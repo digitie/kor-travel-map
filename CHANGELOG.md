@@ -10,6 +10,16 @@
 
 ## [Unreleased]
 
+### provider 적재의 fence 대기 상한 (2026-10-22, T-LOAD-LOCK-WAIT)
+
+- **CHANGED (Python API)**: `AsyncKorTravelMapClient`의 provider 적재 메서드(`load_feature_bundles`·`_reobserving`·
+  `load_feature_bundle_batches`·`load_authoritative_feature_snapshot`·notice 둘·`retire_*` 둘·enrichment 셋·
+  `load_price_features`)는 `feature-curation-write`를 처음 잡을 때 엔진 `lock_timeout`(Dagster 30초) 대신 설정값까지
+  기다린다. 그 한 문장만 `SET LOCAL`로 늘리고 직후 되돌린다(늘리기만 한다 — 0/더 긴 값은 그대로).
+- **ADDED (설정)**: `KOR_TRAVEL_MAP_FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS`(기본 900, 0=끔, 최대 3600).
+- **ADDED (infra)**: `feature_repo.arm_feature_curation_write_wait`. API 단건 writer·reconcile sensor·completion sweep은
+  바뀌지 않는다. migration·OpenAPI 변화 없음.
+
 ### prod 첫 적재 실패 2건 (2026-10-22)
 
 - **FIXED (provider 변환)**: krex 고속도로 돌발 bundle이 `AdminEvidence(reverse_attempted, obs_code)`를 싣는다. geocoder를

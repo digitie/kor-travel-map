@@ -3,12 +3,13 @@
 Dagster 엔진의 ``lock_timeout=30000``이 다른 적재의 쓰기 단계 뒤에서 30초 만에 55P03을 냈다.
 적재 transaction만 **첫 획득 한 문장**의 대기를 늘리고, 직후 두 timeout을 되돌린다. 이 파일은
 어디서(무장한 session의 첫 획득) 무엇을(``lock_timeout``·``statement_timeout`` SET LOCAL과 복원)
-하는지를 문장 순서로 결박한다. 실제 대기·55P03은 ``tests/integration/test_feature_load_curation_lock_wait.py``.
+하는지를 문장 순서로 결박한다. 실제 대기·55P03은 같은 이름의 통합 검사
+(``tests/integration/test_feature_load_curation_lock_wait.py``).
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
 
@@ -128,7 +129,7 @@ async def test_zero_wait_disables() -> None:
 
 
 def test_negative_wait_is_rejected() -> None:
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="wait_ms"):
         arm_feature_curation_write_wait(_Session(), -1)  # type: ignore[arg-type]
 
 
@@ -151,10 +152,10 @@ class _ClientSession:
 
 
 @pytest.fixture
-def client() -> Iterator[AsyncKorTravelMapClient]:
+def client() -> AsyncKorTravelMapClient:
     instance = AsyncKorTravelMapClient(object())  # type: ignore[arg-type]
     instance._session_factory = _ClientSession  # type: ignore[assignment]  # noqa: SLF001
-    yield instance
+    return instance
 
 
 @pytest.mark.asyncio

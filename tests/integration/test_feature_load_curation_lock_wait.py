@@ -43,6 +43,10 @@ pytestmark = pytest.mark.integration
 _DAGSTER_SERVER_SETTINGS = {"statement_timeout": "600000", "lock_timeout": "30000"}
 """``kortravelmap.dagster.resources.kor_travel_map_client_resource``와 같은 값."""
 
+_CURRENT_TIMEOUTS_SQL = (
+    "SELECT current_setting('lock_timeout'), current_setting('statement_timeout')"
+)
+
 _HOLD_SECONDS = 40.0
 """holder가 fence를 쥐는 시간 — 엔진 lock_timeout(30초)보다 길다."""
 
@@ -115,16 +119,17 @@ async def test_a_load_waits_past_the_engine_lock_timeout_and_api_writers_do_not(
 
     armed_elapsed, armed_error = armed
     assert armed_error is None, f"무장한 적재가 실패했다: {armed_error!r}"
-    assert armed_elapsed > 32.0, f"무장한 적재가 {armed_elapsed:.1f}초만 기다렸다 — holder 전에 끝남"
+    assert armed_elapsed > 32.0, f"무장한 적재가 {armed_elapsed:.1f}초만 기다렸다"
 
     control_elapsed, control_error = control
-    assert control_error is not None and _sqlstate(control_error) == "55P03", (
-        "전제가 깨졌다 — 대기를 끈 적재가 엔진 30초에 55P03으로 끝나야 한다"
-    )
+    # 전제: 대기를 끈 적재는 엔진 30초에 55P03으로 끝난다(이 환경에서 실제로).
+    assert control_error is not None
+    assert _sqlstate(control_error) == "55P03"
     assert 25.0 < control_elapsed < 38.0
 
     api_elapsed, api_error = api
-    assert api_error is not None and _sqlstate(api_error) == "55P03"
+    assert api_error is not None
+    assert _sqlstate(api_error) == "55P03"
     assert api_elapsed < 10.0, f"API 단건 writer가 {api_elapsed:.1f}초 기다렸다"
 
 
@@ -146,27 +151,25 @@ async def test_after_acquiring_the_short_timeouts_come_back(
                 text("SELECT pg_advisory_lock(hashtextextended(:k, 0))"), {"k": other_key}
             )
             await holder.commit()
+            observed: list[tuple[object, ...]] = []
+            began: list[float] = []
+
+            async def _armed_then_other_lock() -> None:
+                async with make_async_session_factory(short)() as session, session.begin():
+                    arm_feature_curation_write_wait(session, 60_000)
+                    await lock_feature_curation_write(session)
+                    row = (await session.execute(text(_CURRENT_TIMEOUTS_SQL))).one()
+                    observed.append(tuple(row))
+                    began.append(time.monotonic())
+                    await session.execute(
+                        text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
+                        {"k": other_key},
+                    )
+
             try:
-                began = 0.0
                 with pytest.raises(DBAPIError) as caught:
-                    async with make_async_session_factory(short)() as session, session.begin():
-                        arm_feature_curation_write_wait(session, 60_000)
-                        await lock_feature_curation_write(session)
-                        settings = (
-                            await session.execute(
-                                text(
-                                    "SELECT current_setting('lock_timeout'),"
-                                    " current_setting('statement_timeout')"
-                                )
-                            )
-                        ).one()
-                        assert tuple(settings) == ("2s", "10min")
-                        began = time.monotonic()
-                        await session.execute(
-                            text("SELECT pg_advisory_xact_lock(hashtextextended(:k, 0))"),
-                            {"k": other_key},
-                        )
-                elapsed = time.monotonic() - began
+                    await _armed_then_other_lock()
+                elapsed = time.monotonic() - began[0]
             finally:
                 await holder.execute(
                     text("SELECT pg_advisory_unlock(hashtextextended(:k, 0))"), {"k": other_key}
@@ -174,5 +177,6 @@ async def test_after_acquiring_the_short_timeouts_come_back(
                 await holder.commit()
     finally:
         await short.dispose()
+    assert observed == [("2s", "10min")]
     assert _sqlstate(caught.value) == "55P03"
     assert elapsed < 10.0

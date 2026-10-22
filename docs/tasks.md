@@ -104,3 +104,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   ADR-105가 정의 유지로 남겼고 API 재도입 방지 검사가 그 정의에 기댄다. 지우려면 그
   검사를 kind/provider 정체성만으로 다시 써야 한다.
+
+- [ ] T-LOAD-LOCK-WAIT — **동시 provider 적재가 `feature-curation-write`를 30초만 기다리고 55P03으로 죽는다**
+
+  2026-10-22 n150에서 다섯 dataset이 3회 재시도 끝에 실패했다. 소유자 결정은 "1안 지금(적재 쪽 대기 상한만 늘림),
+  2안 나중(쓰기 단계의 잠금 보유 축소)"이다. 해제 조건은 acceptance §T-LOAD-LOCK-WAIT.

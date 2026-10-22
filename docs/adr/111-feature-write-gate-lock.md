@@ -133,3 +133,10 @@ PR #1319는 재시도·물러섬·멈춤 알림·root 닫기를 세 판에 걸�
 
 - **앞으로 고친다(fix forward).** 406은 forward-only이고, 405 판 코드를 406 DB에 다시 올리는 것은 검증하지
   않았다 — 되돌림을 약속하지 않는다. reconcile sensor cursor는 이 PR이 바꾸지 않았다.
+
+### 후속 — 적재의 fence 대기 상한(2026-10-22, T-LOAD-LOCK-WAIT)
+
+결정 1의 "Dagster `lock_timeout=30000`" 전제는 provider 적재끼리도 깨졌다 — 동시 적재가 다른 적재의 쓰기 단계 뒤에서
+30초 만에 55P03으로 실패했다. client의 적재 transaction은 이제 `feature-curation-write`를 **처음 잡는 한 문장만**
+`lock_timeout`을 설정값(기본 900초)으로, 필요하면 `statement_timeout`을 그 + 60초로 늘리고 직후 되돌린다. 잠금 의미·
+순서(§2)는 그대로이고, 단건 writer(5초·503)·reconcile sensor(ADR-112 예산)·completion sweep은 무장하지 않는다.

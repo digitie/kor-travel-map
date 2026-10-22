@@ -308,7 +308,6 @@ from kortravelmap.infra.sync_state_repo import (
 )
 from kortravelmap.infra.transaction_limits import apply_transaction_limits
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
-from kortravelmap.settings import FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT
 from kortravelmap.mois import (
     MoisBulkJobResult,
     MoisBulkSyncResult,
@@ -348,6 +347,7 @@ from kortravelmap.providers.visitkorea import (
     festival_to_enrichment_links,
     festival_to_review_candidates,
 )
+from kortravelmap.settings import FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT
 
 if TYPE_CHECKING:
     from collections.abc import (
