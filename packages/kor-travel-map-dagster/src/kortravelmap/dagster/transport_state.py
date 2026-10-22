@@ -261,7 +261,10 @@ async def load_transport_state(
     except StateStoreError as exc:
         raise _terminal(exc) from exc
     try:
-        async with active.load_lock(spec.dataset.name) as acquired:
+        # 잠금 TTL은 run 상한에 맞춘다 — 죽은 run의 잠금이 다음 tick들을 오래 막지 않게.
+        async with active.load_lock(
+            spec.dataset.name, ttl_seconds=spec.max_runtime_seconds + 60
+        ) as acquired:
             if not acquired:
                 return {"dataset": spec.dataset.name, "skipped": "locked"}
             with counting_upstream_requests(), sharing_run_retry_budget():

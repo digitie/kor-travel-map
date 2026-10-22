@@ -42,6 +42,20 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 §11.2 4a) 전**이었으나 플립이 먼저 일어나 이제 **가능한 한 빨리**다(acceptance §T-MAP-02 2026-10-15 소유자 결정 — 머지 뒤 첫 prod 배포).
 
 
+**weather·transport 메모리 상태(ADR-114, proposed)** — 이행 순서 3을 transport(1단계)·weather(2단계)로 나눴다. 키·교체·REST 설계 정본은 ADR-114 "구현 설계 — 1단계", 해제 조건은 acceptance의 같은 ID다.
+
+- [ ] T-STATE-01 — **transport 현재 상태 Valkey 적재·service REST(1단계)**
+
+  Valkey 세대 교체 store·`transport_state_*` job(기본 STOPPED)·`/v1/service/transport/*`·가격 추이 프록시. Manager Valkey 배포·schedule enable·첫 교체·PinVi 재vendor 뒤 닫는다.
+
+- [ ] T-STATE-02 — **weather 현재·예보·세 구간 요약 Valkey(2단계)**
+
+  weather 저장소의 Map용 API가 생긴 뒤 같은 세대 교체 틀에 얹는다(ADR-114 결정 1, 열린 결정 1).
+
+- [ ] T-STATE-03 — **PG transport feature 퇴역(이행 순서 5)**
+
+  PinVi가 Map REST로 옮긴 뒤 기존 PG transport 적재·feature를 거둔다. 방법·시점은 이행 PR에서 정한다(결정 7).
+
 **동시 쓰기 설계(ADR-115, proposed)** — 현재 Weather·Transport 작업을 마친 뒤 아래 의존 순서로 구현한다. 설계 문서 PR은 구현 완료가 아니며, 수용 조건 정본은 `tasks-acceptance.md`의 같은 ID다.
 
 - [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**

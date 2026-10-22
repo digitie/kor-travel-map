@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import logging
 import math
 from collections.abc import AsyncIterator, Sequence
 from contextlib import asynccontextmanager
@@ -39,6 +40,7 @@ from kortravelmap.dto.transport_state import (
     RestAreaState,
 )
 from kortravelmap.infra.valkey_state import (
+    GEO_LAT_LIMIT,
     GenerationMeta,
     StateGenerationExpired,
     StateNotLoaded,
@@ -69,6 +71,8 @@ from kortravelmap.api.transport_state_service import (
 )
 
 __all__ = ["service_router"]
+
+_LOGGER = logging.getLogger(__name__)
 
 service_router = APIRouter(
     prefix="/service/transport",
@@ -289,6 +293,9 @@ class TransportDatasetStatus(BaseModel):
     dataset: str
     loaded: bool
     freshness: TransportFreshness | None
+    error: str | None = Field(
+        default=None, description="이 데이터셋만 읽지 못했을 때 이유(나머지는 그대로 보인다)."
+    )
 
 
 class TransportStatusData(BaseModel):
@@ -367,23 +374,22 @@ def _freshness(dataset: TransportStateDataset, meta: GenerationMeta) -> Transpor
     )
 
 
-def _encode_cursor(generation: str, after: str) -> str:
-    raw = f"{generation}|{after}".encode()
+def _encode_cursor(dataset: str, generation: str, after: str) -> str:
+    raw = f"{dataset}|{generation}|{after}".encode()
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
 
 
-def _decode_cursor(cursor: str) -> tuple[str, str]:
+def _decode_cursor(cursor: str, *, dataset: str) -> tuple[str, str]:
+    """cursor → ``(세대, 마지막 id)``. 다른 데이터셋의 cursor는 422다."""
+    invalid = _problem(422, "VALIDATION_ERROR", "cursor가 올바르지 않다.")
     try:
         padded = cursor + "=" * (-len(cursor) % 4)
-        generation, after = base64.urlsafe_b64decode(padded.encode("ascii")).decode().split("|", 1)
+        decoded = base64.b64decode(padded.encode("ascii"), altchars=b"-_", validate=True)
+        owner, generation, after = decoded.decode().split("|", 2)
     except (ValueError, binascii.Error, UnicodeError) as exc:
-        raise _problem(
-            422, "VALIDATION_ERROR", "cursor가 올바르지 않다."
-        ) from exc
-    if not generation or not after:
-        raise _problem(
-            422, "VALIDATION_ERROR", "cursor가 올바르지 않다."
-        )
+        raise invalid from exc
+    if owner != dataset or not generation or not after:
+        raise invalid
     return generation, after
 
 
@@ -407,14 +413,17 @@ def _query(
     ] = None,
     limit: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT,
     lon: Annotated[float | None, Query(ge=-180, le=180, description="근처 검색 중심 경도.")] = None,
-    lat: Annotated[float | None, Query(ge=-90, le=90, description="근처 검색 중심 위도.")] = None,
+    lat: Annotated[
+        float | None,
+        Query(ge=-GEO_LAT_LIMIT, le=GEO_LAT_LIMIT, description="근처 검색 중심 위도."),
+    ] = None,
     radius_m: Annotated[
         float | None, Query(gt=0, le=MAX_RADIUS_M, description="근처 검색 반경(m, 최대 50 km).")
     ] = None,
     min_lon: Annotated[float | None, Query(ge=-180, le=180)] = None,
-    min_lat: Annotated[float | None, Query(ge=-90, le=90)] = None,
+    min_lat: Annotated[float | None, Query(ge=-GEO_LAT_LIMIT, le=GEO_LAT_LIMIT)] = None,
     max_lon: Annotated[float | None, Query(ge=-180, le=180)] = None,
-    max_lat: Annotated[float | None, Query(ge=-90, le=90)] = None,
+    max_lat: Annotated[float | None, Query(ge=-GEO_LAT_LIMIT, le=GEO_LAT_LIMIT)] = None,
 ) -> _Query:
     near = (lon, lat, radius_m)
     box = (min_lon, min_lat, max_lon, max_lat)
@@ -512,7 +521,7 @@ async def _list(
 ) -> _Listing[_OutT]:
     async with _state_errors():
         if query.cursor is not None:
-            generation, after = _decode_cursor(query.cursor)
+            generation, after = _decode_cursor(query.cursor, dataset=dataset.name)
             meta = await store.readable_meta(dataset.name, generation)
         else:
             meta = await store.current_meta(dataset.name)
@@ -563,7 +572,12 @@ async def _list(
             dataset.name, generation, after=after or None, limit=query.limit
         )
         items = _parse_values(model, ids, await store.get_values(dataset.name, generation, ids))
-        next_cursor = _encode_cursor(generation, ids[-1]) if has_more and ids else None
+        if query.cursor is not None:
+            # 읽는 사이 grace가 끝나 세대가 사라졌으면 빈 페이지가 "끝"으로 보인다 — 409로 알린다.
+            await store.generation_meta(dataset.name, generation)
+        next_cursor = (
+            _encode_cursor(dataset.name, generation, ids[-1]) if has_more and ids else None
+        )
         return _Listing(items, False, next_cursor, meta)
 
 
@@ -584,25 +598,31 @@ async def _detail(
 async def _attach_rest_area_prices(
     store: ValkeyStateStore, areas: list[RestAreaOut]
 ) -> tuple[list[RestAreaOut], TransportFreshness | None]:
-    """휴게소에 휴게소 유가를 붙인다(D1). 유가 데이터셋이 아직 없으면 그대로 둔다."""
+    """휴게소에 휴게소 유가를 붙인다(D1).
+
+    유가 데이터셋이 없거나 읽지 못하면 휴게소는 그대로 주고 유가만 비운다(D6 — 휴게소 응답을 막지
+    않는다).
+    """
     dataset = DATASET_REST_AREA_FUEL_PRICES
-    async with _state_errors():
-        try:
-            meta = await store.current_meta(dataset.name)
-        except StateNotLoaded:
-            return areas, None
+    try:
+        meta = await store.current_meta(dataset.name)
         keys = [area.natural_key for area in areas]
         price_ids = await store.lookup(dataset.name, meta.generation, keys)
         wanted = [price_id for price_id in price_ids if price_id is not None]
         values = await store.get_values(dataset.name, meta.generation, wanted)
+    except StateNotLoaded:
+        return areas, None
+    except StateStoreError:
+        _LOGGER.warning("휴게소 유가 데이터셋을 읽지 못해 유가 없이 응답한다.")
+        return areas, None
     prices: dict[str, RestAreaFuelPriceState] = {}
     for price_id, value in zip(wanted, values, strict=True):
         if value is None:
-            raise state_unavailable(f"휴게소 유가 값이 없다: {price_id}")
+            continue
         try:
             prices[price_id] = RestAreaFuelPriceState.model_validate_json(value)
-        except ValidationError as exc:
-            raise state_unavailable(f"휴게소 유가 값 모양이 다르다: {price_id}") from exc
+        except ValidationError:
+            _LOGGER.warning("휴게소 유가 값 모양이 다르다: %s", price_id)
     attached = [
         area.model_copy(update={"fuel_prices": prices.get(price_id)}) if price_id else area
         for area, price_id in zip(areas, price_ids, strict=True)
@@ -889,6 +909,13 @@ async def get_transport_state_status(
             except StateNotLoaded:
                 datasets.append(
                     TransportDatasetStatus(dataset=dataset.name, loaded=False, freshness=None)
+                )
+                continue
+            except StateStoreError as exc:
+                datasets.append(
+                    TransportDatasetStatus(
+                        dataset=dataset.name, loaded=False, freshness=None, error=str(exc)
+                    )
                 )
                 continue
             datasets.append(

@@ -1,7 +1,7 @@
 # ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다
 
-- 상태: proposed (소유자 결정 2026-10-23 — 방향 확정, 구현 전. 이행 단계마다 이 문서를 갱신하고 마지막 단계가
-  배포되면 accepted로 올린다)
+- 상태: proposed (소유자 결정 2026-10-23 — 방향 확정. 2026-10-23 1단계(transport) 구현 PR — 아래 "구현 설계 —
+  1단계". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
 - 날짜: 2026-10-23
 - 결정자: 소유자(방향), Claude(문서)
 - 관계: **ADR-105를 부분 대체**(weather가 Map에 다시 들어온다 — 단 DB 스키마가 아니라 메모리 DB로), ADR-110(odroid

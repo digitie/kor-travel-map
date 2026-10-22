@@ -122,6 +122,7 @@ def test_client_does_not_retry_and_uses_the_configured_timeouts() -> None:
     assert kwargs["socket_connect_timeout"] == 0.7
     assert kwargs["socket_timeout"] == 1.3
     assert kwargs["password"] == "pw"
-    retry = kwargs.get("retry")
-    assert retry is not None
-    assert retry.get_retries() == 0
+    # 연결 층과 client 층 둘 다 재시도가 꺼져 있어야 "곧바로 503"이 된다.
+    for retry in (kwargs.get("retry"), client.get_retry()):
+        assert retry is not None
+        assert retry.get_retries() == 0

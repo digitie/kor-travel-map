@@ -61,8 +61,12 @@ def state_unavailable(message: str) -> HTTPException:
     )
 
 
-def get_state_store() -> ValkeyStateStore:
-    """FastAPI 의존성 — 프로세스 단위 store. 설정이 없으면 503."""
+async def get_state_store() -> ValkeyStateStore:
+    """FastAPI 의존성 — 프로세스 단위 store. 설정이 없으면 503.
+
+    ``async``라 이벤트 루프에서 돈다 — 확인과 대입 사이에 ``await``가 없어 동시 첫 요청이 client를
+    둘 만들어 하나를 새게 하지 않는다(sync 의존성은 threadpool에서 돈다).
+    """
     global _store
     if _store is None:
         try:

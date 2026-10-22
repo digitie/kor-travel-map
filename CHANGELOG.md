@@ -10,6 +10,28 @@
 
 ## [Unreleased]
 
+### transport 현재 상태를 Valkey에 세대 단위로 담고 service REST로 준다 (2026-10-23, ADR-114 1단계, T-STATE-01)
+
+- **ADDED (service REST)**: `/v1/service/transport/{fuel-stations,rest-areas,highway-incidents,airports}` 목록·상세,
+  `/v1/service/transport/fuel-stations/{feature_id}/price-history`, `/v1/service/transport/status`(service token).
+  목록은 `feature_id` 사전순 cursor(세대 고정), 근처(`lon`·`lat`·`radius_m` ≤ 50 km)·영역(`min_lon`…`max_lat`)은
+  가까운 순 `limit`건 + `truncated`. 응답마다 `freshness`(원천 수집 시각·반영 시각·나이·`stale`). Valkey 장애는 이 표면만
+  503 `TRANSPORT_STATE_UNAVAILABLE`, 적재 전 503 `TRANSPORT_STATE_NOT_LOADED`, 사라진 세대의 cursor는 409
+  `TRANSPORT_STATE_GENERATION_EXPIRED`. 가격 추이는 transport에서 요청 시 읽고 실패하면 현재가와
+  `history.status=unavailable`(이유)을 준다. **admin `openapi.json`도 바뀌어 PinVi admin 스냅샷 재vendor가 필요하다**
+  (user OpenAPI는 그대로).
+- **ADDED (Dagster)**: job·schedule 5쌍 `transport_state_{fuel_stations,rest_areas,rest_area_fuel_prices,
+  highway_incidents,airports}` — 기존 transport export를 받아 Valkey 새 세대를 쓰고 Lua compare-and-set으로 포인터를
+  바꾼다. 비었거나 최근 6세대 최대보다 비정상적으로 작은 집합·절대 하한 미만은 교체하지 않는다(`state_swap_refused`,
+  run config `allow_shrink`로 한 번 넘김). **schedule은 기본 STOPPED**. 기존 PG transport 적재는 그대로다.
+- **ADDED (Python API)**: `kortravelmap.infra.valkey_state`(세대 교체 store), `kortravelmap.dto.transport_state`(값 모델),
+  `kortravelmap.providers.kor_travel_transport_state`(export → 값, id는 `make_feature_id(bjd_code=None)`),
+  `kor_travel_transport.parse_fuel_price_history`, `krex`의 자연키·제목 규칙 공개 이름, transport fetcher의
+  `on_collected_at` 콜백.
+- **ADDED (설정)**: `KOR_TRAVEL_MAP_VALKEY_URL`(비밀), `KOR_TRAVEL_MAP_VALKEY_{CONNECT,SOCKET}_TIMEOUT_SECONDS`,
+  `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_{ENABLED,TIMEOUT_SECONDS}`.
+- **ADDED (의존성)**: `redis>=7.0,<8`(redis-py, `redis.asyncio`; 이미지 핀 `redis==7.4.1`). migration 없음.
+
 ### 스트리밍 snapshot은 다 받은 뒤 짧게 쓴다 (2026-10-22, ADR-113, T-LOAD-LOCK-WAIT 2안)
 
 - **CHANGED (Python API)**: `AsyncKorTravelMapClient.load_feature_bundle_batches`는 batch stream을 DB session 없이 끝까지

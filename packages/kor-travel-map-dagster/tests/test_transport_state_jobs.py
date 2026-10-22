@@ -53,7 +53,8 @@ class _FakeStore:
         self.swapped: list[tuple[str, int, bool]] = []
 
     @asynccontextmanager
-    async def load_lock(self, _dataset: str) -> AsyncIterator[bool]:
+    async def load_lock(self, _dataset: str, *, ttl_seconds: int) -> AsyncIterator[bool]:
+        assert ttl_seconds <= TRANSPORT_STATE_SPECS[0].max_runtime_seconds + 60
         yield not self.locked
 
     async def swap(self, dataset: str, items: list[Any], **kwargs: Any) -> SwapResult:

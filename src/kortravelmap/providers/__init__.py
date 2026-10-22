@@ -15,6 +15,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``knps`` | python-knps-api | 국립공원 file dataset |
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
 | ``kor_travel_transport`` | kor-travel-transport | transport export 계약·파서(ADR-106) |
+| ``kor_travel_transport_state`` | kor-travel-transport | export → Valkey 상태 값(ADR-114) |
 | ``krairport`` | kor-travel-transport | 공항 메타데이터 |
 | ``krex`` | kor-travel-transport | 휴게소·휴게소 유가·고속도로 돌발 |
 | ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |

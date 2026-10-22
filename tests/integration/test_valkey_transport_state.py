@@ -262,6 +262,28 @@ async def test_crashed_build_leaves_only_expiring_keys(
         await store.current_meta("t.crash")
 
 
+async def test_lost_flip_reply_does_not_delete_the_now_current_generation(
+    store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """교체 스크립트는 돌았는데 응답만 잃었다.
+
+    정리가 새 지금 세대를 지우면 포인터가 허공을 가리킨다.
+    """
+    original = store._flip
+
+    async def _flip_then_lose_reply(*args: Any, **kwargs: Any) -> None:
+        await original(*args, **kwargs)
+        raise StateStoreUnavailable("응답을 읽기 전에 연결이 끊겼다")
+
+    monkeypatch.setattr(store, "_flip", _flip_then_lose_reply)
+    with pytest.raises(StateStoreUnavailable):
+        await _swap(store, "t.lost_reply", _items(3))
+    meta = await store.current_meta("t.lost_reply")
+    assert meta.count == 3
+    values = await store.get_values("t.lost_reply", meta.generation, ["f_test_00002"])
+    assert values == [b'{"n": 2}']
+
+
 async def test_duplicate_ids_keep_the_first_row(store: ValkeyStateStore) -> None:
     items = [*_items(2), StateItem(id="f_test_00000", value='"late"')]
     generation = await _swap(store, "t.dup", items)
@@ -308,6 +330,9 @@ async def test_operator_override_publishes_an_empty_generation(store: ValkeyStat
     assert (meta.generation, meta.count, meta.guard_override) == (generation, 0, True)
     # 0건 세대: meta만 있고 읽기는 빈 결과다.
     assert await store.page_ids("t.override", generation, after=None, limit=5) == ([], False)
+    # 한 번의 override로 충분하다 — 다음 정상 교체가 옛 최대(40)에 다시 막히지 않는다.
+    await _swap(store, "t.override", [], guard=guard)
+    assert await store.recent_counts("t.override") == [0, 0]
     assert await store.nearby(
         "t.override", generation, lon=127.0, lat=37.5, radius_m=1000, count=5
     ) == []
@@ -401,11 +426,14 @@ async def test_load_lock_admits_one_loader(store: ValkeyStateStore) -> None:
 
 async def test_other_schema_versions_are_retired(store: ValkeyStateStore) -> None:
     await store.client.set("ktm:state:v0:transport.airports:current", "old")
+    await store.client.set("ktm:state:v2:transport.airports:current", "newer")
     await store.client.set("unrelated:key", "keep")
     await _swap(store, "t.version", _items(1))
     assert await store.retire_other_versions() == 1
     assert 0 < await _ttl(store, "ktm:state:v0:transport.airports:current") <= 60
     assert await _ttl(store, "unrelated:key") == -1
+    # 더 새 버전은 건드리지 않는다(롤링·롤백 중 서로 만료시키지 않게).
+    assert await _ttl(store, "ktm:state:v2:transport.airports:current") == -1
     assert await _ttl(store, state_key("t.version", "current")) == -1
 
 

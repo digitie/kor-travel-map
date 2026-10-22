@@ -82,6 +82,8 @@ def test_missing_valkey_url_is_503_for_this_surface_only(
         {"min_lon": 128.0, "min_lat": 37.0, "max_lon": 127.0, "max_lat": 38.0},
         {"lon": 127.0, "lat": 37.5, "radius_m": 50_001},
         {"limit": 501},
+        {"lon": 127.0, "lat": 89.0, "radius_m": 10},
+        {"min_lon": 127.0, "min_lat": 37.0, "max_lon": 128.0, "max_lat": 86.0},
     ],
 )
 def test_query_shape_is_validated_before_touching_the_store(
@@ -102,9 +104,9 @@ def test_garbage_cursor_is_422(client: TestClient) -> None:
             raise AssertionError(f"store를 건드렸다: {name}")
 
     client.app.dependency_overrides[get_state_store] = _Untouchable  # type: ignore[attr-defined]
-    response = client.get("/v1/service/transport/airports", params={"cursor": "%%%"})
-    assert response.status_code == 422
-    assert _encode_cursor("20261023T000000Z-abcdef01", "f_global_p_1")
+    for cursor in ("%%%", "", _encode_cursor("transport.fuel_stations", "g-1", "f_global_p_1")):
+        response = client.get("/v1/service/transport/airports", params={"cursor": cursor})
+        assert response.status_code == 422, cursor
 
 
 def _haversine(lon1: float, lat1: float, lon2: float, lat2: float) -> float:

@@ -3,7 +3,7 @@
 `kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-116.**
 
 - [ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리](115-scoped-concurrent-feature-writes.md) — proposed, 2026-10-23 (PG 쓰기 설계만, T-CWRITE-01~09; Weather·Transport 현 작업 후 구현).
-- [ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다](114-weather-transport-state-in-memory-db.md) — proposed, 2026-10-23 (소유자 방향 결정, ADR-105 부분 대체).
+- [ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다](114-weather-transport-state-in-memory-db.md) — proposed, 2026-10-23 (소유자 방향 결정, ADR-105 부분 대체; 1단계 transport 키 설계·구현 PR 2026-10-23).
 - [ADR-113 — 스트리밍 snapshot 적재는 먼저 다 받아 두고, 쓰기 transaction은 그 뒤에 짧게 연다](113-snapshot-load-spool-then-write.md) — proposed, 2026-10-22 (`T-LOAD-LOCK-WAIT` 2안, PR 미머지; 배포 뒤 8개 asset 쓰기 시간 실측으로 accepted).
 - [ADR-112 — reconcile sensor는 DB root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다](112-reconcile-sensor-retry-alert-close.md) — proposed, 2026-10-20 (설계만, `T-RECONCILE-RETRY`; 구현은 소유자 승인 뒤).
 - [ADR-111 — Feature advisory fence는 Feature마다가 아니라 전역 gate 하나다](111-feature-write-gate-lock.md) — proposed, 2026-10-13 (PR #1319; 공용 PG lock table 고갈 53200 근본 수정, alembic 406).

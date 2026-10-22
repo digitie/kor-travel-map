@@ -268,6 +268,15 @@ def state_key(dataset: str, *parts: str) -> str:
     return ":".join((STATE_KEY_PREFIX, dataset, *parts))
 
 
+def _key_version(key: str) -> int | None:
+    """``ktm:state:v{N}:…``의 N. 형식이 다르면 ``None``(건드리지 않는다)."""
+    head = f"{STATE_KEY_NAMESPACE}:v"
+    if not key.startswith(head):
+        return None
+    digits = key[len(head) :].split(":", 1)[0]
+    return int(digits) if digits.isdigit() else None
+
+
 def _gen_keys(dataset: str, generation: str) -> dict[str, str]:
     return {name: state_key(dataset, generation, name) for name in _GEN_KEY_NAMES}
 
@@ -317,9 +326,11 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
 
 # KEYS[1]=current KEYS[2]=previous KEYS[3]=recent_counts
 # KEYS[4..8]=새 세대 meta·items·ids·geo·lookup, KEYS[9..]=물러날 직전 세대 키.
-# ARGV[1]=기대하는 지금 세대(''=없음) ARGV[2]=새 세대 ARGV[3]=grace 초 ARGV[4]=recent 창 크기.
-# 반환: {1, 직전} 교체됨 · {0, 지금 포인터} 포인터가 바뀌었다 · {-1, 어긋난 키 이름} 새 세대 검사
-# 실패.
+# ARGV[1]=기대하는 지금 세대(''=없음) ARGV[2]=새 세대 ARGV[3]=grace 초 ARGV[4]=recent 창 크기
+# ARGV[5]='1'이면 recent_counts를 비우고 새 개수 하나로 시작한다
+#   (운영자 allow_shrink — 한 번이면 충분해야 한다).
+# 반환: {1, 직전} 교체됨 · {0, 지금 포인터} 포인터가 바뀌었다 ·
+#   {-1, 어긋난 키 이름} 새 세대 검사 실패.
 _FLIP_SCRIPT: Final[str] = """
 local current = redis.call('GET', KEYS[1])
 if not current then current = '' end
@@ -336,6 +347,7 @@ if redis.call('HLEN', KEYS[8]) ~= lookup then return {-1, 'lookup'} end
 for i = 4, 8 do redis.call('PERSIST', KEYS[i]) end
 redis.call('SET', KEYS[1], ARGV[2])
 if current ~= '' then redis.call('SET', KEYS[2], current) else redis.call('DEL', KEYS[2]) end
+if ARGV[5] == '1' then redis.call('DEL', KEYS[3]) end
 redis.call('LPUSH', KEYS[3], count)
 redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1)
 for i = 9, #KEYS do redis.call('EXPIRE', KEYS[i], tonumber(ARGV[3])) end
@@ -384,7 +396,8 @@ async def _unavailable_on_error(what: str) -> AsyncIterator[None]:
             raise StateStoreOutOfMemory(
                 f"Valkey {what} 실패: maxmemory 도달(noeviction 쓰기 거부)"
             ) from exc
-        raise StateStoreUnavailable(f"Valkey {what} 실패: {type(exc).__name__}") from exc
+        # 그 밖의 응답 오류(WRONGTYPE·NOSCRIPT·인자 오류)는 기다려도 풀리지 않는다.
+        raise StateStoreError(f"Valkey {what} 실패: {type(exc).__name__}") from exc
     except (RedisError, OSError) as exc:
         raise StateStoreUnavailable(f"Valkey {what} 실패: {type(exc).__name__}") from exc
 
@@ -457,10 +470,17 @@ class ValkeyStateStore:
             state_key(dataset, generation)
         except ValueError as exc:
             raise StateGenerationExpired(f"{dataset} 세대 이름이 올바르지 않다.") from exc
-        allowed = {
-            await self._pointer(dataset, "current"),
-            await self._pointer(dataset, "previous"),
-        }
+        async with _unavailable_on_error("포인터 읽기"):
+            # 두 포인터를 한 번에 읽는다 — 사이에 교체가 끼면 멀쩡한 cursor를 거부한다.
+            raw = cast(
+                "list[bytes | None]",
+                await _resolve(
+                    self._client.mget(
+                        [state_key(dataset, "current"), state_key(dataset, "previous")]
+                    )
+                ),
+            )
+        allowed = {_text(value) for value in raw if value}
         if generation not in allowed:
             raise StateGenerationExpired(f"{dataset} 세대 {generation}는 읽을 수 없다.")
         return await self.generation_meta(dataset, generation)
@@ -579,12 +599,18 @@ class ValkeyStateStore:
     # -- 쓰기 ------------------------------------------------------------------
 
     @asynccontextmanager
-    async def load_lock(self, dataset: str) -> AsyncIterator[bool]:
-        """데이터셋 적재 잠금(D3-1). 이미 잡혀 있으면 ``False``를 내고 아무것도 하지 않는다."""
+    async def load_lock(
+        self, dataset: str, *, ttl_seconds: int | None = None
+    ) -> AsyncIterator[bool]:
+        """데이터셋 적재 잠금(D3-1). 이미 잡혀 있으면 ``False``를 내고 아무것도 하지 않는다.
+
+        ``ttl_seconds``는 적재 run의 상한에 맞춘다 — 죽은 run의 잠금이 그 뒤 run들을 오래 막지 않게.
+        """
         key = state_key(dataset, "lock")
         token = secrets.token_hex(16)
+        ttl = ttl_seconds if ttl_seconds is not None else self._build_ttl
         async with _unavailable_on_error("잠금"):
-            acquired = bool(await self._client.set(key, token, nx=True, ex=self._build_ttl))
+            acquired = bool(await self._client.set(key, token, nx=True, ex=ttl))
         try:
             yield acquired
         finally:
@@ -656,7 +682,9 @@ class ValkeyStateStore:
                 pipe.hset(keys["meta"], mapping=meta_fields)
                 pipe.expire(keys["meta"], self._build_ttl)
                 await pipe.execute()
-            await self._flip(dataset, keys, previous_generation, generation)
+            await self._flip(
+                dataset, keys, previous_generation, generation, reset_recent=allow_shrink
+            )
         except BaseException:
             await self._discard_unless_current(dataset, keys, generation)
             raise
@@ -672,6 +700,8 @@ class ValkeyStateStore:
         keys: dict[str, str],
         previous_generation: str | None,
         generation: str,
+        *,
+        reset_recent: bool = False,
     ) -> None:
         retiring = (
             list(_gen_keys(dataset, previous_generation).values())
@@ -697,6 +727,7 @@ class ValkeyStateStore:
                         generation,
                         self._grace,
                         RECENT_COUNTS_WINDOW,
+                        "1" if reset_recent else "0",
                     )
                 ),
             )
@@ -771,12 +802,16 @@ class ValkeyStateStore:
         새 버전의 교체가 성공한 뒤에 부른다 — 옛 버전 ``current``와 교체된 세대는 만료가 없어 이
         정리가 없으면 ``noeviction`` 아래 영구히 남는다.
         """
-        own = f"{STATE_KEY_PREFIX}:"
+        own_version = _key_version(f"{STATE_KEY_PREFIX}:")
+        assert own_version is not None  # STATE_KEY_PREFIX는 ktm:state:v{N} 꼴이다.
         retired = 0
         async with _unavailable_on_error("옛 버전 정리"):
             async for raw in self._client.scan_iter(match=f"{STATE_KEY_NAMESPACE}:*", count=500):
                 key = _text(raw)
-                if key.startswith(own):
+                version = _key_version(key)
+                # 옛 버전만 거둔다 — 새 버전과 옛 버전이 잠시 함께 돌 때(롤링·롤백) 서로의 키를
+                # 번갈아 만료시키지 않게 한다.
+                if version is None or version >= own_version:
                     continue
                 if int(await self._client.ttl(key)) == -1:
                     await self._client.expire(key, self._grace)
