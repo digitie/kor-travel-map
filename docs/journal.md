@@ -11,9 +11,16 @@
   python-krheritage-api에서 별도 진행). Map 쪽 보완: `address`가 비면 `sido`+`gugun`을 `Address.legal`로 쓴다(좌표는
   만들지 않는다). 값은 속성(`getattr`)을 먼저, 없으면 원 payload 키를 본다 — provider bump 전후로 같은 값이 나온다.
 - 자연키: 종전 fallback `title::""::""`은 같은 제목의 다른 행사를 한 feature로 접었다. 실 응답에서 `seqNo`는 회차 id가
-  **아니다**(같은 응답에 `15720`이 08-29~와 10-17 두 행) — `sn` 단독이면 회차가 접힌다. 그래서 `sn::시작일`(시작일이
-  없으면 `sn`)로 바꿨다. `sn`·시작일도 원 payload `seqNo`·`sDate`로 보충하므로 provider bump 전후 키가 같다. 이 dataset은
+  **아니다**(같은 응답에 `15720`이 08-29~와 10-17 두 행) — `sn` 단독이면 회차가 접힌다. 그래서 `sn::시작일::종료일`(날짜가
+  없으면 `sn`)로 바꿨다 — provider 수정본의 `occurrence_key`와 같은 모양이다. `sn`·시작일도 원 payload `seqNo`·`sDate`로 보충하므로 provider bump 전후 키가 같다. 이 dataset은
   한 번도 적재된 적이 없어 계보 이전이 필요 없다.
+- 적대 리뷰 2회(읽기 전용). A(고속도로): HIGH/MED 없음. LOW — 좌표 row마다 `reverse_geocode_not_attempted` warning
+  finding이 10분마다 갱신된다(dedupe·stale close로 증식 없음), 돌발은 bjd 없이 적재된다(#667 설계 그대로).
+  B(행사): HIGH — 상세(시작/종료일·장소·전화)가 provider 수정 전엔 비고, bump 뒤에도 raw가 같아 payload hash가
+  안 바뀌므로 feature가 다시 쓰이지 않는다 → `sDate`/`eDate`/`subDesc`/`contact`/`mainImageTemp`도 같은 방식(속성 →
+  원 키)으로 채웠다. MED — `(seqNo, sDate)` 유일성 미확인, provider 수정본은 `(seqNo, sDate, eDate)`로 실측 유일 →
+  자연키를 `occurrence_key`와 같은 `sn::시작일::종료일`로 맞췄다. LOW — fallback 키의 place가 bump 전후 달라짐(원
+  `subDesc`를 쓰게 해 해소), 세종처럼 sido·gugun 중복 결합(provider와 같은 결합이라 일관, 무해).
 
 ## 2026-10-21 — T-RECONCILE-RETRY 하위 단계 2: reconcile sensor 결정 1~7(ADR-112 accepted): 브랜치 `feat/reconcile-retry-alert-close`
 

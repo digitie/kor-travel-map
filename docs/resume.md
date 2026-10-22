@@ -1,7 +1,7 @@
 ## 2026-10-22 — prod 첫 적재 실패 2건: 브랜치 `fix/highway-evidence-krheritage-address`
 
 - 고속도로 돌발 10분 경로에 `AdminEvidence`를 실어 미시도 reverse가 drop이 아니라 warning이 되게 했고, 국가유산 행사는
-  `sido`/`gugun` 주소 fallback과 `seqNo::시작일` 자연키를 넣었다. migration·OpenAPI 변화 없음.
+  `sido`/`gugun` 주소 fallback과 `seqNo::시작일::종료일` 자연키를 넣었다. migration·OpenAPI 변화 없음.
 - **다음 한 작업: PR CI green → python-krheritage-api 필드명 수정 핀이 오면 같은 PR에서 bump → 소유자 머지 판단 →
   Map Dagster code location 재배포 후 두 job 첫 적재 확인.**
 

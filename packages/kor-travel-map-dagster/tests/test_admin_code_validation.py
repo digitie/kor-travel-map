@@ -959,7 +959,7 @@ async def test_highway_incident_with_failing_geocoder_still_drops() -> None:
 
 
 async def test_heritage_event_region_fallback_resolves_missing_address() -> None:
-    """행사 목록 실 응답(좌표·상세주소 없음, ``sido``/``gugun``만)이 ``missing_address``가 아니다."""
+    """행사 목록 실 응답(좌표·상세주소 없이 ``sido``/``gugun``만)은 ``missing_address``가 아니다."""
     class _RealShapeEvent:
         sn = None
         title = "허선구 고가에서 나누는 특별한 하루"

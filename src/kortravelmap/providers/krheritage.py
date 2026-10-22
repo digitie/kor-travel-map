@@ -761,21 +761,63 @@ def _event_text(
 
 def _event_sn(event: KrHeritageEvent) -> str | None:
     """provider 행사 번호 — ``sn``, 비면 원 응답의 ``seqNo``."""
-    return _event_text(event, ("sn", "seq_no"), ("sn", "seqNo"))
+    return _event_text(event, ("sn",), ("sn", "seqNo"))
 
 
-def _event_start_token(event: KrHeritageEvent) -> str:
-    """자연키용 시작일 토큰(ISO). provider 날짜가 없으면 원 응답 ``sDate``(YYYYMMDD)."""
-    if event.starts_on is not None:
-        return event.starts_on.isoformat()
-    text = _event_text(event, (), ("sDate", "startDate"))
-    digits = "".join(ch for ch in (text or "") if ch.isdigit())
-    if len(digits) != 8:
-        return ""
+def _parse_event_date(value: object) -> date | None:
+    """``YYYYMMDD``/ISO 날짜 → ``date``. provider 수정본의 파싱 규칙과 같다(불가능한 값은 None)."""
+    if isinstance(value, date):
+        return value
+    if isinstance(value, int) and not isinstance(value, bool):
+        value = str(value)
+    if not isinstance(value, str):
+        return None
     try:
-        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8])).isoformat()
+        return date.fromisoformat(value.strip()[:10])
     except ValueError:
-        return ""
+        pass
+    digits = "".join(ch for ch in value if ch.isdigit())
+    if len(digits) != 8:
+        return None
+    try:
+        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8]))
+    except ValueError:
+        return None
+
+
+def _event_date(event: KrHeritageEvent, attr: str, raw_keys: tuple[str, ...]) -> date | None:
+    """행사 날짜 — provider 속성, 비면 원 응답 키(``sDate``/``eDate``)."""
+    value = getattr(event, attr, None)
+    if isinstance(value, date):
+        return value
+    raw = getattr(event, "raw", None)
+    if isinstance(raw, Mapping):
+        for key in raw_keys:
+            parsed = _parse_event_date(raw.get(key))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _event_starts_on(event: KrHeritageEvent) -> date | None:
+    return _event_date(event, "starts_on", ("sDate", "startDate"))
+
+
+def _event_ends_on(event: KrHeritageEvent) -> date | None:
+    return _event_date(event, "ends_on", ("eDate", "endDate"))
+
+
+def _event_place(event: KrHeritageEvent) -> str | None:
+    """개최 장소 — ``place``, 비면 원 응답 ``subDesc``(provider 수정본의 ``place``)."""
+    return _event_text(event, ("place",), ("subDesc", "siteName"))
+
+
+def _event_tel(event: KrHeritageEvent) -> str | None:
+    return _event_text(event, ("tel_name",), ("contact", "telName"))
+
+
+def _event_main_image(event: KrHeritageEvent) -> str | None:
+    return _event_text(event, ("main_image",), ("mainImageTemp", "mainImage"))
 
 
 def _event_address_text(event: KrHeritageEvent) -> str | None:
@@ -799,27 +841,34 @@ def _event_address_text(event: KrHeritageEvent) -> str | None:
 
 
 def _event_natural_key(event: KrHeritageEvent) -> str | None:
-    """event 자연키 — ``sn::시작일``(시작일이 없으면 ``sn``), sn이 비면 ``title::starts_on::place``.
+    """event 자연키 — ``sn::시작일::종료일``(날짜가 없으면 ``sn``).
+
+    ``sn``이 비면 ``title::starts_on::place``다.
 
     ``sn``(원 응답 ``seqNo``)은 **회차 id가 아니다** — 같은 응답 안에서 같은 ``seqNo``가
-    시작일이 다른 행으로 반복된다(2026-10 실 응답: ``15720``이 08-29~와 10-17 두 행).
-    ``sn`` 단독이면 회차가 한 feature로 접히므로 시작일을 붙인다. 같은 회차가 여러 달
-    응답에 다시 나오는 것은 같은 키로 접히는 것이 맞다.
+    날짜가 다른 행으로 반복된다(2026-10 실 응답 2,006행 중 1,378행이 중복 ``seqNo``,
+    ``(seqNo, sDate, eDate)``는 유일 — 상류 보장은 아니다). provider 수정본의
+    ``occurrence_key``와 같은 모양으로 날짜 둘을 붙인다. 같은 회차가 여러 달 응답에 다시
+    나오는 것은 같은 키로 접히는 것이 맞다.
 
     live 일부 행사 row는 ``sn``이 빈 값이라(run ``bd92b726``, #380) ADR-009
     검증(빈 source_entity_id 금지)에 걸린다. 그 경우 행사명+시작일+장소(없으면
     주소)로 결정적 fallback 키를 파생한다 (ADR-009 ``::`` 구분자, #374 패턴).
     ``sn``도 행사명도 없으면 ``None`` — 호출측이 해당 row를 skip한다.
     """
-    starts = _event_start_token(event)
+    starts_on = _event_starts_on(event)
+    ends_on = _event_ends_on(event)
+    starts = starts_on.isoformat() if starts_on is not None else ""
+    ends = ends_on.isoformat() if ends_on is not None else ""
     sn = _event_sn(event)
     if sn:
-        return f"{sn}::{starts}" if starts else sn
+        # provider 수정본 ``HeritageEvent.occurrence_key``와 같은 모양이다.
+        return f"{sn}::{starts}::{ends}" if (starts or ends) else sn
     title = normalize_korean_text(event.title)
     if not title:
         return None
     place = (
-        normalize_korean_text(event.place)
+        normalize_korean_text(_event_place(event))
         or _event_address_text(event)
         or ""
     )
@@ -882,10 +931,10 @@ async def _event_to_bundle(
         detail=EventDetail(
             feature_id=feature_id,
             event_kind="heritage_event",
-            starts_on=event.starts_on,
-            ends_on=event.ends_on,
-            venue_name=normalize_korean_text(event.place),
-            tel=normalize_phone_number(event.tel_name),
+            starts_on=_event_starts_on(event),
+            ends_on=_event_ends_on(event),
+            venue_name=normalize_korean_text(_event_place(event)),
+            tel=normalize_phone_number(_event_tel(event)),
             content_id=natural_key,
         ),
     )
@@ -910,7 +959,7 @@ async def _event_to_bundle(
         feature_id=feature_id,
         source_record_key=source_record_key,
         dataset_key=DATASET_KEY_EVENT,
-        image_url=getattr(event, "main_image", None),
+        image_url=_event_main_image(event),
         alt_text=name,
     )
     return FeatureBundle(
@@ -931,7 +980,7 @@ async def heritage_events_to_bundles(
     """무형유산/행사 events → event ``FeatureBundle`` 리스트.
 
     ``EventDetail.event_kind='heritage_event'``. 자연키는 provider 행사 번호
-    (`sn`/원 응답 ``seqNo``)와 시작일의 ``sn::starts_on``이며(``seqNo``는 회차마다
+    (`sn`/원 응답 ``seqNo``)와 날짜의 ``sn::starts_on::ends_on``이며(``seqNo``는 회차마다
     반복된다), live 일부 row처럼 ``sn``이 빈 값이면
     ``title::starts_on::place`` fallback을 파생한다 (#380, ADR-009 ``::``).
     주소는 ``address``, 비면 원 응답의 ``sido``/``gugun``으로 ``Address.legal``을 채운다.

@@ -6,7 +6,7 @@
   `AdminEvidence(reverse_attempted, obs_code)`를 실어 미시도는 warning으로 적재한다. 브랜치
   `fix/highway-evidence-krheritage-address`, journal 2026-10-22.
 - [x] T-LOAD-KRHERITAGE-ADDRESS — **국가유산 행사 전량 `missing_address`.** `address`가 비면 `sido`/`gugun`을
-  `Address.legal`로 쓰고 자연키를 `seqNo::시작일`로 바꿨다(provider 수정 전후 동일). 같은 브랜치·journal.
+  `Address.legal`로 쓰고 자연키를 `seqNo::시작일::종료일`로 바꿨다(provider 수정 전후 동일). 같은 브랜치·journal.
 
 ## 2026-10-21 — reconcile sensor 재시도·멈춤 알림·정한 실패만 닫기(ADR-112)
 

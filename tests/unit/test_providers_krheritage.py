@@ -346,9 +346,9 @@ async def test_event_bundle_mapping() -> None:
     assert feat.detail.ends_on == date(2026, 5, 3)
     assert feat.detail.venue_name == "종묘"
     # sn은 회차 id가 아니다 — 시작일을 붙인다.
-    assert feat.detail.content_id == "EVT-2026-001::2026-05-01"
+    assert feat.detail.content_id == "EVT-2026-001::2026-05-01::2026-05-03"
     assert bundle.source_record.dataset_key == DATASET_KEY_EVENT
-    assert bundle.source_record.source_entity_id == "EVT-2026-001::2026-05-01"
+    assert bundle.source_record.source_entity_id == "EVT-2026-001::2026-05-01::2026-05-03"
     assert feat.feature_id.startswith("f_global_e_")
 
 
@@ -413,6 +413,9 @@ _REAL_EVENT_RAW: dict[str, Any] = {
     "sDate": "20261017",
     "eDate": "20261017",
     "groupName": "불휘기픈남간",
+    "contact": "010-5438-4331",
+    "subDesc": "허선구고가",
+    "mainImageTemp": "",
     "sido": "경상남도",
     "gugun": "진주시",
 }
@@ -434,11 +437,19 @@ async def test_event_pre_fix_shape_uses_raw_region_and_seq_no() -> None:
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.coord is None  # 좌표는 만들지 않는다.
     assert bundle.feature.address.legal == "경상남도 진주시"
-    assert bundle.source_record.source_entity_id == "15720::2026-10-17"
+    assert bundle.source_record.source_entity_id == "15720::2026-10-17::2026-10-17"
+    # 상세도 원 응답에서 채운다 — provider bump 뒤에도 raw(→ payload hash)가 같아 feature가
+    # 다시 쓰이지 않으므로, 지금 비워 두면 그대로 남는다.
+    detail = bundle.feature.detail
+    assert detail.starts_on == date(2026, 10, 17)
+    assert detail.ends_on == date(2026, 10, 17)
+    assert detail.venue_name == "허선구고가"
+    assert detail.tel == "010-5438-4331"
+    assert bundle.file_sources == []  # 빈 mainImageTemp는 이미지가 아니다.
 
 
 async def test_event_post_fix_shape_keeps_same_key_and_address() -> None:
-    """provider 수정 후(속성으로 옴)에도 자연키·주소가 같다 — bump 전후로 feature가 갈리지 않는다."""
+    """provider 수정 후(속성으로 옴)에도 자연키·주소가 같다 — bump 전후 feature가 같다."""
     before = _Event(
         sn=None, title="허선구 고가에서 나누는 특별한 하루", raw=dict(_REAL_EVENT_RAW)
     )
@@ -447,6 +458,8 @@ async def test_event_post_fix_shape_keeps_same_key_and_address() -> None:
         title="허선구 고가에서 나누는 특별한 하루",
         starts_on=date(2026, 10, 17),
         ends_on=date(2026, 10, 17),
+        place="허선구고가",
+        tel_name="010-5438-4331",
         sido="경상남도",
         gugun="진주시",
         raw=dict(_REAL_EVENT_RAW),
@@ -454,6 +467,8 @@ async def test_event_post_fix_shape_keeps_same_key_and_address() -> None:
     [b1] = await heritage_events_to_bundles([before], fetched_at=_FETCHED)
     [b2] = await heritage_events_to_bundles([after], fetched_at=_FETCHED)
     assert b1.feature.feature_id == b2.feature.feature_id
+    assert b1.source_record.source_entity_id == b2.source_record.source_entity_id
+    assert b1.feature.detail == b2.feature.detail
     assert b2.feature.address.legal == "경상남도 진주시"
 
 
@@ -471,7 +486,7 @@ async def test_event_without_any_region_has_no_legal() -> None:
 
 
 async def test_event_same_seq_no_different_sessions_stay_distinct() -> None:
-    """``seqNo``는 회차마다 반복된다(실 응답 15720: 08-29~ 와 10-17) — 한 feature로 접히면 안 된다."""
+    """``seqNo``는 회차마다 반복된다(실 응답 15720: 08-29~, 10-17) — 접히면 안 된다."""
     span = _Event(
         sn=None,
         title="허선구 고가에서 나누는 특별한 하루",
@@ -493,8 +508,8 @@ async def test_event_empty_sn_titles_no_longer_collide_when_seq_no_present() -> 
     b = _Event(sn=None, title="정기 공연", raw={"seqNo": "200", "sDate": "20261001"})
     bundles = await heritage_events_to_bundles([a, b], fetched_at=_FETCHED)
     assert [x.source_record.source_entity_id for x in bundles] == [
-        "100::2026-10-01",
-        "200::2026-10-01",
+        "100::2026-10-01::",
+        "200::2026-10-01::",
     ]
 
 
