@@ -807,6 +807,21 @@ def _event_ends_on(event: KrHeritageEvent) -> date | None:
     return _event_date(event, "ends_on", ("eDate", "endDate"))
 
 
+def _event_detail_ends_on(event: KrHeritageEvent) -> date | None:
+    """``EventDetail``에 실을 종료일 — 시작일보다 앞서면 비운다.
+
+    상류에 종료일이 시작일보다 앞선 row가 있다(2026-10-22 prod: ``2026-09-28``~``2026-09-08``).
+    ``EventDetail``은 이를 거부하므로 그대로 두면 row 하나가 job 전체를 실패시킨다. 어느 쪽이
+    틀렸는지 알 수 없어 종료일만 비우고 시작일은 남긴다. 자연키(``occurrence_key``)는 원 값을
+    그대로 쓴다 — provider 계약과 같아야 하기 때문이다.
+    """
+    starts_on = _event_starts_on(event)
+    ends_on = _event_ends_on(event)
+    if starts_on is not None and ends_on is not None and ends_on < starts_on:
+        return None
+    return ends_on
+
+
 def _event_place(event: KrHeritageEvent) -> str | None:
     """개최 장소 — ``place``, 비면 원 응답 ``subDesc``(provider 수정본의 ``place``)."""
     return _event_text(event, ("place",), ("subDesc", "siteName"))
@@ -935,7 +950,7 @@ async def _event_to_bundle(
             feature_id=feature_id,
             event_kind="heritage_event",
             starts_on=_event_starts_on(event),
-            ends_on=_event_ends_on(event),
+            ends_on=_event_detail_ends_on(event),
             venue_name=normalize_korean_text(_event_place(event)),
             tel=normalize_phone_number(_event_tel(event)),
             content_id=natural_key,

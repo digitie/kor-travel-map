@@ -352,6 +352,23 @@ async def test_event_bundle_mapping() -> None:
     assert feat.feature_id.startswith("f_global_e_")
 
 
+async def test_event_inverted_dates_drop_end_but_keep_row() -> None:
+    """상류 종료일이 시작일보다 앞서면(2026-10-22 prod) 종료일만 비우고 row는 적재한다."""
+    event = _Event(
+        sn="EVT-INV",
+        title="날짜가 뒤집힌 행사",
+        starts_on=date(2026, 9, 28),
+        ends_on=date(2026, 9, 8),
+        place="어딘가",
+        address="경상남도 진주시",
+    )
+    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
+    assert bundle.feature.detail.starts_on == date(2026, 9, 28)
+    assert bundle.feature.detail.ends_on is None
+    # 자연키는 provider occurrence_key와 같아야 하므로 원 값을 그대로 쓴다.
+    assert bundle.source_record.source_entity_id == "EVT-INV::2026-09-28::2026-09-08"
+
+
 async def test_event_empty_sn_derives_fallback_natural_key() -> None:
     event = _Event(
         sn="",
