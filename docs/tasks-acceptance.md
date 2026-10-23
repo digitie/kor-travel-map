@@ -2770,10 +2770,21 @@ D1~D7, 설계 적대 리뷰 반영은 같은 절 끝.
 
 ## T-STATE-02
 
-- [ ] weather 저장소의 Map용 API(현재·예보·세 구간 요약 export)가 배포됐다.
-- [ ] ADR-114에 weather 데이터셋·키(지점×provider 묶음, 예보 시각 지난 값 제거, 요약 14일 보관 설정값)를 적고
-  적대 설계 리뷰 1회를 반영했다.
-- [ ] T-STATE-01과 같은 세대 교체 store로 적재하고 REST를 연다. 적대 코드 리뷰 2회·통합 검사·CI 초록.
+ADR-114 2단계(weather). 브랜치 `feat/adr114-valkey-weather`. 설계·데이터셋·키·REST는 ADR-114 "구현 설계 — 2단계" W0~W8.
+
+- [ ] weather 저장소의 Map용 API(W1~W5 — producer는 weather main `7aa7e70`까지 머지 완료)가 odroid에 배포되고
+  `KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED=true`다(2026-10-24 live는 `3a0ae398`이라 `/v1/service/exports/*` 404).
+- [x] ADR-114에 weather 데이터셋·키(위치 단위 묶음, 예보 시각 지난 값은 읽을 때 제거, 요약 보관 일수 설정값)를 적었다.
+- [ ] 적대 설계·코드 리뷰를 반영했다(소유자가 돌린다).
+- [ ] 코드 PR 머지: `dto/weather_state.py`·`providers/kor_travel_weather{,_state}.py`·Dagster job 7개(기본 STOPPED)·
+  `/v1/service/weather/*` 4 route·OpenAPI·admin TS 타입 재생성, 통합 검사(실제 Valkey 적재 op → REST 왕복·급감 거부),
+  CI 4세션 초록.
+- [ ] Manager: Map Dagster code-server에 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL`(odroid weather API)과
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(= `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`) env가 배포됐다(API는 불필요).
+- [ ] PinVi admin·service 스냅샷 재vendor(Map API 배포 **전** 머지).
+- [ ] schedule을 켜기 전에 W1 표의 절대 하한(전부 실측 전 추정)을 weather live 개수와 대조했다.
+- [ ] schedule 7개를 켜고 데이터셋마다 첫 교체가 성공했다(`/v1/service/weather/status` 전부 `loaded=true`). 세대 크기·
+  Valkey `INFO memory`를 journal에 적고 W6 추정과 대조한다.
 
 ## T-STATE-03
 

@@ -1,3 +1,28 @@
+## 2026-10-24 — ADR-114 2단계: weather 현재·예보·세 구간 요약 Valkey·service REST: 브랜치 `feat/adr114-valkey-weather`
+
+- 원천 계약: weather main `7aa7e70`(W1~W5 producer 머지 완료 — #143~#164)의 OpenAPI·라우터·실제 HTTP 예시로 맞췄다.
+  `GET /v1/service/exports/{locations,current,forecasts?style=,daily-summaries?days=,status}`, header `X-Admin-Token`
+  (weather `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`), `{items, meta}` + 서명 cursor(TTL 15분)·`snapshot_id`·`source_status`,
+  503 = 완결 export 없음, 410 = snapshot 만료, 401 = 토큰. 로컬 `F:\dev\kor-travel-weather`는 `9aa0d33`(main보다 1
+  커밋 뒤, 문서만 차이) — 읽기 전용 scratch clone으로 대조했다.
+- live(읽기 전용): odroid weather API는 `3a0ae398`(weather128)이라 `kortravelweather_api.routers.service_exports`가 없고
+  `/v1/service/exports/*`는 404다. n150 Map code-server에는 weather 주소·토큰 env가 없다(Valkey URL·transport env만 있다).
+  n150 어떤 컨테이너에도 weather 관리자 토큰이 없다 — Manager가 넣어야 한다.
+- 설계(ADR-114 "구현 설계 — 2단계" W0~W8): 데이터셋 7개(`weather.locations`·`current`·`forecast_{ultra_short,short,mid,
+  external}`·`daily_summaries`), **값 하나 = 위치 하나**(`make_feature_id(kind="weather", category="99000000",
+  bjd_code=None)`), GEO는 위치 데이터셋 하나·다른 데이터셋은 같은 id로 `HMGET`. 매 run 전량(증분 `since`·ETag 미사용),
+  410은 처음부터 한 번 재시작, `source_status`(worst)·`source_collected_at`(min, 하나라도 null이면 null)을 세대 메타에
+  싣는다. 지난 예보 시각은 읽을 때 뗀다. REST는 `/v1/service/weather/{locations,locations/{id},nearest,status}` — 묶음은
+  데이터셋별 `status`로 부분 장애를 알리고 요약은 전날 같은 구간 대비 `vs_previous_day`를 싣는다. 메모리 추정 약 48 MB
+  (교체 겹침 최대 약 100 MB, transport 포함 200 MB 미만 / 1 GB).
+- ADR-105 재도입 방지 검사(`test_api_serves_no_weather.py`·admin vitest)는 `/v1/service/weather/` 접두사만 예외로 두고
+  예외의 실재·폐쇄(전부 service 정책, 예외 스키마는 다른 경로에서 닿지 않음, 빼는 것이 실제로 있음)를 따로 잰다.
+  Dagster 쪽 검사(카탈로그 operation·client 쓰기·KMA import)는 그대로 초록이다 — 이 job은 PG를 쓰지 않는다.
+- OpenAPI: admin·service에 4 operation·스키마 18개 **추가**(기존 불변, user 불변) → PinVi `apps/api/tests/contract/
+  kor-travel-map-openapi-{admin,service}.json` 재vendor 필요. admin TS 타입(`types.ts`)도 재생성했다 — main에서 1단계
+  transport route가 빠진 채 drift였던 것도 함께 들어갔다(frontend CI는 main에서 이미 빨갛다 — npm audit).
+- 검사: GATE_RESULT
+
 ## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
 
 - 고정 synthetic fixture와 전용 PostGIS container/template clone으로 native load_bundles→seal/commit의 cold/warm 3회 runner를 구현했다. CPU/RSS/WAL·실제 DML 구간/잠금 샘플·CI artifact를 남기며 전체 T01/동시 쓰기 완료로 세지 않는다.

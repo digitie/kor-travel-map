@@ -57,7 +57,9 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-STATE-02 — **weather 현재·예보·세 구간 요약 Valkey(2단계)**
 
-  weather 저장소의 Map용 API가 생긴 뒤 같은 세대 교체 틀에 얹는다(ADR-114 결정 1, 열린 결정 1).
+  weather W1~W5(producer 머지 완료, weather main `7aa7e70`)를 같은 세대 교체 store에 얹는다 — 설계 ADR-114
+  "구현 설계 — 2단계", 구현 브랜치 `feat/adr114-valkey-weather`(job 7개 기본 STOPPED·`/v1/service/weather/*` 4 route).
+  weather 배포·export 활성화·Map code-server weather env·PinVi 재vendor·schedule enable 뒤 닫는다.
 
 - [ ] T-STATE-03 — **PG transport feature 퇴역(이행 순서 5)**
 
