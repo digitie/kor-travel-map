@@ -594,6 +594,57 @@ class KorTravelMapSettings(BaseSettings):
         ),
     )
 
+    # ── Valkey 상태 저장소 (ADR-114) ─────────────────────────────────────
+    valkey_url: SecretStr | None = Field(
+        default=None,
+        description=(
+            "transport·weather 현재 상태를 담는 Valkey(Redis 호환) URL(ADR-114). "
+            "``redis://:password@host:port/0`` 형식이고 비밀번호가 들어 있어 비밀로 다룬다. "
+            "비어 있으면 상태 적재 job은 실패하고 상태 REST는 503이다(나머지 Map 기능은 영향 "
+            "없음). "
+            "env ``KOR_TRAVEL_MAP_VALKEY_URL``."
+        ),
+    )
+    valkey_connect_timeout_seconds: float = Field(
+        default=1.0,
+        ge=0.1,
+        le=10.0,
+        description=(
+            "Valkey TCP 연결 수립 상한(초). 같은 호스트의 컨테이너라 짧게 둔다 — 꺼져 있으면 상태 "
+            "REST가 이 시간 안에 503을 낸다. env ``KOR_TRAVEL_MAP_VALKEY_CONNECT_TIMEOUT_SECONDS``."
+        ),
+    )
+    valkey_socket_timeout_seconds: float = Field(
+        default=2.0,
+        ge=0.1,
+        le=60.0,
+        description=(
+            "Valkey 명령 하나의 응답 상한(초). env "
+            "``KOR_TRAVEL_MAP_VALKEY_SOCKET_TIMEOUT_SECONDS``."
+        ),
+    )
+    transport_price_history_enabled: bool = Field(
+        default=False,
+        description=(
+            "주유소 가격 추이를 transport "
+            "``/v1/service/exports/fuel-stations/{uni_id}/price-history``"
+            "에서 읽어 전할지(ADR-114 결정 4). 꺼져 있으면 추이는 "
+            "``unavailable``(``disabled``)이고 "
+            "현재가만 준다. transport에 그 경로가 배포된 뒤 켠다. "
+            "env ``KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED``."
+        ),
+    )
+    transport_price_history_timeout_seconds: float = Field(
+        default=5.0,
+        ge=0.2,
+        le=30.0,
+        description=(
+            "가격 추이 프록시의 transport read 상한(초). 사용자 요청 경로라 적재 fetcher(30초)보다 "
+            "짧다. 연결 수립은 ``kor_travel_transport_connect_timeout_seconds``를 따른다. "
+            "env ``KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_TIMEOUT_SECONDS``."
+        ),
+    )
+
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(
         default="INFO",

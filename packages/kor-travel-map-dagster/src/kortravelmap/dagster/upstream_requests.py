@@ -74,7 +74,7 @@ _COUNTER: Final[ContextVar[list[int] | None]] = ContextVar(
 
 @contextmanager
 def counting_upstream_requests() -> Iterator[list[int]]:
-    """이 블록 안에서 일어난 upstream 요청을 센다. **실행 경계 넷**이 연다.
+    """이 블록 안에서 일어난 upstream 요청을 센다. **실행 경계 다섯**이 연다.
 
     - :func:`~.feature_operation_tracking.run_tracked_feature_asset` (single-member asset)
     - :func:`~.mcst_features.feature_place_mcst_culture` (유일한 multi-member asset)
@@ -83,6 +83,7 @@ def counting_upstream_requests() -> Iterator[list[int]]:
       한다)
     - :func:`~.mois_source_sync.mois_localdata_source_sync_op` (Phase A는 asset이
       아니라 plain ``@op``)
+    - :func:`~.transport_state.load_transport_state` (ADR-114 Valkey 상태 적재 op)
 
     **열지 않으면 그 경로의 계수는 조용한 no-op이다.** 정적 검사는 그것을 보지
     못한다(호출 자리가 있기만 하면 초록). 2·3차 적대 리뷰가 뒤 둘을 각각

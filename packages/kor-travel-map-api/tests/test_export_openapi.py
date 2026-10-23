@@ -339,6 +339,17 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/feature-requests",
         "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",
+        # ADR-114 1단계 — Valkey transport 현재 상태 read.
+        "/v1/service/transport/airports",
+        "/v1/service/transport/airports/{feature_id}",
+        "/v1/service/transport/fuel-stations",
+        "/v1/service/transport/fuel-stations/{feature_id}",
+        "/v1/service/transport/fuel-stations/{feature_id}/price-history",
+        "/v1/service/transport/highway-incidents",
+        "/v1/service/transport/highway-incidents/{feature_id}",
+        "/v1/service/transport/rest-areas",
+        "/v1/service/transport/rest-areas/{feature_id}",
+        "/v1/service/transport/status",
     }
     assert set(service["components"]["securitySchemes"]) == {
         "OpsScope",

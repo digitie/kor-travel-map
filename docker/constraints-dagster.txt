@@ -45,3 +45,5 @@ psycopg-binary==3.3.6
 psycopg-pool==3.3.3
 psycopg2-binary==2.9.13
 asyncpg==0.31.0
+# Valkey(Redis 호환) client — ADR-114 transport·weather 상태 저장소. Map만 쓴다.
+redis==7.4.1

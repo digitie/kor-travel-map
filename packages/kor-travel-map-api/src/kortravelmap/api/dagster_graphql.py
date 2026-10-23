@@ -60,6 +60,12 @@ _MAX_EVENT_CURSOR_LENGTH = 2048
 
 _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "consistency_dedup_refresh_daily_schedule": "45 5 * * *",
+    # ADR-114 — Valkey transport 상태 적재(dagster `TRANSPORT_STATE_SPECS`와 같은 값).
+    "transport_state_fuel_stations_schedule": "17 * * * *",
+    "transport_state_rest_areas_schedule": "47 4 * * *",
+    "transport_state_rest_area_fuel_prices_schedule": "27 * * * *",
+    "transport_state_highway_incidents_schedule": "3-59/10 * * * *",
+    "transport_state_airports_schedule": "53 4 * * *",
     "mois_localdata_source_sync_weekly_schedule": "0 4 * * 1",
     "feature_event_datagokr_cultural_festivals_monthly_schedule": "10 3 1 * *",
     "feature_place_transport_fuel_stations_weekly_schedule": "5 3 * * 1",

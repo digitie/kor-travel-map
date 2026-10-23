@@ -97,11 +97,30 @@ def test_the_provider_modules_are_found() -> None:
         assert expected in names, f"{expected}를 찾지 못했다 — 탐색 경로가 옮겨졌다"
 
 
+#: ``Feature``를 만들지 않는 provider 모듈 — identity claim이 없어 이 규약의 대상이 아니다.
+#: 목록에 올리는 일 자체가 결정의 기록이다(이유를 적는다).
+_NON_FEATURE_MODULES: dict[str, str] = {
+    "src/kortravelmap/providers/kor_travel_transport_state.py": (
+        "ADR-114 Valkey 상태 값을 만든다 — PG Feature·identity claim이 없다. 자연키는 값의 "
+        "``natural_key``에 싣고, id 계산은 PG 변환과 같은 입력임을 단위 검사가 대조한다."
+    ),
+}
+
+
+def test_non_feature_modules_really_build_no_feature() -> None:
+    """면제는 효과로 결박한다 — 면제 모듈이 ``Feature(``를 만들기 시작하면 빨갛다."""
+    for name in _NON_FEATURE_MODULES:
+        tree = ast.parse((_ROOT / name).read_text(encoding="utf-8"))
+        assert not _calls_in(tree, "Feature"), name
+
+
 def test_every_module_carries_as_many_natural_keys_as_it_computes() -> None:
     """모듈 단위 수 대조 — 헬퍼로 감싼 호출도 이 검사는 통과하지 못한다."""
 
     mismatches: dict[str, tuple[int, int]] = {}
     for path in _MODULES:
+        if _relative(path) in _NON_FEATURE_MODULES:
+            continue
         text = path.read_text(encoding="utf-8")
         computed = text.count("source_natural_key=")
         carried = text.count("provider_natural_key=")

@@ -210,6 +210,17 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     # T-VN-32C alias-map DB-to-DB 이관 표면 (ADR-068 전환·복구 경계 read).
     "/v1/service/feature-alias-maps": RoutePolicy.SERVICE,
     "/v1/service/feature-alias-maps/checksum": RoutePolicy.SERVICE,
+    # ADR-114 — Valkey transport 현재 상태 read (PinVi 등 service 소비자).
+    "/v1/service/transport/fuel-stations": RoutePolicy.SERVICE,
+    "/v1/service/transport/fuel-stations/{feature_id}": RoutePolicy.SERVICE,
+    "/v1/service/transport/fuel-stations/{feature_id}/price-history": RoutePolicy.SERVICE,
+    "/v1/service/transport/rest-areas": RoutePolicy.SERVICE,
+    "/v1/service/transport/rest-areas/{feature_id}": RoutePolicy.SERVICE,
+    "/v1/service/transport/highway-incidents": RoutePolicy.SERVICE,
+    "/v1/service/transport/highway-incidents/{feature_id}": RoutePolicy.SERVICE,
+    "/v1/service/transport/airports": RoutePolicy.SERVICE,
+    "/v1/service/transport/airports/{feature_id}": RoutePolicy.SERVICE,
+    "/v1/service/transport/status": RoutePolicy.SERVICE,
     "/v1/service/curation-items/{curation_item_id}/detail-snapshot": RoutePolicy.SERVICE,
     "/v1/service/curation-collections/{collection_id}/detail-snapshot": RoutePolicy.SERVICE,
     "/v1/service/curation-cutover/identity-mappings": RoutePolicy.SERVICE,

@@ -355,6 +355,7 @@ async def _iter_transport_export(
     settings: KorTravelMapSettings,
     path: str,
     parse: Callable[[Mapping[str, Any]], Any],
+    on_collected_at: Callable[[datetime], None] | None = None,
 ) -> AsyncIterator[Any]:
     """cursor 페이지를 끝까지 읽어 파싱한 item을 낸다.
 
@@ -380,6 +381,9 @@ async def _iter_transport_export(
             response = await _transport_get(client, path, params, budget=budget)
             page = parse_export_page(_transport_json(response, path), where=path)
             require_current_collection(page.collection, where=path)
+            if on_collected_at is not None and page.collection.last_success_at is not None:
+                # 페이지마다 원천 수집 시각을 알린다 — Valkey 상태의 신선도(ADR-114 D5).
+                on_collected_at(page.collection.last_success_at)
             for item in page.items:
                 total += 1
                 yield parse(item)
@@ -404,34 +408,50 @@ async def _iter_transport_export(
 
 async def fetch_transport_fuel_stations(
     settings: KorTravelMapSettings,
+    *,
+    on_collected_at: Callable[[datetime], None] | None = None,
 ) -> AsyncIterator[TransportFuelStation]:
-    """오피넷 주유소 + 유종별 최신 가격(transport 전국 수집본)."""
+    """오피넷 주유소 + 유종별 최신 가격(transport 전국 수집본).
+
+    ``on_collected_at``은 페이지마다 그 페이지 근거 수집의 ``last_success_at``을 받는다(ADR-114 D5).
+    """
     async for station in _iter_transport_export(
-        settings, EXPORT_PATH_FUEL_STATIONS, parse_fuel_station
+        settings, EXPORT_PATH_FUEL_STATIONS, parse_fuel_station, on_collected_at
     ):
         yield station
 
 
 async def fetch_transport_rest_areas(
     settings: KorTravelMapSettings,
+    *,
+    on_collected_at: Callable[[datetime], None] | None = None,
 ) -> AsyncIterator[TransportRestArea]:
     """고속도로 휴게소 기준정보."""
-    async for area in _iter_transport_export(settings, EXPORT_PATH_REST_AREAS, parse_rest_area):
+    async for area in _iter_transport_export(
+        settings, EXPORT_PATH_REST_AREAS, parse_rest_area, on_collected_at
+    ):
         yield area
 
 
 async def fetch_transport_rest_area_fuel_prices(
     settings: KorTravelMapSettings,
+    *,
+    on_collected_at: Callable[[datetime], None] | None = None,
 ) -> AsyncIterator[TransportRestAreaFuelPrice]:
     """휴게소 주유소 현재 유가."""
     async for price in _iter_transport_export(
-        settings, EXPORT_PATH_REST_AREA_FUEL_PRICES, parse_rest_area_fuel_price
+        settings,
+        EXPORT_PATH_REST_AREA_FUEL_PRICES,
+        parse_rest_area_fuel_price,
+        on_collected_at,
     ):
         yield price
 
 
 async def fetch_transport_highway_incidents(
     settings: KorTravelMapSettings,
+    *,
+    on_collected_at: Callable[[datetime], None] | None = None,
 ) -> AsyncIterator[TransportHighwayIncident]:
     """마지막 성공 수집의 활성 돌발 **전체**(페이지 없음).
 
@@ -457,6 +477,8 @@ async def fetch_transport_highway_incidents(
             _transport_json(response, EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE)
         )
     require_fresh_incident_set(active, now=_utcnow())
+    if on_collected_at is not None:
+        on_collected_at(active.collected_at)
     for incident in active.items:
         yield incident
 

@@ -1,3 +1,10 @@
+## 2026-10-23 — ADR-114 1단계(T-STATE-01): 브랜치 `feat/adr114-valkey-transport`
+
+- transport 주유소·휴게소·휴게소 유가·돌발·공항의 현재 상태를 Valkey 세대 단위로 교체하는 Dagster job 5개(기본 STOPPED)와
+  `/v1/service/transport/*` 10 route를 더했다. migration 없음. admin·service OpenAPI 변경(**PinVi admin 재vendor 필요**).
+- **다음 한 작업: PR CI green → 소유자 머지 판단 → Manager Valkey PR 배포·API env(Valkey URL, transport 주소·토큰) →
+  PinVi 재vendor → Map 배포 → schedule enable·첫 교체 확인(acceptance §T-STATE-01).**
+
 ## 2026-10-23 — Map 실제 동시 쓰기 설계(ADR-115, 문서만)
 
 - 최신 main `cdd2614007a86e8627949cd1176c61eb14c0ce3e`의 전역 3종 gate, source/Feature

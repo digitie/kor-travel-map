@@ -65,8 +65,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # description 문자열만 변경, schema·user/service 불변).
     # 2026-10-16 T-GR-04 — admin baseline 재고정(`/v1/ops/geo-releases` 5 operation 추가,
     # 기존 경로·user/service 불변).
+    # 2026-10-23 T-STATE-01(ADR-114) — service·admin baseline 재고정(`/v1/service/transport/*` 10
+    # operation 추가, user 불변). service added 10건.
     "openapi-diff-v1.json": (
-        "4ae5c94bb8e08b6b0415a129a0111dbbc10d08fd5757464a2a1d40e169fc278a"
+        "cd3d5fb3529dc461fce475e07c3505c45a54e9b677541da35be98ba36d53943e"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -75,8 +77,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 한정했다(manual·요청승인·큐레이션·core는 legacy 주소를 갖지 않는다).
     # 2026-10-12 ADR-108 — T-VN-40 pending receipt의 full-admin sha 재핀(description만 변경).
     # 2026-10-16 T-GR-04 — 같은 receipt의 full-admin sha 재핀(geo-releases 5 operation 추가).
+    # 2026-10-23 T-STATE-01(ADR-114) — pending receipt의 service·full-admin sha 재핀
+    # (transport 10 operation 추가).
     "consumer-rollout-v1.json": (
-        "648f1a7a8f7ba9d3568ee5aafa418eacec275cb6c190a6f399b1591e777837d2"
+        "4f475bc11ccb739c1843a7d73bedd2d240ca6d8059eb22ac862bd422797a7235"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

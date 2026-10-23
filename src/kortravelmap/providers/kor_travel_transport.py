@@ -41,6 +41,7 @@ __all__ = [
     "DATASET_KEY_REST_AREA_FUEL_PRICES",
     "EXPORT_PATH_AIRPORTS",
     "EXPORT_PATH_FUEL_STATIONS",
+    "EXPORT_PATH_FUEL_STATION_PRICE_HISTORY",
     "EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE",
     "EXPORT_PATH_REST_AREAS",
     "EXPORT_PATH_REST_AREA_FUEL_PRICES",
@@ -58,6 +59,8 @@ __all__ = [
     "TransportExportNotCurrent",
     "TransportExportPage",
     "TransportFuelPrice",
+    "TransportFuelPriceHistory",
+    "TransportFuelPriceHistoryPoint",
     "TransportFuelStation",
     "TransportHighwayIncident",
     "TransportIncidentActiveSet",
@@ -68,6 +71,7 @@ __all__ = [
     "parse_airports",
     "parse_collection",
     "parse_export_page",
+    "parse_fuel_price_history",
     "parse_fuel_station",
     "parse_rest_area",
     "parse_rest_area_fuel_price",
@@ -99,6 +103,13 @@ EXPORT_PATH_REST_AREAS: Final[str] = "/v1/service/exports/rest-areas"
 EXPORT_PATH_REST_AREA_FUEL_PRICES: Final[str] = "/v1/service/exports/rest-area-fuel-prices"
 EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE: Final[str] = "/v1/service/exports/highway-incidents/active"
 EXPORT_PATH_AIRPORTS: Final[str] = "/v1/service/exports/airports"
+EXPORT_PATH_FUEL_STATION_PRICE_HISTORY: Final[str] = (
+    "/v1/service/exports/fuel-stations/{natural_key}/price-history"
+)
+"""주유소 한 곳의 가격 이력(transport ADR-013 2026-10-23 추가, Map ADR-114 결정 4).
+
+Map은 저장하지 않고 요청 시 전한다. ``{natural_key}``는 오피넷 uni_id다(경로 성분으로 escape해
+넣는다)."""
 
 
 INCIDENT_SET_MAX_AGE: Final[timedelta] = timedelta(minutes=30)
@@ -616,3 +627,58 @@ def parse_airports(payload: Any) -> tuple[TransportAirport, ...]:
         raise TransportExportEmpty("kor-travel-transport airports가 0건이다.")
     return tuple(parse_airport(_mapping(item, "airports.items[]")) for item in items)
 
+
+@dataclass(frozen=True, slots=True)
+class TransportFuelPriceHistoryPoint:
+    """가격 이력 한 행(``fuel_price_snapshots``). ``price=None``은 그때 판매하지 않음이다."""
+
+    product_code: str
+    price: Decimal | None
+    provider_updated_at: datetime | None
+    observed_at: datetime
+    collected_at: datetime
+
+
+@dataclass(frozen=True, slots=True)
+class TransportFuelPriceHistory:
+    """``GET …/fuel-stations/{natural_key}/price-history`` 응답.
+
+    ``items``는 ``observed_at`` 내림차순이다.
+    """
+
+    generated_at: datetime
+    natural_key: str
+    items: tuple[TransportFuelPriceHistoryPoint, ...]
+    truncated: bool
+
+
+def parse_fuel_price_history(payload: Any, *, natural_key: str) -> TransportFuelPriceHistory:
+    """가격 이력 응답을 엄격히 읽는다. 요청한 주유소가 아닌 응답은 계약 위반이다."""
+    where = "fuel-stations/price-history"
+    body = _mapping(payload, where)
+    returned_key = _required_text(body, "natural_key", where)
+    if returned_key != natural_key:
+        raise TransportExportContractError(
+            f"{where}.natural_key: 요청({natural_key!r})과 다른 주유소({returned_key!r})다."
+        )
+    items = body.get("items")
+    if not isinstance(items, list):
+        raise TransportExportContractError(f"{where}.items: 배열이어야 한다.")
+    points: list[TransportFuelPriceHistoryPoint] = []
+    for raw in items:
+        row = _mapping(raw, f"{where}.items[]")
+        points.append(TransportFuelPriceHistoryPoint(
+            product_code=_required_text(row, "product_code", f"{where}.items[]").strip(),
+            price=_decimal(row, "price", f"{where}.items[]"),
+            provider_updated_at=_datetime(
+                row, "provider_updated_at", f"{where}.items[]", required=False
+            ),
+            observed_at=_required_datetime(row, "observed_at", f"{where}.items[]"),
+            collected_at=_required_datetime(row, "collected_at", f"{where}.items[]"),
+        ))
+    return TransportFuelPriceHistory(
+        generated_at=_required_datetime(body, "generated_at", where),
+        natural_key=returned_key,
+        items=tuple(points),
+        truncated=_strict_bool(body, "truncated", where),
+    )

@@ -94,6 +94,13 @@ __all__ = [
     "rest_area_place_locator_from_rows",
     "RestAreaPlaceLocator",
     "traffic_notices_to_bundles",
+    # 자연키·표시 규칙 (ADR-114 Valkey 상태가 PG 경로와 같은 규칙을 쓴다)
+    "fuel_price_match_key",
+    "parse_krex_occurrence",
+    "rest_area_natural_key",
+    "safe_notice_type",
+    "synthesize_notice_title",
+    "traffic_notice_natural_key",
     # 메타
     "REST_AREA_SOURCE_ENTITY_TYPE",
     "REST_AREA_CATEGORY",
@@ -1050,3 +1057,15 @@ async def traffic_notices_to_bundles(
         )
         for item in items
     ]
+
+
+# -- 공개 이름 (ADR-114) ------------------------------------------------------
+#
+# Valkey 상태(``providers.kor_travel_transport_state``)는 PG 변환과 **같은 규칙**으로 자연키·
+# 제목·발생 시각을 만들어야 같은 ``feature_id``가 나온다. 규칙을 복제하지 않고 같은 함수를 쓴다.
+rest_area_natural_key = _rest_area_natural_key
+fuel_price_match_key = _fuel_price_match_key
+traffic_notice_natural_key = _traffic_notice_natural_key
+safe_notice_type = _safe_notice_type
+synthesize_notice_title = _synthesize_notice_title
+parse_krex_occurrence = _parse_krex_occurrence
