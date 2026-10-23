@@ -1244,6 +1244,16 @@ class GeoDatasetHandle:
                 self._fetched = True
         return self._value
 
+    async def recheck(self) -> DatasetRef | None:
+        """run 기억값과 무관하게 **지금** geo가 서빙하는 데이터셋을 다시 읽는다(ADR-116).
+
+        저장값만으로 끝난 변환은 geo 응답을 하나도 받지 않아 run 도중의 릴리스 전환을 관측하지
+        못한다. 적재 helper가 그 변환 뒤 이것을 불러 run 관측 집합에 더한다 — 전환이 있었으면
+        :meth:`GeoLoadContext.effective_token`이 None이 되어 stale 분기·스탬프를 하지 않는다.
+        실패는 None + WARNING(:func:`current_geo_dataset_from_settings`와 같다).
+        """
+        return await current_geo_dataset_from_settings(self._settings)
+
 
 @resource(
     description=(

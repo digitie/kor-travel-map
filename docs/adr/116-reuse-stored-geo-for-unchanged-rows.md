@@ -140,3 +140,23 @@ asset이 helper를 거치는지는 lint(`tests/lint/test_reverse_geocoding_asset
 - LOW-10(helper 우회를 아무도 모른다): lint를 더했다(결정 5).
 - 대안 "어긋나도 pass 1 bundle을 그대로 쓴다"는 택하지 않았다 — 결과가 전량 지오코딩과 같다는 보장을 버리고, 재시도 비용은
   답 기억으로 이미 geo 0회다.
+
+## 코드 리뷰 반영(2026-10-23, 적대 리뷰 2회)
+
+- B MED-1(조회 실패가 적재를 죽이고, 큐 경로에서는 executor transaction까지 되감는다): 조회는 savepoint 안에서 하고
+  `SQLAlchemyError`는 그 안에서 끝내 `None`을 돌려준다 — 그 변환은 전량 지오코딩하고 `lookup_failed`로 센다.
+- B MED-2(generic plan이 스탬프 토큰 인덱스에서 출발할 수 있다): 입력 CTE를 `MATERIALIZED`로 묶어 입력 행에서 출발하게
+  했다.
+- A MED-1(저장값만으로 끝난 변환은 run 도중의 geo 릴리스를 관측하지 못해, 그 사이 릴리스 run이 새 값으로 고친 행을 stale
+  분기가 옛 값으로 되돌릴 수 있다): 저장값으로 답한 행이 있으면 helper가 geo의 현재 데이터셋을 다시 읽어(`GeoDatasetHandle.
+  recheck`) run 관측 집합에 더한다 — 전환이 있었으면 `effective_token()`이 None이라 stale 분기·스탬프가 없다. 남는 창은
+  마지막 batch의 재확인과 쓰기 사이(spool 쓰기 시작까지)이고, 재확인이 실패(geo 장애)하면 관측하지 못한다.
+- A LOW-3(pass 1에서만 생긴 evidence): 사후 확인이 `_reusable_shape`도 본다.
+- B LOW-4(메타 키 불일치): 메타는 `GeoCallStats.as_metadata`의 `geo_reuse_*`를 그대로 쓴다. B LOW-5(lint 범위): dagster
+  패키지 전 모듈을 보고 MOIS chunk 적재·offline upload를 이유와 함께 예외로 둔다.
+- A LOW-6(계수 의미): `fallback`·`disabled`·`lookup_failed`는 `geocoded`의 부분집합이라고 적었다.
+- 받아들인 것: A LOW-2(빈 답 가드가 지킨 옛 주소는 그 뒤 재사용 행의 검증에 그대로 쓰인다 — DB 값은 전량 지오코딩과 같고,
+  그 값은 ADR-109 행 가드가 의도해 남긴 것이다), A LOW-4(주소 유도 코드 변경은 스탬프가 모른다 — 결과 절), A LOW-5·B LOW-3
+  (pass 0 예외는 모듈 경고 + `disabled` 계수; 진짜 버그는 pass 1이 다시 올린다), A LOW-7(asyncpg 오류는 SQLAlchemy가
+  `DBAPIError`로 감싼다), B LOW-6(asset 결선 통합 검사 — 단위 검사가 결선을 대역으로 본다), B LOW-7·8(결과 절).
+

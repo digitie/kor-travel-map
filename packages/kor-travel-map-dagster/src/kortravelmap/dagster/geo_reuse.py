@@ -178,6 +178,10 @@ def _mismatched(
         if key is None or key not in served:
             continue
         values = stored.get(bundle.source_record.source_record_key)
+        if not _reusable_shape(bundle):
+            # pass 0에는 없던 geo 관측(evidence)이 저장 답에서 만들어졌다 — 재현할 수 없다.
+            bad.add(key)
+            continue
         if values is None or _normalized(values) != _normalized(
             address_column_values(bundle.feature.address)
         ):
@@ -226,6 +230,7 @@ async def transform_reusing_stored_geo(
         [Sequence[FeatureBundle]], Awaitable[Mapping[str, Mapping[str, Any]] | None]
     ],
     stats: GeoCallStats | None = None,
+    after_reuse: Callable[[], Awaitable[None]] | None = None,
 ) -> list[FeatureBundle]:
     """``transform(reverse_geocoder)``을 저장값 재사용과 함께 돌린다(ADR-116).
 
@@ -233,7 +238,9 @@ async def transform_reusing_stored_geo(
     concierge처럼 격리 목록을 채우는 변환은 넘기지 않는다). ``live``는 run의 실제 역지오코더,
     ``lookup``은 재사용 조건을 만족하는 행의 ``source_record_key → 저장 주소 유도 열``을 돌려준다
     (조회가 실패했으면 None — 그 변환은 전량 지오코딩하고 ``lookup_failed``로 센다).
-    ``stats``가 있으면 행 단위 계수를 더한다.
+    ``stats``가 있으면 행 단위 계수를 더한다. ``after_reuse``는 저장값으로 답한 행이 하나라도 있으면
+    결과를 돌려주기 전에 한 번 불린다 — 호출자가 그때 geo의 현재 데이터셋을 다시 관측한다(저장값만
+    쓴 변환은 응답을 받지 않아 run 도중의 릴리스 전환을 보지 못한다, 코드 리뷰 A MED-1).
     """
     probe = _EmptyAnswers()
     disabled = False
@@ -277,4 +284,6 @@ async def transform_reusing_stored_geo(
             1 for bundle in bundles if bundle.feature.coord is not None
         )
     _count(bundles, served, stored, stats, disabled=disabled)
+    if served and after_reuse is not None:
+        await after_reuse()
     return bundles

@@ -105,7 +105,13 @@ class _Lookup:
 
 
 def _dump(bundles: Sequence[FeatureBundle]) -> list[str]:
-    return sorted(json.dumps(bundle.model_dump(mode="json"), sort_keys=True) for bundle in bundles)
+    """bundle 비교 키 — ``source_link.created_at``(만들 때의 now)만 뺀다."""
+    dumped = []
+    for bundle in bundles:
+        data = bundle.model_dump(mode="json")
+        data["source_link"].pop("created_at")
+        dumped.append(json.dumps(data, sort_keys=True))
+    return sorted(dumped)
 
 
 async def _full(points: Sequence[_Point]) -> list[FeatureBundle]:
@@ -467,3 +473,84 @@ async def test_bundles_carrying_geo_evidence_are_never_reused() -> None:
 
     assert lookup.asked == []
     assert live.calls == [("128.1", "38.1")]
+
+
+async def test_a_fully_reused_transform_still_observes_a_mid_run_release() -> None:
+    """저장값만 쓴 변환은 geo 응답이 없다 — helper가 현재 데이터셋을 다시 읽어 run 관측에 더한다.
+
+    전환이 있었으면 적재의 ``effective_token``이 None이 되어 stale 분기가 새 릴리스 값을 옛 값으로
+    되돌리지 않는다(코드 리뷰 A MED-1).
+    """
+    from types import SimpleNamespace
+
+    from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
+
+    from kortravelmap.dagster import assets
+
+    run_token = "dd1-" + "b" * 32
+    released = "dd1-" + "c" * 32
+    points = [_point("p1", "128.1", "38.1")]
+    previous = _stored_from(await _full(points))
+    stats = GeoCallStats()
+
+    class _Live(_CountingReverse):
+        @property
+        def stats(self) -> GeoCallStats:
+            return stats
+
+    class _Client:
+        async def read_reusable_geo_columns(
+            self, bundles: Sequence[FeatureBundle], *, current_data_token: str
+        ) -> Mapping[str, Mapping[str, Any]]:
+            return previous
+
+    class _Handle:
+        rechecks = 0
+
+        async def current(self) -> DatasetRef:
+            return DatasetRef(version_token="dv1-" + "a" * 32, data_token=run_token)
+
+        async def recheck(self) -> DatasetRef:
+            _Handle.rechecks += 1
+            return DatasetRef(version_token="dv1-" + "d" * 32, data_token=released)
+
+    context = SimpleNamespace(
+        resources=SimpleNamespace(kor_travel_map_client=_Client(), kor_travel_geo_dataset=_Handle())
+    )
+    live = _Live()
+
+    await assets._transform_reusing_geo(  # noqa: SLF001
+        context,  # type: ignore[arg-type]
+        knps_point_records_to_bundles,
+        points,
+        dataset_key=_DATASET,
+        fetched_at=_FETCHED,
+        reverse_geocoder=live,
+    )
+
+    assert live.calls == []
+    assert _Handle.rechecks == 1
+    load = GeoLoadContext(
+        geo_applied=GeoApplied(reverse=True, geocode=False),
+        current_dataset=DatasetRef(version_token="dv1-" + "a" * 32, data_token=run_token),
+        observed_data_tokens=stats.observed_data_tokens,
+    )
+    assert load.effective_token() is None
+
+
+async def test_after_reuse_runs_only_when_something_was_reused() -> None:
+    points = [_point("p1", "128.1", "38.1")]
+    calls: list[str] = []
+
+    async def note() -> None:
+        calls.append("x")
+
+    await transform_reusing_stored_geo(
+        _transform(points), live=_CountingReverse(), lookup=_Lookup({}), after_reuse=note
+    )
+    assert calls == []
+    previous = _stored_from(await _full(points))
+    await transform_reusing_stored_geo(
+        _transform(points), live=_CountingReverse(), lookup=_Lookup(previous), after_reuse=note
+    )
+    assert calls == ["x"]

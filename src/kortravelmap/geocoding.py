@@ -1305,6 +1305,8 @@ class GeoCallStats:
       변환의 좌표 있는 행. 조회조차 하지 않았으므로 "재사용할 것이 없었다"와 구별된다.
     - ``lookup_failed``: 재사용 조회가 DB 오류로 실패해 전량 지오코딩한 변환의 좌표 있는 행.
 
+    ``fallback``·``disabled``·``lookup_failed``는 모두 ``geocoded``의 부분집합이다(겹쳐 센다).
+
     실제 HTTP 수는 ``calls``다(provider 캐시가 같은 좌표를 묶으므로 행 수와 다르다).
     """
 

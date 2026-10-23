@@ -2219,11 +2219,22 @@ async def _transform_reusing_geo(
     async def _transform(geocoder: ReverseGeocoder) -> list[Any]:
         return await transform(rows, reverse_geocoder=geocoder, **kwargs)
 
+    stats = cast("GeoCallStats | None", getattr(live, "stats", None))
+    recheck = getattr(
+        _resource_object(context, "kor_travel_geo_dataset", default=None), "recheck", None
+    )
+
+    async def _observe_current() -> None:
+        # 저장값만으로 끝난 변환도 run 도중의 릴리스 전환을 보게 한다(코드 리뷰 A MED-1).
+        if stats is not None and callable(recheck):
+            stats.observe_dataset(cast("DatasetRef | None", await recheck()))
+
     return await transform_reusing_stored_geo(
         _transform,
         live=live,
         lookup=_lookup,
-        stats=cast("GeoCallStats | None", getattr(live, "stats", None)),
+        stats=stats,
+        after_reuse=_observe_current,
     )
 
 

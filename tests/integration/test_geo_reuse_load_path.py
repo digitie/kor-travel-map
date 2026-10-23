@@ -113,6 +113,16 @@ def _transform(items: Sequence[_Festival]) -> Any:
     return run
 
 
+def _comparable(bundles: Sequence[FeatureBundle]) -> list[str]:
+    """bundle 비교 키 — ``source_link.created_at``(만들 때의 now)만 뺀다."""
+    dumped = []
+    for bundle in bundles:
+        data = bundle.model_dump(mode="json")
+        data["source_link"].pop("created_at")
+        dumped.append(json.dumps(data, sort_keys=True, ensure_ascii=False))
+    return sorted(dumped)
+
+
 def _ctx(ref: DatasetRef, token: str) -> GeoLoadContext:
     return GeoLoadContext(
         geo_applied=_REVERSE, current_dataset=ref, observed_data_tokens=frozenset({token})
@@ -319,9 +329,7 @@ async def test_unchanged_rows_skip_geo_and_load_exactly_like_a_full_geocode(
     assert dict(stats.reuse) == {"skipped": 4, "geocoded": 1, "fallback": 0}
     # 전량 지오코딩한 변환과 같은 bundle이다.
     full = await _transform(second_items)(_Reverse())
-    assert sorted(b.model_dump_json() for b in produced) == sorted(
-        b.model_dump_json() for b in full
-    )
+    assert _comparable(produced) == _comparable(full)
     after = await _state(dagster_like_engine, loaded)
     for key in list(after)[1:]:
         assert after[key] == before[key], key  # row_revision·주소·스탬프 그대로
