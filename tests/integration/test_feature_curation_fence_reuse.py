@@ -86,12 +86,12 @@ async def test_acquisition_inside_savepoint_is_rechecked_after_it_ends(
         savepoint = await session.begin_nested()
         await lock_feature_curation_write(session)
         await lock_feature_curation_write(session)
-        assert len(fence_calls) == 1
+        assert len(fence_calls) == 2  # nested 획득은 조상 수명을 입증할 수 없어 캐시하지 않는다.
         await getattr(savepoint, finish)()
         # rollback은 savepoint에서 얻은 xact advisory를 실제로 놓는다.
         assert await _free(pg_engine) is (finish == "rollback")
         await lock_feature_curation_write(session)
-        assert len(fence_calls) == 2
+        assert len(fence_calls) == 3
         assert not await _free(pg_engine)
     assert await _free(pg_engine)
 
@@ -166,4 +166,50 @@ async def test_cancelled_wait_does_not_cache(
             assert len(fence_calls) == 3
             assert not await _free(pg_engine)
             await waiter.rollback()
+    assert await _free(pg_engine)
+
+
+async def test_external_ancestor_savepoint_rollback_never_reuses_child_fence(
+    pg_engine: AsyncEngine, fence_calls: list[str]
+) -> None:
+    async with pg_engine.connect() as connection:
+        await connection.begin()
+        parent = await connection.begin_nested()
+        session = AsyncSession(bind=connection, join_transaction_mode="create_savepoint")
+        try:
+            await lock_feature_curation_write(session)
+            assert not await _free(pg_engine)
+            with pytest.warns(SAWarning, match="nested transaction already deassociated"):
+                await parent.rollback()
+            assert await _free(pg_engine)
+            # SQLAlchemy 자식 is_active는 true여도 실제 PG 잠금은 해제됐다.
+            await lock_feature_curation_write(session)
+            assert len(fence_calls) == 2
+            assert not await _free(pg_engine)
+        finally:
+            # 의도적으로 ancestor를 먼저 끝낸 fault fixture의 잘못된 자식 SAVEPOINT는
+            # 다시 rollback하지 않고 연결을 폐기한다. 운영 세션을 건드리지 않는다.
+            await session.invalidate()
+    assert await _free(pg_engine)
+
+
+async def test_caught_core_sql_error_invalidates_success_proof_before_rollback(
+    pg_engine: AsyncEngine, fence_calls: list[str]
+) -> None:
+    async with AsyncSession(pg_engine) as session:
+        await lock_feature_curation_write(session)
+        with pytest.raises(DBAPIError) as original:
+            await session.execute(text("SELECT 1 / 0"))
+        assert getattr(original.value.orig, "sqlstate", None) == "22012"
+        assert session.sync_session.get_transaction().is_active
+        assert await _free(pg_engine)  # PG abort는 xact advisory lock을 이미 해제했다.
+        with pytest.raises(DBAPIError) as aborted:
+            await lock_feature_curation_write(session)
+        assert getattr(aborted.value.orig, "sqlstate", None) == "25P02"
+        assert len(fence_calls) == 2
+        await session.rollback()
+        await lock_feature_curation_write(session)
+        assert len(fence_calls) == 3
+        assert not await _free(pg_engine)
+        await session.rollback()
     assert await _free(pg_engine)

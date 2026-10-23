@@ -12,7 +12,7 @@
 
 ### 수집 쓰기 fence 재진입 왕복 절감 (2026-10-24, ADR115 선행)
 
-- 같은 session·DB transaction에서 이미 잡은 전역 fence의 반복 SQL을 생략한다. commit/rollback·획득 savepoint 종료·연결 변경 뒤에는 다시 획득한다. 전역 잠금 범위와 Feature 병합 의미는 유지한다.
+- 같은 session·DB transaction에서 이미 잡은 전역 fence의 반복 SQL을 생략한다. commit/rollback·SQL 오류·연결 변경 뒤에는 다시 획득하고 savepoint 안의 획득은 캐시하지 않는다. 전역 잠금 범위와 Feature 병합 의미는 유지한다.
 
 ### transport 현재 상태를 Valkey에 세대 단위로 담고 service REST로 준다 (2026-10-23, ADR-114 1단계, T-STATE-01)
 

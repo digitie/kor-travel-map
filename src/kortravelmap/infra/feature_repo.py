@@ -61,7 +61,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from pydantic import ValidationError
-from sqlalchemy import bindparam, text
+from sqlalchemy import bindparam, event, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
@@ -111,7 +111,7 @@ from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
 
-    from sqlalchemy.engine import Connection, Transaction
+    from sqlalchemy.engine import Connection, ExceptionContext, Transaction
     from sqlalchemy.orm import SessionTransaction
 
     from kortravelmap.dto import Feature, FeatureBundle, SourceLink, SourceRecord
@@ -220,6 +220,16 @@ def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None
 
 
 _FEATURE_CURATION_FENCE_INFO_KEY: Final[str] = "kortravelmap.feature_curation_fence"
+_FEATURE_CURATION_FENCE_STAMP_KEY: Final[str] = "kortravelmap.feature_curation_fence_stamp"
+
+
+def _invalidate_feature_curation_fence(context: ExceptionContext) -> None:
+    # Core SQL 오류는 PG transaction을 abort해도 SessionTransaction.is_active가 true일 수 있다.
+    # driver의 private 상태 대신 공식 오류 event로 성공 획득 stamp만 무효화한다.
+    connection = context.connection
+    if connection is not None and not connection.closed and not connection.invalidated:
+        connection.info.pop(_FEATURE_CURATION_FENCE_STAMP_KEY, None)
+
 
 
 @dataclass(frozen=True)
@@ -227,10 +237,9 @@ class _FeatureCurationFence:
     """실제 획득한 session·DB transaction의 수명에 한정한 재진입 증거."""
 
     session_root: SessionTransaction
-    session_owner: SessionTransaction
     connection: Connection
     connection_root: Transaction
-    connection_owner: Transaction
+    stamp: object
 
     def held_by(self, session: AsyncSession) -> bool:
         bind = session.sync_session.get_bind()
@@ -238,12 +247,11 @@ class _FeatureCurationFence:
             (bind is self.connection or bind is self.connection.engine)
             and session.sync_session.get_transaction() is self.session_root
             and self.session_root.is_active
-            and self.session_owner.is_active
             and not self.connection.closed
             and not self.connection.invalidated
             and self.connection.get_transaction() is self.connection_root
             and self.connection_root.is_active
-            and self.connection_owner.is_active
+            and self.connection.info.get(_FEATURE_CURATION_FENCE_STAMP_KEY) is self.stamp
         )
 
 
@@ -255,17 +263,23 @@ async def _remember_feature_curation_fence(session: AsyncSession) -> None:
     if root is None or not root.is_active:
         return
     connection = (await session.connection()).sync_connection
-    if connection is None:
+    if connection is None or connection.get_nested_transaction() is not None:
+        # 외부 조상 savepoint rollback은 SQLAlchemy의 자식 is_active를 갱신하지 않을 수 있다.
+        # public API로 조상 수명을 입증하지 못하므로 nested 획득은 원래처럼 매번 SQL을 쓴다.
         return
     connection_root = connection.get_transaction()
     if connection_root is None or not connection_root.is_active:
         return
+    if not event.contains(connection.engine, "handle_error", _invalidate_feature_curation_fence):
+        event.listen(connection.engine, "handle_error", _invalidate_feature_curation_fence)
+    # pool connection 정보에는 Session/증거 객체 대신 plain stamp만 둔다.
+    stamp = object()
+    connection.info[_FEATURE_CURATION_FENCE_STAMP_KEY] = stamp
     session.info[_FEATURE_CURATION_FENCE_INFO_KEY] = _FeatureCurationFence(
         session_root=root,
-        session_owner=session.sync_session.get_nested_transaction() or root,
         connection=connection,
         connection_root=connection_root,
-        connection_owner=connection.get_nested_transaction() or connection_root,
+        stamp=stamp,
     )
 
 
@@ -275,8 +289,8 @@ async def lock_feature_curation_write(session: AsyncSession) -> None:
     session이 :func:`arm_feature_curation_write_wait`로 무장돼 있으면 첫 획득만 긴 대기로
     잡는다(:func:`_lock_feature_curation_write_waiting`). 같은 transaction의 다음 호출은
     이미 쥔 xact lock은 실제 session·DB transaction의 수명이 유지되는 동안 SQL 없이 재사용한다.
-    획득 savepoint의 종료·rollback, 외부 connection transaction 종료, 새 transaction이면
-    다시 잡는다.
+    savepoint 안에서 획득한 잠금은 캐시하지 않는다. 외부 connection transaction 종료나
+    새 transaction에서도 다시 잡는다.
     전역 잠금의 충돌 범위와 Feature 병합 의미는 바꾸지 않는다(ADR-115의 안전한 선행 단위).
     """
 

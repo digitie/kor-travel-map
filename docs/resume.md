@@ -1,7 +1,7 @@
 ## 2026-10-24 — ADR115 선행: 같은 transaction fence 재진입 SQL 절감
 
-- 실제 session/connection transaction·획득 savepoint가 유효한 동안만 전역 fence를 재사용한다. 전역 충돌 범위·병합 의미는 유지한다.
-- 기존 집중27/새 실제PG8 PASS, 변경 Ruff/strict mypy PASS. [범위·실패 규약·검증 한계](reports/2026-10-24-curation-fence-reentry.md).
+- 실제 root session/connection transaction·오류 stamp가 유효한 동안만 전역 fence를 재사용한다. savepoint 획득은 캐시하지 않는다. 전역 충돌 범위·병합 의미는 유지한다.
+- 기존 집중27/새 실제PG10 PASS, 변경 Ruff/strict mypy PASS. [범위·실패 규약·검증 한계](reports/2026-10-24-curation-fence-reentry.md).
 - T-CWRITE-01 전체 기준선 및02~09는 미완이다. 다음은 두 독립 리뷰·CI·실제 HTTP/UI 수용 후 후보/winner와 scope gate의 작은 코드 단위를 이어간다. 운영 미배포.
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
