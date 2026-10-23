@@ -9,7 +9,7 @@
 - 수정: 재사용 helper 선조회 동시성(기본 2), 적재 geo client 일시 장애 총 3회 재시도(opt-in, 논리 요청당 1회 계수),
   적재 step I/O 정지 900초 시 task 스택 WARNING. 적대 리뷰 2회 — 반영: watchdog이 자기 읽기로 영원히 안 울리던 결함
   (HIGH), 재시도 범위를 API까지 넓힌 것(opt-in으로 축소), 시도마다 계수(분모 부풀림), 캐시 크기, 로그 실패 격리.
-  받아들인 것: 동시 geo 부하 증가·재시도 증폭(env로 1), 토큰 없는 run은 순차, 등산로는 seal jsonb 천장이 별도로 남음.
+  받아들인 것: 동시 geo 부하 증가·재시도 증폭(env로 1), 토큰 없는 run은 순차. 리뷰가 든 등산로 seal jsonb 천장은 #1256(ADR-099 1단계, 행별 digest)로 이미 해소.
 
 ## 2026-10-23 — geo 부하 줄이기 0단계(ADR-116, T-GEOLOAD-00): 브랜치 `feat/skip-geocode-unchanged`
 
