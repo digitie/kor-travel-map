@@ -20,7 +20,7 @@ import io
 import logging
 import time
 from collections.abc import AsyncIterator, Callable
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from typing import Any, Final
 
 __all__ = ["DEFAULT_STALL_AFTER_SECONDS", "process_io_bytes", "stall_watchdog"]
@@ -101,7 +101,5 @@ async def stall_watchdog(
         yield
     finally:
         watcher.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await watcher
-        except asyncio.CancelledError:
-            pass
