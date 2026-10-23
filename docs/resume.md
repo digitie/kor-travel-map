@@ -1,3 +1,9 @@
+## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
+
+- MCST 첫 적재 성공(#1357). watchdog 진척 신호에 geo·상류 요청·DB 문장 표시를 더하고 경고를 run당 한 번으로. migration·
+  OpenAPI·설정 변화 없음. 배포 영향: Map Dagster code location.
+- **다음 한 작업: PR CI green → 머지·배포(등산로 run이 끝난 뒤) → 등산로 결과 journal.**
+
 ## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
 
 - 비-MOIS 역지오코딩 적재 선조회 동시성(env `KOR_TRAVEL_MAP_REVERSE_GEOCODE_CONCURRENCY`, 기본 2), 적재 geo client 일시

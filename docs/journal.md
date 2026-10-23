@@ -1,3 +1,11 @@
+## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
+
+- #1357 배포 뒤 MCST run `c0f91a7c` **성공**(12:04Z 시작, 9,634초): geo 호출 36,905건(reverse 35,852·region 1,053),
+  저장값 재사용 skipped=45,930·geocoded=53,276·fallback=21. 이전 실패(6시간 상한)·멈춤 해소.
+- 그러나 watchdog이 15분마다 "I/O 없이 멈춤"을 남겼다(스택은 진행 중인 prefetch task). 원인: `/proc/self/io`의
+  `rchar`/`wchar`는 소켓 송수신을 세지 않는다. 수정: geo 왕복·상류 요청·SQLAlchemy 문장이 `core.activity`를 표시하고
+  watchdog이 그것도 진척으로 본다. 경고는 run당 한 번. 이어서 등산로 적재 시작.
+
 ## 2026-10-23 — MCST 6시간 상한·멈춤: 브랜치 `fix/mcst-geo-stall`
 
 - prod: MCST run(06:02Z 시작)이 3.5시간 이벤트 0건. step 프로세스 생존, `/proc/<pid>/io` rchar 60초 불변, geo·DB 소켓

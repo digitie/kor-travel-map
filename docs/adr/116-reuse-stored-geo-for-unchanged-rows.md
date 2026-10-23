@@ -178,3 +178,6 @@ asset이 helper를 거치는지는 lint(`tests/lint/test_reverse_geocoding_asset
 - **받아들인 위험.** 동시 geo 요청 상한이 run당 1에서 2로 오른다 — 큐 경로는 pool을 claim하지 않아 worker run 수만큼
   곱해진다. 과부하 중 재시도는 서버 일을 최대 3배로 늘릴 수 있다(재시도는 행당 상한·선조회는 첫 소진 실패에서 멈춤).
   odroid 부하가 문제가 되면 env로 동시성 1로 되돌린다.
+- **멈춤 진단 정정(2026-10-24).** 첫 판은 파일 I/O(`rchar+wchar`)만 진척으로 봤는데 소켓 `recv`/`send`는 거기 잡히지
+  않는다 — 배포 뒤 MCST run(성공, 2시간 40분)이 geo를 수만 번 부르는 동안 15분마다 오탐했다. 진척 신호에
+  `kortravelmap.core.activity` 표시(geo 왕복·상류 요청·SQLAlchemy 문장)를 더하고, 경고는 run당 한 번으로 줄였다.
