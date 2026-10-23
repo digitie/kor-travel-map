@@ -1003,7 +1003,11 @@ def geo_run_metadata(
         )
     # 저장값 재사용 계수(ADR-116) — run 누적이다(같은 resource 계수를 가리킨다).
     reuse = (
-        {f"geo_reuse_{name}": count for name, count in geo_stats.reuse.items()}
+        {
+            name: value
+            for name, value in geo_stats.as_metadata().items()
+            if name.startswith("geo_reuse_")
+        }
         if geo_stats is not None
         else {}
     )

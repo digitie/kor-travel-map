@@ -437,7 +437,10 @@ async def test_the_safety_net_is_counted_as_disabled_not_as_nothing_to_reuse() -
 
 
 async def test_bundles_carrying_geo_evidence_are_never_reused() -> None:
-    """``admin_evidence``는 원 geo 답(후보 시군구·관측 코드)을 싣는다 — 저장값으로 재현할 수 없다."""
+    """``admin_evidence``는 원 geo 답(후보 시군구·관측 코드)을 싣는다.
+
+    저장값으로 재현할 수 없다.
+    """
     from kortravelmap.dto.admin_evidence import AdminEvidence
 
     points = [_point("p1", "128.1", "38.1")]

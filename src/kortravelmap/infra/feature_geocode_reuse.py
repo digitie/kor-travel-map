@@ -65,7 +65,8 @@ WITH input AS (
           feature_kind, natural_key, source_entity_key, source_record_key,
           raw_payload_hash, lon, lat
       )
-), resolved AS (
+), resolved AS MATERIALIZED (
+    -- 입력 행에서 출발하게 묶는다 — 정상 상태에서 스탬프 토큰은 거의 전부 같아 선택도가 없다.
     SELECT input.*,
            feature.resolve_provider_feature_id(
                CAST(:provider_dataset_id AS bigint), input.feature_kind, input.natural_key

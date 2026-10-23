@@ -1240,7 +1240,13 @@ endpoint 키(``reverse``·``regions_within_radius``)와 달리 이것은 역지�
 """
 
 
-_REUSE_KEYS: Final[tuple[str, ...]] = ("skipped", "geocoded", "fallback", "disabled")
+_REUSE_KEYS: Final[tuple[str, ...]] = (
+    "skipped",
+    "geocoded",
+    "fallback",
+    "disabled",
+    "lookup_failed",
+)
 
 
 @dataclass
@@ -1297,6 +1303,7 @@ class GeoCallStats:
       (``geocoded``의 부분집합).
     - ``disabled``: 안전망(변환이 행 좌표 밖을 물었거나 빈 답을 견디지 못했다)이 재사용을 끈
       변환의 좌표 있는 행. 조회조차 하지 않았으므로 "재사용할 것이 없었다"와 구별된다.
+    - ``lookup_failed``: 재사용 조회가 DB 오류로 실패해 전량 지오코딩한 변환의 좌표 있는 행.
 
     실제 HTTP 수는 ``calls``다(provider 캐시가 같은 좌표를 묶으므로 행 수와 다르다).
     """

@@ -299,7 +299,8 @@ async def test_unchanged_rows_skip_geo_and_load_exactly_like_a_full_geocode(
         dagster_like_engine,
         settings=KorTravelMapSettings(feature_load_curation_lock_wait_seconds=120),
     )
-    # 좌표는 행마다 다르게 둔다 — 같은 좌표를 나눈 행은 저장값이 갈리면(축제 원문 주소) 재사용하지 않는다.
+    # 좌표는 행마다 다르게 둔다 — 같은 좌표를 나눈 행은 저장값이 갈리면(축제 원문 주소)
+    # 재사용하지 않는다.
     items = [_item(f"R{index}", lat=37.52 + index / 1000) for index in range(5)]
 
     first_live = _Reverse()
@@ -349,10 +350,9 @@ async def test_queue_bound_client_reuses_inside_the_executor_transaction(
     await _load_run(client, items, live=_Reverse(), ref=REF_A, stats=GeoCallStats())
 
     live = _Reverse()
-    async with make_async_session_factory(dagster_like_engine)() as executor:
-        async with executor.begin():
-            await executor.execute(text("SELECT 1"))
-            bound = await _bind_client_to_session(client, executor)
-            await _load_run(bound, items, live=live, ref=REF_A, stats=GeoCallStats())
+    async with make_async_session_factory(dagster_like_engine)() as executor, executor.begin():
+        await executor.execute(text("SELECT 1"))
+        bound = await _bind_client_to_session(client, executor)
+        await _load_run(bound, items, live=live, ref=REF_A, stats=GeoCallStats())
 
     assert live.calls == []

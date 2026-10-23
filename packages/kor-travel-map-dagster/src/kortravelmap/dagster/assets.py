@@ -2210,9 +2210,9 @@ async def _transform_reusing_geo(
     if token is None:
         return await transform(rows, reverse_geocoder=live, **kwargs)
 
-    async def _lookup(bundles: Sequence[Any]) -> Mapping[str, Mapping[str, Any]]:
+    async def _lookup(bundles: Sequence[Any]) -> Mapping[str, Mapping[str, Any]] | None:
         return cast(
-            "Mapping[str, Mapping[str, Any]]",
+            "Mapping[str, Mapping[str, Any]] | None",
             await read(bundles, current_data_token=token),
         )
 

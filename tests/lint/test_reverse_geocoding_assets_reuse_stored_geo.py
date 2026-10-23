@@ -23,13 +23,16 @@ _DAGSTER_PKG: Final = (
     / "kortravelmap"
     / "dagster"
 )
-_MODULES: Final = ("assets.py", "mcst_features.py")
+#: dagster 패키지의 모든 모듈을 본다 — 새 모듈에서 helper 없이 부르는 것도 잡는다.
+_MODULES: Final = tuple(sorted(path.name for path in _DAGSTER_PKG.glob("*.py")))
 _HELPER: Final = "_transform_reusing_geo"
 _ALLOWED: Final[dict[str, str]] = {
     "run_feature_place_mois_licenses": "ADR-108 재개형 chunk 적재가 자기 선조회·건너뛰기를 갖는다",
     "run_feature_place_kor_travel_concierge_youtube": (
         "격리 목록 부수효과 + observe() 후보 증거 — 두 번 변환할 수 없다"
     ),
+    "load_mois_license_records_chunked": "ADR-108 MOIS 재개형 chunk 적재(자기 선조회)",
+    "load_offline_upload_op": "사람이 올린 일회성 파일 — 이전 적재가 없다",
 }
 
 

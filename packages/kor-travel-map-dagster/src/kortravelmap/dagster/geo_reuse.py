@@ -25,14 +25,9 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from typing import TYPE_CHECKING, Any, Final
-
-from kortravelmap.dagster.validation import (
-    DROPPABLE_ISSUE_CODES,
-    validate_feature_bundle_address,
-)
-from pydantic import ValidationError
 
 from kortravelmap.dto import Address
 from kortravelmap.geocoding import (
@@ -42,6 +37,12 @@ from kortravelmap.geocoding import (
     coord_cache_key,
 )
 from kortravelmap.infra.feature_geocode_load import address_column_values
+from pydantic import ValidationError
+
+from kortravelmap.dagster.validation import (
+    DROPPABLE_ISSUE_CODES,
+    validate_feature_bundle_address,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Awaitable, Callable, Mapping, Sequence
@@ -55,6 +56,8 @@ __all__ = ["MAX_REUSE_TRANSFORMS", "transform_reusing_stored_geo"]
 MAX_REUSE_TRANSFORMS: Final[int] = 3
 
 CoordKey = tuple[str, str]
+
+_LOGGER = logging.getLogger(__name__)
 
 
 class _EmptyAnswers:
@@ -219,14 +222,17 @@ async def transform_reusing_stored_geo(
     transform: Callable[[ReverseGeocoder], Awaitable[list[FeatureBundle]]],
     *,
     live: ReverseGeocoder,
-    lookup: Callable[[Sequence[FeatureBundle]], Awaitable[Mapping[str, Mapping[str, Any]]]],
+    lookup: Callable[
+        [Sequence[FeatureBundle]], Awaitable[Mapping[str, Mapping[str, Any]] | None]
+    ],
     stats: GeoCallStats | None = None,
 ) -> list[FeatureBundle]:
     """``transform(reverse_geocoder)``을 저장값 재사용과 함께 돌린다(ADR-116).
 
     ``transform``은 같은 입력으로 몇 번 불려도 같은 결과를 내는 순수 변환이어야 한다(부수효과 없음 —
     concierge처럼 격리 목록을 채우는 변환은 넘기지 않는다). ``live``는 run의 실제 역지오코더,
-    ``lookup``은 재사용 조건을 만족하는 행의 ``source_record_key → 저장 주소 유도 열``을 돌려준다.
+    ``lookup``은 재사용 조건을 만족하는 행의 ``source_record_key → 저장 주소 유도 열``을 돌려준다
+    (조회가 실패했으면 None — 그 변환은 전량 지오코딩하고 ``lookup_failed``로 센다).
     ``stats``가 있으면 행 단위 계수를 더한다.
     """
     probe = _EmptyAnswers()
@@ -234,7 +240,8 @@ async def transform_reusing_stored_geo(
     try:
         drafts = await transform(probe)
     # 빈 답을 견디지 못하는 변환은 재사용하지 않는다 — 실제 경로가 판정한다.
-    except Exception:  # noqa: BLE001
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.warning("저장값 재사용 pass 0 실패 — 이 변환은 재사용하지 않는다: %r", exc)
         drafts, disabled = [], True
     row_coords = {key for key in map(_key, drafts) if key is not None}
     if not probe.requested <= row_coords:
@@ -242,7 +249,9 @@ async def transform_reusing_stored_geo(
         # 안전망).
         drafts, disabled = [], True
     candidates = [bundle for bundle in drafts if _reusable_shape(bundle)]
-    stored: Mapping[str, Mapping[str, Any]] = await lookup(candidates) if candidates else {}
+    found = await lookup(candidates) if candidates else {}
+    lookup_failed = found is None
+    stored: Mapping[str, Mapping[str, Any]] = found or {}
     table = _coordinate_table(drafts, stored) if stored else {}
     del drafts, candidates  # 큰 목록 적재(주차장 1.7만 건)에서 bundle 두 벌을 같이 들지 않는다
 
@@ -262,6 +271,10 @@ async def transform_reusing_stored_geo(
         # 두 번째도 어긋나면(변환이 결정적이지 않다) 표 없이 한 번 더 — 재사용 전과 같은 경로다.
         table = (
             {} if attempt >= 1 else {key: value for key, value in table.items() if key not in bad}
+        )
+    if lookup_failed and stats is not None:
+        stats.reuse["lookup_failed"] += sum(
+            1 for bundle in bundles if bundle.feature.coord is not None
         )
     _count(bundles, served, stored, stats, disabled=disabled)
     return bundles

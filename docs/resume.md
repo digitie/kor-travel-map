@@ -1,3 +1,13 @@
+## 2026-10-23 — geo 부하 줄이기 0단계(ADR-116, T-GEOLOAD-00): 브랜치 `feat/skip-geocode-unchanged`
+
+- 비-MOIS 역지오코딩 asset(MCST 포함, MOIS·concierge 제외)이 공통 helper로 변환을 두 번 돌려, payload·좌표가 그대로이고
+  스탬프가 `called`·현재 geo 토큰인 행은 geo를 부르지 않고 저장 주소 열을 답으로 쓴다. 결과 bundle은 전량 지오코딩과
+  같다(사후 확인). migration·OpenAPI·설정 변화 없음(PinVi 재vendor 불필요). 배포 영향: Map Dagster code location 재배포.
+- prod 읽기 전용 실측의 기대: 주차장 reverse 약 17.6k/run → 1~2k, MCST 세계음식점 9.5k → 수백(나머지 MCST 12개·등산로는
+  첫 성공 적재 뒤부터).
+- **다음 한 작업: PR CI green → 소유자 머지·배포 판단 → 배포 뒤 첫 정기 run의 `저장값 재사용 skipped=… geocoded=…`
+  요약 로그를 journal에 남기고 ADR-116 accepted.**
+
 ## 2026-10-23 — ADR-114 1단계(T-STATE-01): 브랜치 `feat/adr114-valkey-transport`
 
 - transport 주유소·휴게소·휴게소 유가·돌발·공항의 현재 상태를 Valkey 세대 단위로 교체하는 Dagster job 5개(기본 STOPPED)와
