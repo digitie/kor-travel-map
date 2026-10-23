@@ -1,3 +1,34 @@
+## 2026-10-24 — 가격 추이 프록시 transport T4 정렬(T-STATE-01-T4): 브랜치 `feat/transport-fuel-price-history-t4`
+
+- 원인: #1355 프록시는 transport T4가 확정되기 전 가정 모양(top-level `natural_key`·`generated_at`·`truncated`, 행별
+  필수 `collected_at`)을 파싱하고 `product_code`·`since`·`until`로 보내 — transport는 그 질의를 무시하고 정상 응답은 모두
+  `upstream_contract`가 됐다. transport 정본: origin/main `9974d25`의 `backend/app/services/export_price_history.py`·
+  `docs/map-service-price-history.md`(질의 `product`/`from`/`to`/`limit` 기본 1000·최대 5000/`cursor` ≤4096, 창 기본 30일·
+  최대 366일·미래 금지, 응답 `meta{generated_at, source_collected_at, source_status, item_count}`·`station_key`·`items[
+  product_code, observed_at, price]`·`next_cursor`·`has_more`, cursor HMAC 서명·첫 페이지부터 15분·수집 revision 고정,
+  revision 변경·만료 409, 변조/다른 필터 cursor·창 위반 422, 성공 근거 없음 503 + meta, 휴게소 이력 501, 오류는 problem+json).
+- 실측(n150 Map Dagster code-server 컨테이너의 transport env로 읽기 전용 GET, odroid `192.168.1.13:12301`): 주유소 하나
+  30일 5행(유종 5개, null 가격 3), `source_status=stale`(opinet 수집 10-21 이후 미성공 — 주유소 export 목록은 503),
+  `limit=2` 두 페이지 cursor 정상(486자), 변조 cursor 422·다른 product cursor 422·미래 `to` 422·naive `from` 422·없는 키
+  404·휴게소 501, gzip·weak ETag·`private, no-cache`. **Map API 컨테이너에는 transport 주소·토큰·플래그 env가 아직 없다**
+  (Map service `/v1/service/transport/fuel-stations`도 503 — Valkey 미적재).
+- 설계: cursor는 불투명 전달(Map이 해석·서명하지 않음), 응답 `history.has_more`·`next_cursor`(+ `meta.page` 미러),
+  `truncated`=has_more 호환. transport 409는 HTTP 409가 아니라 200 + `reason=cursor_expired`(현재가 유지, 소비자는 누적
+  페이지를 버리고 처음부터) — Map 목록의 세대 만료 409와 달리 이 route는 현재가를 함께 줘서 이력 실패가 응답을 막지 않는다
+  (ADR-114 결정 4). 이유 enum에 `upstream_unsupported`(501)·`request_rejected`(422)·`upstream_timeout` 추가. 파서는
+  `station_key` 일치·`item_count`=행 수·`has_more`⇔`next_cursor`·`observed_at` 내림차순을 확인한다. 행별
+  `collected_at`·`provider_updated_at`은 nullable(지금 항상 null, 응답 시각으로 채우지 않음). limit은 페이지 전체 행 수.
+- OpenAPI: service·admin 재생성, vnext receipt·diff baseline 재핀(service schema_changes 1건). 관리자 `types.ts` 재생성 —
+  main frontend CI가 `npm audit`(next critical)에서 먼저 멈춰 #1355의 `/v1/service/transport/*`가 types에 빠져 있었다.
+  user OpenAPI·user-client 타입 불변.
+- 검사(n150 일회용 python:3.13, CI 설치 레시피): openapi `--check`·ruff·mypy --strict(271 files)·lint-imports 초록.
+  unit+lint+api+dagster 5,502 passed·26 failed — 전부 알려진 환경 실패(docker runtime 23·sealed tree 2·smoke settings 1).
+  Valkey 통합 28 passed + 1 error(Docker API ReadTimeout, load 15) → 그 테스트 재실행 통과. 새 router 검사 60 passed.
+- PinVi 영향(읽기만, origin/main `3e1e8bc0`): `apps/api/tests/contract/kor-travel-map-openapi-service.json`을 vendor하고
+  `test_kor_travel_map_transport_contract.py::_EXPECTED_QUERY`가 price-history query를 `{product_code, since, until,
+  limit}`로 핀한다 → 재vendor 시 `cursor` 추가 필요. `PRICE_HISTORY_REASONS`가 옛 6개라 새 이유는 `upstream_contract`로
+  접힌다(깨지진 않음). PinVi는 `since`만 보내 30일을 기본 limit 200(이제 전체 행 수)으로 받고 `truncated`를 그대로 쓴다.
+
 ## 2026-10-24 — geo 재시도에 ReadError·WriteError 추가: 브랜치 `fix/geo-retry-readerror`
 
 - 등산로 run `18c4c1d7`(22:12Z)이 선조회 중 `GeoRequestError: transport 실패: ReadError` 한 번으로 두 시도(1h24m·37m)를 잃었다
