@@ -240,8 +240,11 @@ def test_reverse_geocoder_resource_builds_and_closes_client(
         *,
         api_key: SecretStr | None = None,
         stats: Any = None,
+        transient_attempts: int = 1,
     ) -> tuple[str, _FakeHttpClient]:
         assert api_key is not None
+        # 적재 resource만 geo 일시 장애 재시도를 켠다(ADR-116 2026-10-23 개정).
+        assert transient_attempts == 3
         assert api_key.get_secret_value() == "geo-public-key"
         # **대역이 계약을 따라와야 한다.** 이 인자를 받지 않으면 resource가 계수를
         # 주입하도록 바뀐 것을 대역이 가려 버린다(TypeError로 드러나긴 하지만,
@@ -305,6 +308,7 @@ def test_reverse_geocoder_resource_reports_the_geo_call_counts(
         *,
         api_key: SecretStr | None = None,
         stats: Any = None,
+        transient_attempts: int = 1,
     ) -> tuple[str, _FakeHttpClient]:
         seen.append(stats)
         return ("kraddr", client)

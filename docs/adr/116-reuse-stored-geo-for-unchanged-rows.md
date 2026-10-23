@@ -160,3 +160,21 @@ asset이 helper를 거치는지는 lint(`tests/lint/test_reverse_geocoding_asset
   (pass 0 예외는 모듈 경고 + `disabled` 계수; 진짜 버그는 pass 1이 다시 올린다), A LOW-7(asyncpg 오류는 SQLAlchemy가
   `DBAPIError`로 감싼다), B LOW-6(asset 결선 통합 검사 — 단위 검사가 결선을 대역으로 본다), B LOW-7·8(결과 절).
 
+## 개정 2026-10-23 — 선조회 동시성·적재 geo 일시 장애 재시도(브랜치 `fix/mcst-geo-stall`)
+
+- **배경.** MCST 첫 적재(13개 dataset, 104,301행)는 저장값이 없어 전량을 순차로 물었다 — 실측 초당 약 4.6건, 6시간 상한
+  초과. 같은 날 run 하나는 3.5시간 동안 이벤트 0건·프로세스 I/O 0으로 멈췄고(원인 미규명), 재현은 odroid 과부하 중
+  `/v2/regions/within-radius` 504 한 번으로 변환 전체가 끝났다.
+- **선조회.** 재사용 helper는 pass 1 전에 저장값 표에 없는 좌표를 `KOR_TRAVEL_MAP_REVERSE_GEOCODE_CONCURRENCY`(기본 2,
+  1이면 종전 순차)만큼 동시에 미리 묻는다(ADR-108 `PrefetchingReverseGeocoder` — MOIS 전용에서 공용으로). 캐시는 변환이 물을
+  좌표 전부를 담는다. 결과는 순차 경로와 같다(같은 6자리 좌표 키·`observe` 경로). 토큰이 없는 run 등 helper가 원래 변환으로
+  가는 경로는 여전히 순차다.
+- **재시도(소유자 승인 2026-10-23, ADR-109 열린 결정 6·ADR-108 §2 "건별 재시도 없음"을 이 범위에서 개정).** Dagster
+  `reverse_geocoder` resource의 geo client만 502/503/504·read timeout·연결 중 끊김에 총 3회(2초·4초 뒤)까지 다시 보낸다.
+  연결 실패(호스트 다운)·4xx·500은 다시 보내지 않는다. API 기동 검증·admin route·offline upload·현재 데이터셋 조회는
+  기본값 1(재시도 없음)이라 종전과 같다. 계수는 논리 요청당 한 번(최종 결과) — 빈 답 run 가드의 분모가 부풀지 않는다.
+- **멈춤 진단.** 적재 step(`run_tracked_feature_asset`·MCST asset)이 900초 동안 프로세스 I/O(`rchar+wchar`, 관측 자신의
+  읽기는 뺀다)가 그대로면 asyncio task 스택을 WARNING으로 한 번 남긴다. run은 건드리지 않는다.
+- **받아들인 위험.** 동시 geo 요청 상한이 run당 1에서 2로 오른다 — 큐 경로는 pool을 claim하지 않아 worker run 수만큼
+  곱해진다. 과부하 중 재시도는 서버 일을 최대 3배로 늘릴 수 있다(재시도는 행당 상한·선조회는 첫 소진 실패에서 멈춤).
+  odroid 부하가 문제가 되면 env로 동시성 1로 되돌린다.

@@ -1,3 +1,16 @@
+## 2026-10-23 — MCST 6시간 상한·멈춤: 브랜치 `fix/mcst-geo-stall`
+
+- prod: MCST run(06:02Z 시작)이 3.5시간 이벤트 0건. step 프로세스 생존, `/proc/<pid>/io` rchar 60초 불변, geo·DB 소켓
+  대기 요청 없음, Map DB 비-idle 세션 없음, py-spy main thread는 이벤트 루프 `select`에서 idle → 소유자 승인으로 취소.
+  py-spy는 coroutine 스택을 못 보여 멈춘 줄은 미규명.
+- 재현(같은 code-server 컨테이너, DB 쓰기 없음): 수집 14초(13 dataset·104,301행·실패 0). 변환은 순차 역지오코딩 초당
+  약 4.6건 → 6시간 초과 예상. 445초에 `/v2/regions/within-radius` 504 한 번으로 종료(odroid load 15~17, transport
+  code-server 134%·공용 PG 97%·root chrome).
+- 수정: 재사용 helper 선조회 동시성(기본 2), 적재 geo client 일시 장애 총 3회 재시도(opt-in, 논리 요청당 1회 계수),
+  적재 step I/O 정지 900초 시 task 스택 WARNING. 적대 리뷰 2회 — 반영: watchdog이 자기 읽기로 영원히 안 울리던 결함
+  (HIGH), 재시도 범위를 API까지 넓힌 것(opt-in으로 축소), 시도마다 계수(분모 부풀림), 캐시 크기, 로그 실패 격리.
+  받아들인 것: 동시 geo 부하 증가·재시도 증폭(env로 1), 토큰 없는 run은 순차. 리뷰가 든 등산로 seal jsonb 천장은 #1256(ADR-099 1단계, 행별 digest)로 이미 해소.
+
 ## 2026-10-23 — geo 부하 줄이기 0단계(ADR-116, T-GEOLOAD-00): 브랜치 `feat/skip-geocode-unchanged`
 
 - 소유자 결정(2026-10-23): ADR-108의 "payload가 같은 행은 지오코딩하지 않는다"를 비-MOIS 적재 전부로 넓힌다. prod는

@@ -177,9 +177,9 @@ class KorTravelMapSettings(BaseSettings):
             "kor-travel-geo TCP 연결 수립 timeout seconds(ADR-110 결정 3). geo는 다른 "
             "호스트(odroid)에 있어 그 호스트가 꺼지면 연결 거부(RST)가 아니라 무응답이다 — "
             "이 값이 없으면 호출마다 read 상한까지 기다린다. 기본 4초 — Linux는 SYN을 "
-            "약 1초·3초에 재전송하므로 2초면 첫 재전송 하나만 기다리고, geo 호출에는 재시도가 "
-            "없어 과부하 순간의 느린 수립 한 번이 MOIS run 전체를 실패시킨다(Manager compose가 "
-            "이 env를 넘기지 않으므로 기본값이 곧 운영 값이다). "
+            "약 1초·3초에 재전송하므로 2초면 첫 재전송 하나만 기다리고, 연결 실패는 "
+            "적재에서도 재시도하지 않아 과부하 순간의 느린 수립 한 번이 MOIS run 전체를 "
+            "실패시킨다(Manager compose가 이 env를 넘기지 않으므로 기본값이 곧 운영 값이다). "
             "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_GEO_CONNECT_TIMEOUT_SECONDS``."
         ),
     )
@@ -408,6 +408,17 @@ class KorTravelMapSettings(BaseSettings):
             "odroid(A55 ×4)에서 돌아 CPU가 좁으므로 기본값은 보수적으로 2다(ADR-110 결정 6, "
             "odroid geo CPU 보호). "
             "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY``."
+        ),
+    )
+    reverse_geocode_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description=(
+            "비-MOIS 역지오코딩 적재(ADR-116 재사용 경로)가 저장값이 없는 좌표를 kor-travel-geo에 "
+            "동시에 미리 묻는 상한. 1이면 선조회 없이 변환이 좌표를 하나씩 묻는다. geo가 odroid "
+            "(A55 ×4)에 있어 MOIS와 같은 보수적 기본값 2다 — 2026-10-23 MCST 첫 적재는 순차 조회로 "
+            "10만 행에 6시간을 넘겼다. env ``KOR_TRAVEL_MAP_REVERSE_GEOCODE_CONCURRENCY``."
         ),
     )
     mois_geocode_degraded_ratio: float = Field(
