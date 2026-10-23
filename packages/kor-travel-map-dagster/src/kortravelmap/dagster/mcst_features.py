@@ -285,10 +285,14 @@ async def feature_place_mcst_culture(
                 result = await run_feature_place_mcst_culture(
                     context,
                     memberships=memberships,
-                    on_memberships_completed=_on_memberships_completed if guard is not None else None,
+                    on_memberships_completed=(
+                        _on_memberships_completed if guard is not None else None
+                    ),
                 )
                 if guard is not None and completed_memberships != memberships:
-                    raise RuntimeError("MCST raw runner가 exact membership completion을 emit하지 않음")
+                    raise RuntimeError(
+                        "MCST raw runner가 exact membership completion을 emit하지 않음"
+                    )
             except Exception as exc:
                 if guard is not None:
                     for membership in memberships:
