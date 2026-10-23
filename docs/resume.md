@@ -1,14 +1,15 @@
 ## 2026-10-24 — frontend npm high 게이트(Next 16.4.3 보안 bump): 브랜치 `fix/frontend-npm-high-vulns`
 
 - `next` 16.3.8 → 16.4.3(critical RCE 2건·high DoS 1건 해소), lockfile은 Next family만 변경. 게이트 변경 없음.
+  덩달아 `scripts/verify-next-sharp.mjs` import 경로(Next 16.4 모듈 분리)와 #1355가 남긴 admin `types.ts` drift를 고쳤다.
   OpenAPI·migration 변화 없음. 배포 영향: Map admin UI 이미지 재빌드.
 - **다음 한 작업: draft PR CI green → 소유자 머지 판단 → admin UI 재배포. PinVi `apps/web`의 next 16.3.3도 같은 권고 대상(별도).**
+
 ## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
 
 - MCST 첫 적재 성공(#1357). watchdog 진척 신호에 geo·상류 요청·DB 문장 표시를 더하고 경고를 run당 한 번으로. migration·
   OpenAPI·설정 변화 없음. 배포 영향: Map Dagster code location.
 - **다음 한 작업: PR CI green → 머지·배포(등산로 run이 끝난 뒤) → 등산로 결과 journal.**
-||||||| parent of c16210af1 (fix(frontend): next 16.3.8 → 16.4.3 보안 bump (critical RCE 2·high DoS 1))
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
 

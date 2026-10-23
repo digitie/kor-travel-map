@@ -8,6 +8,14 @@
   (`sharp` 범위 ^0.35.5는 기존 override 0.35.5와 일치). 16.4 릴리스 노트의 제거 항목(실험 옵션)은 `next.config.ts`에서 미사용.
 - PinVi는 Map frontend 패키지를 소비하지 않는다(ADR-043, 소스 이식 주석만). 단 PinVi `apps/web`이 자체적으로 `next`
   16.3.3을 쓰고 있어 같은 권고에 걸린다 — PinVi 저장소에서 별도 처리 필요.
+- 게이트가 열리자 뒤 단계 두 개가 드러났다: (1) `verify:next-sharp`가 `optimizeImage is not a function` — Next 16.4가
+  `optimizeImage`·`getImageSize`를 `server/image-optimizer/{transform,get-image-size}.js`로 분리(runtime optimizer가 쓰는 같은
+  모듈)해 검사기 import를 옮겼다. (2) `gen:types:check` drift — #1355(transport service REST)가 `openapi.json`만 바꾸고 admin
+  `src/api/types.ts`를 재생성하지 않았다(audit 단계에서 job이 먼저 죽어 가려져 있었다). openapi-typescript 7.13.0으로 재생성.
+- n150 `node:22.23.1` 컨테이너, workflow 단계 그대로: npm ci·audit:high(0건)·verify-npm-tree·eslint config·lint·react-doctor
+  config/scan·next-sharp·vitest·e2e:list·gen:types:check·type-check·next build 모두 초록. dev 포함 audit(비차단)은 기존
+  dev 도구 8건(vite·zod·js-yaml·fast-uri·brace-expansion·@vitest/mocker) 그대로 — 배포 트리 밖.
+
 ## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
 
 - #1357 배포 뒤 MCST run `c0f91a7c` **성공**(12:04Z 시작, 9,634초): geo 호출 36,905건(reverse 35,852·region 1,053),
@@ -15,7 +23,6 @@
 - 그러나 watchdog이 15분마다 "I/O 없이 멈춤"을 남겼다(스택은 진행 중인 prefetch task). 원인: `/proc/self/io`의
   `rchar`/`wchar`는 소켓 송수신을 세지 않는다. 수정: geo 왕복·상류 요청·SQLAlchemy 문장이 `core.activity`를 표시하고
   watchdog이 그것도 진척으로 본다. 경고는 run당 한 번. 이어서 등산로 적재 시작.
-||||||| parent of c16210af1 (fix(frontend): next 16.3.8 → 16.4.3 보안 bump (critical RCE 2·high DoS 1))
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤: 브랜치 `fix/mcst-geo-stall`
 
