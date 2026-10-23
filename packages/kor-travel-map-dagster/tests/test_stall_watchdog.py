@@ -5,7 +5,9 @@ from __future__ import annotations
 import asyncio
 from typing import Any
 
-from kortravelmap.dagster.stall_watchdog import stall_watchdog
+import pytest
+
+from kortravelmap.dagster.stall_watchdog import process_io_bytes, stall_watchdog
 
 
 class _Log:
@@ -55,3 +57,22 @@ async def test_noop_without_proc_io() -> None:
         await asyncio.sleep(0.05)
 
     assert log.warnings == []
+
+
+def test_reading_proc_io_does_not_count_as_progress() -> None:
+    """관측이 관측값을 움직이면 감시는 영원히 울리지 않는다(적대 리뷰 — 호출마다 +106)."""
+    first = process_io_bytes()
+    if first is None:
+        pytest.skip("/proc/self/io 없음")
+    assert [process_io_bytes() for _ in range(5)] == [first] * 5
+
+
+async def test_log_failure_does_not_fail_the_block() -> None:
+    class _Broken:
+        def warning(self, msg: str, *args: Any) -> None:
+            raise RuntimeError("event log down")
+
+    async with stall_watchdog(
+        _Broken(), stall_after_seconds=0.02, poll_seconds=0.01, io_bytes=lambda: 1
+    ):
+        await asyncio.sleep(0.08)

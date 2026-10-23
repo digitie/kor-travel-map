@@ -279,9 +279,10 @@ async def transform_reusing_stored_geo(
     pending = [coord for key, coord in probe.coords.items() if key not in table]
     if prefetch_concurrency > 1 and pending:
         # 표에 없는 좌표만 — 저장값으로 답할 좌표를 geo에 묻지 않는다(ADR-116의 요점).
-        # 캐시가 pending을 다 담게 잡는다. 넘치면 앞서 받은 답이 밀려나 다시 묻는다.
+        # 캐시는 변환이 물을 **모든** 좌표를 담게 잡는다 — 세 번째 시도(표 없이)가 표의 좌표까지
+        # 실시간으로 물을 때 선조회한 답이 밀려나면 다시 하나씩 묻게 된다.
         prefetcher = PrefetchingReverseGeocoder(
-            live, concurrency=prefetch_concurrency, max_entries=len(pending) + 1024
+            live, concurrency=prefetch_concurrency, max_entries=len(probe.coords) + 1024
         )
         await prefetcher.prefetch(pending)
         remembered = prefetcher

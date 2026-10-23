@@ -34,15 +34,28 @@ _LOGGER = logging.getLogger(__name__)
 _MAX_TASKS: Final[int] = 50
 
 
+_SELF_READ_BYTES = 0
+"""``process_io_bytes``가 ``/proc/self/io``를 읽느라 늘린 ``rchar`` 누계."""
+
+
 def process_io_bytes() -> int | None:
-    """이 프로세스가 지금까지 읽고 쓴 바이트(소켓 포함). ``/proc/self/io``가 없으면 None."""
+    """이 프로세스가 지금까지 읽고 쓴 바이트(소켓 포함). ``/proc/self/io``가 없으면 None.
+
+    ``/proc/self/io``를 읽는 것 자체가 ``rchar``를 읽은 바이트만큼 늘린다(적대 리뷰 실측 — 호출마다
+    +106). 그대로 두면 감시가 매 poll마다 "움직였다"고 보고 영원히 울리지 않는다. 내용이 만들어지는
+    시점의 ``rchar``에는 **이전** 읽기까지만 들어 있으므로 이전 읽기의 누계를 뺀다.
+    """
+    global _SELF_READ_BYTES
     try:
-        with open("/proc/self/io", encoding="ascii") as handle:
-            fields = dict(line.split(":", 1) for line in handle if ":" in line)
+        with open("/proc/self/io", "rb") as handle:
+            raw = handle.read()
     except OSError:
         return None
+    already = _SELF_READ_BYTES
+    _SELF_READ_BYTES += len(raw)
+    fields = dict(line.split(b":", 1) for line in raw.splitlines() if b":" in line)
     try:
-        return int(fields["rchar"]) + int(fields["wchar"])
+        return int(fields[b"rchar"]) + int(fields[b"wchar"]) - already
     except (KeyError, ValueError):
         return None
 
@@ -90,11 +103,14 @@ async def stall_watchdog(
             idle = clock() - moved_at
             if not reported and idle >= stall_after_seconds:
                 reported = True
-                logger.warning(
-                    "적재 step이 %.0f초 동안 I/O 없이 멈춰 있다 — asyncio task 스택:\n%s",
-                    idle,
-                    _task_dump(asyncio.current_task()),
-                )
+                try:
+                    logger.warning(
+                        "적재 step이 %.0f초 동안 I/O 없이 멈춰 있다 — asyncio task 스택:\n%s",
+                        idle,
+                        _task_dump(asyncio.current_task()),
+                    )
+                except Exception:  # noqa: BLE001 — 진단이 적재 결과를 바꾸면 안 된다
+                    _LOGGER.exception("stall watchdog 로그 실패")
 
     watcher = asyncio.create_task(_watch(), name="kortravelmap-stall-watchdog")
     try:

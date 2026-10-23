@@ -19,6 +19,7 @@ from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError
 from kortravelmap.dto.geo_dataset import DatasetRef
 from kortravelmap.geocoding import (
+    GEO_LOAD_TRANSIENT_ATTEMPTS,
     GeoCallStats,
     KorTravelGeoRestClient,
     fetch_current_dataset,
@@ -1178,6 +1179,8 @@ def reverse_geocoder_resource(_context: InitResourceContext) -> Iterator[Any]:
             http,
             api_key=settings.kor_travel_geo_api_key,
             stats=stats,
+            # 적재는 수 시간 돈다 — 과부하 geo의 504 한 번이 run을 끝내지 않게 한다.
+            transient_attempts=GEO_LOAD_TRANSIENT_ATTEMPTS,
         )
         yield kor_travel_geo_reverse_geocoder(
             client,

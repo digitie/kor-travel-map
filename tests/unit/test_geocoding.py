@@ -23,6 +23,7 @@ from pydantic import SecretStr
 from kortravelmap.core.exceptions import GeoRequestError
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.geocoding import (
+    GeoCallStats,
     KorTravelGeoRestClient,
     cached_address_resolver,
     cached_reverse_geocoder,
@@ -1112,7 +1113,6 @@ def test_rest_client_regions_within_radius_invalid_response_raises(
     asyncio.run(_run())
 
 
-@pytest.mark.usefixtures("_no_geo_backoff")
 def test_rest_client_regions_within_radius_raises_on_http_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"detail": "maintenance"})
@@ -1833,7 +1833,9 @@ def test_rest_client_retries_gateway_timeout_then_succeeds() -> None:
 
     async def _run() -> None:
         async with _mock_client(handler) as http:
-            await _geo_client(http).regions_within_radius(lon=126.978, lat=37.5665)
+            await _geo_client(http, transient_attempts=3).regions_within_radius(
+                    lon=126.978, lat=37.5665
+                )
 
     asyncio.run(_run())
     assert seen == [504, 200]
@@ -1850,7 +1852,9 @@ def test_rest_client_gives_up_after_bounded_attempts() -> None:
     async def _run() -> None:
         async with _mock_client(handler) as http:
             with pytest.raises(GeoRequestError):
-                await _geo_client(http).regions_within_radius(lon=126.978, lat=37.5665)
+                await _geo_client(http, transient_attempts=3).regions_within_radius(
+                    lon=126.978, lat=37.5665
+                )
 
     asyncio.run(_run())
     assert len(calls) == 3
@@ -1874,7 +1878,9 @@ def test_rest_client_retries_read_timeout_but_not_connect_failure(
     async def _run() -> None:
         async with _mock_client(handler) as http:
             with pytest.raises(GeoRequestError):
-                await _geo_client(http).regions_within_radius(lon=126.978, lat=37.5665)
+                await _geo_client(http, transient_attempts=3).regions_within_radius(
+                    lon=126.978, lat=37.5665
+                )
 
     asyncio.run(_run())
     assert len(calls) == expected_calls
@@ -1886,6 +1892,48 @@ def test_rest_client_does_not_retry_client_errors() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         calls.append(1)
         return httpx.Response(500, json={"detail": "upstream broken"})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            with pytest.raises(GeoRequestError):
+                await _geo_client(http, transient_attempts=3).regions_within_radius(
+                    lon=126.978, lat=37.5665
+                )
+
+    asyncio.run(_run())
+    assert len(calls) == 1
+
+
+@pytest.mark.usefixtures("_no_geo_backoff")
+def test_rest_client_counts_a_retried_request_once() -> None:
+    """재시도를 시도마다 세면 빈 답 run 가드의 분모가 부푼다 — 논리 요청당 한 번만 센다."""
+    statuses = [504, 504, 200]
+    seen: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        status = statuses[len(seen)]
+        seen.append(status)
+        return httpx.Response(status, json=_OK_REGIONS if status == 200 else {"detail": "x"})
+
+    stats = GeoCallStats()
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = _geo_client(http, transient_attempts=3, stats=stats)
+            await client.regions_within_radius(lon=126.978, lat=37.5665)
+
+    asyncio.run(_run())
+    assert seen == [504, 504, 200]
+    assert stats.total_calls == 1
+
+
+def test_rest_client_default_does_not_retry() -> None:
+    """API 기동 검증·admin route는 프록시 상한 안에서 끝나야 한다 — 기본은 재시도 없음."""
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(504, json={"detail": "x"})
 
     async def _run() -> None:
         async with _mock_client(handler) as http:

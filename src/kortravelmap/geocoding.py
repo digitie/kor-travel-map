@@ -1366,8 +1366,8 @@ class GeoCallStats:
 
 #: 일시 장애로 보고 다시 보내는 geo 응답 상태 — 게이트웨이/과부하 계열만(``_post`` 참고).
 _GEO_TRANSIENT_STATUS: Final[frozenset[int]] = frozenset({502, 503, 504})
-#: 첫 시도를 포함한 총 시도 수.
-_GEO_TRANSIENT_ATTEMPTS: Final[int] = 3
+#: 적재 resource가 쓰는 총 시도 수(첫 시도 포함) — ``KorTravelGeoRestClient(transient_attempts=…)``.
+GEO_LOAD_TRANSIENT_ATTEMPTS: Final[int] = 3
 #: n번째 재시도 전 대기(초) = 이 값 × n.
 _GEO_TRANSIENT_BACKOFF_SECONDS: Final[float] = 2.0
 
@@ -1397,8 +1397,13 @@ class KorTravelGeoRestClient:
         api_key: SecretStr | None = None,
         require_auth: bool = True,
         stats: GeoCallStats | None = None,
+        transient_attempts: int = 1,
     ) -> None:
         """backend-to-backend public API key 인증을 생성 시점에 검증한다.
+
+        ``transient_attempts``는 일시 장애(게이트웨이 5xx·read timeout)에 보낼 총 시도 수다.
+        기본 1(재시도 없음) — API 기동 검증·대화형 admin route가 프록시 상한보다 오래 붙잡히지
+        않게, 재시도는 적재(Dagster ``reverse_geocoder`` resource)처럼 오래 도는 쪽만 켠다.
 
         key는 URL query가 아니라 ``X-KTG-API-Key`` header로만 전송한다. Map은 public
         endpoint만 호출하므로 geo admin trusted-proxy 권한을 요구하거나 위임하지 않는다.
@@ -1412,6 +1417,9 @@ class KorTravelGeoRestClient:
         # 기본값 None = **현행 동작과 같다.** 계측을 켜는 것은 주입한 쪽의 결정이고,
         # 그래야 호출자 여덟 곳 중 어느 것도 우연히 달라지지 않는다.
         self._stats = stats
+        if transient_attempts < 1:
+            raise ValueError("transient_attempts must be >= 1")
+        self._transient_attempts = transient_attempts
         if require_auth:
             self.preflight()
 
@@ -1496,28 +1504,43 @@ class KorTravelGeoRestClient:
         return {"X-KTG-API-Key": self._api_key.get_secret_value().strip()}
 
     async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
-        """일시 장애(게이트웨이 5xx·read timeout)는 짧게 몇 번 다시 보낸다.
+        """일시 장애(게이트웨이 5xx·read timeout)는 ``transient_attempts``까지 다시 보낸다.
 
         2026-10-23 MCST 재현에서 odroid 과부하로 ``/v2/regions/within-radius``가 504를 한 번
         냈고, 그 한 번이 10만 행 변환 전체를 끝냈다. 같은 좌표를 몇 초 뒤 다시 물으면 대개
         지나간다. 연결 실패(호스트 다운)는 다시 보내지 않는다 — 그때는 매 시도가 connect
         상한만큼 기다릴 뿐이다.
+
+        **계수는 논리 요청당 한 번이다**(최종 결과로). 재시도를 시도마다 세면 빈 답 run 가드
+        (ADR-109 결정 4)의 분모가 부풀어, 과부하 때 오히려 부분 장애가 비율 상한 아래로 숨는다.
         """
         import asyncio as _asyncio
 
-        for attempt in range(1, _GEO_TRANSIENT_ATTEMPTS + 1):
-            last = attempt == _GEO_TRANSIENT_ATTEMPTS
+        attempts = self._transient_attempts
+        for attempt in range(1, attempts + 1):
+            last = attempt == attempts
             try:
                 response = await self._post_once(path, json=json)
             except _TransientGeoRequestError:
                 if last:
+                    self._record(path, failed=True)
                     raise
+            except GeoRequestError:
+                self._record(path, failed=True)
+                raise
             else:
                 if last or response.status_code not in _GEO_TRANSIENT_STATUS:
+                    self._record(path, failed=False)
                     return response
                 await response.aclose()
             await _asyncio.sleep(_GEO_TRANSIENT_BACKOFF_SECONDS * attempt)
         raise AssertionError("unreachable")  # pragma: no cover
+
+    def _record(self, path: str, *, failed: bool) -> None:
+        # **던지기 전에 센다.** 실패한 왕복도 왕복이고, 실패한 run이야말로 그 수가
+        # 가장 필요한 run이다.
+        if self._stats is not None:
+            self._stats.record(self._endpoint(path), failed=failed)
 
     async def _post_once(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
         """transport 오류도 원본 request를 연결하지 않는 typed 예외로 바꾼다."""
@@ -1538,11 +1561,7 @@ class KorTravelGeoRestClient:
                 else GeoRequestError
             )
             sanitized = error_type(f"kor-travel-geo transport 실패: {type(exc).__name__}")
-        # **던지기 전에 센다.** 실패한 왕복도 왕복이고, 실패한 run이야말로 그 수가
-        # 가장 필요한 run이다. except 블록 **밖**이므로 키가 든 원본 예외의
-        # ``__context__``가 생기지 않는다(위 주석의 계약을 그대로 지킨다).
-        if self._stats is not None:
-            self._stats.record(self._endpoint(path), failed=sanitized is not None)
+        # except 블록 **밖**에서 던지므로 키가 든 원본 예외의 ``__context__``가 생기지 않는다.
         if sanitized is not None:
             raise sanitized
         assert response is not None
