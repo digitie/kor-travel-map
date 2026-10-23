@@ -1,6 +1,6 @@
 # ADR-116 — 비-MOIS 적재도 payload·좌표·geo 토큰이 그대로인 행은 역지오코딩하지 않고 저장값을 다시 쓴다
 
-- 상태: proposed (2026-10-23, 소유자 결정 "geo 부하 줄이기 계획 0단계")
+- 상태: **accepted** (2026-10-24 소유자 수용 — MCST 첫 적재 실측 재사용 45,930행·geocoded 53,276행; 제안 2026-10-23, 소유자 결정 "geo 부하 줄이기 계획 0단계")
 - 날짜: 2026-10-23
 - 결정자: human(방향 결정), Claude(설계·구현)
 - 관계: **ADR-108** §1(MOIS의 "payload가 같은 행은 지오코딩하지 않는다"를 비-MOIS로 넓힌다 — MOIS 경로는 바꾸지 않는다),
@@ -178,3 +178,6 @@ asset이 helper를 거치는지는 lint(`tests/lint/test_reverse_geocoding_asset
 - **받아들인 위험.** 동시 geo 요청 상한이 run당 1에서 2로 오른다 — 큐 경로는 pool을 claim하지 않아 worker run 수만큼
   곱해진다. 과부하 중 재시도는 서버 일을 최대 3배로 늘릴 수 있다(재시도는 행당 상한·선조회는 첫 소진 실패에서 멈춤).
   odroid 부하가 문제가 되면 env로 동시성 1로 되돌린다.
+- **멈춤 진단 정정(2026-10-24).** 첫 판은 파일 I/O(`rchar+wchar`)만 진척으로 봤는데 소켓 `recv`/`send`는 거기 잡히지
+  않는다 — 배포 뒤 MCST run(성공, 2시간 40분)이 geo를 수만 번 부르는 동안 15분마다 오탐했다. 진척 신호에
+  `kortravelmap.core.activity` 표시(geo 왕복·상류 요청·SQLAlchemy 문장)를 더하고, 경고는 run당 한 번으로 줄였다.

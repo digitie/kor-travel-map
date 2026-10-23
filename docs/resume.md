@@ -10,6 +10,21 @@
 - 기존 집중27/새 실제PG10 PASS, 변경 Ruff/strict mypy PASS. [범위·실패 규약·검증 한계](reports/2026-10-24-curation-fence-reentry.md).
 - T-CWRITE-01 전체 기준선 및02~09는 미완이다. 다음은 두 독립 리뷰·CI·실제 HTTP/UI 수용 후 후보/winner와 scope gate의 작은 코드 단위를 이어간다. 운영 미배포.
 
+## 2026-10-24 — 수집 PR #1358의 Next 보안 CI 선행 복구
+
+- Next/직접env/ESLint 플러그인16.4.1, 배포 audit 취약점0. 기존 OpenAPI admin 타입 산출물
+  drift를 공식 generator로 정합화했다. 수집/화면/API 구현/DB 제품 소스는 변경하지 않았다.
+- admin395/marker4·타입/lint·Sharp실변환·production build PASS.
+- 다음: 두 독립 리뷰 → 정확 CI 통과 후 CI 복구 PR을 먼저 머지하고
+  #1358이 최신 main을 통합해 CI를 재실행한다. 운영 미배포.
+- [범위와 검증 기록](reports/2026-10-24-next-security-gate.md).
+
+## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
+
+- MCST 첫 적재 성공(#1357). watchdog 진척 신호에 geo·상류 요청·DB 문장 표시를 더하고 경고를 run당 한 번으로. migration·
+  OpenAPI·설정 변화 없음. 배포 영향: Map Dagster code location.
+- **다음 한 작업: PR CI green → 머지·배포(등산로 run이 끝난 뒤) → 등산로 결과 journal.**
+
 ## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
 
 - 비-MOIS 역지오코딩 적재 선조회 동시성(env `KOR_TRAVEL_MAP_REVERSE_GEOCODE_CONCURRENCY`, 기본 2), 적재 geo client 일시
