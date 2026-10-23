@@ -419,7 +419,7 @@ _HistoryApi = tuple[TestClient, list[httpx.Request], dict[str, Any]]
 
 
 @pytest.fixture
-def history_api(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Iterator[_HistoryApi]:
+def history_api(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> _HistoryApi:
     """route를 가짜 store + MockTransport transport로 돌린다. ``state["handler"]``를 바꿔 쓴다."""
     from kortravelmap.api.routers import service_transport
 
@@ -438,7 +438,7 @@ def history_api(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> Iterator
 
     monkeypatch.setattr(service_transport, "fetch_price_history", _patched)
     client.app.dependency_overrides[get_state_store] = _FakeStore  # type: ignore[attr-defined]
-    yield client, seen, state
+    return client, seen, state
 
 
 def test_route_reads_two_pages_with_the_opaque_cursor(history_api: _HistoryApi) -> None:

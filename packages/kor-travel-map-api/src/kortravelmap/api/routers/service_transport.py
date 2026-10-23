@@ -255,8 +255,8 @@ class PriceHistoryPoint(BaseModel):
     observed_at: AwareDatetime = Field(description="오피넷 갱신시각(없으면 처음 본 수집 시각).")
     collected_at: AwareDatetime | None = Field(
         description=(
-            "원천이 행마다 주지 않아 현재 항상 null이다(응답 생성 시각으로 채우지 않는다). 페이지의 "
-            "수집 시각은 history.source_collected_at이다."
+            "원천이 행마다 주지 않아 현재 항상 null이다(응답 생성 시각으로 채우지 "
+            "않는다). 페이지의 수집 시각은 history.source_collected_at이다."
         )
     )
 
@@ -269,12 +269,13 @@ class PriceHistoryBlock(BaseModel):
         description=(
             "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 "
             "없음) — 이 둘은 transport를 부르지 않았다. upstream_not_found(transport 404 — 없는 "
-            "주유소·옛 버전·토큰·접속 주소)·upstream_unsupported(501)·cursor_expired(transport 409 — "
-            "수집 revision이 바뀌었거나 cursor가 만료됐다. 이미 받은 페이지를 버리고 cursor 없이 "
+            "주유소·옛 버전·토큰·접속 주소)·upstream_unsupported(501)·"
+            "cursor_expired(transport 409 — 수집 revision이 바뀌었거나 cursor가 만료됐다. "
+            "이미 받은 페이지를 버리고 cursor 없이 "
             "처음부터 다시 읽는다)·request_rejected(transport 422 — 조회 창 366일 초과·미래 until·"
             "변조되었거나 다른 조건의 cursor)·upstream_timeout(timeout)·upstream_unavailable(5xx·"
-            "연결 실패)·upstream_rejected(그 밖의 비-200)·upstream_contract(응답 모양이 다름 — 다른 "
-            "주유소의 station_key 포함)."
+            "연결 실패)·upstream_rejected(그 밖의 비-200)·upstream_contract(응답 모양이 "
+            "다름 — 다른 주유소의 station_key 포함)."
         )
     )
     generated_at: AwareDatetime | None = Field(description="transport가 이 페이지를 만든 시각.")

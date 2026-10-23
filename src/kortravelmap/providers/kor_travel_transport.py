@@ -647,8 +647,8 @@ class TransportFuelPriceHistoryPoint:
     """가격 이력 한 행. ``price=None``은 그때 판매하지 않음이다(null은 그대로 둔다).
 
     transport T4 행은 ``product_code``·``observed_at``·``price``만 준다. ``provider_updated_at``·
-    ``collected_at``은 원천이 행마다 주지 않으므로 ``None``이다 — 응답 생성 시각 등으로 채우지 않는다
-    (값이 오면 엄격히 읽는다).
+    ``collected_at``은 원천이 행마다 주지 않으므로 ``None``이다 — 응답 생성 시각 등으로 채우지
+    않는다(값이 오면 엄격히 읽는다).
     """
 
     product_code: str
@@ -662,7 +662,8 @@ class TransportFuelPriceHistoryPoint:
 class TransportFuelPriceHistory:
     """``GET …/fuel-stations/{station_key}/price-history`` 한 페이지(transport T4).
 
-    ``items``는 ``observed_at`` 내림차순이다. ``has_more``이면 ``next_cursor``로 다음 페이지를 읽는다.
+    ``items``는 ``observed_at`` 내림차순이다. ``has_more``이면 ``next_cursor``로 다음 페이지를
+    읽는다.
     ``source_status``는 ``ok``/``stale``(stale이어도 기존 이력은 200으로 온다).
     """
 

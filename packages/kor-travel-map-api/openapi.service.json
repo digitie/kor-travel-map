@@ -5103,15 +5103,33 @@
                 "type": "null"
               }
             ],
+            "description": "transport가 이 페이지를 만든 시각.",
             "title": "Generated At"
           },
+          "has_more": {
+            "description": "다음 페이지가 있다(next_cursor로 읽는다).",
+            "title": "Has More",
+            "type": "boolean"
+          },
           "items": {
-            "description": "observed_at 내림차순.",
+            "description": "observed_at 내림차순, 유종 합계 최대 limit행.",
             "items": {
               "$ref": "#/components/schemas/PriceHistoryPoint"
             },
             "title": "Items",
             "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "다음 페이지 cursor(불투명, transport 발급·첫 페이지부터 15분 유효). 같은 product_code·since·until과 함께 cursor 인자로 보낸다. meta.page.next_cursor와 같다.",
+            "title": "Next Cursor"
           },
           "reason": {
             "anyOf": [
@@ -5120,6 +5138,10 @@
                   "disabled",
                   "not_configured",
                   "upstream_not_found",
+                  "upstream_unsupported",
+                  "cursor_expired",
+                  "request_rejected",
+                  "upstream_timeout",
                   "upstream_unavailable",
                   "upstream_rejected",
                   "upstream_contract"
@@ -5130,8 +5152,38 @@
                 "type": "null"
               }
             ],
-            "description": "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 없음)·upstream_not_found(transport 404 — 옛 버전·토큰·접속 주소)·upstream_unavailable(5xx·연결·timeout)·upstream_rejected(그 밖의 4xx)·upstream_contract(응답 모양이 다름).",
+            "description": "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 없음) — 이 둘은 transport를 부르지 않았다. upstream_not_found(transport 404 — 없는 주유소·옛 버전·토큰·접속 주소)·upstream_unsupported(501)·cursor_expired(transport 409 — 수집 revision이 바뀌었거나 cursor가 만료됐다. 이미 받은 페이지를 버리고 cursor 없이 처음부터 다시 읽는다)·request_rejected(transport 422 — 조회 창 366일 초과·미래 until·변조되었거나 다른 조건의 cursor)·upstream_timeout(timeout)·upstream_unavailable(5xx·연결 실패)·upstream_rejected(그 밖의 비-200)·upstream_contract(응답 모양이 다름 — 다른 주유소의 station_key 포함).",
             "title": "Reason"
+          },
+          "source_collected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이 페이지 이력의 실제 수집 시각 중 가장 이른 값(빈 범위면 transport 마지막 성공 수집).",
+            "title": "Source Collected At"
+          },
+          "source_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "stale",
+                  "failed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "transport 유가 수집 상태. stale이어도 기존 이력은 준다. unavailable이면 null.",
+            "title": "Source Status"
           },
           "status": {
             "enum": [
@@ -5142,6 +5194,7 @@
             "type": "string"
           },
           "truncated": {
+            "description": "호환용 — has_more와 같다(deprecated, has_more·next_cursor를 쓴다).",
             "title": "Truncated",
             "type": "boolean"
           }
@@ -5150,6 +5203,10 @@
           "status",
           "reason",
           "generated_at",
+          "source_collected_at",
+          "source_status",
+          "has_more",
+          "next_cursor",
           "truncated",
           "items"
         ],
@@ -5160,10 +5217,17 @@
         "additionalProperties": false,
         "properties": {
           "collected_at": {
-            "description": "같은 가격을 마지막으로 다시 확인한 수집 시각.",
-            "format": "date-time",
-            "title": "Collected At",
-            "type": "string"
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "원천이 행마다 주지 않아 현재 항상 null이다(응답 생성 시각으로 채우지 않는다). 페이지의 수집 시각은 history.source_collected_at이다.",
+            "title": "Collected At"
           },
           "observed_at": {
             "description": "오피넷 갱신시각(없으면 처음 본 수집 시각).",
@@ -5180,7 +5244,7 @@
                 "type": "null"
               }
             ],
-            "description": "원/L. null이면 그때 판매하지 않았다.",
+            "description": "원/L. null이면 그때 판매하지 않았다(그대로 전한다).",
             "title": "Price"
           },
           "product_code": {
@@ -5212,6 +5276,7 @@
                 "type": "null"
               }
             ],
+            "description": "원천이 행마다 주지 않아 현재 항상 null이다(다른 시각으로 채우지 않는다).",
             "title": "Provider Updated At"
           }
         },
@@ -9888,7 +9953,7 @@
             }
           },
           {
-            "description": "이 시각 이상(observed_at).",
+            "description": "이 시각 이상(observed_at). 없으면 until(또는 지금) 30일 전.",
             "in": "query",
             "name": "since",
             "required": false,
@@ -9902,12 +9967,12 @@
                   "type": "null"
                 }
               ],
-              "description": "이 시각 이상(observed_at).",
+              "description": "이 시각 이상(observed_at). 없으면 until(또는 지금) 30일 전.",
               "title": "Since"
             }
           },
           {
-            "description": "이 시각 이하(observed_at).",
+            "description": "이 시각 이하(observed_at). 없으면 지금. 미래·366일 넘는 창은 거부된다.",
             "in": "query",
             "name": "until",
             "required": false,
@@ -9921,22 +9986,42 @@
                   "type": "null"
                 }
               ],
-              "description": "이 시각 이하(observed_at).",
+              "description": "이 시각 이하(observed_at). 없으면 지금. 미래·366일 넘는 창은 거부된다.",
               "title": "Until"
             }
           },
           {
-            "description": "유종마다의 최대 행 수.",
+            "description": "한 페이지의 전체 행 수(유종 합계).",
             "in": "query",
             "name": "limit",
             "required": false,
             "schema": {
               "default": 200,
-              "description": "유종마다의 최대 행 수.",
+              "description": "한 페이지의 전체 행 수(유종 합계).",
               "maximum": 1000,
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "이전 응답의 history.next_cursor(불투명). 같은 product_code·since·until로 보낸다. history.reason=cursor_expired면 받은 페이지를 버리고 cursor 없이 다시 시작한다.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 4096,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "이전 응답의 history.next_cursor(불투명). 같은 product_code·since·until로 보낸다. history.reason=cursor_expired면 받은 페이지를 버리고 cursor 없이 다시 시작한다.",
+              "title": "Cursor"
             }
           }
         ],
