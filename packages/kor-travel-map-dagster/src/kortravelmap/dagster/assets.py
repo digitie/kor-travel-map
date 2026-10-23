@@ -2184,23 +2184,30 @@ async def _transform_reusing_geo(
 ) -> list[Any]:
     """provider 변환을 저장값 재사용과 함께 돌린다(ADR-116) — 역지오코딩 asset의 공통 자리.
 
-    호출 모양은 ``transform(records, **kwargs)``와 같다(``reverse_geocoder=``는 호출자가 그대로 넘긴다). run의
-    현재 geo 토큰이 있으면 payload·좌표·스탬프가 그대로인 행은 geo를 부르지 않고 저장 주소 열을 답으로 쓴다
-    (:func:`kortravelmap.dagster.geo_reuse.transform_reusing_stored_geo`). 토큰이 없거나(비교 기준이 없다)
-    역지오코더가 없거나 client가 재사용 조회를 모르면 원래 호출 그대로다.
+    호출 모양은 ``transform(records, **kwargs)``와 같다(``reverse_geocoder=``는 호출자가
+    그대로 넘긴다). run의 현재 geo 토큰이 있으면 payload·좌표·스탬프가 그대로인 행은 geo를
+    부르지 않고 저장 주소 열을 답으로 쓴다
+    (:func:`kortravelmap.dagster.geo_reuse.transform_reusing_stored_geo`). 토큰이 없거나
+    (비교 기준이 없다) 역지오코더가 없거나 client가 재사용 조회를 모르면 원래 호출 그대로다.
 
-    현재 토큰은 **첫 지오코딩 전에** 읽는다(ADR-109 결정 2 — :class:`_TokenFirstReverseGeocoder`와 같은 순서).
-    ``transform``은 같은 입력에 몇 번 불려도 같은 결과를 내야 한다 — 그래서 ``records``를 목록으로 고정한다.
+    현재 토큰은 **첫 지오코딩 전에** 읽는다(ADR-109 결정 2 —
+    :class:`_TokenFirstReverseGeocoder`와 같은 순서). ``transform``은 같은 입력에 몇 번
+    불려도 같은 결과를 내야 한다 — 그래서 ``records``를 목록으로 고정한다.
     """
     live = cast("ReverseGeocoder | None", kwargs.pop("reverse_geocoder", None))
     rows = records if isinstance(records, Sequence) else list(records)
-    if live is None:
-        return await transform(rows, reverse_geocoder=None, **kwargs)
-    current = await _current_geo_dataset(context)
-    token = current.data_token if current is not None else None
     client = _resource_object(context, "kor_travel_map_client", default=None)
     read = getattr(client, "read_reusable_geo_columns", None)
-    if token is None or not callable(read):
+    if (
+        live is None
+        or not callable(read)
+        # 키 미배선 경고는 적재 wrapper가 run에 한 번 낸다(_geo_run_inputs) — batch마다 내지 않는다.
+        or _resource_object(context, "kor_travel_geo_dataset", default=None) is None
+    ):
+        return await transform(rows, reverse_geocoder=live, **kwargs)
+    current = await _current_geo_dataset(context)
+    token = current.data_token if current is not None else None
+    if token is None:
         return await transform(rows, reverse_geocoder=live, **kwargs)
 
     async def _lookup(bundles: Sequence[Any]) -> Mapping[str, Mapping[str, Any]]:

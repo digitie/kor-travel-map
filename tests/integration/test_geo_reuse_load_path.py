@@ -2,12 +2,12 @@
 
 두 부분이다.
 
-1. **조회 술어**(``read_reusable_geo_columns``, 테스트마다 롤백되는 ``migrated_session``) — 그대로인 행은
-   저장 주소 열과 함께 나오고, payload·좌표·토큰·override 중 하나라도 다르면 빠진다.
+1. **조회 술어**(``read_reusable_geo_columns``, 테스트마다 롤백되는 ``migrated_session``) — 그대로인
+   행은 저장 주소 열과 함께 나오고, payload·좌표·토큰·override 중 하나라도 다르면 빠진다.
 2. **실제 client 경로**(Dagster와 같은 연결 1개 엔진, ADR-113 spool) — 두 번째 적재가 stream 안에서
-   조회하고(쓰기 transaction 밖), 바뀌지 않은 행은 geo를 부르지 않으며, 적재 결과(``row_revision``·스탬프·
-   주소 열)는 전량 지오코딩한 적재와 같다. 바뀐 payload·옛 토큰 행은 geo를 부른다. 큐 경로처럼 executor
-   transaction에 결합한 client에서도 같다.
+   조회하고(쓰기 transaction 밖), 바뀌지 않은 행은 geo를 부르지 않으며, 적재
+   결과(``row_revision``·스탬프· 주소 열)는 전량 지오코딩한 적재와 같다. 바뀐 payload·옛 토큰 행은
+   geo를 부른다. 큐 경로처럼 executor transaction에 결합한 client에서도 같다.
 """
 
 from __future__ import annotations
@@ -61,7 +61,10 @@ _TRUNCATE_SQL = (
 
 
 class _Reverse:
-    """좌표의 함수인 결정적 답(같은 토큰이면 같은 좌표에 같은 답). ``generation``은 geo 데이터셋이다."""
+    """좌표의 함수인 결정적 답(같은 토큰이면 같은 좌표에 같은 답).
+
+    ``generation``은 geo 데이터셋이다.
+    """
 
     def __init__(self, generation: str = "A") -> None:
         self.generation = generation
@@ -122,6 +125,7 @@ async def _feature_id(session: AsyncSession, bundle: FeatureBundle) -> str:
     return identity.feature_id
 
 
+# 
 # -- 1. 조회 술어 ------------------------------------------------------------------------------
 
 
@@ -163,10 +167,12 @@ async def test_a_changed_payload_is_not_reusable(migrated_session: AsyncSession)
 async def test_a_changed_coordinate_is_not_reusable(migrated_session: AsyncSession) -> None:
     bundle = await _loaded(migrated_session, "coord")
     # payload key는 그대로 두고 좌표만 바꾼다 — 좌표 조건이 따로 결박돼 있는지 본다.
+    original = bundle.feature.coord
+    assert original is not None
     moved = bundle.model_copy(
         update={
             "feature": bundle.feature.model_copy(
-                update={"coord": Coordinate(lon=bundle.feature.coord.lon, lat=37.6)}  # type: ignore[union-attr]
+                update={"coord": Coordinate(lon=original.lon, lat=37.6)}
             )
         }
     )
@@ -212,6 +218,7 @@ async def test_a_row_never_loaded_is_not_reusable(migrated_session: AsyncSession
     ) == {}
 
 
+# 
 # -- 2. 실제 client 경로(ADR-113 spool, 연결 1개) ------------------------------------------------
 
 
@@ -262,7 +269,10 @@ async def _load_run(
     ref: DatasetRef,
     stats: GeoCallStats,
 ) -> list[FeatureBundle]:
-    """asset의 snapshot 경로 모양 — batch마다 stream 안에서 변환(재사용)하고, 쓰기는 spool 뒤 한 번."""
+    """asset의 snapshot 경로 모양.
+
+    batch마다 stream 안에서 변환(재사용)하고, 쓰기는 spool 뒤 한 번이다.
+    """
     token = ref.data_token
     assert token is not None
     produced: list[FeatureBundle] = []

@@ -266,9 +266,9 @@ def coord_cache_key(
 ) -> tuple[str, str]:
     """역지오코딩 캐시 키 — 좌표를 ``precision`` 자리로 양자화한 ``(lon, lat)`` 문자열.
 
-    provider가 감싸는 :func:`cached_reverse_geocoder`와 :class:`PrefetchingReverseGeocoder`가 같은 좌표를 한 번만
-    묻는 기준이다. 저장값 재사용(ADR-116)도 이 키로 "같은 좌표"를 정한다 — 키가 갈리면 provider 캐시가 묶은 두 행을
-    재사용 판정이 따로 보게 된다.
+    provider가 감싸는 :func:`cached_reverse_geocoder`와 :class:`PrefetchingReverseGeocoder`가
+    같은 좌표를 한 번만 묻는 기준이다. 저장값 재사용(ADR-116)도 이 키로 "같은 좌표"를 정한다 —
+    키가 갈리면 provider 캐시가 묶은 두 행을 재사용 판정이 따로 보게 된다.
     """
     return (f"{coord.lon:.{precision}f}", f"{coord.lat:.{precision}f}")
 
@@ -1240,7 +1240,7 @@ endpoint 키(``reverse``·``regions_within_radius``)와 달리 이것은 역지�
 """
 
 
-_REUSE_KEYS: Final[tuple[str, ...]] = ("skipped", "geocoded", "fallback")
+_REUSE_KEYS: Final[tuple[str, ...]] = ("skipped", "geocoded", "fallback", "disabled")
 
 
 @dataclass
@@ -1289,11 +1289,16 @@ class GeoCallStats:
     """
 
     reuse: Counter[str] = field(default_factory=Counter)
-    """저장값 재사용 계수(ADR-116) — **행 단위**, 키 ``skipped``·``geocoded``·``fallback``.
+    """저장값 재사용 계수(ADR-116) — **행 단위**.
 
-    ``skipped`` = 저장 주소 열을 역지오코더의 답으로 받은 행(geo 왕복 없음), ``geocoded`` = 실제 geo 답을 받은 좌표 있는
-    행, ``fallback`` = DB가 재사용 가능이라 했는데 공유 좌표·사후 확인·안전망 때문에 geo를 부른 행(``geocoded``의
-    부분집합). 실제 HTTP 수는 ``calls``다(provider 캐시가 같은 좌표를 묶으므로 행 수와 다르다).
+    - ``skipped``: 저장 주소 열을 역지오코더의 답으로 받은 행(geo 왕복 없음).
+    - ``geocoded``: 실제 geo 답을 받은 좌표 있는 행.
+    - ``fallback``: DB가 재사용 가능이라 했는데 공유 좌표·사후 확인 때문에 geo를 부른 행
+      (``geocoded``의 부분집합).
+    - ``disabled``: 안전망(변환이 행 좌표 밖을 물었거나 빈 답을 견디지 못했다)이 재사용을 끈
+      변환의 좌표 있는 행. 조회조차 하지 않았으므로 "재사용할 것이 없었다"와 구별된다.
+
+    실제 HTTP 수는 ``calls``다(provider 캐시가 같은 좌표를 묶으므로 행 수와 다르다).
     """
 
     def record(self, endpoint: str, *, failed: bool) -> None:

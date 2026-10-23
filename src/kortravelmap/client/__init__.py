@@ -1230,9 +1230,10 @@ class AsyncKorTravelMapClient:
     ) -> dict[str, Mapping[str, Any]]:
         """payload·좌표·스탬프가 그대로인 행의 저장 주소 유도 열(ADR-116) — 읽기 전용.
 
-        적재가 역지오코딩 **전에** 묻는다. 여기 든 행(``source_record_key``)은 적재해도 주소 열이 쓰이지
-        않으므로, 호출자가 저장값을 역지오코더의 답으로 돌려줘 geo 왕복을 건너뛴다. fence를 잡지 않는 짧은
-        읽기 transaction이다(ADR-113 받기 단계·큐 결합 transaction 모두 안전).
+        적재가 역지오코딩 **전에** 묻는다. 여기 든 행(``source_record_key``)은 적재해도 주소
+        열이 쓰이지 않으므로, 호출자가 저장값을 역지오코더의 답으로 돌려줘 geo 왕복을 건너뛴다.
+        fence를 잡지 않는 짧은 읽기 transaction이다(ADR-113 받기 단계·큐 결합 transaction 모두
+        안전).
         """
         async with self._session_factory() as session, session.begin():
             return await repo_read_reusable_geo_columns(
