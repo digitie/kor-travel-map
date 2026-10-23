@@ -52,6 +52,7 @@ class _FakeStore:
         self.locked = locked
         self.swap_error = swap_error
         self.swapped: list[tuple[str, int, bool]] = []
+        self.retired: list[str] = []
 
     @asynccontextmanager
     async def load_lock(self, _dataset: str, *, ttl_seconds: int) -> AsyncIterator[bool]:
@@ -79,7 +80,8 @@ class _FakeStore:
         )
         return SwapResult(meta=meta, previous_generation=None, baseline=None)
 
-    async def retire_other_versions(self) -> int:
+    async def retire_other_versions(self, dataset: str) -> int:
+        self.retired.append(dataset)
         return 0
 
 
@@ -109,6 +111,8 @@ async def test_success_reports_the_earliest_source_collection() -> None:
     assert store.swapped == [(TRANSPORT_STATE_SPECS[0].dataset.name, 2, False)]
     assert metadata["count"] == 2
     assert metadata["source_collected_at"] == "2026-10-23T00:30:00+00:00"
+    # 옛 스키마 버전 정리는 자기 데이터셋만(ADR-114 D2).
+    assert store.retired == [TRANSPORT_STATE_SPECS[0].dataset.name]
 
 
 async def test_a_held_lock_skips_without_fetching() -> None:
