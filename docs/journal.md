@@ -13,6 +13,16 @@
   받아들인 것은 ADR-116 끝 두 절. 주요 반영: 재시도 답 기억, 옛 저장 jsonb fallback, DTO key 대신 hash 비교, 안전망
   `disabled`·조회 실패 `lookup_failed` 계수, 조회 savepoint 격리, `MATERIALIZED` 입력, 재사용 뒤 현재 geo 데이터셋 재관측
   (run 도중 릴리스), helper 우회 lint.
+- 검사(n150 일회용 python:3.13 컨테이너, CI 설치 레시피): ruff·lint-imports·mypy --strict(core·dagster) 초록. unit+lint+dagster
+  4,174 passed — 실패 29건은 main `e9d0e53c` 기준선과 같은 환경 실패(docker runtime 23·sealed tree 2·tick window 3·
+  smoke settings 1). 통합 66 passed(새 `test_geo_reuse_load_path` 8건 — 조회 술어 6·실제 client spool(연결 1개, Dagster runtime
+  login)·큐 결합 client — + 기존 geo 릴리스·spool fence·스탬프·dagster ETL). 처음 돌렸을 때 통합이 빨갛던 원인은 검사 자료가
+  같은 좌표를 나눠 쓴 것(저장 원문 주소가 갈려 설계대로 재사용 제외)과 bundle 비교에 생성 시각 필드가 섞인 것이었다.
+- 변이 검사 17개 중 16개 빨강(술어 4·안전망·답 기억·토큰·evidence·옛 저장값·사후 확인·검증·재관측·lint). 공유 좌표 두 변이
+  (M5·M6)는 처음에 초록이었다 — 사후 확인이 재시도로 덮어 결과가 같았다. 변환 횟수를 세게 고쳐 빨강. pass 1 evidence
+  사후 확인(M17)은 그것을 만드는 provider가 없어 대상 검사 없음(잠재 방어).
+- prod 읽기 전용 `EXPLAIN (ANALYZE, BUFFERS)`(`plan_cache_mode=force_generic_plan`, 주차장 1,000행 입력): `resolved`
+  MATERIALIZED에서 출발해 features·heads·records·stamps 모두 PK 인덱스 nested loop, 재사용 질의 부분 약 80 ms.
 - 원장: acceptance §T-GR-01·T-GR-02를 도구로 아카이브(체크박스 111건 보존, 216,928 → 208,855 bytes) 뒤 §T-GEOLOAD-00 추가.
 
 ## 2026-10-23 — ADR-114 1단계: transport 현재 상태 Valkey·service REST: 브랜치 `feat/adr114-valkey-transport`
