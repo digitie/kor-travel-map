@@ -350,6 +350,11 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/transport/rest-areas",
         "/v1/service/transport/rest-areas/{feature_id}",
         "/v1/service/transport/status",
+        # ADR-114 2단계 — Valkey weather 현재·예보·세 구간 요약 read.
+        "/v1/service/weather/locations",
+        "/v1/service/weather/locations/{feature_id}",
+        "/v1/service/weather/nearest",
+        "/v1/service/weather/status",
     }
     assert set(service["components"]["securitySchemes"]) == {
         "OpsScope",

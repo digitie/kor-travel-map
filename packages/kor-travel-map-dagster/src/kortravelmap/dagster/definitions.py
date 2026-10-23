@@ -51,6 +51,7 @@ from .schedule_overrides import load_schedule_cron_overrides
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
 from .sensors import FEATURE_UPDATE_JOBS, FEATURE_UPDATE_SENSORS
 from .transport_state import TRANSPORT_STATE_JOBS, TRANSPORT_STATE_SCHEDULES
+from .weather_state import WEATHER_STATE_JOBS, WEATHER_STATE_SCHEDULES
 
 REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "kor_travel_map_client",
@@ -201,6 +202,7 @@ defs = Definitions(
             *RUN_HEARTBEAT_JOBS,
             *FEATURE_OPERATION_COMPLETION_JOBS,
             *TRANSPORT_STATE_JOBS,
+            *WEATHER_STATE_JOBS,
         ],
     ),
     schedules=[
@@ -210,6 +212,7 @@ defs = Definitions(
         *MANUAL_PROVIDER_DEDUP_SCHEDULES,
         *FILE_REGISTRY_SCAN_SCHEDULES,
         *TRANSPORT_STATE_SCHEDULES,
+        *WEATHER_STATE_SCHEDULES,
     ],
     sensors=[
         *FEATURE_UPDATE_SENSORS,

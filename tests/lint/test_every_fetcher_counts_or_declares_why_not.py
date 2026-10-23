@@ -116,6 +116,12 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_standard_special_streets",
         "fetch_standard_tourist_attractions",
         "fetch_visitkorea_festival_events",
+        # ADR-114 2단계 — weather Map export(W1·W2·W3·W5)를 Valkey 상태로 받는 fetcher. 시도마다
+        # `_weather_request_once`가 센다.
+        "fetch_weather_current",
+        "fetch_weather_daily_summaries",
+        "fetch_weather_forecasts",
+        "fetch_weather_locations",
         # fetcher 이름은 아니지만 **같은 종류의 upstream 다운로드**라 게이트 안에
         # 둔다. MOIS Phase A는 slug마다 LOCALDATA 파일을 받는다 — 접두사로 유도하면
         # 이것이 통째로 게이트 밖이었다(2·3차 리뷰).
@@ -171,7 +177,9 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 그것은 면제할 이유가 아니다 — 면제는 '적다'가 아니라 '셀 수 없다'일 때다.
 #: 2026-10-01 27 → 24. 날씨 진입점 셋(KREX 휴게소 기상·산림청 산악기상·산불위험예보)이
 #: ADR-105로 사라졌다 — 셋 다 완전 계측이었다.
-_EXPECTED_FULLY_COUNTED: int = 25
+#: 2026-10-24 25 → 29. ADR-114 2단계 weather 상태 fetcher 넷이 들어왔다 — 전부 **완전 계측**이다
+#: (시도마다 `note_upstream_request()`, 410 재시작의 재요청까지).
+_EXPECTED_FULLY_COUNTED: int = 29
 
 
 def _module_trees() -> dict[str, ast.Module]:
@@ -312,7 +320,8 @@ def test_the_universe_cannot_shrink_without_editing_this_file() -> None:
     # 2026-10-01 31 → 29: 날씨 진입점 셋이 ADR-105로 사라졌다(32 → 29개).
     # 2026-10-02 29 → 27: OpiNet 둘·krex 셋·krairport 하나·돌발 snapshot 헬퍼가 transport
     # fetcher 다섯으로 바뀌었다(ADR-106).
-    assert len(_EXPECTED_FETCHERS) >= 27, (
+    # 2026-10-24 27 → 31: ADR-114 2단계 weather 상태 fetcher 넷.
+    assert len(_EXPECTED_FETCHERS) >= 31, (
         f"진입점 목록이 {len(_EXPECTED_FETCHERS)}개로 줄었다. 진짜로 사라진 "
         "진입점이면 이 하한도 함께 낮춰라 — 그 편집이 리뷰에 보여야 한다."
     )

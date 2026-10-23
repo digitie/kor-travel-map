@@ -389,7 +389,8 @@ OpenAPI·weather 저장소의 실제 HTTP 예시(`docs/examples/map-service/`)�
 - GEO는 `weather.locations` 하나다. 근처·영역 검색은 그 GEO로 위치를 찾고 다른 데이터셋은 같은 id로 `HMGET`한다
   (1단계 휴게소 유가와 같은 읽기 결합). 데이터셋마다 세대가 따로 돈다 — 예보 export가 죽어도 위치·관측은 갱신된다.
 - 한 집합에 같은 위치가 두 번 오면(묶음 경계·재시도) 위치 단위로 합친다: 관측은 (provider, metric) 첫 행, 예보는
-  (provider) 첫 묶음, 요약은 (date, slot) 첫 행을 남기고 버린 수를 `meta.duplicates`에 적는다. 위치 W1에 없는 id가
+  (provider) 첫 묶음, 요약은 (date, slot) 첫 행을 남기고 버린 수를 op metadata `row_duplicates`에 적는다(세대 `meta.duplicates`는
+  1단계처럼 같은 위치 id가 두 번 온 수다 — 위치 단위로 묶은 뒤라 0이다). 위치 W1에 없는 id가
   W2/W3/W5에 와도 그대로 담는다(카탈로그 갱신 순서가 다를 수 있다) — 읽기는 W1에 있는 위치만 찾을 수 있다.
 - 묶음의 `target_at`과 metric 배열 길이가 다르거나, `target_at`이 오름차순이 아니거나, 묶음의 style이 요청 style과
   다르거나, 시각에 timezone이 없으면 계약 위반으로 적재를 실패시킨다(Valkey에 쓰지 않는다).

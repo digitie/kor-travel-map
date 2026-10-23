@@ -251,6 +251,9 @@ class GenerationMeta:
     loaded_at: datetime
     run_id: str | None
     guard_override: bool
+    source_status: str | None = None
+    """원천이 알린 집합 상태(weather ``ok``·``stale``, ADR-114 2단계 W4). 1단계 세대와 원천이
+    알리지 않는 데이터셋은 ``None``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -324,6 +327,7 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
             loaded_at=loaded_at,
             run_id=run_id or None,
             guard_override=fields.get("guard_override") == "1",
+            source_status=fields.get("source_status") or None,
         )
     except (KeyError, ValueError) as exc:
         raise StateStoreUnavailable(
@@ -644,6 +648,7 @@ class ValkeyStateStore:
         loaded_at: datetime,
         run_id: str | None = None,
         allow_shrink: bool = False,
+        source_status: str | None = None,
     ) -> SwapResult:
         """새 세대를 쓰고 포인터를 원자적으로 바꾼다(ADR-114 D3).
 
@@ -687,6 +692,7 @@ class ValkeyStateStore:
                 "loaded_at": _iso(loaded_at),
                 "run_id": run_id or "",
                 "guard_override": "1" if allow_shrink else "0",
+                "source_status": source_status or "",
             }
             async with (
                 _unavailable_on_error("메타 쓰기"),
