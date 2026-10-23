@@ -1001,6 +1001,12 @@ def geo_run_metadata(
             current_dataset.data_token if current_dataset is not None else None,
             observed,
         )
+    # 저장값 재사용 계수(ADR-116) — run 누적이다(같은 resource 계수를 가리킨다).
+    reuse = (
+        {f"geo_reuse_{name}": count for name, count in geo_stats.reuse.items()}
+        if geo_stats is not None
+        else {}
+    )
     return {
         "geo_applied_reverse": geo_applied.reverse,
         "geo_applied_geocode": geo_applied.geocode,
@@ -1010,6 +1016,7 @@ def geo_run_metadata(
             else "none"
         ),
         "geo_dataset_mismatch": mismatch,
+        **reuse,
     }
 
 
