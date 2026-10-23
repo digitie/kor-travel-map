@@ -13,8 +13,9 @@ PinVi 같은 service 소비자가 주유소(최신 유가)·휴게소(휴게소 
 - Valkey 미설정·연결 실패는 이 표면만 503 ``TRANSPORT_STATE_UNAVAILABLE``, 아직 적재 전이면 503
   ``TRANSPORT_STATE_NOT_LOADED``, cursor의 세대가 사라졌으면 409
   ``TRANSPORT_STATE_GENERATION_EXPIRED``.
-- 가격 추이는 transport에서 요청 시 읽어 전한다. transport가 응답하지 않으면 현재가는 주고 추이만
-  ``unavailable``이다(결정 4).
+- 가격 추이는 transport T4에서 요청 시 한 페이지씩 읽어 전한다. transport가 응답하지 않거나 계약이
+  어긋나면 현재가는 주고 추이만 ``unavailable``(이유)이다(결정 4). transport의 불투명 cursor를
+  그대로 주고받으며, transport 409는 ``reason=cursor_expired``(처음부터 다시)다.
 """
 
 from __future__ import annotations
@@ -247,10 +248,17 @@ class PriceHistoryPoint(BaseModel):
     product_key: str
     product_code: str
     product_name: str | None
-    price: float | None = Field(description="원/L. null이면 그때 판매하지 않았다.")
-    provider_updated_at: AwareDatetime | None
+    price: float | None = Field(description="원/L. null이면 그때 판매하지 않았다(그대로 전한다).")
+    provider_updated_at: AwareDatetime | None = Field(
+        description="원천이 행마다 주지 않아 현재 항상 null이다(다른 시각으로 채우지 않는다)."
+    )
     observed_at: AwareDatetime = Field(description="오피넷 갱신시각(없으면 처음 본 수집 시각).")
-    collected_at: AwareDatetime = Field(description="같은 가격을 마지막으로 다시 확인한 수집 시각.")
+    collected_at: AwareDatetime | None = Field(
+        description=(
+            "원천이 행마다 주지 않아 현재 항상 null이다(응답 생성 시각으로 채우지 않는다). 페이지의 "
+            "수집 시각은 history.source_collected_at이다."
+        )
+    )
 
 
 class PriceHistoryBlock(BaseModel):
@@ -260,15 +268,37 @@ class PriceHistoryBlock(BaseModel):
     reason: PriceHistoryUnavailableReason | None = Field(
         description=(
             "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 "
-            "없음)·"
-            "upstream_not_found(transport 404 — 옛 버전·토큰·접속 "
-            "주소)·upstream_unavailable(5xx·연결·"
-            "timeout)·upstream_rejected(그 밖의 4xx)·upstream_contract(응답 모양이 다름)."
+            "없음) — 이 둘은 transport를 부르지 않았다. upstream_not_found(transport 404 — 없는 "
+            "주유소·옛 버전·토큰·접속 주소)·upstream_unsupported(501)·cursor_expired(transport 409 — "
+            "수집 revision이 바뀌었거나 cursor가 만료됐다. 이미 받은 페이지를 버리고 cursor 없이 "
+            "처음부터 다시 읽는다)·request_rejected(transport 422 — 조회 창 366일 초과·미래 until·"
+            "변조되었거나 다른 조건의 cursor)·upstream_timeout(timeout)·upstream_unavailable(5xx·"
+            "연결 실패)·upstream_rejected(그 밖의 비-200)·upstream_contract(응답 모양이 다름 — 다른 "
+            "주유소의 station_key 포함)."
         )
     )
-    generated_at: AwareDatetime | None
-    truncated: bool
-    items: list[PriceHistoryPoint] = Field(description="observed_at 내림차순.")
+    generated_at: AwareDatetime | None = Field(description="transport가 이 페이지를 만든 시각.")
+    source_collected_at: AwareDatetime | None = Field(
+        description=(
+            "이 페이지 이력의 실제 수집 시각 중 가장 이른 값(빈 범위면 transport 마지막 성공 수집)."
+        )
+    )
+    source_status: Literal["ok", "stale", "failed"] | None = Field(
+        description="transport 유가 수집 상태. stale이어도 기존 이력은 준다. unavailable이면 null."
+    )
+    has_more: bool = Field(description="다음 페이지가 있다(next_cursor로 읽는다).")
+    next_cursor: str | None = Field(
+        description=(
+            "다음 페이지 cursor(불투명, transport 발급·첫 페이지부터 15분 유효). 같은 product_code·"
+            "since·until과 함께 cursor 인자로 보낸다. meta.page.next_cursor와 같다."
+        )
+    )
+    truncated: bool = Field(
+        description="호환용 — has_more와 같다(deprecated, has_more·next_cursor를 쓴다)."
+    )
+    items: list[PriceHistoryPoint] = Field(
+        description="observed_at 내림차순, 유종 합계 최대 limit행."
+    )
 
 
 class FuelStationPriceHistoryData(BaseModel):
@@ -696,9 +726,28 @@ async def get_fuel_station_price_history(
             min_length=1, max_length=20, description="오피넷 유종 코드(B027·D047·B034·C004·K015)."
         ),
     ] = None,
-    since: Annotated[AwareDatetime | None, Query(description="이 시각 이상(observed_at).")] = None,
-    until: Annotated[AwareDatetime | None, Query(description="이 시각 이하(observed_at).")] = None,
-    limit: Annotated[int, Query(ge=1, le=1000, description="유종마다의 최대 행 수.")] = 200,
+    since: Annotated[
+        AwareDatetime | None,
+        Query(description="이 시각 이상(observed_at). 없으면 until(또는 지금) 30일 전."),
+    ] = None,
+    until: Annotated[
+        AwareDatetime | None,
+        Query(description="이 시각 이하(observed_at). 없으면 지금. 미래·366일 넘는 창은 거부된다."),
+    ] = None,
+    limit: Annotated[
+        int, Query(ge=1, le=1000, description="한 페이지의 전체 행 수(유종 합계).")
+    ] = 200,
+    cursor: Annotated[
+        str | None,
+        Query(
+            min_length=1,
+            max_length=4096,
+            description=(
+                "이전 응답의 history.next_cursor(불투명). 같은 product_code·since·until로 보낸다. "
+                "history.reason=cursor_expired면 받은 페이지를 버리고 cursor 없이 다시 시작한다."
+            ),
+        ),
+    ] = None,
 ) -> FuelStationPriceHistoryResponse:
     started_at = perf_counter()
     if since is not None and until is not None and since > until:
@@ -708,7 +757,7 @@ async def get_fuel_station_price_history(
         KorTravelMapSettings(),
         item.natural_key,
         params=price_history_params(
-            product_code=product_code, since=since, until=until, limit=limit
+            product_code=product_code, since=since, until=until, limit=limit, cursor=cursor
         ),
     )
     if outcome.history is not None:
@@ -732,7 +781,11 @@ async def get_fuel_station_price_history(
             status="available",
             reason=None,
             generated_at=outcome.history.generated_at,
-            truncated=outcome.history.truncated,
+            source_collected_at=outcome.history.source_collected_at,
+            source_status=outcome.history.source_status,
+            has_more=outcome.history.has_more,
+            next_cursor=outcome.history.next_cursor,
+            truncated=outcome.history.has_more,
             items=points,
         )
     else:
@@ -740,6 +793,10 @@ async def get_fuel_station_price_history(
             status="unavailable",
             reason=outcome.reason,
             generated_at=None,
+            source_collected_at=None,
+            source_status=None,
+            has_more=False,
+            next_cursor=None,
             truncated=False,
             items=[],
         )
@@ -751,7 +808,9 @@ async def get_fuel_station_price_history(
             history=history,
             freshness=_freshness(DATASET_FUEL_STATIONS, meta),
         ),
-        meta=make_meta(request, started_at=started_at),
+        meta=make_meta(
+            request, started_at=started_at, page_size=limit, next_cursor=history.next_cursor
+        ),
     )
 
 
