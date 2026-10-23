@@ -73,8 +73,10 @@ class _CountingReverse:
         return _answer(coord, generation=self.generation)
 
 
-def _transform(points: Sequence[_Point]) -> Any:
+def _transform(points: Sequence[_Point], calls: list[int] | None = None) -> Any:
     async def run(geocoder: ReverseGeocoder) -> list[FeatureBundle]:
+        if calls is not None:
+            calls.append(1)
         return await knps_point_records_to_bundles(
             points,  # type: ignore[arg-type]
             dataset_key=_DATASET,
@@ -201,11 +203,17 @@ async def test_a_shared_coordinate_with_a_changed_neighbour_geocodes_both() -> N
     live = _CountingReverse()
     stats = GeoCallStats()
 
+    transforms: list[int] = []
     await transform_reusing_stored_geo(
-        _transform(after), live=live, lookup=_Lookup(_stored_from(previous)), stats=stats
+        _transform(after, transforms),
+        live=live,
+        lookup=_Lookup(_stored_from(previous)),
+        stats=stats,
     )
 
     assert live.calls == [("128.1", "38.1")]  # provider 캐시가 같은 좌표를 한 번으로 묶는다
+    # 표가 처음부터 그 좌표를 빼야 한다 — 사후 확인에 기대 다시 변환하면 안 된다(pass 0 + pass 1).
+    assert len(transforms) == 2
     assert dict(stats.reuse) == {"skipped": 0, "geocoded": 2, "fallback": 1}
 
 
@@ -216,9 +224,13 @@ async def test_a_shared_coordinate_with_different_stored_values_geocodes() -> No
     stored[second] = {**stored[second], "road_name_code": "999999999999"}
     live = _CountingReverse()
 
-    await transform_reusing_stored_geo(_transform(points), live=live, lookup=_Lookup(stored))
+    transforms: list[int] = []
+    await transform_reusing_stored_geo(
+        _transform(points, transforms), live=live, lookup=_Lookup(stored)
+    )
 
     assert live.calls == [("128.1", "38.1")]
+    assert len(transforms) == 2  # 표에서 처음부터 빠진다(사후 확인 재시도 없음)
     assert first != second
 
 
