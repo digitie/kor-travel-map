@@ -183,6 +183,7 @@ __all__ = [
     "ReverseGeocoder",
     "cached_address_resolver",
     "cached_reverse_geocoder",
+    "coord_cache_key",
     # kor-travel-geo REST v2 응답 structural Protocol
     "KraddrPoint",
     "KraddrAddressV2",
@@ -260,6 +261,18 @@ _DEFAULT_COORD_PRECISION = 6
 """좌표 캐시 키 소수 자릿수 (1e-6° ≈ 0.11m — 같은 시설 묶기 충분)."""
 
 
+def coord_cache_key(
+    coord: Coordinate, *, precision: int = _DEFAULT_COORD_PRECISION
+) -> tuple[str, str]:
+    """역지오코딩 캐시 키 — 좌표를 ``precision`` 자리로 양자화한 ``(lon, lat)`` 문자열.
+
+    provider가 감싸는 :func:`cached_reverse_geocoder`와 :class:`PrefetchingReverseGeocoder`가
+    같은 좌표를 한 번만 묻는 기준이다. 저장값 재사용(ADR-116)도 이 키로 "같은 좌표"를 정한다 —
+    키가 갈리면 provider 캐시가 묶은 두 행을 재사용 판정이 따로 보게 된다.
+    """
+    return (f"{coord.lon:.{precision}f}", f"{coord.lat:.{precision}f}")
+
+
 def cached_reverse_geocoder(
     geocoder: ReverseGeocoder,
     *,
@@ -281,10 +294,7 @@ class _CachedObservedReverseGeocoder:
         self._cache: dict[tuple[str, str], ReverseGeocodeObservation] = {}
 
     def _key(self, coord: Coordinate) -> tuple[str, str]:
-        return (
-            f"{coord.lon:.{self._precision}f}",
-            f"{coord.lat:.{self._precision}f}",
-        )
+        return coord_cache_key(coord, precision=self._precision)
 
     async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
         key = self._key(coord)
@@ -407,10 +417,7 @@ class PrefetchingReverseGeocoder:
         return sum(self._recent_empty) / len(self._recent_empty)
 
     def _key(self, coord: Coordinate) -> tuple[str, str]:
-        return (
-            f"{coord.lon:.{self._precision}f}",
-            f"{coord.lat:.{self._precision}f}",
-        )
+        return coord_cache_key(coord, precision=self._precision)
 
     def _remember(self, key: tuple[str, str], observation: ReverseGeocodeObservation) -> None:
         self._cache[key] = observation
@@ -1233,6 +1240,15 @@ endpoint 키(``reverse``·``regions_within_radius``)와 달리 이것은 역지�
 """
 
 
+_REUSE_KEYS: Final[tuple[str, ...]] = (
+    "skipped",
+    "geocoded",
+    "fallback",
+    "disabled",
+    "lookup_failed",
+)
+
+
 @dataclass
 class GeoCallStats:
     """geo 경계를 **몇 번 넘었는지**를 endpoint별로 센다.
@@ -1278,6 +1294,22 @@ class GeoCallStats:
     run-scoped 현재 토큰과 다른 값이 있으면 그 run 도중 릴리스가 바뀐 것이다(경고 + 메타만).
     """
 
+    reuse: Counter[str] = field(default_factory=Counter)
+    """저장값 재사용 계수(ADR-116) — **행 단위**.
+
+    - ``skipped``: 저장 주소 열을 역지오코더의 답으로 받은 행(geo 왕복 없음).
+    - ``geocoded``: 실제 geo 답을 받은 좌표 있는 행.
+    - ``fallback``: DB가 재사용 가능이라 했는데 공유 좌표·사후 확인 때문에 geo를 부른 행
+      (``geocoded``의 부분집합).
+    - ``disabled``: 안전망(변환이 행 좌표 밖을 물었거나 빈 답을 견디지 못했다)이 재사용을 끈
+      변환의 좌표 있는 행. 조회조차 하지 않았으므로 "재사용할 것이 없었다"와 구별된다.
+    - ``lookup_failed``: 재사용 조회가 DB 오류로 실패해 전량 지오코딩한 변환의 좌표 있는 행.
+
+    ``fallback``·``disabled``·``lookup_failed``는 모두 ``geocoded``의 부분집합이다(겹쳐 센다).
+
+    실제 HTTP 수는 ``calls``다(provider 캐시가 같은 좌표를 묶으므로 행 수와 다르다).
+    """
+
     def record(self, endpoint: str, *, failed: bool) -> None:
         self.calls[endpoint] += 1
         if failed:
@@ -1285,6 +1317,11 @@ class GeoCallStats:
 
     def record_empty(self, endpoint: str) -> None:
         self.empty[endpoint] += 1
+
+    def record_reuse(self, *, skipped: int, geocoded: int, fallback: int) -> None:
+        self.reuse["skipped"] += skipped
+        self.reuse["geocoded"] += geocoded
+        self.reuse["fallback"] += fallback
 
     def observe_dataset(self, dataset: DatasetRef | None) -> None:
         if dataset is not None and dataset.data_token is not None:
@@ -1305,19 +1342,26 @@ class GeoCallStats:
         metadata["geo_calls_total"] = self.total_calls
         metadata["geo_failures_total"] = sum(self.failures.values())
         metadata["geo_empty_total"] = sum(self.empty.values())
+        if self.reuse:
+            metadata.update({f"geo_reuse_{name}": self.reuse[name] for name in _REUSE_KEYS})
         return metadata
 
     def summary(self) -> str:
         """한 줄 요약. **0건도 말한다** — 침묵과 0을 구별할 수 있어야 한다."""
 
+        reuse = (
+            " · 저장값 재사용 " + " ".join(f"{name}={self.reuse[name]}" for name in _REUSE_KEYS)
+            if self.reuse
+            else ""
+        )
         if not self.calls:
-            return "geo 경계 호출 0건"
+            return "geo 경계 호출 0건" + reuse
         parts = [
             f"{name}={self.calls[name]}"
             + (f"(실패 {self.failures[name]})" if self.failures[name] else "")
             for name in sorted(self.calls)
         ]
-        return f"geo 경계 호출 {self.total_calls}건 — " + " ".join(parts)
+        return f"geo 경계 호출 {self.total_calls}건 — " + " ".join(parts) + reuse
 
 
 class KorTravelGeoRestClient:

@@ -15,6 +15,9 @@
   전량 재계획은 생기지 않았다(ADR-110 "사실 갱신 (2026-10-15)" 절 5항 (ㄹ)). **소유자 결정(2026-10-15)**: geo `data_token`이 '없음'에서 첫
   토큰으로 바뀌는 것(n150 geo는 토큰이 없었고 odroid dump 복원 뒤 처음 생겼다)은 **기준선**이지 재계획 사유가 아니다 —
   감지 규칙(결정 5)에 이 분기를 더하는 것은 T-GR-04/05 구현 몫이다.
+- amended by: **ADR-116**(proposed, 2026-10-23) — 컨텍스트 1의 "비-MOIS 변환기는 payload 변경과 무관하게 reverse를
+  부른다"를 고친다: payload·좌표가 그대로이고 스탬프가 `called`·현재 토큰인 행은 저장 주소 열을 재사용한다. 스탬프·stale
+  분기·빈 답 가드(결정 1·4)는 그대로이고, 스탬프가 없거나 옛 토큰인 행은 여전히 geo를 부른다.
 - 코딩용 상세(표·판정 표·run_key·테스트 목록): [`docs/etl/address-geocoding.md`](../etl/address-geocoding.md)
 - 운영: [`docs/runbooks/geo-release-regeocode.md`](../runbooks/geo-release-regeocode.md)
 

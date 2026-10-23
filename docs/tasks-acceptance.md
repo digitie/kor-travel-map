@@ -41,6 +41,8 @@
 > | `T-GR-04` (완료) | [archive/tasks-acceptance-gr-04.md](archive/tasks-acceptance-gr-04.md) | 약 10 KB |
 > | `T-GR-05` (완료) | [archive/tasks-acceptance-gr-05.md](archive/tasks-acceptance-gr-05.md) | 약 7 KB |
 > | `T-GR-06` (완료) | [archive/tasks-acceptance-gr-06.md](archive/tasks-acceptance-gr-06.md) | 약 2 KB |
+> | `T-GR-01` (완료) | [archive/tasks-acceptance-gr-01.md](archive/tasks-acceptance-gr-01.md) | 약 5 KB |
+> | `T-GR-02` (완료) | [archive/tasks-acceptance-gr-02.md](archive/tasks-acceptance-gr-02.md) | 약 5 KB |
 
 ## T-CWRITE-01 — 현재 writer·trigger·성능 기준선
 
@@ -2610,80 +2612,11 @@ run이 호출마다 10 s를 소모한다. 규모 S.
 
 ## T-GR-01
 
-ADR-109 결정 1·2. 수정 파일: `alembic/versions/407_feature_geocode_stamps.py`(직전 head `406_feature_write_gate`, ADR-111),
-`alembic/head-schema.sql`, `src/kortravelmap/dto/geo_dataset.py`(신규 `DatasetRef`·`GeoApplied`),
-`infra/models.py`(`FeatureGeocodeStampRow`), `infra/feature_geocode_stamp_repo.py`(신규), `src/kortravelmap/geocoding.py`
-(`dataset_version()`, `_RestReverseV2Response.dataset` :935, `GeoCallStats.observed_data_tokens`·`empty[endpoint]`
-:1112·`ObservedReverseGeocoder` 기록 :1405), tests. 의존: T-GR-00-LEDGER(원장 분리; 코드 의존 없음 — geo ADR-069 배포와
-병렬 가능, `dataset` 없는 응답 허용; 열린 결정 비의존). 규모 S. timeout 재시도 옵션(열린 결정 6)은 T-GR-05로 옮겼다.
-
-- `alembic/head-schema.sql` 재생성이 byte 일치하고 마이그레이션 lint 4종(`test_migrations_keep_the_schema_owner_role`·
-  `test_routine_ddl_runs_under_its_owner_role`·`test_receipt_head_check_covers_the_graph_head`·
-  `test_migration_revision_ids_fit_the_version_column`)이 초록이다 — 407은 `SET ROLE ktm_feature_schema_owner` 아래
-  DDL·`OWNER TO`·RESET ROLE 없음·receipt head CHECK에 자기 revision.
-- 스탬프 삽입: 어느 outcome이든 `geo_version_token`/`geo_data_token` NULL은 NOT NULL이 거부한다(NULL 스탬프는
-  만들지 않는다 — ADR-109 결정 1).
-- `dataset` 필드가 없는 옛 응답 픽스처 → `None`, 있는 픽스처 → `DatasetRef`; `dataset_version()`은
-  `POST /v2/dataset/version` 본문 `{}`를 보낸다(효과 테스트).
-- `GeoCallStats.empty['reverse']`: 200 응답에 `bjd_code` None인 reverse 2건·정상 3건·전송 실패 1건 픽스처 →
-  `calls=6, failures=1, empty=2`(빈 답은 `failures`에 들지 않는다).
-- `is_stale`/`select_stale_feature_ids` 5분기(스탬프 없음·`not_called`·`geocoded` 다른 토큰·다른 토큰·같은 토큰)와
-  "현재 토큰 None → stale 0건"이 통합 테스트로 고정된다. `decide_outcome`은 `address-geocoding.md` §2 판정 표 전 행.
-- `lint-imports` 초록(`DatasetRef`·`GeoApplied`를 `infra`가 import해도 `infra → geocoding` 역행 없음).
-- 이 task에서 provider 모듈·`Address`·`ReverseGeocoder` diff 0.
-- 구현 메모(2026-10-15, 브랜치 `feat/t-gr-01-geocode-stamps`): 설계 §2의 시그니처와 다르게 쓴 것 — (1) `decide_outcome(
-  geo_applied, *, has_coord, provider_code_present, legal_dong_code_present, evidence)`: 판정 표 ④의 "법정동코드가 생겼다"를
-  입력으로 받아야 해서 `legal_dong_code_present`를 더했고, MOIS evidence는 `AdminEvidence`를 바꾸지 않으려고 `dto/geo_dataset.py`의
-  `GeoAttemptEvidence{reverse_attempted, geocode_obtained_code}`로 받는다(T-GR-03이 `AdminEvidence`와 geocode 분기
-  결과에서 만든다 — '받았다'가 '시도했다'를 함의하므로 `geocode_attempted`는 판정에 필요 없어 두지 않는다). (2) `upsert_stamps(session, *, current, outcomes)`:
-  run 토큰을 인자로 받아 None·`data_token` None이면 0건(쓰지도 덮지도 않음)을 함수가 강제한다. (3) `coverage()`는
-  `excluded_by_skip`이 408의 계획 표에 기대므로 T-GR-04로 미룬다. (3b) `select_stale_feature_ids`에 keyset 커서 `after`(`feature_id > after`)를 더했다(T-GR-04 페이지용). (4) 토큰 형식 CHECK(`dv1-`/`dd1-` + 32 hex)를
-  407에 더했다 — 틀린 값이 비교 키가 되면 모든 행이 영구 stale이다. (5) 407은 forward-only다(`alembic/env.py`가 모든
-  downgrade를 해석 전에 거부한다 — ADR-021·102). 왕복 확인은 scratch DB에서 손으로 했다(406까지 올림 → head →
-  역 SQL로 표·CHECK 원복 + `alembic_version`=406 → 다시 head, PR 본문).
-  (6) 응답 `dataset`의 형식 위반은 선택 파싱이라 None으로 삼키고(지오코딩 응답 자체는 쓴다), `dataset_version()`의
-  형식 위반은 typed 오류로 올린다(현재 토큰은 엄격). (7) `GeoCallStats.empty`는 endpoint 단위다 — reverse가 비고 region
-  fallback이 채우면 `empty['reverse']` 1건이고 fallback은 `regions_within_radius`로 따로 센다(T-GR-03 run 가드가 어느
-  분자를 쓸지 정한다). 소유자 결정(2026-10-15, '없음 → 첫 data_token = 기준선')은 ADR-109 결정 5에 기록했다(구현 T-GR-04/05).
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-gr-01.md](archive/tasks-acceptance-gr-01.md)로 옮겼다(2026-10-23, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-GR-02
 
-ADR-109 결정 2·3. 수정 파일: `packages/kor-travel-map-dagster/src/kortravelmap/dagster/resources.py`
-(`kor_travel_geo_client_resource`·`kor_travel_geo_dataset_resource`·`fetch_current_dataset`), `definitions.py`
-(`DEFAULT_RESOURCE_DEFINITIONS`), `feature_update_runner.py`(`_COMMON_RESOURCE_KEYS`), `assets.py`(각 feature load
-asset이 `load_feature_bundles`에 `geo_applied=` 전달; `required_resource_keys`), `offline_uploads.py`,
-`src/kortravelmap/cli/main.py`, `dagster/etl.py`(공통 chunk 루프: 전달 + 빈 답 비율 가드 — 분모 `GeoCallStats.calls['reverse']`·
-분자 `empty['reverse']` chunk 간 누적, 상수·비율 계산은 MOIS와 공유), tests. 의존: T-GR-01(+ 아래 "(T-GR-03 뒤)"
-표시 항목은 스탬프 쓰기·CTE 조건이 T-GR-03에 있어 PR-1에서 셋을 함께 판정한다 — 단독으로는 스탬프 표가 비어
-항진명제다). 규모 S.
-
-- (T-GR-03 뒤) geo 실패(HTTP 예외·`available=false`)를 주입하면 `current_dataset=None`으로 run이 **계속**되고 경고 로그가
-  정확히 1건이며, unchanged 집합이 토큰 도입 전 집합과 **동일**하다(같은 픽스처로 두 번 실행해 집합 비교).
-- 성공 시 asset·큐 runner·offline upload·CLI 네 경로가 같은 `DatasetRef` 값을 받는다(팩토리 1개 — 단위 테스트가
-  호출 지점을 센다).
-- 응답 `dataset`이 run-scoped 값과 다른 픽스처 → op 메타 `geo_dataset_mismatch=true` + WARNING 1건.
-- (T-GR-03 뒤) `feature_price_transport_*`·`feature_notice_transport_highway_incidents` 적재 뒤 스탬프 0건, `coverage` 분모 불변.
-- AST lint: asset이 `_reverse_geocoder(context)`를 쓰면 `geo_applied.reverse=True`, `address_resolver=`를 넘기면
-  `geocode=True`를 넘긴다 — 현재 asset은 전부 `geocode=False`(`assets.py`에 `address_resolver=` 0건,
-  `address-geocoding.md` §1 호출자 표)이고 offline upload·CLI만 `geocode=True`. `assets.py`에서 하나를 일부러
-  False로 바꿔 빨간 것을 확인한다.
-- (T-GR-03 뒤) 빈 답 비율 가드: 좌표 있는 50건 중 빈 답(200, `bjd_code` None) 3건(> 5%) 픽스처 → run FAILURE·그 chunk
-  스탬프 0건; 좌표 없는 1,000건을 섞어도 분모(`calls['reverse']`)가 불변이다. **같은 조건의 MOIS run은 FAILURE가
-  아니다**(ADR-108 §3a-2 degraded 그대로 — 회귀 테스트; 상수·비율 계산 함수는 한 곳).
-- 구현 메모(2026-10-16, 브랜치 `feat/t-gr-02-geo-dataset-resource`, #1326 위에 쌓음): (1) 팩토리 `fetch_current_dataset(client)`는
-  `kortravelmap.geocoding`에 있다 — CLI가 `kortravelmap.dagster`를 import할 수 없어서다. Dagster resource
-  `kor_travel_geo_dataset`(asset·큐 runner 공통 resource 키)이 짧은 수명 client로 한 번 부르고, offline upload·CLI는 같은
-  함수를 직접 부른다(호출 지점 3 — `tests/lint/test_geo_applied_matches_asset_geo_callables.py`가 센다). (2) 설계의
-  `kor_travel_geo_client_resource`(경량 client)는 이 PR에 넣지 않았다 — 쓰는 곳이 센서(T-GR-05)뿐이라 그때 더한다(§T-GR-05 수정 파일에 적었다). 리뷰 반영(2026-10-16): resource는
-  **lazy handle**(`GeoDatasetHandle.current()` — 처음 쓰일 때 1회, 동시 호출도 1회)이라 geo 콜러블이 없는 run(price/notice·
-  visitkorea·MOIS)은 읽지 않는다; 경고는 managed logger(`kortravelmap.dagster.resources`)·`context.log`로 낸다(event
-  stream 결박 테스트); 키 미배선은 WARNING.
-  (3) `geo_applied`는 `_load`·`_load_snapshot_batches`의 필수 인자이고 asset 21곳 + MCST 1곳이 리터럴로 넘긴다(AST lint가
-  run 함수의 실제 콜러블과 대조 — 하나를 False로 바꾸면 빨갛다). 적재 wrapper는 그것과 현재 토큰·reverse 계수를 받아
-  output 메타 `geo_applied_reverse/geocode`·`geo_data_token`·`geo_dataset_mismatch`를 낸다(불일치면 WARNING 1건).
-  **client·infra 적재 함수로 넘기는 것과 빈 답 비율 가드는 T-GR-03**이다 — 이 PR이 넘기면 받는 쪽이 아무것도 하지 않는
-  인자가 된다. MOIS 재개형 적재(`mois_chunked_load.py`)도 T-GR-03(행별 evidence)에서 배선한다. offline upload은 메타
-  `geo_data_token`, CLI는 stderr 한 줄로 어느 데이터셋으로 적재했는지 남긴다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-gr-02.md](archive/tasks-acceptance-gr-02.md)로 옮겼다(2026-10-23, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-GR-03
 
@@ -2839,3 +2772,15 @@ D1~D7, 설계 적대 리뷰 반영은 같은 절 끝.
 - [ ] PG transport 적재 job·schedule과 기존 feature의 퇴역 방법(soft-delete·dataset 비활성)을 ADR-114에 적고, seal
   대조가 깨지지 않는 순서로 실행했다(ADR-114 기각 대안의 두 함정).
 
+## T-GEOLOAD-00
+
+ADR-116(geo 부하 줄이기 0단계). 브랜치 `feat/skip-geocode-unchanged`.
+
+- [ ] 코드 PR 머지: 공통 helper(`dagster/geo_reuse.py`·`assets._transform_reusing_geo`)를 비-MOIS 역지오코딩 asset
+  전부(MCST 포함, MOIS·concierge 제외)가 거치고 lint가 우회를 막는다. 조회(`infra/feature_geocode_reuse.py`)는 fence
+  없는 읽기다. 설계 적대 리뷰 1회·코드 적대 리뷰 2회 반영, 변이 검사, CI 4세션 초록.
+- [ ] 통합 검사(n150 일회용): 그대로인 행은 geo 0회, payload·좌표·토큰·override가 다른 행은 geo를 부른다, 결과 bundle은
+  전량 지오코딩과 같고 적재 뒤 `row_revision`·스탬프·주소 열이 불변이다, ADR-113 spool(연결 1개)·큐 결합 client에서도
+  같다.
+- [ ] 배포 뒤 첫 정기 run(주차장·MCST·국가유산)의 run 요약 로그 `저장값 재사용 skipped=… geocoded=… fallback=…
+  disabled=…`와 `geo_calls_reverse`를 배포 전 run과 비교해 journal에 적는다(기대: 주차장 약 17.6k → 1~2k).

@@ -155,6 +155,7 @@ from .feature_operation_tracking import (
     require_feature_operation_guard,
     run_tracked_feature_asset,
 )
+from .geo_reuse import transform_reusing_stored_geo
 from .mois_chunked_load import MoisLoadPlan, load_mois_license_records_chunked
 from .source_replay import (
     apply_replay_provenance,
@@ -359,7 +360,9 @@ async def run_feature_event_datagokr_cultural_festivals(
     source = await _resource_value(context, "datagokr_cultural_festivals")
     records = await _record_list(context, "datagokr_cultural_festivals")
     fetched_at = await _fetched_at(context)
-    bundles = await cultural_festivals_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        cultural_festivals_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
@@ -400,7 +403,9 @@ async def run_feature_place_transport_fuel_stations(
     """
     records = await _record_list(context, "transport_fuel_stations")
     fetched_at = await _fetched_at(context)
-    bundles = await stations_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        stations_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
@@ -524,7 +529,9 @@ async def run_feature_place_transport_rest_areas(
     """고속도로 휴게소(transport export)를 place Feature로 적재한다."""
     records = await _record_list(context, "transport_rest_areas")
     fetched_at = await _fetched_at(context)
-    bundles = await rest_areas_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        rest_areas_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
@@ -836,7 +843,9 @@ async def run_feature_place_krheritage_items(
     """국가유산 item record를 place/area Feature로 적재한다."""
     records = await _record_list(context, "krheritage_items")
     fetched_at = await _fetched_at(context)
-    bundles = await heritage_items_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        heritage_items_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
@@ -894,7 +903,9 @@ async def run_feature_event_krheritage_events(
     """국가유산 행사 record를 event Feature로 적재한다."""
     records = await _record_list(context, "krheritage_events")
     fetched_at = await _fetched_at(context)
-    bundles = await heritage_events_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        heritage_events_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
@@ -1011,7 +1022,9 @@ async def run_feature_place_knps_points(
     )
     if dataset_key not in KNPS_PLACE_DATASETS:
         raise KeyError(f"KNPS point dataset_key가 아님: {dataset_key!r}")
-    bundles = await knps_point_records_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        knps_point_records_to_bundles,
         records,
         dataset_key=dataset_key,
         fetched_at=fetched_at,
@@ -1050,7 +1063,9 @@ async def run_feature_geometry_knps_records(
     )
     if dataset_key not in KNPS_GEOMETRY_DATASETS:
         raise KeyError(f"KNPS geometry dataset_key가 아님: {dataset_key!r}")
-    bundles = await knps_geometry_records_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        knps_geometry_records_to_bundles,
         records,
         dataset_key=dataset_key,
         fetched_at=fetched_at,
@@ -1089,7 +1104,9 @@ async def run_feature_place_krforest_recreation_forests(
         async for records in _record_batches(
             context, "krforest_recreation_forests", batch_size=100
         ):
-            yield await recreation_forests_to_bundles(
+            yield await _transform_reusing_geo(
+                context,
+                recreation_forests_to_bundles,
                 records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
             )
 
@@ -1124,7 +1141,9 @@ async def run_feature_place_krforest_arboretums(
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(context, "krforest_arboretums", batch_size=100):
-            yield await arboretums_to_bundles(
+            yield await _transform_reusing_geo(
+                context,
+                arboretums_to_bundles,
                 records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
             )
 
@@ -1155,7 +1174,9 @@ async def run_feature_route_krforest_mountain_trails(
     """산림청 등산로 SHP route를 적재한다(C05A)."""
     records = await _record_list(context, "krforest_mountain_trails")
     fetched_at = await _fetched_at(context)
-    bundles = await mountain_trails_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        mountain_trails_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
@@ -1190,7 +1211,9 @@ async def run_feature_route_krforest_dulle_trails(
     """산림청 둘레길 SHP route를 적재한다(C05A)."""
     records = await _record_list(context, "krforest_dulle_trails")
     fetched_at = await _fetched_at(context)
-    bundles = await dulle_trails_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        dulle_trails_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
@@ -1304,7 +1327,9 @@ async def run_feature_place_standard_museums(
         async for records in _record_batches(context, "standard_museums", batch_size=100):
             yield apply_replay_provenance(
                 source,
-                await museums_to_bundles(
+                await _transform_reusing_geo(
+                    context,
+                    museums_to_bundles,
                     records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
                 ),
             )
@@ -1346,7 +1371,9 @@ async def run_feature_place_standard_tourist_attractions(
         ):
             yield apply_replay_provenance(
                 source,
-                await tourist_attractions_to_bundles(
+                await _transform_reusing_geo(
+                    context,
+                    tourist_attractions_to_bundles,
                     records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
                 ),
             )
@@ -1388,7 +1415,9 @@ async def run_feature_place_standard_parking_lots(
         async for records in _record_batches(context, "standard_parking_lots", batch_size=100):
             yield apply_replay_provenance(
                 source,
-                await parking_lots_to_bundles(
+                await _transform_reusing_geo(
+                    context,
+                    parking_lots_to_bundles,
                     records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
                 ),
             )
@@ -1430,7 +1459,9 @@ async def run_feature_place_standard_special_streets(
         async for records in _record_batches(context, "standard_special_streets", batch_size=100):
             yield apply_replay_provenance(
                 source,
-                await special_streets_to_bundles(
+                await _transform_reusing_geo(
+                    context,
+                    special_streets_to_bundles,
                     records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
                 ),
             )
@@ -1468,7 +1499,9 @@ async def run_feature_place_datagokr_file_data(
     source = await _resource_value(context, "datagokr_file_data_records")
     records = await _record_list(context, "datagokr_file_data_records")
     fetched_at = await _fetched_at(context)
-    bundles = await file_data_rows_to_bundles(
+    bundles = await _transform_reusing_geo(
+        context,
+        file_data_rows_to_bundles,
         records,
         dataset_key=dataset_key,
         fetched_at=fetched_at,
@@ -1507,7 +1540,9 @@ async def run_feature_place_khoa_beaches(
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(context, "khoa_beaches", batch_size=100):
-            yield await beaches_to_bundles(
+            yield await _transform_reusing_geo(
+                context,
+                beaches_to_bundles,
                 records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
             )
 
@@ -1540,7 +1575,9 @@ async def run_feature_place_transport_airports(
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(context, "transport_airports", batch_size=100):
-            yield await airports_to_bundles(
+            yield await _transform_reusing_geo(
+                context,
+                airports_to_bundles,
                 records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
             )
 
@@ -2135,6 +2172,69 @@ def _reverse_geocoder(context: AssetExecutionContext) -> ReverseGeocoder | None:
     return cast(
         "ReverseGeocoder",
         wrapper_type(inner, lambda: _current_geo_dataset(context)),
+    )
+
+
+async def _transform_reusing_geo(
+    context: AssetExecutionContext,
+    transform: Callable[..., Awaitable[list[Any]]],
+    records: Iterable[Any],
+    /,
+    **kwargs: Any,
+) -> list[Any]:
+    """provider 변환을 저장값 재사용과 함께 돌린다(ADR-116) — 역지오코딩 asset의 공통 자리.
+
+    호출 모양은 ``transform(records, **kwargs)``와 같다(``reverse_geocoder=``는 호출자가
+    그대로 넘긴다). run의 현재 geo 토큰이 있으면 payload·좌표·스탬프가 그대로인 행은 geo를
+    부르지 않고 저장 주소 열을 답으로 쓴다
+    (:func:`kortravelmap.dagster.geo_reuse.transform_reusing_stored_geo`). 토큰이 없거나
+    (비교 기준이 없다) 역지오코더가 없거나 client가 재사용 조회를 모르면 원래 호출 그대로다.
+
+    현재 토큰은 **첫 지오코딩 전에** 읽는다(ADR-109 결정 2 —
+    :class:`_TokenFirstReverseGeocoder`와 같은 순서). ``transform``은 같은 입력에 몇 번
+    불려도 같은 결과를 내야 한다 — 그래서 ``records``를 목록으로 고정한다.
+    """
+    live = cast("ReverseGeocoder | None", kwargs.pop("reverse_geocoder", None))
+    rows = records if isinstance(records, Sequence) else list(records)
+    client = _resource_object(context, "kor_travel_map_client", default=None)
+    read = getattr(client, "read_reusable_geo_columns", None)
+    if (
+        live is None
+        or not callable(read)
+        # 키 미배선 경고는 적재 wrapper가 run에 한 번 낸다(_geo_run_inputs) — batch마다 내지 않는다.
+        or _resource_object(context, "kor_travel_geo_dataset", default=None) is None
+    ):
+        return await transform(rows, reverse_geocoder=live, **kwargs)
+    current = await _current_geo_dataset(context)
+    token = current.data_token if current is not None else None
+    if token is None:
+        return await transform(rows, reverse_geocoder=live, **kwargs)
+
+    async def _lookup(bundles: Sequence[Any]) -> Mapping[str, Mapping[str, Any]] | None:
+        return cast(
+            "Mapping[str, Mapping[str, Any]] | None",
+            await read(bundles, current_data_token=token),
+        )
+
+    async def _transform(geocoder: ReverseGeocoder) -> list[Any]:
+        return await transform(rows, reverse_geocoder=geocoder, **kwargs)
+
+    stats = cast("GeoCallStats | None", getattr(live, "stats", None))
+    recheck = getattr(
+        _resource_object(context, "kor_travel_geo_dataset", default=None), "recheck", None
+    )
+
+    async def _observe_current() -> None:
+        # 저장값만으로 끝난 변환도 run 도중의 릴리스 전환을 보게 한다(코드 리뷰 A MED-1).
+        if stats is not None and callable(recheck):
+            stats.observe_dataset(cast("DatasetRef | None", await recheck()))
+
+    return await transform_reusing_stored_geo(
+        _transform,
+        live=live,
+        lookup=_lookup,
+        stats=stats,
+        after_reuse=_observe_current,
     )
 
 

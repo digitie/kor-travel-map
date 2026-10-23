@@ -55,7 +55,10 @@ datagokr_file_data·krforest·krheritage·opinet·krex)이고 그중 krex는 받
 | admin `/admin/features/new`·curation import | 브라우저가 geo proxy로 받은 코드를 폼에 채움 | provider dataset 없음(ADR-109 열린 결정 2) |
 
 적재 뒤 unchanged 행은 재작성되지 않고(`infra/feature_repo.py:3085-3095`), MOIS는 payload hash가 같은 행의
-변환·지오코딩을 건너뛴다(`:3199-3231`). 역지오코딩 캐시(`cached_reverse_geocoder` `geocoding.py:233`,
+변환·지오코딩을 건너뛴다(`:3199-3231`). **비-MOIS(ADR-116, 2026-10-23)**: payload·좌표가 그대로이고 스탬프가 `called`·현재
+토큰인 행은 역지오코딩하지 않고 저장 주소 열을 역지오코더의 답으로 쓴다 — 공통 helper
+`dagster/geo_reuse.py`(변환 두 번: 빈 답 pass 0으로 행을 알아내고 조회 뒤 저장값·실제 geo를 섞어 pass 1, 사후 확인),
+조회는 `infra/feature_geocode_reuse.py`(fence 없는 읽기). 역지오코딩 캐시(`cached_reverse_geocoder` `geocoding.py:233`,
 `PrefetchingReverseGeocoder` `:279`)는 None도 캐싱하고 예외는 올린다. 클라이언트에 건별 재시도는 없다.
 
 ## 2. 스탬프 표와 outcome 판정 (구현 T-GR-01·03)

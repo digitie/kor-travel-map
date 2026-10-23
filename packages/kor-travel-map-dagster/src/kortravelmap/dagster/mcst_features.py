@@ -37,6 +37,7 @@ from .assets import (
     _load,
     _record_list,
     _reverse_geocoder,
+    _transform_reusing_geo,
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import (
@@ -186,7 +187,9 @@ async def run_feature_place_mcst_culture(
                 "MCST %s row 없음 — authoritative empty snapshot으로 seal.",
                 spec.dataset_key,
             )
-        bundles = await file_rows_to_bundles(
+        bundles = await _transform_reusing_geo(
+            context,
+            file_rows_to_bundles,
             slug_rows,
             slug=slug,
             fetched_at=fetched_at,

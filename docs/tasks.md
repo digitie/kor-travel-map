@@ -63,6 +63,12 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   PinVi가 Map REST로 옮긴 뒤 기존 PG transport 적재·feature를 거둔다. 방법·시점은 이행 PR에서 정한다(결정 7).
 
+**geo 부하 줄이기(소유자 결정 2026-10-23)** — 0단계는 비-MOIS 적재의 저장값 재사용이다(ADR-116, proposed).
+
+- [ ] T-GEOLOAD-00 — **비-MOIS 적재: payload·좌표·geo 토큰이 그대로인 행은 역지오코딩 생략**
+
+  공통 helper가 변환을 두 번 돌려 그런 행은 저장 주소 열을 답으로 쓴다. 설계는 [ADR-116](adr/116-reuse-stored-geo-for-unchanged-rows.md), 해제 조건은 acceptance의 같은 ID다.
+
 **동시 쓰기 설계(ADR-115, proposed)** — 현재 Weather·Transport 작업을 마친 뒤 아래 의존 순서로 구현한다. 설계 문서 PR은 구현 완료가 아니며, 수용 조건 정본은 `tasks-acceptance.md`의 같은 ID다.
 
 - [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**

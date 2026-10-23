@@ -4,7 +4,8 @@
 - 날짜: 2026-10-12
 - 결정자: human(승인), Claude
 - 관계: ADR-099(curation seal fold — 크기 한계는 이미 해소), ADR-087/088(source head·membership),
-  ADR-011(`import_jobs`), ADR-034 7단계(MOIS bulk)
+  ADR-011(`import_jobs`), ADR-034 7단계(MOIS bulk). §1의 "payload가 같은 행은 지오코딩하지 않는다"는
+  **ADR-116**(proposed, 2026-10-23)이 비-MOIS 적재로 넓혔다 — MOIS 경로는 바뀌지 않는다.
 
 ## 컨텍스트
 

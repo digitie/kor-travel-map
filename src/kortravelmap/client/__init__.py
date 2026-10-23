@@ -46,6 +46,7 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client._bundle_spool import BundleSpool
@@ -136,6 +137,9 @@ from kortravelmap.infra.enrichment_review_repo import (
 )
 from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
+)
+from kortravelmap.infra.feature_geocode_reuse import (
+    read_reusable_geo_columns as repo_read_reusable_geo_columns,
 )
 from kortravelmap.infra.feature_operation_repo import (
     abandon_dagster_feature_run as repo_abandon_dagster_feature_run,
@@ -1218,6 +1222,34 @@ class AsyncKorTravelMapClient:
                 payload_hashes=payload_hashes,
                 current_data_token=current_data_token,
             )
+
+    async def read_reusable_geo_columns(
+        self,
+        bundles: Sequence[FeatureBundle],
+        *,
+        current_data_token: str,
+    ) -> dict[str, Mapping[str, Any]] | None:
+        """payload·좌표·스탬프가 그대로인 행의 저장 주소 유도 열(ADR-116) — 읽기 전용.
+
+        적재가 역지오코딩 **전에** 묻는다. 여기 든 행(``source_record_key``)은 적재해도 주소
+        열이 쓰이지 않으므로, 호출자가 저장값을 역지오코더의 답으로 돌려줘 geo 왕복을 건너뛴다.
+        fence를 잡지 않는 짧은 읽기 transaction이다(ADR-113 받기 단계·큐 결합 transaction 모두
+        안전).
+
+        최적화 조회라 DB 오류로 적재를 죽이지 않는다 — savepoint 안에서 읽고, 실패하면 savepoint만
+        되감고 ``None``을 돌려준다(호출자는 전량 지오코딩한다). 큐 경로의 결합 client는
+        ``join_transaction_mode="rollback_only"``라 오류가 ``session.begin()`` 밖으로 나가면
+        executor의 root transaction까지 되감기므로, 오류는 이 블록 안에서 끝낸다.
+        """
+        async with self._session_factory() as session, session.begin():
+            try:
+                async with session.begin_nested():
+                    return await repo_read_reusable_geo_columns(
+                        session, bundles, current_data_token=current_data_token
+                    )
+            except SQLAlchemyError as exc:
+                _LOG.warning("저장값 재사용 조회 실패 — 이 묶음은 전량 지오코딩: %r", exc)
+                return None
 
     async def read_current_source_records(
         self,
