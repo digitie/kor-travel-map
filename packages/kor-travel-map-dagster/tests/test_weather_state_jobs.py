@@ -269,7 +269,7 @@ async def test_status_codes_are_classified(
     seen = _install(monkeypatch, lambda _request: httpx.Response(status, json={}))
     with pytest.raises(error) as excinfo:
         await fetch_weather_current(_settings())
-    assert getattr(excinfo.value, "retryable") is retryable
+    assert excinfo.value.retryable is retryable  # type: ignore[attr-defined]
     assert len(seen) == 1  # 재시도할 상태가 아니다
 
 
@@ -422,7 +422,8 @@ async def test_unrecoverable_weather_failures_turn_off_step_retries(error: Excep
     with pytest.raises(Failure) as excinfo:
         await _load(_failing_spec(error), store)
     assert excinfo.value.allow_retries is False
-    assert str(excinfo.value.metadata["failure_kind"].value) == getattr(error, "failure_kind")
+    expected_kind = error.failure_kind  # type: ignore[attr-defined]
+    assert str(excinfo.value.metadata["failure_kind"].value) == expected_kind
     assert store.swapped == []
 
 

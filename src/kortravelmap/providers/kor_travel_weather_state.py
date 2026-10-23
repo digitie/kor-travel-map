@@ -7,9 +7,10 @@
 갖는다. 설계 정본은 ADR-114 "구현 설계 — 2단계" W1·W2·W4.
 
 - **값 하나 = 위치 하나**다. 일곱 데이터셋이 같은 ``feature_id``
-  (:func:`weather_location_feature_id`)를 키로 쓴다. W2·W3·W5의 행은 위치 단위로 묶는다(:class:`LocationGrouper`).
+  (:func:`weather_location_feature_id`)를 키로 쓴다. W2·W3·W5의 행은 위치 단위로 묶는다
+  (:class:`CurrentGrouper`·:class:`ForecastGrouper`·:class:`DailySummaryGrouper`).
 - 같은 위치 안에서 같은 관측(provider, metric)·예보 묶음(provider)·요약(date, slot)이 두 번 오면
-  원천 순서의 첫 행을 남기고 버린 수를 센다(세대 ``meta.duplicates``에 더한다).
+  원천 순서의 첫 행을 남기고 버린 수를 센다(적재 op metadata ``row_duplicates``).
 - geo를 부르지 않는다. 법정동 코드는 weather W1 값을 그대로 쓴다(결정 6).
 """
 
