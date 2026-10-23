@@ -1,7 +1,7 @@
 """프로세스 단위 진척 신호 — 실제 일을 한 경계가 한 번씩 표시한다.
 
-적재 step의 멈춤 감시(:mod:`kortravelmap.dagster.stall_watchdog`)가 읽는다. ``/proc/self/io``의
-``rchar``/``wchar``는 소켓 송수신(``recv``/``send``)을 세지 않는다 — 2026-10-23 MCST run은 geo를
+적재 step의 멈춤 감시(``kortravelmap.dagster.stall_watchdog``)가 읽는다.
+``/proc/self/io``의 ``rchar``/``wchar``는 소켓 송수신(``recv``/``send``)을 세지 않는다 — 2026-10-23 MCST run은 geo를
 수만 번 부르는 동안에도 그 값이 거의 그대로여서 감시가 15분마다 "멈췄다"고 오탐했다. 그래서 geo 왕복·
 상류 요청·DB 문장처럼 **일을 한 자리**가 이 계수를 올린다.
 

@@ -61,21 +61,27 @@ async def test_activity_marks_count_as_progress_without_file_io() -> None:
             await asyncio.sleep(0.005)
 
     async with stall_watchdog(
-        log, stall_after_seconds=0.03, poll_seconds=0.01, io_bytes=lambda: 7
+        log, stall_after_seconds=0.5, poll_seconds=0.01, io_bytes=lambda: 7
     ):
         await _busy()
 
     assert log.warnings == []
 
 
-async def test_warns_at_most_once_per_block() -> None:
+async def test_one_warning_per_stall_rearms_after_progress_and_is_capped() -> None:
+    """조용한 단계의 오탐이 뒤의 진짜 멈춤을 가리지 않게 재무장하고, 덤프 수는 상한으로 묶는다."""
     log = _Log()
+    value = [0]
     async with stall_watchdog(
-        log, stall_after_seconds=0.02, poll_seconds=0.01, io_bytes=lambda: None
+        log, stall_after_seconds=0.02, poll_seconds=0.01, io_bytes=lambda: value[0]
     ):
-        await asyncio.sleep(0.2)
+        await asyncio.sleep(0.15)
+        assert len(log.warnings) == 1
+        for _ in range(4):
+            value[0] += 1
+            await asyncio.sleep(0.15)
 
-    assert len(log.warnings) == 1
+    assert len(log.warnings) == 3
 
 
 def test_db_statements_mark_activity() -> None:

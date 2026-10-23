@@ -65,13 +65,13 @@ from typing import (
 
 from pydantic import SecretStr
 
+from kortravelmap.core import activity
 from kortravelmap.core.address import (
     extract_sido_code,
     extract_sigungu_code,
     normalize_bjd_code,
     normalize_korean_text,
 )
-from kortravelmap.core import activity
 from kortravelmap.core.exceptions import GeoAuthNotConfiguredError, GeoRequestError
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.dto.geo_dataset import DatasetRef
