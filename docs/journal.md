@@ -2,7 +2,8 @@
 
 - Next 및 직접 ESLint 플러그인을 최소 수정 버전 16.4.1로 pin했다. npm12 배포
   audit의 critical 1건이 0건으로 줄었다. 기존 dev moderate2/high6은 변경하지 않았다.
-- 실제 frontend 회귀·빌드/독립 리뷰/CI는 진행 중이며 운영 변경은 없다.
+- 기존 정본 OpenAPI와 생성물 drift를 공식 기존 generator로 정합화했다. admin395/marker4
+  단위·타입·lint·실제Sharp변환·production build PASS. 독립 리뷰/CI는 진행 중이며 운영 변경은 없다.
   상세: [검증 기록](reports/2026-10-24-next-security-gate.md).
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤: 브랜치 `fix/mcst-geo-stall`

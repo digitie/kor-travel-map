@@ -1,7 +1,9 @@
 ## 2026-10-24 — 수집 PR #1358의 Next 보안 CI 선행 복구
 
-- Next와 직접 ESLint 플러그인 16.4.1, 배포 audit 취약점0. 수집/화면/DB 제품 소스는 변경하지 않았다.
-- 다음: 실제 frontend 검증 → 두 독립 리뷰 → 정확 CI 통과 후 보안 PR을 먼저 머지하고
+- Next/직접env/ESLint 플러그인16.4.1, 배포 audit 취약점0. 기존 OpenAPI admin 타입 산출물
+  drift를 공식 generator로 정합화했다. 수집/화면/API 구현/DB 제품 소스는 변경하지 않았다.
+- admin395/marker4·타입/lint·Sharp실변환·production build PASS.
+- 다음: 두 독립 리뷰 → 정확 CI 통과 후 CI 복구 PR을 먼저 머지하고
   #1358이 최신 main을 통합해 CI를 재실행한다. 운영 미배포.
 - [범위와 검증 기록](reports/2026-10-24-next-security-gate.md).
 
