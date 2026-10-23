@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 T-CWRITE-02: 원천별 필드 shadow 후보(초기 checkpoint)
+
+- 기본OFF인410 shadow 정책/후보 원장, typed 기록 procedure/닫힌 ACL, supplied-field 증거와 실제 load_bundle hook을 구현 중이다. 공개 winner/잠금 범위는 유지한다.
+- 초기 actual PG3/OFF22/strict mypy166 PASS. [구현 범위·미완 gate](reports/2026-10-24-provider-field-shadow.md).
+- 전체 backfill/정책·Geo 증거·winner 활성·scope gate/CI/두 리뷰/실제 HTTP·UI는 미완이며 운영 배포하지 않았다.
+
 ## 2026-10-24 — ADR115 선행: 같은 transaction fence 재진입 SQL 절감
 
 - 실제 root session/connection transaction·오류 stamp가 유효한 동안만 전역 fence를 재사용한다. savepoint 획득은 캐시하지 않는다. 전역 충돌 범위·병합 의미는 유지한다.

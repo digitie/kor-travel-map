@@ -325,6 +325,8 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "feature_creation_origins",
         "features",
         "feature_base_field_values",
+        "provider_field_shadow_policies",
+        "provider_field_shadow_candidates",
         "feature_state_transitions",
         "manual_feature_identity_claims",
         # purge의 복구점. 런타임 role에는 보이지 않는다 — 지워진 Feature의 payload를

@@ -281,6 +281,7 @@ from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.infra.price_repo import (
     load_price_values as repo_load_price_values,
 )
+from kortravelmap.infra.provider_field_candidates import arm_provider_field_shadow
 from kortravelmap.infra.source_replay_repo import CurrentSourceRecord
 from kortravelmap.infra.source_replay_repo import (
     count_active_source_entities as repo_count_active_source_entities,
@@ -590,6 +591,9 @@ class AsyncKorTravelMapClient:
         #: transaction까지 되감으므로 **회복 불가**다 — 호출자가 완화 모드라도
         #: 삼키면 안 되고, 그 판단을 하려면 이 사실이 노출돼 있어야 한다.
         self._transaction_bound = False
+        self._provider_field_shadow_revision = (
+            settings.provider_field_shadow_policy_revision if settings is not None else None
+        )
 
     async def __aenter__(self) -> AsyncKorTravelMapClient:
         return self
@@ -615,6 +619,7 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session, session.begin():
             arm_feature_curation_write_wait(session, self._feature_load_lock_wait_ms)
+            arm_provider_field_shadow(session, self._provider_field_shadow_revision)
             yield session
 
     @asynccontextmanager

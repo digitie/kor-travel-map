@@ -325,6 +325,16 @@ class KorTravelMapSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_MINIMUM``."
         ),
     )
+    provider_field_shadow_policy_revision: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "ADR115 shadow 후보 정책 revision. 기본 None은 OFF이며 기존 수집에 추가 SQL이 없다. "
+            "명시 정책과 normalizer field-presence 증거가 필요하다. "
+            "공개 winner/lock mode는 바꾸지 않는다. "
+            "env KOR_TRAVEL_MAP_PROVIDER_FIELD_SHADOW_POLICY_REVISION."
+        ),
+    )
     feature_load_curation_lock_wait_seconds: int = Field(
         default=FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT,
         ge=0,
