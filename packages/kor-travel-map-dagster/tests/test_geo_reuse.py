@@ -434,3 +434,33 @@ async def test_the_safety_net_is_counted_as_disabled_not_as_nothing_to_reuse() -
     assert lookup.asked == []  # 조회조차 하지 않는다
     assert stats.reuse["disabled"] == 1
     assert "disabled=1" in stats.summary()
+
+
+async def test_bundles_carrying_geo_evidence_are_never_reused() -> None:
+    """``admin_evidence``는 원 geo 답(후보 시군구·관측 코드)을 싣는다 — 저장값으로 재현할 수 없다."""
+    from kortravelmap.dto.admin_evidence import AdminEvidence
+
+    points = [_point("p1", "128.1", "38.1")]
+    inner = _transform(points)
+
+    async def with_evidence(geocoder: ReverseGeocoder) -> list[FeatureBundle]:
+        bundles = await inner(geocoder)
+        return [
+            bundle.model_copy(
+                update={
+                    "admin_evidence": AdminEvidence(
+                        obs_code=bundle.feature.address.bjd_code, reverse_attempted=True
+                    )
+                }
+            )
+            for bundle in bundles
+        ]
+
+    previous = await with_evidence(_CountingReverse())
+    lookup = _Lookup(_stored_from(previous))
+    live = _CountingReverse()
+
+    await transform_reusing_stored_geo(with_evidence, live=live, lookup=lookup)
+
+    assert lookup.asked == []
+    assert live.calls == [("128.1", "38.1")]

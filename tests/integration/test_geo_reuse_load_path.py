@@ -299,7 +299,8 @@ async def test_unchanged_rows_skip_geo_and_load_exactly_like_a_full_geocode(
         dagster_like_engine,
         settings=KorTravelMapSettings(feature_load_curation_lock_wait_seconds=120),
     )
-    items = [_item(f"R{index}") for index in range(5)]
+    # 좌표는 행마다 다르게 둔다 — 같은 좌표를 나눈 행은 저장값이 갈리면(축제 원문 주소) 재사용하지 않는다.
+    items = [_item(f"R{index}", lat=37.52 + index / 1000) for index in range(5)]
 
     first_live = _Reverse()
     await _load_run(client, items, live=first_live, ref=REF_A, stats=GeoCallStats())
@@ -308,7 +309,7 @@ async def test_unchanged_rows_skip_geo_and_load_exactly_like_a_full_geocode(
     before = await _state(dagster_like_engine, loaded)
 
     # 둘째 run: R0는 payload가 바뀌고 나머지는 그대로.
-    second_items = [_item("R0", description="바뀐 설명"), *items[1:]]
+    second_items = [_item("R0", lat=37.52, description="바뀐 설명"), *items[1:]]
     second_live = _Reverse()
     stats = GeoCallStats()
     produced = await _load_run(client, second_items, live=second_live, ref=REF_A, stats=stats)
@@ -344,7 +345,7 @@ async def test_queue_bound_client_reuses_inside_the_executor_transaction(
         dagster_like_engine,
         settings=KorTravelMapSettings(feature_load_curation_lock_wait_seconds=120),
     )
-    items = [_item(f"Q{index}") for index in range(3)]
+    items = [_item(f"Q{index}", lat=37.53 + index / 1000) for index in range(3)]
     await _load_run(client, items, live=_Reverse(), ref=REF_A, stats=GeoCallStats())
 
     live = _Reverse()
