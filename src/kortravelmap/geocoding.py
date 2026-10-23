@@ -65,6 +65,7 @@ from typing import (
 
 from pydantic import SecretStr
 
+from kortravelmap.core import activity
 from kortravelmap.core.address import (
     extract_sido_code,
     extract_sigungu_code,
@@ -1561,6 +1562,8 @@ class KorTravelGeoRestClient:
                 else GeoRequestError
             )
             sanitized = error_type(f"kor-travel-geo transport 실패: {type(exc).__name__}")
+        # 왕복 하나가 끝났다 — 적재 멈춤 감시의 진척 신호(소켓 I/O는 ``rchar``에 안 잡힌다).
+        activity.mark()
         # except 블록 **밖**에서 던지므로 키가 든 원본 예외의 ``__context__``가 생기지 않는다.
         if sanitized is not None:
             raise sanitized

@@ -7,10 +7,15 @@ step 프로세스는 살아 있었지만 ``/proc/<pid>/io``의 ``rchar``가 1분
 보여 주지 않고, 진행 로그는 ``python_log_level: WARNING`` 아래라 Dagster에 실리지 않는다 —
 그래서 어디서 멈췄는지 알 길이 없었다.
 
-이 watchdog은 그 상태를 **효과로** 잡는다: 프로세스 I/O 바이트(``rchar + wchar``)가
-``stall_after_seconds`` 동안 그대로면 모든 task의 스택을 WARNING으로 한 번 남긴다. 멈춤
-한 번에 한 번만 남기고(I/O가 다시 움직이면 재무장), run을 실패시키거나 취소하지 않는다 —
-진단만 한다. ``/proc/self/io``가 없는 환경(macOS 등)에서는 아무것도 하지 않는다.
+이 watchdog은 **진척 신호**가 ``stall_after_seconds`` 동안 그대로면 모든 task의 스택을 WARNING으로
+남긴다. 진척 신호는 둘이다: 파일 I/O 바이트(``/proc/self/io``의 ``rchar + wchar``)와
+:mod:`kortravelmap.core.activity` 표시(geo 왕복·상류 요청·DB 문장). ``rchar``/``wchar``는 소켓
+``recv``/``send``를 세지 않는다 — 처음 판(#1357)은 파일 I/O만 봐서, 2026-10-23 MCST run이 geo를
+수만 번 부르는 동안 15분마다 오탐했다(그 run은 2시간 40분에 성공).
+
+경고는 멈춤 한 번에 한 번(진척이 다시 보이면 재무장), 블록 하나에 최대 ``_MAX_WARNINGS``번이다 —
+조용한 단계(대용량 파일 파싱 등)의 오탐이 뒤의 진짜 멈춤을 가리지 않고, event log를 덤프로 채우지도
+않는다. run을 실패시키거나 취소하지 않는다(진단만). ``/proc/self/io``가 없으면 activity 표시만 본다.
 """
 
 from __future__ import annotations
@@ -23,15 +28,20 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager, suppress
 from typing import Any, Final
 
+from kortravelmap.core import activity
+from sqlalchemy import event
+from sqlalchemy.engine import Engine
+
 __all__ = ["DEFAULT_STALL_AFTER_SECONDS", "process_io_bytes", "stall_watchdog"]
 
-#: 이 시간 동안 프로세스 I/O가 그대로면 멈춤으로 본다. geo 호출 하나의 read 상한(수십 초)보다
+#: 이 시간 동안 진척 신호가 그대로면 멈춤으로 본다. geo 호출 하나의 read 상한(수십 초)보다
 #: 충분히 길어야 느린 응답을 멈춤으로 오인하지 않는다.
 DEFAULT_STALL_AFTER_SECONDS: Final[float] = 900.0
 
 _STACK_LIMIT: Final[int] = 40
 _LOGGER = logging.getLogger(__name__)
 _MAX_TASKS: Final[int] = 50
+_MAX_WARNINGS: Final[int] = 3
 
 
 _SELF_READ_BYTES = 0
@@ -39,7 +49,7 @@ _SELF_READ_BYTES = 0
 
 
 def process_io_bytes() -> int | None:
-    """이 프로세스가 지금까지 읽고 쓴 바이트(소켓 포함). ``/proc/self/io``가 없으면 None.
+    """이 프로세스의 파일 I/O 바이트(``rchar+wchar``, 소켓 송수신 제외). 없으면 None.
 
     ``/proc/self/io``를 읽는 것 자체가 ``rchar``를 읽은 바이트만큼 늘린다(적대 리뷰 실측 — 호출마다
     +106). 그대로 두면 감시가 매 poll마다 "움직였다"고 보고 영원히 울리지 않는다. 내용이 만들어지는
@@ -58,6 +68,20 @@ def process_io_bytes() -> int | None:
         return int(fields[b"rchar"]) + int(fields[b"wchar"]) - already
     except (KeyError, ValueError):
         return None
+
+
+def _mark_db_statement(*_args: Any, **_kwargs: Any) -> None:
+    activity.mark()
+
+
+# DB 문장도 진척이다(asyncpg 소켓 I/O는 ``rchar``에 안 잡힌다). 모든 Engine(async engine의 sync 쪽
+# 포함)에 한 번 건다.
+if not event.contains(Engine, "before_cursor_execute", _mark_db_statement):
+    event.listen(Engine, "before_cursor_execute", _mark_db_statement)
+
+
+def _progress(io_bytes: Callable[[], int | None]) -> tuple[int | None, int]:
+    return io_bytes(), activity.snapshot()
 
 
 def _task_dump(current: asyncio.Task[Any] | None) -> str:
@@ -86,27 +110,29 @@ async def stall_watchdog(
     ``log``는 ``warning(msg, *args)``를 가진 logger(보통 ``context.log``). None이면 모듈 logger.
     """
     logger: Any = _LOGGER if log is None else log
-    if io_bytes() is None:
-        yield
-        return
 
     async def _watch() -> None:
-        last = io_bytes()
+        last = _progress(io_bytes)
         moved_at = clock()
         reported = False
-        while True:
+        warnings = 0
+        while warnings < _MAX_WARNINGS:
             await asyncio.sleep(poll_seconds)
-            now_bytes = io_bytes()
-            if now_bytes != last:
-                last, moved_at, reported = now_bytes, clock(), False
+            now = _progress(io_bytes)
+            if now != last:
+                last, moved_at, reported = now, clock(), False
                 continue
             idle = clock() - moved_at
             if not reported and idle >= stall_after_seconds:
                 reported = True
+                warnings += 1
                 try:
                     logger.warning(
-                        "적재 step이 %.0f초 동안 I/O 없이 멈춰 있다 — asyncio task 스택:\n%s",
+                        "적재 step이 %.0f초 동안 진척 신호(파일 I/O·geo·DB·상류 요청) 없이 "
+                        "멈춰 있다(%d/%d) — asyncio task 스택:\n%s",
                         idle,
+                        warnings,
+                        _MAX_WARNINGS,
                         _task_dump(asyncio.current_task()),
                     )
                 except Exception:  # noqa: BLE001 — 진단이 적재 결과를 바꾸면 안 된다
