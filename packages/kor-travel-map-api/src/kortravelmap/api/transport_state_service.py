@@ -16,7 +16,7 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING, Literal
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 
 import httpx
 from fastapi import HTTPException, status
@@ -109,11 +109,19 @@ class PriceHistoryOutcome:
 
 
 def _transport_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str, str]] | None:
-    """base URL과 인증 header. 둘 중 하나라도 비면 ``None``(빈 env도 미설정이다)."""
+    """base URL과 인증 header. 비었거나 형식이 틀리면 ``None``(빈 env도 미설정이다)."""
     base_url = (settings.kor_travel_transport_base_url or "").strip()
     token = settings.kor_travel_transport_service_token
     secret = token.get_secret_value().strip() if token is not None else ""
-    if not base_url or not secret:
+    if not base_url or not secret or not secret.isascii():
+        return None
+    try:
+        parts = urlsplit(base_url)
+        host = parts.hostname
+        _ = parts.port  # 숫자가 아닌 port는 ValueError
+    except ValueError:
+        return None
+    if parts.scheme not in {"http", "https"} or not host:
         return None
     return base_url.rstrip("/"), {SERVICE_TOKEN_HEADER: secret}
 
