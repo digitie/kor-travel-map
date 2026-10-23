@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any, Final
 from kortravelmap.dto import Address
 from kortravelmap.geocoding import (
     ObservedReverseGeocoder,
+    PrefetchingReverseGeocoder,
     ReverseGeocodeObservation,
     cached_reverse_geocoder,
     coord_cache_key,
@@ -65,9 +66,13 @@ class _EmptyAnswers:
 
     def __init__(self) -> None:
         self.requested: set[CoordKey] = set()
+        self.coords: dict[CoordKey, Coordinate] = {}
+        """요청 좌표 원본 — pass 1 전에 저장값이 없는 좌표를 동시에 선조회한다."""
 
     async def observe(self, coord: Coordinate) -> ReverseGeocodeObservation:
-        self.requested.add(coord_cache_key(coord))
+        key = coord_cache_key(coord)
+        self.requested.add(key)
+        self.coords.setdefault(key, coord)
         return ReverseGeocodeObservation(None)
 
     async def __call__(self, coord: Coordinate) -> Address | None:
@@ -231,6 +236,7 @@ async def transform_reusing_stored_geo(
     ],
     stats: GeoCallStats | None = None,
     after_reuse: Callable[[], Awaitable[None]] | None = None,
+    prefetch_concurrency: int = 1,
 ) -> list[FeatureBundle]:
     """``transform(reverse_geocoder)``을 저장값 재사용과 함께 돌린다(ADR-116).
 
@@ -241,6 +247,11 @@ async def transform_reusing_stored_geo(
     ``stats``가 있으면 행 단위 계수를 더한다. ``after_reuse``는 저장값으로 답한 행이 하나라도 있으면
     결과를 돌려주기 전에 한 번 불린다 — 호출자가 그때 geo의 현재 데이터셋을 다시 관측한다(저장값만
     쓴 변환은 응답을 받지 않아 run 도중의 릴리스 전환을 보지 못한다, 코드 리뷰 A MED-1).
+
+    ``prefetch_concurrency``가 2 이상이면 pass 1 전에 저장값이 없는 좌표를 그 수만큼 동시에
+    미리 묻는다(ADR-108의 :class:`~kortravelmap.geocoding.PrefetchingReverseGeocoder`). 변환은
+    좌표를 하나씩 순서대로 부르므로, 그대로 두면 왕복 지연이 행 수만큼 쌓인다 — 2026-10-23 MCST
+    첫 적재는 10만 행을 초당 4~5건으로 물어 6시간 상한을 넘었다.
     """
     probe = _EmptyAnswers()
     disabled = False
@@ -264,7 +275,17 @@ async def transform_reusing_stored_geo(
 
     # 재시도가 실제 geo를 다시 부르지 않게 이 호출 동안 실제 답을 기억한다(provider 캐시는 변환마다
     # 새로 생긴다).
-    remembered = cached_reverse_geocoder(live)
+    remembered: ReverseGeocoder = cached_reverse_geocoder(live)
+    pending = [coord for key, coord in probe.coords.items() if key not in table]
+    if prefetch_concurrency > 1 and pending:
+        # 표에 없는 좌표만 — 저장값으로 답할 좌표를 geo에 묻지 않는다(ADR-116의 요점).
+        # 캐시가 pending을 다 담게 잡는다. 넘치면 앞서 받은 답이 밀려나 다시 묻는다.
+        prefetcher = PrefetchingReverseGeocoder(
+            live, concurrency=prefetch_concurrency, max_entries=len(pending) + 1024
+        )
+        await prefetcher.prefetch(pending)
+        remembered = prefetcher
+    del pending
     bundles: list[FeatureBundle] = []
     served: set[CoordKey] = set()
     for attempt in range(MAX_REUSE_TRANSFORMS):

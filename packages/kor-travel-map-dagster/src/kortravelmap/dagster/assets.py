@@ -139,6 +139,7 @@ from kortravelmap.providers.standard_data import (
     special_streets_to_bundles,
     tourist_attractions_to_bundles,
 )
+from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import AssetExecutionContext, Backoff, Failure, RetryPolicy, asset
 
@@ -2235,6 +2236,7 @@ async def _transform_reusing_geo(
         lookup=_lookup,
         stats=stats,
         after_reuse=_observe_current,
+        prefetch_concurrency=KorTravelMapSettings().reverse_geocode_concurrency,
     )
 
 

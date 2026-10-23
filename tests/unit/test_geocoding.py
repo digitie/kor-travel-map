@@ -1112,6 +1112,7 @@ def test_rest_client_regions_within_radius_invalid_response_raises(
     asyncio.run(_run())
 
 
+@pytest.mark.usefixtures("_no_geo_backoff")
 def test_rest_client_regions_within_radius_raises_on_http_error() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"detail": "maintenance"})
@@ -1798,3 +1799,98 @@ def test_geo_errors_never_render_base_url_userinfo_or_path(
             assert "geo.test" not in rendered
 
     asyncio.run(scenario())
+
+
+# -- 일시 장애 재시도 (2026-10-23 MCST 504) ---------------------------------------
+
+
+@pytest.fixture
+def _no_geo_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
+    import kortravelmap.geocoding as geocoding_module
+
+    monkeypatch.setattr(geocoding_module, "_GEO_TRANSIENT_BACKOFF_SECONDS", 0.0)
+
+
+_OK_REGIONS: dict[str, Any] = {
+    "center": {"lon": 126.978, "lat": 37.5665},
+    "radius_km": 0.1,
+    "sido": [],
+    "sigungu": [],
+    "emd": [],
+}
+
+
+@pytest.mark.usefixtures("_no_geo_backoff")
+def test_rest_client_retries_gateway_timeout_then_succeeds() -> None:
+    """504 한 번이 10만 행 변환을 끝내지 않는다 — 다시 보내 받은 답을 쓴다."""
+    statuses = [504, 200]
+    seen: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        status = statuses[len(seen)]
+        seen.append(status)
+        return httpx.Response(status, json=_OK_REGIONS if status == 200 else {"detail": "x"})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            await _geo_client(http).regions_within_radius(lon=126.978, lat=37.5665)
+
+    asyncio.run(_run())
+    assert seen == [504, 200]
+
+
+@pytest.mark.usefixtures("_no_geo_backoff")
+def test_rest_client_gives_up_after_bounded_attempts() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(503, json={"detail": "maintenance"})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            with pytest.raises(GeoRequestError):
+                await _geo_client(http).regions_within_radius(lon=126.978, lat=37.5665)
+
+    asyncio.run(_run())
+    assert len(calls) == 3
+
+
+@pytest.mark.usefixtures("_no_geo_backoff")
+@pytest.mark.parametrize(
+    ("raised", "expected_calls"),
+    [(httpx.ReadTimeout("slow"), 3), (httpx.ConnectError("down"), 1)],
+)
+def test_rest_client_retries_read_timeout_but_not_connect_failure(
+    raised: Exception, expected_calls: int
+) -> None:
+    """호스트가 꺼진 연결 실패는 다시 보내도 connect 상한만 더 기다린다 — 한 번에 끝낸다."""
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        raise raised
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            with pytest.raises(GeoRequestError):
+                await _geo_client(http).regions_within_radius(lon=126.978, lat=37.5665)
+
+    asyncio.run(_run())
+    assert len(calls) == expected_calls
+
+
+def test_rest_client_does_not_retry_client_errors() -> None:
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        calls.append(1)
+        return httpx.Response(500, json={"detail": "upstream broken"})
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            with pytest.raises(GeoRequestError):
+                await _geo_client(http).regions_within_radius(lon=126.978, lat=37.5665)
+
+    asyncio.run(_run())
+    assert len(calls) == 1

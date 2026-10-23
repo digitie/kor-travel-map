@@ -576,3 +576,57 @@ async def test_after_reuse_runs_only_when_something_was_reused() -> None:
         _transform(points), live=_CountingReverse(), lookup=_Lookup(previous), after_reuse=note
     )
     assert calls == ["x"]
+
+
+class _ConcurrencyProbe(_CountingReverse):
+    """동시에 진행 중인 조회 수의 최댓값을 잰다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.in_flight = 0
+        self.peak = 0
+
+    async def __call__(self, coord: Coordinate) -> Address | None:
+        import asyncio
+
+        self.in_flight += 1
+        self.peak = max(self.peak, self.in_flight)
+        try:
+            await asyncio.sleep(0.01)
+            return await super().__call__(coord)
+        finally:
+            self.in_flight -= 1
+
+
+async def test_prefetch_asks_only_unstored_coordinates_concurrently_once_each() -> None:
+    """선조회는 저장값이 없는 좌표만, 동시성 상한 안에서, 좌표마다 한 번만 묻는다.
+
+    2026-10-23 MCST 첫 적재가 순차 조회로 6시간 상한을 넘긴 것의 수정이다.
+    """
+    kept = [_point("p1", "128.1", "38.1")]
+    fresh = [_point(f"n{i}", f"128.{i + 2}", f"38.{i + 2}") for i in range(6)]
+    previous = await _full(kept)
+    live = _ConcurrencyProbe()
+
+    bundles = await transform_reusing_stored_geo(
+        _transform(kept + fresh),
+        live=live,
+        lookup=_Lookup(_stored_from(previous)),
+        prefetch_concurrency=3,
+    )
+
+    assert sorted(live.calls) == sorted((p.raw["lon"], p.raw["lat"]) for p in fresh)
+    assert 1 < live.peak <= 3
+    assert _dump(bundles) == _dump(await _full(kept + fresh))
+
+
+async def test_prefetch_concurrency_one_keeps_sequential_path() -> None:
+    points = [_point(f"n{i}", f"128.{i + 2}", f"38.{i + 2}") for i in range(4)]
+    live = _ConcurrencyProbe()
+
+    await transform_reusing_stored_geo(
+        _transform(points), live=live, lookup=_Lookup({}), prefetch_concurrency=1
+    )
+
+    assert live.peak == 1
+    assert len(live.calls) == 4

@@ -410,6 +410,17 @@ class KorTravelMapSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_MOIS_GEOCODE_CONCURRENCY``."
         ),
     )
+    reverse_geocode_concurrency: int = Field(
+        default=2,
+        ge=1,
+        le=8,
+        description=(
+            "비-MOIS 역지오코딩 적재(ADR-116 재사용 경로)가 저장값이 없는 좌표를 kor-travel-geo에 "
+            "동시에 미리 묻는 상한. 1이면 선조회 없이 변환이 좌표를 하나씩 묻는다. geo가 odroid "
+            "(A55 ×4)에 있어 MOIS와 같은 보수적 기본값 2다 — 2026-10-23 MCST 첫 적재는 순차 조회로 "
+            "10만 행에 6시간을 넘겼다. env ``KOR_TRAVEL_MAP_REVERSE_GEOCODE_CONCURRENCY``."
+        ),
+    )
     mois_geocode_degraded_ratio: float = Field(
         default=0.05,
         gt=0.0,

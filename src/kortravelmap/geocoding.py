@@ -1364,6 +1364,18 @@ class GeoCallStats:
         return f"geo 경계 호출 {self.total_calls}건 — " + " ".join(parts) + reuse
 
 
+#: 일시 장애로 보고 다시 보내는 geo 응답 상태 — 게이트웨이/과부하 계열만(``_post`` 참고).
+_GEO_TRANSIENT_STATUS: Final[frozenset[int]] = frozenset({502, 503, 504})
+#: 첫 시도를 포함한 총 시도 수.
+_GEO_TRANSIENT_ATTEMPTS: Final[int] = 3
+#: n번째 재시도 전 대기(초) = 이 값 × n.
+_GEO_TRANSIENT_BACKOFF_SECONDS: Final[float] = 2.0
+
+
+class _TransientGeoRequestError(GeoRequestError):
+    """다시 보내 볼 만한 transport 실패(read timeout·연결 중 끊김). 밖에서는 ``GeoRequestError``다."""
+
+
 class KorTravelGeoRestClient:
     """kor-travel-geo REST API v2 (``POST /v2/{reverse,geocode}``) 비동기 클라이언트.
 
@@ -1481,6 +1493,30 @@ class KorTravelGeoRestClient:
         return {"X-KTG-API-Key": self._api_key.get_secret_value().strip()}
 
     async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
+        """일시 장애(게이트웨이 5xx·read timeout)는 짧게 몇 번 다시 보낸다.
+
+        2026-10-23 MCST 재현에서 odroid 과부하로 ``/v2/regions/within-radius``가 504를 한 번
+        냈고, 그 한 번이 10만 행 변환 전체를 끝냈다. 같은 좌표를 몇 초 뒤 다시 물으면 대개
+        지나간다. 연결 실패(호스트 다운)는 다시 보내지 않는다 — 그때는 매 시도가 connect
+        상한만큼 기다릴 뿐이다.
+        """
+        import asyncio as _asyncio
+
+        for attempt in range(1, _GEO_TRANSIENT_ATTEMPTS + 1):
+            last = attempt == _GEO_TRANSIENT_ATTEMPTS
+            try:
+                response = await self._post_once(path, json=json)
+            except _TransientGeoRequestError:
+                if last:
+                    raise
+            else:
+                if last or response.status_code not in _GEO_TRANSIENT_STATUS:
+                    return response
+                await response.aclose()
+            await _asyncio.sleep(_GEO_TRANSIENT_BACKOFF_SECONDS * attempt)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+    async def _post_once(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
         """transport 오류도 원본 request를 연결하지 않는 typed 예외로 바꾼다."""
         import httpx as _httpx
 
@@ -1493,9 +1529,12 @@ class KorTravelGeoRestClient:
                 headers=self._public_api_headers(),
             )
         except _httpx.HTTPError as exc:
-            sanitized = GeoRequestError(
-                f"kor-travel-geo transport 실패: {type(exc).__name__}"
+            error_type = (
+                _TransientGeoRequestError
+                if isinstance(exc, (_httpx.ReadTimeout, _httpx.RemoteProtocolError))
+                else GeoRequestError
             )
+            sanitized = error_type(f"kor-travel-geo transport 실패: {type(exc).__name__}")
         # **던지기 전에 센다.** 실패한 왕복도 왕복이고, 실패한 run이야말로 그 수가
         # 가장 필요한 run이다. except 블록 **밖**이므로 키가 든 원본 예외의
         # ``__context__``가 생기지 않는다(위 주석의 계약을 그대로 지킨다).

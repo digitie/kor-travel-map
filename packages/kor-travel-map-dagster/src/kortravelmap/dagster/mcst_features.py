@@ -47,6 +47,7 @@ from .feature_operation_tracking import (
     finish_tracked_feature_membership,
 )
 from .quota_exhaustion import raise_terminal_if_quota_exhausted
+from .stall_watchdog import stall_watchdog
 from .upstream_requests import counting_upstream_requests
 
 __all__ = [
@@ -265,6 +266,12 @@ async def feature_place_mcst_culture(
 ) -> McstLoadResult:
     """MCST multi-member asset — 쿼터 판정과 분자 계수기를 둘 다 연다."""
 
+    # I/O 없이 멈춘 step을 진단한다 — 2026-10-23 이 asset이 3.5시간 무이벤트로 멈췄다.
+    async with stall_watchdog(context.log):
+        return await _feature_place_mcst_culture(context)
+
+
+async def _feature_place_mcst_culture(context: AssetExecutionContext) -> McstLoadResult:
     with counting_upstream_requests():
         guard = await ensure_tracked_multi_member_asset(context)
         memberships = guard.memberships if guard is not None else ()
