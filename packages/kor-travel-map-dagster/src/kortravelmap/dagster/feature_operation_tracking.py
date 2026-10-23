@@ -577,58 +577,51 @@ async def run_tracked_feature_asset(
     **Failure metadata**에 싣고(output이 아니라 실패 이벤트에 붙으므로 남는다),
     그 밖의 실패는 아래 :func:`_log_spend_on_failure`가 경고 로그로 남긴다.
     """
-    # I/O 없이 멈춘 step을 진단한다(2026-10-23 MCST 3.5시간 무이벤트, :mod:`~.stall_watchdog`).
-    async with stall_watchdog(getattr(context, "log", None)):
-        return await _run_tracked_feature_asset(context, run)
-
-
-async def _run_tracked_feature_asset(
-    context: Any,
-    run: Callable[[Any], Awaitable[_T]],
-) -> _T:
     # 재시도 예산도 step(run 경계) 하나에 하나다 — 이 안의 transport fetcher가 나눠 쓴다.
-    with counting_upstream_requests(), sharing_run_retry_budget():
-        guard = await ensure_authoritative_feature_operation_guard(
-            context,
-            boundary="public_wrapper",
-        )
-        if guard.operation_key is None:
+    # I/O 없이 멈춘 step은 task 스택을 남긴다(2026-10-23 MCST 3.5시간 무이벤트, :mod:`~.stall_watchdog`).
+    async with stall_watchdog(getattr(context, "log", None)):
+        with counting_upstream_requests(), sharing_run_retry_budget():
+            guard = await ensure_authoritative_feature_operation_guard(
+                context,
+                boundary="public_wrapper",
+            )
+            if guard.operation_key is None:
+                try:
+                    return await run(context)
+                except Exception as exc:
+                    _log_spend_on_failure(context)
+                    raise_terminal_if_quota_exhausted(exc)
+                    raise_terminal_if_transport_unrecoverable(exc)
+                    raise
+            membership = _single_membership_for_asset(guard)
             try:
-                return await run(context)
+                result = await run(context)
             except Exception as exc:
+                # 실패 기록이 먼저다 — 원 예외를 그대로 봐야 분류가 보존된다.
+                await _append_failed_attempt(context, guard, membership, exc)
                 _log_spend_on_failure(context)
                 raise_terminal_if_quota_exhausted(exc)
                 raise_terminal_if_transport_unrecoverable(exc)
                 raise
-        membership = _single_membership_for_asset(guard)
-        try:
-            result = await run(context)
-        except Exception as exc:
-            # 실패 기록이 먼저다 — 원 예외를 그대로 봐야 분류가 보존된다.
-            await _append_failed_attempt(context, guard, membership, exc)
-            _log_spend_on_failure(context)
-            raise_terminal_if_quota_exhausted(exc)
-            raise_terminal_if_transport_unrecoverable(exc)
-            raise
-        mutation = await guard.client.finish_dagster_feature_membership(
-            dagster_run_id=guard.dagster_run_id,
-            membership=membership,
-            authoritative_snapshot_complete=bool(
-                getattr(
-                    getattr(result, "observation_receipt", None),
-                    "authoritative_snapshot_complete",
-                    False,
-                )
-            ),
-            curation_input_member_count=getattr(
-                getattr(result, "load", None), "curation_input_member_count", None
-            ),
-            curation_input_set_hash=getattr(
-                getattr(result, "load", None), "curation_input_set_hash", None
-            ),
-        )
-        _raise_if_blocked(guard.dagster_run_id, mutation)
-        return result
+            mutation = await guard.client.finish_dagster_feature_membership(
+                dagster_run_id=guard.dagster_run_id,
+                membership=membership,
+                authoritative_snapshot_complete=bool(
+                    getattr(
+                        getattr(result, "observation_receipt", None),
+                        "authoritative_snapshot_complete",
+                        False,
+                    )
+                ),
+                curation_input_member_count=getattr(
+                    getattr(result, "load", None), "curation_input_member_count", None
+                ),
+                curation_input_set_hash=getattr(
+                    getattr(result, "load", None), "curation_input_set_hash", None
+                ),
+            )
+            _raise_if_blocked(guard.dagster_run_id, mutation)
+            return result
 
 
 async def ensure_tracked_multi_member_asset(
