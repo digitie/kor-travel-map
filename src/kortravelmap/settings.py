@@ -325,6 +325,45 @@ class KorTravelMapSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_MINIMUM``."
         ),
     )
+    provider_field_shadow_scopes: frozenset[tuple[str, str]] = Field(
+        default_factory=frozenset,
+        max_length=128,
+        description=(
+            "ADR115 shadow를 명시적으로 허용한 (provider,dataset_key) 쌍. 기본 빈 집합은 SQL0회다. "
+            "env KOR_TRAVEL_MAP_PROVIDER_FIELD_SHADOW_SCOPES는 JSON 배열의 쌍 목록이다."
+        ),
+    )
+
+    @field_validator("provider_field_shadow_scopes")
+    @classmethod
+    def _validate_shadow_scopes(
+        cls, scopes: frozenset[tuple[str, str]]
+    ) -> frozenset[tuple[str, str]]:
+        for provider, dataset in scopes:
+            if any(
+                not item or item != item.strip() or len(item) > 128 for item in (provider, dataset)
+            ):
+                raise ValueError("shadow scope는 정확한 provider/dataset 자연키여야 합니다.")
+        return scopes
+
+    provider_field_shadow_policy_revision: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "ADR115 shadow 후보 정책 revision. 기본 None은 OFF이며 기존 수집에 추가 SQL이 없다. "
+            "명시 정책과 normalizer field-presence 증거가 필요하다. "
+            "공개 winner/lock mode는 바꾸지 않는다. "
+            "env KOR_TRAVEL_MAP_PROVIDER_FIELD_SHADOW_POLICY_REVISION."
+        ),
+    )
+
+    @field_validator("provider_field_shadow_policy_revision", mode="before")
+    @classmethod
+    def _reject_shadow_revision_bool(cls, value: object) -> object:
+        if isinstance(value, bool):
+            raise ValueError("shadow revision은 bool이 아닌 양의 정수여야 합니다.")
+        return value
+
     feature_load_curation_lock_wait_seconds: int = Field(
         default=FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT,
         ge=0,

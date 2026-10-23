@@ -107,6 +107,10 @@ from kortravelmap.infra.feature_projection import (
     typed_feature_detail_joins_sql,
 )
 from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
+from kortravelmap.infra.provider_field_candidates import (
+    capture_provider_field_candidates,
+    provider_field_shadow_enabled,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -3531,6 +3535,31 @@ async def load_bundle(
             stamped = await upsert_stamps(
                 session, current=geo.current_dataset, outcomes={lifecycle_feature_id: outcome}
             )
+    if provider_field_shadow_enabled(
+        session,
+        provider=bundle.source_record.provider,
+        dataset_key=bundle.source_record.dataset_key,
+    ):
+        # 기존 typed DTO의 기본 None과 원천 필드 존재는 별개다. 증거가 없으면 recorder가
+        # unresolved로 남기며 winner/effective를 갱신하지 않는다. 기본 OFF에는 변환/SQL0회다.
+        shadow_values, shadow_geometry = "{}", "{}"
+        if (
+            bundle.provider_field_presence is not None
+            and bundle.provider_field_presence.supplied_fields
+        ):
+            shadow_values, shadow_geometry = _provider_field_patch_payload(
+                bundle.feature, feature_uuid=lifecycle_feature_id, parent_feature_id=None
+            )
+        await capture_provider_field_candidates(
+            session,
+            feature_id=lifecycle_feature_id,
+            dataset_id=record_state.provider_dataset_id,
+            entity_key=record_state.source_entity_key,
+            record_key=record_state.source_record_key,
+            values=shadow_values,
+            geometry_wkt=shadow_geometry,
+            presence=bundle.provider_field_presence,
+        )
     return FeatureLoadResult(
         bundles_total=1,
         features_inserted=int(feature_inserted),
