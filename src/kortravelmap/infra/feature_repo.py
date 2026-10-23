@@ -65,6 +65,7 @@ from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.engine import RowMapping
 from sqlalchemy.exc import DBAPIError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Text
 
 from kortravelmap.core.exceptions import (
@@ -110,7 +111,8 @@ from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
 
-    from sqlalchemy.ext.asyncio import AsyncSession
+    from sqlalchemy.engine import Connection, Transaction
+    from sqlalchemy.orm import SessionTransaction
 
     from kortravelmap.dto import Feature, FeatureBundle, SourceLink, SourceRecord
     from kortravelmap.dto.geo_dataset import GeoLoadContext, ReverseOutcome
@@ -217,12 +219,65 @@ def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None
     session.info[FEATURE_CURATION_WRITE_WAIT_INFO_KEY] = wait_ms
 
 
+_FEATURE_CURATION_FENCE_INFO_KEY: Final[str] = "kortravelmap.feature_curation_fence"
+
+
+@dataclass(frozen=True)
+class _FeatureCurationFence:
+    """실제 획득한 session·DB transaction의 수명에 한정한 재진입 증거."""
+
+    session_root: SessionTransaction
+    session_owner: SessionTransaction
+    connection: Connection
+    connection_root: Transaction
+    connection_owner: Transaction
+
+    def held_by(self, session: AsyncSession) -> bool:
+        bind = session.sync_session.get_bind()
+        return (
+            (bind is self.connection or bind is self.connection.engine)
+            and session.sync_session.get_transaction() is self.session_root
+            and self.session_root.is_active
+            and self.session_owner.is_active
+            and not self.connection.closed
+            and not self.connection.invalidated
+            and self.connection.get_transaction() is self.connection_root
+            and self.connection_root.is_active
+            and self.connection_owner.is_active
+        )
+
+
+async def _remember_feature_curation_fence(session: AsyncSession) -> None:
+    # SQL 대역은 실제 transaction 수명을 증명하지 못하므로 재사용하지 않는다.
+    if not isinstance(session, AsyncSession):
+        return
+    root = session.sync_session.get_transaction()
+    if root is None or not root.is_active:
+        return
+    connection = (await session.connection()).sync_connection
+    if connection is None:
+        return
+    connection_root = connection.get_transaction()
+    if connection_root is None or not connection_root.is_active:
+        return
+    session.info[_FEATURE_CURATION_FENCE_INFO_KEY] = _FeatureCurationFence(
+        session_root=root,
+        session_owner=session.sync_session.get_nested_transaction() or root,
+        connection=connection,
+        connection_root=connection_root,
+        connection_owner=connection.get_nested_transaction() or connection_root,
+    )
+
+
 async def lock_feature_curation_write(session: AsyncSession) -> None:
     """Feature/source/link/curation 의미 writer의 공통 transaction fence.
 
     session이 :func:`arm_feature_curation_write_wait`로 무장돼 있으면 첫 획득만 긴 대기로
     잡는다(:func:`_lock_feature_curation_write_waiting`). 같은 transaction의 다음 호출은
-    이미 쥔 xact lock을 다시 잡는 것이라 즉시 돌아온다.
+    이미 쥔 xact lock은 실제 session·DB transaction의 수명이 유지되는 동안 SQL 없이 재사용한다.
+    획득 savepoint의 종료·rollback, 외부 connection transaction 종료, 새 transaction이면
+    다시 잡는다.
+    전역 잠금의 충돌 범위와 Feature 병합 의미는 바꾸지 않는다(ADR-115의 안전한 선행 단위).
     """
 
     info = getattr(session, "info", None)
@@ -231,10 +286,16 @@ async def lock_feature_curation_write(session: AsyncSession) -> None:
         if isinstance(info, dict)
         else None
     )
+    held = info.pop(_FEATURE_CURATION_FENCE_INFO_KEY, None) if isinstance(info, dict) else None
+    if isinstance(info, dict) and isinstance(held, _FeatureCurationFence) and held.held_by(session):
+        info[_FEATURE_CURATION_FENCE_INFO_KEY] = held
+        return
     if isinstance(wait_ms, int) and wait_ms > 0:
         await _lock_feature_curation_write_waiting(session, wait_ms)
-        return
-    await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
+    else:
+        await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
+    # 실패·취소에서는 도달하지 않는다. SQL이 성공한 뒤의 transaction/savepoint만 기억한다.
+    await _remember_feature_curation_fence(session)
 
 
 async def _lock_feature_curation_write_waiting(session: AsyncSession, wait_ms: int) -> None:
