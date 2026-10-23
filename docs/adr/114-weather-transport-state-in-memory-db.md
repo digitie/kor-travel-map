@@ -234,12 +234,36 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 - Valkey 미설정·연결 실패·timeout → 이 표면만 503 `TRANSPORT_STATE_UNAVAILABLE`. 아직 한 번도 적재되지 않은
   데이터셋 → 503 `TRANSPORT_STATE_NOT_LOADED`. 다른 Map 기능과 `/ops/health-deep`은 Valkey를 보지 않는다.
   client는 재시도하지 않는다(redis-py 기본 재시도는 1초 연결 상한을 몇 배로 늘린다).
-- 가격 추이: Valkey의 현재가와 함께 transport `GET /v1/service/exports/fuel-stations/{uni_id}/price-history`
-  (transport ADR-013 2026-10-23 추가)를 요청 시 그대로 전한다. `uni_id`는 Valkey 값에서 꺼낸다. 설정 플래그
-  `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`(기본 꺼짐 — transport에 경로가 배포된 뒤 켠다)가 꺼졌거나,
-  transport 주소·토큰이 없거나, transport가 404(옛 버전·토큰·fence)·5xx·timeout·계약 위반이면 200으로 현재가를
-  주고 `history.status=unavailable`과 이유를 싣는다. 404는 설정 문제일 수 있어 경고 로그를 남긴다. API 프로세스도
-  transport 토큰을 갖게 되므로 그 비밀이 놓이는 자리가 하나 는다.
+- 가격 추이: Valkey의 현재가와 함께 transport T4 `GET /v1/service/exports/fuel-stations/{station_key}/price-history`
+  (transport ADR-013, 세부 계약 transport `docs/map-service-price-history.md`)를 요청 시 한 페이지씩 전한다.
+  `station_key`는 Valkey 주유소 값의 `natural_key`(오피넷 uni_id)다. 설정 플래그
+  `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`(기본 꺼짐)가 꺼졌거나 transport 주소·토큰이 없으면 transport를
+  부르지 않는다. 어떤 실패든 200으로 현재가를 주고 `history.status=unavailable`과 이유를 싣는다(아래 표). 404는
+  설정 문제일 수 있어 경고 로그를 남긴다. API 프로세스도 transport 토큰을 갖게 되므로 그 비밀이 놓이는 자리가 하나
+  는다. 2026-10-24 T4 정렬(T-STATE-01-T4):
+  - 질의 변환: Map `product_code`·`since`·`until`(timezone 필수) → transport `product`·`from`·`to`. `limit`은 **한
+    페이지 전체 행 수(유종 합계)** — Map 기본 200·최대 1000(transport 기본 1000·최대 5000). 창 기본값(종료=지금,
+    시작=종료 30일 전)·최대 366일·미래 금지는 transport가 정한다.
+  - cursor: Map `cursor`는 transport `next_cursor`를 **불투명하게 그대로** 주고받는다(Map이 해석·서명하지 않는다).
+    응답 `history.has_more`·`history.next_cursor`(+ `meta.page.next_cursor` 미러), `history.truncated`는 `has_more`와
+    같은 호환값(deprecated). 다음 페이지는 같은 `product_code`·`since`·`until`과 `cursor`로 부른다. cursor는 첫
+    페이지 발급부터 15분, 그리고 transport 유가 수집 revision이 그대로인 동안만 유효하다.
+  - **409 재시작 신호**: cursor를 보냈는데 transport가 409(수집 revision 변경·cursor 만료)면 Map은 HTTP 409가 아니라
+    200 + `history.reason=cursor_expired`를 준다 — 현재가는 그대로 주고, 소비자는 **이미 누적한 이력 페이지를 버리고
+    cursor 없이 첫 페이지부터 다시** 읽는다(다른 revision의 페이지를 이어 붙이면 중복·누락이 생긴다). Map 목록 표면의
+    `TRANSPORT_STATE_GENERATION_EXPIRED`(HTTP 409)와 다른 이유: 이 route는 현재가를 함께 주므로 이력 실패가 응답 전체를
+    막지 않는다(결정 4).
+  - unavailable 이유(값 하나에 원인 하나): `disabled`·`not_configured`(부르지 않음), `upstream_not_found`(404),
+    `upstream_unsupported`(501), `cursor_expired`(cursor와 함께 받은 409), `request_rejected`(422 — 366일 초과·미래
+    `until`·변조/다른 조건의 cursor), `upstream_timeout`(연결·읽기 timeout), `upstream_unavailable`(5xx — 503은 성공
+    수집 근거 없음 — ·그 밖의 연결 실패), `upstream_rejected`(그 밖의 비-200), `upstream_contract`(200 본문이 계약과
+    다름 — 요청과 다른 `station_key`·`meta.item_count` 불일치·`has_more`/`next_cursor` 어긋남·`observed_at` 내림차순
+    위반 포함).
+  - 응답 필드: `history.generated_at`·`source_collected_at`·`source_status`(`ok`/`stale` — stale이어도 이력을 준다)는
+    transport `meta`에서 온다. 행은 `product_code`·`observed_at`·`price`(null 그대로)만 원천이 준다 — 행별
+    `collected_at`·`provider_updated_at`은 nullable이고 지금은 항상 null이다(응답 생성 시각으로 채우지 않는다).
+  - 휴게소 유가 이력: transport가 저장하지 않아 `…/rest-area-fuel-prices/{station_key}/price-history`는 501이다. Map은
+    그 경로를 노출·호출하지 않고 새 표를 만들지 않는다(transport가 501을 주면 `upstream_unsupported`).
 - Map **admin** OpenAPI(`openapi.json`)에는 모든 표면이 들어가므로 이 route가 추가되면 PinVi 재vendor가 필요하다.
 
 ### D7. 운영 값

@@ -2758,6 +2758,10 @@ D1~D7, 설계 적대 리뷰 반영은 같은 절 끝.
   `stale=false`). 그 수치·세대 크기·Valkey 메모리 사용량을 journal에 적는다.
 - [ ] transport `price-history` export 배포 뒤 `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED=true`에서 실제 이력이
   `history.status=available`로 온다(그 전에는 `unavailable`/`disabled`가 정상이다).
+- [ ] T4 정렬(T-STATE-01-T4, 브랜치 `feat/transport-fuel-price-history-t4`): Map 파서·질의·cursor·이유 enum이 transport
+  T4 계약과 같다(ADR-114 D6 "2026-10-24 T4 정렬"). 코드 PR 머지(적대 리뷰 2회 반영·CI 초록), PinVi service·admin
+  재vendor + PinVi `_EXPECTED_QUERY`에 `cursor`·reason enum 4개 추가, 배포 뒤 Map API 컨테이너에서 실제 주유소 하나로
+  `available`·두 페이지(`limit=2`)·`source_status`를 확인한다.
 
 ## T-STATE-02
 

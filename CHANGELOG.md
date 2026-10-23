@@ -10,6 +10,24 @@
 
 ## [Unreleased]
 
+### 주유소 가격 추이 프록시를 transport T4 계약에 맞춘다 (2026-10-24, ADR-114 D6, T-STATE-01-T4)
+
+- **FIXED (service REST)**: `GET /v1/service/transport/fuel-stations/{feature_id}/price-history`가 실제 transport T4 응답
+  (`station_key`·`items`·`has_more`·`next_cursor` + `meta{generated_at, source_collected_at, source_status, item_count}`)을
+  계약 위반으로 거부하던 것을 고쳤다(옛 파서는 `natural_key`·top-level `generated_at`/`truncated`·행별 `collected_at`을
+  요구했다). transport에는 `product`·`from`·`to`로 보낸다(종전 `product_code`·`since`·`until`은 transport가 무시했다).
+- **ADDED (service REST)**: query `cursor`(transport `next_cursor` 불투명 전달), `history.has_more`·`history.next_cursor`
+  (+ `meta.page.next_cursor`)·`history.source_collected_at`·`history.source_status`. unavailable 이유
+  `cursor_expired`(transport 409 — 누적한 페이지를 버리고 처음부터)·`request_rejected`(422)·`upstream_unsupported`(501)·
+  `upstream_timeout`.
+- **CHANGED**: `limit`(기본 200·최대 1000)은 유종별이 아니라 **한 페이지 전체 행 수**다. `history.truncated`는 `has_more`와
+  같은 호환값(deprecated). `PriceHistoryPoint.collected_at`은 nullable이 됐고 `provider_updated_at`과 함께 지금은 항상
+  null이다(원천이 행마다 주지 않는다). service·admin OpenAPI가 바뀌어 **PinVi service·admin 재vendor가 필요하다**(user 불변).
+  관리자 frontend `types.ts`를 `openapi.json`에서 재생성했다(#1355의 `/v1/service/transport/*` 누락분 포함).
+- **CHANGED (Python API)**: `kor_travel_transport.parse_fuel_price_history(payload, *, station_key=...)`·
+  `TransportFuelPriceHistory`(필드 `station_key`·`source_collected_at`·`source_status`·`has_more`·`next_cursor`),
+  `EXPORT_PATH_FUEL_STATION_PRICE_HISTORY`의 자리표시자 `{station_key}`. migration·설정 변화 없음.
+
 ### 수집 쓰기 fence 재진입 왕복 절감 (2026-10-24, ADR115 선행)
 
 - 같은 session·DB transaction에서 이미 잡은 전역 fence의 반복 SQL을 생략한다. commit/rollback·SQL 오류·연결 변경 뒤에는 다시 획득하고 savepoint 안의 획득은 캐시하지 않는다. 전역 잠금 범위와 Feature 병합 의미는 유지한다.
