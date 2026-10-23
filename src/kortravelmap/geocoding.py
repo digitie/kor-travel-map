@@ -1373,7 +1373,10 @@ _GEO_TRANSIENT_BACKOFF_SECONDS: Final[float] = 2.0
 
 
 class _TransientGeoRequestError(GeoRequestError):
-    """다시 보내 볼 만한 transport 실패(read timeout·연결 중 끊김). 밖에서는 ``GeoRequestError``다."""
+    """다시 보내 볼 만한 transport 실패(read timeout·연결 중 끊김).
+
+    밖에서는 그냥 ``GeoRequestError``다.
+    """
 
 
 class KorTravelGeoRestClient:

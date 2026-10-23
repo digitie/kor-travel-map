@@ -577,8 +577,8 @@ async def run_tracked_feature_asset(
     **Failure metadata**에 싣고(output이 아니라 실패 이벤트에 붙으므로 남는다),
     그 밖의 실패는 아래 :func:`_log_spend_on_failure`가 경고 로그로 남긴다.
     """
-    # I/O 없이 멈춘 step을 진단한다(2026-10-23 MCST 3.5시간 무이벤트 — :mod:`~.stall_watchdog`).
-    async with stall_watchdog(context.log):
+    # I/O 없이 멈춘 step을 진단한다(2026-10-23 MCST 3.5시간 무이벤트, :mod:`~.stall_watchdog`).
+    async with stall_watchdog(getattr(context, "log", None)):
         return await _run_tracked_feature_asset(context, run)
 
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -29,6 +30,7 @@ __all__ = ["DEFAULT_STALL_AFTER_SECONDS", "process_io_bytes", "stall_watchdog"]
 DEFAULT_STALL_AFTER_SECONDS: Final[float] = 900.0
 
 _STACK_LIMIT: Final[int] = 40
+_LOGGER = logging.getLogger(__name__)
 _MAX_TASKS: Final[int] = 50
 
 
@@ -66,7 +68,11 @@ async def stall_watchdog(
     io_bytes: Callable[[], int | None] = process_io_bytes,
     clock: Callable[[], float] = time.monotonic,
 ) -> AsyncIterator[None]:
-    """블록이 도는 동안 I/O 정지를 감시한다. ``log``는 ``warning(msg, *args)``를 가진 logger."""
+    """블록이 도는 동안 I/O 정지를 감시한다.
+
+    ``log``는 ``warning(msg, *args)``를 가진 logger(보통 ``context.log``). None이면 모듈 logger.
+    """
+    logger: Any = _LOGGER if log is None else log
     if io_bytes() is None:
         yield
         return
@@ -84,7 +90,7 @@ async def stall_watchdog(
             idle = clock() - moved_at
             if not reported and idle >= stall_after_seconds:
                 reported = True
-                log.warning(
+                logger.warning(
                     "적재 step이 %.0f초 동안 I/O 없이 멈춰 있다 — asyncio task 스택:\n%s",
                     idle,
                     _task_dump(asyncio.current_task()),

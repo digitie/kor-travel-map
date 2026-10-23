@@ -199,8 +199,14 @@ async def test_cancellation_drains_prefetch_tasks() -> None:
 
 
 @pytest.mark.parametrize("failure", [400, 404, 429, 500, 503, "read_timeout"])
-async def test_rest_errors_abort_prefetch_without_caching_missing_address(failure) -> None:
+async def test_rest_errors_abort_prefetch_without_caching_missing_address(
+    failure, monkeypatch: pytest.MonkeyPatch
+) -> None:
     import httpx
+
+    import kortravelmap.geocoding as geocoding_module
+
+    monkeypatch.setattr(geocoding_module, "_GEO_TRANSIENT_BACKOFF_SECONDS", 0.0)
     from pydantic import SecretStr
 
     from kortravelmap.core.exceptions import GeoRequestError
@@ -225,7 +231,10 @@ async def test_rest_errors_abort_prefetch_without_caching_missing_address(failur
         geocoder = PrefetchingReverseGeocoder(reverse, concurrency=2)
         with pytest.raises(GeoRequestError):
             await geocoder.prefetch([_coord(i) for i in range(500)])
-        assert 1 <= calls <= 2
+        # 일시 장애(503·read timeout)는 행마다 상한 횟수만큼 다시 보낸다 — 그래도 동시성 2의
+        # 첫 두 행에서 끝나고 500행을 걷지 않는다.
+        attempts = 3 if failure in (503, "read_timeout") else 1
+        assert 1 <= calls <= 2 * attempts
 
 
 @pytest.mark.parametrize(

@@ -267,7 +267,7 @@ async def feature_place_mcst_culture(
     """MCST multi-member asset — 쿼터 판정과 분자 계수기를 둘 다 연다."""
 
     # I/O 없이 멈춘 step을 진단한다 — 2026-10-23 이 asset이 3.5시간 무이벤트로 멈췄다.
-    async with stall_watchdog(context.log):
+    async with stall_watchdog(getattr(context, "log", None)):
         return await _feature_place_mcst_culture(context)
 
 
