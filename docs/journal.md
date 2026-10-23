@@ -13,6 +13,12 @@
   MED 4·LOW 9 — 하한 추정치 실측(배포 시 acceptance) 외 전부 반영.
 - OpenAPI: service·admin 재생성(user 불변), vnext `openapi-diff-v1`·`consumer-rollout-v1` receipt 재핀 — **PinVi admin·
   service 재vendor 필요**.
+- 검사(n150 일회용 컨테이너, CI 세션 경계): unit·api·dagster·integration 초록(남은 실패는 main `bc5ab503` 기준선과 같은
+  환경 실패 — docker runtime 23·sealed tree 2·bootstrap 19·docker ledger 2). 새 통합 검사는 Manager와 같은 digest의
+  Valkey 9.0으로 돈다. 변이 검사: 핵심 가드 15개(CAS·개수 대조·PERSIST·grace·최근 최대·빈 집합·cursor 세대·NX 잠금·
+  응답 유실 정리·bbox 폭·절대 하한·옛 버전만 정리·override 초기화·세대 재확인) 전부 빨강.
+- Manager #544(Valkey) 머지 확인: run worker는 code-server 자식이라 URL을 상속한다. Map API에는 transport 주소·토큰이
+  없어 가격 추이는 그 env 전까지 `not_configured`.
 - 원장: acceptance §T-GR-05·T-GR-06을 도구로 아카이브(체크박스 100건 보존). `tasks.md`의 번호 없는 outage 보류 항목이
   T-CWRITE-09 본문으로 세어져 main CI가 빨갰다 — entry 앞으로 옮겼다.
 - 배포 의존: Manager Map Valkey 서비스 PR(`feat/map-valkey`, 포트 12704, `KOR_TRAVEL_MAP_VALKEY_URL`), API에 transport
