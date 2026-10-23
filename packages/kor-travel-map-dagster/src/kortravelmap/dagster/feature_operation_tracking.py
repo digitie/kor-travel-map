@@ -40,12 +40,12 @@ from .quota_exhaustion import (
     raise_terminal_if_quota_exhausted,
     raise_terminal_if_transport_unrecoverable,
 )
+from .stall_watchdog import stall_watchdog
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     counting_upstream_requests,
     observed_upstream_requests,
 )
-from .stall_watchdog import stall_watchdog
 from .upstream_retry import sharing_run_retry_budget
 
 _T = TypeVar("_T")
