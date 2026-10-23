@@ -1,3 +1,13 @@
+## 2026-10-24 — frontend npm high 게이트 빨강(Next RCE 권고): 브랜치 `fix/frontend-npm-high-vulns`
+
+- main frontend job이 `npm high 취약점 gate (배포 의존성)`에서 실패(run 39907545867·39944064649). 배포 의존성 `next`
+  16.3.8이 GHSA-2464-fhr4-w9xw·GHSA-673q-mjm6-r5xr(critical RCE)·GHSA-p3m5-59mp-jv5r(high DoS)에 걸렸다(16.0.0–16.4.0,
+  패치 16.4.1). 소유자: 보안 문제이므로 게이트를 약화하지 말고 의존성을 고칠 것.
+- 수정: `next` 16.3.8 → 16.4.3(16.4 라인 최신 패치), 루트 `@next/env`·dev `@next/eslint-plugin-next` 짝 맞춤.
+  lockfile은 n150 `node:22.23.1` 컨테이너에서 npm 12.0.1 `install --package-lock-only`로 갱신 — 바뀐 것은 Next family 뿐
+  (`sharp` 범위 ^0.35.5는 기존 override 0.35.5와 일치). 16.4 릴리스 노트의 제거 항목(실험 옵션)은 `next.config.ts`에서 미사용.
+- PinVi는 Map frontend 패키지를 소비하지 않는다(ADR-043, 소스 이식 주석만). 단 PinVi `apps/web`이 자체적으로 `next`
+  16.3.3을 쓰고 있어 같은 권고에 걸린다 — PinVi 저장소에서 별도 처리 필요.
 ## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
 
 - #1357 배포 뒤 MCST run `c0f91a7c` **성공**(12:04Z 시작, 9,634초): geo 호출 36,905건(reverse 35,852·region 1,053),
@@ -5,6 +15,7 @@
 - 그러나 watchdog이 15분마다 "I/O 없이 멈춤"을 남겼다(스택은 진행 중인 prefetch task). 원인: `/proc/self/io`의
   `rchar`/`wchar`는 소켓 송수신을 세지 않는다. 수정: geo 왕복·상류 요청·SQLAlchemy 문장이 `core.activity`를 표시하고
   watchdog이 그것도 진척으로 본다. 경고는 run당 한 번. 이어서 등산로 적재 시작.
+||||||| parent of c16210af1 (fix(frontend): next 16.3.8 → 16.4.3 보안 bump (critical RCE 2·high DoS 1))
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤: 브랜치 `fix/mcst-geo-stall`
 

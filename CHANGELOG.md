@@ -10,6 +10,14 @@
 
 ## [Unreleased]
 
+### npm 보안 권고 — Next 16.4.3 (2026-10-24)
+
+- **SECURITY (frontend)**: `next` 16.3.8 → **16.4.3**(`@next/env`·`@next/eslint-plugin-next`·`@next/swc-*` 함께).
+  GHSA-2464-fhr4-w9xw(critical, SVG Image Optimization RCE)·GHSA-673q-mjm6-r5xr(critical, `use cache` typed array
+  RCE)·GHSA-p3m5-59mp-jv5r(high, Server Actions DoS, CVE-2026-94482) — 취약 범위 16.0.0–16.4.0, 첫 패치 16.4.1 —
+  가 main의 `npm run audit:high`를 막았다. 게이트는 그대로 두고 의존성을 올렸다. lockfile은 npm 12.0.1
+  `--package-lock-only`로 다시 만들었고 Next family 밖의 해소는 바뀌지 않았다(override 추가 없음).
+
 ### transport 현재 상태를 Valkey에 세대 단위로 담고 service REST로 준다 (2026-10-23, ADR-114 1단계, T-STATE-01)
 
 - **ADDED (service REST)**: `/v1/service/transport/{fuel-stations,rest-areas,highway-incidents,airports}` 목록·상세,
