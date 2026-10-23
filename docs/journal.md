@@ -1,3 +1,20 @@
+## 2026-10-23 — geo 부하 줄이기 0단계(ADR-116, T-GEOLOAD-00): 브랜치 `feat/skip-geocode-unchanged`
+
+- 소유자 결정(2026-10-23): ADR-108의 "payload가 같은 행은 지오코딩하지 않는다"를 비-MOIS 적재 전부로 넓힌다. prod는
+  주차장 17,045 좌표에 run마다 reverse 17,638회·MCST 22~28k·등산로 약 57k를 불러 odroid geo가 ReadTimeout을 냈다.
+- prod 읽기 전용 실측(공용 PG `kor_travel_map`, READ ONLY transaction): 비-MOIS dataset별 좌표 있는 active·스탬프
+  `called`·현재 토큰 수, 직전 적재들 사이 payload가 바뀐 기존 행(주차장 878/17,795 ≈ 5%, 박물관 24, 축제 51, 관광지 9,
+  MCST 세계음식점 8), 6자리 좌표를 나눠 쓰는 행(주차장 1,176, 국가유산 920, MCST 504), 주소 열 override 0건. MCST 13개 중
+  적재된 것은 1개, 등산로는 미적재(seal 천장) — 그 dataset들은 첫 성공 적재 뒤부터 준다.
+- 설계: 역지오코더는 좌표만 받아 record를 모른다 → 공통 helper가 변환을 두 번 돌린다(빈 답 pass 0으로 identity·payload
+  hash·좌표 → fence 없는 조회 → 좌표 표 → 저장값/실제 geo를 섞은 pass 1 → 사후 확인). 조건은 `load_bundle`이 주소 열을
+  쓰지 않을 조건과 같다(head payload hash·스탬프 `called`+현재 토큰·좌표 float8 일치·active·주소 override 없음).
+- 설계 적대 리뷰 1회(HIGH 0·MED 4·LOW 6), 코드 적대 리뷰 2회(A: HIGH 0·MED 1·LOW 6, B: HIGH 0·MED 2·LOW 6) — 반영과
+  받아들인 것은 ADR-116 끝 두 절. 주요 반영: 재시도 답 기억, 옛 저장 jsonb fallback, DTO key 대신 hash 비교, 안전망
+  `disabled`·조회 실패 `lookup_failed` 계수, 조회 savepoint 격리, `MATERIALIZED` 입력, 재사용 뒤 현재 geo 데이터셋 재관측
+  (run 도중 릴리스), helper 우회 lint.
+- 원장: acceptance §T-GR-01·T-GR-02를 도구로 아카이브(체크박스 111건 보존, 216,928 → 208,855 bytes) 뒤 §T-GEOLOAD-00 추가.
+
 ## 2026-10-23 — ADR-114 1단계: transport 현재 상태 Valkey·service REST: 브랜치 `feat/adr114-valkey-transport`
 
 - 설계: ADR-114에 "구현 설계 — 1단계"(D1~D7)를 적었다 — 데이터셋 5개, 세대 키(`ktm:state:v1:{ds}:{gen}:{meta,items,ids,geo,lookup}`)

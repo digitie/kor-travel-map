@@ -15,7 +15,7 @@ from __future__ import annotations
 import json
 from collections.abc import AsyncIterator, Sequence
 from datetime import UTC, date, datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Final
 
 import pytest
 from kortravelmap.dagster.feature_update_runner import _bind_client_to_session
@@ -113,14 +113,24 @@ def _transform(items: Sequence[_Festival]) -> Any:
     return run
 
 
+_VOLATILE: Final = frozenset({"created_at", "updated_at", "imported_at"})
+"""DTO가 만들 때의 now로 채우는 시각 — 같은 입력이라도 변환마다 다르다."""
+
+
+def _without_clock(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {k: _without_clock(v) for k, v in value.items() if k not in _VOLATILE}
+    if isinstance(value, list):
+        return [_without_clock(v) for v in value]
+    return value
+
+
 def _comparable(bundles: Sequence[FeatureBundle]) -> list[str]:
-    """bundle 비교 키 — ``source_link.created_at``(만들 때의 now)만 뺀다."""
-    dumped = []
-    for bundle in bundles:
-        data = bundle.model_dump(mode="json")
-        data["source_link"].pop("created_at")
-        dumped.append(json.dumps(data, sort_keys=True, ensure_ascii=False))
-    return sorted(dumped)
+    """bundle 비교 키 — 만들 때의 now로 채우는 시각만 뺀다."""
+    return sorted(
+        json.dumps(_without_clock(bundle.model_dump(mode="json")), sort_keys=True)
+        for bundle in bundles
+    )
 
 
 def _ctx(ref: DatasetRef, token: str) -> GeoLoadContext:
