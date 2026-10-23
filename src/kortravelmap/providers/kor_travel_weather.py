@@ -1,4 +1,4 @@
-"""``kortravelmap.providers.kor_travel_weather`` — kor-travel-weather Map export 계약 (ADR-114 2단계).
+"""``kortravelmap.providers.kor_travel_weather`` — weather Map export 계약 (ADR-114 2단계).
 
 Map은 weather 값을 PG feature로 적재하지 않는다(ADR-105). 대신 kor-travel-weather가 Map용으로 연
 ``GET /v1/service/exports/{locations,current,forecasts,daily-summaries}``(weather W1·W2·W3·W5)를
@@ -11,8 +11,8 @@ Map 쪽 정본이다 — 이미 받은 JSON 페이지를 **엄격히** 읽어 Ma
   만들지 않았다). 실패는 401이다 — transport의 404 은닉과 다르다.
 - **계약을 pin·vendoring하지 않는다**(내부 소비자 규약). 필수 필드·타입이 어긋나면
   :class:`WeatherExportContractError`로 실패한다. weather가 필드를 **더하면** 무시한다(가산 변경).
-- 응답 ``meta.source_status``는 ``ok``·``stale``만 성공 페이지에 온다. ``failed``는 weather가 503으로
-  내므로 200 본문에 있으면 계약 위반이다.
+- 응답 ``meta.source_status``는 ``ok``·``stale``만 성공 페이지에 온다. ``failed``는 weather가
+  503으로 내므로 200 본문에 있으면 계약 위반이다.
 """
 
 from __future__ import annotations

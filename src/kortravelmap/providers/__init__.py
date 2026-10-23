@@ -17,7 +17,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``kor_travel_transport`` | kor-travel-transport | transport export 계약·파서(ADR-106) |
 | ``kor_travel_transport_state`` | kor-travel-transport | export → Valkey 상태 값(ADR-114) |
 | ``kor_travel_weather`` | kor-travel-weather | Map용 export(W1~W5) 계약·파서(ADR-114 2단계) |
-| ``kor_travel_weather_state`` | kor-travel-weather | export → Valkey weather 상태 값(ADR-114 2단계) |
+| ``kor_travel_weather_state`` | kor-travel-weather | export → Valkey 상태 값(ADR-114 2단계) |
 | ``krairport`` | kor-travel-transport | 공항 메타데이터 |
 | ``krex`` | kor-travel-transport | 휴게소·휴게소 유가·고속도로 돌발 |
 | ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |

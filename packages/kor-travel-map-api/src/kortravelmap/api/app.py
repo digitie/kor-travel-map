@@ -1203,8 +1203,9 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             service_transport_router,
             prefix="/v1",
         )
-        # ADR-114 2단계 — Valkey weather 현재·예보·세 구간 요약 service read. ADR-105(Map은 weather를
-        # 서빙하지 않는다)의 유일한 예외 표면이다. Valkey 장애는 이 라우터만 503이다.
+        # ADR-114 2단계 — Valkey weather 현재·예보·세 구간 요약 service read.
+        # ADR-105(Map은 weather를 서빙하지 않는다)의 유일한 예외 표면이다.
+        # Valkey 장애는 이 라우터만 503이다.
         application.include_router(
             service_weather_router,
             prefix="/v1",

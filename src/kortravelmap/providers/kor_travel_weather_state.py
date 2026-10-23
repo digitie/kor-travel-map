@@ -1,14 +1,15 @@
-"""``kortravelmap.providers.kor_travel_weather_state`` — weather export → Valkey 상태 값 (ADR-114 2단계).
+"""``kortravelmap.providers.kor_travel_weather_state`` — weather export → Valkey 상태 값
+(ADR-114 2단계).
 
 ``providers.kor_travel_weather``가 엄격히 읽은 W1·W2·W3·W5 항목을 ``dto.weather_state`` 값과
 :class:`~kortravelmap.infra.valkey_state.StateItem`으로 바꾼다. HTTP는 Dagster fetcher가, 저장은
 ``infra.valkey_state``가 한다 — 이 모듈은 변환과 데이터셋 정의(이름·교체 거부 기준·신선도 상한)만
 갖는다. 설계 정본은 ADR-114 "구현 설계 — 2단계" W1·W2·W4.
 
-- **값 하나 = 위치 하나**다. 일곱 데이터셋이 같은 ``feature_id``(:func:`weather_location_feature_id`)를
-  키로 쓴다. W2·W3·W5의 행은 위치 단위로 묶는다(:class:`LocationGrouper`).
-- 같은 위치 안에서 같은 관측(provider, metric)·예보 묶음(provider)·요약(date, slot)이 두 번 오면 원천
-  순서의 첫 행을 남기고 버린 수를 센다(세대 ``meta.duplicates``에 더한다).
+- **값 하나 = 위치 하나**다. 일곱 데이터셋이 같은 ``feature_id``
+  (:func:`weather_location_feature_id`)를 키로 쓴다. W2·W3·W5의 행은 위치 단위로 묶는다(:class:`LocationGrouper`).
+- 같은 위치 안에서 같은 관측(provider, metric)·예보 묶음(provider)·요약(date, slot)이 두 번 오면
+  원천 순서의 첫 행을 남기고 버린 수를 센다(세대 ``meta.duplicates``에 더한다).
 - geo를 부르지 않는다. 법정동 코드는 weather W1 값을 그대로 쓴다(결정 6).
 """
 

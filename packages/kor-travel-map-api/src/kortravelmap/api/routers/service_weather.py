@@ -150,7 +150,9 @@ class WeatherLocationOut(WeatherLocationState):
     distance_m: float | None = Field(default=None, description="근처 검색일 때 중심에서의 거리.")
     observations: list[WeatherObservationState] | None = Field(
         default=None,
-        description="include_current=true일 때 최신 관측(관측 데이터셋이 없거나 항목이 없으면 null).",
+        description=(
+            "include_current=true일 때 최신 관측(관측 데이터셋이 없거나 항목이 없으면 null)."
+        ),
     )
 
 
@@ -213,7 +215,9 @@ class WeatherSlotDelta(BaseModel):
 class WeatherDailySlotOut(WeatherDailySlotState):
     vs_previous_day: WeatherSlotDelta | None = Field(
         default=None,
-        description="전날 같은 구간과 비교. 전날 구간이 없거나 둘 중 하나가 sample_count=0이면 null.",
+        description=(
+            "전날 같은 구간과 비교. 전날 구간이 없거나 둘 중 하나가 sample_count=0이면 null."
+        ),
     )
 
 
@@ -268,7 +272,9 @@ class WeatherStatusResponse(BaseModel):
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
     409: {
         "model": ProblemDetail,
-        "description": "WEATHER_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시.",
+        "description": (
+            "WEATHER_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시."
+        ),
     },
     503: {
         "model": ProblemDetail,

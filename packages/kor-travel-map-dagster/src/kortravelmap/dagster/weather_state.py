@@ -9,8 +9,9 @@ D3·D4와 "2단계" W3·W4가 정본이다.
 - **PG를 읽지도 쓰지도 않는다.** Map의 weather feature 적재는 ADR-105가 지웠고 그대로다 — 이 job은
   ``kor_travel_map_client``를 요구하지 않고 weather 값을 PG에 쓰는 core 경로를 부르지 않는다.
 - geo를 부르지 않는다. 법정동 코드는 weather W1 값을 그대로 쓴다(결정 6).
-- schedule은 **기본 STOPPED**다. weather에 W1~W5가 배포되고(``KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED``)
-  Map code-server에 weather 주소·토큰이 들어간 뒤 켠다. 첫 교체 전에는 REST가 503이다.
+- schedule은 **기본 STOPPED**다. weather에 W1~W5가 배포되고
+  (``KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED``) Map code-server에 weather 주소·토큰이
+  들어간 뒤 켠다. 첫 교체 전에는 REST가 503이다.
 - 실패 분류: 503(``weather_not_ready``)·410 재시도 소진·Valkey 연결 실패는 step 재시도 대상이고,
   401·404·계약 위반·JSON 아님·교체 거부·동시 교체·Valkey OOM·미설정은 step 재시도를 끈다.
 - 다른 적재가 같은 데이터셋을 잡고 있으면(잠금) 이번 run은 아무것도 하지 않고 성공으로 끝난다.
@@ -192,8 +193,8 @@ def _raise_weather_status(response: httpx.Response, path: str) -> None:
     status = response.status_code
     if status == 401:
         raise WeatherExportUnauthorized(
-            f"kor-travel-weather {path}가 401이다 — 토큰이 weather KOR_TRAVEL_WEATHER_ADMIN_TOKEN과 "
-            "다르다."
+            f"kor-travel-weather {path}가 401이다 — 토큰이 weather "
+            "KOR_TRAVEL_WEATHER_ADMIN_TOKEN과 다르다."
         )
     if status == 404:
         raise WeatherExportMissing(
