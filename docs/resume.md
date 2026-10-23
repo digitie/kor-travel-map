@@ -1,8 +1,8 @@
-## 2026-10-24 — ADR115 T-CWRITE-02: 원천별 필드 shadow 후보(초기 checkpoint)
+## 2026-10-24 — ADR115 T-CWRITE-02: 불변 정책과 shadow 후보 기반
 
-- 기본OFF인410 shadow 정책/후보 원장, typed 기록 procedure/닫힌 ACL, supplied-field 증거와 실제 load_bundle hook을 구현 중이다. 공개 winner/잠금 범위는 유지한다.
-- 초기 actual PG3/OFF22/strict mypy166 PASS. [구현 범위·미완 gate](reports/2026-10-24-provider-field-shadow.md).
-- 전체 backfill/정책·Geo 증거·winner 활성·scope gate/CI/두 리뷰/실제 HTTP·UI는 미완이며 운영 배포하지 않았다.
+- 완결 fieldset을 원자 등록하는 불변 정책 header와 source별 typed shadow recorder/ACL을410에 추가한다. 등록은 global-first이며 RR에서 새 revision이 보이지 않으면 실패한다.
+- 실제 native 수집 hook/settings는 별도 후속으로 분리했다. 공개 winner/effective/전역 잠금 범위는 유지하며 기본OFF/운영0이다. [범위·교착/RR·미완 gate](reports/2026-10-24-provider-field-shadow.md).
+- 정책/전체 membership·Geo·winner 활성·scope/epoch/manifest와 최종 CI/두 리뷰·HTTP/UI 수용은 미완이다. 첫 기반 단위를 전체 동시 쓰기 완료로 세지 않는다.
 
 ## 2026-10-24 — ADR115 선행: 같은 transaction fence 재진입 SQL 절감
 

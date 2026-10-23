@@ -2,22 +2,97 @@
 CREATE TABLE feature.provider_field_shadow_policies (
     policy_revision bigint NOT NULL CHECK (policy_revision >= 1),
     provider_dataset_id bigint NOT NULL REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT,
-    field_path text NOT NULL REFERENCES ops.feature_override_field_paths(field_path) ON DELETE RESTRICT,
-    normalizer_revision text NOT NULL CHECK (btrim(normalizer_revision) <> '' AND length(normalizer_revision) <= 128),
-    provider_rank integer NOT NULL CHECK (provider_rank >= 0),
-    omitted_policy text NOT NULL CHECK (omitted_policy IN ('carry_forward', 'remove')),
-    null_policy text NOT NULL CHECK (null_policy IN ('remove', 'value')),
-    CONSTRAINT pk_provider_field_shadow_policies PRIMARY KEY (policy_revision, provider_dataset_id, field_path)
+    normalizer_revision text NOT NULL CHECK (normalizer_revision = btrim(normalizer_revision) AND normalizer_revision <> '' AND length(normalizer_revision) <= 128),
+    fields jsonb NOT NULL CHECK (jsonb_typeof(fields) = 'array' AND jsonb_array_length(fields) BETWEEN 1 AND 256),
+    CONSTRAINT pk_provider_field_shadow_policies PRIMARY KEY (policy_revision, provider_dataset_id)
 );
 ALTER TABLE feature.provider_field_shadow_policies OWNER TO ktm_feature_schema_owner;
 CREATE INDEX idx_provider_field_shadow_policies_dataset ON feature.provider_field_shadow_policies(provider_dataset_id);
-CREATE INDEX idx_provider_field_shadow_policies_path ON feature.provider_field_shadow_policies(field_path);
+
+-- 전체 fieldset은 등록 진입점 한 번에 고정한다. 행별 수정 트리거에서 global fence를
+-- 기다리면 collector(global -> policy)와 admin(policy -> global)의 순서가 역전된다.
+CREATE PROCEDURE feature.register_provider_field_shadow_policy(
+    IN p_policy_revision bigint, IN p_provider_dataset_id bigint,
+    IN p_normalizer_revision text, IN p_fields jsonb
+)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
+DECLARE
+    v_fields jsonb;
+    v_existing feature.provider_field_shadow_policies%ROWTYPE;
+BEGIN
+    -- 어떤 정책 행/unique key를 잠그기 전에 기존 전역 fence를 먼저 획득한다.
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
+    IF p_policy_revision IS NULL OR p_policy_revision < 1
+       OR p_provider_dataset_id IS NULL
+       OR p_normalizer_revision IS NULL OR p_normalizer_revision <> btrim(p_normalizer_revision)
+       OR p_normalizer_revision = '' OR length(p_normalizer_revision) > 128
+       OR jsonb_typeof(p_fields) IS DISTINCT FROM 'array'
+       OR pg_column_size(p_fields) > 131072 THEN
+        RAISE EXCEPTION 'invalid shadow policy header' USING ERRCODE='23514';
+    END IF;
+    IF jsonb_array_length(p_fields) NOT BETWEEN 1 AND 256 THEN
+        RAISE EXCEPTION 'invalid shadow policy field count' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_fields) field
+        WHERE jsonb_typeof(field) <> 'object') THEN
+        RAISE EXCEPTION 'invalid shadow policy field shape' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_fields) field
+        WHERE (SELECT array_agg(key ORDER BY key COLLATE "C") FROM jsonb_object_keys(field) key)
+               IS DISTINCT FROM ARRAY['field_path','null_policy','omitted_policy','provider_rank']::text[]
+           OR jsonb_typeof(field->'field_path') <> 'string'
+           OR jsonb_typeof(field->'provider_rank') <> 'number'
+           OR (field->>'provider_rank') !~ '^(0|[1-9][0-9]*)$'
+           OR (field->>'omitted_policy') NOT IN ('carry_forward','remove')
+           OR (field->>'null_policy') NOT IN ('remove','value')
+           OR jsonb_typeof(field->'omitted_policy') <> 'string'
+           OR jsonb_typeof(field->'null_policy') <> 'string'
+           OR NOT EXISTS (SELECT 1 FROM ops.feature_override_field_paths registry
+               WHERE registry.field_path=field->>'field_path' AND registry.provider_writable)) THEN
+        RAISE EXCEPTION 'invalid typed shadow policy field' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS (SELECT 1 FROM jsonb_array_elements(p_fields) field
+        WHERE (field->>'provider_rank')::numeric > 2147483647)
+       OR (SELECT count(DISTINCT field->>'field_path') FROM jsonb_array_elements(p_fields) field)
+          <> jsonb_array_length(p_fields) THEN
+        RAISE EXCEPTION 'duplicate field or invalid shadow provider rank' USING ERRCODE='23514';
+    END IF;
+    SELECT jsonb_agg(jsonb_build_object(
+        'field_path',field->>'field_path', 'provider_rank',(field->>'provider_rank')::integer,
+        'omitted_policy',field->>'omitted_policy', 'null_policy',field->>'null_policy'
+    ) ORDER BY field->>'field_path' COLLATE "C") INTO v_fields FROM jsonb_array_elements(p_fields) field;
+    INSERT INTO feature.provider_field_shadow_policies(
+        policy_revision,provider_dataset_id,normalizer_revision,fields
+    ) VALUES (p_policy_revision,p_provider_dataset_id,p_normalizer_revision,v_fields)
+    ON CONFLICT (policy_revision,provider_dataset_id) DO NOTHING;
+    SELECT * INTO v_existing FROM feature.provider_field_shadow_policies
+        WHERE policy_revision=p_policy_revision AND provider_dataset_id=p_provider_dataset_id;
+    IF NOT FOUND OR v_existing.normalizer_revision IS DISTINCT FROM p_normalizer_revision
+       OR v_existing.fields IS DISTINCT FROM v_fields THEN
+        -- RR에 새 revision이 보이지 않거나 동일 revision이 다르면 승인하지 않는다.
+        RAISE EXCEPTION 'shadow policy revision is immutable or not visible' USING ERRCODE='23514';
+    END IF;
+END;
+$$;
+ALTER PROCEDURE feature.register_provider_field_shadow_policy(bigint,bigint,text,jsonb) OWNER TO ktm_feature_schema_owner;
+REVOKE ALL ON PROCEDURE feature.register_provider_field_shadow_policy(bigint,bigint,text,jsonb) FROM PUBLIC;
+-- 정책 등록은 schema 관리자만 한다. runtime/typed recorder owner에게 EXECUTE를 주지 않는다.
+CREATE FUNCTION feature.guard_provider_field_shadow_policy() RETURNS trigger
+LANGUAGE plpgsql SET search_path TO pg_catalog AS $$
+BEGIN
+    RAISE EXCEPTION 'shadow policy revision and complete fieldset are immutable' USING ERRCODE='23514';
+END;
+$$;
+ALTER FUNCTION feature.guard_provider_field_shadow_policy() OWNER TO ktm_feature_schema_owner;
+REVOKE ALL ON FUNCTION feature.guard_provider_field_shadow_policy() FROM PUBLIC;
+CREATE TRIGGER trg_provider_field_shadow_policy_immutable BEFORE UPDATE OR DELETE
+ON feature.provider_field_shadow_policies FOR EACH ROW EXECUTE FUNCTION feature.guard_provider_field_shadow_policy();
 
 CREATE TABLE feature.provider_field_shadow_candidates (
     feature_id uuid NOT NULL REFERENCES feature.features(feature_id) ON DELETE CASCADE,
     policy_revision bigint NOT NULL,
     provider_dataset_id bigint NOT NULL,
-    field_path text NOT NULL,
+    field_path text NOT NULL REFERENCES ops.feature_override_field_paths(field_path) ON DELETE RESTRICT,
     source_entity_key text NOT NULL REFERENCES provider_sync.source_entities(source_entity_key) ON DELETE RESTRICT,
     value_source_record_key text REFERENCES provider_sync.source_records(source_record_key) ON DELETE RESTRICT,
     value_source_hash text,
@@ -31,8 +106,8 @@ CREATE TABLE feature.provider_field_shadow_candidates (
     validated_at timestamptz NOT NULL,
     normalizer_revision text,
     CONSTRAINT pk_provider_field_shadow_candidates PRIMARY KEY (feature_id, field_path, provider_dataset_id, source_entity_key, policy_revision),
-    CONSTRAINT fk_provider_field_shadow_candidates_policy FOREIGN KEY(policy_revision, provider_dataset_id, field_path)
-        REFERENCES feature.provider_field_shadow_policies(policy_revision, provider_dataset_id, field_path) ON DELETE RESTRICT,
+    CONSTRAINT fk_provider_field_shadow_candidates_policy FOREIGN KEY(policy_revision, provider_dataset_id)
+        REFERENCES feature.provider_field_shadow_policies(policy_revision, provider_dataset_id) ON DELETE RESTRICT,
     CONSTRAINT ck_provider_field_shadow_candidates_single_value CHECK (value_json IS NULL OR value_geometry IS NULL),
     CONSTRAINT ck_provider_field_shadow_candidates_value CHECK (
         availability <> 'value' OR (value_source_record_key IS NOT NULL AND value_source_hash IS NOT NULL
@@ -61,12 +136,15 @@ DECLARE
     v_kind text;
     v_observed_at timestamptz;
     v_validated_at timestamptz;
-    v_policy feature.provider_field_shadow_policies%ROWTYPE;
+    v_header feature.provider_field_shadow_policies%ROWTYPE;
+    v_policy record;
     v_registry ops.feature_override_field_paths%ROWTYPE;
     v_old feature.provider_field_shadow_candidates%ROWTYPE;
     v_candidate feature.provider_field_shadow_candidates%ROWTYPE;
     v_supplied boolean;
     v_value jsonb;
+    v_target_type text;
+    v_cast_value jsonb;
 BEGIN
     IF p_policy_revision IS NULL OR p_policy_revision < 1 OR p_presence_proven IS NULL
        OR jsonb_typeof(p_values) IS DISTINCT FROM 'object'
@@ -85,31 +163,31 @@ BEGIN
       FROM provider_sync.source_records record
       JOIN provider_sync.source_entity_heads head ON head.source_entity_key=record.source_entity_key
       WHERE record.source_record_key=p_source_record_key AND head.current_source_record_key=record.source_record_key;
-    IF NOT EXISTS (SELECT 1 FROM feature.provider_field_shadow_policies
-        WHERE policy_revision=p_policy_revision AND provider_dataset_id=p_provider_dataset_id) THEN
-        RAISE EXCEPTION 'shadow policy is not explicitly configured' USING ERRCODE='23514';
+    SELECT * INTO v_header FROM feature.provider_field_shadow_policies
+        WHERE policy_revision=p_policy_revision AND provider_dataset_id=p_provider_dataset_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'shadow policy is not explicitly configured or visible' USING ERRCODE='23514';
     END IF;
     IF EXISTS (
         SELECT path FROM (
             SELECT jsonb_object_keys(p_values) path UNION ALL SELECT jsonb_object_keys(p_geometry_wkt)
         ) supplied
-        WHERE NOT EXISTS (SELECT 1 FROM feature.provider_field_shadow_policies policy
-            WHERE policy.policy_revision=p_policy_revision AND policy.provider_dataset_id=p_provider_dataset_id
-            AND policy.field_path=supplied.path)
+        WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_header.fields) field
+            WHERE field->>'field_path'=supplied.path)
     ) OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_values) path WHERE p_geometry_wkt ? path) THEN
         RAISE EXCEPTION 'supplied field has missing policy or conflicting typed values' USING ERRCODE='23514';
     END IF;
     o_field_count := 0;
     o_unresolved_count := 0;
-    FOR v_policy IN SELECT * FROM feature.provider_field_shadow_policies
-        WHERE policy_revision=p_policy_revision AND provider_dataset_id=p_provider_dataset_id
-        ORDER BY field_path COLLATE "C" FOR SHARE
+    FOR v_policy IN SELECT * FROM jsonb_to_recordset(v_header.fields)
+        AS field(field_path text,provider_rank integer,omitted_policy text,null_policy text)
+        ORDER BY field_path COLLATE "C"
     LOOP
         SELECT * INTO STRICT v_registry FROM ops.feature_override_field_paths WHERE field_path=v_policy.field_path;
         IF NOT v_registry.provider_writable OR (v_registry.feature_kind <> '*' AND v_registry.feature_kind <> v_kind) THEN
             RAISE EXCEPTION 'shadow field does not belong to typed Feature' USING ERRCODE='23514';
         END IF;
-        IF p_presence_proven AND p_normalizer_revision IS DISTINCT FROM v_policy.normalizer_revision THEN
+        IF p_presence_proven AND p_normalizer_revision IS DISTINCT FROM v_header.normalizer_revision THEN
             RAISE EXCEPTION 'shadow normalizer revision is not declared' USING ERRCODE='23514';
         END IF;
         SELECT * INTO v_old FROM feature.provider_field_shadow_candidates
@@ -158,6 +236,36 @@ BEGIN
             ) THEN
                 RAISE EXCEPTION 'shadow text array contains nontext value' USING ERRCODE='23514';
             END IF;
+            IF v_value <> 'null'::jsonb THEN
+                -- registry JSON 종류만으로 fractional integer/잘못된 날짜를 승인하지 않는다.
+                -- 실제 저장 열의 smallint/int/numeric 정밀도·길이까지 검증한다.
+                SELECT format_type(attribute.atttypid,attribute.atttypmod) INTO STRICT v_target_type
+                FROM pg_attribute attribute
+                JOIN pg_class relation ON relation.oid=attribute.attrelid
+                JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
+                WHERE namespace.nspname='feature' AND relation.relname=v_registry.target_relation
+                  AND attribute.attname=v_registry.target_column AND NOT attribute.attisdropped;
+                IF v_registry.value_kind NOT IN ('json_object','json_array','text_array') THEN
+                    IF NOT pg_input_is_valid(v_value #>> '{}',v_target_type) THEN
+                        RAISE EXCEPTION 'shadow scalar cannot be stored in typed target' USING ERRCODE='23514';
+                    END IF;
+                    IF v_registry.value_kind='date' AND (v_value #>> '{}') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
+                        RAISE EXCEPTION 'shadow date requires an ISO calendar date' USING ERRCODE='23514';
+                    END IF;
+                    IF v_registry.value_kind='timestamptz' AND (v_value #>> '{}') !~
+                        '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' THEN
+                        RAISE EXCEPTION 'shadow timestamp requires an explicit timezone' USING ERRCODE='23514';
+                    END IF;
+                    IF v_registry.value_kind IN ('integer','numeric','text') THEN
+                        -- format_type는 trusted catalog 값이다. 입력값은 바인딩해 SQL에 섞지 않는다.
+                        EXECUTE format('SELECT to_jsonb(($1)::%s)',v_target_type)
+                            INTO v_cast_value USING v_value #>> '{}';
+                        IF v_cast_value IS DISTINCT FROM v_value THEN
+                            RAISE EXCEPTION 'shadow scalar would lose precision or length' USING ERRCODE='23514';
+                        END IF;
+                    END IF;
+                END IF;
+            END IF;
             v_candidate.value_json := v_value;
             v_candidate.value_geometry := NULL;
             v_candidate.value_source_record_key := p_source_record_key;
@@ -191,30 +299,9 @@ BEGIN
 END;
 $$;
 ALTER PROCEDURE feature.record_provider_field_candidates(uuid,bigint,text,text,bigint,text,boolean,jsonb,jsonb) OWNER TO ktm_feature_state_procedure_owner;
+SET ROLE ktm_feature_state_procedure_owner;
 REVOKE ALL ON PROCEDURE feature.record_provider_field_candidates(uuid,bigint,text,text,bigint,text,boolean,jsonb,jsonb) FROM PUBLIC;
-GRANT SELECT, UPDATE(policy_revision) ON feature.provider_field_shadow_policies TO ktm_feature_state_procedure_owner;
-GRANT SELECT,INSERT,UPDATE ON feature.provider_field_shadow_candidates TO ktm_feature_state_procedure_owner;
 GRANT EXECUTE ON PROCEDURE feature.record_provider_field_candidates(uuid,bigint,text,text,bigint,text,boolean,jsonb,jsonb) TO ktm_feature_runtime;
-
-CREATE FUNCTION feature.guard_provider_field_shadow_policy() RETURNS trigger
-LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
-DECLARE
-    v_revision bigint;
-    v_dataset bigint;
-BEGIN
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
-    v_revision := CASE WHEN TG_OP='DELETE' THEN OLD.policy_revision ELSE NEW.policy_revision END;
-    v_dataset := CASE WHEN TG_OP='DELETE' THEN OLD.provider_dataset_id ELSE NEW.provider_dataset_id END;
-    IF EXISTS (SELECT 1 FROM feature.provider_field_shadow_candidates
-        WHERE policy_revision=v_revision AND provider_dataset_id=v_dataset)
-       OR (TG_OP='UPDATE' AND EXISTS (SELECT 1 FROM feature.provider_field_shadow_candidates
-        WHERE policy_revision=OLD.policy_revision AND provider_dataset_id=OLD.provider_dataset_id)) THEN
-        RAISE EXCEPTION 'used shadow policy revision is immutable' USING ERRCODE='23514';
-    END IF;
-    IF TG_OP='DELETE' THEN RETURN OLD; ELSE RETURN NEW; END IF;
-END;
-$$;
-ALTER FUNCTION feature.guard_provider_field_shadow_policy() OWNER TO ktm_feature_state_procedure_owner;
-REVOKE ALL ON FUNCTION feature.guard_provider_field_shadow_policy() FROM PUBLIC;
-CREATE TRIGGER trg_provider_field_shadow_policy_immutable BEFORE INSERT OR UPDATE OR DELETE
-ON feature.provider_field_shadow_policies FOR EACH ROW EXECUTE FUNCTION feature.guard_provider_field_shadow_policy();
+SET ROLE ktm_feature_schema_owner;
+GRANT SELECT ON feature.provider_field_shadow_policies TO ktm_feature_state_procedure_owner;
+GRANT SELECT,INSERT,UPDATE ON feature.provider_field_shadow_candidates TO ktm_feature_state_procedure_owner;

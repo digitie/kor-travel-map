@@ -35,7 +35,6 @@ from .file import FeatureFileSource
 from .geo_dataset import GeoAttemptEvidence
 from .notice import NoticeDetail
 from .place import PlaceDetail
-from .provider_field_presence import ProviderFieldPresence
 from .route import RouteDetail
 from .source import SourceLink, SourceRecord
 
@@ -85,13 +84,6 @@ class FeatureBundle(BaseModel):
             "값이 어느 출처인지 알 수 없어 좌표-주소 교차검증이 불가능해진다. 채우지 않은 "
             "provider는 ``None``이며, 검증은 그 provider에 대해 침묵한다 — 침묵을 통과로 "
             "착각하지 않도록 커버리지는 metadata에 별도 집계된다."
-        ),
-    )
-    provider_field_presence: ProviderFieldPresence | None = Field(
-        default=None,
-        description=(
-            "ADR115 shadow 후보용 원천 필드 존재 증거. normalizer가 명시한 경로만 supplied로 "
-            "보며 DTO 기본 None을 명시 null로 추측하지 않는다. 미제공은 coverage 미완이다."
         ),
     )
     geo_attempt: GeoAttemptEvidence | None = Field(

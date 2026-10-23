@@ -12,6 +12,7 @@ from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
 from kortravelmap.infra.provider_field_candidates import (
     arm_provider_field_shadow,
     capture_provider_field_candidates,
+    provider_field_shadow_enabled,
 )
 
 
@@ -77,3 +78,15 @@ def test_invalid_shadow_revision_is_not_armed(revision: Any) -> None:
 def test_presence_requires_canonical_registry_paths(paths: set[str]) -> None:
     with pytest.raises(ValidationError):
         ProviderFieldPresence(normalizer_revision="v1", supplied_fields=paths)
+
+
+def test_other_dataset_is_not_enabled_by_a_global_revision() -> None:
+    session = _Session()
+    arm_provider_field_shadow(session, 1, frozenset({("provider-a", "dataset-a")}))
+    assert provider_field_shadow_enabled(session, provider="provider-a", dataset_key="dataset-a")
+    assert not provider_field_shadow_enabled(
+        session, provider="provider-a", dataset_key="dataset-b"
+    )
+    assert not provider_field_shadow_enabled(
+        session, provider="provider-b", dataset_key="dataset-a"
+    )

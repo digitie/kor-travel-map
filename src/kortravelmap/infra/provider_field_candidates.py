@@ -13,6 +13,7 @@ if TYPE_CHECKING:
 
     from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
 
+_SHADOW_SCOPES_INFO_KEY: Final[str] = "kortravelmap.provider_field_shadow_scopes"
 _SHADOW_REVISION_INFO_KEY: Final[str] = "kortravelmap.provider_field_shadow_revision"
 _RECORD_SQL: Final[str] = """
 CALL feature.record_provider_field_candidates(
@@ -30,16 +31,27 @@ class CandidateShadowCoverage:
     unresolved_count: int
 
 
-def arm_provider_field_shadow(session: AsyncSession, revision: int | None) -> None:
+def arm_provider_field_shadow(
+    session: AsyncSession,
+    revision: int | None,
+    scopes: frozenset[tuple[str, str]] = frozenset(),
+) -> None:
     """선택한 shadow 정책 revision만 transaction에 배선한다. 기본 None은 SQL0회다."""
     if revision is not None and (type(revision) is not int or revision < 1):
         raise ValueError("shadow policy revision은 양의 정수여야 합니다.")
     session.info[_SHADOW_REVISION_INFO_KEY] = revision
+    session.info[_SHADOW_SCOPES_INFO_KEY] = scopes
 
 
-def provider_field_shadow_enabled(session: AsyncSession) -> bool:
+def provider_field_shadow_enabled(
+    session: AsyncSession, *, provider: str, dataset_key: str
+) -> bool:
     info = getattr(session, "info", None)
-    return isinstance(info, dict) and info.get(_SHADOW_REVISION_INFO_KEY) is not None
+    return (
+        isinstance(info, dict)
+        and info.get(_SHADOW_REVISION_INFO_KEY) is not None
+        and (provider, dataset_key) in info.get(_SHADOW_SCOPES_INFO_KEY, frozenset())
+    )
 
 
 async def capture_provider_field_candidates(
