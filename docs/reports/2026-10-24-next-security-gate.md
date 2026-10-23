@@ -13,8 +13,10 @@ Vercel 공식 권고 세 건의 최초 수정 버전은 모두 16.4.1이다. 자
 - [GHSA-p3m5-59mp-jv5r](https://github.com/vercel/next.js/security/advisories/GHSA-p3m5-59mp-jv5r)
 - [GHSA-673q-mjm6-r5xr](https://github.com/vercel/next.js/security/advisories/GHSA-673q-mjm6-r5xr)
 
-`sharp`는 기존 정확 핀 0.35.5를 유지한다. 루트의 별도 `@next/env` 16.3.8도
-유지하며 Next 자체에는 npm이 16.4.1을 하위 의존성으로 설치한다.
+`sharp`는 기존 정확 핀 0.35.5를 유지한다. 루트의 직접 `@next/env`도
+16.4.1로 맞춘다. 최초 Next만 갱신한 검사에서는 CI와 같은 `npm ci --workspaces`가
+루트의 옛 env를 설치하지 않아 tree 검사가 실패했다. 같은 버전으로 통합해 이 설치
+회귀도 제거한다.
 `npm --force`와 무관 의존성 버전 갱신은 사용하지 않았다.
 
 ## 검증과 남은 게이트
