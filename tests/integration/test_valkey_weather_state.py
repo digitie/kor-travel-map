@@ -114,19 +114,23 @@ def _pages(rows: list[dict[str, Any]], size: int = 2, **meta: Any) -> dict[str |
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
 
 
-def _serve(monkeypatch: pytest.MonkeyPatch, routes: dict[str, dict[str | None, Any]]) -> None:
-    import kortravelmap.dagster.weather_state as weather_state
+#: 가짜 weather가 내는 경로 → cursor 페이지. ``_load``가 적재 op 동안만 httpx client를 바꿔 끼운다
+#: (API 미들웨어가 ``isinstance(…, httpx.AsyncClient)``를 쓰므로 REST 호출 중에는 원래 타입이어야 한다).
+_ROUTES: dict[str, dict[str | None, Any]] = {}
 
-    def handler(request: httpx.Request) -> httpx.Response:
-        pages = routes[request.url.path]
-        return httpx.Response(200, json=pages[request.url.params.get("cursor")])
 
-    def factory(**kwargs: Any) -> httpx.AsyncClient:
-        if str(kwargs.get("base_url", "")).startswith("http://weather.test"):
-            return _REAL_ASYNC_CLIENT(transport=httpx.MockTransport(handler), **kwargs)
-        return _REAL_ASYNC_CLIENT(**kwargs)
+def _serve(_monkeypatch: pytest.MonkeyPatch, routes: dict[str, dict[str | None, Any]]) -> None:
+    _ROUTES.clear()
+    _ROUTES.update(routes)
 
-    monkeypatch.setattr(weather_state.httpx, "AsyncClient", factory)
+
+def _weather_handler(request: httpx.Request) -> httpx.Response:
+    pages = _ROUTES[request.url.path]
+    return httpx.Response(200, json=pages[request.url.params.get("cursor")])
+
+
+def _routed_client(**kwargs: Any) -> httpx.AsyncClient:
+    return _REAL_ASYNC_CLIENT(transport=httpx.MockTransport(_weather_handler), **kwargs)
 
 
 def _location(location_id: str, lon: float, lat: float) -> dict[str, Any]:
@@ -142,17 +146,19 @@ def _location(location_id: str, lon: float, lat: float) -> dict[str, Any]:
 
 
 async def _load(store: ValkeyStateStore, dataset: Any, **kwargs: Any) -> dict[str, Any]:
-    from kortravelmap.dagster.weather_state import WEATHER_STATE_SPECS, load_weather_state
+    import kortravelmap.dagster.weather_state as weather_state
 
-    spec = next(s for s in WEATHER_STATE_SPECS if s.dataset is dataset)
+    spec = next(s for s in weather_state.WEATHER_STATE_SPECS if s.dataset is dataset)
     spec = replace(spec, dataset=replace(spec.dataset, guard=LENIENT))
-    return await load_weather_state(
-        spec,
-        settings=_weather_settings(),
-        run_id="run-int",
-        allow_shrink=kwargs.get("allow_shrink", False),
-        store=store,
-    )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(weather_state.httpx, "AsyncClient", _routed_client)
+        return await weather_state.load_weather_state(
+            spec,
+            settings=_weather_settings(),
+            run_id="run-int",
+            allow_shrink=kwargs.get("allow_shrink", False),
+            store=store,
+        )
 
 
 async def test_load_then_nearest_bundle_joins_every_dataset(
