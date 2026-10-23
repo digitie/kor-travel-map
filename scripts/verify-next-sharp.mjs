@@ -62,9 +62,16 @@ assert.equal(
   "설치된 Sharp가 선언된 핀과 다릅니다.",
 );
 
-const { getImageSize, optimizeImage } = require(
-  "next/dist/server/image-optimizer.js",
+// Next 16.4부터 `image-optimizer.js`는 이 둘을 내보내지 않고 아래 두 모듈에서
+// 가져다 쓴다(runtime optimizer가 require하는 바로 그 모듈 — 같은 sharp 경로).
+const { optimizeImage } = require(
+  "next/dist/server/image-optimizer/transform.js",
 );
+const { getImageSize } = require(
+  "next/dist/server/image-optimizer/get-image-size.js",
+);
+assert.equal(typeof optimizeImage, "function", "Next optimizeImage를 찾지 못했습니다.");
+assert.equal(typeof getImageSize, "function", "Next getImageSize를 찾지 못했습니다.");
 const source = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">' +
     '<rect width="1" height="1" fill="#2f765f"/>' +
