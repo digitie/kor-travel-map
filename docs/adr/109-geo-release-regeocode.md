@@ -379,6 +379,7 @@ helper; run 빈 답 가드의 분자는 행 단위 최종 빈 답; MOIS는 repla
    않는다(결정 7 결과). MOIS replay(로컬 SQLite 무다운로드)는 릴리스가 TTL 뒤에 자주 온다는 것이 확인되면 추가.
 5. `same_sigungu` 링크 재동기화 — **활성 target 전부 1회**(권장안) 구현. PinVi stream 이벤트는 범위 밖(활성 target 0개).
 6. geo-release run 한정 reverse timeout 재시도 — **미승인, 미적용**(attempt 2로만 복구). 재론은 실측 뒤.
+   → 2026-10-23 개정: 적재 resource의 geo client 전체에 일시 장애 총 3회 재시도를 소유자가 승인했다(ADR-116 끝 개정 절).
 7. task 접두사 — **`T-GR-NN` 그대로**(묶음 prefix, `tasks-rule.md` §3).
 8. 해소(소유자 결정 2026-10-15 — 첫 토큰은 기준선).
 9. 완료 판정 — 권장안대로 구현(비-skipped `stamped_other + unstamped == 0`, 아니면 sweep 1회 뒤 `residual_stale`).

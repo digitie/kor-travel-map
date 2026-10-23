@@ -1,3 +1,9 @@
+## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
+
+- 비-MOIS 역지오코딩 적재 선조회 동시성(env `KOR_TRAVEL_MAP_REVERSE_GEOCODE_CONCURRENCY`, 기본 2), 적재 geo client 일시
+  장애 재시도, 적재 step 멈춤 진단. migration·OpenAPI 변화 없음(PinVi 재vendor 불필요). 배포 영향: Map Dagster code location.
+- **다음 한 작업: PR CI green → 머지·배포 → MCST 재실행(약 3시간 예상) → 성공 시 등산로(seal jsonb 천장 여부 먼저 확인).**
+
 ## 2026-10-23 — geo 부하 줄이기 0단계(ADR-116, T-GEOLOAD-00): 브랜치 `feat/skip-geocode-unchanged`
 
 - 비-MOIS 역지오코딩 asset(MCST 포함, MOIS·concierge 제외)이 공통 helper로 변환을 두 번 돌려, payload·좌표가 그대로이고
