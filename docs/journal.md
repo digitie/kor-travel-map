@@ -1,3 +1,10 @@
+## 2026-10-24 — 수집 CI 선행 Next 보안 게이트 복구
+
+- Next 및 직접 ESLint 플러그인을 최소 수정 버전 16.4.1로 pin했다. npm12 배포
+  audit의 critical 1건이 0건으로 줄었다. 기존 dev moderate2/high6은 변경하지 않았다.
+- 실제 frontend 회귀·빌드/독립 리뷰/CI는 진행 중이며 운영 변경은 없다.
+  상세: [검증 기록](reports/2026-10-24-next-security-gate.md).
+
 ## 2026-10-23 — MCST 6시간 상한·멈춤: 브랜치 `fix/mcst-geo-stall`
 
 - prod: MCST run(06:02Z 시작)이 3.5시간 이벤트 0건. step 프로세스 생존, `/proc/<pid>/io` rchar 60초 불변, geo·DB 소켓
