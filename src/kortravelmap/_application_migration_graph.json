@@ -87,6 +87,12 @@
         "413_legacy_sql_protocol_entry"
       ],
       "revision": "414_manual_dedup_protocol"
+    },
+    {
+      "down_revision": [
+        "414_manual_dedup_protocol"
+      ],
+      "revision": "415_state_lifecycle_protocol"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

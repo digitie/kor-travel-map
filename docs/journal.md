@@ -3,6 +3,12 @@
 - 실제 통합 UI에서 파일 상세의 백업 링크가 없는 상세 route를 prefetch해404를 냈다. 백업 목록 페이지로 연결하고 중첩·공백 파일 경로의 회귀를 추가했다. DB·DTO·프론트·수집/잠금 변경0이다.
 - 수정 전 회귀1 FAIL을 보존했고 수정 뒤 router9 PASS·Ruff·strict mypy1·문서 redaction PASS다. 독립2리뷰·정확 CI·최종 실제 UI는 후속 수용이며 기존16case별 PASS를 전체 성공으로 세지 않는다. [원인·범위](reports/2026-10-24-backup-file-link.md).
 
+## 2026-10-24 — state/lifecycle SQL first-entry 폐포(415)
+
+- admin/reactivate/core/lifecycle author·revoke5개를 함께 protocol-first로 보강하며 원래 서명·본문·owner/ACL을 보존한다. Python 업무·field override·identity·정책 seed/운영 변경0이다.
+- 실제 PG36+unit5 총41 PASS(16.63초), valid nested state·M05 non-kept·기존 provider retire·SH 거부/rollback·active-policy 거부·닫힌 ACL을 확인했다. 초기 seed 준비 실패는 별도 보존했다.
+- 공식 oracle 기록1skip과 별도 비교/metadata2 PASS·전체 lint373 PASS/기존6skip을 구분했다. 독립2리뷰·정확 CI/UI는 미완이며 전체 동시 쓰기 완료가 아니다. [범위·실패·증거](reports/2026-10-24-state-lifecycle-protocol-entry.md).
+
 ## 2026-10-24 — 통합 전체 CI의 시험 격리 보완(#1379)
 
 - b460의 두 실제 PG lane는 같은5건 실패였다. 4건의 새 읽기 세션 fixture 누락과 metrics의 앞선 committed행 미고려를 제품 변경 없이 고쳤다. 0/2 sibling 제어군으로기존실패를 재현하고 old/new snapshot·writer commit 단언을 보존했다.
