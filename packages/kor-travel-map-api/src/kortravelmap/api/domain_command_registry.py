@@ -533,6 +533,9 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/features/batch"): _query(
         "읽기 batch를 URL 길이와 payload 크기 때문에 POST로 표현"
     ),
+    ("POST", "/v1/service/weather/locations/batch"): _query(
+        "Valkey weather 상태 읽기 batch(최대 50곳)를 URL 길이 때문에 POST로 표현(ADR-114 W7)"
+    ),
     (
         "PUT",
         "/v1/service/cache-targets/{external_system}/{target_key}",

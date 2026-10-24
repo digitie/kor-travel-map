@@ -40,6 +40,8 @@ class _Rule:
 _RULES = (
     _Rule("geo", "KorTravelGeoRestClient", "geo_http_timeout"),
     _Rule("transport", "_transport_connection", "transport_http_timeout"),
+    # ADR-114 2단계 — weather도 odroid에 있다(꺼지면 무응답). 같은 이유로 connect를 분리한다.
+    _Rule("weather", "_weather_connection", "weather_http_timeout"),
 )
 
 
@@ -110,6 +112,7 @@ def test_geo_and_transport_clients_use_the_timeout_factory() -> None:
     # 하한은 '본 것'에 건다 — 마커 이름이 바뀌어 아무것도 안 보이면 이 검사는 항진명제다.
     assert seen["geo"] >= 1, "geo 생성 지점(KorTravelGeoRestClient 호출)을 못 봤다"
     assert seen["transport"] >= 1, "transport 생성 지점(_transport_connection 호출)을 못 봤다"
+    assert seen["weather"] >= 1, "weather 생성 지점(_weather_connection 호출)을 못 봤다"
     assert not problems, "connect timeout 분리 없는 client:\n" + "\n".join(problems)
 
 

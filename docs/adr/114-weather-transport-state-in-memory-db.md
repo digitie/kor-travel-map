@@ -1,7 +1,7 @@
 # ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다
 
 - 상태: proposed (소유자 결정 2026-10-23 — 방향 확정. 2026-10-23 1단계(transport) 구현 PR — 아래 "구현 설계 —
-  1단계". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
+  1단계". 2026-10-24 2단계(weather) 구현 PR — 아래 "구현 설계 — 2단계". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
 - 날짜: 2026-10-23
 - 결정자: 소유자(방향), Claude(문서)
 - 관계: **ADR-105를 부분 대체**(weather가 Map에 다시 들어온다 — 단 DB 스키마가 아니라 메모리 DB로), ADR-110(odroid
@@ -340,8 +340,226 @@ HIGH 4 — 같은 id 행이 `HLEN` 검사를 영구 실패시킴(→ 고유 id �
 행), client 재시도(→ 끔), 신선도 혼합(→ 이른 쪽). 가격 추이 플래그 제거 의견은 받지 않았다 — transport 경로가 배포되기
 전에 켜지지 않게 하는 스위치가 필요하다(소유자 요구).
 
+## 구현 설계 — 2단계: weather (2026-10-24, 이행 순서 3의 weather 부분)
+
+1단계의 세대 교체 store(`infra/valkey_state.py`)·키 규약(D2)·교체 순서(D3)·거부 기준(D4)을 **그대로** 쓴다. 바뀌는 것은
+원천(kor-travel-weather의 Map용 export W1~W5)·데이터셋·값 모양·REST다. 1단계와 다른 점만 W-번호로 적는다.
+
+### W0. 원천 계약(weather main `7aa7e70`, W1~W5 producer 머지 완료 — 운영 활성화는 별도)
+
+weather `GET /v1/service/exports/{locations,current,forecasts,daily-summaries,status}`. 인증은 weather의 기존 관리자
+header `X-Admin-Token`(값 = weather `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`)이고 실패는 **401**이다(transport의 404 은닉과 다르다).
+응답은 `{items, meta}`이고 `meta`는 `generated_at`·`source_collected_at`(null 가능)·`source_status`(`ok|stale|failed`)·
+`item_count`(페이지 항목 수)·`snapshot_id`·`next_cursor`·`has_more`·`next_since`다. 페이지는 `limit` ≤ 5,000(기본 500)과
+본문 4 MiB 중 먼저 닿는 쪽까지이고, cursor는 서명된 불투명 값(TTL 15분)이다. 오류: 503 = 완결된 성공 export 없음
+(`EXPORT_NOT_READY` — 빈 정상 집합이 아니다), 410 = snapshot 만료(첫 페이지부터 다시), 422 = cursor 위조·도중 필터 변경.
+gzip·약한 ETag/304를 지원한다(Map은 첫 페이지에만 `If-None-Match`를 보낸다 — 아래 W3).
+
+| export | 항목 하나 | 주요 필드 |
+| --- | --- | --- |
+| W1 `locations` | 위치 1곳 | `location_id`·`name`·`latitude`·`longitude`(null 가능)·`legal_dong_code`(10자리, null 가능)·`sido_name`·`sigungu_name`. `source_collected_at`은 언제나 null·`source_status=stale`(카탈로그 수집 시각을 알 수 없다 — weather가 꾸미지 않는다) |
+| W2 `current` | 위치×provider×metric 최신 관측 1값 | `location_id`·`provider`·`metric_key`·`value`(수·문자열·null)·`unit`·`target_at`·`known_at`·`forecast_style`(`observed`·`nowcast`) |
+| W3 `forecasts?style=` | 위치×provider 예보 묶음 1개 | `location_id`·`provider`·`forecast_style`(`ultra_short`·`short`·`mid`·`external`)·`known_at`·`published_at`·`target_at[]`(오름차순, **응답 시각 이후만**)·`metrics{metric: 값[]}`(target_at과 같은 길이, null 정렬) |
+| W5 `daily-summaries?days=` | 위치×날짜×구간 1개 | `location_id`·`date`·`slot`(`morning` [05,11)·`noon` [11,17)·`evening` [17,23) KST)·`temp_min/max/avg`·`humidity_avg`·`precip_sum_mm`·`precip_occurred`·`sky_code`·`wind_speed_avg`·`sample_count`(0~6, 관측 시간 bucket 수)·`source_providers[]`·`partial`. `days` 기본 14, 최대 31 |
+| W4 `status` | provider×dataset×style 수집 상태 | Map은 적재에 쓰지 않는다(운영 진단용) |
+
+2026-10-24 live 확인: odroid weather API는 `3a0ae398`(W1~W5 이전)이라 `/v1/service/exports/*`가 404다 — 이 계약은 소스·
+OpenAPI·weather 저장소의 실제 HTTP 예시(`docs/examples/map-service/`)로 맞췄고, live 대조는 weather 배포·
+`KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED=true` 뒤 schedule을 켜기 전에 한다(acceptance §T-STATE-02).
+
+### W1. 데이터셋과 식별자
+
+| 데이터셋(`{ds}`) | 원천 | 값 하나(= 위치 하나) | GEO | 교체 거부(절대 하한 · 비율 · 비율 적용 기준) | 신선도 상한 | schedule(KST) |
+| --- | --- | --- | --- | --- | --- | --- |
+| `weather.locations` | W1 | 위치 + 주소(시도·시군구·법정동) | 좌표 있는 것 | 1,000곳 · 90% · 100 | 8일(`loaded_at` 기준) | 매일 04:37 |
+| `weather.current` | W2 | 그 위치의 최신 관측 값 목록 | 없음 | 500곳 · 80% · 50 | 3시간 | 매시 :25·:40 |
+| `weather.forecast_ultra_short` | W3 `ultra_short` | 그 위치의 provider별 예보 묶음 | 없음 | 500곳 · 80% · 50 | 3시간 | 매시 :48 |
+| `weather.forecast_short` | W3 `short` | 〃 | 없음 | 1,000곳 · 90% · 100 | 12시간 | 하루 8회 02·05·…·23시 :30 |
+| `weather.forecast_mid` | W3 `mid` | 〃 | 없음 | 300곳 · 80% · 50 | 36시간 | 06·07·18·19시 :40 |
+| `weather.forecast_external` | W3 `external` | 〃 | 없음 | 없음 · 80% · 50(기준 미만이면 0곳 허용) | 12시간 | 3시간마다 :55 |
+| `weather.daily_summaries` | W5 `days=N` | 그 위치의 (날짜, 구간) 요약 목록 | 없음 | 1,000곳 · 90% · 100 | 6시간 | 매시 :41 |
+
+- **항목 단위는 위치**다(D2 "묶음 단위"). 한 위치의 관측·예보·요약은 각 데이터셋에서 필드 하나(`HGET` 하나)다. provider가
+  여럿이면 값 안에 묶음 배열로 든다(외부 예보). 그래서 데이터셋 일곱 개가 **같은 `feature_id`**를 키로 쓴다.
+- `feature_id` = `make_feature_id(bjd_code=None, kind="weather", category="99000000", source_type=
+  "kor-travel-weather:locations", source_natural_key=location_id)`. category·marker(`weather`·`P-01`)는 ADR-105 전
+  KMA 격자 weather feature의 sentinel과 같다(정의는 ADR-105가 남겼다). `bjd_code=None`인 이유는 1단계 D1과 같다 —
+  결정 6에 따라 weather가 준 법정동은 **값의 주소 속성**(`address.bjd_code`)으로만 그대로 쓰고 geo를 다시 부르지 않으며,
+  id는 바뀌지 않는다. PG feature가 아니므로 identity claim·seal이 없다.
+- GEO는 `weather.locations` 하나다. 근처·영역 검색은 그 GEO로 위치를 찾고 다른 데이터셋은 같은 id로 `HMGET`한다
+  (1단계 휴게소 유가와 같은 읽기 결합). 데이터셋마다 세대가 따로 돈다 — 예보 export가 죽어도 위치·관측은 갱신된다.
+- 한 집합에 같은 위치가 두 번 오면(묶음 경계·재시도) 위치 단위로 합친다: 관측은 (provider, metric) 첫 행, 예보는
+  (provider) 첫 묶음, 요약은 (date, slot) 첫 행을 남기고 버린 수를 op metadata `row_duplicates`에 적는다(세대 `meta.duplicates`는
+  1단계처럼 같은 위치 id가 두 번 온 수다 — 위치 단위로 묶은 뒤라 0이다). 위치 W1에 없는 id가
+  W2/W3/W5에 와도 그대로 담는다(카탈로그 갱신 순서가 다를 수 있다) — 읽기는 W1에 있는 위치만 찾을 수 있다.
+- 묶음의 `target_at`과 metric 배열 길이가 다르거나, `target_at`이 오름차순이 아니거나, 묶음의 style이 요청 style과
+  다르거나, 시각에 timezone이 없으면 계약 위반으로 적재를 실패시킨다(Valkey에 쓰지 않는다).
+- 좌표 범위는 D1과 같다(한국 주변 밖·(0, 0)이면 좌표 없음 — 그 위치는 근처·영역에 나오지 않는다).
+- `location_id`에 `|`나 제어 문자가 있으면(`make_feature_id`가 받지 않는다) 그 페이지 전체가 계약 위반이고 run은 재시도
+  없이 실패한다 — 그 행만 빼고 교체하면 위치 하나가 조용히 사라지기 때문이다(코드 리뷰 2026-10-24).
+- schedule은 weather 공개 시각 뒤에 맞췄다(운영 리뷰 2026-10-24): 관측은 weather 승격(매시 :20·:35 무렵) 뒤 :25·:40,
+  초단기는 매시 발표 뒤 :48, 단기는 발표(02·05·…·23시) 뒤 :30에 하루 8회, 중기는 발표(06·18시) 뒤 :40과 한 시간 뒤 한 번
+  더, 외부는 3시간마다. 공개 시각은 운영 실측으로 다시 맞춘다(acceptance §T-STATE-02).
+
+### W2. 키·값
+
+D2 키 표를 그대로 쓴다(`ktm:state:v1:weather.<…>:…`). `weather.locations`의 `lookup`은 weather `location_id` →
+`feature_id`다(PinVi가 이미 가진 weather 위치 id로 찾는 배치 route용, W7). 메타에 `source_status`(W4)·`source_etag`·
+`checked_at`(W3)를 더한다 — 1단계 세대에는 이 필드가 없고 읽는 쪽은 없으면 null로 본다(키 버전을 올리지 않는다: 값
+모양이 아니라 메타 hash에 필드가 느는 것이다). 값은 `kortravelmap.dto.weather_state` Pydantic 모델의 JSON이고 REST가 같은 모델을 쓴다.
+
+### W3. 쓰기
+
+D3 그대로(잠금 → 원천 끝까지 → 거부 검사 → build TTL로 쓰기 → Lua CAS 교체). weather 쪽 차이:
+
+- 받을 때는 **전량**이다. W3의 `since` 증분(`meta.next_since`)은 쓰지 않는다 — 세대 교체는 전체 집합이 있어야 하고,
+  증분을 쌓으려면 Map이 직전 세대와 병합해야 해서 원자 교체·거부 검사의 단순성을 잃는다. 비용이 문제로 드러나면 그때
+  증분을 따로 설계한다.
+- **ETag**: 교체한 세대 meta에 첫 페이지 ETag(`source_etag`)를 적고, 다음 run은 첫 페이지에 `If-None-Match`로 보낸다.
+  304면 받지도 교체하지도 않고 지금 세대 meta의 `checked_at`만 Lua로 적는다(포인터가 그 세대일 때만). weather 코드
+  확인(main `7aa7e70`): ETag는 `snapshot_id`·manifest digest·페이지·상태(예보는 본문까지)의 digest이고, 같은 승인 집합이면
+  같은 snapshot을 **TTL 15분 동안만** 재사용한다 — 그 뒤에는 내용이 같아도 새 `snapshot_id`가 되어 ETag가 바뀐다. 그래서
+  304는 직전 확인과 15분 안에 같은 집합을 다시 볼 때만 난다(관측 :25→:40처럼). 그보다 긴 주기에서는 거의 매번 전량을
+  받는다 — 운영 비용은 schedule 주기(위 W1)로 줄인다. `allow_shrink` run은 ETag를 보내지 않는다(강제 재적재).
+- 페이지 내내 `snapshot_id`가 같아야 한다(다르면 계약 위반). **410**(snapshot 만료)이나 **둘째 페이지 이후의 422**(순회
+  도중 weather가 재배포돼 provider 선택·cursor 서명이 바뀐 경우)면 첫 페이지부터 **한 번** 다시 받는다 — 두 번째도
+  410이면 재시도 가능한 실패, 두 번째도 422면 재시도 없는 계약 위반이다. 첫 페이지 422는 질의 계약 위반(재시도 없음).
+  503은 재시도 가능한 실패(`weather_not_ready` — weather의 다음 성공 승격에서 풀린다), 401·404·그 밖의 4xx·JSON 아님·
+  계약 위반·조건 없는 304는 step 재시도를 끄는 실패다(401 = 토큰, 404 = W1~W5가 없는 weather 버전). 429와 503을 뺀
+  5xx(500 포함)·연결 오류는 HTTP 층에서 유한 재시도하고, 다 쓰면 step 재시도 대상이다(1단계 transport fetcher와 같은
+  예산·계수 규약).
+- 요청 수는 시도마다 센다(`note_upstream_request`, ADR-097 분자).
+
+### W4. 신선도
+
+- `meta.source_collected_at` = 페이지들의 `source_collected_at` 중 가장 이른 값. 한 페이지라도 null이면 null(weather 규약:
+  하나라도 미확정이면 집계도 null). `meta.source_status` = 페이지들 중 가장 나쁜 값(`stale` > `ok`). `failed`는 weather가
+  503으로 주므로 성공 페이지에 나오면 계약 위반이다.
+- `stale` 응답(마지막 성공 집합을 그대로 준 것)도 교체한다 — 내용은 직전 성공 집합이고 `source_collected_at`이 옛
+  시각이라 Map 신선도의 `stale`이 그대로 드러난다. 교체를 거부하면 Map 쪽 나이만 늘 뿐 정보가 없다.
+- 응답 신선도는 1단계 필드에 `source_status`·`checked_at`을 더한다. `stale = age_seconds > max_age_seconds`이고 age는
+  `source_collected_at`(없으면 `checked_at`, 그것도 없으면 `loaded_at`) 기준이다 — W1 위치는 원천이 시각을 주지 않아 304
+  확인 시각이나 교체 시각 기준이다.
+- **위치 roster의 `source_status`는 null(해당 없음)이다.** weather W1은 카탈로그 수집 시각을 알 수 없어 언제나 `stale`·
+  `source_collected_at=null`을 보낸다 — 그대로 내보내면 PinVi가 모든 위치를 stale로 표시한다. 그래서 Map은 그 데이터셋의
+  값을 싣지 않고(데이터셋 정의 `reports_source_status=False`), 세대 meta에는 원값을 남긴다(운영 진단용).
+
+### W5. 지난 예보 시각 제거
+
+W3 export는 응답 시각 이후 `target_at`만 주지만 Map 세대는 다음 교체까지 늙는다. **읽을 때** 지금보다 이른 `target_at`과
+그 자리의 metric 값을 떼고, 남는 시각이 없는 묶음은 뺀다(결정 1 "예보는 시각이 지나면 지운다"). 요청이 `from`·`to`
+(aware 시각)를 주면 그 창 밖도 뗀다(`from`이 지금보다 이르면 지금). 세대 값 자체는 불변이고
+다음 교체가 지난 시각 없는 집합으로 바꾼다. 단기예보 상한 12시간이면 최악 12시간 치를 읽을 때 걸러 낸다.
+
+### W6. 메모리 추정(n150 Valkey `maxmemory 1gb`·`noeviction`)
+
+odroid 실측 값 수(컨텍스트 절)에 JSON 크기를 곱한 **추정**이다(배포 뒤 `MEMORY USAGE`·`INFO memory`로 journal에 실측을 적는다).
+
+| 데이터셋 | 원천 값 수 | 세대 하나 추정 |
+| --- | --- | --- |
+| locations | 약 1,450곳 | 0.5 MB(GEO 포함) |
+| current | 약 3.2만 값 | 4 MB(값마다 provider·metric·시각 문자열) |
+| forecast_short | 약 179만 값 | 15 MB(배열 값 약 6 B + 시각 배열) |
+| forecast_ultra_short + mid | 약 6만 값 | 1 MB |
+| forecast_external | 미측정(W1 위치 중 외부 provider 지점) | 상한 가정 15 MB |
+| daily_summaries | 1,450 × 3 × 14 ≈ 6.1만 항목 | 12 MB |
+| **합계** | | **약 48 MB**(외부 예보 상한 가정 포함) |
+
+벌 수(운영 리뷰 2026-10-24 정정): 지금 세대 + grace(15분) 중인 직전 세대 + 쓰는 중인 새 세대 = 데이터셋마다 **최대 세
+벌**이다. 15분보다 짧은 주기(관측 :25→:40)에서는 grace가 끝나기 전에 다음 교체가 와서 직전 세대가 둘 남을 수도 있다
+(교체마다 그 직전 하나만 grace를 받으므로 네 벌 상한). 그 위에 죽은 run의 build 키가 build TTL(2시간) 동안 남는다 —
+잠금이 데이터셋마다 하나라 그 사이 다른 build는 잠금 TTL 뒤에만 시작한다. 최악을 단순 합으로 잡으면 일곱 데이터셋 ×
+네 벌 ≈ 190 MB, 죽은 build 키 한 벌씩 더해 약 240 MB다. 1단계 transport의 같은 최악(약 60 MB)과 합쳐 300 MB 남짓으로
+1 GB의 30% 아래다. `noeviction` 쓰기 거부는 `state_store_oom`(재시도 없음)으로 드러난다(D7). 실측(`INFO memory`)은
+schedule을 켠 뒤 journal에 적는다.
+
+### W7. 읽기 — Map REST(service 표면, PinVi용)
+
+`/v1/service/weather/…`, `X-Kor-Travel-Map-Service-Token`(1단계와 같은 `require_service_token`). PinVi가 장소 하나에 날씨를
+붙이는 흐름(좌표 → 가까운 위치 → 관측·예보·요약)을 요청 하나로 끝내게 한다.
+
+| route | 내용 |
+| --- | --- |
+| `GET /locations` | 위치 목록·근처(`lon`·`lat`·`radius_m` ≤ 100 km)·영역(bbox) — D6과 같은 keyset cursor·`truncated`. `include_current=true`면 각 위치에 최신 관측을 붙인다(지도 마커용) |
+| `GET /locations/{feature_id}` | 위치 하나의 **묶음**: 위치 + 관측 + 예보(style별, 지난 시각 제거, 선택 `from`·`to`) + 세 구간 요약(전날 같은 구간 대비 차이 포함) |
+| `POST /locations/batch` | `feature_ids`·weather `location_ids`(둘 다 써도 된다, 합 ≤ 50 — id마다 경로 `feature_id`와 같은 모양·weather `location_id`와 같은 길이·문자 검사)의 묶음 목록과 `missing`. 같은 `sections`·`forecast_styles`·`forecast_from`·`forecast_to` |
+| `GET /nearest` | `lon`·`lat`·`radius_m`(기본 20 km, ≤ 100 km — PinVi는 20 → 50 → 100 km로 넓힌다) 근처 위치를 가까운 순으로 보고(관측·요약은 **최대 10곳**, 예보는 **최대 50곳** — 예보 없는 측정소가 KMA 격자보다 가까이 여럿 몰린 도심 대비), **부분마다** 그 데이터셋 값이 실제로 있는 가장 가까운 위치를 고른다. 위치가 없으면 404 |
+| `GET /status` | Valkey 연결과 데이터셋 일곱 개의 신선도(실패한 데이터셋은 원 메시지 대신 `failure_kind` 코드) |
+
+- **부분마다 위치를 고르는 이유**(운영 리뷰 HIGH, 2026-10-24): 가장 가까운 weather 위치가 대기질 측정소처럼 예보가 없는
+  지점인 경우가 흔하다 — 위치 하나만 고르면 KMA 예보가 조용히 빠진다(PinVi는 그래서 지금 위치 id를 모두 모아 합친다).
+  각 부분은 `source{feature_id, location_id, distance_m}`로 값이 온 위치를 알린다. 깨진 후보는 건너뛰되 끝내 값이 없고
+  깨진 후보가 있었으면 `unavailable`이다. `/locations/{feature_id}`·배치는 그 위치 하나만 본다.
+- 묶음의 데이터셋 읽기는 후보·배치 위치를 모두 합쳐 Valkey 왕복 두 번이다(포인터 `MGET` → meta·값 pipeline,
+  `ValkeyStateStore.read_many`).
+
+- 묶음의 각 부분(`current`·`forecasts.<style>`·`daily_summaries`)은 `{status, freshness, …}`이고 `status`는
+  `ok`·`not_loaded`(아직 한 번도 적재 전)·`unavailable`(그 데이터셋만 읽지 못했거나 **저장 값이 모델과 맞지 않음** —
+  위치 값이 깨지면 503인 것과 같은 판정, 빈 데이터로 꾸미지 않는다)·`no_data`(데이터셋은 있으나 후보 위치에 항목이 없음)다 — 한 데이터셋 장애가 묶음 전체를 막지 않는다(1단계 휴게소 유가와 같다). `sections`·`forecast_styles`로
+  필요한 부분만 고를 수 있다.
+- 세 구간 요약의 `partial`은 **읽는 시각으로 다시 계산한다**: KST 구간 끝(`dto.weather_state.daily_slot_bounds` —
+  아침 [05,11)·점심 [11,17)·저녁 [17,23)) 전이면 언제나 partial이고, 끝났어도 weather가 적재 때 partial로 줬으면 partial로
+  남긴다(그 세대 요약은 구간 도중에 계산된 값이라 다음 교체 전까지 실제로 덜 모였다).
+- 각 항목은 `vs_previous_day{previous_date, temp_min_delta, temp_max_delta, temp_avg_delta, humidity_avg_delta}`를 싣는다 —
+  전날 같은 구간과의 차이(이쪽 − 전날). 전날 구간이 없거나, 둘 중 하나가 `sample_count=0`이거나, **둘 중 하나가 partial이면
+  null**이다 — 06:30의 아침(1시간 반 치)을 끝난 어제 아침(6시간 치)과 비교하면 "어제보다 춥다"가 거짓이 될 수 있다.
+  판단(문턱값·문구)은 소비자가 한다. **보관 일수 `KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS=1`이면 전날 구간이 없으므로
+  `vs_previous_day`는 언제나 null이다** — 비교가 필요하면 2 이상(기본 14)으로 둔다.
+- 예보 `to`(배치는 `forecast_to`)가 이미 지난 시각이면 422다 — 조용한 `no_data` 대신 요청 오류로 알린다.
+- weather 특보(`weather_alert`)는 범위 밖이다 — PinVi는 특보를 계속 weather에서 직접 읽는다.
+- 위치 데이터셋이 없거나 Valkey가 죽었으면 503(`WEATHER_STATE_NOT_LOADED`·`WEATHER_STATE_UNAVAILABLE`), cursor 세대가
+  사라졌으면 409 `WEATHER_STATE_GENERATION_EXPIRED`, 지금 세대에 그 위치가 없으면 404 — 1단계 D6과 같은 규칙.
+- 이 route들은 ADR-105의 "Map은 weather를 서빙하지 않는다" 검사(`test_api_serves_no_weather.py`)에 걸린다. 이 ADR이
+  ADR-105를 부분 대체하므로 검사는 **이 표면 하나만** 예외로 둔다: `/v1/service/weather/` 아래 경로와 거기서만 닿는
+  스키마. PG feature 표면(공개·admin·feature 응답)은 그대로 weather를 내보내지 못한다.
+- admin OpenAPI(`openapi.json`)와 service OpenAPI가 바뀐다 → **PinVi 재vendor**(1단계와 같은 receipt에 덧붙인다).
+
+### W8. 운영 값
+
+- env(Dagster code-server만 — API는 weather를 부르지 않는다): `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL`(odroid
+  weather API, 기본 `http://<prod-host-ip>:12201`), `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(비밀 — weather
+  `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`과 같은 값), 선택 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_AUTH_HEADER`(기본 `X-Admin-Token`),
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_{TIMEOUT,CONNECT_TIMEOUT}_SECONDS`(기본 60·4), `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_PAGE_SIZE`
+  (기본 2,000, ≤ 5,000), `KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS`(기본 14, 1~31 — 결정 1의 "소유자가 바꿀 수 있는 보관
+  기간"). Map API는 Valkey URL만 있으면 된다(1단계에서 이미 받는다).
+- **Manager 변경(이 PR 밖, 정확히)**: Map Dagster code-server 서비스 environment에
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL:-http://<prod-host-ip>:12201}`와
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN: ${KOR_TRAVEL_WEATHER_ADMIN_TOKEN:?…}`(같은 `.env` 값 재사용)를 더하고,
+  Manager `.env.example`과 계약 검사 `backend/tests/test_consumer_origin_defaults.py`(consumer origin 기본값 표)·
+  `backend/tests/test_docker_service_config.py`(서비스별 env 렌더 대조)를 함께 고친다. Map API 서비스에는 넣지 않는다.
+- **받아들인 위험 — weather 관리자 토큰**: Map은 weather의 `X-Admin-Token`을 쓴다. 그 토큰은 weather 관리자 **쓰기**
+  권한도 주고 weather export cursor의 HMAC 서명 키도 겸한다 — Map code-server가 털리면 weather 관리 표면까지 열린다.
+  weather가 읽기 전용 export 토큰을 낼 때까지의 받아들인 위험이다. header 이름을 설정(`…_AUTH_HEADER`)으로 뺐으므로
+  범위가 좁은 토큰으로 바꿀 때 Map 코드 변경은 없다(env 두 개만 바꾼다).
+- Valkey 지속성: Manager 설정(RDB `save 3600 1 300 100 60 10000` + AOF `everysec`)에서 weather 데이터셋이 더해지면 쓰기량이
+  는다(단기예보 15 MB 세대 하루 8번 등) — `save 60 10000` 조건이 자주 걸려 n150 디스크 대기가 늘 수 있다. schedule을 켠 뒤
+  `INFO persistence`(`rdb_changes_since_last_save`·`aof_rewrites`)와 n150 iowait를 재서 journal에 적고, 필요하면 Manager에서
+  AOF를 끄거나 save 조건을 늦춘다(D7 설계 리뷰 의견과 같다).
+- **회전 순서**: #1365(transport 가격 추이 T4)와 이 PR이 **둘 다** 머지된 뒤의 정확한 Map commit에서 PinVi가 admin·service
+  스냅샷을 **한 번** 재vendor한다(1단계 transport 재vendor 대기분을 함께 접는다) → 그다음 Manager pair 핀.
+- weather 쪽 선행: W1~W5가 든 weather 배포와 `KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED=true`(API·code-server 함께),
+  artifact root 공유 — weather 저장소의 운영 수용 항목이다.
+- Dagster job 7개(`weather_state_*`)와 schedule 7개는 **기본 STOPPED**다. 켜기 전에 W1 표의 절대 하한(전부 실측 전
+  추정)을 weather live 개수와 대조한다.
+- 범위 밖: PinVi 전환(이행 순서 4, odroid weather 직접 호출 제거), weather W4 `status`의 Map 노출, W3 증분, weather 특보.
+
+### 코드·운영 리뷰(2026-10-24) 반영
+
+정확성 리뷰(차단 없음): 깨진 저장 값 → `unavailable`, `partial` 읽기 시각 재계산(KST 경계), partial 구간의 전날 비교 null,
+429·5xx 재시도, `|` location_id는 재시도 없는 계약 위반, 순회 도중 422 한 번 재시작, roster `source_status` null. 운영·
+소비자 리뷰: 부분별 nearest(HIGH)·100 km 반경(weather 전용 상수 — transport 모듈을 import하지 않는다)·배치 route와
+pipeline 읽기·예보 시간 창·`location_id` lookup·ETag 304와 schedule 정렬·`/status` 오류 코드화·벌 수 정정·토큰 위험과
+header 설정·지속성·회전 순서·Manager env.
+
+### 기존 PG weather feature
+
+ADR-105가 Map의 weather feature 적재·스키마·데이터를 이미 지웠다(2026-10-01, prod 0행). 그래서 2단계에는 퇴역할 PG
+weather 적재가 **없다** — 결정 7(퇴역)은 transport에만 남는다. ADR-105의 재도입 방지 검사는 PG feature 경로(카탈로그
+weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지키고, 이 Valkey 표면만 위 W7대로 예외다.
+
 ## 열린 결정
 
-- weather에서 Map이 들고 있을 provider·항목의 범위(2단계)
+- weather 범위는 "구현 설계 — 2단계" W1이 정했다(W1~W5 export 전부, W4 status 제외). W3 증분(`since`)·ETag 사용은 비용이
+  드러나면 따로 정한다.
 - 기존 PG transport feature 퇴역 시점과 방법
 - 결정 6의 VWorld 블록이 export에 실릴 때 bjd를 값 주소에 넣는 일(id는 D1대로 바뀌지 않는다)
