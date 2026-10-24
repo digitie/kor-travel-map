@@ -44,7 +44,8 @@ mapper의 조합을 비교한 증거다. SQLSTATE를 가짜 예외로 대체하�
 - 실제 native manifest/SH와4개 유효 CALL을 경합시켜 정확 key/PID/blocker에서 EX 대기를
   관측했다. command/request NOWAIT와 동일 core/provider/manual unique identity의 실제
   INSERT/rollback으로 선점0을 확인했다. MVCC count만으로 미커밋 부재를 주장하지 않는다.
-  대기 동안 기존 global gate가 선점되지 않음과 역 EX→native SH 순서도 검증했다.
+  대기 동안 기존 global gate 미선점과 역 EX→다른 backend의 protocol SH 대기도
+  확인했다. 역방향은 gate 직접 호출이며 전체 native manifest 실행으로 세지 않는다.
 - SH→EX23514·55P03 뒤 전체 rollback·동일 identity/command의 fresh TX 재시도, 원문 역치환
   SHA/고유config/기존4 ACL·CREATE·정확2 owner 추가 권한을 확인했다.
 - 원래 auth/session/transaction/handler에서 engine만 owned runtime에 결박한 실제 ASGI는
