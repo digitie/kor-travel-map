@@ -141,6 +141,12 @@
         "422_heritage_evidence_reader"
       ],
       "revision": "423_exclusive_context_select"
+    },
+    {
+      "down_revision": [
+        "423_exclusive_context_select"
+      ],
+      "revision": "425_provider_base_update_first"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

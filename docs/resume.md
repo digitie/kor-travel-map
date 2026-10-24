@@ -1,3 +1,7 @@
+## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
+
+- materializer 두 루프의 기존 행 UPDATE와 원 UPSERT fallback만 분리했다. signature·winner·권한을 보존하며 실제 PG/비용은 두 리뷰 뒤 검증한다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
+
 ## 2026-10-25 — EX context 단일 조회(423)
 
 - 기존 검증·권한을 보존한 단일 조회에서 실제9 PASS(15.406초), 별도 공식 fresh oracle1 PASS(20.551초)를 확인했다. 부모1641블록 중1639동일/ACL보존, 초기 감사 setup오류는 별도 보존한다. 최종CI/API startup·비용·운영은 미완이다. [근거·범위](reports/2026-10-25-exclusive-context-single-select.md).
