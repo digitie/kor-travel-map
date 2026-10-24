@@ -1,3 +1,7 @@
+## 2026-10-25 — tracking P→L prefix(424, 부분)
+
+- 종결·취소의 P EX→L과 leaf L 진입 검사를 추가하고 기존 SER/capture/kernel/SH OFF를 보존했다. 순수72 PASS·mypy6/Ruff 통과, 실제PG·oracle·CI/두리뷰는 미완이다. [범위·후속 검증](reports/2026-10-25-tracking-protocol-prefix.md).
+
 ## 2026-10-25 — EX context 단일 조회(423)
 
 - 기존 검증·권한을 보존한 단일 조회에서 실제9 PASS(15.406초), 별도 공식 fresh oracle1 PASS(20.551초)를 확인했다. 부모1641블록 중1639동일/ACL보존, 초기 감사 setup오류는 별도 보존한다. 최종CI/API startup·비용·운영은 미완이다. [근거·범위](reports/2026-10-25-exclusive-context-single-select.md).

@@ -35,6 +35,8 @@ from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_repo import (
     lock_pipeline_cancellation_root,
     lock_pipeline_lineage_mutation,
+    lock_provider_feature_finalization,
+    lock_provider_feature_tracking_leaf,
 )
 
 if TYPE_CHECKING:
@@ -577,6 +579,7 @@ async def ensure_dagster_feature_operation(
         finished_at=None,
     )
 
+    await lock_provider_feature_tracking_leaf(session)
     await lock_pipeline_lineage_mutation(session)
     command = (
         await session.execute(
@@ -734,6 +737,7 @@ async def finish_dagster_feature_membership(
     curation_input_set_hash: str | None = None,
 ) -> DagsterFeatureOperationMutation:
     normalized_run_id = _run_id(dagster_run_id)
+    await lock_provider_feature_finalization(session)
     await lock_pipeline_lineage_mutation(session)
     root = (
         await session.execute(
@@ -831,6 +835,7 @@ async def append_dagster_feature_attempt_event(
 ) -> ImportJobEvent:
     if attempt_number < 1:
         raise ValueError("attempt_number must be positive")
+    await lock_provider_feature_tracking_leaf(session)
     operation = await _load_operation(session, _run_id(dagster_run_id))
     member = next(
         (item for item in operation.members if item.membership == membership), None
@@ -923,6 +928,7 @@ async def reconcile_dagster_feature_run(
         finished_at=finished_at,
     )
 
+    await lock_provider_feature_finalization(session)
     await lock_pipeline_lineage_mutation(session)
     root = (
         await session.execute(
@@ -1228,6 +1234,7 @@ async def abandon_dagster_feature_run(
         "first_failed_at": first_failed.isoformat() if first_failed is not None else None,
     }
 
+    await lock_provider_feature_finalization(session)
     await lock_pipeline_lineage_mutation(session)
     root = (
         await session.execute(

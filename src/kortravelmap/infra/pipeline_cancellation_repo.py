@@ -162,6 +162,7 @@ async def _lock_in_progress_attempt(
     session: AsyncSession,
     cancellation_id: str,
 ) -> PipelineCancellationAttempt | None:
+    await lock_provider_feature_finalization(session)
     attempt = await _lock_attempt(session, cancellation_id)
     if attempt is None or attempt.status != "in_progress":
         return None
@@ -174,6 +175,7 @@ async def _lock_attempt_after_root(
 ) -> PipelineCancellationAttempt | None:
     """lineage-global→root→attempt 순서로 finish/retry source를 잠근다."""
     normalized_id = _uuid(cancellation_id)
+    await lock_provider_feature_finalization(session)
     observed_row = (
         await session.execute(
             text(_ATTEMPT_SQL),
@@ -257,6 +259,16 @@ async def lock_pipeline_cancellation_root(
         text("SELECT pg_advisory_xact_lock(:lock_id)"),
         {"lock_id": lock_id},
     )
+
+
+async def lock_provider_feature_finalization(session: AsyncSession) -> None:
+    """종결/취소 경로는 행 선점 전에 P EX→L을 취득한다."""
+    await session.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
+
+
+async def lock_provider_feature_tracking_leaf(session: AsyncSession) -> None:
+    """nonterminal/event leaf는 L만 취득하고 늦은 P/L 승격을 거부한다."""
+    await session.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(false)"))
 
 
 async def lock_pipeline_lineage_mutation(session: AsyncSession) -> None:
@@ -611,6 +623,7 @@ async def create_pipeline_cancellation_attempt(
     입력이다. retryable attempt 재시도는 hierarchy를 다시 읽지 않는
     :func:`retry_pipeline_cancellation_attempt`를 사용해야 한다.
     """
+    await lock_provider_feature_finalization(session)
     await lock_pipeline_lineage_mutation(session)
     await lock_pipeline_cancellation_root(
         session,
@@ -1039,6 +1052,7 @@ async def fill_pipeline_cancellation_canonical_starts(
     """frozen canonical member의 누락 start를 권위 있는 run start로 보충한다."""
     if engine_started_at.tzinfo is None or engine_started_at.utcoffset() is None:
         raise ValueError("engine_started_at must be timezone-aware")
+    await lock_provider_feature_finalization(session)
     row = (
         await session.execute(
             text(_FILL_CANONICAL_STARTS_SQL),
@@ -1450,6 +1464,8 @@ __all__ = [
     "lock_pipeline_cancellation_root",
     "lock_pipeline_hierarchy_for_jobs",
     "lock_pipeline_lineage_mutation",
+    "lock_provider_feature_finalization",
+    "lock_provider_feature_tracking_leaf",
     "mark_pipeline_cancellation_run_termination_reserved",
     "pipeline_cancellation_root_lock_key",
     "resolve_pipeline_cancellation_scope",
