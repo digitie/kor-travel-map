@@ -1,3 +1,8 @@
+## 2026-10-25 — scalar batch 내부 실행 단계 분리
+
+- 기존 begin/manifest 검증/항목 적용/finish를 구체 private 함수로 나눴다. 펼친 실행 AST·SQL·공개 계약과 전체30초·완료 조기반환을 보존했다.
+- unit10/Ruff/mypy1 통과, 실제 PG·두리뷰·정확CI는 후속이다. 새 collector/정책/운영 변경0. [범위와 증명](reports/2026-10-25-scoped-provider-batch-phases.md).
+
 ## 2026-10-25 — SH 운영 후보 크기 실측
 
 - 국가유산/세계음식점 current head와 active primary place가 각각4,279/9,494로 기존 SH 한도를 넘음을 읽기 전용으로 확인했다. 작은 조회·시험을 운영 전체 동시성으로 세지 않는다. [실측·후속 범위](reports/2026-10-25-sh-operating-scope-measurement.md).
