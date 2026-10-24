@@ -1,3 +1,8 @@
+## 2026-10-24 — ADR115 기존 SQL 직접 호출의 잠금 순서 보강 착수
+
+- Python fence만으로 커버되지 않는 기존 SQL 7개에 첫 protocol EX 진입을 추가한다. 기존 body/owner/search_path/ACL을 유지하고 scalar OFF·seed0·운영0을 지킨다. 전체 writer 전환이 아니다.
+- 실제 전체 bootstrap+기존 fence5 PASS(13.85초), 정적 역할 검사7 PASS/1 기존skip. SQL 직접 CALL/경합·head oracle·독립2리뷰/CI 수용은 진행 중이다. [범위·초기 실패·남은 검증](reports/2026-10-24-legacy-sql-protocol-entry.md).
+
 ## 2026-10-24 — ADR115 범위 커널·기존 writer fence 통합
 
 - #1371에 411 scope/epoch/owner/manifest·membership 재검증과 기존 protocol→전역 fence 순서를 연결했다. runtime 직접 테이블 쓰기는 닫고 기존 writer 배타 경로·기본 OFF를 유지한다.
