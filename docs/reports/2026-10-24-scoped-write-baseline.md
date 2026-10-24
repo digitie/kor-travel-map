@@ -20,7 +20,10 @@ T-CWRITE-01의 작은 측정 도구다. 실제 운영 값·수집 속도 개선�
 ## 격리와 반복
 
 CLI는 외부 DSN이나 기존 container를 받지 않는다. 로컬 Unix Docker socket의 pinned PostGIS
-testcontainer 하나만 생성하고 fresh schema를 bootstrap한다. 고정 fixture가 든 template DB를
+testcontainer 하나만 생성하고 fresh schema를 bootstrap한다. DDL 뒤에는 운영 entrypoint와 같은
+닫힌 runtime ACL 조정 routine을 호출하고 그 setup pool을 폐기한다. 별도 fresh worker pool은
+실제 `ktm_feature_service` 최소권한 preflight와 session/current login을 검증한다. GRANT를
+추가하거나 owner/superuser를 worker로 쓰지 않는다. 고정 fixture가 든 template DB를
 clone하므로 각 trial의 최초 DB 상태가 같다. 생성에 성공한 정확한 DB 목록만 정리하고
 성공/실패 모두 자기 container를 제거한다. 시작 중 취소도 thread 완료를 기다린 뒤 정리한다.
 다른 서비스·DB·daemon은 다루지 않는다.
@@ -65,6 +68,8 @@ scoped-write-baseline-<lane> artifact를 보관한다. timing 임계값으로 CI
 
 순수 fixture/구간 계산 첫 checkpoint는 Ruff와 unit 10건, 계획 조회를 통과했다.
 실제 PG runner와 추가 회귀는 구현했으며 최종 검증 수치·두 리뷰·exact CI는 PR 기록에서 수용한다.
+첫 실제 PG 실행은 필수 post-upgrade runtime ACL 조정이 빠져 원문 적재 전 거절됐고, 성공
+JSON을 발행하지 않았다. 정본 초기화 순서를 보완한 후 두 lane의 실제 측정을 다시 수용한다.
 로컬 container를 추가로 켰거나 운영 측정을 했다고 보고하지 않는다.
 
 T-CWRITE-01의 writer/trigger 전수 inventory·실분포/대량 geometry·API/UI 기준선은 미완이다.

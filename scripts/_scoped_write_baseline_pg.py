@@ -33,7 +33,7 @@ from kortravelmap.dto import (
     SourceLink,
     SourceRecord,
 )
-from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.db import assert_runtime_db_privilege_boundary, make_async_engine
 from kortravelmap.infra.feature_repo import (
     arm_feature_curation_write_wait,
     capture_provider_curation_input,
@@ -41,6 +41,7 @@ from kortravelmap.infra.feature_repo import (
     load_source_record_links,
     lock_feature_curation_write,
 )
+from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges_in_transaction
 from scripts.scoped_write_baseline import Fixture, Point, interval_overlap, plan
 from tests.integration._application_300_bootstrap import (
     _TEST_RUNTIME_PASSWORD,
@@ -147,6 +148,21 @@ def cpu_delta(before: dict[str, Any], after: dict[str, Any]) -> float:
     if delta < 0:
         raise RuntimeError("측정 중 container CPU counter가 역행했습니다")
     return float(delta) / 1_000_000_000
+
+
+async def _prepare_runtime_acl(dsn: str) -> None:
+    # 정본 post-upgrade 단계다. SET ROLE을 쓴 setup pool은 worker와 공유하지 않는다.
+    engine = make_async_engine(
+        dsn,
+        pool_size=1,
+        max_overflow=0,
+        server_settings={"statement_timeout": "15000", "lock_timeout": "5000"},
+    )
+    try:
+        async with engine.begin() as connection:
+            await reconcile_runtime_privileges_in_transaction(connection)
+    finally:
+        await engine.dispose()
 
 
 async def _seed(admin_engine: AsyncEngine, runtime_engine: AsyncEngine, fixture: Fixture) -> None:
@@ -261,7 +277,25 @@ async def _writer(
     async with AsyncSession(engine) as session:
         began = time.perf_counter()
         async with session.begin():
-            pid = await session.scalar(text("SELECT pg_backend_pid()"))
+            identity = (
+                (
+                    await session.execute(
+                        text("""
+                    SELECT pg_backend_pid() AS backend_pid,
+                           session_user::text AS session_login,
+                           current_user::text AS effective_login
+                """)
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            if any(
+                identity[field] != "ktm_feature_service"
+                for field in ("session_login", "effective_login")
+            ):
+                raise RuntimeError("benchmark worker는 실제 ktm_feature_service여야 합니다")
+            pid = int(identity["backend_pid"])
             await session.execute(text("SET LOCAL statement_timeout='15s'"))
             await session.execute(text("SET LOCAL lock_timeout='5s'"))
             arm_feature_curation_write_wait(session, 5000)
@@ -283,6 +317,8 @@ async def _writer(
     return {
         "writer": writer,
         "backend_pid": pid,
+        "session_login": str(identity["session_login"]),
+        "effective_login": str(identity["effective_login"]),
         "transaction_started": began,
         "lock_requested": waiting,
         "lock_acquired": acquired,
@@ -579,6 +615,13 @@ async def run_baseline(fixture: Fixture, *, repetitions: int = 3) -> dict[str, A
         config = Config(str(_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(_ROOT / "alembic"))
         await upgrade_head_with_application_300_bootstrap(config, template_admin)
+        await _prepare_runtime_acl(
+            admin_url.set(
+                database=template,
+                username="ktm_feature_service",
+                password=_TEST_RUNTIME_PASSWORD,
+            ).render_as_string(hide_password=False)
+        )
 
         def engines(database: str) -> tuple[AsyncEngine, AsyncEngine]:
             settings = {
@@ -606,6 +649,10 @@ async def run_baseline(fixture: Fixture, *, repetitions: int = 3) -> dict[str, A
 
         owner, runtime = engines(template)
         try:
+            await assert_runtime_db_privilege_boundary(
+                runtime, expected_login="ktm_feature_service"
+            )
+            report["runtime_acl_boundary_verified"] = True
             await _seed(owner, runtime, fixture)
             async with owner.connect() as connection:
                 report["schema_head"] = await connection.scalar(

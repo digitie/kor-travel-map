@@ -22,6 +22,7 @@ async def test_isolated_three_run_cold_warm_baseline(tmp_path) -> None:
     assert report["three_repetition_baseline"] is True
     assert report["scope_complete"] is False
     assert report["global_fence_retained"] is True
+    assert report["runtime_acl_boundary_verified"] is True
     assert report["operational_access"] is False
     assert len(report["trials"]) == 6
     assert {trial["case"] for trial in report["trials"]} == {"independent", "shared"}
@@ -38,6 +39,10 @@ async def test_isolated_three_run_cold_warm_baseline(tmp_path) -> None:
             assert phase["worker_rss_sample_peak_bytes"] > 0
             assert phase["wal_bytes"] >= 0
             assert len({writer["backend_pid"] for writer in phase["writers"]}) == 2
+            assert all(
+                writer["session_login"] == writer["effective_login"] == "ktm_feature_service"
+                for writer in phase["writers"]
+            )
             assert all(
                 writer["seal_member_count"] == len(fixture.points) for writer in phase["writers"]
             )
