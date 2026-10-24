@@ -63,6 +63,12 @@
         "409_geo_release_item_reasons"
       ],
       "revision": "410_provider_field_shadow"
+    },
+    {
+      "down_revision": [
+        "410_provider_field_shadow"
+      ],
+      "revision": "411_retire_pg_transport_prices_incidents"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
