@@ -71,7 +71,6 @@ ALTER TABLE ops.application_schema_operation_receipts
 """
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
-    "GRANT CREATE ON SCHEMA feature TO ktm_feature_state_procedure_owner",
     "SET ROLE ktm_feature_state_procedure_owner",
     _sidecar("_423_exclusive_refresh_context.sql"),
     "SET ROLE ktm_feature_schema_owner",
@@ -137,6 +136,8 @@ def upgrade() -> None:
             )
         )
     )
+    if not prior_create:
+        bind.execute(text("GRANT CREATE ON SCHEMA feature TO ktm_feature_state_procedure_owner"))
     for statement in _UPGRADE_STATEMENTS:
         bind.execute(text(statement))
     if not prior_create:

@@ -4,7 +4,7 @@
 
 기존 `_exclusive_provider_refresh_context`는 같은 applying attempt/manifest 조건으로 count와 row SELECT를 따로 수행했다. 새423은 최대2행의 단일 SELECT에서 첫 행을 명시적으로 보관하고 0/복수는 false로 반환한다. 정확1행만 기존 protocol EX → candidate assertion → primary entity STRICT SELECT → 공개 scalar assertion 순서로 진행한다. 기존420 역사 파일, 이후 검증 본문, SQLSTATE, 권한·함수 서명·search_path·기본 EX 정책은 바꾸지 않는다. 예외를 정상0행 경로로 사용하거나 새로운 캐시/GUC를 추가하지 않는다.
 
-마이그레이션은 원래 prosrc SHA256 `3dd92fbb11e8d8c8cdfdf3fb5e90f0a04a19b80d7d89ae95505a0733edfc2361`와 단일 catalog 함수의 signature/owner/언어/SECURITY DEFINER/volatile/결과/search_path를 확인한 뒤 기존 소유자로 CREATE OR REPLACE한다. protocol EX와30초 statement/1초 lock 상한을 유지하고 더 짧은 기존 설정을 보존한다. feature CREATE 임시 권한과 GUC를 원복한다. 새 runtime EXECUTE나 테이블 권한은 없다.
+마이그레이션은 원래 prosrc SHA256 `3dd92fbb11e8d8c8cdfdf3fb5e90f0a04a19b80d7d89ae95505a0733edfc2361`와 단일 catalog 함수의 signature/owner/언어/SECURITY DEFINER/volatile/결과/search_path를 확인한 뒤 기존 소유자로 CREATE OR REPLACE한다. protocol EX와30초 statement/1초 lock 상한을 유지하고 더 짧은 기존 설정을 보존한다. 기존 effective feature CREATE 권한이 있으면 GRANT/REVOKE를 모두 생략한다. 없을 때만 임시 CREATE를 부여·회수하고 GUC를 원복한다. 새 runtime EXECUTE나 테이블 권한은 없다.
 
 ## 영향도 범위
 
@@ -16,8 +16,10 @@
 
 ## 현재 실제 확인과 미완
 
-- migration/역할/sidecar/receipt/graph/forward-only 정적 검사64 PASS, 기존1 skip(6.66초). 첫 초안은 revision35자 때문에2 FAIL/62 PASS였고 원 로그를 보존했다. 32자 이하 이름으로 고쳤으며 검사 기준은 그대로다.
+- migration/역할/sidecar/receipt/graph/forward-only와 CREATE 권한 단위 회귀를 합쳐66 PASS, 기존1 skip(6.79초). 첫 초안은 revision35자 때문에2 FAIL/62 PASS였고 원 로그를 보존했다. 32자 이하 이름으로 고쳤으며 검사 기준은 그대로다.
 - 기존420 이후 검증 원문은 byte 동일하다. 새 함수의 role/ACL 실제 catalog 보존, migration 실적용·공식 head oracle, 실제0/1/2행·후속 오류 순서·timeout/동시성 회귀는 아직 실행하지 않았다. 현재 head-schema는 부모422 원본이며 새423 oracle 수용을 주장하지 않는다.
+- 첫 checkpoint의 무조건 CREATE GRANT는 상속 권한이 있는 경우 direct grant를 남길 수 있어 고쳤다. 원 실제 upgrade fake-bind는 해당 경로1 FAIL/나머지1 PASS였고, 수정 뒤 두 경로2 PASS(0.36초)다. 실제 PG ACL 검증으로 세지 않는다.
+- 실제 경계 시험9개를 수집만 확인했다(실행0). 일반 runtime private EXECUTE 거부/명시 owner catalog 관찰/0·1·복수·optional dataset·SH·다른 TX·완료 replay·외부 writer 대기와55P03·원자 rollback을 다룬다. 복수는 기존 두 dataset owner seed 위에 실제 claim/seal/begin만 쌓으며 applying/txid를 직접 만들지 않는다. 별도 두 고권한 manifest negative fixture는 검증기40001/23514와 savepoint 복구만 확인하며 runtime 권한이나 정상 수집 경로로 부르지 않는다. 복합 오류의 모든 최초 실패순서/P0002/P0003 실측은 이9개에 포함하지 않으며 후속 검증 tail의 byte 보존 근거와 구분한다.
 - 두 독립 소스 리뷰와 root의 CPU 슬롯 뒤에만 owned PG를 실행한다. 공개 API/UI·collector 배선·운영 활성화는0이다.
 
 ## 실제 시험 계획(미실행)

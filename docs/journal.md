@@ -1,6 +1,6 @@
 ## 2026-10-25 — EX context 단일 조회(423, 부분)
 
-- 같은 후보 count/SELECT를 최대2행 조회로 합치는 초안을 추가했다. 기존 검증 순서·권한은 보존하며 정적64 PASS/기존1 skip이다. 실제 PG/oracle/오류 순서·비용은 미완, 운영0이다. [범위·미실행 계획](reports/2026-10-25-exclusive-context-single-select.md).
+- 같은 후보 count/SELECT를 최대2행 조회로 합치는 초안을 추가했다. 기존 검증 순서·권한은 보존하며 정적·ACL 단위66 PASS/기존1 skip이며 실제 경계9개는 미실행이다. 실제 PG/oracle/오류 순서·비용은 미완, 운영0이다. [범위·미실행 계획](reports/2026-10-25-exclusive-context-single-select.md).
 
 ## 2026-10-25 — 전체 snapshot 동시 쓰기·복구 설계(미구현)
 
