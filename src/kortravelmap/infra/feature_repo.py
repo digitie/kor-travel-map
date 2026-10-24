@@ -110,6 +110,7 @@ from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
 from kortravelmap.infra.provider_field_candidates import (
     capture_provider_field_candidates,
     provider_field_shadow_enabled,
+    recompute_provider_field_candidates,
 )
 
 if TYPE_CHECKING:
@@ -2520,6 +2521,7 @@ async def _apply_provider_feature_field_patch(
     provider_dataset_id: int,
     source_membership: _ProviderSourceMembership,
     expected_row_revision: int,
+    excluded_fields: frozenset[str] = frozenset(),
 ) -> int:
     """Existing provider Feature를 field-level base/effective procedure로 갱신한다."""
 
@@ -2530,6 +2532,9 @@ async def _apply_provider_feature_field_patch(
     values, geometry_wkt = _provider_field_patch_payload(
         feature, feature_uuid=feature_uuid, parent_feature_id=parent_feature_id
     )
+    if excluded_fields:
+        values = json.dumps({k: v for k, v in json.loads(values).items()
+                             if k not in excluded_fields}, ensure_ascii=False)
     return await _apply_provider_field_values(
         session,
         # T-VN-39: 프로시저는 `CAST(:feature_id AS uuid)`로 받는다. `feature.feature_id`는
@@ -2695,6 +2700,8 @@ async def upsert_feature(
     *,
     provider_dataset_id: int,
     source_membership: _ProviderSourceMembership,
+    _excluded_fields: frozenset[str] = frozenset(),
+    _existing_feature_id: str | None = None,
 ) -> bool:
     """provider Feature를 procedure와 typed subtype으로 적재한다.
 
@@ -2723,6 +2730,20 @@ async def upsert_feature(
     if provider_dataset_id <= 0:
         raise ValueError("provider_dataset_id는 양의 정수여야 합니다.")
 
+    if _excluded_fields:
+        if _existing_feature_id is None:
+            raise ValueError("explicit existing full-refresh identity required")
+        state = await _feature_load_state(session, _existing_feature_id)
+        if not state.exists or state.row_revision is None:
+            raise ValueError("active full-refresh target disappeared")
+        # create wrapper의 INSERT BEFORE trigger/identity 경로를 통과시키지 않는다.
+        # 기존 canonical identity는 entry의 plan/DB manifest에서 이미 재검증했다.
+        await _apply_provider_feature_field_patch(
+            session, feature, feature_uuid=_existing_feature_id,
+            provider_dataset_id=provider_dataset_id, source_membership=source_membership,
+            expected_row_revision=state.row_revision, excluded_fields=_excluded_fields,
+        )
+        return False
     params = _feature_params(feature)
     geom_wkt = cast("str | None", params.pop("geom_wkt"))
     # T-VN-39: core 생성 프로시저는 payload의 `parent_feature_id`를
@@ -3301,12 +3322,21 @@ class _GeoChunk:
         return feature_id in self.stale, self.stored[feature_id]
 
 
+@dataclass(frozen=True)
+class _ExclusiveProviderRefresh:
+    """Python routing만 전달한다. 쓰기 허용 증거는 DB applying EX manifest다."""
+
+    attempt_id: uuid.UUID
+    policies: Mapping[str, tuple[int, frozenset[str]]]
+
+
 async def load_bundle(
     session: AsyncSession,
     bundle: FeatureBundle,
     *,
     geo: GeoLoadContext | None = None,
     _chunk: _GeoChunk | None = None,
+    _exclusive_refresh: _ExclusiveProviderRefresh | None = None,
 ) -> FeatureLoadResult:
     """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
@@ -3355,11 +3385,20 @@ async def load_bundle(
         else await _feature_load_state(session, resolved_feature_id)
     )
     feature_missing = not feature_state.exists
+    active_policy = (
+        _exclusive_refresh.policies.get(str(resolved_feature_id))
+        if _exclusive_refresh is not None else None
+    )
+    excluded_fields = active_policy[1] if active_policy is not None else frozenset()
+    active_write_options: dict[str, Any] = (
+        {"_excluded_fields": excluded_fields, "_existing_feature_id": resolved_feature_id}
+        if active_policy is not None else {}
+    )
     link_inserted = False
     # Existing Feature refresh must prove the same primary link inside the
     # provider field-patch procedure. New Feature has no FK target until the
     # create procedure returns, so it creates this link immediately afterward.
-    if not feature_missing:
+    if not feature_missing and active_policy is None:
         assert resolved_feature_id is not None  # exists=True면 claim이 풀렸다.
         link_inserted = await upsert_source_link(
             session, bundle.source_link, feature_id=resolved_feature_id
@@ -3433,6 +3472,7 @@ async def load_bundle(
             session,
             feature_to_write,
             provider_dataset_id=record_state.provider_dataset_id,
+            **active_write_options,
             source_membership=_ProviderSourceMembership(
                 source_entity_key=record_state.source_entity_key,
                 source_record_key=record_state.source_record_key,
@@ -3452,6 +3492,7 @@ async def load_bundle(
                 if kept_fields
                 else bundle.feature,
                 provider_dataset_id=record_state.provider_dataset_id,
+                **active_write_options,
                 source_membership=_ProviderSourceMembership(
                     source_entity_key=record_state.source_entity_key,
                     source_record_key=record_state.source_record_key,
@@ -3543,7 +3584,31 @@ async def load_bundle(
             stamped = await upsert_stamps(
                 session, current=geo.current_dataset, outcomes={lifecycle_feature_id: outcome}
             )
-    if provider_field_shadow_enabled(
+    if active_policy is not None:
+        assert _exclusive_refresh is not None
+        presence = bundle.provider_field_presence
+        if presence is None:
+            raise ValueError("active full refresh requires explicit field presence")
+        values, geometry = _provider_field_patch_payload(
+            bundle.feature, feature_uuid=lifecycle_feature_id, parent_feature_id=None
+        )
+        await capture_provider_field_candidates(
+            session, feature_id=lifecycle_feature_id,
+            dataset_id=record_state.provider_dataset_id,
+            entity_key=record_state.source_entity_key,
+            record_key=record_state.source_record_key,
+            values=json.dumps({k: v for k, v in json.loads(values).items()
+                               if k in excluded_fields}, ensure_ascii=False),
+            geometry_wkt="{}",
+            presence=presence.model_copy(update={
+                "supplied_fields": presence.supplied_fields & excluded_fields}),
+            attempt_id=str(_exclusive_refresh.attempt_id), policy_revision=active_policy[0],
+        )
+        await recompute_provider_field_candidates(
+            session, attempt_id=str(_exclusive_refresh.attempt_id),
+            feature_id=lifecycle_feature_id, policy_revision=active_policy[0],
+        )
+    elif provider_field_shadow_enabled(
         session,
         provider=bundle.source_record.provider,
         dataset_key=bundle.source_record.dataset_key,
@@ -3655,6 +3720,7 @@ async def load_bundles(
     bundles: Iterable[FeatureBundle],
     *,
     geo: GeoLoadContext | None = None,
+    _exclusive_refresh: _ExclusiveProviderRefresh | None = None,
 ) -> FeatureLoadResult:
     """``FeatureBundle`` 다수를 같은 session(transaction)에서 순차 적재.
 
@@ -3672,7 +3738,12 @@ async def load_bundles(
         chunk = await _prefetch_geo_chunk(session, materialized, geo)
     total = FeatureLoadResult()
     for bundle in materialized:
-        total = total.merge(await load_bundle(session, bundle, geo=geo, _chunk=chunk))
+        if _exclusive_refresh is None:
+            loaded = await load_bundle(session, bundle, geo=geo, _chunk=chunk)
+        else:
+            loaded = await load_bundle(session, bundle, geo=geo, _chunk=chunk,
+                                       _exclusive_refresh=_exclusive_refresh)
+        total = total.merge(loaded)
     if geo is not None and chunk is not None and chunk.stamps:
         token = geo.effective_token()
         stamped = await upsert_stamps(

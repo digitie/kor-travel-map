@@ -317,6 +317,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
                 _M05_DETECTOR_MANUAL_LIST_FUNCTION,
                 _PROVIDER_CURATION_SEAL_FUNCTION,
+                "feature.validate_exclusive_provider_snapshot(uuid,bigint,jsonb,text[])",
                 "feature.lock_provider_field_policy_epoch()",
                 "feature.assert_scoped_provider_scalar_target(uuid,uuid,bigint,text,bigint)",
                 "feature._provider_field_projection_dependency_active(text,text)",

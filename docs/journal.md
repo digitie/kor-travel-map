@@ -1,3 +1,13 @@
+## 2026-10-25 — main 419 보존과 EX 적재 연결 420 재검증
+
+- 머지 직전 main에 들어온 PG transport 퇴역419를 보존하고 미머지 EX 적재 연결만420으로 재배치했다. DDL sidecar 본문과 main 비중복33파일·journal/resume 원문 suffix를 보존했다.
+- 새 합집합 집중199 PASS/155.27초·lint373 PASS/기존6skip·CI 대상 Ruff/mypy5/import4 통과. 원419 세대의 CI/UI를 새420 결과로 세지 않으며, 새 정확CI·두리뷰·fresh UI는 별도다. [근거와 경계](reports/2026-10-24-exclusive-provider-full-refresh.md#main-419-병합-뒤-420-재검증).
+
+## 2026-10-24 — 제한 primary place의 명시 EX 전체 적재(A3 checkpoint)
+
+- 최종 converter 입력에서 bounded plan을 만드는 opt-in client/EX 경로를 추가했다. 기존 applying EX manifest·비활성 base/Geo와 활성 winner를 같은 TX로 닫고 기본 선택은 OFF다.
+- 최종 집중190건(140+중복 없는 converter50)·oracle/metadata2·lint377/기존6skip·mypy5/import4 통과. 실제 SDK/asset tracking은 격리 시험이며 실제 worker/운영 수집은 아니다. 최종 두리뷰·정확CI·fresh UI는 별도다. [범위와 남은 gate](reports/2026-10-24-exclusive-provider-full-refresh.md).
+
 ## 2026-10-24 — ADR-114 결정 7 퇴역 1단계(T-STATE-03): 브랜치 `feat/adr114-retire-pg-transport`
 
 - 소비자 확인(읽기 전용 실측): prod Map transport 출처 Feature 26,293건(주유소 place 11,820·유가 11,822·휴게소 215·휴게소 유가

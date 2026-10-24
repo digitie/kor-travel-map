@@ -95,6 +95,46 @@ $$;
 ALTER FUNCTION feature._assert_provider_field_projection(p_feature uuid) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: _exclusive_provider_refresh_context(uuid, bigint); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._exclusive_provider_refresh_context(p_feature uuid, p_dataset bigint DEFAULT NULL::bigint) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_count bigint; v_entity text;
+BEGIN
+    SELECT count(*) INTO v_count FROM ops.feature_write_attempts a
+    JOIN ops.feature_write_manifests m ON m.attempt_id=a.attempt_id
+    WHERE a.status='applying' AND a.apply_txid=txid_current() AND a.exclusive_protocol
+      AND a.idempotency_key='native-full-refresh-v1:'||a.input_digest||':'||replace(a.attempt_id::text,'-','')
+      AND m.dependency_kind='feature' AND m.dependency_key=p_feature::text
+      AND (p_dataset IS NULL OR a.provider_dataset_id=p_dataset);
+    IF v_count<>1 THEN RETURN false; END IF;
+    SELECT a.* INTO STRICT v_attempt FROM ops.feature_write_attempts a
+    JOIN ops.feature_write_manifests m ON m.attempt_id=a.attempt_id
+    WHERE a.status='applying' AND a.apply_txid=txid_current() AND a.exclusive_protocol
+      AND a.idempotency_key='native-full-refresh-v1:'||a.input_digest||':'||replace(a.attempt_id::text,'-','')
+      AND m.dependency_kind='feature' AND m.dependency_key=p_feature::text
+      AND (p_dataset IS NULL OR a.provider_dataset_id=p_dataset);
+    -- prefix는 용도 구분일 뿐이다. 실제 TX/membership/closure/epoch와 EX를 검증한다.
+    PERFORM ops.lock_scoped_feature_write_protocol(true);
+    PERFORM feature.assert_scoped_candidate_write(v_attempt.attempt_id,p_feature);
+    SELECT l.source_entity_key INTO STRICT v_entity FROM provider_sync.source_links l
+    JOIN provider_sync.source_entities e USING(source_entity_key)
+    WHERE l.feature_id=p_feature AND l.source_role='primary'
+      AND e.provider_dataset_id=v_attempt.provider_dataset_id;
+    PERFORM feature.assert_scoped_provider_scalar_target(v_attempt.attempt_id,p_feature,
+        v_attempt.provider_dataset_id,v_entity,
+        (SELECT policy_revision FROM feature.provider_field_active_policies WHERE feature_id=p_feature));
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION feature._exclusive_provider_refresh_context(p_feature uuid, p_dataset bigint) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: _install_provider_field_projection_guards(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -9755,6 +9795,28 @@ BEGIN
     SELECT * INTO v_active FROM feature.provider_field_active_policies WHERE feature_id IN (v_feature,CASE WHEN TG_OP<>'INSERT' THEN OLD.feature_id END)
         ORDER BY feature_id LIMIT 1;
     IF NOT FOUND THEN RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END; END IF;
+    IF TG_OP<>'DELETE' AND TG_TABLE_NAME IN ('features','feature_places','feature_geocode_stamps')
+       AND feature._exclusive_provider_refresh_context(v_feature) THEN
+        IF TG_TABLE_NAME='feature_geocode_stamps' AND (TG_OP='INSERT'
+             OR NEW.feature_id=OLD.feature_id) THEN
+            RETURN NEW;
+        ELSIF TG_TABLE_NAME='features' AND TG_OP='UPDATE' THEN
+            SELECT coalesce(array_agg(attname::text),ARRAY[]::text[]) INTO v_generated
+              FROM pg_attribute WHERE attrelid=TG_RELID AND attgenerated<>'' AND NOT attisdropped;
+            IF (to_jsonb(NEW)-v_generated-ARRAY['name','category','coord','coord_precision_digits',
+                'address','legal_dong_code','road_name_code','road_address_management_no',
+                'admin_dong_code','sido_code','sigungu_code','urls','marker_icon','marker_color',
+                'raw_refs','updated_at','row_revision']) IS NOT DISTINCT FROM
+               (to_jsonb(OLD)-v_generated-ARRAY['name','category','coord','coord_precision_digits',
+                'address','legal_dong_code','road_name_code','road_address_management_no',
+                'admin_dong_code','sido_code','sigungu_code','urls','marker_icon','marker_color',
+                'raw_refs','updated_at','row_revision']) THEN RETURN NEW; END IF;
+        ELSIF TG_TABLE_NAME='feature_places' AND TG_OP='UPDATE' THEN
+            -- subtype identity/place_kind는 유지한다. 다른 값은 기존 typed registry materializer다.
+            IF (NEW.feature_id,NEW.kind,NEW.place_kind) IS NOT DISTINCT FROM
+               (OLD.feature_id,OLD.kind,OLD.place_kind) THEN RETURN NEW; END IF;
+        END IF;
+    END IF;
     IF TG_OP='DELETE' OR TG_TABLE_NAME IN ('source_links','feature_geocode_stamps') THEN
         RAISE EXCEPTION 'active scalar identity or link mutation is unsupported' USING ERRCODE='23514';
     ELSIF TG_TABLE_NAME='features' THEN
@@ -11600,7 +11662,9 @@ BEGIN
         RAISE EXCEPTION 'base field path % does not apply to Feature', NEW.field_path
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_target';
     END IF;
-    IF EXISTS (SELECT 1 FROM feature.provider_field_active_policies WHERE feature_id=NEW.feature_id) THEN
+    IF EXISTS (SELECT 1 FROM feature.provider_field_active_policies
+        WHERE feature_id=NEW.feature_id AND (NEW.field_path=ANY(field_paths)
+          OR NOT feature._exclusive_provider_refresh_context(NEW.feature_id,NEW.provider_dataset_id))) THEN
         SELECT winner.value_source_hash INTO v_source_hash
         FROM feature.provider_field_active_policies active
         CROSS JOIN LATERAL feature.provider_field_scalar_winners(
@@ -11674,6 +11738,79 @@ $$;
 
 
 ALTER FUNCTION feature.validate_active_provider_base_field_value() OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: validate_exclusive_provider_snapshot(uuid, bigint, jsonb, text[]); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.validate_exclusive_provider_snapshot(p_attempt uuid, p_dataset bigint, p_targets jsonb, p_entities text[]) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_target record; v_result jsonb:='{}';
+    v_actual uuid[]; v_wanted uuid[]; v_count bigint;
+BEGIN
+    IF p_dataset IS NULL OR cardinality(p_entities) NOT BETWEEN 1 AND 2730
+       OR p_entities IS NULL OR pg_column_size(p_entities)>1048576
+       OR (p_attempt IS NOT NULL AND (jsonb_typeof(p_targets) IS DISTINCT FROM 'object'
+           OR pg_column_size(p_targets)>1048576)) THEN
+        RAISE EXCEPTION 'invalid bounded full refresh selection' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS (SELECT 1 FROM provider_sync.source_entities
+        WHERE source_entity_key=ANY(p_entities) AND provider_dataset_id<>p_dataset) THEN
+        RAISE EXCEPTION 'full snapshot contains another dataset' USING ERRCODE='23514';
+    END IF;
+    IF p_attempt IS NOT NULL THEN
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
+    IF NOT v_attempt.exclusive_protocol OR v_attempt.provider_dataset_id<>p_dataset
+       OR v_attempt.idempotency_key<>'native-full-refresh-v1:'||v_attempt.input_digest||':'||replace(v_attempt.attempt_id::text,'-','')
+       OR v_attempt.status NOT IN ('applying','completed') THEN
+        RAISE EXCEPTION 'not an explicit exclusive full refresh' USING ERRCODE='23514';
+    END IF;
+    END IF;
+    SELECT array_agg(feature_id ORDER BY feature_id) INTO v_actual FROM (
+        SELECT DISTINCT a.feature_id FROM feature.provider_field_active_policies a
+        JOIN provider_sync.source_links l USING(feature_id)
+        WHERE l.source_entity_key=ANY(p_entities) LIMIT 2731
+    ) bounded_targets;
+    IF cardinality(v_actual)>2730 THEN
+        RAISE EXCEPTION 'too many active targets' USING ERRCODE='23514';
+    END IF;
+    SELECT array_agg(key::uuid ORDER BY key::uuid) INTO v_wanted FROM jsonb_each(p_targets);
+    IF p_attempt IS NOT NULL AND (v_actual IS DISTINCT FROM v_wanted OR v_wanted IS NULL) THEN
+        RAISE EXCEPTION 'full refresh active target set changed' USING ERRCODE='40001';
+    END IF;
+    FOR v_target IN SELECT a.*,f.kind FROM feature.provider_field_active_policies a
+        JOIN feature.features f USING(feature_id) WHERE a.feature_id=ANY(v_actual) ORDER BY a.feature_id LOOP
+        IF v_target.kind<>'place' OR (p_attempt IS NOT NULL AND
+            (p_targets->>v_target.feature_id::text)::bigint<>v_target.policy_revision) THEN
+            RAISE EXCEPTION 'active target revision or kind changed' USING ERRCODE='40001';
+        END IF;
+        IF EXISTS (SELECT 1 FROM provider_sync.source_links l
+            JOIN provider_sync.source_links other USING(source_entity_key)
+            WHERE l.feature_id=v_target.feature_id AND other.feature_id<>l.feature_id) THEN
+            RAISE EXCEPTION 'shared active entity is unsupported, including retired area' USING ERRCODE='23514';
+        END IF;
+        IF v_attempt.status='applying' AND NOT feature._exclusive_provider_refresh_context(v_target.feature_id,p_dataset) THEN
+            RAISE EXCEPTION 'full refresh target lacks applying context' USING ERRCODE='23514';
+        END IF;
+        v_result:=v_result||jsonb_build_object(v_target.feature_id::text,
+            jsonb_build_array(v_target.policy_revision,to_jsonb(v_target.field_paths)));
+    END LOOP;
+    IF p_attempt IS NOT NULL AND v_attempt.status='applying' THEN
+        SELECT count(*) INTO v_count FROM (SELECT DISTINCT source_entity_key
+            FROM provider_sync.source_links WHERE feature_id=ANY(v_actual) LIMIT 8193) heads;
+        IF v_count+2*cardinality(v_actual)>8192
+           OR v_attempt.expected_members<>v_count+2*cardinality(v_actual) THEN
+            RAISE EXCEPTION 'full refresh requires exact active closure' USING ERRCODE='23514';
+        END IF;
+    END IF;
+    RETURN v_result;
+END;
+$$;
+
+
+ALTER FUNCTION feature.validate_exclusive_provider_snapshot(p_attempt uuid, p_dataset bigint, p_targets jsonb, p_entities text[]) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: validate_feature_base_field_value(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -17623,7 +17760,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -26357,6 +26494,13 @@ REVOKE ALL ON FUNCTION feature._assert_provider_field_projection(p_feature uuid)
 
 
 --
+-- Name: FUNCTION _exclusive_provider_refresh_context(p_feature uuid, p_dataset bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._exclusive_provider_refresh_context(p_feature uuid, p_dataset bigint) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION _install_provider_field_projection_guards(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -27126,6 +27270,14 @@ GRANT ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN
 
 REVOKE ALL ON FUNCTION feature.validate_active_provider_base_field_value() FROM PUBLIC;
 GRANT ALL ON FUNCTION feature.validate_active_provider_base_field_value() TO ktm_feature_schema_owner;
+
+
+--
+-- Name: FUNCTION validate_exclusive_provider_snapshot(p_attempt uuid, p_dataset bigint, p_targets jsonb, p_entities text[]); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.validate_exclusive_provider_snapshot(p_attempt uuid, p_dataset bigint, p_targets jsonb, p_entities text[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.validate_exclusive_provider_snapshot(p_attempt uuid, p_dataset bigint, p_targets jsonb, p_entities text[]) TO ktm_feature_runtime;
 
 
 --

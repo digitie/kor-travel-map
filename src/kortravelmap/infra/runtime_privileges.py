@@ -416,6 +416,9 @@ _CORE_FEATURE_GRANTS = (
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
+    "REVOKE ALL ON FUNCTION feature.validate_exclusive_provider_snapshot(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.validate_exclusive_provider_snapshot(...) "
+    "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.lock_provider_field_policy_epoch(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION feature.lock_provider_field_policy_epoch(...) "
     "TO ktm_feature_runtime",
@@ -921,6 +924,7 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "feature.validate_exclusive_provider_snapshot": "419_exclusive_provider_refresh",
     "feature.lock_provider_field_policy_epoch": "412_provider_scalar_projection",
     "feature.assert_scoped_provider_scalar_target": "412_provider_scalar_projection",
     "feature.record_scoped_provider_field_candidates": "412_provider_scalar_projection",
