@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 실제 동시 쓰기 구현 착수
+
+- 기준선 #1370은 정확 `2a53dce7c`의 CI 5개·실제 glibc/alpine·독립 리뷰 2인을 통과해 머지했다. 두 lane의 원본과 checkout/runner/fixture/ACL/12phase를 대조했다. 직렬 synthetic 기준선이며 운영 절감이나 동시 쓰기 완료가 아니다.
+- 다음은 후보 완전성/winner·scope/epoch/manifest·순수 reader snapshot을 분리 구현한 뒤 실제 독립 DML 중첩과 공유 Feature·복구를 검증한다. 기존 전역 fence·기본 OFF·정책 seed0·운영0을 유지한다.
+- Weather·Transport 전파는 Map의 해당 개선 수용 이후다. [순서·검증·남은 범위](reports/2026-10-24-scoped-concurrent-writes-implementation.md). T-CWRITE-01~09 전체 acceptance는 미완이다.
+
 ## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
 
 - 고정 synthetic fixture와 전용 PostGIS container/template clone으로 native load_bundles→seal/commit의 cold/warm 3회 runner를 구현했다. CPU/RSS/WAL·실제 DML 구간/잠금 샘플·CI artifact를 남기며 전체 T01/동시 쓰기 완료로 세지 않는다.
