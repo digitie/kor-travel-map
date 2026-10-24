@@ -54,3 +54,30 @@ T-CWRITE-01~09의 전체 acceptance는 모두 원문을 유지한다. 이번 진
 완료 근거가 아니다. provider 실제 rank·Geo 일관 그룹·모든 membership backfill,
 redirect/merge·catalog/root의 전체 closure, 실제 scoped DML·지역 소실/이동,
 장애 주입·대량 부하·운영 단계 확대와 Weather·Transport 적용은 후속 수용 대상이다.
+
+
+## 범위 커널과 기존 fence 통합 검증
+
+후속 초안 PR [#1371](https://github.com/digitie/kor-travel-map/pull/1371)은 411의
+scope/attempt/manifest와 제한된 공개 routine을 추가한다. 직접 테이블 쓰기는 열지 않는다.
+protocol → 참여 dataset → region/attempt → source entity/head → link → Feature 순서로
+잠근다. 공유 Feature의 전체 membership 지문을 잠금 뒤 다시 확인하고 추가·삭제·head 변경은
+전체 transaction의 재계획으로 돌린다. applying만 하고 finish하지 않은 transaction은
+지연 제약으로 commit을 거부한다. 취소·만료·epoch/owner 불일치도 쓰기를 허용하지 않는다.
+
+기존 native writer는 protocol 배타 gate를 먼저 획득하고 기존 전역 advisory fence로
+진입한다. 공유 gate에서 배타로 승격하지 않는다. 기존 유한 lock timeout은 유지하고,
+무제한 설정일 때 gate 획득만 1초로 제한한다. scoped entry는 statement 30초·lock 1초
+이하의 transaction-local 제한을 적용한다. 더 짧은 호출자 제한은 늘리지 않는다.
+
+실제 PostgreSQL에서 커널·전체 bootstrap·legacy fence·metadata 검사를 합쳐
+56 passed/1 skipped를 확인했다. 이 skip은 명시적인 head schema 오라클 재생성 모드다.
+오라클 비교 모드를 포함한 후속 검사는 40 passed/1 기존 skipped다. 별도 전체 bootstrap의
+legacy fence 검사는 15 passed이며 commit/rollback 수명, savepoint 재진입,
+protocol→기존 fence 순서와 공유→배타 전환 거부를 검증했다. 배포 role 복귀·trigger 소유권
+초기 실패는 수정 후 재실행했고 실패 로그도 보존했다. 이 수치는 실제 수집 전체 경로의
+병렬 쓰기나 운영 부하 측정 결과가 아니다.
+
+별도 reader 초안 #1372와 scalar 후보 초안 #1373은 각각 독립 PR로 검증한다.
+후자는 기존 Feature/source/link의 이름·전화만 다루며 전체 provider 쓰기 전환이 아니다.
+정책 seed·운영 활성화는 0건이다. 정확한 최종 커밋의 독립 리뷰와 CI가 남아 있다.

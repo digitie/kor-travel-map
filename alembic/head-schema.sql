@@ -11105,6 +11105,30 @@ $$;
 ALTER FUNCTION feature.write_feature_state_transition() OWNER TO ktm_feature_audit_writer;
 
 --
+-- Name: _arm_scoped_feature_write_deadline(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops._arm_scoped_feature_write_deadline() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_statement bigint; v_lock bigint;
+BEGIN
+    SELECT setting::bigint INTO v_statement FROM pg_settings WHERE name='statement_timeout';
+    SELECT setting::bigint INTO v_lock FROM pg_settings WHERE name='lock_timeout';
+    -- 함수 안에서 statement_timeout을 바꿔도 현재 statement 전체를 제한하지 못한다.
+    -- Python은 호출 직전 설정하며 SQL 직접 호출도 시작부터 유한한 제한을 요구한다.
+    IF v_statement=0 OR v_statement>30000 THEN
+        RAISE EXCEPTION 'kernel requires statement timeout of at most 30 seconds' USING ERRCODE='23514';
+    END IF;
+    PERFORM set_config('lock_timeout',LEAST(COALESCE(NULLIF(v_lock,0),1000),1000)::text,true);
+END;
+$$;
+
+
+ALTER FUNCTION ops._arm_scoped_feature_write_deadline() OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: _guard_scoped_feature_write_completion(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -11133,6 +11157,7 @@ CREATE FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions
     AS $$
 DECLARE v_region jsonb;
 BEGIN
+    PERFORM ops._arm_scoped_feature_write_deadline();
     PERFORM ops.lock_scoped_feature_write_protocol(p_exclusive);
     INSERT INTO ops.feature_write_dataset_scopes(provider_dataset_id) VALUES(p_dataset)
         ON CONFLICT DO NOTHING;
@@ -11315,7 +11340,7 @@ BEGIN
             OR jsonb_typeof(v_member->'ordinal') IS DISTINCT FROM 'number'
             OR (v_member->>'ordinal') !~ '^(0|[1-9][0-9]{0,3})$'
             OR jsonb_typeof(v_member->'dependency_kind') IS DISTINCT FROM 'string'
-            OR (v_member->>'dependency_kind') NOT IN ('feature','source_head')
+            OR (v_member->>'dependency_kind') NOT IN ('feature','source_head','feature_membership')
             OR jsonb_typeof(v_member->'dependency_key') IS DISTINCT FROM 'string'
             OR octet_length(v_member->>'dependency_key') NOT BETWEEN 1 AND 128
             OR jsonb_typeof(v_member->'expected_value') IS DISTINCT FROM 'string'
@@ -11325,6 +11350,9 @@ BEGIN
         IF (v_member->>'ordinal')::integer>=v_attempt.expected_members THEN RAISE EXCEPTION 'manifest ordinal overflow' USING ERRCODE='23514'; END IF;
         IF v_member->>'dependency_kind'='feature' AND ((v_member->>'dependency_key') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR (v_member->>'expected_value') !~ '^[1-9][0-9]{0,18}$') THEN
             RAISE EXCEPTION 'invalid feature dependency' USING ERRCODE='23514';
+        END IF;
+        IF v_member->>'dependency_kind'='feature_membership' AND ((v_member->>'dependency_key') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR (v_member->>'expected_value') !~ '^[0-9a-f]{64}$') THEN
+            RAISE EXCEPTION 'invalid feature membership dependency' USING ERRCODE='23514';
         END IF;
         v_digest:=encode(sha256(convert_to(v_member::text,'UTF8')),'hex');
         INSERT INTO ops.feature_write_manifests(attempt_id,ordinal,dependency_kind,dependency_key,expected_value,member_digest)
@@ -11416,6 +11444,7 @@ CREATE FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_m
     AS $$
 DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_dependency ops.feature_write_manifests%ROWTYPE; v_value text; v_plan ops.feature_write_attempts%ROWTYPE; v_participants bigint[]; v_dataset bigint; v_entity_dataset bigint;
 BEGIN
+    PERFORM ops._arm_scoped_feature_write_deadline();
     -- dataset 행을 하나라도 잠그기 전에 frozen manifest의 모든 participant를 정렬한다.
     SELECT * INTO v_plan FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
     IF NOT FOUND OR v_plan.owner IS DISTINCT FROM p_owner THEN
@@ -11450,21 +11479,46 @@ BEGIN
     IF v_attempt.status='completed' THEN RETURN to_jsonb(v_attempt); END IF;
     IF v_attempt.status='applying' AND v_attempt.apply_txid=txid_current() THEN RETURN to_jsonb(v_attempt); END IF;
     IF v_attempt.status<>'ready' THEN RAISE EXCEPTION 'attempt is not ready' USING ERRCODE='23514'; END IF;
-    -- 명시 manifest의 알려진 source/head→Feature 의존만 지원한다. 전체 closure/phantom의
-    -- 완결성 증명이나 claim/redirect/catalog 검증은 후속 진입점이 제공하기 전 enable하지 않는다.
-    FOR v_dependency IN SELECT * FROM ops.feature_write_manifests WHERE attempt_id=p_attempt
-        ORDER BY CASE dependency_kind WHEN 'source_head' THEN 0 ELSE 1 END,dependency_key COLLATE "C" LOOP
-        v_value:=NULL;
-        IF v_dependency.dependency_kind='source_head' THEN
-            SELECT provider_dataset_id INTO v_entity_dataset FROM provider_sync.source_entities WHERE source_entity_key=v_dependency.dependency_key FOR UPDATE;
-            IF NOT FOUND OR NOT (v_entity_dataset=ANY(v_participants)) THEN
-                RAISE EXCEPTION 'source participant changed; replan' USING ERRCODE='40001';
-            END IF;
-            SELECT current_source_record_key INTO v_value FROM provider_sync.source_entity_heads WHERE source_entity_key=v_dependency.dependency_key FOR UPDATE;
-        ELSE
-            SELECT row_revision::text INTO v_value FROM feature.features WHERE feature_id=v_dependency.dependency_key::uuid FOR UPDATE;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'membership apply requires fresh read committed replan' USING ERRCODE='40001';
+    END IF;
+    IF EXISTS(SELECT 1 FROM ops.feature_write_manifests f WHERE f.attempt_id=p_attempt AND f.dependency_kind='feature'
+        AND NOT EXISTS(SELECT 1 FROM ops.feature_write_manifests m WHERE m.attempt_id=p_attempt AND m.dependency_kind='feature_membership' AND m.dependency_key=f.dependency_key))
+       OR EXISTS(SELECT 1 FROM ops.feature_write_manifests m WHERE m.attempt_id=p_attempt AND m.dependency_kind='feature_membership'
+        AND NOT EXISTS(SELECT 1 FROM ops.feature_write_manifests f WHERE f.attempt_id=p_attempt AND f.dependency_kind='feature' AND f.dependency_key=m.dependency_key)) THEN
+        RAISE EXCEPTION 'feature membership plan is required' USING ERRCODE='23514';
+    END IF;
+    FOR v_dependency IN SELECT * FROM ops.feature_write_manifests WHERE attempt_id=p_attempt AND dependency_kind='feature_membership' ORDER BY dependency_key COLLATE "C" LOOP
+        IF ops.scoped_feature_write_membership_digest(v_dependency.dependency_key::uuid)<>v_dependency.expected_value
+           OR EXISTS(SELECT 1 FROM provider_sync.source_links l WHERE l.feature_id=v_dependency.dependency_key::uuid
+            AND NOT EXISTS(SELECT 1 FROM ops.feature_write_manifests h WHERE h.attempt_id=p_attempt AND h.dependency_kind='source_head' AND h.dependency_key=l.source_entity_key)) THEN
+            RAISE EXCEPTION 'feature membership changed or head omitted; replan' USING ERRCODE='40001';
         END IF;
-        IF v_value IS DISTINCT FROM v_dependency.expected_value THEN RAISE EXCEPTION 'manifest dependency changed; replan' USING ERRCODE='40001'; END IF;
+    END LOOP;
+    -- 명시 manifest의 알려진 source/head→link→Feature 의존만 지원한다. 전체 closure/phantom의
+    -- 완결성 증명이나 claim/redirect/catalog 검증은 후속 진입점이 제공하기 전 enable하지 않는다.
+    FOR v_dependency IN SELECT * FROM ops.feature_write_manifests WHERE attempt_id=p_attempt AND dependency_kind='source_head'
+        ORDER BY dependency_key COLLATE "C" LOOP
+        SELECT provider_dataset_id INTO v_entity_dataset FROM provider_sync.source_entities WHERE source_entity_key=v_dependency.dependency_key FOR UPDATE;
+        IF NOT FOUND OR NOT (v_entity_dataset=ANY(v_participants)) THEN
+            RAISE EXCEPTION 'source participant changed; replan' USING ERRCODE='40001';
+        END IF;
+        SELECT current_source_record_key INTO v_value FROM provider_sync.source_entity_heads WHERE source_entity_key=v_dependency.dependency_key FOR UPDATE;
+        IF v_value IS DISTINCT FROM v_dependency.expected_value THEN RAISE EXCEPTION 'manifest source changed; replan' USING ERRCODE='40001'; END IF;
+    END LOOP;
+    -- 늦은 source-link 잠금을 Feature 뒤에 추가하지 않는다. 현재 link들은 먼저 선점한다.
+    PERFORM l.source_entity_key FROM provider_sync.source_links l
+        JOIN ops.feature_write_manifests f ON f.attempt_id=p_attempt AND f.dependency_kind='feature' AND f.dependency_key=l.feature_id::text
+        ORDER BY l.source_entity_key COLLATE "C",l.feature_id,l.source_role COLLATE "C" FOR SHARE OF l;
+    FOR v_dependency IN SELECT * FROM ops.feature_write_manifests WHERE attempt_id=p_attempt AND dependency_kind='feature'
+        ORDER BY dependency_key COLLATE "C" LOOP
+        SELECT row_revision::text INTO v_value FROM feature.features WHERE feature_id=v_dependency.dependency_key::uuid FOR UPDATE;
+        IF v_value IS DISTINCT FROM v_dependency.expected_value THEN RAISE EXCEPTION 'manifest feature changed; replan' USING ERRCODE='40001'; END IF;
+        -- 새 FK link INSERT는 Feature FOR UPDATE와 충돌한다. 기다린 뒤 차이를 재검증한다.
+        SELECT expected_value INTO v_value FROM ops.feature_write_manifests WHERE attempt_id=p_attempt AND dependency_kind='feature_membership' AND dependency_key=v_dependency.dependency_key;
+        IF ops.scoped_feature_write_membership_digest(v_dependency.dependency_key::uuid) IS DISTINCT FROM v_value THEN
+            RAISE EXCEPTION 'feature membership changed while locking; replan' USING ERRCODE='40001';
+        END IF;
     END LOOP;
     UPDATE ops.feature_write_attempts SET status='applying',apply_txid=txid_current(),updated_at=clock_timestamp() WHERE attempt_id=p_attempt RETURNING * INTO v_attempt;
     RETURN to_jsonb(v_attempt);
@@ -12697,6 +12751,7 @@ CREATE FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) RETU
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
+DECLARE v_prior_lock_timeout text;
 BEGIN
     IF p_exclusive IS NULL THEN
         RAISE EXCEPTION 'protocol mode is required' USING ERRCODE='23514';
@@ -12713,11 +12768,14 @@ BEGIN
     ) THEN
         RAISE EXCEPTION 'protocol share to exclusive upgrade requires replan' USING ERRCODE='23514';
     END IF;
+    SELECT setting INTO v_prior_lock_timeout FROM pg_settings WHERE name='lock_timeout';
+    IF v_prior_lock_timeout='0' THEN PERFORM set_config('lock_timeout','1000',true); END IF;
     IF p_exclusive THEN
         PERFORM pg_advisory_xact_lock(1369104691,115);
     ELSE
         PERFORM pg_advisory_xact_lock_shared(1369104691,115);
     END IF;
+    IF v_prior_lock_timeout='0' THEN PERFORM set_config('lock_timeout',v_prior_lock_timeout,true); END IF;
 END;
 $$;
 
@@ -12767,6 +12825,7 @@ CREATE FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestamp with 
     AS $$
 DECLARE v_members integer; v_attempts integer;
 BEGIN
+    PERFORM ops._arm_scoped_feature_write_deadline();
     PERFORM ops.lock_scoped_feature_write_protocol(false);
     IF p_before IS NULL OR p_before>clock_timestamp()-interval '1 day' OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 256 THEN
         RAISE EXCEPTION 'invalid bounded terminal retention' USING ERRCODE='23514';
@@ -13610,6 +13669,30 @@ CREATE FUNCTION ops.reject_terminal_current_summary_run_mutation() RETURNS trigg
 
 
 ALTER FUNCTION ops.reject_terminal_current_summary_run_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: scoped_feature_write_membership_digest(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.scoped_feature_write_membership_digest(p_feature uuid) RETURNS text
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_count bigint; v_digest text;
+BEGIN
+    SELECT count(*) INTO v_count FROM provider_sync.source_links WHERE feature_id=p_feature;
+    IF v_count>8192 THEN RAISE EXCEPTION 'feature membership exceeds manifest capacity' USING ERRCODE='23514'; END IF;
+    -- 행마다 JSON 배열로 경계를 고정하고 정렬된 고정폭 SHA256만 fold한다.
+    SELECT encode(sha256(convert_to(COALESCE(string_agg(
+        encode(sha256(convert_to(jsonb_build_array(source_entity_key,source_role)::text,'UTF8')),'hex'),
+        '' ORDER BY source_entity_key COLLATE "C",source_role COLLATE "C"),''),'UTF8')),'hex')
+    INTO v_digest FROM provider_sync.source_links WHERE feature_id=p_feature;
+    RETURN v_digest;
+END;
+$$;
+
+
+ALTER FUNCTION ops.scoped_feature_write_membership_digest(p_feature uuid) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: seal_scoped_feature_write_manifest(uuid, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
@@ -17651,7 +17734,7 @@ CREATE TABLE ops.feature_write_manifests (
     CONSTRAINT ck_fw_manifest_digest CHECK ((member_digest ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_fw_manifest_expected CHECK (((octet_length(expected_value) >= 1) AND (octet_length(expected_value) <= 128))),
     CONSTRAINT ck_fw_manifest_key CHECK (((octet_length(dependency_key) >= 1) AND (octet_length(dependency_key) <= 128))),
-    CONSTRAINT ck_fw_manifest_kind CHECK ((dependency_kind = ANY (ARRAY['feature'::text, 'source_head'::text]))),
+    CONSTRAINT ck_fw_manifest_kind CHECK ((dependency_kind = ANY (ARRAY['feature'::text, 'source_head'::text, 'feature_membership'::text]))),
     CONSTRAINT ck_fw_manifest_ordinal CHECK (((ordinal >= 0) AND (ordinal <= 8191)))
 );
 
@@ -26016,6 +26099,13 @@ REVOKE ALL ON FUNCTION feature.validate_theme_candidate_merge_target() FROM PUBL
 
 
 --
+-- Name: FUNCTION _arm_scoped_feature_write_deadline(); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops._arm_scoped_feature_write_deadline() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION _guard_scoped_feature_write_completion(); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -26172,6 +26262,14 @@ REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_mutation() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_truncate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION scoped_feature_write_membership_digest(p_feature uuid); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.scoped_feature_write_membership_digest(p_feature uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.scoped_feature_write_membership_digest(p_feature uuid) TO ktm_feature_runtime;
 
 
 --

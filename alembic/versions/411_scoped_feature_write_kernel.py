@@ -168,7 +168,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "REVOKE EXECUTE ON FUNCTION ops._guard_scoped_feature_write_completion() FROM ktm_feature_schema_owner",
     "SET ROLE ktm_feature_schema_owner",
     _RECEIPT_HEAD_CHECK_SQL,
-    "RESET ROLE",
+    "SET ROLE ktm_feature_schema_owner",
 )
 
 

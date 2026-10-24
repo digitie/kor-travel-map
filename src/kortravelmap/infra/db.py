@@ -315,6 +315,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
                 _M05_DETECTOR_MANUAL_LIST_FUNCTION,
                 _PROVIDER_CURATION_SEAL_FUNCTION,
+                "ops.scoped_feature_write_membership_digest(uuid)",
                 "ops.lock_scoped_feature_write_protocol(boolean)",
                 "ops.claim_scoped_feature_write(uuid,uuid,bigint,text,jsonb,text,integer,integer,boolean)",
                 "ops.append_scoped_feature_write_manifest(uuid,uuid,jsonb)",

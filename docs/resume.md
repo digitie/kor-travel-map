@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 범위 커널·기존 writer fence 통합
+
+- #1371에 411 scope/epoch/owner/manifest·membership 재검증과 기존 protocol→전역 fence 순서를 연결했다. runtime 직접 테이블 쓰기는 닫고 기존 writer 배타 경로·기본 OFF를 유지한다.
+- 실제 PG 커널·전체 bootstrap·metadata 56 passed/1 오라클 기록 skip, 후속 오라클 비교 포함 40 passed/1 기존 skip. 별도 legacy fence 15 passed. 초기 role/trigger 실패는 수정 후 재실행했다.
+- 제한 scalar·reader는 별도 초안 #1373/#1372다. 전체 provider DML 병행·정책 seed·운영 활성화·Weather/Transport 전파는 아직 미완이다. [검증과 한계](reports/2026-10-24-scoped-concurrent-writes-implementation.md).
+
 ## 2026-10-24 — ADR115 실제 동시 쓰기 구현 착수
 
 - 기준선 #1370은 정확 `2a53dce7c`의 CI 5개·실제 glibc/alpine·독립 리뷰 2인을 통과해 머지했다. 두 lane의 원본과 checkout/runner/fixture/ACL/12phase를 대조했다. 직렬 synthetic 기준선이며 운영 절감이나 동시 쓰기 완료가 아니다.
