@@ -1,20 +1,31 @@
 {
   "ignore": {
-    "files": ["dist/**"],
+    "files": [
+      "dist/**",
+      "public/maplibre/**"
+    ],
     "overrides": [
       {
-        "files": ["src/api/live.ts"],
+        "files": [
+          "src/api/live.ts"
+        ],
         "rules": [
           "react-doctor/effect-needs-cleanup",
           "react-doctor/no-fetch-in-effect"
         ]
       },
       {
-        "files": ["src/app/ops/datasets/datasets-client.tsx"],
-        "rules": ["react-doctor/no-event-handler"]
+        "files": [
+          "src/app/ops/datasets/datasets-client.tsx"
+        ],
+        "rules": [
+          "react-doctor/no-event-handler"
+        ]
       },
       {
-        "files": ["src/components/ui/data-table.tsx"],
+        "files": [
+          "src/components/ui/data-table.tsx"
+        ],
         "rules": [
           "react-doctor/no-redundant-roles",
           "react-doctor/no-interactive-element-to-noninteractive-role"
