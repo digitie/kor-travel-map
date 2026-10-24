@@ -273,10 +273,67 @@ async def test_failed_import_rolls_back_and_same_plan_can_retry(scalar_engines, 
                 )
         finally:
             await tx.rollback()
+    async with AsyncSession(admin) as observer:
+        assert (
+            await observer.scalar(
+                text(
+                    "SELECT count(*) FROM ops.curation_import_manual_feature_children "
+                    "WHERE import_plan_id=CAST(:plan AS uuid)"
+                ),
+                dict(plan=case.plan),
+            )
+            == 0
+        )
     # plan claim과 child 발급은 첫 실패 TX에서 전부 취소된다. 같은 key/plan으로 재시도한다.
     async with _transaction(runtime) as session:
         first = await _import(session, case)
         assert not first["manual_children"][0].reused
+    async with _transaction(runtime) as session:
+        again = await _import(session, case)
+        assert not again["manual_children"][0].reused
+
+
+async def test_existing_autobegin_contract_keeps_caller_owned_rollback(scalar_engines):
+    admin, runtime = scalar_engines
+    case = await _prepare(admin, runtime)
+    async with AsyncSession(runtime) as session:
+        assert not session.in_transaction()
+        # 기존 caller의 SET TRANSACTION이 autobegin을 연다. 명시 begin을 새로 요구하지 않는다.
+        await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+        assert session.in_transaction()
+        result = await _import(session, case)
+        child = result["manual_children"][0]
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM feature.features WHERE feature_id=CAST(:feature AS uuid)"
+                ),
+                dict(feature=child.feature_id),
+            )
+            == 1
+        )
+        await session.rollback()
+    async with AsyncSession(admin) as observer:
+        assert (
+            await observer.scalar(
+                text(
+                    "SELECT count(*) FROM feature.features WHERE feature_id=CAST(:feature AS uuid)"
+                ),
+                dict(feature=child.feature_id),
+            )
+            == 0
+        )
+        assert (
+            await observer.scalar(
+                text(
+                    "SELECT count(*) FROM ops.curation_import_manual_feature_children "
+                    "WHERE import_plan_id=CAST(:plan AS uuid)"
+                ),
+                dict(plan=case.plan),
+            )
+            == 0
+        )
+    # 실패나 caller rollback 뒤에도 같은 plan과 deterministic child identity는 유효하다.
     async with _transaction(runtime) as session:
         again = await _import(session, case)
         assert not again["manual_children"][0].reused

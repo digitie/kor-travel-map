@@ -16,9 +16,12 @@ normal-head의 비어 있지 않은 import는 첫 import advisory 직전에 `SEL
 
 ## 검증 checkpoint
 
-- 수정 뒤 실제 PG4 passed/16.46초: whole import/direct manual 양방향, 정확 protocol EX/key/PID/blocker·후발 import의 advisory 미선점, SH 승격 `23514`, 잠금 대기 `55P03` 뒤 rollback 및 같은 plan 재시도.
+- 최초 수정 뒤 실제 PG4 passed/16.46초는 별도 원본으로 보존했다. 최종 실제 PG9 passed/31.34초는 신규5개(양방향·SH 승격 `23514`·잠금 대기 `55P03` 뒤 rollback/동일 plan 재시도·autobegin/caller rollback)와 기존 M03 4개다. 정확 protocol EX/key/mode/PID/blocker·후발 import의 advisory 미선점, rollback 뒤 child linkage/Feature 부재, 실제 child 재사용·계보를 확인했다. 원본4개를 최종9개에 합산하지 않는다.
+- 기존 curation/merge/import quarantine 회귀48 passed/27.63초: authoritative reimport·운영자 override·동시 import/merge·collection revision 계약을 유지한다.
 - 기존 curation 단위73 passed. 추가 h35/빈 import/기존 collection 경계 포함76 passed/1.03초. 최초 신규 collection 단위의 필수 source_id 누락1FAIL은 수정 후 통과했으며 제품 실패가 아니다.
-- 2CPU·1536MiB·PID256의 자체 UUID PostGIS만 사용했다. 추가 기존 M03 회귀·보안/정적 검사·독립2리뷰·정확CI는 후속 수용이다.
+- archive 링크 검사+전체 lint377 passed/기존 skip6(32.20초), Ruff·strict mypy1 source·import4계약·redaction·diff-check PASS다. migration/head schema/graph/OpenAPI·API 제품 변경은 0이다.
+- 2CPU·1536MiB·PID256의 자체 UUID PostGIS만 사용했다. 실제 container ID 부재와 UUID 잔존0을 검증했고 원본 증거를 보존했다. 독립2리뷰·정확CI·실제 HTTP/UI·운영 수용은 후속 gate이며 이 PG 시험으로 대체하지 않는다.
+- journal cap을 피하려고 tasks-rule §8에 따라 가장 오래된2026-09-30 한 절3480B를 `../archive/journal-2026-09h.md`로 옮겼다. 원문 SHA256 `11815da19a12acd210eff244efa7b4bae752e3df6156e0d95244605556259eb9`와 bytes를 대조했고 live222330B다.
 
 ## 한계
 
