@@ -138,6 +138,7 @@ jobs:
             image: postgis/postgis@sha256:8b33190b6486ab9905dea999171817c1ac461733a7078dd4c836091c6e6b5d40
     env:
       KTM_TEST_POSTGIS_IMAGE: ${{ matrix.image }}
+      KTM_CWRITE_BASELINE_REPORT: ${{ runner.temp }}/map-scoped-write-baseline.json
     steps:
       - uses: actions/checkout@v4
 
@@ -187,6 +188,15 @@ jobs:
           pytest tests/integration -q \
             --cov=src/kortravelmap --cov-append \
             --cov-report=term-missing --cov-report=xml
+
+      - name: Upload isolated scoped write baseline
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: scoped-write-baseline-${{ matrix.lane }}
+          path: ${{ runner.temp }}/map-scoped-write-baseline.json
+          if-no-files-found: error
+          retention-days: 7
 
       - name: Upload combined coverage XML
         if: ${{ !cancelled() }}

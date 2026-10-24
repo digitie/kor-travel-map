@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import hashlib
 import json
 import math
@@ -71,7 +72,15 @@ def load_fixture(path: Path = FIXTURE_PATH) -> Fixture:
 
 
 def interval_overlap(intervals: list[tuple[float, float]]) -> float:
-    if len(intervals) != 2 or any(end < start for start, end in intervals):
+    if (
+        len(intervals) != 2
+        or any(
+            type(bound) not in (int, float) or not math.isfinite(bound)
+            for interval in intervals
+            for bound in interval
+        )
+        or any(end < start for start, end in intervals)
+    ):
         raise ValueError("두 writer의 유효한 DML 구간이 필요합니다")
     return max(0.0, min(end for _, end in intervals) - max(start for start, _ in intervals))
 
@@ -86,10 +95,12 @@ def plan(fixture: Fixture) -> dict[str, Any]:
         "repetitions": 3,
         "cold": "전용 PG 재시작 후 shared_buffers 첫 실행; OS page cache는 미통제",
         "warm": "같은 artifact의 즉시 replay",
-        "measured_path": "global fence → source/typed field patch → causal input seal → commit",
+        "measured_path": (
+            "global fence → load_bundles(source/typed patch) → causal input seal → commit"
+        ),
         "excludes": [
             "provider HTTP/Geo",
-            "전체 load_bundle identity 경로",
+            "최초 identity 생성",
             "root finalize",
             "API/UI",
         ],
@@ -101,8 +112,27 @@ def plan(fixture: Fixture) -> dict[str, Any]:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.parse_args()
-    print(json.dumps(plan(load_fixture()), ensure_ascii=False, sort_keys=True))
+    parser.add_argument("--run", action="store_true", help="자체 testcontainer에서 격리 측정")
+    parser.add_argument("--repetitions", type=int, choices=range(3, 11), default=3)
+    parser.add_argument("--output", type=Path, help="실측 JSON 결과 파일")
+    args = parser.parse_args()
+    fixture = load_fixture()
+    if not args.run:
+        print(json.dumps(plan(fixture), ensure_ascii=False, sort_keys=True))
+        return 0
+    if __package__ != "scripts":
+        parser.error(
+            "실측은 저장소 루트에서 python -m scripts.scoped_write_baseline --run 으로 실행"
+        )
+    if args.output is None:
+        parser.error("--run에는 --output이 필요합니다")
+    if not args.output.parent.is_dir() or args.output.exists():
+        parser.error("결과 디렉터리가 존재하고 --output 파일은 새 이름이어야 합니다")
+    from scripts._scoped_write_baseline_pg import run_baseline, write_report
+
+    result = asyncio.run(run_baseline(fixture, repetitions=args.repetitions))
+    write_report(args.output, result)
+    print(json.dumps({"output": str(args.output), "fixture_sha256": fixture.sha256}))
     return 0
 
 
