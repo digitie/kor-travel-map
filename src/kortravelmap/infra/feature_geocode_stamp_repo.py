@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Final
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.sql.elements import TextClause
 from sqlalchemy.types import Text
 
 if TYPE_CHECKING:
@@ -47,6 +48,8 @@ __all__ = [
     "select_stale_feature_ids",
     "stale_among",
     "upsert_stamps",
+    "lock_scoped_provider_geocode_stamps",
+    "reobserve_scoped_provider_geocode_stamps",
 ]
 
 
@@ -106,16 +109,9 @@ def decide_outcome(
 
 _UPSERT_STAMPS_SQL: Final = text(
     """
-INSERT INTO feature.feature_geocode_stamps AS stamp (
-    feature_id, geo_version_token, geo_data_token, reverse_outcome, stamped_at
+SELECT feature.upsert_provider_geocode_stamps_ex(
+    CAST(:feature_ids AS uuid[]), CAST(:outcomes AS text[]), :version_token, :data_token
 )
-SELECT input.feature_id::uuid, :version_token, :data_token, input.reverse_outcome, now()
-  FROM unnest(:feature_ids, :outcomes) AS input(feature_id, reverse_outcome)
-ON CONFLICT (feature_id) DO UPDATE
-   SET geo_version_token = EXCLUDED.geo_version_token,
-       geo_data_token = EXCLUDED.geo_data_token,
-       reverse_outcome = EXCLUDED.reverse_outcome,
-       stamped_at = EXCLUDED.stamped_at
 """
 ).bindparams(
     bindparam("feature_ids", type_=ARRAY(Text)),
@@ -202,7 +198,7 @@ async def upsert_stamps(
     if current is None or current.data_token is None or not outcomes:
         return 0
     feature_ids = list(outcomes)
-    await session.execute(
+    result = await session.execute(
         _UPSERT_STAMPS_SQL,
         {
             "feature_ids": feature_ids,
@@ -211,7 +207,7 @@ async def upsert_stamps(
             "data_token": current.data_token,
         },
     )
-    return len(feature_ids)
+    return int(result.scalar_one())
 
 
 async def get_stamp(session: AsyncSession, feature_id: str) -> GeocodeStamp | None:
@@ -260,11 +256,15 @@ async def stale_among(
     if current_data_token is None or not feature_ids:
         return frozenset()
     rows = (
-        await session.execute(
-            _STALE_AMONG_SQL,
-            {"feature_ids": list(feature_ids), "current_data_token": current_data_token},
+        (
+            await session.execute(
+                _STALE_AMONG_SQL,
+                {"feature_ids": list(feature_ids), "current_data_token": current_data_token},
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return frozenset(str(row) for row in rows)
 
 
@@ -299,7 +299,6 @@ async def select_stale_feature_ids(
     else:
         rows = await session.execute(_SELECT_STALE_AFTER_SQL, {**params, "after": after})
     return [str(feature_id) for feature_id in rows.scalars().all()]
-
 
 
 @dataclass(frozen=True)
@@ -430,4 +429,84 @@ async def coverage(
         },
         excluded_by_skip=excluded,
         unstamped_non_provider=non_provider,
+    )
+
+
+_LOCK_SCOPED_STAMPS_SQL: Final = text(
+    "SELECT feature.lock_scoped_provider_geocode_stamps("
+    "CAST(:attempt AS uuid),CAST(:owner AS uuid),:manifest,:input,CAST(:targets AS jsonb))"
+)
+_REOBSERVE_SCOPED_STAMPS_SQL: Final = text(
+    "SELECT feature.reobserve_scoped_provider_geocode_stamps("
+    "CAST(:attempt AS uuid),CAST(:owner AS uuid),:manifest,:input,CAST(:targets AS jsonb))"
+)
+
+
+async def _scoped_stamps(
+    session: AsyncSession,
+    statement: TextClause,
+    *,
+    attempt_id: str,
+    owner: str,
+    manifest_digest: str,
+    input_digest: str,
+    targets_json: str,
+) -> int:
+    # JSON decode/copy는 여기서 하지 않는다. SQL이 정확 shape/2730/OLD/closure를 검증한다.
+    if not isinstance(targets_json, str) or not 0 < len(targets_json) <= 1_048_576:
+        raise ValueError("scoped stamp JSON exceeds1MiB")
+    if len(targets_json.encode("utf-8")) > 1_048_576:
+        raise ValueError("scoped stamp JSON exceeds1MiB")
+    value = await session.scalar(
+        statement,
+        {
+            "attempt": attempt_id,
+            "owner": owner,
+            "manifest": manifest_digest,
+            "input": input_digest,
+            "targets": targets_json,
+        },
+    )
+    return int(value)
+
+
+async def lock_scoped_provider_geocode_stamps(
+    session: AsyncSession,
+    *,
+    attempt_id: str,
+    owner: str,
+    manifest_digest: str,
+    input_digest: str,
+    targets_json: str,
+) -> int:
+    """첫 source DML 전, applying SH 전체 target의 기존 stamp만 정렬 잠금·검증한다."""
+    return await _scoped_stamps(
+        session,
+        _LOCK_SCOPED_STAMPS_SQL,
+        attempt_id=attempt_id,
+        owner=owner,
+        manifest_digest=manifest_digest,
+        input_digest=input_digest,
+        targets_json=targets_json,
+    )
+
+
+async def reobserve_scoped_provider_geocode_stamps(
+    session: AsyncSession,
+    *,
+    attempt_id: str,
+    owner: str,
+    manifest_digest: str,
+    input_digest: str,
+    targets_json: str,
+) -> int:
+    """실제 accepted head 확인 뒤 같은 ID/token/outcome의 now()만 갱신한다."""
+    return await _scoped_stamps(
+        session,
+        _REOBSERVE_SCOPED_STAMPS_SQL,
+        attempt_id=attempt_id,
+        owner=owner,
+        manifest_digest=manifest_digest,
+        input_digest=input_digest,
+        targets_json=targets_json,
     )

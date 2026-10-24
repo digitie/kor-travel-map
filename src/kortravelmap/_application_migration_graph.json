@@ -117,6 +117,12 @@
         "418_creation_protocol"
       ],
       "revision": "419_exclusive_provider_refresh"
+    },
+    {
+      "down_revision": [
+        "419_exclusive_provider_refresh"
+      ],
+      "revision": "420_stamp_writer_boundary"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -186,6 +186,7 @@ def _runtime_privilege_row(
         "executable_application_security_definer_functions": sorted(
             _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS[login]
         ),
+        "can_mutate_geocode_stamps_directly": False,
         "can_insert_feature_directly": False,
         "can_update_lifecycle_directly": False,
         "can_update_publication_directly": False,
@@ -440,3 +441,12 @@ def test_session_factory_is_async_sessionmaker() -> None:
     engine = make_async_engine("postgresql://u:p@h/d")
     factory = make_async_session_factory(engine)
     assert isinstance(factory, async_sessionmaker)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("value", [True, None])
+def test_stamp_direct_write_preflight_is_fail_closed(value):
+    row = _runtime_privilege_row()
+    row["can_mutate_geocode_stamps_directly"] = value
+    problems = _runtime_db_privilege_problems(row, expected_login="ktm_feature_service")
+    assert "runtime login must not mutate geocode stamps directly" in problems
