@@ -6052,10 +6052,13 @@
       },
       "WeatherBatchRequest": {
         "additionalProperties": false,
-        "description": "``feature_ids``나 weather ``location_ids`` 중 하나로 최대 50곳.",
+        "description": "``feature_ids``와 weather ``location_ids``(둘 다 써도 된다, 합 최대 50곳).\n\nid 하나하나는 경로의 ``feature_id``와 같은 모양 검사, ``location_id``는 weather 계약과 같은\n길이·문자 검사를 받는다.",
         "properties": {
           "feature_ids": {
             "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
               "type": "string"
             },
             "maxItems": 50,
@@ -6111,6 +6114,9 @@
           "location_ids": {
             "description": "weather 위치 id(PinVi가 가진 weather location_id). Map이 feature_id로 바꾼다.",
             "items": {
+              "maxLength": 120,
+              "minLength": 1,
+              "pattern": "^[^|\\x00-\\x1f]+$",
               "type": "string"
             },
             "maxItems": 50,

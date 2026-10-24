@@ -14473,7 +14473,10 @@ export interface components {
         };
         /**
          * WeatherBatchRequest
-         * @description ``feature_ids``나 weather ``location_ids`` 중 하나로 최대 50곳.
+         * @description ``feature_ids``와 weather ``location_ids``(둘 다 써도 된다, 합 최대 50곳).
+         *
+         *     id 하나하나는 경로의 ``feature_id``와 같은 모양 검사, ``location_id``는 weather 계약과 같은
+         *     길이·문자 검사를 받는다.
          */
         WeatherBatchRequest: {
             /** Feature Ids */

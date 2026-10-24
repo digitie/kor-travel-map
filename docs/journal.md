@@ -1,3 +1,13 @@
+## 2026-10-24 — ADR-114 2단계 재리뷰 Low·main 재기반(#1365 뒤): 브랜치 `feat/adr114-valkey-weather`
+
+- origin/main(#1365 transport T4·#1368·#1369) 위로 rebase. OpenAPI 3종·admin `types.ts`는 rebase한 트리에서 n150이 다시
+  뽑았고, vnext 계약 두 파일은 main 쪽을 받은 뒤 weather 항목(revision·service added 5건)을 다시 얹고 sha를 다시 쟀다.
+  문서만 손으로 합쳤다(새 항목 위, 줄머리 충돌·diff3 마커 없음).
+- 재리뷰 Low: `/nearest` 예보는 후보 최대 50곳(관측·요약은 10곳 그대로 — 예보 없는 측정소 12곳이 KMA 격자보다 가까운 통합
+  검사), 이미 지난 `to`/`forecast_to`는 422, 배치 id는 경로 `feature_id`·weather `location_id`와 같은 모양·길이 검사(docstring은
+  "둘 다 가능"으로), `…_DAILY_SUMMARY_DAYS=1`이면 `vs_previous_day`는 언제나 null(ADR W7·설정 설명), 테스트 이름 정정.
+- 검사: GATE3_RESULT
+
 ## 2026-10-24 — ADR-114 2단계 리뷰 반영(#1367): 브랜치 `feat/adr114-valkey-weather`
 
 - origin/main(#1358·#1359)로 rebase. 생성물(OpenAPI 3종·admin `types.ts`·vnext baseline·receipt 핀)은 rebase한 트리에서
