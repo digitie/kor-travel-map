@@ -209,18 +209,45 @@ async def test_modes_cannot_be_substituted_and_original_plan_recovers(scalar_eng
             assert (await correct(session, bundle, **plan))["status"] == "completed"
 
 
-async def test_ex_lock_timeout_keeps_old_head_and_retry_succeeds(scalar_engines):
+@pytest.mark.parametrize("armed", [False, True])
+async def test_ex_lock_timeout_keeps_old_head_and_retry_succeeds(scalar_engines, armed):
     admin, runtime = scalar_engines
     feature, dataset, entity, identity = await _seed(admin)
     before = await _semantics(admin, feature, entity)
     bundle = _bundle(identity, "after-timeout")
     plan = await _plan(runtime, feature, dataset, bundle, exclusive_protocol=True)
+    from kortravelmap.infra.feature_repo import (
+        FEATURE_CURATION_WRITE_WAIT_INFO_KEY,
+        arm_feature_curation_write_wait,
+    )
+
     async with AsyncSession(runtime) as blocker, blocker.begin():
         await blocker.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-        with pytest.raises(DBAPIError) as error:
-            async with AsyncSession(runtime) as session, session.begin():
-                await native.refresh_exclusive_provider_scalars(session, bundle, **plan)
-        assert getattr(error.value.orig, "sqlstate", None) == "55P03"
+        async with runtime.connect() as connection:
+            settings = text(
+                "SELECT pg_backend_pid(),current_setting('lock_timeout'),"
+                "current_setting('statement_timeout')"
+            )
+            baseline = tuple((await connection.execute(settings)).one())
+            await connection.rollback()
+            async with AsyncSession(bind=connection) as session:
+
+                async def apply_with_hint():
+                    async with session.begin():
+                        await session.execute(text("SET LOCAL lock_timeout='25ms'"))
+                        if armed:
+                            arm_feature_curation_write_wait(session, 1500)
+                        await asyncio.wait_for(
+                            native.refresh_exclusive_provider_scalars(session, bundle, **plan),
+                            timeout=0.75,
+                        )
+
+                with pytest.raises(DBAPIError) as error:
+                    await apply_with_hint()
+                assert getattr(error.value.orig, "sqlstate", None) == "55P03"
+                assert FEATURE_CURATION_WRITE_WAIT_INFO_KEY not in session.info
+            assert tuple((await connection.execute(settings)).one()) == baseline
+            await connection.rollback()
     assert await _semantics(admin, feature, entity) == before
     async with AsyncSession(runtime) as session, session.begin():
         assert (await native.refresh_exclusive_provider_scalars(session, bundle, **plan))[

@@ -23,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import FeatureBundle, SourceRole
 from kortravelmap.infra.feature_repo import (
+    FEATURE_CURATION_WRITE_WAIT_INFO_KEY,
     _make_source_entity_key,
     _provider_field_patch_payload,
     _upsert_source_record_state,
@@ -225,6 +226,8 @@ async def _refresh_provider_scalars(
     )
     await _arm_deadline(session)
     if exclusive_protocol:
+        # legacy의 첫 fence 장기 대기 힌트가 native deadline을 늘리지 않게 소비한다.
+        session.info.pop(FEATURE_CURATION_WRITE_WAIT_INFO_KEY, None)
         await lock_feature_curation_write(session)
     else:
         await lock_scoped_feature_write_protocol(session, exclusive=False)
