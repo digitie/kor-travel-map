@@ -63,6 +63,16 @@ class _Session:
         return self._results.pop(0)
 
 
+@pytest.fixture(autouse=True)
+def fake_session_feature_fence(monkeypatch: pytest.MonkeyPatch) -> None:
+    """본문/receipt 단위 시험의 fake SQL queue와 실제 PG 잠금 검증을 분리한다."""
+
+    async def _fence(session: object) -> None:
+        assert isinstance(session, _Session)
+
+    monkeypatch.setattr(repo, "lock_feature_curation_write", _fence)
+
+
 def _feature_row(feature_id: str = "feature-1") -> dict[str, Any]:
     return {
         "feature_id": feature_id,

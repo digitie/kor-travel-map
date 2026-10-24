@@ -1,3 +1,9 @@
+## 2026-10-24 — field override 진입 보강(416)
+
+- SQL author/revoke·patch/create를 조기EX로 맞추고 manualcreate55P03을 기존503/RetryAfter5로 반환한다.
+- 실제 PG/ASGI29+순수5=34·unit110·oracle/metadata2·lint373 PASS(기존6skip). native Python helper·수집배선은 제외다.
+- 두 코드리뷰 PASS, 정확CI·실UI는 대기다. 기본OFF·seed0·운영0. [실패·범위·검증](reports/2026-10-24-field-override-protocol-entry.md).
+
 ## 2026-10-24 — 파일 레지스트리의 백업 링크 복구
 
 - 실제 통합 UI에서 파일 상세의 백업 링크가 없는 상세 route를 prefetch해404를 냈다. 백업 목록 페이지로 연결하고 중첩·공백 파일 경로의 회귀를 추가했다. DB·DTO·프론트·수집/잠금 변경0이다.
