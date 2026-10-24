@@ -325,6 +325,8 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "feature_creation_origins",
         "features",
         "feature_base_field_values",
+        "provider_field_shadow_policies",
+        "provider_field_shadow_candidates",
         "feature_state_transitions",
         "manual_feature_identity_claims",
         # purge의 복구점. 런타임 role에는 보이지 않는다 — 지워진 Feature의 payload를
@@ -407,6 +409,9 @@ _CORE_FEATURE_GRANTS = (
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
+    "REVOKE ALL ON PROCEDURE feature.record_provider_field_candidates(...) FROM PUBLIC",
+    "GRANT EXECUTE ON PROCEDURE feature.record_provider_field_candidates(...) "
+    "TO ktm_feature_runtime",
     # ADR-098 claim 축 해석기(309). provider 적재가 "이 원천이 이미 Feature를 갖고
     # 있나"를 묻는 유일한 통로다 — runtime은 `provider_sync`의 표를 직접 못 읽으므로
     # 이 SECURITY DEFINER 함수의 EXECUTE가 그 질문의 전부다.
@@ -850,28 +855,14 @@ _ROUTINE_KIND_KEYWORD: Mapping[str, str] = {"f": "FUNCTION", "p": "PROCEDURE"}
 _ARGUMENT_TYPE = r"(?:[a-z_][a-z0-9_]*\.)?[a-z][a-z0-9_ ]*(?:\[\])*"
 _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 
-#: 이 조정기가 도는 시점에 **아직 없을 수 있는** 루틴과 그것을 만드는 revision.
-#: 닫힌 집합이고, 이름이 느는 것 자체가 리뷰 신호다.
-#:
-#: `0236 → 300` handoff는 `300`에 stamp한 직후 이 조정기를 부른다. 301~309는 그 뒤
-#: 평범한 `alembic upgrade`가 올리므로 그 시점에는 아래 셋이 없다.
-#:
-#: 여기 **없는** 이름이 해석되지 않으면 조용히 넘어가지 않고 실패한다. 그리고 이 셋이
-#: head에는 반드시 있어야 한다는 것은 런타임의 추측이 아니라
-#: `tests/lint/test_db_procedure_signatures_exist_in_head.py`가 head 오라클에 대고
-#: 정적으로 고정한다 — 배포가 아니라 머지를 막는 쪽이 더 이르다.
-#: 인벤토리가 지목하지만 **없어도 되는** 루틴과 그것을 만드는 revision.
-#:
-#: 지금은 비어 있다. 이 예외가 있던 이유는 조정기가 두 스키마 상태에서 돌았기
-#: 때문이다 — baseline root에서 한 번(0236 handoff 직후), head에서 한 번. 그
-#: 사이에 생긴 루틴은 앞 시점에 없었다. `400` 스쿼시로 그 두 시점이 하나가 됐고,
-#: `tests/lint/test_db_procedure_signatures_exist_in_head.py`가 실물로 확인한다 —
-#: baseline root에 없는 인벤토리 루틴은 0개다.
-#:
-#: 비워 두는 것이 중요하다. 이름이 남아 있으면 그 루틴이 **정말로** 사라진 날에도
-#: 조정기가 조용히 건너뛰고, 지켜야 할 ACL이 없어진 것을 아무도 모른다. 다음
-#: revision이 새 루틴을 만들고 그 사이 상태를 지나야 한다면 그때 다시 적는다.
-_OPTIONAL_ROUTINES: Mapping[str, str] = {}
+#: baseline400과 최종 head에서 같은 ACL 조정기가 실행된다. 새410 shadow recorder는
+#: baseline에는 없고410 이후에는 반드시 있어야 한다. 이 닫힌 목록에 없는 루틴의
+#: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
+#: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
+_OPTIONAL_ROUTINES: Mapping[str, str] = {
+    # baseline400에는 아직 없으며410이 같은 전역 fence 아래 shadow 전용으로 추가한다.
+    "feature.record_provider_field_candidates": "410_provider_field_shadow",
+}
 
 #: 인벤토리가 지목하는 루틴 전부. `db.py`의 head 전용 preflight 목록과 달리 이것은
 #: **이 조정기가 ACL을 거는 대상**이고, lint가 두 오라클에 이름으로 묶는다.

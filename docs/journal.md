@@ -5,6 +5,55 @@ Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭�
 후속 UI에서 설명은 제목의 정보 버튼, 상태 필터는 `추가 필터`로 접고 select를 176×30px로 통일했다. 지도 높이를 유지하면서 375px 지도 시작을 651.75→439.25px로 앞당겼다. 다른 화면의 기본 여백·도움말·모바일 메뉴는 유지한다.
 
 WSL 타입·frontend 397건·변경 파일 ESLint PASS. n150 Chromium 실제 지도 375×1000/1440×1000/375×812 실측 3건과 지도 E2E 4건 PASS. 실제 VWorld 타일을 사용하되 Feature API는 결정적 검증 자료다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 최신 main 보안 정합 병합·CI·독립 리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+## 2026-10-24 — geo 재시도에 ReadError·WriteError 추가: 브랜치 `fix/geo-retry-readerror`
+
+- 등산로 run `18c4c1d7`(22:12Z)이 선조회 중 `GeoRequestError: transport 실패: ReadError` 한 번으로 두 시도(1h24m·37m)를 잃었다
+  (keep-alive 연결이 요청 도중 끊김). #1357 일시 장애 재시도는 ReadTimeout·RemoteProtocolError만 다시 보냈다 —
+  ReadError·WriteError도 적재 client(opt-in)에서 총 3회까지 다시 보낸다. 연결 수립 실패는 여전히 제외.
+
+## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
+
+- revision+provider/dataset allowlist가 모두 있을 때만 기존 native TX 안에서 shadow를 기록한다. 실제 MCST 이름만 supplied로 선언하며 Geo/파생값/DTO null은 추측하지 않는다.
+- 기본OFF/정책seed0/운영0. 기존 Feature ID/effective/전역 잠금 의미를 유지한다. [연결·실패·미완 gate](reports/2026-10-24-provider-field-shadow-hook.md).
+- 실제client PG/기존MCST·대기 집중검증을 진행하며 CI/두 리뷰/HTTPUI는 별도 수용한다. 전체 membership/winner/Geo/scope 분할은 미완이다.
+
+## 2026-10-24 — ADR115 T-CWRITE-02: 불변 정책과 shadow 후보 기반
+
+- 전체 CI의 ORM metadata/runtime preflight 누락을 보완했다. shadow CHECK/FK/index를 metadata에 정합화하고 recorder 정확 signature만 허용한다. 정책 등록/직접 DML 차단과 경고 검사는 유지하며 실패한 테스트 engine 회수도 검증한다.
+
+- 완결 fieldset을 원자 등록하는 불변 정책 header와 source별 typed shadow recorder/ACL을410에 추가한다. 등록은 global-first이며 RR에서 새 revision이 보이지 않으면 실패한다.
+- 실제 native 수집 hook/settings는 별도 후속으로 분리했다. 공개 winner/effective/전역 잠금 범위는 유지하며 기본OFF/운영0이다. [범위·교착/RR·미완 gate](reports/2026-10-24-provider-field-shadow.md).
+- 정책/전체 membership·Geo·winner 활성·scope/epoch/manifest와 최종 CI/두 리뷰·HTTP/UI 수용은 미완이다. 첫 기반 단위를 전체 동시 쓰기 완료로 세지 않는다.
+
+## 2026-10-24 — ADR115 선행: 같은 transaction fence 재진입 SQL 절감
+
+- 실제 root session/connection transaction·오류 stamp가 유효한 동안만 전역 fence를 재사용한다. savepoint 획득은 캐시하지 않는다. 전역 충돌 범위·병합 의미는 유지한다.
+- 기존 집중27/새 실제PG10 PASS, 변경 Ruff/strict mypy PASS. [범위·실패 규약·검증 한계](reports/2026-10-24-curation-fence-reentry.md).
+- T-CWRITE-01 전체 기준선 및02~09는 미완이다. 다음은 두 독립 리뷰·CI·실제 HTTP/UI 수용 후 후보/winner와 scope gate의 작은 코드 단위를 이어간다. 운영 미배포.
+
+## 2026-10-24 — 수집 CI 선행 Next 보안 게이트 복구
+
+- Next 및 직접 ESLint 플러그인을 최소 수정 버전 16.4.1로 pin했다. npm12 배포
+  audit의 critical 1건이 0건으로 줄었다. 기존 dev moderate2/high6은 변경하지 않았다.
+- 기존 정본 OpenAPI와 생성물 drift를 공식 기존 generator로 정합화했다. admin395/marker4
+  단위·타입·lint·실제Sharp변환·production build PASS. 독립 리뷰/CI는 진행 중이며 운영 변경은 없다.
+  상세: [검증 기록](reports/2026-10-24-next-security-gate.md).
+
+## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
+
+- #1357 배포 뒤 MCST run `c0f91a7c` **성공**(12:04Z 시작, 9,634초): geo 호출 36,905건(reverse 35,852·region 1,053),
+  저장값 재사용 skipped=45,930·geocoded=53,276·fallback=21. 이전 실패(6시간 상한)·멈춤 해소.
+- 그러나 watchdog이 15분마다 "I/O 없이 멈춤"을 남겼다(스택은 진행 중인 prefetch task). 원인: `/proc/self/io`의
+  `rchar`/`wchar`는 소켓 송수신을 세지 않는다. 수정: geo 왕복·상류 요청·SQLAlchemy 문장이 `core.activity`를 표시하고
+  watchdog이 그것도 진척으로 본다. 경고는 run당 한 번. 이어서 등산로 적재 시작.
+
+## 2026-10-24 — 여섯 프로젝트 npm 보안·버전 정합
+
+- 이 저장소의 기존 프론트엔드/공용 테스트 399개와 타입·린트·빌드 PASS. [버전·예외·검증 범위](npm-security-alignment-2026-10-24.md).
+- Popper 사전 리뷰 P1: Playwright 이미지와 세 실행 helper의 이전 digest 불일치를 수정했다. Docker FROM·버전·digest 길이·helper 동등성 회귀 검사를 보강했고 관련 55개 테스트가 통과했다. James 사전 리뷰의 추가 결함은 없었다.
+- 직접/전이 npm 의존성과 잠금 파일을 갱신하고 여섯 프로젝트의 공통 버전을 맞췄다.
+- 호환성 예외·미수정 상류 권고·검증 범위는 [정합 기록](npm-security-alignment-2026-10-24.md)을 따른다.
+- 소스·잠금 파일 정합과 WSL 검증을 완료했다. 최종 CI·두 독립 확인·N150 후보 UI 게이트와 머지 상태는 [PR](https://github.com/digitie/kor-travel-map/pull/1368)에서 정산하며 통과 확인 전 머지하지 않는다.
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤: 브랜치 `fix/mcst-geo-stall`
 

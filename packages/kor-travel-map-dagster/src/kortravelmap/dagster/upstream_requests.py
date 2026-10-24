@@ -48,6 +48,8 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Final
 
+from kortravelmap.core import activity
+
 __all__ = [
     "UPSTREAM_REQUESTS_METADATA_KEY",
     "counting_upstream_requests",
@@ -102,8 +104,9 @@ def counting_upstream_requests() -> Iterator[list[int]]:
 
 
 def note_upstream_request(count: int = 1) -> None:
-    """upstream 요청 ``count``건을 기록한다. 계수기가 없으면 no-op."""
+    """upstream 요청 ``count``건을 기록한다. 계수기가 없으면 no-op(진척 신호는 늘 남긴다)."""
 
+    activity.mark()
     counter = _COUNTER.get()
     if counter is not None:
         counter[0] += count

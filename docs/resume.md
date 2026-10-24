@@ -5,6 +5,43 @@ Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭�
 후속 UI에서 설명은 제목의 정보 버튼, 상태 필터는 `추가 필터`로 접고 select를 176×30px로 통일했다. 지도 높이를 유지하면서 375px 지도 시작을 651.75→439.25px로 앞당겼다. 다른 화면의 기본 여백·도움말·모바일 메뉴는 유지한다.
 
 WSL 타입·frontend 397건·변경 파일 ESLint PASS. n150 Chromium 실제 지도 375×1000/1440×1000/375×812 실측 3건과 지도 E2E 4건 PASS. 실제 VWorld 타일을 사용하되 Feature API는 결정적 검증 자료다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 최신 main 보안 정합 병합·CI·독립 리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
+
+- revision+provider/dataset allowlist가 모두 있을 때만 기존 native TX 안에서 shadow를 기록한다. 실제 MCST 이름만 supplied로 선언하며 Geo/파생값/DTO null은 추측하지 않는다.
+- 기본OFF/정책seed0/운영0. 기존 Feature ID/effective/전역 잠금 의미를 유지한다. [연결·실패·미완 gate](reports/2026-10-24-provider-field-shadow-hook.md).
+- 실제client PG/기존MCST·대기 집중검증을 진행하며 CI/두 리뷰/HTTPUI는 별도 수용한다. 전체 membership/winner/Geo/scope 분할은 미완이다.
+
+## 2026-10-24 — ADR115 T-CWRITE-02: 불변 정책과 shadow 후보 기반
+
+- 완결 fieldset을 원자 등록하는 불변 정책 header와 source별 typed shadow recorder/ACL을410에 추가한다. 등록은 global-first이며 RR에서 새 revision이 보이지 않으면 실패한다.
+- 실제 native 수집 hook/settings는 별도 후속으로 분리했다. 공개 winner/effective/전역 잠금 범위는 유지하며 기본OFF/운영0이다. [범위·교착/RR·미완 gate](reports/2026-10-24-provider-field-shadow.md).
+- 정책/전체 membership·Geo·winner 활성·scope/epoch/manifest와 최종 CI/두 리뷰·HTTP/UI 수용은 미완이다. 첫 기반 단위를 전체 동시 쓰기 완료로 세지 않는다.
+
+## 2026-10-24 — ADR115 선행: 같은 transaction fence 재진입 SQL 절감
+
+- 실제 root session/connection transaction·오류 stamp가 유효한 동안만 전역 fence를 재사용한다. savepoint 획득은 캐시하지 않는다. 전역 충돌 범위·병합 의미는 유지한다.
+- 기존 집중27/새 실제PG10 PASS, 변경 Ruff/strict mypy PASS. [범위·실패 규약·검증 한계](reports/2026-10-24-curation-fence-reentry.md).
+- T-CWRITE-01 전체 기준선 및02~09는 미완이다. 다음은 두 독립 리뷰·CI·실제 HTTP/UI 수용 후 후보/winner와 scope gate의 작은 코드 단위를 이어간다. 운영 미배포.
+
+## 2026-10-24 — 수집 PR #1358의 Next 보안 CI 선행 복구
+
+- Next/직접env/ESLint 플러그인16.4.1, 배포 audit 취약점0. 기존 OpenAPI admin 타입 산출물
+  drift를 공식 generator로 정합화했다. 수집/화면/API 구현/DB 제품 소스는 변경하지 않았다.
+- admin395/marker4·타입/lint·Sharp실변환·production build PASS.
+- 다음: 두 독립 리뷰 → 정확 CI 통과 후 CI 복구 PR을 먼저 머지하고
+  #1358이 최신 main을 통합해 CI를 재실행한다. 운영 미배포.
+- [범위와 검증 기록](reports/2026-10-24-next-security-gate.md).
+
+## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
+
+- MCST 첫 적재 성공(#1357). watchdog 진척 신호에 geo·상류 요청·DB 문장 표시를 더하고 경고를 run당 한 번으로. migration·
+  OpenAPI·설정 변화 없음. 배포 영향: Map Dagster code location.
+- **다음 한 작업: PR CI green → 머지·배포(등산로 run이 끝난 뒤) → 등산로 결과 journal.**
+
+## 2026-10-24 — 여섯 프로젝트 npm 보안·버전 정합
+
+- 현재 상태: npm 보안·공통 버전 소스 정합 및 WSL 검증 완료. [버전과 예외](npm-security-alignment-2026-10-24.md). 최종 CI·UI·머지 상태의 정본은 [PR](https://github.com/digitie/kor-travel-map/pull/1368)이다.
+- 다음 한 작업: 운영 반영을 요청받으면 Manager 정본과 현재 배포 런북에 따라 릴리스를 적용한다. 소스 머지와 운영 배포는 구분한다.
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
 

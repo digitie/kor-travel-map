@@ -3017,6 +3017,176 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/transport/airports": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 국내 운영 공항 (목록·근처·영역) */
+        get: operations["list_airports_v1_service_transport_airports_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/airports/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 공항 한 곳 */
+        get: operations["get_airport_v1_service_transport_airports__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/fuel-stations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 주유소 + 유종별 최신가 (목록·근처·영역) */
+        get: operations["list_fuel_stations_v1_service_transport_fuel_stations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/fuel-stations/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 주유소 한 곳 */
+        get: operations["get_fuel_station_v1_service_transport_fuel_stations__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/fuel-stations/{feature_id}/price-history": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 주유소 현재가 + 가격 추이(transport에서 요청 시 읽음) */
+        get: operations["get_fuel_station_price_history_v1_service_transport_fuel_stations__feature_id__price_history_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/highway-incidents": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 고속도로 활성 돌발 (목록·근처·영역) */
+        get: operations["list_highway_incidents_v1_service_transport_highway_incidents_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/highway-incidents/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 활성 돌발 한 건 */
+        get: operations["get_highway_incident_v1_service_transport_highway_incidents__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/rest-areas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 고속도로 휴게소 + 휴게소 유가 (목록·근처·영역) */
+        get: operations["list_rest_areas_v1_service_transport_rest_areas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/rest-areas/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 휴게소 한 곳 */
+        get: operations["get_rest_area_v1_service_transport_rest_areas__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valkey 연결과 데이터셋별 신선도 */
+        get: operations["get_transport_state_status_v1_service_transport_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/version": {
         parameters: {
             query?: never;
@@ -4802,6 +4972,63 @@ export interface components {
              * Format: date-time
              */
             updated_at: string;
+        };
+        /** AirportDetailData */
+        AirportDetailData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            item: components["schemas"]["AirportOut"];
+        };
+        /** AirportDetailResponse */
+        AirportDetailResponse: {
+            data: components["schemas"]["AirportDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** AirportListData */
+        AirportListData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            /** Items */
+            items: components["schemas"]["AirportOut"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** AirportListResponse */
+        AirportListResponse: {
+            data: components["schemas"]["AirportListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** AirportOut */
+        AirportOut: {
+            address: components["schemas"]["StateAddress"];
+            /** Category */
+            category: string;
+            coord: components["schemas"]["StateCoordinate"] | null;
+            /**
+             * Distance M
+             * @description 근처 검색일 때 중심에서의 거리.
+             */
+            distance_m?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Iata Code */
+            iata_code: string;
+            /** Icao Code */
+            icao_code?: string | null;
+            /**
+             * Kind
+             * @default place
+             * @constant
+             */
+            kind: "place";
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Municipality */
+            municipality?: string | null;
+            /** Name */
+            name: string;
+            /** Name English */
+            name_english: string;
         };
         /**
          * ApiCallLogRecord
@@ -9811,6 +10038,145 @@ export interface components {
             venue_name?: string | null;
         };
         /**
+         * FuelPriceState
+         * @description 주유소 유종 하나의 최신 가격.
+         */
+        FuelPriceState: {
+            /**
+             * Collected At
+             * Format: date-time
+             * @description transport가 이 가격을 현재가로 마지막으로 확인한 수집 시각.
+             */
+            collected_at: string;
+            /**
+             * Price
+             * @description 원/L. null이면 지금 판매하지 않는다.
+             */
+            price: number | null;
+            /**
+             * Product Code
+             * @description 오피넷 유종 코드(B027·D047·B034·C004·K015).
+             */
+            product_code: string;
+            /**
+             * Product Key
+             * @description 표준 유종 키(gasoline·diesel·premium_gasoline·kerosene·lpg).
+             */
+            product_key: string;
+            /** Product Name */
+            product_name?: string | null;
+            /**
+             * Provider Updated At
+             * @description 오피넷이 그 유종 가격을 마지막으로 바꾼 시각.
+             */
+            provider_updated_at?: string | null;
+            /**
+             * Unit
+             * @default KRW/L
+             * @constant
+             */
+            unit: "KRW/L";
+        };
+        /** FuelStationDetailData */
+        FuelStationDetailData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            item: components["schemas"]["FuelStationOut"];
+        };
+        /** FuelStationDetailResponse */
+        FuelStationDetailResponse: {
+            data: components["schemas"]["FuelStationDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FuelStationListData */
+        FuelStationListData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            /** Items */
+            items: components["schemas"]["FuelStationOut"][];
+            /**
+             * Truncated
+             * @description 근처·영역 검색이 limit에 닿았다(더 있을 수 있다).
+             */
+            truncated: boolean;
+        };
+        /** FuelStationListResponse */
+        FuelStationListResponse: {
+            data: components["schemas"]["FuelStationListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** FuelStationOut */
+        FuelStationOut: {
+            address: components["schemas"]["StateAddress"];
+            /** Brand Code */
+            brand_code?: string | null;
+            /** Brand Name */
+            brand_name?: string | null;
+            /** Category */
+            category: string;
+            coord: components["schemas"]["StateCoordinate"] | null;
+            /**
+             * Distance M
+             * @description 근처 검색일 때 중심에서의 거리.
+             */
+            distance_m?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Has Carwash */
+            has_carwash?: boolean | null;
+            /** Has Cvs */
+            has_cvs?: boolean | null;
+            /** Has Maintenance */
+            has_maintenance?: boolean | null;
+            /** Is 24H */
+            is_24h?: boolean | null;
+            /** Is Self */
+            is_self?: boolean | null;
+            /**
+             * Kind
+             * @default place
+             * @constant
+             */
+            kind: "place";
+            /** Lpg Available */
+            lpg_available?: boolean | null;
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Name */
+            name: string;
+            /**
+             * Natural Key
+             * @description 오피넷 주유소 ID(uni_id).
+             */
+            natural_key: string;
+            /** Phone */
+            phone?: string | null;
+            /** Prices */
+            prices: components["schemas"]["FuelPriceState"][];
+            /**
+             * Source Last Seen At
+             * Format: date-time
+             * @description transport가 이 주유소를 원천에서 마지막으로 본 시각.
+             */
+            source_last_seen_at: string;
+        };
+        /** FuelStationPriceHistoryData */
+        FuelStationPriceHistoryData: {
+            /** Current Prices */
+            current_prices: components["schemas"]["FuelPriceState"][];
+            /** Feature Id */
+            feature_id: string;
+            freshness: components["schemas"]["TransportFreshness"];
+            history: components["schemas"]["PriceHistoryBlock"];
+            /** Natural Key */
+            natural_key: string;
+        };
+        /** FuelStationPriceHistoryResponse */
+        FuelStationPriceHistoryResponse: {
+            data: components["schemas"]["FuelStationPriceHistoryData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
          * GeoCoverageRecord
          * @description 계획 토큰 기준 커버리지 — 분모는 그 계획의 비-skip 항목 dataset이다.
          */
@@ -9998,6 +10364,83 @@ export interface components {
             service: string;
             /** Status */
             status: string;
+        };
+        /** HighwayIncidentDetailData */
+        HighwayIncidentDetailData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            item: components["schemas"]["HighwayIncidentOut"];
+        };
+        /** HighwayIncidentDetailResponse */
+        HighwayIncidentDetailResponse: {
+            data: components["schemas"]["HighwayIncidentDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** HighwayIncidentListData */
+        HighwayIncidentListData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            /** Items */
+            items: components["schemas"]["HighwayIncidentOut"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** HighwayIncidentListResponse */
+        HighwayIncidentListResponse: {
+            data: components["schemas"]["HighwayIncidentListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** HighwayIncidentOut */
+        HighwayIncidentOut: {
+            /** Category */
+            category: string;
+            /** Congestion Length */
+            congestion_length?: number | null;
+            coord: components["schemas"]["StateCoordinate"] | null;
+            /** Direction */
+            direction?: string | null;
+            /**
+             * Distance M
+             * @description 근처 검색일 때 중심에서의 거리.
+             */
+            distance_m?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Incident Type */
+            incident_type?: string | null;
+            /** Incident Type Code */
+            incident_type_code?: string | null;
+            /**
+             * Kind
+             * @default notice
+             * @constant
+             */
+            kind: "notice";
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Message */
+            message?: string | null;
+            /** Natural Key */
+            natural_key: string;
+            /** Notice Type */
+            notice_type: string;
+            /**
+             * Occurred At
+             * @description 원천 발생 일자·시각(KST). 읽을 수 없으면 null.
+             */
+            occurred_at?: string | null;
+            /** Point Name */
+            point_name?: string | null;
+            /** Process Status */
+            process_status?: string | null;
+            /** Process Status Code */
+            process_status_code?: string | null;
+            /** Route Name */
+            route_name?: string | null;
+            /** Route No */
+            route_no?: string | null;
+            /** Title */
+            title: string;
         };
         /**
          * InBoundsCoverage
@@ -12592,6 +13035,56 @@ export interface components {
             /** Latest At */
             latest_at?: string | null;
         };
+        /** PriceHistoryBlock */
+        PriceHistoryBlock: {
+            /** Generated At */
+            generated_at: string | null;
+            /**
+             * Items
+             * @description observed_at 내림차순.
+             */
+            items: components["schemas"]["PriceHistoryPoint"][];
+            /**
+             * Reason
+             * @description unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 없음)·upstream_not_found(transport 404 — 옛 버전·토큰·접속 주소)·upstream_unavailable(5xx·연결·timeout)·upstream_rejected(그 밖의 4xx)·upstream_contract(응답 모양이 다름).
+             */
+            reason: ("disabled" | "not_configured" | "upstream_not_found" | "upstream_unavailable" | "upstream_rejected" | "upstream_contract") | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "available" | "unavailable";
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** PriceHistoryPoint */
+        PriceHistoryPoint: {
+            /**
+             * Collected At
+             * Format: date-time
+             * @description 같은 가격을 마지막으로 다시 확인한 수집 시각.
+             */
+            collected_at: string;
+            /**
+             * Observed At
+             * Format: date-time
+             * @description 오피넷 갱신시각(없으면 처음 본 수집 시각).
+             */
+            observed_at: string;
+            /**
+             * Price
+             * @description 원/L. null이면 그때 판매하지 않았다.
+             */
+            price: number | null;
+            /** Product Code */
+            product_code: string;
+            /** Product Key */
+            product_key: string;
+            /** Product Name */
+            product_name: string | null;
+            /** Provider Updated At */
+            provider_updated_at: string | null;
+        };
         /**
          * PricePointOut
          * @description canonical dataset/price_domain/product series의 가격 관측 1건.
@@ -13363,6 +13856,127 @@ export interface components {
              */
             locations?: string[] | null;
         };
+        /** RestAreaDetailData */
+        RestAreaDetailData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            fuel_price_freshness: components["schemas"]["TransportFreshness"] | null;
+            item: components["schemas"]["RestAreaOut"];
+        };
+        /** RestAreaDetailResponse */
+        RestAreaDetailResponse: {
+            data: components["schemas"]["RestAreaDetailData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * RestAreaFuelPriceState
+         * @description 휴게소 주유소 1곳의 최신 유가(휴게소에 읽을 때 붙인다).
+         */
+        RestAreaFuelPriceState: {
+            /** Address */
+            address?: string | null;
+            /** Diesel Price */
+            diesel_price?: number | null;
+            /** Direction */
+            direction?: string | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Gasoline Price */
+            gasoline_price?: number | null;
+            /**
+             * Kind
+             * @default price
+             * @constant
+             */
+            kind: "price";
+            /** Lpg Price */
+            lpg_price?: number | null;
+            /**
+             * Match Key
+             * @description 휴게소 ``natural_key``와 같은 규칙으로 정규화한 매칭 키. 이름이 없으면 null.
+             */
+            match_key: string | null;
+            /**
+             * Observed At
+             * Format: date-time
+             */
+            observed_at: string;
+            /** Oil Company */
+            oil_company?: string | null;
+            /** Phone */
+            phone?: string | null;
+            /** Route Name */
+            route_name?: string | null;
+            /** Service Area Code */
+            service_area_code: string;
+            /** Service Area Name */
+            service_area_name?: string | null;
+            /**
+             * Unit
+             * @default KRW/L
+             * @constant
+             */
+            unit: "KRW/L";
+        };
+        /** RestAreaListData */
+        RestAreaListData: {
+            freshness: components["schemas"]["TransportFreshness"];
+            /** @description 휴게소 유가 데이터셋의 신선도. 아직 적재 전이면 null. */
+            fuel_price_freshness: components["schemas"]["TransportFreshness"] | null;
+            /** Items */
+            items: components["schemas"]["RestAreaOut"][];
+            /** Truncated */
+            truncated: boolean;
+        };
+        /** RestAreaListResponse */
+        RestAreaListResponse: {
+            data: components["schemas"]["RestAreaListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** RestAreaOut */
+        RestAreaOut: {
+            address: components["schemas"]["StateAddress"];
+            /** Category */
+            category: string;
+            coord: components["schemas"]["StateCoordinate"] | null;
+            /** Direction */
+            direction?: string | null;
+            /**
+             * Distance M
+             * @description 근처 검색일 때 중심에서의 거리.
+             */
+            distance_m?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** @description 휴게소 주유소 최신 유가(매칭이 없거나 아직 적재 전이면 null). */
+            fuel_prices?: components["schemas"]["RestAreaFuelPriceState"] | null;
+            /** Has Ev Charger */
+            has_ev_charger?: boolean | null;
+            /** Has Gas Station */
+            has_gas_station?: boolean | null;
+            /** Has Lpg Station */
+            has_lpg_station?: boolean | null;
+            /**
+             * Kind
+             * @default place
+             * @constant
+             */
+            kind: "place";
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Name */
+            name: string;
+            /**
+             * Natural Key
+             * @description ``name::route_name::direction``(strip→lower).
+             */
+            natural_key: string;
+            /** Phone */
+            phone?: string | null;
+            /** Route Name */
+            route_name?: string | null;
+        };
         /**
          * ReviewFeatureDetailRecord
          * @description Review 상세 feature snapshot.
@@ -13483,6 +14097,31 @@ export interface components {
              * @enum {string}
              */
             type: "sigungu_by_radius";
+        };
+        /**
+         * StateAddress
+         * @description 원천이 준 주소 문자열과(있으면) 행정 코드.
+         */
+        StateAddress: {
+            /**
+             * Bjd Code
+             * @description 법정동 코드 10자리. transport VWorld 블록이 실릴 때만 채워진다(ADR-114 결정 6).
+             */
+            bjd_code?: string | null;
+            /** Jibun */
+            jibun?: string | null;
+            /** Road */
+            road?: string | null;
+        };
+        /**
+         * StateCoordinate
+         * @description WGS84 경위도.
+         */
+        StateCoordinate: {
+            /** Lat */
+            lat: number;
+            /** Lon */
+            lon: number;
         };
         /** SummaryBucket */
         SummaryBucket: {
@@ -13626,6 +14265,69 @@ export interface components {
         ThemeCandidateRejectRequest: {
             /** Reason Code */
             reason_code: string;
+        };
+        /** TransportDatasetStatus */
+        TransportDatasetStatus: {
+            /** Dataset */
+            dataset: string;
+            /**
+             * Error
+             * @description 이 데이터셋만 읽지 못했을 때 이유(나머지는 그대로 보인다).
+             */
+            error?: string | null;
+            freshness: components["schemas"]["TransportFreshness"] | null;
+            /** Loaded */
+            loaded: boolean;
+        };
+        /**
+         * TransportFreshness
+         * @description 세대 하나의 신선도(ADR-114 D5).
+         */
+        TransportFreshness: {
+            /**
+             * Age Seconds
+             * @description source_collected_at(없으면 loaded_at)부터 지금까지.
+             */
+            age_seconds: number;
+            /** Dataset */
+            dataset: string;
+            /** Generation */
+            generation: string;
+            /** Item Count */
+            item_count: number;
+            /**
+             * Loaded At
+             * Format: date-time
+             * @description Map이 이 세대로 교체한 시각.
+             */
+            loaded_at: string;
+            /** Max Age Seconds */
+            max_age_seconds: number;
+            /**
+             * Source Collected At
+             * @description 원천(transport) 수집 시각. 공항처럼 원천이 주지 않으면 null.
+             */
+            source_collected_at: string | null;
+            /**
+             * Stale
+             * @description age_seconds > max_age_seconds. stale이어도 값은 준다.
+             */
+            stale: boolean;
+        };
+        /** TransportStatusData */
+        TransportStatusData: {
+            /** Datasets */
+            datasets: components["schemas"]["TransportDatasetStatus"][];
+            /**
+             * Store
+             * @constant
+             */
+            store: "ok";
+        };
+        /** TransportStatusResponse */
+        TransportStatusResponse: {
+            data: components["schemas"]["TransportStatusData"];
+            meta: components["schemas"]["Meta"];
         };
         /** VersionData */
         VersionData: {
@@ -24573,6 +25275,623 @@ export interface operations {
             };
             /** @description Validation Error */
             422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_airports_v1_service_transport_airports_get: {
+        parameters: {
+            query?: {
+                /** @description 직전 페이지 meta.page.next_cursor. */
+                cursor?: string | null;
+                limit?: number;
+                /** @description 근처 검색 중심 경도. */
+                lon?: number | null;
+                /** @description 근처 검색 중심 위도. */
+                lat?: number | null;
+                /** @description 근처 검색 반경(m, 최대 50 km). */
+                radius_m?: number | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirportListResponse"];
+                };
+            };
+            /** @description TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_airport_v1_service_transport_airports__feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AirportDetailResponse"];
+                };
+            };
+            /** @description NOT_FOUND — 지금 세대에 그 feature_id가 없다. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_fuel_stations_v1_service_transport_fuel_stations_get: {
+        parameters: {
+            query?: {
+                /** @description 직전 페이지 meta.page.next_cursor. */
+                cursor?: string | null;
+                limit?: number;
+                /** @description 근처 검색 중심 경도. */
+                lon?: number | null;
+                /** @description 근처 검색 중심 위도. */
+                lat?: number | null;
+                /** @description 근처 검색 반경(m, 최대 50 km). */
+                radius_m?: number | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FuelStationListResponse"];
+                };
+            };
+            /** @description TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_fuel_station_v1_service_transport_fuel_stations__feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FuelStationDetailResponse"];
+                };
+            };
+            /** @description NOT_FOUND — 지금 세대에 그 feature_id가 없다. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_fuel_station_price_history_v1_service_transport_fuel_stations__feature_id__price_history_get: {
+        parameters: {
+            query?: {
+                /** @description 오피넷 유종 코드(B027·D047·B034·C004·K015). */
+                product_code?: string | null;
+                /** @description 이 시각 이상(observed_at). */
+                since?: string | null;
+                /** @description 이 시각 이하(observed_at). */
+                until?: string | null;
+                /** @description 유종마다의 최대 행 수. */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FuelStationPriceHistoryResponse"];
+                };
+            };
+            /** @description NOT_FOUND — 지금 세대에 그 feature_id가 없다. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_highway_incidents_v1_service_transport_highway_incidents_get: {
+        parameters: {
+            query?: {
+                /** @description 직전 페이지 meta.page.next_cursor. */
+                cursor?: string | null;
+                limit?: number;
+                /** @description 근처 검색 중심 경도. */
+                lon?: number | null;
+                /** @description 근처 검색 중심 위도. */
+                lat?: number | null;
+                /** @description 근처 검색 반경(m, 최대 50 km). */
+                radius_m?: number | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighwayIncidentListResponse"];
+                };
+            };
+            /** @description TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_highway_incident_v1_service_transport_highway_incidents__feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighwayIncidentDetailResponse"];
+                };
+            };
+            /** @description NOT_FOUND — 지금 세대에 그 feature_id가 없다. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_rest_areas_v1_service_transport_rest_areas_get: {
+        parameters: {
+            query?: {
+                /** @description 직전 페이지 meta.page.next_cursor. */
+                cursor?: string | null;
+                limit?: number;
+                /** @description 근처 검색 중심 경도. */
+                lon?: number | null;
+                /** @description 근처 검색 중심 위도. */
+                lat?: number | null;
+                /** @description 근처 검색 반경(m, 최대 50 km). */
+                radius_m?: number | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestAreaListResponse"];
+                };
+            };
+            /** @description TRANSPORT_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_rest_area_v1_service_transport_rest_areas__feature_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestAreaDetailResponse"];
+                };
+            };
+            /** @description NOT_FOUND — 지금 세대에 그 feature_id가 없다. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_transport_state_status_v1_service_transport_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TransportStatusResponse"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
                 headers: {
                     [name: string]: unknown;
                 };
