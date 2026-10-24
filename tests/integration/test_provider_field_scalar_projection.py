@@ -484,3 +484,301 @@ async def test_head_only_commit_is_rejected_and_original_projection_survives(sca
             )
             == "winner-0"
         )
+
+
+async def test_explicit_null_is_rejected_without_advancing_head(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    with pytest.raises(DBAPIError, match="typed registry"):
+        await _refresh(runtime, feature, datasets[0], entities[0], {"core.name": None})
+    async with AsyncSession(admin) as session:
+        assert (
+            await session.scalar(
+                text("SELECT name FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+                {"id": feature},
+            )
+            == "winner-0"
+        )
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT current_source_record_key FROM provider_sync.source_entity_heads "
+                    "WHERE source_entity_key=:entity"
+                ),
+                {"entity": entities[0]},
+            )
+            == entities[0] + "-r1"
+        )
+
+
+async def test_active_legacy_writer_cannot_replace_winner_with_lower_provider(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        revision = await session.scalar(
+            text("SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": feature},
+        )
+        with pytest.raises(DBAPIError, match="current canonical source"):
+            async with session.begin_nested():
+                await session.execute(
+                    text("""CALL feature.apply_provider_feature_field_patch(
+                    CAST(:id AS uuid),:dataset,:entity,:record,:revision,
+                    '{"core.name":"lower-legacy"}','{}',NULL,NULL,NULL)"""),
+                    {
+                        "id": feature,
+                        "dataset": datasets[1],
+                        "entity": entities[1],
+                        "record": entities[1] + "-r1",
+                        "revision": revision,
+                    },
+                )
+    async with AsyncSession(admin) as session:
+        assert (
+            await session.scalar(
+                text("SELECT name FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+                {"id": feature},
+            )
+            == "winner-0"
+        )
+
+
+async def test_cross_dataset_target_is_rejected_before_source_dml(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    from kortravelmap.infra.provider_field_candidates import lock_provider_field_policy_epoch
+    from kortravelmap.infra.scoped_feature_writes import (
+        begin_scoped_feature_write,
+        finish_scoped_feature_write,
+        lock_scoped_feature_write_protocol,
+    )
+
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    attempt, owner, digest = await _plan(runtime, feature, datasets[0])
+    async with AsyncSession(runtime) as session, session.begin():
+        await lock_scoped_feature_write_protocol(session, exclusive=False)
+        await lock_provider_field_policy_epoch(session)
+        await begin_scoped_feature_write(
+            session, attempt_id=attempt, owner=owner, manifest_digest=digest
+        )
+        with pytest.raises(DBAPIError, match="outside the applying dataset"):
+            async with session.begin_nested():
+                await session.execute(
+                    text("""SELECT feature.assert_scoped_provider_scalar_target(
+                    :attempt,CAST(:feature AS uuid),:dataset,:entity,1)"""),
+                    {
+                        "attempt": attempt,
+                        "feature": feature,
+                        "dataset": datasets[1],
+                        "entity": entities[1],
+                    },
+                )
+        await finish_scoped_feature_write(
+            session, attempt_id=attempt, owner=owner, result_digest="b" * 64
+        )
+
+
+async def test_runtime_cannot_activate_or_call_private_projection(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, runtime = scalar_engines
+    feature, _, _ = await _seed(admin)
+    async with AsyncSession(runtime) as session, session.begin():
+        for statement in [
+            "CALL feature.activate_provider_field_policy(CAST(:id AS uuid),1,ARRAY['core.name'])",
+            "SELECT feature._project_provider_field_candidates(CAST(:id AS uuid))",
+            "SELECT feature._install_provider_field_projection_guards()",
+        ]:
+            with pytest.raises(DBAPIError, match="permission denied"):
+                async with session.begin_nested():
+                    await session.execute(text(statement), {"id": feature})
+
+
+async def test_shared_source_entity_is_rejected_at_activation(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, _ = scalar_engines
+    feature, _, entities = await _seed(admin)
+    other = str(uuid4())
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        await session.execute(
+            text("""INSERT INTO feature.features(
+            feature_id,kind,name,category,lifecycle_state,publication_state,quality_state)
+            VALUES(CAST(:id AS uuid),'place','other','01010100','active','published','valid')"""),
+            {"id": other},
+        )
+        await session.execute(
+            text("""INSERT INTO provider_sync.source_links(
+            feature_id,source_entity_key,source_role,match_method,confidence)
+            VALUES(CAST(:id AS uuid),:entity,'primary','fixture',100)"""),
+            {"id": other, "entity": entities[0]},
+        )
+    with pytest.raises(DBAPIError, match="shared source entity"):
+        await _activate(admin, feature)
+
+
+async def test_geo_group_and_stamp_are_preserved_and_unsupported_writes_rejected(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        await session.execute(
+            text("""UPDATE feature.features
+            SET coord=x_extension.st_setsrid(x_extension.st_makepoint(127,37),4326)
+            WHERE feature_id=CAST(:id AS uuid)"""),
+            {"id": feature},
+        )
+        await session.execute(
+            text("""INSERT INTO feature.feature_geocode_stamps(
+            feature_id,geo_version_token,geo_data_token,reverse_outcome)
+            VALUES(CAST(:id AS uuid),:version,:data,'geocoded')"""),
+            {"id": feature, "version": "dv1-" + "a" * 32, "data": "dd1-" + "b" * 32},
+        )
+    await _activate(admin, feature)
+    query = text("""SELECT x_extension.st_asewkt(coord),coord_precision_digits,
+        address,legal_dong_code,geo_version_token,geo_data_token,stamped_at
+        FROM feature.features JOIN feature.feature_geocode_stamps USING(feature_id)
+        WHERE feature_id=CAST(:id AS uuid)""")
+    async with AsyncSession(admin) as session:
+        before = tuple((await session.execute(query, {"id": feature})).one())
+    await _refresh(runtime, feature, datasets[0], entities[0], {"core.name": "scalar refresh"})
+    async with AsyncSession(admin) as session, session.begin():
+        assert tuple((await session.execute(query, {"id": feature})).one()) == before
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        with pytest.raises(DBAPIError, match="unsupported"):
+            async with session.begin_nested():
+                await session.execute(
+                    text("""UPDATE feature.feature_geocode_stamps
+                    SET geo_data_token=:data WHERE feature_id=CAST(:id AS uuid)"""),
+                    {"id": feature, "data": "dd1-" + "c" * 32},
+                )
+        with pytest.raises(DBAPIError, match="Geo lifecycle"):
+            async with session.begin_nested():
+                await session.execute(
+                    text("""UPDATE feature.features
+                    SET coord=x_extension.st_setsrid(x_extension.st_makepoint(128,38),4326)
+                    WHERE feature_id=CAST(:id AS uuid)"""),
+                    {"id": feature},
+                )
+
+
+async def test_override_revoke_restores_latest_winner(scalar_engines):
+    from kortravelmap.infra.admin_feature_repo import (
+        author_admin_feature_field_overrides,
+        revoke_admin_feature_field_overrides,
+    )
+    from tests.integration.test_tvn36_override_lineage_spine import _open_domain_command
+
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    actor = "admin:scalar-fixture"
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        revision = await session.scalar(
+            text("SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": feature},
+        )
+        command = await _open_domain_command(
+            session, actor=actor, operation="admin.feature.override.author"
+        )
+        await author_admin_feature_field_overrides(
+            session,
+            feature,
+            expected_row_revision=revision,
+            reason_code="operator_correction",
+            operator=actor,
+            command_id=command,
+            values={"place.phones": ["099"]},
+            geometry_wkt={},
+        )
+    await _refresh(
+        runtime, feature, datasets[0], entities[0], {"core.name": "latest", "place.phones": ["011"]}
+    )
+    async with AsyncSession(admin) as session, session.begin():
+        assert await session.scalar(
+            text("SELECT phones FROM feature.feature_places WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": feature},
+        ) == ["099"]
+        assert await session.scalar(
+            text(
+                "SELECT value_json FROM feature.feature_base_field_values "
+                "WHERE feature_id=CAST(:id AS uuid) AND field_path='place.phones'"
+            ),
+            {"id": feature},
+        ) == ["011"]
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        revision = await session.scalar(
+            text("SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": feature},
+        )
+        command = await _open_domain_command(
+            session, actor=actor, operation="admin.feature.override.revoke"
+        )
+        await revoke_admin_feature_field_overrides(
+            session,
+            feature,
+            expected_row_revision=revision,
+            reason_code="operator_correction",
+            operator=actor,
+            command_id=command,
+            field_paths=("place.phones",),
+        )
+    async with AsyncSession(admin) as session:
+        assert await session.scalar(
+            text("SELECT phones FROM feature.feature_places WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": feature},
+        ) == ["011"]
+
+
+async def test_source_only_old_rr_cannot_advance_head_after_policy_cutover(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, _ = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    other, _, _ = await _seed(admin)
+    async with admin.connect() as connection:
+        await connection.execution_options(isolation_level="REPEATABLE READ")
+        async with AsyncSession(bind=connection) as old:
+            await old.execute(text("SELECT epoch FROM feature.provider_field_policy_epoch"))
+            record = entities[0] + "-rr"
+            await old.execute(
+                text("""INSERT INTO provider_sync.source_records(
+                source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+                VALUES(:record,:entity,'{}',:hash,clock_timestamp())"""),
+                {"record": record, "entity": entities[0], "hash": "c" * 64},
+            )
+            await _activate(admin, other)
+            with pytest.raises(DBAPIError) as failed:
+                await old.execute(
+                    text("""UPDATE provider_sync.source_entity_heads
+                    SET current_source_record_key=:record,observed_at=clock_timestamp()
+                    WHERE source_entity_key=:entity"""),
+                    {"record": record, "entity": entities[0]},
+                )
+            assert getattr(failed.value.orig, "sqlstate", None) == "40001"
+            await old.rollback()
+    async with AsyncSession(admin) as session:
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT current_source_record_key FROM provider_sync.source_entity_heads "
+                    "WHERE source_entity_key=:entity"
+                ),
+                {"entity": entities[0]},
+            )
+            == entities[0] + "-r1"
+        )
