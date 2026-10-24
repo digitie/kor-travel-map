@@ -6572,6 +6572,10 @@ async def import_curation_rows(
     before_item_hashes: dict[str, str] = {}
     item_values: list[dict[str, Any]] = []
     if rows:
+        if not frozen_h35_schema:
+            # manual child SQL도 protocol → import advisory 순서다. h35에는 이
+            # protocol 함수가 없으므로 당시 잠금 경계를 그대로 보존한다.
+            await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
         # 서로 다른 CSV가 theme/source/collection lock을 역순으로 잡는 deadlock과
         # 같은 collection의 authoritative replace 경합을 하나의 write 경계로 직렬화한다.
         await _lock_curation_write_boundary(session)

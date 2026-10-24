@@ -6,26 +6,37 @@ feature branch를 base로 둬 CI가 발행되지 않은 상태는 통과가 아�
 
 ## 구현과 검증
 
+구성 #1371~#1378·#1380·#1381은 #1379의 정확fd6 전체 CI와 두 PostGIS lane을 통과해
+main에 포함됐다. 개별 feature-base PR의 미발행 CI를 성공으로 간주한 것은 아니다.
+
 | PR | 구현 범위 | 확보한 증거 | 남은 수용 |
 | --- | --- | --- | --- |
 | #1370 | 격리 직렬 기준선 | 두 독립 리뷰·정확 CI·두 PostGIS lane 통과 후 머지 | 전체 운영 기준선·동시 쓰기의 증거는 아님 |
-| #1371 | 411 scope/epoch/manifest·membership 재검증, 기존 writer protocol→global 순서 | 실제 커널·bootstrap·메타데이터·기존 fence, 두 독립 리뷰 | CI에서 발견한 잠금 관측 시험을 고친 정확 HEAD의 전체 CI |
-| #1372 | 순수 multi-SELECT reader 29개, 별도 read-only RR·인증 세션 | 실제 순서 반전·pool1·권한·세션 정리, 두 독립 리뷰 | 새 읽기·인증 세션 fixture 수정 뒤 정확 전체 CI |
-| #1373 | 412 기존 primary Feature의 명시 name/phones winner | 실제 PG16·unit18·lint369/기존skip6·공식 oracle/metadata2, 두 독립 리뷰 | #1371 시험 수정 통합 뒤 정확 전체 CI·통합 수용 |
-| #1374 | 후속 GET 13개 | 실제 PG11·순수 읽기 RR, 행 잠금 GET의 RW/RR·40001→503 후 새 요청 복구, 두 독립 리뷰 | 부모 머지 후 main 재기반·정확 CI |
-| #1375 | 제한 native source/head→후보→winner→완료 receipt | 단위4+native PG5+기존 lineage1, 독립 TX의 미커밋 source 쓰기 중첩·예외/취소 rollback·동일 입력 재시도, 두 독립 리뷰 | 전체 collector 배선·정확 CI·운영(실제 사망은 #1378 별도 검증) |
-| #1376 | 제한 native 직렬/병렬2 비용 runner | 각 fresh clone 3회·동일 출력/receipt hash·별도 미커밋 중첩 probe·정확 자체 자원 정리, 두 독립 소스 리뷰 | main 재기반·정확 CI, 대량/공유 Feature/운영 ARM 수용 |
-| #1377 | 413 기존 SQL 직접 호출 7개의 첫 protocol EX | 단위/실제 PG/전체 lint407·기존skip6, 공식 oracle/metadata2, 타입 정리 뒤 PG/unit29, 두 독립 리뷰 | main 재기반·정확 CI, 나머지 SQL writer와 mixed binary 전수 수용 |
-| #1378 | commit 직전 실제 OS worker SIGKILL | pidfd/소유 PID·exit-9·PG 연결/잠금0·12표 rollback hash·동일 artifact 복구·완료 replay DML0, 실제 PG1/14.64초·두 독립 리뷰 | 통합 정확 CI·Dagster 감독/lease 인계/host 사망 전체 수용 |
-| #1380 | 전화·주소 override caller의 첫 행 잠금 전 EX | 실제 PG8·기존 unit10·두 독립 리뷰, 독립 Feature 대기/SH 승격 거부/ledger rollback | 통합 정확 CI·전체 SQL 직접 진입 전환·HTTP/UI 수용 |
-| #1381 | 414 M05 record/private resolve/public v2의 첫 EX | 기존 413 실제40P01 재현, 수정 뒤 PG8+unit4·lint373/기존skip6·공식 oracle/metadata2·두 독립 리뷰 | 통합 정확 CI·mixed binary drain/전체 writer 전환 |
-| #1379 | 위 구현의 합집합 수용 | 초기 집중145 PASS, 최종 source 통합 집중175 PASS·공식 oracle/metadata2·독립 교차 리뷰2 PASS | main 정확 CI·최종 실제 HTTP/UI·머지/운영 판단 |
+| #1371 | 411 scope/epoch/manifest·membership 재검증, 기존 writer protocol→global 순서 | 실제 커널·bootstrap·메타데이터·기존 fence, 두 독립 리뷰 | 전체 writer 배선·mixed binary 전환/운영 수용 |
+| #1372 | 순수 multi-SELECT reader 29개, 별도 read-only RR·인증 세션 | 실제 순서 반전·pool1·권한·세션 정리, 두 독립 리뷰 | 운영 배포와 실제 부하/연결 수용 |
+| #1373 | 412 기존 primary Feature의 명시 name/phones winner | 실제 PG16·unit18·lint369/기존skip6·공식 oracle/metadata2, 두 독립 리뷰 | 정책 의미의 지원 범위 확대·운영 활성화 |
+| #1374 | 후속 GET 13개 | 실제 PG11·순수 읽기 RR, 행 잠금 GET의 RW/RR·40001→503 후 새 요청 복구, 두 독립 리뷰 | 운영 배포와 실제 부하 수용 |
+| #1375 | 제한 native source/head→후보→winner→완료 receipt | 단위4+native PG5+기존 lineage1, 독립 TX의 미커밋 source 쓰기 중첩·예외/취소 rollback·동일 입력 재시도, 두 독립 리뷰 | 전체 collector 배선·운영(실제 사망은 #1378 별도 검증) |
+| #1376 | 제한 native 직렬/병렬2 비용 runner | 각 fresh clone 3회·동일 출력/receipt hash·별도 미커밋 중첩 probe·정확 자체 자원 정리, 두 독립 소스 리뷰 | 대량/공유 Feature/운영 ARM 수용 |
+| #1377 | 413 기존 SQL 직접 호출 7개의 첫 protocol EX | 단위/실제 PG/전체 lint407·기존skip6, 공식 oracle/metadata2, 타입 정리 뒤 PG/unit29, 두 독립 리뷰 | 나머지 SQL writer와 mixed binary 전수 수용 |
+| #1378 | commit 직전 실제 OS worker SIGKILL | pidfd/소유 PID·exit-9·PG 연결/잠금0·12표 rollback hash·동일 artifact 복구·완료 replay DML0, 실제 PG1/14.64초·두 독립 리뷰 | Dagster 감독/lease 인계/host 사망 전체 수용 |
+| #1380 | 전화·주소 override caller의 첫 행 잠금 전 EX | 실제 PG8·기존 unit10·두 독립 리뷰, 독립 Feature 대기/SH 승격 거부/ledger rollback | 전체 SQL 직접 진입 전환·해당 override의 HTTP/UI 수용 |
+| #1381 | 414 M05 record/private resolve/public v2의 첫 EX | 기존 413 실제40P01 재현, 수정 뒤 PG8+unit4·lint373/기존skip6·공식 oracle/metadata2·두 독립 리뷰 | mixed binary drain/전체 writer 전환 |
+| #1379 | 위 구현의 합집합 수용 | 최종 집중175 PASS·oracle/metadata2·두 리뷰·정확fd6 CI5개·실UI16 PASS, main c6b608f1 | 전체 writer/collector·운영 전환 수용 |
+| #1383 | 415 state/lifecycle5개 SQL의 첫 EX | PG36+unit5·추가ASGI1·두리뷰·정확9c213 CI5개·실UI18 PASS, main39483333 | 전체 writer 의미 지원·운영 전환 |
+| #1385 | 416 field SQL2개·Python patch/create 진입, manualcreate55P03→503 | PG/ASGI29+unit5·기존unit110·두리뷰·정확0f146 CI5개·실UI18+별도HTTP2 PASS, mainff65c415 | 전체 수집 배선·운영 전환 |
+| #1386 | normal-head whole curation import의 첫 EX | 실제40P01 재현·PG9/회귀48/unit76·독립2리뷰·정확b78b 실CSV UI5/별도계보 PASS | 정확b78b CI·머지·운영 |
+| #1387 | 417 EX 재진입 xact 소유 재확보 후 반복 GUC 조회 생략 | 실제PG7+unit4·oracle4·최종집중92·독립2리뷰·정확fc9 실UI18+별도HTTP2 | 정확fc9 CI·머지·운영 |
+| 후속418 | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·별도실제mapper500→503/같은key복구·oracle4·독립2리뷰 | 정확CI·최신418 실UI |
 
-실제 Chromium·BFF/API·PostgreSQL 수용은 reader/kernel 합집합에서 12건 통과했다.
-실제 로그인·파일 목록/상세/검색·issues·datasets·metrics·Feature 상세·모바일·로그아웃을
-확인했고 page error·비의도 쓰기·예상 밖 HTTP 오류는 0건이었다. 이 증거는 지도 타일,
-가격 지도 클릭, native writer/413 운영 전환 또는 모든 수집기의 UI 수용을 대신하지 않는다.
-이후 #1371/#1372 수정은 시험 파일뿐이고 관련 제품 blob은 해당 UI 세대와 같다.
+실제 Chromium·BFF/API·PostgreSQL은 reader/kernel 합집합의 정확fd6/schema414에서16건을
+통과했다. 지도 cluster3회 확대→UUID마커/상세, 인증401/403/200·파일 목록/상세/검색·issues·
+datasets·metrics·stale412 뒤 불변/후속GET200·모바일·로그아웃을 확인했다. page error·
+비의도 쓰기·예상 밖 HTTP는0, 의도 stale412정확1이다. 백업 링크의 실제404는 별도 수정했다.
+415/정확9c213은 새로운 실제 상태 변경/복원2개를 포함해18 UI PASS,416/정확0f146은 새
+schema에서18 UI와 별도 실제HTTP 이름수정/복원2개를 통과했다. 이름편집UI는 없고 최종
+값 복원 뒤 override provenance가 남는다. 각 fresh/소유 lab의 증거·정리와 source 핀을
+분리했으며 VWorld 외부 타일·native collector·전체 운영 수용을 대신하지 않는다.
 
 ## 실측의 의미
 
@@ -37,8 +48,8 @@ CPU 절감은 입증하지 못했다. 메모리 100ms 표본은 실제 peak 보�
 
 정적 [SQL writer inventory](2026-10-24-scoped-sql-writer-inventory.md)는 235개 routine과
 Python caller·trigger를 분류했다. 정적 후보 수를 독립 writer 수나 실제 장애 재현으로 세지
-않는다. M05 역순은 후속 #1381에서 실제 재현·수정했고, state/override/identity/catalog의
-전수 경계는 여전히 후속이다.
+않는다. M05 역순은 #1381에서 실제 재현·수정했고 state/field의 명시 SQL 진입도415/416에서
+보강했다. 신규 identity/catalog·다른 writer의 전수 경계와 의미 지원은 여전히 후속이다.
 
 기존 시험의 `worker-loss` case는 RuntimeError/CancelledError 주입 후 정상적인 context
 rollback이다. 실제 OS 프로세스 사망으로 세지 않는다. 별도 #1378에서 제한 commit 전
