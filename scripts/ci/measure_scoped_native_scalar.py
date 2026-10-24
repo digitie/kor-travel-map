@@ -384,16 +384,16 @@ async def state(engine: AsyncEngine) -> dict[str, Any]:
             raise RuntimeError("native output/lineage differs from fixture")
     if len(values) != 2 or completed != 2 or len(bases) != 4:
         raise RuntimeError("native output cardinality differs from fixture")
-    for row in bases:
-        writer = "left" if row["feature_id"] == str(feature_id("left")) else "right"
+    for base_row in bases:
+        writer = "left" if base_row["feature_id"] == str(feature_id("left")) else "right"
         expected = bundle(writer, measured=True)
         expected_value = (
-            expected.feature.name if row["field_path"] == "core.name" else ["010-0000-0000"]
+            expected.feature.name if base_row["field_path"] == "core.name" else ["010-0000-0000"]
         )
         if (
-            row["value_json"] != expected_value
-            or row["source_record_key"] != expected.source_record.source_record_key
-            or row["source_raw_payload_hash"] != expected.source_record.raw_payload_hash
+            base_row["value_json"] != expected_value
+            or base_row["source_record_key"] != expected.source_record.source_record_key
+            or base_row["source_raw_payload_hash"] != expected.source_record.raw_payload_hash
         ):
             raise RuntimeError("base winner lacks expected canonical source lineage")
     canonical = {
@@ -419,13 +419,13 @@ async def measure(
 ) -> dict[str, Any]:
     if mode not in ("serial", "concurrent2") or (proof and mode != "concurrent2"):
         raise ValueError("invalid measurement mode")
-    original = native._upsert_source_record_state
+    original = native._upsert_source_record_state  # type: ignore[attr-defined]
     intervals: dict[str, dict[str, Any]] = {}
     barrier = asyncio.Barrier(2) if proof else None
     stopped = asyncio.Event()
-    samples = []
+    samples: list[dict[str, Any]] = []
 
-    async def capture(session: AsyncSession, record: SourceRecord):
+    async def capture(session: AsyncSession, record: SourceRecord) -> Any:
         writer = record.dataset_key
         item = intervals[writer]
         item["dml_started"] = time.perf_counter()
@@ -464,7 +464,7 @@ async def measure(
                 await asyncio.wait_for(stopped.wait(), _SAMPLE_SECONDS)
 
     connections = {}
-    native._upsert_source_record_state = capture
+    native._upsert_source_record_state = capture  # type: ignore[attr-defined]
     try:
         for writer in ("left", "right"):
             connections[writer] = await runtime.connect()
@@ -496,7 +496,7 @@ async def measure(
                 {"before": lsn},
             )
     finally:
-        native._upsert_source_record_state = original
+        native._upsert_source_record_state = original  # type: ignore[attr-defined]
         for connection in connections.values():
             await connection.close()
     dml_overlap = interval_overlap([(r["dml_started"], r["source_dml_returned"]) for r in results])
@@ -674,7 +674,7 @@ async def run() -> dict[str, Any]:
                 raise RuntimeError("refusing cleanup of unowned container")
             await asyncio.to_thread(wrapped.remove, force=True, v=True)
             # 정확한 생성 ID의 부재만 확인한다. 다른 동명/공유 자원은 만지지 않는다.
-            from docker.errors import NotFound
+            from docker.errors import NotFound  # type: ignore[import-not-found]
 
             try:
                 await asyncio.to_thread(wrapped.client.containers.get, created_id)
