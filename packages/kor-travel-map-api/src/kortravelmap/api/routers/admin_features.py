@@ -1783,6 +1783,8 @@ async def create_feature_route(
             constraint=exc.constraint,
         ) from exc
     except (AdminManualFeatureInvariantError, DBAPIError, ValueError) as exc:
+        if isinstance(exc, DBAPIError) and getattr(exc.orig, "sqlstate", None) == "55P03":
+            raise
         raise _manual_feature_create_internal_error() from exc
     if isinstance(result, AdminManualFeatureExactDuplicate):
         raise HTTPException(

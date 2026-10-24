@@ -8,7 +8,12 @@ import json
 from dataclasses import dataclass
 from uuid import UUID, uuid4
 
+import httpx
 import pytest
+from kortravelmap.api import db as api_db
+from kortravelmap.api.app import create_app
+from kortravelmap.api.http_revision import revision_etag
+from kortravelmap.api.settings import ApiSettings
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -20,7 +25,12 @@ from kortravelmap.infra.scoped_feature_writes import (
     finish_scoped_feature_write,
 )
 from tests.integration.test_admin_override_protocol_entry import _wait_protocol_blocker
-from tests.integration.test_provider_field_scalar_projection import _plan, _seed
+from tests.integration.test_provider_field_scalar_projection import (
+    _activate,
+    _plan,
+    _refresh,
+    _seed,
+)
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
 )
@@ -75,9 +85,13 @@ async def _case(admin, runtime):
         await session.execute(
             text("""CALL feature.apply_provider_feature_field_patch(
             CAST(:feature AS uuid),:dataset,:entity,:record,1,
-            '{"core.name":"base","place.phones":["010-base"]}','{}',NULL,NULL,NULL)"""),
+            CAST(:values AS jsonb),'{}',NULL,NULL,NULL)"""),
             dict(
-                feature=feature, dataset=datasets[0], entity=entities[0], record=entities[0] + "-r1"
+                feature=feature,
+                dataset=datasets[0],
+                entity=entities[0],
+                record=entities[0] + "-r1",
+                values=json.dumps({"core.name": "base", "place.phones": ["010-base"]}),
             ),
         )
     async with AsyncSession(admin) as session:
@@ -182,11 +196,25 @@ async def _state(admin, case):
     return hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
 
 
-@pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
-async def test_valid_writer_waits_before_first_feature_or_manual_claim(scalar_engines, kind):
+@pytest.mark.parametrize(
+    ("kind", "same_feature"),
+    [
+        ("author", True),
+        ("author", False),
+        ("revoke", True),
+        ("revoke", False),
+        ("patch", True),
+        ("patch", False),
+        ("create", True),
+    ],
+)
+async def test_valid_writer_waits_before_first_feature_or_manual_claim(
+    scalar_engines, kind, same_feature
+):
     admin, runtime = scalar_engines
     case = await _prepare(admin, runtime, kind)
-    attempt, owner, digest = await _plan(runtime, case.feature, case.dataset)
+    held = case if same_feature else await _case(admin, runtime)
+    attempt, owner, digest = await _plan(runtime, held.feature, held.dataset)
     started = asyncio.get_running_loop().create_future()
 
     async def write():
@@ -208,6 +236,37 @@ async def test_valid_writer_waits_before_first_feature_or_manual_claim(scalar_en
             pid = await asyncio.wait_for(asyncio.shield(started), 3)
             await _wait_protocol_blocker(admin, pid, blocker)
             assert not task.done()
+            if not same_feature:
+                async with AsyncSession(admin) as observer, observer.begin():
+                    assert (
+                        await observer.scalar(
+                            text(
+                                "SELECT 1 FROM feature.features "
+                                "WHERE feature_id=CAST(:id AS uuid) FOR UPDATE NOWAIT"
+                            ),
+                            dict(id=case.feature),
+                        )
+                        == 1
+                    )
+            if kind == "create":
+                # MVCC count만으로는 미커밋 claim 부재를 증명하지 못한다. 같은 unique key를
+                # 실제 삽입·rollback하여 선점 여부를 확인한다.
+                async with AsyncSession(admin) as observer:
+                    tx = await observer.begin()
+                    try:
+                        await observer.execute(text("SET LOCAL lock_timeout='150ms'"))
+                        await observer.execute(
+                            text("""INSERT INTO feature.manual_feature_identity_claims(
+                            feature_id,feature_kind,name_key,lon_e6,lat_e6,
+                            claimed_by_command_id,claim_basis,claimed_at)
+                            SELECT :probe,key.feature_kind,key.name_key,key.lon_e6,key.lat_e6,
+                            :command,'manual_create',clock_timestamp()
+                            FROM feature.manual_feature_identity_key('place',:name,127.5,36.5) key
+                            """),
+                            dict(probe=uuid4(), command=case.command, name=case.actor),
+                        )
+                    finally:
+                        await tx.rollback()
             async with AsyncSession(admin) as observer:
                 # create가 protocol 대기 전에 claim/core를 쓰지 않았는지 직접 확인한다.
                 assert (
@@ -316,3 +375,268 @@ async def test_original_body_acl_config_and_owner_are_preserved(scalar_engines, 
     assert row.allowed
     assert row.closed
     assert row.proconfig == ["search_path=pg_catalog"]
+
+
+async def _revision(admin, case):
+    async with AsyncSession(admin) as observer:
+        return int(
+            await observer.scalar(
+                text(
+                    "SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"
+                ),
+                dict(id=case.feature),
+            )
+        )
+
+
+async def test_active_name_phones_override_survives_native_refresh_then_revoke(scalar_engines):
+    admin, runtime = scalar_engines
+    case = await _case(admin, runtime)
+    await _activate(admin, case.feature)
+    case.revision = await _revision(admin, case)
+    await _command(runtime, case, "author")
+    async with AsyncSession(runtime) as session, session.begin():
+        result = await repo.author_admin_feature_field_overrides(
+            session,
+            case.feature,
+            expected_row_revision=case.revision,
+            reason_code="field-416",
+            operator=case.actor,
+            command_id=case.command,
+            values={"core.name": "operator", "place.phones": ["010-operator"]},
+            geometry_wkt={},
+        )
+        assert result.applied_field_count == 2
+    record, source_hash = await _refresh(
+        runtime,
+        case.feature,
+        case.dataset,
+        case.entity,
+        {"core.name": "fresh-base", "place.phones": ["010-fresh"]},
+    )
+    async with AsyncSession(admin) as observer:
+        effective = (
+            await observer.execute(
+                text(
+                    "SELECT name,phones FROM feature.features "
+                    "JOIN feature.feature_places USING(feature_id) "
+                    "WHERE feature_id=CAST(:id AS uuid)"
+                ),
+                dict(id=case.feature),
+            )
+        ).one()
+        assert tuple(effective) == ("operator", ["010-operator"])
+        bases = (
+            await observer.execute(
+                text(
+                    "SELECT field_path,value_json,source_record_key,"
+                    "source_raw_payload_hash FROM feature.feature_base_field_values "
+                    "WHERE feature_id=CAST(:id AS uuid) ORDER BY field_path"
+                ),
+                dict(id=case.feature),
+            )
+        ).all()
+        assert {row.field_path: row.value_json for row in bases} == {
+            "core.name": "fresh-base",
+            "place.phones": ["010-fresh"],
+        }
+        assert all(row.source_record_key == record for row in bases)
+        assert all(row.source_raw_payload_hash == source_hash for row in bases)
+    case.revision = await _revision(admin, case)
+    await _command(runtime, case, "revoke")
+    async with AsyncSession(runtime) as session, session.begin():
+        result = await repo.revoke_admin_feature_field_overrides(
+            session,
+            case.feature,
+            expected_row_revision=case.revision,
+            reason_code="field-416",
+            operator=case.actor,
+            command_id=case.command,
+            field_paths=["core.name", "place.phones"],
+        )
+        assert result.applied_field_count == 2
+    async with AsyncSession(admin) as observer:
+        effective = (
+            await observer.execute(
+                text(
+                    "SELECT name,phones FROM feature.features "
+                    "JOIN feature.feature_places USING(feature_id) "
+                    "WHERE feature_id=CAST(:id AS uuid)"
+                ),
+                dict(id=case.feature),
+            )
+        ).one()
+        assert tuple(effective) == ("fresh-base", ["010-fresh"])
+        assert (
+            await observer.scalar(
+                text(
+                    "SELECT count(*) FROM ops.feature_overrides WHERE "
+                    "feature_id=CAST(:id AS uuid) AND status='active'"
+                ),
+                dict(id=case.feature),
+            )
+            == 0
+        )
+
+
+@pytest.mark.parametrize(
+    ("path", "value"), [("core.category", "01010200"), ("core.address", {"road": "denied"})]
+)
+async def test_active_unsupported_fields_still_rollback(scalar_engines, path, value):
+    admin, runtime = scalar_engines
+    case = await _case(admin, runtime)
+    await _activate(admin, case.feature)
+    case.revision = await _revision(admin, case)
+    await _command(runtime, case, "author")
+    before = await _state(admin, case)
+    params = case.params()
+    params["values"] = json.dumps({path: value})
+    with pytest.raises(DBAPIError) as caught:
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text(_CALLS["author"]), params)
+    assert caught.value.orig.sqlstate == "23514"
+    assert await _state(admin, case) == before
+
+
+@pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
+async def test_http_lock_timeout_rolls_back_and_retry_is_valid(scalar_engines, kind, monkeypatch):
+    admin, runtime = scalar_engines
+    case = await _prepare(admin, runtime, kind)
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret="field-416-local-proxy-credential-000000000000",
+            admin_manual_feature_create_enabled=True,
+            admin_feature_create_token_sha256=hashlib.sha256(b"field-416-local-create").hexdigest(),
+            public_api_key_required=False,
+            vworld_api_key=None,
+        )
+    )
+
+    async def session_dependency():
+        async with AsyncSession(runtime) as session:
+            yield session
+
+    app.dependency_overrides[api_db.get_session] = session_dependency
+    headers = {
+        "X-Kor-Travel-Map-Admin-Proxy-Secret": "field-416-local-proxy-credential-000000000000",
+        "X-Kor-Travel-Map-Actor": case.actor,
+        "Idempotency-Key": str(uuid4()),
+        "If-Match": revision_etag(case.revision),
+        "X-Kor-Travel-Map-Admin-Feature-Create-Token": "field-416-local-create",
+    }
+    suffix = {
+        "author": "/field-overrides",
+        "revoke": "/field-overrides/revoke",
+        "patch": "",
+        "create": "",
+    }[kind]
+    url = "/v1/admin/features" + ("" if kind == "create" else "/" + case.feature + suffix)
+    body = {
+        "author": dict(reason_code="field-416", values={"core.name": "http"}),
+        "revoke": dict(reason_code="field-416", field_paths=["core.name"]),
+        "patch": dict(reason="field-416", name="http"),
+        "create": dict(_payload(case), reason="field-416"),
+    }[kind]
+    method = "PATCH" if kind == "patch" else "POST"
+    before = await _state(admin, case)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url="http://test"
+    ) as client:
+        async with AsyncSession(admin) as holder, holder.begin():
+            await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+            response = await client.request(method, url, headers=headers, json=body)
+            assert response.status_code == 503, response.text
+            assert response.json()["code"] == "LOCK_TIMEOUT"
+            assert response.headers["Retry-After"] == "5"
+        assert await _state(admin, case) == before
+        response = await client.request(method, url, headers=headers, json=body)
+        assert response.status_code == (201 if kind == "create" else 200), response.text
+        replay = await client.request(method, url, headers=headers, json=body)
+        assert replay.status_code == response.status_code
+        assert replay.json()["data"] == response.json()["data"]
+
+
+@pytest.mark.parametrize("sqlstate", ["23514", "40001", "XX000"])
+async def test_create_other_database_errors_remain_private_500(
+    scalar_engines, sqlstate, monkeypatch
+):
+    from kortravelmap.api.routers import admin_features as router
+
+    admin, runtime = scalar_engines
+    case = await _prepare(admin, runtime, "create")
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret="field-416-local-proxy-credential-000000000000",
+            admin_manual_feature_create_enabled=True,
+            admin_feature_create_token_sha256=hashlib.sha256(b"field-416-local-create").hexdigest(),
+            public_api_key_required=False,
+            vworld_api_key=None,
+        )
+    )
+
+    async def session_dependency():
+        async with AsyncSession(runtime) as session:
+            yield session
+
+    app.dependency_overrides[api_db.get_session] = session_dependency
+    original = router.create_admin_feature_with_field_overrides
+
+    async def fault(session, **_kwargs):
+        # owned PG가 실제 SQLSTATE를 낸다. handler/권한 검사를 fake로 바꾸지 않는다.
+        await session.execute(
+            text(
+                "DO $$ BEGIN RAISE EXCEPTION 'private-field-416-db-detail' "
+                "USING ERRCODE='" + sqlstate + "'; END $$"
+            )
+        )
+
+    monkeypatch.setattr(router, "create_admin_feature_with_field_overrides", fault)
+    headers = {
+        "X-Kor-Travel-Map-Admin-Proxy-Secret": "field-416-local-proxy-credential-000000000000",
+        "X-Kor-Travel-Map-Actor": case.actor,
+        "Idempotency-Key": str(uuid4()),
+        "X-Kor-Travel-Map-Admin-Feature-Create-Token": "field-416-local-create",
+    }
+    before = await _state(admin, case)
+    async with httpx.AsyncClient(
+        transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            "/v1/admin/features", headers=headers, json=dict(_payload(case), reason="field-416")
+        )
+        assert response.status_code == 500
+        assert response.json()["code"] == "INTERNAL_SERVER_ERROR"
+        assert "private-field-416-db-detail" not in response.text
+        assert sqlstate not in response.text
+        assert "Retry-After" not in response.headers
+        assert await _state(admin, case) == before
+        async with AsyncSession(admin) as observer:
+            assert (
+                await observer.scalar(
+                    text(
+                        "SELECT count(*) FROM ops.domain_command_results r "
+                        "JOIN ops.domain_commands c USING(command_id) WHERE c.actor=:actor"
+                    ),
+                    dict(actor=case.actor),
+                )
+                == 0
+            )
+        # 같은 key를 다시 쓸 수 있어야 앞선 claim도 rollback됐음을 증명한다.
+        monkeypatch.setattr(router, "create_admin_feature_with_field_overrides", original)
+        response = await client.post(
+            "/v1/admin/features", headers=headers, json=dict(_payload(case), reason="field-416")
+        )
+        assert response.status_code == 201, response.text
+
+
+@pytest.mark.parametrize("kind", ["author", "revoke"])
+async def test_ungranted_owner_cannot_execute_field_entry(scalar_engines, kind):
+    admin, runtime = scalar_engines
+    case = await _prepare(admin, runtime, kind)
+    before = await _state(admin, case)
+    with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 실제 비인가 role과 CALL 경계
+        async with AsyncSession(admin) as session, session.begin():
+            await session.execute(text("SET LOCAL ROLE ktm_manual_feature_procedure_owner"))
+            await _apply(session, kind, case)
+    assert caught.value.orig.sqlstate == "42501"
+    assert await _state(admin, case) == before
