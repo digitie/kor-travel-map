@@ -99,6 +99,12 @@
         "415_state_lifecycle_protocol"
       ],
       "revision": "416_field_override_protocol"
+    },
+    {
+      "down_revision": [
+        "416_field_override_protocol"
+      ],
+      "revision": "417_protocol_ex_reentry"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
