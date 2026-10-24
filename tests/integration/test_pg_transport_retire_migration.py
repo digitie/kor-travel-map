@@ -38,6 +38,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
+_PROD_NOW: Final = "409_geo_release_item_reasons"
 _BEFORE: Final = "410_provider_field_shadow"
 _AFTER: Final = "411_retire_pg_transport_values"
 
@@ -85,10 +86,7 @@ async def _admin_execute(url: str, statement: str) -> None:
         await connection.close()
 
 
-@pytest.fixture
-async def db_at_410(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
-    """fresh DB를 배포 경로로 **410까지만** 올린다. (411을 올릴 Config, superuser DSN)."""
-
+async def _db_at(pg_container: object, *, stop_at_409: bool) -> AsyncIterator[tuple[Config, str]]:
     # 목표 revision은 모듈 상수 리터럴로만 넘긴다(`tests/unit/test_alembic_squash_boundary.py`).
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
     database = f"transport_retire_{uuid4().hex}"
@@ -102,10 +100,29 @@ async def db_at_410(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
             await bootstrapped_application_300_migrator_dsn(normalize_async_dsn(superuser_dsn)),
         )
         with alembic_schema_owner_role():
-            await asyncio.to_thread(command.upgrade, config, _BEFORE)
+            if stop_at_409:
+                await asyncio.to_thread(command.upgrade, config, _PROD_NOW)
+            else:
+                await asyncio.to_thread(command.upgrade, config, _BEFORE)
         yield config, superuser_dsn
     finally:
         await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')
+
+
+@pytest.fixture
+async def db_at_410(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
+    """fresh DB를 배포 경로로 **410까지만** 올린다(410 commit). (Config, superuser DSN)."""
+
+    async for value in _db_at(pg_container, stop_at_409=False):
+        yield value
+
+
+@pytest.fixture
+async def db_at_409(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
+    """prod와 같은 **409**에서 멈춘다 — 410·411을 한 트랜잭션으로 올리는 배포 경로를 잰다."""
+
+    async for value in _db_at(pg_container, stop_at_409=True):
+        yield value
 
 
 async def _upgrade_to_411(config: Config) -> None:
@@ -256,6 +273,62 @@ async def _enabled_target_operations(connection: Any) -> int:
     )
 
 
+async def _other_dataset_seals(connection: Any) -> dict[int, tuple[int, int, str]]:
+    """대상 밖 모든 dataset의 curation seal 입력(``current_provider_curation_input_set``)."""
+    rows = await connection.fetch(
+        f"""
+        SELECT dataset.provider_dataset_id, input.source_entity_count, input.input_member_count,
+               input.source_input_set_hash
+          FROM provider_sync.provider_datasets AS dataset
+         CROSS JOIN LATERAL feature.current_provider_curation_input_set(
+               dataset.provider_dataset_id) AS input
+         WHERE dataset.provider_dataset_id NOT IN ({_TARGET_DATASETS_SQL})
+        """
+    )
+    return {
+        int(row["provider_dataset_id"]): (
+            int(row["source_entity_count"]),
+            int(row["input_member_count"]),
+            str(row["source_input_set_hash"]),
+        )
+        for row in rows
+    }
+
+
+async def _target_scope(connection: Any) -> Any:
+    member = await connection.fetchrow(
+        f"""
+        SELECT scope.provider_dataset_id, scope.sync_scope, scope.operation_key
+          FROM provider_sync.provider_dataset_operation_scopes AS scope
+         WHERE scope.provider_dataset_id IN ({_TARGET_DATASETS_SQL})
+         ORDER BY scope.provider_dataset_id, scope.operation_key, scope.sync_scope
+         LIMIT 1
+        """
+    )
+    assert member is not None, "대상 operation scope가 없다 — 전제가 깨졌다"
+    return member
+
+
+async def _insert_member_job(connection: Any, member: Any, kind: str) -> Any:
+    job_id = await connection.fetchval(
+        "INSERT INTO ops.import_jobs (kind, dataset_membership_mode) "
+        "VALUES ($1, 'single') RETURNING job_id",
+        kind,
+    )
+    await connection.execute(
+        """
+        INSERT INTO ops.import_job_datasets (
+            job_id, provider_dataset_id, sync_scope, operation_key
+        ) VALUES ($1, $2, $3, $4)
+        """,
+        job_id,
+        member["provider_dataset_id"],
+        member["sync_scope"],
+        member["operation_key"],
+    )
+    return job_id
+
+
 async def test_411_retires_transport_price_and_incident_features_and_keeps_everything_else(
     db_at_410: tuple[Config, str],
 ) -> None:
@@ -272,6 +345,8 @@ async def test_411_retires_transport_price_and_incident_features_and_keeps_every
             await connection.fetchval(f"SELECT count(*) FROM ({_TARGET_DATASETS_SQL}) AS t")
         )
         assert target_datasets == 3
+        seals_before = await _other_dataset_seals(connection)
+        assert len(seals_before) > 10
         kept_enabled_before = await connection.fetch(
             """
             SELECT operation.provider_dataset_id, operation.operation_key, operation.is_enabled
@@ -366,6 +441,16 @@ async def test_411_retires_transport_price_and_incident_features_and_keeps_every
              WHERE operation.operation_key = 'feature_place_transport_airports_job'
             """
         ) is True
+
+        # 대상 밖 dataset의 seal 입력은 하나도 바뀌지 않았다(대상 Feature에 그 link가 없다).
+        assert await _other_dataset_seals(connection) == seals_before
+        # 새 대상 member는 활성 가드가 거부한다(operation이 꺼졌다).
+        import asyncpg
+
+        member = await _target_scope(connection)
+        with pytest.raises(asyncpg.CheckViolationError, match="inactive dataset member"):
+            async with connection.transaction():
+                await _insert_member_job(connection, member, "411-after-probe")
     finally:
         await connection.close()
 
@@ -433,12 +518,13 @@ async def test_411_refuses_when_a_job_is_queued_on_a_transport_price_operation(
         await connection.close()
 
 
-async def test_411_refuses_when_a_target_feature_has_another_primary_source(
+async def test_411_refuses_when_a_target_feature_has_a_link_from_another_dataset(
     db_at_410: tuple[Config, str],
 ) -> None:
-    """대상 Feature가 대상 밖 dataset에도 primary 출처를 가지면 퇴역하지 않는다.
+    """대상 Feature가 대상 밖 dataset의 link(역할 무관 — 여기서는 enrichment)를 가지면 퇴역 안 함.
 
-    퇴역하면 남는 출처의 Feature가 함께 사라진다. 트랜잭션 전체가 되돌아가 410 그대로여야 한다.
+    퇴역은 그 dataset의 curation seal 입력을 바꾼다(link 역할 무관). 트랜잭션 전체가 되돌아가 410
+    그대로여야 한다.
     """
 
     config, superuser_dsn = db_at_410
@@ -463,7 +549,7 @@ async def test_411_refuses_when_a_target_feature_has_another_primary_source(
                 """
                 INSERT INTO provider_sync.source_links (
                     feature_id, source_role, match_method, confidence, source_entity_key
-                ) VALUES ($1, 'primary', 'provider_key', 100, $2)
+                ) VALUES ($1, 'enrichment', 'provider_key', 80, $2)
                 """,
                 seeded.targets[2],
                 shared_entity,
@@ -472,7 +558,7 @@ async def test_411_refuses_when_a_target_feature_has_another_primary_source(
     finally:
         await connection.close()
 
-    with pytest.raises(Exception, match="primary source outside the targets"):
+    with pytest.raises(Exception, match="source link outside the targets"):
         await _upgrade_to_411(config)
 
     connection = await _connect(superuser_dsn)
@@ -481,4 +567,120 @@ async def test_411_refuses_when_a_target_feature_has_another_primary_source(
         assert await _states(connection, seeded.targets) == before
         assert await _enabled_target_operations(connection) > 0
     finally:
+        await connection.close()
+
+
+async def test_409_to_411_in_one_transaction_refuses_and_rolls_back_410_too(
+    db_at_409: tuple[Config, str],
+) -> None:
+    """prod 경로(409)에서 410·411을 한 트랜잭션으로 올리면 411이 거부한다(퇴역할 Feature가 있을 때).
+
+    한 트랜잭션이면 410의 FK 추가가 잡은 표 잠금을 퇴역 내내 쥔다. 거부되면 410도 함께 되돌아가
+    409 그대로다. 그 뒤 410을 단독 commit하고 411을 올리면 통과한다(runbook A·B).
+    """
+
+    config, superuser_dsn = db_at_409
+    connection = await _connect(superuser_dsn)
+    try:
+        assert await _version(connection) == _PROD_NOW
+        seeded = await _seed_population(connection)
+    finally:
+        await connection.close()
+
+    with pytest.raises(Exception, match="앞선 revision"):
+        await _upgrade_to_411(config)
+
+    connection = await _connect(superuser_dsn)
+    try:
+        assert await _version(connection) == _PROD_NOW
+        assert await connection.fetchval(
+            "SELECT to_regclass('feature.provider_field_shadow_candidates') IS NULL"
+        ) is True
+        assert all(
+            state[0] == "active"
+            for state in (await _states(connection, seeded.targets)).values()
+        )
+    finally:
+        await connection.close()
+
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, config, _BEFORE)
+    await _upgrade_to_411(config)
+
+    connection = await _connect(superuser_dsn)
+    try:
+        assert await _version(connection) == _AFTER
+        assert all(
+            state[:2] == ("retired", "suppressed")
+            for state in (await _states(connection, seeded.targets)).values()
+        )
+    finally:
+        await connection.close()
+
+
+async def test_411_refuses_when_a_target_feature_has_an_active_lifecycle_override(
+    db_at_410: tuple[Config, str],
+) -> None:
+    """운영자 lifecycle override가 이미 있는 대상은 덮어쓰지 않는다 — 트랜잭션 전체가 되돌아간다."""
+
+    config, superuser_dsn = db_at_410
+    connection = await _connect(superuser_dsn)
+    try:
+        seeded = await _seed_population(connection)
+        await connection.execute(
+            """
+            INSERT INTO ops.feature_overrides (
+                feature_id, field_path, override_value, prevent_provider_reactivation, status
+            ) VALUES ($1, 'lifecycle_state', '"active"'::jsonb, false, 'active')
+            """,
+            seeded.targets[0],
+        )
+        before = await _states(connection, seeded.targets)
+    finally:
+        await connection.close()
+
+    with pytest.raises(Exception, match="active lifecycle override"):
+        await _upgrade_to_411(config)
+
+    connection = await _connect(superuser_dsn)
+    try:
+        assert await _version(connection) == _BEFORE
+        assert await _states(connection, seeded.targets) == before
+        assert await _enabled_target_operations(connection) > 0
+    finally:
+        await connection.close()
+
+
+async def test_411_waits_on_an_uncommitted_target_membership_and_fails_closed(
+    db_at_410: tuple[Config, str],
+) -> None:
+    """검사와 끄기 사이의 경주: commit되지 않은 대상 member가 있으면 411은 scope 행을 잠그지 못한다.
+
+    member INSERT의 FK가 scope 행에 ``FOR KEY SHARE``를 쥐므로 411의 ``FOR UPDATE``는
+    ``lock_timeout``(5초)으로 실패하고 아무것도 바꾸지 않는다. 잠금이 없다면 411은 그 job을
+    보지 못한 채 operation을 끄고, job은 영영 종결로 가지 못한다.
+    """
+
+    config, superuser_dsn = db_at_410
+    connection = await _connect(superuser_dsn)
+    holder = await _connect(superuser_dsn)
+    try:
+        seeded = await _seed_population(connection)
+        member = await _target_scope(connection)
+        transaction = holder.transaction()
+        await transaction.start()
+        try:
+            await _insert_member_job(holder, member, "411-race-probe")
+            with pytest.raises(Exception, match="lock"):
+                await _upgrade_to_411(config)
+        finally:
+            await transaction.rollback()
+        assert await _version(connection) == _BEFORE
+        assert all(
+            state[0] == "active"
+            for state in (await _states(connection, seeded.targets)).values()
+        )
+        assert await _enabled_target_operations(connection) > 0
+    finally:
+        await holder.close()
         await connection.close()

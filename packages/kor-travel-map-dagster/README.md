@@ -31,6 +31,8 @@ Docker 이미지는 `docker/dagster.yaml`을 `DAGSTER_HOME`에 포함한다. 이
 `dagster-webserver`와 `dagster-daemon`을 분리 실행하므로, local/Docker 모두 같은
 PostgreSQL-backed instance config를 쓴다.
 
+
+> **2026-10-24 ADR-114 결정 7(1단계, migration `411_retire_pg_transport_values`)** — 유가(주유소·휴게소)·고속도로 돌발의 PG 적재(asset·job·schedule·resource·preview)는 퇴역했고 그 Feature는 `retired`·`suppressed`다. 현재 값은 Valkey `transport_state_*`와 `/v1/service/transport/*`가 준다. 아래 유가·돌발 서술은 이력이다. 장소(주유소·휴게소·공항 place) 적재는 그대로다.
 ## 패키지 설치 기준
 
 `kor-travel-map-dagster`는 독립 code location으로 clean install될 수 있어야 한다.
@@ -71,8 +73,6 @@ provider record resource:
 - `datagokr_cultural_festivals`
 - `transport_fuel_stations`
 - `transport_rest_areas`
-- `transport_rest_area_fuel_prices`
-- `transport_highway_incidents`
 - `transport_airports`
 - `krheritage_items`
 - `krheritage_events`
@@ -106,8 +106,6 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `datagokr_cultural_festivals` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `transport_fuel_stations` | `kor-travel-transport` | `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL`, `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` | transport `TRANSPORT_SERVICE_EXPORT_TOKEN`(같은 값) |
 | `transport_rest_areas` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
-| `transport_rest_area_fuel_prices` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
-| `transport_highway_incidents` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
 | `transport_airports` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
 | `krheritage_items` | `python-krheritage-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krheritage_events` | `python-krheritage-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
@@ -170,10 +168,7 @@ asset step과 큐 run(`execute_feature_update_request`, scope 여러 개)이 `up
 |----------|-----|------|
 | `feature_event_datagokr_cultural_festivals_monthly_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 1 * *` |
 | `feature_place_transport_fuel_stations_weekly_schedule` | `feature_place_transport_fuel_stations_job` | `5 3 * * 1` |
-| `feature_price_transport_fuel_stations_daily_schedule` | `feature_price_transport_fuel_stations_job` | `18 18 * * *` |
 | `feature_place_transport_rest_areas_weekly_schedule` | `feature_place_transport_rest_areas_job` | `20 4 * * 1` |
-| `feature_price_transport_rest_areas_twice_daily_schedule` | `feature_price_transport_rest_areas_job` | `50 6,18 * * *` |
-| `feature_notice_transport_highway_incidents_ten_minute_schedule` | `feature_notice_transport_highway_incidents_job` | `*/10 * * * *` |
 | `feature_place_transport_airports_monthly_schedule` | `feature_place_transport_airports_job` | `5 5 4 * *` |
 | `feature_place_krheritage_items_monthly_schedule` | `feature_place_krheritage_items_job` | `15 2 2 * *` |
 | `feature_event_krheritage_events_monthly_schedule` | `feature_event_krheritage_events_job` | `25 3 2 * *` |

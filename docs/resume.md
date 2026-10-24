@@ -4,8 +4,11 @@
   `411_retire_pg_transport_values`가 그 operation을 끄고 Feature 약 1.4만 건을 `system` 퇴역한다(soft-delete,
   데이터는 남김). 장소(주유소·휴게소·공항)는 PinVi 일반 검색·근처와 C7 공항 job이 기대므로 ②단계로 미뤘다. API 표면 변화
   없음. 배포 영향: Map API·Dagster code location(같은 pair) + migration 411.
-- **다음 한 작업: 소유자 적대 리뷰 → CI green → 머지 판단 → 배포 전 유가·돌발 schedule 셋 정지·큐 비우기 → pair 배포(411)
-  → 전이 수·in-bounds 확인(ADR-114 "①의 운영 runbook"). 그 뒤 ②의 해제 조건(PinVi in-bounds 기본 kind·장소 검색 대체, C7
+- 적대 리뷰 2회 반영(2026-10-24): 409→411 한 트랜잭션 거부(410 잠금을 퇴역 내내 쥐지 않게 — 배포는 A 410 단독 → B 411), 대상
+  scope 행 `FOR UPDATE`로 검사·끄기 경주 차단·operation 먼저 끔, timeout 명시, link 역할 무관 seal 검사, 대상 dataset 셋 고정·옛
+  provider 잔여 fail closed, 상태 문맥 GUC 정리.
+- **다음 한 작업: CI green → 머지 판단 → A: head 410 pair 배포 → B: 세 dataset 갱신 정책 `enabled=false` 필수·schedule 확인·진행 중
+  job 0 → 411 pair 배포 → 전이 수·in-bounds 확인(ADR-114 "①의 운영 runbook"). 그 뒤 ②의 해제 조건(PinVi in-bounds 기본 kind·장소 검색 대체, C7
   안전 대상 이동)을 PinVi·C7 쪽에 건다.**
 
 ## 2026-10-24 — ADR-114 2단계(T-STATE-02): 브랜치 `feat/adr114-valkey-weather`

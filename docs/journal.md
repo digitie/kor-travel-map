@@ -14,6 +14,10 @@
   실패 그대로 — docker runtime 23·sealed tree 2·tick window 3·smoke settings 1), 통합(transport·retire·notice·price·mois·
   tvn34c/35·phase2·catalog 등 -k) 290 passed(1 error는 컨테이너에 docker CLI 없음). 첫 실행에서 revision id 40자(>32)와 사후
   조건 SQL의 없는 열(`context`)을 잡아 고쳤다.
+- 적대 리뷰 2회(HIGH 1·MED 2·LOW 3·운영 1) 반영: (F1) prod 409→411이 한 트랜잭션이면 410 FK 잠금을 퇴역 내내 쥔다 →
+  `alembic_version` xmin으로 같은 트랜잭션을 감지해 퇴역 대상이 있을 때 거부, runbook A·B. (F2) 대상 scope 행 `FOR UPDATE`(FK
+  KEY SHARE와 충돌) 뒤 preflight, operation 먼저 끔, 사후 in-flight 재확인. (F3) scope 잠금 5초·DDL 1초·퇴역 statement_timeout 0.
+  (F4) 공유 출처 검사 역할 무관. (F5) 대상 셋 고정·옛 provider 잔여 fail closed. (F6) 상태 문맥 GUC 정리·docstring. 문서 drift 넷.
 
 ## 2026-10-24 — ADR-114 2단계 재리뷰 Low·main 재기반(#1365 뒤): 브랜치 `feat/adr114-valkey-weather`
 
