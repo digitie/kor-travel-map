@@ -30,7 +30,11 @@ from kortravelmap.api.cache_target_stream_schema import (
     CacheTargetStreamStatusRecord,
 )
 from kortravelmap.api.cache_target_stream_service import get_cache_target_stream_service
-from kortravelmap.api.db import get_read_snapshot_session, get_session
+from kortravelmap.api.db import (
+    get_locking_read_snapshot_session,
+    get_read_snapshot_session,
+    get_session,
+)
 from kortravelmap.api.domain_command_service import (
     DomainCommandFingerprintConflict,
     DomainCommandReplay,
@@ -575,6 +579,7 @@ def _client(
 
     app.dependency_overrides[get_session] = _fake_session
     app.dependency_overrides[get_read_snapshot_session] = _fake_session
+    app.dependency_overrides[get_locking_read_snapshot_session] = _fake_session
     app.dependency_overrides[get_cache_target_stream_service] = lambda: service
     return TestClient(app, client=("127.0.0.1", 50000))
 
