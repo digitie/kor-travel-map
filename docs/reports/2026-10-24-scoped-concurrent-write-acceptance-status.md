@@ -29,7 +29,7 @@ main에 포함됐다. 개별 feature-base PR의 미발행 CI를 성공으로 간
 | #1387 | 417 EX 재진입 xact 소유 재확보 후 반복 GUC 조회 생략 | 실제PG7+unit4·oracle4·최종집중92·독립2리뷰·정확fc9 실UI18+별도HTTP2 | 정확fc9 CI5개 PASS·main708efbc1, 운영 후속 |
 | #1388(418) | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·oracle4·독립2리뷰·정확99fe CI5개·실UI19/별도HTTP3·proof PASS, main2e3dd69e | 원strict cleanup의 외부소멸2 FAIL 보존·별도잔여정리 완료, 전체 writer/운영 후속 |
 | #1389 | 같은 source/head·후보/winner/receipt의 protocol EX+전역 fence | 실제PG/기존native/artifact16 PASS·독립2리뷰·정확dcb92934 CI5개 PASS | 새 실UI 진행·미머지, 실제 collector 배선/운영 미완 |
-| #1390 | 국가유산 이름 presence·저장 projection 재정규화·지원 외 불변 진단, native 예산 후속075 합성 | A1 SDK98+native/EX18=116 PASS·lint377(6skip)·mypy3/import4·source 독립2리뷰 PASS | 정확475 CI·최종 문서 delta 검토, 실collector/실UI/운영 미완 |
+| #1390 | 국가유산 이름 presence·저장 projection 재정규화·지원 외 불변 진단, native 예산 후속075 합성 | A1 SDK98+native/EX18=116 PASS·lint377(6skip)·mypy3/import4·source 독립2리뷰 PASS | 최종 HEAD 정확CI·최종 문서 delta 검토, 실collector/실UI/운영 미완 |
 
 실제 Chromium·BFF/API·PostgreSQL은 reader/kernel 합집합의 정확fd6/schema414에서16건을
 통과했다. 지도 cluster3회 확대→UUID마커/상세, 인증401/403/200·파일 목록/상세/검색·issues·
