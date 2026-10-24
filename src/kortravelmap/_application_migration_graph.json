@@ -111,6 +111,12 @@
         "417_protocol_ex_reentry"
       ],
       "revision": "418_creation_protocol"
+    },
+    {
+      "down_revision": [
+        "418_creation_protocol"
+      ],
+      "revision": "419_exclusive_provider_refresh"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

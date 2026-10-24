@@ -37,6 +37,7 @@ ADR 참조
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import Mapping, Sequence
 from contextlib import asynccontextmanager
@@ -137,6 +138,13 @@ from kortravelmap.infra.enrichment_review_repo import (
 )
 from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
+)
+from kortravelmap.infra.exclusive_provider_refresh import (
+    ExclusiveProviderSnapshotOptions,
+    ExclusiveProviderSnapshotPlan,
+    bounded_full_snapshot,
+    prepare_exclusive_provider_snapshot,
+    refresh_exclusive_provider_snapshot,
 )
 from kortravelmap.infra.feature_geocode_reuse import (
     read_reusable_geo_columns as repo_read_reusable_geo_columns,
@@ -573,10 +581,12 @@ class AsyncKorTravelMapClient:
         engine: AsyncEngine,
         *,
         settings: KorTravelMapSettings | None = None,
+        exclusive_provider_snapshot: ExclusiveProviderSnapshotOptions | None = None,
     ) -> None:
         self._engine = engine
         self._session_factory = make_async_session_factory(engine)
         self._settings = settings
+        self._exclusive_provider_snapshot = exclusive_provider_snapshot
         #: provider 적재 transaction이 ``feature-curation-write``를 처음 잡을 때 기다릴 상한(ms).
         #: :meth:`_feature_load_transaction`만 쓴다(T-LOAD-LOCK-WAIT).
         self._feature_load_lock_wait_ms = 1000 * (
@@ -1466,6 +1476,27 @@ class AsyncKorTravelMapClient:
                 )
             return result
 
+    async def _cancel_exclusive_snapshot_plan(self, plan: ExclusiveProviderSnapshotPlan) -> None:
+        """소유 plan만 rollback 뒤 짧게 정리한다. 실패/재취소는 원예외를 덮지 않는다.
+
+        apply TX가 끝나 잠금을 놓은 뒤 남은 예약은60초 lease로 회수한다.
+        살아 있는 backend의 rowlock을 lease만으로 없애지는 않는다. commit 불확실 상태에서
+        정본 cancel은 completed를 변경하지 않는다. 재시도/재수집을 자동 실행하지 않는다.
+        """
+        from kortravelmap.infra.scoped_feature_writes import cancel_scoped_feature_write
+
+        try:
+            async with asyncio.timeout(2.0):
+                async with self._session_factory() as cleanup, cleanup.begin():
+                    await cleanup.execute(text("SET LOCAL statement_timeout='1s'"))
+                    await cleanup.execute(text("SET LOCAL lock_timeout='250ms'"))
+                    await cancel_scoped_feature_write(
+                        cleanup, attempt_id=plan.attempt_id, owner=plan.owner
+                    )
+        except BaseException:
+            # 이 private helper는 이미 원예외 처리중일 때만 호출된다.
+            return
+
     async def load_authoritative_feature_snapshot(
         self,
         bundles: Iterable[FeatureBundle],
@@ -1481,14 +1512,67 @@ class AsyncKorTravelMapClient:
         """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다."""
 
         if (
-            retired_source_entity_ids is not None
-            and retire_geometryless_areas
-        ) or (
-            retired_source_entity_ids is not None
-            and retire_absent_from_snapshot
-        ) or (retire_geometryless_areas and retire_absent_from_snapshot):
+            (retired_source_entity_ids is not None and retire_geometryless_areas)
+            or (retired_source_entity_ids is not None and retire_absent_from_snapshot)
+            or (retire_geometryless_areas and retire_absent_from_snapshot)
+        ):
             raise ValueError("retirement mode는 하나만 선택해야 합니다")
-        materialized = list(bundles)
+        materialized: Sequence[FeatureBundle]
+        options = self._exclusive_provider_snapshot
+        if options is not None and (provider, dataset_key) == (
+            options.provider,
+            options.dataset_key,
+        ):
+            if self._transaction_bound:
+                raise ValueError("exclusive snapshot cannot commit a transaction-bound caller")
+            if (
+                source_entity_type != options.source_entity_type
+                or retired_source_entity_ids is not None
+                or retire_absent_from_snapshot
+            ):
+                raise ValueError("exclusive snapshot scope/retirement mode unsupported")
+            materialized = bounded_full_snapshot(
+                bundles,
+                options=options,
+                geo=geo,
+                retire_geometryless_areas=retire_geometryless_areas,
+            )
+            async with self._session_factory() as planning, planning.begin():
+                plan = await prepare_exclusive_provider_snapshot(
+                    planning,
+                    materialized,
+                    options=options,
+                    geo=geo,
+                    retire_geometryless_areas=retire_geometryless_areas,
+                )
+            if plan is not None:
+                try:
+                    async with self._feature_load_transaction() as session:
+                        full = await refresh_exclusive_provider_snapshot(
+                            session,
+                            materialized,
+                            dataset_id=plan.dataset_id,
+                            provider=provider,
+                            dataset_key=dataset_key,
+                            source_entity_type=source_entity_type,
+                            active_targets=plan.active_targets,
+                            attempt_id=plan.attempt_id,
+                            owner=plan.owner,
+                            manifest_digest=plan.manifest_digest,
+                            geo=geo,
+                            retire_geometryless_areas=retire_geometryless_areas,
+                        )
+                        if full.replayed:
+                            raise ValueError(
+                                "completed plan requires original run recovery, not new success"
+                            )
+                        assert full.retired is not None
+                        return full.load, full.retired
+                except BaseException:
+                    await self._cancel_exclusive_snapshot_plan(plan)
+                    raise
+        else:
+            materialized = list(bundles)
         async with self._feature_load_transaction() as session:
             result = await load_bundles(session, materialized, geo=geo)
             retired = 0

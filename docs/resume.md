@@ -1,3 +1,8 @@
+## 2026-10-24 — 제한 primary place의 명시 EX 전체 적재(A3 checkpoint)
+
+- 최종 converter 입력에서 bounded plan을 만드는 opt-in client/EX 경로를 추가했다. 기존 applying EX manifest·비활성 base/Geo와 활성 winner를 같은 TX로 닫고 기본 선택은 OFF다.
+- 초기 synthetic PG5/단위4, legacy before23514 원본을 보존했다. 실제 tracked collector/권한·최종 oracle/CI·UI/두리뷰·운영 수용은 미완이다. [범위와 남은 gate](reports/2026-10-24-exclusive-provider-full-refresh.md).
+
 ## 2026-10-24 — 한 sealed attempt의 scalar 원자 batch(A2)
 
 - 같은 dataset의 기존 primary place 여러 개를 한 TX/finish1회로 적용하는 별도 entry를 추가했다. snapshot seal·실제 collector 배선·same-dataset 병렬 수용은 아니다.

@@ -87,7 +87,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-04 — **독립 데이터셋 동시 쓰기**
 
-  일반 snapshot의 원자성을 유지하며 독립 dataset DML을 병행한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+  일반 snapshot의 원자성을 유지하며 독립 dataset DML을 병행한다. [제한 EX 연결](reports/2026-10-24-exclusive-provider-full-refresh.md)은 구현·검증 중이며 병렬/운영 수용은 아니다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-05 — **완전 지역의 동시 쓰기·경계 이동**
 
