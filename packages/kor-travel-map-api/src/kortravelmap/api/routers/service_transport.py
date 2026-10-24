@@ -294,8 +294,8 @@ class PriceHistoryBlock(BaseModel):
     )
     source_status: Literal["ok", "stale"] | None = Field(
         description=(
-            "transport 유가 수집 상태(ok·stale). stale이어도 기존 이력은 준다. unavailable이면 null "
-            "(성공한 수집 근거가 없으면 reason=upstream_no_collection)."
+            "transport 유가 수집 상태(ok·stale). stale이어도 기존 이력은 준다. unavailable이면 "
+            "null(성공한 수집 근거가 없으면 reason=upstream_no_collection)."
         )
     )
     has_more: bool = Field(

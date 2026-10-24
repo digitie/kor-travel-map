@@ -385,10 +385,14 @@ async def test_price_history_deep_or_oversized_bodies_are_upstream_contract() ->
     )
 
 
+def _raw(status_code: int, data: bytes, headers: dict[str, str]) -> httpx.Response:
+    """원문 그대로의 stream 응답. ``content=``는 생성 때 미리 풀어 버려(깨진 gzip이면 그 자리에서
+    터진다) 실제 전송을 흉내 내지 못한다."""
+    return httpx.Response(status_code, stream=httpx.ByteStream(data), headers=headers)
+
+
 def _gzip_response(payload: bytes, status_code: int = 200) -> httpx.Response:
-    return httpx.Response(
-        status_code, content=gzip.compress(payload), headers={"Content-Encoding": "gzip"}
-    )
+    return _raw(status_code, gzip.compress(payload), {"Content-Encoding": "gzip"})
 
 
 async def test_price_history_gzip_is_capped_after_decompression() -> None:
@@ -397,31 +401,28 @@ async def test_price_history_gzip_is_capped_after_decompression() -> None:
     compressed = gzip.compress(bomb)
     assert len(compressed) < 64 * 1024
     outcome = await _fetch(
-        lambda _r: httpx.Response(200, content=compressed, headers={"Content-Encoding": "gzip"})
+        lambda _r: _raw(200, compressed, {"Content-Encoding": "gzip"})
     )
     assert outcome.reason == "upstream_contract"
     # 상한 안의 정상 gzip 페이지는 그대로 읽는다.
     ok = await _fetch(lambda _r: _gzip_response(json.dumps(_page()).encode()))
     assert ok.reason is None
-    assert ok.history is not None and len(ok.history.items) == 2
+    assert ok.history is not None
+    assert len(ok.history.items) == 2
 
 
 @pytest.mark.parametrize(
-    "response",
+    ("data", "encoding"),
     [
-        httpx.Response(200, content=b"not gzip at all", headers={"Content-Encoding": "gzip"}),
-        httpx.Response(
-            200,
-            content=gzip.compress(json.dumps(_page()).encode())[:-12],  # 잘린 gzip
-            headers={"Content-Encoding": "gzip"},
-        ),
-        httpx.Response(200, content=b"{}", headers={"Content-Encoding": "br"}),
+        (b"not gzip at all", "gzip"),
+        (gzip.compress(json.dumps(_page()).encode())[:-12], "gzip"),  # 잘린 gzip
+        (b"{}", "br"),
     ],
 )
 async def test_price_history_bad_content_encoding_is_upstream_contract(
-    response: httpx.Response,
+    data: bytes, encoding: str
 ) -> None:
-    outcome = await _fetch(lambda _r: response)
+    outcome = await _fetch(lambda _r: _raw(200, data, {"Content-Encoding": encoding}))
     assert (outcome.history, outcome.reason) == (None, "upstream_contract")
 
 
@@ -453,7 +454,7 @@ _HUGE = b"x" * (MAX_PRICE_HISTORY_BODY_BYTES * 2)
             False,
         ),
         (
-            httpx.Response(503, content=b"\x00garbage", headers={"Content-Encoding": "gzip"}),
+            _raw(503, b"\x00garbage", {"Content-Encoding": "gzip"}),
             None,
             "upstream_unavailable",
             False,
