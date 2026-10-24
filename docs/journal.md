@@ -1,3 +1,11 @@
+## 2026-10-24 — ADR115 T-CWRITE-02: 불변 정책과 shadow 후보 기반
+
+- 전체 CI의 ORM metadata/runtime preflight 누락을 보완했다. shadow CHECK/FK/index를 metadata에 정합화하고 recorder 정확 signature만 허용한다. 정책 등록/직접 DML 차단과 경고 검사는 유지하며 실패한 테스트 engine 회수도 검증한다.
+
+- 완결 fieldset을 원자 등록하는 불변 정책 header와 source별 typed shadow recorder/ACL을410에 추가한다. 등록은 global-first이며 RR에서 새 revision이 보이지 않으면 실패한다.
+- 실제 native 수집 hook/settings는 별도 후속으로 분리했다. 공개 winner/effective/전역 잠금 범위는 유지하며 기본OFF/운영0이다. [범위·교착/RR·미완 gate](reports/2026-10-24-provider-field-shadow.md).
+- 정책/전체 membership·Geo·winner 활성·scope/epoch/manifest와 최종 CI/두 리뷰·HTTP/UI 수용은 미완이다. 첫 기반 단위를 전체 동시 쓰기 완료로 세지 않는다.
+
 ## 2026-10-24 — ADR115 선행: 같은 transaction fence 재진입 SQL 절감
 
 - 실제 root session/connection transaction·오류 stamp가 유효한 동안만 전역 fence를 재사용한다. savepoint 획득은 캐시하지 않는다. 전역 충돌 범위·병합 의미는 유지한다.
