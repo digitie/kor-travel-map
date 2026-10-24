@@ -22,6 +22,7 @@ ALTER TABLE ops.application_schema_operation_receipts
     ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh', '402_remove_map_weather_data', '403_drop_kma_notice_lineage', '404_transport_provider_identity', '405_mois_freshness_sla', '406_feature_write_gate', '407_feature_geocode_stamps', '408_kor_travel_geo_releases', '409_geo_release_item_reasons', '410_provider_field_shadow', '411_scoped_feature_write_kernel'))
 """
 
+
 def _sidecar(name: str) -> str:
     return Path(__file__).with_name(f"_411_{name}.sql").read_text(encoding="utf-8")
 
@@ -72,7 +73,7 @@ CREATE TABLE ops.feature_write_dataset_scopes (
     """CREATE TABLE ops.feature_write_manifests (
     attempt_id uuid NOT NULL CONSTRAINT fk_fw_manifest_attempt REFERENCES ops.feature_write_attempts(attempt_id) ON DELETE CASCADE,
     ordinal integer NOT NULL CONSTRAINT ck_fw_manifest_ordinal CHECK (ordinal BETWEEN 0 AND 8191),
-    dependency_kind text COLLATE "C" NOT NULL CONSTRAINT ck_fw_manifest_kind CHECK (dependency_kind IN ('feature','source_head')),
+    dependency_kind text COLLATE "C" NOT NULL CONSTRAINT ck_fw_manifest_kind CHECK (dependency_kind IN ('feature','source_head','feature_membership')),
     dependency_key text COLLATE "C" NOT NULL CONSTRAINT ck_fw_manifest_key CHECK (octet_length(dependency_key) BETWEEN 1 AND 128),
     expected_value text COLLATE "C" NOT NULL CONSTRAINT ck_fw_manifest_expected CHECK (octet_length(expected_value) BETWEEN 1 AND 128),
     member_digest text COLLATE "C" NOT NULL CONSTRAINT ck_fw_manifest_digest CHECK (member_digest ~ '^[0-9a-f]{64}$'),
@@ -126,6 +127,10 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "REVOKE ALL ON FUNCTION ops.seal_scoped_feature_write_manifest(uuid,uuid) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.seal_scoped_feature_write_manifest(uuid,uuid) TO ktm_feature_runtime",
     "SET ROLE ktm_feature_state_procedure_owner",
+    _sidecar("membership_digest"),
+    "ALTER FUNCTION ops.scoped_feature_write_membership_digest(uuid) OWNER TO ktm_feature_state_procedure_owner",
+    "REVOKE ALL ON FUNCTION ops.scoped_feature_write_membership_digest(uuid) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.scoped_feature_write_membership_digest(uuid) TO ktm_feature_runtime",
     _sidecar("begin_attempt"),
     "ALTER FUNCTION ops.begin_scoped_feature_write(uuid,uuid,text) OWNER TO ktm_feature_state_procedure_owner",
     "SET ROLE ktm_feature_state_procedure_owner",

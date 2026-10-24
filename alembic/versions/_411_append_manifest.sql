@@ -15,7 +15,7 @@ BEGIN
             OR jsonb_typeof(v_member->'ordinal') IS DISTINCT FROM 'number'
             OR (v_member->>'ordinal') !~ '^(0|[1-9][0-9]{0,3})$'
             OR jsonb_typeof(v_member->'dependency_kind') IS DISTINCT FROM 'string'
-            OR (v_member->>'dependency_kind') NOT IN ('feature','source_head')
+            OR (v_member->>'dependency_kind') NOT IN ('feature','source_head','feature_membership')
             OR jsonb_typeof(v_member->'dependency_key') IS DISTINCT FROM 'string'
             OR octet_length(v_member->>'dependency_key') NOT BETWEEN 1 AND 128
             OR jsonb_typeof(v_member->'expected_value') IS DISTINCT FROM 'string'
@@ -25,6 +25,9 @@ BEGIN
         IF (v_member->>'ordinal')::integer>=v_attempt.expected_members THEN RAISE EXCEPTION 'manifest ordinal overflow' USING ERRCODE='23514'; END IF;
         IF v_member->>'dependency_kind'='feature' AND ((v_member->>'dependency_key') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR (v_member->>'expected_value') !~ '^[1-9][0-9]{0,18}$') THEN
             RAISE EXCEPTION 'invalid feature dependency' USING ERRCODE='23514';
+        END IF;
+        IF v_member->>'dependency_kind'='feature_membership' AND ((v_member->>'dependency_key') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR (v_member->>'expected_value') !~ '^[0-9a-f]{64}$') THEN
+            RAISE EXCEPTION 'invalid feature membership dependency' USING ERRCODE='23514';
         END IF;
         v_digest:=encode(sha256(convert_to(v_member::text,'UTF8')),'hex');
         INSERT INTO ops.feature_write_manifests(attempt_id,ordinal,dependency_kind,dependency_key,expected_value,member_digest)

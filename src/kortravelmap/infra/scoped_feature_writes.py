@@ -41,24 +41,29 @@ class ScopedWriteDependency:
     """계획 때 관측한 대상 revision. 소실/추가 phantom 전체 검증의 대체물이 아니다."""
 
     ordinal: int
-    dependency_kind: Literal["feature", "source_head"]
+    dependency_kind: Literal["feature", "source_head", "feature_membership"]
     dependency_key: str
     expected_value: str
 
     def __post_init__(self) -> None:
         if type(self.ordinal) is not int or not 0 <= self.ordinal < _MAX_MEMBERS:
             raise ValueError("invalid manifest ordinal")
-        if self.dependency_kind not in ("feature", "source_head"):
+        if self.dependency_kind not in ("feature", "source_head", "feature_membership"):
             raise ValueError("unsupported dependency kind")
         for value in (self.dependency_key, self.expected_value):
             if not isinstance(value, str) or not 1 <= len(value.encode()) <= 128:
                 raise ValueError("invalid bounded dependency")
-        if self.dependency_kind == "feature":
+        if self.dependency_kind in ("feature", "feature_membership"):
             try:
                 valid_id = str(UUID(self.dependency_key)) == self.dependency_key
             except ValueError:
                 valid_id = False
-            if not valid_id or not re.fullmatch(r"[1-9][0-9]{0,18}", self.expected_value):
+            valid_expected = (
+                bool(_DIGEST.fullmatch(self.expected_value))
+                if self.dependency_kind == "feature_membership"
+                else bool(re.fullmatch(r"[1-9][0-9]{0,18}", self.expected_value))
+            )
+            if not valid_id or not valid_expected:
                 raise ValueError("invalid feature dependency")
 
 
