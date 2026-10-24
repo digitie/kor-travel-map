@@ -11843,8 +11843,6 @@ BEGIN
             RAISE EXCEPTION 'active stamp requires applying EX full context' USING ERRCODE='23514';
         END IF;
     END LOOP;
-    PERFORM core.feature_id FROM feature.features core WHERE core.feature_id=ANY(p_feature_ids)
-        ORDER BY core.feature_id FOR KEY SHARE;
     -- 원래 Mapping의 모든 항목과 transaction now()를 보존한다. SH cap을 legacy에 전파하지 않는다.
     INSERT INTO feature.feature_geocode_stamps AS stamp(
         feature_id,geo_version_token,geo_data_token,reverse_outcome,stamped_at)

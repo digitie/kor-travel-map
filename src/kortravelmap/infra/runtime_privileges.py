@@ -870,9 +870,10 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         _SCHEMA_OWNER_ROLE,
         _CORE_FEATURE_GRANTS
         + (
-            "DO $stamp_acl$ BEGIN IF to_regprocedure("
-            "'feature.upsert_provider_geocode_stamps_ex(uuid[],text[],text,text)') "
-            "IS NOT NULL THEN "
+            "DO $stamp_acl$ BEGIN IF EXISTS ("
+            "SELECT 1 FROM pg_catalog.pg_proc p "
+            "JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname='feature' AND p.proname='upsert_provider_geocode_stamps_ex') THEN "
             "GRANT SELECT,INSERT,UPDATE ON feature.feature_geocode_stamps "
             "TO ktm_feature_state_procedure_owner; END IF; END $stamp_acl$",
         )
