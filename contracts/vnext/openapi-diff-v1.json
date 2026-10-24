@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "d3bea1006ae06f3e87dcc7bcae782a37f9f6e867cd58b4e0bacedddc8156da4a"
+      "sha256": "b1d6c87d83c087e1a3e8f418ba3cd3ab9d28204a8c9ae69f3b21e786a05877ad"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,7 +13,7 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "2409428ba9a546f81ca3e4f612174515cb27eb9f55cb11f0c8448d5d64217650"
+      "sha256": "a279e522ca6e413a2ea957016f99d59155a7ec7bf8473c6eaff7e3b1c870255e"
     }
   },
   "revisions": [
@@ -195,7 +195,7 @@
     {
       "date": "2026-10-24",
       "task": "T-STATE-01-T4",
-      "change": "baseline sha256 재고정(service·admin). `GET /v1/service/transport/fuel-stations/{feature_id}/price-history`를 transport T4 계약에 맞췄다 — query `cursor` 추가, limit은 페이지 전체 행 수, PriceHistoryBlock에 source_collected_at·source_status·has_more·next_cursor 추가(truncated는 has_more 호환값), PriceHistoryPoint.collected_at nullable, reason enum에 upstream_unsupported·cursor_expired·request_rejected·upstream_timeout 추가. user spec 무변경. PinVi service·admin 재vendor 대상이다."
+      "change": "baseline sha256 재고정(service·admin). `GET /v1/service/transport/fuel-stations/{feature_id}/price-history`를 transport T4 계약에 맞췄다 — query `cursor` 추가, limit은 페이지 전체 행 수, PriceHistoryBlock에 source_collected_at·source_status·has_more·next_cursor 추가(truncated는 has_more 호환값), PriceHistoryPoint.collected_at nullable, reason enum에 upstream_unsupported·request_rejected·upstream_no_collection·upstream_timeout 추가, cursor 요청의 transport 409는 응답 409 TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED. user spec 무변경. PinVi service·admin 재vendor 대상이다."
     }
   ],
   "surfaces": {
@@ -490,7 +490,7 @@
       "schema_changes": [
         {
           "operation": "GET /v1/service/transport/fuel-stations/{feature_id}/price-history",
-          "detail": "transport T4 계약 정렬 — query cursor(불투명, transport 409는 reason=cursor_expired로 처음부터), limit=페이지 전체 행 수, history에 source_status·source_collected_at·has_more·next_cursor, 행별 collected_at nullable, reason enum 4개 추가",
+          "detail": "transport T4 계약 정렬 — query cursor(불투명, cursor 요청의 transport 409는 응답 409 TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED로 처음부터), limit=페이지 전체 행 수, history에 source_status·source_collected_at·has_more·next_cursor, 행별 collected_at nullable, reason enum 4개 추가",
           "basis": "ADR-114"
         }
       ],
