@@ -1,3 +1,9 @@
+## 2026-10-24 — state/lifecycle SQL first-entry 폐포(415)
+
+- admin/reactivate/core/lifecycle author·revoke5개를 함께 protocol-first로 보강하며 원래 서명·본문·owner/ACL을 보존한다. Python 업무·field override·identity·정책 seed/운영 변경0이다.
+- 실제 PG36+unit5 총41 PASS(16.63초), valid nested state·M05 non-kept·기존 provider retire·SH 거부/rollback·active-policy 거부·닫힌 ACL을 확인했다. 초기 seed 준비 실패는 별도 보존했다.
+- 공식 oracle 기록1skip이며 비교/전체 lint·독립2리뷰·정확 CI/UI는 미완이다. 전체 동시 쓰기 완료가 아니다. [범위·실패·증거](reports/2026-10-24-state-lifecycle-protocol-entry.md).
+
 ## 2026-10-24 — 통합 전체 CI의 시험 격리 보완(#1379)
 
 - b460의 두 실제 PG lane는 같은5건 실패였다. 4건의 새 읽기 세션 fixture 누락과 metrics의 앞선 committed행 미고려를 제품 변경 없이 고쳤다. 0/2 sibling 제어군으로기존실패를 재현하고 old/new snapshot·writer commit 단언을 보존했다.

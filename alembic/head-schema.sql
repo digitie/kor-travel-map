@@ -2928,6 +2928,7 @@ CREATE PROCEDURE feature.author_lifecycle_override(IN p_feature_id uuid, IN p_so
 DECLARE
     v_current feature.features%ROWTYPE;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_source_lifecycle_state NOT IN ('active', 'retired')
        OR p_override_lifecycle_state NOT IN ('active', 'retired')
        OR p_prevent_provider_reactivation IS NULL
@@ -8275,6 +8276,7 @@ DECLARE
     v_raw_payload_hash text;
     v_causation_ref text;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_provider_dataset_id IS NULL
        OR coalesce(btrim(p_source_entity_key), '') = ''
        OR coalesce(btrim(p_source_record_key), '') = ''
@@ -10696,6 +10698,7 @@ CREATE PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id uuid, IN p_pr
 DECLARE
     v_current feature.features%ROWTYPE;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF coalesce(btrim(p_principal), '') = ''
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'lifecycle override revoke has invalid typed arguments'
@@ -11366,6 +11369,7 @@ DECLARE
     v_publication_state text;
     v_quality_state text;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_action NOT IN ('patch', 'retire')
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR coalesce(btrim(p_reason_code), '') = ''
@@ -11445,6 +11449,7 @@ DECLARE
     v_current feature.features%ROWTYPE;
     v_override_row_revision bigint;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'expected feature row revision is required'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_expected_revision';
@@ -17603,7 +17608,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
