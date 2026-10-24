@@ -1,6 +1,6 @@
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 
-- 종결·취소의 P EX→L과 leaf L 진입 검사를 추가하고 기존 SER/capture/kernel/SH OFF를 보존했다. 순수72 PASS·mypy6/Ruff 통과, 실제PG·oracle·CI/두리뷰는 미완이다. [범위·후속 검증](reports/2026-10-25-tracking-protocol-prefix.md).
+- 기존 SER/capture/kernel/SH OFF를 보존한 prefix를 두 소스 리뷰 뒤 검증했다. 직접25 PASS20.590초·정본oracle1 PASS26.436초·기존 real client/asset4 PASS17.213초는 별도 실행이다. startup P1 수정·원실패를 보존하며 API재개·추가triple·정확CI는 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
 
 ## 2026-10-25 — EX context 단일 조회(423)
 
