@@ -46,3 +46,5 @@ bfed checkpoint의 첫 owned PG 실행은 `422_heritage_evidence_reader.py`의 s
 공개 SQL 입력의 NULL/차원/중복/형식/2731개와 metadata 배열 예산을 Python validator와 독립해서 검증하는 실제 PG 시험 source를 추가했다. private5 EXECUTE와 private base table SELECT는 runtime42501을 확인하고, 예외 TX 뒤 새 READ ONLY TX의 공개 known-ineligibility 응답을 확인하도록 했다. owner 고권한까지 sandbox한다는 주장은 없다.
 
 현재 기존 SDK positive1을 포함해18개가 수집된다(collect-only18, 0.98초). 이 중 추가17개는 아직 실행하지 않았고 source 두 리뷰 전 PG0이다. Ruff의 초기 raises 범위2건은 실제 한 문장만 예외 검증하고 session 종료로 rollback되도록 수정했다. snapshot·저장 shape/압축·history/peak 시험은 그다음 source/runner gate로 분리한다.
+
+독립 두 리뷰 뒤 source `ca631dc2747afa9e660f5d8979ae8b59028940fc`의 같은 bounded fresh fixture에서 전체18 PASS(14.58초, skip0)를 확인했다. 내역은 기존 SDK3shape1·private 권한6·서버 입력10·배열 metadata 예산1이며, 과거 positive1을 새로운 시험으로 합산하지 않는다. runtime session/current_user·6routine owner/EXEC·resource를 관찰했고 exact CID의 Docker SDK NotFound/label0과 공식 oracle bytes 불변을 확인했다. 저장 shape 부정·snapshot·history/peak·운영 검증은 미완이다.

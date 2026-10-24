@@ -1,5 +1,5 @@
 {
-  "상태": "full SQL/12관계43가변열 독립 양방향 source 대조 완료. 실제 SDK3shape reader positive1 PASS 및 별도 공식 fresh head oracle1 PASS. 부정/동일snapshot/peak/EXPLAIN 수용은 미완",
+  "상태": "full SQL/12관계43가변열 source 독립 대조 완료. 실제 SDK3shape와 작은 runtime권한/서버입력 총18 PASS, 별도 공식 fresh head oracle1 PASS. 저장shape 부정/동일snapshot/peak/EXPLAIN은 미완",
   "상한단위": "압축되지 않은 direct stored datum byte. flattened 예산은 측정byte+4로 누적한다. payload 길이와 datum header를 혼동하지 않는다.",
   "metadata_only_fixed_columns": [
     "UUID",
@@ -258,5 +258,6 @@
   ],
   "starting_source": "7e36356700eb69a8c3c6a299fe2f14e06db905f5",
   "source_full_review_checkpoint": "bfed38828aabaa16d7610c99c1f923c972778192",
-  "actual_positive_checkpoint": "3bfa51bc8d52cf17cd05d49f479bfbc82d9e75af"
+  "actual_positive_checkpoint": "3bfa51bc8d52cf17cd05d49f479bfbc82d9e75af",
+  "actual_security_input_checkpoint": "ca631dc2747afa9e660f5d8979ae8b59028940fc"
 }
