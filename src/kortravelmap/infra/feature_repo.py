@@ -5755,6 +5755,8 @@ async def set_feature_phones(session: AsyncSession, feature_id: str, phones: lis
     enrichment receipt가 author한 effective 값은 유지되고, 그 명령·actor·reason은
     domain-command ledger와 override provenance에서 모두 추적된다.
     """
+    # 공유 writer의 source/link→Feature 순서와 교차하기 전에 protocol EX를 잡는다.
+    await lock_feature_curation_write(session)
     locked = (
         await session.execute(
             text(_LOCK_FEATURE_PHONE_OVERRIDE_SQL), {"feature_id": feature_id}

@@ -23,6 +23,7 @@ from kortravelmap.infra.domain_command_repo import (
     create_domain_command_record,
     lock_domain_command,
 )
+from kortravelmap.infra.feature_repo import lock_feature_curation_write
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -188,6 +189,8 @@ async def apply_feature_address_override(
     if not has_mutation:
         raise ValueError("덮어쓸 주소/좌표 필드가 최소 1개 필요함")
 
+    # 첫 Feature 행 잠금 전에 공통 protocol EX→기존 전역 fence 순서를 보장한다.
+    await lock_feature_curation_write(session)
     # procedure도 같은 core lock을 재사용하여 stale write를 fail-close한다.
     locked = (
         await session.execute(
