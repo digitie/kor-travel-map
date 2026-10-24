@@ -1,6 +1,7 @@
 """실제 SDK 저장3shape와 source-only reader의 향후 격리 PG 수용 경로.
 
-이 파일은 full source 두 리뷰 전 아직 실행하지 않았다. optional SDK skip은 PASS가 아니다.
+full source 두 리뷰 뒤 actual SDK3shape positive1 PASS를 확인했다.
+optional SDK skip은 PASS가 아니다.
 """
 
 from __future__ import annotations

@@ -1,6 +1,6 @@
 ## 2026-10-25 — Heritage bounded evidence reader 입력 계약(부분)
 
-- 입력 계약에 이어422 정적 SQL/metadata·shape·응답 검증 초안을 추가했다. 순수32·역할/배선 정적16 PASS(기존1skip)이며, fullsource 두 리뷰·실PG/메모리·canonical ACL/head oracle는 미완이다. SH 수집/운영0을 유지한다. [범위·미완](reports/2026-10-25-heritage-bounded-evidence-reader.md).
+- 422 source 독립 두 리뷰와 실제 SDK3shape reader positive1 PASS(14.70초), 별도 공식 fresh oracle1 PASS(14.68초)를 확인했다. 첫 migration 배선 setup ERROR와 문서 lint 실패/수정은 보존했다. 부정·snapshot·메모리·비용/SH 수집·운영은 미완이다. [근거·범위](reports/2026-10-25-heritage-bounded-evidence-reader.md).
 
 ## 2026-10-25 — Geo stamp SQL writer 권한 경계(421)
 
