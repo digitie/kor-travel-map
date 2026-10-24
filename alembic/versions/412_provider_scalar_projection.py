@@ -227,7 +227,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "GRANT EXECUTE ON FUNCTION feature._install_provider_field_projection_guards() "
     "TO ktm_feature_state_procedure_owner",
     _RECEIPT_HEAD_CHECK_SQL,
-    "RESET ROLE",
+    "SET ROLE ktm_feature_schema_owner",
 )
 
 

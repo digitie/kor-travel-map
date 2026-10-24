@@ -36,6 +36,15 @@
 Map에는 notice 전용 route가 없고 notice는 일반 ``/v1/features*`` 조회로 나가므로, 양성
 축은 route가 아니라 notice를 만드는 preview 변환이다.
 
+**ADR-114 2단계 예외(2026-10-24).** ADR-114가 ADR-105를 부분 대체했다 — weather 현재·예보·세 구간
+요약이 PG feature가 아니라 Valkey 상태로 Map에 다시 들어오고, service 소비자(PinVi)는
+``/v1/service/weather/*``로 읽는다. 그래서 위 1·2번 검사는 **그 접두사의 경로와 거기서만 닿는
+스키마**를 빼고 잰다(:func:`_openapi_without_state_surface`). 예외는 효과로 결박한다 — 예외 경로는
+전부 service 정책이고, 예외 스키마는 예외가 아닌 경로에서 닿지 않으며, 예외 표면이 실제로
+weather 이름·축을 갖는다(빼는 것이 실재한다)는 것을 따로 잰다
+(``test_the_state_surface_exemption_is_real_and_closed``). PG feature 표면은 그대로 weather를
+내보내지 못한다.
+
 DB 쪽(카탈로그 비활성·데이터 삭제)은 이 파일의 범위가 아니다 — 402 migration 통합 검사
 (``tests/integration/test_weather_removal_migration.py``)와
 ``tests/integration/test_provider_catalog.py::test_head_serves_no_weather_dataset``가 맡는다.
@@ -62,6 +71,7 @@ from pydantic import ValidationError
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.etl_fixtures import FIXTURE_REGISTRY, EtlFixtureEntry
+from kortravelmap.api.route_policy import ROUTE_POLICIES, RoutePolicy
 from kortravelmap.api.settings import ApiSettings
 
 _WEATHER_ONLY_TYPES: frozenset[type] = frozenset({WeatherDomain, ForecastStyle, TimelineBucket})
@@ -86,8 +96,67 @@ def _weather_value_axes() -> frozenset[str]:
     )
 
 
+#: ADR-114 2단계 — weather Valkey 상태 service 표면. ADR-105의 유일한 예외.
+_STATE_SURFACE_PREFIX = "/v1/service/weather/"
+
+
 def _openapi() -> dict[str, Any]:
     return create_app(ApiSettings()).openapi()
+
+
+def _refs(node: Any) -> Iterator[str]:
+    """노드 안의 ``#/components/schemas/<이름>`` 참조 이름."""
+    if isinstance(node, dict):
+        ref = node.get("$ref")
+        if isinstance(ref, str) and ref.startswith("#/components/schemas/"):
+            yield ref.rsplit("/", 1)[1]
+        for child in node.values():
+            yield from _refs(child)
+    elif isinstance(node, list):
+        for child in node:
+            yield from _refs(child)
+
+
+def _reachable_schemas(spec: dict[str, Any], paths: dict[str, Any]) -> set[str]:
+    schemas = spec.get("components", {}).get("schemas", {})
+    seen: set[str] = set()
+    stack = list(_refs(paths))
+    while stack:
+        name = stack.pop()
+        if name in seen or name not in schemas:
+            continue
+        seen.add(name)
+        stack.extend(_refs(schemas[name]))
+    return seen
+
+
+def _split_state_surface(spec: dict[str, Any]) -> tuple[dict[str, Any], set[str], set[str]]:
+    """(예외 표면을 뺀 spec, 예외 경로, 예외 경로에서만 닿는 스키마)."""
+    paths = spec.get("paths", {})
+    kept_paths = {p: v for p, v in paths.items() if not p.startswith(_STATE_SURFACE_PREFIX)}
+    state_paths = {p: v for p, v in paths.items() if p.startswith(_STATE_SURFACE_PREFIX)}
+    kept_schemas = _reachable_schemas(spec, kept_paths)
+    all_schemas = set(spec.get("components", {}).get("schemas", {}))
+    state_only = _reachable_schemas(spec, state_paths) - kept_schemas
+    # 어느 경로에서도 닿지 않는 스키마(공용 정의 등)는 예외가 아니다 — 남겨서 잰다.
+    kept_names = all_schemas - state_only
+    filtered = {
+        **{k: v for k, v in spec.items() if k not in {"paths", "components"}},
+        "paths": kept_paths,
+        "components": {
+            **{k: v for k, v in spec.get("components", {}).items() if k != "schemas"},
+            "schemas": {
+                name: body
+                for name, body in spec.get("components", {}).get("schemas", {}).items()
+                if name in kept_names
+            },
+        },
+    }
+    return filtered, set(state_paths), state_only
+
+
+def _openapi_without_state_surface() -> dict[str, Any]:
+    return _split_state_surface(_openapi())[0]
 
 
 def _walk_properties(node: Any, where: str) -> Iterator[tuple[str, str]]:
@@ -118,7 +187,7 @@ def test_weather_value_axes_are_derived_not_empty() -> None:
 
 def test_no_openapi_schema_carries_a_weather_value_axis() -> None:
     axes = _weather_value_axes()
-    spec = _openapi()
+    spec = _openapi_without_state_surface()
     seen = list(_walk_properties(spec, "#"))
     assert len(seen) > 100, "OpenAPI property 순회가 거의 아무것도 보지 못했다"
     offenders = sorted({f"{where}.{name}" for where, name in seen if name in axes})
@@ -132,7 +201,7 @@ def test_no_route_schema_or_property_is_named_for_the_weather_kind() -> None:
     # route 목록은 OpenAPI의 paths에서 읽는다. ``app.routes``는 settings profile에 따라
     # router가 sub-app으로 mount돼 APIRoute가 거의 보이지 않는다(n150 실측: ``/metrics``
     # 하나) — 공개 표면의 정본은 OpenAPI다.
-    spec = _openapi()
+    spec = _openapi_without_state_surface()
     route_paths = list(spec.get("paths", {}))
     assert len(route_paths) > 50, "route 순회가 거의 아무것도 보지 못했다"
     schema_names = list(spec.get("components", {}).get("schemas", {}))
@@ -146,6 +215,34 @@ def test_no_route_schema_or_property_is_named_for_the_weather_kind() -> None:
     assert not offenders, (
         f"weather kind({_WEATHER_TOKEN!r})를 서빙하는 이름이 다시 생겼다(ADR-105): {offenders}"
     )
+
+
+def test_the_state_surface_exemption_is_real_and_closed() -> None:
+    """예외(ADR-114 2단계)는 좁고 실재해야 한다.
+
+    - 예외 경로는 전부 service 정책이다(공개·admin 표면으로 weather가 새지 않는다).
+    - 예외 스키마는 예외가 아닌 경로에서 닿지 않는다(구성상 그렇다 — 대신 예외 스키마가 하나라도
+      공개 응답에 끼면 위 두 검사가 빨갛게 잡는다).
+    - 예외 표면이 실제로 weather 이름·축을 갖는다 — 예외 장치가 아무것도 빼지 않는데 초록인
+      항진명제가 되지 않게.
+    """
+    spec = _openapi()
+    _, state_paths, state_only = _split_state_surface(spec)
+    assert len(state_paths) >= 4, f"weather 상태 표면을 찾지 못했다: {sorted(state_paths)}"
+    not_service = sorted(p for p in state_paths if ROUTE_POLICIES.get(p) is not RoutePolicy.SERVICE)
+    assert not not_service, f"weather 상태 경로가 service 정책이 아니다: {not_service}"
+    named = {name for name in state_only if _WEATHER_TOKEN in _words(name)}
+    assert named, "예외 스키마에 weather 이름이 없다 — 예외가 아무것도 빼지 않는다"
+    axes = _weather_value_axes()
+    state_properties = {
+        name
+        for schema in state_only
+        for _, name in _walk_properties(spec["components"]["schemas"][schema], schema)
+    }
+    assert state_properties & axes, "예외 스키마가 weather 축을 갖지 않는다 — 예외가 헛돈다"
+    # 반대 방향: 예외를 빼지 않으면 두 검사가 실제로 빨갛다(예외가 진짜로 필요하다).
+    full_paths = list(spec.get("paths", {}))
+    assert any(_WEATHER_TOKEN in _words(path) for path in full_paths)
 
 
 def _converted(entry: EtlFixtureEntry) -> list[Any]:

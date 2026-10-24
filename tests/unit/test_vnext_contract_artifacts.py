@@ -69,8 +69,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # operation 추가, user 불변). service added 10건.
     # 2026-10-24 T-STATE-01-T4 — price-history를 transport T4 계약에 맞춰 service·admin
     # baseline 재고정, service schema_changes 1건.
+    # 2026-10-24 T-STATE-02(ADR-114 2단계) — service·admin baseline 재고정(`/v1/service/weather/*`
+    # 5 operation 추가, user 불변). service added 5건.
     "openapi-diff-v1.json": (
-        "f6d845eac03c8847b69fb29541ffecd80ef9178e977ad2994f515d0350cff290"
+        "d458ea11ac0ec5b8cd4b7da1586a3e357a3e13e809229413e3c2a4ced8a6dbc9"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -82,8 +84,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-23 T-STATE-01(ADR-114) — pending receipt의 service·full-admin sha 재핀
     # (transport 10 operation 추가).
     # 2026-10-24 T-STATE-01-T4 — 같은 receipt의 service·full-admin sha 재핀(price-history T4).
+    # 2026-10-24 T-STATE-02(ADR-114 2단계) — 같은 receipt 재핀(weather 5 operation 추가).
     "consumer-rollout-v1.json": (
-        "816a5956656cd5948107e7c53cbff3b547731cc4152673ac1f6fe8b500bf9c12"
+        "8be64ffc3c7a60b24fe0cf05306713b9cdbd8f36a22b3e4ceae892b13a52cde4"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"
