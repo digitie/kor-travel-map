@@ -31,6 +31,7 @@ __all__ = [
     "get_engine",
     "get_session",
     "get_read_snapshot_session",
+    "get_public_api_key_session",
     "set_engine_for_test",
     "reset_engine",
 ]
@@ -93,6 +94,18 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     """FastAPI 의존성 — 요청 단위 ``AsyncSession`` (read-only 조회용).
 
     조회 라우터 전용이라 commit하지 않는다 (적재는 ``client.load_feature_bundles``).
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    async with AsyncSession(_get_engine(), expire_on_commit=False) as session:
+        yield session
+
+
+async def get_public_api_key_session() -> AsyncIterator[AsyncSession]:
+    """공개 key 인증 전용 세션. handler/쓰기 세션과 dependency cache를 공유하지 않는다.
+
+    ``require_public_api_key``가 조회 직후 context를 닫아 snapshot reader가 같은
+    pool의 유일한 connection도 이어 쓸 수 있게 한다. 의존성 종료의 close는 멱등이다.
     """
     from sqlalchemy.ext.asyncio import AsyncSession
 
