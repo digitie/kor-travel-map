@@ -1286,6 +1286,27 @@ def kor_travel_map_client_resource(
         server_settings={"statement_timeout": "600000", "lock_timeout": "30000"},
     )
     try:
-        yield AsyncKorTravelMapClient(engine, settings=settings)
+        if settings.krheritage_exclusive_snapshot_enabled:
+            from kortravelmap.infra.exclusive_provider_refresh import (
+                ExclusiveProviderSnapshotOptions,
+            )
+            from kortravelmap.providers.krheritage import (
+                DATASET_KEY_HERITAGE,
+                PROVIDER_NAME,
+            )
+
+            # 계획은 fetch/Geo를 마친 최종 입력으로 client가 만든다.
+            # 리소스 생성 시점에는 scope만 연결하고 DB/정책을 변경하지 않는다.
+            yield AsyncKorTravelMapClient(
+                engine,
+                settings=settings,
+                exclusive_provider_snapshot=ExclusiveProviderSnapshotOptions(
+                    provider=PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_HERITAGE,
+                    source_entity_type="heritage",
+                ),
+            )
+        else:
+            yield AsyncKorTravelMapClient(engine, settings=settings)
     finally:
         _dispose_async_engine(engine)
