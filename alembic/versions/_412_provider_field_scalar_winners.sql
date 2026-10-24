@@ -45,6 +45,11 @@ BEGIN
         WHERE link.feature_id=p_feature_id AND NOT dataset.is_active) THEN
         RAISE EXCEPTION 'inactive source membership requires an explicit retirement protocol' USING ERRCODE='23514';
     END IF;
+    IF EXISTS (SELECT 1 FROM provider_sync.source_links own
+        JOIN provider_sync.source_links other USING(source_entity_key)
+        WHERE own.feature_id=p_feature_id AND other.feature_id<>p_feature_id) THEN
+        RAISE EXCEPTION 'single Feature policy does not support a shared source entity' USING ERRCODE='23514';
+    END IF;
     -- 모든 연결을 먼저 열거한다. 다른 role의 필드 기여를 없는 것으로 추정하지 않는다.
     FOR v_member IN
         SELECT dataset.provider_dataset_id,dataset.provider,dataset.dataset_key,
