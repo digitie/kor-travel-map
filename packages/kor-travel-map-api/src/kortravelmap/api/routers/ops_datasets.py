@@ -18,7 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import OPS_AUTH_ERROR_RESPONSES
 from kortravelmap.api.dagster_http import dagster_http_dependencies
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.ops_dataset_preview import (
     PREVIEW_TIMEOUT_SECONDS,
     run_dataset_fixture_preview,
@@ -79,7 +79,7 @@ router = APIRouter(
 )
 async def list_datasets_grid(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> OpsDatasetsGridResponse:
     started_at = perf_counter()
     settings, dagster_client = dagster_http_dependencies(request)
@@ -107,7 +107,7 @@ async def get_dataset_detail(
     request: Request,
     provider_dataset_id: Annotated[int, Path(ge=1)],
     sync_scope: Annotated[str, Query(min_length=1)],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     operation_key: Annotated[
         str | None,
         Query(

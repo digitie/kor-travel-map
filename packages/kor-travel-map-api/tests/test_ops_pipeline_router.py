@@ -63,7 +63,7 @@ from kortravelmap.api.auth import (
     OPS_TOKEN_HEADER,
 )
 from kortravelmap.api.dagster_schema import DagsterScheduleClaimResolution
-from kortravelmap.api.db import get_engine, get_session
+from kortravelmap.api.db import get_engine, get_read_snapshot_session, get_session
 from kortravelmap.api.pipeline_cancellation_schema import (
     PipelineCancellationDetailRecord,
     PipelineCancellationRootRecord,
@@ -286,6 +286,7 @@ def client(session: _FakeSession, monkeypatch: pytest.MonkeyPatch) -> TestClient
         return response
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     monkeypatch.setattr(
         pipeline_mod,
         "get_current_pipeline_cancellation_detail",
@@ -1013,6 +1014,7 @@ def test_pipeline_routes_require_bff_or_ops_principal_when_secret_set(
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     gated_client = TestClient(app)
 
     response = gated_client.get("/v1/ops/pipeline/executions")
@@ -1046,6 +1048,7 @@ def test_cancel_execution_uses_authenticated_proxy_actor(
         return _cancellation_detail()
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     app.dependency_overrides[get_engine] = _fake_engine
     monkeypatch.setattr(
         pipeline_mod.pipeline_cancellation_service,
@@ -1095,6 +1098,7 @@ def test_exact_import_job_cancel_uses_server_actor_and_cancel_token(
         return _cancellation_detail()
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     app.dependency_overrides[get_engine] = _fake_engine
     monkeypatch.setattr(
         pipeline_mod.pipeline_cancellation_service,
@@ -1292,6 +1296,7 @@ def test_pipeline_projections_redact_invalid_dagster_url_secrets(
         return _counts()
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     monkeypatch.setattr(pipeline_mod, "get_pipeline_status_counts", _fake_counts)
 
     with TestClient(app) as test_client:

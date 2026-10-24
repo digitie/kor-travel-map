@@ -27,7 +27,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = [
@@ -238,7 +238,7 @@ def _metrics_response(
 
 @router.get("/metrics", response_model=OpsMetricsResponse)
 async def get_ops_metrics(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> OpsMetricsResponse:
     """운영 홈/대시보드가 쓰는 DB 기반 summary metric."""
     started_at = perf_counter()

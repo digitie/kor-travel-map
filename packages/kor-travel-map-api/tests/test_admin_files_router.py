@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -46,6 +46,7 @@ def _make_app(tmp_path: Path, **overrides: Any) -> Any:
     # get_session은 실제 DB 커넥션을 만든다 — sentinel로 대체(라우터가 세션을
     # 실제로 쓰기 전에 검증/게이트에서 분기하는 경로만 테스트).
     app.dependency_overrides[get_session] = _FakeSession
+    app.dependency_overrides[get_read_snapshot_session] = _FakeSession
     return app
 
 

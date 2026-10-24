@@ -88,7 +88,7 @@ from kortravelmap.api.cache_target_stream_service import (
     get_cache_target_stream_service,
     raise_for_cache_target_status,
 )
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.domain_command_service import (
     begin_domain_command,
     complete_domain_command,
@@ -1804,7 +1804,7 @@ def _snapshot_response(
 )
 async def get_service_cache_target_reconciliation_snapshot(
     request_id: Annotated[UUID, Path()],
-    session: Annotated[Any, Depends(get_session)],
+    session: Annotated[Any, Depends(get_read_snapshot_session)],
     stream_service: Annotated[
         CacheTargetStreamService,
         Depends(get_cache_target_stream_service),
@@ -1970,7 +1970,7 @@ async def get_ops_cache_target_dead_letter(
 )
 async def get_ops_cache_target_operation(
     operation_id: Annotated[str, Path(min_length=1, max_length=128)],
-    session: Annotated[Any, Depends(get_session)],
+    session: Annotated[Any, Depends(get_read_snapshot_session)],
     stream_service: Annotated[
         CacheTargetStreamService,
         Depends(get_cache_target_stream_service),

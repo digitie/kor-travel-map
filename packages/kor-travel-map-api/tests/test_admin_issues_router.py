@@ -21,7 +21,7 @@ from kortravelmap.infra.integrity_violation_repo import (
 from kortravelmap.infra.ops_repo import OpsIntegrityIssue, OpsIntegrityIssuePage
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.routers import admin_issues as router_mod
 from kortravelmap.api.settings import ApiSettings
 
@@ -73,6 +73,7 @@ def client(
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     monkeypatch.setattr(
         domain_command_service,
         "begin_domain_command",
