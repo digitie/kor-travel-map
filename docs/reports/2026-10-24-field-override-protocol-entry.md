@@ -72,8 +72,8 @@ terminal replay가 가능하다. 실제 owned PG가23514/40001/XX000을 내는3�
 검사 약화 없이 고쳤고 전체 lint373 PASS를 다시 확인했다. 전용34 PASS의 최종26.85초는
 binding 보완 뒤 실행이며 앞선24.64초/중간29 PASS와 합산하지 않는다.
 
-원본·중간·최종 로그/cleanup 증거는 감사 보관소 `map416-*`에 별도 보존한다. 설계2리뷰 PASS는
-코드2리뷰 완료가 아니다. 정확 CI·독립2코드리뷰·최신 부모 합집합·실제 TCP/UI는 미완 gate다.
+원본·중간·최종 로그/cleanup 증거는 감사 보관소 `map416-*`에 별도 보존한다. 독립2코드리뷰와
+최신 부모 합집합 검토는 PASS이며, 정확 CI·실제 TCP/UI는 미완 gate다.
 기본OFF·seed0·운영0이며 mixed binary/drain 확인 전 설치·활성화하지 않는다. 기존1379 reader/
 kernel UI 수용을 이 새 mutation의 UI 수용으로 세지 않는다. 전체 T-CWRITE는 미완이다.
 
