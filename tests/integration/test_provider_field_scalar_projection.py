@@ -288,3 +288,199 @@ async def test_unknown_source_cannot_activate_or_change_epoch(scalar_engines):
             )
             == "before"
         )
+
+
+async def _plan(runtime, feature, dataset):
+    from kortravelmap.infra.scoped_feature_writes import (
+        ScopedWriteDependency,
+        append_scoped_feature_write_manifest,
+        claim_scoped_feature_write,
+        seal_scoped_feature_write_manifest,
+    )
+
+    attempt, owner = uuid4(), uuid4()
+    async with AsyncSession(runtime) as session, session.begin():
+        assert tuple((await session.execute(text("SELECT session_user,current_user"))).one()) == (
+            "ktm_feature_service",
+            "ktm_feature_service",
+        )
+        revision = await session.scalar(
+            text("SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": feature},
+        )
+        heads = (
+            await session.execute(
+                text("""SELECT source_entity_key,current_source_record_key
+            FROM provider_sync.source_links
+            JOIN provider_sync.source_entity_heads USING(source_entity_key)
+            WHERE feature_id=CAST(:id AS uuid) ORDER BY source_entity_key COLLATE "C"
+            """),
+                {"id": feature},
+            )
+        ).all()
+        membership = await session.scalar(
+            text("SELECT ops.scoped_feature_write_membership_digest(CAST(:id AS uuid))"),
+            {"id": feature},
+        )
+        members = [
+            ScopedWriteDependency(i, "source_head", entity, record)
+            for i, (entity, record) in enumerate(heads)
+        ]
+        members.extend(
+            [
+                ScopedWriteDependency(len(members), "feature", feature, str(revision)),
+                ScopedWriteDependency(len(members) + 1, "feature_membership", feature, membership),
+            ]
+        )
+        await claim_scoped_feature_write(
+            session,
+            attempt_id=attempt,
+            owner=owner,
+            dataset_id=dataset,
+            idempotency_key=uuid4().hex,
+            regions=(),
+            input_digest="a" * 64,
+            expected_members=len(members),
+        )
+        await append_scoped_feature_write_manifest(
+            session, attempt_id=attempt, owner=owner, members=members
+        )
+        digest = await seal_scoped_feature_write_manifest(session, attempt_id=attempt, owner=owner)
+    return attempt, owner, digest
+
+
+async def _refresh(runtime, feature, dataset, entity, values, *, project=True):
+    import hashlib
+
+    from kortravelmap.infra.provider_field_candidates import (
+        lock_provider_field_policy_epoch,
+        recompute_provider_field_candidates,
+    )
+    from kortravelmap.infra.scoped_feature_writes import (
+        begin_scoped_feature_write,
+        finish_scoped_feature_write,
+        lock_scoped_feature_write_protocol,
+    )
+
+    attempt, owner, digest = await _plan(runtime, feature, dataset)
+    record = entity + "-" + uuid4().hex[:8]
+    payload = json.dumps(values, sort_keys=True)
+    source_hash = hashlib.sha256(payload.encode()).hexdigest()
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL statement_timeout='8s'"))
+        await lock_scoped_feature_write_protocol(session, exclusive=False)
+        await lock_provider_field_policy_epoch(session)
+        await begin_scoped_feature_write(
+            session, attempt_id=attempt, owner=owner, manifest_digest=digest
+        )
+        await session.execute(
+            text("""SELECT feature.assert_scoped_provider_scalar_target(
+            :attempt,CAST(:feature AS uuid),:dataset,:entity,1)"""),
+            {"attempt": attempt, "feature": feature, "dataset": dataset, "entity": entity},
+        )
+        await session.execute(
+            text("""INSERT INTO provider_sync.source_records(
+            source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+            VALUES(:record,:entity,CAST(:raw AS jsonb),:hash,clock_timestamp())"""),
+            {"record": record, "entity": entity, "raw": payload, "hash": source_hash},
+        )
+        await session.execute(
+            text("""UPDATE provider_sync.source_entity_heads
+            SET current_source_record_key=:record,observed_at=clock_timestamp()
+            WHERE source_entity_key=:entity"""),
+            {"record": record, "entity": entity},
+        )
+        if project:
+            arm_provider_field_shadow(session, 1)
+            result = await capture_provider_field_candidates(
+                session,
+                feature_id=feature,
+                dataset_id=dataset,
+                entity_key=entity,
+                record_key=record,
+                values=payload,
+                geometry_wkt="{}",
+                presence=ProviderFieldPresence(
+                    normalizer_revision="scalar-v1", supplied_fields=set(values)
+                ),
+                attempt_id=str(attempt),
+            )
+            assert result is not None
+            assert result.unresolved_count == 0
+            await recompute_provider_field_candidates(
+                session, attempt_id=str(attempt), feature_id=feature, policy_revision=1
+            )
+        await finish_scoped_feature_write(
+            session, attempt_id=attempt, owner=owner, result_digest="b" * 64
+        )
+    return record, source_hash
+
+
+@pytest.mark.parametrize("order", [(0, 1), (1, 0)])
+async def test_shared_refresh_order_preserves_r1_phone_and_r2_name(scalar_engines, order):
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    records = {}
+    for index in order:
+        records[index] = await _refresh(
+            runtime, feature, datasets[index], entities[index], {"core.name": f"new-{index}"}
+        )
+    async with AsyncSession(admin) as session:
+        row = (
+            await session.execute(
+                text("""SELECT name,phones FROM feature.features
+            JOIN feature.feature_places USING(feature_id) WHERE feature_id=CAST(:id AS uuid)"""),
+                {"id": feature},
+            )
+        ).one()
+        assert tuple(row) == ("new-0", ["010-0"])
+        rows = (
+            await session.execute(
+                text("""SELECT field_path,source_record_key,
+            source_raw_payload_hash,value_json FROM feature.feature_base_field_values
+            WHERE feature_id=CAST(:id AS uuid) ORDER BY field_path"""),
+                {"id": feature},
+            )
+        ).all()
+        assert tuple(rows[0]) == ("core.name", records[0][0], records[0][1], "new-0")
+        assert tuple(rows[1]) == ("place.phones", entities[0] + "-r1", "1" * 64, ["010-0"])
+        validated = (
+            await session.execute(
+                text("""SELECT value_source_record_key,validated_source_record_key
+            FROM feature.provider_field_shadow_candidates WHERE feature_id=CAST(:id AS uuid)
+            AND field_path='place.phones' AND provider_dataset_id=:dataset"""),
+                {"id": feature, "dataset": datasets[0]},
+            )
+        ).one()
+        assert tuple(validated) == (entities[0] + "-r1", records[0][0])
+
+
+async def test_head_only_commit_is_rejected_and_original_projection_survives(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    with pytest.raises(DBAPIError, match="candidate is missing"):
+        await _refresh(
+            runtime, feature, datasets[0], entities[0], {"core.name": "unprojected"}, project=False
+        )
+    async with AsyncSession(admin) as session:
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT current_source_record_key FROM provider_sync.source_entity_heads "
+                    "WHERE source_entity_key=:entity"
+                ),
+                {"entity": entities[0]},
+            )
+            == entities[0] + "-r1"
+        )
+        assert (
+            await session.scalar(
+                text("SELECT name FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+                {"id": feature},
+            )
+            == "winner-0"
+        )

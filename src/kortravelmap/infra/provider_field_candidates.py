@@ -74,13 +74,20 @@ async def capture_provider_field_candidates(
     geometry_wkt: str,
     presence: ProviderFieldPresence | None,
     attempt_id: str | None = None,
+    policy_revision: int | None = None,
 ) -> CandidateShadowCoverage | None:
     """이미 같은 전역 fence 아래 물화한 typed patch의 source별 shadow를 기록한다.
 
     정책 미설정이면 DB를 읽지 않는다. 원천 presence 증거가 없으면 모든 선언 필드가
     unresolved이며, 별도 enable gate가 이를 승인 coverage로 간주해서는 안 된다.
     """
-    revision = session.info.get(_SHADOW_REVISION_INFO_KEY)
+    revision: int | None
+    if policy_revision is not None:
+        if attempt_id is None or type(policy_revision) is not int or policy_revision < 1:
+            raise ValueError("명시 정책 revision은 scoped 호출의 양의 정수여야 합니다.")
+        revision = policy_revision
+    else:
+        revision = session.info.get(_SHADOW_REVISION_INFO_KEY)
     if revision is None:
         if attempt_id is not None:
             raise ValueError("scoped capture에는 명시적으로 선택한 정책이 필요합니다.")

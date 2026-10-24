@@ -86,3 +86,44 @@ async def test_invalid_projection_revision_has_no_database_effect(revision: Any)
             policy_revision=revision,
         )
     assert session.calls == []
+
+
+async def test_explicit_scoped_revision_does_not_change_session_policy() -> None:
+    session = _Session()
+    arm_provider_field_shadow(session, 3)
+    before = dict(session.info)
+    await capture_provider_field_candidates(
+        session,
+        feature_id="feature",
+        dataset_id=1,
+        entity_key="entity",
+        record_key="record",
+        values='{"core.name":"name"}',
+        geometry_wkt="{}",
+        presence=ProviderFieldPresence(normalizer_revision="v1", supplied_fields={"core.name"}),
+        attempt_id="applying",
+        policy_revision=2,
+    )
+    assert session.calls[0][1]["policy_revision"] == 2
+    assert session.info == before
+
+
+@pytest.mark.parametrize(("attempt", "revision"), [(None, 1), ("applying", True), ("applying", 0)])
+async def test_invalid_or_legacy_revision_override_is_rejected_before_parsing(
+    attempt: str | None, revision: Any
+) -> None:
+    session = _Session()
+    with pytest.raises(ValueError, match="revision"):
+        await capture_provider_field_candidates(
+            session,
+            feature_id="unused",
+            dataset_id=1,
+            entity_key="entity",
+            record_key="record",
+            values="not JSON",
+            geometry_wkt="not JSON",
+            presence=None,
+            attempt_id=attempt,
+            policy_revision=revision,
+        )
+    assert session.calls == []
