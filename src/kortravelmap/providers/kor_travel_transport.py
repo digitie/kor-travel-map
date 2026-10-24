@@ -30,7 +30,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 __all__ = [
     "DATASET_KEY_AIRPORTS",
@@ -47,6 +47,7 @@ __all__ = [
     "EXPORT_PATH_REST_AREA_FUEL_PRICES",
     "KOR_TRAVEL_TRANSPORT_PROVIDER_NAME",
     "INCIDENT_SET_MAX_AGE",
+    "PriceHistorySourceStatus",
     "SERVICE_TOKEN_HEADER",
     "TransportAirport",
     "TransportCollection",
@@ -104,12 +105,25 @@ EXPORT_PATH_REST_AREA_FUEL_PRICES: Final[str] = "/v1/service/exports/rest-area-f
 EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE: Final[str] = "/v1/service/exports/highway-incidents/active"
 EXPORT_PATH_AIRPORTS: Final[str] = "/v1/service/exports/airports"
 EXPORT_PATH_FUEL_STATION_PRICE_HISTORY: Final[str] = (
-    "/v1/service/exports/fuel-stations/{natural_key}/price-history"
+    "/v1/service/exports/fuel-stations/{station_key}/price-history"
 )
-"""주유소 한 곳의 가격 이력(transport ADR-013 2026-10-23 추가, Map ADR-114 결정 4).
+"""주유소 한 곳의 가격 이력(transport T4 — transport ADR-013·``docs/map-service-price-history.md``,
+Map ADR-114 결정 4).
 
-Map은 저장하지 않고 요청 시 전한다. ``{natural_key}``는 오피넷 uni_id다(경로 성분으로 escape해
-넣는다)."""
+Map은 저장하지 않고 요청 시 전한다. ``{station_key}``는 주유소 export의 ``natural_key``(오피넷
+uni_id, 선행 0 유지)다(경로 성분으로 escape해 넣는다). 질의는 ``product``·``from``·``to``(timezone이
+있는 ISO 시각)·``limit``(한 페이지 전체 행 수, transport 기본 1000·최대 5000)·``cursor``(불투명)다.
+휴게소 이력(``/rest-area-fuel-prices/{station_key}/price-history``)은 transport가 저장하지 않아
+501이고 Map은 그 경로를 부르지 않는다."""
+
+PriceHistorySourceStatus = Literal["ok", "stale"]
+"""200 가격 이력 페이지의 transport ``ServiceExportMeta.source_status``. transport는 ``failed``를
+503 problem 본문에만 싣는다 — 200 본문의 ``failed``는 계약 위반이다."""
+
+_PRICE_HISTORY_SOURCE_STATUSES: Final[dict[str, PriceHistorySourceStatus]] = {
+    "ok": "ok",
+    "stale": "stale",
+}
 
 
 INCIDENT_SET_MAX_AGE: Final[timedelta] = timedelta(minutes=30)
@@ -376,9 +390,22 @@ def _decimal(item: Mapping[str, Any], key: str, where: str) -> Decimal | None:
     if isinstance(value, bool) or not isinstance(value, int | float | str):
         raise TransportExportContractError(f"{where}.{key}: 숫자 또는 null이어야 한다.")
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
     except InvalidOperation as exc:
         raise TransportExportContractError(f"{where}.{key}: 숫자로 읽을 수 없다.") from exc
+    if not parsed.is_finite():
+        # NaN·sNaN·Infinity(JSON ``1e400``은 float inf가 된다)는 가격이 아니다 — 받아들이면 응답
+        # 직렬화에서 터지거나 잘못된 값이 소비자에게 간다.
+        raise TransportExportContractError(f"{where}.{key}: 유한한 숫자여야 한다.")
+    return parsed
+
+
+def _json_number(item: Mapping[str, Any], key: str, where: str) -> Decimal | None:
+    """JSON number 또는 null만 받는다(문자열 숫자는 계약 위반). 유한해야 한다."""
+    value = item.get(key)
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
+        raise TransportExportContractError(f"{where}.{key}: JSON number 또는 null이어야 한다.")
+    return _decimal(item, key, where)
 
 
 def _datetime(item: Mapping[str, Any], key: str, where: str, *, required: bool) -> datetime | None:
@@ -630,55 +657,118 @@ def parse_airports(payload: Any) -> tuple[TransportAirport, ...]:
 
 @dataclass(frozen=True, slots=True)
 class TransportFuelPriceHistoryPoint:
-    """가격 이력 한 행(``fuel_price_snapshots``). ``price=None``은 그때 판매하지 않음이다."""
+    """가격 이력 한 행. ``price=None``은 그때 판매하지 않음이다(null은 그대로 둔다).
+
+    transport T4 행은 ``product_code``·``observed_at``·``price``만 준다. ``provider_updated_at``·
+    ``collected_at``은 원천이 행마다 주지 않으므로 ``None``이다 — 응답 생성 시각 등으로 채우지
+    않는다(값이 오면 엄격히 읽는다).
+    """
 
     product_code: str
     price: Decimal | None
-    provider_updated_at: datetime | None
     observed_at: datetime
-    collected_at: datetime
+    provider_updated_at: datetime | None = None
+    collected_at: datetime | None = None
 
 
 @dataclass(frozen=True, slots=True)
 class TransportFuelPriceHistory:
-    """``GET …/fuel-stations/{natural_key}/price-history`` 응답.
+    """``GET …/fuel-stations/{station_key}/price-history`` 한 페이지(transport T4).
 
-    ``items``는 ``observed_at`` 내림차순이다.
+    ``items``는 ``observed_at`` 내림차순이다. ``has_more``이면 ``next_cursor``로 다음 페이지를
+    읽는다.
+    ``source_status``는 ``ok``/``stale``(stale이어도 기존 이력은 200으로 온다).
     """
 
+    station_key: str
     generated_at: datetime
-    natural_key: str
+    source_collected_at: datetime | None
+    source_status: PriceHistorySourceStatus
     items: tuple[TransportFuelPriceHistoryPoint, ...]
-    truncated: bool
+    has_more: bool
+    next_cursor: str | None
 
 
-def parse_fuel_price_history(payload: Any, *, natural_key: str) -> TransportFuelPriceHistory:
-    """가격 이력 응답을 엄격히 읽는다. 요청한 주유소가 아닌 응답은 계약 위반이다."""
+def parse_fuel_price_history(
+    payload: Any,
+    *,
+    station_key: str,
+    product_code: str | None = None,
+    observed_from: datetime | None = None,
+    observed_to: datetime | None = None,
+) -> TransportFuelPriceHistory:
+    """가격 이력 한 페이지를 엄격히 읽는다(transport ``FuelPriceHistoryExportPage``).
+
+    요청한 주유소가 아닌 응답·``meta.item_count``와 행 수 불일치·``has_more``와 ``next_cursor``의
+    어긋남·``observed_at`` 내림차순 위반·문자열이거나 유한하지 않은 가격은 계약 위반이다.
+
+    요청 조건도 행마다 확인한다: ``product_code``를 보냈으면 모든 행이 그 유종이어야 하고,
+    ``observed_from``/``observed_to``(보낸 ``from``/``to`` — transport는 양끝 포함)를 보냈으면 모든
+    ``observed_at``이 그 안이어야 한다. 보내지 않은 끝은 transport 기본값을 추측하지 않고 검사하지
+    않는다.
+    """
     where = "fuel-stations/price-history"
     body = _mapping(payload, where)
-    returned_key = _required_text(body, "natural_key", where)
-    if returned_key != natural_key:
+    returned_key = _required_text(body, "station_key", where)
+    if returned_key != station_key:
         raise TransportExportContractError(
-            f"{where}.natural_key: 요청({natural_key!r})과 다른 주유소({returned_key!r})다."
+            f"{where}.station_key: 요청({station_key!r})과 다른 주유소({returned_key!r})다."
         )
+    meta = _mapping(body.get("meta"), f"{where}.meta")
+    raw_status = _required_text(meta, "source_status", f"{where}.meta")
+    source_status = _PRICE_HISTORY_SOURCE_STATUSES.get(raw_status)
+    if source_status is None:
+        raise TransportExportContractError(
+            f"{where}.meta.source_status: 알 수 없는 값({raw_status!r})이다."
+        )
+    item_count = meta.get("item_count")
+    if isinstance(item_count, bool) or not isinstance(item_count, int):
+        raise TransportExportContractError(f"{where}.meta.item_count: 정수여야 한다.")
     items = body.get("items")
     if not isinstance(items, list):
         raise TransportExportContractError(f"{where}.items: 배열이어야 한다.")
+    if item_count != len(items):
+        raise TransportExportContractError(
+            f"{where}.meta.item_count({item_count})가 items 수({len(items)})와 다르다."
+        )
     points: list[TransportFuelPriceHistoryPoint] = []
+    row_where = f"{where}.items[]"
     for raw in items:
-        row = _mapping(raw, f"{where}.items[]")
-        points.append(TransportFuelPriceHistoryPoint(
-            product_code=_required_text(row, "product_code", f"{where}.items[]").strip(),
-            price=_decimal(row, "price", f"{where}.items[]"),
-            provider_updated_at=_datetime(
-                row, "provider_updated_at", f"{where}.items[]", required=False
-            ),
-            observed_at=_required_datetime(row, "observed_at", f"{where}.items[]"),
-            collected_at=_required_datetime(row, "collected_at", f"{where}.items[]"),
-        ))
+        row = _mapping(raw, row_where)
+        point = TransportFuelPriceHistoryPoint(
+            product_code=_required_text(row, "product_code", row_where).strip(),
+            price=_json_number(row, "price", row_where),
+            observed_at=_required_datetime(row, "observed_at", row_where),
+            provider_updated_at=_datetime(row, "provider_updated_at", row_where, required=False),
+            collected_at=_datetime(row, "collected_at", row_where, required=False),
+        )
+        if points and point.observed_at > points[-1].observed_at:
+            raise TransportExportContractError(f"{where}.items: observed_at 내림차순이 아니다.")
+        if product_code is not None and point.product_code != product_code:
+            raise TransportExportContractError(
+                f"{where}.items: 요청 유종({product_code!r})이 아닌 행({point.product_code!r})이다."
+            )
+        if (observed_from is not None and point.observed_at < observed_from) or (
+            observed_to is not None and point.observed_at > observed_to
+        ):
+            raise TransportExportContractError(
+                f"{where}.items: observed_at({point.observed_at.isoformat()})이 요청 창 밖이다."
+            )
+        points.append(point)
+    has_more = _strict_bool(body, "has_more", where)
+    next_cursor = _text(body, "next_cursor", where)
+    if has_more != bool(next_cursor):
+        raise TransportExportContractError(
+            f"{where}: has_more({has_more})와 next_cursor 유무가 어긋난다."
+        )
     return TransportFuelPriceHistory(
-        generated_at=_required_datetime(body, "generated_at", where),
-        natural_key=returned_key,
+        station_key=returned_key,
+        generated_at=_required_datetime(meta, "generated_at", f"{where}.meta"),
+        source_collected_at=_datetime(
+            meta, "source_collected_at", f"{where}.meta", required=False
+        ),
+        source_status=source_status,
         items=tuple(points),
-        truncated=_strict_bool(body, "truncated", where),
+        has_more=has_more,
+        next_cursor=next_cursor,
     )
