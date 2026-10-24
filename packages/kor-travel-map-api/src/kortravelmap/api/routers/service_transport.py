@@ -383,7 +383,8 @@ _PRICE_HISTORY_RESPONSES: dict[int | str, dict[str, Any]] = {
         "description": (
             "TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED — cursor를 보냈는데 transport 유가 수집 "
             "revision이 바뀌었거나 cursor(첫 페이지부터 15분)가 만료됐다. 누적한 이력 페이지를 "
-            "버리고 cursor 없이 처음부터 다시 읽는다. 첫 페이지(cursor 없음)는 이 오류를 내지 않는다."
+            "버리고 cursor 없이 처음부터 다시 읽는다. 첫 페이지(cursor 없음)는 이 오류를 내지 "
+            "않는다."
         ),
     },
 }

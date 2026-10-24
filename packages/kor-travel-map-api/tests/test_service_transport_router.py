@@ -343,7 +343,7 @@ _UNTIL = datetime(2026, 10, 22, tzinfo=UTC)
         ([_ROW_1022], PriceHistoryRequest(since=_SINCE, until=_UNTIL), True),  # 양끝 포함
         ([_ROW_0922], PriceHistoryRequest(since=_SINCE), False),
         ([_ROW_1022], PriceHistoryRequest(until=_UNTIL - timedelta(seconds=1)), False),
-        # 보내지 않은 끝은 transport 기본 창을 추측하지 않는다(cursor 페이지가 since·until을 뺀 경우).
+        # 보내지 않은 끝은 transport 기본 창을 추측하지 않는다(cursor 페이지가 창을 뺀 경우).
         ([_ROW_0922], PriceHistoryRequest(cursor="c"), True),
     ],
 )
@@ -535,7 +535,7 @@ def test_route_reads_two_pages_with_the_opaque_cursor(history_api: _HistoryApi) 
         next_cursor="opaque-c1",
     )
     page_two = _page(
-        [{"product_code": "D047", "observed_at": "2026-10-21T00:00:00Z", "price": None}],
+        [{"product_code": "B027", "observed_at": "2026-10-21T00:00:00Z", "price": None}],
         status="stale",
     )
     state["handler"] = lambda request: httpx.Response(
@@ -566,9 +566,9 @@ def test_route_reads_two_pages_with_the_opaque_cursor(history_api: _HistoryApi) 
     assert history_two["source_status"] == "stale"
     assert history_two["items"] == [
         {
-            "product_key": "diesel",
-            "product_code": "D047",
-            "product_name": "경유",
+            "product_key": "gasoline",
+            "product_code": "B027",
+            "product_name": "휘발유",
             "price": None,
             "provider_updated_at": None,
             "observed_at": "2026-10-21T00:00:00Z",

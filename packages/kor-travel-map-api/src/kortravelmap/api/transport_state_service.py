@@ -112,8 +112,8 @@ PriceHistoryUnavailableReason = Literal[
 - ``upstream_not_found``: transport 404(없는 주유소 키·옛 버전·토큰·peer fence).
 - ``upstream_unsupported``: transport 501(이력을 저장하지 않는 대상).
 - ``request_rejected``: transport 422 — 조회 창(366일 초과·미래 ``until``)·변조/다른 조건의 cursor.
-- ``upstream_no_collection``: transport 503 problem의 ``meta.source_status=failed`` — 성공한 유가 수집
-  근거가 아직 없다.
+- ``upstream_no_collection``: transport 503 problem의 ``meta.source_status=failed`` — 성공한
+  유가 수집 근거가 아직 없다.
 - ``upstream_timeout``: 연결·읽기 timeout.
 - ``upstream_unavailable``: 그 밖의 5xx·연결 실패.
 - ``upstream_rejected``: 그 밖의 비-200(예: cursor 없이 받은 409·그 밖의 4xx).
@@ -217,7 +217,10 @@ def _reject_constant(name: str) -> object:
 
 
 def _load_json(body: bytes) -> object:
-    """엄격 JSON — ``NaN``·``Infinity`` 상수 거부. 깊은 중첩의 ``RecursionError``는 호출자가 잡는다."""
+    """엄격 JSON — ``NaN``·``Infinity`` 상수 거부.
+
+    깊은 중첩의 ``RecursionError``는 호출자가 잡는다.
+    """
     return json.loads(body, parse_constant=_reject_constant)
 
 
@@ -268,7 +271,9 @@ async def fetch_price_history(
             status_code = response.status_code
             body = await _read_capped(response)
     except _BodyTooLarge:
-        _LOGGER.warning("transport 가격 이력 본문이 %d bytes를 넘는다.", MAX_PRICE_HISTORY_BODY_BYTES)
+        _LOGGER.warning(
+            "transport 가격 이력 본문이 %d bytes를 넘는다.", MAX_PRICE_HISTORY_BODY_BYTES
+        )
         return _unavailable("upstream_contract")
     except httpx.TimeoutException as exc:
         _LOGGER.info("transport 가격 이력 timeout: %s", type(exc).__name__)

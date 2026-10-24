@@ -2759,9 +2759,11 @@ D1~D7, 설계 적대 리뷰 반영은 같은 절 끝.
 - [ ] transport `price-history` export 배포 뒤 `KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED=true`에서 실제 이력이
   `history.status=available`로 온다(그 전에는 `unavailable`/`disabled`가 정상이다).
 - [ ] T4 정렬(T-STATE-01-T4, 브랜치 `feat/transport-fuel-price-history-t4`): Map 파서·질의·cursor·이유 enum이 transport
-  T4 계약과 같다(ADR-114 D6 "2026-10-24 T4 정렬"). 코드 PR 머지(적대 리뷰 2회 반영·CI 초록), PinVi service·admin
-  재vendor + PinVi `_EXPECTED_QUERY`에 `cursor`·reason enum 4개 추가, 배포 뒤 Map API 컨테이너에서 실제 주유소 하나로
-  `available`·두 페이지(`limit=2`)·`source_status`를 확인한다.
+  T4 계약과 같다(ADR-114 D6 "2026-10-24 T4 정렬"). 순서: 코드 PR 머지(적대 리뷰 2회 반영·CI 초록) → PinVi
+  재vendor PR(ADR-114 D6 체크리스트 5항목: service·admin vendor, `_EXPECTED_QUERY`+`cursor`, `PRICE_HISTORY_REASONS`,
+  `transport_map_fixtures.history_body`·`fx.meta` 새 필드, 페이지 창 재사용·409 처리) → Manager compose PR(`kor-travel-map-api`
+  에 transport 주소·토큰·`KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`) → pair 회전 → 배포 뒤 Map API 컨테이너에서 실제
+  주유소 하나로 `available`·두 페이지(`limit=2`)·`source_status`를 확인한다.
 
 ## T-STATE-02
 

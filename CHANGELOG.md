@@ -16,13 +16,19 @@
   (`station_key`·`items`·`has_more`·`next_cursor` + `meta{generated_at, source_collected_at, source_status, item_count}`)을
   계약 위반으로 거부하던 것을 고쳤다(옛 파서는 `natural_key`·top-level `generated_at`/`truncated`·행별 `collected_at`을
   요구했다). transport에는 `product`·`from`·`to`로 보낸다(종전 `product_code`·`since`·`until`은 transport가 무시했다).
-- **ADDED (service REST)**: query `cursor`(transport `next_cursor` 불투명 전달), `history.has_more`·`history.next_cursor`
-  (+ `meta.page.next_cursor`)·`history.source_collected_at`·`history.source_status`. unavailable 이유
-  `cursor_expired`(transport 409 — 누적한 페이지를 버리고 처음부터)·`request_rejected`(422)·`upstream_unsupported`(501)·
-  `upstream_timeout`.
+- **ADDED (service REST)**: query `cursor`(transport `next_cursor` 불투명 전달 — 다음 페이지는 같은 `product_code`,
+  `since`/`until`은 생략 또는 동일), `history.has_more`·`history.next_cursor`(+ `meta.page.next_cursor`)·
+  `history.source_collected_at`·`history.source_status`. cursor를 보낸 요청의 transport 409는 HTTP 409
+  `TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED`(누적한 페이지를 버리고 처음부터). unavailable 이유 `request_rejected`(422)·
+  `upstream_no_collection`(503 — 성공 수집 근거 없음)·`upstream_unsupported`(501)·`upstream_timeout`.
+  `history.status=unavailable`(이때 `has_more=false`)은 이력의 끝이 아니다.
+- **FIXED (계약 검사)**: 유한하지 않거나 문자열인 가격, 요청과 다른 유종·창 밖의 행, JSON이 아니거나 너무 깊은 본문,
+  2 MiB 초과 본문은 `upstream_contract`(현재가는 그대로). transport export 공통 `_decimal`도 유한한 값만 받는다.
 - **CHANGED**: `limit`(기본 200·최대 1000)은 유종별이 아니라 **한 페이지 전체 행 수**다. `history.truncated`는 `has_more`와
   같은 호환값(deprecated). `PriceHistoryPoint.collected_at`은 nullable이 됐고 `provider_updated_at`과 함께 지금은 항상
-  null이다(원천이 행마다 주지 않는다). service·admin OpenAPI가 바뀌어 **PinVi service·admin 재vendor가 필요하다**(user 불변).
+  null이다(원천이 행마다 주지 않는다). service·admin OpenAPI가 바뀌어 **PinVi service·admin 재vendor가 필요하다**(user 불변)
+  — 그 전에는 Manager pair 회전 preflight가 거부한다. 운영에서 켜려면 Manager compose `kor-travel-map-api`에 transport
+  주소·토큰·플래그를 더하는 PR이 필요하다.
   관리자 frontend `types.ts`를 `openapi.json`에서 재생성했다(#1355의 `/v1/service/transport/*` 누락분 포함).
 - **CHANGED (Python API)**: `kor_travel_transport.parse_fuel_price_history(payload, *, station_key=...)`·
   `TransportFuelPriceHistory`(필드 `station_key`·`source_collected_at`·`source_status`·`has_more`·`next_cursor`),

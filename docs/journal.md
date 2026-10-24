@@ -13,9 +13,8 @@
   404·휴게소 501, gzip·weak ETag·`private, no-cache`. **Map API 컨테이너에는 transport 주소·토큰·플래그 env가 아직 없다**
   (Map service `/v1/service/transport/fuel-stations`도 503 — Valkey 미적재).
 - 설계: cursor는 불투명 전달(Map이 해석·서명하지 않음), 응답 `history.has_more`·`next_cursor`(+ `meta.page` 미러),
-  `truncated`=has_more 호환. transport 409는 HTTP 409가 아니라 200 + `reason=cursor_expired`(현재가 유지, 소비자는 누적
-  페이지를 버리고 처음부터) — Map 목록의 세대 만료 409와 달리 이 route는 현재가를 함께 줘서 이력 실패가 응답을 막지 않는다
-  (ADR-114 결정 4). 이유 enum에 `upstream_unsupported`(501)·`request_rejected`(422)·`upstream_timeout` 추가. 파서는
+  `truncated`=has_more 호환. 이유 enum에 `upstream_unsupported`(501)·`request_rejected`(422)·`upstream_timeout` 추가.
+  (처음엔 cursor 요청의 transport 409를 200 + `reason=cursor_expired`로 했다 — 아래 리뷰 반영에서 HTTP 409로 바꿨다.) 파서는
   `station_key` 일치·`item_count`=행 수·`has_more`⇔`next_cursor`·`observed_at` 내림차순을 확인한다. 행별
   `collected_at`·`provider_updated_at`은 nullable(지금 항상 null, 응답 시각으로 채우지 않음). limit은 페이지 전체 행 수.
 - OpenAPI: service·admin 재생성, vnext receipt·diff baseline 재핀(service schema_changes 1건). 관리자 `types.ts` 재생성 —
@@ -28,6 +27,16 @@
   `test_kor_travel_map_transport_contract.py::_EXPECTED_QUERY`가 price-history query를 `{product_code, since, until,
   limit}`로 핀한다 → 재vendor 시 `cursor` 추가 필요. `PRICE_HISTORY_REASONS`가 옛 6개라 새 이유는 `upstream_contract`로
   접힌다(깨지진 않음). PinVi는 `since`만 보내 30일을 기본 limit 200(이제 전체 행 수)으로 받고 `truncated`를 그대로 쓴다.
+- 적대 리뷰 2회 반영(차단 없음): ① 가격은 JSON number/null·유한만(`_decimal` 공통 유한 검사, NaN 상수 거부) — 전엔
+  NaN·`1e400`이 응답 직렬화로 갔다. ② transport 503 problem `meta.source_status=failed` → `upstream_no_collection`.
+  ③ 보낸 `product`·`from`·`to`와 다른 행은 `upstream_contract`(보내지 않은 끝은 추측하지 않음). ④ 본문 2 MiB 상한
+  (Content-Length·스트리밍)·`RecursionError`. ⑤ 소유자 승인으로 cursor 요청의 transport 409를 HTTP 409
+  `TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED`로(`cursor_expired` 이유 제거; 첫 페이지는 늘 200 + 현재가). ⑥ OpenAPI에
+  "unavailable·has_more=false는 끝이 아님", 다음 페이지 `product_code` 동일·`since`/`until` 생략 또는 동일(transport
+  코드 확인: 창은 cursor에 고정되고 보낸 값은 같아야 하며 product는 생략도 불일치다). ⑦ 운영: Manager compose
+  `kor-travel-map-api`(72ee710 1659행~)에 transport 변수 자체가 없어 compose PR이 필요하고, pair 회전 preflight
+  (`_PAIR_SURFACE_PATHS`)가 PinVi 재vendor 전 회전을 거부한다 → Map 머지 → PinVi 재vendor → 회전. #1357·#1360·#1362 위로
+  리베이스. 두 페이지 검사의 2쪽 행이 요청과 다른 유종(D047)이어서 새 행 검사가 빨갛게 잡았다 — 검사 자료를 고쳤다.
 
 ## 2026-10-24 — geo 재시도에 ReadError·WriteError 추가: 브랜치 `fix/geo-retry-readerror`
 
