@@ -750,6 +750,13 @@ async def test_411_rejects_a_target_membership_inserted_while_it_runs(
 
         insert = asyncio.create_task(_insert())
         await _wait_for_lock_wait(connection, inserter.get_server_pid())
+        # 그 대기는 member 표의 ROW EXCLUSIVE다(가드보다 먼저 서는 자리) — 행·FK 잠금이 아니다.
+        assert await connection.fetchval(
+            "SELECT count(*) FROM pg_locks WHERE pid = $1 AND NOT granted "
+            "AND locktype = 'relation' AND mode = 'RowExclusiveLock' "
+            "AND relation = 'ops.import_job_datasets'::regclass",
+            inserter.get_server_pid(),
+        ) == 1
         await hold.rollback()
         await upgrade
         with pytest.raises(asyncpg.CheckViolationError, match="inactive dataset member"):

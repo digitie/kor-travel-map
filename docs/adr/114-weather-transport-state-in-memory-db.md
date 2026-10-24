@@ -614,7 +614,10 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   SELECT로 `is_enabled`를 읽는다. 411이 끈 operation은 commit 전까지 다른 세션에 켜진 것으로 보이므로, 행 단위(FK 대상 scope 행
   `FOR UPDATE`)로는 가드를 통과한 INSERT가 FK에서 기다렸다가 commit 뒤 성공해 꺼진 operation에 member가 남는다. 표 `SHARE` 잠금은
   INSERT가 문장 시작에서 `ROW EXCLUSIVE`를 기다리게 하므로 가드가 commit된 꺼진 값을 본다. **대가**: 411 트랜잭션 동안 모든
-  dataset의 새 job member 쓰기가 기다린다(퇴역 수십 초~수 분) — 배포를 한가한 시간에 한다.
+  dataset의 새 job member 쓰기가 기다린다(퇴역 수십 초~수 분). 그 창에서 **새로 시작하는** Map run(어느 dataset이든)은 Dagster
+  resource 초기화의 operation guard가 member INSERT에서 기다리다 `lock_timeout` 30초에 55P03으로 실패하고, API·PinVi
+  cache-target 요청은 약 5초 상한에서 503을 받는다. 이미 돌고 있는 적재는 영향이 없다. 그래서 runbook B는 큐 sensor를 멈춘 창에서
+  411을 돌린다.
 - **남기는 것**: Feature 행·source lineage·가격 fact·notice 계보·alias·상태 전이 감사·카탈로그 행. **dataset은 활성으로 둔다**
   (401과 같다 — 비활성은 물리 삭제 단계의 일이고, 활성 가드가 그때 DELETE까지 막는다).
 - **seal**(기각 대안의 첫 함정): 전이는 그 Feature에 link가 있는 **모든 dataset**의 `current_provider_curation_input_set` 입력을
@@ -678,10 +681,23 @@ pair를 회전한다(`/root/chain17.sh`, 마이그레이션 전진이 410을 단
     WHERE job.status IN ('queued','running') AND m.provider_dataset_id IN (SELECT * FROM target);
    ```
 
-   0행이어야 한다. 411은 scope 행 잠금 뒤에 같은 것을 다시 재고, 남아 있거나 미완 member가 scope 행을 쥐고 있으면(5초) 실패한다
-   — 그때 DB는 **410 그대로**다(A가 이미 commit됐다). 원인을 없애고 B를 다시 돌린다.
+   0행이어야 한다. 411은 member 표 둘을 `SHARE`로 잠근 뒤 같은 것을 다시 잰다. 남아 있으면 실패하고, 아직 commit되지 않은 member
+   INSERT가 그 표에 `ROW EXCLUSIVE`를 쥐고 있으면 잠금을 5초 안에 얻지 못해 실패한다 — 그때 DB는 **410 그대로**다(A가 이미
+   commit됐다). 원인을 없애고 B를 다시 돌린다. 실패한 411 시도는 매번 최대 5초 `SHARE` 대기를 하고 entrypoint가 30번까지
+   재시도하므로, 그동안 member 쓰기를 하는 API·PinVi 요청이 잠깐씩 503을 받을 수 있다.
+3a. **큐 sensor를 멈춘다(411 창 동안).** 411이 도는 동안 새 run 시작은 실패한다(위 "대가"). 공용 plane에서:
+
+   ```bash
+   docker exec kor-travel-dagster-daemon dagster sensor stop feature_update_request_queue_sensor \
+     -l kortravelmap.dagster.definitions -w /opt/dagster/dagster_home/workspace.yaml
+   ```
+
+   그리고 411 창에 schedule tick이 오지 않게 배포 시각을 고른다(켜진 Map schedule의 다음 tick을 Dagster UI에서 본다). tick을
+   피하지 못하면 그 run은 55P03으로 실패한다 — 받아들이고 411 뒤에 다시 실행해도 된다(적재는 멱등). 배포·확인(5단계)이 끝나면
+   같은 명령의 `sensor start`로 되돌린다.
 4. **배포**(Map API·Dagster code location 같은 pair): 411 실행. 한 트랜잭션, 프로시저 약 1.4만 회(수십 초~수 분). 그동안 **모든**
-   dataset의 새 job member 쓰기가 member 표 잠금에서 기다린다 — 한가한 시간에 한다. **A를 건너뛰었다면**(prod가 아직 409) 411이
+   dataset의 새 job member 쓰기가 member 표 잠금에서 기다린다 — 새 Map run 시작은 55P03으로 실패하고(3a로 sensor를 멈춘 이유),
+   API·PinVi cache-target 요청은 약 5초 뒤 503을 받는다. 돌고 있던 적재는 그대로 끝난다. 한가한 시간에 한다. **A를 건너뛰었다면**(prod가 아직 409) 411이
    같은 트랜잭션 거부로 결정적으로 실패하고, `docker/api-entrypoint.sh`가 `alembic upgrade head`를 30번 재시도한 뒤 API
    컨테이너가 crash-loop한다(fail-closed — DB는 409 그대로, 410도 되돌아간다). 복구: 그 pair를 멈추고 A(head 410 pair)를 먼저
    배포한 뒤 B를 다시 한다.
