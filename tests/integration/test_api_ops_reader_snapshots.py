@@ -78,13 +78,26 @@ def _control(app: Any, engine: AsyncEngine, snapshot: bool) -> None:
     app.dependency_overrides[api_db.get_read_snapshot_session] = read_committed
 
 
+@pytest.mark.parametrize("preexisting", [0, 2], ids=["clean", "committed-siblings"])
 @pytest.mark.parametrize("snapshot", [False, True], ids=["rc-counterexample", "repeatable-read"])
 async def test_metrics_totals_and_kind_counts_share_snapshot(
     ops_reader_app: Any,
     migrated_engine: AsyncEngine,
     monkeypatch: pytest.MonkeyPatch,
     snapshot: bool,
+    preexisting: int,
 ) -> None:
+    # session-scope DB에 앞선 시험이 commit한 행이 남은 상황도 결정적으로 재현한다.
+    async with AsyncSession(migrated_engine) as sibling, sibling.begin():
+        for index in range(preexisting):
+            await _insert_feature(
+                sibling, feature_id=feature_uuid(f"ops-reader-committed-sibling-{index}"),
+                name="committed sibling", lon=127.0, lat=37.5,
+            )
+    # total은 전체 lifecycle, by_kind는 active만 집계하므로 각각의 기준값을 보존한다.
+    async with AsyncSession(migrated_engine) as observer:
+        baseline = await status_repo.gather_status_counts(observer)
+    assert baseline.features_by_kind.get("place", 0) >= 1 + preexisting
     _control(ops_reader_app, migrated_engine, snapshot)
     original = AsyncSession.execute
     injected = False
@@ -106,8 +119,16 @@ async def test_metrics_totals_and_kind_counts_share_snapshot(
     assert response.status_code == 200, response.text
     data = response.json()["data"]
     assert injected
-    assert data["features_total"] == 1
-    assert sum(data["features_by_kind"].values()) == (1 if snapshot else 2)
+    assert data["features_total"] == baseline.features_total
+    expected_by_kind = dict(baseline.features_by_kind)
+    if not snapshot:
+        expected_by_kind["place"] = expected_by_kind.get("place", 0) + 1
+    assert data["features_by_kind"] == expected_by_kind
+    # 별도 writer의 commit 자체도 확인한다. RR의 old image를 쓰기 실패로 오판하지 않는다.
+    async with AsyncSession(migrated_engine) as observer:
+        after = await status_repo.gather_status_counts(observer)
+    assert after.features_total == baseline.features_total + 1
+    assert after.features_by_kind["place"] == baseline.features_by_kind.get("place", 0) + 1
 
 
 @pytest.mark.parametrize("snapshot", [False, True], ids=["rc-counterexample", "repeatable-read"])
