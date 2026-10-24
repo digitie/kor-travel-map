@@ -200,6 +200,54 @@ async def _apply_batch(
     manifest_digest: str,
     exclusive_protocol: bool,
 ) -> dict[str, Any]:
+    attempt = await _begin_batch(
+        session,
+        ordered,
+        expected_digest=expected_digest,
+        dataset_id=dataset_id,
+        attempt_id=attempt_id,
+        owner=owner,
+        manifest_digest=manifest_digest,
+        exclusive_protocol=exclusive_protocol,
+    )
+    if attempt["status"] == "completed":
+        return attempt
+    await _validate_batch_manifest(
+        session,
+        ordered,
+        attempt=attempt,
+        dataset_id=dataset_id,
+        policy_revision=policy_revision,
+        attempt_id=attempt_id,
+    )
+    heads = await _apply_batch_items(
+        session,
+        ordered,
+        dataset_id=dataset_id,
+        policy_revision=policy_revision,
+        attempt_id=attempt_id,
+    )
+    return await _finish_batch(
+        session,
+        heads,
+        expected_digest=expected_digest,
+        attempt_id=attempt_id,
+        owner=owner,
+    )
+
+
+async def _begin_batch(
+    session: AsyncSession,
+    ordered: tuple[ProviderScalarRefreshItem, ...],
+    *,
+    expected_digest: str,
+    dataset_id: int,
+    attempt_id: UUID,
+    owner: UUID,
+    manifest_digest: str,
+    exclusive_protocol: bool,
+) -> dict[str, Any]:
+    """기존 deadline·protocol·epoch·sealed 입력 검사 순서를 유지한다."""
     await _arm_deadline(session)
     if exclusive_protocol:
         session.info.pop(FEATURE_CURATION_WRITE_WAIT_INFO_KEY, None)
@@ -218,8 +266,19 @@ async def _apply_batch(
         or not 3 * len(ordered) <= attempt["expected_members"] <= 8192
     ):
         raise ValueError("sealed scalar batch artifact does not match this input")
-    if attempt["status"] == "completed":
-        return attempt
+    return attempt
+
+
+async def _validate_batch_manifest(
+    session: AsyncSession,
+    ordered: tuple[ProviderScalarRefreshItem, ...],
+    *,
+    attempt: dict[str, Any],
+    dataset_id: int,
+    policy_revision: int,
+    attempt_id: UUID,
+) -> None:
+    """모든 target과 실제 source union을 검증한 뒤에만 DML로 넘어간다."""
     # 필요 dependency의 존재를 전수 검증한 뒤에만 count 등식이 완전성을 증명한다.
     for item in ordered:
         await native._assert_provider_scalar_target(
@@ -242,6 +301,17 @@ async def _apply_batch(
     required_members = 2 * len(ordered) + source_count
     if required_members > 8192 or attempt["expected_members"] != required_members:
         raise ValueError("scalar batch requires exactly its complete manifest")
+
+
+async def _apply_batch_items(
+    session: AsyncSession,
+    ordered: tuple[ProviderScalarRefreshItem, ...],
+    *,
+    dataset_id: int,
+    policy_revision: int,
+    attempt_id: UUID,
+) -> list[list[str]]:
+    """검증된 정렬 항목을 같은 TX에 적용하고 결과 head 순서를 보존한다."""
     heads = []
     for item in ordered:
         current_key = await native._apply_provider_scalar(
@@ -254,6 +324,18 @@ async def _apply_batch(
             scalar_values=native._provider_scalar_values(item.bundle, feature_id=item.feature_id),
         )
         heads.append([str(item.feature_id), current_key])
+    return heads
+
+
+async def _finish_batch(
+    session: AsyncSession,
+    heads: list[list[str]],
+    *,
+    expected_digest: str,
+    attempt_id: UUID,
+    owner: UUID,
+) -> dict[str, Any]:
+    """같은 입력·head 지문으로 attempt를 한 번 완료한다."""
     result_digest = hashlib.sha256(
         json.dumps([expected_digest, heads], separators=(",", ":")).encode()
     ).hexdigest()
