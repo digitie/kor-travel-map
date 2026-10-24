@@ -32,7 +32,7 @@ const EXPECTED_DOCTOR_COMMAND =
   "react-doctor --scope full --no-score --no-telemetry --no-respect-inline-disables --blocking warning .";
 const EXPECTED_CONFIG = {
   ignore: {
-    files: ["dist/**"],
+    files: ["dist/**", "public/maplibre/**"],
     overrides: [
       {
         files: ["src/api/live.ts"],

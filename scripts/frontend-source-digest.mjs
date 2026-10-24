@@ -24,7 +24,6 @@ const inputs = [
   "docker/frontend.Dockerfile",
   "scripts/frontend-build-inputs.mjs",
   "scripts/frontend-source-digest.mjs",
-  "scripts/patch-redocly-openapi-core.mjs",
   "scripts/verify-next-sharp.mjs",
   "scripts/verify-npm-tree.mjs",
   "packages/map-marker-react",

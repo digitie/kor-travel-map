@@ -64,6 +64,8 @@ const eslintConfig = defineConfig([
   nextPlugin.configs["core-web-vitals"],
   globalIgnores([
     ".next/**",
+    // prebuild가 복사하는 MapLibre 배포 파일은 소스 린트 대상에서 제외한다.
+    "public/maplibre/**",
     "out/**",
     "build/**",
     "next-env.d.ts",

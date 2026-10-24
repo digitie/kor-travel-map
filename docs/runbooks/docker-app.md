@@ -497,15 +497,15 @@ npm run docker:build
 
 frontend 이미지는 루트 `package-lock.json`을 build context에 포함하고
 exact npm 12.0.1의 `npm ci --workspaces --include=optional`로 의존성을 설치한다. install 전에
-`.npmrc`와 `scripts/patch-redocly-openapi-core.mjs`를 복사하며 postinstall이 Redocly exact
-version·원문을 검사해 안전 minimatch API를 적용한다. dependency install script는 검토한
+.npmrc를 먼저 복사하고 자체 보안 패치를 포함한 Redocly 1.34.22를 설치한다.
+이전 minimatch override와 postinstall 보정 스크립트는 제거했다. dependency install script는 검토한
 `esbuild@0.28.1`과 `unrs-resolver@1.12.2`만 허용하고 새 package/version은
 `strict-allow-scripts`로 거부한다. `--ignore-scripts` 결과는 배포 검증으로 인정하지 않는다.
 install 직후 `scripts/verify-next-sharp.mjs`가 Next image optimizer의 실제 SVG→WebP 변환으로
 Sharp ABI를 확인한다. `scripts/verify-npm-tree.mjs`는 `npm ls --all --json`의 종료코드와
 `problems` 0개를 모두 검사한다.
-C7 Playwright image도 세 검증 script와 같은 lockfile을 사용하며 browser/client Playwright
-1.60.0을 맞춘다. `package.json` 또는 workspace `package.json`을 바꾼 PR은 Linux에서 npm
+C7 Playwright image도 의존성 트리·이미지 변환 검증 script와 같은 lockfile을 사용하며 browser/client Playwright
+1.64.1을 맞춘다. `package.json` 또는 workspace `package.json`을 바꾼 PR은 Linux에서 npm
 12.0.1 지원 Node(`^22.22.2 || ^24.15.0 || >=26.0.0`)와 exact npm 12.0.1로 clean install,
 audit high, tree-integrity verifier, optimizer smoke, lockfile 갱신과 frontend/C7 Docker 빌드를
 함께 검증한다.

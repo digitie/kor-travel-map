@@ -31,6 +31,11 @@
   OpenAPI·설정 변화 없음. 배포 영향: Map Dagster code location.
 - **다음 한 작업: PR CI green → 머지·배포(등산로 run이 끝난 뒤) → 등산로 결과 journal.**
 
+## 2026-10-24 — 여섯 프로젝트 npm 보안·버전 정합
+
+- 현재 상태: npm 보안·공통 버전 소스 정합 및 WSL 검증 완료. [버전과 예외](npm-security-alignment-2026-10-24.md). 최종 CI·UI·머지 상태의 정본은 [PR](https://github.com/digitie/kor-travel-map/pull/1368)이다.
+- 다음 한 작업: 운영 반영을 요청받으면 Manager 정본과 현재 배포 런북에 따라 릴리스를 적용한다. 소스 머지와 운영 배포는 구분한다.
+
 ## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
 
 - 비-MOIS 역지오코딩 적재 선조회 동시성(env `KOR_TRAVEL_MAP_REVERSE_GEOCODE_CONCURRENCY`, 기본 2), 적재 geo client 일시
