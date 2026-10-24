@@ -137,7 +137,7 @@ notice asset, 매분 weather current summary schedule은 2026-10-01 ADR-104·ADR
 T-VN-40부터 별도 curated overlay asset group은 제거됐다. provider full-snapshot의 authoritative
 terminal receipt가 source observation과 candidate generation을 같은 transaction에서 실행한다.
 
-> **2026-10-24 ADR-114 결정 7(1단계, migration `417_retire_pg_transport_values`)** — 유가(주유소·휴게소)·고속도로 돌발의 PG 적재(asset·job·schedule·resource·preview)는 퇴역했고 그 Feature는 `retired`·`suppressed`다. 현재 값은 Valkey `transport_state_*`와 `/v1/service/transport/*`가 준다. 아래 유가·돌발 서술은 이력이다. 장소(주유소·휴게소·공항 place) 적재는 그대로다.
+> **2026-10-24 ADR-114 결정 7(1단계, migration `418_retire_pg_transport_values`)** — 유가(주유소·휴게소)·고속도로 돌발의 PG 적재(asset·job·schedule·resource·preview)는 퇴역했고 그 Feature는 `retired`·`suppressed`다. 현재 값은 Valkey `transport_state_*`와 `/v1/service/transport/*`가 준다. 아래 유가·돌발 서술은 이력이다. 장소(주유소·휴게소·공항 place) 적재는 그대로다.
 
 `transport_*` asset 여섯(주유소 place/price, 휴게소 place/price, 고속도로 돌발, 공항)은 2026-10-02
 ADR-106부터 provider 라이브러리(OpiNet·KREX·krairport)가 아니라 kor-travel-transport의 내부 export

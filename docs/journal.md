@@ -5,7 +5,7 @@
   레이어를 Map service REST로만 읽지만 일반 in-bounds 기본 kind(`place·event·notice·price`)·검색·근처가 PG transport를 여전히
   돌려받는다(교통 레이어와 중복, 장소 이름 검색은 PG에만 있다). PinVi DB의 Map feature 참조는 전체 0행. C7 운영 게이트가 공항
   job을 안전 대상으로 쓴다.
-- 그래서 세 단계로 나눴다(ADR-114 "결정 7 이행"): ① 유가 둘·돌발 하나의 PG 적재 코드 제거 + migration `417`(operation 종류
+- 그래서 세 단계로 나눴다(ADR-114 "결정 7 이행"): ① 유가 둘·돌발 하나의 PG 적재 코드 제거 + migration `418`(operation 종류
   불문 끔, Feature `system` 퇴역 = `retired`·`suppressed` + 재활성화 막는 lifecycle override, dataset·lineage·가격 fact는 남김,
   queued/running·공유 primary·기존 lifecycle override preflight) → ② 장소 셋 → ③ 물리 삭제. 장소 적재는 계속 돈다.
 - API 표면 변화 없음(OpenAPI 재생성·PinVi 재vendor 불필요). Codex 수집 fence·shadow 원장 코드는 읽기만 했다(퇴역 프로시저는
@@ -22,12 +22,27 @@
   읽고 FK 대기는 그 뒤라, 411 도중 들어온 INSERT가 켜진 값을 보고 통과해 commit 뒤 성공한다. member 표 둘을 `SHARE`로 잠그도록
   바꿨다(INSERT가 문장 시작에서 기다리고 commit 뒤 가드가 거부). 퇴역 루프 lock_timeout 60초. 두 연결 순서 강제 통합 검사(도중
   INSERT 거부) 추가. runbook B1 upsert 예시·B5 사후 member 0 확인·A 건너뜀 crash-loop 복구.
-- main 병합(#1379·#1383·#1385 — ADR-115 revision 411~416): 이 migration을 `417_retire_pg_transport_values`(down 416)로 다시
+- main 병합(#1379·#1383·#1385 — ADR-115 revision 411~416): 이 migration을 `418_retire_pg_transport_values`(down 416)로 다시
   번호 매겼다. 415부터 `transition_feature_state`가 scoped write 프로토콜 gate를 배타로 잡으므로 417은 그 gate를 member 표 잠금보다
   **먼저** 잡는다(교착 회피, 돌고 있는 쓰기가 있으면 30초에 실패). runbook A는 head 416 pair, 3a 큐 sensor 정지 명령(공용 daemon)·
   417 창 새 run 실패/503 안내. 경주 검사는 inserter의 미허가 RowExclusiveLock이 `ops.import_job_datasets`에 있음을 잰다.
-- main 병합 뒤 journal이 220 KiB를 넘어(228,797 bytes) 가장 오래된 4건(2026-09-30 ~ 2026-10-01)을
-  `docs/archive/journal-2026-10a.md`로 옮겼다(tasks-rule §8 — 섹션 본문 바이트 보존, 상대 링크 없음). diff3 base 마커 줄 셋도 지웠다.
+- main 병합 뒤 journal이 220 KiB를 넘어(228,797 bytes) 가장 오래된 2026-10-01 기록(ADR-104 KMA 제거·drain 정정·공유 plane 준비)을
+  `docs/archive/journal-2026-10a.md`로 옮겼다(tasks-rule §8 — 섹션 본문 바이트 보존, 상대 링크 없음). diff3 base 마커 줄 셋도 지웠다. (두 번째 main 병합: main이 2026-09-30분을 `journal-2026-09h.md`로 따로 옮겨 그것을 따랐다.)
+- 두 번째 main 병합(#1386·#1387 — ADR-115 `417_protocol_ex_reentry`): 이 migration을 `418_retire_pg_transport_values`(down
+  417)로 다시 번호 매겼다. runbook A는 head 417 pair.
+## 2026-10-24 — protocol EX 재진입 비용 개선(417)
+
+- 이미 보유한 EX는 xact 소유를 재확보한 뒤 반복 설정 조회를 생략한다. session/xact·savepoint·NULL/SH 승격·timeout 계약은 유지한다.
+- 실제PG7+unit4=11·oracle/metadata4·graph18·lint373 PASS(기존6skip). 합성1000회 wall 중앙값584.55→24.95ms이며 운영 CPU 개선율은 아니다.
+- 선행 #1379·#1383은 각각 최신CI/실UI16·18 통과 뒤 main에 머지됐다. #1385는 실UI18+별도HTTP2 PASS/정확CI 대기, #1386은 두리뷰 PASS/CI·수집UI 대기다.
+- 이번417의 독립2코드리뷰 PASS. 정확CI·실UI와 생성SQL·전체수집전환·후속전파는 미완이다. 기본OFF/seed0/운영0. [범위·실측](reports/2026-10-24-protocol-ex-reentry.md).
+
+## 2026-10-24 — 큐레이션 import의 protocol-first 진입
+
+- 실제 whole M03 import와 direct manual의 역순40P01을 재현하고 normal-head 첫 advisory 전 protocol EX만 추가했다. h35/다른2caller·DDL·권한은 유지한다.
+- 최종PG9+기존curation/merge48·관련unit76·lint377 PASS(기존6skip). 두 리뷰·정확CI는 대기이며 기본OFF/seed0/운영0이다. [범위·실패·증거](reports/2026-10-24-curation-import-protocol-entry.md).
+- tasks-rule §8에 따라 가장 오래된09-30 한 절3480B를09h로 원문 보존해 분리했다. 옛DB 전체 replay·전체 writer 활성화는 미완이다.
+
 ## 2026-10-24 — field override 진입 보강(416)
 
 - SQL author/revoke·patch/create를 조기EX로 맞추고 manualcreate55P03을 기존503/RetryAfter5로 반환한다.
@@ -1729,12 +1744,13 @@ ADR-104(KMA Dagster 경로 제거) 작업 중 소유자 결정이 넓어졌다: 
 
 ## 과거 기록 아카이브
 
-> 현행 작업 창(2026-10-02~) 이전 기록은 아래로 분리했다. 검색은
+> 현행 작업 창(2026-10-01 ADR-105 이후~) 이전 기록은 아래로 분리했다. 검색은
 > `rg <패턴> docs/archive/` 로 한다. 새 엔트리는 항상 이 파일 상단에 추가한다.
 
 | 파일 | 기간 | 엔트리 | 크기 |
 | --- | --- | --- | --- |
-| [`journal-2026-10a.md`](archive/journal-2026-10a.md) | 2026-09-30 ~ 2026-10-01 | 4건 | 15 KB |
+| [`journal-2026-10a.md`](archive/journal-2026-10a.md) | 2026-10-01 | 3건 | 12 KB |
+| [`journal-2026-09h.md`](archive/journal-2026-09h.md) | 2026-09-30 | 1건 | 4 KB |
 | [`journal-2026-09g.md`](archive/journal-2026-09g.md) | 2026-09-28 ~ 2026-09-29 | 6건 | 22 KB |
 | [`journal-2026-09f.md`](archive/journal-2026-09f.md) | 2026-09-26 ~ 2026-09-27 | 14건 | 31 KB |
 | [`journal-2026-09e.md`](archive/journal-2026-09e.md) | 2026-09-20 ~ 2026-09-25 | 8건 | 27 KB |

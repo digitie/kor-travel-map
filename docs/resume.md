@@ -1,15 +1,28 @@
 ## 2026-10-24 — ADR-114 결정 7 퇴역 1단계(T-STATE-03): 브랜치 `feat/adr114-retire-pg-transport`
 
 - PG transport **유가·돌발** 적재(asset·job·schedule 셋, 큐 runner spec·handler binding·preview fixture)를 지우고 migration
-  `417_retire_pg_transport_values`가 그 operation을 끄고 Feature 약 1.4만 건을 `system` 퇴역한다(soft-delete,
+  `418_retire_pg_transport_values`가 그 operation을 끄고 Feature 약 1.4만 건을 `system` 퇴역한다(soft-delete,
   데이터는 남김). 장소(주유소·휴게소·공항)는 PinVi 일반 검색·근처와 C7 공항 job이 기대므로 ②단계로 미뤘다. API 표면 변화
-  없음. 배포 영향: Map API·Dagster code location(같은 pair) + migration 417.
+  없음. 배포 영향: Map API·Dagster code location(같은 pair) + migration 418.
 - 적대 리뷰 2회 반영(2026-10-24): 409→417 한 트랜잭션 거부(410~416 잠금을 퇴역 내내 쥐지 않게 — 배포는 A head 416 → B 411), 대상
   member 표 둘 `SHARE` 잠금으로 검사·끄기·도중 INSERT 경주 차단(재리뷰: 행 단위는 BEFORE 가드 뒤라 못 막는다)·operation 먼저 끔, timeout 명시, link 역할 무관 seal 검사, 대상 dataset 셋 고정·옛
   provider 잔여 fail closed, 상태 문맥 GUC 정리.
 - **다음 한 작업: CI green → 머지 판단 → A: head 416 pair 배포 → B: 세 dataset 갱신 정책 `enabled=false` 필수·schedule 확인·진행 중
   job 0·큐 sensor 정지 → 417 pair 배포 → 전이 수·in-bounds 확인(ADR-114 "①의 운영 runbook"). 그 뒤 ②의 해제 조건(PinVi in-bounds 기본 kind·장소 검색 대체, C7
   안전 대상 이동)을 PinVi·C7 쪽에 건다.**
+## 2026-10-24 — protocol EX 재진입 비용 개선(417)
+
+- 이미 보유한 EX는 xact 소유를 재확보한 뒤 반복 설정 조회를 생략한다. session/xact·savepoint·NULL/SH 승격·timeout 계약은 유지한다.
+- 실제PG7+unit4=11·oracle/metadata4·graph18·lint373 PASS(기존6skip). 합성1000회 wall 중앙값584.55→24.95ms이며 운영 CPU 개선율은 아니다.
+- 선행 #1379·#1383은 각각 최신CI/실UI16·18 통과 뒤 main에 머지됐다. #1385는 실UI18+별도HTTP2 PASS/정확CI 대기, #1386은 두리뷰 PASS/CI·수집UI 대기다.
+- 이번417의 독립2코드리뷰 PASS. 정확CI·실UI와 생성SQL·전체수집전환·후속전파는 미완이다. 기본OFF/seed0/운영0. [범위·실측](reports/2026-10-24-protocol-ex-reentry.md).
+
+## 2026-10-24 — 큐레이션 import의 protocol-first 진입
+
+- 실제 whole M03 import와 direct manual의 역순40P01을 재현하고 normal-head 첫 advisory 전 protocol EX만 추가했다. h35/다른2caller·DDL·권한은 유지한다.
+- 최종PG9+기존curation/merge48·관련unit76·lint377 PASS(기존6skip). 두 리뷰·정확CI는 대기이며 기본OFF/seed0/운영0이다. [범위·실패·증거](reports/2026-10-24-curation-import-protocol-entry.md).
+- tasks-rule §8에 따라 가장 오래된09-30 한 절3480B를09h로 원문 보존해 분리했다. 옛DB 전체 replay·전체 writer 활성화는 미완이다.
+
 ## 2026-10-24 — field override 진입 보강(416)
 
 - SQL author/revoke·patch/create를 조기EX로 맞추고 manualcreate55P03을 기존503/RetryAfter5로 반환한다.

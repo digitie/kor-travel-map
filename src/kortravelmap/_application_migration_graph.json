@@ -104,7 +104,13 @@
       "down_revision": [
         "416_field_override_protocol"
       ],
-      "revision": "417_retire_pg_transport_values"
+      "revision": "417_protocol_ex_reentry"
+    },
+    {
+      "down_revision": [
+        "417_protocol_ex_reentry"
+      ],
+      "revision": "418_retire_pg_transport_values"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -238,7 +238,7 @@ def test_handler_registry_is_key_to_handler_only() -> None:
     # 2026-10-01 38 → 33: KMA 적재 operation 5개를 ADR-104로 제거했다.
     # 2026-10-01 33 → 29: 남은 weather 적재 operation 4개를 ADR-105로 제거했다
     # (에어코리아·KREX 휴게소 기상·산림청 산악기상·산불위험예보).
-    # 2026-10-24 29 → 26: 유가 둘·돌발 하나(ADR-114 결정 7, migration 417).
+    # 2026-10-24 29 → 26: 유가 둘·돌발 하나(ADR-114 결정 7, migration 418).
     assert len(FEATURE_OPERATION_HANDLERS) == 26
     assert feature_operation_handler_keys() == frozenset(FEATURE_OPERATION_HANDLERS)
     binding = resolve_feature_operation_handler("feature_place_knps_points_job")
