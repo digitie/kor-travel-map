@@ -1,4 +1,4 @@
-"""ADR115 shadow 후보 수집. 공개 effective/winner를 변경하지 않는 기본 OFF 경로."""
+"""ADR115 후보 수집과 명시 scoped scalar 투영. 정책 미설정은 SQL0회다."""
 
 from __future__ import annotations
 
