@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 제한 native scalar 실제 DML 중첩
+
+- 기존 primary 장소의 이름·전화만 다루는 명시 helper를 별도 추가했다. claim artifact 검증→protocol/epoch/manifest→source/head→후보/winner→finish를 같은 TX에 묶는다. 자동 수집·지역 분할·운영 활성화는 없다.
+- 실제 PG에서 독립 dataset의 두 source DML 동시 미커밋 구간, 실패 rollback/같은 artifact 복구, 완료 receipt의 무 DML 재호출, 오래된 artifact 보존을 확인했다. first_seen 불변식 충돌을 수정한 뒤 native3+기존lineage1 모두 PASS(26.39초).
+- 412 선행 수용·최종 두 리뷰/CI/HTTP/UI·대량/전체 writer 전환과 Weather/Transport 전파는 미완이다. [범위·실패·검증](reports/2026-10-24-scoped-native-scalar-refresh.md).
+
 ## 2026-10-24 — ADR115 범위 커널·기존 writer fence 통합
 
 - #1371에 411 scope/epoch/owner/manifest·membership 재검증과 기존 protocol→전역 fence 순서를 연결했다. runtime 직접 테이블 쓰기는 닫고 기존 writer 배타 경로·기본 OFF를 유지한다.
