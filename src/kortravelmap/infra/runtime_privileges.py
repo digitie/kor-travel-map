@@ -302,6 +302,11 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "kor_travel_geo_releases": ("SELECT", "INSERT", "UPDATE"),
     "curation_rule_reconcile_operations": (),
     "curation_rule_reconcile_scope_members": (),
+    # ADR115 scope/epoch/manifest는 typed SD kernel만 쓴다. runtime 직접 접근은 닫는다.
+    "feature_write_dataset_scopes": (),
+    "feature_write_region_scopes": (),
+    "feature_write_attempts": (),
+    "feature_write_manifests": (),
     "feature_override_field_paths": ("SELECT",),
     "feature_overrides": ("SELECT",),
     # T-VN-M04 queue는 service와 admin route가 SECURITY DEFINER routine을
@@ -409,6 +414,23 @@ _CORE_FEATURE_GRANTS = (
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
+    "REVOKE ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION ops.claim_scoped_feature_write(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.claim_scoped_feature_write(...) TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION ops.append_scoped_feature_write_manifest(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.append_scoped_feature_write_manifest(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION ops.seal_scoped_feature_write_manifest(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.seal_scoped_feature_write_manifest(...) TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION ops.begin_scoped_feature_write(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.begin_scoped_feature_write(...) TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION ops.finish_scoped_feature_write(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.finish_scoped_feature_write(...) TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION ops.cancel_scoped_feature_write(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.cancel_scoped_feature_write(...) TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION ops.expire_scoped_feature_write_attempt(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.expire_scoped_feature_write_attempt(...) TO ktm_feature_runtime",
     "REVOKE ALL ON PROCEDURE feature.record_provider_field_candidates(...) FROM PUBLIC",
     "GRANT EXECUTE ON PROCEDURE feature.record_provider_field_candidates(...) "
     "TO ktm_feature_runtime",
@@ -862,6 +884,14 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
     # baseline400에는 아직 없으며410이 같은 전역 fence 아래 shadow 전용으로 추가한다.
     "feature.record_provider_field_candidates": "410_provider_field_shadow",
+    "ops.lock_scoped_feature_write_protocol": "411_scoped_feature_write_kernel",
+    "ops.claim_scoped_feature_write": "411_scoped_feature_write_kernel",
+    "ops.append_scoped_feature_write_manifest": "411_scoped_feature_write_kernel",
+    "ops.seal_scoped_feature_write_manifest": "411_scoped_feature_write_kernel",
+    "ops.begin_scoped_feature_write": "411_scoped_feature_write_kernel",
+    "ops.finish_scoped_feature_write": "411_scoped_feature_write_kernel",
+    "ops.cancel_scoped_feature_write": "411_scoped_feature_write_kernel",
+    "ops.expire_scoped_feature_write_attempt": "411_scoped_feature_write_kernel",
 }
 
 #: 인벤토리가 지목하는 루틴 전부. `db.py`의 head 전용 preflight 목록과 달리 이것은

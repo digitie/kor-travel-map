@@ -57,6 +57,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Numeric,
+    PrimaryKeyConstraint,
     SmallInteger,
     String,
     Text,
@@ -922,9 +923,7 @@ class FeatureRequestRow(Base):
         server_default=text("'service:feature-request'"),
     )
     request_payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
-    status: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'pending'")
-    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'"))
     submitted_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
     )
@@ -1233,9 +1232,7 @@ class FeatureReferenceReconciliationEventRow(Base):
         primary_key=True,
         server_default=text("x_extension.gen_random_uuid()"),
     )
-    event_sequence: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), nullable=False
-    )
+    event_sequence: Mapped[int] = mapped_column(BigInteger, Identity(always=True), nullable=False)
     case_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     resolution_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     action: Mapped[str] = mapped_column(Text, nullable=False)
@@ -1293,8 +1290,7 @@ class FeatureReferenceReconciliationAckRow(Base):
     __tablename__ = "feature_reference_reconciliation_acks"
     __table_args__ = (
         CheckConstraint(
-            "event_sha256 ~ '^[0-9a-f]{64}$' "
-            "AND local_receipt_sha256 ~ '^[0-9a-f]{64}$'",
+            "event_sha256 ~ '^[0-9a-f]{64}$' AND local_receipt_sha256 ~ '^[0-9a-f]{64}$'",
             name=conv("ck_feature_reference_reconciliation_acks_hashes"),
         ),
         UniqueConstraint(
@@ -1545,9 +1541,7 @@ class FeatureRouteGeometryRow(Base):
 
     __tablename__ = "feature_route_geometries"
     __table_args__ = (
-        CheckConstraint(
-            "kind = 'route'", name=conv("ck_feature_route_geometries_kind")
-        ),
+        CheckConstraint("kind = 'route'", name=conv("ck_feature_route_geometries_kind")),
         ForeignKeyConstraint(
             ["feature_id", "kind"],
             ["feature.features.feature_id", "feature.features.kind"],
@@ -1579,8 +1573,7 @@ class FeatureRouteGeometryRow(Base):
     geom_digest: Mapped[str | None] = mapped_column(
         Text,
         Computed(
-            "encode(x_extension.digest(x_extension.st_asewkb(geom), 'sha256'::text),"
-            " 'hex'::text)",
+            "encode(x_extension.digest(x_extension.st_asewkb(geom), 'sha256'::text), 'hex'::text)",
             persisted=True,
         ),
     )
@@ -1776,8 +1769,7 @@ class FeatureAliasRow(Base):
         # 위 3건이 이중 접두인 것은 conv 때문이 아니라, 컨벤션에 이미 걸려 이중이 된
         # DB 이름을 conv로 그대로 고정하고 있기 때문이다.
         CheckConstraint(
-            "alias_kind <> 'legacy_feature_id' "
-            "OR alias ~ '^f_.+_[a-z]_[0-9a-f]{16}$'",
+            "alias_kind <> 'legacy_feature_id' OR alias ~ '^f_.+_[a-z]_[0-9a-f]{16}$'",
             name=conv("ck_feature_aliases_legacy_alias_shape"),
         ),
         # identity 사본 일치 FK(``fk_feature_aliases_identity_pair``)와
@@ -1844,8 +1836,7 @@ class ProviderFeatureIdentityRow(Base):
     __tablename__ = "provider_feature_identities"
     __table_args__ = (
         CheckConstraint(
-            "feature_kind IN ('place', 'event', 'notice', 'price', "
-            "'weather', 'route', 'area')",
+            "feature_kind IN ('place', 'event', 'notice', 'price', 'weather', 'route', 'area')",
             name=conv("ck_provider_feature_identities_kind"),
         ),
         CheckConstraint(
@@ -1857,8 +1848,7 @@ class ProviderFeatureIdentityRow(Base):
             name=conv("ck_provider_feature_identities_natural_key"),
         ),
         CheckConstraint(
-            "btrim(bound_by_operation) = bound_by_operation "
-            "AND bound_by_operation <> ''",
+            "btrim(bound_by_operation) = bound_by_operation AND bound_by_operation <> ''",
             name=conv("ck_provider_feature_identities_operation"),
         ),
         Index("idx_provider_feature_identities_feature", "feature_id"),
@@ -4124,10 +4114,8 @@ class ProviderFieldShadowCandidateRow(Base):
         nullable=False,
     )
     validated_source_hash: Mapped[str] = mapped_column(Text, nullable=False)
-    value_json: Mapped[
-        dict[str, Any] | list[Any] | str | int | float | bool | None
-    ] = mapped_column(
-        JSONB
+    value_json: Mapped[dict[str, Any] | list[Any] | str | int | float | bool | None] = (
+        mapped_column(JSONB)
     )
     value_geometry: Mapped[Any | None] = mapped_column(
         Geometry("GEOMETRY", srid=4326, spatial_index=False)
@@ -7288,9 +7276,7 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
         CheckConstraint(
             "compaction_drained_at IS NULL "
             "OR (compacted_at IS NOT NULL AND compaction_drained_at >= compacted_at)",
-            name=conv(
-                "ck_poi_cache_target_snapshot_materials_drained_after_compacted"
-            ),
+            name=conv("ck_poi_cache_target_snapshot_materials_drained_after_compacted"),
         ),
         CheckConstraint(
             "orphaned_at IS NULL OR orphaned_at >= materialized_at",
@@ -7324,9 +7310,7 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
         Index(
             "idx_poi_cache_target_snapshot_materials_draining",
             "material_id",
-            postgresql_where=text(
-                "compacted_at IS NOT NULL AND compaction_drained_at IS NULL"
-            ),
+            postgresql_where=text("compacted_at IS NOT NULL AND compaction_drained_at IS NULL"),
         ),
         {"schema": "ops"},
     )
@@ -7378,9 +7362,7 @@ class PoiCacheTargetSnapshotMaterialRow(Base):
     #: 둘을 나눠 두는 이유는 GC backlog 판정 때문이다 — item 존재를 직접 재면 compacted
     #: material 하나마다 index probe 한 번이고 audit material은 영구 보존이라 그 수가 단조
     #: 증가한다. 이 열의 partial index가 그 질문을 상수 시간으로 만든다.
-    compaction_drained_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True)
-    )
+    compaction_drained_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class PoiCacheTargetSnapshotMaterialItemRow(Base):
@@ -7931,9 +7913,7 @@ class KorTravelGeoReleaseRow(Base):
 
     __tablename__ = "kor_travel_geo_releases"
     __table_args__ = (
-        UniqueConstraint(
-            "geo_data_token", "plan_seq", name="uq_kor_travel_geo_releases_token_seq"
-        ),
+        UniqueConstraint("geo_data_token", "plan_seq", name="uq_kor_travel_geo_releases_token_seq"),
         CheckConstraint(
             "state IN ('baseline', 'planned', 'running', 'done', 'superseded')",
             name=conv("ck_kor_travel_geo_releases_state"),
@@ -7964,13 +7944,9 @@ class KorTravelGeoReleaseRow(Base):
         {"schema": "ops"},
     )
 
-    plan_id: Mapped[int] = mapped_column(
-        BigInteger, Identity(always=True), primary_key=True
-    )
+    plan_id: Mapped[int] = mapped_column(BigInteger, Identity(always=True), primary_key=True)
     geo_data_token: Mapped[str] = mapped_column(Text, nullable=False)
-    plan_seq: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1")
-    )
+    plan_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
     geo_version_token: Mapped[str] = mapped_column(Text, nullable=False)
     activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     reference_months: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
@@ -8026,12 +8002,8 @@ class KorTravelGeoReleaseItemRow(Base):
             "state <> 'skipped' OR state_reason IS NOT NULL",
             name=conv("ck_kor_travel_geo_release_items_skip_reason"),
         ),
-        CheckConstraint(
-            '"position" >= 1', name=conv("ck_kor_travel_geo_release_items_position")
-        ),
-        CheckConstraint(
-            "attempt_seq >= 1", name=conv("ck_kor_travel_geo_release_items_attempt")
-        ),
+        CheckConstraint('"position" >= 1', name=conv("ck_kor_travel_geo_release_items_position")),
+        CheckConstraint("attempt_seq >= 1", name=conv("ck_kor_travel_geo_release_items_attempt")),
         CheckConstraint(
             "run_config IS NULL OR jsonb_typeof(run_config) = 'object'",
             name=conv("ck_kor_travel_geo_release_items_run_config"),
@@ -8044,12 +8016,8 @@ class KorTravelGeoReleaseItemRow(Base):
     operation_key: Mapped[str] = mapped_column(Text, nullable=False)
     provider_dataset_ids: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
     run_config: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
-    attempt_seq: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default=text("1")
-    )
-    state: Mapped[str] = mapped_column(
-        Text, nullable=False, server_default=text("'pending'::text")
-    )
+    attempt_seq: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("1"))
+    state: Mapped[str] = mapped_column(Text, nullable=False, server_default=text("'pending'::text"))
     state_reason: Mapped[str | None] = mapped_column(Text)
     run_key: Mapped[str | None] = mapped_column(Text)
     dagster_run_id: Mapped[str | None] = mapped_column(Text)
@@ -8687,3 +8655,184 @@ for _schema, _table_name, _checks in _MIGRATION_OWNED_CHECK_CONSTRAINTS:
         if _name in _existing_names:
             raise RuntimeError(f"중복 CHECK constraint metadata: {_schema}.{_table_name}.{_name}")
         _table.append_constraint(CheckConstraint(_sqltext, name=conv(_name)))
+
+
+class ScopedFeatureWriteDatasetRow(Base):
+    """dataset 전체 snapshot과 지역 예약의 계층 anchor(ADR115)."""
+
+    __tablename__ = "feature_write_dataset_scopes"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_dataset")),
+        CheckConstraint("epoch >= 0", name=conv("ck_fw_dataset_epoch")),
+        CheckConstraint(
+            "(owner IS NULL) = (lease_until IS NULL)", name=conv("ck_fw_dataset_owner")
+        ),
+        {"schema": "ops"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "provider_sync.provider_datasets.provider_dataset_id",
+            name=conv("fk_fw_dataset_provider"),
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    owner: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedFeatureWriteRegionRow(Base):
+    """증거가 있는 coverage 지역만 표현하는 예약 anchor."""
+
+    __tablename__ = "feature_write_region_scopes"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_region")),
+        CheckConstraint("scope_version > 0", name=conv("ck_fw_region_version")),
+        CheckConstraint("region_key ~ '^[A-Za-z0-9_.:-]{1,128}$'", name=conv("ck_fw_region_key")),
+        CheckConstraint("epoch >= 0", name=conv("ck_fw_region_epoch")),
+        CheckConstraint("(owner IS NULL) = (lease_until IS NULL)", name=conv("ck_fw_region_owner")),
+        Index(
+            "idx_feature_write_region_scopes_lease",
+            "lease_until",
+            "provider_dataset_id",
+            postgresql_where=text("owner IS NOT NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.feature_write_dataset_scopes.provider_dataset_id",
+            name=conv("fk_fw_region_dataset"),
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    scope_version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    region_key: Mapped[str] = mapped_column(Text(collation="C"), primary_key=True)
+    epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    owner: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedFeatureWriteAttemptRow(Base):
+    """epoch로 소유권을 검증하는 단일 dataset attempt. 공개 DTO가 아니다."""
+
+    __tablename__ = "feature_write_attempts"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_attempt")),
+        UniqueConstraint(
+            "provider_dataset_id", "idempotency_key", name=conv("uq_fw_attempt_idempotency")
+        ),
+        CheckConstraint(
+            "idempotency_key ~ '^[A-Za-z0-9_.:-]{1,128}$'", name=conv("ck_fw_attempt_key")
+        ),
+        CheckConstraint("dataset_epoch >= 0", name=conv("ck_fw_attempt_epoch")),
+        CheckConstraint(
+            "jsonb_typeof(regions) = 'array' AND jsonb_array_length(regions) <= 256 "
+            "AND cardinality(region_epochs)=jsonb_array_length(regions)",
+            name=conv("ck_fw_attempt_regions"),
+        ),
+        CheckConstraint("input_digest ~ '^[0-9a-f]{64}$'", name=conv("ck_fw_attempt_input")),
+        CheckConstraint("expected_members BETWEEN 0 AND 8192", name=conv("ck_fw_attempt_members")),
+        CheckConstraint(
+            "status IN ('preparing','ready','applying','completed','cancelled')",
+            name=conv("ck_fw_attempt_status"),
+        ),
+        CheckConstraint(
+            "manifest_digest IS NULL OR manifest_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_fw_attempt_manifest"),
+        ),
+        CheckConstraint(
+            "result_digest IS NULL OR result_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_fw_attempt_result"),
+        ),
+        Index(
+            "idx_feature_write_attempts_terminal",
+            "updated_at",
+            "attempt_id",
+            postgresql_where=text("status IN ('completed','cancelled')"),
+        ),
+        Index(
+            "idx_feature_write_attempts_expired",
+            "lease_until",
+            "provider_dataset_id",
+            postgresql_where=text("status IN ('preparing','ready','applying')"),
+        ),
+        {"schema": "ops"},
+    )
+
+    attempt_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.feature_write_dataset_scopes.provider_dataset_id",
+            name=conv("fk_fw_attempt_dataset"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    owner: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    dataset_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    region_epochs: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
+    regions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    exclusive_protocol: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    input_digest: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    expected_members: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest_digest: Mapped[str | None] = mapped_column(Text(collation="C"))
+    status: Mapped[str] = mapped_column(
+        Text(collation="C"), nullable=False, server_default=text("'preparing'")
+    )
+    apply_txid: Mapped[int | None] = mapped_column(BigInteger)
+    result_digest: Mapped[str | None] = mapped_column(Text(collation="C"))
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class ScopedFeatureWriteManifestRow(Base):
+    """대용량 payload 대신 고정 폭 근거와 예상 revision만 보관한다."""
+
+    __tablename__ = "feature_write_manifests"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_manifest")),
+        UniqueConstraint(
+            "attempt_id",
+            "dependency_kind",
+            "dependency_key",
+            name=conv("uq_fw_manifest_dependency"),
+        ),
+        CheckConstraint("ordinal BETWEEN 0 AND 8191", name=conv("ck_fw_manifest_ordinal")),
+        CheckConstraint(
+            "dependency_kind IN ('feature','source_head')", name=conv("ck_fw_manifest_kind")
+        ),
+        CheckConstraint(
+            "octet_length(dependency_key) BETWEEN 1 AND 128", name=conv("ck_fw_manifest_key")
+        ),
+        CheckConstraint(
+            "octet_length(expected_value) BETWEEN 1 AND 128", name=conv("ck_fw_manifest_expected")
+        ),
+        CheckConstraint("member_digest ~ '^[0-9a-f]{64}$'", name=conv("ck_fw_manifest_digest")),
+        {"schema": "ops"},
+    )
+
+    attempt_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.feature_write_attempts.attempt_id",
+            name=conv("fk_fw_manifest_attempt"),
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dependency_kind: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    dependency_key: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    expected_value: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    member_digest: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
