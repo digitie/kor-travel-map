@@ -6,7 +6,9 @@
 - 재리뷰 Low: `/nearest` 예보는 후보 최대 50곳(관측·요약은 10곳 그대로 — 예보 없는 측정소 12곳이 KMA 격자보다 가까운 통합
   검사), 이미 지난 `to`/`forecast_to`는 422, 배치 id는 경로 `feature_id`·weather `location_id`와 같은 모양·길이 검사(docstring은
   "둘 다 가능"으로), `…_DAILY_SUMMARY_DAYS=1`이면 `vs_previous_day`는 언제나 null(ADR W7·설정 설명), 테스트 이름 정정.
-- 검사: GATE3_RESULT
+- 검사(n150 일회용 python:3.13, origin/main `0b2dc53d0` 위): ruff·mypy --strict(279)·lint-imports·OpenAPI drift 초록, 통합
+  (실제 Valkey) 34 passed, unit+lint+api 4,773 passed·24 failed(main 기준선 환경 실패 그대로 — docker runtime 23·
+  `test_settings_default_values` 1), dagster 패키지 세션 905 passed.
 
 ## 2026-10-24 — ADR-114 2단계 리뷰 반영(#1367): 브랜치 `feat/adr114-valkey-weather`
 
