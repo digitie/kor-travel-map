@@ -1,3 +1,8 @@
+## 2026-10-24 — 통합 전체 CI의 시험 격리 보완(#1379)
+
+- b460의 두 실제 PG lane는 같은5건 실패였다. 4건의 새 읽기 세션 fixture 누락과 metrics의 앞선 committed행 미고려를 제품 변경 없이 고쳤다. 0/2 sibling 제어군으로기존실패를 재현하고 old/new snapshot·writer commit 단언을 보존했다.
+- test-only c5b635363의 실제 PG/ASGI48 PASS(120.45초), 제품/DDL0diff·Ruff/redaction PASS다. 원본 glibc1425/12skip/5FAIL·alpine1419/18skip/5FAIL 및 수정전 제어군 로그를 보존했다. 새 정확 전체 CI·실제 UI·머지는 미완, 기본OFF/seed0/운영0 유지. [원인·수정·제약](reports/2026-10-24-scoped-concurrent-write-integration.md).
+
 ## 2026-10-24 — ADR115 구현 합집합 수용(#1379)
 
 - 10개 검토된 구현 부모를 제품 고정점 `ebb62ccb8`로 합쳤다. 유일한 제품 합성은 승인 native 전체에 승인 phone 첫 gate2줄뿐이며 나머지 제품은 승인 부모 blob과 동일하다. 공통 문서의 양쪽 전체 항목도 보존했다.

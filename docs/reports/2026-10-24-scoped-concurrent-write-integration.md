@@ -37,3 +37,28 @@ PG8+unit4건으로 입증했다. 이 회귀를 전체 Dagster 감독/새 owner �
 기본 OFF·정책 seed0·운영 활성화0이다. [수용 현황](2026-10-24-scoped-concurrent-write-acceptance-status.md)의
 미완 gate와 T-CWRITE 체크박스는 전체 acceptance 전까지 유지한다. Map에서 검증된 개선의
 Weather/Transport 전파는 후속이며, 취소된 export 운영 활성화/Map 연동 검증은 재개하지 않는다.
+
+## 전체 CI의 시험 격리 실패와 수정
+
+`b460d5167`의 전체 CI는 OpenAPI·lint·frontend·Docker 4 workflow와 Python3버전/fixture를
+통과했지만 실제 PostgreSQL 두 lane가 같은5건에서 실패했다. glibc는1425 passed/12 skipped/
+5 failed, alpine은1419 passed/18 skipped/5 failed였다. coverage87.55% 통과나 기준선
+artifact 업로드로 이 실패를 덮지 않는다. 두 원본 job 로그·해시를 감사 원장에 보존했다.
+
+4건은 기존 `get_session`만 시험 연결로 대체하고 새 `get_read_snapshot_session`을 연결하지
+않아 발생했다. 실제 제품의 DSN/권한/RO·RR 설정은 바꾸지 않고 기존 seed와 같은 fixture
+연결을 새 dependency에도 연결한다. 남은 metrics 1건은 session-scope DB에 앞선 시험이
+commit한 행을 무시하고 전체건수를1로 고정한 기대값 때문이다. 0/2 committed sibling을
+추가한 수정전 제어군은2 passed/2 failed로 `3 == 1` 실패를 실제 재현했다.
+
+수정은 주입 전의 전체 lifecycle total과 active kind별 기준값을 각각 읽고, 같은 writer가
+commit한 place1건을 RC만 보는 반증과 RR의 이전 snapshot을 전체 dict로 비교한다.
+주입 뒤 별도 연결에서 실제 total+1·place+1도 확인해 쓰기 실패를 RR 성공으로 세지 않는다.
+기대값을3으로 바꾸거나 원래 검증을 삭제하지 않았다. 제품/DDL 변경은0이며 수정 후 정확
+집중 PG·독립 리뷰와 새 전체 CI가 별도 수용 조건이다.
+
+수정 커밋 `c5b63536325e7bf4c3c2cb9a079828f046bfb920`은 시험3파일만27줄 추가/4줄 삭제다.
+수정 뒤 실제 PG/ASGI4파일 **48 passed(120.45초)**이며 기존 reader13과 실패가 발생한
+후속 reader/지표/API fixture를 포함한다. 별도 성공 수를 초기175에 합산하지 않는다.
+Ruff·redaction·diff 검사도 통과했다. 제품/DDL blob은 b460과 동일하므로 실제 UI는 최종
+문서 정산 후 같은 제품의 정확 archive로 검증한다. 새 전체 CI와 실제 UI는 아직 미완이다.
