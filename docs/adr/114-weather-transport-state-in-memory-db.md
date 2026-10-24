@@ -482,8 +482,8 @@ schedule을 켠 뒤 journal에 적는다.
 | --- | --- |
 | `GET /locations` | 위치 목록·근처(`lon`·`lat`·`radius_m` ≤ 100 km)·영역(bbox) — D6과 같은 keyset cursor·`truncated`. `include_current=true`면 각 위치에 최신 관측을 붙인다(지도 마커용) |
 | `GET /locations/{feature_id}` | 위치 하나의 **묶음**: 위치 + 관측 + 예보(style별, 지난 시각 제거, 선택 `from`·`to`) + 세 구간 요약(전날 같은 구간 대비 차이 포함) |
-| `POST /locations/batch` | `feature_ids`·weather `location_ids`(합 ≤ 50)의 묶음 목록과 `missing`. 같은 `sections`·`forecast_styles`·`forecast_from`·`forecast_to` |
-| `GET /nearest` | `lon`·`lat`·`radius_m`(기본 20 km, ≤ 100 km — PinVi는 20 → 50 → 100 km로 넓힌다) 근처 위치 **최대 10곳**을 가까운 순으로 보고, **부분마다** 그 데이터셋 값이 실제로 있는 가장 가까운 위치를 고른다. 위치가 없으면 404 |
+| `POST /locations/batch` | `feature_ids`·weather `location_ids`(둘 다 써도 된다, 합 ≤ 50 — id마다 경로 `feature_id`와 같은 모양·weather `location_id`와 같은 길이·문자 검사)의 묶음 목록과 `missing`. 같은 `sections`·`forecast_styles`·`forecast_from`·`forecast_to` |
+| `GET /nearest` | `lon`·`lat`·`radius_m`(기본 20 km, ≤ 100 km — PinVi는 20 → 50 → 100 km로 넓힌다) 근처 위치를 가까운 순으로 보고(관측·요약은 **최대 10곳**, 예보는 **최대 50곳** — 예보 없는 측정소가 KMA 격자보다 가까이 여럿 몰린 도심 대비), **부분마다** 그 데이터셋 값이 실제로 있는 가장 가까운 위치를 고른다. 위치가 없으면 404 |
 | `GET /status` | Valkey 연결과 데이터셋 일곱 개의 신선도(실패한 데이터셋은 원 메시지 대신 `failure_kind` 코드) |
 
 - **부분마다 위치를 고르는 이유**(운영 리뷰 HIGH, 2026-10-24): 가장 가까운 weather 위치가 대기질 측정소처럼 예보가 없는
@@ -503,7 +503,9 @@ schedule을 켠 뒤 journal에 적는다.
 - 각 항목은 `vs_previous_day{previous_date, temp_min_delta, temp_max_delta, temp_avg_delta, humidity_avg_delta}`를 싣는다 —
   전날 같은 구간과의 차이(이쪽 − 전날). 전날 구간이 없거나, 둘 중 하나가 `sample_count=0`이거나, **둘 중 하나가 partial이면
   null**이다 — 06:30의 아침(1시간 반 치)을 끝난 어제 아침(6시간 치)과 비교하면 "어제보다 춥다"가 거짓이 될 수 있다.
-  판단(문턱값·문구)은 소비자가 한다.
+  판단(문턱값·문구)은 소비자가 한다. **보관 일수 `KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS=1`이면 전날 구간이 없으므로
+  `vs_previous_day`는 언제나 null이다** — 비교가 필요하면 2 이상(기본 14)으로 둔다.
+- 예보 `to`(배치는 `forecast_to`)가 이미 지난 시각이면 422다 — 조용한 `no_data` 대신 요청 오류로 알린다.
 - weather 특보(`weather_alert`)는 범위 밖이다 — PinVi는 특보를 계속 weather에서 직접 읽는다.
 - 위치 데이터셋이 없거나 Valkey가 죽었으면 503(`WEATHER_STATE_NOT_LOADED`·`WEATHER_STATE_UNAVAILABLE`), cursor 세대가
   사라졌으면 409 `WEATHER_STATE_GENERATION_EXPIRED`, 지금 세대에 그 위치가 없으면 404 — 1단계 D6과 같은 규칙.

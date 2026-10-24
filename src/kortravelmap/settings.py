@@ -762,7 +762,8 @@ class KorTravelMapSettings(BaseSettings):
         le=31,
         description=(
             "Valkey에 보관하는 weather 하루 세 구간(아침·점심·저녁) 요약의 일수(ADR-114 결정 1, "
-            "소유자가 바꿀 수 있는 보관 기간). weather W5 ``days`` 상한 31과 같다. "
+            "소유자가 바꿀 수 있는 보관 기간). weather W5 ``days`` 상한 31과 같다. 1이면 전날 구간이 "
+            "없어 응답의 ``vs_previous_day``가 언제나 null이다. "
             "env ``KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS``."
         ),
     )

@@ -67,7 +67,7 @@ def _forbid_store(client: TestClient) -> None:
     overrides[get_weather_state_store] = _Untouchable
 
 
-def test_every_route_is_a_get_on_the_service_surface(client: TestClient) -> None:
+def test_every_route_has_its_method_on_the_service_surface(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
     for path, methods in _PATHS.items():
         assert set(spec["paths"][path]) == methods, path
@@ -103,6 +103,9 @@ def test_missing_valkey_url_is_503_for_this_surface_only(
              "to": "2026-10-24T00:00:00+09:00"},
         ),
         ("/v1/service/weather/locations/f_global_w_x", {"from": "2026-10-25T00:00:00"}),
+        ("/v1/service/weather/locations/f_global_w_x", {"to": "2020-01-01T00:00:00+09:00"}),
+        ("/v1/service/weather/nearest", {"lon": 127.0, "lat": 37.5,
+                                         "to": "2020-01-01T00:00:00+09:00"}),
         ("/v1/service/weather/nearest", {"lon": 127.0, "lat": 89.0}),
         ("/v1/service/weather/nearest", {"lon": 127.0, "lat": 37.5, "sections": "weather"}),
         ("/v1/service/weather/locations/f_global_w_x", {"forecast_styles": "daily"}),
@@ -126,6 +129,11 @@ def test_query_shape_is_validated_before_touching_the_store(
         {"feature_ids": ["a", "a"]},
         {"feature_ids": ["a"], "location_ids": [f"l{i}" for i in range(50)]},
         {"feature_ids": ["a"], "sections": ["weather"]},
+        {"feature_ids": ["bad id"]},
+        {"feature_ids": ["x" * 129]},
+        {"location_ids": ["a|b"]},
+        {"location_ids": ["x" * 121]},
+        {"feature_ids": ["a"], "forecast_to": "2020-01-01T00:00:00+09:00"},
         {
             "feature_ids": ["a"],
             "forecast_from": "2026-10-25T00:00:00+09:00",

@@ -7,7 +7,8 @@ PinVi 같은 service 소비자가 장소 하나에 날씨를 붙이는 흐름(�
 
 - ``/locations``: 위치 목록(keyset cursor)·근처·영역. ``include_current=true``면 최신 관측을 붙인다.
 - ``/locations/{feature_id}``: 위치 하나의 **묶음**(위치 + 관측 + 예보 + 세 구간 요약).
-- ``/nearest``: 좌표 근처의 위치 후보(가까운 순 최대 :data:`NEAREST_CANDIDATES`곳)에서
+- ``/nearest``: 좌표 근처의 위치 후보(가까운 순, 관측·요약은 최대 :data:`NEAREST_CANDIDATES`곳,
+  예보는 최대 :data:`FORECAST_CANDIDATES`곳)에서
   **부분마다** 그 부분의 데이터가 실제로 있는 가장 가까운 위치를 고른다 — 가장 가까운 지점이
   대기질 측정소처럼 예보가 없는 위치여도 예보는 다음으로 가까운 예보 위치에서 온다. 부분마다
   출처 위치와 거리를 싣는다.
@@ -93,7 +94,12 @@ MAX_BBOX_SIDE_M: Final = 1_000_000.0
 _BOX_MARGIN: Final = 1.02
 DEFAULT_NEAREST_RADIUS_M: Final = 20_000.0
 NEAREST_CANDIDATES: Final = 10
-"""``/nearest``가 부분마다 데이터를 찾아 보는 가까운 위치 수의 상한."""
+"""``/nearest``가 관측·세 구간 요약을 찾아 보는 가까운 위치 수의 상한."""
+FORECAST_CANDIDATES: Final = 50
+"""``/nearest``가 예보를 찾아 보는 가까운 위치 수의 상한. 대기질 측정소처럼 예보가 없는 지점이
+KMA 격자보다 가까이 여럿 몰린 도심에서도 반경 안의 예보 위치를 놓치지 않게 넓게 본다."""
+_FEATURE_ID_PATTERN: Final = r"^[A-Za-z0-9_\-]+$"
+_LOCATION_ID_PATTERN: Final = r"^[^|\x00-\x1f]+$"
 MAX_BATCH: Final = 50
 
 
@@ -299,13 +305,23 @@ class WeatherBundleResponse(BaseModel):
 Section = Literal["current", "forecasts", "daily_summaries"]
 
 
+FeatureIdItem = Annotated[str, Field(min_length=1, max_length=128, pattern=_FEATURE_ID_PATTERN)]
+LocationIdItem = Annotated[
+    str, Field(min_length=1, max_length=120, pattern=_LOCATION_ID_PATTERN)
+]
+
+
 class WeatherBatchRequest(BaseModel):
-    """``feature_ids``나 weather ``location_ids`` 중 하나로 최대 50곳."""
+    """``feature_ids``와 weather ``location_ids``(둘 다 써도 된다, 합 최대 50곳).
+
+    id 하나하나는 경로의 ``feature_id``와 같은 모양 검사, ``location_id``는 weather 계약과 같은
+    길이·문자 검사를 받는다.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
-    feature_ids: list[str] = Field(default_factory=list, max_length=MAX_BATCH)
-    location_ids: list[str] = Field(
+    feature_ids: list[FeatureIdItem] = Field(default_factory=list, max_length=MAX_BATCH)
+    location_ids: list[LocationIdItem] = Field(
         default_factory=list,
         max_length=MAX_BATCH,
         description="weather 위치 id(PinVi가 가진 weather location_id). Map이 feature_id로 바꾼다.",
@@ -332,6 +348,8 @@ class WeatherBatchRequest(BaseModel):
             and self.forecast_from > self.forecast_to
         ):
             raise ValueError("forecast_from은 forecast_to보다 늦을 수 없다.")
+        if self.forecast_to is not None and self.forecast_to < datetime.now(UTC):
+            raise ValueError("forecast_to가 이미 지났다 — 지난 예보는 주지 않는다.")
         return self
 
 
@@ -669,6 +687,9 @@ ToQuery = Annotated[
 def _window(since: datetime | None, until: datetime | None) -> _ForecastWindow:
     if since is not None and until is not None and since > until:
         raise _invalid("from은 to보다 늦을 수 없다.")
+    if until is not None and until < datetime.now(UTC):
+        # 조용한 no_data 대신 요청 오류로 알린다 — 지난 예보는 저장하지 않는다(결정 1).
+        raise _invalid("to가 이미 지났다 — 지난 예보는 주지 않는다.")
     return _ForecastWindow(since, until)
 
 
@@ -737,11 +758,20 @@ async def _bundles(
         datasets.extend(d for d in FORECAST_DATASETS if d.style in wanted_styles)
     if "daily_summaries" in wanted:
         datasets.append(DATASET_DAILY_SUMMARIES)
-    ids = list(dict.fromkeys(c.location.feature_id for cands, _ in groups for c in cands))
+    near_ids = list(
+        dict.fromkeys(
+            c.location.feature_id for cands, _ in groups for c in cands[:NEAREST_CANDIDATES]
+        )
+    )
+    all_ids = list(dict.fromkeys(c.location.feature_id for cands, _ in groups for c in cands))
+    requests = [
+        (dataset.name, all_ids if dataset.style is not None else near_ids) for dataset in datasets
+    ]
     async with _state_errors():
-        reads = await store.read_many([(dataset.name, ids) for dataset in datasets])
+        reads = await store.read_many(requests)
     by_dataset: dict[str, tuple[DatasetRead, dict[str, bytes | None]]] = {
-        read.dataset: (read, dict(zip(ids, read.values, strict=True))) for read in reads
+        read.dataset: (read, dict(zip(ids, read.values, strict=True)))
+        for read, (_, ids) in zip(reads, requests, strict=True)
     }
 
     def read_for(dataset: WeatherStateDataset, cands: Sequence[_Candidate]) -> DatasetRead:
@@ -754,10 +784,11 @@ async def _bundles(
     for candidates, location_meta in groups:
         current: WeatherCurrentSection | None = None
         if "current" in wanted:
-            read = read_for(DATASET_CURRENT, candidates)
+            near = candidates[:NEAREST_CANDIDATES]
+            read = read_for(DATASET_CURRENT, near)
             state, chosen, observations = _pick(
                 read,
-                candidates,
+                near,
                 WeatherCurrentState,
                 lambda v: list(v.observations) or None,
             )
@@ -787,10 +818,11 @@ async def _bundles(
             )
         daily: WeatherDailySection | None = None
         if "daily_summaries" in wanted:
-            read = read_for(DATASET_DAILY_SUMMARIES, candidates)
+            near = candidates[:NEAREST_CANDIDATES]
+            read = read_for(DATASET_DAILY_SUMMARIES, near)
             state, chosen, slots = _pick(
                 read,
-                candidates,
+                near,
                 WeatherDailySummaryState,
                 lambda v: with_previous_day(v.slots, now) or None,
             )
@@ -1050,7 +1082,7 @@ async def get_nearest_weather(
             lon=lon,
             lat=lat,
             radius_m=radius_m,
-            count=NEAREST_CANDIDATES,
+            count=FORECAST_CANDIDATES,
         )
         if not hits:
             raise _problem(404, "NOT_FOUND", f"반경 {radius_m:.0f} m 안에 weather 위치가 없다.")

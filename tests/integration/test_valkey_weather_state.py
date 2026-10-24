@@ -512,3 +512,33 @@ async def test_not_modified_reload_keeps_the_generation_and_records_the_check(
     assert after.generation == first["generation"]
     assert after.checked_at is not None
     assert after.loaded_at == meta.loaded_at
+
+
+async def test_nearest_forecast_scans_past_ten_closer_stations_without_forecasts(
+    store: ValkeyStateStore, api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """도심처럼 예보 없는 측정소 12곳이 KMA 격자보다 가까워도 예보는 KMA 격자에서 온다."""
+    stations = [_location(f"air-{i:02d}", 127.0 + i * 0.001, 37.5) for i in range(12)]
+    kma = _location("kma-x", 127.05, 37.5)  # 약 4.4 km
+    _serve(
+        monkeypatch,
+        {
+            "/v1/service/exports/locations": _pages([*stations, kma], size=50),
+            "/v1/service/exports/current": _pages([_air_value(s["location_id"]) for s in stations]),
+            "/v1/service/exports/forecasts": _pages([_kma_group("kma-x", (1, 2))]),
+        },
+    )
+    await _load(store, DATASET_LOCATIONS)
+    await _load(store, DATASET_CURRENT)
+    await _load(store, DATASET_FORECAST_SHORT)
+    response = await api.get(
+        "/v1/service/weather/nearest",
+        params={"lon": 127.0, "lat": 37.5, "radius_m": 20_000, "forecast_styles": "short"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["current"]["source"]["location_id"] == "air-00"
+    short = data["forecasts"]["short"]
+    assert short["status"] == "ok"
+    assert short["source"]["location_id"] == "kma-x"
+    assert 4_000 < short["source"]["distance_m"] < 5_000
