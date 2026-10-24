@@ -10,6 +10,10 @@
   queued/running·공유 primary·기존 lifecycle override preflight) → ② 장소 셋 → ③ 물리 삭제. 장소 적재는 계속 돈다.
 - API 표면 변화 없음(OpenAPI 재생성·PinVi 재vendor 불필요). Codex 수집 fence·shadow 원장 코드는 읽기만 했다(퇴역 프로시저는
   advisory lock을 잡지 않는다).
+- 검사(n150 일회용 python:3.13): ruff·mypy --strict(279)·lint-imports 초록, unit+lint+api 4,817 passed·29 failed(기준선 환경
+  실패 그대로 — docker runtime 23·sealed tree 2·tick window 3·smoke settings 1), 통합(transport·retire·notice·price·mois·
+  tvn34c/35·phase2·catalog 등 -k) 290 passed(1 error는 컨테이너에 docker CLI 없음). 첫 실행에서 revision id 40자(>32)와 사후
+  조건 SQL의 없는 열(`context`)을 잡아 고쳤다.
 
 ## 2026-10-24 — ADR-114 2단계 재리뷰 Low·main 재기반(#1365 뒤): 브랜치 `feat/adr114-valkey-weather`
 
