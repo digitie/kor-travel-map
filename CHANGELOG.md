@@ -20,7 +20,6 @@
   dataset의 operation을 종류 불문 끄고, 그 primary Feature를 `system` 상태 전이로 `retired`·`suppressed`(+ 재활성화를 막는
   lifecycle override)로 내린다. 행·lineage·가격 fact·dataset은 남는다. queued/running job이 있으면 아무것도 바꾸지 않고 멈춘다.
 - 영향 없음: REST·OpenAPI, Valkey transport 표면, 장소(주유소·휴게소·공항) 적재와 C7 공항 대상.
-||||||| e0131ec16
 ### 수동 Feature 생성의 잠금 대기를 재시도 가능 오류로 표시 (2026-10-24)
 
 - **FIXED**: 공유 writer와 경합해 `55P03`이 발생한 수동 Feature 생성은 내부 오류500 대신
