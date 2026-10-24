@@ -7,14 +7,17 @@ PinVi 같은 service 소비자가 장소 하나에 날씨를 붙이는 흐름(�
 
 - ``/locations``: 위치 목록(keyset cursor)·근처·영역. ``include_current=true``면 최신 관측을 붙인다.
 - ``/locations/{feature_id}``: 위치 하나의 **묶음**(위치 + 관측 + 예보 + 세 구간 요약).
-- ``/nearest``: 좌표 근처의 위치 후보(가까운 순 최대 :data:`NEAREST_CANDIDATES`곳)에서 **부분마다**
-  그 부분의 데이터가 실제로 있는 가장 가까운 위치를 고른다 — 가장 가까운 지점이 대기질 측정소처럼
-  예보가 없는 위치여도 예보는 다음으로 가까운 예보 위치에서 온다. 부분마다 출처 위치와 거리를 싣는다.
-- ``POST /locations/batch``: ``feature_id``·weather ``location_id``로 최대 :data:`MAX_BATCH`곳의 묶음.
-- 각 부분은 자기 데이터셋의 ``status``·``freshness``를 갖고, 한 데이터셋 장애가 묶음을 막지 않는다.
-  묶음의 데이터셋 읽기는 Valkey 왕복 두 번으로 한다(``ValkeyStateStore.read_many``).
-- 예보는 **읽을 때** 지금(또는 ``from``)보다 이른 ``target_at``과 ``to`` 뒤를 뗀다(W5). 세 구간 요약은
-  읽는 시각으로 ``partial``을 다시 계산하고, 끝난 구간끼리만 전날 대비 차이(``vs_previous_day``)를 싣는다.
+- ``/nearest``: 좌표 근처의 위치 후보(가까운 순 최대 :data:`NEAREST_CANDIDATES`곳)에서
+  **부분마다** 그 부분의 데이터가 실제로 있는 가장 가까운 위치를 고른다 — 가장 가까운 지점이
+  대기질 측정소처럼 예보가 없는 위치여도 예보는 다음으로 가까운 예보 위치에서 온다. 부분마다
+  출처 위치와 거리를 싣는다.
+- ``POST /locations/batch``: ``feature_id``·weather ``location_id``로 최대 :data:`MAX_BATCH`곳의
+  묶음.
+- 각 부분은 자기 데이터셋의 ``status``·``freshness``를 갖고, 한 데이터셋 장애가 묶음을 막지
+  않는다. 묶음의 데이터셋 읽기는 Valkey 왕복 두 번으로 한다(``ValkeyStateStore.read_many``).
+- 예보는 **읽을 때** 지금(또는 ``from``)보다 이른 ``target_at``과 ``to`` 뒤를 뗀다(W5). 세 구간
+  요약은 읽는 시각으로 ``partial``을 다시 계산하고, 끝난 구간끼리만 전날 대비 차이
+  (``vs_previous_day``)를 싣는다.
 - 위치 데이터셋이 없거나 Valkey가 죽었으면 503, cursor 세대가 사라졌으면 409, 위치가 없으면 404.
   다른 Map 기능과 ``/ops/health-deep``은 Valkey를 보지 않는다.
 
@@ -360,7 +363,9 @@ class WeatherDatasetStatus(BaseModel):
     freshness: WeatherStateFreshness | None
     error: str | None = Field(
         default=None,
-        description="이 데이터셋만 읽지 못했을 때 안정 코드(failure_kind). 원 메시지는 싣지 않는다.",
+        description=(
+            "이 데이터셋만 읽지 못했을 때 안정 코드(failure_kind). 원 메시지는 싣지 않는다."
+        ),
     )
 
 

@@ -7,11 +7,10 @@
 
 from __future__ import annotations
 
+import datetime as dt
 from collections.abc import Iterator
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
-
-import datetime as dt
 
 import pytest
 from fastapi.testclient import TestClient

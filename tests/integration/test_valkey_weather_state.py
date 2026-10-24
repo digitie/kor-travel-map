@@ -215,7 +215,8 @@ async def test_load_then_nearest_bundle_joins_every_dataset(
             "metrics": {"TMP": [18.0]},
         },
     ]
-    today = (now + timedelta(hours=9)).date()  # KST 날짜
+    # 끝난 두 날의 아침(오늘 아침은 읽는 시각에 따라 partial이라 비교하지 않는다 — W7).
+    today = (now + timedelta(hours=9)).date() - timedelta(days=1)  # KST 어제
     yesterday = today - timedelta(days=1)
     daily = [
         {

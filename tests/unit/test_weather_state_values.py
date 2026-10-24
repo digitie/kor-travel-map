@@ -329,4 +329,5 @@ def test_location_roster_does_not_report_source_status() -> None:
     from kortravelmap.providers.kor_travel_weather_state import DATASET_LOCATIONS
 
     assert DATASET_LOCATIONS.reports_source_status is False
-    assert all(d.reports_source_status for d in WEATHER_STATE_DATASETS if d is not DATASET_LOCATIONS)
+    others = [d for d in WEATHER_STATE_DATASETS if d is not DATASET_LOCATIONS]
+    assert all(d.reports_source_status for d in others)

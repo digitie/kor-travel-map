@@ -719,8 +719,9 @@ class KorTravelMapSettings(BaseSettings):
         max_length=64,
         pattern=r"^[A-Za-z0-9-]+$",
         description=(
-            "weather export 인증 header 이름. 기본은 weather의 기존 관리자 header ``X-Admin-Token``"
-            "(그 토큰은 weather 관리자 쓰기와 cursor 서명 키를 겸한다 — ADR-114 W8의 받아들인 위험). "
+            "weather export 인증 header 이름. 기본은 weather의 기존 관리자 header "
+            "``X-Admin-Token``(그 토큰은 weather 관리자 쓰기와 cursor 서명 키를 겸한다 — "
+            "ADR-114 W8의 받아들인 위험). "
             "weather가 읽기 전용 export 토큰을 내면 이 값과 토큰만 바꾼다(Map 코드 변경 없음). "
             "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_AUTH_HEADER``."
         ),
