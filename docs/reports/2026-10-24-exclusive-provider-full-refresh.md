@@ -12,7 +12,8 @@ converter `/tmp/map419-provider-converter-regression.log`의50PASS0.92초, 중�
 합계190건이다. 부모146건과 A3 PG18/단위4·J tracking4·resource18을 포함한다.
 SDK는 정본 pin을 설치한 전용 target에서 실제 실행했고 기본 CI의 optional skip과 구분한다.
 root/W의6de 제품 delta 승인은 받았지만 아래 최종 시험·문서·main 합성 pin 재대조,
-정확 CI와 fresh UI는 별도 미완이다. 초기/중간 수치는 합산하지 않는다.
+이 문서 고정 시점의 정확 CI와 fresh UI는 대기다. 최종 정확 SHA별 CI·두 리뷰·UI 수용은
+PR 본문과 감사 원장을 참조한다. 초기/중간 수치는 합산하지 않는다.
 
 ## 실제 전후 증거
 
