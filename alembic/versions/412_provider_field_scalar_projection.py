@@ -21,14 +21,18 @@ def _sidecar(name: str) -> str:
 
 _SCHEMA_STATEMENTS: Final[tuple[str, ...]] = (
     """CREATE TABLE feature.provider_field_policy_epoch (
-        singleton boolean PRIMARY KEY DEFAULT true CHECK(singleton),
-        epoch bigint NOT NULL DEFAULT 0 CHECK(epoch >= 0)
+        singleton boolean CONSTRAINT pk_pfp_epoch PRIMARY KEY DEFAULT true
+            CONSTRAINT ck_pfp_singleton CHECK(singleton),
+        epoch bigint NOT NULL DEFAULT 0 CONSTRAINT ck_pfp_epoch CHECK(epoch >= 0)
     )""",
     "INSERT INTO feature.provider_field_policy_epoch(singleton,epoch) VALUES (true,0)",
     """CREATE TABLE feature.provider_field_active_policies (
-        feature_id uuid PRIMARY KEY REFERENCES feature.features(feature_id) ON DELETE RESTRICT,
-        policy_revision bigint NOT NULL CHECK(policy_revision >= 1),
-        field_paths text[] NOT NULL CHECK(field_paths IN (
+        feature_id uuid CONSTRAINT pk_pfp_active PRIMARY KEY
+            CONSTRAINT fk_pfp_active_feature REFERENCES feature.features(feature_id)
+            ON DELETE RESTRICT,
+        policy_revision bigint NOT NULL CONSTRAINT ck_pfp_active_revision
+            CHECK(policy_revision >= 1),
+        field_paths text[] NOT NULL CONSTRAINT ck_pfp_active_fields CHECK(field_paths IN (
             ARRAY['core.name']::text[], ARRAY['place.phones']::text[],
             ARRAY['core.name','place.phones']::text[]
         ))
@@ -73,6 +77,10 @@ def _record_core_sql() -> str:
         END IF;
     ELSE
         PERFORM feature.assert_scoped_candidate_write(p_attempt,p_feature_id);
+        IF NOT EXISTS (SELECT 1 FROM ops.feature_write_attempts
+            WHERE attempt_id=p_attempt AND provider_dataset_id=p_provider_dataset_id) THEN
+            RAISE EXCEPTION 'capture source is outside the attempt dataset' USING ERRCODE='23514';
+        END IF;
     END IF;""",
     )
 
@@ -104,6 +112,7 @@ _ROUTINES: Final[tuple[tuple[str, str, bool], ...]] = (
     ("FUNCTION", "feature.validate_feature_base_field_value()", False),
     ("FUNCTION", "feature._assert_provider_field_projection(uuid)", False),
     ("FUNCTION", "feature.guard_provider_field_projection()", False),
+    ("FUNCTION", "feature._provider_field_projection_dependency_active(text,text)", True),
     ("FUNCTION", "feature.reject_unsupported_active_scalar_mutation()", False),
 )
 _BARRIER_TABLES: Final[tuple[str, ...]] = (
@@ -114,7 +123,6 @@ _BARRIER_TABLES: Final[tuple[str, ...]] = (
     "feature.provider_field_shadow_candidates",
     "provider_sync.source_links",
     "provider_sync.source_entities",
-    "provider_sync.source_records",
     "provider_sync.source_entity_heads",
     "provider_sync.provider_datasets",
     "ops.feature_overrides",
@@ -151,6 +159,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _sidecar("validate_feature_base_field_value"),
     _sidecar("_assert_provider_field_projection"),
     _sidecar("guard_provider_field_projection"),
+    _sidecar("projection_dependency_active"),
     _sidecar("reject_unsupported_active_scalar_mutation"),
     *(
         f"REVOKE ALL ON {kind} {signature} FROM PUBLIC,ktm_feature_runtime"
@@ -164,32 +173,20 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     # 등록은 runtime에 열지 않는다. schema 관리자는 명시적인 격리 검증에만 사용한다.
     "GRANT EXECUTE ON PROCEDURE feature.activate_provider_field_policy(uuid,bigint,text[]) "
     "TO ktm_feature_schema_owner",
+    # 이 권한은 private installer의 CREATE TRIGGER 검증에만 필요하다.
     *(
         f"GRANT EXECUTE ON FUNCTION {signature} TO ktm_feature_schema_owner"
-        for signature in _TRIGGER_FUNCTIONS
+        for signature in (
+            *_TRIGGER_FUNCTIONS,
+            "feature._provider_field_projection_dependency_active(text,text)",
+        )
     ),
     "SET ROLE ktm_feature_schema_owner",
-    *(
-        f"CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON {table} "
-        "FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()"
-        for table in _BARRIER_TABLES
-    ),
-    *(
-        "CREATE CONSTRAINT TRIGGER trg_scalar_projection "
-        f"AFTER INSERT OR UPDATE OR DELETE ON {table} "
-        "DEFERRABLE INITIALLY DEFERRED FOR EACH ROW "
-        "EXECUTE FUNCTION feature.guard_provider_field_projection()"
-        for table in (*_BARRIER_TABLES, "feature.provider_field_active_policies")
-    ),
-    *(
-        f"CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON {table} "
-        "FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()"
-        for table in _REJECT_TABLES
-    ),
-    *(
-        f"REVOKE EXECUTE ON FUNCTION {signature} FROM ktm_feature_schema_owner"
-        for signature in _TRIGGER_FUNCTIONS
-    ),
+    _sidecar("install_projection_guards"),
+    "REVOKE ALL ON FUNCTION feature._install_provider_field_projection_guards() "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "GRANT EXECUTE ON FUNCTION feature._install_provider_field_projection_guards() "
+    "TO ktm_feature_state_procedure_owner",
     "RESET ROLE",
 )
 
@@ -226,6 +223,7 @@ def upgrade() -> None:
         bind.execute(text("RESET ROLE"))
     for name, value in settings.items():
         bind.execute(text("SELECT set_config(:name,:value,true)"), {"name": name, "value": value})
+    bind.execute(text("SET ROLE ktm_feature_schema_owner"))
 
 
 def downgrade() -> None:

@@ -39,6 +39,12 @@ BEGIN
     IF 'place.phones'=ANY(p_field_paths) AND v_kind <> 'place' THEN
         RAISE EXCEPTION 'phones policy requires place subtype' USING ERRCODE='23514';
     END IF;
+    IF EXISTS (SELECT 1 FROM provider_sync.source_links link
+        JOIN provider_sync.source_entities entity USING(source_entity_key)
+        JOIN provider_sync.provider_datasets dataset USING(provider_dataset_id)
+        WHERE link.feature_id=p_feature_id AND NOT dataset.is_active) THEN
+        RAISE EXCEPTION 'inactive source membership requires an explicit retirement protocol' USING ERRCODE='23514';
+    END IF;
     -- 모든 연결을 먼저 열거한다. 다른 role의 필드 기여를 없는 것으로 추정하지 않는다.
     FOR v_member IN
         SELECT dataset.provider_dataset_id,dataset.provider,dataset.dataset_key,

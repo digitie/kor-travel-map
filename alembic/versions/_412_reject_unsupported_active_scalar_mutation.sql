@@ -23,7 +23,8 @@ BEGIN
         RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
     END IF;
     v_feature:=CASE WHEN TG_OP='DELETE' THEN OLD.feature_id ELSE NEW.feature_id END;
-    SELECT * INTO v_active FROM feature.provider_field_active_policies WHERE feature_id=v_feature;
+    SELECT * INTO v_active FROM feature.provider_field_active_policies WHERE feature_id IN (v_feature,CASE WHEN TG_OP<>'INSERT' THEN OLD.feature_id END)
+        ORDER BY feature_id LIMIT 1;
     IF NOT FOUND THEN RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END; END IF;
     IF TG_OP='DELETE' OR TG_TABLE_NAME IN ('source_links','feature_geocode_stamps') THEN
         RAISE EXCEPTION 'active scalar identity or link mutation is unsupported' USING ERRCODE='23514';

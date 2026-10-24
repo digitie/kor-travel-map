@@ -5,8 +5,10 @@ LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
 DECLARE v_key text; v_dataset bigint;
 BEGIN
     PERFORM ops.lock_scoped_feature_write_protocol(true);
-    PERFORM 1 FROM feature.provider_field_policy_epoch WHERE singleton FOR UPDATE;
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write',0));
+    -- 기본 OFF에는 trigger/event 비용이 없다. 첫 명시 cutover에서만 DDL을 원자 설치한다.
+    PERFORM feature._install_provider_field_projection_guards();
+    PERFORM 1 FROM feature.provider_field_policy_epoch WHERE singleton FOR UPDATE;
     -- begin과 동일하게 모든 dataset→entity/head→Feature 순서를 지킨다.
     FOR v_dataset IN SELECT DISTINCT entity.provider_dataset_id
         FROM provider_sync.source_links link JOIN provider_sync.source_entities entity USING(source_entity_key)

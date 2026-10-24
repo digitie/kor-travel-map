@@ -18,6 +18,12 @@ BEGIN
           AND manifest.dependency_key=p_feature::text) THEN
         RAISE EXCEPTION 'candidate Feature is outside the applying manifest' USING ERRCODE='23514';
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.feature_write_manifests manifest
+        WHERE manifest.attempt_id=p_attempt AND manifest.dependency_kind='feature_membership'
+          AND manifest.dependency_key=p_feature::text
+          AND manifest.expected_value=ops.scoped_feature_write_membership_digest(p_feature)) THEN
+        RAISE EXCEPTION 'candidate source membership changed; replan' USING ERRCODE='40001';
+    END IF;
     -- membership를 축소해서 정상처럼 처리하지 않는다. begin 뒤 새 head 잠금은 취득하지 않는다.
     IF NOT EXISTS (SELECT 1 FROM provider_sync.source_links WHERE feature_id=p_feature)
        OR EXISTS (SELECT 1 FROM provider_sync.source_links link
