@@ -117,6 +117,26 @@ def test_managed_file_links_use_canonical_admin_pages() -> None:
 
 
 @pytest.mark.unit
+def test_backup_file_link_targets_existing_backup_page() -> None:
+    from kortravelmap.api.routers.admin_files import _build_links
+
+    links = _build_links(
+        SimpleNamespace(
+            origin_import_job_id=None,
+            upload_id=None,
+            location="backup_root",
+            kind="backup",
+            path="nested/기록 1.dump",
+            provider_dataset_id=None,
+            origin_dagster_run_id=None,
+        )
+    )
+
+    # 백업 UI는 목록 페이지에서 선택한다. 파일 경로를 상세 route로 만들지 않는다.
+    assert [(link.rel, link.href) for link in links] == [("backup", "/admin/backups")]
+
+
+@pytest.mark.unit
 def test_list_rejects_unknown_status(client: TestClient) -> None:
     # enum 검증은 세션 사용 전에 422로 끊는다.
     response = client.get("/v1/admin/files", params={"status": "bogus"})

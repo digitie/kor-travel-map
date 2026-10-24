@@ -10,6 +10,18 @@
 
 ## [Unreleased]
 
+### 수동 Feature 생성의 잠금 대기를 재시도 가능 오류로 표시 (2026-10-24)
+
+- **FIXED**: 공유 writer와 경합해 `55P03`이 발생한 수동 Feature 생성은 내부 오류500 대신
+  기존 `503 LOCK_TIMEOUT`과 `Retry-After: 5`를 반환한다. 실패 transaction/command는
+  rollback되므로 같은 `Idempotency-Key`로 재시도할 수 있다. 다른 DB 오류의 비식별500과
+  권한·입력 검증은 유지한다. migration416은 field override SQL과 상위 patch/create의
+  잠금 순서를 보강하며 새 정책 활성화·수집 배선·전체 동시 쓰기 지원을 뜻하지 않는다.
+
+### 파일 레지스트리의 백업 링크 (2026-10-24)
+
+- **FIXED (admin)**: 파일 상세의 백업 링크가 실제 백업 목록 페이지를 연다. 없는 파일별 상세 route의 prefetch404를 없앴다.
+
 ### weather 현재·예보·세 구간 요약을 Valkey에 세대 단위로 담고 service REST로 준다 (2026-10-24, ADR-114 2단계, T-STATE-02)
 
 - **ADDED (service REST)**: `/v1/service/weather/locations`(목록·근처·영역 ≤ 100 km, `include_current`),
