@@ -49,3 +49,7 @@ native 5개+lineage 1개 모두 27.38초에 통과했다. 최초 소스 8d365e03
 실제 native5+기존lineage1을 함께 재실행하여 10 passed/32.41초를 확인했다.
 이 중 4개는 DB를 사용하지 않는 artifact 단위 검사다. 지역 분할·일반 provider 수집 경로와
 운영 활성화는 계속 미지원이다. 추가된 streaming hash/사전 예산과 선행 guard의 최종 리뷰가 남아 있다.
+
+기존 실패/취소 회귀는 `RuntimeError`/`CancelledError`를 주입한 정상 context rollback이며,
+실제 worker 사망이나 연결 단절의 증거가 아니다. 실제 SIGKILL 검증은 별도
+[전용 시험 보고서](2026-10-24-scoped-native-worker-crash.md)에서 수용한다.

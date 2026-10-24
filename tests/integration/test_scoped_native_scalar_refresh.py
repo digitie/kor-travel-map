@@ -294,7 +294,7 @@ async def test_native_independent_source_dml_actually_overlaps(scalar_engines, m
 
 
 @pytest.mark.parametrize(
-    "failure", [RuntimeError, asyncio.CancelledError], ids=["worker-loss", "cancel"]
+    "failure", [RuntimeError, asyncio.CancelledError], ids=["injected-exception", "injected-cancel"]
 )
 async def test_native_failure_rolls_back_and_same_artifact_recovers(
     scalar_engines, monkeypatch, failure
