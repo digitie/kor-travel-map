@@ -1,6 +1,6 @@
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 
-- 기존 SER/capture/kernel/SH OFF를 보존한 prefix를 두 소스 리뷰 뒤 검증했다. 직접25 PASS20.590초·정본oracle1 PASS26.436초·기존 real client/asset4 PASS17.213초는 별도 실행이다. startup P1 수정·원실패를 보존하며 API재개·추가triple·정확CI는 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
+- 기존 SER/capture/kernel/SH OFF를 보존했다. 직접25·정본oracle1·기존 client4와 별도 ASGI1(503→새요청200→재요청200)·fresh triple7을 검증했다. 공유 cutover DB의 통합11 원실패(9 PASS/2 FAIL)는 보존·합산하지 않는다. 정확 CI·운영·whole snapshot은 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
 
 ## 2026-10-25 — EX context 단일 조회(423)
 
