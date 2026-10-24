@@ -15,6 +15,12 @@ main `0b2dc53d0`을 추가 통합하고 두 작업 기록을 양쪽 보존했다
 - **다음 한 작업: CI green → 소유자 머지 판단 → PinVi 재vendor PR → Manager compose PR(`kor-travel-map-api`에 transport
   주소·토큰·`KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`) → pair 회전 → 배포 뒤 실제 주유소로 `available`·두 페이지 확인.**
 
+## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
+
+- 고정 synthetic fixture와 전용 PostGIS container/template clone으로 native load_bundles→seal/commit의 cold/warm 3회 runner를 구현했다. CPU/RSS/WAL·실제 DML 구간/잠금 샘플·CI artifact를 남기며 전체 T01/동시 쓰기 완료로 세지 않는다.
+- 첫 실제 PG에서 post-upgrade runtime ACL 조정 누락을 확인해 정본 routine/setup pool 폐기·fresh worker 최소권한 preflight/login 검증을 보완했다. GRANT 추가/owner 측정 우회 없이 두 lane을 재수용한다.
+- 기존 global fence/FeatureRepo/winner/API는 변경하지 않는다. 외부 DSN·운영 접속·새 로컬 DB/container0. [범위·미완](reports/2026-10-24-scoped-write-baseline.md).
+
 ## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
 
 - revision+provider/dataset allowlist가 모두 있을 때만 기존 native TX 안에서 shadow를 기록한다. 실제 MCST 이름만 supplied로 선언하며 Geo/파생값/DTO null은 추측하지 않는다.

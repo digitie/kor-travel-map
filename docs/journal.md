@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
+
+- 고정 synthetic fixture와 전용 PostGIS container/template clone으로 native load_bundles→seal/commit의 cold/warm 3회 runner를 구현했다. CPU/RSS/WAL·실제 DML 구간/잠금 샘플·CI artifact를 남기며 전체 T01/동시 쓰기 완료로 세지 않는다.
+- 첫 실제 PG에서 post-upgrade runtime ACL 조정 누락을 확인해 정본 routine/setup pool 폐기·fresh worker 최소권한 preflight/login 검증을 보완했다. GRANT 추가/owner 측정 우회 없이 두 lane을 재수용한다.
+- 기존 global fence/FeatureRepo/winner/API는 변경하지 않는다. 외부 DSN·운영 접속·새 로컬 DB/container0. [범위·미완](reports/2026-10-24-scoped-write-baseline.md).
+
 ## 2026-10-24 — 공용 지도 작업면 채택 후보
 
 Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭·건수/실제 좌표·줌·상세 오버레이를 공통 컴포넌트로 소비한다. Map의 기본 종류·소스·상태 필터와 조회 동작은 보존한다.
