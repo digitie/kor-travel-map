@@ -498,22 +498,35 @@ async def _measure(
     }
 
 
-def _ready(admin: str) -> bool:
+_READY_ATTEMPT_SECONDS = 1.0
+_READY_TOTAL_SECONDS = 30.0
+_READY_PAUSE_SECONDS = 0.1
+
+
+async def _ready(admin: str) -> bool:
+    connection: psycopg.AsyncConnection[Any] | None = None
     try:
-        with psycopg.connect(admin, connect_timeout=1) as connection:
-            connection.execute("SELECT 1")
+        async with asyncio.timeout(_READY_ATTEMPT_SECONDS):
+            connection = await psycopg.AsyncConnection.connect(
+                admin, autocommit=True, connect_timeout=1
+            )
+            await connection.execute("SELECT 1")
         return True
-    except psycopg.OperationalError:
+    except (psycopg.OperationalError, TimeoutError):
         return False
+    finally:
+        if connection is not None:
+            # autocommit이므로 rollback 왕복 없이 public close가 로컬 연결을 종료한다.
+            await connection.close()
 
 
-def _wait_ready(admin: str) -> None:
-    deadline = time.monotonic() + 30
-    while time.monotonic() < deadline:
-        if _ready(admin):
-            return
-        time.sleep(0.1)
-    raise TimeoutError("소유 PostgreSQL 재기동 준비 시간이 30초를 넘었습니다")
+async def _wait_ready(admin: str) -> None:
+    async with asyncio.timeout(_READY_TOTAL_SECONDS):
+        for _ in range(300):
+            if await _ready(admin):
+                return
+            await asyncio.sleep(_READY_PAUSE_SECONDS)
+    raise TimeoutError("소유 PostgreSQL 재기동 준비 시간이 상한을 넘었습니다")
 
 
 async def _start_owned_container(container: Any) -> None:
@@ -609,7 +622,7 @@ async def run_baseline(fixture: Fixture, *, repetitions: int = 3) -> dict[str, A
                 await asyncio.to_thread(_database, admin, "create", name, template)
                 owned.append(name)
                 await asyncio.to_thread(docker_container.restart, timeout=10)
-                await asyncio.to_thread(_wait_ready, admin)
+                await _wait_ready(admin)
                 owner, runtime = engines(name)
                 try:
                     cold = await _measure(owner, runtime, docker_container, case, fixture)
