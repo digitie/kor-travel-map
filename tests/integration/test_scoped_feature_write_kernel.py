@@ -61,10 +61,12 @@ def kernel_database():
             pids_limit=256,
         )
     )
+    captured_id = None
     try:
         container.start()
         actual = container.get_wrapped_container()
         actual.reload()
+        captured_id = actual.id
         assert actual.attrs["Config"]["Labels"]["codex.scoped-kernel"] == identity
         assert "@sha256:" in resolve_postgis_image()
         admin = make_url(container.get_connection_url()).set(drivername="postgresql")
@@ -169,6 +171,9 @@ def kernel_database():
         except docker.errors.NotFound:
             pass
         else:
+            # name/UUID label 외에도 이 fixture가 생성한 실제 object ID만 제거한다.
+            expected_id = captured_id or container.get_wrapped_container().id
+            assert owned.id == expected_id
             assert owned.attrs["Config"]["Labels"].get("codex.scoped-kernel") == identity
             assert owned.name == "kt-map-scope-kernel-" + identity
             owned.remove(force=True, v=True)
