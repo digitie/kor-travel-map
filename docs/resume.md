@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 운영·관리 다중 reader 후속
+
+- 초안 #1374는 관리·운영 GET 13개의 DB 읽기 phase를 RR로 고정한다. 외부 Dagster HTTP는 첫 DB 조회 전에 끝내며 외부 상태까지 같은 snapshot이라고 약속하지 않는다.
+- reconciliation snapshot의 기존 FOR SHARE는 유지하고 이 1개 경로만 RR/read-write로 분리했다. 나머지 12개는 read-only다. 실제 readonly 제어군의 25006 오류를 재현하고, row lock 경합·응답 종료 뒤 writer 재개·pool의 기본 RC 복귀까지 검증했다.
+- 최종 소스 708672f06 실제 PG/ASGI 10 passed, cache 단위 178 passed, 앞선 8 router 단위 510 passed다. 부모 #1372 기반이므로 main 재기준 뒤 CI가 필요하며 두 독립 리뷰·실제 HTTP/UI·운영 적용은 미완이다. [검증과 미완](reports/2026-10-24-api-ops-reader-snapshot-followup.md).
+
 ## 2026-10-24 — 공용 지도 작업면 채택 후보
 
 Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭·건수/실제 좌표·줌·상세 오버레이를 공통 컴포넌트로 소비한다. Map의 기본 종류·소스·상태 필터와 조회 동작은 보존한다.

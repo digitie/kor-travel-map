@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 운영·관리 다중 reader 후속
+
+- 초안 #1374는 관리·운영 GET 13개의 DB 읽기 phase를 RR로 고정한다. 외부 Dagster HTTP는 첫 DB 조회 전에 끝내며 외부 상태까지 같은 snapshot이라고 약속하지 않는다.
+- reconciliation snapshot의 기존 FOR SHARE는 유지하고 이 1개 경로만 RR/read-write로 분리했다. 나머지 12개는 read-only다. 실제 readonly 제어군의 25006 오류를 재현하고, row lock 경합·응답 종료 뒤 writer 재개·pool의 기본 RC 복귀까지 검증했다.
+- 최종 소스 708672f06 실제 PG/ASGI 10 passed, cache 단위 178 passed, 앞선 8 router 단위 510 passed다. 부모 #1372 기반이므로 main 재기준 뒤 CI가 필요하며 두 독립 리뷰·실제 HTTP/UI·운영 적용은 미완이다. [검증과 미완](reports/2026-10-24-api-ops-reader-snapshot-followup.md).
+
 ## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
 
 - 고정 synthetic fixture와 전용 PostGIS container/template clone으로 native load_bundles→seal/commit의 cold/warm 3회 runner를 구현했다. CPU/RSS/WAL·실제 DML 구간/잠금 샘플·CI artifact를 남기며 전체 T01/동시 쓰기 완료로 세지 않는다.
