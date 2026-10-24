@@ -1,3 +1,9 @@
+## 2026-10-24 — M05 중복 후보·판정의 protocol-first 보강(414)
+
+- 실제 기존 M05 CALL과 scoped begin의 Feature/head 역순에서 40P01을 재현했다. 414는 후보 기록·판정 public v2/private inner의 첫 BEGIN에 EX만 추가하고 본문·서명·ACL은 보존한다. 기존 내부 owner EXEC만 정본에 더하며 새 공개 권한·정책 활성화는 없다.
+- 수정 후 실제 PG8개·순수4개 총12 passed/14.23초, 전체 lint373 passed·기존 skip6, 공식 실제 oracle 재비교+metadata2 passed다. 초기 관측 PID/진단 시간 실패는 분리 보존했다. [재현·상한·범위](reports/2026-10-24-manual-dedup-protocol-entry.md).
+- 기본 OFF/정책 seed0/운영 활성화0이며 컨트롤러를 둔 소규모 정확성 시험이다. 전체 writer 전환·Geo·대량/운영 ARM 성능·Weather/Transport 전파·최종 두 리뷰/정확 CI/UI 수용은 미완이다.
+
 ## 2026-10-24 — ADR115 SQL 직접 진입 413 실제 검증
 
 - 기존 SQL 7개의 첫 protocol EX 진입을 원문 signature·본문 SHA-256, 원래 owner/ACL과 함께 검증했다. 공유→배타 승격 거부·실제 두 세션 차단 PID·옛 전역 fence 선점 방지를 포함한 단위/PG/전체 lint **407 PASS/6 기존 skip**, 공식 head oracle·metadata **2 PASS**다.

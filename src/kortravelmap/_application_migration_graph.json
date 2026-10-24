@@ -81,6 +81,12 @@
         "412_provider_scalar_projection"
       ],
       "revision": "413_legacy_sql_protocol_entry"
+    },
+    {
+      "down_revision": [
+        "413_legacy_sql_protocol_entry"
+      ],
+      "revision": "414_manual_dedup_protocol"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
