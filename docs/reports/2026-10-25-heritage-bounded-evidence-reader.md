@@ -63,4 +63,8 @@ SDK 기반 bundle에 synthetic extra raw만 추가해 정본 hash/key/link를 �
 
 저장 raw source의 두 독립 리뷰 뒤 `d3aad3ab3d14486851ce595deb5fffffb52b8961`에서 새3개만3 PASS(14.29초, 기존20 deselected, skip0)를 확인했다. XML metadata는 small370B/압축없음→shape_unsupported,685B/pglz→storage_unsupported,20823B/압축없음→storage_unsupported다. 각각 전체 items[]였으며 exact CID Docker SDK NotFound/label0·공식 oracle 불변을 확인했다. 이전 a2c03의20개와 새로운3개는 중복 없는 별도 fixture 결과이고, 최종 head의 단일23개 실행이라고 부르지 않는다. 별도 공식 oracle1 결과도 합산하지 않는다.
 
-현재 precursor의 작은 positive/권한/입력/snapshot/저장 raw 부정 근거만 확보했다. 추가 membership·정책·lineage·retire0 부정 전수, 대형 history의 EXPLAIN·실제 지원 N·peak, 운영 전체 입력/SH worker와 새schema API startup 호환은 후속 gate다. 실제 전체 입력을 수용하는 운영 동시성 해결로 주장하지 않는다.
+e5 checkpoint 고정 시점에는 precursor의 작은 positive/권한/입력/snapshot/저장 raw 부정 근거를 확보했다. 추가 membership·정책·lineage·retire0 부정 전수, 대형 history의 EXPLAIN·실제 지원 N·peak, 운영 전체 입력/SH worker와 새schema API startup 호환은 후속 gate다. 실제 전체 입력을 수용하는 운영 동시성 해결로 주장하지 않는다.
+
+## 후속 관측: 작은 비용과 schema422 API startup
+
+같은 제품 SQL의 [작은 fixture 비용](2026-10-25-heritage-reader-cost-observation.md)과 정확 e5의 [실제 API startup/READ](2026-10-25-schema422-api-startup-observation.md)를 별도 확인했다. 앞의 후속 gate 중 API startup 호환은 이 범위에서 확인됐지만, 실제 전체 입력·peak·추가 의미 부정·SH worker·운영 활성화는 계속 미완이다. 작은 비용 측정과 새 API 기동을 운영 동시 쓰기 완주로 바꾸어 쓰지 않는다.
