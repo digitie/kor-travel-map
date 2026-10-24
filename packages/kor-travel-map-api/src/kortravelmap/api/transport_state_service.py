@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import json
 import logging
+import zlib
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Literal
@@ -39,6 +40,7 @@ from kortravelmap.settings import KorTravelMapSettings
 
 __all__ = [
     "MAX_PRICE_HISTORY_BODY_BYTES",
+    "MAX_PRICE_HISTORY_PROBLEM_BYTES",
     "PriceHistoryOutcome",
     "PriceHistoryRequest",
     "PriceHistoryUnavailableReason",
@@ -118,7 +120,8 @@ PriceHistoryUnavailableReason = Literal[
 - ``upstream_unavailable``: 그 밖의 5xx·연결 실패.
 - ``upstream_rejected``: 그 밖의 비-200(예: cursor 없이 받은 409·그 밖의 4xx).
 - ``upstream_contract``: 200 본문이 계약과 다르다(다른 ``station_key``·요청과 다른 유종이나 창 밖의
-  행·유한하지 않은 가격·JSON이 아니거나 너무 깊은 본문·``MAX_PRICE_HISTORY_BODY_BYTES`` 초과 포함).
+  행·유한하지 않은 가격·200 본문의 ``source_status=failed``·JSON이 아니거나 너무 깊은 본문·
+  ``MAX_PRICE_HISTORY_BODY_BYTES`` 초과·깨진 gzip·모르는 Content-Encoding 포함).
 
 cursor를 보낸 요청의 transport 409(수집 revision 변경·cursor 만료)는 이유가 아니다 — 응답 전체가
 HTTP 409 ``TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED``다(:attr:`PriceHistoryOutcome.cursor_expired`).
@@ -126,6 +129,10 @@ HTTP 409 ``TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED``다(:attr:`PriceHistoryOutcom
 
 MAX_PRICE_HISTORY_BODY_BYTES = 2 * 1024 * 1024
 """transport 응답 본문(압축 해제 뒤) 상한. 1000행 한 페이지는 약 100 KB다 — 넘으면 계약 위반이다."""
+
+MAX_PRICE_HISTORY_PROBLEM_BYTES = 64 * 1024
+"""비-200 본문 중 읽는 것(503 problem의 ``meta.source_status``)의 상한. 넘거나 못 읽으면 본문 없이
+상태 코드로만 분류한다."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,17 +206,42 @@ class _BodyTooLarge(Exception):
     pass
 
 
-async def _read_capped(response: httpx.Response) -> bytes:
-    """본문을 상한까지만 읽는다(압축 해제 뒤 크기). 넘으면 :class:`_BodyTooLarge`."""
+class _BadEncoding(Exception):
+    pass
+
+
+async def _read_capped(response: httpx.Response, cap: int) -> bytes:
+    """본문을 ``cap`` bytes까지만 읽는다 — 원문(전송) 크기와 압축 해제 뒤 크기 모두.
+
+    httpx의 ``aiter_bytes``는 받은 조각을 통째로 풀어 내놓으므로(작은 gzip 조각이 수십 MB로
+    풀린다) 상한이 무력하다. 여기서는 원문을 ``aiter_raw``로 상한까지 모은 뒤, gzip이면 출력 상한을
+    건 ``zlib.decompressobj``로 푼다. 요청은 ``Accept-Encoding: identity``라 정상이면 gzip이 오지
+    않는다. 깨진·잘린 gzip과 모르는 인코딩은 :class:`_BadEncoding`, 상한 초과는
+    :class:`_BodyTooLarge`다.
+    """
+    encoding = response.headers.get("content-encoding", "").strip().lower()
+    if encoding not in {"", "identity", "gzip"}:
+        raise _BadEncoding
     declared = response.headers.get("content-length")
-    if declared is not None and declared.isdigit() and int(declared) > MAX_PRICE_HISTORY_BODY_BYTES:
+    if declared is not None and declared.isdigit() and int(declared) > cap:
         raise _BodyTooLarge
-    body = bytearray()
-    async for chunk in response.aiter_bytes():
-        body += chunk
-        if len(body) > MAX_PRICE_HISTORY_BODY_BYTES:
+    raw = bytearray()
+    async for chunk in response.aiter_raw():
+        if len(raw) + len(chunk) > cap:
             raise _BodyTooLarge
-    return bytes(body)
+        raw += chunk
+    if encoding != "gzip":
+        return bytes(raw)
+    decoder = zlib.decompressobj(wbits=16 + zlib.MAX_WBITS)
+    try:
+        decoded = decoder.decompress(bytes(raw), cap + 1)
+    except zlib.error as exc:
+        raise _BadEncoding from exc
+    if len(decoded) > cap or decoder.unconsumed_tail:
+        raise _BodyTooLarge
+    if not decoder.eof:
+        raise _BadEncoding  # 잘린 gzip
+    return decoded
 
 
 def _reject_constant(name: str) -> object:
@@ -266,14 +298,33 @@ async def fetch_price_history(
                 headers=headers,
                 transport=transport,
             ) as client,
-            client.stream("GET", path, params=request.params) as response,
+            client.stream(
+                "GET",
+                path,
+                params=request.params,
+                # 한 페이지는 약 100 KB다 — 압축을 받지 않아 본문 상한을 원문 크기로 잰다.
+                headers={"Accept-Encoding": "identity"},
+            ) as response,
         ):
+            # 상태 코드를 먼저 본다. 200만 본문 전체를 읽고, 503만 problem의 meta를 작은 상한으로
+            # 읽는다 — 큰 오류 본문도 상태 코드로 분류된다(cursor 409 신호 포함).
             status_code = response.status_code
-            body = await _read_capped(response)
+            body = b""
+            if status_code == 200:
+                body = await _read_capped(response, MAX_PRICE_HISTORY_BODY_BYTES)
+            elif status_code == 503:
+                try:
+                    body = await _read_capped(response, MAX_PRICE_HISTORY_PROBLEM_BYTES)
+                except (_BodyTooLarge, _BadEncoding, httpx.DecodingError):
+                    body = b""
     except _BodyTooLarge:
         _LOGGER.warning(
             "transport 가격 이력 본문이 %d bytes를 넘는다.", MAX_PRICE_HISTORY_BODY_BYTES
         )
+        return _unavailable("upstream_contract")
+    except (_BadEncoding, httpx.DecodingError) as exc:
+        # 깨진·잘린 gzip·모르는 Content-Encoding — 연결 문제가 아니라 본문이 계약과 다르다.
+        _LOGGER.warning("transport 가격 이력 본문 인코딩 오류: %s", type(exc).__name__)
         return _unavailable("upstream_contract")
     except httpx.TimeoutException as exc:
         _LOGGER.info("transport 가격 이력 timeout: %s", type(exc).__name__)

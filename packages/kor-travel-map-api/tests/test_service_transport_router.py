@@ -8,6 +8,8 @@
 
 from __future__ import annotations
 
+import gzip
+import json
 import math
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta, timezone
@@ -265,6 +267,8 @@ async def test_price_history_success_sends_t4_query_and_parses_the_real_shape() 
         "cursor": "c-1",
     }
     assert sent.headers["X-Kor-Travel-Transport-Service-Token"] == "s" * 40
+    # 압축을 받지 않는다 — 본문 상한을 원문 크기로 잰다(gzip 조각은 통째로 풀린다).
+    assert sent.headers["Accept-Encoding"] == "identity"
 
 
 # transport 503 problem+json(성공한 수집 근거 없음) — export_price_history.py의 실제 본문.
@@ -381,6 +385,101 @@ async def test_price_history_deep_or_oversized_bodies_are_upstream_contract() ->
     )
 
 
+def _gzip_response(payload: bytes, status_code: int = 200) -> httpx.Response:
+    return httpx.Response(
+        status_code, content=gzip.compress(payload), headers={"Content-Encoding": "gzip"}
+    )
+
+
+async def test_price_history_gzip_is_capped_after_decompression() -> None:
+    """identity를 무시하고 gzip이 와도 풀린 크기로 상한을 잰다(작은 압축 조각 → 수 MB)."""
+    bomb = b'{"pad":"' + b"x" * (MAX_PRICE_HISTORY_BODY_BYTES * 3) + b'"}'
+    compressed = gzip.compress(bomb)
+    assert len(compressed) < 64 * 1024
+    outcome = await _fetch(
+        lambda _r: httpx.Response(200, content=compressed, headers={"Content-Encoding": "gzip"})
+    )
+    assert outcome.reason == "upstream_contract"
+    # 상한 안의 정상 gzip 페이지는 그대로 읽는다.
+    ok = await _fetch(lambda _r: _gzip_response(json.dumps(_page()).encode()))
+    assert ok.reason is None
+    assert ok.history is not None and len(ok.history.items) == 2
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, content=b"not gzip at all", headers={"Content-Encoding": "gzip"}),
+        httpx.Response(
+            200,
+            content=gzip.compress(json.dumps(_page()).encode())[:-12],  # 잘린 gzip
+            headers={"Content-Encoding": "gzip"},
+        ),
+        httpx.Response(200, content=b"{}", headers={"Content-Encoding": "br"}),
+    ],
+)
+async def test_price_history_bad_content_encoding_is_upstream_contract(
+    response: httpx.Response,
+) -> None:
+    outcome = await _fetch(lambda _r: response)
+    assert (outcome.history, outcome.reason) == (None, "upstream_contract")
+
+
+async def test_price_history_stream_is_cut_before_buffering_past_the_cap() -> None:
+    yielded: list[int] = []
+
+    async def _chunks() -> Any:
+        for index in range(10):
+            yielded.append(index)
+            yield b" " * (MAX_PRICE_HISTORY_BODY_BYTES // 2 + 1)
+
+    outcome = await _fetch(lambda _r: httpx.Response(200, content=_chunks()))
+    assert outcome.reason == "upstream_contract"
+    # 두 번째 조각이 상한을 넘기므로 붙이기 전에 끊고 나머지는 읽지 않는다.
+    assert yielded == [0, 1]
+
+
+_HUGE = b"x" * (MAX_PRICE_HISTORY_BODY_BYTES * 2)
+
+
+@pytest.mark.parametrize(
+    ("response", "request_", "reason", "cursor_expired"),
+    [
+        (httpx.Response(503, content=_HUGE), None, "upstream_unavailable", False),
+        (
+            httpx.Response(503, content=b"{}", headers={"content-length": str(len(_HUGE))}),
+            None,
+            "upstream_unavailable",
+            False,
+        ),
+        (
+            httpx.Response(503, content=b"\x00garbage", headers={"Content-Encoding": "gzip"}),
+            None,
+            "upstream_unavailable",
+            False,
+        ),
+        (_gzip_response(json.dumps(_NO_COLLECTION).encode(), 503), None, "upstream_no_collection",
+         False),
+        (httpx.Response(404, content=_HUGE), None, "upstream_not_found", False),
+        (httpx.Response(422, content=_HUGE), None, "request_rejected", False),
+        (httpx.Response(501, content=_HUGE), None, "upstream_unsupported", False),
+        (httpx.Response(409, content=_HUGE), PriceHistoryRequest(cursor="c"), None, True),
+    ],
+)
+async def test_price_history_oversized_error_bodies_are_classified_by_status(
+    response: httpx.Response,
+    request_: PriceHistoryRequest | None,
+    reason: str | None,
+    cursor_expired: bool,
+) -> None:
+    outcome = await _fetch(lambda _r: response, request=request_)
+    assert (outcome.history, outcome.reason, outcome.cursor_expired) == (
+        None,
+        reason,
+        cursor_expired,
+    )
+
+
 @pytest.mark.parametrize(
     "body",
     [
@@ -396,6 +495,7 @@ async def test_price_history_deep_or_oversized_bodies_are_upstream_contract() ->
         _page(next_cursor="c", has_more=False),
         _page(has_more="yes"),
         _page(status="unknown"),
+        _page(status="failed"),  # transport는 failed를 503 problem에만 싣는다
         _with_meta(item_count=5),
         _with_meta(item_count=True),
         _with_meta(generated_at=None),

@@ -116,13 +116,13 @@ uni_id, 선행 0 유지)다(경로 성분으로 escape해 넣는다). 질의는 
 휴게소 이력(``/rest-area-fuel-prices/{station_key}/price-history``)은 transport가 저장하지 않아
 501이고 Map은 그 경로를 부르지 않는다."""
 
-PriceHistorySourceStatus = Literal["ok", "stale", "failed"]
-"""transport ``ServiceExportMeta.source_status``. ``failed``는 transport가 503 본문에만 싣는다."""
+PriceHistorySourceStatus = Literal["ok", "stale"]
+"""200 가격 이력 페이지의 transport ``ServiceExportMeta.source_status``. transport는 ``failed``를
+503 problem 본문에만 싣는다 — 200 본문의 ``failed``는 계약 위반이다."""
 
 _PRICE_HISTORY_SOURCE_STATUSES: Final[dict[str, PriceHistorySourceStatus]] = {
     "ok": "ok",
     "stale": "stale",
-    "failed": "failed",
 }
 
 
