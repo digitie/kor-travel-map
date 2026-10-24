@@ -1,3 +1,9 @@
+## 2026-10-24 — 생성 SQL의 protocol-first 진입과 승인 복구(418)
+
+- core/provider/manual/요청승인4개를 첫EX로 보강하고 내부owner2개에 함수EXEC만 추가한다. 승인55P03은 기존503/RetryAfter5로 전달한다.
+- 실제PG/ASGI·기존M01/M04·unit/graph/docs 집중51 PASS, 별도 이전mapper500→수정503/동일key복구를 확인했다. [범위·실패·검증](reports/2026-10-24-creation-protocol-entry.md).
+- 독립2코드리뷰·정확CI·최신418 실UI·전체수집전환/후속전파는 미완이다. 기본OFF/seed0/운영0.
+
 ## 2026-10-24 — protocol EX 재진입 비용 개선(417)
 
 - 이미 보유한 EX는 xact 소유를 재확보한 뒤 반복 설정 조회를 생략한다. session/xact·savepoint·NULL/SH 승격·timeout 계약은 유지한다.
