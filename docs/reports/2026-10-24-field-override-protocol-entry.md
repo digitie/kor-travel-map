@@ -41,9 +41,13 @@ terminal replay가 가능하다. 실제 owned PG가23514/40001/XX000을 내는3�
   INSERT/rollback하여 대기 중 미커밋 선점이 없음을 확인했다.
 - valid author/revoke/patch/manualcreate, SH 승격23514·caller rollback·새 TX 재호출,
   원문 SHA/owner/config/기존 EXECUTE·PUBLIC 폐쇄·비인가 owner42501을 검증했다.
-- active name/phones의 operator override를 쓴 뒤 실제 native source/head 갱신·후보 재투영에도
+- active name/phones의 operator override를 쓴 뒤 실제 scoped SQL source/head→후보/winner
+  재투영에도
   effective 값이 유지되고, revoke 뒤 최신 provider base 값·record/hash lineage로 복원된다.
   category/address 등 미지원 path는 기존23514와 값·override·감사의 전체 rollback을 유지한다.
+  이 사례의 `_refresh`는 실제 PG에서 source/head SQL·kernel/capture/recompute를 직접 실행한다.
+  production `refresh_scoped_provider_scalars` Python helper·일반 collector 배선 호출은 포함하지
+  않으며 그 별도 native 테스트 증거와 합산하지 않는다.
 - oracle 기록은 **1 skipped(13.77초)**이며 비교 성공으로 세지 않는다. 별도 정본 head oracle
   비교·fresh300 metadata는 **2 passed(27.68초)**다. head oracle diff는 SQL2개 첫EX와
   receipt의416 추가뿐이며 수동 편집하지 않았다.

@@ -389,7 +389,7 @@ async def _revision(admin, case):
         )
 
 
-async def test_active_name_phones_override_survives_native_refresh_then_revoke(scalar_engines):
+async def test_active_override_survives_scoped_sql_reprojection_then_revoke(scalar_engines):
     admin, runtime = scalar_engines
     case = await _case(admin, runtime)
     await _activate(admin, case.feature)
