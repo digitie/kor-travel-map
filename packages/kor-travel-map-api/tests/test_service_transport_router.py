@@ -202,6 +202,22 @@ def _with_meta(**changes: Any) -> dict[str, Any]:
     return body
 
 
+def _as_wire(response: httpx.Response) -> httpx.Response:
+    """``content=``·``json=``로 만든 응답은 이미 읽힌 상태라 ``aiter_raw``가 ``StreamConsumed``를
+    낸다 — 실제 전송처럼 원문 stream으로 다시 싼다(``_raw`` 응답은 그대로)."""
+    try:
+        data = response.content
+    except httpx.ResponseNotRead:
+        return response
+    return httpx.Response(
+        response.status_code, headers=response.headers, stream=httpx.ByteStream(data)
+    )
+
+
+def _mock(handler: Any) -> httpx.MockTransport:
+    return httpx.MockTransport(lambda request: _as_wire(handler(request)))
+
+
 async def _fetch(
     handler: Any,
     settings: KorTravelMapSettings = _ENABLED,
@@ -212,7 +228,7 @@ async def _fetch(
         settings,
         _STATION_KEY,
         request=PriceHistoryRequest(limit=10) if request is None else request,
-        transport=httpx.MockTransport(handler),
+        transport=_mock(handler),
     )
 
 
@@ -621,7 +637,7 @@ def history_api(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> _History
 
     async def _patched(_settings: Any, station_key: str, **kwargs: Any) -> Any:
         return await fetch_price_history(
-            state["settings"], station_key, transport=httpx.MockTransport(_handler), **kwargs
+            state["settings"], station_key, transport=_mock(_handler), **kwargs
         )
 
     monkeypatch.setattr(service_transport, "fetch_price_history", _patched)
