@@ -236,53 +236,7 @@ async def test_reconciliation_actual_rowlock_guard_and_pool_lifetime(
     readonly_control: bool,
 ) -> None:
     monkeypatch.setattr(api_db, "_get_engine", lambda: migrated_engine)
-    system = "ops-reader-snapshot-lock"
-    token = "ops-reader-local-snapshot-token"
-    profiles = [
-        ["cache-target:command"],
-        [
-            "cache-target:read",
-            "cache-target:claim",
-            "cache-target:ack",
-            "cache-target:nack",
-            "cache-target:snapshot",
-        ],
-        ["cache-target:restore-fence"],
-        ["cache-target:recovery", "cache-target:recovery-replay"],
-    ]
-    app = create_app(
-        ApiSettings(
-            public_api_key_required=False,
-            vworld_api_key=None,
-            cache_target_service_principals=[
-                {
-                    "principal_id": f"svc:ops-reader-{index}",
-                    "consumer_id": "pinvi-cache-consumer",
-                    "token_sha256": hashlib.sha256(
-                        (token if index == 1 else f"{token}-{index}").encode()
-                    ).hexdigest(),
-                    "scopes": profile,
-                    "external_systems": [system],
-                }
-                for index, profile in enumerate(profiles)
-            ],
-        )
-    )
-    async with AsyncSession(migrated_engine) as writer, writer.begin():
-        await _apply_snapshot_source(
-            writer,
-            external_system=system,
-            target_key="one",
-            event_id="91110000-0000-4000-8000-000000000001",
-            idempotency_key="91110000-0000-4000-8000-000000000002",
-        )
-        command = await _reconciliation_command(writer, key=str(uuid4()))
-        request = await cache_repo.request_cache_target_reconciliation(
-            writer,
-            command_id=command,
-            external_system=system,
-            reason="reader snapshot test",
-        )
+    app, request, token, system = await _prepare_locking_snapshot(migrated_engine)
     if readonly_control:
         app.dependency_overrides[api_db.get_locking_read_snapshot_session] = (
             api_db.get_read_snapshot_session
@@ -354,5 +308,106 @@ async def test_reconciliation_actual_rowlock_guard_and_pool_lifetime(
     finally:
         if writer_task is not None:
             await asyncio.wait_for(writer_task, timeout=3)
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await truncate_committed_test_rows(cleanup, _STREAM_TRUNCATE_SQL)
+
+
+async def _prepare_locking_snapshot(migrated_engine: AsyncEngine):
+    system = "ops-reader-snapshot-lock"
+    token = "ops-reader-local-snapshot-token"
+    profiles = [
+        ["cache-target:command"],
+        [
+            "cache-target:read",
+            "cache-target:claim",
+            "cache-target:ack",
+            "cache-target:nack",
+            "cache-target:snapshot",
+        ],
+        ["cache-target:restore-fence"],
+        ["cache-target:recovery", "cache-target:recovery-replay"],
+    ]
+    app = create_app(
+        ApiSettings(
+            public_api_key_required=False,
+            vworld_api_key=None,
+            cache_target_service_principals=[
+                {
+                    "principal_id": f"svc:ops-reader-{index}",
+                    "consumer_id": "pinvi-cache-consumer",
+                    "token_sha256": hashlib.sha256(
+                        (token if index == 1 else f"{token}-{index}").encode()
+                    ).hexdigest(),
+                    "scopes": profile,
+                    "external_systems": [system],
+                }
+                for index, profile in enumerate(profiles)
+            ],
+        )
+    )
+    async with AsyncSession(migrated_engine) as writer, writer.begin():
+        await _apply_snapshot_source(
+            writer,
+            external_system=system,
+            target_key="one",
+            event_id="91110000-0000-4000-8000-000000000001",
+            idempotency_key="91110000-0000-4000-8000-000000000002",
+        )
+        command = await _reconciliation_command(writer, key=str(uuid4()))
+        request = await cache_repo.request_cache_target_reconciliation(
+            writer,
+            command_id=command,
+            external_system=system,
+            reason="reader snapshot test",
+        )
+    return app, request, token, system
+
+
+async def test_reconciliation_metadata_commit_returns_retryable_response(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(api_db, "_get_engine", lambda: migrated_engine)
+    app, request, token, system = await _prepare_locking_snapshot(migrated_engine)
+    original = AsyncSession.execute
+    injected = False
+
+    async def after_metadata(self: AsyncSession, statement: Any, *args: Any, **kwargs: Any):
+        nonlocal injected
+        result = await original(self, statement, *args, **kwargs)
+        if not injected and str(statement) == cache_repo._GET_RECONCILIATION_SQL:
+            injected = True
+            # 첫 metadata는 snapshot을 열었지만 아직 FOR SHARE를 잡지 않았다.
+            async with migrated_engine.begin() as writer:
+                await writer.execute(text("SET LOCAL statement_timeout='3s'"))
+                await writer.execute(
+                    text(
+                        "UPDATE ops.poi_cache_target_streams SET consumer_enabled=true "
+                        "WHERE external_system=:system"
+                    ),
+                    {"system": system},
+                )
+        return result
+
+    monkeypatch.setattr(AsyncSession, "execute", after_metadata)
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url="http://test"
+        ) as client:
+            url = f"/v1/service/cache-target-reconciliations/{request.request_id}/snapshot"
+            headers = {"X-Kor-Travel-Map-Service-Token": token}
+            response = await client.get(url, headers=headers)
+            assert injected
+            assert response.status_code == 503, response.text
+            assert response.headers["retry-after"] == "1"
+            assert response.json()["code"] == "SNAPSHOT_RETRY_REQUIRED"
+            # 소비자의 새 요청은 권한 검사부터 다시 실행하며 같은 immutable page를 읽는다.
+            recovered = await client.get(url, headers=headers)
+            assert recovered.status_code == 200, recovered.text
+            assert len(recovered.json()["data"]["items"]) == 1
+        async with AsyncSession(migrated_engine) as probe:
+            assert await probe.scalar(text("SHOW transaction_isolation")) == "read committed"
+            assert await probe.scalar(text("SHOW transaction_read_only")) == "off"
+    finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
             await truncate_committed_test_rows(cleanup, _STREAM_TRUNCATE_SQL)

@@ -73,3 +73,12 @@ reconciliation snapshot은 DML이 없지만 `_GET_RECONCILIATION_SNAPSHOT_SQL`�
 행 잠금 보완 후 cache router 178건 PASS(56.64초), DB/cache router strict mypy 2개 PASS. 실제 PG/ASGI 추가 2건 PASS(19.47초): 잘못된 READ ONLY를 주입하면 실제 FOR SHARE에서 25006을 관측하고, 새 dependency에서는 isolation=REPEATABLE READ, transaction_read_only=off를 SHOW로 확인해 정상 200을 받는다. 별도 writer의 `pg_blocking_pids`가 현재 reader PID를 가리키는 동안 snapshot item을 읽고, 응답 종료 뒤 writer 완료와 다음 pool session의 READ COMMITTED/read-write 복구를 확인했다. 시험 초안의 principal role registry 누락은 정본의 4개 exact role profile로 보완했으며 인증 조건을 낮추지 않았다.
 
 최종 새 PG/ASGI 파일 전체 10건 PASS(34.61초). 행 잠금 보완 뒤 all-profile OpenAPI check/Ruff/redaction도 PASS이며 생성 spec 변경 0이다.
+
+
+## 잠금 전 writer commit의 재시도 응답
+
+독립 리뷰가 반대 순서의 경합을 지적했다. metadata 첫 SELECT 뒤 stream UPDATE가 별도 TX에서 commit되면 후속 `FOR SHARE`는 RR의 40001을 낸다. 최초 실제 API 회귀는 이 순서를 주입해 HTTP500을 재현했다(`/tmp/map1374-lock-before.log`, 1 FAIL/16.99초).
+
+해당 GET의 metadata/권한 검사와 page 조회에서 발생한 40001만 기존 Problem 응답의 503 `SNAPSHOT_RETRY_REQUIRED`, `Retry-After: 1`로 변환한다. 전역 오류 처리나 다른 SQLSTATE는 바꾸지 않고 내부 자동 retry도 추가하지 않는다. 소비자가 재요청하면 새 RR에서 principal/scope 검사부터 다시 수행한다. 불완전 page나 healthy 성공으로 돌려주지 않는다.
+
+최종 actual PG/ASGI 전체 11건 PASS(35.45초): 정상 locked reader 뒤 writer 대기/해제, metadata 뒤 writer commit에 대한 503, 새 요청의 200 회복과 pool RC/read-write 복귀를 모두 확인했다. 변경 DB/router strict mypy·Ruff·redaction·정본 all-profile OpenAPI check PASS이며 DTO/생성 spec 변경 0이다. 공유 journal/resume의 root 기록은 그대로 보존했다. 최종 독립 재리뷰와 정확 CI는 별도다.
