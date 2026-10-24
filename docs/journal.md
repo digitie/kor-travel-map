@@ -7,7 +7,7 @@
   최대 366일·미래 금지, 응답 `meta{generated_at, source_collected_at, source_status, item_count}`·`station_key`·`items[
   product_code, observed_at, price]`·`next_cursor`·`has_more`, cursor HMAC 서명·첫 페이지부터 15분·수집 revision 고정,
   revision 변경·만료 409, 변조/다른 필터 cursor·창 위반 422, 성공 근거 없음 503 + meta, 휴게소 이력 501, 오류는 problem+json).
-- 실측(n150 Map Dagster code-server 컨테이너의 transport env로 읽기 전용 GET, odroid `192.168.1.13:12301`): 주유소 하나
+- 실측(n150 Map Dagster code-server 컨테이너의 transport env로 읽기 전용 GET, odroid `<prod-host-ip>:12301`): 주유소 하나
   30일 5행(유종 5개, null 가격 3), `source_status=stale`(opinet 수집 10-21 이후 미성공 — 주유소 export 목록은 503),
   `limit=2` 두 페이지 cursor 정상(486자), 변조 cursor 422·다른 product cursor 422·미래 `to` 422·naive `from` 422·없는 키
   404·휴게소 501, gzip·weak ETag·`private, no-cache`. **Map API 컨테이너에는 transport 주소·토큰·플래그 env가 아직 없다**
