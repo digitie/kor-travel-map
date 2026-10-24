@@ -135,6 +135,12 @@
         "421_stamp_writer_boundary"
       ],
       "revision": "422_heritage_evidence_reader"
+    },
+    {
+      "down_revision": [
+        "422_heritage_evidence_reader"
+      ],
+      "revision": "423_exclusive_context_select"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

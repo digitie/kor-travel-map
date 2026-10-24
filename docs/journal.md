@@ -1,3 +1,7 @@
+## 2026-10-25 — EX context 단일 조회(423)
+
+- 기존 검증·권한을 보존하고 실제9 PASS, 별도 공식 oracle1 PASS/ACL보존, schema423 API startup1 PASS/고정GET3을 확인했다. 초기 감사 실패는 보존한다. 함수A/B6회는 뚜렷한 전체 CPU 개선을 입증하지 못했다. 최종 정확CI·collector/운영은 미완이다. [근거·한계](reports/2026-10-25-exclusive-context-single-select.md).
+
 ## 2026-10-25 — scalar batch 내부 실행 단계 분리
 
 - 기존 begin/manifest 검증/항목 적용/finish를 구체 private 함수로 나누고 실행 AST·SQL·공개 계약·전체30초·완료 조기반환을 보존했다. 두 소스 리뷰와 기존 실제 PG20 PASS/23.57초·정확 정리를 확인했다.
