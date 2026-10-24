@@ -93,6 +93,12 @@
         "414_manual_dedup_protocol"
       ],
       "revision": "415_state_lifecycle_protocol"
+    },
+    {
+      "down_revision": [
+        "415_state_lifecycle_protocol"
+      ],
+      "revision": "416_field_override_protocol"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
