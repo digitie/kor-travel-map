@@ -47,7 +47,7 @@ CPU/메모리나 전체 수집 처리량 개선율로 세지 않는다. 사전 �
   정상 명령으로 복구했다.
 - 원본·후보·정확417 측정 및 집중 시험의 고유4개 container ID를 SDK NotFound로, 각 UUID
   잔존0으로 재확인했다. 원로그·측정 원문·script·정리 증거는 로컬 감사 `map417-*`에 보존했다.
-- 독립2코드리뷰·정확 CI·최신417 실제 UI는 후속 gate다. 선행416 UI18/별도HTTP2 결과를 이
+- 제품 a6097d569의 J/W 독립2코드리뷰 PASS/열린 P0·P1·P2는0이다. 정확 CI·최신417 실제 UI는 후속 gate다. 선행416 UI18/별도HTTP2 결과를 이
   migration의 실제 UI 성공으로 세지 않는다. 문서와 후속 부모 합집합도 최종 검토한다.
 
 기본 OFF·정책 seed0·운영 변경0이다. 신규 identity·catalog/Geo·지역 이동·일반 collector
