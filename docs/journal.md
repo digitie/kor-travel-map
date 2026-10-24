@@ -21,8 +21,10 @@
   main frontend CI가 `npm audit`(next critical)에서 먼저 멈춰 #1355의 `/v1/service/transport/*`가 types에 빠져 있었다.
   user OpenAPI·user-client 타입 불변.
 - 검사(n150 일회용 python:3.13, CI 설치 레시피): openapi `--check`·ruff·mypy --strict(271 files)·lint-imports 초록.
-  unit+lint+api+dagster 5,502 passed·26 failed — 전부 알려진 환경 실패(docker runtime 23·sealed tree 2·smoke settings 1).
-  Valkey 통합 28 passed + 1 error(Docker API ReadTimeout, load 15) → 그 테스트 재실행 통과. 새 router 검사 60 passed.
+  첫 head: unit+lint+api+dagster 5,502 passed·26 failed, Valkey 통합 28 passed + 1 Docker API ReadTimeout(재실행 통과).
+  **리뷰 반영·리베이스 뒤 최종 head(`553e9f3f`)**: openapi `--check`·ruff·mypy --strict(272 files)·lint-imports 초록,
+  unit+lint+api+dagster 5,524 passed·26 failed — 전부 알려진 환경 실패(docker runtime 23·sealed tree 2·smoke settings 1),
+  Valkey 통합 28 passed. router 검사 80개(이 PR 추가분 포함).
 - PinVi 영향(읽기만, origin/main `3e1e8bc0`): `apps/api/tests/contract/kor-travel-map-openapi-service.json`을 vendor하고
   `test_kor_travel_map_transport_contract.py::_EXPECTED_QUERY`가 price-history query를 `{product_code, since, until,
   limit}`로 핀한다 → 재vendor 시 `cursor` 추가 필요. `PRICE_HISTORY_REASONS`가 옛 6개라 새 이유는 `upstream_contract`로
