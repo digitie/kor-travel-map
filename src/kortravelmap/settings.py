@@ -695,6 +695,79 @@ class KorTravelMapSettings(BaseSettings):
         ),
     )
 
+    # ── kor-travel-weather Map export (ADR-114 2단계) ─────────────────────
+    kor_travel_weather_base_url: str | None = Field(
+        default=None,
+        description=(
+            "kor-travel-weather REST API base URL(**scheme+host[:port]만**). Map Dagster의 "
+            "``weather_state_*`` job이 절대경로 ``/v1/service/exports/*``(W1~W5)로 부른다. "
+            "Map API는 weather를 부르지 않는다. 운영은 odroid weather API(ADR-110). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL``."
+        ),
+    )
+    kor_travel_weather_service_token: SecretStr | None = Field(
+        default=None,
+        description=(
+            "kor-travel-weather export 토큰. weather의 기존 관리자 header ``X-Admin-Token``으로 "
+            "보낸다 — 값은 weather ``KOR_TRAVEL_WEATHER_ADMIN_TOKEN``과 같다(비밀). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN``."
+        ),
+    )
+    kor_travel_weather_auth_header: str = Field(
+        default="X-Admin-Token",
+        min_length=1,
+        max_length=64,
+        pattern=r"^[A-Za-z0-9-]+$",
+        description=(
+            "weather export 인증 header 이름. 기본은 weather의 기존 관리자 header "
+            "``X-Admin-Token``(그 토큰은 weather 관리자 쓰기와 cursor 서명 키를 겸한다 — "
+            "ADR-114 W8의 받아들인 위험). "
+            "weather가 읽기 전용 export 토큰을 내면 이 값과 토큰만 바꾼다(Map 코드 변경 없음). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_AUTH_HEADER``."
+        ),
+    )
+    kor_travel_weather_page_size: int = Field(
+        default=2_000,
+        ge=1,
+        le=5_000,
+        description=(
+            "kor-travel-weather export page size. 상한 5000은 weather export ``limit`` 상한과 같다"
+            "(weather는 본문 4 MiB에서도 페이지를 끊는다). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_PAGE_SIZE``."
+        ),
+    )
+    kor_travel_weather_timeout_seconds: float = Field(
+        default=60.0,
+        ge=0.2,
+        le=300.0,
+        description=(
+            "kor-travel-weather REST 호출의 read·write·pool timeout seconds. 연결 수립 상한은 "
+            "``kor_travel_weather_connect_timeout_seconds``가 따로 정한다(ADR-110 결정 3과 같은 "
+            "이유 — weather는 다른 호스트에 있다). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_TIMEOUT_SECONDS``."
+        ),
+    )
+    kor_travel_weather_connect_timeout_seconds: float = Field(
+        default=4.0,
+        ge=0.2,
+        le=10.0,
+        description=(
+            "kor-travel-weather TCP 연결 수립 timeout seconds. "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_CONNECT_TIMEOUT_SECONDS``."
+        ),
+    )
+    weather_daily_summary_days: int = Field(
+        default=14,
+        ge=1,
+        le=31,
+        description=(
+            "Valkey에 보관하는 weather 하루 세 구간(아침·점심·저녁) 요약의 일수(ADR-114 결정 1, "
+            "소유자가 바꿀 수 있는 보관 기간). weather W5 ``days`` 상한 31과 같다. "
+            "1이면 전날 구간이 없어 응답의 ``vs_previous_day``가 언제나 null이다. "
+            "env ``KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS``."
+        ),
+    )
+
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(
         default="INFO",

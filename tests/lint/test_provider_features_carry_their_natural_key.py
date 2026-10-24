@@ -104,6 +104,10 @@ _NON_FEATURE_MODULES: dict[str, str] = {
         "ADR-114 Valkey 상태 값을 만든다 — PG Feature·identity claim이 없다. 자연키는 값의 "
         "``natural_key``에 싣고, id 계산은 PG 변환과 같은 입력임을 단위 검사가 대조한다."
     ),
+    "src/kortravelmap/providers/kor_travel_weather_state.py": (
+        "ADR-114 2단계 Valkey weather 상태 값을 만든다 — PG weather feature는 ADR-105가 지웠다. "
+        "자연키(weather location_id)는 값의 ``location_id``에 싣는다."
+    ),
 }
 
 

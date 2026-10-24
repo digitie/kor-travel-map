@@ -1,0 +1,456 @@
+{
+  "items": [
+    {
+      "location_id": "all-sources-064220de8e734317a52a1c8ab2589a45",
+      "provider": "weatherapi",
+      "metric_key": "HUMIDITY",
+      "value": 50.0,
+      "unit": "%",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:04.818691Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-064220de8e734317a52a1c8ab2589a45",
+      "provider": "weatherapi",
+      "metric_key": "TEMP",
+      "value": 20.0,
+      "unit": "deg_c",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:04.818691Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-064220de8e734317a52a1c8ab2589a45",
+      "provider": "weatherapi",
+      "metric_key": "WIND_SPEED",
+      "value": 5.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:04.818691Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "PTY",
+      "value": 0.0,
+      "unit": "code",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "REH",
+      "value": 50.0,
+      "unit": "%",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "RN1",
+      "value": 0.0,
+      "unit": "mm",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "T1H",
+      "value": 18.4,
+      "unit": "deg_c",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "UUU",
+      "value": 0.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "VEC",
+      "value": 120.0,
+      "unit": "deg",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "VVV",
+      "value": 0.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "c",
+      "provider": "python-kma-api",
+      "metric_key": "WSD",
+      "value": 1.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.123139Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "PTY",
+      "value": 0.0,
+      "unit": "code",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "REH",
+      "value": 50.0,
+      "unit": "%",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "RN1",
+      "value": 0.0,
+      "unit": "mm",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "T1H",
+      "value": 18.4,
+      "unit": "deg_c",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "UUU",
+      "value": 0.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "VEC",
+      "value": 120.0,
+      "unit": "deg",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "VVV",
+      "value": 0.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "a",
+      "provider": "python-kma-api",
+      "metric_key": "WSD",
+      "value": 1.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "PTY",
+      "value": 0.0,
+      "unit": "code",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "REH",
+      "value": 50.0,
+      "unit": "%",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "RN1",
+      "value": 0.0,
+      "unit": "mm",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "T1H",
+      "value": 18.4,
+      "unit": "deg_c",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "UUU",
+      "value": 0.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "VEC",
+      "value": 120.0,
+      "unit": "deg",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "VVV",
+      "value": 0.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "b",
+      "provider": "python-kma-api",
+      "metric_key": "WSD",
+      "value": 1.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:04.106488Z",
+      "forecast_style": "nowcast"
+    },
+    {
+      "location_id": "krforest-dust-001",
+      "provider": "python-krforest-api",
+      "metric_key": "PM10",
+      "value": 35.0,
+      "unit": "㎍/㎥",
+      "target_at": "2026-10-23T13:45:00Z",
+      "known_at": "2026-10-23T14:45:05.591919Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krforest-dust-001",
+      "provider": "python-krforest-api",
+      "metric_key": "TEMP",
+      "value": -2.0,
+      "unit": "℃",
+      "target_at": "2026-10-23T13:45:00Z",
+      "known_at": "2026-10-23T14:45:05.591919Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-be3a643b83de4a4abf942b4f2ef786cc",
+      "provider": "open_meteo",
+      "metric_key": "HUMIDITY",
+      "value": 50.0,
+      "unit": "%",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:04.610988Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-be3a643b83de4a4abf942b4f2ef786cc",
+      "provider": "open_meteo",
+      "metric_key": "TEMP",
+      "value": 20.0,
+      "unit": "deg_c",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:04.610988Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-be3a643b83de4a4abf942b4f2ef786cc",
+      "provider": "open_meteo",
+      "metric_key": "WIND_SPEED",
+      "value": 5.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:04.610988Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "airkorea-a",
+      "provider": "python-airkorea-api",
+      "metric_key": "PM10",
+      "value": 35.0,
+      "unit": "ug/m3",
+      "target_at": "2026-10-23T13:45:00Z",
+      "known_at": "2026-10-23T14:45:05.220679Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "airkorea-a",
+      "provider": "python-airkorea-api",
+      "metric_key": "PM25",
+      "value": 17.0,
+      "unit": "ug/m3",
+      "target_at": "2026-10-23T13:45:00Z",
+      "known_at": "2026-10-23T14:45:05.220679Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-d7509a158fa44712a544b3d31102a2ab",
+      "provider": "openweathermap",
+      "metric_key": "HUMIDITY",
+      "value": 50.0,
+      "unit": "%",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:05.024144Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-d7509a158fa44712a544b3d31102a2ab",
+      "provider": "openweathermap",
+      "metric_key": "TEMP",
+      "value": 20.0,
+      "unit": "deg_c",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:05.024144Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "all-sources-d7509a158fa44712a544b3d31102a2ab",
+      "provider": "openweathermap",
+      "metric_key": "WIND_SPEED",
+      "value": 5.0,
+      "unit": "m/s",
+      "target_at": "2026-10-23T14:00:00Z",
+      "known_at": "2026-10-23T14:45:05.024144Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krforest-M001",
+      "provider": "python-krforest-api",
+      "metric_key": "HUMIDITY",
+      "value": 75.0,
+      "unit": "%",
+      "target_at": "2026-10-23T13:45:00Z",
+      "known_at": "2026-10-23T14:45:05.409211Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krforest-M001",
+      "provider": "python-krforest-api",
+      "metric_key": "TEMP",
+      "value": -2.0,
+      "unit": "℃",
+      "target_at": "2026-10-23T13:45:00Z",
+      "known_at": "2026-10-23T14:45:05.409211Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krforest-M001",
+      "provider": "python-krforest-api",
+      "metric_key": "WIND_SPEED",
+      "value": 1.2,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:45:00Z",
+      "known_at": "2026-10-23T14:45:05.409211Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krex-002",
+      "provider": "python-krex-api",
+      "metric_key": "HUMIDITY",
+      "value": 65.0,
+      "unit": "%",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:05.761167Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krex-002",
+      "provider": "python-krex-api",
+      "metric_key": "TEMP",
+      "value": -2.0,
+      "unit": "℃",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:05.761167Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krex-002",
+      "provider": "python-krex-api",
+      "metric_key": "WEATHER_TEXT",
+      "value": "맑음",
+      "unit": null,
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:05.761167Z",
+      "forecast_style": "observed"
+    },
+    {
+      "location_id": "krex-002",
+      "provider": "python-krex-api",
+      "metric_key": "WIND_SPEED",
+      "value": 1.2,
+      "unit": "m/s",
+      "target_at": "2026-10-23T13:00:00Z",
+      "known_at": "2026-10-23T14:45:05.761167Z",
+      "forecast_style": "observed"
+    }
+  ],
+  "meta": {
+    "generated_at": "2026-10-23T14:45:05.954843Z",
+    "source_collected_at": "2026-10-23T14:45:04.106488Z",
+    "source_status": "ok",
+    "item_count": 44,
+    "snapshot_id": "b7312182-f7bb-491a-8571-0425f24612f0",
+    "snapshot_generated_at": "2026-10-23T14:45:05.943659Z",
+    "as_of": "2026-10-23T14:45:05.943659Z",
+    "next_cursor": null,
+    "has_more": false,
+    "next_since": null
+  }
+}
