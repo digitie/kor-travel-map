@@ -24,7 +24,9 @@ artifact binding 검사 뒤, manifest 검증·항목 DML·finish 앞의 기존 �
 
 ## 영향도와 의미 보존 증명
 
-기준 main은 e07e2050b69cbd114fcdf208997381d0b9aa066e다.
+단계 분리의 최초 기준 main은 e07e2050b69cbd114fcdf208997381d0b9aa066e다.
+이후 main e7874a00ccb7bacd13d5df897864e51ebca3ef71의 reader422·설계 문서를
+통합했으며 단계 분리 모듈은 두 리뷰와 실제 PG 검증을 받은 c76 소스와 byte가 같다.
 실제 Codegraph 조회는 _refresh_batch→_apply_batch와 protocol/epoch/begin/finish
 edge를 확인했다. native apply edge 누락과 hexdigest 오결박이 있어 graph만으로
 폐포를 주장하지 않고 실제 함수 본문 및 직접 caller 검색을 함께 대조했다.
@@ -43,6 +45,14 @@ SQL/오류 문자열 순서도 같다. SQL sidecar·migration·ACL·client·prov
 - 새 private 함수는 기존 statement를 이동했으므로 구현을 그대로 따라 쓰는 새 모의 시험은
   추가하지 않았다. 기존 실제 PG batch 회귀가 rollback·완료 재생·manifest·mode·owner·
   lease·pool1·SDK legacy claim·SH/EX 동등·짧은 cap을 검증한다.
-- 두 독립 소스 리뷰 뒤 필요한 기존 actual PG 회귀를 실행한다. 이 시점 실제 PG0이며
-  새 정확 CI와 최종 리뷰·수용은 PR 본문과 감사 원장을 참조한다.
+- 두 독립 소스 리뷰 뒤 c76 정확 소스에서 기존 actual PG20 PASS/23.57초·skip0을
+  확인했다. 실제 rollback·취소·완료 재생·manifest·mode·owner·SDK legacy claim·
+  SH/EX 동등·짧은 cap·pool1 회귀이며 소유 CID/UUID·runtime backend는0으로 정리했다.
+  감사 map1398-c76-local-acceptance.json과 원 로그/XML을 보존했다.
+- 초기 c76 CI는 세 Python에서 부모 tasks04 본문423자 제한 위반으로 실패했다.
+  제품 실패나 실제 PG 실패로 세지 않으며 원 로그를 보존했다. 이번 통합은 main의
+  검토된283자 본문을 그대로 소비한다. c76 단계 분리와 부모의 기존 제품 byte가
+  각각 보존되어 추가 로컬 PG는 실행하지 않았다.
+- 이 문서 고정 시점 새 합성 HEAD의 정확 CI는 대기다. 새 CI 세대와 최종 부모 합성
+  리뷰·수용은 PR 본문과 감사 원장을 참조하며 초기 실패와 구분한다.
 - 운영/활성화0, 넓은 T-CWRITE 완료 체크는 변경하지 않았다.

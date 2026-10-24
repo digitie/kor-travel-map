@@ -115,6 +115,8 @@
 
 ## T-CWRITE-04 — 독립 데이터셋 동시 쓰기
 
+[전체 snapshot·복구 설계](reports/2026-10-25-full-snapshot-coordination-design.md)는 실제 입력 크기, capture 전수 경계, 영속 결과 복구와 큰 집합 protocol의 남은 구현 순서를 정리한다. 아래 해제 조건은 그대로 미완이며, 작은 reader나 설계 PR의 머지만으로 닫지 않는다.
+
 선행: T-CWRITE-03. 수집 concurrency만 바꾸어 완료하지 않는다.
 
 - [ ] 첫 policy 활성화 및 이후 변경은 배타 protocol gate 아래 영향 closure와 head/membership를
