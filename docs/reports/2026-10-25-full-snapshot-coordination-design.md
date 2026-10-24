@@ -4,6 +4,8 @@
 
 ## 0. 먼저 통과해야 할 실제 전체 입력 문턱
 
+[작은 reader 비용 관찰](2026-10-25-heritage-reader-cost-observation.md)은 같은 fixture의 무관 current 묶음0/1만에서만 측정했다. 17건 성공·18건 예산 거부는 해당 payload의 결과이며 일반 page 크기가 아니다. 실제 전국 입력·전체 apply30초·worker 복구는 이 측정으로 수용하지 않는다.
+
 - 현재 확정된 첫 SH 운영 pair는 없다. Heritage4279/world9494는 기존2730/8192 문턱 밖이다. MCST49/50/51은 reader whole256KiB가 raw+entity+head에서 이미 넘는다(7ec677… 원시 metadata); reader **호출당** 예산으로 나누는 것은 검토할 수 있으나 full artifact 예산을 나누는 허가는 아니다.
 - exact public DTO 구조·8-per-node 순회의 offline 하한을 계산했다. FeatureBundle→Feature/Coordinate/Address/Urls/PlaceDetail→SourceRecord/Link/presence 구조를 유지하고 모든 문자열 **값** 길이를0으로 낮춰도 coord가 관찰된49/50/51은 item2094B, full batch는49(327)=684778B/50(1059)=2217586B/51(786)=1645924B/52(411, coord 미관찰이므로 None skeleton)=845056B다. 50/51은 raw를 비운 구조만으로 prewalk1MiB에서 불가다. 49/52는 하한이1MiB보다 작다는 것뿐이며 실제 성공은 미증명이다.
 - 근거 map-small-snapshot-structural-budget-j-r2.json SHAe61c60ad4c78d1b944bd49b46fe1203b74c5d1d57d2f884ef8d8c2b62f3ecaf9. 유효 public DTO skeleton은 provider conversion/실제 수집 fixture가 아니다. 원천 값은 직렬화하지 않았다. JSONB physical 크기를 prewalk/UTF8 artifact 크기로 그대로 더하지 않는다. 411건 DS52 raw byte는 이번 metadata query 대상도 아니다.
