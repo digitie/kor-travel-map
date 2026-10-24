@@ -112,7 +112,7 @@ async def claim_scoped_feature_write(
         or not isinstance(owner, UUID)
     ):
         raise ValueError("invalid owner or mode")
-    bounded = []
+    bounded: list[ScopedWriteRegion] = []
     for region in regions:
         if not isinstance(region, ScopedWriteRegion) or len(bounded) == _MAX_REGIONS:
             raise ValueError("invalid bounded region plan")
@@ -148,7 +148,7 @@ async def append_scoped_feature_write_manifest(
 ) -> int:
     """공식 호출당 최대 256개만 적재한다. 전체 UUID 목록을 모으지 않는다."""
     _transaction(session)
-    rows = []
+    rows: list[dict[str, Any]] = []
     for member in members:
         if not isinstance(member, ScopedWriteDependency) or len(rows) == 256:
             raise ValueError("invalid bounded manifest batch")

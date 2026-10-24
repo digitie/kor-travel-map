@@ -153,8 +153,12 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _sidecar("guard_apply_completion"),
     "ALTER FUNCTION ops._guard_scoped_feature_write_completion() OWNER TO ktm_feature_state_procedure_owner",
     "REVOKE ALL ON FUNCTION ops._guard_scoped_feature_write_completion() FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops._guard_scoped_feature_write_completion() TO ktm_feature_schema_owner",
     "SET ROLE ktm_feature_schema_owner",
     "CREATE CONSTRAINT TRIGGER trg_fw_attempt_complete AFTER INSERT OR UPDATE ON ops.feature_write_attempts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ops._guard_scoped_feature_write_completion()",
+    "SET ROLE ktm_feature_state_procedure_owner",
+    "REVOKE EXECUTE ON FUNCTION ops._guard_scoped_feature_write_completion() FROM ktm_feature_schema_owner",
+    "SET ROLE ktm_feature_schema_owner",
     _RECEIPT_HEAD_CHECK_SQL,
     "RESET ROLE",
 )
