@@ -7,6 +7,10 @@ BEGIN
         WHERE active.feature_id=p_feature AND active.policy_revision=p_revision) THEN
         RAISE EXCEPTION 'active scalar revision changed; replan' USING ERRCODE='40001';
     END IF;
+    IF EXISTS (SELECT 1 FROM provider_sync.source_links
+        WHERE source_entity_key=p_entity AND feature_id<>p_feature) THEN
+        RAISE EXCEPTION 'single Feature scalar refresh cannot advance a shared source entity' USING ERRCODE='23514';
+    END IF;
     IF NOT EXISTS (SELECT 1 FROM ops.feature_write_attempts attempt
         JOIN provider_sync.provider_datasets dataset ON dataset.provider_dataset_id=attempt.provider_dataset_id
         JOIN provider_sync.source_entities entity ON entity.provider_dataset_id=dataset.provider_dataset_id

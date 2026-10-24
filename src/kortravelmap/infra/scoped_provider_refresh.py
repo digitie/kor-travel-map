@@ -10,9 +10,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
 from typing import Any
 from uuid import UUID
 
+from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -39,6 +43,62 @@ _FIELDS = frozenset({"core.name", "place.phones"})
 _MAX_INPUT_BYTES = 1_048_576
 
 
+def _artifact_json_value(value: Any) -> Any:
+    if isinstance(value, BaseModel):
+        return dict(value)  # raw_data를 재귀 복사하지 않는다.
+    if isinstance(value, (set, frozenset)):
+        return sorted(value)
+    if isinstance(value, (date, datetime)):
+        return value.isoformat()
+    if isinstance(value, (UUID, Decimal)):
+        return str(value)
+    if isinstance(value, Enum):
+        return value.value
+    raise TypeError("unsupported scalar artifact value")
+
+
+def _check_artifact_budget(value: Any, budget: list[int], depth: int = 0) -> None:
+    # iterencode도 큰 단일 string을 한 번에 만들므로 복사/원천 hash 이전에 크기를 막는다.
+    if depth > 64:
+        raise ValueError("scalar refresh artifact nesting exceeds budget")
+    budget[0] -= 8
+    if isinstance(value, str):
+        if len(value) > budget[0]:
+            raise ValueError("scalar refresh artifact exceeds 1 MiB")
+        budget[0] -= len(value.encode())
+    elif isinstance(value, BaseModel):
+        _check_artifact_budget(dict(value), budget, depth + 1)
+    elif isinstance(value, dict):
+        for key, child in value.items():
+            _check_artifact_budget(key, budget, depth + 1)
+            _check_artifact_budget(child, budget, depth + 1)
+    elif isinstance(value, (list, tuple, set, frozenset)):
+        for child in value:
+            _check_artifact_budget(child, budget, depth + 1)
+    if budget[0] < 0:
+        raise ValueError("scalar refresh artifact exceeds 1 MiB")
+
+
+def _artifact_digest(value: Any) -> str:
+    _check_artifact_budget(value, [_MAX_INPUT_BYTES])
+    digest = hashlib.sha256()
+    size = 0
+    encoder = json.JSONEncoder(
+        default=_artifact_json_value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    )
+    for chunk in encoder.iterencode(value):
+        encoded = chunk.encode()
+        size += len(encoded)
+        if size > _MAX_INPUT_BYTES:
+            raise ValueError("scalar refresh artifact exceeds 1 MiB")
+        digest.update(encoded)
+    return digest.hexdigest()
+
+
 def scoped_provider_refresh_input_digest(
     bundle: FeatureBundle, *, feature_id: UUID, dataset_id: int, policy_revision: int
 ) -> str:
@@ -59,6 +119,9 @@ def scoped_provider_refresh_input_digest(
         or bundle.admin_evidence is not None
     ):
         raise ValueError("only existing unexpired primary place scalar refresh is supported")
+    digest = _artifact_digest(
+        ["native-scalar-v1", str(feature_id), dataset_id, policy_revision, bundle]
+    )
     record = bundle.source_record
     if record.raw_payload_hash != make_payload_hash(
         record.raw_data, length=len(record.raw_payload_hash)
@@ -72,18 +135,7 @@ def scoped_provider_refresh_input_digest(
         raw_payload_hash=record.raw_payload_hash,
     ):
         raise ValueError("source record key mismatch")
-    data = bundle.model_dump(mode="json")
-    data["provider_field_presence"]["supplied_fields"] = sorted(presence.supplied_fields)
-    payload = json.dumps(
-        [str(feature_id), dataset_id, policy_revision, data],
-        ensure_ascii=False,
-        allow_nan=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode()
-    if len(payload) > _MAX_INPUT_BYTES:
-        raise ValueError("scalar refresh artifact exceeds 1 MiB")
-    return hashlib.sha256(payload).hexdigest()
+    return digest
 
 
 async def refresh_scoped_provider_scalars(

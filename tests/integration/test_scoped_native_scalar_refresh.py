@@ -293,7 +293,12 @@ async def test_native_independent_source_dml_actually_overlaps(scalar_engines, m
         )
 
 
-async def test_native_failure_rolls_back_and_same_artifact_recovers(scalar_engines, monkeypatch):
+@pytest.mark.parametrize(
+    "failure", [RuntimeError, asyncio.CancelledError], ids=["worker-loss", "cancel"]
+)
+async def test_native_failure_rolls_back_and_same_artifact_recovers(
+    scalar_engines, monkeypatch, failure
+):
     admin, runtime = scalar_engines
     feature, dataset, entity, identity = await _seed(admin)
     before = await _read(admin, feature, entity)
@@ -303,11 +308,11 @@ async def test_native_failure_rolls_back_and_same_artifact_recovers(scalar_engin
 
     async def crash_after_source_dml(session, record):
         await original(session, record)
-        raise RuntimeError("injected worker loss")
+        raise failure("injected worker loss")
 
     with monkeypatch.context() as patch:
         patch.setattr(native, "_upsert_source_record_state", crash_after_source_dml)
-        with pytest.raises(RuntimeError, match="injected worker loss"):
+        with pytest.raises(failure, match="injected worker loss"):
             async with AsyncSession(runtime) as session, session.begin():
                 await native.refresh_scoped_provider_scalars(session, bundle, **plan)
     assert await _read(admin, feature, entity) == before
@@ -339,3 +344,22 @@ async def test_native_older_artifact_does_not_replace_current_winner(scalar_engi
     async with AsyncSession(runtime) as session, session.begin():
         await native.refresh_scoped_provider_scalars(session, older, **old_plan)
     assert await _read(admin, feature, entity) == ("newest", bundle.source_record.source_record_key)
+
+
+async def test_native_wrong_artifact_cannot_change_head_or_winner(scalar_engines):
+    admin, runtime = scalar_engines
+    feature, dataset, entity, identity = await _seed(admin)
+    before = await _read(admin, feature, entity)
+    intended = _bundle(identity, "intended")
+    substituted = _bundle(identity, "substituted")
+    plan = await _plan(runtime, feature, dataset, intended)
+    with pytest.raises(ValueError, match="does not match this input"):
+        async with AsyncSession(runtime) as session, session.begin():
+            await native.refresh_scoped_provider_scalars(session, substituted, **plan)
+    assert await _read(admin, feature, entity) == before
+    async with AsyncSession(runtime) as session, session.begin():
+        await native.refresh_scoped_provider_scalars(session, intended, **plan)
+    assert await _read(admin, feature, entity) == (
+        "intended",
+        intended.source_record.source_record_key,
+    )
