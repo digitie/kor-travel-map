@@ -772,14 +772,15 @@ async def load_datasets_grid(
     now: datetime | None = None,
 ) -> OpsDatasetsGridData:
     """3원 grid를 batch query들로 조립한다. 행별 detail 조회는 하지 않는다."""
-    states = await sync_state_repo.list_all_sync_states(session)
-    policies = await list_all_provider_refresh_policies(session)
-    issue_counts = await count_open_integrity_issues_by_dataset(session)
-    execution_snapshots = await list_dataset_execution_snapshots(session)
+    # 외부 schedule 조회는 DB snapshot을 열기 전에 끝낸다. 외부와 DB의 시점은 별개다.
     schedules = await load_dataset_schedule_index(
         settings=settings,
         client=dagster_client,
     )
+    states = await sync_state_repo.list_all_sync_states(session)
+    policies = await list_all_provider_refresh_policies(session)
+    issue_counts = await count_open_integrity_issues_by_dataset(session)
+    execution_snapshots = await list_dataset_execution_snapshots(session)
     catalog_entries = await list_provider_dataset_catalog(session)
     reference = now or kst_now()
 
@@ -1001,6 +1002,11 @@ async def load_dataset_detail(
 ) -> OpsDatasetDetailData:
     canonical_scope = parse_canonical_sync_scope(sync_scope).value
     reference = now or kst_now()
+    # 외부 schedule 조회는 DB snapshot을 열기 전에 끝낸다. 외부와 DB의 시점은 별개다.
+    schedules = await load_dataset_schedule_index(
+        settings=settings,
+        client=dagster_client,
+    )
     entry = next(
         (
             item
@@ -1147,10 +1153,6 @@ async def load_dataset_detail(
     )
     dataset_issues = next(
         (item for item in issue_counts if item.provider_dataset_id == provider_dataset_id), None
-    )
-    schedules = await load_dataset_schedule_index(
-        settings=settings,
-        client=dagster_client,
     )
     canonical = entry is not None
     orphan_reason = (

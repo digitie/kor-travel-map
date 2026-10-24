@@ -15,7 +15,7 @@ from kortravelmap.infra import geo_release_repo
 from kortravelmap.infra.feature_geocode_stamp_repo import GeoCoverage
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.routers import ops_geo_releases
 from kortravelmap.api.settings import ApiSettings
 
@@ -106,6 +106,7 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
     monkeypatch.setattr(ops_geo_releases, "_current_dataset", _current)
     monkeypatch.setattr(geo_release_repo, "plan_coverage", _coverage)
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     return TestClient(app)
 
 

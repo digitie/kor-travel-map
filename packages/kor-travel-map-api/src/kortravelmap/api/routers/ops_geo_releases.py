@@ -29,7 +29,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["router"]
@@ -336,7 +336,7 @@ async def detect_geo_release(
 )
 async def get_geo_release(
     plan_id: Annotated[int, Path(ge=1)],
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> GeoReleaseDetailResponse:
     """계획·항목과 계획 토큰 기준 커버리지."""
     started_at = perf_counter()

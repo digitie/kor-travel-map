@@ -93,7 +93,7 @@ from kortravelmap.api.dagster_schema import (
     DagsterSensor,
     DagsterSummaryResponse,
 )
-from kortravelmap.api.db import get_engine, get_session
+from kortravelmap.api.db import get_engine, get_read_snapshot_session, get_session
 from kortravelmap.api.feature_update_http import (
     FEATURE_UPDATE_CONFLICT_RESPONSES,
     FEATURE_UPDATE_CREATE_CONFLICT_DESCRIPTION,
@@ -1431,7 +1431,7 @@ async def _load_execution_detail(
 async def get_execution_detail(
     kind: ExecutionKind,
     execution_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     level: Annotated[JobEventLevel | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,

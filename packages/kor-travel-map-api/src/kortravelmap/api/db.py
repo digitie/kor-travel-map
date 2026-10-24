@@ -31,6 +31,7 @@ __all__ = [
     "get_engine",
     "get_session",
     "get_read_snapshot_session",
+    "get_locking_read_snapshot_session",
     "get_public_api_key_session",
     "set_engine_for_test",
     "reset_engine",
@@ -125,6 +126,22 @@ async def get_read_snapshot_session() -> AsyncIterator[AsyncSession]:
 
     engine = _get_engine().execution_options(
         isolation_level="REPEATABLE READ", postgresql_readonly=True
+    )
+    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
+        yield session
+
+
+async def get_locking_read_snapshot_session() -> AsyncIterator[AsyncSession]:
+    """FOR SHARE가 필요한 조회 전용 phase. 기존 read-write 권한 안에서 RR만 보장한다.
+
+    PostgreSQL은 READ ONLY transaction에서 행 잠금을 금지한다. 순수 SELECT reader는
+    기존 ``get_read_snapshot_session``을 유지하며, 이 dependency는 행 잠금 guard를
+    제거하거나 mutation에 쓰기 권한을 새로 주기 위한 경로가 아니다.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    engine = _get_engine().execution_options(
+        isolation_level="REPEATABLE READ", postgresql_readonly=False
     )
     async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
         yield session
