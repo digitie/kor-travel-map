@@ -17,16 +17,18 @@
 ## 현재 실제 확인과 미완
 
 - migration/역할/sidecar/receipt/graph/forward-only와 CREATE 권한 단위 회귀를 합쳐66 PASS, 기존1 skip(6.79초). 첫 초안은 revision35자 때문에2 FAIL/62 PASS였고 원 로그를 보존했다. 32자 이하 이름으로 고쳤으며 검사 기준은 그대로다.
-- 기존420 이후 검증 원문은 byte 동일하다. 새 함수의 role/ACL 실제 catalog 보존, migration 실적용·공식 head oracle, 실제0/1/2행·후속 오류 순서·timeout/동시성 회귀는 아직 실행하지 않았다. 현재 head-schema는 부모422 원본이며 새423 oracle 수용을 주장하지 않는다.
-- 첫 checkpoint의 무조건 CREATE GRANT는 상속 권한이 있는 경우 direct grant를 남길 수 있어 고쳤다. 원 실제 upgrade fake-bind는 해당 경로1 FAIL/나머지1 PASS였고, 수정 뒤 두 경로2 PASS(0.36초)다. 실제 PG ACL 검증으로 세지 않는다.
-- 실제 경계 시험9개를 수집만 확인했다(실행0). 일반 runtime private EXECUTE 거부/명시 owner catalog 관찰/0·1·복수·optional dataset·SH·다른 TX·완료 replay·외부 writer 대기와55P03·원자 rollback을 다룬다. 복수는 기존 두 dataset owner seed 위에 실제 claim/seal/begin만 쌓으며 applying/txid를 직접 만들지 않는다. 별도 두 고권한 manifest negative fixture는 검증기40001/23514와 savepoint 복구만 확인하며 runtime 권한이나 정상 수집 경로로 부르지 않는다. 복합 오류의 모든 최초 실패순서/P0002/P0003 실측은 이9개에 포함하지 않으며 후속 검증 tail의 byte 보존 근거와 구분한다.
-- 두 독립 소스 리뷰와 root의 CPU 슬롯 뒤에만 owned PG를 실행한다. 공개 API/UI·collector 배선·운영 활성화는0이다.
+- 첫 checkpoint의 무조건 CREATE GRANT는 상속 권한이 있는 경우 direct grant를 남길 수 있어 고쳤다. 원 upgrade fake-bind는 해당 경로1 FAIL/나머지1 PASS였고, 수정 뒤 두 경로2 PASS(0.36초)다. 실제 PG ACL 검증으로 세지 않는다.
+- 고정 source `c6bb7943`에서 실제 경계9개가9 PASS(15.406초, 실패·오류·skip0)였다. 일반 runtime private EXECUTE 거부와 명시 owner catalog, 0·정확1·복수·optional dataset·SH·다른 TX·완료 replay를 확인했다. 복수는 두 dataset의 정본 claim/seal/begin으로 만들었으며 applying/txid 직접 쓰기가 아니다. 별도 고권한 manifest 부정 fixture는40001/23514와 savepoint 복구만 확인한다. 외부 public stamp writer의 실제 blocker PID 관계·55P03·새 TX 복구 및 business rollback을 확인했다. 복합 오류 전체 최초 실패순서/P0002/P0003 실측은 포함하지 않는다. 기존420 이후 검증 tail의 byte 동일 근거와 구분한다.
+- 위9개 최초 감사 실행은 도구가 testcontainers의 실제 `{'5432': None}` 표현을 예상하지 못해 create RPC 전 setup오류9개로 멈췄다. 이 한 TCP 표현만 허용하는 수정 뒤 새 UUID로 실제9개를 실행했다. 첫 실패를 제품·시험 성공으로 다시 세지 않는다.
+- 별도 공식 fresh bootstrap/oracle은1 PASS(20.551초, skip0)다. 기존 canonical `application_300_config`/덤프/비교 함수를 바꾸지 않고 감사 출력 경로만 분리했으며 runtime reconcile을 호출하지 않았다. 첫 시도는 외부 감사 시험의 `-c pyproject.toml` 누락으로 async fixture setup오류1개였고, 원 donor와 같은 설정 경로만 복구했다. 원 실패·실제9개·공식1개는 별도 원장이다.
+- 공식 덤프와 두 번째 덤프는 동일하다. 부모422의1,641개 블록과 비교해1,639개가 byte 동일하며 context 함수 본문1개와 receipt의423 허용 literal1개만 바뀌었다. 전체 기존 ACL/함수 header·owner·config는 보존했다. 새 덤프를 `alembic/head-schema.sql`에 반영했다. 이는 이전422 오라클과 새423이 완전히 같다는 주장이 아니다.
+- 두 실행 모두 정확한 owned CID·UUID label·익명 볼륨 정리를 확인했다. 자원2 CPU/1536MiB RAM·swap동일/PID256, 전체2378 Git blob/mode·SDK53 파일 전후·실제9개 project import hash를 검사했다. SDK import 확인을 실제 converter 동작 증거로 세지 않는다.
+- 새 오라클 반영 뒤 offline lint373개와 기존 CREATE 단위2개를 함께 확인해375 PASS/기존6 skip(31.09초)이었다. 앞 정적66개와 중복 합산하지 않는다.
+- 새 최종 HEAD의 전체 CI, schema423 API startup 및 비용은 미완이다. 공개 API/UI·collector 배선·운영 활성화는0이다. 감사 원장은 `map423-owned-nine-r2-acceptance.json`과 `map423-official-oracle-r2-acceptance.json`이다.
 
-## 실제 시험 계획(미실행)
+## 후속 검증 범위
 
-1. 기존 owned bounded fixture의 실제 claim/manifest/seal/begin과 공개 full-refresh 경로를 이용해0행 거부/정확1행 성공 및 기존 caller 회귀를 확인한다. 같은 TX에서 정본 수명주기로 복수 matching attempt를 구성할 수 있는지 먼저 확인한다. 불가능하면 권한 우회 fixture로 실제 경로를 꾸미지 않고 제한을 명시하며, 순수 PL/pgSQL 루프의0/1/2행 임시 fixture 검증과 구분한다.
-2. candidate membership40001/closure23514가 primary STRICT 및 scalar revision 오류보다 먼저 실패하는 순서를 보존한다. 이후 primary STRICT P0002/P0003, revision40001/shared entity23514/target23514를 가능한 정본 fixture에서 대조한다. timeout55P03/cancel57014를 fallback으로 삼키지 않는다.
-3. 실제 함수 owner/ACL/config/signature를 적용 전후 비교하고 protocol/epoch/attempt 잠금과 원자 rollback·같은 연결 GUC 복구를 확인한다. 기존 unmodified canonical bootstrap으로 공식 oracle을 생성·비교한다.
+실제9개 밖의 모든 복합 최초 오류순서·cancel57014를 검증 완료로 확대하지 않는다. 이후 tail은 원문 보존했지만, 모든 SQLSTATE의 실제 회귀와는 별개다. API startup은 새 schema423의 actual preflight/HTTP 읽기를 최소 fresh lab에서 따로 확인한다. 기존 UI 제품 byte 보존과 새 SQL 동작의 실제 증거를 구분하며, 운영 DB에 fixture를 쓰지 않는다.
 
 ## 비용과 범위
 

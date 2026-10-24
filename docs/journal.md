@@ -1,6 +1,6 @@
-## 2026-10-25 — EX context 단일 조회(423, 부분)
+## 2026-10-25 — EX context 단일 조회(423)
 
-- 같은 후보 count/SELECT를 최대2행 조회로 합치는 초안을 추가했다. 기존 검증 순서·권한은 보존하며 정적·ACL 단위66 PASS/기존1 skip이며 실제 경계9개는 미실행이다. 실제 PG/oracle/오류 순서·비용은 미완, 운영0이다. [범위·미실행 계획](reports/2026-10-25-exclusive-context-single-select.md).
+- 기존 검증·권한을 보존한 단일 조회에서 실제9 PASS(15.406초), 별도 공식 fresh oracle1 PASS(20.551초)를 확인했다. 부모1641블록 중1639동일/ACL보존, 초기 감사 setup오류는 별도 보존한다. 최종CI/API startup·비용·운영은 미완이다. [근거·범위](reports/2026-10-25-exclusive-context-single-select.md).
 
 ## 2026-10-25 — 전체 snapshot 동시 쓰기·복구 설계(미구현)
 

@@ -139,21 +139,21 @@ CREATE FUNCTION feature._exclusive_provider_refresh_context(p_feature uuid, p_da
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
-DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_count bigint; v_entity text;
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE;
+        v_row ops.feature_write_attempts%ROWTYPE; v_count integer:=0; v_entity text;
 BEGIN
-    SELECT count(*) INTO v_count FROM ops.feature_write_attempts a
+    -- 0/복수는 false이며 정확 1행일 때만 기존 검증 순서로 진행한다.
+    FOR v_row IN SELECT a.* FROM ops.feature_write_attempts a
     JOIN ops.feature_write_manifests m ON m.attempt_id=a.attempt_id
     WHERE a.status='applying' AND a.apply_txid=txid_current() AND a.exclusive_protocol
       AND a.idempotency_key='native-full-refresh-v1:'||a.input_digest||':'||replace(a.attempt_id::text,'-','')
       AND m.dependency_kind='feature' AND m.dependency_key=p_feature::text
-      AND (p_dataset IS NULL OR a.provider_dataset_id=p_dataset);
-    IF v_count<>1 THEN RETURN false; END IF;
-    SELECT a.* INTO STRICT v_attempt FROM ops.feature_write_attempts a
-    JOIN ops.feature_write_manifests m ON m.attempt_id=a.attempt_id
-    WHERE a.status='applying' AND a.apply_txid=txid_current() AND a.exclusive_protocol
-      AND a.idempotency_key='native-full-refresh-v1:'||a.input_digest||':'||replace(a.attempt_id::text,'-','')
-      AND m.dependency_kind='feature' AND m.dependency_key=p_feature::text
-      AND (p_dataset IS NULL OR a.provider_dataset_id=p_dataset);
+      AND (p_dataset IS NULL OR a.provider_dataset_id=p_dataset) LIMIT 2 LOOP
+        v_count:=v_count+1;
+        IF v_count>1 THEN RETURN false; END IF;
+        v_attempt:=v_row;
+    END LOOP;
+    IF v_count=0 THEN RETURN false; END IF;
     -- prefix는 용도 구분일 뿐이다. 실제 TX/membership/closure/epoch와 EX를 검증한다.
     PERFORM ops.lock_scoped_feature_write_protocol(true);
     PERFORM feature.assert_scoped_candidate_write(v_attempt.attempt_id,p_feature);
@@ -18984,7 +18984,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
