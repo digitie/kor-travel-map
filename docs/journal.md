@@ -1,3 +1,9 @@
+## 2026-10-24 — geo 재시도에 ReadError·WriteError 추가: 브랜치 `fix/geo-retry-readerror`
+
+- 등산로 run `18c4c1d7`(22:12Z)이 선조회 중 `GeoRequestError: transport 실패: ReadError` 한 번으로 두 시도(1h24m·37m)를 잃었다
+  (keep-alive 연결이 요청 도중 끊김). #1357 일시 장애 재시도는 ReadTimeout·RemoteProtocolError만 다시 보냈다 —
+  ReadError·WriteError도 적재 client(opt-in)에서 총 3회까지 다시 보낸다. 연결 수립 실패는 여전히 제외.
+
 ## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
 
 - revision+provider/dataset allowlist가 모두 있을 때만 기존 native TX 안에서 shadow를 기록한다. 실제 MCST 이름만 supplied로 선언하며 Geo/파생값/DTO null은 추측하지 않는다.
