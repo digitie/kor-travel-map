@@ -87,7 +87,8 @@ def record(
         raw_payload_hash=digest,
         raw_data=payload,
         fetched_at=fixture.observed_at + timedelta(seconds=int(measured)),
-        imported_at=fixture.observed_at,
+        # 정본 head는 imported_at(관측 시각)을 먼저 비교한다. warm도 같은 clock을 재사용한다.
+        imported_at=fixture.observed_at + timedelta(seconds=int(measured)),
     )
 
 

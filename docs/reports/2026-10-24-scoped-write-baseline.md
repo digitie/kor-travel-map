@@ -82,3 +82,11 @@ JSON을 발행하지 않았다. 정본 초기화 순서를 보완한 후 두 lan
 
 T-CWRITE-01의 writer/trigger 전수 inventory·실분포/대량 geometry·API/UI 기준선은 미완이다.
 T02 membership/backfill·winner, T03 scope/epoch/gate, T04 실제 DML 동시 쓰기도 남아 있다.
+
+
+3ab의 실제 PG 두 lane에서는 WAL 변환 뒤 alias→canonical 집합 검증이 실패했다.
+seed와 측정의 imported_at이 같아 정본 head의 관측 시각/key 동률 비교에서 일부 측정 원문이
+이전 원문보다 오래된 것으로 남았다. fixture의 측정 imported_at도 fetched_at과 함께 1초
+전진시키고 warm replay는 그 동일 시각을 유지한다. 제품 winner·ACL은 바꾸지 않으며,
+원천 key가 작은 자료의 최신성·같은 replay와 실제 집합/본문 검증으로 재수용한다.
+실패한 3ab에서는 성공 측정 JSON이 발행되지 않았다.
