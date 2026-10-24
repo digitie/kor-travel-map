@@ -6,8 +6,11 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import {
   ExternalLinkIcon,
   GitCompareArrowsIcon,
-  ListIcon,
-  MapIcon,
+  BellIcon,
+  CalendarDaysIcon,
+  FuelIcon,
+  MountainIcon,
+  RouteIcon,
   MapPinnedIcon,
   XIcon,
 } from "lucide-react";
@@ -41,13 +44,12 @@ import { EmptyState } from "@/components/empty-state";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
-import { FilterBar, FilterField } from "@/components/filter-bar";
+import { MapDetailOverlay, MapFilterBar as FilterBar, MapFilterField as FilterField, MapKindFilter, MapTabs as Tabs, MapTabPanel as TabsContent, MapViewTabs } from "@kor-travel/ui/map-controls";
 import { JsonViewer } from "@/components/json-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { Card } from "@/components/ui/card";
 import {
   DataTable,
   type DataTableColumnMeta,
@@ -55,7 +57,6 @@ import {
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   VWorldFeatureClusters,
   VWorldMapView,
@@ -143,10 +144,11 @@ function FeatureDetailPanel({
       : null;
 
   return (
-    <Card
-      className="absolute top-20 right-3 bottom-24 z-10 w-[min(var(--rail),calc(100%-1.5rem))] gap-3 overflow-auto p-4 shadow-elevated"
+    <MapDetailOverlay
+      className="flex flex-col gap-3 p-4"
       data-testid="feature-detail-panel"
-      size="sm"
+      aria-label="선택 Feature"
+      onDismiss={onClose}
     >
       <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
         <div className="flex min-w-0 flex-col gap-0.5">
@@ -246,7 +248,7 @@ function FeatureDetailPanel({
           </>
         ) : null}
       </div>
-    </Card>
+    </MapDetailOverlay>
   );
 }
 
@@ -492,7 +494,7 @@ function useFeaturesClientController() {
   };
 }
 
-const filterLabelClass = "text-2xs leading-none font-medium text-text-secondary";
+const FEATURE_KIND_ICONS = { place: MapPinnedIcon, event: CalendarDaysIcon, notice: BellIcon, price: FuelIcon, route: RouteIcon, area: MountainIcon };
 
 function FeatureMapToolbar({
   activeFeatureKinds,
@@ -510,7 +512,6 @@ function FeatureMapToolbar({
   setProviderFilter,
   setPublicationStateFilter,
   setQualityStateFilter,
-  status,
   toggleFeatureKind,
   truncated,
 }: Pick<
@@ -530,52 +531,22 @@ function FeatureMapToolbar({
   | "setProviderFilter"
   | "setPublicationStateFilter"
   | "setQualityStateFilter"
-  | "status"
   | "toggleFeatureKind"
   | "truncated"
 >) {
-  const queryFailed = clusterMode ? clustersQuery.isError : featuresQuery.isError;
   return (
     <div className="flex flex-col gap-3">
       <FilterBar>
-        <div className="flex min-w-0 flex-col gap-1">
-          <span aria-hidden="true" className={filterLabelClass}>
-            종류
-          </span>
-          <div
-            aria-label="kind 필터"
-            className="flex flex-wrap gap-1"
-            data-testid="kind-filter"
-            role="group"
-          >
-            {FEATURE_KINDS.map((kind) => {
-              const active = activeFeatureKinds.has(kind);
-              return (
-                <Button
-                  aria-pressed={active}
-                  key={kind}
-                  size="sm"
-                  type="button"
-                  variant={active ? "secondary" : "outline"}
-                  onClick={() => toggleFeatureKind(kind)}
-                >
-                  {kind}
-                </Button>
-              );
-            })}
-            <Button
-              disabled={isDefaultKindFilter}
-              disabledReason={`기본 종류(${DEFAULT_FEATURE_MAP_KINDS.join("·")})만 선택된 상태입니다`}
-              size="sm"
-              type="button"
-              variant="ghost"
-              onClick={resetFeatureKinds}
-            >
-              <XIcon data-icon="inline-start" />
-              초기화
-            </Button>
-          </div>
-        </div>
+        <MapKindFilter
+          ariaLabel="kind 필터"
+          testId="kind-filter"
+          options={FEATURE_KINDS.map((kind) => { const Icon = FEATURE_KIND_ICONS[kind]; return { value: kind, label: kind, icon: <Icon aria-hidden="true" /> }; })}
+          value={Array.from(activeFeatureKinds)}
+          onToggle={(kind) => toggleFeatureKind(kind as FeatureKind)}
+          onReset={resetFeatureKinds}
+          resetDisabled={isDefaultKindFilter}
+          resetTitle={`기본 종류(${DEFAULT_FEATURE_MAP_KINDS.join("·")})만 선택된 상태입니다`}
+        />
         <FilterField htmlFor="feature-provider-filter" label="소스">
           <NativeSelect
             aria-label="소스 필터"
@@ -677,7 +648,6 @@ function FeatureMapToolbar({
         </Alert>
       ) : null}
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={queryFailed ? "destructive" : "neutral"}>{status}</Badge>
         {truncated ? (
           <Badge
             data-testid="features-partial-indicator"
@@ -700,6 +670,7 @@ function FeatureMapToolbar({
 function FeatureMapWorkspace({
   clusterItems,
   clusterMode,
+  clustersQuery,
   featureColumns,
   featureItems,
   featureViewMode,
@@ -709,6 +680,7 @@ function FeatureMapWorkspace({
   setSelectedFeatureId,
   setTableSorting,
   showAreaGeometry,
+  status,
   tableSorting,
   updateViewportFromMap,
   viewport,
@@ -716,6 +688,7 @@ function FeatureMapWorkspace({
   ReturnType<typeof useFeaturesClientController>,
   | "clusterItems"
   | "clusterMode"
+  | "clustersQuery"
   | "featureColumns"
   | "featureItems"
   | "featureViewMode"
@@ -725,6 +698,7 @@ function FeatureMapWorkspace({
   | "setSelectedFeatureId"
   | "setTableSorting"
   | "showAreaGeometry"
+  | "status"
   | "tableSorting"
   | "updateViewportFromMap"
   | "viewport"
@@ -741,27 +715,17 @@ function FeatureMapWorkspace({
          * 필터되므로 현재 viewport가 두 뷰의 공통 컨텍스트다). e2e는 "center … · z N"을 읽는다
          * (e2e/live/features-map.live.spec.ts · features-map-input-roundtrip.live.spec.ts).
          */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <TabsList aria-label="보기 전환">
-            <TabsTrigger value="map">
-              <MapIcon data-icon="inline-start" />
-              지도
-            </TabsTrigger>
-            <TabsTrigger value="table">
-              <ListIcon data-icon="inline-start" />
-              테이블
-            </TabsTrigger>
-          </TabsList>
-          <span className="font-mono text-2xs text-text-secondary tabular-nums">
-            center {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
-            {viewport.zoom.toFixed(1)}
-          </span>
-        </div>
+        <MapViewTabs
+          listValue="table"
+          listLabel="테이블"
+          viewport={{ longitude: viewport.lon, latitude: viewport.lat, zoom: viewport.zoom }}
+          status={<Badge variant={(clusterMode ? clustersQuery.isError : featuresQuery.isError) ? "destructive" : "neutral"}>{status}</Badge>}
+        />
 
         <TabsContent className="min-h-0" value="map">
           <div
             className={cn(
-              "relative overflow-hidden rounded-panel border border-border bg-surface-subtle",
+              "kt-map-stage rounded-panel border border-border bg-surface-subtle",
               WORKSPACE_HEIGHT_CLASS,
             )}
           >
@@ -925,7 +889,6 @@ function FeaturesClientView({
           setProviderFilter={setProviderFilter}
           setPublicationStateFilter={setPublicationStateFilter}
           setQualityStateFilter={setQualityStateFilter}
-          status={status}
           toggleFeatureKind={toggleFeatureKind}
           truncated={truncated}
         />
@@ -933,6 +896,8 @@ function FeaturesClientView({
         <FeatureMapWorkspace
           clusterItems={clusterItems}
           clusterMode={clusterMode}
+          clustersQuery={clustersQuery}
+          status={status}
           featureColumns={featureColumns}
           featureItems={featureItems}
           featureViewMode={featureViewMode}
