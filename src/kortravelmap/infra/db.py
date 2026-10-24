@@ -85,6 +85,7 @@ _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
         "feature.author_feature_field_overrides(uuid,bigint,text,text,bigint,jsonb,jsonb)",
         "feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)",
         "feature.reactivate_admin_feature_state(uuid,bigint,text,text,bigint,text,text)",
+        "feature.record_provider_field_candidates(uuid,bigint,text,text,bigint,text,boolean,jsonb,jsonb)",
         "feature.revoke_feature_field_overrides(uuid,bigint,text,text,bigint,text[])",
         "feature.revoke_lifecycle_override(uuid,text,bigint)",
         "feature.transition_admin_feature_state(uuid,text,text,text,bigint,text,text,text)",

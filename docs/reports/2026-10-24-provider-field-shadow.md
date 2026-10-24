@@ -60,6 +60,12 @@ migration은 forward-only다. 오류는 같은 transaction으로 rollback하므�
 
 ## 검증 상태
 
+전체 CI에서 shadow 표의 ORM metadata와 recorder의 정확한 runtime procedure 허용 목록
+누락을 발견해 보완했다. 실제 target metadata에 두 표의 CHECK/FK/index를 모두 선언하며,
+preflight는 recorder의 정확한 signature만 허용하고 정책 등록과 직접 DML 차단은 유지한다.
+사전검사에 실패해 호출자에게 반환되지 않은 테스트 engine도 즉시 dispose하여 socket 누수를
+막는다. fresh metadata clean·실제 runtime LOGIN/ACL·실패 시 자원 회수 회귀로 검증한다.
+
 실제 PG의 R1/R2 carry·explicit null·presence unknown·runtime ACL, 불변 fieldset·재등록·잘못된
 정책의 원자 실패, 두 session의 global-first/오래된 RR snapshot을 확인했다. 최종 수치와 source
 SHA·전체 CI/두 독립 리뷰/HTTP·UI는 PR 수용 기록에 남기며 현재 모두 완료로 표현하지 않는다.
