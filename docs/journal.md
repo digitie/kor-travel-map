@@ -16,7 +16,11 @@
 - weather ETag 확인(main `7aa7e70` `export_snapshots.py`): ETag는 `snapshot_id`를 포함하고 같은 manifest의 snapshot은 TTL
   15분 동안만 재사용된다 — 15분보다 긴 주기의 poll은 내용이 같아도 거의 매번 200이다(관측 :25→:40 같은 짧은 간격에서만
   304 기대). 비용은 주기 정렬로 줄인다.
-- 검사: GATE2_RESULT
+- 검사(n150 일회용 python:3.13, origin/main `1d01ccbc2` 위 rebase): ruff·mypy --strict(279)·lint-imports·OpenAPI drift 초록,
+  통합(실제 Valkey, root `filterwarnings=error` 세션) `test_valkey_{weather,transport}_state.py` 33 passed, unit+lint+api
+  4,696 passed·24 failed(전부 main 기준선 환경 실패 — docker runtime 23·`test_settings_default_values` 1), dagster 패키지
+  세션 905 passed. 첫 재검사에서 잡은 둘을 고쳤다: rebase가 남긴 diff3 기준 마커 줄(CHANGELOG·journal·resume),
+  `POST /locations/batch`의 domain command registry 등록(`_query`, 쓰기 수 79 → 80).
 
 ## 2026-10-24 — ADR-114 2단계: weather 현재·예보·세 구간 요약 Valkey·service REST: 브랜치 `feat/adr114-valkey-weather`
 
