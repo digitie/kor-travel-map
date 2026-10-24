@@ -1,3 +1,10 @@
+## 2026-10-24 — ADR115 제한 native scalar 비용 실측(#1376)
+
+- schema412의 로컬 amd64·2CPU/1536MiB 격리 환경에서 고정 2dataset·2record를 직렬/병렬2 각각 fresh clone 3회로 측정했다. 중앙값 elapsed는 **273.81→158.42ms**였지만 **PG CPU는 +4.2%**여서 CPU 감소를 입증하지 못했다. 전체 수집·운영 ARM·대량/공유 Feature 성능으로 일반화하지 않는다.
+- 별도 정확성 probe에서 두 실제 source DML의 미커밋 중첩 79.23ms를 확인했다. 이 강제 barrier는 성능 6회에서 제외했고, 결과/lineage/완료 receipt hash는 모두 같았다. 자체 container의 정확 생성 ID 정리를 확인했으며 운영·provider 호출은 0건이다.
+- 실측 source는 `4c9916d0b90406a0613ca8b41434260b6ec85696`의 `tracked_clean=true`이고, 현재 runner SHA256 `64cd3944e648a2be957aee01aec78a3bb845f8585b80770b740e44122d154fc9`와 같다. 원시 JSON SHA256 `f3f33144390854288657d47209dada2c5c5f6092dd4b7fc1b1dad61d2dbd236f`와 로그는 별도 로컬 감사 보관소에 동일 bytes로 보존했다.
+- 두 독립 source 리뷰를 통과했으나 정확 CI·전체 T-CWRITE 수용은 별도다. 최신 부모 대비 제품 소스 변경 0, 기본 OFF·정책 seed0·운영0을 유지한다. 413 전체 SQL writer 전환·일반 수집 배선·API p95·Weather/Transport 전파는 이 측정의 완료 범위가 아니다. [수치·실패·제약](reports/2026-10-24-scoped-native-scalar-measurement.md).
+
 ## 2026-10-24 — ADR115 제한 native scalar 실제 DML 중첩
 
 - 기존 primary 장소의 이름·전화만 다루는 명시 helper를 별도 추가했다. claim artifact 검증→protocol/epoch/manifest→source/head→후보/winner→finish를 같은 TX에 묶는다. 자동 수집·지역 분할·운영 활성화는 없다.
