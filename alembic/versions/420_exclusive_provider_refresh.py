@@ -10,8 +10,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "419_exclusive_provider_refresh"
-down_revision: str | None = "418_creation_protocol"
+revision: str = "420_exclusive_provider_refresh"
+down_revision: str | None = "419_retire_pg_transport_values"
 branch_labels: str | None = None
 depends_on: str | None = None
 _EXPECTED: Final[dict[str, str]] = {
@@ -59,7 +59,8 @@ ALTER TABLE ops.application_schema_operation_receipts
         '416_field_override_protocol',
         '417_protocol_ex_reentry',
         '418_creation_protocol',
-        '419_exclusive_provider_refresh'
+        '419_retire_pg_transport_values',
+        '420_exclusive_provider_refresh'
     ))
 """
 
@@ -69,10 +70,10 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
 )
 _SIDECARS: Final = (
-    "_419_exclusive_refresh_context.sql",
-    "_419_validate_full_refresh.sql",
-    "_419_reject_unsupported_active_mutation.sql",
-    "_419_validate_base_field_value.sql",
+    "_420_exclusive_refresh_context.sql",
+    "_420_validate_full_refresh.sql",
+    "_420_reject_unsupported_active_mutation.sql",
+    "_420_validate_base_field_value.sql",
 )
 
 
@@ -92,7 +93,7 @@ def upgrade() -> None:
         or hashlib.sha256(body.encode()).hexdigest() != _EXPECTED[name]
         for name, body, owner, sd, kind in rows
     ):
-        raise RuntimeError("reviewed active guard definition drifted before419")
+        raise RuntimeError("reviewed active guard definition drifted before420")
     settings = dict(
         bind.execute(
             text(

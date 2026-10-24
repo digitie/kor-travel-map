@@ -10,8 +10,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "420_stamp_writer_boundary"
-down_revision: str | None = "419_exclusive_provider_refresh"
+revision: str = "421_stamp_writer_boundary"
+down_revision: str | None = "420_exclusive_provider_refresh"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -60,8 +60,9 @@ ALTER TABLE ops.application_schema_operation_receipts
         '416_field_override_protocol',
         '417_protocol_ex_reentry',
         '418_creation_protocol',
-        '419_exclusive_provider_refresh',
-        '420_stamp_writer_boundary'
+        '419_retire_pg_transport_values',
+        '420_exclusive_provider_refresh',
+        '421_stamp_writer_boundary'
     ))
 """
 _REWIRE_SQL: Final[str] = """
@@ -87,12 +88,12 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "ktm_feature_state_procedure_owner",
     "GRANT CREATE ON SCHEMA feature TO ktm_feature_state_procedure_owner",
     "SET ROLE ktm_feature_state_procedure_owner",
-    _sidecar("_420_stamp_writer_entry.sql"),
+    _sidecar("_421_stamp_writer_entry.sql"),
     "GRANT EXECUTE ON FUNCTION feature.guard_stamp_writer_entry() TO ktm_feature_schema_owner",
-    _sidecar("_420_legacy_stamp_upsert.sql"),
-    _sidecar("_420_validate_scoped_stamps.sql"),
-    _sidecar("_420_lock_scoped_stamps.sql"),
-    _sidecar("_420_reobserve_scoped_stamps.sql"),
+    _sidecar("_421_legacy_stamp_upsert.sql"),
+    _sidecar("_421_validate_scoped_stamps.sql"),
+    _sidecar("_421_lock_scoped_stamps.sql"),
+    _sidecar("_421_reobserve_scoped_stamps.sql"),
     "REVOKE ALL ON FUNCTION feature.guard_stamp_writer_entry() FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION "
     "feature._validate_scoped_provider_geocode_stamps(uuid,uuid,text,t"
@@ -111,10 +112,10 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "feature.reobserve_scoped_provider_geocode_stamps(uuid,uuid,text,t"
     "ext,jsonb) TO ktm_feature_runtime",
     "SET ROLE ktm_feature_schema_owner",
-    _sidecar("_420_projection_guard_inventory.sql"),
+    _sidecar("_421_projection_guard_inventory.sql"),
     "REVOKE ALL ON FUNCTION feature._assert_stamp_projection_guard_inventory(boolean) "
     "FROM PUBLIC,ktm_feature_runtime",
-    _sidecar("_420_install_projection_guards.sql"),
+    _sidecar("_421_install_projection_guards.sql"),
     _REWIRE_SQL,
     _RECEIPT_HEAD_CHECK_SQL,
 )
@@ -131,7 +132,7 @@ def upgrade() -> None:
         row[1:] != ("ktm_feature_schema_owner", True, "f")
         or hashlib.sha256(row[0].encode()).hexdigest() != _EXPECTED_INSTALLER_BODY_SHA
     ):
-        raise RuntimeError("projection installer definition drifted before420")
+        raise RuntimeError("projection installer definition drifted before421")
     prior_create = bool(
         bind.scalar(
             text(

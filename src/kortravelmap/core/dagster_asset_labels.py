@@ -7,10 +7,7 @@ from typing import Final
 DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
     "feature_event_datagokr_cultural_festivals": "전국 문화축제",
     "feature_place_transport_fuel_stations": "주유소 위치",
-    "feature_price_transport_fuel_stations": "주유소 가격",
     "feature_place_transport_rest_areas": "고속도로 휴게소",
-    "feature_price_transport_rest_areas": "휴게소 유가",
-    "feature_notice_transport_highway_incidents": "고속도로 교통공지",
     "feature_place_krheritage_items": "국가유산",
     "feature_event_krheritage_events": "국가유산 행사",
     "feature_place_mois_licenses": "인허가 장소",

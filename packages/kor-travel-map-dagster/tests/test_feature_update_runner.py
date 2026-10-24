@@ -825,7 +825,7 @@ def test_runner_rejects_two_specs_claiming_the_same_operation_key() -> None:
         )
         for asset_key in (
             "feature_place_transport_fuel_stations",
-            "feature_price_transport_fuel_stations",
+            "feature_place_transport_rest_areas",
         )
     )
 
@@ -865,7 +865,7 @@ async def test_runner_rejects_a_spec_whose_asset_key_is_not_the_handler_asset() 
                 run=_unused_run,
                 resources=_empty_resources,
                 # 실재하는 asset이지만 이 operation의 handler asset은 아니다.
-                asset_key="feature_price_transport_fuel_stations",
+                asset_key="feature_place_transport_rest_areas",
             ),
         ),
     )

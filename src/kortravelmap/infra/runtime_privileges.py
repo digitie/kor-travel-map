@@ -61,7 +61,7 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "current_price_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_aliases": ("SELECT",),
     "feature_events": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    # 420: 직접 stamp I/U는 회수하고 검토된 EX/SH SD만 쓴다. FK CASCADE는 별도다.
+    # 421: 직접 stamp I/U는 회수하고 검토된 EX/SH SD만 쓴다. FK CASCADE는 별도다.
     "feature_geocode_stamps": ("SELECT",),
     "feature_notices": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_places": ("SELECT", "INSERT", "UPDATE", "DELETE"),
@@ -947,13 +947,13 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
-    "feature._assert_stamp_projection_guard_inventory": "420_stamp_writer_boundary",
-    "feature.upsert_provider_geocode_stamps_ex": "420_stamp_writer_boundary",
-    "feature.lock_scoped_provider_geocode_stamps": "420_stamp_writer_boundary",
-    "feature.reobserve_scoped_provider_geocode_stamps": "420_stamp_writer_boundary",
-    "feature.guard_stamp_writer_entry": "420_stamp_writer_boundary",
-    "feature._validate_scoped_provider_geocode_stamps": "420_stamp_writer_boundary",
-    "feature.validate_exclusive_provider_snapshot": "419_exclusive_provider_refresh",
+    "feature._assert_stamp_projection_guard_inventory": "421_stamp_writer_boundary",
+    "feature.upsert_provider_geocode_stamps_ex": "421_stamp_writer_boundary",
+    "feature.lock_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
+    "feature.reobserve_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
+    "feature.guard_stamp_writer_entry": "421_stamp_writer_boundary",
+    "feature._validate_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
+    "feature.validate_exclusive_provider_snapshot": "420_exclusive_provider_refresh",
     "feature.lock_provider_field_policy_epoch": "412_provider_scalar_projection",
     "feature.assert_scoped_provider_scalar_target": "412_provider_scalar_projection",
     "feature.record_scoped_provider_field_candidates": "412_provider_scalar_projection",

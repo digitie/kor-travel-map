@@ -30,6 +30,7 @@ from kortravelmap.dto.geo_dataset import DatasetRef
 from kortravelmap.geocoding import GeoCallStats
 from kortravelmap.infra import exclusive_provider_refresh as full
 from kortravelmap.infra import feature_repo
+from kortravelmap.infra.application_schema_head import application_schema_head
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.providers.feature_operation_registry import resolve_feature_operation_handler
 from kortravelmap.providers.krheritage import (
@@ -131,7 +132,7 @@ async def collector_client(scalar_engines, scalar_container, request):
         ]
     )
     head = await _readonly(admin, "SELECT version_num FROM alembic_version")
-    assert [row["version_num"] for row in head] == ["419_exclusive_provider_refresh"]
+    assert [row["version_num"] for row in head] == [application_schema_head()]
     request.node.user_properties.append(("actual_schema", head[0]["version_num"]))
     runtime = make_async_engine(
         fixture_runtime.url.render_as_string(hide_password=False),
