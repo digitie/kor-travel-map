@@ -12,7 +12,9 @@ membership의 이름·전화만 지원한다. 자동 수집에는 연결하지 �
 
 원천 fetch와 sealed manifest 준비는 apply 밖에서 완료한다. 적용 artifact는 typed bundle,
 정본 Feature UUID, dataset, 명시 policy revision의 결정적 SHA256으로 claim에 묶는다.
-입력은 1 MiB 이하이며 presence 집합은 정렬한다. manifest owner/digest와 artifact가 다르면
+입력은 1 MiB 이하이며 presence 집합은 정렬한다. 직렬화 전에 깊이 64와 노드·문자 예산을
+검사하고, typed model의 raw payload를 재귀 복사하지 않는 streaming encoder로 SHA256을
+계산한다. 큰 단일 문자열·과도한 중첩·수많은 항목은 원천 hash/JSON 복사 전에 거부한다. manifest owner/digest와 artifact가 다르면
 source DML 전에 거부한다. protocol 공유→policy epoch 공유→begin의 정렬 잠금→target
 preflight→기존 source entity/record/head upsert→scoped 후보→winner→finish 순서다.
 모두 caller의 같은 READ COMMITTED transaction이며 helper는 commit하지 않는다.
@@ -41,3 +43,9 @@ DML을 완료한 뒤 어느 쪽도 commit하기 전에 barrier에 함께 도착�
 native 5개+lineage 1개 모두 27.38초에 통과했다. 최초 소스 8d365e033의 독립 소스 리뷰
 1인은 PASS다. 최종 두 적대 리뷰·CI·실제 HTTP/UI·대량/장애 주입·모든 writer 전환은 남아 있다.
 412를 먼저 수용한 뒤 main에 재기준하여 검증한다. Weather·Transport 전파는 Map 수용 뒤다.
+
+
+최신 412 공유 entity/Geo guard `2d7b53f39`를 통합한 뒤, 예산·입력 순서 결정성 4개와
+실제 native5+기존lineage1을 함께 재실행하여 10 passed/32.41초를 확인했다.
+이 중 4개는 DB를 사용하지 않는 artifact 단위 검사다. 지역 분할·일반 provider 수집 경로와
+운영 활성화는 계속 미지원이다. 추가된 streaming hash/사전 예산과 선행 guard의 최종 리뷰가 남아 있다.
