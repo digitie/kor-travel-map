@@ -918,3 +918,90 @@ async def test_python_stamp_wrapper_rejects_oversize_without_sql(boundary):
         assert statements == []
     finally:
         event.remove(runtime.sync_engine, "before_cursor_execute", count)
+
+
+async def test_legacy_missing_feature_fk_rejects_entire_batch(boundary):
+    admin, runtime = boundary
+    ids = await _nonactive_features(admin, 1)
+    missing = str(uuid4())
+
+    async def insert():
+        async with AsyncSession(runtime) as session, session.begin():
+            await upsert_stamps(
+                session, current=_A, outcomes={ids[0]: "called", missing: "geocoded"}
+            )
+
+    with pytest.raises(DBAPIError) as caught:
+        await insert()
+    assert caught.value.orig.sqlstate == "23503"
+    assert await _stamps(admin, ids + [missing]) == []
+    assert runtime.pool.checkedout() == 0
+
+
+@pytest.mark.parametrize("existing_stamp", [False, True], ids=["new-insert", "reobserve"])
+@pytest.mark.parametrize("delete_commits", [False, True], ids=["parent-rollback", "parent-delete"])
+async def test_legacy_fk_actual_parent_delete_race(boundary, existing_stamp, delete_commits):
+    admin, runtime = boundary
+    ids = await _nonactive_features(admin, 1)
+    if existing_stamp:
+        async with AsyncSession(runtime) as session, session.begin():
+            assert await upsert_stamps(session, current=_A, outcomes={ids[0]: "called"}) == 1
+    started = asyncio.get_running_loop().create_future()
+    task = None
+    try:
+        async with AsyncSession(admin) as holder:
+            transaction = await holder.begin()
+            try:
+                holder_pid = await holder.scalar(text("SELECT pg_backend_pid()"))
+                # 정본 highpriv fixture 관리자만 사용한다. runtime DELETE 권한 확대가 아니다.
+                deleted = await holder.execute(
+                    text("DELETE FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+                    {"id": ids[0]},
+                )
+                assert deleted.rowcount == 1
+
+                async def writer():
+                    async with AsyncSession(runtime) as session, session.begin():
+                        await session.execute(text("SET LOCAL lock_timeout='5s'"))
+                        await session.execute(text("SET LOCAL statement_timeout='8s'"))
+                        started.set_result(await session.scalar(text("SELECT pg_backend_pid()")))
+                        return await upsert_stamps(
+                            session, current=_B, outcomes={ids[0]: "geocoded"}
+                        )
+
+                task = asyncio.create_task(writer())
+                writer_pid = await asyncio.wait_for(asyncio.shield(started), 3)
+                await _wait_blocker(admin, writer_pid, holder_pid)
+                assert not task.done()
+                # protocol 대기가 아닌 실제 FK/부모삭제 xact 경합임을 분리한다.
+                locks = await _read(
+                    admin,
+                    """SELECT mode,granted FROM pg_locks
+                    WHERE pid=:pid AND locktype='advisory' AND classid=1369104691::oid
+                    AND objid=115::oid AND objsubid=2""",
+                    {"pid": writer_pid},
+                )
+                assert [dict(row) for row in locks] == [{"mode": "ExclusiveLock", "granted": True}]
+                if delete_commits:
+                    await transaction.commit()
+                else:
+                    await transaction.rollback()
+            finally:
+                if transaction.is_active:
+                    await transaction.rollback()
+        if delete_commits:
+            with pytest.raises(DBAPIError) as caught:
+                await asyncio.wait_for(task, 8)
+            assert caught.value.orig.sqlstate == "23503"
+            assert await _stamps(admin, ids) == []
+        else:
+            assert await asyncio.wait_for(task, 8) == 1
+            rows = await _stamps(admin, ids)
+            assert len(rows) == 1
+            assert rows[0]["geo_data_token"] == _B.data_token
+            assert rows[0]["reverse_outcome"] == "geocoded"
+        assert runtime.pool.checkedout() == 0
+    finally:
+        if task is not None and not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
