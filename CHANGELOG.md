@@ -10,6 +10,10 @@
 
 ## [Unreleased]
 
+### 파일 레지스트리의 백업 링크 (2026-10-24)
+
+- **FIXED (admin)**: 파일 상세의 백업 링크가 실제 백업 목록 페이지를 연다. 없는 파일별 상세 route의 prefetch404를 없앴다.
+
 ### weather 현재·예보·세 구간 요약을 Valkey에 세대 단위로 담고 service REST로 준다 (2026-10-24, ADR-114 2단계, T-STATE-02)
 
 - **ADDED (service REST)**: `/v1/service/weather/locations`(목록·근처·영역 ≤ 100 km, `include_current`),

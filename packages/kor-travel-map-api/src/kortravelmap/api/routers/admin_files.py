@@ -318,7 +318,8 @@ def _build_links(row: file_registry.ManagedFile) -> list[ManagedFileLink]:
             ManagedFileLink(
                 rel="backup",
                 label="백업",
-                href=f"/admin/backups/{row.path}",
+                # 백업은 목록 페이지에서 선택하며 파일별 상세 route는 없다.
+                href="/admin/backups",
             )
         )
     if row.provider_dataset_id is not None:

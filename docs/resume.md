@@ -1,3 +1,8 @@
+## 2026-10-24 — 파일 레지스트리의 백업 링크 복구
+
+- 실제 통합 UI에서 파일 상세의 백업 링크가 없는 상세 route를 prefetch해404를 냈다. 백업 목록 페이지로 연결하고 중첩·공백 파일 경로의 회귀를 추가했다. DB·DTO·프론트·수집/잠금 변경0이다.
+- 수정 전 회귀1 FAIL을 보존했고 수정 뒤 router9 PASS·Ruff·strict mypy1·문서 redaction PASS다. 독립2리뷰·정확 CI·최종 실제 UI는 후속 수용이며 기존16case별 PASS를 전체 성공으로 세지 않는다. [원인·범위](reports/2026-10-24-backup-file-link.md).
+
 ## 2026-10-24 — 통합 전체 CI의 시험 격리 보완(#1379)
 
 - b460의 두 실제 PG lane는 같은5건 실패였다. 4건의 새 읽기 세션 fixture 누락과 metrics의 앞선 committed행 미고려를 제품 변경 없이 고쳤다. 0/2 sibling 제어군으로기존실패를 재현하고 old/new snapshot·writer commit 단언을 보존했다.
