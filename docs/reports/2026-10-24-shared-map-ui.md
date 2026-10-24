@@ -53,3 +53,15 @@ Next 16.4.3·React 19.3.1·Base UI 1.9.0·MapLibre 6.15.0·Playwright 1.64.1 정
 - 각 화면의 실제 GeoJSON circle 렌더링 **3/3 PASS**. `maplibre-gl-worker.mjs`와 `maplibre-gl-shared.mjs` 모두 HTTP 200, `application/javascript` MIME을 확인했다.
 
 QA 서버·전용 연결은 후속 검증을 위해 유지했다. 운영 빌드·배포·컨테이너 교체는 여전히 0이며, 다음은 통합 담당자의 CI와 독립 리뷰 gate다.
+
+## 후속 main 재통합과 키보드 리뷰 보완
+
+main `0b2dc53d0`의 transport T4 가격 추이 계약을 합쳤다. 충돌은 journal/resume 두 작업 기록뿐이며 양쪽 내용을 보존했다. Python·API·계약 생성물은 main 그대로이고 관리자 생성 타입 갱신도 수용했다. 의존성 lock·공용 산출물은 바뀌지 않았다.
+
+독립 리뷰에서 상세를 열어도 포커스가 마커/지도 탭에 남고, 닫기 뒤 body로 이탈하는 문제를 확인했다. 상세 진입 때 열었던 요소를 저장하고 패널로 포커스를 옮긴다. Escape/닫기는 패널이 사라지기 전에 원래 요소로 복원하며, 요소가 사라졌으면 지도 canvas로 돌아간다. 선택 변경·unmount 때 진입 예약 프레임을 취소해 다른 화면의 포커스를 빼앗지 않는다.
+
+실제 키보드 회귀는 가격 DOM 마커가 `role=button`만 있고 키보드 활성화는 없던 별도 결함도 잡았다. 기존 point icon/가격 wrapper의 클릭 연결 두 경로에 `tabIndex=0`과 Enter·Space 활성화를 더했다. 같은 click을 재사용하고 기본 스크롤·지도 키 이벤트 전파를 막으며 포인터 드래그 처리는 바꾸지 않았다.
+
+WSL 타입·전체 frontend **49파일 400건**·전체 ESLint PASS다. 상세 진입·Escape/닫기 복원·진입 프레임 취소의 단위 회귀 3건을 추가했다. n150 지도 E2E는 기존 4건과 375/1440px 키보드 회귀 2건, **6건 PASS(25.6초)**다. 실제 유가 마커의 Enter/Space→패널 포커스→Escape/닫기 Enter→마커 복원과 테이블 행 Enter→지도 탭→패널→Escape→지도 탭 복원을 검증했다. 필터 치수는 안정 상태의 CSS 176×30px와 실제 경계 오차 0.05px 미만을 함께 검사한다. 이는 팝업 전환 중 행렬 소수점 오차가 정수와 다르던 검증 불안정을 없앤 것이다.
+
+후속 테스트 편집 뒤 타입·해당 E2E ESLint도 다시 통과했다. 운영 변경은 없으며 최종 CI·두 독립 재리뷰는 통합 담당자가 확인한다.

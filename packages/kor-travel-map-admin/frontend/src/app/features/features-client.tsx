@@ -16,7 +16,7 @@ import {
   SlidersHorizontalIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
@@ -126,13 +126,41 @@ function PayloadDisclosure({
   );
 }
 
-function FeatureDetailPanel({
+export function FeatureDetailPanel({
   featureId,
   onClose,
 }: {
   featureId: string;
   onClose: () => void;
 }) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const entryFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && !panelRef.current?.contains(active)) {
+      openerRef.current = active;
+    }
+    const frame = requestAnimationFrame(() => panelRef.current?.focus({ preventScroll: true }));
+    entryFrameRef.current = frame;
+    return () => {
+      cancelAnimationFrame(frame);
+      entryFrameRef.current = null;
+    };
+  }, [featureId]);
+
+  function dismiss() {
+    if (entryFrameRef.current !== null) cancelAnimationFrame(entryFrameRef.current);
+    const opener = openerRef.current;
+    const target = opener?.isConnected && opener !== document.body
+      ? opener
+      : panelRef.current?.closest(".kt-map-stage")?.querySelector<HTMLElement>(".maplibregl-canvas");
+    // 닫기 버튼이 사라지기 전에 원래 마커/지도 탭으로 돌아가 body 포커스 이탈을 막는다.
+    target?.focus({ preventScroll: true });
+    onClose();
+  }
+
   const adminDetailQuery = useAdminFeatureDetail(featureId);
   const feature = adminDetailQuery.data?.data.feature;
   const sourceProviders = useMemo(() => {
@@ -150,7 +178,8 @@ function FeatureDetailPanel({
       className="flex flex-col gap-3 p-4"
       data-testid="feature-detail-panel"
       aria-label="선택 Feature"
-      onDismiss={onClose}
+      ref={panelRef}
+      onDismiss={dismiss}
     >
       <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
         <div className="flex min-w-0 flex-col gap-0.5">
@@ -172,7 +201,7 @@ function FeatureDetailPanel({
             size="icon-sm"
             type="button"
             variant="ghost"
-            onClick={onClose}
+            onClick={dismiss}
           >
             <XIcon />
           </Button>

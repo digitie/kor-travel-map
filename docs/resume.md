@@ -4,7 +4,16 @@ Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭�
 
 후속 UI에서 설명은 제목의 정보 버튼, 상태 필터는 `추가 필터`로 접고 select를 176×30px로 통일했다. 지도 높이를 유지하면서 375px 지도 시작을 651.75→439.25px로 앞당겼다. 다른 화면의 기본 여백·도움말·모바일 메뉴는 유지한다.
 
-최신 main을 합친 앱 후보 `5acadb24e`를 npm 12.0.1 ci로 다시 설치했다. WSL 타입·frontend 48파일 397건·전체 ESLint·의존성 트리·Next/Sharp ABI PASS. n150 Playwright 1.64.1/Chromium 1248에서 지도 E2E 4건과 세 화면 실측·GeoJSON 렌더링을 다시 통과했다. 닫기 전환 중 이전 팝업을 배제하도록 E2E locator 한 줄만 수정했으며 앱 구현은 보존했다. 실제 VWorld 타일을 사용하되 Feature API는 결정적 검증 자료다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 CI·독립 리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+main `0b2dc53d0`을 추가 통합하고 두 작업 기록을 양쪽 보존했다. 독립 리뷰의 상세 키보드 포커스 이탈을 수정했다: 진입 포커스·예약 프레임 취소·Escape/닫기 후 마커/지도 탭 복원, point/가격 DOM 마커 Enter·Space 활성화. WSL 타입·frontend 49파일 400건·전체 ESLint PASS. n150 Playwright 1.64.1 지도 E2E 6건(375/1440px 키보드 2건 포함) PASS, 기존 실측·GeoJSON 검증의 레이아웃/worker 계약도 유지한다. Python/API/계약은 최신 main 그대로이며 lock 변화는 없다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 CI·두 독립 재리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+
+## 2026-10-24 — 가격 추이 프록시 transport T4 정렬(T-STATE-01-T4): 브랜치 `feat/transport-fuel-price-history-t4`
+
+- `/v1/service/transport/fuel-stations/{feature_id}/price-history`가 transport T4 실제 계약을 읽는다(질의 변환·불투명
+  cursor·cursor 요청의 transport 409 → HTTP 409 `TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED`·이유 enum 4개 추가·유한 가격·
+  요청 대비 행 검증·본문 상한·행별 시각 nullable). migration·설정 변화 없음. service·admin OpenAPI 변경(**PinVi service·admin
+  재vendor 필요 — ADR-114 D6 체크리스트**). 배포 영향: Map API. 적대 리뷰 2회 반영 완료.
+- **다음 한 작업: CI green → 소유자 머지 판단 → PinVi 재vendor PR → Manager compose PR(`kor-travel-map-api`에 transport
+  주소·토큰·`KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`) → pair 회전 → 배포 뒤 실제 주유소로 `available`·두 페이지 확인.**
 
 ## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
 

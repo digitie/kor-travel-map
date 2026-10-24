@@ -4,7 +4,55 @@ Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭�
 
 후속 UI에서 설명은 제목의 정보 버튼, 상태 필터는 `추가 필터`로 접고 select를 176×30px로 통일했다. 지도 높이를 유지하면서 375px 지도 시작을 651.75→439.25px로 앞당겼다. 다른 화면의 기본 여백·도움말·모바일 메뉴는 유지한다.
 
-최신 main을 합친 앱 후보 `5acadb24e`를 npm 12.0.1 ci로 다시 설치했다. WSL 타입·frontend 48파일 397건·전체 ESLint·의존성 트리·Next/Sharp ABI PASS. n150 Playwright 1.64.1/Chromium 1248에서 지도 E2E 4건과 세 화면 실측·GeoJSON 렌더링을 다시 통과했다. 닫기 전환 중 이전 팝업을 배제하도록 E2E locator 한 줄만 수정했으며 앱 구현은 보존했다. 실제 VWorld 타일을 사용하되 Feature API는 결정적 검증 자료다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 CI·독립 리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+main `0b2dc53d0`을 추가 통합하고 두 작업 기록을 양쪽 보존했다. 독립 리뷰의 상세 키보드 포커스 이탈을 수정했다: 진입 포커스·예약 프레임 취소·Escape/닫기 후 마커/지도 탭 복원, point/가격 DOM 마커 Enter·Space 활성화. WSL 타입·frontend 49파일 400건·전체 ESLint PASS. n150 Playwright 1.64.1 지도 E2E 6건(375/1440px 키보드 2건 포함) PASS, 기존 실측·GeoJSON 검증의 레이아웃/worker 계약도 유지한다. Python/API/계약은 최신 main 그대로이며 lock 변화는 없다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 CI·두 독립 재리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+
+## 2026-10-24 — 가격 추이 프록시 transport T4 정렬(T-STATE-01-T4): 브랜치 `feat/transport-fuel-price-history-t4`
+
+- 원인: #1355 프록시는 transport T4가 확정되기 전 가정 모양(top-level `natural_key`·`generated_at`·`truncated`, 행별
+  필수 `collected_at`)을 파싱하고 `product_code`·`since`·`until`로 보내 — transport는 그 질의를 무시하고 정상 응답은 모두
+  `upstream_contract`가 됐다. transport 정본: origin/main `9974d25`의 `backend/app/services/export_price_history.py`·
+  `docs/map-service-price-history.md`(질의 `product`/`from`/`to`/`limit` 기본 1000·최대 5000/`cursor` ≤4096, 창 기본 30일·
+  최대 366일·미래 금지, 응답 `meta{generated_at, source_collected_at, source_status, item_count}`·`station_key`·`items[
+  product_code, observed_at, price]`·`next_cursor`·`has_more`, cursor HMAC 서명·첫 페이지부터 15분·수집 revision 고정,
+  revision 변경·만료 409, 변조/다른 필터 cursor·창 위반 422, 성공 근거 없음 503 + meta, 휴게소 이력 501, 오류는 problem+json).
+- 실측(n150 Map Dagster code-server 컨테이너의 transport env로 읽기 전용 GET, odroid `<prod-host-ip>:12301`): 주유소 하나
+  30일 5행(유종 5개, null 가격 3), `source_status=stale`(opinet 수집 10-21 이후 미성공 — 주유소 export 목록은 503),
+  `limit=2` 두 페이지 cursor 정상(486자), 변조 cursor 422·다른 product cursor 422·미래 `to` 422·naive `from` 422·없는 키
+  404·휴게소 501, gzip·weak ETag·`private, no-cache`. **Map API 컨테이너에는 transport 주소·토큰·플래그 env가 아직 없다**
+  (Map service `/v1/service/transport/fuel-stations`도 503 — Valkey 미적재).
+- 설계: cursor는 불투명 전달(Map이 해석·서명하지 않음), 응답 `history.has_more`·`next_cursor`(+ `meta.page` 미러),
+  `truncated`=has_more 호환. 이유 enum에 `upstream_unsupported`(501)·`request_rejected`(422)·`upstream_timeout` 추가.
+  (처음엔 cursor 요청의 transport 409를 200 + `reason=cursor_expired`로 했다 — 아래 리뷰 반영에서 HTTP 409로 바꿨다.) 파서는
+  `station_key` 일치·`item_count`=행 수·`has_more`⇔`next_cursor`·`observed_at` 내림차순을 확인한다. 행별
+  `collected_at`·`provider_updated_at`은 nullable(지금 항상 null, 응답 시각으로 채우지 않음). limit은 페이지 전체 행 수.
+- OpenAPI: service·admin 재생성, vnext receipt·diff baseline 재핀(service schema_changes 1건). 관리자 `types.ts` 재생성 —
+  main frontend CI가 `npm audit`(next critical)에서 먼저 멈춰 #1355의 `/v1/service/transport/*`가 types에 빠져 있었다.
+  user OpenAPI·user-client 타입 불변.
+- 검사(n150 일회용 python:3.13, CI 설치 레시피): openapi `--check`·ruff·mypy --strict(271 files)·lint-imports 초록.
+  첫 head: unit+lint+api+dagster 5,502 passed·26 failed, Valkey 통합 28 passed + 1 Docker API ReadTimeout(재실행 통과).
+  **리뷰 반영·리베이스 뒤 최종 head(`553e9f3f`)**: openapi `--check`·ruff·mypy --strict(272 files)·lint-imports 초록,
+  unit+lint+api+dagster 5,524 passed·26 failed — 전부 알려진 환경 실패(docker runtime 23·sealed tree 2·smoke settings 1),
+  Valkey 통합 28 passed. router 검사 80개(이 PR 추가분 포함).
+- PinVi 영향(읽기만, origin/main `3e1e8bc0`): `apps/api/tests/contract/kor-travel-map-openapi-service.json`을 vendor하고
+  `test_kor_travel_map_transport_contract.py::_EXPECTED_QUERY`가 price-history query를 `{product_code, since, until,
+  limit}`로 핀한다 → 재vendor 시 `cursor` 추가 필요. `PRICE_HISTORY_REASONS`가 옛 6개라 새 이유는 `upstream_contract`로
+  접힌다(깨지진 않음). PinVi는 `since`만 보내 30일을 기본 limit 200(이제 전체 행 수)으로 받고 `truncated`를 그대로 쓴다.
+- 적대 리뷰 2회 반영(차단 없음): ① 가격은 JSON number/null·유한만(`_decimal` 공통 유한 검사, NaN 상수 거부) — 전엔
+  NaN·`1e400`이 응답 직렬화로 갔다. ② transport 503 problem `meta.source_status=failed` → `upstream_no_collection`.
+  ③ 보낸 `product`·`from`·`to`와 다른 행은 `upstream_contract`(보내지 않은 끝은 추측하지 않음). ④ 본문 2 MiB 상한
+  (Content-Length·스트리밍)·`RecursionError`. ⑤ 소유자 승인으로 cursor 요청의 transport 409를 HTTP 409
+  `TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED`로(`cursor_expired` 이유 제거; 첫 페이지는 늘 200 + 현재가). ⑥ OpenAPI에
+  "unavailable·has_more=false는 끝이 아님", 다음 페이지 `product_code` 동일·`since`/`until` 생략 또는 동일(transport
+  코드 확인: 창은 cursor에 고정되고 보낸 값은 같아야 하며 product는 생략도 불일치다). ⑦ 운영: Manager compose
+  `kor-travel-map-api`(72ee710 1659행~)에 transport 변수 자체가 없어 compose PR이 필요하고, pair 회전 preflight
+  (`_PAIR_SURFACE_PATHS`)가 PinVi 재vendor 전 회전을 거부한다 → Map 머지 → PinVi 재vendor → 회전. #1357·#1360·#1362 위로
+  리베이스. 두 페이지 검사의 2쪽 행이 요청과 다른 유종(D047)이어서 새 행 검사가 빨갛게 잡았다 — 검사 자료를 고쳤다.
+- 재리뷰 반영(head `58352857` 기준): F1 — httpx `aiter_bytes`는 gzip 조각을 통째로 풀어(64 KiB → 67 MB) 2 MiB 상한이
+  뚫렸다 → 요청 `Accept-Encoding: identity`, `aiter_raw`로 붙이기 전 상한, gzip이 와도 출력 상한 `zlib`. N1 — 깨진·잘린
+  gzip·모르는 인코딩·`DecodingError`는 `upstream_contract`. N2 — 상태 코드 먼저, 200만 전체·503만 64 KiB, 그 밖은 본문을
+  읽지 않아 큰 오류 본문도 상태로(cursor 409 유지). N3 — 200의 `source_status=failed`는 계약 위반, 공개 enum `ok|stale`.
+  검사 대역 함정: `httpx.Response(content=…)`는 생성 때 미리 읽혀(gzip이면 그 자리에서 풀어) `aiter_raw`가
+  `StreamConsumed`를 낸다 — 원문 stream(`httpx.ByteStream`)으로 다시 싸는 `_mock`을 두었다. #1368 위로 리베이스.
 
 ## 2026-10-24 — geo 재시도에 ReadError·WriteError 추가: 브랜치 `fix/geo-retry-readerror`
 

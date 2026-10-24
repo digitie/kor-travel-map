@@ -13037,34 +13037,60 @@ export interface components {
         };
         /** PriceHistoryBlock */
         PriceHistoryBlock: {
-            /** Generated At */
+            /**
+             * Generated At
+             * @description transport가 이 페이지를 만든 시각.
+             */
             generated_at: string | null;
             /**
+             * Has More
+             * @description 다음 페이지가 있다(next_cursor로 읽는다). status=available일 때만 끝을 뜻한다 — unavailable이면 늘 false다.
+             */
+            has_more: boolean;
+            /**
              * Items
-             * @description observed_at 내림차순.
+             * @description observed_at 내림차순, 유종 합계 최대 limit행.
              */
             items: components["schemas"]["PriceHistoryPoint"][];
             /**
-             * Reason
-             * @description unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 없음)·upstream_not_found(transport 404 — 옛 버전·토큰·접속 주소)·upstream_unavailable(5xx·연결·timeout)·upstream_rejected(그 밖의 4xx)·upstream_contract(응답 모양이 다름).
+             * Next Cursor
+             * @description 다음 페이지 cursor(불투명, transport 발급·첫 페이지부터 15분 유효). cursor 인자로 보내며 product_code는 첫 페이지와 똑같이 보낸다(빼거나 바꾸면 request_rejected). since·until은 cursor가 창을 품으므로 빼도 되고, 보낸다면 첫 페이지와 같은 시각이어야 한다. meta.page.next_cursor와 같다.
              */
-            reason: ("disabled" | "not_configured" | "upstream_not_found" | "upstream_unavailable" | "upstream_rejected" | "upstream_contract") | null;
+            next_cursor: string | null;
+            /**
+             * Reason
+             * @description unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 없음) — 이 둘은 transport를 부르지 않았다. upstream_not_found(transport 404 — 없는 주유소·옛 버전·토큰·접속 주소)·upstream_unsupported(501)·request_rejected(transport 422 — 조회 창 366일 초과·미래 until·변조되었거나 다른 조건의 cursor)·upstream_no_collection(transport 503 — 성공한 유가 수집 근거가 아직 없다)·upstream_timeout(timeout)·upstream_unavailable(그 밖의 5xx·연결 실패)·upstream_rejected(그 밖의 비-200)·upstream_contract(응답 모양이 다름 — 다른 station_key·요청과 다른 유종이나 창 밖의 행·유한하지 않은 가격·너무 큰 본문 포함). cursor 만료는 이유가 아니라 HTTP 409다.
+             */
+            reason: ("disabled" | "not_configured" | "upstream_not_found" | "upstream_unsupported" | "request_rejected" | "upstream_no_collection" | "upstream_timeout" | "upstream_unavailable" | "upstream_rejected" | "upstream_contract") | null;
+            /**
+             * Source Collected At
+             * @description 이 페이지 이력의 실제 수집 시각 중 가장 이른 값(빈 범위면 transport 마지막 성공 수집).
+             */
+            source_collected_at: string | null;
+            /**
+             * Source Status
+             * @description transport 유가 수집 상태(ok·stale). stale이어도 기존 이력은 준다. unavailable이면 null(성공한 수집 근거가 없으면 reason=upstream_no_collection).
+             */
+            source_status: ("ok" | "stale") | null;
             /**
              * Status
+             * @description unavailable이면 이 페이지를 읽지 못했다는 뜻이다 — has_more=false여도 이력의 끝이 아니다. 페이지를 이어 읽는 소비자는 매 페이지 status를 확인하고, unavailable이면 누적한 페이지를 완전한 이력으로 쓰지 않는다.
              * @enum {string}
              */
             status: "available" | "unavailable";
-            /** Truncated */
+            /**
+             * Truncated
+             * @description 호환용 — has_more와 같다(deprecated, has_more·next_cursor를 쓴다).
+             */
             truncated: boolean;
         };
         /** PriceHistoryPoint */
         PriceHistoryPoint: {
             /**
              * Collected At
-             * Format: date-time
-             * @description 같은 가격을 마지막으로 다시 확인한 수집 시각.
+             * @description 원천이 행마다 주지 않아 현재 항상 null이다(응답 생성 시각으로 채우지 않는다). 페이지의 수집 시각은 history.source_collected_at이다.
              */
-            collected_at: string;
+            collected_at: string | null;
             /**
              * Observed At
              * Format: date-time
@@ -13073,7 +13099,7 @@ export interface components {
             observed_at: string;
             /**
              * Price
-             * @description 원/L. null이면 그때 판매하지 않았다.
+             * @description 원/L. null이면 그때 판매하지 않았다(그대로 전한다).
              */
             price: number | null;
             /** Product Code */
@@ -13082,7 +13108,10 @@ export interface components {
             product_key: string;
             /** Product Name */
             product_name: string | null;
-            /** Provider Updated At */
+            /**
+             * Provider Updated At
+             * @description 원천이 행마다 주지 않아 현재 항상 null이다(다른 시각으로 채우지 않는다).
+             */
             provider_updated_at: string | null;
         };
         /**
@@ -25554,12 +25583,14 @@ export interface operations {
             query?: {
                 /** @description 오피넷 유종 코드(B027·D047·B034·C004·K015). */
                 product_code?: string | null;
-                /** @description 이 시각 이상(observed_at). */
+                /** @description 이 시각 이상(observed_at). 없으면 until(또는 지금) 30일 전. */
                 since?: string | null;
-                /** @description 이 시각 이하(observed_at). */
+                /** @description 이 시각 이하(observed_at). 없으면 지금. 미래·366일 넘는 창은 거부된다. */
                 until?: string | null;
-                /** @description 유종마다의 최대 행 수. */
+                /** @description 한 페이지의 전체 행 수(유종 합계). */
                 limit?: number;
+                /** @description 이전 응답의 history.next_cursor(불투명). product_code는 첫 페이지와 똑같이, since·until은 빼거나 첫 페이지와 같게 보낸다. 409 TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED면 받은 페이지를 버리고 cursor 없이 다시 시작한다. */
+                cursor?: string | null;
             };
             header?: never;
             path: {
@@ -25580,6 +25611,15 @@ export interface operations {
             };
             /** @description NOT_FOUND — 지금 세대에 그 feature_id가 없다. */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED — cursor를 보냈는데 transport 유가 수집 revision이 바뀌었거나 cursor(첫 페이지부터 15분)가 만료됐다. 누적한 이력 페이지를 버리고 cursor 없이 처음부터 다시 읽는다. 첫 페이지(cursor 없음)는 이 오류를 내지 않는다. */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

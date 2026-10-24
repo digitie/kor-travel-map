@@ -1077,16 +1077,56 @@ test.describe("/features map interactions", () => {
       await expect(page.getByLabel("수명주기 필터")).toHaveCount(0);
       await page.getByRole("button", { name: "추가 필터", exact: true }).click();
       for (const label of ["수명주기 필터", "공개 상태 필터", "품질 상태 필터"]) {
-        await expect.poll(async () => Math.round((await page.getByLabel(label).boundingBox())?.width ?? 0)).toBe(176);
+        await page.getByLabel(label).click({ trial: true });
+        await expect(page.getByLabel(label)).toHaveCSS("width", "176px");
+        await expect(page.getByLabel(label)).toHaveCSS("height", "30px");
         const rect = await page.getByLabel(label).boundingBox();
-        expect(rect?.width).toBe(176);
-        expect(rect?.height).toBe(30);
+        expect(rect?.width).toBeCloseTo(176, 1);
+        expect(rect?.height).toBeCloseTo(30, 1);
       }
       await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "도움말: Feature 지도" }).click();
       await expect(page.locator('[data-slot="popover-content"][data-open]')).toContainText("추가 필터에서");
       await page.keyboard.press("Escape");
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+    });
+  }
+
+  for (const width of [375, 1440]) {
+    test(`${width}px 상세 키보드 진입·Escape·닫기는 원래 포커스로 복귀`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await mockFeatureRoutes(page, {
+        adminDetail: makeAdminFeatureDetailResponse({ kind: "price", name: "서울주유소 유가" }),
+        items: [makeAdminFeatureMapItem({ kind: "price", marker_icon: "fuel", name: "서울주유소 유가", price_summary: makeFeaturePriceResponse().data.current })],
+      });
+      await page.goto("/features");
+      await setMapZoom(page, 16, [126.978, 37.5665]);
+      const marker = page.getByRole("button", { name: /서울주유소 유가/ });
+      const panel = page.getByTestId("feature-detail-panel");
+      await marker.focus();
+      await marker.press("Enter");
+      await expect(panel).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
+      await expect(marker).toBeFocused();
+      await marker.press("Space");
+      await expect(panel).toBeFocused();
+      await panel.getByRole("button", { name: "닫기", exact: true }).focus();
+      await page.keyboard.press("Enter");
+      await expect(panel).toHaveCount(0);
+      await expect(marker).toBeFocused();
+
+      await page.getByRole("tab", { name: "테이블", exact: true }).click();
+      const row = page.getByRole("row").filter({ hasText: "서울주유소 유가" });
+      await row.focus();
+      await row.press("Enter");
+      const mapTab = page.getByRole("tab", { name: "지도", exact: true });
+      await mapTab.focus();
+      await mapTab.press("Enter");
+      await expect(panel).toBeFocused();
+      await page.keyboard.press("Escape");
+      await expect(panel).toHaveCount(0);
+      await expect(mapTab).toBeFocused();
     });
   }
 

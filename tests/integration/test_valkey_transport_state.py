@@ -726,6 +726,10 @@ async def test_rest_price_history_falls_back_without_losing_current_prices(
         "status": "unavailable",
         "reason": "disabled",
         "generated_at": None,
+        "source_collected_at": None,
+        "source_status": None,
+        "has_more": False,
+        "next_cursor": None,
         "truncated": False,
         "items": [],
     }
@@ -745,9 +749,9 @@ async def test_rest_price_history_falls_back_without_losing_current_prices(
         kor_travel_transport_connect_timeout_seconds=1.0,
     )
 
-    async def _fetch(_settings: Any, natural_key: str, **kwargs: Any) -> Any:
+    async def _fetch(_settings: Any, station_key: str, **kwargs: Any) -> Any:
         return await fetch_price_history(
-            enabled, natural_key, transport=httpx.MockTransport(_transport_404), **kwargs
+            enabled, station_key, transport=httpx.MockTransport(_transport_404), **kwargs
         )
 
     monkeypatch.setattr(service_transport, "fetch_price_history", _fetch)
@@ -757,7 +761,8 @@ async def test_rest_price_history_falls_back_without_losing_current_prices(
     assert requests[0].url.path == (
         f"/v1/service/exports/fuel-stations/{station.natural_key}/price-history"
     )
-    assert requests[0].url.params["product_code"] == "B027"
+    assert requests[0].url.params["product"] == "B027"
+    assert "product_code" not in requests[0].url.params
     assert requests[0].headers["X-Kor-Travel-Transport-Service-Token"] == "t" * 40
 
 
