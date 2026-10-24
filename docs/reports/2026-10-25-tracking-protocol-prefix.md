@@ -32,6 +32,8 @@ Codegraph index를 재사용한 실제 caller/callee/impact 조회를 소스 추
 - 초기 1 FAIL/71 PASS는 quarantined fixture의 SQL 3개 고정 기대값이었다.
   새 prefix를 첫 SQL로 단언하고 기존 ensure/quarantine 검증을 유지한 뒤 통과했다.
   실패 로그 `/tmp/map424-unit-r1.log`와 후속 로그는 별도 보존한다.
+- API 취소 기존 순수 시험은 별도20 PASS/1.33초였다.
+- 신규 integration25개는 수집만 통과했으며 실제 DB 결과로 세지 않는다.
 - 변경 Python 6파일 strict mypy 및 Ruff 통과.
 - source lint+graph는390 PASS/6기존 skip/1 FAIL(29.06초)이었다. 실패는 새 helper의
   공식 head-schema 미생성으로 ACL 이름이 부모 oracle에 없다는 검사이며, 생략하거나
