@@ -2,6 +2,7 @@
 
 from dataclasses import replace
 from datetime import timedelta
+from enum import Enum
 
 import pytest
 
@@ -247,10 +248,12 @@ async def test_current_link_record_key_must_match_the_actual_record():
         assert result.reason == "invalid_current_lineage"
 
 
-@pytest.mark.parametrize("shape", ["deep", "nodes", "bytes"])
+@pytest.mark.parametrize("shape", ["deep", "nodes", "bytes", "enum"])
 async def test_current_bundle_budget_rejects_before_model_dump(shape, monkeypatch):
     before = await _bundle(_base())
     payload = "x" * 1_048_577 if shape == "bytes" else list(range(9000))
+    if shape == "enum":
+        payload = Enum("LargeProjectionValue", {"VALUE": "x" * 1_048_577}).VALUE
     if shape == "deep":
         payload = "leaf"
         for _ in range(65):
@@ -267,6 +270,26 @@ async def test_current_bundle_budget_rejects_before_model_dump(shape, monkeypatc
         return original(self, *args, **kwargs)
 
     monkeypatch.setattr(type(current), "model_dump", forbidden_copy)
+    result = await _assess(before, current)
+    assert not result.eligible
+    assert result.reason == "invalid_bundle_budget"
+
+
+async def test_model_copy_undeclared_fields_are_not_eagerly_copied(monkeypatch):
+    before = await _bundle(_base())
+    detail = before.feature.detail.model_copy(update={f"undeclared_{i}": None for i in range(9000)})
+    current = before.model_copy(
+        update={"feature": before.feature.model_copy(update={"detail": detail})}
+    )
+    original = type(detail).__iter__
+
+    def bounded_iteration(self):
+        for count, item in enumerate(original(self)):
+            if self is detail and count > 100:
+                pytest.fail("model iterator was eagerly copied before budget rejection")
+            yield item
+
+    monkeypatch.setattr(type(detail), "__iter__", bounded_iteration)
     result = await _assess(before, current)
     assert not result.eligible
     assert result.reason == "invalid_bundle_budget"

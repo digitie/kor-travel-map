@@ -58,7 +58,7 @@ parent/marker/subtype/link 속성은 전수 비교한다. canonical UUID/claim/m
 - 전용 WT에서 codegraph 최초 init을 수행했고 converter 영향도25개를 확인했다. 공유 index는
   변경하지 않았다. dynamic `_transform_reusing_geo`→converter actual asset은 직접 정적 대조했다.
 - 신규 pure 진단·기존 converter·실 SDK 모델/Map fetcher 계약을 같은 최종 실행에서
-  **94 PASS/1.55초** 확인했다. public SDK는 pyproject 정본 pin
+  **96 PASS/1.53초** 확인했다. public SDK는 pyproject 정본 pin
   `e1b346f70dd90f68247776fe14ad39b0a90db763` 고정 archive와 의존성을 `/tmp` 전용
   target에 설치했다. 공유 venv는 변경하지 않았다. public model은 실제 실행하고 fetcher는
   기존 public search/list/details service fixture 경계를 대체했다. 외부 HTTP/DB는 0이다.
@@ -86,3 +86,10 @@ canonical 진단에서 놓쳤다. source link key/Feature alias가 current recor
 작업 후 journal/resume와 내부 변경 CHANGELOG를 추가했다. journal224494B/resume173169B로
 정본225280B 안이며 archive 분리는 필요하지 않았다. 현재 부모에 없는 EX #1389 기록은
 복사하여 dangling 링크를 만들지 않고, 후속 부모 통합 때 양쪽 상단을 보존한다.
+
+
+추가 root 리뷰에서는 plain Enum.value의 과대 객체와 model_copy의 미선언 필드가 첫 guard를
+우회하는 경계를 발견했다. 두 반례는 수정 전 **2 FAIL/0.93초**로 보존했다. Enum.value도
+같은 walker에서 제한하고, BaseModel의 공식 iterator를 lazy하게 직접 순회해 실제 push마다
+남은 노드/stack 예산을 확인한다. dict(model) 전체 복사는 제거했으며 미선언 필드는 첫 발견에
+거부한다. 최종96개 실행은 이 두 반례를 포함하고 기존90/94 수치와 합산하지 않는다.

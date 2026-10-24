@@ -10,12 +10,11 @@ import json
 import math
 import re
 import sys
-from collections.abc import Callable, Iterable, Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from enum import Enum
-from itertools import chain
 from typing import Any, Literal
 from uuid import UUID
 
@@ -227,7 +226,7 @@ def _meaning(bundle: FeatureBundle, *, name_changes: bool, aliases: bool) -> dic
 
 
 def _within_comparison_budget(values: tuple[object, ...]) -> bool:
-    """model_dump 전 shallow 순회. 전체 입력을 복사하지 않고 깊이/노드/byte를 제한한다."""
+    """model_dump 전 lazy 순회. 전체 입력을 복사하지 않고 깊이/노드/byte를 제한한다."""
     stack = [(value, 0) for value in values]
     nodes = 8192
     remaining = 1_048_576
@@ -237,53 +236,56 @@ def _within_comparison_budget(values: tuple[object, ...]) -> bool:
         remaining -= 8  # JSON 구분자/상수 표기의 보수적 여유.
         if nodes < 0 or remaining < 0 or depth > 64:
             return False
-        children: Iterable[object]
-        if isinstance(value, BaseModel):
-            size = len(type(value).model_fields) + len(value.model_extra or {})
-            if size * 2 > nodes - len(stack):
+        if isinstance(value, Enum):
+            # plain Enum.value도 임의 크기/형태를 가질 수 있으므로 정수처럼 취급하지 않는다.
+            if len(stack) + 1 > nodes:
                 return False
-            # Pydantic의 공식 shallow iteration만 사용하며 중첩 raw를 재귀 복사하지 않는다.
-            mapping = dict(value)
-            children = chain.from_iterable(mapping.items())
-            count = len(mapping) * 2
+            stack.append((value.value, depth + 1))
+        elif isinstance(value, BaseModel):
+            # 공식 iterator를 직접 소비한다. model_copy의 미선언 __dict__ 필드도 복사 전에 거부한다.
+            for key, child in value:
+                if key not in type(value).model_fields or len(stack) + 2 > nodes:
+                    return False
+                stack.append((key, depth + 1))
+                stack.append((child, depth + 1))
         elif isinstance(value, Mapping):
-            children = chain.from_iterable(value.items())
-            count = len(value) * 2
+            for key, child in value.items():
+                if len(stack) + 2 > nodes:
+                    return False
+                stack.append((key, depth + 1))
+                stack.append((child, depth + 1))
         elif isinstance(value, (list, tuple, set, frozenset)):
-            children = iter(value)
-            count = len(value)
+            for child in value:
+                if len(stack) + 1 > nodes:
+                    return False
+                stack.append((child, depth + 1))
+        elif isinstance(value, str):
+            if len(value) > remaining:
+                return False
+            try:
+                remaining -= len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+            except UnicodeError:
+                return False
+        elif value is None or isinstance(value, bool):
+            pass
+        elif isinstance(value, int):
+            if value.bit_length() > 4096:
+                return False
+            remaining -= len(str(value))
+        elif isinstance(value, float):
+            if not math.isfinite(value):
+                return False
+            remaining -= len(repr(value))
+        elif isinstance(value, Decimal):
+            if not value.is_finite() or sys.getsizeof(value) > 1024:
+                return False
+            remaining -= len(str(value))
+        elif isinstance(value, (datetime, date, UUID)):
+            remaining -= 128
         else:
-            if isinstance(value, str):
-                if len(value) > remaining:
-                    return False
-                try:
-                    remaining -= len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
-                except UnicodeError:
-                    return False
-            elif value is None or isinstance(value, bool):
-                pass
-            elif isinstance(value, int):
-                if value.bit_length() > 4096:
-                    return False
-                remaining -= len(str(value))
-            elif isinstance(value, float):
-                if not math.isfinite(value):
-                    return False
-                remaining -= len(repr(value))
-            elif isinstance(value, Decimal):
-                if not value.is_finite() or sys.getsizeof(value) > 1024:
-                    return False
-                remaining -= len(str(value))
-            elif isinstance(value, (datetime, date, UUID, Enum)):
-                remaining -= 128
-            else:
-                return False
-            if remaining < 0:
-                return False
-            continue
-        if count > nodes - len(stack):
             return False
-        stack.extend((child, depth + 1) for child in children)
+        if remaining < 0:
+            return False
     return True
 
 
