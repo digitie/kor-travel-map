@@ -2,7 +2,7 @@
 
 기준: 2df9ab03b33c73a55fc893ef0bf62ba6159be41c. 전용 WT는
 `/home/digitie/dev/kor-travel-map-native-batch-20261024`, branch는
-`codex/native-batch-20261024`다. 구현 전 계약 checkpoint이며 운영/collector 배선0이다.
+`codex/native-batch-20261024`다. 한정 구현과 수용 근거를 기록하며 운영/collector 배선0이다.
 
 ## API와 입력
 
@@ -81,7 +81,7 @@ policy seed/enable은 A3 후속이다. 기존 전체 SQL writer/운영 동시쓰
   원자 batch 증거다. same-dataset 병렬 쓰기의 증거가 아니다. max2730/총1MiB는 실제 fetch
   max5000 수집에 일반 배선할 수 없으며 초과 입력은 DML 전에 거부하고 기존 성공 집합을 유지한다.
 
-## 초기 구현 checkpoint
+## 초기 구현 checkpoint(acd90d5 당시)
 
 새 batch entry와 기존 single의 private per-item apply 추출을 구현했다. 기존 single public
 서명·digest·result receipt와 SQL/ACL/DDL은 바꾸지 않는다. 이 단계의 unit16개는 순서 고정,
@@ -89,3 +89,64 @@ policy seed/enable은 A3 후속이다. 기존 전체 SQL writer/운영 동시쓰
 거부와 기존 artifact 반례를 포함한다. Ruff·strict mypy2는 통과했다. 실제 PG 원자성/시간초과/
 권한·정확 CI·코드 두 적대리뷰·실UI는 아직 실행/수용 전이다. 설계 두 검토를 코드 승인으로
 세지 않으며 기본 OFF·운영0·새 fetch0·collector 미배선이다.
+
+## 최종 로컬 수용
+
+최종 집중은 **146 PASS/52.11초**다. 새 batch 실제PG20·신규 unit10과 부모의
+native/EX/artifact18·A1/고정 SDK98을 같은 실행에서 확인했다. 서로 앞선 17PG/21.96초나
+초기16unit 수치와 더하지 않는다. SDK는 pyproject 정본 pin
+`e1b346f70dd90f68247776fe14ad39b0a90db763`과 의존성을 기존 고유 `/tmp` target에서
+읽었고 공유 venv를 수정하지 않았다. 기본 CI에 선택 SDK가 없으면 해당 SDK case만 명시
+skip이며, 이를 실제 실행 성공으로 세지 않는다.
+
+새 PG는2CPU/1.5GiB·PIDs256의 소유 PostGIS를 정본 bootstrap/head418·runtime ACL reconcile
+후 사용했다. 실제 runtime role에서 legacy `feature_repo.load_bundles`를 호출해
+서버발급 canonical UUID/claim/alias를 얻은 뒤 소유 fixture에서만 policy1을 명시 cutover했다.
+Feature/claim 직접 INSERT로 이 단계를 대신하지 않았다. `_seed_bundles(admin,runtime,old,new)`는
+다음 A3 실험에서 재사용할 준비 seam이다. 실제 public `HeritageDetail`→기존 converter의
+국가유산2개를 이 seam으로 적재/claim한 뒤 이름 변화 진단과 batch를 검증했다. 외부 HTTP0,
+Geo 미요청·whole asset `_load`/syncsuccess/retire/seal·운영 증거는 아니다.
+
+새 실제PG20개의 범위는 다음과 같다.
+
+- 같은 dataset의2개 canonical Feature를 SH/EX로 모두 갱신하고 finish1회·completed의
+  source/candidate/winner/finish 재호출0을 확인했다. completed여도 다른 owner/input/
+  manifest/mode는 거부한다. 같은 그룹의 SH 뒤 EX 재적용도 head/candidate/clock/result
+  digest가 같았다. dataset row FOR UPDATE·active owner1 제약상 same-dataset 병렬 증거가 아니다.
+- 두 번째 실제 source DML 직후 RuntimeError/CancelledError·대기를 넣은2s deadline에서
+  첫 Feature/source/candidate까지 전부 rollback됐다. 2s는 시험 전용 budget이며 제품은30s다.
+  같은 artifact/plan을 fresh TX에서 복구하고 기존 single18 회귀도 유지했다.
+- 추가/누락 Feature·누락 head·실제로 읽었던 옛 head가 남은 plan은 DML 전에 거부했다.
+  1s lease 후 실제1.1s 경과→새 epoch의 정상 batch commit 뒤 늦은 옛 attempt는40001이다.
+  잘못된 mode/owner도 거부했다. 현재 source/membership union을 DISTINCT+LIMIT8193으로
+  읽고 전체 assert 뒤에만 정확 member count를 비교한다.
+- pool_size1/max_overflow0에서 read/claim commit→fresh apply가 같은 physical PID를
+  순차 재사용하고 local timeout GUC를 원복했다. 해당 dataset scope의 실제 blocker PID와
+  transactionid 대기를 관찰해 source DML0에서 기다림을 확인했다. EX는 armed/unarmed 모두
+  caller25ms lock cap을 유지해55P03 뒤 같은 artifact를 복구했다.
+- 전체1MiB/최대2730 초과는 source DML0이고 이미 완료된 성공 집합을 보존했다. 적용 전
+  입력 이름 변경도 sealed input digest 불일치로 거부했다. 중첩 DTO를 await 중 바꾸는
+  다른 task에 대한 방어를 보장하지 않으며 caller의 독점 소유 전제는 그대로다.
+
+## 원 실패와 미완료
+
+첫 신규 fixture는 dataset을 사전 선언하지 않아 legacy loader에서 **2 FAIL/13.71초**였다
+(`/tmp/map-native-batch-a2-pg-first.log`). 소유 lab catalog만 선언해 보완한 뒤 기본 SH/EX
+2 PASS/14.18초를 확인했다. 다음 실행은 **14 PASS/2 FAIL/20.68초**였다
+(`/tmp/map-native-batch-a2-pg-full-r1.log`). 하나는 누락 manifest의 의도된 조기 ValueError를
+DB 오류로 기대한 시험 문제였고, 다른 하나는 active source head만 바꿔 commit하려던
+fixture가 기존 deferred candidate guard23514에 거부된 정상 동작이었다. 제품/guard를
+완화하지 않고 실제 정상 batch commit 뒤 옛 head가 남은 plan과 lease/epoch takeover로
+stale 반례를 구성했다. 원로그는 삭제/성공으로 치환하지 않는다.
+
+코드 두 독립 FULL 리뷰·정확 CI·fresh 실HTTP/UI는 이 로컬 실행과 별도 수용 gate다.
+초안 base는 선행1390 branch이며 미발행 CI를 성공으로 세지 않는다. active policy의
+지원 외 필드 변화·주소/좌표/category/link/신규 identity/file/retire·whole-TX snapshot seal,
+실제 collector 배선/내구 artifact·운영 활성화는 A3 이후다. 기본 OFF·운영0을 유지한다.
+
+## 최종 정적 gate
+
+최종 Ruff·strict mypy2·import4를 통과했다. 전체 lint/archive는377 PASS·기존6skip/29.80초,
+소유 scalar fixture 잔존0을 확인했다. codegraph는 전용 WT만 초기화/sync했고 기존 single의
+impact4와 추출 후 private apply의 impact5를 기록했다. 다른 module의`native._apply_provider_scalar`
+경유는 동적 alias라 graph만으로 완결하지 않고 batch의 실제 callsite도 직접 대조했다.
