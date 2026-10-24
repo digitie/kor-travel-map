@@ -41,30 +41,46 @@ class ScopedWriteDependency:
     """계획 때 관측한 대상 revision. 소실/추가 phantom 전체 검증의 대체물이 아니다."""
 
     ordinal: int
-    dependency_kind: Literal["feature", "source_head"]
+    dependency_kind: Literal["feature", "source_head", "feature_membership"]
     dependency_key: str
     expected_value: str
 
     def __post_init__(self) -> None:
         if type(self.ordinal) is not int or not 0 <= self.ordinal < _MAX_MEMBERS:
             raise ValueError("invalid manifest ordinal")
-        if self.dependency_kind not in ("feature", "source_head"):
+        if self.dependency_kind not in ("feature", "source_head", "feature_membership"):
             raise ValueError("unsupported dependency kind")
         for value in (self.dependency_key, self.expected_value):
             if not isinstance(value, str) or not 1 <= len(value.encode()) <= 128:
                 raise ValueError("invalid bounded dependency")
-        if self.dependency_kind == "feature":
+        if self.dependency_kind in ("feature", "feature_membership"):
             try:
                 valid_id = str(UUID(self.dependency_key)) == self.dependency_key
             except ValueError:
                 valid_id = False
-            if not valid_id or not re.fullmatch(r"[1-9][0-9]{0,18}", self.expected_value):
+            valid_expected = (
+                bool(_DIGEST.fullmatch(self.expected_value))
+                if self.dependency_kind == "feature_membership"
+                else bool(re.fullmatch(r"[1-9][0-9]{0,18}", self.expected_value))
+            )
+            if not valid_id or not valid_expected:
                 raise ValueError("invalid feature dependency")
 
 
 def _transaction(session: AsyncSession) -> None:
     if not session.in_transaction():
         raise ValueError("explicit caller transaction required")
+
+
+async def _arm_deadline(session: AsyncSession) -> None:
+    # 이 SELECT가 끝난 뒤 시작하는 kernel statement부터 제한된다. TX 종료 때 자동 원복된다.
+    await session.execute(
+        text("""
+        SELECT set_config(name,LEAST(COALESCE(NULLIF(setting::bigint,0),cap),cap)::text,true)
+        FROM pg_settings JOIN (VALUES ('statement_timeout',30000::bigint),
+                                     ('lock_timeout',1000::bigint)) caps(name,cap) USING(name)
+    """)
+    )
 
 
 def _digest(value: str) -> None:
@@ -119,6 +135,7 @@ async def claim_scoped_feature_write(
         bounded.append(region)
     if len(set(bounded)) != len(bounded):
         raise ValueError("duplicate region")
+    await _arm_deadline(session)
     result = await session.scalar(
         text("""
         SELECT ops.claim_scoped_feature_write(:attempt,:owner,:dataset,:key,
@@ -158,6 +175,7 @@ async def append_scoped_feature_write_manifest(
     payload = json.dumps(rows, allow_nan=False)
     if len(payload.encode()) > 131072:
         raise ValueError("manifest batch byte budget exceeded")
+    await _arm_deadline(session)
     value = await session.scalar(
         text(
             "SELECT ops.append_scoped_feature_write_manifest"
@@ -173,6 +191,7 @@ async def seal_scoped_feature_write_manifest(
     session: AsyncSession, *, attempt_id: UUID, owner: UUID
 ) -> str:
     _transaction(session)
+    await _arm_deadline(session)
     return str(
         await session.scalar(
             text("SELECT ops.seal_scoped_feature_write_manifest(:attempt,:owner)"),
@@ -191,6 +210,7 @@ async def begin_scoped_feature_write(
     """적용 TX 첫 진입. 반환 뒤 실제 DML과 finish를 같은 TX에서 수행한다."""
     _transaction(session)
     _digest(manifest_digest)
+    await _arm_deadline(session)
     return cast(
         "dict[str, Any]",
         await session.scalar(
@@ -209,6 +229,7 @@ async def finish_scoped_feature_write(
 ) -> dict[str, Any]:
     _transaction(session)
     _digest(result_digest)
+    await _arm_deadline(session)
     return cast(
         "dict[str, Any]",
         await session.scalar(
@@ -222,6 +243,7 @@ async def cancel_scoped_feature_write(
     session: AsyncSession, *, attempt_id: UUID, owner: UUID
 ) -> bool:
     _transaction(session)
+    await _arm_deadline(session)
     return bool(
         await session.scalar(
             text("SELECT ops.cancel_scoped_feature_write(:attempt,:owner)"),

@@ -61,10 +61,12 @@ def kernel_database():
             pids_limit=256,
         )
     )
+    captured_id = None
     try:
         container.start()
         actual = container.get_wrapped_container()
         actual.reload()
+        captured_id = actual.id
         assert actual.attrs["Config"]["Labels"]["codex.scoped-kernel"] == identity
         assert "@sha256:" in resolve_postgis_image()
         admin = make_url(container.get_connection_url()).set(drivername="postgresql")
@@ -121,6 +123,22 @@ def kernel_database():
                 "feature.features TO ktm_feature_state_procedure_owner"
             )
             connection.execute("GRANT SELECT,UPDATE ON feature.features TO ktm_feature_runtime")
+            connection.execute(
+                "CREATE TABLE ops.application_schema_operation_receipts(destinati"
+                "on_head text, CONSTRAINT ck_application_schema_operation_receipt"
+                "s_head CHECK (destination_head IN ('300')))"
+            )
+            connection.execute(
+                "CREATE TABLE provider_sync.source_links(feature_id uuid NOT NULL"
+                " REFERENCES feature.features(feature_id), source_entity_key text"
+                " NOT NULL REFERENCES provider_sync.source_entities(source_entity"
+                "_key), source_role text NOT NULL, PRIMARY KEY(feature_id,source_"
+                "entity_key,source_role))"
+            )
+            connection.execute(
+                "GRANT SELECT,UPDATE ON provider_sync.source_links TO ktm_feature"
+                "_state_procedure_owner"
+            )
             connection.execute("RESET ROLE")
             path = _ROOT / "alembic/versions/411_scoped_feature_write_kernel.py"
             spec = importlib.util.spec_from_file_location("scoped_kernel_migration", path)
@@ -153,6 +171,9 @@ def kernel_database():
         except docker.errors.NotFound:
             pass
         else:
+            # name/UUID label 외에도 이 fixture가 생성한 실제 object ID만 제거한다.
+            expected_id = captured_id or container.get_wrapped_container().id
+            assert owned.id == expected_id
             assert owned.attrs["Config"]["Labels"].get("codex.scoped-kernel") == identity
             assert owned.name == "kt-map-scope-kernel-" + identity
             owned.remove(force=True, v=True)
@@ -162,7 +183,12 @@ def kernel_database():
 
 @pytest.fixture
 async def kernel_engines(kernel_database):
-    admin = create_async_engine(kernel_database["admin"], pool_size=2, max_overflow=0)
+    admin = create_async_engine(
+        kernel_database["admin"],
+        pool_size=2,
+        max_overflow=0,
+        connect_args={"server_settings": {"statement_timeout": "4000", "lock_timeout": "1000"}},
+    )
     runtime = create_async_engine(
         kernel_database["runtime"],
         pool_size=4,
@@ -178,7 +204,23 @@ async def kernel_engines(kernel_database):
 
 async def prepared(runtime, *, dataset=1, region=None, members=()):
     attempt, owner = uuid4(), uuid4()
+    members = list(members)
     async with AsyncSession(runtime) as session, session.begin():
+        for feature in [m for m in members if m.dependency_kind == "feature"]:
+            if not any(
+                m.dependency_kind == "feature_membership"
+                and m.dependency_key == feature.dependency_key
+                for m in members
+            ):
+                membership = await session.scalar(
+                    text("SELECT ops.scoped_feature_write_membership_digest(CAST(:id AS uuid))"),
+                    {"id": feature.dependency_key},
+                )
+                members.append(
+                    ScopedWriteDependency(
+                        len(members), "feature_membership", feature.dependency_key, membership
+                    )
+                )
         await claim_scoped_feature_write(
             session,
             attempt_id=attempt,
@@ -618,6 +660,12 @@ async def test_cross_dataset_shared_feature_all_heads_lock_in_sorted_order(kerne
                 text("INSERT INTO provider_sync.source_entity_heads VALUES(:key,'record')"),
                 {"key": key},
             )
+    async with admin.begin() as connection:
+        for key in keys:
+            await connection.execute(
+                text("INSERT INTO provider_sync.source_links VALUES(:feature,:key,'primary')"),
+                {"feature": feature, "key": key},
+            )
     members = [
         ScopedWriteDependency(0, "source_head", keys[1], "record"),
         ScopedWriteDependency(1, "feature", str(feature), "1"),
@@ -654,3 +702,333 @@ async def test_cross_dataset_shared_feature_all_heads_lock_in_sorted_order(kerne
             )
             == 2
         )
+
+
+async def test_repeatable_read_old_worker_is_serialization_failure(kernel_engines):
+    admin, runtime = kernel_engines
+    region = uuid4().hex
+    token, digest = await prepared(runtime, region=region)
+    rr = create_async_engine(
+        runtime.url, isolation_level="REPEATABLE READ", pool_size=1, max_overflow=0
+    )
+    try:
+        async with AsyncSession(rr) as old, old.begin():
+            await old.execute(text("SELECT count(*) FROM feature.features"))
+            async with admin.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE ops.feature_write_attempts SET "
+                        "lease_until=clock_timestamp()-interval '1 second' WHERE attempt_id=:id"
+                    ),
+                    {"id": token["attempt_id"]},
+                )
+                await connection.execute(
+                    text(
+                        "UPDATE ops.feature_write_region_scopes SET "
+                        "lease_until=clock_timestamp()-interval '1 second' WHERE owner=:id"
+                    ),
+                    {"id": token["attempt_id"]},
+                )
+            successor, _ = await prepared(runtime, region=region)
+            with pytest.raises(DBAPIError) as caught:
+                await begin_scoped_feature_write(old, **token, manifest_digest=digest)
+            assert caught.value.orig.sqlstate == "40001"
+        async with AsyncSession(runtime) as session, session.begin():
+            assert await cancel_scoped_feature_write(session, **successor)
+    finally:
+        await rr.dispose()
+
+
+async def test_participant_dataset_budget_is_enforced_before_apply(kernel_engines):
+    admin, runtime = kernel_engines
+    members = []
+    async with admin.begin() as connection:
+        for ordinal in range(33):
+            dataset = 1000 + ordinal
+            await connection.execute(
+                text("INSERT INTO provider_sync.provider_datasets VALUES(:id)"), {"id": dataset}
+            )
+            key = "budget-" + uuid4().hex
+            await connection.execute(
+                text("INSERT INTO provider_sync.source_entities VALUES(:key,:dataset)"),
+                {"key": key, "dataset": dataset},
+            )
+            await connection.execute(
+                text("INSERT INTO provider_sync.source_entity_heads VALUES(:key,'record')"),
+                {"key": key},
+            )
+            members.append(ScopedWriteDependency(ordinal, "source_head", key, "record"))
+    token, digest = await prepared(runtime, region=uuid4().hex, members=members)
+    with pytest.raises(DBAPIError) as caught:
+        async with AsyncSession(runtime) as session, session.begin():
+            await begin_scoped_feature_write(session, **token, manifest_digest=digest)
+    assert caught.value.orig.sqlstate == "23514"
+    async with admin.connect() as connection:
+        assert (
+            await connection.scalar(
+                text("SELECT status FROM ops.feature_write_attempts WHERE attempt_id=:id"),
+                {"id": token["attempt_id"]},
+            )
+            == "ready"
+        )
+    async with AsyncSession(runtime) as session, session.begin():
+        assert await cancel_scoped_feature_write(session, **token)
+
+
+async def test_cancel_cannot_overwrite_committed_apply(kernel_engines):
+    _, runtime = kernel_engines
+    token, digest = await prepared(runtime, region=uuid4().hex)
+    async with AsyncSession(runtime) as first, first.begin():
+        await begin_scoped_feature_write(first, **token, manifest_digest=digest)
+        with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 실제 대기 중 취소 경쟁
+            async with AsyncSession(runtime) as other, other.begin():
+                await other.execute(text("SET LOCAL lock_timeout='80ms'"))
+                await cancel_scoped_feature_write(other, **token)
+        assert caught.value.orig.sqlstate == "55P03"
+        await finish_scoped_feature_write(first, **token, result_digest="b" * 64)
+    async with AsyncSession(runtime) as session, session.begin():
+        assert not await cancel_scoped_feature_write(session, **token)
+
+
+async def test_kernel_deadlines_preserve_shorter_caller_and_reject_unbounded_sql(kernel_engines):
+    _, runtime = kernel_engines
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL statement_timeout='200ms'"))
+        await session.execute(text("SET LOCAL lock_timeout='80ms'"))
+        await claim_scoped_feature_write(
+            session,
+            attempt_id=uuid4(),
+            owner=uuid4(),
+            dataset_id=2,
+            idempotency_key=uuid4().hex,
+            regions=[ScopedWriteRegion(1, uuid4().hex)],
+            input_digest="a" * 64,
+            expected_members=0,
+        )
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='statement_timeout'")
+            )
+            == 200
+        )
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 80
+        )
+    with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - SQL direct deadline 사전 거부
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout=0"))
+            await session.execute(
+                text(
+                    "SELECT ops.claim_scoped_feature_write(:id,:owner,1,'unbounded','"
+                    "[]',:digest,0,180,false)"
+                ),
+                {"id": uuid4(), "owner": uuid4(), "digest": "a" * 64},
+            )
+    assert caught.value.orig.sqlstate == "23514"
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL statement_timeout=0"))
+        await session.execute(text("SET LOCAL lock_timeout=0"))
+        token = await claim_scoped_feature_write(
+            session,
+            attempt_id=uuid4(),
+            owner=uuid4(),
+            dataset_id=2,
+            idempotency_key=uuid4().hex,
+            regions=[ScopedWriteRegion(1, uuid4().hex)],
+            input_digest="a" * 64,
+            expected_members=0,
+        )
+        assert token["status"] == "preparing"
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='statement_timeout'")
+            )
+            == 30000
+        )
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 1000
+        )
+
+
+async def test_public_protocol_preserves_finite_legacy_wait_and_resets_default(kernel_engines):
+    _, runtime = kernel_engines
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL lock_timeout='15min'"))
+        await lock_scoped_feature_write_protocol(session, exclusive=True)
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 900000
+        )
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL lock_timeout=0"))
+        await lock_scoped_feature_write_protocol(session, exclusive=True)
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 0
+        )
+
+
+async def _linked_feature(admin):
+    feature = uuid4()
+    key = "linked-" + uuid4().hex
+    async with admin.begin() as connection:
+        await connection.execute(
+            text("INSERT INTO feature.features VALUES(:id,1,'before')"), {"id": feature}
+        )
+        await connection.execute(
+            text("INSERT INTO provider_sync.source_entities VALUES(:key,1)"), {"key": key}
+        )
+        await connection.execute(
+            text("INSERT INTO provider_sync.source_entity_heads VALUES(:key,'record')"),
+            {"key": key},
+        )
+        await connection.execute(
+            text("INSERT INTO provider_sync.source_links VALUES(:id,:key,'primary')"),
+            {"id": feature, "key": key},
+        )
+    return feature, key
+
+
+async def test_membership_delete_after_plan_is_replanned(kernel_engines):
+    admin, runtime = kernel_engines
+    feature, key = await _linked_feature(admin)
+    token, digest = await prepared(
+        runtime,
+        region=uuid4().hex,
+        members=[
+            ScopedWriteDependency(0, "source_head", key, "record"),
+            ScopedWriteDependency(1, "feature", str(feature), "1"),
+        ],
+    )
+    async with admin.begin() as connection:
+        await connection.execute(
+            text("DELETE FROM provider_sync.source_links WHERE feature_id=:id"), {"id": feature}
+        )
+    with pytest.raises(DBAPIError) as caught:
+        async with AsyncSession(runtime) as session, session.begin():
+            await begin_scoped_feature_write(session, **token, manifest_digest=digest)
+    assert caught.value.orig.sqlstate == "40001"
+
+
+async def test_membership_all_source_heads_required_and_link_locked(kernel_engines):
+    admin, runtime = kernel_engines
+    feature, key = await _linked_feature(admin)
+    incomplete, d1 = await prepared(
+        runtime,
+        region=uuid4().hex,
+        members=[ScopedWriteDependency(0, "feature", str(feature), "1")],
+    )
+    with pytest.raises(DBAPIError) as caught:
+        async with AsyncSession(runtime) as session, session.begin():
+            await begin_scoped_feature_write(session, **incomplete, manifest_digest=d1)
+    assert caught.value.orig.sqlstate == "40001"
+    complete, d2 = await prepared(
+        runtime,
+        region=uuid4().hex,
+        members=[
+            ScopedWriteDependency(0, "source_head", key, "record"),
+            ScopedWriteDependency(1, "feature", str(feature), "1"),
+        ],
+    )
+    async with AsyncSession(runtime) as first, first.begin():
+        await begin_scoped_feature_write(first, **complete, manifest_digest=d2)
+        with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 별도 세션 실제 link 행 잠금
+            async with admin.begin() as connection:
+                await connection.execute(text("SET LOCAL lock_timeout='80ms'"))
+                await connection.execute(
+                    text("DELETE FROM provider_sync.source_links WHERE feature_id=:id"),
+                    {"id": feature},
+                )
+        assert caught.value.orig.sqlstate == "55P03"
+        await finish_scoped_feature_write(first, **complete, result_digest="b" * 64)
+
+
+async def test_membership_digest_distinguishes_role_and_is_stable(kernel_engines):
+    admin, runtime = kernel_engines
+    feature, key = await _linked_feature(admin)
+    async with AsyncSession(runtime) as session, session.begin():
+        original = await session.scalar(
+            text("SELECT ops.scoped_feature_write_membership_digest(:id)"), {"id": feature}
+        )
+        assert original == await session.scalar(
+            text("SELECT ops.scoped_feature_write_membership_digest(:id)"), {"id": feature}
+        )
+    async with admin.begin() as connection:
+        await connection.execute(
+            text("INSERT INTO provider_sync.source_links VALUES(:id,:key,'enrichment')"),
+            {"id": feature, "key": key},
+        )
+    async with AsyncSession(runtime) as session, session.begin():
+        changed = await session.scalar(
+            text("SELECT ops.scoped_feature_write_membership_digest(:id)"), {"id": feature}
+        )
+        assert changed != original
+
+
+async def test_new_link_committing_during_feature_lock_wait_is_replanned(kernel_engines):
+    admin, runtime = kernel_engines
+    feature, key = await _linked_feature(admin)
+    new_key = "phantom-" + uuid4().hex
+    async with admin.begin() as connection:
+        await connection.execute(
+            text("INSERT INTO provider_sync.source_entities VALUES(:key,2)"), {"key": new_key}
+        )
+        await connection.execute(
+            text("INSERT INTO provider_sync.source_entity_heads VALUES(:key,'record')"),
+            {"key": new_key},
+        )
+    token, digest = await prepared(
+        runtime,
+        region=uuid4().hex,
+        members=[
+            ScopedWriteDependency(0, "source_head", key, "record"),
+            ScopedWriteDependency(1, "feature", str(feature), "1"),
+        ],
+    )
+    async with admin.connect() as inserting:
+        transaction = await inserting.begin()
+        try:
+            await inserting.execute(
+                text("INSERT INTO provider_sync.source_links VALUES(:id,:key,'primary')"),
+                {"id": feature, "key": new_key},
+            )
+            async with AsyncSession(runtime) as applying, applying.begin():
+                pid = await applying.scalar(text("SELECT pg_backend_pid()"))
+                task = asyncio.create_task(
+                    begin_scoped_feature_write(applying, **token, manifest_digest=digest)
+                )
+                try:
+                    async with admin.connect() as probe:
+                        async with asyncio.timeout(0.7):
+                            for _ in range(70):
+                                if await probe.scalar(
+                                    text("SELECT cardinality(pg_blocking_pids(:pid))>0"),
+                                    {"pid": pid},
+                                ):
+                                    break
+                                await asyncio.sleep(0.01)
+                            else:
+                                raise RuntimeError("owned feature lock wait not observed")
+                    # 새 link는 처음 membership 조회에는 보이지 않았다. FK가 Feature를 잠근
+                    # 실제 대기를 확인한 뒤 commit하여 최종 membership 재조회가 필요함을 증명한다.
+                    await transaction.commit()
+                    with pytest.raises(DBAPIError) as caught:
+                        await task
+                    assert caught.value.orig.sqlstate == "40001"
+                finally:
+                    if not task.done():
+                        task.cancel()
+                        await asyncio.gather(task, return_exceptions=True)
+        finally:
+            if transaction.is_active:
+                await transaction.rollback()

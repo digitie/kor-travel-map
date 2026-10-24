@@ -2,6 +2,7 @@ CREATE FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestamptz,p_l
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
 DECLARE v_members integer; v_attempts integer;
 BEGIN
+    PERFORM ops._arm_scoped_feature_write_deadline();
     PERFORM ops.lock_scoped_feature_write_protocol(false);
     IF p_before IS NULL OR p_before>clock_timestamp()-interval '1 day' OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 256 THEN
         RAISE EXCEPTION 'invalid bounded terminal retention' USING ERRCODE='23514';

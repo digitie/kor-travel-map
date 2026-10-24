@@ -8843,7 +8843,8 @@ class ScopedFeatureWriteManifestRow(Base):
         ),
         CheckConstraint("ordinal BETWEEN 0 AND 8191", name=conv("ck_fw_manifest_ordinal")),
         CheckConstraint(
-            "dependency_kind IN ('feature','source_head')", name=conv("ck_fw_manifest_kind")
+            "dependency_kind IN ('feature','source_head','feature_membership')",
+            name=conv("ck_fw_manifest_kind"),
         ),
         CheckConstraint(
             "octet_length(dependency_key) BETWEEN 1 AND 128", name=conv("ck_fw_manifest_key")

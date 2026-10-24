@@ -320,6 +320,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 "feature.lock_provider_field_policy_epoch()",
                 "feature.assert_scoped_provider_scalar_target(uuid,uuid,bigint,text,bigint)",
                 "feature._provider_field_projection_dependency_active(text,text)",
+                "ops.scoped_feature_write_membership_digest(uuid)",
                 "ops.lock_scoped_feature_write_protocol(boolean)",
                 "ops.claim_scoped_feature_write(uuid,uuid,bigint,text,jsonb,text,integer,integer,boolean)",
                 "ops.append_scoped_feature_write_manifest(uuid,uuid,jsonb)",

@@ -435,6 +435,9 @@ _STATE_OWNER_FUNCTION_ACL = (
     "FROM PUBLIC, ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.activate_provider_field_policy(...) "
     "TO ktm_feature_schema_owner",
+    "REVOKE ALL ON FUNCTION ops.scoped_feature_write_membership_digest(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.scoped_feature_write_membership_digest(...) "
+    "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION ops.claim_scoped_feature_write(...) FROM PUBLIC",
@@ -921,6 +924,7 @@ _OPTIONAL_ROUTINES: Mapping[str, str] = {
     "feature._install_provider_field_projection_guards": "412_provider_scalar_projection",
     # baseline400에는 아직 없으며410이 같은 전역 fence 아래 shadow 전용으로 추가한다.
     "feature.record_provider_field_candidates": "410_provider_field_shadow",
+    "ops.scoped_feature_write_membership_digest": "411_scoped_feature_write_kernel",
     "ops.lock_scoped_feature_write_protocol": "411_scoped_feature_write_kernel",
     "ops.claim_scoped_feature_write": "411_scoped_feature_write_kernel",
     "ops.append_scoped_feature_write_manifest": "411_scoped_feature_write_kernel",

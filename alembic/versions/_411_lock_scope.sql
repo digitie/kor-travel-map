@@ -2,6 +2,7 @@ CREATE FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions
 RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
 DECLARE v_region jsonb;
 BEGIN
+    PERFORM ops._arm_scoped_feature_write_deadline();
     PERFORM ops.lock_scoped_feature_write_protocol(p_exclusive);
     INSERT INTO ops.feature_write_dataset_scopes(provider_dataset_id) VALUES(p_dataset)
         ON CONFLICT DO NOTHING;
