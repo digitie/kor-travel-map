@@ -530,7 +530,10 @@ async def _measure(
         cpu_after = time.process_time()
         after = await asyncio.to_thread(_container_sample, container)
         wal = await observer.scalar(
-            text("SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(),CAST(:before AS pg_lsn))"),
+            text(
+                "SELECT pg_wal_lsn_diff(pg_current_wal_insert_lsn(),"
+                "CAST(CAST(:before AS text) AS pg_lsn))"
+            ),
             {"before": before_lsn},
         )
     results = [task.result() for task in writers]

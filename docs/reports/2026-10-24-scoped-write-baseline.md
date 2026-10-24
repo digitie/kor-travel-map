@@ -74,6 +74,10 @@ scoped-write-baseline-<lane> artifact를 보관한다. timing 임계값으로 CI
 실제 PG runner와 추가 회귀는 구현했으며 최종 검증 수치·두 리뷰·exact CI는 PR 기록에서 수용한다.
 첫 실제 PG 실행은 필수 post-upgrade runtime ACL 조정이 빠져 원문 적재 전 거절됐고, 성공
 JSON을 발행하지 않았다. 정본 초기화 순서를 보완한 후 두 lane의 실제 측정을 다시 수용한다.
+재기동 뒤에는 소유 container의 현재 port를 다시 조회하도록 보완했다. 다음 실제 PG에서는
+첫 native 적재·seal 뒤 WAL 관찰의 pg_lsn 문자열 bind가 asyncpg 정수 codec으로 추론되어
+실패했다. bind를 먼저 text로 전송한 뒤 서버에서 pg_lsn으로 변환하며, 기존 실제 cold/warm
+회귀와 WAL 수치 검증으로 재수용한다. 이 실패에서도 성공 측정 JSON은 발행하지 않았다.
 로컬 container를 추가로 켰거나 운영 측정을 했다고 보고하지 않는다.
 
 T-CWRITE-01의 writer/trigger 전수 inventory·실분포/대량 geometry·API/UI 기준선은 미완이다.
