@@ -1,3 +1,7 @@
+## 2026-10-25 — Heritage bounded evidence reader 입력 계약(부분)
+
+- 요청 key·중복·MAX+1/배열 예산과 부적격 사유를 추가했다. 순수16 PASS/Ruff PASS이며 DB reader·422 SQL/실PG·SH 수집·운영은 아직0이다. [범위·미완](reports/2026-10-25-heritage-bounded-evidence-reader.md).
+
 ## 2026-10-25 — Geo stamp SQL writer 권한 경계(421)
 
 - 일반 runtime raw stamp 쓰기를 회수하고 EX/SH 전용 SD와 SI 진입 검증·기존 active full-context/정렬 잠금을 유지했다. 실제 SH collector 배선/운영 활성화는0이다.
