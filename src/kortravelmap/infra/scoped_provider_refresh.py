@@ -221,14 +221,7 @@ async def _refresh_provider_scalars(
     expected_digest = scoped_provider_refresh_input_digest(
         bundle, feature_id=feature_id, dataset_id=dataset_id, policy_revision=policy_revision
     )
-    values, _ = _provider_field_patch_payload(
-        bundle.feature, feature_uuid=str(feature_id), parent_feature_id=None
-    )
-    scalar_values = json.dumps(
-        {key: value for key, value in json.loads(values).items() if key in _FIELDS},
-        ensure_ascii=False,
-        allow_nan=False,
-    )
+    scalar_values = _provider_scalar_values(bundle, feature_id=feature_id)
     await _arm_deadline(session)
     if exclusive_protocol:
         # legacy의 첫 fence 장기 대기 힌트가 native deadline을 늘리지 않게 소비한다.
@@ -249,6 +242,51 @@ async def _refresh_provider_scalars(
         raise ValueError("sealed scalar refresh artifact does not match this input")
     if attempt["status"] == "completed":
         return attempt
+    await _assert_provider_scalar_target(
+        session,
+        bundle,
+        feature_id=feature_id,
+        dataset_id=dataset_id,
+        policy_revision=policy_revision,
+        attempt_id=attempt_id,
+    )
+    current_key = await _apply_provider_scalar(
+        session,
+        bundle,
+        feature_id=feature_id,
+        dataset_id=dataset_id,
+        policy_revision=policy_revision,
+        attempt_id=attempt_id,
+        scalar_values=scalar_values,
+    )
+    result_digest = hashlib.sha256(
+        json.dumps([expected_digest, current_key], separators=(",", ":")).encode()
+    ).hexdigest()
+    return await finish_scoped_feature_write(
+        session, attempt_id=attempt_id, owner=owner, result_digest=result_digest
+    )
+
+
+def _provider_scalar_values(bundle: FeatureBundle, *, feature_id: UUID) -> str:
+    values, _ = _provider_field_patch_payload(
+        bundle.feature, feature_uuid=str(feature_id), parent_feature_id=None
+    )
+    return json.dumps(
+        {key: value for key, value in json.loads(values).items() if key in _FIELDS},
+        ensure_ascii=False,
+        allow_nan=False,
+    )
+
+
+async def _assert_provider_scalar_target(
+    session: AsyncSession,
+    bundle: FeatureBundle,
+    *,
+    feature_id: UUID,
+    dataset_id: int,
+    policy_revision: int,
+    attempt_id: UUID,
+) -> None:
     record = bundle.source_record
     entity = _make_source_entity_key(
         provider=record.provider,
@@ -267,6 +305,26 @@ async def _refresh_provider_scalars(
             "entity": entity,
             "revision": policy_revision,
         },
+    )
+
+
+async def _apply_provider_scalar(
+    session: AsyncSession,
+    bundle: FeatureBundle,
+    *,
+    feature_id: UUID,
+    dataset_id: int,
+    policy_revision: int,
+    attempt_id: UUID,
+    scalar_values: str,
+) -> Any:
+    """이미 begin/target 검증한 한 항목. commit/finish는 호출하지 않는다."""
+    record = bundle.source_record
+    entity = _make_source_entity_key(
+        provider=record.provider,
+        dataset_key=record.dataset_key,
+        source_entity_type=record.source_entity_type,
+        source_entity_id=record.source_entity_id,
     )
     state = await _upsert_source_record_state(session, record)
     current_key = await session.scalar(
@@ -294,9 +352,4 @@ async def _refresh_provider_scalars(
         feature_id=str(feature_id),
         policy_revision=policy_revision,
     )
-    result_digest = hashlib.sha256(
-        json.dumps([expected_digest, current_key], separators=(",", ":")).encode()
-    ).hexdigest()
-    return await finish_scoped_feature_write(
-        session, attempt_id=attempt_id, owner=owner, result_digest=result_digest
-    )
+    return current_key
