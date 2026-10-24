@@ -9,6 +9,8 @@ T-CWRITE-01의 작은 측정 도구다. 실제 운영 값·수집 속도 개선�
 - independent는 두 dataset의 서로 다른 Feature, shared는 두 dataset의 claim/source/head/primary
   link가 같은 canonical Feature에 연결된 N:1 fixture다. source/record/Feature는 기존 제약을 지킨다.
   fixture 준비는 측정 밖이며 최초 identity 발급·자동 dedup의 성능을 측정한 것으로 해석하지 않는다.
+- provider DTO의 주소는 public `make_feature_id`로 만든 source별 `f_*`다. seed/claim의 정본 UUID는
+  유지한다. 실제 측정 뒤 source별 alias→canonical 매핑도 검증하므로 shared N:1을 분리하지 않는다.
 - 측정은 기존 global fence 획득 → **수정하지 않은 load_bundles** → 기존
   capture_provider_curation_input의 causal seal → 같은 transaction commit이다.
   source/typed field patch를 benchmark SQL로 다시 구현하지 않는다.

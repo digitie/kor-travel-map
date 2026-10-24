@@ -29,10 +29,13 @@ async def test_isolated_three_run_cold_warm_baseline(tmp_path) -> None:
     for trial in report["trials"]:
         cold, warm = trial["cold"], trial["warm"]
         assert cold["state"]["effective_sha256"] == warm["state"]["effective_sha256"]
+        assert cold["state"]["alias_sha256"] == warm["state"]["alias_sha256"]
         expected_features = len(fixture.points) * (2 if trial["case"] == "independent" else 1)
         for phase in (cold, warm):
             assert phase["state"]["feature_count"] == expected_features
             assert phase["state"]["source_count"] == 2 * len(fixture.points)
+            assert phase["state"]["alias_count"] == 2 * len(fixture.points)
+            assert phase["state"]["alias_sha256"]
             assert phase["dml_overlap_seconds"] == 0
             assert phase["worker_cpu_core_seconds"] >= 0
             assert phase["pg_cpu_core_seconds"] >= 0

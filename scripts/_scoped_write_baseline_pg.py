@@ -24,7 +24,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
-from kortravelmap.core import make_payload_hash, make_source_record_key
+from kortravelmap.core import make_feature_id, make_payload_hash, make_source_record_key
 from kortravelmap.dto import (
     Coordinate,
     Feature,
@@ -55,6 +55,16 @@ _ROOT = Path(__file__).resolve().parents[1]
 def feature_id(case: str, writer: str, point: Point) -> str:
     owner = "left" if case == "shared" else writer
     return str(uuid5(NAMESPACE_URL, f"map-cwrite-baseline-v1:{case}:{owner}:{point.key}"))
+
+
+def _source_alias(case: str, writer: str, point: Point) -> str:
+    return make_feature_id(
+        bjd_code=None,
+        kind="place",
+        category="01010100",
+        source_type=f"cwrite-benchmark-{case}:{writer}",
+        source_natural_key=point.key,
+    )
 
 
 def record(
@@ -244,10 +254,10 @@ async def _seed(admin_engine: AsyncEngine, runtime_engine: AsyncEngine, fixture:
 
 def _bundle(case: str, writer: str, point: Point, fixture: Fixture) -> FeatureBundle:
     source = record(case, writer, point, fixture, measured=True)
-    identity = feature_id(case, writer, point)
+    legacy_alias = _source_alias(case, writer, point)
     return FeatureBundle(
         feature=Feature(
-            feature_id=identity,
+            feature_id=legacy_alias,
             provider_natural_key=point.key,
             kind="place",
             name=point.name,
@@ -255,13 +265,13 @@ def _bundle(case: str, writer: str, point: Point, fixture: Fixture) -> FeatureBu
             category="01010100",
             marker_icon="circle",
             marker_color="P-01",
-            detail=PlaceDetail(feature_id=identity, place_kind="tourism"),
+            detail=PlaceDetail(feature_id=legacy_alias, place_kind="tourism"),
             created_at=fixture.observed_at,
             updated_at=fixture.observed_at,
         ),
         source_record=source,
         source_link=SourceLink(
-            feature_id=identity,
+            feature_id=legacy_alias,
             source_record_key=source.source_record_key,
             source_role="primary",
             match_method="fixture",
@@ -415,6 +425,30 @@ async def _state(engine: AsyncEngine, case: str, fixture: Fixture) -> dict[str, 
                 "observed": fixture.observed_at + timedelta(seconds=1),
             },
         )
+        alias_rows = (
+            (
+                await connection.execute(
+                    text("""
+                    SELECT alias AS legacy_alias,feature_id::text
+                    FROM feature.feature_aliases
+                    WHERE alias_kind='legacy_feature_id'
+                      AND feature_id=ANY(CAST(:ids AS uuid[]))
+                    ORDER BY alias
+                """),
+                    {"ids": ids},
+                )
+            )
+            .mappings()
+            .all()
+        )
+    expected_aliases = {
+        _source_alias(case, writer, point): feature_id(case, writer, point)
+        for writer in ("left", "right")
+        for point in fixture.points
+    }
+    actual_aliases = {str(row["legacy_alias"]): str(row["feature_id"]) for row in alias_rows}
+    if len(alias_rows) != len(expected_aliases) or actual_aliases != expected_aliases:
+        raise RuntimeError("원천 alias→canonical fixture 관계가 다릅니다")
     effective = _effective_state((dict(row) for row in rows), case, fixture)
     if source_count != 2 * len(fixture.points):
         raise RuntimeError("source current head 집합이 고정 fixture와 다릅니다")
@@ -422,6 +456,10 @@ async def _state(engine: AsyncEngine, case: str, fixture: Fixture) -> dict[str, 
     return {
         "feature_count": len(rows),
         "source_count": source_count,
+        "alias_count": len(alias_rows),
+        "alias_sha256": hashlib.sha256(
+            json.dumps(actual_aliases, sort_keys=True).encode()
+        ).hexdigest(),
         "effective_sha256": hashlib.sha256(
             json.dumps(effective, sort_keys=True, allow_nan=False).encode()
         ).hexdigest(),
