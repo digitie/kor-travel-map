@@ -1,3 +1,9 @@
+## 2026-10-24 — 큐레이션 import의 protocol-first 진입
+
+- 실제 whole M03 import와 direct manual의 역순40P01을 재현하고 normal-head 첫 advisory 전 protocol EX만 추가했다. h35/다른2caller·DDL·권한은 유지한다.
+- 최종PG9+기존curation/merge48·관련unit76·lint377 PASS(기존6skip). 두 리뷰·정확CI는 대기이며 기본OFF/seed0/운영0이다. [범위·실패·증거](reports/2026-10-24-curation-import-protocol-entry.md).
+- tasks-rule §8에 따라 가장 오래된09-30 한 절3480B를09h로 원문 보존해 분리했다. 옛DB 전체 replay·전체 writer 활성화는 미완이다.
+
 ## 2026-10-24 — field override 진입 보강(416)
 
 - SQL author/revoke·patch/create를 조기EX로 맞추고 manualcreate55P03을 기존503/RetryAfter5로 반환한다.

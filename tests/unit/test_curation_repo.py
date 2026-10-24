@@ -1203,6 +1203,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     )
     monkeypatch.setattr(repo, "_upsert_id_with_fallback", foundations)
     changed = _FakeSession(
+        _FakeResult(),  # normal-head protocol entry
         _FakeResult(),
         _FakeResult(),
         _FakeResult(rows=["feature:one"]),
@@ -1226,11 +1227,13 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     assert result["removed"] == 1
     assert result["removals"] == (_item(),)
     assert result["import_batch_id"] == "00000000-0000-4000-8000-000000000091"
-    assert "pg_advisory_xact_lock" in changed.calls[0][0]
+    assert "ops.lock_scoped_feature_write_protocol(true)" in changed.calls[0][0]
+    assert "pg_advisory_xact_lock" in changed.calls[1][0]
     assert "UPDATE feature.curation_collections" in changed.calls[-1][0]
     foundations.reset_mock(side_effect=True)
     foundations.side_effect = ["00000000-0000-4000-8000-000000000012"]
     unchanged = _FakeSession(
+        _FakeResult(),  # normal-head protocol entry
         _FakeResult(),
         _FakeResult(),
         _FakeResult(rows=["feature:one"]),
@@ -1246,7 +1249,7 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     no_change = await repo.import_curation_rows(unchanged, rows=(rows[0],))
     assert no_change["inserted"] == no_change["updated"] == no_change["removed"] == 0
     assert no_change["import_batch_id"] == "00000000-0000-4000-8000-000000000092"
-    assert len(unchanged.calls) == 11
+    assert len(unchanged.calls) == 12
 
 
 @pytest.mark.parametrize(
