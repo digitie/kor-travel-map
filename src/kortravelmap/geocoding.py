@@ -1374,7 +1374,7 @@ _GEO_TRANSIENT_BACKOFF_SECONDS: Final[float] = 2.0
 
 
 class _TransientGeoRequestError(GeoRequestError):
-    """다시 보내 볼 만한 transport 실패(read timeout·연결 중 끊김).
+    """다시 보내 볼 만한 transport 실패(read timeout·연결 중 끊김·읽기/쓰기 중 연결 오류).
 
     밖에서는 그냥 ``GeoRequestError``다.
     """
@@ -1558,7 +1558,17 @@ class KorTravelGeoRestClient:
         except _httpx.HTTPError as exc:
             error_type = (
                 _TransientGeoRequestError
-                if isinstance(exc, (_httpx.ReadTimeout, _httpx.RemoteProtocolError))
+                # ReadError/WriteError: keep-alive 연결이 요청 도중 끊긴 경우(2026-10-24 등산로 run이
+                # 5만 좌표 선조회 중 ReadError 한 번으로 두 시도를 잃었다). 연결 수립 실패는 제외.
+                if isinstance(
+                    exc,
+                    (
+                        _httpx.ReadTimeout,
+                        _httpx.RemoteProtocolError,
+                        _httpx.ReadError,
+                        _httpx.WriteError,
+                    ),
+                )
                 else GeoRequestError
             )
             sanitized = error_type(f"kor-travel-geo transport 실패: {type(exc).__name__}")

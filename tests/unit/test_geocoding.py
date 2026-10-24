@@ -1863,7 +1863,13 @@ def test_rest_client_gives_up_after_bounded_attempts() -> None:
 @pytest.mark.usefixtures("_no_geo_backoff")
 @pytest.mark.parametrize(
     ("raised", "expected_calls"),
-    [(httpx.ReadTimeout("slow"), 3), (httpx.ConnectError("down"), 1)],
+    [
+        (httpx.ReadTimeout("slow"), 3),
+        (httpx.ReadError("reset"), 3),
+        (httpx.WriteError("broken pipe"), 3),
+        (httpx.RemoteProtocolError("closed"), 3),
+        (httpx.ConnectError("down"), 1),
+    ],
 )
 def test_rest_client_retries_read_timeout_but_not_connect_failure(
     raised: Exception, expected_calls: int
