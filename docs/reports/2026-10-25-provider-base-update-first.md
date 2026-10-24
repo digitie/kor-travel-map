@@ -64,3 +64,15 @@ source key는 정본 네 keyword 인자로 호출하고, blocker/waiter PID는 `
 PG 없이 정본 helper8곳의 signature binding·실제 SourceRecord/key 구성을 대조했다.
 기본 xunit2·기존 warning 정책으로 순수1 PASS(7.79초), XML의 두 PID property 보존,
 실제15개 collect/Ruff를 확인했다. 이 검사는 실제15개 재실행을 대신하지 않는다.
+
+## 수정 후 실제15개 결과
+
+수정한 fixture의 owned PG 재실행은15 PASS/실패·오류·skip0(XML14.129초, 전체23.013초)였다.
+5kind의 부재 fallback·동일값 UPDATE와 lineage/revision/clock/geometry, JSON null 구분,
+notice/override 보존, 잘못된 source 오류 우선과 rollback, owner-first 정확 PID 경합,
+실제425 procedure 본문·owner/ACL·서비스 역할을 확인했다. 늦은 INSERT 경합 증명은 아니다.
+Git2384개·SDK53개 전후와 실제 import9개를 대조했으며 SDK 실행으로 세지 않는다.
+정확 CID·UUID·scalar label·익명 volume 부재를 확인했다. 첫 실패는 성공과 합산하지 않는다.
+
+기존 활성 정책 EX20·공식425 oracle·비용·최종 CI는 아직 미완이다. 424 고정 소스 위로
+migration을 선형화한 뒤 후속 검증하며, 이15개 성공만으로 성능이나 collector 완료를 주장하지 않는다.

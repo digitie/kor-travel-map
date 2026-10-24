@@ -1,6 +1,6 @@
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
-- materializer 두 루프만 분리했다. 첫 PG는 catalog1 PASS/fixture13 FAIL·setup1 ERROR였고 정확 정리했다. 테스트 호출·PID 증거만 고쳤으며 동작/비용은 아직 미판정이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
+- materializer 두 루프만 분리했다. 첫 fixture 실패를 보존하고 테스트만 고쳐 실제15 PASS/14.129초·정확 정리를 확인했다. 활성 정책20·공식 oracle·비용·최종 CI는 미완이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
 
 ## 2026-10-25 — EX context 단일 조회(423)
 
