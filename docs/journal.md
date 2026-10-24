@@ -1,3 +1,72 @@
+## 2026-10-24 — ADR-114 2단계 재리뷰 Low·main 재기반(#1365 뒤): 브랜치 `feat/adr114-valkey-weather`
+
+- origin/main(#1365 transport T4·#1368·#1369) 위로 rebase. OpenAPI 3종·admin `types.ts`는 rebase한 트리에서 n150이 다시
+  뽑았고, vnext 계약 두 파일은 main 쪽을 받은 뒤 weather 항목(revision·service added 5건)을 다시 얹고 sha를 다시 쟀다.
+  문서만 손으로 합쳤다(새 항목 위, 줄머리 충돌·diff3 마커 없음).
+- 재리뷰 Low: `/nearest` 예보는 후보 최대 50곳(관측·요약은 10곳 그대로 — 예보 없는 측정소 12곳이 KMA 격자보다 가까운 통합
+  검사), 이미 지난 `to`/`forecast_to`는 422, 배치 id는 경로 `feature_id`·weather `location_id`와 같은 모양·길이 검사(docstring은
+  "둘 다 가능"으로), `…_DAILY_SUMMARY_DAYS=1`이면 `vs_previous_day`는 언제나 null(ADR W7·설정 설명), 테스트 이름 정정.
+- 검사(n150 일회용 python:3.13, origin/main `0b2dc53d0` 위): ruff·mypy --strict(279)·lint-imports·OpenAPI drift 초록, 통합
+  (실제 Valkey) 34 passed, unit+lint+api 4,773 passed·24 failed(main 기준선 환경 실패 그대로 — docker runtime 23·
+  `test_settings_default_values` 1), dagster 패키지 세션 905 passed.
+
+## 2026-10-24 — ADR-114 2단계 리뷰 반영(#1367): 브랜치 `feat/adr114-valkey-weather`
+
+- origin/main(#1358·#1359)로 rebase. 생성물(OpenAPI 3종·admin `types.ts`·vnext baseline·receipt 핀)은 rebase한 트리에서
+  다시 뽑았고 문서만 손으로 합쳤다.
+- 정확성 리뷰(차단 없음): 깨진 저장 값 → 부분 `unavailable`(위치 값 503과 같은 판정), `partial`을 읽는 시각으로 다시
+  계산(KST 경계 `daily_slot_bounds`, 끝났어도 적재 때 partial이면 유지), partial 구간은 `vs_previous_day=null`(06:30 아침),
+  429·5xx(500 포함, 503 제외) 재시도, `|`·제어 문자 location_id는 페이지 전체 계약 위반(재시도 없음 — 행만 빼면 위치가 조용히
+  사라진다), 둘째 페이지 이후 422는 처음부터 한 번 재시작(두 번째는 계약 위반), roster `source_status`는 null.
+- 운영·소비자 리뷰: `/nearest`는 근처 최대 10곳에서 부분마다 데이터가 있는 가장 가까운 위치(`source{feature_id, location_id,
+  distance_m}`, HIGH — 가장 가까운 대기질 측정소가 KMA 예보를 가리던 문제), weather 반경 100 km(weather 전용 상수, transport
+  모듈 import 제거 — #1365 충돌 회피, `bbox_search_box`만 남김), `POST /locations/batch`(50곳, weather `location_id` lookup),
+  묶음 읽기는 `read_many`로 왕복 두 번, 예보 `from`·`to` 창, ETag `If-None-Match` + 304 시 `checked_at`만 기록, schedule을
+  weather 공개 시각 뒤로(관측 :25·:40, 초단기 :48, 단기 하루 8회, 중기 06·07·18·19시, 외부 3시간), `/status` 오류는
+  `failure_kind` 코드만, 인증 header 설정(`…_AUTH_HEADER`), ADR W6 벌 수 정정(최악 약 240 MB)·W8 토큰 위험·지속성·회전 순서·
+  Manager env.
+- weather ETag 확인(main `7aa7e70` `export_snapshots.py`): ETag는 `snapshot_id`를 포함하고 같은 manifest의 snapshot은 TTL
+  15분 동안만 재사용된다 — 15분보다 긴 주기의 poll은 내용이 같아도 거의 매번 200이다(관측 :25→:40 같은 짧은 간격에서만
+  304 기대). 비용은 주기 정렬로 줄인다.
+- 검사(n150 일회용 python:3.13, origin/main `1d01ccbc2` 위 rebase): ruff·mypy --strict(279)·lint-imports·OpenAPI drift 초록,
+  통합(실제 Valkey, root `filterwarnings=error` 세션) `test_valkey_{weather,transport}_state.py` 33 passed, unit+lint+api
+  4,696 passed·24 failed(전부 main 기준선 환경 실패 — docker runtime 23·`test_settings_default_values` 1), dagster 패키지
+  세션 905 passed. 첫 재검사에서 잡은 둘을 고쳤다: rebase가 남긴 diff3 기준 마커 줄(CHANGELOG·journal·resume),
+  `POST /locations/batch`의 domain command registry 등록(`_query`, 쓰기 수 79 → 80).
+
+## 2026-10-24 — ADR-114 2단계: weather 현재·예보·세 구간 요약 Valkey·service REST: 브랜치 `feat/adr114-valkey-weather`
+
+- 원천 계약: weather main `7aa7e70`(W1~W5 producer 머지 완료 — #143~#164)의 OpenAPI·라우터·실제 HTTP 예시로 맞췄다.
+  `GET /v1/service/exports/{locations,current,forecasts?style=,daily-summaries?days=,status}`, header `X-Admin-Token`
+  (weather `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`), `{items, meta}` + 서명 cursor(TTL 15분)·`snapshot_id`·`source_status`,
+  503 = 완결 export 없음, 410 = snapshot 만료, 401 = 토큰. 로컬 `F:\dev\kor-travel-weather`는 `9aa0d33`(main보다 1
+  커밋 뒤, 문서만 차이) — 읽기 전용 scratch clone으로 대조했다.
+- live(읽기 전용): odroid weather API는 `3a0ae398`(weather128)이라 `kortravelweather_api.routers.service_exports`가 없고
+  `/v1/service/exports/*`는 404다. n150 Map code-server에는 weather 주소·토큰 env가 없다(Valkey URL·transport env만 있다).
+  n150 어떤 컨테이너에도 weather 관리자 토큰이 없다 — Manager가 넣어야 한다.
+- 설계(ADR-114 "구현 설계 — 2단계" W0~W8): 데이터셋 7개(`weather.locations`·`current`·`forecast_{ultra_short,short,mid,
+  external}`·`daily_summaries`), **값 하나 = 위치 하나**(`make_feature_id(kind="weather", category="99000000",
+  bjd_code=None)`), GEO는 위치 데이터셋 하나·다른 데이터셋은 같은 id로 `HMGET`. 매 run 전량(증분 `since`·ETag 미사용),
+  410은 처음부터 한 번 재시작, `source_status`(worst)·`source_collected_at`(min, 하나라도 null이면 null)을 세대 메타에
+  싣는다. 지난 예보 시각은 읽을 때 뗀다. REST는 `/v1/service/weather/{locations,locations/{id},nearest,status}` — 묶음은
+  데이터셋별 `status`로 부분 장애를 알리고 요약은 전날 같은 구간 대비 `vs_previous_day`를 싣는다. 메모리 추정 약 48 MB
+  (교체 겹침 최대 약 100 MB, transport 포함 200 MB 미만 / 1 GB).
+- ADR-105 재도입 방지 검사(`test_api_serves_no_weather.py`·admin vitest)는 `/v1/service/weather/` 접두사만 예외로 두고
+  예외의 실재·폐쇄(전부 service 정책, 예외 스키마는 다른 경로에서 닿지 않음, 빼는 것이 실제로 있음)를 따로 잰다.
+  Dagster 쪽 검사(카탈로그 operation·client 쓰기·KMA import)는 그대로 초록이다 — 이 job은 PG를 쓰지 않는다.
+- OpenAPI: admin·service에 4 operation·스키마 18개 **추가**(기존 불변, user 불변) → PinVi `apps/api/tests/contract/
+  kor-travel-map-openapi-{admin,service}.json` 재vendor 필요. admin TS 타입(`types.ts`)도 재생성했다 — main에서 1단계
+  transport route가 빠진 채 drift였던 것도 함께 들어갔다(frontend CI는 main에서 이미 빨갛다 — npm audit).
+- 검사(n150 일회용 python:3.13, `-c docker/constraints-dagster.txt`): ruff·mypy --strict(276 파일)·lint-imports·
+  OpenAPI drift `--check` 초록. unit+lint+api+dagster 5,536 passed·24 failed — 실패는 전부 main 기준선의 환경 실패
+  (`test_docker_dagster_runtime.py` 23·`test_smoke_import.py::test_settings_default_values` 1; safe.directory를 넣어
+  sealed tree·tick window는 이번엔 초록). 통합(실제 Valkey 컨테이너) `test_valkey_weather_state.py`+
+  `test_valkey_transport_state.py` 30 passed. 첫 통합 실행에서 테스트의 httpx 전역 patch가 API 미들웨어의
+  `isinstance(…, httpx.AsyncClient)`를 깨뜨려 고쳤다(적재 op 동안만 patch). dagster 패키지 테스트를 다른 패키지
+  테스트와 한 세션에 섞으면 dagster `BetaWarning`이 오류로 승격돼 정의 검사가 빨갛다 — CI처럼 패키지 세션으로 돌리면
+  초록(1단계 transport 검사와 같다). admin vitest(`map-ui-has-no-weather.test.ts`)는 n150에 workspace node_modules가
+  없어 돌리지 않았다 — 예외 조건만 바꿨다.
+
 ## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
 
 - 고정 synthetic fixture와 전용 PostGIS container/template clone으로 native load_bundles→seal/commit의 cold/warm 3회 runner를 구현했다. CPU/RSS/WAL·실제 DML 구간/잠금 샘플·CI artifact를 남기며 전체 T01/동시 쓰기 완료로 세지 않는다.

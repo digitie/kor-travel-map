@@ -149,6 +149,14 @@ describe("Map UI는 weather 기능을 제공하지 않는다", () => {
     const source = readFileSync(GENERATED_TYPES, "utf8");
     const pathKeys = [...source.matchAll(/^ {4}"(\/[^"]+)": \{$/gm)].map((m) => m[1]);
     expect(pathKeys).toContain("/v1/features/in-bounds");
-    expect(pathKeys.filter((key) => /\/weather(\/|$)/.test(key))).toEqual([]);
+    // ADR-114 2단계(2026-10-24): `/v1/service/weather/*`는 PinVi 등 service 소비자용 Valkey 상태
+    // 표면이다(ADR-105의 유일한 예외, service 정책). admin UI는 그 경로를 부르지 않는다 — 위
+    // production 소스 검사가 `/weather` 경로 리터럴을 계속 막는다.
+    expect(pathKeys.some((key) => key.startsWith("/v1/service/weather/"))).toBe(true);
+    expect(
+      pathKeys.filter(
+        (key) => /\/weather(\/|$)/.test(key) && !key.startsWith("/v1/service/weather/"),
+      ),
+    ).toEqual([]);
   });
 });

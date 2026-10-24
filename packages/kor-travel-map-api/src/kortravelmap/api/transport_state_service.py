@@ -48,6 +48,7 @@ __all__ = [
     "fetch_price_history",
     "get_state_store",
     "set_state_store_for_test",
+    "shared_state_store",
     "state_unavailable",
     "transport_http_timeout",
 ]
@@ -65,19 +66,26 @@ def state_unavailable(message: str) -> HTTPException:
     )
 
 
-async def get_state_store() -> ValkeyStateStore:
-    """FastAPI 의존성 — 프로세스 단위 store. 설정이 없으면 503.
+def shared_state_store() -> ValkeyStateStore:
+    """프로세스 단위 store(transport·weather 표면이 함께 쓴다).
 
-    ``async``라 이벤트 루프에서 돈다 — 확인과 대입 사이에 ``await``가 없어 동시 첫 요청이 client를
-    둘 만들어 하나를 새게 하지 않는다(sync 의존성은 threadpool에서 돈다).
+    설정이 없으면 :class:`StateStoreError`.
+
+    이벤트 루프에서만 부른다(아래 async 의존성) — 확인과 대입 사이에 ``await``가 없어 동시 첫 요청이
+    client를 둘 만들어 하나를 새게 하지 않는다(sync 의존성은 threadpool에서 돈다).
     """
     global _store
     if _store is None:
-        try:
-            _store = ValkeyStateStore(make_valkey_client(KorTravelMapSettings()))
-        except StateStoreError as exc:
-            raise state_unavailable(str(exc)) from exc
+        _store = ValkeyStateStore(make_valkey_client(KorTravelMapSettings()))
     return _store
+
+
+async def get_state_store() -> ValkeyStateStore:
+    """FastAPI 의존성(transport 표면) — 프로세스 단위 store. 설정이 없으면 503."""
+    try:
+        return shared_state_store()
+    except StateStoreError as exc:
+        raise state_unavailable(str(exc)) from exc
 
 
 def set_state_store_for_test(store: ValkeyStateStore | None) -> None:

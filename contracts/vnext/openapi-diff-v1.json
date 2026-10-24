@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "bcb61c0b0a6edc2e78da5376d9c9c9d061fb0afcad3e4a7b44f986a119e0d0a0"
+      "sha256": "24b021078eb68dcf20135b2fb120c2b6cec34fd28337080e179e88c94902a546"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,7 +13,7 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "4994d478a5cba4346dd96251583872e5c7abc0ef475fd36670d9dc62d4cb59f0"
+      "sha256": "3b8503a31d725cc1e6d033ac02edaba5c5fe9539ac448fb37dafb6f8fc51c26b"
     }
   },
   "revisions": [
@@ -196,6 +196,11 @@
       "date": "2026-10-24",
       "task": "T-STATE-01-T4",
       "change": "baseline sha256 재고정(service·admin). `GET /v1/service/transport/fuel-stations/{feature_id}/price-history`를 transport T4 계약에 맞췄다 — query `cursor` 추가, limit은 페이지 전체 행 수, PriceHistoryBlock에 source_collected_at·source_status·has_more·next_cursor 추가(truncated는 has_more 호환값), PriceHistoryPoint.collected_at nullable, reason enum에 upstream_unsupported·request_rejected·upstream_no_collection·upstream_timeout 추가, cursor 요청의 transport 409는 응답 409 TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED. user spec 무변경. PinVi service·admin 재vendor 대상이다."
+    },
+    {
+      "date": "2026-10-24",
+      "task": "T-STATE-02",
+      "change": "baseline sha256 재고정(service·admin). ADR-114 2단계 `/v1/service/weather/*` 5 operation을 추가했다(기존 경로·스키마 불변, user spec 무변경). ADR-105의 유일한 예외 표면이다. full/admin spec도 같은 operation이 더해져 PinVi admin 재vendor 대상이다."
     }
   ],
   "surfaces": {
@@ -374,7 +379,7 @@
     },
     "service": {
       "counts": {
-        "added": 13,
+        "added": 18,
         "removed": 0,
         "renamed": 0,
         "enum_changes": 1,
@@ -472,6 +477,41 @@
           "kind": "operation",
           "target_operation": "GET /v1/service/transport/status",
           "detail": "Valkey 세대 교체 상태에서 읽는 transport 현재 상태(ADR-114 1단계). service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/weather/locations",
+          "detail": "Valkey 세대 교체 상태에서 읽는 weather 위치 목록·근처(≤ 100 km)·영역(ADR-114 2단계). include_current로 최신 관측을 붙인다. service token, Valkey 장애는 이 표면만 503.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "POST /v1/service/weather/locations/batch",
+          "detail": "feature_id·weather location_id(합 ≤ 50)의 묶음 목록과 missing(ADR-114 2단계, 읽기 — command registry query). Valkey 왕복 두 번.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/weather/locations/{feature_id}",
+          "detail": "weather 위치 하나의 관측·예보(지난 시각 제거, from·to)·세 구간 요약(partial 재계산, 전날 대비) 묶음(ADR-114 2단계). 데이터셋별 status로 부분 장애를 알린다.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/weather/nearest",
+          "detail": "좌표 근처 weather 위치(관측·요약 10곳, 예보 50곳)에서 부분마다 데이터가 있는 가장 가까운 위치의 묶음(ADR-114 2단계, 반경 ≤ 100 km). PinVi가 장소 하나에 날씨를 붙이는 진입점.",
+          "basis": "ADR-114",
+          "applied": true
+        },
+        {
+          "kind": "operation",
+          "target_operation": "GET /v1/service/weather/status",
+          "detail": "Valkey 연결과 weather 데이터셋 7개의 신선도(ADR-114 2단계, 실패는 failure_kind 코드).",
           "basis": "ADR-114",
           "applied": true
         }
