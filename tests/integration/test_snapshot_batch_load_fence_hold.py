@@ -130,6 +130,7 @@ class _OtherWriter:
         self.holding = asyncio.Event()
         self.release = asyncio.Event()
         self.waited: float | None = None
+        self.pid: int | None = None
 
     async def run(self) -> None:
         async with make_async_session_factory(self._engine)() as session, session.begin():
@@ -137,6 +138,7 @@ class _OtherWriter:
             began = time.monotonic()
             await lock_feature_curation_write(session)
             self.waited = time.monotonic() - began
+            self.pid = int(await session.scalar(text("SELECT pg_backend_pid()")))
             self.holding.set()
             await self.release.wait()
 
@@ -149,19 +151,37 @@ async def _finish(*tasks: asyncio.Task[Any]) -> None:
 
 
 _FENCE_WAITERS_SQL = text(
-    "SELECT count(*) FROM pg_catalog.pg_locks "
-    "WHERE locktype = 'advisory' AND NOT granted AND objsubid = 1 "
-    "AND ((classid::bigint << 32) | objid::bigint) = "
-    "pg_catalog.hashtextextended('feature-curation-write', 0)"
+    "SELECT count(*) FROM pg_catalog.pg_locks AS waiting "
+    "WHERE waiting.locktype = 'advisory' AND NOT waiting.granted "
+    "AND waiting.objsubid = 2 AND waiting.classid = 1369104691::oid "
+    "AND waiting.objid = 115::oid "
+    "AND CAST(:blocker_pid AS integer) = ANY(pg_catalog.pg_blocking_pids(waiting.pid))"
 )
 
 
-async def _a_fence_waiter_appears(engine: AsyncEngine, within_seconds: float = 30.0) -> bool:
-    """``feature-curation-write`` 미부여 대기가 ``within_seconds`` 안에 보이는가."""
+async def _a_fence_waiter_appears(
+    engine: AsyncEngine,
+    *,
+    blocker_pid: int,
+    pending: asyncio.Task[Any],
+    within_seconds: float = 30.0,
+) -> bool:
+    """이 시험 writer가 가진 protocol gate를 다른 세션이 실제로 기다리는가.
+
+    protocol EX가 옛 global보다 먼저이므로 대기는 2-int protocol key에 나타난다.
+    unrelated advisory 대기나 단순히 오래 실행 중인 task를 성공으로 세지 않는다.
+    """
     deadline = time.monotonic() + within_seconds
     while time.monotonic() < deadline:
+        if pending.done():
+            pending.result()  # 적재 예외를 timeout 오진으로 숨기지 않는다.
+            raise AssertionError("적재가 protocol 대기를 관측하기 전에 종료했다")
         async with AsyncSession(engine) as session:
-            if int((await session.execute(_FENCE_WAITERS_SQL)).scalar_one()):
+            if int(
+                (
+                    await session.execute(_FENCE_WAITERS_SQL, {"blocker_pid": blocker_pid})
+                ).scalar_one()
+            ):
                 return True
         await asyncio.sleep(0.2)
     return False
@@ -212,7 +232,10 @@ async def test_fence_is_free_while_the_stream_is_fetching_and_held_while_writing
         # 받기를 끝낸다. 쓰기는 다른 writer가 fence를 놓을 때까지 기다려야 한다 — "아직 안 끝났다"가
         # 아니라 **잠금 대기 중**임을 pg_locks에서 본다(느린 runner에서의 거짓 초록 방지).
         stream.proceed.set()
-        assert await _a_fence_waiter_appears(migrated_engine), "쓰기 단계가 fence를 기다리지 않았다"
+        assert other.pid is not None
+        assert await _a_fence_waiter_appears(
+            migrated_engine, blocker_pid=other.pid, pending=load_task
+        ), "쓰기 단계가 해당 writer의 protocol fence를 기다리지 않았다"
         assert not load_task.done()
 
         other.release.set()
