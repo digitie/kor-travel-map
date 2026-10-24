@@ -7,6 +7,8 @@ optional SDK skip은 PASS가 아니다.
 from __future__ import annotations
 
 import asyncio
+import base64
+import hashlib
 from datetime import timedelta
 from time import monotonic
 from uuid import uuid4
@@ -15,7 +17,8 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.dto import Address
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.dto import Address, SourceRecord
 from kortravelmap.infra import scoped_provider_batch as batch
 from kortravelmap.infra.heritage_evidence_reader import (
     decode_heritage_evidence,
@@ -385,3 +388,81 @@ async def test_stable_reader_uses_statement_snapshot_before_controller_release(
                 if not task.done():
                     task.cancel()
                 await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2)
+
+
+@pytest.mark.parametrize(
+    ("mode", "expected"),
+    [
+        ("small-extra", "shape_unsupported"),
+        ("compressed", "storage_unsupported"),
+        ("uncompressed-oversize", "storage_unsupported"),
+    ],
+)
+async def test_unsupported_legacy_raw_is_rejected_whole(scalar_engines, request, mode, expected):
+    """실제 SDK의 출력 성공이 아닌 합법 legacy 저장의 synthetic 부정 사례다."""
+    admin, runtime = scalar_engines
+    old, _ = await _sdk_bundles(("no_coord",))
+    original = old[0]
+    if mode == "small-extra":
+        padding = "unsupported extra field"
+    elif mode == "compressed":
+        padding = "x" * 32_768
+    else:
+        # 결정적 고엔트로피 ASCII다. 실제 압축 여부는 DB metadata로 별도 확인한다.
+        padding = base64.b85encode(
+            hashlib.shake_256(b"reader-oversize-fixture").digest(16_384)
+        ).decode()
+    raw = original.source_record.raw_data | {"unsupported_extra": padding}
+    raw_hash = make_payload_hash(raw)
+    key = make_source_record_key(
+        provider=original.source_record.provider,
+        dataset_key=original.source_record.dataset_key,
+        source_entity_type=original.source_record.source_entity_type,
+        source_entity_id=original.source_record.source_entity_id,
+        raw_payload_hash=raw_hash,
+    )
+    record = SourceRecord.model_validate(
+        original.source_record.model_dump()
+        | {"raw_data": raw, "raw_payload_hash": raw_hash, "source_record_key": key}
+    )
+    unsupported = original.model_copy(
+        update={
+            "source_record": record,
+            "source_link": original.source_link.model_copy(update={"source_record_key": key}),
+        }
+    )
+    assert unsupported.provider_field_presence == original.provider_field_presence
+    # 기존 immutable raw UPDATE/trigger 해제/임의 GRANT 없이 정본 EX loader로 새 원천을 저장한다.
+    dataset, _ = await _seed_bundles(admin, runtime, [unsupported], [unsupported])
+    async with AsyncSession(admin) as observer, observer.begin():
+        await observer.execute(text("SET TRANSACTION READ ONLY"))
+        physical, compression = (
+            await observer.execute(
+                text("""SELECT pg_column_size(raw_data),pg_column_compression(raw_data)
+            FROM provider_sync.source_records WHERE source_record_key=:key"""),
+                {"key": key},
+            )
+        ).one()
+    if mode == "compressed":
+        assert compression is not None
+    elif mode == "uncompressed-oversize":
+        assert compression is None
+        assert physical > 8192
+    else:
+        assert compression is None
+        assert physical <= 8192
+    async with AsyncSession(runtime) as reader, reader.begin():
+        await reader.execute(text("SET TRANSACTION READ ONLY"))
+        await reader.execute(text("SET LOCAL statement_timeout='2s'"))
+        result = await read_heritage_evidence(reader, dataset, [_entity(unsupported)])
+    assert not result.evidence_complete
+    assert result.reason == expected
+    assert result.items == ()
+    request.node.user_properties.extend(
+        [
+            ("stored_raw_case", mode),
+            ("raw_physical_bytes", physical),
+            ("raw_compression", compression or "none"),
+            ("known_reason", result.reason.value),
+        ]
+    )
