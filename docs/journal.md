@@ -1,3 +1,8 @@
+## 2026-10-25 — SH 운영 후보 크기 실측
+
+- 국가유산/세계음식점 current head와 active primary place가 각각4,279/9,494로 기존 SH 한도를 넘음을 읽기 전용으로 확인했다. 작은 조회·시험을 운영 전체 동시성으로 세지 않는다. [실측·후속 범위](reports/2026-10-25-sh-operating-scope-measurement.md).
+- 문서만 변경하며 정책·상한·운영 활성화0, T-CWRITE-04는 미완이다.
+
 ## 2026-10-25 — Geo stamp SQL writer 권한 경계(421)
 
 - 일반 runtime raw stamp 쓰기를 회수하고 EX/SH 전용 SD와 SI 진입 검증·기존 active full-context/정렬 잠금을 유지했다. 실제 SH collector 배선/운영 활성화는0이다.
