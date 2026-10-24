@@ -2777,11 +2777,15 @@ ADR-114 2단계(weather). 브랜치 `feat/adr114-valkey-weather`. 설계·데이
 - [x] ADR-114에 weather 데이터셋·키(위치 단위 묶음, 예보 시각 지난 값은 읽을 때 제거, 요약 보관 일수 설정값)를 적었다.
 - [ ] 적대 설계·코드 리뷰를 반영했다(소유자가 돌린다).
 - [ ] 코드 PR 머지: `dto/weather_state.py`·`providers/kor_travel_weather{,_state}.py`·Dagster job 7개(기본 STOPPED)·
-  `/v1/service/weather/*` 4 route·OpenAPI·admin TS 타입 재생성, 통합 검사(실제 Valkey 적재 op → REST 왕복·급감 거부),
+  `/v1/service/weather/*` 5 route·OpenAPI·admin TS 타입 재생성, 통합 검사(실제 Valkey 적재 op → REST 왕복·급감 거부),
   CI 4세션 초록.
-- [ ] Manager: Map Dagster code-server에 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL`(odroid weather API)과
-  `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(= `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`) env가 배포됐다(API는 불필요).
-- [ ] PinVi admin·service 스냅샷 재vendor(Map API 배포 **전** 머지).
+- [ ] Manager: Map Dagster code-server에 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL`(기본
+  `http://192.168.1.13:12201`)과 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(= `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`) env가
+  배포됐다(API는 불필요). Manager `.env.example`·`test_consumer_origin_defaults.py`·`test_docker_service_config.py` 동반.
+- [ ] PinVi admin·service 스냅샷 재vendor — #1365와 이 PR이 둘 다 머지된 Map commit에서 **한 번**(1단계 대기분 포함),
+  그 뒤 Manager pair 핀(ADR-114 W8 회전 순서).
+- [ ] schedule을 켠 뒤 weather 공개 시각과 poll 시각(W1)을 실측으로 맞추고, ETag 304 비율·Valkey `INFO persistence`·n150
+  iowait를 journal에 적는다.
 - [ ] schedule을 켜기 전에 W1 표의 절대 하한(전부 실측 전 추정)을 weather live 개수와 대조했다.
 - [ ] schedule 7개를 켜고 데이터셋마다 첫 교체가 성공했다(`/v1/service/weather/status` 전부 `loaded=true`). 세대 크기·
   Valkey `INFO memory`를 journal에 적고 W6 추정과 대조한다.

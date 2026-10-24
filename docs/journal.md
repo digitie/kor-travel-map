@@ -1,3 +1,23 @@
+## 2026-10-24 — ADR-114 2단계 리뷰 반영(#1367): 브랜치 `feat/adr114-valkey-weather`
+
+- origin/main(#1358·#1359)로 rebase. 생성물(OpenAPI 3종·admin `types.ts`·vnext baseline·receipt 핀)은 rebase한 트리에서
+  다시 뽑았고 문서만 손으로 합쳤다.
+- 정확성 리뷰(차단 없음): 깨진 저장 값 → 부분 `unavailable`(위치 값 503과 같은 판정), `partial`을 읽는 시각으로 다시
+  계산(KST 경계 `daily_slot_bounds`, 끝났어도 적재 때 partial이면 유지), partial 구간은 `vs_previous_day=null`(06:30 아침),
+  429·5xx(500 포함, 503 제외) 재시도, `|`·제어 문자 location_id는 페이지 전체 계약 위반(재시도 없음 — 행만 빼면 위치가 조용히
+  사라진다), 둘째 페이지 이후 422는 처음부터 한 번 재시작(두 번째는 계약 위반), roster `source_status`는 null.
+- 운영·소비자 리뷰: `/nearest`는 근처 최대 10곳에서 부분마다 데이터가 있는 가장 가까운 위치(`source{feature_id, location_id,
+  distance_m}`, HIGH — 가장 가까운 대기질 측정소가 KMA 예보를 가리던 문제), weather 반경 100 km(weather 전용 상수, transport
+  모듈 import 제거 — #1365 충돌 회피, `bbox_search_box`만 남김), `POST /locations/batch`(50곳, weather `location_id` lookup),
+  묶음 읽기는 `read_many`로 왕복 두 번, 예보 `from`·`to` 창, ETag `If-None-Match` + 304 시 `checked_at`만 기록, schedule을
+  weather 공개 시각 뒤로(관측 :25·:40, 초단기 :48, 단기 하루 8회, 중기 06·07·18·19시, 외부 3시간), `/status` 오류는
+  `failure_kind` 코드만, 인증 header 설정(`…_AUTH_HEADER`), ADR W6 벌 수 정정(최악 약 240 MB)·W8 토큰 위험·지속성·회전 순서·
+  Manager env.
+- weather ETag 확인(main `7aa7e70` `export_snapshots.py`): ETag는 `snapshot_id`를 포함하고 같은 manifest의 snapshot은 TTL
+  15분 동안만 재사용된다 — 15분보다 긴 주기의 poll은 내용이 같아도 거의 매번 200이다(관측 :25→:40 같은 짧은 간격에서만
+  304 기대). 비용은 주기 정렬로 줄인다.
+- 검사: GATE2_RESULT
+
 ## 2026-10-24 — ADR-114 2단계: weather 현재·예보·세 구간 요약 Valkey·service REST: 브랜치 `feat/adr114-valkey-weather`
 
 - 원천 계약: weather main `7aa7e70`(W1~W5 producer 머지 완료 — #143~#164)의 OpenAPI·라우터·실제 HTTP 예시로 맞췄다.
