@@ -3,10 +3,50 @@
 - Heritage 이름 변경과 MCST 동일 key 반복 입력의 최소 범위를 나누고 현재 normalizer/Geo stamp·dataset retire0·full capture/후속 receipt를 필수 조건으로 정리했다.
 - 실제 두 dataset DML 중첩·worker 복구/Geo pool은 별도 수용이며 구현/정책/운영 변경0, 전체 T 체크는 미완이다. [설계와 필수 반례](reports/2026-10-25-sh-collector-integration-design.md).
 
+## 2026-10-25 — main 419 보존과 EX 적재 연결 420 재검증
+
+- 머지 직전 main에 들어온 PG transport 퇴역419를 보존하고 미머지 EX 적재 연결만420으로 재배치했다. DDL sidecar 본문과 main 비중복33파일·journal/resume 원문 suffix를 보존했다.
+- 새 합집합 집중199 PASS/155.27초·lint373 PASS/기존6skip·CI 대상 Ruff/mypy5/import4 통과. 원419 세대의 CI/UI를 새420 결과로 세지 않으며, 새 정확CI·두리뷰·fresh UI는 별도다. [근거와 경계](reports/2026-10-24-exclusive-provider-full-refresh.md#main-419-병합-뒤-420-재검증).
+
 ## 2026-10-24 — 제한 primary place의 명시 EX 전체 적재(A3 checkpoint)
 
 - 최종 converter 입력에서 bounded plan을 만드는 opt-in client/EX 경로를 추가했다. 기존 applying EX manifest·비활성 base/Geo와 활성 winner를 같은 TX로 닫고 기본 선택은 OFF다.
 - 최종 집중190건(140+중복 없는 converter50)·oracle/metadata2·lint377/기존6skip·mypy5/import4 통과. 실제 SDK/asset tracking은 격리 시험이며 실제 worker/운영 수집은 아니다. 최종 두리뷰·정확CI·fresh UI는 별도다. [범위와 남은 gate](reports/2026-10-24-exclusive-provider-full-refresh.md).
+
+## 2026-10-24 — ADR-114 결정 7 퇴역 1단계(T-STATE-03): 브랜치 `feat/adr114-retire-pg-transport`
+
+- 소비자 확인(읽기 전용 실측): prod Map transport 출처 Feature 26,293건(주유소 place 11,820·유가 11,822·휴게소 215·휴게소 유가
+  219·돌발 2,202·공항 15), 병합·curation·override·POI 링크 0. Valkey 다섯 데이터셋 `loaded`·fresh. PinVi main `ff64b65`은 교통
+  레이어를 Map service REST로만 읽지만 일반 in-bounds 기본 kind(`place·event·notice·price`)·검색·근처가 PG transport를 여전히
+  돌려받는다(교통 레이어와 중복, 장소 이름 검색은 PG에만 있다). PinVi DB의 Map feature 참조는 전체 0행. C7 운영 게이트가 공항
+  job을 안전 대상으로 쓴다.
+- 그래서 세 단계로 나눴다(ADR-114 "결정 7 이행"): ① 유가 둘·돌발 하나의 PG 적재 코드 제거 + migration `419`(operation 종류
+  불문 끔, Feature `system` 퇴역 = `retired`·`suppressed` + 재활성화 막는 lifecycle override, dataset·lineage·가격 fact는 남김,
+  queued/running·공유 primary·기존 lifecycle override preflight) → ② 장소 셋 → ③ 물리 삭제. 장소 적재는 계속 돈다.
+- API 표면 변화 없음(OpenAPI 재생성·PinVi 재vendor 불필요). Codex 수집 fence·shadow 원장 코드는 읽기만 했다(퇴역 프로시저는
+  advisory lock을 잡지 않는다).
+- 검사(n150 일회용 python:3.13): ruff·mypy --strict(279)·lint-imports 초록, unit+lint+api 4,817 passed·29 failed(기준선 환경
+  실패 그대로 — docker runtime 23·sealed tree 2·tick window 3·smoke settings 1), 통합(transport·retire·notice·price·mois·
+  tvn34c/35·phase2·catalog 등 -k) 290 passed(1 error는 컨테이너에 docker CLI 없음). 첫 실행에서 revision id 40자(>32)와 사후
+  조건 SQL의 없는 열(`context`)을 잡아 고쳤다.
+- 적대 리뷰 2회(HIGH 1·MED 2·LOW 3·운영 1) 반영: (F1) prod 409→411(현 417)이 한 트랜잭션이면 410 FK 잠금을 퇴역 내내 쥔다 →
+  `alembic_version` xmin으로 같은 트랜잭션을 감지해 퇴역 대상이 있을 때 거부, runbook A·B. (F2) 대상 scope 행 `FOR UPDATE`(FK
+  KEY SHARE와 충돌) 뒤 preflight, operation 먼저 끔, 사후 in-flight 재확인. (F3) scope 잠금 5초·DDL 1초·퇴역 statement_timeout 0.
+  (F4) 공유 출처 검사 역할 무관. (F5) 대상 셋 고정·옛 provider 잔여 fail closed. (F6) 상태 문맥 GUC 정리·docstring. 문서 drift 넷.
+- 재리뷰(fix-delta): F2의 scope 행 `FOR UPDATE`는 경주를 닫지 못한다 — BEFORE INSERT 활성 가드가 plain SELECT로 `is_enabled`를
+  읽고 FK 대기는 그 뒤라, 411 도중 들어온 INSERT가 켜진 값을 보고 통과해 commit 뒤 성공한다. member 표 둘을 `SHARE`로 잠그도록
+  바꿨다(INSERT가 문장 시작에서 기다리고 commit 뒤 가드가 거부). 퇴역 루프 lock_timeout 60초. 두 연결 순서 강제 통합 검사(도중
+  INSERT 거부) 추가. runbook B1 upsert 예시·B5 사후 member 0 확인·A 건너뜀 crash-loop 복구.
+- main 병합(#1379·#1383·#1385 — ADR-115 revision 411~416): 이 migration을 `417_retire_pg_transport_values`(down 416)로 다시
+  번호 매겼다. 415부터 `transition_feature_state`가 scoped write 프로토콜 gate를 배타로 잡으므로 417은 그 gate를 member 표 잠금보다
+  **먼저** 잡는다(교착 회피, 돌고 있는 쓰기가 있으면 30초에 실패). runbook A는 head 416 pair, 3a 큐 sensor 정지 명령(공용 daemon)·
+  417 창 새 run 실패/503 안내. 경주 검사는 inserter의 미허가 RowExclusiveLock이 `ops.import_job_datasets`에 있음을 잰다.
+- main 병합 뒤 journal이 220 KiB를 넘어(228,797 bytes) 가장 오래된 2026-10-01 기록을
+  아카이브로 옮겼다(tasks-rule §8 — 섹션 본문 바이트 보존, 상대 링크 없음). diff3 base 마커 줄 셋도 지웠다. (main이 2026-09-30분을 `journal-2026-09h.md`, 가장 오래된 2026-10-01 한 절을 `journal-2026-10a.md`로 따로 옮겨 그것을 따랐고, 남은 2026-10-01 두 절을 `journal-2026-10b.md`로 옮겼다.)
+- 두 번째 main 병합(#1386·#1387 — ADR-115 `417_protocol_ex_reentry`): 이 migration을 `418_retire_pg_transport_values`(down
+  417)로 다시 번호 매겼다(당시 runbook A는 head 417 pair).
+- 세 번째 main 병합(#1388 — ADR-115 `418_creation_protocol`): 이 migration을 `419_retire_pg_transport_values`(down 418)로 다시
+  번호 매겼다. runbook A는 head 418 pair.
 
 ## 2026-10-24 — 한 sealed attempt의 scalar 원자 batch(A2)
 
@@ -1744,63 +1784,6 @@ ADR-104(KMA Dagster 경로 제거) 작업 중 소유자 결정이 넓어졌다: 
   (RUNNING) 하나가 사라지고 sensor 10은 남는다. 옛 Map 전용 instance(`kor_travel_map_dagster`)의 같은 schedule 상태 행도
   쓰이지 않게 된다. 402의 `DROP INDEX`가 `feature.features`에 ACCESS EXCLUSIVE를 잡으므로 매분 schedule과 겹치지 않게
   배포한다(새 코드에는 그 schedule이 없으니 code server 교체 뒤 migration이면 겹칠 일이 없다).
-
-## 2026-10-01 — Map Dagster의 KMA 적재 경로 제거(ADR-104): 브랜치 `feat/remove-map-kma-dagster`
-
-소유자 결정: KMA는 kor-travel-weather가 소유하고, Map은 KMA data.go.kr 오퍼레이션을 다시는 부르지 않는다
-(data.go.kr 키를 weather와 함께 쓰고 오퍼레이션당 일일 한도가 빠듯하다).
-
-- **끄던 것이 능력을 남기고 있었다.** `DISABLED_FEATURE_LOAD_SCHEDULES`는 schedule을 만들지 않고 큐의 targeted
-  요청만 건너뛰었다. Dagster UI launch·백필, `provider_dataset` 큐 요청, C7의 `external_system:c7-e2e` 요청은
-  그대로 KMA를 불렀고, 카탈로그는 KMA refresh operation 5개를 enabled로 들고 있었다.
-- **지운 것.** `dagster/kma_weather.py`(asset 5), KMA job·schedule, resource 셋, `fetch_kma_weather_alerts`, 큐
-  runner spec·handler binding 5, KMA settings 넷, KMA 대상 좌표 조회(client 4·repo 4), asset 라벨·API cron 힌트,
-  `providers.kma`의 Dagster 설정 파서 둘. `DISABLED_FEATURE_LOAD_SCHEDULES`에서 KMA 이름이 빠졌다(AirKorea 등 때문에
-  목록은 남는다).
-- **남긴 것.** `providers.kma` 변환·정체성 계약(이미 적재된 KMA feature 읽기, `/ops/datasets` fixture preview),
-  카탈로그 행·scope·dataset(`is_active`), preview operation, 공개/운영 KMA 특보 이력 API.
-- **DB.** `401_retire_map_kma_refresh` — provider `python-kma-api`의 `refresh`·`feature_load`를 `is_enabled=false`.
-  이 저장소 관례(`_UPGRADE_STATEMENTS`)를 따르고 receipt head CHECK에 `400`·`401`을 더했다(graph 전체를 받아야 한다는
-  lint 계약; `head-schema.sql` 동기화). 400 스쿼시 뒤 첫 child migration이라, 300~313 체인에 맞춰 박힌 migration lint
-  하한 다섯(롤 전환 ≥5, 문장 ≥100 등)이 대상이 없는데 빨갰다 — 하한을 "소스 텍스트에 보이는 것을 추출도 전부 본다"로
-  옮겼다.
-- **재도입 방지.** `test_map_dagster_has_no_weather.py`가 시드 카탈로그에서 KMA operation key를 provider로 유도해
-  Definitions(job·schedule·sensor·asset)·handler registry·큐 runner를 보고, 효과 축으로 Map 런타임 소스의 KMA client
-  import와 KMA data.go.kr 경로(`1360000`)를 본다. DB 축은 `test_head_enables_no_kma_load_operation`.
-  **각 검사를 한 번씩 빨갛게 만들었다**: main 소스에 대고 돌리면 job·asset·launch·소스 넷이 각각 KMA job 5개 /
-  `kma_weather_alert_records` / registry의 KMA key 5개 / `import kma` 위치로 빨갛다. 하한 검사는 KMA 행을 뺀 시드로
-  빨갛다. 처음 판의 sensor 축은 `RunStatusSensorDefinition`에 `job_names`가 없어 **효과가 아니라 AttributeError로**
-  빨갰다 — 그 빨강은 아무것도 증명하지 않으므로 target의 `job_name`을 읽게 고치고 main에서 다시 KMA job 이름으로
-  빨개지는 것을 확인했다.
-- **prod 읽기 전용 실측(09:00Z 전후).** 공유 plane `dagster_shared`의 Map instigator는 sensor 10 + schedule 1
-  (`current_weather_summary_refresh_minutely_schedule`), 옛 `kor_travel_map_dagster`도 같은 11개 — KMA instigator·
-  KMA run 0. `dagster_shared`의 KMA schedule 5·run 63(전부 FAILURE)은 weather location 것이다. Map DB(rev `400`)는 KMA
-  refresh 5·preview 4가 enabled, KMA feature·sync state·멤버십 가진 import job·요청 0. 그래서 배포가 바꾸는 것은
-  Dagster 정의 목록(KMA job 5 소멸, instigator 변화 없음)과 카탈로그의 enabled 5행뿐이다.
-- **남긴 일.** C7 러너 가족(`run-c7-prod-live-e2e.sh`, `ops-c7-*` spec)은 KMA 위에 서 있다 — KMA write spec은 이제
-  요청 단계에서 거부되고, 러너는 schedule allowlist의 KMA schedule이 2026-09-09부터 없어 이미 돌 수 없었다. 배포 게이트
-  (chain16 D1·D2)는 이 러너를 쓰지 않는다. `python-kma-api` 의존 핀, Manager compose의 `KOR_TRAVEL_MAP_KMA_WEATHER_*`
-  env도 후속.
-
-## 2026-10-01 — flip 전 drain 절차 정정(공유 Dagster plane cutover 완료): 브랜치 `docs/shared-plane-drain`
-
-Map은 2026-10-01 05:54Z cutover로 05:58Z부터 공유 plane에서 돈다. C7은 06:02Z GREEN이었다.
-
-- **runbook이 틀린 drain을 권했다.** #1290이 `docs/runbooks/docker-app.md`에 "writer drain으로 새 run을 막고 run이
-  terminal이 될 때까지 기다린다"고 적었다. 코드(`writer_drain_service.py`)는 그렇게 하지 않는다. Map의 RUNNING
-  instigator를 **전부** 멈추므로 operation을 종결 반영할 reconcile sensor와 run-status sensor도 멈추고,
-  `min(15초, dagster_termination_timeout_seconds/2)` grace 뒤 남은 run을 `SAFE_TERMINATE`로 끊는다. 그래서 "active
-  operation 0건"을 만들 수 없다.
-- **실제로 쓴 절차를 적었다.** 창 전 in-flight load가 스스로 끝나게 두고 330초(reconcile lag 300 + 주기 30) 기다리며
-  새 load·요청을 시작하지 않는다 → `ops.import_jobs`의 `queued`/`running`·`dagster_run_id` 있음·비격리·
-  `provider_feature_load_run`/`feature_update_request` 건수 0을 게이트로 본다 → queue는 닫지 않는다
-  (`DISABLED_FEATURE_LOAD_SCHEDULES` 불필요, run 없는 요청은 새 queue sensor가 집는다). Manager cutover script는 게이트를
-  precheck와 fence·run-cancel 뒤 switch 전에 두 번 보는데, 두 번째는 snapshot이고 cancel된 `feature_update_request`
-  run은 어느 sensor도 종결시키지 않아 손으로 정리한다. 정본은 Manager topology §7과 `scripts/dagster-shared-cutover.sh`.
-- **writer drain의 자리.** 원래 용도(Manager cache-target diagnostic/cutover의 writer fence 직전 producer 비우기,
-  ADR-082)로는 유효하다고 적었다. pool 이름 변경 배포 전제의 drain 설명("run이 끝나기를 기다린다")도 "grace 뒤 끊는다"로
-  고쳤다. 다른 Map 문서에 flip용으로 writer drain을 권한 곳은 없었다(CHANGELOG·journal의 기존 언급은 pool 이름 변경용).
-
 
 ## 과거 기록 아카이브
 

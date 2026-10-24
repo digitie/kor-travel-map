@@ -291,7 +291,8 @@ def test_kept_notice_previews_still_convert() -> None:
     """비기상 notice preview가 남아 있어야 한다 — 하한은 '본 것'에 건다.
 
     2026-10-01 기준 교통 돌발(``kor-travel-transport``)과 산사태 예보(``python-krforest-api``)
-    두 dataset이 notice를 낸다.
+    두 dataset이 notice를 냈다. 2026-10-24 교통 돌발 PG 적재·preview는 ADR-114 결정 7(migration
+    417)로 퇴역했다 — 남는 것은 산사태 예보다.
     """
     notice_datasets: set[str] = set()
     for entry in FIXTURE_REGISTRY:
@@ -299,7 +300,7 @@ def test_kept_notice_previews_still_convert() -> None:
             kind, provider = _feature_kind_and_provider(item)
             if kind == _NOTICE_KIND and provider != _KMA_PROVIDER:
                 notice_datasets.add(f"{entry.provider}/{entry.dataset}")
-    assert len(notice_datasets) >= 2, (
+    assert len(notice_datasets) >= 1, (
         f"비기상 notice preview가 사라졌다 — notice 일반까지 지운 것이 아닌지 확인할 것: "
         f"{sorted(notice_datasets)}"
     )

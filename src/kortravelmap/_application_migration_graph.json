@@ -116,7 +116,13 @@
       "down_revision": [
         "418_creation_protocol"
       ],
-      "revision": "419_exclusive_provider_refresh"
+      "revision": "419_retire_pg_transport_values"
+    },
+    {
+      "down_revision": [
+        "419_retire_pg_transport_values"
+      ],
+      "revision": "420_exclusive_provider_refresh"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

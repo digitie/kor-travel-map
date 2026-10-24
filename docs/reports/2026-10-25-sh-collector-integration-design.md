@@ -1,8 +1,9 @@
 # A4 실제 수집기의 제한 SH 연결 설계
 
-2026-10-25. 기준 source는 A3 d47639e0f51a2539c8edcf02c52aa6ff5263f7ec다.
-이 문서는 구현 전 계약 초안이며 제품/DDL/시험/운영 변경0이다. 두 설계 리뷰 전에 SH 코드를
-수정하지 않는다. A3의 정확 CI/UI와 이후 이 설계의 코드·운영 수용을 대신하지 않는다.
+2026-10-25. 현재 기준 source는 main419와 합친 A3
+1be95b53813ec40332b2b269292175013385481e(schema420)다. 이전 d476/schema419 기록은 별도로
+보존한다. 이 문서 PR은 제품/DDL/시험/운영 변경0이며, 두 설계 리뷰를 거친 범위에서만
+SH 코드를 구현한다. A3의 정확 CI/UI와 이후 이 설계의 코드·운영 수용을 대신하지 않는다.
 [ADR-115](../adr/115-scoped-concurrent-feature-writes.md)의 T-CWRITE-04와
 [A3 EX 한정 연결](2026-10-24-exclusive-provider-full-refresh.md)의 후속이다.
 
@@ -12,7 +13,7 @@ root/J의 별도 읽기 메모와 위 source를 대조했다. 기존 writer inve
 
 ## 가장 작은 구현과 단계 분리
 
-첫 PR은 국가유산 한 scope의 실제 SDK 최종 snapshot에 대해 **전량 기존 canonical primary
+첫 collector 연결 PR은 국가유산 한 scope의 실제 SDK 최종 snapshot에 대해 **전량 기존 canonical primary
 place/같은 정책 revision/name-only/지원 외 불변**일 때만 SH를 선택하는 wrapper다. 기본값은
 지금의 EX 경로이고 자동 활성화0이다. 별도 provider의 적격성 구현과 실제 두 dataset DML
 중첩은 두 번째 수용 단위다. 국가유산 종목 코드만 나눈 두 입력은 같은 dataset이므로 병렬
@@ -20,9 +21,15 @@ place/같은 정책 revision/name-only/지원 외 불변**일 때만 SH를 선�
 
 최소 구현 파일 후보는 새 infra SH full-snapshot 모듈, client의 명시 Options routing,
 국가유산 진단 호출의 현재 DB evidence 준비, 좁은 SQL 검증/동일 Geo stamp 재관측 entry,
-전용 PG/실제 asset 시험이다. 아직 migration 번호를 할당하지 않는다. 기존 scalar single/batch의
+전용 PG/실제 asset 시험이다. 이 wrapper 문서는 후속 migration 번호를 선점하지 않는다. 기존 scalar single/batch의
 공개 계약과 unsupported 거부를 유지한다. 기존 A3 EX guard를 SH에 통째로 개방하지 않는다.
 Settings/실제 worker flag의 새 전파는 첫 wrapper 수용 뒤 별도 작은 범위로 결정한다.
+
+스탬프 직접 쓰기 권한 회수와 legacy EX SD/좁은 SH SD 경계는 wrapper보다 앞선 별도
+foundation PR로 분리한다. 일반 effective runtime 역할의 직접 DML을 닫는 설계이며, 같은
+서비스 로그인의 명시 owner 역할 전환은 기존 고권한 관리 경계로 구분한다. 해당 SQL 계약·
+마이그레이션 번호·권한 회귀·비용 수용은 foundation PR에서 검증하고, 그 완료를 실제 SH
+수집기 연결 완료로 세지 않는다.
 
 최종 fetch/Geo/converter 뒤 load 호출에서 동적 준비하며, 상위 transaction-bound client는
 계속 거부한다. pool1에서 짧은 planning TX→fresh RC apply→기존 sync 성공→별도 SERIALIZABLE
@@ -100,7 +107,7 @@ apply는 kernel의 dataset→source/head→link→Feature 순서 뒤 canonical U
 행을 FOR UPDATE**하고 그 전체 증거를 재검증한다. missing stamp는 SH에서 새로 생성하지 않는다.
 변경/누락/다중관측 token/Geo outcome 변화는 첫 source DML 이전에 거부한다.
 
-A3 _419 guard는 feature_geocode_stamps를 일반 SH에서23514로 막는다. 단순 EX predicate 제거는
+A3 _420 guard는 feature_geocode_stamps를 일반 SH에서23514로 막는다. 단순 EX predicate 제거는
 불가하다. 새 좁은 SD entry만 현재 applying SH+sameTX+owner/epoch+완전 target/source manifest를
 확인하고, 기존 stamp의 ID/token/outcome이 동일하며 새 관측 시각만 바뀌는 원자 update를 허용하는
 방식이 최소 후보다. 기존 private context를 무조건 bool 확장하거나 session.info/prefix를 권한으로
