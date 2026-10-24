@@ -103,3 +103,5 @@ cold key 캐시가 기존 요청 세션의 connection을 잡은 채 독립 snaps
 - 실제 `SHOW transaction_isolation=repeatable read`, `transaction_read_only=on`, 금지 DDL 실패 뒤 context 종료·pool 다음 writer의 READ COMMITTED/read-write 복구를 확인했다. cold key 캐시/pool1은 단일·동시3 요청200 및 invalid key401 후 pool반납0을 확인했다.
 - API DB/auth strict mypy PASS. 정본 `docker/constraints-dagster.txt`의 Pydantic2.13.5/core2.46.5/settings2.15.0을 전용 임시 overlay로 사용한 all-profile OpenAPI check PASS이며 generated spec/DTO 변경은 없다. 다른 작업자의 공유 venv(2.14.1)는 수정하지 않았다.
 - 전체 API 단위 suite와 exact CI/독립 두 리뷰는 별도 진행 중이다. 운영 호출·배포·정책 활성화는 0회다. T-CWRITE01/04 전체 및 위 표의 RR 후속은 아직 완료가 아니다.
+
+전체 API suite는 1344 PASS/1 FAIL(439.02초)이었다. 실패는 기존 `test_auth._client`가 새 인증 전용 dependency를 fake로 등록하지 않아 placeholder DB에 연결한 시험 배선 누락이었다. 해당 테스트 파일만 전용 override/context를 명시하고 원래 auth 판정을 보존했다. 정본 constraints로 auth 전체93건 PASS(16.17초)를 재확인했다. 이 마지막 변경은 시험 배선과 기존 일반 session의 잘못된 read-only 주석 교정이며 transaction 동작을 바꾸지 않는다. exact CI 전체 결과는 별도 수용한다.

@@ -91,9 +91,10 @@ def reset_engine() -> None:
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI 의존성 — 요청 단위 ``AsyncSession`` (read-only 조회용).
+    """FastAPI 의존성 — 일반 요청 세션. 쓰기/복합 phase의 transaction도 받는다.
 
-    조회 라우터 전용이라 commit하지 않는다 (적재는 ``client.load_feature_bundles``).
+    이 의존성 자체는 commit하지 않는다. handler가 쓰기 transaction을 소유하며,
+    단일 image가 필요한 순수 조회는 ``get_read_snapshot_session``을 쓴다.
     """
     from sqlalchemy.ext.asyncio import AsyncSession
 
