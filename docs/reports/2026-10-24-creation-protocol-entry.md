@@ -54,8 +54,11 @@ mapper의 조합을 비교한 증거다. SQLSTATE를 가짜 예외로 대체하�
   별도 실제PG fault 주입23514/40001/XX000은 기존422/비식별500/500과 복구를 검증한 것이며
   실제 직렬화 실패의 동시성 재현으로 세지 않는다.
 - 정본 oracle 기록1skip/14.33초와 별도 metadata/oracle4 PASS/33.28초를 구분한다.
-  전체 lint373 PASS/기존6skip(31.11초), 변경 Ruff·strict mypy3 PASS다. OpenAPI는 후속
-  drift 검토 대상으로 남기며 API 모델·HTTP 계약을 변경하지 않았다.
+  전체 lint373 PASS/기존6skip(31.11초), 변경 Ruff·strict mypy3·import4계약 PASS다.
+  CI 정본 Pydantic2.13.5/core2.46.5를 별도 target에 설치한 all-profile OpenAPI check도
+  PASS이며 checked-in spec 변경0이다. 공유 venv는 수정하지 않았다. 로컬2.14.1에서는 기존
+  좌표 Decimal의3개 스키마가 drift했지만 같은 환경에서 부모417/후보418의 전체 생성 결과는
+  같았다. 이 도구 버전 차 실패도 보존하며 로컬2.14 결과로 정본 spec을 바꾸지 않았다.
 
 초기 시험 오류도 보존한다. J의 기존CREATE=false 가정·aclitem 문자열 codec·승인 config를
 다른 루틴과 같다고 가정한3회 실패는 실제 catalog와 대조해 fixture를 고친 것이며 제품을
@@ -65,7 +68,8 @@ mapper의 조합을 비교한 증거다. SQLSTATE를 가짜 예외로 대체하�
 
 ## 남은 수용
 
-독립2코드리뷰·정확 CI·최신418 실제 UI는 후속 gate다. 선행417의 UI18+별도HTTP2는418
+root 소유 제품·HTTP·문서는 J/W, J 소유 경계 시험은 root/W 검토를 통과했다.
+정확 CI·최신418 실제 UI는 후속 gate다. 선행417의 UI18+별도HTTP2는418
 생성/승인 UI 증거가 아니다. 기본 OFF·정책 seed0·운영 변경0이며 mixed binary 전환 전
 관련 writer drain이 필요하다. 모든 domain command 선점·catalog/Geo·지역 이동·전체 collector
 배선과 의미 지원, 대량/운영 ARM의 CPU·메모리 수용, Weather/Transport 전파는 미완이다.
