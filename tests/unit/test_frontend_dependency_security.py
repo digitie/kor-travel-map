@@ -63,8 +63,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert root_package["dependencies"] == {"@next/env": declared_next}
     # 차단 게이트는 **배포되는 의존성만** 본다. dev 전용 빌드 도구의 취약점은
     # 사용자에게 나가지 않으므로 머지를 막지 않는다 —
-    # `@redocly/openapi-core` 1.x는 패치가 없고 2.x는 타입 생성을 깨뜨린다
-    # (docs/dev-environment.md §10.6에 근거와 다시 조일 조건).
+    # OpenAPI 생성기는 API 호환 범위의 보안 패치를 소비한다.
     assert root_package["scripts"]["audit:high"] == (
         "npx --yes npm@12.0.1 audit --audit-level=high --omit=dev"
     )
@@ -73,7 +72,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         "npx --yes npm@12.0.1 audit --audit-level=high || true"
     )
     assert root_package["allowScripts"] == {
-        "esbuild@0.28.1": True,
+        "esbuild@0.28.2": True,
         "unrs-resolver@1.12.2": True,
     }
     assert root_package["scripts"]["verify:npm-tree"] == (
@@ -88,16 +87,14 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert root_package["overrides"] == {
         "source-map-js": "1.2.2",
         "next": {"postcss": declared_postcss, "sharp": declared_sharp},
-        "@redocly/openapi-core": {
-            "js-yaml": "4.3.0",
-            "minimatch": "10.2.5",
-        },
+        "@redocly/openapi-core": "1.34.22",
     }
     for unused in ("@hookform/resolvers", "react-hook-form", "zod"):
         assert unused not in frontend_package["dependencies"]
     assert "shadcn" not in frontend_package["devDependencies"]
     assert "eslint-config-next" not in frontend_package["devDependencies"]
-    assert frontend_package["devDependencies"]["@playwright/test"] == "1.60.0"
+    declared_playwright = frontend_package["devDependencies"]["@playwright/test"]
+    assert re.fullmatch(r"\d+\.\d+\.\d+", declared_playwright)
     assert "eslint-plugin-react-x" in frontend_package["devDependencies"]
     assert "eslint-plugin-react-dom" in frontend_package["devDependencies"]
     assert "reactX.configs.recommended" in eslint_config
@@ -115,13 +112,11 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     )
     assert lock_packages["node_modules/postcss"]["version"] == declared_postcss
     assert lock_packages["node_modules/sharp"]["version"] == declared_sharp
-    assert lock_packages["node_modules/@playwright/test"]["version"] == "1.60.0"
+    assert lock_packages["node_modules/@playwright/test"]["version"] == declared_playwright
     assert (
         lock_packages["node_modules/@redocly/openapi-core"]["version"]
-        == "1.34.17"
+        == root_package["overrides"]["@redocly/openapi-core"]
     )
-    assert lock_packages["node_modules/minimatch"]["version"] == "10.2.5"
-    assert lock_packages["node_modules/js-yaml"]["version"] == "4.3.0"
     assert lock_packages[""]["engines"] == expected_engines
     assert lock_packages[""]["dependencies"] == {"@next/env": declared_next}
     # lock의 workspace 키는 언제나 POSIX 구분자다. `str(...)`로 만들면 Windows
@@ -131,7 +126,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         expected_engines
     )
     for package_name, version in (
-        ("esbuild", "0.28.1"),
+        ("esbuild", "0.28.2"),
         ("unrs-resolver", "1.12.2"),
     ):
         package = lock_packages[f"node_modules/{package_name}"]
@@ -142,9 +137,6 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
 @pytest.mark.unit
 def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     root_package = _json(ROOT / "package.json")
-    installer = (ROOT / "scripts" / "patch-redocly-openapi-core.mjs").read_text(
-        encoding="utf-8"
-    )
     sharp_smoke = (ROOT / "scripts" / "verify-next-sharp.mjs").read_text(
         encoding="utf-8"
     )
@@ -166,13 +158,7 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     )
     npmrc = (ROOT / ".npmrc").read_text(encoding="utf-8").splitlines()
 
-    assert root_package["scripts"]["postinstall"] == (
-        "node scripts/patch-redocly-openapi-core.mjs"
-    )
-    assert 'const expectedVersion = "1.34.17";' in installer
-    assert "existsSync(packageJsonPath)" in installer
-    assert "beforeCount !== 1 || afterCount !== 0" in installer
-    assert "minimatch.minimatch(url, pattern)" in installer
+    assert "postinstall" not in root_package["scripts"]
     # ABI 스모크는 **숫자를 박지 않는다.** 기대값을 매니페스트에서 파생해야
     # 보안 권고 하나가 세 자리를 흔들지 않는다. 그래서 여기서 재는 것은 "무슨
     # 숫자인가"가 아니라 "숫자를 박지 않았는가 · 설치된 트리를 실제로 읽는가 ·
@@ -199,10 +185,6 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     assert 'severity(`react-x/${duplicateRule}`)' in eslint_verifier
     assert 'severity("react-x/no-missing-key")' in eslint_verifier
 
-    patch_copy = (
-        "COPY scripts/patch-redocly-openapi-core.mjs "
-        "./scripts/patch-redocly-openapi-core.mjs"
-    )
     sharp_copy = (
         "COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs"
     )
@@ -213,14 +195,12 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     verify_token = "npx --yes npm@12.0.1 run verify:next-sharp"
     for dockerfile in dockerfiles.values():
         assert npmrc_copy in dockerfile
-        assert patch_copy in dockerfile
         assert sharp_copy in dockerfile
         assert tree_copy in dockerfile
         assert install_token in dockerfile
         assert tree_token in dockerfile
         assert verify_token in dockerfile
         assert dockerfile.index(npmrc_copy) < dockerfile.index(install_token)
-        assert dockerfile.index(patch_copy) < dockerfile.index(install_token)
         assert dockerfile.index(sharp_copy) < dockerfile.index(install_token)
         assert dockerfile.index(tree_copy) < dockerfile.index(install_token)
         assert dockerfile.index(install_token) < dockerfile.index(tree_token)
@@ -232,9 +212,21 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     assert "npx --yes npm@12.0.1 run verify:frontend-eslint" in workflow
     assert verify_token in workflow
     assert npmrc == ["engine-strict=true", "strict-allow-scripts=true"]
-    assert "mcr.microsoft.com/playwright:v1.60.0-noble@sha256:" in (
-        dockerfiles["c7-playwright.Dockerfile"]
+    playwright_version = _json(FRONTEND / "package.json")["devDependencies"]["@playwright/test"]
+    base = re.search(r"^FROM (\S+)$", dockerfiles["c7-playwright.Dockerfile"], re.MULTILINE)
+    assert base is not None
+    image = base.group(1)
+    assert re.fullmatch(
+        rf"mcr\.microsoft\.com/playwright:v{re.escape(playwright_version)}-noble@sha256:[0-9a-f]{{64}}",
+        image,
     )
+    for helper in (
+        "build-c7-playwright-image.sh",
+        "run-c7-prod-live-e2e.sh",
+        "run-admin-feature-live-acceptance.sh",
+    ):
+        source = (ROOT / "scripts" / helper).read_text(encoding="utf-8")
+        assert f'PLAYWRIGHT_BASE_IMAGE="{image}"' in source
 
 
 @pytest.mark.unit

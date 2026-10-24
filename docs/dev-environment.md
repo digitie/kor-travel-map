@@ -385,7 +385,7 @@ scripts/build-c7-playwright-image.sh
 ```
 
 base는
-`mcr.microsoft.com/playwright:v1.60.0-noble@sha256:9bd26ad900bb5e0f4dee75839e957a89ae89c2b7ab1e76050e559790e946b948`
+`mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea`
 로 고정한다. 최종 C7은 임의 `docker run`이나 host `npm` 명령으로 실행하지 않고
 build도 ignored/untracked file이 들어갈 수 없는 exact Git archive script로만 수행한다.
 [`run-c7-prod-live-e2e.sh`](../scripts/run-c7-prod-live-e2e.sh)는 핀된 SHA의 평범한 `git archive`
