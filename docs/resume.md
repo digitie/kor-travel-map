@@ -1,3 +1,8 @@
+## 2026-10-24 — 한 sealed attempt의 scalar 원자 batch(A2)
+
+- 같은 dataset의 기존 primary place 여러 개를 한 TX/finish1회로 적용하는 별도 entry를 추가했다. snapshot seal·실제 collector 배선·same-dataset 병렬 수용은 아니다.
+- 초기 unit16·Ruff/mypy2 통과, 실제PG·두 코드리뷰·정확CI·실UI는 미완이다. 총1MiB/manifest8192·협력적30s/입력독점소유 계약과 한계는 [A2 보고서](reports/2026-10-24-native-scalar-batch.md)에 있다. 기본OFF/seed0/운영0.
+
 ## 2026-10-24 — 국가유산 native 적격성 선행 계약(A1, #1390)
 
 - 안정 composite ID의 본체 이름 presence와 저장 typed projection 재정규화·지원 외 불변 진단을 추가했다. eligible은 DB 적용 승인이 아니며 collector/Geo/whole-TX seal·정책은 바꾸지 않는다.
