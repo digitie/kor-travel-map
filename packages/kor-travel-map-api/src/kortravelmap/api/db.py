@@ -30,6 +30,9 @@ __all__ = [
     "configure_prometheus_metrics",
     "get_engine",
     "get_session",
+    "get_read_snapshot_session",
+    "get_locking_read_snapshot_session",
+    "get_public_api_key_session",
     "set_engine_for_test",
     "reset_engine",
 ]
@@ -89,13 +92,58 @@ def reset_engine() -> None:
 
 
 async def get_session() -> AsyncIterator[AsyncSession]:
-    """FastAPI 의존성 — 요청 단위 ``AsyncSession`` (read-only 조회용).
+    """FastAPI 의존성 — 일반 요청 세션. 쓰기/복합 phase의 transaction도 받는다.
 
-    조회 라우터 전용이라 commit하지 않는다 (적재는 ``client.load_feature_bundles``).
+    이 의존성 자체는 commit하지 않는다. handler가 쓰기 transaction을 소유하며,
+    단일 image가 필요한 순수 조회는 ``get_read_snapshot_session``을 쓴다.
     """
     from sqlalchemy.ext.asyncio import AsyncSession
 
     async with AsyncSession(_get_engine(), expire_on_commit=False) as session:
+        yield session
+
+
+async def get_public_api_key_session() -> AsyncIterator[AsyncSession]:
+    """공개 key 인증 전용 세션. handler/쓰기 세션과 dependency cache를 공유하지 않는다.
+
+    ``require_public_api_key``가 조회 직후 context를 닫아 snapshot reader가 같은
+    pool의 유일한 connection도 이어 쓸 수 있게 한다. 의존성 종료의 close는 멱등이다.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    async with AsyncSession(_get_engine(), expire_on_commit=False) as session:
+        yield session
+
+
+async def get_read_snapshot_session() -> AsyncIterator[AsyncSession]:
+    """순수 조회 응답 전체를 최초 SELECT 전 read-only REPEATABLE READ로 묶는다.
+
+    auth/쓰기용 ``get_session``과 세션을 공유하지 않는다. 이미 autobegin된
+    transaction의 isolation을 바꾸지 않으며, 성공/예외 모두 context 종료 시
+    connection을 pool에 반환한다. 여러 HTTP page 사이의 snapshot은 약속하지 않는다.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    engine = _get_engine().execution_options(
+        isolation_level="REPEATABLE READ", postgresql_readonly=True
+    )
+    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
+        yield session
+
+
+async def get_locking_read_snapshot_session() -> AsyncIterator[AsyncSession]:
+    """FOR SHARE가 필요한 조회 전용 phase. 기존 read-write 권한 안에서 RR만 보장한다.
+
+    PostgreSQL은 READ ONLY transaction에서 행 잠금을 금지한다. 순수 SELECT reader는
+    기존 ``get_read_snapshot_session``을 유지하며, 이 dependency는 행 잠금 guard를
+    제거하거나 mutation에 쓰기 권한을 새로 주기 위한 경로가 아니다.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    engine = _get_engine().execution_options(
+        isolation_level="REPEATABLE READ", postgresql_readonly=False
+    )
+    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
         yield session
 
 

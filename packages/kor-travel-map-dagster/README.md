@@ -32,7 +32,7 @@ Docker 이미지는 `docker/dagster.yaml`을 `DAGSTER_HOME`에 포함한다. 이
 PostgreSQL-backed instance config를 쓴다.
 
 
-> **2026-10-24 ADR-114 결정 7(1단계, migration `411_retire_pg_transport_values`)** — 유가(주유소·휴게소)·고속도로 돌발의 PG 적재(asset·job·schedule·resource·preview)는 퇴역했고 그 Feature는 `retired`·`suppressed`다. 현재 값은 Valkey `transport_state_*`와 `/v1/service/transport/*`가 준다. 아래 유가·돌발 서술은 이력이다. 장소(주유소·휴게소·공항 place) 적재는 그대로다.
+> **2026-10-24 ADR-114 결정 7(1단계, migration `417_retire_pg_transport_values`)** — 유가(주유소·휴게소)·고속도로 돌발의 PG 적재(asset·job·schedule·resource·preview)는 퇴역했고 그 Feature는 `retired`·`suppressed`다. 현재 값은 Valkey `transport_state_*`와 `/v1/service/transport/*`가 준다. 아래 유가·돌발 서술은 이력이다. 장소(주유소·휴게소·공항 place) 적재는 그대로다.
 ## 패키지 설치 기준
 
 `kor-travel-map-dagster`는 독립 code location으로 clean install될 수 있어야 한다.

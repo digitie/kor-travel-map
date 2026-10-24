@@ -90,7 +90,7 @@
   퇴역 방법과 시점은 이행 PR에서 정한다. 그 전까지는 현재 적재를 유지한다.
 - (2026-10-24) 방법·순서는 아래 "결정 7 이행 — PG transport 퇴역"이 정본이다. 소비자 확인 결과 장소(주유소·휴게소·
   공항 place)는 아직 기대는 곳이 있어 세 단계로 나눴다: ① 유가·돌발 적재 종료 + Feature 퇴역(soft-delete, migration
-  411) → ② 장소 적재 종료 + 퇴역 → ③ 물리 삭제.
+  417) → ② 장소 적재 종료 + 퇴역 → ③ 물리 삭제.
 
 ## 결과 — 잃는 것
 
@@ -586,7 +586,7 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
 
 | 단계 | 무엇 | 해제 조건 |
 | --- | --- | --- |
-| ① (이 PR, migration `411_retire_pg_transport_values`) | 유가 둘·돌발 하나의 PG 적재(asset·job·schedule·큐 runner spec·handler binding·preview fixture)를 지우고, 그 dataset의 operation을 종류 불문 끄고, 그 Feature를 퇴역한다 | Valkey 다섯 데이터셋 적재 중(충족) |
+| ① (이 PR, migration `417_retire_pg_transport_values`) | 유가 둘·돌발 하나의 PG 적재(asset·job·schedule·큐 runner spec·handler binding·preview fixture)를 지우고, 그 dataset의 operation을 종류 불문 끄고, 그 Feature를 퇴역한다 | Valkey 다섯 데이터셋 적재 중(충족) |
 | ② | 장소 셋(주유소·휴게소·공항)의 PG 적재 종료 + 퇴역 | PinVi가 일반 in-bounds 기본 kind에서 transport 중복을 빼고 장소 이름 검색 대체를 정함(또는 소유자가 손실을 받아들임), C7 안전 대상을 공항 job 밖으로 옮김 |
 | ③ | 물리 삭제(402와 같은 모양 — Feature·source lineage·가격 fact·notice 계보), dataset 비활성, 남은 PG 변환 코드(`providers/opinet.py`·`krex.py` 유가·돌발·`krairport.py`의 PG 경로)와 notice 계보 함수의 돌발 분기 정리 | ②가 배포되고 관찰 기간(1주 이상)에 되돌릴 일이 없었음, 소유자 확인(비가역) |
 
@@ -596,7 +596,7 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
 ### ①의 방법 — 무엇이 실행되는가
 
 - **퇴역 = soft-delete**: `feature.transition_feature_state`(감사·불변 trail의 정본 상태 전이)를 `transition_kind='system'`,
-  `reason_code='adr114_transport_state_moved_to_valkey'`, `principal='system/alembic-411_retire_pg_transport_values'`,
+  `reason_code='adr114_transport_state_moved_to_valkey'`, `principal='system/alembic-417_retire_pg_transport_values'`,
   `causation_ref='ADR-114 decision 7 phase 1'`로 부른다 → `lifecycle_state='retired'`·`publication_state='suppressed'`. 프로시저가
   같은 전이에 lifecycle override(`prevent_provider_reactivation=true`)를 붙인다 — provider 부재가 아니라 결정이므로 provider
   tombstone으로 위장하지 않고, 적재가 실수로 되살아나도 다시 켜지지 않는다. 프로시저는 advisory lock을 잡지 않는다(행 잠금만,
@@ -607,17 +607,19 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   그 entity에 `primary` link로 묶인 `active` Feature(prod 약 14,240건). 404가 비활성화한 옛 provider(`python-opinet-api`·
   `python-krex-api`)의 price·notice dataset에 active Feature가 남아 있으면 멈춘다(404 preflight 때 0행, 그 뒤 쓰기 불가 —
   남았다면 모르는 상태라 몰래 퇴역하지 않는다).
-- **순서**: 같은 트랜잭션 거부 → member 표 둘(`ops.import_job_datasets`·`ops.feature_update_request_datasets`) `LOCK … IN SHARE
+- **순서**: 같은 트랜잭션 거부 → ADR-115 scoped write 프로토콜 gate 배타 획득(`ops.lock_scoped_feature_write_protocol(true)`,
+  lock_timeout 30초 — 415부터 `transition_feature_state`가 같은 gate를 잡으므로 member 표보다 **먼저** 잡아 교착을 피한다. 돌고 있는
+  Map Feature 쓰기가 있으면 30초 안에 얻지 못해 실패한다) → member 표 둘(`ops.import_job_datasets`·`ops.feature_update_request_datasets`) `LOCK … IN SHARE
   MODE`(lock_timeout 5초) → preflight → operation **먼저** 끔 → 퇴역(`statement_timeout=0`, `lock_timeout` 60초) → receipt
   CHECK(`lock_timeout` 1초, 410과 같은 상한) → timeout 원복 → 사후 조건(켜진 대상 operation 0, active 대상 0, 전이 수 = 대상 수,
   queued/running 대상 job 0). **왜 표 잠금인가**: 활성 가드(`reject_inactive_*_dataset_membership`)는 BEFORE INSERT 트리거의 plain
-  SELECT로 `is_enabled`를 읽는다. 411이 끈 operation은 commit 전까지 다른 세션에 켜진 것으로 보이므로, 행 단위(FK 대상 scope 행
+  SELECT로 `is_enabled`를 읽는다. 417이 끈 operation은 commit 전까지 다른 세션에 켜진 것으로 보이므로, 행 단위(FK 대상 scope 행
   `FOR UPDATE`)로는 가드를 통과한 INSERT가 FK에서 기다렸다가 commit 뒤 성공해 꺼진 operation에 member가 남는다. 표 `SHARE` 잠금은
-  INSERT가 문장 시작에서 `ROW EXCLUSIVE`를 기다리게 하므로 가드가 commit된 꺼진 값을 본다. **대가**: 411 트랜잭션 동안 모든
+  INSERT가 문장 시작에서 `ROW EXCLUSIVE`를 기다리게 하므로 가드가 commit된 꺼진 값을 본다. **대가**: 417 트랜잭션 동안 모든
   dataset의 새 job member 쓰기가 기다린다(퇴역 수십 초~수 분). 그 창에서 **새로 시작하는** Map run(어느 dataset이든)은 Dagster
   resource 초기화의 operation guard가 member INSERT에서 기다리다 `lock_timeout` 30초에 55P03으로 실패하고, API·PinVi
   cache-target 요청은 약 5초 상한에서 503을 받는다. 이미 돌고 있는 적재는 영향이 없다. 그래서 runbook B는 큐 sensor를 멈춘 창에서
-  411을 돌린다.
+  417을 돌린다.
 - **남기는 것**: Feature 행·source lineage·가격 fact·notice 계보·alias·상태 전이 감사·카탈로그 행. **dataset은 활성으로 둔다**
   (401과 같다 — 비활성은 물리 삭제 단계의 일이고, 활성 가드가 그때 DELETE까지 막는다).
 - **seal**(기각 대안의 첫 함정): 전이는 그 Feature에 link가 있는 **모든 dataset**의 `current_provider_curation_input_set` 입력을
@@ -625,19 +627,19 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   Feature에 대상 밖 dataset의 link(역할 무관)가 있으면 멈춘다 — 다른 dataset의 seal은 바뀌지 않는다(통합 검사가 대상 밖 전
   dataset의 seal 입력을 전후로 대조한다). 이미 실패로 끝난 root의 미완 영수증(prod 돌발 3건)은 다시 대조되지 않는다. 두 번째
   함정(runtime 역할의 증거 표 읽기)은 해당이 없다 — 퇴역은 migration 안에서 한다.
-- **같은 트랜잭션 거부**: env.py는 밀린 revision 전부를 한 트랜잭션으로 돈다. prod(409)가 한 번에 411까지 오르면 410(ADR-115
-  shadow 원장)의 FK 추가가 `feature.features`·`source_entities`·`source_records`·`provider_datasets`·`feature_override_field_paths`에
-  잡은 SHARE ROW EXCLUSIVE를 퇴역 내내 쥐어 DB 쓰기가 멈춘다. env.py는 그대로 두고, 411은 **퇴역할 Feature가 있는데**
-  `alembic_version` 행이 지금 트랜잭션에서 쓰였으면(앞선 revision이 이 트랜잭션에서 적용됨) 거부한다 — 410도 함께 되돌아가 DB는
+- **같은 트랜잭션 거부**: env.py는 밀린 revision 전부를 한 트랜잭션으로 돈다. prod(409)가 한 번에 417까지 오르면 410~416(ADR-115
+  shadow 원장·scoped write 프로토콜)의 FK·DDL이 `feature.features`·`source_entities`·`source_records`·`provider_datasets`·`feature_override_field_paths`에
+  잡은 SHARE ROW EXCLUSIVE를 퇴역 내내 쥐어 DB 쓰기가 멈춘다. env.py는 그대로 두고, 417은 **퇴역할 Feature가 있는데**
+  `alembic_version` 행이 지금 트랜잭션에서 쓰였으면(앞선 revision이 이 트랜잭션에서 적용됨) 거부한다 — 앞선 revision도 함께 되돌아가 DB는
   409 그대로다. 빈 DB(fresh bootstrap·CI)는 대상이 0이라 한 번에 오른다.
 
 ### ①의 운영 runbook (n150, 공용 Dagster)
 
-**A. 410만 먼저.** head가 410인 Map commit(#1382 머지 직전 main — 예: `e0131ec1`처럼 `410_provider_field_shadow`가 head인 것)으로
-pair를 회전한다(`/root/chain17.sh`, 마이그레이션 전진이 410을 단독 commit). 확인: Map API 컨테이너 DSN으로
-`SELECT version_num FROM alembic_version` = `410_provider_field_shadow`. 410 자체는 짧은 DDL이다(Codex, ADR-115).
+**A. 416까지 먼저.** head가 `416_field_override_protocol`인 Map commit(#1382 머지 직전 main, 예: `ff65c4154`)으로 pair를
+회전한다(`/root/chain17.sh`, 마이그레이션 전진이 410~416을 commit — ADR-115 소유 revision, 각자의 runbook을 따른다). 확인: Map API
+컨테이너 DSN으로 `SELECT version_num FROM alembic_version` = `416_field_override_protocol`.
 
-**B. 411 — 배포 전(필수).**
+**B. 417 — 배포 전(필수).**
 
 1. **갱신 정책을 끈다(필수).** prod 적재는 cron이 아니라 큐다(`feature_update_request_queue_sensor` 기본 RUNNING, PinVi
    cache-target 요청이 targeted run을 낸다). 세 dataset(`transport_fuel_prices`·`transport_rest_area_fuel_prices`·
@@ -681,30 +683,31 @@ pair를 회전한다(`/root/chain17.sh`, 마이그레이션 전진이 410을 단
     WHERE job.status IN ('queued','running') AND m.provider_dataset_id IN (SELECT * FROM target);
    ```
 
-   0행이어야 한다. 411은 member 표 둘을 `SHARE`로 잠근 뒤 같은 것을 다시 잰다. 남아 있으면 실패하고, 아직 commit되지 않은 member
-   INSERT가 그 표에 `ROW EXCLUSIVE`를 쥐고 있으면 잠금을 5초 안에 얻지 못해 실패한다 — 그때 DB는 **410 그대로**다(A가 이미
-   commit됐다). 원인을 없애고 B를 다시 돌린다. 실패한 411 시도는 매번 최대 5초 `SHARE` 대기를 하고 entrypoint가 30번까지
+   0행이어야 한다. 417은 member 표 둘을 `SHARE`로 잠근 뒤 같은 것을 다시 잰다. 남아 있으면 실패하고, 아직 commit되지 않은 member
+   INSERT가 그 표에 `ROW EXCLUSIVE`를 쥐고 있으면 잠금을 5초 안에 얻지 못해 실패한다 — 그때 DB는 **416 그대로**다(A가 이미
+   commit됐다). 원인을 없애고 B를 다시 돌린다. 실패한 417 시도는 매번 최대 5초 `SHARE` 대기를 하고 entrypoint가 30번까지
    재시도하므로, 그동안 member 쓰기를 하는 API·PinVi 요청이 잠깐씩 503을 받을 수 있다.
-3a. **큐 sensor를 멈춘다(411 창 동안).** 411이 도는 동안 새 run 시작은 실패한다(위 "대가"). 공용 plane에서:
+3a. **큐 sensor를 멈추고 돌고 있는 Map run이 끝나기를 기다린다(417 창 동안).** 417이 도는 동안 새 run 시작은 실패하고(위
+   "대가"), 돌고 있는 Feature 쓰기가 있으면 417이 프로토콜 gate를 30초 안에 얻지 못해 실패한다. 공용 plane에서:
 
    ```bash
    docker exec kor-travel-dagster-daemon dagster sensor stop feature_update_request_queue_sensor \
      -l kortravelmap.dagster.definitions -w /opt/dagster/dagster_home/workspace.yaml
    ```
 
-   그리고 411 창에 schedule tick이 오지 않게 배포 시각을 고른다(켜진 Map schedule의 다음 tick을 Dagster UI에서 본다). tick을
-   피하지 못하면 그 run은 55P03으로 실패한다 — 받아들이고 411 뒤에 다시 실행해도 된다(적재는 멱등). 배포·확인(5단계)이 끝나면
+   그리고 417 창에 schedule tick이 오지 않게 배포 시각을 고른다(켜진 Map schedule의 다음 tick을 Dagster UI에서 본다). tick을
+   피하지 못하면 그 run은 55P03으로 실패한다 — 받아들이고 417 뒤에 다시 실행해도 된다(적재는 멱등). 배포·확인(5단계)이 끝나면
    같은 명령의 `sensor start`로 되돌린다.
-4. **배포**(Map API·Dagster code location 같은 pair): 411 실행. 한 트랜잭션, 프로시저 약 1.4만 회(수십 초~수 분). 그동안 **모든**
+4. **배포**(Map API·Dagster code location 같은 pair): 417 실행. 한 트랜잭션, 프로시저 약 1.4만 회(수십 초~수 분). 그동안 **모든**
    dataset의 새 job member 쓰기가 member 표 잠금에서 기다린다 — 새 Map run 시작은 55P03으로 실패하고(3a로 sensor를 멈춘 이유),
-   API·PinVi cache-target 요청은 약 5초 뒤 503을 받는다. 돌고 있던 적재는 그대로 끝난다. 한가한 시간에 한다. **A를 건너뛰었다면**(prod가 아직 409) 411이
+   API·PinVi cache-target 요청은 약 5초 뒤 503을 받는다. 돌고 있던 적재는 그대로 끝난다. 한가한 시간에 한다. **A를 건너뛰었다면**(prod가 아직 409) 417이
    같은 트랜잭션 거부로 결정적으로 실패하고, `docker/api-entrypoint.sh`가 `alembic upgrade head`를 30번 재시도한 뒤 API
-   컨테이너가 crash-loop한다(fail-closed — DB는 409 그대로, 410도 되돌아간다). 복구: 그 pair를 멈추고 A(head 410 pair)를 먼저
+   컨테이너가 crash-loop한다(fail-closed — DB는 409 그대로, 410~416도 되돌아간다). 복구: 그 pair를 멈추고 A(head 416 pair)를 먼저
    배포한 뒤 B를 다시 한다.
 5. **확인**: `SELECT count(*) FROM feature.feature_state_transitions WHERE reason_code = 'adr114_transport_state_moved_to_valkey'` ≈
    14,240, 대상 dataset enabled operation 0, `/v1/features/in-bounds?kinds=price`에 transport 유가 없음, Valkey
    `/v1/service/transport/status` 그대로, 다른 dataset 적재 정상. 그리고 **꺼진 대상 operation에 붙은 queued/running member는 0**이어야
-   한다(3단계 질의를 다시 돌린다 — 411 사후 조건이 같은 것을 재지만 배포 뒤 한 번 더 본다). 0이 아니면(설계상 생길 수 없다 — 생겼다면
+   한다(3단계 질의를 다시 돌린다 — 417 사후 조건이 같은 것을 재지만 배포 뒤 한 번 더 본다). 0이 아니면(설계상 생길 수 없다 — 생겼다면
    잠금 우회 경로가 있다는 뜻이니 원인을 기록한다) 그 job은 활성 가드 때문에 스스로 종결로 가지 못한다: 정리는 admin 파이프라인
    취소 경로(`/ops/pipeline` 요청 취소)로 하고, 그것도 막히면 member 행을 건드리지 말고 그 job id를 남겨 사람이 판단한다
    (operation을 잠시 다시 켜 종결시키는 것은 새 revision 없이 하지 않는다).

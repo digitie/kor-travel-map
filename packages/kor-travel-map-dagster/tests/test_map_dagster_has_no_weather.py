@@ -237,9 +237,9 @@ def _weather_dataset_identities() -> set[tuple[str, str]]:
 
 
 def _pg_retired_transport_datasets() -> frozenset[tuple[str, str]]:
-    """ADR-114 결정 7(migration 411)이 PG 적재를 퇴역한 시드 dataset.
+    """ADR-114 결정 7(migration 417)이 PG 적재를 퇴역한 시드 dataset.
 
-    411의 정체성 규칙(provider ``kor-travel-transport`` + ``produces`` price·notice)을
+    417의 정체성 규칙(provider ``kor-travel-transport`` + ``produces`` price·notice)을
     시드(rev 300)의 옛 정체성으로 번역한다 — 404 대응표에서 새 kind가 price·notice인
     것. 현재 상태는 Valkey가 든다.
     """

@@ -161,7 +161,7 @@ async def _convert_datagokr_festival(items: Sequence[Any]) -> list[Any]:
 
 # ── kor-travel-transport 주유소·휴게소 fixture (ADR-106) ─────────────────
 #
-# 유가·돌발 preview는 ADR-114 결정 7(migration 411)로 그 dataset과 함께 퇴역했다.
+# 유가·돌발 preview는 ADR-114 결정 7(migration 417)로 그 dataset과 함께 퇴역했다.
 #
 # 아래 fixture는 transport export JSON 모양 그대로이고 실 파서(``kor_travel_transport``)를
 # 지난다 — preview가 실제 계약과 갈라지지 않게 한다.

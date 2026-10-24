@@ -133,7 +133,10 @@
 - [ ] 일반 snapshot 적재·retire·seal은 한 commit이다. 중간 실패 후 API에는 기존 image만
   보이며 public_ready·geometry sidecar·ETag/cache generation이 일치한다.
 - [ ] T-CWRITE-01의 다중 SELECT API inventory 전부를 단일 SQL 또는 첫 SELECT 전 read-only
-  REPEATABLE READ로 구현한다. READ COMMITTED의 같은 transaction만으로 수용하지 않는다.
+  REPEATABLE READ로 구현한다. 기존 row lock guard 때문에 READ ONLY를 사용할 수 없는
+  reconciliation snapshot GET 한 경로만 ADR-115 §6의 READ WRITE RR·명시 retryable 503
+  예외를 적용하고, metadata 조회 뒤 경쟁 commit→40001→503→새 요청 권한 재검사를 반증한다.
+  READ COMMITTED의 같은 transaction만으로 수용하지 않는다.
   `get_feature`, `get_features_batch`, `list_features_nearby_by_target`, `get_feature_price_snapshot`
   및 audit에서 추가된 경로 각각의 SELECT 사이 writer commit을 주입해 하나의 응답에는 old/old
   또는 new/new만 나오고 참조/본문·total/items·주소/Geo stamp의 mixed image가 0임을 검증한다.
@@ -2800,7 +2803,7 @@ ADR-114 2단계(weather). 브랜치 `feat/adr114-valkey-weather`. 설계·데이
   충족, 일반 in-bounds 기본 kind(`price`·`notice`)·장소 검색·근처는 아직 PG transport를 받는다 — ②의 해제 조건.
 - [ ] PG transport 적재 job·schedule과 기존 feature의 퇴역 방법(soft-delete·dataset 비활성)을 ADR-114에 적고, seal
   대조가 깨지지 않는 순서로 실행했다(ADR-114 기각 대안의 두 함정). 2026-10-24 방법은 ADR-114 "결정 7 이행"에 적었다.
-- [ ] ① 코드 PR 머지(유가·돌발 asset 제거, migration 411 통합 검사 — 퇴역·보존·preflight 둘, CI 4세션 초록) → 배포 전
+- [ ] ① 코드 PR 머지(유가·돌발 asset 제거, migration 417 통합 검사 — 퇴역·보존·preflight 둘, CI 4세션 초록) → 배포 전
   schedule 셋 정지·큐 비우기 → pair 배포 → 전이 수(약 1.4만)·대상 operation 0·in-bounds price 없음을 journal에 적는다.
 - [ ] ② 장소 셋 퇴역: PinVi in-bounds 기본 kind에서 transport 중복 제거·장소 이름 검색 대체 결정, C7 안전 schedule·갱신
   요청 대상을 공항 job 밖으로 옮긴 뒤.

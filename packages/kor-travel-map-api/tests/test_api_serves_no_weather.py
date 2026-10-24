@@ -292,7 +292,7 @@ def test_kept_notice_previews_still_convert() -> None:
 
     2026-10-01 기준 교통 돌발(``kor-travel-transport``)과 산사태 예보(``python-krforest-api``)
     두 dataset이 notice를 냈다. 2026-10-24 교통 돌발 PG 적재·preview는 ADR-114 결정 7(migration
-    411)로 퇴역했다 — 남는 것은 산사태 예보다.
+    417)로 퇴역했다 — 남는 것은 산사태 예보다.
     """
     notice_datasets: set[str] = set()
     for entry in FIXTURE_REGISTRY:

@@ -464,7 +464,7 @@ def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
     # 2026-10-01 9 → 6: 에어코리아·KREX 휴게소 기상·산림청 weather 값 적재 함수가
     # ADR-105로 사라졌다.
     # 2026-10-02 6 → 5: OpiNet 가격 asset의 쿼터 초크포인트가 ADR-106으로 사라졌다.
-    # 2026-10-24 5 → 3: 주유소·휴게소 유가 asset이 ADR-114 결정 7(migration 411)로 사라졌다.
+    # 2026-10-24 5 → 3: 주유소·휴게소 유가 asset이 ADR-114 결정 7(migration 417)로 사라졌다.
     assert len(scanned) >= 3, (
         f"초크포인트를 지나는 함수를 {len(scanned)}개만 찾았다 — 유도가 낡았다."
     )

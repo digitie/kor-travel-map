@@ -104,7 +104,7 @@ async def test_source_record_writer_keeps_raw_snapshot_immutable_and_advances_he
     stale = _record(
         key="source-record-a",
         payload_hash="a1",
-        observed_at=_BASE + timedelta(minutes=1),
+        observed_at=_BASE - timedelta(minutes=1),
         raw_data={"edition": "a"},
     )
     assert await upsert_source_record(migrated_session, stale) is False

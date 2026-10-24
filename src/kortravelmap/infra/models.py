@@ -57,6 +57,7 @@ from sqlalchemy import (
     Integer,
     MetaData,
     Numeric,
+    PrimaryKeyConstraint,
     SmallInteger,
     String,
     Text,
@@ -8687,3 +8688,228 @@ for _schema, _table_name, _checks in _MIGRATION_OWNED_CHECK_CONSTRAINTS:
         if _name in _existing_names:
             raise RuntimeError(f"중복 CHECK constraint metadata: {_schema}.{_table_name}.{_name}")
         _table.append_constraint(CheckConstraint(_sqltext, name=conv(_name)))
+
+
+class ScopedFeatureWriteDatasetRow(Base):
+    """dataset 전체 snapshot과 지역 예약의 계층 anchor(ADR115)."""
+
+    __tablename__ = "feature_write_dataset_scopes"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_dataset")),
+        CheckConstraint("epoch >= 0", name=conv("ck_fw_dataset_epoch")),
+        CheckConstraint(
+            "(owner IS NULL) = (lease_until IS NULL)", name=conv("ck_fw_dataset_owner")
+        ),
+        {"schema": "ops"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "provider_sync.provider_datasets.provider_dataset_id",
+            name=conv("fk_fw_dataset_provider"),
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    owner: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedFeatureWriteRegionRow(Base):
+    """증거가 있는 coverage 지역만 표현하는 예약 anchor."""
+
+    __tablename__ = "feature_write_region_scopes"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_region")),
+        CheckConstraint("scope_version > 0", name=conv("ck_fw_region_version")),
+        CheckConstraint("region_key ~ '^[A-Za-z0-9_.:-]{1,128}$'", name=conv("ck_fw_region_key")),
+        CheckConstraint("epoch >= 0", name=conv("ck_fw_region_epoch")),
+        CheckConstraint("(owner IS NULL) = (lease_until IS NULL)", name=conv("ck_fw_region_owner")),
+        Index(
+            "idx_feature_write_region_scopes_lease",
+            "lease_until",
+            "provider_dataset_id",
+            postgresql_where=text("owner IS NOT NULL"),
+        ),
+        {"schema": "ops"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.feature_write_dataset_scopes.provider_dataset_id",
+            name=conv("fk_fw_region_dataset"),
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    scope_version: Mapped[int] = mapped_column(Integer, primary_key=True)
+    region_key: Mapped[str] = mapped_column(Text(collation="C"), primary_key=True)
+    epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    owner: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    lease_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ScopedFeatureWriteAttemptRow(Base):
+    """epoch로 소유권을 검증하는 단일 dataset attempt. 공개 DTO가 아니다."""
+
+    __tablename__ = "feature_write_attempts"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_attempt")),
+        UniqueConstraint(
+            "provider_dataset_id", "idempotency_key", name=conv("uq_fw_attempt_idempotency")
+        ),
+        CheckConstraint(
+            "idempotency_key ~ '^[A-Za-z0-9_.:-]{1,128}$'", name=conv("ck_fw_attempt_key")
+        ),
+        CheckConstraint("dataset_epoch >= 0", name=conv("ck_fw_attempt_epoch")),
+        CheckConstraint(
+            "jsonb_typeof(regions) = 'array' AND jsonb_array_length(regions) <= 256 "
+            "AND cardinality(region_epochs)=jsonb_array_length(regions)",
+            name=conv("ck_fw_attempt_regions"),
+        ),
+        CheckConstraint("input_digest ~ '^[0-9a-f]{64}$'", name=conv("ck_fw_attempt_input")),
+        CheckConstraint("expected_members BETWEEN 0 AND 8192", name=conv("ck_fw_attempt_members")),
+        CheckConstraint(
+            "status IN ('preparing','ready','applying','completed','cancelled')",
+            name=conv("ck_fw_attempt_status"),
+        ),
+        CheckConstraint(
+            "manifest_digest IS NULL OR manifest_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_fw_attempt_manifest"),
+        ),
+        CheckConstraint(
+            "result_digest IS NULL OR result_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("ck_fw_attempt_result"),
+        ),
+        Index(
+            "idx_feature_write_attempts_terminal",
+            "updated_at",
+            "attempt_id",
+            postgresql_where=text("status IN ('completed','cancelled')"),
+        ),
+        Index(
+            "idx_feature_write_attempts_expired",
+            "lease_until",
+            "provider_dataset_id",
+            postgresql_where=text("status IN ('preparing','ready','applying')"),
+        ),
+        {"schema": "ops"},
+    )
+
+    attempt_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "ops.feature_write_dataset_scopes.provider_dataset_id",
+            name=conv("fk_fw_attempt_dataset"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    idempotency_key: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    owner: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    dataset_epoch: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    region_epochs: Mapped[list[int]] = mapped_column(ARRAY(BigInteger), nullable=False)
+    regions: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    exclusive_protocol: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    input_digest: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    expected_members: Mapped[int] = mapped_column(Integer, nullable=False)
+    manifest_digest: Mapped[str | None] = mapped_column(Text(collation="C"))
+    status: Mapped[str] = mapped_column(
+        Text(collation="C"), nullable=False, server_default=text("'preparing'")
+    )
+    apply_txid: Mapped[int | None] = mapped_column(BigInteger)
+    result_digest: Mapped[str | None] = mapped_column(Text(collation="C"))
+    lease_until: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class ScopedFeatureWriteManifestRow(Base):
+    """대용량 payload 대신 고정 폭 근거와 예상 revision만 보관한다."""
+
+    __tablename__ = "feature_write_manifests"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_fw_manifest")),
+        UniqueConstraint(
+            "attempt_id",
+            "dependency_kind",
+            "dependency_key",
+            name=conv("uq_fw_manifest_dependency"),
+        ),
+        CheckConstraint("ordinal BETWEEN 0 AND 8191", name=conv("ck_fw_manifest_ordinal")),
+        CheckConstraint(
+            "dependency_kind IN ('feature','source_head','feature_membership')",
+            name=conv("ck_fw_manifest_kind"),
+        ),
+        CheckConstraint(
+            "octet_length(dependency_key) BETWEEN 1 AND 128", name=conv("ck_fw_manifest_key")
+        ),
+        CheckConstraint(
+            "octet_length(expected_value) BETWEEN 1 AND 128", name=conv("ck_fw_manifest_expected")
+        ),
+        CheckConstraint("member_digest ~ '^[0-9a-f]{64}$'", name=conv("ck_fw_manifest_digest")),
+        {"schema": "ops"},
+    )
+
+    attempt_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "ops.feature_write_attempts.attempt_id",
+            name=conv("fk_fw_manifest_attempt"),
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    ordinal: Mapped[int] = mapped_column(Integer, primary_key=True)
+    dependency_kind: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    dependency_key: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    expected_value: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+    member_digest: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+
+
+class ProviderFieldPolicyEpochRow(Base):
+    """첫 scalar cutover와 이전 snapshot의 writer를 분리하는 단일 행."""
+
+    __tablename__ = "provider_field_policy_epoch"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_pfp_epoch")),
+        CheckConstraint("singleton", name=conv("ck_pfp_singleton")),
+        CheckConstraint("epoch >= 0", name=conv("ck_pfp_epoch")),
+        {"schema": "feature"},
+    )
+
+    singleton: Mapped[bool] = mapped_column(
+        Boolean, primary_key=True, server_default=text("true")
+    )
+    epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+
+
+class ProviderFieldActivePolicyRow(Base):
+    """지원하는 scalar fieldset의 명시 활성 revision. runtime 직접 DML은 닫힌다."""
+
+    __tablename__ = "provider_field_active_policies"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_pfp_active")),
+        CheckConstraint("policy_revision >= 1", name=conv("ck_pfp_active_revision")),
+        CheckConstraint(
+            "field_paths IN (ARRAY['core.name']::text[], ARRAY['place.phones']::text[], "
+            "ARRAY['core.name','place.phones']::text[])",
+            name=conv("ck_pfp_active_fields"),
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "feature.features.feature_id", name=conv("fk_pfp_active_feature"), ondelete="RESTRICT"
+        ),
+        primary_key=True,
+    )
+    policy_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    field_paths: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)

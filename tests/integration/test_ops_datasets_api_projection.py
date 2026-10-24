@@ -37,7 +37,7 @@ import pytest
 from kortravelmap.api import dagster_http, ops_dataset_schedule
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import ADMIN_ACTOR_HEADER, ADMIN_PROXY_SECRET_HEADER
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.ops_dataset_preview import DatasetPreviewResult
 from kortravelmap.api.settings import ApiSettings
 from pydantic import SecretStr
@@ -964,6 +964,7 @@ async def test_datasets_and_pipeline_rest_share_committed_canonical_operations(
         )
     )
     app.dependency_overrides[get_session] = _request_session
+    app.dependency_overrides[get_read_snapshot_session] = _request_session
     auth_headers = {
         ADMIN_ACTOR_HEADER: "admin:integration-test",
         ADMIN_PROXY_SECRET_HEADER: _PROXY_SECRET,

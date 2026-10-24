@@ -78,6 +78,7 @@ def _field_command_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _record(*args: Any, **kwargs: Any) -> None:
         return None
 
+    monkeypatch.setattr(repo, "lock_feature_curation_write", _lock)
     monkeypatch.setattr(repo, "lock_domain_command", _lock)
     monkeypatch.setattr(repo, "create_domain_command_claim", _claim)
     monkeypatch.setattr(repo, "create_domain_command_record", _record)
@@ -230,3 +231,20 @@ async def test_apply_sido_and_road_management_no() -> None:
     assert result is not None
     assert set(result.overridden_fields) == {"sido_code", "road_address_management_no"}
     assert len(session.calls) == 3
+
+
+async def test_apply_acquires_protocol_before_first_row_lock(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    session = _Session([None])
+
+    async def _protocol(actual: Any) -> None:
+        assert actual is session
+        session.calls.append({"sql": "protocol EX", "params": {}})
+
+    monkeypatch.setattr(repo, "lock_feature_curation_write", _protocol)
+    assert await repo.apply_feature_address_override(
+        session, "missing", address={"road": "fixture"},
+    ) is None  # type: ignore[arg-type]
+    assert session.calls[0]["sql"] == "protocol EX"
+    assert "FOR UPDATE" in session.calls[1]["sql"]

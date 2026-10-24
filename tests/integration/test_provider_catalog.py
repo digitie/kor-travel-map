@@ -58,7 +58,7 @@ import httpx
 import pytest
 from kortravelmap.api import dagster_http
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.ops_dataset_service import (
     _catalog_info,
     _catalog_state_memberships,
@@ -894,14 +894,14 @@ async def test_head_retires_every_operation_of_the_transport_moved_datasets(
         if _TRANSPORT_PLACE_KIND in entry.produces:
             assert {"refresh", "preview"} <= kinds, (entry.dataset_key, kinds)
         else:
-            # ADR-114 결정 7(migration 411): 유가·돌발 PG 적재는 operation이 전부 꺼졌다.
+            # ADR-114 결정 7(migration 417): 유가·돌발 PG 적재는 operation이 전부 꺼졌다.
             assert kinds == set(), (entry.dataset_key, kinds)
 
 
 async def test_head_serves_no_pg_transport_price_or_notice_load(
     seed_session: AsyncSession,
 ) -> None:
-    """head 카탈로그가 transport 유가·돌발 PG 적재를 실행 가능하다고 말하지 않는다(411).
+    """head 카탈로그가 transport 유가·돌발 PG 적재를 실행 가능하다고 말하지 않는다(417).
 
     정체성은 이름이 아니라 provider와 capability다(``produces``에 price·notice). 하한은 본 것에
     건다 — 대상 dataset 셋이 시드에 보이고 각자 operation 행을 가져야 이 검사가 무언가를 잰다.
@@ -1136,6 +1136,7 @@ async def _seeded_ops_api(
                 yield session
 
             app.dependency_overrides[get_session] = _request_session
+            app.dependency_overrides[get_read_snapshot_session] = _request_session
 
             def _dagster(_request: httpx.Request) -> httpx.Response:
                 return httpx.Response(200, json=_empty_schedule_payload())

@@ -43,7 +43,11 @@ import pytest
 from fastapi import HTTPException
 from kortravelmap.api import feature_update_service
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import (
+    get_public_api_key_session,
+    get_read_snapshot_session,
+    get_session,
+)
 from kortravelmap.api.feature_update_schema import (
     FeatureIdsScope,
     FeatureUpdateRequestCreateRequest,
@@ -364,6 +368,9 @@ async def cutover_env(migrated_engine: AsyncEngine) -> AsyncIterator[_CutoverEnv
                 yield session
 
         app.dependency_overrides[get_session] = _request_session
+        # UUID/cursor 계약 시험의 미커밋 seed와 outer rollback 경계를 함께 쓴다.
+        app.dependency_overrides[get_read_snapshot_session] = _request_session
+        app.dependency_overrides[get_public_api_key_session] = _request_session
         transport = httpx.ASGITransport(app=app)
         try:
             async with httpx.AsyncClient(

@@ -1,6 +1,6 @@
 """transport place asset의 pool과 code location pool 이름공간 정적 회귀 테스트.
 
-주유소·휴게소 **가격** asset과 고속도로 돌발 asset은 ADR-114 결정 7(1단계, migration 411)로
+주유소·휴게소 **가격** asset과 고속도로 돌발 asset은 ADR-114 결정 7(1단계, migration 417)로
 퇴역했다 — 그 현재 상태는 Valkey(`transport_state_*`)가 든다. 그래서 price→place ``deps``
 엣지와 돌발 snapshot pool 검사는 대상이 사라졌다. live DB·materialize 없음.
 """

@@ -55,7 +55,7 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
     require_admin_manual_feature_create,
 )
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
@@ -1596,7 +1596,7 @@ async def list_admin_curation_quarantines(
 async def list_admin_curation_quarantine_items(
     request: Request,
     collection_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
     target_collection_id: Annotated[UUID | None, Query()] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
@@ -1781,7 +1781,7 @@ async def reclassify_admin_curation_quarantine(
 async def get_admin_curation_import_batch(
     request: Request,
     import_batch_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     _context: Annotated[AdminProxyContext, Depends(require_admin_frontend)],
 ) -> CurationImportBatchResponse:
     """성공한 import batch와 immutable row payload/provenance를 조회한다."""
@@ -2403,7 +2403,7 @@ async def commit_admin_curation_import_plan(
 @candidate_router.get("", response_model=AdminThemeCandidatePageResponse)
 async def list_admin_theme_candidates(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     rule_id: Annotated[UUID | None, Query()] = None,
     theme_id: Annotated[UUID | None, Query()] = None,
     source_id: Annotated[UUID | None, Query()] = None,
@@ -2484,7 +2484,7 @@ async def get_admin_theme_candidate(
 async def list_admin_theme_candidate_transitions(
     request: Request,
     candidate_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     before_transition_id: Annotated[int | None, Query(gt=0)] = None,
     page_size: Annotated[int, Query(ge=1, le=200)] = 100,
 ) -> AdminThemeCandidateTransitionPageResponse:
@@ -2622,7 +2622,7 @@ async def promote_admin_theme_candidate(
 @router.get("", response_model=FeatureCurationGroupsResponse)
 async def list_public_curation_groups(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
     provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
@@ -2705,7 +2705,7 @@ async def list_public_curation_collections(
 async def get_public_curation_collection(
     request: Request,
     collection_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> CurationCollectionResponse:
     started_at = perf_counter()
     result = await curation_repo.get_curation_collection(
@@ -2728,7 +2728,7 @@ async def get_public_curation_collection(
 async def get_public_feature_curations(
     request: Request,
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> FeatureCurationGroupResponse:
     started_at = perf_counter()
     # T-VN-32C PR-2 (S11) — `/{feature_id}` 계열과 동일한 경계 해석: legacy·UUID
@@ -2798,7 +2798,7 @@ async def get_admin_curation_collection(
     request: Request,
     collection_id: UUID,
     response: Response,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> AdminCurationCollectionResponse | Response:
     started_at = perf_counter()
     result = await curation_repo.get_curation_collection(

@@ -68,7 +68,43 @@
       "down_revision": [
         "410_provider_field_shadow"
       ],
-      "revision": "411_retire_pg_transport_values"
+      "revision": "411_scoped_feature_write_kernel"
+    },
+    {
+      "down_revision": [
+        "411_scoped_feature_write_kernel"
+      ],
+      "revision": "412_provider_scalar_projection"
+    },
+    {
+      "down_revision": [
+        "412_provider_scalar_projection"
+      ],
+      "revision": "413_legacy_sql_protocol_entry"
+    },
+    {
+      "down_revision": [
+        "413_legacy_sql_protocol_entry"
+      ],
+      "revision": "414_manual_dedup_protocol"
+    },
+    {
+      "down_revision": [
+        "414_manual_dedup_protocol"
+      ],
+      "revision": "415_state_lifecycle_protocol"
+    },
+    {
+      "down_revision": [
+        "415_state_lifecycle_protocol"
+      ],
+      "revision": "416_field_override_protocol"
+    },
+    {
+      "down_revision": [
+        "416_field_override_protocol"
+      ],
+      "revision": "417_retire_pg_transport_values"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

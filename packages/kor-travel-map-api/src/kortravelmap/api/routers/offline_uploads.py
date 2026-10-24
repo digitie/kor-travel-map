@@ -96,7 +96,7 @@ from kortravelmap.api.auth import (
     require_admin_destructive_enabled,
     require_admin_frontend,
 )
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
@@ -1560,7 +1560,7 @@ async def validate_offline_upload_request(
 )
 async def get_offline_upload_validation_request(
     upload_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> OfflineUploadValidationResponse:
     started_at = perf_counter()
     row = await get_offline_upload(session, upload_id)

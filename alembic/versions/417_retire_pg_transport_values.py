@@ -1,7 +1,7 @@
 """PG transport 유가·돌발 적재를 닫고 그 Feature를 퇴역(soft-delete)한다(ADR-114 결정 7, 1단계).
 
-Revision ID: 411_retire_pg_transport_values
-Revises: 410_provider_field_shadow
+Revision ID: 417_retire_pg_transport_values
+Revises: 416_field_override_protocol
 
 왜 필요한가. ADR-114로 transport의 **현재 상태**(주유소·휴게소 유가, 고속도로 돌발 활성 집합 등)는
 Map Valkey 세대(`transport_state_*` job, `/v1/service/transport/*`)가 들고, PinVi는 그 REST로
@@ -40,6 +40,12 @@ schedule·큐 runner spec·handler binding·preview fixture를 걷어냈다. **�
 0. 함수 소유자 롤 창을 연다(404와 같다).
 1. **같은 트랜잭션 거부**(아래 "트랜잭션"). 퇴역할 Feature가 있는데 이 트랜잭션에서 앞선 revision이
    이미 적용됐으면(``alembic_version`` 행이 이 트랜잭션에서 쓰였으면) 멈춘다.
+1a. ADR-115 scoped write 프로토콜 gate(``ops.lock_scoped_feature_write_protocol(true)``, 배타)를 **먼저**
+   잡는다(``lock_timeout`` 30초). ``transition_feature_state``가 415부터 루프마다 같은 gate를 배타로 잡는다 — 그
+   첫 획득이 member 표 잠금 **뒤**에 오면, gate 공유 몫을 쥔 채 member를 쓰려는 writer와 교착할 수 있다. 그래서
+   gate → member 표 순서로 잡는다. gate는 다른 Map Feature 쓰기와 상호 배제이므로, 돌고 있는 적재가 있으면 30초 안에
+   얻지 못해 아무것도 바꾸지 않고 실패한다(runbook: 큐 sensor 정지·진행 중 run 종료 뒤 배포). 이 코드는 gate를 정의하지
+   않고 부르기만 한다(ADR-115 소유).
 2. member 표 둘(``ops.import_job_datasets``·``ops.feature_update_request_datasets``)을 ``SHARE`` 모드로
    잠근다(``lock_timeout`` 5초). member INSERT는 문장 시작에서 ``ROW EXCLUSIVE``를 잡아야 하므로 이
    트랜잭션이 끝날 때까지 **BEFORE 활성 가드보다 먼저** 기다리고, 끝난 뒤 가드
@@ -66,7 +72,7 @@ schedule·큐 runner spec·handler binding·preview fixture를 걷어냈다. **�
    블록만 ``statement_timeout = 0``·``lock_timeout`` 60초다(prod 약 1.4만 호출 — member 표 잠금을 쥔 채 행 잠금에서 무한히 서지 않게). 끝나면 프로시저가 남긴 상태 문맥 GUC
    (``feature.state_transition_context``·``feature.state_procedure_definer``)를 비운다 — 같은
    트랜잭션의 뒤 revision이 그 문맥으로 상태를 바꿀 수 없게.
-5. receipt head CHECK에 이 revision을 더한다(401~410과 같은 계약). 이 ``ALTER TABLE``만
+5. receipt head CHECK에 이 revision을 더한다(401~416과 같은 계약). 이 ``ALTER TABLE``만
    ``lock_timeout`` 1초다(410과 같은 상한). 끝나면 두 timeout을 진입 값으로 되돌린다.
 
 **dataset은 비활성화하지 않는다**(401과 같다 — 그것은 물리 삭제 단계의 일이다, 402·404). 활성 가드
@@ -104,13 +110,13 @@ dataset 적재는 preflight가 막고, (나) 대상 Feature에 대상 밖 datase
 퇴역 전이 수는 preflight에서 센 대상 수와 같아야 한다.
 
 트랜잭션. env.py는 밀린 revision 전부를 **한 트랜잭션**으로 돈다. prod가 409에서 이 revision까지 한
-번에 오르면 410(ADR-115 shadow 원장)의 FK 추가가 ``feature.features``·``provider_sync.source_entities``·
+번에 오르면 410~416(ADR-115 shadow 원장·scoped write 프로토콜)의 FK·DDL이 ``feature.features``·``provider_sync.source_entities``·
 ``source_records``·``provider_datasets``·``ops.feature_override_field_paths``에 잡은 SHARE ROW EXCLUSIVE를
 이 revision의 약 1.4만 호출 내내 쥐게 된다 — DB 전체 쓰기 정지다. env.py의 의미는 바꾸지 않고, 이
 revision이 **퇴역할 Feature가 있을 때만** 같은 트랜잭션을 거부한다(``alembic_version`` 행의 ``xmin``이
-지금 트랜잭션 id면 앞선 revision이 이 트랜잭션에서 적용된 것이다). 운영은 두 번에 나눈다: (A) head가 410인
-pair로 배포(410 단독 commit) → (B) 이 revision이 든 pair로 배포. 빈 DB(fresh bootstrap·CI)는 퇴역할
-Feature가 0이라 한 번에 오른다. 거부되면 같은 트랜잭션의 410도 함께 되돌아가 DB는 진입 revision(prod 409)
+지금 트랜잭션 id면 앞선 revision이 이 트랜잭션에서 적용된 것이다). 운영은 두 번에 나눈다: (A) head가 416인
+pair로 배포(410~416 commit) → (B) 이 revision이 든 pair로 배포. 빈 DB(fresh bootstrap·CI)는 퇴역할
+Feature가 0이라 한 번에 오른다. 거부되면 같은 트랜잭션의 앞선 revision도 함께 되돌아가 DB는 진입 revision(prod 409)
 그대로다.
 
 forward-only. downgrade는 두지 않는다(ADR-021) — PG 유가·돌발 적재를 되살리는 것은 새 결정이다.
@@ -127,8 +133,8 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "411_retire_pg_transport_values"
-down_revision: str | Sequence[str] | None = "410_provider_field_shadow"
+revision: str = "417_retire_pg_transport_values"
+down_revision: str | Sequence[str] | None = "416_field_override_protocol"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -145,9 +151,11 @@ LEGACY_PROVIDERS: Final[tuple[str, ...]] = ("python-opinet-api", "python-krex-ap
 #: 퇴역 전이의 감사 문맥. ``prepare_feature_state_context``가 받는 키만 쓴다.
 #: SQLAlchemy ``text()``가 ``:이름``을 bind로 읽으므로 값에 콜론을 넣지 않는다.
 RETIRE_REASON_CODE: Final[str] = "adr114_transport_state_moved_to_valkey"
-RETIRE_PRINCIPAL: Final[str] = "system/alembic-411_retire_pg_transport_values"
+RETIRE_PRINCIPAL: Final[str] = "system/alembic-417_retire_pg_transport_values"
 RETIRE_CAUSATION_REF: Final[str] = "ADR-114 decision 7 phase 1"
 
+#: ADR-115 scoped write 프로토콜 gate 배타 획득 대기 상한(ms). 돌고 있는 Feature 쓰기가 있으면 실패한다.
+PROTOCOL_LOCK_TIMEOUT_MS: Final[int] = 30000
 #: member 표 SHARE 잠금 대기 상한(ms). 미완 member 쓰기가 있으면 기다리지 않고 실패한다.
 MEMBER_LOCK_TIMEOUT_MS: Final[int] = 5000
 #: 퇴역 루프의 행 잠금 대기 상한(ms). member 표 잠금을 쥔 채 무한히 서지 않게 한다.
@@ -214,6 +222,8 @@ SELECT EXISTS (
 _SET_OWNER_ROLE_SQL: Final[str] = "SET ROLE ktm_feature_schema_owner"
 _SET_STATE_PROCEDURE_OWNER_ROLE_SQL: Final[str] = "SET ROLE ktm_feature_state_procedure_owner"
 
+_LOCK_WRITE_PROTOCOL_SQL: Final[str] = "SELECT ops.lock_scoped_feature_write_protocol(true)"
+
 _LOCK_MEMBER_TABLES_SQL: Final[str] = (
     "LOCK TABLE ops.import_job_datasets, ops.feature_update_request_datasets IN SHARE MODE"
 )
@@ -268,7 +278,7 @@ SELECT set_config('feature.state_transition_context', '', true),
 _RECEIPT_HEAD_CHECK_SQL: Final[str] = """
 ALTER TABLE ops.application_schema_operation_receipts
     DROP CONSTRAINT ck_application_schema_operation_receipts_head,
-    ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh', '402_remove_map_weather_data', '403_drop_kma_notice_lineage', '404_transport_provider_identity', '405_mois_freshness_sla', '406_feature_write_gate', '407_feature_geocode_stamps', '408_kor_travel_geo_releases', '409_geo_release_item_reasons', '410_provider_field_shadow', '411_retire_pg_transport_values'))
+    ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh', '402_remove_map_weather_data', '403_drop_kma_notice_lineage', '404_transport_provider_identity', '405_mois_freshness_sla', '406_feature_write_gate', '407_feature_geocode_stamps', '408_kor_travel_geo_releases', '409_geo_release_item_reasons', '410_provider_field_shadow', '411_scoped_feature_write_kernel', '412_provider_scalar_projection', '413_legacy_sql_protocol_entry', '414_manual_dedup_protocol', '415_state_lifecycle_protocol', '416_field_override_protocol', '417_retire_pg_transport_values'))
 """
 
 # ---------------------------------------------------------------------------
@@ -345,6 +355,7 @@ SELECT 'active_feature', target.feature_id::text
 
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _SET_OWNER_ROLE_SQL,
+    _LOCK_WRITE_PROTOCOL_SQL,
     _LOCK_MEMBER_TABLES_SQL,
     _DISABLE_TARGET_OPERATIONS_SQL,
     _SET_STATE_PROCEDURE_OWNER_ROLE_SQL,
@@ -368,6 +379,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     (
         set_owner,
+        lock_protocol,
         lock_members,
         disable_operations,
         set_state_owner,
@@ -386,24 +398,26 @@ def upgrade() -> None:
     expected = int(bind.execute(text(_COUNT_TARGET_FEATURES_SQL)).scalar_one())
     if expected and bool(bind.execute(text(_EARLIER_REVISION_IN_THIS_TRANSACTION_SQL)).scalar_one()):
         raise RuntimeError(
-            "411: 아무것도 바꾸지 않았다 — 이 트랜잭션에서 앞선 revision(410 등)이 이미 적용됐는데 퇴역할 "
+            "417: 아무것도 바꾸지 않았다 — 이 트랜잭션에서 앞선 revision(410~416 등)이 이미 적용됐는데 퇴역할 "
             f"Feature가 {expected}건이다. 한 트랜잭션으로 돌면 앞선 revision의 표 잠금을 퇴역 내내 쥐어 "
-            "DB 쓰기가 멈춘다. 먼저 head가 410인 pair로 배포해 410을 단독 commit하고, 그 뒤 이 revision이 든 "
+            "DB 쓰기가 멈춘다. 먼저 head가 416인 pair로 배포해 410~416을 commit하고, 그 뒤 이 revision이 든 "
             "pair로 배포하라(ADR-114 '①의 운영 runbook' A·B). 같은 트랜잭션의 앞선 revision도 함께 되돌아간다."
         )
     keys = set(_scalars(bind, _TARGET_DATASET_KEYS_SQL))
     if keys != EXPECTED_TARGET_DATASET_KEYS:
         raise RuntimeError(
-            f"411: 아무것도 바꾸지 않았다 — 대상 dataset 집합이 기대와 다르다: {sorted(keys)!r} "
+            f"417: 아무것도 바꾸지 않았다 — 대상 dataset 집합이 기대와 다르다: {sorted(keys)!r} "
             f"(기대 {sorted(EXPECTED_TARGET_DATASET_KEYS)!r})"
         )
     legacy = _scalars(bind, _LEGACY_ACTIVE_FEATURES_SQL)
     if legacy:
         raise RuntimeError(
-            "411: 아무것도 바꾸지 않았다 — 404가 비활성화한 옛 provider의 price/notice dataset에 active "
+            "417: 아무것도 바꾸지 않았다 — 404가 비활성화한 옛 provider의 price/notice dataset에 active "
             f"Feature가 남아 있다(이 revision이 모르는 상태): {legacy!r}"
         )
 
+    _set_local(bind, "lock_timeout", str(PROTOCOL_LOCK_TIMEOUT_MS))
+    bind.execute(text(lock_protocol))
     _set_local(bind, "lock_timeout", str(MEMBER_LOCK_TIMEOUT_MS))
     bind.execute(text(lock_members))
     blockers: list[str] = []
@@ -420,7 +434,7 @@ def upgrade() -> None:
     if overridden:
         blockers.append(f"target Feature has an active lifecycle override: {overridden!r}")
     if blockers:
-        raise RuntimeError("411: 아무것도 바꾸지 않았다 — " + "; ".join(blockers))
+        raise RuntimeError("417: 아무것도 바꾸지 않았다 — " + "; ".join(blockers))
 
     bind.execute(text(disable_operations))
     _set_local(bind, "statement_timeout", "0")
@@ -437,17 +451,17 @@ def upgrade() -> None:
 
     remaining = [f"{kind}:{name}" for kind, name in bind.execute(text(_REMAINING_SQL)).all()]
     if remaining:
-        raise RuntimeError(f"411: 대상이 남았다: {remaining!r}")
+        raise RuntimeError(f"417: 대상이 남았다: {remaining!r}")
     retired = int(bind.execute(text(_COUNT_RETIRED_BY_THIS_REVISION_SQL)).scalar_one())
     if retired != expected:
-        raise RuntimeError(f"411: 퇴역 전이 수가 대상 수와 다르다: retired={retired}, expected={expected}")
+        raise RuntimeError(f"417: 퇴역 전이 수가 대상 수와 다르다: retired={retired}, expected={expected}")
     late = _scalars(bind, _IN_FLIGHT_TARGET_JOBS_SQL)
     if late:
-        raise RuntimeError(f"411: 끄는 동안 대상 operation job이 생겼다: {late!r}")
+        raise RuntimeError(f"417: 끄는 동안 대상 operation job이 생겼다: {late!r}")
 
 
 def downgrade() -> None:
     """되돌리지 않는다 — PG 유가·돌발 적재를 되살리는 것은 새 결정이다(ADR-114)."""
     raise RuntimeError(
-        "411_retire_pg_transport_values is forward-only: transport 현재 상태는 Valkey가 든다(ADR-114)."
+        "417_retire_pg_transport_values is forward-only: transport 현재 상태는 Valkey가 든다(ADR-114)."
     )

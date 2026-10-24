@@ -63,7 +63,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-STATE-03 — **PG transport feature 퇴역(이행 순서 5)**
 
-  세 단계(ADR-114 "결정 7 이행"): ① 유가·돌발 적재 종료 + 퇴역(브랜치 `feat/adr114-retire-pg-transport`, migration 411) →
+  세 단계(ADR-114 "결정 7 이행"): ① 유가·돌발 적재 종료 + 퇴역(브랜치 `feat/adr114-retire-pg-transport`, migration 417) →
   ② 장소 셋(PinVi in-bounds 기본 kind·장소 검색 대체, C7 안전 대상 이동 뒤) → ③ 물리 삭제(관찰 1주 이상·소유자 확인).
 
 **geo 부하 줄이기(소유자 결정 2026-10-23)** — 0단계는 비-MOIS 적재의 저장값 재사용이다(ADR-116, proposed).
@@ -76,7 +76,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**
 
-  ADR-115의 근거 버전부터 전체 쓰기 경로와 실제 부하를 고정한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+  ADR-115의 근거 버전부터 전체 쓰기 경로와 실제 부하를 고정한다. [413 기준 정적 SQL/Python/trigger 목록](reports/2026-10-24-scoped-sql-writer-inventory.md)은 조사 증거이며 실제 부하·전체 closure 수용은 미완이다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-02 — **공유 Feature의 후보·필드 winner·병합 정본**
 
