@@ -1229,9 +1229,11 @@ def _migration_config(dsn):
     return config
 
 
-async def _migrate(dsn, target):
+async def _migrate_parent420(dsn):
     with alembic_schema_owner_role():
-        await asyncio.to_thread(command.upgrade, _migration_config(dsn), target)
+        await asyncio.to_thread(
+            command.upgrade, _migration_config(dsn), "420_exclusive_provider_refresh"
+        )
 
 
 async def _upgrade_with_window(dsn, request):
@@ -1273,7 +1275,7 @@ async def _upgrade_with_window(dsn, request):
 async def _bare_parent420(container):
     admin_dsn = normalize_async_dsn(container.get_connection_url())
     migrator_dsn = await bootstrapped_application_300_migrator_dsn(admin_dsn)
-    await _migrate(migrator_dsn, _PARENT420_HEAD)
+    await _migrate_parent420(migrator_dsn)
     return admin_dsn, migrator_dsn
 
 
