@@ -64,6 +64,15 @@ DB 증거 조회 요청을 잘게 나누는 것만으로 단일 manifest/apply�
 multi-member capture 의미를 보존하는 별도 적격성 검증이 필요하다. byte 예산·실제 성공 N을
 측정하기 전에는 첫 운영 dataset 선정 또는 SH 활성화 완료로 기록하지 않는다.
 
+후속 metadata 전용 조회는 0.185초였고 세 집합의 관찰 열 압축은 없었다. 현재 head의
+원천 record는 정본 index의 key 동등 조건으로 한 건씩 조회했으며 payload 직렬화는 하지 않았다.
+raw JSONB의 직접 저장 크기만 각각 193,851/678,475/529,309 byte였다. 현재 reader의
+physical+4 누적 방식으로 raw+entity+head만 합쳐도 각각 312,299/1,063,185/829,199 byte여서
+모두 256 KiB를 넘는다. 이 수치는 Feature/base/candidate/policy·배열·descriptor 예산을
+추가하기 전의 하한이다. 따라서 세 후보 모두 현재 전체 증거 단일 조회로 수용할 수 없다.
+증거 조회 분할과 전체 atomic manifest/apply 검증은 별개이며, metadata만으로 canonical
+typed artifact/manifest 1 MiB의 통과 또는 실패를 확정하지 않는다.
+
 ## 후속 구현 순서와 완료 조건
 
 1. 실제로 작은 독립 dataset 후보의 current/최종 입력과 typed converter 의미를 확인한다.
@@ -92,5 +101,7 @@ T-CWRITE-04 및 큰 입력/실제 worker/운영 수용은 미완이다. 첫 작�
   SHA-256 9edccaa89c0d051c8c8f28264c9bdb2709c97240903157299db4c14e9a2a39fe.
 - MCST 소형 후보 조회: map-mcst-small-scope-counts-j-r2.json,
   SHA-256 4da4baa017b4920b5eac9ec10aa41f1caecd91542553b763cc43fb001640d5ba.
+- MCST metadata 예산 조회: map-mcst-metadata-viability-j-r3.json,
+  SHA-256 7ec67747ca833bfd7e9d892e95003c9aca62cac38bce5d9a0607035f5d732e27.
 - 기존 의미·원자성 경계: [SH 수집 설계](2026-10-25-sh-collector-integration-design.md),
   [ADR-115](../adr/115-scoped-concurrent-feature-writes.md).
