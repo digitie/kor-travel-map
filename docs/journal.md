@@ -1,8 +1,8 @@
-## 2026-10-24 — field override 진입·상위 caller 폐포(416)
+## 2026-10-24 — field override 진입 보강(416)
 
-- SQL author/revoke2개의 첫EX·Python patch/create 조기helper2개로 첫 Feature/공유claim 선점 전 gate를 확보한다. 실제 manualcreate55P03→500을 재현해 정확55P03만 기존503/RetryAfter5로 보냈다.
-- 실제 PG/ASGI29+순수5=34 PASS·관련unit110 PASS·정본oracle/metadata2 PASS·lint373 PASS/기존6skip, 설계2리뷰 완료. scoped SQL 재투영 검증이며 production native helper/일반collector 호출은 포함하지 않는다.
-- 코드2리뷰·정확CI·최신 실제TCP/UI는 미완이며 기본OFF·seed0·운영0이다. SQL-onlycreate/curationimport와 전체동시쓰기는 미완이다. [실패·범위·검증](reports/2026-10-24-field-override-protocol-entry.md).
+- SQL author/revoke·patch/create를 조기EX로 맞추고 manualcreate55P03을 기존503/RetryAfter5로 반환한다.
+- 실제 PG/ASGI29+순수5=34·unit110·oracle/metadata2·lint373 PASS(기존6skip). native Python helper·수집배선은 제외다.
+- 두 코드리뷰 PASS, 정확CI·실UI는 대기다. 기본OFF·seed0·운영0. [실패·범위·검증](reports/2026-10-24-field-override-protocol-entry.md).
 
 ## 2026-10-24 — 파일 레지스트리의 백업 링크 복구
 
