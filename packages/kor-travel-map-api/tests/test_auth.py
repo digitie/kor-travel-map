@@ -35,7 +35,7 @@ from kortravelmap.api.auth import (
     require_service_token,
     resolve_admin_proxy_context,
 )
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_public_api_key_session, get_session
 from kortravelmap.api.provider_catalog import (
     ProviderDatasetCatalogEntry,
     ProviderDatasetOperation,
@@ -725,6 +725,12 @@ def test_ops_operator_rejects_missing_invalid_or_excess_scope(
 
 
 class _FakeSession:
+    async def __aenter__(self) -> _FakeSession:
+        return self
+
+    async def __aexit__(self, *_args: object) -> None:
+        return None
+
     async def execute(self, *_args: Any, **_kwargs: Any) -> Any:
         class _Result:
             def scalars(self) -> Any:
@@ -756,6 +762,7 @@ def _client(settings: ApiSettings) -> TestClient:
         yield _FakeSession()
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_public_api_key_session] = _fake_session
     return TestClient(app, client=("127.0.0.1", 50000))
 
 

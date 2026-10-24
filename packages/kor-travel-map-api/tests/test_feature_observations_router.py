@@ -20,7 +20,7 @@ from kortravelmap.infra.observation_repo import (
 )
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.settings import ApiSettings
 
 # admin BFF secret이 없는 로컬-dev 프로필 — require_admin_frontend가 actor
@@ -57,6 +57,8 @@ def _client(settings: ApiSettings) -> TestClient:
         yield object()
 
     app.dependency_overrides[get_session] = _session
+
+    app.dependency_overrides[get_read_snapshot_session] = _session
     return TestClient(app)
 
 

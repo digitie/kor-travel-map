@@ -32,7 +32,7 @@ from kortravelmap.infra.public_api_keys import (
 )
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_public_api_key_session, get_session
 from kortravelmap.api.response import ProblemDetail
 from kortravelmap.api.settings import CacheTargetServiceScope
 
@@ -924,7 +924,7 @@ def require_cache_target_service_scope(
 
 async def require_public_api_key(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_api_key_session)],
 ) -> None:
     """public REST surface용 Map 전용 API key를 검증한다.
 
@@ -949,10 +949,13 @@ async def require_public_api_key(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail=f"유효한 {PUBLIC_API_KEY_HEADER} 헤더가 필요합니다.",
         )
-    active_hashes = await cached_active_public_api_key_hashes(
-        session,
-        ttl_seconds=settings.public_api_key_cache_ttl_s,
-    )
+    # 인증의 RC 조회를 종료한 뒤 업무 reader가 별도 RR snapshot을 시작한다.
+    # 전용 dependency이므로 다른 handler의 이미 시작된 transaction을 닫지 않는다.
+    async with session:
+        active_hashes = await cached_active_public_api_key_hashes(
+            session,
+            ttl_seconds=settings.public_api_key_cache_ttl_s,
+        )
     if not active_hashes or not public_api_key_matches(key, active_hashes):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

@@ -123,7 +123,7 @@ def test_list_public_beaches_maps_page(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import public_views as public_views_mod
 
     async def _list(_session: Any, **kwargs: Any) -> public_views_repo.PublicBeachPage:
@@ -137,6 +137,7 @@ def test_list_public_beaches_maps_page(
         _list,
     )
     client.app.dependency_overrides[get_session] = _fake_session
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         # T-VN-07: 제거된 no-op 옵션(include_forecast)을 옛 caller가 보내도 FastAPI가
         # 미지 파라미터를 무시해 정상 200이어야 한다(no 500).
@@ -190,7 +191,7 @@ def test_public_festival_monthly_maps_items_and_months(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import public_views as public_views_mod
 
     async def _monthly(
@@ -219,6 +220,7 @@ def test_public_festival_monthly_maps_items_and_months(
         _monthly,
     )
     client.app.dependency_overrides[get_session] = _fake_session
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/public/festivals/monthly",
@@ -247,7 +249,7 @@ def test_get_public_festival_404(
     client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import public_views as public_views_mod
 
     async def _missing(_session: Any, *, feature_id: str) -> None:
@@ -256,6 +258,7 @@ def test_get_public_festival_404(
 
     monkeypatch.setattr(public_views_mod.public_views_repo, "get_public_festival", _missing)
     client.app.dependency_overrides[get_session] = _fake_session
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get("/v1/public/festivals/missing")
         assert r.status_code == 404

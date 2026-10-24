@@ -20,7 +20,7 @@ from kortravelmap.infra.enrichment_review_repo import EnrichmentDecisionResult
 from kortravelmap.infra.feature_repo import EnrichmentLoadResult
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -66,6 +66,8 @@ def client(
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
+
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     monkeypatch.setattr(
         domain_command_service,
         "begin_domain_command",

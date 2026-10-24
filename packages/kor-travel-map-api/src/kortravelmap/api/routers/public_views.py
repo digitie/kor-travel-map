@@ -17,7 +17,7 @@ from kortravelmap.infra import public_views_repo
 from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.identity_projection import response_feature_id
 from kortravelmap.api.response import Meta, make_meta
@@ -494,7 +494,7 @@ async def list_public_beach_markers(
 async def get_public_beach(
     feature_id: str,
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> PublicBeachDetailResponse:
     """해수욕장 공개 상세 view."""
 
@@ -516,7 +516,7 @@ async def get_public_beach(
 @router.get("/festivals/monthly", response_model=PublicFestivalMonthlyResponse)
 async def list_public_festivals_monthly(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     year: Annotated[int | None, Query(ge=1900, le=2200)] = None,
     month: Annotated[int | None, Query(ge=1, le=12)] = None,
     sido_code: Annotated[str | None, Query(min_length=2, max_length=2)] = None,
@@ -611,7 +611,7 @@ async def list_public_festival_markers(
 async def get_public_festival(
     feature_id: str,
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> PublicFestivalDetailResponse:
     """축제 공개 상세 view."""
 

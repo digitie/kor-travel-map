@@ -31,7 +31,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
@@ -343,7 +343,7 @@ def _decision_response(
 @router.get("", response_model=DedupReviewListResponse)
 async def list_reviews(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     review_status: Annotated[
         list[DedupStatus] | None,
         Query(alias="status", description="dedup review status 반복 필터"),
@@ -403,7 +403,7 @@ async def list_reviews(
 async def get_review_detail(
     request: Request,
     review_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> DedupReviewDetailResponse:
     started_at = perf_counter()
     detail = await get_dedup_review_detail(session, review_id)

@@ -36,12 +36,14 @@ def client() -> TestClient:
 @pytest.fixture
 def dbless_client(client: TestClient) -> TestClient:
     """요청 검증 테스트가 runtime DSN에 의존하지 않도록 빈 세션만 주입한다."""
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         yield client
     finally:
@@ -189,12 +191,14 @@ def test_features_routes_disabled_unmounts() -> None:
 def test_bbox_min_greater_than_max_returns_422(client: TestClient) -> None:
     """min>max는 DB 도달 전 422 (get_session 의존성 미평가 경로는 아니지만
     검증이 핸들러 본문 첫 줄이라 빈 세션으로도 충분 — override로 안전 보장)."""
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
 
     async def _empty_session() -> AsyncIterator[Any]:
         yield None  # 검증에서 막히므로 세션 미사용
 
     client.app.dependency_overrides[get_session] = _empty_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _empty_session
     try:
         r = client.get(
             "/v1/features",
@@ -221,7 +225,7 @@ class _FakeSession:
 
 @pytest.mark.unit
 def test_get_feature_404_when_missing(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     async def _none_get_row(_session: Any, _fid: str) -> None:
@@ -234,6 +238,8 @@ def test_get_feature_404_when_missing(client: TestClient, monkeypatch: pytest.Mo
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get("/v1/features/nonexistent")
         assert r.status_code == 404
@@ -246,7 +252,7 @@ def test_get_feature_404_when_missing(client: TestClient, monkeypatch: pytest.Mo
 def test_get_feature_404_when_notice_is_ended_or_non_latest(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     row = {
@@ -277,6 +283,8 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get("/v1/features/notice-old")
         assert r.status_code == 404
@@ -286,7 +294,7 @@ def test_get_feature_404_when_notice_is_ended_or_non_latest(
 
 @pytest.mark.unit
 def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     rows = [
@@ -328,6 +336,8 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/features",
@@ -380,7 +390,7 @@ def test_list_features_maps_bbox_rows(client: TestClient, monkeypatch: pytest.Mo
 def test_list_features_include_geometry_maps_route_area_rows(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     rows = [
@@ -436,6 +446,8 @@ def test_list_features_include_geometry_maps_route_area_rows(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/features",
@@ -464,7 +476,7 @@ def test_list_features_default_omits_geometry(
 ) -> None:
     """include_geometry 미지정 시 repo는 include_geometry=False로 호출되고
     응답의 geometry/area_square_meters는 None이다 (PR #512 follow-up)."""
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     rows = [
@@ -491,6 +503,8 @@ def test_list_features_default_omits_geometry(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/features",
@@ -515,7 +529,7 @@ def test_list_public_features_in_bounds_include_geometry(
 ) -> None:
     """``GET /features/in-bounds`` 의 include_geometry=true는 repo로 전달되고
     route/area geometry가 매핑된다 (PR #512 follow-up)."""
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     rows = [
@@ -547,6 +561,8 @@ def test_list_public_features_in_bounds_include_geometry(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/features/in-bounds",
@@ -572,7 +588,7 @@ def test_list_public_features_in_bounds_include_geometry(
 def test_list_public_features_in_bounds_uses_envelope(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     rows = [
@@ -599,6 +615,8 @@ def test_list_public_features_in_bounds_uses_envelope(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/features/in-bounds",
@@ -622,7 +640,7 @@ def test_list_public_features_in_bounds_uses_envelope(
 
 @pytest.mark.unit
 def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     row = {
@@ -673,6 +691,8 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get("/v1/features/f1")
         assert r.status_code == 200
@@ -730,7 +750,7 @@ def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
     경계에서 UUID → legacy 정본 키로 해석한 뒤 내부 조회는 legacy 키로만 한다.
     응답 ``feature_id`` 값은 UUID 정본(T-VN-32C 값 전환), ``feature_uuid`` 병행.
     """
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     row = {
@@ -777,6 +797,8 @@ def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(f"/v1/features/{_expected_uuid('f1')}")
         assert r.status_code == 200
@@ -796,7 +818,7 @@ def test_get_feature_ref_format_error_maps_to_422(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """형식 오류 참조(공백 패딩·길이 초과)는 DB 해석 전에 422다 (T-VN-32B)."""
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
 
     _patch_resolved_identity(monkeypatch)
 
@@ -804,6 +826,8 @@ def test_get_feature_ref_format_error_maps_to_422(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         padded = client.get("/v1/features/%20f1")
         assert padded.status_code == 422
@@ -824,7 +848,7 @@ def test_mois_place_detail_strips_raw_provider_payload(
     detail_status_*/opn_authority_code/title/epsg5174가 공개 표면에 새면 안 된다.
     typed 공개-안전 필드(place_kind/phones/facility_info/license_date)는 유지한다.
     """
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     row = {
@@ -884,6 +908,8 @@ def test_mois_place_detail_strips_raw_provider_payload(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get("/v1/features/mois:1")
         assert r.status_code == 200
@@ -912,7 +938,7 @@ def test_mois_place_detail_strips_raw_provider_payload(
 def test_get_area_contained_features_maps_rows(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     area_row = {
@@ -967,6 +993,8 @@ def test_get_area_contained_features_maps_rows(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/features/area1/contained-features",
@@ -986,7 +1014,7 @@ def test_get_area_contained_features_maps_rows(
 def test_get_area_contained_features_rejects_non_area(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
@@ -998,6 +1026,8 @@ def test_get_area_contained_features_rejects_non_area(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get("/v1/features/place1/contained-features")
         assert r.status_code == 422
@@ -1013,7 +1043,7 @@ def test_features_batch_returns_exhaustive_typed_items(
     from kortravelmap.infra import feature_identity
     from kortravelmap.infra.feature_repo import FeatureBatchItemRow
 
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     # T-VN-32C 회귀 (echo 계약) — "found"는 UUID **대문자 표기**로 요청한다.
@@ -1103,6 +1133,8 @@ def test_features_batch_returns_exhaustive_typed_items(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.post(
             "/v1/features/batch",
@@ -1188,7 +1220,7 @@ def test_features_batch_maps_database_failure_to_service_unavailable(
 ) -> None:
     from sqlalchemy.exc import OperationalError
 
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     async def _get_items(
@@ -1203,6 +1235,8 @@ def test_features_batch_maps_database_failure_to_service_unavailable(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         response = client.post(
             "/v1/features/batch",
@@ -1231,7 +1265,7 @@ def test_features_batch_bounds_known_revision_to_postgres_bigint(
 ) -> None:
     from kortravelmap.infra.feature_repo import FeatureBatchItemRow
 
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     called = False
@@ -1258,6 +1292,8 @@ def test_features_batch_bounds_known_revision_to_postgres_bigint(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         response = client.post(
             "/v1/features/batch",
@@ -1282,7 +1318,7 @@ def test_search_features_maps_page_and_requires_scope(
 ) -> None:
     from kortravelmap.infra.feature_repo import FeatureSearchPage, FeatureSearchRow
 
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     async def _search(_session: Any, **_kw: Any) -> FeatureSearchPage:
@@ -1316,6 +1352,8 @@ def test_search_features_maps_page_and_requires_scope(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get(
             "/v1/features/search",
@@ -1342,7 +1380,7 @@ def test_search_features_omits_total_without_count_request(
 ) -> None:
     from kortravelmap.infra.feature_repo import FeatureSearchPage
 
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     async def _search(_session: Any, **kwargs: Any) -> FeatureSearchPage:
@@ -1355,6 +1393,8 @@ def test_search_features_omits_total_without_count_request(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         response = client.get("/v1/features/search", params={"q": "경복궁"})
         assert response.status_code == 200
@@ -1391,7 +1431,7 @@ def test_search_features_maps_typed_cursor_errors(
     error: Exception,
     expected_code: str,
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     async def _search(_session: Any, **_kwargs: Any) -> None:
@@ -1403,6 +1443,8 @@ def test_search_features_maps_typed_cursor_errors(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         response = client.get(
             "/v1/features/search",
@@ -1432,7 +1474,7 @@ def test_search_features_rejects_partial_bbox(
 def test_search_features_rejects_missing_scope(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
     from kortravelmap.api.routers import features as features_mod
 
     async def _search(_session: Any, **_kw: Any) -> None:
@@ -1444,6 +1486,8 @@ def test_search_features_rejects_missing_scope(
         yield object()
 
     client.app.dependency_overrides[get_session] = _fake_session
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
     try:
         r = client.get("/v1/features/search")
         assert r.status_code == 422

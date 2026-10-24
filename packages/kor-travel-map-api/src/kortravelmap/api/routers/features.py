@@ -57,7 +57,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
@@ -1137,7 +1137,7 @@ async def list_public_features_in_bounds(
 )
 async def search_public_features(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     q: Annotated[str | None, Query(description="name pg_trgm 검색어.")] = None,
     kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
     category: Annotated[
@@ -1289,7 +1289,7 @@ async def list_features_nearby(
 )
 async def list_features_nearby_by_target(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     external_system: Annotated[
         str,
         Query(
@@ -1402,7 +1402,7 @@ async def get_feature(
     request: Request,
     response: Response,
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> FeatureDetailEnvelopeResponse | Response:
     started_at = perf_counter()
     # T-VN-32B 경계 alias 해석 — legacy/UUID 참조를 정본 키 쌍으로 해석하고,
@@ -1449,7 +1449,7 @@ async def get_feature(
 async def get_feature_sources(
     request: Request,
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> FeatureSourcesResponse:
     """operator 전용 — feature에 연결된 모든 제공기관 entity의 현재 raw 관측값.
 
@@ -1484,7 +1484,7 @@ async def get_feature_observation_history(
     request: Request,
     feature_id: str,
     source_entity_key: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     page_size: Annotated[int, Query(ge=1, le=200)] = 50,
     cursor: Annotated[str | None, Query()] = None,
 ) -> FeatureObservationHistoryResponse:
@@ -1524,7 +1524,7 @@ async def get_feature_observation_history(
 )
 async def get_area_contained_features(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     feature_id: str,
     kind: Annotated[
         list[str] | None,
@@ -1567,7 +1567,7 @@ async def get_area_contained_features(
 )
 async def get_feature_price(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     feature_id: str,
     history_limit: Annotated[
         int,
@@ -1606,7 +1606,7 @@ async def get_feature_price(
 )
 async def get_feature_price_snapshot(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     feature_id: str,
     observed_at: Annotated[datetime, Query(description="재현할 price 관측 cutoff.")],
     known_at: Annotated[datetime, Query(description="그 시점에 알려진 response cutoff.")],
@@ -1662,7 +1662,7 @@ async def get_feature_price_snapshot(
 async def get_features_batch(
     request: Request,
     body: FeatureBatchRequest,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
     # T-VN-32C PR-2 — 값 전환 후 소비자(PinVi)가 UUID 참조를 보낸다. 경계
