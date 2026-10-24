@@ -7,16 +7,18 @@
 - :func:`fetch_price_history` — transport T4
   ``/v1/service/exports/fuel-stations/{station_key}/price-history``를 요청 시 한 페이지씩 읽는다.
   어떤 실패도 예외로 올리지 않고 ``unavailable``과 이유로 돌려준다 — 현재가는 그대로 주고 추이만
-  "없음"이다(ADR-114 결정 4). cursor는 불투명하게 그대로 전하고, transport 409(수집 revision
-  변경·cursor 만료)는 ``cursor_expired``(누적한 페이지를 버리고 cursor 없이 처음부터)다.
+  "없음"이다(ADR-114 결정 4). cursor는 불투명하게 그대로 전한다. 예외: cursor를 보낸 요청의
+  transport 409(수집 revision 변경·cursor 만료)는 route가 HTTP 409로 바꾼다(누적한 페이지를 버리고
+  cursor 없이 처음부터).
 """
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 from urllib.parse import quote, urlsplit
 
 import httpx
@@ -35,11 +37,10 @@ from kortravelmap.providers.kor_travel_transport import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 
-if TYPE_CHECKING:
-    from collections.abc import Mapping
-
 __all__ = [
+    "MAX_PRICE_HISTORY_BODY_BYTES",
     "PriceHistoryOutcome",
+    "PriceHistoryRequest",
     "PriceHistoryUnavailableReason",
     "close_state_store",
     "fetch_price_history",
@@ -98,8 +99,8 @@ PriceHistoryUnavailableReason = Literal[
     "not_configured",
     "upstream_not_found",
     "upstream_unsupported",
-    "cursor_expired",
     "request_rejected",
+    "upstream_no_collection",
     "upstream_timeout",
     "upstream_unavailable",
     "upstream_rejected",
@@ -110,20 +111,60 @@ PriceHistoryUnavailableReason = Literal[
 - ``disabled``·``not_configured``: Map 설정 — transport를 부르지 않았다.
 - ``upstream_not_found``: transport 404(없는 주유소 키·옛 버전·토큰·peer fence).
 - ``upstream_unsupported``: transport 501(이력을 저장하지 않는 대상).
-- ``cursor_expired``: transport 409 — cursor를 보냈는데 수집 revision이 바뀌었거나 cursor(15분)가
-  만료됐다. 이미 받은 페이지를 버리고 cursor 없이 첫 페이지부터 다시 읽는다.
-- ``request_rejected``: transport 422 — 조회 창(366일 초과·미래 ``until``)·변조/다른 필터의 cursor.
+- ``request_rejected``: transport 422 — 조회 창(366일 초과·미래 ``until``)·변조/다른 조건의 cursor.
+- ``upstream_no_collection``: transport 503 problem의 ``meta.source_status=failed`` — 성공한 유가 수집
+  근거가 아직 없다.
 - ``upstream_timeout``: 연결·읽기 timeout.
-- ``upstream_unavailable``: 5xx(503 = 성공한 수집 근거 없음)·그 밖의 연결 실패.
+- ``upstream_unavailable``: 그 밖의 5xx·연결 실패.
 - ``upstream_rejected``: 그 밖의 비-200(예: cursor 없이 받은 409·그 밖의 4xx).
-- ``upstream_contract``: 200 본문이 계약과 다르다(다른 주유소의 ``station_key`` 포함).
+- ``upstream_contract``: 200 본문이 계약과 다르다(다른 ``station_key``·요청과 다른 유종이나 창 밖의
+  행·유한하지 않은 가격·JSON이 아니거나 너무 깊은 본문·``MAX_PRICE_HISTORY_BODY_BYTES`` 초과 포함).
+
+cursor를 보낸 요청의 transport 409(수집 revision 변경·cursor 만료)는 이유가 아니다 — 응답 전체가
+HTTP 409 ``TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED``다(:attr:`PriceHistoryOutcome.cursor_expired`).
 """
+
+MAX_PRICE_HISTORY_BODY_BYTES = 2 * 1024 * 1024
+"""transport 응답 본문(압축 해제 뒤) 상한. 1000행 한 페이지는 약 100 KB다 — 넘으면 계약 위반이다."""
+
+
+@dataclass(frozen=True, slots=True)
+class PriceHistoryRequest:
+    """Map 공개 인자. :attr:`params`가 transport T4 질의다."""
+
+    product_code: str | None = None
+    since: datetime | None = None
+    until: datetime | None = None
+    limit: int = 200
+    cursor: str | None = None
+
+    @property
+    def params(self) -> dict[str, str]:
+        """``product_code``→``product``, ``since``→``from``, ``until``→``to``(timezone이 있는
+        ISO-8601), ``limit``은 한 페이지 전체 행 수(유종 합계), ``cursor``는 불투명하게 그대로.
+        """
+        params = {"limit": str(self.limit)}
+        if self.product_code:
+            params["product"] = self.product_code
+        if self.since is not None:
+            params["from"] = self.since.isoformat()
+        if self.until is not None:
+            params["to"] = self.until.isoformat()
+        if self.cursor is not None:
+            params["cursor"] = self.cursor
+        return params
 
 
 @dataclass(frozen=True, slots=True)
 class PriceHistoryOutcome:
     history: TransportFuelPriceHistory | None
     reason: PriceHistoryUnavailableReason | None
+    cursor_expired: bool = False
+    """cursor를 보냈는데 transport가 409였다 — route가 HTTP 409로 바꾼다(처음부터 다시)."""
+
+
+def _unavailable(reason: PriceHistoryUnavailableReason) -> PriceHistoryOutcome:
+    return PriceHistoryOutcome(history=None, reason=reason)
 
 
 def _transport_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str, str]] | None:
@@ -154,94 +195,124 @@ def transport_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
     )
 
 
+class _BodyTooLarge(Exception):
+    pass
+
+
+async def _read_capped(response: httpx.Response) -> bytes:
+    """본문을 상한까지만 읽는다(압축 해제 뒤 크기). 넘으면 :class:`_BodyTooLarge`."""
+    declared = response.headers.get("content-length")
+    if declared is not None and declared.isdigit() and int(declared) > MAX_PRICE_HISTORY_BODY_BYTES:
+        raise _BodyTooLarge
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        body += chunk
+        if len(body) > MAX_PRICE_HISTORY_BODY_BYTES:
+            raise _BodyTooLarge
+    return bytes(body)
+
+
+def _reject_constant(name: str) -> object:
+    raise ValueError(f"JSON 상수 {name}은 받지 않는다.")
+
+
+def _load_json(body: bytes) -> object:
+    """엄격 JSON — ``NaN``·``Infinity`` 상수 거부. 깊은 중첩의 ``RecursionError``는 호출자가 잡는다."""
+    return json.loads(body, parse_constant=_reject_constant)
+
+
+def _is_no_collection_problem(body: bytes) -> bool:
+    """transport 503 problem+json의 ``meta.source_status=failed``(성공한 수집 근거 없음)."""
+    try:
+        payload = _load_json(body)
+    except (ValueError, RecursionError):
+        return False
+    if not isinstance(payload, dict):
+        return False
+    meta = payload.get("meta")
+    return isinstance(meta, dict) and meta.get("source_status") == "failed"
+
+
 async def fetch_price_history(
     settings: KorTravelMapSettings,
     station_key: str,
     *,
-    params: Mapping[str, str],
+    request: PriceHistoryRequest,
     transport: httpx.AsyncBaseTransport | None = None,
 ) -> PriceHistoryOutcome:
     """transport에서 가격 이력 한 페이지를 읽는다. 실패는 이유와 함께 ``history=None``으로 돌려준다.
 
-    ``station_key``는 Valkey 주유소 값의 ``natural_key``(transport station_key)다. ``params``는
-    :func:`price_history_params`가 만든 transport 질의다.
+    ``station_key``는 Valkey 주유소 값의 ``natural_key``(transport station_key)다. 예외를 올리지
+    않는다 — cursor 만료도 :attr:`PriceHistoryOutcome.cursor_expired`로 돌려준다.
     """
     if not settings.transport_price_history_enabled:
-        return PriceHistoryOutcome(history=None, reason="disabled")
+        return _unavailable("disabled")
     connection = _transport_connection(settings)
     if connection is None:
-        return PriceHistoryOutcome(history=None, reason="not_configured")
+        return _unavailable("not_configured")
     base_url, headers = connection
     if station_key in {"", ".", ".."} or "/" in station_key:
         # 경로 정규화로 다른 transport route를 가리키게 되는 키는 보내지 않는다.
-        return PriceHistoryOutcome(history=None, reason="upstream_contract")
+        return _unavailable("upstream_contract")
     path = EXPORT_PATH_FUEL_STATION_PRICE_HISTORY.format(station_key=quote(station_key, safe=""))
     try:
-        async with httpx.AsyncClient(
-            base_url=base_url,
-            timeout=transport_http_timeout(settings),
-            headers=headers,
-            transport=transport,
-        ) as client:
-            response = await client.get(path, params=dict(params))
+        async with (
+            httpx.AsyncClient(
+                base_url=base_url,
+                timeout=transport_http_timeout(settings),
+                headers=headers,
+                transport=transport,
+            ) as client,
+            client.stream("GET", path, params=request.params) as response,
+        ):
+            status_code = response.status_code
+            body = await _read_capped(response)
+    except _BodyTooLarge:
+        _LOGGER.warning("transport 가격 이력 본문이 %d bytes를 넘는다.", MAX_PRICE_HISTORY_BODY_BYTES)
+        return _unavailable("upstream_contract")
     except httpx.TimeoutException as exc:
         _LOGGER.info("transport 가격 이력 timeout: %s", type(exc).__name__)
-        return PriceHistoryOutcome(history=None, reason="upstream_timeout")
+        return _unavailable("upstream_timeout")
     except httpx.HTTPError as exc:
         _LOGGER.info("transport 가격 이력 요청 실패: %s", type(exc).__name__)
-        return PriceHistoryOutcome(history=None, reason="upstream_unavailable")
+        return _unavailable("upstream_unavailable")
     except (httpx.InvalidURL, ValueError) as exc:
         # 주소·토큰 형식이 틀렸다(InvalidURL은 HTTPError가 아니다, 비ASCII 토큰은 ValueError).
         _LOGGER.warning("transport 가격 이력 설정이 올바르지 않다: %s", type(exc).__name__)
-        return PriceHistoryOutcome(history=None, reason="not_configured")
-    if response.status_code == 404:
-        # 옛 transport(경로 없음)·토큰 불일치·peer fence 셋 중 하나다 — 설정 문제일 수 있어
-        # 경고한다.
+        return _unavailable("not_configured")
+    if status_code == 404:
+        # 없는 주유소 키·옛 transport(경로 없음)·토큰 불일치·peer fence 중 하나다 — 설정 문제일 수
+        # 있어 경고한다.
         _LOGGER.warning(
-            "transport 가격 이력이 404다 — 경로가 없는 버전이거나 토큰·접속 주소가 맞지 않는다."
+            "transport 가격 이력이 404다 — 키가 없거나, 경로가 없는 버전이거나, 토큰·접속 주소가 "
+            "맞지 않는다."
         )
-        return PriceHistoryOutcome(history=None, reason="upstream_not_found")
-    if response.status_code == 501:
-        return PriceHistoryOutcome(history=None, reason="upstream_unsupported")
-    if response.status_code == 409 and "cursor" in params:
-        # 수집 revision 변경·cursor 만료 — 소비자가 처음부터 다시 읽어야 한다(정상 신호).
-        return PriceHistoryOutcome(history=None, reason="cursor_expired")
-    if response.status_code == 422:
+        return _unavailable("upstream_not_found")
+    if status_code == 501:
+        return _unavailable("upstream_unsupported")
+    if status_code == 409 and request.cursor is not None:
+        # 수집 revision 변경·cursor 만료 — 소비자가 처음부터 다시 읽어야 한다.
+        return PriceHistoryOutcome(history=None, reason=None, cursor_expired=True)
+    if status_code == 422:
         _LOGGER.info("transport 가격 이력 요청 거부(422): 조회 창 또는 cursor")
-        return PriceHistoryOutcome(history=None, reason="request_rejected")
-    if response.status_code >= 500:
-        return PriceHistoryOutcome(history=None, reason="upstream_unavailable")
-    if response.status_code != 200:
-        _LOGGER.warning("transport 가격 이력이 %d다.", response.status_code)
-        return PriceHistoryOutcome(history=None, reason="upstream_rejected")
+        return _unavailable("request_rejected")
+    if status_code == 503 and _is_no_collection_problem(body):
+        return _unavailable("upstream_no_collection")
+    if status_code >= 500:
+        return _unavailable("upstream_unavailable")
+    if status_code != 200:
+        _LOGGER.warning("transport 가격 이력이 %d다.", status_code)
+        return _unavailable("upstream_rejected")
     try:
-        history = parse_fuel_price_history(response.json(), station_key=station_key)
-    except (ValueError, TransportExportContractError) as exc:
-        _LOGGER.warning("transport 가격 이력 계약 위반: %s", exc)
-        return PriceHistoryOutcome(history=None, reason="upstream_contract")
+        history = parse_fuel_price_history(
+            _load_json(body),
+            station_key=station_key,
+            product_code=request.product_code,
+            observed_from=request.since,
+            observed_to=request.until,
+        )
+    except (ValueError, RecursionError, TransportExportContractError) as exc:
+        # UnicodeDecodeError·JSONDecodeError는 ValueError다. 깊은 중첩은 RecursionError다.
+        _LOGGER.warning("transport 가격 이력 계약 위반(%s): %s", type(exc).__name__, exc)
+        return _unavailable("upstream_contract")
     return PriceHistoryOutcome(history=history, reason=None)
-
-
-def price_history_params(
-    *,
-    product_code: str | None,
-    since: datetime | None,
-    until: datetime | None,
-    limit: int,
-    cursor: str | None = None,
-) -> dict[str, str]:
-    """Map 공개 인자 → transport T4 질의 인자.
-
-    ``product_code``→``product``, ``since``→``from``, ``until``→``to``(timezone이 있는 ISO-8601),
-    ``limit``은 한 페이지 전체 행 수(유종 합계)로 그대로, ``cursor``는 불투명하게 그대로 보낸다.
-    """
-    params = {"limit": str(limit)}
-    if product_code:
-        params["product"] = product_code
-    if since is not None:
-        params["from"] = since.isoformat()
-    if until is not None:
-        params["to"] = until.isoformat()
-    if cursor is not None:
-        params["cursor"] = cursor
-    return params

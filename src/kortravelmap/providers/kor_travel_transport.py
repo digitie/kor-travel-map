@@ -390,9 +390,22 @@ def _decimal(item: Mapping[str, Any], key: str, where: str) -> Decimal | None:
     if isinstance(value, bool) or not isinstance(value, int | float | str):
         raise TransportExportContractError(f"{where}.{key}: 숫자 또는 null이어야 한다.")
     try:
-        return Decimal(str(value))
+        parsed = Decimal(str(value))
     except InvalidOperation as exc:
         raise TransportExportContractError(f"{where}.{key}: 숫자로 읽을 수 없다.") from exc
+    if not parsed.is_finite():
+        # NaN·sNaN·Infinity(JSON ``1e400``은 float inf가 된다)는 가격이 아니다 — 받아들이면 응답
+        # 직렬화에서 터지거나 잘못된 값이 소비자에게 간다.
+        raise TransportExportContractError(f"{where}.{key}: 유한한 숫자여야 한다.")
+    return parsed
+
+
+def _json_number(item: Mapping[str, Any], key: str, where: str) -> Decimal | None:
+    """JSON number 또는 null만 받는다(문자열 숫자는 계약 위반). 유한해야 한다."""
+    value = item.get(key)
+    if value is not None and (isinstance(value, bool) or not isinstance(value, int | float)):
+        raise TransportExportContractError(f"{where}.{key}: JSON number 또는 null이어야 한다.")
+    return _decimal(item, key, where)
 
 
 def _datetime(item: Mapping[str, Any], key: str, where: str, *, required: bool) -> datetime | None:
@@ -676,11 +689,23 @@ class TransportFuelPriceHistory:
     next_cursor: str | None
 
 
-def parse_fuel_price_history(payload: Any, *, station_key: str) -> TransportFuelPriceHistory:
+def parse_fuel_price_history(
+    payload: Any,
+    *,
+    station_key: str,
+    product_code: str | None = None,
+    observed_from: datetime | None = None,
+    observed_to: datetime | None = None,
+) -> TransportFuelPriceHistory:
     """가격 이력 한 페이지를 엄격히 읽는다(transport ``FuelPriceHistoryExportPage``).
 
     요청한 주유소가 아닌 응답·``meta.item_count``와 행 수 불일치·``has_more``와 ``next_cursor``의
-    어긋남·``observed_at`` 내림차순 위반은 계약 위반이다.
+    어긋남·``observed_at`` 내림차순 위반·문자열이거나 유한하지 않은 가격은 계약 위반이다.
+
+    요청 조건도 행마다 확인한다: ``product_code``를 보냈으면 모든 행이 그 유종이어야 하고,
+    ``observed_from``/``observed_to``(보낸 ``from``/``to`` — transport는 양끝 포함)를 보냈으면 모든
+    ``observed_at``이 그 안이어야 한다. 보내지 않은 끝은 transport 기본값을 추측하지 않고 검사하지
+    않는다.
     """
     where = "fuel-stations/price-history"
     body = _mapping(payload, where)
@@ -712,13 +737,23 @@ def parse_fuel_price_history(payload: Any, *, station_key: str) -> TransportFuel
         row = _mapping(raw, row_where)
         point = TransportFuelPriceHistoryPoint(
             product_code=_required_text(row, "product_code", row_where).strip(),
-            price=_decimal(row, "price", row_where),
+            price=_json_number(row, "price", row_where),
             observed_at=_required_datetime(row, "observed_at", row_where),
             provider_updated_at=_datetime(row, "provider_updated_at", row_where, required=False),
             collected_at=_datetime(row, "collected_at", row_where, required=False),
         )
         if points and point.observed_at > points[-1].observed_at:
             raise TransportExportContractError(f"{where}.items: observed_at 내림차순이 아니다.")
+        if product_code is not None and point.product_code != product_code:
+            raise TransportExportContractError(
+                f"{where}.items: 요청 유종({product_code!r})이 아닌 행({point.product_code!r})이다."
+            )
+        if (observed_from is not None and point.observed_at < observed_from) or (
+            observed_to is not None and point.observed_at > observed_to
+        ):
+            raise TransportExportContractError(
+                f"{where}.items: observed_at({point.observed_at.isoformat()})이 요청 창 밖이다."
+            )
         points.append(point)
     has_more = _strict_bool(body, "has_more", where)
     next_cursor = _text(body, "next_cursor", where)

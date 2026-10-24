@@ -27,10 +27,11 @@ from kortravelmap.api.route_policy import ROUTE_POLICIES, RoutePolicy
 from kortravelmap.api.routers.service_transport import _encode_cursor, bbox_search_box
 from kortravelmap.api.settings import ApiSettings
 from kortravelmap.api.transport_state_service import (
+    MAX_PRICE_HISTORY_BODY_BYTES,
+    PriceHistoryRequest,
     PriceHistoryUnavailableReason,
     fetch_price_history,
     get_state_store,
-    price_history_params,
     set_state_store_for_test,
 )
 
@@ -203,12 +204,12 @@ async def _fetch(
     handler: Any,
     settings: KorTravelMapSettings = _ENABLED,
     *,
-    params: dict[str, str] | None = None,
+    request: PriceHistoryRequest | None = None,
 ) -> Any:
     return await fetch_price_history(
         settings,
         _STATION_KEY,
-        params={"limit": "10"} if params is None else params,
+        request=PriceHistoryRequest(limit=10) if request is None else request,
         transport=httpx.MockTransport(handler),
     )
 
@@ -216,18 +217,16 @@ async def _fetch(
 def test_public_params_translate_to_transport_t4_names() -> None:
     since = datetime(2026, 10, 1, tzinfo=UTC)
     until = datetime(2026, 10, 23, 9, tzinfo=timezone(timedelta(hours=9)))
-    assert price_history_params(
+    assert PriceHistoryRequest(
         product_code="B027", since=since, until=until, limit=200, cursor="opaque"
-    ) == {
+    ).params == {
         "product": "B027",
         "from": "2026-10-01T00:00:00+00:00",
         "to": "2026-10-23T09:00:00+09:00",
         "limit": "200",
         "cursor": "opaque",
     }
-    assert price_history_params(product_code=None, since=None, until=None, limit=5) == {
-        "limit": "5"
-    }
+    assert PriceHistoryRequest(limit=5).params == {"limit": "5"}
 
 
 async def test_price_history_success_sends_t4_query_and_parses_the_real_shape() -> None:
@@ -237,14 +236,13 @@ async def test_price_history_success_sends_t4_query_and_parses_the_real_shape() 
         seen.append(request)
         return httpx.Response(200, json=_page(status="stale"))
 
-    params = price_history_params(
-        product_code="B027",
+    request = PriceHistoryRequest(
         since=datetime(2026, 10, 1, tzinfo=UTC),
         until=datetime(2026, 10, 23, tzinfo=UTC),
         limit=200,
         cursor="c-1",
     )
-    outcome = await _fetch(_ok, params=params)
+    outcome = await _fetch(_ok, request=request)
     assert outcome.reason is None
     history = outcome.history
     assert history.station_key == _STATION_KEY
@@ -258,40 +256,129 @@ async def test_price_history_success_sends_t4_query_and_parses_the_real_shape() 
         ("D047", None),
     ]
     assert all(p.collected_at is None and p.provider_updated_at is None for p in history.items)
-    (request,) = seen
-    assert request.url.path == f"/v1/service/exports/fuel-stations/{_STATION_KEY}/price-history"
-    assert dict(request.url.params) == {
-        "product": "B027",
+    (sent,) = seen
+    assert sent.url.path == f"/v1/service/exports/fuel-stations/{_STATION_KEY}/price-history"
+    assert dict(sent.url.params) == {
         "from": "2026-10-01T00:00:00+00:00",
         "to": "2026-10-23T00:00:00+00:00",
         "limit": "200",
         "cursor": "c-1",
     }
-    assert request.headers["X-Kor-Travel-Transport-Service-Token"] == "s" * 40
+    assert sent.headers["X-Kor-Travel-Transport-Service-Token"] == "s" * 40
 
 
-_CURSOR_PARAMS = {"cursor": "c", "limit": "5"}
+# transport 503 problem+json(성공한 수집 근거 없음) — export_price_history.py의 실제 본문.
+_NO_COLLECTION = {
+    "type": "about:blank",
+    "title": "Service Unavailable",
+    "status": 503,
+    "detail": "성공한 유가 수집 이력이 없습니다.",
+    "instance": "/v1/service/exports/fuel-stations/A0000001/price-history",
+    "meta": {
+        "generated_at": "2026-10-23T00:00:01Z",
+        "source_collected_at": None,
+        "source_status": "failed",
+        "item_count": 0,
+    },
+}
 
 
 @pytest.mark.parametrize(
-    ("response", "reason", "params"),
+    ("response", "reason"),
     [
-        (httpx.Response(404, json={"detail": "Not Found"}), "upstream_not_found", None),
-        (httpx.Response(501, json={"status": 501}), "upstream_unsupported", None),
-        (httpx.Response(409, json={"status": 409}), "cursor_expired", _CURSOR_PARAMS),
-        (httpx.Response(409, json={"status": 409}), "upstream_rejected", None),
-        (httpx.Response(422, json={"status": 422}), "request_rejected", None),
-        (httpx.Response(503, json={"status": 503}), "upstream_unavailable", None),
-        (httpx.Response(502, text="bad gateway"), "upstream_unavailable", None),
-        (httpx.Response(304), "upstream_rejected", None),
-        (httpx.Response(200, text="<html>"), "upstream_contract", None),
+        (httpx.Response(404, json={"detail": "Not Found"}), "upstream_not_found"),
+        (httpx.Response(501, json={"status": 501}), "upstream_unsupported"),
+        (httpx.Response(409, json={"status": 409}), "upstream_rejected"),  # cursor 없이 409
+        (httpx.Response(422, json={"status": 422}), "request_rejected"),
+        (httpx.Response(503, json=_NO_COLLECTION), "upstream_no_collection"),
+        (httpx.Response(503, json={"status": 503}), "upstream_unavailable"),
+        (httpx.Response(503, text="maintenance"), "upstream_unavailable"),
+        (httpx.Response(502, text="bad gateway"), "upstream_unavailable"),
+        (httpx.Response(304), "upstream_rejected"),
+        (httpx.Response(200, text="<html>"), "upstream_contract"),
     ],
 )
 async def test_price_history_failures_degrade_to_unavailable(
-    response: httpx.Response, reason: str, params: dict[str, str] | None
+    response: httpx.Response, reason: str
 ) -> None:
-    outcome = await _fetch(lambda _request: response, params=params)
-    assert (outcome.history, outcome.reason) == (None, reason)
+    outcome = await _fetch(lambda _request: response)
+    assert (outcome.history, outcome.reason, outcome.cursor_expired) == (None, reason, False)
+
+
+async def test_price_history_409_after_a_cursor_is_a_restart_signal() -> None:
+    outcome = await _fetch(
+        lambda _request: httpx.Response(409, json={"status": 409}),
+        request=PriceHistoryRequest(cursor="c", limit=5),
+    )
+    assert (outcome.history, outcome.reason, outcome.cursor_expired) == (None, None, True)
+
+
+@pytest.mark.parametrize(
+    "raw_price",
+    [b"NaN", b"Infinity", b"-Infinity", b"1e400", b'"sNaN"', b'"1700"', b"true"],
+)
+async def test_price_history_rejects_non_finite_and_non_number_prices(raw_price: bytes) -> None:
+    body = (
+        b'{"meta":{"generated_at":"2026-10-23T00:00:01Z","source_collected_at":null,'
+        b'"source_status":"ok","item_count":1},"station_key":"A0000001","items":[{"product_code":'
+        b'"B027","observed_at":"2026-10-22T00:00:00Z","price":' + raw_price + b'}],'
+        b'"next_cursor":null,"has_more":false}'
+    )
+    outcome = await _fetch(lambda _request: httpx.Response(200, content=body))
+    assert (outcome.history, outcome.reason) == (None, "upstream_contract")
+
+
+_ROW_0922 = {"product_code": "B027", "observed_at": "2026-09-22T00:00:00Z", "price": 1.0}
+_ROW_1022 = {"product_code": "B027", "observed_at": "2026-10-22T00:00:00Z", "price": 1.0}
+_ROW_D047 = {"product_code": "D047", "observed_at": "2026-10-21T00:00:00Z", "price": 1.0}
+_SINCE = datetime(2026, 10, 1, tzinfo=UTC)
+_UNTIL = datetime(2026, 10, 22, tzinfo=UTC)
+
+
+@pytest.mark.parametrize(
+    ("rows", "request_", "ok"),
+    [
+        ([_ROW_1022], PriceHistoryRequest(product_code="B027"), True),
+        ([_ROW_1022, _ROW_D047], PriceHistoryRequest(product_code="B027"), False),
+        ([_ROW_1022], PriceHistoryRequest(since=_SINCE, until=_UNTIL), True),  # 양끝 포함
+        ([_ROW_0922], PriceHistoryRequest(since=_SINCE), False),
+        ([_ROW_1022], PriceHistoryRequest(until=_UNTIL - timedelta(seconds=1)), False),
+        # 보내지 않은 끝은 transport 기본 창을 추측하지 않는다(cursor 페이지가 since·until을 뺀 경우).
+        ([_ROW_0922], PriceHistoryRequest(cursor="c"), True),
+    ],
+)
+async def test_price_history_rows_must_match_the_requested_product_and_window(
+    rows: list[dict[str, Any]], request_: PriceHistoryRequest, ok: bool
+) -> None:
+    outcome = await _fetch(lambda _request: httpx.Response(200, json=_page(rows)), request=request_)
+    assert (outcome.reason is None) is ok, outcome.reason
+    if not ok:
+        assert outcome.reason == "upstream_contract"
+
+
+async def test_price_history_deep_or_oversized_bodies_are_upstream_contract() -> None:
+    deep = b"[" * 200_000 + b"]" * 200_000
+    assert (await _fetch(lambda _r: httpx.Response(200, content=deep))).reason == (
+        "upstream_contract"
+    )
+    huge_rows = [_ROW_1022] * (MAX_PRICE_HISTORY_BODY_BYTES // 60 + 1)
+    assert (await _fetch(lambda _r: httpx.Response(200, json=_page(huge_rows)))).reason == (
+        "upstream_contract"
+    )
+    lying = httpx.Response(
+        200, content=b"{}", headers={"content-length": str(MAX_PRICE_HISTORY_BODY_BYTES + 1)}
+    )
+    assert (await _fetch(lambda _r: lying)).reason == "upstream_contract"
+
+    async def _chunks() -> Any:
+        for _ in range(3):  # content-length 없이 상한을 넘는 스트림
+            yield b" " * (MAX_PRICE_HISTORY_BODY_BYTES // 2)
+
+    streamed = await _fetch(lambda _r: httpx.Response(200, content=_chunks()))
+    assert streamed.reason == "upstream_contract"
+    assert (await _fetch(lambda _r: httpx.Response(200, content=b"\xff\xfe"))).reason == (
+        "upstream_contract"
+    )
 
 
 @pytest.mark.parametrize(
@@ -366,7 +453,7 @@ async def test_price_history_bad_configuration_and_path_keys_never_raise() -> No
     assert (await _fetch(_never, bad_url)).reason == "not_configured"
     for key in ("..", ".", "a/b"):
         outcome = await fetch_price_history(
-            _ENABLED, key, params={}, transport=httpx.MockTransport(_never)
+            _ENABLED, key, request=PriceHistoryRequest(), transport=httpx.MockTransport(_never)
         )
         assert outcome.reason == "upstream_contract", key
 
@@ -502,7 +589,9 @@ def _raise_read_timeout(request: httpx.Request) -> httpx.Response:
 @pytest.mark.parametrize(
     ("handler", "params", "reason"),
     [
-        (lambda _r: httpx.Response(409, json={}), {"cursor": "old"}, "cursor_expired"),
+        (lambda _r: httpx.Response(409, json={}), {}, "upstream_rejected"),
+        (lambda _r: httpx.Response(503, json=_NO_COLLECTION), {}, "upstream_no_collection"),
+        (lambda _r: httpx.Response(200, content=b'{"price": NaN}'), {}, "upstream_contract"),
         (lambda _r: httpx.Response(422, json={}), {"cursor": "bad"}, "request_rejected"),
         (lambda _r: httpx.Response(501, json={}), {}, "upstream_unsupported"),
         (lambda _r: httpx.Response(200, json=_page(station_key="OTHER")), {}, "upstream_contract"),
@@ -531,6 +620,34 @@ def test_route_keeps_current_prices_when_history_is_unavailable(
     assert data["current_prices"][0]["price"] == 1689.0
     assert data["natural_key"] == _STATION_KEY
     assert response.json()["meta"]["page"]["next_cursor"] is None
+
+
+def test_route_cursor_409_is_http_409_restart(history_api: _HistoryApi) -> None:
+    client, seen, state = history_api
+    state["handler"] = lambda _r: httpx.Response(409, json={"status": 409})
+    response = client.get(_URL, params={"cursor": "old", "product_code": "B027"})
+    assert response.status_code == 409, response.text
+    assert response.json()["code"] == "TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED"
+    assert dict(seen[0].url.params) == {"cursor": "old", "product": "B027", "limit": "200"}
+
+
+def test_route_non_finite_price_keeps_current_price(history_api: _HistoryApi) -> None:
+    client, _seen, state = history_api
+    body = (
+        b'{"meta":{"generated_at":"2026-10-23T00:00:01Z","source_collected_at":null,'
+        b'"source_status":"ok","item_count":1},"station_key":"A0000001","items":[{"product_code":'
+        b'"B027","observed_at":"2026-10-22T00:00:00Z","price":1e400}],"next_cursor":null,'
+        b'"has_more":false}'
+    )
+    state["handler"] = lambda _r: httpx.Response(200, content=body)
+    response = client.get(_URL)
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert (data["history"]["status"], data["history"]["reason"]) == (
+        "unavailable",
+        "upstream_contract",
+    )
+    assert data["current_prices"][0]["price"] == 1689.0
 
 
 @pytest.mark.parametrize(
@@ -593,8 +710,14 @@ def test_route_openapi_documents_t4_semantics(client: TestClient) -> None:
     assert {"type": "null"} in point["properties"]["collected_at"]["anyOf"]
     reasons = set(get_args(PriceHistoryUnavailableReason))
     assert {
-        "cursor_expired",
         "request_rejected",
+        "upstream_no_collection",
         "upstream_timeout",
         "upstream_unsupported",
     } <= reasons
+    assert "cursor_expired" not in reasons
+    assert set(block["properties"]["reason"]["anyOf"][0]["enum"]) == reasons
+    conflict = operation["responses"]["409"]["description"]
+    assert "TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED" in conflict
+    status_doc = block["properties"]["status"]["description"]
+    assert "has_more=false" in status_doc

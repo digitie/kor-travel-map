@@ -15,7 +15,9 @@ PinVi 같은 service 소비자가 주유소(최신 유가)·휴게소(휴게소 
   ``TRANSPORT_STATE_GENERATION_EXPIRED``.
 - 가격 추이는 transport T4에서 요청 시 한 페이지씩 읽어 전한다. transport가 응답하지 않거나 계약이
   어긋나면 현재가는 주고 추이만 ``unavailable``(이유)이다(결정 4). transport의 불투명 cursor를
-  그대로 주고받으며, transport 409는 ``reason=cursor_expired``(처음부터 다시)다.
+  그대로 주고받는다. cursor를 보낸 요청에 transport가 409(수집 revision 변경·cursor 만료)면 이
+  route는 409 ``TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED``다 — 누적한 페이지를 버리고 cursor 없이
+  처음부터 다시 읽는다.
 """
 
 from __future__ import annotations
@@ -64,10 +66,10 @@ from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationErro
 from kortravelmap.api.auth import require_service_token
 from kortravelmap.api.response import Meta, ProblemDetail, make_meta
 from kortravelmap.api.transport_state_service import (
+    PriceHistoryRequest,
     PriceHistoryUnavailableReason,
     fetch_price_history,
     get_state_store,
-    price_history_params,
     state_unavailable,
 )
 
@@ -264,18 +266,24 @@ class PriceHistoryPoint(BaseModel):
 class PriceHistoryBlock(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    status: Literal["available", "unavailable"]
+    status: Literal["available", "unavailable"] = Field(
+        description=(
+            "unavailable이면 이 페이지를 읽지 못했다는 뜻이다 — has_more=false여도 이력의 끝이 "
+            "아니다. 페이지를 이어 읽는 소비자는 매 페이지 status를 확인하고, unavailable이면 "
+            "누적한 페이지를 완전한 이력으로 쓰지 않는다."
+        )
+    )
     reason: PriceHistoryUnavailableReason | None = Field(
         description=(
             "unavailable일 때 이유. disabled(Map 설정이 끔)·not_configured(transport 주소·토큰 "
             "없음) — 이 둘은 transport를 부르지 않았다. upstream_not_found(transport 404 — 없는 "
-            "주유소·옛 버전·토큰·접속 주소)·upstream_unsupported(501)·"
-            "cursor_expired(transport 409 — 수집 revision이 바뀌었거나 cursor가 만료됐다. "
-            "이미 받은 페이지를 버리고 cursor 없이 "
-            "처음부터 다시 읽는다)·request_rejected(transport 422 — 조회 창 366일 초과·미래 until·"
-            "변조되었거나 다른 조건의 cursor)·upstream_timeout(timeout)·upstream_unavailable(5xx·"
-            "연결 실패)·upstream_rejected(그 밖의 비-200)·upstream_contract(응답 모양이 "
-            "다름 — 다른 주유소의 station_key 포함)."
+            "주유소·옛 버전·토큰·접속 주소)·upstream_unsupported(501)·request_rejected(transport "
+            "422 — 조회 창 366일 초과·미래 until·변조되었거나 다른 조건의 cursor)·"
+            "upstream_no_collection(transport 503 — 성공한 유가 수집 근거가 아직 없다)·"
+            "upstream_timeout(timeout)·upstream_unavailable(그 밖의 5xx·연결 실패)·"
+            "upstream_rejected(그 밖의 비-200)·upstream_contract(응답 모양이 다름 — 다른 "
+            "station_key·요청과 다른 유종이나 창 밖의 행·유한하지 않은 가격·너무 큰 본문 포함). "
+            "cursor 만료는 이유가 아니라 HTTP 409다."
         )
     )
     generated_at: AwareDatetime | None = Field(description="transport가 이 페이지를 만든 시각.")
@@ -287,11 +295,18 @@ class PriceHistoryBlock(BaseModel):
     source_status: Literal["ok", "stale", "failed"] | None = Field(
         description="transport 유가 수집 상태. stale이어도 기존 이력은 준다. unavailable이면 null."
     )
-    has_more: bool = Field(description="다음 페이지가 있다(next_cursor로 읽는다).")
+    has_more: bool = Field(
+        description=(
+            "다음 페이지가 있다(next_cursor로 읽는다). status=available일 때만 끝을 뜻한다 — "
+            "unavailable이면 늘 false다."
+        )
+    )
     next_cursor: str | None = Field(
         description=(
-            "다음 페이지 cursor(불투명, transport 발급·첫 페이지부터 15분 유효). 같은 product_code·"
-            "since·until과 함께 cursor 인자로 보낸다. meta.page.next_cursor와 같다."
+            "다음 페이지 cursor(불투명, transport 발급·첫 페이지부터 15분 유효). cursor 인자로 "
+            "보내며 product_code는 첫 페이지와 똑같이 보낸다(빼거나 바꾸면 request_rejected). "
+            "since·until은 cursor가 창을 품으므로 빼도 되고, 보낸다면 첫 페이지와 같은 시각이어야 "
+            "한다. meta.page.next_cursor와 같다."
         )
     )
     truncated: bool = Field(
@@ -360,6 +375,17 @@ _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
 _DETAIL_RESPONSES: dict[int | str, dict[str, Any]] = {
     404: {"model": ProblemDetail, "description": "NOT_FOUND — 지금 세대에 그 feature_id가 없다."},
     503: _ERROR_RESPONSES[503],
+}
+_PRICE_HISTORY_RESPONSES: dict[int | str, dict[str, Any]] = {
+    **_DETAIL_RESPONSES,
+    409: {
+        "model": ProblemDetail,
+        "description": (
+            "TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED — cursor를 보냈는데 transport 유가 수집 "
+            "revision이 바뀌었거나 cursor(첫 페이지부터 15분)가 만료됐다. 누적한 이력 페이지를 "
+            "버리고 cursor 없이 처음부터 다시 읽는다. 첫 페이지(cursor 없음)는 이 오류를 내지 않는다."
+        ),
+    },
 }
 
 
@@ -715,7 +741,7 @@ async def get_fuel_station(
     "/fuel-stations/{feature_id}/price-history",
     response_model=FuelStationPriceHistoryResponse,
     summary="주유소 현재가 + 가격 추이(transport에서 요청 시 읽음)",
-    responses=_DETAIL_RESPONSES,
+    responses=_PRICE_HISTORY_RESPONSES,
 )
 async def get_fuel_station_price_history(
     request: Request,
@@ -744,8 +770,10 @@ async def get_fuel_station_price_history(
             min_length=1,
             max_length=4096,
             description=(
-                "이전 응답의 history.next_cursor(불투명). 같은 product_code·since·until로 보낸다. "
-                "history.reason=cursor_expired면 받은 페이지를 버리고 cursor 없이 다시 시작한다."
+                "이전 응답의 history.next_cursor(불투명). product_code는 첫 페이지와 똑같이, "
+                "since·until은 빼거나 첫 페이지와 같게 보낸다. 409 "
+                "TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED면 받은 페이지를 버리고 cursor 없이 다시 "
+                "시작한다."
             ),
         ),
     ] = None,
@@ -757,10 +785,17 @@ async def get_fuel_station_price_history(
     outcome = await fetch_price_history(
         KorTravelMapSettings(),
         item.natural_key,
-        params=price_history_params(
+        request=PriceHistoryRequest(
             product_code=product_code, since=since, until=until, limit=limit, cursor=cursor
         ),
     )
+    if outcome.cursor_expired:
+        raise _problem(
+            status.HTTP_409_CONFLICT,
+            "TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED",
+            "transport 유가 수집이 바뀌었거나 cursor가 만료됐다. 받은 이력 페이지를 버리고 cursor "
+            "없이 첫 페이지부터 다시 읽는다.",
+        )
     if outcome.history is not None:
         points = [
             PriceHistoryPoint(
