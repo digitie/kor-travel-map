@@ -690,6 +690,23 @@ function createFeatureMarkerElement({
   badgeCount?: number;
   onClick?: (event: MouseEvent) => void;
 }): HTMLDivElement {
+  function bindSelection(element: HTMLDivElement) {
+    if (!onClick) return;
+    element.tabIndex = 0;
+    element.style.cursor = "pointer";
+    element.addEventListener("click", (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      onClick?.(event);
+    });
+    element.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      event.stopPropagation();
+      element.click();
+    });
+  }
+
   const icon = createMarkerElement({
     markerIcon,
     markerColor,
@@ -699,14 +716,7 @@ function createFeatureMarkerElement({
   applyTokenMarkerColor(icon, markerColor);
   const markerLabel = priceLabel ?? null;
   if (!markerLabel) {
-    if (onClick) {
-      icon.style.cursor = "pointer";
-      icon.addEventListener("click", (event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        onClick(event);
-      });
-    }
+    bindSelection(icon);
     if (badgeCount && badgeCount > 1) {
       appendCountBadge(icon, badgeCount, markerColorValue(markerColor));
     }
@@ -753,13 +763,7 @@ function createFeatureMarkerElement({
   label.style.pointerEvents = "none";
 
   wrapper.append(icon, label);
-  if (onClick) {
-    wrapper.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onClick(event);
-    });
-  }
+  bindSelection(wrapper);
   if (badgeCount && badgeCount > 1) {
     appendCountBadge(wrapper, badgeCount, color);
   }
