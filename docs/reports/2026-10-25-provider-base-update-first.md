@@ -32,8 +32,8 @@ atomic UPSERT fallback을 제거하지 않는다. source/값 검증이나 deferr
 ## 실제 시험 source 계획(미실행)
 
 전용 owned scalar fixture에서 synthetic SourceRecord/hash/key·실제 source/link·5kind를 심는다.
-외부 SDK 실행이나 collector 경로를 검증한 것으로 세지 않는다. 새14개는5kind의 부재 fallback 뒤
-동일값 UPDATE·lineage/revision/clock/geometry,4개 오류 전체 rollback, 허용 null, notice first-probe,
+외부 SDK 실행이나 collector 경로를 검증한 것으로 세지 않는다. 새15개는5kind의 부재 fallback 뒤
+동일값 UPDATE·lineage/revision/clock/geometry,5개 오류 전체 rollback, 허용 null, notice first-probe,
 operator override 보존, exact owner-first blocker PID와 commit 후 갱신, 실제 catalog/body/ACL이다.
 updated_at >= observed_at는 existing UPDATE에만 검사하고, absent INSERT는 원 DEFAULT now()를 보존한다.
 
@@ -43,5 +43,9 @@ updated_at >= observed_at는 existing UPDATE에만 검사하고, absent INSERT�
 부재 fallback 실행과 원 UPSERT byte 보존은 증명하되 권한·constraint 우회로 경합을 만들지 않는다.
 
 추가로 기존 명시 EX full-refresh20 회귀를 현재425 bootstrap에서 그대로 실행해 active policy,
-epoch 및 deferred projection·부재/기존 base를 대조한다. 새14개와 기존20개의 실제 실행 결과는
+epoch 및 deferred projection·부재/기존 base를 대조한다. 새15개와 기존20개의 실제 실행 결과는
 두 독립 시험 source 리뷰와 별도 CPU 승인 뒤 기록한다. 원 clock/정책·guard를 끄지 않는다.
+
+허용 geometry null은 SQL NULL과 JSON null을 SQL boolean 두 개로 구분한다.
+잘못된 source record와 등록되지 않은 field를 함께 주고 source provenance 오류가 먼저 나며
+전체 상태가 rollback되는 반례를 추가했다. 실제 실행은 아직0이다.

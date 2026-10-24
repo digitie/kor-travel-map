@@ -25,7 +25,10 @@ from tests.integration.test_provider_field_scalar_projection import (
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_engines as scalar_engines,
 )
-from tests.integration.test_tvn36_override_lineage_spine import _open_domain_command
+from tests.integration.test_tvn36_override_lineage_spine import (
+    _constraint_name,
+    _open_domain_command,
+)
 
 pytestmark = pytest.mark.integration
 _ROOT = Path(__file__).resolve().parents[2]
@@ -177,7 +180,9 @@ async def _base(engine, seed):
                 await session.execute(
                     text("""
             SELECT field_path,provider_dataset_id,source_entity_key,source_record_key,
-                source_raw_payload_hash,value_json,x_extension.st_astext(value_geometry) AS wkt,
+                source_raw_payload_hash,value_json,value_json IS NULL AS sql_null,
+                value_json = 'null'::jsonb AS json_null,
+                x_extension.st_astext(value_geometry) AS wkt,
                 base_revision,observed_at,updated_at
             FROM feature.feature_base_field_values
             WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path"""),
@@ -278,6 +283,8 @@ async def test_geometry_can_return_to_registry_allowed_null(scalar_engines):
             await _patch(session, seed, {}, geometry)
     row = (await _base(admin, seed))["core.coord"]
     assert row["value_json"] is None  # JSON null의 asyncpg 반환값
+    assert row["sql_null"] is False
+    assert row["json_null"] is True
     assert row["wkt"] is None
     assert row["updated_at"] >= row["observed_at"]
 
@@ -418,3 +425,21 @@ async def test_actual_catalog_body_owner_acl_and_service_identity(scalar_engines
             "ktm_feature_service",
             "ktm_feature_service",
         )
+
+
+async def test_invalid_source_precedes_invalid_field_and_rolls_back(scalar_engines):
+    admin, runtime = scalar_engines
+    seed = await _seed(admin)
+    before = await _snapshot(admin, seed)
+    bad = {**seed, "record": "sr_" + "f" * 20}
+
+    async def attempt():
+        async with AsyncSession(runtime) as session, session.begin():
+            await _gate(session)
+            await _patch(session, bad, {"core.not_registered": "invalid"})
+
+    with pytest.raises(DBAPIError) as caught:
+        await attempt()
+    assert getattr(caught.value.orig, "sqlstate", None) == "23514"
+    assert _constraint_name(caught.value) == "ck_feature_provider_source_provenance"
+    assert await _snapshot(admin, seed) == before
