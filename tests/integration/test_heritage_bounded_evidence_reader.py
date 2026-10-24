@@ -110,3 +110,114 @@ async def test_actual_sdk_three_shapes_and_old_nonname_r1_are_readable(scalar_en
         assert (
             current["current_record"]["source_record_key"] == bundle.source_record.source_record_key
         )
+
+
+@pytest.mark.parametrize(
+    "statement",
+    [
+        "SELECT feature._heritage_evidence_metadata_bytes("
+        "NULL::bigint[],NULL::boolean[],NULL::integer[],NULL::boolean[])",
+        "SELECT feature._heritage_evidence_string_object(NULL::jsonb,NULL::text[])",
+        "SELECT feature._heritage_evidence_shape("
+        "NULL::jsonb,NULL::jsonb,NULL::jsonb,NULL::x_extension.geometry)",
+        "SELECT feature._heritage_evidence_inventory(1,NULL::text[])",
+        "SELECT feature._heritage_evidence_retire0(1)",
+        "SELECT feature_id FROM feature.feature_base_field_values LIMIT 0",
+    ],
+    ids=["metadata", "string-object", "shape", "inventory", "retire", "private-base-table"],
+)
+async def test_runtime_cannot_bypass_public_reader_boundary(scalar_engines, statement):
+    """실제 service 권한으로 private 진입을 거부한다. owner sandbox 주장은 없다."""
+    from sqlalchemy.exc import DBAPIError
+
+    _, runtime = scalar_engines
+    async with AsyncSession(runtime) as session:
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        await session.execute(text("SET LOCAL statement_timeout='2s'"))
+        assert (await session.execute(text("SELECT session_user,current_user"))).one() == (
+            "ktm_feature_service",
+            "ktm_feature_service",
+        )
+        with pytest.raises(DBAPIError) as failure:
+            await session.execute(text(statement))
+        assert getattr(failure.value.orig, "sqlstate", None) == "42501"
+    # 예외 TX는 rollback하고 새 TX에서 공개 reader가 정상 응답하는지 확인한다.
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        result = await read_heritage_evidence(
+            session, 9_223_372_036_854_775_807, ["se_" + "1" * 64]
+        )
+        assert not result.evidence_complete
+        assert result.reason == "scope_unsupported"
+        assert result.items == ()
+
+
+@pytest.mark.parametrize(
+    ("dataset", "keys"),
+    [
+        (None, ["se_" + "1" * 64]),
+        (0, ["se_" + "1" * 64]),
+        (1, None),
+        (1, []),
+        (1, [["se_" + "1" * 64], ["se_" + "2" * 64]]),
+        (1, ["se_" + "1" * 64, "se_" + "1" * 64]),
+        (1, [None]),
+        (1, ["sx_" + "1" * 64]),
+        (1, ["se_" + "1" * 10_000]),
+        (1, ["se_" + f"{index:064x}" for index in range(2731)]),
+    ],
+    ids=[
+        "null-dataset",
+        "zero-dataset",
+        "null-array",
+        "empty-array",
+        "multidimensional",
+        "duplicate",
+        "null-key",
+        "wrong-key-format",
+        "oversize-key",
+        "max-plus-one",
+    ],
+)
+async def test_public_sql_rejects_invalid_server_input(scalar_engines, dataset, keys):
+    """Python validator를 거치지 않는 고정 공개 SQL로 서버의 실제 검사를 확인한다."""
+    from sqlalchemy.exc import DBAPIError
+
+    _, runtime = scalar_engines
+    async with AsyncSession(runtime) as session:
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        await session.execute(text("SET LOCAL statement_timeout='2s'"))
+        with pytest.raises(DBAPIError) as failure:
+            await session.execute(
+                text(
+                    "SELECT feature.read_heritage_name_refresh_evidence("
+                    "CAST(:dataset AS bigint),CAST(:keys AS text[]))"
+                ),
+                {"dataset": dataset, "keys": keys},
+            )
+        assert getattr(failure.value.orig, "sqlstate", None) == "22023"
+
+
+async def test_server_array_physical_budget_precedes_unbounded_enumeration(scalar_engines):
+    """이미 생성된 caller 배열의 메모리까지 제한한다는 뜻은 아니다."""
+    _, runtime = scalar_engines
+    keys = ["se_" + f"{index:064x}" for index in range(5000)]
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        await session.execute(text("SET LOCAL statement_timeout='2s'"))
+        size = await session.scalar(
+            text("SELECT pg_column_size(CAST(:keys AS text[]))"), {"keys": keys}
+        )
+        assert size > 262_144
+        result = await session.scalar(
+            text("SELECT feature.read_heritage_name_refresh_evidence(1,CAST(:keys AS text[]))"),
+            {"keys": keys},
+        )
+        assert result == {
+            "version": 1,
+            "evidence_complete": False,
+            "reason": "budget_exceeded",
+            "dataset_id": 1,
+            "policy_epoch": None,
+            "items": [],
+        }

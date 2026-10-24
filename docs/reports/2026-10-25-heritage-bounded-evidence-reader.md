@@ -40,3 +40,9 @@ bfed checkpoint의 첫 owned PG 실행은 `422_heritage_evidence_reader.py`의 s
 이 scalar fixture는 migration 뒤 정본 runtime reconcile도 실행하므로 그 dump에는 기존 grants 차이가 생긴다. 이를 공식 oracle로 사용하지 않고 원 dump를 보존했다. 별도 bounded fresh fixture에서 기존 `application_300_config`와 정본 dump/비교 함수를 그대로 위임한 공식 oracle1 PASS(14.68초, skip0)를 확인했다. 공식 dump의 변경은 신규 함수6개/ACL6개와 receipt CHECK의422 추가뿐이며 기존 나머지 object block·runtime grant는 byte 동일하다. 두 fixture는 다른 검증이므로 SDK 시험2 PASS나 메모리 수용으로 합산하지 않는다.
 
 공식 dump를 읽는 offline 전체 lint는372 PASS/기존6 SKIP/문서 길이1 FAIL(29.53초)이었다. 초기 reader 링크가 tasks의 기존 본문에 붙어300자를 넘겼기에 우리 링크 한 줄만 제거하고 원 entry를 보존했다. 해당 문서 lint5 PASS(0.10초)로 재확인했으며 전체 lint를 재실행했다고 주장하지 않는다. 실패·수정 원본은 감사 원장에 분리했다. 부정·보안·동일 snapshot·peak/EXPLAIN/지원 N과 실제 SH 수집·운영은 아직 수용하지 않았다.
+
+## 다음 작은 보안·서버 입력 시험 source
+
+공개 SQL 입력의 NULL/차원/중복/형식/2731개와 metadata 배열 예산을 Python validator와 독립해서 검증하는 실제 PG 시험 source를 추가했다. private5 EXECUTE와 private base table SELECT는 runtime42501을 확인하고, 예외 TX 뒤 새 READ ONLY TX의 공개 known-ineligibility 응답을 확인하도록 했다. owner 고권한까지 sandbox한다는 주장은 없다.
+
+현재 기존 SDK positive1을 포함해18개가 수집된다(collect-only18, 0.98초). 이 중 추가17개는 아직 실행하지 않았고 source 두 리뷰 전 PG0이다. Ruff의 초기 raises 범위2건은 실제 한 문장만 예외 검증하고 session 종료로 rollback되도록 수정했다. snapshot·저장 shape/압축·history/peak 시험은 그다음 source/runner gate로 분리한다.
