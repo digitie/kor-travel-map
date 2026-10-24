@@ -2230,6 +2230,7 @@ DECLARE
   v_hint feature.curation_items%ROWTYPE;
   v_item feature.curation_items%ROWTYPE;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
@@ -3775,6 +3776,7 @@ DECLARE
   v_place_name text;
   v_decision_id uuid;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
@@ -4172,6 +4174,7 @@ DECLARE
     v_metadata jsonb;
     v_decision_id uuid;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF current_setting('transaction_isolation') <> 'serializable' THEN
         RAISE EXCEPTION 'manual curation writer requires SERIALIZABLE'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_curation_create_isolation';
@@ -5021,6 +5024,7 @@ DECLARE
   v_child_count bigint;
   v_child_hash text;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
   o_stale_input := false;
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'provider curation root requires SERIALIZABLE transaction'
@@ -6917,6 +6921,7 @@ DECLARE
   v_source_owned_changed boolean;
   v_operator_owned_changed boolean;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'item command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
@@ -8536,6 +8541,7 @@ DECLARE
   v_target_id uuid;
   v_locked_item_ids uuid[];
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'quarantine command requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
@@ -9216,6 +9222,7 @@ DECLARE
     v_fields jsonb;
     v_existing feature.provider_field_shadow_policies%ROWTYPE;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     -- 어떤 정책 행/unique key를 잠그기 전에 기존 전역 fence를 먼저 획득한다.
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
     IF p_policy_revision IS NULL OR p_policy_revision < 1
@@ -17593,7 +17600,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -27242,6 +27249,8 @@ GRANT ALL ON FUNCTION ops.finish_scoped_feature_write(p_attempt uuid, p_owner uu
 
 REVOKE ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_feature_runtime;
+GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_feature_schema_owner;
+GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_curation_command_owner;
 
 
 --
