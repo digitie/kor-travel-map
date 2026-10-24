@@ -1,3 +1,7 @@
+## 2026-10-25 — 전체 snapshot 동시 쓰기·복구 설계(미구현)
+
+전체 입력 크기·capture closure·동일 run 복구·큰 snapshot protocol의 남은 문턱을 [설계](reports/2026-10-25-full-snapshot-coordination-design.md)에 정리했다. 실제 collector·운영 동시 쓰기와 후속 전파는 미완이다.
+
 ## 2026-10-25 — SH 운영 후보 크기 실측
 
 - 국가유산/세계음식점 current head와 active primary place가 각각4,279/9,494로 기존 SH 한도를 넘음을 읽기 전용으로 확인했다. 작은 조회·시험을 운영 전체 동시성으로 세지 않는다. [실측·후속 범위](reports/2026-10-25-sh-operating-scope-measurement.md).

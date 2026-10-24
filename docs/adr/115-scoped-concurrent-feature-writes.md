@@ -240,6 +240,8 @@ collection revision 하나를 공유하는 명령끼리는 계속 충돌하는 �
 
 초기 **PG 동시 쓰기 구현**은 staging 전체 복사나 새 active release pointer를 추가하지 않는다. 일반 dataset/정당한
 지역 snapshot은 기존 한 transaction을 유지하므로 API reader는 commit 전/후 image만 본다.
+작은 불변 provider 입력을 보존하는 재시도 artifact는 Feature 공개 snapshot 복사나 active release pointer가 아니다. 세부 검토는 [전체 snapshot·복구 설계](../reports/2026-10-25-full-snapshot-coordination-design.md)에 정리하며, 기존 transaction 공개·capture hash·후속 seal 의미를 바꾸지 않는다. 새 저장·복구 경로는 아직 구현되지 않았다.
+
 현재 READ COMMITTED에서 같은 transaction을 쓰더라도 SELECT마다 snapshot이 달라진다.
 따라서 관련 조회를 단일 SQL로 합치거나, **첫 SELECT 이전**에 read-only REPEATABLE READ
 transaction을 시작해 응답 전체(참조 해석·본문·추가 조회)를 감싼다. 이미 autobegin된 READ COMMITTED
