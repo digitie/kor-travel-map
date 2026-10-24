@@ -23,9 +23,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import FeatureBundle, SourceRole
 from kortravelmap.infra.feature_repo import (
+    FEATURE_CURATION_WRITE_WAIT_INFO_KEY,
     _make_source_entity_key,
     _provider_field_patch_payload,
     _upsert_source_record_state,
+    lock_feature_curation_write,
 )
 from kortravelmap.infra.provider_field_candidates import (
     capture_provider_field_candidates,
@@ -155,6 +157,60 @@ async def refresh_scoped_provider_scalars(
     경로로 fallback하지 않는다. 재계획은 새 transaction/attempt로 하며 원천 artifact는
     재사용한다. 완료된 동일 attempt 재호출은 source DML을 다시 실행하지 않는다.
     """
+    return await _refresh_provider_scalars(
+        session,
+        bundle,
+        feature_id=feature_id,
+        dataset_id=dataset_id,
+        policy_revision=policy_revision,
+        attempt_id=attempt_id,
+        owner=owner,
+        manifest_digest=manifest_digest,
+        exclusive_protocol=False,
+    )
+
+
+async def refresh_exclusive_provider_scalars(
+    session: AsyncSession,
+    bundle: FeatureBundle,
+    *,
+    feature_id: UUID,
+    dataset_id: int,
+    policy_revision: int,
+    attempt_id: UUID,
+    owner: UUID,
+    manifest_digest: str,
+) -> dict[str, Any]:
+    """동일 후보/winner 의미를 기존 배타 protocol·전역 fence 아래 적용한다.
+
+    Geo/link/신규 identity 변경 처리를 제공하지 않는다. caller는 지원 외 필드 불변을
+    확인하고 같은 의미의 EX manifest를 별도 transaction에서 준비해야 한다. 자동
+    fallback이나 collector 배선이 아니다."""
+    return await _refresh_provider_scalars(
+        session,
+        bundle,
+        feature_id=feature_id,
+        dataset_id=dataset_id,
+        policy_revision=policy_revision,
+        attempt_id=attempt_id,
+        owner=owner,
+        manifest_digest=manifest_digest,
+        exclusive_protocol=True,
+    )
+
+
+async def _refresh_provider_scalars(
+    session: AsyncSession,
+    bundle: FeatureBundle,
+    *,
+    feature_id: UUID,
+    dataset_id: int,
+    policy_revision: int,
+    attempt_id: UUID,
+    owner: UUID,
+    manifest_digest: str,
+    exclusive_protocol: bool,
+) -> dict[str, Any]:
     if not session.in_transaction():
         raise ValueError("explicit caller transaction required")
     expected_digest = scoped_provider_refresh_input_digest(
@@ -169,7 +225,12 @@ async def refresh_scoped_provider_scalars(
         allow_nan=False,
     )
     await _arm_deadline(session)
-    await lock_scoped_feature_write_protocol(session, exclusive=False)
+    if exclusive_protocol:
+        # legacy의 첫 fence 장기 대기 힌트가 native deadline을 늘리지 않게 소비한다.
+        session.info.pop(FEATURE_CURATION_WRITE_WAIT_INFO_KEY, None)
+        await lock_feature_curation_write(session)
+    else:
+        await lock_scoped_feature_write_protocol(session, exclusive=False)
     await lock_provider_field_policy_epoch(session)
     attempt = await begin_scoped_feature_write(
         session, attempt_id=attempt_id, owner=owner, manifest_digest=manifest_digest
@@ -177,7 +238,7 @@ async def refresh_scoped_provider_scalars(
     if (
         attempt["input_digest"] != expected_digest
         or attempt["provider_dataset_id"] != dataset_id
-        or attempt["exclusive_protocol"]
+        or attempt["exclusive_protocol"] is not exclusive_protocol
         or attempt["regions"]
     ):
         raise ValueError("sealed scalar refresh artifact does not match this input")

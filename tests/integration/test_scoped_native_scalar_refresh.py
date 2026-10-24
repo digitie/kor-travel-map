@@ -187,7 +187,7 @@ async def _seed(admin):
     return feature, dataset, entity, identity
 
 
-async def _plan(runtime, feature, dataset, bundle):
+async def _plan(runtime, feature, dataset, bundle, *, exclusive_protocol=False):
     attempt, owner = uuid4(), uuid4()
     async with AsyncSession(runtime) as session, session.begin():
         revision = await session.scalar(
@@ -222,6 +222,7 @@ async def _plan(runtime, feature, dataset, bundle):
             idempotency_key=uuid4().hex,
             regions=(),
             expected_members=len(members),
+            exclusive_protocol=exclusive_protocol,
             input_digest=native.scoped_provider_refresh_input_digest(
                 bundle, feature_id=feature, dataset_id=dataset, policy_revision=1
             ),

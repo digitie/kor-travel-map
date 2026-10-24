@@ -33,6 +33,12 @@
 - 세 번째 main 병합(#1388 — ADR-115 `418_creation_protocol`): 이 migration을 `419_retire_pg_transport_values`(down 418)로 다시
   번호 매겼다. runbook A는 head 418 pair.
 
+## 2026-10-24 — 제한 scalar의 같은 의미 EX 실행 진입
+
+- SH와 같은 source/head→후보→winner→receipt를 기존 protocol EX·curation 전역 fence 아래 수행하는 별도 내부 entry를 추가했다. legacy loader fallback·collector 배선·정책 활성화는 아니다.
+- 실제PG/기존native/artifact16 PASS(28.51초): SH/EX 결과 동등·정확 gate 대기·실패/취소 rollback·55P03 복구·완료 replay0DML·mode 대체 거부. 적대리뷰 P2의 legacy장기hint를 소비해 짧은상한을 유지했다. 최종두리뷰·정확CI·최신UI는 후속이다. [범위와 증거](reports/2026-10-24-scalar-exclusive-semantic-entry.md).
+- 선행 #1386·#1387은 각각 두리뷰·정확CI5개·실UI5/18(별도HTTP2) 뒤 main에 머지됐다. 기본OFF/seed0/운영0, 전체수집전환·후속전파는 미완이다.
+
 ## 2026-10-24 — 생성 SQL의 protocol-first 진입과 승인 복구(418)
 
 - core/provider/manual/요청승인4개를 첫EX로 보강하고 내부owner2개에 함수EXEC만 추가한다. 승인55P03은 기존503/RetryAfter5로 전달한다.

@@ -25,9 +25,10 @@ main에 포함됐다. 개별 feature-base PR의 미발행 CI를 성공으로 간
 | #1379 | 위 구현의 합집합 수용 | 최종 집중175 PASS·oracle/metadata2·두 리뷰·정확fd6 CI5개·실UI16 PASS, main c6b608f1 | 전체 writer/collector·운영 전환 수용 |
 | #1383 | 415 state/lifecycle5개 SQL의 첫 EX | PG36+unit5·추가ASGI1·두리뷰·정확9c213 CI5개·실UI18 PASS, main39483333 | 전체 writer 의미 지원·운영 전환 |
 | #1385 | 416 field SQL2개·Python patch/create 진입, manualcreate55P03→503 | PG/ASGI29+unit5·기존unit110·두리뷰·정확0f146 CI5개·실UI18+별도HTTP2 PASS, mainff65c415 | 전체 수집 배선·운영 전환 |
-| #1386 | normal-head whole curation import의 첫 EX | 실제40P01 재현·PG9/회귀48/unit76·독립2리뷰·정확b78b 실CSV UI5/별도계보 PASS | 정확b78b CI·머지·운영 |
-| #1387 | 417 EX 재진입 xact 소유 재확보 후 반복 GUC 조회 생략 | 실제PG7+unit4·oracle4·최종집중92·독립2리뷰·정확fc9 실UI18+별도HTTP2 | 정확fc9 CI·머지·운영 |
-| 후속418 | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·별도실제mapper500→503/같은key복구·oracle4·독립2리뷰 | 정확CI·최신418 실UI |
+| #1386 | normal-head whole curation import의 첫 EX | 실제40P01 재현·PG9/회귀48/unit76·독립2리뷰·정확b78b 실CSV UI5/별도계보 PASS | 정확b78b CI5개 PASS·main2cd9c485, 운영 후속 |
+| #1387 | 417 EX 재진입 xact 소유 재확보 후 반복 GUC 조회 생략 | 실제PG7+unit4·oracle4·최종집중92·독립2리뷰·정확fc9 실UI18+별도HTTP2 | 정확fc9 CI5개 PASS·main708efbc1, 운영 후속 |
+| #1388(418) | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·별도실제mapper500→503/같은key복구·oracle4·독립2리뷰 | 정확CI·최신418 실UI |
+| 후속 EX 진입 | 같은 source/head·후보/winner/receipt의 protocol EX+전역 fence | 실제PG/기존native/artifact16 PASS·lint373(6skip)·mypy/import | 독립2리뷰·정확CI·최신UI·collector 배선 |
 
 실제 Chromium·BFF/API·PostgreSQL은 reader/kernel 합집합의 정확fd6/schema414에서16건을
 통과했다. 지도 cluster3회 확대→UUID마커/상세, 인증401/403/200·파일 목록/상세/검색·issues·

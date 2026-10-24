@@ -10,6 +10,12 @@
 - **다음 한 작업: CI green → 머지 판단 → A: head 416 pair 배포 → B: 세 dataset 갱신 정책 `enabled=false` 필수·schedule 확인·진행 중
   job 0·큐 sensor 정지 → 417 pair 배포 → 전이 수·in-bounds 확인(ADR-114 "①의 운영 runbook"). 그 뒤 ②의 해제 조건(PinVi in-bounds 기본 kind·장소 검색 대체, C7
   안전 대상 이동)을 PinVi·C7 쪽에 건다.**
+## 2026-10-24 — 제한 scalar의 같은 의미 EX 실행 진입
+
+- SH와 같은 source/head→후보→winner→receipt를 기존 protocol EX·curation 전역 fence 아래 수행하는 별도 내부 entry를 추가했다. legacy loader fallback·collector 배선·정책 활성화는 아니다.
+- 실제PG/기존native/artifact16 PASS(28.51초): SH/EX 결과 동등·정확 gate 대기·실패/취소 rollback·55P03 복구·완료 replay0DML·mode 대체 거부. 적대리뷰 P2의 legacy장기hint를 소비해 짧은상한을 유지했다. 최종두리뷰·정확CI·최신UI는 후속이다. [범위와 증거](reports/2026-10-24-scalar-exclusive-semantic-entry.md).
+- 선행 #1386·#1387은 각각 두리뷰·정확CI5개·실UI5/18(별도HTTP2) 뒤 main에 머지됐다. 기본OFF/seed0/운영0, 전체수집전환·후속전파는 미완이다.
+
 ## 2026-10-24 — 생성 SQL의 protocol-first 진입과 승인 복구(418)
 
 - core/provider/manual/요청승인4개를 첫EX로 보강하고 내부owner2개에 함수EXEC만 추가한다. 승인55P03은 기존503/RetryAfter5로 전달한다.

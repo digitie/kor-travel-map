@@ -20,6 +20,12 @@
   dataset의 operation을 종류 불문 끄고, 그 primary Feature를 `system` 상태 전이로 `retired`·`suppressed`(+ 재활성화를 막는
   lifecycle override)로 내린다. 행·lineage·가격 fact·dataset은 남는다. queued/running job이 있으면 아무것도 바꾸지 않고 멈춘다.
 - 영향 없음: REST·OpenAPI, Valkey transport 표면, 장소(주유소·휴게소·공항) 적재와 C7 공항 대상.
+### 제한 scalar 쓰기의 같은 의미 배타 실행 (2026-10-24)
+
+- **ADDED**: 기존 primary place의 명시 name/phones 갱신에 SH와 같은 후보·승자 계산을
+  protocol EX·전역 fence 아래 수행하는 내부 진입을 추가했다. 기존 loader로의 자동 fallback,
+  미지원 identity/Geo 변경·전체 collector 배선·운영 활성화는 포함하지 않는다.
+
 ### Feature 요청 승인의 잠금 대기 복구 (2026-10-24)
 
 - **FIXED**: 생성 요청 승인 중 `55P03`은 기존503/RetryAfter5로 반환하고 실패 command를
