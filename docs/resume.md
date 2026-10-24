@@ -1,3 +1,10 @@
+## 2026-10-24 — ADR115 제한 scalar winner·정합성 검증(#1373)
+
+- 412는 기존 Feature/primary source의 name·phones만 명시 정책으로 투영한다. R1 값/R2 검증 head, override/revoke, 실제 순서 반전·old RR·Geo 증거 보호를 확인했다. 기본 OFF/정책 seed0/운영 활성화0이며 mixed legacy writer preflight 전 production cutover는 금지한다.
+- 실제16 PG/18 unit 통과, role tuple 정산 뒤 lint369 passed·기존 skip6, 공식 head oracle 재생성 후 비교+metadata2 passed. 초기 revision 길이·ACL inventory·generated 열·fieldset 축소 실패는 수정 후 재검증했다.
+- OFF 10k×7표를 411/412 fresh clone 각3회 측정해 scalar trigger0/원래 validator 동일/deferred context 동일을 확인했다. 로컬 관리자 synthetic이며 운영 ARM/실제 collector 성능 개선율이 아니다. [원본 수치·제약·실패 기록](reports/2026-10-24-provider-field-scalar-projection.md).
+- 413 기존 SQL 직접 진입점의 protocol-first 보강, 전체 membership/Geo/일반 수집 전환, 두 독립 최종 리뷰·정확 CI·HTTP/UI 수용과 Weather/Transport 전파는 미완이다. 기존 API/UI 동작을 새 native 수집에 자동 연결하지 않았다.
+
 ## 2026-10-24 — ADR115 운영·관리 다중 reader 후속
 
 - 초안 #1374는 관리·운영 GET 13개의 DB 읽기 phase를 RR로 고정한다. 외부 Dagster HTTP는 첫 DB 조회 전에 끝내며 외부 상태까지 같은 snapshot이라고 약속하지 않는다.

@@ -69,6 +69,12 @@
         "410_provider_field_shadow"
       ],
       "revision": "411_scoped_feature_write_kernel"
+    },
+    {
+      "down_revision": [
+        "411_scoped_feature_write_kernel"
+      ],
+      "revision": "412_provider_scalar_projection"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

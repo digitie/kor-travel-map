@@ -8870,3 +8870,46 @@ class ScopedFeatureWriteManifestRow(Base):
     dependency_key: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
     expected_value: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
     member_digest: Mapped[str] = mapped_column(Text(collation="C"), nullable=False)
+
+
+class ProviderFieldPolicyEpochRow(Base):
+    """첫 scalar cutover와 이전 snapshot의 writer를 분리하는 단일 행."""
+
+    __tablename__ = "provider_field_policy_epoch"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_pfp_epoch")),
+        CheckConstraint("singleton", name=conv("ck_pfp_singleton")),
+        CheckConstraint("epoch >= 0", name=conv("ck_pfp_epoch")),
+        {"schema": "feature"},
+    )
+
+    singleton: Mapped[bool] = mapped_column(
+        Boolean, primary_key=True, server_default=text("true")
+    )
+    epoch: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+
+
+class ProviderFieldActivePolicyRow(Base):
+    """지원하는 scalar fieldset의 명시 활성 revision. runtime 직접 DML은 닫힌다."""
+
+    __tablename__ = "provider_field_active_policies"
+    __table_args__ = (
+        PrimaryKeyConstraint(name=conv("pk_pfp_active")),
+        CheckConstraint("policy_revision >= 1", name=conv("ck_pfp_active_revision")),
+        CheckConstraint(
+            "field_paths IN (ARRAY['core.name']::text[], ARRAY['place.phones']::text[], "
+            "ARRAY['core.name','place.phones']::text[])",
+            name=conv("ck_pfp_active_fields"),
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "feature.features.feature_id", name=conv("fk_pfp_active_feature"), ondelete="RESTRICT"
+        ),
+        primary_key=True,
+    )
+    policy_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    field_paths: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)

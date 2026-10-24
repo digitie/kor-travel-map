@@ -331,6 +331,8 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "features",
         "feature_base_field_values",
         "provider_field_shadow_policies",
+        "provider_field_policy_epoch",
+        "provider_field_active_policies",
         "provider_field_shadow_candidates",
         "feature_state_transitions",
         "manual_feature_identity_claims",
@@ -414,6 +416,25 @@ _CORE_FEATURE_GRANTS = (
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
+    "REVOKE ALL ON FUNCTION feature.lock_provider_field_policy_epoch(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.lock_provider_field_policy_epoch(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.assert_scoped_provider_scalar_target(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.assert_scoped_provider_scalar_target(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON PROCEDURE feature.record_scoped_provider_field_candidates(...) FROM PUBLIC",
+    "GRANT EXECUTE ON PROCEDURE feature.record_scoped_provider_field_candidates(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON PROCEDURE feature.recompute_provider_field_candidates(...) FROM PUBLIC",
+    "GRANT EXECUTE ON PROCEDURE feature.recompute_provider_field_candidates(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._provider_field_projection_dependency_active(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature._provider_field_projection_dependency_active(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON PROCEDURE feature.activate_provider_field_policy(...) "
+    "FROM PUBLIC, ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.activate_provider_field_policy(...) "
+    "TO ktm_feature_schema_owner",
     "REVOKE ALL ON FUNCTION ops.scoped_feature_write_membership_digest(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.scoped_feature_write_membership_digest(...) "
     "TO ktm_feature_runtime",
@@ -812,6 +833,14 @@ _CURATION_CANDIDATE_READ_ACL = tuple(
 )
 
 
+_SCALAR_GUARD_INSTALLER_ACL = (
+    "REVOKE ALL ON FUNCTION feature._install_provider_field_projection_guards(...) "
+    "FROM PUBLIC, ktm_feature_runtime",
+    "GRANT EXECUTE ON FUNCTION feature._install_provider_field_projection_guards(...) "
+    "TO ktm_feature_state_procedure_owner",
+)
+
+
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -822,7 +851,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _FEATURE_REQUEST_SCHEMA_OWNER_DEPENDENCY_ACL
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
         + _PROVIDER_CURATION_SEAL_ACL
-        + _CURATION_CANDIDATE_READ_ACL,
+        + _CURATION_CANDIDATE_READ_ACL
+        + _SCALAR_GUARD_INSTALLER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
@@ -885,6 +915,13 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "feature.lock_provider_field_policy_epoch": "412_provider_scalar_projection",
+    "feature.assert_scoped_provider_scalar_target": "412_provider_scalar_projection",
+    "feature.record_scoped_provider_field_candidates": "412_provider_scalar_projection",
+    "feature.recompute_provider_field_candidates": "412_provider_scalar_projection",
+    "feature._provider_field_projection_dependency_active": "412_provider_scalar_projection",
+    "feature.activate_provider_field_policy": "412_provider_scalar_projection",
+    "feature._install_provider_field_projection_guards": "412_provider_scalar_projection",
     # baseline400에는 아직 없으며410이 같은 전역 fence 아래 shadow 전용으로 추가한다.
     "feature.record_provider_field_candidates": "410_provider_field_shadow",
     "ops.scoped_feature_write_membership_digest": "411_scoped_feature_write_kernel",
