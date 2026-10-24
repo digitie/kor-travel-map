@@ -2,7 +2,9 @@
 
 Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭·건수/실제 좌표·줌·상세 오버레이를 공통 컴포넌트로 소비한다. Map의 기본 종류·소스·상태 필터와 조회 동작은 보존한다.
 
-동일 소스/고정 lock을 WSL 내부 디스크에서 설치하여 타입 검사 PASS. frontend395 중 mirror에 빠뜨린 core enum 파일로3 실패가 있었고 같은 파일을 복사한 후 해당6 PASS, 나머지392 PASS였다. Common UI54와 Transport/Weather 반응형375/1440px 소비자 검증은 별도로 PASS다. Map 자체 live 브라우저/CI·최종 통합 gate는 아직 미실행이다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 후보 CI/최종 소비자 검증이며 자체 운영 빌드·배포는 하지 않는다.
+후속 UI에서 설명은 제목의 정보 버튼, 상태 필터는 `추가 필터`로 접고 select를 176×30px로 통일했다. 지도 높이를 유지하면서 375px 지도 시작을 651.75→439.25px로 앞당겼다. 다른 화면의 기본 여백·도움말·모바일 메뉴는 유지한다.
+
+WSL 타입·frontend 397건·변경 파일 ESLint PASS. n150 Chromium 실제 지도 375×1000/1440×1000/375×812 실측 3건과 지도 E2E 4건 PASS. 실제 VWorld 타일을 사용하되 Feature API는 결정적 검증 자료다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 최신 main 보안 정합 병합·CI·독립 리뷰이며 자체 운영 빌드·배포는 하지 않는다.
 
 ## 2026-10-23 — MCST 6시간 상한·멈춤(T-GEOLOAD-01): 브랜치 `fix/mcst-geo-stall`
 

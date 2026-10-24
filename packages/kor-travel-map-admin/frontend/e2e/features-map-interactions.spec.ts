@@ -1062,6 +1062,34 @@ test.describe("/features map interactions", () => {
     await expect(page.getByText("표시할 feature가 없습니다.")).toBeVisible();
   });
 
+  for (const width of [375, 1440]) {
+    test(`${width}px 핵심 필터·지도 접근성과 부가 필터 치수`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 1000 });
+      await mockFeatureRoutes(page);
+      await page.goto("/features");
+      const map = page.getByTestId("map-canvas-container");
+      await expect(map).toBeVisible();
+      await setMapZoom(page, 14, [126.978, 37.5665]);
+      await expect(page.locator(".kt-map-readout")).toContainText("1건 표시");
+      const box = await map.boundingBox();
+      expect(box?.height).toBeGreaterThanOrEqual(698);
+      if (width === 375) expect(box?.y).toBeLessThanOrEqual(450);
+      await expect(page.getByLabel("수명주기 필터")).toHaveCount(0);
+      await page.getByRole("button", { name: "추가 필터", exact: true }).click();
+      for (const label of ["수명주기 필터", "공개 상태 필터", "품질 상태 필터"]) {
+        await expect.poll(async () => Math.round((await page.getByLabel(label).boundingBox())?.width ?? 0)).toBe(176);
+        const rect = await page.getByLabel(label).boundingBox();
+        expect(rect?.width).toBe(176);
+        expect(rect?.height).toBe(30);
+      }
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "도움말: Feature 지도" }).click();
+      await expect(page.locator('[data-slot="popover-content"]')).toContainText("추가 필터에서");
+      await page.keyboard.press("Escape");
+      expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
+    });
+  }
+
   test("비공개 운영 상태 축 필터 — retired/suppressed 쿼리와 테이블 축을 함께 반영", async ({
     page,
   }) => {
@@ -1076,8 +1104,11 @@ test.describe("/features map interactions", () => {
     });
 
     await page.goto("/features");
+    await page.getByRole("button", { name: "추가 필터", exact: true }).click();
     await page.getByLabel("수명주기 필터").selectOption("retired");
     await page.getByLabel("공개 상태 필터").selectOption("suppressed");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("button", { name: "추가 필터 (2)", exact: true })).toBeVisible();
     await setMapZoom(page, 14);
 
     await expect
