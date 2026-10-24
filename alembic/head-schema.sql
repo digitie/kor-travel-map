@@ -11845,13 +11845,15 @@ BEGIN
     END LOOP;
     -- 원래 Mapping의 모든 항목과 transaction now()를 보존한다.
     -- EX/global의 직렬화와 SH의 정렬 잠금·cap은 분리한다.
+    EXECUTE $fixed_stamp_sql$
     INSERT INTO feature.feature_geocode_stamps AS stamp(
         feature_id,geo_version_token,geo_data_token,reverse_outcome,stamped_at)
-    SELECT id,p_version_token,p_data_token,outcome,now()
-        FROM unnest(p_feature_ids,p_outcomes) AS input(id,outcome)
+    SELECT id,$3,$4,outcome,now()
+        FROM unnest($1::uuid[],$2::text[]) AS input(id,outcome)
     ON CONFLICT(feature_id) DO UPDATE SET geo_version_token=EXCLUDED.geo_version_token,
         geo_data_token=EXCLUDED.geo_data_token,reverse_outcome=EXCLUDED.reverse_outcome,
         stamped_at=EXCLUDED.stamped_at;
+    $fixed_stamp_sql$ USING p_feature_ids,p_outcomes,p_version_token,p_data_token;
     GET DIAGNOSTICS v_count=ROW_COUNT;
     RETURN v_count;
 END;
