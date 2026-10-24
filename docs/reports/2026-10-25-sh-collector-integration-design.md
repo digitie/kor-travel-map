@@ -39,7 +39,7 @@ child receipt→root completion을 유지한다. 지원 외를 발견하면 SH D
 
 `providers/mcst.py`의 `_build_bundle`은 `natural_key = "::".join([name, raw_address or ""])`를
 source_entity_id와 파생 Feature alias의 근거로 쓴다. `mcst-name-v1`의 presence가 있어도 이름이
-바뀌면 identity도 바뀐다. 안정 ID를 임의 추가하거나 이름변경을 Heritage처럼 승인하지 않는다.
+바뀌면 identity도 바뀐다. 안정 ID를 임의 추가하거나 이름변경을 Heritage의 동일 identity 갱신으로 분류하지 않는다.
 MCST 최소 지원은 원 raw/이름/주소/key/타입·Geo 불변인 반복 수집이며 source 재관측·동일 winner와
 stamp/capture의 실제 DML을 수행하는 경우다. 사용자에게 보이는 이름변경 성공의 증거는 아니다.
 이름/주소 변화는 첫 SH DML 전에 부적격이며 정본 EX의 신규 identity 의미를 유지한다.
@@ -63,7 +63,11 @@ frozen exact memberships, 시도 slug 표식, 실패 slug의 sync-success 금지
 A1은 pure 진단이고 collector_ready=False다. 현재 raw를 오늘 converter revision으로 다시
 변환했다고 해서 과거 revision의 정본 증거가 생기지 않는다. 현재 source head/정확 record,
 정책에 저장된 normalizer revision과 supplied field evidence, canonical UUID/primary link/claim,
-현재 typed projection, 현재 Geo stamp를 한 planning 응답으로 읽고 증거 hash를 묶는다.
+현재 provider 원문에서 재구성한 typed projection과 현재 Geo stamp를 한 planning 응답으로
+읽고 증거 hash를 묶는다. provider projection은 operator override가 적용된 effective 값과
+분리한다. 이름 override에 가린 원천 이름 변화도 새 후보/원천 lineage를 갱신하며 사람의
+effective 이름은 보존한다. effective 값이 같다는 이유로 원천 변화가 없다고 판정하거나
+사람의 값을 provider 원문으로 재구성하지 않는다. 이는 A1의 기존 비교 계약을 유지한다.
 이 증거가 불완전하면 SH 불가다. A1의 감사 clock/파생 alias 제외는 그대로 적용하되 claim은
 DB에서 재검증한다. 이름 파생 category/marker/주소/image alt 변화, source link identity,
 kind/parent/lifecycle/expiry/admin evidence 변화는 SH 불가다. file_sources는 첫 SH에서는 빈 값만
@@ -79,6 +83,13 @@ planning은 protocol SH+policy epoch SH를 먼저 잡는 별도 경로여야 한
 lock_feature_curation_write(EX)를 재사용하면 앞 SH apply와 다음 planning을 직렬화하므로
 SH collector의 DB 중첩 목표를 달성하지 못한다. 같은 dataset owner/anchor 직렬화는 유지한다.
 모든 current/head/claim/evidence 조회는 bounded bulk이고 N개별 왕복을 만들지 않는다.
+
+새 full SH wrapper는 각 실제 source 적용 뒤 accepted head의 source_record_key가 입력
+record key와 정확히 같은지 확인한다. 동일 raw key가 이미 current인 재관측은 허용한다.
+기존 native `_apply_provider_scalar`가 낡은 입력에서 현재 head key를 반환하는 scalar 의미를
+새 전체 수집 성공으로 포장하지 않는다. 하나라도 입력 key와 다르면 전체 TX를 rollback하고
+fresh 입력/계획으로 재검증하며 capture/finish/sync-success/후속 receipt를 만들지 않는다.
+기존 public scalar single/batch의 반환·적용 계약은 변경하지 않는다.
 
 ## Geo stamp는 없어도 되는 부수 효과가 아니다
 
@@ -144,7 +155,7 @@ runner를 직접 호출해 이 pool을 우회한다는 문서 경계도 별도�
 첫 wrapper PR에서는 이 Geo 보호 pool을 바꾸지 않는다. 먼저 실제 두 dataset의 DB write 구간
 중첩을 real converter/client/tracking fixture로 증명하고, Geo 요청 구간과 DB 구간을 분리하는
 worker 설계/Geo capacity 수용을 후속 결정한다. Geo pool 자체를 무조건2로 늘리는 것은 이 설계의
-승인이 아니며 운영 변경0이다. Weather/Transport 전파도 이후 각 실제 병목/실패 반례를 기준으로 한다.
+운영 수용 범위가 아니며 현재 운영 변경0이다. Weather/Transport 전파도 이후 각 실제 병목/실패 반례를 기준으로 한다.
 
 ## 구현 전에 확정할 필수 반례
 
@@ -155,7 +166,8 @@ worker 설계/Geo capacity 수용을 후속 결정한다. Geo pool 자체를 무
 | 동일 Geo | 실제 source DML과 stamp stamped_at 재관측이 한 TX, 2번째 stamp 실패 시 전부 rollback |
 | retire | 입력 밖 별도 area1이면 EX, same entity는 reject, dataset 전체0일 때만 SH retired0 |
 | 범위/상한 | raw/분류/파일/관리증거/부모/kind 변화와 2731/1MiB초과/실manifest8193은 source·stamp·receipt0 |
-| replay | A→B→옛A completed와 새plan을 각각 검사, capture/stamp 변경 뒤 거짓 완료 금지 |
+| replay | A→B→옛A completed와 새plan을 각각 검사, 실제 accepted head≠입력 key이면 전체 rollback/완료0 |
+| override | 원천 이름 변경이 사람 이름에 가려도 후보/lineage 갱신·effective override 보존 |
 | 취소/회복 | 두 번째 source/stamp DML 실패, 반복 취소, 실제 process kill→전체 rollback+동일artifact fresh retry |
 | 잠금 | 실제 두 독립 dataset의 첫 source DML 뒤 commit 전 barrier; 서로 다른 PID/xid, 정확 SH, global EX 없음 |
 | 충돌 | 같은 dataset 직렬화, shared Feature 충돌, old EX 양방향 차단/승격23514/55P03 rollback |
@@ -165,7 +177,7 @@ worker 설계/Geo capacity 수용을 후속 결정한다. Geo pool 자체를 무
 
 첫 PR은 Heritage 한 scope의 정확성을 먼저 닫고, 두 번째 제공자의 독립 진단·실제 DML overlap과
 worker scheduling 수용을 별도 미완으로 둔다. 실제 두 번째 adapter를 fake dataset으로 대체하지 않는다.
-최종A3 CI/UI 수용을 먼저 진행하며 본 문서는 코드진행 허가나 전체 동시쓰기 완료 판정이 아니다.
+A3 CI/UI 수용을 먼저 진행하며 본 문서는 구현/운영 수용이나 전체 동시쓰기 완료 판정을 대신하지 않는다.
 
 
 ## 권장 작은 PR 순서와 수용 종료 조건
@@ -178,7 +190,7 @@ worker scheduling 수용을 별도 미완으로 둔다. 실제 두 번째 adapte
    실제 독립 두 dataset에서 첫 DML 후 미커밋 barrier를 동시에 관측하고 같은 winner·capture/
    후속 receipt 및 실패 원자성을 확인한다. raw scalar 두 세션 실험과 구분한다.
 4. worker·배포 전 수용: Geo pool의 현재 보호 목적과 source/Geo/DB 단계별 병목, 실제 worker
-   종료/복구·ARM CPU/RSS/WAL·빈 집합/급감 guard를 확인한다. 승인 없이 pool/정책/운영값을 켜지 않는다.
+   종료/복구·ARM CPU/RSS/WAL·빈 집합/급감 guard를 확인한다. 운영 검증 게이트를 통과하기 전에 pool/정책/운영값을 바꾸지 않는다.
 
 현재 이 문서는 위 1의 초안이며 2~4의 구현·실측은0이다. UI는 실제 화면 흐름만 UI로 기록하고
 직접 helper/API 호출은 실제 PG/HTTP 증거로 분리한다. Weather/Transport는 Map 수용 뒤 각 저장소의
