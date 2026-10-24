@@ -21,7 +21,7 @@ migration CREATE·drift·짧은 GUC 단위5 PASS(0.29초), Ruff2파일/mypy1파�
 첫 정적 합집합은 새 unit의 baseline dump 직접 참조 때문에1 FAIL/377 PASS/기존6 skip이었다.
 원 로그를 보존하고 fake catalog fixture로 격리해 baseline을 현행 계약으로 쓰지 않도록 고쳤다.
 수정 뒤 같은 정적·단위 합집합은378 PASS/기존6 skip(29.76초)다. 앞5개와 중복 합산하지 않는다.
-실제 PG·API·비용·전체 CI는 아직 실행하지 않았다. 두 독립 소스 리뷰 뒤
+위 정적 검사 시점에는 실제 PG·API·비용·전체 CI가 미실행이었다. 두 독립 소스 리뷰 뒤
 기존/부재·값동일·geometry/null·notice·모든 kind·override 보존·revision/clock·잘못된 source/registry
 오류순서·owner concurrent insert fallback·전체 rollback을 검증한다.
 현재 Feature lock은 정본 caller를 직렬화하지만 고권한 raw writer의 부재 증명이 아니므로
@@ -29,7 +29,7 @@ atomic UPSERT fallback을 제거하지 않는다. source/값 검증이나 deferr
 
 성능 개선이나 SH collector 완료, 운영 활성화는 주장하지 않는다.
 
-## 실제 시험 source 계획(미실행)
+## 실제 시험 source 계획
 
 전용 owned scalar fixture에서 synthetic SourceRecord/hash/key·실제 source/link·5kind를 심는다.
 외부 SDK 실행이나 collector 경로를 검증한 것으로 세지 않는다. 새15개는5kind의 부재 fallback 뒤
@@ -48,4 +48,19 @@ epoch 및 deferred projection·부재/기존 base를 대조한다. 새15개와 �
 
 허용 geometry null은 SQL NULL과 JSON null을 SQL boolean 두 개로 구분한다.
 잘못된 source record와 등록되지 않은 field를 함께 주고 source provenance 오류가 먼저 나며
-전체 상태가 rollback되는 반례를 추가했다. 실제 실행은 아직0이다.
+전체 상태가 rollback되는 반례를 추가했다.
+
+## 첫 실제 실행과 fixture 수정
+
+첫 owned425 실행은15개 중 catalog/body/owner·ACL1 PASS, fixture 호출13 FAIL과 setup1 ERROR
+(15.186초)였다. keyword-only `_make_source_entity_key`를 positional로 호출했고,
+`record_property` fixture가 기본 xunit2에서 warning-as-error를 냈다. 원 로그/XML을 보존했다.
+source key는 정본 네 keyword 인자로 호출하고, blocker/waiter PID는 `request.node.user_properties`에
+남기도록 테스트만 수정했다. warning filter·제품 SQL·권한은 바꾸지 않았다.
+정확 CID·UUID·scalar label·익명 volume 부재를 확인하고 CPU 슬롯을 반환했다.
+실패 실행의 source/SDK 사후 검사는 완료되지 않았으며, UPDATE-first 동작·비용 효과는 아직 미판정이다.
+새 소스/기동 binding의 두 리뷰와 CPU 승인 전 재실행하지 않는다.
+
+PG 없이 정본 helper8곳의 signature binding·실제 SourceRecord/key 구성을 대조했다.
+기본 xunit2·기존 warning 정책으로 순수1 PASS(7.79초), XML의 두 PID property 보존,
+실제15개 collect/Ruff를 확인했다. 이 검사는 실제15개 재실행을 대신하지 않는다.

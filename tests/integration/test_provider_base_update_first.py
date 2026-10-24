@@ -73,7 +73,12 @@ async def _seed(engine, kind="place"):
         ),
         fetched_at=datetime(2026, 10, 25, tzinfo=UTC),
     )
-    entity = feature_repo._make_source_entity_key(record)
+    entity = feature_repo._make_source_entity_key(
+        provider=record.provider,
+        dataset_key=record.dataset_key,
+        source_entity_type=record.source_entity_type,
+        source_entity_id=record.source_entity_id,
+    )
     table, column, value, _, _ = _SHAPES[kind]
     async with AsyncSession(engine) as session, session.begin():
         await _gate(session)
@@ -340,7 +345,7 @@ async def test_operator_name_stays_effective_while_provider_base_changes(scalar_
 
 
 async def test_owner_insert_first_blocks_feature_then_updates_after_commit(
-    scalar_engines, record_property
+    scalar_engines, request
 ):
     admin, runtime = scalar_engines
     seed = await _seed(admin)
@@ -376,8 +381,9 @@ async def test_owner_insert_first_blocks_feature_then_updates_after_commit(
                     if owner_pid in blockers:
                         break
                     await asyncio.sleep(0.005)
-            record_property("owner_blocker_pid", owner_pid)
-            record_property("provider_waiter_pid", waiter)
+            request.node.user_properties.extend(
+                [("owner_blocker_pid", owner_pid), ("provider_waiter_pid", waiter)]
+            )
             assert owner_pid != waiter
             await owner.commit()
             out = await asyncio.wait_for(task, 3)

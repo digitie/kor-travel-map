@@ -1,6 +1,6 @@
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
-- materializer 두 루프의 기존 행 UPDATE와 원 UPSERT fallback만 분리했다. signature·winner·권한을 보존하며 실제 PG/비용은 두 리뷰 뒤 검증한다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
+- materializer 두 루프만 분리했다. 첫 PG는 catalog1 PASS/fixture13 FAIL·setup1 ERROR였고 정확 정리했다. 테스트 호출·PID 증거만 고쳤으며 동작/비용은 아직 미판정이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
 
 ## 2026-10-25 — EX context 단일 조회(423)
 
