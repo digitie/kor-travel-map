@@ -236,19 +236,37 @@ def _weather_dataset_identities() -> set[tuple[str, str]]:
     }
 
 
-#: ADR-114 결정 7(migration 411): 이 provider의 notice(고속도로 돌발) PG 적재는 퇴역했다 — 현재
-#: 활성 집합은 Valkey(`transport_state_highway_incidents`)가 든다. ADR-105가 남기는 쪽이 아니다.
-_PG_RETIRED_NOTICE_PROVIDERS = frozenset({"kor-travel-transport"})
+def _pg_retired_transport_datasets() -> frozenset[tuple[str, str]]:
+    """ADR-114 결정 7(migration 411)이 PG 적재를 퇴역한 시드 dataset.
+
+    411의 정체성 규칙(provider ``kor-travel-transport`` + ``produces`` price·notice)을
+    시드(rev 300)의 옛 정체성으로 번역한다 — 404 대응표에서 새 kind가 price·notice인
+    것. 현재 상태는 Valkey가 든다.
+    """
+    import importlib.util
+
+    path = _REPO_ROOT / "alembic" / "versions" / "404_transport_provider_identity.py"
+    spec = importlib.util.spec_from_file_location("_migration_404_kinds", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return frozenset(
+        (old_provider, old_dataset)
+        for old_provider, old_dataset, _new, _label, kind, _job in module.DATASET_MOVES
+        if kind in {"price", "notice"}
+    )
 
 
 def _kept_notice_dataset_ids() -> set[int]:
     """날씨 출처가 아닌 notice dataset — ADR-105가 남기는 쪽(ADR-114로 퇴역한 transport 제외)."""
+    retired = _pg_retired_transport_datasets()
     return {
         dataset_id
         for dataset_id, dataset in _catalog_datasets().items()
         if _NOTICE_KIND in dataset.produces
         and not dataset.is_weather
-        and dataset.provider not in _PG_RETIRED_NOTICE_PROVIDERS
+        and (dataset.provider, dataset.dataset_key) not in retired
     }
 
 
