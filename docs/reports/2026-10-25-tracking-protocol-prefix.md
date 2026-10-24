@@ -42,6 +42,15 @@ Codegraph index를 재사용한 실제 caller/callee/impact 조회를 소스 추
   실행하지 않았다. 현재 head-schema는 부모423 원문이며 최종 수용 증거가 아니다.
 - 원격 운영·HTTP·UI 실행0, 공유 venv 변경0. CI와 독립 소스 리뷰도 아직 미완이다.
 
+## Startup 허용 목록 P1 정정
+
+독립 리뷰에서 새 helper의 runtime EXEC와 기동 preflight SD 목록이 어긋난
+문제를 찾았다. 최초 체크포인트는 정상 catalog도 unexpected SD로 거부한다.
+정확한 boolean signature 1개를 서비스 allowlist에 추가했고 검사 함수는 바꾸지 않았다.
+수정 전 literal catalog fixture 1 FAIL을 보존했으며, 수정 후 DB/prefix 순수31
+PASS(1.59초)·mypy1/Ruff를 확인했다. 같은 시험에서 권한 누락과 text overload는
+계속 거부한다. 실제 API startup/catalog 검증은 여전히 별도 PG 수용 대상이다.
+
 ## 다음 검증과 미완
 
 실제 두 backend에서 P가 먼저 대기하고 L/root/member는 아직 선점하지 않은지,
