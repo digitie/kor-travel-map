@@ -179,6 +179,9 @@ export type AdminShellProps = {
   section?: string;
   breadcrumbs?: AdminBreadcrumb[];
   help?: ReactNode;
+  helpVariant?: "help" | "info";
+  /** 지도처럼 작업면을 먼저 보여야 하는 화면의 세로 여백만 줄인다. */
+  compact?: boolean;
   /**
    * h1 아래 한 줄 메타(상태·갱신 시각·건수 등). text-secondary 텍스트 한 줄로만 렌더한다 —
    * 제목을 반복하는 badge 는 넣지 않는다(M30/M31). 구분자는 `·`.
@@ -195,6 +198,8 @@ export function AdminShell({
   section,
   breadcrumbs,
   help,
+  helpVariant,
+  compact = false,
   meta,
   actions,
   children,
@@ -342,7 +347,7 @@ export function AdminShell({
         <div className="flex min-w-0 flex-col">
           {/* Flush header band: breadcrumb/section → h1(+help) + actions 한 baseline → meta → description, 아래 hairline(M9/M30/m1). */}
           <header
-            className="border-b border-border px-6 pt-5 pb-4"
+            className={cn("border-b border-border px-6", compact ? "py-3" : "pt-5 pb-4")}
             data-slot="admin-shell-header"
           >
             <div className="flex min-w-0 flex-col gap-1">
@@ -379,7 +384,7 @@ export function AdminShell({
                   <h1 className="text-xl leading-tight font-bold tracking-tight text-text-primary">
                     {title}
                   </h1>
-                  {help ? <HelpTip label={title}>{help}</HelpTip> : null}
+                  {help ? <HelpTip label={title} variant={helpVariant}>{help}</HelpTip> : null}
                 </div>
                 {actions ? (
                   <div className="flex shrink-0 flex-wrap items-center gap-2">
@@ -409,7 +414,7 @@ export function AdminShell({
             까지 오염) — 폭만 0으로 끄는 `outline-0` 이라야 자식 컨트롤 링이 살아 있다.
           */}
           <main
-            className="min-w-0 flex-1 px-6 py-6 focus-visible:outline-0"
+            className={cn("min-w-0 flex-1 px-6 focus-visible:outline-0", compact ? "py-3" : "py-6")}
             data-slot="admin-shell-main"
             id={MAIN_CONTENT_ID}
             tabIndex={-1}

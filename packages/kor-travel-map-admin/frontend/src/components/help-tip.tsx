@@ -2,7 +2,7 @@
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import * as React from "react";
-import { CircleHelpIcon } from "lucide-react";
+import { CircleHelpIcon, InfoIcon } from "lucide-react";
 
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -18,6 +18,7 @@ type HelpTipProps = {
   label: string;
   children: React.ReactNode;
   className?: string;
+  variant?: "help" | "info";
 };
 
 /**
@@ -29,7 +30,8 @@ type HelpTipProps = {
  * (design.md §Microinteractions ≥ 24px) without changing the 14px glyph or inline layout.
  * States: rest ink-2 · hover/open ink on paper-2 · active paper-3 · focus = one outline recipe.
  */
-function HelpTip({ label, children, className }: HelpTipProps) {
+function HelpTip({ label, children, className, variant = "help" }: HelpTipProps) {
+  const Icon = variant === "info" ? InfoIcon : CircleHelpIcon;
   const [popoverOpen, setPopoverOpen] = React.useState(false);
 
   const trigger = (
@@ -45,7 +47,7 @@ function HelpTip({ label, children, className }: HelpTipProps) {
       )}
       type="button"
     >
-      <CircleHelpIcon aria-hidden className="size-3.5" />
+      <Icon aria-hidden className="size-3.5" />
     </button>
   );
 

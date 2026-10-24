@@ -6,13 +6,17 @@ import "maplibre-gl/dist/maplibre-gl.css";
 import {
   ExternalLinkIcon,
   GitCompareArrowsIcon,
-  ListIcon,
-  MapIcon,
+  BellIcon,
+  CalendarDaysIcon,
+  FuelIcon,
+  MountainIcon,
+  RouteIcon,
   MapPinnedIcon,
   XIcon,
+  SlidersHorizontalIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { type ColumnDef, type SortingState } from "@tanstack/react-table";
 
@@ -41,21 +45,20 @@ import { EmptyState } from "@/components/empty-state";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
-import { FilterBar, FilterField } from "@/components/filter-bar";
+import { MapDetailOverlay, MapFilterBar as FilterBar, MapFilterField as FilterField, MapKindFilter, MapTabs as Tabs, MapTabPanel as TabsContent, MapViewTabs } from "@kor-travel/ui/map-controls";
 import { JsonViewer } from "@/components/json-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { Card } from "@/components/ui/card";
 import {
   DataTable,
   type DataTableColumnMeta,
 } from "@/components/ui/data-table";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   VWorldFeatureClusters,
   VWorldMapView,
@@ -123,13 +126,41 @@ function PayloadDisclosure({
   );
 }
 
-function FeatureDetailPanel({
+export function FeatureDetailPanel({
   featureId,
   onClose,
 }: {
   featureId: string;
   onClose: () => void;
 }) {
+  const panelRef = useRef<HTMLElement | null>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
+  const entryFrameRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && !panelRef.current?.contains(active)) {
+      openerRef.current = active;
+    }
+    const frame = requestAnimationFrame(() => panelRef.current?.focus({ preventScroll: true }));
+    entryFrameRef.current = frame;
+    return () => {
+      cancelAnimationFrame(frame);
+      entryFrameRef.current = null;
+    };
+  }, [featureId]);
+
+  function dismiss() {
+    if (entryFrameRef.current !== null) cancelAnimationFrame(entryFrameRef.current);
+    const opener = openerRef.current;
+    const target = opener?.isConnected && opener !== document.body
+      ? opener
+      : panelRef.current?.closest(".kt-map-stage")?.querySelector<HTMLElement>(".maplibregl-canvas");
+    // 닫기 버튼이 사라지기 전에 원래 마커/지도 탭으로 돌아가 body 포커스 이탈을 막는다.
+    target?.focus({ preventScroll: true });
+    onClose();
+  }
+
   const adminDetailQuery = useAdminFeatureDetail(featureId);
   const feature = adminDetailQuery.data?.data.feature;
   const sourceProviders = useMemo(() => {
@@ -143,10 +174,12 @@ function FeatureDetailPanel({
       : null;
 
   return (
-    <Card
-      className="absolute top-20 right-3 bottom-24 z-10 w-[min(var(--rail),calc(100%-1.5rem))] gap-3 overflow-auto p-4 shadow-elevated"
+    <MapDetailOverlay
+      className="flex flex-col gap-3 p-4"
       data-testid="feature-detail-panel"
-      size="sm"
+      aria-label="선택 Feature"
+      ref={panelRef}
+      onDismiss={dismiss}
     >
       <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
         <div className="flex min-w-0 flex-col gap-0.5">
@@ -168,7 +201,7 @@ function FeatureDetailPanel({
             size="icon-sm"
             type="button"
             variant="ghost"
-            onClick={onClose}
+            onClick={dismiss}
           >
             <XIcon />
           </Button>
@@ -246,7 +279,7 @@ function FeatureDetailPanel({
           </>
         ) : null}
       </div>
-    </Card>
+    </MapDetailOverlay>
   );
 }
 
@@ -492,7 +525,7 @@ function useFeaturesClientController() {
   };
 }
 
-const filterLabelClass = "text-2xs leading-none font-medium text-text-secondary";
+const FEATURE_KIND_ICONS = { place: MapPinnedIcon, event: CalendarDaysIcon, notice: BellIcon, price: FuelIcon, route: RouteIcon, area: MountainIcon };
 
 function FeatureMapToolbar({
   activeFeatureKinds,
@@ -510,7 +543,6 @@ function FeatureMapToolbar({
   setProviderFilter,
   setPublicationStateFilter,
   setQualityStateFilter,
-  status,
   toggleFeatureKind,
   truncated,
 }: Pick<
@@ -530,52 +562,27 @@ function FeatureMapToolbar({
   | "setProviderFilter"
   | "setPublicationStateFilter"
   | "setQualityStateFilter"
-  | "status"
   | "toggleFeatureKind"
   | "truncated"
 >) {
-  const queryFailed = clusterMode ? clustersQuery.isError : featuresQuery.isError;
+  const selectedStateCount = [
+    lifecycleStateFilter,
+    publicationStateFilter,
+    qualityStateFilter,
+  ].filter(Boolean).length;
   return (
     <div className="flex flex-col gap-3">
       <FilterBar>
-        <div className="flex min-w-0 flex-col gap-1">
-          <span aria-hidden="true" className={filterLabelClass}>
-            종류
-          </span>
-          <div
-            aria-label="kind 필터"
-            className="flex flex-wrap gap-1"
-            data-testid="kind-filter"
-            role="group"
-          >
-            {FEATURE_KINDS.map((kind) => {
-              const active = activeFeatureKinds.has(kind);
-              return (
-                <Button
-                  aria-pressed={active}
-                  key={kind}
-                  size="sm"
-                  type="button"
-                  variant={active ? "secondary" : "outline"}
-                  onClick={() => toggleFeatureKind(kind)}
-                >
-                  {kind}
-                </Button>
-              );
-            })}
-            <Button
-              disabled={isDefaultKindFilter}
-              disabledReason={`기본 종류(${DEFAULT_FEATURE_MAP_KINDS.join("·")})만 선택된 상태입니다`}
-              size="sm"
-              type="button"
-              variant="ghost"
-              onClick={resetFeatureKinds}
-            >
-              <XIcon data-icon="inline-start" />
-              초기화
-            </Button>
-          </div>
-        </div>
+        <MapKindFilter
+          ariaLabel="kind 필터"
+          testId="kind-filter"
+          options={FEATURE_KINDS.map((kind) => { const Icon = FEATURE_KIND_ICONS[kind]; return { value: kind, label: kind, icon: <Icon aria-hidden="true" /> }; })}
+          value={Array.from(activeFeatureKinds)}
+          onToggle={(kind) => toggleFeatureKind(kind as FeatureKind)}
+          onReset={resetFeatureKinds}
+          resetDisabled={isDefaultKindFilter}
+          resetTitle={`기본 종류(${DEFAULT_FEATURE_MAP_KINDS.join("·")})만 선택된 상태입니다`}
+        />
         <FilterField htmlFor="feature-provider-filter" label="소스">
           <NativeSelect
             aria-label="소스 필터"
@@ -593,69 +600,87 @@ function FeatureMapToolbar({
             ))}
           </NativeSelect>
         </FilterField>
-        <FilterField htmlFor="feature-lifecycle-filter" label="수명주기">
-          <NativeSelect
-            aria-label="수명주기 필터"
-            className="w-36"
-            id="feature-lifecycle-filter"
-            size="sm"
-            value={lifecycleStateFilter}
-            onChange={(event) =>
-              setLifecycleStateFilter(
-                event.target.value as AxisFilter<FeatureLifecycleState>,
-              )
-            }
-          >
-            <NativeSelectOption value="">모든 수명주기</NativeSelectOption>
-            {FEATURE_LIFECYCLE_STATES.map((value) => (
-              <NativeSelectOption key={value} value={value}>
-                {featureStateLabel("lifecycle", value)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </FilterField>
-        <FilterField htmlFor="feature-publication-filter" label="공개 상태">
-          <NativeSelect
-            aria-label="공개 상태 필터"
-            className="w-36"
-            id="feature-publication-filter"
-            size="sm"
-            value={publicationStateFilter}
-            onChange={(event) =>
-              setPublicationStateFilter(
-                event.target.value as AxisFilter<FeaturePublicationState>,
-              )
-            }
-          >
-            <NativeSelectOption value="">모든 공개 상태</NativeSelectOption>
-            {FEATURE_PUBLICATION_STATES.map((value) => (
-              <NativeSelectOption key={value} value={value}>
-                {featureStateLabel("publication", value)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </FilterField>
-        <FilterField htmlFor="feature-quality-filter" label="품질 상태">
-          <NativeSelect
-            aria-label="품질 상태 필터"
-            className="w-36"
-            id="feature-quality-filter"
-            size="sm"
-            value={qualityStateFilter}
-            onChange={(event) =>
-              setQualityStateFilter(
-                event.target.value as AxisFilter<FeatureQualityState>,
-              )
-            }
-          >
-            <NativeSelectOption value="">모든 품질 상태</NativeSelectOption>
-            {FEATURE_QUALITY_STATES.map((value) => (
-              <NativeSelectOption key={value} value={value}>
-                {featureStateLabel("quality", value)}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
-        </FilterField>
+        <Popover>
+          <PopoverTrigger render={<Button size="sm" variant="outline" />}>
+            <SlidersHorizontalIcon data-icon="inline-start" />
+            추가 필터{selectedStateCount > 0 ? ` (${selectedStateCount})` : ""}
+          </PopoverTrigger>
+          <PopoverContent align="end" className="w-auto" aria-label="Feature 상태 필터">
+            <FilterBar className="max-w-44">
+                <FilterField htmlFor="feature-lifecycle-filter" label="수명주기">
+                  <NativeSelect
+                    aria-label="수명주기 필터"
+                    className="w-44"
+                    id="feature-lifecycle-filter"
+                    size="sm"
+                    value={lifecycleStateFilter}
+                    onChange={(event) =>
+                      setLifecycleStateFilter(
+                        event.target.value as AxisFilter<FeatureLifecycleState>,
+                      )
+                    }
+                  >
+                    <NativeSelectOption value="">모든 수명주기</NativeSelectOption>
+                    {FEATURE_LIFECYCLE_STATES.map((value) => (
+                      <NativeSelectOption key={value} value={value}>
+                        {featureStateLabel("lifecycle", value)}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </FilterField>
+                <FilterField htmlFor="feature-publication-filter" label="공개 상태">
+                  <NativeSelect
+                    aria-label="공개 상태 필터"
+                    className="w-44"
+                    id="feature-publication-filter"
+                    size="sm"
+                    value={publicationStateFilter}
+                    onChange={(event) =>
+                      setPublicationStateFilter(
+                        event.target.value as AxisFilter<FeaturePublicationState>,
+                      )
+                    }
+                  >
+                    <NativeSelectOption value="">모든 공개 상태</NativeSelectOption>
+                    {FEATURE_PUBLICATION_STATES.map((value) => (
+                      <NativeSelectOption key={value} value={value}>
+                        {featureStateLabel("publication", value)}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </FilterField>
+                <FilterField htmlFor="feature-quality-filter" label="품질 상태">
+                  <NativeSelect
+                    aria-label="품질 상태 필터"
+                    className="w-44"
+                    id="feature-quality-filter"
+                    size="sm"
+                    value={qualityStateFilter}
+                    onChange={(event) =>
+                      setQualityStateFilter(
+                        event.target.value as AxisFilter<FeatureQualityState>,
+                      )
+                    }
+                  >
+                    <NativeSelectOption value="">모든 품질 상태</NativeSelectOption>
+                    {FEATURE_QUALITY_STATES.map((value) => (
+                      <NativeSelectOption key={value} value={value}>
+                        {featureStateLabel("quality", value)}
+                      </NativeSelectOption>
+                    ))}
+                  </NativeSelect>
+                </FilterField>
+            </FilterBar>
+            <nav aria-label="관련 지도 작업" className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
+              <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/curated-features">
+                <MapPinnedIcon data-icon="inline-start" />큐레이션 지도
+              </Link>
+              <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/admin/features/dedup-reviews">
+                <GitCompareArrowsIcon data-icon="inline-start" />중복 검토
+              </Link>
+            </nav>
+          </PopoverContent>
+        </Popover>
       </FilterBar>
 
       {!clusterMode && featuresQuery.isError ? (
@@ -676,23 +701,16 @@ function FeatureMapToolbar({
           </AlertDescription>
         </Alert>
       ) : null}
-      <div className="flex flex-wrap items-center gap-2">
-        <Badge variant={queryFailed ? "destructive" : "neutral"}>{status}</Badge>
-        {truncated ? (
-          <Badge
-            data-testid="features-partial-indicator"
-            title="현재 bbox 결과가 서버 상한에서 잘렸습니다. 더 확대해 범위를 좁히세요."
-            variant="warning"
-          >
+      {truncated ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <Badge data-testid="features-partial-indicator" variant="warning">
             부분 결과
           </Badge>
-        ) : null}
-        {truncated ? (
           <span className="text-2xs text-text-secondary">
             결과가 서버 상한에서 잘렸습니다 — 더 확대해 범위를 좁히세요.
           </span>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -700,6 +718,7 @@ function FeatureMapToolbar({
 function FeatureMapWorkspace({
   clusterItems,
   clusterMode,
+  clustersQuery,
   featureColumns,
   featureItems,
   featureViewMode,
@@ -709,6 +728,7 @@ function FeatureMapWorkspace({
   setSelectedFeatureId,
   setTableSorting,
   showAreaGeometry,
+  status,
   tableSorting,
   updateViewportFromMap,
   viewport,
@@ -716,6 +736,7 @@ function FeatureMapWorkspace({
   ReturnType<typeof useFeaturesClientController>,
   | "clusterItems"
   | "clusterMode"
+  | "clustersQuery"
   | "featureColumns"
   | "featureItems"
   | "featureViewMode"
@@ -725,6 +746,7 @@ function FeatureMapWorkspace({
   | "setSelectedFeatureId"
   | "setTableSorting"
   | "showAreaGeometry"
+  | "status"
   | "tableSorting"
   | "updateViewportFromMap"
   | "viewport"
@@ -741,27 +763,17 @@ function FeatureMapWorkspace({
          * 필터되므로 현재 viewport가 두 뷰의 공통 컨텍스트다). e2e는 "center … · z N"을 읽는다
          * (e2e/live/features-map.live.spec.ts · features-map-input-roundtrip.live.spec.ts).
          */}
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <TabsList aria-label="보기 전환">
-            <TabsTrigger value="map">
-              <MapIcon data-icon="inline-start" />
-              지도
-            </TabsTrigger>
-            <TabsTrigger value="table">
-              <ListIcon data-icon="inline-start" />
-              테이블
-            </TabsTrigger>
-          </TabsList>
-          <span className="font-mono text-2xs text-text-secondary tabular-nums">
-            center {viewport.lon.toFixed(4)}, {viewport.lat.toFixed(4)} · z{" "}
-            {viewport.zoom.toFixed(1)}
-          </span>
-        </div>
+        <MapViewTabs
+          listValue="table"
+          listLabel="테이블"
+          viewport={{ longitude: viewport.lon, latitude: viewport.lat, zoom: viewport.zoom }}
+          status={<Badge variant={(clusterMode ? clustersQuery.isError : featuresQuery.isError) ? "destructive" : "neutral"}>{status}</Badge>}
+        />
 
         <TabsContent className="min-h-0" value="map">
           <div
             className={cn(
-              "relative overflow-hidden rounded-panel border border-border bg-surface-subtle",
+              "kt-map-stage rounded-panel border border-border bg-surface-subtle",
               WORKSPACE_HEIGHT_CLASS,
             )}
           >
@@ -887,28 +899,13 @@ function FeaturesClientView({
 }: ReturnType<typeof useFeaturesClientController>) {
   return (
     <AdminShell
-      actions={
-        <>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/curated-features"
-          >
-            <MapPinnedIcon data-icon="inline-start" />
-            큐레이션 지도
-          </Link>
-          <Link
-            className={cn(buttonVariants({ variant: "outline" }))}
-            href="/admin/features/dedup-reviews"
-          >
-            <GitCompareArrowsIcon data-icon="inline-start" />
-            중복 검토
-          </Link>
-        </>
-      }
-      description="현재 지도 범위의 feature를 종류·소스·상태 축으로 걸러 지도와 테이블로 봅니다."
+      help="현재 지도 범위의 Feature를 종류·소스·상태로 걸러 봅니다. 추가 필터에서 수명주기·공개·품질 상태를 선택할 수 있습니다."
+      helpVariant="info"
+      compact
+      section=""
       title="Feature 지도"
     >
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-2">
         <FeatureMapToolbar
           activeFeatureKinds={activeFeatureKinds}
           clusterMode={clusterMode}
@@ -925,7 +922,6 @@ function FeaturesClientView({
           setProviderFilter={setProviderFilter}
           setPublicationStateFilter={setPublicationStateFilter}
           setQualityStateFilter={setQualityStateFilter}
-          status={status}
           toggleFeatureKind={toggleFeatureKind}
           truncated={truncated}
         />
@@ -933,6 +929,8 @@ function FeaturesClientView({
         <FeatureMapWorkspace
           clusterItems={clusterItems}
           clusterMode={clusterMode}
+          clustersQuery={clustersQuery}
+          status={status}
           featureColumns={featureColumns}
           featureItems={featureItems}
           featureViewMode={featureViewMode}
