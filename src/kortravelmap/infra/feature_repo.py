@@ -496,7 +496,7 @@ INSERT INTO provider_sync.source_entities (
     :observed_at, :observed_at
 )
 ON CONFLICT (source_entity_key) DO UPDATE SET
-    first_seen_at = LEAST(provider_sync.source_entities.first_seen_at, EXCLUDED.first_seen_at),
+    -- first_seen_at은 생성 증거이므로 과거 artifact replay로 되돌리지 않는다.
     last_seen_at = GREATEST(
         provider_sync.source_entities.last_seen_at,
         EXCLUDED.last_seen_at
