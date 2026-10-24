@@ -15,7 +15,7 @@
 
 입력 배열 자체 검사, 모든 가변 열 inventory·양측 text JOIN의 metadata CASE, SQLNULL/JSONnull 구분, 전체 binary256KiB·encoded1MiB와 row 상한, 저장 normalizer/core.name header·R1/R2·base24/field별 clock, claim·primary-only 전체 membership·lifecycle/stamp/epoch·dataset retire0 검사의 source 초안을 작성했고 bfed checkpoint의 full source/12관계43가변열 inventory 대조는 독립 두 리뷰를 통과했다. 실제 SDK3shape positive는 확인했으나 부정·snapshot·메모리 수용은 미완이다. nonname24가 서로 다른 R1인 과거 상태는 처음에는 명시 EX로 거부한다.
 
-기존 synthetic primitive13 부정 사례와 별도 actual SDK 저장3shape 근거를 새 reader의 성공이나 peak memory 증거로 세지 않는다. full SQL/ACL/volatility/NULL/encoded의 독립 두 source 리뷰는 완료했다. 격리 PG positive·부정·snapshot·memory 시험은 별도 수용이 필요하다. 새 SH wrapper·실제 두 dataset worker·ARM·전국 수집·Geo·child/root seal·운영 전환은 후속 미완이다.
+기존 synthetic primitive13 부정 사례와 별도 actual SDK 저장3shape 근거를 새 reader의 성공이나 peak memory 증거로 세지 않는다. full SQL/ACL/volatility/NULL/encoded의 독립 두 source 리뷰는 완료했다. 작은 positive 뒤에도 저장 부정·snapshot·memory 시험은 별도 수용이 필요하다. 새 SH wrapper·실제 두 dataset worker·ARM·전국 수집·Geo·child/root seal·운영 전환은 후속 미완이다.
 
 ## 실제 SQL source 체크포인트
 
@@ -31,7 +31,7 @@ private metadata 단계는 숫자/bool만 받는 datum 검사와 12관계의 제
 
 bfed checkpoint의 첫 owned PG 실행은 `422_heritage_evidence_reader.py`의 sidecar 실행에서 `cannot insert multiple commands into a prepared statement`로 setup ERROR였다. 함수 생성과 REVOKE가 한 문자열에 묶여 asyncpg 준비문 계약을 위반했고, reader 시험 본문과 head oracle 생성에는 도달하지 않았다. 원 로그/XML/실행 원장을 보존했으며 소유 scalar container 잔여0을 확인했다. 이 결과를 reader PASS로 세지 않는다.
 
-기존 421 배선 방식에 맞춰 shape의 두 CREATE를 각각 별도 파일로 나누고, 모든 REVOKE를 바로 뒤 migration literal로 옮겼다. 여섯 CREATE 본문 bytes와 원래 CREATE→REVOKE 순서는 동일하며 runtime SQL parser를 추가하지 않았다. 공개 함수의 중복 REVOKE도 원래 순서를 보존했다. 최소 수정의 순수·정적48 PASS/기존1 SKIP(1.57초), Ruff/strict mypy1파일 PASS이며, 실제 bootstrap/SDK3shape 재실행은 두 독립 delta 리뷰 뒤 진행한다.
+기존 421 배선 방식에 맞춰 shape의 두 CREATE를 각각 별도 파일로 나누고, 모든 REVOKE를 바로 뒤 migration literal로 옮겼다. 여섯 CREATE 본문 bytes와 원래 CREATE→REVOKE 순서는 동일하며 runtime SQL parser를 추가하지 않았다. 공개 함수의 중복 REVOKE도 원래 순서를 보존했다. 최소 수정의 순수·정적48 PASS/기존1 SKIP(1.57초), Ruff/strict mypy1파일 PASS이며, 실제 bootstrap/SDK3shape 재실행은 두 독립 delta 리뷰 뒤 진행하도록 했다. 결과는 아래에 정산했다.
 
 ## 실제 초기 positive와 공식 oracle
 
@@ -45,6 +45,12 @@ bfed checkpoint의 첫 owned PG 실행은 `422_heritage_evidence_reader.py`의 s
 
 공개 SQL 입력의 NULL/차원/중복/형식/2731개와 metadata 배열 예산을 Python validator와 독립해서 검증하는 실제 PG 시험 source를 추가했다. private5 EXECUTE와 private base table SELECT는 runtime42501을 확인하고, 예외 TX 뒤 새 READ ONLY TX의 공개 known-ineligibility 응답을 확인하도록 했다. owner 고권한까지 sandbox한다는 주장은 없다.
 
-현재 기존 SDK positive1을 포함해18개가 수집된다(collect-only18, 0.98초). 이 중 추가17개는 아직 실행하지 않았고 source 두 리뷰 전 PG0이다. Ruff의 초기 raises 범위2건은 실제 한 문장만 예외 검증하고 session 종료로 rollback되도록 수정했다. snapshot·저장 shape/압축·history/peak 시험은 그다음 source/runner gate로 분리한다.
+이 source 체크포인트에서는 기존 SDK positive1을 포함해18개가 수집됐다(collect-only18, 0.98초). 그 당시 신규17개는 실행 전이었고 source 두 리뷰 전 PG0을 유지했다. 실행 결과는 아래에 별도로 정산했다. Ruff의 초기 raises 범위2건은 실제 한 문장만 예외 검증하고 session 종료로 rollback되도록 수정했다. snapshot·저장 shape/압축·history/peak 시험은 그다음 source/runner gate로 분리한다.
 
 독립 두 리뷰 뒤 source `ca631dc2747afa9e660f5d8979ae8b59028940fc`의 같은 bounded fresh fixture에서 전체18 PASS(14.58초, skip0)를 확인했다. 내역은 기존 SDK3shape1·private 권한6·서버 입력10·배열 metadata 예산1이며, 과거 positive1을 새로운 시험으로 합산하지 않는다. runtime session/current_user·6routine owner/EXEC·resource를 관찰했고 exact CID의 Docker SDK NotFound/label0과 공식 oracle bytes 불변을 확인했다. 저장 shape 부정·snapshot·history/peak·운영 검증은 미완이다.
+
+## Snapshot 다음 시험 source(실행 전)
+
+SDK fixture 생성만 test helper로 추출하고 RR reader→별도 actual batch commit→같은 RR old/fresh RC new를 검증하는 source를 추가했다. 별도 단일 statement는 MATERIALIZED controller barrier의 held 열을 참조하고 실제 pg_blocking_pids에서 정확한 C를 관측한 뒤 B commit/C release/A old를 비교한다. A/B runtime과 C/observer admin은 네 물리 PID가 다른지 확인하며, 기본 pool2를 각각 사용한다. controller 해제와 task 종료에는 명시 timeout을 둔다. 이는 snapshot-before-function 검증이며 metadata/payload 중간 interleave 증거가 아니다.
+
+base24 JSON 배열 순서는 계약이 아니므로 field_path별 map으로 비교하고24개/중복0을 확인한다. 각 entry의 값·R1·revision·clock 전체는 비교하며 제품에 ORDER BY를 추가하지 않는다. 새2case는 아직 PG 미실행이고 source 두 리뷰 뒤에만 실행한다.

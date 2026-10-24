@@ -6,7 +6,9 @@ optional SDK skip은 PASS가 아니다.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import timedelta
+from time import monotonic
 from uuid import uuid4
 
 import pytest
@@ -15,7 +17,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.dto import Address
 from kortravelmap.infra import scoped_provider_batch as batch
-from kortravelmap.infra.heritage_evidence_reader import read_heritage_evidence
+from kortravelmap.infra.heritage_evidence_reader import (
+    decode_heritage_evidence,
+    read_heritage_evidence,
+    validate_heritage_evidence_request,
+)
 from kortravelmap.providers.krheritage import heritage_items_to_bundles
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
@@ -27,17 +33,34 @@ from tests.integration.test_scoped_provider_batch import _entity, _plan, _seed_b
 pytestmark = pytest.mark.integration
 
 
-async def test_actual_sdk_three_shapes_and_old_nonname_r1_are_readable(scalar_engines):
+def _base_by_path(item):
+    """base24의 배열 순서는 계약이 아니다. 값과 모든 provenance/clock은 그대로 비교한다."""
+    rows = item["non_name_base"]
+    by_path = {row["field_path"]: row for row in rows}
+    assert len(rows) == len(by_path) == 24
+    return by_path
+
+
+def _semantic_evidence(envelope):
+    return (
+        envelope.request,
+        envelope.evidence_complete,
+        envelope.reason,
+        envelope.policy_epoch,
+        tuple({**item, "non_name_base": _base_by_path(item)} for item in envelope.items),
+    )
+
+
+async def _sdk_bundles(modes):
     sdk = pytest.importorskip("krheritage.models", reason="actual public Heritage SDK required")
     old, new = [], []
-    # 독립 소유 module DB에서 policy revision1을 한 번 등록하고 세 mode를 함께 확인한다.
     serial = int(uuid4().hex[:8], 16)
     address = Address(legal="서울특별시 영등포구 여의도동 8", bjd_code="1156011000")
 
     async def reverse(_coordinate):
         return address
 
-    for index, mode in enumerate(("no_coord", "coord", "coord_geo")):
+    for index, mode in enumerate(modes):
         raw = {
             "key": {"ccbaKdcd": "11", "ccbaAsno": str(serial + index), "ccbaCtcd": "11"},
             "ccbaMnm1": f"기준 유산 {index}",
@@ -66,6 +89,11 @@ async def test_actual_sdk_three_shapes_and_old_nonname_r1_are_readable(scalar_en
                     }
                 )
             )
+    return old, new
+
+
+async def test_actual_sdk_three_shapes_and_old_nonname_r1_are_readable(scalar_engines):
+    old, new = await _sdk_bundles(("no_coord", "coord", "coord_geo"))
     admin, runtime = scalar_engines
     dataset, items = await _seed_bundles(admin, runtime, old, new)
     keys = [_entity(bundle) for bundle in old]
@@ -101,7 +129,7 @@ async def test_actual_sdk_three_shapes_and_old_nonname_r1_are_readable(scalar_en
         after = await read_heritage_evidence(session, dataset, keys)
         assert after.evidence_complete
     for previous, current, bundle in zip(before.items, after.items, new, strict=True):
-        assert current["non_name_base"] == previous["non_name_base"]
+        assert _base_by_path(current) == _base_by_path(previous)
         assert current["base_record"] == previous["base_record"]
         assert (
             current["name_candidate"]["value_source_record_key"]
@@ -221,3 +249,139 @@ async def test_server_array_physical_budget_precedes_unbounded_enumeration(scala
             "policy_epoch": None,
             "items": [],
         }
+
+
+async def test_repeatable_read_keeps_old_evidence_after_actual_batch_commit(
+    scalar_engines, request
+):
+    admin, runtime = scalar_engines
+    old, new = await _sdk_bundles(("no_coord",))
+    dataset, items = await _seed_bundles(admin, runtime, old, new)
+    keys = [_entity(old[0])]
+    async with AsyncSession(runtime) as reader:
+        await reader.execute(text("SET TRANSACTION ISOLATION LEVEL REPEATABLE READ, READ ONLY"))
+        await reader.execute(text("SET LOCAL statement_timeout='2s'"))
+        reader_pid = await reader.scalar(text("SELECT pg_backend_pid()"))
+        before = await read_heritage_evidence(reader, dataset, keys)
+        assert before.evidence_complete
+        plan, _ = await _plan(runtime, dataset, items)
+        async with AsyncSession(runtime) as writer, writer.begin():
+            writer_pid = await writer.scalar(text("SELECT pg_backend_pid()"))
+            assert reader_pid != writer_pid
+            result = await batch.refresh_scoped_provider_scalars_batch(writer, items, **plan)
+            assert result["status"] == "completed"
+        repeated = await read_heritage_evidence(reader, dataset, keys)
+        assert _semantic_evidence(repeated) == _semantic_evidence(before)
+    async with AsyncSession(runtime) as fresh, fresh.begin():
+        await fresh.execute(text("SET TRANSACTION READ ONLY"))
+        current = await read_heritage_evidence(fresh, dataset, keys)
+    assert current.evidence_complete
+    assert (
+        current.items[0]["current_record"]["source_record_key"]
+        == new[0].source_record.source_record_key
+    )
+    assert (
+        before.items[0]["current_record"]["source_record_key"]
+        == old[0].source_record.source_record_key
+    )
+    assert _base_by_path(current.items[0]) == _base_by_path(before.items[0])
+    assert current.items[0]["base_record"] == before.items[0]["base_record"]
+    request.node.user_properties.extend(
+        [
+            ("snapshot_kind", "repeatable_read_transaction"),
+            ("reader_pid", reader_pid),
+            ("writer_pid", writer_pid),
+            ("actual_batch_committed", True),
+        ]
+    )
+
+
+async def test_stable_reader_uses_statement_snapshot_before_controller_release(
+    scalar_engines, request
+):
+    """호출 전 snapshot 증거이며 metadata/payload 중간 interleave의 증거는 아니다."""
+    admin, runtime = scalar_engines
+    old, new = await _sdk_bundles(("no_coord",))
+    dataset, items = await _seed_bundles(admin, runtime, old, new)
+    keys = [_entity(old[0])]
+    async with AsyncSession(runtime) as previous, previous.begin():
+        before = await read_heritage_evidence(previous, dataset, keys)
+        assert before.evidence_complete
+    gate = uuid4().int & ((1 << 63) - 1)
+    # C와 observer는 별도 admin pool, A와 B는 runtime pool의 독립 연결을 사용한다.
+    async with AsyncSession(admin) as controller, AsyncSession(admin) as observer:
+        await controller.execute(text("SET LOCAL statement_timeout='2s'"))
+        controller_pid = await controller.scalar(text("SELECT pg_backend_pid()"))
+        await controller.execute(
+            text("SELECT pg_advisory_xact_lock(CAST(:gate AS bigint))"), {"gate": gate}
+        )
+        await observer.execute(text("SET TRANSACTION READ ONLY"))
+        await observer.execute(text("SET LOCAL statement_timeout='500ms'"))
+        observer_pid = await observer.scalar(text("SELECT pg_backend_pid()"))
+        async with AsyncSession(runtime) as reader:
+            await reader.execute(text("SET TRANSACTION READ ONLY"))
+            await reader.execute(text("SET LOCAL statement_timeout='3s'"))
+            reader_pid = await reader.scalar(text("SELECT pg_backend_pid()"))
+            assert len({reader_pid, controller_pid, observer_pid}) == 3
+            task = asyncio.create_task(
+                reader.execute(
+                    text("""WITH barrier AS MATERIALIZED (
+                SELECT pg_advisory_xact_lock(CAST(:gate AS bigint)) AS held)
+                SELECT feature.read_heritage_name_refresh_evidence(
+                    :dataset,CAST(:keys AS text[])) AS evidence,barrier.held
+                FROM barrier"""),
+                    {"gate": gate, "dataset": dataset, "keys": keys},
+                )
+            )
+            try:
+                deadline = monotonic() + 1
+                while True:
+                    if task.done():
+                        task.result()  # 조기 SQL 실패를 일반 barrier timeout으로 가리지 않는다.
+                        raise AssertionError("reader completed before the observed controller gate")
+                    blockers = await observer.scalar(
+                        text("SELECT pg_blocking_pids(CAST(:pid AS integer))"), {"pid": reader_pid}
+                    )
+                    if controller_pid in blockers:
+                        break
+                    if monotonic() >= deadline:
+                        raise AssertionError("reader never waited for its exact controller")
+                    await asyncio.sleep(0.01)
+                plan, _ = await _plan(runtime, dataset, items)
+                async with AsyncSession(runtime) as writer, writer.begin():
+                    writer_pid = await writer.scalar(text("SELECT pg_backend_pid()"))
+                    assert len({reader_pid, writer_pid, controller_pid, observer_pid}) == 4
+                    result = await batch.refresh_scoped_provider_scalars_batch(
+                        writer, items, **plan
+                    )
+                    assert result["status"] == "completed"
+                async with AsyncSession(runtime) as fresh, fresh.begin():
+                    await fresh.execute(text("SET TRANSACTION READ ONLY"))
+                    current = await read_heritage_evidence(fresh, dataset, keys)
+                    assert current.evidence_complete
+                    assert (
+                        current.items[0]["current_record"]["source_record_key"]
+                        == new[0].source_record.source_record_key
+                    )
+                await asyncio.wait_for(controller.rollback(), timeout=2)
+                raw = (await asyncio.wait_for(task, timeout=4)).one().evidence
+                actual = decode_heritage_evidence(
+                    validate_heritage_evidence_request(dataset, keys), raw
+                )
+                assert _semantic_evidence(actual) == _semantic_evidence(before)
+                request.node.user_properties.extend(
+                    [
+                        ("snapshot_kind", "statement_before_function"),
+                        ("reader_pid", reader_pid),
+                        ("writer_pid", writer_pid),
+                        ("controller_pid", controller_pid),
+                        ("observer_pid", observer_pid),
+                        ("exact_blocker_observed", True),
+                        ("actual_batch_committed_before_release", True),
+                    ]
+                )
+            finally:
+                await asyncio.wait_for(controller.rollback(), timeout=2)
+                if not task.done():
+                    task.cancel()
+                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), timeout=2)
