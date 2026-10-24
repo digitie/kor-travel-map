@@ -31,7 +31,9 @@ clone하므로 각 trial의 최초 DB 상태가 같다. 생성에 성공한 정�
 다른 서비스·DB·daemon은 다루지 않는다.
 
 cold는 전용 PG 재시작 후 **shared_buffers 첫 실행**이다. OS page cache를 비웠다고 주장하지
-않는다. warm은 같은 artifact의 즉시 native replay다. independent/shared 각각 cold+warm 3회가
+않는다. restart 뒤에는 소유 Testcontainer의 현재 host port로 readiness·새 pool·다음 DB
+관리 접속을 갱신하며, 이전/새 port를 결과에 남긴다. 준비 deadline은 그대로 유지한다.
+warm은 같은 artifact의 즉시 native replay다. independent/shared 각각 cold+warm 3회가
 기본이며 매 trial의 effective 집합(kind·name·coord·category·marker·place_kind)과
 current source 수, seal membership, replay 원문 멱등을 확인한다.
 처음 입력과 replay의 DML 양이 다르므로 cold/warm 차이를 cache 효과만으로 해석하지 않는다.

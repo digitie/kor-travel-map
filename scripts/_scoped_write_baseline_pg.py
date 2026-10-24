@@ -21,7 +21,7 @@ import psycopg
 from alembic.config import Config
 from psycopg import sql
 from sqlalchemy import text
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
 
 from kortravelmap.core import make_feature_id, make_payload_hash, make_source_record_key
@@ -603,6 +603,16 @@ async def _wait_ready(admin: str) -> None:
     raise TimeoutError("소유 PostgreSQL 재기동 준비 시간이 상한을 넘었습니다")
 
 
+async def _restart_owned_database(container: Any, docker_container: Any) -> URL:
+    # Docker의 동적 host port는 restart 뒤 달라질 수 있다. 시작 때의 DSN을 재사용하지 않는다.
+    await asyncio.to_thread(docker_container.restart, timeout=10)
+    current = make_url(await asyncio.to_thread(container.get_connection_url)).set(
+        drivername="postgresql"
+    )
+    await _wait_ready(current.render_as_string(hide_password=False))
+    return current
+
+
 async def _start_owned_container(container: Any) -> None:
     # to_thread는 caller 취소만으로 끝나지 않는다. 시작 완료 뒤에만 outer finally가 stop한다.
     startup = asyncio.create_task(asyncio.to_thread(container.start))
@@ -706,8 +716,9 @@ async def run_baseline(fixture: Fixture, *, repetitions: int = 3) -> dict[str, A
                 name = "ktm_cwrite_baseline_" + uuid4().hex
                 await asyncio.to_thread(_database, admin, "create", name, template)
                 owned.append(name)
-                await asyncio.to_thread(docker_container.restart, timeout=10)
-                await _wait_ready(admin)
+                previous_port = admin_url.port
+                admin_url = await _restart_owned_database(container, docker_container)
+                admin = admin_url.render_as_string(hide_password=False)
                 owner, runtime = engines(name)
                 try:
                     cold = await _measure(owner, runtime, docker_container, case, fixture)
@@ -718,6 +729,12 @@ async def run_baseline(fixture: Fixture, *, repetitions: int = 3) -> dict[str, A
                         {
                             "case": case,
                             "iteration": iteration,
+                            "restart_binding": {
+                                "source": "owned-testcontainer-public-mapping",
+                                "previous_port": previous_port,
+                                "current_port": admin_url.port,
+                                "readiness_verified": True,
+                            },
                             "cold": cold,
                             "warm": warm,
                         }

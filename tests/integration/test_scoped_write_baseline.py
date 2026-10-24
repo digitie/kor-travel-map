@@ -27,6 +27,10 @@ async def test_isolated_three_run_cold_warm_baseline(tmp_path) -> None:
     assert len(report["trials"]) == 6
     assert {trial["case"] for trial in report["trials"]} == {"independent", "shared"}
     for trial in report["trials"]:
+        binding = trial["restart_binding"]
+        assert binding["source"] == "owned-testcontainer-public-mapping"
+        assert binding["readiness_verified"] is True
+        assert all(0 < binding[key] <= 65535 for key in ("previous_port", "current_port"))
         cold, warm = trial["cold"], trial["warm"]
         assert cold["state"]["effective_sha256"] == warm["state"]["effective_sha256"]
         assert cold["state"]["alias_sha256"] == warm["state"]["alias_sha256"]

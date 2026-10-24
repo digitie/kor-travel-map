@@ -55,3 +55,37 @@ async def test_overall_readiness_deadline_closes_each_connected_probe(monkeypatc
         assert not failsafe.expired()
     assert opened
     assert len(closed) == len(opened)
+
+
+@pytest.mark.parametrize("next_port", [30001, 30002])
+async def test_restart_refreshes_owned_mapping_before_readiness(monkeypatch, next_port) -> None:
+    class OwnedContainer:
+        port = 30001
+        reads = 0
+
+        def get_connection_url(self) -> str:
+            self.reads += 1
+            return f"postgresql+psycopg2://owned:fixture@localhost:{self.port}/postgres"
+
+    container = OwnedContainer()
+
+    class OwnedDocker:
+        def restart(self, *, timeout: int) -> None:
+            assert timeout == 10
+            assert container.reads == 0
+            container.port = next_port
+
+    ready: list[str] = []
+
+    async def wait_ready(admin: str) -> None:
+        ready.append(admin)
+        assert container.reads == 1
+        assert pg.make_url(admin).port == next_port
+
+    monkeypatch.setattr(pg, "_wait_ready", wait_ready)
+    current = await pg._restart_owned_database(container, OwnedDocker())
+    assert current.drivername == "postgresql"
+    assert current.port == next_port
+    assert current.username == "owned"
+    assert current.database == "postgres"
+    assert ready == [current.render_as_string(hide_password=False)]
