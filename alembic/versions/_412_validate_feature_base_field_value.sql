@@ -1,4 +1,4 @@
-CREATE OR REPLACE FUNCTION feature.validate_feature_base_field_value() RETURNS trigger
+CREATE FUNCTION feature.validate_active_provider_base_field_value() RETURNS trigger
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$

@@ -9,7 +9,7 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "412_provider_field_scalar_projection"
+revision: str = "412_provider_scalar_projection"
 down_revision: str | None = "411_scoped_feature_write_kernel"
 branch_labels: str | None = None
 depends_on: str | None = None
@@ -76,11 +76,8 @@ def _record_core_sql() -> str:
             RAISE EXCEPTION 'active scalar Feature requires scoped capture' USING ERRCODE='23514';
         END IF;
     ELSE
-        PERFORM feature.assert_scoped_candidate_write(p_attempt,p_feature_id);
-        IF NOT EXISTS (SELECT 1 FROM ops.feature_write_attempts
-            WHERE attempt_id=p_attempt AND provider_dataset_id=p_provider_dataset_id) THEN
-            RAISE EXCEPTION 'capture source is outside the attempt dataset' USING ERRCODE='23514';
-        END IF;
+        PERFORM feature.assert_scoped_provider_scalar_target(
+            p_attempt,p_feature_id,p_provider_dataset_id,p_source_entity_key,p_policy_revision);
     END IF;""",
     )
 
@@ -90,6 +87,11 @@ _ROUTINES: Final[tuple[tuple[str, str, bool], ...]] = (
     ("FUNCTION", "feature.lock_provider_field_policy_epoch()", True),
     ("FUNCTION", "feature.provider_field_policy_statement_barrier()", False),
     ("FUNCTION", "feature.assert_scoped_candidate_write(uuid,uuid)", False),
+    (
+        "FUNCTION",
+        "feature.assert_scoped_provider_scalar_target(uuid,uuid,bigint,text,bigint)",
+        True,
+    ),
     ("FUNCTION", "feature.provider_field_scalar_winners(uuid,bigint,text[])", False),
     (
         "PROCEDURE",
@@ -109,7 +111,7 @@ _ROUTINES: Final[tuple[tuple[str, str, bool], ...]] = (
     ("FUNCTION", "feature._project_provider_field_candidates(uuid)", False),
     ("PROCEDURE", "feature.recompute_provider_field_candidates(uuid,uuid,bigint)", True),
     ("PROCEDURE", "feature.activate_provider_field_policy(uuid,bigint,text[])", False),
-    ("FUNCTION", "feature.validate_feature_base_field_value()", False),
+    ("FUNCTION", "feature.validate_active_provider_base_field_value()", False),
     ("FUNCTION", "feature._assert_provider_field_projection(uuid)", False),
     ("FUNCTION", "feature.guard_provider_field_projection()", False),
     ("FUNCTION", "feature._provider_field_projection_dependency_active(text,text)", True),
@@ -149,6 +151,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _sidecar("lock_provider_field_policy_epoch"),
     _sidecar("provider_field_policy_statement_barrier"),
     _sidecar("assert_scoped_candidate_write"),
+    _sidecar("assert_scoped_provider_scalar_target"),
     _sidecar("provider_field_scalar_winners"),
     _record_core_sql(),
     _sidecar("legacy_record_wrapper"),
@@ -179,6 +182,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
         for signature in (
             *_TRIGGER_FUNCTIONS,
             "feature._provider_field_projection_dependency_active(text,text)",
+            "feature.validate_active_provider_base_field_value()",
         )
     ),
     "SET ROLE ktm_feature_schema_owner",

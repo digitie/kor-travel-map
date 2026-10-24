@@ -17,6 +17,8 @@ BEGIN
         RAISE EXCEPTION 'incomplete scalar guard installation' USING ERRCODE='23514';
     END IF;
     LOCK TABLE feature.feature_base_field_values,feature.feature_geocode_stamps,feature.feature_places,feature.features,feature.provider_field_active_policies,feature.provider_field_shadow_candidates,ops.feature_overrides,provider_sync.provider_datasets,provider_sync.source_entities,provider_sync.source_entity_heads,provider_sync.source_links IN ACCESS EXCLUSIVE MODE;
+    EXECUTE 'DROP TRIGGER trg_feature_base_field_values_validate ON feature.feature_base_field_values';
+    EXECUTE 'CREATE TRIGGER trg_feature_base_field_values_validate BEFORE INSERT OR UPDATE ON feature.feature_base_field_values FOR EACH ROW EXECUTE FUNCTION feature.validate_active_provider_base_field_value()';
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.features FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_places FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_geocode_stamps FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
