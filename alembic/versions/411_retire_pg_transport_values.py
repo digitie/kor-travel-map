@@ -234,8 +234,9 @@ _COUNT_RETIRED_BY_THIS_REVISION_SQL: Final[str] = f"""
 SELECT count(*)
   FROM feature.feature_state_transitions AS transition
  WHERE transition.to_lifecycle_state = 'retired'
-   AND transition.context ->> 'reason_code' = '{RETIRE_REASON_CODE}'
-   AND transition.context ->> 'principal' = '{RETIRE_PRINCIPAL}'
+   AND transition.transition_kind = 'system'
+   AND transition.reason_code = '{RETIRE_REASON_CODE}'
+   AND transition.principal = '{RETIRE_PRINCIPAL}'
 """
 
 _REMAINING_SQL: Final[str] = f"""
