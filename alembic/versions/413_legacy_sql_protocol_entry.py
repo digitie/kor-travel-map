@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from typing import Final
 
 from sqlalchemy import text
@@ -22,6 +23,39 @@ _LEGACY_OWNERS: Final[dict[str, str]] = {
     "reclassify_curation_quarantine_command": "ktm_curation_command_owner",
     "register_provider_field_shadow_policy": "ktm_feature_schema_owner",
 }
+
+# 412의 실제 head oracle에서 산출한 signature/body 정본이다. 임의 로컬 DDL은 수용하지 않는다.
+_EXPECTED_DEFINITIONS: Final[dict[str, tuple[str, str]]] = {
+    "archive_curation_item_command": (
+        "0d2076967e73f7d48cc11cd9aa89f58839bccb3e2a5b6f4490963f2e3b743058",
+        "18a93ca46a4e025bff1217e92d2c87b587ed87847e626f59194c23c44c3a9bb5",
+    ),
+    "create_curation_item_command": (
+        "87578c60cf9f3e8ae6a03242bd51fe3834137bcf4f2165925987a66acd868d12",
+        "5dcef22de66898d53d7426a9899525abe6ae121bd028592b8143732c172f70a4",
+    ),
+    "create_manual_curation_item_with_feature_command": (
+        "fc3d1a71c6f6929c7f27ae21a948b62c54e44de3488ef6e2a712a7e7a70098f5",
+        "a862453d708499e4527f1fed000564da6223b55d6ab6499aaa42066a98d901df",
+    ),
+    "finalize_provider_curation_root": (
+        "c3ed2a4d1cd7b51d3fd8dbfc5683bc9c1063a818d732d510dab95ebd952bdf6a",
+        "60adcade83c06c01e3900fb618f112c1edfdf0fb74eeb36fbc2098cde8c66e7d",
+    ),
+    "patch_curation_item_command": (
+        "1de57bf9dcf8035df2779002c6309cf24a6ba35126deee10e59b91e65652d7a9",
+        "47775ed61231258439b427863aae3948b06ebcb4204e0470cc93c7c1e5dc20db",
+    ),
+    "reclassify_curation_quarantine_command": (
+        "187b1fee3ccc3f12ffc9e4ac52c68c55a810eda6a05e5cd216984b882c91f1b1",
+        "dff5e68db7043769db7529ff34bc6212658a89735ee51d485f432bfec773ca3e",
+    ),
+    "register_provider_field_shadow_policy": (
+        "6abd02f62327bdae2474b07c0202af520e8142eea68bd12b21cbc408a5655c2b",
+        "60b8af159dd59afa128316c4d4dffee45c1d935953b771b888c156ec5af971b1",
+    ),
+}
+
 _GLOBAL_FENCE: Final = (
     "PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));"
 )
@@ -44,7 +78,8 @@ def upgrade() -> None:
         bind.execute(
             text("""SELECT procedure.proname AS name,role.rolname AS owner,
             procedure.prosrc AS body,pg_get_functiondef(procedure.oid) AS definition,
-            procedure.prokind::text AS prokind,procedure.prosecdef,language.lanname AS language
+            procedure.prokind::text AS prokind,procedure.prosecdef,language.lanname AS language,
+            pg_get_function_identity_arguments(procedure.oid) AS signature
         FROM pg_proc procedure JOIN pg_namespace namespace ON namespace.oid=procedure.pronamespace
         JOIN pg_roles role ON role.oid=procedure.proowner
         JOIN pg_language language ON language.oid=procedure.prolang
@@ -66,6 +101,10 @@ def upgrade() -> None:
             or not row["prosecdef"]
             or row["language"] != "plpgsql"
             or row["definition"].count(row["body"]) != 1
+            or hashlib.sha256(row["signature"].encode()).hexdigest()
+            != _EXPECTED_DEFINITIONS[row["name"]][0]
+            or hashlib.sha256(row["body"].encode()).hexdigest()
+            != _EXPECTED_DEFINITIONS[row["name"]][1]
         ):
             raise RuntimeError(
                 "legacy SQL owner or definition changed: "
