@@ -1,3 +1,8 @@
+## 2026-10-25 — 실제 SH 수집 연결의 설계 초안(A4)
+
+- Heritage 이름 변경과 MCST 동일 key 반복 입력의 최소 범위를 나누고 현재 normalizer/Geo stamp·dataset retire0·full capture/후속 receipt를 필수 조건으로 정리했다.
+- 실제 두 dataset DML 중첩·worker 복구/Geo pool은 별도 수용이며 구현/정책/운영 변경0, 전체 T 체크는 미완이다. [설계와 필수 반례](reports/2026-10-25-sh-collector-integration-design.md).
+
 ## 2026-10-24 — 제한 primary place의 명시 EX 전체 적재(A3 checkpoint)
 
 - 최종 converter 입력에서 bounded plan을 만드는 opt-in client/EX 경로를 추가했다. 기존 applying EX manifest·비활성 base/Geo와 활성 winner를 같은 TX로 닫고 기본 선택은 OFF다.
