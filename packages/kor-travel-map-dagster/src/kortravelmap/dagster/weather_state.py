@@ -28,14 +28,16 @@ from typing import Any, Final, TypeVar
 
 import httpx
 from kortravelmap.infra.valkey_state import (
+    GenerationMeta,
     StateItem,
+    StateNotLoaded,
     StateStoreError,
+    StateStoreUnavailable,
     StateSwapRefused,
     ValkeyStateStore,
     make_valkey_client,
 )
 from kortravelmap.providers.kor_travel_weather import (
-    ADMIN_TOKEN_HEADER,
     EXPORT_PATH_CURRENT,
     EXPORT_PATH_DAILY_SUMMARIES,
     EXPORT_PATH_FORECASTS,
@@ -159,7 +161,7 @@ def _weather_connection(settings: KorTravelMapSettings) -> tuple[str, dict[str, 
             "weather 상태 적재에는 KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN"
             "(weather KOR_TRAVEL_WEATHER_ADMIN_TOKEN과 같은 값)이 필요하다."
         )
-    return base_url.rstrip("/"), {ADMIN_TOKEN_HEADER: secret}
+    return base_url.rstrip("/"), {settings.kor_travel_weather_auth_header: secret}
 
 
 def weather_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
@@ -177,13 +179,19 @@ def weather_http_timeout(settings: KorTravelMapSettings) -> httpx.Timeout:
 _WEATHER_MAX_PAGES: Final[int] = 2_000
 """페이지 루프 상한. 넘으면 cursor 계약이 깨진 것이다(같은 cursor 반복은 즉시 잡는다)."""
 
-_WEATHER_TRANSIENT_STATUSES: Final[frozenset[int]] = frozenset({502, 504})
 _WEATHER_RETRY_BASE_DELAY_SECONDS: float = upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS
 """HTTP 층 재시도 간격 기준(테스트가 0으로 바꾼다)."""
 
 
+class _WeatherCursorRejected(WeatherExportContractError):
+    """422. 첫 페이지면 질의 계약 위반(terminal)이고, 둘째 페이지 이후면 순회 도중 weather가
+    재배포돼 provider 선택·서명이 바뀐 것일 수 있어 처음부터 **한 번** 다시 받는다(ADR-114 W3)."""
+
+    failure_kind = "weather_cursor_rejected"
+
+
 class _WeatherTransientStatus(WeatherExportFailure):
-    """502/504. HTTP 층에서 유한 재시도하고, 소진하면 step 재시도 대상이다."""
+    """429와 503을 뺀 5xx(500 포함). HTTP 층에서 유한 재시도하고, 소진하면 step 재시도 대상이다."""
 
     failure_kind = "weather_transient_status"
     retryable = True
@@ -209,19 +217,24 @@ def _raise_weather_status(response: httpx.Response, path: str) -> None:
             "집합이 아니다). 이번 run은 아무것도 쓰지 않는다."
         )
     if status == 422:
-        raise WeatherExportContractError(f"kor-travel-weather {path}가 422다(cursor·질의 계약).")
-    if status in _WEATHER_TRANSIENT_STATUSES:
+        raise _WeatherCursorRejected(f"kor-travel-weather {path}가 422다(cursor·질의 계약).")
+    if status == 429 or status >= 500:
         raise _WeatherTransientStatus(f"kor-travel-weather {path}가 {status}다.")
+    if status == 304:
+        return
     if status != 200:
         raise WeatherExportFailure(f"kor-travel-weather {path}가 {status}다.")
 
 
 async def _weather_request_once(
-    client: httpx.AsyncClient, path: str, params: Mapping[str, Any]
+    client: httpx.AsyncClient,
+    path: str,
+    params: Mapping[str, Any],
+    headers: Mapping[str, str] | None = None,
 ) -> httpx.Response:
     """HTTP 요청 정확히 1건 — 시도마다 여기서 센다(재시도도 요청이다)."""
     note_upstream_request()
-    response = await client.get(path, params=dict(params))
+    response = await client.get(path, params=dict(params), headers=dict(headers or {}))
     _raise_weather_status(response, path)
     return response
 
@@ -236,12 +249,13 @@ async def _weather_get(
     params: Mapping[str, Any],
     *,
     budget: upstream_retry.RetryBudget,
+    headers: Mapping[str, str] | None = None,
 ) -> httpx.Response:
-    """요청 1건(전송 오류·502/504는 유한 재시도). 규약은 transport fetcher와 같다."""
+    """요청 1건(전송 오류·429·5xx는 유한 재시도, 503 제외). 규약은 transport fetcher와 같다."""
     attempts = upstream_retry.DEFAULT_UPSTREAM_ATTEMPTS
     for attempt in range(1, attempts + 1):
         try:
-            return await _weather_request_once(client, path, params)
+            return await _weather_request_once(client, path, params, headers)
         except Exception as exc:
             if attempt >= attempts or not _weather_retryable(exc) or not budget.try_consume():
                 raise
@@ -282,6 +296,10 @@ class WeatherFetch:
     """페이지들 중 가장 나쁜 상태(``stale`` > ``ok``)."""
     pages: int
     snapshot_id: str | None
+    etag: str | None = None
+    """첫 페이지 ETag(다음 적재의 ``If-None-Match``)."""
+    not_modified: bool = False
+    """첫 페이지가 304였다 — ``rows``는 비었고 지금 세대가 그대로 맞다."""
 
 
 async def _read_all_pages(
@@ -289,8 +307,14 @@ async def _read_all_pages(
     path: str,
     params: Mapping[str, Any],
     parse: Callable[[Any], WeatherExportPage[_ItemT]],
+    if_none_match: str | None = None,
 ) -> WeatherFetch:
-    """cursor를 끝까지 따라간다. 410(snapshot 만료)이면 첫 페이지부터 **한 번** 다시 받는다."""
+    """cursor를 끝까지 따라간다.
+
+    410(snapshot 만료)이나 둘째 페이지 이후의 422(순회 도중 weather 재배포)이면 첫 페이지부터
+    **한 번** 다시 받는다. 첫 페이지 422는 질의 계약 위반이라 그대로 실패한다.
+    ``if_none_match``가 있으면 첫 페이지에 보내고, 304면 바로 ``not_modified``로 끝낸다.
+    """
     base_url, headers = _weather_connection(settings)
     shared = upstream_retry.active_run_retry_budget()
     budget = shared if shared is not None else upstream_retry.RetryBudget()
@@ -301,12 +325,27 @@ async def _read_all_pages(
     ) as client:
         for restart in range(2):
             try:
-                return await _walk_pages(client, path, params, parse, budget=budget)
-            except WeatherExportSnapshotExpired:
+                return await _walk_pages(
+                    client, path, params, parse, budget=budget, if_none_match=if_none_match
+                )
+            except (WeatherExportSnapshotExpired, _MidWalkCursorRejected) as exc:
                 if restart:
+                    if isinstance(exc, _MidWalkCursorRejected):
+                        raise WeatherExportContractError(
+                            f"{path}: 처음부터 다시 받아도 순회 도중 422다."
+                        ) from exc
                     raise
-                _LOGGER.warning("kor-travel-weather %s snapshot 만료 — 처음부터 다시 받는다.", path)
+                _LOGGER.warning(
+                    "kor-travel-weather %s %s — 처음부터 다시 받는다.", path, exc.failure_kind
+                )
     raise AssertionError("unreachable")  # pragma: no cover
+
+
+class _MidWalkCursorRejected(WeatherExportFailure):
+    """둘째 페이지 이후의 422 — :func:`_read_all_pages`가 한 번 재시작한다."""
+
+    failure_kind = "weather_cursor_rejected_mid_walk"
+    retryable = True
 
 
 async def _walk_pages(
@@ -316,18 +355,36 @@ async def _walk_pages(
     parse: Callable[[Any], WeatherExportPage[_ItemT]],
     *,
     budget: upstream_retry.RetryBudget,
+    if_none_match: str | None = None,
 ) -> WeatherFetch:
     rows: list[Any] = []
     collected: list[datetime | None] = []
     statuses: set[str] = set()
     snapshot_id: str | None = None
+    etag: str | None = None
     cursor: str | None = None
     seen_cursors: set[str] = set()
     for page_number in range(1, _WEATHER_MAX_PAGES + 1):
         query = dict(params)
         if cursor is not None:
             query["cursor"] = cursor
-        response = await _weather_get(client, path, query, budget=budget)
+        first = page_number == 1
+        headers = {"If-None-Match": if_none_match} if first and if_none_match else None
+        try:
+            response = await _weather_get(client, path, query, budget=budget, headers=headers)
+        except _WeatherCursorRejected as exc:
+            if first:
+                raise
+            raise _MidWalkCursorRejected(f"{path}: 페이지 {page_number}에서 422다.") from exc
+        if response.status_code == 304:
+            if not (first and if_none_match):
+                raise WeatherExportContractError(f"{path}: 조건 없는 요청에 304다.")
+            return WeatherFetch(
+                rows=[], source_collected_at=None, source_status="ok", pages=1,
+                snapshot_id=None, etag=if_none_match, not_modified=True,
+            )
+        if first:
+            etag = response.headers.get("etag")
         page = parse(_weather_json(response, path))
         if page_number == 1:
             snapshot_id = page.meta.snapshot_id
@@ -345,6 +402,7 @@ async def _walk_pages(
                 source_status="stale" if "stale" in statuses else "ok",
                 pages=page_number,
                 snapshot_id=snapshot_id,
+                etag=etag,
             )
         next_cursor = page.meta.next_cursor
         assert next_cursor is not None  # 파서가 보장한다.
@@ -355,37 +413,48 @@ async def _walk_pages(
     raise WeatherExportContractError(f"{path}: {_WEATHER_MAX_PAGES}페이지를 넘었다.")
 
 
-async def fetch_weather_locations(settings: KorTravelMapSettings) -> WeatherFetch:
+async def fetch_weather_locations(
+    settings: KorTravelMapSettings, *, if_none_match: str | None = None
+) -> WeatherFetch:
     """W1 위치 roster 전체."""
     return await _read_all_pages(
         settings,
         EXPORT_PATH_LOCATIONS,
         {"limit": settings.kor_travel_weather_page_size},
         parse_location_page,
+        if_none_match,
     )
 
 
-async def fetch_weather_current(settings: KorTravelMapSettings) -> WeatherFetch:
+async def fetch_weather_current(
+    settings: KorTravelMapSettings, *, if_none_match: str | None = None
+) -> WeatherFetch:
     """W2 활성 관측 제공처 전체의 최신 관측."""
     return await _read_all_pages(
         settings,
         EXPORT_PATH_CURRENT,
         {"limit": settings.kor_travel_weather_page_size},
         parse_current_page,
+        if_none_match,
     )
 
 
-async def fetch_weather_forecasts(settings: KorTravelMapSettings, style: str) -> WeatherFetch:
+async def fetch_weather_forecasts(
+    settings: KorTravelMapSettings, style: str, *, if_none_match: str | None = None
+) -> WeatherFetch:
     """W3 한 style의 예보 묶음 전체(증분 ``since`` 없이 전량 — ADR-114 W3)."""
     return await _read_all_pages(
         settings,
         EXPORT_PATH_FORECASTS,
         {"style": style, "limit": settings.kor_travel_weather_page_size},
         lambda payload: parse_forecast_page(payload, style=style),
+        if_none_match,
     )
 
 
-async def fetch_weather_daily_summaries(settings: KorTravelMapSettings) -> WeatherFetch:
+async def fetch_weather_daily_summaries(
+    settings: KorTravelMapSettings, *, if_none_match: str | None = None
+) -> WeatherFetch:
     """W5 최근 ``weather_daily_summary_days``일 세 구간 요약 전체."""
     return await _read_all_pages(
         settings,
@@ -395,6 +464,7 @@ async def fetch_weather_daily_summaries(settings: KorTravelMapSettings) -> Weath
             "limit": settings.kor_travel_weather_page_size,
         },
         parse_daily_summary_page,
+        if_none_match,
     )
 
 
@@ -409,17 +479,22 @@ class WeatherCollected:
     fetch: WeatherFetch
 
 
-Collector = Callable[[KorTravelMapSettings], Awaitable[WeatherCollected]]
+Collector = Callable[[KorTravelMapSettings, str | None], Awaitable[WeatherCollected]]
+"""``(settings, if_none_match)`` → 상태 항목. ``if_none_match``는 지금 세대의 원천 ETag다."""
 
 
-async def _collect_locations(settings: KorTravelMapSettings) -> WeatherCollected:
-    fetch = await fetch_weather_locations(settings)
+async def _collect_locations(
+    settings: KorTravelMapSettings, if_none_match: str | None
+) -> WeatherCollected:
+    fetch = await fetch_weather_locations(settings, if_none_match=if_none_match)
     rows: list[WeatherExportLocation] = fetch.rows
     return WeatherCollected(items=location_state_items(rows), row_duplicates=0, fetch=fetch)
 
 
-async def _collect_current(settings: KorTravelMapSettings) -> WeatherCollected:
-    fetch = await fetch_weather_current(settings)
+async def _collect_current(
+    settings: KorTravelMapSettings, if_none_match: str | None
+) -> WeatherCollected:
+    fetch = await fetch_weather_current(settings, if_none_match=if_none_match)
     grouper = CurrentGrouper()
     row: WeatherExportCurrentValue
     for row in fetch.rows:
@@ -431,8 +506,10 @@ def _forecast_collector(dataset: WeatherStateDataset) -> Collector:
     style = dataset.style
     assert style is not None
 
-    async def _collect(settings: KorTravelMapSettings) -> WeatherCollected:
-        fetch = await fetch_weather_forecasts(settings, style)
+    async def _collect(
+        settings: KorTravelMapSettings, if_none_match: str | None
+    ) -> WeatherCollected:
+        fetch = await fetch_weather_forecasts(settings, style, if_none_match=if_none_match)
         grouper = ForecastGrouper(style=style)
         group: WeatherExportForecastGroup
         for group in fetch.rows:
@@ -442,8 +519,10 @@ def _forecast_collector(dataset: WeatherStateDataset) -> Collector:
     return _collect
 
 
-async def _collect_daily_summaries(settings: KorTravelMapSettings) -> WeatherCollected:
-    fetch = await fetch_weather_daily_summaries(settings)
+async def _collect_daily_summaries(
+    settings: KorTravelMapSettings, if_none_match: str | None
+) -> WeatherCollected:
+    fetch = await fetch_weather_daily_summaries(settings, if_none_match=if_none_match)
     grouper = DailySummaryGrouper()
     row: WeatherExportDailySummary
     for row in fetch.rows:
@@ -489,28 +568,28 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
         "weather 위치 roster(W1) → Valkey 세대 교체(매일).",
     ),
     _spec(
-        DATASET_CURRENT, "current", "6-59/10 * * * *", 480, _collect_current,
-        "weather 최신 관측·실황(W2) → Valkey 세대 교체(10분마다).",
+        DATASET_CURRENT, "current", "25,40 * * * *", 480, _collect_current,
+        "weather 최신 관측·실황(W2) → Valkey 세대 교체(매시 :25·:40 — weather 공개 :20·:35 뒤).",
     ),
     _spec(
-        DATASET_FORECAST_ULTRA_SHORT, "forecast_ultra_short", "14,44 * * * *", 600,
+        DATASET_FORECAST_ULTRA_SHORT, "forecast_ultra_short", "48 * * * *", 600,
         _forecast_collector(DATASET_FORECAST_ULTRA_SHORT),
-        "weather 초단기예보(W3 ultra_short) → Valkey 세대 교체(30분마다).",
+        "weather 초단기예보(W3 ultra_short) → Valkey 세대 교체(매시 :48).",
     ),
     _spec(
-        DATASET_FORECAST_SHORT, "forecast_short", "24 * * * *", 1_500,
+        DATASET_FORECAST_SHORT, "forecast_short", "30 2-23/3 * * *", 1_500,
         _forecast_collector(DATASET_FORECAST_SHORT),
-        "weather 단기예보(W3 short) → Valkey 세대 교체(매시).",
+        "weather 단기예보(W3 short) → Valkey 세대 교체(하루 8회, 발표 02·05…23시 뒤 :30).",
     ),
     _spec(
-        DATASET_FORECAST_MID, "forecast_mid", "34 */3 * * *", 900,
+        DATASET_FORECAST_MID, "forecast_mid", "40 6,7,18,19 * * *", 900,
         _forecast_collector(DATASET_FORECAST_MID),
-        "weather 중기예보(W3 mid) → Valkey 세대 교체(3시간마다).",
+        "weather 중기예보(W3 mid) → Valkey 세대 교체(발표 06·18시 뒤, 한 시간 뒤 한 번 더).",
     ),
     _spec(
-        DATASET_FORECAST_EXTERNAL, "forecast_external", "54 * * * *", 1_200,
+        DATASET_FORECAST_EXTERNAL, "forecast_external", "55 */3 * * *", 1_200,
         _forecast_collector(DATASET_FORECAST_EXTERNAL),
-        "weather 외부 provider 예보(W3 external) → Valkey 세대 교체(매시).",
+        "weather 외부 provider 예보(W3 external) → Valkey 세대 교체(3시간마다).",
     ),
     _spec(
         DATASET_DAILY_SUMMARIES, "daily_summaries", "41 * * * *", 900, _collect_daily_summaries,
@@ -564,6 +643,16 @@ def _raise_terminal_if_weather_unrecoverable(exc: BaseException) -> None:
         current = current.__cause__
 
 
+async def _current_meta_or_none(store: ValkeyStateStore, dataset: str) -> GenerationMeta | None:
+    """지금 세대 meta(원천 ETag용). 없으면 ``None`` — 깨진 저장소는 교체 단계가 실패시킨다."""
+    try:
+        return await store.current_meta(dataset)
+    except StateNotLoaded:
+        return None
+    except StateStoreUnavailable:
+        return None
+
+
 async def load_weather_state(
     spec: WeatherStateJobSpec,
     *,
@@ -587,13 +676,29 @@ async def load_weather_state(
         ) as acquired:
             if not acquired:
                 return {"dataset": spec.dataset.name, "skipped": "locked"}
+            current = await _current_meta_or_none(active, spec.dataset.name)
+            etag = current.source_etag if current is not None and not allow_shrink else None
             with counting_upstream_requests(), sharing_run_retry_budget():
                 try:
-                    collected = await spec.collect(settings)
+                    collected = await spec.collect(settings, etag)
                 except Exception as exc:
                     _raise_terminal_if_weather_unrecoverable(exc)
                     raise
                 upstream = observed_upstream_requests()
+            if collected.fetch.not_modified:
+                assert current is not None
+                touched = await active.touch_checked(
+                    spec.dataset.name, current.generation, datetime.now(UTC)
+                )
+                unchanged: dict[str, Any] = {
+                    "dataset": spec.dataset.name,
+                    "unchanged": "not_modified",
+                    "generation": current.generation,
+                    "checked": touched,
+                }
+                if upstream is not None:
+                    unchanged[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
+                return unchanged
             result = await active.swap(
                 spec.dataset.name,
                 collected.items,
@@ -603,6 +708,7 @@ async def load_weather_state(
                 run_id=run_id,
                 allow_shrink=allow_shrink,
                 source_status=collected.fetch.source_status,
+                source_etag=collected.fetch.etag,
             )
             try:
                 retired = await active.retire_other_versions(spec.dataset.name)

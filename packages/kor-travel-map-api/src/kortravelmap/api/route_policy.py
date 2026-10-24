@@ -223,6 +223,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/service/transport/status": RoutePolicy.SERVICE,
     # ADR-114 2단계 — Valkey weather 현재·예보·세 구간 요약 read (PinVi 등 service 소비자).
     "/v1/service/weather/locations": RoutePolicy.SERVICE,
+    "/v1/service/weather/locations/batch": RoutePolicy.SERVICE,
     "/v1/service/weather/locations/{feature_id}": RoutePolicy.SERVICE,
     "/v1/service/weather/nearest": RoutePolicy.SERVICE,
     "/v1/service/weather/status": RoutePolicy.SERVICE,

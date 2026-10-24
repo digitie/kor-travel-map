@@ -44,6 +44,7 @@ __all__ = [
     "DEFAULT_BUILD_TTL_SECONDS",
     "DEFAULT_RETIRE_GRACE_SECONDS",
     "GEO_LAT_LIMIT",
+    "DatasetRead",
     "RECENT_COUNTS_WINDOW",
     "STATE_KEY_NAMESPACE",
     "STATE_KEY_PREFIX",
@@ -254,6 +255,22 @@ class GenerationMeta:
     source_status: str | None = None
     """원천이 알린 집합 상태(weather ``ok``·``stale``, ADR-114 2단계 W4). 1단계 세대와 원천이
     알리지 않는 데이터셋은 ``None``."""
+    source_etag: str | None = None
+    """원천 첫 페이지의 ETag(weather, ADR-114 W3). 다음 적재가 ``If-None-Match``로 보낸다."""
+    checked_at: datetime | None = None
+    """원천이 304(바뀌지 않음)로 답해 교체 없이 다시 확인한 마지막 시각(ADR-114 W3)."""
+
+
+@dataclass(frozen=True, slots=True)
+class DatasetRead:
+    """:meth:`ValkeyStateStore.read_many`의 데이터셋 하나 결과."""
+
+    dataset: str
+    status: str
+    """``ok``·``not_loaded``·``unavailable``."""
+    meta: GenerationMeta | None
+    values: list[bytes | None]
+    """요청한 id 순서. 없는 id는 ``None``."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -312,8 +329,11 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
         run_id = fields.get("run_id") or ""
         loaded_at = datetime.fromisoformat(fields["loaded_at"])
         source_at = datetime.fromisoformat(source) if source else None
+        checked = fields.get("checked_at") or ""
+        checked_at = datetime.fromisoformat(checked) if checked else None
         if any(
-            value is not None and value.utcoffset() is None for value in (loaded_at, source_at)
+            value is not None and value.utcoffset() is None
+            for value in (loaded_at, source_at, checked_at)
         ):
             raise ValueError("timezone이 없는 시각")
         return GenerationMeta(
@@ -328,6 +348,8 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
             run_id=run_id or None,
             guard_override=fields.get("guard_override") == "1",
             source_status=fields.get("source_status") or None,
+            source_etag=fields.get("source_etag") or None,
+            checked_at=checked_at,
         )
     except (KeyError, ValueError) as exc:
         raise StateStoreUnavailable(
@@ -363,6 +385,15 @@ redis.call('LPUSH', KEYS[3], count)
 redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1)
 for i = 9, #KEYS do redis.call('EXPIRE', KEYS[i], tonumber(ARGV[3])) end
 return {1, current}
+"""
+
+# KEYS[1]=current KEYS[2]=그 세대 meta. ARGV[1]=세대 ARGV[2]=checked_at(ISO).
+# 포인터가 그 세대일 때만 meta의 checked_at을 바꾼다(그 사이 교체됐으면 아무것도 하지 않는다).
+_TOUCH_SCRIPT: Final[str] = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+if redis.call('EXISTS', KEYS[2]) == 0 then return 0 end
+redis.call('HSET', KEYS[2], 'checked_at', ARGV[2])
+return 1
 """
 
 _RELEASE_LOCK_SCRIPT: Final[str] = """
@@ -602,6 +633,72 @@ class ValkeyStateStore:
             )
         return [_text(value) if value is not None else None for value in raw]
 
+    async def touch_checked(self, dataset: str, generation: str, checked_at: datetime) -> bool:
+        """원천이 바뀌지 않았다(304)고 확인한 시각을 지금 세대 meta에 적는다(ADR-114 W3).
+
+        세대 값은 그대로다 — meta의 ``checked_at`` 한 필드만 바꾼다. 그 사이 교체됐으면 ``False``.
+        """
+        async with _unavailable_on_error("확인 시각 쓰기"):
+            touched = await _resolve(
+                self._client.eval(
+                    _TOUCH_SCRIPT,
+                    2,
+                    state_key(dataset, "current"),
+                    state_key(dataset, generation, "meta"),
+                    generation,
+                    _iso(checked_at),
+                )
+            )
+        return int(touched) == 1
+
+    async def read_many(
+        self, requests: Sequence[tuple[str, Sequence[str]]]
+    ) -> list[DatasetRead]:
+        """여러 데이터셋의 지금 세대에서 id들을 **왕복 두 번**에 읽는다(포인터 → meta·값).
+
+        데이터셋마다 결과가 따로다 — 적재 전이면 ``not_loaded``, 그 데이터셋 키만 깨졌으면
+        ``unavailable``. 연결 자체가 실패하면 :class:`StateStoreUnavailable`.
+        """
+        if not requests:
+            return []
+        async with _unavailable_on_error("포인터 읽기"):
+            pointers = cast(
+                "list[bytes | None]",
+                await _resolve(
+                    self._client.mget([state_key(ds, "current") for ds, _ in requests])
+                ),
+            )
+        generations = [_text(raw) if raw else None for raw in pointers]
+        async with (
+            _unavailable_on_error("묶음 읽기"),
+            self._client.pipeline(transaction=False) as pipe,
+        ):
+            for (dataset, ids), generation in zip(requests, generations, strict=True):
+                if generation is None:
+                    continue
+                pipe.hgetall(state_key(dataset, generation, "meta"))
+                if ids:
+                    pipe.hmget(state_key(dataset, generation, "items"), list(ids))
+            replies = list(await pipe.execute(raise_on_error=False))
+        results: list[DatasetRead] = []
+        for (dataset, ids), generation in zip(requests, generations, strict=True):
+            if generation is None:
+                results.append(DatasetRead(dataset, "not_loaded", None, [None] * len(ids)))
+                continue
+            raw_meta = replies.pop(0)
+            raw_values = replies.pop(0) if ids else []
+            if isinstance(raw_meta, Exception) or isinstance(raw_values, Exception) or not raw_meta:
+                results.append(DatasetRead(dataset, "unavailable", None, [None] * len(ids)))
+                continue
+            try:
+                meta = _parse_meta(dataset, generation, cast("dict[Any, Any]", raw_meta))
+            except StateStoreUnavailable:
+                results.append(DatasetRead(dataset, "unavailable", None, [None] * len(ids)))
+                continue
+            values = cast("list[bytes | None]", raw_values)
+            results.append(DatasetRead(dataset, "ok", meta, list(values)))
+        return results
+
     async def recent_counts(self, dataset: str) -> list[int]:
         async with _unavailable_on_error("최근 개수 읽기"):
             raw = cast(
@@ -649,6 +746,7 @@ class ValkeyStateStore:
         run_id: str | None = None,
         allow_shrink: bool = False,
         source_status: str | None = None,
+        source_etag: str | None = None,
     ) -> SwapResult:
         """새 세대를 쓰고 포인터를 원자적으로 바꾼다(ADR-114 D3).
 
@@ -693,6 +791,7 @@ class ValkeyStateStore:
                 "run_id": run_id or "",
                 "guard_override": "1" if allow_shrink else "0",
                 "source_status": source_status or "",
+                "source_etag": source_etag or "",
             }
             async with (
                 _unavailable_on_error("메타 쓰기"),

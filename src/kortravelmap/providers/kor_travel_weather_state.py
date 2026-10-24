@@ -83,12 +83,18 @@ class WeatherStateDataset:
     max_age: timedelta
     style: WeatherForecastStyle | None = None
     """예보 데이터셋이면 weather W3 ``style``."""
+    reports_source_status: bool = True
+    """원천이 이 집합의 수집 상태를 실제로 알리는가. W1 위치 roster는 언제나 ``stale``·
+    ``source_collected_at=null``을 보낸다(카탈로그 수집 시각을 알 수 없다) — 그 값을 그대로
+    내보내면 소비자가 모든 위치를 stale로 표시한다. 그래서 응답 신선도의 ``source_status``를
+    null(해당 없음)로 둔다(ADR-114 W4)."""
 
 
 DATASET_LOCATIONS: Final = WeatherStateDataset(
     name="weather.locations",
     guard=ShrinkGuard(min_ratio=0.9, baseline_min=100, min_count=1_000),
     max_age=timedelta(days=8),
+    reports_source_status=False,
 )
 DATASET_CURRENT: Final = WeatherStateDataset(
     name="weather.current",
@@ -170,8 +176,15 @@ def location_state(location: WeatherExportLocation) -> WeatherLocationState:
 
 
 def location_state_items(locations: Iterable[WeatherExportLocation]) -> list[StateItem]:
-    """W1 위치들 → 상태 항목(GEO 포함). 같은 위치의 중복은 store가 첫 행을 남긴다."""
-    return [to_state_item(location_state(location)) for location in locations]
+    """W1 위치들 → 상태 항목(GEO 포함). 같은 위치의 중복은 store가 첫 행을 남긴다.
+
+    보조 키 표(``lookup``)에 weather ``location_id`` → ``feature_id``를 싣는다 — 소비자(PinVi)가
+    이미 가진 weather 위치 id로 찾을 수 있게(ADR-114 W7).
+    """
+    return [
+        to_state_item(location_state(location), lookup_keys=(location.location_id,))
+        for location in locations
+    ]
 
 
 @dataclass

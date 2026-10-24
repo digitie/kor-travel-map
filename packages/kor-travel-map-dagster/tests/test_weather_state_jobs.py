@@ -25,6 +25,7 @@ from kortravelmap.infra.valkey_state import (
 from kortravelmap.providers.kor_travel_weather import (
     ADMIN_TOKEN_HEADER,
     WeatherExportContractError,
+    WeatherExportFailure,
     WeatherExportMissing,
     WeatherExportNotReady,
     WeatherExportSnapshotExpired,
@@ -261,6 +262,7 @@ async def test_expired_snapshot_twice_is_retryable(monkeypatch: pytest.MonkeyPat
         (404, WeatherExportMissing, False),
         (503, WeatherExportNotReady, True),
         (422, WeatherExportContractError, False),
+        (400, WeatherExportFailure, False),
     ],
 )
 async def test_status_codes_are_classified(
@@ -273,8 +275,11 @@ async def test_status_codes_are_classified(
     assert len(seen) == 1  # 재시도할 상태가 아니다
 
 
-async def test_gateway_errors_are_retried_and_counted(monkeypatch: pytest.MonkeyPatch) -> None:
-    replies = [httpx.Response(502), httpx.Response(200, json={"items": [], "meta": _meta(0)})]
+@pytest.mark.parametrize("status", [500, 502, 504, 429])
+async def test_gateway_errors_are_retried_and_counted(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    replies = [httpx.Response(status), httpx.Response(200, json={"items": [], "meta": _meta(0)})]
     seen = _install(monkeypatch, lambda _request: replies.pop(0))
     with counting_upstream_requests():
         fetch = await fetch_weather_current(_settings())
@@ -310,14 +315,132 @@ async def test_non_json_body_is_malformed(monkeypatch: pytest.MonkeyPatch) -> No
         await fetch_weather_locations(_settings())
 
 
+@pytest.mark.parametrize("status", [500, 429])
+async def test_exhausted_transient_status_stays_retryable(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    _install(monkeypatch, lambda _request: httpx.Response(status))
+    with pytest.raises(WeatherExportFailure) as excinfo:
+        await fetch_weather_current(_settings())
+    assert excinfo.value.retryable is True
+
+
+async def test_location_id_with_a_pipe_is_a_terminal_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    bad = {**_location("a|b")}
+    _install(
+        monkeypatch,
+        lambda _request: httpx.Response(200, json={"items": [bad], "meta": _meta(1)}),
+    )
+    with pytest.raises(WeatherExportContractError) as excinfo:
+        await fetch_weather_locations(_settings())
+    assert excinfo.value.retryable is False
+
+
+async def test_mid_walk_422_restarts_once_from_the_first_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        calls.append(cursor)
+        if cursor == "c2" and calls.count("c2") == 1:
+            return httpx.Response(422, json={})
+        if cursor is None:
+            return httpx.Response(
+                200,
+                json={"items": [_location("a")], "meta": _meta(1, has_more=True, next_cursor="c2")},
+            )
+        return httpx.Response(200, json={"items": [_location("b")], "meta": _meta(1)})
+
+    _install(monkeypatch, handler)
+    fetch = await fetch_weather_locations(_settings())
+    assert calls == [None, "c2", None, "c2"]
+    assert [row.location_id for row in fetch.rows] == ["a", "b"]
+
+
+async def test_mid_walk_422_twice_is_terminal(monkeypatch: pytest.MonkeyPatch) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("cursor") == "c2":
+            return httpx.Response(422, json={})
+        return httpx.Response(
+            200, json={"items": [_location("a")], "meta": _meta(1, has_more=True, next_cursor="c2")}
+        )
+
+    seen = _install(monkeypatch, handler)
+    with pytest.raises(WeatherExportContractError) as excinfo:
+        await fetch_weather_locations(_settings())
+    assert excinfo.value.retryable is False
+    assert len(seen) == 4
+
+
+async def test_first_page_etag_is_kept_and_304_short_circuits(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.headers.get("if-none-match") == 'W/"v1"':
+            return httpx.Response(304, headers={"etag": 'W/"v1"'})
+        return httpx.Response(
+            200,
+            json={"items": [_location("a")], "meta": _meta(1)},
+            headers={"etag": 'W/"v1"'},
+        )
+
+    seen = _install(monkeypatch, handler)
+    fresh = await fetch_weather_locations(_settings())
+    assert fresh.etag == 'W/"v1"'
+    assert fresh.not_modified is False
+    same = await fetch_weather_locations(_settings(), if_none_match='W/"v1"')
+    assert same.not_modified is True
+    assert same.rows == []
+    assert "if-none-match" not in seen[0].headers
+    assert seen[1].headers["if-none-match"] == 'W/"v1"'
+
+
+async def test_unconditional_304_is_a_contract_error(monkeypatch: pytest.MonkeyPatch) -> None:
+    _install(monkeypatch, lambda _request: httpx.Response(304))
+    with pytest.raises(WeatherExportContractError):
+        await fetch_weather_locations(_settings())
+
+
+async def test_auth_header_name_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _install(
+        monkeypatch, lambda _request: httpx.Response(200, json={"items": [], "meta": _meta(0)})
+    )
+    await fetch_weather_current(_settings(kor_travel_weather_auth_header="X-Weather-Export-Token"))
+    assert seen[0].headers["x-weather-export-token"] == TOKEN
+    assert "x-admin-token" not in seen[0].headers
+
+
 # -- 적재 op(가짜 store) ---------------------------------------------------------------------
 
 
 class _FakeStore:
-    def __init__(self, *, locked: bool = False, swap_error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        locked: bool = False,
+        swap_error: Exception | None = None,
+        current: GenerationMeta | None = None,
+    ) -> None:
         self.locked = locked
         self.swap_error = swap_error
+        self.current = current
         self.swapped: list[dict[str, Any]] = []
+        self.touched: list[tuple[str, str]] = []
+
+    async def current_meta(self, dataset: str) -> GenerationMeta:
+        from kortravelmap.infra.valkey_state import StateNotLoaded
+
+        if self.current is None:
+            raise StateNotLoaded(dataset)
+        return self.current
+
+    async def touch_checked(self, dataset: str, generation: str, _checked_at: Any) -> bool:
+        self.touched.append((dataset, generation))
+        return True
 
     @asynccontextmanager
     async def load_lock(self, _dataset: str, *, ttl_seconds: int) -> AsyncIterator[bool]:
@@ -392,7 +515,7 @@ async def test_forecast_load_groups_per_location_and_records_status(
 
 
 def _failing_spec(error: Exception) -> WeatherStateJobSpec:
-    async def _collect(_settings: Any) -> Any:
+    async def _collect(_settings: Any, _etag: str | None) -> Any:
         raise error
 
     return replace(WEATHER_STATE_SPECS[0], collect=_collect)
@@ -436,7 +559,7 @@ async def test_waitable_weather_failures_stay_retryable(error: Exception) -> Non
 
 
 async def test_valkey_outage_stays_retryable_and_lock_skips() -> None:
-    async def _ok(_settings: Any) -> Any:
+    async def _ok(_settings: Any, _etag: str | None) -> Any:
         return weather_state.WeatherCollected(
             items=[], row_duplicates=0, fetch=weather_state.WeatherFetch([], None, "ok", 1, None)
         )
@@ -445,7 +568,7 @@ async def test_valkey_outage_stays_retryable_and_lock_skips() -> None:
     with pytest.raises(StateStoreUnavailable):
         await _load(spec, _FakeStore(swap_error=StateStoreUnavailable("연결")))
 
-    async def _boom(_settings: Any) -> Any:
+    async def _boom(_settings: Any, _etag: str | None) -> Any:
         raise AssertionError("잠금을 못 잡았으면 받지 않는다")
 
     locked = await _load(replace(spec, collect=_boom), _FakeStore(locked=True))
@@ -455,3 +578,60 @@ async def test_valkey_outage_stays_retryable_and_lock_skips() -> None:
 def test_collectors_are_bound_to_their_own_style() -> None:
     styles: list[Callable[..., Any]] = [spec.collect for spec in WEATHER_STATE_SPECS]
     assert len(set(styles)) == len(styles)
+
+
+async def test_not_modified_touches_the_current_generation_without_swapping(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _install(monkeypatch, lambda _request: httpx.Response(304))
+    current = GenerationMeta(
+        dataset="weather.locations",
+        generation="g-1",
+        count=3,
+        geo_count=3,
+        lookup_count=3,
+        duplicates=0,
+        source_collected_at=None,
+        loaded_at=NOW,
+        run_id=None,
+        guard_override=False,
+        source_status="stale",
+        source_etag='W/"v1"',
+    )
+    store = _FakeStore(current=current)
+    metadata = await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id="run-304",
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, store),
+    )
+    assert metadata["unchanged"] == "not_modified"
+    assert store.swapped == []
+    assert store.touched == [("weather.locations", "g-1")]
+    assert seen[0].headers["if-none-match"] == 'W/"v1"'
+    assert metadata["upstream_requests_min"] == 1
+
+
+async def test_allow_shrink_forces_a_full_reload(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _install(
+        monkeypatch,
+        lambda _request: httpx.Response(
+            200, json={"items": [_location("a")], "meta": _meta(1)}, headers={"etag": 'W/"v2"'}
+        ),
+    )
+    current = GenerationMeta(
+        dataset="weather.locations", generation="g-1", count=3, geo_count=3, lookup_count=3,
+        duplicates=0, source_collected_at=None, loaded_at=NOW, run_id=None, guard_override=False,
+        source_etag='W/"v1"',
+    )
+    store = _FakeStore(current=current)
+    await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id=None,
+        allow_shrink=True,
+        store=cast(ValkeyStateStore, store),
+    )
+    assert "if-none-match" not in seen[0].headers
+    assert store.swapped[0]["source_etag"] == 'W/"v2"'

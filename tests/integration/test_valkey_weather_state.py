@@ -123,11 +123,21 @@ _ROUTES: dict[str, dict[str | None, Any]] = {}
 def _serve(_monkeypatch: pytest.MonkeyPatch, routes: dict[str, dict[str | None, Any]]) -> None:
     _ROUTES.clear()
     _ROUTES.update(routes)
+    _ETAGS.clear()
+
+
+_ETAGS: dict[str, str] = {}
+"""경로 → 첫 페이지 ETag. 있으면 그 값으로 ``If-None-Match``가 오면 304를 낸다."""
 
 
 def _weather_handler(request: httpx.Request) -> httpx.Response:
+    etag = _ETAGS.get(request.url.path)
+    if etag is not None and request.headers.get("if-none-match") == etag:
+        return httpx.Response(304, headers={"etag": etag})
     pages = _ROUTES[request.url.path]
-    return httpx.Response(200, json=pages[request.url.params.get("cursor")])
+    cursor = request.url.params.get("cursor")
+    headers = {"etag": etag} if etag is not None and cursor is None else {}
+    return httpx.Response(200, json=pages[cursor], headers=headers)
 
 
 def _routed_client(**kwargs: Any) -> httpx.AsyncClient:
@@ -261,9 +271,9 @@ async def test_load_then_nearest_bundle_joins_every_dataset(
     assert data["location"]["feature_id"] == seoul_id
     assert data["location"]["address"]["bjd_code"] == "1111010100"
     assert 0 < data["location"]["distance_m"] < 1_000
-    # 위치 roster는 원천 수집 시각이 없다 — loaded_at 기준, weather 상태 stale을 그대로 싣는다.
+    # 위치 roster는 원천 수집 시각이 없다 — loaded_at 기준, weather가 늘 보내는 stale은 싣지 않는다.
     assert data["location_freshness"]["source_collected_at"] is None
-    assert data["location_freshness"]["source_status"] == "stale"
+    assert data["location_freshness"]["source_status"] is None
     assert data["location_freshness"]["stale"] is False
 
     assert data["current"]["status"] == "ok"
@@ -360,3 +370,144 @@ async def test_shrunken_location_roster_is_not_swapped(
     assert shrunk["guard_override"] is True
     meta = await store.current_meta(DATASET_LOCATIONS.name)
     assert meta.source_status == "ok"
+
+
+def _kma_group(location_id: str, hours: tuple[int, ...]) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    return {
+        "location_id": location_id,
+        "provider": "python-kma-api",
+        "forecast_style": "short",
+        "known_at": now.isoformat(),
+        "published_at": now.isoformat(),
+        "target_at": [(now + timedelta(hours=h)).isoformat() for h in hours],
+        "metrics": {"TMP": [float(h) for h in hours]},
+    }
+
+
+def _air_value(location_id: str) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    return {
+        "location_id": location_id,
+        "provider": "python-airkorea-api",
+        "metric_key": "PM10",
+        "value": 31.0,
+        "unit": "ug/m3",
+        "target_at": (now - timedelta(minutes=30)).isoformat(),
+        "known_at": (now - timedelta(minutes=20)).isoformat(),
+        "forecast_style": "observed",
+    }
+
+
+async def test_nearest_takes_each_section_from_the_nearest_location_with_data(
+    store: ValkeyStateStore, api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """가장 가까운 대기질 측정소에는 예보가 없다 — 예보는 다음으로 가까운 KMA 격자에서 온다."""
+    locations = [
+        _location("air-1", 127.000, 37.500),  # 요청 좌표 바로 옆 대기질 측정소
+        _location("kma-1", 127.020, 37.500),  # 약 1.8 km 떨어진 KMA 격자
+        _location("kma-far", 127.400, 37.500),
+    ]
+    _serve(
+        monkeypatch,
+        {
+            "/v1/service/exports/locations": _pages(locations),
+            "/v1/service/exports/current": _pages([_air_value("air-1")]),
+            "/v1/service/exports/forecasts": _pages(
+                [_kma_group("kma-1", (1, 2, 30)), _kma_group("kma-far", (1,))]
+            ),
+        },
+    )
+    await _load(store, DATASET_LOCATIONS)
+    await _load(store, DATASET_CURRENT)
+    await _load(store, DATASET_FORECAST_SHORT)
+
+    response = await api.get(
+        "/v1/service/weather/nearest",
+        params={"lon": 127.0001, "lat": 37.5, "radius_m": 100_000, "forecast_styles": "short"},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert data["location"]["location_id"] == "air-1"
+    assert data["current"]["source"]["location_id"] == "air-1"
+    short = data["forecasts"]["short"]
+    assert short["status"] == "ok"
+    assert short["source"]["location_id"] == "kma-1"
+    assert 1_000 < short["source"]["distance_m"] < 3_000
+    assert data["daily_summaries"]["status"] == "not_loaded"
+    assert data["daily_summaries"]["source"] is None
+
+    # 시간 창 — 3시간 안만.
+    windowed = await api.get(
+        "/v1/service/weather/nearest",
+        params={
+            "lon": 127.0001,
+            "lat": 37.5,
+            "forecast_styles": "short",
+            "to": (datetime.now(UTC) + timedelta(hours=3)).isoformat(),
+        },
+    )
+    (group,) = windowed.json()["data"]["forecasts"]["short"]["groups"]
+    assert group["metrics"]["TMP"] == [1.0, 2.0]
+
+    # 배치 — feature_id와 weather location_id를 함께, 없는 id는 missing.
+    batch = await api.post(
+        "/v1/service/weather/locations/batch",
+        json={
+            "feature_ids": [weather_location_feature_id("air-1"), "f_global_w_0000000000000000"],
+            "location_ids": ["kma-1", "nope"],
+            "sections": ["forecasts"],
+            "forecast_styles": ["short"],
+        },
+    )
+    assert batch.status_code == 200, batch.text
+    body = batch.json()["data"]
+    assert [item["location"]["location_id"] for item in body["items"]] == ["air-1", "kma-1"]
+    assert body["items"][0]["forecasts"]["short"]["status"] == "no_data"  # 배치는 그 위치 그대로
+    assert body["items"][1]["forecasts"]["short"]["source"]["location_id"] == "kma-1"
+    assert body["missing"] == [
+        {"feature_id": "f_global_w_0000000000000000", "location_id": None},
+        {"feature_id": None, "location_id": "nope"},
+    ]
+
+
+async def test_broken_stored_value_is_reported_as_unavailable(
+    store: ValkeyStateStore, api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.infra.valkey_state import state_key
+
+    _serve(
+        monkeypatch,
+        {
+            "/v1/service/exports/locations": _pages([_location("a", 127.0, 37.5)]),
+            "/v1/service/exports/current": _pages([_air_value("a")]),
+        },
+    )
+    await _load(store, DATASET_LOCATIONS)
+    await _load(store, DATASET_CURRENT)
+    meta = await store.current_meta(DATASET_CURRENT.name)
+    feature_id = weather_location_feature_id("a")
+    await store.client.hset(
+        state_key(DATASET_CURRENT.name, meta.generation, "items"), feature_id, b'{"x": 1}'
+    )
+    response = await api.get(f"/v1/service/weather/locations/{feature_id}")
+    assert response.status_code == 200, response.text
+    assert response.json()["data"]["current"]["status"] == "unavailable"
+
+
+async def test_not_modified_reload_keeps_the_generation_and_records_the_check(
+    store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _serve(monkeypatch, {"/v1/service/exports/locations": _pages([_location("a", 127.0, 37.5)])})
+    _ETAGS["/v1/service/exports/locations"] = 'W/"roster-1"'
+    first = await _load(store, DATASET_LOCATIONS)
+    meta = await store.current_meta(DATASET_LOCATIONS.name)
+    assert meta.source_etag == 'W/"roster-1"'
+    assert meta.checked_at is None
+    second = await _load(store, DATASET_LOCATIONS)
+    assert second["unchanged"] == "not_modified"
+    assert second["checked"] is True
+    after = await store.current_meta(DATASET_LOCATIONS.name)
+    assert after.generation == first["generation"]
+    assert after.checked_at is not None
+    assert after.loaded_at == meta.loaded_at

@@ -16,13 +16,15 @@ Map Dagster의 ``weather_state_*`` job이 이 모델의 JSON을 Valkey 세대 �
 from __future__ import annotations
 
 import datetime as dt
-from typing import Literal
+from typing import Final, Literal
+from zoneinfo import ZoneInfo
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
 
 from kortravelmap.dto.transport_state import StateCoordinate
 
 __all__ = [
+    "DAILY_SLOT_HOURS",
     "DailySlot",
     "WeatherCurrentState",
     "WeatherDailySlotState",
@@ -33,6 +35,7 @@ __all__ = [
     "WeatherLocationAddress",
     "WeatherLocationState",
     "WeatherObservationState",
+    "daily_slot_bounds",
 ]
 
 WeatherForecastStyle = Literal["ultra_short", "short", "mid", "external"]
@@ -40,6 +43,23 @@ WeatherForecastStyle = Literal["ultra_short", "short", "mid", "external"]
 
 DailySlot = Literal["morning", "noon", "evening"]
 """KST 하루 세 구간: morning [05,11) · noon [11,17) · evening [17,23)."""
+
+DAILY_SLOT_HOURS: Final[dict[str, tuple[int, int]]] = {
+    "morning": (5, 11),
+    "noon": (11, 17),
+    "evening": (17, 23),
+}
+"""구간별 KST 시작·끝 시(끝은 제외). weather W5와 같은 경계다."""
+
+_KST: Final = ZoneInfo("Asia/Seoul")
+
+
+def daily_slot_bounds(date: dt.date, slot: str) -> tuple[dt.datetime, dt.datetime]:
+    """``(date, slot)``의 KST 구간 ``[시작, 끝)``."""
+    start_hour, end_hour = DAILY_SLOT_HOURS[slot]
+    start = dt.datetime.combine(date, dt.time(start_hour), tzinfo=_KST)
+    end = dt.datetime.combine(date, dt.time(end_hour), tzinfo=_KST)
+    return start, end
 
 MetricValue = float | str | None
 """weather metric 값 — 수·서술 문자열(예: 하늘상태 문구)·null. 문자열을 수로 바꾸지 않는다."""

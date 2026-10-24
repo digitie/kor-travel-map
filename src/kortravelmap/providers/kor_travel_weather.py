@@ -112,6 +112,11 @@ class WeatherExportMalformed(WeatherExportFailure):
 
 # -- 모양 ----------------------------------------------------------------------
 
+_LOCATION_ID_PATTERN: Final[str] = r"^[^|\x00-\x1f]+$"
+"""``make_feature_id``가 받지 않는 ``|``와 제어 문자를 뺀 location_id. 어긋난 행이 하나라도 있으면
+페이지 전체가 계약 위반(재시도 없음)이다 — 그 행만 빼고 교체하면 위치가 조용히 사라진다
+(ADR-114 W1)."""
+
 
 class _Lenient(BaseModel):
     # weather가 필드를 더해도 깨지지 않게 모르는 필드는 무시한다. 있는 필드는 엄격히 본다.
@@ -129,7 +134,7 @@ class WeatherExportMeta(_Lenient):
 
 
 class WeatherExportLocation(_Lenient):
-    location_id: str = Field(min_length=1)
+    location_id: str = Field(min_length=1, pattern=_LOCATION_ID_PATTERN)
     name: str
     latitude: float | None
     longitude: float | None
@@ -139,7 +144,7 @@ class WeatherExportLocation(_Lenient):
 
 
 class WeatherExportCurrentValue(_Lenient):
-    location_id: str = Field(min_length=1)
+    location_id: str = Field(min_length=1, pattern=_LOCATION_ID_PATTERN)
     provider: str = Field(min_length=1)
     metric_key: str = Field(min_length=1)
     value: float | str | None
@@ -150,7 +155,7 @@ class WeatherExportCurrentValue(_Lenient):
 
 
 class WeatherExportForecastGroup(_Lenient):
-    location_id: str = Field(min_length=1)
+    location_id: str = Field(min_length=1, pattern=_LOCATION_ID_PATTERN)
     provider: str = Field(min_length=1)
     forecast_style: Literal["ultra_short", "short", "mid", "external"]
     known_at: AwareDatetime
@@ -160,7 +165,7 @@ class WeatherExportForecastGroup(_Lenient):
 
 
 class WeatherExportDailySummary(_Lenient):
-    location_id: str = Field(min_length=1)
+    location_id: str = Field(min_length=1, pattern=_LOCATION_ID_PATTERN)
     date: dt.date
     slot: Literal["morning", "noon", "evening"]
     temp_min: float | None

@@ -308,3 +308,25 @@ def test_dataset_table_is_unique_and_only_external_may_be_empty() -> None:
     assert empties == [DATASET_FORECAST_EXTERNAL.name]
     styles = {d.style for d in WEATHER_STATE_DATASETS if d.style is not None}
     assert styles == {"ultra_short", "short", "mid", "external"}
+
+
+def test_location_items_carry_the_weather_location_id_as_lookup_key() -> None:
+    page = parse_location_page({"items": [_location("loc-9")], "meta": _meta(1)})
+    (item,) = location_state_items(page.items)
+    assert item.lookup_keys == ("loc-9",)
+    assert item.id == weather_location_feature_id("loc-9")
+
+
+@pytest.mark.parametrize("location_id", ["a|b", "tab\there", "", "nul\x00x"])
+def test_location_ids_make_feature_id_cannot_take_are_contract_errors(location_id: str) -> None:
+    with pytest.raises(WeatherExportContractError):
+        parse_location_page({"items": [_location(location_id)], "meta": _meta(1)})
+    with pytest.raises(WeatherExportContractError):
+        parse_forecast_page({"items": [_group(location_id)], "meta": _meta(1)}, style="short")
+
+
+def test_location_roster_does_not_report_source_status() -> None:
+    from kortravelmap.providers.kor_travel_weather_state import DATASET_LOCATIONS
+
+    assert DATASET_LOCATIONS.reports_source_status is False
+    assert all(d.reports_source_status for d in WEATHER_STATE_DATASETS if d is not DATASET_LOCATIONS)
