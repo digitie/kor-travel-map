@@ -40,12 +40,12 @@ PostGIS는 UUID name/label/실제 생성 ID, 2CPU·memory1536MiB·memory+swap153
 
 ## 실제 검증과 증거
 
-- 최종 전용 실제 PG **1 passed(14.60초)**. SIGKILL exitcode=-9, backend·잠금0,
+- 최종 전용 실제 PG **1 passed(14.64초)**. SIGKILL exitcode=-9, backend·잠금0,
   rollback scope hash 동일, 같은 artifact 복구 completed, 재호출 DML0/raw1/완료attempt1.
-- 현재 test source SHA256: `464399a947559c72a7bfa2aa6cdd927cf30f13b0176be030d91d0668bbc69042`.
+- 현재 test source SHA256: `1ef46a893187184ae14afc872a85a3d2d4d28cd9240a6e00e5de1c3e0b22b360`.
 - 새 시험 Ruff PASS, strict mypy(`--follow-imports=silent`) 1 file PASS. 기존 untyped helper의
   구현은 바꾸지 않고 재사용 경계의 Callable 타입만 명시했다.
-- 로그 SHA256: `8e25dc5431c89ffd7d193b74d57ae2cd4e1ed2411fb3060ffea179e66c382519`. 로그·sanitized proof JSON은 별도 로컬 감사
+- 로그 SHA256: `ee7e3a4b7989f87bbee655718d4e972a248ee1339ffff8fb3d377edddbe11e3b`. 로그·sanitized proof JSON은 별도 로컬 감사
   보관소에 동일 bytes로 보존했다. 정확 container ID의 SDK NotFound와 해당 UUID label의
   잔존0을 확인했다. 실제 종료한 child는 join/close했다.
 - 예비 r1은 Python pidfd wrapper 부재로 **skip**, r2는 초기 주소공간768MiB가 기존 가상메모리
@@ -53,6 +53,9 @@ PostGIS는 UUID name/label/실제 생성 ID, 2CPU·memory1536MiB·memory+swap153
   **ValidationError 실패**였다. libc pidfd/1536MiB 상한/명시 DTO 객체 Pipe 전달로 시험
   하네스만 고쳤다. r4의 1 PASS(14.75초)는 중간 증거이며 최종 수치는 위 실행만 쓴다.
   실패·skip 로그도 보존했고 성공 수에 더하지 않는다.
+- 독립 리뷰 P2로 초기 검사는 protocol key/granted만 보아 SH 모드를 직접 입증하지 못함을
+  확인했다. `pg_locks.mode=ShareLock` 조건을 추가한 뒤 위 최종 실행을 통과했다. 이전
+  14.60초의 1 PASS 로그·proof는 보존하며 새 최종 실행과 합산하지 않는다.
 
 두 독립 리뷰·정확 CI는 별도 gate다. 이 시험은 commit 전의 제한 name/phones TX 사망 복구이며
 Dagster 실제 worker 감독·lease 만료 후 새 owner·네트워크 blackhole·PG/host 사망·전체 collector/

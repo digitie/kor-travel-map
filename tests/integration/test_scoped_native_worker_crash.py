@@ -295,6 +295,7 @@ async def test_sigkill_before_commit_releases_native_transaction_and_same_artifa
                 await observer.scalar(
                     text("""SELECT count(*) FROM pg_locks
                 WHERE pid=:pid AND locktype='advisory' AND granted
+                AND mode='ShareLock'
                 AND classid=1369104691::oid AND objid=115::oid AND objsubid=2"""),
                     {"pid": backend["backend_pid"]},
                 )
