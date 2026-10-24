@@ -64,12 +64,17 @@ def _check_artifact_budget(value: Any, budget: list[int], depth: int = 0) -> Non
     if depth > 64:
         raise ValueError("scalar refresh artifact nesting exceeds budget")
     budget[0] -= 8
-    if isinstance(value, str):
+    if isinstance(value, Enum):
+        _check_artifact_budget(value.value, budget, depth + 1)
+    elif isinstance(value, str):
         if len(value) > budget[0]:
             raise ValueError("scalar refresh artifact exceeds 1 MiB")
         budget[0] -= len(value.encode())
     elif isinstance(value, BaseModel):
-        _check_artifact_budget(dict(value), budget, depth + 1)
+        # encoder의 shallow dict와 같은 필드를 복사 없이 먼저 검사한다.
+        for key, child in value:
+            _check_artifact_budget(key, budget, depth + 1)
+            _check_artifact_budget(child, budget, depth + 1)
     elif isinstance(value, dict):
         for key, child in value.items():
             _check_artifact_budget(key, budget, depth + 1)
