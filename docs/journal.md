@@ -1,3 +1,9 @@
+## 2026-10-24 — M05 중복 후보·판정의 protocol-first 보강(414)
+
+- 실제 기존 M05 CALL과 scoped begin의 Feature/head 역순에서 40P01을 재현했다. 414는 후보 기록·판정 public v2/private inner의 첫 BEGIN에 EX만 추가하고 본문·서명·ACL은 보존한다. 기존 내부 owner EXEC만 정본에 더하며 새 공개 권한·정책 활성화는 없다.
+- 수정 후 실제 PG8개·순수4개 총12 passed/14.23초, 전체 lint373 passed·기존 skip6, 공식 실제 oracle 재비교+metadata2 passed다. 초기 관측 PID/진단 시간 실패는 분리 보존했다. [재현·상한·범위](reports/2026-10-24-manual-dedup-protocol-entry.md).
+- 기본 OFF/정책 seed0/운영 활성화0이며 컨트롤러를 둔 소규모 정확성 시험이다. 전체 writer 전환·Geo·대량/운영 ARM 성능·Weather/Transport 전파·최종 두 리뷰/정확 CI/UI 수용은 미완이다.
+
 ## 2026-10-24 — ADR115 제한 native scalar 비용 실측(#1376)
 
 - schema412의 로컬 amd64·2CPU/1536MiB 격리 환경에서 고정 2dataset·2record를 직렬/병렬2 각각 fresh clone 3회로 측정했다. 중앙값 elapsed는 **273.81→158.42ms**였지만 **PG CPU는 +4.2%**여서 CPU 감소를 입증하지 못했다. 전체 수집·운영 ARM·대량/공유 Feature 성능으로 일반화하지 않는다.
