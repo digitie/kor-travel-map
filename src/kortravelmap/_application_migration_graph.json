@@ -75,6 +75,12 @@
         "411_scoped_feature_write_kernel"
       ],
       "revision": "412_provider_scalar_projection"
+    },
+    {
+      "down_revision": [
+        "412_provider_scalar_projection"
+      ],
+      "revision": "413_legacy_sql_protocol_entry"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

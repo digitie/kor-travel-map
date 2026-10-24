@@ -73,9 +73,11 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 **동시 쓰기 설계(ADR-115, proposed)** — 현재 Weather·Transport 작업을 마친 뒤 아래 의존 순서로 구현한다. 설계 문서 PR은 구현 완료가 아니며, 수용 조건 정본은 `tasks-acceptance.md`의 같은 ID다.
 
+구현별 증거와 남은 수용은 [2026-10-24 현황](reports/2026-10-24-scoped-concurrent-write-acceptance-status.md)에 분리 기록한다. 아래 체크박스는 전체 acceptance 전까지 해제하지 않는다.
+
 - [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**
 
-  ADR-115의 근거 버전부터 전체 쓰기 경로와 실제 부하를 고정한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+  ADR-115의 근거 버전부터 전체 쓰기 경로와 실제 부하를 고정한다. [413 기준 정적 SQL/Python/trigger 목록](reports/2026-10-24-scoped-sql-writer-inventory.md)은 조사 증거이며 실제 부하·전체 closure 수용은 미완이다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-02 — **공유 Feature의 후보·필드 winner·병합 정본**
 
