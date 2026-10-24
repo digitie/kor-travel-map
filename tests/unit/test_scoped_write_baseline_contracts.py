@@ -21,9 +21,14 @@ def _rows() -> list[dict[str, Any]]:
     return [
         {
             "feature_id": feature_id("shared", "left", point),
-            "kind": "place", "name": point.name, "category": "01010100",
-            "lon": point.lon, "lat": point.lat,
-            "marker_icon": "circle", "marker_color": "P-01", "place_kind": "tourism",
+            "kind": "place",
+            "name": point.name,
+            "category": "01010100",
+            "lon": point.lon,
+            "lat": point.lat,
+            "marker_icon": "circle",
+            "marker_color": "P-01",
+            "place_kind": "tourism",
             "row_revision": 100,
         }
         for point in fixture.points
@@ -34,9 +39,14 @@ def _rows() -> list[dict[str, Any]]:
     ("field", "wrong"),
     [
         ("feature_id", "00000000-0000-0000-0000-000000000000"),
-        ("kind", "event"), ("name", "변조"), ("category", "01010200"),
-        ("lon", 128.0), ("lat", 38.0), ("marker_icon", "pin"),
-        ("marker_color", "P-02"), ("place_kind", "leisure"),
+        ("kind", "event"),
+        ("name", "변조"),
+        ("category", "01010200"),
+        ("lon", 128.0),
+        ("lat", 38.0),
+        ("marker_icon", "pin"),
+        ("marker_color", "P-02"),
+        ("place_kind", "leisure"),
     ],
 )
 def test_every_written_effective_field_is_checked(field: str, wrong: Any) -> None:
