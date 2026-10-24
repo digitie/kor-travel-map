@@ -920,8 +920,54 @@ async def test_python_stamp_wrapper_rejects_oversize_without_sql(boundary):
         event.remove(runtime.sync_engine, "before_cursor_execute", count)
 
 
-async def test_legacy_missing_feature_fk_rejects_entire_batch(boundary):
-    admin, runtime = boundary
+@pytest.fixture(scope="module")
+def fk_container():
+    # 기존44가 설치한 module-local cutover와 분리된 새 OFF lab만 사용한다.
+    generator = scalar_container.__wrapped__()
+    try:
+        yield next(generator)
+    finally:
+        generator.close()
+
+
+@pytest.fixture(scope="module")
+async def fk_engines(fk_container):
+    generator = scalar_engines.__wrapped__(fk_container)
+    try:
+        yield await anext(generator)
+    finally:
+        await generator.aclose()
+
+
+@pytest.fixture
+async def fk_boundary(fk_engines, fk_container, request):
+    # 자원/현재역할/backend0 경계는 기존44와 동일한 실제 fixture를 재사용한다.
+    generator = boundary.__wrapped__(fk_engines, fk_container, request)
+    try:
+        pair = await anext(generator)
+        admin, _ = pair
+        assert (
+            await _read(
+                admin, "SELECT count(*) AS count FROM feature.provider_field_active_policies"
+            )
+        )[0]["count"] == 0
+        assert (
+            await _read(
+                admin,
+                "SELECT count(*) AS count FROM pg_trigger "
+                "WHERE tgname LIKE 'trg_scalar_%' AND NOT tgisinternal",
+            )
+        )[0]["count"] == 0
+        request.node.user_properties.append(
+            ("fk_scope", "fresh-OFF-only, not post-cutover raw DELETE")
+        )
+        yield pair
+    finally:
+        await generator.aclose()
+
+
+async def test_legacy_missing_feature_fk_rejects_entire_batch(fk_boundary):
+    admin, runtime = fk_boundary
     ids = await _nonactive_features(admin, 1)
     missing = str(uuid4())
 
@@ -940,8 +986,8 @@ async def test_legacy_missing_feature_fk_rejects_entire_batch(boundary):
 
 @pytest.mark.parametrize("existing_stamp", [False, True], ids=["new-insert", "reobserve"])
 @pytest.mark.parametrize("delete_commits", [False, True], ids=["parent-rollback", "parent-delete"])
-async def test_legacy_fk_actual_parent_delete_race(boundary, existing_stamp, delete_commits):
-    admin, runtime = boundary
+async def test_legacy_fk_actual_parent_delete_race(fk_boundary, existing_stamp, delete_commits):
+    admin, runtime = fk_boundary
     ids = await _nonactive_features(admin, 1)
     if existing_stamp:
         async with AsyncSession(runtime) as session, session.begin():
