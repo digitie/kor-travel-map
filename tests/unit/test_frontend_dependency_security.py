@@ -213,9 +213,20 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     assert verify_token in workflow
     assert npmrc == ["engine-strict=true", "strict-allow-scripts=true"]
     playwright_version = _json(FRONTEND / "package.json")["devDependencies"]["@playwright/test"]
-    assert f"mcr.microsoft.com/playwright:v{playwright_version}-noble@sha256:" in (
-        dockerfiles["c7-playwright.Dockerfile"]
+    base = re.search(r"^FROM (\S+)$", dockerfiles["c7-playwright.Dockerfile"], re.MULTILINE)
+    assert base is not None
+    image = base.group(1)
+    assert re.fullmatch(
+        rf"mcr\.microsoft\.com/playwright:v{re.escape(playwright_version)}-noble@sha256:[0-9a-f]{{64}}",
+        image,
     )
+    for helper in (
+        "build-c7-playwright-image.sh",
+        "run-c7-prod-live-e2e.sh",
+        "run-admin-feature-live-acceptance.sh",
+    ):
+        source = (ROOT / "scripts" / helper).read_text(encoding="utf-8")
+        assert f'PLAYWRIGHT_BASE_IMAGE="{image}"' in source
 
 
 @pytest.mark.unit
