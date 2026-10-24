@@ -2,6 +2,7 @@ CREATE FUNCTION ops.begin_scoped_feature_write(p_attempt uuid,p_owner uuid,p_man
 RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
 DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_dependency ops.feature_write_manifests%ROWTYPE; v_value text; v_plan ops.feature_write_attempts%ROWTYPE; v_participants bigint[]; v_dataset bigint; v_entity_dataset bigint;
 BEGIN
+    PERFORM ops._arm_scoped_feature_write_deadline();
     -- dataset 행을 하나라도 잠그기 전에 frozen manifest의 모든 participant를 정렬한다.
     SELECT * INTO v_plan FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
     IF NOT FOUND OR v_plan.owner IS DISTINCT FROM p_owner THEN

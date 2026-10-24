@@ -162,7 +162,12 @@ def kernel_database():
 
 @pytest.fixture
 async def kernel_engines(kernel_database):
-    admin = create_async_engine(kernel_database["admin"], pool_size=2, max_overflow=0)
+    admin = create_async_engine(
+        kernel_database["admin"],
+        pool_size=2,
+        max_overflow=0,
+        connect_args={"server_settings": {"statement_timeout": "4000", "lock_timeout": "1000"}},
+    )
     runtime = create_async_engine(
         kernel_database["runtime"],
         pool_size=4,
@@ -653,4 +658,178 @@ async def test_cross_dataset_shared_feature_all_heads_lock_in_sorted_order(kerne
                 {"left": left["attempt_id"], "right": right["attempt_id"]},
             )
             == 2
+        )
+
+
+async def test_repeatable_read_old_worker_is_serialization_failure(kernel_engines):
+    admin, runtime = kernel_engines
+    region = uuid4().hex
+    token, digest = await prepared(runtime, region=region)
+    rr = create_async_engine(
+        runtime.url, isolation_level="REPEATABLE READ", pool_size=1, max_overflow=0
+    )
+    try:
+        async with AsyncSession(rr) as old, old.begin():
+            await old.execute(text("SELECT count(*) FROM feature.features"))
+            async with admin.begin() as connection:
+                await connection.execute(
+                    text(
+                        "UPDATE ops.feature_write_attempts SET "
+                        "lease_until=clock_timestamp()-interval '1 second' WHERE attempt_id=:id"
+                    ),
+                    {"id": token["attempt_id"]},
+                )
+                await connection.execute(
+                    text(
+                        "UPDATE ops.feature_write_region_scopes SET "
+                        "lease_until=clock_timestamp()-interval '1 second' WHERE owner=:id"
+                    ),
+                    {"id": token["attempt_id"]},
+                )
+            successor, _ = await prepared(runtime, region=region)
+            with pytest.raises(DBAPIError) as caught:
+                await begin_scoped_feature_write(old, **token, manifest_digest=digest)
+            assert caught.value.orig.sqlstate == "40001"
+        async with AsyncSession(runtime) as session, session.begin():
+            assert await cancel_scoped_feature_write(session, **successor)
+    finally:
+        await rr.dispose()
+
+
+async def test_participant_dataset_budget_is_enforced_before_apply(kernel_engines):
+    admin, runtime = kernel_engines
+    members = []
+    async with admin.begin() as connection:
+        for ordinal in range(33):
+            dataset = 1000 + ordinal
+            await connection.execute(
+                text("INSERT INTO provider_sync.provider_datasets VALUES(:id)"), {"id": dataset}
+            )
+            key = "budget-" + uuid4().hex
+            await connection.execute(
+                text("INSERT INTO provider_sync.source_entities VALUES(:key,:dataset)"),
+                {"key": key, "dataset": dataset},
+            )
+            await connection.execute(
+                text("INSERT INTO provider_sync.source_entity_heads VALUES(:key,'record')"),
+                {"key": key},
+            )
+            members.append(ScopedWriteDependency(ordinal, "source_head", key, "record"))
+    token, digest = await prepared(runtime, region=uuid4().hex, members=members)
+    with pytest.raises(DBAPIError) as caught:
+        async with AsyncSession(runtime) as session, session.begin():
+            await begin_scoped_feature_write(session, **token, manifest_digest=digest)
+    assert caught.value.orig.sqlstate == "23514"
+    async with admin.connect() as connection:
+        assert (
+            await connection.scalar(
+                text("SELECT status FROM ops.feature_write_attempts WHERE attempt_id=:id"),
+                {"id": token["attempt_id"]},
+            )
+            == "ready"
+        )
+    async with AsyncSession(runtime) as session, session.begin():
+        assert await cancel_scoped_feature_write(session, **token)
+
+
+async def test_cancel_cannot_overwrite_committed_apply(kernel_engines):
+    _, runtime = kernel_engines
+    token, digest = await prepared(runtime, region=uuid4().hex)
+    async with AsyncSession(runtime) as first, first.begin():
+        await begin_scoped_feature_write(first, **token, manifest_digest=digest)
+        with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 실제 대기 중 취소 경쟁
+            async with AsyncSession(runtime) as other, other.begin():
+                await other.execute(text("SET LOCAL lock_timeout='80ms'"))
+                await cancel_scoped_feature_write(other, **token)
+        assert caught.value.orig.sqlstate == "55P03"
+        await finish_scoped_feature_write(first, **token, result_digest="b" * 64)
+    async with AsyncSession(runtime) as session, session.begin():
+        assert not await cancel_scoped_feature_write(session, **token)
+
+
+async def test_kernel_deadlines_preserve_shorter_caller_and_reject_unbounded_sql(kernel_engines):
+    _, runtime = kernel_engines
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL statement_timeout='200ms'"))
+        await session.execute(text("SET LOCAL lock_timeout='80ms'"))
+        await claim_scoped_feature_write(
+            session,
+            attempt_id=uuid4(),
+            owner=uuid4(),
+            dataset_id=2,
+            idempotency_key=uuid4().hex,
+            regions=[ScopedWriteRegion(1, uuid4().hex)],
+            input_digest="a" * 64,
+            expected_members=0,
+        )
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='statement_timeout'")
+            )
+            == 200
+        )
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 80
+        )
+    with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - SQL direct deadline 사전 거부
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout=0"))
+            await session.execute(
+                text(
+                    "SELECT ops.claim_scoped_feature_write(:id,:owner,1,'unbounded','"
+                    "[]',:digest,0,180,false)"
+                ),
+                {"id": uuid4(), "owner": uuid4(), "digest": "a" * 64},
+            )
+    assert caught.value.orig.sqlstate == "23514"
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL statement_timeout=0"))
+        await session.execute(text("SET LOCAL lock_timeout=0"))
+        token = await claim_scoped_feature_write(
+            session,
+            attempt_id=uuid4(),
+            owner=uuid4(),
+            dataset_id=2,
+            idempotency_key=uuid4().hex,
+            regions=[ScopedWriteRegion(1, uuid4().hex)],
+            input_digest="a" * 64,
+            expected_members=0,
+        )
+        assert token["status"] == "preparing"
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='statement_timeout'")
+            )
+            == 30000
+        )
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 1000
+        )
+
+
+async def test_public_protocol_preserves_finite_legacy_wait_and_resets_default(kernel_engines):
+    _, runtime = kernel_engines
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL lock_timeout='15min'"))
+        await lock_scoped_feature_write_protocol(session, exclusive=True)
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 900000
+        )
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET LOCAL lock_timeout=0"))
+        await lock_scoped_feature_write_protocol(session, exclusive=True)
+        assert (
+            await session.scalar(
+                text("SELECT setting::int FROM pg_settings WHERE name='lock_timeout'")
+            )
+            == 0
         )
