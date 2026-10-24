@@ -37,6 +37,7 @@ from kortravelmap.infra.scoped_feature_writes import (
 
 _MAX_ITEMS = 8192 // 3
 _APPLY_SECONDS = 30.0
+_PLAN_SECONDS = 30.0
 _DOMAIN = "native-full-refresh-v1"
 
 
@@ -232,6 +233,24 @@ async def prepare_exclusive_provider_snapshot(
     retire_geometryless_areas: bool = False,
 ) -> ExclusiveProviderSnapshotPlan | None:
     """한 fresh planning TX. 실제 snapshot을 받고 만들며 commit은 caller 소유다."""
+    async with asyncio.timeout(_PLAN_SECONDS):
+        return await _prepare_exclusive_provider_snapshot(
+            session,
+            bundles,
+            options=options,
+            geo=geo,
+            retire_geometryless_areas=retire_geometryless_areas,
+        )
+
+
+async def _prepare_exclusive_provider_snapshot(
+    session: AsyncSession,
+    bundles: tuple[FeatureBundle, ...],
+    *,
+    options: ExclusiveProviderSnapshotOptions,
+    geo: GeoLoadContext | None,
+    retire_geometryless_areas: bool,
+) -> ExclusiveProviderSnapshotPlan | None:
     if not session.in_transaction():
         raise ValueError("explicit planning transaction required")
     bundles = bounded_full_snapshot(
@@ -279,13 +298,18 @@ async def prepare_exclusive_provider_snapshot(
     dependencies: dict[
         tuple[Literal["feature", "feature_membership", "source_head"], str], str
     ] = {}
-    for feature in sorted(targets):
-        revision = await session.scalar(
-            text("SELECT row_revision FROM feature.features WHERE feature_id=:id"), {"id": feature}
+    feature_rows = (
+        await session.execute(
+            text("""SELECT feature_id,row_revision,
+        ops.scoped_feature_write_membership_digest(feature_id)
+        FROM feature.features WHERE feature_id=ANY(CAST(:features AS uuid[]))
+        ORDER BY feature_id"""),
+            {"features": list(targets)},
         )
-        membership = await session.scalar(
-            text("SELECT ops.scoped_feature_write_membership_digest(:id)"), {"id": feature}
-        )
+    ).all()
+    if len(feature_rows) != len(targets):
+        raise ValueError("active Feature disappeared while planning")
+    for feature, revision, membership in feature_rows:
         dependencies[("feature", str(feature))] = str(revision)
         dependencies[("feature_membership", str(feature))] = membership
     heads = (
@@ -434,7 +458,13 @@ async def refresh_exclusive_provider_snapshot(
             capture = await repo.capture_provider_curation_input(
                 session, provider=provider, dataset_key=dataset_key
             )
-            result = _result_digest(fingerprint, manifest_digest, capture, context)
+            result = _result_digest(
+                fingerprint,
+                manifest_digest,
+                capture,
+                context,
+                await _read_target_state(session, entities),
+            )
             if result != attempt["result_digest"]:
                 raise ValueError("completed full snapshot is stale; replan without DML")
             return ExclusiveProviderSnapshotResult(capture, attempt, True, None)
@@ -454,9 +484,37 @@ async def refresh_exclusive_provider_snapshot(
             session,
             attempt_id=attempt_id,
             owner=owner,
-            result_digest=_result_digest(fingerprint, manifest_digest, capture, context),
+            result_digest=_result_digest(
+                fingerprint,
+                manifest_digest,
+                capture,
+                context,
+                await _read_target_state(session, entities),
+            ),
         )
         return ExclusiveProviderSnapshotResult(load.merge(capture), attempt, False, retired)
+
+
+async def _read_target_state(session: AsyncSession, entities: list[str]) -> list[list[str]]:
+    # capture 원장에는 Geo stamp가 없다. 입력 target을 먼저 bounded DISTINCT한 뒤
+    # 모든 core UPDATE는 정본 BEFORE trigger가 row_revision을 올린다.
+    # core 전체 JSON 재직렬화 없이 revision과 독립 Geo stamp의 DB hash만 전송한다.
+    rows = (
+        await session.execute(
+            text("""WITH targets AS (
+        SELECT DISTINCT feature_id FROM provider_sync.source_links
+        WHERE source_entity_key=ANY(CAST(:entities AS text[])) ORDER BY feature_id LIMIT 2731
+    ) SELECT core.feature_id::text,encode(x_extension.digest(convert_to(
+        jsonb_build_array(core.feature_id,core.row_revision,to_jsonb(stamp))::text,'UTF8'),'sha256'),'hex')
+      FROM targets JOIN feature.features core USING(feature_id)
+      LEFT JOIN feature.feature_geocode_stamps stamp USING(feature_id)
+      ORDER BY core.feature_id"""),
+            {"entities": entities},
+        )
+    ).all()
+    if len(rows) > _MAX_ITEMS:
+        raise ValueError("full result target set exceeds2730")
+    return [[str(feature), str(fingerprint)] for feature, fingerprint in rows]
 
 
 def _result_digest(
@@ -464,6 +522,7 @@ def _result_digest(
     manifest: str,
     capture: repo.FeatureLoadResult,
     context: repo._ExclusiveProviderRefresh,
+    target_state: list[list[str]],
 ) -> str:
     return hashlib.sha256(
         json.dumps(
@@ -477,6 +536,7 @@ def _result_digest(
                 ],
                 capture.curation_input_member_count,
                 capture.curation_input_set_hash,
+                target_state,
             ],
             separators=(",", ":"),
         ).encode()

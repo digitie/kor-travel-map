@@ -8,9 +8,9 @@ Geo/분류·typed base/effective 의미는 legacy EX로 유지하고, 활성 nam
 5000건 수집·내구 artifact·실제 worker 전수 수용을 완료했다고 표시하지 않는다.
 
 초기 checkpoint에는 실제 legacy before 실패1건과 명시 entry PG5/단위4를 확인했다.
-최신 합집합은 `/tmp/map419-checkpoint-focused.log`의9PASS16.33초다.
-추가 경합·lease/반복취소·권한/metadata/oracle·정확 CI·실제 asset/tracking·UI·독립2리뷰는
-계속 진행 중이다. 아래 수치는 그 시점의 별도 실행이며 최종 합산 수치가 아니다.
+초기 합집합은 `/tmp/map419-checkpoint-focused.log`의9PASS16.33초다.
+현재 확장 시험은 `/tmp/map419-revision-checkpoint-pg.log`의17PASS22.91초이며 최종 합집합
+실행 전 checkpoint다. metadata/oracle·정확 CI·UI·최종 독립2리뷰는 진행 중이다. 아래 수치는 그 시점의 별도 실행이며 최종 합산 수치가 아니다.
 
 ## 실제 전후 증거
 
@@ -43,7 +43,7 @@ plan을 만든다. Options는 `kortravelmap.infra.exclusive_provider_refresh`에
 미래 converter clock을 미리 만든 정적 plan이나 fakeclient 치환이 아니다. 기본 None과
 다른 scope는 기존 load 분기를 사용하며 추가 planning SQL이 없다. 상위 transaction에
 묶인 client는 선택 경로에서 명시 거부한다. 실제 Dagster resource 설정 연결과 실제
-tracked asset은 별도 후속 합성·검증 항목이다.
+tracked asset 시험은 아래 별도 저자 합성 항목이다.
 
 새 table이나 ops raw SELECT/DML grant를 추가하지 않는다. 기존 applying+sameTX+EX
 attempt, 활성 Feature의 완전 member/source-head manifest, epoch/owner 검증을 재사용한다.
@@ -68,7 +68,10 @@ caller가 planning부터 apply await 종료까지 독점 소유하고 수정하�
 
 쓰기 TX는 RC에서 load→별도 entity의 비활성 area retire→전체 count/hash capture→제한
 attempt finish 순서다. result digest는 full input·manifest/정책 subset·당시 capture를
-결합한다. completed는 현재 readonly capture와 target을 재구성해 저장 지문과 같을 때만
+결합한다. target 결과는 canonical UUID·core row_revision·Geo stamp의 DB 해시다.
+정본 force_features_row_revision BEFORE UPDATE trigger는 모든 core UPDATE에서 OLD+1을
+강제하고, 기존 capture는 detail·override lineage도 포함한다. 전체 core JSON을 다시
+직렬화하지 않으면서 stamp-only와 core 변경을 각각 구분한다. completed는 현재 readonly capture와 target을 재구성해 저장 지문과 같을 때만
 source/winner DML0으로 반환한다. 다르면 stale/replan이고 새 current capture를 옛 성공에
 붙이지 않는다. 과거 insert/update 숫자는 저장되지 않아 복원하지 않으며 replay 카운트는0,
 retired는 불명(None)으로 표시한다. client의 새 호출은 항상 새 plan이고 완료 plan을 새 run
@@ -79,7 +82,9 @@ apply 실패/취소는 전체 rollback 뒤 자기 ready plan을 fresh TX에서1�
 태스크를 남기지 않는다. 정리 불가시60초 lease는 **apply TX가 종료되어 잠금을 놓은 뒤**
 남은 owner 예약의 복구 상한이다. 살아 있는 PG backend/idle TX의 rowlock까지 lease만으로
 제거하지 않는다. 완료 commit이 불확실해도 기존 cancel은 completed를 변경하지 않는다.
-전체 apply의30초는 협력적 호출 상한이며 동기 CPU 선점/commit의 hard cap이 아니다.
+planning과 apply는 각각30초의 협력적 호출 예산이다. claim/membership은 target당 왕복하지
+않고 정렬된 bulk SELECT1회로 읽는다. 두 단계 사이 commit/DB 정리 시간은 별도이며
+단일60초 hard cap으로 부르지 않는다. 전체 apply의30초는 협력적 호출 상한이며 동기 CPU 선점/commit의 hard cap이 아니다.
 
 기존 count/hash capture는 SELECT다. 영속 child snapshot receipt는 후속 별도
 SERIALIZABLE TX에서 exact root/child/member와 현재 집합을 다시 대조한다. scoped begin의
@@ -91,12 +96,36 @@ fresh RC 요구와 합쳐 한 TX로 바꾸지 않는다. 기존 root receipt/취
 업로드/등록을 수행하지 않는다(client 모듈의 후속 TODO). 기존 DTO 설명을 실행 사실로
 세지 않는다. 이번 변경은 업로더를 구현하지 않는다. 파일 적재 원자 성공/실제 전송 증거는0이다.
 
-- [ ] shared entity의 active place+퇴역 area 거부와 별도 entity retire 성공 실제 회귀
-- [ ] mode/epoch/owner/manifest/잘못된 dataset·target, active 지원 밖·권한 회귀
-- [ ] 실패/취소·반복취소·짧은 cap·lease takeover·pool1과 completed replay 반증
-- [ ] 실제 public SDK HTTP대역→converter/Geo→실제 asset/tracking/child receipt
+- [ ] fresh old input의 새 plan·최종 권한/metadata·지원 밖 회귀 합집합
+- [ ] 최종 SDK asset/tracking과 전체 회귀 합집합
 - [ ] 최종 metadata/oracle/정적 전체 gate·독립2리뷰·정확 CI·fresh 실제 UI
 - [ ] 5000건/큰 artifact·내구 worker 인계·ARM 비용·운영 opt-in 별도 수용
 
 모든 T-CWRITE 전체 완료 체크박스는 계속 미완이다. EX 경로는 SH 병렬 처리 성과가 아니며
 같은 dataset은 기존 단일 owner/dataset 잠금으로 직렬화한다.
+
+
+## 별도 저자 합성과 확장 시험 경계
+
+root의 bd87 resource commit과 4d77 Compose/example commit을 합성했다. 새 국가유산 전용
+flag는 기본 false이고 code-server에만 명시 전달한다. root의 정확 커밋 대상18PASS2.44초는
+초기18건과 합산하지 않는다. T/W가 별도 소유권으로 독립 검토한 변경이며 실제 운영 env는0이다.
+
+J의 e599 baseline과 e9a033 실제 asset EX 시험을 신규 전용 파일로 합성했다. 실제 pinned
+public SDK HTTP대역→converter/Geo→실제 client/정본 tracking wrapper를 사용하며 fakeclient
+메서드 치환이 아니다. J의4PASS16.91초는 legacy 정상·후속 seal drift 및 EX 성공·두 번째
+실제 source DML rollback/cancel을 구분한다. RC capture와 별도 SERIALIZABLE child seal,
+뒤의 root completion을 관측한다. 실제 Dagster worker·운영 수집으로 세지 않는다.
+최종 A3 소스와 결합한 재실행은 별도 gate다.
+
+17건 확장 시험은 혼합 active2/비활성 existing1·신규1/별도 entity area retire, stamp-only
+stale, bulk planning1회와 planning 전체 취소 rollback, 잘못된 owner/mode/target의 preDML
+거부, 반복 취소/짧은 lease 후 takeover와 old owner fencing, SH/EX 동일 활성 projection,
+실제 bound client 거부, 닫힌 ACL을 포함한다.
+이전 `/tmp/map419-all-contract-pg.log`의14PASS3FAIL은 시험 fixture 실패로 보존한다.
+하나는 공유 fixture의 전역 attempt 수를0으로 가정했고 dataset 범위로 수정했다. 두 개는
+historical area의 immutable source ownership을 재바인딩하려다가 기존23514로 차단됐다.
+guard를 끄거나 active cutover를 위조하지 않았다. live/retired area 모두 재바인딩이
+거부되고 정책 미활성임을 확인하는 회귀로 수정했다. 따라서 이 두 건은 이미 공유된
+active place+area에 대한 새 full entry 분기 실행 증거가 아니다. 별도 entity retire 성공과
+정적 validator의 shared entity 거부는 구분한다.

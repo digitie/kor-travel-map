@@ -1488,8 +1488,14 @@ class AsyncKorTravelMapClient:
         try:
             async with asyncio.timeout(2.0):
                 async with self._session_factory() as cleanup, cleanup.begin():
-                    await cleanup.execute(text("SET LOCAL statement_timeout='1s'"))
-                    await cleanup.execute(text("SET LOCAL lock_timeout='250ms'"))
+                    await cleanup.execute(
+                        text("""SELECT set_config(setting.name,
+                        (CASE WHEN setting.setting::bigint=0 THEN cap.value
+                              ELSE least(setting.setting::bigint,cap.value) END)::text,true)
+                        FROM pg_settings setting JOIN (VALUES
+                          ('statement_timeout',1000),('lock_timeout',250)
+                        ) AS cap(name,value) ON setting.name=cap.name""")
+                    )
                     await cancel_scoped_feature_write(
                         cleanup, attempt_id=plan.attempt_id, owner=plan.owner
                     )
@@ -1537,14 +1543,20 @@ class AsyncKorTravelMapClient:
                 geo=geo,
                 retire_geometryless_areas=retire_geometryless_areas,
             )
-            async with self._session_factory() as planning, planning.begin():
-                plan = await prepare_exclusive_provider_snapshot(
-                    planning,
-                    materialized,
-                    options=options,
-                    geo=geo,
-                    retire_geometryless_areas=retire_geometryless_areas,
-                )
+            plan: ExclusiveProviderSnapshotPlan | None = None
+            try:
+                async with self._session_factory() as planning, planning.begin():
+                    plan = await prepare_exclusive_provider_snapshot(
+                        planning,
+                        materialized,
+                        options=options,
+                        geo=geo,
+                        retire_geometryless_areas=retire_geometryless_areas,
+                    )
+            except BaseException:
+                if plan is not None:
+                    await self._cancel_exclusive_snapshot_plan(plan)
+                raise
             if plan is not None:
                 try:
                     async with self._feature_load_transaction() as session:

@@ -33,7 +33,9 @@ async def test_active_primary_legacy_refresh_before(scalar_engines):
     assert caught.value.orig.sqlstate == "23514"
 
 
-async def _full_plan(runtime, dataset, items, *, bundles=None, geo=None, retire=False):
+async def _full_plan(
+    runtime, dataset, items, *, bundles=None, geo=None, retire=False, exclusive=True
+):
     inputs = [item.bundle for item in items] if bundles is None else bundles
     targets = {item.feature_id: 1 for item in items}
     kwargs = dict(
@@ -84,7 +86,7 @@ async def _full_plan(runtime, dataset, items, *, bundles=None, geo=None, retire=
             regions=(),
             expected_members=len(members),
             input_digest=fingerprint,
-            exclusive_protocol=True,
+            exclusive_protocol=exclusive,
         )
         await append_scoped_feature_write_manifest(
             session, attempt_id=attempt, owner=owner, members=members
@@ -267,3 +269,460 @@ async def test_client_second_source_failure_cancels_and_same_input_recovers(
     monkeypatch.setattr(feature_repo, "_upsert_source_record_state", original)
     load, _ = await client.load_authoritative_feature_snapshot([i.bundle for i in items], **kwargs)
     assert load.bundles_total == 2
+
+
+async def test_mixed_active_existing_new_and_distinct_historical_area_retire(scalar_engines):
+    from kortravelmap.infra.feature_identity import resolve_feature_identity
+    from tests.integration.test_scoped_provider_batch import _dataset_bundle
+
+    admin, runtime = scalar_engines
+    dataset, items = await _seed(admin, runtime)
+    key = items[0].bundle.source_record.dataset_key
+    existing = _dataset_bundle(key, uuid4().hex, "nonactive-existing", hours=-24)
+    area = _dataset_bundle(key, uuid4().hex, "historical-geometryless-area", hours=-24)
+    new = _dataset_bundle(key, uuid4().hex, "nonactive-new", hours=0)
+    async with AsyncSession(runtime) as session, session.begin():
+        await feature_repo.load_bundles(session, [existing, area])
+        area_id = (await resolve_feature_identity(session, area.feature.feature_id)).feature_id
+    # 정본 기존 회귀와 같은 pre-0086 historical shape: subtype 부재의 area.
+    # active 데이터나 guard는 손대지 않는다. source entity는 active place와 별개다.
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        await session.execute(
+            text("DELETE FROM feature.feature_places WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": area_id},
+        )
+        await session.execute(
+            text("UPDATE feature.features SET kind='area' WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": area_id},
+        )
+    bundles = [existing, items[1].bundle, new, items[0].bundle]
+    inputs, plan = await _full_plan(runtime, dataset, items, bundles=bundles, retire=True)
+    async with AsyncSession(runtime) as session, session.begin():
+        result = await full.refresh_exclusive_provider_snapshot(session, inputs, **plan)
+        assert result.load.bundles_total == 4
+        assert result.load.features_inserted == 1
+        assert result.retired == 1
+        assert result.load.curation_input_member_count == 5
+    async with AsyncSession(admin) as session:
+        state = (
+            await session.execute(
+                text(
+                    "SELECT lifecycle_state,publication_state FROM feature.features "
+                    "WHERE feature_id=CAST(:id AS uuid)"
+                ),
+                {"id": area_id},
+            )
+        ).one()
+        assert tuple(state) == ("retired", "suppressed")
+
+
+async def test_completed_replay_rejects_stamp_only_advance(scalar_engines):
+    from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
+
+    admin, runtime = scalar_engines
+    dataset, items = await _seed(admin, runtime)
+
+    def context(char):
+        return GeoLoadContext(
+            geo_applied=GeoApplied(reverse=True, geocode=False),
+            current_dataset=DatasetRef(
+                version_token="dv1-" + char * 32, data_token="dd1-" + char * 32
+            ),
+            observed_data_tokens=frozenset({"dd1-" + char * 32}),
+        )
+
+    inputs, oldplan = await _full_plan(runtime, dataset, items, geo=context("a"))
+    async with AsyncSession(runtime) as session, session.begin():
+        old = await full.refresh_exclusive_provider_snapshot(session, inputs, **oldplan)
+    _, newplan = await _full_plan(runtime, dataset, items, geo=context("b"))
+    async with AsyncSession(runtime) as session, session.begin():
+        new = await full.refresh_exclusive_provider_snapshot(session, inputs, **newplan)
+    assert old.load.curation_input_set_hash == new.load.curation_input_set_hash
+    with pytest.raises(ValueError, match="stale"):
+        async with AsyncSession(runtime) as session, session.begin():
+            await full.refresh_exclusive_provider_snapshot(session, inputs, **oldplan)
+
+
+async def test_planning_bulk_read_and_whole_timeout_roll_back_claim(scalar_engines, monkeypatch):
+    import asyncio
+
+    from sqlalchemy import event
+
+    admin, runtime = scalar_engines
+    dataset, items = await _seed(admin, runtime)
+    record = items[0].bundle.source_record
+    options = full.ExclusiveProviderSnapshotOptions(
+        record.provider, record.dataset_key, record.source_entity_type
+    )
+    statements = []
+
+    def observe(_conn, _cursor, statement, _parameters, _context, _many):
+        statements.append(statement)
+
+    event.listen(runtime.sync_engine, "before_cursor_execute", observe)
+    sealed = asyncio.Event()
+    original = full.seal_scoped_feature_write_manifest
+
+    async def stop_after_seal(*args, **kwargs):
+        await original(*args, **kwargs)
+        sealed.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(full, "seal_scoped_feature_write_manifest", stop_after_seal)
+    assert full._PLAN_SECONDS == 30.0
+    monkeypatch.setattr(full, "_PLAN_SECONDS", 1.0)
+    try:
+        with pytest.raises(TimeoutError):
+            async with AsyncSession(runtime) as session, session.begin():
+                await full.prepare_exclusive_provider_snapshot(
+                    session, tuple(i.bundle for i in items), options=options
+                )
+    finally:
+        event.remove(runtime.sync_engine, "before_cursor_execute", observe)
+    assert sealed.is_set()
+    membership_reads = [
+        s for s in statements if "scoped_feature_write_membership_digest(feature_id)" in s
+    ]
+    assert len(membership_reads) == 1
+    async with AsyncSession(admin) as session:
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM ops.feature_write_attempts WHERE provider_dataset_id=:id"
+                ),
+                {"id": dataset},
+            )
+            == 0
+        )
+    monkeypatch.setattr(full, "seal_scoped_feature_write_manifest", original)
+    async with AsyncSession(runtime) as session, session.begin():
+        recovered = await full.prepare_exclusive_provider_snapshot(
+            session, tuple(i.bundle for i in items), options=options
+        )
+    assert recovered is not None
+    from kortravelmap.infra.scoped_feature_writes import cancel_scoped_feature_write
+
+    async with AsyncSession(runtime) as session, session.begin():
+        assert await cancel_scoped_feature_write(
+            session, attempt_id=recovered.attempt_id, owner=recovered.owner
+        )
+
+
+@pytest.mark.parametrize("mismatch", ["owner", "mode", "target"])
+async def test_wrong_binding_rejected_before_source_dml(scalar_engines, monkeypatch, mismatch):
+    admin, runtime = scalar_engines
+    dataset, items = await _seed(admin, runtime)
+    inputs, plan = await _full_plan(runtime, dataset, items, exclusive=mismatch != "mode")
+    calls = 0
+
+    async def forbidden(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        raise AssertionError("source DML must not start for mismatched binding")
+
+    monkeypatch.setattr(feature_repo, "_upsert_source_record_state", forbidden)
+    if mismatch == "owner":
+        plan["owner"] = uuid4()
+    elif mismatch == "target":
+        plan["active_targets"] = {uuid4(): 1}
+    with pytest.raises((ValueError, DBAPIError)) as caught:
+        async with AsyncSession(runtime) as session, session.begin():
+            await full.refresh_exclusive_provider_snapshot(session, inputs, **plan)
+    if mismatch == "owner":
+        assert caught.value.orig.sqlstate == "40001"
+    assert calls == 0
+    from kortravelmap.infra.scoped_feature_writes import cancel_scoped_feature_write
+
+    # 원 owner를 보존한 경우만 즉시 정리한다. 나머지는 소유 fixture 종료로 제거한다.
+    if mismatch != "owner":
+        async with AsyncSession(runtime) as session, session.begin():
+            await cancel_scoped_feature_write(
+                session, attempt_id=plan["attempt_id"], owner=plan["owner"]
+            )
+
+
+async def test_repeated_cancel_keeps_original_and_lease_takeover_fences_old_owner(
+    scalar_engines, monkeypatch
+):
+    import asyncio
+
+    import kortravelmap.client as client_module
+    from kortravelmap.client import AsyncKorTravelMapClient
+    from kortravelmap.infra import scoped_feature_writes as kernel
+
+    admin, runtime = scalar_engines
+    _, items = await _seed(admin, runtime)
+    record = items[0].bundle.source_record
+    client = AsyncKorTravelMapClient(
+        runtime,
+        exclusive_provider_snapshot=full.ExclusiveProviderSnapshotOptions(
+            record.provider, record.dataset_key, record.source_entity_type
+        ),
+    )
+    real_claim = full.claim_scoped_feature_write
+
+    async def short_lease(*args, **kwargs):
+        kwargs["lease_seconds"] = 1
+        return await real_claim(*args, **kwargs)
+
+    monkeypatch.setattr(full, "claim_scoped_feature_write", short_lease)
+    plans = []
+    real_prepare = client_module.prepare_exclusive_provider_snapshot
+
+    async def observe_plan(*args, **kwargs):
+        value = await real_prepare(*args, **kwargs)
+        plans.append(value)
+        return value
+
+    monkeypatch.setattr(client_module, "prepare_exclusive_provider_snapshot", observe_plan)
+    source_started = asyncio.Event()
+    cleanup_started = asyncio.Event()
+    real_source = feature_repo._upsert_source_record_state
+    calls = 0
+
+    async def suspend_source(*args, **kwargs):
+        nonlocal calls
+        value = await real_source(*args, **kwargs)
+        calls += 1
+        if calls == 2:
+            source_started.set()
+            await asyncio.Event().wait()
+        return value
+
+    real_cancel = kernel.cancel_scoped_feature_write
+
+    async def suspend_cleanup(*_args, **_kwargs):
+        cleanup_started.set()
+        await asyncio.Event().wait()
+
+    monkeypatch.setattr(feature_repo, "_upsert_source_record_state", suspend_source)
+    monkeypatch.setattr(kernel, "cancel_scoped_feature_write", suspend_cleanup)
+    kwargs = dict(
+        provider=record.provider,
+        dataset_key=record.dataset_key,
+        source_entity_type=record.source_entity_type,
+    )
+    task = asyncio.create_task(
+        client.load_authoritative_feature_snapshot([i.bundle for i in items], **kwargs),
+        name="owned-full-cancel-task",
+    )
+    try:
+        await asyncio.wait_for(source_started.wait(), 5)
+        task.cancel("owned-first")
+        await asyncio.wait_for(cleanup_started.wait(), 5)
+        task.cancel("owned-second")
+        with pytest.raises(asyncio.CancelledError) as caught:
+            await asyncio.wait_for(task, 3)
+        assert caught.value.args == ("owned-first",)
+        assert task.done()
+        assert runtime.pool.checkedout() == 0
+        old = plans[0]
+        async with AsyncSession(admin) as session:
+            assert (
+                await session.scalar(
+                    text("SELECT status FROM ops.feature_write_attempts WHERE attempt_id=:id"),
+                    {"id": old.attempt_id},
+                )
+                == "ready"
+            )
+        monkeypatch.setattr(feature_repo, "_upsert_source_record_state", real_source)
+        monkeypatch.setattr(kernel, "cancel_scoped_feature_write", real_cancel)
+        await asyncio.sleep(1.1)
+        load, _ = await client.load_authoritative_feature_snapshot(
+            [i.bundle for i in items], **kwargs
+        )
+        assert load.bundles_total == 2
+        with pytest.raises(DBAPIError) as stale:
+            async with AsyncSession(runtime) as session, session.begin():
+                await full.refresh_exclusive_provider_snapshot(
+                    session,
+                    [i.bundle for i in items],
+                    dataset_id=old.dataset_id,
+                    active_targets=old.active_targets,
+                    attempt_id=old.attempt_id,
+                    owner=old.owner,
+                    manifest_digest=old.manifest_digest,
+                    **kwargs,
+                )
+        assert stale.value.orig.sqlstate == "40001"
+    finally:
+        if not task.done():
+            task.cancel()
+            await asyncio.gather(task, return_exceptions=True)
+
+
+async def test_sh_and_full_ex_keep_identical_active_base_semantics(scalar_engines):
+    from kortravelmap.infra import scoped_provider_batch
+    from tests.integration.test_scoped_provider_batch import _plan
+
+    admin, runtime = scalar_engines
+    dataset, items = await _seed(admin, runtime)
+    shared, _ = await _plan(runtime, dataset, items)
+    async with AsyncSession(runtime) as session, session.begin():
+        await scoped_provider_batch.refresh_scoped_provider_scalars_batch(session, items, **shared)
+
+    async def active_bases():
+        async with AsyncSession(admin) as session:
+            return (
+                await session.execute(
+                    text("""SELECT feature_id,field_path,provider_dataset_id,
+                source_entity_key,source_record_key,source_raw_payload_hash,value_json,
+                observed_at,base_revision FROM feature.feature_base_field_values
+                WHERE feature_id=ANY(CAST(:ids AS uuid[]))
+                AND field_path IN ('core.name','place.phones') ORDER BY feature_id,field_path"""),
+                    {"ids": [i.feature_id for i in items]},
+                )
+            ).all()
+
+    before = await active_bases()
+    inputs, exclusive = await _full_plan(runtime, dataset, items)
+    async with AsyncSession(runtime) as session, session.begin():
+        await full.refresh_exclusive_provider_snapshot(session, inputs, **exclusive)
+    assert await active_bases() == before
+
+
+async def test_actual_bound_client_rejects_without_committing_caller(scalar_engines):
+    from kortravelmap.dagster.feature_update_runner import _bind_client_to_session
+
+    from kortravelmap.client import AsyncKorTravelMapClient
+
+    admin, runtime = scalar_engines
+    dataset, items = await _seed(admin, runtime)
+    record = items[0].bundle.source_record
+    client = AsyncKorTravelMapClient(
+        runtime,
+        exclusive_provider_snapshot=full.ExclusiveProviderSnapshotOptions(
+            record.provider, record.dataset_key, record.source_entity_type
+        ),
+    )
+    async with AsyncSession(runtime) as outer, outer.begin():
+        bound = await _bind_client_to_session(client, outer)
+        with pytest.raises(ValueError, match="transaction-bound"):
+            await bound.load_authoritative_feature_snapshot(
+                [i.bundle for i in items],
+                provider=record.provider,
+                dataset_key=record.dataset_key,
+                source_entity_type=record.source_entity_type,
+            )
+        assert outer.in_transaction()
+        assert outer.is_active
+        assert await outer.scalar(text("SELECT 1")) == 1
+    async with AsyncSession(admin) as session:
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM ops.feature_write_attempts "
+                    "WHERE provider_dataset_id=:dataset"
+                ),
+                {"dataset": dataset},
+            )
+            == 0
+        )
+
+
+@pytest.mark.parametrize("retired", [False, True])
+async def test_shared_historical_area_rebind_rejected_without_fabricated_active(
+    scalar_engines, retired
+):
+
+    from kortravelmap.infra.feature_identity import resolve_feature_identity
+    from tests.integration.test_scoped_provider_batch import _dataset_bundle, _entity
+
+    admin, runtime = scalar_engines
+    key = uuid4().hex
+    place = _dataset_bundle(key, uuid4().hex, "shared-place", hours=-24)
+    area = _dataset_bundle(key, uuid4().hex, "historical-area", hours=-24)
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        dataset = await session.scalar(
+            text("""INSERT INTO provider_sync.provider_datasets(
+            provider,dataset_key,display_name,source_kind) VALUES(:p,:k,'owned historical','manual')
+            RETURNING provider_dataset_id"""),
+            {"p": place.source_record.provider, "k": key},
+        )
+    async with AsyncSession(runtime) as session, session.begin():
+        await feature_repo.load_bundles(session, [place, area])
+        place_id = (await resolve_feature_identity(session, place.feature.feature_id)).feature_id
+        area_id = (await resolve_feature_identity(session, area.feature.feature_id)).feature_id
+    # 정본 구형 데이터 모양만 만든다. active policy/guard/claim을 위조하지 않는다.
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        await session.execute(
+            text("DELETE FROM feature.feature_places WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": area_id},
+        )
+        await session.execute(
+            text("UPDATE feature.features SET kind='area' WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": area_id},
+        )
+
+    if retired:
+        async with AsyncSession(runtime) as session, session.begin():
+            rows = (
+                (
+                    await session.execute(
+                        text(
+                            "SELECT feature_id,CAST(:dataset AS bigint) AS provider_dataset_id "
+                            "FROM feature.features WHERE feature_id=CAST(:id AS uuid)"
+                        ),
+                        {"id": area_id, "dataset": dataset},
+                    )
+                )
+                .mappings()
+                .all()
+            )
+            assert (
+                await feature_repo._retire_provider_candidates(
+                    session, rows, reason_code="provider_invalid_geometry"
+                )
+                == 1
+            )
+
+    async def rebind():
+        async with AsyncSession(admin) as session, session.begin():
+            await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+            await session.execute(
+                text(
+                    "UPDATE provider_sync.source_links SET source_entity_key=:entity "
+                    "WHERE feature_id=CAST(:id AS uuid)"
+                ),
+                {"id": area_id, "entity": _entity(place)},
+            )
+
+    with pytest.raises(DBAPIError) as caught:
+        await rebind()
+    assert caught.value.orig.sqlstate == "23514"
+    async with AsyncSession(admin) as session:
+        current = await session.scalar(
+            text(
+                "SELECT source_entity_key FROM provider_sync.source_links "
+                "WHERE feature_id=CAST(:id AS uuid)"
+            ),
+            {"id": area_id},
+        )
+        assert current == _entity(area)
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM feature.provider_field_active_policies "
+                    "WHERE feature_id=CAST(:id AS uuid)"
+                ),
+                {"id": place_id},
+            )
+            == 0
+        )
+
+
+async def test_new_context_acl_remains_closed(scalar_engines):
+    admin, runtime = scalar_engines
+    async with AsyncSession(runtime) as session:
+        row = (
+            await session.execute(
+                text("""SELECT
+            has_function_privilege(current_user,'feature._exclusive_provider_refresh_context(uuid,bigint)','EXECUTE'),
+            has_table_privilege(current_user,'ops.feature_write_attempts','SELECT'),
+            has_function_privilege(current_user,'feature.validate_exclusive_provider_snapshot(uuid,bigint,jsonb,text[])','EXECUTE')""")
+            )
+        ).one()
+        assert tuple(row) == (False, False, True)
