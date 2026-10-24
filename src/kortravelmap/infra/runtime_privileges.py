@@ -415,6 +415,19 @@ _CORE_FEATURE_GRANTS = (
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_metadata_bytes(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_string_object(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_shape(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_inventory(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_retire0(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.read_heritage_name_refresh_evidence(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.read_heritage_name_refresh_evidence(...) "
+    "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.upsert_provider_geocode_stamps_ex(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION feature.upsert_provider_geocode_stamps_ex(...) "
     "TO ktm_feature_runtime",
@@ -947,6 +960,12 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "feature._heritage_evidence_metadata_bytes": "422_heritage_evidence_reader",
+    "feature._heritage_evidence_string_object": "422_heritage_evidence_reader",
+    "feature._heritage_evidence_shape": "422_heritage_evidence_reader",
+    "feature._heritage_evidence_inventory": "422_heritage_evidence_reader",
+    "feature._heritage_evidence_retire0": "422_heritage_evidence_reader",
+    "feature.read_heritage_name_refresh_evidence": "422_heritage_evidence_reader",
     "feature._assert_stamp_projection_guard_inventory": "421_stamp_writer_boundary",
     "feature.upsert_provider_geocode_stamps_ex": "421_stamp_writer_boundary",
     "feature.lock_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",

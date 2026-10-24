@@ -1,6 +1,11 @@
 ## 2026-10-25 — 전체 snapshot 동시 쓰기·복구 설계(미구현)
 
-전체 입력 크기·capture closure·동일 run 복구·큰 snapshot protocol의 남은 문턱을 [설계](reports/2026-10-25-full-snapshot-coordination-design.md)에 정리했다. 실제 collector·운영 동시 쓰기와 후속 전파는 미완이다.
+전체 입력·capture·동일 run 복구의 남은 문턱을 [설계](reports/2026-10-25-full-snapshot-coordination-design.md)에 정리했다. 작은 비용과 [schema422 API startup](reports/2026-10-25-schema422-api-startup-observation.md)은 별도 관측했으며, 실제 SH collector·운영 동시 쓰기·후속 전파는 미완이다.
+
+## 2026-10-25 — Heritage bounded evidence reader 입력 계약(부분)
+
+- 422 source 두 리뷰 뒤 SDK/권한/입력/snapshot20 PASS(15.11초)와 별도 새raw부정3 PASS(14.29초), 공식 fresh oracle1 PASS(14.68초)를 확인했다. 초기 실패는 보존하며 단일최종23 실행으로 세지 않는다. 추가 의미부정·메모리/비용·schema API startup/SH 운영은 미완이다. [근거·범위](reports/2026-10-25-heritage-bounded-evidence-reader.md).
+
 
 ## 2026-10-25 — SH 운영 후보 크기 실측
 

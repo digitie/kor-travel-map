@@ -1,0 +1,271 @@
+{
+  "상태": "source 독립 대조 완료. 실제 SDK/권한/입력/RR·statement snapshot20 PASS와 별도 새저장raw3 PASS, 별도 공식oracle1 PASS. 단일최종23 실행/peak·EXPLAIN·운영 수용 아님",
+  "상한단위": "압축되지 않은 direct stored datum byte. flattened 예산은 측정byte+4로 누적한다. payload 길이와 datum header를 혼동하지 않는다.",
+  "metadata_only_fixed_columns": [
+    "UUID",
+    "bigint",
+    "boolean",
+    "timestamptz",
+    "tableoid/ctid 내부 위치",
+    "smallint"
+  ],
+  "외부미반환위치": "(tableoid,ctid)는 한 STABLE 호출의 동일 snapshot 안에서만 사용하고 상속/partition 관계는 거부한다.",
+  "가변열": {
+    "provider_sync.provider_datasets": {
+      "provider": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "dataset_key": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_entities": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_type": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_id": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_entity_heads": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "current_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "lineage_key": {
+        "physical_cap": 1024,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_records": {
+      "source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "raw_payload_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "raw_data": {
+        "physical_cap": 8192,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_links": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_role": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.provider_feature_identities": {
+      "feature_kind": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "natural_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.features": {
+      "kind": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "lifecycle_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "publication_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "quality_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_active_policies": {
+      "field_paths": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_shadow_policies": {
+      "normalizer_revision": {
+        "physical_cap": 1024,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "fields": {
+        "physical_cap": 8192,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_shadow_candidates": {
+      "field_path": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_source_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "validated_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "validated_source_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_json": {
+        "physical_cap": 8192,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_geometry": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "availability": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "reason": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "normalizer_revision": {
+        "physical_cap": 1024,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      }
+    },
+    "feature.feature_base_field_values": {
+      "field_path": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_raw_payload_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_json": {
+        "physical_cap": 8192,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_geometry": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      }
+    },
+    "feature.feature_geocode_stamps": {
+      "geo_version_token": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "geo_data_token": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "reverse_outcome": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    }
+  },
+  "아직미완": [
+    "추가membership/정책/lineage/retire0 부정 전수",
+    "metadata/payload 중간 interleave·peak와 대형 unrelated history EXPLAIN/CPU/wall 관측",
+    "실제 지원 N과 운영 전체 입력의 원자적 planning/apply 수용"
+  ],
+  "starting_source": "7e36356700eb69a8c3c6a299fe2f14e06db905f5",
+  "source_full_review_checkpoint": "bfed38828aabaa16d7610c99c1f923c972778192",
+  "actual_positive_checkpoint": "3bfa51bc8d52cf17cd05d49f479bfbc82d9e75af",
+  "actual_security_input_checkpoint": "ca631dc2747afa9e660f5d8979ae8b59028940fc",
+  "actual_snapshot_checkpoint": "a2c03cdd93c276b5d1883b75a22534de90b865cd",
+  "actual_stored_negative_checkpoint": "d3aad3ab3d14486851ce595deb5fffffb52b8961",
+  "후속관측": {
+    "작은비용": "2026-10-25-heritage-reader-cost-observation.md",
+    "schema422_API_startup": "2026-10-25-schema422-api-startup-observation.md",
+    "actual_API_source_checkpoint": "e5a31f1acabbe338fb4c3f3e07a83149bdeb3a2d",
+    "actual_API_scope": "actual lifespan/preflight and fixed GET200/403/200; new19UI/SH/operating not proven"
+  }
+}
