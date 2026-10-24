@@ -4,7 +4,10 @@
 
 ## 실제 조회와 확인한 집합
 
-현재 운영 Map API의 실제 runtime 역할로 읽기 전용 transaction을 사용했다.
+첫 entity 집계는 현재 운영 Map API의 runtime 로그인 역할로 읽기 전용 transaction을 사용했다.
+독립 current/연결/receipt와 후속 MCST 후보 집계는 같은 API 설정·로그인으로 접속한 뒤
+`SET LOCAL ROLE ktm_feature_schema_owner`를 적용한 읽기 전용 관찰이다. 이 조회가
+runtime 기본 권한만으로 모두 허용된다고 주장하지 않는다.
 조회 당시 운영 schema는409였고 신규 provider-field 정책표는 아직 설치되지 않았다.
 조회에는 statement timeout 3초와 lock timeout을 두었다. 원천 HTTP 재수집이나 DB 쓰기는 하지 않았다.
 이력 표 전체 COUNT는 하지 않고 이력 규모는 PostgreSQL 통계의 추정치로만 읽었다.
@@ -21,7 +24,9 @@ API 컨테이너·이미지는 두 번째 조회 전후 같았다. 이 순간의
 확대하지 않는다. source_records 통계 추정은 247,898행이며 정확 COUNT가 아니다.
 
 최근 영속 receipt의 집합 크기도 각각 4,279/9,494였다. 그러나 current head나 과거 receipt의
-크기가 새 provider 응답 전체 입력 개수라는 뜻은 아니다. 실제 canonical fetch와 최종 typed
+크기가 새 provider 응답 전체 입력 개수라는 뜻은 아니다. entity와 고유 Feature 개수가
+같아도 개별 entity의 일대일 연결이나 모든 역할의 closure가 증명되지는 않는다.
+실제 canonical fetch와 최종 typed
 bundle을 다음 수용 단계에서 별도로 대조해야 한다.
 
 ## 현재 경로의 한계
@@ -39,6 +44,25 @@ DB 증거 조회 요청을 잘게 나누는 것만으로 단일 manifest/apply�
 따라서 기존 설계의 국가유산/세계음식점은 적격성 의미와 제한된 합성 시험을 위한 후보이며,
 현재 전체 저장 집합에 대해 운영 SH가 작동한다고 세지 않는다. 새 조회기·stamp SQL 경계나
 격리된 소규모 두 transaction 성공도 실제 두 수집 worker와 전국 입력의 수용을 대신하지 않는다.
+
+## 더 작은 MCST 후보의 읽기 전용 조사
+
+13개 MCST dataset을 추가로 조사했다. 기존 `kcisa_common` 계열에서 현재 head가 2,730 이하인
+집합은 캠핑 2,476개 하나라서 같은 계열의 소형 두 dataset을 바로 고를 수는 없다.
+다른 `cntc_resrce` 계열의 후보는 다음과 같다.
+
+| dataset | 현재 head / entity / 연결된 고유 Feature |
+| --- | ---: |
+| 독립서점 (49) | 327 |
+| 카페서점 (50) | 1,059 |
+| 아동서점 (51) | 786 |
+
+이 세 개수는 현재 저장 집합의 관찰이다. 개별 연결의 closure, 새 fetch의 전체 입력,
+원천 필드 전체의 일관성이나 typed manifest 1 MiB·reader 256 KiB 통과를 뜻하지 않는다.
+독립서점/카페서점의 한 표본은 같은 11개 원천 필드였으나 아동서점 표본은 12개로 달랐다.
+국가유산 adapter의 provider 이름만 바꾸어 재사용할 수 없으며, MCST의 이름·주소 자연키와
+multi-member capture 의미를 보존하는 별도 적격성 검증이 필요하다. byte 예산·실제 성공 N을
+측정하기 전에는 첫 운영 dataset 선정 또는 SH 활성화 완료로 기록하지 않는다.
 
 ## 후속 구현 순서와 완료 조건
 
@@ -66,5 +90,7 @@ T-CWRITE-04 및 큰 입력/실제 worker/운영 수용은 미완이다. 첫 작�
   SHA-256 5e8656319e5ba02ca4ec6afc19406f4bfd05fd947b9e6a8c5c98d72f57906793.
 - 독립 current/receipt 조회: map-sh-viability-current-counts-j-r1.json,
   SHA-256 9edccaa89c0d051c8c8f28264c9bdb2709c97240903157299db4c14e9a2a39fe.
+- MCST 소형 후보 조회: map-mcst-small-scope-counts-j-r2.json,
+  SHA-256 4da4baa017b4920b5eac9ec10aa41f1caecd91542553b763cc43fb001640d5ba.
 - 기존 의미·원자성 경계: [SH 수집 설계](2026-10-25-sh-collector-integration-design.md),
   [ADR-115](../adr/115-scoped-concurrent-feature-writes.md).
