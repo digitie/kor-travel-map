@@ -49,7 +49,7 @@ from kortravelmap.infra.curation_repo import (
 from kortravelmap.infra.domain_command_repo import DomainCommandRecord
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.settings import ApiSettings
 
 COLLECTION_ID = "11111111-1111-4111-8111-111111111111"
@@ -243,6 +243,8 @@ def client(monkeypatch: pytest.MonkeyPatch) -> TestClient:
         yield _FakeSession()
 
     app.dependency_overrides[get_session] = _session
+
+    app.dependency_overrides[get_read_snapshot_session] = _session
     monkeypatch.setattr(
         domain_command_service,
         "begin_domain_command",

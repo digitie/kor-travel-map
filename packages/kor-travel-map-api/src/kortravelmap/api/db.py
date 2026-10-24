@@ -30,6 +30,7 @@ __all__ = [
     "configure_prometheus_metrics",
     "get_engine",
     "get_session",
+    "get_read_snapshot_session",
     "set_engine_for_test",
     "reset_engine",
 ]
@@ -96,6 +97,22 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     async with AsyncSession(_get_engine(), expire_on_commit=False) as session:
+        yield session
+
+
+async def get_read_snapshot_session() -> AsyncIterator[AsyncSession]:
+    """순수 조회 응답 전체를 최초 SELECT 전 read-only REPEATABLE READ로 묶는다.
+
+    auth/쓰기용 ``get_session``과 세션을 공유하지 않는다. 이미 autobegin된
+    transaction의 isolation을 바꾸지 않으며, 성공/예외 모두 context 종료 시
+    connection을 pool에 반환한다. 여러 HTTP page 사이의 snapshot은 약속하지 않는다.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    engine = _get_engine().execution_options(
+        isolation_level="REPEATABLE READ", postgresql_readonly=True
+    )
+    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
         yield session
 
 

@@ -73,7 +73,7 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
     require_admin_manual_feature_create,
 )
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.domain_command_service import (
     current_domain_command,
     domain_command_transaction,
@@ -1460,7 +1460,7 @@ async def list_admin_features_in_bounds(
 )
 async def get_admin_feature_price(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     feature_id: str,
     history_limit: Annotated[int, Query(ge=1, le=500)] = 100,
 ) -> FeaturePriceResponse:
@@ -1581,7 +1581,7 @@ async def list_features(
 async def get_feature_revision_route(
     feature_id: str,
     response: Response,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> AdminFeatureRevisionResponse:
     identity = await resolve_feature_ref_or_error(session, feature_id)
     canonical_id = identity.feature_id
@@ -1613,7 +1613,7 @@ async def get_feature_revision_route(
 )
 async def list_feature_state_transitions_route(
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     page_size: Annotated[int, Query(ge=1, le=500)] = 50,
     before_transition_id: Annotated[int | None, Query(gt=0)] = None,
 ) -> AdminFeatureStateTransitionsResponse:
@@ -1665,7 +1665,7 @@ async def list_feature_state_transitions_route(
 )
 async def get_feature_creation_provenance_route(
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> AdminManualFeatureProvenanceResponse:
     """현재 Feature에 결박된 claim/origin만 읽고 absence를 추정하지 않는다."""
 
@@ -1703,7 +1703,7 @@ async def get_feature_creation_provenance_route(
 )
 async def get_feature_detail_route(
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> AdminFeatureDetailResponse:
     started_at = perf_counter()
     # T-VN-32B 경계 alias 해석 — 이후 내부 조회는 해석된 정본 키로만 한다.

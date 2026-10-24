@@ -33,12 +33,14 @@ def client() -> TestClient:
 
 
 def _fake_session(client: TestClient) -> None:
-    from kortravelmap.api.db import get_session
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
 
     async def _fs() -> AsyncIterator[Any]:
         yield object()
 
     client.app.dependency_overrides[get_session] = _fs
+
+    client.app.dependency_overrides[get_read_snapshot_session] = _fs
 
 
 @pytest.mark.unit
