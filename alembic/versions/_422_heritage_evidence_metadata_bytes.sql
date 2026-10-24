@@ -39,6 +39,3 @@ BEGIN
     RETURN v_total;
 END;
 $$;
-REVOKE ALL ON FUNCTION feature._heritage_evidence_metadata_bytes(
-    bigint[],boolean[],integer[],boolean[]
-) FROM PUBLIC,ktm_feature_runtime;

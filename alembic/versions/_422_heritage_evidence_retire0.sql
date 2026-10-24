@@ -37,5 +37,3 @@ SELECT NOT EXISTS (
         ELSE true END
 );
 $$;
-REVOKE ALL ON FUNCTION feature._heritage_evidence_retire0(bigint)
-FROM PUBLIC,ktm_feature_runtime;

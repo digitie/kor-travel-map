@@ -423,5 +423,3 @@ BEGIN
         'refs',v_refs,'feature_ids',to_jsonb(v_features));
 END;
 $$;
-REVOKE ALL ON FUNCTION feature._heritage_evidence_inventory(bigint,text[])
-FROM PUBLIC,ktm_feature_runtime;

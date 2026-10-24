@@ -67,10 +67,22 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "GRANT CREATE ON SCHEMA feature TO ktm_feature_state_procedure_owner",
     "SET ROLE ktm_feature_state_procedure_owner",
     _sidecar("_422_heritage_evidence_metadata_bytes.sql"),
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_metadata_bytes( "
+    "bigint[],boolean[],integer[],boolean[] ) FROM PUBLIC,ktm_feature_runtime",
+    _sidecar("_422_heritage_evidence_string_object.sql"),
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_string_object(jsonb,text[]) "
+    "FROM PUBLIC,ktm_feature_runtime",
     _sidecar("_422_validate_heritage_evidence_shape.sql"),
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_shape( "
+    "jsonb,jsonb,jsonb,x_extension.geometry ) FROM PUBLIC,ktm_feature_runtime",
     _sidecar("_422_heritage_evidence_inventory.sql"),
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_inventory(bigint,text[]) FROM "
+    "PUBLIC,ktm_feature_runtime",
     _sidecar("_422_heritage_evidence_retire0.sql"),
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_retire0(bigint) FROM "
+    "PUBLIC,ktm_feature_runtime",
     _sidecar("_422_read_heritage_evidence.sql"),
+    "REVOKE ALL ON FUNCTION feature.read_heritage_name_refresh_evidence(bigint,text[]) FROM PUBLIC",
     "REVOKE ALL ON FUNCTION feature.read_heritage_name_refresh_evidence(bigint,text[]) "
     "FROM PUBLIC,ktm_feature_runtime",
     "GRANT EXECUTE ON FUNCTION feature.read_heritage_name_refresh_evidence(bigint,text[]) "

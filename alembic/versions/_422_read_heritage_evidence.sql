@@ -296,4 +296,3 @@ BEGIN
     RETURN v_result;
 END;
 $$;
-REVOKE ALL ON FUNCTION feature.read_heritage_name_refresh_evidence(bigint,text[]) FROM PUBLIC;
