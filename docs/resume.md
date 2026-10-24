@@ -1,3 +1,8 @@
+## 2026-10-25 — scalar batch 내부 실행 단계 분리
+
+- 기존 begin/manifest 검증/항목 적용/finish를 구체 private 함수로 나누고 실행 AST·SQL·공개 계약·전체30초·완료 조기반환을 보존했다. 두 소스 리뷰와 기존 실제 PG20 PASS/23.57초·정확 정리를 확인했다.
+- main1395/1397 문서를 통합했다. 초기 CI의 부모 tasks04 길이 실패를 보존하며 새 정확 CI는 별도다. collector/coordinator·운영 변경0. [범위와 증명](reports/2026-10-25-scoped-provider-batch-phases.md).
+
 ## 2026-10-25 — 전체 snapshot 동시 쓰기·복구 설계(미구현)
 
 전체 입력·capture·동일 run 복구의 남은 문턱을 [설계](reports/2026-10-25-full-snapshot-coordination-design.md)에 정리했다. 작은 비용과 [schema422 API startup](reports/2026-10-25-schema422-api-startup-observation.md)은 별도 관측했으며, 실제 SH collector·운영 동시 쓰기·후속 전파는 미완이다.
