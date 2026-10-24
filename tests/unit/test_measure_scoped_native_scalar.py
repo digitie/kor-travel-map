@@ -7,7 +7,13 @@ import json
 import pytest
 
 from scripts._scoped_write_baseline_pg import cpu_delta
-from scripts.ci.measure_scoped_native_scalar import bundle, feature_id, fixture_digest, plan
+from scripts.ci.measure_scoped_native_scalar import (
+    bundle,
+    feature_id,
+    fixture_digest,
+    plan,
+    summarize,
+)
 from scripts.scoped_write_baseline import interval_overlap
 
 
@@ -49,3 +55,49 @@ def test_overlap_and_cpu_counters_preserve_physical_units():
     assert cpu_delta({"cpu_ns": 1_000_000_000}, {"cpu_ns": 2_500_000_000}) == 1.5
     with pytest.raises(RuntimeError):
         cpu_delta({"cpu_ns": 2}, {"cpu_ns": 1})
+
+
+def _trials():
+    return [
+        {
+            "mode": mode,
+            "iteration": iteration,
+            "barrier_probe_only": False,
+            "state": {"sha256": "a" * 64},
+            "elapsed_seconds": 2.0 if mode == "serial" else 1.0,
+            "python_cpu_core_seconds": 0.2,
+            "pg_cpu_core_seconds": 0.4,
+            "python_rss_sample_peak_bytes": 100,
+            "pg_memory_sample_peak_bytes": 200,
+            "wal_bytes": 42,
+        }
+        for iteration in (1, 2, 3)
+        for mode in ("serial", "concurrent2")
+    ]
+
+
+def test_comparison_keeps_three_samples_and_physical_ratios():
+    value = summarize(_trials())
+    assert value["concurrent_to_serial_median_ratio"]["elapsed_seconds"] == 0.5
+    assert value["concurrent_to_serial_median_ratio"]["pg_cpu_core_seconds"] == 1.0
+    assert value["small_input_only"]
+    assert value["ratio_is_not_operating_arm_evidence"]
+
+
+@pytest.mark.parametrize(
+    "invalid", ["probe", "partial", "different-output", "duplicate-iteration", "nan", "bool"]
+)
+def test_comparison_rejects_incomparable_or_invalid_measurements(invalid):
+    values = _trials()
+    if invalid == "probe":
+        values[0]["barrier_probe_only"] = True
+    elif invalid == "partial":
+        values.pop()
+    elif invalid == "different-output":
+        values[0]["state"] = {"sha256": "b" * 64}
+    elif invalid == "duplicate-iteration":
+        values[0]["iteration"] = 2
+    else:
+        values[0]["elapsed_seconds"] = float("nan") if invalid == "nan" else True
+    with pytest.raises(ValueError, match="required|mismatch"):
+        summarize(values)

@@ -7,12 +7,14 @@ import argparse
 import asyncio
 import hashlib
 import json
+import math
 import os
 import subprocess
 import time
 from contextlib import suppress
 from datetime import datetime, timedelta
 from pathlib import Path
+from statistics import median
 from typing import Any
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from zoneinfo import ZoneInfo
@@ -564,6 +566,45 @@ def source_provenance() -> dict[str, Any]:
     }
 
 
+def summarize(trials: list[dict[str, Any]]) -> dict[str, Any]:
+    """6개 실제 성능 표본만 비교한다. probe·부분 성공·서로 다른 결과를 합치지 않는다."""
+    if len(trials) != 6 or any(t["barrier_probe_only"] for t in trials):
+        raise ValueError("six non-probe trials required")
+    if len({t["state"]["sha256"] for t in trials}) != 1:
+        raise ValueError("canonical output hash mismatch")
+    metrics = (
+        "elapsed_seconds",
+        "python_cpu_core_seconds",
+        "pg_cpu_core_seconds",
+        "python_rss_sample_peak_bytes",
+        "pg_memory_sample_peak_bytes",
+        "wal_bytes",
+    )
+    grouped = {}
+    for mode in ("serial", "concurrent2"):
+        values = [t for t in trials if t["mode"] == mode]
+        if sorted(t["iteration"] for t in values) != [1, 2, 3]:
+            raise ValueError("three distinct iterations per mode required")
+        result = {}
+        for metric in metrics:
+            numbers = [t[metric] for t in values]
+            if any(type(v) not in (int, float) or not math.isfinite(v) or v < 0 for v in numbers):
+                raise ValueError("finite nonnegative metrics required")
+            result[metric] = {"median": median(numbers), "min": min(numbers), "max": max(numbers)}
+        grouped[mode] = result
+    ratios = {}
+    for metric in metrics:
+        before = grouped["serial"][metric]["median"]
+        after = grouped["concurrent2"][metric]["median"]
+        ratios[metric] = after / before if before else None
+    return {
+        "per_mode": grouped,
+        "concurrent_to_serial_median_ratio": ratios,
+        "ratio_is_not_operating_arm_evidence": True,
+        "small_input_only": True,
+    }
+
+
 async def run() -> dict[str, Any]:
     """새 이름/label/ID로 소유를 확인한 로컬 container 한 개만 사용한다."""
     from alembic.config import Config
@@ -604,6 +645,16 @@ async def run() -> dict[str, Any]:
         wrapped.reload()
         if wrapped.name != name or wrapped.attrs["Config"]["Labels"].get(_LABEL) != identity:
             raise RuntimeError("owned container identity mismatch")
+        limits = wrapped.attrs["HostConfig"]
+        if (limits["NanoCpus"], limits["Memory"], limits["MemorySwap"], limits["PidsLimit"]) != (
+            2_000_000_000,
+            1536 * 1024 * 1024,
+            1536 * 1024 * 1024,
+            256,
+        ):
+            raise RuntimeError("owned container resource limits mismatch")
+        report["container_limits_verified"] = True
+        report["image_architecture"] = wrapped.image.attrs.get("Architecture")
         admin_url = make_url(container.get_connection_url()).set(drivername="postgresql")
         admin = admin_url.render_as_string(False)
         template = "native_measure_" + uuid4().hex
@@ -661,6 +712,14 @@ async def run() -> dict[str, Any]:
             owned.remove(database)
         if len({trial["state"]["sha256"] for trial in report["trials"]}) != 1:
             raise RuntimeError("serial/concurrent canonical output differs")
+        await asyncio.to_thread(wrapped.reload)
+        report["container_final_state"] = {
+            "oom_killed": bool(wrapped.attrs["State"]["OOMKilled"]),
+            "restart_count": int(wrapped.attrs["RestartCount"]),
+        }
+        if report["container_final_state"] != {"oom_killed": False, "restart_count": 0}:
+            raise RuntimeError("owned container was restarted or OOM killed")
+        report["comparison"] = summarize(report["trials"])
         report["scope_complete"] = False
         report["status"] = "passed"
         report["phase"] = "complete"
