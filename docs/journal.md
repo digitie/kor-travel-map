@@ -1,3 +1,8 @@
+## 2026-10-25 — 실제 SH 수집 연결의 설계 초안(A4)
+
+- Heritage 이름 변경과 MCST 동일 key 반복 입력의 최소 범위를 나누고 현재 normalizer/Geo stamp·dataset retire0·full capture/후속 receipt를 필수 조건으로 정리했다.
+- 실제 두 dataset DML 중첩·worker 복구/Geo pool은 별도 수용이며 구현/정책/운영 변경0, 전체 T 체크는 미완이다. [설계와 필수 반례](reports/2026-10-25-sh-collector-integration-design.md).
+
 ## 2026-10-25 — main 419 보존과 EX 적재 연결 420 재검증
 
 - 머지 직전 main에 들어온 PG transport 퇴역419를 보존하고 미머지 EX 적재 연결만420으로 재배치했다. DDL sidecar 본문과 main 비중복33파일·journal/resume 원문 suffix를 보존했다.
