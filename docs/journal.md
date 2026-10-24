@@ -2,6 +2,10 @@
 
 - materializer 두 루프만 분리했다. 첫 fixture 실패를 보존하고 테스트만 고쳐 실제15 PASS/14.129초·정확 정리를 확인했다. 활성 정책20·공식 oracle·비용·최종 CI는 미완이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
 
+## 2026-10-25 — tracking P→L prefix(424, 부분)
+
+- 기존 SER/capture/kernel/SH OFF를 보존한 prefix를 두 소스 리뷰 뒤 검증했다. 직접25 PASS20.590초·정본oracle1 PASS26.436초·기존 real client/asset4 PASS17.213초는 별도 실행이다. startup P1 수정·원실패를 보존하며 API재개·추가triple·정확CI는 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
+
 ## 2026-10-25 — EX context 단일 조회(423)
 
 - 기존 검증·권한을 보존한 단일 조회에서 실제9 PASS(15.406초), 별도 공식 fresh oracle1 PASS(20.551초)를 확인했다. 부모1641블록 중1639동일/ACL보존, 초기 감사 setup오류는 별도 보존한다. 최종CI/API startup·비용·운영은 미완이다. [근거·범위](reports/2026-10-25-exclusive-context-single-select.md).

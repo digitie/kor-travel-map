@@ -11,7 +11,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision: str = "425_provider_base_update_first"
-down_revision: str | None = "423_exclusive_context_select"
+down_revision: str | None = "424_tracking_protocol_prefix"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -88,6 +88,7 @@ ALTER TABLE ops.application_schema_operation_receipts
         '421_stamp_writer_boundary',
         '422_heritage_evidence_reader',
         '423_exclusive_context_select',
+        '424_tracking_protocol_prefix',
         '425_provider_base_update_first'
     ))
 """

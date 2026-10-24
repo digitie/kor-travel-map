@@ -7,7 +7,7 @@ winner projector와 validator·권한·Feature/source 잠금·notice 최초 시�
 
 새 migration은 기존 procedure의 본문 SHA·인자·owner·SECURITY DEFINER·search_path를 대조한다.
 기존 effective CREATE 권한이 없을 때만 정본 임시 GRANT/REVOKE window를 쓰며,
-짧은 caller GUC를 유지한다. 현재423 위의 후보425이며424가 먼저 합쳐지면 선형 순서를 조정한다.
+짧은 caller GUC를 유지한다. 424 고정 소스 위에 후보425를 선형으로 연결했다. 원 provider procedure 본문은 그대로다.
 직접 public SD의 P-prefix 보강은 별도 작업으로 남긴다.
 
 ## 수정 전 영향과 현재 검증
@@ -15,7 +15,7 @@ winner projector와 validator·권한·Feature/source 잠금·notice 최초 시�
 새 migration/sidecar이며 public 시그니처는 같다. codegraph-worktree §7의 신규 파일 예외를 적용했다.
 기존 base UPSERT 정적 조사와 실제 context 관측은 원인 후보 근거일 뿐 trigger별 비용 귀속이 아니다.
 원 두 UPSERT를 그대로 둔 fallback과 새 UPDATE만 역치환하면 기존 procedure 전체 원문이 일치한다.
-현재 head-schema는 부모423이며425 공식 oracle은 아직 생성하지 않았다.
+현재 head-schema는 부모424이며425 공식 oracle은 아직 생성하지 않았다.
 
 migration CREATE·drift·짧은 GUC 단위5 PASS(0.29초), Ruff2파일/mypy1파일을 확인했다.
 첫 정적 합집합은 새 unit의 baseline dump 직접 참조 때문에1 FAIL/377 PASS/기존6 skip이었다.
@@ -75,4 +75,15 @@ Git2384개·SDK53개 전후와 실제 import9개를 대조했으며 SDK 실행�
 정확 CID·UUID·scalar label·익명 volume 부재를 확인했다. 첫 실패는 성공과 합산하지 않는다.
 
 기존 활성 정책 EX20·공식425 oracle·비용·최종 CI는 아직 미완이다. 424 고정 소스 위로
-migration을 선형화한 뒤 후속 검증하며, 이15개 성공만으로 성능이나 collector 완료를 주장하지 않는다.
+migration을 선형화했고 후속 실제 검증은 아직 대기하며, 이15개 성공만으로 성능이나 collector 완료를 주장하지 않는다.
+
+## 424 부모 통합
+
+424의 고정14417 소스·공식 부모 oracle·tracking prefix를 보존했다. 새425 migration의
+선행 revision과 receipt 허용 head에424를 넣고 graph만 선형화했다. UPDATE-first SQL과
+실제15개 시험 본문은 그대로며, 앞15개는 통합 전78e 소스의 결과다. 새 부모에서의
+활성 정책20·공식425 oracle·전체 CI를 수행한 것으로 승계하지 않는다.
+
+통합 뒤 migration·tracking prefix·squash boundary·DB/runtime 권한·operation 계약 순수 합집합은
+130 PASS(7.43초)였다. 통합 source의 새 PG 결과는 아직 없으며 부모 oracle424를425로
+간주하지 않는다.

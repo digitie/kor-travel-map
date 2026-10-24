@@ -146,6 +146,12 @@
       "down_revision": [
         "423_exclusive_context_select"
       ],
+      "revision": "424_tracking_protocol_prefix"
+    },
+    {
+      "down_revision": [
+        "424_tracking_protocol_prefix"
+      ],
       "revision": "425_provider_base_update_first"
     }
   ],

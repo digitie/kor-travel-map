@@ -35,6 +35,7 @@ from kortravelmap.infra.feature_operation_repo import (
     list_feature_operation_memberships,
     resolve_feature_operation_dataset_membership,
 )
+from kortravelmap.infra.pipeline_cancellation_repo import lock_provider_feature_finalization
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -255,6 +256,9 @@ async def test_finish_rejects_a_sibling_operation_member_of_the_same_scope(
     다른 membership이 실행 완료 경계에서 통과하면, A operation run이 B operation의
     실행 단위를 종결한 것으로 보인다.
     """
+    # 이 두 시험은 한 seed TX를 재사용하므로 행 조회 전에 정본 P EX→L을 취득한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     single = (
         await memberships_for_operation(
             migrated_session, operation_key=SINGLE_MEMBER_OPERATION
@@ -293,6 +297,9 @@ async def test_finish_closes_only_the_running_operations_own_member(
     migrated_session: AsyncSession,
 ) -> None:
     """형제 operation이 각자 run을 돌 때 한쪽 완료가 다른 쪽을 건드리지 않는다."""
+    # 이 두 시험은 한 seed TX를 재사용하므로 행 조회 전에 정본 P EX→L을 취득한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     single = (
         await memberships_for_operation(
             migrated_session, operation_key=SINGLE_MEMBER_OPERATION

@@ -243,9 +243,10 @@ async def test_feature_operation_ensure_reports_quarantined_run_conflict() -> No
 
     assert raised.value.details == {"reason": "quarantined"}
     assert raised.value.dagster_run_id == "run-quarantined"
-    assert len(session.statements) == 3
-    assert "ensure_provider_feature_operation_command" in session.statements[1]
-    assert "root.quarantined_at IS NULL" in session.statements[2]
+    assert len(session.statements) == 4
+    assert session.statements[0] == "SELECT ops.lock_provider_feature_tracking_protocol(false)"
+    assert "ensure_provider_feature_operation_command" in session.statements[2]
+    assert "root.quarantined_at IS NULL" in session.statements[3]
 
 
 @pytest.mark.parametrize("owner", [None, "", " ", " owner", "owner "])

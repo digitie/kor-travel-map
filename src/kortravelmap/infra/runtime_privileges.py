@@ -752,6 +752,9 @@ _MANUAL_FEATURE_WRITER_ACL = (
 )
 
 _MANUAL_CURATION_WRITER_ACL = (
+    "REVOKE ALL ON FUNCTION ops.lock_provider_feature_tracking_protocol(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.lock_provider_feature_tracking_protocol(...) "
+    "TO ktm_feature_runtime",
     "REVOKE ALL ON PROCEDURE "
     "feature.create_manual_curation_item_with_feature_command(...) "
     "FROM PUBLIC, ktm_feature_runtime, "
@@ -960,6 +963,7 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "ops.lock_provider_feature_tracking_protocol": "424_tracking_protocol_prefix",
     "feature._heritage_evidence_metadata_bytes": "422_heritage_evidence_reader",
     "feature._heritage_evidence_string_object": "422_heritage_evidence_reader",
     "feature._heritage_evidence_shape": "422_heritage_evidence_reader",
