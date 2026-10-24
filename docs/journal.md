@@ -39,6 +39,12 @@
   `kor-travel-map-api`(72ee710 1659행~)에 transport 변수 자체가 없어 compose PR이 필요하고, pair 회전 preflight
   (`_PAIR_SURFACE_PATHS`)가 PinVi 재vendor 전 회전을 거부한다 → Map 머지 → PinVi 재vendor → 회전. #1357·#1360·#1362 위로
   리베이스. 두 페이지 검사의 2쪽 행이 요청과 다른 유종(D047)이어서 새 행 검사가 빨갛게 잡았다 — 검사 자료를 고쳤다.
+- 재리뷰 반영(head `58352857` 기준): F1 — httpx `aiter_bytes`는 gzip 조각을 통째로 풀어(64 KiB → 67 MB) 2 MiB 상한이
+  뚫렸다 → 요청 `Accept-Encoding: identity`, `aiter_raw`로 붙이기 전 상한, gzip이 와도 출력 상한 `zlib`. N1 — 깨진·잘린
+  gzip·모르는 인코딩·`DecodingError`는 `upstream_contract`. N2 — 상태 코드 먼저, 200만 전체·503만 64 KiB, 그 밖은 본문을
+  읽지 않아 큰 오류 본문도 상태로(cursor 409 유지). N3 — 200의 `source_status=failed`는 계약 위반, 공개 enum `ok|stale`.
+  검사 대역 함정: `httpx.Response(content=…)`는 생성 때 미리 읽혀(gzip이면 그 자리에서 풀어) `aiter_raw`가
+  `StreamConsumed`를 낸다 — 원문 stream(`httpx.ByteStream`)으로 다시 싸는 `_mock`을 두었다. #1368 위로 리베이스.
 
 ## 2026-10-24 — geo 재시도에 ReadError·WriteError 추가: 브랜치 `fix/geo-retry-readerror`
 

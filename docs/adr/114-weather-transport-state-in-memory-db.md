@@ -267,7 +267,13 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
   - 계약 검사(`upstream_contract`): 요청과 다른 `station_key`, `meta.item_count`≠행 수, `has_more`/`next_cursor`
     어긋남, `observed_at` 내림차순 위반, timezone 없는 시각, 가격이 JSON number/null이 아니거나 유한하지 않음
     (NaN·Infinity·`1e400`), 보낸 `product`와 다른 유종의 행, 보낸 `from`/`to`(양끝 포함) 밖의 행(보내지 않은 끝은
-    transport 기본 창을 추측하지 않고 검사하지 않는다), JSON이 아니거나 너무 깊은 본문, 압축 해제 뒤 2 MiB 초과 본문.
+    transport 기본 창을 추측하지 않고 검사하지 않는다), JSON이 아니거나 너무 깊은 본문, 2 MiB 초과 본문, 깨진·잘린
+    gzip·모르는 Content-Encoding, 200 본문의 `source_status=failed`(transport는 failed를 503 problem에만 싣는다 —
+    공개 `history.source_status`도 `ok`/`stale`뿐이다).
+  - 본문 읽기: 요청은 `Accept-Encoding: identity`(한 페이지 약 100 KB)다. httpx `aiter_bytes`는 받은 gzip 조각을 통째로
+    풀어(64 KiB 조각 → 67 MB) 상한을 무력화하므로, 원문을 `aiter_raw`로 붙이기 **전에** 상한을 재고, 그래도 gzip이 오면
+    출력 상한을 건 `zlib.decompressobj`로 푼다. 상태 코드를 먼저 본다 — 200만 본문 전체를, 503만 problem의 `meta`를
+    64 KiB까지 읽고, 그 밖의 비-200은 본문을 읽지 않고 상태로 분류한다(큰 오류 본문도 cursor 409 신호를 지운다).
   - 응답 필드: `history.generated_at`·`source_collected_at`·`source_status`(`ok`/`stale` — stale이어도 이력을 준다)는
     transport `meta`에서 온다. 행은 `product_code`·`observed_at`·`price`(null 그대로)만 원천이 준다 — 행별
     `collected_at`·`provider_updated_at`은 nullable이고 지금은 항상 null이다(응답 생성 시각으로 채우지 않는다).

@@ -23,7 +23,9 @@
   `upstream_no_collection`(503 — 성공 수집 근거 없음)·`upstream_unsupported`(501)·`upstream_timeout`.
   `history.status=unavailable`(이때 `has_more=false`)은 이력의 끝이 아니다.
 - **FIXED (계약 검사)**: 유한하지 않거나 문자열인 가격, 요청과 다른 유종·창 밖의 행, JSON이 아니거나 너무 깊은 본문,
-  2 MiB 초과 본문은 `upstream_contract`(현재가는 그대로). transport export 공통 `_decimal`도 유한한 값만 받는다.
+  2 MiB 초과 본문(gzip은 풀린 크기로 — 요청은 `Accept-Encoding: identity`), 깨진 gzip, 200 본문의
+  `source_status=failed`는 `upstream_contract`(현재가는 그대로). 비-200은 본문을 읽지 않거나(503만 64 KiB) 상태 코드로
+  분류한다. 공개 `history.source_status`는 `ok`/`stale`뿐이다. transport export 공통 `_decimal`도 유한한 값만 받는다.
 - **CHANGED**: `limit`(기본 200·최대 1000)은 유종별이 아니라 **한 페이지 전체 행 수**다. `history.truncated`는 `has_more`와
   같은 호환값(deprecated). `PriceHistoryPoint.collected_at`은 nullable이 됐고 `provider_updated_at`과 함께 지금은 항상
   null이다(원천이 행마다 주지 않는다). service·admin OpenAPI가 바뀌어 **PinVi service·admin 재vendor가 필요하다**(user 불변)

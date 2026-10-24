@@ -13069,9 +13069,9 @@ export interface components {
             source_collected_at: string | null;
             /**
              * Source Status
-             * @description transport 유가 수집 상태. stale이어도 기존 이력은 준다. unavailable이면 null.
+             * @description transport 유가 수집 상태(ok·stale). stale이어도 기존 이력은 준다. unavailable이면 null(성공한 수집 근거가 없으면 reason=upstream_no_collection).
              */
-            source_status: ("ok" | "stale" | "failed") | null;
+            source_status: ("ok" | "stale") | null;
             /**
              * Status
              * @description unavailable이면 이 페이지를 읽지 못했다는 뜻이다 — has_more=false여도 이력의 끝이 아니다. 페이지를 이어 읽는 소비자는 매 페이지 status를 확인하고, unavailable이면 누적한 페이지를 완전한 이력으로 쓰지 않는다.

@@ -70,7 +70,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-24 T-STATE-01-T4 — price-history를 transport T4 계약에 맞춰 service·admin
     # baseline 재고정, service schema_changes 1건.
     "openapi-diff-v1.json": (
-        "6da2345e66ea7dd34e03fc422ae04feceb15f41e856b33d2793df797b998d61c"
+        "f6d845eac03c8847b69fb29541ffecd80ef9178e977ad2994f515d0350cff290"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -83,7 +83,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # (transport 10 operation 추가).
     # 2026-10-24 T-STATE-01-T4 — 같은 receipt의 service·full-admin sha 재핀(price-history T4).
     "consumer-rollout-v1.json": (
-        "5970cf45223eafd6b4d0f9a53f7b7ffb46ffab89ff109d85ab854c60a7c7b73e"
+        "816a5956656cd5948107e7c53cbff3b547731cc4152673ac1f6fe8b500bf9c12"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"
