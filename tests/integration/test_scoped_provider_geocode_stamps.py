@@ -1067,7 +1067,14 @@ _PARENT420_HEAD = "420_exclusive_provider_refresh"
 _STAMP421_HEAD = "421_stamp_writer_boundary"
 # immutable1be runtime_privileges.py의 역사적 표 권한은 SELECT/INSERT/UPDATE다.
 _PARENT420_SOURCE_SHA = "ab5ab6c236a3d2629dad93500f250cde6d05b68bed3c945c39b26c4bded4bf56"
-_PARENT420_ACL_SHA = "cb7f11372336a27902d2ca3a901bdade7b40367bc5280a45a944cee499e73724"
+_PARENT420_ACL_SHA_BY_IMAGE = {
+    "postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c": (
+        "ab583025fb75be3901d177db19c84c53903a00805a452ede7a31ce4d30a7cf43"
+    ),
+    "postgis/postgis@sha256:8b33190b6486ab9905dea999171817c1ac461733a7078dd4c836091c6e6b5d40": (
+        "528ccce668ca6486cebbc1e811424c34ab89333c7cc10616e5011bdb070b3277"
+    ),
+}
 _PARENT50_GUARDS_SHA = "70ba8fdeebadbde52a5aa81c9841d89a06481222efbbd386b0072874b8b9ad59"
 _PARENT420_INSTALLER_SHA = "f8db128ea1712051475ecd5af20d14788facda20b61ca160c944d28a8d860ea2"
 _NEW_STAMP_ROUTINES = [
@@ -1081,7 +1088,7 @@ _NEW_STAMP_ROUTINES = [
 
 _ACL_SNAPSHOT_SQL = """
 WITH objects(kind,object,owner,acl) AS (
- SELECT 'schema',n.nspname,n.nspowner,coalesce(n.nspacl,acldefault('n',n.nspowner))
+ SELECT 'schema',n.nspname::text,n.nspowner,coalesce(n.nspacl,acldefault('n',n.nspowner))
  FROM pg_namespace n WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
  UNION ALL
  SELECT CASE WHEN c.relkind='S' THEN 'sequence' ELSE 'relation' END,
@@ -1156,7 +1163,7 @@ async def _acl_snapshot(admin):
         for row in await _read(
             admin,
             """
-        SELECT * FROM (SELECT 'schema' AS kind,n.nspname AS object,r.rolname AS owner
+        SELECT * FROM (SELECT 'schema' AS kind,n.nspname::text AS object,r.rolname AS owner
         FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner
         WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
         UNION ALL
@@ -1179,6 +1186,21 @@ async def _acl_snapshot(admin):
         """,
         )
     ]
+    # UNION의 name 타입 추론에 의한 63자 절단을 실제 catalog의 긴 signature로 반증한다.
+    identity_args = (
+        await _read(
+            admin,
+            """
+        SELECT pg_get_function_identity_arguments(
+          'feature.apply_provider_feature_field_patch(uuid,bigint,text,text,bigint,jsonb,jsonb)'
+          ::regprocedure) AS arguments
+    """,
+        )
+    )[0]["arguments"]
+    identity = "feature.apply_provider_feature_field_patch(" + identity_args + ")"
+    assert len(identity) > 63
+    assert any(row["kind"] == "routine" and row["object"] == identity for row in objects)
+    assert any(row["kind"] == "routine" and row["object"] == identity for row in owners)
     return dict(objects=objects, owners=owners, roles=roles, members=members)
 
 
@@ -1186,6 +1208,17 @@ def _snapshot_hash(value):
     return hashlib.sha256(
         json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+
+
+def _parent420_acl_sha(container):
+    wrapped = container.get_wrapped_container()
+    wrapped.reload()
+    image_ref = wrapped.attrs["Config"]["Image"]
+    if image_ref not in _PARENT420_ACL_SHA_BY_IMAGE:
+        raise AssertionError(
+            "historical parent ACL requires an independently audited immutable image"
+        )
+    return _PARENT420_ACL_SHA_BY_IMAGE[image_ref]
 
 
 def _migration_config(dsn):
@@ -1293,7 +1326,7 @@ async def upgrade_parent_lab(upgrade_container):
     await _restore_parent420_acl(off_migrator)
     engine = make_async_engine(off_admin, pool_size=1)
     try:
-        assert _snapshot_hash(await _acl_snapshot(engine)) == _PARENT420_ACL_SHA
+        assert _snapshot_hash(await _acl_snapshot(engine)) == _parent420_acl_sha(upgrade_container)
     finally:
         await engine.dispose()
     active_admin, active_migrator = _clone_upgrade_db(off_admin, off_migrator)
@@ -1418,14 +1451,16 @@ async def upgrade_case(upgrade_parent_lab, request):
             ("owned_pg_name", attrs["Name"]),
             ("owned_pg_image_id", attrs["Image"]),
             ("parent420_acl_source_sha256", _PARENT420_SOURCE_SHA),
-            ("parent420_acl_digest", _PARENT420_ACL_SHA),
+            ("parent420_acl_digest", _parent420_acl_sha(upgrade_parent_lab["container"])),
         ]
     )
     try:
         assert await _read(admin, "SELECT version_num FROM alembic_version") == [
             {"version_num": _PARENT420_HEAD}
         ]
-        assert _snapshot_hash(await _acl_snapshot(admin)) == _PARENT420_ACL_SHA
+        assert _snapshot_hash(await _acl_snapshot(admin)) == _parent420_acl_sha(
+            upgrade_parent_lab["container"]
+        )
         async with AsyncSession(runtime) as session:
             assert await session.scalar(text("SELECT current_user")) == "ktm_feature_service"
             privileges = (
