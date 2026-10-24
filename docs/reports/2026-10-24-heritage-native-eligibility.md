@@ -67,7 +67,7 @@ parent/marker/subtype/link 속성은 전수 비교한다. canonical UUID/claim/m
   CI에서도 실행한다. 인벤토리/Protocol lint는27 PASS/기존 sibling 부재1skip이다.
 - import 오류(ProviderFieldPresence 경로), 시험 Settings import 오류 등 선행 실패도 실제
   실행 전에 수정했다. 앞선 checkpoint의 SDK 의존성 부재를 이번 정상 설치 검증과 섞지 않는다.
-- 최종 합집합 strict mypy3개·Ruff·import4를 확인했고 정확CI·독립2리뷰는 진행 중이다.
+- 최종 합집합 strict mypy3개·Ruff·import4를 확인했다. 최종475 source는 root/W 두 독립 리뷰 PASS이며 정확CI·문서 delta 검토는 별도다.
   실제 PG/HTTP/UI/worker 복구/운영 활성화를 이번 pure 계약 증거로 대체하지 않는다.
 
 ## 두 적대 리뷰 경계의 보완
@@ -119,4 +119,4 @@ native/EX18개(기존16+신규 artifact 반례2)를 같은 실행에서 확인�
 실행 후 해당 scalar fixture 잔존0을 확인한다. A1 pure 진단이 새 실제 collector 경로를 실행한
 것은 아니다. 외부 provider HTTP/운영 호출은0이며 EX의 별도 CI/UI gate를 대체하지 않는다.
 
-합집합 전체 lint와 archive 링크는 **377 PASS/기존6skip/29.82초**다. 최종 문서 상한·redaction·archive 링크도 확인했다. 정확 CI/두 최종 리뷰는 별도 대기다.
+합집합 전체 lint와 archive 링크는 **377 PASS/기존6skip/29.82초**다. 최종 문서 상한·redaction·archive 링크도 확인했다. 475 source의 root/W 두 독립 최종 리뷰는 PASS다. 이번 문서 delta 검토와 정확 CI는 별도 대기다.

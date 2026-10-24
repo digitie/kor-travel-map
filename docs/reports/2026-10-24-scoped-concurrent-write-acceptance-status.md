@@ -27,8 +27,9 @@ main에 포함됐다. 개별 feature-base PR의 미발행 CI를 성공으로 간
 | #1385 | 416 field SQL2개·Python patch/create 진입, manualcreate55P03→503 | PG/ASGI29+unit5·기존unit110·두리뷰·정확0f146 CI5개·실UI18+별도HTTP2 PASS, mainff65c415 | 전체 수집 배선·운영 전환 |
 | #1386 | normal-head whole curation import의 첫 EX | 실제40P01 재현·PG9/회귀48/unit76·독립2리뷰·정확b78b 실CSV UI5/별도계보 PASS | 정확b78b CI5개 PASS·main2cd9c485, 운영 후속 |
 | #1387 | 417 EX 재진입 xact 소유 재확보 후 반복 GUC 조회 생략 | 실제PG7+unit4·oracle4·최종집중92·독립2리뷰·정확fc9 실UI18+별도HTTP2 | 정확fc9 CI5개 PASS·main708efbc1, 운영 후속 |
-| #1388(418) | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·별도실제mapper500→503/같은key복구·oracle4·독립2리뷰 | 정확CI·최신418 실UI |
-| 후속 EX 진입 | 같은 source/head·후보/winner/receipt의 protocol EX+전역 fence | 실제PG/기존native/artifact16 PASS·lint373(6skip)·mypy/import | 독립2리뷰·정확CI·최신UI·collector 배선 |
+| #1388(418) | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·oracle4·독립2리뷰·정확99fe CI5개·실UI19/별도HTTP3·proof PASS, main2e3dd69e | 원strict cleanup의 외부소멸2 FAIL 보존·별도잔여정리 완료, 전체 writer/운영 후속 |
+| #1389 | 같은 source/head·후보/winner/receipt의 protocol EX+전역 fence | 실제PG/기존native/artifact16 PASS·독립2리뷰·정확dcb92934 CI5개 PASS | 새 실UI 진행·미머지, 실제 collector 배선/운영 미완 |
+| #1390 | 국가유산 이름 presence·저장 projection 재정규화·지원 외 불변 진단, native 예산 후속075 합성 | A1 SDK98+native/EX18=116 PASS·lint377(6skip)·mypy3/import4·source 독립2리뷰 PASS | 정확475 CI·최종 문서 delta 검토, 실collector/실UI/운영 미완 |
 
 실제 Chromium·BFF/API·PostgreSQL은 reader/kernel 합집합의 정확fd6/schema414에서16건을
 통과했다. 지도 cluster3회 확대→UUID마커/상세, 인증401/403/200·파일 목록/상세/검색·issues·
@@ -38,6 +39,18 @@ datasets·metrics·stale412 뒤 불변/후속GET200·모바일·로그아웃을 
 schema에서18 UI와 별도 실제HTTP 이름수정/복원2개를 통과했다. 이름편집UI는 없고 최종
 값 복원 뒤 override provenance가 남는다. 각 fresh/소유 lab의 증거·정리와 source 핀을
 분리했으며 VWorld 외부 타일·native collector·전체 운영 수용을 대신하지 않는다.
+
+#1388은 정확99fe 소스의 CI5개와 새 실제UI19·별도HTTP3·runtime proof를 수용한 뒤
+2026-10-24 13:18:24Z에 main `2e3dd69e4f4ea9a95b868fc777bf4e0136b74a45`로 머지했다.
+원 strict cleanup은 다른 작업의 foreign 컨테이너2개 소멸로 FAIL였으며
+`foreign_baseline_unchanged=false`·`original_strict_cleanup_pass=false`를 그대로 보존한다. 별도 승인된
+정확2ID 예외 정리에서 소유 자원/UUID0·민감자료 폐기·나머지 foreign21 불변을 확인했다.
+이를 전체 foreign 불변이나 원 strict cleanup PASS로 바꾸지 않는다. root/W의 제품 gate
+수용과 이 정리 한계는 별개다.
+
+#1389의 정확dcb92934 source/CI 통과는 새UI 완료나 머지의 증거가 아니다. #1390의 source는
+root/W가 검토했고 root 작성 native075 후속은 W/T가 별도 검토했다. 같은 합집합의
+116개 검사는 로컬 제한 PG/SDK 증거이며 #1389 새UI·실제 collector·운영 활성화를 대신하지 않는다.
 
 ## 실측의 의미
 
