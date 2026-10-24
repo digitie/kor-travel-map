@@ -292,6 +292,8 @@ async def approve_feature_request(
             .one()
         )
     except DBAPIError as error:
+        if _driver_constraint_identity(error)[0] == "55P03":
+            raise
         _procedure_error(error)
     outcome = row.get("o_outcome")
     if outcome == "exact_conflict":

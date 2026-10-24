@@ -10,6 +10,18 @@
 
 ## [Unreleased]
 
+### 제한 scalar 쓰기의 같은 의미 배타 실행 (2026-10-24)
+
+- **ADDED**: 기존 primary place의 명시 name/phones 갱신에 SH와 같은 후보·승자 계산을
+  protocol EX·전역 fence 아래 수행하는 내부 진입을 추가했다. 기존 loader로의 자동 fallback,
+  미지원 identity/Geo 변경·전체 collector 배선·운영 활성화는 포함하지 않는다.
+
+### Feature 요청 승인의 잠금 대기 복구 (2026-10-24)
+
+- **FIXED**: 생성 요청 승인 중 `55P03`은 기존503/RetryAfter5로 반환하고 실패 command를
+  rollback해 같은 key 재시도를 허용한다. migration418은 생성 SQL4개의 첫 protocol 잠금과
+  내부 호출 권한만 보강하며 일반 수집 동시 전환·정책 활성화는 포함하지 않는다.
+
 ### 배타 잠금 재진입의 반복 비용 개선 (2026-10-24)
 
 - **IMPROVED**: protocol EX를 이미 보유한 트랜잭션은 xact 소유를 재확보한 뒤 반복 설정
