@@ -676,8 +676,8 @@ class KorTravelMapSettings(BaseSettings):
     transport_price_history_enabled: bool = Field(
         default=False,
         description=(
-            "주유소 가격 추이를 transport "
-            "``/v1/service/exports/fuel-stations/{uni_id}/price-history``"
+            "주유소 가격 추이를 transport T4 "
+            "``/v1/service/exports/fuel-stations/{station_key}/price-history``"
             "에서 읽어 전할지(ADR-114 결정 4). 꺼져 있으면 추이는 "
             "``unavailable``(``disabled``)이고 "
             "현재가만 준다. transport에 그 경로가 배포된 뒤 켠다. "

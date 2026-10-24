@@ -53,7 +53,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-STATE-01 — **transport 현재 상태 Valkey 적재·service REST(1단계)**
 
-  Valkey 세대 교체 store·`transport_state_*` job(기본 STOPPED)·`/v1/service/transport/*`·가격 추이 프록시. Manager Valkey 배포·schedule enable·첫 교체·PinVi 재vendor 뒤 닫는다.
+  Valkey 세대 교체 store·`transport_state_*` job(기본 STOPPED)·`/v1/service/transport/*`·가격 추이 프록시. Manager Valkey 배포·schedule enable·첫 교체·PinVi 재vendor 뒤 닫는다. 가격 추이 T4 계약 정렬(cursor·409 재시작·이유 enum)은 브랜치 `feat/transport-fuel-price-history-t4`(acceptance 같은 ID 마지막 항목).
 
 - [ ] T-STATE-02 — **weather 현재·예보·세 구간 요약 Valkey(2단계)**
 

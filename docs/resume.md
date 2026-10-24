@@ -1,3 +1,12 @@
+## 2026-10-24 — 가격 추이 프록시 transport T4 정렬(T-STATE-01-T4): 브랜치 `feat/transport-fuel-price-history-t4`
+
+- `/v1/service/transport/fuel-stations/{feature_id}/price-history`가 transport T4 실제 계약을 읽는다(질의 변환·불투명
+  cursor·cursor 요청의 transport 409 → HTTP 409 `TRANSPORT_PRICE_HISTORY_CURSOR_EXPIRED`·이유 enum 4개 추가·유한 가격·
+  요청 대비 행 검증·본문 상한·행별 시각 nullable). migration·설정 변화 없음. service·admin OpenAPI 변경(**PinVi service·admin
+  재vendor 필요 — ADR-114 D6 체크리스트**). 배포 영향: Map API. 적대 리뷰 2회 반영 완료.
+- **다음 한 작업: CI green → 소유자 머지 판단 → PinVi 재vendor PR → Manager compose PR(`kor-travel-map-api`에 transport
+  주소·토큰·`KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_ENABLED`) → pair 회전 → 배포 뒤 실제 주유소로 `available`·두 페이지 확인.**
+
 ## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
 
 - revision+provider/dataset allowlist가 모두 있을 때만 기존 native TX 안에서 shadow를 기록한다. 실제 MCST 이름만 supplied로 선언하며 Geo/파생값/DTO null은 추측하지 않는다.
