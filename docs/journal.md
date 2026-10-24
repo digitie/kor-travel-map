@@ -1,3 +1,8 @@
+## 2026-10-24 — ADR115 구현과 전체 수용 범위 구분
+
+- #1371~#1377의 커널·reader·제한 winner/native·비용·직접 SQL 보강과 증거를 [수용 현황](reports/2026-10-24-scoped-concurrent-write-acceptance-status.md)에 정리했다. 정확 CI가 진행 중이거나 feature base에서 아직 발행되지 않은 PR은 green/머지 완료로 세지 않는다.
+- 제한 병렬2의 elapsed 개선과 PG CPU 약4.2% 증가를 분리했다. 예외 rollback을 실제 worker 사망으로 세지 않으며 SIGKILL 검증은 별도다. 모든 T-CWRITE 전체 수용·운영 활성화·Weather/Transport 전파는 미완, 취소된 export 운영 활성화/Map 연동 검증도 재개하지 않는다.
+
 ## 2026-10-24 — ADR115 SQL 직접 진입 413 실제 검증
 
 - 기존 SQL 7개의 첫 protocol EX 진입을 원문 signature·본문 SHA-256, 원래 owner/ACL과 함께 검증했다. 공유→배타 승격 거부·실제 두 세션 차단 PID·옛 전역 fence 선점 방지를 포함한 단위/PG/전체 lint **407 PASS/6 기존 skip**, 공식 head oracle·metadata **2 PASS**다.
