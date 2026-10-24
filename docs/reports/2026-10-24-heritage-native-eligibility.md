@@ -88,7 +88,8 @@ canonical 진단에서 놓쳤다. source link key/Feature alias가 current recor
 2026-10-01 가장 오래된 한 절5764B를 journal-2026-10a.md로 원문 이동했다. SHA256은
 `ffe1b6c06892402d17b38e34fd511c358fd7be7c0e0acf2460d0d9bdc6bdb58d`이며
 본문 원문/상대 링크 변경0이다. 절 뒤 빈 분리줄1B는 live에 유지해 부모 전체를 복원할 수 있다. 양쪽 상단·기존 본문·CHANGELOG 항목을 모두 보존했다.
-EX 소스/시험/report는 dcb 부모 blob 그대로이며 이 합성이 EX 개별 CI/UI gate를 대신하지 않는다.
+scoped_provider_refresh.py와 artifact 단위 시험은 root075 blob이고 나머지 EX 시험/report는
+dcb 부모 blob 그대로다. 이 합성이 EX 개별 CI/UI gate를 대신하지 않는다.
 
 
 추가 root 리뷰에서는 plain Enum.value의 과대 객체와 model_copy의 미선언 필드가 첫 guard를
@@ -104,15 +105,18 @@ prefix를 신뢰 경계로 쓰지 않는다. 최종98개는 두 직렬화 반례
 이 검사는 JSON 표현의 형태·타입과 정본 DTO 입력 한계를 검증하며, 악의적인 Python 런타임
 전체를 sandbox하거나 monkeypatch를 방어한다는 보장은 아니다.
 
-기존 native artifact의 별도 `_check_artifact_budget`에는 Enum.value와 BaseModel 사전
-복사 예산의 후속 검토가 남는다. root의 Enum 과대값 실제 반례가 확인됐고 직렬화 후1MiB만
-보장하므로 기본 OFF를 유지하며 운영 opt-in 전 반드시 수정·수용해야 한다. A1의 model_dump와
-native의 dict+JSONEncoder 방식은 달라 이 변경에서 guard를 무작정 공용화하거나 수정하지 않았다.
+기존 native artifact의 별도 `_check_artifact_budget`에서도 root가 Enum.value 예산 누락과
+BaseModel 사전 dict 복사 반례를 확인했다(수정 전2 FAIL/4 PASS). root 작성 후속
+`07506ba08c3e16f5bd910b912f0725bf8e5039f0`을 독립 T/W 두 리뷰 후 cherry-pick했다.
+Enum.value 재귀 검사와 공식 shallow iterator 순회만 추가했고 native 제품/unit 두 blob은
+원075와 정확히 같다. A1의 model_dump와 native의 dict+JSONEncoder 방식은 달라 guard를
+공용화하지 않았다. 직렬화 후1MiB 제한도 유지하며 모든 raw 타입의 메모리 peak/운영 CPU
+개선을 보장한다는 주장은 하지 않는다. 기본 OFF·실제 collector 배선 미완은 그대로다.
 
-최종 EX 부모와의 집중 실행은 **114 PASS/28.98초**이며 A1·고정 SDK98개와 기존 native/EX16개를
-같은 실행에서 확인했다. native/EX의 실제 PG는 2CPU/1.5GiB 제한 소유 fixture를 사용했고
+native 예산 후속075까지 합친 최종 실행은 **116 PASS/29.20초**이며 A1·고정 SDK98개와
+native/EX18개(기존16+신규 artifact 반례2)를 같은 실행에서 확인했다. 직전 EX 부모만의
+114 PASS/28.98초와 합산하지 않는다. native/EX의 실제 PG는 2CPU/1.5GiB 제한 소유 fixture를 사용했고
 실행 후 해당 scalar fixture 잔존0을 확인한다. A1 pure 진단이 새 실제 collector 경로를 실행한
 것은 아니다. 외부 provider HTTP/운영 호출은0이며 EX의 별도 CI/UI gate를 대체하지 않는다.
 
-합집합 전체 lint와 archive 링크는 **377 PASS/기존6skip/29.57초**다. 최종 문서 변경 후
-문서 상한·redaction·archive 링크를 다시 확인한다. 정확 CI/두 최종 리뷰는 별도 대기다.
+합집합 전체 lint와 archive 링크는 **377 PASS/기존6skip/29.82초**다. 최종 문서 상한·redaction·archive 링크도 확인했다. 정확 CI/두 최종 리뷰는 별도 대기다.

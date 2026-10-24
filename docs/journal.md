@@ -1,7 +1,7 @@
 ## 2026-10-24 — 국가유산 native 적격성 선행 계약(A1, #1390)
 
 - 안정 composite ID의 본체 이름 presence와 저장 typed projection 재정규화·지원 외 불변 진단을 추가했다. eligible은 DB 적용 승인이 아니며 collector/Geo/whole-TX seal·정책은 바꾸지 않는다.
-- 격리된 고정SDK public 모델·Map fetcher service fixture 포함98 PASS, 합집합114 PASS(실PG 포함), mypy3/import4/Ruff 통과. 정확CI·독립2리뷰는 진행 중이며 PG/실UI/운영 수용으로 세지 않는다. [범위와 실패](reports/2026-10-24-heritage-native-eligibility.md).
+- 격리된 고정SDK public 모델·Map fetcher service fixture 포함98 PASS, native 예산 후속075 합집합116 PASS(실PG 포함), mypy3/import4/Ruff 통과. 정확CI·독립2리뷰는 진행 중이며 PG/실UI/운영 수용으로 세지 않는다. [범위와 실패](reports/2026-10-24-heritage-native-eligibility.md).
 - 기존 EX 진입은 별도 #1389이며 부모 합성 시 양쪽 기록을 보존한다. 기본OFF/seed0/운영0, 내구 artifact/full bundle/실제 collector 배선은 후속이다.
 
 - EX 부모 합성으로 journal225349B가 되어 가장 오래된 2026-10-01 한 절5764B를 [아카이브](archive/journal-2026-10a.md)로 원문 이동했다. 원문 SHA/부모 합집합은 A1 보고서에 기록했다.

@@ -64,9 +64,10 @@ Dagster 감독·lease 만료 후 owner 인계·DB/host 사망 복구는 여전�
 root/catalog·중단/재계획·실부하와 배포/되돌림 훈련은 남아 있다. 기본 OFF·정책 seed0·
 운영 활성화0을 유지하며 배타 gate만 추가했다고 의미 프로토콜이 완성됐다고 보지 않는다.
 
-기존 native artifact의 pre-serializer Enum.value 예산 누락은 root의 실제 반례로 확인됐고,
-현재 직렬화 후1MiB만 보장한다. BaseModel 사전 dict 복사 예산도 별도 후속이며 모든 raw 타입의
-복사 전 메모리가 제한됐다고 보지 않고, 기본 OFF 유지와 운영 opt-in 전 필수 수정·수용 gate로 남긴다.
+기존 native artifact의 pre-serializer Enum.value 예산 누락과 BaseModel 사전 dict 복사 경계는
+root의 실제 반례로 확인한 뒤 후속07506ba0에서 보완했고, A1 합집합에 원제품/unit blob 그대로
+포함했다. 독립 T/W 두 리뷰와 최종 합집합 반례 수용을 별도로 확인하며 직렬화 후1MiB 제한을
+유지한다. 모든 raw 타입의 메모리 peak/운영 CPU 개선이나 collector 활성화 완료를 뜻하지 않는다.
 
 Map의 해당 개선을 수용한 뒤 Weather·Transport의 실제 저장·복구 경로와 대조하여 적용한다.
 공통 재시도/실행 소유권/자원 제한은 kor-travel-common을 우선 재사용하되 Map 전용
