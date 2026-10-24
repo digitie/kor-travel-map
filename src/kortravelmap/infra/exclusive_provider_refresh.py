@@ -63,7 +63,7 @@ class ExclusiveProviderSnapshotPlan:
 
 @dataclass(frozen=True)
 class ExclusiveProviderSnapshotResult:
-    """replay는 DML0이며 과거 insert/update 카운트를 복원했다고 주장하지 않는다."""
+    """replay는 source/candidate/winner/finish DML을 생략하며 과거 DML 카운트를 복원하지 않는다."""
 
     load: repo.FeatureLoadResult
     attempt: dict[str, Any]

@@ -147,7 +147,7 @@ completed 재사용 시험과 별개이며 이 반증에는 제품 변경이 없
 정적 배선 검사가 읽지 못한 실패다. 네 full filename 리터럴과 같은 read 순서로 바꿨고
 ordered DDL bytes/SHA는 같으며 검사기를 완화하지 않았다. 실제 fresh upgrade/oracle2건도
 통과했다. Ruff12경로, strict mypy5파일, import4계약을 통과했다. 최종 문서 편집 뒤
-archive 링크/크기4건은 다시 확인한다.
+archive 링크/크기4건은 최종 편집 뒤 확인했다(4PASS0.94초).
 
 새 opt-in 자원 wiring은 future worker 실행의 선택 seam이며 이번 실제 asset 시험이
 Dagster resource를 기동한 worker라는 뜻은 아니다. public SDK HTTP는 fixture transport,
