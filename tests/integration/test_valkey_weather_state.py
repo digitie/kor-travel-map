@@ -114,8 +114,9 @@ def _pages(rows: list[dict[str, Any]], size: int = 2, **meta: Any) -> dict[str |
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
 
 
-#: 가짜 weather가 내는 경로 → cursor 페이지. ``_load``가 적재 op 동안만 httpx client를 바꿔 끼운다
-#: (API 미들웨어가 ``isinstance(…, httpx.AsyncClient)``를 쓰므로 REST 호출 중에는 원래 타입이어야 한다).
+#: 가짜 weather가 내는 경로 → cursor 페이지. ``_load``가 적재 op 동안만 httpx client를 바꿔
+#: 끼운다(API 미들웨어가 ``isinstance(…, httpx.AsyncClient)``를 쓰므로 REST 호출 중에는 원래
+#: 타입이어야 한다).
 _ROUTES: dict[str, dict[str | None, Any]] = {}
 
 
