@@ -1,3 +1,9 @@
+## 2026-10-24 — 국가유산 native 적격성 선행 계약(A1, #1390)
+
+- 안정 composite ID의 본체 이름 presence와 저장 typed projection 재정규화·지원 외 불변 진단을 추가했다. eligible은 DB 적용 승인이 아니며 collector/Geo/whole-TX seal·정책은 바꾸지 않는다.
+- 격리된 고정SDK public 모델·Map fetcher service fixture 포함94 PASS, lint373 PASS(기존6skip), mypy2/import4/Ruff 통과. 정확CI·독립2리뷰는 진행 중이며 PG/실UI/운영 수용으로 세지 않는다. [범위와 실패](reports/2026-10-24-heritage-native-eligibility.md).
+- 기존 EX 진입은 별도 #1389이며 부모 합성 시 양쪽 기록을 보존한다. 기본OFF/seed0/운영0, 내구 artifact/full bundle/실제 collector 배선은 후속이다.
+
 ## 2026-10-24 — 생성 SQL의 protocol-first 진입과 승인 복구(418)
 
 - core/provider/manual/요청승인4개를 첫EX로 보강하고 내부owner2개에 함수EXEC만 추가한다. 승인55P03은 기존503/RetryAfter5로 전달한다.

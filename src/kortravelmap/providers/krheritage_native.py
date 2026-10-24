@@ -6,11 +6,20 @@ provider HTTP facade가 아니다. validator는 정본 public HeritageDetail.mod
 
 from __future__ import annotations
 
+import json
+import math
 import re
-from collections.abc import Callable, Mapping
+import sys
+from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
+from enum import Enum
+from itertools import chain
 from typing import Any, Literal
+from uuid import UUID
+
+from pydantic import BaseModel
 
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import Address, FeatureBundle, FeatureKind, SourceRecord, SourceRole
@@ -217,6 +226,67 @@ def _meaning(bundle: FeatureBundle, *, name_changes: bool, aliases: bool) -> dic
     }
 
 
+def _within_comparison_budget(values: tuple[object, ...]) -> bool:
+    """model_dump 전 shallow 순회. 전체 입력을 복사하지 않고 깊이/노드/byte를 제한한다."""
+    stack = [(value, 0) for value in values]
+    nodes = 8192
+    remaining = 1_048_576
+    while stack:
+        value, depth = stack.pop()
+        nodes -= 1
+        remaining -= 8  # JSON 구분자/상수 표기의 보수적 여유.
+        if nodes < 0 or remaining < 0 or depth > 64:
+            return False
+        children: Iterable[object]
+        if isinstance(value, BaseModel):
+            size = len(type(value).model_fields) + len(value.model_extra or {})
+            if size * 2 > nodes - len(stack):
+                return False
+            # Pydantic의 공식 shallow iteration만 사용하며 중첩 raw를 재귀 복사하지 않는다.
+            mapping = dict(value)
+            children = chain.from_iterable(mapping.items())
+            count = len(mapping) * 2
+        elif isinstance(value, Mapping):
+            children = chain.from_iterable(value.items())
+            count = len(value) * 2
+        elif isinstance(value, (list, tuple, set, frozenset)):
+            children = iter(value)
+            count = len(value)
+        else:
+            if isinstance(value, str):
+                if len(value) > remaining:
+                    return False
+                try:
+                    remaining -= len(json.dumps(value, ensure_ascii=False).encode("utf-8"))
+                except UnicodeError:
+                    return False
+            elif value is None or isinstance(value, bool):
+                pass
+            elif isinstance(value, int):
+                if value.bit_length() > 4096:
+                    return False
+                remaining -= len(str(value))
+            elif isinstance(value, float):
+                if not math.isfinite(value):
+                    return False
+                remaining -= len(repr(value))
+            elif isinstance(value, Decimal):
+                if not value.is_finite() or sys.getsizeof(value) > 1024:
+                    return False
+                remaining -= len(str(value))
+            elif isinstance(value, (datetime, date, UUID, Enum)):
+                remaining -= 128
+            else:
+                return False
+            if remaining < 0:
+                return False
+            continue
+        if count > nodes - len(stack):
+            return False
+        stack.extend((child, depth + 1) for child in children)
+    return True
+
+
 async def assess_heritage_name_refresh(
     previous: SourceRecord,
     current: FeatureBundle,
@@ -235,6 +305,15 @@ async def assess_heritage_name_refresh(
         or previous_geo != current_geo
     ):
         return HeritageNameEligibility(False, "unknown_or_changed_geo_evidence")
+    if not _within_comparison_budget(
+        (previous, current, previous_geo.address, current_geo.address)
+    ):
+        return HeritageNameEligibility(False, "invalid_bundle_budget")
+    if (
+        current.source_link.source_record_key != current.source_record.source_record_key
+        or current.source_link.feature_id != current.feature.feature_id
+    ):
+        return HeritageNameEligibility(False, "invalid_current_lineage")
     presence = current.provider_field_presence
     if (
         presence is None

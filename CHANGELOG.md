@@ -10,6 +10,11 @@
 
 ## [Unreleased]
 
+### 국가유산 native 적격성 선행 계약 (2026-10-24)
+
+- **ADDED**: 본체의 검증된 이름 presence와 저장 typed projection 재정규화 진단을 추가했다.
+  기존 공개 필드값·collector·SQL·정책·Geo·seal 동작은 유지하며 적용/활성화 승인은 제공하지 않는다.
+
 ### Feature 요청 승인의 잠금 대기 복구 (2026-10-24)
 
 - **FIXED**: 생성 요청 승인 중 `55P03`은 기존503/RetryAfter5로 반환하고 실패 command를

@@ -125,7 +125,10 @@ async def test_current_dto_must_match_reconstruction_including_derived_alias(fie
     tampered = current.model_copy(
         update={"feature": current.feature.model_copy(update={field: value})}
     )
-    assert (await _assess(before, tampered)).reason == "current_bundle_not_canonical"
+    expected = (
+        "invalid_current_lineage" if field == "feature_id" else "current_bundle_not_canonical"
+    )
+    assert (await _assess(before, tampered)).reason == expected
 
 
 @pytest.mark.parametrize(
@@ -231,3 +234,39 @@ async def test_omitted_presence_and_actual_bundle_obligations_are_rejected():
     assert (
         await _assess(before, before.model_copy(update={"source_link": changed_role}))
     ).reason == "current_bundle_not_canonical"
+
+
+async def test_current_link_record_key_must_match_the_actual_record():
+    before = await _bundle(_base())
+    current = await _bundle(replace(_base(), name_ko="새 유산"), later=True)
+    for key in (before.source_record.source_record_key, "unrelated-record"):
+        bad_link = current.source_link.model_copy(update={"source_record_key": key})
+        bad = current.model_copy(update={"source_link": bad_link})
+        result = await _assess(before, bad)
+        assert not result.eligible
+        assert result.reason == "invalid_current_lineage"
+
+
+@pytest.mark.parametrize("shape", ["deep", "nodes", "bytes"])
+async def test_current_bundle_budget_rejects_before_model_dump(shape, monkeypatch):
+    before = await _bundle(_base())
+    payload = "x" * 1_048_577 if shape == "bytes" else list(range(9000))
+    if shape == "deep":
+        payload = "leaf"
+        for _ in range(65):
+            payload = {"child": payload}
+    detail = before.feature.detail.model_copy(update={"payload": {"unsupported": payload}})
+    current = before.model_copy(
+        update={"feature": before.feature.model_copy(update={"detail": detail})}
+    )
+    original = type(current).model_dump
+
+    def forbidden_copy(self, *args, **kwargs):
+        if self is current:
+            pytest.fail("unsafe current bundle reached model_dump before budget rejection")
+        return original(self, *args, **kwargs)
+
+    monkeypatch.setattr(type(current), "model_dump", forbidden_copy)
+    result = await _assess(before, current)
+    assert not result.eligible
+    assert result.reason == "invalid_bundle_budget"

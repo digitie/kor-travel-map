@@ -58,7 +58,7 @@ parent/marker/subtype/link 속성은 전수 비교한다. canonical UUID/claim/m
 - 전용 WT에서 codegraph 최초 init을 수행했고 converter 영향도25개를 확인했다. 공유 index는
   변경하지 않았다. dynamic `_transform_reusing_geo`→converter actual asset은 직접 정적 대조했다.
 - 신규 pure 진단·기존 converter·실 SDK 모델/Map fetcher 계약을 같은 최종 실행에서
-  **90 PASS/1.63초** 확인했다. public SDK는 pyproject 정본 pin
+  **94 PASS/1.55초** 확인했다. public SDK는 pyproject 정본 pin
   `e1b346f70dd90f68247776fe14ad39b0a90db763` 고정 archive와 의존성을 `/tmp` 전용
   target에 설치했다. 공유 venv는 변경하지 않았다. public model은 실제 실행하고 fetcher는
   기존 public search/list/details service fixture 경계를 대체했다. 외부 HTTP/DB는 0이다.
@@ -67,5 +67,22 @@ parent/marker/subtype/link 속성은 전수 비교한다. canonical UUID/claim/m
   CI에서도 실행한다. 인벤토리/Protocol lint는27 PASS/기존 sibling 부재1skip이다.
 - import 오류(ProviderFieldPresence 경로), 시험 Settings import 오류 등 선행 실패도 실제
   실행 전에 수정했다. 앞선 checkpoint의 SDK 의존성 부재를 이번 정상 설치 검증과 섞지 않는다.
-- strict mypy2개·Ruff는 통과했다. 전체 lint/import 계약·정확CI·독립2리뷰는 진행 중이다.
+- strict mypy2개·Ruff는 통과했다. 전체 lint373 PASS(기존6skip/29.55초)·import4를 확인했고 정확CI·독립2리뷰는 진행 중이다.
   실제 PG/HTTP/UI/worker 복구/운영 활성화를 이번 pure 계약 증거로 대체하지 않는다.
+
+## 두 적대 리뷰 경계의 보완
+
+첫 fbff 후보는 current link의 record key를 의미 비교에서 분리했기 때문에, 잘못된 link key도
+canonical 진단에서 놓쳤다. source link key/Feature alias가 current record/Feature와 정확히
+일치하는지 별도 검증했다. current DTO 전체의 임의 detail payload도 raw 검사만으로는
+제한되지 않아 `model_dump` 전에 shallow Pydantic 순회로 입력 총1MiB·8192노드·깊이64를
+검사한다. 노드/JSON 구분자 예산은 보수적으로 계산한다. over-budget/deep/unknown object·
+비유한 값은 거부하며 shared infra를 import하거나 whole DTO를 먼저 복사하지 않는다.
+
+수정 전 old/타 record link 및 deep/node/byte 세 가지 복사 전 거부 회귀는 **4 FAIL/0.96초**였고
+원로그를 보존했다. 최종94개 실행에 같은 회귀를 포함했다. 이 문제는 pure 진단의 정합성과
+자원 제한 문제이며 실제 collector/DB 오류를 새로 관찰한 것으로 표시하지 않는다.
+
+작업 후 journal/resume와 내부 변경 CHANGELOG를 추가했다. journal224494B/resume173169B로
+정본225280B 안이며 archive 분리는 필요하지 않았다. 현재 부모에 없는 EX #1389 기록은
+복사하여 dangling 링크를 만들지 않고, 후속 부모 통합 때 양쪽 상단을 보존한다.
