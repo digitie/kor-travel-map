@@ -1,4 +1,4 @@
-"""migration 411이 PG transport 유가·돌발 적재를 닫고 그 Feature를 퇴역하는지(ADR-114 결정 7, 1단계).
+"""migration 411 — PG transport 유가·돌발 적재 종료와 Feature 퇴역(ADR-114 결정 7, 1단계).
 
 **410까지 올린 빈 DB**(배포 경로: bootstrap → migrator → schema owner)에 seed 카탈로그의 실제
 transport dataset으로 Feature를 심고 411을 올린다.
