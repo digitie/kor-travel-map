@@ -1,6 +1,6 @@
 """PG transport 유가·돌발 적재를 닫고 그 Feature를 퇴역(soft-delete)한다(ADR-114 결정 7, 1단계).
 
-Revision ID: 411_retire_pg_transport_prices_incidents
+Revision ID: 411_retire_pg_transport_values
 Revises: 410_provider_field_shadow
 
 왜 필요한가. ADR-114로 transport의 **현재 상태**(주유소·휴게소 유가, 고속도로 돌발 활성 집합 등)는
@@ -96,7 +96,7 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "411_retire_pg_transport_prices_incidents"
+revision: str = "411_retire_pg_transport_values"
 down_revision: str | Sequence[str] | None = "410_provider_field_shadow"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -106,7 +106,7 @@ TRANSPORT_PROVIDER: Final[str] = "kor-travel-transport"
 #: 퇴역 전이의 감사 문맥. ``prepare_feature_state_context``가 받는 키만 쓴다.
 #: SQLAlchemy ``text()``가 ``:이름``을 bind로 읽으므로 값에 콜론을 넣지 않는다.
 RETIRE_REASON_CODE: Final[str] = "adr114_transport_state_moved_to_valkey"
-RETIRE_PRINCIPAL: Final[str] = "system/alembic-411_retire_pg_transport_prices_incidents"
+RETIRE_PRINCIPAL: Final[str] = "system/alembic-411_retire_pg_transport_values"
 RETIRE_CAUSATION_REF: Final[str] = "ADR-114 decision 7 phase 1"
 
 _TARGET_DATASETS_SQL: Final[str] = f"""
@@ -176,7 +176,7 @@ UPDATE provider_sync.provider_dataset_operations AS operation
 _RECEIPT_HEAD_CHECK_SQL: Final[str] = """
 ALTER TABLE ops.application_schema_operation_receipts
     DROP CONSTRAINT ck_application_schema_operation_receipts_head,
-    ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh', '402_remove_map_weather_data', '403_drop_kma_notice_lineage', '404_transport_provider_identity', '405_mois_freshness_sla', '406_feature_write_gate', '407_feature_geocode_stamps', '408_kor_travel_geo_releases', '409_geo_release_item_reasons', '410_provider_field_shadow', '411_retire_pg_transport_prices_incidents'))
+    ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK (destination_head IN ('300', '301_m03_import_children', '302_m03_child_issuance', '303_m05_payload_hash_domain', '304_m05_detector_manuals', '305_m05_relitigation_fence', '306_m02_manual_feature_purge', '307_m02_truncate_fence', '308_t39_provider_identities', '309_t39_feature_id_rekey', '310_seoul_source_move', '311_seal_member_digest', '312_route_geometry_sidecar', '313_single_service_role', '400', '401_retire_map_kma_refresh', '402_remove_map_weather_data', '403_drop_kma_notice_lineage', '404_transport_provider_identity', '405_mois_freshness_sla', '406_feature_write_gate', '407_feature_geocode_stamps', '408_kor_travel_geo_releases', '409_geo_release_item_reasons', '410_provider_field_shadow', '411_retire_pg_transport_values'))
 """
 
 # ---------------------------------------------------------------------------
@@ -291,5 +291,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     """되돌리지 않는다 — PG 유가·돌발 적재를 되살리는 것은 새 결정이다(ADR-114)."""
     raise RuntimeError(
-        "411_retire_pg_transport_prices_incidents is forward-only: transport 현재 상태는 Valkey가 든다(ADR-114)."
+        "411_retire_pg_transport_values is forward-only: transport 현재 상태는 Valkey가 든다(ADR-114)."
     )

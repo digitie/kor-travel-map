@@ -586,7 +586,7 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
 
 | 단계 | 무엇 | 해제 조건 |
 | --- | --- | --- |
-| ① (이 PR, migration `411_retire_pg_transport_prices_incidents`) | 유가 둘·돌발 하나의 PG 적재(asset·job·schedule·큐 runner spec·handler binding·preview fixture)를 지우고, 그 dataset의 operation을 종류 불문 끄고, 그 Feature를 퇴역한다 | Valkey 다섯 데이터셋 적재 중(충족) |
+| ① (이 PR, migration `411_retire_pg_transport_values`) | 유가 둘·돌발 하나의 PG 적재(asset·job·schedule·큐 runner spec·handler binding·preview fixture)를 지우고, 그 dataset의 operation을 종류 불문 끄고, 그 Feature를 퇴역한다 | Valkey 다섯 데이터셋 적재 중(충족) |
 | ② | 장소 셋(주유소·휴게소·공항)의 PG 적재 종료 + 퇴역 | PinVi가 일반 in-bounds 기본 kind에서 transport 중복을 빼고 장소 이름 검색 대체를 정함(또는 소유자가 손실을 받아들임), C7 안전 대상을 공항 job 밖으로 옮김 |
 | ③ | 물리 삭제(402와 같은 모양 — Feature·source lineage·가격 fact·notice 계보), dataset 비활성, 남은 PG 변환 코드(`providers/opinet.py`·`krex.py` 유가·돌발·`krairport.py`의 PG 경로)와 notice 계보 함수의 돌발 분기 정리 | ②가 배포되고 관찰 기간(1주 이상)에 되돌릴 일이 없었음, 소유자 확인(비가역) |
 
@@ -596,7 +596,7 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
 ### ①의 방법 — 무엇이 실행되는가
 
 - **퇴역 = soft-delete**: `feature.transition_feature_state`(감사·불변 trail의 정본 상태 전이)를 `transition_kind='system'`,
-  `reason_code='adr114_transport_state_moved_to_valkey'`, `principal='system/alembic-411_retire_pg_transport_prices_incidents'`,
+  `reason_code='adr114_transport_state_moved_to_valkey'`, `principal='system/alembic-411_retire_pg_transport_values'`,
   `causation_ref='ADR-114 decision 7 phase 1'`로 부른다 → `lifecycle_state='retired'`·`publication_state='suppressed'`. 프로시저가
   같은 전이에 lifecycle override(`prevent_provider_reactivation=true`)를 붙인다 — provider 부재가 아니라 결정이므로 provider
   tombstone으로 위장하지 않고, 적재가 실수로 되살아나도 다시 켜지지 않는다. 프로시저는 advisory lock을 잡지 않는다(행 잠금만,

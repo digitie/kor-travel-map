@@ -236,12 +236,19 @@ def _weather_dataset_identities() -> set[tuple[str, str]]:
     }
 
 
+#: ADR-114 결정 7(migration 411): 이 provider의 notice(고속도로 돌발) PG 적재는 퇴역했다 — 현재
+#: 활성 집합은 Valkey(`transport_state_highway_incidents`)가 든다. ADR-105가 남기는 쪽이 아니다.
+_PG_RETIRED_NOTICE_PROVIDERS = frozenset({"kor-travel-transport"})
+
+
 def _kept_notice_dataset_ids() -> set[int]:
-    """날씨 출처가 아닌 notice dataset — ADR-105가 남기는 쪽."""
+    """날씨 출처가 아닌 notice dataset — ADR-105가 남기는 쪽(ADR-114로 퇴역한 transport 제외)."""
     return {
         dataset_id
         for dataset_id, dataset in _catalog_datasets().items()
-        if _NOTICE_KIND in dataset.produces and not dataset.is_weather
+        if _NOTICE_KIND in dataset.produces
+        and not dataset.is_weather
+        and dataset.provider not in _PG_RETIRED_NOTICE_PROVIDERS
     }
 
 
@@ -535,11 +542,13 @@ def test_kept_notice_loaders_are_still_launchable() -> None:
     날씨를 지우다 notice 공용 경로를 함께 지우면 위의 음성 검사는 전부 초록이다 —
     "아무것도 없다"는 "날씨가 없다"를 만족한다. 그래서 남겨야 할 쪽을 카탈로그에서
     유도해 Definitions job · handler binding · 큐 runner spec 세 경계에서 결박한다.
-    하한은 시드가 보여 주는 수다(2026-10-01: KREX 교통공지 · 산림청 산사태 예보).
+    하한은 시드가 보여 주는 수다(2026-10-01: KREX 교통공지 · 산림청 산사태 예보 —
+    2026-10-24부터 교통공지는 ADR-114 결정 7로 퇴역).
     """
 
     kept_ids = _kept_notice_dataset_ids()
-    assert len(kept_ids) >= 2, f"남는 notice dataset을 덜 찾았다: {sorted(kept_ids)}"
+    # 2026-10-24 2 → 1: KREX 교통 돌발은 ADR-114 결정 7로 퇴역했다(산림청 산사태 예보가 남는다).
+    assert len(kept_ids) >= 1, f"남는 notice dataset을 덜 찾았다: {sorted(kept_ids)}"
     kept_keys = _operation_keys_for(kept_ids)
     assert len(kept_keys) >= len(kept_ids), (
         f"남는 notice dataset에 적재 operation이 결박돼 있지 않다: {sorted(kept_keys)}"

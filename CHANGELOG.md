@@ -16,7 +16,7 @@
   `feature_notice_transport_highway_incidents` asset과 그 job·schedule·큐 runner spec·handler binding·resource 둘
   (`transport_rest_area_fuel_prices`·`transport_highway_incidents`), preview fixture 셋. 현재 유가·돌발은 Valkey
   `transport_state_*`가 든다.
-- **CHANGED (DB, migration `411_retire_pg_transport_prices_incidents`)**: provider `kor-travel-transport`·`produces` price/notice
+- **CHANGED (DB, migration `411_retire_pg_transport_values`)**: provider `kor-travel-transport`·`produces` price/notice
   dataset의 operation을 종류 불문 끄고, 그 primary Feature를 `system` 상태 전이로 `retired`·`suppressed`(+ 재활성화를 막는
   lifecycle override)로 내린다. 행·lineage·가격 fact·dataset은 남는다. queued/running job이 있으면 아무것도 바꾸지 않고 멈춘다.
 - 영향 없음: REST·OpenAPI, Valkey transport 표면, 장소(주유소·휴게소·공항) 적재와 C7 공항 대상.

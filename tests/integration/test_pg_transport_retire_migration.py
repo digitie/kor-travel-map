@@ -39,7 +39,7 @@ pytestmark = pytest.mark.integration
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _BEFORE: Final = "410_provider_field_shadow"
-_AFTER: Final = "411_retire_pg_transport_prices_incidents"
+_AFTER: Final = "411_retire_pg_transport_values"
 
 _T0: Final = datetime(2026, 10, 24, 0, 0, tzinfo=UTC)
 

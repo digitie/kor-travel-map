@@ -416,7 +416,8 @@ def test_the_derivation_actually_found_something() -> None:
     assets = _feature_load_assets()
     # 2026-10-01 35 → 30: KMA asset 다섯이 ADR-104로 사라졌다(실측 30).
     # 2026-10-01 30 → 26: 남은 weather asset 넷이 ADR-105로 사라졌다(실측 26).
-    assert len(assets) >= 26, (
+    # 2026-10-24 26 → 23: 유가 둘·돌발 하나가 ADR-114 결정 7(migration 411)로 사라졌다(실측 23).
+    assert len(assets) >= 23, (
         f"재시도 정책을 단 asset을 {len(assets)}개만 찾았다 — 유도가 낡았다."
     )
     assert _quota_guarded_functions(), (
