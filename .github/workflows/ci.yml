@@ -138,7 +138,6 @@ jobs:
             image: postgis/postgis@sha256:8b33190b6486ab9905dea999171817c1ac461733a7078dd4c836091c6e6b5d40
     env:
       KTM_TEST_POSTGIS_IMAGE: ${{ matrix.image }}
-      KTM_CWRITE_BASELINE_REPORT: ${{ runner.temp }}/map-scoped-write-baseline.json
     steps:
       - uses: actions/checkout@v4
 
@@ -175,6 +174,8 @@ jobs:
         run: mv coverage-unit .coverage
 
       - name: Run integration tests (testcontainers PostGIS via Docker)
+        env:
+          KTM_CWRITE_BASELINE_REPORT: ${{ runner.temp }}/map-scoped-write-baseline.json
         # Docker는 ubuntu-latest runner에서 자동 제공.
         # 통합 테스트는 conftest의 pg_container fixture가 PostGIS 컨테이너 자동 부팅.
         # ADR-075 D-12-2 / T-VN-19 §8.1 gate — 빈 PostGIS DB → alembic upgrade head →
