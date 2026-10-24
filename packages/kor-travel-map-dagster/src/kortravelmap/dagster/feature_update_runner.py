@@ -46,7 +46,6 @@ from .assets import (
     run_feature_event_visitkorea_enrichment,
     run_feature_geometry_knps_records,
     run_feature_notice_krforest_landslide_forecast_issues,
-    run_feature_notice_transport_highway_incidents,
     run_feature_place_datagokr_file_data,
     run_feature_place_khoa_beaches,
     run_feature_place_knps_points,
@@ -62,8 +61,6 @@ from .assets import (
     run_feature_place_transport_airports,
     run_feature_place_transport_fuel_stations,
     run_feature_place_transport_rest_areas,
-    run_feature_price_transport_fuel_stations,
-    run_feature_price_transport_rest_areas,
     run_feature_route_krforest_dulle_trails,
     run_feature_route_krforest_mountain_trails,
 )
@@ -92,8 +89,6 @@ from .provider_fetchers import (
     fetch_standard_tourist_attractions,
     fetch_transport_airports,
     fetch_transport_fuel_stations,
-    fetch_transport_highway_incidents,
-    fetch_transport_rest_area_fuel_prices,
     fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
 )
@@ -748,30 +743,10 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         asset_key="feature_place_transport_fuel_stations",
     ),
     *_operation_specs(
-        "feature_price_transport_fuel_stations_job",
-        run=run_feature_price_transport_fuel_stations,
-        resources=_records("transport_fuel_stations", fetch_transport_fuel_stations),
-        asset_key="feature_price_transport_fuel_stations",
-    ),
-    *_operation_specs(
         "feature_place_transport_rest_areas_job",
         run=run_feature_place_transport_rest_areas,
         resources=_records("transport_rest_areas", fetch_transport_rest_areas),
         asset_key="feature_place_transport_rest_areas",
-    ),
-    *_operation_specs(
-        "feature_price_transport_rest_areas_job",
-        run=run_feature_price_transport_rest_areas,
-        resources=_records(
-            "transport_rest_area_fuel_prices", fetch_transport_rest_area_fuel_prices
-        ),
-        asset_key="feature_price_transport_rest_areas",
-    ),
-    *_operation_specs(
-        "feature_notice_transport_highway_incidents_job",
-        run=run_feature_notice_transport_highway_incidents,
-        resources=_records("transport_highway_incidents", fetch_transport_highway_incidents),
-        asset_key="feature_notice_transport_highway_incidents",
     ),
     *_operation_specs(
         "feature_place_krheritage_items_job",

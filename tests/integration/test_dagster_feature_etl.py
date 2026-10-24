@@ -14,14 +14,11 @@ from kortravelmap.dagster.assets import (
     run_feature_event_datagokr_cultural_festivals,
     run_feature_event_krheritage_events,
     run_feature_geometry_knps_records,
-    run_feature_notice_transport_highway_incidents,
     run_feature_place_knps_points,
     run_feature_place_krheritage_items,
     run_feature_place_mois_licenses,
     run_feature_place_transport_fuel_stations,
     run_feature_place_transport_rest_areas,
-    run_feature_price_transport_fuel_stations,
-    run_feature_price_transport_rest_areas,
 )
 from kortravelmap.dagster.feature_operation_tracking import (
     FeatureOperationExecutionGuard,
@@ -98,22 +95,6 @@ class _Station:
 
 
 @dataclass(frozen=True)
-class _OilPrice:
-    """transport ``fuel-stations`` export의 유종별 최신 가격 행(ADR-106)."""
-
-    product_code: str
-    price: Decimal | None
-    observed_at: datetime
-    collected_at: datetime
-    raw: dict[str, Any]
-
-
-@dataclass(frozen=True)
-class _StationDetail(_Station):
-    prices: tuple[_OilPrice, ...] = ()
-
-
-@dataclass(frozen=True)
 class _RestArea:
     name: str
     route_name: str | None
@@ -121,45 +102,6 @@ class _RestArea:
     lat: float | None
     lon: float | None
     phone_number: str | None
-
-
-@dataclass(frozen=True)
-class _FuelPriceRecord:
-    service_area_code: str
-    route_name: str | None
-    direction: str | None
-    oil_company: str | None
-    service_area_name: str | None
-    phone_number: str | None
-    address: str | None
-    gasoline_price: int | None
-    diesel_price: int | None
-    lpg_price: int | None
-    raw: dict[str, Any]
-    observed_at: datetime = datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ)
-
-
-@dataclass(frozen=True)
-class _Notice:
-    """`KrexTrafficNoticeItem` Protocol 준수 (provider ``krex.models.Incident``
-    realTimeSms shape 정합, #378)."""
-
-    occurred_date: str | None
-    occurred_time: str | None
-    incident_type: str | None
-    incident_type_code: str | None
-    direction: str | None
-    message: str | None
-    point_name: str | None
-    route_no: str | None
-    route_name: str | None
-    process_status: str | None
-    process_status_code: str | None
-    latitude: float | None
-    longitude: float | None
-    congestion_length: float | None
-    series_no: int | None
-    raw: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -374,39 +316,6 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
             ],
         ),
         await _run_asset(
-            run_feature_price_transport_fuel_stations,
-            map_client,
-            transport_fuel_stations=[
-                _StationDetail(
-                    uni_id="DAGSTER-OPINET-001",
-                    name="SK주유소 강남점",
-                    brand="SKE",
-                    address_road="서울특별시 강남구 테헤란로 100",
-                    address_jibun=None,
-                    lon=127.0376,
-                    lat=37.4979,
-                    tel="02-1234-5678",
-                    lpg_yn="Y",
-                    prices=(
-                        _OilPrice(
-                            product_code="B027",
-                            price=Decimal(1820),
-                            observed_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
-                            collected_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
-                            raw={"PRODCD": "B027", "PRICE": "1820"},
-                        ),
-                        _OilPrice(
-                            product_code="D047",
-                            price=Decimal(1650),
-                            observed_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
-                            collected_at=datetime(2026, 6, 2, 12, 0, tzinfo=_KST_TZ),
-                            raw={"PRODCD": "D047", "PRICE": "1650"},
-                        ),
-                    ),
-                )
-            ],
-        ),
-        await _run_asset(
             run_feature_place_transport_rest_areas,
             map_client,
             transport_rest_areas=[
@@ -417,56 +326,6 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
                     lat=36.7800,
                     lon=126.6500,
                     phone_number="041-1234-5678",
-                )
-            ],
-        ),
-        await _run_asset(
-            run_feature_price_transport_rest_areas,
-            map_client,
-            transport_rest_area_fuel_prices=[
-                _FuelPriceRecord(
-                    service_area_code="DAGSTER-KREX-FUEL-001",
-                    route_name="서해안고속도로",
-                    direction="부산방향",
-                    oil_company="EX-OIL",
-                    service_area_name="서산휴게소",
-                    phone_number="041-1234-5678",
-                    address="충남 서산시",
-                    gasoline_price=1710,
-                    diesel_price=1599,
-                    lpg_price=1010,
-                    raw={"serviceAreaCode": "DAGSTER-KREX-FUEL-001"},
-                )
-            ],
-        ),
-        await _run_asset(
-            run_feature_notice_transport_highway_incidents,
-            map_client,
-            transport_highway_incidents=[
-                _Notice(
-                    occurred_date="2026.05.28",
-                    occurred_time="05:00:00",
-                    incident_type="공사",  # → roadwork
-                    incident_type_code="3",
-                    direction="부산방향",
-                    message="서해안고속도로 105km 지점 도로공사",
-                    point_name="서산나들목",
-                    route_no="0150",
-                    route_name="서해안고속도로",
-                    process_status="진행",
-                    process_status_code="1",
-                    latitude=None,
-                    longitude=None,
-                    congestion_length=None,
-                    series_no=1,
-                    raw={
-                        "accDate": "2026.05.28",
-                        "accHour": "05:00:00",
-                        "accType": "공사",
-                        "smsText": "서해안고속도로 105km 지점 도로공사",
-                        "nosunNM": "0150",
-                        "roadNM": "서해안고속도로",
-                    },
                 )
             ],
         ),
@@ -550,37 +409,21 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     ]
 
     feature_results = [result for result in results if hasattr(result, "feature_ids")]
-    price_results = [result for result in results if hasattr(result, "price_values")]
 
+    assert len(feature_results) == len(results)
     assert all(result.load.features_inserted == 1 for result in feature_results)
     assert all(not result.address_validation.has_errors for result in feature_results)
-    assert all(result.features.features_inserted == 1 for result in price_results)
-    assert [result.price_values for result in price_results] == [2, 3]
 
     feature_ids = [
         feature_id for result in feature_results for feature_id in result.feature_ids
     ]
-    assert len(feature_ids) == 9
-
-    # krex 교통 공지는 provider Incident에 좌표가 없어 coordless로 적재된다
-    # (ADR-044) — 좌표/행정코드 보강 단언에서 제외하고 별도로 검증한다.
-    notice_feature_ids = {
-        feature_id
-        for result in feature_results
-        if result.dataset_key == "transport_highway_incidents"
-        for feature_id in result.feature_ids
-    }
+    assert len(feature_ids) == 8
 
     # 조회 키는 적재가 발급한 정본 키다 — asset이 돌려준 ``f_*``는 그 주소다.
     canonical_ids = await _canonical_ids(migrated_engine, feature_ids)
     for feature_id in feature_ids:
         row = await map_client.get_feature(canonical_ids[feature_id])
         assert row is not None
-        if feature_id in notice_feature_ids:
-            # coordless notice: 좌표·법정동코드 없이 적재됨.
-            assert row["coord_5179_srid"] is None
-            assert row["legal_dong_code"] is None
-            continue
         assert row["coord_5179_srid"] == 5179
         assert row["legal_dong_code"] is not None
         assert row["sigungu_code"] is not None
@@ -590,312 +433,10 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
         source_count = await session.scalar(
             text("SELECT count(*) FROM provider_sync.source_records")
         )
-        price_feature_count = await session.scalar(
-            text("SELECT count(*) FROM feature.features WHERE kind = 'price'")
-        )
-        price_value_count = await session.scalar(
-            text("SELECT count(*) FROM feature.feature_price_values")
-        )
-    assert feature_count == 11
-    # T-VN-38 fact lineage는 OpiNet 가격 상세의 canonical raw response 두 건을
-    # 독립 source record로 보존한다. Feature 수만 세던 구 projection 전제(11)를
-    # 유지하면 immutable fact의 source revision을 잃는다.
-    assert source_count == 13
-    assert price_feature_count == 2
-    assert price_value_count == 5
-
-
-async def _notice_valid_end(
-    client: AsyncKorTravelMapClient, feature_id: str
-) -> datetime | None:
-    """공개 read가 보는 notice 효력 종료 시각 (없으면 ``None`` = 열려 있음)."""
-    row = await client.get_feature(feature_id)
-    assert row is not None
-    detail = row["detail"]
-    assert isinstance(detail, dict)
-    value = detail.get("valid_end_time")
-    assert value is None or isinstance(value, str)
-    return datetime.fromisoformat(value) if value is not None else None
-
-
-async def _krex_notice_sync_cursor(client: AsyncKorTravelMapClient) -> dict[str, Any]:
-    """KREX notice snapshot asset이 마지막 성공에 기록한 cursor."""
-    state = await client.get_sync_state(
-        provider="kor-travel-transport",
-        dataset_key="transport_highway_incidents",
-        # T-VN-33 — sync state identity는 (dataset, scope, operation) 3축이다.
-        operation_key="feature_notice_transport_highway_incidents_job",
-    )
-    assert state is not None
-    return state.cursor
-
-
-async def test_krex_notice_asset_snapshot_lifecycle_and_sync_cursor(
-    map_client: AsyncKorTravelMapClient,
-    migrated_engine: Any,
-) -> None:
-    """seed→partial→empty→reappear snapshot이 종료/복구와 cursor를 함께 반영한다.
-
-    여기서 재등장하는 ``a``는 **byte 단위로 같은** row다 — source entity head가
-    그대로라 ``became_current``가 거짓이고 bundle load가 notice subtype을 아예
-    다시 쓰지 않는다. 내용이 바뀐 재등장(실제 피드의 정상 케이스)은
-    ``test_krex_notice_content_change_reappearance_reopens_and_counts``가 맡는다.
-    """
-
-    def _notice(*, occurred_time: str, route_no: str, point_name: str) -> _Notice:
-        return _Notice(
-            occurred_date="2026.07.13",
-            occurred_time=occurred_time,
-            incident_type="사고",
-            incident_type_code="1",
-            direction="서울방향",
-            message=f"{point_name} 교통사고",
-            point_name=point_name,
-            route_no=route_no,
-            route_name="경부고속도로",
-            process_status="진행",
-            process_status_code="1",
-            latitude=None,
-            longitude=None,
-            congestion_length=None,
-            series_no=1,
-            raw={"routeNo": route_no, "pointName": point_name},
-        )
-
-    first_seen = _FETCHED
-    partial_at = first_seen + timedelta(minutes=10)
-    empty_at = first_seen + timedelta(minutes=20)
-    reappeared_at = first_seen + timedelta(minutes=30)
-    a = _notice(occurred_time="10:00:00", route_no="0010", point_name="양재")
-    b = _notice(occurred_time="10:01:00", route_no="0020", point_name="판교")
-
-    seeded = await _run_asset(
-        run_feature_notice_transport_highway_incidents,
-        map_client,
-        transport_highway_incidents=[a, b],
-        fetched_at=first_seen,
-    )
-    a_legacy, b_legacy = seeded.feature_ids
-    canonical = await _canonical_ids(migrated_engine, seeded.feature_ids)
-    a_id, b_id = canonical[a_legacy], canonical[b_legacy]
-    assert await _notice_valid_end(map_client, a_id) is None
-    assert await _notice_valid_end(map_client, b_id) is None
-
-    await _run_asset(
-        run_feature_notice_transport_highway_incidents,
-        map_client,
-        transport_highway_incidents=[a],
-        fetched_at=partial_at,
-    )
-    assert await _notice_valid_end(map_client, a_id) is None
-    assert await _notice_valid_end(map_client, b_id) == partial_at
-    assert (await _krex_notice_sync_cursor(map_client))["notices_closed"] == 1
-
-    await _run_asset(
-        run_feature_notice_transport_highway_incidents,
-        map_client,
-        transport_highway_incidents=[],
-        fetched_at=empty_at,
-    )
-    assert await _notice_valid_end(map_client, a_id) == empty_at
-    assert await _notice_valid_end(map_client, b_id) == partial_at
-    assert (await _krex_notice_sync_cursor(map_client))["notices_closed"] == 1
-
-    await _run_asset(
-        run_feature_notice_transport_highway_incidents,
-        map_client,
-        transport_highway_incidents=[a],
-        fetched_at=reappeared_at,
-    )
-    assert await _notice_valid_end(map_client, a_id) is None
-    assert await _notice_valid_end(map_client, b_id) == partial_at
-    cursor = await _krex_notice_sync_cursor(map_client)
-    assert cursor["notices_reopened"] == 1
-    assert cursor["loaded_at"] == reappeared_at.isoformat()
-
-
-async def test_highway_incident_asset_runs_on_dagster_single_connection_pool(
-    map_client: AsyncKorTravelMapClient,
-    migrated_engine: Any,
-    dagster_runtime_engine: Any,
-) -> None:
-    """회귀(prod run ``bfd18ef5``): 실제 asset 경로가 Dagster pool 1/0에서 끝까지 돈다.
-
-    Dagster ``kor_travel_map_client`` resource는 ``pool_size=1, max_overflow=0``이다
-    (ADR-107). 이 파일의 다른 테스트는 기본 pool(5+10)인 ``migrated_engine``을 써서
-    ``provider_run_lock``이 연결을 쥔 채 본문이 두 번째 연결을 요구하던 결함을 보지
-    못했다. 여기서는 같은 pool 모양의 engine으로 asset 본문(watermark 조회 → 적재 →
-    reconcile → sync cursor) 전체를 두 번 돌린다. prod와 같이 **실제 Dagster runtime
-    login**(``ktm_feature_service``)으로 접속한다. ``map_client``는 검증과 정리용이다.
-    """
-    from sqlalchemy.ext.asyncio import create_async_engine
-
-    def _notice(*, occurred_time: str, route_no: str, point_name: str) -> _Notice:
-        return _Notice(
-            occurred_date="2026.10.12",
-            occurred_time=occurred_time,
-            incident_type="사고",
-            incident_type_code="1",
-            direction="서울방향",
-            message=f"{point_name} 교통사고",
-            point_name=point_name,
-            route_no=route_no,
-            route_name="경부고속도로",
-            process_status="진행",
-            process_status_code="1",
-            latitude=None,
-            longitude=None,
-            congestion_length=None,
-            series_no=1,
-            raw={"routeNo": route_no, "pointName": point_name},
-        )
-
-    engine = create_async_engine(
-        dagster_runtime_engine.url,
-        pool_size=1,
-        max_overflow=0,
-        # prod는 30초다. 판정은 같고 회귀 시 실패만 빨라진다.
-        pool_timeout=2,
-    )
-    single_connection_client = AsyncKorTravelMapClient(engine)
-    a = _notice(occurred_time="10:00:00", route_no="0010", point_name="양재")
-    b = _notice(occurred_time="10:01:00", route_no="0020", point_name="판교")
-    partial_at = _FETCHED + timedelta(minutes=10)
-    try:
-        seeded = await _run_asset(
-            run_feature_notice_transport_highway_incidents,
-            single_connection_client,
-            transport_highway_incidents=[a, b],
-            fetched_at=_FETCHED,
-        )
-        await _run_asset(
-            run_feature_notice_transport_highway_incidents,
-            single_connection_client,
-            transport_highway_incidents=[a],
-            fetched_at=partial_at,
-        )
-    finally:
-        await engine.dispose()
-
-    canonical = await _canonical_ids(migrated_engine, seeded.feature_ids)
-    a_legacy, b_legacy = seeded.feature_ids
-    assert await _notice_valid_end(map_client, canonical[a_legacy]) is None
-    assert await _notice_valid_end(map_client, canonical[b_legacy]) == partial_at
-    cursor = await _krex_notice_sync_cursor(map_client)
-    assert cursor["notices_closed"] == 1
-    assert cursor["snapshot_applied_at"] == partial_at.isoformat()
-
-
-async def test_krex_notice_content_change_reappearance_reopens_and_counts(
-    map_client: AsyncKorTravelMapClient,
-    migrated_engine: Any,
-) -> None:
-    """내용이 바뀐 재등장도 종료를 되돌리고 ``notices_reopened``로 집계한다.
-
-    byte 단위로 같은 row가 다시 오면 entity head의 current record가 그대로라
-    ``became_current``가 거짓이고, bundle load가 notice subtype을 아예 다시 쓰지
-    않는다 — lifecycle이 "직전에 닫혀 있었다"를 DB에서 그대로 읽을 수 있어 관측
-    시점 결함이 있어도 통과한다. 그러나 실제 KREX 실시간 피드의 정상 재등장은
-    자연키(발생일시·노선·방향·지점·사고유형코드)만 같고 payload(process_status·
-    정체 길이·원문 row)가 바뀐 경우다. 그때는 적재가 lifecycle보다 **먼저**
-    ``valid_end_time``을 NULL로 되돌리므로, 적재 직전 비가시 집합을 재두지 않으면
-    재등장이 관측 불가가 되어 집계가 구조적으로 항상 0이 된다(T-VN-33 회귀).
-    """
-
-    def _notice(*, point_name: str, process_status: str, revision: int) -> _Notice:
-        # 자연키는 occurred_date/time·route_no·direction·point_name·
-        # incident_type_code만 쓴다(`krex._traffic_notice_natural_key`). 아래에서
-        # 바꾸는 process_status/정체 길이/raw는 자연키 밖이라 **같은 feature**를
-        # 가리키면서 raw payload hash만 달라진다.
-        congestion_length = 1.5 * revision
-        return _Notice(
-            occurred_date="2026.07.14",
-            occurred_time="09:30:00",
-            incident_type="정체",
-            incident_type_code="2",
-            direction="부산방향",
-            message=f"{point_name} 정체 {congestion_length}km ({process_status})",
-            point_name=point_name,
-            route_no="0010",
-            route_name="경부고속도로",
-            process_status=process_status,
-            process_status_code=str(revision),
-            latitude=None,
-            longitude=None,
-            congestion_length=congestion_length,
-            series_no=revision,
-            raw={
-                "routeNo": "0010",
-                "pointName": point_name,
-                "processStatus": process_status,
-                "lateLength": congestion_length,
-                "seriesNo": revision,
-            },
-        )
-
-    seeded_at = _FETCHED + timedelta(hours=1)
-    closed_at = seeded_at + timedelta(minutes=10)
-    reappeared_at = seeded_at + timedelta(minutes=20)
-    target = _notice(point_name="기흥", process_status="진행", revision=1)
-    bystander = _notice(point_name="죽전", process_status="진행", revision=1)
-    # 같은 사건의 후속 관측 — 자연키는 그대로, 내용만 바뀐 재등장.
-    target_again = _notice(point_name="기흥", process_status="정체해소중", revision=2)
-
-    seeded = await _run_asset(
-        run_feature_notice_transport_highway_incidents,
-        map_client,
-        transport_highway_incidents=[target, bystander],
-        fetched_at=seeded_at,
-    )
-    # 재키 뒤 "같은 feature인가"는 정본 키로만 판정된다 — 유도 ``f_*``는 자연키가
-    # 같으면 언제나 같은 값이라 신규 적재와 재등장을 갈라내지 못한다.
-    seeded_ids = set(
-        (await _canonical_ids(migrated_engine, seeded.feature_ids)).values()
-    )
-    assert len(seeded_ids) == 2
-    assert seeded.load.features_inserted == 2
-    seed_cursor = await _krex_notice_sync_cursor(map_client)
-    # 처음 적재된 공고는 재등장도 종료도 아니다.
-    assert seed_cursor["notices_reopened"] == 0
-    assert seed_cursor["notices_closed"] == 0
-
-    await _run_asset(
-        run_feature_notice_transport_highway_incidents,
-        map_client,
-        transport_highway_incidents=[],
-        fetched_at=closed_at,
-    )
-    for feature_id in sorted(seeded_ids):
-        assert await _notice_valid_end(map_client, feature_id) == closed_at
-    closed_cursor = await _krex_notice_sync_cursor(map_client)
-    assert closed_cursor["notices_closed"] == 2
-    assert closed_cursor["notices_reopened"] == 0
-
-    reappeared = await _run_asset(
-        run_feature_notice_transport_highway_incidents,
-        map_client,
-        transport_highway_incidents=[target_again],
-        fetched_at=reappeared_at,
-    )
-    # 자연키가 같으니 새 feature가 아니라 닫혀 있던 그 feature여야 한다. 여기서
-    # 갈라지면 아래 단언은 재등장이 아니라 신규 적재를 보게 된다.
-    (target_legacy,) = reappeared.feature_ids
-    target_id = (await _canonical_ids(migrated_engine, [target_legacy]))[target_legacy]
-    assert target_id in seeded_ids
-    (bystander_id,) = seeded_ids - {target_id}
-    # 내용이 바뀌었으므로 이번엔 적재가 feature 본문을 실제로 다시 쓴다. byte 동일
-    # 재등장(features_updated == 0)과 갈리는 지점이 정확히 여기다.
-    assert reappeared.load.source_records_inserted == 1
-    assert reappeared.load.features_inserted == 0
-    assert reappeared.load.features_updated == 1
-
-    assert await _notice_valid_end(map_client, target_id) is None
-    assert await _notice_valid_end(map_client, bystander_id) == closed_at
-    cursor = await _krex_notice_sync_cursor(map_client)
-    assert cursor["notices_reopened"] == 1
-    # 적재 직전 이미 닫혀 있던 ``bystander``를 다시 닫았다고 세면 유령 집계다.
-    assert cursor["notices_closed"] == 0
-    assert cursor["notices_superseded"] == 0
+    # 유가 price·돌발 notice asset은 ADR-114 결정 7(1단계, migration 417)로 퇴역했다 — 그 현재
+    # 상태는 Valkey(`transport_state_*`)가 든다(`tests/integration/test_valkey_transport_state.py`).
+    assert feature_count == 8
+    assert source_count == 8
 
 
 async def _run_asset(

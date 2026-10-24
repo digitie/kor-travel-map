@@ -1,7 +1,8 @@
 # ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다
 
 - 상태: proposed (소유자 결정 2026-10-23 — 방향 확정. 2026-10-23 1단계(transport) 구현 PR — 아래 "구현 설계 —
-  1단계". 2026-10-24 2단계(weather) 구현 PR — 아래 "구현 설계 — 2단계". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
+  1단계". 2026-10-24 2단계(weather) 구현 PR — 아래 "구현 설계 — 2단계". 2026-10-24 결정 7 퇴역 1단계(PG 유가·돌발) PR —
+  아래 "결정 7 이행 — PG transport 퇴역". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
 - 날짜: 2026-10-23
 - 결정자: 소유자(방향), Claude(문서)
 - 관계: **ADR-105를 부분 대체**(weather가 Map에 다시 들어온다 — 단 DB 스키마가 아니라 메모리 DB로), ADR-110(odroid
@@ -87,6 +88,9 @@
 
 - 지금 PG에 있는 transport 출처 feature(주유소·휴게소·유가·돌발·공항 dataset)는 Valkey 경로가 배포되면 퇴역한다.
   퇴역 방법과 시점은 이행 PR에서 정한다. 그 전까지는 현재 적재를 유지한다.
+- (2026-10-24) 방법·순서는 아래 "결정 7 이행 — PG transport 퇴역"이 정본이다. 소비자 확인 결과 장소(주유소·휴게소·
+  공항 place)는 아직 기대는 곳이 있어 세 단계로 나눴다: ① 유가·돌발 적재 종료 + Feature 퇴역(soft-delete, migration
+  417) → ② 장소 적재 종료 + 퇴역 → ③ 물리 삭제.
 
 ## 결과 — 잃는 것
 
@@ -557,9 +561,167 @@ ADR-105가 Map의 weather feature 적재·스키마·데이터를 이미 지웠�
 weather 적재가 **없다** — 결정 7(퇴역)은 transport에만 남는다. ADR-105의 재도입 방지 검사는 PG feature 경로(카탈로그
 weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지키고, 이 Valkey 표면만 위 W7대로 예외다.
 
+## 결정 7 이행 — PG transport 퇴역 (2026-10-24, T-STATE-03)
+
+### 소비자 확인 (2026-10-24, 읽기 전용 실측)
+
+- **prod Map DB**(alembic `409`): transport 출처 Feature 26,293건 — 주유소 place 11,820·주유소 유가 price 11,822·
+  휴게소 place 215·휴게소 유가 price 219·돌발 notice 2,202(그중 원천 종료 시각 없는 활성 320)·공항 place 15. 전부
+  `active`/`published`. 다른 provider와 병합된 것 0, curation item·theme 후보·override·merge 이력·POI cache 링크·
+  reference reconciliation event 0. 가격 fact 30,983·source record 37,483. 마지막 적재: 돌발 매 10분(그날 08:00Z),
+  휴게소 유가 10-22, 주유소 유가·장소 10-12, 공항 10-03.
+- **prod Valkey**: `/v1/service/transport/status` 다섯 데이터셋 모두 `loaded=true`·`stale=false`(주유소 11,833·
+  휴게소 215·휴게소 유가 226·돌발 330·공항 15).
+- **PinVi**(GitHub main `ff64b65`, 읽기 전용): 교통 레이어는 Map `/v1/service/transport/*`만 읽는다(ADR-076,
+  `transport_layers.py`). 그러나 **일반 지도·검색·근처**가 Map `/v1/features/{in-bounds,search,nearby}`를 부르고 in-bounds
+  기본 kind가 `place·event·notice·price`다(`api/v1/features.py::_DEFAULT_INBOUNDS_KINDS`) — PG transport Feature가 교통
+  레이어와 **중복으로** 그려지고, 공항·휴게소·주유소 이름 검색·근처는 PG place에서만 나온다(Valkey 표면에는 이름 검색이
+  없다). PinVi DB의 Map feature 참조(`trip_day_pois`·`curated_plan_pois`·`weather_location_links`·reference
+  reconciliation)는 **0행**이다(transport 출처만이 아니라 전체가 0).
+- **Map 내부**: C7 운영 게이트가 `feature_place_transport_airports_monthly_schedule`·`feature_place_transport_airports_job`
+  을 "외부 호출 0"의 안전한 schedule·갱신 요청 대상으로 고정한다(`scripts/run-c7-prod-live-e2e.sh`, `e2e/live/ops-c7-*`).
+  admin UI의 price 패널·마커는 price kind 일반 기능이다(남는다 — 정의).
+
+### 세 단계
+
+| 단계 | 무엇 | 해제 조건 |
+| --- | --- | --- |
+| ① (이 PR, migration `417_retire_pg_transport_values`) | 유가 둘·돌발 하나의 PG 적재(asset·job·schedule·큐 runner spec·handler binding·preview fixture)를 지우고, 그 dataset의 operation을 종류 불문 끄고, 그 Feature를 퇴역한다 | Valkey 다섯 데이터셋 적재 중(충족) |
+| ② | 장소 셋(주유소·휴게소·공항)의 PG 적재 종료 + 퇴역 | PinVi가 일반 in-bounds 기본 kind에서 transport 중복을 빼고 장소 이름 검색 대체를 정함(또는 소유자가 손실을 받아들임), C7 안전 대상을 공항 job 밖으로 옮김 |
+| ③ | 물리 삭제(402와 같은 모양 — Feature·source lineage·가격 fact·notice 계보), dataset 비활성, 남은 PG 변환 코드(`providers/opinet.py`·`krex.py` 유가·돌발·`krairport.py`의 PG 경로)와 notice 계보 함수의 돌발 분기 정리 | ②가 배포되고 관찰 기간(1주 이상)에 되돌릴 일이 없었음, 소유자 확인(비가역) |
+
+①이 시간에 민감한 값부터 하는 이유: 적재를 멈추고 남겨 두면 **틀린 값**을 보여 준다 — 지도 API는 오래된 유가도 날짜와 함께
+그리고, 종료 시각 없는 돌발은 다음 적재가 닫아 주지 않으면 영원히 진행 중이다. 장소는 천천히 바뀌고 아직 소비자가 있다.
+
+### ①의 방법 — 무엇이 실행되는가
+
+- **퇴역 = soft-delete**: `feature.transition_feature_state`(감사·불변 trail의 정본 상태 전이)를 `transition_kind='system'`,
+  `reason_code='adr114_transport_state_moved_to_valkey'`, `principal='system/alembic-417_retire_pg_transport_values'`,
+  `causation_ref='ADR-114 decision 7 phase 1'`로 부른다 → `lifecycle_state='retired'`·`publication_state='suppressed'`. 프로시저가
+  같은 전이에 lifecycle override(`prevent_provider_reactivation=true`)를 붙인다 — provider 부재가 아니라 결정이므로 provider
+  tombstone으로 위장하지 않고, 적재가 실수로 되살아나도 다시 켜지지 않는다. 프로시저는 advisory lock을 잡지 않는다(행 잠금만,
+  ADR-111 lock table 문제 없음). EXECUTE는 프로시저 소유자와 `ktm_feature_runtime`에게만 있어 migration은 프로시저 소유자 롤
+  창에서 부르고 스키마 소유자 롤로 돌아온다(`RESET ROLE` 아님). 끝나면 상태 문맥 GUC를 비운다.
+- **대상은 정체성으로**: provider `kor-travel-transport` + `capabilities.produces`에 price·notice인 dataset — 그 집합이
+  `transport_fuel_prices`·`transport_rest_area_fuel_prices`·`transport_highway_incidents` 셋과 정확히 같아야 한다(fail closed).
+  그 entity에 `primary` link로 묶인 `active` Feature(prod 약 14,240건). 404가 비활성화한 옛 provider(`python-opinet-api`·
+  `python-krex-api`)의 price·notice dataset에 active Feature가 남아 있으면 멈춘다(404 preflight 때 0행, 그 뒤 쓰기 불가 —
+  남았다면 모르는 상태라 몰래 퇴역하지 않는다).
+- **순서**: 같은 트랜잭션 거부 → ADR-115 scoped write 프로토콜 gate 배타 획득(`ops.lock_scoped_feature_write_protocol(true)`,
+  lock_timeout 30초 — 415부터 `transition_feature_state`가 같은 gate를 잡으므로 member 표보다 **먼저** 잡아 교착을 피한다. 돌고 있는
+  Map Feature 쓰기가 있으면 30초 안에 얻지 못해 실패한다) → member 표 둘(`ops.import_job_datasets`·`ops.feature_update_request_datasets`) `LOCK … IN SHARE
+  MODE`(lock_timeout 5초) → preflight → operation **먼저** 끔 → 퇴역(`statement_timeout=0`, `lock_timeout` 60초) → receipt
+  CHECK(`lock_timeout` 1초, 410과 같은 상한) → timeout 원복 → 사후 조건(켜진 대상 operation 0, active 대상 0, 전이 수 = 대상 수,
+  queued/running 대상 job 0). **왜 표 잠금인가**: 활성 가드(`reject_inactive_*_dataset_membership`)는 BEFORE INSERT 트리거의 plain
+  SELECT로 `is_enabled`를 읽는다. 417이 끈 operation은 commit 전까지 다른 세션에 켜진 것으로 보이므로, 행 단위(FK 대상 scope 행
+  `FOR UPDATE`)로는 가드를 통과한 INSERT가 FK에서 기다렸다가 commit 뒤 성공해 꺼진 operation에 member가 남는다. 표 `SHARE` 잠금은
+  INSERT가 문장 시작에서 `ROW EXCLUSIVE`를 기다리게 하므로 가드가 commit된 꺼진 값을 본다. **대가**: 417 트랜잭션 동안 모든
+  dataset의 새 job member 쓰기가 기다린다(퇴역 수십 초~수 분). 그 창에서 **새로 시작하는** Map run(어느 dataset이든)은 Dagster
+  resource 초기화의 operation guard가 member INSERT에서 기다리다 `lock_timeout` 30초에 55P03으로 실패하고, API·PinVi
+  cache-target 요청은 약 5초 상한에서 503을 받는다. 이미 돌고 있는 적재는 영향이 없다. 그래서 runbook B는 큐 sensor를 멈춘 창에서
+  417을 돌린다.
+- **남기는 것**: Feature 행·source lineage·가격 fact·notice 계보·alias·상태 전이 감사·카탈로그 행. **dataset은 활성으로 둔다**
+  (401과 같다 — 비활성은 물리 삭제 단계의 일이고, 활성 가드가 그때 DELETE까지 막는다).
+- **seal**(기각 대안의 첫 함정): 전이는 그 Feature에 link가 있는 **모든 dataset**의 `current_provider_curation_input_set` 입력을
+  바꾼다(link 역할 무관). 진행 중인 대상 적재가 있으면 그 root가 `stale_input`으로 실패하므로 queued/running job을 막고, 대상
+  Feature에 대상 밖 dataset의 link(역할 무관)가 있으면 멈춘다 — 다른 dataset의 seal은 바뀌지 않는다(통합 검사가 대상 밖 전
+  dataset의 seal 입력을 전후로 대조한다). 이미 실패로 끝난 root의 미완 영수증(prod 돌발 3건)은 다시 대조되지 않는다. 두 번째
+  함정(runtime 역할의 증거 표 읽기)은 해당이 없다 — 퇴역은 migration 안에서 한다.
+- **같은 트랜잭션 거부**: env.py는 밀린 revision 전부를 한 트랜잭션으로 돈다. prod(409)가 한 번에 417까지 오르면 410~416(ADR-115
+  shadow 원장·scoped write 프로토콜)의 FK·DDL이 `feature.features`·`source_entities`·`source_records`·`provider_datasets`·`feature_override_field_paths`에
+  잡은 SHARE ROW EXCLUSIVE를 퇴역 내내 쥐어 DB 쓰기가 멈춘다. env.py는 그대로 두고, 417은 **퇴역할 Feature가 있는데**
+  `alembic_version` 행이 지금 트랜잭션에서 쓰였으면(앞선 revision이 이 트랜잭션에서 적용됨) 거부한다 — 앞선 revision도 함께 되돌아가 DB는
+  409 그대로다. 빈 DB(fresh bootstrap·CI)는 대상이 0이라 한 번에 오른다.
+
+### ①의 운영 runbook (n150, 공용 Dagster)
+
+**A. 416까지 먼저.** head가 `416_field_override_protocol`인 Map commit(#1382 머지 직전 main, 예: `ff65c4154`)으로 pair를
+회전한다(`/root/chain17.sh`, 마이그레이션 전진이 410~416을 commit — ADR-115 소유 revision, 각자의 runbook을 따른다). 확인: Map API
+컨테이너 DSN으로 `SELECT version_num FROM alembic_version` = `416_field_override_protocol`.
+
+**B. 417 — 배포 전(필수).**
+
+1. **갱신 정책을 끈다(필수).** prod 적재는 cron이 아니라 큐다(`feature_update_request_queue_sensor` 기본 RUNNING, PinVi
+   cache-target 요청이 targeted run을 낸다). 세 dataset(`transport_fuel_prices`·`transport_rest_area_fuel_prices`·
+   `transport_highway_incidents`)마다 — `PUT /v1/ops/datasets/refresh-policy?provider_dataset_id=<id>`는 **전체 upsert**다(본문
+   `extra=forbid`, `source_kind`·`expected_revision` 필수, 빠진 필드는 기본값으로 덮인다). 그래서 현재 정책을 먼저 읽고
+   (`GET /v1/ops/datasets/<id>?sync_scope=dataset_wide`의 정책 블록 — 정책 행이 없으면 `expected_revision: null`로 새로 만든다)
+   **그 값을 그대로** 보내되 `enabled`와 `targeted_policy`만 바꾼다(읽은 원본은 되돌리기용으로 보관한다). 예:
+
+   ```bash
+   # admin 토큰·주소는 Map admin 표면 설정을 쓴다. <id>는 아래 3단계 질의의 target id.
+   curl -sS "$MAP/v1/ops/datasets/<id>?sync_scope=dataset_wide" -H "$ADMIN_AUTH" > policy-<id>.before.json
+   # policy-<id>.before.json의 정책 필드를 그대로 옮기고 두 값만 바꾼 본문:
+   curl -sS -X PUT "$MAP/v1/ops/datasets/refresh-policy?provider_dataset_id=<id>" -H "$ADMIN_AUTH" \
+     -H 'Content-Type: application/json' -d '{"expected_revision": "<현재 revision 또는 null>",
+       "source_kind": "internal", "targeted_policy": "disabled", "enabled": false,
+       "system_interval_seconds": <원래 값>, "min_interval_seconds": <원래 값>, "max_concurrent": <원래 값>, …}'
+   ```
+
+   (UI `/ops/datasets` 정책 편집기도 같은 upsert다 — 두 값만 바꿔 저장한다.) 그러면 큐 executor가 새 요청을 `policy_disabled`로
+   건너뛴다. API를 쓸 수 없을 때만 같은 두 값을 SQL로 바꾼다(스키마 소유자, `revision = revision + 1`, 다른 열은 두고).
+2. **schedule 확인.** 세 schedule(`feature_price_transport_fuel_stations_daily_schedule`·
+   `feature_price_transport_rest_areas_twice_daily_schedule`·`feature_notice_transport_highway_incidents_ten_minute_schedule`)은
+   코드 기본이 STOPPED다. 공용 webserver(`kor-travel-dagster-webserver`) UI의 Schedules에서 code location
+   `kortravelmap.dagster.definitions`로 걸러 상태를 보고, RUNNING이면 Stop한다(또는 그 컨테이너에서
+   `dagster schedule stop <이름> --location kortravelmap.dagster.definitions` — workspace는 컨테이너 기본값).
+3. **진행 중 job이 0일 때까지 기다린다.** Map API 컨테이너 DSN(스키마 소유자 SET ROLE)으로 — migration preflight와 같은 질의:
+
+   ```sql
+   WITH target AS (
+     SELECT provider_dataset_id FROM provider_sync.provider_datasets
+      WHERE provider = 'kor-travel-transport'
+        AND dataset_key IN ('transport_fuel_prices','transport_rest_area_fuel_prices','transport_highway_incidents'))
+   SELECT job.job_id, job.status, 'import_job_datasets' AS via
+     FROM ops.import_jobs job JOIN ops.import_job_datasets m ON m.job_id = job.job_id
+    WHERE job.status IN ('queued','running') AND m.provider_dataset_id IN (SELECT * FROM target)
+   UNION
+   SELECT job.job_id, job.status, 'feature_update_request_datasets'
+     FROM ops.feature_update_request_datasets m
+     JOIN ops.feature_update_requests r ON r.request_id = m.request_id
+     JOIN ops.import_jobs job ON job.job_id = r.job_id
+    WHERE job.status IN ('queued','running') AND m.provider_dataset_id IN (SELECT * FROM target);
+   ```
+
+   0행이어야 한다. 417은 member 표 둘을 `SHARE`로 잠근 뒤 같은 것을 다시 잰다. 남아 있으면 실패하고, 아직 commit되지 않은 member
+   INSERT가 그 표에 `ROW EXCLUSIVE`를 쥐고 있으면 잠금을 5초 안에 얻지 못해 실패한다 — 그때 DB는 **416 그대로**다(A가 이미
+   commit됐다). 원인을 없애고 B를 다시 돌린다. 실패한 417 시도는 매번 최대 5초 `SHARE` 대기를 하고 entrypoint가 30번까지
+   재시도하므로, 그동안 member 쓰기를 하는 API·PinVi 요청이 잠깐씩 503을 받을 수 있다.
+3a. **큐 sensor를 멈추고 돌고 있는 Map run이 끝나기를 기다린다(417 창 동안).** 417이 도는 동안 새 run 시작은 실패하고(위
+   "대가"), 돌고 있는 Feature 쓰기가 있으면 417이 프로토콜 gate를 30초 안에 얻지 못해 실패한다. 공용 plane에서:
+
+   ```bash
+   docker exec kor-travel-dagster-daemon dagster sensor stop feature_update_request_queue_sensor \
+     -l kortravelmap.dagster.definitions -w /opt/dagster/dagster_home/workspace.yaml
+   ```
+
+   그리고 417 창에 schedule tick이 오지 않게 배포 시각을 고른다(켜진 Map schedule의 다음 tick을 Dagster UI에서 본다). tick을
+   피하지 못하면 그 run은 55P03으로 실패한다 — 받아들이고 417 뒤에 다시 실행해도 된다(적재는 멱등). 배포·확인(5단계)이 끝나면
+   같은 명령의 `sensor start`로 되돌린다.
+4. **배포**(Map API·Dagster code location 같은 pair): 417 실행. 한 트랜잭션, 프로시저 약 1.4만 회(수십 초~수 분). 그동안 **모든**
+   dataset의 새 job member 쓰기가 member 표 잠금에서 기다린다 — 새 Map run 시작은 55P03으로 실패하고(3a로 sensor를 멈춘 이유),
+   API·PinVi cache-target 요청은 약 5초 뒤 503을 받는다. 돌고 있던 적재는 그대로 끝난다. 한가한 시간에 한다. **A를 건너뛰었다면**(prod가 아직 409) 417이
+   같은 트랜잭션 거부로 결정적으로 실패하고, `docker/api-entrypoint.sh`가 `alembic upgrade head`를 30번 재시도한 뒤 API
+   컨테이너가 crash-loop한다(fail-closed — DB는 409 그대로, 410~416도 되돌아간다). 복구: 그 pair를 멈추고 A(head 416 pair)를 먼저
+   배포한 뒤 B를 다시 한다.
+5. **확인**: `SELECT count(*) FROM feature.feature_state_transitions WHERE reason_code = 'adr114_transport_state_moved_to_valkey'` ≈
+   14,240, 대상 dataset enabled operation 0, `/v1/features/in-bounds?kinds=price`에 transport 유가 없음, Valkey
+   `/v1/service/transport/status` 그대로, 다른 dataset 적재 정상. 그리고 **꺼진 대상 operation에 붙은 queued/running member는 0**이어야
+   한다(3단계 질의를 다시 돌린다 — 417 사후 조건이 같은 것을 재지만 배포 뒤 한 번 더 본다). 0이 아니면(설계상 생길 수 없다 — 생겼다면
+   잠금 우회 경로가 있다는 뜻이니 원인을 기록한다) 그 job은 활성 가드 때문에 스스로 종결로 가지 못한다: 정리는 admin 파이프라인
+   취소 경로(`/ops/pipeline` 요청 취소)로 하고, 그것도 막히면 member 행을 건드리지 말고 그 job id를 남겨 사람이 판단한다
+   (operation을 잠시 다시 켜 종결시키는 것은 새 revision 없이 하지 않는다).
+6. **남는 Dagster 상태**: 지운 schedule 셋의 instigator state 행은 공용 Dagster storage에 "로드할 수 없는 schedule"로 남는다 —
+   해롭지 않다(tick을 만들지 않는다). UI에서 정리하거나 그대로 둔다.
+7. **되돌리기**: 데이터는 지우지 않았다. 개별 Feature는 admin 재활성화(`reactivation_evidence` 필요 — override 때문에 provider
+   재적재로는 켜지지 않는다), 일괄은 새 revision. 코드는 revert + operation 재활성 revision. transport 자체의 이력(transport
+   저장소)은 무관하다. 갱신 정책은 ③에서 dataset과 함께 정리한다.
+8. API 표면 변화 없음(OpenAPI 재생성 없음, PinVi 재vendor 불필요). PinVi 일반 지도에서 transport 유가·돌발 중복 마커가 사라진다
+   (교통 레이어는 그대로).
+
 ## 열린 결정
 
 - weather 범위는 "구현 설계 — 2단계" W1이 정했다(W1~W5 export 전부, W4 status 제외). W3 증분(`since`)·ETag 사용은 비용이
   드러나면 따로 정한다.
-- 기존 PG transport feature 퇴역 시점과 방법
+- PG transport 퇴역 ②·③단계의 시점(위 "결정 7 이행"의 해제 조건)
 - 결정 6의 VWorld 블록이 export에 실릴 때 bjd를 값 주소에 넣는 일(id는 D1대로 바뀌지 않는다)

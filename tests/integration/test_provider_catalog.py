@@ -846,6 +846,8 @@ async def test_head_serves_no_weather_dataset(
     assert not [b for b in bindings if (b.provider, b.dataset_key) in targets]
 
 
+_TRANSPORT_PLACE_KIND = FeatureKind.PLACE.value
+
 #: ADR-106(migration 404)이 kor-travel-transport로 옮긴 옛 dataset.
 _TRANSPORT_RETIRED_DATASETS = frozenset(
     {
@@ -889,7 +891,43 @@ async def test_head_retires_every_operation_of_the_transport_moved_datasets(
     for entry in moved:
         kinds = {op.operation_kind for op in entry.operations if op.is_enabled}
         assert entry.is_active, entry.dataset_key
-        assert {"refresh", "preview"} <= kinds, (entry.dataset_key, kinds)
+        if _TRANSPORT_PLACE_KIND in entry.produces:
+            assert {"refresh", "preview"} <= kinds, (entry.dataset_key, kinds)
+        else:
+            # ADR-114 결정 7(migration 417): 유가·돌발 PG 적재는 operation이 전부 꺼졌다.
+            assert kinds == set(), (entry.dataset_key, kinds)
+
+
+async def test_head_serves_no_pg_transport_price_or_notice_load(
+    seed_session: AsyncSession,
+) -> None:
+    """head 카탈로그가 transport 유가·돌발 PG 적재를 실행 가능하다고 말하지 않는다(417).
+
+    정체성은 이름이 아니라 provider와 capability다(``produces``에 price·notice). 하한은 본 것에
+    건다 — 대상 dataset 셋이 시드에 보이고 각자 operation 행을 가져야 이 검사가 무언가를 잰다.
+    dataset은 활성으로 남는다(401과 같은 1단계, 물리 삭제는 다음 단계).
+    """
+
+    targets = [
+        entry
+        for entry in await list_provider_dataset_catalog(seed_session)
+        if entry.provider == "kor-travel-transport"
+        and ({FeatureKind.PRICE.value, FeatureKind.NOTICE.value} & set(entry.produces))
+    ]
+    assert len(targets) == 3, [(e.provider, e.dataset_key) for e in targets]
+    assert all(entry.operations for entry in targets)
+    enabled = sorted(
+        f"{entry.dataset_key}:{operation.operation_key}:{operation.operation_kind}"
+        for entry in targets
+        for operation in entry.operations
+        if operation.is_enabled
+    )
+    assert enabled == [], enabled
+    assert not any(entry.is_refreshable for entry in targets)
+    assert all(entry.is_active for entry in targets)
+    keys = {(entry.provider, entry.dataset_key) for entry in targets}
+    bindings = await list_active_refresh_operation_bindings(seed_session)
+    assert not [b for b in bindings if (b.provider, b.dataset_key) in keys]
 
 
 async def test_non_dagster_operation_allowlist_is_exactly_the_seed_difference(

@@ -2799,9 +2799,15 @@ ADR-114 2단계(weather). 브랜치 `feat/adr114-valkey-weather`. 설계·데이
 
 ## T-STATE-03
 
-- [ ] PinVi가 transport 데이터를 Map REST(`/v1/service/transport/*`)로만 읽는다(PinVi 저장소 PR).
+- [ ] PinVi가 transport 데이터를 Map REST(`/v1/service/transport/*`)로만 읽는다(PinVi 저장소 PR). 2026-10-24: 교통 레이어는
+  충족, 일반 in-bounds 기본 kind(`price`·`notice`)·장소 검색·근처는 아직 PG transport를 받는다 — ②의 해제 조건.
 - [ ] PG transport 적재 job·schedule과 기존 feature의 퇴역 방법(soft-delete·dataset 비활성)을 ADR-114에 적고, seal
-  대조가 깨지지 않는 순서로 실행했다(ADR-114 기각 대안의 두 함정).
+  대조가 깨지지 않는 순서로 실행했다(ADR-114 기각 대안의 두 함정). 2026-10-24 방법은 ADR-114 "결정 7 이행"에 적었다.
+- [ ] ① 코드 PR 머지(유가·돌발 asset 제거, migration 417 통합 검사 — 퇴역·보존·preflight 둘, CI 4세션 초록) → 배포 전
+  schedule 셋 정지·큐 비우기 → pair 배포 → 전이 수(약 1.4만)·대상 operation 0·in-bounds price 없음을 journal에 적는다.
+- [ ] ② 장소 셋 퇴역: PinVi in-bounds 기본 kind에서 transport 중복 제거·장소 이름 검색 대체 결정, C7 안전 schedule·갱신
+  요청 대상을 공항 job 밖으로 옮긴 뒤.
+- [ ] ③ 물리 삭제(402 모양, dataset 비활성, 남은 PG 변환·notice 계보 돌발 분기 정리): ② 배포 뒤 관찰 1주 이상·소유자 확인.
 
 ## T-GEOLOAD-00
 

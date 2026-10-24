@@ -57,7 +57,6 @@ FEATURE_LOAD_JOB_OPERATION_KEYS: frozenset[str] = frozenset(
         "feature_event_visitkorea_enrichment_job",
         "feature_geometry_knps_records_job",
         "feature_notice_krforest_landslide_forecast_issues_job",
-        "feature_notice_transport_highway_incidents_job",
         "feature_place_datagokr_ansan_world_restaurants_job",
         "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
         "feature_place_datagokr_jeju_local_restaurants_job",
@@ -77,8 +76,6 @@ FEATURE_LOAD_JOB_OPERATION_KEYS: frozenset[str] = frozenset(
         "feature_place_transport_airports_job",
         "feature_place_transport_fuel_stations_job",
         "feature_place_transport_rest_areas_job",
-        "feature_price_transport_fuel_stations_job",
-        "feature_price_transport_rest_areas_job",
         "feature_route_krforest_dulle_trails_job",
         "feature_route_krforest_mountain_trails_job",
     }
