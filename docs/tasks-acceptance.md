@@ -2780,7 +2780,7 @@ ADR-114 2단계(weather). 브랜치 `feat/adr114-valkey-weather`. 설계·데이
   `/v1/service/weather/*` 5 route·OpenAPI·admin TS 타입 재생성, 통합 검사(실제 Valkey 적재 op → REST 왕복·급감 거부),
   CI 4세션 초록.
 - [ ] Manager: Map Dagster code-server에 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL`(기본
-  `http://192.168.1.13:12201`)과 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(= `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`) env가
+  `http://<prod-host-ip>:12201`)과 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(= `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`) env가
   배포됐다(API는 불필요). Manager `.env.example`·`test_consumer_origin_defaults.py`·`test_docker_service_config.py` 동반.
 - [ ] PinVi admin·service 스냅샷 재vendor — #1365와 이 PR이 둘 다 머지된 Map commit에서 **한 번**(1단계 대기분 포함),
   그 뒤 Manager pair 핀(ADR-114 W8 회전 순서).

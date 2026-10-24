@@ -515,13 +515,13 @@ schedule을 켠 뒤 journal에 적는다.
 ### W8. 운영 값
 
 - env(Dagster code-server만 — API는 weather를 부르지 않는다): `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL`(odroid
-  weather API, 기본 `http://192.168.1.13:12201`), `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(비밀 — weather
+  weather API, 기본 `http://<prod-host-ip>:12201`), `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN`(비밀 — weather
   `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`과 같은 값), 선택 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_AUTH_HEADER`(기본 `X-Admin-Token`),
   `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_{TIMEOUT,CONNECT_TIMEOUT}_SECONDS`(기본 60·4), `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_PAGE_SIZE`
   (기본 2,000, ≤ 5,000), `KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS`(기본 14, 1~31 — 결정 1의 "소유자가 바꿀 수 있는 보관
   기간"). Map API는 Valkey URL만 있으면 된다(1단계에서 이미 받는다).
 - **Manager 변경(이 PR 밖, 정확히)**: Map Dagster code-server 서비스 environment에
-  `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL:-http://192.168.1.13:12201}`와
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL: ${KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_BASE_URL:-http://<prod-host-ip>:12201}`와
   `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_SERVICE_TOKEN: ${KOR_TRAVEL_WEATHER_ADMIN_TOKEN:?…}`(같은 `.env` 값 재사용)를 더하고,
   Manager `.env.example`과 계약 검사 `backend/tests/test_consumer_origin_defaults.py`(consumer origin 기본값 표)·
   `backend/tests/test_docker_service_config.py`(서비스별 env 렌더 대조)를 함께 고친다. Map API 서비스에는 넣지 않는다.
