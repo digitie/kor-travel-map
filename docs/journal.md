@@ -1,3 +1,11 @@
+## 2026-10-24 — 수집 CI 선행 Next 보안 게이트 복구
+
+- Next 및 직접 ESLint 플러그인을 최소 수정 버전 16.4.1로 pin했다. npm12 배포
+  audit의 critical 1건이 0건으로 줄었다. 기존 dev moderate2/high6은 변경하지 않았다.
+- 기존 정본 OpenAPI와 생성물 drift를 공식 기존 generator로 정합화했다. admin395/marker4
+  단위·타입·lint·실제Sharp변환·production build PASS. 독립 리뷰/CI는 진행 중이며 운영 변경은 없다.
+  상세: [검증 기록](reports/2026-10-24-next-security-gate.md).
+
 ## 2026-10-24 — 멈춤 진단 오탐 정정: 브랜치 `fix/stall-watchdog-progress`
 
 - #1357 배포 뒤 MCST run `c0f91a7c` **성공**(12:04Z 시작, 9,634초): geo 호출 36,905건(reverse 35,852·region 1,053),

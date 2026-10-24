@@ -62,8 +62,12 @@ assert.equal(
   "설치된 Sharp가 선언된 핀과 다릅니다.",
 );
 
-const { getImageSize, optimizeImage } = require(
-  "next/dist/server/image-optimizer.js",
+// Next 16.4는 보안 수정과 함께 변환/크기 검사를 별도 모듈로 분리했다.
+const { optimizeImage } = require(
+  "next/dist/server/image-optimizer/transform.js",
+);
+const { getImageSize } = require(
+  "next/dist/server/image-optimizer/get-image-size.js",
 );
 const source = Buffer.from(
   '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1">' +
