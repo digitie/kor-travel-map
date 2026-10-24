@@ -10,15 +10,11 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
-from dataclasses import fields, is_dataclass
-from datetime import date, datetime, time, timedelta, timezone
-from decimal import Decimal
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
-from kortravelmap.core.ids import make_payload_hash, make_source_record_key
-from kortravelmap.dto import SourceRecord
 from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
 from kortravelmap.geocoding import GeoCallStats, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
@@ -29,7 +25,6 @@ from kortravelmap.infra.feature_repo import (
 from kortravelmap.infra.integrity_violation_repo import (
     IntegrityObservationReceipt as DurableIntegrityObservationReceipt,
 )
-from kortravelmap.infra.price_repo import PriceFeatureLoadResult
 from kortravelmap.providers.datagokr_file_data import (
     DATAGOKR_FILEDATA_PROVIDER_NAME,
     file_data_rows_to_bundles,
@@ -60,20 +55,13 @@ from kortravelmap.providers.kor_travel_concierge import (
 )
 from kortravelmap.providers.kor_travel_transport import (
     DATASET_KEY_AIRPORTS,
-    DATASET_KEY_FUEL_PRICES,
     DATASET_KEY_FUEL_STATIONS,
-    DATASET_KEY_HIGHWAY_INCIDENTS,
-    DATASET_KEY_REST_AREA_FUEL_PRICES,
     DATASET_KEY_REST_AREAS,
     KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
 )
 from kortravelmap.providers.krairport import airports_to_bundles
 from kortravelmap.providers.krex import (
-    REST_AREA_SOURCE_ENTITY_TYPE,
-    rest_area_fuel_price_records_to_features_and_values,
-    rest_area_place_locator_from_rows,
     rest_areas_to_bundles,
-    traffic_notices_to_bundles,
 )
 from kortravelmap.providers.krforest import (
     DATASET_KEY_ARBORETUMS as KRFOREST_ARBORETUMS_DATASET_KEY,
@@ -121,9 +109,6 @@ from kortravelmap.providers.mois import (
     PROVIDER_NAME as MOIS_PROVIDER_NAME,
 )
 from kortravelmap.providers.opinet import (
-    OPINET_STATION_SOURCE_ENTITY_TYPE,
-    fuel_station_place_locator_from_rows,
-    station_prices_to_features_and_values,
     stations_to_bundles,
 )
 from kortravelmap.providers.standard_data import (
@@ -189,8 +174,6 @@ pool 이름공간과 ``concurrency.pools.default_limit``은 Dagster **instance �
 그래서 Map pool은 전부 이 접두사로 시작한다(tag key ``kor_travel_map.*``와 같은 규칙).
 """
 
-HIGHWAY_INCIDENT_SNAPSHOT_POOL: Final[str] = f"{MAP_POOL_PREFIX}highway_incident_snapshot"
-"""고속도로 돌발 notice 활성 집합의 load/reconcile 순서를 직렬화하는 Dagster pool."""
 
 GEO_HEAVY_POOL: Final[str] = f"{MAP_POOL_PREFIX}kor_travel_geo"
 """역지오코딩을 대량으로 하는 적재 asset을 인스턴스 전체에서 직렬화하는 pool.
@@ -217,7 +200,7 @@ run 둘이 겹치면 그 CPU를 나눠 다른 소비자의 지연이 커진다. 
 
 `docker/dagster.yaml`의 `concurrency.pools`가 `default_limit: 1`,
 `granularity: run`이므로 **이 이름을 선언하는 것만으로** 인스턴스 전역에서 한
-번에 하나만 돈다(`HIGHWAY_INCIDENT_SNAPSHOT_POOL`과 같은 기제).
+번에 하나만 돈다.
 
 **무엇이 여기 들어오고 무엇이 빠지는가는 유도한다.** 대상은
 `reverse_geocoder=`를 넘기는 asset 중 schedule spec에 `max_runtime_seconds`가
@@ -234,114 +217,12 @@ geo를 쓰면서도 이 이유로 빠져 있었다 — 2026-10-01 ADR-105로 ass
 별도로 `provider_rate_gate`가 있다.
 """
 
-HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK: Final[str] = (
-    f"provider-run:{KOR_TRAVEL_TRANSPORT_PROVIDER_NAME}:{DATASET_KEY_HIGHWAY_INCIDENTS}"
-)
-"""고속도로 돌발 fetch→reconcile을 모든 실행 경로에서 직렬화하는 DB lock key."""
 
 MOIS_RECORD_BATCH_SIZE: Final[int] = 1000
 """MOIS bulk record를 FeatureBundle로 변환하기 전에 끊어 읽는 record batch 크기."""
 
 _KST = timezone(timedelta(hours=9))
 _MISSING: Final = object()
-
-
-def _response_payload_value(value: Any) -> Any:
-    """provider raw response를 source-record JSON 값으로 좁혀 보존한다.
-
-    ``make_payload_hash``의 canonical 값 규칙은 이미 저장된 source record의 hash
-    약속이므로 넓히지 않는다. 대신 Dagster ingress에서 provider dataclass가 가진
-    시간·금액 scalar를 명시적으로 JSON 값으로 바꾼다.
-    """
-
-    if value is None or isinstance(value, str | int | float | bool):
-        return value
-    if isinstance(value, datetime | date | time):
-        return value.isoformat()
-    if isinstance(value, Decimal):
-        return str(value)
-    # provider dataclass는 ``raw``를 MappingProxyType 등 불변 map으로 들고 올 수 있다.
-    # ``dataclasses.asdict`` deep-copies those maps and fails before ingress can
-    # canonicalize them.  Walk dataclass fields directly, preserving the same
-    # visible field payload without requiring values to be pickleable.
-    if is_dataclass(value) and not isinstance(value, type):
-        return {
-            field.name: _response_payload_value(getattr(value, field.name))
-            for field in fields(value)
-        }
-    if isinstance(value, Mapping):
-        normalized: dict[str, Any] = {}
-        for key, item in value.items():
-            if not isinstance(key, str):
-                raise TypeError(
-                    "provider response payload dict key must be str "
-                    f"(got {type(key).__name__}: {key!r})"
-                )
-            normalized[key] = _response_payload_value(item)
-        return normalized
-    if isinstance(value, list | tuple):
-        return [_response_payload_value(item) for item in value]
-    raise TypeError(
-        "provider response payload must be JSON-preservable "
-        f"(got {type(value).__name__}: {value!r})"
-    )
-
-
-def _response_payload_item(item: Any) -> dict[str, Any]:
-    """provider response item을 source record에 보존할 canonical JSON object로 만든다."""
-
-    if is_dataclass(item) and not isinstance(item, type):
-        return cast(dict[str, Any], _response_payload_value(item))
-    raw = getattr(item, "raw", None)
-    if isinstance(raw, Mapping):
-        return cast(dict[str, Any], _response_payload_value(raw))
-    model_dump = getattr(item, "model_dump", None)
-    if callable(model_dump):
-        dumped = model_dump(mode="json")
-        if isinstance(dumped, dict):
-            return cast(dict[str, Any], _response_payload_value(dumped))
-    if isinstance(item, dict):
-        return cast(dict[str, Any], _response_payload_value(item))
-    raise TypeError(f"provider response item cannot be preserved as JSON: {type(item).__name__}")
-
-
-def _value_response_source_record(
-    *,
-    provider: str,
-    dataset_key: str,
-    source_entity_type: str,
-    source_entity_id: str,
-    records: Sequence[Any],
-    fetched_at: datetime,
-) -> SourceRecord:
-    """value producer dataset이 소유하는 immutable response source record를 만든다.
-
-    날씨 grid/station Feature의 source entity와 value를 만든 provider response는
-    서로 다를 수 있다. 따라서 response 자체를 producer dataset에 귀속한 별도
-    source entity로 보존하고, fact는 이 record만 lineage로 참조한다.
-    """
-
-    raw_data = {
-        "source_entity_id": source_entity_id,
-        "records": [_response_payload_item(record) for record in records],
-    }
-    payload_hash = make_payload_hash(raw_data)
-    return SourceRecord(
-        provider=provider,
-        dataset_key=dataset_key,
-        source_entity_type=source_entity_type,
-        source_entity_id=source_entity_id,
-        raw_payload_hash=payload_hash,
-        raw_data=raw_data,
-        fetched_at=fetched_at,
-        source_record_key=make_source_record_key(
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type=source_entity_type,
-            source_entity_id=source_entity_id,
-            raw_payload_hash=payload_hash,
-        ),
-    )
 
 
 _COMMON_RESOURCE_KEYS: Final[set[str]] = {
@@ -433,97 +314,6 @@ async def feature_place_transport_fuel_stations(
     return await run_tracked_feature_asset(context, run_feature_place_transport_fuel_stations)
 
 
-async def run_feature_price_transport_fuel_stations(
-    context: AssetExecutionContext,
-) -> PriceFeatureLoadResult:
-    """오피넷 주유소 유종별 최신 가격(transport export)을 price Feature + PriceValue로 적재한다.
-
-    주유소 place를 다시 만들거나 역지오코딩하지 않는다(ADR-106 리뷰 M5) — 그것은 주간 place
-    job의 몫이고 geo-heavy pool 아래서 돈다. 가격 feature의 부모는 이미 적재된 place의
-    locator로 찾고, 좌표는 transport가 넘긴 WGS84를 그대로 쓴다. export가 0건·낡음이면 fetcher가
-    먼저 실패한다(``TransportExportEmpty``/``TransportExportNotCurrent``).
-    """
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    records = await _record_list(context, "transport_fuel_stations")
-    fetched_at = await _fetched_at(context)
-    locator_rows = await client.list_primary_place_locator(
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_FUEL_STATIONS,
-        source_entity_type=OPINET_STATION_SOURCE_ENTITY_TYPE,
-    )
-    bundles, values = station_prices_to_features_and_values(
-        records,
-        fetched_at=fetched_at,
-        place_locator=fuel_station_place_locator_from_rows(locator_rows),
-    )
-    if not values:
-        # 주유소는 있는데 판매가가 하나도 없으면 원천 drift다 — 성공으로 기록하지 않는다.
-        raise RuntimeError(
-            "kor-travel-transport 주유소 export에서 PriceValue를 0건 변환했다. "
-            "transport 최신 유가와 export 계약을 확인하라."
-        )
-    latest_observed_at = max(value.observed_at for value in values).astimezone(_KST)
-    membership = await _exact_sync_membership(
-        context,
-        client,
-        boundary="transport_fuel_price_value_write",
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_FUEL_PRICES,
-    )
-    result = await client.load_price_features(
-        bundles,
-        values,
-        provider_dataset_id=membership.provider_dataset_id,
-        source_record=_value_response_source_record(
-            provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-            dataset_key=DATASET_KEY_FUEL_PRICES,
-            source_entity_type="price_response",
-            source_entity_id=f"run:{fetched_at.isoformat()}",
-            records=[
-                {"uni_id": record.uni_id, "prices": [dict(row.raw) for row in record.prices]}
-                for record in records
-            ],
-            fetched_at=fetched_at,
-        ),
-    )
-    load_metadata = {
-        **result.as_metadata(),
-        "records_fetched": len(records),
-        "latest_observed_at": latest_observed_at.isoformat(),
-    }
-    _add_output_metadata(
-        context,
-        {
-            "provider": KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_FUEL_PRICES,
-            **load_metadata,
-        },
-    )
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_FUEL_PRICES,
-        cursor_extra=load_metadata,
-    )
-    return result
-
-
-@asset(
-    group_name="features_price",
-    # price feature의 parent_feature_id는 주유소 place feature를 가리킨다 → place asset을
-    # 상류 의존(deps)으로 선언해 계보·backfill 순서를 보장한다. 런타임에는 이미 적재된 place만
-    # locator로 부모 삼는다(place가 없는 새 주유소는 부모 없이 적재되고 다음 실행에 붙는다).
-    deps=[feature_place_transport_fuel_stations],
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"transport_fuel_stations"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-)
-async def feature_price_transport_fuel_stations(
-    context: AssetExecutionContext,
-) -> PriceFeatureLoadResult:
-    return await run_tracked_feature_asset(context, run_feature_price_transport_fuel_stations)
-
-
 async def run_feature_place_transport_rest_areas(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -557,285 +347,6 @@ async def feature_place_transport_rest_areas(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     return await run_tracked_feature_asset(context, run_feature_place_transport_rest_areas)
-
-
-async def run_feature_price_transport_rest_areas(
-    context: AssetExecutionContext,
-) -> PriceFeatureLoadResult:
-    """휴게소 주유소 현재 유가(transport export)를 price Feature + PriceValue로 적재한다.
-
-    #547 — 유가 row에는 lon/lat가 없어 이미 적재된 휴게소 place feature의 자연키→좌표 locator로
-    좌표·``parent_feature_id``를 상속한다(geocoding 미경유). place가 아직 없으면 유가는
-    coordless로 적재되고 다음 실행에서 회복된다.
-    """
-    records = await _record_list(context, "transport_rest_area_fuel_prices")
-    fetched_at = await _fetched_at(context)
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    locator_rows = await client.list_primary_place_locator(
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_REST_AREAS,
-        source_entity_type=REST_AREA_SOURCE_ENTITY_TYPE,
-    )
-    place_locator = rest_area_place_locator_from_rows(locator_rows)
-    bundles, values = rest_area_fuel_price_records_to_features_and_values(
-        records,
-        fetched_at=fetched_at,
-        place_locator=place_locator,
-    )
-    membership = await _exact_sync_membership(
-        context,
-        client,
-        boundary="transport_rest_area_price_value_write",
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_REST_AREA_FUEL_PRICES,
-    )
-    result = await client.load_price_features(
-        bundles,
-        values,
-        provider_dataset_id=membership.provider_dataset_id,
-        source_record=_value_response_source_record(
-            provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-            dataset_key=DATASET_KEY_REST_AREA_FUEL_PRICES,
-            source_entity_type="price_response",
-            source_entity_id=f"run:{fetched_at.isoformat()}",
-            records=[dict(record.raw) for record in records],
-            fetched_at=fetched_at,
-        ),
-    )
-    _add_output_metadata(
-        context,
-        {
-            "provider": KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-            "dataset_key": DATASET_KEY_REST_AREA_FUEL_PRICES,
-            **result.as_metadata(),
-        },
-    )
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_REST_AREA_FUEL_PRICES,
-        cursor_extra=result.as_metadata(),
-    )
-    return result
-
-
-@asset(
-    group_name="features_price",
-    # 유가 price feature는 휴게소 place feature를 parent로 삼고 place 좌표를 locator로 상속한다.
-    deps=[feature_place_transport_rest_areas],
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"transport_rest_area_fuel_prices"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-)
-async def feature_price_transport_rest_areas(
-    context: AssetExecutionContext,
-) -> PriceFeatureLoadResult:
-    return await run_tracked_feature_asset(context, run_feature_price_transport_rest_areas)
-
-
-async def run_feature_notice_transport_highway_incidents(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    """고속도로 돌발 활성 집합을 provider 전역 DB lock 안에서 반영한다."""
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    async with client.provider_run_lock(HIGHWAY_INCIDENT_PROVIDER_RUN_LOCK):
-        return await _run_feature_notice_transport_highway_incidents_locked(context, client)
-
-
-async def _run_feature_notice_transport_highway_incidents_locked(
-    context: AssetExecutionContext,
-    client: "AsyncKorTravelMapClient",
-) -> DagsterFeatureLoadResult:
-    """고속도로 돌발을 notice Feature로 적재하고 활성 집합에 없는 계보를 닫는다.
-
-    transport export는 **마지막 성공 수집이 본 사건 전체**다(transport ADR-013). 수집이 실패했거나
-    30분 넘게 성공하지 못했으면 transport가 503을 내고 fetcher가 실패한다 — 그때는 아무것도
-    닫지 않는다. 적재 직후 reconcile(#632): 같은 계보의 중복 feature를 soft-delete하고, 이번
-    집합에 없는 계보의 latest feature는 ``valid_end_time=fetched_at``으로 닫는다. 다시 나타난
-    계보는 이전 종료 시각을 지워 active로 복구한다.
-    """
-    fetched_at = await _fetched_at(context)
-    await _guard_notice_snapshot_watermark(
-        context,
-        client,
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_HIGHWAY_INCIDENTS,
-        source_entity_type="traffic_notice",
-        fetched_at=fetched_at,
-    )
-    records = await _record_list(context, "transport_highway_incidents")
-    bundles = await traffic_notices_to_bundles(
-        records,
-        fetched_at=fetched_at,
-        # 10분 freshness 경로에서 row별 reverse geocoding을 수행하면 snapshot 반영보다 주소
-        # 보강이 더 오래 걸린다. 원천 좌표는 converter가 Feature.coord/SourceRecord에 보존한다.
-        reverse_geocoder=None,
-    )
-    active_lineage_keys = {
-        bundle.source_record.source_entity_id for bundle in bundles
-    }
-    reconciled: Any | None = None
-
-    async def load_snapshot_atomically(
-        validated_bundles: Sequence[Any],
-        _geo: GeoLoadContext | None,
-    ) -> FeatureLoadResult:
-        # notice 활성 집합은 geo를 쓰지 않는다(geo_applied 전부 False) — 스탬프 대상이 아니다.
-        nonlocal reconciled
-        atomic_load = getattr(client, "load_authoritative_notice_snapshot", None)
-        if not callable(atomic_load):
-            raise RuntimeError(
-                "고속도로 돌발 snapshot은 atomic snapshot load client가 필요하다."
-            )
-        outcome = cast(
-            "NoticeFeatureLoadResult",
-            await atomic_load(
-                bundles=validated_bundles,
-                provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-                dataset_key=DATASET_KEY_HIGHWAY_INCIDENTS,
-                source_entity_type="traffic_notice",
-                active_lineage_keys=active_lineage_keys,
-                observed_at=fetched_at,
-            ),
-        )
-        reconciled = outcome.reconcile
-        return outcome.load
-
-    result = await _load(
-        context,
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_HIGHWAY_INCIDENTS,
-        bundles=bundles,
-        authoritative_snapshot_complete=True,
-        record_sync_state=False,
-        load_all=load_snapshot_atomically,
-        geo_applied=GeoApplied(reverse=False, geocode=False),
-    )
-    if reconciled is None:
-        raise RuntimeError("고속도로 돌발 atomic load가 reconcile 결과를 반환하지 않았다.")
-    if reconciled.superseded or reconciled.closed or reconciled.reopened:
-        context.log.info(
-            "고속도로 돌발 reconcile — 중복 soft-delete %d건, 집합 소멸 닫음 %d건, "
-            "재등장 복구 %d건.",
-            reconciled.superseded,
-            reconciled.closed,
-            reconciled.reopened,
-        )
-    # load 성공만으로 sync cursor를 전진시키지 않는다. reconcile까지 성공한 뒤에만
-    # snapshot 전체 처리를 성공으로 기록한다.
-    await _record_feature_sync_success(
-        context,
-        client,
-        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_HIGHWAY_INCIDENTS,
-        cursor_extra={
-            **_feature_result_cursor_extra(result),
-            "notices_superseded": reconciled.superseded,
-            "notices_closed": reconciled.closed,
-            "notices_reopened": reconciled.reopened,
-            "snapshot_applied_at": fetched_at.isoformat(),
-        },
-        observation_receipt=result.observation_receipt,
-    )
-    return result
-
-
-async def _guard_notice_snapshot_watermark(
-    context: AssetExecutionContext,
-    client: "AsyncKorTravelMapClient",
-    *,
-    provider: str,
-    dataset_key: str,
-    source_entity_type: str,
-    fetched_at: datetime,
-) -> None:
-    """이미 반영한 snapshot보다 과거인 run의 destructive reconcile을 막는다.
-
-    Dagster pool이 정상 경로를 직렬화하지만, 배포 이전 queued run이나 pool 설정이
-    반영되지 않은 실행까지 방어하도록 persisted sync cursor를 watermark로 쓴다.
-    """
-    get_sync_state = getattr(client, "get_sync_state_for_operation_membership", None)
-    if not callable(get_sync_state):
-        raise RuntimeError(
-            "notice snapshot은 get_sync_state_for_operation_membership을 "
-            "제공하는 client가 필요하다."
-        )
-    if not callable(
-        getattr(client, "record_sync_success_for_operation_membership", None)
-    ):
-        raise RuntimeError(
-            "notice snapshot은 record_sync_success_for_operation_membership을 "
-            "제공하는 client가 필요하다."
-        )
-    watermarks: list[datetime] = []
-    get_scope_watermark = getattr(client, "get_notice_snapshot_watermark", None)
-    if callable(get_scope_watermark):
-        scope_watermark = await get_scope_watermark(
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type=source_entity_type,
-        )
-        if scope_watermark is not None:
-            if (
-                scope_watermark.tzinfo is None
-                or scope_watermark.utcoffset() is None
-            ):
-                raise RuntimeError("notice scope watermark는 timezone-aware datetime이어야 한다.")
-            watermarks.append(scope_watermark)
-
-    membership = await _exact_sync_membership(
-        context,
-        client,
-        boundary="notice_snapshot_watermark",
-        provider=provider,
-        dataset_key=dataset_key,
-    )
-    state = await get_sync_state(membership=membership)
-    if state is not None:
-        cursor = getattr(state, "cursor", None)
-        if not isinstance(cursor, dict):
-            raise RuntimeError("notice snapshot sync cursor가 object가 아니다.")
-        raw_watermark = cursor.get("snapshot_applied_at") or cursor.get("loaded_at")
-        if raw_watermark is not None:
-            watermarks.append(_parse_snapshot_watermark(raw_watermark))
-    if not watermarks:
-        return
-    watermark = max(watermarks)
-    if fetched_at.tzinfo is None or fetched_at.utcoffset() is None:
-        raise RuntimeError("notice snapshot fetched_at은 timezone-aware datetime이어야 한다.")
-    # 동일 watermark는 core의 fingerprint CAS가 exact replay인지 충돌인지
-    # 판정한다. 여기서 막으면 누락된 member state를 replay로 self-heal할 수 없다.
-    if fetched_at < watermark:
-        raise RuntimeError(
-            "notice snapshot이 이미 반영한 watermark보다 과거다: "
-            f"fetched_at={fetched_at.isoformat()}, watermark={watermark.isoformat()}"
-        )
-
-
-def _parse_snapshot_watermark(value: object) -> datetime:
-    if not isinstance(value, str) or not value.strip():
-        raise RuntimeError("notice snapshot watermark가 비어 있거나 문자열이 아니다.")
-    try:
-        parsed = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-    except ValueError as exc:
-        raise RuntimeError("notice snapshot watermark가 ISO-8601 datetime이 아니다.") from exc
-    if parsed.tzinfo is None or parsed.utcoffset() is None:
-        raise RuntimeError("notice snapshot watermark는 timezone-aware datetime이어야 한다.")
-    return parsed
-
-
-@asset(
-    group_name="features_notice",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"transport_highway_incidents"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-    pool=HIGHWAY_INCIDENT_SNAPSHOT_POOL,
-)
-async def feature_notice_transport_highway_incidents(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    return await run_tracked_feature_asset(
-        context, run_feature_notice_transport_highway_incidents
-    )
 
 
 async def run_feature_place_krheritage_items(
@@ -1751,10 +1262,7 @@ async def feature_event_visitkorea_enrichment(
 FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_transport_fuel_stations,
-    feature_price_transport_fuel_stations,
     feature_place_transport_rest_areas,
-    feature_price_transport_rest_areas,
-    feature_notice_transport_highway_incidents,
     feature_place_krheritage_items,
     feature_event_krheritage_events,
     feature_place_mois_licenses,
