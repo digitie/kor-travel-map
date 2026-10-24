@@ -1,3 +1,13 @@
+## 2026-10-24 — ADR-114 결정 7 퇴역 1단계(T-STATE-03): 브랜치 `feat/adr114-retire-pg-transport`
+
+- PG transport **유가·돌발** 적재(asset·job·schedule 셋, 큐 runner spec·handler binding·preview fixture)를 지우고 migration
+  `411_retire_pg_transport_prices_incidents`가 그 operation을 끄고 Feature 약 1.4만 건을 `system` 퇴역한다(soft-delete,
+  데이터는 남김). 장소(주유소·휴게소·공항)는 PinVi 일반 검색·근처와 C7 공항 job이 기대므로 ②단계로 미뤘다. API 표면 변화
+  없음. 배포 영향: Map API·Dagster code location(같은 pair) + migration 411.
+- **다음 한 작업: 소유자 적대 리뷰 → CI green → 머지 판단 → 배포 전 유가·돌발 schedule 셋 정지·큐 비우기 → pair 배포(411)
+  → 전이 수·in-bounds 확인(ADR-114 "①의 운영 runbook"). 그 뒤 ②의 해제 조건(PinVi in-bounds 기본 kind·장소 검색 대체, C7
+  안전 대상 이동)을 PinVi·C7 쪽에 건다.**
+
 ## 2026-10-24 — ADR-114 2단계(T-STATE-02): 브랜치 `feat/adr114-valkey-weather`
 
 - weather W1·W2·W3·W5 export를 위치 단위 Valkey 세대로 싣는 Dagster job 7개(기본 STOPPED)와 `/v1/service/weather/*` 5

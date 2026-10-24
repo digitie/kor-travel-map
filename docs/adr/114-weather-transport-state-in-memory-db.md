@@ -1,7 +1,8 @@
 # ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다
 
 - 상태: proposed (소유자 결정 2026-10-23 — 방향 확정. 2026-10-23 1단계(transport) 구현 PR — 아래 "구현 설계 —
-  1단계". 2026-10-24 2단계(weather) 구현 PR — 아래 "구현 설계 — 2단계". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
+  1단계". 2026-10-24 2단계(weather) 구현 PR — 아래 "구현 설계 — 2단계". 2026-10-24 결정 7 퇴역 1단계(PG 유가·돌발) PR —
+  아래 "결정 7 이행 — PG transport 퇴역". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
 - 날짜: 2026-10-23
 - 결정자: 소유자(방향), Claude(문서)
 - 관계: **ADR-105를 부분 대체**(weather가 Map에 다시 들어온다 — 단 DB 스키마가 아니라 메모리 DB로), ADR-110(odroid
@@ -87,6 +88,9 @@
 
 - 지금 PG에 있는 transport 출처 feature(주유소·휴게소·유가·돌발·공항 dataset)는 Valkey 경로가 배포되면 퇴역한다.
   퇴역 방법과 시점은 이행 PR에서 정한다. 그 전까지는 현재 적재를 유지한다.
+- (2026-10-24) 방법·순서는 아래 "결정 7 이행 — PG transport 퇴역"이 정본이다. 소비자 확인 결과 장소(주유소·휴게소·
+  공항 place)는 아직 기대는 곳이 있어 세 단계로 나눴다: ① 유가·돌발 적재 종료 + Feature 퇴역(soft-delete, migration
+  411) → ② 장소 적재 종료 + 퇴역 → ③ 물리 삭제.
 
 ## 결과 — 잃는 것
 
@@ -557,9 +561,80 @@ ADR-105가 Map의 weather feature 적재·스키마·데이터를 이미 지웠�
 weather 적재가 **없다** — 결정 7(퇴역)은 transport에만 남는다. ADR-105의 재도입 방지 검사는 PG feature 경로(카탈로그
 weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지키고, 이 Valkey 표면만 위 W7대로 예외다.
 
+## 결정 7 이행 — PG transport 퇴역 (2026-10-24, T-STATE-03)
+
+### 소비자 확인 (2026-10-24, 읽기 전용 실측)
+
+- **prod Map DB**(alembic `409`): transport 출처 Feature 26,293건 — 주유소 place 11,820·주유소 유가 price 11,822·
+  휴게소 place 215·휴게소 유가 price 219·돌발 notice 2,202(그중 원천 종료 시각 없는 활성 320)·공항 place 15. 전부
+  `active`/`published`. 다른 provider와 병합된 것 0, curation item·theme 후보·override·merge 이력·POI cache 링크·
+  reference reconciliation event 0. 가격 fact 30,983·source record 37,483. 마지막 적재: 돌발 매 10분(그날 08:00Z),
+  휴게소 유가 10-22, 주유소 유가·장소 10-12, 공항 10-03.
+- **prod Valkey**: `/v1/service/transport/status` 다섯 데이터셋 모두 `loaded=true`·`stale=false`(주유소 11,833·
+  휴게소 215·휴게소 유가 226·돌발 330·공항 15).
+- **PinVi**(GitHub main `ff64b65`, 읽기 전용): 교통 레이어는 Map `/v1/service/transport/*`만 읽는다(ADR-076,
+  `transport_layers.py`). 그러나 **일반 지도·검색·근처**가 Map `/v1/features/{in-bounds,search,nearby}`를 부르고 in-bounds
+  기본 kind가 `place·event·notice·price`다(`api/v1/features.py::_DEFAULT_INBOUNDS_KINDS`) — PG transport Feature가 교통
+  레이어와 **중복으로** 그려지고, 공항·휴게소·주유소 이름 검색·근처는 PG place에서만 나온다(Valkey 표면에는 이름 검색이
+  없다). PinVi DB의 Map feature 참조(`trip_day_pois`·`curated_plan_pois`·`weather_location_links`·reference
+  reconciliation)는 **0행**이다(transport 출처만이 아니라 전체가 0).
+- **Map 내부**: C7 운영 게이트가 `feature_place_transport_airports_monthly_schedule`·`feature_place_transport_airports_job`
+  을 "외부 호출 0"의 안전한 schedule·갱신 요청 대상으로 고정한다(`scripts/run-c7-prod-live-e2e.sh`, `e2e/live/ops-c7-*`).
+  admin UI의 price 패널·마커는 price kind 일반 기능이다(남는다 — 정의).
+
+### 세 단계
+
+| 단계 | 무엇 | 해제 조건 |
+| --- | --- | --- |
+| ① (이 PR, migration `411_retire_pg_transport_prices_incidents`) | 유가 둘·돌발 하나의 PG 적재(asset·job·schedule·큐 runner spec·handler binding·preview fixture)를 지우고, 그 dataset의 operation을 종류 불문 끄고, 그 Feature를 퇴역한다 | Valkey 다섯 데이터셋 적재 중(충족) |
+| ② | 장소 셋(주유소·휴게소·공항)의 PG 적재 종료 + 퇴역 | PinVi가 일반 in-bounds 기본 kind에서 transport 중복을 빼고 장소 이름 검색 대체를 정함(또는 소유자가 손실을 받아들임), C7 안전 대상을 공항 job 밖으로 옮김 |
+| ③ | 물리 삭제(402와 같은 모양 — Feature·source lineage·가격 fact·notice 계보), dataset 비활성, 남은 PG 변환 코드(`providers/opinet.py`·`krex.py` 유가·돌발·`krairport.py`의 PG 경로)와 notice 계보 함수의 돌발 분기 정리 | ②가 배포되고 관찰 기간(1주 이상)에 되돌릴 일이 없었음, 소유자 확인(비가역) |
+
+①이 시간에 민감한 값부터 하는 이유: 적재를 멈추고 남겨 두면 **틀린 값**을 보여 준다 — 지도 API는 오래된 유가도 날짜와 함께
+그리고, 종료 시각 없는 돌발은 다음 적재가 닫아 주지 않으면 영원히 진행 중이다. 장소는 천천히 바뀌고 아직 소비자가 있다.
+
+### ①의 방법 — 무엇이 실행되는가
+
+- **퇴역 = soft-delete**: `feature.transition_feature_state`(감사·불변 trail의 정본 상태 전이)를 `transition_kind='system'`,
+  `reason_code='adr114_transport_state_moved_to_valkey'`, `principal='system/alembic-411_retire_pg_transport_prices_incidents'`,
+  `causation_ref='ADR-114 decision 7 phase 1'`로 부른다 → `lifecycle_state='retired'`·`publication_state='suppressed'`. 프로시저가
+  같은 전이에 lifecycle override(`prevent_provider_reactivation=true`)를 붙인다 — provider 부재가 아니라 결정이므로 provider
+  tombstone으로 위장하지 않고, 적재가 실수로 되살아나도 다시 켜지지 않는다. 프로시저는 advisory lock을 잡지 않는다(행 잠금만,
+  ADR-111 lock table 문제 없음).
+- **대상은 정체성으로**: provider `kor-travel-transport` + `capabilities.produces`에 price·notice인 dataset, 그 entity에 `primary`
+  link로 묶인 `active` Feature(prod 약 14,240건).
+- **남기는 것**: Feature 행·source lineage·가격 fact·notice 계보·alias·상태 전이 감사·카탈로그 행. **dataset은 활성으로 둔다**
+  (401과 같다 — 비활성은 물리 삭제 단계의 일이고, 활성 가드가 그때 DELETE까지 막는다).
+- **seal**(기각 대안의 첫 함정): 전이는 `current_provider_curation_input_set` 입력을 바꾼다. 진행 중인 대상 적재가 있으면 그 root가
+  `stale_input`으로 실패하므로 preflight가 queued/running job을 막는다. 이미 실패로 끝난 root의 미완 영수증(prod 돌발 3건)은 다시
+  대조되지 않는다. 두 번째 함정(runtime 역할의 증거 표 읽기)은 해당이 없다 — 퇴역은 migration 안에서 schema owner·state procedure
+  owner 창으로 한다.
+- **preflight**(하나라도 있으면 아무것도 바꾸지 않음): 대상 operation member의 queued/running job, 대상 밖 dataset에도 primary
+  출처가 있는 대상 Feature, 활성 lifecycle override가 있는 대상 Feature. **사후 조건**: 켜진 대상 operation 0, active 대상 Feature 0,
+  퇴역 전이 수 = preflight 대상 수.
+
+### ①의 운영 runbook
+
+1. 배포 전: Dagster에서 `feature_price_transport_fuel_stations_daily_schedule`·`feature_price_transport_rest_areas_twice_daily_schedule`·
+   `feature_notice_transport_highway_incidents_ten_minute_schedule`를 멈춘다(`dagster schedule stop …` 또는 UI). prod는 큐로도
+   돈다(`feature_update_request_queue_sensor` — PinVi cache-target 요청이 targeted run을 낸다). 옛 코드에서 큐까지 닫는 런타임
+   스위치는 없으므로(`DISABLED_FEATURE_LOAD_SCHEDULES`는 코드 상수다) admin `/ops/datasets`에서 그 세 dataset의 갱신 정책을
+   거부로 두거나, 큐가 비는 순간에 배포한다. 진행 중 run이 끝나기를 기다린다. 확인: `ops.import_jobs`에 그 dataset member의
+   queued/running이 0. migration preflight가 같은 것을 다시 잰다 — 남아 있으면 배포가 실패하고 DB는 410 그대로다(그 뒤 다시 배포).
+2. 배포(Map API·Dagster code location 같은 pair): 마이그레이션 전진이 411을 실행한다. 한 트랜잭션 — 전부 되거나 전부 안 된다. 예상
+   소요는 퇴역 약 1.4만 건의 프로시저 호출(수십 초~수 분, 행 잠금만).
+3. 확인: `SELECT reason_code, count(*) FROM feature.feature_state_transitions WHERE reason_code='adr114_transport_state_moved_to_valkey'
+   GROUP BY 1` ≈ 14,240, 대상 dataset의 enabled operation 0, `/v1/features/in-bounds?kinds=price`가 transport 유가를 내지 않는다,
+   Valkey `/v1/service/transport/status`는 그대로.
+4. 배포 뒤 Dagster의 사라진 schedule 셋은 code location에서 빠진다(공용 plane, 다음 pinned pair부터).
+5. **되돌리기**: 데이터는 지우지 않았다. 개별 Feature는 admin 재활성화(`reactivation_evidence` 필요 — override 때문에 provider 재적재로는
+  켜지지 않는다), 일괄은 새 revision. 코드는 git revert + operation 재활성 revision. transport 자체의 이력(transport 저장소)은 무관하다.
+6. API 표면 변화 없음(OpenAPI 재생성 없음, PinVi 재vendor 불필요). PinVi의 일반 지도에서 transport 유가·돌발 중복 마커가 사라진다
+   (교통 레이어는 그대로).
+
 ## 열린 결정
 
 - weather 범위는 "구현 설계 — 2단계" W1이 정했다(W1~W5 export 전부, W4 status 제외). W3 증분(`since`)·ETag 사용은 비용이
   드러나면 따로 정한다.
-- 기존 PG transport feature 퇴역 시점과 방법
+- PG transport 퇴역 ②·③단계의 시점(위 "결정 7 이행"의 해제 조건)
 - 결정 6의 VWorld 블록이 export에 실릴 때 bjd를 값 주소에 넣는 일(id는 D1대로 바뀌지 않는다)
