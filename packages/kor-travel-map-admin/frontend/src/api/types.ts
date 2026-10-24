@@ -3187,6 +3187,91 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/weather/locations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** weather 위치 (목록·근처·영역, 선택적으로 최신 관측) */
+        get: operations["list_weather_locations_v1_service_weather_locations_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/weather/locations/batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** weather 위치 여러 곳(feature_id·weather location_id, 최대 50)의 묶음 */
+        post: operations["batch_weather_locations_v1_service_weather_locations_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/weather/locations/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** weather 위치 하나의 관측·예보·세 구간 요약 묶음 */
+        get: operations["get_weather_location_v1_service_weather_locations__feature_id__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/weather/nearest": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 좌표 근처 weather 위치들에서 부분마다 데이터가 있는 가장 가까운 위치의 묶음 */
+        get: operations["get_nearest_weather_v1_service_weather_nearest_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/weather/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Valkey 연결과 weather 데이터셋별 신선도 */
+        get: operations["get_weather_state_status_v1_service_weather_status_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/version": {
         parameters: {
             query?: never;
@@ -14368,6 +14453,407 @@ export interface components {
             openapi_version: string;
             /** Version */
             version: string;
+        };
+        /** WeatherBatchData */
+        WeatherBatchData: {
+            /** Items */
+            items: components["schemas"]["WeatherBundleData"][];
+            /**
+             * Missing
+             * @description 지금 세대에 없는 id(요청 순서).
+             */
+            missing: components["schemas"]["WeatherBatchMissing"][];
+        };
+        /** WeatherBatchMissing */
+        WeatherBatchMissing: {
+            /** Feature Id */
+            feature_id: string | null;
+            /** Location Id */
+            location_id: string | null;
+        };
+        /**
+         * WeatherBatchRequest
+         * @description ``feature_ids``와 weather ``location_ids``(둘 다 써도 된다, 합 최대 50곳).
+         *
+         *     id 하나하나는 경로의 ``feature_id``와 같은 모양 검사, ``location_id``는 weather 계약과 같은
+         *     길이·문자 검사를 받는다.
+         */
+        WeatherBatchRequest: {
+            /** Feature Ids */
+            feature_ids?: string[];
+            /**
+             * Forecast From
+             * @description 예보 target_at 하한(지금보다 이르면 지금).
+             */
+            forecast_from?: string | null;
+            /** Forecast Styles */
+            forecast_styles?: ("ultra_short" | "short" | "mid" | "external")[] | null;
+            /**
+             * Forecast To
+             * @description 예보 target_at 상한.
+             */
+            forecast_to?: string | null;
+            /**
+             * Location Ids
+             * @description weather 위치 id(PinVi가 가진 weather location_id). Map이 feature_id로 바꾼다.
+             */
+            location_ids?: string[];
+            /** Sections */
+            sections?: ("current" | "forecasts" | "daily_summaries")[] | null;
+        };
+        /** WeatherBatchResponse */
+        WeatherBatchResponse: {
+            data: components["schemas"]["WeatherBatchData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** WeatherBundleData */
+        WeatherBundleData: {
+            /** @description sections에 없으면 null. */
+            current: components["schemas"]["WeatherCurrentSection"] | null;
+            /** @description sections에 없으면 null. */
+            daily_summaries: components["schemas"]["WeatherDailySection"] | null;
+            /** @description forecast_styles에 든 style만 채운다. */
+            forecasts: components["schemas"]["WeatherForecastSections"];
+            /** @description 요청 위치(/nearest면 가장 가까운 위치). 부분의 값은 source 위치에서 온다. */
+            location: components["schemas"]["WeatherLocationOut"];
+            location_freshness: components["schemas"]["WeatherStateFreshness"];
+        };
+        /** WeatherBundleResponse */
+        WeatherBundleResponse: {
+            data: components["schemas"]["WeatherBundleData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** WeatherCurrentSection */
+        WeatherCurrentSection: {
+            freshness: components["schemas"]["WeatherStateFreshness"] | null;
+            /** Observations */
+            observations: components["schemas"]["WeatherObservationState"][];
+            /** @description 값이 온 위치(값이 없으면 null). */
+            source: components["schemas"]["WeatherSectionSource"] | null;
+            /**
+             * Status
+             * @description ok · not_loaded(데이터셋이 아직 한 번도 적재 전) · unavailable(그 데이터셋을 읽지 못했거나 저장 값이 깨짐) · no_data(데이터셋은 있으나 후보 위치에 항목이 없음).
+             * @enum {string}
+             */
+            status: "ok" | "not_loaded" | "unavailable" | "no_data";
+        };
+        /** WeatherDailySection */
+        WeatherDailySection: {
+            freshness: components["schemas"]["WeatherStateFreshness"] | null;
+            /**
+             * Slots
+             * @description (date, slot) 오름차순.
+             */
+            slots: components["schemas"]["WeatherDailySlotOut"][];
+            /** @description 값이 온 위치(값이 없으면 null). */
+            source: components["schemas"]["WeatherSectionSource"] | null;
+            /**
+             * Status
+             * @description ok · not_loaded(데이터셋이 아직 한 번도 적재 전) · unavailable(그 데이터셋을 읽지 못했거나 저장 값이 깨짐) · no_data(데이터셋은 있으나 후보 위치에 항목이 없음).
+             * @enum {string}
+             */
+            status: "ok" | "not_loaded" | "unavailable" | "no_data";
+        };
+        /** WeatherDailySlotOut */
+        WeatherDailySlotOut: {
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Humidity Avg */
+            humidity_avg?: number | null;
+            /**
+             * Partial
+             * @description 아직 끝나지 않은 구간.
+             */
+            partial: boolean;
+            /** Precip Occurred */
+            precip_occurred?: boolean | null;
+            /** Precip Sum Mm */
+            precip_sum_mm?: number | null;
+            /**
+             * Sample Count
+             * @description 채택된 관측 시간 bucket 수.
+             */
+            sample_count: number;
+            /** Sky Code */
+            sky_code?: number | null;
+            /**
+             * Slot
+             * @enum {string}
+             */
+            slot: "morning" | "noon" | "evening";
+            /** Source Providers */
+            source_providers: string[];
+            /** Temp Avg */
+            temp_avg?: number | null;
+            /** Temp Max */
+            temp_max?: number | null;
+            /** Temp Min */
+            temp_min?: number | null;
+            /** @description 전날 같은 구간과 비교. 전날 구간이 없거나, 둘 중 하나가 sample_count=0이거나, 둘 중 하나가 partial(읽는 시각 기준으로 아직 끝나지 않았거나 덜 계산된 구간 — 끝난 구간과 비교하면 왜곡된다)이면 null. partial은 읽는 시각으로 다시 계산한 값이다. */
+            vs_previous_day?: components["schemas"]["WeatherSlotDelta"] | null;
+            /** Wind Speed Avg */
+            wind_speed_avg?: number | null;
+        };
+        /** WeatherDatasetStatus */
+        WeatherDatasetStatus: {
+            /** Dataset */
+            dataset: string;
+            /**
+             * Error
+             * @description 이 데이터셋만 읽지 못했을 때 안정 코드(failure_kind). 원 메시지는 싣지 않는다.
+             */
+            error?: string | null;
+            freshness: components["schemas"]["WeatherStateFreshness"] | null;
+            /** Loaded */
+            loaded: boolean;
+        };
+        /**
+         * WeatherForecastGroupState
+         * @description 위치×provider 예보 묶음 하나(W3). ``metrics``의 배열은 ``target_at``과 같은 길이다.
+         */
+        WeatherForecastGroupState: {
+            /**
+             * Known At
+             * Format: date-time
+             */
+            known_at: string;
+            /** Metrics */
+            metrics: {
+                [key: string]: (number | string | null)[];
+            };
+            /** Provider */
+            provider: string;
+            /**
+             * Published At
+             * Format: date-time
+             */
+            published_at: string;
+            /**
+             * Target At
+             * @description 오름차순.
+             */
+            target_at: string[];
+        };
+        /** WeatherForecastSection */
+        WeatherForecastSection: {
+            freshness: components["schemas"]["WeatherStateFreshness"] | null;
+            /**
+             * Groups
+             * @description provider별 묶음. 지금(또는 from)보다 이른 target_at·to 뒤 target_at과 그 자리 값은 뗐다(ADR-114 W5).
+             */
+            groups: components["schemas"]["WeatherForecastGroupState"][];
+            /** @description 값이 온 위치(값이 없으면 null). */
+            source: components["schemas"]["WeatherSectionSource"] | null;
+            /**
+             * Status
+             * @description ok · not_loaded(데이터셋이 아직 한 번도 적재 전) · unavailable(그 데이터셋을 읽지 못했거나 저장 값이 깨짐) · no_data(데이터셋은 있으나 후보 위치에 항목이 없음).
+             * @enum {string}
+             */
+            status: "ok" | "not_loaded" | "unavailable" | "no_data";
+        };
+        /** WeatherForecastSections */
+        WeatherForecastSections: {
+            external?: components["schemas"]["WeatherForecastSection"] | null;
+            mid?: components["schemas"]["WeatherForecastSection"] | null;
+            short?: components["schemas"]["WeatherForecastSection"] | null;
+            ultra_short?: components["schemas"]["WeatherForecastSection"] | null;
+        };
+        /**
+         * WeatherLocationAddress
+         * @description weather가 준 행정 정보(ADR-114 결정 6 — 그대로 쓴다).
+         */
+        WeatherLocationAddress: {
+            /**
+             * Bjd Code
+             * @description 법정동 코드 10자리(weather W1 ``legal_dong_code``). 없으면 null.
+             */
+            bjd_code?: string | null;
+            /** Sido Name */
+            sido_name?: string | null;
+            /** Sigungu Name */
+            sigungu_name?: string | null;
+        };
+        /** WeatherLocationListData */
+        WeatherLocationListData: {
+            /** @description include_current=true일 때 관측 데이터셋 신선도(적재 전 null). */
+            current_freshness?: components["schemas"]["WeatherStateFreshness"] | null;
+            freshness: components["schemas"]["WeatherStateFreshness"];
+            /** Items */
+            items: components["schemas"]["WeatherLocationOut"][];
+            /**
+             * Truncated
+             * @description 근처·영역 검색이 limit에 닿았다(더 있을 수 있다).
+             */
+            truncated: boolean;
+        };
+        /** WeatherLocationListResponse */
+        WeatherLocationListResponse: {
+            data: components["schemas"]["WeatherLocationListData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /** WeatherLocationOut */
+        WeatherLocationOut: {
+            address: components["schemas"]["WeatherLocationAddress"];
+            /** Category */
+            category: string;
+            coord: components["schemas"]["StateCoordinate"] | null;
+            /**
+             * Distance M
+             * @description 근처 검색일 때 중심에서의 거리.
+             */
+            distance_m?: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Kind
+             * @default weather
+             * @constant
+             */
+            kind: "weather";
+            /**
+             * Location Id
+             * @description weather 위치 id(자연키).
+             */
+            location_id: string;
+            /** Marker Color */
+            marker_color: string;
+            /** Marker Icon */
+            marker_icon: string;
+            /** Name */
+            name: string;
+            /**
+             * Observations
+             * @description include_current=true일 때 최신 관측(관측 데이터셋이 없거나 항목이 없으면 null).
+             */
+            observations?: components["schemas"]["WeatherObservationState"][] | null;
+        };
+        /**
+         * WeatherObservationState
+         * @description 위치×provider×metric 최신 관측 1값(W2).
+         */
+        WeatherObservationState: {
+            /**
+             * Forecast Style
+             * @enum {string}
+             */
+            forecast_style: "observed" | "nowcast";
+            /**
+             * Known At
+             * Format: date-time
+             * @description 원천 fact의 인식 시각.
+             */
+            known_at: string;
+            /** Metric Key */
+            metric_key: string;
+            /** Provider */
+            provider: string;
+            /**
+             * Target At
+             * Format: date-time
+             * @description 관측·실황이 가리키는 시각.
+             */
+            target_at: string;
+            /** Unit */
+            unit?: string | null;
+            /** Value */
+            value: number | string | null;
+        };
+        /**
+         * WeatherSectionSource
+         * @description 이 부분의 값이 온 위치.
+         */
+        WeatherSectionSource: {
+            /**
+             * Distance M
+             * @description /nearest일 때 요청 좌표에서의 거리.
+             */
+            distance_m: number | null;
+            /** Feature Id */
+            feature_id: string;
+            /** Location Id */
+            location_id: string;
+        };
+        /**
+         * WeatherSlotDelta
+         * @description 전날 같은 구간 대비 차이(이쪽 − 전날). 둘 중 하나가 없으면 그 값은 null.
+         */
+        WeatherSlotDelta: {
+            /** Humidity Avg Delta */
+            humidity_avg_delta: number | null;
+            /**
+             * Previous Date
+             * Format: date
+             */
+            previous_date: string;
+            /** Temp Avg Delta */
+            temp_avg_delta: number | null;
+            /** Temp Max Delta */
+            temp_max_delta: number | null;
+            /** Temp Min Delta */
+            temp_min_delta: number | null;
+        };
+        /**
+         * WeatherStateFreshness
+         * @description 세대 하나의 신선도(ADR-114 W4).
+         */
+        WeatherStateFreshness: {
+            /**
+             * Age Seconds
+             * @description source_collected_at(없으면 checked_at, 그것도 없으면 loaded_at)부터 지금까지.
+             */
+            age_seconds: number;
+            /**
+             * Checked At
+             * @description weather가 304(바뀌지 않음)로 답해 교체 없이 다시 확인한 마지막 시각.
+             */
+            checked_at: string | null;
+            /** Dataset */
+            dataset: string;
+            /** Generation */
+            generation: string;
+            /** Item Count */
+            item_count: number;
+            /**
+             * Loaded At
+             * Format: date-time
+             * @description Map이 이 세대로 교체한 시각.
+             */
+            loaded_at: string;
+            /** Max Age Seconds */
+            max_age_seconds: number;
+            /**
+             * Source Collected At
+             * @description weather 원천 수집 시각(페이지 중 가장 이른 값). 위치 roster는 언제나 null.
+             */
+            source_collected_at: string | null;
+            /**
+             * Source Status
+             * @description weather가 알린 집합 상태. stale = weather가 마지막 성공 집합을 그대로 줬다. null = 해당 없음 — 원천이 집합 상태를 알리지 않는 데이터셋(위치 roster: weather W1은 카탈로그 수집 시각을 알 수 없어 언제나 stale을 보낸다)이라 Map이 싣지 않는다.
+             */
+            source_status: ("ok" | "stale") | null;
+            /**
+             * Stale
+             * @description age_seconds > max_age_seconds. stale이어도 값은 준다.
+             */
+            stale: boolean;
+        };
+        /** WeatherStatusData */
+        WeatherStatusData: {
+            /** Datasets */
+            datasets: components["schemas"]["WeatherDatasetStatus"][];
+            /**
+             * Store
+             * @constant
+             */
+            store: "ok";
+        };
+        /** WeatherStatusResponse */
+        WeatherStatusResponse: {
+            data: components["schemas"]["WeatherStatusData"];
+            meta: components["schemas"]["Meta"];
         };
     };
     responses: never;
@@ -25931,6 +26417,305 @@ export interface operations {
                 };
             };
             /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_weather_locations_v1_service_weather_locations_get: {
+        parameters: {
+            query?: {
+                /** @description true면 각 위치에 최신 관측을 붙인다(지도 마커용). */
+                include_current?: boolean;
+                /** @description 직전 페이지 meta.page.next_cursor. */
+                cursor?: string | null;
+                limit?: number;
+                /** @description 근처 검색 중심 경도. */
+                lon?: number | null;
+                /** @description 근처 검색 중심 위도. */
+                lat?: number | null;
+                /** @description 근처 검색 반경(m, 최대 100 km). */
+                radius_m?: number | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherLocationListResponse"];
+                };
+            };
+            /** @description WEATHER_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시. */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    batch_weather_locations_v1_service_weather_locations_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WeatherBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherBatchResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_weather_location_v1_service_weather_locations__feature_id__get: {
+        parameters: {
+            query?: {
+                /** @description 묶음에 담을 부분(반복 가능). 없으면 전부. */
+                sections?: ("current" | "forecasts" | "daily_summaries")[] | null;
+                /** @description 담을 예보 style(반복 가능). 없으면 네 가지 전부. */
+                forecast_styles?: ("ultra_short" | "short" | "mid" | "external")[] | null;
+                /** @description 예보 target_at 하한(지금보다 이르면 지금). 기본 지금. */
+                from?: string | null;
+                /** @description 예보 target_at 상한. 기본 끝까지. */
+                to?: string | null;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherBundleResponse"];
+                };
+            };
+            /** @description NOT_FOUND — 지금 세대에 그 위치가 없다. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_nearest_weather_v1_service_weather_nearest_get: {
+        parameters: {
+            query: {
+                /** @description 경도. */
+                lon: number;
+                /** @description 위도. */
+                lat: number;
+                /** @description 찾는 반경(m, 기본 20 km, 최대 100 km). */
+                radius_m?: number;
+                /** @description 묶음에 담을 부분(반복 가능). 없으면 전부. */
+                sections?: ("current" | "forecasts" | "daily_summaries")[] | null;
+                /** @description 담을 예보 style(반복 가능). 없으면 네 가지 전부. */
+                forecast_styles?: ("ultra_short" | "short" | "mid" | "external")[] | null;
+                /** @description 예보 target_at 하한(지금보다 이르면 지금). 기본 지금. */
+                from?: string | null;
+                /** @description 예보 target_at 상한. 기본 끝까지. */
+                to?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherBundleResponse"];
+                };
+            };
+            /** @description NOT_FOUND — 지금 세대에 그 위치가 없다. */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_weather_state_status_v1_service_weather_status_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WeatherStatusResponse"];
+                };
+            };
+            /** @description WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전). */
             503: {
                 headers: {
                     [name: string]: unknown;

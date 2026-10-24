@@ -4,6 +4,15 @@
 - cold API key 인증 세션을 hash 조회 직후 반환해 pool size=1 재진입 timeout을 없앴다. 실제 PG/ASGI 13 passed(기존 RC 혼합 반증·RR 일관성·pool 복원·cold 인증 포함), 관련 API 198 passed다. 전체 API 1,344 passed/1 failed는 새 dependency의 테스트 override 누락을 수정한 뒤 auth 93 passed로 재검증했다.
 - 소스 b8f6e677a는 독립 리뷰 2인 PASS다. 정확한 최종 문서 포함 후보의 CI·별도 실제 HTTP/UI 검증은 남아 있다. 기존 writer 잠금·운영 정책·배포 변경은 없다. [전체 reader 분류와 경계](reports/2026-10-24-api-reader-snapshot-inventory.md).
 
+## 2026-10-24 — ADR-114 2단계(T-STATE-02): 브랜치 `feat/adr114-valkey-weather`
+
+- weather W1·W2·W3·W5 export를 위치 단위 Valkey 세대로 싣는 Dagster job 7개(기본 STOPPED)와 `/v1/service/weather/*` 5
+  route를 더했다(2026-10-24 정확성·운영 리뷰 반영 — 부분별 nearest·배치·partial 재계산·ETag 304 등, ADR-114 W 절). migration 없음. admin·service OpenAPI 변경(**PinVi 재vendor 필요**). 배포 영향: Map API·Dagster code
+  location. weather live(odroid `3a0ae398`)에는 아직 W1~W5가 없다.
+- **다음 한 작업: 소유자 적대 리뷰 → PR CI green → 머지 판단 → weather W1~W5 배포·export 활성화 → Manager가 Map
+  code-server에 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_{BASE_URL,SERVICE_TOKEN}` 추가 → PinVi 재vendor → Map 배포 → 하한
+  대조 후 schedule enable(acceptance §T-STATE-02).**
+
 ## 2026-10-24 — 공용 지도 작업면 채택 후보
 
 Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭·건수/실제 좌표·줌·상세 오버레이를 공통 컴포넌트로 소비한다. Map의 기본 종류·소스·상태 필터와 조회 동작은 보존한다.

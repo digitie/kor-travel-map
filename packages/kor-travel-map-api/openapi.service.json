@@ -5990,6 +5990,1179 @@
         ],
         "title": "TransportStatusResponse",
         "type": "object"
+      },
+      "WeatherBatchData": {
+        "additionalProperties": false,
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherBundleData"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "missing": {
+            "description": "지금 세대에 없는 id(요청 순서).",
+            "items": {
+              "$ref": "#/components/schemas/WeatherBatchMissing"
+            },
+            "title": "Missing",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items",
+          "missing"
+        ],
+        "title": "WeatherBatchData",
+        "type": "object"
+      },
+      "WeatherBatchMissing": {
+        "additionalProperties": false,
+        "properties": {
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "location_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Location Id"
+          }
+        },
+        "required": [
+          "feature_id",
+          "location_id"
+        ],
+        "title": "WeatherBatchMissing",
+        "type": "object"
+      },
+      "WeatherBatchRequest": {
+        "additionalProperties": false,
+        "description": "``feature_ids``와 weather ``location_ids``(둘 다 써도 된다, 합 최대 50곳).\n\nid 하나하나는 경로의 ``feature_id``와 같은 모양 검사, ``location_id``는 weather 계약과 같은\n길이·문자 검사를 받는다.",
+        "properties": {
+          "feature_ids": {
+            "items": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Feature Ids",
+            "type": "array"
+          },
+          "forecast_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "예보 target_at 하한(지금보다 이르면 지금).",
+            "title": "Forecast From"
+          },
+          "forecast_styles": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "ultra_short",
+                    "short",
+                    "mid",
+                    "external"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Forecast Styles"
+          },
+          "forecast_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "예보 target_at 상한.",
+            "title": "Forecast To"
+          },
+          "location_ids": {
+            "description": "weather 위치 id(PinVi가 가진 weather location_id). Map이 feature_id로 바꾼다.",
+            "items": {
+              "maxLength": 120,
+              "minLength": 1,
+              "pattern": "^[^|\\x00-\\x1f]+$",
+              "type": "string"
+            },
+            "maxItems": 50,
+            "title": "Location Ids",
+            "type": "array"
+          },
+          "sections": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "current",
+                    "forecasts",
+                    "daily_summaries"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sections"
+          }
+        },
+        "title": "WeatherBatchRequest",
+        "type": "object"
+      },
+      "WeatherBatchResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherBatchData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WeatherBatchResponse",
+        "type": "object"
+      },
+      "WeatherBundleData": {
+        "additionalProperties": false,
+        "properties": {
+          "current": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherCurrentSection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sections에 없으면 null."
+          },
+          "daily_summaries": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherDailySection"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "sections에 없으면 null."
+          },
+          "forecasts": {
+            "$ref": "#/components/schemas/WeatherForecastSections",
+            "description": "forecast_styles에 든 style만 채운다."
+          },
+          "location": {
+            "$ref": "#/components/schemas/WeatherLocationOut",
+            "description": "요청 위치(/nearest면 가장 가까운 위치). 부분의 값은 source 위치에서 온다."
+          },
+          "location_freshness": {
+            "$ref": "#/components/schemas/WeatherStateFreshness"
+          }
+        },
+        "required": [
+          "location",
+          "location_freshness",
+          "current",
+          "forecasts",
+          "daily_summaries"
+        ],
+        "title": "WeatherBundleData",
+        "type": "object"
+      },
+      "WeatherBundleResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherBundleData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WeatherBundleResponse",
+        "type": "object"
+      },
+      "WeatherCurrentSection": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherStateFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "observations": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherObservationState"
+            },
+            "title": "Observations",
+            "type": "array"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherSectionSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "값이 온 위치(값이 없으면 null)."
+          },
+          "status": {
+            "description": "ok · not_loaded(데이터셋이 아직 한 번도 적재 전) · unavailable(그 데이터셋을 읽지 못했거나 저장 값이 깨짐) · no_data(데이터셋은 있으나 후보 위치에 항목이 없음).",
+            "enum": [
+              "ok",
+              "not_loaded",
+              "unavailable",
+              "no_data"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "source",
+          "freshness",
+          "observations"
+        ],
+        "title": "WeatherCurrentSection",
+        "type": "object"
+      },
+      "WeatherDailySection": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherStateFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "slots": {
+            "description": "(date, slot) 오름차순.",
+            "items": {
+              "$ref": "#/components/schemas/WeatherDailySlotOut"
+            },
+            "title": "Slots",
+            "type": "array"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherSectionSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "값이 온 위치(값이 없으면 null)."
+          },
+          "status": {
+            "description": "ok · not_loaded(데이터셋이 아직 한 번도 적재 전) · unavailable(그 데이터셋을 읽지 못했거나 저장 값이 깨짐) · no_data(데이터셋은 있으나 후보 위치에 항목이 없음).",
+            "enum": [
+              "ok",
+              "not_loaded",
+              "unavailable",
+              "no_data"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "source",
+          "freshness",
+          "slots"
+        ],
+        "title": "WeatherDailySection",
+        "type": "object"
+      },
+      "WeatherDailySlotOut": {
+        "additionalProperties": false,
+        "properties": {
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "humidity_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Avg"
+          },
+          "partial": {
+            "description": "아직 끝나지 않은 구간.",
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "precip_occurred": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precip Occurred"
+          },
+          "precip_sum_mm": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Precip Sum Mm"
+          },
+          "sample_count": {
+            "description": "채택된 관측 시간 bucket 수.",
+            "maximum": 6.0,
+            "minimum": 0.0,
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "sky_code": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sky Code"
+          },
+          "slot": {
+            "enum": [
+              "morning",
+              "noon",
+              "evening"
+            ],
+            "title": "Slot",
+            "type": "string"
+          },
+          "source_providers": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Providers",
+            "type": "array"
+          },
+          "temp_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temp Avg"
+          },
+          "temp_max": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temp Max"
+          },
+          "temp_min": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temp Min"
+          },
+          "vs_previous_day": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherSlotDelta"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "전날 같은 구간과 비교. 전날 구간이 없거나, 둘 중 하나가 sample_count=0이거나, 둘 중 하나가 partial(읽는 시각 기준으로 아직 끝나지 않았거나 덜 계산된 구간 — 끝난 구간과 비교하면 왜곡된다)이면 null. partial은 읽는 시각으로 다시 계산한 값이다."
+          },
+          "wind_speed_avg": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wind Speed Avg"
+          }
+        },
+        "required": [
+          "date",
+          "slot",
+          "sample_count",
+          "source_providers",
+          "partial"
+        ],
+        "title": "WeatherDailySlotOut",
+        "type": "object"
+      },
+      "WeatherDatasetStatus": {
+        "additionalProperties": false,
+        "properties": {
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "이 데이터셋만 읽지 못했을 때 안정 코드(failure_kind). 원 메시지는 싣지 않는다.",
+            "title": "Error"
+          },
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherStateFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "loaded": {
+            "title": "Loaded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dataset",
+          "loaded",
+          "freshness"
+        ],
+        "title": "WeatherDatasetStatus",
+        "type": "object"
+      },
+      "WeatherForecastGroupState": {
+        "additionalProperties": false,
+        "description": "위치×provider 예보 묶음 하나(W3). ``metrics``의 배열은 ``target_at``과 같은 길이다.",
+        "properties": {
+          "known_at": {
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "items": {
+                "anyOf": [
+                  {
+                    "type": "number"
+                  },
+                  {
+                    "type": "string"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "type": "array"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "published_at": {
+            "format": "date-time",
+            "title": "Published At",
+            "type": "string"
+          },
+          "target_at": {
+            "description": "오름차순.",
+            "items": {
+              "format": "date-time",
+              "type": "string"
+            },
+            "title": "Target At",
+            "type": "array"
+          }
+        },
+        "required": [
+          "provider",
+          "known_at",
+          "published_at",
+          "target_at",
+          "metrics"
+        ],
+        "title": "WeatherForecastGroupState",
+        "type": "object"
+      },
+      "WeatherForecastSection": {
+        "additionalProperties": false,
+        "properties": {
+          "freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherStateFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "groups": {
+            "description": "provider별 묶음. 지금(또는 from)보다 이른 target_at·to 뒤 target_at과 그 자리 값은 뗐다(ADR-114 W5).",
+            "items": {
+              "$ref": "#/components/schemas/WeatherForecastGroupState"
+            },
+            "title": "Groups",
+            "type": "array"
+          },
+          "source": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherSectionSource"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "값이 온 위치(값이 없으면 null)."
+          },
+          "status": {
+            "description": "ok · not_loaded(데이터셋이 아직 한 번도 적재 전) · unavailable(그 데이터셋을 읽지 못했거나 저장 값이 깨짐) · no_data(데이터셋은 있으나 후보 위치에 항목이 없음).",
+            "enum": [
+              "ok",
+              "not_loaded",
+              "unavailable",
+              "no_data"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "source",
+          "freshness",
+          "groups"
+        ],
+        "title": "WeatherForecastSection",
+        "type": "object"
+      },
+      "WeatherForecastSections": {
+        "additionalProperties": false,
+        "properties": {
+          "external": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherForecastSection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mid": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherForecastSection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "short": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherForecastSection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ultra_short": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherForecastSection"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "WeatherForecastSections",
+        "type": "object"
+      },
+      "WeatherLocationAddress": {
+        "additionalProperties": false,
+        "description": "weather가 준 행정 정보(ADR-114 결정 6 — 그대로 쓴다).",
+        "properties": {
+          "bjd_code": {
+            "anyOf": [
+              {
+                "pattern": "^[0-9]{10}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "법정동 코드 10자리(weather W1 ``legal_dong_code``). 없으면 null.",
+            "title": "Bjd Code"
+          },
+          "sido_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Name"
+          },
+          "sigungu_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Name"
+          }
+        },
+        "title": "WeatherLocationAddress",
+        "type": "object"
+      },
+      "WeatherLocationListData": {
+        "additionalProperties": false,
+        "properties": {
+          "current_freshness": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/WeatherStateFreshness"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "include_current=true일 때 관측 데이터셋 신선도(적재 전 null)."
+          },
+          "freshness": {
+            "$ref": "#/components/schemas/WeatherStateFreshness"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherLocationOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "truncated": {
+            "description": "근처·영역 검색이 limit에 닿았다(더 있을 수 있다).",
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "items",
+          "truncated",
+          "freshness"
+        ],
+        "title": "WeatherLocationListData",
+        "type": "object"
+      },
+      "WeatherLocationListResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherLocationListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WeatherLocationListResponse",
+        "type": "object"
+      },
+      "WeatherLocationOut": {
+        "additionalProperties": false,
+        "properties": {
+          "address": {
+            "$ref": "#/components/schemas/WeatherLocationAddress"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coord": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/StateCoordinate"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "근처 검색일 때 중심에서의 거리.",
+            "title": "Distance M"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "kind": {
+            "const": "weather",
+            "default": "weather",
+            "title": "Kind",
+            "type": "string"
+          },
+          "location_id": {
+            "description": "weather 위치 id(자연키).",
+            "title": "Location Id",
+            "type": "string"
+          },
+          "marker_color": {
+            "title": "Marker Color",
+            "type": "string"
+          },
+          "marker_icon": {
+            "title": "Marker Icon",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "observations": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WeatherObservationState"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "include_current=true일 때 최신 관측(관측 데이터셋이 없거나 항목이 없으면 null).",
+            "title": "Observations"
+          }
+        },
+        "required": [
+          "feature_id",
+          "category",
+          "marker_icon",
+          "marker_color",
+          "location_id",
+          "name",
+          "coord",
+          "address"
+        ],
+        "title": "WeatherLocationOut",
+        "type": "object"
+      },
+      "WeatherObservationState": {
+        "additionalProperties": false,
+        "description": "위치×provider×metric 최신 관측 1값(W2).",
+        "properties": {
+          "forecast_style": {
+            "enum": [
+              "observed",
+              "nowcast"
+            ],
+            "title": "Forecast Style",
+            "type": "string"
+          },
+          "known_at": {
+            "description": "원천 fact의 인식 시각.",
+            "format": "date-time",
+            "title": "Known At",
+            "type": "string"
+          },
+          "metric_key": {
+            "title": "Metric Key",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "target_at": {
+            "description": "관측·실황이 가리키는 시각.",
+            "format": "date-time",
+            "title": "Target At",
+            "type": "string"
+          },
+          "unit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unit"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "provider",
+          "metric_key",
+          "value",
+          "target_at",
+          "known_at",
+          "forecast_style"
+        ],
+        "title": "WeatherObservationState",
+        "type": "object"
+      },
+      "WeatherSectionSource": {
+        "additionalProperties": false,
+        "description": "이 부분의 값이 온 위치.",
+        "properties": {
+          "distance_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "/nearest일 때 요청 좌표에서의 거리.",
+            "title": "Distance M"
+          },
+          "feature_id": {
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "location_id": {
+            "title": "Location Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "location_id",
+          "distance_m"
+        ],
+        "title": "WeatherSectionSource",
+        "type": "object"
+      },
+      "WeatherSlotDelta": {
+        "additionalProperties": false,
+        "description": "전날 같은 구간 대비 차이(이쪽 − 전날). 둘 중 하나가 없으면 그 값은 null.",
+        "properties": {
+          "humidity_avg_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Humidity Avg Delta"
+          },
+          "previous_date": {
+            "format": "date",
+            "title": "Previous Date",
+            "type": "string"
+          },
+          "temp_avg_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temp Avg Delta"
+          },
+          "temp_max_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temp Max Delta"
+          },
+          "temp_min_delta": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Temp Min Delta"
+          }
+        },
+        "required": [
+          "previous_date",
+          "temp_min_delta",
+          "temp_max_delta",
+          "temp_avg_delta",
+          "humidity_avg_delta"
+        ],
+        "title": "WeatherSlotDelta",
+        "type": "object"
+      },
+      "WeatherStateFreshness": {
+        "additionalProperties": false,
+        "description": "세대 하나의 신선도(ADR-114 W4).",
+        "properties": {
+          "age_seconds": {
+            "description": "source_collected_at(없으면 checked_at, 그것도 없으면 loaded_at)부터 지금까지.",
+            "title": "Age Seconds",
+            "type": "integer"
+          },
+          "checked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "weather가 304(바뀌지 않음)로 답해 교체 없이 다시 확인한 마지막 시각.",
+            "title": "Checked At"
+          },
+          "dataset": {
+            "title": "Dataset",
+            "type": "string"
+          },
+          "generation": {
+            "title": "Generation",
+            "type": "string"
+          },
+          "item_count": {
+            "title": "Item Count",
+            "type": "integer"
+          },
+          "loaded_at": {
+            "description": "Map이 이 세대로 교체한 시각.",
+            "format": "date-time",
+            "title": "Loaded At",
+            "type": "string"
+          },
+          "max_age_seconds": {
+            "title": "Max Age Seconds",
+            "type": "integer"
+          },
+          "source_collected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "weather 원천 수집 시각(페이지 중 가장 이른 값). 위치 roster는 언제나 null.",
+            "title": "Source Collected At"
+          },
+          "source_status": {
+            "anyOf": [
+              {
+                "enum": [
+                  "ok",
+                  "stale"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "weather가 알린 집합 상태. stale = weather가 마지막 성공 집합을 그대로 줬다. null = 해당 없음 — 원천이 집합 상태를 알리지 않는 데이터셋(위치 roster: weather W1은 카탈로그 수집 시각을 알 수 없어 언제나 stale을 보낸다)이라 Map이 싣지 않는다.",
+            "title": "Source Status"
+          },
+          "stale": {
+            "description": "age_seconds > max_age_seconds. stale이어도 값은 준다.",
+            "title": "Stale",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "dataset",
+          "generation",
+          "source_collected_at",
+          "source_status",
+          "loaded_at",
+          "checked_at",
+          "age_seconds",
+          "max_age_seconds",
+          "stale",
+          "item_count"
+        ],
+        "title": "WeatherStateFreshness",
+        "type": "object"
+      },
+      "WeatherStatusData": {
+        "additionalProperties": false,
+        "properties": {
+          "datasets": {
+            "items": {
+              "$ref": "#/components/schemas/WeatherDatasetStatus"
+            },
+            "title": "Datasets",
+            "type": "array"
+          },
+          "store": {
+            "const": "ok",
+            "title": "Store",
+            "type": "string"
+          }
+        },
+        "required": [
+          "store",
+          "datasets"
+        ],
+        "title": "WeatherStatusData",
+        "type": "object"
+      },
+      "WeatherStatusResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/WeatherStatusData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "WeatherStatusResponse",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -10765,6 +11938,732 @@
         "summary": "Valkey 연결과 데이터셋별 신선도",
         "tags": [
           "service-transport-state"
+        ]
+      }
+    },
+    "/v1/service/weather/locations": {
+      "get": {
+        "operationId": "list_weather_locations_v1_service_weather_locations_get",
+        "parameters": [
+          {
+            "description": "true면 각 위치에 최신 관측을 붙인다(지도 마커용).",
+            "in": "query",
+            "name": "include_current",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "true면 각 위치에 최신 관측을 붙인다(지도 마커용).",
+              "title": "Include Current",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "직전 페이지 meta.page.next_cursor.",
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "직전 페이지 meta.page.next_cursor.",
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "근처 검색 중심 경도.",
+            "in": "query",
+            "name": "lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 경도.",
+              "title": "Lon"
+            }
+          },
+          {
+            "description": "근처 검색 중심 위도.",
+            "in": "query",
+            "name": "lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 중심 위도.",
+              "title": "Lat"
+            }
+          },
+          {
+            "description": "근처 검색 반경(m, 최대 100 km).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "exclusiveMinimum": 0,
+                  "maximum": 100000.0,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "근처 검색 반경(m, 최대 100 km).",
+              "title": "Radius M"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 85.05112878,
+                  "minimum": -85.05112878,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lat"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherLocationListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_STATE_GENERATION_EXPIRED — cursor의 세대가 사라졌다. 처음부터 다시."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "weather 위치 (목록·근처·영역, 선택적으로 최신 관측)",
+        "tags": [
+          "service-weather-state"
+        ]
+      }
+    },
+    "/v1/service/weather/locations/batch": {
+      "post": {
+        "operationId": "batch_weather_locations_v1_service_weather_locations_batch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WeatherBatchRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherBatchResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "weather 위치 여러 곳(feature_id·weather location_id, 최대 50)의 묶음",
+        "tags": [
+          "service-weather-state"
+        ]
+      }
+    },
+    "/v1/service/weather/locations/{feature_id}": {
+      "get": {
+        "operationId": "get_weather_location_v1_service_weather_locations__feature_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "maxLength": 128,
+              "minLength": 1,
+              "pattern": "^[A-Za-z0-9_\\-]+$",
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "묶음에 담을 부분(반복 가능). 없으면 전부.",
+            "in": "query",
+            "name": "sections",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "current",
+                      "forecasts",
+                      "daily_summaries"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "묶음에 담을 부분(반복 가능). 없으면 전부.",
+              "title": "Sections"
+            }
+          },
+          {
+            "description": "담을 예보 style(반복 가능). 없으면 네 가지 전부.",
+            "in": "query",
+            "name": "forecast_styles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "ultra_short",
+                      "short",
+                      "mid",
+                      "external"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "담을 예보 style(반복 가능). 없으면 네 가지 전부.",
+              "title": "Forecast Styles"
+            }
+          },
+          {
+            "description": "예보 target_at 하한(지금보다 이르면 지금). 기본 지금.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 target_at 하한(지금보다 이르면 지금). 기본 지금.",
+              "title": "From"
+            }
+          },
+          {
+            "description": "예보 target_at 상한. 기본 끝까지.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 target_at 상한. 기본 끝까지.",
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherBundleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "NOT_FOUND — 지금 세대에 그 위치가 없다."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "weather 위치 하나의 관측·예보·세 구간 요약 묶음",
+        "tags": [
+          "service-weather-state"
+        ]
+      }
+    },
+    "/v1/service/weather/nearest": {
+      "get": {
+        "operationId": "get_nearest_weather_v1_service_weather_nearest_get",
+        "parameters": [
+          {
+            "description": "경도.",
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "description": "경도.",
+              "maximum": 180,
+              "minimum": -180,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "위도.",
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "description": "위도.",
+              "maximum": 85.05112878,
+              "minimum": -85.05112878,
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "찾는 반경(m, 기본 20 km, 최대 100 km).",
+            "in": "query",
+            "name": "radius_m",
+            "required": false,
+            "schema": {
+              "default": 20000.0,
+              "description": "찾는 반경(m, 기본 20 km, 최대 100 km).",
+              "exclusiveMinimum": 0,
+              "maximum": 100000.0,
+              "title": "Radius M",
+              "type": "number"
+            }
+          },
+          {
+            "description": "묶음에 담을 부분(반복 가능). 없으면 전부.",
+            "in": "query",
+            "name": "sections",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "current",
+                      "forecasts",
+                      "daily_summaries"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "묶음에 담을 부분(반복 가능). 없으면 전부.",
+              "title": "Sections"
+            }
+          },
+          {
+            "description": "담을 예보 style(반복 가능). 없으면 네 가지 전부.",
+            "in": "query",
+            "name": "forecast_styles",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "ultra_short",
+                      "short",
+                      "mid",
+                      "external"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "담을 예보 style(반복 가능). 없으면 네 가지 전부.",
+              "title": "Forecast Styles"
+            }
+          },
+          {
+            "description": "예보 target_at 하한(지금보다 이르면 지금). 기본 지금.",
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 target_at 하한(지금보다 이르면 지금). 기본 지금.",
+              "title": "From"
+            }
+          },
+          {
+            "description": "예보 target_at 상한. 기본 끝까지.",
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "예보 target_at 상한. 기본 끝까지.",
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherBundleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "NOT_FOUND — 지금 세대에 그 위치가 없다."
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "좌표 근처 weather 위치들에서 부분마다 데이터가 있는 가장 가까운 위치의 묶음",
+        "tags": [
+          "service-weather-state"
+        ]
+      }
+    },
+    "/v1/service/weather/status": {
+      "get": {
+        "operationId": "get_weather_state_status_v1_service_weather_status_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WeatherStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "503": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "WEATHER_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 WEATHER_STATE_NOT_LOADED(위치 데이터셋이 아직 적재 전)."
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Valkey 연결과 weather 데이터셋별 신선도",
+        "tags": [
+          "service-weather-state"
         ]
       }
     }

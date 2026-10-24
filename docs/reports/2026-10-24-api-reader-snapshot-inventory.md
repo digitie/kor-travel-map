@@ -105,3 +105,10 @@ cold key 캐시가 기존 요청 세션의 connection을 잡은 채 독립 snaps
 - 전체 API 단위 suite와 exact CI/독립 두 리뷰는 별도 진행 중이다. 운영 호출·배포·정책 활성화는 0회다. T-CWRITE01/04 전체 및 위 표의 RR 후속은 아직 완료가 아니다.
 
 전체 API suite는 1344 PASS/1 FAIL(439.02초)이었다. 실패는 기존 `test_auth._client`가 새 인증 전용 dependency를 fake로 등록하지 않아 placeholder DB에 연결한 시험 배선 누락이었다. 해당 테스트 파일만 전용 override/context를 명시하고 원래 auth 판정을 보존했다. 정본 constraints로 auth 전체93건 PASS(16.17초)를 재확인했다. 이 마지막 변경은 시험 배선과 기존 일반 session의 잘못된 read-only 주석 교정이며 transaction 동작을 바꾸지 않는다. exact CI 전체 결과는 별도 수용한다.
+
+
+## 최신 main 통합
+
+#1367의 weather 상태 REST와 Valkey 적재가 들어온 main `e0131ec16`을 합쳤다.
+새 weather REST는 Valkey를 읽으며 이 PR의 PostgreSQL snapshot 대상으로 확장하지 않는다.
+기존 분류와 29개 DB reader 코드는 유지했다. 운영 export 활성화·Map 연동 검증의 보류도 유지한다.

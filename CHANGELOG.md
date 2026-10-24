@@ -10,6 +10,26 @@
 
 ## [Unreleased]
 
+### weather 현재·예보·세 구간 요약을 Valkey에 세대 단위로 담고 service REST로 준다 (2026-10-24, ADR-114 2단계, T-STATE-02)
+
+- **ADDED (service REST)**: `/v1/service/weather/locations`(목록·근처·영역 ≤ 100 km, `include_current`),
+  `/v1/service/weather/locations/{feature_id}`(관측·예보·세 구간 요약 묶음 — 지난 예보 시각은 읽을 때 떼고 `from`·`to` 창,
+  요약 `partial`은 읽는 시각으로 다시 계산하고 끝난 구간끼리만 `vs_previous_day`), `/v1/service/weather/nearest`(근처
+  최대 10곳에서 **부분마다** 데이터가 있는 가장 가까운 위치 — `source`로 출처 위치·거리), `POST
+  /v1/service/weather/locations/batch`(feature_id·weather location_id 합 50), `/v1/service/weather/status`(service
+  token). 묶음의 각 부분은 데이터셋별 `status`·`freshness`(weather `source_status` 포함)를 갖는다. Valkey 장애는 이 표면만
+  503 `WEATHER_STATE_UNAVAILABLE`, 위치 적재 전 503 `WEATHER_STATE_NOT_LOADED`. ADR-105(Map은 weather를 서빙하지
+  않는다)의 유일한 예외 표면이다. **admin·service OpenAPI가 바뀌어 PinVi 재vendor가 필요하다**(user 그대로).
+- **ADDED (Dagster)**: job·schedule 7쌍 `weather_state_{locations,current,forecast_ultra_short,forecast_short,
+  forecast_mid,forecast_external,daily_summaries}` — kor-travel-weather Map export(W1·W2·W3·W5, `X-Admin-Token`)를 끝까지
+  받아 위치 단위로 묶어 1단계와 같은 세대 교체 store로 싣는다. **schedule은 기본 STOPPED**. PG는 쓰지 않는다.
+- **ADDED (설정)**: `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_{BASE_URL,SERVICE_TOKEN,AUTH_HEADER,PAGE_SIZE,TIMEOUT_SECONDS,
+  CONNECT_TIMEOUT_SECONDS}`, `KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS`(기본 14).
+- **ADDED (Python API)**: `kortravelmap.dto.weather_state`, `kortravelmap.providers.kor_travel_weather`(export 계약·파서),
+  `kortravelmap.providers.kor_travel_weather_state`(위치 단위 값, id는 `make_feature_id(kind="weather", bjd_code=None)`),
+  Valkey 세대 메타 `source_status`·`source_etag`·`checked_at`, `ValkeyStateStore.read_many`(pipeline 묶음 읽기)·
+  `touch_checked`(304 확인 시각).
+
 ### 주유소 가격 추이 프록시를 transport T4 계약에 맞춘다 (2026-10-24, ADR-114 D6, T-STATE-01-T4)
 
 - **FIXED (service REST)**: `GET /v1/service/transport/fuel-stations/{feature_id}/price-history`가 실제 transport T4 응답
