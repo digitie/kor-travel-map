@@ -193,6 +193,9 @@ def upgrade() -> None:
         bind.execute(text("RESET ROLE"))
     for name, prior in settings.items():
         bind.execute(text("SELECT set_config(:name,:value,true)"), {"name": name, "value": prior})
+    # Alembic의 version 표 쓰기는 원래 schema owner 창에서 계속해야 한다.
+    # ops CREATE 임시 권한을 회수하며 RESET ROLE한 상태를 밖으로 누출하지 않는다.
+    bind.execute(text("SET ROLE ktm_feature_schema_owner"))
 
 
 def downgrade() -> None:

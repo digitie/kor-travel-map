@@ -11105,6 +11105,141 @@ $$;
 ALTER FUNCTION feature.write_feature_state_transition() OWNER TO ktm_feature_audit_writer;
 
 --
+-- Name: _guard_scoped_feature_write_completion(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops._guard_scoped_feature_write_completion() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF EXISTS(SELECT 1 FROM ops.feature_write_attempts WHERE attempt_id=NEW.attempt_id AND status='applying') THEN
+        RAISE EXCEPTION 'apply transaction must finish before commit' USING ERRCODE='23514';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION ops._guard_scoped_feature_write_completion() OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _lock_scoped_feature_write_scope(bigint, jsonb, boolean); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_region jsonb;
+BEGIN
+    PERFORM ops.lock_scoped_feature_write_protocol(p_exclusive);
+    INSERT INTO ops.feature_write_dataset_scopes(provider_dataset_id) VALUES(p_dataset)
+        ON CONFLICT DO NOTHING;
+    IF jsonb_array_length(p_regions)=0 THEN
+        PERFORM 1 FROM ops.feature_write_dataset_scopes WHERE provider_dataset_id=p_dataset FOR UPDATE;
+    ELSE
+        PERFORM 1 FROM ops.feature_write_dataset_scopes WHERE provider_dataset_id=p_dataset FOR SHARE;
+    END IF;
+    IF NOT FOUND THEN RAISE EXCEPTION 'scope is not visible; replan' USING ERRCODE='40001'; END IF;
+    FOR v_region IN SELECT value FROM jsonb_array_elements(p_regions) LOOP
+        INSERT INTO ops.feature_write_region_scopes(provider_dataset_id,scope_version,region_key)
+            VALUES(p_dataset,(v_region->>'scope_version')::integer,v_region->>'region_key') ON CONFLICT DO NOTHING;
+        PERFORM 1 FROM ops.feature_write_region_scopes WHERE provider_dataset_id=p_dataset
+            AND scope_version=(v_region->>'scope_version')::integer AND region_key=v_region->>'region_key' FOR UPDATE;
+        IF NOT FOUND THEN RAISE EXCEPTION 'region is not visible; replan' USING ERRCODE='40001'; END IF;
+    END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
+
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: feature_write_attempts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_write_attempts (
+    attempt_id uuid NOT NULL,
+    provider_dataset_id bigint NOT NULL,
+    idempotency_key text NOT NULL COLLATE pg_catalog."C",
+    owner uuid NOT NULL,
+    dataset_epoch bigint NOT NULL,
+    region_epochs bigint[] NOT NULL,
+    regions jsonb NOT NULL,
+    exclusive_protocol boolean NOT NULL,
+    input_digest text NOT NULL COLLATE pg_catalog."C",
+    expected_members integer NOT NULL,
+    manifest_digest text COLLATE pg_catalog."C",
+    status text DEFAULT 'preparing'::text NOT NULL COLLATE pg_catalog."C",
+    apply_txid bigint,
+    result_digest text COLLATE pg_catalog."C",
+    lease_until timestamp with time zone NOT NULL,
+    updated_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_fw_attempt_epoch CHECK ((dataset_epoch >= 0)),
+    CONSTRAINT ck_fw_attempt_input CHECK ((input_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_fw_attempt_key CHECK ((idempotency_key ~ '^[A-Za-z0-9_.:-]{1,128}$'::text)),
+    CONSTRAINT ck_fw_attempt_manifest CHECK (((manifest_digest IS NULL) OR (manifest_digest ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT ck_fw_attempt_members CHECK (((expected_members >= 0) AND (expected_members <= 8192))),
+    CONSTRAINT ck_fw_attempt_regions CHECK (((jsonb_typeof(regions) = 'array'::text) AND (jsonb_array_length(regions) <= 256) AND (cardinality(region_epochs) = jsonb_array_length(regions)))),
+    CONSTRAINT ck_fw_attempt_result CHECK (((result_digest IS NULL) OR (result_digest ~ '^[0-9a-f]{64}$'::text))),
+    CONSTRAINT ck_fw_attempt_status CHECK ((status = ANY (ARRAY['preparing'::text, 'ready'::text, 'applying'::text, 'completed'::text, 'cancelled'::text])))
+);
+
+
+ALTER TABLE ops.feature_write_attempts OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: _locked_scoped_feature_write_attempt(uuid, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops._locked_scoped_feature_write_attempt(p_attempt uuid, p_owner uuid) RETURNS ops.feature_write_attempts
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_dataset ops.feature_write_dataset_scopes%ROWTYPE;
+        v_region jsonb; v_epoch bigint; v_owner uuid; v_index integer:=0;
+BEGIN
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
+    IF NOT FOUND THEN RAISE EXCEPTION 'unknown attempt' USING ERRCODE='23514'; END IF;
+    PERFORM ops._lock_scoped_feature_write_scope(v_attempt.provider_dataset_id,v_attempt.regions,v_attempt.exclusive_protocol);
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt FOR UPDATE;
+    IF NOT FOUND OR v_attempt.owner IS DISTINCT FROM p_owner THEN
+        RAISE EXCEPTION 'attempt owner is not current' USING ERRCODE='40001';
+    END IF;
+    IF v_attempt.status IN ('completed','cancelled') THEN RETURN v_attempt; END IF;
+    SELECT * INTO v_dataset FROM ops.feature_write_dataset_scopes WHERE provider_dataset_id=v_attempt.provider_dataset_id;
+    IF v_dataset.epoch <> v_attempt.dataset_epoch THEN
+        RAISE EXCEPTION 'dataset epoch changed' USING ERRCODE='40001';
+    END IF;
+    IF jsonb_array_length(v_attempt.regions)=0 AND v_dataset.owner IS DISTINCT FROM p_attempt THEN
+        RAISE EXCEPTION 'dataset owner changed' USING ERRCODE='40001';
+    END IF;
+    FOR v_region IN SELECT value FROM jsonb_array_elements(v_attempt.regions) LOOP
+        v_index:=v_index+1;
+        SELECT epoch,owner INTO v_epoch,v_owner FROM ops.feature_write_region_scopes
+            WHERE provider_dataset_id=v_attempt.provider_dataset_id
+            AND scope_version=(v_region->>'scope_version')::integer AND region_key=v_region->>'region_key';
+        IF v_epoch IS DISTINCT FROM v_attempt.region_epochs[v_index] OR v_owner IS DISTINCT FROM p_attempt THEN
+            RAISE EXCEPTION 'region epoch or owner changed' USING ERRCODE='40001';
+        END IF;
+    END LOOP;
+    IF v_attempt.lease_until <= clock_timestamp()
+       AND NOT (v_attempt.status='applying' AND v_attempt.apply_txid=txid_current()) THEN
+        RAISE EXCEPTION 'attempt lease expired; replan' USING ERRCODE='40001';
+    END IF;
+    RETURN v_attempt;
+END;
+$$;
+
+
+ALTER FUNCTION ops._locked_scoped_feature_write_attempt(p_attempt uuid, p_owner uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: append_provider_feature_attempt_event_command(text, bigint, text, text, integer, text, jsonb); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
 --
 
@@ -11156,6 +11291,57 @@ $$;
 
 
 ALTER PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: append_scoped_feature_write_manifest(uuid, uuid, jsonb); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.append_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid, p_members jsonb) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_member jsonb; v_digest text; v_existing ops.feature_write_manifests%ROWTYPE; v_count integer;
+BEGIN
+    v_attempt:=ops._locked_scoped_feature_write_attempt(p_attempt,p_owner);
+    IF v_attempt.status<>'preparing' THEN RAISE EXCEPTION 'manifest is sealed' USING ERRCODE='23514'; END IF;
+    IF jsonb_typeof(p_members) IS DISTINCT FROM 'array' OR pg_column_size(p_members)>131072 THEN
+        RAISE EXCEPTION 'invalid bounded manifest batch' USING ERRCODE='23514';
+    END IF;
+    IF jsonb_array_length(p_members) NOT BETWEEN 1 AND 256 THEN RAISE EXCEPTION 'invalid manifest batch count' USING ERRCODE='23514'; END IF;
+    FOR v_member IN SELECT value FROM jsonb_array_elements(p_members) LOOP
+        IF jsonb_typeof(v_member) IS DISTINCT FROM 'object' THEN RAISE EXCEPTION 'invalid manifest object' USING ERRCODE='23514'; END IF;
+        IF (SELECT array_agg(key ORDER BY key COLLATE "C") FROM jsonb_object_keys(v_member) key)
+            IS DISTINCT FROM ARRAY['dependency_key','dependency_kind','expected_value','ordinal']::text[]
+            OR jsonb_typeof(v_member->'ordinal') IS DISTINCT FROM 'number'
+            OR (v_member->>'ordinal') !~ '^(0|[1-9][0-9]{0,3})$'
+            OR jsonb_typeof(v_member->'dependency_kind') IS DISTINCT FROM 'string'
+            OR (v_member->>'dependency_kind') NOT IN ('feature','source_head')
+            OR jsonb_typeof(v_member->'dependency_key') IS DISTINCT FROM 'string'
+            OR octet_length(v_member->>'dependency_key') NOT BETWEEN 1 AND 128
+            OR jsonb_typeof(v_member->'expected_value') IS DISTINCT FROM 'string'
+            OR octet_length(v_member->>'expected_value') NOT BETWEEN 1 AND 128 THEN
+            RAISE EXCEPTION 'invalid manifest member' USING ERRCODE='23514';
+        END IF;
+        IF (v_member->>'ordinal')::integer>=v_attempt.expected_members THEN RAISE EXCEPTION 'manifest ordinal overflow' USING ERRCODE='23514'; END IF;
+        IF v_member->>'dependency_kind'='feature' AND ((v_member->>'dependency_key') !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$' OR (v_member->>'expected_value') !~ '^[1-9][0-9]{0,18}$') THEN
+            RAISE EXCEPTION 'invalid feature dependency' USING ERRCODE='23514';
+        END IF;
+        v_digest:=encode(sha256(convert_to(v_member::text,'UTF8')),'hex');
+        INSERT INTO ops.feature_write_manifests(attempt_id,ordinal,dependency_kind,dependency_key,expected_value,member_digest)
+            VALUES(p_attempt,(v_member->>'ordinal')::integer,v_member->>'dependency_kind',v_member->>'dependency_key',v_member->>'expected_value',v_digest) ON CONFLICT(attempt_id,ordinal) DO NOTHING;
+        SELECT * INTO v_existing FROM ops.feature_write_manifests WHERE attempt_id=p_attempt AND ordinal=(v_member->>'ordinal')::integer;
+        IF NOT FOUND OR v_existing.member_digest<>v_digest THEN RAISE EXCEPTION 'manifest member is immutable or not visible' USING ERRCODE='23514'; END IF;
+    END LOOP;
+    SELECT count(*) INTO v_count FROM ops.feature_write_manifests WHERE attempt_id=p_attempt;
+    IF v_count>v_attempt.expected_members OR (SELECT COALESCE(sum(octet_length(dependency_key)+octet_length(expected_value)+octet_length(dependency_kind)+68),0) FROM ops.feature_write_manifests WHERE attempt_id=p_attempt)>1048576 THEN
+        RAISE EXCEPTION 'manifest budget exceeded' USING ERRCODE='23514';
+    END IF;
+    RETURN v_count;
+END;
+$_$;
+
+
+ALTER FUNCTION ops.append_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid, p_members jsonb) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: assert_feature_update_job_pair(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -11221,6 +11407,74 @@ CREATE FUNCTION ops.assign_cache_target_outbox_relay_order() RETURNS trigger
 ALTER FUNCTION ops.assign_cache_target_outbox_relay_order() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: begin_scoped_feature_write(uuid, uuid, text); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_dependency ops.feature_write_manifests%ROWTYPE; v_value text; v_plan ops.feature_write_attempts%ROWTYPE; v_participants bigint[]; v_dataset bigint; v_entity_dataset bigint;
+BEGIN
+    -- dataset 행을 하나라도 잠그기 전에 frozen manifest의 모든 participant를 정렬한다.
+    SELECT * INTO v_plan FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
+    IF NOT FOUND OR v_plan.owner IS DISTINCT FROM p_owner THEN
+        RAISE EXCEPTION 'unknown attempt or owner' USING ERRCODE='40001';
+    END IF;
+    IF v_plan.status NOT IN ('ready','applying','completed') THEN
+        RAISE EXCEPTION 'manifest is not frozen' USING ERRCODE='23514';
+    END IF;
+    SELECT array_agg(dataset ORDER BY dataset) INTO v_participants FROM (
+        SELECT v_plan.provider_dataset_id AS dataset UNION
+        SELECT e.provider_dataset_id FROM ops.feature_write_manifests m
+        JOIN provider_sync.source_entities e ON e.source_entity_key=m.dependency_key
+        WHERE m.attempt_id=p_attempt AND m.dependency_kind='source_head'
+    ) participants;
+    IF cardinality(v_participants)>32 THEN
+        RAISE EXCEPTION 'too many participant datasets' USING ERRCODE='23514';
+    END IF;
+    PERFORM ops.lock_scoped_feature_write_protocol(v_plan.exclusive_protocol);
+    FOREACH v_dataset IN ARRAY v_participants LOOP
+        INSERT INTO ops.feature_write_dataset_scopes(provider_dataset_id) VALUES(v_dataset) ON CONFLICT DO NOTHING;
+        IF v_dataset=v_plan.provider_dataset_id AND jsonb_array_length(v_plan.regions)=0 THEN
+            PERFORM 1 FROM ops.feature_write_dataset_scopes WHERE provider_dataset_id=v_dataset FOR UPDATE;
+        ELSE
+            PERFORM 1 FROM ops.feature_write_dataset_scopes WHERE provider_dataset_id=v_dataset FOR SHARE;
+        END IF;
+        IF NOT FOUND THEN RAISE EXCEPTION 'participant is not visible' USING ERRCODE='40001'; END IF;
+    END LOOP;
+    v_attempt:=ops._locked_scoped_feature_write_attempt(p_attempt,p_owner);
+    IF v_attempt.manifest_digest IS DISTINCT FROM p_manifest_digest OR p_manifest_digest IS NULL THEN
+        RAISE EXCEPTION 'manifest digest mismatch' USING ERRCODE='23514';
+    END IF;
+    IF v_attempt.status='completed' THEN RETURN to_jsonb(v_attempt); END IF;
+    IF v_attempt.status='applying' AND v_attempt.apply_txid=txid_current() THEN RETURN to_jsonb(v_attempt); END IF;
+    IF v_attempt.status<>'ready' THEN RAISE EXCEPTION 'attempt is not ready' USING ERRCODE='23514'; END IF;
+    -- 명시 manifest의 알려진 source/head→Feature 의존만 지원한다. 전체 closure/phantom의
+    -- 완결성 증명이나 claim/redirect/catalog 검증은 후속 진입점이 제공하기 전 enable하지 않는다.
+    FOR v_dependency IN SELECT * FROM ops.feature_write_manifests WHERE attempt_id=p_attempt
+        ORDER BY CASE dependency_kind WHEN 'source_head' THEN 0 ELSE 1 END,dependency_key COLLATE "C" LOOP
+        v_value:=NULL;
+        IF v_dependency.dependency_kind='source_head' THEN
+            SELECT provider_dataset_id INTO v_entity_dataset FROM provider_sync.source_entities WHERE source_entity_key=v_dependency.dependency_key FOR UPDATE;
+            IF NOT FOUND OR NOT (v_entity_dataset=ANY(v_participants)) THEN
+                RAISE EXCEPTION 'source participant changed; replan' USING ERRCODE='40001';
+            END IF;
+            SELECT current_source_record_key INTO v_value FROM provider_sync.source_entity_heads WHERE source_entity_key=v_dependency.dependency_key FOR UPDATE;
+        ELSE
+            SELECT row_revision::text INTO v_value FROM feature.features WHERE feature_id=v_dependency.dependency_key::uuid FOR UPDATE;
+        END IF;
+        IF v_value IS DISTINCT FROM v_dependency.expected_value THEN RAISE EXCEPTION 'manifest dependency changed; replan' USING ERRCODE='40001'; END IF;
+    END LOOP;
+    UPDATE ops.feature_write_attempts SET status='applying',apply_txid=txid_current(),updated_at=clock_timestamp() WHERE attempt_id=p_attempt RETURNING * INTO v_attempt;
+    RETURN to_jsonb(v_attempt);
+END;
+$$;
+
+
+ALTER FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: bump_import_job_event_clock(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -11271,6 +11525,33 @@ CREATE FUNCTION ops.bump_ops_live_topic_revision() RETURNS trigger
 ALTER FUNCTION ops.bump_ops_live_topic_revision() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: cancel_scoped_feature_write(uuid, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE;
+BEGIN
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
+    IF NOT FOUND THEN RETURN false; END IF;
+    PERFORM ops._lock_scoped_feature_write_scope(v_attempt.provider_dataset_id,v_attempt.regions,v_attempt.exclusive_protocol);
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt FOR UPDATE;
+    IF NOT FOUND OR v_attempt.owner IS DISTINCT FROM p_owner THEN RAISE EXCEPTION 'attempt owner mismatch' USING ERRCODE='40001'; END IF;
+    IF v_attempt.status='completed' THEN RETURN false; END IF;
+    IF v_attempt.status='applying' THEN RAISE EXCEPTION 'cancel applying transaction by rollback' USING ERRCODE='23514'; END IF;
+    UPDATE ops.feature_write_attempts SET status='cancelled',updated_at=clock_timestamp() WHERE attempt_id=p_attempt;
+    UPDATE ops.feature_write_dataset_scopes SET owner=NULL,lease_until=NULL WHERE provider_dataset_id=v_attempt.provider_dataset_id AND owner=p_attempt;
+    UPDATE ops.feature_write_region_scopes SET owner=NULL,lease_until=NULL WHERE provider_dataset_id=v_attempt.provider_dataset_id AND owner=p_attempt;
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: check_feature_operation_parent(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -11300,6 +11581,87 @@ CREATE FUNCTION ops.check_feature_operation_parent() RETURNS trigger
 
 
 ALTER FUNCTION ops.check_feature_operation_parent() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: claim_scoped_feature_write(uuid, uuid, bigint, text, jsonb, text, integer, integer, boolean); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE v_regions jsonb; v_region jsonb; v_dataset ops.feature_write_dataset_scopes%ROWTYPE;
+        v_attempt ops.feature_write_attempts%ROWTYPE; v_epochs bigint[]:='{}'; v_epoch bigint; v_until timestamptz;
+BEGIN
+    IF p_attempt IS NULL OR p_owner IS NULL OR p_dataset IS NULL OR p_dataset<1
+       OR p_key IS NULL OR p_key !~ '^[A-Za-z0-9_.:-]{1,128}$'
+       OR p_input_digest IS NULL OR p_input_digest !~ '^[0-9a-f]{64}$'
+       OR p_expected_members IS NULL OR p_expected_members NOT BETWEEN 0 AND 8192
+       OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 1 AND 900
+       OR p_exclusive IS NULL OR jsonb_typeof(p_regions) IS DISTINCT FROM 'array'
+       OR pg_column_size(p_regions)>131072 THEN
+        RAISE EXCEPTION 'invalid bounded scope plan' USING ERRCODE='23514';
+    END IF;
+    IF jsonb_array_length(p_regions)>256 THEN RAISE EXCEPTION 'too many regions' USING ERRCODE='23514'; END IF;
+    FOR v_region IN SELECT value FROM jsonb_array_elements(p_regions) LOOP
+        IF jsonb_typeof(v_region) IS DISTINCT FROM 'object' THEN
+            RAISE EXCEPTION 'invalid region object' USING ERRCODE='23514';
+        END IF;
+        IF (SELECT array_agg(key ORDER BY key COLLATE "C") FROM jsonb_object_keys(v_region) key)
+             IS DISTINCT FROM ARRAY['region_key','scope_version']::text[]
+           OR jsonb_typeof(v_region->'region_key') IS DISTINCT FROM 'string'
+           OR (v_region->>'region_key') !~ '^[A-Za-z0-9_.:-]{1,128}$'
+           OR jsonb_typeof(v_region->'scope_version') IS DISTINCT FROM 'number'
+           OR (v_region->>'scope_version') !~ '^[1-9][0-9]{0,9}$' THEN
+            RAISE EXCEPTION 'invalid region fields' USING ERRCODE='23514';
+        END IF;
+        IF (v_region->>'scope_version')::numeric>2147483647 THEN
+            RAISE EXCEPTION 'region version overflow' USING ERRCODE='23514';
+        END IF;
+    END LOOP;
+    SELECT COALESCE(jsonb_agg(value ORDER BY (value->>'scope_version')::integer,value->>'region_key' COLLATE "C"),'[]')
+        INTO v_regions FROM jsonb_array_elements(p_regions);
+    IF (SELECT count(DISTINCT value) FROM jsonb_array_elements(v_regions))<>jsonb_array_length(v_regions) THEN
+        RAISE EXCEPTION 'duplicate region' USING ERRCODE='23514';
+    END IF;
+    PERFORM ops._lock_scoped_feature_write_scope(p_dataset,v_regions,p_exclusive);
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE provider_dataset_id=p_dataset AND idempotency_key=p_key FOR UPDATE;
+    IF FOUND THEN
+        IF v_attempt.attempt_id IS DISTINCT FROM p_attempt OR v_attempt.owner IS DISTINCT FROM p_owner
+           OR v_attempt.regions IS DISTINCT FROM v_regions OR v_attempt.input_digest IS DISTINCT FROM p_input_digest
+           OR v_attempt.expected_members IS DISTINCT FROM p_expected_members OR v_attempt.exclusive_protocol IS DISTINCT FROM p_exclusive THEN
+            RAISE EXCEPTION 'idempotency key is immutable' USING ERRCODE='23514';
+        END IF;
+        RETURN to_jsonb(v_attempt);
+    END IF;
+    SELECT * INTO v_dataset FROM ops.feature_write_dataset_scopes WHERE provider_dataset_id=p_dataset;
+    IF v_dataset.owner IS NOT NULL AND v_dataset.lease_until>clock_timestamp() THEN
+        RAISE EXCEPTION 'dataset has active owner' USING ERRCODE='55P03';
+    END IF;
+    v_until:=clock_timestamp()+make_interval(secs=>p_lease_seconds);
+    IF jsonb_array_length(v_regions)=0 THEN
+        IF EXISTS(SELECT 1 FROM ops.feature_write_region_scopes WHERE provider_dataset_id=p_dataset AND owner IS NOT NULL AND lease_until>clock_timestamp()) THEN
+            RAISE EXCEPTION 'dataset has active region owners' USING ERRCODE='55P03';
+        END IF;
+        UPDATE ops.feature_write_dataset_scopes SET epoch=epoch+1,owner=p_attempt,lease_until=v_until WHERE provider_dataset_id=p_dataset RETURNING epoch INTO v_dataset.epoch;
+    ELSE
+        FOR v_region IN SELECT value FROM jsonb_array_elements(v_regions) LOOP
+            IF EXISTS(SELECT 1 FROM ops.feature_write_region_scopes WHERE provider_dataset_id=p_dataset AND scope_version=(v_region->>'scope_version')::integer AND region_key=v_region->>'region_key' AND owner IS NOT NULL AND lease_until>clock_timestamp()) THEN
+                RAISE EXCEPTION 'region has active owner' USING ERRCODE='55P03';
+            END IF;
+            UPDATE ops.feature_write_region_scopes SET epoch=epoch+1,owner=p_attempt,lease_until=v_until
+                WHERE provider_dataset_id=p_dataset AND scope_version=(v_region->>'scope_version')::integer AND region_key=v_region->>'region_key' RETURNING epoch INTO v_epoch;
+            v_epochs:=array_append(v_epochs,v_epoch);
+        END LOOP;
+    END IF;
+    INSERT INTO ops.feature_write_attempts(attempt_id,provider_dataset_id,idempotency_key,owner,dataset_epoch,region_epochs,regions,exclusive_protocol,input_digest,expected_members,lease_until)
+        VALUES(p_attempt,p_dataset,p_key,p_owner,v_dataset.epoch,v_epochs,v_regions,p_exclusive,p_input_digest,p_expected_members,v_until) RETURNING * INTO v_attempt;
+    RETURN to_jsonb(v_attempt);
+END;
+$_$;
+
+
+ALTER FUNCTION ops.claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: curation_import_manual_feature_children_append_only(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -11619,6 +11981,29 @@ $$;
 ALTER PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: expire_scoped_feature_write_attempt(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.expire_scoped_feature_write_attempt(p_attempt uuid) RETURNS boolean
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE;
+BEGIN
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
+    IF NOT FOUND OR v_attempt.status IN ('completed','cancelled') THEN RETURN false; END IF;
+    PERFORM ops._lock_scoped_feature_write_scope(v_attempt.provider_dataset_id,v_attempt.regions,v_attempt.exclusive_protocol);
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt FOR UPDATE;
+    IF NOT FOUND OR v_attempt.status IN ('completed','cancelled') THEN RETURN false; END IF;
+    IF v_attempt.lease_until>clock_timestamp() THEN RAISE EXCEPTION 'attempt lease is active' USING ERRCODE='55P03'; END IF;
+    RETURN ops.cancel_scoped_feature_write(p_attempt,v_attempt.owner);
+END;
+$$;
+
+
+ALTER FUNCTION ops.expire_scoped_feature_write_attempt(p_attempt uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: fill_provider_cancellation_starts_command(uuid, text, timestamp with time zone); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
 --
 
@@ -11752,6 +12137,32 @@ $$;
 
 
 ALTER PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: finish_scoped_feature_write(uuid, uuid, text); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE;
+BEGIN
+    v_attempt:=ops._locked_scoped_feature_write_attempt(p_attempt,p_owner);
+    IF p_result_digest IS NULL OR p_result_digest !~ '^[0-9a-f]{64}$' THEN RAISE EXCEPTION 'invalid result digest' USING ERRCODE='23514'; END IF;
+    IF v_attempt.status='completed' AND v_attempt.result_digest=p_result_digest THEN RETURN to_jsonb(v_attempt); END IF;
+    IF v_attempt.status<>'applying' OR v_attempt.apply_txid IS DISTINCT FROM txid_current() THEN
+        RAISE EXCEPTION 'completion must share the apply transaction' USING ERRCODE='23514';
+    END IF;
+    UPDATE ops.feature_write_attempts SET status='completed',result_digest=p_result_digest,updated_at=clock_timestamp() WHERE attempt_id=p_attempt RETURNING * INTO v_attempt;
+    UPDATE ops.feature_write_dataset_scopes SET owner=NULL,lease_until=NULL WHERE provider_dataset_id=v_attempt.provider_dataset_id AND owner=p_attempt;
+    UPDATE ops.feature_write_region_scopes SET owner=NULL,lease_until=NULL WHERE provider_dataset_id=v_attempt.provider_dataset_id AND owner=p_attempt;
+    RETURN to_jsonb(v_attempt);
+END;
+$_$;
+
+
+ALTER FUNCTION ops.finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: force_poi_cache_target_lock_version(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -12279,6 +12690,41 @@ CREATE FUNCTION ops.is_valid_feature_update_scope_0075(p_scope_type text, p_scop
 ALTER FUNCTION ops.is_valid_feature_update_scope_0075(p_scope_type text, p_scope jsonb) OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: lock_scoped_feature_write_protocol(boolean); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF p_exclusive IS NULL THEN
+        RAISE EXCEPTION 'protocol mode is required' USING ERRCODE='23514';
+    END IF;
+    -- 두 정수의 고정 gate 한 개만 사용한다. Feature hash별 잠금을 만들지 않는다.
+    IF p_exclusive AND EXISTS (
+        SELECT 1 FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+        AND classid=1369104691::oid AND objid=115::oid AND objsubid=2
+        AND mode='ShareLock' AND granted
+    ) AND NOT EXISTS (
+        SELECT 1 FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+        AND classid=1369104691::oid AND objid=115::oid AND objsubid=2
+        AND mode='ExclusiveLock' AND granted
+    ) THEN
+        RAISE EXCEPTION 'protocol share to exclusive upgrade requires replan' USING ERRCODE='23514';
+    END IF;
+    IF p_exclusive THEN
+        PERFORM pg_advisory_xact_lock(1369104691,115);
+    ELSE
+        PERFORM pg_advisory_xact_lock_shared(1369104691,115);
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: mark_snapshot_material_orphaned(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -12310,6 +12756,39 @@ $$;
 
 
 ALTER FUNCTION ops.mark_snapshot_material_orphaned() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: prune_scoped_feature_write_attempts(timestamp with time zone, integer); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestamp with time zone, p_limit integer) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_members integer; v_attempts integer;
+BEGIN
+    PERFORM ops.lock_scoped_feature_write_protocol(false);
+    IF p_before IS NULL OR p_before>clock_timestamp()-interval '1 day' OR p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 256 THEN
+        RAISE EXCEPTION 'invalid bounded terminal retention' USING ERRCODE='23514';
+    END IF;
+    WITH candidates AS MATERIALIZED (
+        SELECT m.attempt_id,m.ordinal FROM ops.feature_write_manifests m JOIN ops.feature_write_attempts a USING(attempt_id)
+        WHERE a.status IN ('completed','cancelled') AND a.updated_at<p_before
+        ORDER BY a.updated_at,a.attempt_id,m.ordinal LIMIT p_limit FOR UPDATE OF m SKIP LOCKED
+    ), deleted AS (DELETE FROM ops.feature_write_manifests m USING candidates c WHERE m.attempt_id=c.attempt_id AND m.ordinal=c.ordinal RETURNING 1)
+    SELECT count(*) INTO v_members FROM deleted;
+    WITH candidates AS MATERIALIZED (
+        SELECT a.attempt_id FROM ops.feature_write_attempts a WHERE a.status IN ('completed','cancelled') AND a.updated_at<p_before
+        AND NOT EXISTS(SELECT 1 FROM ops.feature_write_manifests m WHERE m.attempt_id=a.attempt_id)
+        ORDER BY a.updated_at,a.attempt_id LIMIT 8 FOR UPDATE SKIP LOCKED
+    ), deleted AS (DELETE FROM ops.feature_write_attempts a USING candidates c WHERE a.attempt_id=c.attempt_id RETURNING 1)
+    SELECT count(*) INTO v_attempts FROM deleted;
+    RETURN jsonb_build_object('manifest_rows',v_members,'attempt_rows',v_attempts);
+END;
+$$;
+
+
+ALTER FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestamp with time zone, p_limit integer) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: record_curation_import_manual_feature_child(uuid, integer, text, text, bigint, uuid, uuid, uuid, uuid); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
@@ -13131,6 +13610,30 @@ CREATE FUNCTION ops.reject_terminal_current_summary_run_mutation() RETURNS trigg
 
 
 ALTER FUNCTION ops.reject_terminal_current_summary_run_mutation() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: seal_scoped_feature_write_manifest(uuid, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.seal_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_count integer; v_max integer; v_digest text;
+BEGIN
+    v_attempt:=ops._locked_scoped_feature_write_attempt(p_attempt,p_owner);
+    IF v_attempt.status='ready' THEN RETURN v_attempt.manifest_digest; END IF;
+    IF v_attempt.status<>'preparing' THEN RAISE EXCEPTION 'attempt cannot seal' USING ERRCODE='23514'; END IF;
+    SELECT count(*),COALESCE(max(ordinal),-1),encode(sha256(convert_to(COALESCE(string_agg(member_digest,'' ORDER BY ordinal),''),'UTF8')),'hex')
+        INTO v_count,v_max,v_digest FROM ops.feature_write_manifests WHERE attempt_id=p_attempt;
+    IF v_count<>v_attempt.expected_members OR v_max<>v_count-1 THEN RAISE EXCEPTION 'manifest is incomplete' USING ERRCODE='23514'; END IF;
+    UPDATE ops.feature_write_attempts SET status='ready',manifest_digest=v_digest,updated_at=clock_timestamp() WHERE attempt_id=p_attempt;
+    RETURN v_digest;
+END;
+$$;
+
+
+ALTER FUNCTION ops.seal_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: stamp_import_job_root(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -14302,10 +14805,6 @@ CREATE FUNCTION provider_sync.lock_feature_update_request_member_scopes(target_r
 
 
 ALTER FUNCTION provider_sync.lock_feature_update_request_member_scopes(target_request_id uuid) OWNER TO ktm_feature_schema_owner;
-
-SET default_tablespace = '';
-
-SET default_table_access_method = heap;
 
 --
 -- Name: source_entity_heads; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
@@ -16136,7 +16635,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -17121,6 +17620,63 @@ CREATE TABLE ops.feature_update_requests (
 
 
 ALTER TABLE ops.feature_update_requests OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_write_dataset_scopes; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_write_dataset_scopes (
+    provider_dataset_id bigint NOT NULL,
+    epoch bigint DEFAULT 0 NOT NULL,
+    owner uuid,
+    lease_until timestamp with time zone,
+    CONSTRAINT ck_fw_dataset_epoch CHECK ((epoch >= 0)),
+    CONSTRAINT ck_fw_dataset_owner CHECK (((owner IS NULL) = (lease_until IS NULL)))
+);
+
+
+ALTER TABLE ops.feature_write_dataset_scopes OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_write_manifests; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_write_manifests (
+    attempt_id uuid NOT NULL,
+    ordinal integer NOT NULL,
+    dependency_kind text NOT NULL COLLATE pg_catalog."C",
+    dependency_key text NOT NULL COLLATE pg_catalog."C",
+    expected_value text NOT NULL COLLATE pg_catalog."C",
+    member_digest text NOT NULL COLLATE pg_catalog."C",
+    CONSTRAINT ck_fw_manifest_digest CHECK ((member_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT ck_fw_manifest_expected CHECK (((octet_length(expected_value) >= 1) AND (octet_length(expected_value) <= 128))),
+    CONSTRAINT ck_fw_manifest_key CHECK (((octet_length(dependency_key) >= 1) AND (octet_length(dependency_key) <= 128))),
+    CONSTRAINT ck_fw_manifest_kind CHECK ((dependency_kind = ANY (ARRAY['feature'::text, 'source_head'::text]))),
+    CONSTRAINT ck_fw_manifest_ordinal CHECK (((ordinal >= 0) AND (ordinal <= 8191)))
+);
+
+
+ALTER TABLE ops.feature_write_manifests OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_write_region_scopes; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.feature_write_region_scopes (
+    provider_dataset_id bigint NOT NULL,
+    scope_version integer NOT NULL,
+    region_key text NOT NULL COLLATE pg_catalog."C",
+    epoch bigint DEFAULT 0 NOT NULL,
+    owner uuid,
+    lease_until timestamp with time zone,
+    CONSTRAINT ck_fw_region_epoch CHECK ((epoch >= 0)),
+    CONSTRAINT ck_fw_region_key CHECK ((region_key ~ '^[A-Za-z0-9_.:-]{1,128}$'::text)),
+    CONSTRAINT ck_fw_region_owner CHECK (((owner IS NULL) = (lease_until IS NULL))),
+    CONSTRAINT ck_fw_region_version CHECK ((scope_version > 0))
+);
+
+
+ALTER TABLE ops.feature_write_region_scopes OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: import_job_datasets; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -19395,6 +19951,38 @@ ALTER TABLE ONLY ops.feature_update_requests
 
 
 --
+-- Name: feature_write_attempts pk_fw_attempt; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_attempts
+    ADD CONSTRAINT pk_fw_attempt PRIMARY KEY (attempt_id);
+
+
+--
+-- Name: feature_write_dataset_scopes pk_fw_dataset; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_dataset_scopes
+    ADD CONSTRAINT pk_fw_dataset PRIMARY KEY (provider_dataset_id);
+
+
+--
+-- Name: feature_write_manifests pk_fw_manifest; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_manifests
+    ADD CONSTRAINT pk_fw_manifest PRIMARY KEY (attempt_id, ordinal);
+
+
+--
+-- Name: feature_write_region_scopes pk_fw_region; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_region_scopes
+    ADD CONSTRAINT pk_fw_region PRIMARY KEY (provider_dataset_id, scope_version, region_key);
+
+
+--
 -- Name: import_job_datasets pk_import_job_datasets; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -19960,6 +20548,22 @@ ALTER TABLE ONLY ops.feature_update_request_datasets
 
 ALTER TABLE ONLY ops.feature_update_requests
     ADD CONSTRAINT uq_feature_update_requests_job_id UNIQUE (job_id);
+
+
+--
+-- Name: feature_write_attempts uq_fw_attempt_idempotency; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_attempts
+    ADD CONSTRAINT uq_fw_attempt_idempotency UNIQUE (provider_dataset_id, idempotency_key);
+
+
+--
+-- Name: feature_write_manifests uq_fw_manifest_dependency; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_manifests
+    ADD CONSTRAINT uq_fw_manifest_dependency UNIQUE (attempt_id, dependency_kind, dependency_key);
 
 
 --
@@ -20872,6 +21476,27 @@ CREATE INDEX idx_feature_update_request_datasets_dataset_request ON ops.feature_
 --
 
 CREATE INDEX idx_feature_update_request_idempotency_request ON ops.feature_update_request_idempotency USING btree (request_id);
+
+
+--
+-- Name: idx_feature_write_attempts_expired; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_write_attempts_expired ON ops.feature_write_attempts USING btree (lease_until, provider_dataset_id) WHERE (status = ANY (ARRAY['preparing'::text, 'ready'::text, 'applying'::text]));
+
+
+--
+-- Name: idx_feature_write_attempts_terminal; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_write_attempts_terminal ON ops.feature_write_attempts USING btree (updated_at, attempt_id) WHERE (status = ANY (ARRAY['completed'::text, 'cancelled'::text]));
+
+
+--
+-- Name: idx_feature_write_region_scopes_lease; Type: INDEX; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_write_region_scopes_lease ON ops.feature_write_region_scopes USING btree (lease_until, provider_dataset_id) WHERE (owner IS NOT NULL);
 
 
 --
@@ -22366,6 +22991,13 @@ CREATE TRIGGER trg_feature_update_requests_mutation_guard BEFORE DELETE OR UPDAT
 CREATE TRIGGER trg_feature_update_requests_no_truncate BEFORE TRUNCATE ON ops.feature_update_requests FOR EACH STATEMENT EXECUTE FUNCTION feature.reject_feature_request_evidence_mutation();
 
 ALTER TABLE ops.feature_update_requests ENABLE ALWAYS TRIGGER trg_feature_update_requests_no_truncate;
+
+
+--
+-- Name: feature_write_attempts trg_fw_attempt_complete; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE CONSTRAINT TRIGGER trg_fw_attempt_complete AFTER INSERT OR UPDATE ON ops.feature_write_attempts DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ops._guard_scoped_feature_write_completion();
 
 
 --
@@ -24235,6 +24867,38 @@ ALTER TABLE ONLY ops.feature_update_requests
 
 
 --
+-- Name: feature_write_attempts fk_fw_attempt_dataset; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_attempts
+    ADD CONSTRAINT fk_fw_attempt_dataset FOREIGN KEY (provider_dataset_id) REFERENCES ops.feature_write_dataset_scopes(provider_dataset_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_write_dataset_scopes fk_fw_dataset_provider; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_dataset_scopes
+    ADD CONSTRAINT fk_fw_dataset_provider FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_write_manifests fk_fw_manifest_attempt; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_manifests
+    ADD CONSTRAINT fk_fw_manifest_attempt FOREIGN KEY (attempt_id) REFERENCES ops.feature_write_attempts(attempt_id) ON DELETE CASCADE;
+
+
+--
+-- Name: feature_write_region_scopes fk_fw_region_dataset; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_write_region_scopes
+    ADD CONSTRAINT fk_fw_region_dataset FOREIGN KEY (provider_dataset_id) REFERENCES ops.feature_write_dataset_scopes(provider_dataset_id) ON DELETE RESTRICT;
+
+
+--
 -- Name: import_job_datasets fk_import_job_datasets_exact_operation_scope; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -25352,6 +26016,34 @@ REVOKE ALL ON FUNCTION feature.validate_theme_candidate_merge_target() FROM PUBL
 
 
 --
+-- Name: FUNCTION _guard_scoped_feature_write_completion(); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops._guard_scoped_feature_write_completion() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) FROM PUBLIC;
+
+
+--
+-- Name: TABLE feature_write_attempts; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_attempts TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: FUNCTION _locked_scoped_feature_write_attempt(p_attempt uuid, p_owner uuid); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops._locked_scoped_feature_write_attempt(p_attempt uuid, p_owner uuid) FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
 --
 
@@ -25360,11 +26052,51 @@ GRANT ALL ON PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_da
 
 
 --
+-- Name: FUNCTION append_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid, p_members jsonb); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.append_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid, p_members jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.append_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid, p_members jsonb) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION cancel_scoped_feature_write(p_attempt uuid, p_owner uuid); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean) TO ktm_feature_runtime;
+
+
+--
 -- Name: PROCEDURE ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
 --
 
 REVOKE ALL ON PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean) FROM PUBLIC;
 GRANT ALL ON PROCEDURE ops.ensure_provider_feature_operation_command(IN p_dagster_run_id text, IN p_trigger_kind text, IN p_operation_key text, IN p_memberships jsonb, IN p_created_at timestamp with time zone, IN p_started_at timestamp with time zone, IN p_observed_status text, OUT o_root_job_id uuid, OUT o_inserted boolean, OUT o_changed boolean) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION expire_scoped_feature_write_attempt(p_attempt uuid); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.expire_scoped_feature_write_attempt(p_attempt uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.expire_scoped_feature_write_attempt(p_attempt uuid) TO ktm_feature_runtime;
 
 
 --
@@ -25381,6 +26113,29 @@ GRANT ALL ON FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellati
 
 REVOKE ALL ON PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean) FROM PUBLIC;
 GRANT ALL ON PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION lock_scoped_feature_write_protocol(p_exclusive boolean); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION prune_scoped_feature_write_attempts(p_before timestamp with time zone, p_limit integer); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestamp with time zone, p_limit integer) FROM PUBLIC;
 
 
 --
@@ -25417,6 +26172,14 @@ REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_mutation() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_truncate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION seal_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.seal_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.seal_scoped_feature_write_manifest(p_attempt uuid, p_owner uuid) TO ktm_feature_runtime;
 
 
 --
@@ -27090,6 +27853,27 @@ GRANT UPDATE(rejection_reason) ON TABLE ops.feature_requests TO ktm_feature_requ
 --
 
 GRANT SELECT ON TABLE ops.feature_update_requests TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE feature_write_dataset_scopes; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_dataset_scopes TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: TABLE feature_write_manifests; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_manifests TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: TABLE feature_write_region_scopes; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_region_scopes TO ktm_feature_state_procedure_owner;
 
 
 --
