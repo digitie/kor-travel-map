@@ -26,12 +26,20 @@
   번호 매겼다. 415부터 `transition_feature_state`가 scoped write 프로토콜 gate를 배타로 잡으므로 417은 그 gate를 member 표 잠금보다
   **먼저** 잡는다(교착 회피, 돌고 있는 쓰기가 있으면 30초에 실패). runbook A는 head 416 pair, 3a 큐 sensor 정지 명령(공용 daemon)·
   417 창 새 run 실패/503 안내. 경주 검사는 inserter의 미허가 RowExclusiveLock이 `ops.import_job_datasets`에 있음을 잰다.
-- main 병합 뒤 journal이 220 KiB를 넘어(228,797 bytes) 가장 오래된 2026-10-01 기록(ADR-104 KMA 제거·drain 정정·공유 plane 준비)을
-  `docs/archive/journal-2026-10a.md`로 옮겼다(tasks-rule §8 — 섹션 본문 바이트 보존, 상대 링크 없음). diff3 base 마커 줄 셋도 지웠다. (두 번째 main 병합: main이 2026-09-30분을 `journal-2026-09h.md`로 따로 옮겨 그것을 따랐다.)
+- main 병합 뒤 journal이 220 KiB를 넘어(228,797 bytes) 가장 오래된 2026-10-01 기록을
+  아카이브로 옮겼다(tasks-rule §8 — 섹션 본문 바이트 보존, 상대 링크 없음). diff3 base 마커 줄 셋도 지웠다. (main이 2026-09-30분을 `journal-2026-09h.md`, 가장 오래된 2026-10-01 한 절을 `journal-2026-10a.md`로 따로 옮겨 그것을 따랐고, 남은 2026-10-01 두 절을 `journal-2026-10b.md`로 옮겼다.)
 - 두 번째 main 병합(#1386·#1387 — ADR-115 `417_protocol_ex_reentry`): 이 migration을 `418_retire_pg_transport_values`(down
   417)로 다시 번호 매겼다(당시 runbook A는 head 417 pair).
 - 세 번째 main 병합(#1388 — ADR-115 `418_creation_protocol`): 이 migration을 `419_retire_pg_transport_values`(down 418)로 다시
   번호 매겼다. runbook A는 head 418 pair.
+
+## 2026-10-24 — 국가유산 native 적격성 선행 계약(A1, #1390)
+
+- 안정 composite ID의 본체 이름 presence와 저장 typed projection 재정규화·지원 외 불변 진단을 추가했다. eligible은 DB 적용 승인이 아니며 collector/Geo/whole-TX seal·정책은 바꾸지 않는다.
+- 격리된 고정SDK public 모델·Map fetcher service fixture 포함98 PASS, native 예산 후속075 합집합116 PASS(실PG 포함), mypy3/import4/Ruff 통과. 정확CI·독립2리뷰는 진행 중이며 PG/실UI/운영 수용으로 세지 않는다. [범위와 실패](reports/2026-10-24-heritage-native-eligibility.md).
+- 기존 EX 진입은 별도 #1389이며 부모 합성 시 양쪽 기록을 보존한다. 기본OFF/seed0/운영0, 내구 artifact/full bundle/실제 collector 배선은 후속이다.
+
+- EX 부모 합성으로 journal225349B가 되어 가장 오래된 2026-10-01 한 절5764B를 [아카이브](archive/journal-2026-10a.md)로 원문 이동했다. 원문 SHA/부모 합집합은 A1 보고서에 기록했다.
 
 ## 2026-10-24 — 제한 scalar의 같은 의미 EX 실행 진입
 
@@ -1759,12 +1767,13 @@ ADR-104(KMA Dagster 경로 제거) 작업 중 소유자 결정이 넓어졌다: 
 
 ## 과거 기록 아카이브
 
-> 현행 작업 창(2026-10-01 ADR-105 이후~) 이전 기록은 아래로 분리했다. 검색은
+> 현행 작업 창(2026-10-01~) 이전 기록은 아래로 분리했다. 검색은
 > `rg <패턴> docs/archive/` 로 한다. 새 엔트리는 항상 이 파일 상단에 추가한다.
 
 | 파일 | 기간 | 엔트리 | 크기 |
 | --- | --- | --- | --- |
-| [`journal-2026-10a.md`](archive/journal-2026-10a.md) | 2026-10-01 | 3건 | 12 KB |
+| [`journal-2026-10b.md`](archive/journal-2026-10b.md) | 2026-10-01 | 2건 | 6 KB |
+| [`journal-2026-10a.md`](archive/journal-2026-10a.md) | 2026-10-01 | 1건 | 6 KB |
 | [`journal-2026-09h.md`](archive/journal-2026-09h.md) | 2026-09-30 | 1건 | 4 KB |
 | [`journal-2026-09g.md`](archive/journal-2026-09g.md) | 2026-09-28 ~ 2026-09-29 | 6건 | 22 KB |
 | [`journal-2026-09f.md`](archive/journal-2026-09f.md) | 2026-09-26 ~ 2026-09-27 | 14건 | 31 KB |

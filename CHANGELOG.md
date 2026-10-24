@@ -20,6 +20,11 @@
   dataset의 operation을 종류 불문 끄고, 그 primary Feature를 `system` 상태 전이로 `retired`·`suppressed`(+ 재활성화를 막는
   lifecycle override)로 내린다. 행·lineage·가격 fact·dataset은 남는다. queued/running job이 있으면 아무것도 바꾸지 않고 멈춘다.
 - 영향 없음: REST·OpenAPI, Valkey transport 표면, 장소(주유소·휴게소·공항) 적재와 C7 공항 대상.
+### 국가유산 native 적격성 선행 계약 (2026-10-24)
+
+- **ADDED**: 본체의 검증된 이름 presence와 저장 typed projection 재정규화 진단을 추가했다.
+  기존 공개 필드값·collector·SQL·정책·Geo·seal 동작은 유지하며 적용/활성화 승인은 제공하지 않는다.
+
 ### 제한 scalar 쓰기의 같은 의미 배타 실행 (2026-10-24)
 
 - **ADDED**: 기존 primary place의 명시 name/phones 갱신에 SH와 같은 후보·승자 계산을

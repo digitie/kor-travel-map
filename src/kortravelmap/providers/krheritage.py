@@ -68,6 +68,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
+from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
 from kortravelmap.geocoding import (
     AddressResolver,
     ReverseGeocoder,
@@ -87,6 +88,7 @@ __all__ = [
     "DATASET_KEY_HERITAGE",
     "DATASET_KEY_EVENT",
     "HERITAGE_MARKER_COLOR",
+    "HERITAGE_NAME_NORMALIZER_REVISION",
 ]
 
 
@@ -98,6 +100,12 @@ DATASET_KEY_EVENT: Final[str] = "krheritage_event_list"
 
 _HERITAGE_ENTITY_TYPE: Final[str] = "heritage"
 _EVENT_ENTITY_TYPE: Final[str] = "heritage_event"
+
+HERITAGE_NAME_NORMALIZER_REVISION: Final[str] = "krheritage-name-v1"
+_HERITAGE_NAME_PRESENCE: Final[ProviderFieldPresence] = ProviderFieldPresence(
+    normalizer_revision=HERITAGE_NAME_NORMALIZER_REVISION,
+    supplied_fields=frozenset({"core.name"}),
+)
 
 HERITAGE_MARKER_COLOR: Final[str] = "P-07"
 """국가유산 marker color (보라/자홍 계열, docs §4-pre)."""
@@ -671,6 +679,8 @@ async def _heritage_item_to_bundle(
         source_record=source_record,
         source_link=source_link,
         file_sources=file_sources,
+        # 검증된 이름만 선언한다. 파생 분류/Geo/DTO 기본값의 존재를 추측하지 않는다.
+        provider_field_presence=_HERITAGE_NAME_PRESENCE,
     )
 
 
