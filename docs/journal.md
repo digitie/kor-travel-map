@@ -1,3 +1,8 @@
+## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
+
+- 고정 synthetic fixture·검증·실행 계획의 첫 checkpoint다. 실제 PG 측정/CI evidence는 이어 구현하며 수집 속도 개선 완료로 세지 않는다.
+- 기존 global fence/FeatureRepo/winner/API는 변경하지 않는다. 외부 DSN·운영 접속·새 로컬 DB/container0. [범위·미완](reports/2026-10-24-scoped-write-baseline.md).
+
 ## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
 
 - revision+provider/dataset allowlist가 모두 있을 때만 기존 native TX 안에서 shadow를 기록한다. 실제 MCST 이름만 supplied로 선언하며 Geo/파생값/DTO null은 추측하지 않는다.

@@ -46,6 +46,9 @@
 
 ## T-CWRITE-01 — 현재 writer·trigger·성능 기준선
 
+진행 중인 작은 단위: [격리 source/typed-patch/seal runner](reports/2026-10-24-scoped-write-baseline.md).
+실제 수용 전까지 아래 acceptance는 미체크로 유지한다.
+
 선행: Weather·Transport의 진행 중 동시성 개선 완료. 설계 정본은 ADR-115다. 아직 측정하지 않은
 값을 목표 달성 수치로 적지 않는다.
 
