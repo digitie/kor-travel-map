@@ -47,7 +47,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_destructive_enabled
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
@@ -421,7 +421,7 @@ async def list_files(
 
 @router.get("/summary", response_model=ManagedFileSummaryResponse)
 async def files_summary(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     request: Request,
 ) -> ManagedFileSummaryResponse:
     """요약 카드 집계 — kind/status/location 별 건수·용량."""
@@ -459,7 +459,7 @@ async def files_summary(
 @router.get("/{file_id}", response_model=ManagedFileDetailResponse)
 async def file_detail(
     file_id: int,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     request: Request,
 ) -> ManagedFileDetailResponse:
     """파일 상세 — provenance links + 최근 이벤트(50건)."""
@@ -487,7 +487,7 @@ async def file_detail(
 @router.get("/{file_id}/events", response_model=ManagedFileEventsResponse)
 async def file_events(
     file_id: int,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     request: Request,
     limit: Annotated[int, Query(ge=1, le=200)] = 50,
     offset: Annotated[int, Query(ge=0)] = 0,

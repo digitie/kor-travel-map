@@ -26,7 +26,7 @@ from kortravelmap.infra.status_repo import StatusCounts
 from starlette.websockets import WebSocket, WebSocketDisconnect
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.settings import ApiSettings
 
 _LIVE_SECRET = "ops-live-test-secret-at-least-32-bytes"
@@ -205,6 +205,7 @@ def client(session: _FakeSession) -> TestClient:
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     return TestClient(app)
 
 
@@ -225,6 +226,7 @@ def live_client(
 
     monkeypatch.setattr(live_mod, "claim_ops_live_ticket", _claim)
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     return TestClient(app)
 
 
@@ -857,6 +859,7 @@ async def test_ops_live_real_uvicorn_separates_handshake_and_auth_close() -> Non
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     for attempt in range(5):
         chunks = await _capture_raw_ops_live_response(
             app,
@@ -913,6 +916,7 @@ async def test_ops_live_real_uvicorn_owns_failed_accept_fallback(
         raise RuntimeError("injected accept failure")
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     monkeypatch.setattr(WebSocket, "accept", _fail_accept)
     monkeypatch.setattr(live_mod, "_CLOSE_TIMEOUT_SECONDS", 0.001)
 

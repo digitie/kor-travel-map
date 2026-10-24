@@ -31,7 +31,7 @@ from pydantic import SecretStr
 from sqlalchemy.exc import IntegrityError
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -137,6 +137,7 @@ def client(
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     monkeypatch.setattr(
         domain_command_service,
         "begin_domain_command",
@@ -1101,6 +1102,7 @@ def test_load_offline_upload_rejects_invalid_dagster_url_before_db_or_http(
         raise AssertionError("invalid Dagster URL must fail before HTTP")
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     monkeypatch.setattr(router_mod, "get_offline_upload", _unexpected_get)
     monkeypatch.setattr(router_mod, "_post_graphql", _unexpected_post)
 
@@ -1983,6 +1985,7 @@ def test_delete_offline_upload_blocked_when_destructive_disabled(
         yield session
 
     app.dependency_overrides[get_session] = _fake_session
+    app.dependency_overrides[get_read_snapshot_session] = _fake_session
     guarded_client = TestClient(app)
 
     response = guarded_client.delete(
