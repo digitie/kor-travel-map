@@ -1,0 +1,261 @@
+{
+  "상태": "구현 중 inventory. full SQL과 독립대조 전이며 SQL/PG/메모리 수용 아님",
+  "source": "7e36356700eb69a8c3c6a299fe2f14e06db905f5",
+  "상한단위": "압축되지 않은 direct stored datum byte. flattened 예산은 측정byte+4로 누적한다. payload 길이와 datum header를 혼동하지 않는다.",
+  "metadata_only_fixed_columns": [
+    "UUID",
+    "bigint",
+    "boolean",
+    "timestamptz",
+    "tableoid/ctid 내부 위치",
+    "smallint"
+  ],
+  "외부미반환위치": "(tableoid,ctid)는 한 STABLE 호출의 동일 snapshot 안에서만 사용하고 상속/partition 관계는 거부한다.",
+  "가변열": {
+    "provider_sync.provider_datasets": {
+      "provider": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "dataset_key": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_entities": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_type": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_id": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_entity_heads": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "current_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "lineage_key": {
+        "physical_cap": 1024,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_records": {
+      "source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "raw_payload_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "raw_data": {
+        "physical_cap": 8192,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_links": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_role": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.provider_feature_identities": {
+      "feature_kind": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "natural_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.features": {
+      "kind": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "lifecycle_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "publication_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "quality_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_active_policies": {
+      "field_paths": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_shadow_policies": {
+      "normalizer_revision": {
+        "physical_cap": 1024,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "fields": {
+        "physical_cap": 8192,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_shadow_candidates": {
+      "field_path": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_source_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "validated_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "validated_source_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_json": {
+        "physical_cap": 8192,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_geometry": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "availability": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "reason": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "normalizer_revision": {
+        "physical_cap": 1024,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      }
+    },
+    "feature.feature_base_field_values": {
+      "field_path": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_raw_payload_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_json": {
+        "physical_cap": 8192,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_geometry": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      }
+    },
+    "feature.feature_geocode_stamps": {
+      "geo_version_token": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "geo_data_token": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "reverse_outcome": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    }
+  },
+  "아직미완": [
+    "실제 모든 payload SELECT/JOIN/정렬/predicate와 inventory 양방향 대조",
+    "서버 입력 text[] physical/encoded/cardinality preflight",
+    "단일 R1/nonname24 provenance/shape 및 primitive 합성",
+    "full schema/반례/동일snapshot/peak/EXPLAIN 비용 실증"
+  ]
+}

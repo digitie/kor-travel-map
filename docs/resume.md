@@ -1,6 +1,6 @@
 ## 2026-10-25 — Heritage bounded evidence reader 입력 계약(부분)
 
-- 요청 key·중복·MAX+1/배열 예산과 부적격 사유를 추가했다. 순수16 PASS/Ruff PASS이며 DB reader·422 SQL/실PG·SH 수집·운영은 아직0이다. [범위·미완](reports/2026-10-25-heritage-bounded-evidence-reader.md).
+- 입력 계약에 이어422 정적 SQL/metadata·shape·응답 검증 초안을 추가했다. 순수32·역할/배선 정적16 PASS(기존1skip)이며, fullsource 두 리뷰·실PG/메모리·canonical ACL/head oracle는 미완이다. SH 수집/운영0을 유지한다. [범위·미완](reports/2026-10-25-heritage-bounded-evidence-reader.md).
 
 ## 2026-10-25 — Geo stamp SQL writer 권한 경계(421)
 
