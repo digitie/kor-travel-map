@@ -44,7 +44,7 @@ from pydantic import BaseModel, ConfigDict, Field, SecretStr
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
@@ -377,7 +377,7 @@ def _geocode_query(
 
 @router.get("", response_model=AdminIssueListResponse)
 async def list_admin_issues(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
     issue_status: Annotated[IssueStatus | None, Query(alias="status")] = "open",
     issue_type: Annotated[str | None, Query()] = None,
     provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
@@ -440,7 +440,7 @@ async def list_admin_issues(
 )
 async def get_admin_issue(
     issue_id: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
 ) -> AdminIssueDetailResponse:
     """운영 이슈 단건 + 연결 feature 주소/좌표 스냅샷."""
     started_at = perf_counter()

@@ -1,3 +1,84 @@
+## 2026-10-24 — 파일 레지스트리의 백업 링크 복구
+
+- 실제 통합 UI에서 파일 상세의 백업 링크가 없는 상세 route를 prefetch해404를 냈다. 백업 목록 페이지로 연결하고 중첩·공백 파일 경로의 회귀를 추가했다. DB·DTO·프론트·수집/잠금 변경0이다.
+- 수정 전 회귀1 FAIL을 보존했고 수정 뒤 router9 PASS·Ruff·strict mypy1·문서 redaction PASS다. 독립2리뷰·정확 CI·최종 실제 UI는 후속 수용이며 기존16case별 PASS를 전체 성공으로 세지 않는다. [원인·범위](reports/2026-10-24-backup-file-link.md).
+
+## 2026-10-24 — 통합 전체 CI의 시험 격리 보완(#1379)
+
+- b460의 두 실제 PG lane는 같은5건 실패였다. 4건의 새 읽기 세션 fixture 누락과 metrics의 앞선 committed행 미고려를 제품 변경 없이 고쳤다. 0/2 sibling 제어군으로기존실패를 재현하고 old/new snapshot·writer commit 단언을 보존했다.
+- test-only c5b635363의 실제 PG/ASGI48 PASS(120.45초), 제품/DDL0diff·Ruff/redaction PASS다. 원본 glibc1425/12skip/5FAIL·alpine1419/18skip/5FAIL 및 수정전 제어군 로그를 보존했다. 새 정확 전체 CI·실제 UI·머지는 미완, 기본OFF/seed0/운영0 유지. [원인·수정·제약](reports/2026-10-24-scoped-concurrent-write-integration.md).
+
+## 2026-10-24 — ADR115 구현 합집합 수용(#1379)
+
+- 10개 검토된 구현 부모를 제품 고정점 `ebb62ccb8`로 합쳤다. 유일한 제품 합성은 승인 native 전체에 승인 phone 첫 gate2줄뿐이며 나머지 제품은 승인 부모 blob과 동일하다. 공통 문서의 양쪽 전체 항목도 보존했다.
+- 최종 집중175 PASS·공식 oracle/metadata2 PASS·lint373 PASS/기존skip6·Ruff/strict mypy/import4계약 PASS, 독립 교차 리뷰2 PASS. 실제 SIGKILL 복구(#1378)와 M05 old40P01 재현·414 보강(#1381)을 예외 rollback과 구분했다. task 안내 길이 실패는 원인을 고쳐 재검증하고 원본을 보존했다.
+- main 정확 CI·최신 실제 HTTP/UI·머지/운영 수용은 미완이다. 기본 OFF·seed0·운영0, 전체 T/collector·Geo/지역/identity·Weather/Transport 전파 및 취소된 export 운영 활성화 재개 없음. [통합 증거·제약](reports/2026-10-24-scoped-concurrent-write-integration.md).
+
+## 2026-10-24 — M05 중복 후보·판정의 protocol-first 보강(414)
+
+- 실제 기존 M05 CALL과 scoped begin의 Feature/head 역순에서 40P01을 재현했다. 414는 후보 기록·판정 public v2/private inner의 첫 BEGIN에 EX만 추가하고 본문·서명·ACL은 보존한다. 기존 내부 owner EXEC만 정본에 더하며 새 공개 권한·정책 활성화는 없다.
+- 수정 후 실제 PG8개·순수4개 총12 passed/14.23초, 전체 lint373 passed·기존 skip6, 공식 실제 oracle 재비교+metadata2 passed다. 초기 관측 PID/진단 시간 실패는 분리 보존했다. [재현·상한·범위](reports/2026-10-24-manual-dedup-protocol-entry.md).
+- 기본 OFF/정책 seed0/운영 활성화0이며 컨트롤러를 둔 소규모 정확성 시험이다. 전체 writer 전환·Geo·대량/운영 ARM 성능·Weather/Transport 전파·최종 두 리뷰/정확 CI/UI 수용은 미완이다.
+
+## 2026-10-24 — ADR115 제한 native scalar 비용 실측(#1376)
+
+- schema412의 로컬 amd64·2CPU/1536MiB 격리 환경에서 고정 2dataset·2record를 직렬/병렬2 각각 fresh clone 3회로 측정했다. 중앙값 elapsed는 **273.81→158.42ms**였지만 **PG CPU는 +4.2%**여서 CPU 감소를 입증하지 못했다. 전체 수집·운영 ARM·대량/공유 Feature 성능으로 일반화하지 않는다.
+- 별도 정확성 probe에서 두 실제 source DML의 미커밋 중첩 79.23ms를 확인했다. 이 강제 barrier는 성능 6회에서 제외했고, 결과/lineage/완료 receipt hash는 모두 같았다. 자체 container의 정확 생성 ID 정리를 확인했으며 운영·provider 호출은 0건이다.
+- 실측 source는 `4c9916d0b90406a0613ca8b41434260b6ec85696`의 `tracked_clean=true`이고, 현재 runner SHA256 `64cd3944e648a2be957aee01aec78a3bb845f8585b80770b740e44122d154fc9`와 같다. 원시 JSON SHA256 `f3f33144390854288657d47209dada2c5c5f6092dd4b7fc1b1dad61d2dbd236f`와 로그는 별도 로컬 감사 보관소에 동일 bytes로 보존했다.
+- 두 독립 source 리뷰를 통과했으나 정확 CI·전체 T-CWRITE 수용은 별도다. 최신 부모 대비 제품 소스 변경 0, 기본 OFF·정책 seed0·운영0을 유지한다. 후속 413 수용·전체 SQL writer 전환·일반 수집 배선·API p95·Weather/Transport 전파는 이 측정의 완료 범위가 아니다. [수치·실패·제약](reports/2026-10-24-scoped-native-scalar-measurement.md).
+
+## 2026-10-24 — ADR115 구현과 전체 수용 범위 구분
+
+- #1371~#1377의 커널·reader·제한 winner/native·비용·직접 SQL 보강과 증거를 [수용 현황](reports/2026-10-24-scoped-concurrent-write-acceptance-status.md)에 정리했다. 정확 CI가 진행 중이거나 feature base에서 아직 발행되지 않은 PR은 green/머지 완료로 세지 않는다.
+- 제한 병렬2의 elapsed 개선과 PG CPU 약4.2% 증가를 분리했다. 예외 rollback을 실제 worker 사망으로 세지 않으며 SIGKILL 검증은 별도다. 모든 T-CWRITE 전체 수용·운영 활성화·Weather/Transport 전파는 미완, 취소된 export 운영 활성화/Map 연동 검증도 재개하지 않는다.
+
+## 2026-10-24 — ADR115 SQL 직접 진입 413 실제 검증
+
+- 기존 SQL 7개의 첫 protocol EX 진입을 원문 signature·본문 SHA-256, 원래 owner/ACL과 함께 검증했다. 공유→배타 승격 거부·실제 두 세션 차단 PID·옛 전역 fence 선점 방지를 포함한 단위/PG/전체 lint **407 PASS/6 기존 skip**, 공식 head oracle·metadata **2 PASS**다.
+- receipt 정적 검사에서 드러난 동적 문자열 문제를 명시 전체 head 목록으로 정리했다. 초기 실패도 기록했다. 두 독립 리뷰·정확 CI 수용 전이며 기본 OFF/seed0/운영0, 전체 writer·Geo·지역 전환과 Weather/Transport 전파는 미완이다. [증거와 범위](reports/2026-10-24-legacy-sql-protocol-entry.md).
+
+## 2026-10-24 — ADR115 기존 SQL 직접 호출의 잠금 순서 보강 착수
+
+- Python fence만으로 커버되지 않는 기존 SQL 7개에 첫 protocol EX 진입을 추가한다. 기존 body/owner/search_path/ACL을 유지하고 scalar OFF·seed0·운영0을 지킨다. 전체 writer 전환이 아니다.
+- 실제 전체 bootstrap+기존 fence5 PASS(13.85초), 정적 역할 검사7 PASS/1 기존skip. SQL 직접 CALL/경합·head oracle·독립2리뷰/CI 수용은 진행 중이다. [범위·초기 실패·남은 검증](reports/2026-10-24-legacy-sql-protocol-entry.md).
+
+## 2026-10-24 — ADR115 제한 native scalar 실제 DML 중첩
+
+- 기존 primary 장소의 이름·전화만 다루는 명시 helper를 별도 추가했다. claim artifact 검증→protocol/epoch/manifest→source/head→후보/winner→finish를 같은 TX에 묶는다. 자동 수집·지역 분할·운영 활성화는 없다.
+- 실제 PG에서 독립 dataset의 두 source DML 동시 미커밋 구간, 실패 rollback/같은 artifact 복구, 완료 receipt의 무 DML 재호출, 오래된 artifact 보존을 확인했다. first_seen 불변식 충돌을 수정한 뒤 native3+기존lineage1 모두 PASS(26.39초).
+- 412 선행 수용·최종 두 리뷰/CI/HTTP/UI·대량/전체 writer 전환과 Weather/Transport 전파는 미완이다. [범위·실패·검증](reports/2026-10-24-scoped-native-scalar-refresh.md).
+
+## 2026-10-24 — ADR115 제한 scalar winner·정합성 검증(#1373)
+
+- 412는 기존 Feature/primary source의 name·phones만 명시 정책으로 투영한다. R1 값/R2 검증 head, override/revoke, 실제 순서 반전·old RR·Geo 증거 보호를 확인했다. 기본 OFF/정책 seed0/운영 활성화0이며 mixed legacy writer preflight 전 production cutover는 금지한다.
+- 실제16 PG/18 unit 통과, role tuple 정산 뒤 lint369 passed·기존 skip6, 공식 head oracle 재생성 후 비교+metadata2 passed. 초기 revision 길이·ACL inventory·generated 열·fieldset 축소 실패는 수정 후 재검증했다.
+- OFF 10k×7표를 411/412 fresh clone 각3회 측정해 scalar trigger0/원래 validator 동일/deferred context 동일을 확인했다. 로컬 관리자 synthetic이며 운영 ARM/실제 collector 성능 개선율이 아니다. [원본 수치·제약·실패 기록](reports/2026-10-24-provider-field-scalar-projection.md).
+- 413 기존 SQL 직접 진입점의 protocol-first 보강, 전체 membership/Geo/일반 수집 전환, 두 독립 최종 리뷰·정확 CI·HTTP/UI 수용과 Weather/Transport 전파는 미완이다. 기존 API/UI 동작을 새 native 수집에 자동 연결하지 않았다.
+
+## 2026-10-24 — ADR115 운영·관리 다중 reader 후속
+
+- 초안 #1374는 관리·운영 GET 13개의 DB 읽기 phase를 RR로 고정한다. 외부 Dagster HTTP는 첫 DB 조회 전에 끝내며 외부 상태까지 같은 snapshot이라고 약속하지 않는다.
+- reconciliation snapshot의 기존 FOR SHARE는 유지하고 이 1개 경로만 RR/read-write로 분리했다. 나머지 12개는 read-only다. 실제 readonly 제어군의 25006 오류를 재현하고, row lock 경합·응답 종료 뒤 writer 재개·pool의 기본 RC 복귀까지 검증했다.
+- 최종 소스 708672f06 실제 PG/ASGI 10 passed, cache 단위 178 passed, 앞선 8 router 단위 510 passed다. 부모 #1372 기반이므로 main 재기준 뒤 CI가 필요하며 두 독립 리뷰·실제 HTTP/UI·운영 적용은 미완이다. [검증과 미완](reports/2026-10-24-api-ops-reader-snapshot-followup.md).
+
+## 2026-10-24 — ADR115 순수 다중 조회의 snapshot 고정
+
+- 초안 #1372는 29개 순수 다중 SELECT를 최초 데이터 조회 전 read-only REPEATABLE READ로 고정한다. 쓰기·lease·외부 HTTP와 별도 요청 페이지의 원자성을 확대하지 않는다.
+- cold API key 인증 세션을 hash 조회 직후 반환해 pool size=1 재진입 timeout을 없앴다. 실제 PG/ASGI 13 passed(기존 RC 혼합 반증·RR 일관성·pool 복원·cold 인증 포함), 관련 API 198 passed다. 전체 API 1,344 passed/1 failed는 새 dependency의 테스트 override 누락을 수정한 뒤 auth 93 passed로 재검증했다.
+- 소스 b8f6e677a는 독립 리뷰 2인 PASS다. 정확한 최종 문서 포함 후보의 CI·별도 실제 HTTP/UI 검증은 남아 있다. 기존 writer 잠금·운영 정책·배포 변경은 없다. [전체 reader 분류와 경계](reports/2026-10-24-api-reader-snapshot-inventory.md).
+
+## 2026-10-24 — ADR115 범위 커널·기존 writer fence 통합
+
+- #1371에 411 scope/epoch/owner/manifest·membership 재검증과 기존 protocol→전역 fence 순서를 연결했다. runtime 직접 테이블 쓰기는 닫고 기존 writer 배타 경로·기본 OFF를 유지한다.
+- 실제 PG 커널·전체 bootstrap·metadata 56 passed/1 오라클 기록 skip, 후속 오라클 비교 포함 40 passed/1 기존 skip. 별도 legacy fence 15 passed. 초기 role/trigger 실패는 수정 후 재실행했다.
+- 제한 scalar·reader는 별도 초안 #1373/#1372다. 전체 provider DML 병행·정책 seed·운영 활성화·Weather/Transport 전파는 아직 미완이다. [검증과 한계](reports/2026-10-24-scoped-concurrent-writes-implementation.md).
+
+## 2026-10-24 — ADR115 실제 동시 쓰기 구현 착수
+
+- 기준선 #1370은 정확 `2a53dce7c`의 CI 5개·실제 glibc/alpine·독립 리뷰 2인을 통과해 머지했다. 두 lane의 원본과 checkout/runner/fixture/ACL/12phase를 대조했다. 직렬 synthetic 기준선이며 운영 절감이나 동시 쓰기 완료가 아니다.
+- 다음은 후보 완전성/winner·scope/epoch/manifest·순수 reader snapshot을 분리 구현한 뒤 실제 독립 DML 중첩과 공유 Feature·복구를 검증한다. 기존 전역 fence·기본 OFF·정책 seed0·운영0을 유지한다.
+- Weather·Transport 전파는 Map의 해당 개선 수용 이후다. [순서·검증·남은 범위](reports/2026-10-24-scoped-concurrent-writes-implementation.md). T-CWRITE-01~09 전체 acceptance는 미완이다.
+
 ## 2026-10-24 — ADR-114 2단계(T-STATE-02): 브랜치 `feat/adr114-valkey-weather`
 
 - weather W1·W2·W3·W5 export를 위치 단위 Valkey 세대로 싣는 Dagster job 7개(기본 STOPPED)와 `/v1/service/weather/*` 5

@@ -25,7 +25,7 @@ from kortravelmap.infra.sync_state_repo import SyncState
 
 from kortravelmap.api.app import create_app
 from kortravelmap.api.auth import OPS_SCOPE_HEADER
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.ops_dataset_schedule import (
     DatasetScheduleIndex,
     DatasetScheduleState,
@@ -78,6 +78,7 @@ def client() -> TestClient:
         yield _FakeSession()
 
     app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_read_snapshot_session] = _session
     return TestClient(app)
 
 

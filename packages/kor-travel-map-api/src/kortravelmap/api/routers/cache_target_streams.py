@@ -25,6 +25,7 @@ from kortravelmap.core.cache_target_stream import (
     validate_cache_target_key,
 )
 from pydantic import AfterValidator, BaseModel
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.api.auth import (
     AdminProxyContext,
@@ -88,11 +89,16 @@ from kortravelmap.api.cache_target_stream_service import (
     get_cache_target_stream_service,
     raise_for_cache_target_status,
 )
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import (
+    get_locking_read_snapshot_session,
+    get_read_snapshot_session,
+    get_session,
+)
 from kortravelmap.api.domain_command_service import (
     begin_domain_command,
     complete_domain_command,
     idempotent_domain_command,
+    sqlstate_of,
 )
 from kortravelmap.api.response import Meta, make_meta
 from kortravelmap.api.settings import CacheTargetServiceScope
@@ -1804,7 +1810,7 @@ def _snapshot_response(
 )
 async def get_service_cache_target_reconciliation_snapshot(
     request_id: Annotated[UUID, Path()],
-    session: Annotated[Any, Depends(get_session)],
+    session: Annotated[Any, Depends(get_locking_read_snapshot_session)],
     stream_service: Annotated[
         CacheTargetStreamService,
         Depends(get_cache_target_stream_service),
@@ -1817,20 +1823,32 @@ async def get_service_cache_target_reconciliation_snapshot(
     cursor: Annotated[str | None, Query()] = None,
 ) -> CacheTargetSnapshotResponse:
     started_at = perf_counter()
-    await _require_reconciliation_metadata_access(
-        session,
-        stream_service,
-        request_id=str(request_id),
-        scope="cache-target:snapshot",
-        context=context,
-    )
-    page = await stream_service.get_cache_target_reconciliation_snapshot(
-        session,
-        request_id=str(request_id),
-        consumer_id=context.consumer_id,
-        limit=page_size,
-        cursor=cursor,
-    )
+    try:
+        await _require_reconciliation_metadata_access(
+            session,
+            stream_service,
+            request_id=str(request_id),
+            scope="cache-target:snapshot",
+            context=context,
+        )
+        page = await stream_service.get_cache_target_reconciliation_snapshot(
+            session,
+            request_id=str(request_id),
+            consumer_id=context.consumer_id,
+            limit=page_size,
+            cursor=cursor,
+        )
+    except DBAPIError as exc:
+        if sqlstate_of(exc) != "40001":
+            raise
+        # metadata와 FOR SHARE 사이의 변경이다. 불완전 page 대신 새 요청을 요구한다.
+        # 다음 요청은 새 RR에서 principal/scope 검사부터 다시 실행한다.
+        raise _http_error(
+            status.HTTP_503_SERVICE_UNAVAILABLE,
+            "SNAPSHOT_RETRY_REQUIRED",
+            "snapshot 조회 중 상태가 바뀌었습니다. 잠시 뒤 다시 요청하세요.",
+            headers={"Retry-After": "1"},
+        ) from exc
     raise_for_cache_target_status(page)
     return _snapshot_response(
         page,
@@ -1970,7 +1988,7 @@ async def get_ops_cache_target_dead_letter(
 )
 async def get_ops_cache_target_operation(
     operation_id: Annotated[str, Path(min_length=1, max_length=128)],
-    session: Annotated[Any, Depends(get_session)],
+    session: Annotated[Any, Depends(get_read_snapshot_session)],
     stream_service: Annotated[
         CacheTargetStreamService,
         Depends(get_cache_target_stream_service),

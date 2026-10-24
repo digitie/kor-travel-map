@@ -171,9 +171,13 @@ __all__ = [
 _LOG = logging.getLogger(__name__)
 
 _FEATURE_CURATION_WRITE_LOCK_SQL: Final[str] = """
+WITH protocol_gate AS MATERIALIZED (
+  SELECT ops.lock_scoped_feature_write_protocol(true)
+)
 SELECT pg_catalog.pg_advisory_xact_lock(
   pg_catalog.hashtextextended('feature-curation-write', 0)
 )
+FROM protocol_gate
 """
 
 
@@ -295,7 +299,11 @@ async def lock_feature_curation_write(session: AsyncSession) -> None:
     이미 쥔 xact lock은 실제 session·DB transaction의 수명이 유지되는 동안 SQL 없이 재사용한다.
     savepoint 안에서 획득한 잠금은 캐시하지 않는다. 외부 connection transaction 종료나
     새 transaction에서도 다시 잡는다.
-    전역 잠금의 충돌 범위와 Feature 병합 의미는 바꾸지 않는다(ADR-115의 안전한 선행 단위).
+    신규 protocol 배타 gate를 먼저 잡고 기존 전역 fence를 잡는다. MATERIALIZED CTE가
+    두 잠금의 평가 순서를 강제하며 SQL 왕복은 한 번이다. 이미 공유 protocol gate를 든
+    caller는 승격하지 않고 DB가 거부하므로 rollback 뒤 배타 경로로 재계획해야 한다.
+    기존 전역 충돌 범위와 Feature 병합 의미는 유지한다. 이 배선만으로 SQL/trigger의
+    전수 전환이나 동시 쓰기 활성화가 완료되지는 않는다(ADR-115).
     """
 
     info = getattr(session, "info", None)
@@ -488,7 +496,7 @@ INSERT INTO provider_sync.source_entities (
     :observed_at, :observed_at
 )
 ON CONFLICT (source_entity_key) DO UPDATE SET
-    first_seen_at = LEAST(provider_sync.source_entities.first_seen_at, EXCLUDED.first_seen_at),
+    -- first_seen_at은 생성 증거이므로 과거 artifact replay로 되돌리지 않는다.
     last_seen_at = GREATEST(
         provider_sync.source_entities.last_seen_at,
         EXCLUDED.last_seen_at
@@ -5747,6 +5755,8 @@ async def set_feature_phones(session: AsyncSession, feature_id: str, phones: lis
     enrichment receipt가 author한 effective 값은 유지되고, 그 명령·actor·reason은
     domain-command ledger와 override provenance에서 모두 추적된다.
     """
+    # 공유 writer의 source/link→Feature 순서와 교차하기 전에 protocol EX를 잡는다.
+    await lock_feature_curation_write(session)
     locked = (
         await session.execute(
             text(_LOCK_FEATURE_PHONE_OVERRIDE_SQL), {"feature_id": feature_id}

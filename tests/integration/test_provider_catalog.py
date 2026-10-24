@@ -58,7 +58,7 @@ import httpx
 import pytest
 from kortravelmap.api import dagster_http
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.ops_dataset_service import (
     _catalog_info,
     _catalog_state_memberships,
@@ -1098,6 +1098,7 @@ async def _seeded_ops_api(
                 yield session
 
             app.dependency_overrides[get_session] = _request_session
+            app.dependency_overrides[get_read_snapshot_session] = _request_session
 
             def _dagster(_request: httpx.Request) -> httpx.Response:
                 return httpx.Response(200, json=_empty_schedule_payload())

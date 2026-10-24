@@ -63,6 +63,30 @@
         "409_geo_release_item_reasons"
       ],
       "revision": "410_provider_field_shadow"
+    },
+    {
+      "down_revision": [
+        "410_provider_field_shadow"
+      ],
+      "revision": "411_scoped_feature_write_kernel"
+    },
+    {
+      "down_revision": [
+        "411_scoped_feature_write_kernel"
+      ],
+      "revision": "412_provider_scalar_projection"
+    },
+    {
+      "down_revision": [
+        "412_provider_scalar_projection"
+      ],
+      "revision": "413_legacy_sql_protocol_entry"
+    },
+    {
+      "down_revision": [
+        "413_legacy_sql_protocol_entry"
+      ],
+      "revision": "414_manual_dedup_protocol"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

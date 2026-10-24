@@ -27,6 +27,12 @@ _TRY = text(
 
 
 @pytest.fixture
+def pg_engine(migrated_engine: AsyncEngine) -> AsyncEngine:
+    """protocol gate가 있는 실제 head를 쓴다. bare extension fixture로 대역하지 않는다."""
+    return migrated_engine
+
+
+@pytest.fixture
 def fence_calls(pg_engine: AsyncEngine) -> Iterator[list[str]]:
     calls: list[str] = []
 

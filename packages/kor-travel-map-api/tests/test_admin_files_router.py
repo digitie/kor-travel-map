@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.settings import ApiSettings
 
 
@@ -46,6 +46,7 @@ def _make_app(tmp_path: Path, **overrides: Any) -> Any:
     # get_session은 실제 DB 커넥션을 만든다 — sentinel로 대체(라우터가 세션을
     # 실제로 쓰기 전에 검증/게이트에서 분기하는 경로만 테스트).
     app.dependency_overrides[get_session] = _FakeSession
+    app.dependency_overrides[get_read_snapshot_session] = _FakeSession
     return app
 
 
@@ -113,6 +114,26 @@ def test_managed_file_links_use_canonical_admin_pages() -> None:
         ("import-job", "/ops/pipeline?execution=import_job:job%2F1"),
         ("provider", "/ops/datasets?provider_dataset_id=7"),
     ]
+
+
+@pytest.mark.unit
+def test_backup_file_link_targets_existing_backup_page() -> None:
+    from kortravelmap.api.routers.admin_files import _build_links
+
+    links = _build_links(
+        SimpleNamespace(
+            origin_import_job_id=None,
+            upload_id=None,
+            location="backup_root",
+            kind="backup",
+            path="nested/기록 1.dump",
+            provider_dataset_id=None,
+            origin_dagster_run_id=None,
+        )
+    )
+
+    # 백업 UI는 목록 페이지에서 선택한다. 파일 경로를 상세 route로 만들지 않는다.
+    assert [(link.rel, link.href) for link in links] == [("backup", "/admin/backups")]
 
 
 @pytest.mark.unit
