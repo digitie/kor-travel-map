@@ -152,6 +152,8 @@ __all__ = [
     "OfflineUploadRow",
     "FeatureOverrideFieldPathRow",
     "FeatureBaseFieldValueRow",
+    "ProviderFieldShadowPolicyRow",
+    "ProviderFieldShadowCandidateRow",
     "FeatureOverrideRow",
     "FeatureUpdateRequestRow",
     "FeatureUpdateRequestDatasetRow",
@@ -3981,6 +3983,160 @@ class FeatureOverrideFieldPathRow(Base):
     provider_writable: Mapped[bool] = mapped_column(Boolean, nullable=False)
     operator_writable: Mapped[bool] = mapped_column(Boolean, nullable=False)
     sort_order: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+
+
+class ProviderFieldShadowPolicyRow(Base):
+    """불변 provider 정책 header와 완결 fieldset(ADR115, migration 410)."""
+
+    __tablename__ = "provider_field_shadow_policies"
+    __table_args__ = (
+        CheckConstraint(
+            "policy_revision >= 1",
+            name=conv("provider_field_shadow_policies_policy_revision_check"),
+        ),
+        CheckConstraint(
+            "normalizer_revision = btrim(normalizer_revision) "
+            "AND normalizer_revision <> '' AND length(normalizer_revision) <= 128",
+            name=conv("provider_field_shadow_policies_normalizer_revision_check"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(fields) = 'array' AND jsonb_array_length(fields) BETWEEN 1 AND 256",
+            name=conv("provider_field_shadow_policies_fields_check"),
+        ),
+        Index("idx_provider_field_shadow_policies_dataset", "provider_dataset_id"),
+        {"schema": "feature"},
+    )
+
+    policy_revision: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    provider_dataset_id: Mapped[int] = mapped_column(
+        BigInteger,
+        ForeignKey(
+            "provider_sync.provider_datasets.provider_dataset_id",
+            name=conv("provider_field_shadow_policies_provider_dataset_id_fkey"),
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    normalizer_revision: Mapped[str] = mapped_column(Text, nullable=False)
+    fields: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+
+
+class ProviderFieldShadowCandidateRow(Base):
+    """원천 값 R1과 검증 head R2를 분리한 shadow 후보(기존 effective 미변경)."""
+
+    __tablename__ = "provider_field_shadow_candidates"
+    __table_args__ = (
+        CheckConstraint(
+            "btrim(validated_source_hash) <> ''",
+            name=conv("provider_field_shadow_candidates_validated_source_hash_check"),
+        ),
+        CheckConstraint(
+            "availability IN ('value', 'removed', 'unresolved')",
+            name=conv("provider_field_shadow_candidates_availability_check"),
+        ),
+        CheckConstraint(
+            "reason IN ('supplied', 'explicit_null', 'omitted_carry', 'omitted_remove', "
+            "'missing_initial_value', 'presence_unknown', 'geo_evidence_unsupported')",
+            name=conv("provider_field_shadow_candidates_reason_check"),
+        ),
+        CheckConstraint(
+            "value_json IS NULL OR value_geometry IS NULL",
+            name=conv("ck_provider_field_shadow_candidates_single_value"),
+        ),
+        CheckConstraint(
+            "availability <> 'value' OR (value_source_record_key IS NOT NULL "
+            "AND value_source_hash IS NOT NULL AND value_observed_at IS NOT NULL "
+            "AND (value_json IS NOT NULL OR value_geometry IS NOT NULL))",
+            name=conv("ck_provider_field_shadow_candidates_value"),
+        ),
+        CheckConstraint(
+            "(value_source_record_key IS NULL) = (value_source_hash IS NULL)",
+            name=conv("ck_provider_field_shadow_candidates_record_hash"),
+        ),
+        ForeignKeyConstraint(
+            ["policy_revision", "provider_dataset_id"],
+            [
+                "feature.provider_field_shadow_policies.policy_revision",
+                "feature.provider_field_shadow_policies.provider_dataset_id",
+            ],
+            name="fk_provider_field_shadow_candidates_policy",
+            ondelete="RESTRICT",
+        ),
+        Index(
+            "idx_provider_field_shadow_candidates_policy",
+            "policy_revision",
+            "provider_dataset_id",
+            "field_path",
+        ),
+        Index("idx_provider_field_shadow_candidates_entity", "source_entity_key"),
+        Index("idx_provider_field_shadow_candidates_value_record", "value_source_record_key"),
+        Index(
+            "idx_provider_field_shadow_candidates_validated_record", "validated_source_record_key"
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        ForeignKey(
+            "feature.features.feature_id",
+            name=conv("provider_field_shadow_candidates_feature_id_fkey"),
+            ondelete="CASCADE",
+        ),
+        primary_key=True,
+    )
+    field_path: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "ops.feature_override_field_paths.field_path",
+            name=conv("provider_field_shadow_candidates_field_path_fkey"),
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    source_entity_key: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "provider_sync.source_entities.source_entity_key",
+            name=conv("provider_field_shadow_candidates_source_entity_key_fkey"),
+            ondelete="RESTRICT",
+        ),
+        primary_key=True,
+    )
+    policy_revision: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    value_source_record_key: Mapped[str | None] = mapped_column(
+        Text,
+        ForeignKey(
+            "provider_sync.source_records.source_record_key",
+            name=conv("provider_field_shadow_candidates_value_source_record_key_fkey"),
+            ondelete="RESTRICT",
+        ),
+    )
+    value_source_hash: Mapped[str | None] = mapped_column(Text)
+    validated_source_record_key: Mapped[str] = mapped_column(
+        Text,
+        ForeignKey(
+            "provider_sync.source_records.source_record_key",
+            name=conv("provider_field_shadow_candidat_validated_source_record_key_fkey"),
+            ondelete="RESTRICT",
+        ),
+        nullable=False,
+    )
+    validated_source_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    value_json: Mapped[
+        dict[str, Any] | list[Any] | str | int | float | bool | None
+    ] = mapped_column(
+        JSONB
+    )
+    value_geometry: Mapped[Any | None] = mapped_column(
+        Geometry("GEOMETRY", srid=4326, spatial_index=False)
+    )
+    availability: Mapped[str] = mapped_column(Text, nullable=False)
+    reason: Mapped[str] = mapped_column(Text, nullable=False)
+    value_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    validated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    normalizer_revision: Mapped[str | None] = mapped_column(Text)
 
 
 class FeatureBaseFieldValueRow(Base):

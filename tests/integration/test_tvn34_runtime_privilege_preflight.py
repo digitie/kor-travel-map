@@ -117,7 +117,12 @@ def _runtime_dsn(engine: AsyncEngine, *, login: str) -> str:
 
 async def _engine_for_runtime(engine: AsyncEngine, *, login: str) -> AsyncEngine:
     runtime_engine = make_async_engine(_runtime_dsn(engine, login=login), pool_size=1)
-    await assert_runtime_db_privilege_boundary(runtime_engine, expected_login=login)
+    try:
+        await assert_runtime_db_privilege_boundary(runtime_engine, expected_login=login)
+    except RuntimeDbPrivilegeBoundaryError:
+        # 반환 전 실패하면 호출자는 이 engine을 회수할 수 없다.
+        await runtime_engine.dispose()
+        raise
     return runtime_engine
 
 
