@@ -36,5 +36,8 @@ GREATEST와 immutable raw 이력·head의 시간 순서 조건은 유지했다. 
 DML을 완료한 뒤 어느 쪽도 commit하기 전에 barrier에 함께 도착해야 통과한다.
 이 synthetic 소규모 결과는 운영 ARM CPU/RAM 개선율이나 전체 provider 경로 검증이 아니다.
 
-정확한 최종 후보의 두 적대 리뷰·CI·실제 HTTP/UI·대량/장애 주입·모든 writer 전환은 남아 있다.
+추가로 취소(CancelledError) 직후 rollback·같은 artifact 복구, sealed 입력 대체 거부와
+의도한 원본으로의 복구를 검증했다. 기존 lineage를 최초 관측보다 앞선 시각으로 강화한 뒤
+native 5개+lineage 1개 모두 27.38초에 통과했다. 최초 소스 8d365e033의 독립 소스 리뷰
+1인은 PASS다. 최종 두 적대 리뷰·CI·실제 HTTP/UI·대량/장애 주입·모든 writer 전환은 남아 있다.
 412를 먼저 수용한 뒤 main에 재기준하여 검증한다. Weather·Transport 전파는 Map 수용 뒤다.
