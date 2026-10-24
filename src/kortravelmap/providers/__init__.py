@@ -23,6 +23,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |
 | ``krforest_safety`` | python-krforest-api | 산사태 예보 notice |
 | ``krheritage`` | python-krheritage-api | 국가유산 place/area/event |
+| ``krheritage_native`` | python-krheritage-api | 저장 typed projection 복원·이름 적격성 진단 |
 | ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
 | ``opinet`` | kor-travel-transport | 주유소·유가 |
