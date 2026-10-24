@@ -782,3 +782,82 @@ async def test_source_only_old_rr_cannot_advance_head_after_policy_cutover(scala
             )
             == entities[0] + "-r1"
         )
+
+
+async def test_active_fieldset_change_is_rejected_atomically(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    admin, _ = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    # 최초 활성화 전에 다른 완결 정책/후보도 준비한다. 새 revision 자체의 준비
+    # 부족 때문이 아니라 이미 활성인 fieldset의 제거가 거부되어야 한다.
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        for index, dataset in enumerate(datasets):
+            await session.execute(
+                text("""CALL feature.register_provider_field_shadow_policy(
+                    2,:dataset,'scalar-v1',CAST(:fields AS jsonb))"""),
+                {
+                    "dataset": dataset,
+                    "fields": json.dumps(
+                        [
+                            {
+                                "field_path": "core.name",
+                                "provider_rank": 10 + index * 10,
+                                "omitted_policy": "carry_forward",
+                                "null_policy": "value",
+                            }
+                        ]
+                    ),
+                },
+            )
+            arm_provider_field_shadow(session, 2)
+            await capture_provider_field_candidates(
+                session,
+                feature_id=feature,
+                dataset_id=dataset,
+                entity_key=entities[index],
+                record_key=entities[index] + "-r1",
+                values=json.dumps({"core.name": f"winner-{index}"}),
+                geometry_wkt="{}",
+                presence=ProviderFieldPresence(
+                    normalizer_revision="scalar-v1",
+                    supplied_fields={"core.name"},
+                ),
+            )
+    await _activate(admin, feature)
+
+    async def state():
+        async with AsyncSession(admin) as session:
+            return tuple(
+                (
+                    await session.execute(
+                        text("""SELECT active.policy_revision,
+                active.field_paths,epoch.epoch,feature.name,place.phones,
+                (SELECT jsonb_agg(to_jsonb(base) ORDER BY base.field_path)
+                  FROM feature.feature_base_field_values base
+                  WHERE base.feature_id=active.feature_id)
+                FROM feature.provider_field_active_policies active
+                CROSS JOIN feature.provider_field_policy_epoch epoch
+                JOIN feature.features feature ON feature.feature_id=active.feature_id
+                JOIN feature.feature_places place ON place.feature_id=active.feature_id
+                WHERE active.feature_id=CAST(:feature AS uuid)"""),
+                        {"feature": feature},
+                    )
+                ).one()
+            )
+
+    before = await state()
+
+    async def shrink():
+        async with AsyncSession(admin) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout='10s'"))
+            await session.execute(
+                text("""CALL feature.activate_provider_field_policy(
+                CAST(:feature AS uuid),2,ARRAY['core.name'])"""),
+                {"feature": feature},
+            )
+
+    with pytest.raises(DBAPIError, match="fieldset"):
+        await shrink()
+    assert await state() == before

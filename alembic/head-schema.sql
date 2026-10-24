@@ -623,6 +623,14 @@ BEGIN
     END LOOP;
     PERFORM 1 FROM feature.features WHERE feature_id=p_feature FOR UPDATE;
     IF NOT FOUND THEN RAISE EXCEPTION 'unknown Feature' USING ERRCODE='23514'; END IF;
+    -- 활성 fieldset 제거/교체는 남은 base/effective의 정리 의미가 없으므로 거부한다.
+    -- 같은 fieldset의 revision/rank 교체만 완결성 검증 뒤 허용한다.
+    IF EXISTS (SELECT 1 FROM feature.provider_field_active_policies active
+        WHERE active.feature_id=p_feature AND active.field_paths IS DISTINCT FROM
+          (SELECT array_agg(path ORDER BY path COLLATE "C") FROM unnest(p_fields) path)) THEN
+        RAISE EXCEPTION 'active scalar fieldset changes require a separate cutover protocol'
+          USING ERRCODE='23514';
+    END IF;
     -- 읽기만으로 완전성을 먼저 검증한다. 이후 어느 단계가 실패해도 pointer/epoch/투영 모두 rollback한다.
     PERFORM * FROM feature.provider_field_scalar_winners(p_feature,p_revision,p_fields);
     INSERT INTO feature.provider_field_active_policies(feature_id,policy_revision,field_paths)
