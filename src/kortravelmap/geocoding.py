@@ -1558,8 +1558,8 @@ class KorTravelGeoRestClient:
         except _httpx.HTTPError as exc:
             error_type = (
                 _TransientGeoRequestError
-                # ReadError/WriteError: keep-alive 연결이 요청 도중 끊긴 경우(2026-10-24 등산로 run이
-                # 5만 좌표 선조회 중 ReadError 한 번으로 두 시도를 잃었다). 연결 수립 실패는 제외.
+                # ReadError/WriteError = keep-alive 연결이 요청 중 끊김(2026-10-24 등산로
+                # 선조회가 이것 한 번으로 시도를 잃었다). 연결 수립 실패는 제외.
                 if isinstance(
                     exc,
                     (
