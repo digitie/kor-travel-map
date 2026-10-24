@@ -56,8 +56,10 @@ lifecycle/publication/quality 또는 lifecycle override를 새로 허용하지 �
 - 5개 prosrc에서 EX 한 줄을 제거한 bytes SHA가414 원문과 같고 owner/search_path/
   runtime EXECUTE·PUBLIC 폐쇄를 대조했다. 실제 fixture의 자원 제한을 inspect하고 최종
   정확 ID의 SDK NotFound·동일 UUID label 잔존0을 확인했다.
-- 공식 oracle 기록은 **1 skipped(14.83초)**이며 비교 성공으로 세지 않는다. 비교/metadata
-  재검증·전체 lint·정확 CI·독립2리뷰·추가 HTTP/UI는 아직 후속 gate다.
+- 공식 oracle 기록은 **1 skipped(14.83초)**이며 비교 성공으로 세지 않는다. 별도 정본
+  head oracle 비교·fresh300 metadata는 **2 passed(23.30초)**, 전체 정적 규약은
+  **373 passed/기존6 skipped(30.46초)**다. 기록과 비교를 합산하지 않는다.
+- 정확 CI·독립2리뷰·추가 HTTP/UI는 아직 후속 gate다.
 - 변경 Ruff PASS, migration strict mypy1 PASS. 공유 venv/index는 변경하지 않았다.
 
 초기 집중은33 passed/8 failed(21.70초)였다. active-policy 회귀가 전역 guard를 설치한 뒤

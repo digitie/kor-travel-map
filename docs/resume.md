@@ -2,7 +2,7 @@
 
 - admin/reactivate/core/lifecycle author·revoke5개를 함께 protocol-first로 보강하며 원래 서명·본문·owner/ACL을 보존한다. Python 업무·field override·identity·정책 seed/운영 변경0이다.
 - 실제 PG36+unit5 총41 PASS(16.63초), valid nested state·M05 non-kept·기존 provider retire·SH 거부/rollback·active-policy 거부·닫힌 ACL을 확인했다. 초기 seed 준비 실패는 별도 보존했다.
-- 공식 oracle 기록1skip이며 비교/전체 lint·독립2리뷰·정확 CI/UI는 미완이다. 전체 동시 쓰기 완료가 아니다. [범위·실패·증거](reports/2026-10-24-state-lifecycle-protocol-entry.md).
+- 공식 oracle 기록1skip과 별도 비교/metadata2 PASS·전체 lint373 PASS/기존6skip을 구분했다. 독립2리뷰·정확 CI/UI는 미완이며 전체 동시 쓰기 완료가 아니다. [범위·실패·증거](reports/2026-10-24-state-lifecycle-protocol-entry.md).
 
 ## 2026-10-24 — 통합 전체 CI의 시험 격리 보완(#1379)
 
