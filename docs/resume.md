@@ -1,6 +1,6 @@
 ## 2026-10-25 — Heritage bounded evidence reader 입력 계약(부분)
 
-- 422 source 독립 두 리뷰 뒤 실제 SDK3shape·runtime 권한/입력·RR/statement snapshot 총20 PASS(15.11초), 별도 공식 fresh oracle1 PASS(14.68초)를 확인했다. 초기 setup ERROR·문서 lint 실패/수정은 보존했다. 저장 shape 부정·midfunction interleave·메모리·비용/SH 수집·운영은 미완이다. [근거·범위](reports/2026-10-25-heritage-bounded-evidence-reader.md).
+- 422 source 두 리뷰 뒤 SDK/권한/입력/snapshot20 PASS(15.11초)와 별도 새raw부정3 PASS(14.29초), 공식 fresh oracle1 PASS(14.68초)를 확인했다. 초기 실패는 보존하며 단일최종23 실행으로 세지 않는다. 추가 의미부정·메모리/비용·schema API startup/SH 운영은 미완이다. [근거·범위](reports/2026-10-25-heritage-bounded-evidence-reader.md).
 
 
 ## 2026-10-25 — SH 운영 후보 크기 실측

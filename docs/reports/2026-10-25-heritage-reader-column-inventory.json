@@ -1,5 +1,5 @@
 {
-  "상태": "full SQL/12관계43가변열 source 독립 대조 완료. 실제 SDK3shape/작은runtime권한/서버입력/RR·statement-before-function snapshot 총20 PASS, 별도 공식 fresh oracle1 PASS. 저장shape 부정/peak/EXPLAIN은 미완",
+  "상태": "source 독립 대조 완료. 실제 SDK/권한/입력/RR·statement snapshot20 PASS와 별도 새저장raw3 PASS, 별도 공식oracle1 PASS. 단일최종23 실행/peak·EXPLAIN·운영 수용 아님",
   "상한단위": "압축되지 않은 direct stored datum byte. flattened 예산은 측정byte+4로 누적한다. payload 길이와 datum header를 혼동하지 않는다.",
   "metadata_only_fixed_columns": [
     "UUID",
@@ -252,13 +252,14 @@
     }
   },
   "아직미완": [
-    "저장 shape/압축·추가membership/정책/retire0 부정 반례",
+    "추가membership/정책/lineage/retire0 부정 전수",
     "metadata/payload 중간 interleave·peak와 대형 unrelated history EXPLAIN/CPU/wall 관측",
-    "실제 지원 N과 운영 전체 입력의 원자적 planning/apply 수용"
+    "실제 지원 N과 운영 전체 입력의 원자적 planning/apply·새schema API startup 수용"
   ],
   "starting_source": "7e36356700eb69a8c3c6a299fe2f14e06db905f5",
   "source_full_review_checkpoint": "bfed38828aabaa16d7610c99c1f923c972778192",
   "actual_positive_checkpoint": "3bfa51bc8d52cf17cd05d49f479bfbc82d9e75af",
   "actual_security_input_checkpoint": "ca631dc2747afa9e660f5d8979ae8b59028940fc",
-  "actual_snapshot_checkpoint": "a2c03cdd93c276b5d1883b75a22534de90b865cd"
+  "actual_snapshot_checkpoint": "a2c03cdd93c276b5d1883b75a22534de90b865cd",
+  "actual_stored_negative_checkpoint": "d3aad3ab3d14486851ce595deb5fffffb52b8961"
 }

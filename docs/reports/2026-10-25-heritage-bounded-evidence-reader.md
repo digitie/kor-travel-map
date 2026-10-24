@@ -53,10 +53,14 @@ bfed checkpoint의 첫 owned PG 실행은 `422_heritage_evidence_reader.py`의 s
 
 SDK fixture 생성만 test helper로 추출하고 RR reader→별도 actual batch commit→같은 RR old/fresh RC new를 검증하는 source를 추가했다. 별도 단일 statement는 MATERIALIZED controller barrier의 held 열을 참조하고 실제 pg_blocking_pids에서 정확한 C를 관측한 뒤 B commit/C release/A old를 비교한다. A/B runtime과 C/observer admin은 네 물리 PID가 다른지 확인하며, 기본 pool2를 각각 사용한다. controller 해제와 task 종료에는 명시 timeout을 둔다. 이는 snapshot-before-function 검증이며 metadata/payload 중간 interleave 증거가 아니다.
 
-base24 JSON 배열 순서는 계약이 아니므로 field_path별 map으로 비교하고24개/중복0을 확인한다. 각 entry의 값·R1·revision·clock 전체는 비교하며 제품에 ORDER BY를 추가하지 않는다. 새2case는 아직 PG 미실행이고 source 두 리뷰 뒤에만 실행한다.
+base24 JSON 배열 순서는 계약이 아니므로 field_path별 map으로 비교하고24개/중복0을 확인한다. 각 entry의 값·R1·revision·clock 전체는 비교하며 제품에 ORDER BY를 추가하지 않는다. 이 source 단계에서 새2case는 PG 실행 전이었고 두 리뷰 뒤에만 실행하도록 했다.
 
 두 snapshot source 리뷰 뒤 source `a2c03cdd93c276b5d1883b75a22534de90b865cd` 전체20 PASS(15.11초, skip0)를 확인했다. 이20개는 기존18개를 포함하며 합산하지 않는다. XML에 RR의 A/B PID와 단일 statement의 A/B/C/observer 네 PID, 정확한 C blocker 관측, B commit-before-release를 기록했다. exact CID 삭제/label0과 공식 oracle 불변도 확인했다. metadata/payload 중간 interleave·peak 증명으로 확장하지 않는다.
 
 ## 저장 raw 부정의 다음 source(실행 전)
 
-SDK 기반 bundle에 synthetic extra raw만 추가해 정본 hash/key/link를 새로 계산한 SourceRecord를 legacy EX loader/capture/cutover로 저장하는3case를 추가했다. 작은 extra field는 shape_unsupported, 압축 raw와 압축되지 않은 개별8KiB 초과 raw는 storage_unsupported·전체 items[]를 기대한다. 실제 압축/physical 크기는 별도 observer의 metadata-only SELECT로 확인하도록 했다. 기존 immutable raw UPDATE·trigger 해제·임의 GRANT·normalizer relabel은 없다. 이 raw는 실제 SDK 출력 성공이 아니라 지원 밖 저장 shape의 부정 사례다. 추가3case는 두 source 리뷰 전 PG 미실행이다.
+SDK 기반 bundle에 synthetic extra raw만 추가해 정본 hash/key/link를 새로 계산한 SourceRecord를 legacy EX loader/capture/cutover로 저장하는3case를 추가했다. 작은 extra field는 shape_unsupported, 압축 raw와 압축되지 않은 개별8KiB 초과 raw는 storage_unsupported·전체 items[]를 기대한다. 실제 압축/physical 크기는 별도 observer의 metadata-only SELECT로 확인하도록 했다. 기존 immutable raw UPDATE·trigger 해제·임의 GRANT·normalizer relabel은 없다. 이 raw는 실제 SDK 출력 성공이 아니라 지원 밖 저장 shape의 부정 사례다. 이 source 단계에서 추가3case는 두 리뷰 전 PG 미실행이었다.
+
+저장 raw source의 두 독립 리뷰 뒤 `d3aad3ab3d14486851ce595deb5fffffb52b8961`에서 새3개만3 PASS(14.29초, 기존20 deselected, skip0)를 확인했다. XML metadata는 small370B/압축없음→shape_unsupported,685B/pglz→storage_unsupported,20823B/압축없음→storage_unsupported다. 각각 전체 items[]였으며 exact CID Docker SDK NotFound/label0·공식 oracle 불변을 확인했다. 이전 a2c03의20개와 새로운3개는 중복 없는 별도 fixture 결과이고, 최종 head의 단일23개 실행이라고 부르지 않는다. 별도 공식 oracle1 결과도 합산하지 않는다.
+
+현재 precursor의 작은 positive/권한/입력/snapshot/저장 raw 부정 근거만 확보했다. 추가 membership·정책·lineage·retire0 부정 전수, 대형 history의 EXPLAIN·실제 지원 N·peak, 운영 전체 입력/SH worker와 새schema API startup 호환은 후속 gate다. 실제 전체 입력을 수용하는 운영 동시성 해결로 주장하지 않는다.
