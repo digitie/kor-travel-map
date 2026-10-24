@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 구현 합집합 수용(#1379)
+
+- 10개 검토된 구현 부모를 제품 고정점 `ebb62ccb8`로 합쳤다. 유일한 제품 합성은 승인 native 전체에 승인 phone 첫 gate2줄뿐이며 나머지 제품은 승인 부모 blob과 동일하다. 공통 문서의 양쪽 전체 항목도 보존했다.
+- 최종 집중175 PASS·공식 oracle/metadata2 PASS·lint373 PASS/기존skip6·Ruff/strict mypy/import4계약 PASS, 독립 교차 리뷰2 PASS. 실제 SIGKILL 복구(#1378)와 M05 old40P01 재현·414 보강(#1381)을 예외 rollback과 구분했다. task 안내 길이 실패는 원인을 고쳐 재검증하고 원본을 보존했다.
+- main 정확 CI·최신 실제 HTTP/UI·머지/운영 수용은 미완이다. 기본 OFF·seed0·운영0, 전체 T/collector·Geo/지역/identity·Weather/Transport 전파 및 취소된 export 운영 활성화 재개 없음. [통합 증거·제약](reports/2026-10-24-scoped-concurrent-write-integration.md).
+
 ## 2026-10-24 — M05 중복 후보·판정의 protocol-first 보강(414)
 
 - 실제 기존 M05 CALL과 scoped begin의 Feature/head 역순에서 40P01을 재현했다. 414는 후보 기록·판정 public v2/private inner의 첫 BEGIN에 EX만 추가하고 본문·서명·ACL은 보존한다. 기존 내부 owner EXEC만 정본에 더하며 새 공개 권한·정책 활성화는 없다.

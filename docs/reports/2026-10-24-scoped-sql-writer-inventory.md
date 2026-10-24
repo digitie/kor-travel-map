@@ -2,6 +2,10 @@
 
 ## 기준과 판정
 
+후속 #1381은 아래에서 정적으로 확인한 M05 역순을 실제 413 DB에서 재현하고 414로 보강했다.
+PG8+단위4·공식 oracle/metadata2를 통과했다. 이 정적 목록 자체를 실제 시험 증거로 바꾸거나
+나머지 writer의 전수 전환을 완료한 것은 아니다.
+
 이 보고서는 운영 조회/DB 실행/코드 수정 없이 `alembic/head-schema.sql`과 첫-party Python SQL 호출부를 대조한 정적 조사다. 기준 소스는 `271ed151685ac60d5a993c46f5f957c3843efdf6`, head oracle SHA256은 `2de8a20a78631f876b034f3cdfedc2e41102047e91ff5da8ac5157bb0c851d47`이다. 413의 새 protocol-first 7개가 반영된 oracle이며, 별도 native1375 및 향후 migration414의 완성본을 포함하지 않는다.
 
 **413은 전수 writer closure가 아니다.** 이름이 같은 2-int protocol gate에 참여하는 legacy SQL 진입은 늘었지만, 직접 호출 가능한 state/create/override 13개와 M05·catalog·receipt 경계가 남아 있다. 이 중 **M05의 Feature→source/head 잠금 역순은 본문으로 확인**했다. 실제 교착 재현·수정은 별도 414 담당자의 작업으로, 이 정적 조사 자체가 실제 deadlock/운영 장애를 측정했다는 뜻은 아니다. 다른 항목은 잠재 충돌·설계/시험 대상으로 구분한다. T-CWRITE 전체 acceptance/활성화·운영 효과·Weather/Transport 전파 완료로 바꾸지 않는다.
