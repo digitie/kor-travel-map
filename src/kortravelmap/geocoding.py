@@ -1506,7 +1506,8 @@ class KorTravelGeoRestClient:
         return {"X-KTG-API-Key": self._api_key.get_secret_value().strip()}
 
     async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
-        """일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김)는 ``transient_attempts``까지 다시 보낸다.
+        """일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김)는 ``transient_attempts``까지
+        다시 보낸다.
 
         2026-10-23 MCST 재현에서 odroid 과부하로 ``/v2/regions/within-radius``가 504를 한 번
         냈고, 그 한 번이 10만 행 변환 전체를 끝냈다. 같은 좌표를 몇 초 뒤 다시 물으면 대개
