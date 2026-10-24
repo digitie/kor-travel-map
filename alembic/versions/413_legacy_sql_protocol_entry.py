@@ -61,6 +61,47 @@ _GLOBAL_FENCE: Final = (
 )
 _PROTOCOL: Final = "PERFORM ops.lock_scoped_feature_write_protocol(true);"
 
+_RECEIPT_HEAD_CHECK_SQL: Final[str] = """
+ALTER TABLE ops.application_schema_operation_receipts
+    DROP CONSTRAINT ck_application_schema_operation_receipts_head,
+    ADD CONSTRAINT ck_application_schema_operation_receipts_head CHECK(destination_head IN (
+        '300',
+        '301_m03_import_children',
+        '302_m03_child_issuance',
+        '303_m05_payload_hash_domain',
+        '304_m05_detector_manuals',
+        '305_m05_relitigation_fence',
+        '306_m02_manual_feature_purge',
+        '307_m02_truncate_fence',
+        '308_t39_provider_identities',
+        '309_t39_feature_id_rekey',
+        '310_seoul_source_move',
+        '311_seal_member_digest',
+        '312_route_geometry_sidecar',
+        '313_single_service_role',
+        '400',
+        '401_retire_map_kma_refresh',
+        '402_remove_map_weather_data',
+        '403_drop_kma_notice_lineage',
+        '404_transport_provider_identity',
+        '405_mois_freshness_sla',
+        '406_feature_write_gate',
+        '407_feature_geocode_stamps',
+        '408_kor_travel_geo_releases',
+        '409_geo_release_item_reasons',
+        '410_provider_field_shadow',
+        '411_scoped_feature_write_kernel',
+        '412_provider_scalar_projection',
+        '413_legacy_sql_protocol_entry'
+    ))
+"""
+
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    "SET ROLE ktm_feature_schema_owner",
+    _RECEIPT_HEAD_CHECK_SQL,
+    "SET ROLE ktm_feature_schema_owner",
+)
+
 
 def _with_protocol_entry(body: str) -> str:
     """기존 DDL 전체를 복제하지 않고 검토한 첫 BEGIN 위치만 엄격히 바꾼다."""
@@ -114,14 +155,15 @@ def upgrade() -> None:
             )
         body = _with_protocol_entry(row["body"])
         replacements.append((row["owner"], row["definition"].replace(row["body"], body, 1)))
-    settings = dict(
-        bind.execute(
+    settings: dict[str, str] = {
+        str(name): str(value)
+        for name, value in bind.execute(
             text(
                 "SELECT name,setting FROM pg_settings "
                 "WHERE name IN ('lock_timeout','statement_timeout')"
             )
         ).all()
-    )
+    }
     for name, cap in (("lock_timeout", 1000), ("statement_timeout", 30000)):
         prior = int(settings[name])
         bind.execute(
@@ -149,27 +191,9 @@ def upgrade() -> None:
     bind.execute(text("SET ROLE ktm_feature_schema_owner"))
     if not prior_create:
         bind.execute(text("REVOKE CREATE ON SCHEMA feature FROM ktm_curation_command_owner"))
-    # 배포 receipt의 기존 허용 head는 제거하지 않고 현재 head만 확장한다.
-    from importlib.util import module_from_spec, spec_from_file_location
-    from pathlib import Path
-
-    path = Path(__file__).with_name("412_provider_scalar_projection.py")
-    spec = spec_from_file_location("_map_412_receipt", path)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("revision 412 receipt definition is unavailable")
-    previous = module_from_spec(spec)
-    spec.loader.exec_module(previous)
-    receipt = previous._RECEIPT_HEAD_CHECK_SQL
-    marker = "'412_provider_scalar_projection'\n"
-    if receipt.count(marker) != 1:
-        raise RuntimeError("revision 412 receipt definition changed")
-    bind.execute(
-        text(
-            receipt.replace(
-                marker, "'412_provider_scalar_projection',\n        '" + revision + "'\n"
-            )
-        )
-    )
+    # 정본 정적 gate도 전체 과거 허용 집합을 읽을 수 있게 명시한다.
+    for statement in _UPGRADE_STATEMENTS:
+        op.execute(statement)
     for name, value in settings.items():
         bind.execute(text("SELECT set_config(:name,:value,true)"), {"name": name, "value": value})
     op.execute("SET ROLE ktm_feature_schema_owner")

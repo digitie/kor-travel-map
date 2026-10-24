@@ -1,3 +1,8 @@
+## 2026-10-24 — ADR115 SQL 직접 진입 413 실제 검증
+
+- 기존 SQL 7개의 첫 protocol EX 진입을 원문 signature·본문 SHA-256, 원래 owner/ACL과 함께 검증했다. 공유→배타 승격 거부·실제 두 세션 차단 PID·옛 전역 fence 선점 방지를 포함한 단위/PG/전체 lint **407 PASS/6 기존 skip**, 공식 head oracle·metadata **2 PASS**다.
+- receipt 정적 검사에서 드러난 동적 문자열 문제를 명시 전체 head 목록으로 정리했다. 초기 실패도 기록했다. 두 독립 리뷰·정확 CI 수용 전이며 기본 OFF/seed0/운영0, 전체 writer·Geo·지역 전환과 Weather/Transport 전파는 미완이다. [증거와 범위](reports/2026-10-24-legacy-sql-protocol-entry.md).
+
 ## 2026-10-24 — ADR115 기존 SQL 직접 호출의 잠금 순서 보강 착수
 
 - Python fence만으로 커버되지 않는 기존 SQL 7개에 첫 protocol EX 진입을 추가한다. 기존 body/owner/search_path/ACL을 유지하고 scalar OFF·seed0·운영0을 지킨다. 전체 writer 전환이 아니다.
