@@ -40,11 +40,16 @@ schedule·큐 runner spec·handler binding·preview fixture를 걷어냈다. **�
 0. 함수 소유자 롤 창을 연다(404와 같다).
 1. **같은 트랜잭션 거부**(아래 "트랜잭션"). 퇴역할 Feature가 있는데 이 트랜잭션에서 앞선 revision이
    이미 적용됐으면(``alembic_version`` 행이 이 트랜잭션에서 쓰였으면) 멈춘다.
-2. 대상 operation scope 행을 ``FOR UPDATE``로 잠근다(``lock_timeout`` 5초). 새 import job·feature
-   update request member는 그 행에 FK ``FOR KEY SHARE``를 잡아야 하므로 이 트랜잭션이 끝날 때까지
-   기다리고, 끝난 뒤에는 꺼진 operation을 보고 활성 가드
-   (``reject_inactive_import_job_dataset_membership``)에서 거부된다. 다른 dataset의 job은 막지 않는다.
-   그 잠금을 쥔 **뒤에** preflight를 잰다 — 검사와 끄기 사이에 끼어든 job이 영영 멈추지 않게.
+2. member 표 둘(``ops.import_job_datasets``·``ops.feature_update_request_datasets``)을 ``SHARE`` 모드로
+   잠근다(``lock_timeout`` 5초). member INSERT는 문장 시작에서 ``ROW EXCLUSIVE``를 잡아야 하므로 이
+   트랜잭션이 끝날 때까지 **BEFORE 활성 가드보다 먼저** 기다리고, 끝난 뒤 가드
+   (``reject_inactive_import_job_dataset_membership``·``…_feature_update_request_…``, plain SELECT로
+   ``operation.is_enabled``를 읽는다)가 commit된 꺼진 operation을 보고 거부한다. 이미 미완인 member
+   INSERT가 있으면 이 잠금을 5초 안에 얻지 못해 아무것도 바꾸지 않고 실패한다. 행 단위(FK 대상 scope
+   행 ``FOR UPDATE``)로는 닫히지 않는다 — 가드가 FK 대기보다 먼저 돌아 켜진 operation을 보고 통과한
+   INSERT가 FK에서 기다렸다가 commit 뒤 성공한다(2026-10-24 재리뷰). 대가: 이 트랜잭션 동안 **모든**
+   dataset의 새 job member 쓰기가 기다린다(퇴역 수십 초~수 분 — runbook에 적는다). 그 잠금을 쥔 **뒤에**
+   preflight를 잰다.
 3. 대상 dataset의 operation을 **종류 불문**(``refresh``·``feature_load``·``preview``) **먼저** 끈다.
    행은 지우지 않는다 — ``import_job_datasets``·``feature_update_request_datasets``·
    ``provider_sync_state``가 exact FK로 가리키는 이력이다.
@@ -58,7 +63,7 @@ schedule·큐 runner spec·handler binding·preview fixture를 걷어냈다. **�
    같은 창) 스키마 소유자 롤로 돌아온다 — ``RESET ROLE``이 아니다
    (``tests/lint/test_migrations_keep_the_schema_owner_role.py``). 프로시저는 advisory lock을 잡지
    않는다(행 잠금만) — 수만 건을 한 트랜잭션에서 돌려도 공유 lock table을 쓰지 않는다(ADR-111). 이
-   블록만 ``statement_timeout = 0``이다(prod 약 1.4만 호출). 끝나면 프로시저가 남긴 상태 문맥 GUC
+   블록만 ``statement_timeout = 0``·``lock_timeout`` 60초다(prod 약 1.4만 호출 — member 표 잠금을 쥔 채 행 잠금에서 무한히 서지 않게). 끝나면 프로시저가 남긴 상태 문맥 GUC
    (``feature.state_transition_context``·``feature.state_procedure_definer``)를 비운다 — 같은
    트랜잭션의 뒤 revision이 그 문맥으로 상태를 바꿀 수 없게.
 5. receipt head CHECK에 이 revision을 더한다(401~410과 같은 계약). 이 ``ALTER TABLE``만
@@ -143,8 +148,10 @@ RETIRE_REASON_CODE: Final[str] = "adr114_transport_state_moved_to_valkey"
 RETIRE_PRINCIPAL: Final[str] = "system/alembic-411_retire_pg_transport_values"
 RETIRE_CAUSATION_REF: Final[str] = "ADR-114 decision 7 phase 1"
 
-#: operation scope 행 잠금 대기 상한(ms). 그 행에 FK 잠금을 쥔 미완 job이 있으면 기다리지 않고 실패한다.
-SCOPE_LOCK_TIMEOUT_MS: Final[int] = 5000
+#: member 표 SHARE 잠금 대기 상한(ms). 미완 member 쓰기가 있으면 기다리지 않고 실패한다.
+MEMBER_LOCK_TIMEOUT_MS: Final[int] = 5000
+#: 퇴역 루프의 행 잠금 대기 상한(ms). member 표 잠금을 쥔 채 무한히 서지 않게 한다.
+RETIRE_LOCK_TIMEOUT_MS: Final[int] = 60000
 #: receipt CHECK ``ALTER TABLE`` 잠금 대기 상한(ms) — 410과 같다.
 DDL_LOCK_TIMEOUT_MS: Final[int] = 1000
 
@@ -207,13 +214,9 @@ SELECT EXISTS (
 _SET_OWNER_ROLE_SQL: Final[str] = "SET ROLE ktm_feature_schema_owner"
 _SET_STATE_PROCEDURE_OWNER_ROLE_SQL: Final[str] = "SET ROLE ktm_feature_state_procedure_owner"
 
-_LOCK_TARGET_SCOPES_SQL: Final[str] = f"""
-SELECT scope.provider_dataset_id
-  FROM provider_sync.provider_dataset_operation_scopes AS scope
- WHERE scope.provider_dataset_id IN ({_TARGET_DATASETS_SQL})
- ORDER BY scope.provider_dataset_id, scope.sync_scope, scope.operation_key
-   FOR UPDATE
-"""
+_LOCK_MEMBER_TABLES_SQL: Final[str] = (
+    "LOCK TABLE ops.import_job_datasets, ops.feature_update_request_datasets IN SHARE MODE"
+)
 
 _DISABLE_TARGET_OPERATIONS_SQL: Final[str] = f"""
 UPDATE provider_sync.provider_dataset_operations AS operation
@@ -342,7 +345,7 @@ SELECT 'active_feature', target.feature_id::text
 
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _SET_OWNER_ROLE_SQL,
-    _LOCK_TARGET_SCOPES_SQL,
+    _LOCK_MEMBER_TABLES_SQL,
     _DISABLE_TARGET_OPERATIONS_SQL,
     _SET_STATE_PROCEDURE_OWNER_ROLE_SQL,
     _RETIRE_TARGET_FEATURES_SQL,
@@ -365,7 +368,7 @@ def upgrade() -> None:
     bind = op.get_bind()
     (
         set_owner,
-        lock_scopes,
+        lock_members,
         disable_operations,
         set_state_owner,
         retire,
@@ -401,8 +404,8 @@ def upgrade() -> None:
             f"Feature가 남아 있다(이 revision이 모르는 상태): {legacy!r}"
         )
 
-    _set_local(bind, "lock_timeout", str(SCOPE_LOCK_TIMEOUT_MS))
-    bind.execute(text(lock_scopes))
+    _set_local(bind, "lock_timeout", str(MEMBER_LOCK_TIMEOUT_MS))
+    bind.execute(text(lock_members))
     blockers: list[str] = []
     in_flight = _scalars(bind, _IN_FLIGHT_TARGET_JOBS_SQL)
     if in_flight:
@@ -421,6 +424,7 @@ def upgrade() -> None:
 
     bind.execute(text(disable_operations))
     _set_local(bind, "statement_timeout", "0")
+    _set_local(bind, "lock_timeout", str(RETIRE_LOCK_TIMEOUT_MS))
     bind.execute(text(set_state_owner))
     bind.execute(text(retire))
     bind.execute(text(restore_owner))

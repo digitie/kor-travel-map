@@ -654,11 +654,11 @@ async def test_411_refuses_when_a_target_feature_has_an_active_lifecycle_overrid
 async def test_411_waits_on_an_uncommitted_target_membership_and_fails_closed(
     db_at_410: tuple[Config, str],
 ) -> None:
-    """검사와 끄기 사이의 경주: commit되지 않은 대상 member가 있으면 411은 scope 행을 잠그지 못한다.
+    """경주 ①: commit되지 않은 대상 member가 먼저 있으면 411은 member 표를 잠그지 못한다.
 
-    member INSERT의 FK가 scope 행에 ``FOR KEY SHARE``를 쥐므로 411의 ``FOR UPDATE``는
-    ``lock_timeout``(5초)으로 실패하고 아무것도 바꾸지 않는다. 잠금이 없다면 411은 그 job을
-    보지 못한 채 operation을 끄고, job은 영영 종결로 가지 못한다.
+    미완 INSERT가 ``ROW EXCLUSIVE``를 쥐므로 411의 ``SHARE`` 잠금은 ``lock_timeout``(5초)으로
+    실패하고 아무것도 바꾸지 않는다. 잠금이 없다면 411은 그 job을 보지 못한 채 operation을
+    끄고, job은 영영 종결로 가지 못한다.
     """
 
     config, superuser_dsn = db_at_410
@@ -682,5 +682,86 @@ async def test_411_waits_on_an_uncommitted_target_membership_and_fails_closed(
         )
         assert await _enabled_target_operations(connection) > 0
     finally:
+        await holder.close()
+        await connection.close()
+
+
+async def _wait_for_lock_wait(connection: Any, pid: int, *, seconds: float = 30.0) -> None:
+    """``pid`` backend가 heavyweight lock을 기다리기 시작할 때까지 기다린다."""
+    deadline = asyncio.get_running_loop().time() + seconds
+    while asyncio.get_running_loop().time() < deadline:
+        waiting = await connection.fetchval(
+            "SELECT wait_event_type = 'Lock' FROM pg_stat_activity WHERE pid = $1", pid
+        )
+        if waiting:
+            return
+        await asyncio.sleep(0.1)
+    raise AssertionError(f"backend {pid}가 lock을 기다리지 않는다")
+
+
+async def test_411_rejects_a_target_membership_inserted_while_it_runs(
+    db_at_410: tuple[Config, str],
+) -> None:
+    """경주 ②: 411이 도는 **도중** 들어온 대상 member INSERT는 411 commit 뒤 거부된다.
+
+    BEFORE 활성 가드는 plain SELECT로 ``is_enabled``를 읽는다 — 411이 끈 operation은 commit 전까지
+    다른 세션에 켜진 것으로 보인다. member 표 ``SHARE`` 잠금이 없으면 그 INSERT는 가드를 통과하고
+    (행 단위 FK 대기는 가드 뒤라 소용없다) 꺼진 operation에 member가 남는다(빨강). 순서를 강제한다:
+    C가 대상 Feature 행을 쥐어 411을 퇴역 루프 안에서 세우고, 그동안 B가 member를 넣으려
+    한다(member 표 잠금에서 기다려야 한다). C를 놓으면 411이 commit하고 B의 INSERT는
+    가드에서 거부된다.
+    """
+
+    import asyncpg
+
+    config, superuser_dsn = db_at_410
+    connection = await _connect(superuser_dsn)
+    holder = await _connect(superuser_dsn)
+    inserter = await _connect(superuser_dsn)
+    try:
+        seeded = await _seed_population(connection)
+        member = await _target_scope(connection)
+        hold = holder.transaction()
+        await hold.start()
+        await holder.execute(
+            "SELECT 1 FROM feature.features WHERE feature_id = $1 FOR UPDATE", seeded.targets[0]
+        )
+        upgrade = asyncio.create_task(_upgrade_to_411(config))
+        # 411이 퇴역 루프에서 C의 행 잠금을 기다릴 때까지(그때는 member 표 잠금을 이미 쥐었다).
+        migrator_pid: int | None = None
+        deadline = asyncio.get_running_loop().time() + 60
+        while migrator_pid is None and asyncio.get_running_loop().time() < deadline:
+            migrator_pid = await connection.fetchval(
+                "SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid)) LIMIT 1",
+                holder.get_server_pid(),
+            )
+            if migrator_pid is None:
+                await asyncio.sleep(0.1)
+        assert migrator_pid is not None, "411이 대상 Feature 행 잠금에서 서지 않았다"
+        assert await connection.fetchval(
+            "SELECT count(*) FROM pg_locks WHERE pid = $1 AND granted AND mode = 'ShareLock' "
+            "AND relation = 'ops.import_job_datasets'::regclass",
+            migrator_pid,
+        ) == 1
+
+        async def _insert() -> None:
+            async with inserter.transaction():
+                await _insert_member_job(inserter, member, "411-during-probe")
+
+        insert = asyncio.create_task(_insert())
+        await _wait_for_lock_wait(connection, inserter.get_server_pid())
+        await hold.rollback()
+        await upgrade
+        with pytest.raises(asyncpg.CheckViolationError, match="inactive dataset member"):
+            await insert
+        assert await _version(connection) == _AFTER
+        assert await connection.fetchval(
+            f"""
+            SELECT count(*) FROM ops.import_job_datasets
+             WHERE provider_dataset_id IN ({_TARGET_DATASETS_SQL})
+            """
+        ) == 0
+    finally:
+        await inserter.close()
         await holder.close()
         await connection.close()

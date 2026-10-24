@@ -607,10 +607,14 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   그 entity에 `primary` link로 묶인 `active` Feature(prod 약 14,240건). 404가 비활성화한 옛 provider(`python-opinet-api`·
   `python-krex-api`)의 price·notice dataset에 active Feature가 남아 있으면 멈춘다(404 preflight 때 0행, 그 뒤 쓰기 불가 —
   남았다면 모르는 상태라 몰래 퇴역하지 않는다).
-- **순서**: 같은 트랜잭션 거부 → 대상 operation scope 행 `FOR UPDATE`(lock_timeout 5초 — 새 member의 FK `KEY SHARE`를 막아
-  검사·끄기 사이 경주를 닫는다, 다른 dataset의 job은 막지 않는다) → preflight → operation **먼저** 끔 → 퇴역(`statement_timeout=0`)
-  → receipt CHECK(`lock_timeout` 1초, 410과 같은 상한) → timeout 원복 → 사후 조건(켜진 대상 operation 0, active 대상 0, 전이 수 =
-  대상 수, queued/running 대상 job 0).
+- **순서**: 같은 트랜잭션 거부 → member 표 둘(`ops.import_job_datasets`·`ops.feature_update_request_datasets`) `LOCK … IN SHARE
+  MODE`(lock_timeout 5초) → preflight → operation **먼저** 끔 → 퇴역(`statement_timeout=0`, `lock_timeout` 60초) → receipt
+  CHECK(`lock_timeout` 1초, 410과 같은 상한) → timeout 원복 → 사후 조건(켜진 대상 operation 0, active 대상 0, 전이 수 = 대상 수,
+  queued/running 대상 job 0). **왜 표 잠금인가**: 활성 가드(`reject_inactive_*_dataset_membership`)는 BEFORE INSERT 트리거의 plain
+  SELECT로 `is_enabled`를 읽는다. 411이 끈 operation은 commit 전까지 다른 세션에 켜진 것으로 보이므로, 행 단위(FK 대상 scope 행
+  `FOR UPDATE`)로는 가드를 통과한 INSERT가 FK에서 기다렸다가 commit 뒤 성공해 꺼진 operation에 member가 남는다. 표 `SHARE` 잠금은
+  INSERT가 문장 시작에서 `ROW EXCLUSIVE`를 기다리게 하므로 가드가 commit된 꺼진 값을 본다. **대가**: 411 트랜잭션 동안 모든
+  dataset의 새 job member 쓰기가 기다린다(퇴역 수십 초~수 분) — 배포를 한가한 시간에 한다.
 - **남기는 것**: Feature 행·source lineage·가격 fact·notice 계보·alias·상태 전이 감사·카탈로그 행. **dataset은 활성으로 둔다**
   (401과 같다 — 비활성은 물리 삭제 단계의 일이고, 활성 가드가 그때 DELETE까지 막는다).
 - **seal**(기각 대안의 첫 함정): 전이는 그 Feature에 link가 있는 **모든 dataset**의 `current_provider_curation_input_set` 입력을
@@ -634,9 +638,23 @@ pair를 회전한다(`/root/chain17.sh`, 마이그레이션 전진이 410을 단
 
 1. **갱신 정책을 끈다(필수).** prod 적재는 cron이 아니라 큐다(`feature_update_request_queue_sensor` 기본 RUNNING, PinVi
    cache-target 요청이 targeted run을 낸다). 세 dataset(`transport_fuel_prices`·`transport_rest_area_fuel_prices`·
-   `transport_highway_incidents`)마다 admin `PUT /v1/ops/datasets/refresh-policy`로 `enabled=false`·`targeted_policy="disabled"`를
-   쓴다(UI: `/ops/datasets` 정책 편집기 — 현재 revision을 `expected_revision`으로). 그러면 큐 executor가 새 요청을
-   `policy_disabled`로 건너뛴다. API를 쓸 수 없을 때만 같은 값을 SQL로 쓴다(스키마 소유자, `revision`을 1 올린다).
+   `transport_highway_incidents`)마다 — `PUT /v1/ops/datasets/refresh-policy?provider_dataset_id=<id>`는 **전체 upsert**다(본문
+   `extra=forbid`, `source_kind`·`expected_revision` 필수, 빠진 필드는 기본값으로 덮인다). 그래서 현재 정책을 먼저 읽고
+   (`GET /v1/ops/datasets/<id>?sync_scope=dataset_wide`의 정책 블록 — 정책 행이 없으면 `expected_revision: null`로 새로 만든다)
+   **그 값을 그대로** 보내되 `enabled`와 `targeted_policy`만 바꾼다(읽은 원본은 되돌리기용으로 보관한다). 예:
+
+   ```bash
+   # admin 토큰·주소는 Map admin 표면 설정을 쓴다. <id>는 아래 3단계 질의의 target id.
+   curl -sS "$MAP/v1/ops/datasets/<id>?sync_scope=dataset_wide" -H "$ADMIN_AUTH" > policy-<id>.before.json
+   # policy-<id>.before.json의 정책 필드를 그대로 옮기고 두 값만 바꾼 본문:
+   curl -sS -X PUT "$MAP/v1/ops/datasets/refresh-policy?provider_dataset_id=<id>" -H "$ADMIN_AUTH" \
+     -H 'Content-Type: application/json' -d '{"expected_revision": "<현재 revision 또는 null>",
+       "source_kind": "internal", "targeted_policy": "disabled", "enabled": false,
+       "system_interval_seconds": <원래 값>, "min_interval_seconds": <원래 값>, "max_concurrent": <원래 값>, …}'
+   ```
+
+   (UI `/ops/datasets` 정책 편집기도 같은 upsert다 — 두 값만 바꿔 저장한다.) 그러면 큐 executor가 새 요청을 `policy_disabled`로
+   건너뛴다. API를 쓸 수 없을 때만 같은 두 값을 SQL로 바꾼다(스키마 소유자, `revision = revision + 1`, 다른 열은 두고).
 2. **schedule 확인.** 세 schedule(`feature_price_transport_fuel_stations_daily_schedule`·
    `feature_price_transport_rest_areas_twice_daily_schedule`·`feature_notice_transport_highway_incidents_ten_minute_schedule`)은
    코드 기본이 STOPPED다. 공용 webserver(`kor-travel-dagster-webserver`) UI의 Schedules에서 code location
@@ -662,11 +680,18 @@ pair를 회전한다(`/root/chain17.sh`, 마이그레이션 전진이 410을 단
 
    0행이어야 한다. 411은 scope 행 잠금 뒤에 같은 것을 다시 재고, 남아 있거나 미완 member가 scope 행을 쥐고 있으면(5초) 실패한다
    — 그때 DB는 **410 그대로**다(A가 이미 commit됐다). 원인을 없애고 B를 다시 돌린다.
-4. **배포**(Map API·Dagster code location 같은 pair): 411 실행. 한 트랜잭션, 프로시저 약 1.4만 회(수십 초~수 분, 행 잠금만; 대상
-   dataset의 새 job만 기다린다).
+4. **배포**(Map API·Dagster code location 같은 pair): 411 실행. 한 트랜잭션, 프로시저 약 1.4만 회(수십 초~수 분). 그동안 **모든**
+   dataset의 새 job member 쓰기가 member 표 잠금에서 기다린다 — 한가한 시간에 한다. **A를 건너뛰었다면**(prod가 아직 409) 411이
+   같은 트랜잭션 거부로 결정적으로 실패하고, `docker/api-entrypoint.sh`가 `alembic upgrade head`를 30번 재시도한 뒤 API
+   컨테이너가 crash-loop한다(fail-closed — DB는 409 그대로, 410도 되돌아간다). 복구: 그 pair를 멈추고 A(head 410 pair)를 먼저
+   배포한 뒤 B를 다시 한다.
 5. **확인**: `SELECT count(*) FROM feature.feature_state_transitions WHERE reason_code = 'adr114_transport_state_moved_to_valkey'` ≈
    14,240, 대상 dataset enabled operation 0, `/v1/features/in-bounds?kinds=price`에 transport 유가 없음, Valkey
-   `/v1/service/transport/status` 그대로, 다른 dataset 적재 정상.
+   `/v1/service/transport/status` 그대로, 다른 dataset 적재 정상. 그리고 **꺼진 대상 operation에 붙은 queued/running member는 0**이어야
+   한다(3단계 질의를 다시 돌린다 — 411 사후 조건이 같은 것을 재지만 배포 뒤 한 번 더 본다). 0이 아니면(설계상 생길 수 없다 — 생겼다면
+   잠금 우회 경로가 있다는 뜻이니 원인을 기록한다) 그 job은 활성 가드 때문에 스스로 종결로 가지 못한다: 정리는 admin 파이프라인
+   취소 경로(`/ops/pipeline` 요청 취소)로 하고, 그것도 막히면 member 행을 건드리지 말고 그 job id를 남겨 사람이 판단한다
+   (operation을 잠시 다시 켜 종결시키는 것은 새 revision 없이 하지 않는다).
 6. **남는 Dagster 상태**: 지운 schedule 셋의 instigator state 행은 공용 Dagster storage에 "로드할 수 없는 schedule"로 남는다 —
    해롭지 않다(tick을 만들지 않는다). UI에서 정리하거나 그대로 둔다.
 7. **되돌리기**: 데이터는 지우지 않았다. 개별 Feature는 admin 재활성화(`reactivation_evidence` 필요 — override 때문에 provider
