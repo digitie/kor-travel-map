@@ -286,14 +286,10 @@ async def test_items_follow_the_db_operations_and_the_core_policy(
     assert reasons["feature_place_standard_special_streets_job"] == ("skipped", "disabled")
     assert reasons["feature_place_datagokr_jeju_local_restaurants_job"] == ("skipped", "disabled")
     assert reasons["feature_event_visitkorea_enrichment_job"] == ("skipped", "no_geo_dependency")
-    assert reasons["feature_notice_transport_highway_incidents_job"] == (
-        "skipped",
-        "no_geo_dependency",
-    )
-    assert reasons["feature_price_transport_fuel_stations_job"] == (
-        "skipped",
-        "no_geo_dependency",
-    )
+    # ADR-114 결정 7(migration 411): 유가·돌발 PG operation은 꺼져 계획에 나오지 않는다.
+    assert "feature_notice_transport_highway_incidents_job" not in reasons
+    assert "feature_price_transport_fuel_stations_job" not in reasons
+    assert "feature_price_transport_rest_areas_job" not in reasons
     assert reasons["mois_license_incremental_update"] == ("skipped", "queue_only")
 
     # MOIS는 replay가 없다(T-GR-08) — run_config 없이 계획에 들되 센서가 내지 않는다(운영자 수동,

@@ -57,10 +57,7 @@ def test_feature_load_asset_keys_registered() -> None:
     assert {
         "feature_event_datagokr_cultural_festivals",
         "feature_place_transport_fuel_stations",
-        "feature_price_transport_fuel_stations",
         "feature_place_transport_rest_areas",
-        "feature_price_transport_rest_areas",
-        "feature_notice_transport_highway_incidents",
         "feature_place_krheritage_items",
         "feature_event_krheritage_events",
         "feature_place_mois_licenses",
@@ -95,9 +92,6 @@ _RETRY_POLICY_EXCEPTIONS: dict[str, str] = {
         "다시 실행해 그 예산을 전부 다시 쓴다. 무료키 일일 한도가 300회라 "
         "max_retries=3이면 하루 최악 560회다. 이 모드는 시군 윈도를 날짜로 "
         "회전시키므로 올바른 재시도 주기는 60초가 아니라 다음 스케줄이다."
-    ),
-    "feature_price_transport_fuel_stations": (
-        "같은 이유 — 같은 상류, 같은 예산을 쓴다."
     ),
     "feature_place_mois_licenses": (
         "ADR-108 재개형 적재 — 재시도는 commit된 chunk를 건너뛰고 이어 가므로 여러 번일 "
@@ -218,8 +212,6 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "datagokr_cultural_festivals",
     "transport_fuel_stations",
     "transport_rest_areas",
-    "transport_rest_area_fuel_prices",
-    "transport_highway_incidents",
     "krheritage_items",
     "krheritage_events",
     "mois_license_records",
@@ -307,19 +299,6 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
         assert not any("provider" in key or "dataset" in key for key in schedule.tags)
 
 
-def test_transport_highway_incidents_schedule_runs_every_ten_minutes() -> None:
-    schedule = defs.resolve_schedule_def(
-        "feature_notice_transport_highway_incidents_ten_minute_schedule"
-    )
-
-    assert schedule.cron_schedule == "*/10 * * * *"
-    assert schedule.execution_timezone == KST_TIMEZONE
-    assert schedule.default_status == DefaultScheduleStatus.STOPPED
-    assert schedule.job_name == "feature_notice_transport_highway_incidents_job"
-    assert schedule.tags["kor_travel_map.operation_key"] == schedule.job_name
-    assert schedule.tags["kor_travel_map.trigger_kind"] == "schedule"
-
-
 def _remote_origin(job_name: str, location_name: str = MAP_CODE_LOCATION_NAME) -> RemoteJobOrigin:
     """daemon·GraphQL launch처럼 remote origin을 단 run — Dagster가 location tag를 단다."""
 
@@ -332,11 +311,11 @@ def _remote_origin(job_name: str, location_name: str = MAP_CODE_LOCATION_NAME) -
     )
 
 
-def test_transport_highway_incidents_schedule_coalesces_non_terminal_run() -> None:
+def test_coalescing_schedule_skips_while_a_run_is_non_terminal() -> None:
     schedule = defs.resolve_schedule_def(
-        "feature_notice_transport_highway_incidents_ten_minute_schedule"
+        "feature_notice_krforest_landslide_forecast_issues_six_daily_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
+    job = defs.resolve_job_def("feature_notice_krforest_landslide_forecast_issues_job")
 
     with DagsterInstance.local_temp() as instance:
         for run_status in (
@@ -363,7 +342,7 @@ def test_transport_highway_incidents_schedule_coalesces_non_terminal_run() -> No
             instance.delete_run(run.run_id)
 
 
-def test_krex_coalescing_ignores_other_tenant_run() -> None:
+def test_coalescing_ignores_other_tenant_run() -> None:
     """공유 plane: 다른 프로젝트의 같은 이름 job run은 Map tag가 없어 tick을 막지 않는다.
 
     schedule context에는 code location이 없으므로 location 상수가 아니라 Map job이 스스로
@@ -371,9 +350,9 @@ def test_krex_coalescing_ignores_other_tenant_run() -> None:
     """
 
     schedule = defs.resolve_schedule_def(
-        "feature_notice_transport_highway_incidents_ten_minute_schedule"
+        "feature_notice_krforest_landslide_forecast_issues_six_daily_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
+    job = defs.resolve_job_def("feature_notice_krforest_landslide_forecast_issues_job")
 
     with DagsterInstance.local_temp() as instance:
         instance.create_run_for_job(
@@ -389,11 +368,11 @@ def test_krex_coalescing_ignores_other_tenant_run() -> None:
     assert len(tick.run_requests) == 1
 
 
-def test_krex_coalescing_ignores_untagged_run() -> None:
+def test_coalescing_ignores_untagged_run() -> None:
     schedule = defs.resolve_schedule_def(
-        "feature_notice_transport_highway_incidents_ten_minute_schedule"
+        "feature_notice_krforest_landslide_forecast_issues_six_daily_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
+    job = defs.resolve_job_def("feature_notice_krforest_landslide_forecast_issues_job")
 
     with DagsterInstance.local_temp() as instance:
         instance.create_run_for_job(
@@ -408,11 +387,11 @@ def test_krex_coalescing_ignores_untagged_run() -> None:
     assert len(tick.run_requests) == 1
 
 
-def test_transport_highway_incidents_schedule_requests_run_without_non_terminal_run() -> None:
+def test_coalescing_schedule_requests_run_without_non_terminal_run() -> None:
     schedule = defs.resolve_schedule_def(
-        "feature_notice_transport_highway_incidents_ten_minute_schedule"
+        "feature_notice_krforest_landslide_forecast_issues_six_daily_schedule"
     )
-    job = defs.resolve_job_def("feature_notice_transport_highway_incidents_job")
+    job = defs.resolve_job_def("feature_notice_krforest_landslide_forecast_issues_job")
 
     with DagsterInstance.local_temp() as instance:
         with build_schedule_context(instance=instance) as context:

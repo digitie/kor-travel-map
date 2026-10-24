@@ -46,9 +46,13 @@ schedule·큐 runner spec·handler binding·preview fixture를 걷어냈다. **�
 2. 대상 dataset의 operation을 **종류 불문**(``refresh``·``feature_load``·``preview``) 끈다. 행은 지우지
    않는다 — ``import_job_datasets``·``feature_update_request_datasets``·``provider_sync_state``가 exact
    FK로 가리키는 이력이다.
-3. 대상 dataset을 ``is_active = false``로 내린다(404와 같다 — Feature가 전부 퇴역했으므로 읽기 경로가
-   볼 것이 없다). 카탈로그 행은 지우지 않는다.
-4. receipt head CHECK에 이 revision을 더한다(401~410과 같은 계약).
+3. receipt head CHECK에 이 revision을 더한다(401~410과 같은 계약).
+
+**dataset은 비활성화하지 않는다**(401과 같다 — 그것은 물리 삭제 단계의 일이다, 402·404). 활성 가드
+(``reject_inactive_source_entity_dataset`` 등)는 비활성 dataset의 lineage를 지우는 DELETE까지 막으므로,
+다음 단계가 지울 때 다시 켜야 한다. 그리고 notice 계보·가격 표시 같은 공용 라이브러리 경로가 이
+dataset을 실제 카탈로그 행으로 쓰는 검사가 있다. operation이 꺼지면 큐·``/ops/datasets``의 갱신
+capability·exact-set handler 대조에서 빠진다(활성 join은 ``operation.is_enabled``다).
 
 **남기는 것(이력)**: Feature 행·source entity/record/head/link·가격 fact(``feature_price_values``·
 ``current_price_summary``)·notice 계보·상태 전이 감사·alias는 지우지 않는다. 물리 삭제는 비가역이라
@@ -73,7 +77,7 @@ schedule·큐 runner spec·handler binding·preview fixture를 걷어냈다. **�
 - 대상 Feature에 활성 lifecycle override가 있다 — 운영자 결정이 이미 있으므로 덮어쓰지 않는다
   (2026-10-24 prod 0건).
 
-사후 조건: 대상 dataset에 켜진 operation·활성 dataset·``active`` Feature가 남으면 중단한다. 퇴역 수는
+사후 조건: 대상 dataset에 켜진 operation·``active`` Feature가 남으면 중단한다. 퇴역 수는
 preflight에서 센 대상 수와 같아야 한다.
 
 트랜잭션. env.py가 전 revision을 한 트랜잭션으로 돈다. 전부 되거나 전부 안 된다.
@@ -168,13 +172,6 @@ UPDATE provider_sync.provider_dataset_operations AS operation
    AND operation.is_enabled
 """
 
-_DEACTIVATE_TARGET_DATASETS_SQL: Final[str] = f"""
-UPDATE provider_sync.provider_datasets AS dataset
-   SET is_active = false
- WHERE dataset.provider_dataset_id IN ({_TARGET_DATASETS_SQL})
-   AND dataset.is_active
-"""
-
 #: receipt head 값 열거 CHECK — graph의 **모든** revision(401과 같은 계약).
 _RECEIPT_HEAD_CHECK_SQL: Final[str] = """
 ALTER TABLE ops.application_schema_operation_receipts
@@ -247,11 +244,6 @@ SELECT 'enabled_operation' AS kind, operation.operation_key AS name
  WHERE operation.provider_dataset_id IN ({_TARGET_DATASETS_SQL})
    AND operation.is_enabled
 UNION ALL
-SELECT 'active_dataset', dataset.dataset_key
-  FROM provider_sync.provider_datasets AS dataset
- WHERE dataset.provider_dataset_id IN ({_TARGET_DATASETS_SQL})
-   AND dataset.is_active
-UNION ALL
 SELECT 'active_feature', target.feature_id::text
   FROM ({_TARGET_FEATURES_SQL}) AS target
  LIMIT 10
@@ -263,7 +255,6 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _RETIRE_TARGET_FEATURES_SQL,
     _SET_OWNER_ROLE_SQL,
     _DISABLE_TARGET_OPERATIONS_SQL,
-    _DEACTIVATE_TARGET_DATASETS_SQL,
     _RECEIPT_HEAD_CHECK_SQL,
 )
 
