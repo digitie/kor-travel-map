@@ -75,6 +75,7 @@ from kortravelmap.dto import (
     SourceRecord,
     SourceRole,
 )
+from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
 from kortravelmap.geocoding import ReverseGeocoder, cached_reverse_geocoder
 
 __all__ = [
@@ -589,6 +590,11 @@ async def _resolve_address(
     )
 
 
+_MCST_NAME_PRESENCE: Final[ProviderFieldPresence] = ProviderFieldPresence(
+    normalizer_revision="mcst-name-v1", supplied_fields=frozenset({"core.name"})
+)
+
+
 def _build_bundle(
     *,
     spec: McstDatasetSpec,
@@ -649,7 +655,13 @@ def _build_bundle(
         match_method="natural_key",
         confidence=100,
     )
-    return FeatureBundle(feature=feature, source_record=source_record, source_link=source_link)
+    return FeatureBundle(
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+        # 검증된 원천 이름만 선언한다. 파생 marker/Geo/DTO 기본 None을 supplied로 추정하지 않는다.
+        provider_field_presence=_MCST_NAME_PRESENCE,
+    )
 
 
 async def file_rows_to_bundles(

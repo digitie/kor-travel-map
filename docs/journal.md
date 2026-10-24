@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 shadow 실제 수집 연결: 명시 scope·MCST 이름
+
+- revision+provider/dataset allowlist가 모두 있을 때만 기존 native TX 안에서 shadow를 기록한다. 실제 MCST 이름만 supplied로 선언하며 Geo/파생값/DTO null은 추측하지 않는다.
+- 기본OFF/정책seed0/운영0. 기존 Feature ID/effective/전역 잠금 의미를 유지한다. [연결·실패·미완 gate](reports/2026-10-24-provider-field-shadow-hook.md).
+- 실제client PG/기존MCST·대기 집중검증을 진행하며 CI/두 리뷰/HTTPUI는 별도 수용한다. 전체 membership/winner/Geo/scope 분할은 미완이다.
+
 ## 2026-10-24 — ADR115 T-CWRITE-02: 불변 정책과 shadow 후보 기반
 
 - 전체 CI의 ORM metadata/runtime preflight 누락을 보완했다. shadow CHECK/FK/index를 metadata에 정합화하고 recorder 정확 signature만 허용한다. 정책 등록/직접 DML 차단과 경고 검사는 유지하며 실패한 테스트 engine 회수도 검증한다.
