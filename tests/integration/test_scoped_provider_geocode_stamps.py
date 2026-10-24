@@ -5,13 +5,19 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from pathlib import Path
 from uuid import uuid4
 
+import psycopg
 import pytest
+from alembic.config import Config
+from psycopg import sql
 from sqlalchemy import event, text
+from sqlalchemy.engine import make_url
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from alembic import command
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
 from kortravelmap.infra import exclusive_provider_refresh as full
@@ -19,7 +25,7 @@ from kortravelmap.infra import feature_geocode_stamp_repo as stamp_repo
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra import scoped_provider_batch as batch
 from kortravelmap.infra import scoped_provider_refresh as native
-from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.feature_geocode_stamp_repo import upsert_stamps
 from kortravelmap.infra.provider_field_candidates import lock_provider_field_policy_epoch
 from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges_in_transaction
@@ -28,6 +34,10 @@ from kortravelmap.infra.scoped_feature_writes import (
     cancel_scoped_feature_write,
     finish_scoped_feature_write,
     lock_scoped_feature_write_protocol,
+)
+from tests.integration._application_300_bootstrap import (
+    alembic_schema_owner_role,
+    bootstrapped_application_300_migrator_dsn,
 )
 from tests.integration.test_exclusive_provider_full_refresh import _full_plan
 from tests.integration.test_feature_geocode_stamps import _feature
@@ -1051,3 +1061,511 @@ async def test_legacy_fk_actual_parent_delete_race(fk_boundary, existing_stamp, 
         if task is not None and not task.done():
             task.cancel()
             await asyncio.gather(task, return_exceptions=True)
+
+
+_PARENT420_HEAD = "420_exclusive_provider_refresh"
+_STAMP421_HEAD = "421_stamp_writer_boundary"
+# immutable1be runtime_privileges.py의 역사적 표 권한은 SELECT/INSERT/UPDATE다.
+_PARENT420_SOURCE_SHA = "ab5ab6c236a3d2629dad93500f250cde6d05b68bed3c945c39b26c4bded4bf56"
+_PARENT420_ACL_SHA = "cb7f11372336a27902d2ca3a901bdade7b40367bc5280a45a944cee499e73724"
+_PARENT50_GUARDS_SHA = "70ba8fdeebadbde52a5aa81c9841d89a06481222efbbd386b0072874b8b9ad59"
+_PARENT420_INSTALLER_SHA = "f8db128ea1712051475ecd5af20d14788facda20b61ca160c944d28a8d860ea2"
+_NEW_STAMP_ROUTINES = [
+    "guard_stamp_writer_entry",
+    "upsert_provider_geocode_stamps_ex",
+    "_validate_scoped_provider_geocode_stamps",
+    "lock_scoped_provider_geocode_stamps",
+    "reobserve_scoped_provider_geocode_stamps",
+    "_assert_stamp_projection_guard_inventory",
+]
+
+_ACL_SNAPSHOT_SQL = """
+WITH objects(kind,object,owner,acl) AS (
+ SELECT 'schema',n.nspname,n.nspowner,coalesce(n.nspacl,acldefault('n',n.nspowner))
+ FROM pg_namespace n WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+ UNION ALL
+ SELECT CASE WHEN c.relkind='S' THEN 'sequence' ELSE 'relation' END,
+ n.nspname||'.'||c.relname,c.relowner,
+ coalesce(c.relacl,acldefault(
+ CASE WHEN c.relkind='S' THEN 'S'::"char" ELSE 'r'::"char" END,c.relowner))
+ FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+ AND c.relkind IN ('r','p','v','m','S')
+ UNION ALL
+ SELECT 'column',n.nspname||'.'||c.relname||'.'||a.attname,c.relowner,a.attacl
+ FROM pg_attribute a JOIN pg_class c ON c.oid=a.attrelid
+ JOIN pg_namespace n ON n.oid=c.relnamespace
+ WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema' AND a.attnum>0 AND NOT a.attisdropped
+ AND a.attacl IS NOT NULL
+ UNION ALL
+ SELECT 'routine',n.nspname||'.'||p.proname||'('||pg_get_function_identity_arguments(p.oid)||')',
+ p.proowner,coalesce(p.proacl,acldefault('f',p.proowner))
+ FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+ WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+ UNION ALL
+ SELECT 'type',n.nspname||'.'||t.typname,t.typowner,coalesce(t.typacl,acldefault('T',t.typowner))
+ FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+ WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema' AND t.typtype IN ('e','d')
+ UNION ALL
+ SELECT 'default',coalesce(n.nspname,'*')||':'||d.defaclobjtype::text,d.defaclrole,d.defaclacl
+ FROM pg_default_acl d LEFT JOIN pg_namespace n ON n.oid=d.defaclnamespace
+ WHERE d.defaclrole IN (SELECT oid FROM pg_roles WHERE rolname LIKE 'ktm_%')
+)
+SELECT kind,object,owner.rolname AS owner,
+ coalesce(grantee.rolname,'PUBLIC') AS grantee,grantor.rolname AS grantor,
+ acl.privilege_type,acl.is_grantable
+FROM objects CROSS JOIN LATERAL aclexplode(objects.acl) acl
+JOIN pg_roles owner ON owner.oid=objects.owner
+LEFT JOIN pg_roles grantee ON grantee.oid=acl.grantee
+JOIN pg_roles grantor ON grantor.oid=acl.grantor
+ORDER BY kind COLLATE "C",object COLLATE "C",owner.rolname COLLATE "C",
+ coalesce(grantee.rolname,'PUBLIC') COLLATE "C",
+ grantor.rolname COLLATE "C",acl.privilege_type COLLATE "C"
+"""
+
+
+async def _acl_snapshot(admin):
+    objects = [dict(row) for row in await _read(admin, _ACL_SNAPSHOT_SQL)]
+    roles = [
+        dict(row)
+        for row in await _read(
+            admin,
+            """SELECT rolname,rolsuper,rolinherit,
+        rolcreaterole,rolcreatedb,rolcanlogin,rolreplication,rolbypassrls,rolconnlimit
+        FROM pg_roles WHERE rolname LIKE 'ktm_%' ORDER BY rolname COLLATE "C"
+        """,
+        )
+    ]
+    members = [
+        dict(row)
+        for row in await _read(
+            admin,
+            """SELECT parent.rolname AS role,
+        member.rolname AS member,grantor.rolname AS grantor,
+        m.admin_option,m.inherit_option,m.set_option
+        FROM pg_auth_members m JOIN pg_roles parent ON parent.oid=m.roleid
+        JOIN pg_roles member ON member.oid=m.member JOIN pg_roles grantor ON grantor.oid=m.grantor
+        WHERE parent.rolname LIKE 'ktm_%' OR member.rolname LIKE 'ktm_%'
+        ORDER BY parent.rolname COLLATE "C",member.rolname COLLATE "C",
+        grantor.rolname COLLATE "C"
+        """,
+        )
+    ]
+    owners = [
+        dict(row)
+        for row in await _read(
+            admin,
+            """
+        SELECT * FROM (SELECT 'schema' AS kind,n.nspname AS object,r.rolname AS owner
+        FROM pg_namespace n JOIN pg_roles r ON r.oid=n.nspowner
+        WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+        UNION ALL
+        SELECT 'relation',n.nspname||'.'||c.relname,r.rolname
+        FROM pg_class c JOIN pg_namespace n ON n.oid=c.relnamespace
+        JOIN pg_roles r ON r.oid=c.relowner
+        WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+        UNION ALL
+        SELECT 'routine',n.nspname||'.'||p.proname||'('||
+          pg_get_function_identity_arguments(p.oid)||')',r.rolname
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        JOIN pg_roles r ON r.oid=p.proowner
+        WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+        UNION ALL
+        SELECT 'type',n.nspname||'.'||t.typname,r.rolname
+        FROM pg_type t JOIN pg_namespace n ON n.oid=t.typnamespace
+        JOIN pg_roles r ON r.oid=t.typowner
+        WHERE n.nspname !~ '^pg_' AND n.nspname<>'information_schema'
+        ) AS owners ORDER BY kind COLLATE "C",object COLLATE "C",owner COLLATE "C"
+        """,
+        )
+    ]
+    return dict(objects=objects, owners=owners, roles=roles, members=members)
+
+
+def _snapshot_hash(value):
+    return hashlib.sha256(
+        json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+
+
+def _migration_config(dsn):
+    root = Path(__file__).resolve().parents[2]
+    config = Config(str(root / "alembic.ini"))
+    config.set_main_option("script_location", str(root / "alembic"))
+    config.set_main_option("sqlalchemy.url", dsn)
+    return config
+
+
+async def _migrate(dsn, target):
+    with alembic_schema_owner_role():
+        await asyncio.to_thread(command.upgrade, _migration_config(dsn), target)
+
+
+async def _upgrade_with_window(dsn, request):
+    engine = make_async_engine(dsn, pool_size=1, max_overflow=0)
+    identity_sql = """SELECT pg_backend_pid() AS pid,session_user,current_user,
+        current_setting('lock_timeout') AS lock_timeout,
+        current_setting('statement_timeout') AS statement_timeout,
+        (SELECT count(*) FROM pg_locks WHERE pid=pg_backend_pid()
+         AND locktype='advisory') AS advisory_locks"""
+    try:
+        async with engine.connect() as connection:
+            await connection.execute(text("SET ROLE ktm_feature_schema_owner"))
+            await connection.execute(text("SET lock_timeout='500ms'"))
+            await connection.execute(text("SET statement_timeout='7s'"))
+            await connection.commit()
+            before = dict((await connection.execute(text(identity_sql))).mappings().one())
+            await connection.commit()
+            try:
+                with alembic_schema_owner_role():
+                    async with connection.begin():
+
+                        def run(sync_connection):
+                            config = _migration_config(dsn)
+                            config.attributes["connection"] = sync_connection
+                            command.upgrade(config, _STAMP421_HEAD)
+
+                        await connection.run_sync(run)
+            finally:
+                after = dict((await connection.execute(text(identity_sql))).mappings().one())
+                assert before == after
+                assert after["current_user"] == "ktm_feature_schema_owner"
+                assert after["advisory_locks"] == 0
+                request.node.user_properties.append(("migration_role_guc_locks_restored", True))
+                await connection.rollback()
+    finally:
+        await engine.dispose()
+
+
+async def _bare_parent420(container):
+    admin_dsn = normalize_async_dsn(container.get_connection_url())
+    migrator_dsn = await bootstrapped_application_300_migrator_dsn(admin_dsn)
+    await _migrate(migrator_dsn, _PARENT420_HEAD)
+    return admin_dsn, migrator_dsn
+
+
+def _clone_upgrade_db(admin_dsn, migrator_dsn):
+    base = make_url(admin_dsn)
+    name = "stamp_upgrade_" + uuid4().hex
+    with psycopg.connect(
+        base.set(drivername="postgresql", database="postgres").render_as_string(False),
+        autocommit=True,
+    ) as connection:
+        connection.execute(
+            sql.SQL("CREATE DATABASE {} TEMPLATE {}").format(
+                sql.Identifier(name), sql.Identifier(base.database)
+            )
+        )
+    return base.set(database=name).render_as_string(False), make_url(migrator_dsn).set(
+        database=name
+    ).render_as_string(False)
+
+
+async def _restore_parent420_acl(migrator_dsn):
+    engine = make_async_engine(migrator_dsn, pool_size=1, max_overflow=0)
+    try:
+        async with engine.begin() as connection:
+            await reconcile_runtime_privileges_in_transaction(connection)
+            assert (
+                await connection.scalar(text("SELECT current_user")) == "ktm_feature_schema_owner"
+            )
+            # 실제parent420 tuple의 I/U만 복원한다. 제품421 권한을 넓히는 경로가 아니다.
+            await connection.execute(
+                text("GRANT INSERT,UPDATE ON feature.feature_geocode_stamps TO ktm_feature_runtime")
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.fixture(scope="module")
+def upgrade_container():
+    generator = scalar_container.__wrapped__()
+    try:
+        yield next(generator)
+    finally:
+        generator.close()
+
+
+@pytest.fixture(scope="module")
+async def upgrade_parent_lab(upgrade_container):
+    bare_admin, bare_migrator = await _bare_parent420(upgrade_container)
+    off_admin, off_migrator = _clone_upgrade_db(bare_admin, bare_migrator)
+    await _restore_parent420_acl(off_migrator)
+    engine = make_async_engine(off_admin, pool_size=1)
+    try:
+        assert _snapshot_hash(await _acl_snapshot(engine)) == _PARENT420_ACL_SHA
+    finally:
+        await engine.dispose()
+    active_admin, active_migrator = _clone_upgrade_db(off_admin, off_migrator)
+    admin = make_async_engine(active_admin, pool_size=2)
+    runtime = make_async_engine(active_migrator, pool_size=1, max_overflow=0)
+    try:
+        key = "upgrade-" + uuid4().hex
+        old = [_dataset_bundle(key, "one", "before", hours=-24)]
+        new = [_dataset_bundle(key, "one", "after", hours=0)]
+        _, items = await _seed_bundles(admin, runtime, old, new)
+        assert len(items) == 1
+        rows = await _guard_inventory(admin)
+        assert len(rows) == 50
+        assert all(row["enabled"] == "O" for row in rows)
+        assert not any(row["name"] == "trg_stamp_writer_entry" for row in rows)
+    finally:
+        await runtime.dispose()
+        await admin.dispose()
+    return dict(
+        off=(off_admin, off_migrator),
+        active=(active_admin, active_migrator),
+        container=upgrade_container,
+    )
+
+
+async def _guard_inventory(admin):
+    return [
+        dict(row)
+        for row in await _read(
+            admin,
+            """SELECT n.nspname||'.'||c.relname AS relation,
+        t.tgname::text AS name,t.tgenabled::text AS enabled,pg_get_triggerdef(t.oid) AS definition
+        FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+        JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal
+        AND n.nspname IN ('feature','provider_sync','ops')
+        AND (t.tgname LIKE 'trg_scalar_%' OR t.tgname='trg_stamp_writer_entry')
+        ORDER BY n.nspname COLLATE "C",c.relname COLLATE "C",t.tgname COLLATE "C"
+        """,
+        )
+    ]
+
+
+async def _assert_parent50_catalog(admin):
+    # 정본 parent installer가 생성한 전체 50 definition/enabled를 고정폭으로 대조한다.
+    rows = await _guard_inventory(admin)
+    assert len(rows) == 50
+    normalized = [
+        [
+            row["relation"],
+            row["name"],
+            hashlib.sha256((row["definition"] + "|" + row["enabled"]).encode()).hexdigest(),
+        ]
+        for row in rows
+    ]
+    assert _snapshot_hash(normalized) == _PARENT50_GUARDS_SHA
+    installer = (
+        await _read(
+            admin,
+            """
+        SELECT p.prosrc,r.rolname AS owner,p.prosecdef,p.prokind::text AS kind
+        FROM pg_proc p JOIN pg_roles r ON r.oid=p.proowner
+        WHERE p.oid='feature._install_provider_field_projection_guards()'::regprocedure
+    """,
+        )
+    )[0]
+    assert installer["owner"] == "ktm_feature_schema_owner"
+    assert installer["prosecdef"] is True
+    assert installer["kind"] == "f"
+    assert hashlib.sha256(installer["prosrc"].encode()).hexdigest() == _PARENT420_INSTALLER_SHA
+
+
+async def _upgrade_snapshot(admin):
+    routines = [
+        dict(row)
+        for row in await _read(
+            admin,
+            """SELECT n.nspname||'.'||p.proname||'('||
+        pg_get_function_identity_arguments(p.oid)||')' AS routine,owner.rolname AS owner,
+        md5(pg_get_functiondef(p.oid)) AS definition,p.prosecdef,p.proconfig
+        FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
+        JOIN pg_roles owner ON owner.oid=p.proowner
+        WHERE n.nspname IN ('feature','provider_sync','ops')
+        ORDER BY n.nspname COLLATE "C",p.proname COLLATE "C",
+        pg_get_function_identity_arguments(p.oid) COLLATE "C"
+        """,
+        )
+    ]
+    receipt = await _read(
+        admin,
+        """SELECT pg_get_constraintdef(oid) AS definition FROM pg_constraint
+        WHERE conrelid='ops.application_schema_operation_receipts'::regclass
+        AND conname='ck_application_schema_operation_receipts_head'""",
+    )
+    return dict(
+        acl=await _acl_snapshot(admin),
+        guards=await _guard_inventory(admin),
+        routines=routines,
+        head=[dict(row) for row in await _read(admin, "SELECT version_num FROM alembic_version")],
+        receipt=[dict(row) for row in receipt],
+    )
+
+
+@pytest.fixture
+async def upgrade_case(upgrade_parent_lab, request):
+    mode = request.param
+    parent = upgrade_parent_lab["off" if mode == "old0_new1" else "active"]
+    admin_dsn, migrator_dsn = _clone_upgrade_db(*parent)
+    admin = make_async_engine(admin_dsn, pool_size=2)
+    runtime = make_async_engine(migrator_dsn, pool_size=1, max_overflow=0)
+    wrapped = upgrade_parent_lab["container"].get_wrapped_container()
+    wrapped.reload()
+    attrs = wrapped.attrs
+    label = attrs["Config"]["Labels"]["codex.scalar-projection"]
+    assert attrs["Name"] == "/kt-map-scalar-" + label
+    assert attrs["HostConfig"]["NanoCpus"] == 2_000_000_000
+    assert attrs["HostConfig"]["Memory"] == attrs["HostConfig"]["MemorySwap"] == 1536 * 1024**2
+    assert attrs["HostConfig"]["PidsLimit"] == 256
+    request.node.user_properties.extend(
+        [
+            ("owned_pg_id", attrs["Id"]),
+            ("owned_pg_label", label),
+            ("owned_pg_name", attrs["Name"]),
+            ("owned_pg_image_id", attrs["Image"]),
+            ("parent420_acl_source_sha256", _PARENT420_SOURCE_SHA),
+            ("parent420_acl_digest", _PARENT420_ACL_SHA),
+        ]
+    )
+    try:
+        assert await _read(admin, "SELECT version_num FROM alembic_version") == [
+            {"version_num": _PARENT420_HEAD}
+        ]
+        assert _snapshot_hash(await _acl_snapshot(admin)) == _PARENT420_ACL_SHA
+        async with AsyncSession(runtime) as session:
+            assert await session.scalar(text("SELECT current_user")) == "ktm_feature_service"
+            privileges = (
+                (
+                    await session.execute(
+                        text("""SELECT
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','SELECT') AS r,
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','INSERT') AS i,
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','UPDATE') AS u,
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','DELETE') AS d""")
+                    )
+                )
+                .mappings()
+                .one()
+            )
+            assert dict(privileges) == dict(r=True, i=True, u=True, d=False)
+        assert (
+            await _read(
+                admin,
+                """SELECT count(*) AS count FROM pg_proc p
+            JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname='feature' AND p.proname=ANY(CAST(:names AS text[]))""",
+                {"names": _NEW_STAMP_ROUTINES},
+            )
+        )[0]["count"] == 0
+        yield admin, runtime, migrator_dsn, mode
+    finally:
+        await runtime.dispose()
+        assert (
+            await _read(
+                admin,
+                """SELECT count(*) AS count FROM pg_stat_activity
+            WHERE datname=current_database() AND usename='ktm_feature_service'""",
+            )
+        )[0]["count"] == 0
+        request.node.user_properties.append(("runtime_backend_count_after_dispose", 0))
+        await admin.dispose()
+
+
+@pytest.mark.parametrize(
+    "upgrade_case",
+    ["valid50", "partial50", "definition_drift", "disabled", "old0_new1"],
+    indirect=True,
+)
+async def test_real_parent420_guard_upgrade_or_atomic_rejection(upgrade_case, request):
+    admin, runtime, migrator_dsn, mode = upgrade_case
+    original = await _guard_inventory(admin)
+    assert len(original) == (0 if mode == "old0_new1" else 50)
+    if mode != "old0_new1":
+        await _assert_parent50_catalog(admin)
+    if mode != "valid50":
+        async with AsyncSession(admin) as session, session.begin():
+            await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+            if mode == "partial50":
+                await session.execute(
+                    text("DROP TRIGGER trg_scalar_epoch ON feature.feature_places")
+                )
+            elif mode == "definition_drift":
+                await session.execute(
+                    text("DROP TRIGGER trg_scalar_epoch ON feature.feature_places")
+                )
+                await session.execute(
+                    text("""CREATE TRIGGER trg_scalar_epoch BEFORE INSERT ON feature.feature_places
+                    FOR EACH STATEMENT EXECUTE FUNCTION
+                    feature.provider_field_policy_statement_barrier()""")
+                )
+            elif mode == "disabled":
+                await session.execute(
+                    text("ALTER TABLE feature.feature_places DISABLE TRIGGER trg_scalar_epoch")
+                )
+            else:
+                await session.execute(
+                    text("""CREATE TRIGGER trg_stamp_writer_entry BEFORE INSERT OR UPDATE
+                    ON feature.feature_geocode_stamps
+                    FOR EACH ROW EXECUTE FUNCTION
+                    feature.reject_unsupported_active_scalar_mutation()""")
+                )
+    before = await _upgrade_snapshot(admin)
+    if mode == "valid50":
+        await _upgrade_with_window(migrator_dsn, request)
+        after = await _guard_inventory(admin)
+        assert len(after) == 51
+        assert all(row["enabled"] == "O" for row in after)
+        old = {(row["relation"], row["name"]): row for row in original}
+        new = {(row["relation"], row["name"]): row for row in after}
+        changed = {key for key in old if old[key] != new[key]}
+        assert changed == {("feature.feature_geocode_stamps", "trg_scalar_unsupported")}
+        assert set(new) - set(old) == {("feature.feature_geocode_stamps", "trg_stamp_writer_entry")}
+        assert (await _read(admin, "SELECT version_num FROM alembic_version"))[0][
+            "version_num"
+        ] == _STAMP421_HEAD
+        # canonical reconcile 전에 migration 자체가 역사적 I/U를 회수했음을 검사한다.
+        async with AsyncSession(runtime) as session:
+            privileges = (
+                await session.execute(
+                    text("""SELECT
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','SELECT'),
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','INSERT'),
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','UPDATE'),
+                has_table_privilege(current_user,'feature.feature_geocode_stamps','DELETE')
+            """)
+                )
+            ).one()
+            assert tuple(privileges) == (True, False, False, False)
+        setup = make_async_engine(migrator_dsn, pool_size=1, max_overflow=0)
+        try:
+            async with setup.begin() as connection:
+                await reconcile_runtime_privileges_in_transaction(connection)
+        finally:
+            await setup.dispose()
+        async with AsyncSession(runtime) as session:
+            assert (
+                await session.scalar(
+                    text(
+                        "SELECT has_table_privilege("
+                        "current_user,'feature.feature_geocode_stamps','INSERT')"
+                    )
+                )
+                is False
+            )
+            assert (
+                await session.scalar(
+                    text(
+                        "SELECT has_table_privilege("
+                        "current_user,'feature.feature_geocode_stamps','UPDATE')"
+                    )
+                )
+                is False
+            )
+        assert (
+            await _read(
+                admin, "SELECT feature._assert_stamp_projection_guard_inventory(true) AS count"
+            )
+        )[0]["count"] == 51
+    else:
+        with pytest.raises(DBAPIError) as caught:
+            await _upgrade_with_window(migrator_dsn, request)
+        assert caught.value.orig.sqlstate == "23514"
+        assert await _upgrade_snapshot(admin) == before
+        assert (await _read(admin, "SELECT version_num FROM alembic_version"))[0][
+            "version_num"
+        ] == _PARENT420_HEAD
+    request.node.user_properties.append(("actual_upgrade_mode", mode))
