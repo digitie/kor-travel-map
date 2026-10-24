@@ -4,6 +4,13 @@
 - 실제 PG에서 독립 dataset의 두 source DML 동시 미커밋 구간, 실패 rollback/같은 artifact 복구, 완료 receipt의 무 DML 재호출, 오래된 artifact 보존을 확인했다. first_seen 불변식 충돌을 수정한 뒤 native3+기존lineage1 모두 PASS(26.39초).
 - 412 선행 수용·최종 두 리뷰/CI/HTTP/UI·대량/전체 writer 전환과 Weather/Transport 전파는 미완이다. [범위·실패·검증](reports/2026-10-24-scoped-native-scalar-refresh.md).
 
+## 2026-10-24 — ADR115 제한 scalar winner·정합성 검증(#1373)
+
+- 412는 기존 Feature/primary source의 name·phones만 명시 정책으로 투영한다. R1 값/R2 검증 head, override/revoke, 실제 순서 반전·old RR·Geo 증거 보호를 확인했다. 기본 OFF/정책 seed0/운영 활성화0이며 mixed legacy writer preflight 전 production cutover는 금지한다.
+- 실제16 PG/18 unit 통과, role tuple 정산 뒤 lint369 passed·기존 skip6, 공식 head oracle 재생성 후 비교+metadata2 passed. 초기 revision 길이·ACL inventory·generated 열·fieldset 축소 실패는 수정 후 재검증했다.
+- OFF 10k×7표를 411/412 fresh clone 각3회 측정해 scalar trigger0/원래 validator 동일/deferred context 동일을 확인했다. 로컬 관리자 synthetic이며 운영 ARM/실제 collector 성능 개선율이 아니다. [원본 수치·제약·실패 기록](reports/2026-10-24-provider-field-scalar-projection.md).
+- 413 기존 SQL 직접 진입점의 protocol-first 보강, 전체 membership/Geo/일반 수집 전환, 두 독립 최종 리뷰·정확 CI·HTTP/UI 수용과 Weather/Transport 전파는 미완이다. 기존 API/UI 동작을 새 native 수집에 자동 연결하지 않았다.
+
 ## 2026-10-24 — ADR115 범위 커널·기존 writer fence 통합
 
 - #1371에 411 scope/epoch/owner/manifest·membership 재검증과 기존 protocol→전역 fence 순서를 연결했다. runtime 직접 테이블 쓰기는 닫고 기존 writer 배타 경로·기본 OFF를 유지한다.
@@ -15,6 +22,15 @@
 - 기준선 #1370은 정확 `2a53dce7c`의 CI 5개·실제 glibc/alpine·독립 리뷰 2인을 통과해 머지했다. 두 lane의 원본과 checkout/runner/fixture/ACL/12phase를 대조했다. 직렬 synthetic 기준선이며 운영 절감이나 동시 쓰기 완료가 아니다.
 - 다음은 후보 완전성/winner·scope/epoch/manifest·순수 reader snapshot을 분리 구현한 뒤 실제 독립 DML 중첩과 공유 Feature·복구를 검증한다. 기존 전역 fence·기본 OFF·정책 seed0·운영0을 유지한다.
 - Weather·Transport 전파는 Map의 해당 개선 수용 이후다. [순서·검증·남은 범위](reports/2026-10-24-scoped-concurrent-writes-implementation.md). T-CWRITE-01~09 전체 acceptance는 미완이다.
+
+## 2026-10-24 — ADR-114 2단계(T-STATE-02): 브랜치 `feat/adr114-valkey-weather`
+
+- weather W1·W2·W3·W5 export를 위치 단위 Valkey 세대로 싣는 Dagster job 7개(기본 STOPPED)와 `/v1/service/weather/*` 5
+  route를 더했다(2026-10-24 정확성·운영 리뷰 반영 — 부분별 nearest·배치·partial 재계산·ETag 304 등, ADR-114 W 절). migration 없음. admin·service OpenAPI 변경(**PinVi 재vendor 필요**). 배포 영향: Map API·Dagster code
+  location. weather live(odroid `3a0ae398`)에는 아직 W1~W5가 없다.
+- **다음 한 작업: 소유자 적대 리뷰 → PR CI green → 머지 판단 → weather W1~W5 배포·export 활성화 → Manager가 Map
+  code-server에 `KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_{BASE_URL,SERVICE_TOKEN}` 추가 → PinVi 재vendor → Map 배포 → 하한
+  대조 후 schedule enable(acceptance §T-STATE-02).**
 
 ## 2026-10-24 — 공용 지도 작업면 채택 후보
 

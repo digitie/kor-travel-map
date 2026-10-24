@@ -91,6 +91,9 @@ from kortravelmap.api.routers.public_views import router as public_views_router
 from kortravelmap.api.routers.service_transport import (
     service_router as service_transport_router,
 )
+from kortravelmap.api.routers.service_weather import (
+    service_router as service_weather_router,
+)
 
 __all__ = [
     "admin_backups_router",
@@ -130,6 +133,7 @@ __all__ = [
     "service_curation_snapshots_router",
     "service_feature_alias_maps_router",
     "service_transport_router",
+    "service_weather_router",
     "service_feature_requests_router",
     "service_feature_reference_reconciliations_router",
     "curations_router",

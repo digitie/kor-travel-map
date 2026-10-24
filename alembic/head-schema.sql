@@ -51,6 +51,393 @@ CREATE SCHEMA provider_sync;
 ALTER SCHEMA provider_sync OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: _assert_provider_field_projection(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._assert_provider_field_projection(p_feature uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_active feature.provider_field_active_policies%ROWTYPE; v_winner record;
+        v_effective jsonb; v_expected jsonb;
+BEGIN
+    SELECT * INTO v_active FROM feature.provider_field_active_policies WHERE feature_id=p_feature;
+    IF NOT FOUND THEN RETURN; END IF;
+    FOR v_winner IN SELECT * FROM feature.provider_field_scalar_winners(
+        p_feature,v_active.policy_revision,v_active.field_paths) LOOP
+        IF NOT EXISTS (SELECT 1 FROM feature.feature_base_field_values base
+            WHERE base.feature_id=p_feature AND base.field_path=v_winner.field_path
+              AND base.provider_dataset_id=v_winner.provider_dataset_id
+              AND base.source_entity_key=v_winner.source_entity_key
+              AND base.source_record_key=v_winner.value_source_record_key
+              AND base.source_raw_payload_hash=v_winner.value_source_hash
+              AND base.value_json IS NOT DISTINCT FROM v_winner.value_json
+              AND base.value_geometry IS NULL AND base.observed_at=v_winner.value_observed_at) THEN
+            RAISE EXCEPTION 'active scalar base is not the complete current candidate winner' USING ERRCODE='23514';
+        END IF;
+        SELECT override.override_value INTO v_expected FROM ops.feature_overrides override
+            WHERE override.feature_id=p_feature AND override.field_path=v_winner.field_path
+              AND override.status='active';
+        IF NOT FOUND THEN v_expected:=v_winner.value_json; END IF;
+        IF v_winner.field_path='core.name' THEN
+            SELECT to_jsonb(name) INTO v_effective FROM feature.features WHERE feature_id=p_feature;
+        ELSE
+            SELECT to_jsonb(phones) INTO v_effective FROM feature.feature_places WHERE feature_id=p_feature;
+        END IF;
+        IF v_effective IS DISTINCT FROM v_expected THEN
+            RAISE EXCEPTION 'active scalar effective value disagrees with winner or operator override' USING ERRCODE='23514';
+        END IF;
+    END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION feature._assert_provider_field_projection(p_feature uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _install_provider_field_projection_guards(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature._install_provider_field_projection_guards() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE v_count integer;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid()
+        AND locktype='advisory' AND granted AND classid=1369104691 AND objid=115
+        AND objsubid=2 AND mode='ExclusiveLock') THEN
+        RAISE EXCEPTION 'projection guard installation requires exclusive protocol' USING ERRCODE='23514';
+    END IF;
+    SELECT count(*) INTO v_count FROM pg_trigger WHERE tgname IN (
+        'trg_scalar_epoch','trg_scalar_projection_insert','trg_scalar_projection_update',
+        'trg_scalar_projection_delete','trg_scalar_unsupported') AND NOT tgisinternal;
+    IF v_count=50 THEN RETURN; END IF;
+    IF v_count<>0 THEN
+        RAISE EXCEPTION 'incomplete scalar guard installation' USING ERRCODE='23514';
+    END IF;
+    LOCK TABLE feature.feature_base_field_values,feature.feature_geocode_stamps,feature.feature_places,feature.features,feature.provider_field_active_policies,feature.provider_field_shadow_candidates,ops.feature_overrides,provider_sync.provider_datasets,provider_sync.source_entities,provider_sync.source_entity_heads,provider_sync.source_links IN ACCESS EXCLUSIVE MODE;
+    EXECUTE 'DROP TRIGGER trg_feature_base_field_values_validate ON feature.feature_base_field_values';
+    EXECUTE 'CREATE TRIGGER trg_feature_base_field_values_validate BEFORE INSERT OR UPDATE ON feature.feature_base_field_values FOR EACH ROW EXECUTE FUNCTION feature.validate_active_provider_base_field_value()';
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.features FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_places FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_geocode_stamps FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_base_field_values FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON feature.provider_field_shadow_candidates FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_links FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_entities FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_entity_heads FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.provider_datasets FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_epoch BEFORE INSERT OR UPDATE OR DELETE ON ops.feature_overrides FOR EACH STATEMENT EXECUTE FUNCTION feature.provider_field_policy_statement_barrier()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON feature.features DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('features',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON feature.features DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('features',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('features',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON feature.features DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('features',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON feature.feature_places DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_places',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON feature.feature_places DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_places',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('feature_places',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON feature.feature_places DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_places',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON feature.feature_geocode_stamps DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_geocode_stamps',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON feature.feature_geocode_stamps DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_geocode_stamps',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('feature_geocode_stamps',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON feature.feature_geocode_stamps DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_geocode_stamps',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON feature.feature_base_field_values DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_base_field_values',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON feature.feature_base_field_values DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_base_field_values',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('feature_base_field_values',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON feature.feature_base_field_values DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_base_field_values',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON feature.provider_field_shadow_candidates DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_field_shadow_candidates',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON feature.provider_field_shadow_candidates DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_field_shadow_candidates',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('provider_field_shadow_candidates',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON feature.provider_field_shadow_candidates DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_field_shadow_candidates',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON provider_sync.source_links DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_links',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON provider_sync.source_links DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_links',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('source_links',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON provider_sync.source_links DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_links',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON provider_sync.source_entities DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_entities',NEW.source_entity_key::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON provider_sync.source_entities DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_entities',OLD.source_entity_key::text) OR feature._provider_field_projection_dependency_active('source_entities',NEW.source_entity_key::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON provider_sync.source_entities DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_entities',OLD.source_entity_key::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON provider_sync.source_entity_heads DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_entity_heads',NEW.source_entity_key::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON provider_sync.source_entity_heads DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_entity_heads',OLD.source_entity_key::text) OR feature._provider_field_projection_dependency_active('source_entity_heads',NEW.source_entity_key::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON provider_sync.source_entity_heads DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('source_entity_heads',OLD.source_entity_key::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON provider_sync.provider_datasets DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_datasets',NEW.provider_dataset_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON provider_sync.provider_datasets DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_datasets',OLD.provider_dataset_id::text) OR feature._provider_field_projection_dependency_active('provider_datasets',NEW.provider_dataset_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON provider_sync.provider_datasets DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_datasets',OLD.provider_dataset_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON ops.feature_overrides DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_overrides',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON ops.feature_overrides DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_overrides',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('feature_overrides',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON ops.feature_overrides DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('feature_overrides',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_insert AFTER INSERT ON feature.provider_field_active_policies DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_field_active_policies',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_update AFTER UPDATE ON feature.provider_field_active_policies DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_field_active_policies',OLD.feature_id::text) OR feature._provider_field_projection_dependency_active('provider_field_active_policies',NEW.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON feature.provider_field_active_policies DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_field_active_policies',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_places FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_geocode_stamps FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_links FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_entities FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.provider_datasets FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON ops.feature_overrides FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+END;
+$_$;
+
+
+ALTER FUNCTION feature._install_provider_field_projection_guards() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: _project_provider_field_candidates(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._project_provider_field_candidates(p_feature uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_active feature.provider_field_active_policies%ROWTYPE; v_winner record;
+BEGIN
+    SELECT * INTO STRICT v_active FROM feature.provider_field_active_policies WHERE feature_id=p_feature;
+    FOR v_winner IN SELECT * FROM feature.provider_field_scalar_winners(
+        p_feature,v_active.policy_revision,v_active.field_paths) LOOP
+        INSERT INTO feature.feature_base_field_values AS base(
+            feature_id,field_path,provider_dataset_id,source_entity_key,source_record_key,
+            source_raw_payload_hash,value_json,value_geometry,base_revision,observed_at,updated_at)
+        VALUES(p_feature,v_winner.field_path,v_winner.provider_dataset_id,v_winner.source_entity_key,
+            v_winner.value_source_record_key,v_winner.value_source_hash,v_winner.value_json,NULL,
+            1,v_winner.value_observed_at,clock_timestamp())
+        ON CONFLICT(feature_id,field_path) DO UPDATE SET
+            provider_dataset_id=EXCLUDED.provider_dataset_id,source_entity_key=EXCLUDED.source_entity_key,
+            source_record_key=EXCLUDED.source_record_key,source_raw_payload_hash=EXCLUDED.source_raw_payload_hash,
+            value_json=EXCLUDED.value_json,value_geometry=NULL,base_revision=base.base_revision+1,
+            observed_at=EXCLUDED.observed_at,updated_at=EXCLUDED.updated_at
+        WHERE (base.provider_dataset_id,base.source_entity_key,base.source_record_key,
+               base.source_raw_payload_hash,base.value_json,base.value_geometry,base.observed_at)
+          IS DISTINCT FROM (EXCLUDED.provider_dataset_id,EXCLUDED.source_entity_key,EXCLUDED.source_record_key,
+               EXCLUDED.source_raw_payload_hash,EXCLUDED.value_json,NULL,EXCLUDED.observed_at);
+        IF NOT feature.has_active_feature_override(p_feature,v_winner.field_path) THEN
+            IF v_winner.field_path='core.name' THEN
+                UPDATE feature.features SET name=v_winner.value_json #>> '{}',updated_at=clock_timestamp()
+                  WHERE feature_id=p_feature AND name IS DISTINCT FROM (v_winner.value_json #>> '{}');
+            ELSE
+                UPDATE feature.feature_places SET phones=ARRAY(SELECT jsonb_array_elements_text(v_winner.value_json))
+                  WHERE feature_id=p_feature AND to_jsonb(phones) IS DISTINCT FROM v_winner.value_json;
+                IF FOUND THEN
+                    UPDATE feature.features SET updated_at=clock_timestamp() WHERE feature_id=p_feature;
+                END IF;
+            END IF;
+        END IF;
+    END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION feature._project_provider_field_candidates(p_feature uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _provider_field_projection_dependency_active(text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._provider_field_projection_dependency_active(p_relation text, p_key text) RETURNS boolean
+    LANGUAGE sql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+    SELECT CASE
+      WHEN p_relation IN ('source_entities','source_entity_heads') THEN EXISTS (
+        SELECT 1 FROM provider_sync.source_links link
+        JOIN feature.provider_field_active_policies active USING(feature_id)
+        WHERE link.source_entity_key=p_key)
+      WHEN p_relation='provider_datasets' THEN EXISTS (
+        SELECT 1 FROM provider_sync.source_entities entity
+        JOIN provider_sync.source_links link USING(source_entity_key)
+        JOIN feature.provider_field_active_policies active USING(feature_id)
+        WHERE entity.provider_dataset_id=p_key::bigint)
+      ELSE EXISTS (SELECT 1 FROM feature.provider_field_active_policies WHERE feature_id=p_key::uuid)
+    END;
+$$;
+
+
+ALTER FUNCTION feature._provider_field_projection_dependency_active(p_relation text, p_key text) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _record_provider_field_candidates(uuid, uuid, bigint, text, text, bigint, text, boolean, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_hash text;
+    v_kind text;
+    v_observed_at timestamptz;
+    v_validated_at timestamptz;
+    v_header feature.provider_field_shadow_policies%ROWTYPE;
+    v_policy record;
+    v_registry ops.feature_override_field_paths%ROWTYPE;
+    v_old feature.provider_field_shadow_candidates%ROWTYPE;
+    v_candidate feature.provider_field_shadow_candidates%ROWTYPE;
+    v_supplied boolean;
+    v_value jsonb;
+    v_target_type text;
+    v_cast_value jsonb;
+BEGIN
+    IF p_policy_revision IS NULL OR p_policy_revision < 1 OR p_presence_proven IS NULL
+       OR jsonb_typeof(p_values) IS DISTINCT FROM 'object'
+       OR jsonb_typeof(p_geometry_wkt) IS DISTINCT FROM 'object'
+       OR (NOT p_presence_proven AND (p_values <> '{}'::jsonb OR p_geometry_wkt <> '{}'::jsonb))
+       OR (p_presence_proven AND coalesce(btrim(p_normalizer_revision), '') = '') THEN
+        RAISE EXCEPTION 'invalid shadow observation' USING ERRCODE='23514';
+    END IF;
+    -- 기존 전역 fence를 유지한다. 이 shadow 프로시저는 독립 dataset 쓰기를 허용하지 않는다.
+    IF p_attempt IS NULL THEN
+        PERFORM ops.lock_scoped_feature_write_protocol(true);
+        PERFORM feature.lock_provider_field_policy_epoch();
+        PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write',0));
+        IF EXISTS (SELECT 1 FROM feature.provider_field_active_policies
+            WHERE feature_id=p_feature_id) THEN
+            RAISE EXCEPTION 'active scalar Feature requires scoped capture' USING ERRCODE='23514';
+        END IF;
+    ELSE
+        PERFORM feature.assert_scoped_provider_scalar_target(
+            p_attempt,p_feature_id,p_provider_dataset_id,p_source_entity_key,p_policy_revision);
+    END IF;
+    v_hash := feature.lock_current_provider_feature_source_evidence(
+        p_feature_id, p_provider_dataset_id, p_source_entity_key, p_source_record_key
+    );
+    SELECT kind INTO STRICT v_kind FROM feature.features WHERE feature_id=p_feature_id FOR UPDATE;
+    SELECT record.fetched_at, head.observed_at INTO STRICT v_observed_at, v_validated_at
+      FROM provider_sync.source_records record
+      JOIN provider_sync.source_entity_heads head ON head.source_entity_key=record.source_entity_key
+      WHERE record.source_record_key=p_source_record_key AND head.current_source_record_key=record.source_record_key;
+    SELECT * INTO v_header FROM feature.provider_field_shadow_policies
+        WHERE policy_revision=p_policy_revision AND provider_dataset_id=p_provider_dataset_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'shadow policy is not explicitly configured or visible' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS (
+        SELECT path FROM (
+            SELECT jsonb_object_keys(p_values) path UNION ALL SELECT jsonb_object_keys(p_geometry_wkt)
+        ) supplied
+        WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_header.fields) field
+            WHERE field->>'field_path'=supplied.path)
+    ) OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_values) path WHERE p_geometry_wkt ? path) THEN
+        RAISE EXCEPTION 'supplied field has missing policy or conflicting typed values' USING ERRCODE='23514';
+    END IF;
+    o_field_count := 0;
+    o_unresolved_count := 0;
+    FOR v_policy IN SELECT * FROM jsonb_to_recordset(v_header.fields)
+        AS field(field_path text,provider_rank integer,omitted_policy text,null_policy text)
+        ORDER BY field_path COLLATE "C"
+    LOOP
+        SELECT * INTO STRICT v_registry FROM ops.feature_override_field_paths WHERE field_path=v_policy.field_path;
+        IF NOT v_registry.provider_writable OR (v_registry.feature_kind <> '*' AND v_registry.feature_kind <> v_kind) THEN
+            RAISE EXCEPTION 'shadow field does not belong to typed Feature' USING ERRCODE='23514';
+        END IF;
+        IF p_presence_proven AND p_normalizer_revision IS DISTINCT FROM v_header.normalizer_revision THEN
+            RAISE EXCEPTION 'shadow normalizer revision is not declared' USING ERRCODE='23514';
+        END IF;
+        SELECT * INTO v_old FROM feature.provider_field_shadow_candidates
+          WHERE feature_id=p_feature_id AND field_path=v_policy.field_path
+            AND provider_dataset_id=p_provider_dataset_id AND source_entity_key=p_source_entity_key
+            AND policy_revision=p_policy_revision FOR UPDATE;
+        v_candidate := v_old;
+        v_candidate.feature_id := p_feature_id;
+        v_candidate.policy_revision := p_policy_revision;
+        v_candidate.provider_dataset_id := p_provider_dataset_id;
+        v_candidate.field_path := v_policy.field_path;
+        v_candidate.source_entity_key := p_source_entity_key;
+        v_candidate.validated_source_record_key := p_source_record_key;
+        v_candidate.validated_source_hash := v_hash;
+        v_candidate.validated_at := v_validated_at;
+        v_candidate.normalizer_revision := p_normalizer_revision;
+        v_supplied := p_values ? v_policy.field_path OR p_geometry_wkt ? v_policy.field_path;
+        IF NOT p_presence_proven THEN
+            v_candidate.availability := 'unresolved';
+            v_candidate.reason := 'presence_unknown';
+        ELSIF v_registry.value_kind = 'geometry' OR v_policy.field_path IN (
+            'core.address', 'core.legal_dong_code', 'core.road_name_code', 'core.road_address_management_no',
+            'core.admin_dong_code', 'core.sido_code', 'core.sigungu_code', 'core.coord_precision_digits',
+            'core.parent_feature_id', 'core.sibling_group_id', 'core.raw_refs'
+        ) THEN
+            -- Geo 일관 그룹/stamp 증거는 후속 단위다. 독립 scalar처럼 승인하지 않는다.
+            v_candidate.availability := 'unresolved';
+            v_candidate.reason := 'geo_evidence_unsupported';
+        ELSIF v_supplied THEN
+            IF p_geometry_wkt ? v_policy.field_path THEN
+                RAISE EXCEPTION 'scalar field supplied as geometry' USING ERRCODE='23514';
+            END IF;
+            v_value := p_values -> v_policy.field_path;
+            IF (v_value = 'null'::jsonb AND NOT v_registry.allows_null)
+                OR (v_value <> 'null'::jsonb AND (
+                    (v_registry.value_kind IN ('text','uuid','date','timestamptz') AND jsonb_typeof(v_value) <> 'string')
+                    OR (v_registry.value_kind IN ('integer','numeric') AND jsonb_typeof(v_value) <> 'number')
+                    OR (v_registry.value_kind='boolean' AND jsonb_typeof(v_value) <> 'boolean')
+                    OR (v_registry.value_kind='json_object' AND jsonb_typeof(v_value) <> 'object')
+                    OR (v_registry.value_kind IN ('json_array','text_array') AND jsonb_typeof(v_value) <> 'array')
+                )) THEN
+                RAISE EXCEPTION 'shadow scalar does not match typed registry' USING ERRCODE='23514';
+            END IF;
+            IF v_registry.value_kind='text_array' AND v_value <> 'null'::jsonb AND EXISTS (
+                SELECT 1 FROM jsonb_array_elements(v_value) element WHERE jsonb_typeof(element) <> 'string'
+            ) THEN
+                RAISE EXCEPTION 'shadow text array contains nontext value' USING ERRCODE='23514';
+            END IF;
+            IF v_value <> 'null'::jsonb THEN
+                -- registry JSON 종류만으로 fractional integer/잘못된 날짜를 승인하지 않는다.
+                -- 실제 저장 열의 smallint/int/numeric 정밀도·길이까지 검증한다.
+                SELECT format_type(attribute.atttypid,attribute.atttypmod) INTO STRICT v_target_type
+                FROM pg_attribute attribute
+                JOIN pg_class relation ON relation.oid=attribute.attrelid
+                JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
+                WHERE namespace.nspname='feature' AND relation.relname=v_registry.target_relation
+                  AND attribute.attname=v_registry.target_column AND NOT attribute.attisdropped;
+                IF v_registry.value_kind NOT IN ('json_object','json_array','text_array') THEN
+                    IF NOT pg_input_is_valid(v_value #>> '{}',v_target_type) THEN
+                        RAISE EXCEPTION 'shadow scalar cannot be stored in typed target' USING ERRCODE='23514';
+                    END IF;
+                    IF v_registry.value_kind='date' AND (v_value #>> '{}') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
+                        RAISE EXCEPTION 'shadow date requires an ISO calendar date' USING ERRCODE='23514';
+                    END IF;
+                    IF v_registry.value_kind='timestamptz' AND (v_value #>> '{}') !~
+                        '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' THEN
+                        RAISE EXCEPTION 'shadow timestamp requires an explicit timezone' USING ERRCODE='23514';
+                    END IF;
+                    IF v_registry.value_kind IN ('integer','numeric','text') THEN
+                        -- format_type는 trusted catalog 값이다. 입력값은 바인딩해 SQL에 섞지 않는다.
+                        EXECUTE format('SELECT to_jsonb(($1)::%s)',v_target_type)
+                            INTO v_cast_value USING v_value #>> '{}';
+                        IF v_cast_value IS DISTINCT FROM v_value THEN
+                            RAISE EXCEPTION 'shadow scalar would lose precision or length' USING ERRCODE='23514';
+                        END IF;
+                    END IF;
+                END IF;
+            END IF;
+            v_candidate.value_json := v_value;
+            v_candidate.value_geometry := NULL;
+            v_candidate.value_source_record_key := p_source_record_key;
+            v_candidate.value_source_hash := v_hash;
+            v_candidate.value_observed_at := v_observed_at;
+            v_candidate.availability := CASE WHEN v_value='null'::jsonb AND v_policy.null_policy='remove' THEN 'removed' ELSE 'value' END;
+            v_candidate.reason := CASE WHEN v_value='null'::jsonb THEN 'explicit_null' ELSE 'supplied' END;
+        ELSIF v_policy.omitted_policy='remove' THEN
+            v_candidate.availability := 'removed';
+            v_candidate.reason := 'omitted_remove';
+        ELSIF v_old.value_source_record_key IS NOT NULL AND v_old.availability IN ('value','removed') THEN
+            v_candidate.availability := v_old.availability;
+            v_candidate.reason := 'omitted_carry';
+        ELSE
+            v_candidate.availability := 'unresolved';
+            v_candidate.reason := 'missing_initial_value';
+        END IF;
+        INSERT INTO feature.provider_field_shadow_candidates SELECT (v_candidate).*
+        ON CONFLICT (feature_id,field_path,provider_dataset_id,source_entity_key,policy_revision) DO UPDATE
+        SET value_source_record_key=EXCLUDED.value_source_record_key,
+            value_source_hash=EXCLUDED.value_source_hash,
+            validated_source_record_key=EXCLUDED.validated_source_record_key,
+            validated_source_hash=EXCLUDED.validated_source_hash,
+            value_json=EXCLUDED.value_json,value_geometry=EXCLUDED.value_geometry,
+            availability=EXCLUDED.availability,reason=EXCLUDED.reason,
+            value_observed_at=EXCLUDED.value_observed_at,validated_at=EXCLUDED.validated_at,
+            normalizer_revision=EXCLUDED.normalizer_revision;
+        o_field_count := o_field_count+1;
+        o_unresolved_count := o_unresolved_count + CASE WHEN v_candidate.availability='unresolved' THEN 1 ELSE 0 END;
+    END LOOP;
+END;
+$_$;
+
+
+ALTER PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: ack_feature_reference_reconciliation_event(text, uuid, uuid, bigint, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
@@ -207,6 +594,55 @@ $$;
 
 
 ALTER PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: activate_provider_field_policy(uuid, bigint, text[]); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE PROCEDURE feature.activate_provider_field_policy(IN p_feature uuid, IN p_revision bigint, IN p_fields text[])
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_key text; v_dataset bigint;
+BEGIN
+    PERFORM ops.lock_scoped_feature_write_protocol(true);
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write',0));
+    -- 기본 OFF에는 trigger/event 비용이 없다. 첫 명시 cutover에서만 DDL을 원자 설치한다.
+    PERFORM feature._install_provider_field_projection_guards();
+    PERFORM 1 FROM feature.provider_field_policy_epoch WHERE singleton FOR UPDATE;
+    -- begin과 동일하게 모든 dataset→entity/head→Feature 순서를 지킨다.
+    FOR v_dataset IN SELECT DISTINCT entity.provider_dataset_id
+        FROM provider_sync.source_links link JOIN provider_sync.source_entities entity USING(source_entity_key)
+        WHERE link.feature_id=p_feature ORDER BY entity.provider_dataset_id LOOP
+        PERFORM 1 FROM provider_sync.provider_datasets WHERE provider_dataset_id=v_dataset FOR SHARE;
+    END LOOP;
+    FOR v_key IN SELECT source_entity_key FROM provider_sync.source_links
+        WHERE feature_id=p_feature ORDER BY source_entity_key COLLATE "C" LOOP
+        PERFORM 1 FROM provider_sync.source_entities WHERE source_entity_key=v_key FOR SHARE;
+        PERFORM 1 FROM provider_sync.source_entity_heads WHERE source_entity_key=v_key FOR SHARE;
+    END LOOP;
+    PERFORM 1 FROM feature.features WHERE feature_id=p_feature FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'unknown Feature' USING ERRCODE='23514'; END IF;
+    -- 활성 fieldset 제거/교체는 남은 base/effective의 정리 의미가 없으므로 거부한다.
+    -- 같은 fieldset의 revision/rank 교체만 완결성 검증 뒤 허용한다.
+    IF EXISTS (SELECT 1 FROM feature.provider_field_active_policies active
+        WHERE active.feature_id=p_feature AND active.field_paths IS DISTINCT FROM
+          (SELECT array_agg(path ORDER BY path COLLATE "C") FROM unnest(p_fields) path)) THEN
+        RAISE EXCEPTION 'active scalar fieldset changes require a separate cutover protocol'
+          USING ERRCODE='23514';
+    END IF;
+    -- 읽기만으로 완전성을 먼저 검증한다. 이후 어느 단계가 실패해도 pointer/epoch/투영 모두 rollback한다.
+    PERFORM * FROM feature.provider_field_scalar_winners(p_feature,p_revision,p_fields);
+    INSERT INTO feature.provider_field_active_policies(feature_id,policy_revision,field_paths)
+    VALUES(p_feature,p_revision,p_fields)
+    ON CONFLICT(feature_id) DO UPDATE SET policy_revision=EXCLUDED.policy_revision,field_paths=EXCLUDED.field_paths;
+    PERFORM feature._project_provider_field_candidates(p_feature);
+    UPDATE feature.provider_field_policy_epoch SET epoch=epoch+1 WHERE singleton;
+END;
+$$;
+
+
+ALTER PROCEDURE feature.activate_provider_field_policy(IN p_feature uuid, IN p_revision bigint, IN p_fields text[]) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: append_theme_feature_candidate_transition(uuid, uuid, uuid, uuid, text, text, text, boolean, boolean, text, text, uuid, text, bigint, bigint, text, text, uuid, bigint, text, text, uuid, uuid, bigint, text, text, jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_curation_audit_writer
@@ -1887,6 +2323,87 @@ $$;
 
 
 ALTER FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: assert_scoped_candidate_write(uuid, uuid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.assert_scoped_candidate_write(p_attempt uuid, p_feature uuid) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE;
+BEGIN
+    IF p_attempt IS NULL OR p_feature IS NULL THEN
+        RAISE EXCEPTION 'scoped candidate write requires an applying manifest' USING ERRCODE='23514';
+    END IF;
+    PERFORM feature.lock_provider_field_policy_epoch();
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
+    IF NOT FOUND OR v_attempt.status<>'applying'
+       OR v_attempt.apply_txid IS DISTINCT FROM txid_current()
+       OR v_attempt.manifest_digest IS NULL THEN
+        RAISE EXCEPTION 'candidate attempt is not applying in this transaction' USING ERRCODE='23514';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.feature_write_manifests manifest
+        WHERE manifest.attempt_id=p_attempt AND manifest.dependency_kind='feature'
+          AND manifest.dependency_key=p_feature::text) THEN
+        RAISE EXCEPTION 'candidate Feature is outside the applying manifest' USING ERRCODE='23514';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.feature_write_manifests manifest
+        WHERE manifest.attempt_id=p_attempt AND manifest.dependency_kind='feature_membership'
+          AND manifest.dependency_key=p_feature::text
+          AND manifest.expected_value=ops.scoped_feature_write_membership_digest(p_feature)) THEN
+        RAISE EXCEPTION 'candidate source membership changed; replan' USING ERRCODE='40001';
+    END IF;
+    -- membership를 축소해서 정상처럼 처리하지 않는다. begin 뒤 새 head 잠금은 취득하지 않는다.
+    IF NOT EXISTS (SELECT 1 FROM provider_sync.source_links WHERE feature_id=p_feature)
+       OR EXISTS (SELECT 1 FROM provider_sync.source_links link
+          WHERE link.feature_id=p_feature AND NOT EXISTS (
+            SELECT 1 FROM ops.feature_write_manifests manifest
+            WHERE manifest.attempt_id=p_attempt AND manifest.dependency_kind='source_head'
+              AND manifest.dependency_key=link.source_entity_key)) THEN
+        RAISE EXCEPTION 'applying manifest lacks complete Feature source closure' USING ERRCODE='23514';
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION feature.assert_scoped_candidate_write(p_attempt uuid, p_feature uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: assert_scoped_provider_scalar_target(uuid, uuid, bigint, text, bigint); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.assert_scoped_provider_scalar_target(p_attempt uuid, p_feature uuid, p_dataset bigint, p_entity text, p_revision bigint) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    PERFORM feature.assert_scoped_candidate_write(p_attempt,p_feature);
+    IF NOT EXISTS (SELECT 1 FROM feature.provider_field_active_policies active
+        WHERE active.feature_id=p_feature AND active.policy_revision=p_revision) THEN
+        RAISE EXCEPTION 'active scalar revision changed; replan' USING ERRCODE='40001';
+    END IF;
+    IF EXISTS (SELECT 1 FROM provider_sync.source_links
+        WHERE source_entity_key=p_entity AND feature_id<>p_feature) THEN
+        RAISE EXCEPTION 'single Feature scalar refresh cannot advance a shared source entity' USING ERRCODE='23514';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.feature_write_attempts attempt
+        JOIN provider_sync.provider_datasets dataset ON dataset.provider_dataset_id=attempt.provider_dataset_id
+        JOIN provider_sync.source_entities entity ON entity.provider_dataset_id=dataset.provider_dataset_id
+        JOIN provider_sync.source_links link ON link.source_entity_key=entity.source_entity_key
+        JOIN provider_sync.source_entity_heads head ON head.source_entity_key=entity.source_entity_key
+        WHERE attempt.attempt_id=p_attempt AND attempt.provider_dataset_id=p_dataset
+          AND dataset.is_active AND entity.source_entity_key=p_entity
+          AND link.feature_id=p_feature AND link.source_role='primary'
+          AND head.current_source_record_key IS NOT NULL AND head.expires_at IS NULL) THEN
+        RAISE EXCEPTION 'scalar target is outside the applying dataset or existing primary source' USING ERRCODE='23514';
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION feature.assert_scoped_provider_scalar_target(p_attempt uuid, p_feature uuid, p_dataset bigint, p_entity text, p_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: author_feature_field_overrides(uuid, bigint, text, text, bigint, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -4749,6 +5266,44 @@ CREATE FUNCTION feature.force_features_row_revision() RETURNS trigger
 ALTER FUNCTION feature.force_features_row_revision() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: guard_provider_field_projection(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.guard_provider_field_projection() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_old jsonb; v_new jsonb; v_feature uuid; v_entity text; v_dataset bigint;
+BEGIN
+    IF TG_OP<>'INSERT' THEN v_old:=to_jsonb(OLD); END IF;
+    IF TG_OP<>'DELETE' THEN v_new:=to_jsonb(NEW); END IF;
+    -- 삭제/identity 변경에서는 old와 new의 양쪽 영향을 검사한다.
+    IF TG_TABLE_NAME='provider_datasets' THEN
+        FOR v_feature IN SELECT DISTINCT link.feature_id FROM provider_sync.source_links link
+            JOIN provider_sync.source_entities entity USING(source_entity_key)
+            WHERE entity.provider_dataset_id IN ((v_old->>'provider_dataset_id')::bigint,
+                (v_new->>'provider_dataset_id')::bigint) LOOP
+            PERFORM feature._assert_provider_field_projection(v_feature);
+        END LOOP;
+    ELSIF TG_TABLE_NAME IN ('source_entity_heads','source_entities','source_records') THEN
+        FOR v_feature IN SELECT DISTINCT feature_id FROM provider_sync.source_links
+            WHERE source_entity_key IN (v_old->>'source_entity_key',v_new->>'source_entity_key') LOOP
+            PERFORM feature._assert_provider_field_projection(v_feature);
+        END LOOP;
+    ELSE
+        FOR v_feature IN SELECT DISTINCT value::uuid FROM unnest(ARRAY[
+            v_old->>'feature_id',v_new->>'feature_id']) value WHERE value IS NOT NULL LOOP
+            PERFORM feature._assert_provider_field_projection(v_feature);
+        END LOOP;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.guard_provider_field_projection() OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: guard_provider_field_shadow_policy(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -5121,6 +5676,29 @@ $$;
 
 
 ALTER FUNCTION feature.lock_current_provider_source_evidence(p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: lock_provider_field_policy_epoch(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.lock_provider_field_policy_epoch() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_epoch bigint;
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid()
+        AND locktype='advisory' AND granted AND classid=1369104691 AND objid=115 AND objsubid=2
+        AND mode IN ('ShareLock','ExclusiveLock')) THEN
+        RAISE EXCEPTION 'policy epoch entry requires the protocol gate first' USING ERRCODE='23514';
+    END IF;
+    SELECT epoch INTO STRICT v_epoch FROM feature.provider_field_policy_epoch
+        WHERE singleton FOR SHARE;
+END;
+$$;
+
+
+ALTER FUNCTION feature.lock_provider_field_policy_epoch() OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: manual_feature_identity_key(text, text, numeric, numeric); Type: FUNCTION; Schema: feature; Owner: ktm_manual_feature_procedure_owner
@@ -7122,6 +7700,208 @@ $$;
 ALTER PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id uuid, IN p_collection_id uuid, IN p_external_item_id text, IN p_external_component_id text, IN p_place_name text, IN p_address_hint text, IN p_item_title text, IN p_item_summary text, IN p_sort_order integer, IN p_curation_relation text, IN p_reuse_policy text, IN p_item_status text, IN p_expected_candidate_revision bigint, IN p_expected_collection_revision bigint, IN p_expected_item_revision bigint, IN p_command_id bigint, IN p_reason_code text, IN p_principal text, OUT o_candidate_id uuid, OUT o_candidate_revision bigint, OUT o_curation_item_id uuid, OUT o_curation_item_revision bigint, OUT o_transition_id bigint) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: provider_field_policy_statement_barrier(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.provider_field_policy_statement_barrier() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_epoch bigint;
+BEGIN
+    -- row·source 잠금 전에 statement당 한 번만 실행한다. 오래된 RR은 여기서 40001이다.
+    SELECT epoch INTO STRICT v_epoch FROM feature.provider_field_policy_epoch
+        WHERE singleton FOR SHARE;
+    IF v_epoch > 0 AND NOT EXISTS (SELECT 1 FROM pg_locks WHERE pid=pg_backend_pid()
+        AND locktype='advisory' AND granted AND classid=1369104691 AND objid=115 AND objsubid=2
+        AND mode IN ('ShareLock','ExclusiveLock')) THEN
+        -- 구형 writer의 늦은 gate 획득/SH→EX 승격으로 우회하지 않는다.
+        RAISE EXCEPTION 'legacy writer cannot mutate after scalar policy cutover' USING ERRCODE='23514';
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.provider_field_policy_statement_barrier() OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: provider_field_scalar_winners(uuid, bigint, text[]); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.provider_field_scalar_winners(p_feature_id uuid, p_policy_revision bigint, p_field_paths text[]) RETURNS TABLE(field_path text, value_json jsonb, provider_dataset_id bigint, source_entity_key text, value_source_record_key text, value_source_hash text, validated_source_record_key text, validated_source_hash text, value_observed_at timestamp with time zone, validated_at timestamp with time zone, normalizer_revision text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_member record;
+    v_header feature.provider_field_shadow_policies%ROWTYPE;
+    v_candidate feature.provider_field_shadow_candidates%ROWTYPE;
+    v_field text;
+    v_count integer := 0;
+    v_fields text[] := ARRAY[]::text[];
+    v_value_hash text;
+    v_value_clock timestamptz;
+    v_kind text;
+BEGIN
+    -- private helper: 호출자는 kernel 및 epoch에 먼저 진입한다. shared 경로의
+    -- applying/manifest 권한은 별도의 쓰기 entry가 확인하며 이 helper는 잠금을 추가하지 않는다.
+    IF NOT EXISTS (SELECT 1 FROM pg_locks
+        WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+          AND classid=1369104691 AND objid=115 AND objsubid=2
+          AND mode IN ('ShareLock','ExclusiveLock')) THEN
+        RAISE EXCEPTION 'candidate projection requires protocol entry' USING ERRCODE='23514';
+    END IF;
+    IF p_feature_id IS NULL OR p_policy_revision IS NULL OR p_policy_revision < 1
+       OR p_field_paths IS NULL OR cardinality(p_field_paths) NOT BETWEEN 1 AND 2
+       OR EXISTS (SELECT 1 FROM unnest(p_field_paths) path
+                  WHERE path IS NULL OR path NOT IN ('core.name','place.phones'))
+       OR cardinality(p_field_paths) <> (SELECT count(DISTINCT path) FROM unnest(p_field_paths) path) THEN
+        RAISE EXCEPTION 'unsupported scalar policy selection' USING ERRCODE='23514';
+    END IF;
+    SELECT feature.kind INTO STRICT v_kind FROM feature.features feature
+        WHERE feature.feature_id=p_feature_id;
+    IF 'place.phones'=ANY(p_field_paths) AND v_kind <> 'place' THEN
+        RAISE EXCEPTION 'phones policy requires place subtype' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS (SELECT 1 FROM provider_sync.source_links link
+        JOIN provider_sync.source_entities entity USING(source_entity_key)
+        JOIN provider_sync.provider_datasets dataset USING(provider_dataset_id)
+        WHERE link.feature_id=p_feature_id AND NOT dataset.is_active) THEN
+        RAISE EXCEPTION 'inactive source membership requires an explicit retirement protocol' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS (SELECT 1 FROM provider_sync.source_links own
+        JOIN provider_sync.source_links other USING(source_entity_key)
+        WHERE own.feature_id=p_feature_id AND other.feature_id<>p_feature_id) THEN
+        RAISE EXCEPTION 'single Feature policy does not support a shared source entity' USING ERRCODE='23514';
+    END IF;
+    -- 모든 연결을 먼저 열거한다. 다른 role의 필드 기여를 없는 것으로 추정하지 않는다.
+    FOR v_member IN
+        SELECT dataset.provider_dataset_id,dataset.provider,dataset.dataset_key,
+               entity.source_entity_key,link.source_role,
+               head.current_source_record_key,head.observed_at,head.expires_at,
+               record.raw_payload_hash
+          FROM provider_sync.source_links link
+          JOIN provider_sync.source_entities entity USING(source_entity_key)
+          JOIN provider_sync.provider_datasets dataset USING(provider_dataset_id)
+          LEFT JOIN provider_sync.source_entity_heads head USING(source_entity_key)
+          LEFT JOIN provider_sync.source_records record
+            ON record.source_record_key=head.current_source_record_key
+           AND record.source_entity_key=entity.source_entity_key
+         WHERE link.feature_id=p_feature_id AND dataset.is_active
+         ORDER BY dataset.provider COLLATE "C",dataset.dataset_key COLLATE "C",
+                  entity.source_entity_key COLLATE "C"
+    LOOP
+        v_count := v_count+1;
+        IF v_count > 128 OR v_member.source_role <> 'primary'
+           OR v_member.current_source_record_key IS NULL OR v_member.raw_payload_hash IS NULL
+           OR v_member.expires_at IS NOT NULL THEN
+            RAISE EXCEPTION 'unsupported or incomplete candidate membership' USING ERRCODE='23514';
+        END IF;
+        SELECT * INTO v_header FROM feature.provider_field_shadow_policies policy
+         WHERE policy.policy_revision=p_policy_revision
+           AND policy.provider_dataset_id=v_member.provider_dataset_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'every active membership needs an explicit policy' USING ERRCODE='23514';
+        END IF;
+        FOR v_field IN SELECT item->>'field_path' FROM jsonb_array_elements(v_header.fields) item LOOP
+            IF v_field NOT IN ('core.name','place.phones') OR NOT(v_field=ANY(p_field_paths)) THEN
+                RAISE EXCEPTION 'Geo and undeclared fields cannot enter scalar cutover' USING ERRCODE='23514';
+            END IF;
+            v_fields := array_append(v_fields,v_field);
+            SELECT * INTO v_candidate FROM feature.provider_field_shadow_candidates candidate
+             WHERE candidate.feature_id=p_feature_id AND candidate.field_path=v_field
+               AND candidate.provider_dataset_id=v_member.provider_dataset_id
+               AND candidate.source_entity_key=v_member.source_entity_key
+               AND candidate.policy_revision=p_policy_revision;
+            IF NOT FOUND OR v_candidate.availability NOT IN ('value','removed')
+               OR v_candidate.validated_source_record_key IS DISTINCT FROM v_member.current_source_record_key
+               OR v_candidate.validated_source_hash IS DISTINCT FROM v_member.raw_payload_hash
+               OR v_candidate.validated_at IS DISTINCT FROM v_member.observed_at
+               OR v_candidate.normalizer_revision IS DISTINCT FROM v_header.normalizer_revision
+               OR v_candidate.value_geometry IS NOT NULL THEN
+                RAISE EXCEPTION 'candidate is missing or not validated through current head' USING ERRCODE='23514';
+            END IF;
+            IF v_candidate.availability='value' THEN
+                SELECT record.raw_payload_hash,record.fetched_at INTO v_value_hash,v_value_clock
+                  FROM provider_sync.source_records record
+                 WHERE record.source_record_key=v_candidate.value_source_record_key
+                   AND record.source_entity_key=v_member.source_entity_key;
+                IF NOT FOUND OR v_value_hash IS DISTINCT FROM v_candidate.value_source_hash
+                   OR v_value_clock IS DISTINCT FROM v_candidate.value_observed_at
+                   OR v_candidate.value_json IS NULL OR v_candidate.value_json='null'::jsonb THEN
+                    -- 두 지원 필드는 registry가 explicit null을 허용하지 않는다.
+                    RAISE EXCEPTION 'winner value lacks immutable typed source evidence' USING ERRCODE='23514';
+                END IF;
+            END IF;
+        END LOOP;
+    END LOOP;
+    IF v_count=0 OR (SELECT array_agg(DISTINCT path COLLATE "C" ORDER BY path COLLATE "C") FROM unnest(v_fields) path)
+        IS DISTINCT FROM (SELECT array_agg(path ORDER BY path COLLATE "C") FROM unnest(p_field_paths) path) THEN
+        RAISE EXCEPTION 'candidate field coverage is incomplete' USING ERRCODE='23514';
+    END IF;
+    -- 다른 provider의 시각을 직접 비교하지 않는다. 동순위 provider는 정책 모호성이다.
+    IF EXISTS (
+        SELECT item->>'field_path',(item->>'provider_rank')::integer
+          FROM provider_sync.source_links link
+          JOIN provider_sync.source_entities entity USING(source_entity_key)
+          JOIN provider_sync.provider_datasets dataset USING(provider_dataset_id)
+          JOIN feature.provider_field_shadow_policies policy
+            ON policy.provider_dataset_id=dataset.provider_dataset_id AND policy.policy_revision=p_policy_revision
+          CROSS JOIN LATERAL jsonb_array_elements(policy.fields) item
+         WHERE link.feature_id=p_feature_id AND dataset.is_active
+         GROUP BY item->>'field_path',(item->>'provider_rank')::integer
+        HAVING count(DISTINCT dataset.provider)>1
+    ) THEN
+        RAISE EXCEPTION 'equal field rank across providers is not configured' USING ERRCODE='23514';
+    END IF;
+    -- entity 안의 최신성은 정본 current head가 결정한다. 서로 다른 entity의 도착 clock은
+    -- 비교하지 않고 명시 rank 뒤 안정된 dataset/entity/hash 순서만 사용한다.
+    FOREACH v_field IN ARRAY p_field_paths LOOP
+        SELECT candidate.* INTO v_candidate
+          FROM feature.provider_field_shadow_candidates candidate
+          JOIN provider_sync.source_entities entity
+            ON entity.source_entity_key=candidate.source_entity_key
+           AND entity.provider_dataset_id=candidate.provider_dataset_id
+          JOIN provider_sync.provider_datasets dataset
+            ON dataset.provider_dataset_id=candidate.provider_dataset_id
+          JOIN provider_sync.source_links link
+            ON link.feature_id=candidate.feature_id AND link.source_entity_key=candidate.source_entity_key
+          JOIN feature.provider_field_shadow_policies policy
+            ON policy.provider_dataset_id=dataset.provider_dataset_id AND policy.policy_revision=candidate.policy_revision
+          CROSS JOIN LATERAL jsonb_array_elements(policy.fields) item
+         WHERE candidate.feature_id=p_feature_id AND candidate.policy_revision=p_policy_revision
+           AND candidate.field_path=v_field AND item->>'field_path'=v_field
+           AND dataset.is_active AND candidate.availability='value'
+         ORDER BY (item->>'provider_rank')::integer,
+                  dataset.provider COLLATE "C",dataset.dataset_key COLLATE "C",
+                  candidate.source_entity_key COLLATE "C",
+                  candidate.validated_source_hash COLLATE "C" DESC
+         LIMIT 1;
+        IF NOT FOUND THEN
+            -- name/phones는 nullable이 아니다. 마지막 값의 정당한 무값 의미는 후속 계약이다.
+            RAISE EXCEPTION 'no valid scalar winner remains' USING ERRCODE='23514';
+        END IF;
+        field_path := v_field;
+        value_json := v_candidate.value_json;
+        provider_dataset_id := v_candidate.provider_dataset_id;
+        source_entity_key := v_candidate.source_entity_key;
+        value_source_record_key := v_candidate.value_source_record_key;
+        value_source_hash := v_candidate.value_source_hash;
+        validated_source_record_key := v_candidate.validated_source_record_key;
+        validated_source_hash := v_candidate.validated_source_hash;
+        value_observed_at := v_candidate.value_observed_at;
+        validated_at := v_candidate.validated_at;
+        normalizer_revision := v_candidate.normalizer_revision;
+        RETURN NEXT;
+    END LOOP;
+END;
+$$;
+
+
+ALTER FUNCTION feature.provider_field_scalar_winners(p_feature_id uuid, p_policy_revision bigint, p_field_paths text[]) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: provision_feature_reference_reconciliation_subscription(text, bigint, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
@@ -7958,6 +8738,27 @@ $$;
 ALTER PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quarantine_collection_id uuid, IN p_expected_quarantine_revision bigint, IN p_action text, IN p_target_collection_id uuid, IN p_expected_target_revision bigint, IN p_item_ids uuid[], IN p_collection_key text, IN p_title text, IN p_command_id bigint, IN p_principal text, OUT o_moved_item_ids uuid[], OUT o_quarantine_deleted boolean, OUT o_collection_id uuid, OUT o_collection_key text, OUT o_collection_revision bigint, OUT o_conflicts jsonb) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: recompute_provider_field_candidates(uuid, uuid, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE PROCEDURE feature.recompute_provider_field_candidates(IN p_attempt uuid, IN p_feature uuid, IN p_policy_revision bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    PERFORM feature.assert_scoped_candidate_write(p_attempt,p_feature);
+    IF NOT EXISTS (SELECT 1 FROM feature.provider_field_active_policies
+        WHERE feature_id=p_feature AND policy_revision=p_policy_revision) THEN
+        RAISE EXCEPTION 'active scalar revision changed; replan' USING ERRCODE='40001';
+    END IF;
+    PERFORM feature._project_provider_field_candidates(p_feature);
+END;
+$$;
+
+
+ALTER PROCEDURE feature.recompute_provider_field_candidates(IN p_attempt uuid, IN p_feature uuid, IN p_policy_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: record_manual_provider_dedup_candidate(uuid, uuid, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
@@ -8248,177 +9049,38 @@ ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_featu
 CREATE PROCEDURE feature.record_provider_field_candidates(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer)
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
-    AS $_$
-DECLARE
-    v_hash text;
-    v_kind text;
-    v_observed_at timestamptz;
-    v_validated_at timestamptz;
-    v_header feature.provider_field_shadow_policies%ROWTYPE;
-    v_policy record;
-    v_registry ops.feature_override_field_paths%ROWTYPE;
-    v_old feature.provider_field_shadow_candidates%ROWTYPE;
-    v_candidate feature.provider_field_shadow_candidates%ROWTYPE;
-    v_supplied boolean;
-    v_value jsonb;
-    v_target_type text;
-    v_cast_value jsonb;
+    AS $$
 BEGIN
-    IF p_policy_revision IS NULL OR p_policy_revision < 1 OR p_presence_proven IS NULL
-       OR jsonb_typeof(p_values) IS DISTINCT FROM 'object'
-       OR jsonb_typeof(p_geometry_wkt) IS DISTINCT FROM 'object'
-       OR (NOT p_presence_proven AND (p_values <> '{}'::jsonb OR p_geometry_wkt <> '{}'::jsonb))
-       OR (p_presence_proven AND coalesce(btrim(p_normalizer_revision), '') = '') THEN
-        RAISE EXCEPTION 'invalid shadow observation' USING ERRCODE='23514';
-    END IF;
-    -- 기존 전역 fence를 유지한다. 이 shadow 프로시저는 독립 dataset 쓰기를 허용하지 않는다.
-    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));
-    v_hash := feature.lock_current_provider_feature_source_evidence(
-        p_feature_id, p_provider_dataset_id, p_source_entity_key, p_source_record_key
-    );
-    SELECT kind INTO STRICT v_kind FROM feature.features WHERE feature_id=p_feature_id FOR UPDATE;
-    SELECT record.fetched_at, head.observed_at INTO STRICT v_observed_at, v_validated_at
-      FROM provider_sync.source_records record
-      JOIN provider_sync.source_entity_heads head ON head.source_entity_key=record.source_entity_key
-      WHERE record.source_record_key=p_source_record_key AND head.current_source_record_key=record.source_record_key;
-    SELECT * INTO v_header FROM feature.provider_field_shadow_policies
-        WHERE policy_revision=p_policy_revision AND provider_dataset_id=p_provider_dataset_id;
-    IF NOT FOUND THEN
-        RAISE EXCEPTION 'shadow policy is not explicitly configured or visible' USING ERRCODE='23514';
-    END IF;
-    IF EXISTS (
-        SELECT path FROM (
-            SELECT jsonb_object_keys(p_values) path UNION ALL SELECT jsonb_object_keys(p_geometry_wkt)
-        ) supplied
-        WHERE NOT EXISTS (SELECT 1 FROM jsonb_array_elements(v_header.fields) field
-            WHERE field->>'field_path'=supplied.path)
-    ) OR EXISTS (SELECT 1 FROM jsonb_object_keys(p_values) path WHERE p_geometry_wkt ? path) THEN
-        RAISE EXCEPTION 'supplied field has missing policy or conflicting typed values' USING ERRCODE='23514';
-    END IF;
-    o_field_count := 0;
-    o_unresolved_count := 0;
-    FOR v_policy IN SELECT * FROM jsonb_to_recordset(v_header.fields)
-        AS field(field_path text,provider_rank integer,omitted_policy text,null_policy text)
-        ORDER BY field_path COLLATE "C"
-    LOOP
-        SELECT * INTO STRICT v_registry FROM ops.feature_override_field_paths WHERE field_path=v_policy.field_path;
-        IF NOT v_registry.provider_writable OR (v_registry.feature_kind <> '*' AND v_registry.feature_kind <> v_kind) THEN
-            RAISE EXCEPTION 'shadow field does not belong to typed Feature' USING ERRCODE='23514';
-        END IF;
-        IF p_presence_proven AND p_normalizer_revision IS DISTINCT FROM v_header.normalizer_revision THEN
-            RAISE EXCEPTION 'shadow normalizer revision is not declared' USING ERRCODE='23514';
-        END IF;
-        SELECT * INTO v_old FROM feature.provider_field_shadow_candidates
-          WHERE feature_id=p_feature_id AND field_path=v_policy.field_path
-            AND provider_dataset_id=p_provider_dataset_id AND source_entity_key=p_source_entity_key
-            AND policy_revision=p_policy_revision FOR UPDATE;
-        v_candidate := v_old;
-        v_candidate.feature_id := p_feature_id;
-        v_candidate.policy_revision := p_policy_revision;
-        v_candidate.provider_dataset_id := p_provider_dataset_id;
-        v_candidate.field_path := v_policy.field_path;
-        v_candidate.source_entity_key := p_source_entity_key;
-        v_candidate.validated_source_record_key := p_source_record_key;
-        v_candidate.validated_source_hash := v_hash;
-        v_candidate.validated_at := v_validated_at;
-        v_candidate.normalizer_revision := p_normalizer_revision;
-        v_supplied := p_values ? v_policy.field_path OR p_geometry_wkt ? v_policy.field_path;
-        IF NOT p_presence_proven THEN
-            v_candidate.availability := 'unresolved';
-            v_candidate.reason := 'presence_unknown';
-        ELSIF v_registry.value_kind = 'geometry' OR v_policy.field_path IN (
-            'core.address', 'core.legal_dong_code', 'core.road_name_code', 'core.road_address_management_no',
-            'core.admin_dong_code', 'core.sido_code', 'core.sigungu_code', 'core.coord_precision_digits',
-            'core.parent_feature_id', 'core.sibling_group_id', 'core.raw_refs'
-        ) THEN
-            -- Geo 일관 그룹/stamp 증거는 후속 단위다. 독립 scalar처럼 승인하지 않는다.
-            v_candidate.availability := 'unresolved';
-            v_candidate.reason := 'geo_evidence_unsupported';
-        ELSIF v_supplied THEN
-            IF p_geometry_wkt ? v_policy.field_path THEN
-                RAISE EXCEPTION 'scalar field supplied as geometry' USING ERRCODE='23514';
-            END IF;
-            v_value := p_values -> v_policy.field_path;
-            IF (v_value = 'null'::jsonb AND NOT v_registry.allows_null)
-                OR (v_value <> 'null'::jsonb AND (
-                    (v_registry.value_kind IN ('text','uuid','date','timestamptz') AND jsonb_typeof(v_value) <> 'string')
-                    OR (v_registry.value_kind IN ('integer','numeric') AND jsonb_typeof(v_value) <> 'number')
-                    OR (v_registry.value_kind='boolean' AND jsonb_typeof(v_value) <> 'boolean')
-                    OR (v_registry.value_kind='json_object' AND jsonb_typeof(v_value) <> 'object')
-                    OR (v_registry.value_kind IN ('json_array','text_array') AND jsonb_typeof(v_value) <> 'array')
-                )) THEN
-                RAISE EXCEPTION 'shadow scalar does not match typed registry' USING ERRCODE='23514';
-            END IF;
-            IF v_registry.value_kind='text_array' AND v_value <> 'null'::jsonb AND EXISTS (
-                SELECT 1 FROM jsonb_array_elements(v_value) element WHERE jsonb_typeof(element) <> 'string'
-            ) THEN
-                RAISE EXCEPTION 'shadow text array contains nontext value' USING ERRCODE='23514';
-            END IF;
-            IF v_value <> 'null'::jsonb THEN
-                -- registry JSON 종류만으로 fractional integer/잘못된 날짜를 승인하지 않는다.
-                -- 실제 저장 열의 smallint/int/numeric 정밀도·길이까지 검증한다.
-                SELECT format_type(attribute.atttypid,attribute.atttypmod) INTO STRICT v_target_type
-                FROM pg_attribute attribute
-                JOIN pg_class relation ON relation.oid=attribute.attrelid
-                JOIN pg_namespace namespace ON namespace.oid=relation.relnamespace
-                WHERE namespace.nspname='feature' AND relation.relname=v_registry.target_relation
-                  AND attribute.attname=v_registry.target_column AND NOT attribute.attisdropped;
-                IF v_registry.value_kind NOT IN ('json_object','json_array','text_array') THEN
-                    IF NOT pg_input_is_valid(v_value #>> '{}',v_target_type) THEN
-                        RAISE EXCEPTION 'shadow scalar cannot be stored in typed target' USING ERRCODE='23514';
-                    END IF;
-                    IF v_registry.value_kind='date' AND (v_value #>> '{}') !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' THEN
-                        RAISE EXCEPTION 'shadow date requires an ISO calendar date' USING ERRCODE='23514';
-                    END IF;
-                    IF v_registry.value_kind='timestamptz' AND (v_value #>> '{}') !~
-                        '^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}([.][0-9]{1,6})?(Z|[+-][0-9]{2}:[0-9]{2})$' THEN
-                        RAISE EXCEPTION 'shadow timestamp requires an explicit timezone' USING ERRCODE='23514';
-                    END IF;
-                    IF v_registry.value_kind IN ('integer','numeric','text') THEN
-                        -- format_type는 trusted catalog 값이다. 입력값은 바인딩해 SQL에 섞지 않는다.
-                        EXECUTE format('SELECT to_jsonb(($1)::%s)',v_target_type)
-                            INTO v_cast_value USING v_value #>> '{}';
-                        IF v_cast_value IS DISTINCT FROM v_value THEN
-                            RAISE EXCEPTION 'shadow scalar would lose precision or length' USING ERRCODE='23514';
-                        END IF;
-                    END IF;
-                END IF;
-            END IF;
-            v_candidate.value_json := v_value;
-            v_candidate.value_geometry := NULL;
-            v_candidate.value_source_record_key := p_source_record_key;
-            v_candidate.value_source_hash := v_hash;
-            v_candidate.value_observed_at := v_observed_at;
-            v_candidate.availability := CASE WHEN v_value='null'::jsonb AND v_policy.null_policy='remove' THEN 'removed' ELSE 'value' END;
-            v_candidate.reason := CASE WHEN v_value='null'::jsonb THEN 'explicit_null' ELSE 'supplied' END;
-        ELSIF v_policy.omitted_policy='remove' THEN
-            v_candidate.availability := 'removed';
-            v_candidate.reason := 'omitted_remove';
-        ELSIF v_old.value_source_record_key IS NOT NULL AND v_old.availability IN ('value','removed') THEN
-            v_candidate.availability := v_old.availability;
-            v_candidate.reason := 'omitted_carry';
-        ELSE
-            v_candidate.availability := 'unresolved';
-            v_candidate.reason := 'missing_initial_value';
-        END IF;
-        INSERT INTO feature.provider_field_shadow_candidates SELECT (v_candidate).*
-        ON CONFLICT (feature_id,field_path,provider_dataset_id,source_entity_key,policy_revision) DO UPDATE
-        SET value_source_record_key=EXCLUDED.value_source_record_key,
-            value_source_hash=EXCLUDED.value_source_hash,
-            validated_source_record_key=EXCLUDED.validated_source_record_key,
-            validated_source_hash=EXCLUDED.validated_source_hash,
-            value_json=EXCLUDED.value_json,value_geometry=EXCLUDED.value_geometry,
-            availability=EXCLUDED.availability,reason=EXCLUDED.reason,
-            value_observed_at=EXCLUDED.value_observed_at,validated_at=EXCLUDED.validated_at,
-            normalizer_revision=EXCLUDED.normalizer_revision;
-        o_field_count := o_field_count+1;
-        o_unresolved_count := o_unresolved_count + CASE WHEN v_candidate.availability='unresolved' THEN 1 ELSE 0 END;
-    END LOOP;
+    CALL feature._record_provider_field_candidates(NULL,p_feature_id,p_provider_dataset_id,
+        p_source_entity_key,p_source_record_key,p_policy_revision,p_normalizer_revision,
+        p_presence_proven,p_values,p_geometry_wkt,o_field_count,o_unresolved_count);
 END;
-$_$;
+$$;
 
 
 ALTER PROCEDURE feature.record_provider_field_candidates(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: record_scoped_provider_field_candidates(uuid, uuid, bigint, text, text, bigint, text, boolean, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE PROCEDURE feature.record_scoped_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF p_attempt IS NULL OR NOT EXISTS (SELECT 1 FROM feature.provider_field_active_policies
+        WHERE feature_id=p_feature_id AND policy_revision=p_policy_revision) THEN
+        RAISE EXCEPTION 'scoped capture requires the explicitly active scalar policy' USING ERRCODE='23514';
+    END IF;
+    CALL feature._record_provider_field_candidates(p_attempt,p_feature_id,p_provider_dataset_id,
+        p_source_entity_key,p_source_record_key,p_policy_revision,p_normalizer_revision,
+        p_presence_proven,p_values,p_geometry_wkt,o_field_count,o_unresolved_count);
+END;
+$$;
+
+
+ALTER PROCEDURE feature.record_scoped_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: refresh_curated_source_observation(bigint, uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -9029,6 +9691,88 @@ $$;
 
 
 ALTER FUNCTION feature.reject_tvn40_truncate() OWNER TO ktm_curation_audit_writer;
+
+--
+-- Name: reject_unsupported_active_scalar_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.reject_unsupported_active_scalar_mutation() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_feature uuid; v_active feature.provider_field_active_policies%ROWTYPE;
+        v_generated text[];
+BEGIN
+    IF TG_TABLE_NAME='source_links' THEN
+        IF EXISTS (SELECT 1 FROM provider_sync.source_links link
+            JOIN feature.provider_field_active_policies active USING(feature_id)
+            WHERE link.source_entity_key IN (
+                CASE WHEN TG_OP<>'DELETE' THEN NEW.source_entity_key END,
+                CASE WHEN TG_OP<>'INSERT' THEN OLD.source_entity_key END))
+           OR EXISTS (SELECT 1 FROM feature.provider_field_active_policies active
+            WHERE active.feature_id IN (CASE WHEN TG_OP<>'DELETE' THEN NEW.feature_id END,
+                CASE WHEN TG_OP<>'INSERT' THEN OLD.feature_id END)) THEN
+            RAISE EXCEPTION 'active scalar source link mutation is unsupported' USING ERRCODE='23514';
+        END IF;
+        RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+    END IF;
+    IF TG_TABLE_NAME='provider_datasets' THEN
+        IF (TG_OP='DELETE' OR NEW.is_active IS DISTINCT FROM OLD.is_active) AND EXISTS (
+            SELECT 1 FROM feature.provider_field_active_policies active
+            JOIN provider_sync.source_links link USING(feature_id)
+            JOIN provider_sync.source_entities entity USING(source_entity_key)
+            WHERE entity.provider_dataset_id=OLD.provider_dataset_id) THEN
+            RAISE EXCEPTION 'active scalar membership retirement is unsupported' USING ERRCODE='23514';
+        END IF;
+        RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+    END IF;
+    IF TG_TABLE_NAME='source_entities' THEN
+        IF (TG_OP='DELETE' OR (to_jsonb(NEW)-ARRAY['last_seen_at','first_seen_at'])
+            IS DISTINCT FROM (to_jsonb(OLD)-ARRAY['last_seen_at','first_seen_at']))
+          AND EXISTS (SELECT 1 FROM provider_sync.source_links link
+            JOIN feature.provider_field_active_policies active USING(feature_id)
+            WHERE link.source_entity_key=OLD.source_entity_key) THEN
+            RAISE EXCEPTION 'active scalar source identity mutation is unsupported' USING ERRCODE='23514';
+        END IF;
+        RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END;
+    END IF;
+    v_feature:=CASE WHEN TG_OP='DELETE' THEN OLD.feature_id ELSE NEW.feature_id END;
+    SELECT * INTO v_active FROM feature.provider_field_active_policies WHERE feature_id IN (v_feature,CASE WHEN TG_OP<>'INSERT' THEN OLD.feature_id END)
+        ORDER BY feature_id LIMIT 1;
+    IF NOT FOUND THEN RETURN CASE WHEN TG_OP='DELETE' THEN OLD ELSE NEW END; END IF;
+    IF TG_OP='DELETE' OR TG_TABLE_NAME IN ('source_links','feature_geocode_stamps') THEN
+        RAISE EXCEPTION 'active scalar identity or link mutation is unsupported' USING ERRCODE='23514';
+    ELSIF TG_TABLE_NAME='features' THEN
+        -- BEFORE row에서는 generated 열이 아직 NULL이다. 입력으로 쓸 수 없는 이 열만
+        -- 제외하며 실제 좌표/주소/precision/lifecycle 열의 비교는 그대로 유지한다.
+        SELECT coalesce(array_agg(attname::text),ARRAY[]::text[]) INTO v_generated
+            FROM pg_attribute WHERE attrelid=TG_RELID AND attgenerated<>'' AND NOT attisdropped;
+        IF TG_OP='INSERT' OR (to_jsonb(NEW)-v_generated-CASE WHEN 'core.name'=ANY(v_active.field_paths)
+              THEN ARRAY['name','updated_at','row_revision'] ELSE ARRAY['updated_at','row_revision'] END)
+            IS DISTINCT FROM (to_jsonb(OLD)-v_generated-CASE WHEN 'core.name'=ANY(v_active.field_paths)
+              THEN ARRAY['name','updated_at','row_revision'] ELSE ARRAY['updated_at','row_revision'] END) THEN
+            RAISE EXCEPTION 'Geo lifecycle and other core fields require a separate active policy' USING ERRCODE='23514';
+        END IF;
+    ELSIF TG_TABLE_NAME='feature_places' THEN
+        -- BEFORE row에서는 generated 열이 아직 NULL이다. 입력으로 쓸 수 없는 이 열만
+        -- 제외하며 실제 좌표/주소/precision/lifecycle 열의 비교는 그대로 유지한다.
+        SELECT coalesce(array_agg(attname::text),ARRAY[]::text[]) INTO v_generated
+            FROM pg_attribute WHERE attrelid=TG_RELID AND attgenerated<>'' AND NOT attisdropped;
+        IF TG_OP='INSERT' OR (to_jsonb(NEW)-v_generated-CASE WHEN 'place.phones'=ANY(v_active.field_paths)
+              THEN ARRAY['phones'] ELSE ARRAY[]::text[] END) IS DISTINCT FROM
+              (to_jsonb(OLD)-v_generated-CASE WHEN 'place.phones'=ANY(v_active.field_paths)
+              THEN ARRAY['phones'] ELSE ARRAY[]::text[] END) THEN
+            RAISE EXCEPTION 'other place fields are outside scalar cutover' USING ERRCODE='23514';
+        END IF;
+    ELSIF TG_TABLE_NAME='feature_overrides' AND NOT(NEW.field_path=ANY(v_active.field_paths)) THEN
+        RAISE EXCEPTION 'unsupported operator mutation on active scalar Feature' USING ERRCODE='23514';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION feature.reject_unsupported_active_scalar_mutation() OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: reject_user_feature_version_mutation(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -10807,6 +11551,108 @@ $$;
 
 
 ALTER FUNCTION feature.uuid_generate_v7() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: validate_active_provider_base_field_value(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.validate_active_provider_base_field_value() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_registry ops.feature_override_field_paths%ROWTYPE;
+    v_feature_kind text;
+    v_source_hash text;
+BEGIN
+    SELECT * INTO v_registry
+      FROM ops.feature_override_field_paths
+     WHERE field_path = NEW.field_path;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'unknown provider base field path %', NEW.field_path
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_path';
+    END IF;
+    SELECT kind INTO v_feature_kind
+      FROM feature.features
+     WHERE feature_id = NEW.feature_id;
+    IF NOT FOUND OR (v_registry.feature_kind <> '*' AND v_registry.feature_kind <> v_feature_kind) THEN
+        RAISE EXCEPTION 'base field path % does not apply to Feature', NEW.field_path
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_target';
+    END IF;
+    IF EXISTS (SELECT 1 FROM feature.provider_field_active_policies WHERE feature_id=NEW.feature_id) THEN
+        SELECT winner.value_source_hash INTO v_source_hash
+        FROM feature.provider_field_active_policies active
+        CROSS JOIN LATERAL feature.provider_field_scalar_winners(
+            active.feature_id,active.policy_revision,active.field_paths) winner
+        WHERE active.feature_id=NEW.feature_id AND winner.field_path=NEW.field_path
+          AND winner.provider_dataset_id=NEW.provider_dataset_id
+          AND winner.source_entity_key=NEW.source_entity_key
+          AND winner.value_source_record_key=NEW.source_record_key
+          AND winner.value_observed_at=NEW.observed_at
+          AND winner.value_json IS NOT DISTINCT FROM NEW.value_json
+          AND NEW.value_geometry IS NULL;
+    ELSE
+    SELECT record.raw_payload_hash INTO v_source_hash
+      FROM provider_sync.provider_datasets AS dataset
+      JOIN provider_sync.source_entities AS entity
+        ON entity.provider_dataset_id = dataset.provider_dataset_id
+      JOIN provider_sync.source_records AS record
+        ON record.source_entity_key = entity.source_entity_key
+      JOIN provider_sync.source_entity_heads AS head
+        ON head.source_entity_key = entity.source_entity_key
+       AND head.current_source_record_key = record.source_record_key
+     WHERE dataset.provider_dataset_id = NEW.provider_dataset_id
+       AND entity.source_entity_key = NEW.source_entity_key
+       AND record.source_record_key = NEW.source_record_key;
+    END IF;
+    IF v_source_hash IS NULL OR v_source_hash IS DISTINCT FROM NEW.source_raw_payload_hash THEN
+        RAISE EXCEPTION 'base field requires the current canonical source record'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_source';
+    END IF;
+    IF v_registry.value_kind = 'geometry' THEN
+        IF NOT (
+            (NEW.value_json = 'null'::jsonb AND v_registry.allows_null
+             AND NEW.value_geometry IS NULL)
+            OR (
+                NEW.value_json IS NULL AND NEW.value_geometry IS NOT NULL
+                AND x_extension.st_srid(NEW.value_geometry) = 4326
+                AND upper(x_extension.st_geometrytype(NEW.value_geometry))
+                    = 'ST_' || v_registry.geometry_type
+            )
+        ) THEN
+            RAISE EXCEPTION 'base geometry does not match registry type'
+                USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_value';
+        END IF;
+    ELSIF NEW.value_geometry IS NOT NULL
+       OR NEW.value_json IS NULL
+       OR (NOT v_registry.allows_null AND NEW.value_json = 'null'::jsonb)
+       OR (NEW.value_json <> 'null'::jsonb AND (
+              (v_registry.value_kind = 'text' AND jsonb_typeof(NEW.value_json) <> 'string')
+           OR (v_registry.value_kind = 'uuid' AND jsonb_typeof(NEW.value_json) <> 'string')
+           OR (v_registry.value_kind = 'date' AND jsonb_typeof(NEW.value_json) <> 'string')
+           OR (v_registry.value_kind = 'timestamptz' AND jsonb_typeof(NEW.value_json) <> 'string')
+           OR (v_registry.value_kind = 'integer' AND jsonb_typeof(NEW.value_json) <> 'number')
+           OR (v_registry.value_kind = 'numeric' AND jsonb_typeof(NEW.value_json) <> 'number')
+           OR (v_registry.value_kind = 'boolean' AND jsonb_typeof(NEW.value_json) <> 'boolean')
+           OR (v_registry.value_kind = 'json_object' AND jsonb_typeof(NEW.value_json) <> 'object')
+           OR (v_registry.value_kind IN ('json_array', 'text_array') AND jsonb_typeof(NEW.value_json) <> 'array')
+       )) THEN
+        RAISE EXCEPTION 'base JSON value does not match registry type'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_value';
+    END IF;
+    IF v_registry.value_kind = 'text_array' AND NEW.value_json <> 'null'::jsonb AND EXISTS (
+        SELECT 1 FROM jsonb_array_elements(NEW.value_json) AS element
+        WHERE jsonb_typeof(element) <> 'string'
+    ) THEN
+        RAISE EXCEPTION 'base text array contains a non-string value'
+            USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_base_field_value';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION feature.validate_active_provider_base_field_value() OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: validate_feature_base_field_value(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -16355,6 +17201,35 @@ CREATE TABLE feature.manual_feature_purge_records (
 ALTER TABLE feature.manual_feature_purge_records OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: provider_field_active_policies; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.provider_field_active_policies (
+    feature_id uuid NOT NULL,
+    policy_revision bigint NOT NULL,
+    field_paths text[] NOT NULL,
+    CONSTRAINT ck_pfp_active_fields CHECK ((((field_paths = ARRAY['core.name'::text]) OR (field_paths = ARRAY['place.phones'::text])) OR (field_paths = ARRAY['core.name'::text, 'place.phones'::text]))),
+    CONSTRAINT ck_pfp_active_revision CHECK ((policy_revision >= 1))
+);
+
+
+ALTER TABLE feature.provider_field_active_policies OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: provider_field_policy_epoch; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.provider_field_policy_epoch (
+    singleton boolean DEFAULT true NOT NULL,
+    epoch bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_pfp_epoch CHECK ((epoch >= 0)),
+    CONSTRAINT ck_pfp_singleton CHECK (singleton)
+);
+
+
+ALTER TABLE feature.provider_field_policy_epoch OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: provider_field_shadow_candidates; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -16718,7 +17593,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -19383,6 +20258,22 @@ ALTER TABLE ONLY feature.features
 
 ALTER TABLE ONLY feature.manual_feature_identity_claims
     ADD CONSTRAINT pk_manual_feature_identity_claims PRIMARY KEY (feature_id);
+
+
+--
+-- Name: provider_field_active_policies pk_pfp_active; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.provider_field_active_policies
+    ADD CONSTRAINT pk_pfp_active PRIMARY KEY (feature_id);
+
+
+--
+-- Name: provider_field_policy_epoch pk_pfp_epoch; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.provider_field_policy_epoch
+    ADD CONSTRAINT pk_pfp_epoch PRIMARY KEY (singleton);
 
 
 --
@@ -23966,6 +24857,14 @@ ALTER TABLE ONLY feature.manual_feature_purge_records
 
 
 --
+-- Name: provider_field_active_policies fk_pfp_active_feature; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.provider_field_active_policies
+    ADD CONSTRAINT fk_pfp_active_feature FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
+
+
+--
 -- Name: feature_price_values fk_price_value_source_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -25421,6 +26320,44 @@ GRANT USAGE ON SCHEMA provider_sync TO ktm_manual_provider_dedup_procedure_owner
 
 
 --
+-- Name: FUNCTION _assert_provider_field_projection(p_feature uuid); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._assert_provider_field_projection(p_feature uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _install_provider_field_projection_guards(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature._install_provider_field_projection_guards() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._install_provider_field_projection_guards() TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: FUNCTION _project_provider_field_candidates(p_feature uuid); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._project_provider_field_candidates(p_feature uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _provider_field_projection_dependency_active(p_relation text, p_key text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._provider_field_projection_dependency_active(p_relation text, p_key text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._provider_field_projection_dependency_active(p_relation text, p_key text) TO ktm_feature_runtime;
+GRANT ALL ON FUNCTION feature._provider_field_projection_dependency_active(p_relation text, p_key text) TO ktm_feature_schema_owner;
+
+
+--
+-- Name: PROCEDURE _record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE ack_feature_reference_reconciliation_event(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
@@ -25433,6 +26370,14 @@ REVOKE ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event(IN p_
 
 REVOKE ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.ack_feature_reference_reconciliation_event_v2(IN p_principal_id text, IN p_event_id uuid, IN p_worker_id uuid, IN p_lease_epoch bigint, IN p_event_sha256 text, IN p_local_receipt_sha256 text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_acked_through_sequence bigint) TO ktm_feature_reference_reconciliation_service_executor;
+
+
+--
+-- Name: PROCEDURE activate_provider_field_policy(IN p_feature uuid, IN p_revision bigint, IN p_fields text[]); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.activate_provider_field_policy(IN p_feature uuid, IN p_revision bigint, IN p_fields text[]) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.activate_provider_field_policy(IN p_feature uuid, IN p_revision bigint, IN p_fields text[]) TO ktm_feature_schema_owner;
 
 
 --
@@ -25512,6 +26457,21 @@ GRANT ALL ON PROCEDURE feature.archive_curation_item_command(IN p_collection_id 
 --
 
 REVOKE ALL ON FUNCTION feature.assert_feature_reference_reconciliation_lease_cursor() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assert_scoped_candidate_write(p_attempt uuid, p_feature uuid); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.assert_scoped_candidate_write(p_attempt uuid, p_feature uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION assert_scoped_provider_scalar_target(p_attempt uuid, p_feature uuid, p_dataset bigint, p_entity text, p_revision bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.assert_scoped_provider_scalar_target(p_attempt uuid, p_feature uuid, p_dataset bigint, p_entity text, p_revision bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.assert_scoped_provider_scalar_target(p_attempt uuid, p_feature uuid, p_dataset bigint, p_entity text, p_revision bigint) TO ktm_feature_runtime;
 
 
 --
@@ -25682,6 +26642,14 @@ GRANT ALL ON PROCEDURE feature.finalize_provider_curation_root(IN p_root_job_id 
 
 
 --
+-- Name: FUNCTION guard_provider_field_projection(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.guard_provider_field_projection() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.guard_provider_field_projection() TO ktm_feature_schema_owner;
+
+
+--
 -- Name: FUNCTION guard_provider_field_shadow_policy(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -25746,6 +26714,14 @@ REVOKE ALL ON FUNCTION feature.lock_current_provider_feature_source_evidence(p_f
 --
 
 REVOKE ALL ON FUNCTION feature.lock_current_provider_source_evidence(p_provider_dataset_id bigint, p_source_entity_key text, p_source_record_key text) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION lock_provider_field_policy_epoch(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.lock_provider_field_policy_epoch() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.lock_provider_field_policy_epoch() TO ktm_feature_runtime;
 
 
 --
@@ -25836,6 +26812,21 @@ GRANT ALL ON PROCEDURE feature.promote_theme_feature_candidate(IN p_candidate_id
 
 
 --
+-- Name: FUNCTION provider_field_policy_statement_barrier(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.provider_field_policy_statement_barrier() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.provider_field_policy_statement_barrier() TO ktm_feature_schema_owner;
+
+
+--
+-- Name: FUNCTION provider_field_scalar_winners(p_feature_id uuid, p_policy_revision bigint, p_field_paths text[]); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.provider_field_scalar_winners(p_feature_id uuid, p_policy_revision bigint, p_field_paths text[]) FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE provision_feature_reference_reconciliation_subscription(IN p_principal_id text, IN p_initial_event_sequence bigint, IN p_actor text, IN p_domain_command_id bigint, OUT o_outcome text, OUT o_initial_event_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
@@ -25883,6 +26874,14 @@ GRANT ALL ON PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quara
 
 
 --
+-- Name: PROCEDURE recompute_provider_field_candidates(IN p_attempt uuid, IN p_feature uuid, IN p_policy_revision bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.recompute_provider_field_candidates(IN p_attempt uuid, IN p_feature uuid, IN p_policy_revision bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.recompute_provider_field_candidates(IN p_attempt uuid, IN p_feature uuid, IN p_policy_revision bigint) TO ktm_feature_runtime;
+
+
+--
 -- Name: PROCEDURE record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
 --
 
@@ -25896,6 +26895,14 @@ GRANT ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manua
 
 REVOKE ALL ON PROCEDURE feature.record_provider_field_candidates(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.record_provider_field_candidates(IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) TO ktm_feature_runtime;
+
+
+--
+-- Name: PROCEDURE record_scoped_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.record_scoped_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.record_scoped_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) TO ktm_feature_runtime;
 
 
 --
@@ -25962,6 +26969,14 @@ REVOKE ALL ON FUNCTION feature.reject_tvn40_append_only_mutation() FROM PUBLIC;
 --
 
 REVOKE ALL ON FUNCTION feature.reject_tvn40_truncate() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reject_unsupported_active_scalar_mutation(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.reject_unsupported_active_scalar_mutation() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.reject_unsupported_active_scalar_mutation() TO ktm_feature_schema_owner;
 
 
 --
@@ -26073,6 +27088,14 @@ GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uu
 
 REVOKE ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION validate_active_provider_base_field_value(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.validate_active_provider_base_field_value() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.validate_active_provider_base_field_value() TO ktm_feature_schema_owner;
 
 
 --
@@ -27549,6 +28572,20 @@ GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_manua
 GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_curation_command_owner;
 GRANT SELECT,INSERT ON TABLE feature.manual_feature_identity_claims TO ktm_feature_request_procedure_owner;
 GRANT SELECT ON TABLE feature.manual_feature_identity_claims TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE provider_field_active_policies; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE feature.provider_field_active_policies TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: TABLE provider_field_policy_epoch; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,UPDATE ON TABLE feature.provider_field_policy_epoch TO ktm_feature_state_procedure_owner;
 
 
 --
