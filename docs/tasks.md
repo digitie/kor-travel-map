@@ -63,7 +63,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-STATE-03 — **PG transport feature 퇴역(이행 순서 5)**
 
-  세 단계(ADR-114 "결정 7 이행"): ① 유가·돌발 적재 종료 + 퇴역(브랜치 `feat/adr114-retire-pg-transport`, migration 418) →
+  세 단계(ADR-114 "결정 7 이행"): ① 유가·돌발 적재 종료 + 퇴역(브랜치 `feat/adr114-retire-pg-transport`, migration 419) →
   ② 장소 셋(PinVi in-bounds 기본 kind·장소 검색 대체, C7 안전 대상 이동 뒤) → ③ 물리 삭제(관찰 1주 이상·소유자 확인).
 
 **geo 부하 줄이기(소유자 결정 2026-10-23)** — 0단계는 비-MOIS 적재의 저장값 재사용이다(ADR-116, proposed).

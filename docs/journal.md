@@ -5,7 +5,7 @@
   레이어를 Map service REST로만 읽지만 일반 in-bounds 기본 kind(`place·event·notice·price`)·검색·근처가 PG transport를 여전히
   돌려받는다(교통 레이어와 중복, 장소 이름 검색은 PG에만 있다). PinVi DB의 Map feature 참조는 전체 0행. C7 운영 게이트가 공항
   job을 안전 대상으로 쓴다.
-- 그래서 세 단계로 나눴다(ADR-114 "결정 7 이행"): ① 유가 둘·돌발 하나의 PG 적재 코드 제거 + migration `418`(operation 종류
+- 그래서 세 단계로 나눴다(ADR-114 "결정 7 이행"): ① 유가 둘·돌발 하나의 PG 적재 코드 제거 + migration `419`(operation 종류
   불문 끔, Feature `system` 퇴역 = `retired`·`suppressed` + 재활성화 막는 lifecycle override, dataset·lineage·가격 fact는 남김,
   queued/running·공유 primary·기존 lifecycle override preflight) → ② 장소 셋 → ③ 물리 삭제. 장소 적재는 계속 돈다.
 - API 표면 변화 없음(OpenAPI 재생성·PinVi 재vendor 불필요). Codex 수집 fence·shadow 원장 코드는 읽기만 했다(퇴역 프로시저는
@@ -22,14 +22,23 @@
   읽고 FK 대기는 그 뒤라, 411 도중 들어온 INSERT가 켜진 값을 보고 통과해 commit 뒤 성공한다. member 표 둘을 `SHARE`로 잠그도록
   바꿨다(INSERT가 문장 시작에서 기다리고 commit 뒤 가드가 거부). 퇴역 루프 lock_timeout 60초. 두 연결 순서 강제 통합 검사(도중
   INSERT 거부) 추가. runbook B1 upsert 예시·B5 사후 member 0 확인·A 건너뜀 crash-loop 복구.
-- main 병합(#1379·#1383·#1385 — ADR-115 revision 411~416): 이 migration을 `418_retire_pg_transport_values`(down 416)로 다시
+- main 병합(#1379·#1383·#1385 — ADR-115 revision 411~416): 이 migration을 `417_retire_pg_transport_values`(down 416)로 다시
   번호 매겼다. 415부터 `transition_feature_state`가 scoped write 프로토콜 gate를 배타로 잡으므로 417은 그 gate를 member 표 잠금보다
   **먼저** 잡는다(교착 회피, 돌고 있는 쓰기가 있으면 30초에 실패). runbook A는 head 416 pair, 3a 큐 sensor 정지 명령(공용 daemon)·
   417 창 새 run 실패/503 안내. 경주 검사는 inserter의 미허가 RowExclusiveLock이 `ops.import_job_datasets`에 있음을 잰다.
 - main 병합 뒤 journal이 220 KiB를 넘어(228,797 bytes) 가장 오래된 2026-10-01 기록(ADR-104 KMA 제거·drain 정정·공유 plane 준비)을
   `docs/archive/journal-2026-10a.md`로 옮겼다(tasks-rule §8 — 섹션 본문 바이트 보존, 상대 링크 없음). diff3 base 마커 줄 셋도 지웠다. (두 번째 main 병합: main이 2026-09-30분을 `journal-2026-09h.md`로 따로 옮겨 그것을 따랐다.)
 - 두 번째 main 병합(#1386·#1387 — ADR-115 `417_protocol_ex_reentry`): 이 migration을 `418_retire_pg_transport_values`(down
-  417)로 다시 번호 매겼다. runbook A는 head 417 pair.
+  417)로 다시 번호 매겼다(당시 runbook A는 head 417 pair).
+- 세 번째 main 병합(#1388 — ADR-115 `418_creation_protocol`): 이 migration을 `419_retire_pg_transport_values`(down 418)로 다시
+  번호 매겼다. runbook A는 head 418 pair.
+
+## 2026-10-24 — 생성 SQL의 protocol-first 진입과 승인 복구(418)
+
+- core/provider/manual/요청승인4개를 첫EX로 보강하고 내부owner2개에 함수EXEC만 추가한다. 승인55P03은 기존503/RetryAfter5로 전달한다.
+- 실제PG/ASGI·기존M01/M04·unit/graph/docs 집중51 PASS, 별도 이전mapper500→수정503/동일key복구를 확인했다. [범위·실패·검증](reports/2026-10-24-creation-protocol-entry.md).
+- 제품J/W·경계시험root/W 검토PASS. 정확CI·최신418 실UI·전체수집전환/후속전파는 미완이다. 기본OFF/seed0/운영0.
+
 ## 2026-10-24 — protocol EX 재진입 비용 개선(417)
 
 - 이미 보유한 EX는 xact 소유를 재확보한 뒤 반복 설정 조회를 생략한다. session/xact·savepoint·NULL/SH 승격·timeout 계약은 유지한다.

@@ -1,7 +1,7 @@
-"""migration 418 — PG transport 유가·돌발 적재 종료와 Feature 퇴역(ADR-114 결정 7, 1단계).
+"""migration 419 — PG transport 유가·돌발 적재 종료와 Feature 퇴역(ADR-114 결정 7, 1단계).
 
-**417까지 올린 빈 DB**(배포 경로: bootstrap → migrator → schema owner)에 seed 카탈로그의 실제
-transport dataset으로 Feature를 심고 418을 올린다.
+**418까지 올린 빈 DB**(배포 경로: bootstrap → migrator → schema owner)에 seed 카탈로그의 실제
+transport dataset으로 Feature를 심고 419을 올린다.
 
 - 퇴역해야 하는 것: 주유소 유가 price, 휴게소 유가 price, 고속도로 돌발 notice — ``retired``·
   ``suppressed``, ``system`` 상태 전이 감사 한 줄씩, 재활성화를 막는 lifecycle override 한 줄씩.
@@ -9,7 +9,7 @@ transport dataset으로 Feature를 심고 418을 올린다.
 - 남아야 하는 것: transport 주유소 place(장소 적재는 1단계 범위 밖 — 적재도 계속 돈다)와
   산림청 산사태 notice(다른 provider). 상태·``row_revision``이 그대로이고 operation도 켜져 있다.
 
-"검사는 한 번 빨갛게 만든다": 퇴역을 재는 탐침은 417에서 **0이 아님**(active 대상 3)을 먼저 본다.
+"검사는 한 번 빨갛게 만든다": 퇴역을 재는 탐침은 418에서 **0이 아님**(active 대상 3)을 먼저 본다.
 """
 
 from __future__ import annotations
@@ -39,8 +39,8 @@ pytestmark = pytest.mark.integration
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
 _PROD_NOW: Final = "409_geo_release_item_reasons"
-_BEFORE: Final = "417_protocol_ex_reentry"
-_AFTER: Final = "418_retire_pg_transport_values"
+_BEFORE: Final = "418_creation_protocol"
+_AFTER: Final = "419_retire_pg_transport_values"
 
 _T0: Final = datetime(2026, 10, 24, 0, 0, tzinfo=UTC)
 
@@ -110,8 +110,8 @@ async def _db_at(pg_container: object, *, stop_at_409: bool) -> AsyncIterator[tu
 
 
 @pytest.fixture
-async def db_at_417(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
-    """fresh DB를 배포 경로로 **417까지만** 올린다(410~417 commit). (Config, superuser DSN)."""
+async def db_at_418(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
+    """fresh DB를 배포 경로로 **418까지만** 올린다(410~418 commit). (Config, superuser DSN)."""
 
     async for value in _db_at(pg_container, stop_at_409=False):
         yield value
@@ -119,13 +119,13 @@ async def db_at_417(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
 
 @pytest.fixture
 async def db_at_409(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
-    """prod와 같은 **409**에서 멈춘다 — 410~417·418을 한 트랜잭션으로 올리는 배포 경로를 잰다."""
+    """prod와 같은 **409**에서 멈춘다 — 410~418·419을 한 트랜잭션으로 올리는 배포 경로를 잰다."""
 
     async for value in _db_at(pg_container, stop_at_409=True):
         yield value
 
 
-async def _upgrade_to_418(config: Config) -> None:
+async def _upgrade_to_419(config: Config) -> None:
     with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, config, _AFTER)
 
@@ -154,7 +154,7 @@ async def _seed_feature(
     """entity·record·head·core(+notice subtype)·primary link 한 벌(superuser fixture seeding)."""
 
     feature_id = uuid4()
-    entity_key = f"418-{kind}-{uuid4().hex[:8]}"
+    entity_key = f"419-{kind}-{uuid4().hex[:8]}"
     record_key = f"{entity_key}-record"
     await connection.execute(
         """
@@ -194,7 +194,7 @@ async def _seed_feature(
         "VALUES ($1, $2, $3, '00000000')",
         feature_id,
         kind,
-        f"418 {kind} {entity_key}",
+        f"419 {kind} {entity_key}",
     )
     if kind == "notice":
         await connection.execute(
@@ -329,16 +329,16 @@ async def _insert_member_job(connection: Any, member: Any, kind: str) -> Any:
     return job_id
 
 
-async def test_418_retires_transport_price_and_incident_features_and_keeps_everything_else(
-    db_at_417: tuple[Config, str],
+async def test_419_retires_transport_price_and_incident_features_and_keeps_everything_else(
+    db_at_418: tuple[Config, str],
 ) -> None:
-    config, superuser_dsn = db_at_417
+    config, superuser_dsn = db_at_418
     connection = await _connect(superuser_dsn)
     try:
         assert await _version(connection) == _BEFORE
         seeded = await _seed_population(connection)
         before = await _states(connection, seeded.targets + seeded.kept)
-        # 417: 대상이 전부 active다(빨강) — 0이면 아래 단언이 항진명제다.
+        # 418: 대상이 전부 active다(빨강) — 0이면 아래 단언이 항진명제다.
         assert all(before[f][0] == "active" for f in seeded.targets)
         assert await _enabled_target_operations(connection) > 0
         target_datasets = int(
@@ -360,7 +360,7 @@ async def test_418_retires_transport_price_and_incident_features_and_keeps_every
     finally:
         await connection.close()
 
-    await _upgrade_to_418(config)
+    await _upgrade_to_419(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -450,13 +450,13 @@ async def test_418_retires_transport_price_and_incident_features_and_keeps_every
         member = await _target_scope(connection)
         with pytest.raises(asyncpg.CheckViolationError, match="inactive dataset member"):
             async with connection.transaction():
-                await _insert_member_job(connection, member, "418-after-probe")
+                await _insert_member_job(connection, member, "419-after-probe")
     finally:
         await connection.close()
 
 
-async def test_418_refuses_when_a_job_is_queued_on_a_transport_price_operation(
-    db_at_417: tuple[Config, str],
+async def test_419_refuses_when_a_job_is_queued_on_a_transport_price_operation(
+    db_at_418: tuple[Config, str],
 ) -> None:
     """대상 operation을 member로 둔 queued job이 있으면 아무것도 바꾸지 않는다.
 
@@ -464,7 +464,7 @@ async def test_418_refuses_when_a_job_is_queued_on_a_transport_price_operation(
     ``stale_input``으로 실패시킨다(ADR-114 기각 대안의 첫 함정).
     """
 
-    config, superuser_dsn = db_at_417
+    config, superuser_dsn = db_at_418
     connection = await _connect(superuser_dsn)
     try:
         seeded = await _seed_population(connection)
@@ -485,7 +485,7 @@ async def test_418_refuses_when_a_job_is_queued_on_a_transport_price_operation(
         async with connection.transaction():
             job_id = await connection.fetchval(
                 "INSERT INTO ops.import_jobs (kind, dataset_membership_mode) "
-                "VALUES ('418-in-flight-probe', 'single') RETURNING job_id"
+                "VALUES ('419-in-flight-probe', 'single') RETURNING job_id"
             )
             await connection.execute(
                 """
@@ -504,7 +504,7 @@ async def test_418_refuses_when_a_job_is_queued_on_a_transport_price_operation(
         await connection.close()
 
     with pytest.raises(Exception, match="queued/running job on a transport price/notice operation"):
-        await _upgrade_to_418(config)
+        await _upgrade_to_419(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -518,21 +518,21 @@ async def test_418_refuses_when_a_job_is_queued_on_a_transport_price_operation(
         await connection.close()
 
 
-async def test_418_refuses_when_a_target_feature_has_a_link_from_another_dataset(
-    db_at_417: tuple[Config, str],
+async def test_419_refuses_when_a_target_feature_has_a_link_from_another_dataset(
+    db_at_418: tuple[Config, str],
 ) -> None:
     """대상 Feature가 대상 밖 dataset의 link(역할 무관 — 여기서는 enrichment)를 가지면 퇴역 안 함.
 
-    퇴역은 그 dataset의 curation seal 입력을 바꾼다(link 역할 무관). 트랜잭션 전체가 되돌아가 417
+    퇴역은 그 dataset의 curation seal 입력을 바꾼다(link 역할 무관). 트랜잭션 전체가 되돌아가 418
     그대로여야 한다.
     """
 
-    config, superuser_dsn = db_at_417
+    config, superuser_dsn = db_at_418
     connection = await _connect(superuser_dsn)
     try:
         seeded = await _seed_population(connection)
         landslide = await _dataset_id(connection, _LANDSLIDE)
-        shared_entity = f"418-shared-{uuid4().hex[:8]}"
+        shared_entity = f"419-shared-{uuid4().hex[:8]}"
         async with connection.transaction():
             await connection.execute(
                 """
@@ -559,7 +559,7 @@ async def test_418_refuses_when_a_target_feature_has_a_link_from_another_dataset
         await connection.close()
 
     with pytest.raises(Exception, match="source link outside the targets"):
-        await _upgrade_to_418(config)
+        await _upgrade_to_419(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -570,13 +570,13 @@ async def test_418_refuses_when_a_target_feature_has_a_link_from_another_dataset
         await connection.close()
 
 
-async def test_409_to_418_in_one_transaction_refuses_and_rolls_back_earlier_revisions_too(
+async def test_409_to_419_in_one_transaction_refuses_and_rolls_back_earlier_revisions_too(
     db_at_409: tuple[Config, str],
 ) -> None:
-    """prod 경로(409)에서 410~417·418을 한 트랜잭션으로 올리면 418이 거부한다(퇴역 대상이 있을 때).
+    """prod 경로(409)에서 410~418·419을 한 트랜잭션으로 올리면 419이 거부한다(퇴역 대상이 있을 때).
 
-    한 트랜잭션이면 410~417의 DDL이 잡은 표 잠금을 퇴역 내내 쥔다. 거부되면 앞선 revision도 함께
-    되돌아가 409 그대로다. 그 뒤 410~417을 commit하고 418을 올리면 통과한다(runbook A·B).
+    한 트랜잭션이면 410~418의 DDL이 잡은 표 잠금을 퇴역 내내 쥔다. 거부되면 앞선 revision도 함께
+    되돌아가 409 그대로다. 그 뒤 410~418을 commit하고 419을 올리면 통과한다(runbook A·B).
     """
 
     config, superuser_dsn = db_at_409
@@ -588,7 +588,7 @@ async def test_409_to_418_in_one_transaction_refuses_and_rolls_back_earlier_revi
         await connection.close()
 
     with pytest.raises(Exception, match="앞선 revision"):
-        await _upgrade_to_418(config)
+        await _upgrade_to_419(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -605,7 +605,7 @@ async def test_409_to_418_in_one_transaction_refuses_and_rolls_back_earlier_revi
 
     with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, config, _BEFORE)
-    await _upgrade_to_418(config)
+    await _upgrade_to_419(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -618,12 +618,12 @@ async def test_409_to_418_in_one_transaction_refuses_and_rolls_back_earlier_revi
         await connection.close()
 
 
-async def test_418_refuses_when_a_target_feature_has_an_active_lifecycle_override(
-    db_at_417: tuple[Config, str],
+async def test_419_refuses_when_a_target_feature_has_an_active_lifecycle_override(
+    db_at_418: tuple[Config, str],
 ) -> None:
     """운영자 lifecycle override가 이미 있는 대상은 덮어쓰지 않는다 — 트랜잭션 전체가 되돌아간다."""
 
-    config, superuser_dsn = db_at_417
+    config, superuser_dsn = db_at_418
     connection = await _connect(superuser_dsn)
     try:
         seeded = await _seed_population(connection)
@@ -640,7 +640,7 @@ async def test_418_refuses_when_a_target_feature_has_an_active_lifecycle_overrid
         await connection.close()
 
     with pytest.raises(Exception, match="active lifecycle override"):
-        await _upgrade_to_418(config)
+        await _upgrade_to_419(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -651,17 +651,17 @@ async def test_418_refuses_when_a_target_feature_has_an_active_lifecycle_overrid
         await connection.close()
 
 
-async def test_418_waits_on_an_uncommitted_target_membership_and_fails_closed(
-    db_at_417: tuple[Config, str],
+async def test_419_waits_on_an_uncommitted_target_membership_and_fails_closed(
+    db_at_418: tuple[Config, str],
 ) -> None:
-    """경주 ①: commit되지 않은 대상 member가 먼저 있으면 418은 member 표를 잠그지 못한다.
+    """경주 ①: commit되지 않은 대상 member가 먼저 있으면 419은 member 표를 잠그지 못한다.
 
-    미완 INSERT가 ``ROW EXCLUSIVE``를 쥐므로 418의 ``SHARE`` 잠금은 ``lock_timeout``(5초)으로
-    실패하고 아무것도 바꾸지 않는다. 잠금이 없다면 418은 그 job을 보지 못한 채 operation을
+    미완 INSERT가 ``ROW EXCLUSIVE``를 쥐므로 419의 ``SHARE`` 잠금은 ``lock_timeout``(5초)으로
+    실패하고 아무것도 바꾸지 않는다. 잠금이 없다면 419은 그 job을 보지 못한 채 operation을
     끄고, job은 영영 종결로 가지 못한다.
     """
 
-    config, superuser_dsn = db_at_417
+    config, superuser_dsn = db_at_418
     connection = await _connect(superuser_dsn)
     holder = await _connect(superuser_dsn)
     try:
@@ -670,9 +670,9 @@ async def test_418_waits_on_an_uncommitted_target_membership_and_fails_closed(
         transaction = holder.transaction()
         await transaction.start()
         try:
-            await _insert_member_job(holder, member, "418-race-probe")
+            await _insert_member_job(holder, member, "419-race-probe")
             with pytest.raises(Exception, match="lock"):
-                await _upgrade_to_418(config)
+                await _upgrade_to_419(config)
         finally:
             await transaction.rollback()
         assert await _version(connection) == _BEFORE
@@ -699,22 +699,22 @@ async def _wait_for_lock_wait(connection: Any, pid: int, *, seconds: float = 30.
     raise AssertionError(f"backend {pid}가 lock을 기다리지 않는다")
 
 
-async def test_418_rejects_a_target_membership_inserted_while_it_runs(
-    db_at_417: tuple[Config, str],
+async def test_419_rejects_a_target_membership_inserted_while_it_runs(
+    db_at_418: tuple[Config, str],
 ) -> None:
-    """경주 ②: 418이 도는 **도중** 들어온 대상 member INSERT는 418 commit 뒤 거부된다.
+    """경주 ②: 419이 도는 **도중** 들어온 대상 member INSERT는 419 commit 뒤 거부된다.
 
-    BEFORE 활성 가드는 plain SELECT로 ``is_enabled``를 읽는다 — 418이 끈 operation은 commit 전까지
+    BEFORE 활성 가드는 plain SELECT로 ``is_enabled``를 읽는다 — 419이 끈 operation은 commit 전까지
     다른 세션에 켜진 것으로 보인다. member 표 ``SHARE`` 잠금이 없으면 그 INSERT는 가드를 통과하고
     (행 단위 FK 대기는 가드 뒤라 소용없다) 꺼진 operation에 member가 남는다(빨강). 순서를 강제한다:
-    C가 대상 Feature 행을 쥐어 418을 퇴역 루프 안에서 세우고, 그동안 B가 member를 넣으려
-    한다(member 표 잠금에서 기다려야 한다). C를 놓으면 418이 commit하고 B의 INSERT는
+    C가 대상 Feature 행을 쥐어 419을 퇴역 루프 안에서 세우고, 그동안 B가 member를 넣으려
+    한다(member 표 잠금에서 기다려야 한다). C를 놓으면 419이 commit하고 B의 INSERT는
     가드에서 거부된다.
     """
 
     import asyncpg
 
-    config, superuser_dsn = db_at_417
+    config, superuser_dsn = db_at_418
     connection = await _connect(superuser_dsn)
     holder = await _connect(superuser_dsn)
     inserter = await _connect(superuser_dsn)
@@ -726,8 +726,8 @@ async def test_418_rejects_a_target_membership_inserted_while_it_runs(
         await holder.execute(
             "SELECT 1 FROM feature.features WHERE feature_id = $1 FOR UPDATE", seeded.targets[0]
         )
-        upgrade = asyncio.create_task(_upgrade_to_418(config))
-        # 418이 퇴역 루프에서 C의 행 잠금을 기다릴 때까지(그때는 member 표 잠금을 이미 쥐었다).
+        upgrade = asyncio.create_task(_upgrade_to_419(config))
+        # 419이 퇴역 루프에서 C의 행 잠금을 기다릴 때까지(그때는 member 표 잠금을 이미 쥐었다).
         migrator_pid: int | None = None
         deadline = asyncio.get_running_loop().time() + 60
         while migrator_pid is None and asyncio.get_running_loop().time() < deadline:
@@ -737,7 +737,7 @@ async def test_418_rejects_a_target_membership_inserted_while_it_runs(
             )
             if migrator_pid is None:
                 await asyncio.sleep(0.1)
-        assert migrator_pid is not None, "418이 대상 Feature 행 잠금에서 서지 않았다"
+        assert migrator_pid is not None, "419이 대상 Feature 행 잠금에서 서지 않았다"
         assert await connection.fetchval(
             "SELECT count(*) FROM pg_locks WHERE pid = $1 AND granted AND mode = 'ShareLock' "
             "AND relation = 'ops.import_job_datasets'::regclass",
@@ -746,7 +746,7 @@ async def test_418_rejects_a_target_membership_inserted_while_it_runs(
 
         async def _insert() -> None:
             async with inserter.transaction():
-                await _insert_member_job(inserter, member, "418-during-probe")
+                await _insert_member_job(inserter, member, "419-during-probe")
 
         insert = asyncio.create_task(_insert())
         await _wait_for_lock_wait(connection, inserter.get_server_pid())

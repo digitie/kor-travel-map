@@ -16,15 +16,21 @@
   `feature_notice_transport_highway_incidents` asset과 그 job·schedule·큐 runner spec·handler binding·resource 둘
   (`transport_rest_area_fuel_prices`·`transport_highway_incidents`), preview fixture 셋. 현재 유가·돌발은 Valkey
   `transport_state_*`가 든다.
-- **CHANGED (DB, migration `418_retire_pg_transport_values`)**: provider `kor-travel-transport`·`produces` price/notice
+- **CHANGED (DB, migration `419_retire_pg_transport_values`)**: provider `kor-travel-transport`·`produces` price/notice
   dataset의 operation을 종류 불문 끄고, 그 primary Feature를 `system` 상태 전이로 `retired`·`suppressed`(+ 재활성화를 막는
   lifecycle override)로 내린다. 행·lineage·가격 fact·dataset은 남는다. queued/running job이 있으면 아무것도 바꾸지 않고 멈춘다.
 - 영향 없음: REST·OpenAPI, Valkey transport 표면, 장소(주유소·휴게소·공항) 적재와 C7 공항 대상.
+### Feature 요청 승인의 잠금 대기 복구 (2026-10-24)
+
+- **FIXED**: 생성 요청 승인 중 `55P03`은 기존503/RetryAfter5로 반환하고 실패 command를
+  rollback해 같은 key 재시도를 허용한다. migration419은 생성 SQL4개의 첫 protocol 잠금과
+  내부 호출 권한만 보강하며 일반 수집 동시 전환·정책 활성화는 포함하지 않는다.
+
 ### 배타 잠금 재진입의 반복 비용 개선 (2026-10-24)
 
 - **IMPROVED**: protocol EX를 이미 보유한 트랜잭션은 xact 소유를 재확보한 뒤 반복 설정
   조회를 생략한다. session 잠금 해제 뒤 보호와 SH 승격 거부·타임아웃은 유지한다.
-  migration418은 정책 활성화나 전체 수집 동시 전환을 포함하지 않는다.
+  migration419은 정책 활성화나 전체 수집 동시 전환을 포함하지 않는다.
 
 ### 수동 Feature 생성의 잠금 대기를 재시도 가능 오류로 표시 (2026-10-24)
 

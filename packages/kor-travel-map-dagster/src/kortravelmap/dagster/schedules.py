@@ -212,7 +212,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
     ),
     # 아래 둘(과 공항)은 kor-travel-transport export를 읽는다(ADR-106). 상류 쿼터는 transport가
     # 지고, Map은 transport 수집 주기 뒤에 맞춘다. 유가·돌발 PG 적재는 ADR-114 결정 7(1단계,
-    # migration 418)로 퇴역했다 — 그 현재 상태는 Valkey(`transport_state`)가 든다.
+    # migration 419)로 퇴역했다 — 그 현재 상태는 Valkey(`transport_state`)가 든다.
     FeatureLoadScheduleSpec(
         asset=feature_place_transport_fuel_stations,
         job_name="feature_place_transport_fuel_stations_job",

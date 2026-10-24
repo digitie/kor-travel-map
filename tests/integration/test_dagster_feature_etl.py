@@ -433,7 +433,7 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
         source_count = await session.scalar(
             text("SELECT count(*) FROM provider_sync.source_records")
         )
-    # 유가 price·돌발 notice asset은 ADR-114 결정 7(1단계, migration 418)로 퇴역했다 — 그 현재
+    # 유가 price·돌발 notice asset은 ADR-114 결정 7(1단계, migration 419)로 퇴역했다 — 그 현재
     # 상태는 Valkey(`transport_state_*`)가 든다(`tests/integration/test_valkey_transport_state.py`).
     assert feature_count == 8
     assert source_count == 8

@@ -444,6 +444,8 @@ _STATE_OWNER_FUNCTION_ACL = (
     "TO ktm_feature_schema_owner,ktm_curation_command_owner",
     "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) "
     "TO ktm_manual_provider_dedup_procedure_owner",
+    "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) "
+    "TO ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
     "REVOKE ALL ON FUNCTION ops.claim_scoped_feature_write(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.claim_scoped_feature_write(...) TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION ops.append_scoped_feature_write_manifest(...) FROM PUBLIC",

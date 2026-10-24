@@ -1,15 +1,21 @@
 ## 2026-10-24 — ADR-114 결정 7 퇴역 1단계(T-STATE-03): 브랜치 `feat/adr114-retire-pg-transport`
 
 - PG transport **유가·돌발** 적재(asset·job·schedule 셋, 큐 runner spec·handler binding·preview fixture)를 지우고 migration
-  `418_retire_pg_transport_values`가 그 operation을 끄고 Feature 약 1.4만 건을 `system` 퇴역한다(soft-delete,
+  `419_retire_pg_transport_values`가 그 operation을 끄고 Feature 약 1.4만 건을 `system` 퇴역한다(soft-delete,
   데이터는 남김). 장소(주유소·휴게소·공항)는 PinVi 일반 검색·근처와 C7 공항 job이 기대므로 ②단계로 미뤘다. API 표면 변화
-  없음. 배포 영향: Map API·Dagster code location(같은 pair) + migration 418.
+  없음. 배포 영향: Map API·Dagster code location(같은 pair) + migration 419.
 - 적대 리뷰 2회 반영(2026-10-24): 409→417 한 트랜잭션 거부(410~416 잠금을 퇴역 내내 쥐지 않게 — 배포는 A head 416 → B 411), 대상
   member 표 둘 `SHARE` 잠금으로 검사·끄기·도중 INSERT 경주 차단(재리뷰: 행 단위는 BEFORE 가드 뒤라 못 막는다)·operation 먼저 끔, timeout 명시, link 역할 무관 seal 검사, 대상 dataset 셋 고정·옛
   provider 잔여 fail closed, 상태 문맥 GUC 정리.
 - **다음 한 작업: CI green → 머지 판단 → A: head 416 pair 배포 → B: 세 dataset 갱신 정책 `enabled=false` 필수·schedule 확인·진행 중
   job 0·큐 sensor 정지 → 417 pair 배포 → 전이 수·in-bounds 확인(ADR-114 "①의 운영 runbook"). 그 뒤 ②의 해제 조건(PinVi in-bounds 기본 kind·장소 검색 대체, C7
   안전 대상 이동)을 PinVi·C7 쪽에 건다.**
+## 2026-10-24 — 생성 SQL의 protocol-first 진입과 승인 복구(418)
+
+- core/provider/manual/요청승인4개를 첫EX로 보강하고 내부owner2개에 함수EXEC만 추가한다. 승인55P03은 기존503/RetryAfter5로 전달한다.
+- 실제PG/ASGI·기존M01/M04·unit/graph/docs 집중51 PASS, 별도 이전mapper500→수정503/동일key복구를 확인했다. [범위·실패·검증](reports/2026-10-24-creation-protocol-entry.md).
+- 제품J/W·경계시험root/W 검토PASS. 정확CI·최신418 실UI·전체수집전환/후속전파는 미완이다. 기본OFF/seed0/운영0.
+
 ## 2026-10-24 — protocol EX 재진입 비용 개선(417)
 
 - 이미 보유한 EX는 xact 소유를 재확보한 뒤 반복 설정 조회를 생략한다. session/xact·savepoint·NULL/SH 승격·timeout 계약은 유지한다.

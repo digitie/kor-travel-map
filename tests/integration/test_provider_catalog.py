@@ -894,7 +894,7 @@ async def test_head_retires_every_operation_of_the_transport_moved_datasets(
         if _TRANSPORT_PLACE_KIND in entry.produces:
             assert {"refresh", "preview"} <= kinds, (entry.dataset_key, kinds)
         else:
-            # ADR-114 결정 7(migration 418): 유가·돌발 PG 적재는 operation이 전부 꺼졌다.
+            # ADR-114 결정 7(migration 419): 유가·돌발 PG 적재는 operation이 전부 꺼졌다.
             assert kinds == set(), (entry.dataset_key, kinds)
 
 

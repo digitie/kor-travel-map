@@ -1739,6 +1739,7 @@ DECLARE
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'Feature request approval writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_feature_request_isolation';
@@ -3259,6 +3260,7 @@ DECLARE
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual Feature writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_feature_create_isolation';
@@ -4046,6 +4048,7 @@ DECLARE
     v_category text;
     v_coord feature.features.coord%TYPE;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF jsonb_typeof(p_feature) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'feature payload must be an object'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
@@ -4437,6 +4440,7 @@ DECLARE
     v_created uuid;
     v_created_inserted boolean;
 BEGIN
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     v_dataset_id := nullif(btrim(p_identity ->> 'provider_dataset_id'), '')::bigint;
     v_kind := nullif(btrim(p_identity ->> 'feature_kind'), '');
     v_natural := nullif(btrim(p_identity ->> 'natural_key'), '');
@@ -17619,7 +17623,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_retire_pg_transport_values'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
