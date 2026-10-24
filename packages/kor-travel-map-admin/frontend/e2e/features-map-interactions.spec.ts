@@ -1084,7 +1084,7 @@ test.describe("/features map interactions", () => {
       }
       await page.keyboard.press("Escape");
       await page.getByRole("button", { name: "도움말: Feature 지도" }).click();
-      await expect(page.locator('[data-slot="popover-content"]')).toContainText("추가 필터에서");
+      await expect(page.locator('[data-slot="popover-content"][data-open]')).toContainText("추가 필터에서");
       await page.keyboard.press("Escape");
       expect(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth)).toBe(false);
     });

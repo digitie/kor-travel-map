@@ -4,7 +4,8 @@ Feature 지도의 종류 필터에 아이콘을 결합하고 필터·보기 탭�
 
 후속 UI에서 설명은 제목의 정보 버튼, 상태 필터는 `추가 필터`로 접고 select를 176×30px로 통일했다. 지도 높이를 유지하면서 375px 지도 시작을 651.75→439.25px로 앞당겼다. 다른 화면의 기본 여백·도움말·모바일 메뉴는 유지한다.
 
-WSL 타입·frontend 397건·변경 파일 ESLint PASS. n150 Chromium 실제 지도 375×1000/1440×1000/375×812 실측 3건과 지도 E2E 4건 PASS. 실제 VWorld 타일을 사용하되 Feature API는 결정적 검증 자료다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 최신 main 보안 정합 병합·CI·독립 리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+최신 main을 합친 앱 후보 `5acadb24e`를 npm 12.0.1 ci로 다시 설치했다. WSL 타입·frontend 48파일 397건·전체 ESLint·의존성 트리·Next/Sharp ABI PASS. n150 Playwright 1.64.1/Chromium 1248에서 지도 E2E 4건과 세 화면 실측·GeoJSON 렌더링을 다시 통과했다. 닫기 전환 중 이전 팝업을 배제하도록 E2E locator 한 줄만 수정했으며 앱 구현은 보존했다. 실제 VWorld 타일을 사용하되 Feature API는 결정적 검증 자료다. [정산](reports/2026-10-24-shared-map-ui.md). 다음은 통합 담당자의 CI·독립 리뷰이며 자체 운영 빌드·배포는 하지 않는다.
+
 ## 2026-10-24 — geo 재시도에 ReadError·WriteError 추가: 브랜치 `fix/geo-retry-readerror`
 
 - 등산로 run `18c4c1d7`(22:12Z)이 선조회 중 `GeoRequestError: transport 실패: ReadError` 한 번으로 두 시도(1h24m·37m)를 잃었다

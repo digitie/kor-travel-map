@@ -15,7 +15,7 @@ Map/Transport/Weather가 같은 산출물과 lock integrity를 고정한다.
 
 `AdminShell`의 세로 여백 축소와 `HelpTip`의 정보 아이콘은 선택 속성으로 추가했다. 이 화면만 선택하며 다른 화면의 기본 여백·도움말 아이콘·모바일 메뉴는 보존한다.
 
-## 실제 브라우저 실측
+## 초기 후속 후보 실제 브라우저 실측
 
 n150 Linux의 Chromium·Playwright 1.60.0에서 후보를 실행했다. WSL은 개발 서버·타입/단위 검사에만 사용했고 WSL 브라우저는 실행하지 않았다. Feature/데이터셋 응답은 결정적 검증 자료로 대체했으며, MapLibre와 VWorld 타일은 실제 경로로 렌더링했다. 임시 QA 로그인 폼·인증도 실제 코드로 통과했다. 세션·비밀번호·키 값은 검증 문서나 인증 상태 파일로 저장하지 않았다.
 
@@ -37,6 +37,19 @@ WSL 고정 lock 환경에서 타입 검사 PASS, frontend 단위 검사 **48파�
 
 n150에서 저장소 지도 E2E 중 탭/공유 bbox, 375px·1440px 접근성·필터 치수, 비공개 상태 쿼리 반영 **4건 PASS(24.6초)**다. QA 인증을 메모리에서 주입하고 trace·영상·실패 스크린샷·storageState 저장을 껐다. 별도 실측 3개 화면도 통과했다. 개발 서버 시작 직후 hydration/지도 초기화 전에 잰 실패는 초기화 완료를 기다려 재검증했으며 제품 오류로 계산하지 않는다.
 
-운영 데이터 API 전체 연동·Map Firefox·최신 main 통합 후 CI/적대적 리뷰 gate는 이 검증의 완료 범위가 아니다. 최신 main의 보안 정합 병합은 통합 담당자가 별도로 처리한다. 운영 빌드·배포·컨테이너 교체는 하지 않았다.
+운영 데이터 API 전체 연동·Map Firefox·CI/적대적 리뷰 gate는 이 검증의 완료 범위가 아니다. 최신 main 통합 뒤 로컬 재검증은 아래에 별도로 정산한다. 운영 빌드·배포·컨테이너 교체는 하지 않았다.
 
 Weather 종류 필터는 API/UI를 함께 반영해야 한다. UI만 먼저 배포하면 서버 필터가 적용되지 않는다.
+
+## 최신 main 통합 뒤 재검증
+
+통합 담당자가 main `ee7221ddc`를 합친 앱 후보 `5acadb24e`를 동일 QA mirror에 동기화했다. 비밀·환경 파일·캐시를 복사하지 않았고, **npm 12.0.1 ci**로 다시 설치했다. 루트 lock SHA256은 원본/mirror 모두 `ac8c1f99cd785e21216834450e714bd349333c51abab29565edf0de5fc0e127d`다.
+
+Next 16.4.3·React 19.3.1·Base UI 1.9.0·MapLibre 6.15.0·Playwright 1.64.1 정확 핀에서 다음을 다시 확인했다. n150의 기존 프로젝트 설치는 보존하고 전용 QA 경로의 Playwright 1.64.1·Chromium 1248을 사용했다.
+
+- WSL 타입 검사·전체 frontend **48파일 397건**·전체 frontend ESLint PASS. 의존성 트리 problems 0, ESLint effective-config 계약, Next/Sharp optimizer ABI smoke도 PASS다.
+- n150 지도 E2E **4건 PASS(51.8초)**. Base UI 닫기 전환 중 이전 패널이 잠시 DOM에 남으므로 안내 검증 locator를 `[data-open]`인 팝업으로 한정했다. 앱 구현 변경은 없다. 이 한 줄 뒤 타입 검사·해당 E2E ESLint도 다시 통과했다.
+- 세 화면의 지도 시작점·크기·필터·탭·상세·좌표/줌·선택값 유지·가로 넘침 여부는 위 실측과 같다. 실제 VWorld HTTP 200 이미지 응답은 각각 16/76/28건이다.
+- 각 화면의 실제 GeoJSON circle 렌더링 **3/3 PASS**. `maplibre-gl-worker.mjs`와 `maplibre-gl-shared.mjs` 모두 HTTP 200, `application/javascript` MIME을 확인했다.
+
+QA 서버·전용 연결은 후속 검증을 위해 유지했다. 운영 빌드·배포·컨테이너 교체는 여전히 0이며, 다음은 통합 담당자의 CI와 독립 리뷰 gate다.
