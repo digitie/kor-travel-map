@@ -61,9 +61,8 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "current_price_summary": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_aliases": ("SELECT",),
     "feature_events": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    # ADR-109 결정 1(migration 407): 적재 경로가 스탬프를 쓰고(upsert) stale을 읽는다. 지우는
-    # 경로는 없다 — Feature 삭제는 FK CASCADE가 따라간다.
-    "feature_geocode_stamps": ("SELECT", "INSERT", "UPDATE"),
+    # 421: 직접 stamp I/U는 회수하고 검토된 EX/SH SD만 쓴다. FK CASCADE는 별도다.
+    "feature_geocode_stamps": ("SELECT",),
     "feature_notices": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_places": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     "feature_price_values": ("SELECT", "INSERT"),
@@ -416,6 +415,20 @@ _CORE_FEATURE_GRANTS = (
 )
 
 _STATE_OWNER_FUNCTION_ACL = (
+    "REVOKE ALL ON FUNCTION feature.upsert_provider_geocode_stamps_ex(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.upsert_provider_geocode_stamps_ex(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.lock_scoped_provider_geocode_stamps(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.lock_scoped_provider_geocode_stamps(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.reobserve_scoped_provider_geocode_stamps(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.reobserve_scoped_provider_geocode_stamps(...) "
+    "TO ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.guard_stamp_writer_entry(...) FROM PUBLIC,ktm_feature_runtime",
+    "GRANT EXECUTE ON FUNCTION feature.guard_stamp_writer_entry(...) "
+    "TO ktm_feature_schema_owner",
+    "REVOKE ALL ON FUNCTION "
+    "feature._validate_scoped_provider_geocode_stamps(...) FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.validate_exclusive_provider_snapshot(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION feature.validate_exclusive_provider_snapshot(...) "
     "TO ktm_feature_runtime",
@@ -843,6 +856,8 @@ _CURATION_CANDIDATE_READ_ACL = tuple(
 
 
 _SCALAR_GUARD_INSTALLER_ACL = (
+    "REVOKE ALL ON FUNCTION feature._assert_stamp_projection_guard_inventory(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._install_provider_field_projection_guards(...) "
     "FROM PUBLIC, ktm_feature_runtime",
     "GRANT EXECUTE ON FUNCTION feature._install_provider_field_projection_guards(...) "
@@ -854,6 +869,14 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
         _CORE_FEATURE_GRANTS
+        + (
+            "DO $stamp_acl$ BEGIN IF EXISTS ("
+            "SELECT 1 FROM pg_catalog.pg_proc p "
+            "JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace "
+            "WHERE n.nspname='feature' AND p.proname='upsert_provider_geocode_stamps_ex') THEN "
+            "GRANT SELECT,INSERT,UPDATE ON feature.feature_geocode_stamps "
+            "TO ktm_feature_state_procedure_owner; END IF; END $stamp_acl$",
+        )
         + _ROUTE_AREA_RUNTIME_GRANTS
         + _MANUAL_FEATURE_TABLE_ACL
         + _FEATURE_REQUEST_TABLE_ACL
@@ -924,7 +947,13 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
-    "feature.validate_exclusive_provider_snapshot": "419_exclusive_provider_refresh",
+    "feature._assert_stamp_projection_guard_inventory": "421_stamp_writer_boundary",
+    "feature.upsert_provider_geocode_stamps_ex": "421_stamp_writer_boundary",
+    "feature.lock_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
+    "feature.reobserve_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
+    "feature.guard_stamp_writer_entry": "421_stamp_writer_boundary",
+    "feature._validate_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
+    "feature.validate_exclusive_provider_snapshot": "420_exclusive_provider_refresh",
     "feature.lock_provider_field_policy_epoch": "412_provider_scalar_projection",
     "feature.assert_scoped_provider_scalar_target": "412_provider_scalar_projection",
     "feature.record_scoped_provider_field_candidates": "412_provider_scalar_projection",

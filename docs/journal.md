@@ -1,3 +1,8 @@
+## 2026-10-25 — Geo stamp SQL writer 권한 경계(421)
+
+- 일반 runtime raw stamp 쓰기를 회수하고 EX/SH 전용 SD와 SI 진입 검증·기존 active full-context/정렬 잠금을 유지했다. 실제 SH collector 배선/운영 활성화는0이다.
+- 장수 backend 비용 회귀와 실패 원본을 보존하고 UPSERT 한 문장만 계획하는 후보를 검증 중이다. 집중115·lint373/기존6skip·문서4 통과, 최종 비용·정확 CI/UI는 별도 수용이며 [구현·제한](reports/2026-10-25-stamp-writer-boundary.md)에 정산한다.
+
 ## 2026-10-25 — 실제 SH 수집 연결의 설계 초안(A4)
 
 - Heritage 이름 변경과 MCST 동일 key 반복 입력의 최소 범위를 나누고 현재 normalizer/Geo stamp·dataset retire0·full capture/후속 receipt를 필수 조건으로 정리했다.

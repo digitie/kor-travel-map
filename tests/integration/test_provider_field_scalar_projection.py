@@ -640,11 +640,13 @@ async def test_geo_group_and_stamp_are_preserved_and_unsupported_writes_rejected
             WHERE feature_id=CAST(:id AS uuid)"""),
             {"id": feature},
         )
-        await session.execute(
-            text("""INSERT INTO feature.feature_geocode_stamps(
-            feature_id,geo_version_token,geo_data_token,reverse_outcome)
-            VALUES(CAST(:id AS uuid),:version,:data,'geocoded')"""),
-            {"id": feature, "version": "dv1-" + "a" * 32, "data": "dd1-" + "b" * 32},
+        assert (
+            await session.scalar(
+                text("""SELECT feature.upsert_provider_geocode_stamps_ex(
+                ARRAY[CAST(:id AS uuid)],ARRAY['geocoded']::text[],:version,:data)"""),
+                {"id": feature, "version": "dv1-" + "a" * 32, "data": "dd1-" + "b" * 32},
+            )
+            == 1
         )
     await _activate(admin, feature)
     query = text("""SELECT x_extension.st_asewkt(coord),coord_precision_digits,

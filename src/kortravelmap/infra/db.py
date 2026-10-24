@@ -318,6 +318,9 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 _M05_DETECTOR_MANUAL_LIST_FUNCTION,
                 _PROVIDER_CURATION_SEAL_FUNCTION,
                 "feature.validate_exclusive_provider_snapshot(uuid,bigint,jsonb,text[])",
+                "feature.upsert_provider_geocode_stamps_ex(uuid[],text[],text,text)",
+                "feature.lock_scoped_provider_geocode_stamps(uuid,uuid,text,text,jsonb)",
+                "feature.reobserve_scoped_provider_geocode_stamps(uuid,uuid,text,text,jsonb)",
                 "feature.lock_provider_field_policy_epoch()",
                 "feature.assert_scoped_provider_scalar_target(uuid,uuid,bigint,text,bigint)",
                 "feature._provider_field_projection_dependency_active(text,text)",
@@ -339,6 +342,11 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
 _RUNTIME_DB_PRIVILEGE_SQL = text(
     """
     SELECT
+        (has_table_privilege(session_user,'feature.feature_geocode_stamps','INSERT')
+         OR has_table_privilege(session_user,'feature.feature_geocode_stamps','UPDATE')
+         OR has_table_privilege(session_user,'feature.feature_geocode_stamps','DELETE')
+         OR has_table_privilege(session_user,'feature.feature_geocode_stamps','TRUNCATE'))
+            AS can_mutate_geocode_stamps_directly,
         session_user::text AS session_user,
         current_user::text AS current_user,
         runtime_role.rolsuper AS is_superuser,
@@ -618,6 +626,7 @@ def _runtime_db_privilege_problems(
     # `can_set_runtime_group_role`은 그대로 둔다: bootstrap이 `ktm_feature_runtime`은
     # `SET FALSE`로 주므로 이 술어는 여전히 거짓이어야 하고, 여전히 갈린다.
     forbidden_true_fields = {
+        "can_mutate_geocode_stamps_directly": "runtime login must not mutate geocode stamps directly",
         "is_superuser": "runtime login must not be SUPERUSER",
         "can_create_role": "runtime login must not have CREATEROLE",
         "bypasses_rls": "runtime login must not have BYPASSRLS",

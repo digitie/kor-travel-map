@@ -84,7 +84,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-03 — **scope·epoch·manifest와 protocol gate**
 
-  기존 writer가 우회할 수 없는 계층 scope와 복구 fence를 추가한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+  기존 writer가 우회할 수 없는 계층 scope와 복구 fence를 추가한다. [stamp SD 기반](reports/2026-10-25-stamp-writer-boundary.md)은 별도 수용 중이다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-04 — **독립 데이터셋 동시 쓰기**
 

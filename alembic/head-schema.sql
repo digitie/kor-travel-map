@@ -95,6 +95,43 @@ $$;
 ALTER FUNCTION feature._assert_provider_field_projection(p_feature uuid) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: _assert_stamp_projection_guard_inventory(boolean); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature._assert_stamp_projection_guard_inventory(p_boundary boolean) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_expected jsonb; v_count integer;
+BEGIN
+    v_expected:=CASE WHEN p_boundary THEN '[["feature.feature_base_field_values","trg_scalar_epoch","e7fdba2418e754f701297f14cbf6b9ed03bd286dabf848d24e8663178ea5f7b6"],["feature.feature_base_field_values","trg_scalar_projection_delete","57454de3ebfed2cf610ba1e8108a35374c33cdf9694d9c7359eed1e151cece61"],["feature.feature_base_field_values","trg_scalar_projection_insert","22864e299c2930e3dce602dbc4bdcbb3698e931d1c9598c439bebcb1423f7a78"],["feature.feature_base_field_values","trg_scalar_projection_update","07cde91c7190d1f845bc56735944e2aecc6578694da7348f6de40133d3446833"],["feature.feature_geocode_stamps","trg_scalar_epoch","43c1ccb8ff16ed27437e5cd01cbe68a84d13559052cfd0d86f1d59e4e40ae915"],["feature.feature_geocode_stamps","trg_scalar_projection_delete","09fb45a88188fceaa9ccfc6f03c879ccea00436eeffb2c122091537a18fe003d"],["feature.feature_geocode_stamps","trg_scalar_projection_insert","d4164f14caa9d79ba33fa015b940c6474093f7d307c23cc1b972f9de836f93c8"],["feature.feature_geocode_stamps","trg_scalar_projection_update","eb50866ba5acb82735ce01010bf945d2d34517112a0b5cae3231f13961496cb7"],["feature.feature_geocode_stamps","trg_scalar_unsupported","aa4057934c1870f10bd8897fd19af598e2671ee79f5841acf9015dde0b5373ed"],["feature.feature_geocode_stamps","trg_stamp_writer_entry","5e02742edc53be7e01bcfc10e7c1cd655cb5b43a0b77ade1994b01a695fa804c"],["feature.feature_places","trg_scalar_epoch","65a4df46d10a804bad158d984a933f08a01f826fa92b2a0069848455976ac815"],["feature.feature_places","trg_scalar_projection_delete","142d2259561bd5ca7c0eb383efc995052bc48cb9a7cc7dfd881f0bf58c409bde"],["feature.feature_places","trg_scalar_projection_insert","ff411fe0bbd1b52bf4ca039e75dccceea0f7d2755a57d645266a8686bbfa4b57"],["feature.feature_places","trg_scalar_projection_update","12b8c2361d5d2a14be186db4dee032971c7a8033b8227fbed99e30768351bdd4"],["feature.feature_places","trg_scalar_unsupported","f9eacb8145275bd8434748b8dc42ffd3b6f0f3187ec9675639f4ca209ce754c6"],["feature.features","trg_scalar_epoch","2c2edcbe370fbdfff342ea1edf41a0e725f846324f6bade62d4aac49707bbf8a"],["feature.features","trg_scalar_projection_delete","08c947dc363fa6835a4768dd99eadf74dc5f2b2e065dfd38c1fab4ae3ad4ef16"],["feature.features","trg_scalar_projection_insert","dcac9b5190609f6de16fd1962487a59379e553bf7188c0024e677a28740cfe2d"],["feature.features","trg_scalar_projection_update","6f9dd377f32a6672be1cd5bc5689486089a6ea52ed96e961a656635771484321"],["feature.features","trg_scalar_unsupported","763fc80db402b4b79d254d09c34fca02efcd0026df86c3531ab393f71da81048"],["feature.provider_field_active_policies","trg_scalar_projection_delete","8140ae8a6665e92bbe4f3c02ec7c02bd1f6337f32e62bb23f67648c4e3b6c039"],["feature.provider_field_active_policies","trg_scalar_projection_insert","75952cebe25c51e92cc141df64b207999fdfb10f534b5466901246b12213d50f"],["feature.provider_field_active_policies","trg_scalar_projection_update","ff09c89498cb295270a9a68257d6f20aca87f920ad58966aa369d52c9d94f011"],["feature.provider_field_shadow_candidates","trg_scalar_epoch","9eca29b1edc099349b73f7274cdfef94e02ccc51c50812d9c82953a801ab7da3"],["feature.provider_field_shadow_candidates","trg_scalar_projection_delete","a90f29082dd0f5507f5a41427ba9488f0c01eca33cc17473f1d81c08719a1c7c"],["feature.provider_field_shadow_candidates","trg_scalar_projection_insert","03ff2004b796f497ab211745da6c4280574915d6e94c697c3b38d8cfa5e86cce"],["feature.provider_field_shadow_candidates","trg_scalar_projection_update","e54113e0af364a96d7dce790a6a9af1b4521552c06c752396e71cb255102e05d"],["ops.feature_overrides","trg_scalar_epoch","271773b79dc44b5c825e1ba3cb4a8f7407c8510511f8947ed8c6995a0cb6d81a"],["ops.feature_overrides","trg_scalar_projection_delete","813f89d08a84ef4ece3f0ea9c26f27c1653c3f0ffe16889da7d45b8e8f6d7111"],["ops.feature_overrides","trg_scalar_projection_insert","e1f558e93c319cb9c4c6f77b20a8c9662bd8898dd7910fe3062fab125da9e310"],["ops.feature_overrides","trg_scalar_projection_update","463ab0680035f47322b88cc0805259358bfc047bd5520454a102e91d4d213bdc"],["ops.feature_overrides","trg_scalar_unsupported","fc1256b94c3a6fdd55b46923f7f9be3a3a90e5bae774f6017a2195fc96d3e420"],["provider_sync.provider_datasets","trg_scalar_epoch","3706e000e59dae614b1632b80d047f1b66dd666625b2a9f5ba600f6e47f43eef"],["provider_sync.provider_datasets","trg_scalar_projection_delete","db592e78cda49e313092b292c70f82c511500291ebf431357feaa00ac46fafa7"],["provider_sync.provider_datasets","trg_scalar_projection_insert","5c7fce91e402dc8efa06c896ae47b64b3f778d411cd5afa72c3233ff890056b6"],["provider_sync.provider_datasets","trg_scalar_projection_update","607d33a438fff182a4824efce1514bc4e32c0786e863a6d58d56188e3b0481a8"],["provider_sync.provider_datasets","trg_scalar_unsupported","6be8cc23b026460e10cf7202b33fd18d44b9ec80a1ef7a6ee0a133ddc1092738"],["provider_sync.source_entities","trg_scalar_epoch","8c678e684afefa1cfa488f902a990b805f20c38d05cf21e9f5bf6c6dfa2919e6"],["provider_sync.source_entities","trg_scalar_projection_delete","b44a8b5672278531d2d9aaedf2bbeea35ea2c63569b0cf60ffc6f7026e471d0b"],["provider_sync.source_entities","trg_scalar_projection_insert","29c0b442f3472f87f70d225a37c374011a00de326c4e7b04667dcaf57aff4ce2"],["provider_sync.source_entities","trg_scalar_projection_update","cabc9a4eb77303164c8e34f866bb22160bfc967a5303ff44be790400b40ebcd8"],["provider_sync.source_entities","trg_scalar_unsupported","773bb428158e67267e42d36009ea920576c7f4de09b3f904cf8b45c56e99256f"],["provider_sync.source_entity_heads","trg_scalar_epoch","84fed9bb221ef995a034f0b4313f5d0d8fa5399fab8cccb83308c4ac579ab5bf"],["provider_sync.source_entity_heads","trg_scalar_projection_delete","b1fa6f4766f8180d9c58fd76a52838b0987da0ede1faea39df34ff69d8f307ab"],["provider_sync.source_entity_heads","trg_scalar_projection_insert","7ed71d9546e216d41b8ac94cb94800975ec2a6cc0bea83b03fbee04f79437018"],["provider_sync.source_entity_heads","trg_scalar_projection_update","847699073ec1e85f6cdac516d4425e7187820f34bf1b7baab66b37121e79d928"],["provider_sync.source_links","trg_scalar_epoch","33cc0ed69fbfde6670536fdb9c4ade1a18c2c460a595379fa24dd67980ec728a"],["provider_sync.source_links","trg_scalar_projection_delete","c8ab1677f6fa1546399d04ad92b45412c70d17799db6d8e16b007db0b930376f"],["provider_sync.source_links","trg_scalar_projection_insert","ded84f5e2e0de9958b3585ba1a93fe101fb0b5e794e4c4a78fa8c59d66ff9bb8"],["provider_sync.source_links","trg_scalar_projection_update","0750bee837f6f7953424d0f5a4d8de866b3ea52d12a4a423ca6a4fbc0c7045ba"],["provider_sync.source_links","trg_scalar_unsupported","8e174efbe8fc09b86d3037887003c36ff91a9dca06ee62b70d19fa15e2cc3752"]]'::jsonb ELSE '[["feature.feature_base_field_values","trg_scalar_epoch","e7fdba2418e754f701297f14cbf6b9ed03bd286dabf848d24e8663178ea5f7b6"],["feature.feature_base_field_values","trg_scalar_projection_delete","57454de3ebfed2cf610ba1e8108a35374c33cdf9694d9c7359eed1e151cece61"],["feature.feature_base_field_values","trg_scalar_projection_insert","22864e299c2930e3dce602dbc4bdcbb3698e931d1c9598c439bebcb1423f7a78"],["feature.feature_base_field_values","trg_scalar_projection_update","07cde91c7190d1f845bc56735944e2aecc6578694da7348f6de40133d3446833"],["feature.feature_geocode_stamps","trg_scalar_epoch","43c1ccb8ff16ed27437e5cd01cbe68a84d13559052cfd0d86f1d59e4e40ae915"],["feature.feature_geocode_stamps","trg_scalar_projection_delete","09fb45a88188fceaa9ccfc6f03c879ccea00436eeffb2c122091537a18fe003d"],["feature.feature_geocode_stamps","trg_scalar_projection_insert","d4164f14caa9d79ba33fa015b940c6474093f7d307c23cc1b972f9de836f93c8"],["feature.feature_geocode_stamps","trg_scalar_projection_update","eb50866ba5acb82735ce01010bf945d2d34517112a0b5cae3231f13961496cb7"],["feature.feature_geocode_stamps","trg_scalar_unsupported","969121f28b02f06d7923787843478cbe6d7d8f1cad6a4bbe547b1f6480550d76"],["feature.feature_places","trg_scalar_epoch","65a4df46d10a804bad158d984a933f08a01f826fa92b2a0069848455976ac815"],["feature.feature_places","trg_scalar_projection_delete","142d2259561bd5ca7c0eb383efc995052bc48cb9a7cc7dfd881f0bf58c409bde"],["feature.feature_places","trg_scalar_projection_insert","ff411fe0bbd1b52bf4ca039e75dccceea0f7d2755a57d645266a8686bbfa4b57"],["feature.feature_places","trg_scalar_projection_update","12b8c2361d5d2a14be186db4dee032971c7a8033b8227fbed99e30768351bdd4"],["feature.feature_places","trg_scalar_unsupported","f9eacb8145275bd8434748b8dc42ffd3b6f0f3187ec9675639f4ca209ce754c6"],["feature.features","trg_scalar_epoch","2c2edcbe370fbdfff342ea1edf41a0e725f846324f6bade62d4aac49707bbf8a"],["feature.features","trg_scalar_projection_delete","08c947dc363fa6835a4768dd99eadf74dc5f2b2e065dfd38c1fab4ae3ad4ef16"],["feature.features","trg_scalar_projection_insert","dcac9b5190609f6de16fd1962487a59379e553bf7188c0024e677a28740cfe2d"],["feature.features","trg_scalar_projection_update","6f9dd377f32a6672be1cd5bc5689486089a6ea52ed96e961a656635771484321"],["feature.features","trg_scalar_unsupported","763fc80db402b4b79d254d09c34fca02efcd0026df86c3531ab393f71da81048"],["feature.provider_field_active_policies","trg_scalar_projection_delete","8140ae8a6665e92bbe4f3c02ec7c02bd1f6337f32e62bb23f67648c4e3b6c039"],["feature.provider_field_active_policies","trg_scalar_projection_insert","75952cebe25c51e92cc141df64b207999fdfb10f534b5466901246b12213d50f"],["feature.provider_field_active_policies","trg_scalar_projection_update","ff09c89498cb295270a9a68257d6f20aca87f920ad58966aa369d52c9d94f011"],["feature.provider_field_shadow_candidates","trg_scalar_epoch","9eca29b1edc099349b73f7274cdfef94e02ccc51c50812d9c82953a801ab7da3"],["feature.provider_field_shadow_candidates","trg_scalar_projection_delete","a90f29082dd0f5507f5a41427ba9488f0c01eca33cc17473f1d81c08719a1c7c"],["feature.provider_field_shadow_candidates","trg_scalar_projection_insert","03ff2004b796f497ab211745da6c4280574915d6e94c697c3b38d8cfa5e86cce"],["feature.provider_field_shadow_candidates","trg_scalar_projection_update","e54113e0af364a96d7dce790a6a9af1b4521552c06c752396e71cb255102e05d"],["ops.feature_overrides","trg_scalar_epoch","271773b79dc44b5c825e1ba3cb4a8f7407c8510511f8947ed8c6995a0cb6d81a"],["ops.feature_overrides","trg_scalar_projection_delete","813f89d08a84ef4ece3f0ea9c26f27c1653c3f0ffe16889da7d45b8e8f6d7111"],["ops.feature_overrides","trg_scalar_projection_insert","e1f558e93c319cb9c4c6f77b20a8c9662bd8898dd7910fe3062fab125da9e310"],["ops.feature_overrides","trg_scalar_projection_update","463ab0680035f47322b88cc0805259358bfc047bd5520454a102e91d4d213bdc"],["ops.feature_overrides","trg_scalar_unsupported","fc1256b94c3a6fdd55b46923f7f9be3a3a90e5bae774f6017a2195fc96d3e420"],["provider_sync.provider_datasets","trg_scalar_epoch","3706e000e59dae614b1632b80d047f1b66dd666625b2a9f5ba600f6e47f43eef"],["provider_sync.provider_datasets","trg_scalar_projection_delete","db592e78cda49e313092b292c70f82c511500291ebf431357feaa00ac46fafa7"],["provider_sync.provider_datasets","trg_scalar_projection_insert","5c7fce91e402dc8efa06c896ae47b64b3f778d411cd5afa72c3233ff890056b6"],["provider_sync.provider_datasets","trg_scalar_projection_update","607d33a438fff182a4824efce1514bc4e32c0786e863a6d58d56188e3b0481a8"],["provider_sync.provider_datasets","trg_scalar_unsupported","6be8cc23b026460e10cf7202b33fd18d44b9ec80a1ef7a6ee0a133ddc1092738"],["provider_sync.source_entities","trg_scalar_epoch","8c678e684afefa1cfa488f902a990b805f20c38d05cf21e9f5bf6c6dfa2919e6"],["provider_sync.source_entities","trg_scalar_projection_delete","b44a8b5672278531d2d9aaedf2bbeea35ea2c63569b0cf60ffc6f7026e471d0b"],["provider_sync.source_entities","trg_scalar_projection_insert","29c0b442f3472f87f70d225a37c374011a00de326c4e7b04667dcaf57aff4ce2"],["provider_sync.source_entities","trg_scalar_projection_update","cabc9a4eb77303164c8e34f866bb22160bfc967a5303ff44be790400b40ebcd8"],["provider_sync.source_entities","trg_scalar_unsupported","773bb428158e67267e42d36009ea920576c7f4de09b3f904cf8b45c56e99256f"],["provider_sync.source_entity_heads","trg_scalar_epoch","84fed9bb221ef995a034f0b4313f5d0d8fa5399fab8cccb83308c4ac579ab5bf"],["provider_sync.source_entity_heads","trg_scalar_projection_delete","b1fa6f4766f8180d9c58fd76a52838b0987da0ede1faea39df34ff69d8f307ab"],["provider_sync.source_entity_heads","trg_scalar_projection_insert","7ed71d9546e216d41b8ac94cb94800975ec2a6cc0bea83b03fbee04f79437018"],["provider_sync.source_entity_heads","trg_scalar_projection_update","847699073ec1e85f6cdac516d4425e7187820f34bf1b7baab66b37121e79d928"],["provider_sync.source_links","trg_scalar_epoch","33cc0ed69fbfde6670536fdb9c4ade1a18c2c460a595379fa24dd67980ec728a"],["provider_sync.source_links","trg_scalar_projection_delete","c8ab1677f6fa1546399d04ad92b45412c70d17799db6d8e16b007db0b930376f"],["provider_sync.source_links","trg_scalar_projection_insert","ded84f5e2e0de9958b3585ba1a93fe101fb0b5e794e4c4a78fa8c59d66ff9bb8"],["provider_sync.source_links","trg_scalar_projection_update","0750bee837f6f7953424d0f5a4d8de866b3ea52d12a4a423ca6a4fbc0c7045ba"],["provider_sync.source_links","trg_scalar_unsupported","8e174efbe8fc09b86d3037887003c36ff91a9dca06ee62b70d19fa15e2cc3752"]]'::jsonb END;
+    SELECT count(*) INTO v_count FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+      JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal
+      AND n.nspname IN ('feature','provider_sync','ops')
+      AND (t.tgname LIKE 'trg_scalar_%' OR t.tgname='trg_stamp_writer_entry');
+    IF v_count=0 THEN RETURN 0; END IF;
+    IF EXISTS(
+      WITH actual AS (
+        SELECT n.nspname||'.'||c.relname AS relation,t.tgname::text AS name,
+          encode(x_extension.digest(pg_get_triggerdef(t.oid)||'|'||t.tgenabled::text,'sha256'),'hex') AS hash
+        FROM pg_trigger t JOIN pg_class c ON c.oid=t.tgrelid
+        JOIN pg_namespace n ON n.oid=c.relnamespace WHERE NOT t.tgisinternal
+          AND n.nspname IN ('feature','provider_sync','ops')
+          AND (t.tgname LIKE 'trg_scalar_%' OR t.tgname='trg_stamp_writer_entry')
+      ), expected AS (
+        SELECT value->>0 AS relation,value->>1 AS name,value->>2 AS hash
+        FROM jsonb_array_elements(v_expected)
+      ) SELECT 1 FROM actual FULL JOIN expected USING(relation,name)
+        WHERE actual.hash IS DISTINCT FROM expected.hash
+    ) THEN RAISE EXCEPTION 'projection trigger inventory drifted' USING ERRCODE='23514'; END IF;
+    RETURN v_count;
+END;
+$$;
+
+
+ALTER FUNCTION feature._assert_stamp_projection_guard_inventory(p_boundary boolean) OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: _exclusive_provider_refresh_context(uuid, bigint); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -149,10 +186,8 @@ BEGIN
         AND objsubid=2 AND mode='ExclusiveLock') THEN
         RAISE EXCEPTION 'projection guard installation requires exclusive protocol' USING ERRCODE='23514';
     END IF;
-    SELECT count(*) INTO v_count FROM pg_trigger WHERE tgname IN (
-        'trg_scalar_epoch','trg_scalar_projection_insert','trg_scalar_projection_update',
-        'trg_scalar_projection_delete','trg_scalar_unsupported') AND NOT tgisinternal;
-    IF v_count=50 THEN RETURN; END IF;
+    v_count:=feature._assert_stamp_projection_guard_inventory(true);
+    IF v_count=51 THEN RETURN; END IF;
     IF v_count<>0 THEN
         RAISE EXCEPTION 'incomplete scalar guard installation' USING ERRCODE='23514';
     END IF;
@@ -204,11 +239,13 @@ BEGIN
     EXECUTE $ddl$CREATE CONSTRAINT TRIGGER trg_scalar_projection_delete AFTER DELETE ON feature.provider_field_active_policies DEFERRABLE INITIALLY DEFERRED FOR EACH ROW WHEN (feature._provider_field_projection_dependency_active('provider_field_active_policies',OLD.feature_id::text)) EXECUTE FUNCTION feature.guard_provider_field_projection()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_places FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
-    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON feature.feature_geocode_stamps FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE DELETE ON feature.feature_geocode_stamps FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    EXECUTE $ddl$CREATE TRIGGER trg_stamp_writer_entry BEFORE INSERT OR UPDATE ON feature.feature_geocode_stamps FOR EACH ROW EXECUTE FUNCTION feature.guard_stamp_writer_entry()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_links FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.source_entities FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON provider_sync.provider_datasets FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
     EXECUTE $ddl$CREATE TRIGGER trg_scalar_unsupported BEFORE INSERT OR UPDATE OR DELETE ON ops.feature_overrides FOR EACH ROW EXECUTE FUNCTION feature.reject_unsupported_active_scalar_mutation()$ddl$;
+    PERFORM feature._assert_stamp_projection_guard_inventory(true);
 END;
 $_$;
 
@@ -476,6 +513,112 @@ $_$;
 
 
 ALTER PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _validate_scoped_provider_geocode_stamps(uuid, uuid, text, text, jsonb, boolean); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._validate_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb, p_after_source boolean) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_item jsonb; v_count bigint;
+        v_sources bigint; v_feature uuid; v_stamp feature.feature_geocode_stamps%ROWTYPE;
+BEGIN
+    IF jsonb_typeof(p_targets) IS DISTINCT FROM 'array' OR pg_column_size(p_targets)>1048576
+       OR jsonb_array_length(p_targets) NOT BETWEEN 1 AND 2730 THEN
+        RAISE EXCEPTION 'invalid scoped stamp batch' USING ERRCODE='23514';
+    END IF;
+    v_count:=jsonb_array_length(p_targets);
+    FOR v_item IN SELECT value FROM jsonb_array_elements(p_targets) LOOP
+        IF jsonb_typeof(v_item) IS DISTINCT FROM 'object'
+           OR (SELECT count(*) FROM jsonb_object_keys(v_item))<>8
+           OR EXISTS(SELECT 1 FROM jsonb_object_keys(v_item) key WHERE key NOT IN
+               ('feature_id','source_entity_key','source_record_key','policy_revision',
+                'geo_version_token','geo_data_token','reverse_outcome','stamped_at'))
+           OR EXISTS(SELECT 1 FROM jsonb_each(v_item) e WHERE e.key<>'policy_revision'
+                     AND jsonb_typeof(e.value)<>'string')
+           OR jsonb_typeof(v_item->'policy_revision') IS DISTINCT FROM 'number'
+           OR NOT pg_input_is_valid(v_item->>'feature_id','uuid')
+           OR NOT pg_input_is_valid(v_item->>'policy_revision','bigint')
+           OR (v_item->>'policy_revision')::bigint<=0
+           OR (v_item->>'source_entity_key') !~ '^se_[0-9a-f]{64}$'
+           OR (v_item->>'source_record_key') !~ '^sr_[0-9a-f]{20}$'
+           OR (v_item->>'geo_version_token') !~ '^dv1-[0-9a-f]{32}$'
+           OR (v_item->>'geo_data_token') !~ '^dd1-[0-9a-f]{32}$'
+           OR (v_item->>'reverse_outcome') NOT IN ('called','geocoded','not_called')
+           OR length(v_item->>'stamped_at')>64
+           OR (v_item->>'stamped_at') !~ '(Z|[+-][0-9]{2}:[0-9]{2})$'
+           OR NOT pg_input_is_valid(v_item->>'stamped_at','timestamp with time zone') THEN
+            RAISE EXCEPTION 'invalid scoped stamp evidence' USING ERRCODE='23514';
+        END IF;
+    END LOOP;
+    IF (SELECT count(DISTINCT (value->>'feature_id')::uuid) FROM jsonb_array_elements(p_targets))<>v_count
+       OR (SELECT count(DISTINCT value->>'source_entity_key') FROM jsonb_array_elements(p_targets))<>v_count THEN
+        RAISE EXCEPTION 'duplicate scoped stamp target' USING ERRCODE='23514';
+    END IF;
+    IF NOT EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND granted AND mode='ShareLock')
+       OR EXISTS(SELECT 1 FROM pg_locks WHERE locktype='advisory' AND pid=pg_backend_pid()
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND granted AND mode='ExclusiveLock') THEN
+        RAISE EXCEPTION 'scoped stamp requires actual shared protocol' USING ERRCODE='23514';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM feature.lock_provider_field_policy_epoch();
+    v_attempt:=ops._locked_scoped_feature_write_attempt(p_attempt,p_owner);
+    IF v_attempt.status<>'applying' OR v_attempt.apply_txid IS DISTINCT FROM txid_current()
+       OR v_attempt.exclusive_protocol OR v_attempt.regions<>'[]'::jsonb
+       OR v_attempt.manifest_digest IS DISTINCT FROM p_manifest_digest OR p_manifest_digest IS NULL
+       OR v_attempt.input_digest IS DISTINCT FROM p_input_digest OR p_input_digest IS NULL THEN
+        RAISE EXCEPTION 'scoped stamp is outside the applying input' USING ERRCODE='23514';
+    END IF;
+    IF (SELECT count(*) FROM ops.feature_write_manifests WHERE attempt_id=p_attempt
+        AND dependency_kind='feature')<>v_count OR EXISTS(
+        SELECT 1 FROM jsonb_array_elements(p_targets) input WHERE NOT EXISTS(
+            SELECT 1 FROM ops.feature_write_manifests m WHERE m.attempt_id=p_attempt
+            AND m.dependency_kind='feature' AND m.dependency_key=(input->>'feature_id')::uuid::text)) THEN
+        RAISE EXCEPTION 'scoped stamp target set is not the full manifest' USING ERRCODE='23514';
+    END IF;
+    SELECT count(*) INTO v_sources FROM(
+        SELECT DISTINCT link.source_entity_key FROM provider_sync.source_links link
+        JOIN jsonb_array_elements(p_targets) input ON link.feature_id=(input->>'feature_id')::uuid
+        LIMIT 8193) bounded;
+    IF v_sources>8192 OR v_attempt.expected_members<>2*v_count+v_sources
+       OR (SELECT count(*) FROM ops.feature_write_manifests WHERE attempt_id=p_attempt)
+          <>v_attempt.expected_members THEN
+        RAISE EXCEPTION 'scoped stamp manifest closure is not exact' USING ERRCODE='23514';
+    END IF;
+    FOR v_item IN SELECT value FROM jsonb_array_elements(p_targets)
+        ORDER BY (value->>'feature_id')::uuid LOOP
+        v_feature:=(v_item->>'feature_id')::uuid;
+        PERFORM feature.assert_scoped_provider_scalar_target(p_attempt,v_feature,
+            v_attempt.provider_dataset_id,v_item->>'source_entity_key',
+            (v_item->>'policy_revision')::bigint);
+        -- existing primary place만. 퇴역 여부와 무관한 shared source 거부는 정본 assert에 있다.
+        IF NOT EXISTS(SELECT 1 FROM feature.features core JOIN feature.feature_places place USING(feature_id)
+            WHERE core.feature_id=v_feature AND core.kind='place') THEN
+            RAISE EXCEPTION 'scoped stamp requires existing place' USING ERRCODE='23514';
+        END IF;
+        IF p_after_source AND NOT EXISTS(SELECT 1 FROM provider_sync.source_entity_heads
+            WHERE source_entity_key=v_item->>'source_entity_key'
+              AND current_source_record_key=v_item->>'source_record_key') THEN
+            RAISE EXCEPTION 'accepted source differs from full refresh input' USING ERRCODE='40001';
+        END IF;
+        -- kernel의 dataset/head/link/Feature 뒤에만 stamp 행을 UUID 정렬 잠금한다.
+        SELECT * INTO v_stamp FROM feature.feature_geocode_stamps WHERE feature_id=v_feature FOR UPDATE;
+        IF NOT FOUND OR (v_stamp.geo_version_token,v_stamp.geo_data_token,
+             v_stamp.reverse_outcome,v_stamp.stamped_at) IS DISTINCT FROM
+             (v_item->>'geo_version_token',v_item->>'geo_data_token',v_item->>'reverse_outcome',
+              (v_item->>'stamped_at')::timestamptz) THEN
+            RAISE EXCEPTION 'stamp evidence changed; replan' USING ERRCODE='40001';
+        END IF;
+    END LOOP;
+    RETURN v_count;
+END;
+$_$;
+
+
+ALTER FUNCTION feature._validate_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb, p_after_source boolean) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: ack_feature_reference_reconciliation_event(text, uuid, uuid, bigint, text, text, bigint); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
@@ -5370,6 +5513,27 @@ $$;
 ALTER FUNCTION feature.guard_provider_field_shadow_policy() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: guard_stamp_writer_entry(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.guard_stamp_writer_entry() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    -- runtime table ACL + 검토된 NOLOGIN owner SD만 허용한다. 정책 권한은 SD 본문이 검증한다.
+    -- 동일 service LOGIN의 명시 SET ROLE owner는 기존 고권한 관리 경계다.
+    IF current_user<>'ktm_feature_state_procedure_owner' OR TG_OP NOT IN ('INSERT','UPDATE') THEN
+        RAISE EXCEPTION 'unsupported direct stamp writer; use reviewed entry' USING ERRCODE='42501';
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION feature.guard_stamp_writer_entry() OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: has_active_feature_override(uuid, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -5749,6 +5913,23 @@ $$;
 
 
 ALTER FUNCTION feature.lock_provider_field_policy_epoch() OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: lock_scoped_provider_geocode_stamps(uuid, uuid, text, text, jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.lock_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    RETURN feature._validate_scoped_provider_geocode_stamps(
+        p_attempt,p_owner,p_manifest_digest,p_input_digest,p_targets,false);
+END;
+$$;
+
+
+ALTER FUNCTION feature.lock_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: manual_feature_identity_key(text, text, numeric, numeric); Type: FUNCTION; Schema: feature; Owner: ktm_manual_feature_procedure_owner
@@ -9895,6 +10076,32 @@ $$;
 ALTER FUNCTION feature.reject_user_feature_version_mutation() OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: reobserve_scoped_provider_geocode_stamps(uuid, uuid, text, text, jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.reobserve_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_expected bigint; v_actual bigint;
+BEGIN
+    v_expected:=feature._validate_scoped_provider_geocode_stamps(
+        p_attempt,p_owner,p_manifest_digest,p_input_digest,p_targets,true);
+    -- 시각은 caller 입력을 사용하지 않는다. ID/token/outcome을 바꾸는 SQL은 없다.
+    UPDATE feature.feature_geocode_stamps stamp SET stamped_at=now()
+    FROM jsonb_array_elements(p_targets) input WHERE stamp.feature_id=(input->>'feature_id')::uuid;
+    GET DIAGNOSTICS v_actual=ROW_COUNT;
+    IF v_actual<>v_expected THEN
+        RAISE EXCEPTION 'scoped stamp target disappeared' USING ERRCODE='40001';
+    END IF;
+    RETURN v_actual;
+END;
+$$;
+
+
+ALTER FUNCTION feature.reobserve_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) OWNER TO ktm_feature_state_procedure_owner;
+
+--
 -- Name: resolve_curation_import_collection_command(text, uuid, uuid, text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
 --
 
@@ -11603,6 +11810,57 @@ $$;
 
 
 ALTER PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: upsert_provider_geocode_stamps_ex(uuid[], text[], text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.upsert_provider_geocode_stamps_ex(p_feature_ids uuid[], p_outcomes text[], p_version_token text, p_data_token text) RETURNS bigint
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE v_feature uuid; v_count bigint;
+BEGIN
+    -- caller의 짧은/긴 유한 GUC를 변경하지 않는다. SH→EX는 정본 gate가 즉시 거부한다.
+    PERFORM ops.lock_scoped_feature_write_protocol(true);
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write',0));
+    PERFORM feature.lock_provider_field_policy_epoch();
+    IF p_feature_ids IS NULL OR p_outcomes IS NULL
+       OR cardinality(p_feature_ids)<>cardinality(p_outcomes)
+       OR array_ndims(p_feature_ids)>1 OR array_ndims(p_outcomes)>1
+       OR EXISTS(SELECT 1 FROM unnest(p_feature_ids) id WHERE id IS NULL)
+       OR EXISTS(SELECT 1 FROM unnest(p_outcomes) outcome WHERE outcome IS NULL
+                 OR outcome NOT IN ('called','geocoded','not_called'))
+       OR cardinality(p_feature_ids)<>(SELECT count(DISTINCT id) FROM unnest(p_feature_ids) id)
+       OR p_version_token IS NULL OR p_version_token !~ '^dv1-[0-9a-f]{32}$'
+       OR p_data_token IS NULL OR p_data_token !~ '^dd1-[0-9a-f]{32}$' THEN
+        RAISE EXCEPTION 'invalid legacy stamp batch' USING ERRCODE='23514';
+    END IF;
+    -- noactive 비용은 bulk 조회1회다. target마다 context를 호출하지 않는다.
+    FOR v_feature IN SELECT active.feature_id FROM feature.provider_field_active_policies active
+        JOIN unnest(p_feature_ids) id ON id=active.feature_id ORDER BY active.feature_id LOOP
+        IF NOT feature._exclusive_provider_refresh_context(v_feature) THEN
+            RAISE EXCEPTION 'active stamp requires applying EX full context' USING ERRCODE='23514';
+        END IF;
+    END LOOP;
+    -- 원래 Mapping의 모든 항목과 transaction now()를 보존한다.
+    -- EX/global의 직렬화와 SH의 정렬 잠금·cap은 분리한다.
+    EXECUTE $fixed_stamp_sql$
+    INSERT INTO feature.feature_geocode_stamps AS stamp(
+        feature_id,geo_version_token,geo_data_token,reverse_outcome,stamped_at)
+    SELECT id,$3,$4,outcome,now()
+        FROM unnest($1::uuid[],$2::text[]) AS input(id,outcome)
+    ON CONFLICT(feature_id) DO UPDATE SET geo_version_token=EXCLUDED.geo_version_token,
+        geo_data_token=EXCLUDED.geo_data_token,reverse_outcome=EXCLUDED.reverse_outcome,
+        stamped_at=EXCLUDED.stamped_at;
+    $fixed_stamp_sql$ USING p_feature_ids,p_outcomes,p_version_token,p_data_token;
+    GET DIAGNOSTICS v_count=ROW_COUNT;
+    RETURN v_count;
+END;
+$_$;
+
+
+ALTER FUNCTION feature.upsert_provider_geocode_stamps_ex(p_feature_ids uuid[], p_outcomes text[], p_version_token text, p_data_token text) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: uuid_generate_v7(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
@@ -17760,7 +18018,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -26494,6 +26752,13 @@ REVOKE ALL ON FUNCTION feature._assert_provider_field_projection(p_feature uuid)
 
 
 --
+-- Name: FUNCTION _assert_stamp_projection_guard_inventory(p_boundary boolean); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature._assert_stamp_projection_guard_inventory(p_boundary boolean) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION _exclusive_provider_refresh_context(p_feature uuid, p_dataset bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -26529,6 +26794,13 @@ GRANT ALL ON FUNCTION feature._provider_field_projection_dependency_active(p_rel
 --
 
 REVOKE ALL ON PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _validate_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb, p_after_source boolean); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._validate_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb, p_after_source boolean) FROM PUBLIC;
 
 
 --
@@ -26831,6 +27103,14 @@ REVOKE ALL ON FUNCTION feature.guard_provider_field_shadow_policy() FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION guard_stamp_writer_entry(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.guard_stamp_writer_entry() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.guard_stamp_writer_entry() TO ktm_feature_schema_owner;
+
+
+--
 -- Name: FUNCTION has_active_feature_override(p_feature_id uuid, p_field_path text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -26896,6 +27176,14 @@ REVOKE ALL ON FUNCTION feature.lock_current_provider_source_evidence(p_provider_
 
 REVOKE ALL ON FUNCTION feature.lock_provider_field_policy_epoch() FROM PUBLIC;
 GRANT ALL ON FUNCTION feature.lock_provider_field_policy_epoch() TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION lock_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.lock_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.lock_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) TO ktm_feature_runtime;
 
 
 --
@@ -27162,6 +27450,14 @@ GRANT ALL ON FUNCTION feature.reject_user_feature_version_mutation() TO ktm_feat
 
 
 --
+-- Name: FUNCTION reobserve_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.reobserve_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.reobserve_scoped_provider_geocode_stamps(p_attempt uuid, p_owner uuid, p_manifest_digest text, p_input_digest text, p_targets jsonb) TO ktm_feature_runtime;
+
+
+--
 -- Name: PROCEDURE resolve_curation_import_collection_command(IN p_collection_key text, IN p_theme_id uuid, IN p_source_id uuid, IN p_title text, IN p_edition_key text, IN p_command_id bigint, IN p_principal text, OUT o_collection_id uuid, OUT o_collection_revision bigint, OUT o_created boolean); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
@@ -27262,6 +27558,14 @@ GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uu
 
 REVOKE ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION upsert_provider_geocode_stamps_ex(p_feature_ids uuid[], p_outcomes text[], p_version_token text, p_data_token text); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.upsert_provider_geocode_stamps_ex(p_feature_ids uuid[], p_outcomes text[], p_version_token text, p_data_token text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.upsert_provider_geocode_stamps_ex(p_feature_ids uuid[], p_outcomes text[], p_version_token text, p_data_token text) TO ktm_feature_runtime;
 
 
 --
@@ -28234,6 +28538,13 @@ GRANT UPDATE(sigungu_code) ON TABLE feature.feature_events TO ktm_feature_state_
 --
 
 GRANT UPDATE(payload) ON TABLE feature.feature_events TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: TABLE feature_geocode_stamps; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,UPDATE ON TABLE feature.feature_geocode_stamps TO ktm_feature_state_procedure_owner;
 
 
 --
