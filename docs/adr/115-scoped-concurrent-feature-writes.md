@@ -246,6 +246,14 @@ transaction을 시작해 응답 전체(참조 해석·본문·추가 조회)를 
 session의 중간에서 isolation만 올리는 방법은 금지한다. 이 규약의 구현·검증 전에는 다중 SELECT
 응답이 단일 image를 보장한다고 주장하지 않는다. 별도 HTTP 페이지는 서로 다른 commit을 볼 수 있다.
 
+2026-10-24 실제 PostgreSQL 구현 확인: 기존 `FOR SHARE` guard를 가진 reconciliation
+snapshot 조회는 READ ONLY에서 25006으로 실패하므로 이 한 경로만 기존 권한 범위의
+READ WRITE REPEATABLE READ를 사용한다. guard를 제거하거나 DML 권한을 추가하지 않는다.
+metadata와 row lock 사이의 정상 경쟁 갱신은 40001이 될 수 있으므로 이 GET만 명시적인
+재시도 가능한 503과 Retry-After를 반환한다. 다음 요청은 새 transaction에서 principal/scope
+검사부터 다시 실행한다. 나머지 순수 reader는 READ ONLY를 유지한다. 이 예외는 별도 요청
+페이지의 동일 snapshot이나 자동 내부 재시도를 보장하지 않는다.
+
 현재 `packages/kor-travel-map-api/src/kortravelmap/api/routers/features.py`에서 확인한 검사 대상은
 다음과 같다. 단일 SELECT로 끝나는 경로도 구현 단계에 확인해 분류한다.
 

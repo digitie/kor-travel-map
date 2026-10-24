@@ -133,7 +133,10 @@
 - [ ] 일반 snapshot 적재·retire·seal은 한 commit이다. 중간 실패 후 API에는 기존 image만
   보이며 public_ready·geometry sidecar·ETag/cache generation이 일치한다.
 - [ ] T-CWRITE-01의 다중 SELECT API inventory 전부를 단일 SQL 또는 첫 SELECT 전 read-only
-  REPEATABLE READ로 구현한다. READ COMMITTED의 같은 transaction만으로 수용하지 않는다.
+  REPEATABLE READ로 구현한다. 기존 row lock guard 때문에 READ ONLY를 사용할 수 없는
+  reconciliation snapshot GET 한 경로만 ADR-115 §6의 READ WRITE RR·명시 retryable 503
+  예외를 적용하고, metadata 조회 뒤 경쟁 commit→40001→503→새 요청 권한 재검사를 반증한다.
+  READ COMMITTED의 같은 transaction만으로 수용하지 않는다.
   `get_feature`, `get_features_batch`, `list_features_nearby_by_target`, `get_feature_price_snapshot`
   및 audit에서 추가된 경로 각각의 SELECT 사이 writer commit을 주입해 하나의 응답에는 old/old
   또는 new/new만 나오고 참조/본문·total/items·주소/Geo stamp의 mixed image가 0임을 검증한다.
