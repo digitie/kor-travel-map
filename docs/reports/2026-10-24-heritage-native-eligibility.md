@@ -58,7 +58,7 @@ parent/marker/subtype/link 속성은 전수 비교한다. canonical UUID/claim/m
 - 전용 WT에서 codegraph 최초 init을 수행했고 converter 영향도25개를 확인했다. 공유 index는
   변경하지 않았다. dynamic `_transform_reusing_geo`→converter actual asset은 직접 정적 대조했다.
 - 신규 pure 진단·기존 converter·실 SDK 모델/Map fetcher 계약을 같은 최종 실행에서
-  **96 PASS/1.53초** 확인했다. public SDK는 pyproject 정본 pin
+  **98 PASS/1.54초** 확인했다. public SDK는 pyproject 정본 pin
   `e1b346f70dd90f68247776fe14ad39b0a90db763` 고정 archive와 의존성을 `/tmp` 전용
   target에 설치했다. 공유 venv는 변경하지 않았다. public model은 실제 실행하고 fetcher는
   기존 public search/list/details service fixture 경계를 대체했다. 외부 HTTP/DB는 0이다.
@@ -67,7 +67,7 @@ parent/marker/subtype/link 속성은 전수 비교한다. canonical UUID/claim/m
   CI에서도 실행한다. 인벤토리/Protocol lint는27 PASS/기존 sibling 부재1skip이다.
 - import 오류(ProviderFieldPresence 경로), 시험 Settings import 오류 등 선행 실패도 실제
   실행 전에 수정했다. 앞선 checkpoint의 SDK 의존성 부재를 이번 정상 설치 검증과 섞지 않는다.
-- strict mypy2개·Ruff는 통과했다. 전체 lint373 PASS(기존6skip/29.55초)·import4를 확인했고 정확CI·독립2리뷰는 진행 중이다.
+- 최종 합집합 strict mypy3개·Ruff·import4를 확인했고 정확CI·독립2리뷰는 진행 중이다.
   실제 PG/HTTP/UI/worker 복구/운영 활성화를 이번 pure 계약 증거로 대체하지 않는다.
 
 ## 두 적대 리뷰 경계의 보완
@@ -80,16 +80,39 @@ canonical 진단에서 놓쳤다. source link key/Feature alias가 current recor
 비유한 값은 거부하며 shared infra를 import하거나 whole DTO를 먼저 복사하지 않는다.
 
 수정 전 old/타 record link 및 deep/node/byte 세 가지 복사 전 거부 회귀는 **4 FAIL/0.96초**였고
-원로그를 보존했다. 최종94개 실행에 같은 회귀를 포함했다. 이 문제는 pure 진단의 정합성과
+원로그를 보존했다. 당시94개 실행에 같은 회귀를 포함했다. 이 문제는 pure 진단의 정합성과
 자원 제한 문제이며 실제 collector/DB 오류를 새로 관찰한 것으로 표시하지 않는다.
 
-작업 후 journal/resume와 내부 변경 CHANGELOG를 추가했다. journal224494B/resume173169B로
-정본225280B 안이며 archive 분리는 필요하지 않았다. 현재 부모에 없는 EX #1389 기록은
-복사하여 dangling 링크를 만들지 않고, 후속 부모 통합 때 양쪽 상단을 보존한다.
+작업 후 journal/resume와 내부 변경 CHANGELOG를 추가했다. A1 단독에서는 cap 안이었으나
+검토된 EX 부모 dcb92934를 합성하면 journal225349B로225280B를 넘었다. tasks-rule§8에 따라
+2026-10-01 가장 오래된 한 절5764B를 journal-2026-10a.md로 원문 이동했다. SHA256은
+`ffe1b6c06892402d17b38e34fd511c358fd7be7c0e0acf2460d0d9bdc6bdb58d`이며
+본문 원문/상대 링크 변경0이다. 절 뒤 빈 분리줄1B는 live에 유지해 부모 전체를 복원할 수 있다. 양쪽 상단·기존 본문·CHANGELOG 항목을 모두 보존했다.
+EX 소스/시험/report는 dcb 부모 blob 그대로이며 이 합성이 EX 개별 CI/UI gate를 대신하지 않는다.
 
 
 추가 root 리뷰에서는 plain Enum.value의 과대 객체와 model_copy의 미선언 필드가 첫 guard를
 우회하는 경계를 발견했다. 두 반례는 수정 전 **2 FAIL/0.93초**로 보존했다. Enum.value도
 같은 walker에서 제한하고, BaseModel의 공식 iterator를 lazy하게 직접 순회해 실제 push마다
 남은 노드/stack 예산을 확인한다. dict(model) 전체 복사는 제거했으며 미선언 필드는 첫 발견에
-거부한다. 최종96개 실행은 이 두 반례를 포함하고 기존90/94 수치와 합산하지 않는다.
+거부한다. 당시96개 실행은 이 두 반례를 포함했고 이전 수치와 합산하지 않는다.
+
+추가 자유 payload의 외부 BaseModel computed field/serializer가 사전 검사 뒤 과대 문자열을
+만드는 반례도 **2 FAIL/0.92초**로 보존했다. 이 진단이 실제 사용하는 정본 DTO 9개만
+class identity로 허용하여 임의 모델·그 하위 클래스는 model_dump 전에 거부한다. module
+prefix를 신뢰 경계로 쓰지 않는다. 최종98개는 두 직렬화 반례에서 serializer 미실행을 확인한다.
+이 검사는 JSON 표현의 형태·타입과 정본 DTO 입력 한계를 검증하며, 악의적인 Python 런타임
+전체를 sandbox하거나 monkeypatch를 방어한다는 보장은 아니다.
+
+기존 native artifact의 별도 `_check_artifact_budget`에는 Enum.value와 BaseModel 사전
+복사 예산의 후속 검토가 남는다. root의 Enum 과대값 실제 반례가 확인됐고 직렬화 후1MiB만
+보장하므로 기본 OFF를 유지하며 운영 opt-in 전 반드시 수정·수용해야 한다. A1의 model_dump와
+native의 dict+JSONEncoder 방식은 달라 이 변경에서 guard를 무작정 공용화하거나 수정하지 않았다.
+
+최종 EX 부모와의 집중 실행은 **114 PASS/28.98초**이며 A1·고정 SDK98개와 기존 native/EX16개를
+같은 실행에서 확인했다. native/EX의 실제 PG는 2CPU/1.5GiB 제한 소유 fixture를 사용했고
+실행 후 해당 scalar fixture 잔존0을 확인한다. A1 pure 진단이 새 실제 collector 경로를 실행한
+것은 아니다. 외부 provider HTTP/운영 호출은0이며 EX의 별도 CI/UI gate를 대체하지 않는다.
+
+합집합 전체 lint와 archive 링크는 **377 PASS/기존6skip/29.57초**다. 최종 문서 변경 후
+문서 상한·redaction·archive 링크를 다시 확인한다. 정확 CI/두 최종 리뷰는 별도 대기다.

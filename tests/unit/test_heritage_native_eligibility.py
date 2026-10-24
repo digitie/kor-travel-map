@@ -293,3 +293,36 @@ async def test_model_copy_undeclared_fields_are_not_eagerly_copied(monkeypatch):
     result = await _assess(before, current)
     assert not result.eligible
     assert result.reason == "invalid_bundle_budget"
+
+
+@pytest.mark.parametrize("shape", ["computed", "serializer"])
+async def test_foreign_model_serialization_cannot_expand_after_budget_check(shape):
+    from pydantic import BaseModel, computed_field, model_serializer
+
+    called = False
+
+    class Computed(BaseModel):
+        @computed_field
+        @property
+        def expanded(self) -> str:
+            nonlocal called
+            called = True
+            return "x" * 1_048_577
+
+    class Serialized(BaseModel):
+        @model_serializer
+        def expand(self) -> dict[str, str]:
+            nonlocal called
+            called = True
+            return {"expanded": "x" * 1_048_577}
+
+    before = await _bundle(_base())
+    foreign = Computed() if shape == "computed" else Serialized()
+    detail = before.feature.detail.model_copy(update={"payload": {"foreign": foreign}})
+    current = before.model_copy(
+        update={"feature": before.feature.model_copy(update={"detail": detail})}
+    )
+    result = await _assess(before, current)
+    assert not called
+    assert not result.eligible
+    assert result.reason == "invalid_bundle_budget"

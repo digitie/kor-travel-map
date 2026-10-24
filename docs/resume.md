@@ -1,8 +1,14 @@
 ## 2026-10-24 — 국가유산 native 적격성 선행 계약(A1, #1390)
 
 - 안정 composite ID의 본체 이름 presence와 저장 typed projection 재정규화·지원 외 불변 진단을 추가했다. eligible은 DB 적용 승인이 아니며 collector/Geo/whole-TX seal·정책은 바꾸지 않는다.
-- 격리된 고정SDK public 모델·Map fetcher service fixture 포함96 PASS, lint373 PASS(기존6skip), mypy2/import4/Ruff 통과. 정확CI·독립2리뷰는 진행 중이며 PG/실UI/운영 수용으로 세지 않는다. [범위와 실패](reports/2026-10-24-heritage-native-eligibility.md).
+- 격리된 고정SDK public 모델·Map fetcher service fixture 포함98 PASS, 합집합114 PASS(실PG 포함), mypy3/import4/Ruff 통과. 정확CI·독립2리뷰는 진행 중이며 PG/실UI/운영 수용으로 세지 않는다. [범위와 실패](reports/2026-10-24-heritage-native-eligibility.md).
 - 기존 EX 진입은 별도 #1389이며 부모 합성 시 양쪽 기록을 보존한다. 기본OFF/seed0/운영0, 내구 artifact/full bundle/실제 collector 배선은 후속이다.
+
+## 2026-10-24 — 제한 scalar의 같은 의미 EX 실행 진입
+
+- SH와 같은 source/head→후보→winner→receipt를 기존 protocol EX·curation 전역 fence 아래 수행하는 별도 내부 entry를 추가했다. legacy loader fallback·collector 배선·정책 활성화는 아니다.
+- 실제PG/기존native/artifact16 PASS(28.51초): SH/EX 결과 동등·정확 gate 대기·실패/취소 rollback·55P03 복구·완료 replay0DML·mode 대체 거부. 적대리뷰 P2의 legacy장기hint를 소비해 짧은상한을 유지했다. 최종두리뷰·정확CI·최신UI는 후속이다. [범위와 증거](reports/2026-10-24-scalar-exclusive-semantic-entry.md).
+- 선행 #1386·#1387은 각각 두리뷰·정확CI5개·실UI5/18(별도HTTP2) 뒤 main에 머지됐다. 기본OFF/seed0/운영0, 전체수집전환·후속전파는 미완이다.
 
 ## 2026-10-24 — 생성 SQL의 protocol-first 진입과 승인 복구(418)
 

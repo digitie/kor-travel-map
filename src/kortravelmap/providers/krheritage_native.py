@@ -21,7 +21,19 @@ from uuid import UUID
 from pydantic import BaseModel
 
 from kortravelmap.core.ids import make_payload_hash, make_source_record_key
-from kortravelmap.dto import Address, FeatureBundle, FeatureKind, SourceRecord, SourceRole
+from kortravelmap.dto import (
+    Address,
+    Coordinate,
+    Feature,
+    FeatureBundle,
+    FeatureKind,
+    FeatureUrls,
+    PlaceDetail,
+    SourceLink,
+    SourceRecord,
+    SourceRole,
+)
+from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
 from kortravelmap.providers.krheritage import (
     DATASET_KEY_HERITAGE,
     HERITAGE_NAME_NORMALIZER_REVISION,
@@ -49,6 +61,21 @@ _RAW_KEYS = frozenset(
     }
 )
 _DIGEST = re.compile(r"[0-9a-f]{64}")
+# 이 한정 진단에서 실제 사용하는 정본 DTO class identity만 허용한다.
+# 임의 BaseModel의 computed field/serializer는 사전 순회 이후 출력 크기를 바꿀 수 있다.
+_CANONICAL_MODELS = frozenset(
+    {
+        Address,
+        Coordinate,
+        Feature,
+        FeatureBundle,
+        FeatureUrls,
+        PlaceDetail,
+        SourceLink,
+        SourceRecord,
+        ProviderFieldPresence,
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -242,6 +269,8 @@ def _within_comparison_budget(values: tuple[object, ...]) -> bool:
                 return False
             stack.append((value.value, depth + 1))
         elif isinstance(value, BaseModel):
+            if type(value) not in _CANONICAL_MODELS:
+                return False
             # 공식 iterator를 직접 소비한다. model_copy의 미선언 __dict__ 필드도 복사 전에 거부한다.
             for key, child in value:
                 if key not in type(value).model_fields or len(stack) + 2 > nodes:

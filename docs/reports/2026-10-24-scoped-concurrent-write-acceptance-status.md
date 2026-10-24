@@ -25,9 +25,10 @@ main에 포함됐다. 개별 feature-base PR의 미발행 CI를 성공으로 간
 | #1379 | 위 구현의 합집합 수용 | 최종 집중175 PASS·oracle/metadata2·두 리뷰·정확fd6 CI5개·실UI16 PASS, main c6b608f1 | 전체 writer/collector·운영 전환 수용 |
 | #1383 | 415 state/lifecycle5개 SQL의 첫 EX | PG36+unit5·추가ASGI1·두리뷰·정확9c213 CI5개·실UI18 PASS, main39483333 | 전체 writer 의미 지원·운영 전환 |
 | #1385 | 416 field SQL2개·Python patch/create 진입, manualcreate55P03→503 | PG/ASGI29+unit5·기존unit110·두리뷰·정확0f146 CI5개·실UI18+별도HTTP2 PASS, mainff65c415 | 전체 수집 배선·운영 전환 |
-| #1386 | normal-head whole curation import의 첫 EX | 실제40P01 재현·PG9/회귀48/unit76·독립2리뷰·정확b78b 실CSV UI5/별도계보 PASS | 정확b78b CI·머지·운영 |
-| #1387 | 417 EX 재진입 xact 소유 재확보 후 반복 GUC 조회 생략 | 실제PG7+unit4·oracle4·최종집중92·독립2리뷰·정확fc9 실UI18+별도HTTP2 | 정확fc9 CI·머지·운영 |
-| 후속418 | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·별도실제mapper500→503/같은key복구·oracle4·독립2리뷰 | 정확CI·최신418 실UI |
+| #1386 | normal-head whole curation import의 첫 EX | 실제40P01 재현·PG9/회귀48/unit76·독립2리뷰·정확b78b 실CSV UI5/별도계보 PASS | 정확b78b CI5개 PASS·main2cd9c485, 운영 후속 |
+| #1387 | 417 EX 재진입 xact 소유 재확보 후 반복 GUC 조회 생략 | 실제PG7+unit4·oracle4·최종집중92·독립2리뷰·정확fc9 실UI18+별도HTTP2 | 정확fc9 CI5개 PASS·main708efbc1, 운영 후속 |
+| #1388(418) | 생성 core/provider/manual/요청승인 SQL4개 첫EX·승인55P03 복구 | 최종집중51·별도실제mapper500→503/같은key복구·oracle4·독립2리뷰 | 정확CI·최신418 실UI |
+| 후속 EX 진입 | 같은 source/head·후보/winner/receipt의 protocol EX+전역 fence | 실제PG/기존native/artifact16 PASS·lint373(6skip)·mypy/import | 독립2리뷰·정확CI·최신UI·collector 배선 |
 
 실제 Chromium·BFF/API·PostgreSQL은 reader/kernel 합집합의 정확fd6/schema414에서16건을
 통과했다. 지도 cluster3회 확대→UUID마커/상세, 인증401/403/200·파일 목록/상세/검색·issues·
@@ -62,6 +63,10 @@ Dagster 감독·lease 만료 후 owner 인계·DB/host 사망 복구는 여전�
 목록, 활성 policy 의미의 전체 writer 지원, 신규 identity·membership·Geo·지역 이동,
 root/catalog·중단/재계획·실부하와 배포/되돌림 훈련은 남아 있다. 기본 OFF·정책 seed0·
 운영 활성화0을 유지하며 배타 gate만 추가했다고 의미 프로토콜이 완성됐다고 보지 않는다.
+
+기존 native artifact의 pre-serializer Enum.value 예산 누락은 root의 실제 반례로 확인됐고,
+현재 직렬화 후1MiB만 보장한다. BaseModel 사전 dict 복사 예산도 별도 후속이며 모든 raw 타입의
+복사 전 메모리가 제한됐다고 보지 않고, 기본 OFF 유지와 운영 opt-in 전 필수 수정·수용 gate로 남긴다.
 
 Map의 해당 개선을 수용한 뒤 Weather·Transport의 실제 저장·복구 경로와 대조하여 적용한다.
 공통 재시도/실행 소유권/자원 제한은 kor-travel-common을 우선 재사용하되 Map 전용
