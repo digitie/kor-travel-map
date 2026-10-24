@@ -1,6 +1,6 @@
 ## 2026-10-25 — EX context 단일 조회(423)
 
-- 기존 검증·권한을 보존한 단일 조회에서 실제9 PASS(15.406초), 별도 공식 fresh oracle1 PASS(20.551초)를 확인했다. 부모1641블록 중1639동일/ACL보존, 초기 감사 setup오류는 별도 보존한다. 최종CI/API startup·비용·운영은 미완이다. [근거·범위](reports/2026-10-25-exclusive-context-single-select.md).
+- 기존 검증·권한을 보존하고 실제9 PASS, 별도 공식 oracle1 PASS/ACL보존, schema423 API startup1 PASS/고정GET3을 확인했다. 초기 감사 실패는 보존한다. 함수A/B6회는 뚜렷한 전체 CPU 개선을 입증하지 못했다. 최종 정확CI·collector/운영은 미완이다. [근거·한계](reports/2026-10-25-exclusive-context-single-select.md).
 
 ## 2026-10-25 — scalar batch 내부 실행 단계 분리
 
