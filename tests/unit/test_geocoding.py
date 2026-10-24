@@ -1871,7 +1871,7 @@ def test_rest_client_gives_up_after_bounded_attempts() -> None:
         (httpx.ConnectError("down"), 1),
     ],
 )
-def test_rest_client_retries_read_timeout_but_not_connect_failure(
+def test_rest_client_retries_transient_transport_errors_but_not_connect_failure(
     raised: Exception, expected_calls: int
 ) -> None:
     """호스트가 꺼진 연결 실패는 다시 보내도 connect 상한만 더 기다린다 — 한 번에 끝낸다."""
