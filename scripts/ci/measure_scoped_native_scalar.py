@@ -272,7 +272,8 @@ async def prepare(engine: AsyncEngine, datasets: dict[str, int]) -> dict[str, di
                     text("""SELECT source_entity_key,current_source_record_key
                 FROM provider_sync.source_links
                 JOIN provider_sync.source_entity_heads USING(source_entity_key)
-                WHERE feature_id=:f ORDER BY source_entity_key COLLATE "C"""),
+                WHERE feature_id=:f ORDER BY source_entity_key COLLATE "C"
+                """),
                     {"f": fid},
                 )
             ).all()
@@ -363,7 +364,8 @@ async def state(engine: AsyncEngine) -> dict[str, Any]:
                 await conn.execute(
                     text("""SELECT feature_id::text,field_path,value_json,
                 source_record_key,source_raw_payload_hash
-            FROM feature.feature_base_field_values ORDER BY feature_id,field_path COLLATE "C""")
+            FROM feature.feature_base_field_values ORDER BY feature_id,field_path COLLATE "C"
+                """)
                 )
             )
             .mappings()
@@ -593,6 +595,8 @@ async def run() -> dict[str, Any]:
     created_id = None
     owned = []
     report = {**plan(), "trials": [], "source": await asyncio.to_thread(source_provenance)}
+    report["cleanup_verified"] = False
+    report["phase"] = "owned-container-start"
     try:
         await _start_owned_container(container)
         wrapped = container.get_wrapped_container()
@@ -607,6 +611,7 @@ async def run() -> dict[str, Any]:
         owned.append(template)
         config = Config(str(_ROOT / "alembic.ini"))
         config.set_main_option("script_location", str(_ROOT / "alembic"))
+        report["phase"] = "canonical-bootstrap"
         await upgrade_head_with_application_300_bootstrap(
             config, admin_url.set(database=template).render_as_string(False)
         )
@@ -620,6 +625,7 @@ async def run() -> dict[str, Any]:
             await assert_runtime_db_privilege_boundary(
                 runtime, expected_login="ktm_feature_service"
             )
+            report["phase"] = "seed-and-activate-fixture"
             datasets = await seed(owner)
             async with owner.connect() as connection:
                 report["schema_head"] = await connection.scalar(
@@ -639,7 +645,9 @@ async def run() -> dict[str, Any]:
             owned.append(database)
             owner, runtime = engines(admin_url, database)
             try:
+                report["phase"] = f"prepare-{mode}-{repeat}"
                 plans = await prepare(runtime, datasets)
+                report["phase"] = f"measure-{mode}-{repeat}"
                 result = await measure(owner, runtime, wrapped, mode, plans, proof=proof)
                 result["iteration"] = repeat
                 if proof:
@@ -655,10 +663,14 @@ async def run() -> dict[str, Any]:
             raise RuntimeError("serial/concurrent canonical output differs")
         report["scope_complete"] = False
         report["status"] = "passed"
+        report["phase"] = "complete"
     except Exception as exc:
         # 오류 원문에는 DSN/SQL 바인드가 들어갈 수 있으므로 고정 타입만 남긴다.
         report["status"] = "failed"
         report["error_type"] = type(exc).__name__
+        sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
+        if isinstance(sqlstate, str) and len(sqlstate) == 5 and sqlstate.isalnum():
+            report["sqlstate"] = sqlstate
     finally:
         if wrapped is None:
             with suppress(RuntimeError):
