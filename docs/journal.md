@@ -1,3 +1,9 @@
+## 2026-10-24 — ADR115 순수 다중 조회의 snapshot 고정
+
+- 초안 #1372는 29개 순수 다중 SELECT를 최초 데이터 조회 전 read-only REPEATABLE READ로 고정한다. 쓰기·lease·외부 HTTP와 별도 요청 페이지의 원자성을 확대하지 않는다.
+- cold API key 인증 세션을 hash 조회 직후 반환해 pool size=1 재진입 timeout을 없앴다. 실제 PG/ASGI 13 passed(기존 RC 혼합 반증·RR 일관성·pool 복원·cold 인증 포함), 관련 API 198 passed다. 전체 API 1,344 passed/1 failed는 새 dependency의 테스트 override 누락을 수정한 뒤 auth 93 passed로 재검증했다.
+- 소스 b8f6e677a는 독립 리뷰 2인 PASS다. 정확한 최종 문서 포함 후보의 CI·별도 실제 HTTP/UI 검증은 남아 있다. 기존 writer 잠금·운영 정책·배포 변경은 없다. [전체 reader 분류와 경계](reports/2026-10-24-api-reader-snapshot-inventory.md).
+
 ## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
 
 - 고정 synthetic fixture와 전용 PostGIS container/template clone으로 native load_bundles→seal/commit의 cold/warm 3회 runner를 구현했다. CPU/RSS/WAL·실제 DML 구간/잠금 샘플·CI artifact를 남기며 전체 T01/동시 쓰기 완료로 세지 않는다.

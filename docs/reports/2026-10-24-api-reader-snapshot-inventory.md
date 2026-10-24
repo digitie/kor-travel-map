@@ -49,7 +49,7 @@
 
 ## 검증 계획 및 상태
 
-독립 두 PG 세션의 writer commit을 실제 repo SELECT 사이에 주입하여 identity/body, target/nearby, price current/history, admin 또는 curation count/items의 old/old 또는 new/new를 확인한다. read-only/RR 실제 SHOW, 예외 rollback·pool 반환, 기존 mutation 세션의 쓰기 가능성을 별도 검증한다. 구현/단위/PG/CI/두 리뷰/운영 수용은 각 gate 결과를 나누어 기록한다. 현재 실제 운영 호출은 0회며 모든 gate는 진행 중이다.
+독립 두 PG 세션의 writer commit을 실제 repo SELECT 사이에 주입하여 identity/body, target/nearby, price current/history, admin 또는 curation count/items의 old/old 또는 new/new를 확인한다. read-only/RR 실제 SHOW, 예외 rollback·pool 반환, 기존 mutation 세션의 쓰기 가능성을 별도 검증한다. 구현/단위/PG/CI/두 리뷰/운영 수용은 각 gate 결과를 나누어 기록한다. 현재 실제 운영 호출은 0회다. 실제 PG/ASGI 13개가 통과했으며 READ COMMITTED 혼합 반증, REPEATABLE READ 일관성, 예외 후 pool 복원, pool size=1 cold 인증을 포함한다. 관련 API 198개와 수정된 auth 93개가 통과했다. 전체 API는 1,344 passed/1 failed 후 dependency override를 수정했으므로 그 단일 실행을 전체 성공으로 세지 않는다. 소스 b8f6e677a의 두 독립 리뷰는 PASS이며, 최종 문서 포함 후보의 정확한 CI와 실제 HTTP/UI 수용은 별도 게이트다.
 
 ## 나머지 DB session GET 전수 분류
 
