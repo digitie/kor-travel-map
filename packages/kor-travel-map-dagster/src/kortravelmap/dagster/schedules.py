@@ -30,7 +30,6 @@ from .assets import (
     feature_event_visitkorea_enrichment,
     feature_geometry_knps_records,
     feature_notice_krforest_landslide_forecast_issues,
-    feature_notice_transport_highway_incidents,
     feature_place_datagokr_file_data,
     feature_place_khoa_beaches,
     feature_place_knps_points,
@@ -46,8 +45,6 @@ from .assets import (
     feature_place_transport_airports,
     feature_place_transport_fuel_stations,
     feature_place_transport_rest_areas,
-    feature_price_transport_fuel_stations,
-    feature_price_transport_rest_areas,
     feature_route_krforest_dulle_trails,
     feature_route_krforest_mountain_trails,
 )
@@ -213,9 +210,9 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         cron_schedule="10 3 1 * *",
         description="전국문화축제표준데이터 event Feature 월 1회 야간 적재.",
     ),
-    # 아래 다섯은 kor-travel-transport export를 읽는다(ADR-106). 상류 쿼터는 transport가 지고,
-    # Map은 transport 수집 주기 뒤에 맞춘다: 오피넷 00·08·16시(약 35분 소요), 휴게소 유가
-    # 매 4시간 25분, 휴게소 기준정보 매일 03:40, 돌발 5분.
+    # 아래 둘(과 공항)은 kor-travel-transport export를 읽는다(ADR-106). 상류 쿼터는 transport가
+    # 지고, Map은 transport 수집 주기 뒤에 맞춘다. 유가·돌발 PG 적재는 ADR-114 결정 7(1단계,
+    # migration 419)로 퇴역했다 — 그 현재 상태는 Valkey(`transport_state`)가 든다.
     FeatureLoadScheduleSpec(
         asset=feature_place_transport_fuel_stations,
         job_name="feature_place_transport_fuel_stations_job",
@@ -224,35 +221,11 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description="주유소 place Feature 주 1회 적재(transport export).",
     ),
     FeatureLoadScheduleSpec(
-        asset=feature_price_transport_fuel_stations,
-        job_name="feature_price_transport_fuel_stations_job",
-        schedule_name="feature_price_transport_fuel_stations_daily_schedule",
-        cron_schedule="18 18 * * *",
-        description="주유소 price Feature + PriceValue 일 1회 적재(transport 16시 수집 뒤).",
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
-    ),
-    FeatureLoadScheduleSpec(
         asset=feature_place_transport_rest_areas,
         job_name="feature_place_transport_rest_areas_job",
         schedule_name="feature_place_transport_rest_areas_weekly_schedule",
         cron_schedule="20 4 * * 1",
         description="고속도로 휴게소 place Feature 주 1회 적재(transport export).",
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_price_transport_rest_areas,
-        job_name="feature_price_transport_rest_areas_job",
-        schedule_name="feature_price_transport_rest_areas_twice_daily_schedule",
-        cron_schedule="50 6,18 * * *",
-        description="휴게소 유가 price Feature + PriceValue 일 2회 적재(transport export).",
-    ),
-    FeatureLoadScheduleSpec(
-        asset=feature_notice_transport_highway_incidents,
-        job_name="feature_notice_transport_highway_incidents_job",
-        schedule_name="feature_notice_transport_highway_incidents_ten_minute_schedule",
-        cron_schedule="*/10 * * * *",
-        description="고속도로 돌발 notice Feature 10분마다 활성 집합 반영(transport export).",
-        coalesce_active_runs=True,
-        max_runtime_seconds=_FRESHNESS_RUN_MAX_RUNTIME_SECONDS,
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_krheritage_items,

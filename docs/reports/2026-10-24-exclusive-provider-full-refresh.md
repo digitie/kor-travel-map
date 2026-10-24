@@ -1,5 +1,29 @@
 # A3 제한 EX authoritative refresh — 구현 checkpoint
 
+## main 419 병합 뒤 420 재검증
+
+2026-10-25 머지 직전 PR #1382가 main에 들어와, 기존 `419_retire_pg_transport_values`를
+보존하고 이 PR의 미머지 migration만 `420_exclusive_provider_refresh`로 옮겼다.
+순서는 `418_creation_protocol → 419_retire_pg_transport_values → 420_exclusive_provider_refresh`다.
+네 DDL sidecar 본문은 원래 바이트 그대로이며 파일명만 `_420_`으로 옮겼다. receipt의 허용
+head에 main 419와 새 420을 반영했고 fresh DB에서 oracle를 다시 생성했다.
+
+새 합집합은 집중199건(이전190 + main 퇴역7 + oracle/metadata2) PASS/155.27초,
+lint373 PASS/기존6 SKIP/30.11초, CI 대상 전체 Ruff와 strict mypy5파일/import4계약을
+통과했다. 범위를 넓힌 `ruff check .`는 변경하지 않은 기존 docs/handoff 스크립트와
+journal 검사 스크립트의7건으로 실패했으며 원로그를 보존했다. CI 대상 Ruff 범위를 줄이거나
+검사기를 약하게 바꾸지는 않았다.
+
+기존 main의39개 변경 중 겹치지 않는33개 파일은 그대로 보존했다. journal/resume는 main
+원문 전체 suffix를 보존했고, tracking fixture의 head 기대값은 canonical
+`application_schema_head()`로 바꾼 J의 좁은 수정 blob을 그대로 가져왔다.
+새 head의 두 독립 코드 검토·정확 CI·fresh schema420 UI는 별도 수용 게이트다.
+운영 배포·정책 활성화는 하지 않았다.
+
+아래의419 원장과 d476 커밋 수치는 **이전 수용 세대**다. d476은 5 workflow/10 checks,
+두 독립 코드 검토와 fresh419 UI19/HTTP3을 통과했지만, main 변경 뒤 합집합으로 결과를
+전용하지 않는다. 새 로그는 `/tmp/map420-a3-main-merge-*`와 별도 감사 원장에 보존한다.
+
 ## 범위와 아직 남은 수용
 
 기준은 A2 f138과 main1390의 제품 합집합이다. 기존 active primary place의 비활성

@@ -537,12 +537,11 @@ def test_provider_record_resource_env_mapping() -> None:
     assert specs["datagokr_cultural_festivals"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
     )
-    # ADR-106: transport export resource 다섯은 같은 연결 설정(base URL + token)을 쓴다.
+    # ADR-106: transport export resource 셋은 같은 연결 설정(base URL + token)을 쓴다
+    # (유가·돌발 PG resource는 ADR-114 결정 7로 퇴역했다).
     for key in (
         "transport_fuel_stations",
         "transport_rest_areas",
-        "transport_rest_area_fuel_prices",
-        "transport_highway_incidents",
         "transport_airports",
     ):
         assert specs[key].kor_travel_map_env_names == (

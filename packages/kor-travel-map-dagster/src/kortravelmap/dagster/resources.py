@@ -78,8 +78,6 @@ from .provider_fetchers import (
     fetch_standard_tourist_attractions,
     fetch_transport_airports,
     fetch_transport_fuel_stations,
-    fetch_transport_highway_incidents,
-    fetch_transport_rest_area_fuel_prices,
     fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
 )
@@ -163,8 +161,8 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="transport_fuel_stations",
         setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
         note=(
-            "오피넷 전국 주유소 + 유종별 최신 가격(transport 브라우저 수집본). "
-            "place·price 두 job이 같이 쓴다."
+            "오피넷 전국 주유소(transport 브라우저 수집본). place job이 쓴다 — 유가 PG 적재는 "
+            "ADR-114 결정 7로 퇴역했다."
         ),
     ),
     ProviderRecordResourceSpec(
@@ -173,20 +171,6 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="transport_rest_areas",
         setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
         note="고속도로 휴게소 기준정보(data.go.kr 표준데이터, transport 수집).",
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="transport_rest_area_fuel_prices",
-        provider_package="kor-travel-transport",
-        dataset_key="transport_rest_area_fuel_prices",
-        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
-        note="휴게소 주유소 현재 유가(EX curStateStation, transport 수집).",
-    ),
-    ProviderRecordResourceSpec(
-        resource_key="transport_highway_incidents",
-        provider_package="kor-travel-transport",
-        dataset_key="transport_highway_incidents",
-        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
-        note="마지막 성공 수집의 고속도로 돌발 활성 집합(transport 5분 수집).",
     ),
     ProviderRecordResourceSpec(
         resource_key="transport_airports",
@@ -638,30 +622,6 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_rest_areas"] = (
     build_provider_record_live_resource(
         _TRANSPORT_REST_AREAS_SPEC,
         fetch_transport_rest_areas,
-    )
-)
-
-_TRANSPORT_REST_AREA_FUEL_PRICES_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "transport_rest_area_fuel_prices"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_rest_area_fuel_prices"] = (
-    build_provider_record_live_resource(
-        _TRANSPORT_REST_AREA_FUEL_PRICES_SPEC,
-        fetch_transport_rest_area_fuel_prices,
-    )
-)
-
-_TRANSPORT_HIGHWAY_INCIDENTS_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "transport_highway_incidents"
-)
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_highway_incidents"] = (
-    build_provider_record_live_resource(
-        _TRANSPORT_HIGHWAY_INCIDENTS_SPEC,
-        fetch_transport_highway_incidents,
     )
 )
 
