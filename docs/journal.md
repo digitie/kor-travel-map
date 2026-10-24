@@ -21,7 +21,15 @@
 - OpenAPI: admin·service에 4 operation·스키마 18개 **추가**(기존 불변, user 불변) → PinVi `apps/api/tests/contract/
   kor-travel-map-openapi-{admin,service}.json` 재vendor 필요. admin TS 타입(`types.ts`)도 재생성했다 — main에서 1단계
   transport route가 빠진 채 drift였던 것도 함께 들어갔다(frontend CI는 main에서 이미 빨갛다 — npm audit).
-- 검사: GATE_RESULT
+- 검사(n150 일회용 python:3.13, `-c docker/constraints-dagster.txt`): ruff·mypy --strict(276 파일)·lint-imports·
+  OpenAPI drift `--check` 초록. unit+lint+api+dagster 5,536 passed·24 failed — 실패는 전부 main 기준선의 환경 실패
+  (`test_docker_dagster_runtime.py` 23·`test_smoke_import.py::test_settings_default_values` 1; safe.directory를 넣어
+  sealed tree·tick window는 이번엔 초록). 통합(실제 Valkey 컨테이너) `test_valkey_weather_state.py`+
+  `test_valkey_transport_state.py` 30 passed. 첫 통합 실행에서 테스트의 httpx 전역 patch가 API 미들웨어의
+  `isinstance(…, httpx.AsyncClient)`를 깨뜨려 고쳤다(적재 op 동안만 patch). dagster 패키지 테스트를 다른 패키지
+  테스트와 한 세션에 섞으면 dagster `BetaWarning`이 오류로 승격돼 정의 검사가 빨갛다 — CI처럼 패키지 세션으로 돌리면
+  초록(1단계 transport 검사와 같다). admin vitest(`map-ui-has-no-weather.test.ts`)는 n150에 workspace node_modules가
+  없어 돌리지 않았다 — 예외 조건만 바꿨다.
 
 ## 2026-10-24 — ADR115 T-CWRITE-01: 격리 쓰기 기준선 runner
 
