@@ -69,10 +69,10 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
 )
 _SIDECARS: Final = (
-    "exclusive_refresh_context",
-    "validate_full_refresh",
-    "reject_unsupported_active_mutation",
-    "validate_base_field_value",
+    "_419_exclusive_refresh_context.sql",
+    "_419_validate_full_refresh.sql",
+    "_419_reject_unsupported_active_mutation.sql",
+    "_419_validate_base_field_value.sql",
 )
 
 
@@ -121,7 +121,7 @@ def upgrade() -> None:
     bind.execute(text("GRANT CREATE ON SCHEMA feature TO ktm_feature_state_procedure_owner"))
     bind.execute(text("SET ROLE ktm_feature_state_procedure_owner"))
     for name in _SIDECARS:
-        bind.execute(text(Path(__file__).with_name("_419_" + name + ".sql").read_text()))
+        bind.execute(text(Path(__file__).with_name(name).read_text()))
     bind.execute(
         text(
             "REVOKE ALL ON FUNCTION feature._exclusive_provider_refresh_context(uuid,bigint) "

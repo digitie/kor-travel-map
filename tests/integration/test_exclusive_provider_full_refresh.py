@@ -726,3 +726,75 @@ async def test_new_context_acl_remains_closed(scalar_engines):
             )
         ).one()
         assert tuple(row) == (False, False, True)
+
+
+async def test_fresh_old_input_after_new_head_is_not_false_success(scalar_engines, monkeypatch):
+    from kortravelmap.client import AsyncKorTravelMapClient
+    from tests.integration.test_scoped_provider_batch import _dataset_bundle
+
+    admin, runtime = scalar_engines
+    dataset, items = await _seed(admin, runtime)
+    old = [i.bundle for i in items]
+    record = old[0].source_record
+    client = AsyncKorTravelMapClient(
+        runtime,
+        exclusive_provider_snapshot=full.ExclusiveProviderSnapshotOptions(
+            record.provider, record.dataset_key, record.source_entity_type
+        ),
+    )
+    kwargs = dict(
+        provider=record.provider,
+        dataset_key=record.dataset_key,
+        source_entity_type=record.source_entity_type,
+    )
+    # 옛 A는 계획만 만들고 취소한다. completed 재사용이 아닌 fresh A를 뒤에서 호출한다.
+    options = client._exclusive_provider_snapshot
+    async with AsyncSession(runtime) as session, session.begin():
+        a = await full.prepare_exclusive_provider_snapshot(session, tuple(old), options=options)
+    await client._cancel_exclusive_snapshot_plan(a)
+    newer = [
+        _dataset_bundle(record.dataset_key, b.source_record.source_entity_id, "current-B", hours=1)
+        for b in old
+    ]
+    await client.load_authoritative_feature_snapshot(newer, **kwargs)
+
+    async def state():
+        async with AsyncSession(admin) as session:
+            heads = (
+                await session.execute(
+                    text("""SELECT h.source_entity_key,h.current_source_record_key
+                FROM provider_sync.source_entity_heads h
+                JOIN provider_sync.source_entities e USING(source_entity_key)
+                WHERE e.provider_dataset_id=:dataset ORDER BY h.source_entity_key"""),
+                    {"dataset": dataset},
+                )
+            ).all()
+            capture = await feature_repo.capture_provider_curation_input(
+                session, provider=record.provider, dataset_key=record.dataset_key
+            )
+            return heads, capture.curation_input_set_hash
+
+    before = await state()
+    original = feature_repo._upsert_source_record_state
+    became = []
+
+    async def observed(session, value):
+        result = await original(session, value)
+        became.append(result.became_current)
+        return result
+
+    monkeypatch.setattr(feature_repo, "_upsert_source_record_state", observed)
+    with pytest.raises(DBAPIError) as caught:
+        await client.load_authoritative_feature_snapshot(old, **kwargs)
+    assert caught.value.orig.sqlstate == "23514"
+    assert became == [False]
+    assert await state() == before
+    async with AsyncSession(admin) as session:
+        statuses = (
+            await session.execute(
+                text("""SELECT status,count(*) FROM ops.feature_write_attempts
+            WHERE provider_dataset_id=:dataset GROUP BY status ORDER BY status"""),
+                {"dataset": dataset},
+            )
+        ).all()
+        assert dict(statuses) == {"cancelled": 2, "completed": 1}

@@ -7,10 +7,12 @@ Geo/분류·typed base/effective 의미는 legacy EX로 유지하고, 활성 nam
 동일한 후보·winner로 닫는 명시 경로다. 운영 선택/정책 seed는 0이다. 전체 provider의
 5000건 수집·내구 artifact·실제 worker 전수 수용을 완료했다고 표시하지 않는다.
 
-초기 checkpoint에는 실제 legacy before 실패1건과 명시 entry PG5/단위4를 확인했다.
-초기 합집합은 `/tmp/map419-checkpoint-focused.log`의9PASS16.33초다.
-현재 확장 시험은 `/tmp/map419-revision-checkpoint-pg.log`의17PASS22.91초이며 최종 합집합
-실행 전 checkpoint다. metadata/oracle·정확 CI·UI·최종 독립2리뷰는 진행 중이다. 아래 수치는 그 시점의 별도 실행이며 최종 합산 수치가 아니다.
+최종 집중 실행은 `/tmp/map419-final-focused.log`의140PASS90.70초와 별도 기존
+converter `/tmp/map419-provider-converter-regression.log`의50PASS0.92초, 중복 없는
+합계190건이다. 부모146건과 A3 PG18/단위4·J tracking4·resource18을 포함한다.
+SDK는 정본 pin을 설치한 전용 target에서 실제 실행했고 기본 CI의 optional skip과 구분한다.
+root/W의6de 제품 delta 승인은 받았지만 아래 최종 시험·문서·main 합성 pin 재대조,
+정확 CI와 fresh UI는 별도 미완이다. 초기/중간 수치는 합산하지 않는다.
 
 ## 실제 전후 증거
 
@@ -33,7 +35,8 @@ Geo/분류·typed base/effective 의미는 legacy EX로 유지하고, 활성 nam
 모든 PG는 소유 fixture의2CPU/1536MiB/PID256 container를 사용하고 finally에서 정리한다.
 초기 oracle 명령은 `/tmp` 수집에서 repo pytest 설정을 빠뜨려 async fixture setup 오류가
 났다. `-c pyproject.toml`로 재실행한 기록 모드는1skip13.70초이며 PASS로 합산하지 않는다.
-추가 SQL 수정 뒤 최종 oracle 재생성과 비교 검증을 다시 수행한다.
+최종 canonical oracle 비교·metadata는 `/tmp/map419-final-oracle-metadata.log`의
+2PASS22.16초다. SQL sidecar4개와 생성 head 내용은 초기 checkpoint와 같다.
 
 ## 명시 선택과 private 증거
 
@@ -72,7 +75,8 @@ attempt finish 순서다. result digest는 full input·manifest/정책 subset·�
 정본 force_features_row_revision BEFORE UPDATE trigger는 모든 core UPDATE에서 OLD+1을
 강제하고, 기존 capture는 detail·override lineage도 포함한다. 전체 core JSON을 다시
 직렬화하지 않으면서 stamp-only와 core 변경을 각각 구분한다. completed는 현재 readonly capture와 target을 재구성해 저장 지문과 같을 때만
-source/winner DML0으로 반환한다. 다르면 stale/replan이고 새 current capture를 옛 성공에
+source/candidate/winner/finish DML0으로 반환한다. 기존 kernel begin 자체의
+scope INSERT ON CONFLICT까지 모든 SQL DML0이라고 부르지는 않는다. 다르면 stale/replan이고 새 current capture를 옛 성공에
 붙이지 않는다. 과거 insert/update 숫자는 저장되지 않아 복원하지 않으며 replay 카운트는0,
 retired는 불명(None)으로 표시한다. client의 새 호출은 항상 새 plan이고 완료 plan을 새 run
 성공으로 전달하는 경로는 거부한다.
@@ -96,9 +100,7 @@ fresh RC 요구와 합쳐 한 TX로 바꾸지 않는다. 기존 root receipt/취
 업로드/등록을 수행하지 않는다(client 모듈의 후속 TODO). 기존 DTO 설명을 실행 사실로
 세지 않는다. 이번 변경은 업로더를 구현하지 않는다. 파일 적재 원자 성공/실제 전송 증거는0이다.
 
-- [ ] fresh old input의 새 plan·최종 권한/metadata·지원 밖 회귀 합집합
-- [ ] 최종 SDK asset/tracking과 전체 회귀 합집합
-- [ ] 최종 metadata/oracle/정적 전체 gate·독립2리뷰·정확 CI·fresh 실제 UI
+- [ ] 최종 고정 pin의 두 독립 제품·문서 재대조/정확 CI·fresh 실제 UI
 - [ ] 5000건/큰 artifact·내구 worker 인계·ARM 비용·운영 opt-in 별도 수용
 
 모든 T-CWRITE 전체 완료 체크박스는 계속 미완이다. EX 경로는 SH 병렬 처리 성과가 아니며
@@ -129,3 +131,24 @@ guard를 끄거나 active cutover를 위조하지 않았다. live/retired area �
 거부되고 정책 미활성임을 확인하는 회귀로 수정했다. 따라서 이 두 건은 이미 공유된
 active place+area에 대한 새 full entry 분기 실행 증거가 아니다. 별도 entity retire 성공과
 정적 validator의 shared entity 거부는 구분한다.
+
+
+## 최종 경계 반증과 정적 게이트
+
+새 회귀 `test_fresh_old_input_after_new_head_is_not_false_success`는 A 계획 cancel→새 B 성공
+뒤 옛 A를 **새 plan**으로 호출한다. 실제 upsert의 became_current=False를 관측한 뒤 정본
+current-source 검증23514로 전체 rollback/cancel되고 B head와 capture가 유지된다.
+completed 재사용 시험과 별개이며 이 반증에는 제품 변경이 없다.
+단독 원장 `/tmp/map419-fresh-old-input.log`는1PASS13.99초이고 최종18PG에 포함되어 중복 합산하지 않는다.
+
+최종 `/tmp/map419-final-lint-docs-r2.log`는377PASS/기존6skip29.91초다.
+첫 원장 `/tmp/map419-final-lint-docs.log`의376PASS6skip1FAIL은 late 조립 sidecar 이름을
+정적 배선 검사가 읽지 못한 실패다. 네 full filename 리터럴과 같은 read 순서로 바꿨고
+ordered DDL bytes/SHA는 같으며 검사기를 완화하지 않았다. 실제 fresh upgrade/oracle2건도
+통과했다. Ruff12경로, strict mypy5파일, import4계약을 통과했다. 최종 문서 편집 뒤
+archive 링크/크기4건은 다시 확인한다.
+
+새 opt-in 자원 wiring은 future worker 실행의 선택 seam이며 이번 실제 asset 시험이
+Dagster resource를 기동한 worker라는 뜻은 아니다. public SDK HTTP는 fixture transport,
+Geo는 고정 계약이며 실제 외부 API 네트워크는0이다. 같은 dataset은 단일 owner/범위 잠금으로
+직렬 처리된다. EX whole refresh의 실제 수용은 SH 운영 병렬화나 전체 writer 폐포의 완료가 아니다.
