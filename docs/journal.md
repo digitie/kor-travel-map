@@ -4,7 +4,7 @@
 
 ## 2026-10-25 · cancellation 원 backend cleanup 후보
 
-- 원 backend identity의 종료 요청1회와 advisory0 확인을 보강했다. SQLAlchemy54/55 관련49 PASS, dc70 actual5 PASS15.763초·정확 정리. 13418 두 PG lane 실패와 아래 초기 시험소스 이력은 보존한다. 새 CI·후보 liveUI·운영은 미완이다. [경계/원실패](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
+- 원 backend 종료 요청1회/advisory0과 SQLAlchemy54/55 순수49·dc70 actual5 PASS를 확인했다. 7839 실제 후보 API·Next·브라우저는 화면취소/replay/DB/WS/logout14판정 PASS·정확 정리했다. 원 CI·build/live FAIL은 보존하며 exact CI/운영은 별도다. [근거](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
 
 ## 2026-10-25 API task 취소·pool 경계 시험 소스
 
