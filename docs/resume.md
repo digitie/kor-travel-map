@@ -1,4 +1,4 @@
-## 2026-10-25 — Rest431 Geo 비교 source 시작
+## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
 
 ## 2026-10-25 — Rest431 reader 미호출 source
 
@@ -7,6 +7,21 @@
 
 
 명시 Rest Geo domain/정확 입력형과 순수106PASS를 확인했다. SQL·reader·215 fit·운영은 미완이다. [source 범위](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
+
+synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
+PG reader 비용·운영 fit는 미측정이며 Airport 상한/제품/SQL/운영 변경0이다.
+Rest 전용 유한 profile과 RR chunk 비교·주간 GC/quota·작은 구현 단위는
+[후속안](reports/2026-10-25-rest-area-snapshot-profile.md)에 기록했다.
+다음은 설계 두 리뷰 뒤 owned PG 비용 lab 구현이며 동시 worker 수용은 미완이다.
+
+## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
+
+정본215 tuple의 Geo 유무 lossless roundtrip과 전행 byte/node/token 거부를 구현했다.
+Airport 기존 wrapper/상한을 보존하며 codec·관측·후처리 순수231 PASS/skip0,
+Ruff/mypy/import 검사를 확인했다. SQL/등록/collector/운영 변경0이고 두 리뷰·CI/PG는 미완이다.
+[범위·실측](reports/2026-10-25-rest-area-snapshot-artifact.md). 다음은 독립 source 검토와 J reader lab 결합이다.
 
 ## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
 
