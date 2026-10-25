@@ -162,6 +162,7 @@ BEGIN
     IF jsonb_typeof(v_payload->'pins') IS DISTINCT FROM 'object'
        OR jsonb_typeof(v_payload->'bundles') IS DISTINCT FROM 'array'
        OR jsonb_typeof(v_context->'validation') IS DISTINCT FROM 'object'
+       OR jsonb_typeof(v_context->'geo_stats') NOT IN ('object','null')
        OR jsonb_typeof(v_context->'observation_generation') IS DISTINCT FROM 'string' THEN
         RAISE EXCEPTION 'unsupported snapshot envelope shape' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_registration_domain';

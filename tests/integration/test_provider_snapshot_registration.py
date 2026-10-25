@@ -306,7 +306,21 @@ async def test_same_member_different_immutable_bytes_rejected(registration_engin
         )
 
 
-@pytest.mark.parametrize("broken", ["domain", "root", "sha", "count", "eof", "lease"])
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "domain",
+        "root",
+        "sha",
+        "count",
+        "eof",
+        "lease",
+        "geo_int",
+        "geo_array",
+        "geo_str",
+        "geo_bool",
+    ],
+)
 async def test_invalid_header_or_lease_has_no_registration(registration_engines, broken):
     admin, runtime = registration_engines
     dataset, run, _, args = await _prepare(admin, runtime)
@@ -318,6 +332,10 @@ async def test_invalid_header_or_lease_has_no_registration(registration_engines,
         "sha": ("artifact_sha256", "0" * 64),
         "count": ("source_observations", 2),
         "eof": ("upstream_eof", False),
+        "geo_int": ("geo_stats", 1),
+        "geo_array": ("geo_stats", []),
+        "geo_str": ("geo_stats", "invalid"),
+        "geo_bool": ("geo_stats", False),
         "lease": ("domain", context["domain"]),
     }[broken]
     context[field] = value

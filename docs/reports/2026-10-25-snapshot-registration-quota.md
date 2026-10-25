@@ -55,3 +55,12 @@ collect-only 외 실제 PG·SQL실행/공유430 migration·원자 복구 수용�
 후속 source checkpoint의 정적 확인은 Ruff/format·redaction·diff 통과와 통합15개 collect-only
 1.16초다. collection은 fixture/SQL 실행 또는 정상 등록 수용이 아니다. 두 source 리뷰·공유430
 배선과 별도 owned PG gate 전 실제 실행하지 않는다.
+
+## observation Geo 외부 shape 보정
+
+독립 FULL 검토에서0774의 `geo_stats` 외부 shape 검사 누락을 확인했다. 등록 header는
+object 또는 JSON null만 허용하려던 계약이므로 정수·배열·문자열·boolean도 통과하던
+source를 P2 HOLD로 정정했다. 후속 canonical decode가 이를 거부한다는 사실은 원래부터
+유지되며 잘못된 apply 성공으로 확대하지 않는다. SQL 조건 한 곳과 기존 header 부정 시험의
+네 입력만 추가했다. 기존 null 정상 입력·모든 assert·quota/불변입력/역할/잠금 순서는 그대로다.
+전체 Geo 내부키/값 권위는 여전히 후속 codec/apply 책임이다. 실제 PG는 실행하지 않았다.
