@@ -137,3 +137,10 @@ Root의 별도 fresh cleanup 관찰과 T의 독립 raw/XML/source/SDK 대조를 
 
 수용 원장: Root 92dabe43172653b93f58f1fc0586eba65e8d06ccc1d11257b6dacfa9e025502a,
 T eddcc7e88493fe72cce65373abc0f499bbdb0071188d6dd159ff08fdee5d5a30.
+
+
+## 최초 정확 CI의 계약 핀 정산
+
+a216f362의 첫 CI는 Python 3.11/3.12/3.13에서 각각 3,827 PASS·7 SKIP와 같은 두 계약 핀 검사 FAIL을 냈다. 기존 503 응답 description 두 곳의 DB 연결 정리 문구를 OpenAPI에 반영하면서 vNext admin baseline과 pending T-VN-40 receipt의 full-admin SHA를 함께 갱신하지 못한 원인이다. PG 통합 lane은 실행되지 않았다. 원 CI 로그는 보존하며 제품 회귀 실패나 PG PASS로 계산하지 않는다.
+
+이번 수정은 두 정본 SHA와 그 artifact freeze 상수 및 변경 사유만 원자 갱신한다. user/service spec·제품·통합시험은 그대로이며, PinVi re-vendor·paired live 검증 전 receipt는 계속 pending이다. 새 정확 CI와 live UI·배포 수용은 별도 미완이다.
