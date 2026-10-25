@@ -61,3 +61,9 @@ SER 조기거부 시험은 유지했다. 제품/guard 변경은 앞선 no-op sid
 배제하지만 일반 remove policy의 handoff는 별도 fresh EX plan/apply가 필요하다.
 no-op 수정으로 이 경계의 SH 지원까지 완료했다고 주장하지 않는다. 기존 foreign 변경
 부정 시험은 유지하며 EX handoff paired proof는 별도 미완이다.
+
+추가 actual source는 canonical policy2의 `omitted_policy=remove`와 양 provider의 정본
+후보 capture를 사용한다. SH에서 A name 제거→B winner 선택은23514/원head·base rollback을
+확인하고 그 ready plan을 typed cancel한 뒤 새EX attempt로 같은 raw/hash/관측시각을 적용한다.
+B winner 출처·A removed 상태·own phones·원시각 및 두 attempt의 cancelled/completed까지
+대조할 계획이며19개 scalar 수집/Ruff만 확인했다. 실제 결과는 아직 미완이다.
