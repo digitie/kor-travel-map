@@ -1,3 +1,14 @@
+## 2026-10-26 — Rest432 추가 물리 경합·후보 UI 수용과 CI 잔여 정정
+
+`511da0a0`에서 새 물리 경합 3개와 양 profile 계측 2개, fresh build 기반 후보 UI
+14개 판정이 통과했다. 원 실패·cleanup 및 계측 범위는 보존하며 운영432 배포 완료를
+뜻하지 않는다. 운영431과 별개로 최종 CI·머지/배포 수용은 계속 대기한다.
+
+세 Python CI lane은 같은 static lint 1FAIL(각 4425PASS/7SKIP)을 보였다. 새 seal-race의
+비실행 listener marker를 실제 procedure 호출로 오인한 경계여서 marker의 `CALL `만
+제거했다. 실제 SQL의 9인자·핵심 단언·검사기·allowlist는 그대로이며 수정 후 최종 CI는
+아직 대기한다. [수용 범위](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — Rest432 설계 누락 경합·계측 시험 보강
 
 실제215·quota/GC5·복구3·두writer2 PASS와 별도로 설계 S5를 대조해 동일member등록,

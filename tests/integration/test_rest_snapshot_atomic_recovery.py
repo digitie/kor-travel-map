@@ -423,7 +423,7 @@ async def test_physical_seal_between_original_read_and_claim_restores_original_r
         assert old.postprocess_receipt is not None
         for pool, kind, needle in [
             (pools[0], "claim", "ops.claim_provider_snapshot_executor("),
-            (pools[1], "seal", "CALL ops.seal_provider_snapshot_member("),
+            (pools[1], "seal", "ops.seal_provider_snapshot_member("),
         ]:
             listener = observe_sql(kind, needle)
             event.listen(pool.sync_engine, "before_cursor_execute", listener)
