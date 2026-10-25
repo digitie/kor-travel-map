@@ -4,7 +4,7 @@ RETURNS jsonb LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO pg_cat
 DECLARE
     p_entities text[]; v_scope record; v_scope_count integer:=0;
     v_scope_bytes bigint:=0; v_scope_refs jsonb:='[]';
-    v_inv jsonb; v_data jsonb:='{}'; v_rows jsonb; v_reason text;
+    v_inv jsonb; v_data jsonb:='{}'; v_lookup jsonb; v_rows jsonb; v_reason text;
     v_key text; v_entity jsonb; v_link jsonb; v_feature jsonb; v_active jsonb;
     v_policy jsonb; v_candidate jsonb; v_phones jsonb; v_phones_base jsonb; v_head jsonb; v_stamp jsonb; v_claim jsonb;
     v_record jsonb; v_current_record jsonb; v_value_record jsonb; v_phones_record jsonb; v_base_record jsonb;
@@ -162,33 +162,67 @@ BEGIN
         ON t.tableoid=r.relation AND t.ctid=r.tid
       WHERE r.kind='feature_geocode_stamps';
     v_data:=jsonb_set(v_data,ARRAY['feature_geocode_stamps'],v_rows);
+    -- 동일 bounded payload를 key별 배열로 한 번 묶는다. 행을 덮어쓰지 않고
+    -- 원 ordinal을 보존하여 아래 count/첫 행/중복/NULL 검사는 그대로 수행한다.
+    SELECT COALESCE(jsonb_object_agg(g.index_name,g.entries),'{}'::jsonb)
+      INTO v_lookup
+      FROM (
+        SELECT r.index_name,jsonb_object_agg(r.lookup_key,r.rows) AS entries
+        FROM (
+          SELECT k.index_name,
+            CASE WHEN k.key_mode='text' THEN x.value->>k.key_field
+                 ELSE (x.value->k.key_field)::text END AS lookup_key,
+            jsonb_agg(x.value ORDER BY x.ordinality) AS rows
+          FROM (VALUES
+            ('source_entities','source_entities','source_entity_key','text'),
+            ('source_entity_heads','source_entity_heads','source_entity_key','text'),
+            ('source_links','source_links','source_entity_key','text'),
+            ('features','features','feature_id','json'),
+            ('provider_field_active_policies','provider_field_active_policies','feature_id','json'),
+            ('provider_field_shadow_policies','provider_field_shadow_policies','policy_revision','json'),
+            ('provider_field_shadow_candidates','provider_field_shadow_candidates','feature_id','json'),
+            ('source_records_json','source_records','source_record_key','json'),
+            ('source_records_text','source_records','source_record_key','text'),
+            ('provider_feature_identities','provider_feature_identities','feature_id','json'),
+            ('feature_base_field_values','feature_base_field_values','feature_id','json'),
+            ('feature_geocode_stamps','feature_geocode_stamps','feature_id','json')
+          ) AS k(index_name,relation_name,key_field,key_mode)
+          CROSS JOIN LATERAL jsonb_array_elements(v_data->k.relation_name)
+            WITH ORDINALITY AS x(value,ordinality)
+          GROUP BY k.index_name,lookup_key
+        ) r
+        WHERE r.lookup_key IS NOT NULL
+        GROUP BY r.index_name
+      ) g;
+    -- 이후에는 그룹만 읽는다. 원 관계 배열의 장기 중복 보관을 피한다.
+    v_data:='{}';
     <<targets>>
     FOREACH v_key IN ARRAY p_entities LOOP
         v_reason:=NULL; v_phones_base:=NULL;
-        SELECT x INTO v_entity FROM jsonb_array_elements(v_data->'source_entities') x
+        SELECT x INTO v_entity FROM jsonb_array_elements(COALESCE(v_lookup->'source_entities'->(v_key),'[]'::jsonb)) x
           WHERE x->>'source_entity_key'=v_key;
-        SELECT x INTO v_head FROM jsonb_array_elements(v_data->'source_entity_heads') x
+        SELECT x INTO v_head FROM jsonb_array_elements(COALESCE(v_lookup->'source_entity_heads'->(v_key),'[]'::jsonb)) x
           WHERE x->>'source_entity_key'=v_key;
-        IF (SELECT count(*) FROM jsonb_array_elements(v_data->'source_links') x WHERE x->>'source_entity_key'=v_key)<>1 THEN
+        IF (SELECT count(*) FROM jsonb_array_elements(COALESCE(v_lookup->'source_links'->(v_key),'[]'::jsonb)) x WHERE x->>'source_entity_key'=v_key)<>1 THEN
             v_reason:='unsupported_membership'; EXIT targets;
         END IF;
-        SELECT x INTO v_link FROM jsonb_array_elements(v_data->'source_links') x
+        SELECT x INTO v_link FROM jsonb_array_elements(COALESCE(v_lookup->'source_links'->(v_key),'[]'::jsonb)) x
           WHERE x->>'source_entity_key'=v_key;
         IF v_entity IS NULL OR v_head IS NULL OR v_link IS NULL THEN
             v_reason:='missing_source'; EXIT targets;
         END IF;
-        SELECT x INTO v_feature FROM jsonb_array_elements(v_data->'features') x
+        SELECT x INTO v_feature FROM jsonb_array_elements(COALESCE(v_lookup->'features'->((v_link->'feature_id')::text),'[]'::jsonb)) x
           WHERE x->'feature_id'=v_link->'feature_id';
         IF v_feature IS NULL OR v_feature->>'kind' IS DISTINCT FROM 'place'
            OR v_feature->>'lifecycle_state' IS DISTINCT FROM 'active' THEN
             v_reason:='inactive_feature'; EXIT targets;
         END IF;
-        SELECT x INTO v_active FROM jsonb_array_elements(v_data->'provider_field_active_policies') x
+        SELECT x INTO v_active FROM jsonb_array_elements(COALESCE(v_lookup->'provider_field_active_policies'->((v_link->'feature_id')::text),'[]'::jsonb)) x
           WHERE x->'feature_id'=v_link->'feature_id';
         IF v_active IS NULL OR v_active->'field_paths' IS DISTINCT FROM '["core.name","place.phones"]'::jsonb THEN
             v_reason:='policy_unsupported'; EXIT targets;
         END IF;
-        SELECT x INTO v_policy FROM jsonb_array_elements(v_data->'provider_field_shadow_policies') x
+        SELECT x INTO v_policy FROM jsonb_array_elements(COALESCE(v_lookup->'provider_field_shadow_policies'->((v_active->'policy_revision')::text),'[]'::jsonb)) x
           WHERE x->'policy_revision'=v_active->'policy_revision';
         IF v_policy IS NULL OR v_policy->>'normalizer_revision' IS DISTINCT FROM 'transport-rest-area-name-phones-v1'
            OR jsonb_typeof(v_policy->'fields') IS DISTINCT FROM 'array' THEN
@@ -215,10 +249,10 @@ BEGIN
                 v_reason:='policy_unsupported'; EXIT targets;
             END IF;
         END LOOP;
-        IF (SELECT count(*) FROM jsonb_array_elements(v_data->'provider_field_shadow_candidates') x WHERE x->'feature_id'=v_link->'feature_id' AND x->'policy_revision'=v_active->'policy_revision')<>2 THEN
+        IF (SELECT count(*) FROM jsonb_array_elements(COALESCE(v_lookup->'provider_field_shadow_candidates'->((v_link->'feature_id')::text),'[]'::jsonb)) x WHERE x->'feature_id'=v_link->'feature_id' AND x->'policy_revision'=v_active->'policy_revision')<>2 THEN
             v_reason:='policy_unsupported'; EXIT targets;
         END IF;
-        SELECT x INTO v_candidate FROM jsonb_array_elements(v_data->'provider_field_shadow_candidates') x
+        SELECT x INTO v_candidate FROM jsonb_array_elements(COALESCE(v_lookup->'provider_field_shadow_candidates'->((v_link->'feature_id')::text),'[]'::jsonb)) x
           WHERE x->'feature_id'=v_link->'feature_id' AND x->'policy_revision'=v_active->'policy_revision' AND x->>'field_path'='core.name';
         IF v_candidate IS NULL OR v_candidate->>'field_path' IS DISTINCT FROM 'core.name'
            OR v_candidate->>'source_entity_key' IS DISTINCT FROM v_key
@@ -232,7 +266,7 @@ BEGIN
            OR v_head->'expires_at' IS DISTINCT FROM 'null'::jsonb THEN
             v_reason:='lineage_incomplete'; EXIT targets;
         END IF;
-        SELECT x INTO v_phones FROM jsonb_array_elements(v_data->'provider_field_shadow_candidates') x
+        SELECT x INTO v_phones FROM jsonb_array_elements(COALESCE(v_lookup->'provider_field_shadow_candidates'->((v_link->'feature_id')::text),'[]'::jsonb)) x
           WHERE x->'feature_id'=v_link->'feature_id' AND x->'policy_revision'=v_active->'policy_revision'
             AND x->>'field_path'='place.phones';
         IF v_phones IS NULL OR v_phones->>'source_entity_key' IS DISTINCT FROM v_key
@@ -255,9 +289,9 @@ BEGIN
            OR v_phones->'value_source_hash' IS DISTINCT FROM v_candidate->'value_source_hash' THEN
             v_reason:='mixed_scalar_lineage'; EXIT targets;
         END IF;
-        SELECT x INTO v_current_record FROM jsonb_array_elements(v_data->'source_records') x
+        SELECT x INTO v_current_record FROM jsonb_array_elements(COALESCE(v_lookup->'source_records_json'->((v_head->'current_source_record_key')::text),'[]'::jsonb)) x
           WHERE x->'source_record_key'=v_head->'current_source_record_key';
-        SELECT x INTO v_value_record FROM jsonb_array_elements(v_data->'source_records') x
+        SELECT x INTO v_value_record FROM jsonb_array_elements(COALESCE(v_lookup->'source_records_json'->((v_candidate->'value_source_record_key')::text),'[]'::jsonb)) x
           WHERE x->'source_record_key'=v_candidate->'value_source_record_key';
         IF v_current_record IS NULL OR v_value_record IS NULL
            OR v_current_record->>'source_entity_key' IS DISTINCT FROM v_key
@@ -276,10 +310,10 @@ BEGIN
            OR v_phones->'value_observed_at' IS DISTINCT FROM v_phones_record->'fetched_at' THEN
             v_reason:='lineage_incomplete'; EXIT targets;
         END IF;
-        IF (SELECT count(*) FROM jsonb_array_elements(v_data->'provider_feature_identities') x WHERE x->'feature_id'=v_link->'feature_id')<>1 THEN
+        IF (SELECT count(*) FROM jsonb_array_elements(COALESCE(v_lookup->'provider_feature_identities'->((v_link->'feature_id')::text),'[]'::jsonb)) x WHERE x->'feature_id'=v_link->'feature_id')<>1 THEN
             v_reason:='lineage_incomplete'; EXIT targets;
         END IF;
-        SELECT x INTO v_claim FROM jsonb_array_elements(v_data->'provider_feature_identities') x
+        SELECT x INTO v_claim FROM jsonb_array_elements(COALESCE(v_lookup->'provider_feature_identities'->((v_link->'feature_id')::text),'[]'::jsonb)) x
           WHERE x->'feature_id'=v_link->'feature_id';
         IF v_claim IS NULL OR v_claim->>'feature_kind' IS DISTINCT FROM 'place'
            OR v_claim->'provider_dataset_id' IS DISTINCT FROM to_jsonb(p_dataset)
@@ -288,7 +322,7 @@ BEGIN
         END IF;
         v_base:='{}'; v_base_rows:='[]'; v_base_key:=NULL; v_name_base:=NULL;
         v_coord_json:=NULL; v_geometry:=NULL; v_count:=0;
-        FOR v_row IN SELECT x FROM jsonb_array_elements(v_data->'feature_base_field_values') x
+        FOR v_row IN SELECT x FROM jsonb_array_elements(COALESCE(v_lookup->'feature_base_field_values'->((v_link->'feature_id')::text),'[]'::jsonb)) x
           WHERE x->'feature_id'=v_link->'feature_id'
         LOOP
             v_count:=v_count+1;
@@ -347,7 +381,7 @@ BEGIN
         IF v_count<>25 OR jsonb_array_length(v_base_rows)<>23 OR v_base_key IS NULL OR v_phones_base IS NULL THEN
             v_reason:='lineage_incomplete'; EXIT targets;
         END IF;
-        SELECT x INTO v_base_record FROM jsonb_array_elements(v_data->'source_records') x
+        SELECT x INTO v_base_record FROM jsonb_array_elements(COALESCE(v_lookup->'source_records_text'->(v_base_key),'[]'::jsonb)) x
           WHERE x->>'source_record_key'=v_base_key;
         IF v_base_record IS NULL OR v_base_record->>'source_entity_key' IS DISTINCT FROM v_key THEN
             v_reason:='lineage_incomplete'; EXIT targets;
@@ -384,7 +418,7 @@ BEGIN
            OR v_feature->>'geometry_ewkb' IS DISTINCT FROM encode(x_extension.st_asewkb(v_geometry,'NDR'),'hex') THEN
             v_reason:='geo_evidence_unsupported'; EXIT targets;
         END IF;
-        SELECT x INTO v_stamp FROM jsonb_array_elements(v_data->'feature_geocode_stamps') x
+        SELECT x INTO v_stamp FROM jsonb_array_elements(COALESCE(v_lookup->'feature_geocode_stamps'->((v_link->'feature_id')::text),'[]'::jsonb)) x
           WHERE x->'feature_id'=v_link->'feature_id';
         v_item:=jsonb_build_object('source_entity',v_entity,'source_head',v_head,
             'feature',v_feature,'claim',v_claim,'membership',v_link,'active_policy',v_active,

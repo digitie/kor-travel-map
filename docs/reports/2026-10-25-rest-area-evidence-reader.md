@@ -8,7 +8,8 @@
 경계까지 source로 준비했다. 신규 typed SD의 최소 ACL/optional/startup signature만 연결했고
 공개 converter 기반 preparation/assessment와 전용 실제 lab fixture도 source로 준비했다.
 격리된 owned PG에서 아래 원본 lab·catalog2·공식 oracle1·64진단을 실행했다. 등록·collector·
-운영 flag는0이며 Git golden은 실제430을 보존한다. A1 SQL 변경 후 실제 재검증은 아직 미완이다.
+운영 flag는0이며 Git golden은 실제430을 보존한다. A1 실제64 진단과 원 lab 재시험까지 완료했고215는 원3초 timeout으로 미완이다.
+현재 A2 변경 후 재검증은 아직 수행하지 않았다.
 기존 Airport427/430 코드·공통 projection·SDK converter는 변경하지 않았다.
 
 Geo pins domain은 `transport-rest-area-geo-v1`, 지문 framing domain은
@@ -176,3 +177,39 @@ shape를 보존하며 whole 역변환이 원SQL SHA9aa87f0e와 일치한다. SQL
 cleanup15초이며 seed 뒤 별도150초를 더 주지 않는다. 원 실패도 CID/UUID/global label0와
 volume 부재를 확인했다. 소스/SDK/import 전후 대조와 정확 정리를 유지하며 운영 SQL·
 collector·등록/재개·Chrome 실행은0이다. 최종215 fit·운영 EOF·CPU/RSS 수용은 미완이다.
+
+
+## A1 전후 실제 결과와 A2 source
+
+A1 `9c09aac`의 독립 delta는 W `af42aaa2`/T `2f77997b`가 수용했다. 같은64 진단 한 회에서
+metadata_complete=True/refs2242를 유지하며 inventory wall은2.537425→0.051321초,
+backend CPU는2.53→0.05초였다. public SD64는 이전3초57014 대신0.801235초/CPU0.78초에
+완료했다. decoder64는64행 complete, assessment는 unchanged_reobservation 적격이었다.
+동일 조건 한 번의 관측으로 분포·선형성·215 수용을 주장하지 않는다. 새 진단 원장 SHA는
+`00927fdf6d738cb5ccf77e715344934ac1e8f59b18aa4258194f1d59566a2947`다.
+
+원 lab 재시험은1/15/64/128에서 complete·unchanged였다. codec+두 reader를 포함한 client
+wall은0.076075/0.334079/2.115582/6.391132초다. 각 reader의3초 상한은 그대로이며 합산 wall과
+혼동하지 않는다.215 첫 read에서 원 asyncio3초 TimeoutError로 실패해215 complete와257은
+미도달이다. pytest46.65초/XML suite46.151초/case45.853초와 원FAIL을 보존했다. Git2542·
+SDK53·import15와 양 CID/UUID/global label0·volume1 부재를 전수 대조했다. 실패 뒤 원 runner의
+성공 전용 post검사 미도달은 별도 읽기 전용 대조로 보완했으며 원결과를 고치지 않았다.
+W의 baseline+진단+lab 독립 사실검산은 `27f60d2f`다.
+
+A2는 public reader 한 파일에서 전체 bounded payload를 metadata 성공 후 고정12개 key별
+배열 그룹으로 한 번 묶고 target 내부17개의 관계 전체 배열 탐색을 해당 그룹 탐색으로
+바꾼다. source record는 기존 text/JSON 비교를 각각 보존하도록 두 index로 구분하며 나머지
+key도 원 비교 종류에 맞춘다. key는 정본 DB의 text/UUID/bigint JSON 값에서만 유도한다.
+targets가 v_data를 더 이상 참조하지 않음을 검산하고 그룹 구성 뒤 원 배열 변수를 빈 객체로
+바꿨다. 실제 RSS 감소나 메모리 해제량을 보장한다는 뜻은 아니다.
+그룹은 원 ordinal의 전체 행을 보존하고 objectagg 전에 key별 집계하므로 중복을 덮어쓰지
+않는다. 기존 WHERE/count/첫 행/중복·NULL/policy/source/Geo/base25 검사는 그대로다.
+SQL NULL lookup key는 원 WHERE와 같이 불일치하고 JSON null key는 보존한다.
+
+원 public SQL SHA0976e46a에 대한 전체 역변환을 확인했다. A1 inventory·bulk SELECT·CASE·
+STABLE/ACL·item/metadata/encoded 한도·출력shape·전체 EOF와 v_items concat은 바꾸지 않았다.
+A2의 추가 working memory·성능/선형성은 아직 미측정이며 같은64 진단과215 lab으로 확인한다.
+원 더티 WT와 원 모든 FAIL을 보존하고 등록/collector/운영0을 유지한다.
+
+A2 기본 관련 순수6모듈242PASS9.77초를 확인했다. 변경 후 실제SQL/parser·비용/fit 재검증은
+미완으로 분리하며 마지막 SQL에서 공식 golden을 갱신한다.
