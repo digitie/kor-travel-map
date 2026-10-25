@@ -1,3 +1,7 @@
+## 2026-10-25 — 공항 reader Geo 계약(427, 부분)
+
+- 고정 Geo 비교 domain과 순수26개 경계를 확인했다. SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
+
 ## 2026-10-25 — Transport 순수 투영 진단(미수용)
 
 - 기존 converter로 raw7을 복원하고 명시 presence·동일 raw 진단을 추가했다. 지수 반례4 FAIL을 보존하고 범위 비교만 고쳐 순수45 PASS를 확인했다. 좌표 객체 입력도 보강해47 PASS다. DB/reader/worker는 미배선이며 [범위·미완](reports/2026-10-25-transport-native-eligibility.md)을 분리한다.
