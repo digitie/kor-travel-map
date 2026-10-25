@@ -204,7 +204,10 @@ def _with_meta(**changes: Any) -> dict[str, Any]:
 
 def _as_wire(response: httpx.Response) -> httpx.Response:
     """``content=``·``json=``로 만든 응답은 이미 읽힌 상태라 ``aiter_raw``가 ``StreamConsumed``를
-    낸다 — 실제 전송처럼 원문 stream으로 다시 싼다(``_raw`` 응답은 그대로)."""
+    낸다 — 실제 전송처럼 원문 stream으로 다시 싼다(``_raw`` 응답은 그대로).
+
+    주의: 이미 풀린 ``content``를 원래 ``Content-Encoding`` header와 함께 다시 싸므로, 압축 응답은
+    ``content=``가 아니라 ``_raw``로 만들어야 한다(아니면 평문이 gzip으로 선언된다)."""
     try:
         data = response.content
     except httpx.ResponseNotRead:
@@ -432,6 +435,8 @@ async def test_price_history_gzip_is_capped_after_decompression() -> None:
     [
         (b"not gzip at all", "gzip"),
         (gzip.compress(json.dumps(_page()).encode())[:-12], "gzip"),  # 잘린 gzip
+        (gzip.compress(json.dumps(_page()).encode()) + b"GARBAGE", "gzip"),  # 끝 뒤 쓰레기
+        (gzip.compress(json.dumps(_page()).encode()) * 2, "gzip"),  # 두 번째 member
         (b"{}", "br"),
     ],
 )
@@ -440,6 +445,48 @@ async def test_price_history_bad_content_encoding_is_upstream_contract(
 ) -> None:
     outcome = await _fetch(lambda _r: _raw(200, data, {"Content-Encoding": encoding}))
     assert (outcome.history, outcome.reason) == (None, "upstream_contract")
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        httpx.ReadTimeout("slow"),
+        httpx.RemoteProtocolError("peer closed"),
+        httpx.ReadError("reset"),
+    ],
+)
+async def test_price_history_503_body_read_failure_is_classified_by_status(
+    error: httpx.TransportError,
+) -> None:
+    """503 상태는 받았는데 problem 본문을 읽다 끊기면 no_collection 여부를 모른다 — timeout이
+    아니라 상태 코드대로 ``upstream_unavailable``이다."""
+
+    async def _broken() -> Any:
+        yield b'{"meta":'
+        raise error
+
+    outcome = await _fetch(lambda _r: httpx.Response(503, content=_broken()))
+    assert (outcome.history, outcome.reason) == (None, "upstream_unavailable")
+
+
+@pytest.mark.parametrize(
+    ("error", "reason"),
+    [
+        (httpx.ReadTimeout("slow"), "upstream_timeout"),
+        (httpx.RemoteProtocolError("peer closed"), "upstream_unavailable"),
+    ],
+)
+async def test_price_history_200_body_read_failure_keeps_network_reason(
+    error: httpx.TransportError, reason: str
+) -> None:
+    """200 본문은 읽어야 답이 된다 — 읽는 중 끊김은 그대로 네트워크 실패로 분류한다."""
+
+    async def _broken() -> Any:
+        yield b'{"items":'
+        raise error
+
+    outcome = await _fetch(lambda _r: httpx.Response(200, content=_broken()))
+    assert (outcome.history, outcome.reason) == (None, reason)
 
 
 async def test_price_history_stream_is_cut_before_buffering_past_the_cap() -> None:
