@@ -140,3 +140,36 @@ def test_inactive_feature_does_not_bypass_exact_manifest_target():
     assert "ck_strict_data_feature_eligibility" in source
     assert "source_role='primary'" in source
     assert "OLD.source_entity_key IS DISTINCT FROM NEW.source_entity_key" in source
+
+
+def test_private_canonical_acl_uses_actual_owner_windows_and_optional_parent():
+    from kortravelmap.infra import runtime_privileges as privileges
+
+    state_names = {
+        "feature._strict_sh_data_context",
+        "feature._strict_sh_data_statement_guard",
+        "feature._strict_sh_source_row_guard",
+        "feature._strict_sh_feature_row_guard",
+    }
+    installer = "feature._install_strict_sh_data_guards"
+    windows = dict(privileges._ACL_ROLE_WINDOWS)
+    for name in state_names:
+        assert any(name + "(...)" in sql for sql in windows["ktm_feature_state_procedure_owner"])
+        assert not any(name + "(...)" in sql for sql in windows["ktm_feature_schema_owner"])
+    assert any(installer + "(...)" in sql for sql in windows["ktm_feature_schema_owner"])
+    assert not any(
+        installer + "(...)" in sql for sql in windows["ktm_feature_state_procedure_owner"]
+    )
+    for name in state_names | {installer}:
+        assert privileges._OPTIONAL_ROUTINES[name] == _migration.revision
+    assert privileges._render_acl_statements(privileges._STRICT_SH_DATA_SCHEMA_OWNER_ACL, {}) == ()
+    assert privileges._render_acl_statements(privileges._STRICT_SH_DATA_STATE_OWNER_ACL, {}) == ()
+    for sql in privileges._STRICT_SH_DATA_STATE_OWNER_ACL:
+        if sql.startswith("GRANT"):
+            assert sql.endswith("TO ktm_feature_schema_owner")
+    assert not any("GRANT" in sql for sql in privileges._STRICT_SH_DATA_SCHEMA_OWNER_ACL)
+    assert not any(
+        "SELECT feature._install_strict_sh_data_guards" in sql
+        for _, statements in privileges._ACL_ROLE_WINDOWS
+        for sql in statements
+    )

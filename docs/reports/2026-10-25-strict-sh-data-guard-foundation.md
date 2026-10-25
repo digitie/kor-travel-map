@@ -2,17 +2,17 @@
 
 ## 범위
 
-기준426 부모 `80c404926d3b983dc7ed205b378ee39f85f19285` 위에429의 비활성 private 함수와
-installer 정의만 추가했다. `429_strict_sh_data_guards`는32자 이하이며 down428은 예약한
-`428_bounded_curation_capture`다. 현재 worktree에는427/428이 아직 상속되지 않았으므로
-전체 migration graph·fresh bootstrap·공식 oracle는 미검증이다. 다른 작업자의427/428
-제품·runtime_privileges·기존 activation installer와 기존51 trigger 집합은 변경하지 않았다.
+최초426 부모 `80c404926d3b983dc7ed205b378ee39f85f19285` 위에429의 비활성 private 함수와
+installer 정의만 추가했다. `429_strict_sh_data_guards`는32자 이하이며 down428은
+`428_bounded_curation_capture`다. 당시427/428 미상속 상태에서 실제 migration graph·fresh
+bootstrap·공식 oracle를 검증하지 않았다. 이후 검토된428 부모를 상속한 내용은 아래에
+분리한다. 기존 activation installer와 기존51 trigger 집합은 변경하지 않았다.
 
 migration은 private 함수 네 개를 state procedure owner로 만들고, 입력 없는 private
 installer는 schema owner로 만든다. PUBLIC/runtime/service/provider executor의 직접 EXEC는
 회수하고 schema owner의 trigger 생성에 필요한 네 함수 EXEC만 부여한다. 소유자의 기존
 CREATE 유무와 짧은 caller timeout을 보존한다. 새 runtime SD allowlist 항목이나 직접 표
-권한은 추가하지 않는다. runtime_privileges 정본 동기화는428 부모 합성 뒤 별도 gate다.
+권한은 추가하지 않는다. 권한 정본 동기화는 아래428 부모 합성 단계에서 별도 검토한다.
 
 ## 정의한 경계
 
@@ -104,3 +104,23 @@ retired 상태의 publication_state=suppressed 계약도 적용했다. 두 준�
 두번째 검토자가 address negative의 plain text가 jsonb 입력 변환에서 먼저22P02를
 일으킨다고 지적했다. address를 유효한 JSON object bind로만 정정해 실제 guard까지
 도달하도록 했다. 기존 SQL guard와 오류 기대값은 그대로이며 실제 PG는 아직0이다.
+
+## 428 부모 상속과 권한 역할 정본
+
+정책 없는 target P2와 시험 준비 오류를 두 독립 source 검토로 보강한 뒤,
+`b748bccfb19e4cedd9b081c660b2d4488e86366c` 부모를 합성했다. 부모의427 SQL/decoder와428
+함수·통합37/공식 oracle1 결과 및 전체 문서 suffix를 보존한다. 뒤의427 prepare seam은
+별도 부모이므로 아직 상속하지 않았다. 429 SQL과 integration30 source는 f2fb와 같다.
+
+권한 정본은 state procedure owner 창에서 private4개 REVOKE와 schema owner dependency
+EXEC만 복구한다. schema owner 창은 그 소유의 private installer1개 REVOKE만 수행한다.
+5개 함수는429 이전 head에서 optional로만 건너뛰며 runtime/service/provider executor에
+EXEC나 표 권한을 추가하지 않는다. reconcile은 installer를 호출하지 않는다. 새 회귀는
+실제 owner별 ACL창·optional skip·dependency 수신 role을 확인한다.
+
+429 graph를 생성하고 전용 migration/권한/정본 head/squash 단위67 PASS7.34초, Ruff4·
+mypy1 PASS를 확인했다. 처음 존재하지 않는 graph 시험 파일명을 지정한 collection 오류는
+시험 실행0인 채로 보존하고 실제 파일명으로 정정했다. tracked schema dump는 부모428의
+실제 검증본 그대로이며429 공식 oracle가 아니다. 새 source 두 검토 뒤에만 별도 owned PG
+준비를 진행한다. 429 실제30·전체8 targets/정상 finish·설치 중 DDL rollback·취소/pool정리·
+전체 writer closure·RC·durable recovery·자동 설치·SH 활성화는 여전히 미완이다.

@@ -133,9 +133,7 @@ _ROUTE_AREA_RUNTIME_INSERT_COLUMNS: Mapping[str, tuple[str, ...]] = {
 }
 
 _ROUTE_AREA_RUNTIME_UPDATE_COLUMNS: Mapping[str, tuple[str, ...]] = {
-    relation: tuple(
-        column for column in columns if column not in {"feature_id", "kind"}
-    )
+    relation: tuple(column for column in columns if column not in {"feature_id", "kind"})
     for relation, columns in _ROUTE_AREA_RUNTIME_INSERT_COLUMNS.items()
 }
 
@@ -181,8 +179,7 @@ _STATE_PROCEDURE_GEOMETRY_GRANTS = tuple(
     for relation in sorted(_GEOMETRY_BEARING_RELATIONS)
     for statement in (
         f"GRANT SELECT ON feature.{relation} TO ktm_feature_state_procedure_owner",
-        f"GRANT UPDATE (geom) ON feature.{relation} "
-        "TO ktm_feature_state_procedure_owner",
+        f"GRANT UPDATE (geom) ON feature.{relation} TO ktm_feature_state_procedure_owner",
     )
 )
 
@@ -414,13 +411,60 @@ _CORE_FEATURE_GRANTS = (
     "GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime",
 )
 
+_BOUNDED_CAPTURE_SCHEMA_OWNER_ACL = (
+    "REVOKE ALL ON FUNCTION feature._bounded_curation_string_object(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
+    "REVOKE ALL ON FUNCTION feature._bounded_provider_curation_input_set(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._bounded_provider_curation_input_set(...) "
+    "TO ktm_curation_command_owner",
+)
+
+
+# 429 private 함수는 실제 routine owner별 창에서만 복원한다. trigger 설치는 호출하지 않는다.
+_STRICT_SH_DATA_SCHEMA_OWNER_ACL = (
+    "REVOKE ALL ON FUNCTION feature._install_strict_sh_data_guards(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+)
+
+_STRICT_SH_DATA_STATE_OWNER_ACL = (
+    "REVOKE ALL ON FUNCTION feature._strict_sh_data_context(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._strict_sh_data_context(...) TO ktm_feature_schema_owner",
+    "REVOKE ALL ON FUNCTION feature._strict_sh_data_statement_guard(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._strict_sh_data_statement_guard(...) "
+    "TO ktm_feature_schema_owner",
+    "REVOKE ALL ON FUNCTION feature._strict_sh_source_row_guard(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._strict_sh_source_row_guard(...) "
+    "TO ktm_feature_schema_owner",
+    "REVOKE ALL ON FUNCTION feature._strict_sh_feature_row_guard(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._strict_sh_feature_row_guard(...) "
+    "TO ktm_feature_schema_owner",
+)
+
+
 _STATE_OWNER_FUNCTION_ACL = (
+    # 428이 존재할 때만 owner간 dependency EXEC를 복구한다. 이전 head ACL은 유지한다.
+    "DO $bounded_capture_acl$ BEGIN IF pg_catalog.to_regprocedure("
+    "'feature._bounded_provider_curation_input_set(bigint)') IS NOT NULL THEN "
+    "GRANT EXECUTE ON FUNCTION feature._heritage_evidence_metadata_bytes("
+    "bigint[],boolean[],integer[],boolean[]) TO ktm_feature_schema_owner; "
+    "END IF; END $bounded_capture_acl$",
+    "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_shape(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_inventory(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.read_transport_airport_snapshot_evidence(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.read_transport_airport_snapshot_evidence(...) "
+    "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._heritage_evidence_metadata_bytes(...) "
     "FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._heritage_evidence_string_object(...) "
     "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._heritage_evidence_shape(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._heritage_evidence_shape(...) FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._heritage_evidence_inventory(...) "
     "FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._heritage_evidence_retire0(...) "
@@ -438,8 +482,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     "GRANT EXECUTE ON FUNCTION feature.reobserve_scoped_provider_geocode_stamps(...) "
     "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.guard_stamp_writer_entry(...) FROM PUBLIC,ktm_feature_runtime",
-    "GRANT EXECUTE ON FUNCTION feature.guard_stamp_writer_entry(...) "
-    "TO ktm_feature_schema_owner",
+    "GRANT EXECUTE ON FUNCTION feature.guard_stamp_writer_entry(...) TO ktm_feature_schema_owner",
     "REVOKE ALL ON FUNCTION "
     "feature._validate_scoped_provider_geocode_stamps(...) FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.validate_exclusive_provider_snapshot(...) FROM PUBLIC",
@@ -523,14 +566,10 @@ _STATE_OWNER_FUNCTION_ACL = (
     "GRANT EXECUTE ON PROCEDURE feature.revoke_lifecycle_override(...) TO ktm_feature_runtime",
     "GRANT EXECUTE ON PROCEDURE feature.apply_provider_feature_field_patch(...) "
     "TO ktm_feature_runtime",
-    "GRANT EXECUTE ON PROCEDURE feature.author_feature_field_overrides(...) "
-    "TO ktm_feature_runtime",
-    "GRANT EXECUTE ON PROCEDURE feature.revoke_feature_field_overrides(...) "
-    "TO ktm_feature_runtime",
-    "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state(...) "
-    "TO ktm_feature_runtime",
-    "GRANT EXECUTE ON PROCEDURE feature.reactivate_admin_feature_state(...) "
-    "TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.author_feature_field_overrides(...) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.revoke_feature_field_overrides(...) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.transition_admin_feature_state(...) TO ktm_feature_runtime",
+    "GRANT EXECUTE ON PROCEDURE feature.reactivate_admin_feature_state(...) TO ktm_feature_runtime",
 )
 
 _AUDIT_WRITER_FUNCTION_ACL = (
@@ -900,11 +939,14 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
         + _PROVIDER_CURATION_SEAL_ACL
         + _CURATION_CANDIDATE_READ_ACL
-        + _SCALAR_GUARD_INSTALLER_ACL,
+        + _SCALAR_GUARD_INSTALLER_ACL
+        + _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL
+        + _STRICT_SH_DATA_SCHEMA_OWNER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
         _STATE_OWNER_FUNCTION_ACL
+        + _STRICT_SH_DATA_STATE_OWNER_ACL
         + _SUBTYPE_READY_FUNCTION_ACL
         + _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL
         + _M05_STATE_OWNER_DEPENDENCY_ACL,
@@ -963,6 +1005,16 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "feature._strict_sh_data_context": "429_strict_sh_data_guards",
+    "feature._strict_sh_data_statement_guard": "429_strict_sh_data_guards",
+    "feature._strict_sh_source_row_guard": "429_strict_sh_data_guards",
+    "feature._strict_sh_feature_row_guard": "429_strict_sh_data_guards",
+    "feature._install_strict_sh_data_guards": "429_strict_sh_data_guards",
+    "feature._bounded_curation_string_object": "428_bounded_curation_capture",
+    "feature._bounded_provider_curation_input_set": "428_bounded_curation_capture",
+    "feature._transport_airport_evidence_shape": "427_transport_airport_reader",
+    "feature._transport_airport_evidence_inventory": "427_transport_airport_reader",
+    "feature.read_transport_airport_snapshot_evidence": "427_transport_airport_reader",
     "ops.lock_provider_feature_tracking_protocol": "424_tracking_protocol_prefix",
     "feature._heritage_evidence_metadata_bytes": "422_heritage_evidence_reader",
     "feature._heritage_evidence_string_object": "422_heritage_evidence_reader",
@@ -1321,9 +1373,7 @@ async def reconcile_runtime_privileges_in_transaction(
         [cast(Mapping[str, object], row) for row in rows]
     )
     if unknown_relations:
-        raise RuntimePrivilegeReconciliationError(
-            _undeclared_relation_message(unknown_relations)
-        )
+        raise RuntimePrivilegeReconciliationError(_undeclared_relation_message(unknown_relations))
     for statement in grants:
         await connection.execute(text(statement))
     for role, statements in role_windows:

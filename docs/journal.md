@@ -1,7 +1,25 @@
 ## 2026-10-25 비활성 strict SH guard429 정의
 
-- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 정적7 PASS·전용30 collected이며 PG/RC/SH 활성화는0이다.
-- 427/428 부모·권한 정본 합성, 전용 paired integration은 source만 준비했고 실제 수용은 미완이다. 정책 없는 target 우회 P2를 active policy/lifecycle 검사와 새5개 source로 보강했고 retired fixture의 typed 상태 계약도 순수 검증했다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
+- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 정적67 PASS·전용30 collected이며 PG/RC/SH 활성화는0이다.
+- 검토된428 부모와 소유 역할별 ACL 정본을 합성했으며, 전용 paired integration은 source만 준비해 실제 수용은 미완이다. 정책 없는 target 우회 P2를 active policy/lifecycle 검사와 새5개 source로 보강했고 retired fixture의 typed 상태 계약도 순수 검증했다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
+
+## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
+
+실제 PG16.14에서 통합37 PASS/15.798초, fresh bootstrap 공식 oracle1 PASS/22.897초를 확인했다. 덤프를 갱신했으며 기존 실패와 시험 수정 기록을 보존한다. 최종 source 두 검토·CI, SH/RC/복구 연결과 운영 배포는 미완이다. [범위·예산·검증](reports/2026-10-25-bounded-curation-capture.md).
+
+## 2026-10-25 공항427 key/index 보강
+
+- 논리CASE index3·caller 서버상한·area EXISTS, provenance P2 정정. 순수143 PASS.
+- 실제 설치/oracle/EXPLAIN·Geo/native 준비·수집/SH는 미완, 두 source gate 전 PG0.
+
+## 2026-10-25 공항427 SQL/decoder source
+
+- 426 부모 보존, STABLE3함수·51가변열·RR decoder 배선. 순수108 PASS/mypy4.
+- 실제 PG/oracle·provider 준비/native 연결·15 fit·collector/SH/운영은 미완.
+
+## 2026-10-25 — 공항 reader Geo 계약(427, 부분)
+
+- 원천 hash32/Geo digest64 혼동을 정정하고 원실패를 보존했다. 순수 Geo28개 경계이며 SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
 
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 
