@@ -1,7 +1,7 @@
 """저장된 휴게소 전체 입력의 SH 적용 조각. 새 원천 호출이나 TX 소유권은 없다.
 
 준비 RR snapshot은 권위가 아니다. 원 kernel 잠금 뒤 DB evidence를 다시 비교하고
-같은 TX에서 실제 counter/capture/원 결과를 저장한다. 아직 collector에 배선하지 않는다.
+같은 TX에서 counter/capture와 원 결과를 저장한다. collector의 불변 입력만 쓰며 TX를 소유하지 않는다.
 """
 
 from __future__ import annotations

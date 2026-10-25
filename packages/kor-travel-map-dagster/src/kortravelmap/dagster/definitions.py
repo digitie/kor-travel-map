@@ -128,12 +128,12 @@ def _rest_snapshot_runtime_resource() -> object:
 
 @resource(description="Rest의 metadata를 보존하는 단일응답. 실제 소비 전에는 HTTP를 열지 않는다.")
 def _rest_snapshot_input_resource() -> object:
-    async def fetch() -> object:
+    async def _capture_rest_snapshot_input() -> object:
         from .provider_fetchers import fetch_transport_rest_area_snapshot
 
         return await fetch_transport_rest_area_snapshot(KorTravelMapSettings())
 
-    return fetch
+    return _capture_rest_snapshot_input
 
 
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {

@@ -134,3 +134,38 @@ package migration graph 누락은 별도 검사에서 1실패·28통과로 드�
 5개 변경 외 전체 블록이 보존되며 역치환하면 원431 전체 bytes와 일치한다. quota INSERT는
 schema-only dump에 포함되지 않는다. 실제 startup ACL/metadata2개와 후속215·동시성,
 최종 CI/live/UI 및 배포가 남아 있어 아직 완료나 운영 활성화로 표시하지 않는다.
+
+
+## 실제 startup ACL·metadata 수용
+
+`44c884c4`의 별도 fresh owned DB에서 정본 schema 검사2개가 모두 통과했다
+(console18.57초/XML18.071초, wrapper25.322초). canonical runtime reconcile 뒤 Service
+계정의 startup 경계 검사와 새 private helper 직접 EXEC 차단, snapshot private 표 무권한,
+strict 자동 설치0·원 globalquota를 확인했다. 정본 `command.check`와 mapped CHECK 비교도
+통과했다. 원9개 import·2571개 Git파일·SDK53 전후 일치와 정확 CID/UUID/global0·볼륨
+부재를 검산했다. 원장 `map432-schema-acl2-owned-r2-t-actual-acceptance.json`을 보존한다.
+
+공식 dump 반영 뒤 관련 source 회귀는82개 PASS/정본 조건부1skip(1.73초)다. 이를 actual
+PG2개와 합쳐 중복 없는 전체 검사 수라고 표현하지 않는다. 실제 대량 적용·쿼터 소진/GC·
+두 physical writer·프로세스 종료/복구·최종 CI와 UI·배포는 계속 진행 중이다.
+
+
+## 실제 Rest 시험 구현과 CI 반례 정리
+
+등록·215/쿼터/GC6개, 복구3개, 두 writer2개를 별도 파일에 구현하고 두 명씩 독립 소스
+검토했다. 복구는 실제 DB backend 종료/전체 rollback·pool1 재사용, 잠금 뒤 late Geo
+거부, 실제 Dagster run의 원 snapshot SDK0 재개를 검증한다. 두 writer는 서로 다른
+Airport/Rest backend와 미commit TX의 수명 겹침, 실제 blocker·공유 topic 대기 및 두
+commit 결과를 확인한다. 이는 SQL CPU 실행의 동시성·처리량 증가를 미리 증명하지 않는다.
+모든 실제 Rest 시험은 아직 미실행이며 A215/BquotaGC/복구/두writer를 각각 기존150초
+owned 실행으로 분리한다. backend CPU/RSS는 미측정, client wall/CPU와 SQL roundtrip은
+구분 기록한다. 첫 observer SQL의 닫는 따옴표 누락은 적대 리뷰에서 발견해 최소 수정했고
+원 source/HOLD와 소스 반례를 보존했다.
+
+`44c884c4`의 원격 Python3개 CI는 각각4실패·4421통과·7skip이었다. 새 fetcher 명시 목록,
+계수 전이의 generic 함수명 충돌, 저장 Geo 재사용 helper의 bare 호출 구조, provider 표의
+등록 누락을 보완했다. 신규 private 이름만 고유화하며 기존 resource·Airport·검사기 단언과
+예외 목록은 보존했고 계측 하한을1 높였다. 관련141개 PASS/기존2skip·Ruff/mypy를 확인했다.
+새 진입점도 기존 transport 요청별 counter를 공유하며 실제 HTTP mock 계수 검사를 유지한다.
+원격 CI 재통과는 새 source checkpoint 뒤 별도 확인한다. 이전402개 통합 순수 회귀와
+현재141개는 중복이 있어 합계로 보고하지 않는다.

@@ -14,6 +14,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``khoa`` | python-khoa-api | 해수욕장 place |
 | ``knps`` | python-knps-api | 국립공원 file dataset |
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
+| ``kor_travel_rest_apply`` | kor-travel-transport | 저장 휴게소의 fenced SH 적용·원 결과 저장 |
 | ``kor_travel_rest_evidence`` | kor-travel-transport | 휴게소 DB 증거·최종 입력 비교 |
 | ``kor_travel_transport`` | kor-travel-transport | transport export 계약·파서(ADR-106) |
 | ``kor_travel_transport_apply`` | kor-travel-transport | 원 snapshot의 fenced SH 적용 |

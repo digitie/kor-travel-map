@@ -234,13 +234,14 @@ async def _resume(
     raise io.RestSnapshotUnavailable("rest snapshot replan budget exhausted")
 
 
-async def _collect(
+async def _collect_rest_snapshot_input(
     context: AssetExecutionContext,
     client: AsyncKorTravelMapClient,
     member: RestPostprocessMember,
     runtime: RestSnapshotRuntime,
 ) -> tuple[bytes, bytes]:
     from . import assets
+    from .assets import _transform_reusing_geo
 
     capture = await assets._resource_value(context, "rest_snapshot_input")
     if type(capture) is not TransportRestExportCapture:
@@ -248,7 +249,7 @@ async def _collect(
     records = capture.records
     if type(records) is not tuple or not 1 <= len(records) <= 256:
         raise io.RestSnapshotUnavailable("whole nonempty Rest input required")
-    legacy = await assets._transform_reusing_geo(
+    legacy = await _transform_reusing_geo(
         context,
         rest_areas_to_bundles,
         records,
@@ -284,7 +285,7 @@ async def _collect(
     return payload, observation
 
 
-async def _run(context: AssetExecutionContext) -> DagsterFeatureLoadResult | None:
+async def _run_rest_snapshot(context: AssetExecutionContext) -> DagsterFeatureLoadResult | None:
     from . import assets
 
     client = cast(
@@ -336,7 +337,7 @@ async def _run(context: AssetExecutionContext) -> DagsterFeatureLoadResult | Non
         if strict is not True and strict != "strict":
             raise io.RestSnapshotUnavailable("Rest snapshot requires strict validation")
         await io.collect_expired_rest_snapshots(client)
-        payload, observation = await _collect(context, client, member, runtime)
+        payload, observation = await _collect_rest_snapshot_input(context, client, member, runtime)
         registered = await io.register_rest_snapshot(
             client, identity, payload=payload, context=observation, pins=runtime.pins
         )
@@ -355,7 +356,7 @@ async def run_rest_snapshot_if_supported(
 ) -> DagsterFeatureLoadResult | None:
     """등록 후에는 오류·취소를 EX/refetch로 바꾸지 않는다. 공식 wrapper가 실패를 기록한다."""
     try:
-        return await _run(context)
+        return await _run_rest_snapshot(context)
     except DBAPIError as error:
         cause = getattr(error.orig, "__cause__", None)
         if getattr(cause, "sqlstate", None) == "40001" and getattr(cause, "message", None) == (

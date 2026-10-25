@@ -95,7 +95,7 @@ async def _case(monkeypatch, *, status="postprocessed"):
         stubs[name] = AsyncMock(return_value=value)
         monkeypatch.setattr(target.io, name, stubs[name])
     collect = AsyncMock(side_effect=AssertionError("SDK/Geo/clock refetch forbidden"))
-    monkeypatch.setattr(target, "_collect", collect)
+    monkeypatch.setattr(target, "_collect_rest_snapshot_input", collect)
     atomic = AsyncMock(side_effect=AssertionError("reapply forbidden"))
     monkeypatch.setattr(target, "run_snapshot_apply_postprocess", atomic)
     return context, observed, intent, stubs, collect, atomic
