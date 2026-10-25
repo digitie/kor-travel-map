@@ -1,6 +1,6 @@
 ## 2026-10-25 — 공항 reader Geo 계약(427, 부분)
 
-- 고정 Geo 비교 domain과 순수26개 경계를 확인했다. SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
+- 원천 hash32/Geo digest64 혼동을 정정하고 원실패를 보존했다. 순수 Geo28개 경계이며 SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
 
 ## 2026-10-25 — Transport 순수 투영 진단(미수용)
 

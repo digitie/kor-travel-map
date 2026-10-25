@@ -31,7 +31,7 @@ AIRPORT_ADDRESS_FIELDS: Final = (
     "sido_name",
     "sigungu_name",
 )
-_HEX64: Final = re.compile(r"[0-9a-f]{64}")
+_PAYLOAD_HASH: Final = re.compile(r"[0-9a-f]{32}")
 _ENTITY_KEY: Final = re.compile(r"se_[0-9a-f]{64}")
 _RECORD_KEY: Final = re.compile(r"sr_[0-9a-f]{20}")
 _POINT_NDR_4326: Final = "0101000020e6100000"
@@ -95,7 +95,7 @@ class AirportGeoFacts:
         for value, pattern, length in (
             (self.source_entity_key, _ENTITY_KEY, 67),
             (self.source_record_key, _RECORD_KEY, 23),
-            (self.raw_payload_hash, _HEX64, 64),
+            (self.raw_payload_hash, _PAYLOAD_HASH, 32),
         ):
             if type(value) is not str or len(value) != length or pattern.fullmatch(value) is None:
                 raise ValueError("invalid airport Geo source binding")

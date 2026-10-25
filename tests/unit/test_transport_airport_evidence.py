@@ -21,7 +21,7 @@ def _facts() -> AirportGeoFacts:
         dataset_id=15,
         source_entity_key="se_" + "a" * 64,
         source_record_key="sr_" + "b" * 20,
-        raw_payload_hash="c" * 64,
+        raw_payload_hash="c" * 32,
         feature_id=UUID("45b6b1f3-8a85-4984-932f-dc04358cb08b"),
         coordinate_ewkb="0101000020e6100000" + struct.pack("<dd", 126.45, 37.46).hex(),
         address=(
@@ -77,7 +77,7 @@ def test_digest_has_independent_fixed_field_order_and_length_frames() -> None:
     [
         ("dataset_id", 16),
         ("source_record_key", "sr_" + "d" * 20),
-        ("raw_payload_hash", "d" * 64),
+        ("raw_payload_hash", "d" * 32),
         ("geo_version_token", "v2"),
         ("geo_data_token", "d2"),
         ("stamped_at", datetime(2026, 10, 25, 0, 0, 1, tzinfo=UTC)),
@@ -112,6 +112,7 @@ def test_same_instant_has_one_utc_digest() -> None:
         ("dataset_id", 0),
         ("source_entity_key", "a" * 1_000_000),
         ("raw_payload_hash", "f" * 63),
+        ("raw_payload_hash", "f" * 64),
         ("reverse_outcome", "geocoded"),
         ("reverse_outcome", "not_called"),
         ("geo_data_token", " token"),
@@ -139,3 +140,55 @@ def test_coordinate_binary_is_checked_before_float_text(lon: float, lat: float) 
 def test_aware_time_outside_utc_datetime_range_is_rejected() -> None:
     with pytest.raises(ValueError, match="observation range"):
         replace(_facts(), stamped_at=datetime(1, 1, 1, tzinfo=timezone(timedelta(hours=14))))
+
+
+@pytest.mark.asyncio
+async def test_actual_converter_source_record_uses_32hex_payload_prefix() -> None:
+    from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+    from kortravelmap.dto import Address, SourceRecord
+    from kortravelmap.infra.feature_repo import _make_source_entity_key
+    from kortravelmap.providers.kor_travel_transport import TransportAirport, TransportCoordinate
+    from kortravelmap.providers.kor_travel_transport_native import (
+        TransportGeoEvidence,
+        transport_item_to_native_bundle,
+    )
+
+    address = Address(bjd_code="2811010100")
+    item = TransportAirport(
+        "ICN",
+        "인천공항",
+        "Incheon Airport",
+        "RKSI",
+        "인천",
+        TransportCoordinate(lat=37.46, lon=126.45),
+        {},
+    )
+    bundle = await transport_item_to_native_bundle(
+        item,
+        fetched_at=datetime(2026, 10, 25, tzinfo=UTC),
+        geo=TransportGeoEvidence("resolved", "version1", "data1", address, "d" * 64),
+    )
+    record = bundle.source_record
+    assert type(record) is SourceRecord
+    assert len(record.raw_payload_hash) == 32
+    assert record.raw_payload_hash == make_payload_hash(record.raw_data)
+    assert record.source_record_key == make_source_record_key(
+        provider=record.provider,
+        dataset_key=record.dataset_key,
+        source_entity_type=record.source_entity_type,
+        source_entity_id=record.source_entity_id,
+        raw_payload_hash=record.raw_payload_hash,
+    )
+    facts = replace(
+        _facts(),
+        raw_payload_hash=record.raw_payload_hash,
+        source_record_key=record.source_record_key,
+        source_entity_key=_make_source_entity_key(
+            provider=record.provider,
+            dataset_key=record.dataset_key,
+            source_entity_type=record.source_entity_type,
+            source_entity_id=record.source_entity_id,
+        ),
+        address=tuple(getattr(address, field) for field in AIRPORT_ADDRESS_FIELDS),
+    )
+    assert len(facts.digest()) == 64

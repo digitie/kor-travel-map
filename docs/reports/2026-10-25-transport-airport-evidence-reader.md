@@ -23,7 +23,7 @@ Heritage private Python helper를 가져오거나 provider HTTP facade를 만들
 frame하고 순서대로 SHA256에 넣는다. NULL/빈 문자열/구분자/Unicode 및 JSON 공백이나
 키 순서가 경계를 바꾸지 않는다. 고정 순서는 다음과 같다.
 
-1. dataset bigint의 십진 문자열, `se_`64hex, 이전 R1의 `sr_`20hex, R1 payload SHA256,
+1. dataset bigint의 십진 문자열, `se_`64hex, 이전 R1의 `sr_`20hex, R1 payload SHA256의 정본32hex prefix,
    Feature UUID 소문자 표준 문자열, base 좌표의 NDR/2D/POINT/SRID4326 EWKB 소문자 hex.
 2. Address의 정확12개 순서: road, legal, admin, bjd_code, admin_dong_code,
    sigungu_code, sido_code, road_name_code, road_address_management_no, zipcode,
@@ -57,9 +57,9 @@ policy_epoch, items의 정확7키다. 성공은 complete/eof=true, reason=NULL, 
 items 1..2730개다. 알려진 거부는 complete/eof=false, epoch=NULL, items=[]다. 거부는
 전체 단위이며 일부 항목만 성공으로 돌려주지 않는다. 내부 SQLSTATE/장애는 전파한다.
 
-items는 source_entity, source_head, current_source_record, non_name_source_record,
-feature, claim, membership, active_policy, shadow_policy, name_candidate,
-non_name_base, geocode_stamp의 정확12키다. 각 row의 구체 키·NULL/geometry type과
+items는 source_entity, source_head, feature, claim, membership, active_policy, policy,
+name_candidate, name_base, non_name_base, base_record, name_value_record, current_record,
+geocode_stamp의 정확14키다. name base clock과 current/name/non-name 원천을 따로 남긴다. 각 row의 구체 키·NULL/geometry type과
 12관계/전가변열 inventory는 다음 SQL checkpoint에서 기계 계약으로 고정한다.
 그 전까지 decoder/fullSQL ready로 세지 않는다. 양 source record의 raw7을 각각
 반환하고 단일 non-name R1을 지원한다. mixed R1은 전체 EX다. core.name의 R1/R2와
@@ -88,3 +88,18 @@ EOF·권한 inventory를 구현하고 두 독립 source gate를 받는다. 실�
 positive/negative/RR·statement snapshot/큰 무관 history EXPLAIN·peak와 공식 oracle은
 그 뒤 별도 승인으로 진행한다. 휴게소215/실제 두 worker/whole closure·durable 복구와
 운영 활성화는 전부 미완이다.
+
+## 원천 hash 길이 P2 정정
+
+첫 Geo 계약은 raw_payload_hash를64hex로 잘못 고정했다. 정본 `make_payload_hash`의
+기본값은32hex prefix이며 실제 Transport converter가 이를 그대로 쓴다. 최종 Geo
+SHA256 digest64hex와 원천 hash32hex를 혼동한 입력 계약 오류다. 초기 f887과 당시
+순수26 성공은 보존하며 이 P2를 닫은 결과로 재해석하지 않는다.
+
+정본 factory 기반 decoder positive에서 원3 FAIL/26 PASS를 확인했고, 공개
+TransportAirport→기존 converter→실제 SourceRecord/hash/key를 사용하는 회귀도
+수정 전1 FAIL/1.49초로 재현했다. source32hex만 받도록 고정하고64hex 입력은
+명시 거부한다. 공개 경로의32hex positive와 Geo 최종 digest64hex 구분을 시험했다.
+수정 후 합집합104 PASS/1.55초는 Geo 계약28+작업 중 decoder29+기존 native47이다.
+이 checkpoint 소유 소스는 Geo 계약28까지이며, 아직 미추적 decoder/SQL의 완성이나
+DB 수용으로 합산하지 않는다. 다음 decoder/SQL checkpoint는 별도 source gate다.
