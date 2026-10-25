@@ -82,10 +82,19 @@ async def _set_place(admin, seed, *, payload=None, phones=None, business_hours=F
 
 
 @pytest.mark.parametrize("phones", [[], ["02-123-4567"], ["한글☎", 'quote"\\\n']])
-async def test_exact_old_four_aggregates_for_supported_place_shapes(scalar_engines, phones):
+@pytest.mark.parametrize("business_hours", [False, True], ids=["sql-null", "json-null"])
+async def test_exact_old_four_aggregates_for_supported_place_shapes(
+    scalar_engines, phones, business_hours
+):
     admin, _ = scalar_engines
     seed = await _seed(admin)
-    await _set_place(admin, seed, payload={"한글": '제주\n"\\', "nullable": None}, phones=phones)
+    await _set_place(
+        admin,
+        seed,
+        payload={"한글": '제주\n"\\', "nullable": None},
+        phones=phones,
+        business_hours=business_hours,
+    )
     async with AsyncSession(admin) as session, session.begin():
         await _gate(session)
         expected = (
@@ -113,7 +122,7 @@ async def test_unsupported_json_shape_does_not_become_a_partial_capture(scalar_e
         _rejected(await _capture(session, seed["dataset"]), "shape_unsupported")
 
 
-@pytest.mark.parametrize("case", ["string", "key", "phone", "phone-count", "business-json-null"])
+@pytest.mark.parametrize("case", ["string", "key", "phone", "phone-count"])
 async def test_known_shape_limits_are_enforced_before_final_capture(scalar_engines, case):
     admin, _ = scalar_engines
     seed = await _seed(admin)
@@ -122,9 +131,22 @@ async def test_known_shape_limits_are_enforced_before_final_capture(scalar_engin
         seed,
         payload={"v": "x" * 257} if case == "string" else {"k" * 257: "v"} if case == "key" else {},
         phones=["x" * 257] if case == "phone" else ["x"] * 33 if case == "phone-count" else [],
-        business_hours=case == "business-json-null",
     )
     async with AsyncSession(admin) as session, session.begin():
+        _rejected(await _capture(session, seed["dataset"]), "shape_unsupported")
+
+
+@pytest.mark.parametrize("hours", [{}, [], 0, "unknown"])
+async def test_nonnull_business_hours_remain_unsupported(scalar_engines, hours):
+    admin, _ = scalar_engines
+    seed = await _seed(admin)
+    async with AsyncSession(admin) as session, session.begin():
+        await _gate(session)
+        await session.execute(
+            text("""UPDATE feature.feature_places SET business_hours=CAST(:hours AS jsonb)
+            WHERE feature_id=CAST(:feature AS uuid)"""),
+            {**seed, "hours": json.dumps(hours)},
+        )
         _rejected(await _capture(session, seed["dataset"]), "shape_unsupported")
 
 
