@@ -107,6 +107,7 @@ async def committed_running_job(
         yield job_id, run_id
     finally:
         async with AsyncSession(migrated_engine) as session, session.begin():
+            await lock_provider_feature_finalization(session)
             cancellation_ids = list(
                 await session.scalars(
                     text(
@@ -404,6 +405,7 @@ async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
     finally:
         if root_id is not None:
             async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+                await lock_provider_feature_finalization(cleanup)
                 await cleanup.execute(
                     text(
                         "UPDATE ops.import_jobs SET cancellation_id=NULL, "
@@ -525,6 +527,7 @@ async def test_canonical_cancellation_rejects_divergent_frozen_start_times(
             assert int(active_count) == 3
     finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await lock_provider_feature_finalization(cleanup)
             await cleanup.execute(
                 text(
                     "UPDATE ops.import_jobs SET cancellation_id=NULL, "
@@ -1027,6 +1030,7 @@ async def test_shared_and_multi_run_hierarchy_dispatches_once_per_run(
         assert mutations == {shared_run_id: 1, second_run_id: 1}
     finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await lock_provider_feature_finalization(cleanup)
             await cleanup.execute(
                 text(
                     "DELETE FROM ops.pipeline_cancellation_members "
@@ -1153,6 +1157,7 @@ async def test_running_member_without_run_id_is_definitive_and_never_calls_dagst
         )
     finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await lock_provider_feature_finalization(cleanup)
             await cleanup.execute(
                 text(
                     "UPDATE ops.import_jobs SET cancellation_id=NULL, "
@@ -1310,6 +1315,7 @@ async def test_queued_canonical_terminate_failure_retries_same_frozen_scope(
         assert completed.dagster_runs[0].engine_finished_at == finished_at
     finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await lock_provider_feature_finalization(cleanup)
             await cleanup.execute(
                 text(
                     "UPDATE ops.import_jobs SET cancellation_id=NULL, "
@@ -1804,6 +1810,7 @@ async def test_different_roots_coordinate_independently(
         assert mutations == {first_run_id: 1, second_run_id: 1}
     finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await lock_provider_feature_finalization(cleanup)
             cancellation_ids = list(
                 await cleanup.scalars(
                     text(
