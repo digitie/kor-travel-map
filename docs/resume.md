@@ -1,6 +1,6 @@
 ## 2026-10-25 — 공항 snapshot 원자적 후처리 구현 중
 
-원 발견사항·sync cursor·stale 정리를 한 fenced RC transaction과 receipt로 연결하고, 종결된 임시 입력의 7일/최대16개 정리를 추가했다. 합성430의 실제 설치/startup/ORM/후처리 rollback·replay/null 경계15 PASS와 정리를 확인했다. GC·scheduled caller 실제 시험, 공식oracle·최종 두 리뷰·CI·live UI·운영은 미완이다. [범위와 검증](reports/2026-10-25-airport-snapshot-durable-postprocess.md).
+원 발견사항·sync cursor·stale 정리를 한 fenced RC transaction과 receipt로 연결하고, 종결된 임시 입력의 7일/최대16개 정리를 추가했다. 합성430의 실제 설치/startup/ORM/후처리 rollback·replay/null 경계15 PASS와 정리를 확인했다. 분리 시험의 GC16·세대/커서3·물리 DB 연결 사망/pool1 복구1·scheduled caller2와 공식oracle 생성을 확인했다. 최종덤프·두 리뷰·CI·복구 live UI·운영은 미완이다. [범위와 검증](reports/2026-10-25-airport-snapshot-durable-postprocess.md).
 
 ## 2026-10-25 · cancellation 원 backend cleanup 후보
 

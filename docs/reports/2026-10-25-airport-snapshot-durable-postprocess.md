@@ -4,7 +4,7 @@
 
 합성 source `3f5983244d0e0ff6a413af3f20e2b4b825b6dded`의 owned PostgreSQL 시험은 15 PASS/실패·오류·skip0이다. 실제300→430 설치, service LOGIN·private ACL/startup, ORM 반사, 짧은 GUC 보존, 실제 적용 후 후처리의 부분 실패 rollback·원 receipt 재생, receipt 교체/불완전 marker 거부, 두 null 표현의 정본 capture와 비-null 영업시간 거부를 확인했다. 결과 SHA-256은 `8f98929c14f199f28d70187e703c8aac71b87d55ef89fcd44ed172a2da48590d`이며 정확 CID·고유 label·볼륨 정리와 source/SDK 전후 검사를 통과했다.
 
-아래 구현 당시의 검증 기록은 시간순 이력이다. terminal GC16 실제 시험과 scheduled caller 재개 시험, 공식430 oracle, 최종 합성 CI·두 적대 리뷰·live UI·운영 배포는 별도 수용 전이다. 기존 실패 원문은 보존한다.
+후속 분리 실행으로 terminal GC16개, 실제 후처리 세대/커서3개, 물리 backend 종료 후 pool1 복구1개, 실제 scheduled caller의 SDK0 재생/동일 generation 재계획2개도 통과했다. 각 실행의 source·원 결과와 정리를 따로 보존하며 하나의 합산 실행으로 세지 않는다. 공식430 oracle 생성은 통과했고 최종 덤프 채택·합성 CI·두 적대 리뷰·복구 source의 live UI·운영 배포는 별도 수용 전이다. 아래 구현 당시 검증은 시간순 이력이며 기존 실패 원문도 보존한다.
 
 ## 구현 범위
 
@@ -46,3 +46,5 @@ Docker Dagster image의 설치 완료 후 root 소유 receipt를 생성한다. M
 후처리의 세대 경계를 실제로 검증하기 위해 새 generation 예약만 한 수집은 원 성공을 버리지 않는 사례, 두 번째 실제 적용이 원 후처리를 대체하는 사례, 더 최신 sync cursor를 덮어쓰지 않는 사례를 추가했다. 모두 실제 등록/native apply/DB 저장 경로를 사용하며 새3건은 수집6건 확인만 끝났고 실행은 아직 미완이다.
 
 물리 connection 사망 경계도 별도 시험으로 추가했다. 소유 pool1에서 실제 sync 쓰기 후 그 connection의 PID/backend_start/login을 모두 대조해 종료하고, 원 후처리 효과 rollback·pool 반환·같은 원 입력 재시도 및 새 연결의 SELECT1을 검증한다. 운영 backend는 대상이 아니며 실행 전이다.
+
+물리 backend 종료 fault의 SQLAlchemy rollback 경고는 해당 호출의 정확한 SAWarning 하나만 시험 로컬에서 허용했다. 전역 warnings/제품 guard를 완화하지 않고 원 DBAPIError·효과 rollback·pool1 반환·원 receipt 재시도·SELECT1·옛 backend 부재까지 실제 통과했다. quarantine도 소유 PG의 migration-origin fixture에서 정확 marker trigger 한 개만 같은 TX로 원상 복구해 보존을 검증했다. 새 source 통합 후 기존 취소/스키마/실행부 집중149 PASS와 Dagster 전체1031 PASS/기존 환경 skip15를 확인했다. 새 strict CI와 운영 검증은 이 로컬 결과로 대체하지 않는다.
