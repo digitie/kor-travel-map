@@ -108,3 +108,29 @@ marker를 발급하고 기존 정본 seal과 membership command를 호출한 뒤
 이 조각은 아직 미호출이며 단독 설치·runtime 권한·운영 활성화는 없다. DB apply 결과와
 후처리 receipt를 생산하는 typed 명령, 430 합성/ACL, 실제 paired PG 및 전체 collector 연결은
 여전히 미완이다. source 검토를 실제 PostgreSQL 실행으로 계산하지 않는다.
+
+
+## 적용 결과와 kernel TX의 연결 조각
+
+별도 apply receipt 조각은 quota/tracking tuple을 잠그지 않는 private executor helper와
+plan bind, apply begin, result finish를 정의한다. helper는 P·실제 parent/own scope·control
+순서에서 실제 STARTED root/정본 단일 member·활성 refresh operation과 현재 fence/lease를
+다시 확인한다. 전체430의 B parent helper가 선행되어야 한다.
+
+bind는 ready kernel attempt의 dataset/owner/manifest/input digest와 whole-scope를 대조한다.
+control의 attempt UNIQUE로 한 kernel attempt를 여러 snapshot에 붙이지 못하게 한다.
+기존 bind를 다른 attempt로 암묵 교체하지 않는다. kernel input digest는 artifact의 native
+input digest와 다른 domain일 수 있으므로 같은 값으로 비교하지 않는다. full canonical
+입력 decode와 계획 대상의 완결성 확인은 실제 caller 연결에서 추가해야 한다.
+
+apply begin은 기존 kernel begin의 모든 participant parent 정렬과 source/link/Feature 잠금을
+먼저 유지한 뒤 control fence를 확인한다. own scope를 먼저 잡고 나중에 foreign parent를
+추가하지 않는다. 실패하면 begin의 applying 기록도 같은 TX에서 rollback되며 실제 source
+DML은 caller가 그 뒤 수행해야 한다. apply finish는 같은 TX의 kernel completed/apply_txid와
+완전한 원래14필드+retired를 확인하고 bounded capture를 실제 같은 TX source-head와 대조해
+원 bytes를 저장한다. 이 API를 commit 응답 유실 뒤 새 결과를 만드는 경로로 사용하지 않는다.
+그때는 member SDK0 read로 기존 applied 결과를 읽는 별도 경로가 필요하다.
+
+아직 원 counter의 실제 계측/같은 TX native scalar 호출, kernel lease 만료의 typed 회수·재계획,
+후처리 receipt 생산과 client 재개 배선·통합 실행은 없다. 새 SQL은 현재 미호출 source이며
+검토·whole430 합성 전 독립 설치하지 않는다.

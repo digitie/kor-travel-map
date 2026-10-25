@@ -26,7 +26,7 @@ CREATE TABLE ops.provider_snapshot_controls (
     executor_fence uuid NOT NULL,
     lease_expires_at timestamptz NOT NULL,
     status text NOT NULL CHECK(status IN ('prepared','applied','postprocessed','child_sealed')),
-    attempt_id uuid REFERENCES ops.feature_write_attempts(attempt_id),
+    attempt_id uuid UNIQUE REFERENCES ops.feature_write_attempts(attempt_id),
     attempt_owner uuid,
     manifest_digest text CHECK(manifest_digest ~ '^[0-9a-f]{64}$'),
     applied_result bytea CHECK(octet_length(applied_result) BETWEEN 1 AND 4096),
