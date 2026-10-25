@@ -109,3 +109,12 @@ fresh 실행에서 각각 통과한 증거이며 최초64실행61PASS/3FAIL을 �
 부모dump에대해 projector 정의1개만 역치환하면 전체bytes가 같으며 ACL/owner/기타객체는
 모두동일하다. 원412본문과 새430 no-op조건 외의 제품변경0이다.
 canonical/TVN40/reconcile 원실패 actual과 전체CI/배포수용은 계속미완이다.
+
+## T-VN-40 직접 시험 호출의 전제 정렬
+
+원 failed callsite별로 finalizer/동일TX ensure→seal·terminal reconcile의 직접 성공/의미
+부정 TX만 RC로 정렬한다. ensure만 실행하는 leaf SERIALIZABLE 및 admin command의
+SER 계약은 유지한다. provider root를 직접 만드는 두 owned admin seed는 첫 row 이전
+정본 P EX→L을 명시한다. raw cancellation42501 부정은 fresh RC의 정본 prefix를 먼저
+취득해 typed 권한 검사까지 도달시키며 원42501 단언은 보존한다. 공통fixture/실제
+production caller/권한/guard/모든 기존assert 변경0이다. 이 단계 실제 회귀는 아직미완이다.

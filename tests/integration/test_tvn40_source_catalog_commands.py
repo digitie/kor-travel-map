@@ -30,6 +30,9 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
     suffix = uuid4().hex
     actor = f"admin:tvn40-source-{suffix}"
     async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+        )
         dataset_id = int(
             await connection.scalar(
                 text(
