@@ -45,7 +45,8 @@ e7fb3adef5b76462902fbb992572ca420542aad1499f9a3a94f88480c56c3a43이다.
 통합 시험 3개는 정본 ensure → member finish → reconcile의
 SUCCESS·FAILURE·CANCELED 이후 호출과 tracking/receipt 전체 불변을 준비했다.
 SUCCESS에서는 dataset/scope/operation 세 축의 다른 member 거부도 확인하도록 했다.
-이 3개는 collect-only이며 실제 PostgreSQL 검증은 아직 하지 않았다.
+이 3개는 정본 scalar_container/scalar_engines의 자원 제한과 자동 회수를 재사용하며,
+collect-only다. 공유 migrated_engine을 기동하지 않으며 실제 PostgreSQL 검증은 아직 하지 않았다.
 
 base는 cdfdc7aa39698e0fcf3749c0da72497bb5ff510b이다.
 기존 PR1410 head/branch와 W 소유 runner는 수정하지 않았다.

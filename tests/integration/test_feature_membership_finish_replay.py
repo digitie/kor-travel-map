@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.core.feature_operation import FeatureOperationInvariantConflict
 from kortravelmap.infra.feature_operation_repo import (
@@ -17,16 +18,27 @@ from kortravelmap.infra.feature_operation_repo import (
     reconcile_dagster_feature_run,
 )
 from kortravelmap.infra.pipeline_cancellation_repo import lock_provider_feature_finalization
+from kortravelmap.infra.transaction_limits import apply_bounded_transaction_limits
 from tests.integration._membership_seed import (
     SINGLE_MEMBER_OPERATION,
     memberships_for_operation,
 )
 from tests.integration.conftest import as_dagster_runtime
+from tests.integration.test_provider_field_scalar_projection import (
+    scalar_container as scalar_container,
+)
+from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
 
-if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(35)]
 
-pytestmark = pytest.mark.integration
+
+@pytest.fixture
+async def finish_session(scalar_engines) -> AsyncIterator[AsyncSession]:
+    admin, _runtime = scalar_engines
+    async with AsyncSession(admin, expire_on_commit=False) as session, session.begin():
+        await apply_bounded_transaction_limits(session)
+        yield session
+        await session.rollback()
 
 
 async def _state(session: AsyncSession, root: str) -> object:
@@ -53,17 +65,17 @@ async def _state(session: AsyncSession, root: str) -> object:
 
 @pytest.mark.parametrize("terminal", ["SUCCESS", "FAILURE", "CANCELED"])
 async def test_terminal_root_finish_preserves_original_tracking_state(
-    migrated_session: AsyncSession, terminal: str
+    finish_session: AsyncSession, terminal: str
 ) -> None:
     # row나 manifest를 읽기 전에 정본 P EX→L을 취득한다. guard 비활성화/raw status UPDATE0.
-    async with as_dagster_runtime(migrated_session) as session:
+    async with as_dagster_runtime(finish_session) as session:
         await lock_provider_feature_finalization(session)
     membership = (
-        await memberships_for_operation(migrated_session, operation_key=SINGLE_MEMBER_OPERATION)
+        await memberships_for_operation(finish_session, operation_key=SINGLE_MEMBER_OPERATION)
     )[0]
     run = "finish-success-race-" + str(uuid4())
     created = datetime(2026, 10, 25, tzinfo=UTC)
-    async with as_dagster_runtime(migrated_session) as session:
+    async with as_dagster_runtime(finish_session) as session:
         await ensure_dagster_feature_operation(
             session,
             dagster_run_id=run,
@@ -92,8 +104,8 @@ async def test_terminal_root_finish_preserves_original_tracking_state(
         )
         assert terminal_result.operation.dagster_run_status == terminal
         root = terminal_result.operation.root_job_id
-    before = await _state(migrated_session, root)
-    async with as_dagster_runtime(migrated_session) as session:
+    before = await _state(finish_session, root)
+    async with as_dagster_runtime(finish_session) as session:
         replay = await finish_dagster_feature_membership(
             session,
             dagster_run_id=run,
@@ -111,4 +123,4 @@ async def test_terminal_root_finish_preserves_original_tracking_state(
                     await finish_dagster_feature_membership(
                         session, dagster_run_id=run, membership=foreign
                     )
-    assert await _state(migrated_session, root) == before
+    assert await _state(finish_session, root) == before
