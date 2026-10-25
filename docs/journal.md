@@ -1,3 +1,21 @@
+## 2026-10-26 · Map/PinVi 배포·공개 읽기·일정 복원 정산
+
+- Map #1414·#1411의5f3506a와 PinVi #602의8f1b998f를 공식2단계로 배포했다. 첫418 commit 뒤
+  정식1키 CAS·최종 rotate/rebuild를 마쳤고 Map430·PinVi0102·7 healthy를 새 readback했다.
+- 새 Map·PinVi 백업과 공식 격리 복원 리허설은 verified였다. Map의 비차단
+  REHEARSAL_CATALOG_DRIFT 경고는 보존하며 catalog 소유권·ACL 전체 일치를 주장하지 않는다.
+- Map29f1 CI5 workflow/10 check·격리 Map14·별도 PinVi 후보6 인수와 구분하여,
+  최종 공개 TLS 읽기 R7의 Map7+PinVi6을 통과했다. 성공 실행의 양쪽 로그인·로그아웃은 각1회,
+  보호401·실제 목록/상세·지도·같은 source lineage와 정확 브라우저 정리를 확인했다.
+- 원 공개3 FAIL과 R4의 테스트 세션 철회 미확정은 영구 보존한다. R7의 새 두 세션 정리 성공은
+  그 원 실패를 덮지 않는다. Map의 live immutable 정적 응답 RAM 재사용 예외와 실제 네트워크
+  계수는 [읽기 인수 보고서](reports/2026-10-25-pinvi-admin-feature-read-scope.md)에 구분했다.
+- 원 instigator47/RUNNING38에서 최종51/RUNNING37·STOPPED14를 확인했다. 새 항목은 모두OFF,
+  퇴역한 highway incidents ten-minute schedule은 재생성하지 않았다. 읽기 자격 분리·WeatherOFF도 유지했다.
+- 현재 pair의 배포·공개 읽기/auth·원 일정 복원만 종결한다. 물리 두writer·전체수집 최적화·
+  Rest 후속 영속 연결·전체1commit·W/T 운영 활성화는 별도 미완이다.
+  [후보·CI 범위](reports/2026-10-25-snapshot-recovery-final-candidate-ui.md).
+
 ## 2026-10-26 · expired reset applying holder의 정본 fixture 회귀
 
 - CI 두 lane의 guard 미설치 원1 FAIL을 보존하고 해당 한 case만 기존 strict_engines로

@@ -1,5 +1,16 @@
 # expired plan reset의 applying holder 정본 guard fixture
 
+## 후속 최종 CI·머지 상태
+
+이 fixture를 포함한 최종29f1594b의 전체 CI는5 workflow/10 check 모두 성공했고
+Map #1411은5f3506a로 머지됐다. glibc1905 PASS/23 SKIP, Alpine1899 PASS/29 SKIP이며
+두 lane 모두 원 실패 node를 포함한다. 아래의 전체 CI 미완 표기는 당시 단일회귀
+checkpoint의 한계로 보존한다. 이후 최종 pair의 공식 배포·schema430/0102·7 healthy를
+수용했지만 첫 공개 읽기 UI는 Map 로그인401로 실패해 PinVi 미도달이다. 후속 공개 R7 인수·
+원 일정 복원도 별도 수용했으며 해당 초기 실패는 보존한다. [운영 정산](2026-10-25-pinvi-admin-feature-read-scope.md).
+최종 CI 수용 SHA-256은
+`18be481471666782b9a3893726eab8c342016f9e223d9f475db9614d43a9c2db`다.
+
 ## 원 실패와 원인
 
 Map860967df의 glibc CI는1904통과·23skip·1실패, Alpine은1898통과·29skip·1실패였다. 두 실패는 test_applying_holder_blocks_reset_then_rollback_allows_expired_reset의 실제 holder begin에서 발생한 strict statement guard definition drift 23514이며 waiter 생성 전이다. 원 로그와 원 source를 보존한다.
