@@ -92,12 +92,37 @@ async def _aged_snapshot(engines, *, protect=None):
                     "old": old,
                     "finished": None if running else now if fresh else old,
                     "engine": "STARTED" if protect == "live-engine" else "FAILURE",
-                    "quarantined": now if is_root and protect == "quarantined" else None,
-                    "reason": "unlinked_feature_update_component"
-                    if is_root and protect == "quarantined"
-                    else None,
+                    "quarantined": None,
+                    "reason": None,
                 },
             )
+        if protect == "quarantined":
+            # 이 marker는 typed runtime에서 생성할 수 없는 migration-origin 상태다.
+            # 소유 fresh PG에서 정확 trigger 하나만 같은 TX 안에서 잠시 비활성화한다.
+            trigger = text("""SELECT oid,tgenabled::text FROM pg_catalog.pg_trigger
+                WHERE tgrelid='ops.import_jobs'::regclass
+                AND tgname='trg_import_jobs_quarantine_immutable' AND NOT tgisinternal""")
+            original = (await connection.execute(trigger)).one()
+            assert original[1] == "O"
+            await connection.execute(
+                text(
+                    "ALTER TABLE ops.import_jobs DISABLE TRIGGER "
+                    "trg_import_jobs_quarantine_immutable"
+                )
+            )
+            await connection.execute(
+                text("""UPDATE ops.import_jobs SET quarantined_at=:now,
+                quarantine_reason='unlinked_feature_update_component' WHERE job_id=:root"""),
+                {"now": now, "root": args["root"]},
+            )
+            await connection.execute(
+                text(
+                    "ALTER TABLE ops.import_jobs ENABLE TRIGGER "
+                    "trg_import_jobs_quarantine_immutable"
+                )
+            )
+            assert (await connection.execute(trigger)).one() == original
+            # 앞 문장 실패 시 outer TX rollback이 trigger 상태와 fixture marker를 함께 복원한다.
     return dataset, snapshot, args
 
 

@@ -75,3 +75,11 @@ fixture의 정본 등록 직전 bounded 설정이 없어 kernel의30초 상한 �
 보존·회수·rollback 수용으로 세지 않는다. 원 raw/XML과 정확 CID·UUID·volume 정리는 보존했다.
 정본 registration._bounded(2초/900ms)를 등록 및 정상 GC의 각 TX에 명시하고, limit/SER
 negative·원 단언·제품 SQL은 유지한다. 새 결과 전까지 GC 수용은 미완이다.
+
+GC setter 정정 후81f279의 GC16+신규 후처리3은18PASS/1FAIL20.30s였다. 신규 후처리3과
+GC15는 통과했고 유일 quarantine case는 fixture의 raw marker 변경을 정본 migration-owned
+guard가 거부해 GC에 도달하지 못했다. 이 상태는 정상 registration으로 생성할 수 없으므로
+소유 fresh PG의 migration-origin fault simulation으로 정확 quarantine trigger 하나만
+같은 TX에서 DISABLE→root marker 설정→ENABLE하고 OID/enabled 원상 일치를 확인한다.
+실패 때 outer rollback이 복원하며 제품 함수·다른 trigger·원 GC 단언은 유지한다.
+quarantine의 runtime 쓰기 허용 증거로 부르지 않으며 이1개의 실제 재검증은 별도다.
