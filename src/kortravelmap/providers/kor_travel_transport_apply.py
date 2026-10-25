@@ -30,7 +30,10 @@ from kortravelmap.infra.provider_snapshot_result import (
 )
 from kortravelmap.infra.scoped_feature_writes import lock_scoped_feature_write_protocol
 from kortravelmap.infra.transport_airport_evidence_reader import decode_transport_airport_evidence
-from kortravelmap.providers.kor_travel_transport_evidence import AirportReobservationPreparation
+from kortravelmap.providers.kor_travel_transport_evidence import (
+    AirportReobservationPreparation,
+    assess_transport_airport_reobservation_evidence,
+)
 
 
 async def _counter_state(
@@ -171,6 +174,11 @@ async def apply_stored_airport_reobservation(
         )
         if fresh != preparation.evidence:
             raise ValueError("airport evidence changed after locking; replan")
+        assessed = await assess_transport_airport_reobservation_evidence(
+            artifact.bundles, fresh, geo=artifact.geo
+        )
+        if assessed.eligible is not True:
+            raise ValueError("stored airport input requires EX: " + assessed.reason)
         await batch._validate_batch_manifest(
             session,
             ordered,

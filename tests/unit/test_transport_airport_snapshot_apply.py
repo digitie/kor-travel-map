@@ -178,3 +178,29 @@ async def test_invalid_input_stops_before_lock_or_dml(monkeypatch, broken):
     assert not saved
     apply.assert_not_awaited()
     finish.assert_not_awaited()
+
+
+async def test_other_canonical_payload_cannot_reuse_eligible_preparation(monkeypatch):
+    from kortravelmap.providers.kor_travel_transport import TransportAirport
+    from kortravelmap.providers.kor_travel_transport_native import (
+        TransportGeoEvidence,
+        transport_item_to_native_bundle,
+    )
+
+    session, _, preparation, args, saved, _, apply, finish = await _case(monkeypatch)
+    wire, original = await _fixture()
+    genuine = await target.assess_transport_airport_reobservation_evidence(
+        (original,), decode_transport_airport_evidence(15, wire)
+    )
+    assert genuine.eligible is True
+    other = await transport_item_to_native_bundle(
+        TransportAirport("P01", "변경", "TEST", None, None, None, {}),
+        fetched_at=original.source_record.fetched_at,
+        geo=TransportGeoEvidence("not_requested"),
+    )
+    payload = encode_provider_snapshot_artifact((other,), None, pins=_PINS)
+    with pytest.raises(ValueError, match="requires EX: changed_raw_requires_ex"):
+        await target.apply_stored_airport_reobservation(session, payload, genuine, **args)
+    apply.assert_not_awaited()
+    finish.assert_not_awaited()
+    assert not saved
