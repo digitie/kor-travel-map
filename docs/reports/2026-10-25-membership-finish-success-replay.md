@@ -45,9 +45,21 @@ e7fb3adef5b76462902fbb992572ca420542aad1499f9a3a94f88480c56c3a43이다.
 통합 시험 3개는 정본 ensure → member finish → reconcile의
 SUCCESS·FAILURE·CANCELED 이후 호출과 tracking/receipt 전체 불변을 준비했다.
 SUCCESS에서는 dataset/scope/operation 세 축의 다른 member 거부도 확인하도록 했다.
-이 3개는 정본 scalar_container/scalar_engines의 자원 제한과 자동 회수를 재사용하며,
-collect-only다. 공유 migrated_engine을 기동하지 않으며 실제 PostgreSQL 검증은 아직 하지 않았다.
+이 3개는 정본 scalar_container/scalar_engines의 자원 제한과 자동 회수를 재사용한다.
+공유 migrated_engine을 기동하지 않는다. Root의 명시 승인으로 고정 687febfdc source에서
+한 번 실행하여 3 PASS/skip0, XML suite 13.986초를 확인했다.
+SUCCESS는 정확 member noop·다른 triple 세 축 오류·tracking/receipt 전체 불변,
+FAILURE/CANCELED는 terminal 차단과 같은 상태 불변을 통과했다.
+이는 같은 outer transaction의 실제 lifecycle 검증이며 물리 두 worker commit 경합 실증은 아니다.
+
+실제 Git 2508개 blob/mode와 SDK 53개 전후 대조, 34개 import 경로·SHA,
+head430을 확인했다. 정확 CID와 UUID label은 부재, 익명 volume 1개 부재,
+runner 최종 global scalar label 0과 정리를 확인했다. 슬롯 반환 뒤 독립 읽기에서도
+정확 CID/UUID/volume 부재와 source/SDK 전체를 재확인했다.
+원 raw 8개·XML·result의 SHA는 private 원장
+map430-membership-finish-replay-687-actual-facts.json에 보존했다.
+Root/J 소스 검토는 각각 독립 통과했으며 수정 전 회귀 FAIL도 그대로 남겼다.
 
 base는 cdfdc7aa39698e0fcf3749c0da72497bb5ff510b이다.
 기존 PR1410 head/branch와 W 소유 runner는 수정하지 않았다.
-제품 리뷰·실제 PG·최종 통합은 별도 미완이고 운영 변경은 없다.
+최종 430 통합·최종 후보 live UI 검증은 별도 미완이고 운영 변경은 없다.
