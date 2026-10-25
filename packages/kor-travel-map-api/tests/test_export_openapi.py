@@ -336,6 +336,8 @@ def test_service_openapi_spec_contains_service_routes_and_prunes_user_routes() -
         "/v1/service/feature-alias-maps/checksum",
         "/v1/service/feature-reference-reconciliations",
         "/v1/service/feature-reference-reconciliations/{event_id}/acks",
+        "/v1/service/admin-features",
+        "/v1/service/admin-features/{feature_id}",
         "/v1/service/feature-requests",
         "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",

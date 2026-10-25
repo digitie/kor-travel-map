@@ -1,6 +1,1664 @@
 {
   "components": {
     "schemas": {
+      "AdminCurationItemView": {
+        "additionalProperties": false,
+        "properties": {
+          "accepted_link_decision_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted Link Decision Id"
+          },
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "address_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Hint"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "collection_id": {
+            "format": "uuid",
+            "title": "Collection Id",
+            "type": "string"
+          },
+          "collection_key": {
+            "title": "Collection Key",
+            "type": "string"
+          },
+          "command_etag": {
+            "title": "Command Etag",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "curation_item_id": {
+            "format": "uuid",
+            "title": "Curation Item Id",
+            "type": "string"
+          },
+          "curation_relation": {
+            "enum": [
+              "primary_stop",
+              "food_stop",
+              "cafe_stop",
+              "bookstore_stop",
+              "nearby_option",
+              "accessibility_support",
+              "pet_support",
+              "family_support",
+              "theme_area_anchor"
+            ],
+            "title": "Curation Relation",
+            "type": "string"
+          },
+          "current_import_row_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Import Row Id"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "edition_key": {
+            "title": "Edition Key",
+            "type": "string"
+          },
+          "external_component_id": {
+            "title": "External Component Id",
+            "type": "string"
+          },
+          "external_item_id": {
+            "title": "External Item Id",
+            "type": "string"
+          },
+          "feature_category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Category"
+          },
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Id"
+          },
+          "feature_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Kind"
+          },
+          "feature_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Name"
+          },
+          "item_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Summary"
+          },
+          "item_title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Item Title"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "link_actor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Actor"
+          },
+          "link_decided_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Decided At"
+          },
+          "link_evidence": {
+            "additionalProperties": true,
+            "title": "Link Evidence",
+            "type": "object"
+          },
+          "link_match_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Match Basis"
+          },
+          "link_resolver_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Link Resolver Version"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "title": "Metadata",
+            "type": "object"
+          },
+          "place_name": {
+            "title": "Place Name",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
+          "reuse_policy": {
+            "enum": [
+              "allowed",
+              "blocked",
+              "manual_review"
+            ],
+            "title": "Reuse Policy",
+            "type": "string"
+          },
+          "row_revision": {
+            "pattern": "^[1-9][0-9]*$",
+            "title": "Row Revision",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          },
+          "source_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Name"
+          },
+          "source_present": {
+            "title": "Source Present",
+            "type": "boolean"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "status": {
+            "enum": [
+              "candidate",
+              "included",
+              "rejected",
+              "archived"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "theme_group": {
+            "title": "Theme Group",
+            "type": "string"
+          },
+          "theme_name": {
+            "title": "Theme Name",
+            "type": "string"
+          },
+          "theme_slug": {
+            "title": "Theme Slug",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "updated_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated By"
+          }
+        },
+        "required": [
+          "curation_item_id",
+          "collection_id",
+          "collection_key",
+          "title",
+          "edition_key",
+          "theme_slug",
+          "theme_name",
+          "theme_group",
+          "provider_dataset_id",
+          "provider",
+          "dataset_key",
+          "source_name",
+          "source_url",
+          "feature_id",
+          "feature_name",
+          "feature_kind",
+          "feature_category",
+          "lon",
+          "lat",
+          "address",
+          "source_record_key",
+          "external_item_id",
+          "external_component_id",
+          "place_name",
+          "address_hint",
+          "source_present",
+          "status",
+          "sort_order",
+          "item_title",
+          "item_summary",
+          "curation_relation",
+          "reuse_policy",
+          "metadata",
+          "current_import_row_id",
+          "accepted_link_decision_id",
+          "link_match_basis",
+          "link_resolver_version",
+          "link_evidence",
+          "link_actor",
+          "link_decided_at",
+          "row_revision",
+          "command_etag",
+          "created_at",
+          "updated_at",
+          "archived_at",
+          "created_by",
+          "updated_by"
+        ],
+        "title": "AdminCurationItemView",
+        "type": "object"
+      },
+      "AdminFeatureDetailData": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features/{feature_id}`` data.",
+        "properties": {
+          "curations": {
+            "items": {
+              "$ref": "#/components/schemas/AdminCurationItemView"
+            },
+            "title": "Curations",
+            "type": "array"
+          },
+          "feature": {
+            "$ref": "#/components/schemas/AdminFeatureDetailFeatureRecord"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureDetailFileRecord"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureDetailIssueRecord"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "overrides": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureDetailOverrideRecord"
+            },
+            "title": "Overrides",
+            "type": "array"
+          },
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureDetailSourceRecord"
+            },
+            "title": "Sources",
+            "type": "array"
+          },
+          "state_transitions": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureStateTransitionAuditRecord"
+            },
+            "title": "State Transitions",
+            "type": "array"
+          }
+        },
+        "required": [
+          "feature",
+          "sources",
+          "issues",
+          "overrides",
+          "state_transitions",
+          "files",
+          "curations"
+        ],
+        "title": "AdminFeatureDetailData",
+        "type": "object"
+      },
+      "AdminFeatureDetailFeatureRecord": {
+        "additionalProperties": false,
+        "description": "Admin feature 상세 core snapshot.",
+        "properties": {
+          "address": {
+            "additionalProperties": true,
+            "title": "Address",
+            "type": "object"
+          },
+          "admin_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Admin Dong Code"
+          },
+          "area_square_meters": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Area Square Meters"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "coord_precision_digits": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coord Precision Digits"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "detail": {
+            "additionalProperties": true,
+            "title": "Detail",
+            "type": "object"
+          },
+          "feature_id": {
+            "description": "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것.",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 feature_id와 같은 값이다.",
+            "title": "Feature Uuid"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "legal_dong_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Legal Dong Code"
+          },
+          "lifecycle_state": {
+            "enum": [
+              "active",
+              "retired"
+            ],
+            "title": "Lifecycle State",
+            "type": "string"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "parent_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Feature Id"
+          },
+          "publication_state": {
+            "enum": [
+              "draft",
+              "published",
+              "suppressed"
+            ],
+            "title": "Publication State",
+            "type": "string"
+          },
+          "quality_state": {
+            "enum": [
+              "valid",
+              "quarantined"
+            ],
+            "title": "Quality State",
+            "type": "string"
+          },
+          "raw_refs": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Raw Refs",
+            "type": "array"
+          },
+          "road_address_management_no": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Address Management No"
+          },
+          "road_name_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Road Name Code"
+          },
+          "row_revision": {
+            "description": "correction If-Match에 사용할 server-owned revision.",
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "sibling_group_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sibling Group Id"
+          },
+          "sido_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sido Code"
+          },
+          "sigungu_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sigungu Code"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "urls": {
+            "additionalProperties": true,
+            "title": "Urls",
+            "type": "object"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "lifecycle_state",
+          "publication_state",
+          "quality_state",
+          "address",
+          "detail",
+          "urls",
+          "raw_refs",
+          "row_revision",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminFeatureDetailFeatureRecord",
+        "type": "object"
+      },
+      "AdminFeatureDetailFileRecord": {
+        "additionalProperties": false,
+        "description": "Admin feature 상세 file metadata row.",
+        "properties": {
+          "alt_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alt Text"
+          },
+          "bucket": {
+            "title": "Bucket",
+            "type": "string"
+          },
+          "byte_size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Byte Size"
+          },
+          "checksum_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum Sha256"
+          },
+          "content_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content Type"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "display_order": {
+            "title": "Display Order",
+            "type": "integer"
+          },
+          "file_id": {
+            "title": "File Id",
+            "type": "string"
+          },
+          "file_type": {
+            "title": "File Type",
+            "type": "string"
+          },
+          "height": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height"
+          },
+          "object_key": {
+            "title": "Object Key",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "public_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Public Url"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "source_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Url"
+          },
+          "storage_backend": {
+            "title": "Storage Backend",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "width": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width"
+          }
+        },
+        "required": [
+          "file_id",
+          "file_type",
+          "storage_backend",
+          "bucket",
+          "object_key",
+          "role",
+          "display_order",
+          "payload",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminFeatureDetailFileRecord",
+        "type": "object"
+      },
+      "AdminFeatureDetailIssueRecord": {
+        "additionalProperties": false,
+        "description": "Admin feature 상세 issue row.",
+        "properties": {
+          "dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Key"
+          },
+          "detected_at": {
+            "format": "date-time",
+            "title": "Detected At",
+            "type": "string"
+          },
+          "issue_id": {
+            "title": "Issue Id",
+            "type": "string"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "severity": {
+            "title": "Severity",
+            "type": "string"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "violation_type": {
+            "title": "Violation Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "issue_id",
+          "violation_type",
+          "severity",
+          "message",
+          "payload",
+          "status",
+          "detected_at"
+        ],
+        "title": "AdminFeatureDetailIssueRecord",
+        "type": "object"
+      },
+      "AdminFeatureDetailOverrideRecord": {
+        "additionalProperties": false,
+        "description": "Admin feature 상세 override row.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_by": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created By"
+          },
+          "field_path": {
+            "title": "Field Path",
+            "type": "string"
+          },
+          "override_id": {
+            "title": "Override Id",
+            "type": "string"
+          },
+          "override_value": {
+            "title": "Override Value"
+          },
+          "prevent_provider_reactivation": {
+            "title": "Prevent Provider Reactivation",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "source_value": {
+            "title": "Source Value"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "override_id",
+          "field_path",
+          "source_value",
+          "override_value",
+          "prevent_provider_reactivation",
+          "status",
+          "created_at"
+        ],
+        "title": "AdminFeatureDetailOverrideRecord",
+        "type": "object"
+      },
+      "AdminFeatureDetailResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features/{feature_id}`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeatureDetailData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeatureDetailResponse",
+        "type": "object"
+      },
+      "AdminFeatureDetailSourceRecord": {
+        "additionalProperties": false,
+        "description": "Admin feature 상세 source/link row.",
+        "properties": {
+          "confidence": {
+            "title": "Confidence",
+            "type": "integer"
+          },
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "fetched_at": {
+            "format": "date-time",
+            "title": "Fetched At",
+            "type": "string"
+          },
+          "imported_at": {
+            "format": "date-time",
+            "title": "Imported At",
+            "type": "string"
+          },
+          "linked_at": {
+            "format": "date-time",
+            "title": "Linked At",
+            "type": "string"
+          },
+          "match_method": {
+            "title": "Match Method",
+            "type": "string"
+          },
+          "observed_at": {
+            "format": "date-time",
+            "title": "Observed At",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "raw_data": {
+            "additionalProperties": true,
+            "title": "Raw Data",
+            "type": "object"
+          },
+          "raw_payload_hash": {
+            "title": "Raw Payload Hash",
+            "type": "string"
+          },
+          "source_entity_id": {
+            "title": "Source Entity Id",
+            "type": "string"
+          },
+          "source_entity_key": {
+            "title": "Source Entity Key",
+            "type": "string"
+          },
+          "source_entity_type": {
+            "title": "Source Entity Type",
+            "type": "string"
+          },
+          "source_record_key": {
+            "title": "Source Record Key",
+            "type": "string"
+          },
+          "source_role": {
+            "title": "Source Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "source_entity_key",
+          "source_record_key",
+          "provider",
+          "dataset_key",
+          "source_entity_type",
+          "source_entity_id",
+          "source_role",
+          "match_method",
+          "confidence",
+          "raw_payload_hash",
+          "raw_data",
+          "fetched_at",
+          "imported_at",
+          "observed_at",
+          "linked_at"
+        ],
+        "title": "AdminFeatureDetailSourceRecord",
+        "type": "object"
+      },
+      "AdminFeatureIssueRecord": {
+        "additionalProperties": false,
+        "description": "Admin feature 목록 issue summary.",
+        "properties": {
+          "detected_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Detected At"
+          },
+          "issue_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Issue Id"
+          },
+          "message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Message"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Severity"
+          },
+          "violation_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Violation Type"
+          }
+        },
+        "title": "AdminFeatureIssueRecord",
+        "type": "object"
+      },
+      "AdminFeatureRecord": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features`` item.",
+        "properties": {
+          "address_label": {
+            "title": "Address Label",
+            "type": "string"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "feature_id": {
+            "description": "feature 참조 (opaque string). T-VN-32C 값 전환 이후 UUID 정본 문자열을 담는다 — 형식(legacy f_*/UUID)에 의존하지 말 것.",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "UUID 정본 identity 명시 필드 (ADR-068). T-VN-32C 이후 feature_id와 같은 값이다.",
+            "title": "Feature Uuid"
+          },
+          "issue_count": {
+            "title": "Issue Count",
+            "type": "integer"
+          },
+          "issues": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureIssueRecord"
+            },
+            "title": "Issues",
+            "type": "array"
+          },
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lat"
+          },
+          "lifecycle_state": {
+            "enum": [
+              "active",
+              "retired"
+            ],
+            "title": "Lifecycle State",
+            "type": "string"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lon"
+          },
+          "name": {
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "primary_dataset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Dataset Key"
+          },
+          "primary_provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Primary Provider"
+          },
+          "publication_state": {
+            "enum": [
+              "draft",
+              "published",
+              "suppressed"
+            ],
+            "title": "Publication State",
+            "type": "string"
+          },
+          "quality_state": {
+            "enum": [
+              "valid",
+              "quarantined"
+            ],
+            "title": "Quality State",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "kind",
+          "name",
+          "category",
+          "lifecycle_state",
+          "publication_state",
+          "quality_state",
+          "address_label",
+          "issue_count",
+          "issues",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AdminFeatureRecord",
+        "type": "object"
+      },
+      "AdminFeatureStateTransitionAuditRecord": {
+        "additionalProperties": false,
+        "description": "DB append-only Feature 상태 전이 감사 1건.\n\nadmin detail은 현재 tuple과 이 timeline을 함께 주므로 운영 화면이 합성된\nlegacy status를 추론할 필요가 없다.",
+        "properties": {
+          "causation_ref": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Causation Ref"
+          },
+          "from_lifecycle_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "active",
+                  "retired"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Lifecycle State"
+          },
+          "from_publication_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "draft",
+                  "published",
+                  "suppressed"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Publication State"
+          },
+          "from_quality_state": {
+            "anyOf": [
+              {
+                "enum": [
+                  "valid",
+                  "quarantined"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Quality State"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "principal": {
+            "title": "Principal",
+            "type": "string"
+          },
+          "provider_dataset_id": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Dataset Id"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "row_revision": {
+            "minimum": 1.0,
+            "title": "Row Revision",
+            "type": "integer"
+          },
+          "source_entity_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Entity Key"
+          },
+          "source_record_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Record Key"
+          },
+          "to_lifecycle_state": {
+            "enum": [
+              "active",
+              "retired"
+            ],
+            "title": "To Lifecycle State",
+            "type": "string"
+          },
+          "to_publication_state": {
+            "enum": [
+              "draft",
+              "published",
+              "suppressed"
+            ],
+            "title": "To Publication State",
+            "type": "string"
+          },
+          "to_quality_state": {
+            "enum": [
+              "valid",
+              "quarantined"
+            ],
+            "title": "To Quality State",
+            "type": "string"
+          },
+          "transition_id": {
+            "title": "Transition Id",
+            "type": "integer"
+          },
+          "transition_kind": {
+            "title": "Transition Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transition_id",
+          "to_lifecycle_state",
+          "to_publication_state",
+          "to_quality_state",
+          "transition_kind",
+          "reason_code",
+          "principal",
+          "occurred_at",
+          "row_revision"
+        ],
+        "title": "AdminFeatureStateTransitionAuditRecord",
+        "type": "object"
+      },
+      "AdminFeaturesListData": {
+        "additionalProperties": false,
+        "description": "Admin feature 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/AdminFeatureRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "AdminFeaturesListData",
+        "type": "object"
+      },
+      "AdminFeaturesListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/features`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/AdminFeaturesListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "AdminFeaturesListResponse",
+        "type": "object"
+      },
       "AirportDetailData": {
         "additionalProperties": false,
         "properties": {
@@ -7585,6 +9243,431 @@
         "summary": "C6c cancel-probe fixture finalization",
         "tags": [
           "ops-contract-fixtures"
+        ]
+      }
+    },
+    "/v1/service/admin-features": {
+      "get": {
+        "description": "pinvi:admin-features:read 전용. 기존 admin Feature 필터와 DTO를 공유한다.",
+        "operationId": "service_admin_features_list",
+        "parameters": [
+          {
+            "description": "name/address/feature/source 검색",
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "name/address/feature/source 검색",
+              "title": "Q"
+            }
+          },
+          {
+            "description": "feature kind 반복 필터",
+            "in": "query",
+            "name": "kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "feature kind 반복 필터",
+              "title": "Kind"
+            }
+          },
+          {
+            "description": "category code 반복 필터",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "category code 반복 필터",
+              "title": "Category"
+            }
+          },
+          {
+            "description": "lifecycle 축 반복 필터.",
+            "in": "query",
+            "name": "lifecycle_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "active",
+                      "retired"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "lifecycle 축 반복 필터.",
+              "title": "Lifecycle State"
+            }
+          },
+          {
+            "description": "publication 축 반복 필터.",
+            "in": "query",
+            "name": "publication_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "draft",
+                      "published",
+                      "suppressed"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "publication 축 반복 필터.",
+              "title": "Publication State"
+            }
+          },
+          {
+            "description": "quality 축 반복 필터.",
+            "in": "query",
+            "name": "quality_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "valid",
+                      "quarantined"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "quality 축 반복 필터.",
+              "title": "Quality State"
+            }
+          },
+          {
+            "description": "primary provider dataset canonical ID 필터",
+            "in": "query",
+            "name": "provider_dataset_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "primary provider dataset canonical ID 필터",
+              "title": "Provider Dataset Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_coord",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Coord"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_issue",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Issue"
+            }
+          },
+          {
+            "in": "query",
+            "name": "issue_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Issue Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "updated_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Updated To"
+            }
+          },
+          {
+            "description": "종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. 기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다.",
+            "in": "query",
+            "name": "include_ended",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. 기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다.",
+              "title": "Include Ended",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "name",
+              "enum": [
+                "name",
+                "updated_at",
+                "created_at",
+                "kind",
+                "provider",
+                "issue_count"
+              ],
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "order",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "asc",
+                    "desc"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Order"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeaturesListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "List Features",
+        "tags": [
+          "service-admin-features"
+        ]
+      }
+    },
+    "/v1/service/admin-features/{feature_id}": {
+      "get": {
+        "description": "pinvi:admin-features:read 전용. 기존 alias 해석과 전체 admin DTO를 공유한다.",
+        "operationId": "service_admin_features_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdminFeatureDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "Get Feature Detail Route",
+        "tags": [
+          "service-admin-features"
         ]
       }
     },

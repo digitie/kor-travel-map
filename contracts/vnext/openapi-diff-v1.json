@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "f73311fef26dab277fa2d54cbba52334c78df7cc7e5c934eedda80a7a4a12f91"
+      "sha256": "3fd42a58b91c3296ce201094475e5abbe867f31ecf8e881b375dc0f1f42a88b1"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,10 +13,15 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "3b8503a31d725cc1e6d033ac02edaba5c5fe9539ac448fb37dafb6f8fc51c26b"
+      "sha256": "9c6724f10a8bb784ca4872bf15ec0f94ea0a0a5062290ff22c2ee215c430ce3f"
     }
   },
   "revisions": [
+    {
+      "date": "2026-10-25",
+      "task": "PR #1414 PinVi admin Feature read",
+      "change": "독립 pinvi:admin-features:read 전용 GET 목록·단건을 추가해 service/admin baseline을 재고정한다. 기존 admin endpoint·DTO/필터·write 권한과 user bytes는 유지하며 새 pair/UI·provision은 미완이다."
+    },
     {
       "date": "2026-10-16",
       "task": "T-GR-05 geo release sensor",
@@ -379,7 +384,7 @@
     },
     "service": {
       "counts": {
-        "added": 18,
+        "added": 20,
         "removed": 0,
         "renamed": 0,
         "enum_changes": 1,
@@ -514,6 +519,16 @@
           "detail": "Valkey 연결과 weather 데이터셋 7개의 신선도(ADR-114 2단계, 실패는 failure_kind 코드).",
           "basis": "ADR-114",
           "applied": true
+        },
+        {
+          "target_operation": "GET /v1/service/admin-features",
+          "basis": "PR #1414: 기존 admin DTO/query를 공유하는 별도 digest read principal; write/legacy 권한 확대 없음",
+          "applied": true
+        },
+        {
+          "target_operation": "GET /v1/service/admin-features/{feature_id}",
+          "basis": "PR #1414: 기존 admin DTO/query를 공유하는 별도 digest read principal; write/legacy 권한 확대 없음",
+          "applied": true
         }
       ],
       "removed": [],
@@ -545,7 +560,7 @@
     },
     "admin": {
       "counts": {
-        "added": 16,
+        "added": 18,
         "removed": 12,
         "renamed": 0,
         "enum_changes": 4,
@@ -661,6 +676,16 @@
           "applied": true,
           "detail": "stored plan만 소비하며 If-Match/Idempotency-Key로 exact terminal replay하는 commit",
           "basis": "ADR-092"
+        },
+        {
+          "target_operation": "GET /v1/service/admin-features",
+          "basis": "PR #1414: 기존 admin DTO/query를 공유하는 별도 digest read principal; write/legacy 권한 확대 없음",
+          "applied": true
+        },
+        {
+          "target_operation": "GET /v1/service/admin-features/{feature_id}",
+          "basis": "PR #1414: 기존 admin DTO/query를 공유하는 별도 digest read principal; write/legacy 권한 확대 없음",
+          "applied": true
         }
       ],
       "removed": [
