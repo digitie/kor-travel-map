@@ -344,3 +344,13 @@ def test_asyncpg_receives_single_top_level_ddl_without_splitting_function_bodies
         if "CREATE TABLE" in body
     )
     assert len(migration._top_level_statements(storage)) == 2
+
+
+def test_quota_cross_column_check_names_match_actual_postgresql_catalog():
+    names = {str(c.name) for c in models.ProviderSnapshotQuotaLimitRow.__table__.constraints}
+    assert {
+        "provider_snapshot_quota_limits_check",
+        "provider_snapshot_quota_limits_check1",
+    } <= names
+    assert "provider_snapshot_quota_limits_used_bytes_check" not in names
+    assert "provider_snapshot_quota_limits_used_rows_check" not in names
