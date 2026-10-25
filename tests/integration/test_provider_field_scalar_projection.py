@@ -876,7 +876,8 @@ async def test_foreign_unchanged_winner_preserves_base_revision_and_clock(scalar
     feature, datasets, entities = await _seed(admin)
     await _activate(admin, feature)
     query = text("""SELECT to_jsonb(base) FROM feature.feature_base_field_values base
-        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C""")
+        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C"
+        """)
     async with AsyncSession(admin) as observer:
         before = (await observer.execute(query, {"feature": feature})).scalars().all()
     await _refresh(runtime, feature, datasets[1], entities[1], {"core.name": "nonwinning-name"})
@@ -896,7 +897,8 @@ async def test_foreign_changed_base_still_rejects_inside_manifest_feature(scalar
     await _activate(admin, feature)
     attempt, owner, digest = await _plan(runtime, feature, datasets[1])
     query = text("""SELECT to_jsonb(base) FROM feature.feature_base_field_values base
-        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C""")
+        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C"
+        """)
     async with AsyncSession(admin) as observer:
         before = (await observer.execute(query, {"feature": feature})).scalars().all()
     try:
@@ -1006,7 +1008,8 @@ async def test_removed_own_candidate_requires_fresh_ex_plan_for_foreign_winner(s
                     text("""SELECT source_entity_key,current_source_record_key
                 FROM provider_sync.source_links
                 JOIN provider_sync.source_entity_heads USING(source_entity_key)
-                WHERE feature_id=CAST(:id AS uuid) ORDER BY source_entity_key COLLATE "C"""),
+                WHERE feature_id=CAST(:id AS uuid) ORDER BY source_entity_key COLLATE "C"
+        """),
                     {"id": feature},
                 )
             ).all()

@@ -4,7 +4,8 @@
 
 최종 후보7f40 CI glibc는118FAIL/1768PASS/23SKIP/30ERROR(978.50초)였다.
 원문 전체4MB와 모든148개 node는 원장에 보존했다. 이 결과를 분리된 owned 시험의
-성공으로 덮지 않는다. Alpine 원문은 별도 정산한다. 운영 배포는 보류했고 새 PG는 아직0이다.
+성공으로 덮지 않는다. Alpine도 같은148개 node가 실패했다(118FAIL/1762PASS/29SKIP/30ERROR,1269.76초).
+운영 배포는 보류 상태이며 다음 owned 결과와 원 CI를 분리한다.
 
 ## 실제 canonical projector 문제
 
@@ -67,3 +68,17 @@ no-op 수정으로 이 경계의 SH 지원까지 완료했다고 주장하지 �
 확인하고 그 ready plan을 typed cancel한 뒤 새EX attempt로 같은 raw/hash/관측시각을 적용한다.
 B winner 출처·A removed 상태·own phones·원시각 및 두 attempt의 cancelled/completed까지
 대조할 계획이며19개 scalar 수집/Ruff만 확인했다. 실제 결과는 아직 미완이다.
+
+## 첫 owned64 결과와 fixture 문자열 정정
+
+고정2471의64개를 한 fresh owned PG에서 실행해61PASS/3FAIL(34.15초)을 얻었다.
+tracking25/RC11/reset9 및 기존 scalar16은 통과했다. 새 scalar3개는 SQL 문자열 말미의
+`COLLATE "C"` 닫는 따옴표가 Python triple quote에 흡수되어42601에서 중단됐다.
+원64 전체는 FAIL로 보존하며 새 paired no-op/foreign 변경/EX handoff 본체 수용은 미완이다.
+정정은 세 SQL 문자열의 닫는 delimiter를 다음 줄로 분리하는 시험 코드뿐이며 제품 SQL과
+원assert는 그대로다. 원result SHA80d87d1b7ff3ef5e33799959b900df5e605e2cd4f36ccfdc9ec559ecd62f425b를 보존했다.
+
+원runner의 성공 분기 postcheck는 실행되지 않았다. 별도 실제 postcheck로 Git2514파일,
+SDK53파일, 실제19import hash 및 원raw8개 hash를 확인했다. exact CID 부재/UUID0/
+전체 scalar label0/owned volume1부재를 다시 조회했고 PG 슬롯을 반환했다.
+이 보충 확인은 원runner PASS나 paired3 성공으로 세지 않는다.
