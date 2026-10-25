@@ -261,6 +261,8 @@ def test_inventory_validator_reuses_exact_installer_tail_without_installing():
 @pytest.mark.parametrize(
     ("field", "value", "message"),
     [
+        ("can_execute_snapshot_private_topic_lock", True, "private snapshot topic lock"),
+        ("can_execute_snapshot_private_topic_lock", None, "private snapshot topic lock"),
         ("can_access_provider_snapshot_private_relations", True, "private provider snapshot"),
         ("can_access_provider_snapshot_private_relations", None, "private provider snapshot"),
         ("strict_data_guard_inventory_valid", False, "strict data guard inventory"),

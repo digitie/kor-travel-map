@@ -9,6 +9,7 @@ from uuid import uuid4
 
 import pytest
 from dagster import Failure
+from kortravelmap.client._snapshot_atomic import SnapshotAtomicCompletion
 from kortravelmap.infra.provider_snapshot_artifact import decode_provider_snapshot_artifact
 from kortravelmap.infra.provider_snapshot_recovery_repo import (
     RecoveredProviderSnapshot,
@@ -88,7 +89,7 @@ async def _case(monkeypatch, *, status="applied", geo=False):
         ("read_airport_snapshot", observed),
         ("claim_airport_snapshot", SnapshotExecutorLease(token, _AT, status)),
         ("plan_airport_snapshot", object()),
-        ("apply_airport_snapshot", object()),
+        ("apply_airport_snapshot_in_session", intent.apply_result),
         ("reset_airport_snapshot_plan", "reset"),
         ("collect_expired_airport_snapshots", 0),
         ("register_airport_snapshot", SnapshotRegistration(sid, True, token)),
@@ -97,6 +98,11 @@ async def _case(monkeypatch, *, status="applied", geo=False):
         stub = AsyncMock(return_value=value)
         monkeypatch.setattr(target.io, name, stub)
         stubs[name] = stub
+    atomic = AsyncMock(
+        return_value=SnapshotAtomicCompletion(intent.apply_result, intent.receipt_candidate)
+    )
+    monkeypatch.setattr(target, "run_snapshot_apply_postprocess", atomic)
+    stubs["run_snapshot_apply_postprocess"] = atomic
     backend = SimpleNamespace(
         complete_provider_snapshot_postprocess=AsyncMock(return_value=intent.receipt_candidate)
     )
@@ -128,7 +134,7 @@ async def test_registered_worker_restart_reuses_every_original_value_without_sdk
     collect.assert_not_awaited()
     clock.assert_not_awaited()
     stubs["plan_airport_snapshot"].assert_not_awaited()
-    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["run_snapshot_apply_postprocess"].assert_not_awaited()
     seal = stubs["seal_airport_snapshot"].await_args
     assert seal.args[1] == token
     assert seal.kwargs["postprocess_sha256"] == hashlib.sha256(intent.receipt_candidate).hexdigest()
@@ -197,7 +203,7 @@ async def test_new_registration_token_is_first_claim_previous_and_no_second_fetc
     collect.assert_awaited_once()
     created = stubs["register_airport_snapshot"].return_value.token
     assert stubs["claim_airport_snapshot"].await_args.kwargs["previous"] == created
-    stubs["apply_airport_snapshot"].assert_awaited_once()
+    stubs["run_snapshot_apply_postprocess"].assert_awaited_once()
     clock.assert_not_awaited()
 
 
@@ -206,7 +212,7 @@ async def test_apply_unknown_commit_propagates_without_reset_ex_or_refetch(monke
         monkeypatch, status="prepared"
     )
     error = RuntimeError("unknown apply commit")
-    stubs["apply_airport_snapshot"].side_effect = error
+    stubs["run_snapshot_apply_postprocess"].side_effect = error
     with pytest.raises(RuntimeError) as raised:
         await target.run_airport_snapshot_if_supported(context)
     assert raised.value is error
@@ -239,13 +245,13 @@ async def test_known_replan_reads_then_exact_resets_and_reads_again_before_new_p
 
     stubs["read_airport_snapshot"].side_effect = read
     stubs["reset_airport_snapshot_plan"].side_effect = reset
-    stubs["apply_airport_snapshot"].side_effect = [
+    stubs["run_snapshot_apply_postprocess"].side_effect = [
         target.io.AirportSnapshotReplanRequired("expired"),
         object(),
     ]
     await target.run_airport_snapshot_if_supported(context)
     assert events == ["read", "read", "read", "reset", "read", "read", "read"]
-    assert stubs["apply_airport_snapshot"].await_count == 2
+    assert stubs["run_snapshot_apply_postprocess"].await_count == 2
     collect.assert_not_awaited()
 
 
@@ -521,7 +527,7 @@ async def test_claim_current_applied_state_never_uses_old_prepared_plan(monkeypa
     result = await target.run_airport_snapshot_if_supported(context)
     assert result.load == load
     stubs["plan_airport_snapshot"].assert_not_awaited()
-    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["run_snapshot_apply_postprocess"].assert_not_awaited()
     assert stubs["read_airport_snapshot"].await_count == 2
     collect.assert_not_awaited()
 
@@ -545,7 +551,7 @@ async def test_claim_same_prepared_status_uses_fresh_kernel_binding(monkeypatch)
     stubs["read_airport_snapshot"].side_effect = [prepared, fresh, applied]
     await target.run_airport_snapshot_if_supported(context)
     assert stubs["plan_airport_snapshot"].await_args.args[1] is fresh
-    assert stubs["apply_airport_snapshot"].await_args.args[1] is fresh
+    assert stubs["run_snapshot_apply_postprocess"].await_args.args[1] is fresh
     assert stubs["read_airport_snapshot"].await_count == 3
     collect.assert_not_awaited()
 
@@ -573,7 +579,7 @@ async def test_claim_fresh_read_sealed_uses_original_receipt_without_more_effect
     factory.assert_not_called()
     backend.complete_provider_snapshot_postprocess.assert_not_awaited()
     stubs["plan_airport_snapshot"].assert_not_awaited()
-    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["run_snapshot_apply_postprocess"].assert_not_awaited()
     stubs["seal_airport_snapshot"].assert_not_awaited()
     collect.assert_not_awaited()
 
@@ -587,7 +593,7 @@ async def test_claim_fresh_read_disappearance_is_terminal_before_any_plan(monkey
         await target.run_airport_snapshot_if_supported(context)
     assert raised.value.allow_retries is False
     stubs["plan_airport_snapshot"].assert_not_awaited()
-    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["run_snapshot_apply_postprocess"].assert_not_awaited()
     stubs["reset_airport_snapshot_plan"].assert_not_awaited()
     collect.assert_not_awaited()
 
@@ -633,7 +639,7 @@ async def test_claim_inactive_after_other_worker_seals_uses_durable_original_res
     assert result.load == load
     factory.assert_not_called()
     stubs["plan_airport_snapshot"].assert_not_awaited()
-    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["run_snapshot_apply_postprocess"].assert_not_awaited()
     stubs["seal_airport_snapshot"].assert_not_awaited()
     assert stubs["read_airport_snapshot"].await_count == 2
     collect.assert_not_awaited()
@@ -686,7 +692,7 @@ async def test_claim_inactive_without_exact_unblocked_seal_propagates_original_e
     assert caught.value is error
     factory.assert_not_called()
     stubs["plan_airport_snapshot"].assert_not_awaited()
-    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["run_snapshot_apply_postprocess"].assert_not_awaited()
     stubs["reset_airport_snapshot_plan"].assert_not_awaited()
     collect.assert_not_awaited()
 

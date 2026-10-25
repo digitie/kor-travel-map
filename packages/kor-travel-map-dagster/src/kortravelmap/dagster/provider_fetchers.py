@@ -15,9 +15,11 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import importlib
 import logging
 import pathlib
+import zlib
 from collections.abc import (
     AsyncIterator,
     Awaitable,
@@ -26,9 +28,11 @@ from collections.abc import (
     Iterator,
     Mapping,
 )
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
+from zoneinfo import ZoneInfo
 
 import httpx
 from kortravelmap.providers.kor_travel_transport import (
@@ -73,6 +77,8 @@ from .upstream_requests import note_upstream_request
 if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
 
+    from .rest_snapshot_observation import RestExportWindow
+
 _LOGGER = logging.getLogger(__name__)
 """H45 재시도 텔레메트리. ``docker/dagster.yaml``의 ``python_logs``가 이
 logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
@@ -105,6 +111,7 @@ __all__ = [
     "fetch_transport_highway_incidents",
     "fetch_transport_rest_area_fuel_prices",
     "fetch_transport_rest_areas",
+    "fetch_transport_rest_area_snapshot",
     "fetch_visitkorea_festival_events",
 ]
 
@@ -308,11 +315,70 @@ def _raise_transport_status(response: httpx.Response, path: str) -> None:
     response.raise_for_status()
 
 
+async def _bounded_transport_response(
+    client: httpx.AsyncClient,
+    path: str,
+    params: Mapping[str, Any],
+    limit: int,
+) -> httpx.Response:
+    """새 snapshot만 압축 전/후 본문을 제한한다. decoder의 무제한 decompress/flush는 없다."""
+    if type(limit) is not int or not 1 <= limit <= 2 * 1024 * 1024:
+        raise ValueError("bounded transport response limit is invalid")
+    async with client.stream(
+        "GET", path, params=dict(params), headers={"Accept-Encoding": "gzip, identity"}
+    ) as response:
+        _raise_transport_status(response, path)
+        if response.status_code != 200:
+            raise TransportExportContractError("rest snapshot requires HTTP200")
+        encoding = response.headers.get("content-encoding", "identity").strip().lower()
+        if encoding not in {"identity", "gzip"}:
+            raise TransportExportContractError("rest snapshot response encoding is unsupported")
+        decoder = zlib.decompressobj(16 + zlib.MAX_WBITS) if encoding == "gzip" else None
+        body = bytearray()
+        encoded_size = 0
+        try:
+            async for chunk in response.aiter_raw(chunk_size=65536):
+                encoded_size += len(chunk)
+                if encoded_size > limit:
+                    raise TransportExportContractError(
+                        "rest snapshot encoded response exceeds its budget"
+                    )
+                # +1을 읽어 초과를 검출한다. gzip bomb도 상한+1보다 크게 풀지 않는다.
+                decoded = decoder.decompress(chunk, limit - len(body) + 1) if decoder else chunk
+                if len(body) + len(decoded) > limit:
+                    raise TransportExportContractError(
+                        "rest snapshot decoded response exceeds its budget"
+                    )
+                body.extend(decoded)
+                if decoder and (decoder.unused_data or decoder.unconsumed_tail):
+                    raise TransportExportContractError(
+                        "rest snapshot gzip has trailing or excess data"
+                    )
+            if decoder and not decoder.eof:
+                raise TransportExportContractError("rest snapshot gzip is truncated")
+        except zlib.error as exc:
+            raise TransportExportMalformed("rest snapshot gzip is invalid") from exc
+        headers = {
+            k: v
+            for k, v in response.headers.items()
+            if k.lower() not in {"content-encoding", "content-length"}
+        }
+        return httpx.Response(
+            response.status_code, headers=headers, content=bytes(body), request=response.request
+        )
+
+
 async def _transport_request_once(
-    client: httpx.AsyncClient, path: str, params: Mapping[str, Any]
+    client: httpx.AsyncClient,
+    path: str,
+    params: Mapping[str, Any],
+    *,
+    response_byte_limit: int | None = None,
 ) -> httpx.Response:
     """HTTP 요청 정확히 1건 — 시도마다 여기서 센다(재시도도 요청이다)."""
     note_upstream_request()
+    if response_byte_limit is not None:
+        return await _bounded_transport_response(client, path, params, response_byte_limit)
     response = await client.get(path, params=dict(params))
     _raise_transport_status(response, path)
     return response
@@ -324,6 +390,7 @@ async def _transport_get(
     params: Mapping[str, Any],
     *,
     budget: upstream_retry.RetryBudget,
+    response_byte_limit: int | None = None,
 ) -> httpx.Response:
     """요청 1건(전송 오류·502/504는 유한 재시도). 상태 해석까지 끝낸 응답만 돌려준다.
 
@@ -335,6 +402,10 @@ async def _transport_get(
     attempts = upstream_retry.DEFAULT_UPSTREAM_ATTEMPTS
     for attempt in range(1, attempts + 1):
         try:
+            if response_byte_limit is not None:
+                return await _transport_request_once(
+                    client, path, params, response_byte_limit=response_byte_limit
+                )
             return await _transport_request_once(client, path, params)
         except Exception as exc:
             if attempt >= attempts or not _transport_retryable(exc) or not budget.try_consume():
@@ -344,7 +415,10 @@ async def _transport_get(
                 upstream_retry.DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
             )
             _LOGGER.warning(
-                "kor-travel-transport %s 재시도 %d/%d (%s)", path, attempt, attempts,
+                "kor-travel-transport %s 재시도 %d/%d (%s)",
+                path,
+                attempt,
+                attempts,
                 type(exc).__name__,
             )
             await asyncio.sleep(delay)
@@ -431,6 +505,68 @@ async def fetch_transport_rest_areas(
         settings, EXPORT_PATH_REST_AREAS, parse_rest_area, on_collected_at
     ):
         yield area
+
+
+@dataclass(frozen=True)
+class TransportRestExportCapture:
+    """단일 window의 tuple과 EOF metadata를 함께 넘겨 iterator의 관측 유실을 막는다."""
+
+    records: tuple[TransportRestArea, ...]
+    export_window: RestExportWindow
+
+
+async def fetch_transport_rest_area_snapshot(
+    settings: KorTravelMapSettings,
+) -> TransportRestExportCapture:
+    """단일 limit256 응답만 받는다. 다음 페이지/최신 batch/absence retirement 권위는 없다."""
+    from .rest_snapshot_observation import (
+        REST_EXPORT_BODY_LIMIT,
+        RestExportWindow,
+        export_window_value,
+    )
+
+    base_url, headers = _transport_connection(settings)
+    async with asyncio.timeout(settings.kor_travel_transport_timeout_seconds):
+        async with httpx.AsyncClient(
+            base_url=base_url,
+            timeout=transport_http_timeout(settings),
+            headers=headers,
+        ) as client:
+            response = await _transport_get(
+                client,
+                EXPORT_PATH_REST_AREAS,
+                {"limit": 256},
+                budget=_transport_run_budget(),
+                response_byte_limit=REST_EXPORT_BODY_LIMIT,
+            )
+        captured_at = datetime.now(ZoneInfo("Asia/Seoul"))
+        payload = _transport_json(response, EXPORT_PATH_REST_AREAS)
+        # 기존 parser는 nonstring cursor를 None로 바꾼다. 원 envelope를 먼저 검사한다.
+        if type(payload) is not dict or payload.get("next_cursor", object()) is not None:
+            raise TransportExportContractError("rest snapshot requires an explicit null cursor")
+        page = parse_export_page(payload, where=EXPORT_PATH_REST_AREAS)
+        require_current_collection(page.collection, where=EXPORT_PATH_REST_AREAS)
+        if page.has_more is not False or not 1 <= len(page.items) <= 256:
+            raise TransportExportContractError(
+                "rest snapshot requires one complete nonempty window"
+            )
+        records = tuple(parse_rest_area(item) for item in page.items)
+        keys = [record.natural_key for record in records]
+        if any(not key.strip() or key != key.strip() for key in keys) or len(set(keys)) != len(
+            keys
+        ):
+            raise TransportExportContractError(
+                "rest snapshot requires unique canonical natural keys"
+            )
+        window = RestExportWindow(
+            len(records),
+            len(response.content),
+            hashlib.sha256(response.content).hexdigest(),
+            captured_at,
+            page.collection,
+        )
+        export_window_value(window)
+        return TransportRestExportCapture(records, window)
 
 
 async def fetch_transport_rest_area_fuel_prices(

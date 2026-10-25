@@ -188,6 +188,7 @@ def _runtime_privilege_row(
         ),
         "can_mutate_geocode_stamps_directly": False,
         "can_access_provider_snapshot_private_relations": False,
+        "can_execute_snapshot_private_topic_lock": False,
         "strict_data_guard_inventory_valid": True,
         "can_insert_feature_directly": False,
         "can_update_lifecycle_directly": False,
@@ -252,10 +253,13 @@ def test_each_alembic_version_predicate_fails_on_its_own(
 def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml() -> None:
     row = _runtime_privilege_row()
 
-    assert _runtime_db_privilege_problems(
-        row,
-        expected_login="ktm_feature_service",
-    ) == []
+    assert (
+        _runtime_db_privilege_problems(
+            row,
+            expected_login="ktm_feature_service",
+        )
+        == []
+    )
 
     row["can_update_quality_directly"] = True
     row["can_mutate_transition_audit_directly"] = True
@@ -281,9 +285,7 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
         *executable_application_procedures,
         "feature.unintended_runtime_procedure()",
     ]
-    executable_functions = row[
-        "executable_application_security_definer_functions"
-    ]
+    executable_functions = row["executable_application_security_definer_functions"]
     assert isinstance(executable_functions, list)
     row["executable_application_security_definer_functions"] = [
         *executable_functions,
@@ -301,14 +303,8 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must not access Feature requests directly" in problems
     assert "runtime login must not access manual/provider dedup evidence directly" in problems
     assert "runtime login must not mutate ops.feature_overrides directly" in problems
-    assert (
-        "runtime login must not mutate feature.feature_base_field_values directly"
-        in problems
-    )
-    assert (
-        "runtime login must not mutate ops.feature_override_field_paths directly"
-        in problems
-    )
+    assert "runtime login must not mutate feature.feature_base_field_values directly" in problems
+    assert "runtime login must not mutate ops.feature_override_field_paths directly" in problems
     assert "runtime login must EXECUTE transition_feature_state" in problems
     assert "runtime login must SELECT feature.public_features" in problems
     assert "runtime login must SELECT ops.feature_override_field_paths" in problems
@@ -319,14 +315,11 @@ def test_runtime_privilege_preflight_requires_procedures_but_denies_direct_dml()
     assert "runtime login must EXECUTE transition_admin_feature_state" in problems
     assert "runtime login must EXECUTE reactivate_admin_feature_state" in problems
     assert any(
-        problem.startswith(
-            "runtime login must not EXECUTE unexpected application procedures: "
-        )
+        problem.startswith("runtime login must not EXECUTE unexpected application procedures: ")
         for problem in problems
     )
     assert any(
-        "unexpected application SECURITY DEFINER functions" in problem
-        for problem in problems
+        "unexpected application SECURITY DEFINER functions" in problem for problem in problems
     )
 
 
@@ -340,7 +333,8 @@ def test_tracking_prefix_exact_sd_is_required_and_overload_still_rejected() -> N
     assert _runtime_db_privilege_problems(row, expected_login="ktm_feature_service") == []
 
     row["executable_application_security_definer_functions"] = [
-        item for item in row["executable_application_security_definer_functions"]
+        item
+        for item in row["executable_application_security_definer_functions"]
         if item != signature
     ]
     assert any(
@@ -363,10 +357,13 @@ def test_runtime_privilege_preflight_uses_the_exact_service_procedure_set() -> N
 
     service_row = _runtime_privilege_row()
 
-    assert _runtime_db_privilege_problems(
-        service_row,
-        expected_login="ktm_feature_service",
-    ) == []
+    assert (
+        _runtime_db_privilege_problems(
+            service_row,
+            expected_login="ktm_feature_service",
+        )
+        == []
+    )
 
     missing_create_row = _runtime_privilege_row()
     missing_create_row["can_execute_create_procedure"] = False
@@ -382,10 +379,7 @@ def test_runtime_privilege_preflight_uses_the_exact_service_procedure_set() -> N
         missing_manual_row,
         expected_login="ktm_feature_service",
     )
-    assert (
-        "runtime login must EXECUTE create_admin_manual_feature_with_initial_state"
-        in problems
-    )
+    assert "runtime login must EXECUTE create_admin_manual_feature_with_initial_state" in problems
 
     extra_procedures_row = _runtime_privilege_row()
     service_procedures = list(extra_procedures_row["executable_application_procedures"])
@@ -414,19 +408,15 @@ def test_runtime_privilege_preflight_uses_the_exact_service_procedure_set() -> N
         missing_function_row["executable_application_security_definer_functions"]
     )
     remaining_functions.remove(
-        "ops.fill_provider_cancellation_starts_command("
-        "uuid,text,timestamp with time zone)"
+        "ops.fill_provider_cancellation_starts_command(uuid,text,timestamp with time zone)"
     )
-    missing_function_row["executable_application_security_definer_functions"] = (
-        remaining_functions
-    )
+    missing_function_row["executable_application_security_definer_functions"] = remaining_functions
     problems = _runtime_db_privilege_problems(
         missing_function_row,
         expected_login="ktm_feature_service",
     )
     assert any(
-        "missing expected application SECURITY DEFINER functions" in problem
-        for problem in problems
+        "missing expected application SECURITY DEFINER functions" in problem for problem in problems
     )
 
 

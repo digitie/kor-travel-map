@@ -1,8 +1,14 @@
 # Rest432 제한 profile의 작업·실제 수용 초안
 
-기준/권위는 [설계 초안](2026-10-26-rest-snapshot-registration-spec.md)이다. base65e4943,
-제품 편집/번호 migration 예약/PG·운영 실행0이며 담당 소유권은 구현 착수 때 Root가 나눈다.
-현재 표의 상태는 전부 **미착수**이고431 실제215 reader 수용을 아래 완료로 재사용하지 않는다.
+기준/권위는 [설계](2026-10-26-rest-snapshot-registration-spec.md)다. 최초 문서 checkpoint의
+base65e4943·제품 편집/PG 실행0 기록은 보존한다. 구현은 main `df877690` 위 초안 PR
+[#1418](https://github.com/digitie/kor-travel-map/pull/1418)에서 시작했다.
+
+S1·S2는 입력/정적 profile 소스와 단위 시험, S3는 공통 coordinator와 rollback 시험 소스,
+S4는 quota 계량 준비, S5는 물리 writer 시험 준비, S6는 설치 계약 소스 단계로 **진행 중**이다.
+아직 완료 단위는 없다. 실제 PG·전체215 apply·물리 두 writer·최종 CI/live는 미완이며,
+431 reader 수용을 아래 완료로 재사용하지 않는다. 담당과 검증 원장은
+[구현 기록](2026-10-26-rest-snapshot-atomic-implementation.md)에 모은다.
 
 | 단위 | 산출물 | 함께 닫을 검증 |
 | --- | --- | --- |

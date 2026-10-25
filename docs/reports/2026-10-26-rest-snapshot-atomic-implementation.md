@@ -42,3 +42,25 @@ Ruff와 해당 5개 source의 strict mypy가 통과했다. 이는 mocked 단위 
 Rest SQL/collector 연결, 전체 source 통합, 두 독립 적대 리뷰, 실제 격리 PG·두 worker,
 새 golden/최소 ACL, 전체 CI와 최종 live/UI가 남았다. 기존 431 후보·운영 시험 결과로
 432 시험을 대체하지 않는다. CPU/RSS·잠금 대기와 처리량은 실제 두 writer 시험에서 계량한다.
+
+
+## 두 번째 통합 전 checkpoint
+
+초안 PR은 [#1418](https://github.com/digitie/kor-travel-map/pull/1418)이다. 기존 transaction/
+plan/backend 34개와 새 coordinator·runner 65개를 합친 99개가 3.31초에 통과했다.
+definitions/assets/resources 기존 43개는 3.97초, lazy capture resource 1개는 1.88초에 통과했다.
+이 143개는 서로 다른 단위/구성 시험이며 실제 PG 수용과 구분한다.
+
+처음 새 runner 시험은 아직 작성되지 않은 runtime 모듈 import에서 중단됐다. 의존 모듈을
+연결한 뒤 위 시험을 통과했으며 원 실패 로그는 보존했다. 초기 Docker 배선에 추가했던
+별도 Rest receipt 생성 호출은 제거했다. 기존 receipt가 전체 설치 파일을 지문으로 가지므로
+Rest도 이를 검증해 재사용하며, 별도 receipt나 미구현 함수를 만들지 않는다.
+
+실제 PG 시험 초안에는 5단계별 일반 오류/취소 후 18개 상태표 전체 rollback, 성공 commit 뒤
+응답 경계 오류와 원 receipt 재사용을 넣었다. 빈 finding만으로 행 저장 rollback을 수용하지
+않도록 실제 converter의 warning과 이전 stale finding을 구성했다. 현재는 소스·collect 단계다.
+Rest 전체215·서로 다른 DS의 두 physical writer와 공유 topic 대기는 별도로 남아 있다.
+
+공개 UI 13개 시험은 배포할 Map `df877690`·PinVi `9ebb588a`로 source pin만 정렬했다.
+Root/T가 원 시험 세 파일과 허용 치환 외 전체 동일함을 검산했다. 배포의 실제 revision431,
+컨테이너7개·권한·고정 버전 확인 전에는 실행하지 않는다. 이 준비를 운영 PASS로 표현하지 않는다.

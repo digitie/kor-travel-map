@@ -346,7 +346,7 @@ async def run_feature_place_transport_rest_areas(
 @asset(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS
-    | {"transport_rest_areas", "rest_snapshot_runtime"},
+    | {"transport_rest_areas", "rest_snapshot_runtime", "rest_snapshot_input"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
     pool=GEO_HEAVY_POOL,
 )

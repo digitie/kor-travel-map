@@ -126,10 +126,21 @@ def _rest_snapshot_runtime_resource() -> object:
     return load_rest_snapshot_runtime()
 
 
+@resource(description="Rest의 metadata를 보존하는 단일응답. 실제 소비 전에는 HTTP를 열지 않는다.")
+def _rest_snapshot_input_resource() -> object:
+    async def fetch() -> object:
+        from .provider_fetchers import fetch_transport_rest_area_snapshot
+
+        return await fetch_transport_rest_area_snapshot(KorTravelMapSettings())
+
+    return fetch
+
+
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "kor_travel_map_client": kor_travel_map_client_resource,
     "airport_snapshot_runtime": _airport_snapshot_runtime_resource,
     "rest_snapshot_runtime": _rest_snapshot_runtime_resource,
+    "rest_snapshot_input": _rest_snapshot_input_resource,
     "feature_operation_guard": feature_operation_guard_resource,
     "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,
