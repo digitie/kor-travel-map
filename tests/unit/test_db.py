@@ -187,6 +187,8 @@ def _runtime_privilege_row(
             _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS[login]
         ),
         "can_mutate_geocode_stamps_directly": False,
+        "can_access_provider_snapshot_private_relations": False,
+        "strict_data_guard_inventory_valid": True,
         "can_insert_feature_directly": False,
         "can_update_lifecycle_directly": False,
         "can_update_publication_directly": False,
