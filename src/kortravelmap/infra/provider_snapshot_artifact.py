@@ -212,9 +212,16 @@ def _preflight(values: tuple[object, ...]) -> None:
             remaining -= len(str(value))
         elif kind is datetime:
             zone = value.tzinfo
-            if not (
-                type(zone) is timezone or (type(zone) is ZoneInfo and zone.key == "Asia/Seoul")
-            ):
+            if type(zone) is timezone:
+                # builtin timezone도 임의 길이/str subclass의 name을 그대로 보관한다.
+                name = zone.tzname(None)
+                if type(name) is not str or len(name) > 128 or len(stack) + 1 > nodes:
+                    _reject()
+                stack.append((name, depth + 1))
+            elif type(zone) is ZoneInfo:
+                if type(zone.key) is not str or zone.key != "Asia/Seoul":
+                    _reject()
+            else:
                 _reject()
             remaining -= 128
         else:

@@ -393,3 +393,35 @@ async def test_preflight_is_bounded_before_common_budget_pack_or_hash(shape, mon
     with pytest.raises(codec.UnsupportedSnapshotArtifact):
         codec.encode_provider_snapshot_artifact(bundles, geo, pins=_PINS)
     assert calls == []
+
+
+@pytest.mark.parametrize("name_kind", ["oversized", "foreign", "surrogate"])
+async def test_timezone_name_is_bounded_exact_string_before_encoding(name_kind, monkeypatch):
+    calls = []
+
+    class ForeignName(str):
+        def __len__(self):
+            calls.append("len")
+            raise RuntimeError("must not invoke")
+
+        def encode(self, *args, **kwargs):
+            calls.append("encode")
+            raise RuntimeError("must not invoke")
+
+    name = (
+        "x" * 1_048_577
+        if name_kind == "oversized"
+        else ForeignName("name")
+        if name_kind == "foreign"
+        else "\ud800"
+    )
+    zone = timezone(timedelta(0), name)
+    assert type(zone.tzname(None)) is type(name)
+    bundles, geo = await _input()
+    bundles[0].feature.detail.payload["clock"] = _AT.replace(tzinfo=zone)
+    monkeypatch.setattr(codec, "within_place_projection_budget", lambda _: calls.append("budget"))
+    monkeypatch.setattr(codec, "_pack", lambda _: calls.append("pack"))
+    monkeypatch.setattr(codec, "_artifact_digest", lambda _: calls.append("hash"))
+    with pytest.raises(codec.UnsupportedSnapshotArtifact):
+        codec.encode_provider_snapshot_artifact(bundles, geo, pins=_PINS)
+    assert calls == []

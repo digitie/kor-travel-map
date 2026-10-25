@@ -113,3 +113,17 @@ Geo의 고정 필드도 같은 전체 source 예산에 포함한다. 문자열 U
 부를 수 있어 정확히 `None`만 허용하도록 바꿨다. 정본 모델의 기본 extra 저장소는
 모두 `None`이다. 새 public 반례1개를 더해 최종139 PASS/3.32초(신규62+관련77)이며
 이전138 결과는 별도 source 세대 기록으로 보존한다.
+
+## builtin timezone 이름 예산의 추가 P2
+
+c2a5의 별도 J public 반례에서 exact builtin timezone도 임의 길이 이름을 보관한다는
+예산 누락을 확인했다. datetime의 고정128비용만으로는 그 이름을 wire에 복사하기 전
+차단하지 못했다. c2a5/HOLD와 기존 반례는 보존한다.
+
+선검사는 builtin timezone의 이름을 exact str·최대128자로 먼저 제한하고, 전체 source
+문자열 UTF8/escape 예산에도 직접 누적한다. decoder의 기존 이름128 한도와 같으며
+상한을 늘리지 않는다. ZoneInfo key도 exact str인 고정 Asia/Seoul만 허용한다.
+초대형 이름/str subclass 이름/잘못된 surrogate 세 public 반례에서 common budget,
+pack, hash 진입과 외부 name hook이 모두0임을 확인했다. 정상UTC/KST/fixed offset
+및 실제 converter15 왕복을 포함해 최종142 PASS/3.48초(신규65+관련77)였다.
+독립 최종 source gate·DB/control 연결과 operating 수용은 여전히 별도다.
