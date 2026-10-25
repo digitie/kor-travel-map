@@ -105,3 +105,20 @@ def test_dependency_drift_is_rejected_before_any_grant_or_definition(monkeypatch
     with pytest.raises(RuntimeError, match="dependency definition changed"):
         _migration.upgrade()
     assert not any(sql.startswith(("GRANT", "CREATE")) for sql, _ in bind.statements)
+
+
+def test_canonical_acl_uses_schema_owner_for_schema_owned_capture_functions():
+    from kortravelmap.infra.runtime_privileges import _ACL_ROLE_WINDOWS
+
+    seen = []
+    for role, statements in _ACL_ROLE_WINDOWS:
+        for statement in statements:
+            if statement.startswith(
+                (
+                    "REVOKE ALL ON FUNCTION feature._bounded_",
+                    "GRANT EXECUTE ON FUNCTION feature._bounded_",
+                )
+            ):
+                assert role == "ktm_feature_schema_owner"
+                seen.append(statement)
+    assert len(seen) == 3

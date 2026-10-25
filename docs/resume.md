@@ -1,6 +1,20 @@
 ## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
 
-설계 두 검토와 migration 단위16 PASS를 확인했다. 두 source P2를 보강 중이다. 논리 CASE 조회/제한 hash fold·sameDS seed로 바꾸고 단위35 PASS, 통합37 수집만 확인했다. 실제 PG/공식 oracle/CI·SH 연결은 미완이다. [범위·예산·남은 검증](reports/2026-10-25-bounded-curation-capture.md).
+설계 두 검토와 migration 단위16 PASS를 확인했다. 두 source P2를 보강 중이다. 논리 CASE 조회/제한 hash fold·sameDS seed로 바꾸고 단위36 PASS, 통합37 수집만 확인했다. 427을 상속하고 권한 실행 역할 P2를 수정했다. 실제 PG/공식 oracle/CI·SH 연결은 미완이다. [범위·예산·남은 검증](reports/2026-10-25-bounded-curation-capture.md).
+
+## 2026-10-25 공항427 key/index 보강
+
+- 논리CASE index3·caller 서버상한·area EXISTS, provenance P2 정정. 순수143 PASS.
+- 실제 설치/oracle/EXPLAIN·Geo/native 준비·수집/SH는 미완, 두 source gate 전 PG0.
+
+## 2026-10-25 공항427 SQL/decoder source
+
+- 426 부모 보존, STABLE3함수·51가변열·RR decoder 배선. 순수108 PASS/mypy4.
+- 실제 PG/oracle·provider 준비/native 연결·15 fit·collector/SH/운영은 미완.
+
+## 2026-10-25 — 공항 reader Geo 계약(427, 부분)
+
+- 원천 hash32/Geo digest64 혼동을 정정하고 원실패를 보존했다. 순수 Geo28개 경계이며 SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
 
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 

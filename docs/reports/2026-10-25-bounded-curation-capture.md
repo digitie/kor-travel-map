@@ -67,3 +67,24 @@ identity 변경을 지적했다. 원 source/당시 통합32 collected 결과를 
 
 현재 보강은 아직 두 코드 리뷰·부모427 상속·실제 PostgreSQL/공식 oracle/CI 전이다.
 단위35 PASS/1.35초와 통합37 collected/1.11초이며 실제 통합 실행이나 운영 반영은0이다.
+
+
+## 427 부모 합성과 권한 실행 역할 정정
+
+검증한 427 최종 source를 상속하여 새 인덱스3와 단일428 graph를 함께 고정한다.
+부모의 source/함수·native 구현과 문서 전체를 보존한다. 실제 schema dump는 아직426이며
+새 head의 공식 oracle 전이므로 이를 실제428 schema라고 바꾸지 않는다.
+
+합성 과정에서 root가 별도 P2를 발견했다. bounded 함수2개는 schema owner 소유인데
+권한 조정 정본의 state procedure owner 창에 REVOKE/GRANT가 있었다. 두 역할의 역방향
+membership이 없어 실제 reconciliation에서 소유권 오류가 날 수 있었다. 새 owner-window
+회귀의 수정 전1 FAIL을 보존하고, bounded 함수 ACL만 schema owner 창으로 이동했다.
+metadata helper의 owner간 dependency GRANT는 원 소유자인 state procedure owner 창에
+남긴다. 새 단위 합집합36 PASS/1.23초다. 앞선 두 source 리뷰의 PASS를 이 새 P2 검증으로
+소급하지 않으며, 최종 합성 pin에서 추가 독립 검토와 실제 LOGIN/정본 reconciliation을 확인한다.
+
+
+현재 최종 합성의 단위·정적 합집합72 PASS/2.33초, mypy2/Ruff 통과 및 통합37 collected를
+확인했다. timezone 회귀는 첫 import보다 이틀 뒤17:30 UTC를 명시 입력하여 Seoul 다음날
+변환의 예상 날짜도 독립 단언한다. 긴 key fixture는 실제 압축 여부·논리16000바이트와
+저장 크기를 단언한 뒤 조회 계획을 확인하도록 했다. 모두 실제 통합 실행 전이다.

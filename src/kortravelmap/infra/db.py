@@ -319,6 +319,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 _PROVIDER_CURATION_SEAL_FUNCTION,
                 "feature.validate_exclusive_provider_snapshot(uuid,bigint,jsonb,text[])",
                 "feature.read_heritage_name_refresh_evidence(bigint,text[])",
+                "feature.read_transport_airport_snapshot_evidence(bigint)",
                 "feature.upsert_provider_geocode_stamps_ex(uuid[],text[],text,text)",
                 "feature.lock_scoped_provider_geocode_stamps(uuid,uuid,text,text,jsonb)",
                 "feature.reobserve_scoped_provider_geocode_stamps(uuid,uuid,text,text,jsonb)",

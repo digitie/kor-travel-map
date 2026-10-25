@@ -159,6 +159,18 @@
         "425_provider_base_update_first"
       ],
       "revision": "426_provider_patch_protocol"
+    },
+    {
+      "down_revision": [
+        "426_provider_patch_protocol"
+      ],
+      "revision": "427_transport_airport_reader"
+    },
+    {
+      "down_revision": [
+        "427_transport_airport_reader"
+      ],
+      "revision": "428_bounded_curation_capture"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
