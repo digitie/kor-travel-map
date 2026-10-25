@@ -47,6 +47,7 @@ from .resources import (
     offline_upload_store_resource,
     reverse_geocoder_resource,
 )
+from .rest_snapshot_runtime import load_rest_snapshot_runtime
 from .run_heartbeat import RUN_HEARTBEAT_JOBS
 from .schedule_overrides import load_schedule_cron_overrides
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
@@ -120,9 +121,15 @@ def _airport_snapshot_runtime_resource() -> object:
     return load_airport_snapshot_runtime()
 
 
+@resource(description="이미지 설치본을 검증한 Rest 복구 pin. 기본 비활성.")
+def _rest_snapshot_runtime_resource() -> object:
+    return load_rest_snapshot_runtime()
+
+
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "kor_travel_map_client": kor_travel_map_client_resource,
     "airport_snapshot_runtime": _airport_snapshot_runtime_resource,
+    "rest_snapshot_runtime": _rest_snapshot_runtime_resource,
     "feature_operation_guard": feature_operation_guard_resource,
     "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,

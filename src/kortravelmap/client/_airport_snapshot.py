@@ -337,30 +337,42 @@ async def apply_airport_snapshot(
 ) -> SnapshotApplyResult:
     """원 14counter/retired를 같은 native apply TX에서 저장한다. 응답 유실은 전파한다."""
     _unbound(client)
+    async with _transaction(client) as session:
+        return await apply_airport_snapshot_in_session(session, observed, token, plan, pins=pins)
+
+
+async def apply_airport_snapshot_in_session(
+    session: AsyncSession,
+    observed: RecoveredProviderSnapshot,
+    token: SnapshotExecutorToken,
+    plan: AirportSnapshotPlan,
+    *,
+    pins: SnapshotArtifactPins,
+) -> SnapshotApplyResult:
+    """caller의 기존 TX에서 적용한다. commit이나 다른 connection을 열지 않는다."""
     if token.snapshot_id != observed.snapshot_id:
         raise AirportSnapshotUnavailable("snapshot token differs from its original input")
-    async with _transaction(client) as session:
-        try:
-            return await apply_stored_airport_reobservation(
-                session,
-                observed.artifact_payload,
-                plan.preparation,
-                pins=pins,
-                snapshot_id=token.snapshot_id,
-                generation=token.generation,
-                fence=token.fence,
-                attempt_id=plan.attempt_id,
-                owner=plan.owner,
-                manifest_digest=plan.manifest_digest,
-            )
-        except DBAPIError as error:
-            if _kernel_replan(error):
-                raise AirportSnapshotReplanRequired("kernel requires a fresh plan") from error
-            raise
-        except ValueError as error:
-            if str(error) == "airport evidence changed after locking; replan":
-                raise AirportSnapshotReplanRequired(str(error)) from error
-            raise
+    try:
+        return await apply_stored_airport_reobservation(
+            session,
+            observed.artifact_payload,
+            plan.preparation,
+            pins=pins,
+            snapshot_id=token.snapshot_id,
+            generation=token.generation,
+            fence=token.fence,
+            attempt_id=plan.attempt_id,
+            owner=plan.owner,
+            manifest_digest=plan.manifest_digest,
+        )
+    except DBAPIError as error:
+        if _kernel_replan(error):
+            raise AirportSnapshotReplanRequired("kernel requires a fresh plan") from error
+        raise
+    except ValueError as error:
+        if str(error) == "airport evidence changed after locking; replan":
+            raise AirportSnapshotReplanRequired(str(error)) from error
+        raise
 
 
 async def reset_airport_snapshot_plan(

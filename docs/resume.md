@@ -1,3 +1,12 @@
+## 2026-10-26 — Rest432 선택 A 구현 첫 checkpoint
+
+431 main `df877690` 위에서 저장·원 결과·필수 후처리를 한 RC connection/TX로 묶는
+내부 coordinator와 Airport 연결을 구현했다. 기존 공개 own-TX 서명은 유지하고 seal은
+별도 정본 경로다. 기존 단위34PASS/Ruff/strict mypy5source 통과이며 실제 PG 수용은 아니다.
+Rest SQL·HTTP·관측/runner와 실제 두 writer 시험을 담당별 병행 중이다. runtime 기본OFF,
+전체통합·적대2리뷰·실제PG/CI/live·운영은 미완이다.
+[구현 원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 · Rest431 최종 CI와 main 반영 정산
 
 - PR #1415의 정확 source e1b203bb는 5 workflow/10 check를 모두 통과했다. CI의 실제
