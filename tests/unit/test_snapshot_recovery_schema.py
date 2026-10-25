@@ -248,9 +248,10 @@ def test_inventory_validator_reuses_exact_installer_tail_without_installing():
     assert "CREATE TRIGGER" not in validator
     assert "LOCK TABLE" not in validator
     assert "RETURNS boolean LANGUAGE plpgsql STABLE SECURITY DEFINER" in validator
-    assert "feature._assert_strict_sh_data_guard_inventory(false)" in str(
-        db._RUNTIME_STRICT_GUARD_INVENTORY_SQL
+    assert str(db._RUNTIME_STRICT_GUARD_INVENTORY_SQL) == (
+        "SELECT feature._assert_strict_sh_data_guard_inventory(CAST(:require_all AS boolean))"
     )
+    assert db._RUNTIME_STRICT_GUARD_INVENTORY_SQL.compile().params == {"require_all": False}
     assert "NOT EXISTS(SELECT 1 FROM feature.provider_field_active_policies)" in validator
     assert "p_require_all boolean DEFAULT true" in validator
     assert "IF p_require_all IS NULL" in validator
@@ -319,6 +320,7 @@ async def test_actual_startup_uses_readonly_inventory_only_after_exact_head(
     assert connection.scalar.await_count == int(head_matches)
     if head_matches:
         assert connection.scalar.await_args.args == (db._RUNTIME_STRICT_GUARD_INVENTORY_SQL,)
+        assert db._RUNTIME_STRICT_GUARD_INVENTORY_SQL.compile().params == {"require_all": False}
     assert context.__aexit__.await_count == 1
 
 

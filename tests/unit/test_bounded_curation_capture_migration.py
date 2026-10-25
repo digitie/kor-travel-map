@@ -108,7 +108,10 @@ def test_dependency_drift_is_rejected_before_any_grant_or_definition(monkeypatch
 
 
 def test_canonical_acl_uses_schema_owner_for_schema_owned_capture_functions():
-    from kortravelmap.infra.runtime_privileges import _ACL_ROLE_WINDOWS
+    from kortravelmap.infra.runtime_privileges import (
+        _ACL_ROLE_WINDOWS,
+        _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL,
+    )
 
     seen = []
     for role, statements in _ACL_ROLE_WINDOWS:
@@ -121,4 +124,8 @@ def test_canonical_acl_uses_schema_owner_for_schema_owned_capture_functions():
             ):
                 assert role == "ktm_feature_schema_owner"
                 seen.append(statement)
-    assert len(seen) == 3
+    assert seen == [
+        *_BOUNDED_CAPTURE_SCHEMA_OWNER_ACL,
+        "GRANT EXECUTE ON FUNCTION feature._bounded_provider_curation_input_set(...) "
+        "TO ktm_curation_command_owner",
+    ]

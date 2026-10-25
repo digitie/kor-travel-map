@@ -2,7 +2,7 @@
 
 ## 현재 범위
 
-검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430와 caller 전체 수용은 아직 미완이며 head-schema.sql은 실제 수용된429 그대로다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
+검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430는 아래 e173 fresh 생성·재덤프 결과로 동기화했다. 독립 최종 리뷰·전체 CI와 caller 전체 수용은 아직 미완이다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
 
 430 migration은 고정 sidecar의 CREATE 경계와 명시 signature/owner 목록만 사용한다. 원 SQL 본문을 재작성하지 않고 owner별 문장으로 나누며 전체 bytes 재결합을 검증한다. 기존 routine의 owner도 429 oracle과 대조한다. 실행하는 실제 문장 tuple에 receipt CHECK가 포함된다. P EX를 먼저 얻고 lock/statement timeout을 기존 값과 1s/30s 중 작은 값으로 제한한다. SchemaOwner가 관측한 StateOwner/CommandOwner의 기존 schema CREATE 권한은 유지하고 새로 준 권한만 회수한다.
 
@@ -30,7 +30,7 @@ SchemaOwner의 최초 정책은 global key0 16MiB/256행, 실제 active `kor-tra
 - 기존 models 실제 Codegraph impact와 finalization 원장을 재사용했다. 현재 기존 심볼 signature는 바꾸지 않는다. 최신 graph 전체 closure를 증명한 것은 아니며, db checker는 실제 source/callsite와 순수 startup 경로 시험으로 대조했다.
 - WSL 진입이 한 번 연결 timeout으로 실패했다. 해당 Python 배치는 실행되지 않았음을 파일 상태로 확인하고, 서비스 재시작·다른 작업 중지 없이 연결 복구 후 계속했다.
 
-SQL 설치·startup·ACL·ORM과 후처리 intent 교환/부분 rollback/replay의 한정된 실제15개는 통과했다. newer-applied supersession, GC ledger/retention/active 거부, 전체 A/B/C·등록·reset paired 시험과 최종 caller 원자성은 별도로 남아 있다. 최종 공식430 oracle는 그 실제 실행 결과로만 채택한다. cancellation/pool 및 큰 DS 전체 protocol 수용을 이 배선 완료로 대체하지 않는다.
+SQL 설치·startup·ACL·ORM과 후처리 intent 교환/부분 rollback/replay의 한정된 실제15개는 통과했다. newer-applied supersession·예약-only generation·미래 sync cursor와 GC ledger/retention/active 거부의 한정 실제 결과는 아래에 별도 기록한다. 전체 A/B/C·등록·reset paired 시험과 최종 caller 원자성은 여전히 별도 수용 대상이다. 최종 공식430 oracle는 실제 생성 결과만 사용한다. cancellation/pool 및 큰 DS 전체 protocol 수용을 이 배선 완료로 대체하지 않는다.
 
 
 ## 첫 실제 bootstrap 실패와 수정
@@ -89,3 +89,45 @@ GC 보존·quota 원상은 통과했다. 강제 kill 뒤 SQLAlchemy의 정확한
 warnings=error로 원 DBAPIError를 대체하여 후단언은 미도달했다. 해당 fault 호출 한곳에서만
 `^transaction already deassociated from connection$` SAWarning을 로컬 필터하고, 원DBAPIError·
 전체 rollback/pool0/동일receipt재개/oldbackend0 단언은 그대로 유지한다. 제품·전역경고 변경0이다.
+
+## 실제 후처리·GC·연결 종료와 공식430 dump
+
+서로 다른 source/실행을 하나의 통과 run으로 합산하지 않는다.
+
+| 실행 | 실제 결과 | 범위 |
+|---|---|---|
+|3f598/r7|15PASS21.38s|startup/private ACL·원 metadata clean·부분 후처리 rollback/replay·receipt marker·GUC·null6/non-null4|
+|81f279/r9|18PASS1FAIL20.30s|GC15+신규 후처리3 통과, quarantine fixture만 migration-owned guard에 거부|
+|9a5588/r10|1PASS1FAIL|quarantine GC 보존 통과, backend kill 후 예상 SQLA 경고에서 후단언 미도달|
+|e1734f/r11|1PASS17.01s|실제 backend 종료 뒤 전체 rollback·pool1 checkedout0·원 receipt 재시도·SELECT1·old backend0|
+|e1734f/oracle r2|1PASS52.75s|정본 fresh300→430·runtime reconcile0·공식 새 dump 재덤프 비교|
+
+GC는 terminal quota 정확 반환/outer rollback/원 jobs 불변/9가지 보호/limit/SER/다중 후보 제한/
+ledger 부족 거부를 위의 분리 실행으로 검증했다. quarantine는 migration-origin fault simulation이며
+정상 runtime 등록 권한으로 생성한 상태가 아니다. 실제 backend kill은 exact PID/backend_start/login의
+소유 backend만 대상으로 했으며 OS worker kill·임의 network blackhole의 hardwall 증거는 아니다.
+
+공식 dump SHA는 `9606b64724044a94c56bcde1041638a8dcf762928e1f16437274f4077352d0f4`다.
+429의1665 object block에서430의1734로 바뀌며 신규69/삭제0/논리변경20이다. 한 block은
+pg_dump의 default_tablespace/default_table_access_method SET 위치만 이동했다. receipt CHECK는
+430 literal 하나만 추가했으며, 기존 routine 변경은31개 sidecar 선언 범위와 일치한다.
+신규 trigger4개는 cancellation prefix3+immutable artifact1뿐이고 strict33 자동설치는 없다.
+원생성 dump는 수정하지 않고 전체 bytes로 golden에 동기화했다. 비교 원장은
+`map430-e173-j-official-oracle-object-comparison.json`
+(SHA9af93fa96871d2fb9e581c3aff8b58de66f61c7f1f2f26c10385040575310ff9)이다.
+
+모든 해당 owned 실행은 정확 CID·UUID·global label0와 anonymous volume 부재를 확인했다.
+PASS 실행은 Git/SDK 전후와 실제 import까지 검증했고, 과거 FAIL의 runner post 미도달은
+별도 offline 보충과 구분해 보존했다. W의 실제 예약 caller2는 별도 원장으로 수용하며 이 표에
+합산하지 않는다. 전체 CI·2dataset 동시 쓰기·실제 운영 SDK/runtime receipt·worker death의
+완전 복구·운영 배포와 collector 활성화는 이 스키마/한정 시험 수용으로 대체하지 않는다.
+
+## golden 동기화 뒤 정적 정합
+
+실제430 dump 동기화 뒤 전체 lint/집중 unit은581PASS/3FAIL/6SKIP38.48s였다. 원 로그를
+보존한다. startup의 실제 boolean false 호출을 signature scanner가 타입 리터럴로 읽는
+문제는 `CAST(:require_all AS boolean)`의 bound False로 표기하고 단언으로 결박한다.
+실행 값·head 조건·권한·함수 본문은 유지한다.428 owner 회귀는430의 같은 SchemaOwner 창
+추가 dependent GRANT까지 정확4항목으로 대조한다. 세 번째는 W runner가 정본 Geo reuse helper를
+namespace로 부른 AST 표기 정합이며 helper/검사 완화 없이 직접 이름 import로 정렬한다.
+이 표기/시험 변경을 e173의 실제 실행 source로 재기록하지 않으며 SQL/oracle는 그대로다.
