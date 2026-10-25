@@ -83,6 +83,7 @@ BEGIN
     IF v_control.status<>'prepared' OR v_attempt.provider_dataset_id<>v_artifact.provider_dataset_id
        OR v_attempt.owner IS DISTINCT FROM p_owner OR v_attempt.manifest_digest IS DISTINCT FROM p_manifest
        OR v_attempt.input_digest IS DISTINCT FROM p_kernel_input OR v_attempt.regions<>'[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false
        OR v_attempt.status<>'ready' OR v_attempt.lease_until<=clock_timestamp() THEN
         RAISE EXCEPTION 'snapshot kernel plan is not ready'
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
@@ -103,7 +104,8 @@ END;
 $$;
 
 CREATE FUNCTION ops.begin_provider_snapshot_apply(
-    p_snapshot uuid,p_generation bigint,p_fence uuid,p_attempt uuid,p_owner uuid,p_manifest text
+    p_snapshot uuid,p_generation bigint,p_fence uuid,p_attempt uuid,p_owner uuid,p_manifest text,
+    p_artifact_sha text
 ) RETURNS jsonb LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
 DECLARE
     v_attempt jsonb;
@@ -118,8 +120,16 @@ BEGIN
     IF current_setting('transaction_isolation')<>'read committed' THEN
         RAISE EXCEPTION 'snapshot apply requires READ COMMITTED' USING ERRCODE='25001';
     END IF;
+    IF p_artifact_sha IS NULL OR p_artifact_sha !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'exact decoded artifact SHA required' USING ERRCODE='22023';
+    END IF;
     v_attempt:=ops.begin_scoped_feature_write(p_attempt,p_owner,p_manifest);
     v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF NOT EXISTS(SELECT 1 FROM ops.provider_snapshot_artifacts artifact
+                  WHERE artifact.snapshot_id=p_snapshot AND artifact.artifact_sha256=p_artifact_sha) THEN
+        RAISE EXCEPTION 'decoded apply input differs from the registered artifact'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
     IF v_control.status<>'prepared' OR v_control.attempt_id IS DISTINCT FROM p_attempt
        OR v_control.attempt_owner IS DISTINCT FROM p_owner
        OR v_control.manifest_digest IS DISTINCT FROM p_manifest
@@ -128,7 +138,9 @@ BEGIN
         RAISE EXCEPTION 'snapshot apply does not match its live kernel plan'
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
     END IF;
-    RETURN v_attempt;
+    RETURN v_attempt || jsonb_build_object('snapshot_observation_generation',
+        (SELECT convert_from(artifact.observation_context,'UTF8')::jsonb->>'observation_generation'
+         FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot));
 END;
 $$;
 

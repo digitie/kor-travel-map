@@ -4,7 +4,9 @@ RETURNS TABLE(
     snapshot_id uuid,artifact_payload bytea,artifact_sha256 text,
     observation_context bytea,context_sha256 text,native_input_digest text,
     snapshot_status text,applied_result bytea,postprocess_receipt bytea,
-    lease_expires_at timestamptz,root_status text,child_status text,cancellation_present boolean
+    lease_expires_at timestamptz,root_status text,child_status text,cancellation_present boolean,
+    attempt_id uuid,attempt_owner uuid,manifest_digest text,
+    kernel_status text,kernel_input_digest text,kernel_lease_expires_at timestamptz
 ) LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path TO pg_catalog AS $$
 DECLARE
     v_member record;
@@ -51,14 +53,30 @@ BEGIN
         RAISE EXCEPTION 'registered snapshot control is missing'
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
     END IF;
+    IF EXISTS(
+        SELECT 1 FROM ops.provider_snapshot_controls control
+        LEFT JOIN ops.feature_write_attempts attempt ON attempt.attempt_id=control.attempt_id
+        WHERE control.snapshot_id=v_artifact.snapshot_id AND control.attempt_id IS NOT NULL
+          AND (attempt.attempt_id IS NULL OR attempt.owner IS DISTINCT FROM control.attempt_owner
+               OR attempt.manifest_digest IS DISTINCT FROM control.manifest_digest
+               OR attempt.provider_dataset_id IS DISTINCT FROM v_member.provider_dataset_id
+               OR (control.status IN ('applied','postprocessed','child_sealed')
+                   AND attempt.status IS DISTINCT FROM 'completed'))
+    ) THEN
+        RAISE EXCEPTION 'snapshot kernel binding is inconsistent'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
     -- 같은 STABLE statement snapshot에서 immutable 입력과 mutable 상태를 함께 읽는다.
     -- lease nonce는 반환하지 않는다. 새 실행자는 typed claim으로만 권위를 얻는다.
     RETURN QUERY SELECT artifact.snapshot_id,artifact.artifact_payload,artifact.artifact_sha256,
            artifact.observation_context,artifact.context_sha256,artifact.native_input_digest,
            control.status,control.applied_result,control.postprocess_receipt,
-           control.lease_expires_at,v_member.root_status,v_member.child_status,v_member.blocked
+           control.lease_expires_at,v_member.root_status,v_member.child_status,v_member.blocked,
+           control.attempt_id,control.attempt_owner,control.manifest_digest,
+           attempt.status,attempt.input_digest,attempt.lease_until
       FROM ops.provider_snapshot_artifacts artifact
       JOIN ops.provider_snapshot_controls control USING(snapshot_id)
+      LEFT JOIN ops.feature_write_attempts attempt ON attempt.attempt_id=control.attempt_id
       WHERE artifact.snapshot_id=v_artifact.snapshot_id;
 END;
 $$;
