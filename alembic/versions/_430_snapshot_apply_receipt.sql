@@ -124,6 +124,8 @@ BEGIN
         RAISE EXCEPTION 'exact decoded artifact SHA required' USING ERRCODE='22023';
     END IF;
     v_attempt:=ops.begin_scoped_feature_write(p_attempt,p_owner,p_manifest);
+    -- P SH와 정렬 parent/scope를 잡은 뒤, 실제33 guard drift를 DML보다 먼저 거부한다.
+    PERFORM feature._assert_strict_sh_data_guard_inventory();
     v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
     IF NOT EXISTS(SELECT 1 FROM ops.provider_snapshot_artifacts artifact
                   WHERE artifact.snapshot_id=p_snapshot AND artifact.artifact_sha256=p_artifact_sha) THEN
