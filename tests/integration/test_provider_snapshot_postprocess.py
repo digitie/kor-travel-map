@@ -325,3 +325,72 @@ async def test_newer_sync_cursor_is_never_overwritten_by_old_postprocess(
     with pytest.raises(ProviderSnapshotSuperseded):
         await AirportSnapshotBackend(client, token).complete_provider_snapshot_postprocess(intent)
     assert await _state(admin, token, intent) == before
+
+
+async def test_backend_death_rolls_back_partial_effects_and_pool_one_recovers(
+    scalar_engines, initialized_airport, monkeypatch
+):
+    from kortravelmap.infra.db import make_async_engine
+
+    admin, runtime = scalar_engines
+    token, intent = await _applied(admin, runtime, initialized_airport)
+    before = await _state(admin, token, intent)
+    owned_pool = make_async_engine(
+        runtime.url.render_as_string(hide_password=False), pool_size=1, max_overflow=0
+    )
+    original = AsyncKorTravelMapClient.record_sync_success_for_operation_membership
+    killed = None
+
+    async def die_after_sync(client, **kwargs):
+        nonlocal killed
+        await original(client, **kwargs)
+        # bound client의 동일 외부 TX에서만 PID를 읽는다. session commit은 외부 TX를 끝내지 않는다.
+        async with client._session_factory() as session, session.begin():
+            killed = (
+                await session.execute(
+                    text("""SELECT pid,backend_start,usename FROM pg_stat_activity
+                    WHERE pid=pg_backend_pid() AND backend_type='client backend'""")
+                )
+            ).one()
+            async with admin.connect() as observer:
+                assert (
+                    await observer.scalar(
+                        text("""SELECT pg_terminate_backend(pid) FROM pg_stat_activity
+                    WHERE pid=:pid AND backend_start=:started AND usename=:login
+                      AND backend_type='client backend' AND pid<>pg_backend_pid()"""),
+                        {"pid": killed[0], "started": killed[1], "login": killed[2]},
+                    )
+                    is True
+                )
+
+    try:
+        backend = AirportSnapshotBackend(AsyncKorTravelMapClient(owned_pool), token)
+        with monkeypatch.context() as fault:
+            fault.setattr(
+                AsyncKorTravelMapClient,
+                "record_sync_success_for_operation_membership",
+                die_after_sync,
+            )
+            with pytest.raises(DBAPIError):
+                await backend.complete_provider_snapshot_postprocess(intent)
+        assert killed is not None
+        assert await _state(admin, token, intent) == before
+        assert owned_pool.pool.checkedout() == 0
+        assert (
+            await backend.complete_provider_snapshot_postprocess(intent) == intent.receipt_candidate
+        )
+        assert (await _state(admin, token, intent))[0][0] == "postprocessed"
+        async with owned_pool.connect() as connection:
+            assert await connection.scalar(text("SELECT 1")) == 1
+        assert owned_pool.pool.checkedout() == 0
+        async with admin.connect() as observer:
+            assert (
+                await observer.scalar(
+                    text("""SELECT count(*) FROM pg_stat_activity
+                WHERE pid=:pid AND backend_start=:started AND usename=:login"""),
+                    {"pid": killed[0], "started": killed[1], "login": killed[2]},
+                )
+                == 0
+            )
+    finally:
+        await owned_pool.dispose()
