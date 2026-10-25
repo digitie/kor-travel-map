@@ -42,6 +42,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
     finish_pipeline_cancellation_attempt,
     get_pipeline_cancellation_detail,
+    lock_provider_feature_finalization,
     mark_pipeline_cancellation_run_termination_reserved,
     resolve_pipeline_cancellation_scope,
     retry_pipeline_cancellation_attempt,
@@ -213,6 +214,9 @@ async def test_canonical_same_marker_terminal_reconciles_authoritative_state(
     cancellation_id: str | None = None
     root_id: str | None = None
     async with AsyncSession(migrated_engine) as setup, setup.begin():
+        # 같은 setup TX의 ensure와 terminal seed를 정본 P→L 순서로 묶는다.
+        async with as_dagster_runtime(setup) as runtime_session:
+            await lock_provider_feature_finalization(runtime_session)
         done_pair, active_pair = await memberships_for_operation(setup, limit=2)
         ensured = await ensure_dagster_feature_operation(
             setup,
@@ -456,6 +460,9 @@ async def test_canonical_cancellation_rejects_divergent_frozen_start_times(
     started_at = created_at + timedelta(seconds=1)
     finished_at = created_at + timedelta(seconds=5)
     async with AsyncSession(migrated_engine) as setup, setup.begin():
+        # 같은 setup TX의 ensure와 terminal seed를 정본 P→L 순서로 묶는다.
+        async with as_dagster_runtime(setup) as runtime_session:
+            await lock_provider_feature_finalization(runtime_session)
         pairs = await memberships_for_operation(setup, limit=2)
         ensured = await ensure_dagster_feature_operation(
             setup,

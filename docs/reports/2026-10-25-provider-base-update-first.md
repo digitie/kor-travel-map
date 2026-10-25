@@ -130,3 +130,10 @@ source/epoch/deferred guard를 유지했다. 이 oracle/EX18 정산 시점에는
 
 원 facts SHA는 1de6e42aa8fbab085e02c73795b1bbf80f3cfa87c2f215df03cd0f2aa5f6f224이며,
 두 독립 사실 대조·최종 정확 CI와 후속 수용은 PR 본문/감사 원장에서 확인한다. 추가 재실행0.
+
+## 최종 CI 부모 합성
+
+J424의76d 시험 수정5파일과 main d417의 Place projection 예산 helper를 상속했다.
+425 SQL·migration·전용15개 시험·공식425 oracle은 앞 비용 정산 소스와 같다. 공용 journal/resume는
+425의 짧은 prefix 뒤에 J76d(최신 main 포함)의 전체 suffix를 보존했다. 부모의 원 CI 실패 기록도
+그대로 남겼으며 이 통합에서 PG를 추가 실행하지 않았다. 새 정확 head의 전체 CI는 별도 세대로 확인한다.

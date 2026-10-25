@@ -97,6 +97,7 @@ from kortravelmap.infra.jobs_repo import (
 from kortravelmap.infra.pipeline_cancellation_repo import (
     cancel_queued_pipeline_cancellation_member,
     create_pipeline_cancellation_attempt,
+    lock_provider_feature_finalization,
     resolve_pipeline_cancellation_scope,
 )
 from kortravelmap.infra.pipeline_cancellation_types import (
@@ -605,6 +606,9 @@ async def test_ensure_attempt_and_finish_use_only_canonical_membership(
     run_id = f"tvn33-operation-{uuid4()}"
     started_at = datetime(2026, 8, 7, tzinfo=UTC)
 
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     created = await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id=run_id,
@@ -1242,6 +1246,9 @@ async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(
     # 같은 operation의 서로 다른 dataset membership 2개로 다시 정의한다.
     memberships = await memberships_for_operation(migrated_session, limit=2)
 
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     queued = await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id=run_id,
@@ -2387,6 +2394,9 @@ async def test_run_backed_queued_cancellation_freezes_one_run_and_all_members(
     migrated_session: AsyncSession,
 ) -> None:
     memberships = await memberships_for_operation(migrated_session, limit=2)
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     operation = await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id="run-c3e-queued-cancel",
@@ -2556,6 +2566,9 @@ async def test_every_terminal_identity_mismatch_closes_tracking_invariant(
     incoming_memberships = await memberships_for_operation(
         migrated_session, operation_key=SINGLE_MEMBER_OPERATION
     )
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     operation = await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id=f"run-c3e-mismatch-{terminal_status.lower()}",
@@ -2644,6 +2657,9 @@ async def test_terminal_finish_cannot_precede_stored_engine_start(
     created_at = datetime(2026, 7, 15, 10, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=10)
     memberships = await memberships_for_operation(migrated_session, limit=1)
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id="run-c3e-invalid-finish",
@@ -2679,6 +2695,9 @@ async def test_terminal_created_time_drift_closes_without_invented_finish(
 ) -> None:
     stored_created_at = datetime(2026, 7, 15, 11, tzinfo=UTC)
     memberships = await memberships_for_operation(migrated_session, limit=1)
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     ensured = await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id="run-c3e-created-time-drift",
@@ -2722,6 +2741,9 @@ async def test_terminal_detects_divergent_root_and_child_start_times(
     incoming_started_at = created_at + timedelta(seconds=10)
     stored_child_started_at = created_at + timedelta(seconds=12)
     memberships = await memberships_for_operation(migrated_session, limit=1)
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     ensured = await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id="run-c3e-divergent-child-start",
@@ -2772,6 +2794,9 @@ async def test_success_preserves_terminal_non_done_child_and_fails_root_tracking
     finished_at = created_at + timedelta(seconds=5)
     memberships = await memberships_for_operation(migrated_session, limit=1)
     run_id = f"run-c3e-success-{stored_child_status}"
+    # 이 시험은 같은 TX에서 leaf 이후 terminal까지 호출하므로 P→L부터 시작한다.
+    async with as_dagster_runtime(migrated_session) as runtime_session:
+        await lock_provider_feature_finalization(runtime_session)
     ensured = await ensure_dagster_feature_operation(
         migrated_session,
         dagster_run_id=run_id,
