@@ -490,9 +490,7 @@ async def test_terminal_timeline_conflict_routes_to_durable_reconcile_failure(
         recorded.append(failure)
         return detail
 
-    monkeypatch.setattr(
-        service, "set_pipeline_cancellation_run_result", timeline_conflict
-    )
+    monkeypatch.setattr(service, "set_pipeline_cancellation_run_result", timeline_conflict)
     monkeypatch.setattr(service, "_record_run_failure", record_failure)
 
     updated, failure = await service._record_terminal_run(
@@ -523,14 +521,10 @@ async def test_orphan_terminal_identity_drift_remains_invariant_failure(
     async def unexpected(*_args: Any, **_kwargs: Any) -> None:
         raise AssertionError("generic invariant must not be reclassified")
 
-    monkeypatch.setattr(
-        service, "set_pipeline_cancellation_run_result", programmer_invariant
-    )
+    monkeypatch.setattr(service, "set_pipeline_cancellation_run_result", programmer_invariant)
     monkeypatch.setattr(service, "_record_run_failure", unexpected)
 
-    with pytest.raises(
-        PipelineCancellationInvariantError, match="recorded orphan result drift"
-    ):
+    with pytest.raises(PipelineCancellationInvariantError, match="recorded orphan result drift"):
         await service._record_terminal_run(
             _TransactionSession(),  # type: ignore[arg-type]
             detail,
@@ -587,6 +581,7 @@ class _LeaseSession:
     def __init__(self, *, unlocked: bool = False, error: Exception | None = None) -> None:
         self.unlocked = unlocked
         self.error = error
+        self.info: dict[str, Any] = {}
 
     def in_transaction(self) -> bool:
         return False
@@ -608,7 +603,10 @@ class _PoolProxy:
         self.fail_hard = fail_hard
         self.hard_invalidated = False
         self.terminated = False
-        driver = SimpleNamespace(terminate=self._terminate)
+        driver = SimpleNamespace(
+            terminate=self._terminate,
+            is_closed=lambda: self.terminated,
+        )
         self.driver_connection = driver
         self.dbapi_connection = SimpleNamespace(driver_connection=driver)
 
@@ -626,7 +624,12 @@ class _LeaseConnection:
         self.fail_async = fail_async
         self.invalidated = False
         self.proxy = _PoolProxy(fail_hard=fail_hard)
-        self.sync_connection = SimpleNamespace(connection=self.proxy)
+        self.closed = False
+        self.sync_connection = SimpleNamespace(
+            connection=self.proxy,
+            invalidate=lambda *_args: setattr(self, "invalidated", True),
+            close=lambda: setattr(self, "closed", True),
+        )
 
     async def invalidate(self, _cause: BaseException | None = None) -> None:
         if self.fail_async:
@@ -641,6 +644,13 @@ async def test_unlock_false_or_exception_never_returns_success(
 ) -> None:
     session = _LeaseSession(unlocked=False, error=unlock_error)
     connection = _LeaseConnection()
+    session.info[service._BACKEND_INFO_KEY] = service._CoordinatorBackend(
+        connection,
+        None,
+        connection.proxy,
+        connection.proxy.driver_connection,
+        1,
+    )
 
     with pytest.raises(service.PipelineCancellationUnsafe):
         await service._release_coordinator_lease(
@@ -653,24 +663,25 @@ async def test_unlock_false_or_exception_never_returns_success(
 
 
 @pytest.mark.asyncio
-async def test_unlock_uses_sync_then_physical_hard_invalidate_fallbacks() -> None:
-    sync_connection = _LeaseConnection(fail_async=True)
-    with pytest.raises(service.PipelineCancellationUnsafe):
-        await service._release_coordinator_lease(
-            _LeaseSession(),  # type: ignore[arg-type]
-            sync_connection,  # type: ignore[arg-type]
-            lease_key=1,
+async def test_unlock_uses_captured_physical_driver_before_invalidation() -> None:
+    for fail_hard in (False, True):
+        connection = _LeaseConnection(fail_async=True, fail_hard=fail_hard)
+        session = _LeaseSession()
+        session.info[service._BACKEND_INFO_KEY] = service._CoordinatorBackend(
+            connection,
+            None,
+            connection.proxy,
+            connection.proxy.driver_connection,
+            1,
         )
-    assert sync_connection.proxy.hard_invalidated is True
-
-    physical_connection = _LeaseConnection(fail_async=True, fail_hard=True)
-    with pytest.raises(service.PipelineCancellationUnsafe):
-        await service._release_coordinator_lease(
-            _LeaseSession(),  # type: ignore[arg-type]
-            physical_connection,  # type: ignore[arg-type]
-            lease_key=1,
-        )
-    assert physical_connection.proxy.terminated is True
+        with pytest.raises(service.PipelineCancellationUnsafe):
+            await service._release_coordinator_lease(
+                session,
+                connection,
+                lease_key=1,
+            )
+        assert connection.proxy.terminated is True
+        assert connection.invalidated is True
 
 
 def test_http_adapter_preserves_pre_marker_lease_shape() -> None:

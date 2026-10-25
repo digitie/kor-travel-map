@@ -2,6 +2,16 @@
 
 원 발견사항·sync cursor·stale 정리를 한 fenced RC transaction과 receipt로 연결하고, 종결된 임시 입력의 7일/최대16개 정리를 추가했다. 합성430의 실제 설치/startup/ORM/후처리 rollback·replay/null 경계15 PASS와 정리를 확인했다. GC·scheduled caller 실제 시험, 공식oracle·최종 두 리뷰·CI·live UI·운영은 미완이다. [범위와 검증](reports/2026-10-25-airport-snapshot-durable-postprocess.md).
 
+## 2026-10-25 · cancellation 원 backend cleanup 후보
+
+- 원 backend identity의 종료 요청1회와 advisory0 확인을 보강했다. SQLAlchemy54/55 관련49 PASS, dc70 actual5 PASS15.763초·정확 정리. 13418 두 PG lane 실패와 아래 초기 시험소스 이력은 보존한다. 새 CI·후보 liveUI·운영은 미완이다. [경계/원실패](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
+
+## 2026-10-25 API task 취소·pool 경계 시험 소스
+
+실제 K 보유→P 대기 중 task 취소와 pool1 새 요청/replay를 독립 시험으로 준비한다.
+제품/SQL 변경·실제 PG0이며 [범위](reports/2026-10-25-pipeline-cancellation-task-pool.md)의
+소스 두 리뷰와 고정 실행기 승인 전 실행하지 않는다.
+
 ## 2026-10-25 비활성 strict SH guard429 owned 검증
 
 - 46666 CI 원결과를 보존하고 검토된428 cac89의 ORM metadata/반사식 수정과 원 fresh300 검사1 PASS를 상속한다. 429 SQL·공식dump·role trace는 유지하며 새 합성 CI는 별도다.

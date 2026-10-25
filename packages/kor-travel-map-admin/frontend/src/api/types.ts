@@ -22912,7 +22912,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Dagster 연결 또는 terminal 확인 실패 */
+            /** @description DB 연결 정리 또는 Dagster 연결·terminal 확인 실패 */
             503: {
                 headers: {
                     /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
@@ -23016,7 +23016,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description Dagster 연결 또는 terminal 확인 실패 */
+            /** @description DB 연결 정리 또는 Dagster 연결·terminal 확인 실패 */
             503: {
                 headers: {
                     /** @description 재시도 가능한 오류일 때 적용할 대기 시간(초). */
