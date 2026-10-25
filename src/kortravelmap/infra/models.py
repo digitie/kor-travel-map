@@ -9164,11 +9164,11 @@ class ProviderSnapshotQuotaLimitRow(Base):
         CheckConstraint("max_rows>0", name=conv("provider_snapshot_quota_limits_max_rows_check")),
         CheckConstraint(
             "used_bytes>=0 AND used_bytes<=max_bytes",
-            name=conv("provider_snapshot_quota_limits_used_bytes_check"),
+            name=conv("provider_snapshot_quota_limits_check"),
         ),
         CheckConstraint(
             "used_rows>=0 AND used_rows<=max_rows",
-            name=conv("provider_snapshot_quota_limits_used_rows_check"),
+            name=conv("provider_snapshot_quota_limits_check1"),
         ),
         {"schema": "ops"},
     )

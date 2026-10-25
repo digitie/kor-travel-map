@@ -40,3 +40,17 @@ source56854a의 bounded owned postprocess3 실행은 setup3 ERROR16.81s로 끝�
 수정은 정본 과거0202의 문자열/식별자 quote·dollar tag 인식 경계 탐색을 revision-local로 재사용해, owner chunk마다 최상위 SQL 하나씩 보내는 것이다. 기존 routine body·owner/ACL/GUC/순서와 `_sections`의 원문 bytes 재결합은 유지한다. SQL 없는 trailing comment만 실행에서 제외한다. RootSQL 본문이나 시험 기대값을 바꾸지 않는다. 새 고정 source의 실제 설치 수용은 별도 실행 결과가 있어야 한다.
 
 수정 후 집중67 PASS1.77s·mypy1·Ruff2 PASS다. 최종 source는 다음 bounded bootstrap으로만 실제 설치 여부를 판정한다.
+
+
+## 두 번째 설치 관측과 다음 실제 범위
+
+source7827의 같은3 대상은 실제300→430 migration 및 runtime LOGIN/head 관측에 도달했고 GUC1 PASS/fixture2 FAIL로 끝났다. 첫 실패는 Geo artifact와 `geo_stats=None`의 정본 context 계약 불일치, 둘째는 첫 case가 active policy를 커밋한 동일 Airport identity를 재seed한 조건이었다. SQL guard를 완화하지 않았다. 원 결과/XML과 정확 CID/UUID/global0·volume1 부재를 보존한다. 실패 뒤 runner post 검사는 도달하지 않았음을 유지한다.
+
+Root는6006486에서 실제 GeoStats/builtin set 및 module 초기 seed1회로 fixture를 정정했다. 이 정정을 포함한1c9c6f 부모를 상속했다. 새 전용 시험은 fresh startup boundary/private4표 table·column 권한0/CommandOwner artifact UPDATE0·GC DELETE1/미설치 inactive 검증 모드를 확인한다. metadata 원 검사 함수는 같은 canonical fresh bootstrap DB를 재사용해 command.check와 CHECK 대조를 그대로 수행한다. 실제 결과 전까지 수용으로 세지 않는다.
+
+
+## startup 실제 통과와 ORM 이름 정정
+
+sourceac822의 한 owned DB5 대상은 startup/privateACL 및 GUC2 PASS, metadata/후처리3 FAIL이었다. 실제 startup service의 새 SD exact allowlist, private4표 raw table/column0, CommandOwner artifact UPDATE0/DELETE1과 inactive inventory 모드는 통과했다. metadata 원 CHECK 대조는 quota cross-column CHECK의 실제 자동명 `_check`/`_check1`과 ORM의 열명 기반 추정 두 곳 차이를 검출했다. SQL 식이나 실제 CHECK를 바꾸지 않고 ORM 이름 두 곳만 실제 catalog에 맞춘다.
+
+Root 실제 apply는 일반runtime에서 private bounded capture를 직접 호출한 지점에서 EXEC 거부로 멈췄다. private 함수 권한을 무조건 넓히지 않고 Root가 typed capture 경계를 수정한다. 뒤 marker case의 active owner는 앞 apply 실패가 남긴 ready plan과 같은 DS를 재사용한 연쇄 실패다. 원 결과/XML·정확 정리 결과와 별도 offline source2494/SDK53 post 동일성 관측을 보존했다. 본래 runner는 pytest FAIL 뒤 post 단계에 도달하지 않았으므로 이 보충을 runner PASS로 재해석하지 않는다. 실제 후처리 완료·재개·전체430 수용은 아직 미완이다.
