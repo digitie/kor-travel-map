@@ -4,9 +4,9 @@
 
 기존 `current_provider_curation_input_set`의 네 집계값과 hash/date/정렬 계약을
 보존하면서, 전체 현재집합이 작은 안전한 형태인지 먼저 검사하는 내부 함수를 추가한다.
-첫 문서 checkpoint 뒤 SQL·migration·권한 정본과 시험 코드를 추가한다. 구현은 작업 중이며
-아직 source review/실제 PostgreSQL/공식 oracle/CI 수용 전이다. 427 reader를 부모로
-예약했으며 부모 migration을 상속하기 전 전체 graph와 실제 DB 시험을 실행하지 않는다.
+SQL·migration·권한 정본과 시험 코드를 추가하고 427 부모를 상속했다. 두 source 검토 뒤
+실제 PostgreSQL 통합37개와 fresh bootstrap 공식 oracle1개가 통과했다. 최종 덤프·문서
+두 검토와 CI는 아직 수용 전이다.
 새로운 공개 API/DTO나 collector 호출, RC 전환, SH 활성화는 없다.
 
 ## 검사 순서와 예산
@@ -104,3 +104,24 @@ volume 정리 성공 기록은 보존한다. 수정 후 재실행·공식 oracle
 2b236의 첫 수정은 이력 raw를 정수 scalar로 만들어 object CHECK를 위반할 수 있다고
 두번째 리뷰어가 지적했다. 이 pin으로 재실행하지 않았다. `{"n": n}` object와
 공백 없는 정본 JSON의 SHA256 prefix로 정정하고 원 검토의 누락도 보존한다.
+
+## 실제 674 수용 결과
+
+PG16.14, glibc en_US.utf8에서37개 통합 시험이 모두 통과했다. 이는 Unicode/default
+정렬·세 timezone·정본 네 집계값, JSON 숫자의 text 확장 전 거부, metadata/shape/수량/
+binary·encoded 전체 예산, source membership/override/LOGIN 권한, 무관한 이력5000건과
+큰 압축 key가 있어도 새 CASE index condition 사용을 확인한다. 앞선 실패는 별도로
+보존하며 통과 수에 합산하지 않는다.
+
+같은 source의 공식300 fresh bootstrap은 runtime 권한 재조정 없이 head428까지 설치됐다.
+공식 schema dump/반복 dump 비교1개가22.897초에 통과했고 덤프 SHA256은
+`110440832b264ec5ea9fd56cf0b3130ba21cfaeb19a27bcbfb974eb051c08ad5`다.
+부모426과 비교해 새 함수5/각 ACL5/index3만 추가되고, 기존 metadata helper의
+schema owner EXEC와 schema receipt CHECK만 달라진다. 기존 객체 제거는 없다.
+부모 덤프를 새 스키마의 의미적 정답으로 간주하지 않고 생성·반복 비교 증거로 구분한다.
+두 실행 모두 source2419파일/SDK53파일 전후와 실제 import9개를 확인했고, 정확 시험
+컨테이너·volume이 제거되어 owned 컨테이너0을 확인했다.
+
+이는 synthetic x86 격리 시험이다. 실제 공항15·수집 HTTP·ARM CPU/RSS 저감·RC/SH
+쓰기·전체 writer closure·내구성 복구·운영 배포·Common/Weather/Transport 전파 수용은
+아직 미완이다. 뒤 427 준비 함수와 최종 parent 합성/정확 head CI를 마쳐야 한다.

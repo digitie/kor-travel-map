@@ -132,6 +132,292 @@ $$;
 ALTER FUNCTION feature._assert_stamp_projection_guard_inventory(p_boundary boolean) OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: _bounded_curation_string_object(jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature._bounded_curation_string_object(p_value jsonb) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_key text;
+    v_value jsonb;
+    v_count integer := 0;
+BEGIN
+    IF p_value IS NULL OR jsonb_typeof(p_value) IS DISTINCT FROM 'object' THEN
+        RETURN false;
+    END IF;
+    FOR v_key, v_value IN SELECT key, value FROM jsonb_each(p_value) LOOP
+        v_count := v_count + 1;
+        IF v_count > 32 OR octet_length(v_key) > 256
+           OR jsonb_typeof(v_value) NOT IN ('string', 'null') THEN
+            RETURN false;
+        END IF;
+        -- 숫자를 문자열로 확장하지 않는다. string 판정 후의 문자열만 꺼낸다.
+        IF jsonb_typeof(v_value) = 'string' THEN
+            IF octet_length(v_value #>> '{}'::text[]) > 256 THEN
+                RETURN false;
+            END IF;
+        END IF;
+    END LOOP;
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION feature._bounded_curation_string_object(p_value jsonb) OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: _bounded_provider_curation_input_set(bigint); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature._bounded_provider_curation_input_set(p_provider_dataset_id bigint) RETURNS TABLE(capture_complete boolean, reason text, source_entity_count bigint, input_member_count bigint, last_source_modified_at date, source_input_set_hash text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_entity_ref record;
+    v_meta record;
+    v_link_ref record;
+    v_link record;
+    v_core record;
+    v_place record;
+    v_key text;
+    v_record_key text;
+    v_feature_id uuid;
+    v_raw_hash text;
+    v_record_entity text;
+    v_record_imported_at timestamptz;
+    v_latest_imported_at timestamptz;
+    v_capture_keys text[] := ARRAY[]::text[];
+    v_capture_features uuid[] := ARRAY[]::uuid[];
+    v_capture_hashes bytea[] := ARRAY[]::bytea[];
+    v_encoded_row bytea;
+    v_phone text;
+    v_bytes bigint := 0;
+    v_encoded bigint := 0;
+    v_count integer := 0;
+    v_expected_count integer;
+    v_links integer;
+    v_row_bytes integer;
+    v_catalog text[];
+BEGIN
+    capture_complete := false;
+    reason := 'scope_unsupported';
+    IF p_provider_dataset_id IS NULL OR p_provider_dataset_id < 1 THEN
+        RETURN NEXT; RETURN;
+    END IF;
+
+    -- WHERE false로 payload 없이 관계를 열어 열 변경의 ACCESS EXCLUSIVE와 경합한다.
+    PERFORM 1 FROM ONLY provider_sync.source_entities, ONLY provider_sync.source_entity_heads,
+        ONLY provider_sync.source_records, ONLY provider_sync.source_links,
+        ONLY feature.features, ONLY feature.feature_places, ONLY feature.feature_events,
+        ONLY feature.feature_notices, ONLY feature.feature_routes,
+        ONLY feature.feature_route_geometries, ONLY feature.feature_areas,
+        ONLY ops.feature_overrides WHERE false;
+    IF EXISTS (
+        SELECT 1 FROM pg_class AS c
+        WHERE c.oid = ANY(ARRAY[
+            'provider_sync.source_entities'::regclass,'provider_sync.source_entity_heads'::regclass,
+            'provider_sync.source_records'::regclass,'provider_sync.source_links'::regclass,
+            'feature.features'::regclass,'feature.feature_places'::regclass,
+            'feature.feature_events'::regclass,'feature.feature_notices'::regclass,
+            'feature.feature_routes'::regclass,'feature.feature_route_geometries'::regclass,
+            'feature.feature_areas'::regclass,'ops.feature_overrides'::regclass
+        ]) AND (c.relkind <> 'r' OR EXISTS(
+            SELECT 1 FROM pg_inherits AS i WHERE i.inhparent=c.oid OR i.inhrelid=c.oid
+        ))
+    ) THEN
+        reason := 'storage_unsupported'; RETURN NEXT; RETURN;
+    END IF;
+    SELECT array_agg(a.attname::text || ':' || a.atttypid::text || ':' ||
+        a.attndims::text || ':' || a.atttypmod::text ORDER BY a.attnum)
+    INTO v_catalog FROM pg_attribute AS a
+    WHERE a.attrelid='feature.feature_places'::regclass AND a.attnum>0 AND NOT a.attisdropped;
+    IF v_catalog IS DISTINCT FROM ARRAY[
+        'feature_id:2950:0:-1','kind:1043:0:-1','place_kind:1043:0:-1',
+        'phones:1009:1:-1','biz_number:1043:0:-1','license_date:1082:0:-1',
+        'business_hours:3802:0:-1','facility_info:3802:0:-1',
+        'reviews_link:3802:0:-1','payload:3802:0:-1'
+    ]::text[] THEN
+        reason := 'storage_unsupported'; RETURN NEXT; RETURN;
+    END IF;
+
+    -- 배열의 default 정렬이 기존 canonical의 실제 key 열 정렬과 같아야 한다.
+    IF (SELECT a.attcollation FROM pg_attribute AS a
+        WHERE a.attrelid='provider_sync.source_entities'::regclass
+          AND a.attname='source_entity_key' AND NOT a.attisdropped)
+        IS DISTINCT FROM 'pg_catalog."default"'::regcollation THEN
+        reason := 'storage_unsupported'; RETURN NEXT; RETURN;
+    END IF;
+
+    -- 수량만 MAX+1 조사한다. 키 정렬/본문/이력 표를 먼저 읽지 않는다.
+    SELECT count(*) INTO v_expected_count FROM (
+        SELECT 1 FROM ONLY provider_sync.source_entities
+        WHERE provider_dataset_id=p_provider_dataset_id LIMIT 2731
+    ) AS bounded_entities;
+    IF v_expected_count=0 THEN reason := 'scope_unsupported'; RETURN NEXT; RETURN; END IF;
+    IF v_expected_count>2730 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+
+    FOR v_entity_ref IN
+        SELECT t.ctid AS row_tid, feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint]::bigint[], ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL)]::boolean[], ARRAY[256]::integer[], ARRAY[false]::boolean[]) AS bytes
+        FROM ONLY provider_sync.source_entities AS t
+        WHERE t.provider_dataset_id=p_provider_dataset_id LIMIT 2731
+    LOOP
+        v_count := v_count+1;
+        IF v_count>2730 THEN
+            reason := 'budget_exceeded'; RETURN NEXT; RETURN;
+        END IF;
+        IF v_entity_ref.bytes<0 THEN
+            reason := 'storage_unsupported'; RETURN NEXT; RETURN;
+        END IF;
+        v_bytes := v_bytes+v_entity_ref.bytes;
+        IF v_bytes>262144 THEN
+            reason := 'budget_exceeded'; RETURN NEXT; RETURN;
+        END IF;
+        SELECT t.source_entity_key INTO STRICT v_key
+        FROM ONLY provider_sync.source_entities AS t WHERE t.ctid=v_entity_ref.row_tid;
+
+        SELECT feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint, pg_column_size(t.current_source_record_key)::bigint]::bigint[], ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL), (pg_column_compression(t.current_source_record_key) IS NOT NULL)]::boolean[], ARRAY[256, 256]::integer[], ARRAY[false, false]::boolean[]) AS bytes INTO v_meta
+        FROM ONLY provider_sync.source_entity_heads AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key;
+        IF NOT FOUND THEN
+            reason := 'lineage_incomplete'; RETURN NEXT; RETURN;
+        END IF;
+        IF v_meta.bytes<0 THEN
+            reason := 'storage_unsupported'; RETURN NEXT; RETURN;
+        END IF;
+        v_bytes := v_bytes+v_meta.bytes;
+        IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+        SELECT t.current_source_record_key INTO STRICT v_record_key
+        FROM ONLY provider_sync.source_entity_heads AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key;
+
+        SELECT feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint, pg_column_size(t.source_record_key)::bigint, pg_column_size(t.raw_payload_hash)::bigint]::bigint[], ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL), (pg_column_compression(t.source_record_key) IS NOT NULL), (pg_column_compression(t.raw_payload_hash) IS NOT NULL)]::boolean[], ARRAY[256, 256, 256]::integer[], ARRAY[false, false, false]::boolean[]) AS bytes INTO v_meta
+        FROM ONLY provider_sync.source_records AS t
+        WHERE (CASE WHEN pg_catalog.octet_length(t.source_record_key::text)<=256 THEN t.source_record_key::text ELSE NULL::text END)=v_record_key;
+        IF NOT FOUND THEN
+            reason := 'lineage_incomplete'; RETURN NEXT; RETURN;
+        END IF;
+        IF v_meta.bytes<0 THEN reason := 'storage_unsupported'; RETURN NEXT; RETURN; END IF;
+        v_bytes := v_bytes+v_meta.bytes;
+        IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+        SELECT t.raw_payload_hash,t.imported_at,t.source_entity_key
+        INTO STRICT v_raw_hash,v_record_imported_at,v_record_entity
+        FROM ONLY provider_sync.source_records AS t
+        WHERE (CASE WHEN pg_catalog.octet_length(t.source_record_key::text)<=256 THEN t.source_record_key::text ELSE NULL::text END)=v_record_key;
+
+        IF v_record_entity IS DISTINCT FROM v_key THEN
+            reason := 'lineage_incomplete'; RETURN NEXT; RETURN;
+        END IF;
+
+        v_links := 0;
+        FOR v_link_ref IN
+            SELECT t.feature_id, feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint, pg_column_size(t.source_role)::bigint, pg_column_size(t.match_method)::bigint]::bigint[], ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL), (pg_column_compression(t.source_role) IS NOT NULL), (pg_column_compression(t.match_method) IS NOT NULL)]::boolean[], ARRAY[256, 256, 256]::integer[], ARRAY[false, false, false]::boolean[]) AS bytes
+            FROM ONLY provider_sync.source_links AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key LIMIT 2
+        LOOP
+            v_links := v_links+1;
+            IF v_links>1 THEN reason := 'membership_unsupported'; RETURN NEXT; RETURN; END IF;
+            IF v_link_ref.bytes<0 THEN reason := 'storage_unsupported'; RETURN NEXT; RETURN; END IF;
+            v_bytes := v_bytes+v_link_ref.bytes;
+            IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+            v_feature_id := v_link_ref.feature_id;
+        END LOOP;
+        IF v_links<>1 THEN reason := 'membership_unsupported'; RETURN NEXT; RETURN; END IF;
+        SELECT t.source_role,t.match_method,t.confidence INTO STRICT v_link
+        FROM ONLY provider_sync.source_links AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key;
+        IF v_link.source_role IS DISTINCT FROM 'primary' OR
+            (SELECT count(*) FROM (
+                SELECT 1 FROM ONLY provider_sync.source_links WHERE feature_id=v_feature_id LIMIT 2
+            ) AS bounded_links)<>1 THEN
+            reason := 'membership_unsupported'; RETURN NEXT; RETURN;
+        END IF;
+        IF EXISTS(SELECT 1 FROM ONLY ops.feature_overrides WHERE feature_id=v_feature_id LIMIT 1)
+           OR EXISTS(SELECT 1 FROM ONLY feature.feature_events WHERE feature_id=v_feature_id LIMIT 1)
+           OR EXISTS(SELECT 1 FROM ONLY feature.feature_notices WHERE feature_id=v_feature_id LIMIT 1)
+           OR EXISTS(SELECT 1 FROM ONLY feature.feature_routes WHERE feature_id=v_feature_id LIMIT 1)
+           OR EXISTS(SELECT 1 FROM ONLY feature.feature_route_geometries WHERE feature_id=v_feature_id LIMIT 1)
+           OR EXISTS(SELECT 1 FROM ONLY feature.feature_areas WHERE feature_id=v_feature_id LIMIT 1) THEN
+            reason := 'membership_unsupported'; RETURN NEXT; RETURN;
+        END IF;
+
+        SELECT feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.kind)::bigint, pg_column_size(t.lifecycle_state)::bigint, pg_column_size(t.publication_state)::bigint, pg_column_size(t.quality_state)::bigint]::bigint[], ARRAY[(pg_column_compression(t.kind) IS NOT NULL), (pg_column_compression(t.lifecycle_state) IS NOT NULL), (pg_column_compression(t.publication_state) IS NOT NULL), (pg_column_compression(t.quality_state) IS NOT NULL)]::boolean[], ARRAY[256, 256, 256, 256]::integer[], ARRAY[false, false, false, false]::boolean[]) AS bytes INTO v_meta FROM ONLY feature.features AS t
+        WHERE t.feature_id=v_feature_id;
+        IF NOT FOUND THEN reason := 'lineage_incomplete'; RETURN NEXT; RETURN; END IF;
+        IF v_meta.bytes<0 THEN reason := 'storage_unsupported'; RETURN NEXT; RETURN; END IF;
+        v_bytes := v_bytes+v_meta.bytes;
+        IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+        SELECT t.kind,t.row_revision,t.lifecycle_state,t.publication_state,t.quality_state INTO STRICT v_core
+        FROM ONLY feature.features AS t WHERE t.feature_id=v_feature_id;
+        IF v_core.kind IS DISTINCT FROM 'place' OR v_core.lifecycle_state IS DISTINCT FROM 'active' THEN
+            reason := 'membership_unsupported'; RETURN NEXT; RETURN;
+        END IF;
+        SELECT feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.kind)::bigint, pg_column_size(t.place_kind)::bigint, pg_column_size(t.phones)::bigint, pg_column_size(t.biz_number)::bigint, pg_column_size(t.business_hours)::bigint, pg_column_size(t.facility_info)::bigint, pg_column_size(t.reviews_link)::bigint, pg_column_size(t.payload)::bigint]::bigint[], ARRAY[(pg_column_compression(t.kind) IS NOT NULL), (pg_column_compression(t.place_kind) IS NOT NULL), (pg_column_compression(t.phones) IS NOT NULL), (pg_column_compression(t.biz_number) IS NOT NULL), (pg_column_compression(t.business_hours) IS NOT NULL), (pg_column_compression(t.facility_info) IS NOT NULL), (pg_column_compression(t.reviews_link) IS NOT NULL), (pg_column_compression(t.payload) IS NOT NULL)]::boolean[], ARRAY[256, 256, 8192, 256, 8192, 8192, 8192, 8192]::integer[], ARRAY[false, false, false, true, true, false, false, false]::boolean[]) AS bytes INTO v_meta FROM ONLY feature.feature_places AS t
+        WHERE t.feature_id=v_feature_id;
+        IF NOT FOUND THEN reason := 'lineage_incomplete'; RETURN NEXT; RETURN; END IF;
+        IF v_meta.bytes<0 THEN reason := 'storage_unsupported'; RETURN NEXT; RETURN; END IF;
+        v_bytes := v_bytes+v_meta.bytes;
+        IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+        SELECT t.* INTO STRICT v_place FROM ONLY feature.feature_places AS t
+        WHERE t.feature_id=v_feature_id;
+        IF v_place.kind IS DISTINCT FROM 'place' OR v_place.business_hours IS NOT NULL
+            OR v_place.phones IS NULL THEN
+            reason := 'shape_unsupported'; RETURN NEXT; RETURN;
+        END IF;
+        IF cardinality(v_place.phones)>0 THEN
+            IF cardinality(v_place.phones)>32 OR array_ndims(v_place.phones) IS DISTINCT FROM 1
+               OR array_lower(v_place.phones,1) IS DISTINCT FROM 1 THEN
+                reason := 'shape_unsupported'; RETURN NEXT; RETURN;
+            END IF;
+            FOREACH v_phone IN ARRAY v_place.phones LOOP
+                IF v_phone IS NULL OR octet_length(v_phone)>256 THEN
+                    reason := 'shape_unsupported'; RETURN NEXT; RETURN;
+                END IF;
+            END LOOP;
+        END IF;
+        IF NOT feature._bounded_curation_string_object(v_place.facility_info)
+           OR NOT feature._bounded_curation_string_object(v_place.reviews_link)
+           OR NOT feature._bounded_curation_string_object(v_place.payload) THEN
+            reason := 'shape_unsupported'; RETURN NEXT; RETURN;
+        END IF;
+        -- 기존 canonical 행을 개별 생성한다. 전체 aggregate를 먼저 만들지 않는다.
+        v_encoded_row := convert_to(jsonb_build_array(
+            v_key,v_record_key,v_raw_hash,v_feature_id,v_link.source_role,
+            v_link.match_method,v_link.confidence,v_core.row_revision,
+            v_core.lifecycle_state,v_core.publication_state,v_core.quality_state,
+            to_jsonb(v_place),'[]'::jsonb
+        )::text,'UTF8');
+        v_row_bytes := octet_length(v_encoded_row);
+        IF v_row_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+        v_encoded := v_encoded+v_row_bytes;
+        IF v_encoded>1048576 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+        v_capture_keys := array_append(v_capture_keys,v_key);
+        v_capture_features := array_append(v_capture_features,v_feature_id);
+        v_capture_hashes := array_append(v_capture_hashes,x_extension.digest(v_encoded_row,'sha256'));
+        v_latest_imported_at := greatest(v_latest_imported_at,v_record_imported_at);
+    END LOOP;
+    IF v_count IS DISTINCT FROM v_expected_count THEN
+        reason := 'membership_unsupported'; RETURN NEXT; RETURN;
+    END IF;
+
+    -- 검증한 행만 원 canonical과 동일한 inner digest/정렬/outer digest로 접는다.
+    -- 기존 함수를 재호출해 과거 unbounded index/payload JOIN을 다시 수행하지 않는다.
+    SELECT encode(x_extension.digest(COALESCE(string_agg(
+        u.row_hash,''::bytea ORDER BY u.entity_key,u.feature_id
+    ),''::bytea),'sha256'),'hex') INTO source_input_set_hash
+    FROM unnest(v_capture_keys,v_capture_features,v_capture_hashes)
+        AS u(entity_key,feature_id,row_hash);
+    source_entity_count := v_count::bigint;
+    input_member_count := v_count::bigint;
+    last_source_modified_at := v_latest_imported_at::date;
+    capture_complete := true;
+    reason := NULL;
+    RETURN NEXT;
+END;
+$$;
+
+
+ALTER FUNCTION feature._bounded_provider_curation_input_set(p_provider_dataset_id bigint) OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: _exclusive_provider_refresh_context(uuid, bigint); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -1172,6 +1458,550 @@ $_$;
 
 
 ALTER PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _transport_airport_evidence_inventory(bigint, text[]); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._transport_airport_evidence_inventory(p_dataset bigint, p_entities text[]) RETURNS jsonb
+    LANGUAGE plpgsql STABLE
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_row record; v_relation regclass; v_key text; v_total bigint:=0;
+    v_count integer; v_keys text[]:='{}'; v_features uuid[]:='{}';
+    v_ref_key text; v_seen jsonb:='{}'; v_record_keys text[]:='{}'; v_revisions bigint[]:='{}'; v_revision bigint; v_refs jsonb:='[]'; v_feature uuid;
+BEGIN
+    -- 배열의 caller/wire 생성 메모리는 이 함수의 보장 범위가 아니다.
+    IF p_dataset IS NULL OR p_dataset<1 OR p_entities IS NULL THEN
+        RAISE EXCEPTION 'invalid airport evidence request' USING ERRCODE='22023';
+    END IF;
+    IF pg_column_compression(p_entities) IS NOT NULL
+       OR pg_column_size(p_entities)>262144 THEN
+        RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+    END IF;
+    IF array_ndims(p_entities) IS DISTINCT FROM 1
+       OR array_lower(p_entities,1) IS DISTINCT FROM 1
+       OR cardinality(p_entities) NOT BETWEEN 1 AND 2730 THEN
+        RAISE EXCEPTION 'invalid airport evidence target count' USING ERRCODE='22023';
+    END IF;
+    -- 작은 입력 배열의 원소를 format/중복 검사 전에 각각 검사한다.
+    FOREACH v_key IN ARRAY p_entities LOOP
+        IF v_key IS NULL OR pg_column_compression(v_key) IS NOT NULL
+           OR pg_column_size(v_key)>128 THEN
+            RAISE EXCEPTION 'invalid airport evidence key' USING ERRCODE='22023';
+        END IF;
+        IF octet_length(v_key)<>67 OR v_key !~ '^se_[0-9a-f]{64}$'
+           OR v_key=ANY(v_keys) THEN
+            RAISE EXCEPTION 'invalid airport evidence key' USING ERRCODE='22023';
+        END IF;
+        v_keys:=array_append(v_keys,v_key);
+    END LOOP;
+    v_keys:='{}';
+    -- ctid는 테이블별 값이다. 상속/partition이 생기면 관계 전체를 거부한다.
+    FOREACH v_relation IN ARRAY ARRAY['provider_sync.provider_datasets'::regclass,'provider_sync.source_entities'::regclass,'provider_sync.source_entity_heads'::regclass,'provider_sync.source_records'::regclass,'provider_sync.source_links'::regclass,'provider_sync.provider_feature_identities'::regclass,'feature.features'::regclass,'feature.provider_field_active_policies'::regclass,'feature.provider_field_shadow_policies'::regclass,'feature.provider_field_shadow_candidates'::regclass,'feature.feature_base_field_values'::regclass,'feature.feature_geocode_stamps'::regclass,'feature.provider_field_policy_epoch'::regclass,'feature.feature_areas'::regclass,'ops.feature_overrides'::regclass] LOOP
+        IF EXISTS(SELECT 1 FROM pg_inherits WHERE inhparent=v_relation OR inhrelid=v_relation)
+           OR EXISTS(SELECT 1 FROM pg_class WHERE oid=v_relation AND relkind<>'r') THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','scope_unsupported');
+        END IF;
+    END LOOP;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.provider)::bigint,pg_column_size(t.dataset_key)::bigint]::bigint[],ARRAY[(pg_column_compression(t.provider) IS NOT NULL),(pg_column_compression(t.dataset_key) IS NOT NULL)]::boolean[],ARRAY[512,512]::integer[],ARRAY[false,false]::boolean[]) AS bytes
+        FROM provider_sync.provider_datasets t WHERE t.provider_dataset_id=p_dataset LIMIT 2
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>1 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_datasets'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+        IF NOT EXISTS(SELECT 1 FROM provider_sync.provider_datasets t
+            WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid
+              AND t.provider='kor-travel-transport'
+              AND t.dataset_key='transport_airports' AND t.is_active) THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','scope_unsupported');
+        END IF;
+    END LOOP;
+    IF v_count<>1 THEN RETURN jsonb_build_object('metadata_complete',false,'reason','scope_unsupported'); END IF;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.source_entity_type)::bigint,pg_column_size(t.source_entity_id)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.source_entity_type) IS NOT NULL),(pg_column_compression(t.source_entity_id) IS NOT NULL)]::boolean[],ARRAY[128,64,128]::integer[],ARRAY[false,false,false]::boolean[]) AS bytes
+        FROM provider_sync.source_entities t WHERE t.provider_dataset_id=p_dataset AND (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=ANY(p_entities) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_entities'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+        SELECT t.source_entity_key INTO v_key FROM provider_sync.source_entities t
+          WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
+        v_keys:=array_append(v_keys,v_key);
+        IF NOT EXISTS(SELECT 1 FROM provider_sync.source_entities t
+          WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid
+            AND t.source_entity_type='airport') THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','scope_unsupported');
+        END IF;
+    END LOOP;
+    IF v_count<>cardinality(p_entities) THEN RETURN jsonb_build_object('metadata_complete',false,'reason','missing_source'); END IF;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.current_source_record_key)::bigint,pg_column_size(t.lineage_key)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.current_source_record_key) IS NOT NULL),(pg_column_compression(t.lineage_key) IS NOT NULL)]::boolean[],ARRAY[128,64,1024]::integer[],ARRAY[false,false,false]::boolean[]) AS bytes
+        FROM provider_sync.source_entity_heads t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=ANY(v_keys) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_entity_heads'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+        SELECT t.current_source_record_key INTO v_key FROM provider_sync.source_entity_heads t
+          WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
+        IF v_key IS NULL OR octet_length(v_key)<>23 OR v_key !~ '^sr_[0-9a-f]{20}$' THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','lineage_incomplete');
+        END IF;
+        IF NOT(v_key=ANY(v_record_keys)) THEN v_record_keys:=array_append(v_record_keys,v_key); END IF;
+    END LOOP;
+    IF v_count<>cardinality(p_entities) THEN RETURN jsonb_build_object('metadata_complete',false,'reason','missing_source'); END IF;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.source_role)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.source_role) IS NOT NULL)]::boolean[],ARRAY[128,64]::integer[],ARRAY[false,false]::boolean[]) AS bytes
+        FROM provider_sync.source_links t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=ANY(v_keys) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_links'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+        SELECT t.feature_id INTO v_feature FROM provider_sync.source_links t
+          WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
+        IF v_feature=ANY(v_features) OR NOT EXISTS(SELECT 1 FROM provider_sync.source_links t
+            WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid AND t.source_role='primary') THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','unsupported_membership');
+        END IF;
+        v_features:=array_append(v_features,v_feature);
+    END LOOP;
+    IF v_count<>cardinality(p_entities) THEN RETURN jsonb_build_object('metadata_complete',false,'reason','unsupported_membership'); END IF;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.source_role)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.source_role) IS NOT NULL)]::boolean[],ARRAY[128,64]::integer[],ARRAY[false,false]::boolean[]) AS bytes
+        FROM provider_sync.source_links t WHERE t.feature_id=ANY(v_features) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_links'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+
+    END LOOP;
+    IF v_count<>cardinality(p_entities) THEN RETURN jsonb_build_object('metadata_complete',false,'reason','unsupported_membership'); END IF;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.kind)::bigint,pg_column_size(t.lifecycle_state)::bigint,pg_column_size(t.publication_state)::bigint,pg_column_size(t.quality_state)::bigint,pg_column_size(t.coord)::bigint,pg_column_size(t.address)::bigint,pg_column_size(t.legal_dong_code)::bigint,pg_column_size(t.road_name_code)::bigint,pg_column_size(t.road_address_management_no)::bigint,pg_column_size(t.admin_dong_code)::bigint,pg_column_size(t.sido_code)::bigint,pg_column_size(t.sigungu_code)::bigint]::bigint[],ARRAY[(pg_column_compression(t.kind) IS NOT NULL),(pg_column_compression(t.lifecycle_state) IS NOT NULL),(pg_column_compression(t.publication_state) IS NOT NULL),(pg_column_compression(t.quality_state) IS NOT NULL),(pg_column_compression(t.coord) IS NOT NULL),(pg_column_compression(t.address) IS NOT NULL),(pg_column_compression(t.legal_dong_code) IS NOT NULL),(pg_column_compression(t.road_name_code) IS NOT NULL),(pg_column_compression(t.road_address_management_no) IS NOT NULL),(pg_column_compression(t.admin_dong_code) IS NOT NULL),(pg_column_compression(t.sido_code) IS NOT NULL),(pg_column_compression(t.sigungu_code) IS NOT NULL)]::boolean[],ARRAY[64,64,64,64,128,8192,64,256,256,64,64,64]::integer[],ARRAY[false,false,false,false,true,false,true,true,true,true,true,true]::boolean[]) AS bytes
+        FROM feature.features t WHERE t.feature_id=ANY(v_features) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','features'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+
+    END LOOP;
+
+    -- area payload는 읽지 않고 UUID 존재만 조사한다. 첫 범위는 place-only다.
+    IF EXISTS(SELECT 1 FROM feature.feature_areas t WHERE t.feature_id=ANY(v_features)) THEN
+        RETURN jsonb_build_object('metadata_complete',false,'reason','unsupported_membership');
+    END IF;
+
+    -- 첫 공항 reader는 사람 override가 있는 모든 target을 전체 EX로 보낸다.
+    -- status/field_path/JSON/geometry는 읽지 않고 고정 UUID 존재만 확인한다.
+    IF EXISTS(SELECT 1 FROM ops.feature_overrides t WHERE t.feature_id=ANY(v_features)) THEN
+        RETURN jsonb_build_object('metadata_complete',false,'reason','override_unsupported');
+    END IF;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.feature_kind)::bigint,pg_column_size(t.natural_key)::bigint]::bigint[],ARRAY[(pg_column_compression(t.feature_kind) IS NOT NULL),(pg_column_compression(t.natural_key) IS NOT NULL)]::boolean[],ARRAY[64,128]::integer[],ARRAY[false,false]::boolean[]) AS bytes
+        FROM provider_sync.provider_feature_identities t WHERE t.feature_id=ANY(v_features) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_feature_identities'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+
+    END LOOP;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.field_paths)::bigint]::bigint[],ARRAY[(pg_column_compression(t.field_paths) IS NOT NULL)]::boolean[],ARRAY[512]::integer[],ARRAY[false]::boolean[]) AS bytes
+        FROM feature.provider_field_active_policies t WHERE t.feature_id=ANY(v_features) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_field_active_policies'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+        SELECT t.policy_revision INTO v_revision FROM feature.provider_field_active_policies t
+          WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
+        IF NOT(v_revision=ANY(v_revisions)) THEN v_revisions:=array_append(v_revisions,v_revision); END IF;
+    END LOOP;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.normalizer_revision)::bigint,pg_column_size(t.fields)::bigint]::bigint[],ARRAY[(pg_column_compression(t.normalizer_revision) IS NOT NULL),(pg_column_compression(t.fields) IS NOT NULL)]::boolean[],ARRAY[1024,8192]::integer[],ARRAY[false,false]::boolean[]) AS bytes
+        FROM feature.provider_field_shadow_policies t WHERE t.provider_dataset_id=p_dataset AND t.policy_revision=ANY(v_revisions) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_field_shadow_policies'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+
+    END LOOP;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.field_path)::bigint,pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.value_source_record_key)::bigint,pg_column_size(t.value_source_hash)::bigint,pg_column_size(t.validated_source_record_key)::bigint,pg_column_size(t.validated_source_hash)::bigint,pg_column_size(t.value_json)::bigint,pg_column_size(t.value_geometry)::bigint,pg_column_size(t.availability)::bigint,pg_column_size(t.reason)::bigint,pg_column_size(t.normalizer_revision)::bigint]::bigint[],ARRAY[(pg_column_compression(t.field_path) IS NOT NULL),(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.value_source_record_key) IS NOT NULL),(pg_column_compression(t.value_source_hash) IS NOT NULL),(pg_column_compression(t.validated_source_record_key) IS NOT NULL),(pg_column_compression(t.validated_source_hash) IS NOT NULL),(pg_column_compression(t.value_json) IS NOT NULL),(pg_column_compression(t.value_geometry) IS NOT NULL),(pg_column_compression(t.availability) IS NOT NULL),(pg_column_compression(t.reason) IS NOT NULL),(pg_column_compression(t.normalizer_revision) IS NOT NULL)]::boolean[],ARRAY[128,128,64,128,64,128,8192,128,64,64,1024]::integer[],ARRAY[false,false,true,true,false,false,true,true,false,false,true]::boolean[]) AS bytes
+        FROM feature.provider_field_shadow_candidates t WHERE t.feature_id=ANY(v_features) AND EXISTS(SELECT 1 FROM feature.provider_field_active_policies a WHERE a.feature_id=t.feature_id AND a.policy_revision=t.policy_revision) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_field_shadow_candidates'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+        SELECT t.value_source_record_key INTO v_key FROM feature.provider_field_shadow_candidates t
+          WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
+        IF v_key IS NOT NULL AND NOT(v_key=ANY(v_record_keys)) THEN v_record_keys:=array_append(v_record_keys,v_key); END IF;
+    END LOOP;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.field_path)::bigint,pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.source_record_key)::bigint,pg_column_size(t.source_raw_payload_hash)::bigint,pg_column_size(t.value_json)::bigint,pg_column_size(t.value_geometry)::bigint]::bigint[],ARRAY[(pg_column_compression(t.field_path) IS NOT NULL),(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.source_record_key) IS NOT NULL),(pg_column_compression(t.source_raw_payload_hash) IS NOT NULL),(pg_column_compression(t.value_json) IS NOT NULL),(pg_column_compression(t.value_geometry) IS NOT NULL)]::boolean[],ARRAY[128,128,64,128,8192,128]::integer[],ARRAY[false,false,false,false,true,true]::boolean[]) AS bytes
+        FROM feature.feature_base_field_values t WHERE t.feature_id=ANY(v_features) LIMIT 68251
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>68250 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','feature_base_field_values'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+        SELECT t.source_record_key INTO v_key FROM feature.feature_base_field_values t
+          WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
+        IF v_key IS NULL OR octet_length(v_key)<>23 OR v_key !~ '^sr_[0-9a-f]{20}$' THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','lineage_incomplete');
+        END IF;
+        IF NOT(v_key=ANY(v_record_keys)) THEN v_record_keys:=array_append(v_record_keys,v_key); END IF;
+    END LOOP;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.geo_version_token)::bigint,pg_column_size(t.geo_data_token)::bigint,pg_column_size(t.reverse_outcome)::bigint]::bigint[],ARRAY[(pg_column_compression(t.geo_version_token) IS NOT NULL),(pg_column_compression(t.geo_data_token) IS NOT NULL),(pg_column_compression(t.reverse_outcome) IS NOT NULL)]::boolean[],ARRAY[260,260,64]::integer[],ARRAY[false,false,false]::boolean[]) AS bytes
+        FROM feature.feature_geocode_stamps t WHERE t.feature_id=ANY(v_features) LIMIT 2731
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>2730 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','feature_geocode_stamps'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+
+    END LOOP;
+
+    v_count:=0;
+    FOR v_row IN
+        SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_record_key)::bigint,pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.raw_payload_hash)::bigint,pg_column_size(t.raw_data)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_record_key) IS NOT NULL),(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.raw_payload_hash) IS NOT NULL),(pg_column_compression(t.raw_data) IS NOT NULL)]::boolean[],ARRAY[64,128,128,8192]::integer[],ARRAY[false,false,false,false]::boolean[]) AS bytes
+        FROM provider_sync.source_records t WHERE (CASE WHEN pg_catalog.octet_length(t.source_record_key::text)<=256 THEN t.source_record_key::text ELSE NULL::text END)=ANY(v_record_keys) LIMIT 5461
+    LOOP
+        v_count:=v_count+1;
+        IF v_count>5460 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        IF v_row.bytes<0 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','storage_unsupported');
+        END IF;
+        -- descriptor/고정 길이 열/JSON envelope 여유도 함께 누적한다.
+        v_total:=v_total+v_row.bytes+256;
+        IF v_total>262144 THEN
+            RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
+        END IF;
+        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
+        IF NOT(v_seen ? v_ref_key) THEN
+            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
+                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_records'));
+            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
+        END IF;
+
+    END LOOP;
+    IF v_count<>cardinality(v_record_keys) THEN
+        RETURN jsonb_build_object('metadata_complete',false,'reason','lineage_incomplete');
+    END IF;
+    -- 내부 참조만 반환한다. 공개 response/manifest/다음 호출에 재사용하지 않는다.
+    RETURN jsonb_build_object('metadata_complete',true,'binary_bytes',v_total,
+        'refs',v_refs,'feature_ids',to_jsonb(v_features));
+END;
+$_$;
+
+
+ALTER FUNCTION feature._transport_airport_evidence_inventory(p_dataset bigint, p_entities text[]) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _transport_airport_evidence_shape(jsonb, jsonb, jsonb, x_extension.geometry); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._transport_airport_evidence_shape(p_raw jsonb, p_base jsonb, p_coord_json jsonb, p_geometry x_extension.geometry) RETURNS boolean
+    LANGUAGE plpgsql IMMUTABLE
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_key text; v_value jsonb; v_count integer:=0; v_precision numeric;
+BEGIN
+    -- 각 JSON은 직접 저장 metadata 검사/전체 binary 예산 뒤에만 여기에 온다.
+    IF NOT feature._heritage_evidence_string_object(p_raw,ARRAY[
+        'code','name_korean','name_english','icao_code','municipality','latitude','longitude'
+    ]) THEN RETURN false; END IF;
+    IF jsonb_typeof(p_raw->'code') IS DISTINCT FROM 'string'
+       OR p_raw->>'code'=''
+       OR jsonb_typeof(p_raw->'name_english') IS DISTINCT FROM 'string'
+       OR p_raw->>'name_english'='' THEN RETURN false; END IF;
+    IF (p_raw->'longitude'='null'::jsonb) IS DISTINCT FROM
+       (p_raw->'latitude'='null'::jsonb) THEN RETURN false; END IF;
+    -- raw 좌표/키/hash roundtrip과 전체 typed 의미는 기존 Transport native가 소유한다.
+    IF p_base IS NULL OR jsonb_typeof(p_base) IS DISTINCT FROM 'object' THEN
+        RETURN false;
+    END IF;
+    FOR v_key,v_value IN SELECT key,value FROM jsonb_each(p_base) LOOP
+        v_count:=v_count+1;
+        IF NOT(v_key=ANY(ARRAY[
+            'core.category','core.coord_precision_digits','core.address',
+            'core.legal_dong_code','core.road_name_code','core.road_address_management_no',
+            'core.admin_dong_code','core.sido_code','core.sigungu_code','core.urls',
+            'core.marker_icon','core.marker_color','core.parent_feature_id',
+            'core.sibling_group_id','core.raw_refs','place.place_kind','place.phones',
+            'place.biz_number','place.license_date','place.business_hours',
+            'place.facility_info','place.reviews_link','place.payload'
+        ])) THEN RETURN false; END IF;
+    END LOOP;
+    IF v_count<>23 THEN RETURN false; END IF;
+    FOREACH v_key IN ARRAY ARRAY[
+        'core.category','core.legal_dong_code','core.road_name_code',
+        'core.road_address_management_no','core.admin_dong_code','core.sido_code',
+        'core.sigungu_code','core.marker_icon','core.marker_color','place.place_kind'
+    ] LOOP
+        IF jsonb_typeof(p_base->v_key) NOT IN ('string','null') THEN RETURN false; END IF;
+    END LOOP;
+    IF jsonb_typeof(p_base->'core.category') IS DISTINCT FROM 'string'
+       OR jsonb_typeof(p_base->'place.place_kind') IS DISTINCT FROM 'string'
+       OR NOT feature._heritage_evidence_string_object(p_base->'core.address',ARRAY[
+           'road','legal','admin','bjd_code','admin_dong_code','sigungu_code','sido_code',
+           'road_name_code','road_address_management_no','zipcode','sido_name','sigungu_name'
+       ])
+       OR p_base->'place.payload' IS DISTINCT FROM '{}'::jsonb THEN RETURN false; END IF;
+    IF p_base->'core.urls' IS DISTINCT FROM jsonb_build_object(
+        'homepage',NULL,'sns1',NULL,'sns2',NULL,'review_naver',NULL,
+        'review_kakao',NULL,'review_google',NULL)
+       OR p_base->'core.raw_refs' IS DISTINCT FROM '[]'::jsonb
+       OR p_base->'place.phones' IS DISTINCT FROM '[]'::jsonb
+       OR p_base->'place.reviews_link' IS DISTINCT FROM '{}'::jsonb THEN
+        RETURN false;
+    END IF;
+    IF jsonb_typeof(p_base->'place.facility_info') IS DISTINCT FROM 'object' THEN
+        RETURN false;
+    END IF;
+    FOR v_key,v_value IN SELECT key,value FROM jsonb_each(p_base->'place.facility_info') LOOP
+        IF NOT(v_key=ANY(ARRAY['icao_code','name_english']))
+           OR jsonb_typeof(v_value) IS DISTINCT FROM 'string' THEN RETURN false; END IF;
+    END LOOP;
+    FOREACH v_key IN ARRAY ARRAY[
+        'core.parent_feature_id','core.sibling_group_id','place.biz_number',
+        'place.license_date','place.business_hours'
+    ] LOOP
+        IF p_base->v_key IS DISTINCT FROM 'null'::jsonb THEN RETURN false; END IF;
+    END LOOP;
+    -- Geometry의 SQL NULL과 JSON null을 합치지 않는다.
+    IF p_geometry IS NULL THEN
+        RETURN p_coord_json IS NOT NULL AND p_coord_json='null'::jsonb
+           AND p_base->'core.coord_precision_digits'='null'::jsonb;
+    END IF;
+    IF p_coord_json IS NOT NULL THEN RETURN false; END IF;
+    IF x_extension.st_geometrytype(p_geometry) IS DISTINCT FROM 'ST_Point'
+       OR x_extension.st_srid(p_geometry)<>4326
+       OR x_extension.st_ndims(p_geometry)<>2
+       OR x_extension.st_isempty(p_geometry) THEN RETURN false; END IF;
+    IF NOT(x_extension.st_x(p_geometry) BETWEEN -180 AND 180)
+       OR NOT(x_extension.st_y(p_geometry) BETWEEN -90 AND 90) THEN RETURN false; END IF;
+    IF jsonb_typeof(p_base->'core.coord_precision_digits') IS DISTINCT FROM 'number' THEN
+        RETURN false;
+    END IF;
+    -- JSONB numeric의 binary 복사/scale/범위 검사를 text 직렬화보다 먼저 한다.
+    v_precision:=(p_base->'core.coord_precision_digits')::numeric;
+    IF scale(v_precision) IS DISTINCT FROM 0 OR v_precision<3 OR v_precision>8 THEN
+        RETURN false;
+    END IF;
+    -- 현재 공개 Airport converter의 유좌표 default6만 최초 subset으로 지원한다.
+    RETURN v_precision=6;
+END;
+$$;
+
+
+ALTER FUNCTION feature._transport_airport_evidence_shape(p_raw jsonb, p_base jsonb, p_coord_json jsonb, p_geometry x_extension.geometry) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: _validate_scoped_provider_geocode_stamps(uuid, uuid, text, text, jsonb, boolean); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -9751,6 +10581,386 @@ $$;
 
 
 ALTER FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
+-- Name: read_transport_airport_snapshot_evidence(bigint); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature.read_transport_airport_snapshot_evidence(p_dataset bigint) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    p_entities text[]; v_scope record; v_scope_count integer:=0;
+    v_scope_bytes bigint:=0; v_scope_refs jsonb:='[]';
+    v_inv jsonb; v_data jsonb:='{}'; v_rows jsonb; v_reason text;
+    v_key text; v_entity jsonb; v_link jsonb; v_feature jsonb; v_active jsonb;
+    v_policy jsonb; v_candidate jsonb; v_head jsonb; v_stamp jsonb; v_claim jsonb;
+    v_record jsonb; v_current_record jsonb; v_value_record jsonb; v_base_record jsonb;
+    v_row jsonb; v_name_base jsonb; v_base jsonb; v_base_rows jsonb; v_fields jsonb;
+    v_coord_json jsonb; v_geometry x_extension.geometry; v_base_key text;
+    v_items jsonb:='[]'; v_item jsonb; v_result jsonb; v_rank numeric;
+    v_epoch bigint; v_count integer; v_bytes bigint:=0;
+BEGIN
+    -- 요청 subset이 아니라 DB의 현재 dataset 전체 집합을 metadata부터 닫는다.
+    IF p_dataset IS NULL OR p_dataset<1 THEN
+        RAISE EXCEPTION 'invalid airport evidence dataset' USING ERRCODE='22023';
+    END IF;
+    IF EXISTS(SELECT 1 FROM pg_inherits
+              WHERE inhparent='provider_sync.source_entities'::regclass
+                 OR inhrelid='provider_sync.source_entities'::regclass)
+       OR EXISTS(SELECT 1 FROM pg_class
+                 WHERE oid='provider_sync.source_entities'::regclass AND relkind<>'r') THEN
+        RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,
+            'reason','scope_unsupported','dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+    END IF;
+    FOR v_scope IN
+        SELECT e.tableoid AS relation_oid,e.ctid AS row_tid,
+               feature._heritage_evidence_metadata_bytes(
+                   ARRAY[pg_column_size(e.source_entity_key)::bigint],
+                   ARRAY[pg_column_compression(e.source_entity_key) IS NOT NULL],
+                   ARRAY[128],ARRAY[false]) AS bytes
+        FROM provider_sync.source_entities e WHERE e.provider_dataset_id=p_dataset LIMIT 2731
+    LOOP
+        v_scope_count:=v_scope_count+1;
+        IF v_scope_count>2730 THEN
+            RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,
+                'reason','budget_exceeded','dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+        END IF;
+        IF v_scope.bytes<0 THEN
+            RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,
+                'reason','storage_unsupported','dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+        END IF;
+        v_scope_bytes:=v_scope_bytes+v_scope.bytes+256;
+        IF v_scope_bytes>262144 THEN
+            RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,
+                'reason','budget_exceeded','dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+        END IF;
+        -- 고정폭 물리 ref만 저장한다. key/배열/정렬은 global metadata 성공 뒤다.
+        v_scope_refs:=v_scope_refs||jsonb_build_array(jsonb_build_object(
+            'relation',v_scope.relation_oid,'tid',v_scope.row_tid::text));
+    END LOOP;
+    IF v_scope_count=0 THEN
+        RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,
+            'reason','empty_scope','dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+    END IF;
+    SELECT array_agg(e.source_entity_key ORDER BY e.source_entity_key COLLATE "C")
+      INTO p_entities FROM provider_sync.source_entities e
+      JOIN jsonb_to_recordset(v_scope_refs) AS r(relation oid,tid tid)
+        ON e.tableoid=r.relation AND e.ctid=r.tid;
+    IF cardinality(p_entities) IS DISTINCT FROM v_scope_count THEN
+        RAISE EXCEPTION 'airport physical scope changed within snapshot' USING ERRCODE='55000';
+    END IF;
+    -- DB에서 조립한 내부 key도 형식 위반이면 알려진 전체 거부다.
+    FOREACH v_key IN ARRAY p_entities LOOP
+        IF octet_length(v_key)<>67 OR v_key !~ '^se_[0-9a-f]{64}$' THEN
+            RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,
+                'reason','scope_unsupported','dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+        END IF;
+    END LOOP;
+    v_inv:=feature._transport_airport_evidence_inventory(p_dataset,p_entities);
+    IF (v_inv->>'metadata_complete')::boolean IS DISTINCT FROM true THEN
+        RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,
+            'reason',v_inv->'reason','dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+    END IF;
+    -- 전체 DB entity를 입력으로 삼으며 target 전부의 active/place/단일 primary를
+    -- 아래 targets 단계에서 검사한다. Heritage 전용 retire 술어를 재사용하지 않는다.
+    SELECT epoch INTO v_epoch FROM feature.provider_field_policy_epoch WHERE singleton;
+    IF v_epoch IS NULL THEN RAISE EXCEPTION 'missing policy epoch' USING ERRCODE='55000'; END IF;
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('provider_dataset_id',t.provider_dataset_id,'provider',t.provider,'dataset_key',t.dataset_key,'is_active',t.is_active)),'[]'::jsonb)
+      INTO v_rows FROM provider_sync.provider_datasets t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='provider_datasets';
+    v_data:=jsonb_set(v_data,ARRAY['provider_datasets'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('source_entity_key',t.source_entity_key,'source_entity_type',t.source_entity_type,'source_entity_id',t.source_entity_id,'provider_dataset_id',t.provider_dataset_id,'first_seen_at',t.first_seen_at,'last_seen_at',t.last_seen_at)),'[]'::jsonb)
+      INTO v_rows FROM provider_sync.source_entities t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='source_entities';
+    v_data:=jsonb_set(v_data,ARRAY['source_entities'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('source_entity_key',t.source_entity_key,'current_source_record_key',t.current_source_record_key,'lineage_key',t.lineage_key,'observed_at',t.observed_at,'expires_at',t.expires_at)),'[]'::jsonb)
+      INTO v_rows FROM provider_sync.source_entity_heads t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='source_entity_heads';
+    v_data:=jsonb_set(v_data,ARRAY['source_entity_heads'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('source_record_key',t.source_record_key,'source_entity_key',t.source_entity_key,'raw_payload_hash',t.raw_payload_hash,'raw_data',t.raw_data,'fetched_at',t.fetched_at,'imported_at',t.imported_at)),'[]'::jsonb)
+      INTO v_rows FROM provider_sync.source_records t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='source_records';
+    v_data:=jsonb_set(v_data,ARRAY['source_records'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('feature_id',t.feature_id,'source_entity_key',t.source_entity_key,'source_role',t.source_role)),'[]'::jsonb)
+      INTO v_rows FROM provider_sync.source_links t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='source_links';
+    v_data:=jsonb_set(v_data,ARRAY['source_links'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('feature_id',t.feature_id,'provider_dataset_id',t.provider_dataset_id,'feature_kind',t.feature_kind,'natural_key',t.natural_key)),'[]'::jsonb)
+      INTO v_rows FROM provider_sync.provider_feature_identities t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='provider_feature_identities';
+    v_data:=jsonb_set(v_data,ARRAY['provider_feature_identities'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('feature_id',t.feature_id,'kind',t.kind,'lifecycle_state',t.lifecycle_state,'publication_state',t.publication_state,'quality_state',t.quality_state,'row_revision',t.row_revision,'coord_precision_digits',t.coord_precision_digits,'geometry_ewkb',encode(x_extension.st_asewkb(t.coord,'NDR'),'hex'),'coord_sql_null',t.coord IS NULL,'address',t.address,'legal_dong_code',t.legal_dong_code,'road_name_code',t.road_name_code,'road_address_management_no',t.road_address_management_no,'admin_dong_code',t.admin_dong_code,'sido_code',t.sido_code,'sigungu_code',t.sigungu_code)),'[]'::jsonb)
+      INTO v_rows FROM feature.features t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='features';
+    v_data:=jsonb_set(v_data,ARRAY['features'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('feature_id',t.feature_id,'policy_revision',t.policy_revision,'field_paths',t.field_paths)),'[]'::jsonb)
+      INTO v_rows FROM feature.provider_field_active_policies t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='provider_field_active_policies';
+    v_data:=jsonb_set(v_data,ARRAY['provider_field_active_policies'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('provider_dataset_id',t.provider_dataset_id,'policy_revision',t.policy_revision,'normalizer_revision',t.normalizer_revision,'fields',t.fields)),'[]'::jsonb)
+      INTO v_rows FROM feature.provider_field_shadow_policies t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='provider_field_shadow_policies';
+    v_data:=jsonb_set(v_data,ARRAY['provider_field_shadow_policies'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('feature_id',t.feature_id,'policy_revision',t.policy_revision,'provider_dataset_id',t.provider_dataset_id,'field_path',t.field_path,'source_entity_key',t.source_entity_key,'value_source_record_key',t.value_source_record_key,'value_source_hash',t.value_source_hash,'validated_source_record_key',t.validated_source_record_key,'validated_source_hash',t.validated_source_hash,'value_json',t.value_json,'availability',t.availability,'reason',t.reason,'value_observed_at',t.value_observed_at,'validated_at',t.validated_at,'normalizer_revision',t.normalizer_revision,'value_json_sql_null',t.value_json IS NULL,'value_geometry_sql_null',t.value_geometry IS NULL,'geometry_ewkb',encode(x_extension.st_asewkb(t.value_geometry,'NDR'),'hex'))),'[]'::jsonb)
+      INTO v_rows FROM feature.provider_field_shadow_candidates t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='provider_field_shadow_candidates';
+    v_data:=jsonb_set(v_data,ARRAY['provider_field_shadow_candidates'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('feature_id',t.feature_id,'field_path',t.field_path,'provider_dataset_id',t.provider_dataset_id,'source_entity_key',t.source_entity_key,'source_record_key',t.source_record_key,'source_raw_payload_hash',t.source_raw_payload_hash,'value_json',t.value_json,'base_revision',t.base_revision,'observed_at',t.observed_at,'value_json_sql_null',t.value_json IS NULL,'value_geometry_sql_null',t.value_geometry IS NULL,'geometry_ewkb',encode(x_extension.st_asewkb(t.value_geometry,'NDR'),'hex'))),'[]'::jsonb)
+      INTO v_rows FROM feature.feature_base_field_values t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='feature_base_field_values';
+    v_data:=jsonb_set(v_data,ARRAY['feature_base_field_values'],v_rows);
+    -- 이 bulk는 모든 관계 metadata 합계가 성공한 뒤에만 실행한다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object('feature_id',t.feature_id,'geo_version_token',t.geo_version_token,'geo_data_token',t.geo_data_token,'reverse_outcome',t.reverse_outcome,'stamped_at',t.stamped_at)),'[]'::jsonb)
+      INTO v_rows FROM feature.feature_geocode_stamps t
+      JOIN jsonb_to_recordset(v_inv->'refs') AS r(relation oid,tid tid,kind text)
+        ON t.tableoid=r.relation AND t.ctid=r.tid
+      WHERE r.kind='feature_geocode_stamps';
+    v_data:=jsonb_set(v_data,ARRAY['feature_geocode_stamps'],v_rows);
+    <<targets>>
+    FOREACH v_key IN ARRAY p_entities LOOP
+        v_reason:=NULL;
+        SELECT x INTO v_entity FROM jsonb_array_elements(v_data->'source_entities') x
+          WHERE x->>'source_entity_key'=v_key;
+        SELECT x INTO v_head FROM jsonb_array_elements(v_data->'source_entity_heads') x
+          WHERE x->>'source_entity_key'=v_key;
+        IF (SELECT count(*) FROM jsonb_array_elements(v_data->'source_links') x WHERE x->>'source_entity_key'=v_key)<>1 THEN
+            v_reason:='unsupported_membership'; EXIT targets;
+        END IF;
+        SELECT x INTO v_link FROM jsonb_array_elements(v_data->'source_links') x
+          WHERE x->>'source_entity_key'=v_key;
+        IF v_entity IS NULL OR v_head IS NULL OR v_link IS NULL THEN
+            v_reason:='missing_source'; EXIT targets;
+        END IF;
+        SELECT x INTO v_feature FROM jsonb_array_elements(v_data->'features') x
+          WHERE x->'feature_id'=v_link->'feature_id';
+        IF v_feature IS NULL OR v_feature->>'kind' IS DISTINCT FROM 'place'
+           OR v_feature->>'lifecycle_state' IS DISTINCT FROM 'active' THEN
+            v_reason:='inactive_feature'; EXIT targets;
+        END IF;
+        SELECT x INTO v_active FROM jsonb_array_elements(v_data->'provider_field_active_policies') x
+          WHERE x->'feature_id'=v_link->'feature_id';
+        IF v_active IS NULL OR v_active->'field_paths' IS DISTINCT FROM '["core.name"]'::jsonb THEN
+            v_reason:='policy_unsupported'; EXIT targets;
+        END IF;
+        SELECT x INTO v_policy FROM jsonb_array_elements(v_data->'provider_field_shadow_policies') x
+          WHERE x->'policy_revision'=v_active->'policy_revision';
+        IF v_policy IS NULL OR v_policy->>'normalizer_revision' IS DISTINCT FROM 'transport-airport-name-v1'
+           OR jsonb_typeof(v_policy->'fields') IS DISTINCT FROM 'array' THEN
+            v_reason:='policy_unsupported'; EXIT targets;
+        END IF;
+        IF jsonb_array_length(v_policy->'fields')<>1 THEN
+            v_reason:='policy_unsupported'; EXIT targets;
+        END IF;
+        v_fields:=v_policy->'fields'->0;
+        IF jsonb_typeof(v_fields) IS DISTINCT FROM 'object' THEN
+            v_reason:='policy_unsupported'; EXIT targets;
+        END IF;
+        IF (SELECT count(*) FROM jsonb_object_keys(v_fields))<>4
+           OR v_fields->>'field_path' IS DISTINCT FROM 'core.name'
+           OR v_fields->>'omitted_policy' IS DISTINCT FROM 'carry_forward'
+           OR v_fields->>'null_policy' IS DISTINCT FROM 'value'
+           OR jsonb_typeof(v_fields->'provider_rank') IS DISTINCT FROM 'number' THEN
+            v_reason:='policy_unsupported'; EXIT targets;
+        END IF;
+        -- numeric text 변환 전에 binary numeric의 scale/범위를 닫는다.
+        v_rank:=(v_fields->'provider_rank')::numeric;
+        IF scale(v_rank)<>0 OR v_rank<0 OR v_rank>2147483647 THEN
+            v_reason:='policy_unsupported'; EXIT targets;
+        END IF;
+        IF (SELECT count(*) FROM jsonb_array_elements(v_data->'provider_field_shadow_candidates') x WHERE x->'feature_id'=v_link->'feature_id' AND x->'policy_revision'=v_active->'policy_revision')<>1 THEN
+            v_reason:='policy_unsupported'; EXIT targets;
+        END IF;
+        SELECT x INTO v_candidate FROM jsonb_array_elements(v_data->'provider_field_shadow_candidates') x
+          WHERE x->'feature_id'=v_link->'feature_id' AND x->'policy_revision'=v_active->'policy_revision';
+        IF v_candidate IS NULL OR v_candidate->>'field_path' IS DISTINCT FROM 'core.name'
+           OR v_candidate->>'source_entity_key' IS DISTINCT FROM v_key
+           OR v_candidate->'provider_dataset_id' IS DISTINCT FROM to_jsonb(p_dataset)
+           OR v_candidate->>'normalizer_revision' IS DISTINCT FROM 'transport-airport-name-v1'
+           OR v_candidate->>'availability' IS DISTINCT FROM 'value'
+           OR v_candidate->>'reason' NOT IN ('supplied','omitted_carry')
+           OR v_candidate->'value_geometry_sql_null' IS DISTINCT FROM 'true'::jsonb
+           OR v_candidate->'value_json_sql_null' IS DISTINCT FROM 'false'::jsonb
+           OR jsonb_typeof(v_candidate->'value_json') IS DISTINCT FROM 'string'
+           OR v_head->'expires_at' IS DISTINCT FROM 'null'::jsonb THEN
+            v_reason:='lineage_incomplete'; EXIT targets;
+        END IF;
+        SELECT x INTO v_current_record FROM jsonb_array_elements(v_data->'source_records') x
+          WHERE x->'source_record_key'=v_head->'current_source_record_key';
+        SELECT x INTO v_value_record FROM jsonb_array_elements(v_data->'source_records') x
+          WHERE x->'source_record_key'=v_candidate->'value_source_record_key';
+        IF v_current_record IS NULL OR v_value_record IS NULL
+           OR v_current_record->>'source_entity_key' IS DISTINCT FROM v_key
+           OR v_value_record->>'source_entity_key' IS DISTINCT FROM v_key
+           OR v_candidate->'validated_source_record_key' IS DISTINCT FROM v_current_record->'source_record_key'
+           OR v_candidate->'validated_source_hash' IS DISTINCT FROM v_current_record->'raw_payload_hash'
+           OR v_candidate->'value_source_hash' IS DISTINCT FROM v_value_record->'raw_payload_hash'
+           OR v_candidate->'validated_at' IS DISTINCT FROM v_head->'observed_at'
+           OR v_candidate->'value_observed_at' IS DISTINCT FROM v_value_record->'fetched_at' THEN
+            v_reason:='lineage_incomplete'; EXIT targets;
+        END IF;
+        IF (SELECT count(*) FROM jsonb_array_elements(v_data->'provider_feature_identities') x WHERE x->'feature_id'=v_link->'feature_id')<>1 THEN
+            v_reason:='lineage_incomplete'; EXIT targets;
+        END IF;
+        SELECT x INTO v_claim FROM jsonb_array_elements(v_data->'provider_feature_identities') x
+          WHERE x->'feature_id'=v_link->'feature_id';
+        IF v_claim IS NULL OR v_claim->>'feature_kind' IS DISTINCT FROM 'place'
+           OR v_claim->'provider_dataset_id' IS DISTINCT FROM to_jsonb(p_dataset)
+           OR v_claim->'natural_key' IS DISTINCT FROM v_entity->'source_entity_id' THEN
+            v_reason:='lineage_incomplete'; EXIT targets;
+        END IF;
+        v_base:='{}'; v_base_rows:='[]'; v_base_key:=NULL; v_name_base:=NULL;
+        v_coord_json:=NULL; v_geometry:=NULL; v_count:=0;
+        FOR v_row IN SELECT x FROM jsonb_array_elements(v_data->'feature_base_field_values') x
+          WHERE x->'feature_id'=v_link->'feature_id'
+        LOOP
+            v_count:=v_count+1;
+            IF v_row->'provider_dataset_id' IS DISTINCT FROM to_jsonb(p_dataset)
+               OR v_row->>'source_entity_key' IS DISTINCT FROM v_key THEN
+                v_reason:='lineage_incomplete'; EXIT targets;
+            END IF;
+            IF v_row->>'field_path'='core.name' THEN
+                IF v_row->'source_record_key' IS DISTINCT FROM v_candidate->'value_source_record_key'
+                   OR v_row->'source_raw_payload_hash' IS DISTINCT FROM v_candidate->'value_source_hash'
+                   OR v_row->'value_json' IS DISTINCT FROM v_candidate->'value_json'
+                   OR v_row->'value_json_sql_null' IS DISTINCT FROM 'false'::jsonb
+                   OR v_row->'value_geometry_sql_null' IS DISTINCT FROM 'true'::jsonb THEN
+                    v_reason:='lineage_incomplete'; EXIT targets;
+                END IF;
+                v_name_base:=v_row;
+                CONTINUE;
+            END IF;
+            IF v_base_key IS NULL THEN v_base_key:=v_row->>'source_record_key'; END IF;
+            IF v_row->>'source_record_key' IS DISTINCT FROM v_base_key THEN
+                v_reason:='mixed_base_lineage'; EXIT targets;
+            END IF;
+            IF v_row->>'field_path'='core.coord' THEN
+                IF v_row->'value_json_sql_null'='true'::jsonb THEN
+                    IF v_row->'value_geometry_sql_null' IS DISTINCT FROM 'false'::jsonb THEN
+                        v_reason:='shape_unsupported'; EXIT targets;
+                    END IF;
+                    v_geometry:=x_extension.st_geomfromewkb(decode(v_row->>'geometry_ewkb','hex'));
+                ELSE
+                    IF v_row->'value_geometry_sql_null' IS DISTINCT FROM 'true'::jsonb THEN
+                        v_reason:='shape_unsupported'; EXIT targets;
+                    END IF;
+                    v_coord_json:=v_row->'value_json';
+                END IF;
+            ELSE
+                IF v_row->'value_json_sql_null' IS DISTINCT FROM 'false'::jsonb
+                   OR v_row->'value_geometry_sql_null' IS DISTINCT FROM 'true'::jsonb
+                   OR v_base ? (v_row->>'field_path') THEN
+                    v_reason:='shape_unsupported'; EXIT targets;
+                END IF;
+                v_base:=v_base||jsonb_build_object(v_row->>'field_path',v_row->'value_json');
+            END IF;
+            v_base_rows:=v_base_rows||jsonb_build_array(v_row);
+        END LOOP;
+        IF v_count<>25 OR jsonb_array_length(v_base_rows)<>24 OR v_base_key IS NULL THEN
+            v_reason:='lineage_incomplete'; EXIT targets;
+        END IF;
+        SELECT x INTO v_base_record FROM jsonb_array_elements(v_data->'source_records') x
+          WHERE x->>'source_record_key'=v_base_key;
+        IF v_base_record IS NULL OR v_base_record->>'source_entity_key' IS DISTINCT FROM v_key THEN
+            v_reason:='lineage_incomplete'; EXIT targets;
+        END IF;
+        FOR v_row IN SELECT x FROM jsonb_array_elements(v_base_rows) x LOOP
+            IF v_row->'source_raw_payload_hash' IS DISTINCT FROM v_base_record->'raw_payload_hash' THEN
+                v_reason:='lineage_incomplete'; EXIT targets;
+            END IF;
+        END LOOP;
+        IF feature._transport_airport_evidence_shape(v_base_record->'raw_data',v_base,v_coord_json,v_geometry)
+                IS DISTINCT FROM true
+           OR feature._heritage_evidence_string_object(v_current_record->'raw_data',ARRAY[
+                'code','name_korean','name_english','icao_code','municipality','latitude','longitude']) IS DISTINCT FROM true
+           OR feature._heritage_evidence_string_object(v_value_record->'raw_data',ARRAY[
+                'code','name_korean','name_english','icao_code','municipality','latitude','longitude']) IS DISTINCT FROM true THEN
+            v_reason:='shape_unsupported'; EXIT targets;
+        END IF;
+        -- provider base와 실제 materialized Geo를 혼동하여 재사용하지 않는다.
+        IF feature._heritage_evidence_string_object(v_feature->'address',ARRAY[
+            'road','legal','admin','bjd_code','admin_dong_code','sigungu_code','sido_code',
+            'road_name_code','road_address_management_no','zipcode','sido_name','sigungu_name'
+        ]) IS DISTINCT FROM true THEN
+            v_reason:='geo_evidence_unsupported'; EXIT targets;
+        END IF;
+        IF v_feature->'address' IS DISTINCT FROM v_base->'core.address'
+           OR v_feature->'coord_precision_digits' IS DISTINCT FROM v_base->'core.coord_precision_digits'
+           OR v_feature->'legal_dong_code' IS DISTINCT FROM v_base->'core.legal_dong_code'
+           OR v_feature->'road_name_code' IS DISTINCT FROM v_base->'core.road_name_code'
+           OR v_feature->'road_address_management_no' IS DISTINCT FROM v_base->'core.road_address_management_no'
+           OR v_feature->'admin_dong_code' IS DISTINCT FROM v_base->'core.admin_dong_code'
+           OR v_feature->'sido_code' IS DISTINCT FROM v_base->'core.sido_code'
+           OR v_feature->'sigungu_code' IS DISTINCT FROM v_base->'core.sigungu_code'
+           OR (v_feature->'coord_sql_null'='true'::jsonb) IS DISTINCT FROM (v_geometry IS NULL)
+           OR v_feature->>'geometry_ewkb' IS DISTINCT FROM encode(x_extension.st_asewkb(v_geometry,'NDR'),'hex') THEN
+            v_reason:='geo_evidence_unsupported'; EXIT targets;
+        END IF;
+        SELECT x INTO v_stamp FROM jsonb_array_elements(v_data->'feature_geocode_stamps') x
+          WHERE x->'feature_id'=v_link->'feature_id';
+        v_item:=jsonb_build_object('source_entity',v_entity,'source_head',v_head,
+            'feature',v_feature,'claim',v_claim,'membership',v_link,'active_policy',v_active,
+            'policy',v_policy,'name_candidate',v_candidate,'name_base',v_name_base,'non_name_base',v_base_rows,
+            'base_record',v_base_record,'name_value_record',v_value_record,
+            'current_record',v_current_record,'geocode_stamp',v_stamp);
+        -- 여기까지 허용된 numeric은 작은 고정 정수뿐이다.
+        IF octet_length(convert_to(v_item::text,'UTF8'))>131072 THEN
+            v_reason:='budget_exceeded'; EXIT targets;
+        END IF;
+        v_bytes:=v_bytes+octet_length(convert_to(v_item::text,'UTF8'));
+        IF v_bytes>1040000 THEN v_reason:='budget_exceeded'; EXIT targets; END IF;
+        v_items:=v_items||jsonb_build_array(v_item);
+    END LOOP targets;
+    IF v_reason IS NOT NULL THEN
+        RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,'reason',v_reason,
+            'dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+    END IF;
+    v_result:=jsonb_build_object('version',1,'evidence_complete',true,'db_scope_eof',true,'reason',NULL,
+        'dataset_id',p_dataset,'policy_epoch',v_epoch,'items',v_items);
+    IF octet_length(convert_to(v_result::text,'UTF8'))>1048576 THEN
+        RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,'reason','budget_exceeded',
+            'dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
+    END IF;
+    RETURN v_result;
+END;
+$_$;
+
+
+ALTER FUNCTION feature.read_transport_airport_snapshot_evidence(p_dataset bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: reclassify_curation_quarantine_command(uuid, bigint, text, uuid, bigint, uuid[], text, text, bigint, text); Type: PROCEDURE; Schema: feature; Owner: ktm_curation_command_owner
@@ -19087,7 +20297,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -24605,6 +25815,39 @@ CREATE INDEX idx_source_records_imported_at_brin ON provider_sync.source_records
 
 
 --
+-- Name: ix_source_entity_heads_bounded_evidence_key; Type: INDEX; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX ix_source_entity_heads_bounded_evidence_key ON provider_sync.source_entity_heads USING btree ((
+CASE
+    WHEN (octet_length(source_entity_key) <= 256) THEN source_entity_key
+    ELSE NULL::text
+END));
+
+
+--
+-- Name: ix_source_links_bounded_evidence_key; Type: INDEX; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX ix_source_links_bounded_evidence_key ON provider_sync.source_links USING btree ((
+CASE
+    WHEN (octet_length(source_entity_key) <= 256) THEN source_entity_key
+    ELSE NULL::text
+END));
+
+
+--
+-- Name: ix_source_records_bounded_evidence_key; Type: INDEX; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX ix_source_records_bounded_evidence_key ON provider_sync.source_records USING btree ((
+CASE
+    WHEN (octet_length((source_record_key)::text) <= 256) THEN (source_record_key)::text
+    ELSE NULL::text
+END));
+
+
+--
 -- Name: curated_source_rules trg_curated_source_rules_active_dataset_write; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -27828,6 +29071,21 @@ REVOKE ALL ON FUNCTION feature._assert_stamp_projection_guard_inventory(p_bounda
 
 
 --
+-- Name: FUNCTION _bounded_curation_string_object(p_value jsonb); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature._bounded_curation_string_object(p_value jsonb) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _bounded_provider_curation_input_set(p_provider_dataset_id bigint); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature._bounded_provider_curation_input_set(p_provider_dataset_id bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._bounded_provider_curation_input_set(p_provider_dataset_id bigint) TO ktm_curation_command_owner;
+
+
+--
 -- Name: FUNCTION _exclusive_provider_refresh_context(p_feature uuid, p_dataset bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -27846,6 +29104,7 @@ REVOKE ALL ON FUNCTION feature._heritage_evidence_inventory(p_dataset bigint, p_
 --
 
 REVOKE ALL ON FUNCTION feature._heritage_evidence_metadata_bytes(p_sizes bigint[], p_compressed boolean[], p_caps integer[], p_nullable boolean[]) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._heritage_evidence_metadata_bytes(p_sizes bigint[], p_compressed boolean[], p_caps integer[], p_nullable boolean[]) TO ktm_feature_schema_owner;
 
 
 --
@@ -27898,6 +29157,20 @@ GRANT ALL ON FUNCTION feature._provider_field_projection_dependency_active(p_rel
 --
 
 REVOKE ALL ON PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _transport_airport_evidence_inventory(p_dataset bigint, p_entities text[]); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._transport_airport_evidence_inventory(p_dataset bigint, p_entities text[]) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _transport_airport_evidence_shape(p_raw jsonb, p_base jsonb, p_coord_json jsonb, p_geometry x_extension.geometry); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._transport_airport_evidence_shape(p_raw jsonb, p_base jsonb, p_coord_json jsonb, p_geometry x_extension.geometry) FROM PUBLIC;
 
 
 --
@@ -28437,6 +29710,14 @@ GRANT ALL ON FUNCTION feature.read_heritage_name_refresh_evidence(p_dataset bigi
 
 REVOKE ALL ON FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION feature.read_manual_provider_dedup_case(p_case_id uuid) TO ktm_manual_provider_dedup_admin_executor;
+
+
+--
+-- Name: FUNCTION read_transport_airport_snapshot_evidence(p_dataset bigint); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature.read_transport_airport_snapshot_evidence(p_dataset bigint) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature.read_transport_airport_snapshot_evidence(p_dataset bigint) TO ktm_feature_runtime;
 
 
 --

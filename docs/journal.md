@@ -1,6 +1,6 @@
 ## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
 
-설계 두 검토와 migration 단위16 PASS를 확인했다. 두 source P2를 보강 중이다. 논리 CASE 조회/제한 hash fold·sameDS seed로 바꾸고 단위36 PASS, 통합37 수집만 확인했다. 427을 상속하고 권한 실행 역할 P2를 수정했다. 실제 PG16.14에서34 PASS/3 FAIL을 확인했고 시험 bind·deferred head rollback·이력 unique/object fixture를 정정했다. 공식 oracle/CI·SH 연결은 미완이다. [범위·예산·남은 검증](reports/2026-10-25-bounded-curation-capture.md).
+실제 PG16.14에서 통합37 PASS/15.798초, fresh bootstrap 공식 oracle1 PASS/22.897초를 확인했다. 덤프를 갱신했으며 기존 실패와 시험 수정 기록을 보존한다. 최종 source 두 검토·CI, SH/RC/복구 연결과 운영 배포는 미완이다. [범위·예산·검증](reports/2026-10-25-bounded-curation-capture.md).
 
 ## 2026-10-25 공항427 key/index 보강
 
