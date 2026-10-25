@@ -297,10 +297,13 @@ def _discard_exact_backend(backend: _CoordinatorBackend, cause: BaseException) -
     """원 driver를 종료하고 pool slot을 회수한다. 새 backend로 reconnect하지 않는다."""
     if backend.discarded:
         return
-    if (
-        backend.pool_proxy.driver_connection is not backend.driver
-        and not backend.driver.is_closed()
-    ):
+    current_driver = backend.pool_proxy.driver_connection
+    owned_live_proxy = current_driver is backend.driver and not backend.connection.closed
+    interrupted_invalidation = (
+        current_driver is None and backend.connection.invalidated and not backend.connection.closed
+    )
+    if not (owned_live_proxy or interrupted_invalidation):
+        # 정상 반환된 proxy나 다른 checkout의 driver는 원 driver가 닫혔어도 건드리지 않는다.
         raise PipelineCancellationUnsafe("physical cancellation backend ownership was released")
     backend.discarded = True
     failures: list[BaseException] = []
@@ -321,7 +324,9 @@ def _discard_exact_backend(backend: _CoordinatorBackend, cause: BaseException) -
     ):
         try:
             if target is backend.pool_proxy:
-                target.invalidate(cause, soft=False)
+                # SQLAlchemy가 취소 중 이미 비운 proxy는 record를 다시 건드리지 않는다.
+                if target.dbapi_connection is not None:
+                    target.invalidate(cause, soft=False)
             elif action == "invalidate":
                 target.invalidate(cause)
             else:
@@ -552,10 +557,14 @@ async def _release_coordinator_lease(
             await _hard_invalidate_connection(
                 backend, cause=original_error or PipelineCancellationUnsafe("backend invalidated")
             )
-        except BaseException:
+        except BaseException as cleanup_error:
             if not isinstance(original_error, asyncio.CancelledError):
                 raise
-            _LOG.error("pipeline cancellation cleanup failed; original caller cancel retained")
+            _LOG.error(
+                "pipeline cancellation cleanup failed; original caller cancel retained: "
+                "error_type=%s",
+                type(cleanup_error).__name__,
+            )
         if not isinstance(original_error, asyncio.CancelledError):
             raise PipelineCancellationDatabaseUnavailable(
                 "cancellation backend was invalidated during coordination",

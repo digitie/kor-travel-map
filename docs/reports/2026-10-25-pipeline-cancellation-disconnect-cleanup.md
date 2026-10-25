@@ -53,11 +53,12 @@ server 종료 확인은 별도의 readback 결과로만 인정한다.
 
 ## 검증 상태
 
-순수 단위 41개 PASS, Ruff 대상 5파일 및 mypy 제품 2파일 PASS를 확인했다.
+순수 단위 45개 PASS, Ruff 대상 5파일 및 mypy 제품 2파일 PASS를 확인했다.
 실제 task/P 대기 원 단언은 바꾸지 않았다. 추가 integration은 실제 K 성공+commit 뒤
 반환 전 barrier에서 caller를 취소해 root/attempt 불변, server advisory 0, pool 1의 새
-checkout, fresh/replay 200을 요구한다. 현재 두 integration은 collect-only이며 제품 후보의
-실제 PG 결과는 없다. source 두 독립 리뷰와 별도 owned 실행 승인 뒤 수용한다.
+checkout, fresh/replay 200을 요구한다. b0b91 제품 후보의 실제 두 integration은
+1FAIL/1PASS였다. 아래 수정의 실제 PG는 아직 미실행이며 두 독립 리뷰·새 바인딩과
+별도 owned 실행 승인 뒤 수용한다.
 
 OpenAPI는 동일 환경에서 parent export와 candidate export를 각각 비교했다. Pydantic
 2.14.1의 Decimal anyOf 세 곳은 parent에서도 tracked와 달라지는 baseline drift다.
@@ -80,3 +81,27 @@ Root의 순수 재현에서 정상 GUC 복원 중 새 CancelledError가 나면 �
 실패와 timeout에서 creator finally/pool checkedout 0/새 task 없음도 확인한다. 반복 AnyIO
 level 취소, 미확정 cleanup latch와 rollback 뒤 정상 continuation을 별도로 확인한다.
 이 주입은 실제 asyncpg connect/drain이나 network blackhole의 hard 상한을 증명하지 않는다.
+
+
+## 첫 제품 실행과 interrupted invalidation 보강
+
+b0b91 owned 실행의 K real-commit-gap은 1.104초 PASS다. P 대기는 최초 단언에서
+old PID118 advisory 2행 때문에 FAIL이고, 그 case의 fresh/replay는 도달하지 않았다.
+전체 XML은 1FAIL/1PASS·14.822초(console 15.55초)이며 소유 PG 정리는 통과했다. cleanup 로그의 confirmed=false/
+elapsed=0만으로 원래 예외의 종류를 확정하지 않는다. 원 FAIL 및 성공 case는 분리 보존한다.
+
+별도 순수 재현에서 실제 SQLAlchemy QueuePool/Connection과 SQLite DBAPI를 사용했다.
+do_terminate의 native close 앞에 CancelledError를 주입하면 connection은 invalidated=true/
+closed=false, captured proxy의 driver/dbapi는 None인데 원 native는 열린 상태가 된다.
+기존 소유권 검사는 이를 거부해 캡처한 원 native도 종료하지 않았다. 이 재현은 실제 PG
+실패의 가능한 분기이며 원 실행의 원인을 직접 소급 확정하는 증거는 아니다.
+
+새 검사는 None를 원 Connection의 invalidated && !closed 상태에서만 허용한다.
+다른 nonnull driver는 원 driver가 이미 닫혔어도 항상 거부한다. 정상 반환된 연결·raw
+proxy를 같은 native로 재checkout한 실제 SQLAlchemy 회귀에서도 다음 소유자의 연결을
+종료하거나 invalidate하지 않는다. 이미 dbapi가 비워진 proxy의 invalidate는 생략한다.
+late connection.connection 조회·새 backend unlock은 추가하지 않았다.
+
+기존41개에 이 interrupted-invalidation, 정상/raw 반환 후 실제 same-native recheckout,
+닫힌 원 driver와 다른 현 driver를 구분하는 4회귀를 더해 순수45개가 PASS했다.
+원 35초/3초/zero-row 단언은 그대로다. 수정 뒤 PG 재실행 결과는 아직 없다.

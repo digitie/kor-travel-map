@@ -55,6 +55,7 @@ class Connection:
         self.commands = []
         self.proxy = SimpleNamespace(
             driver_connection=driver,
+            dbapi_connection=driver,
             invalidate=self.invalidate,
         )
         self.sync_connection = SimpleNamespace(
@@ -71,6 +72,7 @@ class Connection:
     def invalidate(self, *_args, **_kwargs):
         self.invalidated = True
         self.proxy.driver_connection = None
+        self.proxy.dbapi_connection = None
 
     def close_sync(self):
         self.closed = True
@@ -272,13 +274,16 @@ async def test_invalidated_connection_never_reconnects_or_sends_unlock(monkeypat
     assert backend.termination_confirmed
 
 
-def test_released_proxy_cannot_terminate_another_checkout():
+@pytest.mark.parametrize("original_closed", [False, True])
+def test_released_proxy_cannot_terminate_another_checkout(original_closed):
     connection = Connection(Driver(10))
     backend = _backend(connection, None)
     connection.proxy.driver_connection = Driver(99)
+    if original_closed:
+        backend.driver.terminate()
     with pytest.raises(service.PipelineCancellationUnsafe, match="ownership"):
         service._discard_exact_backend(backend, RuntimeError("cancel"))
-    assert not backend.driver.closed
+    assert backend.driver.closed is original_closed
     assert not connection.proxy.driver_connection.closed
 
 
@@ -584,3 +589,116 @@ async def test_original_caller_cancel_wins_over_new_cleanup_cancel(monkeypatch):
         await caller()
     assert raised.value is primary
     assert original.driver.closed
+
+
+class _SqliteNative:
+    """실 SQLAlchemy ownership 상태 검증용 DBAPI; PostgreSQL/네트워크 호출 없음."""
+
+    def __init__(self):
+        import sqlite3
+
+        self.connection = sqlite3.connect(":memory:")
+        self.closed = False
+        self.terminations = 0
+
+    def __getattr__(self, name):
+        return getattr(self.connection, name)
+
+    def is_closed(self):
+        return self.closed
+
+    def close(self):
+        self.connection.close()
+        self.closed = True
+
+    def terminate(self):
+        self.terminations += 1
+        self.close()
+
+
+class _SyncConnectionState:
+    def __init__(self, connection):
+        self.sync_connection = connection
+
+    @property
+    def closed(self):
+        return self.sync_connection.closed
+
+    @property
+    def invalidated(self):
+        return self.sync_connection.invalidated
+
+
+def _sqlite_pool():
+    from sqlalchemy import create_engine
+    from sqlalchemy.pool import QueuePool
+
+    return create_engine(
+        "sqlite://",
+        creator=_SqliteNative,
+        poolclass=QueuePool,
+        pool_size=1,
+        max_overflow=0,
+    )
+
+
+def test_sqlalchemy_interrupted_invalidation_can_terminate_captured_detached_native(monkeypatch):
+    engine = _sqlite_pool()
+    connection = engine.connect()
+    proxy = connection.connection
+    native = proxy.driver_connection
+    backend = service._CoordinatorBackend(_SyncConnectionState(connection), None, proxy, native, 1)
+
+    def interrupt_before_close(_driver):
+        raise asyncio.CancelledError("injected before native close")
+
+    monkeypatch.setattr(engine.dialect, "do_terminate", interrupt_before_close)
+    try:
+        with pytest.raises(asyncio.CancelledError):
+            connection.invalidate()
+        # 실 SQLAlchemy invalidate finally의 상태: native close 미완이어도 proxy는 이미 비운다.
+        assert connection.invalidated
+        assert not connection.closed
+        assert proxy.driver_connection is None
+        assert proxy.dbapi_connection is None
+        assert not native.closed
+        assert engine.pool.checkedout() == 0
+
+        service._discard_exact_backend(backend, RuntimeError("caller cancel"))
+        assert native.closed
+        assert native.terminations == 1
+        assert connection.closed
+        assert engine.pool.checkedout() == 0
+    finally:
+        if not native.closed:
+            native.close()
+        connection.close()
+        engine.dispose()
+
+
+@pytest.mark.parametrize("return_path", ["connection_close", "raw_proxy_close"])
+def test_sqlalchemy_normal_return_same_native_recheckout_is_protected(return_path):
+    engine = _sqlite_pool()
+    connection = engine.connect()
+    proxy = connection.connection
+    native = proxy.driver_connection
+    backend = service._CoordinatorBackend(_SyncConnectionState(connection), None, proxy, native, 1)
+    try:
+        if return_path == "connection_close":
+            connection.close()
+        else:
+            proxy.close()
+        with engine.connect() as next_checkout:
+            assert next_checkout.connection.driver_connection is native
+            assert not native.closed
+            assert proxy.driver_connection is None
+            assert not connection.invalidated
+            with pytest.raises(service.PipelineCancellationUnsafe, match="ownership"):
+                service._discard_exact_backend(backend, RuntimeError("late old caller"))
+            assert native.terminations == 0
+            assert not native.closed
+            assert engine.pool.checkedout() == 1
+        assert engine.pool.checkedout() == 0
+    finally:
+        connection.close()
+        engine.dispose()
