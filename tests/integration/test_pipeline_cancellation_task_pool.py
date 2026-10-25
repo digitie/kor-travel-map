@@ -353,3 +353,136 @@ async def test_task_cancel_during_actual_k_then_p_wait_releases_pool_and_replays
             if primary is None:
                 raise
             primary.add_note(f"test cleanup also failed: {type(cleanup_error).__name__}")
+
+
+async def test_cancel_after_real_k_commit_before_return_closes_unknown_lease(
+    scalar_engines, monkeypatch, request
+):
+    """원 helper의 실제 K+commit 뒤 await barrier에서 caller 취소를 전달한다."""
+    admin, fixture_runtime = scalar_engines
+    runtime = make_async_engine(
+        fixture_runtime.url.render_as_string(hide_password=False),
+        pool_size=1,
+        max_overflow=0,
+        server_settings={
+            "lock_timeout": "3s",
+            "statement_timeout": "5s",
+            "idle_in_transaction_session_timeout": "5s",
+        },
+    )
+    task = None
+    acquired = asyncio.Event()
+    never_release = asyncio.Event()
+    observed_pids = set()
+    outbound_calls = []
+    original_acquire = service._acquire_coordinator_lease
+    barrier_used = False
+
+    async def after_real_commit(session, *, lease_key):
+        nonlocal barrier_used
+        result = await original_acquire(session, lease_key=lease_key)
+        if result and not barrier_used:
+            barrier_used = True
+            assert not session.in_transaction()
+            backend = service._session_backend(session)
+            assert backend is not None
+            observed_pids.add(int(backend.driver.get_server_pid()))
+            acquired.set()
+            # 이 시험 await는 원 helper 완료 뒤 caller의 acquired 대입 전에만 추가한다.
+            await never_release.wait()
+        return result
+
+    async def reject_network(call):
+        outbound_calls.append(call.method)
+        raise AssertionError("queued cancellation must not make external HTTP requests")
+
+    try:
+        await assert_runtime_db_privilege_boundary(runtime, expected_login="ktm_feature_service")
+        async with AsyncSession(runtime) as session, session.begin():
+            queued = await enqueue_unpaired_import_job(
+                session, kind="provider_load", payload={"isolated_k_unknown_probe": True}
+            )
+        job_id = queued.job_id
+        before = await _state(admin, job_id)
+        assert before[0][0] == "queued"
+        assert before[1] == 0
+        credential = uuid4().hex + uuid4().hex
+        app = create_app(
+            ApiSettings(
+                admin_proxy_secret=credential, public_api_key_required=False, vworld_api_key=None
+            )
+        )
+        monkeypatch.setattr(api_db, "_get_engine", lambda: runtime)
+        monkeypatch.setattr(service, "_acquire_coordinator_lease", after_real_commit)
+        headers = {
+            "X-Kor-Travel-Map-Admin-Proxy-Secret": credential,
+            "X-Kor-Travel-Map-Actor": "admin:k-unknown-lab-" + uuid4().hex,
+        }
+        path = f"/v1/ops/pipeline/executions/import_job/{job_id}/cancel"
+        async with httpx.AsyncClient(transport=httpx.MockTransport(reject_network)) as outbound:
+            monkeypatch.setattr(
+                dagster_http, "http_client_from_request", lambda request, settings: outbound
+            )
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app, raise_app_exceptions=False),
+                base_url="http://test",
+            ) as client:
+                task = asyncio.create_task(
+                    client.post(path, headers=headers, json={"reason": "isolated_k_unknown"}),
+                    name="owned-api-task-cancel-after-k-commit",
+                )
+                await asyncio.wait_for(acquired.wait(), 3)
+                assert not task.done()
+                assert await _state(admin, job_id) == before
+                task.cancel("owned-api-k-commit-unknown")
+                with pytest.raises(asyncio.CancelledError):
+                    await asyncio.wait_for(task, 3)
+                assert task.cancelled()
+                assert runtime.pool.checkedout() == 0
+                observed_pids.add(await _pool_pid(runtime))
+                await _no_advisory_locks(admin, observed_pids)
+                assert await _state(admin, job_id) == before
+
+                fresh = await client.post(
+                    path, headers=headers, json={"reason": "isolated_k_unknown"}
+                )
+                assert fresh.status_code == 200, fresh.text
+                detail = fresh.json()["data"]
+                assert detail["status"] == "completed"
+                assert detail["root"] == {"kind": "import_job", "id": job_id}
+                assert detail["unresolved_member_count"] == 0
+                assert len(detail["members"]) == 1
+                assert detail["members"][0]["result"] == "cancelled"
+                after = await _state(admin, job_id)
+                assert after[0][0] == "cancelled"
+                assert after[1] == 1
+                replay = await client.post(
+                    path, headers=headers, json={"reason": "isolated_k_unknown"}
+                )
+                assert replay.status_code == 200
+                assert replay.json()["data"] == detail
+                assert await _state(admin, job_id) == after
+                observed_pids.add(await _pool_pid(runtime))
+                await _no_advisory_locks(admin, observed_pids)
+                assert runtime.pool.checkedout() == 0
+        assert outbound_calls == []
+        request.node.user_properties.extend(
+            [
+                ("unknown_acquire_after_real_commit", "true"),
+                ("observed_runtime_pids", ",".join(map(str, sorted(observed_pids)))),
+                ("cancellation_attempts_after_replay", "1"),
+                ("outbound_http_calls", "0"),
+            ]
+        )
+    finally:
+        primary = sys.exc_info()[1]
+        try:
+            async with asyncio.timeout(3):
+                if task is not None and not task.done():
+                    task.cancel()
+                    await asyncio.gather(task, return_exceptions=True)
+                await runtime.dispose()
+        except BaseException as cleanup_error:
+            if primary is None:
+                raise
+            primary.add_note(f"test cleanup also failed: {type(cleanup_error).__name__}")

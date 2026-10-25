@@ -9,12 +9,15 @@ from __future__ import annotations
 import asyncio
 import inspect
 import logging
-from collections.abc import Mapping
+import sys
+from collections.abc import AsyncIterator, Mapping
+from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Final
 
+import anyio
 import httpx
 from kortravelmap.core.feature_operation import FEATURE_OPERATION_RESERVED_KINDS
 from kortravelmap.infra.advisory_lock import advisory_lock_key
@@ -69,6 +72,7 @@ __all__ = [
     "DagsterTerminateFailed",
     "DagsterTerminationTimeout",
     "DagsterUnavailable",
+    "PipelineCancellationDatabaseUnavailable",
     "PipelineCancellationInProgress",
     "PipelineCancellationServiceError",
     "PipelineCancellationUnsafe",
@@ -80,6 +84,11 @@ _LOG = logging.getLogger(__name__)
 
 _TERMINAL_DAGSTER_STATUSES: Final[frozenset[str]] = frozenset({"CANCELED", "SUCCESS", "FAILURE"})
 _COORDINATOR_LEASE_PREFIX = "pipeline-cancellation:coordinator"
+_CONNECTION_CHECK_MILLISECONDS = 100
+_CLEANUP_SECONDS = 0.6
+_OBSERVER_STATEMENT_SECONDS = 0.1
+_BACKEND_INFO_KEY = "pipeline_cancellation_exact_backend"
+
 
 _RUN_STATUS_QUERY = """
 query KorTravelMapCancellationRunStatus($runId: ID!) {
@@ -181,6 +190,10 @@ class PipelineExecutionNotFound(PipelineCancellationServiceError):
     code = "PIPELINE_EXECUTION_NOT_FOUND"
 
 
+class PipelineCancellationDatabaseUnavailable(PipelineCancellationServiceError):
+    code = "PIPELINE_CANCELLATION_DATABASE_UNAVAILABLE"
+
+
 class PipelineCancellationInProgress(PipelineCancellationServiceError):
     code = "PIPELINE_CANCELLATION_IN_PROGRESS"
 
@@ -246,11 +259,248 @@ def _assert_no_transaction(session: AsyncSession) -> None:
         )
 
 
+@dataclass
+class _CoordinatorBackend:
+    connection: AsyncConnection
+    engine: AsyncEngine
+    pool_proxy: Any
+    driver: Any
+    pid: int
+    backend_start: datetime | None = None
+    original_connection_check: str | None = None
+    discarded: bool = False
+    termination_confirmed: bool = False
+    cleanup_attempted: bool = False
+    lease_possible: bool = False
+
+
+def _session_backend(session: AsyncSession) -> _CoordinatorBackend | None:
+    value = getattr(session, "info", {}).get(_BACKEND_INFO_KEY)
+    return value if isinstance(value, _CoordinatorBackend) else None
+
+
+def _capture_backend(connection: AsyncConnection, engine: AsyncEngine) -> _CoordinatorBackend:
+    # 첫 SQL/K 시도 전에만 읽는다. invalidated connection에는 이 함수를 재호출하지 않는다.
+    if connection.invalidated or connection.closed:
+        raise PipelineCancellationUnsafe("cannot capture an unavailable cancellation backend")
+    sync_connection = connection.sync_connection
+    if sync_connection is None:
+        raise PipelineCancellationUnsafe("cancellation connection was not started")
+    proxy = sync_connection.connection
+    driver = proxy.driver_connection
+    if driver is None or not callable(getattr(driver, "terminate", None)):
+        raise PipelineCancellationUnsafe("physical cancellation driver is unavailable")
+    return _CoordinatorBackend(connection, engine, proxy, driver, driver.get_server_pid())
+
+
+def _discard_exact_backend(backend: _CoordinatorBackend, cause: BaseException) -> None:
+    """원 driver를 종료하고 pool slot을 회수한다. 새 backend로 reconnect하지 않는다."""
+    if backend.discarded:
+        return
+    if (
+        backend.pool_proxy.driver_connection is not backend.driver
+        and not backend.driver.is_closed()
+    ):
+        raise PipelineCancellationUnsafe("physical cancellation backend ownership was released")
+    backend.discarded = True
+    failures: list[BaseException] = []
+    try:
+        result = backend.driver.terminate()
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise PipelineCancellationUnsafe("physical driver terminate must be synchronous")
+    except BaseException as exc:
+        failures.append(exc)
+    sync_connection = backend.connection.sync_connection
+    assert sync_connection is not None
+    for target, action in (
+        (backend.pool_proxy, "invalidate"),
+        (sync_connection, "invalidate"),
+        (sync_connection, "close"),
+    ):
+        try:
+            if target is backend.pool_proxy:
+                target.invalidate(cause, soft=False)
+            elif action == "invalidate":
+                target.invalidate(cause)
+            else:
+                target.close()
+        except BaseException as exc:
+            failures.append(exc)
+    if failures:
+        raise PipelineCancellationUnsafe("exact cancellation backend discard failed") from failures[
+            0
+        ]
+
+
+async def _confirm_backend_termination(backend: _CoordinatorBackend, *, deadline: float) -> bool:
+    """같은 LOGIN의 새 readonly observer로 원 backend의 소멸을 확인한다."""
+    if backend.backend_start is None:
+        # 첫 metadata SQL 전에는 K/업무 SQL을 실행하지 않았다. 소멸을 추측하지 않는다.
+        return False
+    observer: _CoordinatorBackend | None = None
+    connection = backend.engine.connect()
+    try:
+        async with asyncio.timeout_at(deadline):
+            await connection.start()
+            observer = _capture_backend(connection, backend.engine)
+            driver = observer.driver
+            await driver.execute(
+                "SET default_transaction_read_only = on",
+                timeout=min(_OBSERVER_STATEMENT_SECONDS, max(0.0, deadline - monotonic())),
+            )
+            while monotonic() < deadline:
+                # 각 native autocommit SELECT는 새 snapshot이다. query 본문/다른 세션은 읽지 않는다.
+                row = await driver.fetchrow(
+                    """SELECT EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_stat_activity
+                        WHERE pid=$1 AND backend_start=$2
+                    ) AS backend_present, EXISTS (
+                        SELECT 1 FROM pg_catalog.pg_locks AS l
+                        WHERE l.pid=$1 AND l.locktype='advisory'
+                    ) AS advisory_present""",
+                    backend.pid,
+                    backend.backend_start,
+                    timeout=min(_OBSERVER_STATEMENT_SECONDS, max(0.0, deadline - monotonic())),
+                )
+                if not row["backend_present"] and not row["advisory_present"]:
+                    return True
+                await asyncio.sleep(min(0.02, max(0.0, deadline - monotonic())))
+    except Exception as exc:
+        # 외부 cancel은 이 scope 밖에서 재전파한다. 확인 실패를 성공으로 승격하지 않는다.
+        _LOG.warning(
+            "pipeline cancellation backend termination readback failed: error_type=%s",
+            type(exc).__name__,
+        )
+    finally:
+        if observer is not None:
+            _discard_exact_backend(
+                observer, PipelineCancellationUnsafe("readonly cancellation observer disposed")
+            )
+        elif connection.sync_connection is not None:
+            connection.sync_connection.invalidate()
+            connection.sync_connection.close()
+    return False
+
+
+async def _hard_invalidate_connection(
+    backend: _CoordinatorBackend, *, cause: BaseException
+) -> None:
+    """level 취소를 막고 exact terminate→유한 readback을 수행한다."""
+    if backend.cleanup_attempted:
+        return
+    backend.cleanup_attempted = True
+    started = monotonic()
+    try:
+        with anyio.CancelScope(shield=True):
+            _discard_exact_backend(backend, cause)
+            backend.termination_confirmed = await _confirm_backend_termination(
+                backend, deadline=started + _CLEANUP_SECONDS
+            )
+    finally:
+        _LOG.log(
+            logging.INFO if backend.termination_confirmed else logging.ERROR,
+            "pipeline cancellation backend cleanup: confirmed=%s elapsed_ms=%d",
+            backend.termination_confirmed,
+            round((monotonic() - started) * 1000),
+        )
+
+
+@asynccontextmanager
+async def _coordinator_session(
+    engine: AsyncEngine,
+) -> AsyncIterator[tuple[AsyncConnection, AsyncSession]]:
+    """정상 업무의 기존 시간 예산은 보존하고 연결 수명만 명시적으로 회수한다."""
+    connection = engine.connect()
+    backend: _CoordinatorBackend | None = None
+    session: AsyncSession | None = None
+    primary: BaseException | None = None
+    try:
+        await connection.start()
+        backend = _capture_backend(connection, engine)
+        metadata = (
+            await connection.execute(
+                text("""WITH config AS MATERIALIZED (
+                        SELECT current_setting('client_connection_check_interval') AS previous
+                    )
+                    SELECT a.backend_start, config.previous,
+                        set_config('client_connection_check_interval',
+                            CASE WHEN config.previous::interval = interval '0' THEN '100ms'
+                            ELSE LEAST(
+                                EXTRACT(epoch FROM config.previous::interval)*1000,
+                                :check_ms)::bigint::text END, false)
+                    FROM pg_catalog.pg_stat_activity AS a CROSS JOIN config
+                    WHERE a.pid=pg_backend_pid()"""),
+                {"check_ms": _CONNECTION_CHECK_MILLISECONDS},
+            )
+        ).one()
+        backend.backend_start = metadata[0]
+        backend.original_connection_check = str(metadata[1])
+        await connection.commit()
+        session = AsyncSession(bind=connection, expire_on_commit=False)
+        session.info[_BACKEND_INFO_KEY] = backend
+        yield connection, session
+    except BaseException as exc:
+        primary = exc
+        raise
+    finally:
+        try:
+            with anyio.CancelScope(shield=True):
+                if backend is not None and (
+                    isinstance(primary, asyncio.CancelledError)
+                    or backend.lease_possible
+                    or connection.invalidated
+                    or session is None
+                ):
+                    await _hard_invalidate_connection(
+                        backend,
+                        cause=primary or PipelineCancellationUnsafe("connection setup failed"),
+                    )
+                    if primary is None:
+                        raise PipelineCancellationDatabaseUnavailable(
+                            "cancellation backend could not be safely returned",
+                            retry_after_seconds=1,
+                        )
+                elif backend is not None and not backend.discarded:
+                    async with asyncio.timeout(_CLEANUP_SECONDS):
+                        if session is not None:
+                            await session.close()
+                        if backend.original_connection_check is not None:
+                            await connection.execute(
+                                text(
+                                    "SELECT set_config("
+                                    "'client_connection_check_interval', :previous, false)"
+                                ),
+                                {"previous": backend.original_connection_check},
+                            )
+                            await connection.commit()
+                        await connection.close()
+                elif backend is None and connection.sync_connection is not None:
+                    connection.sync_connection.invalidate(primary)
+                    connection.sync_connection.close()
+        except BaseException as cleanup_error:
+            if backend is not None:
+                try:
+                    await _hard_invalidate_connection(backend, cause=cleanup_error)
+                except BaseException:
+                    _LOG.error("pipeline cancellation exact backend cleanup failed", exc_info=True)
+            if primary is None:
+                raise PipelineCancellationDatabaseUnavailable(
+                    "cancellation connection cleanup could not be verified",
+                    retry_after_seconds=1,
+                ) from cleanup_error
+            _LOG.error("pipeline cancellation cleanup failed while propagating caller error")
+        # pending AnyIO level 취소를 정상 응답/도메인 오류보다 우선한다.
+        if primary is None or isinstance(primary, Exception):
+            await anyio.lowlevel.checkpoint()
+
+
 async def _rollback_quietly(session: AsyncSession) -> None:
     try:
         if session.in_transaction():
             await session.rollback()
-    except BaseException:  # pragma: no cover - broken/cancelled cleanup
+    except BaseException:
         _LOG.warning("pipeline cancellation session rollback failed", exc_info=True)
 
 
@@ -260,6 +510,10 @@ async def _acquire_coordinator_lease(
     lease_key: int,
 ) -> bool:
     _assert_no_transaction(session)
+    # 이 await 자체의 반환 전에 취소/commit 오류가 나도 K 소유 가능성을 버리지 않는다.
+    backend = _session_backend(session)
+    if backend is not None:
+        backend.lease_possible = True
     try:
         result = await session.execute(
             text("SELECT pg_try_advisory_lock(:lock_id)"),
@@ -267,6 +521,8 @@ async def _acquire_coordinator_lease(
         )
         acquired = bool(result.scalar_one())
         await session.commit()
+        if backend is not None and not acquired:
+            backend.lease_possible = False
         return acquired
     except BaseException:
         await _rollback_quietly(session)
@@ -279,7 +535,27 @@ async def _release_coordinator_lease(
     *,
     lease_key: int,
 ) -> None:
-    """exact-key unlock을 검증하며 불확실한 backend에서 성공을 반환하지 않는다."""
+    """원 연결에서만 exact-key unlock을 검증한다."""
+    backend = _session_backend(session)
+    original_error = sys.exception()
+    # caller 취소/invalidated/unknown은 unlock SQL을 새 backend에 보내지 않는다.
+    if isinstance(original_error, asyncio.CancelledError) or connection.invalidated:
+        if backend is None:
+            raise PipelineCancellationUnsafe("exact cancellation backend was not captured")
+        try:
+            await _hard_invalidate_connection(
+                backend, cause=original_error or PipelineCancellationUnsafe("backend invalidated")
+            )
+        except BaseException:
+            if not isinstance(original_error, asyncio.CancelledError):
+                raise
+            _LOG.error("pipeline cancellation cleanup failed; original caller cancel retained")
+        if not isinstance(original_error, asyncio.CancelledError):
+            raise PipelineCancellationDatabaseUnavailable(
+                "cancellation backend was invalidated during coordination",
+                retry_after_seconds=1,
+            )
+        return
     release_error: BaseException | None = None
     try:
         _assert_no_transaction(session)
@@ -290,85 +566,27 @@ async def _release_coordinator_lease(
         unlocked = bool(result.scalar_one())
         await session.commit()
         if unlocked:
+            if backend is not None:
+                backend.lease_possible = False
             return
         release_error = PipelineCancellationInvariantError(
             "pipeline cancellation coordinator lease was not owned at unlock"
         )
     except BaseException as exc:
-        await _rollback_quietly(session)
         release_error = exc
     assert release_error is not None
     _LOG.error(
         "pipeline cancellation coordinator lease release failed",
-        exc_info=(
-            type(release_error),
-            release_error,
-            release_error.__traceback__,
-        ),
+        exc_info=(type(release_error), release_error, release_error.__traceback__),
     )
-    await _hard_invalidate_connection(connection, cause=release_error)
+    if backend is None:
+        raise PipelineCancellationUnsafe("exact cancellation backend was not captured")
+    await _hard_invalidate_connection(backend, cause=release_error)
     if not isinstance(release_error, Exception):
         raise release_error
     raise PipelineCancellationUnsafe(
         "pipeline cancellation coordinator lease release could not be verified"
     ) from release_error
-
-
-async def _hard_invalidate_connection(
-    connection: AsyncConnection,
-    *,
-    cause: BaseException,
-) -> None:
-    """async invalidate 실패에도 pool proxy/driver를 hard terminate한다."""
-    pool_proxy: Any = None
-    try:
-        sync_connection = connection.sync_connection
-        if sync_connection is not None:
-            candidate = sync_connection.connection
-            if candidate is not None:
-                pool_proxy = candidate
-    except Exception:
-        _LOG.warning("failed to capture cancellation lease pool proxy", exc_info=True)
-
-    try:
-        await connection.invalidate(cause)
-        if connection.invalidated:
-            return
-    except BaseException:
-        _LOG.error("async cancellation lease invalidation failed", exc_info=True)
-
-    if pool_proxy is not None:
-        try:
-            pool_proxy.invalidate(cause, soft=False)
-            return
-        except BaseException:
-            _LOG.critical("sync hard invalidation failed", exc_info=True)
-
-        try:
-            driver_connection = getattr(pool_proxy, "driver_connection", None)
-            if driver_connection is None:
-                dbapi_connection = getattr(pool_proxy, "dbapi_connection", None)
-                driver_connection = getattr(
-                    dbapi_connection,
-                    "driver_connection",
-                    None,
-                )
-            terminate = getattr(driver_connection, "terminate", None)
-            if not callable(terminate):
-                raise RuntimeError("physical driver terminate is unavailable")
-            terminated = terminate()
-            if inspect.isawaitable(terminated):
-                await terminated
-            return
-        except Exception as exc:
-            _LOG.critical("physical cancellation backend terminate failed", exc_info=True)
-            raise PipelineCancellationUnsafe(
-                "failed to hard-invalidate the cancellation coordinator backend"
-            ) from exc
-
-    raise PipelineCancellationUnsafe(
-        "failed to hard-invalidate the cancellation coordinator backend"
-    ) from cause
 
 
 def _ordered_members(
@@ -1033,9 +1251,7 @@ async def _record_terminal_run(
                 terminal_status == "SUCCESS"
                 and member.operation_kind == "provider_feature_load_run"
             ):
-                await session.execute(
-                    text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
-                )
+                await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
             await lock_provider_feature_finalization(session)
             try:
                 changed = await transition_pipeline_cancellation_member(
@@ -1507,7 +1723,7 @@ async def _reload_after_ownership_loss(
 ) -> PipelineCancellationDetailRecord:
     """canonical current를 우선하고 old exact attempt는 마지막 fallback으로 쓴다."""
     async with (
-        AsyncSession(bind=engine, expire_on_commit=False) as fresh_session,
+        _coordinator_session(engine) as (_, fresh_session),
         fresh_session.begin(),
     ):
         canonical_scope = await resolve_pipeline_cancellation_scope(
@@ -1679,10 +1895,7 @@ async def cancel_pipeline_execution(
     if not requested_by.strip():
         raise ValueError("requested_by must not be empty")
 
-    async with (
-        engine.connect() as connection,
-        AsyncSession(bind=connection, expire_on_commit=False) as session,
-    ):
+    async with _coordinator_session(engine) as (connection, session):
         last_root: PipelineCancellationRootRecord | None = None
         for _ in range(settings.pipeline_cancellation_root_retry_limit):
             async with session.begin():
