@@ -314,7 +314,9 @@ def test_stream_encoder_includes_envelope_overhead_in_byte_cap():
         codec._json_bytes({"envelope": "x" * 1_048_570})
 
 
-@pytest.mark.parametrize("kind", ["mapping", "dict", "str", "int", "list", "fieldset"])
+@pytest.mark.parametrize(
+    "kind", ["mapping", "dict", "str", "int", "list", "fieldset", "extra_store"]
+)
 async def test_exact_type_preflight_never_calls_foreign_hooks(kind, monkeypatch):
     from collections.abc import Mapping
 
@@ -356,7 +358,9 @@ async def test_exact_type_preflight_never_calls_foreign_hooks(kind, monkeypatch)
         "list": ForeignList(),
     }
     bundles, geo = await _input()
-    if kind == "fieldset":
+    if kind == "extra_store":
+        object.__setattr__(bundles[0].feature, "__pydantic_extra__", ForeignMapping())
+    elif kind == "fieldset":
         object.__setattr__(bundles[0].feature, "__pydantic_fields_set__", ForeignSet())
     else:
         bundles[0].feature.detail.payload["unsupported"] = variants[kind]

@@ -149,7 +149,7 @@ def _preflight(values: tuple[object, ...]) -> None:
                 or any(type(key) is not str for key in fields)
                 or any(key not in kind.model_fields for key in data)
                 or any(key not in kind.model_fields for key in fields)
-                or value.__pydantic_extra__
+                or value.__pydantic_extra__ is not None
             ):
                 _reject()
             if len(stack) + 1 > nodes:
