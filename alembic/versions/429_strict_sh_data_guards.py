@@ -73,7 +73,10 @@ ALTER TABLE ops.application_schema_operation_receipts
     ))
 """
 
-_UPGRADE_STATEMENTS: Final = (_RECEIPT_HEAD_CHECK_SQL,)
+_UPGRADE_STATEMENTS: Final = (
+    _RECEIPT_HEAD_CHECK_SQL,
+    "SET ROLE " + _SCHEMA_OWNER,
+)
 
 
 def upgrade() -> None:
@@ -135,11 +138,11 @@ def upgrade() -> None:
         )
     )
     # installer를 SELECT하거나 기존 activation installer를 변경하지 않는다.
-    for statement in _UPGRADE_STATEMENTS:
+    for statement in _UPGRADE_STATEMENTS[:-1]:
         bind.execute(text(statement))
     for name, value in settings.items():
         bind.execute(text("SELECT set_config(:name,:value,true)"), {"name": name, "value": value})
-    bind.execute(text("SET ROLE " + _SCHEMA_OWNER))
+    bind.execute(text(_UPGRADE_STATEMENTS[-1]))
 
 
 def downgrade() -> None:

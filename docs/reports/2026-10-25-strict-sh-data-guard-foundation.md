@@ -243,3 +243,17 @@ GRANT는 기존 카탈로그 서명 치환으로 정렬한다. 300의 optional s
 
 추가 상속 뒤 signature lint를 포함한 집중 정적96개가13.35초에 통과했고 Ruff5파일·graph
 동등성·redaction/차이 검사를 확인했다. 최종 두 source 리뷰와 정확 CI는 아직 미완이다.
+
+### ac441 CI의 마지막 role 관찰 규약 정정
+
+정확 ac441 CI에서 lint/OpenAPI/frontend/Docker build workflow는 통과했지만 Python3.13의
+core 검사에서3825 PASS/7 SKIP 뒤 role 관찰 lint1개가 실패했다. 원 job 로그와 checkout
+tree를 보존했으며 재실행하지 않았다. receipt tuple만으로는 실행기의 마지막 role을
+관찰하지 못하는 추출 규약 문제였다. migration은 실제로 schema owner를 남기고 있었다.
+
+정본 tuple에 실제 receipt CHECK와 마지막 SET ROLE 문장을 담고, 앞 문장은 기존 receipt
+위치의 tuple[:-1] loop에서, 마지막 문장은 기존 GUC 복구 뒤 tuple[-1]로 실행한다.
+표시용·미실행 SQL을 넣거나 lint를 완화하지 않는다. ac441 대비 CREATE 권한 유무 양쪽
+upgrade execute trace28/26 전체가 같으며 기존5 SQL sidecar·runtime ACL·41시험·공식
+dump는 바꾸지 않았다. lint 전체와 전용 migration unit은381 PASS/기존6 SKIP,39.13초다.
+새 정확 CI와 두 source delta 검토는 별도이며 PG 재실행·운영 설치·활성화는0이다.
