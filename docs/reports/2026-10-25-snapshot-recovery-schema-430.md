@@ -57,3 +57,13 @@ Root 실제 apply는 일반runtime에서 private bounded capture를 직접 호�
 
 
 Root10696의 typed capture를 합성했다. 일반runtime에 private428 EXEC를 열지 않고, `ops.capture_provider_snapshot_apply_input_set(uuid,bigint,uuid)`의 현재 fence·prepared control·동일TX completed whole-SH attempt/owner/manifest/DS 확인 후 두 capture 값만 반환한다. wrapper는30개 routine 선언, 이 새 CommandOwner 함수의 revoke/grant와 optional/startup exact signature를 정렬했다. 기존 bounded capture 권한은 유지한다. Root fixture는 실패 시 자기 정확 ready attempt를 취소해 다음 case에 연쇄 lock owner를 남기지 않도록 정정했다.
+
+## native 영업시간 null의 forward 배선
+
+고정 e302 진단5개는 startup·원 metadata clean·GUC 3PASS, 후처리2FAIL이며 두 거부 사유는
+`shape_unsupported`였다. 원 실패와 정확 CID·UUID·volume 정리는 보존했다. Root의430 전용
+sidecar는 native materializer가 저장하는 JSON null을 SQL NULL과 같은 빈 영업시간으로 취급한다.
+428 원본과 metadata-first/압축·숫자·문자열·전체예산 제한, canonical4 집계 본문은 그대로다.
+새 sidecar는 기존 private 함수를 SchemaOwner 창에서 교체하는31번째 routine 선언으로 연결한다.
+추가 runtime EXEC·raw 권한·startup 공개 signature·ORM 변경은 없다. SQLNULL/JSONnull×phones3의
+정본 집계 일치와 실제 nonnull 거부는 통합시험 소스이며 아직 이 변경의 PG 결과가 아니다.

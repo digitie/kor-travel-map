@@ -38,6 +38,19 @@ _SIDECARS: Final = (
         ),
     ),
     (
+        "_430_bounded_curation_null_hours.sql",
+        (
+            (
+                "feature._bounded_provider_curation_input_set",
+                "FUNCTION",
+                "(bigint)",
+                _SCHEMA_OWNER,
+                False,
+                False,
+            ),
+        ),
+    ),
+    (
         "_430_snapshot_registration.sql",
         (
             (

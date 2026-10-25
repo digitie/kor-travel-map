@@ -354,3 +354,33 @@ def test_quota_cross_column_check_names_match_actual_postgresql_catalog():
     } <= names
     assert "provider_snapshot_quota_limits_used_bytes_check" not in names
     assert "provider_snapshot_quota_limits_used_rows_check" not in names
+
+
+def test_native_null_hours_forward_sidecar_preserves_private_owner_and_all_other_body_bytes():
+    filename = "_430_bounded_curation_null_hours.sql"
+    declarations = dict(migration._SIDECARS)[filename]
+    assert declarations == (
+        (
+            "feature._bounded_provider_curation_input_set",
+            "FUNCTION",
+            "(bigint)",
+            migration._SCHEMA_OWNER,
+            False,
+            False,
+        ),
+    )
+    old = (_ROOT / "alembic/versions/_428_bounded_provider_curation_input_set.sql").read_text()
+    current = (_ROOT / "alembic/versions" / filename).read_text()
+    assert current.replace(
+        "-- 430 forward 보완: native materializer의 JSON null도 SQL NULL과 같은 빈 영업시간이다.\n"
+        "-- 정본 행 직렬화/지문과 모든 크기·형태 제한은 428을 그대로 유지한다.\n",
+        "-- 동일 statement snapshot의 현재 capture를 제한한다. 호출자/SH는 연결하지 않는다.\n",
+    ).replace(
+        "CREATE OR REPLACE FUNCTION", "CREATE FUNCTION", 1
+    ).replace(
+        "IF v_place.kind IS DISTINCT FROM 'place'\n"
+        "            OR (v_place.business_hours IS NOT NULL AND "
+        "v_place.business_hours <> 'null'::jsonb)",
+        "IF v_place.kind IS DISTINCT FROM 'place' OR v_place.business_hours IS NOT NULL",
+    ) == old
+    assert migration._sections(filename, declarations) == ((migration._SCHEMA_OWNER, current),)
