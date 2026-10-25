@@ -2,7 +2,7 @@
 
 ## 현재 범위
 
-검토된 A/B/C, 등록 b0eb, RC finalization 34c, reset 8d4와 Root backend/GC 26c2e5f를 하나의 forward migration에 연결했다. 이 보고서는 **소스 배선 체크포인트**다. 실제 PostgreSQL parse·설치·권한·ORM reflection·공식 golden430 및 caller 전체 수용은 아직 수행하지 않았다. 기존 head-schema.sql은 실제로 수용된 429 그대로 두었다. 운영 설치, quota 설정 적용, RC·SH collector 활성화는 실행하지 않았다.
+검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430와 caller 전체 수용은 아직 미완이며 head-schema.sql은 실제 수용된429 그대로다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
 
 430 migration은 고정 sidecar의 CREATE 경계와 명시 signature/owner 목록만 사용한다. 원 SQL 본문을 재작성하지 않고 owner별 문장으로 나누며 전체 bytes 재결합을 검증한다. 기존 routine의 owner도 429 oracle과 대조한다. 실행하는 실제 문장 tuple에 receipt CHECK가 포함된다. P EX를 먼저 얻고 lock/statement timeout을 기존 값과 1s/30s 중 작은 값으로 제한한다. SchemaOwner가 관측한 StateOwner/CommandOwner의 기존 schema CREATE 권한은 유지하고 새로 준 권한만 회수한다.
 
@@ -18,7 +18,7 @@ CommandOwner는 private 표에 필요한 SELECT/INSERT/UPDATE/DELETE만 받는�
 
 ## 저장·quota
 
-ORM은 SQL의 네 표, generated SHA, FK/UNIQUE와 상태 CHECK를 대응한다. postprocess TX와 intent SHA는 둘 다 NULL이거나 applied 상태의 양수 TX+64hex SHA로 결박한다. begin(A)/finish(B)를 막는 receipt SHA 저장/검증과 완료 시 두 marker 해제는 Root SQL의 수정 그대로 유지한다. 실제 metadata reflection 비교는 아직 미수행이다.
+ORM은 SQL의 네 표, generated SHA, FK/UNIQUE와 상태 CHECK를 대응한다. postprocess TX와 intent SHA는 둘 다 NULL이거나 applied 상태의 양수 TX+64hex SHA로 결박한다. begin(A)/finish(B)를 막는 receipt SHA 저장/검증과 완료 시 두 marker 해제는 Root SQL의 수정 그대로 유지한다. 실제 reflection은 고정3f598에서 원 command.check와 CHECK 비교를 유지한 시험으로 통과했다.
 
 SchemaOwner의 최초 정책은 global key0 16MiB/256행, 실제 active `kor-travel-transport` / `transport_airports` DS만 4MiB/64행이다. 다른 DS 기본값이나 ON CONFLICT를 통한 상한 확대는 없다. 등록의 논리 예약량은 입력 payload≤1MiB, context≤8KiB, 결과·후속 receipt 각4KiB 예약을 포함한다. 이는 WAL/RSS/CPU 상한이나 실제 운영 적합성 증거가 아니다. 실제 active Airport가 없으면 해당 DS quota row도 생기지 않는다.
 
@@ -30,7 +30,7 @@ SchemaOwner의 최초 정책은 global key0 16MiB/256행, 실제 active `kor-tra
 - 기존 models 실제 Codegraph impact와 finalization 원장을 재사용했다. 현재 기존 심볼 signature는 바꾸지 않는다. 최신 graph 전체 closure를 증명한 것은 아니며, db checker는 실제 source/callsite와 순수 startup 경로 시험으로 대조했다.
 - WSL 진입이 한 번 연결 timeout으로 실패했다. 해당 Python 배치는 실행되지 않았음을 파일 상태로 확인하고, 서비스 재시작·다른 작업 중지 없이 연결 복구 후 계속했다.
 
-다음은 고정 source 두 검토 뒤 owned fresh bootstrap에서 SQL 문법·owner dependency·ACL·startup·ORM reflection을 실제로 확인하는 것이다. postprocess intent mismatch/rollback/replay, newer-applied supersession, GC ledger/retention/active 거부, 전체 A/B/C·등록·reset paired 시험과 최종 caller 원자성도 남아 있다. 최종 공식430 oracle는 그 실제 실행 결과로만 채택한다. cancellation/pool 및 큰 DS 전체 protocol 수용을 이 배선 완료로 대체하지 않는다.
+SQL 설치·startup·ACL·ORM과 후처리 intent 교환/부분 rollback/replay의 한정된 실제15개는 통과했다. newer-applied supersession, GC ledger/retention/active 거부, 전체 A/B/C·등록·reset paired 시험과 최종 caller 원자성은 별도로 남아 있다. 최종 공식430 oracle는 그 실제 실행 결과로만 채택한다. cancellation/pool 및 큰 DS 전체 protocol 수용을 이 배선 완료로 대체하지 않는다.
 
 
 ## 첫 실제 bootstrap 실패와 수정
@@ -66,4 +66,12 @@ sidecar는 native materializer가 저장하는 JSON null을 SQL NULL과 같은 �
 428 원본과 metadata-first/압축·숫자·문자열·전체예산 제한, canonical4 집계 본문은 그대로다.
 새 sidecar는 기존 private 함수를 SchemaOwner 창에서 교체하는31번째 routine 선언으로 연결한다.
 추가 runtime EXEC·raw 권한·startup 공개 signature·ORM 변경은 없다. SQLNULL/JSONnull×phones3의
-정본 집계 일치와 실제 nonnull 거부는 통합시험 소스이며 아직 이 변경의 PG 결과가 아니다.
+정본4집계 일치6개와 nonnull 거부4개는3f598의 실제15에 포함해 통과했다.
+
+## terminal GC의 첫 실제 관측
+
+source5008의 별도 GC16은4PASS/12FAIL이었다. limit3·SER1의 거부는 통과했으나,12개는
+fixture의 정본 등록 직전 bounded 설정이 없어 kernel의30초 상한 거부에서 멈췄다. GC 본체의
+보존·회수·rollback 수용으로 세지 않는다. 원 raw/XML과 정확 CID·UUID·volume 정리는 보존했다.
+정본 registration._bounded(2초/900ms)를 등록 및 정상 GC의 각 TX에 명시하고, limit/SER
+negative·원 단언·제품 SQL은 유지한다. 새 결과 전까지 GC 수용은 미완이다.
