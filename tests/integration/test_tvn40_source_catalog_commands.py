@@ -364,7 +364,7 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             await connection.execute(text("RESET ROLE"))
 
         async with dagster.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             finalized = (
                 await connection.execute(
                     text(

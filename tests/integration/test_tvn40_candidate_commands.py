@@ -1942,6 +1942,9 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         ):
             async with dagster.connect() as connection:
                 transaction = await connection.begin()
+                await connection.execute(
+                    text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+                )
                 with pytest.raises(DBAPIError) as denied:
                     await connection.execute(
                         text(statement),
@@ -1978,6 +1981,9 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         ):
             async with api.connect() as connection:
                 transaction = await connection.begin()
+                await connection.execute(
+                    text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+                )
                 with pytest.raises(DBAPIError) as denied:
                     await connection.execute(
                         text(statement),
