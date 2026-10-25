@@ -1,3 +1,7 @@
+## 2026-10-25 — Place projection 예산 검사 추출
+
+- Heritage 사전 검사를 core로 이동하고 기존 wrapper·9DTO·본문을 보존했다. 순수 회귀114 PASS이며 DB/수집 연결은 없다. [범위·미완](reports/2026-10-25-place-projection-budget-extraction.md).
+
 ## 2026-10-25 — 첫 동시 수집 후보 설계(미구현)
 
 - 공항15·휴게소215를 읽기 전용으로 확인하고 기존 fetch/Geo 차이를 반영한 [구현 순서](reports/2026-10-25-transport-small-native-pair-design.md)를 정리했다. 전체 크기·적격성·실제 두 worker·복구·운영은 미완, T-CWRITE-04/06/07 체크는 유지한다.
