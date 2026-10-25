@@ -27,6 +27,7 @@ from tests.integration.test_scoped_provider_batch import (
     _snapshot,
 )
 from tests.integration.test_scoped_provider_batch import _seed as _batch_seed
+from tests.integration.test_scoped_provider_geocode_stamps import _active_name_setup, _stamps
 from tests.integration.test_tvn36_override_lineage_spine import _constraint_name
 
 pytestmark = pytest.mark.integration
@@ -650,3 +651,56 @@ async def test_installer_mid_ddl_collision_rolls_back_only_nested_new_triggers(s
     async with AsyncSession(admin) as session:
         restored = (await session.execute(inventory_sql)).all()
         assert restored == original  # outer rollback이 원래 OID/definition/enabled33개도 복구한다.
+
+
+async def test_existing_geo_stamp_update_checks_exact_outside_manifest_target(strict_engines):
+    admin, runtime = strict_engines
+    # 기존 stamp 경계 helper는 정본 GeoLoadContext + 실제 EX full loader로 stamp를 쓴다.
+    dataset, items, seeded_stamps = await _active_name_setup(admin, runtime, count=2)
+    selected, outside = items
+    feature = outside.feature_id
+    assert len(seeded_stamps) == 2
+    stamp = next(row for row in seeded_stamps if row["feature_id"] == str(feature))
+    observer = text("""SELECT tableoid::oid AS relation_oid,feature_id,geo_version_token,
+        geo_data_token,reverse_outcome,stamped_at FROM feature.feature_geocode_stamps
+        WHERE feature_id=:feature""")
+    async with AsyncSession(admin) as session:
+        before = (await session.execute(observer, {"feature": feature})).one()
+        assert before.relation_oid == await session.scalar(
+            text("SELECT 'feature.feature_geocode_stamps'::regclass::oid")
+        )
+        assert before.geo_version_token == stamp["geo_version_token"]
+        assert before.geo_data_token == stamp["geo_data_token"]
+        assert before.reverse_outcome == stamp["reverse_outcome"]
+        assert before.stamped_at == stamp["stamped_at"]
+    plan, _ = await _plan(runtime, dataset, [selected])
+    # runtime raw UPDATE 권한 부재를 guard 성공으로 세지 않고 실제 표 소유자 SQL을 쓴다.
+    async with AsyncSession(admin) as session:
+        await session.begin()
+        try:
+            begun = await begin_scoped_feature_write(
+                session,
+                attempt_id=plan["attempt_id"],
+                owner=plan["owner"],
+                manifest_digest=plan["manifest_digest"],
+            )
+            assert begun["status"] == "applying"
+            assert begun["exclusive_protocol"] is False
+            await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+            assert (
+                await session.scalar(text("SELECT current_user::text"))
+                == "ktm_feature_schema_owner"
+            )
+            with pytest.raises(DBAPIError) as error:
+                await session.execute(
+                    text("""UPDATE feature.feature_geocode_stamps
+                    SET stamped_at=stamped_at+interval '1 second' WHERE feature_id=:feature"""),
+                    {"feature": feature},
+                )
+            assert error.value.orig.sqlstate == "23514"
+            assert "candidate Feature is outside the applying manifest" in str(error.value.orig)
+        finally:
+            await session.rollback()
+    async with AsyncSession(admin) as session:
+        assert (await session.execute(observer, {"feature": feature})).one() == before
+    assert await _stamps(admin, [str(item.feature_id) for item in items]) == seeded_stamps

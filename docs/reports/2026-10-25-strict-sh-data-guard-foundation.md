@@ -167,3 +167,24 @@ volume1 정리도 확인했다. 첫514의25 PASS/5 FAIL과 누락 post 블록 �
 40개는 수집만 확인했다. 제품 SQL·migration·권한·공유 fixture는 바꾸지 않았고 신규
 source의 두 검토 전 PG 실행은0이다. cancellation/pool 물리 정리와 전체 writer closure,
 공식429 oracle·RC·durable recovery·collector 활성화는 여전히 OPEN이다.
+
+### 기존 stamp UPDATE의 정확 manifest 경계 보강
+
+ce41의 stamp INSERT negative는 무조건 topology INSERT 거부에서 끝나므로 outside-manifest
+검사를 삭제해도 통과한다는 source 검토 지적을 받았다. 기존 INSERT 거부는 보존하고,
+실제 기존 stamp의 UPDATE에 대한 별도1개 source를 추가했다. 기존 stamp 경계 helper의
+canonical GeoLoadContext와 EX full loader로 같은 dataset의 A/B stamp를 만든다. A만
+manifest에 넣어 실제 SH begin한 뒤 schema owner의 B timestamp UPDATE가 정확
+`candidate Feature is outside the applying manifest`/23514로 거부되어야 한다. 42501이나
+다른 stamp guard의 거부를 성공으로 세지 않는다. rollback 뒤 relation OID·토큰·outcome·
+관측시각과 전체 두 stamp가 이전 관찰과 같아야 한다. 새41개는 source 수집만 확인하며
+PG는 아직 실행하지 않았다. 제품 SQL·공유 fixture 변경은0이다.
+
+### 활성화 전 context 비용 OPEN
+
+매행 `_strict_sh_data_context`의 applying/NOT exclusive/apply_txid 조회에 정확히 맞는
+인덱스는 아직 없다. 기존 expired partial index가 terminal 행을 제외할 수 있으므로
+전체 이력에 반드시 선형 증가한다고 단정하지 않는다. 활성화 전 canonical claim→cancel
+이력0/1000과 실제 applying1 조건에서 정확 내부 SELECT의 EXPLAIN/BUFFERS, 실제 helper
+호출의 CPU/wall을 분리 실측해야 한다. 바깥 EXPLAIN으로 SPI 내부 비용을 주장하지 않는다.
+이 checkpoint는 성능 코드·인덱스 변경이나 새 PG 실측을 포함하지 않는다.
