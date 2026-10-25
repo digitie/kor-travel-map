@@ -1,3 +1,12 @@
+## 2026-10-26 — Rest432 실제215·두 writer 검증
+
+`7651cc39`의 owned215 전체 후검사·후처리·별도seal이1PASS(70.59초), 별도 Airport/Rest
+물리 두writer의 실제 blocker/양쪽commit·receipt 검증이2PASS다. source/SDK 및 정확 자원
+정리도 확인했다. SQL CPU 동시 실행·운영 처리량/서버RSS 측정으로 확대하지 않는다.
+quota/GC4FAIL1PASS와 recovery1PASS2FAIL의 fixture 오류는 원 실패를 보존하고 최소 수정 후
+재검증한다. 최종 CI·후보UI·머지/배포는 미완이며 runtime 기본OFF를 유지한다.
+[실측과 범위](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — 431 reader 배포·공개 UI·원 일정 복원 완료
 
 1415의 CI/후보 UI를 거친 main과 문서까지 고정해 Map `df877690`·PinVi `9ebb588a`를

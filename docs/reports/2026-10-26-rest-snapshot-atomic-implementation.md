@@ -190,3 +190,27 @@ context에 별도로 남는다. 잘못된1개 기대값을 head==원artifact imp
 원실패의 locked reader client roundtrip은2.337초(실제 설정statement3초/lock1초),
 decode0.247초·assessment2.116초였다. 이는 SQL 서버 CPU/RSS나 전체215 처리 성공 시간이
 아니며 timeout 실패도 아니다. 첫 실패의 partial 관측을 최종 성능 개선으로 보고하지 않는다.
+
+
+## 실제215 재검증과 물리 두 writer 수용
+
+`7651cc39`의 새 owned A215는1개 PASS(console70.59초/XML70.089초)다. 215개 전체의
+원 record 보존·head import 시각·14 counter·retired0·필수 후처리와 별도 seal을 확인했다.
+논리 예약744,997바이트, artifact735,271바이트/context1,534바이트이며 atomic15.649초,
+client 전체40.633초/CPU23.180초다. reader roundtrip2.544초(statement3초/lock1초),
+decode0.245초/assessment2.099초다. backend CPU/RSS와 실제 upstream HTTP 성능은 미측정이다.
+원 실패를 보존하고 `map432-rest215-r3-root-actual-acceptance.json`으로 새 실행을 구분한다.
+
+같은 source의 별도 물리 두 writer 시험도2개 모두 PASS다(개별15.460초/1.542초).
+Airport/Rest backend의 미commit TX가 겹치고 실제 topic blocker를 기다린 뒤 양쪽 결과와
+revision·receipt·별도 seal이 보존됐다. SQL CPU 실행의 동시성이나 운영 처리량 증가를
+뜻하지 않는다. source2574개/SDK53개/import54와 정확 CID/UUID/global0·볼륨 부재를 확인했다.
+원장 `map432-two-writer-root-actual-acceptance-r1.json`에 원8개 산출물의 지문을 검산했다.
+
+B quota/GC 첫 실행은4FAIL/1PASS다. SQLSTATE 뒤 helper에 ExceptionInfo 자체를 전달한
+fixture3건과 tracking lineage 잠금 없이 job을 변경한 fixture1건을 분리했다. 실제 SQLSTATE
+23514/53000은 도달했지만 원 constraint/GC 후검사는 미도달해 수용하지 않는다. 복구 첫 실행은
+backend 종료·rollback·pool 재사용1PASS, lateGeo fixture의 직접 stamp 수정 권한 가드와
+뒤따른 active owner로2FAIL이다. SDK0 재개 성공으로 확대하지 않는다. 두 fixture 수정은
+기존 guard·한도·제품 코드·검증 단언을 유지하며, 독립 리뷰 뒤 재실행한다.
+최종 CI·후보 live/UI·머지·배포와 Common/W/T 후속 전파는 아직 남아 있다.

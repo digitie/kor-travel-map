@@ -38,7 +38,10 @@ from kortravelmap.core.feature_operation import ProviderDatasetOperationMembersh
 from kortravelmap.dto.geo_dataset import GeoLoadContext
 from kortravelmap.geocoding import GeoCallStats
 from kortravelmap.infra import feature_repo
-from kortravelmap.infra.feature_operation_repo import ensure_dagster_feature_operation
+from kortravelmap.infra.feature_operation_repo import (
+    ensure_dagster_feature_operation,
+    reconcile_dagster_feature_run,
+)
 from kortravelmap.infra.provider_snapshot_artifact import SnapshotArtifactPins
 from kortravelmap.infra.provider_snapshot_recovery_repo import (
     RecoveredProviderSnapshot,
@@ -694,7 +697,7 @@ async def test_b_airport_wire_is_rejected_by_rest_db_member_without_reservation(
     with pytest.raises(DBAPIError) as raised:
         await attempt()
     assert raised.value.orig.sqlstate == "23514"
-    assert _constraint_name(raised) == "ck_provider_snapshot_registration_domain"
+    assert _constraint_name(raised.value) == "ck_provider_snapshot_registration_domain"
     assert await _snapshot_count(admin, [member.identity.root_id]) == 0
     assert await _quota_state(admin, rest_catalog.dataset, rest_catalog.airport) == before
 
@@ -742,7 +745,7 @@ async def test_b_actual_fixed_policy_first_overflow_is_53000_and_whole_tx_rolls_
     with pytest.raises(DBAPIError) as raised:
         await reserve_until_rejected()
     assert raised.value.orig.sqlstate == "53000"
-    assert _constraint_name(raised) == "ck_provider_snapshot_quota_available"
+    assert _constraint_name(raised.value) == "ck_provider_snapshot_quota_available"
     assert admitted == expected
     assert await _quota_state(admin, rest_catalog.dataset, rest_catalog.airport) == before
     assert await _snapshot_count(admin, [member.identity.root_id for member in members]) == 0
@@ -772,6 +775,36 @@ async def _age_owned_snapshot(admin, member, snapshot, *, running):
     async with AsyncSession(admin) as session, session.begin():
         await _limits(session)
         await feature_repo.lock_feature_curation_write(session)
+        # 기존 P_EX/fence는 유지하고 첫 data 접근 전 tracking lineage L을 선취득한다.
+        await session.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
+        root = (
+            await session.execute(
+                text(
+                    "SELECT created_at,started_at,status,dagster_run_status FROM ops.import_jobs "
+                    "WHERE job_id=:root FOR UPDATE"
+                ),
+                {"root": member.identity.root_id},
+            )
+        ).one()
+        assert root.status == "running"
+        assert root.dagster_run_status == "STARTED"
+        if not running:
+            # 종결은 raw status가 아니라 정본 typed 명령으로 만든다.
+            mutation = await reconcile_dagster_feature_run(
+                session,
+                dagster_run_id=member.run,
+                trigger_kind="schedule",
+                terminal_status="FAILURE",
+                selected_memberships=(member.catalog.membership,),
+                operation_key=member.catalog.membership.operation_key,
+                engine_created_at=root.created_at,
+                engine_started_at=root.started_at,
+                engine_finished_at=datetime.now(UTC),
+                error=None,
+            )
+            assert mutation.operation.status == "failed"
+            assert len(mutation.operation.members) == 1
+            assert mutation.operation.members[0].status == "failed"
         records = []
         for table in ("artifacts", "controls", "quota_reservations"):
             records.append(
@@ -810,18 +843,15 @@ async def _age_owned_snapshot(admin, member, snapshot, *, running):
                 text(f"INSERT INTO ops.provider_snapshot_{table}({columns}) VALUES({values})"),
                 record,
             )
+        # 정본 running/terminal 상태는 유지하고 소유 fixture의 경과 시간만 구성한다.
         for job in (member.identity.root_id, member.identity.child_id):
             await session.execute(
-                text("""UPDATE ops.import_jobs SET status=:status,current_stage=:status,
-                created_at=:old,started_at=:old,finished_at=:finished,
-                dagster_run_status=CASE WHEN kind='provider_feature_load_run'
-                    THEN :engine ELSE NULL END
+                text("""UPDATE ops.import_jobs
+                SET created_at=:old,started_at=:old,finished_at=:finished
                 WHERE job_id=:job"""),
                 {
-                    "status": "running" if running else "failed",
                     "old": old,
                     "finished": None if running else old,
-                    "engine": "STARTED" if running else "FAILURE",
                     "job": job,
                 },
             )

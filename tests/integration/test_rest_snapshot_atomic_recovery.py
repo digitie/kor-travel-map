@@ -184,6 +184,11 @@ async def test_late_geo_stamp_is_rechecked_after_locks_and_rejects_before_any_re
                 {"feature": feature},
             )
             assert old_stamp is not None
+            # 정본 stamp writer는 명시 owner 관리 경계만 허용한다.
+            await session.execute(text("SET LOCAL ROLE ktm_feature_state_procedure_owner"))
+            assert await session.scalar(text("SELECT current_user::text")) == (
+                "ktm_feature_state_procedure_owner"
+            )
             changed = await session.execute(
                 text("""UPDATE feature.feature_geocode_stamps
                 SET stamped_at=stamped_at+interval '1 second' WHERE feature_id=:feature"""),
@@ -206,16 +211,28 @@ async def test_late_geo_stamp_is_rechecked_after_locks_and_rejects_before_any_re
         primary = error
         raise
     finally:
-        if old_stamp is not None:
-            async with AsyncSession(admin) as session, session.begin():
-                await _gate(session)
-                restored = await session.execute(
-                    text("""UPDATE feature.feature_geocode_stamps
-                    SET stamped_at=:original WHERE feature_id=:feature"""),
-                    {"original": old_stamp, "feature": feature},
-                )
-                assert restored.rowcount == 1
-        await _cancel_ready(runtime, case, primary)
+        try:
+            if old_stamp is not None:
+                async with AsyncSession(admin) as session, session.begin():
+                    await _gate(session)
+                    await session.execute(text("SET LOCAL ROLE ktm_feature_state_procedure_owner"))
+                    assert await session.scalar(text("SELECT current_user::text")) == (
+                        "ktm_feature_state_procedure_owner"
+                    )
+                    restored = await session.execute(
+                        text("""UPDATE feature.feature_geocode_stamps
+                        SET stamped_at=:original WHERE feature_id=:feature"""),
+                        {"original": old_stamp, "feature": feature},
+                    )
+                    assert restored.rowcount == 1
+        except BaseException as cleanup_error:
+            if primary is None:
+                primary = cleanup_error
+                raise
+            primary.add_note("owned stamp restore failed: " + type(cleanup_error).__name__)
+        finally:
+            # stamp 복원 실패도 kernel ready lease 정리를 생략하지 않는다.
+            await _cancel_ready(runtime, case, primary)
 
 
 @op
