@@ -1,3 +1,7 @@
+## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
+
+설계 두 검토와 migration 단위16 PASS를 확인했다. 현재 checkpoint는 문서뿐이며 SQL/실제 PG/CI·SH 연결은 미완이다. [범위·예산·남은 검증](reports/2026-10-25-bounded-curation-capture.md).
+
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 
 journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하고 상대 링크만 재기준화했다. 본문 누락 없이 220 KiB 경계를 확보했다.
