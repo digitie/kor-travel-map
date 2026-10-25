@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.admin_feature_repo import author_admin_feature_field_overrides
 from tests.integration.test_provider_base_update_first import _gate, _patch, _seed
@@ -159,9 +161,9 @@ async def test_tiny_huge_exponent_is_rejected_without_calling_old_serializer(sca
             ),
             seed,
         )
-        with pytest.raises(DBAPIError) as error:
-            await _capture(session, seed["dataset"])
-        assert error.value.orig.sqlstate == "P0001"
+        # 정상 형태도 기존 함수를 재호출하지 않아 trap에 도달하지 않는다.
+        positive = await _capture(session, seed["dataset"])
+        assert positive["capture_complete"] is True
         await session.rollback()
 
 
@@ -312,12 +314,73 @@ async def test_extra_place_column_is_rejected_before_record_serialization(scalar
         await session.rollback()
 
 
+async def _same_dataset_seeds(admin, count, *, extra_key_prefixes=None):
+    """identity를 옮기지 않고 처음부터 한 DS에 별개 entity를 생성한다."""
+    first = await _seed(admin)
+    result = [first]
+    async with AsyncSession(admin) as session, session.begin():
+        await _gate(session)
+        for index in range(count - 1):
+            identity = uuid4().hex
+            raw = {"fixture": identity, "kind": "place"}
+            digest = make_payload_hash(raw)
+            entity = feature_repo._make_source_entity_key(
+                provider="map425-synthetic",
+                dataset_key=first["identity"],
+                source_entity_type="place",
+                source_entity_id=identity,
+            )
+            if extra_key_prefixes is not None:
+                # 기존 capture가 지원하는 짧은 legacy key의 collation 회귀 전용이다.
+                entity = extra_key_prefixes[index] + identity
+            record = make_source_record_key(
+                provider="map425-synthetic",
+                dataset_key=first["identity"],
+                source_entity_type="place",
+                source_entity_id=identity,
+                raw_payload_hash=digest,
+            )
+            seed = {
+                **first,
+                "feature": str(uuid4()),
+                "identity": identity,
+                "entity": entity,
+                "record": record,
+                "hash": digest,
+                "raw": json.dumps(raw),
+            }
+            for statement in (
+                """INSERT INTO provider_sync.source_entities
+                (source_entity_key,provider_dataset_id,source_entity_type,source_entity_id,
+                 first_seen_at,last_seen_at)
+                VALUES(:entity,:dataset,'place',:identity,now(),now())""",
+                """INSERT INTO provider_sync.source_records
+                (source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+                VALUES(:record,:entity,CAST(:raw AS jsonb),:hash,now())""",
+                """INSERT INTO provider_sync.source_entity_heads
+                (source_entity_key,current_source_record_key,observed_at)
+                VALUES(:entity,:record,now())""",
+                """INSERT INTO feature.features
+                (feature_id,kind,name,category,lifecycle_state,publication_state,quality_state)
+                VALUES(CAST(:feature AS uuid),'place','before','01010100',
+                       'active','published','valid')""",
+                """INSERT INTO feature.feature_places(feature_id,kind,place_kind)
+                VALUES(CAST(:feature AS uuid),'place','tourism')""",
+                """INSERT INTO provider_sync.source_links
+                (feature_id,source_entity_key,source_role,match_method,confidence)
+                VALUES(CAST(:feature AS uuid),:entity,'primary','fixture',100)""",
+            ):
+                await session.execute(text(statement), seed)
+            result.append(seed)
+    return result
+
+
 @pytest.mark.parametrize("mode", ["binary", "encoded"])
 async def test_whole_payload_budgets_reject_before_aggregate(scalar_engines, mode):
     import random
 
     admin, _ = scalar_engines
-    seeds = [await _seed(admin) for _ in range(24 if mode == "binary" else 18)]
+    seeds = await _same_dataset_seeds(admin, 24 if mode == "binary" else 18)
     rng = random.Random(428)
     payload = {
         str(i): "".join(rng.choices("abcdefghijklmnopqrstuvwxyz0123456789", k=240))
@@ -335,11 +398,6 @@ async def test_whole_payload_budgets_reject_before_aggregate(scalar_engines, mod
                 )
             )
         for seed in seeds:
-            await session.execute(
-                text("""UPDATE provider_sync.source_entities
-                SET provider_dataset_id=:target WHERE source_entity_key=:entity"""),
-                {**seed, "target": seeds[0]["dataset"]},
-            )
             await session.execute(
                 text("""UPDATE feature.feature_places
                 SET payload=CAST(:payload AS jsonb),facility_info=CAST(:payload AS jsonb),
@@ -425,3 +483,80 @@ async def test_metadata_helper_dependency_is_available_to_capture_owner(scalar_e
             )
             is True
         )
+
+
+@pytest.mark.parametrize("timezone", ["UTC", "Asia/Seoul", "Pacific/Honolulu"])
+async def test_multiple_rows_fold_matches_canonical_order_and_import_date(scalar_engines, timezone):
+    admin, _ = scalar_engines
+    seeds = await _same_dataset_seeds(admin, 3, extra_key_prefixes=("Zebra한글", "alpha한글"))
+    # 각각 다른 Unicode/escape 값을 주고 실제 hash·집계 네 값을 정본과 비교한다.
+    for seed, value in zip(reversed(seeds), ["가나다", "Zebra", "alpha\n\t"], strict=True):
+        await _set_place(admin, seed, payload={"v": value}, phones=[value])
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(
+            text("SELECT set_config('TimeZone',:timezone,true)"), {"timezone": timezone}
+        )
+        await _gate(session)
+        expected = (
+            (
+                await session.execute(
+                    text("SELECT * FROM feature.current_provider_curation_input_set(:dataset)"),
+                    seeds[0],
+                )
+            )
+            .mappings()
+            .one()
+        )
+        actual = await _capture(session, seeds[0]["dataset"])
+        assert actual["capture_complete"] is True
+        assert tuple(actual[k] for k in _AGGREGATES) == tuple(expected[k] for k in _AGGREGATES)
+        assert actual["source_entity_count"] == actual["input_member_count"] == 3
+
+
+async def test_non_default_entity_key_collation_is_known_rejection(scalar_engines):
+    admin, _ = scalar_engines
+    seed = await _seed(admin)
+    async with AsyncSession(admin) as session, session.begin():
+        await _gate(session)
+        await session.execute(
+            text(
+                "ALTER TABLE provider_sync.source_entities "
+                'ALTER COLUMN source_entity_key TYPE text COLLATE "C"'
+            )
+        )
+        _rejected(await _capture(session, seed["dataset"]), "storage_unsupported")
+        await session.rollback()
+
+
+async def test_record_lookup_uses_bounded_index_with_unrelated_history(scalar_engines):
+    admin, _ = scalar_engines
+    seed, other = await _seed(admin), await _seed(admin)
+    async with AsyncSession(admin) as session, session.begin():
+        await _gate(session)
+        await session.execute(
+            text("""INSERT INTO provider_sync.source_records
+            (source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+            SELECT 'sr_'||substr(md5(:identity||n::text),1,20),:entity,'{}'::jsonb,:hash,now()
+            FROM generate_series(1,5000) AS g(n)"""),
+            {**other, "hash": make_payload_hash({})},
+        )
+        await session.execute(
+            text("""INSERT INTO provider_sync.source_records
+            (source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+            VALUES(:long_key,:entity,'{}'::jsonb,:hash,now())"""),
+            {**other, "long_key": "x" * 16000, "hash": make_payload_hash({})},
+        )
+        plan = await session.scalar(
+            text("""EXPLAIN (FORMAT JSON,COSTS OFF)
+            SELECT pg_column_size(t.raw_data)
+            FROM ONLY provider_sync.source_records t
+            WHERE (CASE WHEN pg_catalog.octet_length(t.source_record_key::text)<=256
+                THEN t.source_record_key::text ELSE NULL::text END)=:record"""),
+            seed,
+        )
+        assert "ix_source_records_bounded_evidence_key" in json.dumps(plan)
+        assert "Index Cond" in json.dumps(plan)
+        actual = await _capture(session, seed["dataset"])
+        assert actual["capture_complete"] is True
+        assert actual["source_entity_count"] == actual["input_member_count"] == 1
+        await session.rollback()

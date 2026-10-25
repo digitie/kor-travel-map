@@ -11,11 +11,17 @@ DECLARE
     v_link record;
     v_core record;
     v_place record;
-    v_capture record;
     v_key text;
     v_record_key text;
     v_feature_id uuid;
     v_raw_hash text;
+    v_record_entity text;
+    v_record_imported_at timestamptz;
+    v_latest_imported_at timestamptz;
+    v_capture_keys text[] := ARRAY[]::text[];
+    v_capture_features uuid[] := ARRAY[]::uuid[];
+    v_capture_hashes bytea[] := ARRAY[]::bytea[];
+    v_encoded_row bytea;
     v_phone text;
     v_bytes bigint := 0;
     v_encoded bigint := 0;
@@ -66,6 +72,14 @@ BEGIN
         reason := 'storage_unsupported'; RETURN NEXT; RETURN;
     END IF;
 
+    -- 배열의 default 정렬이 기존 canonical의 실제 key 열 정렬과 같아야 한다.
+    IF (SELECT a.attcollation FROM pg_attribute AS a
+        WHERE a.attrelid='provider_sync.source_entities'::regclass
+          AND a.attname='source_entity_key' AND NOT a.attisdropped)
+        IS DISTINCT FROM 'pg_catalog."default"'::regcollation THEN
+        reason := 'storage_unsupported'; RETURN NEXT; RETURN;
+    END IF;
+
     -- 수량만 MAX+1 조사한다. 키 정렬/본문/이력 표를 먼저 읽지 않는다.
     SELECT count(*) INTO v_expected_count FROM (
         SELECT 1 FROM ONLY provider_sync.source_entities
@@ -94,7 +108,7 @@ BEGIN
         FROM ONLY provider_sync.source_entities AS t WHERE t.ctid=v_entity_ref.row_tid;
 
         SELECT feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint, pg_column_size(t.current_source_record_key)::bigint]::bigint[], ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL), (pg_column_compression(t.current_source_record_key) IS NOT NULL)]::boolean[], ARRAY[256, 256]::integer[], ARRAY[false, false]::boolean[]) AS bytes INTO v_meta
-        FROM ONLY provider_sync.source_entity_heads AS t WHERE t.source_entity_key=v_key;
+        FROM ONLY provider_sync.source_entity_heads AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key;
         IF NOT FOUND THEN
             reason := 'lineage_incomplete'; RETURN NEXT; RETURN;
         END IF;
@@ -104,24 +118,30 @@ BEGIN
         v_bytes := v_bytes+v_meta.bytes;
         IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
         SELECT t.current_source_record_key INTO STRICT v_record_key
-        FROM ONLY provider_sync.source_entity_heads AS t WHERE t.source_entity_key=v_key;
+        FROM ONLY provider_sync.source_entity_heads AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key;
 
         SELECT feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint, pg_column_size(t.source_record_key)::bigint, pg_column_size(t.raw_payload_hash)::bigint]::bigint[], ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL), (pg_column_compression(t.source_record_key) IS NOT NULL), (pg_column_compression(t.raw_payload_hash) IS NOT NULL)]::boolean[], ARRAY[256, 256, 256]::integer[], ARRAY[false, false, false]::boolean[]) AS bytes INTO v_meta
         FROM ONLY provider_sync.source_records AS t
-        WHERE t.source_record_key=v_record_key AND t.source_entity_key=v_key;
+        WHERE (CASE WHEN pg_catalog.octet_length(t.source_record_key::text)<=256 THEN t.source_record_key::text ELSE NULL::text END)=v_record_key;
         IF NOT FOUND THEN
             reason := 'lineage_incomplete'; RETURN NEXT; RETURN;
         END IF;
         IF v_meta.bytes<0 THEN reason := 'storage_unsupported'; RETURN NEXT; RETURN; END IF;
         v_bytes := v_bytes+v_meta.bytes;
         IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
-        SELECT t.raw_payload_hash INTO STRICT v_raw_hash FROM ONLY provider_sync.source_records AS t
-        WHERE t.source_record_key=v_record_key AND t.source_entity_key=v_key;
+        SELECT t.raw_payload_hash,t.imported_at,t.source_entity_key
+        INTO STRICT v_raw_hash,v_record_imported_at,v_record_entity
+        FROM ONLY provider_sync.source_records AS t
+        WHERE (CASE WHEN pg_catalog.octet_length(t.source_record_key::text)<=256 THEN t.source_record_key::text ELSE NULL::text END)=v_record_key;
+
+        IF v_record_entity IS DISTINCT FROM v_key THEN
+            reason := 'lineage_incomplete'; RETURN NEXT; RETURN;
+        END IF;
 
         v_links := 0;
         FOR v_link_ref IN
             SELECT t.feature_id, feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint, pg_column_size(t.source_role)::bigint, pg_column_size(t.match_method)::bigint]::bigint[], ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL), (pg_column_compression(t.source_role) IS NOT NULL), (pg_column_compression(t.match_method) IS NOT NULL)]::boolean[], ARRAY[256, 256, 256]::integer[], ARRAY[false, false, false]::boolean[]) AS bytes
-            FROM ONLY provider_sync.source_links AS t WHERE t.source_entity_key=v_key LIMIT 2
+            FROM ONLY provider_sync.source_links AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key LIMIT 2
         LOOP
             v_links := v_links+1;
             IF v_links>1 THEN reason := 'membership_unsupported'; RETURN NEXT; RETURN; END IF;
@@ -132,7 +152,7 @@ BEGIN
         END LOOP;
         IF v_links<>1 THEN reason := 'membership_unsupported'; RETURN NEXT; RETURN; END IF;
         SELECT t.source_role,t.match_method,t.confidence INTO STRICT v_link
-        FROM ONLY provider_sync.source_links AS t WHERE t.source_entity_key=v_key;
+        FROM ONLY provider_sync.source_links AS t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=v_key;
         IF v_link.source_role IS DISTINCT FROM 'primary' OR
             (SELECT count(*) FROM (
                 SELECT 1 FROM ONLY provider_sync.source_links WHERE feature_id=v_feature_id LIMIT 2
@@ -188,32 +208,37 @@ BEGIN
             reason := 'shape_unsupported'; RETURN NEXT; RETURN;
         END IF;
         -- 기존 canonical 행을 개별 생성한다. 전체 aggregate를 먼저 만들지 않는다.
-        v_row_bytes := octet_length(convert_to(jsonb_build_array(
+        v_encoded_row := convert_to(jsonb_build_array(
             v_key,v_record_key,v_raw_hash,v_feature_id,v_link.source_role,
             v_link.match_method,v_link.confidence,v_core.row_revision,
             v_core.lifecycle_state,v_core.publication_state,v_core.quality_state,
             to_jsonb(v_place),'[]'::jsonb
-        )::text,'UTF8'));
+        )::text,'UTF8');
+        v_row_bytes := octet_length(v_encoded_row);
         IF v_row_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
         v_encoded := v_encoded+v_row_bytes;
         IF v_encoded>1048576 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
+        v_capture_keys := array_append(v_capture_keys,v_key);
+        v_capture_features := array_append(v_capture_features,v_feature_id);
+        v_capture_hashes := array_append(v_capture_hashes,x_extension.digest(v_encoded_row,'sha256'));
+        v_latest_imported_at := greatest(v_latest_imported_at,v_record_imported_at);
     END LOOP;
     IF v_count IS DISTINCT FROM v_expected_count THEN
         reason := 'membership_unsupported'; RETURN NEXT; RETURN;
     END IF;
 
-    -- STABLE의 동일 snapshot이다. 기존4aggregate/hash/정렬/date를 보존한다.
-    SELECT * INTO STRICT v_capture FROM feature.current_provider_curation_input_set(p_provider_dataset_id);
-    IF v_capture.source_entity_count IS DISTINCT FROM v_count::bigint
-       OR v_capture.input_member_count IS DISTINCT FROM v_count::bigint THEN
-        reason := 'membership_unsupported'; RETURN NEXT; RETURN;
-    END IF;
+    -- 검증한 행만 원 canonical과 동일한 inner digest/정렬/outer digest로 접는다.
+    -- 기존 함수를 재호출해 과거 unbounded index/payload JOIN을 다시 수행하지 않는다.
+    SELECT encode(x_extension.digest(COALESCE(string_agg(
+        u.row_hash,''::bytea ORDER BY u.entity_key,u.feature_id
+    ),''::bytea),'sha256'),'hex') INTO source_input_set_hash
+    FROM unnest(v_capture_keys,v_capture_features,v_capture_hashes)
+        AS u(entity_key,feature_id,row_hash);
+    source_entity_count := v_count::bigint;
+    input_member_count := v_count::bigint;
+    last_source_modified_at := v_latest_imported_at::date;
     capture_complete := true;
     reason := NULL;
-    source_entity_count := v_capture.source_entity_count;
-    input_member_count := v_capture.input_member_count;
-    last_source_modified_at := v_capture.last_source_modified_at;
-    source_input_set_hash := v_capture.source_input_set_hash;
     RETURN NEXT;
 END;
 $$;

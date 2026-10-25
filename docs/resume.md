@@ -1,6 +1,6 @@
 ## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
 
-설계 두 검토와 migration 단위16 PASS를 확인했다. SQL·권한 정본과 통합32개 초안을 추가했다. 단위16 PASS이며 통합은 수집만 확인했다. 실제 PG/공식 oracle/CI·SH 연결은 미완이다. [범위·예산·남은 검증](reports/2026-10-25-bounded-curation-capture.md).
+설계 두 검토와 migration 단위16 PASS를 확인했다. 두 source P2를 보강 중이다. 논리 CASE 조회/제한 hash fold·sameDS seed로 바꾸고 단위35 PASS, 통합37 수집만 확인했다. 실제 PG/공식 oracle/CI·SH 연결은 미완이다. [범위·예산·남은 검증](reports/2026-10-25-bounded-curation-capture.md).
 
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 
