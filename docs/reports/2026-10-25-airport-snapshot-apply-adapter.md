@@ -44,3 +44,19 @@ quota 설정/terminal GC, expired plan reset/SDK0 gateway, 원자 후처리 coor
 기존 public finish 우회 차단과 실제 collector/step retry 연결이 남았다.
 새 profile의 실제2worker/EX/leaf 경합, commit 전후 worker 종료와 응답 유실/lease·quota 장애
 통합 시험 및 전체 CI·live UI·운영 배포/실측 전에는 동시 쓰기를 활성화하지 않는다.
+
+## 준비 판정과 실제 입력의 P1 결박 수정
+
+두 독립 리뷰에서 bc224가 입력A의 실제 eligible 준비를 입력B에 재사용할 수 있음을
+순수 반례로 확인했다. 같은 entity의 변경 raw나 다른 Geo 주소를 가진 canonical artifact도
+기존 `_inputs`와 DB evidence끼리의 비교만으로는 source DML을 막지 못했다.
+초기9개 mock 시험은 이 반례를 포함하지 못했으며 실제 PG 성공을 뜻하지 않는다.
+
+기존 RR reader 아래 의미 판정을 공유 pure assessment로 분리했다. apply는 실제 입력 bytes를
+decode하고 잠금 뒤 fresh SD evidence를 읽은 후 실제 bundle/Geo와 함께 이 평가를 다시 한다.
+기존 eligible 플래그만으로 DML에 들어가지 않는다. 기존 준비 API signature와 RR/read-only
+요구는 유지하며 새 helper에 DB/SDK/Geo I/O는 없다. 평가 실패는 EX로 암묵 전환하지 않는다.
+
+실제 converter·codec로 만든 대체 raw의 부정 반례를 추가했다. 신규10+기존 준비14개가
+24 PASS/1.73초였고 Ruff3파일도 통과했다. 초기 refactor의 dataset 지역변수 누락은 Ruff에서
+확인해 고쳤다. 잠금/권한/전체430 PG 수용은 아직 별도이며 원 bc224 HOLD는 보존한다.

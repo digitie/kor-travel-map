@@ -192,6 +192,27 @@ async def prepare_transport_airport_reobservation(
     )
     async with asyncio.timeout(3):
         evidence = await read_transport_airport_evidence(session, dataset_id)
+        return await assess_transport_airport_reobservation_evidence(ordered, evidence, geo=geo)
+
+
+async def assess_transport_airport_reobservation_evidence(
+    bundles: Iterable[FeatureBundle],
+    evidence: AirportEvidenceEnvelope,
+    *,
+    geo: GeoLoadContext | None = None,
+) -> AirportReobservationPreparation:
+    """실제 입력과 주어진 정본 DB evidence의 의미를 다시 대조한다. DB/SDK/Geo I/O는 없다.
+
+    apply는 잠금 뒤 fresh SD를 decode한 evidence와 실제 저장 입력을 함께 이 경계로 보낸다.
+    과거 preparation의 eligible 플래그를 다른 artifact의 쓰기 권위로 재사용하지 않는다.
+    """
+    if not _geo_context_valid(geo) or type(evidence) is not AirportEvidenceEnvelope:
+        raise ValueError("invalid canonical airport assessment context")
+    dataset_id = evidence.dataset_id
+    ordered = bounded_full_snapshot(
+        bundles, options=_OPTIONS, geo=geo, retire_geometryless_areas=True
+    )
+    async with asyncio.timeout(3):
         if not evidence.evidence_complete:
             assert evidence.reason is not None
             return AirportReobservationPreparation(False, evidence.reason.value, evidence)

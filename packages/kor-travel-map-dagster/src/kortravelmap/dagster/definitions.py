@@ -17,6 +17,7 @@ from dagster import (
     Field as DagsterField,
 )
 
+from .airport_snapshot_runtime import load_airport_snapshot_runtime
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
 from .feature_operation_completion import FEATURE_OPERATION_COMPLETION_JOBS
@@ -114,8 +115,14 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
 }
 """resource key → 같은 값을 제공하는 ``KorTravelMapSettings`` 속성명."""
 
+@resource(description="이미지 설치본을 검증한 Airport 복구 pin. 기본 비활성.")
+def _airport_snapshot_runtime_resource() -> object:
+    return load_airport_snapshot_runtime()
+
+
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "kor_travel_map_client": kor_travel_map_client_resource,
+    "airport_snapshot_runtime": _airport_snapshot_runtime_resource,
     "feature_operation_guard": feature_operation_guard_resource,
     "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,
