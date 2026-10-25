@@ -1222,6 +1222,9 @@ async def test_provider_generation_primitives_require_internal_finalizer(
     dagster = _runtime_engine(migrated_engine, login="ktm_feature_service")
     try:
         async with migrated_engine.begin() as connection:
+            await connection.execute(
+                text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+            )
             root_job_id = str(
                 await connection.scalar(
                     text(
@@ -1463,7 +1466,7 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
             provider_dataset_id=membership.provider_dataset_id,
         )
         async with session_factory.begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
             await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
@@ -1519,7 +1522,7 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
                 )
 
         async with session_factory.begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             terminal = await reconcile_dagster_feature_run(
                 session,
                 dagster_run_id=run_id,
@@ -1666,7 +1669,7 @@ async def test_provider_child_rejects_post_load_semantic_commit(
     session_factory = async_sessionmaker(dagster, expire_on_commit=False)
     try:
         async with session_factory.begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
             await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
@@ -1750,7 +1753,7 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
             provider_dataset_id=membership.provider_dataset_id,
         )
         async with session_factory.begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
             await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
@@ -1772,7 +1775,7 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
                 curation_input_set_hash=str(seal["source_input_set_hash"]),
             )
         async with session_factory.begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             terminal = await reconcile_dagster_feature_run(
                 session,
                 dagster_run_id=run_id,
@@ -1888,7 +1891,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
 
         async with dagster.connect() as connection:
             transaction = await connection.begin()
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             with pytest.raises(DBAPIError) as missing_seal:
                 await connection.execute(
                     text(
@@ -1939,6 +1942,9 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         ):
             async with dagster.connect() as connection:
                 transaction = await connection.begin()
+                await connection.execute(
+                    text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+                )
                 with pytest.raises(DBAPIError) as denied:
                     await connection.execute(
                         text(statement),
@@ -1975,6 +1981,9 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         ):
             async with api.connect() as connection:
                 transaction = await connection.begin()
+                await connection.execute(
+                    text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+                )
                 with pytest.raises(DBAPIError) as denied:
                     await connection.execute(
                         text(statement),
@@ -1993,7 +2002,7 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
             terminal_dagster, expire_on_commit=False
         )
         async with terminal_session_factory.begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             await session.execute(
                 text(
                     """
@@ -2121,6 +2130,9 @@ async def test_provider_cancellation_lifecycle_requires_typed_api_command(
         ):
             async with api.connect() as connection:
                 transaction = await connection.begin()
+                await connection.execute(
+                    text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+                )
                 with pytest.raises(DBAPIError) as denied:
                     await connection.execute(
                         text(
@@ -2238,7 +2250,7 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
             provider_dataset_id=membership.provider_dataset_id,
         )
         async with async_sessionmaker(dagster, expire_on_commit=False).begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
             await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
@@ -2290,7 +2302,7 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
                 )
 
         async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
-            await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             assert await set_pipeline_cancellation_run_result(
                 session,
                 cancellation_id=cancellation_id,

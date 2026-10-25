@@ -1,5 +1,12 @@
 ## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
 
+## 2026-10-25 — 430 전체 PG gate 첫 원인 수정 준비
+
+7f40 glibc118FAIL/30ERROR 원문 보존. unchanged foreign winner의 불필요 INSERT와
+정확 관리자 cleanup/RC·bounded/reset fixture를 수정 준비했다.25unit PASS/63collect,
+새SQL 두 리뷰·실제 paired/전체 PG 재수용은 미완이며 운영 배포는 보류다.
+
+
 최종1093 API/schema430·동등351입력의7839 production UI로 실제 로그인/취소·replay/DB1attempt/WS17frame/logout 14판정 PASS와 소유 자원 정리를 확인했다. 1093 CI의 과거429 역비교1FAIL을 고정 fixture로 바로잡고 전체 unit4180 PASS/6SKIP을 확인했다. 제품·SQL·권한 변경0, 원 실패 보존이다. 최종 CI·운영 배포·실제 두 dataset 동시 쓰기와 Common 후속은 미완이다. [실제 증거와 범위](reports/2026-10-25-snapshot-recovery-final-candidate-ui.md).
 
 ## 2026-10-25 — 공항 snapshot 원자적 후처리 구현 중

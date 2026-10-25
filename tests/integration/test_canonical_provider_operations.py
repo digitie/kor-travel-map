@@ -418,6 +418,8 @@ async def _delete_committed_feature_tree(
     cancellation_id: str | None = None,
 ) -> None:
     async with AsyncSession(engine) as cleanup, cleanup.begin():
+        # 관리자 fixture 정리도 실제 terminal/cancellation prefix 뒤에만 행을 만진다.
+        await cleanup.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
         await cleanup.execute(
             text(
                 "UPDATE ops.import_jobs SET cancellation_id=NULL, "
@@ -1236,7 +1238,7 @@ async def test_b2_mcst_partial_attempt_is_preserved_by_b3_failure_record(
 async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(
     migrated_session: AsyncSession,
 ) -> None:
-    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
     created_at = datetime(2026, 7, 15, 1, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=2)
     finished_at = started_at + timedelta(seconds=3)

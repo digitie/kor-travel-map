@@ -386,3 +386,58 @@ def test_native_null_hours_forward_sidecar_preserves_private_owner_and_all_other
         "IF v_place.kind IS DISTINCT FROM 'place' OR v_place.business_hours IS NOT NULL",
     ) == old
     assert migration._sections(filename, declarations) == ((migration._SCHEMA_OWNER, current),)
+
+def test_projector_noop_forward_sidecar_skips_only_exact_existing_base():
+    filename = "_430_project_provider_field_candidates_noop.sql"
+    declarations = dict(migration._SIDECARS)[filename]
+    assert declarations == (
+        (
+            "feature._project_provider_field_candidates",
+            "FUNCTION",
+            "(uuid)",
+            migration._STATE_OWNER,
+            False,
+            False,
+        ),
+    )
+    old = (_ROOT / "alembic/versions/_412__project_provider_field_candidates.sql").read_text()
+    current = (_ROOT / "alembic/versions" / filename).read_text()
+    old_start = old.index("        INSERT INTO feature.feature_base_field_values")
+    old_end = old.index("        IF NOT feature.has_active_feature_override", old_start)
+    new_start = current.index("        -- ON CONFLICT")
+    new_end = current.index("        IF NOT feature.has_active_feature_override", new_start)
+    inserted = current[
+        current.index(
+            "            INSERT INTO feature.feature_base_field_values", new_start
+        ) : new_end
+    ]
+    inserted = inserted.removesuffix("        END IF;\n")
+    assert (
+        "".join(line[4:] if line.strip() else line for line in inserted.splitlines(keepends=True))
+        == old[old_start:old_end]
+    )
+    restored = current[:new_start] + old[old_start:old_end] + current[new_end:]
+    assert (
+        restored.removeprefix(
+            "-- 430 strict guard와 기존 scalar projector의 실제 no-op를 맞춘다. "
+            "권한/정책 의미는 보존한다.\n"
+        ).replace("CREATE OR REPLACE FUNCTION", "CREATE FUNCTION", 1)
+        == old
+    )
+    guard = current[
+        new_start : current.index(
+            "            INSERT INTO feature.feature_base_field_values", new_start
+        )
+    ]
+    assert "IS NOT DISTINCT FROM" in guard
+    for field in (
+        "provider_dataset_id",
+        "source_entity_key",
+        "source_record_key",
+        "source_raw_payload_hash",
+        "value_json",
+        "value_geometry",
+        "observed_at",
+    ):
+        assert "base." + field in guard
+    assert migration._sections(filename, declarations) == ((migration._STATE_OWNER, current),)

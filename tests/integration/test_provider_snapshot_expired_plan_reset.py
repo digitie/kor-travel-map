@@ -34,6 +34,28 @@ async def _bounded(session):
     await session.execute(text("SET LOCAL lock_timeout='900ms'"))
 
 
+@pytest.fixture(autouse=True)
+async def _release_this_case_ready_plans(scalar_engines):
+    """이 testcase가 생성한 ready plan만 정본 cancel로 해제한다. lease 대기를 하지 않는다."""
+    admin, runtime = scalar_engines
+    query = text("""SELECT attempt_id,owner FROM ops.feature_write_attempts
+        WHERE idempotency_key LIKE 'reset-plan:%' AND status='ready'""")
+    async with AsyncSession(admin) as observer:
+        before = {row.attempt_id for row in (await observer.execute(query)).all()}
+    yield
+    async with AsyncSession(admin) as observer:
+        created = [
+            row for row in (await observer.execute(query)).all() if row.attempt_id not in before
+        ]
+    for attempt, owner in created:
+        async with AsyncSession(runtime) as session, session.begin():
+            await _bounded(session)
+            assert await session.scalar(
+                text("SELECT ops.cancel_scoped_feature_write(:attempt,:owner)"),
+                {"attempt": attempt, "owner": owner},
+            )
+
+
 async def _ready(session, dataset):
     args = dict(attempt=str(uuid4()), owner=str(uuid4()), input="a" * 64)
     await session.execute(

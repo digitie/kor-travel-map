@@ -30,6 +30,9 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
     suffix = uuid4().hex
     actor = f"admin:tvn40-source-{suffix}"
     async with migrated_engine.begin() as connection:
+        await connection.execute(
+            text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+        )
         dataset_id = int(
             await connection.scalar(
                 text(
@@ -361,7 +364,7 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
             await connection.execute(text("RESET ROLE"))
 
         async with dagster.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             finalized = (
                 await connection.execute(
                     text(
@@ -475,7 +478,7 @@ async def test_source_operator_cas_and_provider_observation_are_disjoint(
         ) == (3, 2, 2)
 
         async with dagster.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             archived_replay = (
                 await connection.execute(
                     text(

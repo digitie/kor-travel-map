@@ -38,6 +38,19 @@ _SIDECARS: Final = (
         ),
     ),
     (
+        "_430_project_provider_field_candidates_noop.sql",
+        (
+            (
+                "feature._project_provider_field_candidates",
+                "FUNCTION",
+                "(uuid)",
+                _STATE_OWNER,
+                False,
+                False,
+            ),
+        ),
+    ),
+    (
         "_430_bounded_curation_null_hours.sql",
         (
             (
@@ -45,6 +58,35 @@ _SIDECARS: Final = (
                 "FUNCTION",
                 "(bigint)",
                 _SCHEMA_OWNER,
+                False,
+                False,
+            ),
+        ),
+    ),
+    (
+        "_430_provider_finalization_catalog_rc.sql",
+        (
+            (
+                "feature.refresh_curated_source_observation",
+                "PROCEDURE",
+                "(bigint,uuid)",
+                _COMMAND_OWNER,
+                False,
+                False,
+            ),
+            (
+                "feature.materialize_theme_candidate_generation",
+                "PROCEDURE",
+                "(uuid,text,uuid,uuid,bigint,text,jsonb)",
+                _COMMAND_OWNER,
+                False,
+                False,
+            ),
+            (
+                "feature.sync_concierge_theme_catalog",
+                "PROCEDURE",
+                "(bigint,uuid)",
+                _COMMAND_OWNER,
                 False,
                 False,
             ),
