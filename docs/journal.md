@@ -1,3 +1,8 @@
+### 2026-10-25 공항427 준비 경계 소스
+
+정본 converter/loader 기반 공항1→15·R1/R2/Geo 시험1개와 비활성 준비 함수를 추가했다.
+순수12 PASS/통합 collect1이며 PG0다. 실제15fit·collector·SH 활성화는 미완이다.
+
 ## 2026-10-25 공항427 key/index 보강
 
 - 논리CASE index3·caller 서버상한·area EXISTS, provenance P2 정정. 순수143 PASS.

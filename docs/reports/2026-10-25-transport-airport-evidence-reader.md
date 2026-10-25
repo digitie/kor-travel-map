@@ -191,3 +191,33 @@ Heritage primitive 역사 참고 안에 분리했다. Airport427 실제 PG/oracl
 서버 상한의0/초과/형식8거부·최소/최대2허용과 새index/role/동일CASE source 검사를
 추가했다. 실제 index 설치/사용, area 분기 실제도달, SD/RR/메모리/collector 수용은
 아니다. 새 고정 source는 다시 root/J 독립 delta 검토를 받은 뒤에만 실제 PG로 간다.
+
+
+## 실제 준비 경계와 공항1→15 시험 소스 (미실행)
+
+`providers.kor_travel_transport_evidence`는 최종 입력을 기존 EX snapshot의 MAX+1/전체
+artifact 예산으로 먼저 제한한 뒤 caller 소유 RR/read-only snapshot에서 공개 SD를 읽는다.
+입력 entity 집합이 DB 전체 EOF 집합과 정확히 같아야 하며 입력 EOF를 upstream EOF로
+바꾸지 않는다. 반환 성공은 `collector_ready=False`이며 kernel 잠금 뒤 DB 재검증이 여전히
+필수다. 새 DB 쓰기/attempt/collector 선택은 없다.
+
+저장 R1 raw는 기존 Transport dataclass 복원과 기존 converter로 재생성한다. 정본
+provider patch payload로 24개 비이름 값/geometry/null을 비교하고 이름의 R2 record와
+후보·base 값을 별도로 결박한다. 좌표가 있으면 실제 snapshot stamp의 `called`/현재
+Geo token/주소/좌표와 versioned GeoFacts를 결합한다. 좌표 없는 `not_requested`는 별도다.
+현재 raw 변경은 EX 진단을 유지한다. SQL 오류·취소·timeout은 fallback으로 감추지 않는다.
+거부된 준비 진단이 보유하는 DB evidence도 apply 허가가 아니다.
+
+새 순수12시험은 정본 converter+synthetic wire를 사용한 무좌표/Geo positive, R1/R2
+분리, bool이 아닌 Geo model_copy flag 거부, base/변경raw/scope/Geo 부정, 알려진 SD 거부와 원 SQL 예외 전파,2731개 소비 뒤
+첫 SQL 이전 중단이다. 실제 DB 저장 shape 증명은 아니다. 첫 순수 fixture는 DTO에 없는
+`Feature.legal_dong_code` 접근으로9FAIL했고 보존했다. 정본 patch payload의 코드 값을
+사용하도록 fixture만 고친 뒤9PASS, R1/R2 시험 추가 후10PASS1.20s, 잘못된 Geo bool
+경계2개를 추가한 최종12PASS1.19s다.
+
+새 integration testcase는 같은 소유 DS에 정본 loader+Geo context→shadow capture→명시
+lab cutover로1개를 만들고, EX sealed scalar apply로 이름 R2/비이름 R1과 stamp 보존을
+검사하도록 작성했다. 이후 같은 DS에14개를 정본 추가한다. 실제15개 positive 또는
+정확 `budget_exceeded`/전체 items[] 거부를 기록하며15fit를 전제하지 않는다.
+운영 공항15/실 Geo HTTP/whole upstream EOF/SH 적용 수용이 아니다. 현재 collect1뿐이며
+실제 PG 실행, 공식427 oracle, 새 인덱스의 대규모 history EXPLAIN/메모리는 미완이다.
