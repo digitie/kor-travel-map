@@ -80,19 +80,28 @@ BEGIN
     END IF;
     PERFORM ops._lock_scoped_feature_write_scope(v_member.provider_dataset_id,'[]'::jsonb,false);
     SELECT root.dagster_run_id INTO v_run
-    FROM ops.import_jobs root JOIN ops.import_jobs child ON child.parent_job_id=root.job_id
+    FROM ops.import_jobs root
     WHERE root.job_id=p_root AND root.kind='provider_feature_load_run'
       AND root.status='running' AND root.dagster_run_status='STARTED'
       AND root.dagster_run_id IS NOT NULL
       AND root.cancellation_id IS NULL AND root.cancellation_requested_at IS NULL
       AND root.quarantined_at IS NULL AND root.root_id=root.job_id AND root.root_kind='import_job'
-      AND child.job_id=p_source_job AND child.kind='provider_feature_load'
-      AND child.status IN ('queued','running') AND child.dagster_run_id=root.dagster_run_id
+    ;
+    IF NOT FOUND OR octet_length(v_run) NOT BETWEEN 1 AND 128 THEN
+        RAISE EXCEPTION 'snapshot root is not active' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    -- metadata 길이를 먼저 확인한 CASE 안에서만 저장된 child run을 비교한다.
+    PERFORM 1 FROM ops.import_jobs child
+    WHERE child.job_id=p_source_job AND child.parent_job_id=p_root AND child.kind='provider_feature_load'
+      AND child.status IN ('queued','running')
+      AND CASE WHEN octet_length(child.dagster_run_id) BETWEEN 1 AND 128
+          THEN child.dagster_run_id=v_run ELSE false END
       AND child.cancellation_id IS NULL AND child.cancellation_requested_at IS NULL
-      AND child.quarantined_at IS NULL AND child.root_id=root.job_id AND child.root_kind='import_job'
+      AND child.quarantined_at IS NULL AND child.root_id=p_root AND child.root_kind='import_job'
       AND child.dataset_membership_mode='single'
       AND (SELECT count(*) FROM ops.import_job_datasets members WHERE members.job_id=child.job_id)=1;
-    IF NOT FOUND OR octet_length(v_run) NOT BETWEEN 1 AND 128 THEN
+    IF NOT FOUND THEN
         RAISE EXCEPTION 'snapshot member is not an active single child' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_member_binding';
     END IF;
@@ -102,7 +111,7 @@ BEGIN
       ON operation.provider_dataset_id=dataset.provider_dataset_id
     WHERE dataset.provider_dataset_id=v_member.provider_dataset_id AND dataset.is_active
       AND operation.operation_key=v_member.operation_key AND operation.is_enabled
-      AND operation.operation_kind='feature_load';
+      AND operation.operation_kind='refresh';
     IF v_dataset.provider<>'kor-travel-transport' OR v_dataset.dataset_key<>'transport_airports' THEN
         RAISE EXCEPTION 'snapshot registration supports Airport v1 only' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_registration_domain';
@@ -120,6 +129,19 @@ BEGIN
        OR (SELECT count(*) FROM jsonb_object_keys(v_context))<>12
        OR NOT (v_context ?& v_context_keys) THEN
         RAISE EXCEPTION 'unexpected snapshot envelope keys' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF jsonb_typeof(v_payload->'version') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(v_context->'version') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(v_context->'dropped') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(v_context->'source_observations') IS DISTINCT FROM 'number' THEN
+        RAISE EXCEPTION 'snapshot counters must be JSON numbers' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF scale((v_payload->'version')::numeric)<>0 OR scale((v_context->'version')::numeric)<>0
+       OR scale((v_context->'dropped')::numeric)<>0
+       OR scale((v_context->'source_observations')::numeric)<>0 THEN
+        RAISE EXCEPTION 'snapshot counters must be integers' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_registration_domain';
     END IF;
     IF v_payload->'version' IS DISTINCT FROM '1'::jsonb
@@ -233,6 +255,14 @@ BEGIN
         RETURN QUERY SELECT v_existing.snapshot_id,false,NULL::bigint,NULL::uuid;
         RETURN;
     END IF;
+    -- 최초 INSERT의 FK도 tuple KEY SHARE를 잡는다. canonical root→child→member를 선취득한다.
+    -- duplicate/claim/renew/apply의 tracking tuple 잠금0과 이 초기 등록 예외를 혼동하지 않는다.
+    PERFORM 1 FROM ops.import_jobs WHERE job_id=p_root FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'snapshot root disappeared' USING ERRCODE='40001'; END IF;
+    PERFORM 1 FROM ops.import_jobs WHERE job_id=p_source_job FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'snapshot child disappeared' USING ERRCODE='40001'; END IF;
+    PERFORM 1 FROM ops.import_job_datasets WHERE import_job_dataset_id=p_member AND job_id=p_source_job FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'snapshot member disappeared' USING ERRCODE='40001'; END IF;
     v_bytes:=octet_length(p_payload)::bigint+octet_length(p_context)::bigint+8192;
     FOREACH v_quota IN ARRAY ARRAY[0::bigint,v_member.provider_dataset_id] LOOP
         SELECT * INTO v_limit FROM ops.provider_snapshot_quota_limits quota

@@ -8,8 +8,9 @@
 
 P SH를 먼저 얻고 실제 parent SHARE → own whole ops scope UPDATE를 거친다. root/source child/member
 UUID에서 dataset/triple/run을 DB가 해석한다. root는 running/STARTED, child는 기존 queued/running과
-single membership만 허용한다. 취소·quarantine·비활성 dataset/operation을 거부하며 tracking 행을
-새로 잠그거나 L을 뒤늦게 취득하지 않는다. single membership의 기존 DB topology 계약을 재사용한다.
+single membership만 허용한다. 취소·quarantine·비활성 dataset/operation을 거부하며 L을 뒤늦게 취득하지 않는다.
+최초 등록은 artifact FK의 자동 tuple 잠금을 고려해 root→child→member KEY SHARE를 quota 전에
+선취득한다. duplicate/claim/renew/apply의 tracking tuple 잠금0과 이 최초 등록 예외는 다르다. single membership의 기존 DB topology 계약을 재사용한다.
 
 입력 artifact/context는 각각1MiB/8KiB로 제한한 뒤 JSON header를 검사한다. 기존 artifact6/pins9와
 W observation context12키를 그대로 사용한다. provider/dataset/entity, 원 run/generation,
@@ -26,8 +27,11 @@ lease5..300초는 caller가 명시한다. commit 응답 유실 뒤 lookup/만료
 
 ## 소유권·미완
 
-최종 wrapper는 SchemaOwner table/SD owner와 PUBLIC/runtime raw권한0, 기존 provider executor만
-등록 EXEC를 정확히 배선해야 한다. 현재 SQL의 role 검사는 session LOGIN의 기존 executor membership을
+최종 wrapper는 SchemaOwner table owner, 기존 CurationCommandOwner SD owner와 필요한
+private table SELECT/INSERT/UPDATE·scope helper 의존 EXEC를 배선해야 한다. PUBLIC/runtime raw권한0과
+기존 provider executor만 등록 EXEC를 허용하며 삭제권한을 추가하지 않는다. CommandOwner의 기존
+provider parent SELECT/UPDATE(PK) 및 tracking SELECT/UPDATE 권한을 재사용한다. 추가 private 의존
+EXEC는 `_arm_scoped_feature_write_deadline()`와 `_lock_scoped_feature_write_scope(bigint,jsonb,boolean)`다. 현재 SQL의 role 검사는 session LOGIN의 기존 executor membership을
 확인하며, 관리자의 명시 SET ROLE/임의 SQL 전체를 물리 신원으로 증명하지 않는다.
 
 quota 설정·GC 반환은 별도 typed/admin 경계다. active/applying/unsealed GC0, apply/renew/finish의
@@ -35,5 +39,19 @@ quota 접근0과 실제 paired lock/rollback 시험이 필요하다. logical quo
 물리 상한이 아니다. storage/controller 입력과 후속 결과 권위 연결, 원본 재사용·SDK0 자동 복구,
 8target/전체 writer closure와 두 수집기 운영은 아직 미완이다.
 
-첫 checkpoint는 SQL source 보존만이다. 관련 integration source와 독립 두 리뷰·실제 owned PG,
-공유430 migration 합성은 다음 단계이며 현재 실제 PG 실행0이다.
+첫 checkpoint4780은 SQL source만 보존했다. 다음 통합 source는 실제 service LOGIN 정상등록·중복의
+quota 미접근·원 lease/fence 불변, immutable 입력거부, header/queued root 거부, 관리자 quota 장애
+주입의 전체 rollback, 실제 L-only leaf root 보유 중 등록의 유한 대기/완료를 준비한다. private raw
+관찰은 관리자만 하며 runtime SELECT/INSERT/UPDATE/DELETE를 허용하지 않는다. 관리자 quota 오류
+주입은 실제 LOGIN 성공 증명과 구분한다. 최초 문법/형식 점검의 스타일 오류는 고쳤으며,
+collect-only 외 실제 PG·SQL실행/공유430 migration·원자 복구 수용은 아직0이다.
+
+첫4780 초안의 operation kind 추가 제한을 기존 schema와 다시 대조했다. 정본 membership scope는
+`refresh_only` CHECK/FK를 가지므로 Dagster job kind와 registry operation kind를 혼동한
+`feature_load` 조건은 source 단계에서 `refresh`로 정렬했다. 원 초안은 보존하며 실제 PG 실패나
+수용 결과로 세지 않는다. 최초 FK의 tracking tuple 잠금0 설명도 root→child→member 선취득으로
+정정했다. FK를 삭제하거나 공유 fixture/기존 CHECK를 바꾸지 않았다.
+
+후속 source checkpoint의 정적 확인은 Ruff/format·redaction·diff 통과와 통합15개 collect-only
+1.16초다. collection은 fixture/SQL 실행 또는 정상 등록 수용이 아니다. 두 source 리뷰·공유430
+배선과 별도 owned PG gate 전 실제 실행하지 않는다.
