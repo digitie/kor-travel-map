@@ -924,6 +924,7 @@ async def test_foreign_changed_base_still_rejects_inside_manifest_feature(scalar
         assert after == before
     finally:
         async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout='8s'"))
             assert await session.scalar(
                 text("SELECT ops.cancel_scoped_feature_write(:attempt,:owner)"),
                 {"attempt": attempt, "owner": owner},
@@ -1124,6 +1125,7 @@ async def test_removed_own_candidate_requires_fresh_ex_plan_for_foreign_winner(s
             )
     finally:
         async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout='8s'"))
             assert await session.scalar(
                 text("SELECT ops.cancel_scoped_feature_write(:attempt,:owner)"),
                 {"attempt": sh_attempt, "owner": sh_owner},

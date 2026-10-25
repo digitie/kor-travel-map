@@ -82,3 +82,9 @@ tracking25/RC11/reset9 및 기존 scalar16은 통과했다. 새 scalar3개는 SQ
 SDK53파일, 실제19import hash 및 원raw8개 hash를 확인했다. exact CID 부재/UUID0/
 전체 scalar label0/owned volume1부재를 다시 조회했고 PG 슬롯을 반환했다.
 이 보충 확인은 원runner PASS나 paired3 성공으로 세지 않는다.
+
+새3만 고정9c4f로 재시험한 결과1PASS/2FAIL(19.33초)이다. unchanged foreign winner
+positive는 본체 통과했다. 나머지 두 case는 SH23514/rollback·원본불변 단언 뒤 finally의
+typed cancel TX에서 statement timeout 미설정으로 kernel cap23514가 발생했다. 두 cleanup
+TX에만 기존 apply와 같은8초 상한을 명시하며 제품guard/원단언을 유지한다. EX handoff
+후반은 이 cleanup 실패로 미도달이므로 성공으로 세지 않는다. 원r2 결과와 정확정리는 보존한다.
