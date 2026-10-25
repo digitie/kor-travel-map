@@ -642,7 +642,7 @@ def _sqlite_pool():
     )
 
 
-def test_sqlalchemy_interrupted_invalidation_can_terminate_captured_detached_native(monkeypatch):
+def test_sqlalchemy_interrupted_invalidation_can_terminate_captured_native(monkeypatch):
     engine = _sqlite_pool()
     connection = engine.connect()
     proxy = connection.connection
@@ -652,17 +652,24 @@ def test_sqlalchemy_interrupted_invalidation_can_terminate_captured_detached_nat
     def interrupt_before_close(_driver):
         raise asyncio.CancelledError("injected before native close")
 
-    monkeypatch.setattr(engine.dialect, "do_terminate", interrupt_before_close)
     try:
-        with pytest.raises(asyncio.CancelledError):
-            connection.invalidate()
-        # 실 SQLAlchemy invalidate finally의 상태: native close 미완이어도 proxy는 이미 비운다.
-        assert connection.invalidated
+        # 최초 close가 취소된 경계만 주입한다. cleanup까지 영구 취소하는 가짜 dialect는 아니다.
+        with monkeypatch.context() as fault:
+            fault.setattr(engine.dialect, "do_terminate", interrupt_before_close)
+            with pytest.raises(asyncio.CancelledError):
+                connection.invalidate()
         assert not connection.closed
-        assert proxy.driver_connection is None
-        assert proxy.dbapi_connection is None
         assert not native.closed
-        assert engine.pool.checkedout() == 0
+        if connection.invalidated:
+            # SQLAlchemy2.0.55: finally가 proxy를 비우고 slot을 반환한다.
+            assert proxy.driver_connection is None
+            assert proxy.dbapi_connection is None
+            assert engine.pool.checkedout() == 0
+        else:
+            # constraints의2.0.54: 취소 직전의 정확 원 handle/proxy가 여전히 붙어 있다.
+            assert proxy.driver_connection is native
+            assert proxy.dbapi_connection is native
+            assert engine.pool.checkedout() == 1
 
         service._discard_exact_backend(backend, RuntimeError("caller cancel"))
         assert native.closed

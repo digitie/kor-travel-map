@@ -144,3 +144,21 @@ T eddcc7e88493fe72cce65373abc0f499bbdb0071188d6dd159ff08fdee5d5a30.
 a216f362의 첫 CI는 Python 3.11/3.12/3.13에서 각각 3,827 PASS·7 SKIP와 같은 두 계약 핀 검사 FAIL을 냈다. 기존 503 응답 description 두 곳의 DB 연결 정리 문구를 OpenAPI에 반영하면서 vNext admin baseline과 pending T-VN-40 receipt의 full-admin SHA를 함께 갱신하지 못한 원인이다. PG 통합 lane은 실행되지 않았다. 원 CI 로그는 보존하며 제품 회귀 실패나 PG PASS로 계산하지 않는다.
 
 이번 수정은 두 정본 SHA와 그 artifact freeze 상수 및 변경 사유만 원자 갱신한다. user/service spec·제품·통합시험은 그대로이며, PinVi re-vendor·paired live 검증 전 receipt는 계속 pending이다. 새 정확 CI와 live UI·배포 수용은 별도 미완이다.
+
+
+## SQLAlchemy 정본 constraint와 취소 fixture
+
+3aa234의 다음 정확 CI는 core 3,829 PASS·7 SKIP 뒤 API 단위시험의 SQLAlchemy
+invalidation 관측 한 곳에서 실패했다. CI의 정본 constraint는2.0.54이며, 로컬45개와
+기존 owned PG는2.0.55였다.2.0.55는 취소가 native close를 끊어도 finally에서 proxy를
+비우지만2.0.54는 정확 원 handle/proxy를 유지한다. 제품은 두 상태를 각각 live ownership과
+invalidated-detached ownership으로 다루며 이 수정에서 제품·의존성·통합시험은 바꾸지 않는다.
+
+원 단위시험을 cached2.0.54에서 그대로 실행해 실패를 재현했다. fault는 최초 invalidation에만
+주입하고 정리 전에 원 dialect를 복원한다. 두 버전의 실제 ownership 상태를 각각 정확히
+검사한 뒤 원 native 종료1회·Connection 닫힘·pool checkout0을 같은 조건으로 확인한다.
+정상 반환·다른 checkout 보호 회귀도 그대로 유지한다. 원 CI/재현 로그는 보존하며 실제
+PostgreSQL2.0.54 동작과 최종 CI/Live UI·배포 수용은 이 순수시험만으로 승격하지 않는다.
+
+설치·공유 venv 변경 없이 cache의 실제2.0.54/2.0.55를 격리 import해 기존 취소 관련45개를
+각각4.65초/4.29초에 모두 통과했다. 이는 순수 회귀이며 새 실제 PG 수용 횟수에 합산하지 않는다.
