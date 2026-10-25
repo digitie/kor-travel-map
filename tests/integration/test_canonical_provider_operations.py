@@ -418,6 +418,8 @@ async def _delete_committed_feature_tree(
     cancellation_id: str | None = None,
 ) -> None:
     async with AsyncSession(engine) as cleanup, cleanup.begin():
+        # 관리자 fixture 정리도 실제 terminal/cancellation prefix 뒤에만 행을 만진다.
+        await cleanup.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
         await cleanup.execute(
             text(
                 "UPDATE ops.import_jobs SET cancellation_id=NULL, "

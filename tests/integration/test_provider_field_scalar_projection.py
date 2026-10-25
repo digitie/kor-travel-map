@@ -863,3 +863,60 @@ async def test_active_fieldset_change_is_rejected_atomically(scalar_engines):
     with pytest.raises(DBAPIError, match="fieldset"):
         await shrink()
     assert await state() == before
+
+
+async def test_foreign_unchanged_winner_preserves_base_revision_and_clock(scalar_engines):
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    query = text("""SELECT to_jsonb(base) FROM feature.feature_base_field_values base
+        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C""")
+    async with AsyncSession(admin) as observer:
+        before = (await observer.execute(query, {"feature": feature})).scalars().all()
+    await _refresh(runtime, feature, datasets[1], entities[1], {"core.name": "nonwinning-name"})
+    async with AsyncSession(admin) as observer:
+        after = (await observer.execute(query, {"feature": feature})).scalars().all()
+    assert after == before
+    assert {row["provider_dataset_id"] for row in after} == {datasets[0]}
+
+
+async def test_foreign_changed_base_still_rejects_inside_manifest_feature(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    from kortravelmap.infra.scoped_feature_writes import begin_scoped_feature_write
+
+    admin, runtime = scalar_engines
+    feature, datasets, _ = await _seed(admin)
+    await _activate(admin, feature)
+    attempt, owner, digest = await _plan(runtime, feature, datasets[1])
+    query = text("""SELECT to_jsonb(base) FROM feature.feature_base_field_values base
+        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C""")
+    async with AsyncSession(admin) as observer:
+        before = (await observer.execute(query, {"feature": feature})).scalars().all()
+    try:
+        async with AsyncSession(runtime) as session:
+            await session.execute(text("SET LOCAL statement_timeout='8s'"))
+            await begin_scoped_feature_write(
+                session, attempt_id=attempt, owner=owner, manifest_digest=digest
+            )
+            with pytest.raises(DBAPIError) as caught:
+                await session.execute(
+                    text("""UPDATE feature.feature_base_field_values
+                    SET value_json=to_jsonb('forbidden'::text)
+                    WHERE feature_id=CAST(:feature AS uuid) AND field_path='core.name'"""),
+                    {"feature": feature},
+                )
+            assert caught.value.orig.sqlstate == "23514"
+            assert "shared derived value is outside its own primary source target" in str(
+                caught.value.orig
+            )
+            await session.rollback()
+        async with AsyncSession(admin) as observer:
+            after = (await observer.execute(query, {"feature": feature})).scalars().all()
+        assert after == before
+    finally:
+        async with AsyncSession(runtime) as session, session.begin():
+            assert await session.scalar(
+                text("SELECT ops.cancel_scoped_feature_write(:attempt,:owner)"),
+                {"attempt": attempt, "owner": owner},
+            )

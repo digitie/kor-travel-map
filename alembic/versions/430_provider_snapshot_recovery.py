@@ -38,6 +38,19 @@ _SIDECARS: Final = (
         ),
     ),
     (
+        "_430_project_provider_field_candidates_noop.sql",
+        (
+            (
+                "feature._project_provider_field_candidates",
+                "FUNCTION",
+                "(uuid)",
+                _STATE_OWNER,
+                False,
+                False,
+            ),
+        ),
+    ),
+    (
         "_430_bounded_curation_null_hours.sql",
         (
             (

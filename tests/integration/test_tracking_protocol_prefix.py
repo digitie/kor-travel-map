@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import re
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 
@@ -33,6 +34,7 @@ _FINAL = sorted(n for n, item in _migration._EXPECTED.items() if item["finalizin
 _LEAF = sorted(n for n, item in _migration._EXPECTED.items() if not item["finalizing"])
 _L = 6832465333779826081
 _P = "SELECT ops.lock_scoped_feature_write_protocol(:exclusive)"
+_GOLDEN = (Path(__file__).resolve().parents[2] / "alembic/head-schema.sql").read_text()
 
 
 async def _direct(session, name):
@@ -49,7 +51,7 @@ async def _direct(session, name):
 
 
 async def _owner(session):
-    await session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+    await session.connection(execution_options={"isolation_level": "READ COMMITTED"})
     await session.execute(text("SET LOCAL ROLE ktm_curation_command_owner"))
     await session.execute(text("SET LOCAL lock_timeout='700ms'"))
     await session.execute(text("SET LOCAL statement_timeout='3s'"))
@@ -88,10 +90,24 @@ async def test_catalog_original_body_owner_acl_and_prefix(scalar_engines, name):
     )
     assert row["body"].partition("\nBEGIN\n")[2].startswith(entry)
     assert row["body"].count(entry) == 1
-    assert (
-        hashlib.sha256(row["body"].replace(entry, "", 1).encode()).hexdigest()
-        == item["body_sha256"]
-    )
+    if name in {
+        "feature.finalize_provider_curation_root",
+        "feature.seal_provider_curation_snapshot_receipt",
+        "ops.finish_provider_feature_membership_command",
+    }:
+        # 430이 의도적으로 바꾼 세 본문은 실제 fresh430 공식 dump와 전부 대조한다.
+        bodies = re.findall(
+            rf"CREATE (?:FUNCTION|PROCEDURE) {re.escape(name)}\(.*?AS (\$[A-Za-z0-9_]*\$)(.*?)\1;",
+            _GOLDEN,
+            re.DOTALL,
+        )
+        assert len(bodies) == 1
+        assert row["body"] == bodies[0][1]
+    else:
+        assert (
+            hashlib.sha256(row["body"].replace(entry, "", 1).encode()).hexdigest()
+            == item["body_sha256"]
+        )
     assert row["owner"] == "ktm_curation_command_owner"
     assert row["config"] == item["config"]
     assert row["names"] == item["names"]

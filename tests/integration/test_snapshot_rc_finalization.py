@@ -194,6 +194,8 @@ async def test_registered_member_cannot_use_legacy_finish_without_private_marker
         status=status,
     )
     async with admin.begin() as seed:
+        await seed.execute(text("SET LOCAL statement_timeout='3s'"))
+        await seed.execute(text("SET LOCAL lock_timeout='900ms'"))
         await seed.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
         dataset = await _seed_dataset(seed, suffix=identity, feature_count=0)
         params["dataset"] = dataset
