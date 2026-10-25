@@ -1,6 +1,7 @@
 """새 client TX의 commit 응답/취소 경계. PostgreSQL 수용 증거는 아니다."""
 
 import asyncio
+import time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 from uuid import uuid4
@@ -9,6 +10,7 @@ import pytest
 
 from kortravelmap.client import _airport_snapshot as target
 from kortravelmap.infra.provider_snapshot_recovery_repo import SnapshotExecutorToken, SnapshotMember
+from kortravelmap.infra.transaction_limits import transaction_deadline
 from tests.unit.test_provider_snapshot_artifact import _PINS
 
 
@@ -95,7 +97,6 @@ async def test_success_exits_commit_scope_before_return_and_forwards_once(monkey
     value = object()
     command = AsyncMock(return_value=value)
     monkeypatch.setattr(target, _NAMES[name], command)
-    monkeypatch.setattr(target, "apply_transaction_limits", AsyncMock())
     assert await _call(client, name) is value
     assert calls == [True]
     assert session.events == ["session:enter", "tx:enter", "tx:ok", "session:ok"]
@@ -104,7 +105,7 @@ async def test_success_exits_commit_scope_before_return_and_forwards_once(monkey
     mode, limits = session.execute.await_args_list
     assert "READ COMMITTED" in str(mode.args[0])
     assert ("READ ONLY" in str(mode.args[0])) is (name == "read")
-    assert limits.args[1] == {"statement": 30000}
+    assert limits.args[1] == {"statement": 30000, "lock": 1000}
     assert "LEAST" in str(limits.args[0])
     if name in {"claim", "register"}:
         assert command.await_args.kwargs["lease_seconds"] == 300
@@ -116,7 +117,6 @@ async def test_database_error_propagates_and_rolls_back_without_retry(monkeypatc
     error = RuntimeError("database failure")
     command = AsyncMock(side_effect=error)
     monkeypatch.setattr(target, _NAMES[name], command)
-    monkeypatch.setattr(target, "apply_transaction_limits", AsyncMock())
     with pytest.raises(RuntimeError, match="database failure") as raised:
         await _call(client, name)
     assert raised.value is error
@@ -131,7 +131,6 @@ async def test_unknown_commit_never_returns_candidate_or_retries(monkeypatch):
     session.commit_error = error
     command = AsyncMock(return_value=object())
     monkeypatch.setattr(target, _NAMES["register"], command)
-    monkeypatch.setattr(target, "apply_transaction_limits", AsyncMock())
     with pytest.raises(RuntimeError, match="commit response lost") as raised:
         await _call(client, "register")
     assert raised.value is error
@@ -149,7 +148,6 @@ async def test_actual_task_cancellation_reaches_owned_transaction_cleanup(monkey
         await asyncio.Event().wait()
 
     monkeypatch.setattr(target, _NAMES["read"], command)
-    monkeypatch.setattr(target, "apply_transaction_limits", AsyncMock())
     task = asyncio.create_task(_call(client, "read"))
     await entered.wait()
     task.cancel()
@@ -164,7 +162,6 @@ async def test_actual_task_cancellation_reaches_owned_transaction_cleanup(monkey
 async def test_missing_runtime_proves_absence_or_blocks_before_sdk(monkeypatch, present):
     client, session, calls = _client()
     session.scalar = AsyncMock(return_value=present)
-    monkeypatch.setattr(target, "apply_transaction_limits", AsyncMock())
     read = AsyncMock()
     monkeypatch.setattr(target, "read_provider_snapshot_for_member", read)
     member = SnapshotMember(uuid4(), uuid4(), uuid4())
@@ -182,3 +179,15 @@ async def test_missing_runtime_proves_absence_or_blocks_before_sdk(monkeypatch, 
         "member": member.member_id,
     }
     read.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("repeatable", "statement"), [(False, 30000), (True, 3000)])
+async def test_transaction_uses_shared_deadline_and_existing_setting_minimum(repeatable, statement):
+    client, session, _ = _client()
+    with transaction_deadline(time.monotonic() + 60):
+        async with target._transaction(client, readonly=True, repeatable=repeatable):
+            pass
+    mode, limits = session.execute.await_args_list
+    assert ("REPEATABLE READ" in str(mode.args[0])) is repeatable
+    assert limits.args[1] == {"statement": statement, "lock": 1000}
+    assert "LEAST(COALESCE(NULLIF(setting::bigint,0),cap),cap)" in str(limits.args[0])

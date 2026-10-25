@@ -22,7 +22,7 @@ from kortravelmap.infra.provider_snapshot_recovery_repo import (
     register_provider_snapshot_artifact,
     seal_provider_snapshot_member,
 )
-from kortravelmap.infra.transaction_limits import apply_transaction_limits
+from kortravelmap.infra.transaction_limits import apply_bounded_transaction_limits
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -55,13 +55,8 @@ async def _transaction(
             mode = "REPEATABLE READ" if repeatable else "READ COMMITTED"
             access = "READ ONLY" if readonly else "READ WRITE"
             await session.execute(text(f"SET TRANSACTION ISOLATION LEVEL {mode}, {access}"))
-            await apply_transaction_limits(session)
-            await session.execute(
-                text("""SELECT set_config(name,
-                    LEAST(COALESCE(NULLIF(setting::bigint,0),cap),cap)::text,true)
-                    FROM pg_settings JOIN (VALUES ('statement_timeout',CAST(:statement AS bigint)),
-                    ('lock_timeout',1000::bigint)) caps(name,cap) USING(name)"""),
-                {"statement": 3000 if repeatable else 30000},
+            await apply_bounded_transaction_limits(
+                session, statement_timeout_ms=3000 if repeatable else 30000
             )
             yield session
 

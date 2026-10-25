@@ -51,3 +51,11 @@ request/job을 잠근 외부 TX에 client를 결합한다. 첫 scope에서는 qu
 공유 journal/resume·설정·build·whole430 wrapper는 Root 소유다. 별도 PR·운영 변경은 없다.
 실제 PG/전체430 설치·ACL·unknown commit 재개·원 run worker 종료·collector 배선/CI 및
 운영 동시 쓰기 수용은 모두 미완이다.
+
+## 짧은 서버 제한 보존
+
+Root backend26c2e5를 상속한 뒤 client의 일반 deadline setter와 중복 cap SQL을
+공통 `apply_bounded_transaction_limits`로 교체했다. 일반 setter가 기존의 더 짧은
+lock timeout을 먼저 늘릴 수 있던 source 경계를 제거한다. RR은3초, 나머지는30초를
+명시하고 기존 서버 값·호출자 마감·고정 cap의 최솟값을 적용한다. client 순수18개가
+4.54초에 통과했다. 이 결과는 SQL 대역의 호출/제한 전달 검사이며 실제 PG 실행은 아니다.
