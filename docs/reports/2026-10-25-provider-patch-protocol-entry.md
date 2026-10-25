@@ -51,3 +51,24 @@ SQL sidecar·procedure 본문·기존 검증/권한은 그대로다. 기존 전�
 기대값만 정본 True로 맞추고 실제 runtime/service의 feature CREATE는 False인지
 확인한다. 원24/1 실패·시험 후 source/SDK 전체 검증 미실행을 보존하며, 실제 CID/UUID/볼륨
 정리는 완료했다. 수정본 두 리뷰·다음 고유 실행 전에는25개 수용 완료로 표시하지 않는다.
+
+
+## 최종 실제25와 공식 fresh oracle
+
+위 두 원실패는 보존한다. 수정 ed8/r5는 새 고유 PG에서25 PASS/실패·오류·skip0
+(23.098초)이었다. 공개 patch의 실제 P 대기·다른 backend의5행 NOWAIT·유한250ms와
+기본1초 timeout·SAVEPOINT GUC 복원·전체 rollback/새 retry·bare SH23514·EX 재진입,
+기존425의15개 및 catalog owner CREATE 보존/runtime CREATE 거부를 확인했다.
+source2395 Git mode/blob·실제9 import·SDK53개 전후 pin도 대조했다.
+
+별도 새 고유 PG의 정본 application300 bootstrap/공식 반복덤프 비교는1 PASS
+(20.369초)였다. runtime reconcile는 호출하지 않았다. 새426 oracle SHA256은
+`02751bc4c380d6822499905a19d33a3a6b86609cd27a2e52ba01182dcefea827`이다.
+부모425의1643개 block 중1641개는 완전히 같고 공개 patch 첫 prefix와 receipt의
+허용 head27자만 다르다. 이 둘을 되돌리면 부모 덤프 전체 byte와 같으며 ACL/default ACL도
+그대로다. 두 실행 모두 정확 CID·UUID·익명 volume 및 전체 감사 container 정리를 확인했다.
+
+소스와 실행기 두 독립 리뷰·실제25 사실 대조를 거쳤다. 이 검증은 직접 legacy EX 경로의
+수용이며 공식 oracle을 교체한다. 최종 부모 CI 수정 상속·정확 전체 CI와 운영 배포는 아직
+미완이다. 실제 두 SH collector·57 호출자 폐쇄·fresh RC·whole capture·durable recovery를
+완료로 표시하지 않는다. SDK pin 검사는 실제 SDK 변환 실행 증거가 아니다.
