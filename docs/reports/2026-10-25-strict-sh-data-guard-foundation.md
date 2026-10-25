@@ -231,3 +231,15 @@ private installer는 기존 activation 경로에서 여전히 호출하지 않�
 CREATE 권한 유무 양쪽의 실제 Python upgrade 실행 trace는 각각28/26문장으로 변경 전후
 완전히 같으며 SQL·role·GUC·순서는 유지된다. 정정 뒤 같은 정적86개가13.96초에 통과했다.
 새 PG 실행은 없으며 앞의 실제 oracle와 owned 결과를 새 실행으로 합산하지 않는다.
+
+### 부모428 권한 인벤토리 CI 정정 상속
+
+검토된 부모 `5ed45f1f3dc8eb55511c8d85b61e83e9d660dfed`의 catalog signature 규약 정정을
+추가 상속했다. capture 함수 존재 검사는 schema/name 카탈로그 조회로, metadata dependency
+GRANT는 기존 카탈로그 서명 치환으로 정렬한다. 300의 optional skip과422~427의 capture
+부재 조건, 모호한 overload 거부·owner별 역할 창·제품 SQL·공식 dump는 유지한다. 부모의
+최초 CI 실패와 실제37/oracle1은 그대로 구분하며 이번 상속으로 새 PG를 실행하지 않았다.
+공통 journal/resume은 자체 최신 prefix 뒤 부모 전체 suffix를 보존한다.
+
+추가 상속 뒤 signature lint를 포함한 집중 정적96개가13.35초에 통과했고 Ruff5파일·graph
+동등성·redaction/차이 검사를 확인했다. 최종 두 source 리뷰와 정확 CI는 아직 미완이다.

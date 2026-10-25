@@ -3,6 +3,10 @@
 - 별도 source의 실제30/새11과 공식oracle1 PASS·정리를 확인했다. 원25 PASS/5 FAIL은 보존하며 단일41 실행으로 세지 않는다.
 - 검토된 root428c98·최신 main/공항427 부모와 실제429 dump를 상속한다. 제품 SQL·공유 fixture는 유지한다. 최종 두 검토/정확 CI·성능·취소/pool·전체 closure·RC/복구/SH 운영은 미완이다. [범위·근거](reports/2026-10-25-strict-sh-data-guard-foundation.md).
 
+## 2026-10-25 — capture 권한 인벤토리 CI 정정
+
+c98 CI의 signature literal 검사 실패1개를 보존하고, 존재 검사를 pg_catalog 이름 조회·GRANT를 카탈로그 서명 치환으로 정렬한다. 역할/SQL/oracle은 유지하며 새 정확 CI는 미완이다. [근거](reports/2026-10-25-bounded-curation-capture.md).
+
 ## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
 
 실제 PG16.14에서 통합37 PASS/15.798초, fresh bootstrap 공식 oracle1 PASS/22.897초를 확인했다. 덤프를 갱신했으며 기존 실패와 시험 수정 기록을 보존한다. 검토된 최신 공항427·main을 상속했으며 최종 CI, SH/RC/복구 연결과 운영 배포는 미완이다. [범위·예산·검증](reports/2026-10-25-bounded-curation-capture.md).

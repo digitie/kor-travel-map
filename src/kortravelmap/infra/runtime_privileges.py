@@ -448,10 +448,13 @@ _STRICT_SH_DATA_STATE_OWNER_ACL = (
 
 _STATE_OWNER_FUNCTION_ACL = (
     # 428이 존재할 때만 owner간 dependency EXEC를 복구한다. 이전 head ACL은 유지한다.
-    "DO $bounded_capture_acl$ BEGIN IF pg_catalog.to_regprocedure("
-    "'feature._bounded_provider_curation_input_set(bigint)') IS NOT NULL THEN "
-    "GRANT EXECUTE ON FUNCTION feature._heritage_evidence_metadata_bytes("
-    "bigint[],boolean[],integer[],boolean[]) TO ktm_feature_schema_owner; "
+    "DO $bounded_capture_acl$ BEGIN IF EXISTS ("
+    "SELECT 1 FROM pg_catalog.pg_proc routine "
+    "JOIN pg_catalog.pg_namespace namespace ON namespace.oid=routine.pronamespace "
+    "WHERE namespace.nspname='feature' "
+    "AND routine.proname='_bounded_provider_curation_input_set') THEN "
+    "GRANT EXECUTE ON FUNCTION feature._heritage_evidence_metadata_bytes(...) "
+    "TO ktm_feature_schema_owner; "
     "END IF; END $bounded_capture_acl$",
     "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_shape(...) "
     "FROM PUBLIC,ktm_feature_runtime",
