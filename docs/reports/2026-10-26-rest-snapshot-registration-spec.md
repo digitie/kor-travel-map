@@ -101,6 +101,20 @@ T-CWRITE04에서 닫을 구현 목표이며 선택 문서만으로 완료 처리
 unknown-commit SDK0/DML0·fence/두writer 증거가 필요하다. postprocessed replay는 원receipt 비교
 뒤 sideeffect0이어야 하며 finish(A→B)·marker 단독commit은 완료 proof가 아니다.
 
+### 후처리 공유 topic의 필수 열린 경계
+
+J 원장 e41110a2와 T 독립 d693de88의 소스 조사에서 finding이 있으면
+`dataset_projection → provider_sync`, 없으면 sync 뒤 zero-row stale UPDATE의 statement trigger로
+`provider_sync → dataset_projection` 순서가 가능하다. bump는 즉시 같은 topic 행을 UPSERT하며
+GUC defer/비동기 경계가 없다. actual PG 교착 재현은0이고 기존 Airport 정본1DS 범위이므로
+운영 deadlock으로 확정하지 않는다. 서로 다른 DS의 ownscopeX만으로 이 역순은 제거되지 않는다.
+
+S3는 첫 topic DML 전 trusted TX seam에서 두 topic을 고정 `COLLATE "C"` 순서로 선취득할
+접점과 행 누락 시 fail-closed 경계를 구체화해야 한다. 정본 bump/알림 성공 조건을 생략하거나
+일반 caller·rawtable ACL을 넓히지 않는다. S5는 다른 DS의 empty/nonempty barrier로 두 순서의
+wait/cycle을 실제 관측하고 `55P03` timeout과 `40P01` deadlock을 구분한다. 첫 topic 취득부터
+commit까지 남는 작업·대기·실제 직렬화 구간을 측정하며 최종 코드 결론은 그 실물 증거 뒤 정한다.
+
 ## quota와 실측
 
 현재430의 global16MiB/256 snapshot·Airport4MiB/64 snapshot만 존재하며 Rest quota는 없다.

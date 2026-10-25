@@ -47,6 +47,11 @@ registration/claim은 앞 단계, control seal은 durable 원결과 기반 후�
 - **GC**: 7일terminal·expiredlease·정확reservation만 반환, active/unsealed·ledger부족 거부,
   limit/정렬/rollback·원jobs 불변·Airport quota/자료/caller 비간섭을 같이 확인한다.
 
+S3의 공유 topic 수용도 미완이다. 첫 topic DML 전에 trusted TX seam이
+`dataset_projection`, `provider_sync` 두 행을 고정 C순으로 선취득할 접점과 누락 fail-closed를
+검토한다. 정본 bump/알림 권위·성공 조건과 최소 ACL은 보존하고, 전체 caller의 교착 부재나
+선취득 구현의 효과를 소스만으로 완료 처리하지 않는다.
+
 ## S5: 두 물리 writer 필수 시나리오
 
 1. 두worker가 같은member를 처음 등록: ownscope 직렬화 뒤 정확immutable1개·quota한번·nonce는
@@ -61,6 +66,11 @@ registration/claim은 앞 단계, control seal은 durable 원결과 기반 후�
    취소/격리를 같은SQLSTATE라는 이유로 완료처리하지 않는다.
 6. exactownbackend death/취소 중 부분TX rollback→poolcheckedout0/다음SELECT1·원receipt재시도,
    active/unsealed GC 동시시도 거부. global cleanup·다른PID terminate0.
+7. 서로 다른 DS의 finding nonempty/empty 두 후처리를 barrier로 교차시켜
+   `dataset_projection → provider_sync`와 역순의 실제 wait/cycle을 관측한다. zero-row UPDATE도
+   statement trigger가 실행됨을 포함하고 `55P03`/`40P01`을 구분한다. 첫 topic lock부터 commit까지
+   작업·대기·직렬화 구간을 측정하며 실제 개선은 실물 뒤 판정한다. J e41110a2/T d693de88은
+   소스 가능성만 증명하고 PG 재현0·현재 Airport1DS 운영 deadlock 확정0이다.
 
 각 시험은 barrier·backend PID/starttime·실제wait/commit 순서와 두 connection을 기록한다.
 예상lockwait는 finite timeout으로 종료하고 수량/guard/기대값을 줄이지 않는다. 단독CPU2/
