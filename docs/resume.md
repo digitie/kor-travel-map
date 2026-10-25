@@ -1,3 +1,11 @@
+## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
+
+synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
+PG reader 비용·운영 fit는 미측정이며 Airport 상한/제품/SQL/운영 변경0이다.
+Rest 전용 유한 profile과 RR chunk 비교·주간 GC/quota·작은 구현 단위는
+[후속안](reports/2026-10-25-rest-area-snapshot-profile.md)에 기록했다.
+다음은 설계 두 리뷰 뒤 owned PG 비용 lab 구현이며 동시 worker 수용은 미완이다.
+
 ## 2026-10-25 — 공항 snapshot 원자적 후처리 구현 중
 
 원 발견사항·sync cursor·stale 정리를 한 fenced RC transaction과 receipt로 연결하고, 종결된 임시 입력의 7일/최대16개 정리를 추가했다. 합성430의 실제 설치/startup/ORM/후처리 rollback·replay/null 경계15 PASS와 정리를 확인했다. 분리 시험의 GC16·세대/커서3·물리 DB 연결 사망/pool1 복구1·scheduled caller2와 공식oracle 생성을 확인했다. 최종덤프·두 리뷰·CI·복구 live UI·운영은 미완이다. [범위와 검증](reports/2026-10-25-airport-snapshot-durable-postprocess.md).
