@@ -1,6 +1,6 @@
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
-- materializer 두 루프만 분리했다. 실제15 PASS 뒤 공식425 oracle1·EX18 PASS와 정확 정리를 확인했다. fixture 실패와 EX count 감사실패를 보존하며 비용·최종 CI는 미완이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
+- 실제15·공식 oracle1·EX18을 확인하고 원 실패를 보존했다. 같은 DB 기존 base100 A/B 각3회의 apply+deferred CPU 중앙값은24.40% 감소했다. collector/운영·최종 CI는 미완이다. [범위·한계](reports/2026-10-25-provider-base-update-first.md).
 
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 
