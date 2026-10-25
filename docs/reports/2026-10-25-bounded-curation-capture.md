@@ -133,3 +133,17 @@ schema owner EXEC와 schema receipt CHECK만 달라진다. 기존 객체 제거�
 시험과 검증된428 공식 dump는 변경하지 않는다. 부모427의 세 SQL body가 그대로이므로
 427 dump로428 golden을 덮어쓰지 않는다. 최종 합성은 별도 두 리뷰와 CI로 확인하며,
 실제37/공식1 증거를 새 실행으로 부풀리지 않는다.
+
+
+## 최종 CI의 인벤토리 규약 위반 정정
+
+c98 CI의 Python3.12/3.13에서 각3815 PASS·7 SKIP 뒤 동일 lint1개가 실패했다.
+권한 조정의 DO 문에 함수 인자 타입 리터럴2개가 남아 있었으며 원 실패·로그를 보존했다.
+존재 검사는 schema/name의 pg_catalog 조회로, GRANT는 기존 `(...)` 인벤토리의
+카탈로그 치환으로 바꾼다. 300에서는 optional metadata helper 부재로 생략하고,
+422~427에서는 capture가 없으므로 추가 EXEC를 주지 않는다. 428부터만 기존 owner간
+EXEC를 복구하며 역할·runtime 권한·제품 SQL·공식 dump는 바꾸지 않는다.
+검사 완화 없이 rendering·signature lint와 후속 정확 CI를 다시 확인한다. 이 수정 이후의
+실제 PG 검증은 최종 CI 결과로 구분하며 이전37/oracle1 실행을 새 결과로 합산하지 않는다.
+
+정정 후 권한 단위·migration 단위·signature lint46 PASS/3.58초, Ruff와 strict mypy1파일 및 redaction/차이 검사를 통과했다. 새 PG 실행은0이며 정확 CI와 두 후속 리뷰는 별도다.

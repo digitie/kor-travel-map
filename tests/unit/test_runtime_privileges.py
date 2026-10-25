@@ -600,3 +600,33 @@ def test_the_candidate_read_grant_is_conditional_and_read_only() -> None:
     for relation in ("theme_candidate_generations", "theme_candidate_generation_observations"):
         assert relation in _PROTECTED_FEATURE_TABLES, relation
         assert relation not in granted, relation
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "argument_types", ["bigint[], boolean[], integer[], boolean[]", "bigint[], boolean[]"]
+)
+def test_bounded_capture_dependency_acl_uses_catalog_signature(argument_types: str) -> None:
+    """300에서는 생략하고, 중간 head에서는 capture 존재에만 권한 복구를 결박한다."""
+    statement = next(
+        sql
+        for sql in runtime_privileges._STATE_OWNER_FUNCTION_ACL
+        if sql.startswith("DO $bounded_capture_acl$")
+    )
+    assert _render_acl_statement(statement, {}) is None
+    rendered = _render_acl_statement(
+        statement,
+        {
+            "feature._heritage_evidence_metadata_bytes": _ResolvedRoutine(
+                keyword="FUNCTION", argument_types=argument_types
+            )
+        },
+    )
+    assert rendered is not None
+    assert "pg_catalog.pg_proc" in rendered
+    assert "namespace.nspname='feature'" in rendered
+    assert "routine.proname='_bounded_provider_curation_input_set'" in rendered
+    assert "GRANT EXECUTE ON FUNCTION feature._heritage_evidence_metadata_bytes(" + (
+        argument_types + ") TO ktm_feature_schema_owner;"
+    ) in rendered
+    assert "to_regprocedure" not in rendered
