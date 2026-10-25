@@ -57,10 +57,8 @@ async def _case(monkeypatch, *, before_exists=False, after_exists=True, changed=
                     )
                 ]
             )
-        if "_bounded_provider_curation_input_set" in name:
-            return _Result(
-                [dict(capture_complete=True, input_member_count=1, source_input_set_hash="c" * 64)]
-            )
+        if "capture_provider_snapshot_apply_input_set" in name:
+            return _Result([dict(input_member_count=1, source_input_set_hash="c" * 64)])
         if "finish_provider_snapshot_apply" in name:
             saved.append(args["result"])
         return _Result([])

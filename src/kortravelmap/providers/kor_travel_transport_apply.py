@@ -211,15 +211,16 @@ async def apply_stored_airport_reobservation(
         capture = (
             (
                 await session.execute(
-                    text("SELECT * FROM feature._bounded_provider_curation_input_set(:dataset)"),
-                    {"dataset": dataset},
+                    text(
+                        "SELECT * FROM ops.capture_provider_snapshot_apply_input_set("
+                        ":snapshot,:generation,:fence)"
+                    ),
+                    params,
                 )
             )
             .mappings()
             .one()
         )
-        if capture["capture_complete"] is not True:
-            raise ValueError("airport apply has no complete causal input capture")
         load = FeatureLoadResult(
             bundles_total=len(ordered),
             features_updated=sum(after[fid][0] != before[fid][0] for fid in expected),
