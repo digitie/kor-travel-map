@@ -12,19 +12,19 @@ protocol 경합/SH에서 EX 승격 거부가 기존 본문 검사보다 먼저 �
 Feature별 advisory lock을 추가하거나 tracking L을 data path에 새로 묶지 않는다.
 수동 선행 row/advisory 잠금의 과거 취득 순서를 증명하는 기능은 아니다.
 
-## migration과 남은 검증
+## migration 계약과 최초 검증 이력
 
 425의 정확 prosrc SHA·인자·owner·SECURITY DEFINER·search_path를 대조한 뒤 교체한다.
 임시 schema CREATE는 원래 없는 경우에만 부여/회수하고 짧은 caller timeout을 유지한다.
 새 SQL은 prefix 제거 시 425 전체 정의와 byte 동일하다. 새 함수/ACL·API/DTO 변경은 없다.
 새 migration/sidecar와 공개 signature 불변이므로 AGENTS의 신규 파일 영향도 예외를 적용한다.
 
-현재는 구현 초안이다. 순수 migration 검증·독립 리뷰·실제 P 경합/SH 거부/정상 EX·rollback·
+최초 초안 단계의 검증 계획은 순수 migration·독립 리뷰·실제 P 경합/SH 거부/정상 EX·rollback·
 권한/GUC/OID/ACL·공식 fresh oracle·정확 CI를 각각 수용해야 한다. 기존 부모 head-schema는
 426 oracle이 아니다. 실제 collector/strict SH closure/whole capture/RC·복구·운영은 미완이다.
 
 집중 migration 순수6 PASS(최초0.31초), Ruff2파일·strict mypy1파일·문서 redaction을
-확인했고 소스 독립 두 리뷰를 거쳤다. 실제 PG 수용·공식 oracle·정확 CI는 미완이다.
+확인했고 소스 독립 두 리뷰를 거쳤다. 당시 실제 PG·공식 oracle·정확 CI는 미완이었다.
 
 
 ## 첫 실제 bootstrap 실패와 revision 길이 정정
