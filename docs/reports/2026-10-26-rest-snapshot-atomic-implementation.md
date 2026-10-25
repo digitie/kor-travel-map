@@ -113,3 +113,24 @@ scripts의 기존 7개 오류가 남는다. 이를 실제 CI 경로 통과와 �
 현재 실제 432 PG 시험은 아직 0회다. 다음은 원자성 11개와 strict guard·원 quota 검증,
 이후 Rest215·쿼터/GC·서로 다른 dataset 두 physical writer 시험이다. 새 golden/최소 ACL,
 현재 커밋의 전체 CI·최종 live/UI와 배포도 남아 있으며 소스 리뷰 통과로 대체하지 않는다.
+
+
+## 실제 원자성 11개와 공식 schema432 수용
+
+커밋 `cb04509d`의 실제 owned PG 시험 11개가 통과했다(console 20.73초, XML 20.246초).
+5단계별 오류/취소 후 18개 상태표의 rollback과 동일 plan 재실행, 성공 commit 뒤 응답 경계
+유실의 SDK0 복구를 확인했다. seed 전 원 quota3행·사용량0 및 strict guard33/inventory
+단언도 실제 통과했다. 물리 wire 유실·Rest215·두 writer·쿼터 소진/GC 수용은 별개로 남는다.
+정확 CID/UUID/global label0·볼륨1개 부재를 재확인했고 원 실행/SDK/source 지문을 보존했다.
+
+package migration graph 누락은 별도 검사에서 1실패·28통과로 드러났다. 정본 생성기로
+기존 entry를 모두 보존한 채432→431 한 entry만 추가했고29개가1.25초에 통과했다. 두 명의
+독립 검토 뒤 `c8836817`에 반영했다. 원 실패와 이전 실제 시험의 graph431 사실을 보존한다.
+
+`c8836817`의 별도 fresh 공식 bootstrap→head→dump→정본 재덤프 비교는1개가27.459초에
+통과했다(wrapper34.994초). runtime reconcile과 strict 자동 설치는0이다. 새 schema 지문은
+`a55cf046257b5c4edda3e5c1a4abee8e0b3cb256d08d88fbffcca6450f060eb3`이며 실제 bytes를
+`alembic/head-schema.sql`에 복사했다. 새 helper FUNCTION/ACL2개와 기존4함수/receipt TABLE
+5개 변경 외 전체 블록이 보존되며 역치환하면 원431 전체 bytes와 일치한다. quota INSERT는
+schema-only dump에 포함되지 않는다. 실제 startup ACL/metadata2개와 후속215·동시성,
+최종 CI/live/UI 및 배포가 남아 있어 아직 완료나 운영 활성화로 표시하지 않는다.

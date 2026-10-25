@@ -2454,3 +2454,12 @@ required-set 완화)은 소유자 지시로 **가장 마지막**이다.
   정리가 필요해 경계를 어디에 둘지가 판단이다.
 - CI의 mypy는 핀이 없다(`mypy>=1.10`). 새 mypy 릴리스가 검사를 조이면 무관한 PR에서
   `lint` job이 붉어질 수 있다 — 기존 세 스텝도 같은 노출을 갖는다.
+
+
+### Rest432 후속: 실제 원자성 및 공식 스키마
+
+- 실제 원자성11개 PASS: 오류·취소 전체 rollback/동일 plan 복구/성공 commit 응답경계 SDK0.
+  초기quota3행·사용량0/guard33 단언과 정확 시험 DB·볼륨 정리를 확인했다. Rest215·두 writer는 미완이다.
+- 정본 package graph 누락1F28P를 공식 generator로 수정하고29P, 두 명 검토 후 반영했다.
+- 별도 fresh 공식 schema432 생성·재비교1P27.459초, dump a55cf046. 예상2추가/5변경만이며
+  역치환은 기존431 전체 bytes exact다. startup ACL/metadata 및 최종 CI/live·배포는 진행 중이다.

@@ -1691,3 +1691,12 @@ CHANGELOG·OpenAPI·테스트는 건드리지 않았다. 호스트 플립 자체
 | [`journal-2026-06c.md`](archive/journal-2026-06c.md) | 2026-06-01 ~ 2026-06-02 | 36건   | 53 KB  |
 | [`journal-2026-05a.md`](archive/journal-2026-05a.md) | 2026-05-24 ~ 2026-05-31 | 90건   | 218 KB |
 | [`journal-2026-05b.md`](archive/journal-2026-05b.md) | 2026-05-24 ~ 2026-05-24 | 3건    | 7 KB   |
+
+
+### Rest432 후속: 실제 원자성 및 공식 스키마
+
+- 실제 원자성11개 PASS: 오류·취소 전체 rollback/동일 plan 복구/성공 commit 응답경계 SDK0.
+  초기quota3행·사용량0/guard33 단언과 정확 시험 DB·볼륨 정리를 확인했다. Rest215·두 writer는 미완이다.
+- 정본 package graph 누락1F28P를 공식 generator로 수정하고29P, 두 명 검토 후 반영했다.
+- 별도 fresh 공식 schema432 생성·재비교1P27.459초, dump a55cf046. 예상2추가/5변경만이며
+  역치환은 기존431 전체 bytes exact다. startup ACL/metadata 및 최종 CI/live·배포는 진행 중이다.
