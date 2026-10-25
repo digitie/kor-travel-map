@@ -1,48 +1,62 @@
 # 430 activation·parent·tracking 경계 합성 조각
 
-기준619a6d4f1의 별도 worktree다. 이 조각만 먼저 배포하거나 활성화하지 않는다.
-Root가 맡은 RC/fresh capture·durable 결과 복구와 같은 수용 단위이며 현재 migration wrapper는 없다.
-기존429/619 CI source는 고정했고 공유 runtime_privileges/db.py/models/head-schema는 수정하지 않았다.
+## 현재 범위
 
-첫 checkpoint는 A/B만 준비한다. 기존 activate_provider_field_policy의 첫 P EX 뒤에 private strict
-installer를 삽입하고 나머지 body는 그대로다. common scope는 실제 dataset parent SHARE를 ops scope
-앞에서 잡는다. begin은 P 취득 뒤 frozen plan/participant를 새 statement로 다시 읽고 실제 parent
-전체를 정렬 SHARE로 선취득한 뒤 기존 ops scope·attempt·manifest/source/link/Feature 경로를 쓴다.
-기존 완료/동일TX/lease/32participant/ownwhole scope UPDATE/region 검증은 유지한다.
+기준619a6d4f1의 별도 worktree에서 A/B/C SQL sidecar3개, unit2개, integration1개와 이 보고서만
+준비했다. 이 조각만 먼저 배포하거나 활성화하지 않는다. Root의 RC/fresh capture·영속 profile과
+전체 결과 복구(D)와 같은 수용 단위다. 공통 migration wrapper는 아직 없고 runtime_privileges/
+db.py/models/head-schema와 T의 cancellation service는 변경하지 않았다. 기존429 CI source도 고정했다.
 
-C tracking OLD/NEW provider 분기·typed owner 우회 전 held L·terminal P+L 및 dedicated cancellation
-statement 경계는 다음 checkpoint에 작성한다. source paired tests도 아직 준비 중이다. 순수 source
-검사는 body 보존/순서만 보며 실제 PG·SSI 제거·whole capture/운영 활성화 수용을 대체하지 않는다.
+## A/B의 실행 순서
 
-Root 합성 요구: SchemaOwner 소유 strict installer에 StateProcedureOwner dependency EXEC를 정확히
-부여해야 activation에서 호출할 수 있다. 일반 runtime/PUBLIC/CREATE 권한은 넓히지 않는다.
-startup은 실제 activation 뒤33개 enabled 정의를 검증하되 기본 bootstrap의 자동설치0 계약과 구분한다.
-sidecar A/B는 기존 StateProcedureOwner routine을 대체하며 기존 owner/ACL은 유지한다. migration 번호430
-및 공통 wrapper/역할 창·graph/oracle은 Root 소유다. 아직 해당 migration 호출·새 PR·PG/HTTP 실행0이다.
+`activate_provider_field_policy`의 첫 P EX 뒤, epoch/Feature/source 선점 전에 private strict
+installer를 호출한다. 그 외 기존 activation body는 그대로다.33개 설치·검증과 기존 winner/
+pointer/epoch 갱신은 같은 TX이므로 중간 실패 시 함께 rollback한다.
 
-첫 A/B source-preservation unit5 PASS/0.12초를 확인했다. 최초 inverse 시험의 공백1줄 관찰 오류를
-시험에서 정정했으며 제품 body 비교의 정확성 기준은 유지했다. 통합 paired PG는 아직0이다.
+common scope는 실제 provider dataset parent를 SHARE로 잡은 뒤 ops scope를 건드린다. begin은
+P 취득 뒤 frozen plan/participant를 새 statement로 다시 읽고 protocol mode 변화를 거부한다.
+전체 participant actual parent를 정렬 SHARE로 선취득한 뒤 기존 ops scope·attempt·source/head→
+link→Feature 순서를 유지한다. completed/동일TX applying/lease/32participant/manifest 검증 tail은
+원문 그대로이며, own whole은 실제 parent UPDATE가 아니라 기존 ops scope UPDATE로 직렬화한다.
 
-## C 본문과 paired 시험 source checkpoint
+## C의 허용 경계
 
 기존 SchemaOwner 소유 INVOKER typed guard3개의 owner/superuser 우회 앞에서 OLD/NEW provider
-분류와 현재DB/PID/subid의 held L을 검사한다. job의 OLD/NEW terminal 및 삭제, membership/event
+분류와 현재DB/PID/subid의 held L을 검사한다. job의 OLD/NEW terminal·삭제, membership/event
 UPDATE·DELETE는 P EX+L을 요구한다. leaf INSERT는 noP+L을 허용하되 P SH+L은 거부한다.
 새 잠금 취득/GUC 변경은 없다. 기존 operation/membership owner·typed authorization tail은 정확히
-보존한다. event는 OLD provider→generic job 이동도 기존 typed42501 거부에 포함하도록 좁게 보강한다.
-이 경계는 typed command 밖에서 행을 바꿀 수 있게 허용하는 경로가 아니다.
+보존한다. event는 OLD provider→generic job 이동도 기존 typed42501 거부에 포함하도록 좁게 보강했다.
+generic import job과 무관한 sync_state에 새 P를 요구하지 않는다.
 
-전용 cancellation3에는 INVOKER prefix checker1개와 BEFORE STATEMENT3개를 준비했다.
-새 checker는 SchemaOwner 소유·PUBLIC EXEC 회수/runtime 직접 EXEC0로 Root wrapper에 배선해야
-한다. 기존3함수의 owner/INVOKER/기존 ACL은 유지한다. trigger가 자동 실행되는 권한을 runtime
-함수 직접 실행 권한으로 넓히지 않는다. import job의 provider 분류는 row 단계의 읽기 검사이며
-여기서 잠금을 잡지 않는다. 데이터25관계 statement의 tuple 전 보장과 혼동하지 않는다.
+전용 cancellation3에는 INVOKER prefix checker1개와 BEFORE STATEMENT3개가 있다. import job의
+provider 분류는 row 단계의 읽기 검사이며 여기서 잠금을 잡지 않는다. 데이터25관계 statement의
+tuple 전 보장과 혼동하지 않는다. pg_locks 관찰은 현재 보유만 확인하며 session/xact의 과거
+취득 순서를 attest하지 않는다. 공식 prefix의 xact 잠금과 임의 관리 SET ROLE/수동 advisory
+unlock까지의 보장을 구분한다. 새로운 nonce/proof table이나 runtime 권한 확대는 없다.
 
-unit13 PASS/0.16초, Ruff 통과 및 실제 integration16개 수집만 확인했다. 시험 source에는 실제
-applying을 유지한 채 같은 DS ensure/event 진행, actual parent 대기 중 ops scope·Feature NOWAIT,
-공식 activation의 partial inventory 거부/DDL·policy·epoch rollback, typed owner prefix 누락,
-cancellation3와 generic job 보존, OLD provider event 이동의 typed42501 거부가 있다.
-42501은 prefix guard 성공으로 세지 않고 typed authorization 별도 반례로만 단언한다.
-원문 검사는 실제 PG·normal full collector·취소 cleanup·RC/SSI 제거·durable 결과 복구의 증거가 아니다.
-공통 migration/ACL/D가 아직 없어 이 branch의 통합 실행/전체 lint/PR·배포 수용은 미완이며,
-Root와 두 source 리뷰 뒤 전체 수용 단위에서만 실제 시험한다. PG/HTTP·migration 호출0이다.
+## Root 합성에 필요한 권한·startup 계약
+
+A가 부르는 SchemaOwner 소유 strict installer에는 StateProcedureOwner dependency EXEC를 정확히
+부여해야 한다. C 새 INVOKER trigger 함수는 SchemaOwner 소유·PUBLIC EXEC 회수/runtime 직접
+EXEC0로 배선한다. 기존3함수의 owner/INVOKER/ACL은 유지한다. trigger 자동 실행을 runtime 직접
+함수 실행 권한으로 넓히지 않는다. 일반 runtime/PUBLIC/CREATE 권한을 추가하지 않는다.
+
+startup은 실제 activation 뒤33개 enabled 정의·argument·함수·행/문장 순서를 확인해야 하며,
+기본 bootstrap의 자동 설치0 계약과 구분한다. migration430 wrapper·역할 창·graph/oracle·D의
+capture/result domain은 Root 소유이며 이 checkpoint에는 없다.
+
+## 검증과 미완
+
+source-preservation unit13 PASS/0.16초, Ruff·redaction·diff 검사를 확인했다. 첫 A/B5 PASS/0.12초는
+초기 checkpoint 기록이며 현재13개에 합산하지 않는다. 최초 inverse 시험의 공백1줄 관찰 오류는
+시험에서 정정했고 제품 body 비교의 정확성 기준은 유지했다. 실제 integration은16개 수집만 했다.
+
+paired source에는 같은 DS actual applying 유지 중 ensure/event 진행, actual parent 대기 중
+ops scope·Feature NOWAIT, 공식 activation의 partial inventory 거부/DDL·policy·epoch rollback,
+typed owner prefix 누락, cancellation3/generic job 보존과 OLD provider event 이동 거부가 있다.
+42501은 prefix guard 성공으로 세지 않고 typed authorization의 별도 반례로만 단언한다.
+
+소스 검사는 실제 PG·normal full collector·취소 cleanup·RC/SSI 제거·whole writer closure·영속 결과
+복구의 증거가 아니다. 공통 migration/ACL/D가 없어 전체 lint/PR·배포 수용도 미완이다.
+Root와 두 source 리뷰 뒤 전체 수용 단위에서만 실제 시험하며, 현재 PG/HTTP·migration 호출·
+실제 activation·새 PR 생성은0이다.
