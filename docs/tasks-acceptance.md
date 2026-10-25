@@ -120,7 +120,7 @@
 선행: T-CWRITE-03. 수집 concurrency만 바꾸어 완료하지 않는다.
 
 휴게소431 후속은 [실측·profile 비교와 작은 구현 단위](reports/2026-10-25-rest-area-snapshot-profile.md)를 따른다.
-현재는 문서·설계이며 제품/SQL/운영상한 변경0이다. Airport 상한을 유지하고 Rest 전용 A와
+첫 checkpoint는 문서·설계였고 [pure codec 후보](reports/2026-10-25-rest-area-snapshot-artifact.md)를 별도로 구현했다. 운영/SQL 변경0이며 Airport 상한을 유지하고 Rest 전용 A와
 RR chunk B의 실제 PG CPU/RSS·215 typed fit를 먼저 계량한다. 주간 GC·DS/global quota,
 전체 snapshot 원자성·fence·공유 Feature 및 실제 두 worker 수용은 아래 조건과 함께 미완이다.
 

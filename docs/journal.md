@@ -1,3 +1,10 @@
+## 2026-10-25 — RestArea pure codec 후보 구현
+
+정본215 tuple의 Geo 유무 lossless roundtrip과 전행 byte/node/token 거부를 구현했다.
+Airport 기존 wrapper/상한을 보존하며 codec·관측·후처리 순수231 PASS/skip0,
+Ruff/mypy/import 검사를 확인했다. SQL/등록/collector/운영 변경0이고 두 리뷰·CI/PG는 미완이다.
+[범위·실측](reports/2026-10-25-rest-area-snapshot-artifact.md). 다음은 독립 source 검토와 J reader lab 결합이다.
+
 ## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
 
 synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
