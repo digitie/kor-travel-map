@@ -1,3 +1,14 @@
+## 2026-10-26 — Rest431 원64 비용 계량과 A1 source
+
+원 lab은1/15 complete 뒤64 원3초 timeout으로 실패해215/257 미도달이며 별도 보존했다.
+catalog/startup/ORM2와 공식 oracle1은 통과했다.64 진단은 private inventory2.537초/CPU2.53초,
+public57014 3.007초/CPU3.00초, 두 bulk EXPLAIN2.594/18.579ms로 관측했다. RSS는 지점값이다.
+A1은 inventory의 refs/seen만 typed3배열+최종 firstordinal JSON으로 바꾸고 원13블록의
+검사·과금·NULL·첫 참조 순서를 whole 역대조했다. 관련242PASS10.07초, 변경 후 PG/개선율은
+미검증이다. WSL CPU2/1536MiB·전체150/parent160/cleanup15 유지, 독립 적대2인 머지 전
+검토와 동일64/215 재계량·최종 실제 golden이 남았다. 등록/collector/운영0.
+[실측·한계](reports/2026-10-25-rest-area-evidence-reader.md).
+
 ## 2026-10-26 — Rest431 통합 source와 실제 lab 준비
 
 merged main5f3506a 위 설계1412·codec1413·명시 reader/preparation 및 direct assessment P2를

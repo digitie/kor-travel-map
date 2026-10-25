@@ -5,7 +5,8 @@ RETURNS jsonb LANGUAGE plpgsql STABLE SET search_path TO pg_catalog AS $$
 DECLARE
     v_row record; v_relation regclass; v_key text; v_total bigint:=0;
     v_count integer; v_keys text[]:='{}'; v_features uuid[]:='{}';
-    v_ref_key text; v_seen jsonb:='{}'; v_record_keys text[]:='{}'; v_revisions bigint[]:='{}'; v_revision bigint; v_refs jsonb:='[]'; v_feature uuid;
+    v_ref_relations oid[]:='{}'; v_ref_tids tid[]:='{}'; v_ref_kinds text[]:='{}';
+    v_record_keys text[]:='{}'; v_revisions bigint[]:='{}'; v_revision bigint; v_refs jsonb:='[]'; v_feature uuid;
 BEGIN
     -- 배열의 caller/wire 생성 메모리는 이 함수의 보장 범위가 아니다.
     IF p_dataset IS NULL OR p_dataset<1 OR p_entities IS NULL THEN
@@ -58,12 +59,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_datasets'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'provider_datasets');
         IF NOT EXISTS(SELECT 1 FROM provider_sync.provider_datasets t
             WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid
               AND t.provider='kor-travel-transport'
@@ -90,12 +88,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_entities'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'source_entities');
         SELECT t.source_entity_key INTO v_key FROM provider_sync.source_entities t
           WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
         v_keys:=array_append(v_keys,v_key);
@@ -124,12 +119,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_entity_heads'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'source_entity_heads');
         SELECT t.current_source_record_key INTO v_key FROM provider_sync.source_entity_heads t
           WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
         IF v_key IS NULL OR octet_length(v_key)<>23 OR v_key !~ '^sr_[0-9a-f]{20}$' THEN
@@ -156,12 +148,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_links'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'source_links');
         SELECT t.feature_id INTO v_feature FROM provider_sync.source_links t
           WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
         IF v_feature=ANY(v_features) OR NOT EXISTS(SELECT 1 FROM provider_sync.source_links t
@@ -189,12 +178,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_links'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'source_links');
 
     END LOOP;
     IF v_count<>cardinality(p_entities) THEN RETURN jsonb_build_object('metadata_complete',false,'reason','unsupported_membership'); END IF;
@@ -216,12 +202,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','features'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'features');
 
     END LOOP;
 
@@ -253,12 +236,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_feature_identities'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'provider_feature_identities');
 
     END LOOP;
 
@@ -279,12 +259,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_field_active_policies'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'provider_field_active_policies');
         SELECT t.policy_revision INTO v_revision FROM feature.provider_field_active_policies t
           WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
         IF NOT(v_revision=ANY(v_revisions)) THEN v_revisions:=array_append(v_revisions,v_revision); END IF;
@@ -307,12 +284,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_field_shadow_policies'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'provider_field_shadow_policies');
 
     END LOOP;
 
@@ -333,12 +307,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','provider_field_shadow_candidates'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'provider_field_shadow_candidates');
         SELECT t.value_source_record_key INTO v_key FROM feature.provider_field_shadow_candidates t
           WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
         IF v_key IS NOT NULL AND NOT(v_key=ANY(v_record_keys)) THEN v_record_keys:=array_append(v_record_keys,v_key); END IF;
@@ -361,12 +332,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','feature_base_field_values'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'feature_base_field_values');
         SELECT t.source_record_key INTO v_key FROM feature.feature_base_field_values t
           WHERE t.tableoid=v_row.relation_oid AND t.ctid=v_row.row_tid;
         IF v_key IS NULL OR octet_length(v_key)<>23 OR v_key !~ '^sr_[0-9a-f]{20}$' THEN
@@ -392,12 +360,9 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','feature_geocode_stamps'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'feature_geocode_stamps');
 
     END LOOP;
 
@@ -418,17 +383,28 @@ BEGIN
         IF v_total>4194304 THEN
             RETURN jsonb_build_object('metadata_complete',false,'reason','budget_exceeded');
         END IF;
-        v_ref_key:=v_row.relation_oid::text||':'||v_row.row_tid::text;
-        IF NOT(v_seen ? v_ref_key) THEN
-            v_refs:=v_refs||jsonb_build_array(jsonb_build_object(
-                'relation',v_row.relation_oid,'tid',v_row.row_tid::text,'kind','source_records'));
-            v_seen:=v_seen||jsonb_build_object(v_ref_key,true);
-        END IF;
+        v_ref_relations:=array_append(v_ref_relations,v_row.relation_oid);
+        v_ref_tids:=array_append(v_ref_tids,v_row.row_tid);
+        v_ref_kinds:=array_append(v_ref_kinds,'source_records');
 
     END LOOP;
     IF v_count<>cardinality(v_record_keys) THEN
         RETURN jsonb_build_object('metadata_complete',false,'reason','lineage_incomplete');
     END IF;
+    -- metadata 과금/검사가 전부 끝난 뒤 고정 참조만 한 번 JSON으로 만든다.
+    -- 중복은 예전 seen의 첫 참조를 유지하고 원래 순서대로 돌려준다.
+    SELECT COALESCE(jsonb_agg(jsonb_build_object(
+        'relation',r.relation,'tid',r.row_tid::text,'kind',r.kind)
+        ORDER BY r.first_ordinal),'[]'::jsonb)
+      INTO v_refs
+      FROM (
+        SELECT DISTINCT ON (x.relation,x.row_tid)
+            x.relation,x.row_tid,x.kind,x.ordinality AS first_ordinal
+        FROM unnest(v_ref_relations,v_ref_tids,v_ref_kinds) WITH ORDINALITY
+          AS x(relation,row_tid,kind,ordinality)
+        ORDER BY x.relation,x.row_tid,x.ordinality
+      ) r;
+
     -- 내부 참조만 반환한다. 공개 response/manifest/다음 호출에 재사용하지 않는다.
     RETURN jsonb_build_object('metadata_complete',true,'binary_bytes',v_total,
         'refs',v_refs,'feature_ids',to_jsonb(v_features));

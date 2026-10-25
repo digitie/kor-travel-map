@@ -7,7 +7,8 @@
 원 WT9514의 더티4파일은 변경하지 않고 bytes 보존 사본으로만 통합했다. 새 `RestAreaGeoFacts`, 전용 migration431/SD3개와 strict decoder·caller RR/read-only
 경계까지 source로 준비했다. 신규 typed SD의 최소 ACL/optional/startup signature만 연결했고
 공개 converter 기반 preparation/assessment와 전용 실제 lab fixture도 source로 준비했다.
-SQL 실제 설치·호출/등록·collector·운영 flag는0이며 공식 golden은 실제430을 보존한다.
+격리된 owned PG에서 아래 원본 lab·catalog2·공식 oracle1·64진단을 실행했다. 등록·collector·
+운영 flag는0이며 Git golden은 실제430을 보존한다. A1 SQL 변경 후 실제 재검증은 아직 미완이다.
 기존 Airport427/430 코드·공통 projection·SDK converter는 변경하지 않았다.
 
 Geo pins domain은 `transport-rest-area-geo-v1`, 지문 framing domain은
@@ -27,7 +28,7 @@ strict mypy1 PASS다. 첫 import 정렬2건의 Ruff 실패는 수정 전 로그�
 
 ## 후보 A source와 남은 실제 수용
 
-후보 A whole RR의 미호출 source를 먼저 고정했다. 신규 Rest 전용 reader는 item256, metadata/encoded
+후보 A whole RR의 원본 source를 먼저 고정한 뒤 아래 실제 계량을 수행했다. 신규 Rest 전용 reader는 item256, metadata/encoded
 각4MiB를 실험 후보로만 고정하고 statement3초/lock1초 및 전행 거부/EOF를 유지한다.
 두 scalar(name/phones)와 나머지23개 원 의미/lineage/clock을 검증하며, 최초 mixed scalar
 history는 명시 EX 진단으로 거부한다. raw7은 정본 Rest normalizer와 converter로 복원한다.
@@ -39,8 +40,8 @@ feature/rawtable 권한 확대0이다.
 
 W는 신규 Rest codec 및 좁은 private codec primitive만 소유한다. J는431SQL·명시
 reader/evidence·전용 시험과 필요한 typed signature metadata를 소유하며 서로 파일을
-되돌리지 않는다. SQL 두 source 리뷰 전 실행0이다. 실제 계량에서 A의 문제가 확인되기
-전에는 chunk 후보 B를 구현하지 않는다. 등록/수집/후처리·운영 연결은 다음 단위다.
+되돌리지 않는다. 독립 적대 리뷰2인은 머지 전 조건이며 격리 시험마다 두 FULL을
+추가 선행조건으로 요구하지 않는다. A의 병목은 아래와 같이 계량했으며 chunk 후보 B는 구현하지 않았다. 등록/수집/후처리·운영 연결은 다음 단위다.
 
 최종 source 검증 로그는 `map431-rest-geo-first-source-r2.log`
 (SHAc9b0f04f2225b526f17ff795698ac164ac570c9e646c1396263ec831cccf64e9)이며
@@ -64,20 +65,21 @@ RR/read-only 및 caller statement1..3000ms/lock1..1000ms를 조회로 확인하�
 정적 decoder+Geo와 기존 Airport 대응 합집합144PASS2.07초, 신규 migration/기존 startup·
 runtime ACL52PASS2.37초, Ruff4 PASS다. 최초 clone 시험의22FAIL55PASS는 기존 Airport
 문구/24개 field 기대값을 새 Rest 계약으로 고치기 전의 source 시험이며 보존했다.
-SQL parser/실DB 설치·ACL/catalog/EXPLAIN·지연/heap·RSS는 아직 검증하지 않았다.
-신규 migration graph는 source로 재생성했으며 실제431 schema dump를 만들어 기록하지 않았다.
+이 단락의 결과는 초기 source 시점이다. 이후 실제 설치·catalog/ACL·ORM·EXPLAIN·지연과
+RSS 지점 관측은 아래 기록으로 보완했다. 신규 migration graph는 source로 재생성했고
+실제431 dump는 별도 원장에 보존했으나 Git golden은 아직 변경하지 않았다.
 
 공개 Rest converter를 쓰는 준비/assessment와 실제 owned lab fixture는 source로 추가했으며
-실제 실행 수용은 아직 미완이다.
+실제215 fit 수용은 아직 미완이다.
 W codec public encode/decode를 연결할 때 native digest 재계산/입력 예산 비용도 실제 계량에
-포함한다. source 두 리뷰 전 SQL 실행0이며1/15/64/128/215 및 MAX+1 whole rejection과
-원 EX projection/unchanged raw·두 scalar/비scalar23·Geo의 정합 검증은 미완이다.
+포함한다. 원 lab에서1/15는 완료했으나64에서 원3초 timeout이 발생해128/215 및 MAX+1에
+도달하지 못했다. 원 EX projection/unchanged raw·두 scalar/비scalar23·Geo의 전체 수용은 미완이다.
 후보 B chunk는 A 측정으로 필요성이 확인된 다음에만 검토한다.
 
 전체 lint+관련 정적 시험은 **504PASS/2FAIL/6SKIP·62.94초**다. 두 실패는 새3함수가
 실제430 golden에 아직 없음을 검출한 정본 signature/inventory 검사다. 이 단계에서
-431 dump를 꾸며 채우거나 검사를 완화하지 않았다. 두 source 리뷰 뒤 실제 fresh431
-공식 oracle를 생성해 동일 검사를 다시 검증해야 한다. 원 실패 로그 SHA는
+431 dump를 꾸며 채우거나 검사를 완화하지 않았다. 마지막 SQL 동결 뒤 실제 fresh431
+공식 oracle를 다시 생성해 동일 검사를 검증해야 한다. 원 실패 로그 SHA는
 `a67edfc106a9eb4d20c1f600d534f1c3ee21f90b47bed74784c27dc867edb55d`다.
 
 ## 최신 source 수용과 선행 P2
@@ -98,7 +100,7 @@ T의9514 FULL+후속 P2 closure의 wholebytes 보존 carry, Root의 기존 codec
 
 ## 다음 owned PG 단계와 비용 분리
 
-- 고정 source 두 리뷰와 Root 슬롯 허용 후 기존 owned scalar donor를 재사용한다.
+- 독립 적대 리뷰2인은 머지 전 유지하며 격리 시험은 조율된 단독 슬롯에서 기존 owned scalar donor를 재사용한다.
   CPU2/RAM1536MiB/swap=RAM/PID256, exact image/earlyCID/UUID label, source·SDK·실제 import
   전후검사, phase150/parent160/cleanup15초를 기본으로 한다. 실패 원본을 보존하고
   수량/SQL/guard/시간을 근거 없이 완화하지 않는다.
@@ -127,3 +129,50 @@ PASS, 변경Python Ruff PASS, graph/check 및 docs redaction을 확인했다. �
 첫 결과370PASS/3FAIL/6SKIP 중 새 provider 문서목록 누락1건은 정본 표1줄로 수정했다.
 최종은 **371PASS/2FAIL/6SKIP·34.36초**이며 남은2개는 실제431 golden 미생성에 따른
 정본 signature/inventory 실패다. 검사를 완화하거나 dump를 꾸며 채우지 않았다.
+
+
+## 원본 실제 계량과 A1 참조 누적 변경
+
+원본 source `cfaee0f`의 lab은1행/15행에서 complete·unchanged를 확인했다. 각 client wall은
+0.067711/0.593950초였다.64행 첫 읽기는 원 asyncio3초 제한에서 TimeoutError로 실패했다.
+phase150초 소진과 다르며128/215/257은 미도달이다. 시험이 예산 거부를 허용하는 경우에도
+`test PASS`를215 fit 성공으로 세지 않는다. 원1FAIL24.68초와 정확 정리 원장을 보존했다
+(`map431-owned-rest-r1-actual-failure-facts.json`, SHA91b62f29).
+
+같은 source의 catalog/startup/ORM2개는 통과했고 private2 실제42501/public1 최소 EXEC와
+함수 owner/SD/volatility/search_path를 확인했다. 공식 fresh300→431 oracle1개도14.825초에
+통과했다. 반복 dump 동일·runtime reconcile 미호출을 확인했고 actual dump SHA는
+`940a3dede130ce23c74858e4f9f5a122a0a05503d08296316e41f6f26ef1ff4f`다.
+430 대비 신규 함수3+ACL3와 receipt CHECK1 외 변화0을 block/전체 bytes로 대조했다.
+이 dump는 A에 보존한 원본 source 증거이며 아래 A1 후의 golden으로 사용하지 않는다.
+
+64 단일 정본 seed 진단 첫 회는 role 전환 후 identity 관측 NULL 처리 오류로 실패했고
+원본을 보존했다. 수정한 두 번째 진단은 같은 connection의 role 전환 전 PID/backend_start와
+매 probe의 PID·proc starttick을 확인했다. private inventory64는 metadata_complete=True,
+refs2242였고 wall2.537425초/backend CPU2.53초(253tick/100Hz)였다. public SD는 원 statement
+3초에서57014, wall3.006628초/backend CPU3.00초였다. SQL에 쓴 client CPU는 각각
+0.003199/0.001263초다. backend RSS는 지점값54,153,216→57,131,008B 및
+60,137,472→70,152,192B이며 peak/RSS 상한으로 표현하지 않는다.
+
+같은 RR physical ref의 원문 bulk SELECT 두 개는 source_records EXPLAIN 실행2.594ms,
+base values18.579ms였다. 각각64/1600 TidScan loops와 SharedHit64/1600, read0이었다.
+두 plan에 JIT 필드는 없고 jit=on/above_cost100000/inline·optimize500000을 읽기만 했다.
+이는 다른 SPI 구문의 JIT 부재 증거가 아니다. 별도 public codec/native hash64는
+wall0.272902/client CPU0.272879초·219339B였다. public timeout 때문에 decoder/assessment는
+미도달이며 비용0으로 세지 않는다. inventory가3초 중 약2.54초를 사용했지만 JSON concat
+각 구문의 CPU 기여를 개별 확정한 것은 아니다. 진단 원장 SHA는
+`e8a5fd702702ea54184ac5d687a438d78bb1c09a33fd8635b0184b59e3791f99`다.
+
+이 관측에 따라 A1은 inventory 한 파일의 refs/seen 행별 JSON 누적만 OID/tid/kind typed
+배열3개 append와 마지막 한 번의 firstordinal dedupe/ordered jsonb_agg로 바꿨다. 원13개
+metadata SELECT/FOR·51 datum·검사/과금 순서·중복 과금·NULL·처음 참조의 kind/순서·반환
+shape를 보존하며 whole 역변환이 원SQL SHA9aa87f0e와 일치한다. SQL SHA는1ec501f1,
+역대조 원장 SHA는79d7fd8d다. 기존 관련 순수6모듈242PASS10.07초다. typed array append의
+선형성이나 속도 개선은 아직 주장하지 않는다. public payload 재스캔(A2)/cap/GUC/권한은
+변경하지 않았다. 같은64 진단과 원215 lab의 전후 측정, 마지막 SQL의 공식 dump가 남았다.
+
+모든 위 PG는 WSL 전용 CPU2/RAM1536MiB/swap=RAM/PID256·loopback·정확 image/CID/UUID
+범위다. pytest 전체150초는 fresh bootstrap+seed+시험+teardown을 포함하고 parent160초,
+cleanup15초이며 seed 뒤 별도150초를 더 주지 않는다. 원 실패도 CID/UUID/global label0와
+volume 부재를 확인했다. 소스/SDK/import 전후 대조와 정확 정리를 유지하며 운영 SQL·
+collector·등록/재개·Chrome 실행은0이다. 최종215 fit·운영 EOF·CPU/RSS 수용은 미완이다.
