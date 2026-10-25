@@ -1,6 +1,6 @@
 ## 2026-10-25 — 공개 provider patch P-first(초안)
 
-기존 본문 앞 protocol EX를 보강했다. 첫 PG는 revision 길이 초과로 준비 실패했다. 27자로 정정했으며 [검증·미완](reports/2026-10-25-provider-patch-protocol-entry.md)을 분리한다. 운영은 미완이다.
+protocol EX를 보강했다. revision 준비 실패와 catalog 가정 오류(24 PASS/1 FAIL)를 보존·수정했다. [검증·미완](reports/2026-10-25-provider-patch-protocol-entry.md)을 분리하며 운영은 미완이다.
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
 - materializer 두 루프만 분리했다. 실제15 PASS 뒤 공식425 oracle1·EX18 PASS와 정확 정리를 확인했다. fixture 실패와 EX count 감사실패를 보존하며 비용·최종 CI는 미완이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).

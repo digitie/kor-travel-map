@@ -38,3 +38,16 @@ Feature별 advisory lock을 추가하거나 tracking L을 data path에 새로 �
 SQL sidecar·procedure 본문·기존 검증/권한은 그대로다. 기존 전수 길이 계약 시험도
 수정 전1 FAIL(0.20초)로 재현했다. 같은 기존 시험을 다시 실행하며 별도의 중복 검사는
 추가하지 않는다. 수정 source·실행기 재결박의 두 리뷰 뒤 새 고유 PG에서 다시 검증한다.
+
+
+## 두 번째 실제 실행의 catalog 시험 가정 정정
+
+7bcc/r4는 head27 bootstrap을 통과했고25개 중24 PASS/1 FAIL(21.915초)이었다.
+직접 P 경합·NOWAIT5행·유한/기본 timeout·GUC/rollback·SH 오류·EX 재진입과 기존15개는
+실행됐지만, 새 catalog 시험이 owner의 CREATE를 무조건 false로 가정해 실패했다.
+정본 fresh bootstrap은 owner에 USAGE,CREATE를 부여하고 migration은 그 기존 권한을
+보존한다. 제품 권한 누수가 아니며 권한 회수나 fixture 변경으로 시험을 통과시키지 않는다.
+
+기대값만 정본 True로 맞추고 실제 runtime/service의 feature CREATE는 False인지
+확인한다. 원24/1 실패·시험 후 source/SDK 전체 검증 미실행을 보존하며, 실제 CID/UUID/볼륨
+정리는 완료했다. 수정본 두 리뷰·다음 고유 실행 전에는25개 수용 완료로 표시하지 않는다.

@@ -354,9 +354,15 @@ async def test_actual_owner_acl_body_and_service_login(scalar_engines):
                     "'ktm_feature_state_procedure_owner','feature','CREATE')"
                 )
             )
-            is False
+            is True  # 정본 fresh bootstrap의 owner CREATE를 회수하지 않는다.
         )
     async with AsyncSession(runtime) as session:
+        assert (
+            await session.scalar(
+                text("SELECT has_schema_privilege(current_user,'feature','CREATE')")
+            )
+            is False
+        )
         assert tuple((await session.execute(text("SELECT session_user,current_user"))).one()) == (
             "ktm_feature_service",
             "ktm_feature_service",
