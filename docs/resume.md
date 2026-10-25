@@ -1,3 +1,7 @@
+## 2026-10-25 — Rest431 Geo 비교 source 시작
+
+명시 Rest Geo domain/정확 입력형과 순수106PASS를 확인했다. SQL·reader·215 fit·운영은 미완이다. [source 범위](reports/2026-10-25-rest-area-evidence-reader.md).
+
 ## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
 
 synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
