@@ -371,8 +371,19 @@ async def test_backend_death_rolls_back_partial_effects_and_pool_one_recovers(
                 "record_sync_success_for_operation_membership",
                 die_after_sync,
             )
-            with pytest.raises(DBAPIError):
-                await backend.complete_provider_snapshot_postprocess(intent)
+            import warnings
+
+            from sqlalchemy.exc import SAWarning
+
+            # 물리 backend kill의 rollback 경고만 이 fault 호출에서 허용한다.
+            with warnings.catch_warnings():
+                warnings.filterwarnings(
+                    "ignore",
+                    message="^transaction already deassociated from connection$",
+                    category=SAWarning,
+                )
+                with pytest.raises(DBAPIError):
+                    await backend.complete_provider_snapshot_postprocess(intent)
         assert killed is not None
         assert await _state(admin, token, intent) == before
         assert owned_pool.pool.checkedout() == 0
