@@ -563,8 +563,8 @@ async def test_record_lookup_uses_bounded_index_with_unrelated_history(scalar_en
         await session.execute(
             text("""INSERT INTO provider_sync.source_records
             (source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
-            SELECT 'sr_'||substr(md5(:identity||n::text),1,20),:entity,to_jsonb(n),
-                substr(encode(sha256(convert_to(n::text,'UTF8')),'hex'),1,32),now()
+            SELECT 'sr_'||substr(md5(:identity||n::text),1,20),:entity,jsonb_build_object('n',n),
+                substr(encode(sha256(convert_to('{"n":'||n::text||'}','UTF8')),'hex'),1,32),now()
             FROM generate_series(1,5000) AS g(n)"""),
             other,
         )
