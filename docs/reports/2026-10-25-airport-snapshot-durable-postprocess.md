@@ -44,3 +44,5 @@ Docker Dagster image의 설치 완료 후 root 소유 receipt를 생성한다. M
 다섯 번째 실제 시험도 startup/ORM/GUC3 PASS/후처리2 FAIL이며 고정 거부 코드는 `shape_unsupported`였다. 426 native materializer가 빈 영업시간을 JSON null로 저장하는 반면 428은 SQL NULL만 허용하는 불일치를 소스에서 확인했다. 428 원본은 유지하고 430 forward 정의에서 SQL NULL과 JSON null만 동등하게 허용한다. 정본 `to_jsonb(place)`의 지문, 크기·수량·기타 형태 제한, private ACL은 유지한다. 두 null 표현의 정본 4집계 대조와 object/array/number/string 영업시간 거부를 실제 회귀에 추가했으며 새 실제 통과는 아직 미확인이다.
 
 후처리의 세대 경계를 실제로 검증하기 위해 새 generation 예약만 한 수집은 원 성공을 버리지 않는 사례, 두 번째 실제 적용이 원 후처리를 대체하는 사례, 더 최신 sync cursor를 덮어쓰지 않는 사례를 추가했다. 모두 실제 등록/native apply/DB 저장 경로를 사용하며 새3건은 수집6건 확인만 끝났고 실행은 아직 미완이다.
+
+물리 connection 사망 경계도 별도 시험으로 추가했다. 소유 pool1에서 실제 sync 쓰기 후 그 connection의 PID/backend_start/login을 모두 대조해 종료하고, 원 후처리 효과 rollback·pool 반환·같은 원 입력 재시도 및 새 연결의 SELECT1을 검증한다. 운영 backend는 대상이 아니며 실행 전이다.
