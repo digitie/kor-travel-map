@@ -12,3 +12,9 @@
 전용 transaction/backend 순수 회귀10개가 통과했다. 같은 connection 결합, 부분 실패·취소 rollback, 저장 receipt replay와 commit 응답 손실을 확인했다. Ruff와 제품 Python4파일 mypy도 통과했다. 이 결과는 실제 PostgreSQL 효과나 운영 검증을 대체하지 않는다.
 
 새 SQL은 전체430 migration·명시 ACL·실제 scheduled caller와 함께 합성해야 하며 단독 설치하지 않는다. 실제 PG의 stale executor/새 적용/실패 세대/권한/후처리 atomicity/정리 ledger 시험, 두 적대 리뷰, 전체 CI·live UI 및 운영 배포는 아직 남아 있다. 임시 quota는 메모리·CPU 실측 튜닝 결과가 아니다.
+
+## 실제 설치본 pin
+
+Docker Dagster image의 설치 완료 후 root 소유 receipt를 생성한다. Map·Dagster와 DTO/직렬화/HTTP/DB/실행에 직접 참여하는 명시10종 distribution의 실제 Python/native 파일 SHA와 설치 버전, Python patch 버전을 고정한다. 총8,192파일/64MiB를 넘으면 거부한다. 운영 runtime은 기본 비활성이며 `KOR_TRAVEL_MAP_AIRPORT_SNAPSHOT_ENABLED=1`일 때만 immutable image revision과 설치 파일을 receipt와 대조한다. 외부 공항 SDK는 이 경로에서 사용하지 않는다.
+
+설치 버전이 같아도 Python/native 파일이 바뀌면 pin을 거부하며, development/missing revision과 비정본 receipt도 거부한다. 이 경계의 순수 회귀9개가 통과했다. 실제 image build/파일 수·크기·검증 시간 측정은 아직 남아 있다. 기본 비활성은 기존 등록 입력의 재수집 허가가 아니며 caller가 등록 존재를 먼저 확인해야 한다.
