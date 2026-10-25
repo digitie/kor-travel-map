@@ -274,11 +274,22 @@ def test_response_budget_precedes_schema_work(bad: object) -> None:
         decode_transport_airport_evidence(15, {"bad": bad})
 
 
-def _session(mode: str = "repeatable read", readonly: str = "on") -> AsyncMock:
+def _session(
+    mode: str = "repeatable read",
+    readonly: str = "on",
+    *,
+    statement_ms: object = 2000,
+    lock_ms: object = 250,
+) -> AsyncMock:
     session = AsyncMock(spec=AsyncSession)
     session.in_transaction.return_value = True
     response = MagicMock()
-    response.mappings.return_value.one.return_value = {"isolation": mode, "read_only": readonly}
+    response.mappings.return_value.one.return_value = {
+        "isolation": mode,
+        "read_only": readonly,
+        "statement_ms": statement_ms,
+        "lock_ms": lock_ms,
+    }
     value = MagicMock()
     value.scalar_one.return_value = _rejection()
     session.execute.side_effect = [response, value]
@@ -322,3 +333,36 @@ async def test_database_error_is_propagated_with_its_original_identity() -> None
     assert caught.value is error
     session.commit.assert_not_awaited()
     session.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("statement_ms", "lock_ms"),
+    [
+        (0, 250),
+        (3001, 250),
+        (-1, 250),
+        (True, 250),
+        (None, 250),
+        ("2000", 250),
+        (2000, 0),
+        (2000, 1001),
+    ],
+)
+async def test_unbounded_or_invalid_server_caps_never_call_sd(statement_ms, lock_ms):
+    session = _session(statement_ms=statement_ms, lock_ms=lock_ms)
+    with pytest.raises(ValueError, match="finite caller SQL timeout"):
+        await read_transport_airport_evidence(session, 15)
+    assert session.execute.await_count == 1
+    session.commit.assert_not_awaited()
+    session.rollback.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("statement_ms", "lock_ms"), [(1, 1), (3000, 1000)])
+async def test_exact_server_cap_boundaries_are_preserved(statement_ms, lock_ms):
+    session = _session(statement_ms=statement_ms, lock_ms=lock_ms)
+    result = await read_transport_airport_evidence(session, 15)
+    assert not result.evidence_complete
+    assert session.execute.await_count == 2
+    assert all("set_config" not in str(call.args[0]) for call in session.execute.call_args_list)

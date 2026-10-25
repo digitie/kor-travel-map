@@ -565,7 +565,11 @@ def decode_transport_airport_evidence(dataset_id: int, value: object) -> Airport
 _READ_SQL: Final = text("SELECT feature.read_transport_airport_snapshot_evidence(:dataset)")
 _MODE_SQL: Final = text(
     "SELECT current_setting('transaction_isolation') AS isolation,"
-    "current_setting('transaction_read_only') AS read_only"
+    "current_setting('transaction_read_only') AS read_only,"
+    "(SELECT setting::bigint FROM pg_catalog.pg_settings "
+    "WHERE name='statement_timeout') AS statement_ms,"
+    "(SELECT setting::bigint FROM pg_catalog.pg_settings "
+    "WHERE name='lock_timeout') AS lock_ms"
 )
 
 
@@ -581,5 +585,13 @@ async def read_transport_airport_evidence(
         mode = (await session.execute(_MODE_SQL)).mappings().one()
         if mode["isolation"] != "repeatable read" or mode["read_only"] != "on":
             raise ValueError("airport evidence requires read-only repeatable read")
+        statement_ms, lock_ms = mode["statement_ms"], mode["lock_ms"]
+        if (
+            type(statement_ms) is not int
+            or not 1 <= statement_ms <= 3000
+            or type(lock_ms) is not int
+            or not 1 <= lock_ms <= 1000
+        ):
+            raise ValueError("airport evidence requires finite caller SQL timeout caps")
         value = (await session.execute(_READ_SQL, {"dataset": dataset_id})).scalar_one()
     return decode_transport_airport_evidence(dataset_id, value)

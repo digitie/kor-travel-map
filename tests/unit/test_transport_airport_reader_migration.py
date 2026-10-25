@@ -117,3 +117,37 @@ def test_every_variable_column_matches_the_reviewable_inventory():
         actual[relation] = values
     assert actual == inventory
     assert sum(len(columns) for columns in actual.values()) == 51
+
+
+def test_new_indexes_and_lookup_guards_use_the_same_logical_bound(monkeypatch):
+    bind = _Bind(False)
+    monkeypatch.setattr(_migration.op, "get_bind", lambda: bind)
+    _migration.upgrade()
+    statements = [sql for sql, _ in bind.statements]
+    indexes = [sql for sql in statements if sql.startswith("CREATE INDEX")]
+    expected = []
+    for relation, column in [
+        ("source_entity_heads", "source_entity_key"),
+        ("source_records", "source_record_key"),
+        ("source_links", "source_entity_key"),
+    ]:
+        expected.append(
+            f"CREATE INDEX ix_{relation}_bounded_evidence_key ON provider_sync.{relation} "
+            f"((CASE WHEN pg_catalog.octet_length({column}::text)<=256 "
+            f"THEN {column}::text ELSE NULL::text END))"
+        )
+    assert indexes == expected
+    role = None
+    gate = statements.index("SELECT ops.lock_scoped_feature_write_protocol(true)")
+    for position, sql in enumerate(statements):
+        if sql.startswith("SET ROLE "):
+            role = sql.removeprefix("SET ROLE ")
+        if sql.startswith("CREATE INDEX"):
+            assert position > gate
+            assert role == "ktm_feature_schema_owner"
+            assert "IF NOT EXISTS" not in sql
+            assert "COLLATE" not in sql
+    sql = (_ROOT / "alembic/versions/_427_transport_airport_evidence_inventory.sql").read_text()
+    assert sql.count("(CASE WHEN pg_catalog.octet_length(t.") == 4
+    assert "pg_column_size(t.source_entity_key)<=128 THEN" not in sql
+    assert "FROM feature.feature_areas t WHERE t.feature_id=ANY(v_features)" in sql

@@ -68,6 +68,16 @@ ALTER TABLE ops.application_schema_operation_receipts
     ))
 """
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    "SET ROLE ktm_feature_schema_owner",
+    "CREATE INDEX ix_source_entity_heads_bounded_evidence_key ON provider_sync.source_entity_heads "
+    "((CASE WHEN pg_catalog.octet_length(source_entity_key::text)<=256 "
+    "THEN source_entity_key::text ELSE NULL::text END))",
+    "CREATE INDEX ix_source_records_bounded_evidence_key ON provider_sync.source_records "
+    "((CASE WHEN pg_catalog.octet_length(source_record_key::text)<=256 "
+    "THEN source_record_key::text ELSE NULL::text END))",
+    "CREATE INDEX ix_source_links_bounded_evidence_key ON provider_sync.source_links "
+    "((CASE WHEN pg_catalog.octet_length(source_entity_key::text)<=256 "
+    "THEN source_entity_key::text ELSE NULL::text END))",
     "SET ROLE ktm_feature_state_procedure_owner",
     _sidecar("_427_transport_airport_evidence_shape.sql"),
     "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_shape("

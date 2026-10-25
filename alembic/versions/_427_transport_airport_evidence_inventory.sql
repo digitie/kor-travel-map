@@ -76,7 +76,7 @@ BEGIN
     v_count:=0;
     FOR v_row IN
         SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.source_entity_type)::bigint,pg_column_size(t.source_entity_id)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.source_entity_type) IS NOT NULL),(pg_column_compression(t.source_entity_id) IS NOT NULL)]::boolean[],ARRAY[128,64,128]::integer[],ARRAY[false,false,false]::boolean[]) AS bytes
-        FROM provider_sync.source_entities t WHERE t.provider_dataset_id=p_dataset AND CASE WHEN t.source_entity_key IS NOT NULL AND pg_column_compression(t.source_entity_key) IS NULL AND pg_column_size(t.source_entity_key)<=128 THEN t.source_entity_key=ANY(p_entities) ELSE false END LIMIT 2731
+        FROM provider_sync.source_entities t WHERE t.provider_dataset_id=p_dataset AND (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=ANY(p_entities) LIMIT 2731
     LOOP
         v_count:=v_count+1;
         IF v_count>2730 THEN
@@ -110,7 +110,7 @@ BEGIN
     v_count:=0;
     FOR v_row IN
         SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.current_source_record_key)::bigint,pg_column_size(t.lineage_key)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.current_source_record_key) IS NOT NULL),(pg_column_compression(t.lineage_key) IS NOT NULL)]::boolean[],ARRAY[128,64,1024]::integer[],ARRAY[false,false,false]::boolean[]) AS bytes
-        FROM provider_sync.source_entity_heads t WHERE CASE WHEN t.source_entity_key IS NOT NULL AND pg_column_compression(t.source_entity_key) IS NULL AND pg_column_size(t.source_entity_key)<=128 THEN t.source_entity_key=ANY(v_keys) ELSE false END LIMIT 2731
+        FROM provider_sync.source_entity_heads t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=ANY(v_keys) LIMIT 2731
     LOOP
         v_count:=v_count+1;
         IF v_count>2730 THEN
@@ -142,7 +142,7 @@ BEGIN
     v_count:=0;
     FOR v_row IN
         SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.source_role)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.source_role) IS NOT NULL)]::boolean[],ARRAY[128,64]::integer[],ARRAY[false,false]::boolean[]) AS bytes
-        FROM provider_sync.source_links t WHERE CASE WHEN t.source_entity_key IS NOT NULL AND pg_column_compression(t.source_entity_key) IS NULL AND pg_column_size(t.source_entity_key)<=128 THEN t.source_entity_key=ANY(v_keys) ELSE false END LIMIT 2731
+        FROM provider_sync.source_links t WHERE (CASE WHEN pg_catalog.octet_length(t.source_entity_key::text)<=256 THEN t.source_entity_key::text ELSE NULL::text END)=ANY(v_keys) LIMIT 2731
     LOOP
         v_count:=v_count+1;
         IF v_count>2730 THEN
@@ -224,6 +224,11 @@ BEGIN
         END IF;
 
     END LOOP;
+
+    -- area payload는 읽지 않고 UUID 존재만 조사한다. 첫 범위는 place-only다.
+    IF EXISTS(SELECT 1 FROM feature.feature_areas t WHERE t.feature_id=ANY(v_features)) THEN
+        RETURN jsonb_build_object('metadata_complete',false,'reason','unsupported_membership');
+    END IF;
 
     -- 첫 공항 reader는 사람 override가 있는 모든 target을 전체 EX로 보낸다.
     -- status/field_path/JSON/geometry는 읽지 않고 고정 UUID 존재만 확인한다.
@@ -399,7 +404,7 @@ BEGIN
     v_count:=0;
     FOR v_row IN
         SELECT t.tableoid AS relation_oid,t.ctid AS row_tid,feature._heritage_evidence_metadata_bytes(ARRAY[pg_column_size(t.source_record_key)::bigint,pg_column_size(t.source_entity_key)::bigint,pg_column_size(t.raw_payload_hash)::bigint,pg_column_size(t.raw_data)::bigint]::bigint[],ARRAY[(pg_column_compression(t.source_record_key) IS NOT NULL),(pg_column_compression(t.source_entity_key) IS NOT NULL),(pg_column_compression(t.raw_payload_hash) IS NOT NULL),(pg_column_compression(t.raw_data) IS NOT NULL)]::boolean[],ARRAY[64,128,128,8192]::integer[],ARRAY[false,false,false,false]::boolean[]) AS bytes
-        FROM provider_sync.source_records t WHERE CASE WHEN t.source_record_key IS NOT NULL AND pg_column_compression(t.source_record_key) IS NULL AND pg_column_size(t.source_record_key)<=64 THEN t.source_record_key=ANY(v_record_keys) ELSE false END LIMIT 5461
+        FROM provider_sync.source_records t WHERE (CASE WHEN pg_catalog.octet_length(t.source_record_key::text)<=256 THEN t.source_record_key::text ELSE NULL::text END)=ANY(v_record_keys) LIMIT 5461
     LOOP
         v_count:=v_count+1;
         IF v_count>5460 THEN

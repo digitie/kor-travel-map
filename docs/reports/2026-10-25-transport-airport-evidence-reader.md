@@ -151,3 +151,43 @@ PASS/1.62초, migration/receipt/role/sidecar/SQL/문서 정적36 PASS/2.44초, i
 PASS를 별도로 확인했다. 첫 import 검사 명령은 실행 entrypoint를 잘못 지정해 실패했고
 정본 lint-imports entrypoint로4개 계약을 확인했다. 기존 head426 oracle를427로
 바꿔 성공을 꾸미지 않으며 공식 fresh bootstrap까지 oracle 관련 최종 gate는 보류한다.
+
+
+## 논리 key 인덱스·서버 상한과 provenance 보강
+
+1191 source를 보존하고 두 독립 FULL 뒤 후속 설계 r3를 반영한다. source heads/records/
+links에 새 CASE expression index를 하나씩 추가한다. 표현식은 정확히
+`CASE WHEN pg_catalog.octet_length(key::text)<=256 THEN key::text ELSE NULL::text END`다.
+pg_catalog의 immutable 논리 길이 검사이며 긴 key는 본문을 펼치지 않고 NULL로 넣는다.
+기존 index를 재작성하거나 긴 데이터를 삭제하지 않는다. 새 인덱스는 생성부터 live/dead/
+pivot의 text key가256바이트 이하이므로 기존 index의 과거 긴 pivot를 재사용하지 않는다.
+COLLATE를 추가하지 않고 원 열의 collation을 유지한다. 세 index는 schema owner의
+P EX/유한 caller lock1초·statement30초 안에서 생성한다. 이름 충돌은 실패하며
+IF NOT EXISTS로 다른 정의를 묵인하지 않는다.
+
+네 key lookup도 동일 CASE를 사용한다. seqscan이라도 raw length 검사 전 text 비교를
+하지 않으며, 통과한 대상의 compression/physical metadata 검사는 그대로 둔다.
+이 식은 인덱스 사용 가능성을 보존하는 설계이지 실제 사용·CPU 개선의 증거가 아니다.
+큰 무관 history/긴 압축 key가 있는 실제 EXPLAIN의 Index Cond·heap buffers와 index 빌드/
+일반 writer 유지비·IO·시간은 별도 미완이다. pg_column_size/compression의 STABLE 속성을
+IMMUTABLE wrapper로 속이지 않는다. validated CHECK만 추가하면 과거 B-tree pivot까지
+제한하지 못한다는 별도 설계 finding을 반영했다. 기존 canonical capture와 428의 새 fold는
+이 PR에서 수정하지 않는다.
+
+RR/read-only wrapper는 caller가 설정한 statement_timeout이1..3000ms, lock_timeout이
+1..1000ms인지 기존 mode 조회에서 확인한 뒤에만 SD를 호출한다. 0/초과/잘못된 값은
+호출 전에 거부하고 GUC를 설정하거나 더 긴 값으로 바꾸지 않는다. mode+SD 전체의
+협력적 asyncio3초도 유지한다. PostgreSQL 장애/취소의 원예외는 그대로 전파한다.
+
+J 독립 FULL은 inventory JSON 말미에 Heritage422의 실제 checkpoint/관측이 provider
+구분 없이 남은 provenance P2를 찾았다. 해당 원본1191을 보존하고 이를 명시적인
+Heritage primitive 역사 참고 안에 분리했다. Airport427 실제 PG/oracle/positive/API는
+모두 false다. 문서가 UUID-only area 존재검사를 주장했지만 원 SQL에는 관계 catalog
+검사만 있던 P2도 수용했다. 이번에는 실제 feature_areas UUID EXISTS를 payload 이전에
+추가하며 존재하면 unsupported_membership으로 전체 거부한다. 기존 kind/FK 추론을
+직접 관찰한 EXISTS라고 포장하지 않는다.
+
+새 순수 합집합143 PASS/2.01초는 Geo28+decoder39+migration5+native47+DBunit24다.
+서버 상한의0/초과/형식8거부·최소/최대2허용과 새index/role/동일CASE source 검사를
+추가했다. 실제 index 설치/사용, area 분기 실제도달, SD/RR/메모리/collector 수용은
+아니다. 새 고정 source는 다시 root/J 독립 delta 검토를 받은 뒤에만 실제 PG로 간다.

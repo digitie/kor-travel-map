@@ -1,3 +1,8 @@
+## 2026-10-25 공항427 key/index 보강
+
+- 논리CASE index3·caller 서버상한·area EXISTS, provenance P2 정정. 순수143 PASS.
+- 실제 설치/oracle/EXPLAIN·Geo/native 준비·수집/SH는 미완, 두 source gate 전 PG0.
+
 ## 2026-10-25 공항427 SQL/decoder source
 
 - 426 부모 보존, STABLE3함수·51가변열·RR decoder 배선. 순수108 PASS/mypy4.

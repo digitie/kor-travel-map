@@ -296,23 +296,36 @@
     "metadata/payload 중간 interleave·peak와 대형 unrelated history EXPLAIN/CPU/wall 관측",
     "실제 지원 N과 운영 전체 입력의 원자적 planning/apply 수용"
   ],
-  "starting_source": "7e36356700eb69a8c3c6a299fe2f14e06db905f5",
-  "source_full_review_checkpoint": "bfed38828aabaa16d7610c99c1f923c972778192",
-  "actual_positive_checkpoint": "3bfa51bc8d52cf17cd05d49f479bfbc82d9e75af",
-  "actual_security_input_checkpoint": "ca631dc2747afa9e660f5d8979ae8b59028940fc",
-  "actual_snapshot_checkpoint": "a2c03cdd93c276b5d1883b75a22534de90b865cd",
-  "actual_stored_negative_checkpoint": "d3aad3ab3d14486851ce595deb5fffffb52b8961",
-  "후속관측": {
-    "작은비용": "2026-10-25-heritage-reader-cost-observation.md",
-    "schema422_API_startup": "2026-10-25-schema422-api-startup-observation.md",
-    "actual_API_source_checkpoint": "e5a31f1acabbe338fb4c3f3e07a83149bdeb3a2d",
-    "actual_API_scope": "actual lifespan/preflight and fixed GET200/403/200; new19UI/SH/operating not proven"
-  },
   "고정폭_존재만_검사": {
     "ops.feature_overrides": "target UUID 존재 시 전체 거부; status/field_path/payload 미조회",
     "feature.feature_areas": "target UUID 존재 시 전체 거부; payload 미조회",
     "feature.provider_field_policy_epoch": "singleton/epoch 고정폭 읽기"
   },
   "범위": "DB dataset 전체 entity를 metadata LIMIT2731로 닫고 exact Transport Airport만 지원. DB EOF는 upstream EOF가 아니다.",
-  "추가_실제_Geo": "features 실제 coord/address/code 8가변열과 precision 고정 smallint를 provider base와 비교한다. override는 전체 거부한다."
+  "추가_실제_Geo": "features 실제 coord/address/code 8가변열과 precision 고정 smallint를 provider base와 비교한다. override는 전체 거부한다.",
+  "Heritage422_재사용_출처_이번공항증거아님": {
+    "구분": "아래는422 primitive의 역사 참고만이다. Airport427 실제설치/positive/API 증거로 사용하지 않는다.",
+    "참고": {
+      "starting_source": "7e36356700eb69a8c3c6a299fe2f14e06db905f5",
+      "source_full_review_checkpoint": "bfed38828aabaa16d7610c99c1f923c972778192",
+      "actual_positive_checkpoint": "3bfa51bc8d52cf17cd05d49f479bfbc82d9e75af",
+      "actual_security_input_checkpoint": "ca631dc2747afa9e660f5d8979ae8b59028940fc",
+      "actual_snapshot_checkpoint": "a2c03cdd93c276b5d1883b75a22534de90b865cd",
+      "actual_stored_negative_checkpoint": "d3aad3ab3d14486851ce595deb5fffffb52b8961",
+      "후속관측": {
+        "작은비용": "2026-10-25-heritage-reader-cost-observation.md",
+        "schema422_API_startup": "2026-10-25-schema422-api-startup-observation.md",
+        "actual_API_source_checkpoint": "e5a31f1acabbe338fb4c3f3e07a83149bdeb3a2d",
+        "actual_API_scope": "actual lifespan/preflight and fixed GET200/403/200; new19UI/SH/operating not proven"
+      }
+    }
+  },
+  "Airport427_실제증거": {
+    "PG": false,
+    "official_oracle": false,
+    "positive": false,
+    "API_startup": false,
+    "collector_or_SH": false
+  },
+  "논리key비교": "원collation의 immutable octet_length(text)<=256 CASE. 신규3 expression index/모든4 lookup은 동일::text 식이며 기존Btree pivot를 재사용하지 않는다. 실제EXPLAIN/cost는미완."
 }
