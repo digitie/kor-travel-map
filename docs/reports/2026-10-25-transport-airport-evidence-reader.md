@@ -1,5 +1,25 @@
 # 공항 현재집합 evidence reader(427, 부분 구현)
 
+## 70cb CI의 ORM 인덱스 누락과 최소 수정
+
+정확70cb의 양 PostGIS CI에서 `test_fresh_300_upgrade_is_metadata_clean`만
+실패했다. glibc는 1712 PASS/23 SKIP/1 FAIL, alpine은 1706 PASS/29 SKIP/1 FAIL이다.
+427의 bounded CASE 인덱스 세 개가 DB에는 있지만 ORM metadata에는 없어 autogen이
+`remove_index` 세 건을 보고했다. 원 로그와 실패를 보존했다.
+
+`SourceRecordRow`/`SourceEntityHeadRow`/`SourceLinkRow`의 `Index` 선언만 추가했다.
+이름·schema/table·CASE cast·256바이트 조건·기본 collation을 기존 migration과 그대로
+맞췄다. 새 순수 대조의 수정 전 선언 누락 3 FAIL을 재현했고, 수정 뒤 생성 SQL의
+문자열 전체 일치와 기존 migration 회귀 8 PASS를 확인했다. migration/SQL/oracle와
+실제 autogen 검사 본문은 바꾸지 않았다. 실제 metadata-clean 재검증과 새 exact CI는
+아직 미실행이다. 기존 공식 DDL oracle의 반복 비교는 이 autogen 검사의 대체가 아니다.
+
+변경 전 필수 Codegraph 영향도는 기존 dc8 정상 격리 index의 복제본에서 조회했다.
+현재 models 전체 SHA는 indexed 원문과 같고 세 class의 depth3 영향도는 각각
+44/42/32 node였다. caller graph는 dc8 시점이므로 새 caller 부재나 전체 graph 최신성을
+주장하지 않는다. index 생성·sync는 없었고 원 index/소스와 실행 자원을 보존·정리했다.
+첫 조회의 freshness 사전 조건 중단도 별도 보존했다.
+
 ## 현재 checkpoint
 
 1404의 순수 복원·적격성 진단 위에 별도 reader를 구현한다. 현재 checkpoint는

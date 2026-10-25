@@ -1,3 +1,7 @@
+### 2026-10-25 공항 reader ORM 인덱스 metadata 보완
+
+- 70cb 양 PG CI의 autogen 단일 실패/원 로그를 보존하고 canonical metadata에 기존 인덱스3만 등록했다. 생성 SQL 전체 대조와 migration 회귀8 PASS, 실제 autogen/새 exact CI는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
 ### 2026-10-25 공항427 준비 경계 소스
 
 정본 converter/loader 기반 공항1→15·R1/R2/Geo 시험1개와 비활성 준비 함수를 추가했다.
