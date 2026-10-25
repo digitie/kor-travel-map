@@ -23,6 +23,7 @@ class Driver:
         self.closed = False
         self.terminations = 0
         self.calls = []
+        self.signal_result = {"signal_sent": True}
 
     def get_server_pid(self):
         return self.pid
@@ -39,6 +40,10 @@ class Driver:
 
     async def fetchrow(self, sql, *args, **kwargs):
         self.calls.append(("fetchrow", sql, args, kwargs["timeout"]))
+        if "pg_terminate_backend" in sql:
+            if isinstance(self.signal_result, BaseException):
+                raise self.signal_result
+            return self.signal_result
         item = self.rows.pop(0)
         if isinstance(item, BaseException):
             raise item
@@ -185,8 +190,17 @@ async def test_level_cancellation_shields_exact_termination_and_readback(monkeyp
     assert observer.driver.closed
     assert original.closed
     assert observer.closed
-    fetches = [c for c in observer.driver.calls if c[0] == "fetchrow"]
+    fetches = [
+        c
+        for c in observer.driver.calls
+        if c[0] == "fetchrow" and "pg_terminate_backend" not in c[1]
+    ]
     assert len(fetches) == 2
+    signals = [
+        c for c in observer.driver.calls if c[0] == "fetchrow" and "pg_terminate_backend" in c[1]
+    ]
+    assert len(signals) == 1
+    assert signals[0][2] == (10, _START)
     assert all(c[2] == (10, _START) for c in fetches)
     assert all("backend_start=$2" in c[1] for c in fetches)
 
@@ -709,3 +723,61 @@ def test_sqlalchemy_normal_return_same_native_recheckout_is_protected(return_pat
     finally:
         connection.close()
         engine.dispose()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("signal_result", [None, {"signal_sent": False}, {"signal_sent": True}])
+async def test_signal_result_never_substitutes_for_actual_zero_readback(signal_result):
+    original = Connection(Driver(10))
+    observer = Connection(
+        Driver(
+            11,
+            [
+                {"backend_present": True, "advisory_present": True},
+                {"backend_present": False, "advisory_present": False},
+            ],
+        )
+    )
+    observer.driver.signal_result = signal_result
+    backend = _backend(original, Engine(observer))
+    assert await service._confirm_backend_termination(
+        backend,
+        deadline=service.monotonic() + 0.2,
+    )
+    signals = [
+        c for c in observer.driver.calls if c[0] == "fetchrow" and "pg_terminate_backend" in c[1]
+    ]
+    readbacks = [
+        c
+        for c in observer.driver.calls
+        if c[0] == "fetchrow" and "pg_terminate_backend" not in c[1]
+    ]
+    assert len(signals) == 1
+    assert len(readbacks) == 2
+    assert observer.driver.closed
+    assert observer.closed
+
+
+@pytest.mark.asyncio
+async def test_signal_permission_failure_is_not_confirmed_and_preserves_cancel(monkeypatch, caplog):
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    observer = Connection(Driver(11))
+    observer.driver.signal_result = PermissionError("not an owned backend")
+    backend = None
+    error = asyncio.CancelledError("caller")
+    async def failed_request():
+        nonlocal backend
+        async with service._coordinator_session(Engine(original, observer)) as (_, session):
+            backend = service._session_backend(session)
+            raise error
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await failed_request()
+    assert raised.value is error
+    assert backend is not None
+    assert not backend.termination_confirmed
+    assert original.driver.closed
+    assert observer.driver.closed
+    assert "phase=exact_termination" in caplog.text
+    assert "signal_sent=False" in caplog.text

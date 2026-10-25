@@ -162,3 +162,34 @@ PostgreSQL2.0.54 동작과 최종 CI/Live UI·배포 수용은 이 순수시험�
 
 설치·공유 venv 변경 없이 cache의 실제2.0.54/2.0.55를 격리 import해 기존 취소 관련45개를
 각각4.65초/4.29초에 모두 통과했다. 이는 순수 회귀이며 새 실제 PG 수용 횟수에 합산하지 않는다.
+
+## 13418 전체 CI의 실제 PG 실패와 종료 요청 보강
+
+13418의 세 Python 단위 lane과 replay는 성공했지만 alpine/glibc 실제 통합은 각각
+1785 PASS·29 SKIP·2 FAIL, 1791 PASS·23 SKIP·2 FAIL이었다. 원 전체 로그 SHA256은
+d7d82e553e35607fd36715c7c2ed4c0e834e0633b3e83ef7952a558a9f112bab다.
+앞선 로컬 SQLAlchemy 2.0.55의 제품2 PASS를 CI 2.0.54의 성공으로 대체하지 않는다.
+
+기존 phase2 unlock 예외 fixture는 새 coordinator의 원 연결 캡처를 거치지 않고
+wrapper도 session.info를 전달하지 않았다. 실제 coordinator context와 원 info를
+보존하도록 고쳐 원 native 종료·connection closed·pool 반환과 기존 경쟁자의 K 획득을
+확인한다. 다른 하나는 원 P 대기 취소 직후 advisory2행이 남았으며, 제품의 전체 cleanup
+0.6초 안 종료 확인이 실패했다. 이 로그만으로 드라이버 버전이나 영구 누수를 원인으로
+단정하지 않는다. 원 zero-row·요청3초·test35초·cleanup0.6초 조건은 그대로다.
+
+socket abort 뒤 서버 lock wait의 즉시 중단을 가정하는 대신, 같은 LOGIN의 새 observer가
+정확 pid/backend_start·현재 LOGIN·client backend·자기 PID 제외 조건을 만족한 원 세션에만
+pg_terminate_backend를 한 번 요청한다. 신호 전달 성공은 소멸 증거가 아니며 기존의
+backend 부재와 advisory0 재조회가 모두 필요하다. checkout·readonly 설정·종료 요청·재조회
+단계를 안전한 로그로 구분하고 전체 감소 예산을 유지한다. 별도 권한 GRANT나 업무 기한,
+SDK·Dagster HTTP 경계는 바꾸지 않는다.
+
+기존45개와 신규4개를 합친 관련 단위49개는 고정 SQLAlchemy2.0.54에서49 PASS4.48초,
+2.0.55에서49 PASS4.76초였다. 네 추가 단위는 신호의 true/false/대상 없음이
+실제 zero 재조회를 대신하지 못함과 권한 오류 뒤 원 caller 취소 보존을 확인한다.
+정확 starttime 불일치·다른 LOGIN의 실제 연결과 잠금을 건드리지 않는 두 PG 반례도
+source로 추가했다. 감사 전용 다섯 case는 원 task2·이 두 반례·원 unlock 본문을 같은
+owned fixture의 runtime LOGIN에서 실행할 계획이다. --pyargs collect5만 통과했고,
+이번 제품 보강의 실제 PG·새 정확 CI·후보 UI·운영 배포는 아직 미완이다. 외부 감사
+파일을 절대경로로 수집한 초기30초 중단 두 건은 pytest의 상위 디렉터리 탐색 단계였으며
+PG 실행이 아니었다. 원 중단과 원13418 실패는 보존한다.

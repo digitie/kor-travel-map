@@ -1473,6 +1473,8 @@ async def test_unexpected_service_close_keeps_retryable_observations(
 class _UnlockFailureSession:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
+        # 실제 coordinator가 캡처한 원 backend identity를 예외 주입 wrapper도 보존한다.
+        self.info = session.info
 
     def in_transaction(self) -> bool:
         return self._session.in_transaction()
@@ -1493,24 +1495,29 @@ async def test_unlock_exception_hard_invalidates_actual_backend_and_releases_loc
     migrated_engine: AsyncEngine,
 ) -> None:
     lease_key = advisory_lock_key("pipeline-cancellation:test:hard-invalidate")
-    async with (
-        migrated_engine.connect() as connection,
-        AsyncSession(bind=connection, expire_on_commit=False) as session,
-    ):
-        assert await service._acquire_coordinator_lease(
-            session,
-            lease_key=lease_key,
-        ) is True
-        backend_pid = await session.scalar(text("SELECT pg_backend_pid()"))
-        await session.commit()
-        assert session.in_transaction() is False
-        with pytest.raises(service.PipelineCancellationUnsafe):
+    with pytest.raises(service.PipelineCancellationUnsafe):  # noqa: PT012 -- 실제 context exit까지 관측
+        async with service._coordinator_session(migrated_engine) as (connection, session):
+            backend = service._session_backend(session)
+            assert backend is not None
+            assert (
+                await service._acquire_coordinator_lease(
+                    session,
+                    lease_key=lease_key,
+                )
+                is True
+            )
+            backend_pid = await session.scalar(text("SELECT pg_backend_pid()"))
+            await session.commit()
+            assert session.in_transaction() is False
             await service._release_coordinator_lease(
                 _UnlockFailureSession(session),  # type: ignore[arg-type]
                 connection,
                 lease_key=lease_key,
             )
-        assert connection.invalidated is True
+    assert connection.closed is True
+    assert backend.driver.is_closed() is True
+    assert backend.termination_confirmed is True
+    assert migrated_engine.pool.checkedout() == 0
 
     async with migrated_engine.connect() as competitor:
         acquired = await competitor.scalar(
@@ -1518,18 +1525,18 @@ async def test_unlock_exception_hard_invalidates_actual_backend_and_releases_loc
             {"lock_id": lease_key},
         )
         assert acquired is True
-        assert await competitor.scalar(
-            text("SELECT pg_advisory_unlock(:lock_id)"),
-            {"lock_id": lease_key},
-        ) is True
+        assert (
+            await competitor.scalar(
+                text("SELECT pg_advisory_unlock(:lock_id)"),
+                {"lock_id": lease_key},
+            )
+            is True
+        )
         active_old_backend = True
         for _ in range(20):
             active_old_backend = bool(
                 await competitor.scalar(
-                    text(
-                        "SELECT EXISTS ("
-                        "SELECT 1 FROM pg_stat_activity WHERE pid=:pid)"
-                    ),
+                    text("SELECT EXISTS (SELECT 1 FROM pg_stat_activity WHERE pid=:pid)"),
                     {"pid": backend_pid},
                 )
             )

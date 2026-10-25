@@ -10,6 +10,7 @@ import asyncio
 import json
 import sys
 import time
+from datetime import timedelta
 from uuid import uuid4
 
 import httpx
@@ -486,3 +487,49 @@ async def test_cancel_after_real_k_commit_before_return_closes_unknown_lease(
             if primary is None:
                 raise
             primary.add_note(f"test cleanup also failed: {type(cleanup_error).__name__}")
+
+
+@pytest.mark.parametrize("mismatch", ["backend_start", "other_login"])
+async def test_exact_termination_never_signals_nonmatching_backend(scalar_engines, mismatch):
+    admin, runtime = scalar_engines
+    target_engine = runtime if mismatch == "backend_start" else admin
+    lease_key = service._coordinator_lease_key(root_kind="import_job", root_id=str(uuid4()))
+    async with target_engine.connect() as target:
+        backend = service._capture_backend(target, runtime)
+        backend.backend_start = await target.scalar(
+            text("SELECT backend_start FROM pg_catalog.pg_stat_activity WHERE pid=pg_backend_pid()")
+        )
+        if mismatch == "backend_start":
+            backend.backend_start -= timedelta(seconds=1)
+        assert (
+            await target.scalar(
+                text("SELECT pg_try_advisory_lock(:key)"),
+                {"key": lease_key},
+            )
+            is True
+        )
+        await target.commit()
+        try:
+            assert not await service._confirm_backend_termination(
+                backend,
+                deadline=service.monotonic() + 0.6,
+            )
+            # 다른 starttime 또는 LOGIN의 실제 연결은 관측 후에도 같은 PID로 사용할 수 있다.
+            assert not backend.driver.is_closed()
+            assert int(await target.scalar(text("SELECT pg_backend_pid()"))) == backend.pid
+            assert (
+                await target.scalar(
+                    text("SELECT pg_advisory_unlock(:key)"),
+                    {"key": lease_key},
+                )
+                is True
+            )
+            await target.commit()
+        finally:
+            if not target.closed and not target.invalidated:
+                await target.rollback()
+                await target.execute(
+                    text("SELECT pg_advisory_unlock(:key)"),
+                    {"key": lease_key},
+                )
+                await target.commit()

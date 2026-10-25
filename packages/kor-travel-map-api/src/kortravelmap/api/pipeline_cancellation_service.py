@@ -340,21 +340,38 @@ def _discard_exact_backend(backend: _CoordinatorBackend, cause: BaseException) -
 
 
 async def _confirm_backend_termination(backend: _CoordinatorBackend, *, deadline: float) -> bool:
-    """같은 LOGIN의 새 readonly observer로 원 backend의 소멸을 확인한다."""
+    """같은 LOGIN의 새 observer로 정확 원 backend에 종료를 요청하고 소멸을 확인한다."""
     if backend.backend_start is None:
         # 첫 metadata SQL 전에는 K/업무 SQL을 실행하지 않았다. 소멸을 추측하지 않는다.
         return False
     observer: _CoordinatorBackend | None = None
     connection = backend.engine.connect()
+    phase = "checkout"
+    signal_sent = False
     try:
         async with asyncio.timeout_at(deadline):
             await connection.start()
             observer = _capture_backend(connection, backend.engine)
             driver = observer.driver
+            phase = "readonly_setup"
             await driver.execute(
                 "SET default_transaction_read_only = on",
                 timeout=min(_OBSERVER_STATEMENT_SECONDS, max(0.0, deadline - monotonic())),
             )
+            # socket close만으로 lock wait가 즉시 중단된다고 가정하지 않는다. 원 LOGIN의
+            # 정확 pid/starttime인 client backend에만 한 번 신호를 보내고 반드시 아래에서 확인한다.
+            phase = "exact_termination"
+            signalled = await driver.fetchrow(
+                """SELECT pg_catalog.pg_terminate_backend(a.pid) AS signal_sent
+                FROM pg_catalog.pg_stat_activity AS a
+                WHERE a.pid=$1 AND a.backend_start=$2 AND a.usename=current_user
+                    AND a.backend_type='client backend' AND a.pid<>pg_catalog.pg_backend_pid()""",
+                backend.pid,
+                backend.backend_start,
+                timeout=min(_OBSERVER_STATEMENT_SECONDS, max(0.0, deadline - monotonic())),
+            )
+            signal_sent = signalled is not None and bool(signalled["signal_sent"])
+            phase = "zero_readback"
             while monotonic() < deadline:
                 # 각 native autocommit SELECT는 새 snapshot이다. query 본문/다른 세션은 읽지 않는다.
                 row = await driver.fetchrow(
@@ -375,7 +392,10 @@ async def _confirm_backend_termination(backend: _CoordinatorBackend, *, deadline
     except Exception as exc:
         # 외부 cancel은 이 scope 밖에서 재전파한다. 확인 실패를 성공으로 승격하지 않는다.
         _LOG.warning(
-            "pipeline cancellation backend termination readback failed: error_type=%s",
+            "pipeline cancellation backend termination readback failed: "
+            "phase=%s signal_sent=%s error_type=%s",
+            phase,
+            signal_sent,
             type(exc).__name__,
         )
     finally:
