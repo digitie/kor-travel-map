@@ -95,3 +95,17 @@ fresh EX로 같은 입력 적용→B winner/own phones/원시각 및 attempt 상
 거부됐다. 기존 strict 시험의 managed-base 경계와 같이 admin 연결의 정본 begin 후
 명시 SchemaOwner로 UPDATE하며 원23514/message/rollback 단언을 그대로 검증한다.
 관리 SQL 증거를 일반 runtime raw 권한이나 guard 성공으로 혼동하지 않는다.
+
+## paired 결과와 실제 공식 golden
+
+관리 owner 부정 마지막1개는 고정6030652에서1PASS로 원23514/message/rollback까지
+검증했다. runtime raw UPDATE42501와 managed guard23514를 분리한다. 새3은 서로 다른
+fresh 실행에서 각각 통과한 증거이며 최초64실행61PASS/3FAIL을 단일64PASS로 합산하지 않는다.
+
+동일6030652 제품으로 canonical application300→430 fresh bootstrap과 공식 재덤프 비교
+1PASS54.22초를 확인했다. runtime reconcile호출0, 실제service역할/SDK53/Git2514·
+9import/원raw9 SHA와 정확CID/UUID/global0/volume1부재를 확인했다. 새 실제dump SHA
+`87929f98fe54f63a5b8c737b9cc867f92d7fc91d4b4e9ff432053585f0933e4c`를채택했다.
+부모dump에대해 projector 정의1개만 역치환하면 전체bytes가 같으며 ACL/owner/기타객체는
+모두동일하다. 원412본문과 새430 no-op조건 외의 제품변경0이다.
+canonical/TVN40/reconcile 원실패 actual과 전체CI/배포수용은 계속미완이다.
