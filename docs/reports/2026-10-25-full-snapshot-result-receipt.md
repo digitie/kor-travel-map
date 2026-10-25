@@ -1,6 +1,7 @@
 # 동일 실행 복구의 원래 반환값 보존 조각
 
-기준619a6d4f1의 별도 branch에서 신규 module/unit/이 보고서만 추가했다. 기존 symbol이나
+기준619a6d4f1의 별도 branch에서 처음 신규 module/unit/이 보고서를 추가했고, 이후 아래
+미호출 저장/dispatch SQL 두 조각을 준비했다. 기존 symbol이나
 signature를 바꾸지 않아 AGENTS.md의 신규 파일 Codegraph 생략 조건에 해당한다. DB 저장,
 권한, lease, actual apply와 SDK0 후속 재개, child/root 완료를 연결한 구현은 아직 아니다.
 단독 PR·배포/활성화는 하지 않고 전체 동시 쓰기·복구 단위에 합성한다.
@@ -38,3 +39,31 @@ finding/sync 후속 처리 완료가 아니다. commit 이후 worker가 죽은 �
 순수 unit120 PASS/1.36초, Ruff 통과다. 최초 Ruff2개는 새 시험 긴 줄, mypy1개는 새 dict의
 value 타입 추론 문제였으며 수정 후 mypy1파일 통과했다. 실제 PG/운영/복구 실패 주입은0이다.
 두 독립 source review와 전체 합성 CI를 아직 수행하지 않았다.
+
+
+## 영속 저장·profile dispatch source 조각
+
+기존 결과 module d11e는 Root/J/W의 독립 source 검토와 각각120개 시험을 통과했다. 그 검토는
+다음 신규 SQL의 검토를 대신하지 않는다. 이 두 SQL은 현재 어떤 migration에서도 호출하지 않는다.
+
+작은 최종 입력과 observation context를 각각1MiB/8KiB로 제한한 immutable artifact 행에 보관하고,
+자주 갱신하는 lease/fence와 원 apply 결과4KiB를 별도 작은 control 행으로 분리했다. 따라서
+renew마다 큰 payload를 다시 읽거나 입력 SHA256을 재계산하는 구조를 피한다. artifact는 실제
+member UUID UNIQUE와 child/member composite FK·root FK를 가지며, 실제 parent/run/exact triple
+검증은 이후 등록 SD에서 해야 한다. FK만으로 그 권위를 증명했다고 하지 않는다.
+
+blob은 canonical source history나 공개 Feature 상태의 새 정본이 아니다. 같은 실행을 재개하기 위한
+한정된 입력 사본이며 source_records를 대체하거나 별도 후보 원장으로 사용하지 않는다. DB 자체가
+NVMe/승인 n150 SSD에 있으므로 이중 파일·DB commit 대신 하나의 PG transaction 경계를 선택한다.
+quota 예약/GC/typed 등록·claim·renew·apply 명령과 권한 배선은 아직 없다. active/unsealed GC0과
+quota를 잡기 전 P SH→own scope 순서도 후속 구현에서 닫아야 한다.
+
+새 private member dispatcher는 P EX+L 보유 및 RC를 요구하며 잠금을 새로 취득하지 않는다.
+실제 child/member UUID를 root와 exact triple에서 먼저 해석하고 그 UUID로 artifact를 조회한다.
+행이 없는 legacy EX만 기존 aggregate를 쓰고, 행이 있으면 root/child/run/triple/profile 전부를
+대조한다. prepared/control 누락/결과 미완은 거부한다. 적용된 bounded profile은 기존428 capture가
+완전하다고 판정한 결과만 반환하며 legacy aggregate로 조용히 바꾸지 않는다.
+
+현재 dispatcher를 load/child/root의 기존 호출자에 연결하지 않았고 새 tables/functions의 owner/ACL,
+모델·schema dump·startup, 실제 PG 시험, 전체 forward migration430도 미완이다. SQL은 source draft이며
+기능 수용·자동 복구·SH 활성화 또는 운영 변경이 아니다. 실제 source/실패 주입 검토가 더 필요하다.
