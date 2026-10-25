@@ -145,7 +145,8 @@ BEGIN
         RAISE EXCEPTION 'snapshot sync cursor is newer than the original observation'
             USING ERRCODE='55000',CONSTRAINT='ck_provider_snapshot_superseded';
     END IF;
-    UPDATE ops.provider_snapshot_controls SET postprocess_txid=txid_current(),updated_at=clock_timestamp()
+    UPDATE ops.provider_snapshot_controls SET postprocess_txid=txid_current(),
+        postprocess_intent_sha256=encode(sha256(p_receipt),'hex'),updated_at=clock_timestamp()
       WHERE snapshot_id=p_snapshot;
     RETURN NULL;
 END;
@@ -166,7 +167,8 @@ BEGIN
     v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
     v_receipt:=ops._provider_snapshot_postprocess_receipt(p_snapshot,p_receipt);
     IF v_control.status IS DISTINCT FROM 'applied'
-       OR v_control.postprocess_txid IS DISTINCT FROM txid_current() THEN
+       OR v_control.postprocess_txid IS DISTINCT FROM txid_current()
+       OR v_control.postprocess_intent_sha256 IS DISTINCT FROM encode(sha256(p_receipt),'hex') THEN
         RAISE EXCEPTION 'postprocess effects must share their fenced transaction'
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
     END IF;
@@ -201,7 +203,8 @@ BEGIN
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
     END IF;
     UPDATE ops.provider_snapshot_controls SET status='postprocessed',postprocess_receipt=p_receipt,
-        postprocessed_at=clock_timestamp(),postprocess_txid=NULL,updated_at=clock_timestamp()
+        postprocessed_at=clock_timestamp(),postprocess_txid=NULL,postprocess_intent_sha256=NULL,
+        updated_at=clock_timestamp()
       WHERE snapshot_id=p_snapshot;
 END;
 $$;

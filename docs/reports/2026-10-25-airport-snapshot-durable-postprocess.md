@@ -18,3 +18,5 @@
 Docker Dagster image의 설치 완료 후 root 소유 receipt를 생성한다. Map·Dagster와 DTO/직렬화/HTTP/DB/실행에 직접 참여하는 명시10종 distribution의 실제 Python/native 파일 SHA와 설치 버전, Python patch 버전을 고정한다. 총8,192파일/64MiB를 넘으면 거부한다. 운영 runtime은 기본 비활성이며 `KOR_TRAVEL_MAP_AIRPORT_SNAPSHOT_ENABLED=1`일 때만 immutable image revision과 설치 파일을 receipt와 대조한다. 외부 공항 SDK는 이 경로에서 사용하지 않는다.
 
 설치 버전이 같아도 Python/native 파일이 바뀌면 pin을 거부하며, development/missing revision과 비정본 receipt도 거부한다. 이 경계의 순수 회귀9개가 통과했다. 실제 image build/파일 수·크기·검증 시간 측정은 아직 남아 있다. 기본 비활성은 기존 등록 입력의 재수집 허가가 아니며 caller가 등록 존재를 먼저 확인해야 한다.
+
+독립 소스 리뷰에서 begin/finish의 receipt byte identity를 transaction marker만으로는 고정하지 못하는 경계를 확인했다. begin에서 receipt SHA도 저장하고 finish가 같은 SHA를 확인하도록 보강했다. 두 marker는 함께 설정·해제하며 실제 PG 반례 검증은 남아 있다. 공항 codec은 표준 JSON을 사용하므로 설치 inventory는 미사용 msgpack 대신 실제 Dagster 공통 실행 코드인 kor-travel-common을 포함한다.

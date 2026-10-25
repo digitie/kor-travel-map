@@ -24,7 +24,7 @@ _DISTRIBUTIONS = (
     "pydantic-core",
     "httpx",
     "httpcore",
-    "msgpack",
+    "kor-travel-common",
     "SQLAlchemy",
     "asyncpg",
 )
