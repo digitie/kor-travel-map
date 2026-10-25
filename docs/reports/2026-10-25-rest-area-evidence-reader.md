@@ -15,7 +15,8 @@ Python RR 양성과 구분한다. Git golden은 마지막
 공식dump SHA59ada12d 그대로다. 이 결과는 synthetic owned input 수용이며 실제upstream215
 EOF·durable 등록/수집·운영 활성화/배포는 미완이다. 아래 초기source/계획 절은 당시 기록이고
 현재 완료·한계는 마지막 실제 수용 절에서 정산한다.
-기존 Airport427/430 코드·공통 projection·SDK converter는 변경하지 않았다.
+기존 Airport427/430 SQL·공통 projection·SDK converter를 보존한다. 공유 Transport native의
+의미 비교는 아래 최종CI 결함 수정에서 unordered presence 집합만 정렬한다.
 
 Geo pins domain은 `transport-rest-area-geo-v1`, 지문 framing domain은
 `kor-travel-map:transport-rest-area-geo-evidence:v1` 뒤 NUL로 고정한다.
@@ -316,3 +317,28 @@ literal_eval로 바로잡았으며 원실행 결과를 변경하거나 PG를 다
 문구는 당시 준비 이력이다. 새 실제 사실의 독립 검산·문서 delta와 정확 최신CI 및 별도
 431 candidate UI가 머지 전 남아 있다. 운영EOF·durable/collector 연결·운영 활성화는 미완이며
 기존1412/1413 draft는431의 main 흡수 증명 전 닫지 않는다.
+
+
+## 최종CI의 presence 집합 순서 결함과 최소 수정
+
+최종65e4943의 Python3.13 CI는4355PASS/7SKIP/6FAIL359.92초였다. 원로그 SHA
+3af5b416c0f7bdcf98da6416b85d7dd5b76c5675c0576ec16d46ac6e20b6c4f4를 보존했다.
+실패6개는 기존 Rest 준비 양성4개와 합법NULL/Geo 양성2개 모두 current_bundle_not_canonical이다.
+원인 분리에서 PYTHONHASHSEED=41로 같은6FAIL/27PASS1.53초를 재현했다. typed presence 집합은
+같지만 deepcopy 뒤 supplied_fields의 JSON 배열 순서만 [place.phones,core.name]과 역순으로
+달라졌으며 다른 meaning 필드는 같았다. seed0의 정상은 이 제품 결함 부재 증거가 아니었다.
+T도 독립42d5532e로 같은 원인과 네 조합을 확인했다. SDK/Geo/SQL권한 문제가 아니다.
+
+공유 native `_meaning`의 model_dump 복사 안에서 supplied_fields만 sorted로 정규화한다.
+원 DTO/집합·fieldpresence 검증·다른 순서있는 list/raw/lineage/hash·codec·SQL/권한·guard는
+바꾸지 않는다. 새로운 seed41 subprocess 회귀는 deepcopy 동일입력 적격과 실제name값 변조
+거부를 함께 검사한다. 수정 전 신규회귀1FAIL2.57초 원본을 보존했고, 수정 후 기존Rest/native
+합집합81PASS2.93초와 관련 Airport/Rest/codec8모듈307PASS11.46초/skip0, Ruff2·format2·strict
+mypy1이 통과했다. 전체 tests/lint는373PASS/기존6SKIP35.14초다. 기존 긍정/부정 단언을
+삭제하거나 결과를 fuzzy 비교로 바꾸지 않았다.
+
+이는 testfixture만 정렬한 수정이 아니라 같은집합을 거짓다름으로 거부하던 제품 수정이다.
+원 215/추가SQL음성/공식golden의 SQL·readers/decoder·stored artifact는 그대로이며 그 실제
+결과와 새로운 의미비교 회귀 범위를 구분해 carry한다. 추가 PG/공식dump 반복은 하지 않았다.
+새 제품 delta의 독립2인 리뷰·정확 새CI 및 최종API 후보UI는 별도로 완료해야 한다.
+기존UI frontend build를 재사용하더라도 최종API source가 같다고 선인정하지 않는다.

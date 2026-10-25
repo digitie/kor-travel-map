@@ -311,6 +311,10 @@ async def rebuild_transport_projection(
 def _meaning(bundle: FeatureBundle) -> dict[str, Any]:
     # 사전 공통 예산 검사를 통과한 정본 DTO만 호출한다. 전체 detail/alias/raw/lineage를 남긴다.
     result = bundle.model_dump(mode="json")
+    # supplied_fields는 집합이다. JSON 배열의 hash 순서를 값의 의미로 비교하지 않는다.
+    presence = result["provider_field_presence"]
+    if presence is not None:
+        presence["supplied_fields"] = sorted(presence["supplied_fields"])
     result["feature"].pop("created_at")
     result["feature"].pop("updated_at")
     result["source_record"].pop("fetched_at")
