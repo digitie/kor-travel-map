@@ -59,3 +59,25 @@ Root backend26c2e5를 상속한 뒤 client의 일반 deadline setter와 중복 c
 lock timeout을 먼저 늘릴 수 있던 source 경계를 제거한다. RR은3초, 나머지는30초를
 명시하고 기존 서버 값·호출자 마감·고정 cap의 최솟값을 적용한다. client 순수18개가
 4.54초에 통과했다. 이 결과는 SQL 대역의 호출/제한 전달 검사이며 실제 PG 실행은 아니다.
+
+## RR 계획과 RC 원 적용
+
+client 전용 파일에 등록 입력의 RR evidence/순수 assessment와 같은 snapshot의 정본
+membership 지문을 읽는 계획 경계를 추가했다. Feature revision·source head·membership의
+3N manifest를 기존 kernel 함수로 작성하고, claim/seal/등록 binding은 한 RC TX에서
+확정한다. lease300초/whole scope/SH 모드를 명시한다. 이미 binding된 ready plan은 원
+attempt/owner/manifest를 재사용하며, 다른 상태나 입력 지문이면 새 attempt로 덮지 않는다.
+J8d4c의 typed reset SD는 정확한 old attempt/owner/manifest와 현재 executor fence만 전달한다.
+만료 판정과 reset/needs_read 결과는 서버가 결정한다. SD 설치는 전체430 합성 의존이다.
+
+실제 적용은 Root의 기존 native apply를 새 RC TX에서 호출한다. native apply가 잠금 뒤
+fresh427과 실제 decoded artifact/Geo 의미를 재검증하고 원14 counter+retired를 저장한다.
+알려진 evidence race만 재계획 진단으로 구분하며, 다른 DB/입력 오류·취소·commit 응답
+유실은 전파한다. 이 client 함수들은 EX fallback/SDK 재호출·자체 재시도를 수행하지 않는다.
+
+기존18개와 새15개 순수 시험을 합한33개가3.18초에 통과했다. 정본 converter/codec/decoder를
+사용한 전체 진단, 3N 내용, 한 TX binding 오류 rollback 경로, 기존 ready 재사용·불일치
+거부, typed reset의 세 원 binding 값, apply 오류와 commit 응답 유실을 확인했다.
+SQL/session/kernel 명령은 대역이며 실제 PG 수용은 아니다. Ruff와 strict mypy도 통과했다.
+Dagster runner/첫 Airport entry 분기·SDK 수집/같은 입력 EX fallback·재계획 상한·최종 봉인은
+아직 배선하지 않았다. 기존 asset와 모든 공유파일은 그대로다.
