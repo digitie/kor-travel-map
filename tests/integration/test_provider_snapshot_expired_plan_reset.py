@@ -19,6 +19,7 @@ from tests.integration.test_provider_field_scalar_projection import scalar_engin
 from tests.integration.test_state_lifecycle_protocol_entry import (
     owned_scalar_resource_bounds as owned_scalar_resource_bounds,
 )
+from tests.integration.test_strict_sh_data_guards import strict_engines as strict_engines
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(35)]
 _RESET = """SELECT ops.reset_expired_provider_snapshot_plan(
@@ -209,9 +210,9 @@ async def test_reset_rollback_and_unknown_response_needs_read(scalar_engines):
     assert await _state(admin, args) == after
 
 
-async def test_applying_holder_blocks_reset_then_rollback_allows_expired_reset(scalar_engines):
-    admin, runtime = scalar_engines
-    dataset, args = await _registered(scalar_engines)
+async def test_applying_holder_blocks_reset_then_rollback_allows_expired_reset(strict_engines):
+    admin, runtime = strict_engines
+    dataset, args = await _registered(strict_engines)
     holder = AsyncSession(runtime)
     await holder.begin()
     task = None
