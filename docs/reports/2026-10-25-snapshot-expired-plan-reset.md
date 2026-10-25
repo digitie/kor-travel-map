@@ -47,3 +47,11 @@ reset rollback/needs_read, 실제 applying holder 경합·rollback 후 reset, �
 attempt의 scopeowner 보존을 검사할 source다. original ready의60초 lease와 SQL timeout을
 정본 API로 설정하며 만료 시각만 관리 장애 주입으로 바꾼다. 초기 Ruff 스타일4/5오류 원로그를
 보존하고 수정 뒤 Ruff/format·redaction·diff 검사를 통과했다. 실제 PG/ownerACL/전체apply는0이다.
+
+## 합성 begin ABI 정렬
+
+원 d75가 기준으로 삼은 초기 Root helper 이후 `begin_provider_snapshot_apply`가 필수
+artifact SHA를 받는7인자로 바뀌었다. 제품 reset SQL은 그대로 두고, canonical 등록에 실제
+제출한 payload bytes의 SHA256을 시험 args에 보존해 applying holder의7번째 인자로 넘긴다.
+원9개 시험의 assert·timeout·빈 계획 의미는 바꾸지 않는다. source 호환성 보정이며 실제
+PG 실행이나 artifact 전체 적용 수용은 아니다. 원 d75와 최초 source 검토는 보존한다.

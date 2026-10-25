@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from contextlib import suppress
 from uuid import uuid4
 
@@ -62,7 +63,12 @@ async def _registered(engines):
         await _bounded(session)
         row = (await session.execute(text(_SQL), registration)).one()
         assert row.created is True
-        args = dict(snapshot=str(row.snapshot_id), generation=row.generation, fence=str(row.fence))
+        args = dict(
+            snapshot=str(row.snapshot_id),
+            generation=row.generation,
+            fence=str(row.fence),
+            artifact_sha=hashlib.sha256(registration["payload"]).hexdigest(),
+        )
     async with AsyncSession(runtime) as session, session.begin():
         await _bounded(session)
         args.update(await _ready(session, dataset))
@@ -193,7 +199,7 @@ async def test_applying_holder_blocks_reset_then_rollback_allows_expired_reset(s
         await holder.execute(
             text("""SELECT ops.begin_provider_snapshot_apply(
             CAST(:snapshot AS uuid),:generation,CAST(:fence AS uuid),
-            CAST(:attempt AS uuid),CAST(:owner AS uuid),:manifest)"""),
+            CAST(:attempt AS uuid),CAST(:owner AS uuid),:manifest,:artifact_sha)"""),
             args,
         )
         waiter_ready = asyncio.Event()
