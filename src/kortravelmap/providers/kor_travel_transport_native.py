@@ -132,6 +132,8 @@ def _bounded_item(item: TransportAirport | TransportRestArea) -> None:
         coord = item.coordinate
         if coord is not None and type(coord) is not TransportCoordinate:
             raise ValueError("noncanonical Transport coordinate")
+        if coord is not None and (type(coord.lon) is not float or type(coord.lat) is not float):
+            raise ValueError("invalid Transport coordinate components")
         values = (item.code, item.name_korean, item.name_english, item.icao_code, item.municipality)
         lon, lat = (coord.lon, coord.lat) if coord is not None else (None, None)
         required = (item.code, item.name_english)

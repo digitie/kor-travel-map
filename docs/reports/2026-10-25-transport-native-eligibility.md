@@ -57,3 +57,12 @@ collector 배선은 다음 단계이며 이번 PR에 없다. 전체15/215 입력
 범위 검사 한 곳만 문맥 독립 `copy_abs()` 비교로 바꿨다. 포괄 예외 허용이나 입력
 범위 확장은 없다. 새4개와 기존41개는45 PASS(1.32초), 앞121 합집합은 별도 세대다.
 DB/HTTP/reader/collector 증거가 추가된 것은 아니다.
+
+## 공항 좌표 객체 입력 계약
+
+최종 리뷰에서 coordinate 객체는 존재하지만 두 성분이 모두 None인 입력을 resolved
+Geo와 함께 builder가 받아들이는 경계를 찾았다. 후속 assess/rebuild는 이미 EX로
+거부하므로 잘못된 apply 수용은 아니다. 원477의 양 Geo 모드 시험1 FAIL/1 PASS
+(1.26초)를 보존하고, 공항 좌표 객체가 있으면 두 실제 float를 요구하도록 보강했다.
+coordinate=None 자체와 not_requested 정상 경로는 유지한다. 새2개와 기존45개는
+47 PASS로 별도 검증했다. 휴게소 nullable 좌표·기존 converter는 바꾸지 않았다.

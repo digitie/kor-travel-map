@@ -319,3 +319,10 @@ async def test_extreme_finite_decimal_exponent_is_known_ineligible(key, value):
     result = await assess(before, current, geo=GEO)
     assert not result.eligible
     assert result.reason == "invalid_typed_projection"
+
+
+@pytest.mark.parametrize("geo", [NONE, GEO])
+async def test_present_airport_coordinate_requires_two_float_components(geo):
+    item = replace(airport(), coordinate=TransportCoordinate(lat=None, lon=None))
+    with pytest.raises(ValueError, match="coordinate"):
+        await transport_item_to_native_bundle(item, fetched_at=NOW, geo=geo)
