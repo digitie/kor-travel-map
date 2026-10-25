@@ -998,9 +998,9 @@ class AsyncKorTravelMapClient:
             async with self._session_factory() as session, session.begin():
                 if authoritative_snapshot_complete:
                     await session.execute(
-                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                        text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     )
-                # 기존 SER 설정 뒤 repository가 P EX→L을 행보다 먼저 확보한다.
+                # 명시 RC 설정 뒤 repository가 P EX→L을 행보다 먼저 확보한다.
                 return await repo_finish_dagster_feature_membership(
                     session,
                     dagster_run_id=dagster_run_id,
@@ -1055,7 +1055,7 @@ class AsyncKorTravelMapClient:
             async with self._session_factory() as session, session.begin():
                 if terminal_status.strip().upper() == "SUCCESS":
                     await session.execute(
-                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                        text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     )
                 # isolation 문 다음이어야 한다 — 먼저 쿼리를 보내면 25001(ADR-112 결정 2).
                 await apply_transaction_limits(session)
