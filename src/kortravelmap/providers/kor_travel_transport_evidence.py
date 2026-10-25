@@ -230,7 +230,17 @@ async def prepare_transport_airport_reobservation(
                     return AirportReobservationPreparation(
                         False, "stored_name_meaning_mismatch", evidence
                     )
+                # 이름 R2와 현재 R3가 같은 raw여도 R1의 비이름 의미를 바꿀 권한은 없다.
+                if not _matches_base(name, item):
+                    return AirportReobservationPreparation(
+                        False, "stored_nonname_history_mismatch", evidence
+                    )
                 previous = _source(item, item["current_record"])
+                stored_current = await rebuild_transport_projection(previous, geo=bound_geo)
+                if not _matches_base(stored_current, item):
+                    return AirportReobservationPreparation(
+                        False, "stored_nonname_history_mismatch", evidence
+                    )
             except (ValueError, KeyError, TypeError):
                 return AirportReobservationPreparation(
                     False, "stored_projection_unsupported", evidence

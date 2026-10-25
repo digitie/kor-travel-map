@@ -269,3 +269,68 @@ async def test_model_copy_invalid_geo_flag_stops_before_sql(monkeypatch, flag):
             object(), [current], dataset_id=15, geo=context
         )
     reader.assert_not_called()
+
+
+@pytest.mark.parametrize("changed_record", ["name_r2", "current_r3"])
+async def test_r2_and_r3_nonname_meaning_must_both_match_stored_r1(monkeypatch, changed_record):
+    wire, _ = await _fixture()
+    outputs = []
+    for label, hour in (("name_r2", 2), ("current_r3", 3)):
+        item = TransportAirport(
+            "P01",
+            "새 이름",
+            "TEST",
+            "NEW1" if label == changed_record else None,
+            None,
+            None,
+            {},
+        )
+        outputs.append(
+            await transport_item_to_native_bundle(
+                item,
+                fetched_at=_AT + timedelta(hours=hour),
+                geo=TransportGeoEvidence("not_requested"),
+            )
+        )
+    name_bundle, current = outputs
+    row = wire["items"][0]
+    for label, bundle in (("name_value_record", name_bundle), ("current_record", current)):
+        record = bundle.source_record
+        row[label].update(
+            source_record_key=record.source_record_key,
+            raw_payload_hash=record.raw_payload_hash,
+            raw_data=record.raw_data,
+            fetched_at=record.fetched_at.isoformat(),
+            imported_at=record.imported_at.isoformat(),
+        )
+    name_record, current_record = name_bundle.source_record, current.source_record
+    row["source_head"].update(
+        current_source_record_key=current_record.source_record_key,
+        observed_at=current_record.fetched_at.isoformat(),
+    )
+    row["source_entity"]["last_seen_at"] = current_record.fetched_at.isoformat()
+    row["feature"]["row_revision"] = 3
+    row["name_base"].update(
+        source_record_key=name_record.source_record_key,
+        source_raw_payload_hash=name_record.raw_payload_hash,
+        value_json=current.feature.name,
+        base_revision=2,
+        observed_at=name_record.fetched_at.isoformat(),
+    )
+    row["name_candidate"].update(
+        value_source_record_key=name_record.source_record_key,
+        value_source_hash=name_record.raw_payload_hash,
+        value_json=current.feature.name,
+        value_observed_at=name_record.fetched_at.isoformat(),
+        validated_source_record_key=current_record.source_record_key,
+        validated_source_hash=current_record.raw_payload_hash,
+        validated_at=current_record.fetched_at.isoformat(),
+    )
+    assert row["current_record"]["raw_data"] == current.source_record.raw_data
+    _mock_reader(monkeypatch, wire)
+    result = await preparation.prepare_transport_airport_reobservation(
+        object(), [current], dataset_id=15
+    )
+    assert result.eligible is False
+    assert result.reason == "stored_nonname_history_mismatch"
+    assert result.collector_ready is False

@@ -238,3 +238,37 @@ EX/global fence를 먼저 획득한다. plan/manifest/기존assert/제품 SQL·�
 실패 runner는 SDK/Git post 검사 전에 중단됐으므로, 별도 offline observer로 원Git
 2416 blob/mode·SDK53 전후 불변을 확인한 범위를 구분한다. 새 source/binding 두
 리뷰와 CPU 승인 전 재실행0이며 공식427 oracle/15fit/collector/SH/운영은 미완이다.
+
+
+## b3b 실제 결과와 공식427 oracle
+
+원 r1 FAIL은 그대로 보존하고 새 소유 r2에서 단일 testcase1 PASS(XML15.228s,
+whole23.910s/skip0)를 확인했다. 전부 유좌표·called Geo context를 쓰는 작은 synthetic
+공항1→EX 이름 R2/비이름24 R1·stamp 보존→같은 DS 추가14개까지 완료했고
+`airport15_outcome=complete15`였다. actual head427/서비스 역할/import16·Git2416/SDK53
+전후와 CID/UUID/global label0·volume1 부재를 검증했다. 이는 운영 공항15fit, 무좌표
+실제 PG branch, upstream EOF, 실제 Geo HTTP, collector/SH 적용의 증명이 아니다.
+
+같은 b3b source의 공식 canonical300 fresh bootstrap은 별도1 PASS(XML14.205s,
+suite21.872s/whole29.662s)다. runtime reconcile 없이 공식 dump/repeat 비교를 수행했고
+원 dump `c0effcbcab7b7c86aee57afb176aa6aaf7cad702f8550fb336f446626d1e64b4`를
+그대로 head-schema에 반영했다. 부모426의1643블록 중1642개와 기존405 ACL이 byte동일하며,
+변경은 receipt CHECK의427 literal1개와 신규 함수3/ACL3/CASE index3뿐이다. 추가9개를
+제거하고 receipt literal을 역변환하면 부모 전체 원문과 정확히 같다. 새3함수의 dollar
+body도 source sidecar와 byte동일하다. 부모 독립 비교와 공식 자기 repeat를 구분한다.
+
+## R2/R3 비이름 의미 P2 보강 (새 실제검증 미완)
+
+b3b 준비 함수는 R1의 nonname24만 재생성과 비교해, 이름 R2 또는 현재 R3의 raw와
+정본 bundle에 ICAO를 추가했어도 저장 R1 facility가 예전 값인 경우 eligible로 잘못
+진단할 수 있었다. `collector_ready=False`였으며 잘못된 apply 수용/실 DB 반례는 아니다.
+기존 root/T FULL 리뷰 기록과 b3b 실제 fixture의 제한 범위를 보존하고 의미 검토를 HOLD로
+정정했다. 서로 독립된 public 준비 함수 반례2개는 수정 전2FAIL1.23s였다.
+
+이름 R2와 현재 R3를 각각 기존 converter로 재생성하고 같은 저장 R1 nonname24와
+비교하는 조건만 추가했다. 현재 raw와 입력 raw가 같아도 저장 의미가 다르면
+`stored_nonname_history_mismatch`로 EX 진단한다. 기존 raw/hash/key·정규화·Geo·name
+검사와 SQL 오류 전파는 유지한다. 보강 후 순수157 PASS2.10s/mypy1/Ruff PASS이며,
+SQL/마이그레이션/권한/실제 fixture 본문은 b3b 그대로다. 두 delta source 리뷰와 새 고정
+실제 fixture 전까지 이 Python 보강의 runtime 수용은 미완이다. 공식oracle는 준비 함수를
+호출하지 않으므로 b3b SQL의 증거와 이 보강을 별도로 정산한다.
