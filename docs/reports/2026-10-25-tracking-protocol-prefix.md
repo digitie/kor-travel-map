@@ -111,8 +111,11 @@ SER snapshot-before-wait·whole capture 폐포·전체 retire/seal 한 commit·�
 대형 protocol·SH collector 활성화가 완료됐다는 주장을 하지 않는다.
 ## exact ab696 CI의 직접 seed 계약과 task 정리 보강(미실행)
 
-최초 exact CI의 PostGIS glibc lane은28 FAIL/1659 PASS/23 SKIP/1 ERROR(839.09초)였다.
-원로그를 보존하며 이를 재시도나 부분 PASS로 대체하지 않는다. 실패28개 중26개는
+최초 exact ab696 CI의 PostGIS glibc lane은28 FAIL/1659 PASS/23 SKIP/1 ERROR
+(839.09초), alpine lane은28 FAIL/1653 PASS/29 SKIP/1 ERROR(970.64초)였다.
+양 lane의 실패28 node 집합은 정확히 같았다. Python3개·fixture replay와 다른4workflow의
+SUCCESS를 CI 전체 통과로 표시하지 않는다. 원로그 둘을 보존하며 이를 재시도나 부분
+PASS로 대체하지 않는다. 실패28개 중26개는
 전용 시험 seed가 같은 transaction에서 leaf ensure 뒤 finish/reconcile/cancel을 호출해
 P→L 순서를 위반했다. 실제 client의 ensure와 finish/reconcile는 각각 새 transaction이며,
 repository final과 취소 public entry는 이미 첫 행 선점 전에 typed P→L을 취득한다.
