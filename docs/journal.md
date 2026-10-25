@@ -1,3 +1,13 @@
+## 2026-10-26 — Rest432 단일 export 영속 재관측 설계 초안
+
+431최종65e source를 보존하고 별도WT에서 spec/task 두 문서만 준비했다. 단일current-export-window
+strictEOF≤256·DBmembership/Geo/policy/non-scalar 동일의 unchanged SH/retire0로 한정하며
+latestbatch·absence-retire·EXbootstrap 권위는 없다. 430재사용 여섯경계와 apply/result TX 대
+후처리TX gap·quota미정·SDK0복구·물리두writer 과제를 명시했다. 제품/PG/HTTP/Chrome/운영0,
+1415머지 전 문서만 선행머지하지 않는다.
+[설계·열린 결정](reports/2026-10-26-rest-snapshot-registration-spec.md) ·
+[작업·실제시험](reports/2026-10-26-rest-snapshot-registration-tasks.md).
+
 ## 2026-10-26 — Rest431 관리 직접SQL 음성 실제 수용
 
 source07867의 새 owned1개가15.448초 PASS/skip0이다. 정본EX guard 아래 RW savepoint에서
