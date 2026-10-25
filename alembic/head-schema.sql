@@ -8083,7 +8083,24 @@ DECLARE
   v_actor text;
   v_is_provider boolean;
 BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
+  -- 기존 SER은 그대로다. RC는 정본 finalizer가 이미 취득한 actual P EX+L만 관측한다.
+  -- pg_locks는 session/xact의 과거 순서를 attest하지 않는다. 새 잠금/승격은 없다.
+  IF current_setting('transaction_isolation') <> 'serializable' AND NOT (
+    current_setting('transaction_isolation') = 'read committed'
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND mode='ExclusiveLock'
+    )
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1590807301 AND objid=1746797985 AND objsubid=1 AND mode='ExclusiveLock'
+    )
+    AND p_generation_kind IS NOT DISTINCT FROM 'provider_full_snapshot'
+  ) THEN
     RAISE EXCEPTION 'candidate generation requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
@@ -12086,7 +12103,23 @@ DECLARE
   v_receipt ops.curation_source_observation_receipts%ROWTYPE;
   v_latest_receipt ops.curation_source_observation_receipts%ROWTYPE;
 BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
+  -- 기존 SER은 그대로다. RC는 정본 finalizer가 이미 취득한 actual P EX+L만 관측한다.
+  -- pg_locks는 session/xact의 과거 순서를 attest하지 않는다. 새 잠금/승격은 없다.
+  IF current_setting('transaction_isolation') <> 'serializable' AND NOT (
+    current_setting('transaction_isolation') = 'read committed'
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND mode='ExclusiveLock'
+    )
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1590807301 AND objid=1746797985 AND objsubid=1 AND mode='ExclusiveLock'
+    )
+  ) THEN
     RAISE EXCEPTION 'source observation requires SERIALIZABLE transaction' USING ERRCODE = '25001';
   END IF;
   IF (
@@ -14018,7 +14051,23 @@ DECLARE
   v_metadata jsonb;
   v_selector jsonb;
 BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
+  -- 기존 SER은 그대로다. RC는 정본 finalizer가 이미 취득한 actual P EX+L만 관측한다.
+  -- pg_locks는 session/xact의 과거 순서를 attest하지 않는다. 새 잠금/승격은 없다.
+  IF current_setting('transaction_isolation') <> 'serializable' AND NOT (
+    current_setting('transaction_isolation') = 'read committed'
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND mode='ExclusiveLock'
+    )
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1590807301 AND objid=1746797985 AND objsubid=1 AND mode='ExclusiveLock'
+    )
+  ) THEN
     RAISE EXCEPTION 'concierge catalog sync requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
