@@ -1,3 +1,44 @@
+## 2026-10-26 — Rest431 통합 source와 실제 lab 준비
+
+merged main5f3506a 위 설계1412·codec1413·명시 reader/preparation 및 direct assessment P2를
+합성했다. 기존 더티4파일 원본은 별도 WT에 보존했고 관련 순수242PASS9.94초를 확인했다.
+T FULL의 P2 HOLD는 Root/T closure와 구분해 기록하며 최신 합성의 두 source 리뷰·
+실제215 fit/권한/공식431 golden·시간/메모리 측정은 미완이다. PG/등록/collector/운영0.
+[현재 범위와 계량 계획](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
+
+## 2026-10-25 — Rest431 reader 미호출 source
+
+새 migration/SD3·decoder 및 최소 typed ACL/startup signature를 준비했다.
+정적144/52 PASS, 기존427/430·golden 불변. SQL 두 리뷰/실제 lab·215 fit·준비/평가/수집 연결은 미완이다.
+
+
+명시 Rest Geo domain/정확 입력형과 순수106PASS를 확인했다. SQL·reader·215 fit·운영은 미완이다. [source 범위](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
+
+synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
+PG reader 비용·운영 fit는 미측정이며 Airport 상한/제품/SQL/운영 변경0이다.
+Rest 전용 유한 profile과 RR chunk 비교·주간 GC/quota·작은 구현 단위는
+[후속안](reports/2026-10-25-rest-area-snapshot-profile.md)에 기록했다.
+다음은 설계 두 리뷰 뒤 owned PG 비용 lab 구현이며 동시 worker 수용은 미완이다.
+
+## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
+
+정본215 tuple의 Geo 유무 lossless roundtrip과 전행 byte/node/token 거부를 구현했다.
+Airport 기존 wrapper/상한을 보존하며 codec·관측·후처리 순수231 PASS/skip0,
+Ruff/mypy/import 검사를 확인했다. SQL/등록/collector/운영 변경0이고 두 리뷰·CI/PG는 미완이다.
+[범위·실측](reports/2026-10-25-rest-area-snapshot-artifact.md). 다음은 독립 source 검토와 J reader lab 결합이다.
+
+## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
+
+synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
+PG reader 비용·운영 fit는 미측정이며 Airport 상한/제품/SQL/운영 변경0이다.
+Rest 전용 유한 profile과 RR chunk 비교·주간 GC/quota·작은 구현 단위는
+[후속안](reports/2026-10-25-rest-area-snapshot-profile.md)에 기록했다.
+다음은 설계 두 리뷰 뒤 owned PG 비용 lab 구현이며 동시 worker 수용은 미완이다.
+
 ## 2026-10-26 · expired reset applying holder의 정본 fixture 회귀
 
 - CI 두 lane의 guard 미설치 원1 FAIL을 보존하고 해당 한 case만 기존 strict_engines로
