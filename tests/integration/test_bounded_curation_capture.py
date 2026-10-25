@@ -134,9 +134,9 @@ async def test_tiny_huge_exponent_is_rejected_without_calling_old_serializer(sca
     async with AsyncSession(admin) as session, session.begin():
         await _gate(session)
         await session.execute(
-            text("""UPDATE feature.feature_places SET payload='{"v":1e100000}'::jsonb
+            text("""UPDATE feature.feature_places SET payload=CAST(:numeric_payload AS jsonb)
             WHERE feature_id=CAST(:feature AS uuid)"""),
-            seed,
+            {**seed, "numeric_payload": '{"v":1e100000}'},
         )
         assert await session.scalar(
             text("""SELECT pg_column_size(payload)<8192
@@ -198,6 +198,8 @@ async def test_missing_lineage_or_membership_returns_no_aggregates(scalar_engine
             await _capture(session, seed["dataset"]),
             "lineage_incomplete" if missing == "head" else "membership_unsupported",
         )
+        # head 누락은 deferred 무결성 검사에 막히므로 관찰 뒤 시험 TX만 rollback한다.
+        await session.rollback()
 
 
 async def test_shared_feature_in_another_dataset_is_rejected(scalar_engines):
@@ -561,9 +563,10 @@ async def test_record_lookup_uses_bounded_index_with_unrelated_history(scalar_en
         await session.execute(
             text("""INSERT INTO provider_sync.source_records
             (source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
-            SELECT 'sr_'||substr(md5(:identity||n::text),1,20),:entity,'{}'::jsonb,:hash,now()
+            SELECT 'sr_'||substr(md5(:identity||n::text),1,20),:entity,to_jsonb(n),
+                substr(encode(sha256(convert_to(n::text,'UTF8')),'hex'),1,32),now()
             FROM generate_series(1,5000) AS g(n)"""),
-            {**other, "hash": make_payload_hash({})},
+            other,
         )
         await session.execute(
             text("""INSERT INTO provider_sync.source_records

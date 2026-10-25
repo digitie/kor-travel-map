@@ -88,3 +88,15 @@ metadata helper의 owner간 dependency GRANT는 원 소유자인 state procedure
 확인했다. timezone 회귀는 첫 import보다 이틀 뒤17:30 UTC를 명시 입력하여 Seoul 다음날
 변환의 예상 날짜도 독립 단언한다. 긴 key fixture는 실제 압축 여부·논리16000바이트와
 저장 크기를 단언한 뒤 조회 계획을 확인하도록 했다. 모두 실제 통합 실행 전이다.
+
+## 첫 실제 PostgreSQL 검사와 시험 데이터 정정
+
+39fe source를 PG16.14/default en_US.utf8에서 실제 실행해34 PASS/3 FAIL을 확인했다.
+숫자 JSON literal의 colon을 SQLAlchemy가 bind로 인식한 오류, 누락 head를 관찰한
+시험 TX가 deferred 무결성 검사 전에 rollback하지 않은 오류, 무관한 이력5000건이
+같은 entity/hash unique key를 재사용한 오류다. 숫자 payload는 bind로 전달하고,
+누락 상태 관찰 뒤 rollback하며, 이력은 서로 다른 정수 raw와 동일 정본 SHA256
+방식의 hash로 만든다. 제품 SQL·권한·예산은 변경하지 않는다. 실패 원본과 컨테이너·
+volume 정리 성공 기록은 보존한다. 수정 후 재실행·공식 oracle·CI는 아직 미완이다.
+그 전 관찰기 r2의 lc_collate 설정 조회는 DB 버전 차이로37개 본문 실행 전 실패했다.
+관찰기만 pg_database catalog 조회로 정정했으며 이 실패도 성공 결과에 합산하지 않는다.
