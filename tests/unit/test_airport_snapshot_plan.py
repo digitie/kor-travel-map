@@ -307,3 +307,52 @@ async def test_same_executor_reset_can_claim_a_new_plan_without_unique_key_colli
     assert all(len(key.encode()) <= 128 for key in keys)
     assert str(first.attempt_id) in next(key for key in keys if str(first.attempt_id) in key)
     assert str(second.attempt_id) in next(key for key in keys if str(second.attempt_id) in key)
+
+
+@pytest.mark.parametrize(
+    ("state", "message", "constraint", "replan"),
+    [
+        ("40001", "attempt lease expired; replan", None, True),
+        ("40001", "manifest feature changed; replan", None, True),
+        ("40001", "snapshot executor fence is stale", None, False),
+        ("40001", "manifest feature changed; replan", "other_constraint", False),
+        ("08006", "attempt lease expired; replan", None, False),
+        ("40001", "other serialization failure", None, False),
+    ],
+)
+async def test_only_exact_kernel_server_failure_routes_to_typed_reset(
+    monkeypatch, state, message, constraint, replan
+):
+    from sqlalchemy.exc import DBAPIError
+
+    client, observed, token, _, _, _, _ = await _case(monkeypatch)
+    plan = await target.plan_airport_snapshot(client, observed, token, pins=_PINS, dataset_id=15)
+    server = RuntimeError(message)
+    server.sqlstate, server.message, server.constraint_name = state, message, constraint
+    orig = RuntimeError("wrapped database error")
+    orig.sqlstate, orig.__cause__ = state, server
+    error = DBAPIError(None, None, orig)
+    command = AsyncMock(side_effect=error)
+    monkeypatch.setattr(target, "apply_stored_airport_reobservation", command)
+    with pytest.raises(target.AirportSnapshotReplanRequired if replan else DBAPIError) as raised:
+        await target.apply_airport_snapshot(client, observed, token, plan, pins=_PINS)
+    assert (raised.value.__cause__ is error) if replan else (raised.value is error)
+    command.assert_awaited_once()
+
+
+@pytest.mark.parametrize("eligible", [True, False])
+async def test_pre_registration_assessment_has_no_claim_or_registration(monkeypatch, eligible):
+    client, observed, _, wire, sessions, _, stubs = await _case(monkeypatch)
+    if not eligible:
+        next(
+            row for row in wire["items"][0]["non_name_base"] if row["field_path"] == "place.phones"
+        )["value_json"] = ["changed"]
+    result = await target.prepare_airport_snapshot_input(
+        client, observed.artifact_payload, pins=_PINS, dataset_id=15
+    )
+    assert result.eligible is eligible
+    assert len(sessions) == 1
+    assert "REPEATABLE READ, READ ONLY" in str(sessions[0].execute.await_args_list[0].args[0])
+    assert sessions[0].execute.await_args_list[1].args[1]["statement"] == 3000
+    for stub in stubs.values():
+        stub.assert_not_awaited()

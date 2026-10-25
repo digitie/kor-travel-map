@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, cast
 from uuid import UUID, uuid4
 
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 
 from kortravelmap.infra.provider_snapshot_artifact import (
     SnapshotArtifactPins,
@@ -165,6 +166,27 @@ async def seal_airport_snapshot(
         )
 
 
+async def prepare_airport_snapshot_input(
+    client: AsyncKorTravelMapClient, payload: bytes, *, pins: SnapshotArtifactPins, dataset_id: int
+) -> AirportReobservationPreparation:
+    """등록 전에 같은 입력의 지원 여부만 진단한다. DB 변경·등록 권위는 없다."""
+    _unbound(client)
+    if type(dataset_id) is not int or not 1 <= dataset_id < 2**63:
+        raise ValueError("canonical positive provider dataset required")
+    artifact = decode_provider_snapshot_artifact(payload, expected_pins=pins)
+    async with _transaction(client, readonly=True, repeatable=True) as session:
+        evidence = decode_transport_airport_evidence(
+            dataset_id,
+            await session.scalar(
+                text("SELECT feature.read_transport_airport_snapshot_evidence(:dataset)"),
+                {"dataset": dataset_id},
+            ),
+        )
+        return await assess_transport_airport_reobservation_evidence(
+            artifact.bundles, evidence, geo=artifact.geo
+        )
+
+
 @dataclass(frozen=True)
 class AirportSnapshotPlan:
     """관측은 권위가 아니다. 실제 apply가 같은 원 입력과 잠금 뒤 evidence를 재검증한다."""
@@ -281,6 +303,30 @@ async def plan_airport_snapshot(
     return AirportSnapshotPlan(preparation, attempt, owner, manifest, digest)
 
 
+_KERNEL_REPLAN_MESSAGES = frozenset(
+    {
+        "attempt lease expired; replan",
+        "feature membership changed or head omitted; replan",
+        "source participant changed; replan",
+        "manifest source changed; replan",
+        "manifest feature changed; replan",
+        "feature membership changed while locking; replan",
+    }
+)
+
+
+def _kernel_replan(error: DBAPIError) -> bool:
+    # 이 기존 kernel RAISE들은 constraint를 선언하지 않는다. 일반40001/연결 오류,
+    # commit 응답 유실과 stale executor fence를 재계획 성공으로 해석하지 않는다.
+    cause = getattr(error.orig, "__cause__", None)
+    return (
+        getattr(error.orig, "sqlstate", None) == "40001"
+        and getattr(cause, "sqlstate", None) == "40001"
+        and getattr(cause, "constraint_name", None) is None
+        and getattr(cause, "message", None) in _KERNEL_REPLAN_MESSAGES
+    )
+
+
 async def apply_airport_snapshot(
     client: AsyncKorTravelMapClient,
     observed: RecoveredProviderSnapshot,
@@ -307,6 +353,10 @@ async def apply_airport_snapshot(
                 owner=plan.owner,
                 manifest_digest=plan.manifest_digest,
             )
+        except DBAPIError as error:
+            if _kernel_replan(error):
+                raise AirportSnapshotReplanRequired("kernel requires a fresh plan") from error
+            raise
         except ValueError as error:
             if str(error) == "airport evidence changed after locking; replan":
                 raise AirportSnapshotReplanRequired(str(error)) from error
@@ -342,3 +392,12 @@ async def reset_airport_snapshot_plan(
         if type(result) is not str or result not in {"reset", "needs_read"}:
             raise AirportSnapshotUnavailable("invalid snapshot reset response")
         return result
+
+
+async def collect_expired_airport_snapshots(client: AsyncKorTravelMapClient) -> int:
+    """미등록 opt-in 실행 직전 한 번만 최대16개를 정리한다. terminal+7일은 SD 권위다."""
+    async with _transaction(client) as session:
+        removed = await session.scalar(text("SELECT ops.collect_expired_provider_snapshots(16)"))
+        if type(removed) is not int or not 0 <= removed <= 16:
+            raise AirportSnapshotUnavailable("invalid bounded snapshot collection response")
+        return removed

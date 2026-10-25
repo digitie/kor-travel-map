@@ -91,3 +91,48 @@ claim/manifest/bind는 계속 같은 TX이므로 응답 유실 뒤에는 실제 
 새 무관 attempt를 성공으로 추측하지 않는다. 순수 DB 대역이 실제 unique key 중복을
 거부하도록 한 반례가 수정 전1FAIL2.51초, 수정 후1PASS2.82초다. 같은 generation에서
 reset 결과 뒤 새 plan key가 달라지는 것을 확인했다. 실제 reset/unique 제약 PG는 미실행이다.
+
+## 예약 SDK0 runner의 첫 배선
+
+원 Airport entry의 첫 분기와 그 asset의 runtime resource 한 key만 추가했다. 다른
+asset/queue/일반 client의 동작은 바꾸지 않는다. 실제 schedule guard의 ensure 결과에서
+root/child/member UUID와 frozen membership을 얻고, 현재 guard의 natural dataset resolver와
+같은 exact membership을 확인한다. 원 unbound client·schedule만 지원하고 queue bound
+client/직접 context는 기존 EX를 유지한다. verified runtime이 없어도 실제 artifact 부재를
+먼저 확인하며, 기등록 입력은 pin 누락·불일치 시 실패한다. 새 시계·원천 iterator·Geo 소비는
+이후다. 별도 DB profile 권위를 발명하지 않고 등록 전 실제 입력의427 RR assessment로 판단한다.
+
+새 strict 입력은 원 converter/Geo reuse로 한 번만 소비하여 전체 EOF를 관측한다.2730개와
+기존 typed1MiB budget 안에서 Transport 정본 presence를 별도 복사에 부착한다. 원 EX tuple은
+그대로 보존한다. 상한 초과는 소비한 prefix와 남은 iterator를 이어 기존 EX loader로 넘기며,
+전체 입력의 codec/관측/assessment 미지원도 같은 원 tuple을 EX로 보낸다. EOF 오류는 등록이나
+재수집으로 바꾸지 않는다. runtime/관측 bytes 등록 뒤에는 EX fallback과 SDK refetch가 없다.
+
+등록 token을 첫 claim의 previous로 전달한다. 기등록 prepared는 원 tuple로 계획·apply하고
+반드시 저장된 원 result를 다시 읽는다. applied/postprocessed는 원14+retired·관측 generation·
+fetched_at·validation·GeoStats를 복원하여 Root backend 한 sameTX coordinator와 atomic seal에
+넘긴다. durable child_sealed는 실제 저장 receipt와 원 bytes의 일치를 재검증하여 효과 없이
+재생한다. 기존 scheduled wrapper의 fresh done→noop은 전체430의 client 두 RC 설정이 전제다.
+
+kernel은 기존 CONSTRAINT 없는40001 RAISE의 정확 message 집합만 typed replan으로 구분한다.
+임의40001·다른 constraint·연결/commit 불명·stale executor는 여기에 포함하지 않는다. replan은
+SDK0 read→exact old binding reset→read 뒤에만 계속하고 최대3회다. 아직 active인 plan의
+55P03은 전파하여 lease를 기다리는 기존 step 재시도로 남긴다. fence 검사 전 old owner cancel로
+우회하지 않는다. stale executor/원 입력 불일치·superseded는 공식 nonretryable Failure로
+올리며 기존 run wrapper가 실패 attempt를 기록한다. 취소와 commit 불명은 원 예외로 전파한다.
+
+quota 정리는 실제 부재+verified runtime+새 strict 입력에서만 fetch 전 독립 RC TX로
+`collect_expired_provider_snapshots(16)`을 한 번 호출한다. 실제 terminal+7일·ledger 판정은
+기존 SD 권위다. 기등록 복구/기본OFF/queue는 GC0이며 무한 drain·새 maintenance job은 없다.
+GC 실패는 등록/SDK 전에 전파한다.
+
+이 source의 client/runner 순수67개가6.92초, 기존 definitions/Transport fetcher/HTTP timeout
+51개가8.52초에 통과했다. DTO·codec·관측·후처리는 정본을 사용하지만 DB와 SDK 호출은 대역이다.
+원 시각·generation·기등록 SDK0·첫 token·EOF/fallback·취소·commit 불명·reset 상한/GC 경계를
+검사했으며 실제 DB effect·SH 실행·전체 run 완료를 증명하지 않는다. Ruff와 strict mypy를
+동기화한다. assets의 원문은 선언한 첫 분기와 resource key를 역제거하면 AST 전체가 같다.
+
+Root native apply의 새 fenced capture 권한 seam, shared430/migration/ACL·client RC/API RC·
+실제 root/member lifecycle을 최종 상속해야 한다. source 두 적대 리뷰·actual PG SDK0 재시작/
+fresh capture·후처리/seal·unknown commit·whole-worker death·전체 CI/운영 수용은 아직 미완이다.
+현재 배포·설정 활성화·PG 실행·새 standalone PR은 없다.
