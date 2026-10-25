@@ -145,3 +145,11 @@ observation을 함께 통과하는 회귀를 추가했다. 기존 asset retry �
 순수 회귀로 고정했으며, 지연 수치에 대한 첫 반례1FAIL은 보존한다. 별도
 RetryRequested·지연 확대·새 주기는 추가하지 않는다. 일반 lock timeout/unknown commit을
 lease busy와 동일시하지 않으며 stale fence의 nonretryable 분리는 유지한다.
+
+## 실제 caller 회귀 source checkpoint
+
+합성 `3f5983244d0e0ff6a413af3f20e2b4b825b6dded` 위 신규 integration 파일만 추가했다. 첫 사례는 실제 ephemeral Dagster의 STARTED run/event와 schedule tag, 실제 resolver/guard 및 public tracking wrapper를 사용한다. 원 converter·저장 Geo 재사용·427 진단·등록·계획·apply·후처리·atomic seal 뒤 동일 run의 retry 번호를 바꾸어 SDK/Geo/새 시계 금지 sentinel로 원 bytes·결과·관측 세대·cursor·완료 행의 재사용을 확인하도록 작성했다. SDK 입력은 synthetic 한 행이며 설치 image runtime receipt·실제 SDK HTTP·worker 강제 종료의 증거가 아니다.
+
+둘째 사례는 같은 설치의 공개 client plan/reset 경로로 첫 ready attempt의 **자기 lease만** 관리자 fixture에서 만료시킨다. 기존 cancelled attempt를 보존한 채 같은 snapshot generation/fence에서 새 attempt/owner/idempotency key가 실제 unique 제약을 통과하는지 확인한다. 완료 attempt를 reset하거나 epoch/결과를 재작성하지 않는다. 각 사례의 실패 원문은 유지하며 아직 ready인 자기 plan만 정리한다.
+
+새 2개는 collect-only 2건/5.14초와 Ruff를 확인했으며 **실제 PG는 아직 실행하지 않았다**. runner 제품 7개 파일·공유 schema/ACL·기존 fixture는 변경하지 않았다. 두 source 검토와 소유 harness/CPU 슬롯 이후의 실제 결과를 별도로 정산한다.
