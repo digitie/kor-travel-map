@@ -1,3 +1,80 @@
+## 2026-10-26 · 최종 CI 통과와 일반 main merge
+
+PR #1415의 최종 source는 e1b203bb53083ff79be7bff5994af160bd16abbe다. 5개 workflow의
+10개 check가 모두 SUCCESS였으며, CI의 실제 merge checkout 2bda205f와 source의 tree는
+2fd7a297로 같았다. 2026-10-25T19:25:53Z의 일반 merge adc0a8d7a415c4b579552f328c45d6a711af0398도
+같은 tree다. admin 우회·force push·운영 변경 없이 main에 반영했다. CI 수용 원장 4bf0fcc1과
+실제 merge 원장 e8a5d2d0을 구분하며 아래 작성 당시 CI/main 미완 기록은 역사로 보존한다.
+
+최종 제품 delta의 W/T 독립 리뷰와 e1b r5 reader·공식 golden·직접 SQL 음성·최종 후보14의
+각 source/실측 범위는 아래와 같다. 후보 r4의 XML1PASS47.526초, 보호401·5초 WS 관측·
+DBattempt1 및 정확 정리(fb2c115c/e5562b78)는 새 실행의 수용이다. 첫 후보 a1f39의 1FAIL과
+possible_unrevoked_test_session=True는 영구 보존하며 원 Error 원인은 확정하지 않는다.
+운영 공개 원3FAIL과 이 격리 후보 첫 FAIL은 서로 다른 이력이다.
+
+이 main 반영은 Rest431의 운영 배포·실제 upstream EOF·영속 등록/수집 활성화를 뜻하지 않는다.
+현재 운영 Map430/PinVi0102의 공개13 인수·원 일정 복원과 분리한다. 후속432는 단일 current-export
+window의 strict EOF/unchanged SH·retire0만 초기 권위로 삼으며 선택A의 caller-owned RC 한TX,
+SDK0 복구·실제 두writer·공유 topic 역순과 직렬화 구간의 실물 검증은 미완이다.
+
+아래 기존 문서는 원문 전체를 보존한다.
+
+---
+
+## 2026-10-26 · Rest431 최종 제품·격리 후보 인수 추가 정산
+
+이 절은 source e1b203bb의 현재 검증 범위를 추가한다. 아래 e1b 원문 전체와 당시 미완 기록은
+그대로 보존한다. **기존 운영 공개 UI의 3회 FAIL과 별개로, 격리 후보 첫 실행 a1f39는 1회
+FAIL이었다.** 새 후보 성공은 어느 원 실패도 삭제하거나 원인 확정으로 바꾸지 않는다.
+
+### 제품 의미 비교와 실제 reader 범위
+
+65e의 원 Python3.13 CI 6FAIL/4355PASS/7SKIP, hashseed41 기존 모듈 6FAIL/27PASS와 신규
+회귀 수정 전 1FAIL을 보존했다. e1b는 JSON 비교 사본의 unordered supplied_fields만 정렬하는
+4줄 제품 수정이다. 다른 ordered list/raw/lineage/hash/codec·SQL/ACL/golden은 그대로다.
+W의 b0592d18와 T의 5a7c0822 독립 제품 delta 리뷰가 통과했고, T의 seed41 신규 회귀는
+1PASS2.25초로 deepcopy 동일 입력 수용과 실제 name 변조의 canonical 거부를 함께 확인했다.
+
+e1b r5는 별도 owned synthetic reader 입력으로 XML1PASS52.627초였다. 215개의 전체 반환/
+EOF·적격과 257개의 전체 거부를 확인했다. 215 지표는 client wall6.309399초,
+process CPU2.168916초, decoder JSON4,133,119B다. codec과 reader 두 호출·decode/assessment를
+포함하며 backend CPU/RSS나 실제 upstream EOF·수집 처리량의 측정이 아니다.
+원장 a809dd1f와 W 독립 5be20aa3로 정산하며 기존3fa의215/64 지점 계량과 공식 golden의
+당시 source·실측을 아래 원문에서 유지한다. 반복 합산하거나 새 source의 전체 의미 보증으로
+확대하지 않는다.
+
+### 후보 첫 FAIL과 별도 진단 실행
+
+첫 e1b 후보 a1f39는 로그인·취소·재생·로그아웃200까지 9개 판정을 통과한 뒤 generic Error로
+FAIL이었다. 보호 GET401·5초 WS 판정은 저장되지 않았고 finally에서도 Error가 났다.
+브라우저 process/profile과 격리 자원 정리는 끝났지만 원 possible_unrevoked_test_session=True는
+영구 보존한다. 제품401/WS 회귀나 navigation 원인을 확정하지 않는다. 원 실패 독립 정적
+진단은 d517aa73이며, 별도 운영 공개 R4의 철회 미확정 기록과 서로 다른 실행이다.
+
+후속 r4 진단은 제품·14개 판정·요청 수·timeout을 바꾸지 않고 고정 substage/error code와
+로그아웃 뒤 정확한 보호 GET의 숫자 status만 추가했다. 원 error message/URL/body는 저장하지
+않는다. 같은 e1b API와 e1b fresh build acb98760으로 수행한 별도 실행은 XML1PASS47.526초,
+원14개 판정 모두 PASS였다. 로그인·로그아웃 POST는 각1회, 취소 POST와 동일 결과 replay는
+각1회이며 실제 DB attempt는1개다. 보호 GET401·로그인 복귀·5초 재연결 없음과 실제 WS16frame을
+확인했다. 5초 관찰을 무기한 재연결 부재로 부르지 않는다.
+
+W의 실제 인수 fb2c115c와 T의 원문 독립 검산 e5562b78은 raw8/private metadata4·Git2543/
+SDK53·실제 import16/API7·SQLAlchemy2.0.54 기본 pool·head431·build manifest4/static176과
+서비스/tunnel/config·브라우저106 runtime/profile/process·정확 owned PG 정리를 대조했다.
+새 실행의 세션 철회 미확정은 False다. 이 성공만으로 첫 a1f39 Error의 원인이 밝혀진 것은
+아니며 원 FAIL/True를 철회하지 않는다. 이 시험은 격리 후보 취소/replay 흐름이고 운영 공개
+읽기13이나 실제 운영 데이터 쓰기 수용을 대신하지 않는다.
+
+### 남은 완료 조건
+
+작성 시점 정확 e1b의 전체 CI 최종 수용과 PR1415 main 반영은 미완이다. 최종 CI/merge 사실은
+별도 checkpoint 뒤 추가한다. PR1417은 1415 main 반영 뒤 실제 main에 문서만 다시 결합하며
+양쪽 journal/resume 원문을 보존하고 다시 독립 검토한다. 이 문서는 미리 rebase/merge하지 않는다.
+Rest 영속 등록·실제 upstream 권위·수집 활성화, 물리 두writer와 선택A의 load/필수 후처리 한TX는
+별도 미완이다. 현재 운영 Map430/PinVi0102 공개13PASS·일정 복원 사실과 혼동하지 않는다.
+
+---
+
 # Rest431 명시 reader의 owned 수용
 
 ## 현재 범위

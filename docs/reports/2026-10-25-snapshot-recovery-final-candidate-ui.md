@@ -1,5 +1,31 @@
 # 430 복구 통합 후보 API·UI 실제 검증
 
+## 2026-10-26 · 최종 후보·CI·머지 정산
+
+Map #1411의 최종 head29f1594b는5 workflow/10 check가 모두 성공했고5f3506a로 머지됐다.
+후보와 머지 tree는 같다. 최종 glibc는1905 PASS/23 SKIP/1028.46초,
+Alpine은1899 PASS/29 SKIP/1333.85초다. 앞선8609의 두 lane 각1 FAIL과
+단일 fixture 회귀는 별도 이력으로 보존하며 이 CI 수에 합산하지 않는다.
+
+최신 격리 Map UI는860967df API와 새로 만든 해당 source UI build로14판정을 통과했다.
+XML은1 PASS/47.872초이며 실제 취소·replay의 DB attempt1개와 WebSocket17 frame을
+확인했다. 29f1은 테스트 fixture와 문서만 달라 제품·스키마·UI 입력의 전체 동등성을
+별도로 확인했다. 따라서 새 head의 UI 재실행이나 전체 source 재빌드를 주장하지 않는다.
+별도 PinVi 연동 후보6단계 인수는 [읽기 scope 보고서](2026-10-25-pinvi-admin-feature-read-scope.md)에
+구분했다. 아래1093 결과와 이전 실패 이력도 해당 고정 source의 기록으로 유지한다.
+
+운영은409→418 별도 commit 뒤 최종 Map5f3506a/PinVi8f1b998f pair의 공식 rebuild를
+committed로 마쳤다. Map schema430·PinVi schema0102·7개 healthy를 새 readback했다.
+첫 공개 읽기 UI는 Map 비인증401 뒤 로그인401로 실패해 PinVi 미도달이며 원 실패와 정확
+정리를 보존한다. 두 번째 공개 실행도 Map 첫4단계 통과 뒤 상세 timeout·PinVi 미도달로
+실패했고 logout0·테스트 세션 철회 미확정이다. 후속 공개 R7의13단계 인수·원 일정 복원은 별도로 통과했으며 원 실패는 보존한다. 후보의 synthetic 취소 flow는
+운영에서 실행하지 않는다. [배포와 공개 실패의 분리](2026-10-25-pinvi-admin-feature-read-scope.md).
+
+선별 증거 SHA-256: 정확 최종 CI10 수용
+`18be481471666782b9a3893726eab8c342016f9e223d9f475db9614d43a9c2db`,
+별도 최신 Map14 후보 수용
+`8e6a72a85310af1a8e1b1f2f7bbbfce246027bd18de81ae70ee0f858367d2fae`.
+
 고정 API source 1093dd3e7e3432e79824a9f445a89fd640609434와 schema head430에서
 실제 uvicorn factory/lifespan·DB preflight, Next/BFF와 n150 Linux 브라우저의
 격리 후보 E2E를 통과했다. pytest는 1 PASS/skip0, XML suite 51.698초이며

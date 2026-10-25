@@ -1,3 +1,49 @@
+## 2026-10-26 · Rest431 최종 CI와 main 반영 정산
+
+- PR #1415의 정확 source e1b203bb는 5 workflow/10 check를 모두 통과했다. CI의 실제
+  merge checkout과 source의 tree가 같았고, 일반 merge adc0a8d7의 tree도 같았다.
+  최종 CI 원장 4bf0fcc1와 merge 원장 e8a5d2d0으로 확인하며 원65 CI6FAIL은 아래에 보존한다.
+- 최종 후보 원14PASS47.526초와 제품의 두 독립 리뷰·215 reader·공식 golden·직접 SQL 음성의
+  각 source 범위를 유지한다. 첫 후보 a1f39 FAIL/철회 미확정 True는 원인 미확정 그대로이며,
+  운영 공개 원3FAIL과도 별개다. 새 성공으로 어느 과거 실패도 철회하지 않는다.
+- Rest431은 main에 반영됐지만 운영은 기존 Map430/PinVi0102다. 이 문서 결합은 제품·배포·
+  수집 활성화를 바꾸지 않는다. 후속432의 단일 current-export window·unchanged SH/retire0,
+  선택A 한TX와 공유 topic의 물리 두writer/직렬화 실측은 열린 과제로 유지한다.
+- 아래 이전 체크포인트와 실제 main의 journal/resume 전체 원문을 함께 보존한다.
+
+## 2026-10-26 · Rest431 최종 제품과 격리 후보 추가 인수
+
+- e1b203bb의 supplied_fields 집합 순서만 정규화하는 제품4줄을 W/T가 독립 검토했다.
+  T의 seed41 회귀1PASS2.25초에서 동일 입력 수용·실제 name 변조 거부를 확인했다.
+  원65 CI6FAIL·seed41 수정 전 실패와 기존3fa reader/golden 실측은 그대로 보존한다.
+- 별도 e1b r5 reader는 XML1PASS52.627초/215 whole EOF·적격/257 whole 거부다.
+  215 client wall6.309399초·CPU2.168916초·JSON4,133,119B는 codec/두 reader/평가를 포함하며
+  backend CPU/RSS·실제 upstream EOF 수용으로 확대하지 않는다.
+- 운영 공개 원3FAIL과 **다른 격리 후보 첫 실행 a1f39의 1FAIL**을 구분한다. 첫 후보는
+  logout200 뒤 Error/보호401 미관측·possible_unrevoked=True를 영구 보존한다.
+  새 진단 r4의 원14PASS47.526초·보호401/5초 WS·DBattempt1·정확 정리(fb2c115c/e5562b78)는
+  그 원 Error 원인 확정이나 과거 미확정 철회가 아니다.
+- 정확 e1b 전체 CI 최종 수용·1415 main 반영은 작성 시점 미완이다. 1417은 그 뒤 문서만
+  재결합한다. 새 제품/PG/운영/활성화 변경 없이 [원문·범위](reports/2026-10-25-rest-area-evidence-reader.md)를 정산한다.
+
+## 2026-10-26 · Map/PinVi 배포·공개 읽기·일정 복원 정산
+
+- Map #1414·#1411의5f3506a와 PinVi #602의8f1b998f를 공식2단계로 배포했다. 첫418 commit 뒤
+  정식1키 CAS·최종 rotate/rebuild를 마쳤고 Map430·PinVi0102·7 healthy를 새 readback했다.
+- 새 Map·PinVi 백업과 공식 격리 복원 리허설은 verified였다. Map의 비차단
+  REHEARSAL_CATALOG_DRIFT 경고는 보존하며 catalog 소유권·ACL 전체 일치를 주장하지 않는다.
+- Map29f1 CI5 workflow/10 check·격리 Map14·별도 PinVi 후보6 인수와 구분하여,
+  최종 공개 TLS 읽기 R7의 Map7+PinVi6을 통과했다. 성공 실행의 양쪽 로그인·로그아웃은 각1회,
+  보호401·실제 목록/상세·지도·같은 source lineage와 정확 브라우저 정리를 확인했다.
+- 원 공개3 FAIL과 R4의 테스트 세션 철회 미확정은 영구 보존한다. R7의 새 두 세션 정리 성공은
+  그 원 실패를 덮지 않는다. Map의 live immutable 정적 응답 RAM 재사용 예외와 실제 네트워크
+  계수는 [읽기 인수 보고서](reports/2026-10-25-pinvi-admin-feature-read-scope.md)에 구분했다.
+- 원 instigator47/RUNNING38에서 최종51/RUNNING37·STOPPED14를 확인했다. 새 항목은 모두OFF,
+  퇴역한 highway incidents ten-minute schedule은 재생성하지 않았다. 읽기 자격 분리·WeatherOFF도 유지했다.
+- 현재 pair의 배포·공개 읽기/auth·원 일정 복원만 종결한다. 물리 두writer·전체수집 최적화·
+  Rest 후속 영속 연결·전체1commit·W/T 운영 활성화는 별도 미완이다.
+  [후보·CI 범위](reports/2026-10-25-snapshot-recovery-final-candidate-ui.md).
+
 ## 2026-10-26 — Rest432 단일 export 영속 재관측 설계 초안
 
 431최종65e source를 보존하고 별도WT에서 spec/task 두 문서만 준비했다. 단일current-export-window
