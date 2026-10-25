@@ -1,11 +1,10 @@
-## 2026-10-25 — PostGIS 추적 fixture 정리
-
-
 ## 2026-10-25 snapshot 잔여 fixture 실제 확인
 
 - 정식 prefix/RC와 typed begin 반환으로 잔여 fixture를 정렬했다. event 소유권 불변과 typed 원문 변조 거부를 실제 별도 경로로 확인한다.
 - 고정13866의 실제10개26.99초와 대량2개150.23초를 분리 검증했다. 원 cap/감사 fixture 실패와 각 정확 정리를 보존했다.
 - [기록](reports/2026-10-25-snapshot-pg-tracking-fixtures.md). 전체 합성 CI·새 실제 UI·운영 배포는 미완이다.
+
+## 2026-10-25 — PostGIS 추적 fixture 정리
 
 전체 CI 실패를 보존하고 배치·취소 cleanup 및 projection seed가 기존 P EX→L 규약을 따르게 수정했다. 제품·guard·기대값 변경 없이 실제 PostgreSQL100개/33.18초/skip0과 소유 자원 정리를 확인했다. 별도 scalar 제품 수정·전체 CI·운영 배포는 아직 미완이다. [범위와 증거](reports/2026-10-25-snapshot-pg-tracking-fixtures.md).
 
