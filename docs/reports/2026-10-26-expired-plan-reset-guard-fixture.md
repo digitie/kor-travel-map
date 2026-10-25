@@ -18,4 +18,10 @@ holder는 ops.begin_provider_snapshot_apply의 실제7개 인자를 호출한다
 
 수정 전 CodeGraph 영향도는 해당 테스트 함수와 파일의2node/1edge이며 pytest의 동적 fixture 주입은 별도로 정본 source와 직접 대조했다. 소스 역치환은 새 fixture import와 이 테스트의 fixture 변수명만 복구하면 부모 전체가 같아야 한다.
 
-Ruff와 정확 한 node의 collection을 먼저 확인한다. 제품·기존 원 단언은 그대로이며 실제 PG의 한 case 검증은 두 독립 소스 리뷰와 별도 단일 슬롯 실행 뒤 정산한다. 아직 새로운 PG 실행·운영 변경은0이다. 기존8609 후보 UI/build를 새 시험 준비의 PG 수용으로 대신하지 않는다.
+Ruff·정확 한 node collection과 Root/J 독립 소스 검토를 통과했다. c265f90c 고정본의 fresh owned PG430에서 해당 한 case가15.044초에 통과했다. 원35초 전체 상한·3초/900ms SQL 상한·blocker/55P03/rollback/reset 단언은 유지했다. 운영 변경과 추가 재실행은0이다.
+
+실제 XML은1 PASS·실패/오류/skip0이고, 실제 import 원장의37개 모듈을 고정 Git source와 대조했다. tracked2523개 mode/blob·SDK53개는 실행 전후 및 별도 읽기 전용 후관찰에서 같았다. 원raw8개 SHA를 재계산했고, 정확 CID 부재·UUID/global scalar label0·anonymous volume1개 부재를 저장 결과와 별도 Docker 조회로 확인했다.
+
+실행기 완료 요약에는 donor의 tests=3·actual_project_imports=34 상수가 남았다. 원 result를 고치지 않고 별도 수용 원장 map-reset-guard-fixture-owned-r1-actual-acceptance.json에 XML1/import37을 직접 검산해 기록했다. 실행 중에도 len(cases)==1과 len(imports)==37을 검사하고 통과했으며, 이 두 요약 필드는 실제 수로 사용하지 않는다.
+
+원 glibc/Alpine CI 각1 FAIL은 보존한다. 이 실행은 수정한 한 case의 cold guard 설치 전제를 검증한 것이며 전체 CI 재수용·물리적 worker commit 경합·운영 배포·기존8609 후보 UI/build의 새 실행을 뜻하지 않는다. 최신 최종 통합 후 정확 head의 CI는 별도로 필요하다.

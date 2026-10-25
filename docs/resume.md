@@ -1,3 +1,11 @@
+## 2026-10-26 · expired reset applying holder의 정본 fixture 회귀
+
+- CI 두 lane의 guard 미설치 원1 FAIL을 보존하고 해당 한 case만 기존 strict_engines로
+  준비했다. 고정 c265f90c의 owned PG430 한 case가15.044초에 통과했으며 원 단언·상한·
+  제품은 유지했다. source2523/SDK53·실제 import37과 정확 정리를 확인했다.
+  실행기 donor 요약3/34는 원보존 후 XML1/import37 별도 원장으로 정산했다.
+  전체 최종 CI·배포는 별도다. [범위](reports/2026-10-26-expired-plan-reset-guard-fixture.md).
+
 ## 2026-10-25 · 전용 읽기 동결 소비 계약 정렬
 
 - 원3Python CI 각3FAIL/3826PASS를 보존하고 새 GET2의 baseline/동결 pending 대상 hash를
