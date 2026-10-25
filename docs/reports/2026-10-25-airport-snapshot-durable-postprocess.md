@@ -24,3 +24,11 @@ Docker Dagster image의 설치 완료 후 root 소유 receipt를 생성한다. M
 같은 리뷰의 추가 대조에서 NULL txid/유효 intent SHA 조합이 SQL CHECK의 UNKNOWN으로 허용되는 저장 계약 문제를 확인했다. txid의 명시 IS NOT NULL 조건을 추가했다. 기존 finish의 DISTINCT FROM 거부는 유지하며 실제 제약 검증은 전체430 시험에 포함한다.
 
 별도 리뷰에서 일반 deadline setter가 기존의 더 짧은 lock timeout을 늘릴 수 있는 경계를 확인했다. 기존 일반 setter의 동작은 유지하고 새 복구 경로에는 서버 기존값·호출자 deadline·고정 cap 중 최솟값만 적용하는 제한 함수를 연결했다. 실제 preapply에는 설치된 strict guard의 정확 inventory를 DML 전에 확인하는 shared helper를 연결한다. 이 helper 설치는 전체430의 소유다.
+
+전체430 정본 fixture를 사용하는 실제 apply→후처리 통합 시험3개를 추가했다. sync 실제 쓰기 뒤 fault의 전체 rollback/재시도/원 receipt replay, begin/finish receipt 교체와 불완전 marker CHECK, 기존200ms/100ms 서버 cap 보존을 검증할 소스다. 현재 수집·실행은 아직 하지 않았다. provider namespace 문서에도 저장 snapshot 적용 모듈을 추가해 목록 누락 검사를3 PASS로 확인했다.
+
+전체430 합성 뒤 PostgreSQL 통합 소스3개가 정상 수집됐다(실행 결과와 별개). API 취소 경로가 provider root의 SUCCESS를 정산할 때 남아 있던 SERIALIZABLE 한 곳도 새 finalization 계약에 맞춰 READ COMMITTED로 맞췄다. 기존 정산·전이·타임라인 검사는 유지한다.
+
+실제 owned 첫 설치는 asyncpg의 multi-command 거부로 본체에 도달하지 못했고 wrapper를 정본 scanner 기반 단일 문장 실행으로 수정했다. 두 번째 시험은 정본300→430 설치·service LOGIN까지 성공했고 GUC 보존1 PASS/후처리 준비2 FAIL이었다. 원인은 시험 fixture의 Geo Stats 누락·frozenset 관측 집합과 이미 활성화된 동일 공항을 재seed한 것이었다. 실제 원 관측 Stats/builtinset을 연결하고 초기 EX 적재를 module당 한 번만 실행하도록 시험을 보완했다. 제품 guard·원 단언은 유지하며 후처리 본체의 실제 통과는 아직 주장하지 않는다.
+
+세 번째 실제 시험은 startup/private ACL·GUC2 PASS/ORM·후처리 준비3 FAIL이었다. ORM의 자동 CHECK 이름2개를 실제 catalog에 맞추며 검사 자체는 유지한다. 실제 native 적용이 runtime에서 private428 capture를 직접 호출한 권한 오류도 확인했다. private 권한을 확대하지 않고 자기 snapshot/fence/완료 kernel/현재 apply TX를 검증한 후 작은 count/hash만 반환하는 typed SD를 추가했다. 공유430의 명시 owner/ACL/startup 목록 연결 뒤 실제 재검증한다. 실패 뒤에는 시험이 소유한 ready plan만 취소해 다음 사례를 가리는 연쇄 실패도 방지한다.

@@ -55,6 +55,7 @@ from sqlalchemy import (
     Identity,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     Numeric,
     PrimaryKeyConstraint,
@@ -105,6 +106,10 @@ _CANONICAL_WHITESPACE_SQL = (
 __all__ = [
     "metadata",
     "Base",
+    "ProviderSnapshotArtifactRow",
+    "ProviderSnapshotControlRow",
+    "ProviderSnapshotQuotaLimitRow",
+    "ProviderSnapshotQuotaReservationRow",
     "FeatureRow",
     "FeatureStateTransitionRow",
     "ManualFeatureIdentityClaimRow",
@@ -8941,3 +8946,263 @@ class ProviderFieldActivePolicyRow(Base):
     )
     policy_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
     field_paths: Mapped[list[str]] = mapped_column(ARRAY(Text), nullable=False)
+
+
+# =============================================================================
+# ops.provider_snapshot_* — bounded immutable replay input과 작은 executor control
+# =============================================================================
+
+
+class ProviderSnapshotArtifactRow(Base):
+    """bounded typed artifact/context. UPDATE 불변식은 SQL trigger가 소유한다."""
+
+    __tablename__ = "provider_snapshot_artifacts"
+    __table_args__ = (
+        PrimaryKeyConstraint("snapshot_id", name=conv("provider_snapshot_artifacts_pkey")),
+        UniqueConstraint(
+            "import_job_dataset_id",
+            name=conv("provider_snapshot_artifacts_import_job_dataset_id_key"),
+        ),
+        ForeignKeyConstraint(
+            ["root_job_id"],
+            ["ops.import_jobs.job_id"],
+            name=conv("provider_snapshot_artifacts_root_job_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name=conv("provider_snapshot_artifacts_provider_dataset_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["source_job_id", "import_job_dataset_id"],
+            ["ops.import_job_datasets.job_id", "ops.import_job_datasets.import_job_dataset_id"],
+            name=conv("fk_provider_snapshot_artifact_member"),
+        ),
+        CheckConstraint(
+            "octet_length(sync_scope) BETWEEN 1 AND 128 AND sync_scope=btrim(sync_scope)",
+            name=conv("provider_snapshot_artifacts_sync_scope_check"),
+        ),
+        CheckConstraint(
+            "octet_length(operation_key) BETWEEN 1 AND 256 AND operation_key=btrim(operation_key)",
+            name=conv("provider_snapshot_artifacts_operation_key_check"),
+        ),
+        CheckConstraint(
+            "octet_length(dagster_run_id) BETWEEN 1 AND 128 AND "
+            "dagster_run_id=btrim(dagster_run_id)",
+            name=conv("provider_snapshot_artifacts_dagster_run_id_check"),
+        ),
+        CheckConstraint(
+            "capture_profile='bounded-place-v1'",
+            name=conv("provider_snapshot_artifacts_capture_profile_check"),
+        ),
+        CheckConstraint(
+            "octet_length(artifact_payload) BETWEEN 1 AND 1048576",
+            name=conv("provider_snapshot_artifacts_artifact_payload_check"),
+        ),
+        CheckConstraint(
+            "native_input_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("provider_snapshot_artifacts_native_input_digest_check"),
+        ),
+        CheckConstraint(
+            "octet_length(observation_context) BETWEEN 1 AND 8192",
+            name=conv("provider_snapshot_artifacts_observation_context_check"),
+        ),
+        {"schema": "ops"},
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False), server_default=text("x_extension.gen_random_uuid()")
+    )
+    root_job_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    source_job_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    import_job_dataset_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sync_scope: Mapped[str] = mapped_column(Text, nullable=False)
+    operation_key: Mapped[str] = mapped_column(Text, nullable=False)
+    dagster_run_id: Mapped[str] = mapped_column(Text, nullable=False)
+    capture_profile: Mapped[str] = mapped_column(Text, nullable=False)
+    artifact_payload: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    artifact_sha256: Mapped[str | None] = mapped_column(
+        Text,
+        Computed(
+            "encode(x_extension.digest(artifact_payload, 'sha256'::text), 'hex'::text)",
+            persisted=True,
+        ),
+    )
+    native_input_digest: Mapped[str] = mapped_column(Text, nullable=False)
+    observation_context: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    context_sha256: Mapped[str | None] = mapped_column(
+        Text,
+        Computed(
+            "encode(x_extension.digest(observation_context, 'sha256'::text), 'hex'::text)",
+            persisted=True,
+        ),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class ProviderSnapshotControlRow(Base):
+    """executor lease/fence와 같은 apply TX가 남긴 원래 결과. table 직접 runtime권한은 없다."""
+
+    __tablename__ = "provider_snapshot_controls"
+    __table_args__ = (
+        PrimaryKeyConstraint("snapshot_id", name=conv("provider_snapshot_controls_pkey")),
+        ForeignKeyConstraint(
+            ["snapshot_id"],
+            ["ops.provider_snapshot_artifacts.snapshot_id"],
+            name=conv("provider_snapshot_controls_snapshot_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["attempt_id"],
+            ["ops.feature_write_attempts.attempt_id"],
+            name=conv("provider_snapshot_controls_attempt_id_fkey"),
+        ),
+        UniqueConstraint("attempt_id", name=conv("provider_snapshot_controls_attempt_id_key")),
+        CheckConstraint(
+            "executor_generation>0",
+            name=conv("provider_snapshot_controls_executor_generation_check"),
+        ),
+        CheckConstraint(
+            "status IN ('prepared','applied','postprocessed','child_sealed')",
+            name=conv("provider_snapshot_controls_status_check"),
+        ),
+        CheckConstraint(
+            "manifest_digest ~ '^[0-9a-f]{64}$'",
+            name=conv("provider_snapshot_controls_manifest_digest_check"),
+        ),
+        CheckConstraint(
+            "octet_length(applied_result) BETWEEN 1 AND 4096",
+            name=conv("provider_snapshot_controls_applied_result_check"),
+        ),
+        CheckConstraint(
+            "octet_length(postprocess_receipt) BETWEEN 1 AND 4096",
+            name=conv("provider_snapshot_controls_postprocess_receipt_check"),
+        ),
+        CheckConstraint(
+            "(attempt_id IS NULL AND attempt_owner IS NULL AND manifest_digest IS"
+            " NULL) OR (attempt_id IS NOT NULL AND attempt_owner IS NOT NULL AND "
+            "manifest_digest IS NOT NULL)",
+            name=conv("ck_provider_snapshot_attempt_pair"),
+        ),
+        CheckConstraint(
+            "(status='prepared' AND applied_result IS NULL AND applied_generation"
+            " IS NULL AND applied_fence IS NULL AND applied_at IS NULL) OR "
+            "(status IN ('applied','postprocessed','child_sealed') AND "
+            "applied_result IS NOT NULL AND applied_generation IS NOT NULL AND "
+            "applied_generation>0 AND applied_generation<=executor_generation AND"
+            " applied_fence IS NOT NULL AND applied_at IS NOT NULL AND attempt_id"
+            " IS NOT NULL)",
+            name=conv("ck_provider_snapshot_applied_result"),
+        ),
+        CheckConstraint(
+            "(status IN ('prepared','applied') AND postprocess_receipt IS NULL "
+            "AND postprocessed_at IS NULL) OR (status IN "
+            "('postprocessed','child_sealed') AND postprocess_receipt IS NOT NULL"
+            " AND postprocessed_at IS NOT NULL)",
+            name=conv("ck_provider_snapshot_postprocess"),
+        ),
+        CheckConstraint(
+            "(postprocess_txid IS NULL AND postprocess_intent_sha256 IS NULL) OR "
+            "(status='applied' AND postprocess_txid IS NOT NULL AND postprocess_txid>0 "
+            "AND postprocess_intent_sha256 IS NOT NULL AND "
+            "postprocess_intent_sha256 ~ '^[0-9a-f]{64}$')",
+            name=conv("ck_provider_snapshot_private_postprocess"),
+        ),
+        CheckConstraint(
+            "seal_txid IS NULL OR (status='postprocessed' AND seal_txid>0)",
+            name=conv("ck_provider_snapshot_private_seal"),
+        ),
+        CheckConstraint(
+            "(status='child_sealed')=(child_sealed_at IS NOT NULL)",
+            name=conv("ck_provider_snapshot_child_seal"),
+        ),
+        {"schema": "ops"},
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    executor_generation: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    executor_fence: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    lease_expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False)
+    attempt_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    attempt_owner: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    manifest_digest: Mapped[str | None] = mapped_column(Text)
+    applied_result: Mapped[bytes | None] = mapped_column(LargeBinary)
+    result_sha256: Mapped[str | None] = mapped_column(
+        Text,
+        Computed(
+            "encode(x_extension.digest(applied_result, 'sha256'::text), 'hex'::text)",
+            persisted=True,
+        ),
+    )
+    applied_generation: Mapped[int | None] = mapped_column(BigInteger)
+    applied_fence: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    applied_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    postprocess_receipt: Mapped[bytes | None] = mapped_column(LargeBinary)
+    postprocessed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    postprocess_txid: Mapped[int | None] = mapped_column(BigInteger)
+    postprocess_intent_sha256: Mapped[str | None] = mapped_column(Text)
+    child_sealed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    seal_txid: Mapped[int | None] = mapped_column(BigInteger)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class ProviderSnapshotQuotaLimitRow(Base):
+    """SchemaOwner가 명시하는 logical quota. 값은 migration/ORM default로 발명하지 않는다."""
+
+    __tablename__ = "provider_snapshot_quota_limits"
+    __table_args__ = (
+        PrimaryKeyConstraint("quota_key", name=conv("provider_snapshot_quota_limits_pkey")),
+        CheckConstraint(
+            "quota_key>=0", name=conv("provider_snapshot_quota_limits_quota_key_check")
+        ),
+        CheckConstraint("max_bytes>0", name=conv("provider_snapshot_quota_limits_max_bytes_check")),
+        CheckConstraint("max_rows>0", name=conv("provider_snapshot_quota_limits_max_rows_check")),
+        CheckConstraint(
+            "used_bytes>=0 AND used_bytes<=max_bytes",
+            name=conv("provider_snapshot_quota_limits_used_bytes_check"),
+        ),
+        CheckConstraint(
+            "used_rows>=0 AND used_rows<=max_rows",
+            name=conv("provider_snapshot_quota_limits_used_rows_check"),
+        ),
+        {"schema": "ops"},
+    )
+
+    quota_key: Mapped[int] = mapped_column(BigInteger, autoincrement=False)
+    max_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    max_rows: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    used_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+    used_rows: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default=text("0"))
+
+
+class ProviderSnapshotQuotaReservationRow(Base):
+    """artifact별 논리 예약 증거. GC가 해제할 때만 quota와 함께 지운다."""
+
+    __tablename__ = "provider_snapshot_quota_reservations"
+    __table_args__ = (
+        PrimaryKeyConstraint("snapshot_id", name=conv("provider_snapshot_quota_reservations_pkey")),
+        ForeignKeyConstraint(
+            ["snapshot_id"],
+            ["ops.provider_snapshot_artifacts.snapshot_id"],
+            name=conv("provider_snapshot_quota_reservations_snapshot_id_fkey"),
+        ),
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name=conv("provider_snapshot_quota_reservations_provider_dataset_id_fkey"),
+        ),
+        CheckConstraint(
+            "reserved_bytes BETWEEN 8194 AND 1064960",
+            name=conv("provider_snapshot_quota_reservations_reserved_bytes_check"),
+        ),
+        {"schema": "ops"},
+    )
+
+    snapshot_id: Mapped[str] = mapped_column(UUID(as_uuid=False))
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    reserved_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False)

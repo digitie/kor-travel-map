@@ -1,7 +1,7 @@
 """``kortravelmap.providers`` — provider별 raw → DTO 변환 모듈.
 
 각 provider 라이브러리(``python-*-api``)의 typed model을 본 라이브러리의
-``FeatureBundle``로 정규화하는 **순수 함수 namespace**. wrapper/adapter/
+``FeatureBundle``로 정규화하며, 저장된 typed 입력의 내부 적용 경계를 제공한다. wrapper/adapter/
 gateway 신규 생성 금지 (ADR-006).
 
 **변환 모듈 인벤토리.** 아래 표와 그 뒤 「표에 없는 모듈」 두 줄이 ``providers/``
@@ -15,6 +15,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``knps`` | python-knps-api | 국립공원 file dataset |
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
 | ``kor_travel_transport`` | kor-travel-transport | transport export 계약·파서(ADR-106) |
+| ``kor_travel_transport_apply`` | kor-travel-transport | 원 snapshot의 fenced SH 적용 |
 | ``kor_travel_transport_evidence`` | kor-travel-transport | 공항 DB 증거 비교 |
 | ``kor_travel_transport_native`` | kor-travel-transport | 저장 projection 복원·순수 적격성 진단 |
 | ``kor_travel_transport_state`` | kor-travel-transport | export → Valkey 상태 값(ADR-114) |

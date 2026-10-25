@@ -1034,7 +1034,7 @@ async def _record_terminal_run(
                 and member.operation_kind == "provider_feature_load_run"
             ):
                 await session.execute(
-                    text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                    text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                 )
             await lock_provider_feature_finalization(session)
             try:
