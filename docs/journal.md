@@ -1,3 +1,7 @@
+## 2026-10-25 — PostGIS 추적 fixture 정리
+
+전체 CI 실패를 보존하고 배치·취소 cleanup 및 projection seed가 기존 P EX→L 규약을 따르게 수정했다. 제품·guard·기대값 변경 없이 실제 PostgreSQL100개/33.18초/skip0과 소유 자원 정리를 확인했다. 별도 scalar 제품 수정·전체 CI·운영 배포는 아직 미완이다. [범위와 증거](reports/2026-10-25-snapshot-pg-tracking-fixtures.md).
+
 ## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
 
 최종1093 API/schema430·동등351입력의7839 production UI로 실제 로그인/취소·replay/DB1attempt/WS17frame/logout 14판정 PASS와 소유 자원 정리를 확인했다. 1093 CI의 과거429 역비교1FAIL을 고정 fixture로 바로잡고 전체 unit4180 PASS/6SKIP을 확인했다. 제품·SQL·권한 변경0, 원 실패 보존이다. 최종 CI·운영 배포·실제 두 dataset 동시 쓰기와 Common 후속은 미완이다. [실제 증거와 범위](reports/2026-10-25-snapshot-recovery-final-candidate-ui.md).

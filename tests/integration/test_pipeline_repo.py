@@ -27,6 +27,7 @@ from kortravelmap.infra.feature_update_repo import (
     start_update_request,
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
+from kortravelmap.infra.pipeline_cancellation_repo import lock_provider_feature_finalization
 from kortravelmap.infra.pipeline_repo import (
     get_pipeline_execution,
     get_pipeline_status_counts,
@@ -203,6 +204,7 @@ async def _job(
     member: _Member | None = None,
 ) -> str | None:
     """job 1건 + (선택) canonical dataset membership 1건. membership id를 돌려준다."""
+    await lock_provider_feature_finalization(session)
     await session.execute(
         _INSERT_JOB_SQL,
         {
@@ -631,6 +633,7 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
     member = await _member(
         migrated_session, provider="provider-a", dataset_key="dataset-a"
     )
+    await lock_provider_feature_finalization(migrated_session)
     await migrated_session.execute(
         text(
             """
