@@ -1238,7 +1238,7 @@ async def test_b2_mcst_partial_attempt_is_preserved_by_b3_failure_record(
 async def test_feature_operation_lifecycle_is_idempotent_and_never_reverses(
     migrated_session: AsyncSession,
 ) -> None:
-    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+    await migrated_session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
     created_at = datetime(2026, 7, 15, 1, tzinfo=UTC)
     started_at = created_at + timedelta(seconds=2)
     finished_at = started_at + timedelta(seconds=3)

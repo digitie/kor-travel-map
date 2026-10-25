@@ -752,18 +752,24 @@ async def test_source_only_old_rr_cannot_advance_head_after_policy_cutover(scala
     feature, datasets, entities = await _seed(admin)
     await _activate(admin, feature)
     other, _, _ = await _seed(admin)
+    record = entities[0] + "-rr"
+    # history 준비도 현재 prefix 규약을 따른다. RR 부정 TX에서는 head만 시험한다.
+    async with AsyncSession(admin) as seed, seed.begin():
+        await seed.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        await seed.execute(
+            text("""INSERT INTO provider_sync.source_records(
+            source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+            VALUES(:record,:entity,'{}',:hash,clock_timestamp())"""),
+            {"record": record, "entity": entities[0], "hash": "c" * 64},
+        )
     async with admin.connect() as connection:
         await connection.execution_options(isolation_level="REPEATABLE READ")
         async with AsyncSession(bind=connection) as old:
             await old.execute(text("SELECT epoch FROM feature.provider_field_policy_epoch"))
-            record = entities[0] + "-rr"
-            await old.execute(
-                text("""INSERT INTO provider_sync.source_records(
-                source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
-                VALUES(:record,:entity,'{}',:hash,clock_timestamp())"""),
-                {"record": record, "entity": entities[0], "hash": "c" * 64},
-            )
             await _activate(admin, other)
+            # 수동 old-RR 부정 fixture다. fresh first-party 진입 성공을 주장하지 않고
+            # 현재 P 뒤에도 stale epoch의 원40001 보호가 남는지 확인한다.
+            await old.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
             with pytest.raises(DBAPIError) as failed:
                 await old.execute(
                     text("""UPDATE provider_sync.source_entity_heads

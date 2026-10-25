@@ -46,3 +46,18 @@ source-only RR 시험의 새 prefix 경계도 원로그 callsite를 계속 분�
 
 원 CI log SHA: `89f14fecf6522541a947e78024fc9f050cacecdb742eb48d32a6f51cb0018fc0`.
 148 node inventory SHA: `d9ae88e8360872d8962b55b9e785be69acb6b62db069532e798932cf3d77d737`.
+
+## old RR fixture와 winner handoff의 별도 범위
+
+source-only old RR의 첫 INSERT가 missing-P23514에서 중단되던 source는 history record를
+별도 정확EX seed로 준비하고, old RR snapshot→외부 cutover→명시 P EX→원head UPDATE로
+정렬했다. 원40001/head불변 단언은 그대로며 fresh first-party 진입 성공을 주장하지 않는
+수동 old-RR 부정 시험이다. canonical lifecycle의 직접 성공 TX도 RC로 바꾸고, 별도
+SER 조기거부 시험은 유지했다. 제품/guard 변경은 앞선 no-op sidecar 외에 없다.
+
+정본 winner는 `removed` 후보를 지원하므로 A 제거→B 실제 handoff는 일반 의미에 포함된다.
+현재 shared/exclusive scalar API는 자동 fallback을 하지 않으며, 진짜 foreign base 변경은
+계속23514다. 최초 durable Airport의 unchanged raw profile에서는 그런 변경을 진입 전
+배제하지만 일반 remove policy의 handoff는 별도 fresh EX plan/apply가 필요하다.
+no-op 수정으로 이 경계의 SH 지원까지 완료했다고 주장하지 않는다. 기존 foreign 변경
+부정 시험은 유지하며 EX handoff paired proof는 별도 미완이다.
