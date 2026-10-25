@@ -5,6 +5,9 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import os
+import resource
+import stat
 import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -19,7 +22,7 @@ from kortravelmap.dagster.airport_snapshot_postprocess import (
 )
 from kortravelmap.dagster.rest_snapshot_backend import RestSnapshotBackend
 from kortravelmap.dagster.rest_snapshot_postprocess import prepare_rest_snapshot_postprocess
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
@@ -181,7 +184,9 @@ def _work(case, observed):
     return RestSnapshotBackend(case.typed_member, case.pins, case.run).prepare(observed)
 
 
-async def _run_case(case, *, client=None, after_apply=None, before_work=None, after_work=None):
+async def _run_case(
+    case, *, client=None, before_apply=None, after_apply=None, before_work=None, after_work=None
+):
     async def apply(session):
         row = (
             await session.execute(
@@ -190,6 +195,8 @@ async def _run_case(case, *, client=None, after_apply=None, before_work=None, af
             )
         ).one()
         assert row.usename == "ktm_feature_service"
+        if before_apply is not None:
+            await before_apply(session, tuple(row))
         apply_fn = (
             airport_io.apply_airport_snapshot_in_session
             if case.pins.source_entity_type == "airport"
@@ -346,9 +353,125 @@ async def _wait_stage(task, event):
         await asyncio.gather(waiter, return_exceptions=True)
 
 
+def _private_metric_directory():
+    """NTFS audit output과 분리한 고정 Linux private UUID 경로만 사용한다."""
+    from pathlib import Path
+
+    configured = os.environ.get("MAP432_PHYSICAL_METRICS_DIR")
+    if configured is None:
+        return None
+    value = os.environ.get("MAP432RESTTWOWRITERS_RUN_DIR")
+    assert value is not None
+    output = Path(value)
+    assert output.parent == Path("/mnt/f/dev/audit-reports/2026-10-24-operations")
+    prefix = "map432-rest-two-writers-owned-r1-"
+    assert output.name.startswith(prefix)
+    nonce = output.name[len(prefix) :]
+    assert UUID(nonce).hex == nonce
+    base = Path("/home/digitie/.local/state/map432-owned-physical-metrics")
+    base.mkdir(mode=0o700, exist_ok=True)
+    root = base / nonce
+    assert Path(configured) == root
+    root.mkdir(mode=0o700, exist_ok=True)
+    for path in (base, root):
+        info = path.lstat()
+        assert not path.is_symlink()
+        assert stat.S_ISDIR(info.st_mode)
+        assert info.st_uid == os.getuid()
+        assert stat.S_IMODE(info.st_mode) == 0o700
+    return root
+
+
+def _private_pair_event(filename, value):
+    """owned runner가 준 private directory에 고정 metadata만 OEXCL로 남긴다."""
+    root = _private_metric_directory()
+    if root is None:
+        return False
+    allowed = {
+        f"physical-pair-{leader}-{profile}-backend.json"
+        for leader in ("airport", "rest")
+        for profile in ("airport", "rest")
+    } | {
+        f"physical-pair-{leader}-{stage}.json"
+        for leader in ("airport", "rest")
+        for stage in ("finished", "final-request")
+    }
+    assert filename in allowed
+    data = (json.dumps(value, sort_keys=True) + "\n").encode()
+    assert len(data) <= 4096
+    final = root / filename
+    intent = root / (filename + ".publish-intent")
+    temporary = root / (filename + ".publishing")
+    # 단일 publisher latch로 중복 게시를 거부한다. final은 완성된 bytes만 보인다.
+    intent_fd = os.open(intent, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    os.close(intent_fd)
+    try:
+        final.lstat()
+    except FileNotFoundError:
+        pass
+    else:
+        raise FileExistsError("owned metric event already exists")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    publish_error = None
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            stream.write(data)
+            stream.flush()
+            os.fsync(stream.fileno())
+        try:
+            final.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise FileExistsError("owned metric event already exists")
+        os.rename(temporary, final)
+    except BaseException as error:
+        publish_error = error
+        raise
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+        except BaseException as cleanup:
+            if publish_error is None:
+                raise
+            publish_error.add_note(
+                "owned metric temporary cleanup failed: " + type(cleanup).__name__
+            )
+    return True
+
+
+async def _metric_ack(leader, cid, phase):
+    """계측 opt-in에서만 observer의 고정 metadata ack를 유한하게 기다린다."""
+    root = _private_metric_directory()
+    if root is None:
+        return False
+    assert phase in {"baseline", "final"}
+    path = root / f"physical-pair-{leader}-{phase}-ack.json"
+    async with asyncio.timeout(5):
+        while True:
+            try:
+                fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+            except FileNotFoundError:
+                await asyncio.sleep(0.005)
+                continue
+            with os.fdopen(fd, "rb") as stream:
+                info = os.fstat(stream.fileno())
+                assert stat.S_ISREG(info.st_mode)
+                assert info.st_nlink == 1
+                assert info.st_uid == os.getuid()
+                assert stat.S_IMODE(info.st_mode) == 0o600
+                data = stream.read(4097)
+            assert len(data) <= 4096
+            assert json.loads(data) == {"version": 1, "leader": leader, "cid": cid, "phase": phase}
+            return True
+
+
 @pytest.mark.parametrize("leader", ["airport", "rest"])
 async def test_disjoint_physical_source_writers_serialize_global_topics_without_lost_effects(
     scalar_engines,
+    scalar_container,
     rest_catalog,
     pair_baselines,
     request,
@@ -364,35 +487,95 @@ async def test_disjoint_physical_source_writers_serialize_global_topics_without_
     identities, source_done = {}, {name: asyncio.Event() for name in cases}
     held, release = asyncio.Event(), asyncio.Event()
     started = time.perf_counter()
+    cpu_started = time.process_time()
+    rss_before = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+    cid = scalar_container.get_wrapped_container().id
+    measurements, connection_names, identity_files = {}, {}, {}
+    hold_times = {}
     tasks, primary, lock_wait = {}, None, None
+
+    def before_sql(connection, cursor, statement, parameters, context, executemany):
+        if "ops.begin_provider_snapshot_postprocess(" not in statement:
+            return
+        name = connection_names[id(connection)]
+        assert "topic_begin_sql_start_ns" not in measurements[name]
+        measurements[name]["topic_begin_sql_start_ns"] = time.perf_counter_ns()
+
+    def after_sql(connection, cursor, statement, parameters, context, executemany):
+        if "ops.begin_provider_snapshot_postprocess(" not in statement:
+            return
+        name = connection_names[id(connection)]
+        measurements[name]["topic_begin_sql_end_ns"] = time.perf_counter_ns()
+
+    event.listen(runtime.sync_engine, "before_cursor_execute", before_sql)
+    event.listen(runtime.sync_engine, "after_cursor_execute", after_sql)
+
+    async def measured_run(name, **callbacks):
+        completion = await _run_case(cases[name], **callbacks)
+        # 정본 coordinator가 반환한 뒤이므로 outer COMMIT 성공 응답 이후다.
+        measurements[name]["coordinator_commit_ack_ns"] = time.perf_counter_ns()
+        return completion
+
+    def before_apply_observer(name):
+        async def observe(session, identity):
+            identities[name] = identity
+            connection = await session.connection()
+            connection_names[id(connection.sync_connection)] = name
+            measurements[name] = {"before_apply_ns": time.perf_counter_ns()}
+            identity_files[name] = _private_pair_event(
+                f"physical-pair-{leader}-{name}-backend.json",
+                {
+                    "version": 1,
+                    "leader": leader,
+                    "profile": name,
+                    "dataset_id": cases[name].typed_member.membership.provider_dataset_id,
+                    "cid": cid,
+                    "pid": identity[0],
+                    "backend_start": identity[1].isoformat(),
+                    "login": identity[2],
+                    "stage": "before_apply",
+                    "monotonic_ns": measurements[name]["before_apply_ns"],
+                },
+            )
+            await _metric_ack(leader, cid, "baseline")
+            if name == follower:
+                async with asyncio.timeout(5):
+                    await held.wait()
+
+        return observe
 
     def source_observer(name):
         async def observe(session, identity, result):
-            identities[name] = identity
+            assert identities[name] == identity
             assert result.load.bundles_total == (1 if name == "airport" else 2)
+            measurements[name]["source_apply_returned_ns"] = time.perf_counter_ns()
             source_done[name].set()
 
         return observe
 
     async def hold_after_actual_work(bound, fresh):
+        hold_times["entered_ns"] = time.perf_counter_ns()
         held.set()
         await release.wait()
+        hold_times["released_ns"] = time.perf_counter_ns()
 
     try:
         tasks[leader] = asyncio.create_task(
-            _run_case(
-                cases[leader],
+            measured_run(
+                leader,
+                before_apply=before_apply_observer(leader),
                 after_apply=source_observer(leader),
                 after_work=hold_after_actual_work,
             )
         )
-        await _wait_stage(tasks[leader], held)
         tasks[follower] = asyncio.create_task(
-            _run_case(
-                cases[follower],
+            measured_run(
+                follower,
+                before_apply=before_apply_observer(follower),
                 after_apply=source_observer(follower),
             )
         )
+        await _wait_stage(tasks[leader], held)
         await _wait_stage(tasks[follower], source_done[follower])
         # A가 commit 전인데 B의 실제 source apply도 끝났다. 공통 topic 안쪽에 양자 barrier0.
         assert not tasks[leader].done()
@@ -403,6 +586,21 @@ async def test_disjoint_physical_source_writers_serialize_global_topics_without_
         release.set()
         async with asyncio.timeout(10):
             completions = await asyncio.gather(tasks["airport"], tasks["rest"])
+        final_request = _private_pair_event(
+            f"physical-pair-{leader}-final-request.json",
+            {"version": 1, "leader": leader, "cid": cid, "monotonic_ns": time.perf_counter_ns()},
+        )
+        final_ack = await _metric_ack(leader, cid, "final")
+        atomic_pair_client_cpu = time.process_time() - cpu_started
+        rss_after_atomic = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        controlled_hold = (hold_times["released_ns"] - hold_times["entered_ns"]) / 1e9
+        for values in measurements.values():
+            begin = values["topic_begin_sql_start_ns"]
+            returned = values["topic_begin_sql_end_ns"]
+            committed = values["coordinator_commit_ack_ns"]
+            assert values["source_apply_returned_ns"] <= begin <= returned <= committed
+            values["begin_return_to_commit_ack_seconds"] = (committed - returned) / 1e9
+            values["begin_start_to_commit_ack_seconds"] = (committed - begin) / 1e9
         after = await _topics(admin)
         assert after["provider_sync"] >= before["provider_sync"] + 2
         assert after["dataset_projection"] >= before["dataset_projection"] + 2
@@ -417,12 +615,28 @@ async def test_disjoint_physical_source_writers_serialize_global_topics_without_
                     {
                         "leader": leader,
                         "actual_backends": 2,
-                        "source_overlap": True,
+                        "source_transaction_lifetimes_overlap": True,
                         "exact_blocker": True,
                         "wait_event": lock_wait,
                         "findings": counts,
                         "whole_wall_seconds": time.perf_counter() - started,
-                        "backend_cpu_RSS": "unmeasured",
+                        "topic_begin_to_commit_ack": measurements,
+                        "controlled_hold_seconds": controlled_hold,
+                        "atomic_pair_client_cpu_seconds": atomic_pair_client_cpu,
+                        "client_process_maxrss_kib_before": rss_before,
+                        "client_process_maxrss_kib_after_atomic": rss_after_atomic,
+                        "client_RSS_scope": "Linux process lifetime highwater; not per-TX RSS",
+                        "private_backend_events": identity_files,
+                        "backend_cpu_RSS": (
+                            "external exact-CID sampler only; missing points unmeasured"
+                        ),
+                        "measurement_limits": (
+                            "client windows include controlled hold, SQL wait, "
+                            "observer and client overhead; backend lock "
+                            "acquisition/release NOT_MEASURED"
+                        ),
+                        "final_sample_requested": final_request,
+                        "final_sample_acknowledged": final_ack,
                         "child_seal": "separate TX",
                     },
                     sort_keys=True,
@@ -434,6 +648,15 @@ async def test_disjoint_physical_source_writers_serialize_global_topics_without_
         raise
     finally:
         release.set()
+        cleanup_primary = primary
+
+        def preserve_cleanup(error, label):
+            nonlocal cleanup_primary
+            if cleanup_primary is None:
+                cleanup_primary = error
+            else:
+                cleanup_primary.add_note(label + ": " + type(error).__name__)
+
         for task in tasks.values():
             if not task.done():
                 task.cancel()
@@ -441,9 +664,31 @@ async def test_disjoint_physical_source_writers_serialize_global_topics_without_
             async with asyncio.timeout(5):
                 await asyncio.gather(*tasks.values(), return_exceptions=True)
         except BaseException as cleanup:
-            if primary is None:
-                raise
-            primary.add_note("owned writer drain failed: " + type(cleanup).__name__)
-        finally:
-            for case in cases.values():
-                await _cancel_ready(runtime, case, primary)
+            preserve_cleanup(cleanup, "owned writer drain failed")
+        for name, listener in (
+            ("before_cursor_execute", before_sql),
+            ("after_cursor_execute", after_sql),
+        ):
+            try:
+                event.remove(runtime.sync_engine, name, listener)
+            except BaseException as cleanup:
+                preserve_cleanup(cleanup, "owned metric listener removal failed")
+        for case in cases.values():
+            try:
+                await _cancel_ready(runtime, case)
+            except BaseException as cleanup:
+                preserve_cleanup(cleanup, "owned ready-plan cleanup failed")
+        try:
+            _private_pair_event(
+                f"physical-pair-{leader}-finished.json",
+                {
+                    "version": 1,
+                    "leader": leader,
+                    "cid": cid,
+                    "monotonic_ns": time.perf_counter_ns(),
+                },
+            )
+        except BaseException as cleanup:
+            preserve_cleanup(cleanup, "owned metrics finish marker failed")
+        if primary is None and cleanup_primary is not None:
+            raise cleanup_primary

@@ -6,7 +6,8 @@
 후보 UI를 통과해 main에 반영됐고, 운영 배포도 아래 별도 Manager·공개 UI 절차로 완료했다.
 이 문서는 [선택 A 명세](2026-10-26-rest-snapshot-registration-spec.md)와
 [작업 목록](2026-10-26-rest-snapshot-registration-tasks.md)의 구현 checkpoint다.
-아직 432 완료·운영 활성화·동시 writer 수용을 뜻하지 않는다.
+실제 격리 DB의215·quota/GC·복구·공유 topic 두 writer는 아래 범위에서 통과했다.
+최종 CI·후보 UI·머지/배포와 운영 활성화는 별개이며 아직 미완이다.
 
 ## 단일 transaction 경계
 
@@ -214,3 +215,57 @@ backend 종료·rollback·pool 재사용1PASS, lateGeo fixture의 직접 stamp �
 뒤따른 active owner로2FAIL이다. SDK0 재개 성공으로 확대하지 않는다. 두 fixture 수정은
 기존 guard·한도·제품 코드·검증 단언을 유지하며, 독립 리뷰 뒤 재실행한다.
 최종 CI·후보 live/UI·머지·배포와 Common/W/T 후속 전파는 아직 남아 있다.
+
+
+## quota/GC·복구 fixture 재검증
+
+`b18470d5`의 새 owned quota/GC는5개 모두 PASS(console61.09초/XML60.375초)다.
+동일 등록이 잠긴 quota와 무관하게 원 예약을 보존하고, 교차 profile23514·고정 row/byte
+한도53000 및 정확 constraint를 확인했다. 초과 시 전체 TX rollback, 실행 중 GC 보존과
+정본 FAILURE 후 정확 예약 반환·원 jobs 보존도 통과했다. 원4FAIL/1PASS는 보존한다.
+원장 `map432-rest-quota-gc-r3-root-actual-acceptance.json`으로 새 실행을 구분한다.
+
+같은 source의 별도 복구 시험은3개 모두 PASS(console18.57초/XML18.064초)다.
+정확 own DB backend 종료 뒤18개 상태표 rollback·pool1 재사용, 적용 전 late Geo stamp
+변경 거부, 실제 같은 Dagster run의 postprocessed 원 snapshot SDK0 재개를 확인했다.
+이 결과는 Dagster worker OS 프로세스 SIGKILL이나 물리 wire 단절 시험을 뜻하지 않는다.
+원1PASS/2FAIL을 보존하며 `map432-rest-recovery-r3-root-actual-acceptance.json`에 분리했다.
+각 실행의 원8개 산출물·source2574개/SDK53개와 import52/54를 검산했고,
+정확 CID/UUID/global0·소유 볼륨 부재도 확인했다. 제품·guard·자원 한도 변경은 없다.
+
+앞의 실제 PG 시험들은 별도 source/fixture와 목적을 가진다. 기존 generic protocol의
+실물 검증과 Rest에 새로 추가한 물리 pair를 구분하며 S5 일곱 시나리오 전체를 이 두
+writer 한 시험으로 대체하지 않는다. 원격 CI 및 최종 후보 live/UI와 머지·배포는 계속 남는다.
+
+
+## 설계 대조에서 찾은 추가 물리 검증
+
+앞의 실제 결과와 별개로 S5의 동일 member 동시 등록, 이전 read와 다른 worker seal 사이
+경합과 적용 중 GC의 실제 대기도 물리 barrier 시험을 추가한다. 현재 두 writer의 whole wall은 topic 첫 취득부터
+commit까지의 전용 계량이 아니며 CPU/RSS도 미측정이다. 테스트의 정본 SQL 호출 전후와
+commit 응답의 시각을 이용한 구간 경계, controlled hold, 정확 own backend·container의
+읽기 전용 자원 계측을 보강한다. 기존 가드·한도·정본 제품 경로를 바꾸지 않는다.
+이 추가 검증과 최종 CI/UI·머지/배포가 남으므로 T-CWRITE04 전체 완료로 표시하지 않는다.
+
+
+## 추가 경합·자원 관측 시험의 소스 검토
+
+같은 member의 두 Service 등록에서 immutable1개·quota한번·첫 nonce만 반환, 이전 read 뒤
+다른 Service의 seal COMMIT과 실제 claim 거부 사이 SDK0 재개, 적용 중 GC가 정확 writer를
+기다리다 own backend 종료 후 입력·예약을 보존하는 세 node를 추가했다. 기존11개 검증 단언과
+정본 가드·quota·SQL/pytest 한도는 보존했다. GC 경합의 입력은 fresh이므로 age/lease/running
+각 단독 보호는 이전 B5와 구분한다. 세 새 node와 추가 계측은 아직 실제 실행 전이다.
+
+두 writer 시험은 실제 SQL 호출 전후와 coordinator COMMIT ACK의 client 시각, controlled
+hold, client process CPU/lifetime RSS highwater를 기록한다. 별도 읽기 전용 sampler는
+소유된 정확 CID/두 backend PID와 process start ticks를 고정해 실행 전후 CPU ticks·RSS
+표본 및 container CPU/메모리를 구분한다. 두 profile의 baseline/final 확인을 받으며 원
+barrier/blocker·30초TX/1초lock·0.8초observer 및 owned150/160/15 한도는 유지한다.
+client 관측 구간은 backend의 실제 lock 취득/해제 시각 자체가 아니며, 표본 RSS는 진짜
+lifetime peak나 운영 효과가 아니다. 새 handshake가 없는 CI에서는 외부 계측 IO를 수행하지 않는다.
+
+적대 리뷰에서 찾은 계측 JSON 부분 공개와 정리 단계 첫 오류 뒤 회수 누락을 보완했다.
+완성 tmp fsync 뒤 단일 publisher가 원자적으로 공개하고, 각 listener/plan/pool 회수를 시도하며
+기존 primary 또는 첫 오류 객체를 보존한다. source·정리 fault의 순수 검증과 두 독립 리뷰를
+실제 PG·자원 수용으로 혼동하지 않는다. source를 동결한 뒤 세 경합과 계측 양 profile을
+각 owned 실행으로 확인하고 최종 CI·후보 UI·머지/배포를 진행한다.

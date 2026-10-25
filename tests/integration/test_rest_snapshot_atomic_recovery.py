@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import json
 import logging
 import warnings
 from dataclasses import replace
@@ -18,7 +20,7 @@ from kortravelmap.dagster import rest_snapshot_runner as runner
 from kortravelmap.dagster.feature_operation_tracking import FeatureOperationExecutionGuard
 from kortravelmap.dagster.rest_snapshot_postprocess import RestPostprocessMember
 from kortravelmap.dagster.rest_snapshot_runtime import RestSnapshotRuntime
-from sqlalchemy import text
+from sqlalchemy import event, text
 from sqlalchemy.exc import DBAPIError, SAWarning
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -363,3 +365,206 @@ async def test_registered_postprocessed_same_dagster_run_resumes_sdk0_without_re
         for table in before:
             if table not in {"ops.provider_snapshot_controls", "ops.ops_live_topic_revisions"}:
                 assert after[table] == before[table]
+
+
+async def _owned_backend_identity(engine):
+    async with AsyncSession(engine) as session, session.begin():
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        await _limits(session)
+        identity = tuple(
+            (
+                await session.execute(
+                    text("""SELECT pid,backend_start,usename
+            FROM pg_stat_activity WHERE pid=pg_backend_pid()
+            AND backend_type='client backend'""")
+                )
+            ).one()
+        )
+        assert identity[2] == "ktm_feature_service"
+        return identity
+
+
+async def test_physical_seal_between_original_read_and_claim_restores_original_receipt_sdk0(
+    scalar_engines,
+    rest_catalog,
+    rest_baseline,
+    monkeypatch,
+    request,
+):
+    admin, runtime = scalar_engines
+    case = await _prepare_rest_case(admin, runtime, rest_catalog, count=2)
+    completion = await _run_case(case)
+    pools = [
+        make_async_engine(
+            runtime.url.render_as_string(hide_password=False), pool_size=1, max_overflow=0
+        )
+        for _ in range(2)
+    ]
+    reader, sealer = [AsyncKorTravelMapClient(pool) for pool in pools]
+    boundary, sealed = asyncio.Event(), asyncio.Event()
+    claim_errors, sql_pids = [], {"claim": [], "seal": []}
+    original_claim, original_seal = io.claim_rest_snapshot, io.seal_rest_snapshot
+    task, primary, baseline = None, None, None
+    listeners = []
+
+    def observe_sql(kind, needle):
+        def observe(connection, cursor, statement, parameters, context, executemany):
+            if needle in statement:
+                sql_pids[kind].append(connection.connection.driver_connection.get_server_pid())
+
+        return observe
+
+    try:
+        identities = [await _owned_backend_identity(pool) for pool in pools]
+        assert identities[0][0] != identities[1][0]
+        old = await io.read_rest_snapshot(reader, case.member, pins=case.pins)
+        assert old.status == "postprocessed"
+        assert old.applied_result_bytes is not None
+        assert old.postprocess_receipt is not None
+        for pool, kind, needle in [
+            (pools[0], "claim", "ops.claim_provider_snapshot_executor("),
+            (pools[1], "seal", "CALL ops.seal_provider_snapshot_member("),
+        ]:
+            listener = observe_sql(kind, needle)
+            event.listen(pool.sync_engine, "before_cursor_execute", listener)
+            listeners.append((pool.sync_engine, listener))
+
+        async def claim_after_other_worker_seals(client, observed, *, previous=None):
+            assert client is reader
+            assert observed is old
+            boundary.set()
+            async with asyncio.timeout(5):
+                await sealed.wait()
+            try:
+                return await original_claim(client, observed, previous=previous)
+            except DBAPIError as error:
+                claim_errors.append(error)
+                raise
+
+        async def other_worker():
+            nonlocal baseline
+            async with asyncio.timeout(5):
+                await boundary.wait()
+            await original_seal(
+                sealer,
+                case.token,
+                artifact_sha256=old.artifact_sha256,
+                context_sha256=old.context_sha256,
+                result_sha256=hashlib.sha256(old.applied_result_bytes).hexdigest(),
+                postprocess_sha256=hashlib.sha256(old.postprocess_receipt).hexdigest(),
+            )
+            # baseline은 다른 worker의 정당한 seal COMMIT 후, 이전 claim을 풀기 전에 받는다.
+            baseline = await _state(admin)
+            sealed.set()
+
+        forbidden = AsyncMock(side_effect=AssertionError("sealed recovery must remain SDK0/DML0"))
+        monkeypatch.setattr(io, "claim_rest_snapshot", claim_after_other_worker_seals)
+        for name in ("plan_rest_snapshot", "reset_rest_snapshot_plan", "seal_rest_snapshot"):
+            monkeypatch.setattr(io, name, forbidden)
+        monkeypatch.setattr(runner, "_collect_rest_snapshot_input", forbidden)
+        monkeypatch.setattr(runner, "run_snapshot_apply_postprocess", forbidden)
+        monkeypatch.setattr(assets, "_reverse_geocoder", lambda *args: pytest.fail("Geo forbidden"))
+        for name in (
+            "record_address_validation_findings",
+            "record_sync_success_for_operation_membership",
+            "close_stale_address_validation_findings",
+        ):
+            monkeypatch.setattr(AsyncKorTravelMapClient, name, forbidden)
+        task = asyncio.create_task(other_worker())
+        resume = asyncio.create_task(
+            runner._resume(
+                reader,
+                case.member,
+                case.typed_member,
+                RestSnapshotRuntime(case.pins),
+                case.run,
+                old,
+            )
+        )
+        # 다른 worker의 원오류를 claim wait timeout으로 가리지 않는다.
+        try:
+            async with asyncio.timeout(10):
+                _, result = await asyncio.gather(task, resume)
+        finally:
+            if not resume.done():
+                resume.cancel()
+            await asyncio.gather(resume, return_exceptions=True)
+        assert len(claim_errors) == 1
+        assert runner._claim_member_inactive(claim_errors[0])
+        assert sql_pids == {"claim": [identities[0][0]], "seal": [identities[1][0]]}
+        assert [await _owned_backend_identity(pool) for pool in pools] == identities
+        assert result.load == completion.result.load
+        forbidden.assert_not_awaited()
+        assert baseline is not None
+        assert await _state(admin) == baseline
+        fresh = await io.read_rest_snapshot(reader, case.member, pins=case.pins)
+        assert fresh.status == "child_sealed"
+        assert fresh.child_status == "done"
+        assert fresh.root_status in {"running", "done"}
+        assert not fresh.cancellation_present
+        assert fresh.snapshot_id == old.snapshot_id
+        assert fresh.artifact_payload == old.artifact_payload
+        assert fresh.observation_context == old.observation_context
+        assert fresh.applied_result_bytes == old.applied_result_bytes
+        assert fresh.postprocess_receipt == old.postprocess_receipt == completion.receipt
+        assert fresh.applied_result == old.applied_result
+        request.node.user_properties.append(
+            (
+                "physical_seal_race",
+                json.dumps(
+                    {
+                        "physical_backends": 2,
+                        "original_read": "postprocessed",
+                        "other_worker_commit_before_claim": True,
+                        "actual_member_inactive_23514": True,
+                        "fresh_read": "child_sealed",
+                        "original_receipt_preserved": True,
+                        "SDK_calls": 0,
+                        "resume_effect_tables_unchanged": 18,
+                        "negative_scope": (
+                            "cancellation/quarantine rejection remains existing pure/CI coverage"
+                        ),
+                    },
+                    sort_keys=True,
+                ),
+            )
+        )
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        sealed.set()
+        cleanup_primary = primary
+
+        def preserve_cleanup(error, label):
+            nonlocal cleanup_primary
+            if cleanup_primary is None:
+                cleanup_primary = error
+            else:
+                cleanup_primary.add_note(label + ": " + type(error).__name__)
+
+        if task is not None and not task.done():
+            task.cancel()
+        try:
+            if task is not None:
+                async with asyncio.timeout(5):
+                    await asyncio.gather(task, return_exceptions=True)
+        except BaseException as cleanup:
+            preserve_cleanup(cleanup, "owned seal-race actor drain failed")
+        for engine, listener in listeners:
+            try:
+                event.remove(engine, "before_cursor_execute", listener)
+            except BaseException as cleanup:
+                preserve_cleanup(cleanup, "owned seal-race listener removal failed")
+        for pool in pools:
+            try:
+                assert pool.pool.checkedout() == 0
+            except BaseException as cleanup:
+                preserve_cleanup(cleanup, "owned seal-race pool checkout check failed")
+            try:
+                async with asyncio.timeout(5):
+                    await pool.dispose()
+            except BaseException as cleanup:
+                preserve_cleanup(cleanup, "owned seal-race pool disposal failed")
+        if primary is None and cleanup_primary is not None:
+            raise cleanup_primary

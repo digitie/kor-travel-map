@@ -4,10 +4,12 @@
 base65e4943·제품 편집/PG 실행0 기록은 보존한다. 구현은 main `df877690` 위 초안 PR
 [#1418](https://github.com/digitie/kor-travel-map/pull/1418)에서 시작했다.
 
-S1·S2는 입력/정적 profile 소스와 단위 시험, S3는 공통 coordinator와 rollback 시험 소스,
-S4는 quota 계량 준비, S5는 물리 writer 시험 준비, S6는 설치 계약 소스 단계로 **진행 중**이다.
-아직 완료 단위는 없다. 실제 PG·전체215 apply·물리 두 writer·최종 CI/live는 미완이며,
-431 reader 수용을 아래 완료로 재사용하지 않는다. 담당과 검증 원장은
+S1·S2의 입력·정적 profile과 S3의 원자적 coordinator를 구현했고 실제215 전체·quota/GC·
+rollback/복구·공식 schema432·최소ACL을 아래 원장 범위에서 검증했다. S5의 서로 다른 DS 두
+writer도 실제 blocker와 양쪽 commit을 확인했다. 같은 member 동시 등록과 이전 read 뒤 다른
+worker seal의 실제 경합, 적용 중 GC 경합과 topic 관측 구간·CPU/RSS 실측은 추가 검증 중이다. S6의 최종 CI와
+후보 live/UI·머지/배포도 남아 있어 전체 완료로 표시하지 않는다. 431 reader 수용을 새 Rest
+시험으로 재사용하지 않으며, source·실패·측정 범위는
 [구현 기록](2026-10-26-rest-snapshot-atomic-implementation.md)에 모은다.
 
 | 단위 | 산출물 | 함께 닫을 검증 |
@@ -53,10 +55,11 @@ registration/claim은 앞 단계, control seal은 durable 원결과 기반 후�
 - **GC**: 7일terminal·expiredlease·정확reservation만 반환, active/unsealed·ledger부족 거부,
   limit/정렬/rollback·원jobs 불변·Airport quota/자료/caller 비간섭을 같이 확인한다.
 
-S3의 공유 topic 수용도 미완이다. 첫 topic DML 전에 trusted TX seam이
-`dataset_projection`, `provider_sync` 두 행을 고정 C순으로 선취득할 접점과 누락 fail-closed를
-검토한다. 정본 bump/알림 권위·성공 조건과 최소 ACL은 보존하고, 전체 caller의 교착 부재나
-선취득 구현의 효과를 소스만으로 완료 처리하지 않는다.
+S3의 공유 topic은 첫 topic DML 전에 trusted TX seam이 `dataset_projection`, `provider_sync`
+두 행을 고정 C순으로 선취득하고 누락 시 fail-closed하도록 구현했다. 실제 서로 다른 DS
+empty/nonempty 두 writer는 정확 blocker와 양쪽 commit을 확인했다. topic 구간·CPU/RSS
+실측은 남아 있으며 전체 caller의 교착 부재나 운영 처리량 개선으로 확대하지 않는다.
+정본 bump/알림 권위·성공 조건과 최소 ACL은 보존한다.
 
 ## S5: 두 물리 writer 필수 시나리오
 

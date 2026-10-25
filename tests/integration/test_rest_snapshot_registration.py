@@ -912,3 +912,185 @@ async def test_b_rest_gc_preserves_running_then_returns_exact_terminal_reservati
             )
         ).all() == jobs
     assert await io.collect_expired_rest_snapshots(client) == 0
+
+
+async def test_same_member_physical_registration_reserves_once_and_hides_duplicate_nonce(
+    scalar_engines, rest_catalog, request
+):
+    # 두 별도 Service 연결의 실제 대기 후 immutable 저장과 최초 nonce의 단일성을 확인한다.
+    from kortravelmap.infra.provider_snapshot_recovery_repo import read_provider_snapshot_for_member
+    from tests.integration.test_rest_snapshot_two_writers import _exact_blocker, _wait_stage
+
+    admin, runtime = scalar_engines
+    member = await _member(runtime, rest_catalog)
+    wire = await _wire(member, count=2)
+    before = await _quota_state(admin, rest_catalog.dataset, rest_catalog.airport)
+    held, started, release = asyncio.Event(), asyncio.Event(), asyncio.Event()
+    identities = {}
+    tasks = []
+
+    async def actor(name):
+        async with AsyncSession(runtime) as session, session.begin():
+            await _limits(session)
+            identity = tuple(
+                (
+                    await session.execute(
+                        text(
+                            "SELECT pid,backend_start,usename FROM pg_stat_activity "
+                            "WHERE pid=pg_backend_pid()"
+                        )
+                    )
+                ).one()
+            )
+            assert identity[1] is not None
+            assert identity[2] == "ktm_feature_service"
+            identities[name] = identity
+            if name == "duplicate":
+                started.set()
+            registered = await _register_in(session, member, wire)
+            observed = await read_provider_snapshot_for_member(
+                session, member.identity, expected_pins=_PINS
+            )
+            assert observed is not None
+            assert observed.snapshot_id == registered.snapshot_id
+            assert observed.artifact_payload == wire.payload
+            assert observed.observation_context == wire.context
+            assert observed.status == "prepared"
+            assert observed.kernel_binding is None
+            if name == "first":
+                held.set()
+                await release.wait()
+        return registered, observed.lease_expires_at
+
+    primary = None
+    try:
+        async with asyncio.timeout(15):
+            first_task = asyncio.create_task(actor("first"))
+            tasks.append(first_task)
+            await _wait_stage(first_task, held)
+            duplicate_task = asyncio.create_task(actor("duplicate"))
+            tasks.append(duplicate_task)
+            await _wait_stage(duplicate_task, started)
+            wait_event = await _exact_blocker(
+                admin, identities["duplicate"], identities["first"], duplicate_task
+            )
+            release.set()
+            (first, first_expiry), (duplicate, duplicate_expiry) = await asyncio.gather(*tasks)
+    except BaseException as error:
+        primary = error
+        raise
+    finally:
+        release.set()
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        try:
+            async with asyncio.timeout(5):
+                await asyncio.gather(*tasks, return_exceptions=True)
+        except BaseException as cleanup_error:
+            if primary is None:
+                raise
+            primary.add_note("registration actor drain: " + type(cleanup_error).__name__)
+
+    assert first.created is True
+    assert first.token is not None
+    assert first.token.generation == 1
+    assert duplicate.created is False
+    assert duplicate.token is None
+    assert duplicate.snapshot_id == first.snapshot_id
+    assert duplicate_expiry == first_expiry
+    after = await _quota_state(admin, rest_catalog.dataset, rest_catalog.airport)
+    assert after == [
+        (
+            key,
+            maximum,
+            rows,
+            used + wire.reserved if key in {0, rest_catalog.dataset} else used,
+            count + 1 if key in {0, rest_catalog.dataset} else count,
+        )
+        for key, maximum, rows, used, count in before
+    ]
+    assert await _snapshot_count(admin, [member.identity.root_id]) == 1
+
+    async def stored_rows():
+        async with AsyncSession(admin) as session, session.begin():
+            await session.execute(text("SET TRANSACTION READ ONLY"))
+            await _limits(session)
+            return (
+                await session.execute(
+                    text("""SELECT a.artifact_payload,a.observation_context,
+                    c.executor_generation,c.executor_fence,c.lease_expires_at,c.status,
+                    q.reserved_bytes FROM ops.provider_snapshot_artifacts a
+                    JOIN ops.provider_snapshot_controls c USING(snapshot_id)
+                    JOIN ops.provider_snapshot_quota_reservations q USING(snapshot_id)
+                    WHERE a.root_job_id=:root AND a.source_job_id=:child
+                    AND a.import_job_dataset_id=:member"""),
+                    {
+                        "root": member.identity.root_id,
+                        "child": member.identity.child_id,
+                        "member": member.identity.member_id,
+                    },
+                )
+            ).all()
+
+    original = await stored_rows()
+    assert len(original) == 1
+    assert tuple(original[0]) == (
+        wire.payload,
+        wire.context,
+        first.token.generation,
+        first.token.fence,
+        first_expiry,
+        "prepared",
+        wire.reserved,
+    )
+    restored = decode_rest_observation_context(
+        wire.context, wire.payload, expected_pins=_PINS, expected_root_run_id=member.run
+    )
+    changed = _Wire(
+        wire.payload,
+        encode_rest_observation_context(
+            wire.payload,
+            pins=_PINS,
+            root_run_id=member.run,
+            observation_generation=member.run + "::retry:1",
+            upstream_eof=True,
+            geo_stats=restored.geo_stats,
+            export_window=restored.export_window,
+        ),
+    )
+    assert changed.context != wire.context
+
+    async def changed_input():
+        async with AsyncSession(runtime) as session, session.begin():
+            await _limits(session)
+            await _register_in(session, member, changed)
+
+    with pytest.raises(DBAPIError) as raised:
+        await changed_input()
+    assert raised.value.orig.sqlstate == "23514"
+    assert _constraint_name(raised.value) == "ck_provider_snapshot_immutable_input"
+    assert await stored_rows() == original
+    assert await _quota_state(admin, rest_catalog.dataset, rest_catalog.airport) == after
+    request.node.user_properties.append(
+        (
+            "rest432_same_member_registration",
+            json.dumps(
+                {
+                    "physical_backends": 2,
+                    "exact_blocker": True,
+                    "wait_event": wait_event,
+                    "immutable_rows": 1,
+                    "reservation_rows": 1,
+                    "reserved_bytes": wire.reserved,
+                    "quota_charges": 1,
+                    "created_first_only": True,
+                    "duplicate_nonce_absent": True,
+                    "lease_unchanged": True,
+                    "different_input_sqlstate": "23514",
+                    "different_input_constraint": "ck_provider_snapshot_immutable_input",
+                },
+                sort_keys=True,
+            ),
+        )
+    )

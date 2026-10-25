@@ -1,3 +1,19 @@
+## 2026-10-26 — Rest432 설계 누락 경합·계측 시험 보강
+
+실제215·quota/GC5·복구3·두writer2 PASS와 별도로 설계 S5를 대조해 동일member등록,
+이전read/다른worker seal, 적용중GC의 새물리node3개와 양profile 자원계측을 추가했다.
+두독립리뷰의 JSON부분공개·정리회수 오류를 수정했고 기존검증/제품가드/한도는 보존했다.
+아직 이추가시험의 실제PG/계측 수용전이며 최종CI/UI·머지/배포도 미완이다.
+[범위와 실측](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest432 quota/GC·복구 재검증 통과
+
+`b18470d5`의 새 quota/GC5개와 별도 복구3개가 모두PASS다. 정확 constraint·초과TXrollback·
+실행중보존/종결후quota반환, ownbackend종료/18표rollback/pool1재사용·lateGeo거부·같은
+Dagsterrun SDK0재개를 확인했다. 원FAIL은 보존하며 실제 OSworker종료/물리wire유실이나
+S5전체pair 수용으로 확대하지 않는다. source/SDK·정확자원정리 확인, 최종CI/UI·머지/배포는
+미완이며 OFF는 유지한다. [원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — Rest432 실제215·두 writer 검증
 
 `7651cc39`의 owned215 전체 후검사·후처리·별도seal이1PASS(70.59초), 별도 Airport/Rest
