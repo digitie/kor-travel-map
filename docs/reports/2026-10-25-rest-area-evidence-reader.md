@@ -269,3 +269,20 @@ UUID/global label0·volume1 부재를 새읽기로 확인했다. 현재PG0/Chrom
 기존 모든 FAIL·미도달 및 관측오류를 보존했다. 전체 tests/lint는373PASS/기존6SKIP35.12초로 원golden signature/inventory2FAIL을 닫았다.
 최종golden/docs 독립2delta 리뷰·정확최종CI, 운영입력 EOF·추가SQL음성 수용·durable/collector
 연결은 각각 별도 남은 경계다.
+
+
+## 최종 추가 직접 SQL 음성 source
+
+215 원 RR/read-only 경로와 구분하여 새 한 testcase를 준비했다. 정본 seed2와 기존 native EX
+claim/seal/begin으로 P/actualparent/scope/feature/epoch guard를 유지하고, SchemaOwner 관리 RW
+savepoint의 CHECK/FK 유효 중간 상태를 public SD에 runtime SET ROLE로 직접 읽힌다.
+deferred projection 상태는 commit하지 않고 매번 rollback한 뒤 원 positive JSON 전체동일을
+확인한다. 외부 Python RR positive도 전후 별도 확인한다. trigger/constraint를 끄거나 권한을
+확대하지 않는다. 이는 운영에 그 중간 상태가 정상 commit된다는 주장이 아니다.
+
+음성5분기는 policy subset, 동일feature/name의 다른기존entity 후보 추가(count3), 검증sourcehash
+불일치, EX 허용 base주소와 materialized Geo 불일치, bounded 큰JSON datum의 실제 size/compression
+관측이다. 각각 전체empty/EOFFalse와 정확reason을 요구한다. 동일basePK INSERT는 기존23505/
+정확pk constraint로 별도 검사하며 reader 거부로 세지 않는다. 원257 scope budget 부정과
+분리하고4MiB합계 임계/51모든 datum 셀의 실DB 전수수용을 주장하지 않는다.
+새 음성 source의 실행 수용은 아직 미완이다. 제품/golden은 실제3fa/59ada와 동일하다.
