@@ -1,5 +1,8 @@
 """기존 Transport dataclass/converter를 실제 호출하는 순수 진단 경계 시험."""
 
+import os
+import subprocess
+import sys
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 
@@ -326,3 +329,39 @@ async def test_present_airport_coordinate_requires_two_float_components(geo):
     item = replace(airport(), coordinate=TransportCoordinate(lat=None, lon=None))
     with pytest.raises(ValueError, match="coordinate"):
         await transport_item_to_native_bundle(item, fetched_at=NOW, geo=geo)
+
+
+def test_presence_set_order_survives_deepcopy_but_forged_value_does_not():
+    # seed41은 CPython의 두 frozenset 원소가 deepcopy 뒤 역순 직렬화되는 원 CI 회귀다.
+    script = """
+import asyncio
+from datetime import timedelta
+from tests.unit.test_transport_native_eligibility import NOW, NONE, assess, rest
+from kortravelmap.providers.kor_travel_transport_native import transport_item_to_native_bundle
+
+async def main():
+    before = await transport_item_to_native_bundle(rest(), fetched_at=NOW, geo=NONE)
+    current = before.model_copy(deep=True)
+    current.source_record.fetched_at = NOW + timedelta(seconds=1)
+    assert current.provider_field_presence == before.provider_field_presence
+    accepted = await assess(before, current)
+    assert accepted.eligible, accepted.reason
+    assert accepted.reason == "unchanged_reobservation"
+    current.feature.name = "forged"
+    rejected = await assess(before, current)
+    assert not rejected.eligible
+    assert rejected.reason == "current_bundle_not_canonical"
+
+asyncio.run(main())
+print("presence-set-only and actual-value negative PASS")
+"""
+    result = subprocess.run(
+        [sys.executable, "-B", "-c", script],
+        env={**os.environ, "PYTHONHASHSEED": "41"},
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=20,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert result.stdout.strip() == "presence-set-only and actual-value negative PASS"

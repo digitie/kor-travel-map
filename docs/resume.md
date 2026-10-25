@@ -1,3 +1,12 @@
+## 2026-10-26 — Rest431 CI의 unordered presence 비교 결함 수정
+
+65e Python3.13CI6FAIL/4355PASS/7SKIP 원본을 보존했다. hashseed41에서 typedfrozenset은같지만
+JSON배열순서만deepcopy로뒤집히는같은6FAIL을재현했다. 공유native 의미비교의 supplied_fields만
+정렬하고 다른list/raw/hash/codec/SQL/권한0변경을유지한다. 새seed41동일입력양성+실name변조음성
+회귀 수정전1FAIL→기존Rest/native81PASS·Airport/Rest/codec307PASS11.46초/Ruff/mypy통과다.
+제품delta2리뷰·정확새CI/최종APIcandidateUI미완, 기존215/직접SQL/golden은별도carry범위다.
+추가PG/Chrome/운영0. [원인·범위](reports/2026-10-25-rest-area-evidence-reader.md).
+
 ## 2026-10-26 — Rest431 관리 직접SQL 음성 실제 수용
 
 source07867의 새 owned1개가15.448초 PASS/skip0이다. 정본EX guard 아래 RW savepoint에서
