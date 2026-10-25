@@ -3,7 +3,7 @@
 [상위 공항·휴게소 설계](2026-10-25-transport-small-native-pair-design.md)와
 [T-CWRITE-04](../tasks-acceptance.md#t-cwrite-04--독립-데이터셋-동시-쓰기)의 후속이다.
 
-상태: **문서·설계 초안**. 제품·상한·flag·스키마 변경0, 이번 조사에서 새 운영조회0/PG실험0. 첫431은 전체 동시 worker가 아닌 **명시 RestArea typed profile/reader와 fit 측정** 단위로 분리한다. Airport profile/동작/한도는 유지한다. 순수 계량 source는 `7fcf7bdef04e114e1ddefccab09905f63d75f091`, 이 문서의 부모는 `1093dd3e7e3432e79824a9f445a89fd640609434`(#1411)다. 계량·설계 판단에 사용한 아래 8개 source 파일은 두 source에서 바이트가 같다. 430의 최종 CI·배포 수용과 별도이며, 431은 후속 번호 계획이지 이 PR의 migration 추가가 아니다.
+상태: **문서·설계 초안**. 제품·상한·flag·스키마 변경0, 이번 조사에서 새 운영조회0/PG실험0. 첫431은 전체 동시 worker가 아닌 **명시 RestArea typed profile/reader와 fit 측정** 단위로 분리한다. Airport profile/동작/한도는 유지한다. 원 r2 순수 실험 JSON의 source는 `b2d05ec2599c6e8d546307e50ee577966658246e`다. 조사 보고에 인용한 동등 revision은 `7fcf7bdef04e114e1ddefccab09905f63d75f091`, 이 문서의 부모는 `1093dd3e7e3432e79824a9f445a89fd640609434`(#1411)다. 계량·설계 판단에 사용한 아래 8개 source 파일은 세 revision에서 바이트가 같다. 원실험을 나중 revision에서 재실행했다는 뜻은 아니다. 430의 최종 CI·배포 수용과 별도이며, 431은 후속 번호 계획이지 이 PR의 migration 추가가 아니다.
 
 ## 실제 관측과 이번 순수 측정의 경계
 
@@ -108,7 +108,10 @@ synthetic215 크기 계량으로 상위 체크박스를 완료하지 않는다.
   Geo claim/token/좌표/address와 활성 정책/epoch를 검증한다. 최초 unchanged raw만 지원하고
   changed raw·identity·시설/주소/Geo 변경은 등록 전 같은 입력의 EX로 보낸다.
 - [ ] 계획은 RR read-only, fresh 재검증은 실제 잠금 뒤 하나의 일관된 capture 경계다.
-  일반 snapshot의 apply·retire·seal은 한 commit이며 chunk commit/부분 완료는 없다.
+  현재430에서 한 commit인 범위는 apply·retire·kernel finish/result receipt다.
+  이어지는 postprocess와 child seal/root finalize는 별도 transaction이다. 상위
+  T-CWRITE-04의 일반 snapshot 적재·retire·최종 seal 한 commit 조건은 여전히 OPEN이며,
+  현재 분리 TX의 구현/재개 성공으로 닫지 않는다. chunk commit/부분 완료도 허용하지 않는다.
   모든 대상/parent/strict closure·manifest/epoch를 DML 전에 재검증하고 stale이면 전체
   bounded 재계획한다. 여러 RC SELECT를 같은 transaction이라는 이유로 같은 snapshot이라 부르지 않는다.
 - [ ] 두 실제 worker의 서로 다른 DS source/head/lineage/finish DML 중첩을 PID/TX와
@@ -141,7 +144,7 @@ repo에 복사하지 않았으며, 경로 이름과 SHA는 사실 대조용이�
 | `map-rest215-wire-profile-w-r1.json` | `2c7cfc2df71c1421098dfae227ee7de4ef64e61ecb97114470cd1a46e95d0cca` |
 | `map-restarea431-followup-w-r1-source-investigation.json` | `f1e93f7d726742330d17a83de064e07b894200a19776dfc69463e16fa20b56db` |
 
-계량 source와 부모1093에서 동일함을 대조한 파일:
+원실험 b2d05ec2·조사 인용7fcf·부모1093에서 동일함을 대조한 파일:
 
 - `src/kortravelmap/infra/provider_snapshot_artifact.py`
 - `src/kortravelmap/core/feature_projection.py`
