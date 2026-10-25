@@ -89,3 +89,22 @@ fieldset/URL/naive clock, 원천 합산 예산 선검사와 출력 envelope over
 초기 Ruff14/mypy5 실패는 새 파일의 형식·타입 선언 문제로 보존했고 수정했다.
 독립 source 리뷰와 전체 합성 CI, 파일/control/durable 경계, operating 및 두 worker
 DML 병행 수용은 아직 수행하지 않았다. PG·운영 변경은 0이다.
+
+## e2b6 source 리뷰의 P2와 선검사 보완
+
+e2b6의 첫 독립 리뷰에서 Any payload에 들어간 미지원 `Mapping.items()`가 공통
+예산 검사 중 먼저 호출되어 RuntimeError로 탈출하는 반례가 나왔다. J의 공개 encode
+재현과 첫 checkpoint/HOLD 원장을 보존한다. 처음51 unit가 통과했다는 사실을 이
+경계의 수용으로 재해석하지 않는다.
+
+수정은 common budget/pack/hash보다 먼저 실행하는 iterative exact-type 선검사다.
+허용 모델의 정확한 class·builtin dict/fieldset·선언 키를 확인하고, builtin container만
+순회한다. 외부 Mapping 및 dict/str/int/list/set subclass의 hook은 호출하지 않는다.
+Geo의 고정 필드도 같은 전체 source 예산에 포함한다. 문자열 UTF8/JSON escape 비용은
+거대한 직렬화 복사 없이 문자별로 선누적하며, self reference도 깊이64 또는 node8192에서
+유한 중단한다. 기존 codec/validator/digest 본문과 상한은 그대로다.
+
+신규10개 public 거부 반례는 foreign hook 호출0 및 common budget/pack/hash 미진입을
+함께 단언한다. 기존51+신규10 및 관련77을 합쳐138 PASS/3.79초였다. 실제 converter
+15 왕복을 함께 재실행했다. 외부 source/DB/control 및 운영 배선은 여전히 없으며,
+수정 source의 두 독립 gate가 닫히기 전 전체 수용은 미완이다.

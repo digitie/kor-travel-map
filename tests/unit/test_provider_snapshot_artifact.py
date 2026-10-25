@@ -312,3 +312,80 @@ async def test_whole_geo_plus_dto_source_budget_before_any_encoding(monkeypatch)
 def test_stream_encoder_includes_envelope_overhead_in_byte_cap():
     with pytest.raises(codec.UnsupportedSnapshotArtifact):
         codec._json_bytes({"envelope": "x" * 1_048_570})
+
+
+@pytest.mark.parametrize("kind", ["mapping", "dict", "str", "int", "list", "fieldset"])
+async def test_exact_type_preflight_never_calls_foreign_hooks(kind, monkeypatch):
+    from collections.abc import Mapping
+
+    calls = []
+
+    def foreign(*args, **kwargs):
+        calls.append("hook")
+        raise RuntimeError("must not invoke")
+
+    class ForeignMapping(Mapping):
+        __getitem__ = foreign
+        __iter__ = foreign
+        __len__ = foreign
+        items = foreign
+
+    class ForeignDict(dict):
+        items = foreign
+        __iter__ = foreign
+
+    class ForeignStr(str):
+        encode = foreign
+        __str__ = foreign
+
+    class ForeignInt(int):
+        __repr__ = foreign
+        bit_length = foreign
+
+    class ForeignList(list):
+        __iter__ = foreign
+
+    class ForeignSet(set):
+        __iter__ = foreign
+
+    variants = {
+        "mapping": ForeignMapping(),
+        "dict": ForeignDict(),
+        "str": ForeignStr("value"),
+        "int": ForeignInt(1),
+        "list": ForeignList(),
+    }
+    bundles, geo = await _input()
+    if kind == "fieldset":
+        object.__setattr__(bundles[0].feature, "__pydantic_fields_set__", ForeignSet())
+    else:
+        bundles[0].feature.detail.payload["unsupported"] = variants[kind]
+    monkeypatch.setattr(codec, "within_place_projection_budget", foreign)
+    monkeypatch.setattr(codec, "_pack", foreign)
+    monkeypatch.setattr(codec, "_artifact_digest", foreign)
+    with pytest.raises(codec.UnsupportedSnapshotArtifact):
+        codec.encode_provider_snapshot_artifact(bundles, geo, pins=_PINS)
+    assert calls == []
+
+
+@pytest.mark.parametrize("shape", ["dict_cycle", "list_cycle", "nodes", "escaped_bytes"])
+async def test_preflight_is_bounded_before_common_budget_pack_or_hash(shape, monkeypatch):
+    bundles, geo = await _input()
+    if shape == "dict_cycle":
+        data = {}
+        data["self"] = data
+    elif shape == "list_cycle":
+        data = []
+        data.append(data)
+    elif shape == "nodes":
+        data = [None] * 8193
+    else:
+        data = "\x01" * 200_000
+    bundles[0].feature.detail.payload["bounded"] = data
+    calls = []
+    monkeypatch.setattr(codec, "within_place_projection_budget", lambda _: calls.append("budget"))
+    monkeypatch.setattr(codec, "_pack", lambda _: calls.append("pack"))
+    monkeypatch.setattr(codec, "_artifact_digest", lambda _: calls.append("hash"))
+    with pytest.raises(codec.UnsupportedSnapshotArtifact):
+        codec.encode_provider_snapshot_artifact(bundles, geo, pins=_PINS)
+    assert calls == []
