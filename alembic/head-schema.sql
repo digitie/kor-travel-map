@@ -2041,24 +2041,37 @@ BEGIN
             RAISE EXCEPTION 'provider cannot write field path %', v_field_path
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_field_path';
         END IF;
-        INSERT INTO feature.feature_base_field_values (
-            feature_id, field_path, provider_dataset_id,
-            source_entity_key, source_record_key, source_raw_payload_hash,
-            value_json, base_revision, observed_at
-        ) VALUES (
-            p_feature_id, v_field_path, p_provider_dataset_id,
-            p_source_entity_key, p_source_record_key, v_source_hash,
-            coalesce(v_value, 'null'::jsonb), v_base_revision, clock_timestamp()
-        ) ON CONFLICT (feature_id, field_path) DO UPDATE
-        SET provider_dataset_id = EXCLUDED.provider_dataset_id,
-            source_entity_key = EXCLUDED.source_entity_key,
-            source_record_key = EXCLUDED.source_record_key,
-            source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
-            value_json = EXCLUDED.value_json,
+        UPDATE feature.feature_base_field_values
+        SET provider_dataset_id = p_provider_dataset_id,
+            source_entity_key = p_source_entity_key,
+            source_record_key = p_source_record_key,
+            source_raw_payload_hash = v_source_hash,
+            value_json = coalesce(v_value, 'null'::jsonb),
             value_geometry = NULL,
-            base_revision = EXCLUDED.base_revision,
-            observed_at = EXCLUDED.observed_at,
-            updated_at = clock_timestamp();
+            base_revision = v_base_revision,
+            observed_at = clock_timestamp(),
+            updated_at = clock_timestamp()
+        WHERE feature_id = p_feature_id AND field_path = v_field_path;
+        IF NOT FOUND THEN
+            INSERT INTO feature.feature_base_field_values (
+                feature_id, field_path, provider_dataset_id,
+                source_entity_key, source_record_key, source_raw_payload_hash,
+                value_json, base_revision, observed_at
+            ) VALUES (
+                p_feature_id, v_field_path, p_provider_dataset_id,
+                p_source_entity_key, p_source_record_key, v_source_hash,
+                coalesce(v_value, 'null'::jsonb), v_base_revision, clock_timestamp()
+            ) ON CONFLICT (feature_id, field_path) DO UPDATE
+            SET provider_dataset_id = EXCLUDED.provider_dataset_id,
+                source_entity_key = EXCLUDED.source_entity_key,
+                source_record_key = EXCLUDED.source_record_key,
+                source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
+                value_json = EXCLUDED.value_json,
+                value_geometry = NULL,
+                base_revision = EXCLUDED.base_revision,
+                observed_at = EXCLUDED.observed_at,
+                updated_at = clock_timestamp();
+        END IF;
     END LOOP;
     FOR v_field_path, v_value IN SELECT key, value FROM jsonb_each(p_geometry_wkt) LOOP
         SELECT * INTO v_registry
@@ -2074,31 +2087,49 @@ BEGIN
             RAISE EXCEPTION 'provider cannot write geometry field path %', v_field_path
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_field_path';
         END IF;
-        INSERT INTO feature.feature_base_field_values (
-            feature_id, field_path, provider_dataset_id,
-            source_entity_key, source_record_key, source_raw_payload_hash,
-            value_json, value_geometry, base_revision, observed_at
-        ) VALUES (
-            p_feature_id, v_field_path, p_provider_dataset_id,
-            p_source_entity_key, p_source_record_key, v_source_hash,
-            CASE WHEN v_value = 'null'::jsonb THEN 'null'::jsonb ELSE NULL END,
-            CASE WHEN v_value = 'null'::jsonb THEN NULL
+        UPDATE feature.feature_base_field_values
+        SET provider_dataset_id = p_provider_dataset_id,
+            source_entity_key = p_source_entity_key,
+            source_record_key = p_source_record_key,
+            source_raw_payload_hash = v_source_hash,
+            value_json = CASE WHEN v_value = 'null'::jsonb THEN 'null'::jsonb ELSE NULL END,
+            value_geometry = CASE WHEN v_value = 'null'::jsonb THEN NULL
                  ELSE CASE v_registry.geometry_type
                       WHEN 'MULTILINESTRING' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
                       WHEN 'MULTIPOLYGON' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
                       ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326)
                  END END,
-            v_base_revision, clock_timestamp()
-        ) ON CONFLICT (feature_id, field_path) DO UPDATE
-        SET provider_dataset_id = EXCLUDED.provider_dataset_id,
-            source_entity_key = EXCLUDED.source_entity_key,
-            source_record_key = EXCLUDED.source_record_key,
-            source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
-            value_json = EXCLUDED.value_json,
-            value_geometry = EXCLUDED.value_geometry,
-            base_revision = EXCLUDED.base_revision,
-            observed_at = EXCLUDED.observed_at,
-            updated_at = clock_timestamp();
+            base_revision = v_base_revision,
+            observed_at = clock_timestamp(),
+            updated_at = clock_timestamp()
+        WHERE feature_id = p_feature_id AND field_path = v_field_path;
+        IF NOT FOUND THEN
+            INSERT INTO feature.feature_base_field_values (
+                feature_id, field_path, provider_dataset_id,
+                source_entity_key, source_record_key, source_raw_payload_hash,
+                value_json, value_geometry, base_revision, observed_at
+            ) VALUES (
+                p_feature_id, v_field_path, p_provider_dataset_id,
+                p_source_entity_key, p_source_record_key, v_source_hash,
+                CASE WHEN v_value = 'null'::jsonb THEN 'null'::jsonb ELSE NULL END,
+                CASE WHEN v_value = 'null'::jsonb THEN NULL
+                     ELSE CASE v_registry.geometry_type
+                          WHEN 'MULTILINESTRING' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
+                          WHEN 'MULTIPOLYGON' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
+                          ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326)
+                     END END,
+                v_base_revision, clock_timestamp()
+            ) ON CONFLICT (feature_id, field_path) DO UPDATE
+            SET provider_dataset_id = EXCLUDED.provider_dataset_id,
+                source_entity_key = EXCLUDED.source_entity_key,
+                source_record_key = EXCLUDED.source_record_key,
+                source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
+                value_json = EXCLUDED.value_json,
+                value_geometry = EXCLUDED.value_geometry,
+                base_revision = EXCLUDED.base_revision,
+                observed_at = EXCLUDED.observed_at,
+                updated_at = clock_timestamp();
+        END IF;
     END LOOP;
 
     UPDATE feature.features AS core
@@ -19055,7 +19086,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),

@@ -1,6 +1,6 @@
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
-- materializer 두 루프만 분리했다. 첫 fixture 실패를 보존하고 테스트만 고쳐 실제15 PASS/14.129초·정확 정리를 확인했다. 활성 정책20·공식 oracle·비용·최종 CI는 미완이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
+- materializer 두 루프만 분리했다. 실제15 PASS 뒤 공식425 oracle1·EX18 PASS와 정확 정리를 확인했다. fixture 실패와 EX count 감사실패를 보존하며 비용·최종 CI는 미완이다. [범위·미완](reports/2026-10-25-provider-base-update-first.md).
 
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 

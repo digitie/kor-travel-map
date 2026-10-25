@@ -15,7 +15,7 @@ winner projector와 validator·권한·Feature/source 잠금·notice 최초 시�
 새 migration/sidecar이며 public 시그니처는 같다. codegraph-worktree §7의 신규 파일 예외를 적용했다.
 기존 base UPSERT 정적 조사와 실제 context 관측은 원인 후보 근거일 뿐 trigger별 비용 귀속이 아니다.
 원 두 UPSERT를 그대로 둔 fallback과 새 UPDATE만 역치환하면 기존 procedure 전체 원문이 일치한다.
-현재 head-schema는 부모424이며425 공식 oracle은 아직 생성하지 않았다.
+초기 head-schema는 부모424였다. 아래 공식425 oracle 정산 전에는 새 덤프를 생성하지 않았다.
 
 migration CREATE·drift·짧은 GUC 단위5 PASS(0.29초), Ruff2파일/mypy1파일을 확인했다.
 첫 정적 합집합은 새 unit의 baseline dump 직접 참조 때문에1 FAIL/377 PASS/기존6 skip이었다.
@@ -93,3 +93,21 @@ migration을 선형화했고 후속 실제 검증은 아직 대기하며, 이15�
 부모 문서이며425 제품 SQL·migration·실제15개 시험 본문은 d47과 같다. journal/resume는
 425의 짧은 기존 prefix와 부모 전체 suffix를 보존했다. 이 통합에서 PG를 추가 실행하지 않았으며,
 공식425 oracle·활성 EX20·비용 harness는 이 고정 소스에 새로 결박한 뒤 별도 두 리뷰를 받는다.
+
+## 최종424 위 공식425 oracle과 활성 EX18
+
+고정826의 별도 공식 fresh bootstrap·dump·반복 비교는1 PASS/27.094초였다. 부모424의1642개
+object block 중1640개가 원문 일치했고, 남은 두 block은 provider procedure의 정본8344→704a
+본문과 receipt의425 literal뿐이었다. procedure의 본문 밖 signature/owner/SEC/search_path와
+405개 ACL/default ACL block은 전부 같았다. 그 감사 덤프를 공식 head-schema425로 채택했다.
+
+같은826의 기존 full-refresh 모듈은 실제18 PASS/25.008초/skip0였다. 감사 wrapper가 예상20을
+검사해 pytest 뒤 실패했으므로 원 runner/result의 FAIL과 로그/XML을 그대로 보존한다. 기존1398의
+20개는 다른 scoped-provider-batch 모듈이며 EX18에 두 개가 빠진 것이 아니다. collection18 nodeID와
+실제 XML18개를 전수 대조했다. 원 assert 뒤 미실행된 사후 검증은 별도 읽기 검사로 보완했다.
+source-before2390개 Git blob/mode·현재826 clean·SDK53개·실제 import9개·pycache 부재가 일치했고,
+정확 CID·UUID·scalar label·익명 volume1개 부재를 다시 확인했다. 같은18개 PG를 다시 실행하지 않았다.
+
+공식 oracle과 EX18은 별도 fresh fixture 실행이며 앞78e의15개와 합산하지 않는다. 기존30초 cap·
+source/epoch/deferred guard를 유지했다. 비용 A/B와 최종 정확 CI는 아직 미완이며, 이 문서 고정 이후의
+정확 SHA별 두 리뷰·CI와 후속 수용은 PR 본문/감사 원장으로 구분한다. 성능 개선·SH 수집완료·운영활성화는 미판정이다.
