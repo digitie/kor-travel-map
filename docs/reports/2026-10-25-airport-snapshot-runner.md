@@ -81,3 +81,13 @@ fresh427과 실제 decoded artifact/Geo 의미를 재검증하고 원14 counter+
 SQL/session/kernel 명령은 대역이며 실제 PG 수용은 아니다. Ruff와 strict mypy도 통과했다.
 Dagster runner/첫 Airport entry 분기·SDK 수집/같은 입력 EX fallback·재계획 상한·최종 봉인은
 아직 배선하지 않았다. 기존 asset와 모든 공유파일은 그대로다.
+
+### 같은 executor의 reset 뒤 새 계획 key
+
+Root 리뷰에서 a137의 key가 snapshot/executor generation만 사용하여 typed reset 뒤
+새 attempt의 unique key와 충돌하는 P1을 확인했다. 기존 source 수용은 이 finding의
+HOLD로 정정한다. 새 attempt UUID를 key에 포함하여 최대 generation에서도128B 안에 둔다.
+claim/manifest/bind는 계속 같은 TX이므로 응답 유실 뒤에는 실제 SDK0 binding을 읽으며
+새 무관 attempt를 성공으로 추측하지 않는다. 순수 DB 대역이 실제 unique key 중복을
+거부하도록 한 반례가 수정 전1FAIL2.51초, 수정 후1PASS2.82초다. 같은 generation에서
+reset 결과 뒤 새 plan key가 달라지는 것을 확인했다. 실제 reset/unique 제약 PG는 미실행이다.

@@ -254,7 +254,9 @@ async def plan_airport_snapshot(
             idempotency_key="airport_snapshot:"
             + str(observed.snapshot_id)
             + ":"
-            + str(token.generation),
+            + str(token.generation)
+            + ":"
+            + str(attempt),
             regions=(),
             input_digest=digest,
             expected_members=len(dependencies),

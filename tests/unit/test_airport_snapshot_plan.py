@@ -258,3 +258,52 @@ async def test_queue_bound_plan_rejects_before_even_artifact_decode(monkeypatch)
             client, replace(observed, artifact_payload=b"invalid"), token, pins=_PINS, dataset_id=15
         )
     assert sessions == []
+
+
+async def test_same_executor_reset_can_claim_a_new_plan_without_unique_key_collision(monkeypatch):
+    client, observed, token, wire, _, _, stubs = await _case(monkeypatch)
+    keys = set()
+
+    async def unique_claim(*args, **kwargs):
+        key = kwargs["idempotency_key"]
+        if key in keys:
+            raise ValueError("duplicate provider_dataset_id/idempotency_key")
+        keys.add(key)
+
+    stubs["claim_scoped_feature_write"].side_effect = unique_claim
+    first = await target.plan_airport_snapshot(client, observed, token, pins=_PINS, dataset_id=15)
+    binding = SnapshotKernelBinding(
+        first.attempt_id,
+        first.owner,
+        first.manifest_digest,
+        "ready",
+        first.input_digest,
+        observed.lease_expires_at,
+    )
+    original = client._session_factory
+
+    def factory():
+        scope = original()
+        scope.session.scalar = AsyncMock(
+            side_effect=lambda sql, args=None: (
+                "reset"
+                if "reset_expired" in str(sql)
+                else (wire if "snapshot_evidence" in str(sql) else "c" * 64)
+            )
+        )
+        return scope
+
+    client._session_factory = factory
+    assert (
+        await target.reset_airport_snapshot_plan(
+            client, replace(observed, kernel_binding=binding), token
+        )
+        == "reset"
+    )
+    # SDK0 read reports unbound prepared after the committed reset. generation is unchanged.
+    second = await target.plan_airport_snapshot(client, observed, token, pins=_PINS, dataset_id=15)
+    assert first.attempt_id != second.attempt_id
+    assert len(keys) == 2
+    assert all(len(key.encode()) <= 128 for key in keys)
+    assert str(first.attempt_id) in next(key for key in keys if str(first.attempt_id) in key)
+    assert str(second.attempt_id) in next(key for key in keys if str(second.attempt_id) in key)
