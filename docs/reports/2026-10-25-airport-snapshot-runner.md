@@ -153,3 +153,11 @@ lease busy와 동일시하지 않으며 stale fence의 nonretryable 분리는 �
 둘째 사례는 같은 설치의 공개 client plan/reset 경로로 첫 ready attempt의 **자기 lease만** 관리자 fixture에서 만료시킨다. 기존 cancelled attempt를 보존한 채 같은 snapshot generation/fence에서 새 attempt/owner/idempotency key가 실제 unique 제약을 통과하는지 확인한다. 완료 attempt를 reset하거나 epoch/결과를 재작성하지 않는다. 각 사례의 실패 원문은 유지하며 아직 ready인 자기 plan만 정리한다.
 
 새 2개는 collect-only 2건/5.14초와 Ruff를 확인했으며 **실제 PG는 아직 실행하지 않았다**. runner 제품 7개 파일·공유 schema/ACL·기존 fixture는 변경하지 않았다. 두 source 검토와 소유 harness/CPU 슬롯 이후의 실제 결과를 별도로 정산한다.
+
+## 실제 caller2 원장 — source5717
+
+고정 `5717bf78008caae206e6bacc73e24e4fa94d9d0d`의 소유 단일 PG 실행에서 위 2개가 모두 PASS했다. XML 2/0 failure/0 error/0 skip, suite 17.210초(각 16.061·1.106초), pytest 요약 18.12초, 전체 자원·정리 포함 32.267초다. 실제 head430/service role/PG16.14·en_US.utf8를 관측했고 Git 2,500개 mode/blob 및 SDK53개 전후, 실제 project import32개를 대조했다. 정확 CID 부재·해당 UUID0·scalar label0·소유 anonymous volume1 부재를 확인해 PG/CPU 슬롯을 반환했다.
+
+첫 시험은 실제 scheduled canonical guard와 전체 client 배선을 거쳐 child sealed 뒤 동일 run의 retry9 재진입에서도 retry2의 원 observation generation·clock·GeoStats·artifact/result/receipt bytes·cursor와 완료 상태를 유지했다. 둘째 시험은 executor generation1/fence를 유지하고 첫 cancelled attempt 행을 보존한 상태에서 다른 새 attempt/owner/idempotency key를 실제 unique 제약 아래 생성했다. 원 SDK 입력은 synthetic 공항1행이고 저장 Geo 재사용 경로이며, 실제 SDK/Geo HTTP·배포 image receipt·worker 강제 종료·두 dataset 동시 쓰기·queue SH·성능 수용을 입증하지 않는다.
+
+정본 사실 원장은 private audit `map-airport-caller2-owned-r1-actual-facts.json` SHA `24c3b1a5e2ff8940c08c8000e7c7ad873a8f629f8b0091def9151a134541c0011`이다. 원 result SHA `f546baaa81858f7121812d70f91c5981172979b77c59f4364b6f374d777a80f0`와 raw8개를 보존했다. 이전의 collect-only 절은 당시 checkpoint 기록으로 남기고 이 실제 결과와 구분한다. 기존 Root GC/후처리/startup 실패·성공을 이 2PASS와 합산하지 않는다.
