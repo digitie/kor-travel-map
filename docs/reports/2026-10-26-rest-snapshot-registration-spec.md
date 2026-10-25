@@ -18,12 +18,16 @@ J 범위(SHAcb15a5c9a677930428c7cd81a41860d570fdfe3eb842409321ae6da9046a9c87)를
 따라서 최근 이전 관측이 포함될 수 있다. 이 집합을 최신 upstream batch의 정확한 membership,
 서버 frozen generation, absence-retire 또는 EX bootstrap 권위로 부르지 않는다.
 
-새 호출은 cursor 없이 limit256을 명시한다. 정본 public SDK에서 HTTP200·bounded 전체body·
+새 호출은 cursor 없이 limit256을 명시한다. 기존 own-service HTTP의 `_transport_get`/
+`_transport_json`과 Map의 `parse_export_page`/`require_current_collection`을 직접 재사용해
+HTTP200·bounded 전체body·
 source=krex_rest_area·aware last_success_at·failed/stale=False·has_more=False·next_cursor=None,
 비어 있지 않은 고유 natural key와 count≤256을 함께 확인한다. page2를 이어 부분 등록하지 않는다.
 257/has_more/nonnull cursor/잘린 body/잘못된 source·clock·중복·빈 입력이면 전체 거부한다.
 215는 실제 수용 표본이며 운영 필수 개수로 하드코딩하지 않는다. 기존 item iterator는 EOF와
 collection metadata를 잃으므로 그대로 완료권위를 부여하지 않는다.
+단일 bounded 응답의 metadata/원body SHA를 보존하는 추가 경계이며 별도 TransportSDK 프로젝트나
+외부 provider client 재구현·새 facade를 요구하지 않는다.
 
 한 응답의 원 collection/EOF/page metadata·전체 export bytes SHA·원 item/native digest를
 typed context에 결박한다. clock/generation은 다시 만들지 않고 원값을 보존한다. 아직 정하지
@@ -74,13 +78,28 @@ kernel finish/result를 같은TX에 둔다. seal은 P_EX→L→root/member→con
 reset은 exact dataset 확인→P_SH→actualparentSHARE→ownscope→oldattemptFORUPDATE→control이며
 expired ready/exactcancelled만 허용한다. current applying/completed/reclaimed epoch 복원은 금지한다.
 
-**전체 한 commit은 현재 미완이다.** 현재430 runner `_resume`은 apply 호출 완료 후 새 read와
-postprocess coordinator, 이어 seal을 각각 호출하며 apply/result TX와 후처리 TX가 다르다.
-한 TX의 강한 약속이 필요하면 구현 전에 coordinator 소유권/순서를 별도 확정해야 한다.
-첫 Rest 수용에서 이 gap을 숨기지 않고 다음을 분리 검증한다: apply+결과 한 TX,
-후처리 callback의 sync/findings/receipt 한 TX, child/root seal 및 unknown-commit SDK0 복구.
-postprocessed replay는 원receipt 비교 뒤 sideeffect0이어야 하며 finish(A→B)·marker 단독commit은
-완료 proof가 아니다. 새 one-commit 구현을 택할 경우 source+실제 partial rollback 증거가 필수다.
+**현재430의 분리 TX와 구현할 선택A를 구분한다.** `_resume`은 apply 완료 후 새 read와
+별도 postprocess coordinator·seal을 호출한다. `_airport_snapshot._unbound`/`_transaction`은
+bound client를 거부하고 새 session.begin을 열며, `_snapshot_postprocess.run_snapshot_postprocess`
+역시 자기 RC TX 안에서만 rollback_only callback·receipt 원자성을 보장한다. 이들을 outer TX에서
+나열하는 것만으로 하나의 commit이 되지 않는다.
+
+Root가 선택한 A는 **load DML+원14counter/retired+필수 ETL/observation/sync/findings+
+postprocess receipt**를 공통 caller-owned coordinator의 한 RC connection/TX에서 commit한다.
+planning RR·외부 HTTP/Geo·codec 준비는 그 TX 밖에서 끝내고, coordinator가 정본 P_SH→
+전actualparent/scope/Feature/attempt→control 순서와 유한 deadline을 소유한다. Rest로 정확히
+분기한 lowlevel apply의 명시 session seam을 재사용하고 kernel finish/capture/result 뒤 같은
+session의 반환bytes로 pure intent를 만든다. 이어 기존 begin postprocess SD→동일 connection의
+rollback_only bound callback→finish receipt를 수행한 뒤 한 번 commit한다. 미commit control/
+result를 다른 unbound session으로 읽거나 callback이 자기 connection/commit을 열게 하지 않는다.
+원 Airport public own-TX API는 보존하며 그 호출을 새 coordinator의 원자적 내부 단계로 위장하지 않는다.
+
+registration/claim과 **control child/root seal은 이 한 commit 밖**이다. seal은 durable 원결과/
+receipt를 읽는 기존 P_EX→L→root/member finalization을 유지하며 SH→EX 승격하지 않는다.
+따라서 이 선택은 seal까지 한 commit이라는 뜻이 아니다. apply/result와 필수 후처리의 원자성이
+T-CWRITE04에서 닫을 구현 목표이며 선택 문서만으로 완료 처리하지 않는다. 실제 partial rollback·
+unknown-commit SDK0/DML0·fence/두writer 증거가 필요하다. postprocessed replay는 원receipt 비교
+뒤 sideeffect0이어야 하며 finish(A→B)·marker 단독commit은 완료 proof가 아니다.
 
 ## quota와 실측
 
@@ -99,7 +118,7 @@ wholeempty/EOFFalse를 유지한다. reader215 fit는 kernel manifest/두scalar 
 
 - single export metadata의 canonical SDK typed 반환과 exact context/domain/sha framing.
 - unchanged 범위의 잠금 후 fresh검증 및 다른 profile/DS 입력의 명시 거부.
-- 430의 apply TX와 후처리 TX gap을 유지하며 복구할지, 전체 한TX로 묶을지의 명시 결정/증거.
+- 선택A의 load/필수후처리 한TX 실제 구현·rollback/응답유실 증거; registration/claim/seal은 별도TX 유지.
 - 실215 wire/context/manifest/capture/latency/CPU/RSS와 정확 quota policy.
 - 실제 두writer/unknowncommit/취소/backenddeath/GC/Airport 비간섭 및 최종golden/최소ACL/CI.
 

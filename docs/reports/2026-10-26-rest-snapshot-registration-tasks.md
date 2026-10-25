@@ -8,7 +8,7 @@
 | --- | --- | --- |
 | S1 입력 권위 | 단일 limit256 Rest current-export-window typed EOF·bounded bytes·원 metadata/context | 215 단일응답,257/has_more/cursor/빈입력/중복/source·clock·stale/잘린body 전부거부; 여러페이지 이어받기0 |
 | S2 여섯 정적 경계 | 등록SQL→infra read→client/apply→observation/postprocess→runtime→설치/GC의 정확 Rest 분기 | Airport/Rest 교차domain·DS/entity/pins·root/member·수정bytes/hash 거부; 임의 registry/권한 확대0 |
-| S3 실제 원자성/복구 | 한정 TX 경계의 apply/result·후처리proof·seal 및 SDK0 freshread | commit 응답유실 각지점 재개0SDK·원14+retired/fullfindinghash·원clock/generation; 전체1commit 여부 별도 결정 |
+| S3 실제 원자성/복구 | 선택A coordinator의 load+14/retired+필수 ETL/obs/sync/findings+receipt 한TX; registration/claim/seal은 별도 | 각 응답유실 SDK0·원결과/원clock/generation; seal P_EX/root순서 보존·SH→EX승격0 |
 | S4 자원/실제215 | explicit quota 제안과 kernel/capture까지 유한 owned lab | logical/physical 분리, statement3s/lock1s·2730/256KiB/1MiB 불변,215 wholecomplete/retire0·257 whole거부 |
 | S5 물리두writer | barrier로 도달점 증명하는 독립 connection/transaction | 아래 pair 목록; 하나의 outerTX 순차호출을 race 수용으로 세지 않음 |
 | S6 최종수용 | 새 schema 실제dump·startup/ORM/최소ACL·최종CI·OFF caller/후보UI | 기능 단위 독립2인 적대리뷰·원FAIL보존·정확cleanup; merge/운영활성화는 별도 |
@@ -16,12 +16,21 @@
 ## S1: source와 입력 소유
 
 현재 Transport service_exports의 default500/max1000·요청1개RR·3일window 정본을 먼저
-핀한다. publicSDK가 EOF/collection metadata를 typed하게 전달하지 못하면 SDK 계약을 먼저
-해결하고 Map에서 재구현하지 않는다. 상위 source clock/hash와 collection clock을 구분한다.
+핀한다. 기존 own-service HTTP fetcher `_transport_get`/`_transport_json`과 Map typed parser
+`parse_export_page`/`require_current_collection`을 직접 써 단일 bounded 응답의 EOF/collection
+metadata와 원body SHA를 보존한다. 별도 TransportSDK 프로젝트를 만들거나 외부 provider
+client/facade를 재구현하지 않는다. 상위 source clock/hash와 collection clock을 구분한다.
 기존 tuple iterator에서 EOF를 추정하거나 collection 시각만 새generation으로 쓰지 않는다.
 착수 당시 SDK/Map exact pin을 기록하며 미확정 migration 번호/계약값을 발명하지 않는다.
 
 ## S2–S3: 핵심 pair
+
+선택A에서 coordinator 한 곳만 load/후처리 commit과 connection·정본 lock순서를 소유한다.
+profile apply는 명시 session으로 kernel finish/capture/result를 반환하며, pure intent 뒤 같은
+session의 begin postprocess SD→rollback_only callback→finish receipt로 이어진다. 외부HTTP/Geo와
+registration/claim은 앞 단계, control seal은 durable 원결과 기반 후속 P_EX→L/root/member 단계다.
+기존430의 own-TX 메서드를 묶는 것만으로 한TX 수용을 주장하지 않는다. seal까지 한commit은
+목표가 아니며 T-CWRITE04의 load/필수후처리 원자성은 실제 증거 뒤에만 닫는다.
 
 - **등록 동일/이상**: 동일member+동일input은 snapshot 동일/createdFalse/nonceNone/no renew,
   다른 root·context·pins·artifact/native hash는 거부. source215를 quota rows215로 세지 않는다.
