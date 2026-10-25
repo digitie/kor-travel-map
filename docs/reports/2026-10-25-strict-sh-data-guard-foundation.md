@@ -143,3 +143,27 @@ constraint 기대값, 제품 SQL·ACL·예산은 그대로다. 이 시험 수정
 bytes/OID/mode와 SDK53개 hash가 같고 실제 import13개가 고정 Git과 일치함을 확인했다.
 정확 CID/UUID0/global scalar0/volume1 부재도 saved cleanup과 새 조회로 확인했다.
 원8개 증거와 result를 보존하며, 보충 관찰로 원 FAIL을 PASS로 다시 쓰지 않는다.
+
+## 95e 실제30 통과와 다음10개 source
+
+두 source·실행기 검토 뒤95e의 새 owned30 한 번은 모두 통과했다. XML14.969초와
+pytest console15.61초를 구분하며, source2428/SDK53 전후·실제13 Git import·정확 CID/UUID0/
+volume1 정리도 확인했다. 첫514의25 PASS/5 FAIL과 누락 post 블록 보충은 별도로 남기고
+성공 수에 합산하지 않는다. 이는 위 전용30 범위의 수용이며 운영 활성화가 아니다.
+
+같은 파일에 다음10개 source를 추가했다. 아직 PG에서 실행하지 않았다.
+
+- 기존 공개 SH batch API로 실제 두 Feature apply→finish→commit한 뒤 별도 연결에서
+  name/head와 completed attempt·result digest를 확인한다. monkeypatch 성공 경로는 없다.
+- 같은 dataset의 A만 manifest에 넣고 B의8개 target별 DML을23514로 거부한다. base/candidate/
+  stamp는 runtime 직접 쓰기 grant가 없어 schema owner 관리 SQL로 구분한다. 나머지5개는
+  실제 service login이다. 42501은 성공으로 세지 않고 source/Feature guard의 constraint나
+  정확 message를 확인하며 실패 TX rollback 뒤 B의 관찰값이 같아야 한다. Geo 없는 stamp는
+  기존 행을 가정하지 않고 B의 INSERT 시도를 검증한다.
+- owned outer TX에서 원33개 trigger를 제거한 뒤 중간 relation인 feature.features에 같은
+  이름의 builtin trigger를 만든다. nested installer의 CREATE 충돌42710 뒤 신규 strict
+  trigger0과 원 collision의 OID/정의/상태 보존, outer rollback 뒤 원33개 복원을 확인한다.
+
+40개는 수집만 확인했다. 제품 SQL·migration·권한·공유 fixture는 바꾸지 않았고 신규
+source의 두 검토 전 PG 실행은0이다. cancellation/pool 물리 정리와 전체 writer closure,
+공식429 oracle·RC·durable recovery·collector 활성화는 여전히 OPEN이다.

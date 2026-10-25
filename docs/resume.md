@@ -1,7 +1,7 @@
 ## 2026-10-25 비활성 strict SH guard429 정의
 
-- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 정적67 PASS 뒤 첫 owned30은25 PASS/5 FAIL이었다. 두 시험 가정을 정정했으며 제품 SQL·RC/SH 활성화는 변경0이다.
-- 검토된428 부모와 소유 역할별 ACL 정본을 합성했으며, 실제 수용은 미완이며 원 FAIL/누락 post검사·별도RO보충을 보존한다. 정책 없는 target 우회 P2를 active policy/lifecycle 검사와 새5개 source로 보강했고 retired fixture의 typed 상태 계약도 순수 검증했다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
+- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 95e owned30 PASS와 정리를 확인했고 첫25 PASS/5 FAIL은 보존했다. 정상 fullbatch/8target/설치 rollback의 새10개는 source만 작성했으며 제품 SQL·RC/SH 활성화는 변경0이다.
+- 검토된428 부모와 소유 역할별 ACL 정본을 합성했으며, 전체 수용은 미완이며 원 FAIL/누락 post검사·별도RO보충을 보존한다. 정책 없는 target 우회 P2를 active policy/lifecycle 검사와 새5개 source로 보강했고 retired fixture의 typed 상태 계약도 순수 검증했다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
 
 ## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
 
