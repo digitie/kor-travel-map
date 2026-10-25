@@ -1,0 +1,310 @@
+{
+  "상태": "431 Rest A whole RR 미호출 source. PG/설치/oracle/215 fit/CPU/RSS/운영 수용0.",
+  "범위": "현재Transport Rest dataset 전체를metadata LIMIT257/MAX256/EOF로검사; upstreamEOF권한아님.",
+  "후보예산": {
+    "items": 256,
+    "metadata_bytes": 4194304,
+    "encoded_bytes": 4194304,
+    "decoder_nodes": 524288,
+    "depth": 64,
+    "per_item_encoded_bytes": 131072,
+    "measurement_only": true
+  },
+  "가변열": {
+    "provider_sync.provider_datasets": {
+      "provider": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "dataset_key": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_entities": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_type": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_id": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_entity_heads": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "current_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "lineage_key": {
+        "physical_cap": 1024,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_records": {
+      "source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "raw_payload_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "raw_data": {
+        "physical_cap": 8192,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.source_links": {
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_role": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "provider_sync.provider_feature_identities": {
+      "feature_kind": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "natural_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.features": {
+      "kind": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "lifecycle_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "publication_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "quality_state": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "coord": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "address": {
+        "physical_cap": 8192,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "legal_dong_code": {
+        "physical_cap": 64,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "road_name_code": {
+        "physical_cap": 256,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "road_address_management_no": {
+        "physical_cap": 256,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "admin_dong_code": {
+        "physical_cap": 64,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "sido_code": {
+        "physical_cap": 64,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "sigungu_code": {
+        "physical_cap": 64,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_active_policies": {
+      "field_paths": {
+        "physical_cap": 512,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_shadow_policies": {
+      "normalizer_revision": {
+        "physical_cap": 1024,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "fields": {
+        "physical_cap": 8192,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    },
+    "feature.provider_field_shadow_candidates": {
+      "field_path": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_source_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "validated_source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "validated_source_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_json": {
+        "physical_cap": 8192,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_geometry": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "availability": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "reason": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "normalizer_revision": {
+        "physical_cap": 1024,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      }
+    },
+    "feature.feature_base_field_values": {
+      "field_path": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_entity_key": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_record_key": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "source_raw_payload_hash": {
+        "physical_cap": 128,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "value_json": {
+        "physical_cap": 8192,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      },
+      "value_geometry": {
+        "physical_cap": 128,
+        "sql_null_allowed": true,
+        "compression_allowed": false
+      }
+    },
+    "feature.feature_geocode_stamps": {
+      "geo_version_token": {
+        "physical_cap": 260,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "geo_data_token": {
+        "physical_cap": 260,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      },
+      "reverse_outcome": {
+        "physical_cap": 64,
+        "sql_null_allowed": false,
+        "compression_allowed": false
+      }
+    }
+  },
+  "metadata_only_fixed_columns": [
+    "UUID",
+    "bigint",
+    "boolean",
+    "timestamptz",
+    "tableoid/ctid 내부 위치",
+    "smallint"
+  ],
+  "외부미반환위치": "(tableoid,ctid)는 한 STABLE 호출의 동일 snapshot 안에서만 사용하고 상속/partition 관계는 거부한다.",
+  "고정폭_존재만_검사": {
+    "ops.feature_overrides": "target UUID 존재 시 전체 거부; status/field_path/payload 미조회",
+    "feature.feature_areas": "target UUID 존재 시 전체 거부; payload 미조회",
+    "feature.provider_field_policy_epoch": "singleton/epoch 고정폭 읽기"
+  },
+  "재사용출처": "427의승인된51개 direct datum 열별cap/NULL/compression값만재사용. Airport/Heritage의actual결과를Restactual로세지않는다.",
+  "논리key비교": "기존427의3개CASE expression index를동일식으로사용.새index/원DDL변경0; 실제plan미완."
+}

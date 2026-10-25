@@ -1,3 +1,87 @@
+## 2026-10-26 — Rest431 CI의 unordered presence 비교 결함 수정
+
+65e Python3.13CI6FAIL/4355PASS/7SKIP 원본을 보존했다. hashseed41에서 typedfrozenset은같지만
+JSON배열순서만deepcopy로뒤집히는같은6FAIL을재현했다. 공유native 의미비교의 supplied_fields만
+정렬하고 다른list/raw/hash/codec/SQL/권한0변경을유지한다. 새seed41동일입력양성+실name변조음성
+회귀 수정전1FAIL→기존Rest/native81PASS·Airport/Rest/codec307PASS11.46초/Ruff/mypy통과다.
+제품delta2리뷰·정확새CI/최종APIcandidateUI미완, 기존215/직접SQL/golden은별도carry범위다.
+추가PG/Chrome/운영0. [원인·범위](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-26 — Rest431 관리 직접SQL 음성 실제 수용
+
+source07867의 새 owned1개가15.448초 PASS/skip0이다. 정본EX guard 아래 RW savepoint에서
+policy subset·후보 중복·검증hash·Geo/base·큰datum5분기의 전체empty/EOFFalse와 정확reason,
+매rollback 원JSON 전체동일을 확인했다. 별도PK23505/정확constraint·PythonRR전후양성도 통과했다.
+이 경로를 PythonRR 음성이나51모든datum/4MiB합계 부정 전수검증으로 표현하지 않는다.
+raw8/Git2543SDK53/import17·head431 및 새읽기 exactCID/UUID/global0/volume1부재로 PG0이다.
+제품/골든3fa/59ada 불변·기존215별도PASS, 독립사실검산/최종CI/431candidateUI와 운영EOF·
+durable/collector·활성화는 별도 남는다. 운영/Chrome0.
+[실제 경계·원장](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-26 — Rest431 실제215 fit와 최종 공식 golden
+
+A1/A2 원timeout을 보존하고 A3 source3fa59cc의 owned lab1개가 통과했다. 실제215는
+complete/EOF/item215/assessment 적격, 실제257은 empty/EOFFalse 전체거부다.215합산client
+wall6.480초/CPU2.209초는codec+두read+decode/assessment이며 원각3초/lock1초를 유지했다.
+같은64 진단은public.515초/CPU.51초, 최종fresh300→431공식oracle1은38.387초PASS였다.
+실제dump59ada12d를golden으로복사하고 함수3+ACL3/receiptCHECK1외0변경whole역대조했다.
+각phase정확정리PG0·Git2542SDK53/import15·15·9확인. sourceW/T delta수용과원FAIL을분리하며
+전체lint373PASS/기존6SKIP35.12초로 원golden2FAIL을 닫았다. 최종golden/docs리뷰·정확CI·
+운영EOF/collector/등록활성화는미완이다. 운영/Chrome0.
+[실측·한계](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-26 — Rest431 원64 비용 계량과 A1 source
+
+원 lab은1/15 complete 뒤64 원3초 timeout으로 실패해215/257 미도달이며 별도 보존했다.
+catalog/startup/ORM2와 공식 oracle1은 통과했다.64 진단은 private inventory2.537초/CPU2.53초,
+public57014 3.007초/CPU3.00초, 두 bulk EXPLAIN2.594/18.579ms로 관측했다. RSS는 지점값이다.
+A1은 inventory의 refs/seen만 typed3배열+최종 firstordinal JSON으로 바꾸고 원13블록의
+검사·과금·NULL·첫 참조 순서를 whole 역대조했다. 관련242PASS10.07초, 변경 후 PG/개선율은
+미검증이다. WSL CPU2/1536MiB·전체150/parent160/cleanup15 유지, 독립 적대2인 머지 전
+검토와 동일64/215 재계량·최종 실제 golden이 남았다. 등록/collector/운영0.
+[실측·한계](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-26 — Rest431 통합 source와 실제 lab 준비
+
+merged main5f3506a 위 설계1412·codec1413·명시 reader/preparation 및 direct assessment P2를
+합성했다. 기존 더티4파일 원본은 별도 WT에 보존했고 관련 순수242PASS9.94초를 확인했다.
+T FULL의 P2 HOLD는 Root/T closure와 구분해 기록하며 최신 합성의 두 source 리뷰·
+실제215 fit/권한/공식431 golden·시간/메모리 측정은 미완이다. PG/등록/collector/운영0.
+[현재 범위와 계량 계획](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
+
+## 2026-10-25 — Rest431 reader 미호출 source
+
+새 migration/SD3·decoder 및 최소 typed ACL/startup signature를 준비했다.
+정적144/52 PASS, 기존427/430·golden 불변. SQL 두 리뷰/실제 lab·215 fit·준비/평가/수집 연결은 미완이다.
+
+
+명시 Rest Geo domain/정확 입력형과 순수106PASS를 확인했다. SQL·reader·215 fit·운영은 미완이다. [source 범위](reports/2026-10-25-rest-area-evidence-reader.md).
+
+## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
+
+synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
+PG reader 비용·운영 fit는 미측정이며 Airport 상한/제품/SQL/운영 변경0이다.
+Rest 전용 유한 profile과 RR chunk 비교·주간 GC/quota·작은 구현 단위는
+[후속안](reports/2026-10-25-rest-area-snapshot-profile.md)에 기록했다.
+다음은 설계 두 리뷰 뒤 owned PG 비용 lab 구현이며 동시 worker 수용은 미완이다.
+
+## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
+
+정본215 tuple의 Geo 유무 lossless roundtrip과 전행 byte/node/token 거부를 구현했다.
+Airport 기존 wrapper/상한을 보존하며 codec·관측·후처리 순수231 PASS/skip0,
+Ruff/mypy/import 검사를 확인했다. SQL/등록/collector/운영 변경0이고 두 리뷰·CI/PG는 미완이다.
+[범위·실측](reports/2026-10-25-rest-area-snapshot-artifact.md). 다음은 독립 source 검토와 J reader lab 결합이다.
+
+## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
+
+synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
+PG reader 비용·운영 fit는 미측정이며 Airport 상한/제품/SQL/운영 변경0이다.
+Rest 전용 유한 profile과 RR chunk 비교·주간 GC/quota·작은 구현 단위는
+[후속안](reports/2026-10-25-rest-area-snapshot-profile.md)에 기록했다.
+다음은 설계 두 리뷰 뒤 owned PG 비용 lab 구현이며 동시 worker 수용은 미완이다.
+
 ## 2026-10-26 · expired reset applying holder의 정본 fixture 회귀
 
 - CI 두 lane의 guard 미설치 원1 FAIL을 보존하고 해당 한 case만 기존 strict_engines로
