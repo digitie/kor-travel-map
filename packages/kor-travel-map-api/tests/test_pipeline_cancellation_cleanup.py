@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 from types import SimpleNamespace
 
@@ -98,6 +99,17 @@ class Session:
         self.connection = bind
         self.info = {}
         self.closed = False
+        self.outcomes = []
+
+    @asynccontextmanager
+    async def begin(self):
+        try:
+            yield
+        except BaseException:
+            self.outcomes.append("rollback")
+            raise
+        else:
+            self.outcomes.append("commit")
 
     async def close(self):
         self.closed = True
@@ -347,3 +359,228 @@ async def test_unknown_k_commit_exception_discards_original_before_pool_return(m
     assert original.closed
     assert original.driver.closed
     assert observer.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("failure", ["connection_error", "creator_timeout"])
+async def test_actual_sqlalchemy_checkout_failure_returns_pool_without_own_tasks(failure):
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    entered = asyncio.Event()
+    finalized = asyncio.Event()
+    pending = asyncio.Event()
+
+    async def fail_before_native_connection():
+        entered.set()
+        try:
+            if failure == "connection_error":
+                raise OSError("injected connect failure before any native handle")
+            await pending.wait()
+        finally:
+            finalized.set()
+
+    # async_creator는 실제 connect를 호출하지 않는다. SQLAlchemy checkout 실패 회수만 검증한다.
+    engine = create_async_engine(
+        "postgresql+asyncpg://",
+        async_creator=fail_before_native_connection,
+        pool_size=1,
+        max_overflow=0,
+    )
+    original = Connection(Driver(10))
+    backend = _backend(original, engine)
+    tasks_before = asyncio.all_tasks()
+    try:
+        confirmed = await service._confirm_backend_termination(
+            backend,
+            deadline=service.monotonic() + 0.02,
+        )
+        assert not confirmed
+        assert entered.is_set()
+        assert finalized.is_set()
+        assert engine.pool.checkedout() == 0
+        assert asyncio.all_tasks() == tasks_before
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_domain_rollback_continuation_and_normal_http_wait_keep_original_budget(monkeypatch):
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    async with service._coordinator_session(Engine(original)) as (_, session):
+        try:
+            async with session.begin():
+                raise service.PipelineCancellationTimelineConflict("recoverable timeline")
+        except service.PipelineCancellationTimelineConflict:
+            # continuation 가능한 domain 오류 뒤 HTTP 대기를 cleanup 예산에 넣지 않는다.
+            await asyncio.sleep(0.51)
+        async with session.begin():
+            assert not original.driver.closed
+    assert session.outcomes == ["rollback", "commit"]
+    assert original.closed
+    assert not original.driver.closed
+
+
+@pytest.mark.asyncio
+async def test_repeated_level_cancel_and_unconfirmed_latch_never_become_success(
+    monkeypatch, caplog
+):
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    observer = Connection(Driver(11))
+    observed = asyncio.Event()
+    allow_failure = asyncio.Event()
+
+    async def fail_during_readback(*_args, **_kwargs):
+        observed.set()
+        await allow_failure.wait()
+        raise TimeoutError("injected observer timeout")
+
+    observer.driver.fetchrow = fail_during_readback
+    entered = asyncio.Event()
+    scope = anyio.CancelScope()
+    engine = Engine(original, observer)
+    backend = None
+    caught = []
+
+    async def caller():
+        nonlocal backend
+        with scope:
+            try:
+                async with service._coordinator_session(engine) as (_, session):
+                    backend = service._session_backend(session)
+                    entered.set()
+                    await asyncio.Event().wait()
+            except BaseException as exc:
+                caught.append(type(exc))
+                raise
+
+    task = asyncio.create_task(caller())
+    await entered.wait()
+    scope.cancel()
+    await observed.wait()
+    for _ in range(3):
+        scope.cancel()
+        await asyncio.sleep(0)
+    assert not task.done()
+    allow_failure.set()
+    await asyncio.wait_for(task, 1)
+    assert caught == [asyncio.CancelledError]
+    assert backend.cleanup_attempted
+    assert not backend.termination_confirmed
+    assert original.closed
+    assert observer.closed
+    assert not engine.connections
+    # 두 번째 cleanup은 재확인 없이 미확정 상태를 그대로 유지한다.
+    await service._hard_invalidate_connection(backend, cause=RuntimeError("duplicate cleanup"))
+    assert not backend.termination_confirmed
+    assert "confirmed=False" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body_error", [None, ValueError("body domain failure")])
+async def test_new_cancel_during_restore_has_priority_over_success_or_domain_error(
+    monkeypatch,
+    body_error,
+):
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    observer = Connection(
+        Driver(
+            11,
+            [
+                {"backend_present": False, "advisory_present": False},
+            ],
+        )
+    )
+    engine = Engine(original, observer)
+    execute = original.execute
+    cancel = asyncio.CancelledError("injected restore cancellation")
+
+    async def cancelled_restore(sql, params=None):
+        if params is not None and "previous" in params:
+            raise cancel
+        return await execute(sql, params)
+
+    original.execute = cancelled_restore
+
+    async def caller():
+        async with service._coordinator_session(engine):
+            if body_error is not None:
+                raise body_error
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await caller()
+    assert raised.value is cancel
+    assert original.driver.closed
+    assert observer.driver.closed
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("body_error", [None, ValueError("body domain failure")])
+async def test_direct_task_cancel_at_restore_barrier_is_preserved(monkeypatch, body_error):
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    observer = Connection(
+        Driver(
+            11,
+            [
+                {"backend_present": False, "advisory_present": False},
+            ],
+        )
+    )
+    engine = Engine(original, observer)
+    execute = original.execute
+    restore_entered = asyncio.Event()
+    caught = []
+
+    async def blocked_restore(sql, params=None):
+        if params is not None and "previous" in params:
+            restore_entered.set()
+            try:
+                await asyncio.Event().wait()
+            except asyncio.CancelledError as exc:
+                caught.append(exc)
+                raise
+        return await execute(sql, params)
+
+    original.execute = blocked_restore
+
+    async def caller():
+        async with service._coordinator_session(engine):
+            if body_error is not None:
+                raise body_error
+
+    task = asyncio.create_task(caller())
+    await restore_entered.wait()
+    task.cancel("direct restore barrier cancel")
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await asyncio.wait_for(task, 1)
+    assert len(caught) == 1
+    assert raised.value is caught[0]
+    assert original.driver.closed
+    assert observer.driver.closed
+    assert task.cancelled()
+
+
+@pytest.mark.asyncio
+async def test_original_caller_cancel_wins_over_new_cleanup_cancel(monkeypatch):
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    primary = asyncio.CancelledError("original caller")
+    cleanup_cancel = asyncio.CancelledError("cleanup interrupted")
+
+    async def interrupted(backend, *, cause):
+        service._discard_exact_backend(backend, cause)
+        raise cleanup_cancel
+
+    monkeypatch.setattr(service, "_hard_invalidate_connection", interrupted)
+
+    async def caller():
+        async with service._coordinator_session(Engine(original)):
+            raise primary
+
+    with pytest.raises(asyncio.CancelledError) as raised:
+        await caller()
+    assert raised.value is primary
+    assert original.driver.closed

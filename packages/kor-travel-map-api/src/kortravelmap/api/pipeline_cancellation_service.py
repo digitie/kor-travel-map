@@ -485,6 +485,12 @@ async def _coordinator_session(
                     await _hard_invalidate_connection(backend, cause=cleanup_error)
                 except BaseException:
                     _LOG.error("pipeline cancellation exact backend cleanup failed", exc_info=True)
+            if isinstance(primary, asyncio.CancelledError):
+                # cleanup 중 새 취소가 생겨도 이미 받은 원 caller 취소 객체가 우선이다.
+                raise primary from None
+            if isinstance(cleanup_error, asyncio.CancelledError):
+                # restore/close가 처음 취소된 경우 domain 오류나 503으로 덮지 않는다.
+                raise
             if primary is None:
                 raise PipelineCancellationDatabaseUnavailable(
                     "cancellation connection cleanup could not be verified",

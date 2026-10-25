@@ -53,7 +53,7 @@ server 종료 확인은 별도의 readback 결과로만 인정한다.
 
 ## 검증 상태
 
-순수 단위 32개 PASS, Ruff 대상 5파일 및 mypy 제품 2파일 PASS를 확인했다.
+순수 단위 41개 PASS, Ruff 대상 5파일 및 mypy 제품 2파일 PASS를 확인했다.
 실제 task/P 대기 원 단언은 바꾸지 않았다. 추가 integration은 실제 K 성공+commit 뒤
 반환 전 barrier에서 caller를 취소해 root/attempt 불변, server advisory 0, pool 1의 새
 checkout, fresh/replay 200을 요구한다. 현재 두 integration은 collect-only이며 제품 후보의
@@ -66,3 +66,17 @@ OpenAPI는 동일 환경에서 parent export와 candidate export를 각각 비�
 전체 export --check PASS로 보고하지 않는다.
 
 참고: [PostgreSQL 16 connection settings](https://www.postgresql.org/docs/16/runtime-config-connection.html#GUC-CLIENT-CONNECTION-CHECK-INTERVAL).
+
+
+## 8f 후보 후속 정정
+
+Root의 순수 재현에서 정상 GUC 복원 중 새 CancelledError가 나면 원 후보는 503 또는
+기존 ValueError로 덮었다. 원 8f source와 재현을 보존하고 cleanup finally의 우선순위를
+수정했다. 이미 받은 caller 취소가 있으면 그 객체, cleanup에서 처음 취소되면 새 취소
+객체를 exact-discard/readback 뒤 재전파한다. 정상 restore barrier의 실제 task.cancel과
+성공/도메인 오류 양쪽을 시험한다.
+
+실제 SQLAlchemy engine에 network를 호출하지 않는 async_creator를 넣어 checkout의 연결
+실패와 timeout에서 creator finally/pool checkedout 0/새 task 없음도 확인한다. 반복 AnyIO
+level 취소, 미확정 cleanup latch와 rollback 뒤 정상 continuation을 별도로 확인한다.
+이 주입은 실제 asyncpg connect/drain이나 network blackhole의 hard 상한을 증명하지 않는다.
