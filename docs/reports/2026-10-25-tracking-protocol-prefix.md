@@ -109,3 +109,25 @@ source728의 실제 실행으로 혼합하지 않는다.
 정확 CI·최종 부모 합성과 실제 운영 수용은 별도다. 이 단계는 기존 SER를 유지하며
 SER snapshot-before-wait·whole capture 폐포·전체 retire/seal 한 commit·자동복구·
 대형 protocol·SH collector 활성화가 완료됐다는 주장을 하지 않는다.
+## exact ab696 CI의 직접 seed 계약과 task 정리 보강(미실행)
+
+최초 exact ab696 CI의 PostGIS glibc lane은28 FAIL/1659 PASS/23 SKIP/1 ERROR
+(839.09초), alpine lane은28 FAIL/1653 PASS/29 SKIP/1 ERROR(970.64초)였다.
+양 lane의 실패28 node 집합은 정확히 같았다. Python3개·fixture replay와 다른4workflow의
+SUCCESS를 CI 전체 통과로 표시하지 않는다. 원로그 둘을 보존하며 이를 재시도나 부분
+PASS로 대체하지 않는다. 실패28개 중26개는
+전용 시험 seed가 같은 transaction에서 leaf ensure 뒤 finish/reconcile/cancel을 호출해
+P→L 순서를 위반했다. 실제 client의 ensure와 finish/reconcile는 각각 새 transaction이며,
+repository final과 취소 public entry는 이미 첫 행 선점 전에 typed P→L을 취득한다.
+이번 관측 경로에서 확정된 production caller 누락은 없고, 그 밖의 경로 전체가
+안전하다는 증명으로 확대하지 않는다.
+
+나머지2개는 batch 경합 시험이 L만 먼저 선점하고 public 취소 entry를 호출해23514를
+받았다. 실패 뒤 phase task를 회수하지 않아 fixture의 DELETE와 행 잠금이 경합한
+teardown deadlock1도 보존한다. 이 시험의 명시적 barrier만 typed final prefix로 맞추고,
+생성한 task를 finally에서 cancel/await해 fixture 정리 전에 반환한다.
+
+5개 시험 module의 알려진 terminal seed에만 실제 executor 역할의 typed prefix를
+추가했다. 공통 fixture·leaf 구현·제품·SQL·SER/SH 거부·timeout·기존 assert는 바꾸지
+않았다. 추가 setup/cleanup만 제거하면 기존 각 함수 AST와 assert 순서가 같음을
+확인한다. 소스 두 리뷰와 별도 실제 PG gate 전에는 이 수정본의 통과를 주장하지 않는다.

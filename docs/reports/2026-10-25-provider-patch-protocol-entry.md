@@ -70,5 +70,15 @@ source2395 Git mode/blob·실제9 import·SDK53개 전후 pin도 대조했다.
 
 소스와 실행기 두 독립 리뷰·실제25 사실 대조를 거쳤다. 이 검증은 직접 legacy EX 경로의
 수용이며 공식 oracle을 교체한다. 최종 부모 CI 수정 상속·정확 전체 CI와 운영 배포는 아직
-미완이다. 실제 두 SH collector·57 호출자 폐쇄·fresh RC·whole capture·durable recovery를
+미완이다. 실제 두 SH collector·전체 쓰기 경로 폐쇄·fresh RC·whole capture·durable recovery를
 완료로 표시하지 않는다. SDK pin 검사는 실제 SDK 변환 실행 증거가 아니다.
+
+
+## 최종 부모 합성과 문서 크기 정리
+
+425의 제한 비용 실험 문서와 J424의 직접 seed 계약 수정5모듈·main의 Place 예산 helper를
+상속했다. 새426 제품·전용10시험 및 기존425 catalog 기대값 한정 보정·공식426 oracle은
+그대로다. source와 시험을 합친 뒤 정확 전체 CI를 새 head에서 확인한다. journal은 상한
+220 KiB를 지키기 위해 10월1~12일28절을 archive10c로 옮겼고, 상대 링크6개만 기준 경로를
+바꿨다. 원본문53709bytes를 역변환하여 전체 동일성을 확인했으며 두 독립 리뷰와 archive
+링크 시험을 통과했다. 이를 기존 기록 삭제나 과거 실패의 정정으로 쓰지 않는다.

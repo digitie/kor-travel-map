@@ -56,6 +56,7 @@ from kortravelmap.infra.feature_operation_repo import (
 )
 from kortravelmap.infra.feature_update_repo import enqueue_feature_update_request
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
+from kortravelmap.infra.pipeline_cancellation_repo import lock_provider_feature_finalization
 from kortravelmap.infra.provider_refresh_policy_repo import (
     upsert_provider_refresh_policy,
 )
@@ -534,6 +535,9 @@ async def _seed_committed_operations(engine: AsyncEngine) -> _SeedState:
         AsyncSession(engine, expire_on_commit=False) as session,
         session.begin(),
     ):
+        # 이 전용 committed seed는 member 완료까지 같은 TX에서 만든다.
+        async with as_dagster_runtime(session) as runtime_session:
+            await lock_provider_feature_finalization(runtime_session)
         await _insert_probe_catalog(session)
         dataset_keys = await _dataset_identity(session)
         target = await membership_for_dataset(

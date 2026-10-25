@@ -109,5 +109,31 @@ source-before2390개 Git blob/mode·현재826 clean·SDK53개·실제 import9개
 정확 CID·UUID·scalar label·익명 volume1개 부재를 다시 확인했다. 같은18개 PG를 다시 실행하지 않았다.
 
 공식 oracle과 EX18은 별도 fresh fixture 실행이며 앞78e의15개와 합산하지 않는다. 기존30초 cap·
-source/epoch/deferred guard를 유지했다. 비용 A/B와 최종 정확 CI는 아직 미완이며, 이 문서 고정 이후의
-정확 SHA별 두 리뷰·CI와 후속 수용은 PR 본문/감사 원장으로 구분한다. 성능 개선·SH 수집완료·운영활성화는 미판정이다.
+source/epoch/deferred guard를 유지했다. 이 oracle/EX18 정산 시점에는 비용 A/B와 최종 정확 CI가 미완이었다. 이후의
+정확 SHA별 두 리뷰·CI와 후속 수용은 PR 본문/감사 원장으로 구분한다. SH 수집완료·운영활성화는 미완이다.
+
+## 기존 base100의 제한된 A/B 비용
+
+고정826 source의 같은 owned425 DB에서 old8344/new704a procedure만 바꿔 synthetic native100 기존 base를 ABBAAB로 각3회 측정했다. context423·prefix424/권한·정책·30초 cap과 원54 trial은 같다. stamp insert 표기를 provider base 부재 INSERT로 해석하지 않는다.
+
+| 구간 | A 원 UPSERT | B UPDATE-first | 관측 감소 |
+| --- | ---: | ---: | ---: |
+| apply PG CPU(core-ms) | 11762.246 | 8064.825 | 31.43% |
+| deferred PG CPU(core-ms) | 5134.287 | 4835.039 | 5.83% |
+| 각 trial apply+deferred PG CPU(core-ms) | 16896.533 | 12773.819 | 24.40% |
+| 각 trial apply+deferred wall(ms) | 17558.286 | 13596.693 | 22.56% |
+
+합계는 각 trial 두 비중첩 구간을 먼저 더한 뒤 중앙값을 구했다. contained stamp 시간이나 중앙값끼리 중복합산하지 않았다.
+실제6회 rollback·fresh cancel·같은pool1 role/GUC복원·원425 definition7305… exact/OID/owner/ACL 복원을 확인했다. Git2390/SDK53 전후와 실import, 정확CID/UUID/global/익명volume1 부재를 확인했고 전체132.195초/180초 이내였다.
+
+물리 dead tuple/cache·attempt 누적이 다른 같은 DB 순차3표본이며 전체 release 비교가 아니다. 원54의 내부 계측 overhead가 남아 있고 apply+deferred는 planning/cancel/commit·실제 collector/SDK·네트워크를 포함하지 않는다. RSS는 Python process의 관측 snapshot이며 peak가 아니다. ARM이나 운영전체 CPU 개선율로 확장하지 않는다.
+
+원 facts SHA는 1de6e42aa8fbab085e02c73795b1bbf80f3cfa87c2f215df03cd0f2aa5f6f224이며,
+두 독립 사실 대조·최종 정확 CI와 후속 수용은 PR 본문/감사 원장에서 확인한다. 추가 재실행0.
+
+## 최종 CI 부모 합성
+
+J424의76d 시험 수정5파일과 main d417의 Place projection 예산 helper를 상속했다.
+425 SQL·migration·전용15개 시험·공식425 oracle은 앞 비용 정산 소스와 같다. 공용 journal/resume는
+425의 짧은 prefix 뒤에 J76d(최신 main 포함)의 전체 suffix를 보존했다. 부모의 원 CI 실패 기록도
+그대로 남겼으며 이 통합에서 PG를 추가 실행하지 않았다. 새 정확 head의 전체 CI는 별도 세대로 확인한다.
