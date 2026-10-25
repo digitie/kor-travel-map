@@ -477,3 +477,30 @@ def test_stamp_direct_write_preflight_is_fail_closed(value):
     row["can_mutate_geocode_stamps_directly"] = value
     problems = _runtime_db_privilege_problems(row, expected_login="ktm_feature_service")
     assert "runtime login must not mutate geocode stamps directly" in problems
+
+
+@pytest.mark.unit
+def test_airport_reader_exact_sd_is_required_and_overload_is_rejected() -> None:
+    signature = "feature.read_transport_airport_snapshot_evidence(bigint)"
+    row = _runtime_privilege_row()
+    row["executable_application_security_definer_functions"] = sorted(
+        set(row["executable_application_security_definer_functions"]) | {signature}
+    )
+    assert _runtime_db_privilege_problems(row, expected_login="ktm_feature_service") == []
+    row["executable_application_security_definer_functions"] = [
+        item
+        for item in row["executable_application_security_definer_functions"]
+        if item != signature
+    ]
+    assert any(
+        signature in problem
+        for problem in _runtime_db_privilege_problems(row, expected_login="ktm_feature_service")
+    )
+    row["executable_application_security_definer_functions"].extend(
+        [signature, "feature.read_transport_airport_snapshot_evidence(text)"]
+    )
+    assert any(
+        "unexpected application SECURITY DEFINER functions" in problem
+        and "feature.read_transport_airport_snapshot_evidence(text)" in problem
+        for problem in _runtime_db_privilege_problems(row, expected_login="ktm_feature_service")
+    )

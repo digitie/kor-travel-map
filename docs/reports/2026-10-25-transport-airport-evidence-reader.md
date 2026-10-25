@@ -2,15 +2,23 @@
 
 ## 현재 checkpoint
 
-1404의 순수 복원·적격성 진단 위에 별도 reader를 준비한다. 현재 구현은 고정 Geo
-비교 계약과 순수 경계 시험뿐이다. migration/SD/decoder/DB 호출·reader·collector·SH
-활성화는 아직 없다. `427_transport_airport_reader` 번호만 예약한다. 기존 converter,
-1404 함수, API/DTO/OpenAPI, 수집과 기본 EX는 바꾸지 않는다.
+1404의 순수 복원·적격성 진단 위에 별도 reader를 구현한다. 현재 checkpoint는
+Geo 비교 계약, 실제 DB 전체 집합을 읽는 STABLE SQL 세 함수, 엄격 decoder와
+caller 소유 RR/read-only 배선까지다. 실제 DB 설치·조회·공식 oracle는 미실행이며
+상위 provider 준비 단계/기존 native 연결·collector·SH 활성화는 아직 없다.
+기존 converter/native 함수, API/DTO/OpenAPI와 기본 EX 수집은 바꾸지 않는다.
 
-새 파일만 추가하고 기존 심볼의 signature를 바꾸지 않아 AGENTS.md의 영향도 검사
-예외에 해당한다. 실제 import는 stdlib뿐이며 provider 역방향 import가 없다. DB
-조회/decoder는 infra, pure native와 연결하는 준비 단계는 상위 providers에 둔다.
-Heritage private Python helper를 가져오거나 provider HTTP facade를 만들지 않는다.
+`427_transport_airport_reader`는 정본426 다음 선형 revision이다. 부모80c의
+제품·기존 시험·공식426 oracle를 상속하고 162a의 Geo/1404 순수 소스를 보존했다.
+공통 journal/resume은 own427 prefix 뒤 부모80c 전체 원문을 유지했다.
+
+새 파일과 기존 signature 불변의 canonical 권한 인벤토리 배선이므로 영향도 검사
+예외를 적용한다. runtime_privileges/db.py는 public SD 정확 signature 하나와
+private 두 함수의 EXECUTE 거부/optional 목록만 추가한다. 새 table SELECT grant는
+없고 기존 preflight 검사 함수는 바꾸지 않는다. DB/decoder는 infra이며 provider를
+역방향 import하지 않는다. 상위 providers의 기존 native/원 iterator와 연결하는
+준비 단계는 후속 미완이다. Heritage private Python helper는 가져오지 않는다.
+기존 SQL의 순수 metadata/string-object 검사만 같은 procedure owner에서 재사용한다.
 
 ## Geo digest v1의 고정 domain
 
@@ -45,12 +53,12 @@ Feature/claim/base R1 및 주소 코드의 대응과 모든24필드 clock을 따
 
 ## 고정할 SQL/decoder I/O
 
-후속 공개 SD signature는
+공개 SD source signature는
 `feature.read_transport_airport_snapshot_evidence(p_dataset bigint) RETURNS jsonb`다.
 STABLE/SECURITY DEFINER/search_path=pg_catalog, owner는 기존 state procedure owner다.
 정확 public signature만 canonical allowlist에 추가하며 private table SELECT grant는
-없다. private helper는 PUBLIC/runtime EXECUTE를 거부한다. 이 signature는 아직
-설치되지 않았고 fake complete를 반환하는 placeholder도 없다.
+없다. private helper는 PUBLIC/runtime EXECUTE를 거부한다. 이 signature는 실제
+설치하지 않았고 fake complete를 반환하는 placeholder도 없다.
 
 응답 top-level은 version=1, dataset_id, evidence_complete, db_scope_eof, reason,
 policy_epoch, items의 정확7키다. 성공은 complete/eof=true, reason=NULL, epoch 정수,
@@ -60,8 +68,8 @@ items 1..2730개다. 알려진 거부는 complete/eof=false, epoch=NULL, items=[
 items는 source_entity, source_head, feature, claim, membership, active_policy, policy,
 name_candidate, name_base, non_name_base, base_record, name_value_record, current_record,
 geocode_stamp의 정확14키다. name base clock과 current/name/non-name 원천을 따로 남긴다. 각 row의 구체 키·NULL/geometry type과
-12관계/전가변열 inventory는 다음 SQL checkpoint에서 기계 계약으로 고정한다.
-그 전까지 decoder/fullSQL ready로 세지 않는다. 양 source record의 raw7을 각각
+12관계51가변열 inventory는 별도 JSON으로 고정하고 SQL 양방향 대조를 시험한다.
+이는 작성자 source 검사이며 독립 fullSQL/실제 DB 수용과 다르다. 양 source record의 raw7을 각각
 반환하고 단일 non-name R1을 지원한다. mixed R1은 전체 EX다. core.name의 R1/R2와
 24개 non-name 값·base_revision·observed_at·lineage를 합치거나 생략하지 않는다.
 
@@ -103,3 +111,43 @@ TransportAirport→기존 converter→실제 SourceRecord/hash/key를 사용하�
 수정 후 합집합104 PASS/1.55초는 Geo 계약28+작업 중 decoder29+기존 native47이다.
 이 checkpoint 소유 소스는 Geo 계약28까지이며, 아직 미추적 decoder/SQL의 완성이나
 DB 수용으로 합산하지 않는다. 다음 decoder/SQL checkpoint는 별도 source gate다.
+
+
+## 전체 SQL/decoder source checkpoint
+
+공개 함수는 dataset bigint 하나만 받는다. 입력은 DB dataset의 전체 entity이며
+첫 key도 압축/physical128B/global256KiB 검사를 통과한 뒤에만 정렬·형식 비교한다.
+각 관계의 양측 가변 key 비교는 CASE 안의 metadata guard 뒤에 둔다.
+모든 payload는 전체 metadata 성공 뒤 (tableoid,ctid) 내부 위치로 다시 읽는다.
+동일 STABLE snapshot 안에서만 위치를 쓰고 상속/partition은 거부한다.
+
+[열 목록](2026-10-25-airport-reader-column-inventory.json)은 12관계51가변열의
+physical cap/SQLNULL/압축 금지를 고정한다. epoch와 UUID-only override/area 존재
+검사도 별도 명시한다. 실제 features의 coord/address/6개 코드8가변열을 추가 검사해
+provider base와 materialized Geo를 비교한다. 어떤 사람 override도 첫 범위에서는
+전체 거부한다. name policy/core.name 정확 한 필드, 단일 primary/all-role closure,
+current/value/non-name 단일 R1과 24개 clock을 유지한다. 혼합 R1/legacy normalizer는
+알려진 전체 거부이며 일부 성공을 반환하지 않는다.
+
+reader는 caller의 기존 READ ONLY REPEATABLE READ transaction만 허용한다.
+mode 확인과 SD 실행 전체에 협력적3초 상한을 두고 commit/rollback/GUC 변경은 하지
+않는다. SQLSTATE/timeout/취소는 전파하며 generic EX fallback으로 바꾸지 않는다.
+DB EOF는 upstream EOF가 아니며 response의 evidence_complete는 구조·저장 증거의
+완결성만 뜻한다. SDK 의미 적격성·새 입력과의 동등성·Geo 현재 token 승인·쓰기 권한은
+주지 않는다. `collector_ready`는 항상 false다. incoming iterator MAX+1/whole artifact와
+기존 native를 연결하는 provider 준비 seam은 아직 없으며 다음 별도 단계다.
+
+순수 합집합108 PASS/1.68초 = Geo28 + synthetic decoder29 + migration/열목록4 +
+기존 Transport native47이다. decoder fixture는 실제 SD가 만든 응답이나 실제 SDK
+저장 shape의 positive 증거가 아니다. 첫 잘못된 시험 경로로 수집0, 다음 migration
+시험의 SQL 선행 주석을 CREATE로 세지 못한2 FAIL/106 PASS를 보존했다. SQL 명령을
+삭제하지 않고 시험의 첫 유효 줄 판별만 보강한 뒤108을 확인했다. mypy4 PASS다.
+기존426 `head-schema.sql`은 그대로이며 427 공식 oracle는 아직 생성하지 않았다.
+full head static oracle/권한·실제 positive/negative/RR snapshot/큰 history plan·CPU·peak,
+실제15 fit/전체 upstream·SH closure·2 worker·운영은 전부 미완이다.
+
+정확 SD startup allowlist의 bigint 허용/누락 및 text overload 거부를 포함한 DB unit24
+PASS/1.62초, migration/receipt/role/sidecar/SQL/문서 정적36 PASS/2.44초, import4
+PASS를 별도로 확인했다. 첫 import 검사 명령은 실행 entrypoint를 잘못 지정해 실패했고
+정본 lint-imports entrypoint로4개 계약을 확인했다. 기존 head426 oracle를427로
+바꿔 성공을 꾸미지 않으며 공식 fresh bootstrap까지 oracle 관련 최종 gate는 보류한다.

@@ -1,3 +1,8 @@
+## 2026-10-25 공항427 SQL/decoder source
+
+- 426 부모 보존, STABLE3함수·51가변열·RR decoder 배선. 순수108 PASS/mypy4.
+- 실제 PG/oracle·provider 준비/native 연결·15 fit·collector/SH/운영은 미완.
+
 ## 2026-10-25 — 공항 reader Geo 계약(427, 부분)
 
 - 원천 hash32/Geo digest64 혼동을 정정하고 원실패를 보존했다. 순수 Geo28개 경계이며 SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
