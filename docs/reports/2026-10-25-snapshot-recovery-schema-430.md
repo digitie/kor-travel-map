@@ -2,7 +2,7 @@
 
 ## 현재 범위
 
-검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430는 아래 e173 fresh 생성·재덤프 결과로 동기화했다. 최신 runner의 SDK0 재개·봉인 증명과 별도 실제 caller2 재검증을 상속했고, 최종 lint/관련 unit 합집합은787PASS/6SKIP40.96s다. 독립 최종 리뷰·전체 CI와 전체 writer/운영 수용은 아직 미완이다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
+검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430는 아래 e173 fresh 생성·재덤프 결과로 동기화했다. 최신 runner의 SDK0 재개·봉인 증명과 별도 실제 caller2 재검증을 상속했고, 최종 전체 tests/unit·tests/lint는4180PASS/6SKIP167.19s다. 독립 최종 리뷰·전체 CI와 전체 writer/운영 수용은 아직 미완이다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
 
 430 migration은 고정 sidecar의 CREATE 경계와 명시 signature/owner 목록만 사용한다. 원 SQL 본문을 재작성하지 않고 owner별 문장으로 나누며 전체 bytes 재결합을 검증한다. 기존 routine의 owner도 429 oracle과 대조한다. 실행하는 실제 문장 tuple에 receipt CHECK가 포함된다. P EX를 먼저 얻고 lock/statement timeout을 기존 값과 1s/30s 중 작은 값으로 제한한다. SchemaOwner가 관측한 StateOwner/CommandOwner의 기존 schema CREATE 권한은 유지하고 새로 준 권한만 회수한다.
 
@@ -157,3 +157,32 @@ W exact674ac caller2는 별도 owned 실행2PASS/skip0, suite24.280s다. J는 ra
 실제 same-run SDK0 replay/같은 generation의 만료 plan 재생성은 확인했으나 물리적인
 claim/seal race를 유도한 시험은 아니다. 원 r1 caller2와 새 r2를 합산하지 않으며,
 Root terminal 뒤 public finish no-op 경합 보강은 T의 별도 소유 변경으로 남긴다.
+
+
+## 최종 CI의 이전 본문 기준과 전체 unit 확인
+
+1093dd3의 Python3.11/3.12/3.13 CI는 각각4177PASS/1FAIL/7SKIP였다. 모두
+`test_activation_preserves_old_body_except_strict_installer`에서 현행430 dump를 변경 전
+429 본문으로 읽어 실패했다. 원 run40186587504의 전체 로그 SHA는
+7d702d6debac187fa537605bcf4064c3ae2e9ae13ddc1771c19cc107e64d74b2다.
+unit 실패로 두 PostGIS lane은 실행되지 않았으며 이를 통합 시험 성공으로 세지 않는다.
+
+activation의 원429 정의1개를 별도 고정 자료로 추출하고 읽기 경로 한 줄만 바꿨다.
+전체 unit의 head-schema 참조도 검색해 tracking owner/typed authorization tail 비교가
+현행430 자신을 원본문으로 읽는 같은 문제를 찾아 원429 정의2개와 경로 한 줄을 고정했다.
+두 자료 모두 e173 원 dump 출처·SHA를 남기고 전체 정의 bytes를 그대로 보존한다.
+원 inverse/assert는 바꾸지 않았다. 나머지6개 module의 dump 참조는 현행 relation/권한/
+lineage/CHECK/owner/trigger 순서 검증이므로 유지했다.
+
+로컬 전체 unit/lint 첫 실행은4167PASS/13FAIL/6SKIP166.68s였다. 13개는 모두 정본
+Next parser `@next/env`가 이 전용 WT에 없는 환경 실패였고 원 로그를 보존했다.
+잠금 파일이 동일한 기존 검증 build의 정확16.4.3 package만 읽기 재사용해, 다운로드·설치와
+cache 원본 변경 없이 전체 실행을 다시 확인했다. 최종 **4180PASS/6SKIP167.19s**,
+로그 SHAe6b85973d672c0fb1268982597146b249b079ede1c81ba1ba8a0b3fc5ca7eb5e다.
+로컬 provider 의존성 차이와 skip 조건이 있어 CI node 수와 같은 수로 바꾸어 적지 않는다.
+
+이번 변경은 시험 자료/경로와 본 보고서뿐이다. 1093의 제품·migration·ACL·ORM·공식 golden은
+모두 그대로다. 따라서 T의 실제 API1093/head430 UI1PASS51.698s는 그 제품 source의
+사실로 유지한다. UI는 양 source의351개 mode/blob이 같은 기존7839 build를 재사용했고,
+새 최종 source 전체 build였다고 하지 않는다. J는 raw8/private11·14판정·API7 실제 import와
+4manifest/176static bytes·정확 정리를 별도로 검산했다. 최종 CI와 운영 수용은 계속 구분한다.
