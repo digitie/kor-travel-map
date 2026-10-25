@@ -7,7 +7,9 @@ SQL timeout/EX lease 시험과 구분한다. handler·repo·SD는 정본이며 l
 from __future__ import annotations
 
 import asyncio
+import json
 import sys
+import time
 from uuid import uuid4
 
 import httpx
@@ -75,6 +77,83 @@ async def _no_advisory_locks(admin, pids):
             )
         ).all()
         assert rows == []
+
+
+async def _capture_failed_zero_lock_timeline(admin, pids, holder_pid, request):
+    """최초 실패를 바꾸지 않고 holder 해제 전 최대 4.5초의 메타데이터만 남긴다."""
+    started = time.monotonic()
+    evidence = {
+        "phase": "before_holder_release",
+        "initial_zero_row_assertion_failed": True,
+        "target_pids": sorted(pids),
+        "holder_pid": holder_pid,
+        "budget_seconds": 4.5,
+        "samples": [],
+        "target_advisory_rows_disappeared": False,
+        "diagnostic_error_type": None,
+    }
+    try:
+        async with asyncio.timeout(4.5):
+            for _ in range(18):
+                # 별도 TX로 activity 통계 snapshot을 갱신한다. query 본문은 읽지 않는다.
+                async with admin.begin() as observer:
+                    await observer.execute(text("SET TRANSACTION READ ONLY"))
+                    await observer.execute(text("SET LOCAL statement_timeout='1s'"))
+                    await observer.execute(text("SET LOCAL lock_timeout='250ms'"))
+                    rows = (
+                        (
+                            await observer.execute(
+                                text("""WITH requested(pid) AS (
+                                SELECT unnest(CAST(:pids AS integer[]))
+                            )
+                            SELECT r.pid,a.backend_start,a.state,a.query_start,
+                                a.wait_event_type,a.wait_event,
+                                CAST(l.classid AS bigint) AS classid,
+                                CAST(l.objid AS bigint) AS objid,
+                                l.objsubid,l.mode,l.granted
+                            FROM requested r
+                            LEFT JOIN pg_catalog.pg_stat_activity a ON a.pid=r.pid
+                            LEFT JOIN pg_catalog.pg_locks l
+                                ON l.pid=r.pid AND l.locktype='advisory'
+                            ORDER BY r.pid,l.classid,l.objid,l.objsubid,l.mode,l.granted
+                            LIMIT 129"""),
+                                {"pids": sorted(pids | {holder_pid})},
+                            )
+                        )
+                        .mappings()
+                        .all()
+                    )
+                    sample_rows = [
+                        {
+                            key: value.isoformat()
+                            if key in {"backend_start", "query_start"} and value is not None
+                            else value
+                            for key, value in row.items()
+                        }
+                        for row in rows[:128]
+                    ]
+                    truncated = len(rows) > 128
+                    evidence["samples"].append(
+                        {
+                            "elapsed_seconds": round(time.monotonic() - started, 6),
+                            "rows": sample_rows,
+                            "truncated": truncated,
+                        }
+                    )
+                # holder 자신의 P 잠금은 target 판정에서 제외한다.
+                if not truncated and not any(
+                    row["pid"] in pids and row["mode"] is not None for row in sample_rows
+                ):
+                    evidence["target_advisory_rows_disappeared"] = True
+                    break
+                await asyncio.sleep(0.25)
+    except BaseException as diagnostic_error:
+        # 진단 실패/상한도 원 최초 AssertionError를 대체하지 않는다.
+        evidence["diagnostic_error_type"] = type(diagnostic_error).__name__
+    evidence["elapsed_seconds"] = round(time.monotonic() - started, 6)
+    request.node.user_properties.append(
+        ("pre_holder_release_advisory_timeline_json", json.dumps(evidence, sort_keys=True))
+    )
 
 
 async def _wait_for_real_p_block(admin, holder_pid, lease_key, task):
@@ -202,7 +281,17 @@ async def test_task_cancel_during_actual_k_then_p_wait_releases_pool_and_replays
                         assert task.cancelled()
                         assert runtime.pool.checkedout() == 0
                         observed_pids.add(await _pool_pid(runtime))
-                        await _no_advisory_locks(admin, observed_pids)
+                        try:
+                            await _no_advisory_locks(admin, observed_pids)
+                        except AssertionError as initial_failure:
+                            await _capture_failed_zero_lock_timeline(
+                                admin, observed_pids, holder_pid, request
+                            )
+                            initial_failure.add_note(
+                                "Initial zero-row assertion remains failed; bounded metadata "
+                                "is in pre_holder_release_advisory_timeline_json XML property."
+                            )
+                            raise
                         assert runtime.pool.checkedout() == 0
                         assert await _state(admin, job_id) == before
                     finally:
