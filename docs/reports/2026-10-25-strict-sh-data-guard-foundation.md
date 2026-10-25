@@ -94,3 +94,9 @@ claim/seal/begin의 manifest 안에 넣고 coord/address/place payload/lifecycle
 반복 UPDATE와 EX seed 검증 source는 보존한다. 정적7 PASS0.29초·Ruff2 PASS, 새 integration은
 30 collected1.06초일 뿐이며 fixture/PG 실행은0이다. 부모 합성·권한 역할 정본·실제
 positive/negative·공식 oracle·RC·전체 closure·SH 활성화는 여전히 미완이다.
+
+새5개 source를 고정한 f6d 뒤 추가 순수 DTO 검증에서 `Feature.model_dump()`의 detail
+dict 재입력이 ADR-018에 따라 거부됨을 발견했다. 원 typed detail을 보존한 뒤에는
+retired 상태의 publication_state=suppressed 계약도 적용했다. 두 준비 오류를 보존하고
+정본 검증기를 통과하는 retired fixture 구성을 확인했다. 원 collect는 함수 본문을
+실행하지 않아 이 오류를 포착한 증거가 아니며, 제품 SQL 변경과 PG 실행은0이다.

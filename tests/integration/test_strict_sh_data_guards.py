@@ -378,7 +378,14 @@ async def test_active_policy_does_not_make_retired_target_shared_eligible(strict
     admin, runtime = strict_engines
     dataset_key, identity = "retired-" + uuid4().hex, uuid4().hex
     old = _dataset_bundle(dataset_key, identity, "retired-before", hours=-24)
-    retired = Feature.model_validate(old.feature.model_dump() | {"lifecycle_state": "retired"})
+    retired = Feature.model_validate(
+        old.feature.model_dump()
+        | {
+            "detail": old.feature.detail,
+            "lifecycle_state": "retired",
+            "publication_state": "suppressed",
+        }
+    )
     old = old.model_copy(update={"feature": retired})
     new = _dataset_bundle(dataset_key, identity, "retired-after", hours=0)
     new = new.model_copy(update={"feature": retired.model_copy(update={"name": "retired-after"})})
