@@ -31,6 +31,20 @@ BEGIN
                 USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_target';
         END IF;
     END IF;
+    -- target 소속만으로 scalar eligibility를 증명하지 않는다. 기존420은 policy가
+    -- 없으면 조기 반환하므로 SH에서는 이 전제를 직접 닫는다. EX는 앞에서 반환했다.
+    IF NOT EXISTS (SELECT 1 FROM feature.features feature
+        JOIN feature.provider_field_active_policies active USING(feature_id)
+        WHERE feature.feature_id=v_feature AND feature.lifecycle_state='active') THEN
+        RAISE EXCEPTION 'shared Feature requires an active scalar policy and lifecycle'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_eligibility';
+    END IF;
+    IF TG_TABLE_NAME='features' THEN
+        IF NEW.lifecycle_state IS DISTINCT FROM 'active' THEN
+            RAISE EXCEPTION 'shared Feature lifecycle transition is unsupported'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_eligibility';
+        END IF;
+    END IF;
     IF TG_TABLE_NAME IN ('feature_base_field_values','provider_field_shadow_candidates') THEN
         SELECT provider_dataset_id INTO STRICT v_dataset FROM ops.feature_write_attempts
          WHERE attempt_id=v_attempt;

@@ -72,3 +72,25 @@ SQL 시험과 실제 service login DML 경계를 구분한다.
 전체8 target·모든 설치 DDL rollback·취소/pool정리·ACL actual 수용을 닫은 결과가 아니다.
 427/428 부모 및 권한 정본 합성과 두 독립 FULL source review 뒤에만 새 bounded runner와
 정확 CPU 슬롯을 정한다. RC·자동설치·SH 활성화는 계속0이다.
+
+## 정책 없는 manifest target의 우회 정정
+
+aba4 source의 두 독립 FULL 검토에서 policy가 없는 inside-manifest Feature의 좌표·주소·
+place 임의 필드 변경이 통과할 수 있음을 확인했다. 기존420 guard는 active policy가
+없으면 조기 반환하며, manifest와 begin은 policy/lifecycle 적격성을 보장하지 않는다.
+기존 target 검사만으로 active scalar 전제를 닫았다고 본 부분은 source P2로 보존한다.
+이 정의는 실제 DB에 설치하거나 실행하지 않았다.
+
+SH의 Feature/derived5관계에는 정확 manifest 검사 뒤 실제 active policy와 현재 active
+lifecycle를 직접 요구한다. Feature UPDATE의 새 lifecycle도 active여야 한다. EX의 앞쪽
+반환과 기존420 fieldset·stamp SI·typed 검사는 그대로 둔다. 일반 runtime이 가진
+coord/address/place payload UPDATE 권한의 우회와, 별도 schema owner 관리 SQL인
+lifecycle 변경을 구분한다. 자동 정책 등록이나 예외 성공 경로를 추가하지 않는다.
+
+새4개 negative는 실제 canonical legacy loader로 만든 정책 없는 Feature를 진짜
+claim/seal/begin의 manifest 안에 넣고 coord/address/place payload/lifecycle 변경을
+23514로 거부하도록 작성했다. 추가1개는 실제 retired bundle을 legacy load하고 cutover한
+뒤 active policy가 있어도 retired target의 SH 변경을 거부한다. 기존 active scalar
+반복 UPDATE와 EX seed 검증 source는 보존한다. 정적7 PASS0.29초·Ruff2 PASS, 새 integration은
+30 collected1.06초일 뿐이며 fixture/PG 실행은0이다. 부모 합성·권한 역할 정본·실제
+positive/negative·공식 oracle·RC·전체 closure·SH 활성화는 여전히 미완이다.

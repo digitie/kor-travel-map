@@ -134,6 +134,9 @@ def test_inactive_feature_does_not_bypass_exact_manifest_target():
     source = (_VERSIONS / "_429_strict_sh_feature_row_guard.sql").read_text()
     assert "assert_scoped_candidate_write(v_attempt,v_feature)" in source
     assert "assert_scoped_candidate_write(v_attempt,OLD.feature_id)" in source
-    assert "lifecycle_state" not in source
+    assert "feature.lifecycle_state='active'" in source
+    assert "JOIN feature.provider_field_active_policies active USING(feature_id)" in source
+    assert "NEW.lifecycle_state IS DISTINCT FROM 'active'" in source
+    assert "ck_strict_data_feature_eligibility" in source
     assert "source_role='primary'" in source
     assert "OLD.source_entity_key IS DISTINCT FROM NEW.source_entity_key" in source

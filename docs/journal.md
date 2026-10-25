@@ -1,7 +1,7 @@
 ## 2026-10-25 비활성 strict SH guard429 정의
 
-- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 정적7 PASS·전용25 collected이며 PG/RC/SH 활성화는0이다.
-- 427/428 부모·권한 정본 합성, 전용 paired integration은 source25만 준비했고 실제 수용은 미완이다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
+- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 정적7 PASS·전용30 collected이며 PG/RC/SH 활성화는0이다.
+- 427/428 부모·권한 정본 합성, 전용 paired integration은 source만 준비했고 실제 수용은 미완이다. 정책 없는 target 우회 P2를 active policy/lifecycle 검사와 새5개 source로 보강했다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
 
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 

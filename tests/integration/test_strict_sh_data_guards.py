@@ -2,18 +2,24 @@
 
 from __future__ import annotations
 
+from uuid import UUID, uuid4
+
 import pytest
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from kortravelmap.dto import Feature
+from kortravelmap.infra import feature_repo
+from kortravelmap.infra.feature_identity import resolve_feature_identity
 from kortravelmap.infra.scoped_feature_writes import begin_scoped_feature_write
+from kortravelmap.infra.scoped_provider_batch import ProviderScalarRefreshItem
 from tests.integration.test_provider_base_update_first import _gate, _seed
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
 )
 from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
-from tests.integration.test_scoped_provider_batch import _plan
+from tests.integration.test_scoped_provider_batch import _dataset_bundle, _plan, _seed_bundles
 from tests.integration.test_scoped_provider_batch import _seed as _batch_seed
 from tests.integration.test_tvn36_override_lineage_spine import _constraint_name
 
@@ -283,5 +289,127 @@ async def test_private_installer_rejects_drift_without_partial_repair(strict_eng
                     )
                     == 0
                 )
+        finally:
+            await session.rollback()
+
+
+@pytest.mark.parametrize("mutation", ["coord", "address", "payload", "lifecycle"])
+async def test_inside_manifest_without_active_policy_rejects_non_scalar_mutation(
+    strict_engines, mutation
+):
+    admin, runtime = strict_engines
+    dataset_key, identity = "uncut-" + uuid4().hex, uuid4().hex
+    bundle = _dataset_bundle(dataset_key, identity, "uncut-before", hours=-24)
+    record = bundle.source_record
+    async with AsyncSession(admin) as session, session.begin():
+        await _gate(session)
+        dataset = await session.scalar(
+            text("""INSERT INTO provider_sync.provider_datasets
+            (provider,dataset_key,display_name,source_kind)
+            VALUES(:provider,:key,'uncut strict guard fixture','manual')
+            RETURNING provider_dataset_id"""),
+            {"provider": record.provider, "key": dataset_key},
+        )
+    # 실제 canonical legacy loader를 사용하되 policy 등록/cutover는 하지 않는다.
+    async with AsyncSession(runtime) as session, session.begin():
+        await feature_repo.load_bundles(session, [bundle])
+        resolved = await resolve_feature_identity(session, bundle.feature.feature_id)
+        assert resolved is not None
+        feature = UUID(str(resolved.feature_id))
+    async with AsyncSession(admin) as session:
+        assert (
+            await session.scalar(
+                text(
+                    """SELECT count(*) FROM feature.provider_field_active_policies
+                    WHERE feature_id=:id"""
+                ),
+                {"id": feature},
+            )
+            == 0
+        )
+    plan, _ = await _plan(runtime, dataset, [ProviderScalarRefreshItem(feature, bundle)])
+    statements = {
+        "coord": """UPDATE feature.features SET
+            coord=x_extension.st_geomfromtext('POINT(127 37)',4326),coord_precision_digits=6
+            WHERE feature_id=:feature""",
+        "address": "UPDATE feature.features SET address='outside scalar' WHERE feature_id=:feature",
+        "payload": """UPDATE feature.feature_places SET payload=CAST(:payload AS jsonb)
+            WHERE feature_id=:feature""",
+        "lifecycle": """UPDATE feature.features SET lifecycle_state='retired'
+            WHERE feature_id=:feature""",
+    }
+    # coord/address/payload는 일반 runtime의 정본 column 권한 경계다.
+    # lifecycle은 직접 runtime grant가 없으므로 명시 관리 role의 SH 호출로 분리한다.
+    async with AsyncSession(admin if mutation == "lifecycle" else runtime) as session:
+        await session.begin()
+        try:
+            await begin_scoped_feature_write(
+                session,
+                attempt_id=plan["attempt_id"],
+                owner=plan["owner"],
+                manifest_digest=plan["manifest_digest"],
+            )
+            if mutation == "lifecycle":
+                await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+            with pytest.raises(DBAPIError) as error:
+                await session.execute(
+                    text(statements[mutation]),
+                    {"feature": feature, "payload": '{"outside": "scalar"}'},
+                )
+            _error(error, "ck_strict_data_feature_eligibility")
+        finally:
+            await session.rollback()
+    async with AsyncSession(admin) as session:
+        row = (
+            await session.execute(
+                text("""SELECT f.lifecycle_state,f.coord,f.address,p.payload
+            FROM feature.features f JOIN feature.feature_places p USING(feature_id)
+            WHERE f.feature_id=:feature"""),
+                {"feature": feature},
+            )
+        ).one()
+        assert row.lifecycle_state == "active"
+        assert row.coord is None
+        assert row.address is None
+        assert row.payload == bundle.feature.detail.payload
+
+
+async def test_active_policy_does_not_make_retired_target_shared_eligible(strict_engines):
+    admin, runtime = strict_engines
+    dataset_key, identity = "retired-" + uuid4().hex, uuid4().hex
+    old = _dataset_bundle(dataset_key, identity, "retired-before", hours=-24)
+    retired = Feature.model_validate(old.feature.model_dump() | {"lifecycle_state": "retired"})
+    old = old.model_copy(update={"feature": retired})
+    new = _dataset_bundle(dataset_key, identity, "retired-after", hours=0)
+    new = new.model_copy(update={"feature": retired.model_copy(update={"name": "retired-after"})})
+    dataset, items = await _seed_bundles(admin, runtime, [old], [new])
+    feature = items[0].feature_id
+    async with AsyncSession(admin) as session:
+        row = (
+            await session.execute(
+                text("""SELECT f.lifecycle_state,active.feature_id FROM feature.features f
+            JOIN feature.provider_field_active_policies active USING(feature_id)
+            WHERE f.feature_id=:feature"""),
+                {"feature": feature},
+            )
+        ).one()
+        assert row.lifecycle_state == "retired"
+        assert row.feature_id == feature
+    plan, _ = await _plan(runtime, dataset, items)
+    async with AsyncSession(runtime) as session:
+        await session.begin()
+        try:
+            await begin_scoped_feature_write(
+                session,
+                attempt_id=plan["attempt_id"],
+                owner=plan["owner"],
+                manifest_digest=plan["manifest_digest"],
+            )
+            with pytest.raises(DBAPIError) as error:
+                await session.execute(
+                    text("UPDATE feature.features SET name=name WHERE feature_id=:feature"),
+                    {"feature": feature},
+                )
+            _error(error, "ck_strict_data_feature_eligibility")
         finally:
             await session.rollback()
