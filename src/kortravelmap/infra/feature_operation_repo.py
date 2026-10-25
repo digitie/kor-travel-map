@@ -133,6 +133,34 @@ CALL ops.finish_provider_feature_membership_command(
 )
 """
 
+# 정상 SUCCESS가 entry guard 뒤에 종결된 경합만 읽기 noop으로 복원한다.
+# 기존 완료를 확인할 뿐 새 seal/finish/권한을 만들지 않는다.
+_SUCCESSFUL_MEMBERSHIP_REPLAY_SQL = """
+SELECT EXISTS (
+  SELECT 1
+  FROM ops.import_jobs AS root
+  JOIN ops.import_jobs AS child ON child.parent_job_id = root.job_id
+  JOIN ops.import_job_datasets AS member ON member.job_id = child.job_id
+  WHERE root.job_id = CAST(:root_job_id AS uuid)
+    AND root.kind = 'provider_feature_load_run'
+    AND root.dagster_run_id = :dagster_run_id
+    AND root.status = 'done' AND root.dagster_run_status = 'SUCCESS'
+    AND root.cancellation_id IS NULL AND root.cancellation_requested_at IS NULL
+    AND root.quarantined_at IS NULL
+    AND child.job_id = CAST(:member_job_id AS uuid)
+    AND child.kind = 'provider_feature_load'
+    AND child.dagster_run_id = root.dagster_run_id AND child.status = 'done'
+    AND child.cancellation_id IS NULL AND child.cancellation_requested_at IS NULL
+    AND child.quarantined_at IS NULL AND child.dataset_membership_mode = 'single'
+    AND member.import_job_dataset_id = CAST(:member_id AS uuid)
+    AND member.provider_dataset_id = :provider_dataset_id
+    AND member.sync_scope = :sync_scope AND member.operation_key = :operation_key
+    AND (SELECT count(*) FROM ops.import_job_datasets AS frozen
+         WHERE frozen.job_id = child.job_id) = 1
+)
+"""
+
+
 _APPEND_ATTEMPT_EVENT_COMMAND_SQL = """
 CALL ops.append_provider_feature_attempt_event_command(
   :dagster_run_id, CAST(:provider_dataset_id AS bigint), :sync_scope,
@@ -758,7 +786,9 @@ async def finish_dagster_feature_membership(
         return DagsterFeatureOperationMutation(
             outcome="blocked", operation=operation, block_reason="cancellation"
         )
-    if operation.status in {"done", "failed", "cancelled"}:
+    if operation.status in {"failed", "cancelled"} or (
+        operation.status == "done" and operation.dagster_run_status != "SUCCESS"
+    ):
         return DagsterFeatureOperationMutation(
             outcome="blocked", operation=operation, block_reason="terminal"
         )
@@ -775,6 +805,29 @@ async def finish_dagster_feature_membership(
                 "operation_key": membership.operation_key,
                 "authoritative_snapshot_complete": authoritative_snapshot_complete,
             },
+        )
+    if operation.status == "done":
+        # P EX→L→root 잠금 뒤의 새 읽기다. 취소/격리/다른 frozen member를
+        # 성공으로 해석하지 않고 원래 완료된 정확한 한 member만 반환한다.
+        if (
+            member.status == "done"
+            and await session.scalar(
+                text(_SUCCESSFUL_MEMBERSHIP_REPLAY_SQL),
+                {
+                    "root_job_id": root_job_id,
+                    "dagster_run_id": normalized_run_id,
+                    "member_job_id": member.job_id,
+                    "member_id": member.import_job_dataset_id,
+                    "provider_dataset_id": membership.provider_dataset_id,
+                    "sync_scope": membership.sync_scope,
+                    "operation_key": membership.operation_key,
+                },
+            )
+            is True
+        ):
+            return DagsterFeatureOperationMutation(outcome="noop", operation=operation)
+        return DagsterFeatureOperationMutation(
+            outcome="blocked", operation=operation, block_reason="terminal"
         )
     if member.status == "done":
         return DagsterFeatureOperationMutation(outcome="noop", operation=operation)
