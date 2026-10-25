@@ -31,7 +31,7 @@ def error_responses(
             "headers": {"Retry-After": retry_after},
         },
         503: {
-            "description": "Dagster 연결 또는 terminal 확인 실패",
+            "description": "DB 연결 정리 또는 Dagster 연결·terminal 확인 실패",
             "headers": {"Retry-After": retry_after},
         },
     }
@@ -88,6 +88,12 @@ def to_http_exception(
         return _exception(
             exc,
             status_code=status.HTTP_502_BAD_GATEWAY,
+            retryable=True,
+        )
+    if isinstance(exc, pipeline_cancellation_service.PipelineCancellationDatabaseUnavailable):
+        return _exception(
+            exc,
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             retryable=True,
         )
     if isinstance(exc, pipeline_cancellation_service.DagsterUnavailable):
