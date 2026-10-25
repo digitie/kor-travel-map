@@ -72,3 +72,43 @@ BEGIN
       ORDER BY f.feature_id;
 END;
 $$;
+
+-- private428 전체집합 helper의 raw runtime EXEC는 부여하지 않는다.
+-- 방금 완료한 자기 kernel 적용 TX에서만 작은 최종 count/hash를 읽는다.
+CREATE FUNCTION ops.capture_provider_snapshot_apply_input_set(
+    p_snapshot uuid,p_generation bigint,p_fence uuid
+) RETURNS TABLE(input_member_count bigint,source_input_set_hash text)
+LANGUAGE plpgsql SECURITY DEFINER SET search_path TO pg_catalog AS $$
+DECLARE
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_dataset bigint;
+    v_capture record;
+BEGIN
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF v_control.status<>'prepared' OR v_control.attempt_id IS NULL THEN
+        RAISE EXCEPTION 'snapshot capture requires prepared original apply'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=v_control.attempt_id;
+    SELECT artifact.provider_dataset_id INTO STRICT v_dataset
+      FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot;
+    IF v_attempt.status<>'completed' OR v_attempt.apply_txid IS DISTINCT FROM txid_current()
+       OR v_attempt.result_digest IS NULL
+       OR v_attempt.owner IS DISTINCT FROM v_control.attempt_owner
+       OR v_attempt.manifest_digest IS DISTINCT FROM v_control.manifest_digest
+       OR v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb THEN
+        RAISE EXCEPTION 'snapshot capture requires the same completed apply transaction'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT * INTO STRICT v_capture FROM feature._bounded_provider_curation_input_set(v_dataset);
+    IF v_capture.capture_complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'snapshot apply requires a complete bounded input capture'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    RETURN QUERY SELECT v_capture.input_member_count,v_capture.source_input_set_hash;
+END;
+$$;

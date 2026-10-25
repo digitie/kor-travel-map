@@ -100,20 +100,34 @@ async def _applied(admin, runtime, initial):
                 policy_revision=1,
             ),
         )
-    async with AsyncSession(runtime) as session, session.begin():
-        await apply_bounded_transaction_limits(session)
-        await apply_stored_airport_reobservation(
-            session,
-            artifact,
-            prepared,
-            pins=_PINS,
-            snapshot_id=token.snapshot_id,
-            generation=token.generation,
-            fence=token.fence,
-            attempt_id=plan["attempt_id"],
-            owner=plan["owner"],
-            manifest_digest=plan["manifest_digest"],
-        )
+    try:
+        async with AsyncSession(runtime) as session, session.begin():
+            await apply_bounded_transaction_limits(session)
+            await apply_stored_airport_reobservation(
+                session,
+                artifact,
+                prepared,
+                pins=_PINS,
+                snapshot_id=token.snapshot_id,
+                generation=token.generation,
+                fence=token.fence,
+                attempt_id=plan["attempt_id"],
+                owner=plan["owner"],
+                manifest_digest=plan["manifest_digest"],
+            )
+    except BaseException as primary:
+        # 이미 commit한 계획의 자기 lease만 회수한다. 첫 실패가 다음 사례를 가리지 않게 한다.
+        from kortravelmap.infra.scoped_feature_writes import cancel_scoped_feature_write
+
+        try:
+            async with AsyncSession(runtime) as cleanup, cleanup.begin():
+                await apply_bounded_transaction_limits(cleanup)
+                await cancel_scoped_feature_write(
+                    cleanup, attempt_id=plan["attempt_id"], owner=plan["owner"]
+                )
+        except BaseException as cleanup_error:
+            primary.add_note("owned plan cleanup also failed: " + type(cleanup_error).__name__)
+        raise
     async with AsyncSession(runtime) as session, session.begin():
         saved = await read_provider_snapshot_for_member(session, member, expected_pins=_PINS)
     assert saved is not None
