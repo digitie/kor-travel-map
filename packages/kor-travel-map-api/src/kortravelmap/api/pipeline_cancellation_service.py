@@ -43,6 +43,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     finish_pipeline_cancellation_attempt,
     get_current_pipeline_cancellation_summary,
     get_pipeline_cancellation_detail,
+    lock_provider_feature_finalization,
     mark_pipeline_cancellation_run_termination_reserved,
     resolve_pipeline_cancellation_scope,
     retry_pipeline_cancellation_attempt,
@@ -1035,6 +1036,7 @@ async def _record_terminal_run(
                 await session.execute(
                     text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
                 )
+            await lock_provider_feature_finalization(session)
             try:
                 changed = await transition_pipeline_cancellation_member(
                     session,

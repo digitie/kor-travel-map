@@ -1966,6 +1966,7 @@ DECLARE
     v_base_revision bigint;
     v_preserved_notice_start jsonb;
 BEGIN
+    PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR p_provider_dataset_id IS NULL
        OR coalesce(btrim(p_source_entity_key), '') = ''
@@ -2041,24 +2042,37 @@ BEGIN
             RAISE EXCEPTION 'provider cannot write field path %', v_field_path
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_field_path';
         END IF;
-        INSERT INTO feature.feature_base_field_values (
-            feature_id, field_path, provider_dataset_id,
-            source_entity_key, source_record_key, source_raw_payload_hash,
-            value_json, base_revision, observed_at
-        ) VALUES (
-            p_feature_id, v_field_path, p_provider_dataset_id,
-            p_source_entity_key, p_source_record_key, v_source_hash,
-            coalesce(v_value, 'null'::jsonb), v_base_revision, clock_timestamp()
-        ) ON CONFLICT (feature_id, field_path) DO UPDATE
-        SET provider_dataset_id = EXCLUDED.provider_dataset_id,
-            source_entity_key = EXCLUDED.source_entity_key,
-            source_record_key = EXCLUDED.source_record_key,
-            source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
-            value_json = EXCLUDED.value_json,
+        UPDATE feature.feature_base_field_values
+        SET provider_dataset_id = p_provider_dataset_id,
+            source_entity_key = p_source_entity_key,
+            source_record_key = p_source_record_key,
+            source_raw_payload_hash = v_source_hash,
+            value_json = coalesce(v_value, 'null'::jsonb),
             value_geometry = NULL,
-            base_revision = EXCLUDED.base_revision,
-            observed_at = EXCLUDED.observed_at,
-            updated_at = clock_timestamp();
+            base_revision = v_base_revision,
+            observed_at = clock_timestamp(),
+            updated_at = clock_timestamp()
+        WHERE feature_id = p_feature_id AND field_path = v_field_path;
+        IF NOT FOUND THEN
+            INSERT INTO feature.feature_base_field_values (
+                feature_id, field_path, provider_dataset_id,
+                source_entity_key, source_record_key, source_raw_payload_hash,
+                value_json, base_revision, observed_at
+            ) VALUES (
+                p_feature_id, v_field_path, p_provider_dataset_id,
+                p_source_entity_key, p_source_record_key, v_source_hash,
+                coalesce(v_value, 'null'::jsonb), v_base_revision, clock_timestamp()
+            ) ON CONFLICT (feature_id, field_path) DO UPDATE
+            SET provider_dataset_id = EXCLUDED.provider_dataset_id,
+                source_entity_key = EXCLUDED.source_entity_key,
+                source_record_key = EXCLUDED.source_record_key,
+                source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
+                value_json = EXCLUDED.value_json,
+                value_geometry = NULL,
+                base_revision = EXCLUDED.base_revision,
+                observed_at = EXCLUDED.observed_at,
+                updated_at = clock_timestamp();
+        END IF;
     END LOOP;
     FOR v_field_path, v_value IN SELECT key, value FROM jsonb_each(p_geometry_wkt) LOOP
         SELECT * INTO v_registry
@@ -2074,31 +2088,49 @@ BEGIN
             RAISE EXCEPTION 'provider cannot write geometry field path %', v_field_path
                 USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_provider_field_path';
         END IF;
-        INSERT INTO feature.feature_base_field_values (
-            feature_id, field_path, provider_dataset_id,
-            source_entity_key, source_record_key, source_raw_payload_hash,
-            value_json, value_geometry, base_revision, observed_at
-        ) VALUES (
-            p_feature_id, v_field_path, p_provider_dataset_id,
-            p_source_entity_key, p_source_record_key, v_source_hash,
-            CASE WHEN v_value = 'null'::jsonb THEN 'null'::jsonb ELSE NULL END,
-            CASE WHEN v_value = 'null'::jsonb THEN NULL
+        UPDATE feature.feature_base_field_values
+        SET provider_dataset_id = p_provider_dataset_id,
+            source_entity_key = p_source_entity_key,
+            source_record_key = p_source_record_key,
+            source_raw_payload_hash = v_source_hash,
+            value_json = CASE WHEN v_value = 'null'::jsonb THEN 'null'::jsonb ELSE NULL END,
+            value_geometry = CASE WHEN v_value = 'null'::jsonb THEN NULL
                  ELSE CASE v_registry.geometry_type
                       WHEN 'MULTILINESTRING' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
                       WHEN 'MULTIPOLYGON' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
                       ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326)
                  END END,
-            v_base_revision, clock_timestamp()
-        ) ON CONFLICT (feature_id, field_path) DO UPDATE
-        SET provider_dataset_id = EXCLUDED.provider_dataset_id,
-            source_entity_key = EXCLUDED.source_entity_key,
-            source_record_key = EXCLUDED.source_record_key,
-            source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
-            value_json = EXCLUDED.value_json,
-            value_geometry = EXCLUDED.value_geometry,
-            base_revision = EXCLUDED.base_revision,
-            observed_at = EXCLUDED.observed_at,
-            updated_at = clock_timestamp();
+            base_revision = v_base_revision,
+            observed_at = clock_timestamp(),
+            updated_at = clock_timestamp()
+        WHERE feature_id = p_feature_id AND field_path = v_field_path;
+        IF NOT FOUND THEN
+            INSERT INTO feature.feature_base_field_values (
+                feature_id, field_path, provider_dataset_id,
+                source_entity_key, source_record_key, source_raw_payload_hash,
+                value_json, value_geometry, base_revision, observed_at
+            ) VALUES (
+                p_feature_id, v_field_path, p_provider_dataset_id,
+                p_source_entity_key, p_source_record_key, v_source_hash,
+                CASE WHEN v_value = 'null'::jsonb THEN 'null'::jsonb ELSE NULL END,
+                CASE WHEN v_value = 'null'::jsonb THEN NULL
+                     ELSE CASE v_registry.geometry_type
+                          WHEN 'MULTILINESTRING' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
+                          WHEN 'MULTIPOLYGON' THEN x_extension.st_multi(x_extension.st_geomfromtext(v_value #>> '{}', 4326))
+                          ELSE x_extension.st_geomfromtext(v_value #>> '{}', 4326)
+                     END END,
+                v_base_revision, clock_timestamp()
+            ) ON CONFLICT (feature_id, field_path) DO UPDATE
+            SET provider_dataset_id = EXCLUDED.provider_dataset_id,
+                source_entity_key = EXCLUDED.source_entity_key,
+                source_record_key = EXCLUDED.source_record_key,
+                source_raw_payload_hash = EXCLUDED.source_raw_payload_hash,
+                value_json = EXCLUDED.value_json,
+                value_geometry = EXCLUDED.value_geometry,
+                base_revision = EXCLUDED.base_revision,
+                observed_at = EXCLUDED.observed_at,
+                updated_at = clock_timestamp();
+        END IF;
     END LOOP;
 
     UPDATE feature.features AS core
@@ -5872,6 +5904,7 @@ DECLARE
   v_child_count bigint;
   v_child_hash text;
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   PERFORM ops.lock_scoped_feature_write_protocol(true);
   o_stale_input := false;
   IF current_setting('transaction_isolation') <> 'serializable' THEN
@@ -11988,6 +12021,7 @@ DECLARE
   v_input_member_count bigint;
   v_last_source_modified_at date;
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF current_setting('transaction_isolation') <> 'serializable' THEN
     RAISE EXCEPTION 'provider snapshot seal requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
@@ -13501,6 +13535,7 @@ CREATE PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(false);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider attempt event requires provider executor'
       USING ERRCODE = '42501';
@@ -14103,6 +14138,7 @@ DECLARE
   v_member_count bigint;
   v_distinct_member_count bigint;
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(false);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider operation command requires provider executor'
       USING ERRCODE = '42501';
@@ -14294,6 +14330,7 @@ CREATE FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id 
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -14362,6 +14399,7 @@ DECLARE
   v_child_job_id uuid;
   v_has_receipt boolean;
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider membership command requires provider executor'
       USING ERRCODE = '42501';
@@ -14970,6 +15008,69 @@ CREATE FUNCTION ops.is_valid_feature_update_scope_0075(p_scope_type text, p_scop
 
 
 ALTER FUNCTION ops.is_valid_feature_update_scope_0075(p_scope_type text, p_scope jsonb) OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: lock_provider_feature_tracking_protocol(boolean); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.lock_provider_feature_tracking_protocol(p_finalizing boolean) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_protocol_held boolean;
+    v_protocol_exclusive boolean;
+    v_lineage_held boolean;
+    v_lock_timeout text := current_setting('lock_timeout');
+BEGIN
+    IF p_finalizing IS NULL THEN
+        RAISE EXCEPTION 'provider tracking prefix mode must not be null'
+            USING ERRCODE='22023';
+    END IF;
+    SELECT COALESCE(bool_or(mode IN ('ShareLock','ExclusiveLock')),false),
+           COALESCE(bool_or(mode='ExclusiveLock'),false)
+    INTO v_protocol_held,v_protocol_exclusive
+    FROM pg_catalog.pg_locks
+    WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+      AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+      AND classid=1369104691 AND objid=115 AND objsubid=2;
+    -- canonical advisory_lock_key('kortravelmap:pipeline-lineage:mutation'):
+    -- unsigned BLAKE2b64 - 2^63 = 6832465333779826081; bigint lock subid=1.
+    SELECT EXISTS(
+        SELECT 1 FROM pg_catalog.pg_locks
+        WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+          AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+          AND classid=1590807301 AND objid=1746797985 AND objsubid=1
+          AND mode='ExclusiveLock'
+    ) INTO v_lineage_held;
+    IF p_finalizing AND v_lineage_held AND NOT v_protocol_exclusive THEN
+        RAISE EXCEPTION 'provider finalization cannot acquire protocol after lineage'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_prefix';
+    END IF;
+    IF NOT p_finalizing AND v_protocol_held
+       AND NOT (v_protocol_exclusive AND v_lineage_held) THEN
+        RAISE EXCEPTION 'provider leaf cannot acquire lineage after a data writer'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_prefix';
+    END IF;
+    -- 기존 유한 caller timeout은 보존한다. 미설정 direct SQL의 새 L 대기만 유한화한다.
+    IF current_setting('lock_timeout')='0' THEN
+        PERFORM set_config('lock_timeout','1s',true);
+    END IF;
+    IF p_finalizing THEN
+        PERFORM ops.lock_scoped_feature_write_protocol(true);
+    END IF;
+    -- 보유 관측이 session lock이어도 성공 경로에는 항상 xact L을 재확보한다.
+    -- 관측만으로 session/xact의 과거 취득 순서를 attest하지 않는다.
+    PERFORM pg_advisory_xact_lock(6832465333779826081::bigint);
+    PERFORM set_config('lock_timeout',v_lock_timeout,true);
+EXCEPTION WHEN OTHERS THEN
+    PERFORM set_config('lock_timeout',v_lock_timeout,true);
+    RAISE;
+END;
+$$;
+
+
+ALTER FUNCTION ops.lock_provider_feature_tracking_protocol(p_finalizing boolean) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: lock_scoped_feature_write_protocol(boolean); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
@@ -16028,6 +16129,7 @@ DECLARE
   v_replayed boolean;
   v_stale_input boolean;
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -16183,6 +16285,7 @@ CREATE PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider terminal command requires provider executor'
       USING ERRCODE = '42501';
@@ -18984,7 +19087,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -28729,6 +28832,14 @@ GRANT ALL ON PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_
 
 REVOKE ALL ON FUNCTION ops.finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION lock_provider_feature_tracking_protocol(p_finalizing boolean); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.lock_provider_feature_tracking_protocol(p_finalizing boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.lock_provider_feature_tracking_protocol(p_finalizing boolean) TO ktm_feature_runtime;
 
 
 --

@@ -36,7 +36,7 @@ from kortravelmap.infra.models import (
 )
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
-    lock_pipeline_lineage_mutation,
+    lock_provider_feature_finalization,
     resolve_pipeline_cancellation_scope,
 )
 
@@ -738,12 +738,39 @@ async def test_tx3_and_failure_have_no_bidirectional_deadlock(
                     message="forced failure",
                 )
 
-    if first_owner == "phase":
-        phase_task = asyncio.create_task(run_phase())
-        await phase_lock_acquired.wait()
+    tasks: list[asyncio.Task[None]] = []
+    try:
+        if first_owner == "phase":
+            phase_task = asyncio.create_task(run_phase())
+            tasks.append(phase_task)
+            await phase_lock_acquired.wait()
 
-        async def cancel_after_phase() -> None:
-            async with AsyncSession(migrated_engine) as cancellation, cancellation.begin():
+            async def cancel_after_phase() -> None:
+                async with AsyncSession(migrated_engine) as cancellation, cancellation.begin():
+                    await cancellation.execute(text("SET LOCAL lock_timeout = '2s'"))
+                    scope = await resolve_pipeline_cancellation_scope(
+                        cancellation,
+                        kind="import_job",
+                        execution_id=prepared.root_job.job_id,
+                    )
+                    assert scope is not None
+                    await create_pipeline_cancellation_attempt(
+                        cancellation,
+                        scope=scope,
+                        requested_by="admin:test",
+                        reason="phase-first barrier",
+                    )
+
+            cancellation_task = asyncio.create_task(cancel_after_phase())
+            tasks.append(cancellation_task)
+            await asyncio.sleep(0.05)
+            assert cancellation_task.done() is False
+            release_phase.set()
+            await phase_task
+            await cancellation_task
+        else:
+            async with AsyncSession(migrated_engine) as cancellation:
+                await cancellation.begin()
                 await cancellation.execute(text("SET LOCAL lock_timeout = '2s'"))
                 scope = await resolve_pipeline_cancellation_scope(
                     cancellation,
@@ -751,38 +778,23 @@ async def test_tx3_and_failure_have_no_bidirectional_deadlock(
                     execution_id=prepared.root_job.job_id,
                 )
                 assert scope is not None
+                await lock_provider_feature_finalization(cancellation)
+                phase_task = asyncio.create_task(run_phase())
+                tasks.append(phase_task)
+                await phase_lock_attempted.wait()
                 await create_pipeline_cancellation_attempt(
                     cancellation,
                     scope=scope,
                     requested_by="admin:test",
-                    reason="phase-first barrier",
+                    reason="cancellation-first barrier",
                 )
-
-        cancellation_task = asyncio.create_task(cancel_after_phase())
-        await asyncio.sleep(0.05)
-        assert cancellation_task.done() is False
+                await cancellation.commit()
+            with pytest.raises(BatchDagCancellationWon):
+                await phase_task
+    finally:
+        # 실패해도 phase가 행 잠금을 쥔 채 fixture 정리와 경합하지 않도록 회수한다.
         release_phase.set()
-        await phase_task
-        await cancellation_task
-    else:
-        async with AsyncSession(migrated_engine) as cancellation:
-            await cancellation.begin()
-            await cancellation.execute(text("SET LOCAL lock_timeout = '2s'"))
-            scope = await resolve_pipeline_cancellation_scope(
-                cancellation,
-                kind="import_job",
-                execution_id=prepared.root_job.job_id,
-            )
-            assert scope is not None
-            await lock_pipeline_lineage_mutation(cancellation)
-            phase_task = asyncio.create_task(run_phase())
-            await phase_lock_attempted.wait()
-            await create_pipeline_cancellation_attempt(
-                cancellation,
-                scope=scope,
-                requested_by="admin:test",
-                reason="cancellation-first barrier",
-            )
-            await cancellation.commit()
-        with pytest.raises(BatchDagCancellationWon):
-            await phase_task
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)

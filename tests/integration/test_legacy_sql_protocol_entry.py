@@ -127,7 +127,12 @@ async def test_actual_entry_owner_acl_and_first_begin(scalar_engines: Any, name:
     admin, _ = scalar_engines
     routine = await _routine(admin, name)
     assert routine.owner == _OWNERS[name]
-    assert routine.body.partition("\nBEGIN\n")[2].lstrip().startswith(_PROTOCOL)
+    first_entry = (
+        "PERFORM ops.lock_provider_feature_tracking_protocol(true);"
+        if name == "finalize_provider_curation_root"
+        else _PROTOCOL
+    )
+    assert routine.body.partition("\nBEGIN\n")[2].lstrip().startswith(first_entry)
     assert routine.body.count(_PROTOCOL) == 1
     assert not routine.public_execute
     assert not routine.runtime_execute
