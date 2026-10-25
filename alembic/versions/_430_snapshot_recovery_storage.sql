@@ -57,7 +57,8 @@ CREATE TABLE ops.provider_snapshot_controls (
             AND postprocessed_at IS NOT NULL)),
     CONSTRAINT ck_provider_snapshot_private_postprocess CHECK(
         (postprocess_txid IS NULL AND postprocess_intent_sha256 IS NULL)
-        OR (status='applied' AND postprocess_txid>0 AND postprocess_intent_sha256 IS NOT NULL
+        OR (status='applied' AND postprocess_txid IS NOT NULL AND postprocess_txid>0
+            AND postprocess_intent_sha256 IS NOT NULL
             AND postprocess_intent_sha256 ~ '^[0-9a-f]{64}$')),
     CONSTRAINT ck_provider_snapshot_private_seal CHECK(
         seal_txid IS NULL OR (status='postprocessed' AND seal_txid>0)),

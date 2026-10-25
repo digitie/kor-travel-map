@@ -20,3 +20,5 @@ Docker Dagster image의 설치 완료 후 root 소유 receipt를 생성한다. M
 설치 버전이 같아도 Python/native 파일이 바뀌면 pin을 거부하며, development/missing revision과 비정본 receipt도 거부한다. 이 경계의 순수 회귀9개가 통과했다. 실제 image build/파일 수·크기·검증 시간 측정은 아직 남아 있다. 기본 비활성은 기존 등록 입력의 재수집 허가가 아니며 caller가 등록 존재를 먼저 확인해야 한다.
 
 독립 소스 리뷰에서 begin/finish의 receipt byte identity를 transaction marker만으로는 고정하지 못하는 경계를 확인했다. begin에서 receipt SHA도 저장하고 finish가 같은 SHA를 확인하도록 보강했다. 두 marker는 함께 설정·해제하며 실제 PG 반례 검증은 남아 있다. 공항 codec은 표준 JSON을 사용하므로 설치 inventory는 미사용 msgpack 대신 실제 Dagster 공통 실행 코드인 kor-travel-common을 포함한다.
+
+같은 리뷰의 추가 대조에서 NULL txid/유효 intent SHA 조합이 SQL CHECK의 UNKNOWN으로 허용되는 저장 계약 문제를 확인했다. txid의 명시 IS NOT NULL 조건을 추가했다. 기존 finish의 DISTINCT FROM 거부는 유지하며 실제 제약 검증은 전체430 시험에 포함한다.
