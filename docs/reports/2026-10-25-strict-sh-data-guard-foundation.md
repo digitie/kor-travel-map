@@ -1,4 +1,4 @@
-# Strict SH 데이터 guard foundation429 — 정의만 작성한 첫 checkpoint
+# Strict SH 데이터 guard foundation429 — 비활성 정의와 owned 검증
 
 ## 범위
 
@@ -188,3 +188,46 @@ PG는 아직 실행하지 않았다. 제품 SQL·공유 fixture 변경은0이다
 이력0/1000과 실제 applying1 조건에서 정확 내부 SELECT의 EXPLAIN/BUFFERS, 실제 helper
 호출의 CPU/wall을 분리 실측해야 한다. 바깥 EXPLAIN으로 SPI 내부 비용을 주장하지 않는다.
 이 checkpoint는 성능 코드·인덱스 변경이나 새 PG 실측을 포함하지 않는다.
+
+## 공식429 oracle와 최신 main·공항427 상속
+
+| 실제 실행 | 고정 source | XML 시간 | 범위 |
+| --- | --- | --- | --- |
+| owned30 PASS | 95e980b60 | 14.969초 | 최초30 경계·권한·정책/lifecycle 거부 |
+| 새11 PASS | cba93b900 | 17.086초 | 기존 SH batch 정상 commit·8관계 대표 target 거부·설치 중 DDL rollback·기존 Geo stamp UPDATE |
+| 공식oracle1 PASS | cba93b900 | 33.281초 | canonical300 fresh bootstrap→429 dump 생성·공식 재dump 비교 |
+
+각 console 시간은15.61/17.67/34.01초다. source 파일의41개 수집과 별도 실제30/11을
+구분하며, 단일 최종 source에서41개를 한 번 실행했다고 주장하지 않는다. 원514의
+25 PASS/5 FAIL과 누락 post검사·별도 읽기 보충도 보존하고 성공 수에 합산하지 않는다.
+두 owned 실행에서 원33개 trigger의 명시 설치는 전용 fixture에만 있었고 운영 설치는0이다.
+
+공식 bootstrap은 runtime reconcile을 호출하지 않았으며 새 audit dump를 공식 구현으로
+재dump해 비교했다. 기존 tracked428 oracle를429의 의미적 정답으로 삼지는 않았다.
+새 dump SHA256은 `893e61bb8532bc1dd0c9c4d56aeec7941af33eac649a32bd9ca40ea305b3175f`다.
+parent428의1655 block에서1665 block으로, 신규 private함수5+ACL5와 receipt CHECK의429
+literal1개만 달라진다. 기존 객체 제거0, 기존 trigger block 전체가 같고33개 strict guard의
+자동 설치도0이다. 네 state-owner 함수는 schema-owner dependency EXEC만, schema-owner
+installer는 추가 EXEC grant 없이 PUBLIC 회수 상태다.
+
+공식 실행의 source2428/SDK53 전후·실제9 Git import, 새11의 실제17 Git import와 정확
+CID/UUID0/global scalar0/volume1 정리를 확인했다. 비용·RSS·ARM 성능 수용은 아니다.
+공식 oracle 뒤 검토된 root428 최종 `c98a0bce3546419489034c628d0109c97cc06d96`을 상속한다.
+최신 main의 가격 이력 API와 최종427 준비 함수·시험·문서 suffix를 부모 그대로 보존하며
+429 제품 SQL과 기존 시험은 cba 그대로다. dump만 실제 생성된429 파일로 채택한다.
+
+이 단계는 기본 대표 DML와 정상 scalar batch commit을 확인했을 뿐 전체 mutation 조합을
+닫지 않는다. cancellation/pool 물리 정리, context 내부 SELECT plan/CPU 비용, 전체39관계/
+126루틴 writer closure, whole capture fresh lock/RC 전환, durable 자동복구·두 collector·
+운영 활성화·배포는 OPEN이다. 최종 합성 source 두 검토와 정확 head CI도 별도이며,
+private installer는 기존 activation 경로에서 여전히 호출하지 않는다.
+
+### 최종 receipt 실행 배선 규약 정정
+
+최종 정적 검사86개 중84 PASS/2 FAIL(14.90초)은 receipt 검사가 실행 문장을
+`_UPGRADE_STATEMENTS` tuple에서 추출하는 규약과 새 migration의 직접 execute 배선이
+맞지 않아 발생했다. 실제 공식 dump의 CHECK에는429가 포함돼 있었고 원 실패는 보존했다.
+검사를 완화하지 않고 같은 CHECK 문자열을 정본 tuple/loop로 실행하도록 정렬했다.
+CREATE 권한 유무 양쪽의 실제 Python upgrade 실행 trace는 각각28/26문장으로 변경 전후
+완전히 같으며 SQL·role·GUC·순서는 유지된다. 정정 뒤 같은 정적86개가13.96초에 통과했다.
+새 PG 실행은 없으며 앞의 실제 oracle와 owned 결과를 새 실행으로 합산하지 않는다.

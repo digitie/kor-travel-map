@@ -5,8 +5,8 @@
 기존 `current_provider_curation_input_set`의 네 집계값과 hash/date/정렬 계약을
 보존하면서, 전체 현재집합이 작은 안전한 형태인지 먼저 검사하는 내부 함수를 추가한다.
 SQL·migration·권한 정본과 시험 코드를 추가하고 427 부모를 상속했다. 두 source 검토 뒤
-실제 PostgreSQL 통합37개와 fresh bootstrap 공식 oracle1개가 통과했다. 최종 덤프·문서
-두 검토와 CI는 아직 수용 전이다.
+실제 PostgreSQL 통합37개와 fresh bootstrap 공식 oracle1개가 통과했다. 덤프·문서 두 검토를 확인했고 최신 공항427·main을
+상속했다. 최종 CI는 아직 수용 전이다.
 새로운 공개 API/DTO나 collector 호출, RC 전환, SH 활성화는 없다.
 
 ## 검사 순서와 예산
@@ -124,4 +124,12 @@ schema owner EXEC와 schema receipt CHECK만 달라진다. 기존 객체 제거�
 
 이는 synthetic x86 격리 시험이다. 실제 공항15·수집 HTTP·ARM CPU/RSS 저감·RC/SH
 쓰기·전체 writer closure·내구성 복구·운영 배포·Common/Weather/Transport 전파 수용은
-아직 미완이다. 뒤 427 준비 함수와 최종 parent 합성/정확 head CI를 마쳐야 한다.
+아직 미완이다. 공항427 준비 함수의 의미 보강과 최신 main 상속을 마쳤으며 정확 head CI를 마쳐야 한다.
+
+## 최종 공항427과 최신 main 상속
+
+427의 R2/currentR3 비이름 의미 보강과 실제 synthetic1→15 재검증을 마친70cb를
+상속했다. 최신 main의 가격 이력 API 후속 변경도 그대로 포함한다. 428의 SQL/권한/
+시험과 검증된428 공식 dump는 변경하지 않는다. 부모427의 세 SQL body가 그대로이므로
+427 dump로428 golden을 덮어쓰지 않는다. 최종 합성은 별도 두 리뷰와 CI로 확인하며,
+실제37/공식1 증거를 새 실행으로 부풀리지 않는다.

@@ -1,11 +1,20 @@
-## 2026-10-25 비활성 strict SH guard429 정의
+## 2026-10-25 비활성 strict SH guard429 owned 검증
 
-- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 95e owned30 PASS와 정리를 확인했고 첫25 PASS/5 FAIL은 보존했다. 정상 fullbatch/8target/설치 rollback과 기존 stamp UPDATE의 새11개는 source만 작성했으며 제품 SQL·RC/SH 활성화는 변경0이다.
-- 검토된428 부모와 소유 역할별 ACL 정본을 합성했으며, 전체 수용은 미완이며 원 FAIL/누락 post검사·별도RO보충을 보존한다. 정책 없는 target 우회 P2를 active policy/lifecycle 검사와 새5개 source로 보강했고 retired fixture의 typed 상태 계약도 순수 검증했다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
+- 별도 source의 실제30/새11과 공식oracle1 PASS·정리를 확인했다. 원25 PASS/5 FAIL은 보존하며 단일41 실행으로 세지 않는다.
+- 검토된 root428c98·최신 main/공항427 부모와 실제429 dump를 상속한다. 제품 SQL·공유 fixture는 유지한다. 최종 두 검토/정확 CI·성능·취소/pool·전체 closure·RC/복구/SH 운영은 미완이다. [범위·근거](reports/2026-10-25-strict-sh-data-guard-foundation.md).
 
 ## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
 
-실제 PG16.14에서 통합37 PASS/15.798초, fresh bootstrap 공식 oracle1 PASS/22.897초를 확인했다. 덤프를 갱신했으며 기존 실패와 시험 수정 기록을 보존한다. 최종 source 두 검토·CI, SH/RC/복구 연결과 운영 배포는 미완이다. [범위·예산·검증](reports/2026-10-25-bounded-curation-capture.md).
+실제 PG16.14에서 통합37 PASS/15.798초, fresh bootstrap 공식 oracle1 PASS/22.897초를 확인했다. 덤프를 갱신했으며 기존 실패와 시험 수정 기록을 보존한다. 검토된 최신 공항427·main을 상속했으며 최종 CI, SH/RC/복구 연결과 운영 배포는 미완이다. [범위·예산·검증](reports/2026-10-25-bounded-curation-capture.md).
+
+### 2026-10-25 공항427 준비 경계 소스
+
+정본 converter/loader 기반 공항1→15·R1/R2/Geo 시험1개와 비활성 준비 함수를 추가했다.
+순수12 PASS 뒤 첫 실제1FAIL을 보존했다. N1 단언 후 EX plan을 SH entry로 호출한
+시험1곳을 EX entry로 정정하고 b3b synthetic15 실제1 PASS·공식oracle1을 확인했다.
+R2/R3 비이름 의미 P2 반례2FAIL→순수157 PASS로 보강하고 두 source/binding 리뷰 뒤
+c63 재검증1 PASS15.246s·complete15와 정리를 확인했다. 운영15fit·collector·SH·EXPLAIN/
+peak·최종CI는 미완이며 현재PG0다.
 
 ## 2026-10-25 공항427 key/index 보강
 
@@ -20,6 +29,10 @@
 ## 2026-10-25 — 공항 reader Geo 계약(427, 부분)
 
 - 원천 hash32/Geo digest64 혼동을 정정하고 원실패를 보존했다. 순수 Geo28개 경계이며 SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
+
+## 2026-10-25 — 가격 추이 본문 읽기 Low 3건(#1365 리뷰 후속)
+
+- gzip 끝 뒤 bytes는 `upstream_contract`, 쓰이지 않던 `DecodingError` catch 제거, 503 본문 읽기 중 끊김은 `upstream_unavailable`.
 
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 

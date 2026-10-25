@@ -1,5 +1,5 @@
 {
-  "상태": "427 구현 source checkpoint. 작성자 열 대조만 완료; 독립 fullSQL/실제 DB/권한/oracle/positive/negative/snapshot/peak는 미완.",
+  "상태": "427 SD/inventory와 준비 함수 의미 P2 delta의 독립 두 source 리뷰를 확인했다. 순수157 PASS와 c63 실제 synthetic15 재검증1 PASS, 별도 b3b 공식 oracle1을 확인했다. 운영/collector/SH 수용은 미완이다.",
   "상한단위": "압축되지 않은 direct stored datum byte. flattened 예산은 측정byte+4로 누적한다. payload 길이와 datum header를 혼동하지 않는다.",
   "metadata_only_fixed_columns": [
     "UUID",
@@ -321,11 +321,18 @@
     }
   },
   "Airport427_실제증거": {
-    "PG": false,
-    "official_oracle": false,
-    "positive": false,
+    "PG": true,
+    "official_oracle": true,
+    "positive": true,
+    "source_checkpoint": "c63ea8f6324d876c1e06adccb5e0686e69d9d748",
+    "positive_scope": "단일 소유 synthetic 공항1→15/전부유좌표·called Geo context/EX 이름R2·비이름R1 유지/complete15. 운영15fit나upstreamEOF 아님",
+    "actual_case_seconds": "15.246",
+    "official_dump_sha256": "c0effcbcab7b7c86aee57afb176aa6aaf7cad702f8550fb336f446626d1e64b4",
     "API_startup": false,
-    "collector_or_SH": false
+    "collector_or_SH": false,
+    "새_Python_P2_보강_실제재검증": true,
+    "official_oracle_source_checkpoint": "b3b0aa724c48786262337a2ec62c45c2b9b9561d",
+    "actual_facts_sha256": "47fce66d526a26f335818cdb5ca9a7e4eb4e31563016130d08dbc78f96dc9fcf"
   },
   "논리key비교": "원collation의 immutable octet_length(text)<=256 CASE. 신규3 expression index/모든4 lookup은 동일::text 식이며 기존Btree pivot를 재사용하지 않는다. 실제EXPLAIN/cost는미완."
 }
