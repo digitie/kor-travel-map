@@ -1,5 +1,11 @@
 # 공항 snapshot 후처리의 원자적 저장과 제한된 정리
 
+## 현재 검증 상태
+
+합성 source `3f5983244d0e0ff6a413af3f20e2b4b825b6dded`의 owned PostgreSQL 시험은 15 PASS/실패·오류·skip0이다. 실제300→430 설치, service LOGIN·private ACL/startup, ORM 반사, 짧은 GUC 보존, 실제 적용 후 후처리의 부분 실패 rollback·원 receipt 재생, receipt 교체/불완전 marker 거부, 두 null 표현의 정본 capture와 비-null 영업시간 거부를 확인했다. 결과 SHA-256은 `8f98929c14f199f28d70187e703c8aac71b87d55ef89fcd44ed172a2da48590d`이며 정확 CID·고유 label·볼륨 정리와 source/SDK 전후 검사를 통과했다.
+
+아래 구현 당시의 검증 기록은 시간순 이력이다. terminal GC16 실제 시험과 scheduled caller 재개 시험, 공식430 oracle, 최종 합성 CI·두 적대 리뷰·live UI·운영 배포는 별도 수용 전이다. 기존 실패 원문은 보존한다.
+
 ## 구현 범위
 
 - 등록된 원 입력·관측·적용 결과에서 후처리 intent를 다시 검증한다. 기존 발견사항 저장, 원 counter와 수집 시각의 sync cursor, stale 발견사항 정리를 한 READ COMMITTED transaction에 결합한다.
@@ -11,7 +17,7 @@
 
 전용 transaction/backend 순수 회귀10개가 통과했다. 같은 connection 결합, 부분 실패·취소 rollback, 저장 receipt replay와 commit 응답 손실을 확인했다. Ruff와 제품 Python4파일 mypy도 통과했다. 이 결과는 실제 PostgreSQL 효과나 운영 검증을 대체하지 않는다.
 
-새 SQL은 전체430 migration·명시 ACL·실제 scheduled caller와 함께 합성해야 하며 단독 설치하지 않는다. 실제 PG의 stale executor/새 적용/실패 세대/권한/후처리 atomicity/정리 ledger 시험, 두 적대 리뷰, 전체 CI·live UI 및 운영 배포는 아직 남아 있다. 임시 quota는 메모리·CPU 실측 튜닝 결과가 아니다.
+새 SQL은 전체430 migration·명시 ACL·실제 scheduled caller와 함께 합성하며 단독 설치하지 않는다. 실제 후처리 atomicity·권한의 위15건을 확인했고, stale executor/새 적용/실패 세대/정리 ledger의 추가 시험, 최종 두 적대 리뷰, 전체 CI·live UI 및 운영 배포는 아직 남아 있다. 임시 quota는 메모리·CPU 실측 튜닝 결과가 아니다.
 
 ## 실제 설치본 pin
 
@@ -36,3 +42,5 @@ Docker Dagster image의 설치 완료 후 root 소유 receipt를 생성한다. M
 네 번째 실제 시험은 startup/ORM/GUC3 PASS/후처리2 FAIL이다. 새 typed capture의 동일 TX·owner 검증까지 통과했으나 bounded capture가 불완전으로 거부했다. 임의 허용 대신 고정 reason 코드만 오류 detail에 노출해 다음 시험에서 거부 원인을 확인한다. payload·주소·SQL은 오류에 추가하지 않는다.
 
 다섯 번째 실제 시험도 startup/ORM/GUC3 PASS/후처리2 FAIL이며 고정 거부 코드는 `shape_unsupported`였다. 426 native materializer가 빈 영업시간을 JSON null로 저장하는 반면 428은 SQL NULL만 허용하는 불일치를 소스에서 확인했다. 428 원본은 유지하고 430 forward 정의에서 SQL NULL과 JSON null만 동등하게 허용한다. 정본 `to_jsonb(place)`의 지문, 크기·수량·기타 형태 제한, private ACL은 유지한다. 두 null 표현의 정본 4집계 대조와 object/array/number/string 영업시간 거부를 실제 회귀에 추가했으며 새 실제 통과는 아직 미확인이다.
+
+후처리의 세대 경계를 실제로 검증하기 위해 새 generation 예약만 한 수집은 원 성공을 버리지 않는 사례, 두 번째 실제 적용이 원 후처리를 대체하는 사례, 더 최신 sync cursor를 덮어쓰지 않는 사례를 추가했다. 모두 실제 등록/native apply/DB 저장 경로를 사용하며 새3건은 수집6건 확인만 끝났고 실행은 아직 미완이다.
