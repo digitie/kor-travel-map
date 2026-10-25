@@ -119,6 +119,8 @@
 
 선행: T-CWRITE-03. 수집 concurrency만 바꾸어 완료하지 않는다.
 
+첫 운영 후보는 [공항·휴게소 구현 순서](reports/2026-10-25-transport-small-native-pair-design.md)의 여섯 단계로 세분화한다. 순수 계약·전체 크기 실측·명시 reader/EX baseline·strict closure/복구·실제 두 worker는 각각 미완이며, 아래 체크를 대신하지 않는다. 기존 Geo 재사용을 통과하는 unchanged raw 재관측이 최초 범위다.
+
 - [ ] 첫 policy 활성화 및 이후 변경은 배타 protocol gate 아래 영향 closure와 head/membership를
   재검증하고 winner/base/effective/Geo stamp·seal 의존·cache/outbox 및 active revision을 한
   transaction으로 바꾼다. writer 경쟁·계획 뒤 head 변경·절반 재계산 시 장애를 주입해 성공 전환

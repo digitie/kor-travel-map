@@ -1,10 +1,13 @@
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 
 - 기존 SER/capture/kernel/SH OFF를 보존했다. 직접25·정본oracle1·기존 client4와 별도 ASGI1(503→새요청200→재요청200)·fresh triple7을 검증했다. 공유 cutover DB의 통합11 원실패(9 PASS/2 FAIL)는 보존·합산하지 않는다. 정확 CI·운영·whole snapshot은 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
+## 2026-10-25 — 첫 동시 수집 후보 설계(미구현)
+
+- 공항15·휴게소215를 읽기 전용으로 확인하고 기존 fetch/Geo 차이를 반영한 [구현 순서](reports/2026-10-25-transport-small-native-pair-design.md)를 정리했다. 전체 크기·적격성·실제 두 worker·복구·운영은 미완, T-CWRITE-04/06/07 체크는 유지한다.
 
 ## 2026-10-25 — EX context 단일 조회(423)
 
-- 기존 검증·권한을 보존한 단일 조회에서 실제9 PASS(15.406초), 별도 공식 fresh oracle1 PASS(20.551초)를 확인했다. 부모1641블록 중1639동일/ACL보존, 초기 감사 setup오류는 별도 보존한다. 최종CI/API startup·비용·운영은 미완이다. [근거·범위](reports/2026-10-25-exclusive-context-single-select.md).
+- 기존 검증·권한을 보존하고 실제9 PASS, 별도 공식 oracle1 PASS/ACL보존, schema423 API startup1 PASS/고정GET3을 확인했다. 초기 감사 실패는 보존한다. 함수A/B6회는 뚜렷한 전체 CPU 개선을 입증하지 못했다. 최종 정확CI·collector/운영은 미완이다. [근거·한계](reports/2026-10-25-exclusive-context-single-select.md).
 
 ## 2026-10-25 — scalar batch 내부 실행 단계 분리
 
