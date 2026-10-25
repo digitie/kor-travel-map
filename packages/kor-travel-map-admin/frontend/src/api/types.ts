@@ -2602,6 +2602,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/admin-features": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Features
+         * @description pinvi:admin-features:read 전용. 기존 admin Feature 필터와 DTO를 공유한다.
+         */
+        get: operations["service_admin_features_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/admin-features/{feature_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Feature Detail Route
+         * @description pinvi:admin-features:read 전용. 기존 alias 해석과 전체 admin DTO를 공유한다.
+         */
+        get: operations["service_admin_features_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/cache-target-event-acks": {
         parameters: {
             query?: never;
@@ -24210,6 +24250,110 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PublicFestivalDetailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    service_admin_features_list: {
+        parameters: {
+            query?: {
+                /** @description name/address/feature/source 검색 */
+                q?: string | null;
+                /** @description feature kind 반복 필터 */
+                kind?: string[] | null;
+                /** @description category code 반복 필터 */
+                category?: string[] | null;
+                /** @description lifecycle 축 반복 필터. */
+                lifecycle_state?: ("active" | "retired")[] | null;
+                /** @description publication 축 반복 필터. */
+                publication_state?: ("draft" | "published" | "suppressed")[] | null;
+                /** @description quality 축 반복 필터. */
+                quality_state?: ("valid" | "quarantined")[] | null;
+                /** @description primary provider dataset canonical ID 필터 */
+                provider_dataset_id?: number | null;
+                has_coord?: boolean | null;
+                has_issue?: boolean | null;
+                issue_type?: string[] | null;
+                updated_from?: string | null;
+                updated_to?: string | null;
+                /** @description 종료된 notice(수집 feed 소멸·해제로 valid_end_time 채워진 것) 포함 여부. 기본 false — 수집에 없는 notice는 과거 자료로 노출하지 않는다. */
+                include_ended?: boolean;
+                page_size?: number;
+                cursor?: string | null;
+                sort?: "name" | "updated_at" | "created_at" | "kind" | "provider" | "issue_count";
+                order?: ("asc" | "desc") | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeaturesListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    service_admin_features_detail: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AdminFeatureDetailResponse"];
                 };
             };
             /** @description Validation Error */

@@ -64,6 +64,7 @@ __all__ = [
     "require_cache_target_service_scope",
     "require_curation_cutover_service_principal",
     "require_curation_snapshot_service_principal",
+    "require_pinvi_admin_features_read_service_principal",
     "require_feature_request_service_principal",
     "require_feature_reference_reconciliation_ack_service_principal",
     "require_feature_reference_reconciliation_read_service_principal",
@@ -734,6 +735,7 @@ async def _require_scoped_service_principal(
             _token_digest(settings.service_token.get_secret_value()),
         )
     for other_digest in (
+        settings.pinvi_admin_features_read_token_sha256,
         settings.pinvi_curation_snapshot_token_sha256,
         settings.pinvi_curation_cutover_mapping_token_sha256,
         settings.feature_request_token_sha256,
@@ -764,6 +766,24 @@ async def _require_scoped_service_principal(
         status.HTTP_401_UNAUTHORIZED,
         f"{error_prefix}_SERVICE_TOKEN_INVALID",
         f"{SERVICE_TOKEN_HEADER} 헤더가 유효하지 않습니다.",
+    )
+
+
+async def require_pinvi_admin_features_read_service_principal(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+    token: Annotated[str | None, Security(_service_token_scheme)] = None,
+) -> CurationSnapshotServicePrincipalContext:
+    """PinVi의 두 admin Feature GET만 허용하는 독립 principal을 확인한다."""
+
+    return await _require_scoped_service_principal(
+        request,
+        session,
+        token,
+        expected_digest=_settings(request).pinvi_admin_features_read_token_sha256,
+        scope="pinvi:admin-features:read",
+        principal_id="service:pinvi:admin-features:read",
+        error_prefix="PINVI_ADMIN_FEATURES_READ",
     )
 
 

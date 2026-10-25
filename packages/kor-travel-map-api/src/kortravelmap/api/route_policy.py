@@ -49,6 +49,7 @@ from kortravelmap.api.auth import (
     require_metrics_token,
     require_ops_fixture_principal,
     require_ops_operator,
+    require_pinvi_admin_features_read_service_principal,
     require_public_api_key,
     require_service_token,
 )
@@ -87,6 +88,9 @@ class RoutePolicyError(RuntimeError):
 
 #: 관측 가능한 enforcing dependency — dependency callable identity로만 판정한다.
 _ENFORCEMENT_BY_CALLABLE: dict[Callable[..., Any], str] = {
+    require_pinvi_admin_features_read_service_principal: (
+        "require_pinvi_admin_features_read_service_principal"
+    ),
     require_cache_target_service_principal: "require_cache_target_service_principal",
     require_curation_snapshot_service_principal: ("require_curation_snapshot_service_principal"),
     require_curation_cutover_service_principal: ("require_curation_cutover_service_principal"),
@@ -232,6 +236,8 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/service/curation-cutover/identity-mappings": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests": RoutePolicy.SERVICE,
     "/v1/service/refresh-requests/{request_id}": RoutePolicy.SERVICE,
+    "/v1/service/admin-features": RoutePolicy.SERVICE,
+    "/v1/service/admin-features/{feature_id}": RoutePolicy.SERVICE,
     "/v1/service/feature-requests": RoutePolicy.SERVICE,
     "/v1/service/feature-reference-reconciliations": RoutePolicy.SERVICE,
     "/v1/service/feature-reference-reconciliations/{event_id}/acks": RoutePolicy.SERVICE,
@@ -527,6 +533,7 @@ def _wiring_satisfied(row: RoutePolicyMatrixRow) -> bool:
         return bool(
             observed
             & {
+                "require_pinvi_admin_features_read_service_principal",
                 "require_service_token",
                 "require_cache_target_service_principal",
                 "require_curation_cutover_service_principal",

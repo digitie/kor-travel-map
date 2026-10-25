@@ -503,6 +503,16 @@ class ApiSettings(BaseSettings):
             "JSON 배열 ``KOR_TRAVEL_MAP_API_CACHE_TARGET_SERVICE_PRINCIPALS``."
         ),
     )
+    pinvi_admin_features_read_token_sha256: str | None = Field(
+        default=None,
+        min_length=64,
+        max_length=64,
+        description=(
+            "PinVi admin Feature 목록/단건 GET 전용 ServiceToken의 lowercase SHA-256 "
+            "digest. scope pinvi:admin-features:read이며 admin write 권한은 없다. env "
+            "KOR_TRAVEL_MAP_API_PINVI_ADMIN_FEATURES_READ_TOKEN_SHA256."
+        ),
+    )
     pinvi_curation_snapshot_token_sha256: str | None = Field(
         default=None,
         min_length=64,
@@ -941,6 +951,7 @@ class ApiSettings(BaseSettings):
         return self
 
     @field_validator(
+        "pinvi_admin_features_read_token_sha256",
         "pinvi_curation_snapshot_token_sha256",
         "pinvi_curation_cutover_mapping_token_sha256",
         "feature_request_token_sha256",
@@ -978,6 +989,7 @@ class ApiSettings(BaseSettings):
                 "configured together"
             )
         digests = {
+            "PinVi admin features read": self.pinvi_admin_features_read_token_sha256,
             "snapshot": self.pinvi_curation_snapshot_token_sha256,
             "cutover mapping": self.pinvi_curation_cutover_mapping_token_sha256,
             "feature request": self.feature_request_token_sha256,

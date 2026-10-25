@@ -1,3 +1,9 @@
+## 2026-10-25 · PinVi admin Feature 전용 읽기
+
+- 별도 digest/scope로 두 service GET에 기존 admin 목록·단건 함수와 DTO를 공유한다.
+  기존 BFF/write 권한은 유지하며 운영 provision·배포는 미완이다.
+  [계약·검증 범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
 
 ## 2026-10-25 · cancellation 원 backend cleanup 후보
 
