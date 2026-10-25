@@ -1,3 +1,18 @@
+## 2026-10-26 · Rest431 최종 제품과 격리 후보 추가 인수
+
+- e1b203bb의 supplied_fields 집합 순서만 정규화하는 제품4줄을 W/T가 독립 검토했다.
+  T의 seed41 회귀1PASS2.25초에서 동일 입력 수용·실제 name 변조 거부를 확인했다.
+  원65 CI6FAIL·seed41 수정 전 실패와 기존3fa reader/golden 실측은 그대로 보존한다.
+- 별도 e1b r5 reader는 XML1PASS52.627초/215 whole EOF·적격/257 whole 거부다.
+  215 client wall6.309399초·CPU2.168916초·JSON4,133,119B는 codec/두 reader/평가를 포함하며
+  backend CPU/RSS·실제 upstream EOF 수용으로 확대하지 않는다.
+- 운영 공개 원3FAIL과 **다른 격리 후보 첫 실행 a1f39의 1FAIL**을 구분한다. 첫 후보는
+  logout200 뒤 Error/보호401 미관측·possible_unrevoked=True를 영구 보존한다.
+  새 진단 r4의 원14PASS47.526초·보호401/5초 WS·DBattempt1·정확 정리(fb2c115c/e5562b78)는
+  그 원 Error 원인 확정이나 과거 미확정 철회가 아니다.
+- 정확 e1b 전체 CI 최종 수용·1415 main 반영은 작성 시점 미완이다. 1417은 그 뒤 문서만
+  재결합한다. 새 제품/PG/운영/활성화 변경 없이 [원문·범위](reports/2026-10-25-rest-area-evidence-reader.md)를 정산한다.
+
 ## 2026-10-26 · Map/PinVi 배포·공개 읽기·일정 복원 정산
 
 - Map #1414·#1411의5f3506a와 PinVi #602의8f1b998f를 공식2단계로 배포했다. 첫418 commit 뒤
