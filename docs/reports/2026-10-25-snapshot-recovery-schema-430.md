@@ -8,7 +8,7 @@
 
 ## 권한과 재시작 검사
 
-immutable artifact·control·quota limit·reservation 네 표는 일반 runtime/PUBLIC raw 권한이 없다. 등록/claim/read/plan/apply/reset/postprocess/GC는 CommandOwner의 typed 명령이다. 공개 typed 함수 11개와 member seal procedure만 provider executor에 부여한다. receipt validator와 executor lock helper는 직접 runtime EXEC가 없다. canonical bounded capture와 kernel 명령의 dependent EXEC도 실제 소유자 창에서 부여한다.
+immutable artifact·control·quota limit·reservation 네 표는 일반 runtime/PUBLIC raw 권한이 없다. 등록/claim/read/plan/apply/reset/postprocess/GC는 CommandOwner의 typed 명령이다. 공개 typed 함수 12개와 member seal procedure만 provider executor에 부여한다. receipt validator와 executor lock helper는 직접 runtime EXEC가 없다. canonical bounded capture와 kernel 명령의 dependent EXEC도 실제 소유자 창에서 부여한다.
 
 CommandOwner는 private 표에 필요한 SELECT/INSERT/UPDATE/DELETE만 받는다. immutable artifact UPDATE는 받지 않는다. reset attempt FOR UPDATE에는 UPDATE(attempt_id), 후처리 sync cursor FOR UPDATE에는 실제 `provider_sync.provider_sync_state`의 UPDATE(provider_dataset_id)를 추가한다. integrity scope/run SELECT·UPDATE와 finding observations SELECT를 명시한다. GC는 terminal 입력 삭제와 quota 반환에 필요한 private DELETE만 사용한다. baseline300~429에는 새 표·루틴이 없으면 기존 optional 규약으로 건너뛰며 head430에서는 누락을 오류로 다룬다.
 
@@ -54,3 +54,6 @@ Root는6006486에서 실제 GeoStats/builtin set 및 module 초기 seed1회로 f
 sourceac822의 한 owned DB5 대상은 startup/privateACL 및 GUC2 PASS, metadata/후처리3 FAIL이었다. 실제 startup service의 새 SD exact allowlist, private4표 raw table/column0, CommandOwner artifact UPDATE0/DELETE1과 inactive inventory 모드는 통과했다. metadata 원 CHECK 대조는 quota cross-column CHECK의 실제 자동명 `_check`/`_check1`과 ORM의 열명 기반 추정 두 곳 차이를 검출했다. SQL 식이나 실제 CHECK를 바꾸지 않고 ORM 이름 두 곳만 실제 catalog에 맞춘다.
 
 Root 실제 apply는 일반runtime에서 private bounded capture를 직접 호출한 지점에서 EXEC 거부로 멈췄다. private 함수 권한을 무조건 넓히지 않고 Root가 typed capture 경계를 수정한다. 뒤 marker case의 active owner는 앞 apply 실패가 남긴 ready plan과 같은 DS를 재사용한 연쇄 실패다. 원 결과/XML·정확 정리 결과와 별도 offline source2494/SDK53 post 동일성 관측을 보존했다. 본래 runner는 pytest FAIL 뒤 post 단계에 도달하지 않았으므로 이 보충을 runner PASS로 재해석하지 않는다. 실제 후처리 완료·재개·전체430 수용은 아직 미완이다.
+
+
+Root10696의 typed capture를 합성했다. 일반runtime에 private428 EXEC를 열지 않고, `ops.capture_provider_snapshot_apply_input_set(uuid,bigint,uuid)`의 현재 fence·prepared control·동일TX completed whole-SH attempt/owner/manifest/DS 확인 후 두 capture 값만 반환한다. wrapper는30개 routine 선언, 이 새 CommandOwner 함수의 revoke/grant와 optional/startup exact signature를 정렬했다. 기존 bounded capture 권한은 유지한다. Root fixture는 실패 시 자기 정확 ready attempt를 취소해 다음 case에 연쇄 lock owner를 남기지 않도록 정정했다.
