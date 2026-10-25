@@ -124,3 +124,22 @@ mypy1 PASS를 확인했다. 처음 존재하지 않는 graph 시험 파일명을
 실제 검증본 그대로이며429 공식 oracle가 아니다. 새 source 두 검토 뒤에만 별도 owned PG
 준비를 진행한다. 429 실제30·전체8 targets/정상 finish·설치 중 DDL rollback·취소/pool정리·
 전체 writer closure·RC·durable recovery·자동 설치·SH 활성화는 여전히 미완이다.
+
+## 첫 owned 실제30 — 시험 가정 정정 전 FAIL 보존
+
+514 source의 승인된 한 번 실행은 PG16.14/en_US.utf8에서25 PASS/5 FAIL이었다. XML
+시간은15.000초, pytest console은15.69초이며 전체 결과는 FAIL로 보존한다. disabled trigger
+관찰이 PostgreSQL char의 bytes `b'D'`를 문자열 `D`와 비교한1건, 정책 없는 target의
+4개 negative가 정확 guard23514와 rollback까지 통과한 뒤 loader의 실제 all-null object
+address를 SQL NULL로 잘못 가정한4건이다. 제품 SQL 오류가 재현된 것으로 해석하지 않는다.
+
+시험은 tgenabled를 명시 text로 읽되 기대 상태 D를 유지한다. address는 허용하거나
+성공으로 바꾸지 않고 실제 canonical load 뒤/SH TX 전의 현재 행 baseline과 rollback
+뒤 lifecycle·coord·address·payload 전체가 같음을 검사한다. 기존 guard의 SQLSTATE와
+constraint 기대값, 제품 SQL·ACL·예산은 그대로다. 이 시험 수정 후 실제 재실행은 아직0이다.
+
+첫 runner는 pytest 실패에서 중단되어 정상 source/SDK post 블록에 들어가지 못했다.
+따라서 이를 수행했다고 주장하지 않는다. 별도 읽기 전용 후관찰에서 source2428개
+bytes/OID/mode와 SDK53개 hash가 같고 실제 import13개가 고정 Git과 일치함을 확인했다.
+정확 CID/UUID0/global scalar0/volume1 부재도 saved cleanup과 새 조회로 확인했다.
+원8개 증거와 result를 보존하며, 보충 관찰로 원 FAIL을 PASS로 다시 쓰지 않는다.

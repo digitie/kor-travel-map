@@ -271,7 +271,7 @@ async def test_private_installer_rejects_drift_without_partial_repair(strict_eng
                 assert (
                     await session.scalar(
                         text(
-                            "SELECT tgenabled FROM pg_trigger WHERE "
+                            "SELECT tgenabled::text FROM pg_trigger WHERE "
                             "tgrelid='provider_sync.source_records'::regclass AND "
                             "tgname='trg_00_strict_sh_data_protocol'"
                         )
@@ -327,6 +327,15 @@ async def test_inside_manifest_without_active_policy_rejects_non_scalar_mutation
             )
             == 0
         )
+    async with AsyncSession(admin) as session:
+        before = (
+            await session.execute(
+                text("""SELECT f.lifecycle_state,f.coord,f.address,p.payload
+                FROM feature.features f JOIN feature.feature_places p USING(feature_id)
+                WHERE f.feature_id=:feature"""),
+                {"feature": feature},
+            )
+        ).one()
     plan, _ = await _plan(runtime, dataset, [ProviderScalarRefreshItem(feature, bundle)])
     statements = {
         "coord": """UPDATE feature.features SET
@@ -375,7 +384,8 @@ async def test_inside_manifest_without_active_policy_rejects_non_scalar_mutation
         ).one()
         assert row.lifecycle_state == "active"
         assert row.coord is None
-        assert row.address is None
+        assert row.address == before.address
+        assert tuple(row) == tuple(before)
         assert row.payload == bundle.feature.detail.payload
 
 
