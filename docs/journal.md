@@ -1,3 +1,9 @@
+## 2026-10-25 API task 취소·pool 경계 시험 소스
+
+실제 K 보유→P 대기 중 task 취소와 pool1 새 요청/replay를 독립 시험으로 준비한다.
+제품/SQL 변경·실제 PG0이며 [범위](reports/2026-10-25-pipeline-cancellation-task-pool.md)의
+소스 두 리뷰와 고정 실행기 승인 전 실행하지 않는다.
+
 ## 2026-10-25 — capture 권한 인벤토리 CI 정정
 
 c98 CI의 signature literal 검사 실패1개를 보존하고, 존재 검사를 pg_catalog 이름 조회·GRANT를 카탈로그 서명 치환으로 정렬한다. 역할/SQL/oracle은 유지하며 새 정확 CI는 미완이다. [근거](reports/2026-10-25-bounded-curation-capture.md).
