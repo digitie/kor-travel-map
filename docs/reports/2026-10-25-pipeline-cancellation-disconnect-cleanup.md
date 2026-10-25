@@ -37,15 +37,18 @@ pool slot을 회수한다. invalidated connection에서 proxy를 다시 얻거�
 보내지 않는다. AnyIO shield는 이 cleanup 경계에만 적용한다. 전체 business를 shield하거나
 cleanup task를 따로 남기지 않는다.
 
-동일 engine/LOGIN의 새 observer는 catalog SELECT만 읽는다. 원 PID+backend_start가
-activity에 없고 그 PID의 advisory 행도 없을 때만 termination confirmed이다. PID 재사용
-때 새 backend에 종료 신호를 보내지 않는다. 각 native SELECT는 autocommit의 새 snapshot이며
-query 본문·자격증명·타 세션의 SQL은 읽지 않는다. observer는 성공·실패 모두 폐기해
-readonly 설정/driver를 pool 재사용에 남기지 않는다.
+현재 보강의 동일 engine/LOGIN observer는 원 PID/backend_start·현재 LOGIN·client
+backend·observer 자신 제외를 한 SQL에서 대조해 일치한 세션에 종료 신호를 한 번 요청한다.
+숫자 PID만으로 종료 대상을 고르지 않는다. 신호 전달 뒤에도 원 PID/backend_start가
+activity에 없고 그 PID의 advisory 행도 없을 때만 termination confirmed이다. 각 native
+SELECT는 autocommit의 새 snapshot이며 query 본문·자격증명·타 세션의 SQL은 읽지 않는다.
+observer는 성공·실패 모두 폐기해 readonly 설정/driver를 pool 재사용에 남기지 않는다.
+535a의 과거 owned2 실측 당시에는 서버 종료 신호 없이 catalog 재조회만 사용했다.
 
 readback은 공유 0.6초, 개별 native statement 0.1초를 후보 경계로 둔다. 이 값은 정상
-업무 상한이 아니다. 아래 owned 2회귀에서 원 3초/zero-row 조건을 통과했지만
-별도 readback 시간의 일반 상한이나 모든 장애의 종료를 증명하지 않는다.
+업무 상한이 아니다. 아래 535a owned2 회귀에서는 원 3초/zero-row 조건을 통과했지만
+현재 종료 신호 보강의 실제 검증으로 전용하지 않는다. 별도 readback 시간의 일반 상한이나
+모든 장애의 종료를 증명하지 않는다.
 SQLAlchemy observer checkout의
 취소 회수도 하위 driver 종료를 기다릴 수 있으므로 단순 asyncio deadline을 모든 network
 blackhole에서의 절대 wall 상한으로 주장하지 않는다. 확인 실패는 false와 elapsed/error
