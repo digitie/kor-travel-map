@@ -1,3 +1,9 @@
+## 2026-10-25 · 전용 읽기 동결 소비 계약 정렬
+
+- 원3Python CI 각3FAIL/3826PASS를 보존하고 새 GET2의 baseline/동결 pending 대상 hash를
+  정렬했다. 원 receipt pending·과거 후보 증거·제품/스펙은 유지하며 계약18 PASS다.
+  [범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
 ## 2026-10-25 · Feature read/create 중복 자격 정정
 
 - 8555 독립 리뷰의 digest 중복 P2와 수정 전6 FAIL/1 PASS를 보존하고 정본 수동 생성

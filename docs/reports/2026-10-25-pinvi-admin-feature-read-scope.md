@@ -55,3 +55,16 @@ token과 TestClient DELETE 인자 오류를 확인했고 원 로그를 보존한
 전에도 PASS였으며 그대로 유지한다. 수정 뒤 새7개를 포함한 read/settings/auth 관련
 227 PASS/27.90초를 확인했다. 기존 admin body·권한·DTO와 OpenAPI bytes는 유지한다.
 이 정정의 독립 두 리뷰·새 CI·운영 provision과 pair/UI 인수는 별도다.
+
+
+## 동결 소비 계약과 CI 원 실패 정산
+
+488d의 Python3.11/3.12/3.13 CI는 각각 3826 PASS/7 SKIP/3 FAIL이었다.
+실패 세 개는 정본 OpenAPI를 갱신한 뒤 남은 vnext baseline·consumer rollout·현재
+pending receipt의 구 service hash였다. 원 로그를 보존하고 openapi-diff의
+admin/service baseline·새 GET2의 applied 항목 및 counts, pending receipt의 Map 대상
+hash와 변경 이유만 정렬했다. user bytes·기존 목표 계약·과거 PinVi vendor 필드와
+detached candidate 증거는 유지한다. 두 receipt는 여전히 pending이며 새 실제
+수용을 선언하지 않는다. 해당 artifact의 두 byte-pin은 실제 계산값으로 갱신했다.
+제품/API/DTO/권한·OpenAPI 변경 없이 동결 계약 모듈 전체18 PASS/1.31초다.
+새 정확 CI와 이 metadata delta의 독립 리뷰는 별도로 확인한다.
