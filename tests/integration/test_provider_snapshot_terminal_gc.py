@@ -13,7 +13,13 @@ from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
 )
 from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
-from tests.integration.test_provider_snapshot_registration import _SQL, _prepare, _quotas, _wire
+from tests.integration.test_provider_snapshot_registration import (
+    _SQL,
+    _bounded,
+    _prepare,
+    _quotas,
+    _wire,
+)
 from tests.integration.test_state_lifecycle_protocol_entry import (
     owned_scalar_resource_bounds as owned_scalar_resource_bounds,
 )
@@ -27,6 +33,7 @@ async def _aged_snapshot(engines, *, protect=None):
     dataset, run, _, args = await _prepare(admin, runtime)
     args.update(await _wire(run))
     async with AsyncSession(runtime) as session, session.begin():
+        await _bounded(session)
         row = (await session.execute(text(_SQL), args)).one()
         assert row.created is True
         snapshot = row.snapshot_id
@@ -131,11 +138,13 @@ async def test_terminal_gc_returns_exact_quota_and_rollback_preserves_original_r
             )
         ).all()
     async with AsyncSession(runtime) as session:
+        await _bounded(session)
         assert await session.scalar(text(_GC), {"limit": 1}) == 1
         await session.rollback()
     assert await _exists(admin, snapshot) is True
     assert await _quota_state(admin, dataset) == before
     async with AsyncSession(runtime) as session, session.begin():
+        await _bounded(session)
         assert await session.scalar(text(_GC), {"limit": 1}) == 1
     assert await _exists(admin, snapshot) is False
     assert await _quota_state(admin, dataset) == [
@@ -152,6 +161,7 @@ async def test_terminal_gc_returns_exact_quota_and_rollback_preserves_original_r
             )
         ).all() == jobs
     async with AsyncSession(runtime) as session, session.begin():
+        await _bounded(session)
         assert await session.scalar(text(_GC), {"limit": 16}) == 0
 
 
@@ -174,6 +184,7 @@ async def test_terminal_gc_preserves_active_or_unsettled_input(scalar_engines, p
     dataset, snapshot, _ = await _aged_snapshot(scalar_engines, protect=protect)
     before = await _quota_state(admin, dataset)
     async with AsyncSession(runtime) as session, session.begin():
+        await _bounded(session)
         assert await session.scalar(text(_GC), {"limit": 16}) == 0
     assert await _exists(admin, snapshot) is True
     assert await _quota_state(admin, dataset) == before
@@ -204,10 +215,12 @@ async def test_terminal_gc_obeys_batch_limit_with_multiple_eligible_inputs(scala
     first = await _aged_snapshot(scalar_engines)
     second = await _aged_snapshot(scalar_engines)
     async with AsyncSession(runtime) as session, session.begin():
+        await _bounded(session)
         assert await session.scalar(text(_GC), {"limit": 1}) == 1
     remaining = [await _exists(admin, item[1]) for item in (first, second)]
     assert sum(remaining) == 1
     async with AsyncSession(runtime) as session, session.begin():
+        await _bounded(session)
         assert await session.scalar(text(_GC), {"limit": 16}) == 1
     assert not any([await _exists(admin, item[1]) for item in (first, second)])
 
@@ -224,6 +237,7 @@ async def test_terminal_gc_inconsistent_quota_never_deletes_input(scalar_engines
         )
     try:
         async with AsyncSession(runtime) as session:
+            await _bounded(session)
             with pytest.raises(DBAPIError) as caught:
                 await session.execute(text(_GC), {"limit": 16})
             assert caught.value.orig.sqlstate == "23514"
@@ -241,4 +255,5 @@ async def test_terminal_gc_inconsistent_quota_never_deletes_input(scalar_engines
             )
     assert await _quota_state(admin, dataset) == before
     async with AsyncSession(runtime) as session, session.begin():
+        await _bounded(session)
         assert await session.scalar(text(_GC), {"limit": 16}) == 1
