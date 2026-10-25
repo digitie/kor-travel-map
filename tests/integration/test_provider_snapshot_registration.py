@@ -124,11 +124,11 @@ async def _prepare(admin, runtime, *, status="STARTED"):
 async def _wire(run):
     # Root가 합성할 W의 실제 public pure codec. 수기 JSON으로 정상 DTO 권위를 만들지 않는다.
     from kortravelmap.dagster.airport_snapshot_observation import encode_airport_observation_context
+
     from kortravelmap.infra.provider_snapshot_artifact import (
         SnapshotArtifactPins,
         encode_provider_snapshot_artifact,
     )
-
     from kortravelmap.providers.kor_travel_transport import TransportAirport
     from kortravelmap.providers.kor_travel_transport_native import (
         AIRPORT_NAME_NORMALIZER_REVISION,
