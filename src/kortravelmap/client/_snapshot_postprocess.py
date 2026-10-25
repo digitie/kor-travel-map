@@ -15,7 +15,7 @@ from kortravelmap.infra.provider_snapshot_postprocess_repo import (
     finish_provider_snapshot_postprocess,
 )
 from kortravelmap.infra.provider_snapshot_recovery_repo import SnapshotExecutorToken
-from kortravelmap.infra.transaction_limits import apply_transaction_limits
+from kortravelmap.infra.transaction_limits import apply_bounded_transaction_limits
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -40,7 +40,7 @@ async def run_snapshot_postprocess(
     async with asyncio.timeout(30):
         async with client._session_factory() as session, session.begin():  # noqa: SLF001
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            await apply_transaction_limits(session)
+            await apply_bounded_transaction_limits(session)
             existing = await begin_provider_snapshot_postprocess(session, token, receipt_candidate)
             if existing is not None:
                 return existing

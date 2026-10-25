@@ -59,7 +59,7 @@ def _setup(monkeypatch, *, saved=None, lost=False):
     begin, finish = AsyncMock(return_value=saved), AsyncMock()
     monkeypatch.setattr(target, "begin_provider_snapshot_postprocess", begin)
     monkeypatch.setattr(target, "finish_provider_snapshot_postprocess", finish)
-    monkeypatch.setattr(target, "apply_transaction_limits", AsyncMock())
+    monkeypatch.setattr(target, "apply_bounded_transaction_limits", AsyncMock())
     return client, session, begin, finish
 
 
