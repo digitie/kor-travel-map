@@ -633,11 +633,68 @@ _QUOTA_STATEMENTS: Final = (
 )
 
 
+def _top_level_statements(source: str) -> tuple[str, ...]:
+    """0202의 quote/dollar 경계 탐색을 고정430 DDL에 재사용한다. 범용 parser가 아니다."""
+    statements: list[str] = []
+    start = 0
+    index = 0
+    quote: str | None = None
+    dollar_tag: str | None = None
+    while index < len(source):
+        character = source[index]
+        if dollar_tag is not None:
+            if source.startswith(dollar_tag, index):
+                index += len(dollar_tag)
+                dollar_tag = None
+                continue
+            index += 1
+            continue
+        if quote is not None:
+            if character == quote:
+                if index + 1 < len(source) and source[index + 1] == quote:
+                    index += 2
+                    continue
+                quote = None
+            index += 1
+            continue
+        if character in {"'", '"'}:
+            quote = character
+            index += 1
+            continue
+        if character == "$":
+            end = source.find("$", index + 1)
+            if end != -1:
+                candidate = source[index : end + 1]
+                inner = candidate[1:-1]
+                if not inner or inner.replace("_", "a").isalnum():
+                    dollar_tag = candidate
+                    index = end + 1
+                    continue
+        if character == ";":
+            statement = source[start : index + 1].strip()
+            if statement:
+                statements.append(statement)
+            start = index + 1
+        index += 1
+    trailing = source[start:].strip()
+    if trailing:
+        statements.append(trailing)
+    # storage의 마지막 설명처럼 SQL이 없는 trailing comment는 prepare하지 않는다.
+    return tuple(
+        statement
+        for statement in statements
+        if any(
+            line.strip() and not line.lstrip().startswith("--") for line in statement.splitlines()
+        )
+    )
+
+
 def _upgrade_statements() -> tuple[str, ...]:
     statements = ["SET ROLE " + _SCHEMA_OWNER]
     for filename, declarations in _SIDECARS:
         for owner, body in _sections(filename, declarations):
-            statements.extend(("SET ROLE " + owner, body))
+            statements.append("SET ROLE " + owner)
+            statements.extend(_top_level_statements(body))
     for owner, privileges in _SNAPSHOT_PRIVILEGE_WINDOWS:
         statements.append("SET ROLE " + owner)
         statements.extend(privileges)
