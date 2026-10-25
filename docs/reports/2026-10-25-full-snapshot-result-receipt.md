@@ -1,7 +1,7 @@
 # 동일 실행 복구의 원래 반환값 보존 조각
 
 기준619a6d4f1의 별도 branch에서 처음 신규 module/unit/이 보고서를 추가했고, 이후 아래
-미호출 저장/dispatch SQL 두 조각을 준비했다. 기존 symbol이나
+미호출 저장/dispatch/lease SQL 조각을 준비했다. 기존 symbol이나
 signature를 바꾸지 않아 AGENTS.md의 신규 파일 Codegraph 생략 조건에 해당한다. DB 저장,
 권한, lease, actual apply와 SDK0 후속 재개, child/root 완료를 연결한 구현은 아직 아니다.
 단독 PR·배포/활성화는 하지 않고 전체 동시 쓰기·복구 단위에 합성한다.
@@ -44,7 +44,7 @@ value 타입 추론 문제였으며 수정 후 mypy1파일 통과했다. 실제 
 ## 영속 저장·profile dispatch source 조각
 
 기존 결과 module d11e는 Root/J/W의 독립 source 검토와 각각120개 시험을 통과했다. 그 검토는
-다음 신규 SQL의 검토를 대신하지 않는다. 이 두 SQL은 현재 어떤 migration에서도 호출하지 않는다.
+다음 신규 SQL의 검토를 대신하지 않는다. 이 SQL 조각은 현재 어떤 migration에서도 호출하지 않는다.
 
 작은 최종 입력과 observation context를 각각1MiB/8KiB로 제한한 immutable artifact 행에 보관하고,
 자주 갱신하는 lease/fence와 원 apply 결과4KiB를 별도 작은 control 행으로 분리했다. 따라서
@@ -60,10 +60,22 @@ quota를 잡기 전 P SH→own scope 순서도 후속 구현에서 닫아야 한
 
 새 private member dispatcher는 P EX+L 보유 및 RC를 요구하며 잠금을 새로 취득하지 않는다.
 실제 child/member UUID를 root와 exact triple에서 먼저 해석하고 그 UUID로 artifact를 조회한다.
-행이 없는 legacy EX만 기존 aggregate를 쓰고, 행이 있으면 root/child/run/triple/profile 전부를
+artifact 행 부재에서는 기존 aggregate를 쓰며, 이를 legacy EX로 한정하는 것은 후속 typed SH apply의
+필수 등록/삭제 방지 불변식이다. 현재 dispatcher가 원 적용의 EX 모드까지 증명한 것은 아니다.
+행이 있으면 root/child/run/triple/profile 전부를
 대조한다. prepared/control 누락/결과 미완은 거부한다. 적용된 bounded profile은 기존428 capture가
 완전하다고 판정한 결과만 반환하며 legacy aggregate로 조용히 바꾸지 않는다.
 
 현재 dispatcher를 load/child/root의 기존 호출자에 연결하지 않았고 새 tables/functions의 owner/ACL,
 모델·schema dump·startup, 실제 PG 시험, 전체 forward migration430도 미완이다. SQL은 source draft이며
 기능 수용·자동 복구·SH 활성화 또는 운영 변경이 아니다. 실제 source/실패 주입 검토가 더 필요하다.
+
+
+lease SD source도 추가했다. explicit input/context SHA를 대조한 뒤 P SH→actual own parent SHARE→
+whole ops scope UPDATE→control 순서이며 quota나 root/member tuple을 뒤늦게 잡지 않는다.
+실제 running STARTED root/단일 child member·활성 dataset/operation·취소/격리 없음을 확인한다.
+원 generation/fence가 일치하고 살아 있을 때만 같은 lease를 갱신하고, token 없는 회수는 이전
+lease가 만료한 뒤에만 DB가 새 generation/nonce를 발급한다. stale token을 새 권위로 전환하지 않는다.
+기존 kernel owner나 원 applied_generation/result는 변경하지 않는다. 이는 논리 실행 lease이고
+물리 worker 신원 attestation이나 live old backend 종료 증명이 아니다. 이 SD도 권한/실제 시험/호출자
+미연결 source이며 아직 실행하지 않았다. initial registration/duplicate 발급 경계는 J 별도 조각이다.
