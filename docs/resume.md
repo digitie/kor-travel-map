@@ -1,3 +1,14 @@
+## 2026-10-26 — Rest431 관리 직접SQL 음성 실제 수용
+
+source07867의 새 owned1개가15.448초 PASS/skip0이다. 정본EX guard 아래 RW savepoint에서
+policy subset·후보 중복·검증hash·Geo/base·큰datum5분기의 전체empty/EOFFalse와 정확reason,
+매rollback 원JSON 전체동일을 확인했다. 별도PK23505/정확constraint·PythonRR전후양성도 통과했다.
+이 경로를 PythonRR 음성이나51모든datum/4MiB합계 부정 전수검증으로 표현하지 않는다.
+raw8/Git2543SDK53/import17·head431 및 새읽기 exactCID/UUID/global0/volume1부재로 PG0이다.
+제품/골든3fa/59ada 불변·기존215별도PASS, 독립사실검산/최종CI/431candidateUI와 운영EOF·
+durable/collector·활성화는 별도 남는다. 운영/Chrome0.
+[실제 경계·원장](reports/2026-10-25-rest-area-evidence-reader.md).
+
 ## 2026-10-26 — Rest431 실제215 fit와 최종 공식 golden
 
 A1/A2 원timeout을 보존하고 A3 source3fa59cc의 owned lab1개가 통과했다. 실제215는

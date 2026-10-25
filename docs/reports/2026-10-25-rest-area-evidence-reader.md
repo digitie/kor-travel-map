@@ -9,7 +9,9 @@
 preparation/assessment와 전용 owned lab에서 실제215 complete/적격 및257 전체 거부를 확인했다.
 원본 및 A1/A2의 timeout을 보존한 뒤 A3 `3fa59cc`에서 원 lab1개가 통과했다.
 실제215는 complete·전체 EOF·215 items·assessment 적격이며257은 부분 없는 전체 거부다.
-catalog/startup/ORM2와 마지막SQL 공식oracle1도 별도로 통과했다. Git golden은 마지막
+catalog/startup/ORM2와 마지막SQL 공식oracle1도 별도로 통과했다. 추가 관리 RW 직접SQL 음성5분기와
+rollback 뒤 원JSON 복원·별도PK23505도 source07867의 owned1개에서 통과했다. 이는 기존215의
+Python RR 양성과 구분한다. Git golden은 마지막
 공식dump SHA59ada12d 그대로다. 이 결과는 synthetic owned input 수용이며 실제upstream215
 EOF·durable 등록/수집·운영 활성화/배포는 미완이다. 아래 초기source/계획 절은 당시 기록이고
 현재 완료·한계는 마지막 실제 수용 절에서 정산한다.
@@ -286,3 +288,31 @@ deferred projection 상태는 commit하지 않고 매번 rollback한 뒤 원 pos
 정확pk constraint로 별도 검사하며 reader 거부로 세지 않는다. 원257 scope budget 부정과
 분리하고4MiB합계 임계/51모든 datum 셀의 실DB 전수수용을 주장하지 않는다.
 새 음성 source의 실행 수용은 아직 미완이다. 제품/golden은 실제3fa/59ada와 동일하다.
+
+
+## 추가 직접 SQL 음성 실제 수용
+
+source `07867f2`의 새 testcase1개가 XML suite15.448초/case15.400초에 PASS했고 skip0이다.
+policy subset·후보 중복그룹은 policy_unsupported, 검증sourcehash는 lineage_incomplete,
+base주소/Geo 불일치는 geo_evidence_unsupported, 실제10248B 비압축 datum은 storage_unsupported로
+전체items=[]/EOFFalse를 확인했다. 각 관리 RW savepoint rollback 뒤 runtime 직접SD의 원JSON이
+전체 동일했고 외부 Python RR 양성도 전후 적격이었다. 동일basePK는23505 및 정확
+pk_feature_base_field_values로 별도 확인했으며 reader의 음성 거부로 세지 않는다.
+정본 EX claim/seal/begin과 원3초/lock1초·test40초·phase150/parent160/cleanup15초를 유지했다.
+
+원시8개 SHA·Git2543파일 mode/blob·SDK53·실제project import17/head431을 전수 대조하고,
+새 조회로 정확CID 부재·UUID/global label0·volume1 부재를 확인해 PG 슬롯을 반환했다.
+원장은 `map431-owned-sql-negatives-r1-actual-acceptance.json`, SHA
+f87ebdeb10a18389e5b9cef96d27dfa7b0cdd6c8c392a35314203000b074ac6d다.
+제품/골든은 실제3fa/59ada와 같고215 fit는 기존 별도 수용이며 반복하지 않았다.
+관리 RW 중간상태 directSQL 검사이므로 Python RR 음성경로로 표현하지 않으며,
+51개 datum 모든 셀·4MiB 합계 임계의 실제 부정 전수수용이나 운영입력 권위를 주장하지 않는다.
+원 runner 자체는 exit0/pass_all=True/cleanup_pass=True였고 원 runner/plugin/result는 변경하지
+않았다. 10248B 비압축 관측은 size 거부 분기의 증거이며 compression 거부 분기 실측은 아니다.
+실행 종료 후 별도 읽기 전용 후검산에서 XML의 Python 표현 `[10248, False]`를 JSON으로 읽은 최초 parser오류는
+literal_eval로 바로잡았으며 원실행 결과를 변경하거나 PG를 다시 실행하지 않았다.
+
+새 source 음성검토는 Root `a36d7d00`/T `464e62c6`가 각각 수용했다. 앞의 원 source 미실행
+문구는 당시 준비 이력이다. 새 실제 사실의 독립 검산·문서 delta와 정확 최신CI 및 별도
+431 candidate UI가 머지 전 남아 있다. 운영EOF·durable/collector 연결·운영 활성화는 미완이며
+기존1412/1413 draft는431의 main 흡수 증명 전 닫지 않는다.
