@@ -1,3 +1,23 @@
+## 2026-10-25 · 전용 읽기 동결 소비 계약 정렬
+
+- 원3Python CI 각3FAIL/3826PASS를 보존하고 새 GET2의 baseline/동결 pending 대상 hash를
+  정렬했다. 원 receipt pending·과거 후보 증거·제품/스펙은 유지하며 계약18 PASS다.
+  [범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
+## 2026-10-25 · Feature read/create 중복 자격 정정
+
+- 8555 독립 리뷰의 digest 중복 P2와 수정 전6 FAIL/1 PASS를 보존하고 정본 수동 생성
+  자격 검사에 read digest 비교1개를 추가했다. 기존 런타임 검사도 공유하며 관련227 PASS다.
+  OpenAPI·기존 admin body는 유지한다. 새 두 리뷰·CI·운영은 미완이다.
+  [원 실패와 범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
+## 2026-10-25 · PinVi admin Feature 전용 읽기
+
+- 별도 digest/scope로 두 service GET에 기존 admin 목록·단건 함수와 DTO를 공유한다.
+  기존 BFF/write 권한은 유지하며 운영 provision·배포는 미완이다.
+  [계약·검증 범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
+
 ## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
 
 ## 2026-10-25 — 430 전체 PG gate 첫 원인 수정 준비

@@ -183,6 +183,10 @@
   절차). UI 재빌드 없음(BFF `/api/geo`는 런타임 `KOR_TRAVEL_GEO_INTERNAL_URL` 우선). weather는 Map이 호출하지
   않으므로(ADR-105) 해당 없음.
 
+PinVi admin Feature 목록·단건의 별도 service read 계약은
+[전용 scope 보고서](reports/2026-10-25-pinvi-admin-feature-read-scope.md)를 따른다.
+기존 admin write/BFF 또는 legacy token에 읽기 권한을 암묵적으로 추가하지 않는다.
+
 ## 3. 인증·envelope — 표면별 의도적 차이 (D-08)
 
 통일하지 않는다 — 표면 성격이 다르다. 아래 표가 "왜 다르지" 재논의를 막는 고정값이다.

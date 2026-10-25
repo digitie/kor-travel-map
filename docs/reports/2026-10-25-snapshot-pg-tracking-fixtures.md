@@ -51,7 +51,7 @@ job_id와 message가 모두 원본인지 확인한다. 권한·guard·제품 DML
 | residual r3 | 10 PASS/26.99초, skip0 | cleanup·status·consistency·activation·active identity·legacy finalizer |
 | residual r6 | 2 PASS/150.23초, skip0 | real gate-busy 분류와 원 2×lock-table 규모의 finalizer |
 
-두 실행은 별개이며 하나의 12 PASS 실행으로 합산하지 않는다. 대량 호출 자체는 123.22초다.
+두 실행은 별개이며 하나의 12 PASS 실행으로 합산하지 않는다. 대량 시험의 pytest call 단계(seed·receipt·finalizer 포함)는 123.22초다. SQL CALL만의 시간으로 분리 측정한 값은 아니다.
 원 150초 감사 실행 한도에는 bootstrap·seed·호출·후처리가 함께 들어갔다. 한도 소진 당시
 최종 CALL은 active이고 lock wait나 blocking PID가 없었다. 동일 제품·데이터 수·단언과
 2CPU/1536MiB/추가 swap0/PID256을 유지하고 감사 실행 한도만 pytest585초/전체600초로

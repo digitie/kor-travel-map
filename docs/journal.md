@@ -1,4 +1,23 @@
-## 2026-10-25 — PostGIS 추적 fixture 정리
+## 2026-10-25 · 전용 읽기 동결 소비 계약 정렬
+
+- 원3Python CI 각3FAIL/3826PASS를 보존하고 새 GET2의 baseline/동결 pending 대상 hash를
+  정렬했다. 원 receipt pending·과거 후보 증거·제품/스펙은 유지하며 계약18 PASS다.
+  [범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
+## 2026-10-25 · Feature read/create 중복 자격 정정
+
+- 8555 독립 리뷰의 digest 중복 P2와 수정 전6 FAIL/1 PASS를 보존하고 정본 수동 생성
+  자격 검사에 read digest 비교1개를 추가했다. 기존 런타임 검사도 공유하며 관련227 PASS다.
+  OpenAPI·기존 admin body는 유지한다. 새 두 리뷰·CI·운영은 미완이다.
+  [원 실패와 범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
+## 2026-10-25 · PinVi admin Feature 전용 읽기
+
+- 별도 digest/scope로 두 service GET에 기존 admin 목록·단건 함수와 DTO를 공유한다.
+  기존 BFF/write 권한은 유지하며 운영 provision·배포는 미완이다.
+  [계약·검증 범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
+
 
 
 ## 2026-10-25 snapshot 잔여 fixture 실제 확인
@@ -6,6 +25,8 @@
 - 정식 prefix/RC와 typed begin 반환으로 잔여 fixture를 정렬했다. event 소유권 불변과 typed 원문 변조 거부를 실제 별도 경로로 확인한다.
 - 고정13866의 실제10개26.99초와 대량2개150.23초를 분리 검증했다. 원 cap/감사 fixture 실패와 각 정확 정리를 보존했다.
 - [기록](reports/2026-10-25-snapshot-pg-tracking-fixtures.md). 전체 합성 CI·새 실제 UI·운영 배포는 미완이다.
+
+## 2026-10-25 — PostGIS 추적 fixture 정리
 
 전체 CI 실패를 보존하고 배치·취소 cleanup 및 projection seed가 기존 P EX→L 규약을 따르게 수정했다. 제품·guard·기대값 변경 없이 실제 PostgreSQL100개/33.18초/skip0과 소유 자원 정리를 확인했다. 별도 scalar 제품 수정·전체 CI·운영 배포는 아직 미완이다. [범위와 증거](reports/2026-10-25-snapshot-pg-tracking-fixtures.md).
 

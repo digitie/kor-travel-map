@@ -362,6 +362,8 @@ def test_service_policy_covers_feature_batch_and_service_surfaces() -> None:
         "/v1/service/feature-alias-maps/checksum",
         "/v1/service/feature-reference-reconciliations",
         "/v1/service/feature-reference-reconciliations/{event_id}/acks",
+        "/v1/service/admin-features",
+        "/v1/service/admin-features/{feature_id}",
         "/v1/service/feature-requests",
         "/v1/service/refresh-requests",
         "/v1/service/refresh-requests/{request_id}",
@@ -394,6 +396,8 @@ def test_service_policy_covers_feature_batch_and_service_surfaces() -> None:
             expected_enforcement = {"require_curation_cutover_service_principal"}
         elif row.path.startswith("/v1/service/curation-"):
             expected_enforcement = {"require_curation_snapshot_service_principal"}
+        elif row.path in {"/v1/service/admin-features", "/v1/service/admin-features/{feature_id}"}:
+            expected_enforcement = {"require_pinvi_admin_features_read_service_principal"}
         elif row.path == "/v1/service/feature-requests":
             expected_enforcement = {"require_feature_request_service_principal"}
         elif row.path == "/v1/service/feature-reference-reconciliations":

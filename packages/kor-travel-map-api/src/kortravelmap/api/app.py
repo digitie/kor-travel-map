@@ -109,6 +109,7 @@ from kortravelmap.api.routers import (
     public_providers_router,
     public_status_router,
     public_views_router,
+    service_admin_features_router,
     service_cache_target_streams_router,
     service_curation_cutover_router,
     service_curation_snapshots_router,
@@ -1183,6 +1184,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             service_cache_target_streams_router,
             prefix="/v1",
         )
+        application.include_router(service_admin_features_router, prefix="/v1")
         application.include_router(
             service_curation_snapshots_router,
             prefix="/v1",
