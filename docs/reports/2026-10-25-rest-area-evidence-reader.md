@@ -1,3 +1,26 @@
+## 2026-10-26 · 최종 CI 통과와 일반 main merge
+
+PR #1415의 최종 source는 e1b203bb53083ff79be7bff5994af160bd16abbe다. 5개 workflow의
+10개 check가 모두 SUCCESS였으며, CI의 실제 merge checkout 2bda205f와 source의 tree는
+2fd7a297로 같았다. 2026-10-25T19:25:53Z의 일반 merge adc0a8d7a415c4b579552f328c45d6a711af0398도
+같은 tree다. admin 우회·force push·운영 변경 없이 main에 반영했다. CI 수용 원장 4bf0fcc1과
+실제 merge 원장 e8a5d2d0을 구분하며 아래 작성 당시 CI/main 미완 기록은 역사로 보존한다.
+
+최종 제품 delta의 W/T 독립 리뷰와 e1b r5 reader·공식 golden·직접 SQL 음성·최종 후보14의
+각 source/실측 범위는 아래와 같다. 후보 r4의 XML1PASS47.526초, 보호401·5초 WS 관측·
+DBattempt1 및 정확 정리(fb2c115c/e5562b78)는 새 실행의 수용이다. 첫 후보 a1f39의 1FAIL과
+possible_unrevoked_test_session=True는 영구 보존하며 원 Error 원인은 확정하지 않는다.
+운영 공개 원3FAIL과 이 격리 후보 첫 FAIL은 서로 다른 이력이다.
+
+이 main 반영은 Rest431의 운영 배포·실제 upstream EOF·영속 등록/수집 활성화를 뜻하지 않는다.
+현재 운영 Map430/PinVi0102의 공개13 인수·원 일정 복원과 분리한다. 후속432는 단일 current-export
+window의 strict EOF/unchanged SH·retire0만 초기 권위로 삼으며 선택A의 caller-owned RC 한TX,
+SDK0 복구·실제 두writer·공유 topic 역순과 직렬화 구간의 실물 검증은 미완이다.
+
+아래 기존 문서는 원문 전체를 보존한다.
+
+---
+
 ## 2026-10-26 · Rest431 최종 제품·격리 후보 인수 추가 정산
 
 이 절은 source e1b203bb의 현재 검증 범위를 추가한다. 아래 e1b 원문 전체와 당시 미완 기록은

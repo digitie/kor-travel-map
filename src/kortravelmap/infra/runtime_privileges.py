@@ -460,6 +460,13 @@ _STATE_OWNER_FUNCTION_ACL = (
     "GRANT EXECUTE ON FUNCTION feature._heritage_evidence_metadata_bytes(...) "
     "TO ktm_feature_schema_owner; "
     "END IF; END $bounded_capture_acl$",
+    "REVOKE ALL ON FUNCTION feature._transport_rest_evidence_shape(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature._transport_rest_evidence_inventory(...) "
+    "FROM PUBLIC,ktm_feature_runtime",
+    "REVOKE ALL ON FUNCTION feature.read_transport_rest_snapshot_evidence(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION feature.read_transport_rest_snapshot_evidence(...) "
+    "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_shape(...) "
     "FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_inventory(...) "
@@ -1129,6 +1136,9 @@ _OPTIONAL_ROUTINES: Mapping[str, str] = {
     "feature._install_strict_sh_data_guards": "429_strict_sh_data_guards",
     "feature._bounded_curation_string_object": "428_bounded_curation_capture",
     "feature._bounded_provider_curation_input_set": "428_bounded_curation_capture",
+    "feature._transport_rest_evidence_shape": "431_transport_rest_reader",
+    "feature._transport_rest_evidence_inventory": "431_transport_rest_reader",
+    "feature.read_transport_rest_snapshot_evidence": "431_transport_rest_reader",
     "feature._transport_airport_evidence_shape": "427_transport_airport_reader",
     "feature._transport_airport_evidence_inventory": "427_transport_airport_reader",
     "feature.read_transport_airport_snapshot_evidence": "427_transport_airport_reader",
