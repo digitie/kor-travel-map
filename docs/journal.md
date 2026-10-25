@@ -1,3 +1,6 @@
+## 2026-10-25 — tracking P→L prefix(424, 부분)
+
+- 기존 SER/capture/kernel/SH OFF를 보존했다. 직접25·정본oracle1·기존 client4와 별도 ASGI1(503→새요청200→재요청200)·fresh triple7을 검증했다. 공유 cutover DB의 통합11 원실패(9 PASS/2 FAIL)는 보존·합산하지 않는다. 정확 CI 양 PostGIS lane의28 FAIL/1 ERROR를 보존·분석 중이며 운영·whole snapshot은 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
 ## 2026-10-25 — Place projection 예산 검사 추출
 
 - Heritage 사전 검사를 core로 이동하고 기존 wrapper·9DTO·본문을 보존했다. 순수 회귀114 PASS이며 DB/수집 연결은 없다. [범위·미완](reports/2026-10-25-place-projection-budget-extraction.md).

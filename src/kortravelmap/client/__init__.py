@@ -1000,6 +1000,7 @@ class AsyncKorTravelMapClient:
                     await session.execute(
                         text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
                     )
+                # 기존 SER 설정 뒤 repository가 P EX→L을 행보다 먼저 확보한다.
                 return await repo_finish_dagster_feature_membership(
                     session,
                     dagster_run_id=dagster_run_id,
