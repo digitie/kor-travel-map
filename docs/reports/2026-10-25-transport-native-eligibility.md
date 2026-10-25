@@ -49,3 +49,11 @@ Geo 증거가 없으면 부적격이다. 좌표가 있으면 명시한 resolved 
 수정 전 호출 경계는 두 기존 converter와 공통 pure helper로 한정해 직접 확인했다.
 Codegraph 실행 성공이나 전체 collector 안전성으로 표시하지 않는다. 실제 reader·DB/bootstrap·
 collector 배선은 다음 단계이며 이번 PR에 없다. 전체15/215 입력의 예산·적격성도 미확인이다.
+
+## 독립 리뷰의 Decimal 경계 수정
+
+짧은 finite 좌표 `1e999999999`와 음수의 양축 반례는 기존 `abs(Decimal)`에서
+실행 문맥의 Overflow를 일으켰다. public 진단 경로의 수정 전4 FAIL(1.57초)을 보존하고
+범위 검사 한 곳만 문맥 독립 `copy_abs()` 비교로 바꿨다. 포괄 예외 허용이나 입력
+범위 확장은 없다. 새4개와 기존41개는45 PASS(1.32초), 앞121 합집합은 별도 세대다.
+DB/HTTP/reader/collector 증거가 추가된 것은 아니다.

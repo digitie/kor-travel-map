@@ -225,7 +225,7 @@ def _stored_coordinate(
             number = Decimal(value)
         except InvalidOperation:
             raise ValueError("invalid Transport projected coordinate") from None
-        if not number.is_finite() or abs(number) > bound:
+        if not number.is_finite() or number.copy_abs() > bound:
             raise ValueError("invalid Transport projected coordinate")
         values.append(float(number))
     return values[0], values[1]

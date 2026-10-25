@@ -304,3 +304,18 @@ async def test_ignored_facility_flags_are_not_an_unbounded_object_channel():
         await transport_item_to_native_bundle(
             replace(rest(), has_gas_station="unknown"), fetched_at=NOW, geo=NONE
         )
+
+
+@pytest.mark.parametrize("key", ["longitude", "latitude"])
+@pytest.mark.parametrize("value", ["1e999999999", "-1e999999999"])
+async def test_extreme_finite_decimal_exponent_is_known_ineligible(key, value):
+    before = await transport_item_to_native_bundle(airport(coords=True), fetched_at=NOW, geo=GEO)
+    current = before.model_copy(deep=True)
+    raw = dict(current.source_record.raw_data)
+    raw[key] = value
+    record = rehash(current.source_record, raw)
+    current.source_record = record
+    current.source_link.source_record_key = record.source_record_key
+    result = await assess(before, current, geo=GEO)
+    assert not result.eligible
+    assert result.reason == "invalid_typed_projection"
