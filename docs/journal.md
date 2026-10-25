@@ -1,5 +1,11 @@
 ## 2026-10-25 — Rest431 Geo 비교 source 시작
 
+## 2026-10-25 — Rest431 reader 미호출 source
+
+새 migration/SD3·decoder 및 최소 typed ACL/startup signature를 준비했다.
+정적144/52 PASS, 기존427/430·golden 불변. SQL 두 리뷰/실제 lab·215 fit·준비/평가/수집 연결은 미완이다.
+
+
 명시 Rest Geo domain/정확 입력형과 순수106PASS를 확인했다. SQL·reader·215 fit·운영은 미완이다. [source 범위](reports/2026-10-25-rest-area-evidence-reader.md).
 
 ## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
