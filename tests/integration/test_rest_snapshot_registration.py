@@ -587,7 +587,10 @@ async def test_a_original_215_apply_required_postprocess_one_commit_and_separate
         assert current["source_head"]["current_source_record_key"] == record.source_record_key
         assert current["current_record"]["source_record_key"] == record.source_record_key
         assert current["current_record"]["raw_payload_hash"] == record.raw_payload_hash
-        assert datetime.fromisoformat(current["source_head"]["observed_at"]) == record.fetched_at
+        # head는 입력의 관측(imported) 시각, immutable row는 최초 raw 수집 시각을 보존한다.
+        assert datetime.fromisoformat(current["source_head"]["observed_at"]) == record.imported_at
+        assert current["current_record"] == previous["current_record"]
+        assert record.fetched_at == _TIME + timedelta(hours=1)
     assert not incoming
     await io.seal_rest_snapshot(
         client,

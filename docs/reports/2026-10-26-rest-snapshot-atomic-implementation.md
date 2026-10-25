@@ -169,3 +169,24 @@ owned 실행으로 분리한다. backend CPU/RSS는 미측정, client wall/CPU�
 새 진입점도 기존 transport 요청별 counter를 공유하며 실제 HTTP mock 계수 검사를 유지한다.
 원격 CI 재통과는 새 source checkpoint 뒤 별도 확인한다. 이전402개 통합 순수 회귀와
 현재141개는 중복이 있어 합계로 보고하지 않는다.
+
+
+## 실제215 첫 실행의 clock 오라클 반례
+
+`cc78cf37`의 A215 첫 owned 실행은1실패(68.73초)다. 실제 apply/후처리 뒤 검증 루프의
+첫 item에서 head `observed_at`을 artifact `fetched_at`과 같다고 비교한 단언이 실패했다.
+seal과215개 전체 후검사는 미도달했으므로 전체215 성공으로 수용하지 않는다. 원 source와
+실패 log/XML, 정확 CID/UUID/global0·볼륨 정리를 보존했다. 실패 후 별도 RO 검산에서
+source2574개와SDK53개 전후 일치를 확인했다. runner의 정상 post 검사는 미도달한 사실도
+`map432-rest215-failed-r1-root-post-source-acceptance.json`에 구분한다.
+
+정본 DTO/loader/native batch를 세 명이 대조했다. `SourceRecord`의 clock은 `fetched_at`과
+`imported_at`이고, head의 `observed_at`은 후자를 저장한다. 동일 entity/rawhash의 immutable
+record는 `DO NOTHING`으로 원 fetched/imported 시각을 보존한다. 새 수집 시각은 artifact와
+context에 별도로 남는다. 잘못된1개 기대값을 head==원artifact imported_at로 정정하고
+기존 current_record 전체 보존·새artifact fetched 시각을 명시 검사한다. 제품·SQL·상한은
+변경하지 않는다. 다른5개 시험과 기존 검증을 유지하고 두 명 검토 뒤 전체를 재실행한다.
+
+원실패의 locked reader client roundtrip은2.337초(실제 설정statement3초/lock1초),
+decode0.247초·assessment2.116초였다. 이는 SQL 서버 CPU/RSS나 전체215 처리 성공 시간이
+아니며 timeout 실패도 아니다. 첫 실패의 partial 관측을 최종 성능 개선으로 보고하지 않는다.
