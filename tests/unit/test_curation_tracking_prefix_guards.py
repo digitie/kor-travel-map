@@ -36,7 +36,9 @@ def test_held_check_precedes_typed_owner_short_circuit(name: str) -> None:
 
 @pytest.mark.parametrize("name", _NAMES[:2])
 def test_existing_owner_and_typed_authorization_tail_is_whole_exact(name: str) -> None:
-    original = _definition((ROOT / "alembic/head-schema.sql").read_text(), name)
+    original = _definition(
+        (ROOT / "tests/unit/fixtures/tracking_authorization_429.sql").read_text(), name
+    )
     actual = _definition(SQL.read_text(), name)
     anchor = "  IF current_user = 'ktm_curation_command_owner'"
     assert actual[actual.index(anchor) :] == original[original.index(anchor) :]

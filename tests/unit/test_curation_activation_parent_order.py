@@ -22,7 +22,8 @@ def _definition(sql: str, name: str) -> str:
 
 def test_activation_preserves_old_body_except_strict_installer() -> None:
     old = _definition(
-        (ROOT / "alembic/head-schema.sql").read_text(), "feature.activate_provider_field_policy"
+        (ROOT / "tests/unit/fixtures/provider_field_activation_429.sql").read_text(),
+        "feature.activate_provider_field_policy",
     )
     new = _definition(
         (VERSIONS / "_430_activate_strict_guards.sql").read_text(),
