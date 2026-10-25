@@ -1,3 +1,11 @@
+## 2026-10-25 — 휴게소431 명시 profile 설계·계량 경계
+
+synthetic215의 기존 codec36행/typed47행 거부와 후보 wire733,671B를 구분했다.
+PG reader 비용·운영 fit는 미측정이며 Airport 상한/제품/SQL/운영 변경0이다.
+Rest 전용 유한 profile과 RR chunk 비교·주간 GC/quota·작은 구현 단위는
+[후속안](reports/2026-10-25-rest-area-snapshot-profile.md)에 기록했다.
+다음은 설계 두 리뷰 뒤 owned PG 비용 lab 구현이며 동시 worker 수용은 미완이다.
+
 ## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
 
 최종1093 API/schema430·동등351입력의7839 production UI로 실제 로그인/취소·replay/DB1attempt/WS17frame/logout 14판정 PASS와 소유 자원 정리를 확인했다. 1093 CI의 과거429 역비교1FAIL을 고정 fixture로 바로잡고 전체 unit4180 PASS/6SKIP을 확인했다. 제품·SQL·권한 변경0, 원 실패 보존이다. 최종 CI·운영 배포·실제 두 dataset 동시 쓰기와 Common 후속은 미완이다. [실제 증거와 범위](reports/2026-10-25-snapshot-recovery-final-candidate-ui.md).
