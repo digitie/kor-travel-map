@@ -136,3 +136,12 @@ Root native apply의 새 fenced capture 권한 seam, shared430/migration/ACL·cl
 실제 root/member lifecycle을 최종 상속해야 한다. source 두 적대 리뷰·actual PG SDK0 재시작/
 fresh capture·후처리/seal·unknown commit·whole-worker death·전체 CI/운영 수용은 아직 미완이다.
 현재 배포·설정 활성화·PG 실행·새 standalone PR은 없다.
+
+실제 `_geo_load_context`는 `GeoCallStats.observed_data_tokens`의 builtin set을 그대로
+참조하므로 이 경로에 frozenset 변환은 없다. 정본 Geo tuple을 이 helper로 조합하여 codec과
+observation을 함께 통과하는 회귀를 추가했다. 기존 asset retry 정책은3회·60초·exponential로
+실제 설치 Dagster의 `calculate_delay(1..3)`가60/180/420초(누적660초)를 반환하여
+300초 lease 만료 뒤 세 번째 재시도 기회를 제공한다. 정적 수열 가정과 달라진 실제값을
+순수 회귀로 고정했으며, 지연 수치에 대한 첫 반례1FAIL은 보존한다. 별도
+RetryRequested·지연 확대·새 주기는 추가하지 않는다. 일반 lock timeout/unknown commit을
+lease busy와 동일시하지 않으며 stale fence의 nonretryable 분리는 유지한다.

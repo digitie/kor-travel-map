@@ -468,3 +468,39 @@ async def test_replan_never_exceeds_three_exact_reset_cycles_or_refetches(monkey
     assert stubs["reset_airport_snapshot_plan"].await_count == 3
     stubs["collect_expired_airport_snapshots"].assert_not_awaited()
     collect.assert_not_awaited()
+
+
+async def test_actual_geo_context_preserves_builtin_stats_set_and_codec_accepts_it():
+    from kortravelmap.dto.geo_dataset import GeoApplied
+    from kortravelmap.infra.provider_snapshot_artifact import encode_provider_snapshot_artifact
+
+    from kortravelmap.dagster.airport_snapshot_observation import encode_airport_observation_context
+    from kortravelmap.dagster.etl import _geo_load_context
+
+    args, _, stats = await _input(count=1, geo=True)
+    artifact = decode_provider_snapshot_artifact(args["artifact_bytes"], expected_pins=_PINS)
+    assert type(stats.observed_data_tokens) is set
+    geo = _geo_load_context(
+        GeoApplied(reverse=True, geocode=False), artifact.geo.current_dataset, stats
+    )
+    assert geo.observed_data_tokens is stats.observed_data_tokens
+    assert type(geo.observed_data_tokens) is set
+    payload = encode_provider_snapshot_artifact(artifact.bundles, geo, pins=_PINS)
+    raw = encode_airport_observation_context(
+        payload,
+        pins=_PINS,
+        root_run_id="root",
+        observation_generation="root",
+        upstream_eof=True,
+        geo_stats=stats,
+    )
+    assert type(raw) is bytes
+    assert raw
+
+
+def test_existing_retry_policy_has_a_finite_retry_after_full_executor_lease():
+    policy = assets.FEATURE_LOAD_RETRY_POLICY
+    assert policy.max_retries == 3
+    delays = [policy.calculate_delay(attempt_num=attempt) for attempt in (1, 2, 3)]
+    assert delays == [60, 180, 420]
+    assert sum(delays) >= target.io.LEASE_SECONDS == 300
