@@ -1,3 +1,8 @@
+## 2026-10-25 비활성 strict SH guard429 정의
+
+- private4+명시 installer 정의만 작성했고 migration의 실제 설치 호출은 없다. 정적7 PASS이며 PG/RC/SH 활성화는0이다.
+- 427/428 부모·권한 정본 합성, 전용 paired integration source와 실제 수용은 미완이다. [범위](reports/2026-10-25-strict-sh-data-guard-foundation.md).
+
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 
 journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하고 상대 링크만 재기준화했다. 본문 누락 없이 220 KiB 경계를 확보했다.
