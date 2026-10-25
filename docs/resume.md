@@ -1,7 +1,7 @@
 
 ## 2026-10-25 · cancellation 원 backend cleanup 후보
 
-- 정상 phase cap을 두지 않고 exact driver·disconnect check·종료 readback을 추가했다. 순수45 PASS·535a owned 제품2 PASS. 원 FAIL 보존, 최종 CI/live UI/운영 미완. [경계/원실패](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
+- 원 backend identity의 종료 요청1회와 advisory0 확인을 보강했다. SQLAlchemy54/55 관련49 PASS, dc70 actual5 PASS15.763초·정확 정리. 13418 두 PG lane 실패와 아래 초기 시험소스 이력은 보존한다. 새 CI·후보 liveUI·운영은 미완이다. [경계/원실패](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
 
 ## 2026-10-25 API task 취소·pool 경계 시험 소스
 

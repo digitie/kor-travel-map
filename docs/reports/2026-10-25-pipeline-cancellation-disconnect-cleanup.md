@@ -192,7 +192,31 @@ SDK·Dagster HTTP 경계는 바꾸지 않는다.
 실제 zero 재조회를 대신하지 못함과 권한 오류 뒤 원 caller 취소 보존을 확인한다.
 정확 starttime 불일치·다른 LOGIN의 실제 연결과 잠금을 건드리지 않는 두 PG 반례도
 source로 추가했다. 감사 전용 다섯 case는 원 task2·이 두 반례·원 unlock 본문을 같은
-owned fixture의 runtime LOGIN에서 실행할 계획이다. --pyargs collect5만 통과했고,
-이번 제품 보강의 실제 PG·새 정확 CI·후보 UI·운영 배포는 아직 미완이다. 외부 감사
+owned fixture의 runtime LOGIN에서 실행하도록 준비했다. 이 source checkpoint에서는
+--pyargs collect5만 통과했으며, 이후 실제 실행 결과는 아래에 분리한다. 새 정확 CI·후보
+UI·운영 배포는 아직 미완이다. 외부 감사
 파일을 절대경로로 수집한 초기30초 중단 두 건은 pytest의 상위 디렉터리 탐색 단계였으며
 PG 실행이 아니었다. 원 중단과 원13418 실패는 보존한다.
+
+## dc70 제품 보강 실제5 수용
+
+두 소스/바인딩 검토 뒤 dc70 source와 고정 SQLAlchemy2.0.54로 owned PG 한 번에서
+다섯 case가 모두 PASS·skip0이었다. XML suite15.763초이며 원 P 대기 case13.425초는
+fixture setup을 포함한다. K real-commit-gap0.520초, backend_start 불일치와 다른 LOGIN의
+실제 연결 보존은 각각0.613초, 원 unlock 예외 본문을 runtime LOGIN으로 호출한 case는
+0.556초다. 원 요청3초·최초 advisory0 단언·test35초·cleanup0.6초를 바꾸지 않았다.
+불일치 두 case는 보호 대상의 원 PID 사용과 session advisory unlock 성공까지 확인했다.
+
+원 결과 SHA256은 c8a6e6f9468285116522a676009d9e550046e9d648f66c4da18d47ecbe52327e다.
+Git2437 blob/mode·SDK53을 전후 대조했고 실제 프로젝트 import16·SQLAlchemy2.0.54를
+확인했다. saved/fresh exact CID 부재·UUID0·소유 anonymous volume1개 부재와 saved
+global scalar0을 확인했다. 소유 PG0으로 단독 CPU 슬롯을 반환했으며 추가 PG는 없다.
+독립 Root 수용 SHA256은 8e5ee18cae5f7782b8b2969d4d27a8bff7eb080ed6b70d796ce9e97ffab6c083,
+별도 사실 대조 SHA256은 887839466dab48194540868722c01c00cacc67de7ac3750a66311dc9b25b2ab2다.
+
+13418 전체 CI의 두 lane 실패와 모든 원로그는 그대로 보존한다. 이번 실제5를 해당 CI의
+성공으로 바꾸지 않으며 새 head의 전체 CI가 필요하다. 후보 frontend build의 첫 실행도
+정해 둔1.5GiB unit의 kernel OOM-kill로 실패해 원문·정확 unit 종료를 보존했다.
+운영 경로에는 쓰지 않았으며 후보 build의 메모리 예산은 이 실측을 근거로 따로 조정한다.
+실제 후보 API·Next·브라우저 검증과 운영 배포, 일반 network blackhole의 절대 종료 상한,
+전체 SH/복구 활성화는 여전히 미완이다.
