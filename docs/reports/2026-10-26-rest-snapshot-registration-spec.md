@@ -116,7 +116,7 @@ wholeempty/EOFFalse를 유지한다. reader215 fit는 kernel manifest/두scalar 
 
 ## 수용 전 열린 항목
 
-- single export metadata의 canonical SDK typed 반환과 exact context/domain/sha framing.
+- 기존 service fetcher의 typed 단일응답 metadata/context와 exact domain/sha framing.
 - unchanged 범위의 잠금 후 fresh검증 및 다른 profile/DS 입력의 명시 거부.
 - 선택A의 load/필수후처리 한TX 실제 구현·rollback/응답유실 증거; registration/claim/seal은 별도TX 유지.
 - 실215 wire/context/manifest/capture/latency/CPU/RSS와 정확 quota policy.
