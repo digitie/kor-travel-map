@@ -833,8 +833,8 @@ def _runtime_db_privilege_problems(
 
 
 _RUNTIME_STRICT_GUARD_INVENTORY_SQL = text(
-    "SELECT feature._assert_strict_sh_data_guard_inventory(false)"
-)
+    "SELECT feature._assert_strict_sh_data_guard_inventory(CAST(:require_all AS boolean))"
+).bindparams(require_all=False)
 
 
 async def assert_runtime_db_privilege_boundary(
