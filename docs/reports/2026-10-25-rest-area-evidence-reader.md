@@ -88,9 +88,10 @@ T의9514 FULL은14파일과 원3 untracked를 읽고 direct assessment의 name b
 Root `dc7386b6`/T `6b012925`가 독립 수용했다. SQL 자체는 원래 해당 불일치를 거부했으므로
 실제DB 우회 수정이라고 주장하지 않는다. 합법 JSON null(False+None)은 그대로 허용한다.
 
-codec78f6는 Root `9691be5b`/J `574afce5` FULL을 carry한다. 이번 통합에서는 신규 준비
-source와 최신main 합성을 포함한 정확 checkpoint의 Root+독립 reviewer 두 FULL을 요구한다.
-기존 컴포넌트 검토를 전체 repo 의미 보증으로 확장하지 않는다.
+codec78f6는 Root `9691be5b`/J `574afce5` FULL을 carry한다. 이번 통합은 W의 새 FULL,
+T의9514 FULL+후속 P2 closure의 wholebytes 보존 carry, Root의 기존 codec FULL/P2와
+새 composition 검산으로 독립 적대 리뷰 범위를 정산한다. Root가 전체 reader를 새 FULL로
+검토했다고 표현하지 않으며, 기존 컴포넌트 검토를 전체 repo 의미 보증으로 확장하지 않는다.
 
 관련 순수6모듈은 **242PASS9.94초**다(`map431-before-integration-focused-unit.log/XML`).
 이는 보존된 원 WT에서 실행한 결과이며 새 통합 checkpoint의 재실행 결과와 구분한다.
