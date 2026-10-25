@@ -99,22 +99,16 @@ async def test_same_dataset_applying_does_not_block_true_leaf(activation_engines
     async with AsyncSession(runtime) as holder:
         await holder.begin()
         try:
-            await begin_scoped_feature_write(
+            applying = await begin_scoped_feature_write(
                 holder,
                 attempt_id=plan["attempt_id"],
                 owner=plan["owner"],
                 manifest_digest=plan["manifest_digest"],
             )
-            assert (
-                await holder.scalar(
-                    text(
-                        "SELECT status='applying' AND apply_txid=txid_current() "
-                        "FROM ops.feature_write_attempts WHERE attempt_id=:id"
-                    ),
-                    {"id": plan["attempt_id"]},
-                )
-                is True
-            )
+            # runtime에는 내부 attempt 표의 raw SELECT 권한이 없다.
+            # 실제 begin이 반환한 같은 행과 현재 TX를 대조한다.
+            assert applying["status"] == "applying"
+            assert applying["apply_txid"] == await holder.scalar(text("SELECT txid_current()"))
             # 실제 applying의 parent SHARE/ops scope UPDATE/P SH를 유지한 채 leaf를 쓴다.
             async with asyncio.timeout(2), AsyncSession(runtime) as leaf, leaf.begin():
                 await leaf.execute(text("SET LOCAL lock_timeout='500ms'"))
@@ -413,7 +407,7 @@ async def test_old_provider_event_cannot_be_moved_to_generic_job(activation_engi
                     ),
                     {"job": generic, "event": event.event_id},
                 )
-            assert caught.value.orig.sqlstate == "42501"
+            assert caught.value.orig.sqlstate == "42501", str(caught.value.orig)
             assert _constraint_name(caught.value) == "ck_tvn40_provider_event_typed_command"
         finally:
             await session.rollback()

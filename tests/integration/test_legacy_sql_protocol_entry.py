@@ -108,7 +108,10 @@ async def _routine(engine: AsyncEngine, name: str) -> Routine:
 
 async def _prepare_call(session: AsyncSession, routine: Routine) -> int:
     # isolation은 첫 SQL 전 선택하고 owner 식별자는 위 고정 whitelist에서만 온다.
-    await session.connection(execution_options={"isolation_level": "SERIALIZABLE"})
+    isolation = (
+        "READ COMMITTED" if routine.name == "finalize_provider_curation_root" else "SERIALIZABLE"
+    )
+    await session.connection(execution_options={"isolation_level": isolation})
     await session.execute(text("SET LOCAL statement_timeout='5s'"))
     await session.execute(text("SET LOCAL lock_timeout='3s'"))
     await session.execute(text("SET LOCAL ROLE " + routine.owner))

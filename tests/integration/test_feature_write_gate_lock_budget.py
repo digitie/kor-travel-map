@@ -109,6 +109,7 @@ def _runtime_engine(engine: AsyncEngine) -> AsyncEngine:
 
 
 async def _seed_dataset(connection: Any, *, suffix: str, feature_count: int) -> int:
+    await connection.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
     dataset_id = int(
         await connection.scalar(
             text(
@@ -207,6 +208,7 @@ async def _seed_dataset(connection: Any, *, suffix: str, feature_count: int) -> 
 async def _seed_root(
     connection: Any, *, dataset_id: int, run_id: str, root_status: str, rows: int
 ) -> tuple[str, str]:
+    await connection.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
     root_job_id = str(
         await connection.scalar(
             text(
@@ -355,7 +357,7 @@ async def test_root_finalize_over_a_dataset_larger_than_the_lock_table(
     dagster = _runtime_engine(isolated_engine)
     try:
         async with dagster.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             finalized = (
                 await connection.execute(
                     text(
@@ -407,12 +409,12 @@ async def test_root_finalize_over_a_dataset_larger_than_the_lock_table(
 async def _finalize_failure(
     dagster: AsyncEngine, root_job_id: str, *, lock_timeout: str | None
 ) -> Any:
-    """실제 procedure를 SERIALIZABLE로 불러 난 오류를 돌려준다."""
+    """실제 procedure를 READ COMMITTED로 불러 난 오류를 돌려준다."""
     from sqlalchemy.exc import DBAPIError
 
     try:
         async with dagster.begin() as connection:
-            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            await connection.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             if lock_timeout is not None:
                 await connection.execute(
                     text("SELECT set_config('lock_timeout', :value, true)"),
