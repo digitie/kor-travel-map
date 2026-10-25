@@ -1,3 +1,15 @@
+## 2026-10-25 — 427 metadata 수정의 428 상속
+
+세 인덱스의 ORM 선언을 실제 PG 반사 표현식에 맞춘 부모를 상속했다. fresh300 원 metadata 검사 1 PASS/17.172초를 확인했으며, 원 실패는 보존한다. 428의 SQL·oracle은 그대로이고 합성 CI·취소 복구·실제 동시 수집은 미완이다.
+
+### 2026-10-25 공항 인덱스 PG 반사 표현식 보완
+
+- 4bd 실제 autogen 1 FAIL/정확 정리를 보존하고 metadata CASE를 PG canonical 반사와 맞췄다. 기존 comparator 순수 회귀3 FAIL→equal·migration 포함8 PASS, 새 실제 검사는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
+### 2026-10-25 공항 reader ORM 인덱스 metadata 보완
+
+- 70cb 양 PG CI의 autogen 단일 실패/원 로그를 보존하고 canonical metadata에 기존 인덱스3만 등록했다. 생성 SQL 전체 대조와 migration 회귀8 PASS, 실제 autogen/새 exact CI는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
 ## 2026-10-25 — capture 권한 인벤토리 CI 정정
 
 c98 CI의 signature literal 검사 실패1개를 보존하고, 존재 검사를 pg_catalog 이름 조회·GRANT를 카탈로그 서명 치환으로 정렬한다. 역할/SQL/oracle은 유지하며 새 정확 CI는 미완이다. [근거](reports/2026-10-25-bounded-curation-capture.md).

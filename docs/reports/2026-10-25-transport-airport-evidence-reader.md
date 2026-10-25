@@ -1,5 +1,45 @@
 # 공항 현재집합 evidence reader(427, 부분 구현)
 
+## 70cb CI의 ORM 인덱스 누락과 최소 수정
+
+정확70cb의 양 PostGIS CI에서 `test_fresh_300_upgrade_is_metadata_clean`만
+실패했다. glibc는 1712 PASS/23 SKIP/1 FAIL, alpine은 1706 PASS/29 SKIP/1 FAIL이다.
+427의 bounded CASE 인덱스 세 개가 DB에는 있지만 ORM metadata에는 없어 autogen이
+`remove_index` 세 건을 보고했다. 원 로그와 실패를 보존했다.
+
+`SourceRecordRow`/`SourceEntityHeadRow`/`SourceLinkRow`의 `Index` 선언만 추가했다.
+이름·schema/table·CASE cast·256바이트 조건·기본 collation을 기존 migration과 그대로
+맞췄다. 새 순수 대조의 수정 전 선언 누락 3 FAIL을 재현했고, 수정 뒤 생성 SQL의
+문자열 전체 일치와 기존 migration 회귀 8 PASS를 확인했다. migration/SQL/oracle와
+실제 autogen 검사 본문은 바꾸지 않았다. 실제 metadata-clean 재검증과 새 exact CI는
+아직 미실행이다. 기존 공식 DDL oracle의 반복 비교는 이 autogen 검사의 대체가 아니다.
+
+변경 전 필수 Codegraph 영향도는 기존 dc8 정상 격리 index의 복제본에서 조회했다.
+현재 models 전체 SHA는 indexed 원문과 같고 세 class의 depth3 영향도는 각각
+44/42/32 node였다. caller graph는 dc8 시점이므로 새 caller 부재나 전체 graph 최신성을
+주장하지 않는다. index 생성·sync는 없었고 원 index/소스와 실행 자원을 보존·정리했다.
+첫 조회의 freshness 사전 조건 중단도 별도 보존했다.
+
+### 4bd 실제 autogen 실패와 반사 표현식 보완
+
+4bd의 owned metadata 검사는 1 FAIL 16.086초였다. 선언 누락 대신 동명 인덱스
+세 개에 remove/add 쌍이 나왔다. `CreateIndex`가 migration과 같다는 첫 정적 검증만으로
+실제 반사 표현식 비교까지 증명한 것으로 해석하지 않는다. 원 실패와 첫 source 리뷰를
+보존했다. 정상 runner post는 미도달이며 실패 뒤 별도 RO로 Git2417/SDK53/import11을
+대조했다. 정확 CID/UUID0/global0/volume1 부재로 정리했고 자동 재실행은 하지 않았다.
+
+PG16은 반사 시 `pg_catalog` qualifier와 text 열의 불필요한 cast를 생략하고 CASE를
+여러 줄로 표시했다. 기존 Alembic comparator는 이 개행·qualifier 차이를 동등하게
+정규화하지 않는다. metadata의 세 표현식만 실제 반사 canonical 문자열에 맞춘다.
+원DDL은 계속 함수 schema를 명시하고, varchar인 record key의 text cast도 유지한다.
+마이그레이션·SQL·oracle·comparator와 실제 검사 본문은 바꾸지 않았다.
+
+새 순수 시험은 저장한 실제 반사식을 기존 PostgreSQL `compare_indexes`에 직접 넣는다.
+수정 전 3 FAIL, 수정 뒤 equal(비교 skip 아님)과 기존 migration 포함 8 PASS다.
+별도로 qualifier와 text 열의 무의미한 cast만 제거한 DDL 동등성을 대조하여 CASE의
+컬럼·256바이트 조건·NULL 반환을 보존한다. 이 새 선언의 실제 autogen과 exact CI는
+아직 미실행이다. 본 단계는 ORM 선언 보완이며 운영/collector 배선을 바꾸지 않는다.
+
 ## 현재 checkpoint
 
 1404의 순수 복원·적격성 진단 위에 별도 reader를 구현한다. 현재 checkpoint는
@@ -278,3 +318,16 @@ actual head427/서비스 역할/import16·Git2416/SDK53 전후와 CID/UUID/globa
 운영15fit·무좌표 실제 branch·upstream EOF·collector/SH·대형 history EXPLAIN·hard peak와
 최종 CI는 여전히 미완이다. 원 결과의 사적 감사는 `map427-owned-airport-r3-actual-facts.json`
 (SHA256 `47fce66d526a26f335818cdb5ca9a7e4eb4e31563016130d08dbc78f96dc9fcf`)에 고정했다.
+
+## 반사 표현식 수정 뒤 원 metadata 검사 실제 통과
+
+고정 source `16ac9d00e037c14cece7acdab8920fa81564ba8e`에서 새 owned PG의 정본
+fresh300→427 bootstrap과 기존 `test_fresh_300_upgrade_is_metadata_clean`을 직접
+호출한 검사가 1 PASS/17.172초(전체 34.564초)로 끝났다. 비교기·원검사·migration
+DDL·golden을 바꾸지 않았고, runtime reconcile도 호출하지 않았다. 테스트 skip은0이다.
+위의 실제 미실행 문장은 수정 checkpoint 당시의 상태로 보존한다.
+
+Root는 raw8개 hash와 XML, head427·service login, Git2417/SDK53 전후 검사·실제
+project import11 및 정확 CID 부재·UUID0·volume1 부재를 독립 확인했다. 원 70cb의
+CI 실패와 4bd의 remove/add 실패는 삭제하거나 새 성공에 합산하지 않았다. 이번 통과는
+ORM metadata 일치 범위이며 428·429 합성 CI, collector/SH·운영 배포는 별도 미완이다.
