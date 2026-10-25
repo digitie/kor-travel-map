@@ -46,6 +46,7 @@ from kortravelmap.providers.kor_travel_transport_native import (
     transport_item_to_native_bundle,
 )
 from tests.integration.test_airport_snapshot_scheduled_runner import _cancel_if_ready
+from tests.integration.test_provider_base_update_first import _gate
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
 )
@@ -63,6 +64,68 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(40)]
 
 @pytest.fixture(scope="module")
 async def airport_baseline(scalar_engines):
+    # 정본 bootstrap 직후 관측한다. _seed/_prepare의 fixture용 정책 변경보다 먼저다.
+    admin, runtime = scalar_engines
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        await session.execute(text("SET LOCAL statement_timeout='3s'"))
+        await session.execute(text("SET LOCAL lock_timeout='1s'"))
+        datasets = (
+            await session.execute(
+                text(
+                    "SELECT dataset_key,provider_dataset_id FROM provider_sync.provider_datasets "
+                    "WHERE provider='kor-travel-transport' AND is_active "
+                    "AND dataset_key IN ('transport_airports','transport_rest_areas') "
+                    "ORDER BY dataset_key"
+                )
+            )
+        ).all()
+        assert [row[0] for row in datasets] == ["transport_airports", "transport_rest_areas"]
+        airport, rest = [row[1] for row in datasets]
+        installed = (
+            await session.execute(
+                text(
+                    "SELECT quota_key,max_bytes,max_rows,used_bytes,used_rows "
+                    "FROM ops.provider_snapshot_quota_limits "
+                    "WHERE quota_key=ANY(CAST(:keys AS bigint[])) ORDER BY quota_key"
+                ),
+                {"keys": [0, airport, rest]},
+            )
+        ).all()
+        assert [tuple(row) for row in installed] == sorted(
+            [
+                (0, 16 * 1024 * 1024, 256, 0, 0),
+                (airport, 4 * 1024 * 1024, 64, 0, 0),
+                (rest, 8 * 1024 * 1024, 16, 0, 0),
+            ]
+        )
+    # function-scope strict_engines에는 의존하지 않고 정본 설치 setup만 재사용한다.
+    # 이 module-owned DB에서 P_EX를 먼저 잡고 SchemaOwner installer를 정확1회 호출한다.
+    async with AsyncSession(admin) as session, session.begin():
+        await _gate(session)
+        await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+        await session.execute(text("SELECT feature._install_strict_sh_data_guards()"))
+    async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SET TRANSACTION READ ONLY"))
+        await session.execute(text("SET LOCAL statement_timeout='3s'"))
+        await session.execute(text("SET LOCAL lock_timeout='1s'"))
+        assert (
+            await session.scalar(
+                text(
+                    "SELECT count(*) FROM pg_trigger WHERE NOT tgisinternal AND tgfoid IN ("
+                    "'feature._strict_sh_data_statement_guard()'::regprocedure,"
+                    "'feature._strict_sh_source_row_guard()'::regprocedure,"
+                    "'feature._strict_sh_feature_row_guard()'::regprocedure)"
+                )
+            )
+            == 33
+        )
+        assert (
+            await session.scalar(
+                text("SELECT feature._assert_strict_sh_data_guard_inventory(true)")
+            )
+            is True
+        )
     return await _seed(*scalar_engines, [await _warning_bundle()])
 
 

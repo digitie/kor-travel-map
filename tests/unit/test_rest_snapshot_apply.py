@@ -45,6 +45,8 @@ async def _case(monkeypatch, *, before_exists=False, after_exists=True, changed=
         nonlocal counter
         name = str(sql)
         calls.append(name)
+        if name.startswith("SELECT name,setting FROM pg_settings"):
+            return _Result([("statement_timeout", "30000"), ("lock_timeout", "1000")])
         if "scalar_counter_state" in name:
             counter += 1
             return _Result(
@@ -194,3 +196,104 @@ async def test_forged_eligible_preparation_does_not_authorize_changed_canonical_
     assert saved == []
     apply.assert_not_awaited()
     finish.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    ("prior_statement", "prior_lock", "expected_statement", "expected_lock"),
+    [(30000, 1000, 3000, 1000), (750, 250, 750, 250), (0, 0, 3000, 1000)],
+)
+async def test_locked_reader_has_its_own_server_cap_then_restores_caller_before_apply(
+    monkeypatch, prior_statement, prior_lock, expected_statement, expected_lock
+):
+    session, payload, preparation, args, _, _, apply, _ = await _case(monkeypatch)
+    settings = {"statement_timeout": str(prior_statement), "lock_timeout": str(prior_lock)}
+    original = dict(settings)
+    execute, scalar = session.execute.side_effect, session.scalar.side_effect
+    events = []
+
+    async def bounded_execute(sql, params=None):
+        statement = str(sql)
+        if statement.startswith("SELECT name,setting FROM pg_settings"):
+            events.append("save")
+            return _Result(list(settings.items()))
+        if "FROM pg_settings JOIN" in statement:
+            events.append("lower")
+            for name, cap in (
+                ("statement_timeout", params["statement"]),
+                ("lock_timeout", params["lock"]),
+            ):
+                settings[name] = str(min(int(settings[name]) or cap, cap))
+            return _Result([])
+        if statement == "SELECT set_config(:name,:value,true)":
+            events.append("restore:" + params["name"])
+            settings[params["name"]] = params["value"]
+            return _Result([])
+        return await execute(sql, params)
+
+    async def bounded_scalar(sql, params=None):
+        if "read_transport_rest_snapshot_evidence" in str(sql):
+            events.append("reader")
+            assert settings == {
+                "statement_timeout": str(expected_statement),
+                "lock_timeout": str(expected_lock),
+            }
+        return await scalar(sql, params)
+
+    async def apply_after_restore(*args, **kwargs):
+        assert settings == original
+        events.append("apply")
+        return []
+
+    session.execute.side_effect = bounded_execute
+    session.scalar.side_effect = bounded_scalar
+    apply.side_effect = apply_after_restore
+    await target.apply_stored_rest_area_reobservation(session, payload, preparation, **args)
+    assert events == [
+        "save",
+        "lower",
+        "reader",
+        "restore:statement_timeout",
+        "restore:lock_timeout",
+        "apply",
+    ]
+    assert settings == original
+
+
+@pytest.mark.parametrize("cancel", [False, True])
+async def test_locked_reader_failure_keeps_original_error_and_requires_outer_rollback(
+    monkeypatch, cancel
+):
+    import asyncio
+
+    session, payload, preparation, args, saved, _, apply, finish = await _case(monkeypatch)
+    execute, scalar = session.execute.side_effect, session.scalar.side_effect
+    events = []
+    error = asyncio.CancelledError() if cancel else RuntimeError("owned reader SQL failure")
+
+    async def execute_before_failure(sql, params=None):
+        statement = str(sql)
+        if statement.startswith("SELECT name,setting FROM pg_settings"):
+            events.append("save")
+            return _Result([("statement_timeout", "30000"), ("lock_timeout", "1000")])
+        if "FROM pg_settings JOIN" in statement:
+            events.append("lower")
+            return _Result([])
+        if statement == "SELECT set_config(:name,:value,true)":
+            pytest.fail("aborted/cancelled SQL must not be followed by restoration SQL")
+        return await execute(sql, params)
+
+    async def failing_reader(sql, params=None):
+        if "read_transport_rest_snapshot_evidence" in str(sql):
+            events.append("reader")
+            raise error
+        return await scalar(sql, params)
+
+    session.execute.side_effect = execute_before_failure
+    session.scalar.side_effect = failing_reader
+    with pytest.raises(type(error)) as raised:
+        await target.apply_stored_rest_area_reobservation(session, payload, preparation, **args)
+    assert raised.value is error
+    assert events == ["save", "lower", "reader"]
+    apply.assert_not_awaited()
+    finish.assert_not_awaited()
+    assert saved == []

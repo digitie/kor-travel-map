@@ -95,7 +95,10 @@ ALTER TABLE ops.application_schema_operation_receipts
     ))
 """
 
-# Rest quota는 실제215 wire/context/reservation 측정 뒤 별도 명시한다. 임의 DS/default row는 없다.
+# 실제215 순수계량 기반 Rest 전용 정책이다. global/Airport/임의 DS default는 바꾸지 않는다.
+_REST_QUOTA_BYTES: Final = 8 * 1024 * 1024
+_REST_QUOTA_ROWS: Final = 16
+_REST_QUOTA_SQL: Final = _sidecar("_432_rest_snapshot_quota.sql")
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
     _sidecar("_432_snapshot_postprocess_topic_lock.sql"),
@@ -117,6 +120,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "ops.finish_provider_snapshot_postprocess(uuid,bigint,uuid,bytea) "
     "TO ktm_curation_provider_executor",
     "SET ROLE ktm_feature_schema_owner",
+    _REST_QUOTA_SQL,
     _RECEIPT_HEAD_CHECK_SQL,
     "SET ROLE ktm_feature_schema_owner",
 )

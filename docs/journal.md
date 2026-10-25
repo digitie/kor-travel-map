@@ -1,3 +1,14 @@
+## 2026-10-26 — 431 reader 배포·공개 UI·원 일정 복원 완료
+
+1415의 CI/후보 UI를 거친 main과 문서까지 고정해 Map `df877690`·PinVi `9ebb588a`를
+공식 Manager `0889d3b4`로 배포했다. 1872.74초/committed, 실제 head431/Pin0102·7healthy다.
+공개 UI 한 번50.277초의 Map7/PinVi6 모두PASS·각login/logout1·보호401·정확browser/profile
+정리와 새session잔류없음을 확인했다. 기존37 RUNNING만복원하고 새활성화0·PinViWeatherOFF,
+복원 뒤 fresh431/7healthy도 확인했다. 예전3FAIL/미확인session 경계는 지우지 않았다.
+Map 백업복원은 verified이나 catalog권한차이 비차단경고를 별도보존한다.
+다음 #1418의432실제원자성/215전체/물리2writer·CI/live는 아직미완이다.
+[진행 원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — Rest432 선택 A 구현 첫 checkpoint
 
 431 main `df877690` 위에서 저장·원 결과·필수 후처리를 한 RC connection/TX로 묶는

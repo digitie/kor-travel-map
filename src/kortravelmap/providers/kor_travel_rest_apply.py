@@ -29,6 +29,7 @@ from kortravelmap.infra.provider_snapshot_result import (
 )
 from kortravelmap.infra.rest_area_snapshot_artifact import decode_rest_area_snapshot_artifact
 from kortravelmap.infra.scoped_feature_writes import lock_scoped_feature_write_protocol
+from kortravelmap.infra.transaction_limits import apply_bounded_transaction_limits
 from kortravelmap.infra.transport_rest_evidence_reader import decode_transport_rest_evidence
 from kortravelmap.providers.kor_travel_rest_evidence import (
     RestReobservationPreparation,
@@ -81,6 +82,38 @@ def _inputs(
         items, dataset_id=preparation.evidence.dataset_id, policy_revision=revision
     )
     return ordered, digest, revision, json.dumps(rows, sort_keys=True, separators=(",", ":"))
+
+
+async def _read_locked_evidence(session: AsyncSession, dataset: int) -> object:
+    """이 조회만 서버3초/lock1초로 제한하고 성공 뒤 caller의 더 짧은 설정도 복원한다.
+
+    SQL 오류/취소 뒤에는 복원 SQL을 보내 원오류를 덮지 않는다. caller는 전체 TX를
+    rollback해야 하며 SET LOCAL 설정도 그 rollback에 따라 복원된다. decoder/assessment는
+    조회 성공 후 원래 설정으로 돌아온 구간에서 별도로 실행한다.
+    """
+    prior = {
+        str(name): str(value)
+        for name, value in (
+            await session.execute(
+                text(
+                    "SELECT name,setting FROM pg_settings WHERE name IN "
+                    "('statement_timeout','lock_timeout')"
+                )
+            )
+        ).all()
+    }
+    if set(prior) != {"statement_timeout", "lock_timeout"}:
+        raise RuntimeError("rest-area reader timeout settings are missing")
+    await apply_bounded_transaction_limits(session, statement_timeout_ms=3000, lock_timeout_ms=1000)
+    raw: object = await session.scalar(
+        text("SELECT feature.read_transport_rest_snapshot_evidence(:dataset)"),
+        {"dataset": dataset},
+    )
+    for name, value in prior.items():
+        await session.execute(
+            text("SELECT set_config(:name,:value,true)"), {"name": name, "value": value}
+        )
+    return raw
 
 
 async def apply_stored_rest_area_reobservation(
@@ -136,11 +169,7 @@ async def apply_stored_rest_area_reobservation(
             exclusive_protocol=False,
         )
         fresh = decode_transport_rest_evidence(
-            dataset,
-            await session.scalar(
-                text("SELECT feature.read_transport_rest_snapshot_evidence(:dataset)"),
-                {"dataset": dataset},
-            ),
+            dataset, await _read_locked_evidence(session, dataset)
         )
         if fresh != preparation.evidence:
             raise ValueError("rest-area evidence changed after locking; replan")
