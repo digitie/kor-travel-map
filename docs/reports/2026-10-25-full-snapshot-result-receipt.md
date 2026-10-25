@@ -79,3 +79,11 @@ lease가 만료한 뒤에만 DB가 새 generation/nonce를 발급한다. stale t
 기존 kernel owner나 원 applied_generation/result는 변경하지 않는다. 이는 논리 실행 lease이고
 물리 worker 신원 attestation이나 live old backend 종료 증명이 아니다. 이 SD도 권한/실제 시험/호출자
 미연결 source이며 아직 실행하지 않았다. initial registration/duplicate 발급 경계는 J 별도 조각이다.
+
+
+member UUID를 먼저 조회하는 private SDK0 읽기 SD도 source로 준비했다. actual root/child/member
+소속을 확인한 뒤 artifact를 찾고 불일치와 부재를 구분한다. 한 STABLE statement snapshot에서
+입력 bytes/context/원 결과와 root·child·취소 상태를 반환한다. active lease의 nonce는 노출하지
+않으므로 같은 artifact를 읽었다고 실행 lease를 가로챌 수 없다. terminal 상태도 읽을 수 있으나
+자동 재활성화하지 않으며, claim/apply/seal의 fresh 검증을 대체하지 않는다. 이 함수도 현재 미호출이고
+runtime EXEC/ACL 및 실제 PG/SDK0 경로 연결은 미완이다.
