@@ -183,7 +183,7 @@ async def test_actual_airport_one_then_fifteen_r1_r2_geo_and_native(scalar_engin
     entries = [batch.ProviderScalarRefreshItem(ids[0], changed)]
     plan, _ = await _plan(runtime, dataset, entries, exclusive=True)
     async with AsyncSession(runtime) as session, session.begin():
-        result = await batch.refresh_scoped_provider_scalars_batch(session, entries, **plan)
+        result = await batch.refresh_exclusive_provider_scalars_batch(session, entries, **plan)
         assert result["status"] == "completed"
     current = await _bundle(0, changed=True, observed=3)
     after = await _read(runtime, dataset, [current])

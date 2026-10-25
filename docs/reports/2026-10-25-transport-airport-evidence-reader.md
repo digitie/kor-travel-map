@@ -221,3 +221,20 @@ lab cutover로1개를 만들고, EX sealed scalar apply로 이름 R2/비이름 R
 정확 `budget_exceeded`/전체 items[] 거부를 기록하며15fit를 전제하지 않는다.
 운영 공항15/실 Geo HTTP/whole upstream EOF/SH 적용 수용이 아니다. 현재 collect1뿐이며
 실제 PG 실행, 공식427 oracle, 새 인덱스의 대규모 history EXPLAIN/메모리는 미완이다.
+
+
+## 첫 실제427 검사와 EX fixture 진입점 정정
+
+source195의 한 소유 fixture는1FAIL14.880s였다. 실제 head427/서비스 역할/import16을
+확인하고 N1 reader/준비 진단 positive 단언을 통과했지만 전체 testcase PASS는 아니다.
+이후 이름 R2 fixture가 `exclusive=True`로 EX plan을 만들고 SH 전용
+`refresh_scoped_provider_scalars_batch`를 호출해 `23514 protocol share to exclusive
+upgrade requires replan`에서 중단됐다.15개 단계에는 도달하지 않았다.
+
+시험 호출1곳만 기존 `refresh_exclusive_provider_scalars_batch`로 정정한다. 두 공개
+함수는 같은 `_refresh_batch`에 각각 명시 False/True를 전달하며, EX 함수가 기존
+EX/global fence를 먼저 획득한다. plan/manifest/기존assert/제품 SQL·권한·예산은
+변경하지 않는다. 원FAIL과 CID/UUID/global label0·volume1 부재 정리를 보존했다.
+실패 runner는 SDK/Git post 검사 전에 중단됐으므로, 별도 offline observer로 원Git
+2416 blob/mode·SDK53 전후 불변을 확인한 범위를 구분한다. 새 source/binding 두
+리뷰와 CPU 승인 전 재실행0이며 공식427 oracle/15fit/collector/SH/운영은 미완이다.
