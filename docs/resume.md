@@ -1,3 +1,7 @@
+## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
+
+- 실제15·oracle1·EX18·제한 A/B를 정산했다. 원 실패를 보존하며 최종 CI·운영은 미완이다. [범위·한계](reports/2026-10-25-provider-base-update-first.md).
+
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 
 - 기존 SER/capture/kernel/SH OFF를 보존했다. 직접25·정본oracle1·기존 client4와 별도 ASGI1(503→새요청200→재요청200)·fresh triple7을 검증했다. 공유 cutover DB의 통합11 원실패(9 PASS/2 FAIL)는 보존·합산하지 않는다. 정확 CI 양 PostGIS lane의28 FAIL/1 ERROR를 보존·분석 중이며 운영·whole snapshot은 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
