@@ -33,7 +33,7 @@ from tests.integration.test_tvn36_override_lineage_spine import (
 pytestmark = pytest.mark.integration
 _ROOT = Path(__file__).resolve().parents[2]
 _EXPECTED_BODY = (
-    (_ROOT / "alembic/versions/_425_provider_base_update_first.sql").read_text().split("$$")[1]
+    (_ROOT / "alembic/versions/_426_provider_patch_protocol_entry.sql").read_text().split("$$")[1]
 )
 _LINE = "MULTILINESTRING((127 37.5,127.01 37.51))"
 _AREA = "MULTIPOLYGON(((127 37.5,127.1 37.5,127.1 37.6,127 37.6,127 37.5)))"

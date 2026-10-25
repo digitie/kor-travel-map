@@ -1,3 +1,10 @@
+## 2026-10-25 — 현행 기록 크기 경계 재분리
+
+journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하고 상대 링크만 재기준화했다. 본문 누락 없이 220 KiB 경계를 확보했다.
+
+## 2026-10-25 — 공개 provider patch P-first(426)
+
+실제25·공식 oracle1 PASS와 정리를 확인했다. 원실패를 보존한다. [근거·미완](reports/2026-10-25-provider-patch-protocol-entry.md). CI·운영·실제 SH는 미완이다.
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
 - 실제15·oracle1·EX18·제한 A/B를 정산했다. 원 실패를 보존하며 최종 CI·운영은 미완이다. [범위·한계](reports/2026-10-25-provider-base-update-first.md).
