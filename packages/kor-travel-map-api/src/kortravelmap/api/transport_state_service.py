@@ -224,8 +224,9 @@ async def _read_capped(response: httpx.Response, cap: int) -> bytes:
     httpx의 ``aiter_bytes``는 받은 조각을 통째로 풀어 내놓으므로(작은 gzip 조각이 수십 MB로
     풀린다) 상한이 무력하다. 여기서는 원문을 ``aiter_raw``로 상한까지 모은 뒤, gzip이면 출력 상한을
     건 ``zlib.decompressobj``로 푼다. 요청은 ``Accept-Encoding: identity``라 정상이면 gzip이 오지
-    않는다. 깨진·잘린 gzip과 모르는 인코딩은 :class:`_BadEncoding`, 상한 초과는
-    :class:`_BodyTooLarge`다.
+    않는다. 깨진·잘린 gzip, gzip 끝 뒤에 남은 bytes(두 번째 member 포함)와 모르는 인코딩은
+    :class:`_BadEncoding`, 상한 초과는 :class:`_BodyTooLarge`다. ``aiter_raw``는 httpx decoder를
+    거치지 않으므로 ``httpx.DecodingError``는 나지 않는다.
     """
     encoding = response.headers.get("content-encoding", "").strip().lower()
     if encoding not in {"", "identity", "gzip"}:
@@ -249,6 +250,8 @@ async def _read_capped(response: httpx.Response, cap: int) -> bytes:
         raise _BodyTooLarge
     if not decoder.eof:
         raise _BadEncoding  # 잘린 gzip
+    if decoder.unused_data:
+        raise _BadEncoding  # gzip 끝 뒤의 쓰레기·두 번째 member
     return decoded
 
 
@@ -321,16 +324,19 @@ async def fetch_price_history(
             if status_code == 200:
                 body = await _read_capped(response, MAX_PRICE_HISTORY_BODY_BYTES)
             elif status_code == 503:
+                # 상태는 이미 받았다 — problem 본문을 못 읽으면(상한 초과·깨진 인코딩·읽는 중
+                # 끊김·timeout) no_collection 여부를 알 수 없으니 상태 코드로만 분류한다.
                 try:
                     body = await _read_capped(response, MAX_PRICE_HISTORY_PROBLEM_BYTES)
-                except (_BodyTooLarge, _BadEncoding, httpx.DecodingError):
+                except (_BodyTooLarge, _BadEncoding, httpx.TransportError) as exc:
+                    _LOGGER.info("transport 가격 이력 503 본문 읽기 실패: %s", type(exc).__name__)
                     body = b""
     except _BodyTooLarge:
         _LOGGER.warning(
             "transport 가격 이력 본문이 %d bytes를 넘는다.", MAX_PRICE_HISTORY_BODY_BYTES
         )
         return _unavailable("upstream_contract")
-    except (_BadEncoding, httpx.DecodingError) as exc:
+    except _BadEncoding as exc:
         # 깨진·잘린 gzip·모르는 Content-Encoding — 연결 문제가 아니라 본문이 계약과 다르다.
         _LOGGER.warning("transport 가격 이력 본문 인코딩 오류: %s", type(exc).__name__)
         return _unavailable("upstream_contract")
