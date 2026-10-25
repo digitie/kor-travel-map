@@ -1,4 +1,4 @@
-# Tracking P→L 진입 순서 고정(424, 부분 체크포인트)
+# Tracking P→L 진입 순서 고정(424, prefix 단계)
 
 종결·취소 경로가 lineage L 또는 행을 선점한 뒤 데이터 protocol P EX를
 늦게 요청하는 순서를 앞당긴다. 기존 SERIALIZABLE 요구, capture/hash,
@@ -49,14 +49,14 @@ Codegraph index를 재사용한 실제 caller/callee/impact 조회를 소스 추
 정확한 boolean signature 1개를 서비스 allowlist에 추가했고 검사 함수는 바꾸지 않았다.
 수정 전 literal catalog fixture 1 FAIL을 보존했으며, 수정 후 DB/prefix 순수31
 PASS(1.59초)·mypy1/Ruff를 확인했다. 같은 시험에서 권한 누락과 text overload는
-계속 거부한다. 실제 API startup/catalog 검증은 여전히 별도 PG 수용 대상이다.
+계속 거부한다. 당시 실제 API startup/catalog 검증은 별도 PG 수용 대상으로 남겼다.
 
-## 다음 검증과 미완
+## 단계별 검증과 남은 범위
 
-실제 두 backend에서 P가 먼저 대기하고 L/root/member는 아직 선점하지 않은지,
-L-only final 및 P SH/EX-only leaf가 즉시23514인지, timeout/rollback/role GUC,
-기존 SER와 capture 결과·owner/ACL·임시 CREATE 회수가 유지되는지 검증해야 한다.
-공식 fresh oracle는 아래 별도 세대로 수용했다. 기존 tracking/cancellation 추가 회귀는 다음 source에서 수행해야 한다.
+실제 prefix 대기·L 미선점·입력 거부·role/ACL·GUC는 아래 source728의 직접25에서,
+정본 oracle와 정상 tracking은 별도 실행에서 확인했다. 일반 queued 취소의 ASGI
+503 후 새 요청 재개와 triple 추가 회귀는 source144에서 아래와 같이 확인했다.
+provider SUCCESS 취소의 실제 API 분기와 Uvicorn process 기동은 아직 미검증이다.
 
 관측된 session/xact advisory lock만으로 과거 전체 취득 순서를 증명하지 않는다.
 first-party fresh transaction 계약과 DB가 검사하는 prefix subset을 구분한다.
@@ -84,7 +84,28 @@ SER snapshot-before-wait, 전체 capture의 payload/phantom 폐포, 전체 retir
 
 같은 seed TX에 ensure→finish를 넣는 기존 identity-triple 시험2개는 첫 행 조회 전에
 실제 runtime의 typed finalprefix를 취득하도록 보강한다. 공통 fixture와 기존 실패/성공
-assert를 바꾸지 않으며 아직 새 source에서 실제 재실행하지 않았다. oracle 채택 후 source lint+graph는391 PASS/기존6skip(32.36초)으로 초기
-oracle미존재1실패를 닫았다. API startup 실제 preflight·503 후 새 요청 재개와
-정확 CI는 아직 미완이다. source728 이후 oracle/시험·문서
-변경을 source728의 실제 실행으로 혼합하지 않는다.
+assert를 바꾸지 않았다. oracle 채택 후 source lint+graph는391 PASS/기존6skip(32.36초)으로
+초기 oracle미존재1실패를 닫았다. source728 이후 oracle/시험·문서 변경을
+source728의 실제 실행으로 혼합하지 않는다.
+
+## source144의 ASGI 취소와 triple 격리 회귀
+
+- 실제 서비스 catalog preflight를 호출한 ASGI 취소1 PASS20.445초. P SH 경합에서
+  503/Retry-After5 뒤 새 요청200과 같은 결과 재요청200을 확인했다. 실패 뒤 취소
+  시도0, 복구·재요청 뒤1개이며 현재/이전 backend 잠금0·pool 반환0·외부HTTP0이었다.
+  일반 queued job 경로이며 provider SUCCESS 취소나 Uvicorn 기동 증거는 아니다.
+- 기존 client4와 triple7을 같은 module DB로 묶은 통합11은9 PASS/2 FAIL이었다
+  (XML22.416초/콘솔23.14초). 앞 exclusive asset의 영속 cutover 정책이 뒤 triple
+  catalog raw UPDATE/INSERT를 정상23514로 거부한 private fixture 격리 오류다.
+  원실패·로그·XML과 정리 증거를 보존했다. 이 실행을 전체 PASS로 바꾸지 않는다.
+- 새 fresh DB에서 기존 triple 함수 본문과 canonical session fixture를 유지한
+  별도7 PASS20.062초. 기존 ensure→finish 두 시험의 실제 typed prefix도 통과했다.
+  앞 통합 실행의 client4 부분 PASS와 source728의 별도4를 구분하며9+7을16 PASS로
+  합산하거나 하나의11 PASS로 정산하지 않는다. guard·공통 fixture·제품 변경은 없다.
+- source144의 두 실행과 원실패 실행은 source2384·SDK53 전후 및 실제 import13 Git
+  SHA를 기록했다. 성공한 ASGI/별도7은 각 artifact SHA를 재계산했으며 세 실행 모두
+  exact CID/UUID/global label0·anonymous volume1 부재를 확인했다.
+
+정확 CI·최종 부모 합성과 실제 운영 수용은 별도다. 이 단계는 기존 SER를 유지하며
+SER snapshot-before-wait·whole capture 폐포·전체 retire/seal 한 commit·자동복구·
+대형 protocol·SH collector 활성화가 완료됐다는 주장을 하지 않는다.

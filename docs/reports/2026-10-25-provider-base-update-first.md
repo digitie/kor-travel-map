@@ -87,3 +87,9 @@ migration을 선형화했고 후속 실제 검증은 아직 대기하며, 이15�
 통합 뒤 migration·tracking prefix·squash boundary·DB/runtime 권한·operation 계약 순수 합집합은
 130 PASS(7.43초)였다. 통합 source의 새 PG 결과는 아직 없으며 부모 oracle424를425로
 간주하지 않는다.
+## 424 최종 문서 부모 통합
+
+최종424 ab696과 최신 main 문서·424의 격리 회귀 정산을 상속했다. 앞14417 이후의 변경은
+부모 문서이며425 제품 SQL·migration·실제15개 시험 본문은 d47과 같다. journal/resume는
+425의 짧은 기존 prefix와 부모 전체 suffix를 보존했다. 이 통합에서 PG를 추가 실행하지 않았으며,
+공식425 oracle·활성 EX20·비용 harness는 이 고정 소스에 새로 결박한 뒤 별도 두 리뷰를 받는다.
