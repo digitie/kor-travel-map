@@ -64,6 +64,27 @@ _SIDECARS: Final = (
         ),
     ),
     (
+        "_430_provider_finalization_catalog_rc.sql",
+        (
+            (
+                "feature.refresh_curated_source_observation",
+                "PROCEDURE",
+                "(bigint,uuid)",
+                _COMMAND_OWNER,
+                False,
+                False,
+            ),
+            (
+                "feature.materialize_theme_candidate_generation",
+                "PROCEDURE",
+                "(uuid,text,uuid,uuid,bigint,text,jsonb)",
+                _COMMAND_OWNER,
+                False,
+                False,
+            ),
+        ),
+    ),
+    (
         "_430_snapshot_registration.sql",
         (
             (

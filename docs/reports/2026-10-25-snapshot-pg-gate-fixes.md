@@ -125,3 +125,25 @@ SER시험 전제를 추가정렬하며 기존42501/성공결과 단언은 유지
 제품RC finalizer→기존SER source observation의 실제모순이다. fixture로피하지않고
 해당내부정의/권한·fresh prefix/capture검증을보존하는 제품수정 별도리뷰가필요하다.
 원77 전체FAIL/정확정리를보존하고72와후속을단일77PASS로합산하지않는다.
+
+## legacy catalog의 실제 RC/SER 모순 수정안(source만)
+
+성공 finalizer 세 경로는 `refresh_curated_source_observation`의 원SER 요구에서25001로
+실패했다. 그다음 `materialize_theme_candidate_generation`에도 같은 원SER 요구가 있어
+두 내부 기존SD를430 sidecar로명시교체한다. 이는제품수정이며fixture허용확대가아니다.
+기존SER진입/권한/검증/실본문은그대로이고, RC는현재DB/currentPID의actual granted P EX와
+L을둘다이미보유할때만추가허용한다. 새lock취득/승격0이다. generation은추가로
+`provider_full_snapshot`만RC이며 `rule_reconcile`은원SER을유지한다. owner는기존
+CommandOwner이고새publicEXEC/role/table권한·signature변경0이다.
+
+정본 finalizer는먼저fresh P→L을취득하고immutable childseal와actualroot capture를전부
+대조한뒤이두SD를호출한다. 새조건은그내부호출의actualprefix를관측한다. pg_locks로
+session/xact과거취득순서를attest하지않고원관리owner경계한계를유지한다. firstparty
+helper는이미xact P/L을재취득한다. 별도일반helper/재시도GUC/우회token은추가하지않는다.
+
+고정429 공식dump893e61의두정의를출처와함께fixture로보존했고새RC조건을역제거하면
+각본문전체bytes가같다. static29PASS2.11초/Ruff와신규11통합수집만확인했다.
+부정source는missingprefix/SH-only/P-only/L-only/다른PID각두정의와RC rule_reconcile을
+확인한다. 원성공TVN40 세경로의관측값/생성receipt/취소SUCCESS결과단언은그대로이며
+두제품source리뷰뒤이11과원TVN40실패5개를한owned PG에서검증할계획이다.
+이새두정의의실제설치/성공/golden갱신은아직미완이고이전projector공식dump와구분한다.
