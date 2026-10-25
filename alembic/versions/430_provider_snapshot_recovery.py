@@ -195,6 +195,14 @@ _SIDECARS: Final = (
                 True,
                 True,
             ),
+            (
+                "ops.capture_provider_snapshot_apply_input_set",
+                "FUNCTION",
+                "(uuid,bigint,uuid)",
+                _COMMAND_OWNER,
+                True,
+                True,
+            ),
         ),
     ),
     (
@@ -560,6 +568,15 @@ _SNAPSHOT_PRIVILEGE_WINDOWS: Final = (
             (
                 "GRANT EXECUTE ON FUNCTION ops.provider_snapshot_scalar_counter_state(uuid, big"
                 "int, uuid, jsonb) TO ktm_curation_provider_executor"
+            ),
+            (
+                "REVOKE ALL ON FUNCTION ops.capture_provider_snapshot_apply_input_set(uuid, big"
+                "int, uuid) FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_pr"
+                "ovider_executor"
+            ),
+            (
+                "GRANT EXECUTE ON FUNCTION ops.capture_provider_snapshot_apply_input_set(uuid, "
+                "bigint, uuid) TO ktm_curation_provider_executor"
             ),
             (
                 "REVOKE ALL ON FUNCTION ops.reset_expired_provider_snapshot_plan(uuid, bigint, "
