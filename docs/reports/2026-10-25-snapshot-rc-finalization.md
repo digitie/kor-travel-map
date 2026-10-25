@@ -66,3 +66,28 @@ worker 동시 성공을 증명하는 시험으로 확대하지 않는다. source
 입력 fixture와 body hash 기대는 새430 의미를 반영해 전체 합성 단계에서 별도 검토해야
 한다. strict activation/등록 quota/GC/전체 same-TX apply/SDK0 후속 복구/운영 수용은
 이 조각의 성공으로 표시하지 않는다. source와 실행기 두 gate·CPU 승인 전 PG0을 유지한다.
+
+## 기존 false 완료 경로의 P1와 다섯 번째 정의
+
+Root marker source0a1e2c5의 독립 검토에서 새 artifact가 등록돼도 기존 공개 membership
+완료 명령에 authoritative=false를 주면 receipt 부재=false와 일치하여 child를 done으로
+바꿀 수 있음을 원문으로 확인했다. C의 held P EX/L 검사와 typed owner 허용은 이
+상태를 막지 않는다. root의 기존 receipt 필수 집합도 authoritative=false child를 제외한다.
+Root가 P1을 확인했으며 첫0a1 HOLD 원장을 보존한다. 실제 PG 재현으로 계산하지 않는다.
+
+다섯 번째 정의로 기존 `ops.finish_provider_feature_membership_command`를 보존해 확장했다.
+기존 child resolver 다음 실제 member UUID로 artifact를 먼저 조회한다. 행이 있으면
+root/child/run/exact triple/profile을 대조하고 authoritative=true, postprocessed,
+현재 TX seal_txid, applied_result와 postprocess_receipt 존재를 모두 요구한다. marker를
+발급하거나 control을 갱신하지 않는다. artifact 부재에서는 기존 receipt/UPDATE 본문을
+그대로 진행한다. Root의 원자 wrapper만 marker→old seal→이 old finish→control sealed와
+marker 제거를 한 CALL로 실행하며, 단독 공개 완료 호출은 이를 건너뛸 수 없다.
+
+허용된 declaration/guard span만 제거한 다섯 번째 정의도 원문 전체와 같아야 한다.
+수정 후22 unit PASS/2.44초(XML 포함), Ruff4파일 PASS다. integration은 기존5개에
+prepared/applied/postprocessed × false/true-no-marker6개를 더해11개 수집만 했다.
+새6개는 owner가 구조만 유효한 private negative 상태를 구성하고 실제 service LOGIN의
+기존 공개 완료 명령이23514로 거부되는지 확인한다. child/control/receipt가 바뀌지 않아야
+한다. 그 fixture의 빈 artifact/result bytes는 typed 등록/apply 성공으로 사용하지 않는다.
+실제 typed wrapper의 같은TX 성공과 replay는 Root가 전체430 합성 후 검증해야 한다.
+새 source의 두 gate와 실행기/CPU 승인 전 PG0 및 activation0을 유지한다.

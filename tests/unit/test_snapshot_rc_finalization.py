@@ -19,6 +19,7 @@ _NAMES = (
     "feature.seal_provider_curation_snapshot_receipt",
     "feature.finalize_provider_curation_root",
     "feature.purge_manual_feature",
+    "ops.finish_provider_feature_membership_command",
 )
 
 
@@ -38,7 +39,25 @@ def _definition(sql, name):
 def test_only_declared_rc_prefix_capture_changes(name):
     old = _definition(_OLD, name)
     current = _definition(_SQL, name)
-    if name.startswith("ops."):
+    if name == "ops.finish_provider_feature_membership_command":
+        declaration = (
+            "  v_snapshot_member uuid;\n  v_snapshot_run text;\n"
+            "  v_snapshot record;\n  v_snapshot_state record;\n"
+        )
+        assert current.count(declaration) == 1
+        current = current.replace(declaration, "", 1)
+        start = current.index("  -- 원 member UUID로 먼저 찾는다.")
+        end = current.index(
+            "  SELECT EXISTS (\n    SELECT 1 FROM ops.curation_provider_snapshot_receipts", start
+        )
+        addition = current[start:end]
+        assert "artifact.import_job_dataset_id=v_snapshot_member" in addition
+        assert "p_authoritative_snapshot_complete IS DISTINCT FROM true" in addition
+        assert "v_snapshot_state.seal_txid IS DISTINCT FROM txid_current()" in addition
+        assert "IF FOUND THEN" in addition
+        assert "UPDATE" not in addition
+        current = current[:start] + current[end:]
+    elif name.startswith("ops."):
         addition = """    IF p_finalizing AND current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'provider finalization requires READ COMMITTED transaction'
             USING ERRCODE='25001';

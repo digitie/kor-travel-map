@@ -171,3 +171,117 @@ async def test_root_capture_after_actual_p_wait_sees_committed_new_input(scalar_
             )
             == 0
         )
+
+
+@pytest.mark.parametrize("status", ["prepared", "applied", "postprocessed"])
+@pytest.mark.parametrize("authoritative", [False, True])
+async def test_registered_member_cannot_use_legacy_finish_without_private_marker(
+    scalar_engines, status, authoritative
+):
+    """고권한 negative fixture는 private 상태만 구성하며 등록/apply 성공을 주장하지 않는다."""
+    admin, runtime = scalar_engines
+    identity = uuid4().hex
+    root, child, member, snapshot, attempt, owner, fence = [str(uuid4()) for _ in range(7)]
+    params = dict(
+        root=root,
+        child=child,
+        member=member,
+        snapshot=snapshot,
+        attempt=attempt,
+        owner=owner,
+        fence=fence,
+        run="bypass-" + identity,
+        status=status,
+    )
+    async with admin.begin() as seed:
+        await seed.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
+        dataset = await _seed_dataset(seed, suffix=identity, feature_count=0)
+        params["dataset"] = dataset
+        await seed.execute(
+            text("""INSERT INTO ops.import_jobs(
+            job_id,kind,payload,status,progress,current_stage,dagster_run_id,
+            dataset_membership_mode,trigger_kind,operation_key,dagster_run_status,created_at,started_at)
+            VALUES(CAST(:root AS uuid),'provider_feature_load_run','{}','running',0,'running',
+                   :run,'root','schedule','load','STARTED',now(),now())"""),
+            params,
+        )
+        await seed.execute(
+            text("""INSERT INTO ops.import_jobs(
+            job_id,kind,parent_job_id,payload,status,progress,current_stage,dagster_run_id,
+            dataset_membership_mode,created_at,started_at)
+            VALUES(CAST(:child AS uuid),'provider_feature_load',CAST(:root AS uuid),'{}',
+                   'running',0,'running',:run,'single',now(),now())"""),
+            params,
+        )
+        await seed.execute(
+            text("""INSERT INTO ops.import_job_datasets(
+            import_job_dataset_id,job_id,provider_dataset_id,sync_scope,operation_key)
+            VALUES(CAST(:member AS uuid),CAST(:child AS uuid),:dataset,'dataset_wide','load')"""),
+            params,
+        )
+        await seed.execute(
+            text("""SELECT ops.claim_scoped_feature_write(
+            CAST(:attempt AS uuid),CAST(:owner AS uuid),:dataset,'bypass',
+            '[]',repeat('a',64),0,60,true)"""),
+            params,
+        )
+        # 구조가 유효한 private 상태의 부정 시험이다. typed artifact/result 권위를 위조해
+        # positive로 쓰지 않고, 기존 공개 finish가 이러한 행을 무시하지 못함만 확인한다.
+        await seed.execute(
+            text("""INSERT INTO ops.provider_snapshot_artifacts(
+            snapshot_id,root_job_id,source_job_id,import_job_dataset_id,provider_dataset_id,
+            sync_scope,operation_key,dagster_run_id,capture_profile,
+            artifact_payload,native_input_digest,observation_context)
+            VALUES(CAST(:snapshot AS uuid),CAST(:root AS uuid),CAST(:child AS uuid),
+                   CAST(:member AS uuid),:dataset,'dataset_wide','load',:run,'bounded-place-v1',
+                   convert_to('{}','UTF8'),repeat('a',64),convert_to('{}','UTF8'))"""),
+            params,
+        )
+        await seed.execute(
+            text("""INSERT INTO ops.provider_snapshot_controls(
+            snapshot_id,executor_generation,executor_fence,lease_expires_at,status,
+            attempt_id,attempt_owner,manifest_digest,applied_result,applied_generation,
+            applied_fence,applied_at,postprocess_receipt,postprocessed_at)
+            SELECT CAST(:snapshot AS uuid),1,CAST(:fence AS uuid),
+                   now()+interval '60 seconds',:status,
+                   CASE WHEN :status='prepared' THEN NULL ELSE CAST(:attempt AS uuid) END,
+                   CASE WHEN :status='prepared' THEN NULL ELSE CAST(:owner AS uuid) END,
+                   CASE WHEN :status='prepared' THEN NULL ELSE repeat('b',64) END,
+                   CASE WHEN :status='prepared' THEN NULL ELSE convert_to('{}','UTF8') END,
+                   CASE WHEN :status='prepared' THEN NULL ELSE 1 END,
+                   CASE WHEN :status='prepared' THEN NULL ELSE CAST(:fence AS uuid) END,
+                   CASE WHEN :status='prepared' THEN NULL ELSE now() END,
+                   CASE WHEN :status='postprocessed' THEN convert_to('{}','UTF8') ELSE NULL END,
+                   CASE WHEN :status='postprocessed' THEN now() ELSE NULL END"""),
+            params,
+        )
+    async with AsyncSession(runtime) as session:
+        with pytest.raises(DBAPIError) as caught:
+            await session.execute(
+                text("""CALL ops.finish_provider_feature_membership_command(
+                CAST(:root AS uuid),:dataset,'dataset_wide','load',:authoritative,now(),NULL)"""),
+                {"root": root, "dataset": dataset, "authoritative": authoritative},
+            )
+        assert caught.value.orig.sqlstate == "23514"
+        assert "registered snapshot requires atomic postprocessed member seal" in str(
+            caught.value.orig
+        )
+        await session.rollback()
+    async with admin.connect() as observer:
+        row = (
+            await observer.execute(
+                text("""SELECT child.status,child.payload,
+            control.status,control.seal_txid,
+            (SELECT count(*) FROM ops.curation_provider_snapshot_receipts r
+             WHERE r.source_job_id=child.job_id)
+            FROM ops.import_jobs child CROSS JOIN ops.provider_snapshot_controls control
+            WHERE child.job_id=CAST(:child AS uuid)
+              AND control.snapshot_id=CAST(:snapshot AS uuid)"""),
+                params,
+            )
+        ).one()
+        assert row[0] == "running"
+        assert row[1] == {}
+        assert row[2] == status
+        assert row[3] is None
+        assert row[4] == 0
