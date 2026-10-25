@@ -236,6 +236,7 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
 _PROVIDER_CURATION_FEATURE_PROCEDURES = frozenset(
     {
         "feature.finalize_provider_curation_root(uuid)",
+        "ops.seal_provider_snapshot_member(uuid,text,text,bigint,uuid,text,text)",
         ("feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text,bigint,text)"),
     }
 )
@@ -329,6 +330,18 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 "ops.scoped_feature_write_membership_digest(uuid)",
                 "ops.lock_scoped_feature_write_protocol(boolean)",
                 "ops.lock_provider_feature_tracking_protocol(boolean)",
+                "ops.register_provider_snapshot_artifact(uuid,uuid,uuid,bytea,bytea,text,integer)",
+                "ops.read_provider_snapshot_for_member(uuid,uuid,uuid)",
+                "ops.claim_provider_snapshot_executor(uuid,text,text,integer,bigint,uuid)",
+                "ops.bind_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text,text)",
+                "ops.begin_provider_snapshot_apply(uuid,bigint,uuid,uuid,uuid,text,text)",
+                "ops.finish_provider_snapshot_apply(uuid,bigint,uuid,bytea)",
+                "ops.provider_snapshot_scalar_counter_state(uuid,bigint,uuid,jsonb)",
+                "ops.reset_expired_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)",
+                "ops.begin_provider_snapshot_postprocess(uuid,bigint,uuid,bytea)",
+                "ops.finish_provider_snapshot_postprocess(uuid,bigint,uuid,bytea)",
+                "ops.collect_expired_provider_snapshots(integer)",
+                "feature._assert_strict_sh_data_guard_inventory(boolean)",
                 "ops.claim_scoped_feature_write(uuid,uuid,bigint,text,jsonb,text,integer,integer,boolean)",
                 "ops.append_scoped_feature_write_manifest(uuid,uuid,jsonb)",
                 "ops.seal_scoped_feature_write_manifest(uuid,uuid)",
@@ -345,6 +358,17 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
 _RUNTIME_DB_PRIVILEGE_SQL = text(
     """
     SELECT
+        EXISTS (
+            SELECT 1 FROM pg_class relation JOIN pg_namespace namespace
+                ON namespace.oid=relation.relnamespace
+            WHERE namespace.nspname='ops' AND relation.relname IN (
+                'provider_snapshot_artifacts','provider_snapshot_controls',
+                'provider_snapshot_quota_limits','provider_snapshot_quota_reservations')
+              AND (has_table_privilege(session_user,relation.oid,
+                    'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
+                   OR has_any_column_privilege(session_user,relation.oid,
+                    'SELECT,INSERT,UPDATE,REFERENCES'))
+        ) AS can_access_provider_snapshot_private_relations,
         (has_table_privilege(session_user,'feature.feature_geocode_stamps','INSERT')
          OR has_table_privilege(session_user,'feature.feature_geocode_stamps','UPDATE')
          OR has_table_privilege(session_user,'feature.feature_geocode_stamps','DELETE')
@@ -630,6 +654,9 @@ def _runtime_db_privilege_problems(
     # `SET FALSE`로 주므로 이 술어는 여전히 거짓이어야 하고, 여전히 갈린다.
     forbidden_true_fields = {
         "can_mutate_geocode_stamps_directly": "runtime login must not mutate geocode stamps directly",
+        "can_access_provider_snapshot_private_relations": (
+            "runtime login must not access private provider snapshot relations directly"
+        ),
         "is_superuser": "runtime login must not be SUPERUSER",
         "can_create_role": "runtime login must not have CREATEROLE",
         "bypasses_rls": "runtime login must not have BYPASSRLS",
@@ -687,6 +714,7 @@ def _runtime_db_privilege_problems(
             problems.append(message)
 
     required_true_fields = {
+        "strict_data_guard_inventory_valid": "strict data guard inventory must match its canonical definition",
         "can_read_public_features": ("runtime login must SELECT feature.public_features"),
         "can_read_feature_override_field_paths": (
             "runtime login must SELECT ops.feature_override_field_paths"
@@ -803,6 +831,11 @@ def _runtime_db_privilege_problems(
     return problems
 
 
+_RUNTIME_STRICT_GUARD_INVENTORY_SQL = text(
+    "SELECT feature._assert_strict_sh_data_guard_inventory(false)"
+)
+
+
 async def assert_runtime_db_privilege_boundary(
     engine: AsyncEngine,
     *,
@@ -817,12 +850,22 @@ async def assert_runtime_db_privilege_boundary(
     try:
         async with engine.connect() as connection:
             row = (await connection.execute(_RUNTIME_DB_PRIVILEGE_SQL)).mappings().one_or_none()
+            receipt_row: Mapping[str, object] | None = cast(Mapping[str, object] | None, row)
+            if receipt_row is not None:
+                receipt = dict(receipt_row)
+                # head mismatch는 기존 checker가 거부한다. 아직 없는430 helper는 호출하지 않는다.
+                receipt["strict_data_guard_inventory_valid"] = False
+                if receipt.get("applied_alembic_heads") == [application_schema_head()]:
+                    receipt["strict_data_guard_inventory_valid"] = await connection.scalar(
+                        _RUNTIME_STRICT_GUARD_INVENTORY_SQL
+                    )
+                receipt_row = receipt
     except Exception as exc:  # noqa: BLE001 - catalog/preflight 실패는 원인과 함께 기동 차단
         raise RuntimeDbPrivilegeBoundaryError(
             "runtime DB privilege preflight could not read the ADR-090 catalog boundary"
         ) from exc
 
-    if row is None:
+    if receipt_row is None:
         raise RuntimeDbPrivilegeBoundaryError(
             "runtime DB privilege preflight could not resolve session_user in pg_roles"
         )
@@ -831,7 +874,7 @@ async def assert_runtime_db_privilege_boundary(
     # them as the wider ``RowMapping`` protocol, so retain that catalog contract
     # explicitly at this boundary.
     problems = _runtime_db_privilege_problems(
-        cast(Mapping[str, object], row),
+        receipt_row,
         expected_login=expected_login,
     )
     if problems:

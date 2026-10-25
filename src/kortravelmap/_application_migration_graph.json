@@ -177,6 +177,12 @@
         "428_bounded_curation_capture"
       ],
       "revision": "429_strict_sh_data_guards"
+    },
+    {
+      "down_revision": [
+        "429_strict_sh_data_guards"
+      ],
+      "revision": "430_provider_snapshot_recovery"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
