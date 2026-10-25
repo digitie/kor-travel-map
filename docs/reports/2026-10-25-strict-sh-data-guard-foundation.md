@@ -257,3 +257,20 @@ tree를 보존했으며 재실행하지 않았다. receipt tuple만으로는 실
 upgrade execute trace28/26 전체가 같으며 기존5 SQL sidecar·runtime ACL·41시험·공식
 dump는 바꾸지 않았다. lint 전체와 전용 migration unit은381 PASS/기존6 SKIP,39.13초다.
 새 정확 CI와 두 source delta 검토는 별도이며 PG 재실행·운영 설치·활성화는0이다.
+### 부모427 metadata 반사식 수정의 429 상속
+
+정확46666의 Python3개·fixture와 다른4 workflow 통과를 확인했으며 두 PostGIS lane은
+관측 시점에 진행 중이다. 같은 부모의427 CI에서 확인된 metadata 인덱스 누락/반사식 차이는
+원결과로 보존하고 재시도하지 않는다. 원 ac441의 세 Python role lint 실패도 별도 보존한다.
+
+검토된428 `cac89e092611e64330cfc90c184e28ca3ed2c0e2`을 상속해 models의 인덱스3 표현식과
+해당 순수 시험을427의16ac 원문 그대로 반영한다. 16ac의 새 owned PG에서 원 fresh300→427
+metadata 검사를 수정 없이 실행한1 PASS/17.172초(전체34.564초), Git2417/SDK53·실제import11·
+정확 정리 기록은 부모 보고서에 보존한다. 이는 합성429에서 새로 실행한 검사나 최종 CI가 아니다.
+429 sidecar·권한·41시험·공식 dump와28/26 ordered upgrade trace는46666 그대로다. 공통
+journal/resume은 자체 prefix 뒤 cac89 전체 suffix를 보존하며 다른 부모 문서를 삭제하지 않는다.
+이번 합성의 두 source 검토·새 정확 CI, 취소/pool·전체 writer closure·RC·durable 복구·
+collector/운영 활성화는 별도로 미완이다. 제품 동작·상한·공유 fixture 변경과 새 PG 실행은0이다.
+
+합성 뒤 metadata/429 migration·role/receipt/signature/문서 규약 집중 검사는39 PASS/기존1 SKIP,
+2.31초이며 Ruff·redaction·diff 검사도 통과했다. 새 PG 실행은 없고 최종 source 검토·CI는 별도다.

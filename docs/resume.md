@@ -1,8 +1,21 @@
 ## 2026-10-25 비활성 strict SH guard429 owned 검증
 
+- 46666 CI 원결과를 보존하고 검토된428 cac89의 ORM metadata/반사식 수정과 원 fresh300 검사1 PASS를 상속한다. 429 SQL·공식dump·role trace는 유지하며 새 합성 CI는 별도다.
 - ac441 CI의 마지막 role 추출 실패를 보존하고 실제 receipt/마지막 SET ROLE tuple 배선을 정렬했다. 양28/26 execute trace는 같고 lint 전체+전용 unit381 PASS/기존6 SKIP이다. 새 CI는 미완이다.
 - 별도 source의 실제30/새11과 공식oracle1 PASS·정리를 확인했다. 원25 PASS/5 FAIL은 보존하며 단일41 실행으로 세지 않는다.
 - 검토된 root428c98·최신 main/공항427 부모와 실제429 dump를 상속한다. 제품 SQL·공유 fixture는 유지한다. 최종 두 검토/정확 CI·성능·취소/pool·전체 closure·RC/복구/SH 운영은 미완이다. [범위·근거](reports/2026-10-25-strict-sh-data-guard-foundation.md).
+
+## 2026-10-25 — 427 metadata 수정의 428 상속
+
+세 인덱스의 ORM 선언을 실제 PG 반사 표현식에 맞춘 부모를 상속했다. fresh300 원 metadata 검사 1 PASS/17.172초를 확인했으며, 원 실패는 보존한다. 428의 SQL·oracle은 그대로이고 합성 CI·취소 복구·실제 동시 수집은 미완이다.
+
+### 2026-10-25 공항 인덱스 PG 반사 표현식 보완
+
+- 4bd 실제 autogen 1 FAIL/정확 정리를 보존하고 metadata CASE를 PG canonical 반사와 맞췄다. 기존 comparator 순수 회귀3 FAIL→equal·migration 포함8 PASS, 새 실제 검사는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
+### 2026-10-25 공항 reader ORM 인덱스 metadata 보완
+
+- 70cb 양 PG CI의 autogen 단일 실패/원 로그를 보존하고 canonical metadata에 기존 인덱스3만 등록했다. 생성 SQL 전체 대조와 migration 회귀8 PASS, 실제 autogen/새 exact CI는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
 
 ## 2026-10-25 — capture 권한 인벤토리 CI 정정
 
