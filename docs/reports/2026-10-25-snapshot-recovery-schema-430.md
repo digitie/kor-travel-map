@@ -2,7 +2,7 @@
 
 ## 현재 범위
 
-검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430는 아래 e173 fresh 생성·재덤프 결과로 동기화했다. 독립 최종 리뷰·전체 CI와 caller 전체 수용은 아직 미완이다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
+검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430는 아래 e173 fresh 생성·재덤프 결과로 동기화했다. 최신 runner의 SDK0 재개·봉인 증명과 별도 실제 caller2 재검증을 상속했고, 최종 lint/관련 unit 합집합은787PASS/6SKIP40.96s다. 독립 최종 리뷰·전체 CI와 전체 writer/운영 수용은 아직 미완이다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
 
 430 migration은 고정 sidecar의 CREATE 경계와 명시 signature/owner 목록만 사용한다. 원 SQL 본문을 재작성하지 않고 owner별 문장으로 나누며 전체 bytes 재결합을 검증한다. 기존 routine의 owner도 429 oracle과 대조한다. 실행하는 실제 문장 tuple에 receipt CHECK가 포함된다. P EX를 먼저 얻고 lock/statement timeout을 기존 값과 1s/30s 중 작은 값으로 제한한다. SchemaOwner가 관측한 StateOwner/CommandOwner의 기존 schema CREATE 권한은 유지하고 새로 준 권한만 회수한다.
 
@@ -131,3 +131,29 @@ PASS 실행은 Git/SDK 전후와 실제 import까지 검증했고, 과거 FAIL�
 추가 dependent GRANT까지 정확4항목으로 대조한다. 세 번째는 W runner가 정본 Geo reuse helper를
 namespace로 부른 AST 표기 정합이며 helper/검사 완화 없이 직접 이름 import로 정렬한다.
 이 표기/시험 변경을 e173의 실제 실행 source로 재기록하지 않으며 SQL/oracle는 그대로다.
+
+
+## 최종 runner 상속과 역변환 시험 기준 고정
+
+W674ac의 claim 성공 후 SDK0 fresh read·정확 inactive/sealed 복원과 Geo direct-name 표기를
+상속했다. 첫 정적 묶음478PASS/6SKIP38.99s 뒤 관련 unit 확장에서는304PASS/5FAIL4.44s였다.
+다섯 실패는 RC inverse 시험이 가변 head430을 이전429 정의로 읽은 시험 기준 오류다.
+원 e173의 실제429 dump에서 해당5개 정의만 추출한 고정 자료에 출처 commit과 원 dump SHA를
+남겼다. 원 inverse 변환·함수·assert는 모두 유지하고 입력 경로 한 줄만 바꿨다.
+제품 SQL·ACL·실제430 golden은 바꾸지 않았다.
+
+최종 전체 tests/lint와 schema/db/bounded·artifact/result/recovery/apply/plan/RC/postprocess/client/
+runner unit의 중복 없는 합집합은787PASS/6SKIP40.96s다. 원581/3FAIL 및304/5FAIL 로그를
+보존했고 최종 로그는 `map430-final-674-full-union-r3.log`
+(SHA4dbb63511950df688c26f81ca52a8da9cc6c237d9fd2c85d9f401a84123b4839)다.
+6개 skip에는 로컬 형제 provider 체크아웃 부재 등 기존 검사 조건이 포함된다.
+공유4파일 strict mypy·집중 Ruff8·redaction은 PASS다. W의 report-only 후속은 시험 제품/정의를
+바꾸지 않고 상속했다. 이후 본 단락 문서 변경은 별도 문서 검사로 확인한다.
+
+W exact674ac caller2는 별도 owned 실행2PASS/skip0, suite24.280s다. J는 raw8개 SHA,
+실 import32의 Git blob, source2505 mode/OID, XML 두 사례 속성과 정확 정리를 읽기 검산했다.
+독립 원장은 `map-airport-caller2-owned-r2-j-independent-factcheck.json`
+(SHA701dc98b51e9eb7286d576460eb7a141d24f65ea96beeded55b9f9e545afe501)이다.
+실제 same-run SDK0 replay/같은 generation의 만료 plan 재생성은 확인했으나 물리적인
+claim/seal race를 유도한 시험은 아니다. 원 r1 caller2와 새 r2를 합산하지 않으며,
+Root terminal 뒤 public finish no-op 경합 보강은 T의 별도 소유 변경으로 남긴다.

@@ -13,7 +13,7 @@ from tests.unit.test_transaction_limits import _NOW, _client, _stub
 
 _ROOT = Path(__file__).resolve().parents[2]
 _SQL = (_ROOT / "alembic/versions/_430_snapshot_finalization.sql").read_text()
-_OLD = (_ROOT / "alembic/head-schema.sql").read_text()
+_OLD = (_ROOT / "tests/unit/fixtures/snapshot_finalization_429.sql").read_text()
 _NAMES = (
     "ops.lock_provider_feature_tracking_protocol",
     "feature.seal_provider_curation_snapshot_receipt",

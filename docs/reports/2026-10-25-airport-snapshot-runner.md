@@ -171,3 +171,9 @@ read와 claim 사이에 다른 worker가 child를 seal한 경우는 SQLSTATE `23
 기존 reverse-Geo 정적 검사가 실제 정본 helper의 direct-name 호출을 요구하므로 local import와 호출 표기만 맞췄다. 정본 함수·재사용 의미·기존 검사 자체는 그대로다. 수정 전 lint 1FAIL/2PASS와 수정 뒤 3PASS를 구분한다. client/plan/runner와 해당 lint의 최종 집중 검증은 **91PASS/6.73초**, strict mypy1 및 Ruff2 PASS다. 이전 5717 실제 caller2 PASS는 그 source 세대의 사실로 보존하며, 이 새 제어 흐름은 같은 소유 2사례로 다시 검증한다. 위 race 자체의 실제 물리 경합·worker kill을 순수 대역 결과로 입증했다고 하지 않는다.
 
 공유 repository의 outer finish는 root terminal 검사와 member-done no-op 순서를 별도로 가진다. runner의 immutable 완료 복원과 전체 public wrapper의 terminal 처리는 같은 판정으로 확대하지 않는다. 이 변경은 소유 runner/그 unit/본 보고서만 수정하며 SQL·공유 client·DTO/OpenAPI·기존 함수 signature·Airport 상한·retry 정책은 유지한다.
+
+## claim 수정 뒤 actual caller2 재검증
+
+고정 `674ac6b2d3d850f9fd85293f2236c2583f233d8b`의 동일한 소유 2사례가 재검증에서 모두 PASS했다. XML suite 24.280초(각 23.232·0.993초), pytest 25.00초, 전체 42.817초이며 failure/error/skip은 모두0이다. 실제 head430/service role, source2,505개와 SDK53개 전후, project import32개 및 raw8개 hash를 확인했다. 정확 CID 부재·UUID0·scalar label0·anonymous volume1 부재 후 PG/CPU 슬롯을 반환했다.
+
+정본은 private audit `map-airport-caller2-owned-r2-actual-facts.json` SHA `cd847ffa2701a0243cd30fb9ecf279386cb8c48e0c53a46b884da36b0c773916`, 원 result SHA `2cc5b83ca9737aefdd7fdd9633a0c7d7ae5432ebde634b6b17b1dc47d3c57c46`다. 5717의 기존 actual2와 이 새 제품 세대의 actual2를 합산해 단일4PASS라고 부르지 않는다. 정상 scheduled caller·SDK0 재개·같은 generation 재계획의 회귀이며, read→claim 사이 실제 다른 물리 worker의 전진을 강제한 경합 시험은 아니다. 운영 배포·실제 SDK/Geo HTTP·두 dataset 동시 worker 수용은 여전히 별도다.
