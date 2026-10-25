@@ -1198,6 +1198,96 @@ $_$;
 ALTER FUNCTION feature._install_provider_field_projection_guards() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: _install_strict_sh_data_guards(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature._install_strict_sh_data_guards() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_relations text[]:=ARRAY['feature.feature_areas','feature.feature_base_field_values','feature.feature_creation_origins','feature.feature_events','feature.feature_geocode_stamps','feature.feature_notices','feature.feature_places','feature.feature_route_geometries','feature.feature_routes','feature.features','feature.manual_feature_identity_claims','feature.provider_field_active_policies','feature.provider_field_policy_epoch','feature.provider_field_shadow_candidates','feature.provider_field_shadow_policies','ops.feature_override_field_paths','ops.feature_overrides','provider_sync.provider_dataset_operation_scopes','provider_sync.provider_dataset_operations','provider_sync.provider_datasets','provider_sync.provider_feature_identities','provider_sync.source_entities','provider_sync.source_entity_heads','provider_sync.source_links','provider_sync.source_records'];
+    v_shared text[]:=ARRAY['feature.feature_base_field_values','feature.feature_geocode_stamps','feature.feature_places','feature.features','feature.provider_field_shadow_candidates','provider_sync.source_entities','provider_sync.source_entity_heads','provider_sync.source_records'];
+    v_relation text;
+    v_profile text;
+    v_function regprocedure;
+    v_expected integer:=33;
+    v_count integer;
+    v_trigger record;
+BEGIN
+    -- P EX 이전에는 table/epoch/행을 잠그지 않는다.
+    PERFORM feature._strict_sh_data_context(false);
+    SELECT count(*) INTO v_count FROM pg_trigger
+     WHERE NOT tgisinternal AND tgfoid IN (
+        'feature._strict_sh_data_statement_guard()'::regprocedure,
+        'feature._strict_sh_source_row_guard()'::regprocedure,
+        'feature._strict_sh_feature_row_guard()'::regprocedure);
+    IF v_count NOT IN (0,v_expected) THEN
+        RAISE EXCEPTION 'partial strict data guard installation'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_inventory';
+    END IF;
+    IF v_count=0 THEN
+        -- 인접 호출자의 table lock 순서는 고정한다. 성공 후만 33개 전체가 보인다.
+        FOREACH v_relation IN ARRAY v_relations LOOP
+            EXECUTE format('LOCK TABLE %s IN ACCESS EXCLUSIVE MODE',v_relation::regclass);
+        END LOOP;
+        FOREACH v_relation IN ARRAY v_relations LOOP
+            v_profile:=CASE WHEN v_relation=ANY(v_shared) THEN 'strict_sh' ELSE 'ex_only' END;
+            EXECUTE format('CREATE TRIGGER trg_00_strict_sh_data_protocol BEFORE INSERT OR UPDATE OR DELETE ON %s FOR EACH STATEMENT EXECUTE FUNCTION feature._strict_sh_data_statement_guard(%L)',v_relation::regclass,v_profile);
+            IF v_relation=ANY(v_shared) THEN
+                v_function:=CASE WHEN v_relation LIKE 'provider_sync.%'
+                    THEN 'feature._strict_sh_source_row_guard()'::regprocedure
+                    ELSE 'feature._strict_sh_feature_row_guard()'::regprocedure END;
+                EXECUTE format('CREATE TRIGGER trg_00_strict_sh_data_target BEFORE INSERT OR UPDATE OR DELETE ON %s FOR EACH ROW EXECUTE FUNCTION %s',v_relation::regclass,v_function);
+            END IF;
+        END LOOP;
+    END IF;
+    -- 기존 이름과 부딪히면 CREATE 자체가 원자적으로 실패한다. disabled/타표/타함수도 거부한다.
+    FOREACH v_relation IN ARRAY v_relations LOOP
+        v_profile:=CASE WHEN v_relation=ANY(v_shared) THEN 'strict_sh' ELSE 'ex_only' END;
+        SELECT * INTO v_trigger FROM pg_trigger
+         WHERE tgrelid=v_relation::regclass AND tgname='trg_00_strict_sh_data_protocol';
+        IF NOT FOUND OR v_trigger.tgisinternal OR v_trigger.tgtype<>30
+           OR v_trigger.tgenabled<>'O' OR v_trigger.tgconstraint<>0
+           OR v_trigger.tgfoid<>'feature._strict_sh_data_statement_guard()'::regprocedure
+           OR v_trigger.tgnargs<>1 OR v_trigger.tgargs<>
+                convert_to(v_profile,'UTF8')||decode('00','hex')
+           OR v_trigger.tgqual IS NOT NULL OR cardinality(v_trigger.tgattr::smallint[])<>0 THEN
+            RAISE EXCEPTION 'strict statement guard definition drift'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_inventory';
+        END IF;
+        IF v_relation=ANY(v_shared) THEN
+            v_function:=CASE WHEN v_relation LIKE 'provider_sync.%'
+                THEN 'feature._strict_sh_source_row_guard()'::regprocedure
+                ELSE 'feature._strict_sh_feature_row_guard()'::regprocedure END;
+            SELECT * INTO v_trigger FROM pg_trigger
+             WHERE tgrelid=v_relation::regclass AND tgname='trg_00_strict_sh_data_target';
+            IF NOT FOUND OR v_trigger.tgisinternal OR v_trigger.tgtype<>31
+               OR v_trigger.tgenabled<>'O' OR v_trigger.tgconstraint<>0
+               OR v_trigger.tgfoid<>v_function OR v_trigger.tgnargs<>0
+               OR v_trigger.tgargs<>''::bytea OR v_trigger.tgqual IS NOT NULL
+               OR cardinality(v_trigger.tgattr::smallint[])<>0 THEN
+                RAISE EXCEPTION 'strict target guard definition drift'
+                    USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_inventory';
+            END IF;
+        END IF;
+    END LOOP;
+    SELECT count(*) INTO v_count FROM pg_trigger
+     WHERE NOT tgisinternal AND tgfoid IN (
+        'feature._strict_sh_data_statement_guard()'::regprocedure,
+        'feature._strict_sh_source_row_guard()'::regprocedure,
+        'feature._strict_sh_feature_row_guard()'::regprocedure);
+    IF v_count<>v_expected THEN
+        RAISE EXCEPTION 'strict guard relation set drift'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_inventory';
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION feature._install_strict_sh_data_guards() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: _project_provider_field_candidates(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -1458,6 +1548,275 @@ $_$;
 
 
 ALTER PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _strict_sh_data_context(boolean); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._strict_sh_data_context(p_allow_shared boolean) RETURNS uuid
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_exclusive boolean;
+    v_shared boolean;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_candidate ops.feature_write_attempts%ROWTYPE;
+    v_count integer := 0;
+    v_scope ops.feature_write_dataset_scopes%ROWTYPE;
+    v_region jsonb;
+    v_index integer := 0;
+    v_epoch bigint;
+    v_owner uuid;
+BEGIN
+    IF p_allow_shared IS NULL THEN
+        RAISE EXCEPTION 'strict data prefix mode is required'
+            USING ERRCODE='23514', CONSTRAINT='ck_strict_data_protocol_prefix';
+    END IF;
+    SELECT coalesce(bool_or(mode='ExclusiveLock'),false),
+           coalesce(bool_or(mode='ShareLock'),false)
+      INTO v_exclusive,v_shared
+      FROM pg_locks
+     WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+       AND database=(SELECT oid FROM pg_database WHERE datname=current_database())
+       AND classid=1369104691 AND objid=115 AND objsubid=2;
+    IF v_exclusive THEN RETURN NULL; END IF;
+    IF NOT v_shared OR NOT p_allow_shared THEN
+        RAISE EXCEPTION 'data mutation requires its protocol prefix before epoch or rows'
+            USING ERRCODE='23514', CONSTRAINT='ck_strict_data_protocol_prefix';
+    END IF;
+    -- 임의 GUC·ready·completed는 권위가 아니다. 실제 begin이 남긴 현재 TX만 읽는다.
+    FOR v_candidate IN
+        SELECT a.* FROM ops.feature_write_attempts a
+         WHERE a.status='applying' AND NOT a.exclusive_protocol
+           AND a.apply_txid=txid_current_if_assigned()
+         ORDER BY a.attempt_id LIMIT 2
+    LOOP
+        v_count:=v_count+1;
+        v_attempt:=v_candidate;
+    END LOOP;
+    IF v_count<>1 OR v_attempt.manifest_digest IS NULL THEN
+        RAISE EXCEPTION 'shared data mutation requires one current applying manifest'
+            USING ERRCODE='23514', CONSTRAINT='ck_strict_data_applying_context';
+    END IF;
+    SELECT * INTO v_scope FROM ops.feature_write_dataset_scopes
+     WHERE provider_dataset_id=v_attempt.provider_dataset_id;
+    IF NOT FOUND OR v_scope.epoch IS DISTINCT FROM v_attempt.dataset_epoch
+       OR (jsonb_array_length(v_attempt.regions)=0
+           AND v_scope.owner IS DISTINCT FROM v_attempt.attempt_id) THEN
+        RAISE EXCEPTION 'shared data scope owner or epoch changed; replan'
+            USING ERRCODE='40001', CONSTRAINT='ck_strict_data_scope_context';
+    END IF;
+    FOR v_region IN SELECT value FROM jsonb_array_elements(v_attempt.regions)
+    LOOP
+        v_index:=v_index+1;
+        SELECT epoch,owner INTO v_epoch,v_owner FROM ops.feature_write_region_scopes
+         WHERE provider_dataset_id=v_attempt.provider_dataset_id
+           AND scope_version=(v_region->>'scope_version')::integer
+           AND region_key=v_region->>'region_key';
+        IF NOT FOUND OR v_epoch IS DISTINCT FROM v_attempt.region_epochs[v_index]
+           OR v_owner IS DISTINCT FROM v_attempt.attempt_id THEN
+            RAISE EXCEPTION 'shared data region owner or epoch changed; replan'
+                USING ERRCODE='40001', CONSTRAINT='ck_strict_data_scope_context';
+        END IF;
+    END LOOP;
+    -- 현재 applying TX는 기존 kernel처럼 lease 경과만으로 자기 권위를 잃지 않는다.
+    -- frozen manifest는 typed kernel만 쓸 수 있다. 이 helper는 nonce/물리 prelock 증명이 아니다.
+    RETURN v_attempt.attempt_id;
+END;
+$$;
+
+
+ALTER FUNCTION feature._strict_sh_data_context(p_allow_shared boolean) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _strict_sh_data_statement_guard(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._strict_sh_data_statement_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_attempt uuid;
+BEGIN
+    IF TG_NARGS<>1 OR TG_ARGV[0] NOT IN ('strict_sh','ex_only') THEN
+        RAISE EXCEPTION 'unknown strict data statement profile'
+            USING ERRCODE='23514', CONSTRAINT='ck_strict_data_guard_profile';
+    END IF;
+    v_attempt:=feature._strict_sh_data_context(TG_ARGV[0]='strict_sh');
+    IF v_attempt IS NOT NULL THEN
+        -- P 없는/bare SH는 이 FOR SHARE helper까지 오지 못한다.
+        PERFORM feature.lock_provider_field_policy_epoch();
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature._strict_sh_data_statement_guard() OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _strict_sh_feature_row_guard(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._strict_sh_feature_row_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_attempt uuid;
+    v_feature uuid;
+    v_dataset bigint;
+BEGIN
+    v_attempt:=feature._strict_sh_data_context(true);
+    IF v_attempt IS NULL THEN
+        IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_TABLE_SCHEMA<>'feature' OR TG_TABLE_NAME NOT IN
+       ('features','feature_places','feature_base_field_values',
+        'provider_field_shadow_candidates','feature_geocode_stamps') THEN
+        RAISE EXCEPTION 'unknown strict Feature relation'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_profile';
+    END IF;
+    IF TG_OP='DELETE' OR (TG_OP='INSERT' AND TG_TABLE_NAME IN
+        ('features','feature_places','feature_geocode_stamps')) THEN
+        RAISE EXCEPTION 'shared Feature topology mutation is unsupported'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_target';
+    END IF;
+    v_feature:=NEW.feature_id;
+    PERFORM feature.assert_scoped_candidate_write(v_attempt,v_feature);
+    IF TG_OP='UPDATE' THEN
+        PERFORM feature.assert_scoped_candidate_write(v_attempt,OLD.feature_id);
+        IF OLD.feature_id IS DISTINCT FROM v_feature THEN
+            RAISE EXCEPTION 'shared Feature identity cannot change'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_target';
+        END IF;
+    END IF;
+    -- target 소속만으로 scalar eligibility를 증명하지 않는다. 기존420은 policy가
+    -- 없으면 조기 반환하므로 SH에서는 이 전제를 직접 닫는다. EX는 앞에서 반환했다.
+    IF NOT EXISTS (SELECT 1 FROM feature.features feature
+        JOIN feature.provider_field_active_policies active USING(feature_id)
+        WHERE feature.feature_id=v_feature AND feature.lifecycle_state='active') THEN
+        RAISE EXCEPTION 'shared Feature requires an active scalar policy and lifecycle'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_eligibility';
+    END IF;
+    IF TG_TABLE_NAME='features' THEN
+        IF NEW.lifecycle_state IS DISTINCT FROM 'active' THEN
+            RAISE EXCEPTION 'shared Feature lifecycle transition is unsupported'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_eligibility';
+        END IF;
+    END IF;
+    IF TG_TABLE_NAME IN ('feature_base_field_values','provider_field_shadow_candidates') THEN
+        SELECT provider_dataset_id INTO STRICT v_dataset FROM ops.feature_write_attempts
+         WHERE attempt_id=v_attempt;
+        IF NEW.provider_dataset_id IS DISTINCT FROM v_dataset
+           OR NOT EXISTS (SELECT 1 FROM provider_sync.source_entities entity
+               JOIN provider_sync.source_links link USING(source_entity_key)
+               WHERE entity.source_entity_key=NEW.source_entity_key
+                 AND entity.provider_dataset_id=v_dataset
+                 AND link.feature_id=v_feature AND link.source_role='primary')
+           OR NOT EXISTS (SELECT 1 FROM ops.feature_write_manifests
+               WHERE attempt_id=v_attempt AND dependency_kind='source_head'
+                 AND dependency_key=NEW.source_entity_key) THEN
+            RAISE EXCEPTION 'shared derived value is outside its own primary source target'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_target';
+        END IF;
+        IF TG_OP='UPDATE' AND (OLD.provider_dataset_id IS DISTINCT FROM NEW.provider_dataset_id
+           OR OLD.source_entity_key IS DISTINCT FROM NEW.source_entity_key) THEN
+            RAISE EXCEPTION 'shared derived value cannot change provider identity'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_feature_target';
+        END IF;
+    END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION feature._strict_sh_feature_row_guard() OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _strict_sh_source_row_guard(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION feature._strict_sh_source_row_guard() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_attempt uuid;
+    v_dataset bigint;
+    v_key text;
+    v_existing provider_sync.source_entities%ROWTYPE;
+BEGIN
+    v_attempt:=feature._strict_sh_data_context(true);
+    IF v_attempt IS NULL THEN
+        IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+        RETURN NEW;
+    END IF;
+    IF TG_TABLE_SCHEMA<>'provider_sync' OR TG_TABLE_NAME NOT IN
+       ('source_entities','source_entity_heads','source_records') THEN
+        RAISE EXCEPTION 'unknown strict source relation'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_profile';
+    END IF;
+    IF TG_TABLE_NAME='source_records' AND TG_OP='DELETE' THEN
+        RAISE EXCEPTION 'shared source records are append-only'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+    END IF;
+    SELECT provider_dataset_id INTO STRICT v_dataset FROM ops.feature_write_attempts
+     WHERE attempt_id=v_attempt;
+    -- source record의 raw_data를 직렬화하지 않고 명시 key 필드만 읽는다.
+    IF TG_TABLE_NAME='source_entities' THEN
+        IF TG_OP='DELETE' THEN
+            RAISE EXCEPTION 'shared source entity deletion is unsupported'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+        END IF;
+        v_key:=NEW.source_entity_key;
+        SELECT * INTO v_existing FROM provider_sync.source_entities WHERE source_entity_key=v_key;
+        IF NOT FOUND OR NEW.provider_dataset_id IS DISTINCT FROM v_dataset
+           OR v_existing.provider_dataset_id IS DISTINCT FROM v_dataset
+           OR NEW.source_entity_type IS DISTINCT FROM v_existing.source_entity_type
+           OR NEW.source_entity_id IS DISTINCT FROM v_existing.source_entity_id
+           OR (TG_OP='UPDATE' AND OLD.source_entity_key IS DISTINCT FROM v_key) THEN
+            RAISE EXCEPTION 'shared source entity must retain existing dataset and identity'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+        END IF;
+        -- INSERT ON CONFLICT 후보의 first_seen_at은 새 값이어도 된다.
+        -- 실제 UPDATE first_seen/last_seen 검사는 기존 immutable/seen trigger가 한다.
+    ELSE
+        v_key:=CASE WHEN TG_OP='DELETE' THEN OLD.source_entity_key ELSE NEW.source_entity_key END;
+        IF TG_OP='UPDATE' AND OLD.source_entity_key IS DISTINCT FROM NEW.source_entity_key THEN
+            RAISE EXCEPTION 'shared source row cannot change entity identity'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+        END IF;
+        IF NOT EXISTS (SELECT 1 FROM provider_sync.source_entities
+            WHERE source_entity_key=v_key AND provider_dataset_id=v_dataset) THEN
+            RAISE EXCEPTION 'shared source row is outside its own dataset'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+        END IF;
+        IF TG_TABLE_NAME='source_entity_heads' THEN
+            IF TG_OP='DELETE' OR NOT EXISTS (SELECT 1 FROM provider_sync.source_entity_heads
+                WHERE source_entity_key=v_key) OR NOT EXISTS (
+                SELECT 1 FROM provider_sync.source_records
+                 WHERE source_record_key=NEW.current_source_record_key AND source_entity_key=v_key) THEN
+                RAISE EXCEPTION 'shared head must retain an existing head and owned record'
+                    USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+            END IF;
+        END IF;
+        -- source_records UPDATE의 원 immutable 오류는 뒤의 정본 trigger가 보존한다.
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM ops.feature_write_manifests
+        WHERE attempt_id=v_attempt AND dependency_kind='source_head' AND dependency_key=v_key) THEN
+        RAISE EXCEPTION 'shared source row is outside its frozen manifest'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+    END IF;
+    IF TG_OP='DELETE' THEN RETURN OLD; END IF;
+    RETURN NEW;
+END;
+$$;
+
+
+ALTER FUNCTION feature._strict_sh_source_row_guard() OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: _transport_airport_evidence_inventory(bigint, text[]); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -20297,7 +20656,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -29137,6 +29496,13 @@ GRANT ALL ON FUNCTION feature._install_provider_field_projection_guards() TO ktm
 
 
 --
+-- Name: FUNCTION _install_strict_sh_data_guards(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature._install_strict_sh_data_guards() FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION _project_provider_field_candidates(p_feature uuid); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -29157,6 +29523,38 @@ GRANT ALL ON FUNCTION feature._provider_field_projection_dependency_active(p_rel
 --
 
 REVOKE ALL ON PROCEDURE feature._record_provider_field_candidates(IN p_attempt uuid, IN p_feature_id uuid, IN p_provider_dataset_id bigint, IN p_source_entity_key text, IN p_source_record_key text, IN p_policy_revision bigint, IN p_normalizer_revision text, IN p_presence_proven boolean, IN p_values jsonb, IN p_geometry_wkt jsonb, OUT o_field_count integer, OUT o_unresolved_count integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _strict_sh_data_context(p_allow_shared boolean); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._strict_sh_data_context(p_allow_shared boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._strict_sh_data_context(p_allow_shared boolean) TO ktm_feature_schema_owner;
+
+
+--
+-- Name: FUNCTION _strict_sh_data_statement_guard(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._strict_sh_data_statement_guard() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._strict_sh_data_statement_guard() TO ktm_feature_schema_owner;
+
+
+--
+-- Name: FUNCTION _strict_sh_feature_row_guard(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._strict_sh_feature_row_guard() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._strict_sh_feature_row_guard() TO ktm_feature_schema_owner;
+
+
+--
+-- Name: FUNCTION _strict_sh_source_row_guard(); Type: ACL; Schema: feature; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION feature._strict_sh_source_row_guard() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._strict_sh_source_row_guard() TO ktm_feature_schema_owner;
 
 
 --

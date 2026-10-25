@@ -171,6 +171,12 @@
         "427_transport_airport_reader"
       ],
       "revision": "428_bounded_curation_capture"
+    },
+    {
+      "down_revision": [
+        "428_bounded_curation_capture"
+      ],
+      "revision": "429_strict_sh_data_guards"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
