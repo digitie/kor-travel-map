@@ -1,3 +1,7 @@
+## 2026-10-25 — Transport 순수 투영 진단(미수용)
+
+- 기존 converter로 raw7을 복원하고 명시 presence·동일 raw 진단을 추가했다. DB/reader/worker는 미배선이며 [범위·미완](reports/2026-10-25-transport-native-eligibility.md)을 분리한다.
+
 ## 2026-10-25 — Place projection 예산 검사 추출
 
 - Heritage 사전 검사를 core로 이동하고 기존 wrapper·9DTO·본문을 보존했다. 순수 회귀114 PASS이며 DB/수집 연결은 없다. [범위·미완](reports/2026-10-25-place-projection-budget-extraction.md).

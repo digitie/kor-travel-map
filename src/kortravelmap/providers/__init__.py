@@ -15,6 +15,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``knps`` | python-knps-api | 국립공원 file dataset |
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
 | ``kor_travel_transport`` | kor-travel-transport | transport export 계약·파서(ADR-106) |
+| ``kor_travel_transport_native`` | kor-travel-transport | 저장 projection 복원·순수 적격성 진단 |
 | ``kor_travel_transport_state`` | kor-travel-transport | export → Valkey 상태 값(ADR-114) |
 | ``kor_travel_weather`` | kor-travel-weather | Map용 export(W1~W5) 계약·파서(ADR-114 2단계) |
 | ``kor_travel_weather_state`` | kor-travel-weather | export → Valkey 상태 값(ADR-114 2단계) |
