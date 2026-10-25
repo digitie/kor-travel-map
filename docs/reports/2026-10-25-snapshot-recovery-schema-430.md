@@ -31,3 +31,12 @@ SchemaOwner의 최초 정책은 global key0 16MiB/256행, 실제 active `kor-tra
 - WSL 진입이 한 번 연결 timeout으로 실패했다. 해당 Python 배치는 실행되지 않았음을 파일 상태로 확인하고, 서비스 재시작·다른 작업 중지 없이 연결 복구 후 계속했다.
 
 다음은 고정 source 두 검토 뒤 owned fresh bootstrap에서 SQL 문법·owner dependency·ACL·startup·ORM reflection을 실제로 확인하는 것이다. postprocess intent mismatch/rollback/replay, newer-applied supersession, GC ledger/retention/active 거부, 전체 A/B/C·등록·reset paired 시험과 최종 caller 원자성도 남아 있다. 최종 공식430 oracle는 그 실제 실행 결과로만 채택한다. cancellation/pool 및 큰 DS 전체 protocol 수용을 이 배선 완료로 대체하지 않는다.
+
+
+## 첫 실제 bootstrap 실패와 수정
+
+source56854a의 bounded owned postprocess3 실행은 setup3 ERROR16.81s로 끝났다. migration 첫 storage chunk가 두 CREATE TABLE을 한 asyncpg prepared statement로 전달해 거부됐다. 시험 본체와 실제430 head 관측은 실행되지 않았다. 정확 CID/UUID/global label0 및 anonymous volume1 부재를 확인했으며 원 raw/XML을 보존했다. pytest 실패 뒤 runner의 SDK/source post 검사는 도달하지 않아 별도 offline 보충으로만 정산한다.
+
+수정은 정본 과거0202의 문자열/식별자 quote·dollar tag 인식 경계 탐색을 revision-local로 재사용해, owner chunk마다 최상위 SQL 하나씩 보내는 것이다. 기존 routine body·owner/ACL/GUC/순서와 `_sections`의 원문 bytes 재결합은 유지한다. SQL 없는 trailing comment만 실행에서 제외한다. RootSQL 본문이나 시험 기대값을 바꾸지 않는다. 새 고정 source의 실제 설치 수용은 별도 실행 결과가 있어야 한다.
+
+수정 후 집중67 PASS1.77s·mypy1·Ruff2 PASS다. 최종 source는 다음 bounded bootstrap으로만 실제 설치 여부를 판정한다.

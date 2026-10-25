@@ -320,3 +320,27 @@ async def test_actual_startup_uses_readonly_inventory_only_after_exact_head(
     if head_matches:
         assert connection.scalar.await_args.args == (db._RUNTIME_STRICT_GUARD_INVENTORY_SQL,)
     assert context.__aexit__.await_count == 1
+
+
+def test_asyncpg_receives_single_top_level_ddl_without_splitting_function_bodies():
+    sql = (
+        "CREATE TABLE a(id int); CREATE FUNCTION f() RETURNS void AS $body$ "
+        "BEGIN PERFORM 1; END; $body$ LANGUAGE plpgsql; -- trailing comment"
+    )
+    commands = migration._top_level_statements(sql)
+    assert len(commands) == 2
+    assert "BEGIN PERFORM 1; END;" in commands[1]
+    assert migration._top_level_statements("SELECT 'a;b'; SELECT 'it''s;ok';") == (
+        "SELECT 'a;b';",
+        "SELECT 'it''s;ok';",
+    )
+    for filename, rows in migration._SIDECARS:
+        for _, body in migration._sections(filename, rows):
+            for command in migration._top_level_statements(body):
+                assert migration._top_level_statements(command) == (command,)
+    storage = next(
+        body
+        for owner, body in migration._sections(*migration._SIDECARS[0])
+        if "CREATE TABLE" in body
+    )
+    assert len(migration._top_level_statements(storage)) == 2
