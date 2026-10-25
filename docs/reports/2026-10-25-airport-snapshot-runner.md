@@ -161,3 +161,13 @@ lease busy와 동일시하지 않으며 stale fence의 nonretryable 분리는 �
 첫 시험은 실제 scheduled canonical guard와 전체 client 배선을 거쳐 child sealed 뒤 동일 run의 retry9 재진입에서도 retry2의 원 observation generation·clock·GeoStats·artifact/result/receipt bytes·cursor와 완료 상태를 유지했다. 둘째 시험은 executor generation1/fence를 유지하고 첫 cancelled attempt 행을 보존한 상태에서 다른 새 attempt/owner/idempotency key를 실제 unique 제약 아래 생성했다. 원 SDK 입력은 synthetic 공항1행이고 저장 Geo 재사용 경로이며, 실제 SDK/Geo HTTP·배포 image receipt·worker 강제 종료·두 dataset 동시 쓰기·queue SH·성능 수용을 입증하지 않는다.
 
 정본 사실 원장은 private audit `map-airport-caller2-owned-r1-actual-facts.json` SHA `24c3b1a5e2ff8940c08c800e7c7ad873a8f629f8b0091def9151a134541c0011`이다. 원 result SHA `f546baaa81858f7121812d70f91c5981172979b77c59f4364b6f374d777a80f0`와 raw8개를 보존했다. 이전의 collect-only 절은 당시 checkpoint 기록으로 남기고 이 실제 결과와 구분한다. 기존 Root GC/후처리/startup 실패·성공을 이 2PASS와 합산하지 않는다.
+
+## claim 전후 상태 전진과 원 결과 복구
+
+T가 고정한 반례에서 초기 read가 `prepared`이고 실제 claim은 이미 `applied`를 반환해도 옛 상태로 plan/apply를 시도했다. 같은 `prepared` 안에서도 다른 worker의 reset/replan으로 binding이 달라질 수 있다. 두 순수 반례는 수정 전 2FAIL로 보존했고, 성공 claim 뒤에는 같은 member의 SDK0 read를 항상 다시 수행하여 snapshot/artifact/context identity와 현재 phase/binding으로만 진행한다. 새 입력이나 SDK 재수집은 없다.
+
+read와 claim 사이에 다른 worker가 child를 seal한 경우는 SQLSTATE `23514`·constraint `ck_provider_snapshot_member_binding`·정확한 member-inactive 메시지 세 항목이 일치할 때만 재조회한다. 동일 snapshot/artifact/context, `child_sealed`, child done, root running 또는 done, 취소·격리 없음과 원 receipt/intent 재검증이 모두 성립해야 DML 없이 원 결과를 복구한다. 하나라도 다르면 원 claim 오류를 재전파한다. 같은 constraint의 input mismatch·다른 constraint·일반 lock timeout은 재분류하지 않는다. 이 inactive-seal 반례의 수정 전 1FAIL도 보존했다. 성공 claim 뒤 sealed를 읽는 경우에도 같은 상태·receipt 검증을 적용한다.
+
+기존 reverse-Geo 정적 검사가 실제 정본 helper의 direct-name 호출을 요구하므로 local import와 호출 표기만 맞췄다. 정본 함수·재사용 의미·기존 검사 자체는 그대로다. 수정 전 lint 1FAIL/2PASS와 수정 뒤 3PASS를 구분한다. client/plan/runner와 해당 lint의 최종 집중 검증은 **91PASS/6.73초**, strict mypy1 및 Ruff2 PASS다. 이전 5717 실제 caller2 PASS는 그 source 세대의 사실로 보존하며, 이 새 제어 흐름은 같은 소유 2사례로 다시 검증한다. 위 race 자체의 실제 물리 경합·worker kill을 순수 대역 결과로 입증했다고 하지 않는다.
+
+공유 repository의 outer finish는 root terminal 검사와 member-done no-op 순서를 별도로 가진다. runner의 immutable 완료 복원과 전체 public wrapper의 terminal 처리는 같은 판정으로 확대하지 않는다. 이 변경은 소유 runner/그 unit/본 보고서만 수정하며 SQL·공유 client·DTO/OpenAPI·기존 함수 signature·Airport 상한·retry 정책은 유지한다.

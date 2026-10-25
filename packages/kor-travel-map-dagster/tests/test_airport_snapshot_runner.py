@@ -44,7 +44,7 @@ async def _case(monkeypatch, *, status="applied", geo=False):
         intent.receipt_candidate if status in {"postprocessed", "child_sealed"} else None,
         _AT,
         "running",
-        "running",
+        "done" if status == "child_sealed" else "running",
         False,
         None,
     )
@@ -187,7 +187,7 @@ async def test_new_registration_token_is_first_claim_previous_and_no_second_fetc
         applied_result=intent.apply_result,
         applied_result_bytes=intent.result_bytes,
     )
-    stubs["read_airport_snapshot"].side_effect = [None, prepared, applied]
+    stubs["read_airport_snapshot"].side_effect = [None, prepared, prepared, applied]
     collect = AsyncMock(
         return_value=(prepared.artifact_payload, prepared.observation_context, None)
     )
@@ -210,7 +210,7 @@ async def test_apply_unknown_commit_propagates_without_reset_ex_or_refetch(monke
     with pytest.raises(RuntimeError) as raised:
         await target.run_airport_snapshot_if_supported(context)
     assert raised.value is error
-    stubs["read_airport_snapshot"].assert_awaited_once()
+    assert stubs["read_airport_snapshot"].await_count == 2
     stubs["reset_airport_snapshot_plan"].assert_not_awaited()
     backend.complete_provider_snapshot_postprocess.assert_not_awaited()
     collect.assert_not_awaited()
@@ -230,7 +230,7 @@ async def test_known_replan_reads_then_exact_resets_and_reads_again_before_new_p
 
     async def read(*args, **kwargs):
         events.append("read")
-        return applied if len(events) == 5 else prepared
+        return applied if len(events) == 7 else prepared
 
     async def reset(*args):
         events.append("reset")
@@ -244,7 +244,7 @@ async def test_known_replan_reads_then_exact_resets_and_reads_again_before_new_p
         object(),
     ]
     await target.run_airport_snapshot_if_supported(context)
-    assert events == ["read", "read", "reset", "read", "read"]
+    assert events == ["read", "read", "read", "reset", "read", "read", "read"]
     assert stubs["apply_airport_snapshot"].await_count == 2
     collect.assert_not_awaited()
 
@@ -427,7 +427,7 @@ async def test_absent_enabled_runs_one_bounded_gc_before_first_fetch(monkeypatch
         applied_result=intent.apply_result,
         applied_result_bytes=intent.result_bytes,
     )
-    stubs["read_airport_snapshot"].side_effect = [None, prepared, applied]
+    stubs["read_airport_snapshot"].side_effect = [None, prepared, prepared, applied]
     events = []
 
     async def collect(*args):
@@ -504,3 +504,211 @@ def test_existing_retry_policy_has_a_finite_retry_after_full_executor_lease():
     delays = [policy.calculate_delay(attempt_num=attempt) for attempt in (1, 2, 3)]
     assert delays == [60, 180, 420]
     assert sum(delays) >= target.io.LEASE_SECONDS == 300
+
+
+async def test_claim_current_applied_state_never_uses_old_prepared_plan(monkeypatch):
+    context, prepared, token, intent, load, _, stubs, _, _, collect, _ = await _case(
+        monkeypatch, status="prepared"
+    )
+    applied = replace(
+        prepared,
+        status="applied",
+        applied_result=intent.apply_result,
+        applied_result_bytes=intent.result_bytes,
+    )
+    stubs["read_airport_snapshot"].side_effect = [prepared, applied]
+    stubs["claim_airport_snapshot"].return_value = SnapshotExecutorLease(token, _AT, "applied")
+    result = await target.run_airport_snapshot_if_supported(context)
+    assert result.load == load
+    stubs["plan_airport_snapshot"].assert_not_awaited()
+    stubs["apply_airport_snapshot"].assert_not_awaited()
+    assert stubs["read_airport_snapshot"].await_count == 2
+    collect.assert_not_awaited()
+
+
+async def test_claim_same_prepared_status_uses_fresh_kernel_binding(monkeypatch):
+    from kortravelmap.infra.provider_snapshot_recovery_repo import SnapshotKernelBinding
+
+    context, prepared, _, intent, _, _, stubs, _, _, collect, _ = await _case(
+        monkeypatch, status="prepared"
+    )
+    old_binding = SnapshotKernelBinding(uuid4(), uuid4(), "a" * 64, "ready", "b" * 64, _AT)
+    new_binding = SnapshotKernelBinding(uuid4(), uuid4(), "c" * 64, "ready", "b" * 64, _AT)
+    prepared = replace(prepared, kernel_binding=old_binding)
+    fresh = replace(prepared, kernel_binding=new_binding)
+    applied = replace(
+        fresh,
+        status="applied",
+        applied_result=intent.apply_result,
+        applied_result_bytes=intent.result_bytes,
+    )
+    stubs["read_airport_snapshot"].side_effect = [prepared, fresh, applied]
+    await target.run_airport_snapshot_if_supported(context)
+    assert stubs["plan_airport_snapshot"].await_args.args[1] is fresh
+    assert stubs["apply_airport_snapshot"].await_args.args[1] is fresh
+    assert stubs["read_airport_snapshot"].await_count == 3
+    collect.assert_not_awaited()
+
+
+@pytest.mark.parametrize("root_status", ["running", "done"])
+async def test_claim_fresh_read_sealed_uses_original_receipt_without_more_effects(
+    monkeypatch, root_status
+):
+    context, prepared, token, intent, load, _, stubs, backend, factory, collect, _ = await _case(
+        monkeypatch, status="prepared"
+    )
+    sealed = replace(
+        prepared,
+        status="child_sealed",
+        applied_result=intent.apply_result,
+        applied_result_bytes=intent.result_bytes,
+        postprocess_receipt=intent.receipt_candidate,
+        child_status="done",
+        root_status=root_status,
+    )
+    stubs["read_airport_snapshot"].side_effect = [prepared, sealed]
+    stubs["claim_airport_snapshot"].return_value = SnapshotExecutorLease(token, _AT, "applied")
+    result = await target.run_airport_snapshot_if_supported(context)
+    assert result.load == load
+    factory.assert_not_called()
+    backend.complete_provider_snapshot_postprocess.assert_not_awaited()
+    stubs["plan_airport_snapshot"].assert_not_awaited()
+    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["seal_airport_snapshot"].assert_not_awaited()
+    collect.assert_not_awaited()
+
+
+async def test_claim_fresh_read_disappearance_is_terminal_before_any_plan(monkeypatch):
+    context, prepared, _, _, _, _, stubs, _, _, collect, _ = await _case(
+        monkeypatch, status="prepared"
+    )
+    stubs["read_airport_snapshot"].side_effect = [prepared, None]
+    with pytest.raises(Failure) as raised:
+        await target.run_airport_snapshot_if_supported(context)
+    assert raised.value.allow_retries is False
+    stubs["plan_airport_snapshot"].assert_not_awaited()
+    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["reset_airport_snapshot_plan"].assert_not_awaited()
+    collect.assert_not_awaited()
+
+
+def _claim_inactive_error(
+    *,
+    state="23514",
+    constraint="ck_provider_snapshot_member_binding",
+    message="snapshot executor member is no longer active",
+):
+    from sqlalchemy.exc import DBAPIError
+
+    class ClaimError(Exception):
+        sqlstate = state
+        constraint_name = constraint
+
+    cause = ClaimError("owned claim error")
+    cause.message = message
+    original = ClaimError("owned adapter error")
+    original.__cause__ = cause
+    return DBAPIError("owned claim", None, original, False)
+
+
+@pytest.mark.parametrize("root_status", ["running", "done"])
+async def test_claim_inactive_after_other_worker_seals_uses_durable_original_result(
+    monkeypatch, root_status
+):
+    context, prepared, _, intent, load, _, stubs, _, factory, collect, _ = await _case(
+        monkeypatch, status="prepared"
+    )
+    sealed = replace(
+        prepared,
+        status="child_sealed",
+        applied_result=intent.apply_result,
+        applied_result_bytes=intent.result_bytes,
+        postprocess_receipt=intent.receipt_candidate,
+        child_status="done",
+        root_status=root_status,
+    )
+    stubs["read_airport_snapshot"].side_effect = [prepared, sealed]
+    stubs["claim_airport_snapshot"].side_effect = _claim_inactive_error()
+    result = await target.run_airport_snapshot_if_supported(context)
+    assert result.load == load
+    factory.assert_not_called()
+    stubs["plan_airport_snapshot"].assert_not_awaited()
+    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["seal_airport_snapshot"].assert_not_awaited()
+    assert stubs["read_airport_snapshot"].await_count == 2
+    collect.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "broken",
+    [
+        "unsealed",
+        "root",
+        "failed",
+        "child",
+        "blocked",
+        "missing",
+        "snapshot",
+        "artifact",
+        "context",
+    ],
+)
+async def test_claim_inactive_without_exact_unblocked_seal_propagates_original_error(
+    monkeypatch, broken
+):
+    context, prepared, _, intent, _, _, stubs, _, factory, collect, _ = await _case(
+        monkeypatch, status="prepared"
+    )
+    sealed = replace(
+        prepared,
+        status="child_sealed",
+        applied_result=intent.apply_result,
+        applied_result_bytes=intent.result_bytes,
+        postprocess_receipt=intent.receipt_candidate,
+        child_status="done",
+    )
+    fresh = {
+        "unsealed": prepared,
+        "root": replace(sealed, root_status="cancelled"),
+        "failed": replace(sealed, root_status="failed"),
+        "child": replace(sealed, child_status="running"),
+        "blocked": replace(sealed, cancellation_present=True),
+        "missing": None,
+        "snapshot": replace(sealed, snapshot_id=uuid4()),
+        "artifact": replace(sealed, artifact_sha256="f" * 64),
+        "context": replace(sealed, context_sha256="f" * 64),
+    }[broken]
+    error = _claim_inactive_error()
+    stubs["claim_airport_snapshot"].side_effect = error
+    stubs["read_airport_snapshot"].side_effect = [prepared, fresh]
+    with pytest.raises(type(error)) as caught:
+        await target.run_airport_snapshot_if_supported(context)
+    assert caught.value is error
+    factory.assert_not_called()
+    stubs["plan_airport_snapshot"].assert_not_awaited()
+    stubs["apply_airport_snapshot"].assert_not_awaited()
+    stubs["reset_airport_snapshot_plan"].assert_not_awaited()
+    collect.assert_not_awaited()
+
+
+@pytest.mark.parametrize(
+    "change",
+    [
+        {"state": "55P03"},
+        {"constraint": "other_constraint"},
+        {"message": "snapshot input does not match the registered member"},
+    ],
+)
+async def test_other_claim_database_errors_are_not_reclassified_or_read_again(monkeypatch, change):
+    context, _, _, _, _, _, stubs, _, factory, collect, _ = await _case(
+        monkeypatch, status="prepared"
+    )
+    error = _claim_inactive_error(**change)
+    stubs["claim_airport_snapshot"].side_effect = error
+    with pytest.raises(type(error)) as caught:
+        await target.run_airport_snapshot_if_supported(context)
+    assert caught.value is error
+    stubs["read_airport_snapshot"].assert_awaited_once()
+    factory.assert_not_called()
+    stubs["plan_airport_snapshot"].assert_not_awaited()
+    collect.assert_not_awaited()

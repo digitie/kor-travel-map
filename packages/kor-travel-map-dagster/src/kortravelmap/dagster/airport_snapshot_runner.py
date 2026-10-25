@@ -92,6 +92,46 @@ def _intent(
     )
 
 
+def _same_snapshot(left: RecoveredProviderSnapshot, right: RecoveredProviderSnapshot) -> bool:
+    return (
+        left.snapshot_id == right.snapshot_id
+        and left.artifact_sha256 == right.artifact_sha256
+        and left.context_sha256 == right.context_sha256
+    )
+
+
+def _claim_member_inactive(error: DBAPIError) -> bool:
+    cause = getattr(error.orig, "__cause__", None)
+    return (
+        getattr(error.orig, "sqlstate", None) == "23514"
+        and getattr(cause, "sqlstate", None) == "23514"
+        and getattr(cause, "constraint_name", None) == "ck_provider_snapshot_member_binding"
+        and getattr(cause, "message", None) == "snapshot executor member is no longer active"
+    )
+
+
+async def _sealed_result(
+    observed: RecoveredProviderSnapshot,
+    member: AirportPostprocessMember,
+    runtime: AirportSnapshotRuntime,
+    root_run_id: str,
+) -> DagsterFeatureLoadResult:
+    if (
+        observed.status != "child_sealed"
+        or observed.root_status not in {"running", "done"}
+        or observed.child_status != "done"
+        or observed.cancellation_present
+    ):
+        raise SnapshotRecoveryCorruption("sealed snapshot is not an active unblocked run member")
+    if observed.postprocess_receipt is None:
+        raise SnapshotRecoveryCorruption("sealed snapshot has no postprocess receipt")
+    intent = _intent(observed, member, runtime, root_run_id)
+    complete = await complete_airport_snapshot_postprocess(
+        _StoredSealedReceipt(observed.postprocess_receipt), intent
+    )
+    return complete.result
+
+
 async def _resume(
     client: AsyncKorTravelMapClient,
     identity: SnapshotMember,
@@ -103,15 +143,36 @@ async def _resume(
 ) -> DagsterFeatureLoadResult:
     for _ in range(_MAX_REPLANS):
         if observed.status == "child_sealed":
-            if observed.postprocess_receipt is None:
-                raise SnapshotRecoveryCorruption("sealed snapshot has no postprocess receipt")
-            intent = _intent(observed, member, runtime, root_run_id)
-            complete = await complete_airport_snapshot_postprocess(
-                _StoredSealedReceipt(observed.postprocess_receipt), intent
-            )
-            return complete.result
-        lease = await io.claim_airport_snapshot(client, observed, previous=previous)
+            return await _sealed_result(observed, member, runtime, root_run_id)
+        try:
+            lease = await io.claim_airport_snapshot(client, observed, previous=previous)
+        except DBAPIError as error:
+            # 다른 worker가 read→claim 사이에 child seal을 commit한 경계만 복구한다.
+            # 취소/격리/domain 불일치를 같은 SQLSTATE라는 이유로 완료로 낮추지 않는다.
+            if not _claim_member_inactive(error):
+                raise
+            fresh = await io.read_airport_snapshot(client, identity, pins=runtime.pins)
+            if (
+                fresh is None
+                or not _same_snapshot(observed, fresh)
+                or fresh.status != "child_sealed"
+                or fresh.root_status not in {"running", "done"}
+                or fresh.child_status != "done"
+                or fresh.cancellation_present
+            ):
+                raise
+            return await _sealed_result(fresh, member, runtime, root_run_id)
         previous = lease.token
+        # claim 이전 관측은 phase/binding 권위가 아니다. 같은 status에서도 다른
+        # worker의 reset/replan이 commit했을 수 있어 현재 SDK0 행을 항상 다시 읽는다.
+        fresh = await io.read_airport_snapshot(client, identity, pins=runtime.pins)
+        if fresh is None or not _same_snapshot(observed, fresh):
+            raise SnapshotRecoveryCorruption(
+                "claimed snapshot disappeared or input identity changed"
+            )
+        observed = fresh
+        if observed.status == "child_sealed":
+            return await _sealed_result(observed, member, runtime, root_run_id)
         if observed.status == "prepared":
             try:
                 plan = await io.plan_airport_snapshot(
@@ -140,6 +201,8 @@ async def _resume(
             if fresh is None:
                 raise SnapshotRecoveryCorruption("applied snapshot disappeared")
             observed = fresh
+        if observed.status == "child_sealed":
+            return await _sealed_result(observed, member, runtime, root_run_id)
         intent = _intent(observed, member, runtime, root_run_id)
         complete = await complete_airport_snapshot_postprocess(
             AirportSnapshotBackend(client, lease.token), intent
@@ -164,6 +227,7 @@ async def _collect_or_legacy(
 ) -> tuple[bytes | None, bytes | None, DagsterFeatureLoadResult | None]:
     # assets는 entry에서 이 모듈을 지연 import한다. 원 converter/Geo/fallback을 그대로 쓴다.
     from . import assets
+    from .assets import _transform_reusing_geo
 
     fetched_at = await assets._fetched_at(context)
     batches = assets._record_batches(context, _DATASET, batch_size=100).__aiter__()
@@ -171,7 +235,7 @@ async def _collect_or_legacy(
 
     async def converted() -> AsyncIterator[Sequence[FeatureBundle]]:
         async for records in batches:
-            yield await assets._transform_reusing_geo(
+            yield await _transform_reusing_geo(
                 context,
                 airports_to_bundles,
                 records,
