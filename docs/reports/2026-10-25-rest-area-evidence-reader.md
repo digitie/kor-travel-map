@@ -9,7 +9,7 @@
 공개 converter 기반 preparation/assessment와 전용 실제 lab fixture도 source로 준비했다.
 격리된 owned PG에서 아래 원본 lab·catalog2·공식 oracle1·64진단을 실행했다. 등록·collector·
 운영 flag는0이며 Git golden은 실제430을 보존한다. A1 실제64 진단과 원 lab 재시험까지 완료했고215는 원3초 timeout으로 미완이다.
-현재 A2 변경 후 재검증은 아직 수행하지 않았다.
+A2 재검증에서도215 첫 read가 원3초 timeout으로 실패했다. 현재 A3의 실제 재검증은 미완이다.
 기존 Airport427/430 코드·공통 projection·SDK converter는 변경하지 않았다.
 
 Geo pins domain은 `transport-rest-area-geo-v1`, 지문 framing domain은
@@ -213,3 +213,23 @@ A2의 추가 working memory·성능/선형성은 아직 미측정이며 같은64
 
 A2 기본 관련 순수6모듈242PASS9.77초를 확인했다. 변경 후 실제SQL/parser·비용/fit 재검증은
 미완으로 분리하며 마지막 SQL에서 공식 golden을 갱신한다.
+
+
+## A2 실제 원FAIL과 A3 item 누적 source
+
+A2 `79ce8cd`의 W `a64fee4e`/T `ab5dd3b6` 독립 delta는 수용됐다. 같은64 진단은
+inventory0.052662초/CPU0.06초·refs2242, public SD0.739814초/CPU0.73초·complete였다.
+원 lab은1/15/64/128 complete·unchanged 뒤215 첫 read에서 원 asyncio3초 TimeoutError로
+실패했고257은 미도달이다. 원 pytest48.07초/XML47.523초/case47.222초와 FAIL을 보존한다.
+128의 codec+두 read wall은5.391619초였으며 이 합산값을 각SQL3초 상한과 혼동하지 않는다.
+단일 관측 차이를 성능 분포·선형성으로 일반화하지 않는다. raw/전후 Git2542·SDK53·import15,
+정확 양CID/UUID/global0·volume1 부재를 검산했고 별도 사실 원장 SHA는 진단78087cd7,
+lab f3f57619다. 원 성공 전용 post검사 미도달은 읽기 전용 대조로만 보완했다.
+
+A3는 public reader 한 파일에서 v_items 행별 JSON concat만 typed jsonb[] append로 바꾸고
+기존 전행 거부 분기 뒤 한 번 to_jsonb로 만든다. 기존 item/누적 byte검사를 먼저 수행하며
+원순서·NULL/빈배열·최종 envelope 크기검사·전체 EOF를 보존한다. 선언/append/최종변환을
+역제거하면 A2 SQL 전체 bytes가 일치한다. A1/A2 조회·CASE·guard·상한·권한·반환shape는
+바꾸지 않았다. 해당 concat의 CPU 기여를 따로 측정했다고 주장하지 않으며 array append의
+선형성·메모리 상한·215 수용도 아직 미검증이다. 같은64 진단 뒤 원215 lab으로 계량한다.
+운영·collector·등록/재개·원 더티 WT 변경0, Git golden은 마지막SQL 공식 재생성 전까지430이다.

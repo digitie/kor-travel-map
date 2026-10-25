@@ -10,6 +10,7 @@ DECLARE
     v_record jsonb; v_current_record jsonb; v_value_record jsonb; v_phones_record jsonb; v_base_record jsonb;
     v_row jsonb; v_name_base jsonb; v_base jsonb; v_base_rows jsonb; v_fields jsonb;
     v_coord_json jsonb; v_geometry x_extension.geometry; v_base_key text;
+    v_item_rows jsonb[]:='{}';
     v_items jsonb:='[]'; v_item jsonb; v_result jsonb; v_rank numeric;
     v_epoch bigint; v_count integer; v_bytes bigint:=0;
 BEGIN
@@ -432,12 +433,14 @@ BEGIN
         END IF;
         v_bytes:=v_bytes+octet_length(convert_to(v_item::text,'UTF8'));
         IF v_bytes>4190000 THEN v_reason:='budget_exceeded'; EXIT targets; END IF;
-        v_items:=v_items||jsonb_build_array(v_item);
+        v_item_rows:=array_append(v_item_rows,v_item);
     END LOOP targets;
     IF v_reason IS NOT NULL THEN
         RETURN jsonb_build_object('version',1,'evidence_complete',false,'db_scope_eof',false,'reason',v_reason,
             'dataset_id',p_dataset,'policy_epoch',NULL,'items','[]'::jsonb);
     END IF;
+    -- 누적 byte/전체 거부 검사를 통과한 원 순서의 item만 한 번 JSON으로 만든다.
+    v_items:=to_jsonb(v_item_rows);
     v_result:=jsonb_build_object('version',1,'evidence_complete',true,'db_scope_eof',true,'reason',NULL,
         'dataset_id',p_dataset,'policy_epoch',v_epoch,'items',v_items);
     IF octet_length(convert_to(v_result::text,'UTF8'))>4194304 THEN
