@@ -16,6 +16,8 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.dto.geo_dataset import GeoLoadContext
+from kortravelmap.geocoding import GeoCallStats
 from kortravelmap.infra import scoped_provider_batch as batch
 from kortravelmap.infra.provider_snapshot_artifact import encode_provider_snapshot_artifact
 from kortravelmap.infra.provider_snapshot_recovery_repo import (
@@ -41,22 +43,33 @@ from tests.unit.test_provider_snapshot_artifact import _PINS
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(40)]
 
 
-async def _applied(admin, runtime):
-    dataset, features = await _seed(admin, runtime, [await _bundle(0)])
+@pytest.fixture(scope="module")
+async def initialized_airport(scalar_engines):
+    admin, runtime = scalar_engines
+    return await _seed(admin, runtime, [await _bundle(0)])
+
+
+async def _applied(admin, runtime, initial):
+    dataset, features = initial
     incoming = await _bundle(0, observed=1)
     prepared = await _read(runtime, dataset, [incoming])
     assert prepared.eligible
     found_dataset, run, membership, args = await _prepare(admin, runtime)
     assert found_dataset == dataset
     member = SnapshotMember(args["root"], args["source"], args["member"])
-    artifact = encode_provider_snapshot_artifact((incoming,), _context(), pins=_PINS)
+    baseline_geo = _context()
+    stats = GeoCallStats(observed_data_tokens=set(baseline_geo.observed_data_tokens))
+    geo = GeoLoadContext(
+        baseline_geo.geo_applied, baseline_geo.current_dataset, stats.observed_data_tokens
+    )
+    artifact = encode_provider_snapshot_artifact((incoming,), geo, pins=_PINS)
     context = encode_airport_observation_context(
         artifact,
         pins=_PINS,
         root_run_id=run,
         observation_generation=run,
         upstream_eof=True,
-        geo_stats=None,
+        geo_stats=stats,
     )
     async with AsyncSession(runtime) as session, session.begin():
         await apply_bounded_transaction_limits(session)
@@ -142,9 +155,11 @@ async def _state(admin, token, intent):
     return tuple(control), cursor
 
 
-async def test_real_apply_partial_postprocess_rollback_then_replay(scalar_engines, monkeypatch):
+async def test_real_apply_partial_postprocess_rollback_then_replay(
+    scalar_engines, initialized_airport, monkeypatch
+):
     admin, runtime = scalar_engines
-    token, intent = await _applied(admin, runtime)
+    token, intent = await _applied(admin, runtime, initialized_airport)
     before = await _state(admin, token, intent)
     original = AsyncKorTravelMapClient.record_sync_success_for_operation_membership
 
@@ -169,9 +184,11 @@ async def test_real_apply_partial_postprocess_rollback_then_replay(scalar_engine
     assert await _state(admin, token, intent) == state
 
 
-async def test_receipt_exchange_and_partial_marker_storage_are_rejected(scalar_engines):
+async def test_receipt_exchange_and_partial_marker_storage_are_rejected(
+    scalar_engines, initialized_airport
+):
     admin, runtime = scalar_engines
-    token, intent = await _applied(admin, runtime)
+    token, intent = await _applied(admin, runtime, initialized_airport)
     changed = json.loads(intent.receipt_candidate)
     changed["fetched_at"] = "2026-10-25T00:00:00+00:00"
     other = json.dumps(changed, sort_keys=True, separators=(",", ":")).encode()
