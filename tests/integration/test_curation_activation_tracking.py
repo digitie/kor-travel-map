@@ -407,7 +407,25 @@ async def test_old_provider_event_cannot_be_moved_to_generic_job(activation_engi
                     ),
                     {"job": generic, "event": event.event_id},
                 )
-            assert caught.value.orig.sqlstate == "42501", str(caught.value.orig)
+            # ownership 불변 guard가 typed guard보다 먼저 이 공격을 거부한다.
+            assert caught.value.orig.sqlstate == "23514"
+            assert _constraint_name(caught.value) == "ck_import_job_event_ownership_immutable"
+        finally:
+            await session.rollback()
+    # ownership을 유지한 내용 변조도 실제 typed command 경계에서 거부해야 한다.
+    async with AsyncSession(runtime) as session:
+        await session.begin()
+        try:
+            await _prefix(session, "ex_l")
+            with pytest.raises(DBAPIError) as caught:
+                await session.execute(
+                    text(
+                        "UPDATE ops.import_job_events SET message='raw mutation' "
+                        "WHERE event_id=CAST(:event AS uuid)"
+                    ),
+                    {"event": event.event_id},
+                )
+            assert caught.value.orig.sqlstate == "42501"
             assert _constraint_name(caught.value) == "ck_tvn40_provider_event_typed_command"
         finally:
             await session.rollback()
