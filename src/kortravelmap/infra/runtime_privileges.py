@@ -414,7 +414,26 @@ _CORE_FEATURE_GRANTS = (
     "GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime",
 )
 
+_BOUNDED_CAPTURE_SCHEMA_OWNER_ACL = (
+    "REVOKE ALL ON FUNCTION feature._bounded_curation_string_object(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
+    "REVOKE ALL ON FUNCTION feature._bounded_provider_curation_input_set(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._bounded_provider_curation_input_set(...) "
+    "TO ktm_curation_command_owner",
+)
+
+
 _STATE_OWNER_FUNCTION_ACL = (
+    # 428이 존재할 때만 owner간 dependency EXEC를 복구한다. 이전 head ACL은 유지한다.
+    "DO $bounded_capture_acl$ BEGIN IF EXISTS ("
+    "SELECT 1 FROM pg_catalog.pg_proc routine "
+    "JOIN pg_catalog.pg_namespace namespace ON namespace.oid=routine.pronamespace "
+    "WHERE namespace.nspname='feature' "
+    "AND routine.proname='_bounded_provider_curation_input_set') THEN "
+    "GRANT EXECUTE ON FUNCTION feature._heritage_evidence_metadata_bytes(...) "
+    "TO ktm_feature_schema_owner; "
+    "END IF; END $bounded_capture_acl$",
     "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_shape(...) "
     "FROM PUBLIC,ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_inventory(...) "
@@ -907,7 +926,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
         + _PROVIDER_CURATION_SEAL_ACL
         + _CURATION_CANDIDATE_READ_ACL
-        + _SCALAR_GUARD_INSTALLER_ACL,
+        + _SCALAR_GUARD_INSTALLER_ACL
+        + _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
@@ -970,6 +990,8 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "feature._bounded_curation_string_object": "428_bounded_curation_capture",
+    "feature._bounded_provider_curation_input_set": "428_bounded_curation_capture",
     "feature._transport_airport_evidence_shape": "427_transport_airport_reader",
     "feature._transport_airport_evidence_inventory": "427_transport_airport_reader",
     "feature.read_transport_airport_snapshot_evidence": "427_transport_airport_reader",

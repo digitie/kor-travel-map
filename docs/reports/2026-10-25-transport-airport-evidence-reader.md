@@ -318,3 +318,16 @@ actual head427/서비스 역할/import16·Git2416/SDK53 전후와 CID/UUID/globa
 운영15fit·무좌표 실제 branch·upstream EOF·collector/SH·대형 history EXPLAIN·hard peak와
 최종 CI는 여전히 미완이다. 원 결과의 사적 감사는 `map427-owned-airport-r3-actual-facts.json`
 (SHA256 `47fce66d526a26f335818cdb5ca9a7e4eb4e31563016130d08dbc78f96dc9fcf`)에 고정했다.
+
+## 반사 표현식 수정 뒤 원 metadata 검사 실제 통과
+
+고정 source `16ac9d00e037c14cece7acdab8920fa81564ba8e`에서 새 owned PG의 정본
+fresh300→427 bootstrap과 기존 `test_fresh_300_upgrade_is_metadata_clean`을 직접
+호출한 검사가 1 PASS/17.172초(전체 34.564초)로 끝났다. 비교기·원검사·migration
+DDL·golden을 바꾸지 않았고, runtime reconcile도 호출하지 않았다. 테스트 skip은0이다.
+위의 실제 미실행 문장은 수정 checkpoint 당시의 상태로 보존한다.
+
+Root는 raw8개 hash와 XML, head427·service login, Git2417/SDK53 전후 검사·실제
+project import11 및 정확 CID 부재·UUID0·volume1 부재를 독립 확인했다. 원 70cb의
+CI 실패와 4bd의 remove/add 실패는 삭제하거나 새 성공에 합산하지 않았다. 이번 통과는
+ORM metadata 일치 범위이며 428·429 합성 CI, collector/SH·운영 배포는 별도 미완이다.

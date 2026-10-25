@@ -1,3 +1,7 @@
+## 2026-10-25 — 인덱스 metadata 반사 표현식과 실제 검사 정산
+
+427의 누락 인덱스 선언과 PG 반사 CASE 차이를 보완한 16ac를 상속했다. 원 실패를 보존하고, 변경하지 않은 fresh300 metadata 검사 실제 1 PASS/17.172초·정확 정리를 확인했다. 428 SQL/oracle은 유지한다. 합성 source의 새 CI·SH/복구·운영은 미완이다. [근거](reports/2026-10-25-transport-airport-evidence-reader.md).
+
 ### 2026-10-25 공항 인덱스 PG 반사 표현식 보완
 
 - 4bd 실제 autogen 1 FAIL/정확 정리를 보존하고 metadata CASE를 PG canonical 반사와 맞췄다. 기존 comparator 순수 회귀3 FAIL→equal·migration 포함8 PASS, 새 실제 검사는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
@@ -5,6 +9,14 @@
 ### 2026-10-25 공항 reader ORM 인덱스 metadata 보완
 
 - 70cb 양 PG CI의 autogen 단일 실패/원 로그를 보존하고 canonical metadata에 기존 인덱스3만 등록했다. 생성 SQL 전체 대조와 migration 회귀8 PASS, 실제 autogen/새 exact CI는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
+## 2026-10-25 — capture 권한 인벤토리 CI 정정
+
+c98 CI의 signature literal 검사 실패1개를 보존하고, 존재 검사를 pg_catalog 이름 조회·GRANT를 카탈로그 서명 치환으로 정렬한다. 역할/SQL/oracle은 유지하며 새 정확 CI는 미완이다. [근거](reports/2026-10-25-bounded-curation-capture.md).
+
+## 2026-10-25 — 제한된 현재집합 capture(428, 구현 중)
+
+실제 PG16.14에서 통합37 PASS/15.798초, fresh bootstrap 공식 oracle1 PASS/22.897초를 확인했다. 덤프를 갱신했으며 기존 실패와 시험 수정 기록을 보존한다. 검토된 최신 공항427·main을 상속했으며 최종 CI, SH/RC/복구 연결과 운영 배포는 미완이다. [범위·예산·검증](reports/2026-10-25-bounded-curation-capture.md).
 
 ### 2026-10-25 공항427 준비 경계 소스
 
