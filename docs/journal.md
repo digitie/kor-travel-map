@@ -21,6 +21,10 @@ peak·최종CI는 미완이며 현재PG0다.
 
 - 원천 hash32/Geo digest64 혼동을 정정하고 원실패를 보존했다. 순수 Geo28개 경계이며 SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
 
+## 2026-10-25 — 가격 추이 본문 읽기 Low 3건(#1365 리뷰 후속)
+
+- gzip 끝 뒤 bytes는 `upstream_contract`, 쓰이지 않던 `DecodingError` catch 제거, 503 본문 읽기 중 끊김은 `upstream_unavailable`.
+
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 
 journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하고 상대 링크만 재기준화했다. 본문 누락 없이 220 KiB 경계를 확보했다.
