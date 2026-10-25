@@ -441,3 +441,7 @@ async def test_old_provider_event_cannot_be_moved_to_generic_job(activation_engi
             )
             == event.job_id
         )
+        assert await observer.scalar(
+            text("SELECT message FROM ops.import_job_events WHERE event_id=CAST(:id AS uuid)"),
+            {"id": event.event_id},
+        ) == event.message
