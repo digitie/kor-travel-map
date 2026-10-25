@@ -147,3 +147,32 @@ helper는이미xact P/L을재취득한다. 별도일반helper/재시도GUC/우�
 확인한다. 원성공TVN40 세경로의관측값/생성receipt/취소SUCCESS결과단언은그대로이며
 두제품source리뷰뒤이11과원TVN40실패5개를한owned PG에서검증할계획이다.
 이새두정의의실제설치/성공/golden갱신은아직미완이고이전projector공식dump와구분한다.
+
+신규11+원실패5의고정9b1 실제는14PASS/2FAIL35.99초로보존한다. 원성공root/SUCCESS취소와
+새부정11은통과했다. concierge는관측receipt INSERT의AFTER trigger가호출하는
+`sync_concierge_theme_catalog`에도원SER조건이남아실패했다. 처음직접CALL만확인해이
+간접호출을누락한분석을정정한다. 동일한actual P EX+L 한정RC조건을이세번째기존
+privateSD에만추가하고원SER/owner/권한/domain검증/실본문은그대로다. 같은429dump의
+전체정의를frozen에추가해역검증한다. 신규5concierge prefix부정과원잔여2를별도실행할
+계획이며실제통과를선기록하지않는다. sourcecatalog의archived-replay 직접finalizer
+TX 한곳도RC로정렬하고원replayed=True 단언은유지한다.
+
+### finalizer 내부 관측·trigger closure의 한정 대조
+
+실제공식430dump87929f98를기준으로 finalizer의project-owned qualified CALL/PERFORM/
+표현식호출과각직접DML관계의모든정본trigger를재귀대조했다. 해당경계는24routine/
+9DML관계/15trigger edge다. 미해석unqualified project routine 호출이나dynamic EXECUTE는
+없었다. SERIALIZABLE 요구는관측/생성/concierge의정확3SD뿐이며모두동일한제한RC분기를
+추가한다. 나머지isolation검사는원RC finalizer/member dispatcher/tracking prefix다.
+이는해당catalog finalize 내부closure의source대조이며전체repo writer폐쇄나운영수용이아니다.
+
+정확간접edge는 `refresh_curated_source_observation`→
+`ops.curation_source_observation_receipts` INSERT→
+`trg_curation_source_observation_sync_concierge`→
+`feature.sync_concierge_catalog_after_observation`→
+`feature.sync_concierge_theme_catalog`→`feature.materialize_theme_candidate_generation`이다.
+관측은 `feature.curated_sources`도UPDATE한다. generation은 generation/observation/
+candidate/transition4관계를변경하고, concierge는theme/rule2관계를변경한다.
+모든해당trigger의routine호출까지포함했고원schema/builtin/extension의의미를재구현하지않았다.
+전체edge/정확triggerDDL/각정의SHA와isolation줄은
+`map430-catalog-finalizer-source-closure-r1.json` 원장에보존했다.

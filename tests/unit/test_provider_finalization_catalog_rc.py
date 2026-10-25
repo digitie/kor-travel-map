@@ -13,7 +13,11 @@ from tests.unit.test_snapshot_recovery_schema import migration
 _ROOT = Path(__file__).resolve().parents[2]
 _FILENAME = "_430_provider_finalization_catalog_rc.sql"
 _FROZEN = Path(__file__).with_name("fixtures") / "provider_finalization_catalog_429.sql"
-_NAMES = ("refresh_curated_source_observation", "materialize_theme_candidate_generation")
+_NAMES = (
+    "refresh_curated_source_observation",
+    "materialize_theme_candidate_generation",
+    "sync_concierge_theme_catalog",
+)
 
 
 def _definition(source: str, name: str) -> str:
@@ -72,9 +76,17 @@ def test_existing_command_owner_definitions_have_no_new_acl_or_public_surface():
             False,
             False,
         ),
+        (
+            "feature.sync_concierge_theme_catalog",
+            "PROCEDURE",
+            "(bigint,uuid)",
+            migration._COMMAND_OWNER,
+            False,
+            False,
+        ),
     )
     sections = migration._sections(_FILENAME, declarations)
-    assert [owner for owner, _ in sections] == [migration._COMMAND_OWNER] * 2
+    assert [owner for owner, _ in sections] == [migration._COMMAND_OWNER] * 3
     current = (_ROOT / "alembic/versions" / _FILENAME).read_text()
     assert "".join(body for _, body in sections) == current
     assert not any(word in current for word in ("GRANT ", "REVOKE ", "ALTER PROCEDURE"))
@@ -87,4 +99,5 @@ def test_frozen_429_definitions_have_exact_pinned_provenance():
     assert [hashlib.sha256(_definition(source, name).encode()).hexdigest() for name in _NAMES] == [
         "2f36e1ea018c8f40e4ace8e687db833c07103b5e0bd30d0443eb07ad5d9af719",
         "ab5329559e4141395c1e8745edaa72ad24b454b6ee952317f8545a916aba286d",
+        "da41f1ed851b7a3f1b3d3e926fabfa1045dca83f3914f301ee9ba918a65e9197",
     ]

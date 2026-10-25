@@ -20,6 +20,7 @@ from tests.integration.test_state_lifecycle_protocol_entry import (
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(35)]
 _LINEAGE = 6832465333779826081
 _CALLS = {
+    "concierge": "CALL feature.sync_concierge_theme_catalog(NULL,NULL,NULL,NULL,NULL,NULL,NULL)",
     "observation": "CALL feature.refresh_curated_source_observation(NULL,NULL,NULL,NULL,NULL,NULL)",
     "generation": "CALL feature.materialize_theme_candidate_generation("
     "NULL,'provider_full_snapshot',NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL,NULL)",

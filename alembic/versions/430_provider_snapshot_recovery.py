@@ -82,6 +82,14 @@ _SIDECARS: Final = (
                 False,
                 False,
             ),
+            (
+                "feature.sync_concierge_theme_catalog",
+                "PROCEDURE",
+                "(bigint,uuid)",
+                _COMMAND_OWNER,
+                False,
+                False,
+            ),
         ),
     ),
     (
