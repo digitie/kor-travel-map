@@ -88,3 +88,10 @@ positive는 본체 통과했다. 나머지 두 case는 SH23514/rollback·원본�
 typed cancel TX에서 statement timeout 미설정으로 kernel cap23514가 발생했다. 두 cleanup
 TX에만 기존 apply와 같은8초 상한을 명시하며 제품guard/원단언을 유지한다. EX handoff
 후반은 이 cleanup 실패로 미도달이므로 성공으로 세지 않는다. 원r2 결과와 정확정리는 보존한다.
+
+고정1b008의 남은2 재시험은1PASS/1FAIL(17.62초)이다. SH 제거 rollback→typed cancel→
+fresh EX로 같은 입력 적용→B winner/own phones/원시각 및 attempt 상태까지 handoff 본체는
+통과했다. 마지막 raw base 변경 부정은 runtime에 raw UPDATE grant가 없어42501로 먼저
+거부됐다. 기존 strict 시험의 managed-base 경계와 같이 admin 연결의 정본 begin 후
+명시 SchemaOwner로 UPDATE하며 원23514/message/rollback 단언을 그대로 검증한다.
+관리 SQL 증거를 일반 runtime raw 권한이나 guard 성공으로 혼동하지 않는다.

@@ -902,10 +902,15 @@ async def test_foreign_changed_base_still_rejects_inside_manifest_feature(scalar
     async with AsyncSession(admin) as observer:
         before = (await observer.execute(query, {"feature": feature})).scalars().all()
     try:
-        async with AsyncSession(runtime) as session:
+        async with AsyncSession(admin) as session:
             await session.execute(text("SET LOCAL statement_timeout='8s'"))
             await begin_scoped_feature_write(
                 session, attempt_id=attempt, owner=owner, manifest_digest=digest
+            )
+            # raw base UPDATE는 runtime grant가 없는 관리 SQL 경계다(기존 strict 시험과 동일).
+            await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+            assert await session.scalar(text("SELECT current_user::text")) == (
+                "ktm_feature_schema_owner"
             )
             with pytest.raises(DBAPIError) as caught:
                 await session.execute(
