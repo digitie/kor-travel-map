@@ -24,6 +24,7 @@ from kortravelmap.infra.feature_operation_repo import (
 from kortravelmap.infra.pipeline_cancellation_repo import (
     create_pipeline_cancellation_attempt,
     finish_pipeline_cancellation_attempt,
+    lock_provider_feature_finalization,
     resolve_pipeline_cancellation_scope,
     set_pipeline_cancellation_run_result,
     transition_pipeline_cancellation_member,
@@ -1463,6 +1464,8 @@ async def test_provider_root_success_atomically_observes_generates_and_seals(
         )
         async with session_factory.begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
+            await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
                 session,
                 dagster_run_id=run_id,
@@ -1664,6 +1667,8 @@ async def test_provider_child_rejects_post_load_semantic_commit(
     try:
         async with session_factory.begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
+            await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
                 session,
                 dagster_run_id=f"tvn40-causal-gap-{seeded['suffix']}",
@@ -1746,6 +1751,8 @@ async def test_concierge_catalog_is_db_derived_inside_terminal_root(
         )
         async with session_factory.begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
+            await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
                 session,
                 dagster_run_id=run_id,
@@ -2232,6 +2239,8 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
         )
         async with async_sessionmaker(dagster, expire_on_commit=False).begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+            # 같은 TX의 ensure→seal은 leaf 전에 terminal prefix를 취득한다.
+            await lock_provider_feature_finalization(session)
             await ensure_dagster_feature_operation(
                 session,
                 dagster_run_id=run_id,
