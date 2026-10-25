@@ -257,7 +257,7 @@ suite21.872s/whole29.662s)다. runtime reconcile 없이 공식 dump/repeat 비�
 제거하고 receipt literal을 역변환하면 부모 전체 원문과 정확히 같다. 새3함수의 dollar
 body도 source sidecar와 byte동일하다. 부모 독립 비교와 공식 자기 repeat를 구분한다.
 
-## R2/R3 비이름 의미 P2 보강 (새 실제검증 미완)
+## R2/R3 비이름 의미 P2 보강과 c63 재검증
 
 b3b 준비 함수는 R1의 nonname24만 재생성과 비교해, 이름 R2 또는 현재 R3의 raw와
 정본 bundle에 ICAO를 추가했어도 저장 R1 facility가 예전 값인 경우 eligible로 잘못
@@ -269,6 +269,12 @@ b3b 준비 함수는 R1의 nonname24만 재생성과 비교해, 이름 R2 또는
 비교하는 조건만 추가했다. 현재 raw와 입력 raw가 같아도 저장 의미가 다르면
 `stored_nonname_history_mismatch`로 EX 진단한다. 기존 raw/hash/key·정규화·Geo·name
 검사와 SQL 오류 전파는 유지한다. 보강 후 순수157 PASS2.10s/mypy1/Ruff PASS이며,
-SQL/마이그레이션/권한/실제 fixture 본문은 b3b 그대로다. 두 delta source 리뷰와 새 고정
-실제 fixture 전까지 이 Python 보강의 runtime 수용은 미완이다. 공식oracle는 준비 함수를
-호출하지 않으므로 b3b SQL의 증거와 이 보강을 별도로 정산한다.
+SQL/마이그레이션/권한/실제 fixture 본문은 b3b 그대로다. root/T의 독립 source 리뷰와
+root/J의 실행기 binding 리뷰 뒤 c63 고정 source를 새 소유 r3에서 한 번 재검증했다.
+단일 testcase1 PASS(XML15.246s, whole24.403s/skip0), `airport15_outcome=complete15`다.
+actual head427/서비스 역할/import16·Git2416/SDK53 전후와 CID/UUID/global label0·volume1
+부재를 검증했다. 원 r1 FAIL·r2 positive·공식 b3b DDL oracle는 각각 보존한다. 공식oracle는
+준비 함수를 호출하지 않으므로 b3b SQL의 증거와 새 Python 검증을 별도로 정산한다.
+운영15fit·무좌표 실제 branch·upstream EOF·collector/SH·대형 history EXPLAIN·hard peak와
+최종 CI는 여전히 미완이다. 원 결과의 사적 감사는 `map427-owned-airport-r3-actual-facts.json`
+(SHA256 `47fce66d526a26f335818cdb5ca9a7e4eb4e31563016130d08dbc78f96dc9fcf`)에 고정했다.
