@@ -41,3 +41,17 @@ token과 TestClient DELETE 인자 오류를 확인했고 원 로그를 보존한
 새 21개 ASGI 회귀와 위 두 원 실패를 묶은 재검증은 23 PASS/18.69초다.
 단일 240 PASS 실행으로 합산하지 않는다. 독립 두 리뷰·최종 CI·
 실제 provision/새 compatible pair UI 인수는 별도 gate다. 이 단계 PG·운영 변경은 없다.
+
+
+## read/create 자격 중복 P2 정정
+
+8555 source의 독립 리뷰에서 새 read digest와 admin_feature_create_token_sha256을
+같게 설정해도 수용하는 누락을 확인했다. 원 source와 초기 검증 결과는 HOLD 이력으로
+보존한다. 수동 생성 자격의 정본 검사 함수에 새 read digest 비교 한 항목만 추가했다.
+이 함수는 정상 Settings 생성과 create_app의 런타임 재검증에서 함께 사용된다.
+
+설정 입력 순서 두 가지·생성 flag true/false·검증을 우회한 model_copy의 런타임 확인은
+수정 전6 FAIL이었다. 별도 정상 BFF를 가진 read token의 실제 생성 요청 거부는 수정
+전에도 PASS였으며 그대로 유지한다. 수정 뒤 새7개를 포함한 read/settings/auth 관련
+227 PASS/27.90초를 확인했다. 기존 admin body·권한·DTO와 OpenAPI bytes는 유지한다.
+이 정정의 독립 두 리뷰·새 CI·운영 provision과 pair/UI 인수는 별도다.

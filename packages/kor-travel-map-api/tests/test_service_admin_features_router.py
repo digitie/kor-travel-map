@@ -242,3 +242,69 @@ def test_only_two_gets_share_original_endpoint_and_spec() -> None:
         assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
             "$ref": "#/components/schemas/" + dto
         }
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("read_first", [False, True])
+def test_manual_create_digest_cannot_equal_read_digest(enabled: bool, read_first: bool) -> None:
+    digest_settings = [
+        ("pinvi_admin_features_read_token_sha256", DIGEST),
+        ("admin_feature_create_token_sha256", DIGEST),
+    ]
+    if not read_first:
+        digest_settings.reverse()
+    with pytest.raises(ValidationError, match="distinct from PinVi admin features read"):
+        ApiSettings(
+            admin_manual_feature_create_enabled=enabled,
+            admin_proxy_secret="separate-proxy-secret-000000000000000000000",
+            **dict(digest_settings),
+        )
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize("enabled", [False, True])
+def test_runtime_revalidation_rejects_unvalidated_duplicate_copy(enabled: bool) -> None:
+    valid = ApiSettings(
+        admin_manual_feature_create_enabled=enabled,
+        admin_proxy_secret="separate-proxy-secret-000000000000000000000",
+        admin_feature_create_token_sha256=hashlib.sha256(b"separate-create-token").hexdigest(),
+        pinvi_admin_features_read_token_sha256=DIGEST,
+    )
+    invalid = valid.model_copy(update={"admin_feature_create_token_sha256": DIGEST})
+    with pytest.raises(ValueError, match="distinct from PinVi admin features read"):
+        create_app(invalid)
+
+
+@pytest.mark.unit
+def test_read_token_cannot_be_promoted_to_create_with_valid_bff() -> None:
+    from test_admin_features_router import _manual_create_payload
+
+    secret = "separate-proxy-secret-000000000000000000000"
+    app = create_app(
+        ApiSettings(
+            public_api_key_required=False,
+            vworld_api_key=None,
+            admin_manual_feature_create_enabled=True,
+            admin_proxy_secret=secret,
+            admin_trusted_proxy_cidrs=["127.0.0.1/32"],
+            admin_feature_create_token_sha256=hashlib.sha256(b"separate-create-token").hexdigest(),
+            pinvi_admin_features_read_token_sha256=DIGEST,
+        )
+    )
+    app.dependency_overrides[get_session] = _session
+    app.dependency_overrides[get_read_snapshot_session] = _session
+    client = TestClient(app, client=("127.0.0.1", 50000))
+    response = client.post(
+        "/v1/admin/features",
+        json=_manual_create_payload(),
+        headers={
+            SERVICE_TOKEN_HEADER: TOKEN,
+            "X-Kor-Travel-Map-Admin-Feature-Create-Token": TOKEN,
+            "X-Kor-Travel-Map-Admin-Proxy-Secret": secret,
+            "X-Kor-Travel-Map-Actor": "admin:read-scope-boundary-test",
+            "Idempotency-Key": "95000000-0000-4000-8000-000000000001",
+        },
+    )
+    assert response.status_code == 403
+    assert response.json()["code"] == "ADMIN_FEATURE_CREATE_SCOPE_REQUIRED"

@@ -1,3 +1,10 @@
+## 2026-10-25 · Feature read/create 중복 자격 정정
+
+- 8555 독립 리뷰의 digest 중복 P2와 수정 전6 FAIL/1 PASS를 보존하고 정본 수동 생성
+  자격 검사에 read digest 비교1개를 추가했다. 기존 런타임 검사도 공유하며 관련227 PASS다.
+  OpenAPI·기존 admin body는 유지한다. 새 두 리뷰·CI·운영은 미완이다.
+  [원 실패와 범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
+
 ## 2026-10-25 · PinVi admin Feature 전용 읽기
 
 - 별도 digest/scope로 두 service GET에 기존 admin 목록·단건 함수와 DTO를 공유한다.

@@ -309,6 +309,10 @@ def _admin_feature_create_credential_problems(
 
     for curation_name, curation_digest in (
         (
+            "PinVi admin features read token digest",
+            getattr(settings, "pinvi_admin_features_read_token_sha256", None),
+        ),
+        (
             "PinVi curation snapshot token digest",
             getattr(settings, "pinvi_curation_snapshot_token_sha256", None),
         ),
