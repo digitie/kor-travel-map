@@ -633,6 +633,7 @@ async def test_feature_run_projects_root_and_exposes_pair_child_status(
     member = await _member(
         migrated_session, provider="provider-a", dataset_key="dataset-a"
     )
+    await lock_provider_feature_finalization(migrated_session)
     await migrated_session.execute(
         text(
             """
