@@ -29,6 +29,12 @@ def _session(row):
     result = MagicMock()
     result.mappings.return_value.one_or_none.return_value = row
     result.mappings.return_value.one.return_value = row
+    result.scalar_one.return_value = {
+        "status": "applying",
+        "apply_txid": 123,
+        "snapshot_observation_generation": "original-generation",
+        "additional": ["preserved"],
+    }
     session.execute = AsyncMock(return_value=result)
     return session
 
@@ -411,3 +417,32 @@ async def test_unbound_prepared_state_and_cancelled_plan_are_distinct(saved):
         await repo.read_provider_snapshot_for_member(
             _session({**saved, "kernel_status": "ready"}), _member(), expected_pins=_PINS
         )
+
+
+async def test_real_asyncpg_uuid_values_are_normalized_without_database(saved):
+    from asyncpg.pgproto.pgproto import UUID as AsyncpgUUID
+
+    snapshot_id = AsyncpgUUID(str(saved["snapshot_id"]))
+    assert isinstance(snapshot_id, type(saved["snapshot_id"]))
+    assert type(snapshot_id) is not type(saved["snapshot_id"])
+    observed = await repo.read_provider_snapshot_for_member(
+        _session({**saved, "snapshot_id": snapshot_id}), _member(), expected_pins=_PINS
+    )
+    assert type(observed.snapshot_id) is type(saved["snapshot_id"])
+    assert observed.snapshot_id == saved["snapshot_id"]
+
+
+async def test_begin_preserves_additional_kernel_and_observation_fields():
+    session = _session(None)
+    value = await repo.begin_provider_snapshot_apply(
+        session,
+        _token(),
+        attempt_id=uuid4(),
+        owner=uuid4(),
+        manifest_digest="a" * 64,
+        artifact_sha256="b" * 64,
+    )
+    assert value is session.execute.return_value.scalar_one.return_value
+    assert value["snapshot_observation_generation"] == "original-generation"
+    assert value["additional"] == ["preserved"]
+    session.commit.assert_not_called()

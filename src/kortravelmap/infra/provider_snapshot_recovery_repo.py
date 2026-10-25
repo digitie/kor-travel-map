@@ -106,9 +106,10 @@ class SnapshotMemberSeal:
 
 
 def _uuid(value: Any) -> UUID:
-    if type(value) is not UUID:
+    if not isinstance(value, UUID):
         raise SnapshotRecoveryCorruption("canonical UUID required")
-    return value
+    # asyncpg의 native UUID는 uuid.UUID subclass다. 반환은 정본 immutable UUID로 고정한다.
+    return UUID(bytes=value.bytes)
 
 
 def _digest(value: Any) -> str:
@@ -399,7 +400,7 @@ async def begin_provider_snapshot_apply(
     owner: UUID,
     manifest_digest: str,
     artifact_sha256: str,
-) -> None:
+) -> dict[str, Any]:
     """원 입력 SHA를 받는7인자 SD를 호출한다. TX 시작·commit은 하지 않는다."""
     _transaction(session)
     params = _token_params(token)
@@ -409,13 +410,24 @@ async def begin_provider_snapshot_apply(
         manifest=_digest(manifest_digest),
         artifact=_digest(artifact_sha256),
     )
-    await session.execute(
-        text(
-            "SELECT ops.begin_provider_snapshot_apply("
-            ":snapshot,:generation,:fence,:attempt,:owner,:manifest,:artifact)"
-        ),
-        params,
-    )
+    value = (
+        await session.execute(
+            text(
+                "SELECT ops.begin_provider_snapshot_apply("
+                ":snapshot,:generation,:fence,:attempt,:owner,:manifest,:artifact)"
+            ),
+            params,
+        )
+    ).scalar_one()
+    if (
+        type(value) is not dict
+        or value.get("status") != "applying"
+        or type(value.get("apply_txid")) is not int
+        or value["apply_txid"] <= 0
+    ):
+        raise SnapshotRecoveryCorruption("kernel begin did not return its applying state")
+    # observation generation 등 추가된 정본 필드를 caller에게 원형 그대로 전달한다.
+    return value
 
 
 async def finish_provider_snapshot_apply(

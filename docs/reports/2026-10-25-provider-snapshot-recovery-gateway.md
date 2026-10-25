@@ -45,3 +45,11 @@ Ruff2파일·strict mypy1파일·문서 redaction도 통과했다.
 
 현재 실제 PostgreSQL/등록 SD 최종pin/429·430 ACL/unknown commit paired 실행/collector 연결은
 미완이다. 이 초안을 SDK 실행 또는 정상 전체수집 수용으로 계산하지 않는다.
+
+## 초기 준비 뒤의 driver 값 보강
+
+초기05732의 UUID exact type 검사는 실제 asyncpg UUID subclass를 거부할 수 있었다.
+PG 없이 설치된 driver의 실제 UUID 값을 통과시키는 반례를 확인하고 UUID 계열을 정본
+UUID bytes 값으로 정규화했다. 이는 DB 권위를 추가하지 않는다. begin 반환은 정본 applying
+JSON 전체를 전달하여 observation generation과 추가 kernel 필드를 버리지 않는다.
+실제 SQL의 generation binding·최종 signature 호환성은 후속 정본핀 검토 대상이다.
