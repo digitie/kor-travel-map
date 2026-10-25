@@ -1,15 +1,18 @@
-# Rest431 명시 reader의 첫 source 경계
+# Rest431 명시 reader의 owned 수용
 
 ## 현재 범위
 
 승인된 [431 설계](2026-10-25-rest-area-snapshot-profile.md)·codec1413와 명시 reader를
 실제 머지된 main `5f3506a60c9289d5947d9d80be76ac044eb36dfe` 위에 합성했다.
 원 WT9514의 더티4파일은 변경하지 않고 bytes 보존 사본으로만 통합했다. 새 `RestAreaGeoFacts`, 전용 migration431/SD3개와 strict decoder·caller RR/read-only
-경계까지 source로 준비했다. 신규 typed SD의 최소 ACL/optional/startup signature만 연결했고
-공개 converter 기반 preparation/assessment와 전용 실제 lab fixture도 source로 준비했다.
-격리된 owned PG에서 아래 원본 lab·catalog2·공식 oracle1·64진단을 실행했다. 등록·collector·
-운영 flag는0이며 Git golden은 실제430을 보존한다. A1 실제64 진단과 원 lab 재시험까지 완료했고215는 원3초 timeout으로 미완이다.
-A2 재검증에서도215 첫 read가 원3초 timeout으로 실패했다. 현재 A3의 실제 재검증은 미완이다.
+경계 및 신규 typed SD의 최소 ACL/optional/startup signature를 연결했다. 공개 converter 기반
+preparation/assessment와 전용 owned lab에서 실제215 complete/적격 및257 전체 거부를 확인했다.
+원본 및 A1/A2의 timeout을 보존한 뒤 A3 `3fa59cc`에서 원 lab1개가 통과했다.
+실제215는 complete·전체 EOF·215 items·assessment 적격이며257은 부분 없는 전체 거부다.
+catalog/startup/ORM2와 마지막SQL 공식oracle1도 별도로 통과했다. Git golden은 마지막
+공식dump SHA59ada12d 그대로다. 이 결과는 synthetic owned input 수용이며 실제upstream215
+EOF·durable 등록/수집·운영 활성화/배포는 미완이다. 아래 초기source/계획 절은 당시 기록이고
+현재 완료·한계는 마지막 실제 수용 절에서 정산한다.
 기존 Airport427/430 코드·공통 projection·SDK converter는 변경하지 않았다.
 
 Geo pins domain은 `transport-rest-area-geo-v1`, 지문 framing domain은
@@ -27,7 +30,7 @@ utcoffset hook 전에 거부하고 UTC/fixed offset/정확 Asia/Seoul clock만 �
 strict mypy1 PASS다. 첫 import 정렬2건의 Ruff 실패는 수정 전 로그로 보존했다.
 이 결과는 reader 실행·215 fit·기존 저장 projection 적격성 증거가 아니다.
 
-## 후보 A source와 남은 실제 수용
+## 초기 후보 A source와 당시 남은 수용
 
 후보 A whole RR의 원본 source를 먼저 고정한 뒤 아래 실제 계량을 수행했다. 신규 Rest 전용 reader는 item256, metadata/encoded
 각4MiB를 실험 후보로만 고정하고 statement3초/lock1초 및 전행 거부/EOF를 유지한다.
@@ -48,7 +51,7 @@ reader/evidence·전용 시험과 필요한 typed signature metadata를 소유�
 (SHAc9b0f04f2225b526f17ff795698ac164ac570c9e646c1396263ec831cccf64e9)이며
 Ruff/check-format·strict mypy1·문서13PASS도 확인했다.
 
-## decoder/SQL 검증의 현재 범위
+## 초기 decoder/SQL 검증 범위
 
 응답 top7/item17/직접 datum51개 명세는
 [열 inventory](2026-10-25-rest-reader-column-inventory.json)에 고정했다.
@@ -99,7 +102,7 @@ T의9514 FULL+후속 P2 closure의 wholebytes 보존 carry, Root의 기존 codec
 관련 순수6모듈은 **242PASS9.94초**다(`map431-before-integration-focused-unit.log/XML`).
 이는 보존된 원 WT에서 실행한 결과이며 새 통합 checkpoint의 재실행 결과와 구분한다.
 
-## 다음 owned PG 단계와 비용 분리
+## 초기 owned PG 계획과 비용 분리
 
 - 독립 적대 리뷰2인은 머지 전 유지하며 격리 시험은 조율된 단독 슬롯에서 기존 owned scalar donor를 재사용한다.
   CPU2/RAM1536MiB/swap=RAM/PID256, exact image/earlyCID/UUID label, source·SDK·실제 import
@@ -233,3 +236,36 @@ A3는 public reader 한 파일에서 v_items 행별 JSON concat만 typed jsonb[]
 바꾸지 않았다. 해당 concat의 CPU 기여를 따로 측정했다고 주장하지 않으며 array append의
 선형성·메모리 상한·215 수용도 아직 미검증이다. 같은64 진단 뒤 원215 lab으로 계량한다.
 운영·collector·등록/재개·원 더티 WT 변경0, Git golden은 마지막SQL 공식 재생성 전까지430이다.
+
+
+## 최종 A3 실제215·공식431 수용
+
+A3 `3fa59cc`는 W `65df5239`/T `4c6a41df` 독립 delta를 통과했다. 같은64 진단은
+metadata_complete/refs2242 유지·inventory0.059042초/CPU0.06초, public0.515122초/CPU0.51초,
+decoder64 complete·assessment unchanged 적격이다. source3fa 진단 원장은01e2f083다.
+64의 backend RSS는59,555,840→66,973,696B 지점값이며 peak/추가메모리 상한이 아니다.
+215의 backend CPU/RSS는 계량하지 않았고64와 client 지표를 혼합하지 않는다.
+
+원 lab의1/15/64/128/215는 모두 complete·unchanged였다.215에서는 전체 EOF/정확215 items,
+name/phones·비scalar23과Geo 단언을 수행했고 actual257행은 budget_exceeded/emptyitems/
+EOFFalse로 전체 거부했다.215 client wall6.479936초/CPU2.208678초는 codec+nativehash+두reader+
+decode/assessment를 포함한다. 각reader의3초/lock1초는 그대로이며 합산 wall로 상한을 바꾼
+것이 아니다. evidence JSON4133162B는 decoder 계량 표현이며 artifact wire나 DB RSS가 아니다.
+pytest1PASS50.41초/XML suite49.886초/case49.844초와 원 lab SHA10354c2a를 대조했다.
+실제 fit는 단순 testcase PASS와 별도로 complete·적격·EOF/itemcount로 수용했다.
+원장 SHA9326954509e6360e5b6e03a0398d8f6f765be82d4781f1bc21fcca0affa4e3c1.
+
+마지막SQL의 canonical fresh300→431 공식 oracle1은 XML38.387초에 통과했다. 실제
+service role2개·runtime reconcile0·반복dump 동일을 확인했고 산출물을 golden에 bytes그대로
+복사했다. SHA59ada12d789bf9f3a7bb19f3a03bc77561731813970b02d02400e3e10660fce0,
+430 대비1734→1740 block은 신규 함수3+ACL3 및 receipt CHECK1뿐이다. 신규6을 제거하고
+원receipt block을 복원하면 parent430 dump 전체bytes가 일치한다. 초기940a dump 대비는
+inventory/public2함수 본문만 다르고 그 원본도 보존했다. 공식 원장7d63286c와 strict 역대조
+0f6050fd를 기록했다. golden을 수기로 조립하지 않았다.
+
+세 phase는 각기 Git2542·SDK53·실제import15/15/9와 원raw SHA를 전수 대조했고 정확CID/
+UUID/global label0·volume1 부재를 새읽기로 확인했다. 현재PG0/Chrome0/운영0이다.
+단일 실행 지표를 성능 분포·동시worker 수용·array 선형성·메모리 개선율로 일반화하지 않는다.
+기존 모든 FAIL·미도달 및 관측오류를 보존했다. 전체 tests/lint는373PASS/기존6SKIP35.12초로 원golden signature/inventory2FAIL을 닫았다.
+최종golden/docs 독립2delta 리뷰·정확최종CI, 운영입력 EOF·추가SQL음성 수용·durable/collector
+연결은 각각 별도 남은 경계다.

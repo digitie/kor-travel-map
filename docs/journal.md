@@ -1,3 +1,15 @@
+## 2026-10-26 — Rest431 실제215 fit와 최종 공식 golden
+
+A1/A2 원timeout을 보존하고 A3 source3fa59cc의 owned lab1개가 통과했다. 실제215는
+complete/EOF/item215/assessment 적격, 실제257은 empty/EOFFalse 전체거부다.215합산client
+wall6.480초/CPU2.209초는codec+두read+decode/assessment이며 원각3초/lock1초를 유지했다.
+같은64 진단은public.515초/CPU.51초, 최종fresh300→431공식oracle1은38.387초PASS였다.
+실제dump59ada12d를golden으로복사하고 함수3+ACL3/receiptCHECK1외0변경whole역대조했다.
+각phase정확정리PG0·Git2542SDK53/import15·15·9확인. sourceW/T delta수용과원FAIL을분리하며
+전체lint373PASS/기존6SKIP35.12초로 원golden2FAIL을 닫았다. 최종golden/docs리뷰·정확CI·
+운영EOF/collector/등록활성화는미완이다. 운영/Chrome0.
+[실측·한계](reports/2026-10-25-rest-area-evidence-reader.md).
+
 ## 2026-10-26 — Rest431 원64 비용 계량과 A1 source
 
 원 lab은1/15 complete 뒤64 원3초 timeout으로 실패해215/257 미도달이며 별도 보존했다.
