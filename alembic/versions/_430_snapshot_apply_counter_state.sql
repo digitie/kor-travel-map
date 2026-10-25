@@ -107,7 +107,8 @@ BEGIN
     SELECT * INTO STRICT v_capture FROM feature._bounded_provider_curation_input_set(v_dataset);
     IF v_capture.capture_complete IS DISTINCT FROM true THEN
         RAISE EXCEPTION 'snapshot apply requires a complete bounded input capture'
-            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required',
+                  DETAIL='capture reason: '||coalesce(v_capture.reason,'missing');
     END IF;
     RETURN QUERY SELECT v_capture.input_member_count,v_capture.source_input_set_hash;
 END;
