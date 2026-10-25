@@ -158,7 +158,7 @@
       "down_revision": [
         "425_provider_base_update_first"
       ],
-      "revision": "426_provider_patch_protocol_entry"
+      "revision": "426_provider_patch_protocol"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

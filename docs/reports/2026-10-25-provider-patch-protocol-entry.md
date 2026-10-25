@@ -24,4 +24,17 @@ Feature별 advisory lock을 추가하거나 tracking L을 data path에 새로 �
 426 oracle이 아니다. 실제 collector/strict SH closure/whole capture/RC·복구·운영은 미완이다.
 
 집중 migration 순수6 PASS(최초0.31초), Ruff2파일·strict mypy1파일·문서 redaction을
-확인했다. 실제 PG·공식 oracle·독립 두 리뷰·정확 CI는 아직 미완이다.
+확인했고 소스 독립 두 리뷰를 거쳤다. 실제 PG 수용·공식 oracle·정확 CI는 미완이다.
+
+
+## 첫 실제 bootstrap 실패와 revision 길이 정정
+
+첫40c/r3의 고유 fresh PG는 migration 식별자33자가 Alembic version_num varchar(32)를
+넘어 22001로 실패했다. XML25개 모두 setupERROR(26.858초)이며 시험 본문은 실행되지
+않았다. 원실패·로그를 보존했고 실제 CID/UUID/볼륨 정리는 완료했다. 이를25 PASS나
+426 실행 경합 검증으로 세지 않는다. 운영 배포는 없었다.
+
+식별자와 receipt 허용값·파생 graph만 `426_provider_patch_protocol`(27자)로 정정했다.
+SQL sidecar·procedure 본문·기존 검증/권한은 그대로다. 기존 전수 길이 계약 시험도
+수정 전1 FAIL(0.20초)로 재현했다. 같은 기존 시험을 다시 실행하며 별도의 중복 검사는
+추가하지 않는다. 수정 source·실행기 재결박의 두 리뷰 뒤 새 고유 PG에서 다시 검증한다.

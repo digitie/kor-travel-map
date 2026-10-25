@@ -10,7 +10,7 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "426_provider_patch_protocol_entry"
+revision: str = "426_provider_patch_protocol"
 down_revision: str | None = "425_provider_base_update_first"
 branch_labels: str | None = None
 depends_on: str | None = None
@@ -90,7 +90,7 @@ ALTER TABLE ops.application_schema_operation_receipts
         '423_exclusive_context_select',
         '424_tracking_protocol_prefix',
         '425_provider_base_update_first',
-        '426_provider_patch_protocol_entry'
+        '426_provider_patch_protocol'
     ))
 """
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
