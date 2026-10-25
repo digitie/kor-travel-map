@@ -1,6 +1,6 @@
 ## 2026-10-25 — 가격 추이 본문 읽기 Low 3건(#1365 리뷰 후속)
 
-- gzip 끝 뒤 bytes(두 번째 member 포함)를 `upstream_contract`로 거부하고, `aiter_raw`에서 나지 않는 `httpx.DecodingError` catch를 지웠다. 503 problem 본문을 읽다 끊기면(timeout·연결 끊김) 상태 코드대로 `upstream_unavailable`이다(200 본문은 기존대로 `upstream_timeout`/`upstream_unavailable`). 테스트 `_as_wire` 주의 문구 추가.
+- gzip 끝 뒤 bytes는 `upstream_contract`, 쓰이지 않던 `DecodingError` catch 제거, 503 본문 읽기 중 끊김은 `upstream_unavailable`.
 
 ## 2026-10-25 — 현행 기록 크기 경계 재분리
 
