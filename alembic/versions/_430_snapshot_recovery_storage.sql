@@ -37,6 +37,7 @@ CREATE TABLE ops.provider_snapshot_controls (
     postprocess_receipt bytea CHECK(octet_length(postprocess_receipt) BETWEEN 1 AND 4096),
     postprocessed_at timestamptz,
     child_sealed_at timestamptz,
+    seal_txid bigint,
     updated_at timestamptz NOT NULL DEFAULT clock_timestamp(),
     CONSTRAINT ck_provider_snapshot_attempt_pair CHECK(
         (attempt_id IS NULL AND attempt_owner IS NULL AND manifest_digest IS NULL)
@@ -52,6 +53,8 @@ CREATE TABLE ops.provider_snapshot_controls (
         (status IN ('prepared','applied') AND postprocess_receipt IS NULL AND postprocessed_at IS NULL)
         OR (status IN ('postprocessed','child_sealed') AND postprocess_receipt IS NOT NULL
             AND postprocessed_at IS NOT NULL)),
+    CONSTRAINT ck_provider_snapshot_private_seal CHECK(
+        seal_txid IS NULL OR (status='postprocessed' AND seal_txid>0)),
     CONSTRAINT ck_provider_snapshot_child_seal CHECK(
         (status='child_sealed')=(child_sealed_at IS NOT NULL))
 );

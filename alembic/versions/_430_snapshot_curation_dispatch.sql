@@ -1,6 +1,6 @@
 -- child/root prefix 완료 후 새 RC statement에서만 부른다. generic EX 의미는 보존한다.
 CREATE FUNCTION feature._member_provider_curation_input_set(
-    p_root uuid,p_dataset bigint,p_scope text,p_operation text
+    p_root uuid,p_dataset bigint,p_scope text,p_operation text,p_stage text
 ) RETURNS TABLE(
     source_entity_count bigint,input_member_count bigint,
     last_source_modified_at date,source_input_set_hash text
@@ -13,6 +13,9 @@ DECLARE
     v_state record;
     v_capture record;
 BEGIN
+    IF p_stage IS NULL OR p_stage NOT IN ('child','root') THEN
+        RAISE EXCEPTION 'explicit child/root capture stage required' USING ERRCODE='22023';
+    END IF;
     IF current_setting('transaction_isolation')<>'read committed' THEN
         RAISE EXCEPTION 'member capture requires fresh READ COMMITTED'
             USING ERRCODE='25001';
@@ -64,12 +67,14 @@ BEGIN
         RAISE EXCEPTION 'snapshot profile does not match its canonical member'
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
     END IF;
-    SELECT control.status,(control.applied_result IS NOT NULL) AS result_present
+    SELECT control.status,control.seal_txid,(control.applied_result IS NOT NULL) AS result_present
       INTO v_state FROM ops.provider_snapshot_controls control
       WHERE control.snapshot_id=v_artifact.snapshot_id;
-    IF NOT FOUND OR v_state.status NOT IN ('applied','postprocessed','child_sealed')
-       OR NOT v_state.result_present THEN
-        RAISE EXCEPTION 'snapshot apply result is not durably complete'
+    IF NOT FOUND OR NOT v_state.result_present
+       OR (p_stage='child' AND (v_state.status<>'postprocessed'
+           OR v_state.seal_txid IS DISTINCT FROM txid_current()))
+       OR (p_stage='root' AND v_state.status<>'child_sealed') THEN
+        RAISE EXCEPTION 'snapshot postprocess and atomic child seal are required'
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
     END IF;
     SELECT * INTO STRICT v_capture FROM feature._bounded_provider_curation_input_set(p_dataset);

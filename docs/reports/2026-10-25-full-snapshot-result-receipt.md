@@ -87,3 +87,24 @@ member UUID를 먼저 조회하는 private SDK0 읽기 SD도 source로 준비했
 않으므로 같은 artifact를 읽었다고 실행 lease를 가로챌 수 없다. terminal 상태도 읽을 수 있으나
 자동 재활성화하지 않으며, claim/apply/seal의 fresh 검증을 대체하지 않는다. 이 함수도 현재 미호출이고
 runtime EXEC/ACL 및 실제 PG/SDK0 경로 연결은 미완이다.
+
+
+## 후처리·하위 봉인의 완료 경계
+
+기존 4인자 dispatcher 후보는 적용 결과만 있어도 하위 봉인을 허용할 여지가 있어,
+명시적인 5번째 `child|root` 단계와 private `seal_txid`를 추가했다.
+child는 `postprocessed`이면서 현재 TX의 marker가 있어야 하고, root는 `child_sealed`여야 한다.
+load의 원인 capture는 이 dispatcher가 아니라 bounded helper를 직접 사용한다.
+
+새 `ops.seal_provider_snapshot_member` 조각은 P EX→L→root→child→member→control 순서로
+잠그고 등록 입력·context·실행 generation/fence·원 적용 결과·후처리 receipt의 SHA를 확인한다.
+새 봉인은 STARTED root와 살아 있는 lease, 완료된 후처리를 요구한다. 같은 CALL 안에서만
+marker를 발급하고 기존 정본 seal과 membership command를 호출한 뒤 control을 child_sealed로
+바꾸며 marker를 지운다. marker를 따로 발급하는 runtime 명령은 없다.
+
+이미 봉인된 상태의 재확인은 원 input count/hash, receipt 시각, child done 및 authoritative
+플래그와 root 성공 가능 상태까지 일치해야 한다. 실패·취소 root를 새 성공으로 바꾸지 않는다.
+봉인 후 동일 fence 재확인은 lease 만료만으로 원 완료를 부정하지 않지만 새로운 봉인은 거부한다.
+이 조각은 아직 미호출이며 단독 설치·runtime 권한·운영 활성화는 없다. DB apply 결과와
+후처리 receipt를 생산하는 typed 명령, 430 합성/ACL, 실제 paired PG 및 전체 collector 연결은
+여전히 미완이다. source 검토를 실제 PostgreSQL 실행으로 계산하지 않는다.
