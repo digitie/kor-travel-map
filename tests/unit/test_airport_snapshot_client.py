@@ -191,3 +191,22 @@ async def test_transaction_uses_shared_deadline_and_existing_setting_minimum(rep
     assert ("REPEATABLE READ" in str(mode.args[0])) is repeatable
     assert limits.args[1] == {"statement": statement, "lock": 1000}
     assert "LEAST(COALESCE(NULLIF(setting::bigint,0),cap),cap)" in str(limits.args[0])
+
+
+@pytest.mark.parametrize("removed", [0, 16, -1, 17, True, None])
+async def test_bounded_collection_validates_exact_server_count_and_transaction(removed):
+    client, session, calls = _client()
+    session.scalar = AsyncMock(return_value=removed)
+    if type(removed) is int and 0 <= removed <= 16:
+        assert await target.collect_expired_airport_snapshots(client) == removed
+        assert session.events[-2:] == ["tx:ok", "session:ok"]
+    else:
+        with pytest.raises(target.AirportSnapshotUnavailable, match="collection"):
+            await target.collect_expired_airport_snapshots(client)
+        assert session.events[-2:] == ["tx:error", "session:error"]
+    assert calls == [True]
+    session.scalar.assert_awaited_once()
+    assert (
+        str(session.scalar.await_args.args[0])
+        == "SELECT ops.collect_expired_provider_snapshots(16)"
+    )
