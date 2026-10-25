@@ -1,3 +1,7 @@
+### 2026-10-25 공항 인덱스 PG 반사 표현식 보완
+
+- 4bd 실제 autogen 1 FAIL/정확 정리를 보존하고 metadata CASE를 PG canonical 반사와 맞췄다. 기존 comparator 순수 회귀3 FAIL→equal·migration 포함8 PASS, 새 실제 검사는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
 ### 2026-10-25 공항 reader ORM 인덱스 metadata 보완
 
 - 70cb 양 PG CI의 autogen 단일 실패/원 로그를 보존하고 canonical metadata에 기존 인덱스3만 등록했다. 생성 SQL 전체 대조와 migration 회귀8 PASS, 실제 autogen/새 exact CI는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).

@@ -20,6 +20,26 @@
 주장하지 않는다. index 생성·sync는 없었고 원 index/소스와 실행 자원을 보존·정리했다.
 첫 조회의 freshness 사전 조건 중단도 별도 보존했다.
 
+### 4bd 실제 autogen 실패와 반사 표현식 보완
+
+4bd의 owned metadata 검사는 1 FAIL 16.086초였다. 선언 누락 대신 동명 인덱스
+세 개에 remove/add 쌍이 나왔다. `CreateIndex`가 migration과 같다는 첫 정적 검증만으로
+실제 반사 표현식 비교까지 증명한 것으로 해석하지 않는다. 원 실패와 첫 source 리뷰를
+보존했다. 정상 runner post는 미도달이며 실패 뒤 별도 RO로 Git2417/SDK53/import11을
+대조했다. 정확 CID/UUID0/global0/volume1 부재로 정리했고 자동 재실행은 하지 않았다.
+
+PG16은 반사 시 `pg_catalog` qualifier와 text 열의 불필요한 cast를 생략하고 CASE를
+여러 줄로 표시했다. 기존 Alembic comparator는 이 개행·qualifier 차이를 동등하게
+정규화하지 않는다. metadata의 세 표현식만 실제 반사 canonical 문자열에 맞춘다.
+원DDL은 계속 함수 schema를 명시하고, varchar인 record key의 text cast도 유지한다.
+마이그레이션·SQL·oracle·comparator와 실제 검사 본문은 바꾸지 않았다.
+
+새 순수 시험은 저장한 실제 반사식을 기존 PostgreSQL `compare_indexes`에 직접 넣는다.
+수정 전 3 FAIL, 수정 뒤 equal(비교 skip 아님)과 기존 migration 포함 8 PASS다.
+별도로 qualifier와 text 열의 무의미한 cast만 제거한 DDL 동등성을 대조하여 CASE의
+컬럼·256바이트 조건·NULL 반환을 보존한다. 이 새 선언의 실제 autogen과 exact CI는
+아직 미실행이다. 본 단계는 ORM 선언 보완이며 운영/collector 배선을 바꾸지 않는다.
+
 ## 현재 checkpoint
 
 1404의 순수 복원·적격성 진단 위에 별도 reader를 구현한다. 현재 checkpoint는
