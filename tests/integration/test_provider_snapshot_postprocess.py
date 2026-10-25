@@ -258,3 +258,70 @@ async def test_existing_short_server_limits_are_never_extended(scalar_engines):
             await apply_bounded_transaction_limits(session)
         assert await session.scalar(text("SHOW statement_timeout")) == "200ms"
         assert await session.scalar(text("SHOW lock_timeout")) == "100ms"
+
+
+async def test_newer_unapplied_observation_does_not_discard_original_success(
+    scalar_engines, initialized_airport
+):
+    from uuid import uuid4
+
+    from kortravelmap.infra.integrity_violation_repo import ensure_integrity_observation_run
+
+    admin, runtime = scalar_engines
+    token, intent = await _applied(admin, runtime, initialized_airport)
+    async with AsyncSession(runtime) as session, session.begin():
+        await apply_bounded_transaction_limits(session)
+        reserved = await ensure_integrity_observation_run(
+            session,
+            provider_dataset_id=intent.member.membership.provider_dataset_id,
+            external_run_id="owned-unapplied-" + uuid4().hex,
+        )
+        assert reserved.status == "collecting"
+    # 새 generation 예약만으로 이미 성공한 원 입력을 폐기하거나 재수집하지 않는다.
+    backend = AirportSnapshotBackend(AsyncKorTravelMapClient(runtime), token)
+    assert await backend.complete_provider_snapshot_postprocess(intent) == intent.receipt_candidate
+    assert (await _state(admin, token, intent))[0][0] == "postprocessed"
+
+
+async def test_newer_actual_apply_supersedes_old_postprocess_without_side_effects(
+    scalar_engines, initialized_airport
+):
+    from kortravelmap.infra.provider_snapshot_postprocess_repo import ProviderSnapshotSuperseded
+
+    admin, runtime = scalar_engines
+    old_token, old_intent = await _applied(admin, runtime, initialized_airport)
+    new_token, new_intent = await _applied(admin, runtime, initialized_airport)
+    before = await _state(admin, old_token, old_intent)
+    old = AirportSnapshotBackend(AsyncKorTravelMapClient(runtime), old_token)
+    with pytest.raises(ProviderSnapshotSuperseded):
+        await old.complete_provider_snapshot_postprocess(old_intent)
+    assert await _state(admin, old_token, old_intent) == before
+    current = AirportSnapshotBackend(AsyncKorTravelMapClient(runtime), new_token)
+    assert (
+        await current.complete_provider_snapshot_postprocess(new_intent)
+        == new_intent.receipt_candidate
+    )
+
+
+async def test_newer_sync_cursor_is_never_overwritten_by_old_postprocess(
+    scalar_engines, initialized_airport
+):
+    from datetime import datetime, timedelta
+
+    from kortravelmap.infra.provider_snapshot_postprocess_repo import ProviderSnapshotSuperseded
+
+    admin, runtime = scalar_engines
+    token, intent = await _applied(admin, runtime, initialized_airport)
+    cursor = dict(intent.cursor)
+    cursor["loaded_at"] = (
+        datetime.fromisoformat(cursor["loaded_at"]) + timedelta(hours=1)
+    ).isoformat()
+    client = AsyncKorTravelMapClient(runtime)
+    await client.record_sync_success_for_operation_membership(
+        membership=intent.member.membership, cursor=cursor
+    )
+    before = await _state(admin, token, intent)
+    assert before[1] == cursor
+    with pytest.raises(ProviderSnapshotSuperseded):
+        await AirportSnapshotBackend(client, token).complete_provider_snapshot_postprocess(intent)
+    assert await _state(admin, token, intent) == before
