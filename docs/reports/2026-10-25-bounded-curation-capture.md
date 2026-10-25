@@ -4,7 +4,7 @@
 
 기존 `current_provider_curation_input_set`의 네 집계값과 hash/date/정렬 계약을
 보존하면서, 전체 현재집합이 작은 안전한 형태인지 먼저 검사하는 내부 함수를 추가한다.
-이 checkpoint는 설계·진행 문서만 공개한다. SQL·migration·시험 코드는 작업 중이며
+첫 문서 checkpoint 뒤 SQL·migration·권한 정본과 시험 코드를 추가한다. 구현은 작업 중이며
 아직 source review/실제 PostgreSQL/공식 oracle/CI 수용 전이다. 427 reader를 부모로
 예약했으며 부모 migration을 상속하기 전 전체 graph와 실제 DB 시험을 실행하지 않는다.
 새로운 공개 API/DTO나 collector 호출, RC 전환, SH 활성화는 없다.
@@ -37,7 +37,8 @@ EXECUTE만 추가한다. 기존 raw table 권한, 정본 함수 본문과 호출
 
 설계 r6는 두 독립 검토를 통과했다. migration fake-bind 시험16 PASS/0.42초는
 P-first, 의존 함수 지문/속성 확인, 유한 timeout과 원 설정 복원만 검증한 단위 결과다.
-실제 PG 성공이나 메모리 개선 증거로 합산하지 않는다. 구현 후 정상 네 값 일치,
+추가 통합32개는 수집만 확인하며 실행 전이다. 실제 PG 성공이나 메모리 개선 증거로
+합산하지 않는다. 구현 후 정상 네 값 일치,
 압축/숫자 확장/형태·수량·예산·catalog·override 거부, 실제 LOGIN 권한과 공식 schema
 oracle을 확인하고 두 적대 리뷰 및 정확 head CI를 통과해야 한다.
 
