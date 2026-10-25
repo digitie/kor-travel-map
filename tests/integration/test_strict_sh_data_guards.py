@@ -332,7 +332,8 @@ async def test_inside_manifest_without_active_policy_rejects_non_scalar_mutation
         "coord": """UPDATE feature.features SET
             coord=x_extension.st_geomfromtext('POINT(127 37)',4326),coord_precision_digits=6
             WHERE feature_id=:feature""",
-        "address": "UPDATE feature.features SET address='outside scalar' WHERE feature_id=:feature",
+        "address": """UPDATE feature.features SET address=CAST(:address AS jsonb)
+            WHERE feature_id=:feature""",
         "payload": """UPDATE feature.feature_places SET payload=CAST(:payload AS jsonb)
             WHERE feature_id=:feature""",
         "lifecycle": """UPDATE feature.features SET lifecycle_state='retired'
@@ -354,7 +355,11 @@ async def test_inside_manifest_without_active_policy_rejects_non_scalar_mutation
             with pytest.raises(DBAPIError) as error:
                 await session.execute(
                     text(statements[mutation]),
-                    {"feature": feature, "payload": '{"outside": "scalar"}'},
+                    {
+                        "feature": feature,
+                        "payload": '{"outside": "scalar"}',
+                        "address": '{"road": "outside scalar"}',
+                    },
                 )
             _error(error, "ck_strict_data_feature_eligibility")
         finally:

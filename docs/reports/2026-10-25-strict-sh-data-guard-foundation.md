@@ -100,3 +100,7 @@ dict 재입력이 ADR-018에 따라 거부됨을 발견했다. 원 typed detail�
 retired 상태의 publication_state=suppressed 계약도 적용했다. 두 준비 오류를 보존하고
 정본 검증기를 통과하는 retired fixture 구성을 확인했다. 원 collect는 함수 본문을
 실행하지 않아 이 오류를 포착한 증거가 아니며, 제품 SQL 변경과 PG 실행은0이다.
+
+두번째 검토자가 address negative의 plain text가 jsonb 입력 변환에서 먼저22P02를
+일으킨다고 지적했다. address를 유효한 JSON object bind로만 정정해 실제 guard까지
+도달하도록 했다. 기존 SQL guard와 오류 기대값은 그대로이며 실제 PG는 아직0이다.
