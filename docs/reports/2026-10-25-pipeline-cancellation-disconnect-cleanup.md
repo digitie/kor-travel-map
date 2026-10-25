@@ -1,5 +1,8 @@
 # Pipeline task 취소의 원 backend 종료 보강
 
+535a의 owned 두 API task 취소 사례는 원 시간·zero-row 단언을 유지해 모두 통과했다.
+최종 exact CI/live UI·운영 배포와 전체 활성화 수용은 별도 미완이다.
+
 ## 실제 실패와 작은 설정 실험
 
 원 9088 API task 시험은 caller 취소·pool 반환·새 checkout을 통과한 뒤 최초 advisory
@@ -41,7 +44,9 @@ query 본문·자격증명·타 세션의 SQL은 읽지 않는다. observer는 �
 readonly 설정/driver를 pool 재사용에 남기지 않는다.
 
 readback은 공유 0.6초, 개별 native statement 0.1초를 후보 경계로 둔다. 이 값은 정상
-업무 상한이 아니며 아직 실제 제품 시험으로 수용하지 않았다. SQLAlchemy observer checkout의
+업무 상한이 아니다. 아래 owned 2회귀에서 원 3초/zero-row 조건을 통과했지만
+별도 readback 시간의 일반 상한이나 모든 장애의 종료를 증명하지 않는다.
+SQLAlchemy observer checkout의
 취소 회수도 하위 driver 종료를 기다릴 수 있으므로 단순 asyncio deadline을 모든 network
 blackhole에서의 절대 wall 상한으로 주장하지 않는다. 확인 실패는 false와 elapsed/error
 종류 로그로 남기고 원 caller CancelledError를 우선한다. 정상 응답 중 연결 정리 불확실성은
@@ -51,14 +56,14 @@ PostgreSQL의 disconnect check는 kernel이 알려 주는 단절을 질의 중 �
 blackhole 전체를 해결하는 keepalive 보증은 아니다. 동기 terminate는 client 측 동작이고
 server 종료 확인은 별도의 readback 결과로만 인정한다.
 
-## 검증 상태
+## 제품 실행 전 정적 검증과 실패 정산
 
 순수 단위 45개 PASS, Ruff 대상 5파일 및 mypy 제품 2파일 PASS를 확인했다.
 실제 task/P 대기 원 단언은 바꾸지 않았다. 추가 integration은 실제 K 성공+commit 뒤
 반환 전 barrier에서 caller를 취소해 root/attempt 불변, server advisory 0, pool 1의 새
 checkout, fresh/replay 200을 요구한다. b0b91 제품 후보의 실제 두 integration은
-1FAIL/1PASS였다. 아래 수정의 실제 PG는 아직 미실행이며 두 독립 리뷰·새 바인딩과
-별도 owned 실행 승인 뒤 수용한다.
+1FAIL/1PASS였다. 당시에는 아래 수정의 실제 PG가 미실행이었고, 최종 535a 결과는
+마지막 절에서 별도로 정산한다.
 
 OpenAPI는 동일 환경에서 parent export와 candidate export를 각각 비교했다. Pydantic
 2.14.1의 Decimal anyOf 세 곳은 parent에서도 tracked와 달라지는 baseline drift다.
@@ -104,4 +109,31 @@ late connection.connection 조회·새 backend unlock은 추가하지 않았다.
 
 기존41개에 이 interrupted-invalidation, 정상/raw 반환 후 실제 same-native recheckout,
 닫힌 원 driver와 다른 현 driver를 구분하는 4회귀를 더해 순수45개가 PASS했다.
-원 35초/3초/zero-row 단언은 그대로다. 수정 뒤 PG 재실행 결과는 아직 없다.
+원 35초/3초/zero-row 단언은 그대로다. 이 수정의 최종 실제 결과는 아래에 기록한다.
+
+
+## 최종 535a 제품 두 사례 수용과 남은 경계
+
+두 독립 source/binding 검토 뒤 동일 고정 자원으로 실행한 owned PG 1회에서
+2PASS/0FAIL/0ERROR/0SKIP을 확인했다. XML suite 16.270초이며 P 대기 case 15.084초에는
+공유 fixture setup이 포함된다. K commit-gap case는 1.143초다. 이를 cleanup 자체의
+시간이나 성능 개선율로 해석하지 않는다.
+
+두 case 모두 최초 advisory zero-row 단언과 caller 취소 3초·시험 35초 제한을 유지했다.
+취소된 요청 뒤 pool 1의 새 checkout, fresh/replay HTTP 200, 동일 결과·시도 1개와 외부
+HTTP 0을 통과했다. K gap은 실제 pg_try_advisory_lock 성공과 commit 뒤 caller가 결과를
+받기 전 barrier에서 취소했다. P holder를 먼저 풀어 단언을 통과시키지 않았다.
+
+실제 source535a/schema429, tracked2437 전체 bytes·mode/OID 후검증, SDK53 의존성 pin 후검증,
+실제 project import15와 pycache 부재를 각각 확인했다. 정확 소유 CID/UUID/scalar label 0,
+anonymous volume 1개 부재로 정리됐다. SDK 체크는 실제 provider HTTP 재수집 증거가 아니다.
+Root의 별도 fresh cleanup 관찰과 T의 독립 raw/XML/source/SDK 대조를 함께 보존했다.
+
+원 9088/808a 실패, 100ms 설정 단독 실패와 b0b91의 1FAIL/1PASS는 각각 보존하며 최종
+성공으로 재해석하거나 합산하지 않는다. 이 수용은 새 실제 Uvicorn/live UI나 prod 배포,
+무한 network blackhole의 hard wall, 모든 hierarchy 크기·collector/SH 활성화 수용을
+뜻하지 않는다. 최신 exact CI, live UI 및 사용자 전체 수용에 필요한 merge/deploy 단계는
+별도로 남아 있다.
+
+수용 원장: Root 92dabe43172653b93f58f1fc0586eba65e8d06ccc1d11257b6dacfa9e025502a,
+T eddcc7e88493fe72cce65373abc0f499bbdb0071188d6dd159ff08fdee5d5a30.

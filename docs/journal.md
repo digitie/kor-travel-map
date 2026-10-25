@@ -1,7 +1,7 @@
 
 ## 2026-10-25 · cancellation 원 backend cleanup 후보
 
-- 정상 phase cap을 두지 않고 exact driver·disconnect check·종료 readback을 추가했다. 순수45 PASS. 직전 제품 1FAIL/1PASS, 수정 후 PG 미실행. [경계/원실패](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
+- 정상 phase cap을 두지 않고 exact driver·disconnect check·종료 readback을 추가했다. 순수45 PASS·535a owned 제품2 PASS. 원 FAIL 보존, 최종 CI/live UI/운영 미완. [경계/원실패](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
 
 ## 2026-10-25 API task 취소·pool 경계 시험 소스
 
