@@ -10,6 +10,11 @@
 
 ## [Unreleased]
 
+### transport 가격 추이 본문 읽기 보강 (2026-10-25, #1365 후속)
+
+- **FIXED**: gzip 본문 끝 뒤에 남은 bytes(두 번째 member 포함)를 `upstream_contract`로 거부한다. 503 problem 본문을 읽는
+  중 timeout·연결 끊김은 `upstream_timeout`이 아니라 상태 코드대로 `upstream_unavailable`이다. REST·OpenAPI 변경 없음.
+
 ### PG transport 유가·돌발 적재를 끝내고 그 Feature를 퇴역한다 (2026-10-24, ADR-114 결정 7 1단계, T-STATE-03)
 
 - **REMOVED (Dagster)**: `feature_price_transport_fuel_stations`·`feature_price_transport_rest_areas`·
