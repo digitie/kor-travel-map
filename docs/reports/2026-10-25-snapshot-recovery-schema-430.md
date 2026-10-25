@@ -1,0 +1,188 @@
+# Airport 영속 snapshot의 430 스키마 배선 체크포인트
+
+## 현재 범위
+
+검토된 A/B/C·등록·RC finalization·reset과 Root backend/GC를 하나의 forward migration에 연결했다. 고정3f598의 owned fresh300→430에서 startup/private ACL·원 metadata clean·실제 apply 후 부분 후처리 rollback/replay·receipt/marker·GUC와 null 경계 **15 PASS21.38s/skip0**를 확인했다. 정확 CID·UUID·global label0/volume1 부재와 source2498/SDK53 전후·16실제 import도 확인했다. 공식 golden430는 아래 e173 fresh 생성·재덤프 결과로 동기화했다. 최신 runner의 SDK0 재개·봉인 증명과 별도 실제 caller2 재검증을 상속했고, 최종 전체 tests/unit·tests/lint는4180PASS/6SKIP167.19s다. 독립 최종 리뷰·전체 CI와 전체 writer/운영 수용은 아직 미완이다. 운영 설치·운영 quota 설정·collector 활성화는 하지 않았다.
+
+430 migration은 고정 sidecar의 CREATE 경계와 명시 signature/owner 목록만 사용한다. 원 SQL 본문을 재작성하지 않고 owner별 문장으로 나누며 전체 bytes 재결합을 검증한다. 기존 routine의 owner도 429 oracle과 대조한다. 실행하는 실제 문장 tuple에 receipt CHECK가 포함된다. P EX를 먼저 얻고 lock/statement timeout을 기존 값과 1s/30s 중 작은 값으로 제한한다. SchemaOwner가 관측한 StateOwner/CommandOwner의 기존 schema CREATE 권한은 유지하고 새로 준 권한만 회수한다.
+
+## 권한과 재시작 검사
+
+immutable artifact·control·quota limit·reservation 네 표는 일반 runtime/PUBLIC raw 권한이 없다. 등록/claim/read/plan/apply/reset/postprocess/GC는 CommandOwner의 typed 명령이다. 공개 typed 함수 12개와 member seal procedure만 provider executor에 부여한다. receipt validator와 executor lock helper는 직접 runtime EXEC가 없다. canonical bounded capture와 kernel 명령의 dependent EXEC도 실제 소유자 창에서 부여한다.
+
+CommandOwner는 private 표에 필요한 SELECT/INSERT/UPDATE/DELETE만 받는다. immutable artifact UPDATE는 받지 않는다. reset attempt FOR UPDATE에는 UPDATE(attempt_id), 후처리 sync cursor FOR UPDATE에는 실제 `provider_sync.provider_sync_state`의 UPDATE(provider_dataset_id)를 추가한다. integrity scope/run SELECT·UPDATE와 finding observations SELECT를 명시한다. GC는 terminal 입력 삭제와 quota 반환에 필요한 private DELETE만 사용한다. baseline300~429에는 새 표·루틴이 없으면 기존 optional 규약으로 건너뛰며 head430에서는 누락을 오류로 다룬다.
+
+새 `feature._assert_strict_sh_data_guard_inventory(boolean DEFAULT true)`는 SchemaOwner의 STABLE 검증 함수다. 429 installer의 25관계/8 shared target, 총33개 trigger 검증 tail을 그대로 재사용하고 설치/DDL/행잠금은 수행하지 않는다. 함수·행/문장 유형·enabled·args·조건·열 목록과 전체 관계 집합을 대조한다. 실제 apply의 기본 true는 언제나 exact33을 요구한다. startup의 false는 active policy가 없고 strict trigger도0일 때만 정의만 있는 상태를 허용한다. 나머지는33개 전부를 검증하며 partial/disabled/drift는 실패한다. NULL mode도 거부한다.
+
+이 검증 함수의 EXEC는 CommandOwner와 startup service만 갖는다. service에 active-policy 표 SELECT를 새로 열지 않는다. 시작 검사는 정확 head 확인 후에만 이 함수를 호출하며, private snapshot 표에 table/column 단위 권한이 새면 거부한다. 기존 allowlist를 넓은 wildcard로 바꾸지 않고 새 signature를 정확히 추가했다.
+
+## 저장·quota
+
+ORM은 SQL의 네 표, generated SHA, FK/UNIQUE와 상태 CHECK를 대응한다. postprocess TX와 intent SHA는 둘 다 NULL이거나 applied 상태의 양수 TX+64hex SHA로 결박한다. begin(A)/finish(B)를 막는 receipt SHA 저장/검증과 완료 시 두 marker 해제는 Root SQL의 수정 그대로 유지한다. 실제 reflection은 고정3f598에서 원 command.check와 CHECK 비교를 유지한 시험으로 통과했다.
+
+SchemaOwner의 최초 정책은 global key0 16MiB/256행, 실제 active `kor-travel-transport` / `transport_airports` DS만 4MiB/64행이다. 다른 DS 기본값이나 ON CONFLICT를 통한 상한 확대는 없다. 등록의 논리 예약량은 입력 payload≤1MiB, context≤8KiB, 결과·후속 receipt 각4KiB 예약을 포함한다. 이는 WAL/RSS/CPU 상한이나 실제 운영 적합성 증거가 아니다. 실제 active Airport가 없으면 해당 DS quota row도 생기지 않는다.
+
+## 검증 기록과 남은 작업
+
+- 최초 공유 source unit/db/ACL 합집합 57 PASS 3.32s, 뒤 확장본63 PASS 2.18s. 각 시점의 파일 차이가 있으므로 최종 source 수용으로 합산하지 않는다.
+- 전체 tests/lint 포함 실행은 436 PASS / 3 FAIL / 6 SKIP 38.51s다. 두 실패는 아직 실제430 golden이 없는 새 signature/ACL oracle 검사이며 검사를 완화하거나 dump를 손으로 만들지 않았다. 나머지는 상속된 provider apply 모듈의 docstring 목록 누락으로 Root에 전달했다. 원 로그를 보존한다.
+- 같은 검증 세대 mypy4 PASS. 초기 tuple type 추론 오류와 스타일 오류는 수정 이력을 보존했다. 최종 소스 집중 합집합은66 PASS1.66s이며 ruff6·graphcheck·redaction도 통과했다. 로그는 map430-schema-checkpoint-static-r4.log(SHA c6aea5f077f766f3b8a5b01382f39d9aa8d019a7f21e378354649976bf9f7c36)에 보존한다.
+- 기존 models 실제 Codegraph impact와 finalization 원장을 재사용했다. 현재 기존 심볼 signature는 바꾸지 않는다. 최신 graph 전체 closure를 증명한 것은 아니며, db checker는 실제 source/callsite와 순수 startup 경로 시험으로 대조했다.
+- WSL 진입이 한 번 연결 timeout으로 실패했다. 해당 Python 배치는 실행되지 않았음을 파일 상태로 확인하고, 서비스 재시작·다른 작업 중지 없이 연결 복구 후 계속했다.
+
+SQL 설치·startup·ACL·ORM과 후처리 intent 교환/부분 rollback/replay의 한정된 실제15개는 통과했다. newer-applied supersession·예약-only generation·미래 sync cursor와 GC ledger/retention/active 거부의 한정 실제 결과는 아래에 별도 기록한다. 전체 A/B/C·등록·reset paired 시험과 최종 caller 원자성은 여전히 별도 수용 대상이다. 최종 공식430 oracle는 실제 생성 결과만 사용한다. cancellation/pool 및 큰 DS 전체 protocol 수용을 이 배선 완료로 대체하지 않는다.
+
+
+## 첫 실제 bootstrap 실패와 수정
+
+source56854a의 bounded owned postprocess3 실행은 setup3 ERROR16.81s로 끝났다. migration 첫 storage chunk가 두 CREATE TABLE을 한 asyncpg prepared statement로 전달해 거부됐다. 시험 본체와 실제430 head 관측은 실행되지 않았다. 정확 CID/UUID/global label0 및 anonymous volume1 부재를 확인했으며 원 raw/XML을 보존했다. pytest 실패 뒤 runner의 SDK/source post 검사는 도달하지 않아 별도 offline 보충으로만 정산한다.
+
+수정은 정본 과거0202의 문자열/식별자 quote·dollar tag 인식 경계 탐색을 revision-local로 재사용해, owner chunk마다 최상위 SQL 하나씩 보내는 것이다. 기존 routine body·owner/ACL/GUC/순서와 `_sections`의 원문 bytes 재결합은 유지한다. SQL 없는 trailing comment만 실행에서 제외한다. RootSQL 본문이나 시험 기대값을 바꾸지 않는다. 새 고정 source의 실제 설치 수용은 별도 실행 결과가 있어야 한다.
+
+수정 후 집중67 PASS1.77s·mypy1·Ruff2 PASS다. 최종 source는 다음 bounded bootstrap으로만 실제 설치 여부를 판정한다.
+
+
+## 두 번째 설치 관측과 다음 실제 범위
+
+source7827의 같은3 대상은 실제300→430 migration 및 runtime LOGIN/head 관측에 도달했고 GUC1 PASS/fixture2 FAIL로 끝났다. 첫 실패는 Geo artifact와 `geo_stats=None`의 정본 context 계약 불일치, 둘째는 첫 case가 active policy를 커밋한 동일 Airport identity를 재seed한 조건이었다. SQL guard를 완화하지 않았다. 원 결과/XML과 정확 CID/UUID/global0·volume1 부재를 보존한다. 실패 뒤 runner post 검사는 도달하지 않았음을 유지한다.
+
+Root는6006486에서 실제 GeoStats/builtin set 및 module 초기 seed1회로 fixture를 정정했다. 이 정정을 포함한1c9c6f 부모를 상속했다. 새 전용 시험은 fresh startup boundary/private4표 table·column 권한0/CommandOwner artifact UPDATE0·GC DELETE1/미설치 inactive 검증 모드를 확인한다. metadata 원 검사 함수는 같은 canonical fresh bootstrap DB를 재사용해 command.check와 CHECK 대조를 그대로 수행한다. 실제 결과 전까지 수용으로 세지 않는다.
+
+
+## startup 실제 통과와 ORM 이름 정정
+
+sourceac822의 한 owned DB5 대상은 startup/privateACL 및 GUC2 PASS, metadata/후처리3 FAIL이었다. 실제 startup service의 새 SD exact allowlist, private4표 raw table/column0, CommandOwner artifact UPDATE0/DELETE1과 inactive inventory 모드는 통과했다. metadata 원 CHECK 대조는 quota cross-column CHECK의 실제 자동명 `_check`/`_check1`과 ORM의 열명 기반 추정 두 곳 차이를 검출했다. SQL 식이나 실제 CHECK를 바꾸지 않고 ORM 이름 두 곳만 실제 catalog에 맞춘다.
+
+Root 실제 apply는 일반runtime에서 private bounded capture를 직접 호출한 지점에서 EXEC 거부로 멈췄다. private 함수 권한을 무조건 넓히지 않고 Root가 typed capture 경계를 수정한다. 뒤 marker case의 active owner는 앞 apply 실패가 남긴 ready plan과 같은 DS를 재사용한 연쇄 실패다. 원 결과/XML·정확 정리 결과와 별도 offline source2494/SDK53 post 동일성 관측을 보존했다. 본래 runner는 pytest FAIL 뒤 post 단계에 도달하지 않았으므로 이 보충을 runner PASS로 재해석하지 않는다. 실제 후처리 완료·재개·전체430 수용은 아직 미완이다.
+
+
+Root10696의 typed capture를 합성했다. 일반runtime에 private428 EXEC를 열지 않고, `ops.capture_provider_snapshot_apply_input_set(uuid,bigint,uuid)`의 현재 fence·prepared control·동일TX completed whole-SH attempt/owner/manifest/DS 확인 후 두 capture 값만 반환한다. wrapper는30개 routine 선언, 이 새 CommandOwner 함수의 revoke/grant와 optional/startup exact signature를 정렬했다. 기존 bounded capture 권한은 유지한다. Root fixture는 실패 시 자기 정확 ready attempt를 취소해 다음 case에 연쇄 lock owner를 남기지 않도록 정정했다.
+
+## native 영업시간 null의 forward 배선
+
+고정 e302 진단5개는 startup·원 metadata clean·GUC 3PASS, 후처리2FAIL이며 두 거부 사유는
+`shape_unsupported`였다. 원 실패와 정확 CID·UUID·volume 정리는 보존했다. Root의430 전용
+sidecar는 native materializer가 저장하는 JSON null을 SQL NULL과 같은 빈 영업시간으로 취급한다.
+428 원본과 metadata-first/압축·숫자·문자열·전체예산 제한, canonical4 집계 본문은 그대로다.
+새 sidecar는 기존 private 함수를 SchemaOwner 창에서 교체하는31번째 routine 선언으로 연결한다.
+추가 runtime EXEC·raw 권한·startup 공개 signature·ORM 변경은 없다. SQLNULL/JSONnull×phones3의
+정본4집계 일치6개와 nonnull 거부4개는3f598의 실제15에 포함해 통과했다.
+
+## terminal GC의 첫 실제 관측
+
+source5008의 별도 GC16은4PASS/12FAIL이었다. limit3·SER1의 거부는 통과했으나,12개는
+fixture의 정본 등록 직전 bounded 설정이 없어 kernel의30초 상한 거부에서 멈췄다. GC 본체의
+보존·회수·rollback 수용으로 세지 않는다. 원 raw/XML과 정확 CID·UUID·volume 정리는 보존했다.
+정본 registration._bounded(2초/900ms)를 등록 및 정상 GC의 각 TX에 명시하고, limit/SER
+negative·원 단언·제품 SQL은 유지한다. 새 결과 전까지 GC 수용은 미완이다.
+
+GC setter 정정 후81f279의 GC16+신규 후처리3은18PASS/1FAIL20.30s였다. 신규 후처리3과
+GC15는 통과했고 유일 quarantine case는 fixture의 raw marker 변경을 정본 migration-owned
+guard가 거부해 GC에 도달하지 못했다. 이 상태는 정상 registration으로 생성할 수 없으므로
+소유 fresh PG의 migration-origin fault simulation으로 정확 quarantine trigger 하나만
+같은 TX에서 DISABLE→root marker 설정→ENABLE하고 OID/enabled 원상 일치를 확인한다.
+실패 때 outer rollback이 복원하며 제품 함수·다른 trigger·원 GC 단언은 유지한다.
+quarantine의 runtime 쓰기 허용 증거로 부르지 않으며 이1개의 실제 재검증은 별도다.
+
+quarantine1과 새 backend-death1을 분리 재검증한9a5588은1PASS/1FAIL이었다. quarantine의
+GC 보존·quota 원상은 통과했다. 강제 kill 뒤 SQLAlchemy의 정확한 rollback 경고가
+warnings=error로 원 DBAPIError를 대체하여 후단언은 미도달했다. 해당 fault 호출 한곳에서만
+`^transaction already deassociated from connection$` SAWarning을 로컬 필터하고, 원DBAPIError·
+전체 rollback/pool0/동일receipt재개/oldbackend0 단언은 그대로 유지한다. 제품·전역경고 변경0이다.
+
+## 실제 후처리·GC·연결 종료와 공식430 dump
+
+서로 다른 source/실행을 하나의 통과 run으로 합산하지 않는다.
+
+| 실행 | 실제 결과 | 범위 |
+|---|---|---|
+|3f598/r7|15PASS21.38s|startup/private ACL·원 metadata clean·부분 후처리 rollback/replay·receipt marker·GUC·null6/non-null4|
+|81f279/r9|18PASS1FAIL20.30s|GC15+신규 후처리3 통과, quarantine fixture만 migration-owned guard에 거부|
+|9a5588/r10|1PASS1FAIL|quarantine GC 보존 통과, backend kill 후 예상 SQLA 경고에서 후단언 미도달|
+|e1734f/r11|1PASS17.01s|실제 backend 종료 뒤 전체 rollback·pool1 checkedout0·원 receipt 재시도·SELECT1·old backend0|
+|e1734f/oracle r2|1PASS52.75s|정본 fresh300→430·runtime reconcile0·공식 새 dump 재덤프 비교|
+
+GC는 terminal quota 정확 반환/outer rollback/원 jobs 불변/9가지 보호/limit/SER/다중 후보 제한/
+ledger 부족 거부를 위의 분리 실행으로 검증했다. quarantine는 migration-origin fault simulation이며
+정상 runtime 등록 권한으로 생성한 상태가 아니다. 실제 backend kill은 exact PID/backend_start/login의
+소유 backend만 대상으로 했으며 OS worker kill·임의 network blackhole의 hardwall 증거는 아니다.
+
+공식 dump SHA는 `9606b64724044a94c56bcde1041638a8dcf762928e1f16437274f4077352d0f4`다.
+429의1665 object block에서430의1734로 바뀌며 신규69/삭제0/논리변경20이다. 한 block은
+pg_dump의 default_tablespace/default_table_access_method SET 위치만 이동했다. receipt CHECK는
+430 literal 하나만 추가했으며, 기존 routine 변경은31개 sidecar 선언 범위와 일치한다.
+신규 trigger4개는 cancellation prefix3+immutable artifact1뿐이고 strict33 자동설치는 없다.
+원생성 dump는 수정하지 않고 전체 bytes로 golden에 동기화했다. 비교 원장은
+`map430-e173-j-official-oracle-object-comparison.json`
+(SHA9af93fa96871d2fb9e581c3aff8b58de66f61c7f1f2f26c10385040575310ff9)이다.
+
+모든 해당 owned 실행은 정확 CID·UUID·global label0와 anonymous volume 부재를 확인했다.
+PASS 실행은 Git/SDK 전후와 실제 import까지 검증했고, 과거 FAIL의 runner post 미도달은
+별도 offline 보충과 구분해 보존했다. W의 실제 예약 caller2는 별도 원장으로 수용하며 이 표에
+합산하지 않는다. 전체 CI·2dataset 동시 쓰기·실제 운영 SDK/runtime receipt·worker death의
+완전 복구·운영 배포와 collector 활성화는 이 스키마/한정 시험 수용으로 대체하지 않는다.
+
+## golden 동기화 뒤 정적 정합
+
+실제430 dump 동기화 뒤 전체 lint/집중 unit은581PASS/3FAIL/6SKIP38.48s였다. 원 로그를
+보존한다. startup의 실제 boolean false 호출을 signature scanner가 타입 리터럴로 읽는
+문제는 `CAST(:require_all AS boolean)`의 bound False로 표기하고 단언으로 결박한다.
+실행 값·head 조건·권한·함수 본문은 유지한다.428 owner 회귀는430의 같은 SchemaOwner 창
+추가 dependent GRANT까지 정확4항목으로 대조한다. 세 번째는 W runner가 정본 Geo reuse helper를
+namespace로 부른 AST 표기 정합이며 helper/검사 완화 없이 직접 이름 import로 정렬한다.
+이 표기/시험 변경을 e173의 실제 실행 source로 재기록하지 않으며 SQL/oracle는 그대로다.
+
+
+## 최종 runner 상속과 역변환 시험 기준 고정
+
+W674ac의 claim 성공 후 SDK0 fresh read·정확 inactive/sealed 복원과 Geo direct-name 표기를
+상속했다. 첫 정적 묶음478PASS/6SKIP38.99s 뒤 관련 unit 확장에서는304PASS/5FAIL4.44s였다.
+다섯 실패는 RC inverse 시험이 가변 head430을 이전429 정의로 읽은 시험 기준 오류다.
+원 e173의 실제429 dump에서 해당5개 정의만 추출한 고정 자료에 출처 commit과 원 dump SHA를
+남겼다. 원 inverse 변환·함수·assert는 모두 유지하고 입력 경로 한 줄만 바꿨다.
+제품 SQL·ACL·실제430 golden은 바꾸지 않았다.
+
+최종 전체 tests/lint와 schema/db/bounded·artifact/result/recovery/apply/plan/RC/postprocess/client/
+runner unit의 중복 없는 합집합은787PASS/6SKIP40.96s다. 원581/3FAIL 및304/5FAIL 로그를
+보존했고 최종 로그는 `map430-final-674-full-union-r3.log`
+(SHA4dbb63511950df688c26f81ca52a8da9cc6c237d9fd2c85d9f401a84123b4839)다.
+6개 skip에는 로컬 형제 provider 체크아웃 부재 등 기존 검사 조건이 포함된다.
+공유4파일 strict mypy·집중 Ruff8·redaction은 PASS다. W의 report-only 후속은 시험 제품/정의를
+바꾸지 않고 상속했다. 이후 본 단락 문서 변경은 별도 문서 검사로 확인한다.
+
+W exact674ac caller2는 별도 owned 실행2PASS/skip0, suite24.280s다. J는 raw8개 SHA,
+실 import32의 Git blob, source2505 mode/OID, XML 두 사례 속성과 정확 정리를 읽기 검산했다.
+독립 원장은 `map-airport-caller2-owned-r2-j-independent-factcheck.json`
+(SHA701dc98b51e9eb7286d576460eb7a141d24f65ea96beeded55b9f9e545afe501)이다.
+실제 same-run SDK0 replay/같은 generation의 만료 plan 재생성은 확인했으나 물리적인
+claim/seal race를 유도한 시험은 아니다. 원 r1 caller2와 새 r2를 합산하지 않으며,
+Root terminal 뒤 public finish no-op 경합 보강은 T의 별도 소유 변경으로 남긴다.
+
+
+## 최종 CI의 이전 본문 기준과 전체 unit 확인
+
+1093dd3의 Python3.11/3.12/3.13 CI는 각각4177PASS/1FAIL/7SKIP였다. 모두
+`test_activation_preserves_old_body_except_strict_installer`에서 현행430 dump를 변경 전
+429 본문으로 읽어 실패했다. 원 run40186587504의 전체 로그 SHA는
+7d702d6debac187fa537605bcf4064c3ae2e9ae13ddc1771c19cc107e64d74b2다.
+unit 실패로 두 PostGIS lane은 실행되지 않았으며 이를 통합 시험 성공으로 세지 않는다.
+
+activation의 원429 정의1개를 별도 고정 자료로 추출하고 읽기 경로 한 줄만 바꿨다.
+전체 unit의 head-schema 참조도 검색해 tracking owner/typed authorization tail 비교가
+현행430 자신을 원본문으로 읽는 같은 문제를 찾아 원429 정의2개와 경로 한 줄을 고정했다.
+두 자료 모두 e173 원 dump 출처·SHA를 남기고 전체 정의 bytes를 그대로 보존한다.
+원 inverse/assert는 바꾸지 않았다. 나머지6개 module의 dump 참조는 현행 relation/권한/
+lineage/CHECK/owner/trigger 순서 검증이므로 유지했다.
+
+로컬 전체 unit/lint 첫 실행은4167PASS/13FAIL/6SKIP166.68s였다. 13개는 모두 정본
+Next parser `@next/env`가 이 전용 WT에 없는 환경 실패였고 원 로그를 보존했다.
+잠금 파일이 동일한 기존 검증 build의 정확16.4.3 package만 읽기 재사용해, 다운로드·설치와
+cache 원본 변경 없이 전체 실행을 다시 확인했다. 최종 **4180PASS/6SKIP167.19s**,
+로그 SHAe6b85973d672c0fb1268982597146b249b079ede1c81ba1ba8a0b3fc5ca7eb5e다.
+로컬 provider 의존성 차이와 skip 조건이 있어 CI node 수와 같은 수로 바꾸어 적지 않는다.
+
+이번 변경은 시험 자료/경로와 본 보고서뿐이다. 1093의 제품·migration·ACL·ORM·공식 golden은
+모두 그대로다. 따라서 T의 실제 API1093/head430 UI1PASS51.698s는 그 제품 source의
+사실로 유지한다. UI는 양 source의351개 mode/blob이 같은 기존7839 build를 재사용했고,
+새 최종 source 전체 build였다고 하지 않는다. J는 raw8/private11·14판정·API7 실제 import와
+4manifest/176static bytes·정확 정리를 별도로 검산했다. 최종 CI와 운영 수용은 계속 구분한다.

@@ -107,6 +107,7 @@ async def _cleanup_committed_batch_state(
         yield
     finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await lock_provider_feature_finalization(cleanup)
             await cleanup.execute(
                 text(
                     "DELETE FROM ops.import_job_events "

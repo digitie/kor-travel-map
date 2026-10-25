@@ -1,7 +1,7 @@
 """ADR-112 결정 2 — sensor가 여는 트랜잭션마다 서버 쪽 상한이 걸린다.
 
 실제 서버 효과(57014·55P03)는 ``tests/integration/test_reconcile_retry.py``가 본다. 여기서는
-client의 sensor 경로 메서드가 **빠짐없이** 트랜잭션 첫머리(SERIALIZABLE이면 isolation 문 다음)에
+client의 sensor 경로 메서드가 **빠짐없이** 트랜잭션 첫머리(명시 isolation 문 다음)에
 상한을 거는지, 보조 트랜잭션(invariant conflict 기록)까지 포함해 본다.
 """
 
@@ -26,7 +26,7 @@ from kortravelmap.infra.transaction_limits import (
 )
 
 _SET_LIMITS = "set_config('statement_timeout'"
-_ISOLATION = "SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"
+_ISOLATION = "SET TRANSACTION ISOLATION LEVEL READ COMMITTED"
 
 
 class _Transaction:
@@ -187,7 +187,7 @@ async def test_every_sensor_path_transaction_carries_the_limits(
     assert _SET_LIMITS in session.executed[0]
 
 
-async def test_a_serializable_reconcile_sets_the_limits_after_isolation(
+async def test_read_committed_reconcile_sets_the_limits_after_isolation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(client_module, "repo_reconcile_dagster_feature_run", _stub)

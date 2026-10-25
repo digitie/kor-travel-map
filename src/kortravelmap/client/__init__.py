@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
@@ -385,6 +385,7 @@ if TYPE_CHECKING:
     from kortravelmap.dto.price import PriceValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
     from kortravelmap.infra.feature_geocode_stamp_repo import GeoCoverage
+    from kortravelmap.infra.provider_snapshot_recovery_repo import SnapshotExecutorToken
     from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
     from kortravelmap.providers.mois import MoisLicensePlaceRecord
     from kortravelmap.providers.visitkorea import VisitKoreaFestivalItem
@@ -998,9 +999,9 @@ class AsyncKorTravelMapClient:
             async with self._session_factory() as session, session.begin():
                 if authoritative_snapshot_complete:
                     await session.execute(
-                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                        text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     )
-                # 기존 SER 설정 뒤 repository가 P EX→L을 행보다 먼저 확보한다.
+                # 명시 RC 설정 뒤 repository가 P EX→L을 행보다 먼저 확보한다.
                 return await repo_finish_dagster_feature_membership(
                     session,
                     dagster_run_id=dagster_run_id,
@@ -1055,7 +1056,7 @@ class AsyncKorTravelMapClient:
             async with self._session_factory() as session, session.begin():
                 if terminal_status.strip().upper() == "SUCCESS":
                     await session.execute(
-                        text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE")
+                        text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     )
                 # isolation 문 다음이어야 한다 — 먼저 쿼리를 보내면 25001(ADR-112 결정 2).
                 await apply_transaction_limits(session)
@@ -3177,3 +3178,14 @@ class AsyncKorTravelMapClient:
             unique_count=len(rows),
             upserted_count=upserted,
         )
+
+    async def run_provider_snapshot_postprocess(
+        self,
+        token: SnapshotExecutorToken,
+        receipt_candidate: bytes,
+        work: Callable[[AsyncKorTravelMapClient], Awaitable[None]],
+    ) -> bytes:
+        """후처리와 원 완료 receipt를 별도 RC transaction 한 번에 commit한다."""
+        from ._snapshot_postprocess import run_snapshot_postprocess
+
+        return await run_snapshot_postprocess(self, token, receipt_candidate, work)

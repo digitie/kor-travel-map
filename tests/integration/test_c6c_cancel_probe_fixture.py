@@ -278,6 +278,9 @@ async def test_normal_cancel_relay_consumes_fixture_in_its_terminal_transaction(
         if fixture is not None:
             async with migrated_engine.begin() as cleanup:
                 await cleanup.execute(
+                    text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+                )
+                await cleanup.execute(
                     text(
                         "DELETE FROM ops.c6c_cancel_probe_fixtures "
                         "WHERE transaction_id = CAST(:transaction_id AS uuid)"

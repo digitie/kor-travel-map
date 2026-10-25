@@ -1286,7 +1286,7 @@ async def _record_terminal_run(
                 terminal_status == "SUCCESS"
                 and member.operation_kind == "provider_feature_load_run"
             ):
-                await session.execute(text("SET TRANSACTION ISOLATION LEVEL SERIALIZABLE"))
+                await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             await lock_provider_feature_finalization(session)
             try:
                 changed = await transition_pipeline_cancellation_member(

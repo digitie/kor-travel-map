@@ -142,3 +142,36 @@ async def apply_transaction_limits(session: AsyncSession) -> TransactionBudget |
             {"interval": f"{check}s"},
         )
     return budget
+
+
+async def apply_bounded_transaction_limits(
+    session: AsyncSession,
+    *,
+    statement_timeout_ms: int = 30_000,
+    lock_timeout_ms: int = 1_000,
+) -> None:
+    """작은 복구 TX는 기존 GUC·호출자 마감·고정 상한 중 가장 짧은 값을 보존한다."""
+    caps = (statement_timeout_ms, lock_timeout_ms)
+    if any(type(value) is not int or value < 1 for value in caps):
+        raise ValueError("bounded transaction limits require positive integer milliseconds")
+    budget = current_transaction_budget()
+    statement = statement_timeout_ms
+    lock = lock_timeout_ms
+    if budget is not None:
+        statement = min(statement, budget.statement_timeout_ms)
+        lock = min(lock, budget.lock_timeout_ms)
+    await session.execute(
+        text("""SELECT set_config(name,
+            LEAST(COALESCE(NULLIF(setting::bigint,0),cap),cap)::text,true)
+            FROM pg_settings JOIN (VALUES ('statement_timeout',CAST(:statement AS bigint)),
+            ('lock_timeout',CAST(:lock AS bigint))) caps(name,cap) USING(name)"""),
+        {"statement": statement, "lock": lock},
+    )
+    check = _CONNECTION_CHECK.get()
+    if check is not None:
+        await session.execute(
+            text("""SELECT set_config(name,
+                LEAST(COALESCE(NULLIF(setting::bigint,0),:interval),:interval)::text,true)
+                FROM pg_settings WHERE name='client_connection_check_interval'"""),
+            {"interval": check * 1000},
+        )

@@ -1,3 +1,11 @@
+## 2026-10-26 · expired reset applying holder의 정본 fixture 회귀
+
+- CI 두 lane의 guard 미설치 원1 FAIL을 보존하고 해당 한 case만 기존 strict_engines로
+  준비했다. 고정 c265f90c의 owned PG430 한 case가15.044초에 통과했으며 원 단언·상한·
+  제품은 유지했다. source2523/SDK53·실제 import37과 정확 정리를 확인했다.
+  실행기 donor 요약3/34는 원보존 후 XML1/import37 별도 원장으로 정산했다.
+  전체 최종 CI·배포는 별도다. [범위](reports/2026-10-26-expired-plan-reset-guard-fixture.md).
+
 ## 2026-10-25 · 전용 읽기 동결 소비 계약 정렬
 
 - 원3Python CI 각3FAIL/3826PASS를 보존하고 새 GET2의 baseline/동결 pending 대상 hash를
@@ -18,9 +26,36 @@
   [계약·검증 범위](reports/2026-10-25-pinvi-admin-feature-read-scope.md).
 
 
+
+
+## 2026-10-25 snapshot 잔여 fixture 실제 확인
+
+- 정식 prefix/RC와 typed begin 반환으로 잔여 fixture를 정렬했다. event 소유권 불변과 typed 원문 변조 거부를 실제 별도 경로로 확인한다.
+- 고정13866의 실제10개26.99초와 대량2개150.23초를 분리 검증했다. 원 cap/감사 fixture 실패와 각 정확 정리를 보존했다.
+- [기록](reports/2026-10-25-snapshot-pg-tracking-fixtures.md). 전체 합성 CI·새 실제 UI·운영 배포는 미완이다.
+
+## 2026-10-25 — PostGIS 추적 fixture 정리
+
+전체 CI 실패를 보존하고 배치·취소 cleanup 및 projection seed가 기존 P EX→L 규약을 따르게 수정했다. 제품·guard·기대값 변경 없이 실제 PostgreSQL100개/33.18초/skip0과 소유 자원 정리를 확인했다. 별도 scalar 제품 수정·전체 CI·운영 배포는 아직 미완이다. [범위와 증거](reports/2026-10-25-snapshot-pg-tracking-fixtures.md).
+
+## 2026-10-25 — 430 복구 후보 실제 UI와 CI 비교 기준 정정
+
+## 2026-10-25 — 430 전체 PG gate 첫 원인 수정 준비
+
+7f40 glibc118FAIL/30ERROR 원문 보존. unchanged foreign winner의 불필요 INSERT와
+정확 관리자 cleanup/RC·bounded/reset fixture를 수정 준비했다.25unit PASS/63collect,
+새SQL 두 리뷰·실제 paired/전체 PG 재수용은 미완이며 운영 배포는 보류다.
+
+
+최종1093 API/schema430·동등351입력의7839 production UI로 실제 로그인/취소·replay/DB1attempt/WS17frame/logout 14판정 PASS와 소유 자원 정리를 확인했다. 1093 CI의 과거429 역비교1FAIL을 고정 fixture로 바로잡고 전체 unit4180 PASS/6SKIP을 확인했다. 제품·SQL·권한 변경0, 원 실패 보존이다. 최종 CI·운영 배포·실제 두 dataset 동시 쓰기와 Common 후속은 미완이다. [실제 증거와 범위](reports/2026-10-25-snapshot-recovery-final-candidate-ui.md).
+
+## 2026-10-25 — 공항 snapshot 원자적 후처리 구현 중
+
+원 발견사항·sync cursor·stale 정리를 한 fenced RC transaction과 receipt로 연결하고, 종결된 임시 입력의 7일/최대16개 정리를 추가했다. 합성430의 실제 설치/startup/ORM/후처리 rollback·replay/null 경계15 PASS와 정리를 확인했다. 분리 시험의 GC16·세대/커서3·물리 DB 연결 사망/pool1 복구1·scheduled caller2와 공식oracle 생성을 확인했다. 최종덤프·두 리뷰·CI·복구 live UI·운영은 미완이다. [범위와 검증](reports/2026-10-25-airport-snapshot-durable-postprocess.md).
+
 ## 2026-10-25 · cancellation 원 backend cleanup 후보
 
-- 원 backend identity의 종료 요청1회와 advisory0 확인을 보강했다. SQLAlchemy54/55 관련49 PASS, dc70 actual5 PASS15.763초·정확 정리. 13418 두 PG lane 실패와 아래 초기 시험소스 이력은 보존한다. 새 CI·후보 liveUI·운영은 미완이다. [경계/원실패](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
+- 원 backend 종료 요청1회/advisory0과 SQLAlchemy54/55 순수49·dc70 actual5 PASS를 확인했다. 7839 실제 후보 API·Next·브라우저는 화면취소/replay/DB/WS/logout14판정 PASS·정확 정리했다. 원 CI·build/live FAIL은 보존하며 exact CI/운영은 별도다. [근거](reports/2026-10-25-pipeline-cancellation-disconnect-cleanup.md).
 
 ## 2026-10-25 API task 취소·pool 경계 시험 소스
 

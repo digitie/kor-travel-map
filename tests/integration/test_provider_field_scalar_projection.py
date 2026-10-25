@@ -752,18 +752,24 @@ async def test_source_only_old_rr_cannot_advance_head_after_policy_cutover(scala
     feature, datasets, entities = await _seed(admin)
     await _activate(admin, feature)
     other, _, _ = await _seed(admin)
+    record = entities[0] + "-rr"
+    # history 준비도 현재 prefix 규약을 따른다. RR 부정 TX에서는 head만 시험한다.
+    async with AsyncSession(admin) as seed, seed.begin():
+        await seed.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        await seed.execute(
+            text("""INSERT INTO provider_sync.source_records(
+            source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+            VALUES(:record,:entity,'{}',:hash,clock_timestamp())"""),
+            {"record": record, "entity": entities[0], "hash": "c" * 64},
+        )
     async with admin.connect() as connection:
         await connection.execution_options(isolation_level="REPEATABLE READ")
         async with AsyncSession(bind=connection) as old:
             await old.execute(text("SELECT epoch FROM feature.provider_field_policy_epoch"))
-            record = entities[0] + "-rr"
-            await old.execute(
-                text("""INSERT INTO provider_sync.source_records(
-                source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
-                VALUES(:record,:entity,'{}',:hash,clock_timestamp())"""),
-                {"record": record, "entity": entities[0], "hash": "c" * 64},
-            )
             await _activate(admin, other)
+            # 수동 old-RR 부정 fixture다. fresh first-party 진입 성공을 주장하지 않고
+            # 현재 P 뒤에도 stale epoch의 원40001 보호가 남는지 확인한다.
+            await old.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
             with pytest.raises(DBAPIError) as failed:
                 await old.execute(
                     text("""UPDATE provider_sync.source_entity_heads
@@ -863,3 +869,320 @@ async def test_active_fieldset_change_is_rejected_atomically(scalar_engines):
     with pytest.raises(DBAPIError, match="fieldset"):
         await shrink()
     assert await state() == before
+
+
+async def test_foreign_unchanged_winner_preserves_base_revision_and_clock(scalar_engines):
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    await _activate(admin, feature)
+    query = text("""SELECT to_jsonb(base) FROM feature.feature_base_field_values base
+        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C"
+        """)
+    async with AsyncSession(admin) as observer:
+        before = (await observer.execute(query, {"feature": feature})).scalars().all()
+    await _refresh(runtime, feature, datasets[1], entities[1], {"core.name": "nonwinning-name"})
+    async with AsyncSession(admin) as observer:
+        after = (await observer.execute(query, {"feature": feature})).scalars().all()
+    assert after == before
+    assert {row["provider_dataset_id"] for row in after} == {datasets[0]}
+
+
+async def test_foreign_changed_base_still_rejects_inside_manifest_feature(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    from kortravelmap.infra.scoped_feature_writes import begin_scoped_feature_write
+
+    admin, runtime = scalar_engines
+    feature, datasets, _ = await _seed(admin)
+    await _activate(admin, feature)
+    attempt, owner, digest = await _plan(runtime, feature, datasets[1])
+    query = text("""SELECT to_jsonb(base) FROM feature.feature_base_field_values base
+        WHERE feature_id=CAST(:feature AS uuid) ORDER BY field_path COLLATE "C"
+        """)
+    async with AsyncSession(admin) as observer:
+        before = (await observer.execute(query, {"feature": feature})).scalars().all()
+    try:
+        async with AsyncSession(admin) as session:
+            await session.execute(text("SET LOCAL statement_timeout='8s'"))
+            await begin_scoped_feature_write(
+                session, attempt_id=attempt, owner=owner, manifest_digest=digest
+            )
+            # raw base UPDATE는 runtime grant가 없는 관리 SQL 경계다(기존 strict 시험과 동일).
+            await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+            assert await session.scalar(text("SELECT current_user::text")) == (
+                "ktm_feature_schema_owner"
+            )
+            with pytest.raises(DBAPIError) as caught:
+                await session.execute(
+                    text("""UPDATE feature.feature_base_field_values
+                    SET value_json=to_jsonb('forbidden'::text)
+                    WHERE feature_id=CAST(:feature AS uuid) AND field_path='core.name'"""),
+                    {"feature": feature},
+                )
+            assert caught.value.orig.sqlstate == "23514"
+            assert "shared derived value is outside its own primary source target" in str(
+                caught.value.orig
+            )
+            await session.rollback()
+        async with AsyncSession(admin) as observer:
+            after = (await observer.execute(query, {"feature": feature})).scalars().all()
+        assert after == before
+    finally:
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout='8s'"))
+            assert await session.scalar(
+                text("SELECT ops.cancel_scoped_feature_write(:attempt,:owner)"),
+                {"attempt": attempt, "owner": owner},
+            )
+
+
+async def test_removed_own_candidate_requires_fresh_ex_plan_for_foreign_winner(scalar_engines):
+    from sqlalchemy.exc import DBAPIError
+
+    from kortravelmap.infra.provider_field_candidates import (
+        lock_provider_field_policy_epoch,
+        recompute_provider_field_candidates,
+    )
+    from kortravelmap.infra.scoped_feature_writes import (
+        ScopedWriteDependency,
+        append_scoped_feature_write_manifest,
+        begin_scoped_feature_write,
+        claim_scoped_feature_write,
+        finish_scoped_feature_write,
+        lock_scoped_feature_write_protocol,
+        seal_scoped_feature_write_manifest,
+    )
+
+    admin, runtime = scalar_engines
+    feature, datasets, entities = await _seed(admin)
+    async with AsyncSession(admin) as seed, seed.begin():
+        await seed.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        for index, dataset in enumerate(datasets):
+            fields = [
+                dict(
+                    field_path=path,
+                    provider_rank=10 + 10 * index,
+                    omitted_policy="remove" if path == "core.name" else "carry_forward",
+                    null_policy="value",
+                )
+                for path in ("core.name", "place.phones")
+            ]
+            await seed.execute(
+                text("""CALL feature.register_provider_field_shadow_policy(
+                2,:dataset,'scalar-v1',CAST(:fields AS jsonb))"""),
+                {"dataset": dataset, "fields": json.dumps(fields)},
+            )
+        arm_provider_field_shadow(seed, 2)
+        for index, dataset in enumerate(datasets):
+            values = {"core.name": f"winner-{index}", "place.phones": [f"010-{index}"]}
+            captured = await capture_provider_field_candidates(
+                seed,
+                feature_id=feature,
+                dataset_id=dataset,
+                entity_key=entities[index],
+                record_key=entities[index] + "-r1",
+                values=json.dumps(values),
+                geometry_wkt="{}",
+                presence=ProviderFieldPresence(
+                    normalizer_revision="scalar-v1", supplied_fields=set(values)
+                ),
+            )
+            assert captured.unresolved_count == 0
+        await seed.execute(
+            text("""CALL feature.activate_provider_field_policy(
+            CAST(:feature AS uuid),2,ARRAY['core.name','place.phones'])"""),
+            {"feature": feature},
+        )
+        observed = await seed.scalar(text("SELECT clock_timestamp()+interval '1 hour'"))
+    payload = json.dumps({"place.phones": ["011-own"]}, sort_keys=True)
+    import hashlib
+
+    source_hash = hashlib.sha256(payload.encode()).hexdigest()
+    record = entities[0] + "-handoff"
+
+    async def plan(exclusive):
+        attempt, owner = uuid4(), uuid4()
+        async with AsyncSession(runtime) as session, session.begin():
+            revision = await session.scalar(
+                text(
+                    "SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"
+                ),
+                {"id": feature},
+            )
+            heads = (
+                await session.execute(
+                    text("""SELECT source_entity_key,current_source_record_key
+                FROM provider_sync.source_links
+                JOIN provider_sync.source_entity_heads USING(source_entity_key)
+                WHERE feature_id=CAST(:id AS uuid) ORDER BY source_entity_key COLLATE "C"
+        """),
+                    {"id": feature},
+                )
+            ).all()
+            membership = await session.scalar(
+                text("SELECT ops.scoped_feature_write_membership_digest(CAST(:id AS uuid))"),
+                {"id": feature},
+            )
+            members = [
+                ScopedWriteDependency(i, "source_head", entity, key)
+                for i, (entity, key) in enumerate(heads)
+            ]
+            members.extend(
+                [
+                    ScopedWriteDependency(len(members), "feature", feature, str(revision)),
+                    ScopedWriteDependency(
+                        len(members) + 1, "feature_membership", feature, membership
+                    ),
+                ]
+            )
+            await claim_scoped_feature_write(
+                session,
+                attempt_id=attempt,
+                owner=owner,
+                dataset_id=datasets[0],
+                idempotency_key=uuid4().hex,
+                regions=(),
+                input_digest="a" * 64,
+                expected_members=len(members),
+                exclusive_protocol=exclusive,
+            )
+            await append_scoped_feature_write_manifest(
+                session, attempt_id=attempt, owner=owner, members=members
+            )
+            digest = await seal_scoped_feature_write_manifest(
+                session, attempt_id=attempt, owner=owner
+            )
+        return attempt, owner, digest
+
+    async def apply(attempt, owner, digest, exclusive):
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout='8s'"))
+            await lock_scoped_feature_write_protocol(session, exclusive=exclusive)
+            await lock_provider_field_policy_epoch(session)
+            await begin_scoped_feature_write(
+                session, attempt_id=attempt, owner=owner, manifest_digest=digest
+            )
+            await session.execute(
+                text("""INSERT INTO provider_sync.source_records(
+                source_record_key,source_entity_key,raw_data,raw_payload_hash,fetched_at)
+                VALUES(:record,:entity,CAST(:raw AS jsonb),:hash,:observed)"""),
+                {
+                    "record": record,
+                    "entity": entities[0],
+                    "raw": payload,
+                    "hash": source_hash,
+                    "observed": observed,
+                },
+            )
+            await session.execute(
+                text("""UPDATE provider_sync.source_entity_heads SET
+                current_source_record_key=:record,observed_at=:observed
+                WHERE source_entity_key=:entity"""),
+                {"record": record, "observed": observed, "entity": entities[0]},
+            )
+            arm_provider_field_shadow(session, 2)
+            captured = await capture_provider_field_candidates(
+                session,
+                feature_id=feature,
+                dataset_id=datasets[0],
+                entity_key=entities[0],
+                record_key=record,
+                values=payload,
+                geometry_wkt="{}",
+                presence=ProviderFieldPresence(
+                    normalizer_revision="scalar-v1", supplied_fields={"place.phones"}
+                ),
+                attempt_id=str(attempt),
+            )
+            assert captured.unresolved_count == 0
+            await recompute_provider_field_candidates(
+                session, attempt_id=str(attempt), feature_id=feature, policy_revision=2
+            )
+            await finish_scoped_feature_write(
+                session, attempt_id=attempt, owner=owner, result_digest="b" * 64
+            )
+
+    sh_attempt, sh_owner, sh_digest = await plan(False)
+    try:
+        with pytest.raises(DBAPIError) as caught:
+            await apply(sh_attempt, sh_owner, sh_digest, False)
+        assert caught.value.orig.sqlstate == "23514"
+        assert "shared derived value is outside its own primary source target" in str(
+            caught.value.orig
+        )
+        async with AsyncSession(admin) as observer:
+            assert (
+                await observer.scalar(
+                    text("SELECT name FROM feature.features WHERE feature_id=CAST(:id AS uuid)"),
+                    {"id": feature},
+                )
+                == "winner-0"
+            )
+            assert (
+                await observer.scalar(
+                    text(
+                        "SELECT count(*) FROM provider_sync.source_records "
+                        "WHERE source_record_key=:record"
+                    ),
+                    {"record": record},
+                )
+                == 0
+            )
+    finally:
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL statement_timeout='8s'"))
+            assert await session.scalar(
+                text("SELECT ops.cancel_scoped_feature_write(:attempt,:owner)"),
+                {"attempt": sh_attempt, "owner": sh_owner},
+            )
+    ex_attempt, ex_owner, ex_digest = await plan(True)
+    assert ex_attempt != sh_attempt
+    await apply(ex_attempt, ex_owner, ex_digest, True)
+    async with AsyncSession(admin) as observer:
+        winner = (
+            await observer.execute(
+                text("""SELECT feature.name,base.provider_dataset_id,
+                base.source_entity_key,base.source_record_key
+            FROM feature.features feature
+            JOIN feature.feature_base_field_values base USING(feature_id)
+            WHERE feature.feature_id=CAST(:id AS uuid) AND base.field_path='core.name'"""),
+                {"id": feature},
+            )
+        ).one()
+        assert tuple(winner) == ("winner-1", datasets[1], entities[1], entities[1] + "-r1")
+        own = (
+            await observer.execute(
+                text("""SELECT availability,reason,validated_source_record_key
+            FROM feature.provider_field_shadow_candidates
+            WHERE feature_id=CAST(:id AS uuid) AND provider_dataset_id=:dataset
+              AND field_path='core.name' AND policy_revision=2"""),
+                {"id": feature, "dataset": datasets[0]},
+            )
+        ).one()
+        assert tuple(own) == ("removed", "omitted_remove", record)
+        stored = (
+            await observer.execute(
+                text(
+                    "SELECT raw_data,raw_payload_hash,fetched_at FROM provider_sync.source_records "
+                    "WHERE source_record_key=:record"
+                ),
+                {"record": record},
+            )
+        ).one()
+        assert tuple(stored) == (json.loads(payload), source_hash, observed)
+        assert await observer.scalar(
+            text("SELECT phones FROM feature.feature_places WHERE feature_id=CAST(:id AS uuid)"),
+            {"id": feature},
+        ) == ["011-own"]
+        statuses = dict(
+            (
+                await observer.execute(
+                    text(
+                        "SELECT attempt_id,status FROM ops.feature_write_attempts "
+                        "WHERE attempt_id=ANY(CAST(:attempts AS uuid[]))"
+                    ),
+                    {"attempts": [sh_attempt, ex_attempt]},
+                )
+            ).all()
+        )
+        assert statuses == {sh_attempt: "cancelled", ex_attempt: "completed"}

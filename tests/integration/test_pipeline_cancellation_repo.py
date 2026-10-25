@@ -36,6 +36,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     finish_pipeline_cancellation_attempt,
     get_current_pipeline_cancellation_detail,
     lock_pipeline_lineage_mutation,
+    lock_provider_feature_finalization,
     resolve_pipeline_cancellation_scope,
     retry_pipeline_cancellation_attempt,
     set_pipeline_cancellation_member_result,
@@ -79,6 +80,7 @@ async def _cleanup_committed_cancellation_state(
         yield
     finally:
         async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await lock_provider_feature_finalization(cleanup)
             new_ids = tuple(
                 str(value)
                 for value in await cleanup.scalars(

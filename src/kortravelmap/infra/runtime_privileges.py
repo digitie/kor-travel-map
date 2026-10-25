@@ -218,6 +218,10 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     # application schema root/finalize의 DB-atomic immutable outbox다. runtime은
     # 직접 읽거나 쓰지 않고 restricted migrator의 recovery command만 조회한다.
     "application_schema_operation_receipts": (),
+    "provider_snapshot_artifacts": (),
+    "provider_snapshot_controls": (),
+    "provider_snapshot_quota_limits": (),
+    "provider_snapshot_quota_reservations": (),
     "api_call_log": _ORDINARY_OPS,
     "backup_command_executions": _ORDINARY_OPS,
     "c6c_cancel_probe_fixtures": _ORDINARY_OPS,
@@ -923,6 +927,93 @@ _SCALAR_GUARD_INSTALLER_ACL = (
 )
 
 
+# 430 private replay 입력/control. baseline300~429에서는 행/권한 모두 추가하지 않는다.
+# table 존재는 같은 forward TX의 전체430 설치 표시이며 부분 수동 설치는 지원하지 않는다.
+_SNAPSHOT_SCHEMA_OWNER_ACL = (
+    "DO $snapshot_tables$ BEGIN IF to_regclass('ops.provider_snapshot_artifacts') IS NOT NULL THEN "
+    "REVOKE ALL ON TABLE ops.provider_snapshot_artifacts,ops.provider_snapshot_controls,"
+    "ops.provider_snapshot_quota_limits,ops.provider_snapshot_quota_reservations "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor; "
+    "GRANT SELECT,INSERT,DELETE ON TABLE ops.provider_snapshot_artifacts "
+    "TO ktm_curation_command_owner; "
+    "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE ops.provider_snapshot_controls "
+    "TO ktm_curation_command_owner; "
+    "GRANT SELECT,UPDATE ON TABLE ops.provider_snapshot_quota_limits TO "
+    "ktm_curation_command_owner; "
+    "GRANT SELECT,INSERT,DELETE ON TABLE ops.provider_snapshot_quota_reservations "
+    "TO ktm_curation_command_owner; "
+    "GRANT SELECT ON TABLE ops.feature_write_attempts,ops.feature_write_manifests,"
+    "provider_sync.source_entities,provider_sync.source_links,provider_sync.source_records,"
+    "feature.features,provider_sync.provider_sync_state,ops.integrity_finding_observations "
+    "TO ktm_curation_command_owner; "
+    "GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_sync_state "
+    "TO ktm_curation_command_owner; "
+    "GRANT UPDATE(attempt_id) ON TABLE ops.feature_write_attempts TO ktm_curation_command_owner; "
+    "GRANT SELECT,UPDATE ON TABLE ops.integrity_observation_scopes,ops.integrity_observation_runs "
+    "TO ktm_curation_command_owner; "
+    "END IF; END $snapshot_tables$",
+    "REVOKE ALL ON FUNCTION ops.reject_provider_snapshot_artifact_update(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "REVOKE ALL ON FUNCTION ops.reject_pipeline_cancellation_prefix(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "REVOKE ALL ON FUNCTION feature._member_provider_curation_input_set(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._member_provider_curation_input_set(...) "
+    "TO ktm_curation_command_owner",
+    "GRANT EXECUTE ON FUNCTION feature._bounded_provider_curation_input_set(...) "
+    "TO ktm_curation_command_owner",
+    "REVOKE ALL ON FUNCTION feature._assert_strict_sh_data_guard_inventory(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION feature._assert_strict_sh_data_guard_inventory(...) "
+    "TO ktm_curation_command_owner,ktm_feature_service",
+    "DO $snapshot_activation$ BEGIN IF "
+    "to_regclass('ops.provider_snapshot_artifacts') IS NOT NULL THEN "
+    "GRANT EXECUTE ON FUNCTION feature._install_strict_sh_data_guards(...) "
+    "TO ktm_feature_state_procedure_owner; END IF; END $snapshot_activation$",
+)
+
+_SNAPSHOT_STATE_OWNER_DEPENDENCY_ACL = (
+    "DO $snapshot_kernel$ BEGIN IF to_regclass('ops.provider_snapshot_artifacts') IS NOT NULL THEN "
+    "GRANT EXECUTE ON FUNCTION ops._arm_scoped_feature_write_deadline(...),"
+    "ops._lock_scoped_feature_write_scope(...),ops.begin_scoped_feature_write(...),"
+    "ops.cancel_scoped_feature_write(...) TO ktm_curation_command_owner; "
+    "END IF; END $snapshot_kernel$",
+)
+
+_SNAPSHOT_TYPED_FUNCTION_NAMES = (
+    "ops.register_provider_snapshot_artifact",
+    "ops.read_provider_snapshot_for_member",
+    "ops.claim_provider_snapshot_executor",
+    "ops.bind_provider_snapshot_plan",
+    "ops.begin_provider_snapshot_apply",
+    "ops.finish_provider_snapshot_apply",
+    "ops.provider_snapshot_scalar_counter_state",
+    "ops.capture_provider_snapshot_apply_input_set",
+    "ops.reset_expired_provider_snapshot_plan",
+    "ops.begin_provider_snapshot_postprocess",
+    "ops.finish_provider_snapshot_postprocess",
+    "ops.collect_expired_provider_snapshots",
+)
+_SNAPSHOT_COMMAND_OWNER_ACL = tuple(
+    statement
+    for name in _SNAPSHOT_TYPED_FUNCTION_NAMES
+    for statement in (
+        "REVOKE ALL ON FUNCTION " + name + "(...) "
+        "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+        "GRANT EXECUTE ON FUNCTION " + name + "(...) TO ktm_curation_provider_executor",
+    )
+) + (
+    "REVOKE ALL ON FUNCTION ops._lock_provider_snapshot_executor(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "REVOKE ALL ON FUNCTION ops._provider_snapshot_postprocess_receipt(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "REVOKE ALL ON PROCEDURE ops.seal_provider_snapshot_member(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "GRANT EXECUTE ON PROCEDURE ops.seal_provider_snapshot_member(...) "
+    "TO ktm_curation_provider_executor",
+)
+
+
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
         _SCHEMA_OWNER_ROLE,
@@ -944,7 +1035,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _CURATION_CANDIDATE_READ_ACL
         + _SCALAR_GUARD_INSTALLER_ACL
         + _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL
-        + _STRICT_SH_DATA_SCHEMA_OWNER_ACL,
+        + _STRICT_SH_DATA_SCHEMA_OWNER_ACL
+        + _SNAPSHOT_SCHEMA_OWNER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
@@ -952,14 +1044,15 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _STRICT_SH_DATA_STATE_OWNER_ACL
         + _SUBTYPE_READY_FUNCTION_ACL
         + _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL
-        + _M05_STATE_OWNER_DEPENDENCY_ACL,
+        + _M05_STATE_OWNER_DEPENDENCY_ACL
+        + _SNAPSHOT_STATE_OWNER_DEPENDENCY_ACL,
     ),
     ("ktm_feature_audit_writer", _AUDIT_WRITER_FUNCTION_ACL),
     (
         "ktm_manual_feature_procedure_owner",
         _MANUAL_FEATURE_WRITER_ACL + _FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL,
     ),
-    ("ktm_curation_command_owner", _MANUAL_CURATION_WRITER_ACL),
+    ("ktm_curation_command_owner", _MANUAL_CURATION_WRITER_ACL + _SNAPSHOT_COMMAND_OWNER_ACL),
     ("ktm_feature_request_procedure_owner", _FEATURE_REQUEST_WRITER_ACL),
     ("ktm_manual_provider_dedup_procedure_owner", _M05_WRITER_ACL),
 )
@@ -1008,6 +1101,27 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "ops.reject_provider_snapshot_artifact_update": "430_provider_snapshot_recovery",
+    "ops.reject_pipeline_cancellation_prefix": "430_provider_snapshot_recovery",
+    "feature._member_provider_curation_input_set": "430_provider_snapshot_recovery",
+    "ops._lock_provider_snapshot_executor": "430_provider_snapshot_recovery",
+    "ops.seal_provider_snapshot_member": "430_provider_snapshot_recovery",
+    "feature._assert_strict_sh_data_guard_inventory": "430_provider_snapshot_recovery",
+    "ops._provider_snapshot_postprocess_receipt": "430_provider_snapshot_recovery",
+    "ops.begin_provider_snapshot_postprocess": "430_provider_snapshot_recovery",
+    "ops.finish_provider_snapshot_postprocess": "430_provider_snapshot_recovery",
+    "ops.collect_expired_provider_snapshots": "430_provider_snapshot_recovery",
+    "ops.register_provider_snapshot_artifact": "430_provider_snapshot_recovery",
+    "ops.read_provider_snapshot_for_member": "430_provider_snapshot_recovery",
+    "ops.claim_provider_snapshot_executor": "430_provider_snapshot_recovery",
+    "ops.bind_provider_snapshot_plan": "430_provider_snapshot_recovery",
+    "ops.begin_provider_snapshot_apply": "430_provider_snapshot_recovery",
+    "ops.finish_provider_snapshot_apply": "430_provider_snapshot_recovery",
+    "ops.provider_snapshot_scalar_counter_state": "430_provider_snapshot_recovery",
+    "ops.capture_provider_snapshot_apply_input_set": "430_provider_snapshot_recovery",
+    "ops.reset_expired_provider_snapshot_plan": "430_provider_snapshot_recovery",
+    "ops._arm_scoped_feature_write_deadline": "411_scoped_feature_write_kernel",
+    "ops._lock_scoped_feature_write_scope": "411_scoped_feature_write_kernel",
     "feature._strict_sh_data_context": "429_strict_sh_data_guards",
     "feature._strict_sh_data_statement_guard": "429_strict_sh_data_guards",
     "feature._strict_sh_source_row_guard": "429_strict_sh_data_guards",

@@ -1,7 +1,8 @@
 # Pipeline task 취소의 원 backend 종료 보강
 
-535a의 owned 두 API task 취소 사례는 원 시간·zero-row 단언을 유지해 모두 통과했다.
-최종 exact CI/live UI·운영 배포와 전체 활성화 수용은 별도 미완이다.
+dc70의 SQLAlchemy2.0.54 owned5와 7839의 실제 후보 API·Next·브라우저 시험을 통과했다.
+후보 UI는 화면 취소·replay·DB·WS·로그아웃14개를 검증했다.
+정확7839 CI와 운영 배포·전체 활성화 수용은 별도 정산하며 원 실패를 보존한다.
 
 ## 실제 실패와 작은 설정 실험
 
@@ -220,3 +221,53 @@ global scalar0을 확인했다. 소유 PG0으로 단독 CPU 슬롯을 반환했�
 운영 경로에는 쓰지 않았으며 후보 build의 메모리 예산은 이 실측을 근거로 따로 조정한다.
 실제 후보 API·Next·브라우저 검증과 운영 배포, 일반 network blackhole의 절대 종료 상한,
 전체 SH/복구 활성화는 여전히 미완이다.
+
+## 실제 후보 API·UI 완주 — source7839
+
+source7839be231의 fresh owned PG에 정본 enqueue_unpaired_import_job으로 queued root
+하나를 만들었다. 실제 uvicorn factory/runtime LOGIN/preflight/SQLAlchemy2.0.54와
+정본 default pool을 사용하고 engine DI는 없다. 동일 후보 Next production build/BFF를
+거쳐 n150의 고정 Chromium·Playwright module로 검증했다. 운영 주소·운영 자격증명·
+SDK fetch·HTTP 응답/WS 모킹은 없다.
+
+최종 성공 실행은 XML1 PASS/0 FAIL·ERROR·SKIP, suite47.178초/case47.123초다.
+driver14판정은 로그인200·HttpOnly cookie, owned queued 상세·인증 reload, 화면 취소사유와
+정본 alertdialog를 거친 취소200, 동일 browser replay200·동일 결과, reload cancelled,
+실제 WS frame, 로그아웃200·보호GET401, 로그아웃 뒤5초 재연결 없음, 보호 화면 reload의
+login 복귀와 요청상한/오류0이다. 최종 성공 실행 login/logout POST는 각1회,
+owned root 취소 POST는 화면1+replay1회다. 실제 WS3연결/16frame, page error0·차단요청0,
+DB의 해당 root cancelled/reason 일치·시도1개와 전체 cancellation1개를 확인했다.
+원 제품 caller3초·시험35초·최초 zero-row 단언과 별도 UI 기동/전송190초 시험을 구분한다.
+
+API 실제 import7개/전체 project import16개, Git2437 mode/blob와 SDK53 전후를 확인했다.
+API/UI CPU1/RAM1536MiB/swap0/PID128과 browser CPU1/RAM1024MiB/swap0/PID256 실제
+unit 관측을 기록했다. 원격 runtime106파일·Node·Chrome 전후가 같고 browser
+process/profile을 정리했다. API/UI unit PID0, SSH tunnel 부재, private config 삭제,
+정확 CID 부재·UUID0·saved global scalar0·익명 volume1개 부재를 확인했다.
+fresh lab 후보 경로의 증거이며 공개 운영 endpoint binding/배포·전체 SH/RC 활성화나
+임의 network blackhole의 절대 wall 보증으로 확대하지 않는다.
+
+정본 lock/Node22.22.2/npm12.0.1의 fresh archive 빌드는 첫1536MiB OOM을 보존했다.
+실측에 따라 build 전용2560MiB로 조정한 실행은 npm ci/production build를 통과했다.
+frontend333개·root lock·workspace는 이전 후보와 같고 manifest4/static176 SHA를 결박했다.
+unit journal은 CPU2분21.311초/wall2분36.458초/cgroup lifecycle memory peak2.5GiB다.
+이를 개별 process RSS peak로 해석하지 않는다. build 때 PG/서비스/browser 실행은 없다.
+
+원 live r1은 fixture URL localhost를 strict127.0.0.1 가드와 맞추지 못해 API preflight
+전 실패했다(Next만 Ready). 입력만 정규화한 r2는 실제 API/Next와 전달 HTTP200에 도달했다.
+이후 확인창을 dialog로 잘못 가정하고 pending promise rejection을 즉시 회수하지 않아
+Node가 결과 JSON 전에 종료했다. r2의 초기 'cases0/bootstrap' 보고는 구조화 결과가
+없었다는 뜻으로 정정한다. stderr의 source 위치상 로그인·queued 상세 뒤 취소 확인
+대기까지 도달했지만 취소 응답/DB/WS PASS로 세지 않는다. r2 session revocation unknown을
+보존하고 임시 profile·서비스·DB 정리와 구분한다. 정본 alertdialog와 promise 오류 회수만
+고친 r3가 최종 성공이다. 제품·권한·원 timeout/단언·build는 바꾸지 않았다.
+두 원 FAIL/정상 runner post 미진입/별도 readonly 후관찰을 성공과 합산하지 않는다.
+
+최종 r3 result SHA:
+4b6f0c8edb7d6c5019153ea3455b835f0fbf6a5e09e0890f62cdeb850c6b518e.
+원문·14판정·자원·정리 대조 원장 SHA:
+613666012b4dc9d09254e9b25b9a2c0b212c92ca8c0c19ac937eababca630518.
+build 수용 원장 SHA:
+19989799ee7bfffc4a191ca64599beaf63a94f87a381bb8e8a96990ef2ed22ae.
+최신 exact CI/최종 merge는 PR1410에서 별도 정산한다. 운영 pair 배포는 후속 복구/수집
+source와 정렬해 진행하며 이 시험으로 운영 배포 완료를 선언하지 않는다.

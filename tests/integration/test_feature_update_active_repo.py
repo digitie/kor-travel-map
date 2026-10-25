@@ -253,6 +253,9 @@ async def _drop_isolated_database(pg_container: Any, dsn: str) -> None:
 async def test_active_identity_uses_job_effective_scope_and_constraint_metadata(
     migrated_session: AsyncSession,
 ) -> None:
+    await migrated_session.execute(
+        text("SELECT ops.lock_provider_feature_tracking_protocol(true)")
+    )
     await _seed_grid_probe(migrated_session)
     targeted = await _operation_scope(migrated_session, sync_scope="target_grids")
     first = await enqueue_feature_update_request(

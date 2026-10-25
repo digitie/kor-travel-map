@@ -132,6 +132,82 @@ $$;
 ALTER FUNCTION feature._assert_stamp_projection_guard_inventory(p_boundary boolean) OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: _assert_strict_sh_data_guard_inventory(boolean); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature._assert_strict_sh_data_guard_inventory(p_require_all boolean DEFAULT true) RETURNS boolean
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_relations text[]:=ARRAY['feature.feature_areas','feature.feature_base_field_values','feature.feature_creation_origins','feature.feature_events','feature.feature_geocode_stamps','feature.feature_notices','feature.feature_places','feature.feature_route_geometries','feature.feature_routes','feature.features','feature.manual_feature_identity_claims','feature.provider_field_active_policies','feature.provider_field_policy_epoch','feature.provider_field_shadow_candidates','feature.provider_field_shadow_policies','ops.feature_override_field_paths','ops.feature_overrides','provider_sync.provider_dataset_operation_scopes','provider_sync.provider_dataset_operations','provider_sync.provider_datasets','provider_sync.provider_feature_identities','provider_sync.source_entities','provider_sync.source_entity_heads','provider_sync.source_links','provider_sync.source_records'];
+    v_shared text[]:=ARRAY['feature.feature_base_field_values','feature.feature_geocode_stamps','feature.feature_places','feature.features','feature.provider_field_shadow_candidates','provider_sync.source_entities','provider_sync.source_entity_heads','provider_sync.source_records'];
+    v_relation text;
+    v_profile text;
+    v_function regprocedure;
+    v_expected integer:=33;
+    v_count integer;
+    v_trigger record;
+BEGIN
+    IF p_require_all IS NULL THEN
+        RAISE EXCEPTION 'strict guard inventory mode required' USING ERRCODE='22023';
+    END IF;
+    -- startup만 inactive+미설치 정의 상태를 허용한다. 실제 apply의 기본값은 항상33개다.
+    IF NOT p_require_all
+       AND NOT EXISTS(SELECT 1 FROM feature.provider_field_active_policies)
+       AND NOT EXISTS(SELECT 1 FROM pg_trigger WHERE NOT tgisinternal AND tgfoid IN (
+           'feature._strict_sh_data_statement_guard()'::regprocedure,
+           'feature._strict_sh_source_row_guard()'::regprocedure,
+           'feature._strict_sh_feature_row_guard()'::regprocedure)) THEN
+        RETURN true;
+    END IF;
+    -- 기존 이름과 부딪히면 CREATE 자체가 원자적으로 실패한다. disabled/타표/타함수도 거부한다.
+    FOREACH v_relation IN ARRAY v_relations LOOP
+        v_profile:=CASE WHEN v_relation=ANY(v_shared) THEN 'strict_sh' ELSE 'ex_only' END;
+        SELECT * INTO v_trigger FROM pg_trigger
+         WHERE tgrelid=v_relation::regclass AND tgname='trg_00_strict_sh_data_protocol';
+        IF NOT FOUND OR v_trigger.tgisinternal OR v_trigger.tgtype<>30
+           OR v_trigger.tgenabled<>'O' OR v_trigger.tgconstraint<>0
+           OR v_trigger.tgfoid<>'feature._strict_sh_data_statement_guard()'::regprocedure
+           OR v_trigger.tgnargs<>1 OR v_trigger.tgargs<>
+                convert_to(v_profile,'UTF8')||decode('00','hex')
+           OR v_trigger.tgqual IS NOT NULL OR cardinality(v_trigger.tgattr::smallint[])<>0 THEN
+            RAISE EXCEPTION 'strict statement guard definition drift'
+                USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_inventory';
+        END IF;
+        IF v_relation=ANY(v_shared) THEN
+            v_function:=CASE WHEN v_relation LIKE 'provider_sync.%'
+                THEN 'feature._strict_sh_source_row_guard()'::regprocedure
+                ELSE 'feature._strict_sh_feature_row_guard()'::regprocedure END;
+            SELECT * INTO v_trigger FROM pg_trigger
+             WHERE tgrelid=v_relation::regclass AND tgname='trg_00_strict_sh_data_target';
+            IF NOT FOUND OR v_trigger.tgisinternal OR v_trigger.tgtype<>31
+               OR v_trigger.tgenabled<>'O' OR v_trigger.tgconstraint<>0
+               OR v_trigger.tgfoid<>v_function OR v_trigger.tgnargs<>0
+               OR v_trigger.tgargs<>''::bytea OR v_trigger.tgqual IS NOT NULL
+               OR cardinality(v_trigger.tgattr::smallint[])<>0 THEN
+                RAISE EXCEPTION 'strict target guard definition drift'
+                    USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_inventory';
+            END IF;
+        END IF;
+    END LOOP;
+    SELECT count(*) INTO v_count FROM pg_trigger
+     WHERE NOT tgisinternal AND tgfoid IN (
+        'feature._strict_sh_data_statement_guard()'::regprocedure,
+        'feature._strict_sh_source_row_guard()'::regprocedure,
+        'feature._strict_sh_feature_row_guard()'::regprocedure);
+    IF v_count<>v_expected THEN
+        RAISE EXCEPTION 'strict guard relation set drift'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_inventory';
+    END IF;
+    RETURN true;
+END;
+$$;
+
+
+ALTER FUNCTION feature._assert_strict_sh_data_guard_inventory(p_require_all boolean) OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: _bounded_curation_string_object(jsonb); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -358,7 +434,8 @@ BEGIN
         IF v_bytes>262144 THEN reason := 'budget_exceeded'; RETURN NEXT; RETURN; END IF;
         SELECT t.* INTO STRICT v_place FROM ONLY feature.feature_places AS t
         WHERE t.feature_id=v_feature_id;
-        IF v_place.kind IS DISTINCT FROM 'place' OR v_place.business_hours IS NOT NULL
+        IF v_place.kind IS DISTINCT FROM 'place'
+            OR (v_place.business_hours IS NOT NULL AND v_place.business_hours <> 'null'::jsonb)
             OR v_place.phones IS NULL THEN
             reason := 'shape_unsupported'; RETURN NEXT; RETURN;
         END IF;
@@ -1288,6 +1365,99 @@ $$;
 ALTER FUNCTION feature._install_strict_sh_data_guards() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: _member_provider_curation_input_set(uuid, bigint, text, text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature._member_provider_curation_input_set(p_root uuid, p_dataset bigint, p_scope text, p_operation text, p_stage text) RETURNS TABLE(source_entity_count bigint, input_member_count bigint, last_source_modified_at date, source_input_set_hash text)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_child uuid;
+    v_member uuid;
+    v_run text;
+    v_artifact record;
+    v_state record;
+    v_capture record;
+BEGIN
+    IF p_stage IS NULL OR p_stage NOT IN ('child','root') THEN
+        RAISE EXCEPTION 'explicit child/root capture stage required' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'member capture requires fresh READ COMMITTED'
+            USING ERRCODE='25001';
+    END IF;
+    IF NOT EXISTS(
+        SELECT 1 FROM pg_catalog.pg_locks
+        WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+          AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+          AND classid=1369104691 AND objid=115 AND objsubid=2 AND mode='ExclusiveLock'
+    ) OR NOT EXISTS(
+        SELECT 1 FROM pg_catalog.pg_locks
+        WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+          AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+          AND classid=1590807301 AND objid=1746797985 AND objsubid=1 AND mode='ExclusiveLock'
+    ) THEN
+        RAISE EXCEPTION 'member capture requires its existing finalization prefix'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_prefix';
+    END IF;
+    -- membership를 먼저 정본 resolver로 읽는다. domain mismatch를 행 부재로 분류하지 않는다.
+    SELECT child.job_id,member.import_job_dataset_id,root.dagster_run_id
+      INTO STRICT v_child,v_member,v_run
+    FROM ops.import_jobs root
+    JOIN ops.import_jobs child ON child.parent_job_id=root.job_id
+    JOIN ops.import_job_datasets member ON member.job_id=child.job_id
+    WHERE root.job_id=p_root AND root.kind='provider_feature_load_run'
+      AND child.kind='provider_feature_load' AND child.dagster_run_id=root.dagster_run_id
+      AND member.provider_dataset_id=p_dataset AND member.sync_scope=p_scope
+      AND member.operation_key=p_operation;
+
+    SELECT artifact.snapshot_id,artifact.root_job_id,artifact.source_job_id,
+           artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+           artifact.dagster_run_id,artifact.capture_profile
+      INTO v_artifact
+    FROM ops.provider_snapshot_artifacts artifact WHERE artifact.import_job_dataset_id=v_member;
+    IF NOT FOUND THEN
+        -- 새 profile의 control이 전혀 없는 기존 EX만 기존 non-place aggregate를 유지한다.
+        RETURN QUERY SELECT current_set.source_entity_count,current_set.input_member_count,
+                            current_set.last_source_modified_at,current_set.source_input_set_hash
+            FROM feature.current_provider_curation_input_set(p_dataset) current_set;
+        RETURN;
+    END IF;
+    IF v_artifact.root_job_id IS DISTINCT FROM p_root
+       OR v_artifact.source_job_id IS DISTINCT FROM v_child
+       OR v_artifact.provider_dataset_id IS DISTINCT FROM p_dataset
+       OR v_artifact.sync_scope IS DISTINCT FROM p_scope
+       OR v_artifact.operation_key IS DISTINCT FROM p_operation
+       OR v_artifact.dagster_run_id IS DISTINCT FROM v_run
+       OR v_artifact.capture_profile IS DISTINCT FROM 'bounded-place-v1' THEN
+        RAISE EXCEPTION 'snapshot profile does not match its canonical member'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    SELECT control.status,control.seal_txid,(control.applied_result IS NOT NULL) AS result_present
+      INTO v_state FROM ops.provider_snapshot_controls control
+      WHERE control.snapshot_id=v_artifact.snapshot_id;
+    IF NOT FOUND OR NOT v_state.result_present
+       OR (p_stage='child' AND (v_state.status<>'postprocessed'
+           OR v_state.seal_txid IS DISTINCT FROM txid_current()))
+       OR (p_stage='root' AND v_state.status<>'child_sealed') THEN
+        RAISE EXCEPTION 'snapshot postprocess and atomic child seal are required'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT * INTO STRICT v_capture FROM feature._bounded_provider_curation_input_set(p_dataset);
+    IF NOT v_capture.capture_complete THEN
+        RAISE EXCEPTION 'bounded snapshot capture is no longer supported'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_bounded_capture';
+    END IF;
+    RETURN QUERY SELECT v_capture.source_entity_count,v_capture.input_member_count,
+                        v_capture.last_source_modified_at,v_capture.source_input_set_hash;
+END;
+$$;
+
+
+ALTER FUNCTION feature._member_provider_curation_input_set(p_root uuid, p_dataset bigint, p_scope text, p_operation text, p_stage text) OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: _project_provider_field_candidates(uuid); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -1300,21 +1470,35 @@ BEGIN
     SELECT * INTO STRICT v_active FROM feature.provider_field_active_policies WHERE feature_id=p_feature;
     FOR v_winner IN SELECT * FROM feature.provider_field_scalar_winners(
         p_feature,v_active.policy_revision,v_active.field_paths) LOOP
-        INSERT INTO feature.feature_base_field_values AS base(
-            feature_id,field_path,provider_dataset_id,source_entity_key,source_record_key,
-            source_raw_payload_hash,value_json,value_geometry,base_revision,observed_at,updated_at)
-        VALUES(p_feature,v_winner.field_path,v_winner.provider_dataset_id,v_winner.source_entity_key,
-            v_winner.value_source_record_key,v_winner.value_source_hash,v_winner.value_json,NULL,
-            1,v_winner.value_observed_at,clock_timestamp())
-        ON CONFLICT(feature_id,field_path) DO UPDATE SET
-            provider_dataset_id=EXCLUDED.provider_dataset_id,source_entity_key=EXCLUDED.source_entity_key,
-            source_record_key=EXCLUDED.source_record_key,source_raw_payload_hash=EXCLUDED.source_raw_payload_hash,
-            value_json=EXCLUDED.value_json,value_geometry=NULL,base_revision=base.base_revision+1,
-            observed_at=EXCLUDED.observed_at,updated_at=EXCLUDED.updated_at
-        WHERE (base.provider_dataset_id,base.source_entity_key,base.source_record_key,
-               base.source_raw_payload_hash,base.value_json,base.value_geometry,base.observed_at)
-          IS DISTINCT FROM (EXCLUDED.provider_dataset_id,EXCLUDED.source_entity_key,EXCLUDED.source_record_key,
-               EXCLUDED.source_raw_payload_hash,EXCLUDED.value_json,NULL,EXCLUDED.observed_at);
+        -- ON CONFLICT의 WHERE보다 BEFORE INSERT가 먼저 실행된다. 완전히 같은
+        -- winner base에는 IUD 자체를 하지 않아 외부 provider의 불필요한 trigger를 피한다.
+        -- 실제 값/출처/시각 변경은 원 UPSERT와 strict target guard를 그대로 지난다.
+        IF NOT EXISTS (
+            SELECT 1 FROM feature.feature_base_field_values base
+            WHERE base.feature_id=p_feature AND base.field_path=v_winner.field_path
+              AND (base.provider_dataset_id,base.source_entity_key,base.source_record_key,
+                   base.source_raw_payload_hash,base.value_json,base.value_geometry,base.observed_at)
+                IS NOT DISTINCT FROM
+                  (v_winner.provider_dataset_id,v_winner.source_entity_key,
+                   v_winner.value_source_record_key,v_winner.value_source_hash,
+                   v_winner.value_json,NULL,v_winner.value_observed_at)
+        ) THEN
+            INSERT INTO feature.feature_base_field_values AS base(
+                feature_id,field_path,provider_dataset_id,source_entity_key,source_record_key,
+                source_raw_payload_hash,value_json,value_geometry,base_revision,observed_at,updated_at)
+            VALUES(p_feature,v_winner.field_path,v_winner.provider_dataset_id,v_winner.source_entity_key,
+                v_winner.value_source_record_key,v_winner.value_source_hash,v_winner.value_json,NULL,
+                1,v_winner.value_observed_at,clock_timestamp())
+            ON CONFLICT(feature_id,field_path) DO UPDATE SET
+                provider_dataset_id=EXCLUDED.provider_dataset_id,source_entity_key=EXCLUDED.source_entity_key,
+                source_record_key=EXCLUDED.source_record_key,source_raw_payload_hash=EXCLUDED.source_raw_payload_hash,
+                value_json=EXCLUDED.value_json,value_geometry=NULL,base_revision=base.base_revision+1,
+                observed_at=EXCLUDED.observed_at,updated_at=EXCLUDED.updated_at
+            WHERE (base.provider_dataset_id,base.source_entity_key,base.source_record_key,
+                   base.source_raw_payload_hash,base.value_json,base.value_geometry,base.observed_at)
+              IS DISTINCT FROM (EXCLUDED.provider_dataset_id,EXCLUDED.source_entity_key,EXCLUDED.source_record_key,
+                   EXCLUDED.source_raw_payload_hash,EXCLUDED.value_json,NULL,EXCLUDED.observed_at);
+        END IF;
         IF NOT feature.has_active_feature_override(p_feature,v_winner.field_path) THEN
             IF v_winner.field_path='core.name' THEN
                 UPDATE feature.features SET name=v_winner.value_json #>> '{}',updated_at=clock_timestamp()
@@ -2637,6 +2821,8 @@ CREATE PROCEDURE feature.activate_provider_field_policy(IN p_feature uuid, IN p_
 DECLARE v_key text; v_dataset bigint;
 BEGIN
     PERFORM ops.lock_scoped_feature_write_protocol(true);
+    -- 실제 activation과 같은 TX에서 strict 정의 전체를 설치·검증한다.
+    PERFORM feature._install_strict_sh_data_guards();
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write',0));
     -- 기본 OFF에는 trigger/event 비용이 없다. 첫 명시 cutover에서만 DDL을 원자 설치한다.
     PERFORM feature._install_provider_field_projection_guards();
@@ -7096,8 +7282,8 @@ BEGIN
   PERFORM ops.lock_provider_feature_tracking_protocol(true);
   PERFORM ops.lock_scoped_feature_write_protocol(true);
   o_stale_input := false;
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
-    RAISE EXCEPTION 'provider curation root requires SERIALIZABLE transaction'
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'provider curation root requires READ COMMITTED transaction'
       USING ERRCODE = '25001';
   END IF;
   IF (
@@ -7249,8 +7435,8 @@ BEGIN
     SELECT input.source_entity_count, input.input_member_count,
            input.source_input_set_hash
     INTO STRICT v_current_count, v_current_member_count, v_current_hash
-    FROM feature.current_provider_curation_input_set(
-      v_child.provider_dataset_id
+    FROM feature._member_provider_curation_input_set(
+      p_root_job_id,v_child.provider_dataset_id,v_child.sync_scope,v_child.operation_key,'root'
     ) AS input;
     IF v_current_count <> v_child.source_entity_count
        OR v_current_member_count <> v_child.input_member_count
@@ -7897,7 +8083,24 @@ DECLARE
   v_actor text;
   v_is_provider boolean;
 BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
+  -- 기존 SER은 그대로다. RC는 정본 finalizer가 이미 취득한 actual P EX+L만 관측한다.
+  -- pg_locks는 session/xact의 과거 순서를 attest하지 않는다. 새 잠금/승격은 없다.
+  IF current_setting('transaction_isolation') <> 'serializable' AND NOT (
+    current_setting('transaction_isolation') = 'read committed'
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND mode='ExclusiveLock'
+    )
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1590807301 AND objid=1746797985 AND objsubid=1 AND mode='ExclusiveLock'
+    )
+    AND p_generation_kind IS NOT DISTINCT FROM 'provider_full_snapshot'
+  ) THEN
     RAISE EXCEPTION 'candidate generation requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
@@ -10138,6 +10341,7 @@ BEGIN
             USING ERRCODE = '23514', CONSTRAINT = 'ck_manual_feature_purge_command';
     END IF;
 
+    PERFORM ops.lock_scoped_feature_write_protocol(true);
     SELECT * INTO v_command
     FROM ops.domain_commands AS command
     WHERE command.command_id = p_command_id
@@ -11899,7 +12103,23 @@ DECLARE
   v_receipt ops.curation_source_observation_receipts%ROWTYPE;
   v_latest_receipt ops.curation_source_observation_receipts%ROWTYPE;
 BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
+  -- 기존 SER은 그대로다. RC는 정본 finalizer가 이미 취득한 actual P EX+L만 관측한다.
+  -- pg_locks는 session/xact의 과거 순서를 attest하지 않는다. 새 잠금/승격은 없다.
+  IF current_setting('transaction_isolation') <> 'serializable' AND NOT (
+    current_setting('transaction_isolation') = 'read committed'
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND mode='ExclusiveLock'
+    )
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1590807301 AND objid=1746797985 AND objsubid=1 AND mode='ExclusiveLock'
+    )
+  ) THEN
     RAISE EXCEPTION 'source observation requires SERIALIZABLE transaction' USING ERRCODE = '25001';
   END IF;
   IF (
@@ -13591,8 +13811,8 @@ DECLARE
   v_last_source_modified_at date;
 BEGIN
   PERFORM ops.lock_provider_feature_tracking_protocol(true);
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
-    RAISE EXCEPTION 'provider snapshot seal requires SERIALIZABLE transaction'
+  IF current_setting('transaction_isolation') <> 'read committed' THEN
+    RAISE EXCEPTION 'provider snapshot seal requires READ COMMITTED transaction'
       USING ERRCODE = '25001';
   END IF;
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
@@ -13650,7 +13870,9 @@ BEGIN
          input.last_source_modified_at, input.source_input_set_hash
   INTO STRICT o_source_entity_count, v_input_member_count,
        v_last_source_modified_at, o_source_input_set_hash
-  FROM feature.current_provider_curation_input_set(p_provider_dataset_id) AS input;
+  FROM feature._member_provider_curation_input_set(
+    p_root_job_id,p_provider_dataset_id,p_sync_scope,p_operation_key,'child'
+  ) AS input;
   IF p_expected_input_member_count IS NULL
      OR p_expected_input_set_hash !~ '^[0-9a-f]{64}$'
      OR p_expected_input_member_count <> v_input_member_count
@@ -13829,7 +14051,23 @@ DECLARE
   v_metadata jsonb;
   v_selector jsonb;
 BEGIN
-  IF current_setting('transaction_isolation') <> 'serializable' THEN
+  -- 기존 SER은 그대로다. RC는 정본 finalizer가 이미 취득한 actual P EX+L만 관측한다.
+  -- pg_locks는 session/xact의 과거 순서를 attest하지 않는다. 새 잠금/승격은 없다.
+  IF current_setting('transaction_isolation') <> 'serializable' AND NOT (
+    current_setting('transaction_isolation') = 'read committed'
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1369104691 AND objid=115 AND objsubid=2 AND mode='ExclusiveLock'
+    )
+    AND EXISTS (
+      SELECT 1 FROM pg_catalog.pg_locks
+      WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+        AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+        AND classid=1590807301 AND objid=1746797985 AND objsubid=1 AND mode='ExclusiveLock'
+    )
+  ) THEN
     RAISE EXCEPTION 'concierge catalog sync requires SERIALIZABLE transaction'
       USING ERRCODE = '25001';
   END IF;
@@ -14978,6 +15216,121 @@ $$;
 
 ALTER FUNCTION ops._guard_scoped_feature_write_completion() OWNER TO ktm_feature_state_procedure_owner;
 
+SET default_tablespace = '';
+
+SET default_table_access_method = heap;
+
+--
+-- Name: provider_snapshot_controls; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.provider_snapshot_controls (
+    snapshot_id uuid NOT NULL,
+    executor_generation bigint NOT NULL,
+    executor_fence uuid NOT NULL,
+    lease_expires_at timestamp with time zone NOT NULL,
+    status text NOT NULL,
+    attempt_id uuid,
+    attempt_owner uuid,
+    manifest_digest text,
+    applied_result bytea,
+    result_sha256 text GENERATED ALWAYS AS (encode(x_extension.digest(applied_result, 'sha256'::text), 'hex'::text)) STORED,
+    applied_generation bigint,
+    applied_fence uuid,
+    applied_at timestamp with time zone,
+    postprocess_receipt bytea,
+    postprocessed_at timestamp with time zone,
+    postprocess_txid bigint,
+    postprocess_intent_sha256 text,
+    child_sealed_at timestamp with time zone,
+    seal_txid bigint,
+    updated_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_provider_snapshot_applied_result CHECK ((((status = 'prepared'::text) AND (applied_result IS NULL) AND (applied_generation IS NULL) AND (applied_fence IS NULL) AND (applied_at IS NULL)) OR ((status = ANY (ARRAY['applied'::text, 'postprocessed'::text, 'child_sealed'::text])) AND (applied_result IS NOT NULL) AND (applied_generation IS NOT NULL) AND (applied_generation > 0) AND (applied_generation <= executor_generation) AND (applied_fence IS NOT NULL) AND (applied_at IS NOT NULL) AND (attempt_id IS NOT NULL)))),
+    CONSTRAINT ck_provider_snapshot_attempt_pair CHECK ((((attempt_id IS NULL) AND (attempt_owner IS NULL) AND (manifest_digest IS NULL)) OR ((attempt_id IS NOT NULL) AND (attempt_owner IS NOT NULL) AND (manifest_digest IS NOT NULL)))),
+    CONSTRAINT ck_provider_snapshot_child_seal CHECK (((status = 'child_sealed'::text) = (child_sealed_at IS NOT NULL))),
+    CONSTRAINT ck_provider_snapshot_postprocess CHECK ((((status = ANY (ARRAY['prepared'::text, 'applied'::text])) AND (postprocess_receipt IS NULL) AND (postprocessed_at IS NULL)) OR ((status = ANY (ARRAY['postprocessed'::text, 'child_sealed'::text])) AND (postprocess_receipt IS NOT NULL) AND (postprocessed_at IS NOT NULL)))),
+    CONSTRAINT ck_provider_snapshot_private_postprocess CHECK ((((postprocess_txid IS NULL) AND (postprocess_intent_sha256 IS NULL)) OR ((status = 'applied'::text) AND (postprocess_txid IS NOT NULL) AND (postprocess_txid > 0) AND (postprocess_intent_sha256 IS NOT NULL) AND (postprocess_intent_sha256 ~ '^[0-9a-f]{64}$'::text)))),
+    CONSTRAINT ck_provider_snapshot_private_seal CHECK (((seal_txid IS NULL) OR ((status = 'postprocessed'::text) AND (seal_txid > 0)))),
+    CONSTRAINT provider_snapshot_controls_applied_result_check CHECK (((octet_length(applied_result) >= 1) AND (octet_length(applied_result) <= 4096))),
+    CONSTRAINT provider_snapshot_controls_executor_generation_check CHECK ((executor_generation > 0)),
+    CONSTRAINT provider_snapshot_controls_manifest_digest_check CHECK ((manifest_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT provider_snapshot_controls_postprocess_receipt_check CHECK (((octet_length(postprocess_receipt) >= 1) AND (octet_length(postprocess_receipt) <= 4096))),
+    CONSTRAINT provider_snapshot_controls_status_check CHECK ((status = ANY (ARRAY['prepared'::text, 'applied'::text, 'postprocessed'::text, 'child_sealed'::text])))
+);
+
+
+ALTER TABLE ops.provider_snapshot_controls OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: _lock_provider_snapshot_executor(uuid, bigint, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops._lock_provider_snapshot_executor(p_snapshot uuid, p_generation bigint, p_fence uuid) RETURNS ops.provider_snapshot_controls
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_artifact record;
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot command requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_snapshot IS NULL OR p_generation IS NULL OR p_generation<1 OR p_fence IS NULL THEN
+        RAISE EXCEPTION 'exact executor fence required' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot command requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM ops.lock_scoped_feature_write_protocol(false);
+    SELECT artifact.root_job_id,artifact.source_job_id,artifact.import_job_dataset_id,
+           artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+           artifact.dagster_run_id,artifact.capture_profile
+      INTO STRICT v_artifact FROM ops.provider_snapshot_artifacts artifact
+      WHERE artifact.snapshot_id=p_snapshot;
+    PERFORM ops._lock_scoped_feature_write_scope(v_artifact.provider_dataset_id,'[]'::jsonb,false);
+    -- B의 actual parent SHARE가 전제다. root/member tuple 및 quota 잠금은 없다.
+    IF v_artifact.capture_profile IS DISTINCT FROM 'bounded-place-v1' OR NOT EXISTS(
+        SELECT 1 FROM ops.import_jobs root
+        JOIN ops.import_jobs child ON child.parent_job_id=root.job_id
+        JOIN ops.import_job_datasets member ON member.job_id=child.job_id
+        JOIN provider_sync.provider_datasets dataset ON dataset.provider_dataset_id=member.provider_dataset_id
+        JOIN provider_sync.provider_dataset_operations operation
+          ON operation.provider_dataset_id=member.provider_dataset_id AND operation.operation_key=member.operation_key
+        WHERE root.job_id=v_artifact.root_job_id AND root.kind='provider_feature_load_run'
+          AND root.status='running' AND root.dagster_run_status='STARTED'
+          AND root.dagster_run_id=v_artifact.dagster_run_id
+          AND root.cancellation_id IS NULL AND root.cancellation_requested_at IS NULL
+          AND root.quarantined_at IS NULL AND root.root_id=root.job_id AND root.root_kind='import_job'
+          AND child.job_id=v_artifact.source_job_id AND child.kind='provider_feature_load'
+          AND child.status IN ('queued','running') AND child.dagster_run_id=root.dagster_run_id
+          AND child.cancellation_id IS NULL AND child.cancellation_requested_at IS NULL
+          AND child.quarantined_at IS NULL AND child.root_id=root.job_id AND child.root_kind='import_job'
+          AND child.dataset_membership_mode='single'
+          AND member.import_job_dataset_id=v_artifact.import_job_dataset_id
+          AND member.provider_dataset_id=v_artifact.provider_dataset_id
+          AND member.sync_scope=v_artifact.sync_scope AND member.operation_key=v_artifact.operation_key
+          AND dataset.is_active AND operation.is_enabled AND operation.operation_kind='refresh'
+          AND (SELECT count(*) FROM ops.import_job_datasets all_members WHERE all_members.job_id=child.job_id)=1
+    ) THEN
+        RAISE EXCEPTION 'snapshot executor member is no longer active'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    SELECT * INTO STRICT v_control FROM ops.provider_snapshot_controls control
+      WHERE control.snapshot_id=p_snapshot FOR UPDATE;
+    IF v_control.executor_generation IS DISTINCT FROM p_generation
+       OR v_control.executor_fence IS DISTINCT FROM p_fence
+       OR v_control.lease_expires_at<=clock_timestamp() THEN
+        RAISE EXCEPTION 'snapshot executor fence is stale' USING ERRCODE='40001';
+    END IF;
+    RETURN v_control;
+END;
+$$;
+
+
+ALTER FUNCTION ops._lock_provider_snapshot_executor(p_snapshot uuid, p_generation bigint, p_fence uuid) OWNER TO ktm_curation_command_owner;
+
 --
 -- Name: _lock_scoped_feature_write_scope(bigint, jsonb, boolean); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
@@ -14990,6 +15343,12 @@ DECLARE v_region jsonb;
 BEGIN
     PERFORM ops._arm_scoped_feature_write_deadline();
     PERFORM ops.lock_scoped_feature_write_protocol(p_exclusive);
+    -- 실제 FK parent는 모든 경로에서 ops scope보다 먼저 SHARE로 선점한다.
+    PERFORM 1 FROM provider_sync.provider_datasets
+        WHERE provider_dataset_id=p_dataset FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'provider dataset is not visible; replan' USING ERRCODE='40001';
+    END IF;
     INSERT INTO ops.feature_write_dataset_scopes(provider_dataset_id) VALUES(p_dataset)
         ON CONFLICT DO NOTHING;
     IF jsonb_array_length(p_regions)=0 THEN
@@ -15010,10 +15369,6 @@ $$;
 
 
 ALTER FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
-
-SET default_tablespace = '';
-
-SET default_table_access_method = heap;
 
 --
 -- Name: feature_write_attempts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -15094,6 +15449,90 @@ $$;
 
 
 ALTER FUNCTION ops._locked_scoped_feature_write_attempt(p_attempt uuid, p_owner uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: _provider_snapshot_postprocess_receipt(uuid, bytea); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops._provider_snapshot_postprocess_receipt(p_snapshot uuid, p_receipt bytea) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_receipt jsonb;
+    v_artifact record;
+    v_context jsonb;
+    v_key text;
+    v_value jsonb;
+    v_keys text[]:=ARRAY['version','domain','root_job_id','source_job_id','import_job_dataset_id',
+        'root_run_id','artifact_sha256','context_sha256','result_sha256','provider_dataset_id',
+        'sync_scope','operation_key','observation_generation','fetched_at','source_observations',
+        'findings_observed','findings_unique','findings_set_sha256','sync_recorded','stale_close_completed'];
+BEGIN
+    IF p_snapshot IS NULL OR p_receipt IS NULL OR octet_length(p_receipt) NOT BETWEEN 1 AND 4096 THEN
+        RAISE EXCEPTION 'bounded snapshot postprocess receipt required' USING ERRCODE='22023';
+    END IF;
+    v_receipt:=convert_from(p_receipt,'UTF8')::jsonb;
+    IF jsonb_typeof(v_receipt) IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'postprocess receipt must be object' USING ERRCODE='22023';
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(v_receipt))<>20 OR NOT(v_receipt ?& v_keys)
+       OR v_receipt->'version' IS DISTINCT FROM '1'::jsonb
+       OR v_receipt->'domain' IS DISTINCT FROM '"airport-snapshot-postprocess-v1"'::jsonb
+       OR v_receipt->'sync_recorded' IS DISTINCT FROM 'true'::jsonb
+       OR v_receipt->'stale_close_completed' IS DISTINCT FROM 'true'::jsonb THEN
+        RAISE EXCEPTION 'invalid full postprocess receipt' USING ERRCODE='22023';
+    END IF;
+    FOREACH v_key IN ARRAY ARRAY['provider_dataset_id','source_observations','findings_observed','findings_unique'] LOOP
+        v_value:=v_receipt->v_key;
+        IF jsonb_typeof(v_value) IS DISTINCT FROM 'number' THEN
+            RAISE EXCEPTION 'postprocess counter must be integer' USING ERRCODE='22023';
+        END IF;
+        IF scale(v_value::numeric)<>0 OR v_value::numeric<0 OR v_value::numeric>9223372036854775807 THEN
+            RAISE EXCEPTION 'postprocess counter exceeds bigint' USING ERRCODE='22023';
+        END IF;
+    END LOOP;
+    FOREACH v_key IN ARRAY ARRAY['artifact_sha256','context_sha256','result_sha256','findings_set_sha256'] LOOP
+        IF jsonb_typeof(v_receipt->v_key) IS DISTINCT FROM 'string'
+           OR v_receipt->>v_key !~ '^[0-9a-f]{64}$' THEN
+            RAISE EXCEPTION 'postprocess receipt SHA required' USING ERRCODE='22023';
+        END IF;
+    END LOOP;
+    SELECT artifact.root_job_id,artifact.source_job_id,artifact.import_job_dataset_id,
+           artifact.dagster_run_id,artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+           artifact.artifact_sha256,artifact.context_sha256,artifact.observation_context,
+           control.result_sha256 INTO STRICT v_artifact
+      FROM ops.provider_snapshot_artifacts artifact
+      JOIN ops.provider_snapshot_controls control USING(snapshot_id)
+      WHERE artifact.snapshot_id=p_snapshot;
+    v_context:=convert_from(v_artifact.observation_context,'UTF8')::jsonb;
+    IF v_receipt->>'root_job_id' IS DISTINCT FROM v_artifact.root_job_id::text
+       OR v_receipt->>'source_job_id' IS DISTINCT FROM v_artifact.source_job_id::text
+       OR v_receipt->>'import_job_dataset_id' IS DISTINCT FROM v_artifact.import_job_dataset_id::text
+       OR v_receipt->>'root_run_id' IS DISTINCT FROM v_artifact.dagster_run_id
+       OR v_receipt->'provider_dataset_id' IS DISTINCT FROM to_jsonb(v_artifact.provider_dataset_id)
+       OR v_receipt->>'sync_scope' IS DISTINCT FROM v_artifact.sync_scope
+       OR v_receipt->>'operation_key' IS DISTINCT FROM v_artifact.operation_key
+       OR v_receipt->>'artifact_sha256' IS DISTINCT FROM v_artifact.artifact_sha256
+       OR v_receipt->>'context_sha256' IS DISTINCT FROM v_artifact.context_sha256
+       OR v_receipt->>'result_sha256' IS DISTINCT FROM v_artifact.result_sha256
+       OR v_receipt->'observation_generation' IS DISTINCT FROM v_context->'observation_generation'
+       OR v_receipt->'source_observations' IS DISTINCT FROM v_context->'source_observations'
+       OR v_receipt->'findings_observed' IS DISTINCT FROM v_context->'validation'->'issue_count'
+       OR (v_receipt->>'findings_unique')::bigint>(v_receipt->>'findings_observed')::bigint
+       OR jsonb_typeof(v_receipt->'fetched_at') IS DISTINCT FROM 'string'
+       OR octet_length(v_receipt->>'fetched_at') NOT BETWEEN 20 AND 64 THEN
+        RAISE EXCEPTION 'postprocess receipt differs from its original snapshot'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    -- 원 fetched_at의 정확 값/clock 표현과 finding 전 필드 지문은 정본 Python decoder가 검증한다.
+    -- 이 private SQL은 DB 소속·수집량/검증량·실제 효과를 별도로 대조한다.
+    RETURN v_receipt;
+END;
+$_$;
+
+
+ALTER FUNCTION ops._provider_snapshot_postprocess_receipt(p_snapshot uuid, p_receipt bytea) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: append_provider_feature_attempt_event_command(text, bigint, text, text, integer, text, jsonb); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
@@ -15267,6 +15706,142 @@ CREATE FUNCTION ops.assign_cache_target_outbox_relay_order() RETURNS trigger
 ALTER FUNCTION ops.assign_cache_target_outbox_relay_order() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: begin_provider_snapshot_apply(uuid, bigint, uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.begin_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_artifact_sha text) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_attempt jsonb;
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+BEGIN
+    -- kernel의 P→모든 실제 parent 정렬→scope→source/link/Feature를 먼저 보존한다.
+    -- own scope를 선점한 뒤 foreign participant parent를 늦게 추가하지 않는다.
+    -- begin의 applying 기록도 아래 fence 실패 시 같은 TX에서 rollback된다. 실제 DML은 아직0.
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot apply requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot apply requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    IF p_artifact_sha IS NULL OR p_artifact_sha !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'exact decoded artifact SHA required' USING ERRCODE='22023';
+    END IF;
+    v_attempt:=ops.begin_scoped_feature_write(p_attempt,p_owner,p_manifest);
+    -- P SH와 정렬 parent/scope를 잡은 뒤, 실제33 guard drift를 DML보다 먼저 거부한다.
+    PERFORM feature._assert_strict_sh_data_guard_inventory();
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF NOT EXISTS(SELECT 1 FROM ops.provider_snapshot_artifacts artifact
+                  WHERE artifact.snapshot_id=p_snapshot AND artifact.artifact_sha256=p_artifact_sha) THEN
+        RAISE EXCEPTION 'decoded apply input differs from the registered artifact'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    IF v_control.status<>'prepared' OR v_control.attempt_id IS DISTINCT FROM p_attempt
+       OR v_control.attempt_owner IS DISTINCT FROM p_owner
+       OR v_control.manifest_digest IS DISTINCT FROM p_manifest
+       OR v_attempt->>'status' IS DISTINCT FROM 'applying'
+       OR v_attempt->>'apply_txid' IS DISTINCT FROM txid_current()::text THEN
+        RAISE EXCEPTION 'snapshot apply does not match its live kernel plan'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    RETURN v_attempt || jsonb_build_object('snapshot_observation_generation',
+        (SELECT convert_from(artifact.observation_context,'UTF8')::jsonb->>'observation_generation'
+         FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot));
+END;
+$_$;
+
+
+ALTER FUNCTION ops.begin_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_artifact_sha text) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: begin_provider_snapshot_postprocess(uuid, bigint, uuid, bytea); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.begin_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) RETURNS bytea
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_receipt jsonb;
+    v_dataset bigint;
+    v_scope ops.integrity_observation_scopes%ROWTYPE;
+    v_run ops.integrity_observation_runs%ROWTYPE;
+    v_result jsonb;
+    v_capture record;
+    v_cursor jsonb;
+BEGIN
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    v_receipt:=ops._provider_snapshot_postprocess_receipt(p_snapshot,p_receipt);
+    IF v_control.status='postprocessed' AND v_control.postprocess_receipt=p_receipt THEN
+        RETURN v_control.postprocess_receipt;
+    END IF;
+    IF v_control.status<>'applied' OR v_control.postprocess_receipt IS NOT NULL
+       OR NOT EXISTS(SELECT 1 FROM ops.feature_write_attempts attempt
+                     WHERE attempt.attempt_id=v_control.attempt_id AND attempt.status='completed'
+                       AND attempt.owner=v_control.attempt_owner
+                       AND attempt.manifest_digest=v_control.manifest_digest
+                       AND attempt.apply_txid IS NOT NULL AND attempt.result_digest IS NOT NULL) THEN
+        RAISE EXCEPTION 'snapshot postprocess requires its original completed apply'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    v_dataset:=(v_receipt->>'provider_dataset_id')::bigint;
+    SELECT * INTO STRICT v_scope FROM ops.integrity_observation_scopes scope
+      WHERE scope.provider_dataset_id=v_dataset FOR UPDATE;
+    SELECT * INTO STRICT v_run FROM ops.integrity_observation_runs run
+      WHERE run.integrity_observation_scope_id=v_scope.integrity_observation_scope_id
+        AND run.external_run_id=v_receipt->>'observation_generation' FOR UPDATE;
+    -- generation은 source 적용 TX에서 이미 예약되어야 한다. 재시작 시 새 세대를 만들지 않는다.
+    -- failed/preload run의 단순 세대 예약은 기존 적용을 무효화하지 않는다.
+    -- 실제 새 적용 또는 더 최신 authoritative 후처리만 원 세대를 대체한다.
+    IF v_run.generation<=v_scope.latest_authoritative_generation OR v_run.status='superseded'
+       OR EXISTS(
+           SELECT 1 FROM ops.provider_snapshot_artifacts artifact
+           JOIN ops.provider_snapshot_controls control USING(snapshot_id)
+           JOIN ops.integrity_observation_runs newer
+             ON newer.integrity_observation_scope_id=v_scope.integrity_observation_scope_id
+            AND newer.external_run_id=(convert_from(artifact.observation_context,'UTF8')::jsonb
+                                        ->>'observation_generation')
+           WHERE artifact.provider_dataset_id=v_dataset
+             AND control.status IN ('applied','postprocessed','child_sealed')
+             AND newer.generation>v_run.generation
+       ) THEN
+        RAISE EXCEPTION 'snapshot was superseded before postprocess'
+            USING ERRCODE='55000',CONSTRAINT='ck_provider_snapshot_superseded';
+    END IF;
+    IF v_run.status<>'collecting' THEN
+        RAISE EXCEPTION 'snapshot has a partial external postprocess state'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    v_result:=convert_from(v_control.applied_result,'UTF8')::jsonb;
+    SELECT * INTO STRICT v_capture FROM feature._bounded_provider_curation_input_set(v_dataset);
+    IF NOT v_capture.capture_complete
+       OR v_capture.input_member_count IS DISTINCT FROM (v_result->'load'->>'curation_input_member_count')::bigint
+       OR v_capture.source_input_set_hash IS DISTINCT FROM v_result->'load'->>'curation_input_set_hash' THEN
+        RAISE EXCEPTION 'snapshot source heads changed before postprocess'
+            USING ERRCODE='55000',CONSTRAINT='ck_provider_snapshot_superseded';
+    END IF;
+    SELECT state.cursor INTO v_cursor FROM provider_sync.provider_sync_state state
+      WHERE state.provider_dataset_id=v_dataset AND state.sync_scope=v_receipt->>'sync_scope'
+        AND state.operation_key=v_receipt->>'operation_key' FOR UPDATE;
+    IF v_cursor ? 'loaded_at'
+       AND (v_cursor->>'loaded_at')::timestamptz>(v_receipt->>'fetched_at')::timestamptz THEN
+        RAISE EXCEPTION 'snapshot sync cursor is newer than the original observation'
+            USING ERRCODE='55000',CONSTRAINT='ck_provider_snapshot_superseded';
+    END IF;
+    UPDATE ops.provider_snapshot_controls SET postprocess_txid=txid_current(),
+        postprocess_intent_sha256=encode(sha256(p_receipt),'hex'),updated_at=clock_timestamp()
+      WHERE snapshot_id=p_snapshot;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION ops.begin_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: begin_scoped_feature_write(uuid, uuid, text); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -15274,13 +15849,24 @@ CREATE FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_m
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
-DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_dependency ops.feature_write_manifests%ROWTYPE; v_value text; v_plan ops.feature_write_attempts%ROWTYPE; v_participants bigint[]; v_dataset bigint; v_entity_dataset bigint;
+DECLARE v_attempt ops.feature_write_attempts%ROWTYPE; v_dependency ops.feature_write_manifests%ROWTYPE; v_value text; v_plan ops.feature_write_attempts%ROWTYPE; v_participants bigint[]; v_dataset bigint; v_entity_dataset bigint; v_exclusive boolean;
 BEGIN
     PERFORM ops._arm_scoped_feature_write_deadline();
     -- dataset 행을 하나라도 잠그기 전에 frozen manifest의 모든 participant를 정렬한다.
     SELECT * INTO v_plan FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
     IF NOT FOUND OR v_plan.owner IS DISTINCT FROM p_owner THEN
         RAISE EXCEPTION 'unknown attempt or owner' USING ERRCODE='40001';
+    END IF;
+    IF v_plan.status NOT IN ('ready','applying','completed') THEN
+        RAISE EXCEPTION 'manifest is not frozen' USING ERRCODE='23514';
+    END IF;
+    -- P를 기다린 앞 statement의 participant를 잠금 권위로 재사용하지 않는다.
+    v_exclusive:=v_plan.exclusive_protocol;
+    PERFORM ops.lock_scoped_feature_write_protocol(v_exclusive);
+    SELECT * INTO v_plan FROM ops.feature_write_attempts WHERE attempt_id=p_attempt;
+    IF NOT FOUND OR v_plan.owner IS DISTINCT FROM p_owner
+       OR v_plan.exclusive_protocol IS DISTINCT FROM v_exclusive THEN
+        RAISE EXCEPTION 'attempt changed before protocol; replan' USING ERRCODE='40001';
     END IF;
     IF v_plan.status NOT IN ('ready','applying','completed') THEN
         RAISE EXCEPTION 'manifest is not frozen' USING ERRCODE='23514';
@@ -15294,7 +15880,14 @@ BEGIN
     IF cardinality(v_participants)>32 THEN
         RAISE EXCEPTION 'too many participant datasets' USING ERRCODE='23514';
     END IF;
-    PERFORM ops.lock_scoped_feature_write_protocol(v_plan.exclusive_protocol);
+    -- 전체 actual parent를 먼저 정렬해 잡은 뒤에만 ops scope를 건드린다.
+    FOREACH v_dataset IN ARRAY v_participants LOOP
+        PERFORM 1 FROM provider_sync.provider_datasets
+            WHERE provider_dataset_id=v_dataset FOR SHARE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'participant dataset is not visible; replan' USING ERRCODE='40001';
+        END IF;
+    END LOOP;
     FOREACH v_dataset IN ARRAY v_participants LOOP
         INSERT INTO ops.feature_write_dataset_scopes(provider_dataset_id) VALUES(v_dataset) ON CONFLICT DO NOTHING;
         IF v_dataset=v_plan.provider_dataset_id AND jsonb_array_length(v_plan.regions)=0 THEN
@@ -15359,6 +15952,55 @@ $$;
 
 
 ALTER FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: bind_provider_snapshot_plan(uuid, bigint, uuid, uuid, uuid, text, text); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.bind_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_kernel_input text) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_artifact record;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+BEGIN
+    IF p_attempt IS NULL OR p_owner IS NULL OR p_manifest IS NULL
+       OR p_manifest !~ '^[0-9a-f]{64}$' OR p_kernel_input IS NULL
+       OR p_kernel_input !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'exact kernel plan binding required' USING ERRCODE='22023';
+    END IF;
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    SELECT artifact.provider_dataset_id INTO STRICT v_artifact
+      FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot;
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=p_attempt;
+    IF v_control.status<>'prepared' OR v_attempt.provider_dataset_id<>v_artifact.provider_dataset_id
+       OR v_attempt.owner IS DISTINCT FROM p_owner OR v_attempt.manifest_digest IS DISTINCT FROM p_manifest
+       OR v_attempt.input_digest IS DISTINCT FROM p_kernel_input OR v_attempt.regions<>'[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false
+       OR v_attempt.status<>'ready' OR v_attempt.lease_until<=clock_timestamp() THEN
+        RAISE EXCEPTION 'snapshot kernel plan is not ready'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    IF v_control.attempt_id IS NOT NULL THEN
+        IF v_control.attempt_id IS DISTINCT FROM p_attempt
+           OR v_control.attempt_owner IS DISTINCT FROM p_owner
+           OR v_control.manifest_digest IS DISTINCT FROM p_manifest THEN
+            -- 재계획/lease 회수 정책은 별도 typed 명령으로만 허용한다.
+            RAISE EXCEPTION 'snapshot kernel plan is already bound'
+                USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+        END IF;
+        RETURN;
+    END IF;
+    UPDATE ops.provider_snapshot_controls SET attempt_id=p_attempt,attempt_owner=p_owner,
+        manifest_digest=p_manifest,updated_at=clock_timestamp() WHERE snapshot_id=p_snapshot;
+END;
+$_$;
+
+
+ALTER FUNCTION ops.bind_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_kernel_input text) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: bump_import_job_event_clock(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -15438,6 +16080,52 @@ $$;
 ALTER FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: capture_provider_snapshot_apply_input_set(uuid, bigint, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.capture_provider_snapshot_apply_input_set(p_snapshot uuid, p_generation bigint, p_fence uuid) RETURNS TABLE(input_member_count bigint, source_input_set_hash text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_dataset bigint;
+    v_capture record;
+BEGIN
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF v_control.status<>'prepared' OR v_control.attempt_id IS NULL THEN
+        RAISE EXCEPTION 'snapshot capture requires prepared original apply'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=v_control.attempt_id;
+    SELECT artifact.provider_dataset_id INTO STRICT v_dataset
+      FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot;
+    IF v_attempt.status<>'completed' OR v_attempt.apply_txid IS DISTINCT FROM txid_current()
+       OR v_attempt.result_digest IS NULL
+       OR v_attempt.owner IS DISTINCT FROM v_control.attempt_owner
+       OR v_attempt.manifest_digest IS DISTINCT FROM v_control.manifest_digest
+       OR v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb THEN
+        RAISE EXCEPTION 'snapshot capture requires the same completed apply transaction'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT * INTO STRICT v_capture FROM feature._bounded_provider_curation_input_set(v_dataset);
+    IF v_capture.capture_complete IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'snapshot apply requires a complete bounded input capture'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required',
+                  DETAIL='capture reason: '||coalesce(v_capture.reason,'missing');
+    END IF;
+    RETURN QUERY SELECT v_capture.input_member_count,v_capture.source_input_set_hash;
+END;
+$$;
+
+
+ALTER FUNCTION ops.capture_provider_snapshot_apply_input_set(p_snapshot uuid, p_generation bigint, p_fence uuid) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: check_feature_operation_parent(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -15467,6 +16155,111 @@ CREATE FUNCTION ops.check_feature_operation_parent() RETURNS trigger
 
 
 ALTER FUNCTION ops.check_feature_operation_parent() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: claim_provider_snapshot_executor(uuid, text, text, integer, bigint, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.claim_provider_snapshot_executor(p_snapshot uuid, p_artifact_sha text, p_context_sha text, p_lease_seconds integer, p_generation bigint DEFAULT NULL::bigint, p_fence uuid DEFAULT NULL::uuid) RETURNS TABLE(generation bigint, fence uuid, lease_expires_at timestamp with time zone, snapshot_status text)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_artifact record;
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_now timestamptz;
+    v_generation bigint;
+    v_fence uuid;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot executor requires provider executor'
+            USING ERRCODE='42501';
+    END IF;
+    IF p_snapshot IS NULL OR p_artifact_sha IS NULL OR p_context_sha IS NULL
+       OR p_artifact_sha !~ '^[0-9a-f]{64}$' OR p_context_sha !~ '^[0-9a-f]{64}$'
+       OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 5 AND 300
+       OR ((p_generation IS NULL)<>(p_fence IS NULL)) THEN
+        RAISE EXCEPTION 'invalid snapshot executor claim'
+            USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot executor requires READ COMMITTED'
+            USING ERRCODE='25001';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM ops.lock_scoped_feature_write_protocol(false);
+    -- artifact는 immutable이다. 큰 bytea 대신 잠금 순서에 필요한 고정 metadata만 읽는다.
+    SELECT artifact.root_job_id,artifact.source_job_id,artifact.import_job_dataset_id,
+           artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+           artifact.dagster_run_id,artifact.artifact_sha256,artifact.context_sha256
+      INTO STRICT v_artifact FROM ops.provider_snapshot_artifacts artifact
+      WHERE artifact.snapshot_id=p_snapshot;
+    IF v_artifact.artifact_sha256 IS DISTINCT FROM p_artifact_sha
+       OR v_artifact.context_sha256 IS DISTINCT FROM p_context_sha THEN
+        RAISE EXCEPTION 'snapshot input does not match the registered member'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    PERFORM ops._lock_scoped_feature_write_scope(v_artifact.provider_dataset_id,'[]'::jsonb,false);
+    -- P SH는 terminal/cancel을, own scope X는 apply와 다른 lease 변경을 먼저 배제한다.
+    -- root/member tuple 잠금이나 quota 행을 뒤늦게 취득하지 않는다.
+    IF NOT EXISTS(
+        SELECT 1 FROM ops.import_jobs root
+        JOIN ops.import_jobs child ON child.parent_job_id=root.job_id
+        JOIN ops.import_job_datasets member ON member.job_id=child.job_id
+        JOIN provider_sync.provider_datasets dataset ON dataset.provider_dataset_id=member.provider_dataset_id
+        JOIN provider_sync.provider_dataset_operations operation
+          ON operation.provider_dataset_id=member.provider_dataset_id AND operation.operation_key=member.operation_key
+        WHERE root.job_id=v_artifact.root_job_id AND root.kind='provider_feature_load_run'
+          AND root.status='running' AND root.dagster_run_status='STARTED'
+          AND root.dagster_run_id=v_artifact.dagster_run_id
+          AND root.cancellation_id IS NULL AND root.quarantined_at IS NULL
+          AND child.job_id=v_artifact.source_job_id AND child.kind='provider_feature_load'
+          AND child.status IN ('queued','running') AND child.dagster_run_id=root.dagster_run_id
+          AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL
+          AND child.dataset_membership_mode='single'
+          AND member.import_job_dataset_id=v_artifact.import_job_dataset_id
+          AND member.provider_dataset_id=v_artifact.provider_dataset_id
+          AND member.sync_scope=v_artifact.sync_scope AND member.operation_key=v_artifact.operation_key
+          AND dataset.is_active AND operation.is_enabled
+          AND (SELECT count(*) FROM ops.import_job_datasets all_members WHERE all_members.job_id=child.job_id)=1
+    ) THEN
+        RAISE EXCEPTION 'snapshot executor member is no longer active'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    SELECT * INTO STRICT v_control FROM ops.provider_snapshot_controls control
+        WHERE control.snapshot_id=p_snapshot FOR UPDATE;
+    v_now:=clock_timestamp();
+    IF p_generation IS NOT NULL THEN
+        -- 오래된 token을 새 handoff 권위로 자동 변환하지 않는다.
+        IF p_generation<>v_control.executor_generation OR p_fence<>v_control.executor_fence
+           OR v_control.lease_expires_at<=v_now THEN
+            RAISE EXCEPTION 'snapshot executor fence is stale'
+                USING ERRCODE='40001';
+        END IF;
+        v_generation:=v_control.executor_generation;
+        v_fence:=v_control.executor_fence;
+    ELSE
+        IF v_control.lease_expires_at>v_now THEN
+            RAISE EXCEPTION 'snapshot executor lease remains active'
+                USING ERRCODE='55P03';
+        END IF;
+        IF v_control.executor_generation=9223372036854775807 THEN
+            RAISE EXCEPTION 'snapshot executor generation exhausted'
+                USING ERRCODE='54000';
+        END IF;
+        v_generation:=v_control.executor_generation+1;
+        v_fence:=x_extension.gen_random_uuid();
+    END IF;
+    UPDATE ops.provider_snapshot_controls control
+       SET executor_generation=v_generation,executor_fence=v_fence,
+           lease_expires_at=v_now+make_interval(secs=>p_lease_seconds),updated_at=v_now
+       WHERE control.snapshot_id=p_snapshot;
+    RETURN QUERY SELECT v_generation,v_fence,v_now+make_interval(secs=>p_lease_seconds),v_control.status;
+END;
+$_$;
+
+
+ALTER FUNCTION ops.claim_provider_snapshot_executor(p_snapshot uuid, p_artifact_sha text, p_context_sha text, p_lease_seconds integer, p_generation bigint, p_fence uuid) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: claim_scoped_feature_write(uuid, uuid, bigint, text, jsonb, text, integer, integer, boolean); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
@@ -15548,6 +16341,90 @@ $_$;
 
 
 ALTER FUNCTION ops.claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: collect_expired_provider_snapshots(integer); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.collect_expired_provider_snapshots(p_limit integer) RETURNS integer
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_rows jsonb;
+    v_row jsonb;
+    v_quota bigint;
+    v_count bigint;
+    v_bytes bigint;
+    v_limit ops.provider_snapshot_quota_limits%ROWTYPE;
+    v_deleted integer:=0;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot cleanup requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_limit IS NULL OR p_limit NOT BETWEEN 1 AND 16 THEN
+        RAISE EXCEPTION 'snapshot cleanup limit must be1..16' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot cleanup requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM ops.lock_scoped_feature_write_protocol(true);
+    SELECT coalesce(jsonb_agg(to_jsonb(candidate)),'[]'::jsonb) INTO v_rows FROM (
+        SELECT artifact.snapshot_id,artifact.provider_dataset_id,reservation.reserved_bytes
+        FROM ops.provider_snapshot_artifacts artifact
+        JOIN ops.provider_snapshot_controls control USING(snapshot_id)
+        JOIN ops.provider_snapshot_quota_reservations reservation USING(snapshot_id)
+        JOIN ops.import_jobs root ON root.job_id=artifact.root_job_id
+        JOIN ops.import_jobs child ON child.job_id=artifact.source_job_id
+        WHERE root.kind='provider_feature_load_run' AND child.kind='provider_feature_load'
+          AND child.parent_job_id=root.job_id AND child.dagster_run_id=root.dagster_run_id
+          AND root.dagster_run_id=artifact.dagster_run_id
+          AND root.quarantined_at IS NULL AND child.quarantined_at IS NULL
+          AND root.status IN ('done','failed','cancelled')
+          AND root.dagster_run_status IN ('SUCCESS','FAILURE','CANCELED')
+          AND child.status IN ('done','failed','cancelled')
+          AND root.finished_at IS NOT NULL AND child.finished_at IS NOT NULL
+          AND control.lease_expires_at<=clock_timestamp()
+          AND greatest(artifact.created_at,control.updated_at,root.finished_at,child.finished_at)
+              <clock_timestamp()-interval '7 days'
+          AND reservation.provider_dataset_id=artifact.provider_dataset_id
+        ORDER BY artifact.created_at,artifact.snapshot_id LIMIT p_limit
+    ) candidate;
+    IF jsonb_array_length(v_rows)=0 THEN RETURN 0; END IF;
+    -- 모든 등록은 P SH라 이 P EX와 겹치지 않는다. 계수는 전역0→정렬dataset 순서로 잠근다.
+    FOR v_quota IN SELECT quota FROM (
+        SELECT 0::bigint AS quota UNION
+        SELECT (value->>'provider_dataset_id')::bigint FROM jsonb_array_elements(v_rows)
+    ) keys ORDER BY quota LOOP
+        SELECT * INTO STRICT v_limit FROM ops.provider_snapshot_quota_limits quota
+          WHERE quota.quota_key=v_quota FOR UPDATE;
+        SELECT count(*),coalesce(sum((value->>'reserved_bytes')::bigint),0)
+          INTO v_count,v_bytes FROM jsonb_array_elements(v_rows)
+          WHERE v_quota=0 OR (value->>'provider_dataset_id')::bigint=v_quota;
+        IF v_limit.used_rows<v_count OR v_limit.used_bytes<v_bytes THEN
+            RAISE EXCEPTION 'snapshot cleanup quota ledger is inconsistent'
+                USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_quota_available';
+        END IF;
+    END LOOP;
+    FOR v_row IN SELECT value FROM jsonb_array_elements(v_rows) LOOP
+        DELETE FROM ops.provider_snapshot_controls WHERE snapshot_id=(v_row->>'snapshot_id')::uuid;
+        DELETE FROM ops.provider_snapshot_quota_reservations WHERE snapshot_id=(v_row->>'snapshot_id')::uuid;
+        DELETE FROM ops.provider_snapshot_artifacts WHERE snapshot_id=(v_row->>'snapshot_id')::uuid;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'snapshot cleanup input disappeared' USING ERRCODE='40001';
+        END IF;
+        UPDATE ops.provider_snapshot_quota_limits SET used_rows=used_rows-1,
+            used_bytes=used_bytes-(v_row->>'reserved_bytes')::bigint
+          WHERE quota_key=0 OR quota_key=(v_row->>'provider_dataset_id')::bigint;
+        v_deleted:=v_deleted+1;
+    END LOOP;
+    RETURN v_deleted;
+END;
+$$;
+
+
+ALTER FUNCTION ops.collect_expired_provider_snapshots(p_limit integer) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: curation_import_manual_feature_children_append_only(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -15967,6 +16844,10 @@ CREATE PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id
 DECLARE
   v_child_job_id uuid;
   v_has_receipt boolean;
+  v_snapshot_member uuid;
+  v_snapshot_run text;
+  v_snapshot record;
+  v_snapshot_state record;
 BEGIN
   PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
@@ -15987,6 +16868,46 @@ BEGIN
     AND member.operation_key = p_operation_key
     AND child.cancellation_id IS NULL AND child.quarantined_at IS NULL
   FOR UPDATE OF child;
+  -- 원 member UUID로 먼저 찾는다. domain 불일치를 artifact 부재로 낮추지 않는다.
+  SELECT member.import_job_dataset_id INTO STRICT v_snapshot_member
+    FROM ops.import_job_datasets member
+    WHERE member.job_id=v_child_job_id AND member.provider_dataset_id=p_provider_dataset_id
+      AND member.sync_scope=p_sync_scope AND member.operation_key=p_operation_key;
+  SELECT artifact.snapshot_id,artifact.root_job_id,artifact.source_job_id,
+         artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+         artifact.dagster_run_id,artifact.capture_profile
+    INTO v_snapshot FROM ops.provider_snapshot_artifacts artifact
+    WHERE artifact.import_job_dataset_id=v_snapshot_member;
+  IF FOUND THEN
+    SELECT root.dagster_run_id INTO STRICT v_snapshot_run
+      FROM ops.import_jobs root JOIN ops.import_jobs child ON child.parent_job_id=root.job_id
+      WHERE root.job_id=p_root_job_id AND root.kind='provider_feature_load_run'
+        AND child.job_id=v_child_job_id AND child.kind='provider_feature_load'
+        AND child.dagster_run_id IS NOT DISTINCT FROM root.dagster_run_id;
+    IF v_snapshot.root_job_id IS DISTINCT FROM p_root_job_id
+       OR v_snapshot.source_job_id IS DISTINCT FROM v_child_job_id
+       OR v_snapshot.provider_dataset_id IS DISTINCT FROM p_provider_dataset_id
+       OR v_snapshot.sync_scope IS DISTINCT FROM p_sync_scope
+       OR v_snapshot.operation_key IS DISTINCT FROM p_operation_key
+       OR v_snapshot.dagster_run_id IS DISTINCT FROM v_snapshot_run
+       OR v_snapshot.capture_profile IS DISTINCT FROM 'bounded-place-v1' THEN
+      RAISE EXCEPTION 'snapshot member completion binding changed'
+        USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    SELECT control.status,control.seal_txid,
+           control.applied_result IS NOT NULL AS result_present,
+           control.postprocess_receipt IS NOT NULL AS postprocess_present
+      INTO v_snapshot_state FROM ops.provider_snapshot_controls control
+      WHERE control.snapshot_id=v_snapshot.snapshot_id;
+    IF NOT FOUND OR p_authoritative_snapshot_complete IS DISTINCT FROM true
+       OR v_snapshot_state.status IS DISTINCT FROM 'postprocessed'
+       OR v_snapshot_state.seal_txid IS DISTINCT FROM txid_current()
+       OR v_snapshot_state.result_present IS DISTINCT FROM true
+       OR v_snapshot_state.postprocess_present IS DISTINCT FROM true THEN
+      RAISE EXCEPTION 'registered snapshot requires atomic postprocessed member seal'
+        USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+  END IF;
   SELECT EXISTS (
     SELECT 1 FROM ops.curation_provider_snapshot_receipts AS receipt
     WHERE receipt.source_job_id = v_child_job_id
@@ -16026,6 +16947,165 @@ $$;
 
 
 ALTER PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_job_id uuid, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_authoritative_snapshot_complete boolean, IN p_finished_at timestamp with time zone, OUT o_changed boolean) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: finish_provider_snapshot_apply(uuid, bigint, uuid, bytea); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.finish_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_result bytea) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_artifact record;
+    v_result jsonb;
+    v_load jsonb;
+    v_key text;
+    v_value jsonb;
+    v_count bigint;
+    v_hash text;
+    v_capture record;
+    v_keys text[]:=ARRAY['bundles_total','features_inserted','features_updated','source_records_inserted',
+        'source_links_inserted','source_links_updated','geo_stamps_written','geo_stale_rewritten',
+        'geo_stale_unchanged','geo_empty_guarded','geo_override_stale_findings','geo_partial_kept',
+        'curation_input_member_count','curation_input_set_hash'];
+BEGIN
+    IF p_result IS NULL OR octet_length(p_result) NOT BETWEEN 1 AND 4096 THEN
+        RAISE EXCEPTION 'bounded original apply result required' USING ERRCODE='22023';
+    END IF;
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF v_control.status<>'prepared' OR v_control.attempt_id IS NULL THEN
+        RAISE EXCEPTION 'snapshot apply result is already complete or has no plan'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=v_control.attempt_id;
+    IF v_attempt.status<>'completed' OR v_attempt.apply_txid IS DISTINCT FROM txid_current()
+       OR v_attempt.owner IS DISTINCT FROM v_control.attempt_owner
+       OR v_attempt.manifest_digest IS DISTINCT FROM v_control.manifest_digest
+       OR v_attempt.result_digest IS NULL THEN
+        RAISE EXCEPTION 'original result must share the kernel apply transaction'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT artifact.provider_dataset_id INTO STRICT v_artifact
+      FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot;
+    IF v_attempt.provider_dataset_id<>v_artifact.provider_dataset_id THEN
+        RAISE EXCEPTION 'snapshot kernel dataset changed'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    v_result:=convert_from(p_result,'UTF8')::jsonb;
+    IF jsonb_typeof(v_result) IS DISTINCT FROM 'object'
+       OR v_result->>'domain' IS DISTINCT FROM 'provider-full-snapshot-apply-result-v1'
+       OR v_result->'version' IS DISTINCT FROM '1'::jsonb THEN
+        RAISE EXCEPTION 'invalid original result envelope' USING ERRCODE='22023';
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(v_result))<>4
+       OR NOT (v_result ?& ARRAY['domain','version','load','retired'])
+       OR jsonb_typeof(v_result->'load') IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'invalid original result fields' USING ERRCODE='22023';
+    END IF;
+    v_load:=v_result->'load';
+    IF (SELECT count(*) FROM jsonb_object_keys(v_load))<>14 OR NOT (v_load ?& v_keys) THEN
+        RAISE EXCEPTION 'partial original result is forbidden' USING ERRCODE='22023';
+    END IF;
+    FOREACH v_key IN ARRAY array_append(v_keys,'retired') LOOP
+        IF v_key='curation_input_set_hash' THEN CONTINUE; END IF;
+        v_value:=CASE WHEN v_key='retired' THEN v_result->v_key ELSE v_load->v_key END;
+        IF jsonb_typeof(v_value) IS DISTINCT FROM 'number' THEN
+            RAISE EXCEPTION 'original result counter must be integer' USING ERRCODE='22023';
+        END IF;
+        IF scale(v_value::numeric)<>0 OR v_value::numeric<0 OR v_value::numeric>9223372036854775807 THEN
+            RAISE EXCEPTION 'original result counter exceeds bigint' USING ERRCODE='22023';
+        END IF;
+    END LOOP;
+    IF jsonb_typeof(v_load->'curation_input_set_hash') IS DISTINCT FROM 'string'
+       OR v_load->>'curation_input_set_hash' !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'original result capture hash required' USING ERRCODE='22023';
+    END IF;
+    v_count:=(v_load->>'curation_input_member_count')::bigint;
+    v_hash:=v_load->>'curation_input_set_hash';
+    SELECT * INTO STRICT v_capture FROM feature._bounded_provider_curation_input_set(v_artifact.provider_dataset_id);
+    IF NOT v_capture.capture_complete OR v_count IS DISTINCT FROM v_capture.input_member_count
+       OR v_hash IS DISTINCT FROM v_capture.source_input_set_hash THEN
+        RAISE EXCEPTION 'original result capture differs from same-TX source heads'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_bounded_capture';
+    END IF;
+    -- 원 counter를 다시 계산하거나 새 성공으로 대체하지 않는다. 입력/후처리 권위는 별도다.
+    UPDATE ops.provider_snapshot_controls SET status='applied',applied_result=p_result,
+        applied_generation=p_generation,applied_fence=p_fence,applied_at=clock_timestamp(),
+        updated_at=clock_timestamp() WHERE snapshot_id=p_snapshot;
+END;
+$_$;
+
+
+ALTER FUNCTION ops.finish_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_result bytea) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: finish_provider_snapshot_postprocess(uuid, bigint, uuid, bytea); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.finish_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_receipt jsonb;
+    v_run record;
+    v_cursor jsonb;
+    v_result jsonb;
+    v_expected_cursor jsonb;
+    v_key text;
+BEGIN
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    v_receipt:=ops._provider_snapshot_postprocess_receipt(p_snapshot,p_receipt);
+    IF v_control.status IS DISTINCT FROM 'applied'
+       OR v_control.postprocess_txid IS DISTINCT FROM txid_current()
+       OR v_control.postprocess_intent_sha256 IS DISTINCT FROM encode(sha256(p_receipt),'hex') THEN
+        RAISE EXCEPTION 'postprocess effects must share their fenced transaction'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    SELECT run.*,scope.latest_generation,scope.latest_authoritative_generation,
+           (SELECT count(*) FROM ops.integrity_finding_observations observation
+            WHERE observation.observation_run_id=run.observation_run_id) AS actual_findings
+      INTO STRICT v_run FROM ops.integrity_observation_runs run
+      JOIN ops.integrity_observation_scopes scope USING(integrity_observation_scope_id)
+      WHERE scope.provider_dataset_id=(v_receipt->>'provider_dataset_id')::bigint
+        AND run.external_run_id=v_receipt->>'observation_generation';
+    IF v_run.status<>'authoritative' OR v_run.completed_at IS NULL
+       OR v_run.generation<>v_run.latest_authoritative_generation
+       OR v_run.source_observations<>(v_receipt->>'source_observations')::bigint
+       OR v_run.findings_observed<>(v_receipt->>'findings_observed')::bigint
+       OR v_run.findings_unique<>(v_receipt->>'findings_unique')::bigint
+       OR v_run.findings_upserted<>v_run.findings_unique OR v_run.actual_findings<>v_run.findings_unique THEN
+        RAISE EXCEPTION 'postprocess finding set was not durably finalized'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    v_result:=convert_from(v_control.applied_result,'UTF8')::jsonb;
+    v_expected_cursor:=jsonb_build_object('loaded_at',v_receipt->>'fetched_at',
+        'asset_key','feature_place_transport_airports');
+    FOREACH v_key IN ARRAY ARRAY['bundles_total','features_inserted','features_updated',
+        'source_records_inserted','source_links_inserted','source_links_updated'] LOOP
+        v_expected_cursor:=v_expected_cursor||jsonb_build_object(v_key,v_result->'load'->v_key);
+    END LOOP;
+    SELECT state.cursor INTO STRICT v_cursor FROM provider_sync.provider_sync_state state
+      WHERE state.provider_dataset_id=(v_receipt->>'provider_dataset_id')::bigint
+        AND state.sync_scope=v_receipt->>'sync_scope' AND state.operation_key=v_receipt->>'operation_key';
+    IF v_cursor IS DISTINCT FROM v_expected_cursor THEN
+        RAISE EXCEPTION 'postprocess sync state does not match original apply counters'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    UPDATE ops.provider_snapshot_controls SET status='postprocessed',postprocess_receipt=p_receipt,
+        postprocessed_at=clock_timestamp(),postprocess_txid=NULL,postprocess_intent_sha256=NULL,
+        updated_at=clock_timestamp()
+      WHERE snapshot_id=p_snapshot;
+END;
+$$;
+
+
+ALTER FUNCTION ops.finish_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: finish_scoped_feature_write(uuid, uuid, text); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
@@ -16596,6 +17676,10 @@ BEGIN
         RAISE EXCEPTION 'provider tracking prefix mode must not be null'
             USING ERRCODE='22023';
     END IF;
+    IF p_finalizing AND current_setting('transaction_isolation') <> 'read committed' THEN
+        RAISE EXCEPTION 'provider finalization requires READ COMMITTED transaction'
+            USING ERRCODE='25001';
+    END IF;
     SELECT COALESCE(bool_or(mode IN ('ShareLock','ExclusiveLock')),false),
            COALESCE(bool_or(mode='ExclusiveLock'),false)
     INTO v_protocol_held,v_protocol_exclusive
@@ -16723,6 +17807,87 @@ $$;
 ALTER FUNCTION ops.mark_snapshot_material_orphaned() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: provider_snapshot_scalar_counter_state(uuid, bigint, uuid, jsonb); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.provider_snapshot_scalar_counter_state(p_snapshot uuid, p_generation bigint, p_fence uuid, p_items jsonb) RETURNS TABLE(feature_id uuid, row_revision bigint, record_exists boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_item jsonb;
+    v_count integer;
+BEGIN
+    IF p_items IS NULL OR jsonb_typeof(p_items) IS DISTINCT FROM 'array'
+       OR pg_column_size(p_items)>1048576 THEN
+        RAISE EXCEPTION 'bounded scalar counter items required' USING ERRCODE='22023';
+    END IF;
+    v_count:=jsonb_array_length(p_items);
+    IF v_count NOT BETWEEN 1 AND 2730 THEN
+        RAISE EXCEPTION 'scalar counter item budget exceeded' USING ERRCODE='22023';
+    END IF;
+    FOR v_item IN SELECT value FROM jsonb_array_elements(p_items) LOOP
+        IF jsonb_typeof(v_item) IS DISTINCT FROM 'object' THEN
+            RAISE EXCEPTION 'invalid scalar counter item' USING ERRCODE='22023';
+        END IF;
+        IF (SELECT count(*) FROM jsonb_object_keys(v_item))<>3
+           OR NOT (v_item ?& ARRAY['feature_id','source_entity_key','raw_payload_hash'])
+           OR jsonb_typeof(v_item->'feature_id') IS DISTINCT FROM 'string'
+           OR jsonb_typeof(v_item->'source_entity_key') IS DISTINCT FROM 'string'
+           OR jsonb_typeof(v_item->'raw_payload_hash') IS DISTINCT FROM 'string'
+           OR v_item->>'feature_id' !~ '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+           OR v_item->>'source_entity_key' !~ '^se_[0-9a-f]{64}$'
+           OR v_item->>'raw_payload_hash' !~ '^[0-9a-f]{32}$' THEN
+            RAISE EXCEPTION 'invalid scalar counter key' USING ERRCODE='22023';
+        END IF;
+    END LOOP;
+    IF (SELECT count(DISTINCT value->>'feature_id') FROM jsonb_array_elements(p_items))<>v_count
+       OR (SELECT count(DISTINCT value->>'source_entity_key') FROM jsonb_array_elements(p_items))<>v_count THEN
+        RAISE EXCEPTION 'duplicate scalar counter item' USING ERRCODE='22023';
+    END IF;
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF v_control.status<>'prepared' OR v_control.attempt_id IS NULL THEN
+        RAISE EXCEPTION 'scalar counter requires prepared snapshot' USING ERRCODE='23514';
+    END IF;
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=v_control.attempt_id;
+    IF v_attempt.status<>'applying' OR v_attempt.apply_txid IS DISTINCT FROM txid_current()
+       OR v_attempt.owner IS DISTINCT FROM v_control.attempt_owner
+       OR v_attempt.manifest_digest IS DISTINCT FROM v_control.manifest_digest THEN
+        RAISE EXCEPTION 'scalar counter requires the original apply transaction' USING ERRCODE='23514';
+    END IF;
+    IF EXISTS(
+        SELECT 1 FROM jsonb_array_elements(p_items) item
+        WHERE NOT EXISTS(SELECT 1 FROM ops.feature_write_manifests m
+                         WHERE m.attempt_id=v_attempt.attempt_id AND m.dependency_kind='feature'
+                           AND m.dependency_key=item->>'feature_id')
+           OR NOT EXISTS(SELECT 1 FROM ops.feature_write_manifests m
+                         WHERE m.attempt_id=v_attempt.attempt_id AND m.dependency_kind='source_head'
+                           AND m.dependency_key=item->>'source_entity_key')
+           OR NOT EXISTS(SELECT 1 FROM provider_sync.source_entities e
+                         JOIN provider_sync.source_links l ON l.source_entity_key=e.source_entity_key
+                         WHERE e.source_entity_key=item->>'source_entity_key'
+                           AND e.provider_dataset_id=v_attempt.provider_dataset_id
+                           AND l.feature_id=(item->>'feature_id')::uuid AND l.source_role='primary')
+    ) THEN
+        RAISE EXCEPTION 'scalar counter items differ from the locked manifest' USING ERRCODE='23514';
+    END IF;
+    RETURN QUERY SELECT f.feature_id,f.row_revision,
+        EXISTS(SELECT 1 FROM provider_sync.source_records r
+               WHERE r.source_entity_key=item->>'source_entity_key'
+                 AND r.raw_payload_hash=item->>'raw_payload_hash')
+      FROM jsonb_array_elements(p_items) item
+      JOIN feature.features f ON f.feature_id=(item->>'feature_id')::uuid
+      ORDER BY f.feature_id;
+END;
+$_$;
+
+
+ALTER FUNCTION ops.provider_snapshot_scalar_counter_state(p_snapshot uuid, p_generation bigint, p_fence uuid, p_items jsonb) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: prune_scoped_feature_write_attempts(timestamp with time zone, integer); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -16755,6 +17920,90 @@ $$;
 
 
 ALTER FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestamp with time zone, p_limit integer) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: read_provider_snapshot_for_member(uuid, uuid, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.read_provider_snapshot_for_member(p_root uuid, p_child uuid, p_member uuid) RETURNS TABLE(snapshot_id uuid, artifact_payload bytea, artifact_sha256 text, observation_context bytea, context_sha256 text, native_input_digest text, snapshot_status text, applied_result bytea, postprocess_receipt bytea, lease_expires_at timestamp with time zone, root_status text, child_status text, cancellation_present boolean, attempt_id uuid, attempt_owner uuid, manifest_digest text, kernel_status text, kernel_input_digest text, kernel_lease_expires_at timestamp with time zone)
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_member record;
+    v_artifact record;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot read requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_root IS NULL OR p_child IS NULL OR p_member IS NULL THEN
+        RAISE EXCEPTION 'canonical snapshot member IDs required' USING ERRCODE='22023';
+    END IF;
+    SELECT member.provider_dataset_id,member.sync_scope,member.operation_key,
+           root.dagster_run_id,root.status AS root_status,child.status AS child_status,
+           (root.cancellation_id IS NOT NULL OR child.cancellation_id IS NOT NULL
+            OR root.quarantined_at IS NOT NULL OR child.quarantined_at IS NOT NULL) AS blocked
+      INTO STRICT v_member FROM ops.import_jobs root
+      JOIN ops.import_jobs child ON child.parent_job_id=root.job_id
+      JOIN ops.import_job_datasets member ON member.job_id=child.job_id
+      WHERE root.job_id=p_root AND root.kind='provider_feature_load_run'
+        AND child.job_id=p_child AND child.kind='provider_feature_load'
+        AND child.dagster_run_id=root.dagster_run_id
+        AND member.import_job_dataset_id=p_member;
+    -- root/domain 조건으로 먼저 거르면 불일치를 artifact 부재로 오인할 수 있다.
+    SELECT artifact.snapshot_id,artifact.root_job_id,artifact.source_job_id,
+           artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+           artifact.dagster_run_id,artifact.capture_profile
+      INTO v_artifact FROM ops.provider_snapshot_artifacts artifact
+      WHERE artifact.import_job_dataset_id=p_member;
+    IF NOT FOUND THEN
+        RETURN;
+    END IF;
+    IF v_artifact.root_job_id IS DISTINCT FROM p_root
+       OR v_artifact.source_job_id IS DISTINCT FROM p_child
+       OR v_artifact.provider_dataset_id IS DISTINCT FROM v_member.provider_dataset_id
+       OR v_artifact.sync_scope IS DISTINCT FROM v_member.sync_scope
+       OR v_artifact.operation_key IS DISTINCT FROM v_member.operation_key
+       OR v_artifact.dagster_run_id IS DISTINCT FROM v_member.dagster_run_id
+       OR v_artifact.capture_profile IS DISTINCT FROM 'bounded-place-v1' THEN
+        RAISE EXCEPTION 'snapshot read does not match its canonical member'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    IF NOT EXISTS(SELECT 1 FROM ops.provider_snapshot_controls control
+                  WHERE control.snapshot_id=v_artifact.snapshot_id) THEN
+        RAISE EXCEPTION 'registered snapshot control is missing'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    IF EXISTS(
+        SELECT 1 FROM ops.provider_snapshot_controls control
+        LEFT JOIN ops.feature_write_attempts attempt ON attempt.attempt_id=control.attempt_id
+        WHERE control.snapshot_id=v_artifact.snapshot_id AND control.attempt_id IS NOT NULL
+          AND (attempt.attempt_id IS NULL OR attempt.owner IS DISTINCT FROM control.attempt_owner
+               OR attempt.manifest_digest IS DISTINCT FROM control.manifest_digest
+               OR attempt.provider_dataset_id IS DISTINCT FROM v_member.provider_dataset_id
+               OR (control.status IN ('applied','postprocessed','child_sealed')
+                   AND attempt.status IS DISTINCT FROM 'completed'))
+    ) THEN
+        RAISE EXCEPTION 'snapshot kernel binding is inconsistent'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    -- 같은 STABLE statement snapshot에서 immutable 입력과 mutable 상태를 함께 읽는다.
+    -- lease nonce는 반환하지 않는다. 새 실행자는 typed claim으로만 권위를 얻는다.
+    RETURN QUERY SELECT artifact.snapshot_id,artifact.artifact_payload,artifact.artifact_sha256,
+           artifact.observation_context,artifact.context_sha256,artifact.native_input_digest,
+           control.status,control.applied_result,control.postprocess_receipt,
+           control.lease_expires_at,v_member.root_status,v_member.child_status,v_member.blocked,
+           control.attempt_id,control.attempt_owner,control.manifest_digest,
+           attempt.status,attempt.input_digest,attempt.lease_until
+      FROM ops.provider_snapshot_artifacts artifact
+      JOIN ops.provider_snapshot_controls control USING(snapshot_id)
+      LEFT JOIN ops.feature_write_attempts attempt ON attempt.attempt_id=control.attempt_id
+      WHERE artifact.snapshot_id=v_artifact.snapshot_id;
+END;
+$$;
+
+
+ALTER FUNCTION ops.read_provider_snapshot_for_member(p_root uuid, p_child uuid, p_member uuid) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: record_curation_import_manual_feature_child(uuid, integer, text, text, bigint, uuid, uuid, uuid, uuid); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
@@ -16854,6 +18103,294 @@ $_$;
 
 
 ALTER PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) OWNER TO ktm_curation_command_owner;
+
+--
+-- Name: register_provider_snapshot_artifact(uuid, uuid, uuid, bytea, bytea, text, integer); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.register_provider_snapshot_artifact(p_root uuid, p_source_job uuid, p_member uuid, p_payload bytea, p_context bytea, p_native_digest text, p_lease_seconds integer) RETURNS TABLE(snapshot_id uuid, created boolean, generation bigint, fence uuid)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_member ops.import_job_datasets%ROWTYPE;
+    v_dataset record;
+    v_existing record;
+    v_payload jsonb;
+    v_context jsonb;
+    v_pin jsonb;
+    v_key text;
+    v_pin_keys text[]:=ARRAY['code_revision','sdk_inventory_sha256','provider','dataset_key',
+        'source_entity_type','normalizer_revision','geo_domain','clock_domain','native_domain'];
+    v_payload_keys text[]:=ARRAY['version','domain','pins','native_input_digest','bundles','geo'];
+    v_context_keys text[]:=ARRAY['version','domain','artifact_sha256','pins','root_run_id',
+        'observation_generation','upstream_eof','validation_mode','dropped','source_observations',
+        'validation','geo_stats'];
+    v_run text;
+    v_generation text;
+    v_suffix text;
+    v_count integer;
+    v_bytes bigint;
+    v_quota bigint;
+    v_limit ops.provider_snapshot_quota_limits%ROWTYPE;
+    v_snapshot uuid;
+    v_fence uuid;
+    v_now timestamptz;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot registration requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_root IS NULL OR p_source_job IS NULL OR p_member IS NULL
+       OR p_payload IS NULL OR p_context IS NULL OR p_native_digest IS NULL
+       OR p_lease_seconds IS NULL OR p_lease_seconds NOT BETWEEN 5 AND 300 THEN
+        RAISE EXCEPTION 'invalid snapshot registration input' USING ERRCODE='22023';
+    END IF;
+    -- bytea 길이는 TOAST raw length로 확인하고 JSON/UTF8 전개 전에 상한을 고정한다.
+    IF octet_length(p_payload) NOT BETWEEN 1 AND 1048576
+       OR octet_length(p_context) NOT BETWEEN 1 AND 8192
+       OR octet_length(p_native_digest)<>64 THEN
+        RAISE EXCEPTION 'snapshot registration input exceeds its bounds' USING ERRCODE='22023';
+    END IF;
+    IF p_native_digest !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'invalid native input digest' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot registration requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM ops.lock_scoped_feature_write_protocol(false);
+    SELECT * INTO STRICT v_member FROM ops.import_job_datasets member
+        WHERE member.import_job_dataset_id=p_member AND member.job_id=p_source_job;
+    -- 불변 UUID로만 먼저 해석한다. 가변 membership key는 길이를 확인한 뒤 비교한다.
+    IF v_member.provider_dataset_id<=0 OR octet_length(v_member.sync_scope) NOT BETWEEN 1 AND 128
+       OR octet_length(v_member.operation_key) NOT BETWEEN 1 AND 256 THEN
+        RAISE EXCEPTION 'unsupported member key' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    PERFORM 1 FROM provider_sync.provider_datasets
+        WHERE provider_dataset_id=v_member.provider_dataset_id FOR SHARE;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'snapshot dataset changed; replan' USING ERRCODE='40001';
+    END IF;
+    PERFORM ops._lock_scoped_feature_write_scope(v_member.provider_dataset_id,'[]'::jsonb,false);
+    SELECT root.dagster_run_id INTO v_run
+    FROM ops.import_jobs root
+    WHERE root.job_id=p_root AND root.kind='provider_feature_load_run'
+      AND root.status='running' AND root.dagster_run_status='STARTED'
+      AND root.dagster_run_id IS NOT NULL
+      AND root.cancellation_id IS NULL AND root.cancellation_requested_at IS NULL
+      AND root.quarantined_at IS NULL AND root.root_id=root.job_id AND root.root_kind='import_job'
+    ;
+    IF NOT FOUND OR octet_length(v_run) NOT BETWEEN 1 AND 128 THEN
+        RAISE EXCEPTION 'snapshot root is not active' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    -- metadata 길이를 먼저 확인한 CASE 안에서만 저장된 child run을 비교한다.
+    PERFORM 1 FROM ops.import_jobs child
+    WHERE child.job_id=p_source_job AND child.parent_job_id=p_root AND child.kind='provider_feature_load'
+      AND child.status IN ('queued','running')
+      AND CASE WHEN octet_length(child.dagster_run_id) BETWEEN 1 AND 128
+          THEN child.dagster_run_id=v_run ELSE false END
+      AND child.cancellation_id IS NULL AND child.cancellation_requested_at IS NULL
+      AND child.quarantined_at IS NULL AND child.root_id=p_root AND child.root_kind='import_job'
+      AND child.dataset_membership_mode='single'
+      AND (SELECT count(*) FROM ops.import_job_datasets members WHERE members.job_id=child.job_id)=1;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'snapshot member is not an active single child' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    SELECT dataset.provider,dataset.dataset_key INTO STRICT v_dataset
+    FROM provider_sync.provider_datasets dataset
+    JOIN provider_sync.provider_dataset_operations operation
+      ON operation.provider_dataset_id=dataset.provider_dataset_id
+    WHERE dataset.provider_dataset_id=v_member.provider_dataset_id AND dataset.is_active
+      AND operation.operation_key=v_member.operation_key AND operation.is_enabled
+      AND operation.operation_kind='refresh';
+    IF v_dataset.provider<>'kor-travel-transport' OR v_dataset.dataset_key<>'transport_airports' THEN
+        RAISE EXCEPTION 'snapshot registration supports Airport v1 only' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+
+    -- JSON header 확인은 DTO/clock/validation 권위가 아니다. 실제 apply가 exact codec을 재검증한다.
+    v_payload:=convert_from(p_payload,'UTF8')::jsonb;
+    v_context:=convert_from(p_context,'UTF8')::jsonb;
+    IF jsonb_typeof(v_payload) IS DISTINCT FROM 'object' OR jsonb_typeof(v_context) IS DISTINCT FROM 'object' THEN
+        RAISE EXCEPTION 'snapshot envelopes must be objects' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(v_payload))<>6
+       OR NOT (v_payload ?& v_payload_keys)
+       OR (SELECT count(*) FROM jsonb_object_keys(v_context))<>12
+       OR NOT (v_context ?& v_context_keys) THEN
+        RAISE EXCEPTION 'unexpected snapshot envelope keys' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF jsonb_typeof(v_payload->'version') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(v_context->'version') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(v_context->'dropped') IS DISTINCT FROM 'number'
+       OR jsonb_typeof(v_context->'source_observations') IS DISTINCT FROM 'number' THEN
+        RAISE EXCEPTION 'snapshot counters must be JSON numbers' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF scale((v_payload->'version')::numeric)<>0 OR scale((v_context->'version')::numeric)<>0
+       OR scale((v_context->'dropped')::numeric)<>0
+       OR scale((v_context->'source_observations')::numeric)<>0 THEN
+        RAISE EXCEPTION 'snapshot counters must be integers' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF v_payload->'version' IS DISTINCT FROM '1'::jsonb
+       OR v_context->'version' IS DISTINCT FROM '1'::jsonb
+       OR v_payload->'domain' IS DISTINCT FROM '"airport-prepared-typed-v1"'::jsonb
+       OR v_context->'domain' IS DISTINCT FROM '"airport-snapshot-observation-v1"'::jsonb
+       OR v_context->'upstream_eof' IS DISTINCT FROM 'true'::jsonb
+       OR v_context->'validation_mode' IS DISTINCT FROM '"strict"'::jsonb
+       OR v_context->'dropped' IS DISTINCT FROM '0'::jsonb
+       OR v_payload->'native_input_digest' IS DISTINCT FROM to_jsonb(p_native_digest)
+       OR v_context->'artifact_sha256' IS DISTINCT FROM
+            to_jsonb(encode(x_extension.digest(p_payload,'sha256'),'hex'))
+       OR v_context->'root_run_id' IS DISTINCT FROM to_jsonb(v_run)
+       OR v_context->'pins' IS DISTINCT FROM v_payload->'pins' THEN
+        RAISE EXCEPTION 'snapshot domain or observation binding mismatch' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF jsonb_typeof(v_payload->'pins') IS DISTINCT FROM 'object'
+       OR jsonb_typeof(v_payload->'bundles') IS DISTINCT FROM 'array'
+       OR jsonb_typeof(v_context->'validation') IS DISTINCT FROM 'object'
+       OR jsonb_typeof(v_context->'geo_stats') NOT IN ('object','null')
+       OR jsonb_typeof(v_context->'observation_generation') IS DISTINCT FROM 'string' THEN
+        RAISE EXCEPTION 'unsupported snapshot envelope shape' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF (SELECT count(*) FROM jsonb_object_keys(v_payload->'pins'))<>9
+       OR NOT ((v_payload->'pins') ?& v_pin_keys)
+       OR jsonb_array_length(v_payload->'bundles')<>2
+       OR v_payload->'bundles'->0 IS DISTINCT FROM '"tuple"'::jsonb THEN
+        RAISE EXCEPTION 'unsupported snapshot pins or bundle tag' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    FOREACH v_key IN ARRAY v_pin_keys LOOP
+        v_pin:=v_payload->'pins'->v_key;
+        IF jsonb_typeof(v_pin) IS DISTINCT FROM 'string' OR pg_column_size(v_pin)>1024 THEN
+            RAISE EXCEPTION 'unsupported snapshot pin' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        IF length(v_pin#>>'{}') NOT BETWEEN 1 AND 128 OR (v_pin#>>'{}')<>btrim(v_pin#>>'{}') THEN
+            RAISE EXCEPTION 'noncanonical snapshot pin' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+    END LOOP;
+    IF v_payload->'pins'->>'code_revision' !~ '^[0-9a-f]{40}$'
+       OR v_payload->'pins'->>'sdk_inventory_sha256' !~ '^[0-9a-f]{64}$'
+       OR v_payload->'pins'->>'provider'<>v_dataset.provider
+       OR v_payload->'pins'->>'dataset_key'<>v_dataset.dataset_key
+       OR v_payload->'pins'->>'source_entity_type'<>'airport'
+       OR v_payload->'pins'->>'native_domain'<>'native-full-refresh-v1' THEN
+        RAISE EXCEPTION 'unsupported snapshot provider pins' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF jsonb_typeof(v_payload->'bundles'->1) IS DISTINCT FROM 'array' THEN
+        RAISE EXCEPTION 'snapshot bundle tuple has no array' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    v_count:=jsonb_array_length(v_payload->'bundles'->1);
+    IF v_count NOT BETWEEN 1 AND 2730 OR v_context->'source_observations' IS DISTINCT FROM to_jsonb(v_count) THEN
+        RAISE EXCEPTION 'snapshot source count mismatch' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    -- text 변환은 작은 context 내부 string에만 한다. 의미 복원은 후속 context codec의 책임이다.
+    IF pg_column_size(v_context->'observation_generation')>1024 THEN
+        RAISE EXCEPTION 'observation generation exceeds its bound' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    v_generation:=v_context->>'observation_generation';
+    IF octet_length(v_generation) NOT BETWEEN 1 AND 160 THEN
+        RAISE EXCEPTION 'invalid observation generation' USING ERRCODE='23514',
+            CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF v_generation<>v_run THEN
+        IF left(v_generation,length(v_run)+8)<>v_run||'::retry:' THEN
+            RAISE EXCEPTION 'observation generation belongs to another run' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        v_suffix:=substr(v_generation,length(v_run)+9);
+        IF v_suffix !~ '^[1-9][0-9]{0,18}$' THEN
+            RAISE EXCEPTION 'invalid observation retry suffix' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        IF v_suffix::numeric>9223372036854775807 THEN
+            RAISE EXCEPTION 'observation retry suffix overflow' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+    END IF;
+
+    -- 동일 member의 중복은 새 quota 접근/lease 갱신/기존 nonce 노출 없이 반환한다.
+    SELECT artifact.snapshot_id,artifact.root_job_id,artifact.source_job_id,
+           artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+           artifact.dagster_run_id,artifact.capture_profile,artifact.native_input_digest,
+           artifact.artifact_payload,artifact.observation_context
+      INTO v_existing FROM ops.provider_snapshot_artifacts artifact
+      WHERE artifact.import_job_dataset_id=p_member;
+    IF FOUND THEN
+        IF v_existing.root_job_id IS DISTINCT FROM p_root OR v_existing.source_job_id IS DISTINCT FROM p_source_job
+           OR v_existing.provider_dataset_id IS DISTINCT FROM v_member.provider_dataset_id
+           OR v_existing.sync_scope IS DISTINCT FROM v_member.sync_scope
+           OR v_existing.operation_key IS DISTINCT FROM v_member.operation_key
+           OR v_existing.dagster_run_id IS DISTINCT FROM v_run
+           OR v_existing.capture_profile IS DISTINCT FROM 'bounded-place-v1'
+           OR v_existing.native_input_digest IS DISTINCT FROM p_native_digest
+           OR v_existing.artifact_payload IS DISTINCT FROM p_payload
+           OR v_existing.observation_context IS DISTINCT FROM p_context THEN
+            RAISE EXCEPTION 'registered member input is immutable' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_immutable_input';
+        END IF;
+        IF NOT EXISTS(SELECT 1 FROM ops.provider_snapshot_controls control WHERE control.snapshot_id=v_existing.snapshot_id) THEN
+            RAISE EXCEPTION 'snapshot control is missing' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_apply_required';
+        END IF;
+        RETURN QUERY SELECT v_existing.snapshot_id,false,NULL::bigint,NULL::uuid;
+        RETURN;
+    END IF;
+    -- 최초 INSERT의 FK도 tuple KEY SHARE를 잡는다. canonical root→child→member를 선취득한다.
+    -- duplicate/claim/renew/apply의 tracking tuple 잠금0과 이 초기 등록 예외를 혼동하지 않는다.
+    PERFORM 1 FROM ops.import_jobs WHERE job_id=p_root FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'snapshot root disappeared' USING ERRCODE='40001'; END IF;
+    PERFORM 1 FROM ops.import_jobs WHERE job_id=p_source_job FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'snapshot child disappeared' USING ERRCODE='40001'; END IF;
+    PERFORM 1 FROM ops.import_job_datasets WHERE import_job_dataset_id=p_member AND job_id=p_source_job FOR KEY SHARE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'snapshot member disappeared' USING ERRCODE='40001'; END IF;
+    v_bytes:=octet_length(p_payload)::bigint+octet_length(p_context)::bigint+8192;
+    FOREACH v_quota IN ARRAY ARRAY[0::bigint,v_member.provider_dataset_id] LOOP
+        SELECT * INTO v_limit FROM ops.provider_snapshot_quota_limits quota
+            WHERE quota.quota_key=v_quota FOR UPDATE;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'snapshot quota is not configured' USING ERRCODE='53000',
+                CONSTRAINT='ck_provider_snapshot_quota_available';
+        END IF;
+        IF v_limit.used_rows>=v_limit.max_rows OR v_bytes>v_limit.max_bytes-v_limit.used_bytes THEN
+            RAISE EXCEPTION 'snapshot quota is exhausted' USING ERRCODE='53000',
+                CONSTRAINT='ck_provider_snapshot_quota_available';
+        END IF;
+    END LOOP;
+    v_snapshot:=x_extension.gen_random_uuid();
+    v_fence:=x_extension.gen_random_uuid();
+    v_now:=clock_timestamp();
+    INSERT INTO ops.provider_snapshot_artifacts(snapshot_id,root_job_id,source_job_id,
+        import_job_dataset_id,provider_dataset_id,sync_scope,operation_key,dagster_run_id,
+        capture_profile,artifact_payload,native_input_digest,observation_context)
+    VALUES(v_snapshot,p_root,p_source_job,p_member,v_member.provider_dataset_id,
+        v_member.sync_scope,v_member.operation_key,v_run,'bounded-place-v1',p_payload,p_native_digest,p_context);
+    INSERT INTO ops.provider_snapshot_controls(snapshot_id,executor_generation,executor_fence,lease_expires_at,status)
+    VALUES(v_snapshot,1,v_fence,v_now+make_interval(secs=>p_lease_seconds),'prepared');
+    INSERT INTO ops.provider_snapshot_quota_reservations(snapshot_id,provider_dataset_id,reserved_bytes)
+        VALUES(v_snapshot,v_member.provider_dataset_id,v_bytes);
+    UPDATE ops.provider_snapshot_quota_limits quota SET used_rows=used_rows+1,used_bytes=used_bytes+v_bytes
+        WHERE quota.quota_key=ANY(ARRAY[0::bigint,v_member.provider_dataset_id]);
+    RETURN QUERY SELECT v_snapshot,true,1::bigint,v_fence;
+END;
+$_$;
+
+
+ALTER FUNCTION ops.register_provider_snapshot_artifact(p_root uuid, p_source_job uuid, p_member uuid, p_payload bytea, p_context bytea, p_native_digest text, p_lease_seconds integer) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: reject_c6c_cancel_probe_event(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -17175,6 +18712,53 @@ $$;
 ALTER FUNCTION ops.reject_live_snapshot_material_item_delete() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: reject_pipeline_cancellation_prefix(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_pipeline_cancellation_prefix() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+  v_need_final boolean:=true;
+  v_protocol_held boolean;
+  v_protocol_exclusive boolean;
+  v_lineage_held boolean;
+BEGIN
+  IF TG_LEVEL<>'STATEMENT' OR TG_TABLE_SCHEMA<>'ops'
+     OR TG_TABLE_NAME NOT IN ('pipeline_cancellations','pipeline_cancellation_members','pipeline_cancellation_runs') THEN
+    RAISE EXCEPTION 'unknown cancellation prefix guard relation'
+      USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_write_prefix';
+  END IF;
+    -- 관측만 한다. tuple 뒤 새 blocking L/P를 요청하지 않는다.
+    SELECT COALESCE(bool_or(mode IN ('ShareLock','ExclusiveLock')),false),
+           COALESCE(bool_or(mode='ExclusiveLock'),false)
+      INTO v_protocol_held,v_protocol_exclusive
+      FROM pg_catalog.pg_locks
+     WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+       AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+       AND classid=1369104691 AND objid=115 AND objsubid=2;
+    SELECT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_locks
+         WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+           AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+           AND classid=1590807301 AND objid=1746797985 AND objsubid=1
+           AND mode='ExclusiveLock'
+    ) INTO v_lineage_held;
+    IF NOT v_lineage_held
+       OR (v_protocol_held AND NOT v_protocol_exclusive)
+       OR (v_need_final AND NOT v_protocol_exclusive) THEN
+        RAISE EXCEPTION 'provider tracking write requires its existing lineage/protocol prefix'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_write_prefix';
+    END IF;
+  RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION ops.reject_pipeline_cancellation_prefix() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: reject_provider_feature_event_raw_dml(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -17183,8 +18767,44 @@ CREATE FUNCTION ops.reject_provider_feature_event_raw_dml() RETURNS trigger
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 DECLARE
+  v_provider boolean;
+  v_need_final boolean;
+  v_protocol_held boolean;
+  v_protocol_exclusive boolean;
+  v_lineage_held boolean;
   v_job_id uuid;
 BEGIN
+  v_job_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.job_id ELSE NEW.job_id END;
+  SELECT EXISTS (SELECT 1 FROM ops.import_jobs job WHERE job.job_id=v_job_id
+    AND job.kind IN ('provider_feature_load_run','provider_feature_load')) INTO v_provider;
+  IF TG_OP='UPDATE' THEN
+    v_provider := v_provider OR EXISTS (SELECT 1 FROM ops.import_jobs job
+      WHERE job.job_id=OLD.job_id AND job.kind IN ('provider_feature_load_run','provider_feature_load'));
+  END IF;
+  v_need_final := TG_OP<>'INSERT';
+  IF v_provider THEN
+    -- 관측만 한다. tuple 뒤 새 blocking L/P를 요청하지 않는다.
+    SELECT COALESCE(bool_or(mode IN ('ShareLock','ExclusiveLock')),false),
+           COALESCE(bool_or(mode='ExclusiveLock'),false)
+      INTO v_protocol_held,v_protocol_exclusive
+      FROM pg_catalog.pg_locks
+     WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+       AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+       AND classid=1369104691 AND objid=115 AND objsubid=2;
+    SELECT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_locks
+         WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+           AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+           AND classid=1590807301 AND objid=1746797985 AND objsubid=1
+           AND mode='ExclusiveLock'
+    ) INTO v_lineage_held;
+    IF NOT v_lineage_held
+       OR (v_protocol_held AND NOT v_protocol_exclusive)
+       OR (v_need_final AND NOT v_protocol_exclusive) THEN
+        RAISE EXCEPTION 'provider tracking write requires its existing lineage/protocol prefix'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_write_prefix';
+    END IF;
+  END IF;
   IF current_user = 'ktm_curation_command_owner'
      OR EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -17193,11 +18813,8 @@ BEGIN
     RETURN CASE WHEN TG_OP = 'DELETE' THEN OLD ELSE NEW END;
   END IF;
   v_job_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.job_id ELSE NEW.job_id END;
-  IF EXISTS (
-    SELECT 1 FROM ops.import_jobs AS job
-    WHERE job.job_id = v_job_id
-      AND job.kind IN ('provider_feature_load_run','provider_feature_load')
-  ) THEN
+  -- OLD가 provider인 event를 generic job으로 옮겨 typed 경계를 피하지 못한다.
+  IF v_provider THEN
     RAISE EXCEPTION 'provider feature events require a typed command'
       USING ERRCODE = '42501', CONSTRAINT = 'ck_tvn40_provider_event_typed_command';
   END IF;
@@ -17217,8 +18834,44 @@ CREATE FUNCTION ops.reject_provider_feature_membership_raw_dml() RETURNS trigger
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 DECLARE
+  v_provider boolean;
+  v_need_final boolean;
+  v_protocol_held boolean;
+  v_protocol_exclusive boolean;
+  v_lineage_held boolean;
   v_job_id uuid;
 BEGIN
+  v_job_id := CASE WHEN TG_OP = 'DELETE' THEN OLD.job_id ELSE NEW.job_id END;
+  SELECT EXISTS (SELECT 1 FROM ops.import_jobs job WHERE job.job_id=v_job_id
+    AND job.kind IN ('provider_feature_load_run','provider_feature_load')) INTO v_provider;
+  IF TG_OP='UPDATE' THEN
+    v_provider := v_provider OR EXISTS (SELECT 1 FROM ops.import_jobs job
+      WHERE job.job_id=OLD.job_id AND job.kind IN ('provider_feature_load_run','provider_feature_load'));
+  END IF;
+  v_need_final := TG_OP<>'INSERT';
+  IF v_provider THEN
+    -- 관측만 한다. tuple 뒤 새 blocking L/P를 요청하지 않는다.
+    SELECT COALESCE(bool_or(mode IN ('ShareLock','ExclusiveLock')),false),
+           COALESCE(bool_or(mode='ExclusiveLock'),false)
+      INTO v_protocol_held,v_protocol_exclusive
+      FROM pg_catalog.pg_locks
+     WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+       AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+       AND classid=1369104691 AND objid=115 AND objsubid=2;
+    SELECT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_locks
+         WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+           AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+           AND classid=1590807301 AND objid=1746797985 AND objsubid=1
+           AND mode='ExclusiveLock'
+    ) INTO v_lineage_held;
+    IF NOT v_lineage_held
+       OR (v_protocol_held AND NOT v_protocol_exclusive)
+       OR (v_need_final AND NOT v_protocol_exclusive) THEN
+        RAISE EXCEPTION 'provider tracking write requires its existing lineage/protocol prefix'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_write_prefix';
+    END IF;
+  END IF;
   IF current_user = 'ktm_curation_command_owner'
      OR EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -17255,8 +18908,48 @@ CREATE FUNCTION ops.reject_provider_feature_operation_raw_dml() RETURNS trigger
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 DECLARE
+  v_provider boolean;
+  v_need_final boolean;
+  v_protocol_held boolean;
+  v_protocol_exclusive boolean;
+  v_lineage_held boolean;
   v_kind text;
 BEGIN
+  v_kind := CASE WHEN TG_OP = 'DELETE' THEN OLD.kind ELSE NEW.kind END;
+  v_provider := v_kind IN ('provider_feature_load_run','provider_feature_load');
+  IF TG_OP='UPDATE' THEN
+    v_provider := v_provider OR OLD.kind IN ('provider_feature_load_run','provider_feature_load');
+  END IF;
+  v_need_final := TG_OP='DELETE';
+  IF TG_OP<>'DELETE' THEN
+    v_need_final := v_need_final OR NEW.status IN ('done','failed','cancelled');
+  END IF;
+  IF TG_OP<>'INSERT' THEN
+    v_need_final := v_need_final OR OLD.status IN ('done','failed','cancelled');
+  END IF;
+  IF v_provider THEN
+    -- 관측만 한다. tuple 뒤 새 blocking L/P를 요청하지 않는다.
+    SELECT COALESCE(bool_or(mode IN ('ShareLock','ExclusiveLock')),false),
+           COALESCE(bool_or(mode='ExclusiveLock'),false)
+      INTO v_protocol_held,v_protocol_exclusive
+      FROM pg_catalog.pg_locks
+     WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+       AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+       AND classid=1369104691 AND objid=115 AND objsubid=2;
+    SELECT EXISTS (
+        SELECT 1 FROM pg_catalog.pg_locks
+         WHERE pid=pg_backend_pid() AND locktype='advisory' AND granted
+           AND database=(SELECT oid FROM pg_catalog.pg_database WHERE datname=current_database())
+           AND classid=1590807301 AND objid=1746797985 AND objsubid=1
+           AND mode='ExclusiveLock'
+    ) INTO v_lineage_held;
+    IF NOT v_lineage_held
+       OR (v_protocol_held AND NOT v_protocol_exclusive)
+       OR (v_need_final AND NOT v_protocol_exclusive) THEN
+        RAISE EXCEPTION 'provider tracking write requires its existing lineage/protocol prefix'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_tracking_write_prefix';
+    END IF;
+  END IF;
   IF current_user = 'ktm_curation_command_owner'
      OR EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -17300,6 +18993,23 @@ $$;
 
 
 ALTER FUNCTION ops.reject_provider_feature_operation_raw_dml() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: reject_provider_snapshot_artifact_update(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.reject_provider_snapshot_artifact_update() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    RAISE EXCEPTION 'registered snapshot input is immutable'
+        USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_immutable_input';
+END;
+$$;
+
+
+ALTER FUNCTION ops.reject_provider_snapshot_artifact_update() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: reject_quarantined_cancellation_member(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -17578,6 +19288,93 @@ CREATE FUNCTION ops.reject_terminal_current_summary_run_mutation() RETURNS trigg
 ALTER FUNCTION ops.reject_terminal_current_summary_run_mutation() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: reset_expired_provider_snapshot_plan(uuid, bigint, uuid, uuid, uuid, text); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_dataset bigint;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot reset requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_snapshot IS NULL OR p_generation IS NULL OR p_generation<1 OR p_fence IS NULL
+       OR p_expected_attempt IS NULL OR p_expected_owner IS NULL
+       OR p_expected_manifest IS NULL OR p_expected_manifest !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'exact expired snapshot plan required' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot reset requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM ops.lock_scoped_feature_write_protocol(false);
+    SELECT artifact.provider_dataset_id INTO STRICT v_dataset
+      FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot;
+    -- 외부 dataset의 attempt 행을 잠근 뒤 participant를 늦게 추가하지 않는다.
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=p_expected_attempt;
+    IF NOT FOUND OR v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'snapshot reset attempt domain changed'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    -- 430B helper: P SH→actual parent SHARE→own whole scope UPDATE.
+    PERFORM ops._lock_scoped_feature_write_scope(v_dataset,'[]'::jsonb,false);
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=p_expected_attempt FOR UPDATE;
+    IF v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false
+       OR v_attempt.owner IS DISTINCT FROM p_expected_owner
+       OR v_attempt.manifest_digest IS DISTINCT FROM p_expected_manifest THEN
+        RAISE EXCEPTION 'snapshot reset attempt changed' USING ERRCODE='40001';
+    END IF;
+    -- 반드시 old attempt 다음 control이다. helper는 P/parent/scope 재진입 및
+    -- 현재 executor·member 활동성 검증을 담당하며 root/member/quota 행을 잠그지 않는다.
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF v_control.status IS DISTINCT FROM 'prepared' THEN
+        RAISE EXCEPTION 'completed snapshot result cannot be replanned'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    IF v_control.attempt_id IS NULL THEN
+        -- 응답 유실일 수 있지만 임의의 옛 cancelled attempt로 성공을 증명하지 않는다.
+        -- 변경0. caller가 SDK0 read로 상태를 읽은 뒤 새 계획을 결정한다.
+        RETURN 'needs_read';
+    END IF;
+    IF v_control.attempt_id IS DISTINCT FROM p_expected_attempt
+       OR v_control.attempt_owner IS DISTINCT FROM p_expected_owner
+       OR v_control.manifest_digest IS DISTINCT FROM p_expected_manifest THEN
+        RAISE EXCEPTION 'snapshot reset binding changed' USING ERRCODE='40001';
+    END IF;
+    IF v_attempt.status NOT IN ('ready','cancelled') THEN
+        RAISE EXCEPTION 'snapshot reset requires an unapplied sealed plan'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    IF v_attempt.status='ready' AND v_attempt.lease_until>clock_timestamp() THEN
+        RAISE EXCEPTION 'snapshot kernel plan lease is still active' USING ERRCODE='55P03';
+    END IF;
+    -- 만료 _locked_attempt를 우회해 권위를 연장하지 않는다. 기존 cancel은 owner를
+    -- 확인하고 scope owner가 해당 attempt일 때만 지운다. 다른 epoch 소유자는 보존된다.
+    IF NOT ops.cancel_scoped_feature_write(p_expected_attempt,p_expected_owner) THEN
+        RAISE EXCEPTION 'snapshot kernel plan was not cancelled' USING ERRCODE='40001';
+    END IF;
+    UPDATE ops.provider_snapshot_controls
+      SET attempt_id=NULL,attempt_owner=NULL,manifest_digest=NULL,updated_at=clock_timestamp()
+      WHERE snapshot_id=p_snapshot;
+    RETURN 'reset';
+END;
+$_$;
+
+
+ALTER FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: scoped_feature_write_membership_digest(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -17600,6 +19397,148 @@ $$;
 
 
 ALTER FUNCTION ops.scoped_feature_write_membership_digest(p_feature uuid) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: seal_provider_snapshot_member(uuid, text, text, bigint, uuid, text, text); Type: PROCEDURE; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE PROCEDURE ops.seal_provider_snapshot_member(IN p_snapshot uuid, IN p_artifact_sha text, IN p_context_sha text, IN p_generation bigint, IN p_fence uuid, IN p_result_sha text, IN p_postprocess_sha text, OUT o_observed_at timestamp with time zone, OUT o_replayed boolean)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_artifact record;
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_root ops.import_jobs%ROWTYPE;
+    v_child ops.import_jobs%ROWTYPE;
+    v_member ops.import_job_datasets%ROWTYPE;
+    v_result jsonb;
+    v_count bigint;
+    v_hash text;
+    v_source uuid;
+    v_entities bigint;
+    v_source_hash text;
+    v_changed boolean;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot seal requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_snapshot IS NULL OR p_generation IS NULL OR p_generation<1 OR p_fence IS NULL
+       OR p_artifact_sha IS NULL OR p_artifact_sha !~ '^[0-9a-f]{64}$'
+       OR p_context_sha IS NULL OR p_context_sha !~ '^[0-9a-f]{64}$'
+       OR p_result_sha IS NULL OR p_result_sha !~ '^[0-9a-f]{64}$'
+       OR p_postprocess_sha IS NULL OR p_postprocess_sha !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'exact snapshot seal binding required' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot seal requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    -- P EX→L→root→child→member→control. apply/lease 쪽의 P SH와 교차하지 않는다.
+    PERFORM ops.lock_provider_feature_tracking_protocol(true);
+    SELECT artifact.root_job_id,artifact.source_job_id,artifact.import_job_dataset_id,
+           artifact.provider_dataset_id,artifact.sync_scope,artifact.operation_key,
+           artifact.dagster_run_id,artifact.capture_profile,artifact.artifact_sha256,artifact.context_sha256
+      INTO STRICT v_artifact FROM ops.provider_snapshot_artifacts artifact
+      WHERE artifact.snapshot_id=p_snapshot;
+    IF v_artifact.capture_profile IS DISTINCT FROM 'bounded-place-v1'
+       OR v_artifact.artifact_sha256 IS DISTINCT FROM p_artifact_sha
+       OR v_artifact.context_sha256 IS DISTINCT FROM p_context_sha THEN
+        RAISE EXCEPTION 'snapshot seal input binding changed'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    SELECT * INTO STRICT v_root FROM ops.import_jobs job
+      WHERE job.job_id=v_artifact.root_job_id FOR UPDATE;
+    SELECT * INTO STRICT v_child FROM ops.import_jobs job
+      WHERE job.job_id=v_artifact.source_job_id FOR UPDATE;
+    SELECT * INTO STRICT v_member FROM ops.import_job_datasets member
+      WHERE member.import_job_dataset_id=v_artifact.import_job_dataset_id FOR UPDATE;
+    IF v_root.kind IS DISTINCT FROM 'provider_feature_load_run'
+       OR v_root.dagster_run_id IS DISTINCT FROM v_artifact.dagster_run_id
+       OR v_child.parent_job_id IS DISTINCT FROM v_root.job_id
+       OR v_child.kind IS DISTINCT FROM 'provider_feature_load'
+       OR v_child.dagster_run_id IS DISTINCT FROM v_root.dagster_run_id
+       OR v_child.dataset_membership_mode IS DISTINCT FROM 'single'
+       OR v_member.job_id IS DISTINCT FROM v_child.job_id
+       OR v_member.provider_dataset_id IS DISTINCT FROM v_artifact.provider_dataset_id
+       OR v_member.sync_scope IS DISTINCT FROM v_artifact.sync_scope
+       OR v_member.operation_key IS DISTINCT FROM v_artifact.operation_key
+       OR v_root.cancellation_id IS NOT NULL OR v_child.cancellation_id IS NOT NULL
+       OR v_root.quarantined_at IS NOT NULL OR v_child.quarantined_at IS NOT NULL
+       OR (SELECT count(*) FROM ops.import_job_datasets member WHERE member.job_id=v_child.job_id)<>1 THEN
+        RAISE EXCEPTION 'snapshot seal canonical member changed'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    SELECT * INTO STRICT v_control FROM ops.provider_snapshot_controls control
+      WHERE control.snapshot_id=p_snapshot FOR UPDATE;
+    IF v_control.executor_generation IS DISTINCT FROM p_generation
+       OR v_control.executor_fence IS DISTINCT FROM p_fence THEN
+        RAISE EXCEPTION 'snapshot seal executor fence is stale' USING ERRCODE='40001';
+    END IF;
+    IF v_control.result_sha256 IS DISTINCT FROM p_result_sha
+       OR encode(x_extension.digest(v_control.postprocess_receipt,'sha256'),'hex') IS DISTINCT FROM p_postprocess_sha THEN
+        RAISE EXCEPTION 'snapshot seal durable receipt changed'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    v_result:=convert_from(v_control.applied_result,'UTF8')::jsonb;
+    v_count:=(v_result->'load'->>'curation_input_member_count')::bigint;
+    v_hash:=v_result->'load'->>'curation_input_set_hash';
+    IF v_result->>'domain' IS DISTINCT FROM 'provider-full-snapshot-apply-result-v1'
+       OR v_result->>'version' IS DISTINCT FROM '1'
+       OR v_count IS NULL OR v_count<0 OR v_hash IS NULL OR v_hash !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'snapshot original input capture is invalid'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    IF v_control.status='child_sealed' THEN
+        -- 미확정 commit 재확인은 원 receipt와 done 상태가 모두 일치할 때만 성공이다.
+        IF v_child.status<>'done' OR v_root.status NOT IN ('running','done')
+           OR coalesce(v_root.dagster_run_status,'') NOT IN ('STARTED','SUCCESS')
+           OR (v_child.payload->>'authoritative_snapshot_complete') IS DISTINCT FROM 'true' THEN
+            RAISE EXCEPTION 'snapshot sealed member is not a successful member'
+                USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+        END IF;
+        SELECT receipt.observed_at INTO STRICT o_observed_at
+          FROM ops.curation_provider_snapshot_receipts receipt
+          WHERE receipt.source_job_id=v_child.job_id AND receipt.root_job_id=v_root.job_id
+            AND receipt.provider_dataset_id=v_artifact.provider_dataset_id
+            AND receipt.sync_scope=v_artifact.sync_scope AND receipt.operation_key=v_artifact.operation_key
+            AND receipt.input_member_count=v_count AND receipt.source_input_set_hash=v_hash;
+        IF o_observed_at IS DISTINCT FROM v_control.child_sealed_at THEN
+            RAISE EXCEPTION 'snapshot child seal timestamp changed'
+                USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+        END IF;
+        o_replayed:=true;
+        RETURN;
+    END IF;
+    IF v_control.status<>'postprocessed' OR v_control.lease_expires_at<=clock_timestamp()
+       OR v_root.status<>'running' OR v_root.dagster_run_status IS DISTINCT FROM 'STARTED'
+       OR v_child.status NOT IN ('queued','running') THEN
+        RAISE EXCEPTION 'snapshot seal requires live executor and complete postprocess'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    UPDATE ops.provider_snapshot_controls SET seal_txid=txid_current()
+      WHERE snapshot_id=p_snapshot;
+    CALL feature.seal_provider_curation_snapshot_receipt(
+        v_root.job_id,v_artifact.provider_dataset_id,v_artifact.sync_scope,v_artifact.operation_key,
+        v_count,v_hash,v_source,o_observed_at,v_entities,v_source_hash);
+    IF v_source IS DISTINCT FROM v_child.job_id OR v_source_hash IS DISTINCT FROM v_hash THEN
+        RAISE EXCEPTION 'snapshot seal returned a different member'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    CALL ops.finish_provider_feature_membership_command(
+        v_root.job_id,v_artifact.provider_dataset_id,v_artifact.sync_scope,v_artifact.operation_key,
+        true,o_observed_at,v_changed);
+    IF v_changed IS DISTINCT FROM true THEN
+        RAISE EXCEPTION 'snapshot child did not transition to done'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    UPDATE ops.provider_snapshot_controls SET status='child_sealed',seal_txid=NULL,
+        child_sealed_at=o_observed_at,updated_at=clock_timestamp() WHERE snapshot_id=p_snapshot;
+    o_replayed:=false;
+END;
+$_$;
+
+
+ALTER PROCEDURE ops.seal_provider_snapshot_member(IN p_snapshot uuid, IN p_artifact_sha text, IN p_context_sha text, IN p_generation bigint, IN p_fence uuid, IN p_result_sha text, IN p_postprocess_sha text, OUT o_observed_at timestamp with time zone, OUT o_replayed boolean) OWNER TO ktm_curation_command_owner;
 
 --
 -- Name: seal_scoped_feature_write_manifest(uuid, uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
@@ -20656,7 +22595,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -22806,6 +24745,72 @@ CREATE TABLE ops.provider_refresh_policies (
 ALTER TABLE ops.provider_refresh_policies OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: provider_snapshot_artifacts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.provider_snapshot_artifacts (
+    snapshot_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    root_job_id uuid NOT NULL,
+    source_job_id uuid NOT NULL,
+    import_job_dataset_id uuid NOT NULL,
+    provider_dataset_id bigint NOT NULL,
+    sync_scope text NOT NULL,
+    operation_key text NOT NULL,
+    dagster_run_id text NOT NULL,
+    capture_profile text NOT NULL,
+    artifact_payload bytea NOT NULL,
+    artifact_sha256 text GENERATED ALWAYS AS (encode(x_extension.digest(artifact_payload, 'sha256'::text), 'hex'::text)) STORED,
+    native_input_digest text NOT NULL,
+    observation_context bytea NOT NULL,
+    context_sha256 text GENERATED ALWAYS AS (encode(x_extension.digest(observation_context, 'sha256'::text), 'hex'::text)) STORED,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT provider_snapshot_artifacts_artifact_payload_check CHECK (((octet_length(artifact_payload) >= 1) AND (octet_length(artifact_payload) <= 1048576))),
+    CONSTRAINT provider_snapshot_artifacts_capture_profile_check CHECK ((capture_profile = 'bounded-place-v1'::text)),
+    CONSTRAINT provider_snapshot_artifacts_dagster_run_id_check CHECK ((((octet_length(dagster_run_id) >= 1) AND (octet_length(dagster_run_id) <= 128)) AND (dagster_run_id = btrim(dagster_run_id)))),
+    CONSTRAINT provider_snapshot_artifacts_native_input_digest_check CHECK ((native_input_digest ~ '^[0-9a-f]{64}$'::text)),
+    CONSTRAINT provider_snapshot_artifacts_observation_context_check CHECK (((octet_length(observation_context) >= 1) AND (octet_length(observation_context) <= 8192))),
+    CONSTRAINT provider_snapshot_artifacts_operation_key_check CHECK ((((octet_length(operation_key) >= 1) AND (octet_length(operation_key) <= 256)) AND (operation_key = btrim(operation_key)))),
+    CONSTRAINT provider_snapshot_artifacts_sync_scope_check CHECK ((((octet_length(sync_scope) >= 1) AND (octet_length(sync_scope) <= 128)) AND (sync_scope = btrim(sync_scope))))
+);
+
+
+ALTER TABLE ops.provider_snapshot_artifacts OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: provider_snapshot_quota_limits; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.provider_snapshot_quota_limits (
+    quota_key bigint NOT NULL,
+    max_bytes bigint NOT NULL,
+    max_rows bigint NOT NULL,
+    used_bytes bigint DEFAULT 0 NOT NULL,
+    used_rows bigint DEFAULT 0 NOT NULL,
+    CONSTRAINT provider_snapshot_quota_limits_check CHECK (((used_bytes >= 0) AND (used_bytes <= max_bytes))),
+    CONSTRAINT provider_snapshot_quota_limits_check1 CHECK (((used_rows >= 0) AND (used_rows <= max_rows))),
+    CONSTRAINT provider_snapshot_quota_limits_max_bytes_check CHECK ((max_bytes > 0)),
+    CONSTRAINT provider_snapshot_quota_limits_max_rows_check CHECK ((max_rows > 0)),
+    CONSTRAINT provider_snapshot_quota_limits_quota_key_check CHECK ((quota_key >= 0))
+);
+
+
+ALTER TABLE ops.provider_snapshot_quota_limits OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: provider_snapshot_quota_reservations; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.provider_snapshot_quota_reservations (
+    snapshot_id uuid NOT NULL,
+    provider_dataset_id bigint NOT NULL,
+    reserved_bytes bigint NOT NULL,
+    CONSTRAINT provider_snapshot_quota_reservations_reserved_bytes_check CHECK (((reserved_bytes >= 8194) AND (reserved_bytes <= 1064960)))
+);
+
+
+ALTER TABLE ops.provider_snapshot_quota_reservations OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: public_api_keys; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -24281,6 +26286,54 @@ ALTER TABLE ONLY ops.poi_cache_targets
 
 ALTER TABLE ONLY ops.provider_refresh_policies
     ADD CONSTRAINT pk_provider_refresh_policies PRIMARY KEY (provider_dataset_id);
+
+
+--
+-- Name: provider_snapshot_artifacts provider_snapshot_artifacts_import_job_dataset_id_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_artifacts
+    ADD CONSTRAINT provider_snapshot_artifacts_import_job_dataset_id_key UNIQUE (import_job_dataset_id);
+
+
+--
+-- Name: provider_snapshot_artifacts provider_snapshot_artifacts_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_artifacts
+    ADD CONSTRAINT provider_snapshot_artifacts_pkey PRIMARY KEY (snapshot_id);
+
+
+--
+-- Name: provider_snapshot_controls provider_snapshot_controls_attempt_id_key; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_controls
+    ADD CONSTRAINT provider_snapshot_controls_attempt_id_key UNIQUE (attempt_id);
+
+
+--
+-- Name: provider_snapshot_controls provider_snapshot_controls_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_controls
+    ADD CONSTRAINT provider_snapshot_controls_pkey PRIMARY KEY (snapshot_id);
+
+
+--
+-- Name: provider_snapshot_quota_limits provider_snapshot_quota_limits_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_quota_limits
+    ADD CONSTRAINT provider_snapshot_quota_limits_pkey PRIMARY KEY (quota_key);
+
+
+--
+-- Name: provider_snapshot_quota_reservations provider_snapshot_quota_reservations_pkey; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_quota_reservations
+    ADD CONSTRAINT provider_snapshot_quota_reservations_pkey PRIMARY KEY (snapshot_id);
 
 
 --
@@ -26559,6 +28612,27 @@ CREATE CONSTRAINT TRIGGER ck_import_jobs_feature_operation_parent AFTER INSERT O
 
 
 --
+-- Name: pipeline_cancellation_members trg_00_provider_tracking_protocol; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_00_provider_tracking_protocol BEFORE INSERT OR DELETE OR UPDATE ON ops.pipeline_cancellation_members FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_pipeline_cancellation_prefix();
+
+
+--
+-- Name: pipeline_cancellation_runs trg_00_provider_tracking_protocol; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_00_provider_tracking_protocol BEFORE INSERT OR DELETE OR UPDATE ON ops.pipeline_cancellation_runs FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_pipeline_cancellation_prefix();
+
+
+--
+-- Name: pipeline_cancellations trg_00_provider_tracking_protocol; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_00_provider_tracking_protocol BEFORE INSERT OR DELETE OR UPDATE ON ops.pipeline_cancellations FOR EACH STATEMENT EXECUTE FUNCTION ops.reject_pipeline_cancellation_prefix();
+
+
+--
 -- Name: application_schema_operation_receipts trg_application_schema_operation_receipts_immutable; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -27439,6 +29513,13 @@ CREATE TRIGGER trg_provider_refresh_policies_active_dataset_write BEFORE INSERT 
 --
 
 CREATE TRIGGER trg_provider_refresh_policies_ops_live_revision AFTER INSERT OR DELETE OR UPDATE OR TRUNCATE ON ops.provider_refresh_policies FOR EACH STATEMENT EXECUTE FUNCTION ops.bump_ops_live_topic_revision('provider_sync');
+
+
+--
+-- Name: provider_snapshot_artifacts trg_provider_snapshot_immutable_input; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_provider_snapshot_immutable_input BEFORE UPDATE ON ops.provider_snapshot_artifacts FOR EACH ROW EXECUTE FUNCTION ops.reject_provider_snapshot_artifact_update();
 
 
 --
@@ -29273,11 +31354,67 @@ ALTER TABLE ONLY ops.provider_refresh_policies
 
 
 --
+-- Name: provider_snapshot_artifacts fk_provider_snapshot_artifact_member; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_artifacts
+    ADD CONSTRAINT fk_provider_snapshot_artifact_member FOREIGN KEY (source_job_id, import_job_dataset_id) REFERENCES ops.import_job_datasets(job_id, import_job_dataset_id);
+
+
+--
 -- Name: import_job_events import_job_events_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY ops.import_job_events
     ADD CONSTRAINT import_job_events_job_id_fkey FOREIGN KEY (job_id) REFERENCES ops.import_jobs(job_id) ON DELETE CASCADE;
+
+
+--
+-- Name: provider_snapshot_artifacts provider_snapshot_artifacts_provider_dataset_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_artifacts
+    ADD CONSTRAINT provider_snapshot_artifacts_provider_dataset_id_fkey FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
+
+
+--
+-- Name: provider_snapshot_artifacts provider_snapshot_artifacts_root_job_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_artifacts
+    ADD CONSTRAINT provider_snapshot_artifacts_root_job_id_fkey FOREIGN KEY (root_job_id) REFERENCES ops.import_jobs(job_id);
+
+
+--
+-- Name: provider_snapshot_controls provider_snapshot_controls_attempt_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_controls
+    ADD CONSTRAINT provider_snapshot_controls_attempt_id_fkey FOREIGN KEY (attempt_id) REFERENCES ops.feature_write_attempts(attempt_id);
+
+
+--
+-- Name: provider_snapshot_controls provider_snapshot_controls_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_controls
+    ADD CONSTRAINT provider_snapshot_controls_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES ops.provider_snapshot_artifacts(snapshot_id);
+
+
+--
+-- Name: provider_snapshot_quota_reservations provider_snapshot_quota_reservations_provider_dataset_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_quota_reservations
+    ADD CONSTRAINT provider_snapshot_quota_reservations_provider_dataset_id_fkey FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id);
+
+
+--
+-- Name: provider_snapshot_quota_reservations provider_snapshot_quota_reservations_snapshot_id_fkey; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.provider_snapshot_quota_reservations
+    ADD CONSTRAINT provider_snapshot_quota_reservations_snapshot_id_fkey FOREIGN KEY (snapshot_id) REFERENCES ops.provider_snapshot_artifacts(snapshot_id);
 
 
 --
@@ -29430,6 +31567,15 @@ REVOKE ALL ON FUNCTION feature._assert_stamp_projection_guard_inventory(p_bounda
 
 
 --
+-- Name: FUNCTION _assert_strict_sh_data_guard_inventory(p_require_all boolean); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature._assert_strict_sh_data_guard_inventory(p_require_all boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._assert_strict_sh_data_guard_inventory(p_require_all boolean) TO ktm_curation_command_owner;
+GRANT ALL ON FUNCTION feature._assert_strict_sh_data_guard_inventory(p_require_all boolean) TO ktm_feature_service;
+
+
+--
 -- Name: FUNCTION _bounded_curation_string_object(p_value jsonb); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -29500,6 +31646,15 @@ GRANT ALL ON FUNCTION feature._install_provider_field_projection_guards() TO ktm
 --
 
 REVOKE ALL ON FUNCTION feature._install_strict_sh_data_guards() FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._install_strict_sh_data_guards() TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: FUNCTION _member_provider_curation_input_set(p_root uuid, p_dataset bigint, p_scope text, p_operation text, p_stage text); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature._member_provider_curation_input_set(p_root uuid, p_dataset bigint, p_scope text, p_operation text, p_stage text) FROM PUBLIC;
+GRANT ALL ON FUNCTION feature._member_provider_curation_input_set(p_root uuid, p_dataset bigint, p_scope text, p_operation text, p_stage text) TO ktm_curation_command_owner;
 
 
 --
@@ -30403,6 +32558,7 @@ REVOKE ALL ON FUNCTION feature.validate_theme_candidate_merge_target() FROM PUBL
 --
 
 REVOKE ALL ON FUNCTION ops._arm_scoped_feature_write_deadline() FROM PUBLIC;
+GRANT ALL ON FUNCTION ops._arm_scoped_feature_write_deadline() TO ktm_curation_command_owner;
 
 
 --
@@ -30413,10 +32569,25 @@ REVOKE ALL ON FUNCTION ops._guard_scoped_feature_write_completion() FROM PUBLIC;
 
 
 --
+-- Name: TABLE provider_snapshot_controls; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.provider_snapshot_controls TO ktm_curation_command_owner;
+
+
+--
+-- Name: FUNCTION _lock_provider_snapshot_executor(p_snapshot uuid, p_generation bigint, p_fence uuid); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops._lock_provider_snapshot_executor(p_snapshot uuid, p_generation bigint, p_fence uuid) FROM PUBLIC;
+
+
+--
 -- Name: FUNCTION _lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
 REVOKE ALL ON FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) TO ktm_curation_command_owner;
 
 
 --
@@ -30424,6 +32595,14 @@ REVOKE ALL ON FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_attempts TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE ops.feature_write_attempts TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN feature_write_attempts.attempt_id; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(attempt_id) ON TABLE ops.feature_write_attempts TO ktm_curation_command_owner;
 
 
 --
@@ -30431,6 +32610,13 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_attempts TO ktm_fea
 --
 
 REVOKE ALL ON FUNCTION ops._locked_scoped_feature_write_attempt(p_attempt uuid, p_owner uuid) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION _provider_snapshot_postprocess_receipt(p_snapshot uuid, p_receipt bytea); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops._provider_snapshot_postprocess_receipt(p_snapshot uuid, p_receipt bytea) FROM PUBLIC;
 
 
 --
@@ -30450,11 +32636,36 @@ GRANT ALL ON FUNCTION ops.append_scoped_feature_write_manifest(p_attempt uuid, p
 
 
 --
+-- Name: FUNCTION begin_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_artifact_sha text); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.begin_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_artifact_sha text) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.begin_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_artifact_sha text) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION begin_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.begin_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.begin_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) TO ktm_curation_provider_executor;
+
+
+--
 -- Name: FUNCTION begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
 REVOKE ALL ON FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) TO ktm_feature_runtime;
+GRANT ALL ON FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uuid, p_manifest_digest text) TO ktm_curation_command_owner;
+
+
+--
+-- Name: FUNCTION bind_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_kernel_input text); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.bind_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_kernel_input text) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.bind_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_attempt uuid, p_owner uuid, p_manifest text, p_kernel_input text) TO ktm_curation_provider_executor;
 
 
 --
@@ -30463,6 +32674,23 @@ GRANT ALL ON FUNCTION ops.begin_scoped_feature_write(p_attempt uuid, p_owner uui
 
 REVOKE ALL ON FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) TO ktm_feature_runtime;
+GRANT ALL ON FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uuid) TO ktm_curation_command_owner;
+
+
+--
+-- Name: FUNCTION capture_provider_snapshot_apply_input_set(p_snapshot uuid, p_generation bigint, p_fence uuid); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.capture_provider_snapshot_apply_input_set(p_snapshot uuid, p_generation bigint, p_fence uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.capture_provider_snapshot_apply_input_set(p_snapshot uuid, p_generation bigint, p_fence uuid) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION claim_provider_snapshot_executor(p_snapshot uuid, p_artifact_sha text, p_context_sha text, p_lease_seconds integer, p_generation bigint, p_fence uuid); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.claim_provider_snapshot_executor(p_snapshot uuid, p_artifact_sha text, p_context_sha text, p_lease_seconds integer, p_generation bigint, p_fence uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.claim_provider_snapshot_executor(p_snapshot uuid, p_artifact_sha text, p_context_sha text, p_lease_seconds integer, p_generation bigint, p_fence uuid) TO ktm_curation_provider_executor;
 
 
 --
@@ -30471,6 +32699,14 @@ GRANT ALL ON FUNCTION ops.cancel_scoped_feature_write(p_attempt uuid, p_owner uu
 
 REVOKE ALL ON FUNCTION ops.claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.claim_scoped_feature_write(p_attempt uuid, p_owner uuid, p_dataset bigint, p_key text, p_regions jsonb, p_input_digest text, p_expected_members integer, p_lease_seconds integer, p_exclusive boolean) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION collect_expired_provider_snapshots(p_limit integer); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.collect_expired_provider_snapshots(p_limit integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.collect_expired_provider_snapshots(p_limit integer) TO ktm_curation_provider_executor;
 
 
 --
@@ -30506,6 +32742,22 @@ GRANT ALL ON PROCEDURE ops.finish_provider_feature_membership_command(IN p_root_
 
 
 --
+-- Name: FUNCTION finish_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_result bytea); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.finish_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_result bytea) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.finish_provider_snapshot_apply(p_snapshot uuid, p_generation bigint, p_fence uuid, p_result bytea) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION finish_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.finish_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.finish_provider_snapshot_postprocess(p_snapshot uuid, p_generation bigint, p_fence uuid, p_receipt bytea) TO ktm_curation_provider_executor;
+
+
+--
 -- Name: FUNCTION finish_scoped_feature_write(p_attempt uuid, p_owner uuid, p_result_digest text); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -30533,10 +32785,26 @@ GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean
 
 
 --
+-- Name: FUNCTION provider_snapshot_scalar_counter_state(p_snapshot uuid, p_generation bigint, p_fence uuid, p_items jsonb); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.provider_snapshot_scalar_counter_state(p_snapshot uuid, p_generation bigint, p_fence uuid, p_items jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.provider_snapshot_scalar_counter_state(p_snapshot uuid, p_generation bigint, p_fence uuid, p_items jsonb) TO ktm_curation_provider_executor;
+
+
+--
 -- Name: FUNCTION prune_scoped_feature_write_attempts(p_before timestamp with time zone, p_limit integer); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
 REVOKE ALL ON FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestamp with time zone, p_limit integer) FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION read_provider_snapshot_for_member(p_root uuid, p_child uuid, p_member uuid); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.read_provider_snapshot_for_member(p_root uuid, p_child uuid, p_member uuid) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.read_provider_snapshot_for_member(p_root uuid, p_child uuid, p_member uuid) TO ktm_curation_provider_executor;
 
 
 --
@@ -30545,6 +32813,14 @@ REVOKE ALL ON FUNCTION ops.prune_scoped_feature_write_attempts(p_before timestam
 
 REVOKE ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) FROM PUBLIC;
 GRANT ALL ON PROCEDURE ops.record_curation_import_manual_feature_child(IN p_import_plan_id uuid, IN p_plan_row_number integer, IN p_plan_sha256 text, IN p_manual_payload_sha256 text, IN p_child_command_id bigint, IN p_feature_id uuid, IN p_import_row_id uuid, IN p_curation_item_id uuid, IN p_link_decision_id uuid) TO ktm_curation_admin_executor;
+
+
+--
+-- Name: FUNCTION register_provider_snapshot_artifact(p_root uuid, p_source_job uuid, p_member uuid, p_payload bytea, p_context bytea, p_native_digest text, p_lease_seconds integer); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.register_provider_snapshot_artifact(p_root uuid, p_source_job uuid, p_member uuid, p_payload bytea, p_context bytea, p_native_digest text, p_lease_seconds integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.register_provider_snapshot_artifact(p_root uuid, p_source_job uuid, p_member uuid, p_payload bytea, p_context bytea, p_native_digest text, p_lease_seconds integer) TO ktm_curation_provider_executor;
 
 
 --
@@ -30576,11 +32852,41 @@ REVOKE ALL ON FUNCTION ops.reject_curation_import_plan_truncate() FROM PUBLIC;
 
 
 --
+-- Name: FUNCTION reject_pipeline_cancellation_prefix(); Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION ops.reject_pipeline_cancellation_prefix() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reject_provider_snapshot_artifact_update(); Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION ops.reject_provider_snapshot_artifact_update() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) TO ktm_curation_provider_executor;
+
+
+--
 -- Name: FUNCTION scoped_feature_write_membership_digest(p_feature uuid); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
 REVOKE ALL ON FUNCTION ops.scoped_feature_write_membership_digest(p_feature uuid) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.scoped_feature_write_membership_digest(p_feature uuid) TO ktm_feature_runtime;
+
+
+--
+-- Name: PROCEDURE seal_provider_snapshot_member(IN p_snapshot uuid, IN p_artifact_sha text, IN p_context_sha text, IN p_generation bigint, IN p_fence uuid, IN p_result_sha text, IN p_postprocess_sha text, OUT o_observed_at timestamp with time zone, OUT o_replayed boolean); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON PROCEDURE ops.seal_provider_snapshot_member(IN p_snapshot uuid, IN p_artifact_sha text, IN p_context_sha text, IN p_generation bigint, IN p_fence uuid, IN p_result_sha text, IN p_postprocess_sha text, OUT o_observed_at timestamp with time zone, OUT o_replayed boolean) FROM PUBLIC;
+GRANT ALL ON PROCEDURE ops.seal_provider_snapshot_member(IN p_snapshot uuid, IN p_artifact_sha text, IN p_context_sha text, IN p_generation bigint, IN p_fence uuid, IN p_result_sha text, IN p_postprocess_sha text, OUT o_observed_at timestamp with time zone, OUT o_replayed boolean) TO ktm_curation_provider_executor;
 
 
 --
@@ -32297,6 +34603,7 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_dataset_scopes TO k
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_manifests TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE ops.feature_write_manifests TO ktm_curation_command_owner;
 
 
 --
@@ -32356,6 +34663,27 @@ GRANT SELECT,USAGE ON SEQUENCE ops.import_jobs_queue_sequence_seq TO ktm_curatio
 
 
 --
+-- Name: TABLE integrity_finding_observations; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE ops.integrity_finding_observations TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE integrity_observation_runs; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,UPDATE ON TABLE ops.integrity_observation_runs TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE integrity_observation_scopes; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,UPDATE ON TABLE ops.integrity_observation_scopes TO ktm_curation_command_owner;
+
+
+--
 -- Name: TABLE manual_provider_dedup_cases; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -32388,6 +34716,27 @@ GRANT SELECT,UPDATE ON TABLE ops.pipeline_cancellation_runs TO ktm_curation_comm
 --
 
 GRANT SELECT,UPDATE ON TABLE ops.pipeline_cancellations TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE provider_snapshot_artifacts; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE ON TABLE ops.provider_snapshot_artifacts TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE provider_snapshot_quota_limits; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,UPDATE ON TABLE ops.provider_snapshot_quota_limits TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE provider_snapshot_quota_reservations; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE ON TABLE ops.provider_snapshot_quota_reservations TO ktm_curation_command_owner;
 
 
 --
@@ -32442,6 +34791,20 @@ GRANT SELECT,INSERT ON TABLE provider_sync.provider_feature_identities TO ktm_fe
 GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_curation_command_owner;
 GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_manual_provider_dedup_procedure_owner;
 GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_feature_runtime;
+
+
+--
+-- Name: TABLE provider_sync_state; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE provider_sync.provider_sync_state TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN provider_sync_state.provider_dataset_id; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_sync_state TO ktm_curation_command_owner;
 
 
 --
