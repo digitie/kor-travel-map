@@ -1,3 +1,34 @@
+### 2026-10-25 공항 인덱스 PG 반사 표현식 보완
+
+- 4bd 실제 autogen 1 FAIL/정확 정리를 보존하고 metadata CASE를 PG canonical 반사와 맞췄다. 기존 comparator 순수 회귀3 FAIL→equal·migration 포함8 PASS, 새 실제 검사는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
+### 2026-10-25 공항 reader ORM 인덱스 metadata 보완
+
+- 70cb 양 PG CI의 autogen 단일 실패/원 로그를 보존하고 canonical metadata에 기존 인덱스3만 등록했다. 생성 SQL 전체 대조와 migration 회귀8 PASS, 실제 autogen/새 exact CI는 미실행이다. [보고서](reports/2026-10-25-transport-airport-evidence-reader.md).
+
+### 2026-10-25 공항427 준비 경계 소스
+
+정본 converter/loader 기반 공항1→15·R1/R2/Geo 시험1개와 비활성 준비 함수를 추가했다.
+순수12 PASS 뒤 첫 실제1FAIL을 보존했다. N1 단언 후 EX plan을 SH entry로 호출한
+시험1곳을 EX entry로 정정하고 b3b synthetic15 실제1 PASS·공식oracle1을 확인했다.
+R2/R3 비이름 의미 P2 반례2FAIL→순수157 PASS로 보강하고 두 source/binding 리뷰 뒤
+c63 재검증1 PASS15.246s·complete15와 정리를 확인했다. 운영15fit·collector·SH·EXPLAIN/
+peak·최종CI는 미완이며 현재PG0다.
+
+## 2026-10-25 공항427 key/index 보강
+
+- 논리CASE index3·caller 서버상한·area EXISTS, provenance P2 정정. 순수143 PASS.
+- 실제 설치/oracle/EXPLAIN·Geo/native 준비·수집/SH는 미완, 두 source gate 전 PG0.
+
+## 2026-10-25 공항427 SQL/decoder source
+
+- 426 부모 보존, STABLE3함수·51가변열·RR decoder 배선. 순수108 PASS/mypy4.
+- 실제 PG/oracle·provider 준비/native 연결·15 fit·collector/SH/운영은 미완.
+
+## 2026-10-25 — 공항 reader Geo 계약(427, 부분)
+
+- 원천 hash32/Geo digest64 혼동을 정정하고 원실패를 보존했다. 순수 Geo28개 경계이며 SD/DB·수집은 미완이다. [범위](reports/2026-10-25-transport-airport-evidence-reader.md).
+
 ## 2026-10-25 — 가격 추이 본문 읽기 Low 3건(#1365 리뷰 후속)
 
 - gzip 끝 뒤 bytes는 `upstream_contract`, 쓰이지 않던 `DecodingError` catch 제거, 503 본문 읽기 중 끊김은 `upstream_unavailable`.
