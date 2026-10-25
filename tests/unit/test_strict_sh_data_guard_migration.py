@@ -125,6 +125,7 @@ def test_source_upsert_identity_check_does_not_compare_first_seen_candidate():
     assert "NEW.provider_dataset_id IS DISTINCT FROM v_dataset" in source
     assert "dependency_kind='source_head'" in source
     assert "current_source_record_key" in source
+    assert "TG_TABLE_NAME='source_records' AND TG_OP='DELETE'" in source
     assert "to_jsonb" not in source
     assert "row_to_json" not in source
 

@@ -17,6 +17,10 @@ BEGIN
         RAISE EXCEPTION 'unknown strict source relation'
             USING ERRCODE='23514',CONSTRAINT='ck_strict_data_guard_profile';
     END IF;
+    IF TG_TABLE_NAME='source_records' AND TG_OP='DELETE' THEN
+        RAISE EXCEPTION 'shared source records are append-only'
+            USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
+    END IF;
     SELECT provider_dataset_id INTO STRICT v_dataset FROM ops.feature_write_attempts
      WHERE attempt_id=v_attempt;
     -- source record의 raw_data를 직렬화하지 않고 명시 key 필드만 읽는다.
@@ -57,7 +61,7 @@ BEGIN
                     USING ERRCODE='23514',CONSTRAINT='ck_strict_data_source_target';
             END IF;
         END IF;
-        -- source_records UPDATE/DELETE의 원 immutable 오류는 뒤의 정본 trigger가 보존한다.
+        -- source_records UPDATE의 원 immutable 오류는 뒤의 정본 trigger가 보존한다.
     END IF;
     IF NOT EXISTS (SELECT 1 FROM ops.feature_write_manifests
         WHERE attempt_id=v_attempt AND dependency_kind='source_head' AND dependency_key=v_key) THEN

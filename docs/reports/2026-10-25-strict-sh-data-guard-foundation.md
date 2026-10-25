@@ -24,7 +24,8 @@ CREATE 유무와 짧은 caller timeout을 보존한다. 새 runtime SD allowlist
 - statement guard는 위 검사를 epoch helper보다 먼저 호출한다. source_records도25관계에 포함한다.
 - source row guard는 own dataset/named 기존 entity/head만 허용하며 새 record는 named entity에만
   붙인다. INSERT ON CONFLICT 후보의 first_seen_at을 기존 값과 같게 강제하지 않는다. 실제
-  source identity/seen 규칙과 records immutable 오류는 기존 trigger에 남아 있다.
+  source identity/seen 규칙과 records UPDATE immutable 오류는 기존 trigger에 남아 있다.
+  records DELETE는 SH append-only 계약으로 명시 거부한다.
 - Feature/derived row guard는 policy 비활성 Feature도 정확 manifest/membership 검사에서 생략하지
   않는다. OLD/NEW Feature UUID와 base/candidate의 own primary source identity를 검사한다. 기존
   scalar/SI/stamp/typed 검사를 삭제하거나 성공으로 치환하지 않는다.
@@ -50,3 +51,24 @@ source first_seen 후보 UPSERT, targetA/targetB, records immutability, disabled
 CPU 슬롯에서 owned PG를 실행한다. 아직 설치·runtime 권한 합성·공식 oracle·whole capture·
 RC 전환·공통 parent 순서·durable 자동복구·전체39관계/126루틴 closure·두 worker·SH 활성화는
 전부 미완이다. collector나 운영 수용으로 해석하지 않는다.
+
+## 전용 integration source와 records DELETE 정정
+
+첫 정의204를 보존한다. 전용 시험을 작성하며 기존 source_records immutable trigger가
+UPDATE 전용임을 재확인했다. DELETE도 같은 오류로 막힐 것으로 가정한 부분은 제거하고,
+SH records DELETE를 새 target guard에서 명시 거부한다. UPDATE의 기존 immutable 오류는
+그대로 둔다. 이 정의는 어느 DB에도 설치하지 않았으며 종전204를 실제 검증 성공으로
+재해석하지 않는다.
+
+전용 integration25개 source를 추가했다. 정본 owned scalar bootstrap/ACL fixture와 기존
+batch 실제 legacy seed→claim/manifest/begin 경로를 재사용한다. private installer의 명시
+설치는 이 전용 owned fixture에만 있다. 원 공통 fixture/loader를 바꾸거나 가짜 성공 함수를
+끼우지 않는다. missingP/bareSH와 epoch·Feature holder,17개 EX-only 관계, valid applying의
+source UPSERT first_seen 보존·Feature 밖 target 거부·records DELETE/원 UPDATE 오류,
+private EXEC 거부와 disabled/partial inventory 거부를 준비했다. schema owner의 명시 관리
+SQL 시험과 실제 service login DML 경계를 구분한다.
+
+`--collect-only`25 collected/1.17초이며 fixture/PG 실행은0이다. 이는 normal fullbatch/finish나
+전체8 target·모든 설치 DDL rollback·취소/pool정리·ACL actual 수용을 닫은 결과가 아니다.
+427/428 부모 및 권한 정본 합성과 두 독립 FULL source review 뒤에만 새 bounded runner와
+정확 CPU 슬롯을 정한다. RC·자동설치·SH 활성화는 계속0이다.
