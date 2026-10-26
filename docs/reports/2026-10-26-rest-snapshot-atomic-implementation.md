@@ -1,5 +1,38 @@
 # Rest432 실제 동시 쓰기 구현 원장
 
+## 8fa 제품의 같은 상한 PG·새 후보 UI 검증
+
+`8fa17bf4ed82ba89c504ac13342f6943c5250cd4`는 두 독립 제품 리뷰와 관련160개 순수시험,
+Ruff·strict mypy2·import4를 통과했다. 공개 strict assessor는 유지하고 같은 호출에서
+이미 decode한 두 값만 private 의미 대조로 보낸다. frozen 순수215의 coverage 비교는
+5.260→1.442초였으나 DB 없는 해당 함수 구간이며 whole TX/운영 CPU 개선율로 환산하지 않는다.
+
+개입 코드 없는 coverage 실제 PG 결과는 다음과 같다. 두 실행은 각각 별도 owned DB를
+사용하고 각 종료 뒤 정확 CID/UUID/볼륨을 정리했으며 operating 호출은 없다.
+
+| 선택 시험 | 실제 결과 | 판정 |
+| --- | --- | --- |
+| 합성215 전체 반영 | case100.369초, reader2.226481초·decode0.733188초·assessment1.456537초·atomic19.733465초 | 전체215/retired0·원 결과·필수 후처리·별도seal PASS |
+| 실제 byte quota 첫 초과 | case119.625초,11×744997B 등록 뒤12번째SQLSTATE53000 | 정확 quota constraint·전체TX rollback·8MiB/16행 유지 PASS |
+
+원장 SHA는 A215 `01fcbafacc81d87259c3408d387b969e73c6409b696437761af2989f0750f199`,
+Bbytes `62afccdb60ecd41d628391aa91250c44a4b521dc17aecee9d0f63e87bd098940`이다.
+독립 raw/환경/정리 검산 원장은 `77c9702c17f7b6e9b15930b6f722cc8f2f1258606ddd1c0e15c929f307f01b12`다.
+모두 Python3.13.14·SQLAlchemy2.0.55의 로컬 합성 fixture이며 CI환경동등이나 서버CPU/RSS
+측정이 아니다. 전체30초·reader3초·lock1초·SQL/ACL은 변경하지 않았다.
+
+같은8fa source로 새 빌드163.352초와 실제 API/Next UI14개를50.038초에 통과했다.
+원14 driver·엄격 n150 접속·자원/정리 상한을 그대로 사용했다. 실제 선택module·API7 및
+전체 source2576/SDK53/UI351·manifest4/static176을 결박했고 mocked 응답은 없다.
+로그인/logout 각1·cancel2·WS 연결3·수신17frame·보호401·5초간재연결없음·pageerror/outside0·
+possible_unrevoked_test_session=false와 정확 browser/profile/API/UI/터널/ownedDB 정리를 확인했다.
+UI 원장은 `d3d7374cf1d0e62038f1b022f4c3b844eec58fbb43b3f314959afe29b019e1ce`다.
+
+이후 문서 정산은 제품 코드·시험·UI 입력을 바꾸지 않는다. 새 최종 CI와 main merge·
+운영 배포/공개13 판정·원 일정 복원은 아직 대기한다. 원6ceb 실패는 삭제하거나 성공으로
+바꾸지 않으며 일반 dataset/region 전수 CWRITE 확대나 OFF profile 활성화도 뜻하지 않는다.
+
+
 ## 6ceb 최종 CI 시간초과와 같은 호출 안의 재검증 비용 제거
 
 `6ceb42780e0e393b9229c5b1dcb8566bb6a1d5c4`의 열 검사 중 여덟 개는 성공했고

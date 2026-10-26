@@ -1,3 +1,17 @@
+## 2026-10-26 — Rest 중복 검증 제거의 PG·후보 UI 수용
+
+두 독립 리뷰를 거친 `8fa17bf4`가 같은 상한의 coverage 실제 PG 두 건을 통과했다.
+합성215개는 원자적 구간19.733초·후처리·별도seal을 확인했고, byte quota는11건 등록 뒤
+12번째53000·정확 constraint·전체rollback을 확인했다. reader3초·lock1초·전체30초와
+8MiB/16행은 유지했다. 각 pytest case100.369/119.625초는 전체 runner·원자적 구간과 다르다.
+
+동일 source의 새 UI 빌드와 실제 API/Next UI14개도50.038초에 통과했다. 로그인·취소·
+재조회·실제WS·로그아웃200 뒤보호401·재연결없음 및 세션 미해제 가능성false를 확인했다.
+선택module을 fixture 전에 검증했고 source2576/SDK53/UI351·정확 자원 정리를 확인했다.
+서버CPU/RSS·CI와 환경동등·운영432 완료로 확대하지 않으며 최종 CI·머지/배포는 남는다.
+원6ceb CI 실패와 COMMIT 결과 불명 경계는 앞선 원장에 보존한다.
+[원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — Rest 최종 두 PostGIS 시간초과 보강 중
 
 6ceb의 최종CI는8성공·PostGIS2실패다. 실제215와 byte quota 반복 등록이 전체30초에
