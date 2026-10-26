@@ -5,7 +5,7 @@
  * `src/api/types.ts`의 OpenAPI 타입에서 파생한다.
  */
 
-import { subscribeAdminLogout } from "@/lib/admin-auth-events";
+import { isAdminLogoutPending, subscribeAdminLogout } from "@/lib/admin-auth-events";
 
 import type { components } from "./types";
 
@@ -692,7 +692,7 @@ function redirectToLoginOnAuthRequired(status: number): void {
   }
   clearDomainIdempotencyKeys();
   const current = `${window.location.pathname}${window.location.search}`;
-  if (window.location.pathname === "/login") {
+  if (isAdminLogoutPending() || window.location.pathname === "/login") {
     return;
   }
   window.location.assign(`/login?next=${encodeURIComponent(current)}`);

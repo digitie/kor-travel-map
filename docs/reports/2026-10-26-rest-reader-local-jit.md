@@ -35,5 +35,12 @@ rollback/savepoint/retry·DB 전역 설정·SQL함수·ACL·한도 변경은 없
 기존 입력/원 결과 회귀를 포함한 단위18개가 통과했다. 원 jit on/off와 더 짧은 제한의
 조합에서 조회 중 off·적용 전에 원값복원을 검사하고, SQL오류/취소에서는 원 객체와
 추가복원SQL 없음을 확인했다. Ruff와 해당 source mypy도 통과했다.
-두 독립 제품 리뷰·제품 자체의 실제 PG 수용·최종 CI·머지/배포는 아직 미완이다.
-JIT OFF 시험의 PASS를 개입 없는 제품 PASS로 표현하지 않는다.
+두 독립 제품 리뷰를 반영한 `81164788` 자체로 개입용 fixture 없이 coverage PG 시험을
+통과했다. 실제215개·후처리·별도seal을 확인했고 reader2.333099초·atomic24.250820초다.
+pytest case106.542초/전체runner119.767820초와 구분한다. source2576/import52/SDK53과
+정확 CID·UUID·볼륨 정리를 독립 검산했다. 원장
+`map432-reader-local-jit-product-A215-w-independent-actual-factcheck-r1.json`을 따른다.
+환경 차이와 미측정 항목은 앞 절과 같으며 제품의 운영 성능으로 확대하지 않는다.
+
+선행 `d8a08b9e` CI는 열 검사 모두 성공했다. JIT 제품과 추가 로그아웃 수정이 포함된
+최종 커밋의 CI·새 UI 빌드/실제 UI·머지/배포는 별도로 남는다.

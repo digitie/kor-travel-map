@@ -1,5 +1,43 @@
 const ADMIN_LOGOUT_EVENT = "ktm:admin-logout";
 const ADMIN_AUTH_CHANNEL = "ktm-admin-auth";
+const ADMIN_LOGOUT_PENDING_MS = 15_000;
+let adminLogoutStartedAt: number | null = null;
+
+function logoutMonotonicTime(): number | null {
+  try {
+    const now = performance.now();
+    return Number.isFinite(now) ? now : null;
+  } catch {
+    return null;
+  }
+}
+
+/** 명시적 로그아웃의 document 이동 권위를 한 탭에서 짧게 고정한다. */
+export function beginAdminLogout(): boolean {
+  if (typeof window === "undefined" || isAdminLogoutPending()) return false;
+  // 시각을 읽지 못해도 실제 로그아웃을 막거나 영구 대기 상태를 만들지 않는다.
+  adminLogoutStartedAt = logoutMonotonicTime();
+  return true;
+}
+
+/** 실패한 로그아웃은 일반 401 로그인 이동을 다시 허용한다. */
+export function cancelPendingAdminLogout(): void {
+  adminLogoutStartedAt = null;
+}
+
+export function isAdminLogoutPending(): boolean {
+  if (typeof window === "undefined" || adminLogoutStartedAt === null) return false;
+  const now = logoutMonotonicTime();
+  if (
+    now === null ||
+    now < adminLogoutStartedAt ||
+    now - adminLogoutStartedAt >= ADMIN_LOGOUT_PENDING_MS
+  ) {
+    adminLogoutStartedAt = null;
+    return false;
+  }
+  return true;
+}
 
 export function publishAdminLogout(): void {
   if (typeof window === "undefined") {

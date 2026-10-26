@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
+  beginAdminLogout,
+  cancelPendingAdminLogout,
+  isAdminLogoutPending,
+} from "@/lib/admin-auth-events";
+
+import {
   ApiClientError,
   DomainIdempotencySubmissionMismatchError,
   fileIdempotencyFingerprint,
@@ -59,6 +65,7 @@ function stubIdempotencyBrowser(keys: string[]) {
 
 describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
   afterEach(() => {
+    cancelPendingAdminLogout();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
@@ -148,6 +155,68 @@ describe("api client AbortSignal forwarding (concierge #111 class fix)", () => {
     expect(assign).toHaveBeenCalledWith(
       "/login?next=%2Fadmin%2Fsettings%3Ftab%3Dkeys",
     );
+  });
+
+  it("명시적 로그아웃 중 늦은 401도 보호 오류로 남고 document 이동을 중복하지 않는다", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", {
+      location: { assign, pathname: "/ops/pipeline", search: "?execution=owned" },
+    });
+    let respond: ((value: Response) => void) | undefined;
+    vi.stubGlobal("fetch", vi.fn<FetchMock>(() => new Promise(resolve => { respond = resolve; })));
+    const pending = getJson("/v1/ops/pipeline/executions/import_job/owned");
+    expect(beginAdminLogout()).toBe(true);
+    respond?.(new Response("{}", { status: 401 }));
+    await expect(pending).rejects.toMatchObject({ status: 401 });
+    expect(assign).not.toHaveBeenCalled();
+    expect(isAdminLogoutPending()).toBe(true);
+    // document commit 전에도 이동은 명시적 logout 경로 한 번만 소유한다.
+    window.location.assign("/login");
+    expect(assign).toHaveBeenCalledExactlyOnceWith("/login");
+  });
+
+  it("이동이 비동기로 중단된 로그아웃은 만료 후 일반 401 이동을 복구한다", async () => {
+    const now = vi.spyOn(performance, "now").mockReturnValue(100);
+    const assign = vi.fn();
+    vi.stubGlobal("window", {
+      location: { assign, pathname: "/ops/pipeline", search: "" },
+    });
+    expect(beginAdminLogout()).toBe(true);
+    // assign이 반환한 뒤에도 document가 바뀌지 않은 비동기 이동 실패를 모사한다.
+    window.location.assign("/login");
+    stubFetchStatus(401);
+    now.mockReturnValue(15_099);
+    await expect(getJson("/v1/x")).rejects.toMatchObject({ status: 401 });
+    expect(assign).toHaveBeenCalledExactlyOnceWith("/login");
+    now.mockReturnValue(15_100);
+    await expect(getJson("/v1/x")).rejects.toMatchObject({ status: 401 });
+    expect(assign.mock.calls).toEqual([["/login"], ["/login?next=%2Fops%2Fpipeline"]]);
+    expect(isAdminLogoutPending()).toBe(false);
+  });
+
+  it("로그아웃 실패로 해제한 뒤 401은 원래 로그인 이동을 유지한다", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", {
+      location: { assign, pathname: "/ops/pipeline", search: "" },
+    });
+    expect(beginAdminLogout()).toBe(true);
+    cancelPendingAdminLogout();
+    stubFetchStatus(401);
+    await expect(getJson("/v1/x")).rejects.toMatchObject({ status: 401 });
+    expect(assign).toHaveBeenCalledExactlyOnceWith("/login?next=%2Fops%2Fpipeline");
+  });
+
+  it("로그아웃 대기 상태는 성공 응답이나 403 오류를 인증 성공으로 바꾸지 않는다", async () => {
+    const assign = vi.fn();
+    vi.stubGlobal("window", {
+      location: { assign, pathname: "/ops/pipeline", search: "" },
+    });
+    expect(beginAdminLogout()).toBe(true);
+    stubFetch();
+    await expect(getJson("/v1/x")).resolves.toEqual({});
+    stubFetchStatus(403);
+    await expect(getJson("/v1/x")).rejects.toMatchObject({ status: 403 });
+    expect(assign).not.toHaveBeenCalled();
   });
 
   it("RFC7807 본문과 Retry-After를 typed 오류로 보존한다", async () => {

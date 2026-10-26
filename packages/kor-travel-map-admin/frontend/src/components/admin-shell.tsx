@@ -40,7 +40,11 @@ import {
 } from "@/components/ui/breadcrumb";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { HelpTip } from "@/components/help-tip";
-import { publishAdminLogout } from "@/lib/admin-auth-events";
+import {
+  beginAdminLogout,
+  cancelPendingAdminLogout,
+  publishAdminLogout,
+} from "@/lib/admin-auth-events";
 import { cn } from "@/lib/utils";
 
 /**
@@ -443,7 +447,7 @@ function ButtonLogout({
   const [busy, setBusy] = useState(false);
   const inFlight = useRef(false);
   async function logout() {
-    if (inFlight.current) return;
+    if (inFlight.current || !beginAdminLogout()) return;
     inFlight.current = true;
     setBusy(true);
     setError(null);
@@ -453,6 +457,7 @@ function ButtonLogout({
       publishAdminLogout();
       window.location.assign("/login");
     } catch {
+      cancelPendingAdminLogout();
       setError("로그아웃하지 못했습니다. 다시 시도해 주세요.");
     } finally {
       inFlight.current = false;
