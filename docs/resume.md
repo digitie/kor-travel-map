@@ -1,3 +1,15 @@
+## 2026-10-26 — byte quota 최종 CI 실패와 문자열 선검사 비용 보강
+
+`5d6f982b`의 최종 CI는9개 성공·glibc PostGIS1개 실패다. 후자는 byte quota 반복 등록이
+전체30초에 걸렸으며 reader3초 실패가 아니다. Alpine과 실제215는 통과했지만 머지하지 않는다.
+
+공통 codec 선검사는 exact 문자열/None/bool의 불필요한 모델 탐색과 ASCII escape·인용문
+문자별 Python 순회를 줄인다. UTF8·depth·node·문자열 비용 및 canonical 검증을 유지하며
+한도·SQL·quota fixture는 바꾸지 않는다. 새 경계28개를 포함한 관련207개 순수시험은 통과했다.
+초안의 escape 메모리 회귀는 두 독립 리뷰로 수정했고, 같은 상한 실제PG·새 최종CI는 아직 대기한다.
+운영 CPU/RSS 개선을 주장하지 않는다.
+[근거](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — Rest 중복 검증 제거의 PG·후보 UI 수용
 
 두 독립 리뷰를 거친 `8fa17bf4`가 같은 상한의 coverage 실제 PG 두 건을 통과했다.

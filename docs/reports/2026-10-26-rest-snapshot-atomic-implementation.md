@@ -1,5 +1,39 @@
 # Rest432 실제 동시 쓰기 구현 원장
 
+## 5d6 최종 glibc byte quota 실패와 네이티브 문자열 선검사 초안
+
+최종5d6 CI는9성공·1실패다. glibc의 quota bytes 시험만 전체30초가 등록 SQL 대기 중
+만료됐고1931PASS/23SKIP였다. 원로그 SHA256은
+`ea981c432e7aeed9235f424e12919ba60c9815d319cebd811864d91a1a840ad3`이다.
+Alpine 성공이나 기존 owned Bbytes 성공으로 이 실패를 덮지 않는다.
+
+같은215개 순수 fixture(719797B)의 CTracer 한정 구간을 확인해 JSON 객체를 만들기 전
+문자열·모델 선검사 비용을 줄이는 초안을 추가했다. exact str/None/bool은 일치할 수 없는
+모델/enum 목록을 탐색하지 않는다. ASCII는 네이티브 판별·escape span으로 기존 인코딩
+비용만 계산하며 복사된 JSON 객체를 만들지 않는다. wire scanner도 인용 문자열 span만
+네이티브로 건너뛰고 바깥 node/depth를 기존처럼 센다. 잘못 닫힌 문자열의 최종 구문
+거부는 기존 json.loads 책임을 유지한다. 공통 helper이므로 Airport에도 같은 의미 보존
+검사를 적용하되 각 profile의 상한·wire·pins·검증 계약은 바꾸지 않는다.
+
+단일 순수 구간 관측에서 preflight0.552→0.158초, whole decode1.682→1.036초였다.
+후속 stdout의 source 필드는 benchmark donor가 가진 base5d6 문자열이므로 그 자체가
+수정 전 제품 실행 증거가 아니다. 해당 working 입력의 codec SHA256은
+`28b54c18fce0bdb3bfb2dabe7226b9f69f6de2591b7c61745e2d6ccce9c25534`이며,
+CI/DB 전체시간·운영 CPU/RSS 개선률로 환산하지 않는다. 새28개 문자열/예산 경계와
+기존179개를 합친207개가6.70초에 통과했다. 두 독립 리뷰·실제PG·새 최종CI 수용은 남는다.
+전체30초·reader3초·lock1초·8MiB/16행·215 fixture와 SQL은 그대로다.
+
+첫 정규식 초안은1MiB의 유효 escape 입력에서 약78.5MB의 역추적 상태를 만드는 문제가
+독립 리뷰에서 발견돼 보류했다. 원 반례를 보존하고 겹치지 않는 span을 possessive로
+소비하도록 수정했다. 최종 codec SHA256은
+`ed7ff46acc50b5a2eaa39377ce92693117a3bb84db97d28698e5080f2c3e98c8`이다.
+Linux3.13 순수 regex의 추적 peak는1286B였으나 전체 RSS 또는 ARM 결과는 아니다.
+최종 관련207개는6.77초, 두 독립 전문·원본 차등·메모리 수정 리뷰는 PASS다. mypy1과
+CI 대상 source/test/packages Ruff는 통과했다. 별도 `ruff check .`는 이번 변경 밖의
+기존 docs/handoff 및 scripts 파일의7개 지적으로 실패했으며 무관 파일은 수정하지 않았다.
+새 실제PG와 최종CI·운영 수용은 아직 남는다.
+
+
 ## 8fa 제품의 같은 상한 PG·새 후보 UI 검증
 
 `8fa17bf4ed82ba89c504ac13342f6943c5250cd4`는 두 독립 제품 리뷰와 관련160개 순수시험,

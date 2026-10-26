@@ -10,6 +10,11 @@
 
 ## [Unreleased]
 
+### snapshot 문자열 선검사 비용 (2026-10-26)
+
+- **PERFORMANCE**: exact scalar와 문자열 span의 반복 Python 탐색을 줄인다.
+  각 profile의 입력 크기·깊이·node 상한과 canonical 검증은 유지한다.
+
 ### 휴게소 저장 입력의 중복 검증 비용 (2026-10-26)
 
 - **PERFORMANCE**: 실험용 Rest 재관측 경로에서 같은 호출 안의 엄격 검증·직렬화 결과를

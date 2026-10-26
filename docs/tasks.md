@@ -104,7 +104,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-08 — **적대 리뷰 2인·실부하·UI 수용**
 
-  정확성 반증·live API/UI·CPU/RAM/DB 전후 비교를 통과시킨다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+  정확성 반증·live API/UI·CPU/RAM/DB 전후 비교를 통과시킨다. Rest byte quota의 최종 CI 재검증은 아직 대기한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-09 — **배포·확대·되돌림과 문서 마감**
 
