@@ -85,7 +85,7 @@ def _inputs(
 
 
 async def _read_locked_evidence(session: AsyncSession, dataset: int) -> object:
-    """이 조회만 서버3초/lock1초로 제한하고 성공 뒤 caller의 더 짧은 설정도 복원한다.
+    """이 조회만 서버3초/lock1초·JIT OFF로 실행하고 성공 뒤 caller 설정을 복원한다.
 
     SQL 오류/취소 뒤에는 복원 SQL을 보내 원오류를 덮지 않는다. caller는 전체 TX를
     rollback해야 하며 SET LOCAL 설정도 그 rollback에 따라 복원된다. decoder/assessment는
@@ -97,14 +97,20 @@ async def _read_locked_evidence(session: AsyncSession, dataset: int) -> object:
             await session.execute(
                 text(
                     "SELECT name,setting FROM pg_settings WHERE name IN "
-                    "('statement_timeout','lock_timeout')"
+                    "('statement_timeout','lock_timeout','jit')"
                 )
             )
         ).all()
     }
-    if set(prior) != {"statement_timeout", "lock_timeout"}:
-        raise RuntimeError("rest-area reader timeout settings are missing")
+    if set(prior) != {"statement_timeout", "lock_timeout", "jit"} or prior["jit"] not in {
+        "on", "off"
+    }:
+        raise RuntimeError("rest-area reader settings are missing or invalid")
     await apply_bounded_transaction_limits(session, statement_timeout_ms=3000, lock_timeout_ms=1000)
+    # 작은 검증 집합은 JIT 컴파일 비용을 피한다. 전체 TX/DB 설정은 바꾸지 않는다.
+    await session.execute(
+        text("SELECT set_config(:name,:value,true)"), {"name": "jit", "value": "off"}
+    )
     raw: object = await session.scalar(
         text("SELECT feature.read_transport_rest_snapshot_evidence(:dataset)"),
         {"dataset": dataset},

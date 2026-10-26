@@ -1,3 +1,15 @@
+## 2026-10-26 — Rest reader 조회에 한정한 JIT 비활성화 초안
+
+coverage를 켠 실제215 owned 시험에서 기존 reader가3초에 취소됐다. 같은 한도에서
+JIT OFF 개입 시험은 reader2.274초·atomic23.841초/전체215·후처리·seal을 통과했다.
+단일 개입 결과이며 서버CPU/RSS·JIT 컴파일 시간이나 원인의 확정은 아니다.
+
+제품 초안은 잠금 뒤 reader 조회에만 transaction-local JIT OFF를 적용하고 성공 뒤
+원 jit/statement/lock 설정을 복원한다. 오류·취소는 원 예외를 전파하고 caller 전체
+rollback으로 설정을 회수한다. 더 짧은 제한과 기존3초/1초·전체30초는 유지한다.
+관련18개 단위/Ruff/mypy1은 통과했으며 두 독립 제품 리뷰·제품 실제PG·최종CI는 남는다.
+[근거와 범위](reports/2026-10-26-rest-reader-local-jit.md).
+
 ## 2026-10-26 — Rest432 최종 CI 실패와 최소 수정
 
 `7fc5bff1`의 최종 CI는 10개 검사 중 8개 성공·2개 실패다. 세 Python 검사는 모두

@@ -46,7 +46,9 @@ async def _case(monkeypatch, *, before_exists=False, after_exists=True, changed=
         name = str(sql)
         calls.append(name)
         if name.startswith("SELECT name,setting FROM pg_settings"):
-            return _Result([("statement_timeout", "30000"), ("lock_timeout", "1000")])
+            return _Result(
+                [("statement_timeout", "30000"), ("lock_timeout", "1000"), ("jit", "on")]
+            )
         if "scalar_counter_state" in name:
             counter += 1
             return _Result(
@@ -202,11 +204,14 @@ async def test_forged_eligible_preparation_does_not_authorize_changed_canonical_
     ("prior_statement", "prior_lock", "expected_statement", "expected_lock"),
     [(30000, 1000, 3000, 1000), (750, 250, 750, 250), (0, 0, 3000, 1000)],
 )
+@pytest.mark.parametrize("prior_jit", ["on", "off"])
 async def test_locked_reader_has_its_own_server_cap_then_restores_caller_before_apply(
-    monkeypatch, prior_statement, prior_lock, expected_statement, expected_lock
+    monkeypatch, prior_statement, prior_lock, expected_statement, expected_lock, prior_jit
 ):
     session, payload, preparation, args, _, _, apply, _ = await _case(monkeypatch)
-    settings = {"statement_timeout": str(prior_statement), "lock_timeout": str(prior_lock)}
+    settings = {
+        "statement_timeout": str(prior_statement), "lock_timeout": str(prior_lock), "jit": prior_jit
+    }
     original = dict(settings)
     execute, scalar = session.execute.side_effect, session.scalar.side_effect
     events = []
@@ -225,7 +230,11 @@ async def test_locked_reader_has_its_own_server_cap_then_restores_caller_before_
                 settings[name] = str(min(int(settings[name]) or cap, cap))
             return _Result([])
         if statement == "SELECT set_config(:name,:value,true)":
-            events.append("restore:" + params["name"])
+            events.append(
+                "jit-off"
+                if params == {"name": "jit", "value": "off"} and "reader" not in events
+                else "restore:" + params["name"]
+            )
             settings[params["name"]] = params["value"]
             return _Result([])
         return await execute(sql, params)
@@ -236,6 +245,7 @@ async def test_locked_reader_has_its_own_server_cap_then_restores_caller_before_
             assert settings == {
                 "statement_timeout": str(expected_statement),
                 "lock_timeout": str(expected_lock),
+                "jit": "off",
             }
         return await scalar(sql, params)
 
@@ -251,9 +261,11 @@ async def test_locked_reader_has_its_own_server_cap_then_restores_caller_before_
     assert events == [
         "save",
         "lower",
+        "jit-off",
         "reader",
         "restore:statement_timeout",
         "restore:lock_timeout",
+        "restore:jit",
         "apply",
     ]
     assert settings == original
@@ -274,11 +286,16 @@ async def test_locked_reader_failure_keeps_original_error_and_requires_outer_rol
         statement = str(sql)
         if statement.startswith("SELECT name,setting FROM pg_settings"):
             events.append("save")
-            return _Result([("statement_timeout", "30000"), ("lock_timeout", "1000")])
+            return _Result(
+                [("statement_timeout", "30000"), ("lock_timeout", "1000"), ("jit", "on")]
+            )
         if "FROM pg_settings JOIN" in statement:
             events.append("lower")
             return _Result([])
         if statement == "SELECT set_config(:name,:value,true)":
+            if params == {"name": "jit", "value": "off"}:
+                events.append("jit-off")
+                return _Result([])
             pytest.fail("aborted/cancelled SQL must not be followed by restoration SQL")
         return await execute(sql, params)
 
@@ -293,7 +310,7 @@ async def test_locked_reader_failure_keeps_original_error_and_requires_outer_rol
     with pytest.raises(type(error)) as raised:
         await target.apply_stored_rest_area_reobservation(session, payload, preparation, **args)
     assert raised.value is error
-    assert events == ["save", "lower", "reader"]
+    assert events == ["save", "lower", "jit-off", "reader"]
     apply.assert_not_awaited()
     finish.assert_not_awaited()
     assert saved == []
