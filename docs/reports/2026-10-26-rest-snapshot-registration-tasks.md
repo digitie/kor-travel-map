@@ -4,13 +4,12 @@
 base65e4943·제품 편집/PG 실행0 기록은 보존한다. 구현은 main `df877690` 위 초안 PR
 [#1418](https://github.com/digitie/kor-travel-map/pull/1418)에서 시작했다.
 
-S1·S2의 입력·정적 profile과 S3의 원자적 coordinator를 구현했고 실제215 전체·quota/GC·
-rollback/복구·공식 schema432·최소ACL을 아래 원장 범위에서 검증했다. S5의 서로 다른 DS 두
-writer도 실제 blocker와 양쪽 commit을 확인했다. 같은 member 동시 등록과 이전 read 뒤 다른
-worker seal의 실제 경합, 적용 중 GC 경합과 topic 관측 구간·CPU/RSS 실측은 추가 검증 중이다. S6의 최종 CI와
-후보 live/UI·머지/배포도 남아 있어 전체 완료로 표시하지 않는다. 431 reader 수용을 새 Rest
-시험으로 재사용하지 않으며, source·실패·측정 범위는
-[구현 기록](2026-10-26-rest-snapshot-atomic-implementation.md)에 모은다.
+S1–S4의 제한 입력·정적 profile·선택A 원자성은 실제215·quota/GC·복구·공식 schema432/최소ACL로
+수용했다. S5의 추가 동일member 등록·read/seal·GC 경합3개와 작은 두profile 계측도 각 범위에서
+통과했다. 최종652 CI10개 SUCCESS·같은tree main d7fd 병합·공식432 설치·공개Map7/PinVi6을
+확인했다. 이는 아래 시나리오 전체를 새 Rest 물리시험으로 실행했다는 뜻이 아니며
+**T-CWRITE-01–09는 모두 미완료**다. 431 결과를 새432 시험으로 재사용하지 않는다.
+원실패·세대별 실제값과 남은 수용은 [구현 기록](2026-10-26-rest-snapshot-atomic-implementation.md)에 보존한다.
 
 | 단위 | 산출물 | 함께 닫을 검증 |
 | --- | --- | --- |
@@ -58,7 +57,8 @@ registration/claim은 앞 단계, control seal은 durable 원결과 기반 후�
 S3의 공유 topic은 첫 topic DML 전에 trusted TX seam이 `dataset_projection`, `provider_sync`
 두 행을 고정 C순으로 선취득하고 누락 시 fail-closed하도록 구현했다. 실제 서로 다른 DS
 empty/nonempty 두 writer는 정확 blocker와 양쪽 commit을 확인했다. topic 구간·CPU/RSS
-실측은 남아 있으며 전체 caller의 교착 부재나 운영 처리량 개선으로 확대하지 않는다.
+작은 두profile의 CPU ticks/RSS 표본과 client SQL→commit ACK bounds를 기록했다. backend 실제
+lock 취득/해제 시각·전체 caller의 교착 부재나 운영 처리량 개선으로 확대하지 않는다.
 정본 bump/알림 권위·성공 조건과 최소 ACL은 보존한다.
 
 ## S5: 두 물리 writer 필수 시나리오
@@ -93,3 +93,21 @@ SQL/backendCPU/RSS 지점·client codec/왕복·logicalbytes/WAL은 섞지 않�
 독립2인 적대리뷰/실제 양·음성/복구·원자성·최종schema/CI를 하나의 수용 단위로 닫는다.
 공통 함수 시그니처를 바꾸기 전에 codegraph 영향도를 확인하며 단순 helper만 별도활성화하지 않는다.
 W/T의 운영·수집 opt-in은 계속OFF이고 기존 Airport baseline을 확대하지 않는다.
+
+
+## 최종 제한 단위와 계속 열린 경계
+
+- 최종652의 coverage owned A215는 wholecomplete/retired0·23비scalar/Geo/policy/head 양clock·
+  필수 후처리·별도seal을 통과했다. Bbytes는11건 뒤12번째53000·전체rollback과8MiB/16행을
+  확인했다. reader3초/lock1초/wholeTX30초와 capture 상한은 그대로다.
+- S5 #1/#5/#6의 새 물리node와 #7 양profile의 정확blocker/양commit은 실제 통과했다.
+  #6 GC 경합은 fresh 입력으로 P_EX 대기·backend 종료 후 보존을 검증했고 age/lease/running
+  각 보호는 B5와 구분한다. #2/#4는 기존 공통 실제 복구/holder 수용과 Rest SDK0를 carry하며,
+  #3은 별도TX의 lateGeo commit 후 whole거부다. sharedFeature 양성 두writer 전수 시험은 아니다.
+- 계측은 작은 Airport1/Rest2 합성 입력이다. backend CPU ticks와 RSS4개 표본, client CPU/
+  RSS highwater·SQL→commit ACK bounds는 단위가 다르다. 실제 backend lock 시각·215 backend
+  CPU/RSS·운영 처리량/CPU/RSS·heap/WAL·실 upstream215 수집은 미측정/미수용이다.
+- S6의 exact652 CI10·같은tree d7fd 병합·공식432 committed/7healthy·공개13은 완료했다.
+  기존 RUNNING37만 복원하고 STOPPED14·새 profile OFF·설치 env bytes/mode를 유지했다.
+  운영 profile 활성화와 전writer/지역·확대·실부하·OSworker/물리wire fault의 상위 수용은 남는다.
+  상위 CWRITE9개 체크박스를 완료로 바꾸지 않는다. 기존 실패/미도달 원장은 보존한다.

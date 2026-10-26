@@ -1,3 +1,22 @@
+## 2026-10-26 — Rest432 제한 단위의 최종 CI·배포·공개 UI 수용
+
+PR #1418의 최종 제품 `65202158`은 CI 10개 모두 성공했고, 같은 tree의 main
+`d7fd7d18`로 병합됐다. 같은 상한의 coverage owned PG는 합성215 전체 반영·후처리·별도seal과
+byte quota 11건 뒤 12번째53000·전체TX rollback을 통과했다. 같은 source의 새 빌드/실제
+API·Next 후보 UI14개도 통과했다. 기존 CI/fixture/UI 실패와 당시 미도달 기록은 아래에 보존한다.
+
+공식 배포는 committed, 실제 schema432/PinVi0102·7healthy다. 배포 후 공개 UI는 Map7개와
+PinVi6개 모두 PASS(55.972초)이며 실제 로그인·쿠키·지도/목록/상세·재조회·로그아웃 뒤
+보호401·세션잔류없음과 정확 browser/profile 정리를 확인했다. 이는 격리 후보 cancellation14와
+별도 시험이다. 기존 RUNNING 37개만 복원하고 STOPPED 14개와 새 profile OFF를 유지했으며
+설치 env의 bytes·mode도 보존했다. 새 수집 활성화나 운영 business DML 시험은 하지 않았다.
+
+이번 수용은 Rest 제한 profile의 구현·정확성/복구 시험·최종 CI·공식 설치와 공개 UI 범위다.
+상위 **T-CWRITE-01–09는 모두 미완료**이며 운영 부하 CPU/RSS·215 backend CPU/RSS,
+실 upstream215 수집·공유 Feature의 양성 동시 쓰기·전 writer 전환/확대·실 OS worker 사망과
+물리 wire 단절은 별도다. 작은 두 profile의 backend ticks/RSS 표본은 운영 효과가 아니다.
+[최종 증거와 한계](reports/2026-10-26-rest-snapshot-atomic-implementation.md#최종-제품652의-ci병합공식-배포-수용).
+
 ## 2026-10-26 — byte quota 최종 CI 실패와 문자열 선검사 비용 보강
 
 `5d6f982b`의 최종 CI는9개 성공·glibc PostGIS1개 실패다. 후자는 byte quota 반복 등록이
