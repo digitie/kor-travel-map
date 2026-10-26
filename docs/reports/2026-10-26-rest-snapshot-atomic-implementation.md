@@ -21,8 +21,11 @@ OFF 상태의 durable read 우선은 유지한다. recovery fixture에는 기존
 `run=run` 한 필드로 노출한다. 관련 순수76PASS와 두 독립 리뷰는 실제 asset의 PG 수용을
 대체하지 않는다. 실행 원장은 `map432-run-id-five-file-handoff-r5.json`이다.
 
-중복 Rest decoder 검증 제거 후보의 기존 codec125PASS와 coverage ON 순수 측정은
-실제 TX 시간초과 해결 증거가 아니다. CI는 coverage7.17.0·Python3.13.16·별도 이미지,
+Rest decoder는 바로 앞에서 검증한 digest/DTO/pins로 고정 envelope를 조립해 전체
+`_snapshot` 두 번째 호출만 제거한다. encoder의 전체 검증과 canonical bytes·raw hash·
+fieldset·clock·Geo·상한은 유지한다. 마지막 행의 raw/source link를 바꾸고 native digest도
+재계산한 음성 2개를 추가해 관련127PASS를 확인했다. coverage ON 순수215행 decode는
+기존2.71~2.85초에서 후보1.61~1.65초였으나 실제 TX 시간초과 해결 증거가 아니다. CI는 coverage7.17.0·Python3.13.16·별도 이미지,
 기존 owned 시험은 무coverage·다른 interpreter/image여서 환경 차이를 명시한다.
 새 owned 검증과 최종 CI·머지·운영432 배포는 아직 미완이다. 30초/3초/1초와 quota 및
 검증 단언을 완화하지 않는다. 원 최종 CI 원장은

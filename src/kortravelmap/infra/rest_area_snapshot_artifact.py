@@ -164,6 +164,16 @@ def _envelope(
 ) -> dict[str, Any]:
     values = _rest_pins(pins)
     digest = _snapshot(bundles, geo, pins)
+    return _canonical_envelope(bundles, geo, values, digest)
+
+
+def _canonical_envelope(
+    bundles: tuple[FeatureBundle, ...],
+    geo: GeoLoadContext | None,
+    values: dict[str, str],
+    digest: str,
+) -> dict[str, Any]:
+    """같은 호출에서 검증한 값만 고정 envelope로 조립한다. 별도 입력 권위가 아니다."""
     return {
         "version": 1,
         "domain": REST_AREA_SNAPSHOT_DOMAIN,
@@ -229,7 +239,7 @@ def decode_rest_area_snapshot_artifact(
         digest = _snapshot(bundles, geo, expected_pins)
         if (
             digest != data["native_input_digest"]
-            or _json_bytes(_envelope(bundles, geo, expected_pins)) != raw
+            or _json_bytes(_canonical_envelope(bundles, geo, expected, digest)) != raw
         ):
             _reject()
         return DecodedSnapshotArtifact(bundles, geo, digest)
