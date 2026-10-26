@@ -412,7 +412,7 @@ async def test_a_original_215_apply_required_postprocess_one_commit_and_separate
     metrics = {"reader_calls": [], "decode_seconds": [], "assessment_seconds": []}
     original_reader = rest_apply._read_locked_evidence
     original_decode = rest_apply.decode_transport_rest_evidence
-    original_assess = rest_apply.assess_transport_rest_area_reobservation_evidence
+    original_assess = rest_apply._assess_canonical
 
     async def settings(session):
         rows = (
@@ -473,7 +473,7 @@ async def test_a_original_215_apply_required_postprocess_one_commit_and_separate
     monkeypatch.setattr(rest_apply, "_read_locked_evidence", measured_reader)
     monkeypatch.setattr(rest_apply, "decode_transport_rest_evidence", measured_decode)
     monkeypatch.setattr(
-        rest_apply, "assess_transport_rest_area_reobservation_evidence", measured_assess
+        rest_apply, "_assess_canonical", measured_assess
     )
     atomic_started = time.perf_counter()
     try:

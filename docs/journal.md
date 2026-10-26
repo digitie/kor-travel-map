@@ -1,3 +1,11 @@
+## 2026-10-26 — Rest 최종 두 PostGIS 시간초과 보강 중
+
+6ceb의 최종CI는8성공·PostGIS2실패다. 실제215와 byte quota 반복 등록이 전체30초에
+걸렸고 원 실패·COMMIT 불명 경계를 보존한다. 전체/SQL/lock 상한을 유지하면서 같은
+호출 안의 중복 codec/의미 대조 준비만 줄이는 후속 수정이 관련 순수160개를 통과했다.
+두 독립 리뷰·실제PG·최종CI·머지/운영배포는 아직 남는다.
+[원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — Rest reader 제품 PG 통과와 로그아웃 이동 경합 보강
 
 개입 코드 없는 `81164788`의 coverage 실제215 시험이 통과했다. reader2.333초·

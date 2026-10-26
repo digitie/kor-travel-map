@@ -64,6 +64,13 @@ def _rest_pins(pins: SnapshotArtifactPins) -> dict[str, str]:
 
 
 def _snapshot(bundles: Any, geo: Any, pins: SnapshotArtifactPins) -> str:
+    return _validated_parts(bundles, geo, pins)[0]
+
+
+def _validated_parts(
+    bundles: Any, geo: Any, pins: SnapshotArtifactPins
+) -> tuple[str, Any, Any]:
+    """같은 호출의 검증과 직렬화 결과만 돌려준다. 호출 간 캐시는 만들지 않는다."""
     if type(bundles) is not tuple or not 0 < len(bundles) <= _MAX_ITEMS:
         _reject()
     # 전체 exact-type 순회가 외부 Mapping/serializer/tzinfo hook보다 먼저다.
@@ -94,11 +101,13 @@ def _snapshot(bundles: Any, geo: Any, pins: SnapshotArtifactPins) -> str:
         not within_place_projection_budget((bundle,)) for bundle in bundles
     ):
         _reject()
-    _pack(bundles)
-    if geo is not None:
-        _pack(geo.geo_applied)
-        _pack(geo.current_dataset)
-        _pack(geo.observed_data_tokens)
+    # foreign timezone/type 거부는 이전과 같이 digest 계산보다 먼저 수행한다.
+    packed_bundles = _pack(bundles)
+    packed_geo = (
+        None
+        if geo is None
+        else [_pack(geo.geo_applied), _pack(geo.current_dataset), _pack(geo.observed_data_tokens)]
+    )
     for bundle in bundles:
         if (
             type(bundle) is not FeatureBundle
@@ -144,7 +153,7 @@ def _snapshot(bundles: Any, geo: Any, pins: SnapshotArtifactPins) -> str:
         geo=geo,
         retire_geometryless_areas=True,
     )
-    return _artifact_digest(
+    digest = _artifact_digest(
         [
             pins.native_domain,
             pins.provider,
@@ -157,19 +166,20 @@ def _snapshot(bundles: Any, geo: Any, pins: SnapshotArtifactPins) -> str:
             True,
         ]
     )
+    return digest, packed_bundles, packed_geo
 
 
 def _envelope(
     bundles: tuple[FeatureBundle, ...], geo: GeoLoadContext | None, pins: SnapshotArtifactPins
 ) -> dict[str, Any]:
     values = _rest_pins(pins)
-    digest = _snapshot(bundles, geo, pins)
-    return _canonical_envelope(bundles, geo, values, digest)
+    digest, packed_bundles, packed_geo = _validated_parts(bundles, geo, pins)
+    return _canonical_envelope(packed_bundles, packed_geo, values, digest)
 
 
 def _canonical_envelope(
-    bundles: tuple[FeatureBundle, ...],
-    geo: GeoLoadContext | None,
+    packed_bundles: Any,
+    packed_geo: Any,
     values: dict[str, str],
     digest: str,
 ) -> dict[str, Any]:
@@ -179,10 +189,8 @@ def _canonical_envelope(
         "domain": REST_AREA_SNAPSHOT_DOMAIN,
         "pins": values,
         "native_input_digest": digest,
-        "bundles": _pack(bundles),
-        "geo": None
-        if geo is None
-        else [_pack(geo.geo_applied), _pack(geo.current_dataset), _pack(geo.observed_data_tokens)],
+        "bundles": packed_bundles,
+        "geo": packed_geo,
     }
 
 
@@ -236,10 +244,10 @@ def decode_rest_area_snapshot_artifact(
             geo = GeoLoadContext(*(_unpack(v) for v in geo_data))
         else:
             _reject()
-        digest = _snapshot(bundles, geo, expected_pins)
+        digest, packed_bundles, packed_geo = _validated_parts(bundles, geo, expected_pins)
         if (
             digest != data["native_input_digest"]
-            or _json_bytes(_canonical_envelope(bundles, geo, expected, digest)) != raw
+            or _json_bytes(_canonical_envelope(packed_bundles, packed_geo, expected, digest)) != raw
         ):
             _reject()
         return DecodedSnapshotArtifact(bundles, geo, digest)

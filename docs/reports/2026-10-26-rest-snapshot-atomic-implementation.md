@@ -1,5 +1,30 @@
 # Rest432 실제 동시 쓰기 구현 원장
 
+## 6ceb 최종 CI 시간초과와 같은 호출 안의 재검증 비용 제거
+
+`6ceb42780e0e393b9229c5b1dcb8566bb6a1d5c4`의 열 검사 중 여덟 개는 성공했고
+PostGIS 두 검사는 각각 실제215와 byte quota 반복 등록의 합산30초에 실패했다.
+glibc의 실제215는 COMMIT 응답 대기에서, Alpine은 후처리 시작 SQL 준비에서 취소됐다.
+따라서 특정 SQL 하나가 원인이라고 단정하지 않으며 COMMIT 결과 불명 경계를 보존한다.
+reader3초·lock1초의 실패와도 구분한다. 원 로그는
+`map1418-6ceb-ci-failed-raw-r1.log`로 보존한다.
+
+후속 수정은 전체30초를 유지하면서 같은 호출에서 이미 검증한 값의 중복 작업을 줄인다.
+Rest codec은 기존 exact-type 선검사·foreign timezone 거부·raw/identity/fieldset·native 지문·
+canonical bytes 검사를 유지하고, digest 전에 만든 packed 값을 같은 호출의 envelope에
+재사용한다. 호출 간 DTO/bytes 캐시는 만들지 않으며 Airport codec은 바꾸지 않는다.
+
+Rest 적용은 원 artifact를 엄격히 decode하고 잠금 뒤 새 DB evidence도 엄격히 decode한
+두 지역 값을 private 의미 대조로 보낸다. 별도의 값싼 Geo 집합 한도 검사는 유지하며
+전체 범위·저장 projection·raw·Geo·scalar 판정과 fence/DB 재확인은 그대로다. 외부 입력을
+받는 public assessor의 재검증도 유지한다. 가변 DTO는 기존 caller 독점 소유 계약을 따른다.
+
+초기 새 Geo 회귀는 fixture가 Geo=None인 것을 놓쳐1FAIL/159PASS였으며 원 로그를 남겼다.
+실제 GeoLoadContext를 구성한 수정 후 관련160개가7.13초에 통과했다. DB 없는 순수 검사이며
+후속 두 독립 리뷰·같은 제한의 실제 PG·최종 CI가 남는다. 기존 새 UI14PASS는6ceb의
+별도 검증이며 이 후속 Python 수정의 최종 source UI/배포 완료로 확대하지 않는다.
+
+
 
 ## 최종 CI 실패와 후속 수정 — 2026-10-26
 

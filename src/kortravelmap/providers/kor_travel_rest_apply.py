@@ -33,7 +33,8 @@ from kortravelmap.infra.transaction_limits import apply_bounded_transaction_limi
 from kortravelmap.infra.transport_rest_evidence_reader import decode_transport_rest_evidence
 from kortravelmap.providers.kor_travel_rest_evidence import (
     RestReobservationPreparation,
-    assess_transport_rest_area_reobservation_evidence,
+    _assess_canonical,
+    _geo_context_valid,
 )
 from kortravelmap.providers.kor_travel_transport_apply import _counter_state
 
@@ -179,9 +180,11 @@ async def apply_stored_rest_area_reobservation(
         )
         if fresh != preparation.evidence:
             raise ValueError("rest-area evidence changed after locking; replan")
-        assessed = await assess_transport_rest_area_reobservation_evidence(
-            artifact.bundles, fresh, pins=pins, geo=artifact.geo
-        )
+        # 두 입력은 이 호출 안에서 strict decode했다. 가변 DTO의 caller 독점 소유를 유지하고
+        # 같은 값의 재 encode/decode만 피하며 DB 의미·전체 범위·Geo를 모두 대조한다.
+        if not _geo_context_valid(artifact.geo):
+            raise ValueError("invalid canonical rest Geo context")
+        assessed = await _assess_canonical(artifact.bundles, fresh, geo=artifact.geo)
         if assessed.eligible is not True:
             raise ValueError("stored rest-area input requires EX: " + assessed.reason)
         await batch._validate_batch_manifest(

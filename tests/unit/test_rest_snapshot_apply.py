@@ -314,3 +314,18 @@ async def test_locked_reader_failure_keeps_original_error_and_requires_outer_rol
     apply.assert_not_awaited()
     finish.assert_not_awaited()
     assert saved == []
+
+
+async def test_decoded_artifact_still_requires_bounded_geo_context(monkeypatch):
+    session, _, prep, args, saved, _, apply, finish = await _case(monkeypatch)
+    from kortravelmap.dto.geo_dataset import GeoApplied, GeoLoadContext
+
+    _, bundle, _ = await _fixture()
+    geo = GeoLoadContext(GeoApplied(reverse=False, geocode=False), None,
+                         {f"{n:064x}" for n in range(33)})
+    payload = encode_rest_area_snapshot_artifact((bundle,), geo, pins=_PINS)
+    with pytest.raises(ValueError, match="invalid canonical rest Geo context"):
+        await target.apply_stored_rest_area_reobservation(session, payload, prep, **args)
+    assert saved == []
+    apply.assert_not_awaited()
+    finish.assert_not_awaited()
