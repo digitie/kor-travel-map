@@ -10,6 +10,21 @@
 
 ## [Unreleased]
 
+### snapshot 문자열 선검사 비용 (2026-10-26)
+
+- **PERFORMANCE**: exact scalar와 문자열 span의 반복 Python 탐색을 줄인다.
+  각 profile의 입력 크기·깊이·node 상한과 canonical 검증은 유지한다.
+
+### 휴게소 저장 입력의 중복 검증 비용 (2026-10-26)
+
+- **PERFORMANCE**: 실험용 Rest 재관측 경로에서 같은 호출 안의 엄격 검증·직렬화 결과를
+  재사용한다. 입력·DB 의미 검사와 시간/용량 상한은 유지하며 runtime profile은 기본OFF다.
+
+### 관리자 로그아웃 이동과 복구 (2026-10-26)
+
+- **FIXED**: 로그아웃 도중 늦게 도착한401이 중복 페이지 이동을 일으키지 않도록 조정한다.
+  이동 실패나15초 만료 뒤에는 재시도할 수 있으며401 응답·인증 키 폐기·다른 탭 알림은 유지한다.
+
 ### transport 가격 추이 본문 읽기 보강 (2026-10-25, #1365 후속)
 
 - **FIXED**: gzip 본문 끝 뒤에 남은 bytes(두 번째 member 포함)를 `upstream_contract`로 거부한다. 503 problem 본문을 읽는

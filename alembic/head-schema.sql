@@ -16346,6 +16346,33 @@ $$;
 ALTER FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: _lock_snapshot_postprocess_topic_revisions(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops._lock_snapshot_postprocess_topic_revisions() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE v_topic text; v_count integer:=0;
+BEGIN
+    FOR v_topic IN
+        SELECT topic FROM ops.ops_live_topic_revisions
+        WHERE topic=ANY(ARRAY['dataset_projection','provider_sync'])
+        ORDER BY topic COLLATE "C" FOR UPDATE
+    LOOP
+        v_count:=v_count+1;
+    END LOOP;
+    IF v_count<>2 THEN
+        RAISE EXCEPTION 'snapshot postprocess topics are not initialized'
+            USING ERRCODE='23514',CONSTRAINT='ck_snapshot_postprocess_topics_present';
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION ops._lock_snapshot_postprocess_topic_revisions() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_write_attempts; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -16436,6 +16463,8 @@ CREATE FUNCTION ops._provider_snapshot_postprocess_receipt(p_snapshot uuid, p_re
 DECLARE
     v_receipt jsonb;
     v_artifact record;
+    v_dataset record;
+    v_domain text;
     v_context jsonb;
     v_key text;
     v_value jsonb;
@@ -16453,7 +16482,6 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM jsonb_object_keys(v_receipt))<>20 OR NOT(v_receipt ?& v_keys)
        OR v_receipt->'version' IS DISTINCT FROM '1'::jsonb
-       OR v_receipt->'domain' IS DISTINCT FROM '"airport-snapshot-postprocess-v1"'::jsonb
        OR v_receipt->'sync_recorded' IS DISTINCT FROM 'true'::jsonb
        OR v_receipt->'stale_close_completed' IS DISTINCT FROM 'true'::jsonb THEN
         RAISE EXCEPTION 'invalid full postprocess receipt' USING ERRCODE='22023';
@@ -16480,6 +16508,21 @@ BEGIN
       FROM ops.provider_snapshot_artifacts artifact
       JOIN ops.provider_snapshot_controls control USING(snapshot_id)
       WHERE artifact.snapshot_id=p_snapshot;
+    SELECT dataset.provider,dataset.dataset_key INTO STRICT v_dataset
+      FROM provider_sync.provider_datasets dataset
+      WHERE dataset.provider_dataset_id=v_artifact.provider_dataset_id;
+    IF v_dataset.provider='kor-travel-transport' AND v_dataset.dataset_key='transport_airports' THEN
+        v_domain:='airport-snapshot-postprocess-v1';
+    ELSIF v_dataset.provider='kor-travel-transport' AND v_dataset.dataset_key='transport_rest_areas' THEN
+        v_domain:='rest-area-snapshot-postprocess-v1';
+    ELSE
+        RAISE EXCEPTION 'unsupported snapshot postprocess dataset'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    IF v_receipt->'domain' IS DISTINCT FROM to_jsonb(v_domain) THEN
+        RAISE EXCEPTION 'snapshot postprocess domain differs from its dataset'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
     v_context:=convert_from(v_artifact.observation_context,'UTF8')::jsonb;
     IF v_receipt->>'root_job_id' IS DISTINCT FROM v_artifact.root_job_id::text
        OR v_receipt->>'source_job_id' IS DISTINCT FROM v_artifact.source_job_id::text
@@ -16809,6 +16852,8 @@ BEGIN
     UPDATE ops.provider_snapshot_controls SET postprocess_txid=txid_current(),
         postprocess_intent_sha256=encode(sha256(p_receipt),'hex'),updated_at=clock_timestamp()
       WHERE snapshot_id=p_snapshot;
+    -- fence/domain/원 결과/marker 검증 뒤, 첫 callback topic DML 전에만 고정순 선취득한다.
+    PERFORM ops._lock_snapshot_postprocess_topic_revisions();
     RETURN NULL;
 END;
 $$;
@@ -18032,6 +18077,8 @@ DECLARE
     v_cursor jsonb;
     v_result jsonb;
     v_expected_cursor jsonb;
+    v_asset text;
+    v_dataset record;
     v_key text;
 BEGIN
     v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
@@ -18059,8 +18106,19 @@ BEGIN
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
     END IF;
     v_result:=convert_from(v_control.applied_result,'UTF8')::jsonb;
-    v_expected_cursor:=jsonb_build_object('loaded_at',v_receipt->>'fetched_at',
-        'asset_key','feature_place_transport_airports');
+    SELECT dataset.provider,dataset.dataset_key INTO STRICT v_dataset
+      FROM ops.provider_snapshot_artifacts artifact
+      JOIN provider_sync.provider_datasets dataset USING(provider_dataset_id)
+      WHERE artifact.snapshot_id=p_snapshot;
+    IF v_dataset.provider='kor-travel-transport' AND v_dataset.dataset_key='transport_airports' THEN
+        v_asset:='feature_place_transport_airports';
+    ELSIF v_dataset.provider='kor-travel-transport' AND v_dataset.dataset_key='transport_rest_areas' THEN
+        v_asset:='feature_place_transport_rest_areas';
+    ELSE
+        RAISE EXCEPTION 'unsupported snapshot postprocess dataset'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_member_binding';
+    END IF;
+    v_expected_cursor:=jsonb_build_object('loaded_at',v_receipt->>'fetched_at','asset_key',v_asset);
     FOREACH v_key IN ARRAY ARRAY['bundles_total','features_inserted','features_updated',
         'source_records_inserted','source_links_inserted','source_links_updated'] LOOP
         v_expected_cursor:=v_expected_cursor||jsonb_build_object(v_key,v_result->'load'->v_key);
@@ -19090,6 +19148,12 @@ CREATE FUNCTION ops.register_provider_snapshot_artifact(p_root uuid, p_source_jo
 DECLARE
     v_member ops.import_job_datasets%ROWTYPE;
     v_dataset record;
+    v_domain text;
+    v_observation_domain text;
+    v_source_type text;
+    v_max_count integer;
+    v_export jsonb;
+    v_collection jsonb;
     v_existing record;
     v_payload jsonb;
     v_context jsonb;
@@ -19181,8 +19245,19 @@ BEGIN
     WHERE dataset.provider_dataset_id=v_member.provider_dataset_id AND dataset.is_active
       AND operation.operation_key=v_member.operation_key AND operation.is_enabled
       AND operation.operation_kind='refresh';
-    IF v_dataset.provider<>'kor-travel-transport' OR v_dataset.dataset_key<>'transport_airports' THEN
-        RAISE EXCEPTION 'snapshot registration supports Airport v1 only' USING ERRCODE='23514',
+    IF v_dataset.provider='kor-travel-transport' AND v_dataset.dataset_key='transport_airports' THEN
+        v_domain:='airport-prepared-typed-v1';
+        v_observation_domain:='airport-snapshot-observation-v1';
+        v_source_type:='airport';
+        v_max_count:=2730;
+    ELSIF v_dataset.provider='kor-travel-transport' AND v_dataset.dataset_key='transport_rest_areas' THEN
+        v_domain:='rest-area-prepared-typed-v1';
+        v_observation_domain:='rest-area-snapshot-observation-v1';
+        v_source_type:='rest_area';
+        v_max_count:=256;
+        v_context_keys:=v_context_keys||ARRAY['export_window'];
+    ELSE
+        RAISE EXCEPTION 'unsupported registered snapshot dataset' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_registration_domain';
     END IF;
 
@@ -19195,7 +19270,7 @@ BEGIN
     END IF;
     IF (SELECT count(*) FROM jsonb_object_keys(v_payload))<>6
        OR NOT (v_payload ?& v_payload_keys)
-       OR (SELECT count(*) FROM jsonb_object_keys(v_context))<>12
+       OR (SELECT count(*) FROM jsonb_object_keys(v_context))<>cardinality(v_context_keys)
        OR NOT (v_context ?& v_context_keys) THEN
         RAISE EXCEPTION 'unexpected snapshot envelope keys' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_registration_domain';
@@ -19215,8 +19290,8 @@ BEGIN
     END IF;
     IF v_payload->'version' IS DISTINCT FROM '1'::jsonb
        OR v_context->'version' IS DISTINCT FROM '1'::jsonb
-       OR v_payload->'domain' IS DISTINCT FROM '"airport-prepared-typed-v1"'::jsonb
-       OR v_context->'domain' IS DISTINCT FROM '"airport-snapshot-observation-v1"'::jsonb
+       OR v_payload->'domain' IS DISTINCT FROM to_jsonb(v_domain)
+       OR v_context->'domain' IS DISTINCT FROM to_jsonb(v_observation_domain)
        OR v_context->'upstream_eof' IS DISTINCT FROM 'true'::jsonb
        OR v_context->'validation_mode' IS DISTINCT FROM '"strict"'::jsonb
        OR v_context->'dropped' IS DISTINCT FROM '0'::jsonb
@@ -19258,7 +19333,7 @@ BEGIN
        OR v_payload->'pins'->>'sdk_inventory_sha256' !~ '^[0-9a-f]{64}$'
        OR v_payload->'pins'->>'provider'<>v_dataset.provider
        OR v_payload->'pins'->>'dataset_key'<>v_dataset.dataset_key
-       OR v_payload->'pins'->>'source_entity_type'<>'airport'
+       OR v_payload->'pins'->>'source_entity_type'<>v_source_type
        OR v_payload->'pins'->>'native_domain'<>'native-full-refresh-v1' THEN
         RAISE EXCEPTION 'unsupported snapshot provider pins' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_registration_domain';
@@ -19268,9 +19343,75 @@ BEGIN
             CONSTRAINT='ck_provider_snapshot_registration_domain';
     END IF;
     v_count:=jsonb_array_length(v_payload->'bundles'->1);
-    IF v_count NOT BETWEEN 1 AND 2730 OR v_context->'source_observations' IS DISTINCT FROM to_jsonb(v_count) THEN
+    IF v_count NOT BETWEEN 1 AND v_max_count OR v_context->'source_observations' IS DISTINCT FROM to_jsonb(v_count) THEN
         RAISE EXCEPTION 'snapshot source count mismatch' USING ERRCODE='23514',
             CONSTRAINT='ck_provider_snapshot_registration_domain';
+    END IF;
+    IF v_source_type='rest_area' THEN
+        -- 이 검사는 bounded header뿐이다. 전체 DTO/원 clock 권위는 canonical decoder가 재검증한다.
+        IF v_payload->'pins'->>'normalizer_revision'<>'transport-rest-area-name-phones-v1'
+           OR v_payload->'pins'->>'geo_domain'<>'transport-rest-area-geo-v1'
+           OR v_payload->'pins'->>'clock_domain'<>'aware-clock-preserved-v1' THEN
+            RAISE EXCEPTION 'unsupported Rest snapshot pins' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        v_export:=v_context->'export_window';
+        IF jsonb_typeof(v_export) IS DISTINCT FROM 'object' THEN
+            RAISE EXCEPTION 'Rest export metadata required' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        IF (SELECT count(*) FROM jsonb_object_keys(v_export))<>11
+           OR NOT(v_export ?& ARRAY['version','domain','path','limit','item_count','has_more',
+               'next_cursor','collection','body_bytes','body_sha256','captured_at']) THEN
+            RAISE EXCEPTION 'unexpected Rest export metadata keys' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        IF jsonb_typeof(v_export->'version') IS DISTINCT FROM 'number'
+           OR jsonb_typeof(v_export->'limit') IS DISTINCT FROM 'number'
+           OR jsonb_typeof(v_export->'item_count') IS DISTINCT FROM 'number'
+           OR jsonb_typeof(v_export->'body_bytes') IS DISTINCT FROM 'number'
+           OR jsonb_typeof(v_export->'body_sha256') IS DISTINCT FROM 'string'
+           OR jsonb_typeof(v_export->'captured_at') IS DISTINCT FROM 'string' THEN
+            RAISE EXCEPTION 'invalid Rest export metadata types' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        IF scale((v_export->'version')::numeric)<>0
+           OR scale((v_export->'limit')::numeric)<>0
+           OR scale((v_export->'item_count')::numeric)<>0
+           OR scale((v_export->'body_bytes')::numeric)<>0
+           OR v_export->'version' IS DISTINCT FROM '1'::jsonb
+           OR v_export->'domain' IS DISTINCT FROM '"transport-rest-current-export-window-v1"'::jsonb
+           OR v_export->'path' IS DISTINCT FROM '"/v1/service/exports/rest-areas"'::jsonb
+           OR v_export->'limit' IS DISTINCT FROM '256'::jsonb
+           OR v_export->'item_count' IS DISTINCT FROM to_jsonb(v_count)
+           OR v_export->'has_more' IS DISTINCT FROM 'false'::jsonb
+           OR v_export->'next_cursor' IS DISTINCT FROM 'null'::jsonb
+           OR (v_export->'body_bytes')::numeric NOT BETWEEN 1 AND 2097152
+           OR v_export->>'body_sha256' !~ '^[0-9a-f]{64}$'
+           OR octet_length(v_export->>'captured_at') NOT BETWEEN 20 AND 64
+           OR v_export->>'captured_at' !~ '(Z|[+-][0-9]{2}:[0-9]{2})$' THEN
+            RAISE EXCEPTION 'incomplete Rest export window' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        v_collection:=v_export->'collection';
+        IF jsonb_typeof(v_collection) IS DISTINCT FROM 'object' THEN
+            RAISE EXCEPTION 'Rest collection metadata required' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        IF (SELECT count(*) FROM jsonb_object_keys(v_collection))<>4
+           OR NOT(v_collection ?& ARRAY['source','last_success_at','failed','stale'])
+           OR v_collection->'source' IS DISTINCT FROM '"krex_rest_area"'::jsonb
+           OR v_collection->'failed' IS DISTINCT FROM 'false'::jsonb
+           OR v_collection->'stale' IS DISTINCT FROM 'false'::jsonb
+           OR jsonb_typeof(v_collection->'last_success_at') IS DISTINCT FROM 'string'
+           OR octet_length(v_collection->>'last_success_at') NOT BETWEEN 20 AND 64
+           OR v_collection->>'last_success_at' !~ '(Z|[+-][0-9]{2}:[0-9]{2})$' THEN
+            RAISE EXCEPTION 'unsupported Rest current collection' USING ERRCODE='23514',
+                CONSTRAINT='ck_provider_snapshot_registration_domain';
+        END IF;
+        -- 원문 bytes는 context SHA와 함께 immutable 보존한다. 현재/새 시각을 만들지 않는다.
+        PERFORM (v_export->>'captured_at')::timestamptz;
+        PERFORM (v_collection->>'last_success_at')::timestamptz;
     END IF;
     -- text 변환은 작은 context 내부 string에만 한다. 의미 복원은 후속 context codec의 책임이다.
     IF pg_column_size(v_context->'observation_generation')>1024 THEN
@@ -23570,7 +23711,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -33585,6 +33726,14 @@ REVOKE ALL ON FUNCTION ops._lock_provider_snapshot_executor(p_snapshot uuid, p_g
 
 REVOKE ALL ON FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops._lock_scoped_feature_write_scope(p_dataset bigint, p_regions jsonb, p_exclusive boolean) TO ktm_curation_command_owner;
+
+
+--
+-- Name: FUNCTION _lock_snapshot_postprocess_topic_revisions(); Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION ops._lock_snapshot_postprocess_topic_revisions() FROM PUBLIC;
+GRANT ALL ON FUNCTION ops._lock_snapshot_postprocess_topic_revisions() TO ktm_curation_command_owner;
 
 
 --

@@ -88,7 +88,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-04 — **독립 데이터셋 동시 쓰기**
 
-  snapshot 원자성을 유지하며 독립 dataset DML을 병행한다. [EX](reports/2026-10-24-exclusive-provider-full-refresh.md)·[SH](reports/2026-10-25-sh-collector-integration-design.md)·[실측](reports/2026-10-25-sh-operating-scope-measurement.md)은 운영 수용과 구분한다. 큰 입력·실worker는 미완이며 정본은 ADR-115/acceptance 같은 ID다.
+  snapshot 원자성을 유지하며 독립 dataset DML을 병행한다. 432 CI 수정 중. [EX](reports/2026-10-24-exclusive-provider-full-refresh.md)·[SH](reports/2026-10-25-sh-collector-integration-design.md)·[실측](reports/2026-10-25-sh-operating-scope-measurement.md)은 운영 수용과 구분한다. 큰 입력·실worker는 미완이며 정본은 ADR-115/acceptance 같은 ID다.
 
 - [ ] T-CWRITE-05 — **완전 지역의 동시 쓰기·경계 이동**
 
@@ -104,7 +104,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-08 — **적대 리뷰 2인·실부하·UI 수용**
 
-  정확성 반증·live API/UI·CPU/RAM/DB 전후 비교를 통과시킨다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+  정확성 반증·live API/UI·CPU/RAM/DB 전후 비교를 통과시킨다. Rest byte quota의 최종 CI 재검증은 아직 대기한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-09 — **배포·확대·되돌림과 문서 마감**
 

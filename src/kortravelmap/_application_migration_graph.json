@@ -189,6 +189,12 @@
         "430_provider_snapshot_recovery"
       ],
       "revision": "431_transport_rest_reader"
+    },
+    {
+      "down_revision": [
+        "431_transport_rest_reader"
+      ],
+      "revision": "432_rest_snapshot_atomic"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -446,3 +446,52 @@ async def test_begin_preserves_additional_kernel_and_observation_fields():
     assert value["snapshot_observation_generation"] == "original-generation"
     assert value["additional"] == ["preserved"]
     session.commit.assert_not_called()
+
+
+async def test_rest_registered_read_uses_exact_static_profile_and_preserves_original_result(saved):
+    import hashlib
+
+    from kortravelmap.infra.rest_area_snapshot_artifact import (
+        decode_rest_area_snapshot_artifact,
+        encode_rest_area_snapshot_artifact,
+    )
+    from tests.unit.test_transport_rest_preparation import _PINS as rest_pins
+    from tests.unit.test_transport_rest_preparation import _fixture as rest_fixture
+
+    _, bundle, geo = await rest_fixture()
+    payload = encode_rest_area_snapshot_artifact((bundle,), geo, pins=rest_pins)
+    row = dict(saved)
+    row.update(
+        artifact_payload=payload,
+        artifact_sha256=hashlib.sha256(payload).hexdigest(),
+        native_input_digest=decode_rest_area_snapshot_artifact(
+            payload, expected_pins=rest_pins
+        ).native_input_digest,
+    )
+    result = await repo.read_provider_snapshot_for_member(
+        _session(row), _member(), expected_pins=rest_pins
+    )
+    assert result.artifact.bundles == (bundle,)
+    assert result.artifact_payload == payload
+    assert result.applied_result_bytes == saved["applied_result"]
+    assert result.applied_result.retired == 17
+    with pytest.raises(UnsupportedSnapshotArtifact, match="invalid airport snapshot artifact"):
+        await repo.read_provider_snapshot_for_member(_session(row), _member(), expected_pins=_PINS)
+    with pytest.raises(UnsupportedSnapshotArtifact, match="invalid rest-area snapshot artifact"):
+        await repo.read_provider_snapshot_for_member(
+            _session(saved), _member(), expected_pins=rest_pins
+        )
+
+
+async def test_registered_profile_dispatch_never_calls_foreign_scope_equality_hook():
+    touched = []
+
+    class ForeignString(str):
+        def __eq__(self, other):
+            touched.append("equality")
+            raise AssertionError("foreign equality called")
+
+    pins = replace(_PINS, dataset_key=ForeignString("transport_airports"))
+    with pytest.raises(repo.SnapshotRecoveryCorruption, match="exact snapshot scope"):
+        repo._decode_registered_artifact(b"invalid", expected_pins=pins)
+    assert touched == []

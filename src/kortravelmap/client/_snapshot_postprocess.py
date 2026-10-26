@@ -41,21 +41,37 @@ async def run_snapshot_postprocess(
         async with client._session_factory() as session, session.begin():  # noqa: SLF001
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
             await apply_bounded_transaction_limits(session)
-            existing = await begin_provider_snapshot_postprocess(session, token, receipt_candidate)
-            if existing is not None:
-                return existing
-            connection = await session.connection()
-            bound = copy.copy(client)
-            bound._session_factory = async_sessionmaker(  # noqa: SLF001
-                bind=connection,
-                class_=AsyncSession,
-                expire_on_commit=False,
-                autoflush=False,
-                join_transaction_mode="rollback_only",
+            receipt = await run_snapshot_postprocess_in_session(
+                client, session, token, receipt_candidate, work
             )
-            bound._engine = cast("AsyncEngine", _SnapshotConnectionGuard())  # noqa: SLF001
-            bound._transaction_bound = True  # noqa: SLF001
-            await work(bound)
-            await finish_provider_snapshot_postprocess(session, token, receipt_candidate)
         # commit 응답이 불명확하면 여기까지 오지 않는다. caller는 SDK0 member read로 확인한다.
+    return receipt
+
+
+async def run_snapshot_postprocess_in_session(
+    client: AsyncKorTravelMapClient,
+    session: AsyncSession,
+    token: SnapshotExecutorToken,
+    receipt_candidate: bytes,
+    work: Callable[[AsyncKorTravelMapClient], Awaitable[None]],
+) -> bytes:
+    """기존 caller TX 안에서만 작업한다. commit·재연결·독립 session을 소유하지 않는다."""
+    if type(receipt_candidate) is not bytes or not 1 <= len(receipt_candidate) <= 4096:
+        raise ValueError("bounded postprocess receipt candidate required")
+    existing = await begin_provider_snapshot_postprocess(session, token, receipt_candidate)
+    if existing is not None:
+        return existing
+    connection = await session.connection()
+    bound = copy.copy(client)
+    bound._session_factory = async_sessionmaker(  # noqa: SLF001
+        bind=connection,
+        class_=AsyncSession,
+        expire_on_commit=False,
+        autoflush=False,
+        join_transaction_mode="rollback_only",
+    )
+    bound._engine = cast("AsyncEngine", _SnapshotConnectionGuard())  # noqa: SLF001
+    bound._transaction_bound = True  # noqa: SLF001
+    await work(bound)
+    await finish_provider_snapshot_postprocess(session, token, receipt_candidate)
     return receipt_candidate

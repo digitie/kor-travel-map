@@ -979,6 +979,15 @@ _SNAPSHOT_SCHEMA_OWNER_ACL = (
     "TO ktm_feature_state_procedure_owner; END IF; END $snapshot_activation$",
 )
 
+# 432의 새 private helper만 추가한다. frozen430 ACL tuple은 그대로 보존한다.
+_SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL = (
+    "REVOKE ALL ON FUNCTION ops._lock_snapshot_postprocess_topic_revisions(...) "
+    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION ops._lock_snapshot_postprocess_topic_revisions(...) "
+    "TO ktm_curation_command_owner",
+)
+
+
 _SNAPSHOT_STATE_OWNER_DEPENDENCY_ACL = (
     "DO $snapshot_kernel$ BEGIN IF to_regclass('ops.provider_snapshot_artifacts') IS NOT NULL THEN "
     "GRANT EXECUTE ON FUNCTION ops._arm_scoped_feature_write_deadline(...),"
@@ -1043,7 +1052,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _SCALAR_GUARD_INSTALLER_ACL
         + _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL
         + _STRICT_SH_DATA_SCHEMA_OWNER_ACL
-        + _SNAPSHOT_SCHEMA_OWNER_ACL,
+        + _SNAPSHOT_SCHEMA_OWNER_ACL
+        + _SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
@@ -1136,6 +1146,7 @@ _OPTIONAL_ROUTINES: Mapping[str, str] = {
     "feature._install_strict_sh_data_guards": "429_strict_sh_data_guards",
     "feature._bounded_curation_string_object": "428_bounded_curation_capture",
     "feature._bounded_provider_curation_input_set": "428_bounded_curation_capture",
+    "ops._lock_snapshot_postprocess_topic_revisions": "432_rest_snapshot_atomic",
     "feature._transport_rest_evidence_shape": "431_transport_rest_reader",
     "feature._transport_rest_evidence_inventory": "431_transport_rest_reader",
     "feature.read_transport_rest_snapshot_evidence": "431_transport_rest_reader",

@@ -371,6 +371,13 @@ _RUNTIME_DB_PRIVILEGE_SQL = text(
                    OR has_any_column_privilege(session_user,relation.oid,
                     'SELECT,INSERT,UPDATE,REFERENCES'))
         ) AS can_access_provider_snapshot_private_relations,
+        EXISTS (
+            SELECT 1 FROM pg_proc routine JOIN pg_namespace namespace
+              ON namespace.oid=routine.pronamespace
+            WHERE namespace.nspname='ops'
+              AND routine.proname='_lock_snapshot_postprocess_topic_revisions'
+              AND has_function_privilege(session_user,routine.oid,'EXECUTE')
+        ) AS can_execute_snapshot_private_topic_lock,
         (has_table_privilege(session_user,'feature.feature_geocode_stamps','INSERT')
          OR has_table_privilege(session_user,'feature.feature_geocode_stamps','UPDATE')
          OR has_table_privilege(session_user,'feature.feature_geocode_stamps','DELETE')
@@ -656,6 +663,9 @@ def _runtime_db_privilege_problems(
     # `SET FALSE`로 주므로 이 술어는 여전히 거짓이어야 하고, 여전히 갈린다.
     forbidden_true_fields = {
         "can_mutate_geocode_stamps_directly": "runtime login must not mutate geocode stamps directly",
+        "can_execute_snapshot_private_topic_lock": (
+            "runtime login must not execute the private snapshot topic lock"
+        ),
         "can_access_provider_snapshot_private_relations": (
             "runtime login must not access private provider snapshot relations directly"
         ),

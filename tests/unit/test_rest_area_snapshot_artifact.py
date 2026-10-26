@@ -383,3 +383,42 @@ def test_wire_bounds_reject_before_json_object_allocation(raw, monkeypatch):
     with pytest.raises(codec.UnsupportedRestAreaSnapshotArtifact):
         codec.decode_rest_area_snapshot_artifact(raw, expected_pins=_PINS)
     assert calls == []
+
+
+@pytest.mark.parametrize("corruption", ["raw_payload", "source_link"])
+async def test_decoder_rejects_self_consistent_wire_with_corrupt_last_source(corruption):
+    # 공격자가 wire/native digest를 함께 바꿔도 마지막 행의 원천 무결성은 필수다.
+    bundles, geo = await _input(2, resolved=True)
+    original = codec.encode_rest_area_snapshot_artifact(bundles, geo, pins=_PINS)
+    decoded = codec.decode_rest_area_snapshot_artifact(original, expected_pins=_PINS)
+    last = decoded.bundles[-1]
+    if corruption == "raw_payload":
+        last.source_record.raw_data["name"] = "변조된 원문"
+    else:
+        last.source_link.source_record_key = decoded.bundles[0].source_record.source_record_key
+    data = json.loads(original)
+    data["bundles"] = codec._pack(decoded.bundles)
+    data["native_input_digest"] = codec._artifact_digest(
+        [
+            _PINS.native_domain,
+            _PINS.provider,
+            _PINS.dataset_key,
+            _PINS.source_entity_type,
+            list(decoded.bundles),
+            [
+                decoded.geo.geo_applied,
+                decoded.geo.current_dataset,
+                decoded.geo.observed_data_tokens,
+            ],
+            True,
+        ]
+    )
+    corrupted = codec._json_bytes(data)
+    with pytest.raises(codec.UnsupportedRestAreaSnapshotArtifact):
+        codec.decode_rest_area_snapshot_artifact(corrupted, expected_pins=_PINS)
+    restored = codec.decode_rest_area_snapshot_artifact(original, expected_pins=_PINS)
+    assert _state(restored.bundles) == _state(bundles)
+    assert (
+        codec.encode_rest_area_snapshot_artifact(restored.bundles, restored.geo, pins=_PINS)
+        == original
+    )

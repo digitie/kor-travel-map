@@ -20,6 +20,7 @@ from kortravelmap.infra.provider_snapshot_result import (
     SnapshotApplyResult,
     decode_snapshot_apply_result,
 )
+from kortravelmap.infra.rest_area_snapshot_artifact import decode_rest_area_snapshot_artifact
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -209,6 +210,22 @@ def _kernel_binding(row: Any) -> SnapshotKernelBinding | None:
     )
 
 
+def _decode_registered_artifact(
+    payload: bytes, *, expected_pins: SnapshotArtifactPins
+) -> DecodedSnapshotArtifact:
+    """호출자가 고정한 정적 profile만 dispatch한다. wire 문자열이 권한을 선택하지 않는다."""
+    if type(expected_pins) is not SnapshotArtifactPins:
+        raise SnapshotRecoveryCorruption("exact snapshot pins required")
+    scope = (expected_pins.provider, expected_pins.dataset_key, expected_pins.source_entity_type)
+    if any(type(value) is not str for value in scope):
+        raise SnapshotRecoveryCorruption("exact snapshot scope required")
+    if scope == ("kor-travel-transport", "transport_airports", "airport"):
+        return decode_provider_snapshot_artifact(payload, expected_pins=expected_pins)
+    if scope == ("kor-travel-transport", "transport_rest_areas", "rest_area"):
+        return decode_rest_area_snapshot_artifact(payload, expected_pins=expected_pins)
+    raise SnapshotRecoveryCorruption("unsupported registered snapshot profile")
+
+
 async def read_provider_snapshot_for_member(
     session: AsyncSession,
     member: SnapshotMember,
@@ -231,7 +248,7 @@ async def read_provider_snapshot_for_member(
         return None
     # SD의 동일 statement snapshot을 그대로 해석한다. 별도 재조회로 상태를 섞지 않는다.
     raw = _checked_hash(row["artifact_payload"], row["artifact_sha256"], 1_048_576)
-    artifact = decode_provider_snapshot_artifact(raw, expected_pins=expected_pins)
+    artifact = _decode_registered_artifact(raw, expected_pins=expected_pins)
     if _digest(row["native_input_digest"]) != artifact.native_input_digest:
         raise SnapshotRecoveryCorruption("stored native digest differs from canonical input")
     context = _checked_hash(row["observation_context"], row["context_sha256"], 8192)
@@ -288,7 +305,7 @@ async def register_provider_snapshot_artifact(
 ) -> SnapshotRegistration:
     """정본 입력을 등록한다. 관측 context의 의미 검증은 Dagster 계층 책임이다."""
     _transaction(session)
-    artifact = decode_provider_snapshot_artifact(artifact_payload, expected_pins=expected_pins)
+    artifact = _decode_registered_artifact(artifact_payload, expected_pins=expected_pins)
     params = _member_params(member)
     params.update(
         payload=artifact_payload,

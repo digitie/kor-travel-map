@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import dataclass
+from functools import partial
 from typing import TYPE_CHECKING, cast
 from uuid import UUID
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.client import _airport_snapshot as io
+from kortravelmap.client._snapshot_atomic import run_snapshot_apply_postprocess
 from kortravelmap.core.feature_projection import within_place_projection_budget
 from kortravelmap.dto import FeatureBundle
 from kortravelmap.dto.geo_dataset import GeoApplied
@@ -28,7 +30,7 @@ from sqlalchemy.exc import DBAPIError
 
 from dagster import Failure
 
-from .airport_snapshot_backend import AirportSnapshotBackend
+from .airport_snapshot_backend import AirportSnapshotBackend, prepare_airport_postprocess_work
 from .airport_snapshot_observation import (
     UnsupportedAirportObservation,
     encode_airport_observation_context,
@@ -182,8 +184,22 @@ async def _resume(
                     pins=runtime.pins,
                     dataset_id=member.membership.provider_dataset_id,
                 )
-                await io.apply_airport_snapshot(
-                    client, observed, lease.token, plan, pins=runtime.pins
+                await run_snapshot_apply_postprocess(
+                    client,
+                    observed,
+                    lease.token,
+                    identity,
+                    pins=runtime.pins,
+                    apply=partial(
+                        io.apply_airport_snapshot_in_session,
+                        observed=observed,
+                        token=lease.token,
+                        plan=plan,
+                        pins=runtime.pins,
+                    ),
+                    prepare=lambda applied: prepare_airport_postprocess_work(
+                        _intent(applied, member, runtime, root_run_id)
+                    ),
                 )
             except io.AirportSnapshotReplanRequired:
                 # 증명된 rollback 뒤에도 현재 binding을 다시 읽는다. active plan의

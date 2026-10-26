@@ -1,3 +1,132 @@
+## 2026-10-26 — byte quota 최종 CI 실패와 문자열 선검사 비용 보강
+
+`5d6f982b`의 최종 CI는9개 성공·glibc PostGIS1개 실패다. 후자는 byte quota 반복 등록이
+전체30초에 걸렸으며 reader3초 실패가 아니다. Alpine과 실제215는 통과했지만 머지하지 않는다.
+
+공통 codec 선검사는 exact 문자열/None/bool의 불필요한 모델 탐색과 ASCII escape·인용문
+문자별 Python 순회를 줄인다. UTF8·depth·node·문자열 비용 및 canonical 검증을 유지하며
+한도·SQL·quota fixture는 바꾸지 않는다. 새 경계28개를 포함한 관련207개 순수시험은 통과했다.
+초안의 escape 메모리 회귀는 두 독립 리뷰로 수정했고, 같은 상한 실제PG·새 최종CI는 아직 대기한다.
+운영 CPU/RSS 개선을 주장하지 않는다.
+[근거](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest 중복 검증 제거의 PG·후보 UI 수용
+
+두 독립 리뷰를 거친 `8fa17bf4`가 같은 상한의 coverage 실제 PG 두 건을 통과했다.
+합성215개는 원자적 구간19.733초·후처리·별도seal을 확인했고, byte quota는11건 등록 뒤
+12번째53000·정확 constraint·전체rollback을 확인했다. reader3초·lock1초·전체30초와
+8MiB/16행은 유지했다. 각 pytest case100.369/119.625초는 전체 runner·원자적 구간과 다르다.
+
+동일 source의 새 UI 빌드와 실제 API/Next UI14개도50.038초에 통과했다. 로그인·취소·
+재조회·실제WS·로그아웃200 뒤보호401·재연결없음 및 세션 미해제 가능성false를 확인했다.
+선택module을 fixture 전에 검증했고 source2576/SDK53/UI351·정확 자원 정리를 확인했다.
+서버CPU/RSS·CI와 환경동등·운영432 완료로 확대하지 않으며 최종 CI·머지/배포는 남는다.
+원6ceb CI 실패와 COMMIT 결과 불명 경계는 앞선 원장에 보존한다.
+[원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest 최종 두 PostGIS 시간초과 보강 중
+
+6ceb의 최종CI는8성공·PostGIS2실패다. 실제215와 byte quota 반복 등록이 전체30초에
+걸렸고 원 실패·COMMIT 불명 경계를 보존한다. 전체/SQL/lock 상한을 유지하면서 같은
+호출 안의 중복 codec/의미 대조 준비만 줄이는 후속 수정이 관련 순수160개를 통과했다.
+두 독립 리뷰·실제PG·최종CI·머지/운영배포는 아직 남는다.
+[원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest reader 제품 PG 통과와 로그아웃 이동 경합 보강
+
+개입 코드 없는 `81164788`의 coverage 실제215 시험이 통과했다. reader2.333초·
+atomic24.251초, 전체 항목·후처리·seal 및 정확 정리를 확인했다. 두 독립 리뷰와
+원장 검산을 마쳤으며 운영 CPU/RSS 개선 실측을 뜻하지 않는다.
+[근거](reports/2026-10-26-rest-reader-local-jit.md).
+
+관리자 로그아웃 POST와 늦게 도착한401의 중복 이동은15초 monotonic lease로 조정한다.
+실패·만료·비정상 시계에서는 재시도할 수 있고 기존401/키 폐기/다른 탭 알림은 유지한다.
+두 독립 리뷰, 관련75개 및 전체 frontend49파일410개가 통과했다. 원 실제 UI의
+로그아웃 이동 실패와 세션 해제 미확정 표시는 보존하며 원인이 단독 확정된 것은 아니다.
+선행 `d8a08b9e` CI10개는 성공했고 최종 source CI·새 빌드/실제UI·머지/배포는 남는다.
+
+## 2026-10-26 — Rest reader 조회에 한정한 JIT 비활성화 초안
+
+coverage를 켠 실제215 owned 시험에서 기존 reader가3초에 취소됐다. 같은 한도에서
+JIT OFF 개입 시험은 reader2.274초·atomic23.841초/전체215·후처리·seal을 통과했다.
+단일 개입 결과이며 서버CPU/RSS·JIT 컴파일 시간이나 원인의 확정은 아니다.
+
+제품 초안은 잠금 뒤 reader 조회에만 transaction-local JIT OFF를 적용하고 성공 뒤
+원 jit/statement/lock 설정을 복원한다. 오류·취소는 원 예외를 전파하고 caller 전체
+rollback으로 설정을 회수한다. 더 짧은 제한과 기존3초/1초·전체30초는 유지한다.
+관련18개 단위/Ruff/mypy1은 통과했으며 두 독립 제품 리뷰·제품 실제PG·최종CI는 남는다.
+[근거와 범위](reports/2026-10-26-rest-reader-local-jit.md).
+
+## 2026-10-26 — Rest432 최종 CI 실패와 최소 수정
+
+`7fc5bff1`의 최종 CI는 10개 검사 중 8개 성공·2개 실패다. 세 Python 검사는 모두
+통과했지만 두 PostGIS 검사에서 같은 세 문제가 발생했다. 실제 asset의 deprecated
+`context.run_id` 경고 1개, 실제215 원자적 처리와 byte quota 반복 등록의 전체 30초
+시간초과 2개다. 원 실패를 보존하고 CI green·머지·운영432 배포로 처리하지 않는다.
+
+Rest는 기존 정본 helper로 native run ID를 고정해 후속 관측에 전달하도록 수정했다.
+직접 호출의 기존 fallback과 OFF 상태의 영속 복구 순서를 유지한다. 두 독립 리뷰와
+관련 순수76개는 통과했으며 실제 asset의 수정 후 PG 시험은 별도로 남는다.
+중복 codec 검증 제거와 coverage를 켠 실제215·quota 시험을 이어서 검증한다.
+CI는 coverage7.17.0·Python3.13.16이며 이전 로컬 시험은 환경이 달라 비용을 동일하게
+비교할 수 없다. [원 실패·후속 검증](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest432 추가 물리 경합·후보 UI 수용과 CI 잔여 정정
+
+`511da0a0`에서 새 물리 경합 3개와 양 profile 계측 2개, fresh build 기반 후보 UI
+14개 판정이 통과했다. 원 실패·cleanup 및 계측 범위는 보존하며 운영432 배포 완료를
+뜻하지 않는다. 운영431과 별개로 최종 CI·머지/배포 수용은 계속 대기한다.
+
+세 Python CI lane은 같은 static lint 1FAIL(각 4425PASS/7SKIP)을 보였다. 새 seal-race의
+비실행 listener marker를 실제 procedure 호출로 오인한 경계여서 marker의 `CALL `만
+제거했다. 실제 SQL의 9인자·핵심 단언·검사기·allowlist는 그대로이며 수정 후 최종 CI는
+아직 대기한다. [수용 범위](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest432 설계 누락 경합·계측 시험 보강
+
+실제215·quota/GC5·복구3·두writer2 PASS와 별도로 설계 S5를 대조해 동일member등록,
+이전read/다른worker seal, 적용중GC의 새물리node3개와 양profile 자원계측을 추가했다.
+두독립리뷰의 JSON부분공개·정리회수 오류를 수정했고 기존검증/제품가드/한도는 보존했다.
+아직 이추가시험의 실제PG/계측 수용전이며 최종CI/UI·머지/배포도 미완이다.
+[범위와 실측](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest432 quota/GC·복구 재검증 통과
+
+`b18470d5`의 새 quota/GC5개와 별도 복구3개가 모두PASS다. 정확 constraint·초과TXrollback·
+실행중보존/종결후quota반환, ownbackend종료/18표rollback/pool1재사용·lateGeo거부·같은
+Dagsterrun SDK0재개를 확인했다. 원FAIL은 보존하며 실제 OSworker종료/물리wire유실이나
+S5전체pair 수용으로 확대하지 않는다. source/SDK·정확자원정리 확인, 최종CI/UI·머지/배포는
+미완이며 OFF는 유지한다. [원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest432 실제215·두 writer 검증
+
+`7651cc39`의 owned215 전체 후검사·후처리·별도seal이1PASS(70.59초), 별도 Airport/Rest
+물리 두writer의 실제 blocker/양쪽commit·receipt 검증이2PASS다. source/SDK 및 정확 자원
+정리도 확인했다. SQL CPU 동시 실행·운영 처리량/서버RSS 측정으로 확대하지 않는다.
+quota/GC4FAIL1PASS와 recovery1PASS2FAIL의 fixture 오류는 원 실패를 보존하고 최소 수정 후
+재검증한다. 최종 CI·후보UI·머지/배포는 미완이며 runtime 기본OFF를 유지한다.
+[실측과 범위](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — 431 reader 배포·공개 UI·원 일정 복원 완료
+
+1415의 CI/후보 UI를 거친 main과 문서까지 고정해 Map `df877690`·PinVi `9ebb588a`를
+공식 Manager `0889d3b4`로 배포했다. 1872.74초/committed, 실제 head431/Pin0102·7healthy다.
+공개 UI 한 번50.277초의 Map7/PinVi6 모두PASS·각login/logout1·보호401·정확browser/profile
+정리와 새session잔류없음을 확인했다. 기존37 RUNNING만복원하고 새활성화0·PinViWeatherOFF,
+복원 뒤 fresh431/7healthy도 확인했다. 예전3FAIL/미확인session 경계는 지우지 않았다.
+Map 백업복원은 verified이나 catalog권한차이 비차단경고를 별도보존한다.
+다음 #1418의432실제원자성/215전체/물리2writer·CI/live는 아직미완이다.
+[진행 원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
+## 2026-10-26 — Rest432 선택 A 구현 첫 checkpoint
+
+431 main `df877690` 위에서 저장·원 결과·필수 후처리를 한 RC connection/TX로 묶는
+내부 coordinator와 Airport 연결을 구현했다. 기존 공개 own-TX 서명은 유지하고 seal은
+별도 정본 경로다. 기존 단위34PASS/Ruff/strict mypy5source 통과이며 실제 PG 수용은 아니다.
+Rest SQL·HTTP·관측/runner와 실제 두 writer 시험을 담당별 병행 중이다. runtime 기본OFF,
+전체통합·적대2리뷰·실제PG/CI/live·운영은 미완이다.
+[구현 원장](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 · Rest431 최종 CI와 main 반영 정산
 
 - PR #1415의 정확 source e1b203bb는 5 workflow/10 check를 모두 통과했다. CI의 실제
@@ -2434,3 +2563,12 @@ required-set 완화)은 소유자 지시로 **가장 마지막**이다.
   정리가 필요해 경계를 어디에 둘지가 판단이다.
 - CI의 mypy는 핀이 없다(`mypy>=1.10`). 새 mypy 릴리스가 검사를 조이면 무관한 PR에서
   `lint` job이 붉어질 수 있다 — 기존 세 스텝도 같은 노출을 갖는다.
+
+
+### Rest432 후속: 실제 원자성 및 공식 스키마
+
+- 실제 원자성11개 PASS: 오류·취소 전체 rollback/동일 plan 복구/성공 commit 응답경계 SDK0.
+  초기quota3행·사용량0/guard33 단언과 정확 시험 DB·볼륨 정리를 확인했다. Rest215·두 writer는 미완이다.
+- 정본 package graph 누락1F28P를 공식 generator로 수정하고29P, 두 명 검토 후 반영했다.
+- 별도 fresh 공식 schema432 생성·재비교1P27.459초, dump a55cf046. 예상2추가/5변경만이며
+  역치환은 기존431 전체 bytes exact다. startup ACL/metadata 및 최종 CI/live·배포는 진행 중이다.

@@ -7,6 +7,7 @@ caller 소유 가변 입력을 검사하는 동안 임의 serializer/hook/IO를 
 from __future__ import annotations
 
 import math
+import re
 import sys
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -34,6 +35,10 @@ from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
 
 _MAX_BYTES = 1_048_576
 _MAX_DEPTH = 64
+# 겹치지 않는 span을 possessive로 소비해 escape 수에 비례하는 역추적 상태를 만들지 않는다.
+# JSON 객체는 한도 검사 뒤에 만든다.
+_QUOTED_STRING = re.compile(r'"[^"\\]*+(?:\\.[^"\\]*+)*+"', re.DOTALL)
+_ASCII_ESCAPES = re.compile(r'["\\\x00-\x1f]')
 
 
 class CodecProfile(Enum):
@@ -95,7 +100,8 @@ def preflight(values: tuple[object, ...], *, profile: CodecProfile) -> None:
             _reject()
         kind = type(value)
         children: Any = ()
-        if any(kind is cls for cls in _MODELS.values()):
+        scalar = kind is str or value is None or kind is bool
+        if not scalar and any(kind is cls for cls in _MODELS.values()):
             data = value.__dict__
             fields = value.model_fields_set
             if type(data) is not dict or type(fields) is not set:
@@ -134,12 +140,19 @@ def preflight(values: tuple[object, ...], *, profile: CodecProfile) -> None:
                 if len(stack) + 1 > nodes:
                     _reject()
                 stack.append((child, depth + 1))
-        elif any(kind is cls for cls in _ENUMS.values()):
+        elif not scalar and any(kind is cls for cls in _ENUMS.values()):
             stack.append((value.value, depth + 1))
         elif kind is str:
             # 거대한 escape/UTF8 복사 없이 전체 encoded 문자열 비용을 선누적한다.
             if len(value) > remaining:
                 _reject()
+            if value.isascii():
+                remaining -= len(value) + 2
+                for match in _ASCII_ESCAPES.finditer(value):
+                    remaining -= 1 if match[0] in '\"\\\b\f\n\r\t' else 5
+                if remaining < 0:
+                    _reject()
+                continue
             remaining -= 2
             for char in value:
                 code = ord(char)
@@ -199,20 +212,22 @@ def guard_wire(raw: bytes, *, profile: CodecProfile) -> str:
         _reject()
     value = raw.decode("utf-8", errors="strict")
     depth = nodes = 0
-    quoted = escaped = token = False
-    for char in value:
-        if quoted:
-            if escaped:
-                escaped = False
-            elif char == "\\":
-                escaped = True
-            elif char == '"':
-                quoted = False
-            continue
+    token = False
+    index = 0
+    while index < len(value):
+        char = value[index]
+        index += 1
         if char == '"':
-            quoted = True
             nodes += 1
             token = False
+            if depth > _MAX_DEPTH or nodes > max_wire_nodes:
+                _reject()
+            matched = _QUOTED_STRING.match(value, index - 1)
+            # 닫히지 않은 문자열은 이전 scanner와 같이 나머지를 추가 토큰으로 세지 않는다.
+            # 실제 JSON 구문 거부는 호출자의 json.loads가 그대로 수행한다.
+            if matched is None:
+                break
+            index = matched.end()
         elif char in "[{":
             depth += 1
             nodes += 1

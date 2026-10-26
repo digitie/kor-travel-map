@@ -98,6 +98,7 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_kor_travel_concierge_youtube_features",
         "fetch_transport_airports",
         "fetch_transport_rest_area_fuel_prices",
+        "fetch_transport_rest_area_snapshot",
         "fetch_transport_rest_areas",
         "fetch_transport_highway_incidents",
         "fetch_krforest_arboretums",
@@ -179,7 +180,8 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: ADR-105로 사라졌다 — 셋 다 완전 계측이었다.
 #: 2026-10-24 25 → 29. ADR-114 2단계 weather 상태 fetcher 넷이 들어왔다 — 전부 **완전 계측**이다
 #: (시도마다 `note_upstream_request()`, 410 재시작의 재요청까지).
-_EXPECTED_FULLY_COUNTED: int = 29
+#: 2026-10-26 29 → 30: Rest 단일응답도 기존 transport 시도별 counter를 공유한다.
+_EXPECTED_FULLY_COUNTED: int = 30
 
 
 def _module_trees() -> dict[str, ast.Module]:
@@ -321,7 +323,8 @@ def test_the_universe_cannot_shrink_without_editing_this_file() -> None:
     # 2026-10-02 29 → 27: OpiNet 둘·krex 셋·krairport 하나·돌발 snapshot 헬퍼가 transport
     # fetcher 다섯으로 바뀌었다(ADR-106).
     # 2026-10-24 27 → 31: ADR-114 2단계 weather 상태 fetcher 넷.
-    assert len(_EXPECTED_FETCHERS) >= 31, (
+    # 2026-10-26 31 → 32: Rest 단일응답 진입점을 명시 등록한다.
+    assert len(_EXPECTED_FETCHERS) >= 32, (
         f"진입점 목록이 {len(_EXPECTED_FETCHERS)}개로 줄었다. 진짜로 사라진 "
         "진입점이면 이 하한도 함께 낮춰라 — 그 편집이 리뷰에 보여야 한다."
     )
