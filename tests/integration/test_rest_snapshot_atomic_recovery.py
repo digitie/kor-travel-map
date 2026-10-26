@@ -327,6 +327,7 @@ async def test_registered_postprocessed_same_dagster_run_resumes_sdk0_without_re
         ]:
             monkeypatch.setattr(AsyncKorTravelMapClient, name, forbidden)
         context = SimpleNamespace(
+            run=run,
             run_id=run.run_id,
             retry_number=0,
             log=logging.getLogger("owned-rest-sdk0"),

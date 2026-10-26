@@ -1,3 +1,17 @@
+## 2026-10-26 — Rest432 최종 CI 실패와 최소 수정
+
+`7fc5bff1`의 최종 CI는 10개 검사 중 8개 성공·2개 실패다. 세 Python 검사는 모두
+통과했지만 두 PostGIS 검사에서 같은 세 문제가 발생했다. 실제 asset의 deprecated
+`context.run_id` 경고 1개, 실제215 원자적 처리와 byte quota 반복 등록의 전체 30초
+시간초과 2개다. 원 실패를 보존하고 CI green·머지·운영432 배포로 처리하지 않는다.
+
+Rest는 기존 정본 helper로 native run ID를 고정해 후속 관측에 전달하도록 수정했다.
+직접 호출의 기존 fallback과 OFF 상태의 영속 복구 순서를 유지한다. 두 독립 리뷰와
+관련 순수76개는 통과했으며 실제 asset의 수정 후 PG 시험은 별도로 남는다.
+중복 codec 검증 제거와 coverage를 켠 실제215·quota 시험을 이어서 검증한다.
+CI는 coverage7.17.0·Python3.13.16이며 이전 로컬 시험은 환경이 달라 비용을 동일하게
+비교할 수 없다. [원 실패·후속 검증](reports/2026-10-26-rest-snapshot-atomic-implementation.md).
+
 ## 2026-10-26 — Rest432 추가 물리 경합·후보 UI 수용과 CI 잔여 정정
 
 `511da0a0`에서 새 물리 경합 3개와 양 profile 계측 2개, fresh build 기반 후보 UI

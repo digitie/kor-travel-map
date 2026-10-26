@@ -74,6 +74,7 @@ async def _case(monkeypatch, *, status="postprocessed"):
     )
     monkeypatch.setattr(assets, "_exact_sync_membership", AsyncMock(return_value=member.membership))
     context = SimpleNamespace(
+        run=SimpleNamespace(run_id="root"),
         run_id="root",
         resources=SimpleNamespace(
             kor_travel_map_client=client,
@@ -209,3 +210,102 @@ async def test_applied_without_atomic_receipt_is_not_resumed_as_three_transactio
     atomic.assert_not_awaited()
     stubs["seal_rest_snapshot"].assert_not_awaited()
     collect.assert_not_awaited()
+
+
+async def test_real_direct_invocation_context_returns_to_legacy_path_without_snapshot_io(
+    monkeypatch,
+):
+    from dagster import build_asset_context
+
+    context, _, _, stubs, collect, atomic = await _case(monkeypatch)
+    with build_asset_context(resources=vars(context.resources)) as direct:
+        assert await target.run_rest_snapshot_if_supported(direct) is None
+    target.ensure_authoritative_feature_operation_guard.assert_not_awaited()
+    stubs["read_rest_snapshot"].assert_not_awaited()
+    collect.assert_not_awaited()
+    atomic.assert_not_awaited()
+
+
+async def test_current_run_identity_is_frozen_once_and_legacy_property_is_never_read(monkeypatch):
+    context, _, intent, stubs, collect, atomic = await _case(monkeypatch)
+    reads = []
+
+    class ScheduledContext:
+        resources = context.resources
+
+        @property
+        def run(self):
+            reads.append(1)
+            return SimpleNamespace(run_id="root" if len(reads) == 1 else "changed")
+
+        @property
+        def run_id(self):
+            raise AssertionError("deprecated context run_id must not be accessed")
+
+    result = await target.run_rest_snapshot_if_supported(ScheduledContext())
+    assert result.load == intent.apply_result.load
+    assert reads == [1]
+    assert stubs["read_rest_snapshot"].await_count == 2
+    collect.assert_not_awaited()
+    atomic.assert_not_awaited()
+
+
+async def test_current_run_identity_mismatch_cannot_be_replaced_by_matching_legacy_id(monkeypatch):
+    context, _, _, stubs, collect, atomic = await _case(monkeypatch)
+    context.run = SimpleNamespace(run_id="another-root")
+    with pytest.raises(Failure) as raised:
+        await target.run_rest_snapshot_if_supported(context)
+    assert isinstance(raised.value.__cause__, target.io.RestSnapshotUnavailable)
+    assert str(raised.value.__cause__) == "canonical scheduled snapshot root required"
+    stubs["read_rest_snapshot"].assert_not_awaited()
+    collect.assert_not_awaited()
+    atomic.assert_not_awaited()
+
+
+@pytest.mark.parametrize("present", [False, True])
+async def test_disabled_runtime_still_reads_durable_snapshot_before_legacy_fallback(
+    monkeypatch, present
+):
+    context, observed, _, stubs, collect, atomic = await _case(monkeypatch)
+    context.run = SimpleNamespace(run_id="root")
+    context.resources.rest_snapshot_runtime = None
+    stubs["read_rest_snapshot"].return_value = observed if present else None
+    if present:
+        with pytest.raises(Failure) as raised:
+            await target.run_rest_snapshot_if_supported(context)
+        assert isinstance(raised.value.__cause__, target.io.RestSnapshotUnavailable)
+        assert str(raised.value.__cause__) == "registered snapshot requires verified runtime"
+    else:
+        assert await target.run_rest_snapshot_if_supported(context) is None
+    stubs["read_rest_snapshot"].assert_awaited_once()
+    stubs["claim_rest_snapshot"].assert_not_awaited()
+    collect.assert_not_awaited()
+    atomic.assert_not_awaited()
+
+
+@pytest.mark.parametrize(("attempt", "expected"), [(0, "root"), (2, "root::retry:2")])
+def test_frozen_root_identity_preserves_existing_observation_attempt_framing(attempt, expected):
+    class Context:
+        retry_number = attempt
+
+        @property
+        def run_id(self):
+            raise AssertionError("generation must reuse the already resolved root")
+
+    assert target._dagster_run_id(Context(), resolved_run_id="root") == expected
+
+
+@pytest.mark.parametrize("bad_root", ["", " ", 7])
+def test_resolved_observation_root_rejects_invalid_identity_without_legacy_access(bad_root):
+    class Context:
+        @property
+        def run_id(self):
+            raise AssertionError("invalid explicit root cannot fall back to another identity")
+
+    assert target._dagster_run_id(Context(), resolved_run_id=bad_root) is None
+
+
+def test_native_root_requirement_does_not_change_existing_legacy_helper_contract():
+    context = SimpleNamespace(run_id="legacy-direct")
+    assert target._context_run_id(context) == "legacy-direct"
+    assert target._context_run_id(context, require_native_run=True) is None

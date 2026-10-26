@@ -1,5 +1,33 @@
 # Rest432 실제 동시 쓰기 구현 원장
 
+
+## 최종 CI 실패와 후속 수정 — 2026-10-26
+
+정확 source `7fc5bff1439fcbbd3f03800d8d1d26563d917e6f`의 CI는 5 workflow 중
+4개 성공·CI workflow 실패, 전체 검사 10개 중 8개 성공·PostGIS 두 개 실패다.
+세 Python lane은 각각 core4426PASS/7SKIP·API1457PASS·Dagster1117PASS/4SKIP다.
+glibc PG는3FAIL/1929PASS/23SKIP(1325.05초), Alpine PG는
+3FAIL/1923PASS/29SKIP(1910.53초)이며 양쪽 모두 아래 세 실패가 같았다.
+
+- 실제 Dagster asset: `AssetExecutionContext.run_id` deprecation 경고가 오류가 됐다.
+- 실제215: 단일 apply/후검사/후처리의 전체30초가 만료됐다. 취소가 begin 후처리 호출에서
+  관측됐다는 사실만으로 해당 SQL 단독 비용이 원인이라고 판단하지 않는다.
+- byte quota: 여러 등록을 수행하는 같은 TX의 전체30초가 만료됐다. job 제한이나 reader
+  statement3초·lock1초의 실패와 구분한다.
+
+Rest caller는 기존 정본 helper의 native run 옵션으로 ID를 고정하고 ETL의 기존 retry
+framing에 전달한다. 다른 caller의 기본 helper 계약·직접 호출 fallback·root 불일치 거부·
+OFF 상태의 durable read 우선은 유지한다. recovery fixture에는 기존 DagsterRun을
+`run=run` 한 필드로 노출한다. 관련 순수76PASS와 두 독립 리뷰는 실제 asset의 PG 수용을
+대체하지 않는다. 실행 원장은 `map432-run-id-five-file-handoff-r5.json`이다.
+
+중복 Rest decoder 검증 제거 후보의 기존 codec125PASS와 coverage ON 순수 측정은
+실제 TX 시간초과 해결 증거가 아니다. CI는 coverage7.17.0·Python3.13.16·별도 이미지,
+기존 owned 시험은 무coverage·다른 interpreter/image여서 환경 차이를 명시한다.
+새 owned 검증과 최종 CI·머지·운영432 배포는 아직 미완이다. 30초/3초/1초와 quota 및
+검증 단언을 완화하지 않는다. 원 최종 CI 원장은
+`map1418-7fc5-terminal-ci10-five-workflow-failure-acceptance-r1.json`이다.
+
 ## 현재 범위
 
 기준 main은 `df8776903c8ef54fc1e6ad89edfc5c3dd0934aed`다. 431 reader는 제품 CI와

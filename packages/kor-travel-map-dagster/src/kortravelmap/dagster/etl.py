@@ -1072,7 +1072,9 @@ def _source_identities(
     }
 
 
-def _dagster_run_id(context: AssetExecutionContext) -> str | None:
+def _dagster_run_id(
+    context: AssetExecutionContext, *, resolved_run_id: str | None = None
+) -> str | None:
     """이 step attempt의 외부 식별자. 직접 호출에서는 없을 수 있다 (T-VN-H32R).
 
     ``run_id``가 없으면 immutable observation generation을 만들지 않고 close receipt도
@@ -1080,10 +1082,16 @@ def _dagster_run_id(context: AssetExecutionContext) -> str | None:
     fail-safe한다. Dagster retry는 같은 run 안에서도 서로 다른 observation set이므로
     attempt 1부터 suffix를 붙인다. 최초 attempt는 기존 receipt identity를 보존한다.
     """
-    try:
-        run_id = context.run_id
-    except Exception:
-        return None
+    if resolved_run_id is None:
+        try:
+            run_id = context.run_id
+        except Exception:
+            return None
+    else:
+        # caller가 정본 run guard로 고정한 ID에 같은 attempt framing만 적용한다.
+        if not isinstance(resolved_run_id, str) or not resolved_run_id.strip():
+            return None
+        run_id = resolved_run_id
     if not run_id:
         return None
     try:

@@ -300,7 +300,7 @@ def _context_job_name(context: Any) -> str | None:
     return job_name if isinstance(job_name, str) and job_name.strip() else None
 
 
-def _context_run_id(context: Any) -> str | None:
+def _context_run_id(context: Any, *, require_native_run: bool = False) -> str | None:
     """run id를 얻되, 없으면 ``None``.
 
     예외를 부재로 접는 이유는 ``.run`` 때문이다. 직접 호출된 asset
@@ -315,6 +315,7 @@ def _context_run_id(context: Any) -> str | None:
     (``test_notice_assets._DIRECT_INVOCATION_RUN_ID``).
     """
 
+    # snapshot 등록은 실제 run이 필수라 legacy 직접호출 ID로 승격하지 않는다.
     def _probe(target: Any, name: str) -> Any:
         try:
             return getattr(target, name, None)
@@ -322,7 +323,7 @@ def _context_run_id(context: Any) -> str | None:
             return None
 
     run_id = _probe(_probe(context, "run"), "run_id")
-    if not isinstance(run_id, str):
+    if not isinstance(run_id, str) and not require_native_run:
         run_id = _probe(context, "run_id")
     return run_id if isinstance(run_id, str) and run_id.strip() else None
 

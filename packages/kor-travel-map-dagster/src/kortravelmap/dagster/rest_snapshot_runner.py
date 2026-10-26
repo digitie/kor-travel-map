@@ -31,6 +31,7 @@ from dagster import Failure
 from .etl import DagsterFeatureLoadResult, _dagster_run_id, _geo_load_context
 from .feature_operation_tracking import (
     FeatureOperationExecutionGuard,
+    _context_run_id,
     ensure_authoritative_feature_operation_guard,
 )
 from .provider_fetchers import TransportRestExportCapture
@@ -239,6 +240,8 @@ async def _collect_rest_snapshot_input(
     client: AsyncKorTravelMapClient,
     member: RestPostprocessMember,
     runtime: RestSnapshotRuntime,
+    *,
+    root_run_id: str,
 ) -> tuple[bytes, bytes]:
     from . import assets
     from .assets import _transform_reusing_geo
@@ -261,14 +264,14 @@ async def _collect_rest_snapshot_input(
     )
     geo_inputs = await assets._geo_run_inputs(context, GeoApplied(reverse=True, geocode=False))
     geo = _geo_load_context(**geo_inputs)
-    generation = _dagster_run_id(context)
+    generation = _dagster_run_id(context, resolved_run_id=root_run_id)
     if generation is None:
         raise io.RestSnapshotUnavailable("original Rest observation generation required")
     payload = encode_rest_area_snapshot_artifact(native, geo, pins=runtime.pins)
     observation = encode_rest_observation_context(
         payload,
         pins=runtime.pins,
-        root_run_id=context.run_id,
+        root_run_id=root_run_id,
         observation_generation=generation,
         upstream_eof=True,
         geo_stats=geo_inputs["geo_stats"],
@@ -298,11 +301,12 @@ async def _run_rest_snapshot(context: AssetExecutionContext) -> DagsterFeatureLo
         return None
     if guard.trigger_kind != "schedule":
         return None
-    if not getattr(context, "run_id", None):
+    root_run_id = _context_run_id(context, require_native_run=True)
+    if root_run_id is None:
         return None
     guard = await ensure_authoritative_feature_operation_guard(context, boundary="rest_snapshot")
     mutation = await guard.ensure()
-    if mutation is None or mutation.operation.dagster_run_id != context.run_id:
+    if mutation is None or mutation.operation.dagster_run_id != root_run_id:
         raise io.RestSnapshotUnavailable("canonical scheduled snapshot root required")
     membership = await assets._exact_sync_membership(
         context,
@@ -337,7 +341,9 @@ async def _run_rest_snapshot(context: AssetExecutionContext) -> DagsterFeatureLo
         if strict is not True and strict != "strict":
             raise io.RestSnapshotUnavailable("Rest snapshot requires strict validation")
         await io.collect_expired_rest_snapshots(client)
-        payload, observation = await _collect_rest_snapshot_input(context, client, member, runtime)
+        payload, observation = await _collect_rest_snapshot_input(
+            context, client, member, runtime, root_run_id=root_run_id
+        )
         registered = await io.register_rest_snapshot(
             client, identity, payload=payload, context=observation, pins=runtime.pins
         )
@@ -348,7 +354,7 @@ async def _run_rest_snapshot(context: AssetExecutionContext) -> DagsterFeatureLo
             raise SnapshotRecoveryCorruption("registered snapshot disappeared")
     if runtime is None:
         raise io.RestSnapshotUnavailable("registered snapshot requires verified runtime")
-    return await _resume(client, identity, member, runtime, context.run_id, observed, previous)
+    return await _resume(client, identity, member, runtime, root_run_id, observed, previous)
 
 
 async def run_rest_snapshot_if_supported(
