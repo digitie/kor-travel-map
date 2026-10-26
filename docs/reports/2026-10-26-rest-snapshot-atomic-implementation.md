@@ -1,5 +1,62 @@
 # Rest432 실제 동시 쓰기 구현 원장
 
+## 최종 제품652의 CI·병합·공식 배포 수용
+
+이 절은 아래 각 시점의 실패/대기 기록을 삭제하지 않고 마지막 제한 단위의 상태를 정산한다.
+최종 제품 `6520215810bcc23d50c0aea169e5100c3ac46617`은 Python3.11/3.12/3.13,
+fixture replay, Alpine/glibc PostGIS, lint/OpenAPI/frontend/production image의 **10개 CI가
+모두 SUCCESS**다. PR #1418은 main `d7fd7d18b2e33bce130b0b49951d3794c36f91a8`에 병합됐고
+제품·시험·UI·문서 전체 tree가 정확히 일치한다. 이전6ceb/5d6 및 초기 CI·오라클·하네스 실패를
+최종 성공으로 바꾸지 않는다. 제품 변경과 각 최소 수정에는 독립2인 적대 검토를 적용했다.
+
+### 같은 상한의 최종 owned 시험
+
+| 시험 | 실제 수용 | 구분해야 할 범위 |
+| --- | --- | --- |
+| 합성215 전체 | console92.19초/case91.228초, atomic17.733949초·reader왕복2.261216초·decode0.726517초·assessment1.449269초; wholecomplete/retired0·23비scalar·Geo/policy/head 양clock·후처리·별도seal PASS | reader3초/lock1초/wholeTX30초 및 기존 capture 상한 유지; upstream HTTP0,215 backend CPU/RSS 미측정 |
+| byte quota 첫 초과 | console89.24초/case88.353초,11×744997B 등록 뒤12번째53000·정확constraint·wholeTX rollback PASS | 8MiB/16행과 원검증 불변; 한 owned 시험의 값이며 운영 처리량이 아님 |
+| 새 빌드·실제 API/Next 후보 | console53.95초/case53.043초,원14판정·login/logout각1·cancel2·WS3연결 총수신18frame·보호401/5초 재연결없음·세션미해제가능성false | exact652 source/build·UI351·manifest4/static176·mock0·정확자원정리; 공개 배포 후13과 별개 |
+
+위 세 실행의 raw10/10/9 SHA·Git2577 mode/OID/전체 blob·SDK53 전후·import52/52/16과 API7을
+저장 원문으로 대조했다. 독립 원장 `map1418-652-j-independent-final-three-actual-acceptance-r1.json`
+SHA256은 `2a6dd803be4eb88dc89d21fca4ae417d007d9dd6821b1ab6f4ec13ec4218b3b7`이다.
+로컬 Python3.13.14/별도 이미지의 CTracer 결과를 CI 환경과 동일하다고 주장하지 않는다.
+
+source511의 추가 물리 시험도 각 범위에서 통과했다. 같은 member 최초 등록은 immutable1개·
+quota한번·첫 nonce만, 이전 read/다른 worker seal 경합은 원 receipt SDK0, 적용중 GC는 정확
+writer 대기→own backend 종료 뒤 rollback/GC0·원자료/예약 보존을 확인했다. 두 profile의 실제
+blocker와 양commit도 통과했다. CPU ticks는100Hz에서 Airport 선행[21,41], Rest 선행[11,17],
+backend RSS는4개 sample point뿐이다. client begin-SQL→commit ACK 구간·controlled hold와
+backend 실제 lock 취득/해제 시각은 다르다. 원 역순 deadlock 재현·일반 caller 교착 부재나
+S5 일곱 종류 전부의 새로운 Rest 물리 시험으로 확대하지 않는다.
+
+### 공식 설치·공개 UI·기존 일정 복원
+
+공식 rebuild 원장은 success/phase=committed, 실제 schema는 Map432/PinVi0102다.
+Map3개·PinVi3개와 Valkey를 합친7개가 healthy이며 공개 UI 전후 같은 runtime7을 확인했다.
+운영 설치의 원장 `map432-official-rebuild-d7fd-20261026-r1.json` SHA256은
+`c2fea706fcdfc23feb3e66e9fc28be853dcc818a5f9f4e0c9f5fc1148fb04b12`이다.
+
+배포 후 공개 read-only UI는55.972초에 Map7/PinVi6 모두 통과했다. 실제 secure/HttpOnly
+쿠키·지도와 provider tile·기존 목록/상세 identity·재조회·logout200/204 뒤보호401을 확인했다.
+Map/PinVi login/logout은 각각1회이고 새 세션 잔류가능성은false다. business DML0,
+credentials/raw cookie/trace/screenshot 저장0이며 browser/profile을 회수했다. runtime7와
+브라우저 runtime106/Node/Chromium 지문·설치 env는 전후 동일했다. 원장
+`map-pinvi-postdeploy432-public-readonly-5bc1e8e4a66e441b8e49e73d0cf25d57.json` SHA256은
+`65c1512049d34e8b22b7d1295af32ce3be1eaec9f670289c6cca0d8c27c72e33`이다.
+
+기존 RUNNING37개만 복원했고 STOPPED14개·새 profile OFF는 유지한다. root env의 bytes·mode도
+그대로이며 새 활성화0이다. 복원 원장 `map432-postdeploy-instigator-restore-d7fd-root-r1.json`
+SHA256은 `cb5978786b2e8f422f6e4e1e4396aa66f5cd2e6df0eb0ed8044f444b4942d8d2`다.
+
+### 계속 열린 상위 수용
+
+이 제한 단위의 완료가 **T-CWRITE-01–09 전체 완료를 뜻하지 않는다**. 운영 CPU/RSS·물리
+heap/WAL·215 backend CPU/RSS와 실 upstream215 수집은 미측정/미수용이다. 공유 Feature의
+후보/winner·양성 동시 쓰기, 지역 경계 이동·전 writer 전환, 실제 OS worker 사망/물리 wire
+단절, 새 profile 활성화·실부하/확대·되돌림 전수 수용은 각각 기존 상위 과제로 남긴다.
+SQL/권한/자료 정본·reader3초/lock1초/wholeTX30초·quota와 capture 상한은 유지했다.
+
 ## 5d6 최종 glibc byte quota 실패와 네이티브 문자열 선검사 초안
 
 최종5d6 CI는9성공·1실패다. glibc의 quota bytes 시험만 전체30초가 등록 SQL 대기 중
