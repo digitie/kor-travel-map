@@ -5,7 +5,7 @@
 2026-10-27, 기준 main `0324cab3`에서 Airport1/Rest2의 저장된 관측을 적용하는
 실제 `multiprocessing` spawn worker 2개의 제한 시험을 추가한다. 생산 Python/SQL,
 스키마432, 운영 설정·새 profile OFF, 30초 원자 구간·reader3초·lock1초를 바꾸지 않는다.
-상위 **T-CWRITE-01–09는 모두 미완료**다. 이 문서는 구현·검증 중 원장이다.
+상위 **T-CWRITE-01–09는 모두 미완료**다. 정확 시험 source `6307ec63`의 두 리뷰와 제한 실제 PG는 통과했고 최종 CI는 대기다.
 
 기존 동일 프로세스의 두 PG session 시험을 대체하지 않는다. 기존 등록·claim·정적
 원 입력/후처리 helper를 재사용하고, 부모의 engine/client를 제거한 불변 case와 자체
@@ -47,8 +47,8 @@ CPU2·RAM1536MiB·swap 동일·PID256, 외부 phase150초/parent160초/cleanup15
 - `ruff check .` 전체는 기존 main의 무관한 문서 handoff script와 journal 검사 script에서
   7개 오류가 나왔다. 전체 `ruff format --check src tests`는 기존416파일 drift로 실패했다.
   무관한 기존 파일은 자동 수정하지 않았으며 새 파일의 통과와 구분한다.
-- 두 독립 적대 리뷰, 같은 상한의 실제 owned PG, 전체 CI는 아직 대기다.
-  이 결과를 실제 두 worker 성공이나 운영 동시 쓰기 완료로 해석하지 않는다.
+- 정확 `6307ec63`은 두 독립 source 리뷰와 같은 상한의 실제 owned PG 양방향2개를 통과했다.
+  최종 CI는 아직 대기다. 운영 전체 동시 쓰기 완료나 CPU/RSS 효과로 확대하지 않는다.
 
 ## 후속과 제외
 
@@ -75,4 +75,25 @@ owned r2의 실제 양방향 시험은 spawn/source overlap/topic blocker/두 co
 시험은 marker 기대값만 지우지 않고, 정본 public Session/connection event를 이용한 실제
 후처리 SQL의 물리 connection 동등성·전후 backend PID/XID를 추가하고 commit 후 NULL 회수를
 검증하도록 교정한다. 예산·생산 코드·SDK 가드·원 receipt·별도seal 검증은 유지한다.
-수정본의 두 리뷰·같은 상한 실제 PG·최종 CI는 아직 대기다.
+수정본 `6307ec63`은 두 리뷰와 같은 상한 실제 PG를 통과했다. 최종 CI는 아직 대기다.
+
+
+## 정확6307의 실제 제한 수용
+
+owned r3는 두 case 모두 PASS, skip0(27.88초)다. 각 case는 서로 다른 spawn PID2개의
+PID/starttick 쌍, 독립 pool1·PG backend/XID, 미commit source lifetime overlap, 정확
+`transactionid` topic blocker, 두 원 commit ACK, 후처리의 원 물리 connection/PID/XID,
+commit 후 marker NULL, 원 counter/receipt와 이후 별도seal을 확인했다. starttick 값 자체는
+동시에 생성된 두 process에서 같을 수 있으며 서로 다른 PID와 함께 식별한다.
+
+정확 source2580개와 선택한 project import56개·SDK source53개를 검산했고 SDK53은 시험 뒤에도
+동일했다. schema432·정본 runtime role·loopback만 공개된 owned PG와 기존 자원/시간 상한을
+유지했다. 정확 CID와 anonymous volume1개를 회수했고 최종 scalar label0/cleanup PASS다.
+별도 감사 원장 `map-os-worker-pair-owned-r3-3a66f6f5b9504141b63a22766e783a87/result.json`의
+SHA256은 `e08a071c95abf015c29d54b42f36843664188e67dbe5d33391cb78b78bede12a`다.
+
+원 r1 SDK import 실패(PG0)와 r2 marker 기대값 오류의2실패는 그대로 보존한다. 원 초안
+`4b742950` CI의 Python3종은 모두 task ledger 본문의300자 상한 위반으로 실패했다.
+`T-CWRITE-04` 본문은 중복 수용 설명 대신 이 원장의 link를 남겨 상한 안으로 단축한다.
+상한·테스트를 바꾸지 않는다. 이 수정은 문서뿐이며 실제 PG를 통과한6307의 시험 source는
+변하지 않는다. 최종 CI 통과 전에는 머지하지 않는다.

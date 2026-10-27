@@ -1,16 +1,13 @@
-## 2026-10-27 — 제한 snapshot의 실제 OS worker pair 시험 구현 중
+## 2026-10-27 — snapshot OS worker pair의 제한 실제 PG 수용
 
-실제 owned r2는 양방향 source overlap·정확 topic blocker·commit ACK까지 도달했지만
-commit 후 임시 marker의 잘못된 시험 기대값으로 두 건 실패했다. 정본 SQL의 NULL 회수와
-실제 후처리 connection/XID 연속성을 함께 검증하도록 교정 중이다. 원 실패/cleanup PASS를
-보존하고 수정본의 실제 PG·두 리뷰·최종 CI를 기다린다.
+정확 시험 source `6307ec63`은 두 독립 리뷰와 Airport/Rest 양방향 owned PG2개를
+27.88초에 통과했다. spawn2·각 pool1·실 source overlap·정확 topic blocker·두 commit ACK,
+후처리의 원 connection/PID/XID·marker NULL 회수·원 receipt·별도seal을 확인했다.
+source2580·선택 import56·SDK53 전후 동일과 정확 CID/volume 회수·cleanup도 통과했다.
 
-Airport1/Rest2 저장 관측을 spawn2·각 pool1로 적용하는 신규 통합 시험을 추가했다.
-미commit leader 뒤 follower의 실제 source 완료·정확 topic blocker·양 commit ACK·원 결과와
-receipt·별도seal을 양 방향으로 검증하는 범위다. 신규 통합2개 collection과 IPC/회수 순수6개,
-CI 범위 Ruff는 통과했다. 원 초안의 fixture 누락 P1은 수정하고 실제 pytest 수집의
-두 dependency closure 미해결0을 확인했다. 실제 PG·두 독립 리뷰·최종 CI는 아직 대기다.
-생산 코드/SQL/schema·운영 OFF 설정과 30/3/1 및 외부 실행 예산은 바꾸지 않는다.
+원 fixture 누락 P1, SDK import 실패(PG0), marker 기대값 오류의 실제2실패는 원장에 보존한다.
+CI가 발견한 ledger300자 위반은 task 본문을 원장 link로 단축해 고친다. 시험 source와 생산
+코드/SQL/schema·운영 OFF 설정 및 기존 예산은 바꾸지 않으며 최종 CI·머지는 아직 대기다.
 T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
 [범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
 
