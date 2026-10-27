@@ -3,7 +3,8 @@
 Airport1/Rest2 저장 관측을 spawn2·각 pool1로 적용하는 신규 통합 시험을 추가했다.
 미commit leader 뒤 follower의 실제 source 완료·정확 topic blocker·양 commit ACK·원 결과와
 receipt·별도seal을 양 방향으로 검증하는 범위다. 신규 통합2개 collection과 IPC/회수 순수6개,
-Ruff는 통과했고 실제 PG·두 독립 리뷰·최종 CI는 아직 대기다.
+CI 범위 Ruff는 통과했다. 원 초안의 fixture 누락 P1은 수정하고 실제 pytest 수집의
+두 dependency closure 미해결0을 확인했다. 실제 PG·두 독립 리뷰·최종 CI는 아직 대기다.
 생산 코드/SQL/schema·운영 OFF 설정과 30/3/1 및 외부 실행 예산은 바꾸지 않는다.
 T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
 [범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).

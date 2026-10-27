@@ -22,6 +22,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.client import _snapshot_atomic as snapshot_atomic
 from kortravelmap.infra.db import make_async_engine
+from tests.integration.test_rest_snapshot_registration import (
+    _rest_catalog as _rest_catalog,
+)
 from tests.integration.test_rest_snapshot_two_writers import (
     _assert_postprocessed_and_seal,
     _cancel_ready,

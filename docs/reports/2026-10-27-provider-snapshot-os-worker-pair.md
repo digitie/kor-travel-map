@@ -31,10 +31,20 @@ CPU2·RAM1536MiB·swap 동일·PID256, 외부 phase150초/parent160초/cleanup15
 
 ## 현재 검증 결과
 
-- 신규 통합 시험2 node collection: PASS, 21.77초. PG fixture·worker 실행은 하지 않았다.
+- 원 초안 `e4f501ae`의 통합2 node collection은 21.77초에 통과했지만 실제 fixture
+  closure를 확인하지 못했다. 두 번째 독립 리뷰가 `rest_catalog` 누락 P1을 발견했다.
+  의도한 다른 이름 import가 Ruff 자동 수정으로 제거된 것이며, 같은 이름 재export로
+  수정한다. 원 collection 결과를 실제 fixture 설정·통합 성공으로 해석하지 않는다.
 - IPC 상한·child 오류/잘못된 profile·foreign identity 거부·시작 중간 실패 회수·개별 close
   오류의 순수 회귀6개: PASS, 6.68초. 외부 호출·Docker·PG 실행0.
 - 신규 두 시험 파일 Ruff: PASS.
+- 수정 후 두 item의 fixture dependency closure 전체 미해결0·`rest_catalog` module fixture
+  해결을 실제 pytest 수집 plugin으로 확인했다(2개, 6.52초). fixture setup/DB 호출0이다.
+- `mypy --strict src`: 196 source files PASS, import-linter: 4 kept/0 broken.
+- CI 범위 Ruff check(src/tests/API/Dagster 전체): PASS. 신규2파일 format check: PASS.
+- `ruff check .` 전체는 기존 main의 무관한 문서 handoff script와 journal 검사 script에서
+  7개 오류가 나왔다. 전체 `ruff format --check src tests`는 기존416파일 drift로 실패했다.
+  무관한 기존 파일은 자동 수정하지 않았으며 새 파일의 통과와 구분한다.
 - 두 독립 적대 리뷰, 같은 상한의 실제 owned PG, 전체 CI는 아직 대기다.
   이 결과를 실제 두 worker 성공이나 운영 동시 쓰기 완료로 해석하지 않는다.
 
