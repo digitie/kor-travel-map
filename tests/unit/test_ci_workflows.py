@@ -109,6 +109,15 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     assert combined_upload["with"]["name"] == "coverage-xml-${{ matrix.lane }}"
     assert combined_upload["with"]["path"] == "coverage.xml"
     assert combined_upload["with"]["if-no-files-found"] == "ignore"
+    # 필수 lane은 측정 artifact를 요구하지 않는다. 관측값 파일이 없다고 job을 실패시키면
+    # 측정 harness가 required CI로 돌아온다(scoped write 기준선이 그랬다).
+    uploads = [
+        step
+        for step in integration["steps"]
+        if str(step.get("uses", "")).startswith("actions/upload-artifact")
+    ]
+    assert uploads
+    assert all(step["with"].get("if-no-files-found") != "error" for step in uploads)
 
     fixture = jobs["fixture-replay"]
     assert fixture["name"] == "pytest fixture replay"

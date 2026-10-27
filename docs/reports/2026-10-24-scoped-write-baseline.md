@@ -65,8 +65,13 @@ python -m scripts.scoped_write_baseline --run --repetitions 3 --output /tmp/cwri
 ```
 
 결과 파일은 atomic no-clobber로 발행한다. 기존 측정 기록을 덮지 않는다.
-기존 integration lane(alpine/glibc)이 실제 3회 cold/warm 회귀를 실행하며
-scoped-write-baseline-<lane> artifact를 보관한다. timing 임계값으로 CI를 느슨하게 하지 않는다.
+
+> **2026-10-27 변경:** 측정은 필수 CI에서 뺐다. 위 `--run`을 수동으로만 돈다.
+> integration lane(alpine/glibc)은 더 이상 전용 container·PG 재시작·3회 반복을 돌지 않고
+> `scoped-write-baseline-<lane>` artifact도 올리지 않는다. 남은 필수 검사는
+> `tests/integration/test_scoped_write_baseline.py`가 공용 `pg_container`에서 보는 불변식이다:
+> DML 구간 비중첩(`dml_overlap == 0`), cold/warm effective·alias hash 동일, Feature·head·alias
+> 개수와 seal membership. 수치는 assert하지 않는 관측값이었다(2026-10-27 Codex PR 통합 리뷰 WI-9).
 
 ## 검증 상태와 남은 범위
 
