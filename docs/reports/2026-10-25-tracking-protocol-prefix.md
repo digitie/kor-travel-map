@@ -1,5 +1,17 @@
 # Tracking P→L 진입 순서 고정(424, prefix 단계)
 
+> **정오표(2026-10-27).**
+> - 머리말의 "기존 SERIALIZABLE 요구 … 보존한다"와 source144 절의 "이 단계는 기존 SER를
+>   유지하며"는 424 시점 서술이다. 430부터 provider finalization·snapshot seal·curation root는
+>   SERIALIZABLE이 아니라 **READ COMMITTED**를 요구하고(`_430_snapshot_finalization.sql`),
+>   P EX → L과 legacy fence 아래에서 입력을 읽는다. 현재 격리·경합 의미의 정본은 ADR-112다.
+> - 마지막 절의 "(미실행)"은 작성 시점 상태다. 그 절의 시험 seed·task 정리 보강은 PR #1401 head
+>   `76d2daf6e`에 들어갔고, 정확 CI 10개(Python 3.11/3.12/3.13·fixture replay·PostGIS
+>   alpine/glibc·lint·OpenAPI·frontend·production image)가 모두 통과한 뒤 2026-10-25에 병합됐다.
+> - 이 prefix는 취소 생성·queued 취소·fill-starts·FAILURE/CANCELED 종결·비권위 finish 같은 장부
+>   작업도 P EX를 먼저 잡게 만들었다. 큐레이션 데이터를 확정하는 작업만 P EX → L을 잡도록 줄이는
+>   변경은 2026-10-27 Codex PR 통합 리뷰 PR(WI-1)에 있다.
+
 종결·취소 경로가 lineage L 또는 행을 선점한 뒤 데이터 protocol P EX를
 늦게 요청하는 순서를 앞당긴다. 기존 SERIALIZABLE 요구, capture/hash,
 parent/kernel 잠금과 수집 flag 기본 OFF는 보존한다. RC 전환이나 전체

@@ -1,5 +1,16 @@
 # Feature 생성 SQL의 첫 protocol EX와 요청 승인 복구
 
+> **정오표(2026-10-27).** 아래 "수동 생성·요청 승인 내부 owner 2개에 함수 EXECUTE를 추가"는
+> migration에서 실제로 일어나지 않았다. 418은 `SET ROLE ktm_feature_schema_owner` 뒤에
+> `GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(boolean)`을 실행한다. 그 함수의
+> owner는 `ktm_feature_state_procedure_owner`이고 schema owner에는 grant option이 없다. PostgreSQL은
+> 경고만 내고 아무것도 부여하지 않는다. 그래서 migration만으로 만든 oracle의 ACL
+> (`head-schema.sql`)에 두 GRANT가 없다. 두 프로시저는 첫 문장에서 이 gate를 호출하는데도
+> 운영이 동작한 것은 post-migration `runtime_privileges` reconcile이 같은 권한을 다시 주기
+> 때문이다. 공용 통합 fixture(`tests/integration/conftest.py`)도 migration 뒤 같은 reconcile을
+> 돌리므로 시험이 이 누락을 드러내지 못했다. 함수 owner 역할로 GRANT하는 forward migration이
+> 2026-10-27 Codex PR 통합 리뷰 PR(WI-3)에서 이것을 바로잡는다.
+
 ## 범위와 잠금 순서
 
 migration418은 다음4개 SQL의 첫 BEGIN 직후 기존 protocol EX를 획득한다.
