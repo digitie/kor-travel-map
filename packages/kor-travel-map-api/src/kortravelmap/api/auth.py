@@ -34,7 +34,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.db import get_public_api_key_session, get_session
 from kortravelmap.api.response import ProblemDetail
-from kortravelmap.api.settings import CacheTargetServiceScope
+from kortravelmap.api.settings import CacheTargetServiceScope, inbound_credentials
 
 if TYPE_CHECKING:
     from kortravelmap.api.settings import ApiSettings
@@ -725,37 +725,13 @@ async def _require_scoped_service_principal(
             scopes=frozenset({scope}),
         )
 
+    # 403과 401의 경계는 기동 distinctness 검증과 같은 단일 목록이다. 목록에 있는 다른
+    # scope의 유효 자격 증명이면 "권한 없음"이고, 어디에도 없으면 "인증 실패"다.
     known_other_scope = any(
-        hmac.compare_digest(digest, principal.token_sha256)
-        for principal in settings.cache_target_service_principals
+        hmac.compare_digest(digest, credential.sha256)
+        for credential in inbound_credentials(settings)
+        if credential.scope != scope
     )
-    if settings.service_token is not None:
-        known_other_scope = known_other_scope or hmac.compare_digest(
-            digest,
-            _token_digest(settings.service_token.get_secret_value()),
-        )
-    for other_digest in (
-        settings.pinvi_admin_features_read_token_sha256,
-        settings.pinvi_curation_snapshot_token_sha256,
-        settings.pinvi_curation_cutover_mapping_token_sha256,
-        settings.feature_request_token_sha256,
-        settings.feature_reference_reconciliation_read_token_sha256,
-        settings.feature_reference_reconciliation_ack_token_sha256,
-    ):
-        if other_digest is not None and other_digest != expected_digest:
-            known_other_scope = known_other_scope or hmac.compare_digest(digest, other_digest)
-    for other_secret in (
-        settings.admin_proxy_secret,
-        settings.metrics_token,
-        settings.ops_read_token,
-        settings.ops_cancel_token,
-        settings.ops_fixture_token,
-    ):
-        if other_secret is not None:
-            known_other_scope = known_other_scope or hmac.compare_digest(
-                digest,
-                _token_digest(other_secret.get_secret_value()),
-            )
     if known_other_scope:
         raise _cache_target_auth_error(
             status.HTTP_403_FORBIDDEN,

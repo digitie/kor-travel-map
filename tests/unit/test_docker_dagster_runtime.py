@@ -4148,13 +4148,17 @@ def test_ops_pair_validation_messages_are_lockstep_across_layers() -> None:
     for shared_phrase in (
         "must be configured together",
         "must all be empty or all be non-empty",
-        "ops read, cancel, and fixture tokens must be distinct",
         "must be configured while ",
         "the ops surface is enabled",
         "production profile is fail-closed (ADR-066)",
     ):
         assert shared_phrase in entrypoint, shared_phrase
         assert shared_phrase in settings_source, shared_phrase
+    # 전용성은 settings가 inbound 자격 증명 목록 하나로 쌍마다 "X must be distinct from Y"를
+    # 낸다. entrypoint는 ops 셋을 묶어 먼저 거부한다. 문구는 달라도 같은 동사구로 찾게 둔다.
+    assert "ops read, cancel, and fixture tokens must be distinct" in entrypoint
+    assert '"{credential.name} must be distinct from {earlier.name}"' in settings_source
+    assert '("ops read token", "ops_read_token"' in settings_source
     # 제거된 문구가 한쪽에만 되살아나는 회귀 방지 — 옛 provenance 문구.
     assert "absent or configured together" not in entrypoint
     assert "absent or configured together" not in settings_source
