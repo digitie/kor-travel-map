@@ -1,3 +1,11 @@
+## 2026-10-27 — bound snapshot stale 뒤 live lease 재계획 경계 조사
+
+Airport 실제 atomic apply의 정확 stale→전체 rollback→기존 typed reset55P03을
+관찰할 [재현 source와 작은 설계](reports/2026-10-27-bound-snapshot-stale-replan.md)를
+작성했다. 아직 실제 PG/운영 호출0이며 제품 수정 전이다. source 두 리뷰 뒤 격리 PG로
+재현하고, 동일 executor의 exact binding만 정리하는 typed 경계를 검토한다.
+MAX3·저장 artifact·취소/fence·후처리/seal·상한/OFF와 T-CWRITE9개 미완을 유지한다.
+
 ## 2026-10-27 — 동시 쓰기 제한 시험 두 PR의 최종 CI·정상 병합
 
 부모 #1421의 정확 head `e23c277d`와 후속 #1422의 `a32674a1`은 각각 CI10개를
