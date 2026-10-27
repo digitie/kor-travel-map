@@ -1,6 +1,9 @@
 services:
   postgres:
-    image: postgis/postgis@sha256:dc17b064a946f64804d3b15e2ce90d01a444c02c9226a28a54764c083bd81a0c
+    # n150 공용 instance와 같은 digest(PG18 + PostGIS 3.6, ADR-118). PG18 공식 이미지는
+    # PGDATA가 `/var/lib/postgresql/18/docker`라 volume을 `/var/lib/postgresql`에 붙인다
+    # (옛 `/data` mount는 entrypoint가 거부한다). PG16 volume은 재사용할 수 없다 — 새 volume.
+    image: postgis/postgis@sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c625a425bd0a2390989c4
     # T-102 — pg_prewarm autoprewarm background worker(부팅 후 buffer warm-up). 확장 자체는
     # alembic 0022가 만들고, autoprewarm(주기 dump + 재기동 reload)은 아래 server config로 켠다.
     # 저비용이라 standalone 스택 기본 on. 효과는 shared_buffers가 hot 데이터에 fit할 때 큼
@@ -22,7 +25,7 @@ services:
     ports:
       - "${KOR_TRAVEL_MAP_DOCKER_BIND_HOST:-127.0.0.1}:${KOR_TRAVEL_MAP_POSTGRES_HOST_PORT:-5432}:5432"
     volumes:
-      - kor-travel-map-postgres:/var/lib/postgresql/data
+      - kor-travel-map-postgres:/var/lib/postgresql
     healthcheck:
       test:
         [
@@ -34,7 +37,7 @@ services:
       retries: 20
 
   dagster-db-init:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     depends_on:
       postgres:
         condition: service_healthy
@@ -232,7 +235,7 @@ services:
   # virgin application DB는 template0에서 한 번만 만들며, 존재하면 repair하지 않고
   # fresh volume으로 재시도하도록 mutation 전에 중단한다.
   db-application-create-fresh-300:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     profiles: ["fresh-init"]
     depends_on:
       postgres:
@@ -276,7 +279,7 @@ services:
   # 기존 `0236` DB의 handoff는 이 경로가 아니라 Docker Manager controlled transaction만
   # 수행한다.
   db-role-bootstrap-300:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     profiles: ["fresh-init"]
     depends_on:
       db-application-create-fresh-300:

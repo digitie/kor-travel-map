@@ -10,7 +10,6 @@ import pytest
 import yaml
 
 from tests.integration._postgis_image import (
-    ALPINE_POSTGIS_IMAGE,
     POSTGIS_IMAGE_ENV,
     SHARED_GLIBC_POSTGIS_IMAGE,
 )
@@ -79,15 +78,10 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     integration = jobs["integration"]
     assert integration["name"] == "pytest integration (PostGIS, ${{ matrix.lane }})"
     assert integration["needs"] == "unit"
-    # 두 lane이 같은 suite를 돈다(ADR-103). digest의 정본은 `_postgis_image.py`다 —
-    # 워크플로가 그 값과 갈리면 glibc lane이 공용 instance가 아닌 이미지를 시험한다.
+    # lane은 공용 instance digest다(ADR-118). digest의 정본은 `_postgis_image.py`다 —
+    # 워크플로가 그 값과 갈리면 CI가 prod major·collation이 아닌 이미지를 시험한다.
     assert integration["strategy"]["fail-fast"] is False
-    assert integration["strategy"]["matrix"] == {
-        "include": [
-            {"lane": "alpine", "image": ALPINE_POSTGIS_IMAGE},
-            {"lane": "glibc", "image": SHARED_GLIBC_POSTGIS_IMAGE},
-        ]
-    }
+    assert integration["strategy"]["matrix"] == {"include": _POSTGIS_LANES}
     assert integration["env"] == {POSTGIS_IMAGE_ENV: "${{ matrix.image }}"}
     integration_steps = _steps_by_name(integration)
     download = integration_steps["Download unit coverage data"]
@@ -126,20 +120,20 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     assert "pytest tests/fixtures -q --no-cov" in fixture_run
 
 
-#: 통합 suite의 두 lane(ADR-103). 값의 정본은 `tests/integration/_postgis_image.py`다.
+#: 통합 suite의 lane(ADR-118). 값의 정본은 `tests/integration/_postgis_image.py`다.
 _POSTGIS_LANES = [
-    {"lane": "alpine", "image": ALPINE_POSTGIS_IMAGE},
-    {"lane": "glibc", "image": SHARED_GLIBC_POSTGIS_IMAGE},
+    {"lane": "pg18", "image": SHARED_GLIBC_POSTGIS_IMAGE},
 ]
 _INTEGRATION_PYTEST = re.compile(r"\bpytest\b[^\n]*\btests/integration\b")
 
 
 @pytest.mark.unit
-def test_every_workflow_that_runs_integration_covers_both_lanes() -> None:
-    """`pytest tests/integration`을 도는 **모든** workflow job이 두 lane을 돈다.
+def test_every_workflow_that_runs_integration_covers_every_lane() -> None:
+    """`pytest tests/integration`을 도는 **모든** workflow job이 같은 lane을 돈다.
 
-    한 곳만 matrix를 가지면 다른 곳(수동 재확인 workflow 등)은 alpine에서만 돌며 초록이
-    된다 — glibc lane이 잡는 collation·head 오라클·bootstrap 결함을 보지 못한다.
+    한 곳만 matrix를 가지면 다른 곳(수동 재확인 workflow 등)은 기본값이나 옛 이미지에서
+    돌며 초록이 된다 — prod major가 잡는 catalog·collation·head 오라클·bootstrap 결함을
+    보지 못한다.
     """
 
     seen: list[str] = []
@@ -182,8 +176,7 @@ def test_branch_protection_runbook_tracks_t203_required_checks() -> None:
         "pytest (Python 3.11)",
         "pytest (Python 3.12)",
         "pytest (Python 3.13)",
-        "pytest integration (PostGIS, alpine)",
-        "pytest integration (PostGIS, glibc)",
+        "pytest integration (PostGIS, pg18)",
         "pytest fixture replay",
         "openapi-drift",
         "type-check + next build (Node 20)",
