@@ -110,7 +110,14 @@ def test_new_public_surface_is_versioned_without_changing_frozen_expired_reset_a
     ]
     assert not any(name in statement for statement in acl._SNAPSHOT_COMMAND_OWNER_ACL)
     assert migration._SCOPE_OWNER_READ_SQL in " ".join(acl._SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL)
-    assert "to_regprocedure" in " ".join(acl._SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL)
+    scope_guard = " ".join(acl._SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL)
+    assert "IF EXISTS" in scope_guard
+    assert "n.nspname='ops'" in scope_guard
+    assert "p.proname='reset_ready_provider_snapshot_plan'" in scope_guard
+    assert "p.prokind='f'" in scope_guard
+    assert "to_regprocedure" not in scope_guard
+    # optional 함수가 없던 schema에서도 문장은 실행되지만 catalog guard가 grant를 막는다.
+    assert acl._render_acl_statement(scope_guard, {}) == scope_guard
     assert migration._SCOPE_OWNER_READ_SQL in migration._UPGRADE_STATEMENTS
 
     assert "'433_snapshot_ready_plan_reset'" in migration._RECEIPT_HEAD_CHECK_SQL

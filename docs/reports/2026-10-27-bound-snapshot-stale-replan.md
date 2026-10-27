@@ -1,8 +1,8 @@
 # bound snapshot의 정확 stale 뒤 재계획 복구
 
-현재 단계: 선행 ea2fbcc5 실제 재현1PASS 뒤 첫 제품 owned16은14PASS/2FAIL이었다.
-두 실패의 catalog 자료형·누락된 application graph를 교정 중이며 제품 전체 수용과
-최종 CI는 아직 미완이다. 원 실패·정리 증거를 보존했고 운영 변경은 없다.
+현재 단계: 선행 재현1PASS 뒤 첫 제품14PASS/2FAIL을 보존했고, 교정 source6cce26ef의
+제품 owned16은 전부 통과했다. 전체 CI에서 드러난 문서 크기·ACL 선언 계약을 교정 중이며
+최종 CI·머지는 아직 미완이다. 운영 변경과 profile 활성화는 없다.
 
 ## 최초 조사 범위(실제 재현 전 기록)
 
@@ -193,3 +193,37 @@ catalog 조회를 `prokind::text`로 정규화하고 기존 generator의 `--writ
 교정 후 기존 graph-currentness/single-head·n150 candidate 소비 계약과 typed reset/양 runner
 순수 회귀145개가25.70초에 통과했다. graph `--check`·Ruff도 통과했으며 첫 Ruff의
 두 차례 E501은 수정 전 원 log로 보존했다. 제품 PG 재시험은 아직 실행하지 않았다.
+
+## 교정 source6c의 실제 제품16 수용과 CI 경계
+
+동일 자원·시간 상한의 단일 재시험은16PASS/18.90초(XML16/skip0, JUnit18.304초,
+runner27.169초)였다. 원 result SHA256은
+`8b4bff8295ab9229001f67747a917124f718e0085196024a9f1537e19099ddf6`이다.
+양 실제 caller는 계획2회/reset1회·같은 artifact bytes·현재generation2·정상 후처리와
+seal·applied reset 거부를 증명했다. 완료 replay의 작은 원천 rows/receipt는 불변이고
+native apply 진입 추가0이며 SQL문장 전체0을 계측했다는 뜻은 아니다.
+
+13개 원 산출물 SHA·2591개 Git mode/blob·실제63 import를 검산했다. 이번 성공에서는
+source 전후/SDK53 전후/실제 Common19 네 지점 모두 실행됐다. 정확 CID 부재·익명
+volume1 부재·전체 scalar label0 정리도 통과했다. 실제 관측 범위는 local owned PG이고
+운영 ARM의 성능·CPU/RSS 감소, TCP ACK 유실 주입, 동시 cancel DML은 증명하지 않는다.
+앞선 재현/제품 실패와 setup/fixture 입력 실패는 원장 그대로 유지한다.
+
+동일 source의 정적 검사는 Map mypy196개/Dagster48개 및 import250개·1790의존성의
+4계약 전부 통과했다. fresh CI Python3.12는 resume225280B 상한과 ACL인벤토리의
+시그니처 리터럴 금지 계약 두 곳에서 실패했다. 실제 제품16 성공과 전체 CI green은
+분리하며 원 CI log를 보존한다. 완전한 과거 resume 세 section9620B는 원문 그대로
+[archive](../archive/resume-2026-09a.md)로 옮겨 상한을 복구했다.
+
+## CI ACL 선언·문서 상한 교정
+
+시그니처 리터럴 금지 fence는 유지한다. 새3열 scope grant의 조건은 기존 catalog
+resolver 관례대로 정확 namespace/name과 function kind 존재 검사로 바꿨다. resolver가
+해당 이름의 유일성을 검증하고433 이전 함수 부재에서는 grant를 하지 않는다. 기존
+expired reset·frozen430·3열 범위·startup guard는 바꾸지 않았다. 기존 ACL4번째 시험에
+함수 catalog 부재·열권한 회수 후 gate가 권한을 추가하지 않고 전체 rollback으로
+함수/권한이 복원되는 관측을 더했다. 이는 전체432 DB/구binary 실행이 아니다.
+
+시그니처 fence·typed reset·archive link/크기 순수35개9.73초와 ACL4개 collect-only
+4.66초/Ruff가 통과했다. source6c 제품16의 실제 성공은 이 추가 gate 변경까지
+승계하지 않고, source/adapter 두 리뷰 뒤 동일 상한 단일 재시험과 fresh CI를 요구한다.

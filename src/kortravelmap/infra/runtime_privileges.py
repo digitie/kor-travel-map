@@ -1031,8 +1031,11 @@ _SNAPSHOT_COMMAND_OWNER_ACL = tuple(
 
 # 433만 필요한 직접 scope 관측이다. lease/UPDATE/runtime 표 읽기 권한은 추가하지 않는다.
 _SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL = (
-    "DO $snapshot_ready_scope$ BEGIN IF to_regprocedure("
-    "'ops.reset_ready_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)') IS NOT NULL THEN "
+    "DO $snapshot_ready_scope$ BEGIN IF EXISTS ("
+    "SELECT 1 FROM pg_catalog.pg_proc p "
+    "JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace "
+    "WHERE n.nspname='ops' AND p.proname='reset_ready_provider_snapshot_plan' "
+    "AND p.prokind='f') THEN "
     "GRANT SELECT(provider_dataset_id,epoch,owner) ON TABLE ops.feature_write_dataset_scopes "
     "TO ktm_curation_command_owner; END IF; END $snapshot_ready_scope$",
 )

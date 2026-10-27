@@ -8,6 +8,7 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra import db as runtime_db
+from kortravelmap.infra import runtime_privileges as acl
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
 )
@@ -184,3 +185,47 @@ async def test_ready_reset_command_owner_scope_read_is_exactly_three_columns(sca
                 )
             assert denied.value.orig.sqlstate == "42501"
             await session.rollback()
+
+    # 전체432 DB/구binary 시험이 아니다. 새 함수가 아직 없는 catalog 경계에서
+    # 새3열 grant가 생기지 않음을 같은433 fixture의 rollback-only TX로 검증한다.
+    async with AsyncSession(admin) as session:
+        await session.begin()
+        try:
+            await _bounded(session)
+            await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+            await session.execute(
+                text(
+                    "REVOKE SELECT(provider_dataset_id,epoch,owner) "
+                    "ON TABLE ops.feature_write_dataset_scopes FROM ktm_curation_command_owner"
+                )
+            )
+            await session.execute(text("SET LOCAL ROLE ktm_curation_command_owner"))
+            await session.execute(text("DROP FUNCTION " + _SIGNATURE))
+            await session.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+            for statement in acl._SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL:
+                await session.execute(text(statement))
+            assert not await session.scalar(
+                text(
+                    "SELECT has_column_privilege('ktm_curation_command_owner',"
+                    "'ops.feature_write_dataset_scopes','provider_dataset_id','SELECT') "
+                    "OR has_column_privilege('ktm_curation_command_owner',"
+                    "'ops.feature_write_dataset_scopes','epoch','SELECT') "
+                    "OR has_column_privilege('ktm_curation_command_owner',"
+                    "'ops.feature_write_dataset_scopes','owner','SELECT')"
+                )
+            )
+        finally:
+            await session.rollback()
+    async with AsyncSession(admin) as session:
+        await _bounded(session)
+        assert await session.scalar(
+            text("SELECT to_regprocedure(:signature) IS NOT NULL"), {"signature": _SIGNATURE}
+        )
+        for column in ("provider_dataset_id", "epoch", "owner"):
+            assert await session.scalar(
+                text(
+                    "SELECT has_column_privilege('ktm_curation_command_owner',"
+                    "'ops.feature_write_dataset_scopes',:column,'SELECT')"
+                ),
+                {"column": column},
+            )

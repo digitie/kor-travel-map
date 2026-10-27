@@ -1,3 +1,11 @@
+## 2026-10-27 — typed reset 실제 제품16 통과, CI 계약 교정 중
+
+source6cce26ef의 단일 owned16은16PASS18.90초/정확 CID·volume1·label0 정리PASS다.
+양 caller 저장원본 재계획·후처리/seal·원 replay 불변과 새권한·경합 경계를 확인했다.
+source2591/SDK53전후/import63/Common19네지점도 검산했다.
+[실제 수용·CI 구분](reports/2026-10-27-bound-snapshot-stale-replan.md#교정-source6c의-실제-제품16-수용과-ci-경계)을
+남겼으며 CI 문서크기/ACL선언 두 실패를 보존하고 교정 중이다. 전체9미완/OFF/운영0이다.
+
 ## 2026-10-27 — 첫 제품 PG14PASS/2FAIL 보존과 canonical head 교정
 
 owned16 첫 실행은14PASS/2FAIL22.46초였고 정확 CID·volume1·전체 label0 정리는
