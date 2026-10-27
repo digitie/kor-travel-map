@@ -195,6 +195,12 @@
         "431_transport_rest_reader"
       ],
       "revision": "432_rest_snapshot_atomic"
+    },
+    {
+      "down_revision": [
+        "432_rest_snapshot_atomic"
+      ],
+      "revision": "433_snapshot_ready_plan_reset"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

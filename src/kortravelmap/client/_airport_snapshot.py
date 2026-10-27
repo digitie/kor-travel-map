@@ -406,6 +406,38 @@ async def reset_airport_snapshot_plan(
         return result
 
 
+async def reset_rolled_back_airport_snapshot_plan(
+    client: AsyncKorTravelMapClient,
+    observed: RecoveredProviderSnapshot,
+    token: SnapshotExecutorToken,
+    plan: AirportSnapshotPlan,
+) -> str:
+    """atomic apply의 선택 stale rollback 뒤 원 plan만 정리한다. ACK 불명에는 호출하지 않는다."""
+    _unbound(client)
+    if token.snapshot_id != observed.snapshot_id or observed.status != "prepared":
+        raise AirportSnapshotUnavailable("exact prepared snapshot required for rolled-back reset")
+    binding = observed.kernel_binding
+    if binding is not None and (
+        binding.attempt_id != plan.attempt_id
+        or binding.owner != plan.owner
+        or binding.manifest_digest != plan.manifest_digest
+    ):
+        raise AirportSnapshotUnavailable("rolled-back snapshot plan binding changed")
+    params = _token_params(token)
+    params.update(attempt=plan.attempt_id, owner=plan.owner, manifest=plan.manifest_digest)
+    async with _transaction(client) as session:
+        result = await session.scalar(
+            text(
+                "SELECT ops.reset_ready_provider_snapshot_plan("
+                ":snapshot,:generation,:fence,:attempt,:owner,:manifest)"
+            ),
+            params,
+        )
+        if type(result) is not str or result not in {"reset", "needs_read"}:
+            raise AirportSnapshotUnavailable("invalid rolled-back snapshot reset response")
+        return result
+
+
 async def collect_expired_airport_snapshots(client: AsyncKorTravelMapClient) -> int:
     """미등록 opt-in 실행 직전 한 번만 최대16개를 정리한다. terminal+7일은 SD 권위다."""
     async with _transaction(client) as session:

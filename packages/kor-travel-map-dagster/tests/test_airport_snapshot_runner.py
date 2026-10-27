@@ -91,6 +91,7 @@ async def _case(monkeypatch, *, status="applied", geo=False):
         ("plan_airport_snapshot", object()),
         ("apply_airport_snapshot_in_session", intent.apply_result),
         ("reset_airport_snapshot_plan", "reset"),
+        ("reset_rolled_back_airport_snapshot_plan", "reset"),
         ("collect_expired_airport_snapshots", 0),
         ("register_airport_snapshot", SnapshotRegistration(sid, True, token)),
         ("seal_airport_snapshot", object()),
@@ -218,6 +219,7 @@ async def test_apply_unknown_commit_propagates_without_reset_ex_or_refetch(monke
     assert raised.value is error
     assert stubs["read_airport_snapshot"].await_count == 2
     stubs["reset_airport_snapshot_plan"].assert_not_awaited()
+    stubs["reset_rolled_back_airport_snapshot_plan"].assert_not_awaited()
     backend.complete_provider_snapshot_postprocess.assert_not_awaited()
     collect.assert_not_awaited()
 
@@ -241,10 +243,11 @@ async def test_known_replan_reads_then_exact_resets_and_reads_again_before_new_p
     async def reset(*args):
         events.append("reset")
         assert args[1] is prepared
+        assert args[3] is stubs["plan_airport_snapshot"].return_value
         return "reset"
 
     stubs["read_airport_snapshot"].side_effect = read
-    stubs["reset_airport_snapshot_plan"].side_effect = reset
+    stubs["reset_rolled_back_airport_snapshot_plan"].side_effect = reset
     stubs["run_snapshot_apply_postprocess"].side_effect = [
         target.io.AirportSnapshotReplanRequired("expired"),
         object(),
@@ -252,6 +255,7 @@ async def test_known_replan_reads_then_exact_resets_and_reads_again_before_new_p
     await target.run_airport_snapshot_if_supported(context)
     assert events == ["read", "read", "read", "reset", "read", "read", "read"]
     assert stubs["run_snapshot_apply_postprocess"].await_count == 2
+    stubs["reset_airport_snapshot_plan"].assert_not_awaited()
     collect.assert_not_awaited()
 
 
@@ -472,6 +476,7 @@ async def test_replan_never_exceeds_three_exact_reset_cycles_or_refetches(monkey
     assert raised.value.allow_retries is False
     assert stubs["plan_airport_snapshot"].await_count == 3
     assert stubs["reset_airport_snapshot_plan"].await_count == 3
+    stubs["reset_rolled_back_airport_snapshot_plan"].assert_not_awaited()
     stubs["collect_expired_airport_snapshots"].assert_not_awaited()
     collect.assert_not_awaited()
 
@@ -717,4 +722,18 @@ async def test_other_claim_database_errors_are_not_reclassified_or_read_again(mo
     stubs["read_airport_snapshot"].assert_awaited_once()
     factory.assert_not_called()
     stubs["plan_airport_snapshot"].assert_not_awaited()
+    collect.assert_not_awaited()
+
+
+async def test_selected_atomic_stale_never_exceeds_three_typed_resets_or_refetches(monkeypatch):
+    context, _, _, _, _, _, stubs, _, _, collect, _ = await _case(monkeypatch, status="prepared")
+    atomic = stubs["run_snapshot_apply_postprocess"]
+    atomic.side_effect = target.io.AirportSnapshotReplanRequired("selected kernel stale")
+    with pytest.raises(Failure) as caught:
+        await target.run_airport_snapshot_if_supported(context)
+    assert caught.value.allow_retries is False
+    assert atomic.await_count == 3
+    assert stubs["plan_airport_snapshot"].await_count == 3
+    assert stubs["reset_rolled_back_airport_snapshot_plan"].await_count == 3
+    stubs["reset_airport_snapshot_plan"].assert_not_awaited()
     collect.assert_not_awaited()

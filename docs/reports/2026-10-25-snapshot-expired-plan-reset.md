@@ -1,5 +1,9 @@
 # 만료된 snapshot kernel 계획의 typed reset
 
+> 2026-10-27 정밀화: 아래 현재 상태/미호출·설치PG0 표기는 최초430 검토 checkpoint의
+> 역사다. 기존 expired reset의 live READY 거부는 유지하며, 실제 재현과 현재 executor의
+> 별도433 후속은 [bound stale 복구 기록](2026-10-27-bound-snapshot-stale-replan.md)을 따른다.
+
 ## 범위와 현재 상태
 
 Root697160d 위 미호출 SQL 조각이다. 기존 artifact/control/attempt schema·일반 kernel·공유
