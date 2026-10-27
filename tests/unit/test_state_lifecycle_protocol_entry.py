@@ -32,13 +32,5 @@ def test_unknown_or_repeated_protocol_shape_is_rejected(body):
         _migration._with_protocol_entry(body)
 
 
-def test_five_state_entries_share_existing_protocol_owner_without_new_grants():
-    assert set(_migration._LEGACY_OWNERS) == {
-        "transition_admin_feature_state",
-        "reactivate_admin_feature_state",
-        "transition_feature_state",
-        "author_lifecycle_override",
-        "revoke_lifecycle_override",
-    }
-    assert set(_migration._LEGACY_OWNERS.values()) == {"ktm_feature_state_procedure_owner"}
-    assert set(_migration._EXPECTED_DEFINITIONS) == set(_migration._LEGACY_OWNERS)
+# 415의 상수를 다시 적던 owner/grant 검사는 지웠다(433 WI-3). 실제 ACL은 migration만으로
+# 만든 head 오라클에서 유도해 본다 — tests/lint/test_protocol_entry_acl_oracle.py.

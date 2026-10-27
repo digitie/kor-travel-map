@@ -78,7 +78,7 @@ def _field_command_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _record(*args: Any, **kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(repo, "lock_feature_curation_write", _lock)
+    monkeypatch.setattr(repo, "lock_single_feature_writer_protocol", _lock)
     monkeypatch.setattr(repo, "lock_domain_command", _lock)
     monkeypatch.setattr(repo, "create_domain_command_claim", _claim)
     monkeypatch.setattr(repo, "create_domain_command_record", _record)
@@ -233,18 +233,25 @@ async def test_apply_sido_and_road_management_no() -> None:
     assert len(session.calls) == 3
 
 
-async def test_apply_acquires_protocol_before_first_row_lock(
+async def test_apply_acquires_regime_entry_before_first_row_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """433 DC-1: 첫 행 잠금 전의 진입은 regime 진입(epoch>0에서만 P EX)이고 적재 fence가 아니다."""
     session = _Session([None])
 
     async def _protocol(actual: Any) -> None:
         assert actual is session
-        session.calls.append({"sql": "protocol EX", "params": {}})
+        session.calls.append({"sql": "regime entry", "params": {}})
 
-    monkeypatch.setattr(repo, "lock_feature_curation_write", _protocol)
+    async def _no_fence(actual: Any) -> None:  # pragma: no cover - 불리면 실패
+        raise AssertionError("address override must not take the load fence")
+
+    monkeypatch.setattr(repo, "lock_single_feature_writer_protocol", _protocol)
+    monkeypatch.setattr(
+        "kortravelmap.infra.feature_repo.lock_feature_curation_write", _no_fence
+    )
     assert await repo.apply_feature_address_override(
         session, "missing", address={"road": "fixture"},
     ) is None  # type: ignore[arg-type]
-    assert session.calls[0]["sql"] == "protocol EX"
+    assert session.calls[0]["sql"] == "regime entry"
     assert "FOR UPDATE" in session.calls[1]["sql"]

@@ -183,12 +183,16 @@ async def _contention(engines, *, fixed: bool, operation: str = "record") -> dic
         manual_task = asyncio.create_task(call_manual())
         scoped_task = None
         try:
-            traces["manual_waits_before_begin"] = await _blockers(
-                admin, manual_pid, scoped_pid if fixed else controller_pid, manual_task
+            # 433 DC-1: epoch=0의 M05는 P를 잡지 않는다. 대신 provider source 증거를 적재와 같은
+            # 순서로 먼저 FOR SHARE한 뒤 Feature에서 controller를 기다린다.
+            traces["manual_waits_at_feature_after_evidence"] = await _blockers(
+                admin, manual_pid, controller_pid, manual_task
             )
             scoped_task = asyncio.create_task(call_scoped())
-            traces["scoped_waits_at_feature_queue"] = await _blockers(
-                admin, scoped_pid, controller_pid if fixed else manual_pid, scoped_task
+            # kernel은 source/head를 Feature보다 먼저 잡으려다 M05가 이미 쥔 증거 뒤에 선다.
+            # 역순(M05 Feature→head, kernel head→Feature)이 없으므로 40P01이 나지 않는다.
+            traces["scoped_waits_behind_manual_evidence"] = await _blockers(
+                admin, scoped_pid, manual_pid if fixed else controller_pid, scoped_task
             )
             # 이 시점에 kernel 전체 begin은 실제 source/head를 먼저 잠갔다.
             # 컨트롤러는 행 잠금 해제 순서만 고정하며 A/B 제품 함수를 바꾸지 않는다.
@@ -247,21 +251,30 @@ async def test_m05_owner_acl_and_first_protocol_entry(scalar_engines, name):
                 {"name": name},
             )
         ).one()
+    # 433 DC-1: 첫 진입은 regime 진입이다(epoch>0에서만 P EX).
     assert (
         row[0]
         .partition("\nBEGIN\n")[2]
         .lstrip()
-        .startswith("PERFORM ops.lock_scoped_feature_write_protocol(true);")
+        .startswith("PERFORM ops.lock_single_feature_writer_protocol();")
     )
+    assert "lock_scoped_feature_write_protocol" not in row[0]
     assert row[1] == "ktm_manual_provider_dedup_procedure_owner"
     assert row[2] is (name != "resolve_manual_provider_dedup_case")
     assert row[3] is False
 
 
 @pytest.mark.parametrize("name", _NAMES)
-async def test_m05_shared_to_legacy_call_fails_before_validation(scalar_engines, name):
+async def test_m05_epoch0_entry_takes_no_protocol_under_a_shared_caller(scalar_engines, name):
+    """epoch=0의 진입은 P를 잡지 않으므로 SH caller에서도 승격 오류 없이 본문 검증까지 간다.
+
+    epoch>0의 SH→EX 승격 거부는 ``test_single_writer_regime_entry.py``가 활성화 뒤에 본다.
+    """
     admin, _ = scalar_engines
     async with AsyncSession(admin) as session:
+        assert await session.scalar(
+            text("SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton")
+        ) == 0
         types = await session.scalar(
             text("""SELECT ARRAY(SELECT format_type(oid,NULL)
             FROM unnest(proallargtypes) WITH ORDINALITY a(oid,position) ORDER BY position)
@@ -272,9 +285,12 @@ async def test_m05_shared_to_legacy_call_fails_before_validation(scalar_engines,
         await session.execute(text("SET LOCAL ROLE ktm_manual_provider_dedup_procedure_owner"))
         await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
         try:
-            with pytest.raises(DBAPIError, match="protocol share to exclusive upgrade"):
+            with pytest.raises(DBAPIError) as caught:
                 await session.execute(
                     text("CALL feature." + name + "(" + ",".join("NULL::" + t for t in types) + ")")
                 )
+            # 본문 자신의 executor/입력 검증에서 멈춘다. protocol 승격 오류가 아니다.
+            assert "upgrade requires replan" not in str(caught.value.orig)
+            assert caught.value.orig.sqlstate in {"42501", "23514", "25001", "P0002"}
         finally:
             await session.rollback()

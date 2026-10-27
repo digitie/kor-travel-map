@@ -156,7 +156,7 @@ async def test_same_dataset_applying_does_not_block_true_leaf(activation_engines
         )
 
 
-@pytest.mark.parametrize("mode", ["none", "l", "sh_l"])
+@pytest.mark.parametrize("mode", ["none", "sh_l"])
 @pytest.mark.parametrize(
     "relation",
     [
@@ -165,7 +165,10 @@ async def test_same_dataset_applying_does_not_block_true_leaf(activation_engines
         "pipeline_cancellation_runs",
     ],
 )
-async def test_cancel_statement_requires_existing_ex_and_l(activation_engines, mode, relation):
+async def test_cancel_statement_requires_l_and_no_shared_protocol(
+    activation_engines, mode, relation
+):
+    """433 WI-1: 취소 원장 쓰기는 L을 요구하고, P를 쥐었다면 EX여야 한다(SH 데이터 writer 금지)."""
     _, runtime = activation_engines
     async with AsyncSession(runtime) as session:
         await session.begin()
@@ -179,10 +182,12 @@ async def test_cancel_statement_requires_existing_ex_and_l(activation_engines, m
             await session.rollback()
 
 
-async def test_cancel_existing_prefix_zero_row_path_is_allowed(activation_engines):
+@pytest.mark.parametrize("mode", ["ex_l", "l"])
+async def test_cancel_existing_prefix_zero_row_path_is_allowed(activation_engines, mode):
+    # 433 WI-1: L만 쥔 장부 transaction도 취소 원장을 쓴다(종전 424는 P EX→L을 요구했다).
     _, runtime = activation_engines
     async with AsyncSession(runtime) as session, session.begin():
-        await _prefix(session, "ex_l")
+        await _prefix(session, mode)
         for relation in [
             "pipeline_cancellations",
             "pipeline_cancellation_members",
@@ -197,7 +202,13 @@ async def test_typed_owner_cannot_skip_l_or_terminal_p(activation_engines):
     dataset, _ = await _seed(admin, runtime, count=1)
     _, _, operation = await _operation(admin, runtime, dataset)
     child = operation.members[0].job_id
-    for mode, status in [("none", "running"), ("l", "done")]:
+    # 433 WI-1: L 없이는 어떤 provider job도 못 쓴다. root(provider_feature_load_run)의 done
+    # 전이는 큐레이션 확정이라 L만으로는 거부한다(P EX 필요). 비권위 child 완료는 장부다.
+    for mode, status, job in [
+        ("none", "running", child),
+        ("l", "done", operation.root_job_id),
+        ("sh_l", "failed", child),
+    ]:
         async with AsyncSession(admin) as session:
             await session.begin()
             try:
@@ -209,7 +220,7 @@ async def test_typed_owner_cannot_skip_l_or_terminal_p(activation_engines):
                             "UPDATE ops.import_jobs SET status=:status "
                             "WHERE job_id=CAST(:id AS uuid)"
                         ),
-                        {"status": status, "id": child},
+                        {"status": status, "id": job},
                     )
                 assert caught.value.orig.sqlstate == "23514"
                 assert _constraint_name(caught.value) == "ck_provider_tracking_write_prefix"

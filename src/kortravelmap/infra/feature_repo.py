@@ -5814,8 +5814,11 @@ async def set_feature_phones(session: AsyncSession, feature_id: str, phones: lis
     enrichment receipt가 author한 effective 값은 유지되고, 그 명령·actor·reason은
     domain-command ledger와 override provenance에서 모두 추적된다.
     """
-    # 433 DC-1: 첫 행 잠금 전의 regime 진입. epoch>0이면 P EX, 아니면 P 없이 행 잠금만 쓴다.
-    await lock_single_feature_writer_protocol(session)
+    # 공유 writer의 source/link→Feature 순서와 교차하기 전에 protocol EX를 잡는다.
+    # 433 DC-1에서도 단건 regime 진입으로 바꾸지 않는다 — 유일한 호출자(전화 enrichment)가
+    # 같은 transaction에서 source record/link를 쓰며 그 쓰기는 적재 fence를 잡는다. fence를
+    # 여기서 먼저 잡지 않으면 Feature 행 잠금 뒤에 P EX를 기다리는 역순이 된다.
+    await lock_feature_curation_write(session)
     locked = (
         await session.execute(
             text(_LOCK_FEATURE_PHONE_OVERRIDE_SQL), {"feature_id": feature_id}

@@ -148,9 +148,14 @@ class _Protocol:
 
 @dataclass(frozen=True)
 class _Lineage:
-    """L 획득. tracking 진입의 finalizing 인자는 앞에 P EX 사건을 따로 낸다."""
+    """L 획득. tracking 진입의 finalizing 인자는 앞에 P EX 사건을 따로 낸다.
+
+    ``leaf``는 tracking 진입의 ``false``(장부 쓰기)다 — 진입 자신이 P를 쥔 채 오면
+    ``ck_provider_tracking_prefix``로 거부한다(P EX와 L을 이미 쥔 재진입만 통과).
+    """
 
     offset: int
+    leaf: bool = False
 
 
 @dataclass(frozen=True)
@@ -166,7 +171,7 @@ def _entry_events(name: str, args: str, offset: int) -> list[object]:
         mode = {"true": "EX", "false": "SH"}.get(argument, "?")
         return [_Protocol(mode, offset)]
     if argument == "false":
-        return [_Lineage(offset)]
+        return [_Lineage(offset, leaf=True)]
     # true, 또는 변수/식(``p_authoritative_snapshot_complete``·SUCCESS 완결 식)은 확정 쪽으로
     # 센다 — 앞의 조건(L·행 잠금 없음)이 가장 엄격하고, 같은 분기 안의 root 완결 CALL이
     # 재진입으로 읽힌다.
@@ -276,6 +281,19 @@ def _acquire(
     return violations
 
 
+def _leaf_violations(held: _Held, *, origin: str, path: str, world: str) -> list[str]:
+    """tracking leaf 진입의 실행 시 거부(``ck_provider_tracking_prefix``)를 미리 본다.
+
+    leaf는 P를 쥔 transaction에서 부르면 23514다. 확정 진입(P EX→L) 뒤의 재진입만 통과한다.
+    433이 장부 쓰기를 leaf로 좁혔으므로, 같은 transaction에서 적재 fence(P EX)를 쥔 뒤
+    장부를 쓰는 경로가 생기면 여기서 먼저 빨개진다.
+    """
+    protocol = held.modes.get(_P)
+    if protocol is None or (protocol == "EX" and _L in held.modes):
+        return []
+    return [f"{origin}: leaf tracking L after P {protocol} without L at {path} [{world}]"]
+
+
 def _order_violations(
     routines: dict[str, str], triggers: dict[str, list[str]] | None = None
 ) -> list[str]:
@@ -306,6 +324,8 @@ def _order_violations(
                 mode = "EX" if event.mode == "REGIME" else event.mode
                 violations.extend(_acquire(held, _P, mode, **context))
             elif isinstance(event, _Lineage):
+                if event.leaf:
+                    violations.extend(_leaf_violations(held, **context))
                 violations.extend(_acquire(held, _L, "EX", **context))
             else:
                 assert isinstance(event, _Lock)
@@ -342,15 +362,20 @@ def _python_feature_write_takers() -> list[str]:
 # (``if``/``else``)는 각자 같은 시작 상태에서 걷고 합친다 — ``if finalizing: P EX else: L``이
 # 순서 위반으로 읽히지 않게 한다. SQL 문자열 상수는 P·L 진입과 ``FOR UPDATE/SHARE``만 본다.
 
-_PY_ROOTS: Final[tuple[pathlib.Path, ...]] = (
-    _ROOT / "src" / "kortravelmap" / "infra",
-    _ROOT / "packages" / "kor-travel-map-api" / "src" / "kortravelmap" / "api",
+#: (폴더, 그 폴더의 dotted 이름). Dagster 코드는 client 인스턴스 메서드를 부르므로 정적으로
+#: 펼 수 없다 — 그 아래 client·infra 함수는 여기서 직접 센다.
+_API_SRC: Final[pathlib.Path] = _ROOT / "packages" / "kor-travel-map-api" / "src"
+_PY_ROOTS: Final[tuple[tuple[pathlib.Path, str], ...]] = (
+    (_ROOT / "src" / "kortravelmap", "kortravelmap"),
+    (_API_SRC / "kortravelmap" / "api", "kortravelmap.api"),
 )
+#: tracking leaf 진입(``lock_provider_feature_tracking_protocol(false)``)의 L.
+_PY_LEAF: Final[str] = "L:LEAF"
 #: 이름만으로 모드가 정해지는 helper.
 _PY_FIXED_HELPERS: Final[dict[str, tuple[str, ...]]] = {
     "lock_feature_curation_write": ("P:EX",),
     "lock_provider_feature_finalization": ("P:EX", "L"),
-    "lock_provider_feature_tracking_leaf": ("L",),
+    "lock_provider_feature_tracking_leaf": (_PY_LEAF,),
     "lock_pipeline_lineage_mutation": ("L",),
     "lock_single_feature_writer_protocol": ("P:REGIME",),
 }
@@ -358,7 +383,7 @@ _PY_FIXED_HELPERS: Final[dict[str, tuple[str, ...]]] = {
 _PY_KEYWORD_HELPERS: Final[dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]]] = {
     "lock_feature_write_protocol": ("exclusive", ("P:EX",), ("P:SH",)),
     "lock_scoped_feature_write_protocol": ("exclusive", ("P:EX",), ("P:SH",)),
-    "lock_provider_feature_tracking": ("finalizing", ("P:EX", "L"), ("L",)),
+    "lock_provider_feature_tracking": ("finalizing", ("P:EX", "L"), (_PY_LEAF,)),
 }
 _PY_MAX_DEPTH: Final[int] = 6
 
@@ -398,7 +423,8 @@ def _py_sql_events(sql: str) -> list[str]:
             if isinstance(event, _Protocol):
                 events.append((match.start(), "P:" + event.mode))
             else:
-                events.append((match.start(), "L"))
+                assert isinstance(event, _Lineage)
+                events.append((match.start(), _PY_LEAF if event.leaf else "L"))
     for match in _LINEAGE_DIRECT.finditer(sql):
         events.append((match.start(), "L"))
     for offset in _domain_row_locks(sql):
@@ -408,7 +434,7 @@ def _py_sql_events(sql: str) -> list[str]:
 
 @dataclass(frozen=True)
 class _PyEvent:
-    """``kind``는 ``P:EX``·``P:SH``·``P:REGIME``·``L``·``ROW``다."""
+    """``kind``는 ``P:EX``·``P:SH``·``P:REGIME``·``L``·``L:LEAF``·``ROW``다."""
 
     kind: str
     where: str
@@ -418,11 +444,20 @@ class _PyEvent:
 class _PyBranch:
     """``if``의 두 갈래. 같은 시작 상태에서 따로 걷는다."""
 
-    body: tuple[_PyEvent | _PyBranch, ...]
-    orelse: tuple[_PyEvent | _PyBranch, ...]
+    body: tuple[_PyEvent | _PyBranch | _PyTransaction, ...]
+    orelse: tuple[_PyEvent | _PyBranch | _PyTransaction, ...]
 
 
-_PyItems = tuple[_PyEvent | _PyBranch, ...]
+@dataclass(frozen=True)
+class _PyTransaction:
+    """``async with ....begin():`` 블록 — 새 transaction이므로 빈 상태에서 걷는다."""
+
+    body: tuple[_PyEvent | _PyBranch | _PyTransaction, ...]
+
+
+_PyItems = tuple[_PyEvent | _PyBranch | _PyTransaction, ...]
+#: ``session.commit()``·``rollback()`` 뒤에는 잠금이 풀린다.
+_PY_RESET: Final[str] = "RESET"
 
 
 @dataclass
@@ -430,13 +465,52 @@ class _PyModule:
     name: str
     constants: dict[str, str]
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef]
-    memo: dict[str, _PyItems]
+    memo: dict[tuple[str, _Bindings], _PyItems]
+    #: 지역 이름 → (모듈 dotted 경로, 원래 이름). ``from x import f as g``.
+    imported: dict[str, tuple[str, str]]
+    #: 지역 별칭 → 모듈 dotted 경로. ``from kortravelmap.infra import feature_repo as repo``.
+    aliases: dict[str, str]
 
 
-def _py_module(path: pathlib.Path, source: str | None = None) -> _PyModule:
+_PY_CACHE: dict[str, _PyModule | None] = {}
+
+
+def _py_module_path(dotted: str) -> pathlib.Path | None:
+    parts = dotted.split(".")
+    if parts[0] != "kortravelmap":
+        return None
+    if len(parts) > 1 and parts[1] == "api":
+        base = _ROOT / "packages" / "kor-travel-map-api" / "src"
+    elif len(parts) > 1 and parts[1] == "dagster":
+        return None
+    else:
+        base = _ROOT / "src"
+    candidate = base.joinpath(*parts)
+    if candidate.with_suffix(".py").is_file():
+        return candidate.with_suffix(".py")
+    if (candidate / "__init__.py").is_file():
+        return candidate / "__init__.py"
+    return None
+
+
+def _py_load(dotted: str) -> _PyModule | None:
+    if dotted not in _PY_CACHE:
+        path = _py_module_path(dotted)
+        _PY_CACHE[dotted] = _py_module(path, dotted=dotted) if path is not None else None
+    return _PY_CACHE[dotted]
+
+
+def _py_module(
+    path: pathlib.Path, source: str | None = None, *, dotted: str | None = None
+) -> _PyModule:
     tree = ast.parse(source if source is not None else path.read_text(encoding="utf-8"))
+    package = dotted
+    if dotted is not None and path.name != "__init__.py":
+        package = dotted.rsplit(".", 1)[0]
     constants: dict[str, str] = {}
     functions: dict[str, ast.FunctionDef | ast.AsyncFunctionDef] = {}
+    imported: dict[str, tuple[str, str]] = {}
+    aliases: dict[str, str] = {}
     for node in tree.body:
         if isinstance(node, ast.Assign | ast.AnnAssign):
             targets = node.targets if isinstance(node, ast.Assign) else [node.target]
@@ -448,34 +522,168 @@ def _py_module(path: pathlib.Path, source: str | None = None) -> _PyModule:
                         constants[target.id] = text_value
         elif isinstance(node, ast.FunctionDef | ast.AsyncFunctionDef):
             functions[node.name] = node
+        elif isinstance(node, ast.ImportFrom) and node.module is not None:
+            source_module = node.module
+            if node.level and package:
+                anchor = package.split(".")
+                source_module = ".".join(anchor[: len(anchor) - node.level + 1] + [node.module])
+            for alias in node.names:
+                local = alias.asname or alias.name
+                if _py_module_path(f"{source_module}.{alias.name}") is not None:
+                    aliases[local] = f"{source_module}.{alias.name}"
+                else:
+                    imported[local] = (source_module, alias.name)
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.asname:
+                    aliases[alias.asname] = alias.name
     name = str(path.relative_to(_ROOT)) if path.is_absolute() else str(path)
-    return _PyModule(name, constants, functions, {})
+    return _PyModule(name, constants, functions, {}, imported, aliases)
 
 
-def _py_function_events(module: _PyModule, name: str) -> _PyItems:
-    """같은 모듈 함수의 사건 열(기억). 재귀는 빈 열로 끊는다."""
-    if name in module.memo:
-        return module.memo[name]
-    module.memo[name] = ()
-    items = _py_block_items(module.functions[name].body, module, name)
-    module.memo[name] = items
+def _py_resolve(module: _PyModule, name: str, depth: int = 0) -> tuple[_PyModule, str] | None:
+    """``name``이 가리키는 함수 정의(모듈, 이름). package 재수출은 몇 단계 따라간다."""
+    if name in module.functions:
+        return module, name
+    if depth > 4 or name not in module.imported:
+        return None
+    source, original = module.imported[name]
+    target = _py_load(source)
+    if target is None:
+        return None
+    return _py_resolve(target, original, depth + 1)
+
+
+#: 호출 지점에서 상수로 정해진 인자(이름 → 값). 정렬된 tuple이라 기억 키가 된다.
+_Bindings = tuple[tuple[str, object], ...]
+_PY_SIMPLE: Final[tuple[type, ...]] = (bool, int, str, type(None))
+
+
+def _py_function_events(module: _PyModule, name: str, bindings: _Bindings = ()) -> _PyItems:
+    """함수의 사건 열(인자 상수별 기억). 재귀는 빈 열로 끊는다."""
+    key = (name, bindings)
+    if key in module.memo:
+        return module.memo[key]
+    module.memo[key] = ()
+    items = _py_block_items(module.functions[name].body, module, name, dict(bindings))
+    module.memo[key] = items
     return items
 
 
-def _py_call_items(node: ast.Call, module: _PyModule, where: str) -> list[_PyEvent | _PyBranch]:
+_PyItem = _PyEvent | _PyBranch | _PyTransaction
+
+
+def _py_value(node: ast.AST, bindings: dict[str, object]) -> tuple[bool, object]:
+    """(알 수 있나, 값) — 상수 또는 상수로 묶인 이름만 안다."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, _PY_SIMPLE):
+        return True, node.value
+    if isinstance(node, ast.Name) and node.id in bindings:
+        return True, bindings[node.id]
+    return False, None
+
+
+def _py_static_truth(test: ast.expr, bindings: dict[str, object]) -> bool | None:
+    """``if`` 조건을 상수 인자로 정할 수 있으면 참/거짓, 아니면 ``None``."""
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        inner = _py_static_truth(test.operand, bindings)
+        return None if inner is None else not inner
+    if isinstance(test, ast.Compare) and len(test.ops) == 1:
+        known_left, left = _py_value(test.left, bindings)
+        known_right, right = _py_value(test.comparators[0], bindings)
+        if not (known_left and known_right):
+            return None
+        op = test.ops[0]
+        if isinstance(op, ast.Is):
+            return left is right
+        if isinstance(op, ast.IsNot):
+            return left is not right
+        if isinstance(op, ast.Eq):
+            return left == right
+        if isinstance(op, ast.NotEq):
+            return left != right
+        return None
+    if isinstance(test, ast.BoolOp):
+        values = [_py_static_truth(value, bindings) for value in test.values]
+        if isinstance(test.op, ast.And):
+            return False if False in values else (True if all(v is True for v in values) else None)
+        return True if True in values else (False if all(v is False for v in values) else None)
+    known, value = _py_value(test, bindings)
+    return bool(value) if known else None
+
+
+def _py_call_bindings(
+    node: ast.Call, function: ast.FunctionDef | ast.AsyncFunctionDef, bindings: dict[str, object]
+) -> _Bindings:
+    """호출 인자와 기본값 중 상수로 정해지는 매개변수."""
+    arguments = function.args
+    positional = [*arguments.posonlyargs, *arguments.args]
+    bound: dict[str, object] = {}
+    with_default = positional[len(positional) - len(arguments.defaults) :]
+    defaults = list(zip(with_default, arguments.defaults, strict=True))
+    defaults += [
+        (parameter, default)
+        for parameter, default in zip(arguments.kwonlyargs, arguments.kw_defaults, strict=True)
+        if default is not None
+    ]
+    for parameter, default in defaults:
+        known, value = _py_value(default, {})
+        if known:
+            bound[parameter.arg] = value
+    for parameter, argument in zip(positional, node.args, strict=False):
+        known, value = _py_value(argument, bindings)
+        if known:
+            bound[parameter.arg] = value
+        else:
+            bound.pop(parameter.arg, None)
+    for keyword in node.keywords:
+        if keyword.arg is None:
+            continue
+        known, value = _py_value(keyword.value, bindings)
+        if known:
+            bound[keyword.arg] = value
+        else:
+            bound.pop(keyword.arg, None)
+    return tuple(sorted(bound.items(), key=lambda item: item[0]))
+
+
+def _py_call_items(
+    node: ast.Call, module: _PyModule, where: str, bindings: dict[str, object]
+) -> list[_PyItem]:
     callee = _py_callee(node)
     label = f"{where} → {callee or '?'}"
+    if callee in ("commit", "rollback") and isinstance(node.func, ast.Attribute):
+        return [_PyEvent(_PY_RESET, label)]
     if callee in _PY_FIXED_HELPERS:
         return [_PyEvent(kind, label) for kind in _PY_FIXED_HELPERS[callee]]
     if callee in _PY_KEYWORD_HELPERS:
         keyword, when_true, when_false = _PY_KEYWORD_HELPERS[callee]
         chosen = when_true
         for item in node.keywords:
-            if item.arg == keyword and isinstance(item.value, ast.Constant):
-                chosen = when_true if item.value.value is True else when_false
+            known, value = _py_value(item.value, bindings)
+            if item.arg == keyword and known:
+                chosen = when_true if value is True else when_false
         return [_PyEvent(kind, label) for kind in chosen]
-    if callee is not None and callee in module.functions:
-        return list(_py_function_events(module, callee))
+    target: tuple[_PyModule, str] | None = None
+    if isinstance(node.func, ast.Name):
+        target = _py_resolve(module, node.func.id)
+    elif (
+        isinstance(node.func, ast.Attribute)
+        and isinstance(node.func.value, ast.Name)
+        and node.func.value.id in module.aliases
+    ):
+        other = _py_load(module.aliases[node.func.value.id])
+        if other is not None:
+            target = _py_resolve(other, node.func.attr)
+    if target is not None:
+        owner, function = target
+        call_bindings = _py_call_bindings(node, owner.functions[function], bindings)
+        expanded: list[_PyItem] = []
+        for item in _py_function_events(owner, function, call_bindings):
+            if isinstance(item, _PyEvent):
+                expanded.append(_PyEvent(item.kind, f"{where} → {item.where}"))
+            else:
+                expanded.append(item)
+        return expanded
     return [
         _PyEvent(kind, label)
         for argument in node.args
@@ -484,42 +692,66 @@ def _py_call_items(node: ast.Call, module: _PyModule, where: str) -> list[_PyEve
 
 
 def _py_expression_items(
-    node: ast.AST, module: _PyModule, where: str
-) -> list[_PyEvent | _PyBranch]:
+    node: ast.AST, module: _PyModule, where: str, bindings: dict[str, object]
+) -> list[_PyItem]:
     """식 하나 안의 호출을 **안쪽 먼저**(인자 평가 순서) 센다."""
     if isinstance(node, ast.Lambda | ast.FunctionDef | ast.AsyncFunctionDef):
         return []
-    items: list[_PyEvent | _PyBranch] = []
+    items: list[_PyItem] = []
     if isinstance(node, ast.Call):
         if isinstance(node.func, ast.Attribute):
-            items.extend(_py_expression_items(node.func.value, module, where))
+            items.extend(_py_expression_items(node.func.value, module, where, bindings))
         for argument in [*node.args, *(item.value for item in node.keywords)]:
             if not isinstance(argument, ast.Call) or _py_callee(argument) != "text":
-                items.extend(_py_expression_items(argument, module, where))
-        items.extend(_py_call_items(node, module, where))
+                items.extend(_py_expression_items(argument, module, where, bindings))
+        items.extend(_py_call_items(node, module, where, bindings))
         return items
     for child in ast.iter_child_nodes(node):
-        items.extend(_py_expression_items(child, module, where))
+        items.extend(_py_expression_items(child, module, where, bindings))
     return items
 
 
-def _py_block_items(body: list[ast.stmt], module: _PyModule, where: str) -> _PyItems:
-    items: list[_PyEvent | _PyBranch] = []
+def _py_begins_transaction(statement: ast.stmt) -> bool:
+    """``async with ....begin():``(savepoint ``begin_nested`` 제외)인가."""
+    if not isinstance(statement, ast.With | ast.AsyncWith):
+        return False
+    return any(
+        isinstance(item.context_expr, ast.Call) and _py_callee(item.context_expr) == "begin"
+        for item in statement.items
+    )
+
+
+def _py_block_items(
+    body: list[ast.stmt], module: _PyModule, where: str, bindings: dict[str, object]
+) -> _PyItems:
+    items: list[_PyItem] = []
     for statement in body:
         if isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef | ast.ClassDef):
             continue
-        if isinstance(statement, ast.If):
-            items.extend(_py_expression_items(statement.test, module, where))
+        if _py_begins_transaction(statement):
+            assert isinstance(statement, ast.With | ast.AsyncWith)
             items.append(
-                _PyBranch(
-                    _py_block_items(statement.body, module, where),
-                    _py_block_items(statement.orelse, module, where),
-                )
+                _PyTransaction(_py_block_items(statement.body, module, where, bindings))
             )
+            continue
+        if isinstance(statement, ast.If):
+            items.extend(_py_expression_items(statement.test, module, where, bindings))
+            truth = _py_static_truth(statement.test, bindings)
+            if truth is True:
+                items.extend(_py_block_items(statement.body, module, where, bindings))
+            elif truth is False:
+                items.extend(_py_block_items(statement.orelse, module, where, bindings))
+            else:
+                items.append(
+                    _PyBranch(
+                        _py_block_items(statement.body, module, where, bindings),
+                        _py_block_items(statement.orelse, module, where, bindings),
+                    )
+                )
             continue
         for child in ast.iter_child_nodes(statement):
             if not isinstance(child, ast.stmt | ast.ExceptHandler):
-                items.extend(_py_expression_items(child, module, where))
+                items.extend(_py_expression_items(child, module, where, bindings))
         for field in ("body", "orelse", "handlers", "finalbody"):
             nested = getattr(statement, field, None)
             if not isinstance(nested, list):
@@ -527,7 +759,7 @@ def _py_block_items(body: list[ast.stmt], module: _PyModule, where: str) -> _PyI
             for element in nested:
                 block = element.body if isinstance(element, ast.ExceptHandler) else [element]
                 statements = [part for part in block if isinstance(part, ast.stmt)]
-                items.extend(_py_block_items(statements, module, where))
+                items.extend(_py_block_items(statements, module, where, bindings))
     return tuple(items)
 
 
@@ -538,6 +770,11 @@ def _py_walk(
     violations: list[str] = []
     states = [held]
     for item in items:
+        if isinstance(item, _PyTransaction):
+            # 새 transaction은 빈 상태에서 시작하고 바깥 상태를 바꾸지 않는다.
+            found, _ends = _py_walk(item.body, _Held({}), origin, world)
+            violations.extend(found)
+            continue
         if isinstance(item, _PyBranch):
             next_states: list[_Held] = []
             for state in states:
@@ -553,7 +790,10 @@ def _py_walk(
             continue
         for state in states:
             context = {"origin": origin, "path": item.where, "world": world}
-            if item.kind == "ROW":
+            if item.kind == _PY_RESET:
+                state.modes.clear()
+                state.rows = False
+            elif item.kind == "ROW":
                 state.rows = True
             elif item.kind.startswith("P:"):
                 mode = item.kind[2:]
@@ -563,8 +803,23 @@ def _py_walk(
                     mode = "EX"
                 violations.extend(_acquire(state, _P, mode, **context))
             else:
+                if item.kind == _PY_LEAF:
+                    violations.extend(_leaf_violations(state, **context))
                 violations.extend(_acquire(state, _L, "EX", **context))
     return violations, states
+
+
+def _py_root_modules() -> list[_PyModule]:
+    modules: list[_PyModule] = []
+    for root, package in _PY_ROOTS:
+        for path in sorted(root.rglob("*.py")):
+            parts = list(path.relative_to(root).with_suffix("").parts)
+            if parts[-1] == "__init__":
+                parts = parts[:-1]
+            module = _py_load(".".join([package, *parts]))
+            if module is not None:
+                modules.append(module)
+    return modules
 
 
 def _python_order_violations(
@@ -573,9 +828,7 @@ def _python_order_violations(
     """(위반, P/L helper를 부르는 함수 수)."""
     violations: list[str] = []
     takers = 0
-    targets = modules if modules is not None else [
-        _py_module(path) for root in _PY_ROOTS for path in sorted(root.rglob("*.py"))
-    ]
+    targets = modules if modules is not None else _py_root_modules()
     for module in targets:
         for name in sorted(module.functions):
             items = _py_function_events(module, name)
@@ -593,7 +846,10 @@ def _py_has_entry(items: _PyItems) -> bool:
         if isinstance(item, _PyBranch):
             if _py_has_entry(item.body) or _py_has_entry(item.orelse):
                 return True
-        elif item.kind != "ROW":
+        elif isinstance(item, _PyTransaction):
+            if _py_has_entry(item.body):
+                return True
+        elif item.kind not in ("ROW", _PY_RESET):
             return True
     return False
 
@@ -785,6 +1041,20 @@ _PLANTED_PROTOCOL = {
         "  PERFORM 1 FROM feature.features WHERE feature_id=p_id FOR UPDATE;\n"
         "  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));\n"
     ),
+    # leaf 진입은 P를 쥔 채 오면 실행 시 23514다(``ck_provider_tracking_prefix``).
+    "feature.fence_then_leaf": (
+        "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
+        "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
+    ),
+    "feature.shared_lineage_then_leaf": (
+        "  PERFORM ops.lock_scoped_feature_write_protocol(false);\n"
+        "  PERFORM pg_advisory_xact_lock(6832465333779826081::bigint);\n"
+        "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
+    ),
+    "feature.regime_then_leaf": (
+        "  PERFORM ops.lock_single_feature_writer_protocol();\n"
+        "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
+    ),
     # 정상: 확정 진입(P EX→L) 뒤의 leaf·같은 진입 재진입·regime 진입 뒤 행 잠금.
     "feature.finalizing_then_leaf": (
         "  PERFORM ops.lock_provider_feature_tracking_protocol(true);\n"
@@ -817,6 +1087,13 @@ def test_the_protocol_detectors_turn_red_on_planted_violations() -> None:
     fence = hits("feature.regime_then_fence_after_rows")
     assert any("without P EX" in v and v.endswith("[epoch0]") for v in fence), found
     assert not any(v.endswith("[regime]") for v in fence), fence
+    assert any("leaf tracking L after P EX" in v for v in hits("feature.fence_then_leaf")), found
+    assert any(
+        "leaf tracking L after P SH" in v for v in hits("feature.shared_lineage_then_leaf")
+    ), found
+    regime_leaf = hits("feature.regime_then_leaf")
+    assert regime_leaf, found
+    assert all(v.endswith("[regime]") for v in regime_leaf), regime_leaf
     for fine in ("feature.finalizing_then_leaf", "feature.regime_then_rows"):
         assert not hits(fine), hits(fine)
 
@@ -860,6 +1137,54 @@ async def branch_is_not_an_order(session, finalizing):
 async def regime_then_rows(session):
     await lock_single_feature_writer_protocol(session)
     await session.execute(text(_LOCK_ROW_SQL), {"id": 1})
+
+
+async def separate_transactions(session):
+    async with session.begin():
+        await lock_provider_feature_tracking_leaf(session)
+    async with session.begin():
+        await lock_provider_feature_finalization(session)
+
+
+async def after_commit(session):
+    await lock_provider_feature_tracking_leaf(session)
+    await session.commit()
+    await lock_provider_feature_finalization(session)
+
+
+async def inside_one_transaction(session):
+    async with session.begin():
+        await lock_provider_feature_tracking_leaf(session)
+        await lock_provider_feature_finalization(session)
+
+
+async def regime_then_row_then_fence(session):
+    # epoch=0에서 regime 진입은 P를 잡지 않는다 — 뒤의 fence(P EX)는 행 잠금 뒤가 된다.
+    await lock_single_feature_writer_protocol(session)
+    await session.execute(text(_LOCK_ROW_SQL), {"id": 1})
+    await lock_feature_curation_write(session)
+
+
+async def _maybe_fence(session, exclusive=False):
+    if exclusive:
+        await lock_feature_curation_write(session)
+    else:
+        await lock_scoped_feature_write_protocol(session, exclusive=False)
+
+
+async def shared_then_literal_shared_branch(session):
+    await lock_scoped_feature_write_protocol(session, exclusive=False)
+    await _maybe_fence(session, exclusive=False)
+
+
+async def fence_then_ledger(session):
+    await lock_feature_curation_write(session)
+    await lock_provider_feature_tracking(session, finalizing=False)
+
+
+async def finalization_then_ledger(session):
+    await lock_provider_feature_finalization(session)
+    await lock_provider_feature_tracking_leaf(session)
 '''
 
 
@@ -875,5 +1200,18 @@ def test_the_python_detector_turns_red_on_planted_violations() -> None:
     assert any("row lock" in v for v in hits("row_then_fence")), found
     assert any("upgrade" in v for v in hits("shared_then_exclusive")), found
     assert any("P after ['L']" in v for v in hits("lineage_then_nested")), found
-    assert not hits("branch_is_not_an_order"), found
-    assert not hits("regime_then_rows"), found
+    assert any("P after ['L']" in v for v in hits("inside_one_transaction")), found
+    fence = hits("regime_then_row_then_fence")
+    assert any("row lock" in v and v.endswith("[epoch0]") for v in fence), found
+    assert not any(v.endswith("[regime]") for v in fence), fence
+    assert any("leaf tracking L after P EX" in v for v in hits("fence_then_ledger")), found
+    for fine in (
+        "finalization_then_ledger",
+        "branch_is_not_an_order",
+        "regime_then_rows",
+        "separate_transactions",
+        "after_commit",
+        # 상수 인자(exclusive=False)로 정해지는 분기는 배타 갈래를 걷지 않는다.
+        "shared_then_literal_shared_branch",
+    ):
+        assert not hits(fine), (fine, found)
