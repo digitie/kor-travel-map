@@ -1,3 +1,15 @@
+## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 실제 PG 수용
+
+정확 source `e35f5dc3`은 두 독립 리뷰 뒤 같은 상한의 owned PG2case를24.80초에 통과했다.
+양 capture/leader의 실제 participant-scope 대기·정확40001·전체TX aborted·unbound READY
+public cancel·동일 bytes 새 attempt/key/manifest·winner/base/lineage·완료 replay source DML0을
+확인했다. source2582/import59/SDK53·격리 CommonAA19의 전후 검산, 정확CID/volume1/label0
+회수도 PASS다. 첫 관찰bind2FAIL와 순수실패2회는 아래/원장에 보존한다.
+
+생산/운영 변경0이며 최종 CI·병합은 대기한다. 일반 coordinator·전 writer 전환과 운영
+CPU/RSS 개선, 상위 T-CWRITE-01–09는 미완이다.
+[제한 수용과 원본 증거](reports/2026-10-27-shared-feature-artifact-replan.md#실제-pg-수용).
+
 ## 2026-10-27 — 공유 Feature 첫 실제 PG의 xid8 관찰 bind 정정
 
 CommonAA 정상 합성 `f691a8e1`의 첫 owned PG2case는 정확 scope 대기·선택된40001·READY
