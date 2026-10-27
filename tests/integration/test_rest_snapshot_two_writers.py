@@ -317,7 +317,7 @@ async def _exact_blocker(admin, blocked_identity, holder_identity, task):
                 row = (
                     await observer.execute(
                         text("""SELECT a.wait_event_type,a.wait_event,
-                    pg_blocking_pids(a.pid),EXISTS(SELECT 1 FROM pg_locks l
+                    (:holder = ANY(pg_blocking_pids(a.pid))),EXISTS(SELECT 1 FROM pg_locks l
                       WHERE l.pid=a.pid AND NOT l.granted),
                     EXISTS(SELECT 1 FROM pg_stat_activity h WHERE h.pid=:holder
                       AND h.backend_start=:holder_started AND h.usename=:holder_login)
@@ -333,7 +333,7 @@ async def _exact_blocker(admin, blocked_identity, holder_identity, task):
                         ),
                     )
                 ).one()
-            if row[0] == "Lock" and holder in row[2]:
+            if row[0] == "Lock" and row[2] is True:
                 assert row[3] is True
                 assert row[4] is True
                 return row[1]

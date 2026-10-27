@@ -1,3 +1,19 @@
+## 2026-10-27 — alpine 관찰자 cold-array codec 경계 최소 교정
+
+원alpine2FAIL/1945PASS/29skip을 보존했다. 기존관찰자300ms timeout stack은
+SELECT 본문전 asyncpg int4[] introspection이어서 SQL exact-holder membership을 bool로
+반환하도록2줄만 바꾼다. PID/start/login/Lock/ungranted·300ms/0.8초/1초를 유지한다.
+[원실패·실측대기](reports/2026-10-27-bound-snapshot-stale-replan.md#alpine-관찰자-cold-codec-실패의-최소-교정)를
+명시하고 source두리뷰뒤 원pair2만실측한다. runtime·운영0/전체9미완/OFF를 유지한다.
+
+## 2026-10-27 — 실제 제품16·후보UI14 뒤 head oracle 빈줄1개 교정
+
+f29 local16과 후보UI14는 통과했으나 전체glibc CI는1952PASS/23skip 뒤 head-schema
+정본 비교1개에서 실패했다. complete live dump diff의 초과빈줄1개만 교정하며 함수/
+runtime/API/UI/migration은 바꾸지 않는다.
+[원 실패·승계 한계](reports/2026-10-27-bound-snapshot-stale-replan.md#f29-전체-glibc-ci의-oracle-형식-실패)를
+보존하고 새exacthead CI와 두리뷰가 끝나기 전 머지하지 않는다. 전체9미완/OFF/운영0이다.
+
 ## 2026-10-27 — typed reset 실제 제품16 통과, CI 계약 교정 중
 
 source6cce26ef의 단일 owned16은16PASS18.90초/정확 CID·volume1·label0 정리PASS다.

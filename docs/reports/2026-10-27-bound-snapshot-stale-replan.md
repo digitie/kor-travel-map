@@ -1,8 +1,8 @@
 # bound snapshot의 정확 stale 뒤 재계획 복구
 
-현재 단계: 선행 재현1PASS 뒤 첫 제품14PASS/2FAIL을 보존했고, 교정 source6cce26ef의
-제품 owned16은 전부 통과했다. 전체 CI에서 드러난 문서 크기·ACL 선언 계약을 교정 중이며
-최종 CI·머지는 아직 미완이다. 운영 변경과 profile 활성화는 없다.
+현재 단계: f29 제품 owned16과 후보 UI14는 통과했다. 전체 CI는 정본 oracle 빈줄과
+alpine의 기존 관찰자 cold codec timeout으로 실패해 두 지점만 교정 중이다. 새 head의
+실제 pair2·후보UI·CI·머지는 미완이며 원 실패를 보존했다. 운영/profile 활성화는 없다.
 
 ## 최초 조사 범위(실제 재현 전 기록)
 
@@ -227,3 +227,41 @@ expired reset·frozen430·3열 범위·startup guard는 바꾸지 않았다. 기
 시그니처 fence·typed reset·archive link/크기 순수35개9.73초와 ACL4개 collect-only
 4.66초/Ruff가 통과했다. source6c 제품16의 실제 성공은 이 추가 gate 변경까지
 승계하지 않고, source/adapter 두 리뷰 뒤 동일 상한 단일 재시험과 fresh CI를 요구한다.
+
+## f29 전체 glibc CI의 oracle 형식 실패
+
+f29의 전체 glibc 통합 시험은1952PASS/23skip/1FAIL(1432.69초), coverage87.64%였다.
+실패는 `test_head_schema_artifact_matches_head` 하나이며 정본 `dump_head_schema`가
+내보낸 complete diff는 scope.owner의 SELECT grant 뒤 초과빈줄1개뿐이었다. 원 log
+SHA256 `49817e0a28885f9efba8b53c2c2c13de8b78e14423daef8bdc6c44c79c6a4ad5`와
+job 원장을 보존했다. 정본 live dump 차이 그대로 빈줄1개만 제거하며 parser/비교/fence를
+완화하지 않는다. 함수 body·migration·runtime Python·API·UI 코드는 바꾸지 않았다.
+
+독립 local16의 성공은 f29 source 실측이고, 별도 후보 UI14도 f29 build에서 실제
+통과했다. 최종 oracle-only head로 수용하려면 전체 코드/입력 동등성과 두 리뷰를
+확인해야 하며 새 head를 실제 실행했다고 쓰지 않는다. 새 exact head CI10과 양PG가
+통과하기 전 정상 머지는 보류한다. 실행 중인 alpine을 취소/재실행하지 않는다.
+
+## alpine 관찰자 cold-codec 실패의 최소 교정
+
+alpine 전체 CI는1945PASS/29skip/2FAIL(1780.79초), coverage87.62%였다. 추가 실패는
+기존 two-writers의 airport 선행 case에서 관찰자 `_exact_blocker`였다. 원 log SHA256은
+`8c45e9601e17b5b6f12bddafb9dbbe7f390c06df00f229d2b8bbc2db2b025853`이다. 원 stack은
+관찰 SELECT 본문 전에 asyncpg0.31의 int4[] cold-codec introspection/JIT 설정 조회에서
+300ms statement timeout을 보고했다. 제품 writer 오류나 pg_locks 본문 비용으로
+단정하지 않는다. 두 source apply 완료 barrier는 통과했지만 최종 commit 관측 전에
+실패했으므로 해당 case 전체 성공으로 세지 않는다.
+
+SQL에서 exact holder의 `ANY(pg_blocking_pids(...))` membership을 bool로 반환하고
+Python은 `is True`로 검사해 배열 codec을 요구하지 않도록 한다. PID/backend_start/
+login·Lock·ungranted·holder identity를 모두 유지하고 SQL300ms/outer0.8초/worker1초와
+재시도 정책도 그대로다. 관찰비용 개선은 아직 실측하지 않았으며, 두 source 리뷰 뒤
+원 airport/rest case 두 개만 같은 소유PG 상한에서 실제 확인한다. 이 test-only 교정과
+oracle 빈줄 외 runtime/API/UI/migration code는 변경하지 않는다. 새exacthead 전체CI와
+최종 후보 UI 검증까지 기다리며 기존 실패를 덮어쓰거나 통째로 재실행하지 않는다.
+
+정적 영향은 `_exact_blocker`를 쓰는 two-writers·gc-race·registration 세 시험 모듈이며
+반환 wait_event 문자열/서명은 유지한다. Ruff/format과 원 pair2 collect-only는 통과했다.
+앞선 local PG의 driver는 asyncpg0.32였고 실패한 CI는0.31이므로 이 차이를 숨기지 않는다.
+후속 원 pair2는 ABI가 맞는 cached0.31을 private 경로에 고정해 실제 import version/
+파일 hash를 확인하며 실행할 계획이고, 아직 실행/원인제거 실측은 하지 않았다.

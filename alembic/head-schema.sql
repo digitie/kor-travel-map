@@ -35869,7 +35869,6 @@ GRANT SELECT(epoch) ON TABLE ops.feature_write_dataset_scopes TO ktm_curation_co
 GRANT SELECT(owner) ON TABLE ops.feature_write_dataset_scopes TO ktm_curation_command_owner;
 
 
-
 --
 -- Name: TABLE feature_write_manifests; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
 --
