@@ -1,6 +1,6 @@
 # Common Dagster 적용과 장애 복구
 
-Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인·메뉴·Dagster 대시보드를 사용한다. 공통 [구현 가이드](https://github.com/digitie/kor-travel-common/blob/e746e4b81b9b62dd1a74ca90ba0a1204951c2885/docs/runbooks/dagster-adoption.md)가 Python 계약의 정본이다. 앱의 DB·인증·쓰기 정합성은 Map이 소유한다.
+Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인·메뉴·Dagster 대시보드를 사용한다. 공통 [구현 가이드](https://github.com/digitie/kor-travel-common/blob/aa232ad5f255233184de80eceaab2e9b6ccb00c9/docs/runbooks/dagster-adoption.md)가 Python 계약의 정본이다. 앱의 DB·인증·쓰기 정합성은 Map이 소유한다.
 
 - GraphQL 조회는 plain 응답 4 MiB와 전체 10초 상한을 갖고 압축 응답을 읽기 전에 거부한다. 요청별 HTTP client를 종료 시 폐기하므로 실패·취소된 연결을 다른 요청에 재사용하지 않는다. client 정리는 별도의 50 ms 예산이다.
 - 최근 30개와 별도의 활성 실행 최대 1,000개를 조회한다. 두 조회 모두 `DagsterUrls.runs_filter()`가 Map code location 태그를 주입한다. 활성 상한 도달·잘못된 응답은 정상 0건으로 바꾸지 않고 오류 상태로 표시한다. 같은 run의 terminal 상태가 활성 샘플보다 우선한다.
@@ -16,7 +16,7 @@ Map은 공통 Python `RecoveryPolicy`와 `bounded_request`, 공통 UI 로그인�
 
 ## 고정 의존성과 검증 경계
 
-Python API `[http]`와 Dagster `[dagster]`는 Common `e746e4b81b9b62dd1a74ca90ba0a1204951c2885`에 고정한다. UI dev.6와 tokens 산출물은 [출처 기록](../third-party-common.md)의 동일 bytes를 사용한다. 메모리 개선은 유한 배치·응답·연결·동시성 구조에 대한 계약이다. 전체 운영 RSS 감소 수치는 실제 측정 전에는 주장하지 않는다. 후보 리뷰·재구축·live 결과는 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)에 별도로 기록한다.
+Python API `[http]`와 Dagster `[dagster]`는 Common `aa232ad5f255233184de80eceaab2e9b6ccb00c9`에 고정한다. UI dev.9와 tokens 산출물은 [출처 기록](../third-party-common.md)의 동일 bytes를 사용한다. 메모리 개선은 유한 배치·응답·연결·동시성 구조에 대한 계약이다. 전체 운영 RSS 감소 수치는 실제 측정 전에는 주장하지 않는다. 후보 리뷰·재구축·live 결과는 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)에 별도로 기록한다.
 
 ## code-server 자식의 경량 건강 점검
 
@@ -25,3 +25,7 @@ standalone Compose는 `python -I -m kortravelcommon.dagster_health <port>`로 pr
 ## 최신 tick 요약의 저장소 작업 상한
 
 `ticks(limit: 3, statuses: [STARTED, SKIPPED, SUCCESS, FAILURE])`로 Dagster 1.13.24의 전체 이력 batch rank 조회를 피한다. 네 상태를 모두 선택하여 실패 tick을 숨기지 않고 instigation별 최신 최대 3건을 표시한다. 운영 Map의 sensor tick storage statement timeout을 재현하고 같은 query의 정상 응답을 확인했다. Dagster upgrade 때 schema enum과 resolver 경로를 재검증하며 HTTP deadline·응답 cap은 계속 적용한다. 실제 재구축과 브라우저 검증은 해당 [검증 기록](../reviews/common-dagster-2026-10-05/README.md)을 따른다.
+
+## 공용 daemon의 workspace 갱신 주기
+
+Common #44의 `KOR_TRAVEL_DAGSTER_WORKSPACE_RELOAD_SECONDS`(`60`|`180`)는 `kor-travel-dagster-daemon run`(`kortravelcommon.daemon_pool`)에만 적용된다(위 가이드 §20). Map code-server·API는 이 모듈을 쓰지 않고, standalone Compose의 `dagster-daemon`은 일반 `dagster-daemon run -w`라 대상이 아니다. 운영 공용 daemon의 env는 Manager가 소유하므로 이 저장소는 값을 넣지 않는다(미설정이면 SDK 원 동작). `180`을 켜면 Map code location 교체의 자동 반영이 최대 약 120초 늦어질 수 있다. 배포 직후 즉시 반영이 필요하면 기존처럼 location reload를 한다.
