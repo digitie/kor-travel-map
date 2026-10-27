@@ -1,5 +1,10 @@
 # bound snapshot의 정확 stale 뒤 재계획 복구
 
+> 최신 수용(2026-10-27 13:29 UTC): 정확6611의 CI10·후보 실제UI14와 두 독립 검토를
+> 통과해 #1424를 정상 머지했다. 운영433 전환·공개UI는 아직 별도 후속이다.
+> [최종 코드 수용](#정확6611의-최종-ci실제-ui정상-머지-수용)이 최신 정본이며,
+> 아래 첫 “현재 단계”와 각 미완 문구는 해당 checkpoint를 작성한 시점의 이력이다.
+
 현재 단계: f29 제품 owned16과 후보 UI14는 통과했다. 전체 CI는 정본 oracle 빈줄과
 alpine의 기존 관찰자 cold codec timeout으로 실패해 두 지점만 교정 중이다. 새 head의
 실제 pair2·후보UI·CI·머지는 미완이며 원 실패를 보존했다. 운영/profile 활성화는 없다.
@@ -265,3 +270,59 @@ oracle 빈줄 외 runtime/API/UI/migration code는 변경하지 않는다. 새ex
 앞선 local PG의 driver는 asyncpg0.32였고 실패한 CI는0.31이므로 이 차이를 숨기지 않는다.
 후속 원 pair2는 ABI가 맞는 cached0.31을 private 경로에 고정해 실제 import version/
 파일 hash를 확인하며 실행할 계획이고, 아직 실행/원인제거 실측은 하지 않았다.
+
+
+## 정확6611의 최종 CI·실제 UI·정상 머지 수용
+
+제품 최종 source는6611af8aaff17647fcc172049b4046ce5f5b2cd9다. 이 커밋의 CI10개가
+전부 성공했다. 전체 glibc PostGIS는1953PASS/23skip/1446.98초, alpine은
+1947PASS/29skip/1802.93초이며 coverage는 각각87.64%/87.62%다. 새 통합4모듈의
+17개는 필터 없는 전체 suite 성공과 완전한 skip 목록에 해당 모듈이 없음을 함께 확인했다.
+이는 포함·성공의 근거이며 개별 case PASS event를 출력한 로그라고 표현하지 않는다.
+f29의 oracle1FAIL·alpine2FAIL, 앞선 setup/입력/제품14PASS2FAIL은 그대로 보존한다.
+
+최종6611의 기존 writer pair 두 case는 CI와 같은 asyncpg0.31을 ABI가 맞는 private
+경로에 고정한 소유 PG에서2PASS/19.81초였다. 양 선행 순서의 exact blocker·미커밋
+중첩·정상 결과와 seal을 확인했고, source2592/실제63imports/SDK53 전후/Common19
+네 지점/정확 CID·익명 volume1·scalar label0 정리를 검산했다. 원 result SHA256은
+15f0ec421f8412c315018c6345351ef51886f008fbd13ec24bb28c75787dd634다.
+관찰 조건300ms/0.8초/worker1초와 자원 상한은 유지했다. 배경 회귀와의 정확 겹침이나
+CPU/RSS·속도 개선율을 측정한 시험은 아니다. f29 owned16은 그 source의 실제 검증으로
+구분하고, 변경 없는 제품 runtime947개 mode/blob 동등성과 최종 exact CI를 따로 남긴다.
+
+최종 후보 UI는6611 실제 API/default pool·새 DB433과 f29에서 새로 빌드한 UI를 사용했다.
+UI 입력350개의 mode/blob 및 빌드 source 전체2592개를 검산해 source와 build source를
+구분했다. 마지막 단일 실행은 실제14 case PASS, JUnit suite73.398초/case73.293초였다.
+로그인1회·로그아웃1회·취소2회, 실제 WS2연결/16frames, 정확 세션 쿠키의 HttpOnly·
+로그아웃 뒤 쿠키 부재, 같은 browser context의 보호 GET401, cleanup 보호 GET401과
+미확인 세션 flag 해제, 5초 재연결 없음·보호 화면 재방문을 확인했다. 소유 DB·API/UI
+unit·tunnel·browser/profile 정리는 모두 통과했다. 원 result SHA256은
+aa431e0439e26e03f367bb82930aba5a8cc3bda0664ab6c1dbfca3bfc8e87adb다.
+이 후보 시험은 운영 공개UI 수용을 대신하지 않는다.
+
+그 앞6611 후보 실행 세 번은 각각 helper75초 내 driver 결과 미회수, 별도 SSH readiness
+8초 timeout으로 browser 미진입, readiness200/200·9case 뒤 logout navigation의
+응답 body 완료 latch 거부로 실패했다. 세 원 실패와 각 자원 정리는 보존한다.
+별도 SSH handshake를 합쳐 같은 두 GET의2초/200 조건을 helper75초 안으로 옮기고,
+로그아웃은200 headers 관찰 뒤 실제 쿠키 삭제·보호401로 검증했다. 전역 navigation 오류를
+삼키거나14조건·인증·75/15/100/190/210/220초의 나머지 한도를 완화하지 않았다.
+세 실패의 미확인 세션 flag를 실제 유효 세션이 남았다는 확인으로 바꾸지 않는다.
+
+두 source 리뷰·별도 실제 결과 검산 뒤, 최신 main/정확 CI head/유일 Alembic433 및
+prospective tree를 다시 확인해 #1424를2026-10-27 13:29:37 UTC 정상 머지했다.
+merge는c3adc0c695160c13bd6bb0bc291e01629d97fc8a, 부모는 원 main3ca5b61과
+정확6611이며 tree36a80acf5b15820714ef90d57f9ea5906d8d1ebc가6611과 같다.
+관리자 강제·force·브랜치 삭제는 하지 않았다. 이 정산 PR은 문서만 바꾸며 코드 PR의
+exact-head CI를 문서 CI 면제로 대체하지 않는다.
+
+### 문서 P3와 아직 남은 운영 경계
+
+원 archive 생성 커밋의 committed diffcheck는 마지막 빈줄 때문에 exit2였다. 당시의
+unstaged diffcheck PASS를 새 파일의 committed-delta PASS로 확대할 수 없어 이 차이를
+명시한다. 후속 문서 정산은 원 archive9819B prefix(그 안의 본문9620B SHA256
+2393a1b9f660c39dae4c9a592611a8f654d1bcb7064e4270d383664455f58a83)를 그대로
+두고 navigation footer를 뒤에 붙여 EOF 경고를 닫는다. 기존 역사 본문은 삭제하지 않는다.
+
+운영 image/schema 전환·공개UI 수용은 아직 미완이며 별도 증거 뒤 추가 정산한다.
+433은 forward-only이고432 image/pin만 되돌리는 것은 DB 복구가 아니다. 전체 writer
+전환·T-CWRITE-01~09 완료, profile 활성화, 운영 ARM CPU/RSS 저감은 선언하지 않는다.
