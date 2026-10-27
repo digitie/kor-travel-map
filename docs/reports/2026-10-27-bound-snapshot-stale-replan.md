@@ -31,3 +31,17 @@ MAX_REPLANS3, executor lease/fence, 취소·원 결과·postprocess·child/root 
 
 Ruff check/format과 fixture 설정을 실행하지 않는 collect-only1개(7.70초)가 통과했다.
 실제 PG 재현·새 typed SQL 구현·운영 호출은 아직0이다. 기존 typed reset을 약화하지 않는다.
+
+## 최초 owned 재현 시도의 setup 실패
+
+정확 `d13312a9` source의 최초 실행은1ERROR/41.53초였다. 새 module timeout40초가
+Alembic400 baseline 초기 적용 중 만료돼 시험 본문에 도달하지 못했다. 따라서 선택stale,
+apply aborted, liveREADY, reset55P03은 아직 실제 관찰하지 않았다. 원 result SHA256은
+`5f10c61de932a28fffe46589851df1ddca02f64962ce2ac54344dd5ec92eccb6`이며 원 log/XML을
+보존했다. exact 소유 CID·익명 volume1·전체 scalar label0 정리는 통과했다.
+
+기존 Airport scheduled donor와 같은 module50초로만 정정한다. 제품 Python/SQL,
+owned 전체150초/감시160초/회수15초·PG CPU2/RAM1536MiB/PID256과
+apply30초/reader3초/lock1초는 변경하지 않는다. 이 수정은 원 setup 실패의 원인을
+확정하거나 제품 장애를 재현했다는 주장이 아니다. 두 리뷰 후 새 namespace로 한 번만
+재시도하며, 실제 재현 전 제품 수정은 하지 않는다.

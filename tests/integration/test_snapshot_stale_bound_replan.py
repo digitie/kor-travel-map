@@ -37,7 +37,7 @@ from tests.integration.test_state_lifecycle_protocol_entry import (
 from tests.integration.test_transport_airport_evidence_reader import _bundle
 from tests.unit.test_provider_snapshot_artifact import _PINS
 
-pytestmark = [pytest.mark.integration, pytest.mark.timeout(40)]
+pytestmark = [pytest.mark.integration, pytest.mark.timeout(50)]
 
 
 def _unreachable_postprocess(_observed):

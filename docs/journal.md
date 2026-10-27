@@ -1,3 +1,11 @@
+## 2026-10-27 — bound snapshot 첫 재현은 baseline setup timeout으로 미도달
+
+정확 d13312a9의 최초 owned 시험은 baseline400 적용 중40초 marker가 만료되어
+1ERROR/41.53초였고, 제품 지점은 아직 미관찰이다. 원 log/XML/result와
+정확 CID·volume1·label0 cleanup PASS를 보존했다. [기록](reports/2026-10-27-bound-snapshot-stale-replan.md#최초-owned-재현-시도의-setup-실패)처럼
+기존 donor module50초만 맞추고 나머지 실행/SQL/자원 상한은 유지한다.
+제품 변경·운영 호출0, 두 리뷰 후 격리 재시도1회가 남아 있다.
+
 ## 2026-10-27 — bound snapshot stale 뒤 live lease 재계획 경계 조사
 
 Airport 실제 atomic apply의 정확 stale→전체 rollback→기존 typed reset55P03을
