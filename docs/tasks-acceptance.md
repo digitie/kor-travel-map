@@ -2830,3 +2830,15 @@ ADR-116(geo 부하 줄이기 0단계). 브랜치 `feat/skip-geocode-unchanged`.
   같다.
 - [ ] 배포 뒤 첫 정기 run(주차장·MCST·국가유산)의 run 요약 로그 `저장값 재사용 skipped=… geocoded=… fallback=…
   disabled=…`와 `geo_calls_reverse`를 배포 전 run과 비교해 journal에 적는다(기대: 주차장 약 17.6k → 1~2k).
+
+## T-PG18-CI
+
+공용 PG 16→18(2026-10-27, Manager #562, pg_upgrade --link). prod Map은 업그레이드된 DB에서 정상(map-api 기동·`/health` 200,
+리허설 행 수·amcheck 일치)이지만 **빈 DB 재구축과 catalog를 들여다보는 이후 migration**은 PG18에서 검증된 적이 없다.
+
+- [ ] ADR-007 개정(테스트 PostGIS 이미지 핀) — PG18 lane 추가(또는 기본 lane 전환)를 결정·기록한다.
+- [ ] CI에 PG18(`postgis/postgis:18-3.6-alpine` digest 핀) lane이 있고 초록이다.
+- [ ] 그 lane이 드러낸 PG16 가정을 고쳤다 — 알려진 후보: `alembic/versions/400_schema_baseline.py`의 fresh guard
+  (`attribute.attstattarget <> -1` — PG17부터 기본 NULL, `alembic_version` constraint 개수 = 1 — PG18은 NOT NULL을
+  contype `'n'` constraint로도 둔다). `pg_database.daticulocale`(PG17 `datlocale`)은 #1429에서 고쳤다.
+- [ ] `contracts/vnext/target-schema-fingerprints-v1.json`·`alembic/head-schema.sql` 같은 PG16 산출물의 major 의존을 정리했다.

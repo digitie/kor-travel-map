@@ -2003,6 +2003,8 @@ async def test_provider_operation_rows_require_typed_dagster_commands(
         )
         async with terminal_session_factory.begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            # 비권위 finish는 L만 잡지만 같은 TX의 root done/finalize는 P EX가 필요하다.
+            await lock_provider_feature_finalization(session)
             await session.execute(
                 text(
                     """
@@ -2301,8 +2303,30 @@ async def test_provider_cancellation_success_finalizes_authoritative_root(
                     seeded,
                 )
 
+        # 장부(L)를 먼저 쓴 뒤 같은 TX에서 확정(P EX→L)으로 승격하는 역순은
+        # 계속 23514로 닫힌다. 이 실패 TX의 run 결과도 rollback되어 아래에서 재사용한다.
+        async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
+            assert await set_pipeline_cancellation_run_result(
+                session,
+                cancellation_id=cancellation_id,
+                dagster_run_id=run_id,
+                result="already_terminal",
+                initial_status="STARTED",
+                terminal_status="SUCCESS",
+                error=None,
+                engine_started_at=started_at,
+                engine_finished_at=finished_at,
+            )
+            with pytest.raises(DBAPIError) as late_promotion:
+                await lock_provider_feature_finalization(session)
+            assert late_promotion.value.orig.sqlstate == "23514"
+            await session.rollback()
+
         async with async_sessionmaker(api, expire_on_commit=False).begin() as session:
             await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
+            # API coordinator는 전이를 별도 TX로 분리한다. 이 테스트처럼 묶는 caller는
+            # 첫 장부 쓰기 전 확정 prefix를 잡아야 한다.
+            await lock_provider_feature_finalization(session)
             assert await set_pipeline_cancellation_run_result(
                 session,
                 cancellation_id=cancellation_id,

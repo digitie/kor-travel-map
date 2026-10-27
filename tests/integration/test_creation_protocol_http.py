@@ -102,8 +102,19 @@ async def test_approval_http_timeout_rollback_same_key_retry_replay_and_conflict
         initial = await client.get(url, headers=headers)
         assert initial.status_code == 200
         assert initial.json()["data"]["status"] == "pending"
-        async with AsyncSession(runtime) as holder, holder.begin():
-            await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+        # 434 epoch=0 단건 writer는 P를 잡지 않는다. 승인 대상 행 자체를 막아
+        # 실제 잠금 timeout·전체 rollback·동일 key 재시도를 검증한다.
+        async with AsyncSession(admin) as holder, holder.begin():
+            assert (
+                await holder.scalar(
+                    text(
+                        "SELECT request_id FROM ops.feature_requests "
+                        "WHERE request_id=CAST(:request AS uuid) FOR UPDATE"
+                    ),
+                    {"request": str(request)},
+                )
+                == request
+            )
             response = await client.post(url + "/approve", headers=headers, json=_BODY)
             assert response.status_code == 503, response.text
             assert response.json()["code"] == "LOCK_TIMEOUT"

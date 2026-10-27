@@ -146,3 +146,6 @@ required-set 완화)은 소유자 지시로 **가장 마지막**이다.
 - CI의 mypy는 핀이 없다(`mypy>=1.10`). 새 mypy 릴리스가 검사를 조이면 무관한 PR에서
   `lint` job이 붉어질 수 있다 — 기존 세 스텝도 같은 노출을 갖는다.
 
+---
+2026-10-27 정산: 위 세 section의 원문은 분리 당시 바이트 그대로 보존한다.
+[현재 resume](../resume.md) · [분리·EOF 정산](../reports/2026-10-27-bound-snapshot-stale-replan.md#문서-p3와-아직-남은-운영-경계)

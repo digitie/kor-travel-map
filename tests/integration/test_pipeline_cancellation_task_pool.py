@@ -1,4 +1,4 @@
-"""실제 API coordinator K→P 대기 task 취소와 pool1의 다음 요청을 검증한다.
+"""실제 API coordinator K→L 대기 task 취소와 pool1의 다음 요청을 검증한다.
 
 SQL timeout/EX lease 시험과 구분한다. handler·repo·SD는 정본이며 lab engine과
 외부 HTTP transport만 결박한다. commit 응답 유실·provider SUCCESS 복구 증거는 아니다.
@@ -34,8 +34,9 @@ from tests.integration.test_state_lifecycle_protocol_entry import (
 )
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(35)]
-_PROTOCOL_CLASS = 1369104691
-_PROTOCOL_OBJECT = 115
+_LINEAGE_KEY = 6832465333779826081
+_LINEAGE_CLASS = (_LINEAGE_KEY >> 32) & 0xFFFFFFFF
+_LINEAGE_OBJECT = _LINEAGE_KEY & 0xFFFFFFFF
 
 
 async def _state(admin, job_id):
@@ -141,7 +142,7 @@ async def _capture_failed_zero_lock_timeline(admin, pids, holder_pid, request):
                             "truncated": truncated,
                         }
                     )
-                # holder 자신의 P 잠금은 target 판정에서 제외한다.
+                # holder 자신의 L 잠금은 target 판정에서 제외한다.
                 if not truncated and not any(
                     row["pid"] in pids and row["mode"] is not None for row in sample_rows
                 ):
@@ -157,7 +158,7 @@ async def _capture_failed_zero_lock_timeline(admin, pids, holder_pid, request):
     )
 
 
-async def _wait_for_real_p_block(admin, holder_pid, lease_key, task):
+async def _wait_for_real_l_block(admin, holder_pid, lease_key, task):
     # bigint advisory K는 PG의 classid/objid 두 unsigned32 부분과 objsubid=1이다.
     high, low = (lease_key >> 32) & 0xFFFFFFFF, lease_key & 0xFFFFFFFF
     async with admin.connect() as observer, observer.begin():
@@ -166,7 +167,7 @@ async def _wait_for_real_p_block(admin, holder_pid, lease_key, task):
         await observer.execute(text("SET LOCAL lock_timeout='250ms'"))
         async with asyncio.timeout(1.5):
             while True:
-                assert not task.done(), "request ended before its actual P wait was observed"
+                assert not task.done(), "request ended before its actual L wait was observed"
                 pids = (
                     (
                         await observer.execute(
@@ -190,8 +191,8 @@ async def _wait_for_real_p_block(admin, holder_pid, lease_key, task):
                     waiting = await observer.scalar(
                         text("""SELECT count(*) FROM pg_locks WHERE pid=:pid
                         AND locktype='advisory' AND classid=:class AND objid=:object
-                        AND objsubid=2 AND mode='ExclusiveLock' AND NOT granted"""),
-                        {"pid": pid, "class": _PROTOCOL_CLASS, "object": _PROTOCOL_OBJECT},
+                        AND objsubid=1 AND mode='ExclusiveLock' AND NOT granted"""),
+                        {"pid": pid, "class": _LINEAGE_CLASS, "object": _LINEAGE_OBJECT},
                     )
                     if blocked and waiting == 1:
                         granted = await observer.scalar(
@@ -199,13 +200,13 @@ async def _wait_for_real_p_block(admin, holder_pid, lease_key, task):
                             AND locktype='advisory' AND granted"""),
                             {"pid": pid},
                         )
-                        assert granted == 1, "K only must be held before P, not L/data locks"
+                        assert granted == 1, "K only must be held before L, not L/data locks"
                         assert pid != holder_pid
                         return pid
                 await asyncio.sleep(0.01)
 
 
-async def test_task_cancel_during_actual_k_then_p_wait_releases_pool_and_replays(
+async def test_task_cancel_during_actual_k_then_l_wait_releases_pool_and_replays(
     scalar_engines, monkeypatch, request
 ):
     admin, fixture_runtime = scalar_engines
@@ -262,21 +263,21 @@ async def test_task_cancel_during_actual_k_then_p_wait_releases_pool_and_replays
                 async with AsyncSession(fixture_runtime) as holder, holder.begin():
                     holder_pid = int(await holder.scalar(text("SELECT pg_backend_pid()")))
                     await holder.execute(
-                        text("SELECT ops.lock_scoped_feature_write_protocol(false)")
+                        text("SELECT ops.lock_provider_feature_tracking_protocol(false)")
                     )
                     try:
                         task = asyncio.create_task(
                             client.post(
                                 path, headers=headers, json={"reason": "isolated_task_cancel"}
                             ),
-                            name="owned-api-task-cancel-p-wait",
+                            name="owned-api-task-cancel-l-wait",
                         )
-                        waiting_pid = await _wait_for_real_p_block(
+                        waiting_pid = await _wait_for_real_l_block(
                             admin, holder_pid, lease_key, task
                         )
                         observed_pids.add(waiting_pid)
                         assert await _state(admin, job_id) == before
-                        task.cancel("owned-api-p-wait")
+                        task.cancel("owned-api-l-wait")
                         with pytest.raises(asyncio.CancelledError):
                             await asyncio.wait_for(task, 3)
                         assert task.cancelled()
