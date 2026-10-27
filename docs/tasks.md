@@ -22,8 +22,8 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **열린 항목 중 가장 마지막**이고, 착수 전 오너와 범위 재확인이 조건이다. 정본은
 `kor-travel-docker-manager` 저장소의 `docs/general-mgmt-audit.md`와 `docs/tasks.md`다.
 
-**보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
-`T-VN-41C`·`T-VN-H43`·`T-101`. 각각 사유와 재개 조건을 아래 줄에 적는다.
+**보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 넷이다 —
+`T-VN-41C`·`T-VN-H43`·`T-101`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
 **reconcile sensor 재시도(ADR-111 후속)** — `T-RECONCILE-RETRY`는 ADR-112(accepted) 결정 0-1(#1345)과 1~7 구현으로
 2026-10-21 `tasks-done.md`로 이관했다.
@@ -73,6 +73,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   공통 helper가 변환을 두 번 돌려 그런 행은 저장 주소 열을 답으로 쓴다. 설계는 [ADR-116](adr/116-reuse-stored-geo-for-unchanged-rows.md), 해제 조건은 acceptance의 같은 ID다.
 
 **동시 쓰기 설계(ADR-115, proposed)** — 현재 Weather·Transport 작업을 마친 뒤 아래 의존 순서로 구현한다. 설계 문서 PR은 구현 완료가 아니며, 수용 조건 정본은 `tasks-acceptance.md`의 같은 ID다.
+
+- [ ] T-ADR117-RETIRE — **SH 스냅샷·스칼라 정책 경로(411~432) 퇴역**
+
+  prod 측정에서 경합 효익이 0이라 forward migration 434로 지우고 P는 배타 전용으로 남긴다. PR #1426 머지 뒤 착수한다. 설계는 [ADR-117](adr/117-retire-sh-snapshot-scalar-policy-path.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**
 
@@ -149,6 +153,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   코드가 아니라 운영 결선이 남았다 — 목적지 호스트·계정·ssh 키가 소유자/운영자
   몫이고, 그 뒤 env와 crontab 한 줄이다. `/opt`의 `.env`에 `KTDM_BACKUP_ROOT`가
   없어 logrotate가 설치되지 않은 것도 이 축에서 함께 닫는다.
+
+- [ ] T-UI-MAPWORKSPACE — **dev.8 MapWorkspace 채택** — **보류**(선택 기능, 지도 영역·e2e 재설계 필요)
+
+  dev.8 지도 작업면은 opt-in 선택 기능이다. 채택하려면 고정 70dvh 지도 영역과 698px e2e 기준을 다시 설계해야 해서 보류한다.
 
 - [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
 
