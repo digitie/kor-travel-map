@@ -127,9 +127,9 @@ def test_head_is_exactly_revision_432_plus_the_reviewed_edits(name: str) -> None
 
 
 def test_single_writer_entry_is_installed_with_its_drain_semantics() -> None:
-    body = _head_body("ops.lock_single_feature_writer_protocol")
+    body = " ".join(_head_body("ops.lock_single_feature_writer_protocol").split())
     # epoch를 평범하게 읽는다(ACCESS SHARE) — 첫 활성화의 ACCESS EXCLUSIVE가 이 writer를 기다린다.
-    assert "FROM feature.provider_field_policy_epoch WHERE singleton" in body
+    assert "FROM feature.provider_field_policy_epoch WHERE singleton;" in body
     assert "FOR UPDATE" not in body
     assert "FOR SHARE" not in body
     # strict guard는 단독 SH를 거부하므로 regime의 단건 writer는 EX다.
