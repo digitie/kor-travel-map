@@ -90,6 +90,7 @@ async def _case(monkeypatch, *, status="postprocessed"):
         ("plan_rest_snapshot", object()),
         ("apply_rest_snapshot_in_session", intent.apply_result),
         ("reset_rest_snapshot_plan", "reset"),
+        ("reset_rolled_back_rest_snapshot_plan", "reset"),
         ("collect_expired_rest_snapshots", 0),
         ("seal_rest_snapshot", object()),
     ]:
@@ -191,6 +192,8 @@ async def test_unknown_commit_is_propagated_without_auto_replay_then_sdk0_receip
     with pytest.raises(OSError, match="commit response unknown") as caught:
         await target.run_rest_snapshot_if_supported(context)
     assert caught.value is error
+    stubs["reset_rest_snapshot_plan"].assert_not_awaited()
+    stubs["reset_rolled_back_rest_snapshot_plan"].assert_not_awaited()
     assert stubs["apply_rest_snapshot_in_session"].await_count == 1
     stubs["seal_rest_snapshot"].assert_not_awaited()
     stubs["read_rest_snapshot"].side_effect = None
@@ -309,3 +312,41 @@ def test_native_root_requirement_does_not_change_existing_legacy_helper_contract
     context = SimpleNamespace(run_id="legacy-direct")
     assert target._context_run_id(context) == "legacy-direct"
     assert target._context_run_id(context, require_native_run=True) is None
+
+
+async def test_selected_atomic_stale_resets_original_plan_before_same_input_retry(monkeypatch):
+    context, observed, intent, stubs, collect, atomic = await _case(monkeypatch, status="prepared")
+    post = replace(
+        observed,
+        status="postprocessed",
+        applied_result=intent.apply_result,
+        applied_result_bytes=intent.result_bytes,
+        postprocess_receipt=intent.receipt_candidate,
+    )
+    stubs["read_rest_snapshot"].side_effect = [observed] * 5 + [post]
+    atomic.side_effect = [
+        target.io.RestSnapshotReplanRequired("selected kernel stale"),
+        SnapshotAtomicCompletion(intent.apply_result, intent.receipt_candidate),
+    ]
+    result = await target.run_rest_snapshot_if_supported(context)
+    assert result.load == intent.apply_result.load
+    stubs["reset_rolled_back_rest_snapshot_plan"].assert_awaited_once()
+    args = stubs["reset_rolled_back_rest_snapshot_plan"].await_args.args
+    assert args[1] is observed
+    assert args[3] is stubs["plan_rest_snapshot"].return_value
+    stubs["reset_rest_snapshot_plan"].assert_not_awaited()
+    assert atomic.await_count == 2
+    collect.assert_not_awaited()
+
+
+async def test_planner_stale_keeps_expired_reset_and_max_three_without_atomic_apply(monkeypatch):
+    context, _, _, stubs, collect, atomic = await _case(monkeypatch, status="prepared")
+    stubs["plan_rest_snapshot"].side_effect = target.io.RestSnapshotReplanRequired("old plan")
+    with pytest.raises(Failure) as caught:
+        await target.run_rest_snapshot_if_supported(context)
+    assert caught.value.allow_retries is False
+    assert stubs["plan_rest_snapshot"].await_count == 3
+    assert stubs["reset_rest_snapshot_plan"].await_count == 3
+    stubs["reset_rolled_back_rest_snapshot_plan"].assert_not_awaited()
+    atomic.assert_not_awaited()
+    collect.assert_not_awaited()

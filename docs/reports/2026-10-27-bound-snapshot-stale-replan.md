@@ -98,3 +98,13 @@ drain·schema/image 동일 generation 전환이 필요하며 기존 실행 worke
 되돌리는 방식은 수용 범위가 아니다. profile OFF도 이 startup 계약을 우회하지 않는다.
 현재 새 운영 절차나 배포는 실행하지 않았고, 새 함수와 runtime 기대값/구기대값의
 권한 거부를 실제 격리 PG에서 검증할 예정이다.
+
+## 첫 제품 순수 회귀
+
+새 migration owner/CREATE window·짧은 timeout 보존·ACL/optional433, 양 client의
+원 plan 전달·foreign fresh binding 사전 거부·reset commit ACK 유실, 실제 두 runner의
+계획오류/atomic 오류 분리를 포함한 집중 순수138개가16.80초에 통과했다. 첫 호출은
+ledger 파일 경로 오기로 수집0/exit4였고 원 로그를 보존한 뒤 올바른 경로로 실행했다.
+이 결과는 새 SQL을 실제 PG에서 적용하거나 수집 성능을 측정한 증거가 아니다.
+다음은 live apply holder, 현재/옛 executor·binding·취소·권한·혼합 schema와 실제
+수집 재계획/원 결과 replay의 통합 source 및 두 독립 리뷰다. 운영 변경은 없다.

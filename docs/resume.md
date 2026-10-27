@@ -1,3 +1,11 @@
+## 2026-10-27 — 새 typed reset의 순수 경계138개 통과
+
+현재executor READY reset의 migration owner/ACL·client 원 plan/CAS·ACK 불명과
+Airport/Rest의 계획오류/atomic rollback 분리 회귀138개가16.80초에 통과했다.
+잘못된 ledger 경로의 초기 수집0 로그도 보존했다. [통합 후속](reports/2026-10-27-bound-snapshot-stale-replan.md#첫-제품-순수-회귀)의
+actual PG/현재·옛 owner/cancel/live apply·실제 수집/replay 수용은 아직 남았다.
+새 제품 PG/운영 변경0, 전체 CWRITE9개 미완·profile OFF를 유지한다.
+
 ## 2026-10-27 — 실제 stale→rollback→live READY reset 거부 재현과 첫 제품 경계
 
 정확ea2fbcc5 owned PG1개가25.52초에 통과했다. 정확40001→aborted TX→
