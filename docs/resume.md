@@ -23,6 +23,14 @@ CI가 발견한 ledger300자 위반은 task 본문을 원장 link로 단축해 �
 T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
 [범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
 
+## 2026-10-27 — kor-travel-common 최신(`aa232ad5`) 반영: 브랜치 `chore/common-latest-map`
+
+- Common 핀 `e746e4b8` → `aa232ad5`(#47 병합, 뒤의 #48은 문서만; Python은 #44 daemon 갱신 주기 opt-in뿐 — Map 미사용,
+  켜지 않음)·관리자 UI `@kor-travel/ui` dev.7 → dev.9(정규 pack 재현 SHA256 `b738d882…`, dev.6·dev.7 tgz 삭제).
+  dev.8 지도 작업면은 opt-in이라 Feature 지도 변화 없음, dev.9 로그인은 hydration 전 비활성. migration·API·OpenAPI
+  변화 없음(PinVi 재vendor 불필요). 배포 영향: Map API·Dagster 이미지(common wheel)·admin UI 이미지. 이 작업은 배포하지
+  않는다.
+
 ## 2026-10-26 — Rest432 제한 단위의 최종 CI·배포·공개 UI 수용
 
 PR #1418의 최종 제품 `65202158`은 CI 10개 모두 성공했고, 같은 tree의 main

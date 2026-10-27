@@ -10,6 +10,15 @@
 
 ## [Unreleased]
 
+### kor-travel-common 최신 main 반영 (2026-10-27)
+
+- **CHANGED (deps)**: kor-travel-common 핀 `e746e4b8` → `aa232ad5`(#44~#47; 뒤의 #48은 문서만). 그 사이 Python 변경은
+  #44 하나다 — 공용 daemon 진입점(`kor-travel-dagster-daemon run`)의 workspace 갱신 주기 opt-in env로, Map code
+  location·API 동작은 같다.
+- **CHANGED (admin UI)**: `@kor-travel/ui` 0.1.0-dev.7 → dev.9. 로그인 입력·제출이 hydration 전에는 비활성이고 준비 전
+  제출을 막는다. dev.8 지도 작업면 API는 opt-in이라 Feature 지도 화면은 바뀌지 않는다. 쓰지 않는 dev.6·dev.7 tgz를 지웠다.
+- migration·API·OpenAPI 변화 없음.
+
 ### snapshot 문자열 선검사 비용 (2026-10-26)
 
 - **PERFORMANCE**: exact scalar와 문자열 span의 반복 Python 탐색을 줄인다.

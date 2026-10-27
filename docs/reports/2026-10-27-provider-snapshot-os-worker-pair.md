@@ -97,3 +97,29 @@ SHA256은 `e08a071c95abf015c29d54b42f36843664188e67dbe5d33391cb78b78bede12a`다.
 `T-CWRITE-04` 본문은 중복 수용 설명 대신 이 원장의 link를 남겨 상한 안으로 단축한다.
 상한·테스트를 바꾸지 않는다. 이 수정은 문서뿐이며 실제 PG를 통과한6307의 시험 source는
 변하지 않는다. 최종 CI 통과 전에는 머지하지 않는다.
+
+
+## 원 head의 CI 완료와 상위 main 제품 변경 합성
+
+원 head `3e962183`은 Python3.11/3.12/3.13의 unit·lint·API·Dagster와 PostGIS alpine/glibc를
+포함한 CI10개를 모두 통과했다. 그동안 상위 main에는 Common 반영 PR #1420이
+`980e0458`로 병합됐다. 해당 정확 head `dedcbe70`도 CI10개 성공을 직접 확인했다.
+
+상위 변경은 문서만이 아니다. API/Dagster의 Common Python pin은 `e746e4b8`에서
+`aa232ad5`로 올랐다. Python source19개 중18개 mode/blob은 같고 `daemon_pool.py`의
+workspace 갱신 주기 opt-in만 추가됐다. Map entrypoint는 이 daemon entry를 사용하지 않지만,
+의존성이 바뀌었으므로 합성본 검토·필요 focused PG·정확 새 CI로 검증한다.
+
+UI는 dev.7에서 dev.9의 정규 tgz로 바뀐다. SHA256은
+`b738d8824e36eb6e58d8cc6b78af7dc31233b6763248d634286044def795b403`(27파일)이며
+기존 Common 수용 산출물과 같다. MapWorkspace 등은 opt-in이고 Map은 채택하지 않는다.
+로그인 hydration 전 native disabled 경계와 해당 Map 회귀18줄이 포함된다.
+상위 PR의 공개 records에는 독립2리뷰 원장이 없으므로 그 완료를 추정하지 않고 새 합성본을
+두 사람이 검토한다. 상위 작성자가 보고한 SSR13·Feature17은 이 작업자가 재실행한 결과가 아니다.
+
+정상 main 병합의 journal/resume 충돌은 양쪽 최신 항목과 공통 이전 본문을 모두 보존한다.
+같은 task 단락 충돌은 기존 제한 수용과 새 worker 원장을 함께 가리키는203자 설명으로 해결한다.
+시험 source6307은 그대로이며 생산 Python/SQL을 새로 수정하지 않는다. 합성본의 정확 CI와
+focused 검증이 끝나기 전에는 PR을 머지하지 않는다. 이는 MD CI 면제 대상이 아니다.
+PR #1420 자체는 이미지3개에 영향을 주고 아직 배포하지 않았다고 명시돼 있다. 시험/문서만의
+추가 무배포 원칙과 그 상위 제품의 운영 미반영을 구분한다. 이 작업은 운영을 바꾸지 않았다.
