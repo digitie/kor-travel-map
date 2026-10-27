@@ -3,7 +3,8 @@
 PR #1421 문서 head `3e962183` 위에 시험 전용 후속을 쌓는다. 정렬 participant-scope
 대기→선택된 stale40001→전체 TX rollback→unbound READY public cancel→동일 bundle의
 새 attempt/key·현재 manifest 재계획과 양방향 winner/lineage·완료 replay DML0을 검사한다.
-순수 회귀20PASS·통합2case의 전이 fixture 미정의0을 확인했다. 두 독립 리뷰와
+순수 회귀21PASS(같은 bytes의 hashseed1/2 복원 포함)·통합2case fixture 미정의0을 확인했다.
+초안 순수실패2회의 원인·정정은 원장에 보존한다. 두 독립 리뷰와 부모 최신 main 합성,
 owned PG·최종 CI는 아직 대기다.
 생산 코드/SQL/API·OFF 설정과 운영은 변경하지 않는다. T-CWRITE-01–09 및 일반
 coordinator/운영 CPU·RSS 개선은 미완이다.

@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.dto import FeatureBundle
+from kortravelmap.dto import FeatureBundle, PlaceDetail
 from kortravelmap.infra import scoped_provider_refresh as native
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_repo import _make_source_entity_key
@@ -51,7 +51,22 @@ pytestmark = [pytest.mark.integration, pytest.mark.timeout(40)]
 
 def _artifact(bundle):
     # bytes 자체를 child에 한 번 전달한다. 재계획 때 provider/normalizer를 다시 호출하지 않는다.
-    return bundle.model_dump_json().encode()
+    # native input digest와 같은 encoder로 frozenset의 process별 hash 순서도 정렬한다.
+    return json.dumps(
+        bundle,
+        default=native._artifact_json_value,
+        ensure_ascii=False,
+        allow_nan=False,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode()
+
+
+def _decode_artifact(artifact):
+    # ADR-018: Feature.detail은 JSON dict를 직접 받지 않고 typed DTO를 요구한다.
+    value = json.loads(artifact)
+    value["feature"]["detail"] = PlaceDetail.model_validate(value["feature"]["detail"])
+    return FeatureBundle.model_validate(value)
 
 
 def _selected_stale(error):
@@ -170,7 +185,7 @@ async def _seed_shared(admin, reverse):
 
 async def _child(pipe, profile, request):
     artifact = request["artifact"]
-    bundle = FeatureBundle.model_validate_json(artifact)
+    bundle = _decode_artifact(artifact)
     assert _artifact(bundle) == artifact
     engine = make_async_engine(
         request["dsn"],

@@ -1,10 +1,17 @@
 """정상 stale만 재계획으로 분류하고 일반 오류/constraint 실패를 삼키지 않는다."""
 
+import os
+import subprocess
+import sys
 from types import SimpleNamespace
 
 import pytest
 
-from tests.integration.test_shared_feature_artifact_replan import _selected_stale
+from tests.integration.test_shared_feature_artifact_replan import (
+    _artifact,
+    _bundle,
+    _selected_stale,
+)
 
 
 @pytest.mark.parametrize(
@@ -30,3 +37,28 @@ def test_only_selected_unconstrained_kernel_stale_is_accepted(
 
 def test_unstructured_driver_failure_is_not_replan():
     assert not _selected_stale(SimpleNamespace(orig=SimpleNamespace(sqlstate="40001")))
+
+
+def test_artifact_bytes_are_identical_across_independent_python_hash_seeds():
+    # frozenset presence를 model_dump_json으로 직렬화하던 초안의 process별 순서 회귀.
+    code = """import hashlib,sys
+from tests.integration.test_shared_feature_artifact_replan import _artifact,_decode_artifact
+bundle=_decode_artifact(sys.stdin.buffer.read())
+print(hashlib.sha256(_artifact(bundle)).hexdigest())
+"""
+    artifact = _artifact(_bundle("fixed-source", "fixed-name")).decode()
+    digests = []
+    for seed in ["1", "2"]:
+        result = subprocess.run(
+            [sys.executable, "-B", "-c", code],
+            env={**os.environ, "PYTHONHASHSEED": seed},
+            input=artifact,
+            capture_output=True,
+            text=True,
+            check=True,
+            timeout=12,
+        )
+        digest = result.stdout.strip()
+        assert len(digest) == 64
+        digests.append(digest)
+    assert digests[0] == digests[1]
