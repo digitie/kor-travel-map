@@ -400,6 +400,39 @@ function applyTokenMarkerColor(element: HTMLElement, markerColor: string | null 
 /** 선택 강조 outline — 불투명 focus 토큰(구 `hsl(var(--primary))`는 oklch 토큰과 호환되지 않는다). */
 const SELECTED_OUTLINE = "3px solid var(--focus)";
 
+/**
+ * 지도 위 DOM 요소를 키보드로도 고를 수 있는 버튼으로 만든다. Tab으로 포커스하고 Enter/Space가
+ * click과 같은 동작을 한다. `role="button"`을 다는 마커·클러스터·라벨은 모두 이것으로 묶는다 —
+ * 포커스할 수 없는 버튼은 키보드 사용자에게 없는 것과 같다. click은 지도까지 전파하지 않는다
+ * (마커 선택이 지도 click으로도 처리되지 않게). 포커스 링은 globals.css의 `:focus-visible`이 그린다.
+ * 반환값은 두 listener를 떼는 함수다(요소를 재사용하는 풀이 쓴다).
+ */
+function bindSelection(
+  element: HTMLElement,
+  onSelect: (event: MouseEvent) => void,
+): () => void {
+  element.tabIndex = 0;
+  element.style.cursor = "pointer";
+  element.setAttribute("role", "button");
+  const handleClick = (event: MouseEvent) => {
+    event.preventDefault();
+    event.stopPropagation();
+    onSelect(event);
+  };
+  const handleKeyDown = (event: KeyboardEvent) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    event.preventDefault();
+    event.stopPropagation();
+    element.click();
+  };
+  element.addEventListener("click", handleClick);
+  element.addEventListener("keydown", handleKeyDown);
+  return () => {
+    element.removeEventListener("click", handleClick);
+    element.removeEventListener("keydown", handleKeyDown);
+  };
+}
+
 interface VWorldMarkerProps {
   lngLat: [number, number];
   markerIcon?: string | null;
@@ -438,17 +471,17 @@ export function VWorldMarker({
   useEffect(() => {
     if (map === null) return;
 
+    // click은 bindSelection 하나로만 단다(공용 factory의 onClick까지 주면 두 번 불린다).
     const element = createMarkerElement({
       markerIcon,
       markerColor,
       size,
       title,
-      onClick: clickable ? () => onClickRef.current?.() : undefined,
     });
     applyTokenMarkerColor(element, markerColor);
     if (clickable) {
       element.setAttribute("aria-label", title ?? "Feature marker");
-      element.setAttribute("role", "button");
+      bindSelection(element, () => onClickRef.current?.());
     }
     elementRef.current = element;
 
@@ -690,23 +723,6 @@ function createFeatureMarkerElement({
   badgeCount?: number;
   onClick?: (event: MouseEvent) => void;
 }): HTMLDivElement {
-  function bindSelection(element: HTMLDivElement) {
-    if (!onClick) return;
-    element.tabIndex = 0;
-    element.style.cursor = "pointer";
-    element.addEventListener("click", (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      onClick?.(event);
-    });
-    element.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter" && event.key !== " ") return;
-      event.preventDefault();
-      event.stopPropagation();
-      element.click();
-    });
-  }
-
   const icon = createMarkerElement({
     markerIcon,
     markerColor,
@@ -716,7 +732,7 @@ function createFeatureMarkerElement({
   applyTokenMarkerColor(icon, markerColor);
   const markerLabel = priceLabel ?? null;
   if (!markerLabel) {
-    bindSelection(icon);
+    if (onClick) bindSelection(icon, onClick);
     if (badgeCount && badgeCount > 1) {
       appendCountBadge(icon, badgeCount, markerColorValue(markerColor));
     }
@@ -763,7 +779,7 @@ function createFeatureMarkerElement({
   label.style.pointerEvents = "none";
 
   wrapper.append(icon, label);
-  bindSelection(wrapper);
+  if (onClick) bindSelection(wrapper, onClick);
   if (badgeCount && badgeCount > 1) {
     appendCountBadge(wrapper, badgeCount, color);
   }
@@ -959,12 +975,8 @@ function createGeometryLabelElement(
   element.style.cursor = onSelectFeature ? "pointer" : "default";
   element.style.userSelect = "none";
   if (onSelectFeature) {
-    element.setAttribute("role", "button");
     element.setAttribute("aria-label", element.title);
-    element.addEventListener("click", (event) => {
-      event.stopPropagation();
-      onSelectFeature(feature.properties.feature_id);
-    });
+    bindSelection(element, () => onSelectFeature(feature.properties.feature_id));
   } else {
     element.setAttribute("role", "img");
     element.setAttribute("aria-label", element.title);
@@ -1002,9 +1014,7 @@ function createServerClusterMarker(
   element.dataset.lon = String(cluster.lon);
   element.dataset.lat = String(cluster.lat);
   element.dataset.zoomStep = String(zoomStep);
-  const handleClick = (event: MouseEvent) => {
-    event.preventDefault();
-    event.stopPropagation();
+  const disposeClick = bindSelection(element, () => {
     const target: [number, number] = [
       Number(element.dataset.lon),
       Number(element.dataset.lat),
@@ -1017,15 +1027,11 @@ function createServerClusterMarker(
         map.getZoom() + (Number.isFinite(currentZoomStep) ? currentZoomStep : 3),
       ),
     });
-  };
-  element.addEventListener("click", handleClick);
+  });
   const marker = new maplibregl.Marker({ element, anchor: "center" })
     .setLngLat([cluster.lon, cluster.lat])
     .addTo(map);
-  return {
-    marker,
-    disposeClick: () => element.removeEventListener("click", handleClick),
-  };
+  return { marker, disposeClick };
 }
 
 function removeServerClusterMarker(entry: ServerClusterMarkerEntry): void {
@@ -1576,9 +1582,7 @@ export function VWorldFeatureClusters({
             element.dataset.lon = String(coords[0]);
             element.dataset.lat = String(coords[1]);
             element.dataset.pointCount = String(count);
-            element.addEventListener("click", (event) => {
-              event.preventDefault();
-              event.stopPropagation();
+            bindSelection(element, () => {
               const source = map.getSource(SRC) as maplibregl.GeoJSONSource;
               const currentClusterId = Number(element.dataset.clusterId);
               const currentPointCount = Number(element.dataset.pointCount) || 0;
