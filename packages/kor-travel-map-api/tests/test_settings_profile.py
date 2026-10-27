@@ -8,13 +8,19 @@ profile에서만 유지되어야 한다.
 from __future__ import annotations
 
 import hashlib
+import itertools
 from typing import Any
 
 import pytest
 from pydantic import SecretStr, ValidationError
 
 from kortravelmap.api.app import create_app
-from kortravelmap.api.settings import ApiSettings
+from kortravelmap.api.settings import (
+    _INBOUND_DIGEST_CREDENTIALS,
+    _INBOUND_RAW_CREDENTIALS,
+    ApiSettings,
+    inbound_credentials,
+)
 
 ADMIN_PROXY_SECRET = "admin-proxy-secret-000000000000000000000000"
 OPS_READ_TOKEN = "read-token-00000000000000000000000000000000"
@@ -292,8 +298,9 @@ def test_production_rejects_service_token_reused_as_admin_secret() -> None:
     with pytest.raises(ValidationError) as excinfo:
         _production_settings(service_token=ADMIN_PROXY_SECRET)
     message = str(excinfo.value)
-    assert "KOR_TRAVEL_MAP_API_SERVICE_TOKEN" in message
-    assert "distinct from KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET" in message
+    assert "service token must be distinct from admin proxy secret" in message
+    # hide_input_in_errors + 이름만 보고 — secret 원문은 에러에 남지 않는다.
+    assert ADMIN_PROXY_SECRET not in message
 
 
 # ── 수동 Feature 생성 전용 transport principal (T-VN-M01) ──────────────────
@@ -414,13 +421,115 @@ def test_admin_feature_create_digest_is_distinct_from_curation_digests() -> None
 
 @pytest.mark.unit
 def test_admin_feature_create_digest_is_distinct_from_cache_target_digests() -> None:
-    with pytest.raises(ValidationError, match="distinct from cache-target tokens"):
+    with pytest.raises(
+        ValidationError, match="distinct from cache target principal svc:pinvi-command"
+    ):
         _local_settings(
             admin_feature_create_token_sha256=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
             cache_target_service_principals=_cache_target_principals(
                 command_digest=ADMIN_FEATURE_CREATE_TOKEN_SHA256,
             ),
         )
+
+
+# ── inbound 자격 증명 단일 목록 ─────────────────────────────────────────────
+
+_SHARED_CREDENTIAL = "shared-inbound-credential-0123456789abcdef"
+_CACHE_TARGET_SLOT = (
+    "cache target principal svc:pinvi-command token digest",
+    "cache_target_service_principals",
+)
+#: (오류 이름, 설정 슬롯). 단일 목록의 순서 그대로다 — 뒤 슬롯이 "must be distinct from 앞".
+_CREDENTIAL_SLOTS = (
+    *((name, field) for name, field, _env, _scope in _INBOUND_RAW_CREDENTIALS),
+    _CACHE_TARGET_SLOT,
+    *((name, field) for name, field, _scope in _INBOUND_DIGEST_CREDENTIALS),
+)
+_RECONCILIATION_FIELDS = (
+    "feature_reference_reconciliation_read_token_sha256",
+    "feature_reference_reconciliation_ack_token_sha256",
+)
+
+
+def _settings_sharing_one_credential(*slots: str) -> ApiSettings:
+    """주어진 슬롯이 모두 같은 원문을 쓰는 설정. 짝으로만 켜지는 설정은 다른 값으로 채운다."""
+
+    digest = hashlib.sha256(_SHARED_CREDENTIAL.encode("utf-8")).hexdigest()
+    values: dict[str, Any] = {}
+    for slot in slots:
+        if slot == "cache_target_service_principals":
+            values[slot] = _cache_target_principals(command_digest=digest)
+        elif slot.endswith("_sha256"):
+            values[slot] = digest
+        else:
+            values[slot] = _SHARED_CREDENTIAL
+    if {"ops_read_token", "ops_cancel_token", "ops_fixture_token"} & values.keys():
+        values.setdefault("ops_read_token", OPS_READ_TOKEN)
+        values.setdefault("ops_cancel_token", OPS_CANCEL_TOKEN)
+        values.setdefault("ops_fixture_token", OPS_FIXTURE_TOKEN)
+    if set(_RECONCILIATION_FIELDS) & values.keys():
+        for field in _RECONCILIATION_FIELDS:
+            values.setdefault(field, hashlib.sha256(field.encode("utf-8")).hexdigest())
+    return _local_settings(**values)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("earlier", "later"),
+    list(itertools.combinations(_CREDENTIAL_SLOTS, 2)),
+    ids=lambda slot: slot[1],
+)
+def test_every_inbound_credential_pair_must_be_distinct(
+    earlier: tuple[str, str],
+    later: tuple[str, str],
+) -> None:
+    """목록의 모든 쌍을 본다. 검증기마다 비교 대상을 따로 적던 때는 수동 생성 digest가
+    feature-request·reconciliation digest와 같아도 통과했다."""
+
+    with pytest.raises(ValidationError) as excinfo:
+        _settings_sharing_one_credential(earlier[1], later[1])
+    message = str(excinfo.value)
+    assert f"{later[0]} must be distinct from {earlier[0]}" in message
+    assert _SHARED_CREDENTIAL not in message
+
+
+@pytest.mark.unit
+def test_each_slot_alone_is_accepted_and_listed() -> None:
+    """위 쌍 테스트의 대조군. 한 슬롯만 쓰면 기동하고 목록에 정확히 그 이름이 나온다."""
+
+    for name, slot in _CREDENTIAL_SLOTS:
+        settings = _settings_sharing_one_credential(slot)
+        assert name in {credential.name for credential in inbound_credentials(settings)}, slot
+
+
+@pytest.mark.unit
+def test_inbound_credential_list_covers_every_credential_setting() -> None:
+    """자격 증명 설정을 새로 만들면 단일 목록에도 넣어야 한다. 빠지면 distinctness와 403 판정
+    양쪽에서 조용히 빠진다."""
+
+    credential_fields = {
+        name
+        for name, field in ApiSettings.model_fields.items()
+        if "SecretStr" in str(field.annotation)
+        or name.endswith("_sha256")
+        or name == "cache_target_service_principals"
+    }
+    listed = {field for _name, field in _CREDENTIAL_SLOTS}
+    assert credential_fields == listed
+    assert len(_CREDENTIAL_SLOTS) == 16
+    scopes = [entry[-1] for entry in (*_INBOUND_RAW_CREDENTIALS, *_INBOUND_DIGEST_CREDENTIALS)]
+    assert len(scopes) == len(set(scopes))
+    for _name, field, env_name, _scope in _INBOUND_RAW_CREDENTIALS:
+        alias = ApiSettings.model_fields[field].validation_alias
+        choices = getattr(alias, "choices", None)
+        expected = (
+            choices[0]
+            if choices
+            else alias
+            if isinstance(alias, str)
+            else f"KOR_TRAVEL_MAP_API_{field.upper()}"
+        )
+        assert env_name == expected, field
 
 
 # ── production 거부 matrix ───────────────────────────────────────────────────

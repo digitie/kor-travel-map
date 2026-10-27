@@ -1618,7 +1618,7 @@ def test_cache_target_service_token_must_be_registered() -> None:
 def test_cache_target_principal_registry_rejects_duplicate_token_digest() -> None:
     principals = _principal_registry()
     principals[1]["token_sha256"] = principals[0]["token_sha256"]
-    with pytest.raises(ValueError, match="token digests must be unique"):
+    with pytest.raises(ValueError, match="must be distinct from cache target principal"):
         _settings(principals=principals)
 
 
