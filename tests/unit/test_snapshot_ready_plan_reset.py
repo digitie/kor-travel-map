@@ -48,7 +48,7 @@ class _Bind:
 
 
 @pytest.mark.parametrize("create", [False, True])
-@pytest.mark.parametrize("prior", [0, 25])
+@pytest.mark.parametrize("prior", [0, 25, 50000])
 def test_additive_upgrade_keeps_owner_acl_and_does_not_raise_shorter_deadlines(
     monkeypatch, create, prior
 ):
@@ -73,8 +73,8 @@ def test_additive_upgrade_keeps_owner_acl_and_does_not_raise_shorter_deadlines(
         )
     settings_calls = [params for statement, params in bind.calls if "set_config" in statement]
     assert settings_calls[:2] == [
-        {"name": "lock_timeout", "value": str(prior or 1000)},
-        {"name": "statement_timeout", "value": str(prior or 30000)},
+        {"name": "lock_timeout", "value": str(min(prior, 1000) if prior else 1000)},
+        {"name": "statement_timeout", "value": str(min(prior, 30000) if prior else 30000)},
     ]
     assert settings_calls[-2:] == [
         {"name": "lock_timeout", "value": str(prior)},

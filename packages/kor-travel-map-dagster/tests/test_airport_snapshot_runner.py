@@ -723,3 +723,17 @@ async def test_other_claim_database_errors_are_not_reclassified_or_read_again(mo
     factory.assert_not_called()
     stubs["plan_airport_snapshot"].assert_not_awaited()
     collect.assert_not_awaited()
+
+
+async def test_selected_atomic_stale_never_exceeds_three_typed_resets_or_refetches(monkeypatch):
+    context, _, _, _, _, _, stubs, _, _, collect, _ = await _case(monkeypatch, status="prepared")
+    atomic = stubs["run_snapshot_apply_postprocess"]
+    atomic.side_effect = target.io.AirportSnapshotReplanRequired("selected kernel stale")
+    with pytest.raises(Failure) as caught:
+        await target.run_airport_snapshot_if_supported(context)
+    assert caught.value.allow_retries is False
+    assert atomic.await_count == 3
+    assert stubs["plan_airport_snapshot"].await_count == 3
+    assert stubs["reset_rolled_back_airport_snapshot_plan"].await_count == 3
+    stubs["reset_airport_snapshot_plan"].assert_not_awaited()
+    collect.assert_not_awaited()

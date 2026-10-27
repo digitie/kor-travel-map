@@ -1,7 +1,7 @@
-"""기존 typed reset의 live READY lease 거부를 실제 Airport apply TX에서 재현한다.
+"""기존 live READY 거부와 현재 executor의 동일 artifact 재계획을 함께 검증한다.
 
-아직 제품 변경 전 source다. upstream/Geo 호출과 운영 설정 변경은 없으며,
-공식 등록·executor·plan·atomic apply가 만드는 정확 binding을 사용한다.
+제품 수정 전 ea2의 실제 재현은 보고서에 보존한다. 현재 회귀는 strict codec·실제 등록/
+atomic apply와 새433 reset을 사용하며 upstream/Geo·운영 설정을 바꾸지 않는다.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ def _unreachable_postprocess(_observed):
     raise AssertionError("selected stale must abort before postprocess")
 
 
-async def test_selected_stale_rolls_back_before_live_bound_reset_is_rejected(
+async def test_selected_stale_legacy_rejects_and_current_executor_typed_reset_recovers(
     scalar_engines, airport_baseline, request
 ):
     admin, runtime = scalar_engines
@@ -161,11 +161,30 @@ async def test_selected_stale_rolls_back_before_live_bound_reset_is_rejected(
                 )
                 == before
             )
+            fresh = await io.read_airport_snapshot(client, identity, pins=_PINS)
+            assert fresh is not None
+            assert (
+                await io.reset_rolled_back_airport_snapshot_plan(client, fresh, token, plan)
+                == "reset"
+            )
+            reset = await io.read_airport_snapshot(client, identity, pins=_PINS)
+            assert reset is not None
+            assert reset.status == "prepared"
+            assert reset.kernel_binding is None
+            assert reset.artifact_payload == bound.artifact_payload
+            assert reset.observation_context == bound.observation_context
+            second = await io.plan_airport_snapshot(
+                client, reset, token, pins=_PINS, dataset_id=dataset
+            )
+            assert second.attempt_id != plan.attempt_id
+            assert second.owner != plan.owner
+            assert second.input_digest == plan.input_digest
             request.node.user_properties.extend(
                 [
                     ("selected_stale", "40001:manifest feature changed; replan"),
                     ("apply_transaction", "aborted"),
                     ("bound_reset", "55P03:live-ready-lease"),
+                    ("typed_recovery", "same-artifact-new-plan"),
                     ("snapshot_id", str(token.snapshot_id)),
                     ("artifact_sha256", bound.artifact_sha256),
                 ]

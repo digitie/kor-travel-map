@@ -1,6 +1,9 @@
 # bound snapshot의 정확 stale 뒤 재계획 복구
 
-## 첫 범위와 아직 미재현인 경계
+현재 단계: 선행 ea2fbcc5 실제 재현1PASS는 수용했다. 433 제품 코드와 순수 회귀는
+구현 중이며 새 제품의 실제 PG·최종 두 리뷰·CI는 아직 미완이다. 운영 변경은 없다.
+
+## 최초 조사 범위(실제 재현 전 기록)
 
 현재 Airport/Rest 실제 asset은 저장 artifact와 executor fence를 가진 전용 coordinator를
 호출한다. 선택 stale로 atomic apply TX가 rollback된 뒤에도 기존 expired-plan reset은
@@ -108,3 +111,38 @@ ledger 파일 경로 오기로 수집0/exit4였고 원 로그를 보존한 뒤 �
 이 결과는 새 SQL을 실제 PG에서 적용하거나 수집 성능을 측정한 증거가 아니다.
 다음은 live apply holder, 현재/옛 executor·binding·취소·권한·혼합 schema와 실제
 수집 재계획/원 결과 replay의 통합 source 및 두 독립 리뷰다. 운영 변경은 없다.
+
+### 공식 Manager의 forward 재시도와 no-op 구분
+
+검토한 Manager aeb2의 pair 실패 경로는 새 runtime 중지와 in_progress 보존 후
+명시적 forward 재시도이며 자동 구 image rollback이 아니다. rebuild_pinned_runtime의
+기존 schema_heads 비교는 같은 committed pair의 수렴 fast-path에 한정된다. 새 pair나
+in_progress는 기존 DB identity를 보존해 full forward deploy로 진행하므로 frozen432
+metadata 자체가 호환433 재시도를 막는다는 근거는 없다. 별도 Manager 수정은 이 증거만으로
+추가하지 않는다. 433 migration 후 구0d60 재시작이나 pin metadata 되돌리기는 DB 복원이
+아니며, 같은/호환433 pair의 forward 재배포가 복구 경계다. 실제 운영 전에는 새 source의
+433 expected head 자동 발견과 부분실패/재시도 계약을 다시 확인한다.
+
+needs_read는 attempt/control/scope의 timestamp까지 영속 변경0과 source DML0을 뜻한다.
+공용 scope helper 안의 INSERT ON CONFLICT DO NOTHING SQL 문장까지0이라고 하지 않는다.
+
+## 제품 통합 실행 전 checkpoint
+
+계획 단계뿐 아니라 양 provider의 반복 선택 atomic stale도 MAX3에서 종료하는 순수
+회귀와 기존 더 긴 timeout을 cap으로 줄이는 migration case를 추가해142개/14.08초를
+통과했다. 실제 통합 source는 원 기록의 복구 기대값1개와 실제 두 asset2개, READY
+needs_read·원 binding/fence·executor lease·canonical 취소·foreign epoch/owner·active
+apply holder10개, 별도 작성한 catalog/권한/startup3개로 총16개를 수집했다(10.54초).
+새 제품의 실제 PG는 여전히0이다.
+
+실제 caller는 canonical operation/membership·DagsterInstance/guard를 사용하고
+등록된 bytes를 SDK0로 읽는다. 새 generation의 최초 apply만 Feature revision을 낡게
+하고 실제 catch→typed reset→새 plan→원 결과/postprocess/seal을 통과시킬 source다.
+완료 전 reset 거부와 완료 replay의 전체 작은 fixture 상태 불변도 검사한다. 기존
+quota를 줄이는 Airport 준비 helper는 쓰지 않고 fresh16/4/8MiB 정책을 유지한다.
+owned 실행은 두 실제 caller를 legacy 등록 helper를 쓰는 case보다 먼저 준비·수집하며
+한 모듈/한 PG로 원 test함수를 실행할 작은 selector를 별도 검토한다.
+
+별도 ACL 파일은 원 작성자와 source를 교차 읽었고 cold setup marker35만 기존50으로
+맞췄다. 구432 SD 기대집합만 모사하는 실제 catalog 검사와 전체 구 binary 기동 검증을
+구분한다. 최종 두 source 리뷰·소유 PG·CI·현재main 합성은 아직 미완이다.

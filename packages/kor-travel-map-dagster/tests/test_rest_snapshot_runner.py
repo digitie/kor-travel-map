@@ -350,3 +350,16 @@ async def test_planner_stale_keeps_expired_reset_and_max_three_without_atomic_ap
     stubs["reset_rolled_back_rest_snapshot_plan"].assert_not_awaited()
     atomic.assert_not_awaited()
     collect.assert_not_awaited()
+
+
+async def test_selected_atomic_stale_never_exceeds_three_typed_resets_or_refetches(monkeypatch):
+    context, _, _, stubs, collect, atomic = await _case(monkeypatch, status="prepared")
+    atomic.side_effect = target.io.RestSnapshotReplanRequired("selected kernel stale")
+    with pytest.raises(Failure) as caught:
+        await target.run_rest_snapshot_if_supported(context)
+    assert caught.value.allow_retries is False
+    assert atomic.await_count == 3
+    assert stubs["plan_rest_snapshot"].await_count == 3
+    assert stubs["reset_rolled_back_rest_snapshot_plan"].await_count == 3
+    stubs["reset_rest_snapshot_plan"].assert_not_awaited()
+    collect.assert_not_awaited()

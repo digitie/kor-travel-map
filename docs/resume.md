@@ -1,3 +1,12 @@
+## 2026-10-27 — typed bound reset 통합 source16개와 순수142개
+
+양 provider atomic stale MAX3·migration 더 긴 timeout cap 순수142개가14.08초에
+통과했고, [통합 source](reports/2026-10-27-bound-snapshot-stale-replan.md#제품-통합-실행-전-checkpoint)16개를
+10.54초에 수집했다. 실제 canonical 두asset/원bytes·seal·replay, holder/foreign
+epoch·취소·lease, 별도 작성 ACL/startup을 포함한다. 새 제품 PG0이며 최종 두리뷰·
+single-owned 실행·CI는 남아 있다. 실제caller 이전 freshquota를 보존하고 운영/
+profile 활성화는 하지 않는다. 기존 실패·상한·전체9개 미완은 유지한다.
+
 ## 2026-10-27 — 새 typed reset의 순수 경계138개 통과
 
 현재executor READY reset의 migration owner/ACL·client 원 plan/CAS·ACK 불명과
