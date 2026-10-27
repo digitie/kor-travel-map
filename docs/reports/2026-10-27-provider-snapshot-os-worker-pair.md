@@ -144,7 +144,8 @@ workflow `40456454576`의 glibc는1934 PASS/23 skip(1344.03초), alpine은1928 P
 것으로 주장하지 않으며, 정확 수집2개·필터 없는 전체 실행·skip 사유·정상 종료를 함께
 검산해 새 두 case의 실행을 수용한다.
 
-외부 접속을 모두 거부한 별도 import/collection 검산은 Common 실제6 module과 전체 source19개,
+검사에 지정한 Python socket 진입점 다섯 개를 거부한 별도 import/collection에서
+해당 진입점의 호출 시도는0이었다. 이 검산은 Common 실제6 module과 전체 source19개,
 Map API/Dagster 실제 transitive49개가 정확 합성본과 같고 fixture 미해결0임을 확인했다.
 이는 실제 PG 시험과 구분한다. 원6307의 owned PG2 PASS와 정확 새 의존성을 설치한 전체 CI를
 함께 근거로 쓰며, 중복 local r4 PG는 실행하지 않았다. 기존 실패·cleanup 및 두 source/문서/
