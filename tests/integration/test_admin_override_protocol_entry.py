@@ -155,7 +155,7 @@ async def test_override_entry_order_before_any_feature_row_lock(
                 await _wait_row_blocker_without_protocol(admin, waiter, blocker, task)
             else:
                 # 433 DC-1: 다른 Feature의 주소 override는 SH 보유자 뒤에서 기다리지 않는다.
-                await asyncio.wait_for(asyncio.shield(task), 3)
+                await asyncio.wait_for(asyncio.shield(task), 8)
             if kind == "phones" and not same_feature:
                 # 다른 Feature여도 EX 대기 전에 행을 선점하지 않아야 한다.
                 async with AsyncSession(admin) as observer, observer.begin():

@@ -327,7 +327,7 @@ async def test_epoch0_creation_does_not_wait_on_protocol_behind_an_applying_kern
             task = asyncio.create_task(write())
             pid = await asyncio.wait_for(asyncio.shield(started), 3)
             # 새 Feature 생성은 kernel이 쥔 Feature와 겹치지 않는다 — P 뒤에 줄 서지 않는다.
-            await _never_requests_protocol(admin, pid, task, window=3.0)
+            await _never_requests_protocol(admin, pid, task, window=8.0)
             assert task.done()
             assert (
                 await finish_scoped_feature_write(

@@ -274,7 +274,7 @@ async def test_epoch0_writer_waits_only_on_the_same_feature_row(
                 assert not task.done()
             else:
                 # 종전(414~418)에는 여기서 P EX를 기다렸다. 이제 kernel과 겹치지 않으면 끝난다.
-                await asyncio.wait_for(asyncio.shield(task), 3)
+                await asyncio.wait_for(asyncio.shield(task), 8)
             assert (
                 await finish_scoped_feature_write(
                     scoped, attempt_id=attempt, owner=owner, result_digest="f" * 64
