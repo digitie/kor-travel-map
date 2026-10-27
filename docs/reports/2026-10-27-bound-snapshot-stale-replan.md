@@ -352,8 +352,9 @@ PG16 system identifier, 이전 Manager bundle을 현재 복구에 적용하지 �
 SSH255와 뒤 durable pause의 ContractError도 성공으로 바꾸지 않는다. 후자는 실제
 Map37개만 STOPPED로 바꿨고 failure sensor 하나는 RUNNING이었다. 당시38개 변경이나
 첫 PinVi 경계 실패라는 초기 추정은 철회했다. 기존 전체67 원복과 자기 unit 정리를
-끝낸 뒤, 별도 검토한 유한 convergence가 원 RUNNING51을 중지했다. 이 과정에서
-STOP ACK 뒤 재RUNNING 관측은 있었지만 자동재기동 주체·최초 실패 원인을 확정하지 않는다.
+끝낸 뒤, 별도 검토한 유한 convergence가 원 RUNNING51을 중지했고 재STOP은0이었다.
+소스 검토에서 상태 덮어쓰기 가능성은 확인했지만 이번 실행에서 주체·최초 실패 원인을
+입증하지 못했다. 특정 STOP ACK 뒤 재RUNNING을 실측했다고 단정하지 않는다.
 
 그 후 별도 유지보수로 Manager/Map/PinVi와 공용 PG가 바뀌어 옛 bundle은 재실행하지
 않았다. 현재 committed 상태·schema·runtime와 원 key/ID를 읽기 검산하고 두 독립
@@ -366,7 +367,7 @@ PinVi13RUNNING/Concierge3RUNNING과 모든 key/ID가 원본과 같았다. 실제
 공식 committed 상태와 환경 bytes는 전후 같았다. 복구 원 result SHA256은
 95c4a79f2a06f4ff4bebf78803ca3b844a4aa3908e1096459bbc2a996b23e2d5,
 독립 fresh 원장은25921e696431e4e28ab877a566049466402ccc977dc6ca539f22ecf625c45e01이다.
-최종 독립 수용과 자기 unit 정리 원장은 각각
+Root 최종 수용과 자기 unit 정리 원장은 각각
 b83d3e184ed8e6bf09ebd9e6913b502ea08b4eb43da63bc48480db27265e6ba2,
 44959823a50c3fc31b124a386bce272e9a3657adb5d1d4cf4c54b44942620939다.
 제품 배포나 PG rollback은 하지 않았다.
