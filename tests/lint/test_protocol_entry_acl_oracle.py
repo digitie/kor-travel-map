@@ -28,6 +28,7 @@ _ENTRY_FUNCTIONS: Final[frozenset[str]] = frozenset(
     {
         "ops.lock_scoped_feature_write_protocol",
         "ops.lock_single_feature_writer_protocol",
+        "ops.lock_provider_evidence_writer_protocol",
         "ops.lock_provider_feature_tracking_protocol",
     }
 )

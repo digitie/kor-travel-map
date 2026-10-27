@@ -405,7 +405,8 @@ Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절
 |---|---|
 | legacy 적재(fence)·curation import·root 완결·병합·purge·provider field patch·DDL·정책 cutover | P EX(무조건) |
 | scoped kernel(411 begin) | P SH + 적용 중 manifest |
-| 단건·관리 writer — SQL 14개(상태/lifecycle 5, 필드 override 2, 생성·승인 4, M05 3)와 Python 관리 생성·patch·주소 override | regime 진입: epoch=0이면 P 없음, epoch>0이면 P EX |
+| 단건·관리 writer — SQL 10개(상태/lifecycle 4, 필드 override 2, 생성·승인 4)와 Python 관리 생성·patch·주소 override | regime 진입: epoch=0이면 P 없음, epoch>0이면 P EX |
+| provider 증거를 먼저 잡는 관리 writer — M05 3개·재활성화 | 증거 진입: epoch=0이면 P SH, epoch>0이면 P EX(적재가 bundle을 차례로 쓰며 Feature를 쥔 채 다음 head를 갱신하므로 P 없이는 순환) |
 | 전화 override(`set_feature_phones`) | P EX(fence) — enrichment가 같은 transaction에서 source record/link를 쓴다 |
 | tracking 확정: seal·root 완결·권위 finish·SUCCESS 완결 취소 전이 | P EX → L |
 | tracking 장부: ensure·attempt event·fill-starts·실패/취소 terminal·비권위 finish·취소 원장 | L만 |
@@ -421,8 +422,10 @@ Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절
 
 - `ops.lock_single_feature_writer_protocol()`은 epoch 표를 평범하게 읽는다(ACCESS SHARE, 행
   잠금 없음). epoch>0이면 P EX를 잡는다.
-- 첫 활성화는 P EX 다음 보호 표 25개(epoch 표 포함)를 ACCESS EXCLUSIVE로 잠근다. 그래서
-  진행 중인 epoch=0 writer가 끝날 때까지 기다린다(drain). cutover 중에 들어온 진입은 epoch
+- 첫 활성화는 P EX 바로 뒤 epoch 표를 먼저 ACCESS EXCLUSIVE로 잠그고, 그다음 보호 표 25개를
+  잠근다. 진입만 지난 epoch=0 writer는 다른 표가 아직 비어 있으므로 끝까지 쓰고 commit하며,
+  활성화는 그때까지 기다린다(drain). epoch 표를 목록 순서대로 잠그면 이 writer의 다음 DML과
+  순환한다(433 적대 리뷰). cutover 중에 들어온 진입은 epoch
   표에서 기다리고, PL/pgSQL은 문장의 잠금을 snapshot보다 먼저 얻으므로(READ COMMITTED) 새
   epoch를 읽고 P EX를 잡는다. 오래된 snapshot의 RR/SERIALIZABLE writer는 412 barrier·430
   strict guard에 23514로 닫힌다.

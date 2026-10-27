@@ -237,12 +237,14 @@ async def test_actual_m05_call_and_scoped_begin_do_not_invert_locks(scalar_engin
 
 
 @pytest.mark.parametrize(("operation", "index"), [("record", 2), ("resolve", 3)])
-async def test_m05_epoch0_finishes_while_a_load_holds_protocol_ex(
+async def test_m05_epoch0_waits_on_shared_protocol_behind_a_load(
     scalar_engines, operation, index
 ):
-    """433 DC-1: 적재가 P EX를 쥔 동안에도 epoch=0의 M05는 끝난다.
+    """433 DC-1(리뷰 반영): M05는 epoch=0에서도 P SH로 적재(P EX) 뒤에 선다.
 
-    종전(414)에는 detector op가 P EX 뒤에서 30초를 기다리다 55P03으로 실패했다.
+    적재는 한 transaction에서 bundle을 차례로 쓰며 Feature를 쥔 채 다음 head를 갱신한다.
+    증거를 먼저 잡고 Feature를 기다리는 M05가 P 없이 겹치면 순환이다. 그래서 적재 뒤에서는
+    기다리고(여기서는 짧은 상한의 55P03), 적재가 끝나면 같은 입력으로 끝난다.
     """
     admin, runtime = scalar_engines
     async with admin.connect() as connection:
@@ -251,22 +253,30 @@ async def test_m05_epoch0_finishes_while_a_load_holds_protocol_ex(
         ) == 0
     pair = await _seed_manual_provider_pair(admin, index=index)
     decision = await _resolve_decision(admin, runtime, pair) if operation == "resolve" else None
+
+    async def call(session):
+        if decision is not None:
+            result = await resolve_manual_provider_dedup_case(session, **decision)
+            assert result.outcome == "kept"
+        else:
+            receipt = await record_manual_provider_candidate(
+                session,
+                manual_feature_id=str(pair["manual_feature_id"]),
+                provider_feature_id=str(pair["provider_feature_id"]),
+                scores=_SCORES,
+                detector_causation=_CAUSATION,
+            )
+            assert receipt[1] == "created"
+
     async with AsyncSession(runtime) as holder, holder.begin():
         await lock_scoped_feature_write_protocol(holder, exclusive=True)
-        async with AsyncSession(runtime) as session, session.begin():
-            await session.execute(text("SET LOCAL lock_timeout='300ms'"))
-            if decision is not None:
-                result = await resolve_manual_provider_dedup_case(session, **decision)
-                assert result.outcome == "kept"
-            else:
-                receipt = await record_manual_provider_candidate(
-                    session,
-                    manual_feature_id=str(pair["manual_feature_id"]),
-                    provider_feature_id=str(pair["provider_feature_id"]),
-                    scores=_SCORES,
-                    detector_causation=_CAUSATION,
-                )
-                assert receipt[1] == "created"
+        with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 실제 P 대기 상한
+            async with AsyncSession(runtime) as session, session.begin():
+                await session.execute(text("SET LOCAL lock_timeout='300ms'"))
+                await call(session)
+        assert _sqlstate(caught.value) == "55P03"
+    async with AsyncSession(runtime) as session, session.begin():
+        await call(session)
 
 
 _NAMES = (
@@ -291,12 +301,12 @@ async def test_m05_owner_acl_and_first_protocol_entry(scalar_engines, name):
                 {"name": name},
             )
         ).one()
-    # 433 DC-1: 첫 진입은 regime 진입이다(epoch>0에서만 P EX).
+    # 433 DC-1: 첫 진입은 증거 writer 진입이다(epoch=0 P SH, epoch>0 P EX).
     assert (
         row[0]
         .partition("\nBEGIN\n")[2]
         .lstrip()
-        .startswith("PERFORM ops.lock_single_feature_writer_protocol();")
+        .startswith("PERFORM ops.lock_provider_evidence_writer_protocol();")
     )
     assert "lock_scoped_feature_write_protocol" not in row[0]
     assert row[1] == "ktm_manual_provider_dedup_procedure_owner"

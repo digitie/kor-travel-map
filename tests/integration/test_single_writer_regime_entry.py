@@ -166,8 +166,9 @@ async def test_first_activation_drains_an_in_flight_epoch0_writer(scalar_engines
     async with AsyncSession(runtime) as writer:
         await writer.begin()
         try:
-            await writer.execute(text(_TRANSITION), target)
-            # epoch=0이라 P 없이 썼다. epoch 표 ACCESS SHARE와 Feature 쓰기 잠금은 그대로 쥐고 있다.
+            # 진입만 지나고 DML은 아직이다 — 리뷰가 찾은 순환 창(활성화가 보호 표를 차례로
+            # 잠그다 epoch 표에서 기다리면, 이 writer의 다음 DML이 이미 잠긴 표에서 막힌다).
+            await writer.execute(text("SELECT ops.lock_single_feature_writer_protocol()"))
             assert (await writer.scalars(text(_OWN_PROTOCOL_MODES))).all() == []
             writer_pid = int(await writer.scalar(text("SELECT pg_backend_pid()")))
             activation = asyncio.create_task(_activate(admin, policy_feature))
@@ -185,8 +186,10 @@ async def test_first_activation_drains_an_in_flight_epoch0_writer(scalar_engines
                     if waiting:
                         break
                     await asyncio.sleep(0.01)
-            # 여기서 epoch를 읽지 않는다 — 활성화가 epoch 표를 이미 잠갔다면 이 검사가 writer의
-            # commit을 막아 시험 자신이 교착한다. drain은 위의 대기 관측이 증명한다.
+            # 활성화는 P EX 바로 뒤 epoch 표에서 기다리므로 다른 보호 표는 아직 비어 있다.
+            # writer는 남은 DML을 끝까지 쓰고 commit한다(교착이면 여기서 40P01).
+            await writer.execute(text(_TRANSITION), target)
+            assert (await writer.scalars(text(_OWN_PROTOCOL_MODES))).all() == []
             await writer.commit()
         finally:
             await writer.rollback()

@@ -538,6 +538,10 @@ _STATE_OWNER_FUNCTION_ACL = (
     "TO ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
     # 433 DC-1: 단건·관리 writer의 regime 진입(epoch>0에서만 P EX). 414~418 루틴 소유자와
     # Python 관리 경로(runtime)가 부른다.
+    # provider 증거를 먼저 잡는 관리 writer(M05·재활성화)는 epoch=0에서도 P SH다.
+    "REVOKE ALL ON FUNCTION ops.lock_provider_evidence_writer_protocol(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.lock_provider_evidence_writer_protocol(...) "
+    "TO ktm_manual_provider_dedup_procedure_owner",
     "REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.lock_single_feature_writer_protocol(...) "
     "TO ktm_feature_runtime,ktm_manual_provider_dedup_procedure_owner,"
@@ -1129,6 +1133,7 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
     "ops.lock_single_feature_writer_protocol": "433_protocol_entry_narrowing",
+    "ops.lock_provider_evidence_writer_protocol": "433_protocol_entry_narrowing",
     "ops.reject_provider_snapshot_artifact_update": "430_provider_snapshot_recovery",
     "ops.reject_pipeline_cancellation_prefix": "430_provider_snapshot_recovery",
     "feature._member_provider_curation_input_set": "430_provider_snapshot_recovery",

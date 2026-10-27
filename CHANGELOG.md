@@ -36,7 +36,8 @@
 - **CHANGED (DB)**: 단건·관리 writer(상태·lifecycle·필드/주소 override·수동 생성·요청 승인·M05)는
   스칼라 정책이 켜졌을 때(epoch>0)만 protocol gate를 배타로 잡는다. 정책 활성화 전에는 행 잠금
   순서만 쓴다 — 적재 중 관리 UI 503과 M05 detector의 55P03이 사라진다. 같은 Feature를 적재가
-  쥐고 있으면 그 행에서 기다린다. M05는 Feature 잠금 전에 provider source 증거를 먼저 잡는다.
+  쥐고 있으면 그 행에서 기다린다. provider 증거를 먼저 잡는 M05·재활성화는 적재와 순환하지 않도록
+  정책 전에도 gate를 공유로 잡아 적재 뒤에 선다.
 - **FIXED**: 무장한 적재·권위 finish가 `lock_timeout=0` 세션에서 1초 만에 포기하던 문제.
   418이 실제로는 부여하지 못한 수동 생성·요청 승인 owner의 진입 함수 EXECUTE를 다시 부여한다.
 - **REST·OpenAPI 변경 없음.** 운영 스냅샷 SH·스칼라 정책 경로는 OFF로 동결한다(ADR-115 §11).
