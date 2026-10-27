@@ -1,3 +1,13 @@
+## 2026-10-27 — 제한 snapshot의 실제 OS worker pair 시험 구현 중
+
+Airport1/Rest2 저장 관측을 spawn2·각 pool1로 적용하는 신규 통합 시험을 추가했다.
+미commit leader 뒤 follower의 실제 source 완료·정확 topic blocker·양 commit ACK·원 결과와
+receipt·별도seal을 양 방향으로 검증하는 범위다. 신규 통합2개 collection과 IPC/회수 순수6개,
+Ruff는 통과했고 실제 PG·두 독립 리뷰·최종 CI는 아직 대기다.
+생산 코드/SQL/schema·운영 OFF 설정과 30/3/1 및 외부 실행 예산은 바꾸지 않는다.
+T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
+[범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
+
 ## 2026-10-26 — Rest432 제한 단위의 최종 CI·배포·공개 UI 수용
 
 PR #1418의 최종 제품 `65202158`은 CI 10개 모두 성공했고, 같은 tree의 main
