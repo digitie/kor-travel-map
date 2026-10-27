@@ -87,9 +87,13 @@ async def _apply(pipe, profile, request):
         server_settings={"application_name": "ktm-snapshot-pair-" + profile},
     )
     case = replace(request["case"], client=AsyncKorTravelMapClient(engine))
-    measures = {}
+    measures = {"work_sql_count": 0}
+    source_session, work_connection, work_active = None, None, False
 
     def before_sql(connection, cursor, statement, parameters, context, executemany):
+        if work_active:
+            assert id(connection) == work_connection
+            measures["work_sql_count"] += 1
         if "ops.begin_provider_snapshot_postprocess(" in statement:
             measures["topic_begin_ns"] = time.perf_counter_ns()
             _send(pipe, {"stage": "topic_begin", "profile": profile})
@@ -97,7 +101,11 @@ async def _apply(pipe, profile, request):
     event.listen(engine.sync_engine, "before_cursor_execute", before_sql)
 
     async def before_apply(session, identity):
+        nonlocal source_session, work_connection
+        source_session = session
+        work_connection = id((await session.connection()).sync_connection)
         xid = await session.scalar(text("SELECT txid_current()"))
+        measures["source_backend"] = (identity[0], xid)
         _send(
             pipe,
             {
@@ -116,17 +124,34 @@ async def _apply(pipe, profile, request):
             {"stage": "source", "profile": profile, "source_return_ns": time.perf_counter_ns()},
         )
 
-    async def hold_after_work(bound, fresh):
-        _send(pipe, {"stage": "held", "profile": profile, "held_ns": time.perf_counter_ns()})
-        await _receive(pipe, "release", profile)
-        measures["released_ns"] = time.perf_counter_ns()
+    async def before_work(bound, fresh):
+        nonlocal work_active
+        assert source_session is not None
+        row = (await source_session.execute(text("SELECT pg_backend_pid(),txid_current()"))).one()
+        assert tuple(row) == measures["source_backend"]
+        measures["before_work_backend"] = tuple(row)
+        work_active = True
+
+    async def after_work(bound, fresh):
+        nonlocal work_active
+        work_active = False
+        assert measures["work_sql_count"] > 0
+        assert source_session is not None
+        row = (await source_session.execute(text("SELECT pg_backend_pid(),txid_current()"))).one()
+        assert tuple(row) == measures["source_backend"]
+        measures["after_work_backend"] = tuple(row)
+        if request["leader"]:
+            _send(pipe, {"stage": "held", "profile": profile, "held_ns": time.perf_counter_ns()})
+            await _receive(pipe, "release", profile)
+            measures["released_ns"] = time.perf_counter_ns()
 
     try:
         completion = await _run_case(
             case,
             before_apply=before_apply,
             after_apply=after_apply,
-            after_work=hold_after_work if request["leader"] else None,
+            before_work=before_work,
+            after_work=after_work,
         )
         _send(
             pipe,
@@ -341,11 +366,13 @@ async def test_spawn_workers_overlap_source_then_serialize_topics_and_seal_separ
                         {"snapshot": case.token.snapshot_id},
                     )
                 ).one()
-                assert tuple(same_transaction) == (
-                    backend[profile]["xid"],
-                    backend[profile]["xid"],
-                    "postprocessed",
-                )
+                # 정본 finish는 같은 TX 안에서 임시 marker를 회수한다(432 SQL 236–238).
+                assert tuple(same_transaction) == (backend[profile]["xid"], None, "postprocessed")
+                values = committed[profile]["measures"]
+                expected = (backend[profile]["backend"][0], backend[profile]["xid"])
+                assert values["before_work_backend"] == expected
+                assert values["after_work_backend"] == expected
+                assert values["work_sql_count"] > 0
             counts[profile] = await _assert_postprocessed_and_seal(
                 case, committed[profile]["completion"]
             )

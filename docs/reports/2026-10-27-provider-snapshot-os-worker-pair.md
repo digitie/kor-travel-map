@@ -20,7 +20,9 @@ DSN·원문은 argv/env/log로 내보내지 않는다. 외부 SDK·Geo·운영 �
 - follower가 정본 begin-postprocess SQL에서 leader XID를 기다리고, 정확 blocker가
   leader 하나이며 leader가 global topic relation을 잠근 사실을 확인한 뒤 hold를 해제한다.
 - 두 정본 coordinator의 commit ACK 뒤 원 결과·receipt·counter 증가를 대조한다.
-  apply/postprocess TX가 각 worker의 XID와 같아야 하며, child seal은 이후 별도 TX다.
+  source의 public AsyncSession과 SQLAlchemy connection event로 실제 후처리 SQL 전체가
+  같은 물리 connection에 있고 그 전후 PID/XID가 같음을 확인한다. commit 후 apply TX는
+  원 worker XID이며 임시 postprocess marker는 NULL이어야 한다. child seal은 이후 별도 TX다.
 - 시작 직후 identity/pidfd 저장 실패도 회수 경로에 포함한다. 자기 PID/starttick 및 pidfd만
   사용하며, 전체 자식2 회수에 공유15초를 둔다. 한 자원 정리 오류가 다른 자식·Pipe·FD
   정리를 건너뛰지 않고 원 primary 예외를 보존한다. foreign PID에는 신호를 보내지 않는다.
@@ -54,3 +56,23 @@ CPU2·RAM1536MiB·swap 동일·PID256, 외부 phase150초/parent160초/cleanup15
 실제 Dagster worker 감독·SIGKILL·wire 단절·shared Feature 양성 경합·지역 분할·전체 writer
 확대·215개/실 upstream·운영 활성화·CPU/RSS 효과는 별도 수용 항목이다.
 이 PR은 시험/문서만 추가하므로 API/UI/운영 배포 변경은 없다.
+
+## 실제 시험에서 발견한 검증 계약 교정
+
+첫 owned r1은 원 임시 SDK dependency 디렉터리 삭제로 fixture 전에 `tenacity` import가
+실패했다(pytest exit3, PG생성0, cleanup PASS). SDK source53개는 원 `e1b346f7`에 고정해
+복원했고, 정본 pyproject의 `tenacity>=8.2`·`lxml>=5.1` 두 누락 의존성만 private target에
+`9.1.2`·`5.4.0`으로 복원했다. 공유 venv/global 패키지는 바꾸지 않았다. 같은 plugin의
+실제 프로젝트56 module/SDK import·fixture closure2개는 socket connect 전체 거부 조건에서
+통과했다. 이는 SDK 네트워크 호출이나 실제 수집을 의미하지 않는다.
+
+owned r2의 실제 양방향 시험은 spawn/source overlap/topic blocker/두 commit ACK·topic counter까지
+도달했지만, commit 후 임시 marker가 XID로 남아야 한다는 새 시험의 기대값 때문에 두 건 모두
+실패했다(27.90초). schema432 정본 SQL `finish_provider_snapshot_postprocess`의236–238줄은
+`postprocessed` 상태·원 receipt를 저장하면서 `postprocess_txid`와 intent marker를 NULL로 회수한다.
+이것은 생산 코드의 실패가 아니다. 원 result/XML/log·정확 CID/volume 회수·cleanup PASS를 보존한다.
+
+시험은 marker 기대값만 지우지 않고, 정본 public Session/connection event를 이용한 실제
+후처리 SQL의 물리 connection 동등성·전후 backend PID/XID를 추가하고 commit 후 NULL 회수를
+검증하도록 교정한다. 예산·생산 코드·SDK 가드·원 receipt·별도seal 검증은 유지한다.
+수정본의 두 리뷰·같은 상한 실제 PG·최종 CI는 아직 대기다.
