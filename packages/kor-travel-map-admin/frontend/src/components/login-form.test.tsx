@@ -1,8 +1,17 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderToString } from "react-dom/server";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { LoginForm } from "./login-form";
+
+const LOGIN_CONTROL_SLOTS = ["login-username", "login-password", "login-submit"] as const;
+
+function loginControlsDisabled(root: ParentNode): (boolean | undefined)[] {
+  return LOGIN_CONTROL_SLOTS.map(
+    (slot) => root.querySelector<HTMLInputElement | HTMLButtonElement>(`[data-slot="${slot}"]`)?.disabled,
+  );
+}
 
 afterEach(() => {
   cleanup();
@@ -43,4 +52,13 @@ it("네트워크 실패는 오류를 표시하고 비밀번호를 지워 다시 
   await screen.findByText("로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.");
   expect(input.value).toBe("");
   expect(screen.queryByText("private network detail")).toBeNull();
+});
+
+it("서버 HTML은 hydration 전 입력·제출을 막고 client mount 뒤에만 연다(@kor-travel/ui dev.9)", () => {
+  const serverHtml = document.createElement("div");
+  serverHtml.innerHTML = renderToString(<LoginForm nextPath="/" />);
+  expect(loginControlsDisabled(serverHtml)).toEqual([true, true, true]);
+
+  const { container } = render(<LoginForm nextPath="/" />);
+  expect(loginControlsDisabled(container)).toEqual([false, false, false]);
 });
