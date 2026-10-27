@@ -103,16 +103,13 @@ _LOAD_FENCES: Final[frozenset[str]] = frozenset(
 _PROTOCOL_FUNCTION: Final[str] = "ops.lock_scoped_feature_write_protocol"
 _TRACKING_FUNCTION: Final[str] = "ops.lock_provider_feature_tracking_protocol"
 _REGIME_FUNCTION: Final[str] = "ops.lock_single_feature_writer_protocol"
-#: provider 증거 writer의 진입 — epoch=0이면 P SH, epoch>0이면 P EX.
-_EVIDENCE_FUNCTION: Final[str] = "ops.lock_provider_evidence_writer_protocol"
 _ENTRY_FUNCTIONS: Final[frozenset[str]] = frozenset(
-    {_PROTOCOL_FUNCTION, _TRACKING_FUNCTION, _REGIME_FUNCTION, _EVIDENCE_FUNCTION}
+    {_PROTOCOL_FUNCTION, _TRACKING_FUNCTION, _REGIME_FUNCTION}
 )
 _ENTRY_CALL = re.compile(
     r"\b(?P<name>ops\.lock_scoped_feature_write_protocol"
     r"|ops\.lock_provider_feature_tracking_protocol"
-    r"|ops\.lock_single_feature_writer_protocol"
-    r"|ops\.lock_provider_evidence_writer_protocol)\((?P<args>[^)]*)\)"
+    r"|ops\.lock_single_feature_writer_protocol)\((?P<args>[^)]*)\)"
 )
 #: L을 직접 잡는 bigint 키(``advisory_lock_key('kortravelmap:pipeline-lineage:mutation')``).
 _LINEAGE_DIRECT = re.compile(r"pg_advisory_xact_lock\(\s*6832465333779826081\b")
@@ -170,8 +167,6 @@ def _entry_events(name: str, args: str, offset: int) -> list[object]:
     argument = " ".join(args.split()).lower()
     if name == _REGIME_FUNCTION:
         return [_Protocol("REGIME", offset)]
-    if name == _EVIDENCE_FUNCTION:
-        return [_Protocol("EVIDENCE", offset)]
     if name == _PROTOCOL_FUNCTION:
         mode = {"true": "EX", "false": "SH"}.get(argument, "?")
         return [_Protocol(mode, offset)]
@@ -286,15 +281,6 @@ def _acquire(
     return violations
 
 
-def _world_mode(mode: str, world: str) -> str:
-    """regime·증거 진입의 실제 P 모드. 증거 진입은 epoch=0에서도 공유를 잡는다."""
-    if mode == "REGIME":
-        return "EX"
-    if mode == "EVIDENCE":
-        return "SH" if world == "epoch0" else "EX"
-    return mode
-
-
 def _leaf_violations(held: _Held, *, origin: str, path: str, world: str) -> list[str]:
     """tracking leaf 진입의 실행 시 거부(``ck_provider_tracking_prefix``)를 미리 본다.
 
@@ -335,7 +321,7 @@ def _order_violations(
             elif isinstance(event, _Protocol):
                 if event.mode == "REGIME" and world == "epoch0":
                     continue
-                mode = _world_mode(event.mode, world)
+                mode = "EX" if event.mode == "REGIME" else event.mode
                 violations.extend(_acquire(held, _P, mode, **context))
             elif isinstance(event, _Lineage):
                 if event.leaf:
@@ -811,9 +797,10 @@ def _py_walk(
                 state.rows = True
             elif item.kind.startswith("P:"):
                 mode = item.kind[2:]
-                if mode == "REGIME" and world == "epoch0":
-                    continue
-                mode = _world_mode(mode, world)
+                if mode == "REGIME":
+                    if world == "epoch0":
+                        continue
+                    mode = "EX"
                 violations.extend(_acquire(state, _P, mode, **context))
             else:
                 if item.kind == _PY_LEAF:
@@ -883,7 +870,7 @@ def test_the_scan_sees_the_feature_write_takers() -> None:
         "ops.curation_source_observation_receipts", []
     )
     # P·L 진입을 실제로 본다(433 WI-4). 433 head 기준 P 직접 진입 루틴 21개, tracking 진입 9개,
-    # regime 진입 14개다 — 정규식이 낡으면 이 하한이 먼저 무너진다.
+    # regime 진입 10개다 — 정규식이 낡으면 이 하한이 먼저 무너진다.
     entries = {
         name: {match["name"] for match in _ENTRY_CALL.finditer(body)}
         for name, body in routines.items()
@@ -894,7 +881,7 @@ def test_the_scan_sees_the_feature_write_takers() -> None:
     regime = [name for name, seen in entries.items() if _REGIME_FUNCTION in seen]
     assert len(protocol) >= 20, protocol
     assert len(tracking) >= 9, tracking
-    assert len(regime) >= 14, regime
+    assert len(regime) >= 10, regime
     _violations, python_takers = _python_order_violations()
     assert python_takers >= 20, python_takers
 

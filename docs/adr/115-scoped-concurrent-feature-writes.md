@@ -406,7 +406,7 @@ Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절
 | legacy 적재(fence)·curation import·root 완결·병합·purge·provider field patch·DDL·정책 cutover | P EX(무조건) |
 | scoped kernel(411 begin) | P SH + 적용 중 manifest |
 | 단건·관리 writer — SQL 10개(상태/lifecycle 4, 필드 override 2, 생성·승인 4)와 Python 관리 생성·patch·주소 override | regime 진입: epoch=0이면 P 없음, epoch>0이면 P EX |
-| provider 증거를 먼저 잡는 관리 writer — M05 3개·재활성화 | 증거 진입: epoch=0이면 P SH, epoch>0이면 P EX(적재가 bundle을 차례로 쓰며 Feature를 쥔 채 다음 head를 갱신하므로 P 없이는 순환) |
+| provider 증거를 먼저 잡는 관리 writer — M05 3개·재활성화 | P EX(무조건, 종전대로) — 적재는 bundle을 차례로 쓰며 Feature를 쥔 채 다음 head를 갱신하고, 병합은 Feature 뒤 link를 잡는다. 증거를 먼저 잡고 Feature를 기다리는 writer가 P 없이 겹치면 순환이다 |
 | 전화 override(`set_feature_phones`) | P EX(fence) — enrichment가 같은 transaction에서 source record/link를 쓴다 |
 | tracking 확정: seal·root 완결·권위 finish·SUCCESS 완결 취소 전이 | P EX → L |
 | tracking 장부: ensure·attempt event·fill-starts·실패/취소 terminal·비권위 finish·취소 원장 | L만 |
@@ -422,16 +422,17 @@ Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절
 
 - `ops.lock_single_feature_writer_protocol()`은 epoch 표를 평범하게 읽는다(ACCESS SHARE, 행
   잠금 없음). epoch>0이면 P EX를 잡는다.
-- 첫 활성화는 P EX 바로 뒤 epoch 표를 먼저 ACCESS EXCLUSIVE로 잠그고, 그다음 보호 표 25개를
-  잠근다. 진입만 지난 epoch=0 writer는 다른 표가 아직 비어 있으므로 끝까지 쓰고 commit하며,
+- 첫 활성화(epoch=0)는 P EX 바로 뒤 epoch 표를 먼저 ACCESS EXCLUSIVE로 잠그고, 그다음 보호
+  표 25개를 잠근다. 이후 활성화는 epoch 표를 잠그지 않는다 — 단건 writer가 epoch를 읽은 뒤
+  P를 기다리므로 역순이 된다. 진입만 지난 epoch=0 writer는 다른 표가 아직 비어 있으므로 끝까지 쓰고 commit하며,
   활성화는 그때까지 기다린다(drain). epoch 표를 목록 순서대로 잠그면 이 writer의 다음 DML과
   순환한다(433 적대 리뷰). cutover 중에 들어온 진입은 epoch
   표에서 기다리고, PL/pgSQL은 문장의 잠금을 snapshot보다 먼저 얻으므로(READ COMMITTED) 새
   epoch를 읽고 P EX를 잡는다. 오래된 snapshot의 RR/SERIALIZABLE writer는 412 barrier·430
   strict guard에 23514로 닫힌다.
-- M05는 두 Feature를 `FOR UPDATE`하기 전에 provider 쪽 primary source 증거(entity/record/
-  head, 그다음 link)를 적재와 같은 순서로 `FOR SHARE`한다. 414가 P로 막았던 역순을 P 없이
-  없앤다. dataset 행은 잠그지 않는다 — M05가 기다리지 않는 행은 순환을 만들지 못한다.
+- M05와 재활성화는 P EX를 유지한다. 계획(DC-1)은 M05가 source 증거를 먼저 잡게 해 P 없이
+  역순을 없애려 했지만, 적대 리뷰가 다중 bundle 적재(앞 bundle의 Feature를 쥔 채 뒤 head 갱신)와
+  병합(Feature 뒤 link)과의 순환을 찾았다. 적재 중 M05 detector가 기다리는 문제는 남는다.
 - epoch=0에서 같은 Feature를 쥔 대량 writer가 있으면 단건 writer는 그 행에서 그 transaction이
   끝날 때까지 기다린다(종전처럼 P에서 1~5초 뒤 503이 아니다). 다른 Feature는 기다리지 않는다.
 - 실제 PG 시험: `tests/integration/test_single_writer_regime_entry.py`.

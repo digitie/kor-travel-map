@@ -3,11 +3,10 @@
 - WI-1: 큐레이션을 확정하는 쓰기만 P EX→L이다(권위 finish의 seal, SUCCESS 완결 전이).
   fill-starts·terminal은 L만, finish는 권위 여부로, 취소 전이는 SUCCESS 완결 인자로
   고른다. 430 write-prefix guard도 같은 분류로 좁힌다.
-- DC-1: 414~418 단건·관리 writer 14개의 첫 진입을 regime 진입으로 바꾼다. provider 증거를
-  먼저 잡는 넷(M05 셋·재활성화)은 epoch=0에서도 P SH로 적재와 직렬화한다.
-  첫 활성화는 P EX 바로 뒤 epoch 표를 먼저 잠가 진행 중인 writer를 drain한다.
-  epoch=0이면 P가 없고 epoch>0이면 P EX다. M05는 Feature FOR UPDATE 전에 provider
-  source 증거를 적재와 같은 순서로 FOR SHARE한다.
+- DC-1: 415~418 단건·관리 writer 10개의 첫 진입을 regime 진입으로 바꾼다. provider 증거를
+  먼저 잡는 넷(M05 셋·재활성화)은 종전 P EX를 유지한다(적재·병합과의 순환 방지).
+  epoch=0이면 P가 없고 epoch>0이면 P EX다. 첫 활성화(epoch=0)는 P EX 바로 뒤 epoch 표를
+  먼저 잠가 진행 중인 writer를 drain한다.
 - WI-3: 418의 GRANT는 grant option 없는 schema owner로 돌아 아무것도 주지 않았다.
 """
 
@@ -67,18 +66,17 @@ _TRACKING_EX: Final = "\nBEGIN\n  PERFORM ops.lock_provider_feature_tracking_pro
 _TRACKING_LEAF: Final = "\nBEGIN\n  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
 _PROTOCOL_EX: Final = "\nBEGIN\n  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
 _SINGLE_WRITER: Final = "\nBEGIN\n  PERFORM ops.lock_single_feature_writer_protocol();\n"
-#: provider source 증거를 잡는 관리 writer(M05·재활성화). epoch=0에서도 P SH로 적재(P EX)와
-#: 직렬화한다 — 적재는 한 transaction에서 bundle을 차례로 쓰므로 Feature를 쥔 채 다음 head를
-#: 갱신한다. 증거를 먼저 잡고 Feature를 기다리는 writer와 P 없이 겹치면 순환이다.
-_EVIDENCE_WRITER: Final = "\nBEGIN\n  PERFORM ops.lock_provider_evidence_writer_protocol();\n"
 #: 첫 활성화는 P EX 바로 뒤 epoch 표를 가장 먼저 잠근다. 보호 표 25개를 차례로 잠그다 epoch
 #: 표에서 기다리면, 진입만 지난 epoch=0 writer의 다음 DML이 이미 잠근 표에서 막혀 순환한다.
 _ACTIVATION_OLD: Final = "\nBEGIN\n    PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
 _ACTIVATION_NEW: Final = (
     "\nBEGIN\n    PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
-    "    -- 433 DC-1: epoch=0 단건 writer는 진입에서 epoch 표 ACCESS SHARE를 쥔다. 다른 표보다\n"
-    "    -- 먼저 이 표를 잠가 진입한 writer는 끝까지 쓰고, 새 진입은 여기서 새 epoch를 기다린다.\n"
-    "    LOCK TABLE feature.provider_field_policy_epoch IN ACCESS EXCLUSIVE MODE;\n"
+    "    -- 433 DC-1: 첫 cutover(epoch=0)만 epoch 표를 다른 보호 표보다 먼저 잠근다. 진입한\n"
+    "    -- epoch=0 writer는 끝까지 쓰고, 새 진입은 여기서 새 epoch를 기다린다. epoch>0이면\n"
+    "    -- 단건 writer가 epoch를 읽은 뒤 P를 기다리므로 표를 잠그지 않는다(역순 방지).\n"
+    "    IF (SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton) = 0 THEN\n"
+    "        LOCK TABLE feature.provider_field_policy_epoch IN ACCESS EXCLUSIVE MODE;\n"
+    "    END IF;\n"
 )
 
 _FINISH_OLD: Final = (
@@ -137,66 +135,11 @@ _OPERATION_GUARD_NEW: Final = (
     "    v_need_final := NEW.kind = 'provider_feature_load_run'\n"
     "      OR COALESCE(NEW.payload ->> 'authoritative_snapshot_complete', '') = 'true';\n"
     "  END IF;\n"
-    "  -- 완결된 root를 다시 바꾸는 쓰기도 확정 쓰기다(완결을 되돌릴 수 없게 P EX).\n"
-    "  IF TG_OP='UPDATE' AND OLD.kind = 'provider_feature_load_run' AND OLD.status = 'done' THEN\n"
-    "    v_need_final := true;\n"
-    "  END IF;\n"
 )
-
-#: M05가 Feature 두 행을 잠그기 전에 provider 쪽 primary source 증거를 잠근다.
-#: 순서는 provider 적재·``lock_current_provider_feature_source_evidence``와 같다
-#: (entity/record/head → link → Feature). dataset 행은 잠그지 않는다 — M05 owner에게 그
-#: 표의 권한이 없고, M05가 기다리지 않는 행은 순환을 만들지 못한다. head가 그사이 넘어가면
-#: READ COMMITTED 재검사가 최신 head를 잠근 채 그 행을 건너뛴다. 실패 판정은 기존 본문이 한다.
-_M05_EVIDENCE_PRELOCK: Final = """    -- 433 DC-1: regime 전에는 P가 없다.
-    -- provider 적재와 같은 순서로 source 증거(entity/record/head 다음 link)를
-    -- Feature보다 먼저 잡는다.
-    FOR v_evidence IN
-        SELECT link.source_entity_key
-        FROM provider_sync.source_links AS link
-        WHERE link.feature_id = {provider}
-          AND link.source_role = 'primary'
-        ORDER BY link.source_entity_key COLLATE "C"
-    LOOP
-        PERFORM 1
-        FROM provider_sync.source_entities AS entity
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = entity.source_entity_key
-        JOIN provider_sync.source_records AS record
-          ON record.source_entity_key = head.source_entity_key
-         AND record.source_record_key = head.current_source_record_key
-        WHERE entity.source_entity_key = v_evidence.source_entity_key
-        FOR SHARE OF entity, record, head;
-        PERFORM 1
-        FROM provider_sync.source_links AS link
-        WHERE link.feature_id = {provider}
-          AND link.source_entity_key = v_evidence.source_entity_key
-        FOR SHARE;
-    END LOOP;
-"""
-_M05_DECLARE_OLD: Final = "    v_source record;\n"
-_M05_DECLARE_NEW: Final = "    v_source record;\n    v_evidence record;\n"
-_M05_RECORD_FEATURES: Final = """    PERFORM 1
-    FROM feature.features AS locked
-    WHERE locked.feature_id IN (p_manual_feature_id, p_provider_feature_id)
-    ORDER BY locked.feature_id
-    FOR UPDATE;
-"""
-_M05_RESOLVE_FEATURES: Final = """    PERFORM 1
-    FROM feature.features AS locked
-    WHERE locked.feature_id IN (v_case.manual_feature_id, v_case.provider_feature_id)
-    ORDER BY locked.feature_id
-    FOR UPDATE;
-"""
-
 
 def _single_writer(signature: str, owner: str, body_sha256: str) -> _Routine:
     return _Routine(signature, owner, "p", True, body_sha256, ((_PROTOCOL_EX, _SINGLE_WRITER),))
 
-
-def _evidence_writer(signature: str, owner: str, body_sha256: str) -> _Routine:
-    edits = ((_PROTOCOL_EX, _EVIDENCE_WRITER),)
-    return _Routine(signature, owner, "p", True, body_sha256, edits)
 
 
 #: 432 head에서 산출한 정본. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
@@ -253,45 +196,6 @@ _ROUTINES: Final[Mapping[str, _Routine]] = {
         "6adc2a65e0e01dff38c79b67908ff7039f925bd173bde0ec1edeecfde66a5b4a",
         ((_OPERATION_GUARD_OLD, _OPERATION_GUARD_NEW),),
     ),
-    # ── DC-1 단건·관리 writer(414 M05) ──────────────────────────────────────
-    "feature.record_manual_provider_dedup_candidate": _Routine(
-        "feature.record_manual_provider_dedup_candidate(uuid,uuid,jsonb,jsonb)",
-        _DEDUP_OWNER,
-        "p",
-        True,
-        "3ce2fd66671e2fff9758f48a26907eb6f55d519f3ec6b408606e287dcf048477",
-        (
-            (_PROTOCOL_EX, _EVIDENCE_WRITER),
-            (_M05_DECLARE_OLD, _M05_DECLARE_NEW),
-            (
-                _M05_RECORD_FEATURES,
-                _M05_EVIDENCE_PRELOCK.format(provider="p_provider_feature_id")
-                + _M05_RECORD_FEATURES,
-            ),
-        ),
-    ),
-    "feature.resolve_manual_provider_dedup_case": _Routine(
-        "feature.resolve_manual_provider_dedup_case(uuid,text,text,bigint,bigint,uuid,text,text,bigint)",
-        _DEDUP_OWNER,
-        "p",
-        True,
-        "2b4fda6088f19aee1952f593239b6b77e338e8bc5169392bfd719ccc00866b37",
-        (
-            (_PROTOCOL_EX, _EVIDENCE_WRITER),
-            (_M05_DECLARE_OLD, _M05_DECLARE_NEW),
-            (
-                _M05_RESOLVE_FEATURES,
-                _M05_EVIDENCE_PRELOCK.format(provider="v_case.provider_feature_id")
-                + _M05_RESOLVE_FEATURES,
-            ),
-        ),
-    ),
-    "feature.resolve_manual_provider_dedup_case_v2": _evidence_writer(
-        "feature.resolve_manual_provider_dedup_case_v2("
-        "uuid,text,text,bigint,bigint,uuid,text,text,bigint)",
-        _DEDUP_OWNER,
-        "fd679983218c28cfc9b3a8a2a89adbc64cc8a0fbf26574afe91edbf2b81ed3c9",
-    ),
     # ── DC-1 첫 활성화의 drain 순서 ──
     "feature.activate_provider_field_policy": _Routine(
         "feature.activate_provider_field_policy(uuid,bigint,text[])",
@@ -306,11 +210,6 @@ _ROUTINES: Final[Mapping[str, _Routine]] = {
         "feature.transition_admin_feature_state(uuid,text,text,text,bigint,text,text,text)",
         _STATE_OWNER,
         "315ba346bf74f5a7070c3a9572ac1b8d69c5cbfec08fbc5675db3b78fb381f81",
-    ),
-    "feature.reactivate_admin_feature_state": _evidence_writer(
-        "feature.reactivate_admin_feature_state(uuid,bigint,text,text,bigint,text,text)",
-        _STATE_OWNER,
-        "8dc92d2732f4df5b9ce725e7a87a412b649aedd15b5df96d3f2cd5267a431de5",
     ),
     "feature.transition_feature_state": _single_writer(
         "feature.transition_feature_state(uuid,text,text,text,bigint,jsonb)",
@@ -367,17 +266,14 @@ def _edited_body(name: str, body: str) -> str:
     routine = _ROUTINES[name]
     if hashlib.sha256(body.encode()).hexdigest() != routine.body_sha256:
         raise RuntimeError("432 body changed: " + name)
-    if "lock_single_feature_writer_protocol" in body or "lock_provider_evidence_writer" in body:
+    if "lock_single_feature_writer_protocol" in body:
         raise RuntimeError("433 entry already present: " + name)
     changed = body
     for old, new in routine.edits:
         if changed.count(old) != 1:
             raise RuntimeError("433 edit anchor is not unique: " + name)
         changed = changed.replace(old, new, 1)
-    single_writer = routine.edits[0] in {
-        (_PROTOCOL_EX, _SINGLE_WRITER),
-        (_PROTOCOL_EX, _EVIDENCE_WRITER),
-    }
+    single_writer = routine.edits[0] == (_PROTOCOL_EX, _SINGLE_WRITER)
     if single_writer and "lock_scoped_feature_write_protocol" in changed:
         raise RuntimeError("single writer kept an unconditional protocol entry: " + name)
     return changed
@@ -465,13 +361,9 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
     "SET ROLE ktm_feature_state_procedure_owner",
     Path(__file__).with_name("_433_single_writer_entry.sql").read_text(encoding="utf-8"),
-    Path(__file__).with_name("_433_evidence_writer_entry.sql").read_text(encoding="utf-8"),
-    "REVOKE ALL ON FUNCTION ops.lock_provider_evidence_writer_protocol() FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.lock_provider_evidence_writer_protocol() "
-    "TO ktm_manual_provider_dedup_procedure_owner",
     "REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol() FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.lock_single_feature_writer_protocol() "
-    "TO ktm_feature_runtime,ktm_manual_provider_dedup_procedure_owner,"
+    "TO ktm_feature_runtime,"
     "ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
     # WI-3: 418은 이 GRANT를 schema owner로 냈다(경고만, 부여 0). 함수 소유자로 다시 낸다.
     "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(boolean) "

@@ -221,16 +221,13 @@ async def _assert_effect(admin, name: str, case: Case) -> None:
         assert overrides == (["active"] if name == "author_lifecycle_override" else [])
 
 
-#: provider 증거를 먼저 잡는 writer — epoch=0에서도 P SH로 적재(P EX)와 직렬화한다.
+#: provider 증거를 먼저 잡는 writer — 433도 종전 P EX를 유지한다. 적재는 bundle을 차례로 쓰며
+#: Feature를 쥔 채 다음 head를 갱신하므로, P 없이 겹치면 순환이다(433 적대 리뷰).
 _EVIDENCE = frozenset({"reactivate_admin_feature_state"})
 
 
 async def _wait_blocked_on_rows(admin, waiting: int, blocker: int, task) -> None:
-    """433 DC-1: epoch=0의 단건 writer는 P가 아니라 실제 행 잠금에서 기다린다.
-
-    증거 writer는 P SH를 쥐었을 수 있다(scoped kernel의 SH와 겹치지 않는다). P를 기다리거나
-    배타로 쥐는 것은 둘 다 아니어야 한다.
-    """
+    """433 DC-1: epoch=0의 단건 writer는 P가 아니라 실제 행 잠금에서 기다린다."""
     async with asyncio.timeout(4):
         while True:
             if task.done():
@@ -242,14 +239,33 @@ async def _wait_blocked_on_rows(admin, waiting: int, blocker: int, task) -> None
                         text("""SELECT :blocker=ANY(pg_blocking_pids(:waiting)),
                         EXISTS(SELECT 1 FROM pg_locks WHERE pid=:waiting
                         AND locktype='advisory' AND classid=1369104691::oid
-                        AND objid=115::oid AND objsubid=2
-                        AND (NOT granted OR mode='ExclusiveLock'))"""),
+                        AND objid=115::oid AND objsubid=2)"""),
                         {"waiting": waiting, "blocker": blocker},
                     )
                 ).one()
             if row[0]:
-                # P를 기다리지 않고 배타로 쥐지도 않는다.
+                # P 요청 자체가 없다 — 보유도 대기도 아니다.
                 assert row[1] is False
+                return
+            await asyncio.sleep(0.01)
+
+
+async def _wait_blocked_on_protocol(admin, waiting: int, blocker: int, task) -> None:
+    """증거 writer는 종전처럼 P EX를 행보다 먼저 기다린다."""
+    async with asyncio.timeout(4):
+        while True:
+            if task.done():
+                task.result()
+                raise AssertionError("evidence writer did not wait on the protocol gate")
+            async with AsyncSession(admin) as observer:
+                found = await observer.scalar(
+                    text("""SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=:waiting
+                    AND locktype='advisory' AND classid=1369104691::oid AND objid=115::oid
+                    AND objsubid=2 AND mode='ExclusiveLock' AND NOT granted)
+                    AND :blocker=ANY(pg_blocking_pids(:waiting))"""),
+                    {"waiting": waiting, "blocker": blocker},
+                )
+            if found:
                 return
             await asyncio.sleep(0.01)
 
@@ -282,7 +298,10 @@ async def test_epoch0_state_call_waits_on_scoped_rows_not_on_protocol(scalar_eng
             blocker = int(await scoped.scalar(text("SELECT pg_backend_pid()")))
             task = asyncio.create_task(legacy())
             pid = await asyncio.wait_for(asyncio.shield(waiting), 4)
-            await _wait_blocked_on_rows(admin, pid, blocker, task)
+            if name in _EVIDENCE:
+                await _wait_blocked_on_protocol(admin, pid, blocker, task)
+            else:
+                await _wait_blocked_on_rows(admin, pid, blocker, task)
             assert not task.done()
             finished = await finish_scoped_feature_write(
                 scoped, attempt_id=attempt, owner=owner, result_digest="f" * 64
@@ -307,6 +326,13 @@ async def test_epoch0_entry_under_shared_protocol_does_not_upgrade(scalar_engine
     admin, runtime = scalar_engines
     case = await _case(admin)
     await _prepare(runtime, name, case)
+    if name in _EVIDENCE:
+        with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 같은 TX의 SH caller와 CALL
+            async with AsyncSession(runtime) as session, session.begin():
+                await lock_scoped_feature_write_protocol(session, exclusive=False)
+                await _call(session, name, case)
+        assert caught.value.orig.sqlstate == "23514"
+        return
     async with AsyncSession(runtime) as session, session.begin():
         await lock_scoped_feature_write_protocol(session, exclusive=False)
         await _call(session, name, case)
@@ -325,8 +351,8 @@ async def test_epoch0_entry_under_shared_protocol_does_not_upgrade(scalar_engine
 async def test_epoch0_state_call_finishes_while_a_load_holds_protocol_ex(scalar_engines, name):
     """433 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 상태·lifecycle writer는 끝난다.
 
-    provider 증거를 먼저 잡는 재활성화만 P SH로 적재 뒤에 선다(적재가 bundle을 차례로 쓰며
-    Feature를 쥔 채 다음 head를 갱신하므로, P 없이 겹치면 순환이다).
+    provider 증거를 먼저 잡는 재활성화만 종전처럼 P EX로 적재 뒤에 선다(적재가 bundle을
+    차례로 쓰며 Feature를 쥔 채 다음 head를 갱신하므로, P 없이 겹치면 순환이다).
     """
     admin, runtime = scalar_engines
     case = await _case(admin)
@@ -545,14 +571,14 @@ async def test_body_owner_acl_and_search_path_are_preserved(scalar_engines, name
             )
         ).one()
     # 433 DC-1: 415의 무조건 EX 진입을 regime 진입 한 줄로 바꿨다. 그 줄을 빼면 414 원문이다.
-    function = (
-        "lock_provider_evidence_writer_protocol"
+    entry = (
+        "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
         if name in _EVIDENCE
-        else "lock_single_feature_writer_protocol"
+        else "  PERFORM ops.lock_single_feature_writer_protocol();\n"
     )
-    entry = "  PERFORM ops." + function + "();\n"
     assert row.prosrc.count(entry) == 1
-    assert "lock_scoped_feature_write_protocol" not in row.prosrc
+    if name not in _EVIDENCE:
+        assert "lock_scoped_feature_write_protocol" not in row.prosrc
     assert row.prosrc.partition("\nBEGIN\n")[2].startswith(entry)
     assert hashlib.sha256(row.prosrc.replace(entry, "", 1).encode()).hexdigest() == _BASE_BODY[name]
     assert row.proconfig == ["search_path=pg_catalog"]
