@@ -13,6 +13,9 @@
   설계라 이번 범위가 아니다(후속 후보). dev.9 로그인 폼은 hydration 전 입력·제출을 비활성으로 두고 준비 전 제출을
   막는다. Map e2e 로그인은 모두 `/api/auth/login` 직접 호출이라 고칠 시험이 없었고, SSR 비활성·mount 뒤 활성 단위
   회귀를 더했다.
+- main CI(`0324cab3a`)가 이미 빨갰다 — `7d64c96e8`([skip ci])이 `tasks.md` T-CWRITE-04 본문을 341자로 늘려
+  `test_task_ledger_conventions`(상한 300자)가 세 Python에서 실패한다. 사실(432 수용·새 profile OFF·근거 링크 셋·미완 범위)은
+  그대로 두고 300자로 줄였다. ADR-115·acceptance 포인터는 같은 절 머리말에 있다.
 
 ## 2026-10-26 — Rest432 제한 단위의 최종 CI·배포·공개 UI 수용
 
