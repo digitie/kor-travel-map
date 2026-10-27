@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client import _airport_snapshot as io
 from kortravelmap.client._snapshot_atomic import run_snapshot_apply_postprocess
+from kortravelmap.dto.geo_dataset import GeoLoadContext
 from kortravelmap.geocoding import GeoCallStats
 from kortravelmap.infra.provider_snapshot_artifact import encode_provider_snapshot_artifact
 from kortravelmap.infra.transaction_limits import apply_bounded_transaction_limits
@@ -52,7 +53,11 @@ async def test_selected_stale_rolls_back_before_live_bound_reset_is_rejected(
     with DagsterInstance.ephemeral() as instance:
         context, client, identity = await _scheduled(admin, runtime, instance, dataset)
         bundle = await _bundle(0, observed=2)
-        geo = _context()
+        baseline_geo = _context()
+        stats = GeoCallStats(observed_data_tokens=set(baseline_geo.observed_data_tokens))
+        geo = GeoLoadContext(
+            baseline_geo.geo_applied, baseline_geo.current_dataset, stats.observed_data_tokens
+        )
         payload = encode_provider_snapshot_artifact((bundle,), geo, pins=_PINS)
         observation = encode_airport_observation_context(
             payload,
@@ -60,7 +65,7 @@ async def test_selected_stale_rolls_back_before_live_bound_reset_is_rejected(
             root_run_id=context.run_id,
             observation_generation=context.run_id,
             upstream_eof=True,
-            geo_stats=GeoCallStats(observed_data_tokens=set(geo.observed_data_tokens)),
+            geo_stats=stats,
         )
         registered = await io.register_airport_snapshot(
             client, identity, payload=payload, context=observation, pins=_PINS

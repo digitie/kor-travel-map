@@ -45,3 +45,20 @@ owned 전체150초/감시160초/회수15초·PG CPU2/RAM1536MiB/PID256과
 apply30초/reader3초/lock1초는 변경하지 않는다. 이 수정은 원 setup 실패의 원인을
 확정하거나 제품 장애를 재현했다는 주장이 아니다. 두 리뷰 후 새 namespace로 한 번만
 재시도하며, 실제 재현 전 제품 수정은 하지 않는다.
+
+## 두 번째 시도의 strict 입력 실패와 순수 준비 확인
+
+정확47c83b81의 한 번 재시도는 schema432와 setup을 통과했지만1FAIL/45.29초였다.
+원천 artifact에 reader fixture의 frozenset Geo tokens를 그대로 넣고 observation Stats만
+별도 set으로 만들어 strict codec이 정상 거부했다. 예약 root/member 준비 뒤 artifact 등록·
+plan·선택stale·reset에는 미도달했다. 원 result SHA256은
+`66e16db6c6cca38da9501d72267171b7eb9b1c5a4f256e964b9582c4a99ae99d`이고
+exact CID·volume1·label0 cleanup PASS와 원 log/XML을 보존한다.
+
+기존 donor와 똑같이 Stats의 builtinset을 GeoLoadContext에도 연결하는 fixture만
+고쳤다. strict validator·제품 코드·상한은 변경하지 않았다. 실제 test coroutine 준비 부분을
+DB scheduled/registration만 대체해 실행하고 실제 artifact/context encoder와 decoder를
+왕복했다. PG0의 순수 준비는0.0182초에 통과했으며 원장 SHA256은
+`870bdba44be4ab2a1a2231a78dbdceae56a2af367cef024c77b163893694ccfb`다.
+이는 본문의 plan/apply/reset 재현 증거가 아니다. 새 source 두 리뷰 뒤 같은 상한으로
+한 번만 격리 실행하며 제품 오류의 실제 재현은 여전히 미완이다.

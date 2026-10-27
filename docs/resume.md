@@ -1,3 +1,12 @@
+## 2026-10-27 — bound 재현의 strict Geo 입력 연결만 정정
+
+두 번째 owned 시도는 setup432 뒤 observation 준비에서1FAIL/45.29초였다.
+reader의 frozenset과 Stats set 연결을 놓친 시험 오류로, 아직 실제 stale/reset 미관찰이다.
+원 log/XML/result·정확 정리를 보존하고 기존 donor의 실제 builtinset 연결만 복원했다.
+실제 준비 source의 strict encode/decode 왕복은 순수0.0182초에 통과했다.
+[기록](reports/2026-10-27-bound-snapshot-stale-replan.md#두-번째-시도의-strict-입력-실패와-순수-준비-확인)처럼
+두 리뷰 뒤 격리 재현1회가 남았다. 제품·validator·상한·운영 변경0, 전체9개 미완이다.
+
 ## 2026-10-27 — bound snapshot 첫 재현은 baseline setup timeout으로 미도달
 
 정확 d13312a9의 최초 owned 시험은 baseline400 적용 중40초 marker가 만료되어
