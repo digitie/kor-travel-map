@@ -170,3 +170,9 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   1안(대기 상한)은 #1348로 머지됐고 2안(스트리밍 snapshot은 다 받은 뒤 짧게 쓴다)은 ADR-113이다. 해제 조건은 acceptance
   §T-LOAD-LOCK-WAIT. 큐 경로 executor transaction의 받는 동안 `idle in transaction`은 남는다(ADR-113 결정 4).
+
+- [ ] T-PG18-CI — **공용 PG 18 대응: PG18 CI lane 추가와 fresh-install catalog 가정 정리**
+
+  prod 공용 PG가 2026-10-27 16→18(pg_upgrade)로 올랐는데 Map CI는 ADR-007로 PG16에 핀돼 있다. ADR-007을 개정해
+  PG18 lane을 더하고 그 lane이 찾는 PG16 catalog 가정(`400_schema_baseline`의 `attstattarget <> -1`·alembic_version
+  constraint 개수 등)을 고친다. 해제 조건은 acceptance §T-PG18-CI.

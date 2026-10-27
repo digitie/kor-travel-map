@@ -934,7 +934,7 @@ N150 feature 화면에서 `area`가 보이지 않는다는 사용자 제보를 �
 맞춰 반영했다.
 
 - **로그인/세션**: Next.js admin frontend에 `/login` 화면을 추가했고, `admin` 단일 계정을
-  gitignored `.env`의 PBKDF2-SHA256 password hash(`ad.min` 원문 미저장)와 server-only session
+  gitignored `.env`의 PBKDF2-SHA256 password hash(`<redacted>` 원문 미저장)와 server-only session
   secret으로 검증한다. 세션은 HttpOnly/SameSite=Strict cookie + user-agent fingerprint +
   logout revocation으로 관리한다.
 - **프록시 경계**: 기존 브라우저→FastAPI 직접 호출을 `/api/proxy` BFF로 전환했다. BFF는 세션

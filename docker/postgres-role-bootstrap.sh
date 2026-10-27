@@ -185,7 +185,9 @@ BEGIN
           AND target_database.dattablespace = template_database.dattablespace
           AND target_database.datcollate IS NOT DISTINCT FROM template_database.datcollate
           AND target_database.datctype IS NOT DISTINCT FROM template_database.datctype
-          AND target_database.daticulocale IS NOT DISTINCT FROM template_database.daticulocale
+          -- PG17이 daticulocale을 datlocale로 바꿨다 — 두 major에서 같은 값을 읽는다(2026-10-27 공용 PG 18).
+          AND COALESCE(to_jsonb(target_database) ->> 'datlocale', to_jsonb(target_database) ->> 'daticulocale')
+              IS NOT DISTINCT FROM COALESCE(to_jsonb(template_database) ->> 'datlocale', to_jsonb(template_database) ->> 'daticulocale')
           AND target_database.daticurules IS NOT DISTINCT FROM template_database.daticurules
           AND target_database.datcollversion IS NOT DISTINCT FROM template_database.datcollversion
           AND target_database.datallowconn = template_database.datallowconn

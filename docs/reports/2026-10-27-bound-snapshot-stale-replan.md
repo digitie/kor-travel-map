@@ -1,8 +1,9 @@
 # bound snapshot의 정확 stale 뒤 재계획 복구
 
-> 최신 수용(2026-10-27 13:29 UTC): 정확6611의 CI10·후보 실제UI14와 두 독립 검토를
-> 통과해 #1424를 정상 머지했다. 운영433 전환·공개UI는 아직 별도 후속이다.
-> [최종 코드 수용](#정확6611의-최종-ci실제-ui정상-머지-수용)이 최신 정본이며,
+> 최신 수용(2026-10-27 18시 UTC 관측): #1424의 정확6611 코드는 정상 머지됐고,
+> 현재 배포 Map001487에 포함돼 있다. 최신 pair의 DB433/0102·원51상태 복구와
+> 공개 UI13·정리를 확인했다. [최신 운영 정산](#현재-배포-포함원51복구공개-ui13-수용)과
+> [최종 코드 수용](#정확6611의-최종-ci실제-ui정상-머지-수용)을 구분한다.
 > 아래 첫 “현재 단계”와 각 미완 문구는 해당 checkpoint를 작성한 시점의 이력이다.
 
 현재 단계: f29 제품 owned16과 후보 UI14는 통과했다. 전체 CI는 정본 oracle 빈줄과
@@ -326,3 +327,69 @@ unstaged diffcheck PASS를 새 파일의 committed-delta PASS로 확대할 수 �
 운영 image/schema 전환·공개UI 수용은 아직 미완이며 별도 증거 뒤 추가 정산한다.
 433은 forward-only이고432 image/pin만 되돌리는 것은 DB 복구가 아니다. 전체 writer
 전환·T-CWRITE-01~09 완료, profile 활성화, 운영 ARM CPU/RSS 저감은 선언하지 않는다.
+
+
+## 현재 배포 포함·원51복구·공개 UI13 수용
+
+2026-10-27 후속 관측에서 현재 배포는 Map001487ee/PinVid204d2b4/Managerd1468213다.
+Map001487의 선조에 정확6611이 포함되고, 두 Map 소스 사이 제품 코드는 같으며
+문서4개와 auth 시험만 달라 별도 구6611 이미지를 다시 배포하지 않았다. 저장소
+최신 main82bcb2c는 이 배포 뒤 PG18 백업/bootstrap 후속이다. 실제 배포001487과
+저장소 최신82b를 같은 release라고 쓰지 않으며82b의 운영 배포도 이번 수용 범위가 아니다.
+외부 유지보수의 PG16→18 전환과 현재 pair 배포는 이번 작업자의 공식 rebuild 실행으로
+계수하지 않는다.
+
+현재 공식 상태는 committed transaction a1f775ff, 실제6 image와 healthy 상태가
+일치한다. 실제 API role의 읽기 전용 조회에서 Map433_snapshot_ready_plan_reset과
+PinVi20260917_0102를 확인했고 Map packaged head도433이다. 오래된432 expected head,
+PG16 system identifier, 이전 Manager bundle을 현재 복구에 적용하지 않았다.
+433은 forward-only이며 구 image/pin 복귀가 DB 복원이라는 의미는 여전히 아니다.
+
+### 중지 실패와 원상복구 범위
+
+첫 pin 명령은 CLI의 사람용 접두문 뒤 JSON을 wrapper가 통째로 해석해 실패했다.
+후속 읽기 검산으로 pin 적용을 확인했으며 재회전하지 않았다. 첫 직접 pause의
+SSH255와 뒤 durable pause의 ContractError도 성공으로 바꾸지 않는다. 후자는 실제
+Map37개만 STOPPED로 바꿨고 failure sensor 하나는 RUNNING이었다. 당시38개 변경이나
+첫 PinVi 경계 실패라는 초기 추정은 철회했다. 기존 전체67 원복과 자기 unit 정리를
+끝낸 뒤, 별도 검토한 유한 convergence가 원 RUNNING51을 중지했다. 이 과정에서
+STOP ACK 뒤 재RUNNING 관측은 있었지만 자동재기동 주체·최초 실패 원인을 확정하지 않는다.
+
+그 후 별도 유지보수로 Manager/Map/PinVi와 공용 PG가 바뀌어 옛 bundle은 재실행하지
+않았다. 현재 committed 상태·schema·runtime와 원 key/ID를 읽기 검산하고 두 독립
+소스 리뷰를 거친 작은 복구가 원 RUNNING51만 재시작했다. 원 MapSTOP13과 외부
+Concierge3은 보호했다. 정상 ACK가 불명확하면 재시도하지 않는 원 transition을 재사용했다.
+
+실제 복구 unit은17:51:55→17:52:14 UTC에 exit0/PID0으로 끝났고 원67상태를
+10초 간격 두 번 확인했다. 독립 fresh 읽기에서도 Map38RUNNING/13STOPPED,
+PinVi13RUNNING/Concierge3RUNNING과 모든 key/ID가 원본과 같았다. 실제11 runtime,
+공식 committed 상태와 환경 bytes는 전후 같았다. 복구 원 result SHA256은
+95c4a79f2a06f4ff4bebf78803ca3b844a4aa3908e1096459bbc2a996b23e2d5,
+독립 fresh 원장은25921e696431e4e28ab877a566049466402ccc977dc6ca539f22ecf625c45e01이다.
+최종 독립 수용과 자기 unit 정리 원장은 각각
+b83d3e184ed8e6bf09ebd9e6913b502ea08b4eb43da63bc48480db27265e6ba2,
+44959823a50c3fc31b124a386bce272e9a3657adb5d1d4cf4c54b44942620939다.
+제품 배포나 PG rollback은 하지 않았다.
+
+### 현재 공개 UI와 남는 한계
+
+최신 pair의 실제 공개 HTTPS 검증 한 번은45.225초에 Map7+PinVi6 전부 통과했다.
+Map은 인증 전401→로그인200/HttpOnly·Secure→hydration→실제 canvas·표·상세·reload→
+로그아웃200/보호401을 확인했다. Common 로그인의 SSR disabled→hydrated enabled도
+실제로 관찰했다. PinVi는 인증·쿠키/reload·VWorld canvas/성공 타일21개·목록/필터/DTO·
+같은 source lineage 상세·로그아웃204/보호401을 확인했다. 각 로그인/로그아웃1회이며
+blocked request·page/hydration error는0, 미확인 세션 flag는 false였다.
+
+소유 browser process 부재·profile 제거·SSH exit0과 실제7서비스 전후 key/CID/image/
+source/start/restart/health 전부 동일, 실행 모듈106개·Node/Chromium 전후 동일을
+확인했다. 운영 business 쓰기는0이며 허용된 auth/session/audit 쓰기와 구분한다.
+원 UI result SHA256은9508dfc25e3dfb4b2e573c0238fabce6abb2559d4f464d7ca5f1fc826f85e74a,
+독립 수용 원장은debe5d4f6a8c10279bb7c1fd4b35e63391a20afed7ffa23eed3c89ada862b414다.
+별도 최종 수용은3dd739a4c4b0c9dc622d37b0e4bdcb165db8dde87fe7c8f930738c5e5c0afc75다.
+이는 현재 공개 읽기13개 수용이며 후보 취소14개나 전체 writer/장애/실부하 시험을 대신하지 않는다.
+
+이번 문서 정산은 최신 main을 정상 흡수하되 제품·시험·schema·tasks를 바꾸지 않는다.
+T-CWRITE-01~09는 모두 미완이고 CWRITE profile flags는 OFF다. 일반 coordinator와
+전체 writer 전환·운영 ARM CPU/RSS 저감은 수용하지 않는다. ADR117의 제안과 별도
+후속 작업은 이 제한된 typed 복구 완료와 구분한다. 원 실패·미측정 항목 및
+source/build/운영 release의 구분을 보존한다.
