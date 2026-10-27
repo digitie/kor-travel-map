@@ -7,7 +7,7 @@ import json
 import pytest
 
 from scripts._scoped_write_baseline_pg import cpu_delta
-from scripts.ci.measure_scoped_native_scalar import (
+from scripts.measure_scoped_native_scalar import (
     bundle,
     feature_id,
     fixture_digest,

@@ -62,7 +62,7 @@ from tests.integration._application_300_bootstrap import (
 )
 from tests.integration._postgis_image import resolve_postgis_image
 
-_ROOT = Path(__file__).resolve().parents[2]
+_ROOT = Path(__file__).resolve().parents[1]
 _TIME = datetime(2026, 10, 24, 12, tzinfo=ZoneInfo("Asia/Seoul"))
 _LABEL = "codex.native-scalar-measure"
 _SAMPLE_SECONDS = 0.1
