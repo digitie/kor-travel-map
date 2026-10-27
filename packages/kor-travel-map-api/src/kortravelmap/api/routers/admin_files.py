@@ -307,7 +307,8 @@ def _build_links(row: file_registry.ManagedFile) -> list[ManagedFileLink]:
             ManagedFileLink(
                 rel="offline-upload",
                 label="오프라인 업로드",
-                href=f"/admin/offline-uploads/{row.upload_id}",
+                # 업로드도 목록 페이지에서 선택한다. 업로드별 상세 route는 없다.
+                href="/admin/offline-uploads",
             )
         )
     if (
