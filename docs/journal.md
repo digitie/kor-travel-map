@@ -1,3 +1,14 @@
+## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 시험 착수
+
+PR #1421 문서 head `3e962183` 위에 시험 전용 후속을 쌓는다. 정렬 participant-scope
+대기→선택된 stale40001→전체 TX rollback→unbound READY public cancel→동일 bundle의
+새 attempt/key·현재 manifest 재계획과 양방향 winner/lineage·완료 replay DML0을 검사한다.
+순수 회귀20PASS·통합2case의 전이 fixture 미정의0을 확인했다. 두 독립 리뷰와
+owned PG·최종 CI는 아직 대기다.
+생산 코드/SQL/API·OFF 설정과 운영은 변경하지 않는다. T-CWRITE-01–09 및 일반
+coordinator/운영 CPU·RSS 개선은 미완이다.
+[범위와 검증 원장](reports/2026-10-27-shared-feature-artifact-replan.md).
+
 ## 2026-10-27 — snapshot OS worker pair의 제한 실제 PG 수용
 
 정확 시험 source `6307ec63`은 두 독립 리뷰와 Airport/Rest 양방향 owned PG2개를
