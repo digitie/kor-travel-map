@@ -1,3 +1,88 @@
+## 2026-10-27 — Common 최신 제품 공식 pair 배포·공개 UI13 수용
+
+검증 Map `0d60cd0b`/PinVi `9ebb588a`를 공식 Manager pair로1회 배포했다.
+새 committed transaction·실제6image·보호5·DBidentity/schema·기존 c6c45행을 검산했고,
+정확한 이번 smoke 이력1개만 추가됐음을 확인했다. 원 RUNNING51개 복구 뒤 전체67상태가
+baseline과 같으며 자기 supervisor/process 정리를 끝냈다. Weather·Transport 이미지 변경은0이다.
+
+공개 HTTPS UI는 최초56.39초 전체FAIL(Map7PASS/PinVi3뒤adminTimeout)을 보존한다.
+제품/예산 변경 없이 관측 필드만 추가한 두 번째 실행은49.27초에 Map7+PinVi6을 통과했다.
+최초 원인은 불명이며 제품 수정·재발 방지·성능 개선으로 확대하지 않는다.
+상위 T-CWRITE-01–09/일반 coordinator·전 writer 전환·운영 CPU/RSS 저감은 여전히 미완이다.
+[실제 배포·복원·두 UI 결과](reports/2026-10-27-common-aa232-pair-deploy-public-ui.md).
+
+## 2026-10-27 — 동시 쓰기 제한 시험 두 PR의 최종 CI·정상 병합
+
+부모 #1421의 정확 head `e23c277d`와 후속 #1422의 `a32674a1`은 각각 CI10개를
+통과했고, 검증 tree 그대로 main `0d60cd0b`·`c62a9868`로 순서대로 정상 병합됐다.
+후속의 양 PostGIS 전체 integration은 glibc1936 PASS/23 skip·alpine1930 PASS/29 skip이며,
+전체 skip 사유에 새 shared Feature/부모 worker pair 시험은 없다. quiet 로그의 개별
+성공 node 출력을 가정하지 않고 정확 수집·전체 실행·skip 사유를 함께 확인했다.
+
+원 owned PG의 부모2PASS27.88초·후속2PASS24.80초와 정확 정리·모든 선행 실패는 보존한다.
+이번 정산은 문서뿐이다. 일반 coordinator·전 writer 전환·운영 활성화와 CPU/RSS 개선,
+상위 T-CWRITE-01–09는 미완이며 공식 배포·공개 UI 수용은 아직 별도다.
+[부모 근거](reports/2026-10-27-provider-snapshot-os-worker-pair.md#최종-합성본의-ci정상-병합-수용),
+[후속 근거](reports/2026-10-27-shared-feature-artifact-replan.md#최종-ci와-정상-main-병합).
+
+## 2026-10-27 — snapshot OS worker pair 최종 CI·정상 병합 수용
+
+PR #1421의 Common 합성 head `e23c277d`는 두 독립 리뷰와 CI10개를 통과했고,
+동일 tree의 main `0d60cd0b`로 정상 병합됐다. 양 PostGIS 전체 integration은 glibc1934개·
+alpine1928개 PASS이며 기존 skip 사유에 신규 worker pair는 없다. CommonAA 설치와
+실제 import/fixture closure를 확인했고 중복 local PG는 실행하지 않았다.
+
+원6307의 제한 owned PG2 PASS·정확 정리와 선행 fixture/SDK/marker/ledger 실패는 보존한다.
+이번 정산은 문서뿐이며 상위 T-CWRITE-01–09·운영 CPU/RSS 실측·상위 Common 제품의
+공식 배포/공개 UI 수용은 별도다. 후속 #1422의 머지 완료로 확대하지 않는다.
+[최종 근거](reports/2026-10-27-provider-snapshot-os-worker-pair.md#최종-합성본의-ci정상-병합-수용).
+
+## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 실제 PG 수용
+
+정확 source `e35f5dc3`은 두 독립 리뷰 뒤 같은 상한의 owned PG2case를24.80초에 통과했다.
+양 capture/leader의 실제 participant-scope 대기·정확40001·전체TX aborted·unbound READY
+public cancel·동일 bytes 새 attempt/key/manifest·winner/base/lineage·완료 replay source DML0을
+확인했다. source2582/import59/SDK53·격리 CommonAA19의 전후 검산, 정확CID/volume1/label0
+회수도 PASS다. 첫 관찰bind2FAIL와 순수실패2회는 아래/원장에 보존한다.
+
+생산/운영 변경0이며 최종 CI·병합은 대기한다. 일반 coordinator·전 writer 전환과 운영
+CPU/RSS 개선, 상위 T-CWRITE-01–09는 미완이다.
+[제한 수용과 원본 증거](reports/2026-10-27-shared-feature-artifact-replan.md#실제-pg-수용).
+
+## 2026-10-27 — 공유 Feature 첫 실제 PG의 xid8 관찰 bind 정정
+
+CommonAA 정상 합성 `f691a8e1`의 첫 owned PG2case는 정확 scope 대기·선택된40001·READY
+불변 뒤 관찰용 xid8 bind에 문자열을 넘겨2FAIL(28.02초)이었다. 정수 xid를 그대로
+전달하는 시험1줄만 수정한다. 원결과와 정확CID/volume1/전체label0 정리PASS를 보존하며,
+aborted 상태 확인·동일 artifact 재계획/완료 replay의 실제PASS는 아직0이다.
+두 좁은 리뷰 뒤 같은 상한으로 재시험한다. 생산/운영 변경0·상위 T-CWRITE-01–09 미완이다.
+[실패와 정정 원장](reports/2026-10-27-shared-feature-artifact-replan.md#첫-실제-pg-실패와-관찰용-bind-정정).
+
+## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 시험 착수
+
+PR #1421 문서 head `3e962183` 위에 시험 전용 후속을 쌓는다. 정렬 participant-scope
+대기→선택된 stale40001→전체 TX rollback→unbound READY public cancel→동일 bundle의
+새 attempt/key·현재 manifest 재계획과 양방향 winner/lineage·완료 replay DML0을 검사한다.
+순수 회귀21PASS(같은 bytes의 hashseed1/2 복원 포함)·통합2case fixture 미정의0을 확인했다.
+초안 순수실패2회의 원인·정정은 원장에 보존한다. 두 독립 리뷰와 부모 최신 main 합성,
+owned PG·최종 CI는 아직 대기다.
+생산 코드/SQL/API·OFF 설정과 운영은 변경하지 않는다. T-CWRITE-01–09 및 일반
+coordinator/운영 CPU·RSS 개선은 미완이다.
+[범위와 검증 원장](reports/2026-10-27-shared-feature-artifact-replan.md).
+
+## 2026-10-27 — snapshot OS worker pair의 제한 실제 PG 수용
+
+정확 시험 source `6307ec63`은 두 독립 리뷰와 Airport/Rest 양방향 owned PG2개를
+27.88초에 통과했다. spawn2·각 pool1·실 source overlap·정확 topic blocker·두 commit ACK,
+후처리의 원 connection/PID/XID·marker NULL 회수·원 receipt·별도seal을 확인했다.
+source2580·선택 import56·SDK53 전후 동일과 정확 CID/volume 회수·cleanup도 통과했다.
+
+원 fixture 누락 P1, SDK import 실패(PG0), marker 기대값 오류의 실제2실패는 원장에 보존한다.
+CI가 발견한 ledger300자 위반은 task 본문을 원장 link로 단축해 고친다. 시험 source와 생산
+코드/SQL/schema·운영 OFF 설정 및 기존 예산은 바꾸지 않으며 최종 CI·머지는 아직 대기다.
+T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
+[범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
+
 ## 2026-10-27 — Codex PR 통합 리뷰의 비잠금 항목(WI-5~11)
 
 최근 1주 Codex PR 46건(#1358~#1419) 통합 리뷰를 하나의 PR로 정리하는 작업 중 잠금 순서와
