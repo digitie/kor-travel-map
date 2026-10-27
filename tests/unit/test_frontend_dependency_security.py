@@ -61,15 +61,20 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
             f"{label}는 범위가 아니라 정확한 핀이어야 한다: {pinned}"
         )
     assert root_package["dependencies"] == {"@next/env": declared_next}
-    # 차단 게이트는 **배포되는 의존성만** 본다. dev 전용 빌드 도구의 취약점은
-    # 사용자에게 나가지 않으므로 머지를 막지 않는다 —
-    # OpenAPI 생성기는 API 호환 범위의 보안 패치를 소비한다.
+    # 배포 의존성 게이트와 dev 포함 전체 트리 게이트를 둘 다 막는 단계로 둔다.
+    # dev 전체 게이트는 `@redocly/openapi-core` 1.x 미패치 동안 `|| true`로 열어 뒀다.
+    # 1.34.22 보안 패치를 소비한 뒤로는 열어 둘 이유가 없다(docs/dev-environment.md §10.6).
+    # 새 dev advisory가 생기면 CI가 빨개지는 것이 의도다.
     assert root_package["scripts"]["audit:high"] == (
         "npx --yes npm@12.0.1 audit --audit-level=high --omit=dev"
     )
-    # dev 취약점은 끄지 않는다 — 비차단으로 CI 로그에 계속 남긴다.
     assert root_package["scripts"]["audit:dev"] == (
-        "npx --yes npm@12.0.1 audit --audit-level=high || true"
+        "npx --yes npm@12.0.1 audit --audit-level=high"
+    )
+    assert not any(
+        "|| true" in command
+        for name, command in root_package["scripts"].items()
+        if name.startswith("audit:")
     )
     assert root_package["allowScripts"] == {
         "esbuild@0.28.2": True,

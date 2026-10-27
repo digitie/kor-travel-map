@@ -521,25 +521,24 @@ uv pip show gdal                # Python GDAL
 
 ## 10.6 npm 취약점 게이트가 dev 의존성에서 막힐 때
 
-CI의 `npm high 취약점 gate`는 **배포되는 의존성만** 본다(`npm audit
---audit-level=high --omit=dev`). dev 전용 빌드 도구의 취약점은 사용자에게 나가지
-않으므로 머지를 막지 않고, 바로 뒤 `npm 취약점 리포트 (dev 포함, 비차단)` 단계가
-전체 트리를 그대로 출력해 눈에 보이게 둔다.
+CI는 두 단계를 **둘 다 막는다**(2026-10-27부터).
 
-**현재 미해결(2026-08-07)**: `@redocly/openapi-core` 1.34.x가
-[GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj)
-(`js-yaml` quadratic CPU, CVE-2026-59870)에 걸린다.
+- `npm high 취약점 gate (배포 의존성)`: `npm run audit:high` = `npm audit --audit-level=high --omit=dev`.
+- `npm high 취약점 gate (dev 포함)`: `npm run audit:dev` = `npm audit --audit-level=high`.
 
-- 취약 범위 `1.34.8 - 1.34.18`인데 **v1 계열 마지막이 1.34.18**이라 1.x 패치가 없다.
-- `openapi-typescript`(타입 생성기, 양쪽 frontend의 devDependency)가 이것을 끌어온다.
-- 2.x로 강제 override하면 audit은 통과하지만 **타입 생성이 깨진다** —
-  `openapi-typescript@7.13.0`이 2.x가 더 이상 export하지 않는
-  `@redocly/openapi-core/lib/ref-utils.js`를 import한다
-  (`ERR_PACKAGE_PATH_NOT_EXPORTED`). 그리고 7.13.0이 최신이다.
-- 배포 의존성만 보면 취약점 **0건**이다(실측).
+dev 포함 게이트는 2026-08-07부터 `|| true`로 비차단이었다. 당시 `@redocly/openapi-core` 1.34.x가
+[GHSA-5p4m-2wfm-xmqj](https://github.com/advisories/GHSA-5p4m-2wfm-xmqj)(`js-yaml` quadratic CPU,
+CVE-2026-59870)에 걸렸고, 1.x 패치가 없었으며 2.x override는 `openapi-typescript`의 타입 생성을
+깼다. 그 뒤 보안 패치된 1.34.22가 나왔고, 루트 `overrides`가 그것으로 고정한다
+([2026-10-24 정합](npm-security-alignment-2026-10-24.md)). 전체 트리 audit이 0건이 되어 비차단으로 둘
+이유가 없어졌다.
 
-**게이트를 다시 조일 조건**: `openapi-typescript`가 redocly 2.x 호환 릴리스를
-내면 override와 `--omit=dev`를 함께 걷어낸다.
+새 dev advisory로 이 단계가 빨개지면 의도한 동작이다. 대응 순서:
+
+1. 패치 릴리스가 있으면 lockfile·`overrides`로 소비한다(배포 의존성과 같은 절차).
+2. 패치가 없고 dev 전용 도구에만 닿으면, 원인·영향 범위·다시 조일 조건을 이 절에 적은 PR에서
+   `audit:dev`만 한시적으로 완화한다. 테스트(`tests/unit/test_frontend_dependency_security.py`)가
+   `audit:*` 스크립트의 `|| true`를 거부하므로 완화는 그 단언과 함께 리뷰를 받는다.
 
 ## 10.7 geo live 테스트가 "public API key 거부"로 실패할 때
 

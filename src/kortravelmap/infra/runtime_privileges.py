@@ -3,13 +3,17 @@
 The dedicated bootstrap transfers application-object ownership to the NOLOGIN
 schema owner *before* Alembic runs.  PostgreSQL default privileges are an
 unsafe way to restore old broad writer access: a later state or audit table
-would silently become mutable by API/Dagster.  Instead the migrator performs
-this explicit, fail-closed reconciliation after every upgrade and before the
-API process discards its migrator DSN.
+would silently become mutable by API/Dagster.  Instead the deployment runs
+this explicit, fail-closed reconciliation after every upgrade.
 
-Only the migrator LOGIN can enter ``ktm_feature_schema_owner``.  Runtime
-LOGINs merely inherit the resulting table grants and cannot ``SET ROLE`` into
-any owner/group role.
+ADR-100 collapsed the three LOGINs into one, ``ktm_feature_service``, which
+also runs the migrations.  It is a member of ``ktm_feature_schema_owner`` with
+``INHERIT FALSE, SET TRUE``: it does not hold the owner's privileges passively,
+but it *can* ``SET ROLE`` into the owner (migrations and this reconciliation
+do exactly that).  Ordinary runtime access comes only from the ``INHERIT TRUE``
+memberships (``ktm_feature_runtime`` and the executor roles), whose grants this
+module reconciles; ``ktm_feature_runtime`` itself is ``SET FALSE``.  What that
+trade-off gives up is spelled out in ``infra/db.py`` ("잃는 것을 정확히 적는다").
 
 이 인벤토리는 **두 스키마 상태**에서 돈다 — ``0236 → 300`` handoff는 baseline
 root로 stamp한 직후, finalize/API entrypoint는 head에서. 그래서 루틴은 이름으로만

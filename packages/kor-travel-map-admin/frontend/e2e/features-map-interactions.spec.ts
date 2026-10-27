@@ -119,6 +119,26 @@ async function setMapZoom(page: Page, zoom: number, center?: [number, number]) {
   );
 }
 
+async function mapZoom(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const container = document.querySelector(
+      '[data-testid="map-canvas-container"]',
+    ) as (HTMLElement & { _maplibreMap?: import("maplibre-gl").Map }) | null;
+    return container?._maplibreMap?.getZoom() ?? Number.NaN;
+  });
+}
+
+/**
+ * maplibre canvas(tabindex=0)에서 Tab을 한 번 누른다. DOM 마커는 같은 canvas container의
+ * canvas 뒤에 붙으므로, 키보드 사용자가 지도에서 다음 Tab으로 닿는 첫 요소가 마커다.
+ */
+async function tabFromMapCanvas(page: Page) {
+  const canvas = page.locator("canvas.maplibregl-canvas");
+  await canvas.focus();
+  await expect(canvas).toBeFocused();
+  await page.keyboard.press("Tab");
+}
+
 function makeAdminSource(
   overrides: Partial<AdminFeatureDetailSourceRecord> = {},
 ): AdminFeatureDetailSourceRecord {
@@ -799,6 +819,53 @@ test.describe("/features map interactions", () => {
       page.getByRole("button", { name: /feature 클러스터 4건/ }),
     ).toBeVisible();
     await expect(page.getByText("Mock Park Area 1 - 1.2 km2")).toBeHidden();
+  });
+
+  test("키보드 — Tab으로 클러스터에 포커스하고 Enter로 확대한다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureRoutes(page, {
+      items: Array.from({ length: 4 }, (_, index) =>
+        makeAdminFeatureMapItem({
+          feature_id: `${FEATURE_ID}-${index + 1}`,
+          lat: 37.5665 + index * 0.001,
+          lon: 126.978 + index * 0.001,
+          name: `${MOCK_NAME} ${index + 1}`,
+        }),
+      ),
+    });
+
+    await page.goto("/features");
+    await expect.poll(() => requests.cluster).toBeGreaterThanOrEqual(1);
+    const cluster = page.getByRole("button", { name: /feature 클러스터 4건/ });
+    await expect(cluster).toBeVisible();
+
+    await tabFromMapCanvas(page);
+    await expect(cluster).toBeFocused();
+    const zoomBefore = await mapZoom(page);
+    expect(Number.isFinite(zoomBefore)).toBe(true);
+    await page.keyboard.press("Enter");
+    await expect.poll(() => mapZoom(page)).toBeGreaterThan(zoomBefore + 1);
+  });
+
+  test("키보드 — Tab으로 마커에 포커스하고 Enter로 선택한다", async ({
+    page,
+  }) => {
+    const requests = await mockFeatureRoutes(page);
+
+    await page.goto("/features");
+    await expect(page.getByTestId("map-canvas-container")).toBeVisible();
+    await setMapZoom(page, 16, [126.978, 37.5665]);
+    await expect.poll(() => requests.list).toBeGreaterThanOrEqual(1);
+    const marker = page.getByRole("button", { name: `${MOCK_NAME} (place)` });
+    await expect(marker).toBeVisible();
+
+    await tabFromMapCanvas(page);
+    await expect(marker).toBeFocused();
+    await page.keyboard.press("Enter");
+    const panel = page.getByTestId("feature-detail-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel.getByText(FEATURE_ID)).toBeVisible();
   });
 
   test("table row 선택 → 지도 탭 상세 패널(marker-click 대체 경로)", async ({

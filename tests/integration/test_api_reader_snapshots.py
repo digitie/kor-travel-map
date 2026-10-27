@@ -263,8 +263,11 @@ async def test_cold_public_key_auth_and_snapshot_share_one_connection_pool(
     async with AsyncSession(migrated_engine) as writer, writer.begin():
         key = await create_public_api_key(writer, label="reader-pool", created_by="local-test")
     invalidate_public_api_key_cache()
+    # 연결 하나로 auth와 snapshot을 차례로 쓰는지 본다. 요청이 연결 둘을 쥐면 둘째 checkout이
+    # 끝내 기다리다 실패한다. 직렬로 도는 요청 셋이 느린 runner에서 0.25초 대기를 넘겨
+    # 오탐이 났으므로 대기를 5초로 둔다(교착은 여전히 5초 뒤 실패로 드러난다).
     bounded = create_async_engine(
-        migrated_engine.url, pool_size=1, max_overflow=0, pool_timeout=0.25
+        migrated_engine.url, pool_size=1, max_overflow=0, pool_timeout=5
     )
     monkeypatch.setattr(api_db, "_get_engine", lambda: bounded)
     app = create_app(ApiSettings(public_api_key_required=True, vworld_api_key=None))

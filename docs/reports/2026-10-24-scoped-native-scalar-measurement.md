@@ -6,7 +6,8 @@ PR1375 `8d365e03361b354fd63599c29bd8c4cc9a0132b6` 위의 별도 측정 runner다
 
 ## 실행 범위
 
-`python -m scripts.ci.measure_scoped_native_scalar`는 Docker를 만들지 않고 계획만 출력한다.
+`python -m scripts.measure_scoped_native_scalar`는 Docker를 만들지 않고 계획만 출력한다
+(2026-10-27에 `scripts/ci/`에서 옮겼다. CI가 돌리는 도구가 아니다).
 `--run --output <새 JSON 경로>`만 자체 로컬 PostGIS container를 생성한다. 외부 DSN,
 기존 container, 운영 주소, provider 호출 입력을 받지 않는다. UUID 이름/label/실제 생성 ID가
 일치하는 container 한 개만 정리한다. 2CPU·memory1536MiB·memory+swap1536MiB
