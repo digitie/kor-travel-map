@@ -69,7 +69,7 @@ python -m scripts.scoped_write_baseline --run --repetitions 3 --output /tmp/cwri
 > **2026-10-27 변경:** 측정은 필수 CI에서 뺐다. 위 `--run`을 수동으로만 돈다.
 > integration lane(alpine/glibc)은 더 이상 전용 container·PG 재시작·3회 반복을 돌지 않고
 > `scoped-write-baseline-<lane>` artifact도 올리지 않는다. 남은 필수 검사는
-> `tests/integration/test_scoped_write_baseline.py`가 공용 `pg_container`에서 보는 불변식이다:
+> `tests/integration/test_scoped_write_baseline.py`가 공용 `pg_container` 안의 전용 DB에서 보는 불변식이다:
 > DML 구간 비중첩(`dml_overlap == 0`), cold/warm effective·alias hash 동일, Feature·head·alias
 > 개수와 seal membership. 수치는 assert하지 않는 관측값이었다(2026-10-27 Codex PR 통합 리뷰 WI-9).
 

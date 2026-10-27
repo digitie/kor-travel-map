@@ -1,3 +1,27 @@
+## 2026-10-27 — Codex PR 통합 리뷰의 비잠금 항목(WI-5~11)
+
+최근 1주 Codex PR 46건(#1358~#1419) 통합 리뷰를 하나의 PR로 정리하는 작업 중 잠금 순서와
+무관한 항목이다. 브랜치 `feat/map-codex-review-misc`에서 만들어 통합 PR 브랜치에 합친다.
+
+- **WI-5** shadow hook이 순서가 뒤바뀐 bundle의 record key를 recorder에 넘겨 23514로 적재
+  transaction 전체를 rollback시켰다. 저장 head가 그 record일 때만 capture한다. 운영은 shadow
+  scope 미설정이라 휴면이었다(n150 Dagster env 읽기 확인).
+- **WI-6** 관리 파일의 오프라인 업로드 링크가 없는 상세 경로(404)를 가리켰다.
+  `/admin/offline-uploads`로 고치고 `_build_links`의 모든 href가 `page.tsx`에 대응하는지 본다.
+- **WI-7** inbound 자격 증명 목록 하나로 기동 distinctness와 `/v1/service/*`의 403 판정을 묶었다.
+  수동 생성 digest가 feature-request·reconciliation digest와 같아도 통과했고, 그 토큰은 403이
+  아니라 401로 떨어졌다. 운영 API env(읽기만)는 설정된 8종 사이 충돌 0건이다.
+- **WI-8** K 없는 정상 반환에서 정리만 실패하면 503 대신 연결을 폐기하고 commit된 결과를
+  돌려준다. ownership reload는 일반 session을 쓴다.
+- **WI-9** 기준선 측정 harness를 필수 CI에서 뺐다. 공용 container 안의 전용 DB에서 DML 비중첩·cold/warm
+  hash·개수만 본다. reader snapshot pool 경합 시험의 대기를 5초로 올렸다.
+- **WI-10** 지도 cluster·geometry label·clickable marker를 Tab·Enter/Space로 고를 수 있다.
+  `audit:dev`의 `|| true`를 뺐다(redocly 1.34.22로 dev 전체 audit 0건).
+- **WI-11** SH 설계 문서 3건 superseded, 418·424 정오표, integration-map §3 admin-features 행,
+  runtime_privileges docstring(ADR-100). T-CWRITE-04 링크는 main이 먼저 고쳤다.
+
+검증은 n150의 CI와 같은 네 pytest 세션·lint·frontend·Playwright에서 했다(결과는 PR 본문).
+
 ## 2026-10-27 — alpine 관찰자 cold-array codec 경계 최소 교정
 
 원alpine2FAIL/1945PASS/29skip을 보존했다. 기존관찰자300ms timeout stack은

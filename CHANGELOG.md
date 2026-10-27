@@ -27,6 +27,7 @@
 - **FIXED (admin UI)**: 지도 cluster·geometry label·마커를 Tab과 Enter/Space로 고를 수 있다.
 - **CHANGED (CI)**: dev 의존성을 포함한 `npm audit --audit-level=high`를 다시 차단 단계로 둔다.
 
+
 ### 적재 중 관리 쓰기·장부 쓰기가 전역 protocol gate 뒤에 줄 서지 않는다 (2026-10-27, migration 434)
 
 - **CHANGED (DB)**: provider tracking 장부 쓰기(취소 생성·queued 취소·fill-starts·실패/취소
