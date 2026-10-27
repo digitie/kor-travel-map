@@ -22,6 +22,7 @@ from kortravelmap.core.pipeline_cancellation_states import (
     PipelineCancellationStatus,
 )
 from kortravelmap.infra.advisory_lock import advisory_lock_key
+from kortravelmap.infra.lock_wait import execute_with_lock_wait, pop_armed_lock_wait
 from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_invariants import (
     _FAILED_ERROR_CODES,
@@ -161,8 +162,15 @@ async def _lock_attempt(
 async def _lock_in_progress_attempt(
     session: AsyncSession,
     cancellation_id: str,
+    *,
+    finalizing: bool,
 ) -> PipelineCancellationAttempt | None:
-    await lock_provider_feature_finalization(session)
+    """tracking prefix를 먼저 잡고 in-progress attempt 행을 잠근다.
+
+    ``finalizing``은 호출자가 **인자로부터** 정한다(433 WI-1). root 완결까지 갈 수 있는
+    SUCCESS 완결 전이만 참이고, 나머지 장부 쓰기는 L만 잡는다.
+    """
+    await lock_provider_feature_tracking(session, finalizing=finalizing)
     attempt = await _lock_attempt(session, cancellation_id)
     if attempt is None or attempt.status != "in_progress":
         return None
@@ -175,7 +183,8 @@ async def _lock_attempt_after_root(
 ) -> PipelineCancellationAttempt | None:
     """lineage-global→root→attempt 순서로 finish/retry source를 잠근다."""
     normalized_id = _uuid(cancellation_id)
-    await lock_provider_feature_finalization(session)
+    # 433 WI-1: attempt finish/retry는 큐레이션을 확정하지 않는 장부 쓰기다 — L만 잡는다.
+    await lock_provider_feature_tracking_leaf(session)
     observed_row = (
         await session.execute(
             text(_ATTEMPT_SQL),
@@ -261,14 +270,60 @@ async def lock_pipeline_cancellation_root(
     )
 
 
+_TRACKING_FINALIZATION_SQL = "SELECT ops.lock_provider_feature_tracking_protocol(true)"
+_TRACKING_LEAF_SQL = "SELECT ops.lock_provider_feature_tracking_protocol(false)"
+
+
 async def lock_provider_feature_finalization(session: AsyncSession) -> None:
-    """종결/취소 경로는 행 선점 전에 P EX→L을 취득한다."""
-    await session.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
+    """큐레이션을 확정하는 transaction은 행 선점 전에 P EX→L을 취득한다.
+
+    대상은 권위 finish(seal), SUCCESS reconcile(root 완결), SUCCESS 완결 취소 전이다(433 WI-1).
+    session이 무장돼 있으면(``arm_feature_curation_write_wait``) 그 한 문장만 적재와 같은
+    상한까지 기다린다 — 다른 적재가 P EX를 쥔 동안 엔진의 짧은 ``lock_timeout``으로
+    이미 commit한 적재의 finish가 55P03으로 죽지 않게 한다.
+    """
+    wait_ms = pop_armed_lock_wait(session)
+    if wait_ms is None:
+        await session.execute(text(_TRACKING_FINALIZATION_SQL))
+        return
+    await execute_with_lock_wait(
+        session,
+        _TRACKING_FINALIZATION_SQL,
+        wait_ms,
+        label="provider tracking finalization prefix",
+    )
 
 
 async def lock_provider_feature_tracking_leaf(session: AsyncSession) -> None:
-    """nonterminal/event leaf는 L만 취득하고 늦은 P/L 승격을 거부한다."""
-    await session.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(false)"))
+    """장부(leaf) 쓰기는 L만 취득하고 늦은 P/L 승격을 거부한다.
+
+    ensure·attempt event·취소 원장·fill-starts·실패/취소 terminal·비권위 finish가 여기다.
+    """
+    await session.execute(text(_TRACKING_LEAF_SQL))
+
+
+async def lock_provider_feature_tracking(session: AsyncSession, *, finalizing: bool) -> None:
+    """``finalizing``이면 P EX→L, 아니면 L만 잡는다(433 WI-1의 단일 분기점)."""
+    if finalizing:
+        await lock_provider_feature_finalization(session)
+    else:
+        await lock_provider_feature_tracking_leaf(session)
+
+
+def cancellation_transition_finalizes(
+    *, result: str, target_status: str, dagster_terminal_status: str | None
+) -> bool:
+    """취소 전이가 root 완결까지 갈 수 있는가 — SQL 진입의 인자 조합과 **같아야** 한다.
+
+    ``ops.transition_provider_cancellation_job_command``는 SUCCESS로 끝난 run의 ``done`` 전이에서만
+    root 완결을 부르고, 그때만 P EX→L을 잡는다. Python이 L만 먼저 잡은 transaction에서 그
+    전이를 부르면 23514(``ck_provider_tracking_prefix``)로 닫힌다.
+    """
+    return (
+        result == "already_terminal"
+        and target_status == "done"
+        and dagster_terminal_status == "SUCCESS"
+    )
 
 
 async def lock_pipeline_lineage_mutation(session: AsyncSession) -> None:
@@ -623,7 +678,8 @@ async def create_pipeline_cancellation_attempt(
     입력이다. retryable attempt 재시도는 hierarchy를 다시 읽지 않는
     :func:`retry_pipeline_cancellation_attempt`를 사용해야 한다.
     """
-    await lock_provider_feature_finalization(session)
+    # 433 WI-1: 취소 원장 생성은 장부 쓰기다. 적재가 P EX를 쥔 동안에도 L만으로 끝난다.
+    await lock_provider_feature_tracking_leaf(session)
     await lock_pipeline_lineage_mutation(session)
     await lock_pipeline_cancellation_root(
         session,
@@ -766,7 +822,7 @@ async def set_pipeline_cancellation_member_result(
     error_code = _structured_error_code(error)
     if set(expected_results) - {"pending", "cancel_failed"}:
         raise ValueError("member failure CAS only accepts unresolved expected results")
-    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+    if await _lock_in_progress_attempt(session, cancellation_id, finalizing=False) is None:
         return False
     member = await _lock_member(
         session,
@@ -927,7 +983,7 @@ async def set_pipeline_cancellation_run_result(
         raise ValueError("engine_started_at must not follow engine_finished_at")
     if set(expected_results) - {"pending", "cancel_failed"}:
         raise ValueError("run CAS only accepts unresolved expected results")
-    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+    if await _lock_in_progress_attempt(session, cancellation_id, finalizing=False) is None:
         return False
     run = await _lock_run(
         session,
@@ -1004,7 +1060,7 @@ async def mark_pipeline_cancellation_run_termination_reserved(
         raise ValueError("initial_status must not be empty")
     if normalized_status in {"CANCELED", "SUCCESS", "FAILURE"}:
         raise ValueError("terminal Dagster status cannot reserve termination")
-    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+    if await _lock_in_progress_attempt(session, cancellation_id, finalizing=False) is None:
         return False
     run = await _lock_run(
         session,
@@ -1052,7 +1108,8 @@ async def fill_pipeline_cancellation_canonical_starts(
     """frozen canonical member의 누락 start를 권위 있는 run start로 보충한다."""
     if engine_started_at.tzinfo is None or engine_started_at.utcoffset() is None:
         raise ValueError("engine_started_at must be timezone-aware")
-    await lock_provider_feature_finalization(session)
+    # 433 WI-1: start 보충은 큐레이션을 읽지 않는 장부 쓰기다 — L만 잡는다.
+    await lock_provider_feature_tracking_leaf(session)
     row = (
         await session.execute(
             text(_FILL_CANONICAL_STARTS_SQL),
@@ -1093,7 +1150,12 @@ async def transition_pipeline_cancellation_member(
         raise PipelineCancellationInvariantError(
             "running member transition requires a Dagster run"
         )
-    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+    finalizing = cancellation_transition_finalizes(
+        result=normalized_result,
+        target_status=target_status,
+        dagster_terminal_status=dagster_terminal_status,
+    )
+    if await _lock_in_progress_attempt(session, cancellation_id, finalizing=finalizing) is None:
         return False
     member = await _lock_member(
         session,
@@ -1285,7 +1347,7 @@ async def cancel_queued_pipeline_cancellation_member(
     job_id: str,
 ) -> bool:
     """외부 terminate 호출 없이 queued base/member를 같은 tx에서 취소한다."""
-    if await _lock_in_progress_attempt(session, cancellation_id) is None:
+    if await _lock_in_progress_attempt(session, cancellation_id, finalizing=False) is None:
         return False
     member = await _lock_member(
         session,
@@ -1455,6 +1517,7 @@ __all__ = [
     "PipelineCancellationScopeMember",
     "PipelineCancellationSummary",
     "cancel_queued_pipeline_cancellation_member",
+    "cancellation_transition_finalizes",
     "create_pipeline_cancellation_attempt",
     "finish_pipeline_cancellation_attempt",
     "fill_pipeline_cancellation_canonical_starts",
@@ -1465,6 +1528,7 @@ __all__ = [
     "lock_pipeline_hierarchy_for_jobs",
     "lock_pipeline_lineage_mutation",
     "lock_provider_feature_finalization",
+    "lock_provider_feature_tracking",
     "lock_provider_feature_tracking_leaf",
     "mark_pipeline_cancellation_run_termination_reserved",
     "pipeline_cancellation_root_lock_key",

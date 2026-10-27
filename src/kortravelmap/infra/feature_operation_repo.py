@@ -35,7 +35,7 @@ from kortravelmap.infra.log_repo import record_system_log
 from kortravelmap.infra.pipeline_cancellation_repo import (
     lock_pipeline_cancellation_root,
     lock_pipeline_lineage_mutation,
-    lock_provider_feature_finalization,
+    lock_provider_feature_tracking,
     lock_provider_feature_tracking_leaf,
 )
 
@@ -765,7 +765,9 @@ async def finish_dagster_feature_membership(
     curation_input_set_hash: str | None = None,
 ) -> DagsterFeatureOperationMutation:
     normalized_run_id = _run_id(dagster_run_id)
-    await lock_provider_feature_finalization(session)
+    # 433 WI-1: 권위 완료만 seal(큐레이션 입력 봉인)을 쓰므로 P EX→L이다. 비권위 완료는 job
+    # 행만 바꾸는 장부 쓰기라 L만 잡는다 — 다른 적재가 P EX를 쥔 동안에도 기다리지 않는다.
+    await lock_provider_feature_tracking(session, finalizing=authoritative_snapshot_complete)
     await lock_pipeline_lineage_mutation(session)
     root = (
         await session.execute(
@@ -981,7 +983,8 @@ async def reconcile_dagster_feature_run(
         finished_at=finished_at,
     )
 
-    await lock_provider_feature_finalization(session)
+    # 433 WI-1: SUCCESS만 root 완결(finalize)에 닿는다. FAILURE·CANCELED 종결은 장부 쓰기다.
+    await lock_provider_feature_tracking(session, finalizing=terminal == "SUCCESS")
     await lock_pipeline_lineage_mutation(session)
     root = (
         await session.execute(
@@ -1287,7 +1290,8 @@ async def abandon_dagster_feature_run(
         "first_failed_at": first_failed.isoformat() if first_failed is not None else None,
     }
 
-    await lock_provider_feature_finalization(session)
+    # 433 WI-1: 닫기는 failed 종결뿐이라 root 완결에 닿지 않는다 — L만 잡는다.
+    await lock_provider_feature_tracking_leaf(session)
     await lock_pipeline_lineage_mutation(session)
     root = (
         await session.execute(

@@ -41,12 +41,13 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationMember,
     PipelineCancellationTimelineConflict,
     cancel_queued_pipeline_cancellation_member,
+    cancellation_transition_finalizes,
     create_pipeline_cancellation_attempt,
     fill_pipeline_cancellation_canonical_starts,
     finish_pipeline_cancellation_attempt,
     get_current_pipeline_cancellation_summary,
     get_pipeline_cancellation_detail,
-    lock_provider_feature_finalization,
+    lock_provider_feature_tracking,
     mark_pipeline_cancellation_run_termination_reserved,
     resolve_pipeline_cancellation_scope,
     retry_pipeline_cancellation_attempt,
@@ -1282,12 +1283,16 @@ async def _record_terminal_run(
         ):
             continue
         async with session.begin():
-            if (
-                terminal_status == "SUCCESS"
-                and member.operation_kind == "provider_feature_load_run"
-            ):
+            # 433 WI-1: SUCCESS 완결 전이만 root 완결에 닿는다(P EX→L, READ COMMITTED).
+            # 실패·취소 전이와 그 뒤의 실패 기록은 장부 쓰기라 L만 잡는다.
+            finalizing = cancellation_transition_finalizes(
+                result=run_result,
+                target_status=target_status,
+                dagster_terminal_status=stored_terminal,
+            )
+            if finalizing:
                 await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            await lock_provider_feature_finalization(session)
+            await lock_provider_feature_tracking(session, finalizing=finalizing)
             try:
                 changed = await transition_pipeline_cancellation_member(
                     session,
