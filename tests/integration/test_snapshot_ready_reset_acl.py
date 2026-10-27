@@ -41,7 +41,8 @@ async def test_ready_reset433_catalog_owner_search_path_and_execute_acl(scalar_e
         routine = (
             (
                 await session.execute(
-                    text("""SELECT owner.rolname AS owner,p.prosecdef,p.proconfig,p.prokind
+                    text("""SELECT owner.rolname AS owner,p.prosecdef,p.proconfig,
+                p.prokind::text AS prokind
                 FROM pg_proc p JOIN pg_roles owner ON owner.oid=p.proowner
                 WHERE p.oid=to_regprocedure(:signature)"""),
                     {"signature": _SIGNATURE},

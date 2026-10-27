@@ -126,13 +126,11 @@ def test_application_graph_uses_dependencies_not_migration_filename_order(
     versions = tmp_path / "versions"
     versions.mkdir()
     (versions / "0226_manual.py").write_text(
-        "revision = 'manual'\n"
-        "down_revision = 'upstream'\n",
+        "revision = 'manual'\ndown_revision = 'upstream'\n",
         encoding="utf-8",
     )
     (versions / "0229_upstream.py").write_text(
-        "revision = 'upstream'\n"
-        "down_revision = None\n",
+        "revision = 'upstream'\ndown_revision = None\n",
         encoding="utf-8",
     )
 
@@ -147,9 +145,19 @@ def test_application_graph_artifact_matches_literal_source_graph() -> None:
     """새 migration은 immutable installed artifact를 함께 갱신해야 한다."""
     generator = _generator_module()
 
-    assert json.loads(_GRAPH_PATH.read_text(encoding="utf-8")) == (
-        generator.build_application_migration_graph(ROOT / "alembic" / "versions")
-    )
+    source_graph = generator.build_application_migration_graph(ROOT / "alembic" / "versions")
+    assert json.loads(_GRAPH_PATH.read_text(encoding="utf-8")) == source_graph
+
+    # startup과 Manager candidate CLI도 같은 실제 migration의 단일 head를 읽어야 한다.
+    from kortravelmap.infra.application_schema_head import application_schema_head
+
+    revisions = {entry["revision"] for entry in source_graph["revisions"]}
+    parents = {parent for entry in source_graph["revisions"] for parent in entry["down_revision"]}
+    heads = revisions - parents
+    assert len(heads) == 1
+    source_head = heads.pop()
+    assert application_schema_head() == source_head
+    assert _command_module()._application_head(source_graph) == source_head
 
 
 @pytest.mark.unit
@@ -167,11 +175,14 @@ def test_application_head_uses_manager_schema_revision_grammar(revision: str) ->
     generator = _generator_module()
 
     assert command._revision_id(revision) == revision
-    assert generator._revision_id(
-        revision,
-        path=Path("migration.py"),
-        field="revision",
-    ) == revision
+    assert (
+        generator._revision_id(
+            revision,
+            path=Path("migration.py"),
+            field="revision",
+        )
+        == revision
+    )
 
 
 @pytest.mark.unit
@@ -271,8 +282,7 @@ def test_generator_rejects_root_connected_cycle_with_single_terminal_head(
         ("0004_head.py", "head", "'cycle_b'"),
     ):
         (versions / filename).write_text(
-            f"revision = {revision!r}\n"
-            f"down_revision = {down_revision}\n",
+            f"revision = {revision!r}\ndown_revision = {down_revision}\n",
             encoding="utf-8",
         )
 

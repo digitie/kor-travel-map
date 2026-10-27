@@ -1,7 +1,8 @@
 # bound snapshot의 정확 stale 뒤 재계획 복구
 
-현재 단계: 선행 ea2fbcc5 실제 재현1PASS는 수용했다. 433 제품 코드와 순수142개는
-준비했으며 새 제품의 실제 PG·최종 두 리뷰·CI는 아직 미완이다. 운영 변경은 없다.
+현재 단계: 선행 ea2fbcc5 실제 재현1PASS 뒤 첫 제품 owned16은14PASS/2FAIL이었다.
+두 실패의 catalog 자료형·누락된 application graph를 교정 중이며 제품 전체 수용과
+최종 CI는 아직 미완이다. 원 실패·정리 증거를 보존했고 운영 변경은 없다.
 
 ## 최초 조사 범위(실제 재현 전 기록)
 
@@ -168,3 +169,27 @@ idempotence 경계이며 실제 TCP 응답 유실 주입은 아니다. 취소 �
 owned 실행 후보는 실제 두 caller→현재/외부 owner·lease·취소·holder10개→ACL/startup4개,
 총16개다. 기존 legacy 거부+새 typed 복구 회귀1개는 정상 CI에서 별도 fresh 모듈로
 유지한다. 새 제품 PG·최종 두리뷰·CI는 여전히 미완이다.
+
+## 첫 제품 owned16 실패와 canonical head 교정
+
+정확3c2aa48의 첫 제품 PG는14PASS/2FAIL(22.46초, XML16/skip0)이었다. 양 실제
+caller2와 race10 및 ACL2는 통과했지만 catalog `prokind`의 PostgreSQL 내부 char가
+asyncpg에서 bytes로 반환됐고, 설치 graph JSON이432에 머물러 실제433 DB의 public
+startup이 fail-closed했다. strict inventory 메시지는 head 불일치 뒤 검사를 건너뛴
+초기값이며 별도 guard 손상으로 판단하지 않는다. 원 result SHA256은
+`ee26013418b5f16e3e8d03892de4354cb54bfe89dd6699248cfb8f382f85f4a3`다.
+
+정확 CID 부재·익명 volume1 부재·scalar label0 정리는 통과했다. pytest exit1에서
+runner가 중단돼 source-after/SDK-post/runner Common-after는 실행되지 않았다.
+있는 source-before/SDK-before/실제63imports 및 pytest Common-before/after 증거를
+전체 전후 수용으로 확대하지 않는다. 원14artifact와 실패 log/XML은 그대로 보존한다.
+
+catalog 조회를 `prokind::text`로 정규화하고 기존 generator의 `--write`로 graph에433을
+반영했다. 기존 artifact-currentness 시험을 확장해 실제 versions의 유일 head와 startup
+및 Manager candidate CLI의 계산이 같음을 검사한다. 새 hardcoded head나 guard 예외는
+없으며 공식 candidate consumer/시작 검사 코드는 바꾸지 않는다. 제품 source·adapter
+두 리뷰 후 같은 상한으로 한 번 재시험하며 그 전 전체 제품 PASS로 세지 않는다.
+
+교정 후 기존 graph-currentness/single-head·n150 candidate 소비 계약과 typed reset/양 runner
+순수 회귀145개가25.70초에 통과했다. graph `--check`·Ruff도 통과했으며 첫 Ruff의
+두 차례 E501은 수정 전 원 log로 보존했다. 제품 PG 재시험은 아직 실행하지 않았다.

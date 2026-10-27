@@ -1,3 +1,11 @@
+## 2026-10-27 — 첫 제품 PG14PASS/2FAIL 보존과 canonical head 교정
+
+owned16 첫 실행은14PASS/2FAIL22.46초였고 정확 CID·volume1·전체 label0 정리는
+통과했다. prokind 자료형과 application graph432 누락을 좁게 교정한다. startup 엄격검사는
+유지하며 head 불일치 후 inventory skip을 별도 손상으로 확대하지 않는다.
+[원 실패와 미실행 post gate](reports/2026-10-27-bound-snapshot-stale-replan.md#첫-제품-owned16-실패와-canonical-head-교정)를
+보존하고 기존 source/head 계약을 확장했다. 순수 계약145개25.70초·graph check·Ruff는 통과했고 제품 전체 수용·CI는 미완/운영 변경0이다.
+
 ## 2026-10-27 — typed reset scope 권한을3열로 제한하고 통합17개 수집
 
 제품 PG 전 발견한 CommandOwner scope 읽기 누락을 SELECT(key/epoch/owner)
