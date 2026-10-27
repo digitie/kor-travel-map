@@ -12820,33 +12820,24 @@ BEGIN
     -- event publication·decision과 같은 global fence가 case episode도 직렬화한다.
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-m05', 0));
     -- 433 DC-1: regime 전에는 P가 없다.
-    -- provider 적재와 같은 순서로 source 증거(dataset/entity/record/head 다음
-    -- link)를 Feature보다 먼저 잡는다.
+    -- provider 적재와 같은 순서로 source 증거(entity/record/head 다음 link)를
+    -- Feature보다 먼저 잡는다.
     FOR v_evidence IN
-        SELECT link.source_entity_key, entity.provider_dataset_id,
-               head.current_source_record_key
+        SELECT link.source_entity_key
         FROM provider_sync.source_links AS link
-        JOIN provider_sync.source_entities AS entity
-          ON entity.source_entity_key = link.source_entity_key
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = entity.source_entity_key
         WHERE link.feature_id = p_provider_feature_id
           AND link.source_role = 'primary'
         ORDER BY link.source_entity_key COLLATE "C"
     LOOP
         PERFORM 1
-        FROM provider_sync.provider_datasets AS dataset
-        JOIN provider_sync.source_entities AS entity
-          ON entity.provider_dataset_id = dataset.provider_dataset_id
-        JOIN provider_sync.source_records AS record
-          ON record.source_entity_key = entity.source_entity_key
+        FROM provider_sync.source_entities AS entity
         JOIN provider_sync.source_entity_heads AS head
           ON head.source_entity_key = entity.source_entity_key
-         AND head.current_source_record_key = record.source_record_key
-        WHERE dataset.provider_dataset_id = v_evidence.provider_dataset_id
-          AND entity.source_entity_key = v_evidence.source_entity_key
-          AND record.source_record_key = v_evidence.current_source_record_key
-        FOR SHARE OF dataset, entity, record, head;
+        JOIN provider_sync.source_records AS record
+          ON record.source_entity_key = head.source_entity_key
+         AND record.source_record_key = head.current_source_record_key
+        WHERE entity.source_entity_key = v_evidence.source_entity_key
+        FOR SHARE OF entity, record, head;
         PERFORM 1
         FROM provider_sync.source_links AS link
         WHERE link.feature_id = p_provider_feature_id
@@ -14080,33 +14071,24 @@ BEGIN
     END IF;
 
     -- 433 DC-1: regime 전에는 P가 없다.
-    -- provider 적재와 같은 순서로 source 증거(dataset/entity/record/head 다음
-    -- link)를 Feature보다 먼저 잡는다.
+    -- provider 적재와 같은 순서로 source 증거(entity/record/head 다음 link)를
+    -- Feature보다 먼저 잡는다.
     FOR v_evidence IN
-        SELECT link.source_entity_key, entity.provider_dataset_id,
-               head.current_source_record_key
+        SELECT link.source_entity_key
         FROM provider_sync.source_links AS link
-        JOIN provider_sync.source_entities AS entity
-          ON entity.source_entity_key = link.source_entity_key
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = entity.source_entity_key
         WHERE link.feature_id = v_case.provider_feature_id
           AND link.source_role = 'primary'
         ORDER BY link.source_entity_key COLLATE "C"
     LOOP
         PERFORM 1
-        FROM provider_sync.provider_datasets AS dataset
-        JOIN provider_sync.source_entities AS entity
-          ON entity.provider_dataset_id = dataset.provider_dataset_id
-        JOIN provider_sync.source_records AS record
-          ON record.source_entity_key = entity.source_entity_key
+        FROM provider_sync.source_entities AS entity
         JOIN provider_sync.source_entity_heads AS head
           ON head.source_entity_key = entity.source_entity_key
-         AND head.current_source_record_key = record.source_record_key
-        WHERE dataset.provider_dataset_id = v_evidence.provider_dataset_id
-          AND entity.source_entity_key = v_evidence.source_entity_key
-          AND record.source_record_key = v_evidence.current_source_record_key
-        FOR SHARE OF dataset, entity, record, head;
+        JOIN provider_sync.source_records AS record
+          ON record.source_entity_key = head.source_entity_key
+         AND record.source_record_key = head.current_source_record_key
+        WHERE entity.source_entity_key = v_evidence.source_entity_key
+        FOR SHARE OF entity, record, head;
         PERFORM 1
         FROM provider_sync.source_links AS link
         WHERE link.feature_id = v_case.provider_feature_id
