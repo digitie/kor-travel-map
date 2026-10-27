@@ -1,3 +1,20 @@
+## 2026-10-28 — 현재 배포·원51복구·공개 UI13 수용
+
+Map001487에 검증6611이 포함돼 별도 구버전 재배포는 하지 않았다.
+PG18 유지보수 뒤 원 RUNNING51을 복구했고 원 STOP13·외부3을 포함한67상태가 같다.
+공개 UI13·정리는45.225초에 통과했다.
+[운영 정산](reports/2026-10-27-bound-snapshot-stale-replan.md#현재-배포-포함원51복구공개-ui13-수용)에
+실패 이력을 보존했다. 전체 writer9개 미완/OFF·CPU/RSS 미측정을 유지한다.
+
+## 2026-10-27 — typed stale 복구 코드의 최종 CI·후보UI·정상 머지
+
+정확6611 CI10과 양 PostGIS(glibc1953PASS/23skip·alpine1947PASS/29skip), 원 writer
+pair2·후보 실제UI14 및 두 독립 검토 뒤 #1424를 mainc3adc0c로 정상 머지했다.
+새17개는 전체 suite/skip 전집으로 포함을 확인했으며 개별 PASS event 계측은 아니다.
+[최종 정산](reports/2026-10-27-bound-snapshot-stale-replan.md#정확6611의-최종-ci실제-ui정상-머지-수용)에
+원 실패·source6611/API와 f29 UI build 구분·쿠키 삭제/401/정리를 남겼다. archive 원문
+9819B 뒤 footer로 EOF P3를 닫는다. 운영433/공개UI는 후속이며 전체9미완/OFF를 유지한다.
+
 ## 2026-10-27 — alpine 관찰자 cold-array codec 경계 최소 교정
 
 원alpine2FAIL/1945PASS/29skip을 보존했다. 기존관찰자300ms timeout stack은
