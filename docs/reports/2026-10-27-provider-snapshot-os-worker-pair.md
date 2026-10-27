@@ -162,4 +162,5 @@ Map API/Dagster 실제 transitive49개가 정확 합성본과 같고 fixture 미
 API/UI를 새로 배포하지 않았다. 상위 #1420 제품의 운영 반영은 별도 공식 배포·공개 UI 수용
 작업이며 이 원장은 그 완료를 뜻하지 않는다. 운영 CPU/RSS 개선은 미측정이고
 T-CWRITE-01–09는 모두 미완료다. shared Feature 경합·저장 artifact 재계획의 후속 PR #1422도
-이 제한 OS worker proof와 구분하며, 이 정산을 작성한 시점에는 아직 머지 전이다.
+이 제한 OS worker proof와 구분한다. 최초 정산 초안 때에는 머지 전이었고, 이후 CI10개를
+통과해 main `c62a9868`로 병합됐다. 후속의 별도 원장에 해당 최종 결과를 기록한다.
