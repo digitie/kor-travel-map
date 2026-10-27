@@ -1,5 +1,6 @@
 """정상 stale만 재계획으로 분류하고 일반 오류/constraint 실패를 삼키지 않는다."""
 
+import hashlib
 import os
 import subprocess
 import sys
@@ -61,4 +62,4 @@ print(hashlib.sha256(_artifact(bundle)).hexdigest())
         digest = result.stdout.strip()
         assert len(digest) == 64
         digests.append(digest)
-    assert digests[0] == digests[1]
+    assert digests == [hashlib.sha256(artifact.encode()).hexdigest()] * 2

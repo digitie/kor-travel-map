@@ -65,6 +65,7 @@ def _artifact(bundle):
 def _decode_artifact(artifact):
     # ADR-018: Feature.detail은 JSON dict를 직접 받지 않고 typed DTO를 요구한다.
     value = json.loads(artifact)
+    assert value["feature"]["kind"] == "place"
     value["feature"]["detail"] = PlaceDetail.model_validate(value["feature"]["detail"])
     return FeatureBundle.model_validate(value)
 
