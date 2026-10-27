@@ -1,3 +1,16 @@
+## 2026-10-27 — snapshot OS worker pair의 제한 실제 PG 수용
+
+정확 시험 source `6307ec63`은 두 독립 리뷰와 Airport/Rest 양방향 owned PG2개를
+27.88초에 통과했다. spawn2·각 pool1·실 source overlap·정확 topic blocker·두 commit ACK,
+후처리의 원 connection/PID/XID·marker NULL 회수·원 receipt·별도seal을 확인했다.
+source2580·선택 import56·SDK53 전후 동일과 정확 CID/volume 회수·cleanup도 통과했다.
+
+원 fixture 누락 P1, SDK import 실패(PG0), marker 기대값 오류의 실제2실패는 원장에 보존한다.
+CI가 발견한 ledger300자 위반은 task 본문을 원장 link로 단축해 고친다. 시험 source와 생산
+코드/SQL/schema·운영 OFF 설정 및 기존 예산은 바꾸지 않으며 최종 CI·머지는 아직 대기다.
+T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
+[범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
+
 ## 2026-10-27 — kor-travel-common 최신(`aa232ad5`) 반영: 브랜치 `chore/common-latest-map`
 
 - Common 핀 `e746e4b8` → `aa232ad5`(#47 병합, 뒤의 #48은 문서만; Python은 #44 daemon 갱신 주기 opt-in뿐 — Map 미사용,

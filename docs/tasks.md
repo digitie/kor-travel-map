@@ -88,7 +88,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-04 — **독립 데이터셋 동시 쓰기**
 
-  snapshot 원자성 아래 독립 dataset DML을 병행한다. 432 제한 profile은 최종 CI·공식 설치·공개 UI 수용·새 profile OFF다. [EX](reports/2026-10-24-exclusive-provider-full-refresh.md)·[SH](reports/2026-10-25-sh-collector-integration-design.md)·[실측](reports/2026-10-25-sh-operating-scope-measurement.md)은 운영 수용 밖이며 큰 입력·실worker는 미완이다.
+  snapshot 원자성을 유지한 독립 dataset 동시 쓰기다. Rest432 제한 수용과 새 profile OFF를 유지한다. [OS worker 시험 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md)의 수용은 제한 범위이며 상위 항목은 미완이다. 정본은 ADR-115/acceptance 같은 ID다.
 
 - [ ] T-CWRITE-05 — **완전 지역의 동시 쓰기·경계 이동**
 
