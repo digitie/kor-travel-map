@@ -1,4 +1,4 @@
-"""잠금을 잡는 **한 문장** 동안만 대기 상한을 늘리는 공통 실행기(T-LOAD-LOCK-WAIT · 433 WI-2).
+"""잠금을 잡는 **한 문장** 동안만 대기 상한을 늘리는 공통 실행기(T-LOAD-LOCK-WAIT · 434 WI-2).
 
 provider 적재와 권위 membership 완료(finish)는 다른 적재가 P EX를 쥔 동안 기다려야 한다. 엔진의
 ``lock_timeout``(Dagster 30초)으로는 그 뒤에서 55P03으로 죽는다. 그래서 그 transaction의

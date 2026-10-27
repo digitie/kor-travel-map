@@ -85,11 +85,11 @@ root 소유 제품·HTTP·문서는 J/W, J 소유 경계 시험은 root/W 검토
 관련 writer drain이 필요하다. 모든 domain command 선점·catalog/Geo·지역 이동·전체 collector
 배선과 의미 지원, 대량/운영 ARM의 CPU·메모리 수용, Weather/Transport 전파는 미완이다.
 
-## 433 이후(2026-10-27)
+## 434 이후(2026-10-27)
 
-- GRANT 누락(머리말 정오표)은 433이 함수 소유자(`ktm_feature_state_procedure_owner`)로 다시
+- GRANT 누락(머리말 정오표)은 434가 함수 소유자(`ktm_feature_state_procedure_owner`)로 다시
   부여해 고친다.
-- 433부터 이 네 루틴의 첫 줄은 무조건 P EX가 아니라 regime 진입
+- 434부터 이 네 루틴의 첫 줄은 무조건 P EX가 아니라 regime 진입
   (`ops.lock_single_feature_writer_protocol()`)이다. 정책 활성화 전(epoch=0)에는 P를 잡지 않으므로
   위 "실제 SH 대기 503" 관측은 epoch>0에서만 성립한다(ADR-115 §11.3).
 - 상수 ACL을 다시 적던 단위 시험은 지우고, head의 SECURITY DEFINER 호출자가 진입 함수를

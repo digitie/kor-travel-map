@@ -6578,7 +6578,7 @@ async def import_curation_rows(
         if not frozen_h35_schema:
             # manual child SQL도 protocol → import advisory 순서다. h35에는 이
             # protocol 함수가 없으므로 당시 잠금 경계를 그대로 보존한다.
-            # 433: 단건 regime 진입이 아니라 무조건 P EX다 — 중첩 curation command가 행 잠금
+            # 434: 단건 regime 진입이 아니라 무조건 P EX다 — 중첩 curation command가 행 잠금
             # 뒤에 적재 fence(feature-curation-write)를 잡으므로, P EX 없이 들어가면 적재와
             # 역순이 된다(ADR-111 §2). 공통 helper로 잡아 같은 transaction의 재진입을 캐시한다.
             await lock_feature_write_protocol(session, exclusive=True)

@@ -27,6 +27,6 @@ def test_unknown_or_already_gated_shape_fails_closed(body):
         _m._with_protocol_entry(body)
 
 
-# 418의 상수를 다시 적던 owner/grant 검사는 지웠다(433 WI-3). 그 GRANT는 schema owner로 돌아
+# 418의 상수를 다시 적던 owner/grant 검사는 지웠다(434 WI-3). 그 GRANT는 schema owner로 돌아
 # 실제로는 아무것도 주지 않았는데 상수 검사는 초록이었다. 실제 ACL은 migration만으로 만든
 # head 오라클에서 유도해 본다 — tests/lint/test_protocol_entry_acl_oracle.py.

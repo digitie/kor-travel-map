@@ -1,4 +1,4 @@
-"""SQLAlchemy/asyncpg 예외 사슬에서 PostgreSQL SQLSTATE를 꺼내는 **단일** 판별기(433 WI-2).
+"""SQLAlchemy/asyncpg 예외 사슬에서 PostgreSQL SQLSTATE를 꺼내는 **단일** 판별기(434 WI-2).
 
 55P03(lock timeout)·40001(serialization) 같은 재시도 판정이 경로마다
 ``getattr(exc.orig, "sqlstate")``·제각각의 사슬 탐색으로 갈라져 있었다. 번역된 예외의 ``orig``만

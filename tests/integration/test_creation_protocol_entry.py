@@ -288,7 +288,7 @@ AND locktype='advisory' AND classid=1369104691::oid AND objid=115::oid AND objsu
 
 
 async def _never_requests_protocol(admin, pid, task, *, window=1.0):
-    """433 DC-1(epoch=0): 생성은 P를 보유·대기하지 않는다. 끝나거나 창이 닫힐 때까지 본다."""
+    """434 DC-1(epoch=0): 생성은 P를 보유·대기하지 않는다. 끝나거나 창이 닫힐 때까지 본다."""
     loop = asyncio.get_running_loop()
     deadline = loop.time() + window
     while not task.done() and loop.time() < deadline:
@@ -396,7 +396,7 @@ async def test_epoch0_creation_completes_while_another_backend_holds_the_protoco
             {"exclusive": exclusive},
         )
         async with AsyncSession(runtime) as s, s.begin():
-            # 종전(418)에는 이 짧은 상한에서 55P03이었다. 433 epoch=0은 P를 기다리지 않는다.
+            # 종전(418)에는 이 짧은 상한에서 55P03이었다. 434 epoch=0은 P를 기다리지 않는다.
             await s.execute(text("SET LOCAL lock_timeout='150ms'"))
             result = await _apply(s, kind, case)
     await _assert_created(admin, case, kind, result)
@@ -423,7 +423,7 @@ n.nspname='feature' AND p.proname=ANY(CAST(:names AS text[]))"""),
         )
         assert len(rows) == 4
         for row in rows:
-            # 433 DC-1: 418의 P EX 첫 줄이 같은 자리의 regime 진입으로 바뀌었다.
+            # 434 DC-1: 418의 P EX 첫 줄이 같은 자리의 regime 진입으로 바뀌었다.
             assert "lock_scoped_feature_write_protocol" not in row["prosrc"]
             assert row["prosrc"].count("  " + _ENTRY + "\n") == 1
             assert row["prosrc"].partition("\nBEGIN\n")[2].lstrip().startswith(_ENTRY)

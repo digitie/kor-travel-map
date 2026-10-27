@@ -32,5 +32,5 @@ def test_unknown_or_repeated_protocol_shape_is_rejected(body):
         _migration._with_protocol_entry(body)
 
 
-# 415의 상수를 다시 적던 owner/grant 검사는 지웠다(433 WI-3). 실제 ACL은 migration만으로
+# 415의 상수를 다시 적던 owner/grant 검사는 지웠다(434 WI-3). 실제 ACL은 migration만으로
 # 만든 head 오라클에서 유도해 본다 — tests/lint/test_protocol_entry_acl_oracle.py.

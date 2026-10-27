@@ -1,6 +1,6 @@
 """고유 PostGIS에서 tracking 진입 순서·직접 SD·롤백 경계를 반증한다.
 
-433 WI-1 분류: 큐레이션을 확정하는 쓰기(root 완결, seal, 권위 finish, SUCCESS 완결 취소
+434 WI-1 분류: 큐레이션을 확정하는 쓰기(root 완결, seal, 권위 finish, SUCCESS 완결 취소
 전이)만 P EX→L이다. 장부 쓰기(ensure·event·fill-starts·실패/취소 terminal·비권위 finish·
 나머지 취소 전이)는 L만 잡는다. finish와 취소 전이는 인자로 고르므로 두 쪽을 다 본다.
 """
@@ -41,7 +41,7 @@ def _load(name: str, filename: str) -> ModuleType:
 
 
 _migration = _load("_integration_424", "424_tracking_protocol_prefix.py")
-_narrowing = _load("_integration_433", "433_protocol_entry_narrowing.py")
+_narrowing = _load("_integration_433", "434_protocol_entry_narrowing.py")
 _FINISH = "ops.finish_provider_feature_membership_command"
 _CANCEL = "ops.transition_provider_cancellation_job_command"
 #: 430이 본문을 의도적으로 바꾼 셋 — 공식 head dump와 통째로 대조한다.
@@ -52,7 +52,7 @@ _GOLDEN_NAMES = frozenset(
         _FINISH,
     }
 )
-#: 433 이후 첫 문장인 진입의 인자(리터럴로 고르는 루틴).
+#: 434 이후 첫 문장인 진입의 인자(리터럴로 고르는 루틴).
 _ENTRY_ARGUMENT = {
     "feature.finalize_provider_curation_root": "true",
     "feature.seal_provider_curation_snapshot_receipt": "true",
@@ -122,7 +122,7 @@ async def _released(admin):
 
 
 def _first_block(name: str) -> str:
-    """433 이후 ``\\nBEGIN\\n`` 바로 뒤에 오는 진입 블록."""
+    """434 이후 ``\\nBEGIN\\n`` 바로 뒤에 오는 진입 블록."""
     if name == _CANCEL:
         return _narrowing._CANCEL_TRANSITION_NEW.removeprefix("\nBEGIN\n")
     return "  PERFORM ops.lock_provider_feature_tracking_protocol(" + _ENTRY_ARGUMENT[name] + ");\n"
@@ -150,7 +150,7 @@ async def test_catalog_original_body_owner_acl_and_prefix(scalar_engines, name):
     body = row["body"]
     assert body.count("ops.lock_provider_feature_tracking_protocol(") == 1
     if name in _GOLDEN_NAMES:
-        # 공식 head dump와 전부 대조한다(430 본문 변경 + 433 진입).
+        # 공식 head dump와 전부 대조한다(430 본문 변경 + 434 진입).
         bodies = re.findall(
             rf"CREATE (?:FUNCTION|PROCEDURE) {re.escape(name)}\(.*?AS (\$[A-Za-z0-9_]*\$)(.*?)\1;",
             _GOLDEN,
@@ -159,7 +159,7 @@ async def test_catalog_original_body_owner_acl_and_prefix(scalar_engines, name):
         assert len(bodies) == 1
         assert body == bodies[0][1]
     if name == _FINISH:
-        # 433: 모드는 권위 인자 그대로다. NULL 검사는 잠금을 잡지 않으므로 진입보다 앞선다.
+        # 434: 모드는 권위 인자 그대로다. NULL 검사는 잠금을 잡지 않으므로 진입보다 앞선다.
         entry = (
             "  PERFORM ops.lock_provider_feature_tracking_protocol("
             "p_authoritative_snapshot_complete);\n"
@@ -278,7 +278,7 @@ async def test_final_waits_on_exact_protocol_pid_before_lineage(scalar_engines, 
 async def test_ledger_entry_does_not_wait_behind_a_protocol_ex_holder(
     scalar_engines, name, overrides
 ):
-    """433 WI-1: 다른 backend가 P EX(적재)를 쥐어도 장부 진입은 P에 줄 서지 않는다.
+    """434 WI-1: 다른 backend가 P EX(적재)를 쥐어도 장부 진입은 P에 줄 서지 않는다.
 
     typed NULL 인자라 본문은 자기 검증에서 멈출 수 있다 — 여기서 보는 것은 진입이 P를
     기다리지 않았다는 것(55P03 아님, P 대기 없음)과 L을 실제로 잡았다는 것이다.

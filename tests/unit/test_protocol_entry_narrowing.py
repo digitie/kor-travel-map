@@ -1,4 +1,4 @@
-"""433 migration의 정본 고정·편집 계획·SQL/Python 분류 일치를 DB 없이 검증한다.
+"""434 migration의 정본 고정·편집 계획·SQL/Python 분류 일치를 DB 없이 검증한다.
 
 실제 PostgreSQL 위의 동작(대기·거부·drain)은 통합 검사가 본다 —
 ``tests/integration/test_tracking_protocol_prefix.py``(WI-1),
@@ -20,7 +20,7 @@ from kortravelmap.infra.pipeline_cancellation_repo import cancellation_transitio
 
 ROOT = Path(__file__).resolve().parents[2]
 SPEC = importlib.util.spec_from_file_location(
-    "protocol_entry_narrowing", ROOT / "alembic/versions/433_protocol_entry_narrowing.py"
+    "protocol_entry_narrowing", ROOT / "alembic/versions/434_protocol_entry_narrowing.py"
 )
 assert SPEC is not None
 assert SPEC.loader is not None
@@ -117,7 +117,7 @@ def _head_body(name: str) -> str:
 
 @pytest.mark.parametrize("name", sorted(MIGRATION._ROUTINES))
 def test_head_is_exactly_revision_432_plus_the_reviewed_edits(name: str) -> None:
-    """head-schema의 433 본문에서 편집을 거꾸로 되돌리면 고정한 432 hash가 나와야 한다."""
+    """head-schema의 434 본문에서 편집을 거꾸로 되돌리면 고정한 432 hash가 나와야 한다."""
     routine = MIGRATION._ROUTINES[name]
     body = _head_body(name)
     for old, new in reversed(routine.edits):

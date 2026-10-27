@@ -167,7 +167,7 @@ async def _lock_in_progress_attempt(
 ) -> PipelineCancellationAttempt | None:
     """tracking prefix를 먼저 잡고 in-progress attempt 행을 잠근다.
 
-    ``finalizing``은 호출자가 **인자로부터** 정한다(433 WI-1). root 완결까지 갈 수 있는
+    ``finalizing``은 호출자가 **인자로부터** 정한다(434 WI-1). root 완결까지 갈 수 있는
     SUCCESS 완결 전이만 참이고, 나머지 장부 쓰기는 L만 잡는다.
     """
     await lock_provider_feature_tracking(session, finalizing=finalizing)
@@ -183,7 +183,7 @@ async def _lock_attempt_after_root(
 ) -> PipelineCancellationAttempt | None:
     """lineage-global→root→attempt 순서로 finish/retry source를 잠근다."""
     normalized_id = _uuid(cancellation_id)
-    # 433 WI-1: attempt finish/retry는 큐레이션을 확정하지 않는 장부 쓰기다 — L만 잡는다.
+    # 434 WI-1: attempt finish/retry는 큐레이션을 확정하지 않는 장부 쓰기다 — L만 잡는다.
     await lock_provider_feature_tracking_leaf(session)
     observed_row = (
         await session.execute(
@@ -277,7 +277,7 @@ _TRACKING_LEAF_SQL = "SELECT ops.lock_provider_feature_tracking_protocol(false)"
 async def lock_provider_feature_finalization(session: AsyncSession) -> None:
     """큐레이션을 확정하는 transaction은 행 선점 전에 P EX→L을 취득한다.
 
-    대상은 권위 finish(seal), SUCCESS reconcile(root 완결), SUCCESS 완결 취소 전이다(433 WI-1).
+    대상은 권위 finish(seal), SUCCESS reconcile(root 완결), SUCCESS 완결 취소 전이다(434 WI-1).
     session이 무장돼 있으면(``arm_feature_curation_write_wait``) 그 한 문장만 적재와 같은
     상한까지 기다린다 — 다른 적재가 P EX를 쥔 동안 엔진의 짧은 ``lock_timeout``으로
     이미 commit한 적재의 finish가 55P03으로 죽지 않게 한다.
@@ -303,7 +303,7 @@ async def lock_provider_feature_tracking_leaf(session: AsyncSession) -> None:
 
 
 async def lock_provider_feature_tracking(session: AsyncSession, *, finalizing: bool) -> None:
-    """``finalizing``이면 P EX→L, 아니면 L만 잡는다(433 WI-1의 단일 분기점)."""
+    """``finalizing``이면 P EX→L, 아니면 L만 잡는다(434 WI-1의 단일 분기점)."""
     if finalizing:
         await lock_provider_feature_finalization(session)
     else:
@@ -678,7 +678,7 @@ async def create_pipeline_cancellation_attempt(
     입력이다. retryable attempt 재시도는 hierarchy를 다시 읽지 않는
     :func:`retry_pipeline_cancellation_attempt`를 사용해야 한다.
     """
-    # 433 WI-1: 취소 원장 생성은 장부 쓰기다. 적재가 P EX를 쥔 동안에도 L만으로 끝난다.
+    # 434 WI-1: 취소 원장 생성은 장부 쓰기다. 적재가 P EX를 쥔 동안에도 L만으로 끝난다.
     await lock_provider_feature_tracking_leaf(session)
     await lock_pipeline_lineage_mutation(session)
     await lock_pipeline_cancellation_root(
@@ -1108,7 +1108,7 @@ async def fill_pipeline_cancellation_canonical_starts(
     """frozen canonical member의 누락 start를 권위 있는 run start로 보충한다."""
     if engine_started_at.tzinfo is None or engine_started_at.utcoffset() is None:
         raise ValueError("engine_started_at must be timezone-aware")
-    # 433 WI-1: start 보충은 큐레이션을 읽지 않는 장부 쓰기다 — L만 잡는다.
+    # 434 WI-1: start 보충은 큐레이션을 읽지 않는 장부 쓰기다 — L만 잡는다.
     await lock_provider_feature_tracking_leaf(session)
     row = (
         await session.execute(

@@ -1,3 +1,95 @@
+## 2026-10-27 — alpine 관찰자 cold-array codec 경계 최소 교정
+
+원alpine2FAIL/1945PASS/29skip을 보존했다. 기존관찰자300ms timeout stack은
+SELECT 본문전 asyncpg int4[] introspection이어서 SQL exact-holder membership을 bool로
+반환하도록2줄만 바꾼다. PID/start/login/Lock/ungranted·300ms/0.8초/1초를 유지한다.
+[원실패·실측대기](reports/2026-10-27-bound-snapshot-stale-replan.md#alpine-관찰자-cold-codec-실패의-최소-교정)를
+명시하고 source두리뷰뒤 원pair2만실측한다. runtime·운영0/전체9미완/OFF를 유지한다.
+
+## 2026-10-27 — 실제 제품16·후보UI14 뒤 head oracle 빈줄1개 교정
+
+f29 local16과 후보UI14는 통과했으나 전체glibc CI는1952PASS/23skip 뒤 head-schema
+정본 비교1개에서 실패했다. complete live dump diff의 초과빈줄1개만 교정하며 함수/
+runtime/API/UI/migration은 바꾸지 않는다.
+[원 실패·승계 한계](reports/2026-10-27-bound-snapshot-stale-replan.md#f29-전체-glibc-ci의-oracle-형식-실패)를
+보존하고 새exacthead CI와 두리뷰가 끝나기 전 머지하지 않는다. 전체9미완/OFF/운영0이다.
+
+## 2026-10-27 — typed reset 실제 제품16 통과, CI 계약 교정 중
+
+source6cce26ef의 단일 owned16은16PASS18.90초/정확 CID·volume1·label0 정리PASS다.
+양 caller 저장원본 재계획·후처리/seal·원 replay 불변과 새권한·경합 경계를 확인했다.
+source2591/SDK53전후/import63/Common19네지점도 검산했다.
+[실제 수용·CI 구분](reports/2026-10-27-bound-snapshot-stale-replan.md#교정-source6c의-실제-제품16-수용과-ci-경계)을
+남겼으며 CI 문서크기/ACL선언 두 실패를 보존하고 교정 중이다. 전체9미완/OFF/운영0이다.
+
+## 2026-10-27 — 첫 제품 PG14PASS/2FAIL 보존과 canonical head 교정
+
+owned16 첫 실행은14PASS/2FAIL22.46초였고 정확 CID·volume1·전체 label0 정리는
+통과했다. prokind 자료형과 application graph432 누락을 좁게 교정한다. startup 엄격검사는
+유지하며 head 불일치 후 inventory skip을 별도 손상으로 확대하지 않는다.
+[원 실패와 미실행 post gate](reports/2026-10-27-bound-snapshot-stale-replan.md#첫-제품-owned16-실패와-canonical-head-교정)를
+보존하고 기존 source/head 계약을 확장했다. 순수 계약145개25.70초·graph check·Ruff는 통과했고 제품 전체 수용·CI는 미완/운영 변경0이다.
+
+## 2026-10-27 — typed reset scope 권한을3열로 제한하고 통합17개 수집
+
+제품 PG 전 발견한 CommandOwner scope 읽기 누락을 SELECT(key/epoch/owner)
+세 열만 추가해 고쳤다. lease/UPDATE/runtime 직접 권한과 frozen430은 그대로다.
+replay는 실제 apply 진입 추가0과 row/receipt 불변으로 표현하고 SQL문장 계측으로
+과장하지 않는다. [범위](reports/2026-10-27-bound-snapshot-stale-replan.md#실행-전-발견한-scope-열-권한과-관측-범위-정정)를
+반영해 순수142개14.45초·통합수집17개10.38초가 통과했다. source 두리뷰/소유PG/
+최종CI·최신main합성은 남아 있고 운영·profile 활성화0/전체9개미완을 유지한다.
+
+## 2026-10-27 — typed bound reset 통합 source16개와 순수142개
+
+양 provider atomic stale MAX3·migration 더 긴 timeout cap 순수142개가14.08초에
+통과했고, [통합 source](reports/2026-10-27-bound-snapshot-stale-replan.md#제품-통합-실행-전-checkpoint)16개를
+10.54초에 수집했다. 실제 canonical 두asset/원bytes·seal·replay, holder/foreign
+epoch·취소·lease, 별도 작성 ACL/startup을 포함한다. 새 제품 PG0이며 최종 두리뷰·
+single-owned 실행·CI는 남아 있다. 실제caller 이전 freshquota를 보존하고 운영/
+profile 활성화는 하지 않는다. 기존 실패·상한·전체9개 미완은 유지한다.
+
+## 2026-10-27 — 새 typed reset의 순수 경계138개 통과
+
+현재executor READY reset의 migration owner/ACL·client 원 plan/CAS·ACK 불명과
+Airport/Rest의 계획오류/atomic rollback 분리 회귀138개가16.80초에 통과했다.
+잘못된 ledger 경로의 초기 수집0 로그도 보존했다. [통합 후속](reports/2026-10-27-bound-snapshot-stale-replan.md#첫-제품-순수-회귀)의
+actual PG/현재·옛 owner/cancel/live apply·실제 수집/replay 수용은 아직 남았다.
+새 제품 PG/운영 변경0, 전체 CWRITE9개 미완·profile OFF를 유지한다.
+
+## 2026-10-27 — 실제 stale→rollback→live READY reset 거부 재현과 첫 제품 경계
+
+정확ea2fbcc5 owned PG1개가25.52초에 통과했다. 정확40001→aborted TX→
+유효READY/원 artifact 보존→기존 typed55P03을 관찰했고 두 선행실패·정리를 보존한다.
+[제품 후속](reports/2026-10-27-bound-snapshot-stale-replan.md#실제-재현-수용과-첫-제품-구현)은
+433의 현재executor typed reset과 원 apply plan을 받는 client/두 실제catch 결선이다.
+계획오류/ACK불명/외부binding은 기존안전경계를 유지하며 새 제품 PG·두리뷰·CI는
+아직 미완이다. profilesOFF/MAX3·상한·전체9개미완/운영변경0을 유지한다.
+
+## 2026-10-27 — bound 재현의 strict Geo 입력 연결만 정정
+
+두 번째 owned 시도는 setup432 뒤 observation 준비에서1FAIL/45.29초였다.
+reader의 frozenset과 Stats set 연결을 놓친 시험 오류로, 아직 실제 stale/reset 미관찰이다.
+원 log/XML/result·정확 정리를 보존하고 기존 donor의 실제 builtinset 연결만 복원했다.
+실제 준비 source의 strict encode/decode 왕복은 순수0.0182초에 통과했다.
+[기록](reports/2026-10-27-bound-snapshot-stale-replan.md#두-번째-시도의-strict-입력-실패와-순수-준비-확인)처럼
+두 리뷰 뒤 격리 재현1회가 남았다. 제품·validator·상한·운영 변경0, 전체9개 미완이다.
+
+## 2026-10-27 — bound snapshot 첫 재현은 baseline setup timeout으로 미도달
+
+정확 d13312a9의 최초 owned 시험은 baseline400 적용 중40초 marker가 만료되어
+1ERROR/41.53초였고, 제품 지점은 아직 미관찰이다. 원 log/XML/result와
+정확 CID·volume1·label0 cleanup PASS를 보존했다. [기록](reports/2026-10-27-bound-snapshot-stale-replan.md#최초-owned-재현-시도의-setup-실패)처럼
+기존 donor module50초만 맞추고 나머지 실행/SQL/자원 상한은 유지한다.
+제품 변경·운영 호출0, 두 리뷰 후 격리 재시도1회가 남아 있다.
+
+## 2026-10-27 — bound snapshot stale 뒤 live lease 재계획 경계 조사
+
+Airport 실제 atomic apply의 정확 stale→전체 rollback→기존 typed reset55P03을
+관찰할 [재현 source와 작은 설계](reports/2026-10-27-bound-snapshot-stale-replan.md)를
+작성했다. 아직 실제 PG/운영 호출0이며 제품 수정 전이다. source 두 리뷰 뒤 격리 PG로
+재현하고, 동일 executor의 exact binding만 정리하는 typed 경계를 검토한다.
+MAX3·저장 artifact·취소/fence·후처리/seal·상한/OFF와 T-CWRITE9개 미완을 유지한다.
+
 ## 2026-10-27 — Common 최신 제품 공식 pair 배포·공개 UI13 수용
 
 검증 Map `0d60cd0b`/PinVi `9ebb588a`를 공식 Manager pair로1회 배포했다.
@@ -107,10 +199,10 @@ T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지�
 
 검증은 n150의 CI와 같은 네 pytest 세션·lint·frontend·Playwright에서 했다(결과는 PR 본문).
 
-## 2026-10-27 — Codex PR 리뷰 정리: tracking 장부는 L만, 단건 writer는 regime 진입(433)
+## 2026-10-27 — Codex PR 리뷰 정리: tracking 장부는 L만, 단건 writer는 regime 진입(434)
 
 Codex PR #1358~#1419 리뷰를 정리한 잠금 핵심을 `feat/map-codex-review-core`에 구현했다(PR은
-gate 뒤에 연다, 미머지). 433은 432 정본 루틴 20개의 본문 SHA·소유자·시그니처를 고정하고
+gate 뒤에 연다, 미머지). 434는 432 정본 루틴 20개의 본문 SHA·소유자·시그니처를 고정하고
 검토한 바늘만 바꾼다. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
 
 - WI-1: tracking 장부 쓰기는 L만, 큐레이션 확정(seal·root 완결·권위 finish·SUCCESS 완결 취소
@@ -124,7 +216,7 @@ gate 뒤에 연다, 미머지). 433은 432 정본 루틴 20개의 본문 SHA·�
 
 운영 읽기 전용 확인: flag 3종 OFF, shadow scope 미설정, epoch 0, active policy·write attempt 0,
 남은 로그 창과 DB 원장에서 LOCK_TIMEOUT 503·55P03 0건 — 결함은 잠재 상태였다.
-[ADR-115 §11](adr/115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-433-기준).
+[ADR-115 §11](adr/115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-434-기준).
 
 다음 한 작업: n150 gate(lint·unit·api·dagster·integration) 통과 → PR 개설과 misc 브랜치 병합 →
 CI green → 두 독립 적대 리뷰와 수정. 머지·배포는 weather export 작업 완료 뒤 lead가 한다.
@@ -2578,150 +2670,9 @@ token이 되살아날 자리가 없다"는 **번들에 대해서만** 참이었�
   선행이다.
 
 
-## 2026-09-06 — D2 lane이 api-audit까지 완주했다
+## 2026-09-05 ~ 2026-09-06 이력
 
-| 항목 | 상태 |
-|---|---|
-| pinset | Map `631f1abc` + PinVi `b9637375` |
-| `T-VN-D2-API-AUDIT` | **완료** — `ktdm-d2-008` `phase: passed`, runner exit 0 |
-| lifecycle | 56 = 7 operation × 8 phase (`helper-api-audit` 8개) |
-| evidence | `phase: evidence-validated`, 파일 집합 exact, FK 제약 18, 리포트 2 |
-| api-audit | counts 3·1·7·3, FK 18/8, `feature_ids`·`feature_uuids` 각 1건 |
-| 선행 축 | ACL preflight 55/55, D1 11 passed |
-
-`feature_id` 규칙은 서로 다른 실행이 만든 Feature **셋**으로 배포 DB에서 확인했다 —
-새 규칙(uuid 재현) 3/3 일치, 구 규칙(run_id 재계산) 3/3 불일치.
-
-### 다음 한 작업
-
-**2026-09-07 소유자 판정 4건이 들어왔다.** 열린 항목은 15 → **11**이 됐다(보류/제외 3 포함).
-
-| 판정 | 결과 |
-|---|---|
-| 승격 정의 변경 | `T-VN-M05-ACTIVATION` — 문서 행위가 아니라 **재계산 가능한 대조**로 정의. Manager `--verify-leaf`가 해시 사슬과 살아 있는 pin registry를 대조한다. 서명은 근거에서 뺐다(키가 실행마다 새로 생겨 사후 검증 불가) |
-| 과대 계상 삭제 | `T-VN-M02`에서 backup/restore 축 제거 — 소유는 `T-VN-H49` 계열 |
-| H34는 CSV만 | `T-VN-H34` **완료**. 범위 밖 넷은 지우지 않고 acceptance에 남겼다 |
-| D1이 자격증명을 갚음 | `T-FE-MOCK-FLAKE` **완료** |
-
-**착수 가능 — 순서대로.**
-
-1. `T-VN-M02` **spec 회수** — 미병합 브랜치 유실 위험. 판정과 무관하게 먼저.
-2. `T-VN-H49` 자식 셋 복원 리허설 — Manager `rehearse-restore` 결함을 고쳐 배포한 뒤
-   실행한다(`geo_dagster`·`concierge`는 백업 0건이라 `create` 선행).
-3. `T-VN-M04` — 조문을 세웠고 reject 통합 테스트를 더했다. CI green이면 닫힌다.
-
-**소유자 판정 대기 — 여섯.**
-
-1. `T-VN-M05-ACTIVATION` A2 — "실행은 단 한 번"의 기준(기계는 execution identity당 1회를
-   강제한다. 한 pinset 아래 leaf가 셋 생겼다).
-2. `T-VN-M02` purge 정책 — evidence cascade/orphan·권한·409 계약.
-3. `T-VN-H49` 자식 셋의 리허설 **기록 위치**.
-4. `T-VN-H49` 부모 — 고착 `load_jobs` 해소를 위한 prod 쓰기 승인.
-5. `T-VN-H49-OFFBOX` — 목적지 호스트·계정·ssh 키. **그리고 n150에 예약 백업이 아예 없다**
-   (root crontab 없음·timer 없음·logrotate 미설치, geo·geo_dagster·concierge 백업 0건).
-6. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가. 가장 큰 축이다.
-
-**보류/제외 셋**: `T-VN-41C`·`T-VN-H43`·`T-101`. **외부 추적**: `GM-17`(가장 마지막).
-
-## 2026-09-06 — D2 통과, receipt 승격
-
-| 항목 | 상태 |
-|---|---|
-| `T-VN-M01` 활성화 | **완료** — ACL 55/55(rebuild 앞뒤 두 번) · 거부 축 4/4 403 · witness 8관계 zero-write · 성공 축 201 |
-| kill-switch | `KOR_TRAVEL_MAP_API_ADMIN_MANUAL_FEATURE_CREATE_ENABLED=true` (2026-09-05T20:27:59Z) |
-| D2 스펙 | **in-lane 통과** — main·recovery 각 `{"counts":{"passed":2},"result":"passed"}` |
-| `T-VN-41F1D-D2` | **통과** — `phase: passed` / `status: complete` (2026-09-06T01:47:03Z, runner exit 0, 1분 43초) |
-| D2 증거 | `phase: evidence-validated` — 파일 집합 exact(10), lifecycle 48, FK 제약 18, 리포트 2 |
-| D2 잔여물 | 독립 측정으로 0 — acceptance 소유 row 0, 라벨 컨테이너 0, BLOCKED/ACTIVE/RESULT 없음 |
-| 선행 축 | 같은 pinset에서 ACL preflight 55/55 · D1 11 passed(29.9초) |
-| 게이트 | 결함마다 `tests/lint/` 탐지기, 전부 변이로 red 확인 |
-| pinset | Map `ab3640f8` + PinVi #535 — rebuild `48166bd2…`, generation `56d331a7…` |
-
-### 다음 한 작업
-
-**`T-VN-41C`의 구조적 순환에 대한 소유자 판정.** 선행 배리어는 전부 닫혔다 — D1·D2·
-`T-VN-41F1D-E`·`T-VN-M01` 완료. 41C의 relay·reconciliation은 **구현이 끝나 있다**(2026-09-06
-재조사가 종전 서술을 정정했다). 남은 셋 중 앞의 둘은 셋째가 풀리기 전에는 착수할 수 없다:
-
-1. **런타임 결선** — 배포 Map 컨테이너에 `..._CACHE_TARGET_SERVICE_PRINCIPALS`가 없어 service
-   표면이 401이고 relay 관계 19개가 전부 0행이다.
-2. **enable 경계 구현** — PinVi가 production에서 sync enable을 거부하며, 그 조문이 기다리는
-   "root-owned final C7 enable boundary"가 Manager에 없다.
-3. **구조적 순환** — 켜면 `environment_sha256`이 바뀌어 rebuild가 필요한데, Manager
-   `require_rebuildable_mode`는 cache-target 값이 inert여야 rebuild를 허용한다. **현
-   lifecycle(rehearsal/rebuildable)에서 enable과 pinned rebuild는 상호배타다.**
-
-셋 중 하나를 골라야 한다 — (a) lifecycle을 옮긴다, (b) Manager가 cache-target 축을
-`environment_sha256` 결박에서 분리한다, (c) enable을 실 production 전환 시점까지 미룬다.
-(a)는 rebuild 능력을 잃고, (b)는 Manager 계약 변경이며, (c)는 41C를 그때까지 여는 것이다.
-`docs/tasks.md`의 41C 줄과 `tasks-acceptance.md` §T-VN-41C가 정본이다.
-
-`GM-17`은 소유자 지시로 **가장 마지막**이다.
-
-그 뒤 순서는 **`T-VN-41F1D-E` → `T-VN-41C`**다(2026-09-06 정정 — 이 줄이 순서를 뒤집어
-적고 있었다). `GM-17`은 소유자 지시로 **가장 마지막**이다.
-`T-VN-D2-API-AUDIT`(helper의 `api-audit`/`purge` 경로가 한 번도 실행된 적 없음)은 D2 완주와
-분리했다 — 고치려면 clone lane의 content digest 계약까지 함께 판단해야 한다.
-
-### 이번에 확인된 운영 사실
-
-- **증거 계약 위반은 스펙이 통과한 뒤에야 드러난다.** `_validate_evidence`가 정확한
-  파일명 집합과 action별 키를 요구하는데 그 검증이 스펙 통과 뒤에 돌기 때문이다. 그래서
-  결함이 병렬로 안 보이고 배포 스택 실행 한 번에 하나씩 직렬로 나온다 — 열두 번을 그렇게
-  썼다. 게이트를 로컬에서 유도해 미리 깨뜨리는 것이 그 비용의 유일한 대안이다.
-- **executor 이미지를 같은 `:local` 태그로 다시 빌드하면 핀이 가리키던 이미지가 사라진다.**
-  live attestation이 image ID를 exact로 들고 있어 재빌드 순서를 지켜야 한다.
-- **`rolinherit=false`라 privilege 확인에 `::regclass`를 쓸 수 없다.** Map 역할 전부가
-  NOINHERIT이므로 preflight는 catalog join으로만 판정한다.
-
-
-## 2026-09-05 — 새 pinset에서 D1 통과, D2는 helper 결함 셋을 고치고 재실행 대기
-
-`af6d7061`(Map `c72456f6` + PinVi `f4401659`)로 rebuild를 마쳤고, attestation을 재발행해
-verifier가 PASS했다. D1은 통과했다. D2는 seed에서 죽었고 원인 셋을 전부 고쳐 실 DB에
-대고 seed → cleanup → audit을 통과시켰다.
-
-| 항목 | 상태 |
-|---|---|
-| pinset | **`af6d7061`** = Map `c72456f6` + PinVi `f4401659` |
-| rebuild | 성공 (`2acd8e97…`, generation `31622c79…`) |
-| host attestation v4 | 재발행 `10ad0f0f…` — **verifier PASS** |
-| C7 executor image | `sha256:f760bf6c…` (라벨 `c72456f6`) |
-| `T-VN-41F1D-D1` | **통과** — 데이터 비의존 live UI 11/11, 33.2초, 핀 자신의 스펙 바이트로 실행 |
-| `T-VN-41F1D-D2` | helper 결함 셋 수정 완료, 실 DB 사이클 통과. **재실행 대기** |
-| D2 lane 상태 | `BLOCKED` 해제 — 잔여물 0 실측 후 `clear-blocked`, 증거는 `adjudicated-…`에 보존 |
-
-### 다음 한 작업
-
-**helper 수정을 머지한 뒤 pinset을 한 번 더 돌린다.** 설치 스냅샷 디렉터리 이름이
-`E2E_C7_EXPECTED_GIT_COMMIT`에 결박돼 있고 그것이 attestation의 `repository_commit`·
-generation의 `map_source_revision`과 exact여야 하므로, Map revision이 바뀌면
-rotate-pair → rebuild → attestation 재발행 → 스냅샷 재설치 → executor 이미지 재빌드 →
-D1 → D2가 따라온다. 전 과정이 이번에 스크립트로 남았다.
-
-그 뒤 순서는 **`T-VN-41F1D-E` → `T-VN-41C`**다(2026-09-06 정정). `GM-17`(Manager production compose
-required-set 완화)은 소유자 지시로 **가장 마지막**이다.
-
-### 이번에 확인된 운영 사실
-
-- **out-of-band DB 패치는 다음 rebuild에 증발한다.** 어제 배포 DB에 손으로 준
-  `GRANT SELECT ON public.alembic_version TO ktm_feature_migrator`가 rebuild로 사라졌고,
-  그래서 helper의 진짜 결함이 드러났다. DB가 선언된 계약으로 수렴하는 건 좋은 성질이지만
-  그런 패치에 기댄 green은 근거가 되지 못한다.
-- **rebuild가 `BLOCKED` lane을 가로지르면 `recover`가 구조적으로 불가능하다.**
-  `begin-recovery`가 BLOCKED의 execution identity와 현재 identity의 일치를 요구하는데
-  rebuild가 여섯 필드를 전부 바꾼다. 이때의 정본 경로는 잔여물을 직접 측정해 0임을 확인한
-  뒤 `clear-blocked`로 정리하고 증거를 남기는 것이다.
-
-### 남아 있는 소유자 판정
-
-- `docker/*.py` 여섯 파일이 `mypy --strict` clean인데도 검사 밖이다(n150 실측). 프로덕션
-  기동을 막는 `application-schema-final-permit.py`가 그중 하나다. 편입 비용은 0이지만
-  `application-schema-fresh-finalize.py`(5건)·`dagster-storage-migrate.py`(4건)는
-  정리가 필요해 경계를 어디에 둘지가 판단이다.
-- CI의 mypy는 핀이 없다(`mypy>=1.10`). 새 mypy 릴리스가 검사를 조이면 무관한 PR에서
-  `lint` job이 붉어질 수 있다 — 기존 세 스텝도 같은 노출을 갖는다.
-
+[완전한 세 section 원문](archive/resume-2026-09a.md)은 읽기 크기 상한에 따라 분리했다.
 
 ### Rest432 후속: 실제 원자성 및 공식 스키마
 

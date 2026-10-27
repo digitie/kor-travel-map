@@ -536,7 +536,7 @@ _STATE_OWNER_FUNCTION_ACL = (
     "TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) "
     "TO ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
-    # 433 DC-1: 단건·관리 writer의 regime 진입(epoch>0에서만 P EX). 414~418 루틴 소유자와
+    # 434 DC-1: 단건·관리 writer의 regime 진입(epoch>0에서만 P EX). 414~418 루틴 소유자와
     # Python 관리 경로(runtime)가 부른다.
     "REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.lock_single_feature_writer_protocol(...) "
@@ -1038,6 +1038,25 @@ _SNAPSHOT_COMMAND_OWNER_ACL = tuple(
     "TO ktm_curation_provider_executor",
 )
 
+# 434만 필요한 직접 scope 관측이다. lease/UPDATE/runtime 표 읽기 권한은 추가하지 않는다.
+_SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL = (
+    "DO $snapshot_ready_scope$ BEGIN IF EXISTS ("
+    "SELECT 1 FROM pg_catalog.pg_proc p "
+    "JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace "
+    "WHERE n.nspname='ops' AND p.proname='reset_ready_provider_snapshot_plan' "
+    "AND p.prokind='f') THEN "
+    "GRANT SELECT(provider_dataset_id,epoch,owner) ON TABLE ops.feature_write_dataset_scopes "
+    "TO ktm_curation_command_owner; END IF; END $snapshot_ready_scope$",
+)
+
+
+_SNAPSHOT_READY_RESET_COMMAND_OWNER_ACL = (
+    "REVOKE ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION ops.reset_ready_provider_snapshot_plan(...) "
+    "TO ktm_curation_provider_executor",
+)
+
 
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -1062,7 +1081,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL
         + _STRICT_SH_DATA_SCHEMA_OWNER_ACL
         + _SNAPSHOT_SCHEMA_OWNER_ACL
-        + _SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL,
+        + _SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL
+        + _SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
@@ -1078,7 +1098,12 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ktm_manual_feature_procedure_owner",
         _MANUAL_FEATURE_WRITER_ACL + _FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL,
     ),
-    ("ktm_curation_command_owner", _MANUAL_CURATION_WRITER_ACL + _SNAPSHOT_COMMAND_OWNER_ACL),
+    (
+        "ktm_curation_command_owner",
+        _MANUAL_CURATION_WRITER_ACL
+        + _SNAPSHOT_COMMAND_OWNER_ACL
+        + _SNAPSHOT_READY_RESET_COMMAND_OWNER_ACL,
+    ),
     ("ktm_feature_request_procedure_owner", _FEATURE_REQUEST_WRITER_ACL),
     ("ktm_manual_provider_dedup_procedure_owner", _M05_WRITER_ACL),
 )
@@ -1127,7 +1152,7 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
-    "ops.lock_single_feature_writer_protocol": "433_protocol_entry_narrowing",
+    "ops.lock_single_feature_writer_protocol": "434_protocol_entry_narrowing",
     "ops.reject_provider_snapshot_artifact_update": "430_provider_snapshot_recovery",
     "ops.reject_pipeline_cancellation_prefix": "430_provider_snapshot_recovery",
     "feature._member_provider_curation_input_set": "430_provider_snapshot_recovery",
@@ -1147,6 +1172,7 @@ _OPTIONAL_ROUTINES: Mapping[str, str] = {
     "ops.provider_snapshot_scalar_counter_state": "430_provider_snapshot_recovery",
     "ops.capture_provider_snapshot_apply_input_set": "430_provider_snapshot_recovery",
     "ops.reset_expired_provider_snapshot_plan": "430_provider_snapshot_recovery",
+    "ops.reset_ready_provider_snapshot_plan": "433_snapshot_ready_plan_reset",
     "ops._arm_scoped_feature_write_deadline": "411_scoped_feature_write_kernel",
     "ops._lock_scoped_feature_write_scope": "411_scoped_feature_write_kernel",
     "feature._strict_sh_data_context": "429_strict_sh_data_guards",

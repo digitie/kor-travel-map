@@ -143,7 +143,7 @@ async def test_a_load_waits_past_the_engine_lock_timeout_and_api_writers_do_not(
 async def test_an_unset_engine_timeout_is_armed_past_the_one_second_gate(
     dagster_runtime_engine: AsyncEngine,
 ) -> None:
-    """433 WI-2: 엔진에 ``lock_timeout``이 없으면(0) protocol gate가 1초로 바꾼다.
+    """434 WI-2: 엔진에 ``lock_timeout``이 없으면(0) protocol gate가 1초로 바꾼다.
 
     종전 무장은 0을 '이미 무한'으로 보고 건드리지 않아, 무장한 적재가 1초에 55P03이었다.
     이제 0도 무장값으로 바꿨다가 잡은 뒤 0으로 되돌린다.

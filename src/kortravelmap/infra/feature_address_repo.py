@@ -189,7 +189,7 @@ async def apply_feature_address_override(
     if not has_mutation:
         raise ValueError("덮어쓸 주소/좌표 필드가 최소 1개 필요함")
 
-    # 433 DC-1: 첫 Feature 행 잠금 전의 regime 진입(epoch>0에서만 P EX). 적재 fence는
+    # 434 DC-1: 첫 Feature 행 잠금 전의 regime 진입(epoch>0에서만 P EX). 적재 fence는
     # 잡지 않는다 — 이 writer는 source/link를 쓰지 않는다.
     await lock_single_feature_writer_protocol(session)
     # procedure도 같은 core lock을 재사용하여 stale write를 fail-close한다.

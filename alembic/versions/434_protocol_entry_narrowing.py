@@ -1,4 +1,4 @@
-"""433: tracking 장부는 L만, 단건 writer는 regime에서만 P, 418 GRANT를 소유자로 다시 낸다.
+"""434: tracking 장부는 L만, 단건 writer는 regime에서만 P, 418 GRANT를 소유자로 다시 낸다.
 
 - WI-1: 큐레이션을 확정하는 쓰기만 P EX→L이다(권위 finish의 seal, SUCCESS 완결 전이).
   fill-starts·terminal은 L만, finish는 권위 여부로, 취소 전이는 SUCCESS 완결 인자로
@@ -21,8 +21,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "433_protocol_entry_narrowing"
-down_revision: str | None = "432_rest_snapshot_atomic"
+revision: str = "434_protocol_entry_narrowing"
+down_revision: str | None = "433_snapshot_ready_plan_reset"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -71,7 +71,7 @@ _SINGLE_WRITER: Final = "\nBEGIN\n  PERFORM ops.lock_single_feature_writer_proto
 _ACTIVATION_OLD: Final = "\nBEGIN\n    PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
 _ACTIVATION_NEW: Final = (
     "\nBEGIN\n    PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
-    "    -- 433 DC-1: 첫 cutover(epoch=0)만 epoch 표를 다른 보호 표보다 먼저 잠근다. 진입한\n"
+    "    -- 434 DC-1: 첫 cutover(epoch=0)만 epoch 표를 다른 보호 표보다 먼저 잠근다. 진입한\n"
     "    -- epoch=0 writer는 끝까지 쓰고, 새 진입은 여기서 새 epoch를 기다린다. epoch>0이면\n"
     "    -- 단건 writer가 epoch를 읽은 뒤 P를 기다리므로 표를 잠그지 않는다(역순 방지).\n"
     "    IF (SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton) = 0 THEN\n"
@@ -96,7 +96,7 @@ _FINISH_NEW: Final = (
     "    RAISE EXCEPTION 'provider membership completion kind is required'\n"
     "      USING ERRCODE = '22023';\n"
     "  END IF;\n"
-    "  -- 433 WI-1: 권위 완료(seal)만 P EX 뒤 L, 비권위 완료는 장부 L만 잡는다.\n"
+    "  -- 434 WI-1: 권위 완료(seal)만 P EX 뒤 L, 비권위 완료는 장부 L만 잡는다.\n"
     "  PERFORM ops.lock_provider_feature_tracking_protocol(p_authoritative_snapshot_complete);\n"
     "  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN\n"
     "    RAISE EXCEPTION 'provider membership command requires provider executor'\n"
@@ -105,7 +105,7 @@ _FINISH_NEW: Final = (
 )
 _CANCEL_TRANSITION_NEW: Final = (
     "\nBEGIN\n"
-    "  -- 433 WI-1: root 완결을 부르는 SUCCESS 완결 인자 조합만 P EX 뒤 L이다.\n"
+    "  -- 434 WI-1: root 완결을 부르는 SUCCESS 완결 인자 조합만 P EX 뒤 L이다.\n"
     "  PERFORM ops.lock_provider_feature_tracking_protocol(\n"
     "    p_result IS NOT DISTINCT FROM 'already_terminal'\n"
     "    AND p_target_status IS NOT DISTINCT FROM 'done'\n"
@@ -113,7 +113,7 @@ _CANCEL_TRANSITION_NEW: Final = (
 )
 _CANCEL_GUARD_OLD: Final = "  v_need_final boolean:=true;\n"
 _CANCEL_GUARD_NEW: Final = (
-    "  -- 433 WI-1: 취소 원장 쓰기는 L만 요구한다. P를 쥐었다면 EX여야 한다.\n"
+    "  -- 434 WI-1: 취소 원장 쓰기는 L만 요구한다. P를 쥐었다면 EX여야 한다.\n"
     "  -- root 완결을 부르는 SUCCESS 전이는 정의 자체가 P EX 뒤 L을 먼저 잡는다.\n"
     "  v_need_final boolean:=false;\n"
 )
@@ -127,7 +127,7 @@ _OPERATION_GUARD_OLD: Final = (
     "  END IF;\n"
 )
 _OPERATION_GUARD_NEW: Final = (
-    "  -- 433 WI-1: P EX 뒤 L은 큐레이션을 확정하는 쓰기(root 완료, 권위 child 완료)와\n"
+    "  -- 434 WI-1: P EX 뒤 L은 큐레이션을 확정하는 쓰기(root 완료, 권위 child 완료)와\n"
     "  -- 삭제뿐이다. 실패·취소·비권위 완료·marker·start 보충은 장부 쓰기라 L만 요구한다.\n"
     "  v_need_final := TG_OP='DELETE';\n"
     "  IF TG_OP<>'DELETE' AND NEW.status = 'done'\n"
@@ -267,11 +267,11 @@ def _edited_body(name: str, body: str) -> str:
     if hashlib.sha256(body.encode()).hexdigest() != routine.body_sha256:
         raise RuntimeError("432 body changed: " + name)
     if "lock_single_feature_writer_protocol" in body:
-        raise RuntimeError("433 entry already present: " + name)
+        raise RuntimeError("434 entry already present: " + name)
     changed = body
     for old, new in routine.edits:
         if changed.count(old) != 1:
-            raise RuntimeError("433 edit anchor is not unique: " + name)
+            raise RuntimeError("434 edit anchor is not unique: " + name)
         changed = changed.replace(old, new, 1)
     single_writer = routine.edits[0] == (_PROTOCOL_EX, _SINGLE_WRITER)
     if single_writer and "lock_scoped_feature_write_protocol" in changed:
@@ -282,7 +282,7 @@ def _edited_body(name: str, body: str) -> str:
 def _planned_replacements(rows: Sequence[Mapping[str, Any]]) -> list[tuple[str, str, str]]:
     """카탈로그 행을 검증하고 ``(name, owner, CREATE OR REPLACE 정의)`` 목록을 돌려준다."""
     if len(rows) != len(_ROUTINES) or {str(r["name"]) for r in rows} != set(_ROUTINES):
-        raise RuntimeError("433 routine inventory differs from revision 432")
+        raise RuntimeError("434 routine inventory differs from revision 432")
     replacements: list[tuple[str, str, str]] = []
     for row in rows:
         name = str(row["name"])
@@ -294,7 +294,7 @@ def _planned_replacements(rows: Sequence[Mapping[str, Any]]) -> list[tuple[str, 
             or row["language"] != "plpgsql"
             or row["definition"].count(row["body"]) != 1
         ):
-            raise RuntimeError("433 owner/kind/security/definition changed: " + name)
+            raise RuntimeError("434 owner/kind/security/definition changed: " + name)
         changed = _edited_body(name, str(row["body"]))
         replacements.append(
             (name, routine.owner, row["definition"].replace(row["body"], changed, 1))
@@ -353,14 +353,15 @@ ALTER TABLE ops.application_schema_operation_receipts
         '430_provider_snapshot_recovery',
         '431_transport_rest_reader',
         '432_rest_snapshot_atomic',
-        '433_protocol_entry_narrowing'
+        '433_snapshot_ready_plan_reset',
+        '434_protocol_entry_narrowing'
     ))
 """
 
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "SET ROLE ktm_feature_schema_owner",
     "SET ROLE ktm_feature_state_procedure_owner",
-    Path(__file__).with_name("_433_single_writer_entry.sql").read_text(encoding="utf-8"),
+    Path(__file__).with_name("_434_single_writer_entry.sql").read_text(encoding="utf-8"),
     "REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol() FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.lock_single_feature_writer_protocol() "
     "TO ktm_feature_runtime,"
@@ -430,7 +431,7 @@ def upgrade() -> None:
     ).all()
     missing = sorted(str(signature) for signature, oid in resolved if oid is None)
     if missing:
-        raise RuntimeError("433 signature not found in revision 432: " + ", ".join(missing))
+        raise RuntimeError("434 signature not found in revision 432: " + ", ".join(missing))
     oids = [int(oid) for _signature, oid in resolved]
     rows = bind.execute(text(_CATALOG_SQL), {"oids": oids}).mappings().all()
     replacements = _planned_replacements(rows)
@@ -462,14 +463,14 @@ def upgrade() -> None:
     bind.execute(text("SET ROLE " + _SCHEMA_OWNER))
     after = bind.execute(text(_CATALOG_SQL), {"oids": oids}).mappings().all()
     if len(after) != len(rows):
-        raise RuntimeError("433 replacement inventory changed")
+        raise RuntimeError("434 replacement inventory changed")
     for prior_row, updated_row in zip(rows, after, strict=True):
         for key in _PRESERVED:
             if prior_row[key] != updated_row[key]:
-                raise RuntimeError("433 replacement metadata changed: " + key)
+                raise RuntimeError("434 replacement metadata changed: " + key)
         name = str(updated_row["name"])
         if updated_row["body"] != _edited_body(name, str(prior_row["body"])):
-            raise RuntimeError("433 replacement body differs from its plan: " + name)
+            raise RuntimeError("434 replacement body differs from its plan: " + name)
     for owner, schema in granted:
         bind.execute(text("REVOKE CREATE ON SCHEMA " + schema + " FROM " + owner))
     for name, value in settings.items():

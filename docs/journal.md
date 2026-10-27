@@ -1,3 +1,95 @@
+## 2026-10-27 — alpine 관찰자 cold-array codec 경계 최소 교정
+
+원alpine2FAIL/1945PASS/29skip을 보존했다. 기존관찰자300ms timeout stack은
+SELECT 본문전 asyncpg int4[] introspection이어서 SQL exact-holder membership을 bool로
+반환하도록2줄만 바꾼다. PID/start/login/Lock/ungranted·300ms/0.8초/1초를 유지한다.
+[원실패·실측대기](reports/2026-10-27-bound-snapshot-stale-replan.md#alpine-관찰자-cold-codec-실패의-최소-교정)를
+명시하고 source두리뷰뒤 원pair2만실측한다. runtime·운영0/전체9미완/OFF를 유지한다.
+
+## 2026-10-27 — 실제 제품16·후보UI14 뒤 head oracle 빈줄1개 교정
+
+f29 local16과 후보UI14는 통과했으나 전체glibc CI는1952PASS/23skip 뒤 head-schema
+정본 비교1개에서 실패했다. complete live dump diff의 초과빈줄1개만 교정하며 함수/
+runtime/API/UI/migration은 바꾸지 않는다.
+[원 실패·승계 한계](reports/2026-10-27-bound-snapshot-stale-replan.md#f29-전체-glibc-ci의-oracle-형식-실패)를
+보존하고 새exacthead CI와 두리뷰가 끝나기 전 머지하지 않는다. 전체9미완/OFF/운영0이다.
+
+## 2026-10-27 — typed reset 실제 제품16 통과, CI 계약 교정 중
+
+source6cce26ef의 단일 owned16은16PASS18.90초/정확 CID·volume1·label0 정리PASS다.
+양 caller 저장원본 재계획·후처리/seal·원 replay 불변과 새권한·경합 경계를 확인했다.
+source2591/SDK53전후/import63/Common19네지점도 검산했다.
+[실제 수용·CI 구분](reports/2026-10-27-bound-snapshot-stale-replan.md#교정-source6c의-실제-제품16-수용과-ci-경계)을
+남겼으며 CI 문서크기/ACL선언 두 실패를 보존하고 교정 중이다. 전체9미완/OFF/운영0이다.
+
+## 2026-10-27 — 첫 제품 PG14PASS/2FAIL 보존과 canonical head 교정
+
+owned16 첫 실행은14PASS/2FAIL22.46초였고 정확 CID·volume1·전체 label0 정리는
+통과했다. prokind 자료형과 application graph432 누락을 좁게 교정한다. startup 엄격검사는
+유지하며 head 불일치 후 inventory skip을 별도 손상으로 확대하지 않는다.
+[원 실패와 미실행 post gate](reports/2026-10-27-bound-snapshot-stale-replan.md#첫-제품-owned16-실패와-canonical-head-교정)를
+보존하고 기존 source/head 계약을 확장했다. 순수 계약145개25.70초·graph check·Ruff는 통과했고 제품 전체 수용·CI는 미완/운영 변경0이다.
+
+## 2026-10-27 — typed reset scope 권한을3열로 제한하고 통합17개 수집
+
+제품 PG 전 발견한 CommandOwner scope 읽기 누락을 SELECT(key/epoch/owner)
+세 열만 추가해 고쳤다. lease/UPDATE/runtime 직접 권한과 frozen430은 그대로다.
+replay는 실제 apply 진입 추가0과 row/receipt 불변으로 표현하고 SQL문장 계측으로
+과장하지 않는다. [범위](reports/2026-10-27-bound-snapshot-stale-replan.md#실행-전-발견한-scope-열-권한과-관측-범위-정정)를
+반영해 순수142개14.45초·통합수집17개10.38초가 통과했다. source 두리뷰/소유PG/
+최종CI·최신main합성은 남아 있고 운영·profile 활성화0/전체9개미완을 유지한다.
+
+## 2026-10-27 — typed bound reset 통합 source16개와 순수142개
+
+양 provider atomic stale MAX3·migration 더 긴 timeout cap 순수142개가14.08초에
+통과했고, [통합 source](reports/2026-10-27-bound-snapshot-stale-replan.md#제품-통합-실행-전-checkpoint)16개를
+10.54초에 수집했다. 실제 canonical 두asset/원bytes·seal·replay, holder/foreign
+epoch·취소·lease, 별도 작성 ACL/startup을 포함한다. 새 제품 PG0이며 최종 두리뷰·
+single-owned 실행·CI는 남아 있다. 실제caller 이전 freshquota를 보존하고 운영/
+profile 활성화는 하지 않는다. 기존 실패·상한·전체9개 미완은 유지한다.
+
+## 2026-10-27 — 새 typed reset의 순수 경계138개 통과
+
+현재executor READY reset의 migration owner/ACL·client 원 plan/CAS·ACK 불명과
+Airport/Rest의 계획오류/atomic rollback 분리 회귀138개가16.80초에 통과했다.
+잘못된 ledger 경로의 초기 수집0 로그도 보존했다. [통합 후속](reports/2026-10-27-bound-snapshot-stale-replan.md#첫-제품-순수-회귀)의
+actual PG/현재·옛 owner/cancel/live apply·실제 수집/replay 수용은 아직 남았다.
+새 제품 PG/운영 변경0, 전체 CWRITE9개 미완·profile OFF를 유지한다.
+
+## 2026-10-27 — 실제 stale→rollback→live READY reset 거부 재현과 첫 제품 경계
+
+정확ea2fbcc5 owned PG1개가25.52초에 통과했다. 정확40001→aborted TX→
+유효READY/원 artifact 보존→기존 typed55P03을 관찰했고 두 선행실패·정리를 보존한다.
+[제품 후속](reports/2026-10-27-bound-snapshot-stale-replan.md#실제-재현-수용과-첫-제품-구현)은
+433의 현재executor typed reset과 원 apply plan을 받는 client/두 실제catch 결선이다.
+계획오류/ACK불명/외부binding은 기존안전경계를 유지하며 새 제품 PG·두리뷰·CI는
+아직 미완이다. profilesOFF/MAX3·상한·전체9개미완/운영변경0을 유지한다.
+
+## 2026-10-27 — bound 재현의 strict Geo 입력 연결만 정정
+
+두 번째 owned 시도는 setup432 뒤 observation 준비에서1FAIL/45.29초였다.
+reader의 frozenset과 Stats set 연결을 놓친 시험 오류로, 아직 실제 stale/reset 미관찰이다.
+원 log/XML/result·정확 정리를 보존하고 기존 donor의 실제 builtinset 연결만 복원했다.
+실제 준비 source의 strict encode/decode 왕복은 순수0.0182초에 통과했다.
+[기록](reports/2026-10-27-bound-snapshot-stale-replan.md#두-번째-시도의-strict-입력-실패와-순수-준비-확인)처럼
+두 리뷰 뒤 격리 재현1회가 남았다. 제품·validator·상한·운영 변경0, 전체9개 미완이다.
+
+## 2026-10-27 — bound snapshot 첫 재현은 baseline setup timeout으로 미도달
+
+정확 d13312a9의 최초 owned 시험은 baseline400 적용 중40초 marker가 만료되어
+1ERROR/41.53초였고, 제품 지점은 아직 미관찰이다. 원 log/XML/result와
+정확 CID·volume1·label0 cleanup PASS를 보존했다. [기록](reports/2026-10-27-bound-snapshot-stale-replan.md#최초-owned-재현-시도의-setup-실패)처럼
+기존 donor module50초만 맞추고 나머지 실행/SQL/자원 상한은 유지한다.
+제품 변경·운영 호출0, 두 리뷰 후 격리 재시도1회가 남아 있다.
+
+## 2026-10-27 — bound snapshot stale 뒤 live lease 재계획 경계 조사
+
+Airport 실제 atomic apply의 정확 stale→전체 rollback→기존 typed reset55P03을
+관찰할 [재현 source와 작은 설계](reports/2026-10-27-bound-snapshot-stale-replan.md)를
+작성했다. 아직 실제 PG/운영 호출0이며 제품 수정 전이다. source 두 리뷰 뒤 격리 PG로
+재현하고, 동일 executor의 exact binding만 정리하는 typed 경계를 검토한다.
+MAX3·저장 artifact·취소/fence·후처리/seal·상한/OFF와 T-CWRITE9개 미완을 유지한다.
+
 ## 2026-10-27 — Common 최신 제품 공식 pair 배포·공개 UI13 수용
 
 검증 Map `0d60cd0b`/PinVi `9ebb588a`를 공식 Manager pair로1회 배포했다.
@@ -107,10 +199,10 @@ T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지�
 
 검증은 n150의 CI와 같은 네 pytest 세션·lint·frontend·Playwright에서 했다(결과는 PR 본문).
 
-## 2026-10-27 — Codex PR 리뷰 정리: tracking 장부는 L만, 단건 writer는 regime 진입(433)
+## 2026-10-27 — Codex PR 리뷰 정리: tracking 장부는 L만, 단건 writer는 regime 진입(434)
 
 Codex PR #1358~#1419 리뷰를 정리한 잠금 핵심을 `feat/map-codex-review-core`에 구현했다(PR은
-gate 뒤에 연다, 미머지). 433은 432 정본 루틴 20개의 본문 SHA·소유자·시그니처를 고정하고
+gate 뒤에 연다, 미머지). 434는 432 정본 루틴 20개의 본문 SHA·소유자·시그니처를 고정하고
 검토한 바늘만 바꾼다. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
 
 - WI-1: tracking 장부 쓰기는 L만, 큐레이션 확정(seal·root 완결·권위 finish·SUCCESS 완결 취소
@@ -124,7 +216,7 @@ gate 뒤에 연다, 미머지). 433은 432 정본 루틴 20개의 본문 SHA·�
 
 운영 읽기 전용 확인: flag 3종 OFF, shadow scope 미설정, epoch 0, active policy·write attempt 0,
 남은 로그 창과 DB 원장에서 LOCK_TIMEOUT 503·55P03 0건 — 결함은 잠재 상태였다.
-[ADR-115 §11](adr/115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-433-기준).
+[ADR-115 §11](adr/115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-434-기준).
 
 ## 2026-10-27 — kor-travel-common 최신(`aa232ad5`) 반영: 브랜치 `chore/common-latest-map`
 

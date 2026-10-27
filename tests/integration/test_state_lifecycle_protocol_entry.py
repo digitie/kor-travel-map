@@ -221,13 +221,13 @@ async def _assert_effect(admin, name: str, case: Case) -> None:
         assert overrides == (["active"] if name == "author_lifecycle_override" else [])
 
 
-#: provider 증거를 먼저 잡는 writer — 433도 종전 P EX를 유지한다. 적재는 bundle을 차례로 쓰며
-#: Feature를 쥔 채 다음 head를 갱신하므로, P 없이 겹치면 순환이다(433 적대 리뷰).
+#: provider 증거를 먼저 잡는 writer — 434도 종전 P EX를 유지한다. 적재는 bundle을 차례로 쓰며
+#: Feature를 쥔 채 다음 head를 갱신하므로, P 없이 겹치면 순환이다(434 적대 리뷰).
 _EVIDENCE = frozenset({"reactivate_admin_feature_state"})
 
 
 async def _wait_blocked_on_rows(admin, waiting: int, blocker: int, task) -> None:
-    """433 DC-1: epoch=0의 단건 writer는 P가 아니라 실제 행 잠금에서 기다린다."""
+    """434 DC-1: epoch=0의 단건 writer는 P가 아니라 실제 행 잠금에서 기다린다."""
     async with asyncio.timeout(4):
         while True:
             if task.done():
@@ -319,7 +319,7 @@ async def test_epoch0_state_call_waits_on_scoped_rows_not_on_protocol(scalar_eng
 
 @pytest.mark.parametrize("name", _CALLS)
 async def test_epoch0_entry_under_shared_protocol_does_not_upgrade(scalar_engines, name):
-    """433 DC-1: epoch=0의 진입은 P를 잡지 않으므로 SH를 쥔 caller에서 승격(23514)이 없다.
+    """434 DC-1: epoch=0의 진입은 P를 잡지 않으므로 SH를 쥔 caller에서 승격(23514)이 없다.
 
     epoch>0의 SH→EX 승격 거부는 ``test_single_writer_regime_entry.py``가 활성화 뒤에 본다.
     """
@@ -349,7 +349,7 @@ async def test_epoch0_entry_under_shared_protocol_does_not_upgrade(scalar_engine
 
 @pytest.mark.parametrize("name", _CALLS)
 async def test_epoch0_state_call_finishes_while_a_load_holds_protocol_ex(scalar_engines, name):
-    """433 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 상태·lifecycle writer는 끝난다.
+    """434 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 상태·lifecycle writer는 끝난다.
 
     provider 증거를 먼저 잡는 재활성화만 종전처럼 P EX로 적재 뒤에 선다(적재가 bundle을
     차례로 쓰며 Feature를 쥔 채 다음 head를 갱신하므로, P 없이 겹치면 순환이다).
@@ -570,7 +570,7 @@ async def test_body_owner_acl_and_search_path_are_preserved(scalar_engines, name
                 {"name": name},
             )
         ).one()
-    # 433 DC-1: 415의 무조건 EX 진입을 regime 진입 한 줄로 바꿨다. 그 줄을 빼면 414 원문이다.
+    # 434 DC-1: 415의 무조건 EX 진입을 regime 진입 한 줄로 바꿨다. 그 줄을 빼면 414 원문이다.
     entry = (
         "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
         if name in _EVIDENCE

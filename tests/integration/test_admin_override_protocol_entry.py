@@ -1,6 +1,6 @@
 """전화/주소 override의 첫 행 잠금 전 진입과 caller TX 수명을 실제 PG로 검증한다.
 
-433 DC-1: 주소 override는 단건 regime 진입(epoch>0에서만 P EX)이다 — 이 모듈은 정책을 활성화하지
+434 DC-1: 주소 override는 단건 regime 진입(epoch>0에서만 P EX)이다 — 이 모듈은 정책을 활성화하지
 않으므로 epoch=0에서 P 없이 행 잠금만 기다린다. 전화 override는 같은 transaction에서 source
 record/link를 쓰는 enrichment 경로라 적재 fence(P EX)를 그대로 먼저 잡는다.
 """
@@ -96,7 +96,7 @@ async def _wait_protocol_blocker(admin: Any, waiter: int, blocker: int) -> None:
 async def _wait_row_blocker_without_protocol(
     admin: Any, waiter: int, blocker: int, task: asyncio.Task[Any]
 ) -> None:
-    """433 DC-1(epoch=0): 단건 writer는 P를 요청하지 않고 실제 행 잠금에서만 기다린다."""
+    """434 DC-1(epoch=0): 단건 writer는 P를 요청하지 않고 실제 행 잠금에서만 기다린다."""
     async with asyncio.timeout(3):
         while True:
             if task.done():
@@ -154,7 +154,7 @@ async def test_override_entry_order_before_any_feature_row_lock(
             elif same_feature:
                 await _wait_row_blocker_without_protocol(admin, waiter, blocker, task)
             else:
-                # 433 DC-1: 다른 Feature의 주소 override는 SH 보유자 뒤에서 기다리지 않는다.
+                # 434 DC-1: 다른 Feature의 주소 override는 SH 보유자 뒤에서 기다리지 않는다.
                 await asyncio.wait_for(asyncio.shield(task), 8)
             if kind == "phones" and not same_feature:
                 # 다른 Feature여도 EX 대기 전에 행을 선점하지 않아야 한다.
@@ -207,7 +207,7 @@ async def test_phone_fence_upgrade_is_rejected_without_override_writes(
 async def test_epoch0_address_override_finishes_while_a_load_holds_protocol_ex(
     scalar_engines: Any,
 ) -> None:
-    """433 DC-1: 적재가 P EX를 쥐어도 다른 Feature의 주소 override는 기다리지 않는다."""
+    """434 DC-1: 적재가 P EX를 쥐어도 다른 Feature의 주소 override는 기다리지 않는다."""
     admin, runtime = scalar_engines
     feature = await _seed(admin)
     async with AsyncSession(runtime) as holder, holder.begin():
@@ -220,7 +220,7 @@ async def test_epoch0_address_override_finishes_while_a_load_holds_protocol_ex(
 async def test_epoch0_address_override_under_shared_protocol_does_not_upgrade(
     scalar_engines: Any,
 ) -> None:
-    """433 DC-1: epoch=0의 주소 override는 P를 잡지 않으므로 SH 보유 caller에서도 쓴다."""
+    """434 DC-1: epoch=0의 주소 override는 P를 잡지 않으므로 SH 보유 caller에서도 쓴다."""
     admin, runtime = scalar_engines
     feature = await _seed(admin)
     async with AsyncSession(runtime) as session, session.begin():

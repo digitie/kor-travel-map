@@ -2910,7 +2910,7 @@ async def create_admin_feature_with_field_overrides(
         6,
     )
     initial_payload["feature_id"] = feature_uuid
-    # 433 DC-1: claim/core/subtype보다 먼저 regime 진입을 잡아 중첩 field author의 역순을
+    # 434 DC-1: claim/core/subtype보다 먼저 regime 진입을 잡아 중첩 field author의 역순을
     # 막는다(epoch>0에서만 P EX, epoch=0이면 P 없음).
     await lock_single_feature_writer_protocol(session)
     try:
@@ -3060,7 +3060,7 @@ async def patch_admin_feature_with_field_overrides(
 ) -> FeatureFieldOverrideCommand:
     """기존 Feature의 admin patch를 field registry command로만 materialize한다."""
 
-    # 433 DC-1: Feature 행 선점 뒤 SQL author가 P를 기다리는 순서를 허용하지 않는다.
+    # 434 DC-1: Feature 행 선점 뒤 SQL author가 P를 기다리는 순서를 허용하지 않는다.
     await lock_single_feature_writer_protocol(session)
     state = await _state_for_conflict(session, feature_id)
     if state is None:

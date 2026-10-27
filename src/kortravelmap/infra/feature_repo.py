@@ -210,7 +210,7 @@ def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None
 
 _FEATURE_CURATION_FENCE_INFO_KEY: Final[str] = "kortravelmap.feature_curation_fence"
 _FEATURE_CURATION_FENCE_STAMP_KEY: Final[str] = "kortravelmap.feature_curation_fence_stamp"
-#: fence 없이 P EX만 쥔 transaction의 재진입 증거(433 WI-2). fence는 언제나 P EX를 함께 든다.
+#: fence 없이 P EX만 쥔 transaction의 재진입 증거(434 WI-2). fence는 언제나 P EX를 함께 든다.
 _FEATURE_WRITE_PROTOCOL_EX_INFO_KEY: Final[str] = "kortravelmap.feature_write_protocol_ex"
 _FEATURE_WRITE_PROTOCOL_EX_STAMP_KEY: Final[str] = "kortravelmap.feature_write_protocol_ex_stamp"
 _TRANSACTION_LOCK_STAMP_KEYS: Final[tuple[str, ...]] = (
@@ -308,7 +308,7 @@ def _protocol_ex_held(session: AsyncSession) -> bool:
 async def lock_feature_write_protocol(
     session: AsyncSession, *, exclusive: bool, wait_ms: int | None = None
 ) -> None:
-    """공통 protocol gate(P)의 **단일** Python 진입이다(433 WI-2).
+    """공통 protocol gate(P)의 **단일** Python 진입이다(434 WI-2).
 
     배타·공유를 받고, 이 transaction이 P EX를 이미 쥐었으면(fence 포함) SQL 없이 돌아간다.
     ``wait_ms``를 주면 그 한 문장만 상한을 늘린다(:func:`execute_with_lock_wait`). 공유를 쥔
@@ -330,7 +330,7 @@ async def lock_feature_write_protocol(
 
 
 async def lock_single_feature_writer_protocol(session: AsyncSession) -> None:
-    """단건·관리 writer의 첫 잠금이다(433 DC-1, ADR-115 §5.2(3) 개정).
+    """단건·관리 writer의 첫 잠금이다(434 DC-1, ADR-115 §5.2(3) 개정).
 
     scalar policy regime(epoch>0)에서만 P EX를 잡는다. regime 전(epoch=0)에는 P 없이 기존
     행 잠금 순서(source → link → Feature)와 기존 advisory만 쓴다 — 적재가 P EX를 쥔 동안에도
@@ -5843,7 +5843,7 @@ async def set_feature_phones(session: AsyncSession, feature_id: str, phones: lis
     domain-command ledger와 override provenance에서 모두 추적된다.
     """
     # 공유 writer의 source/link→Feature 순서와 교차하기 전에 protocol EX를 잡는다.
-    # 433 DC-1에서도 단건 regime 진입으로 바꾸지 않는다 — 유일한 호출자(전화 enrichment)가
+    # 434 DC-1에서도 단건 regime 진입으로 바꾸지 않는다 — 유일한 호출자(전화 enrichment)가
     # 같은 transaction에서 source record/link를 쓰며 그 쓰기는 적재 fence를 잡는다. fence를
     # 여기서 먼저 잡지 않으면 Feature 행 잠금 뒤에 P EX를 기다리는 역순이 된다.
     await lock_feature_curation_write(session)

@@ -176,7 +176,7 @@ async def test_never_shortens_an_engine_wait(prior_lock_ms: int) -> None:
 
 @pytest.mark.asyncio
 async def test_unset_engine_timeout_is_armed_not_left_to_the_gate() -> None:
-    """433 WI-2: ``lock_timeout=0``(미설정)을 그대로 두면 protocol gate가 1초로 바꾼다.
+    """434 WI-2: ``lock_timeout=0``(미설정)을 그대로 두면 protocol gate가 1초로 바꾼다.
 
     무장은 그 1초를 우회해 무장값까지 기다리게 하고, 끝나면 0을 되돌린다.
     """
@@ -188,7 +188,7 @@ async def test_unset_engine_timeout_is_armed_not_left_to_the_gate() -> None:
 
 @pytest.mark.asyncio
 async def test_armed_finalization_prefix_waits_like_the_fence() -> None:
-    """433 WI-1/2: 권위 finish의 확정 prefix(P EX→L)도 무장값으로 그 한 문장만 기다린다."""
+    """434 WI-1/2: 권위 finish의 확정 prefix(P EX→L)도 무장값으로 그 한 문장만 기다린다."""
     from kortravelmap.infra.pipeline_cancellation_repo import lock_provider_feature_finalization
 
     session = _Session(lock_timeout=30_000)
@@ -299,7 +299,7 @@ class _FinishSession(_ClientSession):
 async def test_only_authoritative_finish_arms_the_tracking_wait(
     authoritative: bool, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """433 WI-1: 권위 finish(P EX→L)만 적재 상한까지 기다린다. 비권위 finish는 L만 잡는다."""
+    """434 WI-1: 권위 finish(P EX→L)만 적재 상한까지 기다린다. 비권위 finish는 L만 잡는다."""
     from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 
     instance = AsyncKorTravelMapClient(object())  # type: ignore[arg-type]
@@ -319,7 +319,7 @@ async def test_only_authoritative_finish_arms_the_tracking_wait(
 
     monkeypatch.setattr("kortravelmap.client.repo_finish_dagster_feature_membership", _fake_finish)
     await instance.finish_dagster_feature_membership(
-        dagster_run_id="run-433",
+        dagster_run_id="run-434",
         membership=ProviderDatasetOperationMembership(1, "dataset_wide", "op"),
         authoritative_snapshot_complete=authoritative,
     )

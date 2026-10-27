@@ -1,4 +1,4 @@
-"""protocol 진입을 부르는 SECURITY DEFINER 루틴의 소유자가 그 진입의 EXECUTE를 갖는지(433 WI-3).
+"""protocol 진입을 부르는 SECURITY DEFINER 루틴의 소유자가 그 진입의 EXECUTE를 갖는지(434 WI-3).
 
 ## 왜
 
@@ -82,7 +82,7 @@ def acl_violations(schema: str) -> tuple[list[str], int]:
 
 def test_every_security_definer_caller_can_execute_its_protocol_entry() -> None:
     violations, seen = acl_violations(_HEAD_SCHEMA.read_text(encoding="utf-8"))
-    # 433 head에는 P·L·regime 진입을 부르는 SECURITY DEFINER 루틴이 40개를 넘는다.
+    # 434 head에는 P·L·regime 진입을 부르는 SECURITY DEFINER 루틴이 40개를 넘는다.
     assert seen >= 30, f"protocol 진입 호출을 {seen}개만 봤다 — 추출이 낡았다"
     assert not violations, (
         "migration만으로 만든 head에서 소유자가 EXECUTE를 갖지 못한 protocol 진입 호출:\n  "

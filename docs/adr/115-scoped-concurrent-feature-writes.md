@@ -1,8 +1,8 @@
 # ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌을 분리한다
 
-- 상태: accepted — 부분 구현. alembic 411~433(운영 head 432). 스냅샷 SH 경로와 스칼라 정책
+- 상태: accepted — 부분 구현. alembic 411~434(운영 head 432). 스냅샷 SH 경로와 스칼라 정책
   경로는 구현됐지만 **운영 OFF·동결**이다(DC-2 결정 대기). 현재 잠금 순서·writer 분류·동결
-  조건의 정본은 §11이다. 2026-10-27 개정: §5.2(3)·§8(3)의 writer 분류(433 DC-1), §11 신설.
+  조건의 정본은 §11이다. 2026-10-27 개정: §5.2(3)·§8(3)의 writer 분류(434 DC-1), §11 신설.
 - 날짜: 2026-10-23(제안), 2026-10-27(accepted·개정)
 - 결정자: 사용자(설계·문서화·후속 구현 요청), Codex(설계)
 - 근거 코드: `cdd2614007a86e8627949cd1176c61eb14c0ce3e`(main, PR #1350).
@@ -197,7 +197,7 @@ identity를 만들지 않는다. 초기 opt-in은 provider가 완전성을 보�
    전체 UUID 목록을 Python list로 올리지 않고 임시 표/정렬 커서·COPY를 이용한다.
 3. **진입**: 데이터 writer는 쓰기 전에 protocol gate(P)를 잡는다. 새 규약 writer(scoped
    kernel)는 공유, 잠금 세분화가 미지원인 대량 경로·restore·DDL·정책 cutover는 배타다.
-   **2026-10-27 개정(433 DC-1):** 단건·관리 writer는 regime 진입으로 들어간다. 정책 활성화
+   **2026-10-27 개정(434 DC-1):** 단건·관리 writer는 regime 진입으로 들어간다. 정책 활성화
    전(epoch=0)에는 P를 잡지 않고 기존 행 잠금 순서(source→link→Feature)로만 직렬화하며,
    활성화 뒤(epoch>0)에는 배타 P다 — strict guard가 manifest 없는 공유를 거부하므로 공유가
    아니다. 첫 활성화가 진행 중인 epoch=0 writer를 drain하고, 진입을 건너뛴 DML은 23514로
@@ -323,7 +323,7 @@ fence다. claim은 짧은 transaction으로 epoch를 발급한다. 적용 transa
 2. 후보 원장·정책·redirect·scope 원장을 additive migration으로 넣고 **기존 전역 잠금 아래에서**
    backfill·winner 비교·회복 테스트를 끝낸다. shadow 계산은 공개값을 바꾸지 않는다.
 3. **정책 활성화 전** 모든 writer에 protocol gate(단건·관리 writer는 regime 진입)와
-   후보/winner 의미 경로를 배포한다. **2026-10-27 개정(433 DC-1):** 단건·관리 writer는
+   후보/winner 의미 경로를 배포한다. **2026-10-27 개정(434 DC-1):** 단건·관리 writer는
    epoch=0 동안 P를 잡지 않는다. 첫 활성화가 그들을 drain한 뒤에는 같은 binary가 스스로
    배타 P를 잡으므로, 활성화를 위해 binary를 바꿔 끼우지 않는다(§11.3).
    전역 잠금 경로도 같은 의미를 쓰며 잠금만 배타다. 미변환 legacy 직접 base 호출은 DB에서
@@ -382,7 +382,7 @@ CPU core-seconds/row와 peak RAM, API p95는 기준선 대비 10% 초과 악화�
 2026-10-27: 부분 구현이 운영 중이라 accepted로 바꿨다(§11). ADR-111은 superseded가 아니라
 P·L을 앞에 둔 순서로 개정했다.
 
-## 11. 구현 상태(2026-10-27, alembic 433 기준)
+## 11. 구현 상태(2026-10-27, alembic 434 기준)
 
 Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절의 설계와 다르면 이 절이
 현행 정본이다.
@@ -416,7 +416,7 @@ Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절
   root(`provider_feature_load_run`)와 권위 child만 P EX를 요구하고, 나머지 provider job·취소
   원장 쓰기는 L(그리고 P를 쥐었다면 EX)만 요구한다.
 - 권위 finish의 P EX 대기는 적재와 같은 무장 상한(`feature_load_curation_lock_wait_seconds`)을
-  쓴다. 엔진 `lock_timeout`이 0이어도 gate가 1초로 줄이지 않는다(433 WI-2).
+  쓴다. 엔진 `lock_timeout`이 0이어도 gate가 1초로 줄이지 않는다(434 WI-2).
 
 ### 11.3 regime 진입과 cutover 안전성
 
@@ -426,7 +426,7 @@ Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절
   표 25개를 잠근다. 이후 활성화는 epoch 표를 잠그지 않는다 — 단건 writer가 epoch를 읽은 뒤
   P를 기다리므로 역순이 된다. 진입만 지난 epoch=0 writer는 다른 표가 아직 비어 있으므로 끝까지 쓰고 commit하며,
   활성화는 그때까지 기다린다(drain). epoch 표를 목록 순서대로 잠그면 이 writer의 다음 DML과
-  순환한다(433 적대 리뷰). cutover 중에 들어온 진입은 epoch
+  순환한다(434 적대 리뷰). cutover 중에 들어온 진입은 epoch
   표에서 기다리고, PL/pgSQL은 문장의 잠금을 snapshot보다 먼저 얻으므로(READ COMMITTED) 새
   epoch를 읽고 P EX를 잡는다. 오래된 snapshot의 RR/SERIALIZABLE writer는 412 barrier·430
   strict guard에 23514로 닫힌다.

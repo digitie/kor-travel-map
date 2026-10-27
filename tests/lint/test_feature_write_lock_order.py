@@ -20,15 +20,15 @@
    ``feature-write-all`` → ``feature-write:<id>`` → ``curation-catalog-write`` 순서를 지킨다.
    ``P``는 공통 protocol gate(``ops.lock_scoped_feature_write_protocol``, ADR-115)이고
    ``L``은 provider tracking lineage다(``ops.lock_provider_feature_tracking_protocol``: 인자가
-   ``true``면 P EX 다음 L, ``false``면 L만. 433 WI-1부터 큐레이션을 확정하는 쓰기만 ``true``다).
+   ``true``면 P EX 다음 L, ``false``면 L만. 434 WI-1부터 큐레이션을 확정하는 쓰기만 ``true``다).
    중첩 ``CALL``과 행 쓰기의 trigger 함수까지 펼쳐서 본다 — ``finalize_provider_curation_root``는
    ``curation-catalog-write``를 잡은 뒤 ``materialize_theme_candidate_generation``을 부르고, 그
    안이 gate를 다시 잡는다(이미 들고 있으므로 재진입, 위반 아님). 공유로 든 gate·P를 배타로
    올리는 것도 위반이다 — 둘이 동시에 그러면 서로를 기다린다.
 3. **P는 맨 앞.** P를 처음 잡는 자리 앞에 ranked advisory, L, Feature 도메인(``feature``·
-   ``provider_sync``) 행의 ``FOR UPDATE/SHARE``가 있으면 위반이다(433 WI-4). 명령·job·취소
+   ``provider_sync``) 행의 ``FOR UPDATE/SHARE``가 있으면 위반이다(434 WI-4). 명령·job·취소
    원장 행은 각자의 키로 순서가 정해지므로 세지 않는다. 단건·관리 writer의 regime 진입
-   (``ops.lock_single_feature_writer_protocol``, 433 DC-1)은 epoch에 따라 P를 잡거나 잡지
+   (``ops.lock_single_feature_writer_protocol``, 434 DC-1)은 epoch에 따라 P를 잡거나 잡지
    않으므로 **두 세계**(epoch=0: 진입이 아무것도 잡지 않음, epoch>0: P EX)를 모두 걷는다.
    epoch=0 세계에서는 P 없이 적재 fence(``curation-import``·``feature-curation-write``)를 행
    잠금 뒤에 잡는 것도 위반이다 — 적재는 P EX→fence→행 순서로 쥐고 있다.
@@ -285,7 +285,7 @@ def _leaf_violations(held: _Held, *, origin: str, path: str, world: str) -> list
     """tracking leaf 진입의 실행 시 거부(``ck_provider_tracking_prefix``)를 미리 본다.
 
     leaf는 P를 쥔 transaction에서 부르면 23514다. 확정 진입(P EX→L) 뒤의 재진입만 통과한다.
-    433이 장부 쓰기를 leaf로 좁혔으므로, 같은 transaction에서 적재 fence(P EX)를 쥔 뒤
+    434이 장부 쓰기를 leaf로 좁혔으므로, 같은 transaction에서 적재 fence(P EX)를 쥔 뒤
     장부를 쓰는 경로가 생기면 여기서 먼저 빨개진다.
     """
     protocol = held.modes.get(_P)
@@ -356,7 +356,7 @@ def _python_feature_write_takers() -> list[str]:
     return takers
 
 
-# ── Python helper 순서(433 WI-4) ────────────────────────────────────────────────
+# ── Python helper 순서(434 WI-4) ────────────────────────────────────────────────
 #
 # 같은 모듈 안의 함수 호출만 펼친다(다른 모듈의 repo 함수는 그 모듈을 볼 때 센다). 분기
 # (``if``/``else``)는 각자 같은 시작 상태에서 걷고 합친다 — ``if finalizing: P EX else: L``이
@@ -869,7 +869,7 @@ def test_the_scan_sees_the_feature_write_takers() -> None:
     assert "feature.sync_concierge_catalog_after_observation" in triggers.get(
         "ops.curation_source_observation_receipts", []
     )
-    # P·L 진입을 실제로 본다(433 WI-4). 433 head 기준 P 직접 진입 루틴 21개, tracking 진입 9개,
+    # P·L 진입을 실제로 본다(434 WI-4). 434 head 기준 P 직접 진입 루틴 21개, tracking 진입 9개,
     # regime 진입 10개다 — 정규식이 낡으면 이 하한이 먼저 무너진다.
     entries = {
         name: {match["name"] for match in _ENTRY_CALL.finditer(body)}
@@ -1007,7 +1007,7 @@ def test_the_detectors_turn_red_on_planted_violations() -> None:
     )
 
 
-#: 433 WI-4가 일부러 심는 P·L 위반 본문. 하나라도 초록이면 탐지기가 눈을 감은 것이다.
+#: 434 WI-4가 일부러 심는 P·L 위반 본문. 하나라도 초록이면 탐지기가 눈을 감은 것이다.
 _PLANTED_PROTOCOL = {
     "feature.import_then_protocol": (
         "  PERFORM pg_advisory_xact_lock(hashtextextended('kortravelmap:curation-import', 0));\n"

@@ -105,7 +105,7 @@ async def test_successful_root_after_child_finish_is_read_only_noop(
     )
     assert result.outcome == "noop"
     assert result.operation is operation
-    # 433 WI-1: 권위 완료만 P EX→L(final)이다.
+    # 434 WI-1: 권위 완료만 P EX→L(final)이다.
     assert order == ["final", "lineage", "root"]
     assert len(session.statements) == 2
     assert session.statements[1][1] == {
@@ -222,5 +222,5 @@ async def test_running_root_completed_child_preserves_existing_noop(
     )
     assert result.outcome == "noop"
     assert len(session.statements) == 1
-    # 433 WI-1: 비권위 완료는 장부 쓰기라 L만 잡는다(다른 적재의 P EX 뒤에서 기다리지 않는다).
+    # 434 WI-1: 비권위 완료는 장부 쓰기라 L만 잡는다(다른 적재의 P EX 뒤에서 기다리지 않는다).
     assert order == ["leaf", "lineage", "root"]

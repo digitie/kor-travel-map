@@ -1,6 +1,6 @@
 """field SQL·Python 선점 폐포를 실제 runtime/PG/ASGI로 검증한다.
 
-433 DC-1 이후 이 모듈은 두 세계를 순서대로 본다. 앞쪽 테스트는 정책 활성화 전(epoch=0)이라
+434 DC-1 이후 이 모듈은 두 세계를 순서대로 본다. 앞쪽 테스트는 정책 활성화 전(epoch=0)이라
 단건 writer가 P를 잡지 않는다. 활성화 테스트가 epoch를 올린 뒤의 HTTP 503 테스트는 regime
 진입이 P EX를 기다리는 경로다(``_ensure_regime``이 단독 실행에서도 그 세계를 만든다).
 """
@@ -240,7 +240,7 @@ async def _ensure_regime(admin, runtime) -> None:
 async def test_epoch0_writer_waits_only_on_the_same_feature_row(
     scalar_engines, kind, same_feature
 ):
-    """433 DC-1: epoch=0의 단건 writer는 applying kernel의 P SH 뒤에 줄 서지 않는다.
+    """434 DC-1: epoch=0의 단건 writer는 applying kernel의 P SH 뒤에 줄 서지 않는다.
 
     같은 Feature면 kernel이 잡은 Feature 행에서만 기다리고, 다른 Feature와 신규 생성은
     kernel이 열려 있는 동안 끝난다. 이 모듈의 활성화 테스트보다 앞에 있어야 epoch=0이다.
@@ -310,7 +310,7 @@ async def test_epoch0_writer_waits_only_on_the_same_feature_row(
 
 @pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
 async def test_epoch0_writer_under_shared_protocol_does_not_upgrade(scalar_engines, kind):
-    """433 DC-1: epoch=0이면 SH caller 안에서도 승격 없이 쓴다.
+    """434 DC-1: epoch=0이면 SH caller 안에서도 승격 없이 쓴다.
 
     epoch>0의 SH→EX 승격 거부(23514)는 ``test_single_writer_regime_entry.py``가 본다.
     """
@@ -326,7 +326,7 @@ async def test_epoch0_writer_under_shared_protocol_does_not_upgrade(scalar_engin
 
 @pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
 async def test_epoch0_writer_finishes_while_a_load_holds_protocol_ex(scalar_engines, kind):
-    """433 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 관리 writer는 끝난다(종전 503)."""
+    """434 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 관리 writer는 끝난다(종전 503)."""
     admin, runtime = scalar_engines
     assert await _epoch(admin) == 0
     case = await _prepare(admin, runtime, kind)
@@ -378,7 +378,7 @@ async def test_original_body_acl_config_and_owner_are_preserved(scalar_engines, 
                 dict(name=name),
             )
         ).one()
-    # 433 DC-1: 416의 P EX 첫 줄이 같은 자리의 regime 진입으로 바뀌었다.
+    # 434 DC-1: 416의 P EX 첫 줄이 같은 자리의 regime 진입으로 바뀌었다.
     gate = "  PERFORM ops.lock_single_feature_writer_protocol();\n"
     assert "lock_scoped_feature_write_protocol" not in row.prosrc
     assert row.prosrc.count(gate) == 1

@@ -1,4 +1,4 @@
-"""433 DC-1: 단건 writer의 regime 진입을 정책 활성화 전후로 실제 PG에서 반증한다.
+"""434 DC-1: 단건 writer의 regime 진입을 정책 활성화 전후로 실제 PG에서 반증한다.
 
 - epoch=0: 진입은 P를 잡지 않는다(적재가 P EX를 쥐어도 기다리지 않는다).
 - 첫 활성화: P EX + 보호 표 ACCESS EXCLUSIVE가 진행 중인 epoch=0 writer를 기다린다(drain).
@@ -61,7 +61,7 @@ async def _writer_target(admin) -> dict[str, object]:
         feature=UUID(feature),
         revision=int(revision),
         context=json.dumps(
-            dict(transition_kind="system", reason_code="regime-433", principal="admin:regime-433")
+            dict(transition_kind="system", reason_code="regime-434", principal="admin:regime-434")
         ),
     )
 

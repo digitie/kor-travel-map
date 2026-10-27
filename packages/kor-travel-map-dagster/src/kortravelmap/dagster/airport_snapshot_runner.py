@@ -184,6 +184,18 @@ async def _resume(
                     pins=runtime.pins,
                     dataset_id=member.membership.provider_dataset_id,
                 )
+            except io.AirportSnapshotReplanRequired:
+                # 적용 TX를 시작하지 않은 계획 오류는 기존 만료 reset 경계를 유지한다.
+                fresh = await io.read_airport_snapshot(client, identity, pins=runtime.pins)
+                if fresh is None:
+                    raise SnapshotRecoveryCorruption("registered snapshot disappeared") from None
+                await io.reset_airport_snapshot_plan(client, fresh, lease.token)
+                fresh = await io.read_airport_snapshot(client, identity, pins=runtime.pins)
+                if fresh is None:
+                    raise SnapshotRecoveryCorruption("registered snapshot disappeared") from None
+                observed = fresh
+                continue
+            try:
                 await run_snapshot_apply_postprocess(
                     client,
                     observed,
@@ -202,12 +214,12 @@ async def _resume(
                     ),
                 )
             except io.AirportSnapshotReplanRequired:
-                # 증명된 rollback 뒤에도 현재 binding을 다시 읽는다. active plan의
-                # reset 55P03은 step에 전파하며 임의 cancel/owner 교체로 우회하지 않는다.
+                # atomic context의 전체 rollback 뒤 원 apply plan에만 reset 권한을 준다.
+                # fresh read에서 다른 binding이 보이면 새 plan을 임의 취소하지 않는다.
                 fresh = await io.read_airport_snapshot(client, identity, pins=runtime.pins)
                 if fresh is None:
                     raise SnapshotRecoveryCorruption("registered snapshot disappeared") from None
-                await io.reset_airport_snapshot_plan(client, fresh, lease.token)
+                await io.reset_rolled_back_airport_snapshot_plan(client, fresh, lease.token, plan)
                 fresh = await io.read_airport_snapshot(client, identity, pins=runtime.pins)
                 if fresh is None:
                     raise SnapshotRecoveryCorruption("registered snapshot disappeared") from None

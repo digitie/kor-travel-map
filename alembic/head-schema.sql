@@ -3335,12 +3335,6 @@ CREATE PROCEDURE feature.activate_provider_field_policy(IN p_feature uuid, IN p_
 DECLARE v_key text; v_dataset bigint;
 BEGIN
     PERFORM ops.lock_scoped_feature_write_protocol(true);
-    -- 433 DC-1: 첫 cutover(epoch=0)만 epoch 표를 다른 보호 표보다 먼저 잠근다. 진입한
-    -- epoch=0 writer는 끝까지 쓰고, 새 진입은 여기서 새 epoch를 기다린다. epoch>0이면
-    -- 단건 writer가 epoch를 읽은 뒤 P를 기다리므로 표를 잠그지 않는다(역순 방지).
-    IF (SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton) = 0 THEN
-        LOCK TABLE feature.provider_field_policy_epoch IN ACCESS EXCLUSIVE MODE;
-    END IF;
     -- 실제 activation과 같은 TX에서 strict 정의 전체를 설치·검증한다.
     PERFORM feature._install_strict_sh_data_guards();
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write',0));
@@ -4508,7 +4502,7 @@ DECLARE
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'Feature request approval writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_feature_request_isolation';
@@ -5192,7 +5186,7 @@ DECLARE
     v_geometry_wkt text;
     v_operation text;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR p_command_id IS NULL
        OR p_feature_id IS NULL
@@ -5699,7 +5693,7 @@ CREATE PROCEDURE feature.author_lifecycle_override(IN p_feature_id uuid, IN p_so
 DECLARE
     v_current feature.features%ROWTYPE;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_source_lifecycle_state NOT IN ('active', 'retired')
        OR p_override_lifecycle_state NOT IN ('active', 'retired')
        OR p_prevent_provider_reactivation IS NULL
@@ -6029,7 +6023,7 @@ DECLARE
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual Feature writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_feature_create_isolation';
@@ -6817,7 +6811,7 @@ DECLARE
     v_category text;
     v_coord feature.features.coord%TYPE;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF jsonb_typeof(p_feature) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'feature payload must be an object'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
@@ -7209,7 +7203,7 @@ DECLARE
     v_created uuid;
     v_created_inserted boolean;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     v_dataset_id := nullif(btrim(p_identity ->> 'provider_dataset_id'), '')::bigint;
     v_kind := nullif(btrim(p_identity ->> 'feature_kind'), '');
     v_natural := nullif(btrim(p_identity ->> 'natural_key'), '');
@@ -14280,7 +14274,7 @@ DECLARE
     v_values jsonb;
     v_geometry_wkt jsonb;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR p_command_id IS NULL
        OR p_feature_id IS NULL
@@ -14742,7 +14736,7 @@ CREATE PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id uuid, IN p_pr
 DECLARE
     v_current feature.features%ROWTYPE;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF coalesce(btrim(p_principal), '') = ''
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'lifecycle override revoke has invalid typed arguments'
@@ -15432,7 +15426,7 @@ DECLARE
     v_publication_state text;
     v_quality_state text;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_action NOT IN ('patch', 'retire')
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR coalesce(btrim(p_reason_code), '') = ''
@@ -15512,7 +15506,7 @@ DECLARE
     v_current feature.features%ROWTYPE;
     v_override_row_revision bigint;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'expected feature row revision is required'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_expected_revision';
@@ -17802,7 +17796,7 @@ CREATE FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id 
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
-  PERFORM ops.lock_provider_feature_tracking_protocol(false);
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -17875,15 +17869,14 @@ DECLARE
   v_snapshot record;
   v_snapshot_state record;
 BEGIN
-  IF p_authoritative_snapshot_complete IS NULL THEN
-    RAISE EXCEPTION 'provider membership completion kind is required'
-      USING ERRCODE = '22023';
-  END IF;
-  -- 433 WI-1: 권위 완료(seal)만 P EX 뒤 L, 비권위 완료는 장부 L만 잡는다.
-  PERFORM ops.lock_provider_feature_tracking_protocol(p_authoritative_snapshot_complete);
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider membership command requires provider executor'
       USING ERRCODE = '42501';
+  END IF;
+  IF p_authoritative_snapshot_complete IS NULL THEN
+    RAISE EXCEPTION 'provider membership completion kind is required'
+      USING ERRCODE = '22023';
   END IF;
   SELECT child.job_id INTO STRICT v_child_job_id
   FROM ops.import_jobs AS child
@@ -18812,33 +18805,6 @@ $$;
 
 
 ALTER FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
-
---
--- Name: lock_single_feature_writer_protocol(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
---
-
-CREATE FUNCTION ops.lock_single_feature_writer_protocol() RETURNS void
-    LANGUAGE plpgsql SECURITY DEFINER
-    SET search_path TO 'pg_catalog'
-    AS $$
-DECLARE
-    v_epoch bigint;
-BEGIN
-    -- 행 잠금이 아닌 일반 읽기다. 이 읽기가 남기는 epoch 표의 ACCESS SHARE가
-    -- 첫 활성화의 ACCESS EXCLUSIVE 설치를 이 transaction이 끝날 때까지 기다리게 한다.
-    -- 활성화가 끝난 뒤의 읽기는 epoch>0을 보고 아래 EX로 들어간다.
-    SELECT epoch INTO STRICT v_epoch FROM feature.provider_field_policy_epoch
-     WHERE singleton;
-    IF v_epoch > 0 THEN
-        -- 첫 활성화가 함께 설치하는 strict guard(429)는 manifest 없는 SH 쓰기를 거부한다.
-        -- 그래서 regime의 단건 writer는 EX다. SH 허용은 strict guard 재설계(DC-2)의 몫이다.
-        PERFORM ops.lock_scoped_feature_write_protocol(true);
-    END IF;
-END;
-$$;
-
-
-ALTER FUNCTION ops.lock_single_feature_writer_protocol() OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: mark_snapshot_material_orphaned(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -19870,9 +19836,7 @@ CREATE FUNCTION ops.reject_pipeline_cancellation_prefix() RETURNS trigger
     SET search_path TO 'pg_catalog'
     AS $$
 DECLARE
-  -- 433 WI-1: 취소 원장 쓰기는 L만 요구한다. P를 쥐었다면 EX여야 한다.
-  -- root 완결을 부르는 SUCCESS 전이는 정의 자체가 P EX 뒤 L을 먼저 잡는다.
-  v_need_final boolean:=false;
+  v_need_final boolean:=true;
   v_protocol_held boolean;
   v_protocol_exclusive boolean;
   v_lineage_held boolean;
@@ -20072,13 +20036,12 @@ BEGIN
   IF TG_OP='UPDATE' THEN
     v_provider := v_provider OR OLD.kind IN ('provider_feature_load_run','provider_feature_load');
   END IF;
-  -- 433 WI-1: P EX 뒤 L은 큐레이션을 확정하는 쓰기(root 완료, 권위 child 완료)와
-  -- 삭제뿐이다. 실패·취소·비권위 완료·marker·start 보충은 장부 쓰기라 L만 요구한다.
   v_need_final := TG_OP='DELETE';
-  IF TG_OP<>'DELETE' AND NEW.status = 'done'
-     AND (TG_OP='INSERT' OR OLD.status IS DISTINCT FROM 'done') THEN
-    v_need_final := NEW.kind = 'provider_feature_load_run'
-      OR COALESCE(NEW.payload ->> 'authoritative_snapshot_complete', '') = 'true';
+  IF TG_OP<>'DELETE' THEN
+    v_need_final := v_need_final OR NEW.status IN ('done','failed','cancelled');
+  END IF;
+  IF TG_OP<>'INSERT' THEN
+    v_need_final := v_need_final OR OLD.status IN ('done','failed','cancelled');
   END IF;
   IF v_provider THEN
     -- 관측만 한다. tuple 뒤 새 blocking L/P를 요청하지 않는다.
@@ -20528,6 +20491,102 @@ $_$;
 ALTER FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: reset_ready_provider_snapshot_plan(uuid, bigint, uuid, uuid, uuid, text); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_dataset bigint;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_scope_epoch bigint;
+    v_scope_owner uuid;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot reset requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_snapshot IS NULL OR p_generation IS NULL OR p_generation<1 OR p_fence IS NULL
+       OR p_expected_attempt IS NULL OR p_expected_owner IS NULL
+       OR p_expected_manifest IS NULL OR p_expected_manifest !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'exact ready snapshot plan required' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot reset requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM ops.lock_scoped_feature_write_protocol(false);
+    SELECT artifact.provider_dataset_id INTO STRICT v_dataset
+      FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot;
+    -- 외부 dataset의 attempt 행을 잠근 뒤 participant를 늦게 추가하지 않는다.
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=p_expected_attempt;
+    IF NOT FOUND OR v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'snapshot reset attempt domain changed'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    -- 430B helper: P SH→actual parent SHARE→own whole scope UPDATE.
+    PERFORM ops._lock_scoped_feature_write_scope(v_dataset,'[]'::jsonb,false);
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=p_expected_attempt FOR UPDATE;
+    IF v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false
+       OR v_attempt.owner IS DISTINCT FROM p_expected_owner
+       OR v_attempt.manifest_digest IS DISTINCT FROM p_expected_manifest THEN
+        RAISE EXCEPTION 'snapshot reset attempt changed' USING ERRCODE='40001';
+    END IF;
+    -- 반드시 old attempt 다음 control이다. helper는 P/parent/scope 재진입 및
+    -- 현재 executor·member 활동성 검증을 담당하며 root/member/quota 행을 잠그지 않는다.
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF v_control.status IS DISTINCT FROM 'prepared' THEN
+        RAISE EXCEPTION 'completed snapshot result cannot be replanned'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    IF v_control.attempt_id IS NULL THEN
+        -- 응답 유실일 수 있지만 임의의 옛 cancelled attempt로 성공을 증명하지 않는다.
+        -- 변경0. caller가 SDK0 read로 상태를 읽은 뒤 새 계획을 결정한다.
+        RETURN 'needs_read';
+    END IF;
+    IF v_control.attempt_id IS DISTINCT FROM p_expected_attempt
+       OR v_control.attempt_owner IS DISTINCT FROM p_expected_owner
+       OR v_control.manifest_digest IS DISTINCT FROM p_expected_manifest THEN
+        RAISE EXCEPTION 'snapshot reset binding changed' USING ERRCODE='40001';
+    END IF;
+    -- old apply는 같은 scope/attempt를 끝까지 잠근다. 기다리는 동안 commit했다면
+    -- 위 prepared 검사가 거부하며, rollback하여 READY인 현재 owner만 정리한다.
+    IF v_attempt.status IS DISTINCT FROM 'ready'
+       OR v_attempt.apply_txid IS NOT NULL OR v_attempt.result_digest IS NOT NULL THEN
+        RAISE EXCEPTION 'snapshot reset requires an unapplied ready plan'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    SELECT epoch,owner INTO STRICT v_scope_epoch,v_scope_owner
+      FROM ops.feature_write_dataset_scopes
+      WHERE provider_dataset_id=v_dataset;
+    IF v_scope_epoch IS DISTINCT FROM v_attempt.dataset_epoch
+       OR v_scope_owner IS DISTINCT FROM p_expected_attempt THEN
+        RAISE EXCEPTION 'snapshot ready plan scope changed' USING ERRCODE='40001';
+    END IF;
+    -- kernel lease를 연장하거나 다른 executor로 인계하지 않는다. 현재 executor fence와
+    -- 정확한 bound READY의 rowlock 증거로만 취소하고 새 attempt를 계획한다.
+    IF NOT ops.cancel_scoped_feature_write(p_expected_attempt,p_expected_owner) THEN
+        RAISE EXCEPTION 'snapshot kernel plan was not cancelled' USING ERRCODE='40001';
+    END IF;
+    UPDATE ops.provider_snapshot_controls
+      SET attempt_id=NULL,attempt_owner=NULL,manifest_digest=NULL,updated_at=clock_timestamp()
+      WHERE snapshot_id=p_snapshot;
+    RETURN 'reset';
+END;
+$_$;
+
+
+ALTER FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: scoped_feature_write_membership_digest(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -20790,11 +20849,7 @@ DECLARE
   v_replayed boolean;
   v_stale_input boolean;
 BEGIN
-  -- 433 WI-1: root 완결을 부르는 SUCCESS 완결 인자 조합만 P EX 뒤 L이다.
-  PERFORM ops.lock_provider_feature_tracking_protocol(
-    p_result IS NOT DISTINCT FROM 'already_terminal'
-    AND p_target_status IS NOT DISTINCT FROM 'done'
-    AND p_dagster_terminal_status IS NOT DISTINCT FROM 'SUCCESS');
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -20950,7 +21005,7 @@ CREATE PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
-  PERFORM ops.lock_provider_feature_tracking_protocol(false);
+  PERFORM ops.lock_provider_feature_tracking_protocol(true);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider terminal command requires provider executor'
       USING ERRCODE = '42501';
@@ -23752,7 +23807,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_protocol_entry_narrowing'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -33969,18 +34024,6 @@ GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean
 GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_feature_schema_owner;
 GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_curation_command_owner;
 GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_manual_provider_dedup_procedure_owner;
-GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_manual_feature_procedure_owner;
-GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_feature_request_procedure_owner;
-
-
---
--- Name: FUNCTION lock_single_feature_writer_protocol(); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
---
-
-REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol() FROM PUBLIC;
-GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_feature_runtime;
-GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_manual_feature_procedure_owner;
-GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_feature_request_procedure_owner;
 
 
 --
@@ -34070,6 +34113,14 @@ REVOKE ALL ON FUNCTION ops.reject_provider_snapshot_artifact_update() FROM PUBLI
 
 REVOKE ALL ON FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) TO ktm_curation_provider_executor;
 
 
 --
@@ -35795,6 +35846,27 @@ GRANT SELECT ON TABLE ops.feature_update_requests TO ktm_curation_command_owner;
 --
 
 GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.feature_write_dataset_scopes TO ktm_feature_state_procedure_owner;
+
+
+--
+-- Name: COLUMN feature_write_dataset_scopes.provider_dataset_id; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT(provider_dataset_id) ON TABLE ops.feature_write_dataset_scopes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN feature_write_dataset_scopes.epoch; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT(epoch) ON TABLE ops.feature_write_dataset_scopes TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN feature_write_dataset_scopes.owner; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT(owner) ON TABLE ops.feature_write_dataset_scopes TO ktm_curation_command_owner;
 
 
 --

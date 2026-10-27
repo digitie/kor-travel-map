@@ -236,7 +236,7 @@ async def test_apply_sido_and_road_management_no() -> None:
 async def test_apply_acquires_regime_entry_before_first_row_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """433 DC-1: 첫 행 잠금 전의 진입은 regime 진입(epoch>0에서만 P EX)이고 적재 fence가 아니다."""
+    """434 DC-1: 첫 행 잠금 전의 진입은 regime 진입(epoch>0에서만 P EX)이고 적재 fence가 아니다."""
     session = _Session([None])
 
     async def _protocol(actual: Any) -> None:

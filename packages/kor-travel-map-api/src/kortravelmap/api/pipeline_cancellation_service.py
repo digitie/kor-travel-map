@@ -1300,7 +1300,7 @@ async def _record_terminal_run(
         ):
             continue
         async with session.begin():
-            # 433 WI-1: SUCCESS 완결 전이만 root 완결에 닿는다(P EX→L, READ COMMITTED).
+            # 434 WI-1: SUCCESS 완결 전이만 root 완결에 닿는다(P EX→L, READ COMMITTED).
             # 실패·취소 전이와 그 뒤의 실패 기록은 장부 쓰기라 L만 잡는다.
             finalizing = cancellation_transition_finalizes(
                 result=run_result,
