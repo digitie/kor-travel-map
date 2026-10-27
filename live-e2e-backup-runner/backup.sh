@@ -3,7 +3,7 @@ set -euo pipefail
 
 runner_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo="${KOR_TRAVEL_MAP_BACKUP_REPO_ROOT:-$(cd "$runner_dir/.." && pwd)}"
-pg_image="${KOR_TRAVEL_MAP_BACKUP_POSTGRES_IMAGE:-postgis/postgis:16-3.5}"
+pg_image="${KOR_TRAVEL_MAP_BACKUP_POSTGRES_IMAGE:-postgis/postgis:18-3.6}"
 dagster_container="${KOR_TRAVEL_MAP_BACKUP_DAGSTER_CONTAINER:-kor-travel-map-dagster-latest}"
 rustfs_container="${KOR_TRAVEL_MAP_BACKUP_RUSTFS_CONTAINER:-kor-travel-rustfs}"
 backup_root="${KOR_TRAVEL_MAP_BACKUP_ROOT:-$repo/data/backups}"
