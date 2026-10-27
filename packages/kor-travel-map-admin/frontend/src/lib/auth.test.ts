@@ -75,12 +75,12 @@ describe("admin auth helpers", () => {
   it("username이 달라도 비밀번호 검증 결과를 합쳐 invalid로 처리한다", async () => {
     const env = {
       KOR_TRAVEL_MAP_UI_ADMIN_USERNAME: "admin",
-      KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH: await hashAdminPasswordForEnv("ad.min"),
+      KOR_TRAVEL_MAP_UI_ADMIN_PASSWORD_HASH: await hashAdminPasswordForEnv("not-a-secret"),
       KOR_TRAVEL_MAP_UI_SESSION_SECRET: "x".repeat(32),
     };
 
     await expect(
-      verifyAdminLogin({ username: "not-admin", password: "ad.min" }, env),
+      verifyAdminLogin({ username: "not-admin", password: "not-a-secret" }, env),
     ).resolves.toBe("invalid");
   });
 
