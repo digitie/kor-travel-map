@@ -1,3 +1,36 @@
+## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 실제 PG 수용
+
+정확 source `e35f5dc3`은 두 독립 리뷰 뒤 같은 상한의 owned PG2case를24.80초에 통과했다.
+양 capture/leader의 실제 participant-scope 대기·정확40001·전체TX aborted·unbound READY
+public cancel·동일 bytes 새 attempt/key/manifest·winner/base/lineage·완료 replay source DML0을
+확인했다. source2582/import59/SDK53·격리 CommonAA19의 전후 검산, 정확CID/volume1/label0
+회수도 PASS다. 첫 관찰bind2FAIL와 순수실패2회는 아래/원장에 보존한다.
+
+생산/운영 변경0이며 최종 CI·병합은 대기한다. 일반 coordinator·전 writer 전환과 운영
+CPU/RSS 개선, 상위 T-CWRITE-01–09는 미완이다.
+[제한 수용과 원본 증거](reports/2026-10-27-shared-feature-artifact-replan.md#실제-pg-수용).
+
+## 2026-10-27 — 공유 Feature 첫 실제 PG의 xid8 관찰 bind 정정
+
+CommonAA 정상 합성 `f691a8e1`의 첫 owned PG2case는 정확 scope 대기·선택된40001·READY
+불변 뒤 관찰용 xid8 bind에 문자열을 넘겨2FAIL(28.02초)이었다. 정수 xid를 그대로
+전달하는 시험1줄만 수정한다. 원결과와 정확CID/volume1/전체label0 정리PASS를 보존하며,
+aborted 상태 확인·동일 artifact 재계획/완료 replay의 실제PASS는 아직0이다.
+두 좁은 리뷰 뒤 같은 상한으로 재시험한다. 생산/운영 변경0·상위 T-CWRITE-01–09 미완이다.
+[실패와 정정 원장](reports/2026-10-27-shared-feature-artifact-replan.md#첫-실제-pg-실패와-관찰용-bind-정정).
+
+## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 시험 착수
+
+PR #1421 문서 head `3e962183` 위에 시험 전용 후속을 쌓는다. 정렬 participant-scope
+대기→선택된 stale40001→전체 TX rollback→unbound READY public cancel→동일 bundle의
+새 attempt/key·현재 manifest 재계획과 양방향 winner/lineage·완료 replay DML0을 검사한다.
+순수 회귀21PASS(같은 bytes의 hashseed1/2 복원 포함)·통합2case fixture 미정의0을 확인했다.
+초안 순수실패2회의 원인·정정은 원장에 보존한다. 두 독립 리뷰와 부모 최신 main 합성,
+owned PG·최종 CI는 아직 대기다.
+생산 코드/SQL/API·OFF 설정과 운영은 변경하지 않는다. T-CWRITE-01–09 및 일반
+coordinator/운영 CPU·RSS 개선은 미완이다.
+[범위와 검증 원장](reports/2026-10-27-shared-feature-artifact-replan.md).
+
 ## 2026-10-27 — snapshot OS worker pair의 제한 실제 PG 수용
 
 정확 시험 source `6307ec63`은 두 독립 리뷰와 Airport/Rest 양방향 owned PG2개를
