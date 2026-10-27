@@ -3335,6 +3335,12 @@ CREATE PROCEDURE feature.activate_provider_field_policy(IN p_feature uuid, IN p_
 DECLARE v_key text; v_dataset bigint;
 BEGIN
     PERFORM ops.lock_scoped_feature_write_protocol(true);
+    -- 433 DC-1: 첫 cutover(epoch=0)만 epoch 표를 다른 보호 표보다 먼저 잠근다. 진입한
+    -- epoch=0 writer는 끝까지 쓰고, 새 진입은 여기서 새 epoch를 기다린다. epoch>0이면
+    -- 단건 writer가 epoch를 읽은 뒤 P를 기다리므로 표를 잠그지 않는다(역순 방지).
+    IF (SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton) = 0 THEN
+        LOCK TABLE feature.provider_field_policy_epoch IN ACCESS EXCLUSIVE MODE;
+    END IF;
     -- 실제 activation과 같은 TX에서 strict 정의 전체를 설치·검증한다.
     PERFORM feature._install_strict_sh_data_guards();
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write',0));
@@ -11101,7 +11107,7 @@ DECLARE
     v_raw_payload_hash text;
     v_causation_ref text;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF p_provider_dataset_id IS NULL
        OR coalesce(btrim(p_source_entity_key), '') = ''
        OR coalesce(btrim(p_source_record_key), '') = ''
@@ -12752,7 +12758,6 @@ DECLARE
     v_provider feature.features%ROWTYPE;
     v_origin feature.feature_creation_origins%ROWTYPE;
     v_source record;
-    v_evidence record;
     v_manual_snapshot jsonb;
     v_provider_snapshot jsonb;
     v_input jsonb;
@@ -12767,7 +12772,7 @@ DECLARE
     v_prior_case_id uuid;
     v_decision_fingerprint text;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual/provider dedup detector requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_detector_isolation';
@@ -12819,31 +12824,6 @@ BEGIN
 
     -- event publication·decision과 같은 global fence가 case episode도 직렬화한다.
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-m05', 0));
-    -- 433 DC-1: regime 전에는 P가 없다.
-    -- provider 적재와 같은 순서로 source 증거(entity/record/head 다음 link)를
-    -- Feature보다 먼저 잡는다.
-    FOR v_evidence IN
-        SELECT link.source_entity_key
-        FROM provider_sync.source_links AS link
-        WHERE link.feature_id = p_provider_feature_id
-          AND link.source_role = 'primary'
-        ORDER BY link.source_entity_key COLLATE "C"
-    LOOP
-        PERFORM 1
-        FROM provider_sync.source_entities AS entity
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = entity.source_entity_key
-        JOIN provider_sync.source_records AS record
-          ON record.source_entity_key = head.source_entity_key
-         AND record.source_record_key = head.current_source_record_key
-        WHERE entity.source_entity_key = v_evidence.source_entity_key
-        FOR SHARE OF entity, record, head;
-        PERFORM 1
-        FROM provider_sync.source_links AS link
-        WHERE link.feature_id = p_provider_feature_id
-          AND link.source_entity_key = v_evidence.source_entity_key
-        FOR SHARE;
-    END LOOP;
     PERFORM 1
     FROM feature.features AS locked
     WHERE locked.feature_id IN (p_manual_feature_id, p_provider_feature_id)
@@ -14001,7 +13981,6 @@ DECLARE
     v_provider feature.features%ROWTYPE;
     v_origin feature.feature_creation_origins%ROWTYPE;
     v_source record;
-    v_evidence record;
     v_primary_source_count integer;
     v_command ops.domain_commands%ROWTYPE;
     v_transition_feature_id uuid;
@@ -14013,7 +13992,7 @@ DECLARE
     v_event_sequence bigint;
     v_occurred_at timestamptz;
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual/provider dedup decision requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_decision_isolation';
@@ -14070,31 +14049,6 @@ BEGIN
         RETURN;
     END IF;
 
-    -- 433 DC-1: regime 전에는 P가 없다.
-    -- provider 적재와 같은 순서로 source 증거(entity/record/head 다음 link)를
-    -- Feature보다 먼저 잡는다.
-    FOR v_evidence IN
-        SELECT link.source_entity_key
-        FROM provider_sync.source_links AS link
-        WHERE link.feature_id = v_case.provider_feature_id
-          AND link.source_role = 'primary'
-        ORDER BY link.source_entity_key COLLATE "C"
-    LOOP
-        PERFORM 1
-        FROM provider_sync.source_entities AS entity
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = entity.source_entity_key
-        JOIN provider_sync.source_records AS record
-          ON record.source_entity_key = head.source_entity_key
-         AND record.source_record_key = head.current_source_record_key
-        WHERE entity.source_entity_key = v_evidence.source_entity_key
-        FOR SHARE OF entity, record, head;
-        PERFORM 1
-        FROM provider_sync.source_links AS link
-        WHERE link.feature_id = v_case.provider_feature_id
-          AND link.source_entity_key = v_evidence.source_entity_key
-        FOR SHARE;
-    END LOOP;
     PERFORM 1
     FROM feature.features AS locked
     WHERE locked.feature_id IN (v_case.manual_feature_id, v_case.provider_feature_id)
@@ -14262,7 +14216,7 @@ CREATE PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
 BEGIN
-  PERFORM ops.lock_single_feature_writer_protocol();
+  PERFORM ops.lock_scoped_feature_write_protocol(true);
     -- An immutable cursor-zero subscription is the paired-consumer activation
     -- receipt. No M05 resolution (including "kept") can predate it.
     PERFORM 1
@@ -34025,7 +33979,6 @@ GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean
 
 REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol() FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_feature_runtime;
-GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_manual_provider_dedup_procedure_owner;
 GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_manual_feature_procedure_owner;
 GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_feature_request_procedure_owner;
 
