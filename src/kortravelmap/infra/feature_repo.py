@@ -2946,6 +2946,31 @@ async def _upsert_source_record_state(
     )
 
 
+_CURRENT_SOURCE_RECORD_KEY_SQL: Final[str] = """
+SELECT current_source_record_key
+FROM provider_sync.source_entity_heads
+WHERE source_entity_key = :source_entity_key
+"""
+
+
+async def _source_record_is_current_head(
+    session: AsyncSession, record_state: _SourceRecordUpsertState
+) -> bool:
+    """이 record가 entity의 저장된 head인지 본다. 순서가 뒤바뀐 artifact를 가린다.
+
+    ``became_current``가 참이면 같은 문장이 head를 이 key로 옮겼다. 거짓은 동일 재관측과
+    오래된 artifact 둘 다이므로 저장된 head로 구분한다
+    (``scoped_provider_refresh._apply_provider_scalar``와 같은 판정이다).
+    """
+    if record_state.became_current:
+        return True
+    current_key: str | None = await session.scalar(
+        text(_CURRENT_SOURCE_RECORD_KEY_SQL),
+        {"source_entity_key": record_state.source_entity_key},
+    )
+    return current_key == record_state.source_record_key
+
+
 async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> bool:
     """``provider_sync.source_records`` insert. 신규면 ``True``, 이미 있으면 ``False``.
 
@@ -3612,9 +3637,12 @@ async def load_bundle(
         session,
         provider=bundle.source_record.provider,
         dataset_key=bundle.source_record.dataset_key,
-    ):
+    ) and await _source_record_is_current_head(session, record_state):
         # 기존 typed DTO의 기본 None과 원천 필드 존재는 별개다. 증거가 없으면 recorder가
         # unresolved로 남기며 winner/effective를 갱신하지 않는다. 기본 OFF에는 변환/SQL0회다.
+        # 순서가 뒤바뀐 오래된 artifact는 head를 바꾸지 않으므로 건너뛴다. recorder는 현재
+        # head만 증거로 받는다(23514). 그대로 넘기면 적재 transaction 전체가 rollback되고
+        # 재시도마다 같은 bundle에서 다시 멈춘다. 후보는 현재 head의 것으로 남는다.
         shadow_values, shadow_geometry = "{}", "{}"
         if (
             bundle.provider_field_presence is not None

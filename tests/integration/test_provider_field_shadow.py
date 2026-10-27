@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -13,14 +14,18 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
+from kortravelmap.infra import feature_repo
 from kortravelmap.infra.provider_field_candidates import (
     arm_provider_field_shadow,
     capture_provider_field_candidates,
 )
+from tests.integration.test_feature_repo_load import _KST, _first_probe_notice_bundle
 from tests.integration.test_tvn36_override_lineage_spine import _seed_feature_source
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
+
+    from kortravelmap.dto import FeatureBundle
 
 pytestmark = pytest.mark.integration
 
@@ -283,6 +288,73 @@ async def test_old_source_record_is_not_accepted_as_current_head(
         )
         == "first"
     )
+
+
+def _shadow_notice(name: str, observed_at: datetime) -> FeatureBundle:
+    """같은 provider entity의 관측 하나. 원문이 다르면 record key도 다르다."""
+    bundle = _first_probe_notice_bundle(message=name, fetched_at=observed_at)
+    return bundle.model_copy(
+        update={
+            "feature": bundle.feature.model_copy(update={"name": name}),
+            "provider_field_presence": ProviderFieldPresence(
+                normalizer_revision="fixture-v1", supplied_fields=frozenset({"core.name"})
+            ),
+        }
+    )
+
+
+async def _shadow_rows(session: AsyncSession, dataset_id: int) -> list[tuple[str, ...]]:
+    rows = await session.execute(
+        text("""
+        SELECT field_path, value_json #>> '{}', validated_source_record_key, availability
+        FROM feature.provider_field_shadow_candidates
+        WHERE provider_dataset_id = :dataset ORDER BY field_path
+    """),
+        {"dataset": dataset_id},
+    )
+    return [tuple(row) for row in rows]
+
+
+async def test_out_of_order_bundle_skips_shadow_capture_without_aborting_load(
+    migrated_session: AsyncSession,
+) -> None:
+    """오래된 artifact는 head를 바꾸지 않으므로 shadow capture도 건너뛴다.
+
+    recorder는 현재 head만 증거로 받는다. hook이 조건 없이 넘기던 때는 순서가 뒤바뀐
+    bundle 하나가 23514로 적재 transaction 전체를 rollback시켰고, 재시도마다 같은 bundle에서
+    다시 멈췄다.
+    """
+    session = migrated_session
+    provider, dataset_key = "kor-travel-transport", "transport_highway_incidents"
+    dataset_id = await feature_repo.resolve_active_provider_dataset_id(
+        session, provider=provider, dataset_key=dataset_key
+    )
+    await _register(session, dataset_id, [_FIELDS[0]])
+    arm_provider_field_shadow(session, 1, frozenset({(provider, dataset_key)}))
+    newer = _shadow_notice("새 관측 이름", datetime(2026, 6, 1, 9, 5, tzinfo=_KST))
+    older = _shadow_notice("옛 관측 이름", datetime(2026, 6, 1, 9, 0, tzinfo=_KST))
+
+    await feature_repo.load_bundle(session, newer)
+    before = await _shadow_rows(session, dataset_id)
+    assert before == [
+        ("core.name", "새 관측 이름", newer.source_record.source_record_key, "value")
+    ]
+
+    result = await feature_repo.load_bundle(session, older)
+
+    # 오래된 원문은 immutable 이력으로 남지만 head와 후보는 그대로다.
+    assert result.source_records_inserted == 1
+    assert await _shadow_rows(session, dataset_id) == before
+    head = await session.scalar(
+        text("""
+        SELECT head.current_source_record_key
+        FROM provider_sync.source_entity_heads AS head
+        JOIN provider_sync.source_records AS record USING (source_entity_key)
+        WHERE record.source_record_key = :record
+    """),
+        {"record": older.source_record.source_record_key},
+    )
+    assert head == newer.source_record.source_record_key
 
 
 async def _delete_as_runtime(session: AsyncSession, table: str) -> None:
