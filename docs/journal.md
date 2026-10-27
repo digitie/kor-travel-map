@@ -58,6 +58,19 @@ Airport 실제 atomic apply의 정확 stale→전체 rollback→기존 typed res
 재현하고, 동일 executor의 exact binding만 정리하는 typed 경계를 검토한다.
 MAX3·저장 artifact·취소/fence·후처리/seal·상한/OFF와 T-CWRITE9개 미완을 유지한다.
 
+## 2026-10-27 — Common 최신 제품 공식 pair 배포·공개 UI13 수용
+
+검증 Map `0d60cd0b`/PinVi `9ebb588a`를 공식 Manager pair로1회 배포했다.
+새 committed transaction·실제6image·보호5·DBidentity/schema·기존 c6c45행을 검산했고,
+정확한 이번 smoke 이력1개만 추가됐음을 확인했다. 원 RUNNING51개 복구 뒤 전체67상태가
+baseline과 같으며 자기 supervisor/process 정리를 끝냈다. Weather·Transport 이미지 변경은0이다.
+
+공개 HTTPS UI는 최초56.39초 전체FAIL(Map7PASS/PinVi3뒤adminTimeout)을 보존한다.
+제품/예산 변경 없이 관측 필드만 추가한 두 번째 실행은49.27초에 Map7+PinVi6을 통과했다.
+최초 원인은 불명이며 제품 수정·재발 방지·성능 개선으로 확대하지 않는다.
+상위 T-CWRITE-01–09/일반 coordinator·전 writer 전환·운영 CPU/RSS 저감은 여전히 미완이다.
+[실제 배포·복원·두 UI 결과](reports/2026-10-27-common-aa232-pair-deploy-public-ui.md).
+
 ## 2026-10-27 — 동시 쓰기 제한 시험 두 PR의 최종 CI·정상 병합
 
 부모 #1421의 정확 head `e23c277d`와 후속 #1422의 `a32674a1`은 각각 CI10개를
