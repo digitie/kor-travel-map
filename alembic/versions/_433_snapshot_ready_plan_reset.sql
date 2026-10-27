@@ -7,7 +7,8 @@ DECLARE
     v_dataset bigint;
     v_attempt ops.feature_write_attempts%ROWTYPE;
     v_control ops.provider_snapshot_controls%ROWTYPE;
-    v_scope ops.feature_write_dataset_scopes%ROWTYPE;
+    v_scope_epoch bigint;
+    v_scope_owner uuid;
 BEGIN
     IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
         RAISE EXCEPTION 'snapshot reset requires provider executor' USING ERRCODE='42501';
@@ -68,10 +69,11 @@ BEGIN
         RAISE EXCEPTION 'snapshot reset requires an unapplied ready plan'
             USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
     END IF;
-    SELECT * INTO STRICT v_scope FROM ops.feature_write_dataset_scopes
+    SELECT epoch,owner INTO STRICT v_scope_epoch,v_scope_owner
+      FROM ops.feature_write_dataset_scopes
       WHERE provider_dataset_id=v_dataset;
-    IF v_scope.epoch IS DISTINCT FROM v_attempt.dataset_epoch
-       OR v_scope.owner IS DISTINCT FROM p_expected_attempt THEN
+    IF v_scope_epoch IS DISTINCT FROM v_attempt.dataset_epoch
+       OR v_scope_owner IS DISTINCT FROM p_expected_attempt THEN
         RAISE EXCEPTION 'snapshot ready plan scope changed' USING ERRCODE='40001';
     END IF;
     -- kernel lease를 연장하거나 다른 executor로 인계하지 않는다. 현재 executor fence와

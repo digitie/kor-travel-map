@@ -1,7 +1,7 @@
 # bound snapshot의 정확 stale 뒤 재계획 복구
 
-현재 단계: 선행 ea2fbcc5 실제 재현1PASS는 수용했다. 433 제품 코드와 순수 회귀는
-구현 중이며 새 제품의 실제 PG·최종 두 리뷰·CI는 아직 미완이다. 운영 변경은 없다.
+현재 단계: 선행 ea2fbcc5 실제 재현1PASS는 수용했다. 433 제품 코드와 순수142개는
+준비했으며 새 제품의 실제 PG·최종 두 리뷰·CI는 아직 미완이다. 운영 변경은 없다.
 
 ## 최초 조사 범위(실제 재현 전 기록)
 
@@ -146,3 +146,25 @@ owned 실행은 두 실제 caller를 legacy 등록 helper를 쓰는 case보다 �
 별도 ACL 파일은 원 작성자와 source를 교차 읽었고 cold setup marker35만 기존50으로
 맞췄다. 구432 SD 기대집합만 모사하는 실제 catalog 검사와 전체 구 binary 기동 검증을
 구분한다. 최종 두 source 리뷰·소유 PG·CI·현재main 합성은 아직 미완이다.
+
+## 실행 전 발견한 scope 열 권한과 관측 범위 정정
+
+초기433 source의 CommandOwner는 기존 scope helper EXECUTE만 가지므로 새 직접
+scope SELECT에 필요한 권한이 없었다. 실제 제품 PG 전에 정적으로 찾아 SELECT를
+epoch/owner 두 값으로 좁히고 WHERE의 provider_dataset_id까지 세 열의 SELECT만
+433 migration과 해당 함수 존재 시의 schema-owner ACL에 추가했다. lease 열/UPDATE·
+전체 table SELECT·runtime의 직접 표 권한·기존430 frozen ACL은 늘리지 않는다.
+실제 ACL source는 다른 열의 CommandOwner 읽기와 service 직접 scope 읽기42501도
+검사한다. 이 제품 delta 뒤 순수142개/14.45초와 통합 수집17개/10.38초가 통과했다.
+
+replay 증거는 작은 fixture의 row/timestamp·원 receipt 불변과 실제 native apply
+진입 호출이 추가되지 않았다는 값이다. SQL DML 문장 수를 직접 계측한0이라고
+기록하지 않는다. needs_read 시험은 성공 reset을 commit한 뒤 같은 인자로 재호출한
+idempotence 경계이며 실제 TCP 응답 유실 주입은 아니다. 취소 시험은 canonical 취소를
+먼저 commit한 뒤 거부되는 경계다. live holder는 실제 begin_apply의 scope/attempt
+잠금과 rollback을 검사하며 그 holder 안에 전체 source DML을 넣었다고 하지 않는다.
+전체 source apply/postprocess/seal은 별도의 실제 두 caller case가 담당한다.
+
+owned 실행 후보는 실제 두 caller→현재/외부 owner·lease·취소·holder10개→ACL/startup4개,
+총16개다. 기존 legacy 거부+새 typed 복구 회귀1개는 정상 CI에서 별도 fresh 모듈로
+유지한다. 새 제품 PG·최종 두리뷰·CI는 여전히 미완이다.

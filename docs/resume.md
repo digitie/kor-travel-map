@@ -1,3 +1,12 @@
+## 2026-10-27 — typed reset scope 권한을3열로 제한하고 통합17개 수집
+
+제품 PG 전 발견한 CommandOwner scope 읽기 누락을 SELECT(key/epoch/owner)
+세 열만 추가해 고쳤다. lease/UPDATE/runtime 직접 권한과 frozen430은 그대로다.
+replay는 실제 apply 진입 추가0과 row/receipt 불변으로 표현하고 SQL문장 계측으로
+과장하지 않는다. [범위](reports/2026-10-27-bound-snapshot-stale-replan.md#실행-전-발견한-scope-열-권한과-관측-범위-정정)를
+반영해 순수142개14.45초·통합수집17개10.38초가 통과했다. source 두리뷰/소유PG/
+최종CI·최신main합성은 남아 있고 운영·profile 활성화0/전체9개미완을 유지한다.
+
 ## 2026-10-27 — typed bound reset 통합 source16개와 순수142개
 
 양 provider atomic stale MAX3·migration 더 긴 timeout cap 순수142개가14.08초에

@@ -141,3 +141,45 @@ async def test_ready_reset433_public_startup_accepts_current_rejects_old_sd_expe
     await runtime_db.assert_runtime_db_privilege_boundary(
         runtime, expected_login="ktm_feature_service"
     )
+
+
+async def test_ready_reset_command_owner_scope_read_is_exactly_three_columns(scalar_engines):
+    admin, _ = scalar_engines
+    dataset, args = await _registered(scalar_engines)
+    async with AsyncSession(admin) as session:
+        await _bounded(session)
+        rows = (
+            await session.execute(
+                text("""SELECT a.attname,
+            has_column_privilege('ktm_curation_command_owner',a.attrelid,a.attnum,'SELECT')
+            FROM pg_attribute a WHERE a.attrelid='ops.feature_write_dataset_scopes'::regclass
+              AND a.attnum>0 AND NOT a.attisdropped ORDER BY a.attnum""")
+            )
+        ).all()
+    assert {name for name, allowed in rows if allowed} == {"provider_dataset_id", "epoch", "owner"}
+    async with AsyncSession(admin) as session, session.begin():
+        await _bounded(session)
+        await session.execute(text("SET LOCAL ROLE ktm_curation_command_owner"))
+        row = (
+            await session.execute(
+                text("""SELECT epoch,owner FROM ops.feature_write_dataset_scopes
+            WHERE provider_dataset_id=:dataset"""),
+                {"dataset": dataset},
+            )
+        ).one()
+        assert row.epoch > 0
+        assert str(row.owner) == args["attempt"]
+    for role, statement in [
+        ("ktm_curation_command_owner", "SELECT lease_until FROM ops.feature_write_dataset_scopes"),
+        ("ktm_feature_service", "SELECT epoch FROM ops.feature_write_dataset_scopes"),
+    ]:
+        async with AsyncSession(admin) as session:
+            await session.begin()
+            await _bounded(session)
+            await session.execute(text("SET LOCAL ROLE " + role))
+            with pytest.raises(DBAPIError) as denied:
+                await session.scalar(
+                    text(statement + " WHERE provider_dataset_id=:dataset"), {"dataset": dataset}
+                )
+            assert denied.value.orig.sqlstate == "42501"
+            await session.rollback()

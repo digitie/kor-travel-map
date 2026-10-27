@@ -1029,6 +1029,15 @@ _SNAPSHOT_COMMAND_OWNER_ACL = tuple(
     "TO ktm_curation_provider_executor",
 )
 
+# 433만 필요한 직접 scope 관측이다. lease/UPDATE/runtime 표 읽기 권한은 추가하지 않는다.
+_SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL = (
+    "DO $snapshot_ready_scope$ BEGIN IF to_regprocedure("
+    "'ops.reset_ready_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)') IS NOT NULL THEN "
+    "GRANT SELECT(provider_dataset_id,epoch,owner) ON TABLE ops.feature_write_dataset_scopes "
+    "TO ktm_curation_command_owner; END IF; END $snapshot_ready_scope$",
+)
+
+
 _SNAPSHOT_READY_RESET_COMMAND_OWNER_ACL = (
     "REVOKE ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(...) "
     "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
@@ -1060,7 +1069,8 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL
         + _STRICT_SH_DATA_SCHEMA_OWNER_ACL
         + _SNAPSHOT_SCHEMA_OWNER_ACL
-        + _SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL,
+        + _SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL
+        + _SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",

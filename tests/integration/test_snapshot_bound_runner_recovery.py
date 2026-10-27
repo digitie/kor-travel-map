@@ -225,7 +225,13 @@ async def test_actual_asset_replans_current_executor_and_replays_original_receip
         original_plan = getattr(io, f"plan_{kind}_snapshot")
         original_reset = getattr(io, f"reset_rolled_back_{kind}_snapshot_plan")
         original_seal = getattr(io, f"seal_{kind}_snapshot")
+        original_apply = getattr(io, f"apply_{kind}_snapshot_in_session")
+        apply_calls = []
         plans, reset_calls, applied_rejections = [], [], []
+
+        async def observed_apply(*args, **kwargs):
+            apply_calls.append(True)
+            return await original_apply(*args, **kwargs)
 
         async def plan_then_first_stale(*args, **kwargs):
             plan = await original_plan(*args, **kwargs)
@@ -279,6 +285,7 @@ async def test_actual_asset_replans_current_executor_and_replays_original_receip
             applied_rejections.append(True)
             return await original_seal(client, token, **kwargs)
 
+        monkeypatch.setattr(io, f"apply_{kind}_snapshot_in_session", observed_apply)
         monkeypatch.setattr(io, f"plan_{kind}_snapshot", plan_then_first_stale)
         monkeypatch.setattr(io, f"reset_rolled_back_{kind}_snapshot_plan", exact_reset)
         monkeypatch.setattr(io, f"seal_{kind}_snapshot", reject_applied_before_canonical_seal)
@@ -317,9 +324,12 @@ async def test_actual_asset_replans_current_executor_and_replays_original_receip
                 != states[plans[1].attempt_id].idempotency_key
             )
             before_replay = await _state(admin)
+            before_apply_calls = len(apply_calls)
+            assert before_apply_calls == 2
             replay = await run_tracked_feature_asset(context, entry)
             assert replay == result
             assert await _state(admin) == before_replay
+            assert len(apply_calls) == before_apply_calls
             assert await _read(case) == saved
             assert len(plans) == 2
             assert len(reset_calls) == 1
@@ -334,7 +344,8 @@ async def test_actual_asset_replans_current_executor_and_replays_original_receip
                             "typed_resets": 1,
                             "same_artifact": True,
                             "postprocess_and_seal": True,
-                            "completed_replay_source_dml": 0,
+                            "completed_replay_source_rows_unchanged": True,
+                            "completed_replay_native_apply_calls": 0,
                             "current_generation": case.token.generation + 1,
                             "applied_reset_rejected": True,
                             "artifact_sha256": hashlib.sha256(saved.artifact_payload).hexdigest(),

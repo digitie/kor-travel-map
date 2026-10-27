@@ -109,6 +109,10 @@ def test_new_public_surface_is_versioned_without_changing_frozen_expired_reset_a
         normalized(statement) for statement in frozen
     ]
     assert not any(name in statement for statement in acl._SNAPSHOT_COMMAND_OWNER_ACL)
+    assert migration._SCOPE_OWNER_READ_SQL in " ".join(acl._SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL)
+    assert "to_regprocedure" in " ".join(acl._SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL)
+    assert migration._SCOPE_OWNER_READ_SQL in migration._UPGRADE_STATEMENTS
+
     assert "'433_snapshot_ready_plan_reset'" in migration._RECEIPT_HEAD_CHECK_SQL
     with pytest.raises(RuntimeError, match="forward-only"):
         migration.downgrade()

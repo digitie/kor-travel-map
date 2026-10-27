@@ -18,6 +18,10 @@ _SCHEMA_OWNER: Final = "ktm_feature_schema_owner"
 _COMMAND_OWNER: Final = "ktm_curation_command_owner"
 _RESTRICTED: Final = "PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor"
 _SIGNATURE: Final = "ops.reset_ready_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)"
+_SCOPE_OWNER_READ_SQL: Final = (
+    "GRANT SELECT(provider_dataset_id,epoch,owner) ON TABLE ops.feature_write_dataset_scopes "
+    "TO ktm_curation_command_owner"
+)
 _READY_RESET_SQL: Final = (
     Path(__file__).with_name("_433_snapshot_ready_plan_reset.sql").read_text(encoding="utf-8")
 )
@@ -83,6 +87,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "REVOKE ALL ON FUNCTION " + _SIGNATURE + " FROM " + _RESTRICTED,
     "GRANT EXECUTE ON FUNCTION " + _SIGNATURE + " TO ktm_curation_provider_executor",
     "SET ROLE ktm_feature_schema_owner",
+    _SCOPE_OWNER_READ_SQL,
     _RECEIPT_HEAD_CHECK_SQL,
 )
 
