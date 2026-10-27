@@ -74,9 +74,9 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 **동시 쓰기 설계(ADR-115, proposed)** — 현재 Weather·Transport 작업을 마친 뒤 아래 의존 순서로 구현한다. 설계 문서 PR은 구현 완료가 아니며, 수용 조건 정본은 `tasks-acceptance.md`의 같은 ID다.
 
-- [ ] T-ADR117-RETIRE — **SH 스냅샷·스칼라 정책 경로(411~432) 퇴역**
+- [ ] T-ADR117-RETIRE — **SH 스냅샷·스칼라 정책 경로(411~433) 퇴역**
 
-  prod 측정에서 경합 효익이 0이라 forward migration 434로 지우고 P는 배타 전용으로 남긴다. PR #1426 머지 뒤 착수한다. 설계는 [ADR-117](adr/117-retire-sh-snapshot-scalar-policy-path.md), 해제 조건은 acceptance의 같은 ID다.
+  prod 측정에서 경합 효익이 0이라 다음 빈 번호의 forward migration으로 지우고(#1424의 433 포함) P는 배타 전용으로 남긴다. PR #1426 머지 뒤 착수한다. 설계는 [ADR-117](adr/117-retire-sh-snapshot-scalar-policy-path.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**
 

@@ -2851,11 +2851,11 @@ ADR-116(geo 부하 줄이기 0단계). 브랜치 `feat/skip-geocode-unchanged`.
 
 ## T-ADR117-RETIRE
 
-ADR-117(SH 스냅샷·스칼라 정책 경로 퇴역). 브랜치 `feat/adr117-retire-sh-snapshot`. 착수 조건: PR #1426(433) 머지.
+ADR-117(SH 스냅샷·스칼라 정책 경로 퇴역). 브랜치 `feat/adr117-retire-sh-snapshot`. 착수 조건: PR #1426(434로 재번호) 머지.
 
 - [x] prod 읽기 전용 측정(2026-10-27): flag 3종 미설정(OFF), 활성 정책 0·epoch 0, attempt·스냅샷 표 0행, Airport·Rest
   run은 모두 manual(schedule 0건), 427 index 3개 100 MB `idx_scan`=0. 결과는 ADR-117 §1이다.
-- [ ] migration 434: 433 기준 보존 루틴 hash 고정, prod 사전 조건(정책·attempt·스냅샷 0행) 확인, 대상 DROP(CASCADE 없음),
+- [ ] 새 migration(착수 시점 다음 빈 번호, #1426은 434): 그 head 기준 보존 루틴 hash 고정, #1424 433의 reset 함수·ACL 포함, prod 사전 조건(정책·attempt·스냅샷 0행) 확인, 대상 DROP(CASCADE 없음),
   P 공유 모드·regime 분기 제거, 1 s/30 s 상한, `SET ROLE ktm_feature_schema_owner`로 끝남. head-schema·graph·receipts 갱신.
 - [ ] Python·Dagster·CI: ADR-117 §2.1 표의 모듈·env·스크립트·시험 삭제. 공유 P 호출자 0을 lock-order lint가 센다.
   지운 env가 설정돼 있으면 기동을 거부한다.

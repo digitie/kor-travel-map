@@ -3,7 +3,7 @@
 `kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-119.**
 
 - [ADR-118 — DB 기준을 PostgreSQL 18 + PostGIS 3.6으로, CI는 공용 instance digest 한 lane](118-postgres-18-ci-target.md) — proposed, 2026-10-28 (T-PG18-CI; ADR-007 DB major·ADR-103 CI lane 대체).
-- [ADR-117 — SH 스냅샷·스칼라 정책 경로(411~432)를 퇴역하고, P는 배타 전용 bulk gate로 남긴다](117-retire-sh-snapshot-scalar-policy-path.md) — proposed, 2026-10-27 (소유자 승인; prod 읽기 전용 측정에서 경합 효익 0; ADR-115 부분 대체; 구현은 #1426 머지 뒤 migration 434).
+- [ADR-117 — SH 스냅샷·스칼라 정책 경로(411~433)를 퇴역하고, P는 배타 전용 bulk gate로 남긴다](117-retire-sh-snapshot-scalar-policy-path.md) — proposed, 2026-10-27 (소유자 승인; prod 읽기 전용 측정에서 경합 효익 0; ADR-115 부분 대체; 구현은 #1426 머지 뒤 다음 빈 migration 번호; #1424의 433 포함).
 - [ADR-116 — payload·좌표·geo 토큰이 그대로인 비-MOIS 행은 역지오코딩하지 않고 저장값을 재사용한다](116-reuse-stored-geo-for-unchanged-rows.md) — **accepted**, 2026-10-24 (#1356·#1357; MCST 첫 적재 재사용 45,930행).
 - [ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리](115-scoped-concurrent-feature-writes.md) — **accepted(부분 구현)**, 2026-10-23 제안·2026-10-27 개정 (alembic 411~434, 운영 head 432; SH 스냅샷·스칼라 정책 경로는 운영 OFF·동결, §11이 현행 잠금 순서·writer 분류 정본).
 - [ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다](114-weather-transport-state-in-memory-db.md) — proposed, 2026-10-23 (소유자 방향 결정, ADR-105 부분 대체; 1단계 transport 키 설계·구현 PR 2026-10-23; 2단계 weather 설계·구현 PR 2026-10-24).

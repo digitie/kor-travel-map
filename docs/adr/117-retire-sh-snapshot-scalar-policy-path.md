@@ -1,7 +1,7 @@
-# ADR-117 — SH 스냅샷·스칼라 정책 경로(411~432)를 퇴역하고, P는 배타 전용 bulk gate로 남긴다
+# ADR-117 — SH 스냅샷·스칼라 정책 경로(411~433)를 퇴역하고, P는 배타 전용 bulk gate로 남긴다
 
 - 상태: **proposed** (2026-10-27 소유자 승인 "권장대로" — 측정에서 실제 경합 효익이 나오지 않으면 퇴역. 측정 결과는
-  아래 §1이고 효익은 0이다. 구현은 진행 중인 통합 PR #1426(433) 머지 뒤 별도 PR, 머지 때 accepted)
+  아래 §1이고 효익은 0이다. 구현은 진행 중인 통합 PR #1426(현재 434로 재번호) 머지 뒤 별도 PR, 머지 때 accepted)
 - 날짜: 2026-10-27
 - 결정자: human(DC-2 방향 승인), Claude(측정·설계)
 - 관계: **ADR-115를 부분 대체한다**(§2 표 참고). ADR-111(전역 gate·순서)은 유지하되 순서 맨 앞의 P를 배타 전용으로
@@ -15,6 +15,7 @@ advisory `(1369104691,115)`)에 공유(SH) 모드를 두고, 그 위에 다음�
 
 - scope·attempt·manifest 커널(411), provider 스칼라 후보 정책·epoch·projection guard(412·420·421),
 - Airport·Rest 스냅샷 artifact·control·quota·executor lease·GC·후처리(430·432)와 그 bounded reader(427·431),
+- rollback된 bound plan의 READY reset(433, Codex PR #1424 — 2026-10-27 머지),
 - 국가유산 bounded reader(422)와 국가유산 배타 opt-in(420·423),
 - strict SH data guard와 정책 활성화 때 설치되는 statement barrier(429·430).
 
@@ -69,7 +70,8 @@ Rest 4 min이고, 실제 쓰기 구간은 geo 호출(ADR-113 spool: 쓰기 trans
 
 ### 2.1 퇴역한다
 
-다음을 forward-only alembic 한 개(번호는 PR #1426의 433 다음 — 434 예정)와 같은 PR의 Python·Dagster·CI 정리로 없앤다.
+다음을 forward-only alembic 한 개(번호는 착수 시점 main head의 **다음 빈 번호** — #1424가 433을, #1426이 434를
+쓰므로 435 이후. 고정 번호를 가정하지 않는다)와 같은 PR의 Python·Dagster·CI 정리로 없앤다.
 
 | 묶음 | DB 객체(migration) | Python·Dagster·CI |
 |---|---|---|
@@ -79,8 +81,8 @@ Rest 4 min이고, 실제 쓰기 구간은 geo 호출(ADR-113 spool: 쓰기 trans
 | SH stamp SD | 421 `upsert_provider_geocode_stamps_ex`·`lock_/reobserve_/_validate_scoped_provider_geocode_stamps`·`guard_stamp_writer_entry`와 그 trigger·inventory | legacy stamp 경로(`_421_legacy_stamp_upsert`가 대체한 본문)는 남긴다 — §3 주의 2 |
 | reader | 422 국가유산, 427 Airport, 431 Rest의 bounded reader와 helper 15개, 427 index 3개 | `infra/heritage_evidence_reader.py`, `transport_{airport,rest}_evidence_reader.py`, `providers/kor_travel_{transport,rest}_{apply,evidence}.py` |
 | strict guard | 429·430의 strict SH data guard·설치기·inventory 6개 | — |
-| 스냅샷 복구 | 430·432의 artifact·control·quota·executor lease·plan bind/reset·apply·postprocess·GC 루틴과 표 4개(`provider_snapshot_{artifacts,controls,quota_limits,quota_reservations}`), trigger `trg_provider_snapshot_immutable_input` | Dagster `{airport,rest}_snapshot_{backend,observation,postprocess,runner,runtime}.py`, `definitions.py` 결선, `assets.py`의 `run_*_snapshot_if_supported`, `client/_{airport,rest}_snapshot.py`·`_snapshot_atomic.py`·`_snapshot_postprocess.py`, `infra/provider_snapshot_{artifact,postprocess_repo,recovery_repo}.py`, `infra/rest_area_snapshot_artifact.py`, env 두 개 |
-| 측정·CI | — | `scripts/measure_scoped_native_scalar.py`(PR #1426이 옮김)와 그 단위 시험, `test_scoped_write_baseline.py`, 위 모듈의 단위·통합 시험(약 60개 파일) |
+| 스냅샷 복구 | 430·432의 artifact·control·quota·executor lease·plan bind/reset·apply·postprocess·GC 루틴, 433(#1424)의 `ops.reset_ready_provider_snapshot_plan`과 그 ACL(`ktm_curation_provider_executor` EXECUTE, `feature_write_dataset_scopes`의 열 SELECT 3개, command owner의 `ops` CREATE)과 표 4개(`provider_snapshot_{artifacts,controls,quota_limits,quota_reservations}`), trigger `trg_provider_snapshot_immutable_input` | Dagster `{airport,rest}_snapshot_{backend,observation,postprocess,runner,runtime}.py`(#1424의 atomic-apply catch 안 typed reset 호출 포함), `definitions.py` 결선, `assets.py`의 `run_*_snapshot_if_supported`, `client/_{airport,rest}_snapshot.py`·`_snapshot_atomic.py`·`_snapshot_postprocess.py`, `infra/provider_snapshot_{artifact,postprocess_repo,recovery_repo}.py`, `infra/rest_area_snapshot_artifact.py`, env 두 개 |
+| 측정·CI | — | `scripts/measure_scoped_native_scalar.py`(PR #1426이 옮김)와 그 단위 시험, `test_scoped_write_baseline.py`, 위 모듈의 단위·통합 시험(약 60개 파일, #1424의 `test_snapshot_{bound_runner_recovery,ready_reset_acl,ready_reset_races,stale_bound_replan}.py`·`test_snapshot_ready_plan_reset.py` 포함) |
 
 없애는 것은 **flag OFF·정책 0행에서 도달할 수 없는 코드와 그 저장소**다. prod의 해당 표는 모두 0행이라 데이터
 이관은 없다.
@@ -89,7 +91,7 @@ Rest 4 min이고, 실제 쓰기 구간은 geo 호출(ADR-113 spool: 쓰기 trans
 
 검토한 두 안:
 
-- **(A) P를 배타 전용으로 남긴다.** SH 모드와 regime(PR #1426의 `ops.lock_single_feature_writer_protocol()` — epoch>0이면
+- **(A) P를 배타 전용으로 남긴다.** SH 모드와 regime(PR #1426 434의 `ops.lock_single_feature_writer_protocol()` — epoch>0이면
   P EX) 분기를 없앤다. epoch 표가 사라지므로 단건·관리 writer는 P를 잡지 않는다. 414 이전과 같이 행 잠금과
   ADR-111 gate만 쓴다. 이것은 #1426의 epoch=0 동작과 같다. P를 잡는 것은 대량 적재(`lock_feature_curation_write`),
   권위 finalize·seal의 tracking prefix(P EX → L), provider patch 재진입, curation import, 유지보수·DDL만 남는다.
@@ -111,7 +113,7 @@ L(pipeline-lineage)은 확정 경로에서 P 뒤, 장부 경로에서는 P 없�
 - 410 shadow(`provider_field_shadow_*`, `record_provider_field_candidates`의 shadow capture). 리뷰 WI-5 범위이고 운영
   OFF·0행이지만 ADR-115 §3의 후보 원장 기록이라 이 ADR 범위 밖이다. 412가 그 capture와 정책 경로를 한 루틴에
   섞어 두었으므로 migration은 shadow 분기만 남기고 다시 쓴다.
-- 424·433 tracking prefix, 425·426 provider patch의 P 진입, 428 bounded curation capture(seal 공통). 430이 고친
+- 424·434(#1426) tracking prefix, 425·426 provider patch의 P 진입, 428 bounded curation capture(seal 공통). 430이 고친
   finalize·seal·`refresh_curated_source_observation`·`sync_concierge_theme_catalog`·tracking 명령의 본문에서는
   스냅샷 분기만 빼고 다시 쓴다.
 - 413 legacy SQL 진입(P EX 첫 줄). 배타 전용 P와 그대로 맞는다.
@@ -124,11 +126,11 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
 살아 있다. 동시 쓰기를 다시 추진하려면 **먼저 실제 경합을 측정해** 효익을 보인 뒤 새 ADR로 시작한다. 측정 없는
 성능 전용 마이그레이션은 하지 않는다(리뷰 A2-05의 프로세스 규칙).
 
-## 3. 마이그레이션 규칙 (434)
+## 3. 마이그레이션 규칙 (다음 빈 번호)
 
-424·426·433과 같은 틀을 따른다.
+424·426·434(#1426)와 같은 틀을 따른다.
 
-1. 선행 head가 PR #1426의 433인지 확인한다. 다시 쓰는 모든 보존 루틴은 433 시점의 시그니처·소유자·종류·
+1. 선행 head가 착수 시점 main head(#1426 머지 뒤 434 예상)인지 확인한다. 다시 쓰는 모든 보존 루틴은 그 head 시점의 시그니처·소유자·종류·
    SECURITY DEFINER·`prosrc` SHA-256을 고정한다. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
    DROP 대상도 시그니처와 소유자를 확인한다.
 2. **prod 사전 조건을 migration이 확인한다.** `provider_field_active_policies` 0행, epoch 0, `feature_write_attempts`·
@@ -149,7 +151,7 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
 
 ## 4. 시험
 
-1. migration-only DB에서 434 뒤 `head-schema.sql`과 정확히 같다(기존 oracle 시험).
+1. migration-only DB에서 이 migration 뒤 `head-schema.sql`과 정확히 같다(기존 oracle 시험).
 2. 선행 본문 hash가 하나라도 다르면 실패하고, 활성 정책 1행·attempt 1행 fixture에서는 23514로 실패한다.
 3. `lock_scoped_feature_write_protocol(false)`는 23514다. lock-order lint(PR #1426 WI-4)는 공유 P 호출자 0과
    regime 함수 부재를 센다. 일부러 공유 호출을 심은 fixture로 빨개지는지 확인한다.
@@ -166,14 +168,14 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
 - 긍정: 미사용 index 100 MB와 행마다의 갱신 비용, 되돌릴 수 없는 정책 활성화 위험, 약 35건의 미해결 결함(리뷰 DC-2
   차단 조건 표)이 사라진다. 이후 잠금 변경의 검토 범위가 줄어든다.
 - 부정: ADR-115식 동시 쓰기를 다시 하려면 처음부터 시작한다. 지운 코드는 git 이력(432 head)에 남는다.
-- 진행 중인 Codex draft PR #1424(스냅샷 stale 재계획 복구, 433 추가)는 이 ADR이 지우는 경로를 고친다. 머지 전에
-  소유자가 정리할지 정해야 한다. 433 번호도 #1426과 겹친다.
+- Codex PR #1424(스냅샷 stale 재계획 복구, alembic 433)는 2026-10-27 머지됐다. 그 추가분은 §2.1 퇴역 범위에 넣었다.
+  #1426은 434로 재번호됐다.
 
 ## 6. 구현 순서
 
 1. (완료) 측정과 이 문서. 소유자 승인 2026-10-27.
-2. PR #1426 머지를 기다린다. 그 뒤 이 브랜치를 rebase한다. 433의 최종 본문 기준으로 보존 루틴 목록과 hash를 다시
+2. PR #1426 머지를 기다린다. 그 뒤 이 브랜치를 rebase한다. 그 head의 최종 본문 기준으로 보존 루틴 목록과 hash를 다시
    만든다(codegraph로 caller를 먼저 평가한다).
-3. 434 migration과 Python·Dagster·CI 삭제를 한 PR로 낸다. 커밋은 DB, Python·Dagster, 시험·CI, 문서(ADR-115 머리말·
+3. 새 migration(다음 빈 번호)과 Python·Dagster·CI 삭제를 한 PR로 낸다. 커밋은 DB, Python·Dagster, 시험·CI, 문서(ADR-115 머리말·
    README 색인·tasks 대체 표시·journal·resume·CHANGELOG)로 나눈다.
 4. n150 CI-parity 게이트, CI 초록, 적대 리뷰 2인. 머지와 배포는 소유자가 한다(배포는 419 runbook과 같은 정지 순서).
