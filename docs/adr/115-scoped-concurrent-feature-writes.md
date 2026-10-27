@@ -426,9 +426,9 @@ Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절
   표에서 기다리고, PL/pgSQL은 문장의 잠금을 snapshot보다 먼저 얻으므로(READ COMMITTED) 새
   epoch를 읽고 P EX를 잡는다. 오래된 snapshot의 RR/SERIALIZABLE writer는 412 barrier·430
   strict guard에 23514로 닫힌다.
-- M05는 두 Feature를 `FOR UPDATE`하기 전에 provider 쪽 primary source 증거(dataset/entity/
-  record/head, 그다음 link)를 적재와 같은 순서로 `FOR SHARE`한다. 414가 P로 막았던 역순을 P
-  없이 없앤다.
+- M05는 두 Feature를 `FOR UPDATE`하기 전에 provider 쪽 primary source 증거(entity/record/
+  head, 그다음 link)를 적재와 같은 순서로 `FOR SHARE`한다. 414가 P로 막았던 역순을 P 없이
+  없앤다. dataset 행은 잠그지 않는다 — M05가 기다리지 않는 행은 순환을 만들지 못한다.
 - epoch=0에서 같은 Feature를 쥔 대량 writer가 있으면 단건 writer는 그 행에서 그 transaction이
   끝날 때까지 기다린다(종전처럼 P에서 1~5초 뒤 503이 아니다). 다른 Feature는 기다리지 않는다.
 - 실제 PG 시험: `tests/integration/test_single_writer_regime_entry.py`.
