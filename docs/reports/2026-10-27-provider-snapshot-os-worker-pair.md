@@ -5,7 +5,8 @@
 2026-10-27, 기준 main `0324cab3`에서 Airport1/Rest2의 저장된 관측을 적용하는
 실제 `multiprocessing` spawn worker 2개의 제한 시험을 추가한다. 생산 Python/SQL,
 스키마432, 운영 설정·새 profile OFF, 30초 원자 구간·reader3초·lock1초를 바꾸지 않는다.
-상위 **T-CWRITE-01–09는 모두 미완료**다. 정확 시험 source `6307ec63`의 두 리뷰와 제한 실제 PG는 통과했고 최종 CI는 대기다.
+상위 **T-CWRITE-01–09는 모두 미완료**다. 정확 시험 source `6307ec63`의 두 리뷰와 제한 실제 PG는 통과했다. 상위 Common 변경을
+합성한 `e23c277d`도 두 리뷰와 CI10개를 통과해 PR #1421의 main `0d60cd0b`로 병합됐다.
 
 기존 동일 프로세스의 두 PG session 시험을 대체하지 않는다. 기존 등록·claim·정적
 원 입력/후처리 helper를 재사용하고, 부모의 engine/client를 제거한 불변 case와 자체
@@ -48,7 +49,7 @@ CPU2·RAM1536MiB·swap 동일·PID256, 외부 phase150초/parent160초/cleanup15
   7개 오류가 나왔다. 전체 `ruff format --check src tests`는 기존416파일 drift로 실패했다.
   무관한 기존 파일은 자동 수정하지 않았으며 새 파일의 통과와 구분한다.
 - 정확 `6307ec63`은 두 독립 source 리뷰와 같은 상한의 실제 owned PG 양방향2개를 통과했다.
-  최종 CI는 아직 대기다. 운영 전체 동시 쓰기 완료나 CPU/RSS 효과로 확대하지 않는다.
+  이 단계에서는 최종 CI를 기다렸다. 아래 최종 CI·병합 기록이 현재 상태다. 운영 전체 동시 쓰기 완료나 CPU/RSS 효과로 확대하지 않는다.
 
 ## 후속과 제외
 
@@ -75,7 +76,7 @@ owned r2의 실제 양방향 시험은 spawn/source overlap/topic blocker/두 co
 시험은 marker 기대값만 지우지 않고, 정본 public Session/connection event를 이용한 실제
 후처리 SQL의 물리 connection 동등성·전후 backend PID/XID를 추가하고 commit 후 NULL 회수를
 검증하도록 교정한다. 예산·생산 코드·SDK 가드·원 receipt·별도seal 검증은 유지한다.
-수정본 `6307ec63`은 두 리뷰와 같은 상한 실제 PG를 통과했다. 최종 CI는 아직 대기다.
+수정본 `6307ec63`은 두 리뷰와 같은 상한 실제 PG를 통과했다. 이 단계에서는 최종 CI를 기다렸다. 아래 최종 CI·병합 기록이 현재 상태다.
 
 
 ## 정확6307의 실제 제한 수용
@@ -123,3 +124,41 @@ UI는 dev.7에서 dev.9의 정규 tgz로 바뀐다. SHA256은
 focused 검증이 끝나기 전에는 PR을 머지하지 않는다. 이는 MD CI 면제 대상이 아니다.
 PR #1420 자체는 이미지3개에 영향을 주고 아직 배포하지 않았다고 명시돼 있다. 시험/문서만의
 추가 무배포 원칙과 그 상위 제품의 운영 미반영을 구분한다. 이 작업은 운영을 바꾸지 않았다.
+
+
+## 최종 합성본의 CI·정상 병합 수용
+
+PR #1421은 2026-10-27 06:44:24 UTC에 정상 병합됐다. 정확 검증 head는
+`e23c277d0cfd31e1a58f7bc79779e473b289deda`, main merge는
+`0d60cd0b5ae4e4d54e064a24fdbe3716214789ea`다. merge tree
+`b49826cd96a2b027e1e79c502c85b5c701ad4a32`는 검증 head tree와 같고, 부모는
+main `980e0458`과 검증 head다. 강제 병합·관리자 우회·브랜치 삭제는 하지 않았다.
+
+최종 head의 CI10개는 모두 성공했다. Python3.11/3.12/3.13, fixture replay,
+PostGIS glibc/alpine, lint, OpenAPI, frontend build, production Docker build를 확인했다.
+workflow `40456454576`의 glibc는1934 PASS/23 skip(1344.03초), alpine은1928 PASS/29 skip
+(1718.66초)다. 양쪽 API/Dagster editable 설치 로그의 Common VCS pin은 정확
+`aa232ad5f255233184de80eceaab2e9b6ccb00c9`이며 전체 `pytest tests/integration -q`가
+성공했다. skip 사유 전체에는 새 worker pair 파일이 없다. 기존 Geo live·선택 Heritage SDK·
+이전 fence와 alpine collation 시험만 skip됐다. quiet 로그에 각 성공 node 이름이 출력된
+것으로 주장하지 않으며, 정확 수집2개·필터 없는 전체 실행·skip 사유·정상 종료를 함께
+검산해 새 두 case의 실행을 수용한다.
+
+외부 접속을 모두 거부한 별도 import/collection 검산은 Common 실제6 module과 전체 source19개,
+Map API/Dagster 실제 transitive49개가 정확 합성본과 같고 fixture 미해결0임을 확인했다.
+이는 실제 PG 시험과 구분한다. 원6307의 owned PG2 PASS와 정확 새 의존성을 설치한 전체 CI를
+함께 근거로 쓰며, 중복 local r4 PG는 실행하지 않았다. 기존 실패·cleanup 및 두 source/문서/
+합성 리뷰 원장은 보존한다.
+
+별도 감사 원장 `map1421-normal-main-merge-acceptance-r1.json` SHA256은
+`0cf84da2baae6c39211890d63e88c0505661be87cc70afd311061cc91d46d063`이다.
+양 PostGIS 로그 검산 원장 `map1421-e23-actual-PostGIS-log-proof-r1.json`은
+`c87e3f123e9dfd83ae694b61ed285394a9aab3480e0a1bf735081016c8b7ca98`,
+전체 skip 사유 원장 `map1421-e23-actual-PostGIS-skip-reasons-r1.json`은
+`bc66f58c81fb0fe48bff5fca48e71e066abc2c8236f2393d833c5e86371e2999`다.
+
+이 정산은 문서만 바꾸며 제품·시험·설정은 변경하지 않는다. PR #1421 자체는 시험/문서 추가라
+API/UI를 새로 배포하지 않았다. 상위 #1420 제품의 운영 반영은 별도 공식 배포·공개 UI 수용
+작업이며 이 원장은 그 완료를 뜻하지 않는다. 운영 CPU/RSS 개선은 미측정이고
+T-CWRITE-01–09는 모두 미완료다. shared Feature 경합·저장 artifact 재계획의 후속 PR #1422도
+이 제한 OS worker proof와 구분하며, 이 정산을 작성한 시점에는 아직 머지 전이다.

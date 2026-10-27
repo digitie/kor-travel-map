@@ -1,3 +1,15 @@
+## 2026-10-27 — snapshot OS worker pair 최종 CI·정상 병합 수용
+
+PR #1421의 Common 합성 head `e23c277d`는 두 독립 리뷰와 CI10개를 통과했고,
+동일 tree의 main `0d60cd0b`로 정상 병합됐다. 양 PostGIS 전체 integration은 glibc1934개·
+alpine1928개 PASS이며 기존 skip 사유에 신규 worker pair는 없다. CommonAA 설치와
+실제 import/fixture closure를 확인했고 중복 local PG는 실행하지 않았다.
+
+원6307의 제한 owned PG2 PASS·정확 정리와 선행 fixture/SDK/marker/ledger 실패는 보존한다.
+이번 정산은 문서뿐이며 상위 T-CWRITE-01–09·운영 CPU/RSS 실측·상위 Common 제품의
+공식 배포/공개 UI 수용은 별도다. 후속 #1422의 머지 완료로 확대하지 않는다.
+[최종 근거](reports/2026-10-27-provider-snapshot-os-worker-pair.md#최종-합성본의-ci정상-병합-수용).
+
 ## 2026-10-27 — snapshot OS worker pair의 제한 실제 PG 수용
 
 정확 시험 source `6307ec63`은 두 독립 리뷰와 Airport/Rest 양방향 owned PG2개를
