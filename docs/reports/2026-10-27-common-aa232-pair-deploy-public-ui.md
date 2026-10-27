@@ -53,7 +53,7 @@ prepared TX를 확인했다. 이 관찰을 미래의 수동 실행·writer가 �
 공식 canonical smoke는 이번 transaction의 c6c job1개를 만들어 failed/finalized 이력으로 남긴다.
 따라서 전체 before==전체 after라는 초기 가정을 운영 전에 바로잡았다.
 정확한 새 transaction→fixture1→job1의 최종 cancellation/member receipt를 검증하고,
-그1개만 제외한 기존 집합45개의 count/정렬 row-SHA가 그대로임을 확인했다. 원 total은46이었다.
+그1개만 제외한 기존 집합45개의 count/정렬 row-SHA가 그대로임을 확인했다. 배포 후 total은46이었다.
 기존 이력을 삭제하거나 상태를 고치지 않았다. 과거의 running4 부분집합과 전체45는 다른 범위다.
 
 수용 후 원래 RUNNING51개만 복구했고 전체67개 ID/상태가 baseline과 정확히 같음을 재조회했다.
@@ -66,7 +66,9 @@ prepared TX를 확인했다. 이 관찰을 미래의 수동 실행·writer가 �
 첫 실행 `ef7a058a44c24ffd87120ad078c4da8d`는56.39초에 **전체 실패**했다.
 Map7은 실제 SSR script hold·hydration·로그인·지도·목록/상세·로그아웃을 통과했으나,
 PinVi는3개 단계 뒤 `admin_list_filter_and_dto`에서 `TimeoutError`였다.
-목록200은2회, 상세200은0회였다. 이 실행도 자기 세션·process·profile은 회수했다.
+관측 카운터는 목록200이2회·상세200이0회였다. 초기 seed의 상세 read는 seed 할당 전에
+끝나 카운터에 누락될 수 있으므로, 상세 요청 자체가0회였다고 해석하지 않는다.
+정확한 하위 단계·원인은1차 기록만으로 확정하지 못했다. 자기 세션·process·profile은 회수했다.
 
 원인을 구분하려고 PinVi의 기존 조회/화면 동작 사이에 안전한 `admin_substage` 관측 값만 추가했다.
 HTTP·assertion·timeout·budget·Map 코드·운영 이미지는 바꾸지 않았다.
@@ -79,7 +81,9 @@ HTTP·assertion·timeout·budget·Map 코드·운영 이미지는 바꾸지 않�
 PinVi는 `admin_substage=complete`, 목록200은4회·상세200은2회였고 실제 지도 tile·DTO·lineage를 확인했다.
 각 서비스는 매 실행 own login1/logout1, 보호 조회401과 세션 회수를 확인했다.
 Map WebSocket 중단·자기 browser process0/profile 제거·runtime/env 불변도 수용했다.
-인증 입력은 숨김 TTY/RAM/stdin과 로그인 전 오프라인 검증 경로로만 처리했고 인증 상태를 보존하지 않았다.
+Map의 known 인증 입력은 숨김 TTY/RAM/stdin 경로와 로그인 전 오프라인 검증을 통과했다.
+PinVi는 기존 정본의 bootstrap 인증값을 RAM에서만 읽어 사용했다. UI 검증에서는
+인증값을 추측·초기화하거나 인증 상태를 보존하지 않았다.
 
 이13개 공개 read-only UI 수용은 cancellation14개·전체 수집·모든 장애 조건·CPU/RSS 저감의
 증명이 아니다. 문서 전용 정산으로 runtime 이미지를 다시 빌드하지 않는다.
