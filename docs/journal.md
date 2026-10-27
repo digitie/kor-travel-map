@@ -1,3 +1,10 @@
+## 2026-10-28 — #1426의 main 병합 뒤 resume 크기 경계 복구
+
+ebb92ca9의 새 Python CI는 문서 크기 한 항목에서 실패했다(resume 227100B > 225280B).
+§8에 따라 9월8일 M05 완료 이력 한 절 5075B를 원문 그대로 기존 9월 archive로 옮겼다.
+기존 archive 세 절과 나머지 live 본문은 보존하고 원래 위치의 원문 링크·상단 탐색표를 남긴다.
+제품·시험·상한·현재 미완 판정과 snapshot profiles OFF는 그대로다. 새 exact-head CI와 UI는 별도다.
+
 ## 2026-10-28 — #1426의 main 충돌·기존 통합 회귀 호환 교정
 
 기준 head `28a97e6d`의 양 PostGIS CI는 각각 6개가 실패했다. main `fddc1659`의
