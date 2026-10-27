@@ -100,7 +100,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-CWRITE-07 — **실패·취소·worker 사망 복구**
 
-  idempotency·epoch fencing·artifact 재사용과 bounded retry를 완성한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
+  idempotency·epoch fencing·artifact 재사용과 bounded retry를 완성한다. [bound READY 복구](reports/2026-10-27-bound-snapshot-stale-replan.md)는 구현·검증 중이며 전수 복구는 미완이다. 정본은 [ADR-115](adr/115-scoped-concurrent-feature-writes.md)와 acceptance의 같은 ID다.
 
 - [ ] T-CWRITE-08 — **적대 리뷰 2인·실부하·UI 수용**
 

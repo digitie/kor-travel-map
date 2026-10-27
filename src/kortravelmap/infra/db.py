@@ -340,6 +340,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 "ops.provider_snapshot_scalar_counter_state(uuid,bigint,uuid,jsonb)",
                 "ops.capture_provider_snapshot_apply_input_set(uuid,bigint,uuid)",
                 "ops.reset_expired_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)",
+                "ops.reset_ready_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)",
                 "ops.begin_provider_snapshot_postprocess(uuid,bigint,uuid,bytea)",
                 "ops.finish_provider_snapshot_postprocess(uuid,bigint,uuid,bytea)",
                 "ops.collect_expired_provider_snapshots(integer)",

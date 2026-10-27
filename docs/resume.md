@@ -1,3 +1,12 @@
+## 2026-10-27 — 실제 stale→rollback→live READY reset 거부 재현과 첫 제품 경계
+
+정확ea2fbcc5 owned PG1개가25.52초에 통과했다. 정확40001→aborted TX→
+유효READY/원 artifact 보존→기존 typed55P03을 관찰했고 두 선행실패·정리를 보존한다.
+[제품 후속](reports/2026-10-27-bound-snapshot-stale-replan.md#실제-재현-수용과-첫-제품-구현)은
+433의 현재executor typed reset과 원 apply plan을 받는 client/두 실제catch 결선이다.
+계획오류/ACK불명/외부binding은 기존안전경계를 유지하며 새 제품 PG·두리뷰·CI는
+아직 미완이다. profilesOFF/MAX3·상한·전체9개미완/운영변경0을 유지한다.
+
 ## 2026-10-27 — bound 재현의 strict Geo 입력 연결만 정정
 
 두 번째 owned 시도는 setup432 뒤 observation 준비에서1FAIL/45.29초였다.

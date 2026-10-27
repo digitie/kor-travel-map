@@ -20491,6 +20491,100 @@ $_$;
 ALTER FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: reset_ready_provider_snapshot_plan(uuid, bigint, uuid, uuid, uuid, text); Type: FUNCTION; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+CREATE FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) RETURNS text
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $_$
+DECLARE
+    v_dataset bigint;
+    v_attempt ops.feature_write_attempts%ROWTYPE;
+    v_control ops.provider_snapshot_controls%ROWTYPE;
+    v_scope ops.feature_write_dataset_scopes%ROWTYPE;
+BEGIN
+    IF NOT pg_has_role(session_user,'ktm_curation_provider_executor','member') THEN
+        RAISE EXCEPTION 'snapshot reset requires provider executor' USING ERRCODE='42501';
+    END IF;
+    IF p_snapshot IS NULL OR p_generation IS NULL OR p_generation<1 OR p_fence IS NULL
+       OR p_expected_attempt IS NULL OR p_expected_owner IS NULL
+       OR p_expected_manifest IS NULL OR p_expected_manifest !~ '^[0-9a-f]{64}$' THEN
+        RAISE EXCEPTION 'exact ready snapshot plan required' USING ERRCODE='22023';
+    END IF;
+    IF current_setting('transaction_isolation')<>'read committed' THEN
+        RAISE EXCEPTION 'snapshot reset requires READ COMMITTED' USING ERRCODE='25001';
+    END IF;
+    PERFORM ops._arm_scoped_feature_write_deadline();
+    PERFORM ops.lock_scoped_feature_write_protocol(false);
+    SELECT artifact.provider_dataset_id INTO STRICT v_dataset
+      FROM ops.provider_snapshot_artifacts artifact WHERE artifact.snapshot_id=p_snapshot;
+    -- 외부 dataset의 attempt 행을 잠근 뒤 participant를 늦게 추가하지 않는다.
+    SELECT * INTO v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=p_expected_attempt;
+    IF NOT FOUND OR v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false THEN
+        RAISE EXCEPTION 'snapshot reset attempt domain changed'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    -- 430B helper: P SH→actual parent SHARE→own whole scope UPDATE.
+    PERFORM ops._lock_scoped_feature_write_scope(v_dataset,'[]'::jsonb,false);
+    SELECT * INTO STRICT v_attempt FROM ops.feature_write_attempts attempt
+      WHERE attempt.attempt_id=p_expected_attempt FOR UPDATE;
+    IF v_attempt.provider_dataset_id IS DISTINCT FROM v_dataset
+       OR v_attempt.regions IS DISTINCT FROM '[]'::jsonb
+       OR v_attempt.exclusive_protocol IS DISTINCT FROM false
+       OR v_attempt.owner IS DISTINCT FROM p_expected_owner
+       OR v_attempt.manifest_digest IS DISTINCT FROM p_expected_manifest THEN
+        RAISE EXCEPTION 'snapshot reset attempt changed' USING ERRCODE='40001';
+    END IF;
+    -- 반드시 old attempt 다음 control이다. helper는 P/parent/scope 재진입 및
+    -- 현재 executor·member 활동성 검증을 담당하며 root/member/quota 행을 잠그지 않는다.
+    v_control:=ops._lock_provider_snapshot_executor(p_snapshot,p_generation,p_fence);
+    IF v_control.status IS DISTINCT FROM 'prepared' THEN
+        RAISE EXCEPTION 'completed snapshot result cannot be replanned'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_apply_required';
+    END IF;
+    IF v_control.attempt_id IS NULL THEN
+        -- 응답 유실일 수 있지만 임의의 옛 cancelled attempt로 성공을 증명하지 않는다.
+        -- 변경0. caller가 SDK0 read로 상태를 읽은 뒤 새 계획을 결정한다.
+        RETURN 'needs_read';
+    END IF;
+    IF v_control.attempt_id IS DISTINCT FROM p_expected_attempt
+       OR v_control.attempt_owner IS DISTINCT FROM p_expected_owner
+       OR v_control.manifest_digest IS DISTINCT FROM p_expected_manifest THEN
+        RAISE EXCEPTION 'snapshot reset binding changed' USING ERRCODE='40001';
+    END IF;
+    -- old apply는 같은 scope/attempt를 끝까지 잠근다. 기다리는 동안 commit했다면
+    -- 위 prepared 검사가 거부하며, rollback하여 READY인 현재 owner만 정리한다.
+    IF v_attempt.status IS DISTINCT FROM 'ready'
+       OR v_attempt.apply_txid IS NOT NULL OR v_attempt.result_digest IS NOT NULL THEN
+        RAISE EXCEPTION 'snapshot reset requires an unapplied ready plan'
+            USING ERRCODE='23514',CONSTRAINT='ck_provider_snapshot_plan_binding';
+    END IF;
+    SELECT * INTO STRICT v_scope FROM ops.feature_write_dataset_scopes
+      WHERE provider_dataset_id=v_dataset;
+    IF v_scope.epoch IS DISTINCT FROM v_attempt.dataset_epoch
+       OR v_scope.owner IS DISTINCT FROM p_expected_attempt THEN
+        RAISE EXCEPTION 'snapshot ready plan scope changed' USING ERRCODE='40001';
+    END IF;
+    -- kernel lease를 연장하거나 다른 executor로 인계하지 않는다. 현재 executor fence와
+    -- 정확한 bound READY의 rowlock 증거로만 취소하고 새 attempt를 계획한다.
+    IF NOT ops.cancel_scoped_feature_write(p_expected_attempt,p_expected_owner) THEN
+        RAISE EXCEPTION 'snapshot kernel plan was not cancelled' USING ERRCODE='40001';
+    END IF;
+    UPDATE ops.provider_snapshot_controls
+      SET attempt_id=NULL,attempt_owner=NULL,manifest_digest=NULL,updated_at=clock_timestamp()
+      WHERE snapshot_id=p_snapshot;
+    RETURN 'reset';
+END;
+$_$;
+
+
+ALTER FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) OWNER TO ktm_curation_command_owner;
+
+--
 -- Name: scoped_feature_write_membership_digest(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -23711,7 +23805,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -34017,6 +34111,14 @@ REVOKE ALL ON FUNCTION ops.reject_provider_snapshot_artifact_update() FROM PUBLI
 
 REVOKE ALL ON FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) FROM PUBLIC;
 GRANT ALL ON FUNCTION ops.reset_expired_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) TO ktm_curation_provider_executor;
+
+
+--
+-- Name: FUNCTION reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text); Type: ACL; Schema: ops; Owner: ktm_curation_command_owner
+--
+
+REVOKE ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(p_snapshot uuid, p_generation bigint, p_fence uuid, p_expected_attempt uuid, p_expected_owner uuid, p_expected_manifest text) TO ktm_curation_provider_executor;
 
 
 --

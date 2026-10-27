@@ -1029,6 +1029,13 @@ _SNAPSHOT_COMMAND_OWNER_ACL = tuple(
     "TO ktm_curation_provider_executor",
 )
 
+_SNAPSHOT_READY_RESET_COMMAND_OWNER_ACL = (
+    "REVOKE ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(...) "
+    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
+    "GRANT EXECUTE ON FUNCTION ops.reset_ready_provider_snapshot_plan(...) "
+    "TO ktm_curation_provider_executor",
+)
+
 
 _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     (
@@ -1069,7 +1076,12 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         "ktm_manual_feature_procedure_owner",
         _MANUAL_FEATURE_WRITER_ACL + _FEATURE_REQUEST_MANUAL_OWNER_DEPENDENCY_ACL,
     ),
-    ("ktm_curation_command_owner", _MANUAL_CURATION_WRITER_ACL + _SNAPSHOT_COMMAND_OWNER_ACL),
+    (
+        "ktm_curation_command_owner",
+        _MANUAL_CURATION_WRITER_ACL
+        + _SNAPSHOT_COMMAND_OWNER_ACL
+        + _SNAPSHOT_READY_RESET_COMMAND_OWNER_ACL,
+    ),
     ("ktm_feature_request_procedure_owner", _FEATURE_REQUEST_WRITER_ACL),
     ("ktm_manual_provider_dedup_procedure_owner", _M05_WRITER_ACL),
 )
@@ -1137,6 +1149,7 @@ _OPTIONAL_ROUTINES: Mapping[str, str] = {
     "ops.provider_snapshot_scalar_counter_state": "430_provider_snapshot_recovery",
     "ops.capture_provider_snapshot_apply_input_set": "430_provider_snapshot_recovery",
     "ops.reset_expired_provider_snapshot_plan": "430_provider_snapshot_recovery",
+    "ops.reset_ready_provider_snapshot_plan": "433_snapshot_ready_plan_reset",
     "ops._arm_scoped_feature_write_deadline": "411_scoped_feature_write_kernel",
     "ops._lock_scoped_feature_write_scope": "411_scoped_feature_write_kernel",
     "feature._strict_sh_data_context": "429_strict_sh_data_guards",

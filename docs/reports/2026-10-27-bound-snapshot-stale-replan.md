@@ -62,3 +62,39 @@ DB scheduled/registration만 대체해 실행하고 실제 artifact/context enco
 `870bdba44be4ab2a1a2231a78dbdceae56a2af367cef024c77b163893694ccfb`다.
 이는 본문의 plan/apply/reset 재현 증거가 아니다. 새 source 두 리뷰 뒤 같은 상한으로
 한 번만 격리 실행하며 제품 오류의 실제 재현은 여전히 미완이다.
+
+## 실제 재현 수용과 첫 제품 구현
+
+정확ea2fbcc5의 세 번째 owned 실행은1PASS/skip0/25.52초다. 실제 canonical
+Airport plan의 Feature revision을 낡게 하여 정확40001, apply transaction의 aborted,
+READY 유효 lease·원 artifact/control 불변, 기존 reset의55P03을 차례로 관찰했다.
+원 result SHA256은
+`fb7262794f53b24e355e4aa34df1d189dcd5bfcc4c79f8e99c4ae8439066060c`다.
+12개 산출물 hash·source2584·실제 선택 import60·SDK53 source 전후·CommonAA19
+4지점 전후·exact CID/익명 volume1/전체 label0 정리를 확인했다. SDK는 import/bytes
+검증이며 upstream 호출 검증이나 운영 성능 측정이 아니다. 앞선 두 실패는 보존한다.
+
+첫 제품 checkpoint는433 additive typed READY reset, startup SD/ACL 정본 등록과
+Airport/Rest 실제 catch 결선이다. SQL은 원 scope/attempt/control 잠금 뒤 현재 executor
+lease/generation/fence, exact binding·prepared/READY·미적용 및 scope epoch/owner를
+검사한다. 기존 expired reset은 그대로 두고 계획 단계의 오류는 그 경계를 사용한다.
+새 reset은 atomic apply await가 선택 stale로 빠져나와 전체 rollback된 catch에만
+연결하며, fresh read의 새 plan을 정리하지 않고 원 apply plan을 명시 전달한다.
+ACK 불명/rollback 실패/다른 오류에는 새 reset 권한을 주지 않는다.
+
+생산 SDK/Feature DTO·provider converter·기존 심볼 signature는 바꾸지 않는다.
+새 typed 함수/client 함수와 기존 catch/inventory 내부 배선만 추가하며 기존 caller는
+정적 검색과 실제 재현 경로로 확인했다. codegraph의 signature/core DTO 변경 요건에
+해당하는 기존 signature 변경은 없고 전수 호출 그래프 완료라고 주장하지 않는다.
+제품의 새 PG 회귀·독립 두 리뷰·CI는 아직 미완이므로 추가 실제 실행/운영 변경은0이다.
+
+### schema433과 혼합 binary의 경계
+
+새 public SECURITY DEFINER 함수는 현재 runtime의 exact SD/ACL 목록에도 포함한다.
+이를 모르는432 binary가433 DB에서 재시작하면 unexpected SD surface로 startup이
+거부될 수 있다. 그 보호 검사를 완화하거나 함수 권한을 숨기지 않는다. 공식 pair의
+drain·schema/image 동일 generation 전환이 필요하며 기존 실행 worker를 남긴 채
+혼합 활성화하지 않는다. schema는 forward-only이므로 DB433 이후432 image만으로
+되돌리는 방식은 수용 범위가 아니다. profile OFF도 이 startup 계약을 우회하지 않는다.
+현재 새 운영 절차나 배포는 실행하지 않았고, 새 함수와 runtime 기대값/구기대값의
+권한 거부를 실제 격리 PG에서 검증할 예정이다.
