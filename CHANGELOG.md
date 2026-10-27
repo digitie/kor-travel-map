@@ -10,6 +10,20 @@
 
 ## [Unreleased]
 
+### 적재 중 관리 쓰기·장부 쓰기가 전역 protocol gate 뒤에 줄 서지 않는다 (2026-10-27, migration 433)
+
+- **CHANGED (DB)**: provider tracking 장부 쓰기(취소 생성·queued 취소·fill-starts·실패/취소
+  terminal·비권위 finish)는 lineage 잠금만 잡는다. 큐레이션을 확정하는 쓰기(seal·root 완결·권위
+  finish·SUCCESS 완결 취소 전이)만 protocol gate 배타 뒤 lineage다. 적재가 쓰는 동안 취소 API가
+  503을 내거나 다른 dataset의 완료가 30초 뒤 55P03으로 실패하던 문제를 없앤다.
+- **CHANGED (DB)**: 단건·관리 writer(상태·lifecycle·필드/주소 override·수동 생성·요청 승인·M05)는
+  스칼라 정책이 켜졌을 때(epoch>0)만 protocol gate를 배타로 잡는다. 정책 활성화 전에는 행 잠금
+  순서만 쓴다 — 적재 중 관리 UI 503과 M05 detector의 55P03이 사라진다. 같은 Feature를 적재가
+  쥐고 있으면 그 행에서 기다린다. M05는 Feature 잠금 전에 provider source 증거를 먼저 잡는다.
+- **FIXED**: 무장한 적재·권위 finish가 `lock_timeout=0` 세션에서 1초 만에 포기하던 문제.
+  418이 실제로는 부여하지 못한 수동 생성·요청 승인 owner의 진입 함수 EXECUTE를 다시 부여한다.
+- **REST·OpenAPI 변경 없음.** 운영 스냅샷 SH·스칼라 정책 경로는 OFF로 동결한다(ADR-115 §11).
+
 ### kor-travel-common 최신 main 반영 (2026-10-27)
 
 - **CHANGED (deps)**: kor-travel-common 핀 `e746e4b8` → `aa232ad5`(#44~#47; 뒤의 #48은 문서만). 그 사이 Python 변경은

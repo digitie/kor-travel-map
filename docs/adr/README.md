@@ -3,11 +3,11 @@
 `kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-117.**
 
 - [ADR-116 — payload·좌표·geo 토큰이 그대로인 비-MOIS 행은 역지오코딩하지 않고 저장값을 재사용한다](116-reuse-stored-geo-for-unchanged-rows.md) — **accepted**, 2026-10-24 (#1356·#1357; MCST 첫 적재 재사용 45,930행).
-- [ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리](115-scoped-concurrent-feature-writes.md) — proposed, 2026-10-23 (PG 쓰기 설계만, T-CWRITE-01~09; Weather·Transport 현 작업 후 구현).
+- [ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리](115-scoped-concurrent-feature-writes.md) — **accepted(부분 구현)**, 2026-10-23 제안·2026-10-27 개정 (alembic 411~433, 운영 head 432; SH 스냅샷·스칼라 정책 경로는 운영 OFF·동결, §11이 현행 잠금 순서·writer 분류 정본).
 - [ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다](114-weather-transport-state-in-memory-db.md) — proposed, 2026-10-23 (소유자 방향 결정, ADR-105 부분 대체; 1단계 transport 키 설계·구현 PR 2026-10-23; 2단계 weather 설계·구현 PR 2026-10-24).
 - [ADR-113 — 스트리밍 snapshot 적재는 먼저 다 받아 두고, 쓰기 transaction은 그 뒤에 짧게 연다](113-snapshot-load-spool-then-write.md) — proposed, 2026-10-22 (`T-LOAD-LOCK-WAIT` 2안, PR 미머지; 배포 뒤 8개 asset 쓰기 시간 실측으로 accepted).
 - [ADR-112 — reconcile sensor는 DB root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다](112-reconcile-sensor-retry-alert-close.md) — proposed, 2026-10-20 (설계만, `T-RECONCILE-RETRY`; 구현은 소유자 승인 뒤).
-- [ADR-111 — Feature advisory fence는 Feature마다가 아니라 전역 gate 하나다](111-feature-write-gate-lock.md) — proposed, 2026-10-13 (PR #1319; 공용 PG lock table 고갈 53200 근본 수정, alembic 406).
+- [ADR-111 — Feature advisory fence는 Feature마다가 아니라 전역 gate 하나다](111-feature-write-gate-lock.md) — **accepted**, 2026-10-13 (PR #1319; 공용 PG lock table 고갈 53200 근본 수정, alembic 406; 2026-10-27 §2 순서 앞에 P·L 개정).
 
 - [ADR-110 — geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다](110-geo-transport-hosts-move-to-odroid.md) — proposed, 2026-10-13 (T-MAP-01 #1316 머지·T-MAP-02 구현됨(#1325), 배포 대기; ADR-109 amend; 호스트 플립은 Manager ADR-58·geo ADR-070·transport ADR-014 — 셋 다 proposed로 머지, 실제 이전은 2026-10-14~15 ADR-58 "잠정 시행"; 2026-10-15 사실 갱신 절).
 - [ADR-109 — geo 주소 데이터셋 릴리스 감지·재지오코딩](109-geo-release-regeocode.md) — accepted, 2026-10-16 (T-GR-01~08 구현).
@@ -136,11 +136,11 @@
 | ADR-108 | MOIS 인허가 적재는 원천 내용을 재개 키로 하는 chunk commit 적재다 | [108-mois-resumable-chunked-load.md](108-mois-resumable-chunked-load.md) |
 | ADR-109 | geo 주소 데이터셋 릴리스는 데이터 토큰(`dd1-`)으로 감지하고, 적재 경로를 재사용해 다시 지오코딩한다 (accepted, 2026-10-16 구현) | [109-geo-release-regeocode.md](109-geo-release-regeocode.md) |
 | ADR-110 | geo·transport 피호출자가 odroid로 옮겨도 Map은 n150에 남아 REST만 쓴다 — 값의 자리는 Manager, 장애는 timeout(connect 분리)이다 (proposed, T-MAP-02 구현됨(#1325)·배포 대기; ADR-109 amend; 2026-10-15 사실 갱신 — 이전 실행됨) | [110-geo-transport-hosts-move-to-odroid.md](110-geo-transport-hosts-move-to-odroid.md) |
-| ADR-111 | Feature advisory fence는 Feature마다가 아니라 전역 gate `feature-write-all` 하나다 — 대량 writer 배타 1회·단건 writer 공유 (proposed) | [111-feature-write-gate-lock.md](111-feature-write-gate-lock.md) |
+| ADR-111 | Feature advisory fence는 Feature마다가 아니라 전역 gate `feature-write-all` 하나다 — 대량 writer 배타 1회·단건 writer 공유 (accepted; 2026-10-27 순서 앞에 P·L) | [111-feature-write-gate-lock.md](111-feature-write-gate-lock.md) |
 | ADR-112 | reconcile sensor는 DB root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다 (proposed, 설계만) | [112-reconcile-sensor-retry-alert-close.md](112-reconcile-sensor-retry-alert-close.md) |
 | ADR-113 | 스트리밍 snapshot 적재는 먼저 다 받아 두고(spool), 쓰기 transaction은 그 뒤에 짧게 연다 (proposed) | [113-snapshot-load-spool-then-write.md](113-snapshot-load-spool-then-write.md) |
 
-| ADR-115 | 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리 (proposed, PG 설계만) | [115-scoped-concurrent-feature-writes.md](115-scoped-concurrent-feature-writes.md) |
+| ADR-115 | 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리 (accepted, 부분 구현; SH·정책 경로 운영 OFF·동결) | [115-scoped-concurrent-feature-writes.md](115-scoped-concurrent-feature-writes.md) |
 | ADR-116 | 바뀌지 않은 비-MOIS 행은 저장 geo를 재사용한다 (accepted) | [116-reuse-stored-geo-for-unchanged-rows.md](116-reuse-stored-geo-for-unchanged-rows.md) |
 
 ## 새 ADR 작성 규약

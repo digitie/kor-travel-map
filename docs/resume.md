@@ -1,3 +1,24 @@
+## 2026-10-27 — Codex PR 리뷰 정리: tracking 장부는 L만, 단건 writer는 regime 진입(433)
+
+Codex PR #1358~#1419 리뷰를 정리한 잠금 핵심을 `feat/map-codex-review-core`에 구현했다(PR은
+gate 뒤에 연다, 미머지). 433은 432 정본 루틴 20개의 본문 SHA·소유자·시그니처를 고정하고
+검토한 바늘만 바꾼다. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
+
+- WI-1: tracking 장부 쓰기는 L만, 큐레이션 확정(seal·root 완결·권위 finish·SUCCESS 완결 취소
+  전이)만 P EX→L. 430 write-prefix guard도 같은 분류로 좁혔다.
+- DC-1: 단건·관리 writer(SQL 14개+Python 관리 경로)는 regime 진입 — epoch=0이면 P 없음,
+  epoch>0이면 P EX. 계획의 "epoch>0 공유"는 strict guard가 manifest 없는 SH를 거부해 배타로
+  바꿨다. 전화 override와 curation import는 P EX를 유지한다. M05는 source 증거를 먼저 잡는다.
+- WI-2 무장 대기 0→1초 결함, WI-3 418 GRANT 재부여+ACL 오라클, WI-4 lock-order lint의 P·L·leaf
+  규칙과 Python helper 분석.
+
+운영 읽기 전용 확인: flag 3종 OFF, shadow scope 미설정, epoch 0, active policy·write attempt 0,
+남은 로그 창과 DB 원장에서 LOCK_TIMEOUT 503·55P03 0건 — 결함은 잠재 상태였다.
+[ADR-115 §11](adr/115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-433-기준).
+
+다음 한 작업: n150 gate(lint·unit·api·dagster·integration) 통과 → PR 개설과 misc 브랜치 병합 →
+CI green → 두 독립 적대 리뷰와 수정. 머지·배포는 weather export 작업 완료 뒤 lead가 한다.
+
 ## 2026-10-27 — kor-travel-common 최신(`aa232ad5`) 반영: 브랜치 `chore/common-latest-map`
 
 - Common 핀 `e746e4b8` → `aa232ad5`(#47 병합, 뒤의 #48은 문서만; Python은 #44 daemon 갱신 주기 opt-in뿐 — Map 미사용,

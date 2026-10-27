@@ -73,3 +73,16 @@ root 소유 제품·HTTP·문서는 J/W, J 소유 경계 시험은 root/W 검토
 생성/승인 UI 증거가 아니다. 기본 OFF·정책 seed0·운영 변경0이며 mixed binary 전환 전
 관련 writer drain이 필요하다. 모든 domain command 선점·catalog/Geo·지역 이동·전체 collector
 배선과 의미 지원, 대량/운영 ARM의 CPU·메모리 수용, Weather/Transport 전파는 미완이다.
+
+## 정오표(2026-10-27, alembic 433)
+
+- "수동 생성·요청 승인 내부 owner2개에만 해당 함수 EXECUTE를 추가"는 migration에서는 일어나지
+  않았다. 418은 그 GRANT를 grant option이 없는 `ktm_feature_schema_owner`로 실행했고 경고만 나고
+  부여 0건이었다. migration만으로 만든 head(`alembic/head-schema.sql`)에 두 owner의 ACL이 없다.
+  운영과 위 시험이 동작한 것은 배포 단계의 runtime privilege reconcile이 같은 권한을 다시 주기
+  때문이다. 433이 함수 소유자(`ktm_feature_state_procedure_owner`)로 GRANT를 다시 낸다.
+- 433부터 이 네 루틴의 첫 줄은 무조건 P EX가 아니라 regime 진입
+  (`ops.lock_single_feature_writer_protocol()`)이다. 정책 활성화 전(epoch=0)에는 P를 잡지 않으므로
+  위 "실제 SH 대기 503" 관측은 epoch>0에서만 성립한다(ADR-115 §11.3).
+- 상수 ACL을 다시 적던 단위 시험은 지우고, head의 SECURITY DEFINER 호출자가 진입 함수를
+  실행할 수 있는지 계산하는 `tests/lint/test_protocol_entry_acl_oracle.py`로 바꿨다.

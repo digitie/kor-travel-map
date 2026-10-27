@@ -1,8 +1,8 @@
 # ADR-111 — Feature advisory fence는 Feature마다가 아니라 전역 gate 하나다
 
-- 상태: proposed (PR #1319, 미머지·미배포 — 머지 때 accepted로, n150 배포 확인 때 배포 날짜를 이 줄과
-  `docs/adr/README.md` 색인에 함께 고친다)
-- 날짜: 2026-10-13
+- 상태: accepted — alembic 406으로 구현·운영 중(운영 head 432). 2026-10-27 개정: §2 순서의 맨
+  앞에 protocol gate(P, 411)와 pipeline lineage(L, 424)를 둔다(ADR-115 §11).
+- 날짜: 2026-10-13(제안), 2026-10-27(accepted·§2 개정)
 - 결정자: Claude (소유자 승인 대기)
 - 관계: ADR-103(Map DB가 공용 instance 안에 있다), ADR-011(advisory lock), ADR-021(forward-only)
 
@@ -64,9 +64,13 @@ SQLSTATE 53200 `out of shared memory`로 롤백됐고, reconcile sensor가 30초
 
 한 트랜잭션이 잡는 전역 잠금의 순서는
 
-`kortravelmap:curation-import` → `feature-curation-write` → `feature-write-all` → `feature-write:<id>` → `curation-catalog-write`
+`P`(protocol gate) → `L`(pipeline lineage) → `kortravelmap:curation-import` → `feature-curation-write` → `feature-write-all` → `feature-write:<id>` → `curation-catalog-write`
 
-이다. gate는 종전 Feature 잠금이 있던 자리에 들어가므로 기존 순서를 바꾸지 않는다. 공유로 든
+이다. **2026-10-27 개정:** 411의 protocol gate(P)와 424의 lineage(L)가 앞에 붙었다. P는 Feature
+도메인 행 잠금보다 먼저이고, L 뒤에 P를 새로 잡지 않는다. 433부터 단건·관리 writer는 정책
+활성화 전(epoch=0)에는 P를 잡지 않고, provider tracking 장부 쓰기는 L만 잡는다 — 분류의 정본은
+[ADR-115 §11](115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-433-기준)이다.
+gate는 종전 Feature 잠금이 있던 자리에 들어가므로 기존 순서를 바꾸지 않는다. 공유로 든
 gate를 같은 트랜잭션에서 배타로 올리는 경로는 없다(단건 writer는 대량 writer를 부르지 않는다).
 `finalize_provider_curation_root` → `refresh_curated_source_observation` → 관측 receipt INSERT →
 trigger `trg_curation_source_observation_sync_concierge` → `sync_concierge_theme_catalog` →
@@ -74,7 +78,8 @@ trigger `trg_curation_source_observation_sync_concierge` → `sync_concierge_the
 `tests/lint/test_feature_write_lock_order.py`가 head 스키마의 모든 루틴을 펼쳐 — `feature`·`ops`·
 `provider_sync` 호출과 **행 쓰기가 부르는 trigger 함수**까지 — 이 순서와 "Feature 잠금은 스칼라
 하나·gate 뒤", 공유→배타 승격 금지를 센다. Python은 `feature-write`를 잡지 않는다
-(`lock_feature_curation_write`는 `feature-curation-write`만) — 그것도 같은 파일이 센다.
+(`lock_feature_curation_write`는 `feature-curation-write`만) — 그것도 같은 파일이 센다. 433부터
+같은 파일이 P·L과 Python helper 호출 순서도 두 epoch 세계에서 센다.
 
 ### 3. 기각한 대안 — 대량 writer의 Feature 잠금을 그냥 지운다
 
