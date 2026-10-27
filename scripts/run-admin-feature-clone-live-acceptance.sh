@@ -706,7 +706,7 @@ COPY (
         database.dattablespace,
         database.datcollate,
         database.datctype,
-        COALESCE(database.daticulocale, ''),
+        COALESCE(to_jsonb(database) ->> 'datlocale', to_jsonb(database) ->> 'daticulocale', ''),
         COALESCE(database.daticurules, ''),
         COALESCE(database.datcollversion, ''),
         -- 검증 DB는 crash-safe cleanup을 위해 일회성 전용 role이 소유한다.
