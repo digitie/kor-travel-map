@@ -4502,7 +4502,7 @@ DECLARE
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'Feature request approval writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_feature_request_isolation';
@@ -5186,7 +5186,7 @@ DECLARE
     v_geometry_wkt text;
     v_operation text;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR p_command_id IS NULL
        OR p_feature_id IS NULL
@@ -5693,7 +5693,7 @@ CREATE PROCEDURE feature.author_lifecycle_override(IN p_feature_id uuid, IN p_so
 DECLARE
     v_current feature.features%ROWTYPE;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF p_source_lifecycle_state NOT IN ('active', 'retired')
        OR p_override_lifecycle_state NOT IN ('active', 'retired')
        OR p_prevent_provider_reactivation IS NULL
@@ -6023,7 +6023,7 @@ DECLARE
     v_created_row_revision bigint;
     v_created boolean;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual Feature writer requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_manual_feature_create_isolation';
@@ -6811,7 +6811,7 @@ DECLARE
     v_category text;
     v_coord feature.features.coord%TYPE;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF jsonb_typeof(p_feature) IS DISTINCT FROM 'object' THEN
         RAISE EXCEPTION 'feature payload must be an object'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_create_payload';
@@ -7203,7 +7203,7 @@ DECLARE
     v_created uuid;
     v_created_inserted boolean;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     v_dataset_id := nullif(btrim(p_identity ->> 'provider_dataset_id'), '')::bigint;
     v_kind := nullif(btrim(p_identity ->> 'feature_kind'), '');
     v_natural := nullif(btrim(p_identity ->> 'natural_key'), '');
@@ -11101,7 +11101,7 @@ DECLARE
     v_raw_payload_hash text;
     v_causation_ref text;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF p_provider_dataset_id IS NULL
        OR coalesce(btrim(p_source_entity_key), '') = ''
        OR coalesce(btrim(p_source_record_key), '') = ''
@@ -12752,6 +12752,7 @@ DECLARE
     v_provider feature.features%ROWTYPE;
     v_origin feature.feature_creation_origins%ROWTYPE;
     v_source record;
+    v_evidence record;
     v_manual_snapshot jsonb;
     v_provider_snapshot jsonb;
     v_input jsonb;
@@ -12766,7 +12767,7 @@ DECLARE
     v_prior_case_id uuid;
     v_decision_fingerprint text;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual/provider dedup detector requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_detector_isolation';
@@ -12818,6 +12819,40 @@ BEGIN
 
     -- event publication·decision과 같은 global fence가 case episode도 직렬화한다.
     PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-m05', 0));
+    -- 433 DC-1: regime 전에는 P가 없다.
+    -- provider 적재와 같은 순서로 source 증거(dataset/entity/record/head 다음
+    -- link)를 Feature보다 먼저 잡는다.
+    FOR v_evidence IN
+        SELECT link.source_entity_key, entity.provider_dataset_id,
+               head.current_source_record_key
+        FROM provider_sync.source_links AS link
+        JOIN provider_sync.source_entities AS entity
+          ON entity.source_entity_key = link.source_entity_key
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = entity.source_entity_key
+        WHERE link.feature_id = p_provider_feature_id
+          AND link.source_role = 'primary'
+        ORDER BY link.source_entity_key COLLATE "C"
+    LOOP
+        PERFORM 1
+        FROM provider_sync.provider_datasets AS dataset
+        JOIN provider_sync.source_entities AS entity
+          ON entity.provider_dataset_id = dataset.provider_dataset_id
+        JOIN provider_sync.source_records AS record
+          ON record.source_entity_key = entity.source_entity_key
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = entity.source_entity_key
+         AND head.current_source_record_key = record.source_record_key
+        WHERE dataset.provider_dataset_id = v_evidence.provider_dataset_id
+          AND entity.source_entity_key = v_evidence.source_entity_key
+          AND record.source_record_key = v_evidence.current_source_record_key
+        FOR SHARE OF dataset, entity, record, head;
+        PERFORM 1
+        FROM provider_sync.source_links AS link
+        WHERE link.feature_id = p_provider_feature_id
+          AND link.source_entity_key = v_evidence.source_entity_key
+        FOR SHARE;
+    END LOOP;
     PERFORM 1
     FROM feature.features AS locked
     WHERE locked.feature_id IN (p_manual_feature_id, p_provider_feature_id)
@@ -13975,6 +14010,7 @@ DECLARE
     v_provider feature.features%ROWTYPE;
     v_origin feature.feature_creation_origins%ROWTYPE;
     v_source record;
+    v_evidence record;
     v_primary_source_count integer;
     v_command ops.domain_commands%ROWTYPE;
     v_transition_feature_id uuid;
@@ -13986,7 +14022,7 @@ DECLARE
     v_event_sequence bigint;
     v_occurred_at timestamptz;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF current_setting('transaction_isolation') <> 'read committed' THEN
         RAISE EXCEPTION 'manual/provider dedup decision requires READ COMMITTED'
             USING ERRCODE = '25001', CONSTRAINT = 'ck_m05_decision_isolation';
@@ -14043,6 +14079,40 @@ BEGIN
         RETURN;
     END IF;
 
+    -- 433 DC-1: regime 전에는 P가 없다.
+    -- provider 적재와 같은 순서로 source 증거(dataset/entity/record/head 다음
+    -- link)를 Feature보다 먼저 잡는다.
+    FOR v_evidence IN
+        SELECT link.source_entity_key, entity.provider_dataset_id,
+               head.current_source_record_key
+        FROM provider_sync.source_links AS link
+        JOIN provider_sync.source_entities AS entity
+          ON entity.source_entity_key = link.source_entity_key
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = entity.source_entity_key
+        WHERE link.feature_id = v_case.provider_feature_id
+          AND link.source_role = 'primary'
+        ORDER BY link.source_entity_key COLLATE "C"
+    LOOP
+        PERFORM 1
+        FROM provider_sync.provider_datasets AS dataset
+        JOIN provider_sync.source_entities AS entity
+          ON entity.provider_dataset_id = dataset.provider_dataset_id
+        JOIN provider_sync.source_records AS record
+          ON record.source_entity_key = entity.source_entity_key
+        JOIN provider_sync.source_entity_heads AS head
+          ON head.source_entity_key = entity.source_entity_key
+         AND head.current_source_record_key = record.source_record_key
+        WHERE dataset.provider_dataset_id = v_evidence.provider_dataset_id
+          AND entity.source_entity_key = v_evidence.source_entity_key
+          AND record.source_record_key = v_evidence.current_source_record_key
+        FOR SHARE OF dataset, entity, record, head;
+        PERFORM 1
+        FROM provider_sync.source_links AS link
+        WHERE link.feature_id = v_case.provider_feature_id
+          AND link.source_entity_key = v_evidence.source_entity_key
+        FOR SHARE;
+    END LOOP;
     PERFORM 1
     FROM feature.features AS locked
     WHERE locked.feature_id IN (v_case.manual_feature_id, v_case.provider_feature_id)
@@ -14210,7 +14280,7 @@ CREATE PROCEDURE feature.resolve_manual_provider_dedup_case_v2(IN p_case_id uuid
     SET search_path TO 'pg_catalog', 'feature', 'ops'
     AS $$
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     -- An immutable cursor-zero subscription is the paired-consumer activation
     -- receipt. No M05 resolution (including "kept") can predate it.
     PERFORM 1
@@ -14274,7 +14344,7 @@ DECLARE
     v_values jsonb;
     v_geometry_wkt jsonb;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR p_command_id IS NULL
        OR p_feature_id IS NULL
@@ -14736,7 +14806,7 @@ CREATE PROCEDURE feature.revoke_lifecycle_override(IN p_feature_id uuid, IN p_pr
 DECLARE
     v_current feature.features%ROWTYPE;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF coalesce(btrim(p_principal), '') = ''
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'lifecycle override revoke has invalid typed arguments'
@@ -15426,7 +15496,7 @@ DECLARE
     v_publication_state text;
     v_quality_state text;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF p_action NOT IN ('patch', 'retire')
        OR p_expected_row_revision IS NULL OR p_expected_row_revision < 1
        OR coalesce(btrim(p_reason_code), '') = ''
@@ -15506,7 +15576,7 @@ DECLARE
     v_current feature.features%ROWTYPE;
     v_override_row_revision bigint;
 BEGIN
-  PERFORM ops.lock_scoped_feature_write_protocol(true);
+  PERFORM ops.lock_single_feature_writer_protocol();
     IF p_expected_row_revision IS NULL OR p_expected_row_revision < 1 THEN
         RAISE EXCEPTION 'expected feature row revision is required'
             USING ERRCODE = '23514', CONSTRAINT = 'ck_feature_state_expected_revision';
@@ -17796,7 +17866,7 @@ CREATE FUNCTION ops.fill_provider_cancellation_starts_command(p_cancellation_id 
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
-  PERFORM ops.lock_provider_feature_tracking_protocol(true);
+  PERFORM ops.lock_provider_feature_tracking_protocol(false);
   IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -17869,14 +17939,15 @@ DECLARE
   v_snapshot record;
   v_snapshot_state record;
 BEGIN
-  PERFORM ops.lock_provider_feature_tracking_protocol(true);
-  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
-    RAISE EXCEPTION 'provider membership command requires provider executor'
-      USING ERRCODE = '42501';
-  END IF;
   IF p_authoritative_snapshot_complete IS NULL THEN
     RAISE EXCEPTION 'provider membership completion kind is required'
       USING ERRCODE = '22023';
+  END IF;
+  -- 433 WI-1: 권위 완료(seal)만 P EX 뒤 L, 비권위 완료는 장부 L만 잡는다.
+  PERFORM ops.lock_provider_feature_tracking_protocol(p_authoritative_snapshot_complete);
+  IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
+    RAISE EXCEPTION 'provider membership command requires provider executor'
+      USING ERRCODE = '42501';
   END IF;
   SELECT child.job_id INTO STRICT v_child_job_id
   FROM ops.import_jobs AS child
@@ -18805,6 +18876,33 @@ $$;
 
 
 ALTER FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: lock_single_feature_writer_protocol(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+CREATE FUNCTION ops.lock_single_feature_writer_protocol() RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_epoch bigint;
+BEGIN
+    -- 행 잠금이 아닌 일반 읽기다. 이 읽기가 남기는 epoch 표의 ACCESS SHARE가
+    -- 첫 활성화의 ACCESS EXCLUSIVE 설치를 이 transaction이 끝날 때까지 기다리게 한다.
+    -- 활성화가 끝난 뒤의 읽기는 epoch>0을 보고 아래 EX로 들어간다.
+    SELECT epoch INTO STRICT v_epoch FROM feature.provider_field_policy_epoch
+     WHERE singleton;
+    IF v_epoch > 0 THEN
+        -- 첫 활성화가 함께 설치하는 strict guard(429)는 manifest 없는 SH 쓰기를 거부한다.
+        -- 그래서 regime의 단건 writer는 EX다. SH 허용은 strict guard 재설계(DC-2)의 몫이다.
+        PERFORM ops.lock_scoped_feature_write_protocol(true);
+    END IF;
+END;
+$$;
+
+
+ALTER FUNCTION ops.lock_single_feature_writer_protocol() OWNER TO ktm_feature_state_procedure_owner;
 
 --
 -- Name: mark_snapshot_material_orphaned(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -19836,7 +19934,9 @@ CREATE FUNCTION ops.reject_pipeline_cancellation_prefix() RETURNS trigger
     SET search_path TO 'pg_catalog'
     AS $$
 DECLARE
-  v_need_final boolean:=true;
+  -- 433 WI-1: 취소 원장 쓰기는 L만 요구한다. P를 쥐었다면 EX여야 한다.
+  -- root 완결을 부르는 SUCCESS 전이는 정의 자체가 P EX 뒤 L을 먼저 잡는다.
+  v_need_final boolean:=false;
   v_protocol_held boolean;
   v_protocol_exclusive boolean;
   v_lineage_held boolean;
@@ -20036,12 +20136,13 @@ BEGIN
   IF TG_OP='UPDATE' THEN
     v_provider := v_provider OR OLD.kind IN ('provider_feature_load_run','provider_feature_load');
   END IF;
+  -- 433 WI-1: P EX 뒤 L은 큐레이션을 확정하는 쓰기(root 완료, 권위 child 완료)와
+  -- 삭제뿐이다. 실패·취소·비권위 완료·marker·start 보충은 장부 쓰기라 L만 요구한다.
   v_need_final := TG_OP='DELETE';
-  IF TG_OP<>'DELETE' THEN
-    v_need_final := v_need_final OR NEW.status IN ('done','failed','cancelled');
-  END IF;
-  IF TG_OP<>'INSERT' THEN
-    v_need_final := v_need_final OR OLD.status IN ('done','failed','cancelled');
+  IF TG_OP<>'DELETE' AND NEW.status = 'done'
+     AND (TG_OP='INSERT' OR OLD.status IS DISTINCT FROM 'done') THEN
+    v_need_final := NEW.kind = 'provider_feature_load_run'
+      OR COALESCE(NEW.payload ->> 'authoritative_snapshot_complete', '') = 'true';
   END IF;
   IF v_provider THEN
     -- 관측만 한다. tuple 뒤 새 blocking L/P를 요청하지 않는다.
@@ -20753,7 +20854,11 @@ DECLARE
   v_replayed boolean;
   v_stale_input boolean;
 BEGIN
-  PERFORM ops.lock_provider_feature_tracking_protocol(true);
+  -- 433 WI-1: root 완결을 부르는 SUCCESS 완결 인자 조합만 P EX 뒤 L이다.
+  PERFORM ops.lock_provider_feature_tracking_protocol(
+    p_result IS NOT DISTINCT FROM 'already_terminal'
+    AND p_target_status IS NOT DISTINCT FROM 'done'
+    AND p_dagster_terminal_status IS NOT DISTINCT FROM 'SUCCESS');
   IF session_user <> 'ktm_feature_service'
      AND NOT EXISTS (
        SELECT 1 FROM pg_catalog.pg_roles AS role
@@ -20909,7 +21014,7 @@ CREATE PROCEDURE ops.transition_provider_feature_operation_terminal_command(IN p
     SET search_path TO 'pg_catalog', 'ops'
     AS $$
 BEGIN
-  PERFORM ops.lock_provider_feature_tracking_protocol(true);
+  PERFORM ops.lock_provider_feature_tracking_protocol(false);
   IF NOT pg_has_role(session_user, 'ktm_curation_provider_executor', 'member') THEN
     RAISE EXCEPTION 'provider terminal command requires provider executor'
       USING ERRCODE = '42501';
@@ -23711,7 +23816,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_protocol_entry_narrowing'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -33928,6 +34033,19 @@ GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean
 GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_feature_schema_owner;
 GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_curation_command_owner;
 GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_manual_provider_dedup_procedure_owner;
+GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_manual_feature_procedure_owner;
+GRANT ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(p_exclusive boolean) TO ktm_feature_request_procedure_owner;
+
+
+--
+-- Name: FUNCTION lock_single_feature_writer_protocol(); Type: ACL; Schema: ops; Owner: ktm_feature_state_procedure_owner
+--
+
+REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol() FROM PUBLIC;
+GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_feature_runtime;
+GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_manual_provider_dedup_procedure_owner;
+GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_manual_feature_procedure_owner;
+GRANT ALL ON FUNCTION ops.lock_single_feature_writer_protocol() TO ktm_feature_request_procedure_owner;
 
 
 --
