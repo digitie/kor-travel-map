@@ -204,6 +204,19 @@ async def test_phone_fence_upgrade_is_rejected_without_override_writes(
         await _apply("phones", session, feature)
 
 
+async def test_epoch0_address_override_finishes_while_a_load_holds_protocol_ex(
+    scalar_engines: Any,
+) -> None:
+    """433 DC-1: 적재가 P EX를 쥐어도 다른 Feature의 주소 override는 기다리지 않는다."""
+    admin, runtime = scalar_engines
+    feature = await _seed(admin)
+    async with AsyncSession(runtime) as holder, holder.begin():
+        await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL lock_timeout='300ms'"))
+            await _apply("address", session, feature)
+
+
 async def test_epoch0_address_override_under_shared_protocol_does_not_upgrade(
     scalar_engines: Any,
 ) -> None:

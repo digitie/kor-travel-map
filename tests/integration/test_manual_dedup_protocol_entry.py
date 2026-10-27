@@ -59,6 +59,51 @@ async def _blockers(engine, waiting: int, blocker: int, task):
             await asyncio.sleep(0.01)
 
 
+async def _resolve_decision(admin, runtime, pair) -> dict[str, Any]:
+    """기록된 후보 하나와 resolve 명령·reconciliation 구독을 준비하고 resolve 인자를 돌려준다."""
+    case = await _record_candidate(
+        runtime,
+        manual_feature_id=str(pair["manual_feature_id"]),
+        provider_feature_id=str(pair["provider_feature_id"]),
+    )
+    command = await _open_command(
+        admin, actor=str(pair["actor"]), operation="admin.manual-provider-dedup-case.resolve.v1"
+    )
+    async with admin.begin() as connection:
+        await connection.execute(
+            text("""INSERT INTO ops.feature_reference_reconciliation_subscriptions(
+            principal_id,initial_event_sequence,read_scope,ack_scope)
+            VALUES('service:feature-reference-reconciliation',0,
+            'feature-reference-reconciliation:read','feature-reference-reconciliation:ack')
+            ON CONFLICT DO NOTHING""")
+        )
+        await connection.execute(
+            text("""INSERT INTO ops.feature_reference_reconciliation_leases(
+            principal_id,acked_through_sequence,worker_id,lease_epoch,lease_expires_at)
+            VALUES('service:feature-reference-reconciliation',0,NULL,0,NULL)
+            ON CONFLICT DO NOTHING""")
+        )
+        row = (
+            await connection.execute(
+                text("""SELECT evidence_fingerprint,
+            manual_feature_row_revision,provider_feature_row_revision
+            FROM ops.manual_provider_dedup_cases WHERE case_id=:id"""),
+                {"id": case["o_case_id"]},
+            )
+        ).one()
+    return dict(
+        case_id=case["o_case_id"],
+        decision="kept",
+        expected_case_fingerprint=row[0],
+        expected_manual_row_revision=row[1],
+        expected_provider_row_revision=row[2],
+        survivor_feature_id=None,
+        reason="isolated lock-order test",
+        actor=str(pair["actor"]),
+        command_id=command,
+    )
+
+
 async def _contention(engines, *, fixed: bool, operation: str = "record") -> dict[str, Any]:
     admin, runtime = engines
     # 소유 testcontainer의 진단 주기만 낮춘다. 제품의 1s lock_timeout/ACL은 유지한다.
@@ -76,45 +121,7 @@ async def _contention(engines, *, fixed: bool, operation: str = "record") -> dic
     pair = await _seed_manual_provider_pair(admin, index=0 if operation == "record" else 1)
     decision = None
     if operation == "resolve":
-        case = await _record_candidate(
-            runtime,
-            manual_feature_id=str(pair["manual_feature_id"]),
-            provider_feature_id=str(pair["provider_feature_id"]),
-        )
-        command = await _open_command(
-            admin, actor=str(pair["actor"]), operation="admin.manual-provider-dedup-case.resolve.v1"
-        )
-        async with admin.begin() as connection:
-            await connection.execute(
-                text("""INSERT INTO ops.feature_reference_reconciliation_subscriptions(
-                principal_id,initial_event_sequence,read_scope,ack_scope)
-                VALUES('service:feature-reference-reconciliation',0,
-                'feature-reference-reconciliation:read','feature-reference-reconciliation:ack')""")
-            )
-            await connection.execute(
-                text("""INSERT INTO ops.feature_reference_reconciliation_leases(
-                principal_id,acked_through_sequence,worker_id,lease_epoch,lease_expires_at)
-                VALUES('service:feature-reference-reconciliation',0,NULL,0,NULL)""")
-            )
-            row = (
-                await connection.execute(
-                    text("""SELECT evidence_fingerprint,
-                manual_feature_row_revision,provider_feature_row_revision
-                FROM ops.manual_provider_dedup_cases WHERE case_id=:id"""),
-                    {"id": case["o_case_id"]},
-                )
-            ).one()
-        decision = dict(
-            case_id=case["o_case_id"],
-            decision="kept",
-            expected_case_fingerprint=row[0],
-            expected_manual_row_revision=row[1],
-            expected_provider_row_revision=row[2],
-            survivor_feature_id=None,
-            reason="isolated lock-order test",
-            actor=str(pair["actor"]),
-            command_id=command,
-        )
+        decision = await _resolve_decision(admin, runtime, pair)
     feature = str(pair["provider_feature_id"])
     async with admin.connect() as connection:
         dataset = await connection.scalar(
@@ -227,6 +234,39 @@ async def _contention(engines, *, fixed: bool, operation: str = "record") -> dic
 async def test_actual_m05_call_and_scoped_begin_do_not_invert_locks(scalar_engines, operation):
     result = await _contention(scalar_engines, fixed=True, operation=operation)
     assert result["error_sqlstates"] == []
+
+
+@pytest.mark.parametrize(("operation", "index"), [("record", 2), ("resolve", 3)])
+async def test_m05_epoch0_finishes_while_a_load_holds_protocol_ex(
+    scalar_engines, operation, index
+):
+    """433 DC-1: 적재가 P EX를 쥔 동안에도 epoch=0의 M05는 끝난다.
+
+    종전(414)에는 detector op가 P EX 뒤에서 30초를 기다리다 55P03으로 실패했다.
+    """
+    admin, runtime = scalar_engines
+    async with admin.connect() as connection:
+        assert await connection.scalar(
+            text("SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton")
+        ) == 0
+    pair = await _seed_manual_provider_pair(admin, index=index)
+    decision = await _resolve_decision(admin, runtime, pair) if operation == "resolve" else None
+    async with AsyncSession(runtime) as holder, holder.begin():
+        await lock_scoped_feature_write_protocol(holder, exclusive=True)
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL lock_timeout='300ms'"))
+            if decision is not None:
+                result = await resolve_manual_provider_dedup_case(session, **decision)
+                assert result.outcome == "kept"
+            else:
+                receipt = await record_manual_provider_candidate(
+                    session,
+                    manual_feature_id=str(pair["manual_feature_id"]),
+                    provider_feature_id=str(pair["provider_feature_id"]),
+                    scores=_SCORES,
+                    detector_causation=_CAUSATION,
+                )
+                assert receipt[1] == "created"
 
 
 _NAMES = (

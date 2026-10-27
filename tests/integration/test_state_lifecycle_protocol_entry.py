@@ -313,6 +313,20 @@ async def test_epoch0_entry_under_shared_protocol_does_not_upgrade(scalar_engine
 
 
 @pytest.mark.parametrize("name", _CALLS)
+async def test_epoch0_state_call_finishes_while_a_load_holds_protocol_ex(scalar_engines, name):
+    """433 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 상태·lifecycle writer는 끝난다."""
+    admin, runtime = scalar_engines
+    case = await _case(admin)
+    await _prepare(runtime, name, case)
+    async with AsyncSession(runtime) as holder, holder.begin():
+        await lock_scoped_feature_write_protocol(holder, exclusive=True)
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL lock_timeout='300ms'"))
+            await _call(session, name, case)
+    await _assert_effect(admin, name, case)
+
+
+@pytest.mark.parametrize("name", _CALLS)
 async def test_successful_state_call_obeys_caller_rollback(scalar_engines, name):
     admin, runtime = scalar_engines
     case = await _case(admin)

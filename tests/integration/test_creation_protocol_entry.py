@@ -383,14 +383,18 @@ async def test_epoch0_creation_under_shared_protocol_does_not_upgrade(scalar_eng
     await _assert_created(admin, case, kind, result)
 
 
+@pytest.mark.parametrize("exclusive", [False, True], ids=["scoped-sh", "load-ex"])
 @pytest.mark.parametrize("kind", _KINDS)
-async def test_epoch0_creation_completes_while_another_backend_holds_shared_protocol(
-    scalar_engines, kind
+async def test_epoch0_creation_completes_while_another_backend_holds_the_protocol(
+    scalar_engines, kind, exclusive
 ):
     admin, runtime = scalar_engines
     case = await _case(admin, runtime, kind)
     async with AsyncSession(runtime) as holder, holder.begin():
-        await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+        await holder.execute(
+            text("SELECT ops.lock_scoped_feature_write_protocol(:exclusive)"),
+            {"exclusive": exclusive},
+        )
         async with AsyncSession(runtime) as s, s.begin():
             # 종전(418)에는 이 짧은 상한에서 55P03이었다. 433 epoch=0은 P를 기다리지 않는다.
             await s.execute(text("SET LOCAL lock_timeout='150ms'"))

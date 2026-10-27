@@ -140,6 +140,62 @@ async def test_a_load_waits_past_the_engine_lock_timeout_and_api_writers_do_not(
     assert api_elapsed < 10.0, f"API 단건 writer가 {api_elapsed:.1f}초 기다렸다"
 
 
+async def test_an_unset_engine_timeout_is_armed_past_the_one_second_gate(
+    dagster_runtime_engine: AsyncEngine,
+) -> None:
+    """433 WI-2: 엔진에 ``lock_timeout``이 없으면(0) protocol gate가 1초로 바꾼다.
+
+    종전 무장은 0을 '이미 무한'으로 보고 건드리지 않아, 무장한 적재가 1초에 55P03이었다.
+    이제 0도 무장값으로 바꿨다가 잡은 뒤 0으로 되돌린다.
+    """
+    dsn = dagster_runtime_engine.url.render_as_string(hide_password=False)
+    unset = make_async_engine(
+        dsn,
+        pool_size=1,
+        max_overflow=0,
+        server_settings={"statement_timeout": "600000", "lock_timeout": "0"},
+    )
+    holding = asyncio.Event()
+    release = asyncio.Event()
+
+    async def _hold() -> None:
+        async with make_async_session_factory(dagster_runtime_engine)() as session, session.begin():
+            await lock_feature_curation_write(session)
+            holding.set()
+            await asyncio.wait_for(release.wait(), 30)
+
+    async def _armed() -> tuple[object, ...]:
+        async with make_async_session_factory(unset)() as session, session.begin():
+            arm_feature_curation_write_wait(session, 15_000)
+            await lock_feature_curation_write(session)
+            return tuple((await session.execute(text(_CURRENT_TIMEOUTS_SQL))).one())
+
+    hold_task = asyncio.create_task(_hold())
+    armed_task: asyncio.Task[tuple[object, ...]] | None = None
+    try:
+        await asyncio.wait_for(holding.wait(), timeout=30)
+        armed_task = asyncio.create_task(_armed())
+        # gate의 1초를 충분히 넘겨 본다 — 종전 동작이면 여기서 이미 55P03으로 끝났다.
+        await asyncio.sleep(3.0)
+        if armed_task.done():
+            armed_task.result()
+            raise AssertionError("armed load acquired the fence while it was held")
+        release.set()
+        observed = await asyncio.wait_for(armed_task, timeout=15)
+        await asyncio.wait_for(hold_task, timeout=15)
+    finally:
+        release.set()
+        for task in (armed_task, hold_task):
+            if task is not None and not task.done():
+                task.cancel()
+        await asyncio.gather(
+            *(task for task in (armed_task, hold_task) if task is not None),
+            return_exceptions=True,
+        )
+        await unset.dispose()
+    assert observed == ("0", "10min", "0")
+
+
 async def test_after_acquiring_the_short_timeouts_come_back(
     dagster_runtime_engine: AsyncEngine,
 ) -> None:
