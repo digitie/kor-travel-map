@@ -1,3 +1,29 @@
+## 2026-10-27 — 동시 쓰기 제한 시험 두 PR의 최종 CI·정상 병합
+
+부모 #1421의 정확 head `e23c277d`와 후속 #1422의 `a32674a1`은 각각 CI10개를
+통과했고, 검증 tree 그대로 main `0d60cd0b`·`c62a9868`로 순서대로 정상 병합됐다.
+후속의 양 PostGIS 전체 integration은 glibc1936 PASS/23 skip·alpine1930 PASS/29 skip이며,
+전체 skip 사유에 새 shared Feature/부모 worker pair 시험은 없다. quiet 로그의 개별
+성공 node 출력을 가정하지 않고 정확 수집·전체 실행·skip 사유를 함께 확인했다.
+
+원 owned PG의 부모2PASS27.88초·후속2PASS24.80초와 정확 정리·모든 선행 실패는 보존한다.
+이번 정산은 문서뿐이다. 일반 coordinator·전 writer 전환·운영 활성화와 CPU/RSS 개선,
+상위 T-CWRITE-01–09는 미완이며 공식 배포·공개 UI 수용은 아직 별도다.
+[부모 근거](reports/2026-10-27-provider-snapshot-os-worker-pair.md#최종-합성본의-ci정상-병합-수용),
+[후속 근거](reports/2026-10-27-shared-feature-artifact-replan.md#최종-ci와-정상-main-병합).
+
+## 2026-10-27 — snapshot OS worker pair 최종 CI·정상 병합 수용
+
+PR #1421의 Common 합성 head `e23c277d`는 두 독립 리뷰와 CI10개를 통과했고,
+동일 tree의 main `0d60cd0b`로 정상 병합됐다. 양 PostGIS 전체 integration은 glibc1934개·
+alpine1928개 PASS이며 기존 skip 사유에 신규 worker pair는 없다. CommonAA 설치와
+실제 import/fixture closure를 확인했고 중복 local PG는 실행하지 않았다.
+
+원6307의 제한 owned PG2 PASS·정확 정리와 선행 fixture/SDK/marker/ledger 실패는 보존한다.
+이번 정산은 문서뿐이며 상위 T-CWRITE-01–09·운영 CPU/RSS 실측·상위 Common 제품의
+공식 배포/공개 UI 수용은 별도다. 후속 #1422의 머지 완료로 확대하지 않는다.
+[최종 근거](reports/2026-10-27-provider-snapshot-os-worker-pair.md#최종-합성본의-ci정상-병합-수용).
+
 ## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 실제 PG 수용
 
 정확 source `e35f5dc3`은 두 독립 리뷰 뒤 같은 상한의 owned PG2case를24.80초에 통과했다.

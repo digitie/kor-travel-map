@@ -5,7 +5,7 @@
 PR #1421의 문서 head `3e962183` 위에서 시작해 최신 CommonAA 부모 합성 `e23c277d`를
 정상 merge한 후속 시험이다. 정확 source `e35f5dc3`은 두 독립 source/합성/수정 리뷰와
 owned PG2case(24.80초, skip0)를 통과했다. 이 PR은 생산 Python·SQL·API와 운영 OFF 설정을
-바꾸지 않으며 최종 CI·병합은 아직 대기한다. 상위 T-CWRITE-01–09, 운영 CPU/RSS 개선과
+바꾸지 않는다. 최종 head `a32674a1`의 CI10개가 성공했고 main `c62a9868`로 정상 병합됐다. 상위 T-CWRITE-01–09, 운영 CPU/RSS 개선과
 일반 수집 coordinator 구현은 미완이다.
 
 ## 검증하는 경계
@@ -102,3 +102,36 @@ SHA256 `35aeb74c7ade4d97921e9e2fa003b4b3cc1e3a3577f9ae2560b1fd83707d7739`다.
 이것은 알려진 한 Feature와 두 primary dataset의 시험 조율 한 번이다. 일반 운영 재시도
 coordinator, 전체 identity/link/retire writer 전환·phantom closure, 운영 성능 개선과 활성화는
 아직 구현·수용하지 않았다. 최신 Common의 운영 이미지 갱신도 이 격리 시험의 배포가 아니다.
+
+
+## 최종 CI와 정상 main 병합
+
+PR #1422의 최종 검증 head `a32674a1962b087c0292ba33e5296271bd5e8381`은 CI10개를
+모두 통과했다. 2026-10-27 07:45:50 UTC의 정상 main merge는
+`c62a98680a373939f9b591fa6c26fdc3355d942e`이며, tree
+`84550c3f159d5c92ef69d21c3654288cbdb67911`은 최종 검증 head와 같다. 부모는
+앞선 #1421의 main `0d60cd0b`와 최종 head이며 force·관리자 우회·브랜치 삭제는 없었다.
+
+workflow `40462148455`를 포함한 Python3.11/3.12/3.13, fixture replay, PostGIS2환경,
+lint, OpenAPI, frontend build, production Docker build가 모두 성공했다. 양 PostGIS 전체
+integration의 glibc는1936 PASS/23 skip(1406.67초), alpine은1930 PASS/29 skip(1738.92초)다.
+새 shared Feature/부모 worker pair 시험은 skip 사유에 없고, 기존 Geo live·선택 Heritage
+SDK·이전 fence와 alpine collation만 skip됐다. quiet 로그가 각 성공 node를 출력했다고
+주장하지 않으며, 정확 source 수집과 필터 없는 전체 실행·skip 사유·정상 종료를 함께
+검산해 새 두 case를 수용했다.
+
+양쪽 API/Dagster 설치의 Common VCS requirement는 정확 `aa232ad5`다. 이는 별도 private
+target의 실제19 source/direct_url 전후 검산과 구분한다. CI가 각 Common source bytehash를
+직접 출력하거나 새 clone을 했다고 주장하지 않는다. 시험 source `e35f5dc3`은 이후 문서
+정산·정상 main 합성·CI trigger의 빈 커밋 동안 그대로 보존됐고 중복 local PG는 실행하지 않았다.
+
+최종 CI·사전 검산 원장 `map1422-a326-final-ci-and-premerge-proof-t-r1.json` SHA256은
+`c07d4dffd0db9f9cb5c86a1cfa81f67a79eda8793c472f0e8db47f283a8f1e08`이다.
+정상 병합 원장 `map1422-normal-main-merge-final-acceptance-t-r1.json`은
+`b969a5d1650aca01b34a624e739b116ec127d26a4f878cc7d0ed0cdd787963db`다.
+원 순수실패2회와 첫 실제 PG2FAIL·정확 cleanup·최종 owned PG2PASS 및 두 source/합성/
+문서 리뷰 원장을 보존한다. 본 문서 정산은 생산 코드·SQL·시험·tasks·OFF 설정을 바꾸지 않는다.
+
+부모·후속 두 PR은 제한된 시험을 추가한 것이다. 일반 운영 재계획 coordinator나 모든 writer의
+동시 쓰기·운영 CPU/RSS 개선을 완료한 것은 아니며 T-CWRITE-01–09는 모두 미완료다.
+운영 이미지 변경과 공개 UI 수용도 이 정산 시점에는 진행 전이며 별도로 기록한다.
