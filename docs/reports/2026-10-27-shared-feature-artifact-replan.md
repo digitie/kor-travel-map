@@ -48,3 +48,19 @@ PlaceDetail을 명시 생성해 고쳤으며 이후21PASS다. 이 두 실패에�
 이 시험은 시험이 직접 조율하는 한 번의 재계획이다. 현재 public scalar apply/batch에는
 unbound READY 정리→동일 artifact 재계획→유한 재시도를 소유하는 일반 coordinator가 없다.
 그 생산 구현과 실제 전 writer 전환은 후속 별도 설계·리뷰 대상이다.
+
+
+## 첫 실제 PG 실패와 관찰용 bind 정정
+
+최신 CommonAA를 정상 합성한 `f691a8e1`의 첫 owned PG는 두 case 모두 실패했다
+(2FAIL, pytest28.02초). 정확 participant-scope 대기와 leader commit, 선택된40001,
+READY 계획 불변 확인 뒤 `pg_xact_status(CAST(:xid AS xid8))`의 관찰용 bind에서 멈췄다.
+asyncpg의 xid8 codec은 정수를 요구하는데 시험이 `str(xid)`를 넘겨 DataError가 났다.
+반환받은 정수 xid를 그대로 전달하는 한 줄만 고친다. 다른 observer의 `::text` 비교용
+문자열과 생산 SQL/Python은 바꾸지 않는다.
+
+첫 원결과 `map-shared-feature-replan-owned-r2-fe46c0d59c2242dbadf7fd964c57f045/result.json`
+SHA256은 `07a621f17eab06975cb6b66581ba03c13299e6a04e89ab22487a996e0afde219`다.
+정확 owned CID 없음·anonymous volume1개 없음·전체 scalar label0의 cleanup은 PASS다.
+관찰용 쿼리가 실패했으므로 aborted 상태의 실제 확인과 cancel·동일 artifact 재계획·완료
+replay의 양성 수용을 아직 주장하지 않는다. 한도/자원을 늘리지 않고 두 좁은 리뷰 뒤 재시험한다.

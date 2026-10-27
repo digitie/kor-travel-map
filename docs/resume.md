@@ -1,3 +1,12 @@
+## 2026-10-27 — 공유 Feature 첫 실제 PG의 xid8 관찰 bind 정정
+
+CommonAA 정상 합성 `f691a8e1`의 첫 owned PG2case는 정확 scope 대기·선택된40001·READY
+불변 뒤 관찰용 xid8 bind에 문자열을 넘겨2FAIL(28.02초)이었다. 정수 xid를 그대로
+전달하는 시험1줄만 수정한다. 원결과와 정확CID/volume1/전체label0 정리PASS를 보존하며,
+aborted 상태 확인·동일 artifact 재계획/완료 replay의 실제PASS는 아직0이다.
+두 좁은 리뷰 뒤 같은 상한으로 재시험한다. 생산/운영 변경0·상위 T-CWRITE-01–09 미완이다.
+[실패와 정정 원장](reports/2026-10-27-shared-feature-artifact-replan.md#첫-실제-pg-실패와-관찰용-bind-정정).
+
 ## 2026-10-27 — 공유 Feature의 동일 artifact 재계획 시험 착수
 
 PR #1421 문서 head `3e962183` 위에 시험 전용 후속을 쌓는다. 정렬 participant-scope

@@ -482,7 +482,7 @@ async def test_shared_feature_stale_plan_reuses_identical_artifact_after_full_ro
             await observer.execute(text("SET LOCAL statement_timeout='3s'"))
             assert (
                 await observer.scalar(
-                    text("SELECT pg_xact_status(CAST(:xid AS xid8))"), {"xid": str(stale["xid"])}
+                    text("SELECT pg_xact_status(CAST(:xid AS xid8))"), {"xid": stale["xid"]}
                 )
                 == "aborted"
             )
