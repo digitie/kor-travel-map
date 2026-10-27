@@ -11,6 +11,25 @@ CI가 발견한 ledger300자 위반은 task 본문을 원장 link로 단축해 �
 T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
 [범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
 
+## 2026-10-27 — kor-travel-common 최신(`aa232ad5`) 반영: 브랜치 `chore/common-latest-map`
+
+- Python API `[http]`·Dagster `[dagster]` 핀 `e746e4b8` → `aa232ad5f255233184de80eceaab2e9b6ccb00c9`(#44~#47 병합).
+  그 뒤 main `c289b462`(#48)은 문서만 바꿨다. 그 사이 Python 변경은 #44 하나다 — `kor-travel-dagster-daemon run`
+  (`kortravelcommon.daemon_pool`)에서만 `KOR_TRAVEL_DAGSTER_WORKSPACE_RELOAD_SECONDS`(`60`|`180`, 미설정이면 SDK 원
+  동작)로 workspace 갱신 주기를 늦춘다. Map code location·API는 이 모듈을 쓰지 않고 standalone compose daemon은 일반
+  `dagster-daemon run`이라 대상이 아니다. 공용 daemon env는 Manager 소유라 켜지 않았다(`runbooks/common-dagster.md`).
+- 관리자 UI `@kor-travel/ui` dev.7 → dev.9. Common CI `packages` lane 조건(Node 22.23.1·npm 11.19.1·루트 `npm ci`·
+  `npm pack -w packages/ui`)으로 재현한 tgz가 Common T-217 정규 산출물 SHA256 `b738d882…`와 같다. tokens 0.1.0은 그대로,
+  쓰지 않는 dev.6·dev.7 tgz는 지웠다. 낡은 출처 기록(`third-party-common.md`의 dev.6·`1f8e339c`)도 고쳤다.
+- dev.8 지도 작업면(`MapWorkspace`·`MapFilterPanel`·`MapStage`, 상세 header/접기)은 opt-in이고 dev.7 props·CSS·치수가
+  그대로라 Feature 지도는 바뀌지 않는다. 남은 높이 작업면 채택은 고정 70dvh stage와 698px e2e 기준을 바꾸는 화면
+  설계라 이번 범위가 아니다(후속 후보). dev.9 로그인 폼은 hydration 전 입력·제출을 비활성으로 두고 준비 전 제출을
+  막는다. Map e2e 로그인은 모두 `/api/auth/login` 직접 호출이라 고칠 시험이 없었고, SSR 비활성·mount 뒤 활성 단위
+  회귀를 더했다.
+- main CI(`0324cab3a`)가 이미 빨갰다 — CI를 건너뛴 문서 커밋 `7d64c96e8`이 `tasks.md` T-CWRITE-04 본문을 341자로 늘려
+  `test_task_ledger_conventions`(상한 300자)가 세 Python에서 실패한다. 사실(432 수용·새 profile OFF·근거 링크 셋·미완 범위)은
+  그대로 두고 300자로 줄였다. ADR-115·acceptance 포인터는 같은 절 머리말에 있다.
+
 ## 2026-10-26 — Rest432 제한 단위의 최종 CI·배포·공개 UI 수용
 
 PR #1418의 최종 제품 `65202158`은 CI 10개 모두 성공했고, 같은 tree의 main
