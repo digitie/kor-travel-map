@@ -628,6 +628,12 @@ def _integrity_error(exc: IntegrityError) -> HTTPException:
     )
 
 
+#: 입력이 계약을 어긴 DB 거부 → 422. `ON DELETE RESTRICT` 위반은 PG18부터
+#: 23001(restrict_violation)이고 16은 23503이었다 — 같은 FK 거부이므로
+#: major와 무관하게 같은 응답을 준다(ADR-118).
+_UNPROCESSABLE_SQLSTATES = frozenset({"22P02", "23502", "23001", "23503", "23514", "22023"})
+
+
 def _rule_command_error(exc: DBAPIError) -> HTTPException:
     message = str(exc.orig)
     sqlstate = getattr(exc.orig, "sqlstate", None)
@@ -644,7 +650,7 @@ def _rule_command_error(exc: DBAPIError) -> HTTPException:
         return HTTPException(status_code=409, detail="curated source rule identity conflict")
     if "archived rule" in message:
         return HTTPException(status_code=409, detail=message)
-    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+    if sqlstate in _UNPROCESSABLE_SQLSTATES:
         return HTTPException(status_code=422, detail=message)
     if sqlstate == "42501":
         return HTTPException(status_code=403, detail="curated source rule command 권한이 없습니다.")
@@ -667,7 +673,7 @@ def _theme_command_error(exc: DBAPIError) -> HTTPException:
         return HTTPException(status_code=409, detail="curated theme identity conflict")
     if "archived theme" in message or "already archived" in message:
         return HTTPException(status_code=409, detail=message)
-    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+    if sqlstate in _UNPROCESSABLE_SQLSTATES:
         return HTTPException(status_code=422, detail=message)
     if sqlstate == "42501":
         return HTTPException(status_code=403, detail="curated theme command 권한이 없습니다.")
@@ -690,7 +696,7 @@ def _source_command_error(exc: DBAPIError) -> HTTPException:
         return HTTPException(status_code=409, detail="curated source identity conflict")
     if "archived source" in message or "already archived" in message:
         return HTTPException(status_code=409, detail=message)
-    if sqlstate in {"22P02", "23502", "23503", "23514", "22023"}:
+    if sqlstate in _UNPROCESSABLE_SQLSTATES:
         return HTTPException(status_code=422, detail=message)
     if sqlstate == "42501":
         return HTTPException(status_code=403, detail="curated source command 권한이 없습니다.")

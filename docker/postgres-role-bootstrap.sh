@@ -222,7 +222,7 @@ BEGIN
 
     -- procedural language는 relation/extension inventory에 나타나지 않는다. 여기에
     -- foreign language가 있으면 final `300` guard만 뒤늦게 거절해 role/schema가
-    -- 남을 수 있으므로, 첫 bootstrap mutation 전에 stock PostgreSQL 16 inventory를
+    -- 남을 수 있으므로, 첫 bootstrap mutation 전에 stock PostgreSQL(16·18 같음) inventory를
     -- exact하게 닫는다. final root migration의 language contract와 같은 네 언어만
     -- 수용한다.
     IF (

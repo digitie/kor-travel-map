@@ -354,6 +354,9 @@ JOIN pg_catalog.pg_namespace AS ns ON ns.oid = rel.relnamespace
 LEFT JOIN pg_catalog.pg_class AS ref_rel ON ref_rel.oid = con.confrelid
 LEFT JOIN pg_catalog.pg_namespace AS ref_ns ON ref_ns.oid = ref_rel.relnamespace
 WHERE ns.nspname || '.' || rel.relname = ANY($1::text[])
+  -- PG18은 NOT NULL도 contype 'n' 행으로 둔다(ADR-118). NOT NULL은 columns 축의
+  -- `not_null`(attnotnull)이 이미 보므로 여기서 세면 같은 사실을 major마다 다르게 센다.
+  AND con.contype <> 'n'
 ORDER BY identity
 """
 
@@ -1528,7 +1531,11 @@ async def test_active_parent_cascades_preserve_indirect_owner_guards(
         )
         curation_savepoint = freeze_db.transaction()
         await curation_savepoint.start()
-        with pytest.raises(asyncpg.ForeignKeyViolationError):
+        # `ON DELETE RESTRICT` 위반은 PG18부터 23001(restrict_violation)이다 — 16은 23503.
+        # 둘 다 FK가 부모 삭제를 막았다는 같은 사실이다(ADR-118).
+        with pytest.raises(
+            (asyncpg.ForeignKeyViolationError, asyncpg.RestrictViolationError)
+        ):
             await freeze_db.execute(
                 "DELETE FROM feature.curated_sources WHERE source_id = $1",
                 source_id,
