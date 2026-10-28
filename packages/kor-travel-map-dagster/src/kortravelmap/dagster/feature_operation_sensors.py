@@ -38,7 +38,7 @@ from dagster import (
     run_status_sensor,
     sensor,
 )
-from dagster._core.definitions.sensor_definition import DagsterRunReaction
+from dagster._core.definitions.run_request import DagsterRunReaction
 
 from .feature_operation_completion import (
     FEATURE_OPERATION_COMPLETION_JOB_NAME,
@@ -418,7 +418,7 @@ def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
         if result == _EVENT_HANDLED:
             # tick을 끝낸다. ``SkipReason``과 달리 앞 이벤트의 reaction과 섞여도 된다.
             return DagsterRunReaction(dagster_run=context.dagster_run, run_status=status)
-        return cast("RunRequest | None", result)
+        return result
 
     return _status_sensor
 

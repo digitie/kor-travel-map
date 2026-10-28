@@ -36,6 +36,7 @@ from kortravelmap.dagster.feature_operation_completion import (
     FEATURE_OPERATION_COMPLETION_POOL,
 )
 from kortravelmap.dagster.feature_operation_sensors import (
+    _EVENT_HANDLED,
     FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS,
     FEATURE_OPERATION_DAGSTER_PAGE_SECONDS,
     FEATURE_OPERATION_REALERT_SECONDS,
@@ -50,7 +51,6 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _apply_run_record,
     _dagster_run_page,
     _evaluate_reconciliation_sensor,
-    _EVENT_HANDLED,
     _evaluate_status_event,
     _failure_of,
     _map_run_count,
@@ -1375,7 +1375,7 @@ async def test_success_event_skips_when_a_sweep_has_not_started_yet() -> None:
         _status_context(record, queued), client, requests_completion=True
     )
 
-    # SkipReason이 아니라 handled — sensor가 reaction으로 tick을 끝낸다(다른 reaction과 섞여도 산다).
+    # SkipReason이 아니라 handled — sensor가 reaction으로 tick을 끝낸다.
     assert result == _EVENT_HANDLED
     assert len(client.ensure_calls) == 1
 
