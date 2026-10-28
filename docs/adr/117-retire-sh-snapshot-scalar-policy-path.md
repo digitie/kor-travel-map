@@ -153,8 +153,9 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
 
 주의:
 1. 427 index 3개 DROP과 FK를 가진 표 DROP은 대상 표와 FK가 가리키는 표(`feature.features`, `ops.import_jobs`,
-   `ops.import_job_datasets`, `provider_sync.provider_datasets`)에 잠깐 강한 잠금을 건다. 1 s lock_timeout 아래에서
-   실패하면 transaction 전체가 rollback되고 재시도한다. CONCURRENTLY는 transaction 안에서 쓸 수 없으므로 쓰지
+   `ops.import_job_datasets`, `provider_sync.provider_datasets`)에 잠깐 **ACCESS EXCLUSIVE**를 건다(PG 16 실측 —
+   `DROP TABLE`도 `ALTER TABLE … DROP CONSTRAINT`도 FK가 가리키는 표를 ACCESS EXCLUSIVE로 잠근다. 그 순간에는 API
+   읽기도 기다린다). 1 s lock_timeout 아래에서 실패하면 transaction 전체가 rollback되고 재시도한다. CONCURRENTLY는 transaction 안에서 쓸 수 없으므로 쓰지
    않는다. 배포 runbook은 ADR-114 419와 같다. 적재 schedule을 멈추고 in-flight 0을 확인한 뒤 실행한다.
 2. legacy 적재의 stamp는 421 이후 `upsert_provider_geocode_stamps_ex`(SD)를 거친다. 그래서 그 함수는 지우지 않고
    본문만 다시 쓴다(위 §2.3).
