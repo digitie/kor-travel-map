@@ -23,11 +23,11 @@ from tests.integration._membership_seed import (
     SINGLE_MEMBER_OPERATION,
     memberships_for_operation,
 )
-from tests.integration.conftest import as_dagster_runtime
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
+from tests.integration._owned_pg import scalar_engines as scalar_engines
+from tests.integration.conftest import as_dagster_runtime
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(35)]
 

@@ -23,20 +23,21 @@
    ``true``면 P EX 다음 L, ``false``면 L만. 434 WI-1부터 큐레이션을 확정하는 쓰기만 ``true``다).
    중첩 ``CALL``과 행 쓰기의 trigger 함수까지 펼쳐서 본다 — ``finalize_provider_curation_root``는
    ``curation-catalog-write``를 잡은 뒤 ``materialize_theme_candidate_generation``을 부르고, 그
-   안이 gate를 다시 잡는다(이미 들고 있으므로 재진입, 위반 아님). 공유로 든 gate·P를 배타로
+   안이 gate를 다시 잡는다(이미 들고 있으므로 재진입, 위반 아님). 공유로 든 gate를 배타로
    올리는 것도 위반이다 — 둘이 동시에 그러면 서로를 기다린다.
-3. **P는 맨 앞.** P를 처음 잡는 자리 앞에 ranked advisory, L, Feature 도메인(``feature``·
-   ``provider_sync``) 행의 ``FOR UPDATE/SHARE``가 있으면 위반이다(434 WI-4). 명령·job·취소
-   원장 행은 각자의 키로 순서가 정해지므로 세지 않는다. 단건·관리 writer의 regime 진입
-   (``ops.lock_single_feature_writer_protocol``, 434 DC-1)은 epoch에 따라 P를 잡거나 잡지
-   않으므로 **두 세계**(epoch=0: 진입이 아무것도 잡지 않음, epoch>0: P EX)를 모두 걷는다.
-   epoch=0 세계에서는 P 없이 적재 fence(``curation-import``·``feature-curation-write``)를 행
-   잠금 뒤에 잡는 것도 위반이다 — 적재는 P EX→fence→행 순서로 쥐고 있다.
+3. **P는 맨 앞, 배타 전용.** P를 처음 잡는 자리 앞에 ranked advisory, L, Feature 도메인
+   (``feature``·``provider_sync``) 행의 ``FOR UPDATE/SHARE``가 있으면 위반이다(434 WI-4). 명령·
+   job·취소 원장 행은 각자의 키로 순서가 정해지므로 세지 않는다. P는 435(ADR-117)부터 배타
+   전용이다 — 리터럴 ``true`` 밖의 인자(``false``·변수)로 P를 부르는 호출자는 위반이고(DB가
+   23514로 거부한다), 434의 단건 regime 진입(``ops.lock_single_feature_writer_protocol``)을
+   부르는 것도 위반이다(435가 지웠다). 단건·관리 writer는 P를 잡지 않으므로, P 없이 적재
+   fence(``curation-import``·``feature-curation-write``)를 행 잠금 뒤에 잡는 것도 위반이다 —
+   적재는 P EX→fence→행 순서로 쥐고 있다.
 
 Python은 ``feature-write``를 잡지 않는다(``feature_repo.lock_feature_curation_write``는
 ``feature-curation-write``만 잡는다). 그것도 여기서 센다 — Python이 잡기 시작하면 이
 검사가 보는 세계 밖에서 순서가 정해진다. Python infra/API의 P·L helper 호출 순서도
-같은 규칙(L 뒤 P, 행 잠금 뒤 P, 공유 뒤 배타 금지)으로 센다 — 같은 모듈 안의 호출만 펼친다.
+같은 규칙(L 뒤 P, 행 잠금 뒤 P, 공유 P 금지)으로 센다 — 같은 모듈 안의 호출만 펼친다.
 
 ## 하한
 
@@ -102,9 +103,10 @@ _LOAD_FENCES: Final[frozenset[str]] = frozenset(
 #: ``IF p_finalizing`` 분기를 정적으로 펼치면 leaf까지 P EX를 쥔 것으로 읽혀 위반을 놓친다.
 _PROTOCOL_FUNCTION: Final[str] = "ops.lock_scoped_feature_write_protocol"
 _TRACKING_FUNCTION: Final[str] = "ops.lock_provider_feature_tracking_protocol"
-_REGIME_FUNCTION: Final[str] = "ops.lock_single_feature_writer_protocol"
+#: 434의 단건 regime 진입. 435(ADR-117)가 지웠다 — 부르는 자리가 남으면 위반이다.
+_RETIRED_REGIME_FUNCTION: Final[str] = "ops.lock_single_feature_writer_protocol"
 _ENTRY_FUNCTIONS: Final[frozenset[str]] = frozenset(
-    {_PROTOCOL_FUNCTION, _TRACKING_FUNCTION, _REGIME_FUNCTION}
+    {_PROTOCOL_FUNCTION, _TRACKING_FUNCTION, _RETIRED_REGIME_FUNCTION}
 )
 _ENTRY_CALL = re.compile(
     r"\b(?P<name>ops\.lock_scoped_feature_write_protocol"
@@ -127,8 +129,7 @@ def _domain_row_locks(sql: str) -> list[int]:
         if _DOMAIN_RELATION.search(sql, start, match.start()):
             offsets.append(match.start())
     return offsets
-#: epoch=0(진입이 P를 잡지 않음)과 epoch>0(P EX) 두 세계.
-_WORLDS: Final[tuple[str, ...]] = ("epoch0", "regime")
+
 
 
 @dataclass(frozen=True)
@@ -140,7 +141,7 @@ class _Lock:
 
 @dataclass(frozen=True)
 class _Protocol:
-    """P 진입. ``mode``는 ``EX``·``SH``·``?``(변수 인자)·``REGIME``(단건 regime 진입)."""
+    """P 진입. ``mode``는 ``EX``·``SH``·``?``(변수 인자)·``REGIME``(퇴역한 단건 regime 진입)."""
 
     mode: str
     offset: int
@@ -165,7 +166,7 @@ class _Row:
 
 def _entry_events(name: str, args: str, offset: int) -> list[object]:
     argument = " ".join(args.split()).lower()
-    if name == _REGIME_FUNCTION:
+    if name == _RETIRED_REGIME_FUNCTION:
         return [_Protocol("REGIME", offset)]
     if name == _PROTOCOL_FUNCTION:
         mode = {"true": "EX", "false": "SH"}.get(argument, "?")
@@ -260,28 +261,35 @@ class _Held:
     rows: bool = False
 
 
-def _acquire(
-    held: _Held, key: str, mode: str, *, origin: str, path: str, world: str
-) -> list[str]:
+def _protocol_mode_violations(mode: str, *, origin: str, path: str) -> list[str]:
+    """P는 배타 전용이다(ADR-117). 공유·변수 인자와 퇴역한 regime 진입은 그 자체로 위반이다."""
+    if mode == "REGIME":
+        return [f"{origin}: retired single-writer regime entry at {path}"]
+    if mode != "EX":
+        return [f"{origin}: non-exclusive P ({mode}) was retired at {path}"]
+    return []
+
+
+def _acquire(held: _Held, key: str, mode: str, *, origin: str, path: str) -> list[str]:
     """``key``를 ``mode``로 잡을 때의 위반. 이미 쥐었으면 재진입이고 승격만 본다."""
     if key in held.modes:
         if key in (_GATE, _P) and held.modes[key] == "SH" and mode == "EX":
-            return [f"{origin}: shared→exclusive {key} upgrade at {path} [{world}]"]
+            return [f"{origin}: shared→exclusive {key} upgrade at {path}"]
         return []
     violations: list[str] = []
     top = max((_RANK[name] for name in held.modes), default=-3)
     if _RANK[key] < top:
         above = sorted(name for name in held.modes if _RANK[name] > _RANK[key])
-        violations.append(f"{origin}: {key} after {above} at {path} [{world}]")
+        violations.append(f"{origin}: {key} after {above} at {path}")
     if key == _P and held.rows:
-        violations.append(f"{origin}: P after a row lock at {path} [{world}]")
+        violations.append(f"{origin}: P after a row lock at {path}")
     if key in _LOAD_FENCES and held.rows and held.modes.get(_P) != "EX":
-        violations.append(f"{origin}: {key} after a row lock without P EX at {path} [{world}]")
+        violations.append(f"{origin}: {key} after a row lock without P EX at {path}")
     held.modes[key] = mode
     return violations
 
 
-def _leaf_violations(held: _Held, *, origin: str, path: str, world: str) -> list[str]:
+def _leaf_violations(held: _Held, *, origin: str, path: str) -> list[str]:
     """tracking leaf 진입의 실행 시 거부(``ck_provider_tracking_prefix``)를 미리 본다.
 
     leaf는 P를 쥔 transaction에서 부르면 23514다. 확정 진입(P EX→L) 뒤의 재진입만 통과한다.
@@ -291,38 +299,32 @@ def _leaf_violations(held: _Held, *, origin: str, path: str, world: str) -> list
     protocol = held.modes.get(_P)
     if protocol is None or (protocol == "EX" and _L in held.modes):
         return []
-    return [f"{origin}: leaf tracking L after P {protocol} without L at {path} [{world}]"]
+    return [f"{origin}: leaf tracking L after P {protocol} without L at {path}"]
 
 
 def _order_violations(
     routines: dict[str, str], triggers: dict[str, list[str]] | None = None
 ) -> list[str]:
-    """중첩 호출을 펼친 잠금 열이 전역 순서·P 맨 앞·승격 금지를 두 epoch 세계에서 지키는가."""
+    """중첩 호출을 펼친 잠금 열이 전역 순서·P 맨 앞(배타 전용)·승격 금지를 지키는가."""
 
     violations: list[str] = []
 
-    def walk(
-        name: str,
-        held: _Held,
-        stack: tuple[str, ...],
-        origin: str,
-        world: str,
-    ) -> None:
+    def walk(name: str, held: _Held, stack: tuple[str, ...], origin: str) -> None:
         if name in stack or name not in routines or name in _ENTRY_FUNCTIONS:
             return
         for _offset, event in _events(routines[name], triggers or {}):
             if isinstance(event, str):
-                walk(event, held, (*stack, name), origin, world)
+                walk(event, held, (*stack, name), origin)
                 continue
             path = " → ".join((*stack, name))
-            context = {"origin": origin, "path": path, "world": world}
+            context = {"origin": origin, "path": path}
             if isinstance(event, _Row):
                 held.rows = True
             elif isinstance(event, _Protocol):
-                if event.mode == "REGIME" and world == "epoch0":
+                violations.extend(_protocol_mode_violations(event.mode, **context))
+                if event.mode == "REGIME":
                     continue
-                mode = "EX" if event.mode == "REGIME" else event.mode
-                violations.extend(_acquire(held, _P, mode, **context))
+                violations.extend(_acquire(held, _P, event.mode, **context))
             elif isinstance(event, _Lineage):
                 if event.leaf:
                     violations.extend(_leaf_violations(held, **context))
@@ -332,9 +334,8 @@ def _order_violations(
                 mode = "SH" if event.shared else "EX"
                 violations.extend(_acquire(held, event.key, mode, **context))
 
-    for world in _WORLDS:
-        for name in sorted(routines):
-            walk(name, _Held({}), (), name, world)
+    for name in sorted(routines):
+        walk(name, _Held({}), (), name)
     return violations
 
 
@@ -377,12 +378,13 @@ _PY_FIXED_HELPERS: Final[dict[str, tuple[str, ...]]] = {
     "lock_provider_feature_finalization": ("P:EX", "L"),
     "lock_provider_feature_tracking_leaf": (_PY_LEAF,),
     "lock_pipeline_lineage_mutation": ("L",),
+    # ADR-117: 공통 P helper는 배타 전용이다(``exclusive=`` 인자가 없어졌다).
+    "lock_feature_write_protocol": ("P:EX",),
+    # 434의 regime 진입 helper. 435가 지웠다 — 다시 생기면 위반으로 센다.
     "lock_single_feature_writer_protocol": ("P:REGIME",),
 }
 #: keyword 인자로 모드가 정해지는 helper — (keyword, 참일 때, 거짓일 때). 변수면 참으로 센다.
 _PY_KEYWORD_HELPERS: Final[dict[str, tuple[str, tuple[str, ...], tuple[str, ...]]]] = {
-    "lock_feature_write_protocol": ("exclusive", ("P:EX",), ("P:SH",)),
-    "lock_scoped_feature_write_protocol": ("exclusive", ("P:EX",), ("P:SH",)),
     "lock_provider_feature_tracking": ("finalizing", ("P:EX", "L"), (_PY_LEAF,)),
 }
 _PY_MAX_DEPTH: Final[int] = 6
@@ -763,25 +765,21 @@ def _py_block_items(
     return tuple(items)
 
 
-def _py_walk(
-    items: _PyItems, held: _Held, origin: str, world: str
-) -> tuple[list[str], list[_Held]]:
+def _py_walk(items: _PyItems, held: _Held, origin: str) -> tuple[list[str], list[_Held]]:
     """사건 열을 걷고 (위반, 끝 상태들)을 돌려준다. 분기마다 상태를 나눈다."""
     violations: list[str] = []
     states = [held]
     for item in items:
         if isinstance(item, _PyTransaction):
             # 새 transaction은 빈 상태에서 시작하고 바깥 상태를 바꾸지 않는다.
-            found, _ends = _py_walk(item.body, _Held({}), origin, world)
+            found, _ends = _py_walk(item.body, _Held({}), origin)
             violations.extend(found)
             continue
         if isinstance(item, _PyBranch):
             next_states: list[_Held] = []
             for state in states:
                 for branch in (item.body, item.orelse):
-                    found, ends = _py_walk(
-                        branch, _Held(dict(state.modes), state.rows), origin, world
-                    )
+                    found, ends = _py_walk(branch, _Held(dict(state.modes), state.rows), origin)
                     violations.extend(found)
                     next_states.extend(ends)
             # 같은 상태는 합쳐 갈래 수가 폭증하지 않게 한다.
@@ -789,7 +787,7 @@ def _py_walk(
             states = list(unique.values())
             continue
         for state in states:
-            context = {"origin": origin, "path": item.where, "world": world}
+            context = {"origin": origin, "path": item.where}
             if item.kind == _PY_RESET:
                 state.modes.clear()
                 state.rows = False
@@ -797,10 +795,9 @@ def _py_walk(
                 state.rows = True
             elif item.kind.startswith("P:"):
                 mode = item.kind[2:]
+                violations.extend(_protocol_mode_violations(mode, **context))
                 if mode == "REGIME":
-                    if world == "epoch0":
-                        continue
-                    mode = "EX"
+                    continue
                 violations.extend(_acquire(state, _P, mode, **context))
             else:
                 if item.kind == _PY_LEAF:
@@ -835,9 +832,8 @@ def _python_order_violations(
             if _py_has_entry(items):
                 takers += 1
             origin = f"{module.name}::{name}"
-            for world in _WORLDS:
-                found, _ends = _py_walk(items, _Held({}), origin, world)
-                violations.extend(found)
+            found, _ends = _py_walk(items, _Held({}), origin)
+            violations.extend(found)
     return violations, takers
 
 
@@ -869,8 +865,10 @@ def test_the_scan_sees_the_feature_write_takers() -> None:
     assert "feature.sync_concierge_catalog_after_observation" in triggers.get(
         "ops.curation_source_observation_receipts", []
     )
-    # P·L 진입을 실제로 본다(434 WI-4). 434 head 기준 P 직접 진입 루틴 21개, tracking 진입 9개,
-    # regime 진입 10개다 — 정규식이 낡으면 이 하한이 먼저 무너진다.
+    # P·L 진입을 실제로 본다(434 WI-4). 정규식이 낡으면 이 하한이 먼저 무너진다.
+    # 435 head(ADR-117) 실측: P 직접 진입 루틴 15개, tracking 진입 8개. 434의 21·9에서 준 것은
+    # 퇴역한 SH 스냅샷·스칼라 정책·strict guard 루틴이 지워졌기 때문이다(단건 writer 10개는
+    # 434부터 이미 P 대신 regime 진입이었고, 435가 그 진입 자체를 지웠다). 하한은 그 실측값이다.
     entries = {
         name: {match["name"] for match in _ENTRY_CALL.finditer(body)}
         for name, body in routines.items()
@@ -878,10 +876,11 @@ def test_the_scan_sees_the_feature_write_takers() -> None:
     }
     protocol = [name for name, seen in entries.items() if _PROTOCOL_FUNCTION in seen]
     tracking = [name for name, seen in entries.items() if _TRACKING_FUNCTION in seen]
-    regime = [name for name, seen in entries.items() if _REGIME_FUNCTION in seen]
-    assert len(protocol) >= 20, protocol
-    assert len(tracking) >= 9, tracking
-    assert len(regime) >= 10, regime
+    assert len(protocol) >= 15, protocol
+    assert len(tracking) >= 8, tracking
+    # 435가 regime 진입을 지웠다 — 정의도 호출자도 없어야 한다(ADR-117 §4-3).
+    assert _RETIRED_REGIME_FUNCTION not in routines
+    assert not [name for name, seen in entries.items() if _RETIRED_REGIME_FUNCTION in seen]
     _violations, python_takers = _python_order_violations()
     assert python_takers >= 20, python_takers
 
@@ -1021,23 +1020,18 @@ _PLANTED_PROTOCOL = {
         "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
         "  PERFORM ops.lock_provider_feature_tracking_protocol(true);\n"
     ),
-    "feature.shared_then_exclusive": (
-        "  PERFORM ops.lock_scoped_feature_write_protocol(false);\n"
-        "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
-    ),
+    # ADR-117: 공유 P는 퇴역했다 — 리터럴 ``false``도 변수 인자도 그 자체로 위반이다.
+    "feature.shared_protocol": "  PERFORM ops.lock_scoped_feature_write_protocol(false);\n",
+    "feature.variable_protocol": "  PERFORM ops.lock_scoped_feature_write_protocol(p_mode);\n",
     "feature.row_then_protocol": (
         "  PERFORM 1 FROM feature.features WHERE feature_id=p_id FOR UPDATE;\n"
         "  CALL feature.protocol_first(p_id);\n"
     ),
     "feature.protocol_first": "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n",
-    # regime 진입은 epoch>0에서 P EX다 — 행 잠금 뒤의 진입은 그 세계에서 위반이다.
-    "feature.row_then_regime": (
-        "  PERFORM 1 FROM feature.features WHERE feature_id=p_id FOR UPDATE;\n"
-        "  PERFORM ops.lock_single_feature_writer_protocol();\n"
-    ),
-    # epoch=0에서는 regime 진입이 P를 잡지 않는다 — 행 잠금 뒤 적재 fence는 적재와 역순이다.
-    "feature.regime_then_fence_after_rows": (
-        "  PERFORM ops.lock_single_feature_writer_protocol();\n"
+    # 435가 지운 regime 진입을 다시 부르면 위반이다.
+    "feature.retired_regime": "  PERFORM ops.lock_single_feature_writer_protocol();\n",
+    # 단건 writer는 P를 잡지 않는다 — 행 잠금 뒤 적재 fence는 적재(P EX→fence→행)와 역순이다.
+    "feature.fence_after_rows": (
         "  PERFORM 1 FROM feature.features WHERE feature_id=p_id FOR UPDATE;\n"
         "  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));\n"
     ),
@@ -1046,27 +1040,23 @@ _PLANTED_PROTOCOL = {
         "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
         "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
     ),
-    "feature.shared_lineage_then_leaf": (
-        "  PERFORM ops.lock_scoped_feature_write_protocol(false);\n"
-        "  PERFORM pg_advisory_xact_lock(6832465333779826081::bigint);\n"
-        "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
-    ),
-    "feature.regime_then_leaf": (
-        "  PERFORM ops.lock_single_feature_writer_protocol();\n"
-        "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
-    ),
-    # 정상: 확정 진입(P EX→L) 뒤의 leaf·같은 진입 재진입·regime 진입 뒤 행 잠금.
+    # 정상: 확정 진입(P EX→L) 뒤의 leaf·같은 진입 재진입, P 없는 단건 writer의 행 잠금,
+    # P EX 뒤 fence 뒤 행 잠금(적재 순서).
     "feature.finalizing_then_leaf": (
         "  PERFORM ops.lock_provider_feature_tracking_protocol(true);\n"
         "  PERFORM ops.lock_provider_feature_tracking_protocol(false);\n"
         "  PERFORM 1 FROM ops.import_jobs WHERE job_id=p_id FOR UPDATE;\n"
     ),
-    "feature.regime_then_rows": (
-        "  PERFORM ops.lock_single_feature_writer_protocol();\n"
+    "feature.single_writer_rows": (
         "  PERFORM 1 FROM feature.features WHERE feature_id=p_id FOR UPDATE;\n"
-        "  CALL feature.nested_regime(p_id);\n"
+        "  PERFORM pg_advisory_xact_lock_shared(hashtextextended('feature-write-all', 0));\n"
     ),
-    "feature.nested_regime": "  PERFORM ops.lock_single_feature_writer_protocol();\n",
+    "feature.load_order": (
+        "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
+        "  PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-write', 0));\n"
+        "  PERFORM 1 FROM feature.features WHERE feature_id=p_id FOR UPDATE;\n"
+        "  CALL feature.protocol_first(p_id);\n"
+    ),
 }
 
 
@@ -1079,22 +1069,17 @@ def test_the_protocol_detectors_turn_red_on_planted_violations() -> None:
     assert any("P after" in v for v in hits("feature.import_then_protocol")), found
     assert any("P after ['L']" in v for v in hits("feature.lineage_then_protocol")), found
     assert any("P after ['L']" in v for v in hits("feature.leaf_then_finalizing")), found
-    assert any("upgrade" in v for v in hits("feature.shared_then_exclusive")), found
+    assert any("non-exclusive P (SH)" in v for v in hits("feature.shared_protocol")), found
+    assert any("non-exclusive P (?)" in v for v in hits("feature.variable_protocol")), found
     assert any("row lock" in v for v in hits("feature.row_then_protocol")), found
-    regime_rows = hits("feature.row_then_regime")
-    assert regime_rows, found
-    assert all(v.endswith("[regime]") for v in regime_rows), regime_rows
-    fence = hits("feature.regime_then_fence_after_rows")
-    assert any("without P EX" in v and v.endswith("[epoch0]") for v in fence), found
-    assert not any(v.endswith("[regime]") for v in fence), fence
+    assert any("retired single-writer regime" in v for v in hits("feature.retired_regime")), found
+    assert any("without P EX" in v for v in hits("feature.fence_after_rows")), found
     assert any("leaf tracking L after P EX" in v for v in hits("feature.fence_then_leaf")), found
-    assert any(
-        "leaf tracking L after P SH" in v for v in hits("feature.shared_lineage_then_leaf")
-    ), found
-    regime_leaf = hits("feature.regime_then_leaf")
-    assert regime_leaf, found
-    assert all(v.endswith("[regime]") for v in regime_leaf), regime_leaf
-    for fine in ("feature.finalizing_then_leaf", "feature.regime_then_rows"):
+    for fine in (
+        "feature.finalizing_then_leaf",
+        "feature.single_writer_rows",
+        "feature.load_order",
+    ):
         assert not hits(fine), hits(fine)
 
 
@@ -1112,9 +1097,14 @@ async def row_then_fence(session):
     await lock_feature_curation_write(session)
 
 
-async def shared_then_exclusive(session):
-    await lock_scoped_feature_write_protocol(session, exclusive=False)
-    await lock_feature_write_protocol(session, exclusive=True)
+async def shared_protocol_sql(session):
+    # ADR-117: 공유 P는 퇴역했다 — SQL 문자열로 부르는 자리도 센다.
+    await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+    await lock_feature_write_protocol(session)
+
+
+async def retired_regime(session):
+    await lock_single_feature_writer_protocol(session)
 
 
 async def _nested_finalizing(session):
@@ -1134,8 +1124,8 @@ async def branch_is_not_an_order(session, finalizing):
     await session.execute(text(_LOCK_ROW_SQL), {"id": 1})
 
 
-async def regime_then_rows(session):
-    await lock_single_feature_writer_protocol(session)
+async def protocol_then_rows(session):
+    await lock_feature_write_protocol(session)
     await session.execute(text(_LOCK_ROW_SQL), {"id": 1})
 
 
@@ -1158,23 +1148,16 @@ async def inside_one_transaction(session):
         await lock_provider_feature_finalization(session)
 
 
-async def regime_then_row_then_fence(session):
-    # epoch=0에서 regime 진입은 P를 잡지 않는다 — 뒤의 fence(P EX)는 행 잠금 뒤가 된다.
-    await lock_single_feature_writer_protocol(session)
-    await session.execute(text(_LOCK_ROW_SQL), {"id": 1})
-    await lock_feature_curation_write(session)
-
-
-async def _maybe_fence(session, exclusive=False):
-    if exclusive:
-        await lock_feature_curation_write(session)
+async def _maybe_finalize(session, finalizing=False):
+    if finalizing:
+        await lock_provider_feature_finalization(session)
     else:
-        await lock_scoped_feature_write_protocol(session, exclusive=False)
+        await lock_provider_feature_tracking_leaf(session)
 
 
-async def shared_then_literal_shared_branch(session):
-    await lock_scoped_feature_write_protocol(session, exclusive=False)
-    await _maybe_fence(session, exclusive=False)
+async def leaf_then_literal_leaf_branch(session):
+    await lock_provider_feature_tracking_leaf(session)
+    await _maybe_finalize(session, finalizing=False)
 
 
 async def fence_then_ledger(session):
@@ -1198,20 +1181,18 @@ def test_the_python_detector_turns_red_on_planted_violations() -> None:
 
     assert any("P after ['L']" in v for v in hits("leaf_then_finalizing")), found
     assert any("row lock" in v for v in hits("row_then_fence")), found
-    assert any("upgrade" in v for v in hits("shared_then_exclusive")), found
+    assert any("non-exclusive P (SH)" in v for v in hits("shared_protocol_sql")), found
+    assert any("retired single-writer regime" in v for v in hits("retired_regime")), found
     assert any("P after ['L']" in v for v in hits("lineage_then_nested")), found
     assert any("P after ['L']" in v for v in hits("inside_one_transaction")), found
-    fence = hits("regime_then_row_then_fence")
-    assert any("row lock" in v and v.endswith("[epoch0]") for v in fence), found
-    assert not any(v.endswith("[regime]") for v in fence), fence
     assert any("leaf tracking L after P EX" in v for v in hits("fence_then_ledger")), found
     for fine in (
         "finalization_then_ledger",
         "branch_is_not_an_order",
-        "regime_then_rows",
+        "protocol_then_rows",
         "separate_transactions",
         "after_commit",
-        # 상수 인자(exclusive=False)로 정해지는 분기는 배타 갈래를 걷지 않는다.
-        "shared_then_literal_shared_branch",
+        # 상수 인자(finalizing=False)로 정해지는 분기는 확정(P EX) 갈래를 걷지 않는다.
+        "leaf_then_literal_leaf_branch",
     ):
         assert not hits(fine), (fine, found)

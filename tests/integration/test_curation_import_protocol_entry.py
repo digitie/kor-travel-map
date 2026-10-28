@@ -15,10 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.curation_import_children import ParentCommandIdentity
 from kortravelmap.infra import curation_repo as repo
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
+from tests.integration._owned_pg import scalar_engines as scalar_engines
 from tests.integration.test_state_lifecycle_protocol_entry import (
     owned_scalar_resource_bounds as owned_scalar_resource_bounds,
 )
@@ -252,25 +252,19 @@ async def test_whole_import_and_manual_are_serialized_before_import_advisory(sca
             await asyncio.gather(*tasks, return_exceptions=True)
 
 
-@pytest.mark.parametrize("failure", ["shared_upgrade", "lock_timeout"])
-async def test_failed_import_rolls_back_and_same_plan_can_retry(scalar_engines, failure):
+async def test_failed_import_rolls_back_and_same_plan_can_retry(scalar_engines):
+    # 434의 ``shared_upgrade`` 변형(SH caller 안의 import → 23514)은 435(ADR-117)가 공유 P를
+    # 지워 SH caller가 생길 수 없으므로 지웠다. 남은 실패는 P EX holder 뒤의 lock_timeout이다.
     admin, runtime = scalar_engines
     case = await _prepare(admin, runtime)
     async with AsyncSession(admin) as blocker:
         tx = await blocker.begin()
         try:
-            if failure == "lock_timeout":
-                await blocker.execute(text(_PROTOCOL))
+            await blocker.execute(text(_PROTOCOL))
             async with _transaction(runtime) as session:
-                if failure == "shared_upgrade":
-                    await session.execute(
-                        text("SELECT ops.lock_scoped_feature_write_protocol(false)")
-                    )
                 with pytest.raises(DBAPIError) as caught:
                     await _import(session, case)
-                assert caught.value.orig.sqlstate == (
-                    "23514" if failure == "shared_upgrade" else "55P03"
-                )
+                assert caught.value.orig.sqlstate == "55P03"
         finally:
             await tx.rollback()
     async with AsyncSession(admin) as observer:

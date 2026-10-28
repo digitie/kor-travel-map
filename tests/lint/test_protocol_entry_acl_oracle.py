@@ -23,11 +23,11 @@ from typing import Final
 _ROOT = pathlib.Path(__file__).resolve().parents[2]
 _HEAD_SCHEMA = _ROOT / "alembic" / "head-schema.sql"
 
-#: 다른 루틴이 첫 문장에서 부르는 protocol 진입(P·L·단건 regime).
+#: 다른 루틴이 첫 문장에서 부르는 protocol 진입(P·L). 434의 단건 regime 진입
+#: (``ops.lock_single_feature_writer_protocol``)은 435(ADR-117)가 지웠다.
 _ENTRY_FUNCTIONS: Final[frozenset[str]] = frozenset(
     {
         "ops.lock_scoped_feature_write_protocol",
-        "ops.lock_single_feature_writer_protocol",
         "ops.lock_provider_feature_tracking_protocol",
     }
 )
@@ -82,8 +82,10 @@ def acl_violations(schema: str) -> tuple[list[str], int]:
 
 def test_every_security_definer_caller_can_execute_its_protocol_entry() -> None:
     violations, seen = acl_violations(_HEAD_SCHEMA.read_text(encoding="utf-8"))
-    # 434 head에는 P·L·regime 진입을 부르는 SECURITY DEFINER 루틴이 40개를 넘는다.
-    assert seen >= 30, f"protocol 진입 호출을 {seen}개만 봤다 — 추출이 낡았다"
+    # 435 head(ADR-117)에서 P를 부르는 SECURITY DEFINER 루틴 15개와 L을 부르는 8개, 합 23을
+    # 실측했다. 434의 30+에서 준 것은 단건 writer 10개가 regime 진입 줄을 잃고(P를 잡지 않는다)
+    # strict guard 등 SH 전용 루틴이 지워졌기 때문이다. 하한은 그 실측값이다.
+    assert seen >= 23, f"protocol 진입 호출을 {seen}개만 봤다 — 추출이 낡았다"
     assert not violations, (
         "migration만으로 만든 head에서 소유자가 EXECUTE를 갖지 못한 protocol 진입 호출:\n  "
         + "\n  ".join(violations)

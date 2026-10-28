@@ -1,8 +1,7 @@
 """전화/주소 override의 첫 행 잠금 전 진입과 caller TX 수명을 실제 PG로 검증한다.
 
-434 DC-1: 주소 override는 단건 regime 진입(epoch>0에서만 P EX)이다 — 이 모듈은 정책을 활성화하지
-않으므로 epoch=0에서 P 없이 행 잠금만 기다린다. 전화 override는 같은 transaction에서 source
-record/link를 쓰는 enrichment 경로라 적재 fence(P EX)를 그대로 먼저 잡는다.
+ADR-117(435): 주소 override는 단건 writer라 P를 잡지 않고 행 잠금만 기다린다. 전화 override는 같은
+transaction에서 source record/link를 쓰는 enrichment 경로라 적재 fence(P EX)를 그대로 먼저 잡는다.
 """
 
 from __future__ import annotations
@@ -15,15 +14,14 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.feature_address_repo import apply_feature_address_override
 from kortravelmap.infra.feature_repo import set_feature_phones
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
+from tests.integration._owned_pg import scalar_engines as scalar_engines
 
 pytestmark = [pytest.mark.integration, pytest.mark.timeout(35)]
 
@@ -96,7 +94,7 @@ async def _wait_protocol_blocker(admin: Any, waiter: int, blocker: int) -> None:
 async def _wait_row_blocker_without_protocol(
     admin: Any, waiter: int, blocker: int, task: asyncio.Task[Any]
 ) -> None:
-    """434 DC-1(epoch=0): 단건 writer는 P를 요청하지 않고 실제 행 잠금에서만 기다린다."""
+    """단건 writer는 P를 요청하지 않고 실제 행 잠금에서만 기다린다(434 DC-1·ADR-117)."""
     async with asyncio.timeout(3):
         while True:
             if task.done():
@@ -113,7 +111,7 @@ async def _wait_row_blocker_without_protocol(
                     )
                 ).one()
             if row[0]:
-                assert row[1] is False, "epoch=0 single writer requested the protocol gate"
+                assert row[1] is False, "single writer requested the protocol gate"
                 return
             await asyncio.sleep(0.01)
 
@@ -138,10 +136,11 @@ async def test_override_entry_order_before_any_feature_row_lock(
 
     task = None
     try:
-        async with AsyncSession(admin) as shared, shared.begin():
-            blocker = int(await shared.scalar(text("SELECT pg_backend_pid()")))
-            await shared.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-            await shared.execute(
+        # 적재 모양의 blocker: P EX → Feature 행. 434까지는 P SH였다(ADR-117이 공유 모드를 지웠다).
+        async with AsyncSession(admin) as holder, holder.begin():
+            blocker = int(await holder.scalar(text("SELECT pg_backend_pid()")))
+            await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+            await holder.execute(
                 text("SELECT 1 FROM feature.features WHERE feature_id=:feature FOR UPDATE"),
                 {"feature": held},
             )
@@ -154,7 +153,7 @@ async def test_override_entry_order_before_any_feature_row_lock(
             elif same_feature:
                 await _wait_row_blocker_without_protocol(admin, waiter, blocker, task)
             else:
-                # 434 DC-1: 다른 Feature의 주소 override는 SH 보유자 뒤에서 기다리지 않는다.
+                # 다른 Feature의 주소 override는 P EX 보유자 뒤에서 기다리지 않는다.
                 await asyncio.wait_for(asyncio.shield(task), 8)
             if kind == "phones" and not same_feature:
                 # 다른 Feature여도 EX 대기 전에 행을 선점하지 않아야 한다.
@@ -187,27 +186,10 @@ async def test_override_entry_order_before_any_feature_row_lock(
             await asyncio.gather(task, return_exceptions=True)
 
 
-async def test_phone_fence_upgrade_is_rejected_without_override_writes(
+async def test_address_override_finishes_while_a_load_holds_protocol_ex(
     scalar_engines: Any,
 ) -> None:
-    admin, runtime = scalar_engines
-    feature = await _seed(admin)
-    before = await _state(admin, feature)
-    with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 같은 TX의 gate/override 경계
-        async with AsyncSession(runtime) as session, session.begin():
-            await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-            await _apply("phones", session, feature)
-    assert caught.value.orig.sqlstate == "23514"
-    assert await _state(admin, feature) == before
-    # abort/rollback 후 새 TX는 같은 입력을 정상 author할 수 있다.
-    async with AsyncSession(runtime) as session, session.begin():
-        await _apply("phones", session, feature)
-
-
-async def test_epoch0_address_override_finishes_while_a_load_holds_protocol_ex(
-    scalar_engines: Any,
-) -> None:
-    """434 DC-1: 적재가 P EX를 쥐어도 다른 Feature의 주소 override는 기다리지 않는다."""
+    """적재가 P EX를 쥐어도 다른 Feature의 주소 override는 기다리지 않는다(434 DC-1·ADR-117)."""
     admin, runtime = scalar_engines
     feature = await _seed(admin)
     async with AsyncSession(runtime) as holder, holder.begin():
@@ -215,25 +197,6 @@ async def test_epoch0_address_override_finishes_while_a_load_holds_protocol_ex(
         async with AsyncSession(runtime) as session, session.begin():
             await session.execute(text("SET LOCAL lock_timeout='300ms'"))
             await _apply("address", session, feature)
-
-
-async def test_epoch0_address_override_under_shared_protocol_does_not_upgrade(
-    scalar_engines: Any,
-) -> None:
-    """434 DC-1: epoch=0의 주소 override는 P를 잡지 않으므로 SH 보유 caller에서도 쓴다."""
-    admin, runtime = scalar_engines
-    feature = await _seed(admin)
-    async with AsyncSession(runtime) as session, session.begin():
-        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-        await _apply("address", session, feature)
-        modes = (
-            await session.scalars(
-                text("""SELECT mode FROM pg_locks WHERE pid=pg_backend_pid()
-                AND locktype='advisory' AND classid=1369104691::oid
-                AND objid=115::oid AND objsubid=2 AND granted""")
-            )
-        ).all()
-    assert modes == ["ShareLock"]
 
 
 @pytest.mark.parametrize("kind", ["phones", "address"])

@@ -1,4 +1,8 @@
-"""기존 Python writer의 protocol-first 순서를 실제 두 PG 세션으로 반증한다."""
+"""기존 Python writer의 protocol-first 순서를 실제 두 PG 세션으로 반증한다.
+
+435(ADR-117)부터 P는 배타 전용이다. 434까지 blocker로 쓰던 P SH는 P EX로 바꿨고, "SH caller의
+fence는 승격 거부" 사례는 SH 요청 자체가 23514로 거부되는 사례로 바꿨다.
+"""
 
 from __future__ import annotations
 
@@ -19,6 +23,7 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _PROTOCOL_SHARE = text("SELECT ops.lock_scoped_feature_write_protocol(false)")
+_PROTOCOL_EXCLUSIVE = text("SELECT ops.lock_scoped_feature_write_protocol(true)")
 _TRY_PROTOCOL_SHARE = text("SELECT pg_try_advisory_xact_lock_shared(1369104691,115)")
 _TRY_GLOBAL = text(
     "SELECT pg_try_advisory_xact_lock(hashtextextended('feature-curation-write',0))"
@@ -74,7 +79,7 @@ async def test_protocol_wait_precedes_global_lock(
         AsyncSession(migrated_engine) as scoped,
         AsyncSession(migrated_engine) as legacy,
     ):
-        await scoped.execute(_PROTOCOL_SHARE)
+        await scoped.execute(_PROTOCOL_EXCLUSIVE)
         pid = int(await legacy.scalar(text("SELECT pg_backend_pid()")))
         task = asyncio.create_task(lock_feature_curation_write(legacy))
         try:
@@ -96,14 +101,14 @@ async def test_protocol_wait_precedes_global_lock(
     assert await _can_take(migrated_engine, _TRY_GLOBAL)
 
 
-async def test_shared_to_legacy_requires_rollback_then_replan(
+async def test_retired_shared_request_requires_rollback_then_replan(
     migrated_engine: AsyncEngine,
 ) -> None:
     async with AsyncSession(migrated_engine) as session:
-        await session.execute(_PROTOCOL_SHARE)
         with pytest.raises(DBAPIError) as exc:
-            await lock_feature_curation_write(session)
+            await session.execute(_PROTOCOL_SHARE)
         assert getattr(exc.value.orig, "sqlstate", None) == "23514"
+        assert "shared protocol mode was retired (ADR-117)" in str(exc.value.orig)
         await session.rollback()
         # 실패한 gate를 cache해 재사용하지 않는다.
         await lock_feature_curation_write(session)

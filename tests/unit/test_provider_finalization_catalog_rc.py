@@ -3,12 +3,21 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import re
 from pathlib import Path
 
 import pytest
 
-from tests.unit.test_snapshot_recovery_schema import migration
+_MIGRATION_SPEC = importlib.util.spec_from_file_location(
+    "_snapshot430",
+    Path(__file__).resolve().parents[2] / "alembic/versions/430_provider_snapshot_recovery.py",
+)
+assert _MIGRATION_SPEC is not None
+assert _MIGRATION_SPEC.loader is not None
+migration = importlib.util.module_from_spec(_MIGRATION_SPEC)
+_MIGRATION_SPEC.loader.exec_module(migration)
+
 
 _ROOT = Path(__file__).resolve().parents[2]
 _FILENAME = "_430_provider_finalization_catalog_rc.sql"

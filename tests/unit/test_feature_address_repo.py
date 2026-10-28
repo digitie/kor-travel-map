@@ -78,7 +78,6 @@ def _field_command_receipt(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _record(*args: Any, **kwargs: Any) -> None:
         return None
 
-    monkeypatch.setattr(repo, "lock_single_feature_writer_protocol", _lock)
     monkeypatch.setattr(repo, "lock_domain_command", _lock)
     monkeypatch.setattr(repo, "create_domain_command_claim", _claim)
     monkeypatch.setattr(repo, "create_domain_command_record", _record)
@@ -233,25 +232,21 @@ async def test_apply_sido_and_road_management_no() -> None:
     assert len(session.calls) == 3
 
 
-async def test_apply_acquires_regime_entry_before_first_row_lock(
+async def test_apply_takes_no_protocol_or_load_fence_before_first_row_lock(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """434 DC-1: 첫 행 잠금 전의 진입은 regime 진입(epoch>0에서만 P EX)이고 적재 fence가 아니다."""
+    """ADR-117: 단건 주소 override는 P도 적재 fence도 잡지 않는다 — 첫 SQL이 행 잠금이다."""
     session = _Session([None])
 
-    async def _protocol(actual: Any) -> None:
-        assert actual is session
-        session.calls.append({"sql": "regime entry", "params": {}})
+    async def _forbidden(actual: Any, **_kwargs: Any) -> None:  # pragma: no cover - 불리면 실패
+        raise AssertionError("address override must not take the protocol gate or load fence")
 
-    async def _no_fence(actual: Any) -> None:  # pragma: no cover - 불리면 실패
-        raise AssertionError("address override must not take the load fence")
-
-    monkeypatch.setattr(repo, "lock_single_feature_writer_protocol", _protocol)
     monkeypatch.setattr(
-        "kortravelmap.infra.feature_repo.lock_feature_curation_write", _no_fence
+        "kortravelmap.infra.feature_repo.lock_feature_curation_write", _forbidden
     )
+    monkeypatch.setattr("kortravelmap.infra.feature_repo.lock_feature_write_protocol", _forbidden)
     assert await repo.apply_feature_address_override(
         session, "missing", address={"road": "fixture"},
     ) is None  # type: ignore[arg-type]
-    assert session.calls[0]["sql"] == "regime entry"
-    assert "FOR UPDATE" in session.calls[1]["sql"]
+    assert "FOR UPDATE" in session.calls[0]["sql"]
+    assert not any("lock_scoped_feature_write_protocol" in c["sql"] for c in session.calls)

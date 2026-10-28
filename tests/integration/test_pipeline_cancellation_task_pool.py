@@ -25,10 +25,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.db import assert_runtime_db_privilege_boundary, make_async_engine
 from kortravelmap.infra.jobs_repo import enqueue_unpaired_import_job
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
+from tests.integration._owned_pg import scalar_engines as scalar_engines
 from tests.integration.test_state_lifecycle_protocol_entry import (
     owned_scalar_resource_bounds as owned_scalar_resource_bounds,
 )
