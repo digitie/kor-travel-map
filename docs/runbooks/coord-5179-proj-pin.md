@@ -48,7 +48,8 @@ CREATE INDEX idx_features_coord_5179_gist ON feature.features
   변경으로 다루고, 상향 전후로 §3을 반드시 실행한다.
 - 현재 고정 baseline(참고값, `postgis/postgis:18-3.6` digest 실측 2026-10-28): PostGIS `3.6.4`, PROJ `9.8.1`,
   GEOS `3.13.1`. 이전 baseline은 `16-3.5` 계열 PostGIS `3.5.2`·PROJ `7.2.1`이었다 — 2026-10-27 공용 PG 16→18이 곧
-  PROJ 7→9 상향이다(표본 점 4326→5179 결과는 두 판에서 비트 동일, 실 데이터 §3은 T-PG18-CI 후속).
+  PROJ 7→9 상향이다(표본 점 4326→5179 결과는 두 판에서 비트 동일, 실 데이터 §3은 2026-10-28 prod 전수
+  252,447행 `drifted = 0`·`max_drift_m` 1.63e-9 — §4 불필요).
   실 배포 DB에서 정확한 baseline을 캡처해 배포 기록에 남긴다:
 
 ```sql
@@ -98,6 +99,9 @@ LIMIT 50;
 
 > 검증: 위 세 쿼리(요약·offender·버전)와 §4의 재계산/REINDEX는 `postgis/postgis:16-3.5`
 > 컨테이너(PROJ 7.2.1)에서 실행 확인했다. fresh 데이터에서 `drifted=0`.
+> 2026-10-28 n150 prod(PG 18.6·PostGIS 3.6.4·PROJ 9.8.1, PROJ 7.2.1에서 계산된 저장값): 위 요약과 같은 술어를
+> `feature_id` keyset 5,000행 배치·읽기 전용 transaction·`statement_timeout`으로 전수 실행 — checked 252,447,
+> drifted 0, max 1.63e-9 m(p99 0, 0 초과 2,306행은 전부 1e-6 m 미만 부동소수 잡음), 25초, load 최대 2.46.
 
 ## 4. 재계산 + REINDEX (Recovery)
 

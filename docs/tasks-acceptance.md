@@ -2845,5 +2845,6 @@ ADR-116(geo 부하 줄이기 0단계). 브랜치 `feat/skip-geocode-unchanged`.
   (PG17 `datlocale`)은 #1429에서 고쳤다.
 - [x] PG16 산출물의 major 의존을 정리했다 — `alembic/head-schema.sql`은 pg_dump 18로 재생성, target fingerprint 7축은 PG18에서
   같은 값으로 재현(environment에 기록).
-- [ ] PROJ 7.2.1 → 9.8.1(PostGIS 3.5.2 → 3.6.4) — `docs/runbooks/coord-5179-proj-pin.md` §3 drift 검사를 prod에서 읽기 전용으로
-  한 번 돌려 `drifted = 0`을 journal에 적는다(0이 아니면 §4).
+- [x] PROJ 7.2.1 → 9.8.1(PostGIS 3.5.2 → 3.6.4) — `docs/runbooks/coord-5179-proj-pin.md` §3 drift 검사를 prod에서 읽기 전용으로
+  한 번 돌려 `drifted = 0`을 journal에 적는다(0이 아니면 §4). 2026-10-28 n150 prod(PG 18.6·PostGIS 3.6.4·PROJ 9.8.1)
+  전수 252,447행 `drifted = 0`, `max_drift_m` 1.63e-9 — §4 불필요(journal 2026-10-28).

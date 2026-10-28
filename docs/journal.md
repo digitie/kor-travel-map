@@ -1,3 +1,11 @@
+## 2026-10-28 — T-PG18-CI: prod coord_5179 PROJ 7→9 drift 검사 clean
+
+공용 PG 16→18(pg_upgrade)로 PROJ 7.2.1 → 9.8.1이 된 뒤 runbook `coord-5179-proj-pin.md` §3을 n150 prod Map DB에서
+읽기 전용으로 전수 실행했다(API 컨테이너 DSN, `feature_id` keyset 5,000행 51배치, 배치마다 READ ONLY transaction·
+`statement_timeout` 30s·0.4초 휴지, load·`/health` 지연 감시). checked 252,447(= 종료 시 `coord IS NOT NULL` 수),
+`drifted`(> 1mm) 0, max 1.63e-9 m, p50/p90/p99 0, p99.9 7.0e-10 — 0 초과 2,306행은 모두 1e-6 m 미만 부동소수 잡음.
+§4 재계산·REINDEX 불필요. 25초, load 최대 2.46, `/health` 최대 15ms. 아무것도 쓰지 않았다.
+
 ## 2026-10-28 — T-PG18-CI: CI·compose를 PG18 공용 digest 한 lane으로(ADR-118, #1431)
 
 공용 PG 16→18 뒤 CI 통합 suite를 `postgis/postgis:18-3.6@sha256:4a43e3c3…` 한 lane으로 바꿨다(옛 PG16 alpine·glibc 삭제).
