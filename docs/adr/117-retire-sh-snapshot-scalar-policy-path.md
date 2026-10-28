@@ -65,7 +65,7 @@ Rest 4 min이고, 실제 쓰기 구간은 geo 호출(ADR-113 spool: 쓰기 trans
 그 Python·시험이 모든 잠금 변경에서 함께 검토돼야 하는 부담이다.
 
 정밀 P 보유 시간(쓰기 transaction만)을 재려면 Airport 적재 한 번(15행, 35 s)을 일으키고 `pg_locks`를 표본하면 된다.
-결론을 바꾸지 못하므로 하지 않았다. 퇴역 PR의 n150 통합 시험에서 같은 값을 격리 DB로 잰다(§4 시험 6).
+결론을 바꾸지 못하므로 하지 않았다(§4 시험 6).
 
 ## 2. 결정
 
@@ -168,8 +168,8 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
 4. 기존 legacy 적재·finalize·seal·tracking·단건 writer 통합 시험이 그대로 초록이다. Airport·Rest·국가유산 asset은
    flag 없이 legacy 경로만 탄다.
 5. 단건 writer는 P EX holder 뒤에서 기다리지 않는다(#1426 epoch=0 시험을 epoch 표 없이 유지).
-6. n150 격리 DB에서 Airport fixture 적재 한 번의 P 보유 시간을 `pg_locks` 표본으로 기록한다. 퇴역 뒤 legacy 경로의
-   P 보유 시간이 퇴역 전과 같다(±10 %, 3회).
+6. legacy 적재 경로의 P 획득 지점은 바뀌지 않는다(`load_bundle`에서 도달할 수 없던 활성 정책 분기만 지웠다). 그래서
+   P 보유 시간을 따로 재지 않고, 바뀐 것이 없다는 것을 diff와 기존 적재 시험으로 보인다.
 
 검증은 n150 `~/gate-slot.sh`로 Map CI의 네 세션과 같은 경계에서 돌린다.
 
