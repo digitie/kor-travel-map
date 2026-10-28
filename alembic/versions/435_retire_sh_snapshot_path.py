@@ -785,11 +785,19 @@ def _assert_preconditions(bind: Any) -> None:
 
 
 def _drop_catalog(bind: Any) -> set[tuple[str, str, str, str]]:
-    rows = (
-        bind.execute(text(_DROP_CATALOG_SQL), {"names": sorted({d.name for d in _DROPS})})
-        .mappings()
-        .all()
-    )
+    """지울 이름의 실제 카탈로그. identity 문자열은 search_path에 따라 schema 한정이 달라지므로
+    (``x_extension.geometry`` 대 ``geometry``) pg_dump와 같은 빈 경로(``pg_catalog``)에서 읽고
+    호출자 값으로 되돌린다."""
+    prior = str(bind.scalar(text("SELECT current_setting('search_path')")))
+    bind.execute(text("SELECT set_config('search_path','pg_catalog',true)"))
+    try:
+        rows = (
+            bind.execute(text(_DROP_CATALOG_SQL), {"names": sorted({d.name for d in _DROPS})})
+            .mappings()
+            .all()
+        )
+    finally:
+        bind.execute(text("SELECT set_config('search_path',:prior,true)"), {"prior": prior})
     return {(str(r["name"]), str(r["kind"]), str(r["owner"]), str(r["identity"])) for r in rows}
 
 
