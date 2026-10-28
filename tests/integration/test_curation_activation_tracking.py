@@ -1,4 +1,9 @@
-"""430 합성 뒤 실제 parent/leaf/typed 경계용 paired source. 실행은 별도 owned gate다."""
+"""430·434 tracking prefix의 실제 parent/leaf/typed 경계(owned PG).
+
+ADR-117(435)이 scoped kernel·정책 활성화·strict SH guard와 공유 P를 지웠다. 그 경로를 쓰던 사례
+(applying kernel 옆의 leaf, 활성화 inventory rollback, kernel begin의 parent 대기, SH+L prefix)는
+지웠고, leaf는 적재(P EX + fence) 옆에서 막히지 않음을 본다.
+"""
 
 from __future__ import annotations
 
@@ -16,12 +21,11 @@ from kortravelmap.infra.feature_operation_repo import (
     append_dagster_feature_attempt_event,
     ensure_dagster_feature_operation,
 )
-from kortravelmap.infra.scoped_feature_writes import begin_scoped_feature_write
-from tests.integration.test_provider_field_scalar_projection import (
+from kortravelmap.infra.feature_repo import lock_feature_curation_write
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
-from tests.integration.test_scoped_provider_batch import _plan, _seed
+from tests.integration._owned_pg import scalar_engines as scalar_engines
 from tests.integration.test_state_lifecycle_protocol_entry import (
     owned_scalar_resource_bounds as owned_scalar_resource_bounds,
 )
@@ -39,12 +43,29 @@ async def activation_engines(scalar_engines):
         assert await connection.scalar(
             text("SELECT to_regprocedure('ops.reject_pipeline_cancellation_prefix()') IS NOT NULL")
         )
+        # 435(ADR-117): 정책 활성화와 strict SH guard 설치기는 사라졌다.
         assert await connection.scalar(
-            text("""SELECT position('_install_strict_sh_data_guards' IN p.prosrc)>0
-            FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-            WHERE n.nspname='feature' AND p.proname='activate_provider_field_policy'""")
+            text("""SELECT NOT EXISTS(SELECT 1 FROM pg_proc p
+            JOIN pg_namespace n ON n.oid=p.pronamespace
+            WHERE n.nspname='feature' AND p.proname IN
+            ('activate_provider_field_policy','_install_strict_sh_data_guards'))""")
         )
     return admin, runtime
+
+
+async def _dataset(admin) -> int:
+    """tracking 경계만 보는 소유 dataset 하나. Feature·source는 필요 없다."""
+    async with AsyncSession(admin) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        return int(
+            await session.scalar(
+                text("""INSERT INTO provider_sync.provider_datasets(
+                provider,dataset_key,display_name,source_kind)
+                VALUES('guard430-fixture',:key,'owned tracking fixture','manual')
+                RETURNING provider_dataset_id"""),
+                {"key": uuid4().hex},
+            )
+        )
 
 
 async def _operation(admin, runtime, dataset):
@@ -86,30 +107,21 @@ async def _prefix(session, mode):
         await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _L})
     elif mode == "ex_l":
         await session.execute(text("SELECT ops.lock_provider_feature_tracking_protocol(true)"))
-    elif mode == "sh_l":
-        await session.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": _L})
-        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
 
 
-async def test_same_dataset_applying_does_not_block_true_leaf(activation_engines):
+async def test_load_holding_protocol_ex_does_not_block_true_leaf(activation_engines):
+    """적재가 P EX와 fence를 쥔 동안에도 같은 dataset의 tracking leaf(L만)는 끝난다(434 WI-1).
+
+    434까지는 applying scoped kernel(P SH + parent SHARE + scope UPDATE)을 옆에 뒀다. ADR-117이
+    kernel을 지웠으므로 남은 bulk writer 모양(P EX → feature-curation-write)으로 본다.
+    """
     admin, runtime = activation_engines
-    dataset, items = await _seed(admin, runtime, count=1)
+    dataset = await _dataset(admin)
     run, membership, _ = await _operation(admin, runtime, dataset)
-    plan, _ = await _plan(runtime, dataset, items)
     async with AsyncSession(runtime) as holder:
         await holder.begin()
         try:
-            applying = await begin_scoped_feature_write(
-                holder,
-                attempt_id=plan["attempt_id"],
-                owner=plan["owner"],
-                manifest_digest=plan["manifest_digest"],
-            )
-            # runtime에는 내부 attempt 표의 raw SELECT 권한이 없다.
-            # 실제 begin이 반환한 같은 행과 현재 TX를 대조한다.
-            assert applying["status"] == "applying"
-            assert applying["apply_txid"] == await holder.scalar(text("SELECT txid_current()"))
-            # 실제 applying의 parent SHARE/ops scope UPDATE/P SH를 유지한 채 leaf를 쓴다.
+            await lock_feature_curation_write(holder)
             async with asyncio.timeout(2), AsyncSession(runtime) as leaf, leaf.begin():
                 await leaf.execute(text("SET LOCAL lock_timeout='500ms'"))
                 await leaf.execute(text("SET LOCAL statement_timeout='1s'"))
@@ -133,17 +145,6 @@ async def test_same_dataset_applying_does_not_block_true_leaf(activation_engines
                     error={"code": "owned430"},
                 )
                 assert event.job_id
-            async with admin.connect() as observer:
-                assert (
-                    await observer.scalar(
-                        text(
-                            "SELECT status='applying' FROM ops.feature_write_attempts "
-                            "WHERE attempt_id=:id"
-                        ),
-                        {"id": plan["attempt_id"]},
-                    )
-                    is False
-                )  # 아직 commit하지 않은 applying은 다른 snapshot에 보이지 않는다.
         finally:
             await holder.rollback()
     async with admin.connect() as observer:
@@ -156,7 +157,7 @@ async def test_same_dataset_applying_does_not_block_true_leaf(activation_engines
         )
 
 
-@pytest.mark.parametrize("mode", ["none", "sh_l"])
+@pytest.mark.parametrize("mode", ["none"])
 @pytest.mark.parametrize(
     "relation",
     [
@@ -168,7 +169,10 @@ async def test_same_dataset_applying_does_not_block_true_leaf(activation_engines
 async def test_cancel_statement_requires_l_and_no_shared_protocol(
     activation_engines, mode, relation
 ):
-    """434 WI-1: 취소 원장 쓰기는 L을 요구하고, P를 쥐었다면 EX여야 한다(SH 데이터 writer 금지)."""
+    """434 WI-1: 취소 원장 쓰기는 L을 요구한다.
+
+    434의 ``sh_l``(SH P + L) 사례는 435(ADR-117)에서 SH P 자체가 23514로 거부되므로 지웠다.
+    """
     _, runtime = activation_engines
     async with AsyncSession(runtime) as session:
         await session.begin()
@@ -199,7 +203,7 @@ async def test_cancel_existing_prefix_zero_row_path_is_allowed(activation_engine
 
 async def test_typed_owner_cannot_skip_l_or_terminal_p(activation_engines):
     admin, runtime = activation_engines
-    dataset, _ = await _seed(admin, runtime, count=1)
+    dataset = await _dataset(admin)
     _, _, operation = await _operation(admin, runtime, dataset)
     child = operation.members[0].job_id
     # 434 WI-1: L 없이는 어떤 provider job도 못 쓴다. root(provider_feature_load_run)의 done
@@ -207,7 +211,6 @@ async def test_typed_owner_cannot_skip_l_or_terminal_p(activation_engines):
     for mode, status, job in [
         ("none", "running", child),
         ("l", "done", operation.root_job_id),
-        ("sh_l", "failed", child),
     ]:
         async with AsyncSession(admin) as session:
             await session.begin()
@@ -251,147 +254,9 @@ async def test_generic_job_keeps_original_no_protocol_write_path(activation_engi
         )
 
 
-async def test_activation_partial_inventory_rolls_back_policy_and_trigger(activation_engines):
-    admin, runtime = activation_engines
-    _, items = await _seed(admin, runtime, count=1)
-    feature = items[0].feature_id
-    async with admin.connect() as observer:
-        baseline = (
-            await observer.execute(
-                text("""SELECT active.policy_revision,active.field_paths,
-            epoch.epoch FROM feature.provider_field_active_policies active
-            CROSS JOIN feature.provider_field_policy_epoch epoch
-            WHERE active.feature_id=:id AND epoch.singleton"""),
-                {"id": feature},
-            )
-        ).one()
-        assert (
-            await observer.scalar(
-                text("""SELECT count(*) FROM pg_trigger
-            WHERE NOT tgisinternal AND tgname IN
-            ('trg_00_strict_sh_data_protocol','trg_00_strict_sh_data_target')""")
-            )
-            == 33
-        )
-    async with AsyncSession(admin) as session:
-        await session.begin()
-        try:
-            await _prefix(session, "ex_l")
-            await session.execute(
-                text("DROP TRIGGER trg_00_strict_sh_data_protocol ON feature.features")
-            )
-            await session.execute(text("SET LOCAL ROLE ktm_feature_state_procedure_owner"))
-            with pytest.raises(DBAPIError) as caught:
-                await session.execute(
-                    text("CALL feature.activate_provider_field_policy(:id,:revision,:fields)"),
-                    {"id": feature, "revision": baseline[0], "fields": list(baseline[1])},
-                )
-            assert caught.value.orig.sqlstate == "23514"
-            assert _constraint_name(caught.value) == "ck_strict_data_guard_inventory"
-        finally:
-            await session.rollback()
-    async with admin.connect() as observer:
-        after = (
-            await observer.execute(
-                text("""SELECT active.policy_revision,active.field_paths,
-            epoch.epoch FROM feature.provider_field_active_policies active
-            CROSS JOIN feature.provider_field_policy_epoch epoch
-            WHERE active.feature_id=:id AND epoch.singleton"""),
-                {"id": feature},
-            )
-        ).one()
-        assert tuple(after) == tuple(baseline)
-        assert (
-            await observer.scalar(
-                text("""SELECT count(*) FROM pg_trigger
-            WHERE NOT tgisinternal AND tgname IN
-            ('trg_00_strict_sh_data_protocol','trg_00_strict_sh_data_target')""")
-            )
-            == 33
-        )
-
-
-async def test_begin_waits_on_actual_parent_before_ops_scope_or_feature(activation_engines):
-    admin, runtime = activation_engines
-    dataset, items = await _seed(admin, runtime, count=1)
-    plan, _ = await _plan(runtime, dataset, items)
-    ready = asyncio.get_running_loop().create_future()
-    async with AsyncSession(admin) as holder:
-        await holder.begin()
-        try:
-            # 관리 SQL의 row probe다. 일반 writer의 임의 선행 잠금까지 attest하지 않는다.
-            blocker = int(await holder.scalar(text("SELECT pg_backend_pid()")))
-            await holder.execute(
-                text(
-                    "SELECT 1 FROM provider_sync.provider_datasets "
-                    "WHERE provider_dataset_id=:id FOR UPDATE"
-                ),
-                {"id": dataset},
-            )
-
-            async def begin():
-                async with AsyncSession(runtime) as session:
-                    await session.begin()
-                    try:
-                        await session.execute(text("SET LOCAL lock_timeout='1s'"))
-                        await session.execute(text("SET LOCAL statement_timeout='3s'"))
-                        ready.set_result(int(await session.scalar(text("SELECT pg_backend_pid()"))))
-                        with pytest.raises(DBAPIError) as caught:
-                            await begin_scoped_feature_write(
-                                session,
-                                attempt_id=plan["attempt_id"],
-                                owner=plan["owner"],
-                                manifest_digest=plan["manifest_digest"],
-                            )
-                        assert caught.value.orig.sqlstate == "55P03"
-                    finally:
-                        await session.rollback()
-
-            task = asyncio.create_task(begin())
-            try:
-                pid = await asyncio.wait_for(ready, 2)
-                async with asyncio.timeout(0.8):
-                    while True:
-                        if task.done():
-                            await task
-                            raise AssertionError(
-                                "begin ended before actual parent wait observation"
-                            )
-                        async with admin.connect() as observer:
-                            blocked = await observer.scalar(
-                                text("SELECT :blocker=ANY(pg_blocking_pids(:pid))"),
-                                {"blocker": blocker, "pid": pid},
-                            )
-                        if blocked:
-                            break
-                        await asyncio.sleep(0.01)
-                async with AsyncSession(admin) as observer, observer.begin():
-                    await observer.execute(
-                        text(
-                            "SELECT 1 FROM ops.feature_write_dataset_scopes "
-                            "WHERE provider_dataset_id=:id FOR UPDATE NOWAIT"
-                        ),
-                        {"id": dataset},
-                    )
-                    await observer.execute(
-                        text(
-                            "SELECT 1 FROM feature.features WHERE feature_id=:id FOR UPDATE NOWAIT"
-                        ),
-                        {"id": items[0].feature_id},
-                    )
-                await asyncio.wait_for(task, 2)
-            finally:
-                await holder.rollback()
-                if not task.done():
-                    task.cancel()
-                await asyncio.wait_for(asyncio.gather(task, return_exceptions=True), 2)
-        finally:
-            await holder.rollback()
-
-
 async def test_old_provider_event_cannot_be_moved_to_generic_job(activation_engines):
     admin, runtime = activation_engines
-    dataset, _ = await _seed(admin, runtime, count=1)
+    dataset = await _dataset(admin)
     run, membership, _ = await _operation(admin, runtime, dataset)
     async with AsyncSession(runtime) as session, session.begin():
         event = await append_dagster_feature_attempt_event(

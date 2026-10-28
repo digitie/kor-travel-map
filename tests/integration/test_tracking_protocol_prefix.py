@@ -19,10 +19,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
+from tests.integration._owned_pg import scalar_engines as scalar_engines
 from tests.integration.test_state_lifecycle_protocol_entry import (
     owned_scalar_resource_bounds as owned_scalar_resource_bounds,
 )
@@ -44,7 +44,8 @@ _migration = _load("_integration_424", "424_tracking_protocol_prefix.py")
 _narrowing = _load("_integration_433", "434_protocol_entry_narrowing.py")
 _FINISH = "ops.finish_provider_feature_membership_command"
 _CANCEL = "ops.transition_provider_cancellation_job_command"
-#: 430이 본문을 의도적으로 바꾼 셋 — 공식 head dump와 통째로 대조한다.
+#: 430이 본문을 의도적으로 바꾼 셋 — 공식 head dump와 통째로 대조한다(finish는 435가 스냅샷
+#: binding 분기를 빼고 다시 썼다 — head dump가 그 결과다).
 _GOLDEN_NAMES = frozenset(
     {
         "feature.finalize_provider_curation_root",
@@ -205,12 +206,12 @@ async def test_final_l_only_rejects_before_protocol_or_input(scalar_engines, nam
 
 
 @pytest.mark.parametrize(("name", "overrides"), _LEAF)
-@pytest.mark.parametrize("exclusive", [False, True])
-async def test_leaf_p_without_l_refuses_new_blocking_l(scalar_engines, name, overrides, exclusive):
+async def test_leaf_p_without_l_refuses_new_blocking_l(scalar_engines, name, overrides):
+    # 435(ADR-117): P는 배타 전용이다. 434의 SH 변형은 P(false) 자체가 23514라 지웠다.
     admin, _ = scalar_engines
     async with AsyncSession(admin) as session:
         await _owner(session)
-        await session.execute(text(_P), {"exclusive": exclusive})
+        await session.execute(text(_P), {"exclusive": True})
         try:
             with pytest.raises(DBAPIError) as caught:
                 await _direct(session, name, overrides)
@@ -226,7 +227,8 @@ async def test_final_waits_on_exact_protocol_pid_before_lineage(scalar_engines, 
     admin, runtime = scalar_engines
     ready = asyncio.get_running_loop().create_future()
     async with AsyncSession(runtime) as holder, holder.begin():
-        await holder.execute(text(_P), {"exclusive": False})
+        # blocker는 적재 모양의 P EX다(434까지는 P SH였다 — ADR-117이 공유 모드를 지웠다).
+        await holder.execute(text(_P), {"exclusive": True})
         blocker = int(await holder.scalar(text("SELECT pg_backend_pid()")))
 
         async def call():

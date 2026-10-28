@@ -1,5 +1,21 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-10-28 — ADR-115 동시 쓰기 사슬을 ADR-117로 대체
+
+ADR-115 동시 쓰기 구현 사슬(01→…→09)은 prod 측정에서 SH 경로가 한 번도 돌지 않았고 경합 효익이 0이라
+[ADR-117](adr/117-retire-sh-snapshot-scalar-policy-path.md)이 대체했다(alembic 435가 411~433 SH 경로를 지운다).
+**대체이지 완료가 아니다** — 해제 조건은 충족되지 않았고 acceptance 절은 기록으로 남는다.
+
+- [x] T-CWRITE-01 — **현재 writer·trigger·성능 기준선** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-02 — **공유 Feature의 후보·필드 winner·병합 정본** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-03 — **scope·epoch·manifest와 protocol gate** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-04 — **독립 데이터셋 동시 쓰기** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-05 — **완전 지역의 동시 쓰기·경계 이동** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-06 — **curation·root·관리·병합 전수 전환** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-07 — **실패·취소·worker 사망 복구** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-08 — **적대 리뷰 2인·실부하·UI 수용** — ADR-117로 대체(2026-10-28).
+- [x] T-CWRITE-09 — **배포·확대·되돌림과 문서 마감** — ADR-117로 대체(2026-10-28).
+
 ## 2026-10-22 — 첫 적재 실패 2건(고속도로 돌발·국가유산 행사)
 
 - [x] T-LOAD-HIGHWAY-EVIDENCE — **고속도로 돌발 10분 경로가 미시도 reverse를 실패로 drop.** bundle에

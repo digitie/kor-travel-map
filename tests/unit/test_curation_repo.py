@@ -1227,9 +1227,9 @@ async def test_import_rows_empty_changed_and_no_change(monkeypatch: pytest.Monke
     assert result["removed"] == 1
     assert result["removals"] == (_item(),)
     assert result["import_batch_id"] == "00000000-0000-4000-8000-000000000091"
-    # 434 WI-2: 공통 P helper가 배타 모드를 bind로 넘긴다(regime 진입이 아니라 무조건 EX).
-    assert "ops.lock_scoped_feature_write_protocol(" in changed.calls[0][0]
-    assert changed.calls[0][1] == {"exclusive": True}
+    # ADR-117: 공통 P helper는 배타 전용이다(공유 모드는 DB가 23514로 거부한다).
+    assert "ops.lock_scoped_feature_write_protocol(true)" in changed.calls[0][0]
+    assert changed.calls[0][1] == {}
     assert "pg_advisory_xact_lock" in changed.calls[1][0]
     assert "UPDATE feature.curation_collections" in changed.calls[-1][0]
     foundations.reset_mock(side_effect=True)

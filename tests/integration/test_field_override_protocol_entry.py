@@ -1,8 +1,8 @@
 """field SQL·Python 선점 폐포를 실제 runtime/PG/ASGI로 검증한다.
 
-434 DC-1 이후 이 모듈은 두 세계를 순서대로 본다. 앞쪽 테스트는 정책 활성화 전(epoch=0)이라
-단건 writer가 P를 잡지 않는다. 활성화 테스트가 epoch를 올린 뒤의 HTTP 503 테스트는 regime
-진입이 P EX를 기다리는 경로다(``_ensure_regime``이 단독 실행에서도 그 세계를 만든다).
+ADR-117(435): 단건 writer는 P를 잡지 않는다(행 잠금과 ADR-111 gate만). 434의 정책 활성화(epoch>0)
+세계와 regime 진입은 사라졌으므로, 이 모듈은 한 세계만 본다. HTTP 503은 P가 아니라 같은 Feature
+행을 쥔 적재 뒤의 행 잠금 대기에서 난다.
 """
 
 from __future__ import annotations
@@ -24,24 +24,16 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra import admin_feature_repo as repo
+from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_repo import lock_feature_curation_write
-from kortravelmap.infra.scoped_feature_writes import (
-    begin_scoped_feature_write,
-    finish_scoped_feature_write,
+from tests.integration._owned_pg import _seed
+from tests.integration._owned_pg import (
+    scalar_container as scalar_container,
 )
+from tests.integration._owned_pg import scalar_engines as scalar_engines
 from tests.integration.test_admin_override_protocol_entry import (
     _wait_row_blocker_without_protocol,
 )
-from tests.integration.test_provider_field_scalar_projection import (
-    _activate,
-    _plan,
-    _refresh,
-    _seed,
-)
-from tests.integration.test_provider_field_scalar_projection import (
-    scalar_container as scalar_container,
-)
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
 from tests.integration.test_state_lifecycle_protocol_entry import (
     owned_scalar_resource_bounds as owned_scalar_resource_bounds,
 )
@@ -208,23 +200,6 @@ AND locktype='advisory' AND classid=1369104691::oid AND objid=115::oid AND objsu
 AND granted"""
 
 
-async def _epoch(admin) -> int:
-    async with AsyncSession(admin) as session:
-        return int(
-            await session.scalar(
-                text("SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton")
-            )
-        )
-
-
-async def _ensure_regime(admin, runtime) -> None:
-    """epoch>0을 보장한다. 이 모듈의 활성화 테스트가 이미 올렸으면 그대로 둔다."""
-    if await _epoch(admin) == 0:
-        other = await _case(admin, runtime)
-        await _activate(admin, other.feature)
-    assert await _epoch(admin) > 0
-
-
 @pytest.mark.parametrize(
     ("kind", "same_feature"),
     [
@@ -237,19 +212,15 @@ async def _ensure_regime(admin, runtime) -> None:
         ("create", True),
     ],
 )
-async def test_epoch0_writer_waits_only_on_the_same_feature_row(
-    scalar_engines, kind, same_feature
-):
-    """434 DC-1: epoch=0의 단건 writer는 applying kernel의 P SH 뒤에 줄 서지 않는다.
+async def test_writer_waits_only_on_the_same_feature_row(scalar_engines, kind, same_feature):
+    """단건 writer는 적재(P EX → Feature 행) 뒤에서 P가 아니라 같은 Feature 행에서만 기다린다.
 
-    같은 Feature면 kernel이 잡은 Feature 행에서만 기다리고, 다른 Feature와 신규 생성은
-    kernel이 열려 있는 동안 끝난다. 이 모듈의 활성화 테스트보다 앞에 있어야 epoch=0이다.
+    다른 Feature와 신규 생성은 적재가 열려 있는 동안 끝난다. 434까지는 applying scoped kernel
+    (P SH + manifest 행)을 blocker로 썼다. ADR-117이 kernel을 지웠으므로 적재 모양으로 본다.
     """
     admin, runtime = scalar_engines
-    assert await _epoch(admin) == 0
     case = await _prepare(admin, runtime, kind)
     held = case if same_feature else await _case(admin, runtime)
-    attempt, owner, digest = await _plan(runtime, held.feature, held.dataset)
     started = asyncio.get_running_loop().create_future()
 
     async def write():
@@ -260,26 +231,23 @@ async def test_epoch0_writer_waits_only_on_the_same_feature_row(
 
     task = None
     try:
-        async with AsyncSession(runtime) as scoped, scoped.begin():
-            assert (
-                await begin_scoped_feature_write(
-                    scoped, attempt_id=attempt, owner=owner, manifest_digest=digest
-                )
-            )["status"] == "applying"
-            blocker = int(await scoped.scalar(text("SELECT pg_backend_pid()")))
+        async with AsyncSession(admin) as holder, holder.begin():
+            await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+            await holder.execute(
+                text(
+                    "SELECT 1 FROM feature.features WHERE feature_id=CAST(:id AS uuid) FOR UPDATE"
+                ),
+                dict(id=held.feature),
+            )
+            blocker = int(await holder.scalar(text("SELECT pg_backend_pid()")))
             task = asyncio.create_task(write())
             pid = await asyncio.wait_for(asyncio.shield(started), 3)
             if same_feature and kind != "create":
                 await _wait_row_blocker_without_protocol(admin, pid, blocker, task)
                 assert not task.done()
             else:
-                # 종전(414~418)에는 여기서 P EX를 기다렸다. 이제 kernel과 겹치지 않으면 끝난다.
+                # 종전(414~418)에는 여기서 P EX를 기다렸다. 이제 행이 겹치지 않으면 끝난다.
                 await asyncio.wait_for(asyncio.shield(task), 8)
-            assert (
-                await finish_scoped_feature_write(
-                    scoped, attempt_id=attempt, owner=owner, result_digest="f" * 64
-                )
-            )["status"] == "completed"
         result = await asyncio.wait_for(asyncio.shield(task), 5)
         assert result is not None
         async with AsyncSession(admin) as observer:
@@ -309,26 +277,9 @@ async def test_epoch0_writer_waits_only_on_the_same_feature_row(
 
 
 @pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
-async def test_epoch0_writer_under_shared_protocol_does_not_upgrade(scalar_engines, kind):
-    """434 DC-1: epoch=0이면 SH caller 안에서도 승격 없이 쓴다.
-
-    epoch>0의 SH→EX 승격 거부(23514)는 ``test_single_writer_regime_entry.py``가 본다.
-    """
+async def test_writer_finishes_while_a_load_holds_protocol_ex(scalar_engines, kind):
+    """적재가 P EX를 쥔 동안에도 다른 Feature의 관리 writer는 끝난다(종전 503, 434 DC-1·ADR-117)."""
     admin, runtime = scalar_engines
-    assert await _epoch(admin) == 0
-    case = await _prepare(admin, runtime, kind)
-    async with AsyncSession(runtime) as session, session.begin():
-        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-        assert await _apply(session, kind, case) is not None
-        modes = (await session.scalars(text(_OWN_PROTOCOL_MODES))).all()
-    assert modes == ["ShareLock"]
-
-
-@pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
-async def test_epoch0_writer_finishes_while_a_load_holds_protocol_ex(scalar_engines, kind):
-    """434 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 관리 writer는 끝난다(종전 503)."""
-    admin, runtime = scalar_engines
-    assert await _epoch(admin) == 0
     case = await _prepare(admin, runtime, kind)
     async with AsyncSession(runtime) as holder, holder.begin():
         await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
@@ -378,9 +329,10 @@ async def test_original_body_acl_config_and_owner_are_preserved(scalar_engines, 
                 dict(name=name),
             )
         ).one()
-    # 434 DC-1: 416의 P EX 첫 줄이 같은 자리의 regime 진입으로 바뀌었다.
-    gate = "  PERFORM ops.lock_single_feature_writer_protocol();\n"
+    # 416의 P EX 첫 줄이 434에서 regime 진입, 435(ADR-117)에서 주석 한 줄로 바뀌었다.
+    gate = "  -- 435 ADR-117: 단건 writer는 P를 잡지 않는다(행 잠금과 ADR-111 gate).\n"
     assert "lock_scoped_feature_write_protocol" not in row.prosrc
+    assert "lock_single_feature_writer_protocol" not in row.prosrc
     assert row.prosrc.count(gate) == 1
     assert row.prosrc.partition("\nBEGIN\n")[2].startswith(gate)
     assert (
@@ -393,133 +345,23 @@ async def test_original_body_acl_config_and_owner_are_preserved(scalar_engines, 
     assert row.proconfig == ["search_path=pg_catalog"]
 
 
-async def _revision(admin, case):
-    async with AsyncSession(admin) as observer:
-        return int(
-            await observer.scalar(
-                text(
-                    "SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"
-                ),
-                dict(id=case.feature),
-            )
-        )
-
-
-async def test_active_override_survives_scoped_sql_reprojection_then_revoke(scalar_engines):
-    admin, runtime = scalar_engines
-    case = await _case(admin, runtime)
-    await _activate(admin, case.feature)
-    case.revision = await _revision(admin, case)
-    await _command(runtime, case, "author")
-    async with AsyncSession(runtime) as session, session.begin():
-        result = await repo.author_admin_feature_field_overrides(
-            session,
-            case.feature,
-            expected_row_revision=case.revision,
-            reason_code="field-416",
-            operator=case.actor,
-            command_id=case.command,
-            values={"core.name": "operator", "place.phones": ["010-operator"]},
-            geometry_wkt={},
-        )
-        assert result.applied_field_count == 2
-    record, source_hash = await _refresh(
-        runtime,
-        case.feature,
-        case.dataset,
-        case.entity,
-        {"core.name": "fresh-base", "place.phones": ["010-fresh"]},
-    )
-    async with AsyncSession(admin) as observer:
-        effective = (
-            await observer.execute(
-                text(
-                    "SELECT name,phones FROM feature.features "
-                    "JOIN feature.feature_places USING(feature_id) "
-                    "WHERE feature_id=CAST(:id AS uuid)"
-                ),
-                dict(id=case.feature),
-            )
-        ).one()
-        assert tuple(effective) == ("operator", ["010-operator"])
-        bases = (
-            await observer.execute(
-                text(
-                    "SELECT field_path,value_json,source_record_key,"
-                    "source_raw_payload_hash FROM feature.feature_base_field_values "
-                    "WHERE feature_id=CAST(:id AS uuid) ORDER BY field_path"
-                ),
-                dict(id=case.feature),
-            )
-        ).all()
-        assert {row.field_path: row.value_json for row in bases} == {
-            "core.name": "fresh-base",
-            "place.phones": ["010-fresh"],
-        }
-        assert all(row.source_record_key == record for row in bases)
-        assert all(row.source_raw_payload_hash == source_hash for row in bases)
-    case.revision = await _revision(admin, case)
-    await _command(runtime, case, "revoke")
-    async with AsyncSession(runtime) as session, session.begin():
-        result = await repo.revoke_admin_feature_field_overrides(
-            session,
-            case.feature,
-            expected_row_revision=case.revision,
-            reason_code="field-416",
-            operator=case.actor,
-            command_id=case.command,
-            field_paths=["core.name", "place.phones"],
-        )
-        assert result.applied_field_count == 2
-    async with AsyncSession(admin) as observer:
-        effective = (
-            await observer.execute(
-                text(
-                    "SELECT name,phones FROM feature.features "
-                    "JOIN feature.feature_places USING(feature_id) "
-                    "WHERE feature_id=CAST(:id AS uuid)"
-                ),
-                dict(id=case.feature),
-            )
-        ).one()
-        assert tuple(effective) == ("fresh-base", ["010-fresh"])
-        assert (
-            await observer.scalar(
-                text(
-                    "SELECT count(*) FROM ops.feature_overrides WHERE "
-                    "feature_id=CAST(:id AS uuid) AND status='active'"
-                ),
-                dict(id=case.feature),
-            )
-            == 0
-        )
-
-
-@pytest.mark.parametrize(
-    ("path", "value"), [("core.category", "01010200"), ("core.address", {"road": "denied"})]
-)
-async def test_active_unsupported_fields_still_rollback(scalar_engines, path, value):
-    admin, runtime = scalar_engines
-    case = await _case(admin, runtime)
-    await _activate(admin, case.feature)
-    case.revision = await _revision(admin, case)
-    await _command(runtime, case, "author")
-    before = await _state(admin, case)
-    params = case.params()
-    params["values"] = json.dumps({path: value})
-    with pytest.raises(DBAPIError) as caught:
-        async with AsyncSession(runtime) as session, session.begin():
-            await session.execute(text(_CALLS["author"]), params)
-    assert caught.value.orig.sqlstate == "23514"
-    assert await _state(admin, case) == before
-
-
-@pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
+@pytest.mark.parametrize("kind", ["author", "revoke", "patch"])
 async def test_http_lock_timeout_rolls_back_and_retry_is_valid(scalar_engines, kind, monkeypatch):
-    """regime(epoch>0)의 단건 writer는 P EX를 기다리다 503으로 끝나고 재시도가 유효하다."""
+    """같은 Feature 행을 쥔 적재 뒤에서 단건 writer는 행 대기 끝에 503이고 재시도가 유효하다.
+
+    434까지는 regime(epoch>0) 진입이 P SH holder 뒤의 P EX 대기로 503을 냈다. ADR-117이 그
+    진입을 지웠으므로 대기는 Feature 행에서 난다. 신규 생성(``create``)은 기존 행이 없어
+    적재가 막을 자리가 없다 — 그것이 ADR-117의 결과이므로 이 503 경로에서 뺀다.
+    """
     admin, runtime = scalar_engines
-    await _ensure_regime(admin, runtime)
     case = await _prepare(admin, runtime, kind)
+    # runtime 역할에는 lock_timeout 기본값이 없다(P 함수가 0이면 1s로 묶던 것과 다르다).
+    # 행 대기가 영원히 걸리지 않도록 이 요청 engine에만 상한을 둔다.
+    bounded = make_async_engine(
+        runtime.url.render_as_string(hide_password=False),
+        pool_size=2,
+        server_settings={"lock_timeout": "1000"},
+    )
     app = create_app(
         ApiSettings(
             admin_proxy_secret="field-416-local-proxy-credential-000000000000",
@@ -531,7 +373,7 @@ async def test_http_lock_timeout_rolls_back_and_retry_is_valid(scalar_engines, k
     )
 
     async def session_dependency():
-        async with AsyncSession(runtime) as session:
+        async with AsyncSession(bounded) as session:
             yield session
 
     app.dependency_overrides[api_db.get_session] = session_dependency
@@ -546,32 +388,40 @@ async def test_http_lock_timeout_rolls_back_and_retry_is_valid(scalar_engines, k
         "author": "/field-overrides",
         "revoke": "/field-overrides/revoke",
         "patch": "",
-        "create": "",
     }[kind]
-    url = "/v1/admin/features" + ("" if kind == "create" else "/" + case.feature + suffix)
+    url = "/v1/admin/features/" + case.feature + suffix
     body = {
         "author": dict(reason_code="field-416", values={"core.name": "http"}),
         "revoke": dict(reason_code="field-416", field_paths=["core.name"]),
         "patch": dict(reason="field-416", name="http"),
-        "create": dict(_payload(case), reason="field-416"),
     }[kind]
     method = "PATCH" if kind == "patch" else "POST"
     before = await _state(admin, case)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url="http://test"
-    ) as client:
-        async with AsyncSession(admin) as holder, holder.begin():
-            await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+    try:
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app, raise_app_exceptions=False), base_url="http://test"
+        ) as client:
+            async with AsyncSession(admin) as holder, holder.begin():
+                await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+                await holder.execute(
+                    text(
+                        "SELECT 1 FROM feature.features "
+                        "WHERE feature_id=CAST(:id AS uuid) FOR UPDATE"
+                    ),
+                    dict(id=case.feature),
+                )
+                response = await client.request(method, url, headers=headers, json=body)
+                assert response.status_code == 503, response.text
+                assert response.json()["code"] == "LOCK_TIMEOUT"
+                assert response.headers["Retry-After"] == "5"
+            assert await _state(admin, case) == before
             response = await client.request(method, url, headers=headers, json=body)
-            assert response.status_code == 503, response.text
-            assert response.json()["code"] == "LOCK_TIMEOUT"
-            assert response.headers["Retry-After"] == "5"
-        assert await _state(admin, case) == before
-        response = await client.request(method, url, headers=headers, json=body)
-        assert response.status_code == (201 if kind == "create" else 200), response.text
-        replay = await client.request(method, url, headers=headers, json=body)
-        assert replay.status_code == response.status_code
-        assert replay.json()["data"] == response.json()["data"]
+            assert response.status_code == 200, response.text
+            replay = await client.request(method, url, headers=headers, json=body)
+            assert replay.status_code == response.status_code
+            assert replay.json()["data"] == response.json()["data"]
+    finally:
+        await bounded.dispose()
 
 
 @pytest.mark.parametrize("sqlstate", ["23514", "40001", "XX000"])

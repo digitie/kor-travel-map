@@ -1,4 +1,8 @@
-"""426 direct public patch의 P-first 경계. 고유 정책OFF synthetic PG이며 운영/SDK 증거가 아니다."""
+"""426 direct public patch의 P-first 경계. 고유 synthetic PG이며 운영/SDK 증거가 아니다.
+
+435(ADR-117)부터 P는 배타 전용이다. blocker는 P EX holder이고, 434의 "SH caller 안의 patch는
+승격 거부" 사례는 SH 자체를 얻을 수 없으므로 지웠다.
+"""
 
 from __future__ import annotations
 
@@ -11,13 +15,13 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.application_schema_head import application_schema_head
-from tests.integration.test_provider_base_update_first import _base, _patch, _seed, _snapshot
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_engines as scalar_engines,
 )
+from tests.integration.test_provider_base_update_first import _base, _patch, _seed, _snapshot
 from tests.integration.test_tvn36_override_lineage_spine import _constraint_name
 
 pytestmark = pytest.mark.integration
@@ -30,15 +34,15 @@ _EXPECTED_BODY = (
 
 
 @pytest.fixture(autouse=True)
-async def _fresh_off_policy(scalar_engines):
-    # 현재 module만 고유 fresh DB를 사용하며 타 시험의 cutover를 되돌리지 않는다.
+async def _no_scalar_policy_world(scalar_engines):
+    # 435(ADR-117): 활성 정책 표와 epoch가 사라져 patch는 정책 OFF 경로 하나뿐이다.
     admin, _ = scalar_engines
     async with AsyncSession(admin) as observer:
         assert (
             await observer.scalar(
-                text("SELECT count(*) FROM feature.provider_field_active_policies")
+                text("SELECT to_regclass('feature.provider_field_active_policies')")
             )
-            == 0
+            is None
         )
 
 
@@ -172,7 +176,7 @@ async def test_direct_patch_waits_before_source_and_feature_then_succeeds(scalar
         await _caps(holder)
         holder_pid = await holder.scalar(text("SELECT pg_backend_pid()"))
         pids.add(holder_pid)
-        await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+        await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
         task = asyncio.create_task(writer())
         try:
             try:
@@ -220,7 +224,7 @@ async def test_timeout_restores_caller_guc_and_fresh_retry(scalar_engines, lock,
         await waiter.begin()
         try:
             await _caps(holder)
-            await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+            await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
             await _caps(waiter, lock)
             pids.update(
                 [
@@ -246,26 +250,6 @@ async def test_timeout_restores_caller_guc_and_fresh_retry(scalar_engines, lock,
         out = await _patch(fresh, seed, {"core.name": "retry426"}, expected=1)
         assert out["o_row_revision"] == 2
     assert await _lineage(admin, seed) == lineage
-    await _runtime_clean(admin, runtime, pids)
-
-
-async def test_bare_share_rejects_with_exact_protocol_message(scalar_engines):
-    admin, runtime = scalar_engines
-    seed = await _seed(admin)
-    before = await _snapshot(admin, seed)
-    pids = set()
-    async with AsyncSession(runtime) as session, session.begin():
-        await _caps(session)
-        pids.add(await session.scalar(text("SELECT pg_backend_pid()")))
-        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-        with pytest.raises(DBAPIError) as caught:
-            async with session.begin_nested():
-                await _patch(session, seed, {"core.name": "must reject"}, expected=1)
-        assert getattr(caught.value.orig, "sqlstate", None) == "23514"
-        assert "protocol share to exclusive upgrade requires replan" in str(caught.value.orig)
-        assert _constraint_name(caught.value) is None  # helper는 constraint를 지정하지 않는다.
-        assert await session.scalar(text("SHOW lock_timeout")) == "1s"
-    assert await _snapshot(admin, seed) == before
     await _runtime_clean(admin, runtime, pids)
 
 

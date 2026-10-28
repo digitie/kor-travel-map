@@ -2,7 +2,8 @@
 
 실제 PostgreSQL 위의 동작(대기·거부·drain)은 통합 검사가 본다 —
 ``tests/integration/test_tracking_protocol_prefix.py``(WI-1),
-``tests/integration/test_single_writer_regime_entry.py``(DC-1).
+``tests/integration/test_single_writer_takes_no_protocol.py``(DC-1; 435/ADR-117이 regime·epoch
+세계를 지운 뒤 남은 성질).
 """
 
 from __future__ import annotations
@@ -115,26 +116,48 @@ def _head_body(name: str) -> str:
     return str(bodies[0][1])
 
 
+_RETIREMENT_SPEC = importlib.util.spec_from_file_location(
+    "retire_sh_snapshot_path", ROOT / "alembic/versions/435_retire_sh_snapshot_path.py"
+)
+assert _RETIREMENT_SPEC is not None
+assert _RETIREMENT_SPEC.loader is not None
+RETIREMENT = importlib.util.module_from_spec(_RETIREMENT_SPEC)
+_RETIREMENT_SPEC.loader.exec_module(RETIREMENT)
+_DROPPED_BY_435 = frozenset(drop.name for drop in RETIREMENT._DROPS)
+
+
 @pytest.mark.parametrize("name", sorted(MIGRATION._ROUTINES))
 def test_head_is_exactly_revision_432_plus_the_reviewed_edits(name: str) -> None:
-    """head-schema의 434 본문에서 편집을 거꾸로 되돌리면 고정한 432 hash가 나와야 한다."""
-    routine = MIGRATION._ROUTINES[name]
+    """head 본문에서 435→434 편집을 거꾸로 되돌리면 고정한 432 hash가 나와야 한다.
+
+    head-schema는 435(ADR-117) 뒤의 dump다. 435가 지운 루틴은 head에 없어야 하고, 435가 사이드카로
+    통째로 바꾼 루틴은 head가 그 사이드카와 같아야 한다(434 본문은 435가 hash로 고정한다).
+    """
+    if name in _DROPPED_BY_435:
+        assert not re.search(rf"CREATE (?:FUNCTION|PROCEDURE) {re.escape(name)}\(", HEAD), name
+        return
     body = _head_body(name)
+    retired = RETIREMENT._ROUTINES.get(name)
+    if retired is not None:
+        if retired.replacement is not None:
+            assert body == retired.replacement, name
+            return
+        for old, new in reversed(retired.edits):
+            assert body.count(new) == 1, (name, new[:60])
+            body = body.replace(new, old, 1)
+        assert hashlib.sha256(body.encode()).hexdigest() == retired.body_sha256, name
+    routine = MIGRATION._ROUTINES[name]
     for old, new in reversed(routine.edits):
         assert body.count(new) == 1, (name, new[:60])
         body = body.replace(new, old, 1)
     assert hashlib.sha256(body.encode()).hexdigest() == routine.body_sha256, name
 
 
-def test_single_writer_entry_is_installed_with_its_drain_semantics() -> None:
-    body = " ".join(_head_body("ops.lock_single_feature_writer_protocol").split())
-    # epoch를 평범하게 읽는다(ACCESS SHARE) — 첫 활성화의 ACCESS EXCLUSIVE가 이 writer를 기다린다.
-    assert "FROM feature.provider_field_policy_epoch WHERE singleton;" in body
-    assert "FOR UPDATE" not in body
-    assert "FOR SHARE" not in body
-    # strict guard는 단독 SH를 거부하므로 regime의 단건 writer는 EX다.
-    assert body.count("ops.lock_scoped_feature_write_protocol(true)") == 1
-    assert "lock_scoped_feature_write_protocol(false)" not in body
+def test_single_writer_entry_was_retired_by_435() -> None:
+    """434의 regime 진입은 435(ADR-117)가 지웠다 — 정의도 호출자도 head에 없다."""
+    assert "ops.lock_single_feature_writer_protocol" in _DROPPED_BY_435
+    assert "lock_single_feature_writer_protocol" not in HEAD
+    assert "provider_field_policy_epoch" not in HEAD
 
 
 _SQL_CONDITION = re.compile(r"(p_[a-z_]+) IS NOT DISTINCT FROM '([^']*)'")

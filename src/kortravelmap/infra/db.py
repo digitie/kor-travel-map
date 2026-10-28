@@ -86,8 +86,6 @@ _SHARED_RUNTIME_FEATURE_PROCEDURES = frozenset(
         "feature.author_lifecycle_override(uuid,text,text,boolean,text,text,bigint)",
         "feature.reactivate_admin_feature_state(uuid,bigint,text,text,bigint,text,text)",
         "feature.record_provider_field_candidates(uuid,bigint,text,text,bigint,text,boolean,jsonb,jsonb)",
-        "feature.record_scoped_provider_field_candidates(uuid,uuid,bigint,text,text,bigint,text,boolean,jsonb,jsonb)",
-        "feature.recompute_provider_field_candidates(uuid,uuid,bigint)",
         "feature.revoke_feature_field_overrides(uuid,bigint,text,text,bigint,text[])",
         "feature.revoke_lifecycle_override(uuid,text,bigint)",
         "feature.transition_admin_feature_state(uuid,text,text,text,bigint,text,text,text)",
@@ -236,7 +234,6 @@ _ADMIN_CURATION_FEATURE_PROCEDURES = frozenset(
 _PROVIDER_CURATION_FEATURE_PROCEDURES = frozenset(
     {
         "feature.finalize_provider_curation_root(uuid)",
-        "ops.seal_provider_snapshot_member(uuid,text,text,bigint,uuid,text,text)",
         ("feature.seal_provider_curation_snapshot_receipt(uuid,bigint,text,text,bigint,text)"),
     }
 )
@@ -318,41 +315,9 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 _PROVIDER_FEATURE_ID_RESOLVER_FUNCTION,
                 _M05_DETECTOR_MANUAL_LIST_FUNCTION,
                 _PROVIDER_CURATION_SEAL_FUNCTION,
-                "feature.validate_exclusive_provider_snapshot(uuid,bigint,jsonb,text[])",
-                "feature.read_heritage_name_refresh_evidence(bigint,text[])",
-                "feature.read_transport_airport_snapshot_evidence(bigint)",
-                "feature.read_transport_rest_snapshot_evidence(bigint)",
                 "feature.upsert_provider_geocode_stamps_ex(uuid[],text[],text,text)",
-                "feature.lock_scoped_provider_geocode_stamps(uuid,uuid,text,text,jsonb)",
-                "feature.reobserve_scoped_provider_geocode_stamps(uuid,uuid,text,text,jsonb)",
-                "feature.lock_provider_field_policy_epoch()",
-                "feature.assert_scoped_provider_scalar_target(uuid,uuid,bigint,text,bigint)",
-                "feature._provider_field_projection_dependency_active(text,text)",
-                "ops.scoped_feature_write_membership_digest(uuid)",
                 "ops.lock_scoped_feature_write_protocol(boolean)",
-                "ops.lock_single_feature_writer_protocol()",
                 "ops.lock_provider_feature_tracking_protocol(boolean)",
-                "ops.register_provider_snapshot_artifact(uuid,uuid,uuid,bytea,bytea,text,integer)",
-                "ops.read_provider_snapshot_for_member(uuid,uuid,uuid)",
-                "ops.claim_provider_snapshot_executor(uuid,text,text,integer,bigint,uuid)",
-                "ops.bind_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text,text)",
-                "ops.begin_provider_snapshot_apply(uuid,bigint,uuid,uuid,uuid,text,text)",
-                "ops.finish_provider_snapshot_apply(uuid,bigint,uuid,bytea)",
-                "ops.provider_snapshot_scalar_counter_state(uuid,bigint,uuid,jsonb)",
-                "ops.capture_provider_snapshot_apply_input_set(uuid,bigint,uuid)",
-                "ops.reset_expired_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)",
-                "ops.reset_ready_provider_snapshot_plan(uuid,bigint,uuid,uuid,uuid,text)",
-                "ops.begin_provider_snapshot_postprocess(uuid,bigint,uuid,bytea)",
-                "ops.finish_provider_snapshot_postprocess(uuid,bigint,uuid,bytea)",
-                "ops.collect_expired_provider_snapshots(integer)",
-                "feature._assert_strict_sh_data_guard_inventory(boolean)",
-                "ops.claim_scoped_feature_write(uuid,uuid,bigint,text,jsonb,text,integer,integer,boolean)",
-                "ops.append_scoped_feature_write_manifest(uuid,uuid,jsonb)",
-                "ops.seal_scoped_feature_write_manifest(uuid,uuid)",
-                "ops.begin_scoped_feature_write(uuid,uuid,text)",
-                "ops.finish_scoped_feature_write(uuid,uuid,text)",
-                "ops.cancel_scoped_feature_write(uuid,uuid)",
-                "ops.expire_scoped_feature_write_attempt(uuid)",
             }
         )
     ),
@@ -362,24 +327,6 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
 _RUNTIME_DB_PRIVILEGE_SQL = text(
     """
     SELECT
-        EXISTS (
-            SELECT 1 FROM pg_class relation JOIN pg_namespace namespace
-                ON namespace.oid=relation.relnamespace
-            WHERE namespace.nspname='ops' AND relation.relname IN (
-                'provider_snapshot_artifacts','provider_snapshot_controls',
-                'provider_snapshot_quota_limits','provider_snapshot_quota_reservations')
-              AND (has_table_privilege(session_user,relation.oid,
-                    'SELECT,INSERT,UPDATE,DELETE,TRUNCATE,REFERENCES,TRIGGER')
-                   OR has_any_column_privilege(session_user,relation.oid,
-                    'SELECT,INSERT,UPDATE,REFERENCES'))
-        ) AS can_access_provider_snapshot_private_relations,
-        EXISTS (
-            SELECT 1 FROM pg_proc routine JOIN pg_namespace namespace
-              ON namespace.oid=routine.pronamespace
-            WHERE namespace.nspname='ops'
-              AND routine.proname='_lock_snapshot_postprocess_topic_revisions'
-              AND has_function_privilege(session_user,routine.oid,'EXECUTE')
-        ) AS can_execute_snapshot_private_topic_lock,
         (has_table_privilege(session_user,'feature.feature_geocode_stamps','INSERT')
          OR has_table_privilege(session_user,'feature.feature_geocode_stamps','UPDATE')
          OR has_table_privilege(session_user,'feature.feature_geocode_stamps','DELETE')
@@ -665,12 +612,6 @@ def _runtime_db_privilege_problems(
     # `SET FALSE`로 주므로 이 술어는 여전히 거짓이어야 하고, 여전히 갈린다.
     forbidden_true_fields = {
         "can_mutate_geocode_stamps_directly": "runtime login must not mutate geocode stamps directly",
-        "can_execute_snapshot_private_topic_lock": (
-            "runtime login must not execute the private snapshot topic lock"
-        ),
-        "can_access_provider_snapshot_private_relations": (
-            "runtime login must not access private provider snapshot relations directly"
-        ),
         "is_superuser": "runtime login must not be SUPERUSER",
         "can_create_role": "runtime login must not have CREATEROLE",
         "bypasses_rls": "runtime login must not have BYPASSRLS",
@@ -728,7 +669,6 @@ def _runtime_db_privilege_problems(
             problems.append(message)
 
     required_true_fields = {
-        "strict_data_guard_inventory_valid": "strict data guard inventory must match its canonical definition",
         "can_read_public_features": ("runtime login must SELECT feature.public_features"),
         "can_read_feature_override_field_paths": (
             "runtime login must SELECT ops.feature_override_field_paths"
@@ -845,11 +785,6 @@ def _runtime_db_privilege_problems(
     return problems
 
 
-_RUNTIME_STRICT_GUARD_INVENTORY_SQL = text(
-    "SELECT feature._assert_strict_sh_data_guard_inventory(CAST(:require_all AS boolean))"
-).bindparams(require_all=False)
-
-
 async def assert_runtime_db_privilege_boundary(
     engine: AsyncEngine,
     *,
@@ -865,15 +800,6 @@ async def assert_runtime_db_privilege_boundary(
         async with engine.connect() as connection:
             row = (await connection.execute(_RUNTIME_DB_PRIVILEGE_SQL)).mappings().one_or_none()
             receipt_row: Mapping[str, object] | None = cast(Mapping[str, object] | None, row)
-            if receipt_row is not None:
-                receipt = dict(receipt_row)
-                # head mismatch는 기존 checker가 거부한다. 아직 없는430 helper는 호출하지 않는다.
-                receipt["strict_data_guard_inventory_valid"] = False
-                if receipt.get("applied_alembic_heads") == [application_schema_head()]:
-                    receipt["strict_data_guard_inventory_valid"] = await connection.scalar(
-                        _RUNTIME_STRICT_GUARD_INVENTORY_SQL
-                    )
-                receipt_row = receipt
     except Exception as exc:  # noqa: BLE001 - catalog/preflight 실패는 원인과 함께 기동 차단
         raise RuntimeDbPrivilegeBoundaryError(
             "runtime DB privilege preflight could not read the ADR-090 catalog boundary"

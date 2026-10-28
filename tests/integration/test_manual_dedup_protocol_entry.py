@@ -1,4 +1,9 @@
-"""M05 실제 CALL과 실제 scoped begin의 잠금 역순·protocol-first 회귀."""
+"""M05 실제 CALL의 protocol-first 회귀: 적재(P EX) 뒤에서 행보다 P를 먼저 기다린다.
+
+434까지 이 모듈은 실제 scoped kernel begin(P SH + manifest 행)과 M05 CALL의 잠금 역순을 봤다.
+ADR-117(435)이 kernel과 공유 P를 지웠으므로, 남은 성질은 "M05는 P EX를 첫 문장에서 잡아, 적재가
+P EX와 같은 Feature 행을 쥔 동안 행을 하나도 잡지 않고 P에서 기다리다 적재 뒤에 끝난다"이다.
+"""
 
 from __future__ import annotations
 
@@ -8,25 +13,16 @@ from uuid import UUID
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra.feature_reference_reconciliation_repo import (
     resolve_manual_provider_dedup_case,
 )
 from kortravelmap.infra.manual_provider_dedup_repo import record_manual_provider_candidate
-from kortravelmap.infra.scoped_feature_writes import (
-    begin_scoped_feature_write,
-    finish_scoped_feature_write,
-    lock_scoped_feature_write_protocol,
-)
-from tests.integration.test_provider_field_scalar_projection import (
-    _plan,
-)
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_engines as scalar_engines,
 )
 from tests.integration.test_tvn_m05_manual_provider_dedup import (
@@ -38,10 +34,9 @@ from tests.integration.test_tvn_m05_manual_provider_dedup import (
 )
 
 pytestmark = pytest.mark.integration
-
-
-def _sqlstate(error: BaseException) -> str | None:
-    return getattr(getattr(error, "orig", None), "sqlstate", None)
+_WAITING_ON_PROTOCOL = """SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=:pid
+AND locktype='advisory' AND classid=1369104691::oid AND objid=115::oid AND objsubid=2
+AND mode='ExclusiveLock' AND NOT granted)"""
 
 
 async def _blockers(engine, waiting: int, blocker: int, task):
@@ -59,7 +54,7 @@ async def _blockers(engine, waiting: int, blocker: int, task):
             await asyncio.sleep(0.01)
 
 
-async def _contention(engines, *, fixed: bool, operation: str = "record") -> dict[str, Any]:
+async def _contention(engines, *, operation: str = "record") -> dict[str, Any]:
     admin, runtime = engines
     # 소유 testcontainer의 진단 주기만 낮춘다. 제품의 1s lock_timeout/ACL은 유지한다.
     async with admin.connect() as setup:
@@ -116,33 +111,21 @@ async def _contention(engines, *, fixed: bool, operation: str = "record") -> dic
             command_id=command,
         )
     feature = str(pair["provider_feature_id"])
-    async with admin.connect() as connection:
-        dataset = await connection.scalar(
-            text("""SELECT provider_dataset_id
-            FROM provider_sync.source_entities WHERE source_entity_key=:entity"""),
-            {"entity": pair["source_entity_key"]},
-        )
-    attempt, owner, digest = await _plan(runtime, feature, dataset)
-    traces = {}
-    async with (
-        AsyncSession(admin) as controller,
-        AsyncSession(runtime) as scoped,
-        AsyncSession(runtime) as manual,
-    ):
-        await controller.execute(text("SET LOCAL statement_timeout='8s'"))
-        controller_pid = int(await controller.scalar(text("SELECT pg_backend_pid()")))
-        await controller.execute(
+    traces: dict[str, Any] = {}
+    async with AsyncSession(admin) as load, AsyncSession(runtime) as manual:
+        await load.begin()
+        await load.execute(text("SET LOCAL statement_timeout='8s'"))
+        load_pid = int(await load.scalar(text("SELECT pg_backend_pid()")))
+        # 적재 모양: P EX → 대상 Feature 행.
+        await load.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        await load.execute(
             text("SELECT 1 FROM feature.features WHERE feature_id=:id FOR UPDATE"),
             {"id": UUID(feature)},
         )
-        await scoped.begin()
-        await lock_scoped_feature_write_protocol(scoped, exclusive=False)
-        scoped_pid = int(await scoped.scalar(text("SELECT pg_backend_pid()")))
         await manual.begin()
         await manual.execute(text("SET LOCAL statement_timeout='8s'"))
         await manual.execute(text("SET LOCAL lock_timeout='5s'"))
         manual_pid = int(await manual.scalar(text("SELECT pg_backend_pid()")))
-        assert len({controller_pid, scoped_pid, manual_pid}) == 3
         assert tuple((await manual.execute(text("SELECT session_user,current_user"))).one()) == (
             "ktm_feature_service",
             "ktm_feature_service",
@@ -166,63 +149,45 @@ async def _contention(engines, *, fixed: bool, operation: str = "record") -> dic
             finally:
                 await manual.rollback()
 
-        async def call_scoped():
-            try:
-                receipt = await begin_scoped_feature_write(
-                    scoped, attempt_id=attempt, owner=owner, manifest_digest=digest
-                )
-                assert receipt["status"] == "applying"
-                result = await finish_scoped_feature_write(
-                    scoped, attempt_id=attempt, owner=owner, result_digest="e" * 64
-                )
-                await scoped.commit()
-                return result
-            finally:
-                await scoped.rollback()
-
         manual_task = asyncio.create_task(call_manual())
-        scoped_task = None
         try:
-            traces["manual_waits_before_begin"] = await _blockers(
-                admin, manual_pid, scoped_pid if fixed else controller_pid, manual_task
+            traces["manual_waits_on_load"] = await _blockers(
+                admin, manual_pid, load_pid, manual_task
             )
-            scoped_task = asyncio.create_task(call_scoped())
-            traces["scoped_waits_at_feature_queue"] = await _blockers(
-                admin, scoped_pid, controller_pid if fixed else manual_pid, scoped_task
-            )
-            # 이 시점에 kernel 전체 begin은 실제 source/head를 먼저 잠갔다.
-            # 컨트롤러는 행 잠금 해제 순서만 고정하며 A/B 제품 함수를 바꾸지 않는다.
-            await controller.rollback()
-            outcomes = await asyncio.wait_for(
-                asyncio.gather(scoped_task, manual_task, return_exceptions=True), timeout=7
-            )
-            states = [
-                _sqlstate(outcome) for outcome in outcomes if isinstance(outcome, BaseException)
-            ]
-            traces["error_sqlstates"] = states
-            if fixed:
-                assert states == [], outcomes
-                assert outcomes[0]["status"] == "completed"
-                assert outcomes[1][1] == ("created" if operation == "record" else "kept")
-            else:
-                assert "40P01" in states, outcomes
+            async with admin.connect() as observer:
+                # 행이 아니라 P에서 기다린다.
+                assert await observer.scalar(text(_WAITING_ON_PROTOCOL), {"pid": manual_pid})
+            # P 앞에서 manual Feature 행을 선점하지 않았다(행 잠금은 pg_locks에 보이지 않으므로
+            # 실제 NOWAIT 잠금으로 확인한다).
+            async with AsyncSession(admin) as observer, observer.begin():
+                assert (
+                    await observer.scalar(
+                        text(
+                            "SELECT 1 FROM feature.features WHERE feature_id=:id "
+                            "FOR UPDATE NOWAIT"
+                        ),
+                        {"id": pair["manual_uuid"]},
+                    )
+                    == 1
+                )
+            await load.commit()
+            outcome = await asyncio.wait_for(asyncio.shield(manual_task), 7)
+            assert outcome[1] == ("created" if operation == "record" else "kept")
             return traces
         finally:
-            await controller.rollback()
-            for task in (manual_task, scoped_task):
-                if task is not None and not task.done():
-                    task.cancel()
-            await asyncio.gather(
-                *(t for t in (manual_task, scoped_task) if t), return_exceptions=True
-            )
-            await scoped.rollback()
+            await load.rollback()
+            if not manual_task.done():
+                manual_task.cancel()
+            await asyncio.gather(manual_task, return_exceptions=True)
             await manual.rollback()
 
 
 @pytest.mark.parametrize("operation", ["record", "resolve"])
-async def test_actual_m05_call_and_scoped_begin_do_not_invert_locks(scalar_engines, operation):
-    result = await _contention(scalar_engines, fixed=True, operation=operation)
-    assert result["error_sqlstates"] == []
+async def test_actual_m05_call_waits_on_protocol_before_rows_behind_a_load(
+    scalar_engines, operation
+):
+    result = await _contention(scalar_engines, operation=operation)
+    assert result["manual_waits_on_load"]
 
 
 _NAMES = (
@@ -256,25 +221,3 @@ async def test_m05_owner_acl_and_first_protocol_entry(scalar_engines, name):
     assert row[1] == "ktm_manual_provider_dedup_procedure_owner"
     assert row[2] is (name != "resolve_manual_provider_dedup_case")
     assert row[3] is False
-
-
-@pytest.mark.parametrize("name", _NAMES)
-async def test_m05_shared_to_legacy_call_fails_before_validation(scalar_engines, name):
-    admin, _ = scalar_engines
-    async with AsyncSession(admin) as session:
-        types = await session.scalar(
-            text("""SELECT ARRAY(SELECT format_type(oid,NULL)
-            FROM unnest(proallargtypes) WITH ORDINALITY a(oid,position) ORDER BY position)
-            FROM pg_proc p JOIN pg_namespace n ON n.oid=p.pronamespace
-            WHERE n.nspname='feature' AND p.proname=:name"""),
-            {"name": name},
-        )
-        await session.execute(text("SET LOCAL ROLE ktm_manual_provider_dedup_procedure_owner"))
-        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-        try:
-            with pytest.raises(DBAPIError, match="protocol share to exclusive upgrade"):
-                await session.execute(
-                    text("CALL feature." + name + "(" + ",".join("NULL::" + t for t in types) + ")")
-                )
-        finally:
-            await session.rollback()

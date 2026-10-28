@@ -1,3 +1,15 @@
+## 2026-10-28 — ADR-117: SH 스냅샷·스칼라 정책 경로 퇴역(alembic 435)
+
+소유자 승인(DC-2). prod 읽기 전용 측정에서 SH 경로는 한 번도 돌지 않았다(flag OFF, 정책 0, attempt·artifact 0,
+schedule run 0, 427 index 100 MB `idx_scan`=0 — ADR-117 §1).
+
+- **435**: 434 head 보존 루틴 15개를 hash 고정으로 다시 쓰고 SH 전용 루틴 74·표 10·index 3을 CASCADE 없이 지운다.
+  사전 조건(정책·attempt·스냅샷·lease·활성화 trigger) 하나라도 있으면 아무것도 지우지 않는다. head는 pg_dump 18.
+- **P는 배타 전용**으로 남긴다(ADR-111 완전 복귀는 재증명이 필요해 기각). 단건 writer 10개는 P를 잡지 않아 seal이
+  관리자 동시 편집에 23514로 닫히고 적재가 재시도된다 — §2.2 잔여(#1426의 교환).
+- Python·Dagster 스냅샷·scoped·opt-in·reader·harness와 env 3종(무시)을 지웠다. T-CWRITE-01~09는 대체로 이관했다.
+- head-schema 재생성 중 identity 문자열의 search_path 의존과 trigger 함수 drop 순서 결함을 잡아 고쳤다.
+
 ## 2026-10-28 — T-PG18-CI: prod coord_5179 PROJ 7→9 drift 검사 clean
 
 공용 PG 16→18(pg_upgrade)로 PROJ 7.2.1 → 9.8.1이 된 뒤 runbook `coord-5179-proj-pin.md` §3을 n150 prod Map DB에서

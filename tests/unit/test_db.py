@@ -187,9 +187,6 @@ def _runtime_privilege_row(
             _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS[login]
         ),
         "can_mutate_geocode_stamps_directly": False,
-        "can_access_provider_snapshot_private_relations": False,
-        "can_execute_snapshot_private_topic_lock": False,
-        "strict_data_guard_inventory_valid": True,
         "can_insert_feature_directly": False,
         "can_update_lifecycle_directly": False,
         "can_update_publication_directly": False,
@@ -472,8 +469,10 @@ def test_stamp_direct_write_preflight_is_fail_closed(value):
 
 
 @pytest.mark.unit
-def test_airport_reader_exact_sd_is_required_and_overload_is_rejected() -> None:
-    signature = "feature.read_transport_airport_snapshot_evidence(bigint)"
+def test_exact_sd_is_required_and_overload_is_rejected() -> None:
+    # ADR-117이 지운 airport reader 대신 남은 SD writer로 같은 성질(정확한 서명 필수,
+    # 같은 이름의 overload 거부)을 본다.
+    signature = "feature.upsert_provider_geocode_stamps_ex(uuid[],text[],text,text)"
     row = _runtime_privilege_row()
     row["executable_application_security_definer_functions"] = sorted(
         set(row["executable_application_security_definer_functions"]) | {signature}
@@ -489,10 +488,10 @@ def test_airport_reader_exact_sd_is_required_and_overload_is_rejected() -> None:
         for problem in _runtime_db_privilege_problems(row, expected_login="ktm_feature_service")
     )
     row["executable_application_security_definer_functions"].extend(
-        [signature, "feature.read_transport_airport_snapshot_evidence(text)"]
+        [signature, "feature.upsert_provider_geocode_stamps_ex(uuid[],text[],text)"]
     )
     assert any(
         "unexpected application SECURITY DEFINER functions" in problem
-        and "feature.read_transport_airport_snapshot_evidence(text)" in problem
+        and "feature.upsert_provider_geocode_stamps_ex(uuid[],text[],text)" in problem
         for problem in _runtime_db_privilege_problems(row, expected_login="ktm_feature_service")
     )

@@ -325,14 +325,6 @@ class KorTravelMapSettings(BaseSettings):
             "``KOR_TRAVEL_MAP_PROVIDER_UPSTREAM_RETRY_BUDGET_MINIMUM``."
         ),
     )
-    krheritage_exclusive_snapshot_enabled: bool = Field(
-        default=False,
-        description=(
-            "Dagster 국가유산 전체 스냅샷의 명시 EX 경로 연결. 기본 OFF는 기존 경로다. "
-            "정책 활성화나 SH 병렬 실행을 대신하지 않으며 지원 범위·입력 상한 검증은 유지한다. "
-            "env KOR_TRAVEL_MAP_KRHERITAGE_EXCLUSIVE_SNAPSHOT_ENABLED."
-        ),
-    )
     provider_field_shadow_scopes: frozenset[tuple[str, str]] = Field(
         default_factory=frozenset,
         max_length=128,

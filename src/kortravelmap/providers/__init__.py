@@ -14,12 +14,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``khoa`` | python-khoa-api | 해수욕장 place |
 | ``knps`` | python-knps-api | 국립공원 file dataset |
 | ``kor_travel_concierge`` | kor-travel-concierge | YouTube 장소 후보 |
-| ``kor_travel_rest_apply`` | kor-travel-transport | 저장 휴게소의 fenced SH 적용·원 결과 저장 |
-| ``kor_travel_rest_evidence`` | kor-travel-transport | 휴게소 DB 증거·최종 입력 비교 |
 | ``kor_travel_transport`` | kor-travel-transport | transport export 계약·파서(ADR-106) |
-| ``kor_travel_transport_apply`` | kor-travel-transport | 원 snapshot의 fenced SH 적용 |
-| ``kor_travel_transport_evidence`` | kor-travel-transport | 공항 DB 증거 비교 |
-| ``kor_travel_transport_native`` | kor-travel-transport | 저장 projection 복원·순수 적격성 진단 |
 | ``kor_travel_transport_state`` | kor-travel-transport | export → Valkey 상태 값(ADR-114) |
 | ``kor_travel_weather`` | kor-travel-weather | Map용 export(W1~W5) 계약·파서(ADR-114 2단계) |
 | ``kor_travel_weather_state`` | kor-travel-weather | export → Valkey 상태 값(ADR-114 2단계) |
@@ -28,7 +23,6 @@ gateway 신규 생성 금지 (ADR-006).
 | ``krforest`` | python-krforest-api | 휴양림·수목원·등산로·둘레길 |
 | ``krforest_safety`` | python-krforest-api | 산사태 예보 notice |
 | ``krheritage`` | python-krheritage-api | 국가유산 place/area/event |
-| ``krheritage_native`` | python-krheritage-api | 저장 typed projection 복원·이름 적격성 진단 |
 | ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
 | ``opinet`` | kor-travel-transport | 주유소·유가 |

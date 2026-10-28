@@ -113,7 +113,6 @@ from kortravelmap.infra.lock_wait import execute_with_lock_wait, pop_armed_lock_
 from kortravelmap.infra.provider_field_candidates import (
     capture_provider_field_candidates,
     provider_field_shadow_enabled,
-    recompute_provider_field_candidates,
 )
 
 if TYPE_CHECKING:
@@ -185,12 +184,7 @@ FROM protocol_gate
 """
 
 
-_FEATURE_WRITE_PROTOCOL_SQL: Final[str] = (
-    "SELECT ops.lock_scoped_feature_write_protocol(CAST(:exclusive AS boolean))"
-)
-_SINGLE_FEATURE_WRITER_PROTOCOL_SQL: Final[str] = (
-    "SELECT ops.lock_single_feature_writer_protocol()"
-)
+_FEATURE_WRITE_PROTOCOL_SQL: Final[str] = "SELECT ops.lock_scoped_feature_write_protocol(true)"
 
 
 def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None:
@@ -305,41 +299,25 @@ def _protocol_ex_held(session: AsyncSession) -> bool:
     )
 
 
-async def lock_feature_write_protocol(
-    session: AsyncSession, *, exclusive: bool, wait_ms: int | None = None
-) -> None:
+async def lock_feature_write_protocol(session: AsyncSession, *, wait_ms: int | None = None) -> None:
     """공통 protocol gate(P)의 **단일** Python 진입이다(434 WI-2).
 
-    배타·공유를 받고, 이 transaction이 P EX를 이미 쥐었으면(fence 포함) SQL 없이 돌아간다.
-    ``wait_ms``를 주면 그 한 문장만 상한을 늘린다(:func:`execute_with_lock_wait`). 공유를 쥔
-    transaction의 배타 요청은 DB가 23514로 거부한다 — rollback 뒤 배타로 재계획해야 한다.
+    P는 배타 전용이다(ADR-117 — 공유 모드는 DB가 23514로 거부한다). 이 transaction이 P를 이미
+    쥐었으면(fence 포함) SQL 없이 돌아간다. ``wait_ms``를 주면 그 한 문장만 상한을 늘린다
+    (:func:`execute_with_lock_wait`). 434가 나열한 단건 writer 10개는 P를 잡지 않는다 — 행 잠금과
+    ADR-111 gate만 쓴다(ADR-117 §2.2).
     """
     if _protocol_ex_held(session):
         return
-    params = {"exclusive": exclusive}
     if wait_ms is not None and wait_ms > 0:
         await execute_with_lock_wait(
-            session, _FEATURE_WRITE_PROTOCOL_SQL, wait_ms, label="protocol gate", params=params
+            session, _FEATURE_WRITE_PROTOCOL_SQL, wait_ms, label="protocol gate"
         )
     else:
-        await session.execute(text(_FEATURE_WRITE_PROTOCOL_SQL), params)
-    if exclusive:
-        await _remember_transaction_lock(
-            session, _FEATURE_WRITE_PROTOCOL_EX_INFO_KEY, _FEATURE_WRITE_PROTOCOL_EX_STAMP_KEY
-        )
-
-
-async def lock_single_feature_writer_protocol(session: AsyncSession) -> None:
-    """단건·관리 writer의 첫 잠금이다(434 DC-1, ADR-115 §5.2(3) 개정).
-
-    scalar policy regime(epoch>0)에서만 P EX를 잡는다. regime 전(epoch=0)에는 P 없이 기존
-    행 잠금 순서(source → link → Feature)와 기존 advisory만 쓴다 — 적재가 P EX를 쥔 동안에도
-    다른 Feature를 쓰는 관리 명령은 기다리지 않는다. **첫 행 잠금보다 먼저** 불러야 한다.
-    이미 P EX(또는 fence)를 쥔 transaction은 SQL 없이 지나간다.
-    """
-    if _protocol_ex_held(session):
-        return
-    await session.execute(text(_SINGLE_FEATURE_WRITER_PROTOCOL_SQL), {})
+        await session.execute(text(_FEATURE_WRITE_PROTOCOL_SQL))
+    await _remember_transaction_lock(
+        session, _FEATURE_WRITE_PROTOCOL_EX_INFO_KEY, _FEATURE_WRITE_PROTOCOL_EX_STAMP_KEY
+    )
 
 
 async def lock_feature_curation_write(session: AsyncSession) -> None:
@@ -350,11 +328,9 @@ async def lock_feature_curation_write(session: AsyncSession) -> None:
     이미 쥔 xact lock은 실제 session·DB transaction의 수명이 유지되는 동안 SQL 없이 재사용한다.
     savepoint 안에서 획득한 잠금은 캐시하지 않는다. 외부 connection transaction 종료나
     새 transaction에서도 다시 잡는다.
-    신규 protocol 배타 gate를 먼저 잡고 기존 전역 fence를 잡는다. MATERIALIZED CTE가
-    두 잠금의 평가 순서를 강제하며 SQL 왕복은 한 번이다. 이미 공유 protocol gate를 든
-    caller는 승격하지 않고 DB가 거부하므로 rollback 뒤 배타 경로로 재계획해야 한다.
-    기존 전역 충돌 범위와 Feature 병합 의미는 유지한다. 이 배선만으로 SQL/trigger의
-    전수 전환이나 동시 쓰기 활성화가 완료되지는 않는다(ADR-115).
+    protocol 배타 gate(P)를 먼저 잡고 기존 전역 fence를 잡는다. MATERIALIZED CTE가
+    두 잠금의 평가 순서를 강제하며 SQL 왕복은 한 번이다. P는 배타 전용이다(ADR-117).
+    기존 전역 충돌 범위와 Feature 병합 의미는 유지한다.
     """
 
     wait_ms = pop_armed_lock_wait(session)
@@ -2509,7 +2485,6 @@ async def _apply_provider_feature_field_patch(
     provider_dataset_id: int,
     source_membership: _ProviderSourceMembership,
     expected_row_revision: int,
-    excluded_fields: frozenset[str] = frozenset(),
 ) -> int:
     """Existing provider Feature를 field-level base/effective procedure로 갱신한다."""
 
@@ -2520,9 +2495,6 @@ async def _apply_provider_feature_field_patch(
     values, geometry_wkt = _provider_field_patch_payload(
         feature, feature_uuid=feature_uuid, parent_feature_id=parent_feature_id
     )
-    if excluded_fields:
-        values = json.dumps({k: v for k, v in json.loads(values).items()
-                             if k not in excluded_fields}, ensure_ascii=False)
     return await _apply_provider_field_values(
         session,
         # T-VN-39: 프로시저는 `CAST(:feature_id AS uuid)`로 받는다. `feature.feature_id`는
@@ -2688,8 +2660,6 @@ async def upsert_feature(
     *,
     provider_dataset_id: int,
     source_membership: _ProviderSourceMembership,
-    _excluded_fields: frozenset[str] = frozenset(),
-    _existing_feature_id: str | None = None,
 ) -> bool:
     """provider Feature를 procedure와 typed subtype으로 적재한다.
 
@@ -2718,20 +2688,6 @@ async def upsert_feature(
     if provider_dataset_id <= 0:
         raise ValueError("provider_dataset_id는 양의 정수여야 합니다.")
 
-    if _excluded_fields:
-        if _existing_feature_id is None:
-            raise ValueError("explicit existing full-refresh identity required")
-        state = await _feature_load_state(session, _existing_feature_id)
-        if not state.exists or state.row_revision is None:
-            raise ValueError("active full-refresh target disappeared")
-        # create wrapper의 INSERT BEFORE trigger/identity 경로를 통과시키지 않는다.
-        # 기존 canonical identity는 entry의 plan/DB manifest에서 이미 재검증했다.
-        await _apply_provider_feature_field_patch(
-            session, feature, feature_uuid=_existing_feature_id,
-            provider_dataset_id=provider_dataset_id, source_membership=source_membership,
-            expected_row_revision=state.row_revision, excluded_fields=_excluded_fields,
-        )
-        return False
     params = _feature_params(feature)
     geom_wkt = cast("str | None", params.pop("geom_wkt"))
     # T-VN-39: core 생성 프로시저는 payload의 `parent_feature_id`를
@@ -2947,8 +2903,7 @@ async def _source_record_is_current_head(
     """이 record가 entity의 저장된 head인지 본다. 순서가 뒤바뀐 artifact를 가린다.
 
     ``became_current``가 참이면 같은 문장이 head를 이 key로 옮겼다. 거짓은 동일 재관측과
-    오래된 artifact 둘 다이므로 저장된 head로 구분한다
-    (``scoped_provider_refresh._apply_provider_scalar``와 같은 판정이다).
+    오래된 artifact 둘 다이므로 저장된 head로 구분한다.
     """
     if record_state.became_current:
         return True
@@ -3335,21 +3290,12 @@ class _GeoChunk:
         return feature_id in self.stale, self.stored[feature_id]
 
 
-@dataclass(frozen=True)
-class _ExclusiveProviderRefresh:
-    """Python routing만 전달한다. 쓰기 허용 증거는 DB applying EX manifest다."""
-
-    attempt_id: uuid.UUID
-    policies: Mapping[str, tuple[int, frozenset[str]]]
-
-
 async def load_bundle(
     session: AsyncSession,
     bundle: FeatureBundle,
     *,
     geo: GeoLoadContext | None = None,
     _chunk: _GeoChunk | None = None,
-    _exclusive_refresh: _ExclusiveProviderRefresh | None = None,
 ) -> FeatureLoadResult:
     """``FeatureBundle`` 하나를 적재 (source_record → feature → source_link 순).
 
@@ -3398,20 +3344,11 @@ async def load_bundle(
         else await _feature_load_state(session, resolved_feature_id)
     )
     feature_missing = not feature_state.exists
-    active_policy = (
-        _exclusive_refresh.policies.get(str(resolved_feature_id))
-        if _exclusive_refresh is not None else None
-    )
-    excluded_fields = active_policy[1] if active_policy is not None else frozenset()
-    active_write_options: dict[str, Any] = (
-        {"_excluded_fields": excluded_fields, "_existing_feature_id": resolved_feature_id}
-        if active_policy is not None else {}
-    )
     link_inserted = False
     # Existing Feature refresh must prove the same primary link inside the
     # provider field-patch procedure. New Feature has no FK target until the
     # create procedure returns, so it creates this link immediately afterward.
-    if not feature_missing and active_policy is None:
+    if not feature_missing:
         assert resolved_feature_id is not None  # exists=True면 claim이 풀렸다.
         link_inserted = await upsert_source_link(
             session, bundle.source_link, feature_id=resolved_feature_id
@@ -3485,7 +3422,6 @@ async def load_bundle(
             session,
             feature_to_write,
             provider_dataset_id=record_state.provider_dataset_id,
-            **active_write_options,
             source_membership=_ProviderSourceMembership(
                 source_entity_key=record_state.source_entity_key,
                 source_record_key=record_state.source_record_key,
@@ -3505,7 +3441,6 @@ async def load_bundle(
                 if kept_fields
                 else bundle.feature,
                 provider_dataset_id=record_state.provider_dataset_id,
-                **active_write_options,
                 source_membership=_ProviderSourceMembership(
                     source_entity_key=record_state.source_entity_key,
                     source_record_key=record_state.source_record_key,
@@ -3597,31 +3532,7 @@ async def load_bundle(
             stamped = await upsert_stamps(
                 session, current=geo.current_dataset, outcomes={lifecycle_feature_id: outcome}
             )
-    if active_policy is not None:
-        assert _exclusive_refresh is not None
-        presence = bundle.provider_field_presence
-        if presence is None:
-            raise ValueError("active full refresh requires explicit field presence")
-        values, geometry = _provider_field_patch_payload(
-            bundle.feature, feature_uuid=lifecycle_feature_id, parent_feature_id=None
-        )
-        await capture_provider_field_candidates(
-            session, feature_id=lifecycle_feature_id,
-            dataset_id=record_state.provider_dataset_id,
-            entity_key=record_state.source_entity_key,
-            record_key=record_state.source_record_key,
-            values=json.dumps({k: v for k, v in json.loads(values).items()
-                               if k in excluded_fields}, ensure_ascii=False),
-            geometry_wkt="{}",
-            presence=presence.model_copy(update={
-                "supplied_fields": presence.supplied_fields & excluded_fields}),
-            attempt_id=str(_exclusive_refresh.attempt_id), policy_revision=active_policy[0],
-        )
-        await recompute_provider_field_candidates(
-            session, attempt_id=str(_exclusive_refresh.attempt_id),
-            feature_id=lifecycle_feature_id, policy_revision=active_policy[0],
-        )
-    elif provider_field_shadow_enabled(
+    if provider_field_shadow_enabled(
         session,
         provider=bundle.source_record.provider,
         dataset_key=bundle.source_record.dataset_key,
@@ -3736,7 +3647,6 @@ async def load_bundles(
     bundles: Iterable[FeatureBundle],
     *,
     geo: GeoLoadContext | None = None,
-    _exclusive_refresh: _ExclusiveProviderRefresh | None = None,
 ) -> FeatureLoadResult:
     """``FeatureBundle`` 다수를 같은 session(transaction)에서 순차 적재.
 
@@ -3754,11 +3664,7 @@ async def load_bundles(
         chunk = await _prefetch_geo_chunk(session, materialized, geo)
     total = FeatureLoadResult()
     for bundle in materialized:
-        if _exclusive_refresh is None:
-            loaded = await load_bundle(session, bundle, geo=geo, _chunk=chunk)
-        else:
-            loaded = await load_bundle(session, bundle, geo=geo, _chunk=chunk,
-                                       _exclusive_refresh=_exclusive_refresh)
+        loaded = await load_bundle(session, bundle, geo=geo, _chunk=chunk)
         total = total.merge(loaded)
     if geo is not None and chunk is not None and chunk.stamps:
         token = geo.effective_token()

@@ -1,10 +1,23 @@
 """430 tracking source의 owner/분류/순서 경계. 실제 트리거·paired PG 수용은 별도다."""
 
+import re
 from pathlib import Path
 
 import pytest
 
-from tests.unit.test_curation_activation_parent_order import _definition
+
+def _definition(sql: str, name: str) -> str:
+    match = re.search(
+        r"CREATE(?: OR REPLACE)? (?:FUNCTION|PROCEDURE) " + re.escape(name) + r"\(", sql
+    )
+    assert match is not None
+    start = match.start()
+    delimiter = re.search(r"\bAS (\$[A-Za-z0-9_]*\$)", sql[start:])
+    assert delimiter is not None
+    tag = delimiter.group(1)
+    body_start = start + delimiter.end()
+    return sql[start : sql.index(tag + ";", body_start) + len(tag) + 1]
+
 
 ROOT = Path(__file__).resolve().parents[2]
 SQL = ROOT / "alembic/versions/_430_tracking_prefix_guards.sql"

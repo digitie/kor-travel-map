@@ -7,10 +7,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_engines as scalar_engines,
 )
 from tests.integration.test_state_lifecycle_protocol_entry import (
@@ -28,7 +28,8 @@ _CALLS = {
 
 
 @pytest.mark.parametrize("kind", tuple(_CALLS))
-@pytest.mark.parametrize("mode", ["none", "shared", "protocol_only", "lineage_only", "other_pid"])
+# 434의 ``shared``(P SH) 변형은 435(ADR-117)에서 P(false) 자체가 23514라 지웠다.
+@pytest.mark.parametrize("mode", ["none", "protocol_only", "lineage_only", "other_pid"])
 async def test_rc_catalog_rejects_missing_exact_current_backend_prefix(scalar_engines, kind, mode):
     admin, _ = scalar_engines
     async with AsyncSession(admin) as holder, holder.begin():
@@ -43,11 +44,7 @@ async def test_rc_catalog_rejects_missing_exact_current_backend_prefix(scalar_en
                 assert await session.scalar(
                     text("SELECT current_setting('transaction_isolation')")
                 ) == ("read committed")
-                if mode == "shared":
-                    await session.execute(
-                        text("SELECT ops.lock_scoped_feature_write_protocol(false)")
-                    )
-                elif mode == "protocol_only":
+                if mode == "protocol_only":
                     await session.execute(
                         text("SELECT ops.lock_scoped_feature_write_protocol(true)")
                     )

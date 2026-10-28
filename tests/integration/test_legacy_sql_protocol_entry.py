@@ -15,10 +15,10 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import scalar_engines as scalar_engines
+from tests.integration._owned_pg import scalar_engines as scalar_engines
 
 pytestmark = pytest.mark.integration
 _OWNERS = {
@@ -37,7 +37,9 @@ _VALIDATION = {name: "23514" for name in _OWNERS} | {
     "finalize_provider_curation_root": "P0002",
 }
 _PROTOCOL = "PERFORM ops.lock_scoped_feature_write_protocol(true);"
-_UPGRADE_ERROR = "protocol share to exclusive upgrade requires replan"
+#: 435(ADR-117): 공유 모드는 퇴역했다. 434까지의 "protocol share to exclusive upgrade requires
+#: replan"(SH caller 안의 CALL)은 SH 자체를 얻을 수 없으므로 더 나지 않는다.
+_RETIRED_SHARED = "shared protocol mode was retired (ADR-117)"
 _TRY_GLOBAL = text("SELECT pg_try_advisory_xact_lock(hashtextextended('feature-curation-write',0))")
 
 
@@ -142,21 +144,17 @@ async def test_actual_entry_owner_acl_and_first_begin(scalar_engines: Any, name:
     assert routine.profile_execute
 
 
-@pytest.mark.parametrize("name", sorted(_OWNERS))
-async def test_shared_to_direct_call_is_rejected_before_validation(
+async def test_shared_protocol_caller_is_rejected_before_any_direct_call(
     scalar_engines: Any,
-    name: str,
 ) -> None:
+    """SH caller는 직접 CALL에 닿기 전에 P 자체에서 23514로 끝나고 아무것도 쥐지 않는다."""
     admin, _ = scalar_engines
-    routine = await _routine(admin, name)
     async with AsyncSession(admin) as session:
-        await _prepare_call(session, routine)
-        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
         try:
             with pytest.raises(DBAPIError) as failed:
-                await session.execute(text(routine.call))
+                await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
             assert failed.value.orig.sqlstate == "23514"
-            assert _UPGRADE_ERROR in str(failed.value.orig)
+            assert _RETIRED_SHARED in str(failed.value.orig)
         finally:
             await session.rollback()
     await _released(admin)
@@ -169,9 +167,10 @@ async def test_direct_call_waits_on_protocol_without_taking_old_global(
 ) -> None:
     admin, runtime = scalar_engines
     routine = await _routine(admin, name)
+    # blocker는 적재 모양의 P EX다(434까지는 P SH였다 — ADR-117이 공유 모드를 지웠다).
     async with AsyncSession(runtime) as scoped, AsyncSession(admin) as legacy:
         scoped_pid = int(await scoped.scalar(text("SELECT pg_backend_pid()")))
-        await scoped.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+        await scoped.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
         legacy_pid = await _prepare_call(legacy, routine)
         call = asyncio.create_task(legacy.execute(text(routine.call)))
         try:
@@ -193,7 +192,7 @@ async def test_direct_call_waits_on_protocol_without_taking_old_global(
             with pytest.raises(DBAPIError) as failed:
                 await asyncio.wait_for(call, timeout=3)
             assert failed.value.orig.sqlstate == _VALIDATION[name]
-            assert _UPGRADE_ERROR not in str(failed.value.orig)
+            assert _RETIRED_SHARED not in str(failed.value.orig)
         finally:
             await scoped.rollback()
             if not call.done():

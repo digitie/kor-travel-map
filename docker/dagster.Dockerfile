@@ -80,8 +80,6 @@ RUN apt-get update \
     && chown appuser:appuser /opt/dagster/state /opt/dagster/state/mois
 
 COPY --from=builder /install /usr/local
-# 원본 복구 pin은 실제 설치본으로 만들며 runtime opt-in 시 다시 검증한다.
-RUN python -c 'from kortravelmap.dagster.airport_snapshot_runtime import write_airport_runtime_receipt; write_airport_runtime_receipt()'
 # Map application Alembic graph와 baseline sidecar는 API image만 소유한다. Dagster
 # 런타임은 application 스키마를 만들지 않고, "이 DB가 application DB인가"는 설치된
 # package의 migration graph JSON에서 읽는다(`dagster-storage-migrate.py`).

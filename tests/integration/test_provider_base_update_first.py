@@ -19,10 +19,10 @@ from kortravelmap.core.ids import make_payload_hash, make_source_record_key
 from kortravelmap.dto import SourceRecord
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.admin_feature_repo import author_admin_feature_field_overrides
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_container as scalar_container,
 )
-from tests.integration.test_provider_field_scalar_projection import (
+from tests.integration._owned_pg import (
     scalar_engines as scalar_engines,
 )
 from tests.integration.test_tvn36_override_lineage_spine import (

@@ -23,7 +23,6 @@ from typing import TYPE_CHECKING, Final
 
 from sqlalchemy import bindparam, text
 from sqlalchemy.dialects.postgresql import ARRAY
-from sqlalchemy.sql.elements import TextClause
 from sqlalchemy.types import Text
 
 if TYPE_CHECKING:
@@ -48,8 +47,6 @@ __all__ = [
     "select_stale_feature_ids",
     "stale_among",
     "upsert_stamps",
-    "lock_scoped_provider_geocode_stamps",
-    "reobserve_scoped_provider_geocode_stamps",
 ]
 
 
@@ -431,82 +428,3 @@ async def coverage(
         unstamped_non_provider=non_provider,
     )
 
-
-_LOCK_SCOPED_STAMPS_SQL: Final = text(
-    "SELECT feature.lock_scoped_provider_geocode_stamps("
-    "CAST(:attempt AS uuid),CAST(:owner AS uuid),:manifest,:input,CAST(:targets AS jsonb))"
-)
-_REOBSERVE_SCOPED_STAMPS_SQL: Final = text(
-    "SELECT feature.reobserve_scoped_provider_geocode_stamps("
-    "CAST(:attempt AS uuid),CAST(:owner AS uuid),:manifest,:input,CAST(:targets AS jsonb))"
-)
-
-
-async def _scoped_stamps(
-    session: AsyncSession,
-    statement: TextClause,
-    *,
-    attempt_id: str,
-    owner: str,
-    manifest_digest: str,
-    input_digest: str,
-    targets_json: str,
-) -> int:
-    # JSON decode/copy는 여기서 하지 않는다. SQL이 정확 shape/2730/OLD/closure를 검증한다.
-    if not isinstance(targets_json, str) or not 0 < len(targets_json) <= 1_048_576:
-        raise ValueError("scoped stamp JSON exceeds1MiB")
-    if len(targets_json.encode("utf-8")) > 1_048_576:
-        raise ValueError("scoped stamp JSON exceeds1MiB")
-    value = await session.scalar(
-        statement,
-        {
-            "attempt": attempt_id,
-            "owner": owner,
-            "manifest": manifest_digest,
-            "input": input_digest,
-            "targets": targets_json,
-        },
-    )
-    return int(value)
-
-
-async def lock_scoped_provider_geocode_stamps(
-    session: AsyncSession,
-    *,
-    attempt_id: str,
-    owner: str,
-    manifest_digest: str,
-    input_digest: str,
-    targets_json: str,
-) -> int:
-    """첫 source DML 전, applying SH 전체 target의 기존 stamp만 정렬 잠금·검증한다."""
-    return await _scoped_stamps(
-        session,
-        _LOCK_SCOPED_STAMPS_SQL,
-        attempt_id=attempt_id,
-        owner=owner,
-        manifest_digest=manifest_digest,
-        input_digest=input_digest,
-        targets_json=targets_json,
-    )
-
-
-async def reobserve_scoped_provider_geocode_stamps(
-    session: AsyncSession,
-    *,
-    attempt_id: str,
-    owner: str,
-    manifest_digest: str,
-    input_digest: str,
-    targets_json: str,
-) -> int:
-    """실제 accepted head 확인 뒤 같은 ID/token/outcome의 now()만 갱신한다."""
-    return await _scoped_stamps(
-        session,
-        _REOBSERVE_SCOPED_STAMPS_SQL,
-        attempt_id=attempt_id,
-        owner=owner,
-        manifest_digest=manifest_digest,
-        input_digest=input_digest,
-        targets_json=targets_json,
-    )
