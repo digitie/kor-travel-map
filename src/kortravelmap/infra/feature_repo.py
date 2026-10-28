@@ -304,8 +304,8 @@ async def lock_feature_write_protocol(session: AsyncSession, *, wait_ms: int | N
 
     P는 배타 전용이다(ADR-117 — 공유 모드는 DB가 23514로 거부한다). 이 transaction이 P를 이미
     쥐었으면(fence 포함) SQL 없이 돌아간다. ``wait_ms``를 주면 그 한 문장만 상한을 늘린다
-    (:func:`execute_with_lock_wait`). 단건·관리 writer는 P를 잡지 않는다 — 행 잠금과 ADR-111
-    gate만 쓴다.
+    (:func:`execute_with_lock_wait`). 434가 나열한 단건 writer 10개는 P를 잡지 않는다 — 행 잠금과
+    ADR-111 gate만 쓴다(ADR-117 §2.2).
     """
     if _protocol_ex_held(session):
         return
@@ -2903,8 +2903,7 @@ async def _source_record_is_current_head(
     """이 record가 entity의 저장된 head인지 본다. 순서가 뒤바뀐 artifact를 가린다.
 
     ``became_current``가 참이면 같은 문장이 head를 이 key로 옮겼다. 거짓은 동일 재관측과
-    오래된 artifact 둘 다이므로 저장된 head로 구분한다
-    (``scoped_provider_refresh._apply_provider_scalar``와 같은 판정이다).
+    오래된 artifact 둘 다이므로 저장된 head로 구분한다.
     """
     if record_state.became_current:
         return True

@@ -593,7 +593,14 @@ _PRECONDITION_SQL: Final = """SELECT
  (SELECT count(*) FROM ops.feature_write_attempts) AS attempts,
  (SELECT count(*) FROM ops.provider_snapshot_artifacts) AS artifacts,
  (SELECT count(*) FROM ops.provider_snapshot_controls) AS controls,
- (SELECT count(*) FROM ops.provider_snapshot_quota_reservations) AS reservations
+ (SELECT count(*) FROM ops.provider_snapshot_quota_reservations) AS reservations,
+ (SELECT count(*) FROM ops.feature_write_manifests) AS manifests,
+ (SELECT count(*) FROM ops.feature_write_region_scopes WHERE owner IS NOT NULL) AS region_leases,
+ (SELECT count(*) FROM pg_catalog.pg_trigger trigger_row
+   JOIN pg_catalog.pg_proc routine ON routine.oid=trigger_row.tgfoid
+   JOIN pg_catalog.pg_namespace namespace ON namespace.oid=routine.pronamespace
+   WHERE namespace.nspname||'.'||routine.proname = ANY(CAST(:routines AS text[]))
+     AND trigger_row.tgrelid <> ALL(CAST(:tables AS regclass[]))) AS activation_triggers
 """
 
 #: 430이 스냅샷 후처리(sync cursor·integrity 관측)용으로만 준 표 권한. baseline에 없고 보존
@@ -781,7 +788,18 @@ _DROP_CATALOG_SQL: Final = """SELECT n.nspname||'.'||p.proname AS name,
 
 
 def _assert_preconditions(bind: Any) -> None:
-    row = bind.execute(text(_PRECONDITION_SQL)).mappings().one()
+    """정책 활성화(설치된 trigger 포함)나 scope·스냅샷 상태가 하나라도 있으면 지우지 않는다."""
+    row = (
+        bind.execute(
+            text(_PRECONDITION_SQL),
+            {
+                "routines": sorted({drop.name for drop in _DROPS}),
+                "tables": list(_TABLES),
+            },
+        )
+        .mappings()
+        .one()
+    )
     used = {str(key): int(value) for key, value in row.items() if int(value) != 0}
     if used:
         raise RuntimeError(

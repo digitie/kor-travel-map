@@ -2209,16 +2209,6 @@ class SourceRecordRow(Base):
             "fetched_at",
             postgresql_using="brin",
         ),
-        Index(
-            "ix_source_records_bounded_evidence_key",
-            # PostgreSQL 반사의 pretty CASE와 맞춘다. 실제 DDL의 정본은 427이다.
-            text(
-                "(\nCASE\n"
-                "    WHEN octet_length(source_record_key::text) <= 256 "
-                "THEN source_record_key::text\n"
-                "    ELSE NULL::text\nEND)"
-            ),
-        ),
         {"schema": "provider_sync"},
     )
 
@@ -2274,15 +2264,6 @@ class SourceEntityHeadRow(Base):
             text("observed_at DESC"),
             text("current_source_record_key DESC"),
         ),
-        Index(
-            "ix_source_entity_heads_bounded_evidence_key",
-            text(
-                "(\nCASE\n"
-                "    WHEN octet_length(source_entity_key) <= 256 "
-                "THEN source_entity_key\n"
-                "    ELSE NULL::text\nEND)"
-            ),
-        ),
         {"schema": "provider_sync"},
     )
 
@@ -2337,15 +2318,6 @@ class SourceLinkRow(Base):
             "idx_source_links_primary",
             "feature_id",
             postgresql_where=text("source_role = 'primary'"),
-        ),
-        Index(
-            "ix_source_links_bounded_evidence_key",
-            text(
-                "(\nCASE\n"
-                "    WHEN octet_length(source_entity_key) <= 256 "
-                "THEN source_entity_key\n"
-                "    ELSE NULL::text\nEND)"
-            ),
         ),
         {"schema": "provider_sync"},
     )
