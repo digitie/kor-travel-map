@@ -44,7 +44,7 @@
         ▼                       ▼                       ▼
 ┌────────────────┐    ┌───────────────────┐    ┌──────────────────┐
 │ 독립 PostgreSQL │    │ S3 호환 객체 저장소  │    │ python-*-api     │
-│ + PostGIS 3.5  │    │ (RustFS / MinIO)   │    │ provider clients │
+│ + PostGIS 3.6  │    │ (RustFS / MinIO)   │    │ provider clients │
 │ + pg_trgm      │    │                    │    │                  │
 │ + pgcrypto     │    │                    │    │ KMA, VisitKorea, │
 │                │    │                    │    │ MOIS, OpiNet,    │

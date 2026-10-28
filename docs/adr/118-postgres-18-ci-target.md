@@ -34,18 +34,26 @@ PostGIS 3.5.2 → **3.6.4**로 올랐다. 이미지는 Manager `docker-compose.y
    - 다음 major 이행 때는 matrix에 이행 lane을 잠시 더한다(`KTM_TEST_POSTGIS_IMAGE`는 그대로 digest만 받는다).
 3. **catalog를 읽는 코드는 major를 숫자로 박지 않는다.** 비교 대상이 major마다 바뀌면 그 major의 기본값에서 유도한다
    (`acldefault('r', owner)`로 소유자 몫, `COALESCE(attstattarget, -1)`, contype `'n'` 분리). 비용이 싸면 16에서도
-   맞게 둔다 — 롤백 리허설과 다른 저장소의 16 instance에서 같은 SQL을 읽을 수 있다.
+   맞게 둔다 — 다음 major 이행 lane에서도 같은 SQL이 읽힌다. 16으로 되돌리는 경로는 없다(Manager는 `pg_upgrade
+   --link`로 올렸고 롤백 경로를 두지 않는다).
 4. **standalone compose도 18이다.** `postgres` 서비스는 같은 digest, one-shot client는 `postgres:18-alpine`이다. PG18
-   공식 이미지는 PGDATA가 `/var/lib/postgresql/18/docker`라 volume을 `/var/lib/postgresql`에 붙인다. PG16 volume은
-   이어 쓸 수 없다 — standalone 사용자는 새 volume으로 다시 만든다(prod는 Manager가 pg_upgrade로 이미 옮겼다).
-5. PG16에서 뽑은 오라클(`alembic/head-schema.sql`, `contracts/vnext/target-schema-fingerprints-v1.json`, 이미지별
-   ACL digest)은 PG18에서 다시 뽑는다. 정규화 규칙은 넓히지 않는다 — 걷어낼 것을 늘리면 오라클이 그만큼 눈을 감는다.
+   공식 이미지는 PGDATA가 `/var/lib/postgresql/18/docker`라 volume을 `/var/lib/postgresql`에 붙인다. volume 이름은
+   `kor-travel-map-postgres-18`이다 — 옛 PG16 volume에 붙이면 entrypoint가 거부하지 않고 그 안에 빈 18 cluster를 만들므로
+   이름으로 갈라 둔다. standalone 사용자는 새 volume으로 다시 만든다(prod는 Manager가 pg_upgrade로 이미 옮겼다).
+5. PG16에서 뽑은 오라클은 PG18에서 다시 잰다. pg_dump 출력(`alembic/head-schema.sql`)과 이미지별 ACL digest는 다시
+   뽑는다. catalog 해시(target freeze 7축·T-VN-40 raw-SQL)는 contype `'n'` 행만 뺀다 — NOT NULL은 같은 검사의 열 축
+   (`attnotnull`)이 이미 보므로 같은 사실을 major마다 다르게 세지 않게 하는 것이고, 그 결과 PG16 값이 PG18에서 그대로
+   재현된다. 이것 말고는 정규화를 넓히지 않는다 — 걷어낼 것을 늘리면 오라클이 그만큼 눈을 감는다. 잃는 것은 PG18 전용
+   NOT NULL 속성(이름·`NO INHERIT`·`NOT VALID`)이고, 이름은 head 오라클이 본다.
+6. **PROJ 7.2.1 → 9.8.1**(PostGIS 3.5.2 → 3.6.4)도 이 전환에 들었다. `docs/runbooks/coord-5179-proj-pin.md` §3 drift 검사를
+   prod에서 한 번 돌리는 것이 T-PG18-CI 해제 조건에 들어 있다(표본 점의 4326→5179는 두 판에서 비트 동일).
 
 ## 결과
 
 - 긍정: CI가 prod와 같은 major·PostGIS·collation에서 fresh 재구축을 매 PR 증명한다. lane이 하나라 CI 시간이 준다.
-- 부정: PG16에서 돌던 것을 CI가 더는 보지 않는다. 16으로 되돌리는 롤백(Manager가 PGDATA 16을 보존하는 동안)은 CI 근거가
-  없다 — 그때는 이행 lane을 다시 더해 확인한다.
+- 부정: PG16에서 돌던 것을 CI가 더는 보지 않는다. 16 instance는 더 없으므로(롤백 경로 없음) 잃는 운영 근거는 없다.
+- 부정: 기본 이미지 index에 amd64만 있다 — arm64 호스트(odroid 등)에서는 통합 suite를 기본값으로 돌릴 수 없고
+  `KTM_TEST_POSTGIS_IMAGE`로 arm64 digest를 줘야 한다(옛 alpine 기본값은 multi-arch였다).
 - 부정: 공용 instance digest는 여전히 Manager 핀의 사본이고 두 저장소 사이에 drift 검출기가 없다(ADR-103과 같다).
   Manager가 이미지를 올리면 이 값과 workflow를 같은 묶음으로 바꾼다.
 

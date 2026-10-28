@@ -697,8 +697,8 @@ def test_geo_live_mode_is_probed_before_and_after() -> None:
         line for line in _run_gate_invocations() if "tests/integration" in line
     ]
     assert integration, "integration 게이트가 없다"
-    # 게이트마다 따로 본다(lane이 둘이다, ADR-103). 모은 문자열에서 찾으면 한 lane의
-    # probe를 지워도 다른 lane의 것이 대신 만족시킨다(변이 R11·R11b가 실제로 살아남았다).
+    # 게이트마다 따로 본다. 모은 문자열에서 찾으면 한 게이트의 probe를 지워도 다른
+    # 게이트의 것이 대신 만족시킨다(변이 R11·R11b가 실제로 살아남았다).
     for line in integration:
         # 사전/사후를 **따로** 요구한다. "geo_live_probe.py가 줄에 있는가"만 보면 한쪽만
         # 지워도 통과한다 — 사후 단언이 남아 있어 문자열이 여전히 존재하기 때문이다.
@@ -715,26 +715,25 @@ def test_geo_live_mode_is_probed_before_and_after() -> None:
         )
 
 
-def test_integration_gates_cover_both_postgis_lanes() -> None:
-    """CI ``integration`` matrix의 두 lane(ADR-103)을 로컬도 **따로** 돈다.
+def test_integration_gate_runs_the_ci_postgis_lane() -> None:
+    """CI ``integration`` matrix의 lane(ADR-118)을 로컬도 **같은 이미지로** 돈다.
 
-    조각 감사는 ``tests/integration`` 경로만 보므로 glibc 게이트를 지워도, 또는 그 게이트가
-    이미지를 넘기지 않아 alpine에서 돌아도 침묵한다.
+    조각 감사는 ``tests/integration`` 경로만 보므로 게이트가 이미지를 넘기지 않아
+    기본값에서 돌아도 침묵한다. 기본값이 지금은 같은 digest여도, CI가 matrix로 넘기는
+    값을 로컬도 정본에서 읽어 넘겨야 둘이 갈릴 때 드러난다.
     """
 
     integration = [
         line for line in _run_gate_invocations() if "tests/integration" in line
     ]
-    alpine = [line for line in integration if "KTM_TEST_POSTGIS_IMAGE" not in line]
-    glibc = [
+    pinned = [
         line
         for line in integration
         if "import SHARED_GLIBC_POSTGIS_IMAGE" in line
         and "export KTM_TEST_POSTGIS_IMAGE;" in line
     ]
-    assert len(alpine) == 1, integration
-    assert len(glibc) == 1, integration
-    assert len(integration) == 2, integration
+    assert len(pinned) == 1, integration
+    assert len(integration) == 1, integration
 
 
 def test_exempt_entries_state_a_reason() -> None:

@@ -47,7 +47,7 @@ REGENERATE_ENV = "KTM_WRITE_HEAD_SCHEMA"
 
 _DUMP_SCHEMAS = ("feature", "provider_sync", "ops")
 
-#: PostgreSQL 16의 pg_dump가 내는 psql client-side fence. 토큰이 매번 달라
+#: pg_dump(16.10+·18)가 내는 psql client-side fence. 토큰이 매번 달라
 #: 그대로 두면 결정론적 아티팩트가 되지 않는다. baseline 덤프와 같은 판정이다.
 _PSQL_RESTRICT = re.compile(r"\\(?:un)?restrict [A-Za-z0-9]+")
 

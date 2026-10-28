@@ -33,7 +33,7 @@
 | ADR-004 | ORM은 매핑만, 쿼리는 raw SQL `text()` | [004-orm-mapping-only-raw-sql-text.md](004-orm-mapping-only-raw-sql-text.md) |
 | ADR-005 | 디버그 REST API는 인증 없음, 내부망 전용 (인증 결정은 ADR-066으로 superseded) | [005-debug-rest-api-no-auth-internal-only.md](005-debug-rest-api-no-auth-internal-only.md) |
 | ADR-006 | provider adapter/wrapper 신규 생성 금지 | → 개발 규칙 ([SKILL.md §4](../../SKILL.md)) |
-| ADR-007 | 의존 스택 — Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas (DB major는 ADR-118로 대체) | [007-dependency-stack-postgres-postgis-sqlalchemy.md](007-dependency-stack-postgres-postgis-sqlalchemy.md) |
+| ADR-007 | 의존 스택 — Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas (DB major는 ADR-118이 대체 제안) | [007-dependency-stack-postgres-postgis-sqlalchemy.md](007-dependency-stack-postgres-postgis-sqlalchemy.md) |
 | ADR-008 | PostGIS extension은 `x_extension` schema에 격리 | [008-postgis-extension-x-extension-schema.md](008-postgis-extension-x-extension-schema.md) |
 | ADR-009 | `feature_id` 결정적 생성 (`make_feature_id`) (ADR-068로 superseded) | [009-deterministic-feature-id.md](009-deterministic-feature-id.md) |
 | ADR-010 | weather forecast_style + timeline_bucket 두 축 분리 | → 이관 [etl/weather-feature-normalization.md](../etl/weather-feature-normalization.md) |

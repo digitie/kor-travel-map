@@ -200,10 +200,12 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                             "SELECT encoding::text, datlocprovider::text, datistemplate::text, "
                             "datallowconn::text, datconnlimit::text, "
                             "dattablespace::regclass::text, "
-                            "datcollate, datctype, coalesce(datlocale, '<null>'), "
+                            "datcollate, datctype, coalesce(to_jsonb(d) ->> 'datlocale', "
+                            "to_jsonb(d) ->> 'daticulocale', '<null>'), "
                             "coalesce(daticurules, '<null>'), coalesce(datcollversion, '<null>'), "
                             "coalesce(datacl::text, '<null>') "
-                            "FROM pg_catalog.pg_database WHERE datname = current_database()"
+                            "FROM pg_catalog.pg_database AS d "
+                            "WHERE datname = current_database()"
                         )
                     )
                 ).one()
