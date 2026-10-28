@@ -328,11 +328,9 @@ async def lock_feature_curation_write(session: AsyncSession) -> None:
     이미 쥔 xact lock은 실제 session·DB transaction의 수명이 유지되는 동안 SQL 없이 재사용한다.
     savepoint 안에서 획득한 잠금은 캐시하지 않는다. 외부 connection transaction 종료나
     새 transaction에서도 다시 잡는다.
-    신규 protocol 배타 gate를 먼저 잡고 기존 전역 fence를 잡는다. MATERIALIZED CTE가
-    두 잠금의 평가 순서를 강제하며 SQL 왕복은 한 번이다. 이미 공유 protocol gate를 든
-    caller는 승격하지 않고 DB가 거부하므로 rollback 뒤 배타 경로로 재계획해야 한다.
-    기존 전역 충돌 범위와 Feature 병합 의미는 유지한다. 이 배선만으로 SQL/trigger의
-    전수 전환이나 동시 쓰기 활성화가 완료되지는 않는다(ADR-115).
+    protocol 배타 gate(P)를 먼저 잡고 기존 전역 fence를 잡는다. MATERIALIZED CTE가
+    두 잠금의 평가 순서를 강제하며 SQL 왕복은 한 번이다. P는 배타 전용이다(ADR-117).
+    기존 전역 충돌 범위와 Feature 병합 의미는 유지한다.
     """
 
     wait_ms = pop_armed_lock_wait(session)
