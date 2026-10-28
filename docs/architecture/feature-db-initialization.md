@@ -7,7 +7,7 @@ DB를 부트스트랩하고 내부 라이브러리 client를 초기화하는 절
 ## 1. 부트스트랩 순서
 
 ```
-1. PostgreSQL 16 + PostGIS 3.5와 dedicated DB (`kor_travel_map`)를 준비한다.
+1. PostgreSQL 18 + PostGIS 3.6(ADR-118)과 dedicated DB (`kor_travel_map`)를 준비한다.
 2. ignored deployment env/vault에서 bootstrap superuser와 application service
    (`ktm_feature_service`)의 서로 다른 credential을 주입한다. ADR-100 이후 application
    LOGIN은 **하나**다 — migrator/API/Dagster 세 이름은 없다.
@@ -305,7 +305,7 @@ graceful degradation:
 
 ## 16. 운영 체크리스트
 
-- [ ] PostgreSQL 16 + PostGIS 3.5 컨테이너 healthy
+- [ ] PostgreSQL 18 + PostGIS 3.6 컨테이너 healthy
 - [ ] schema 4종 존재
 - [ ] 확장 4종 존재
 - [ ] `search_path` 올바름 (`SHOW search_path` → `public, x_extension`)

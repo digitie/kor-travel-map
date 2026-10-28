@@ -22,7 +22,6 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-from tests.integration._postgis_image import ALPINE_POSTGIS_IMAGE
 from tests.integration.conftest import postgis_image
 
 if TYPE_CHECKING:
@@ -32,6 +31,11 @@ ROOT = Path(__file__).resolve().parents[2]
 _SCRIPT = ROOT / "docker" / "postgres-role-bootstrap.sh"
 _PREFLIGHT_SCRIPT = ROOT / "scripts" / "database-credential-preflight.sh"
 _DATABASE = "ktm_bootstrap_existing"
+#: bootstrap one-shot client(`docker-compose.yml`의 `postgres:18-alpine`)를 digest로 고정한다.
+#: 스크립트의 `/usr/local/bin/psql`은 alpine 공식 이미지의 경로다(서버 glibc 이미지에는 없다).
+_BOOTSTRAP_CLIENT_IMAGE = (
+    "postgres@sha256:10a5c69a83035ab5239f5620d708520e8b28f5aa1f2b20143e6024532edadfb5"
+)
 
 
 @pytest.fixture(scope="module")
@@ -43,12 +47,12 @@ def pg_container() -> Iterator[Any]:
     role/schema와 virgin bootstrap precondition이 서로 오염된다. 같은 immutable
     PostGIS image를 쓰되 별도 cluster에서만 fresh target을 만들어, 이 테스트의
     cluster-wide mutation과 cleanup이 다른 integration fixture에 닿지 않게 한다.
-    이미지는 lane의 것이다 — glibc lane에서는 공용 instance 이미지에서 bootstrap을
-    instance superuser로 돌린다(ADR-103, S1 리허설).
+    이미지는 lane의 것이다 — 공용 instance 이미지에서 bootstrap을 instance
+    superuser로 돌린다(ADR-103 S1 리허설, ADR-118).
 
     bootstrap 스크립트는 **서버 컨테이너 안이 아니라** 서버의 network namespace를 나눠
-    쓰는 별도 client 컨테이너(alpine)에서 돈다 — 운영도 Manager의 one-shot
-    (`postgres:16-alpine`)이 TCP로 붙는다. 스크립트의 절대 경로(`/usr/local/bin/psql`,
+    쓰는 별도 client 컨테이너(alpine)에서 돈다 — standalone compose의 one-shot
+    (`postgres:18-alpine`)도 TCP로 붙는다. 스크립트의 절대 경로(`/usr/local/bin/psql`,
     `/usr/bin/sleep`)는 alpine client 계약이다. glibc 서버 이미지 안에서 돌리면 그
     경로가 없어 서버와 무관하게 죽는다(2026-09-28 glibc lane 실측).
 
@@ -88,7 +92,7 @@ def pg_container() -> Iterator[Any]:
         server_id = container.get_wrapped_container().id
         labels = [
             argument
-            for key, value in create_labels(ALPINE_POSTGIS_IMAGE, None).items()
+            for key, value in create_labels(_BOOTSTRAP_CLIENT_IMAGE, None).items()
             for argument in ("--label", f"{key}={value}")
         ]
         client_id = subprocess.run(  # noqa: S603 - 테스트 전용 client 컨테이너
@@ -104,7 +108,7 @@ def pg_container() -> Iterator[Any]:
                 f"container:{server_id}",
                 "--entrypoint",
                 "sleep",
-                ALPINE_POSTGIS_IMAGE,
+                _BOOTSTRAP_CLIENT_IMAGE,
                 # 이 모듈의 실행 시간보다 넉넉하되 끝이 있다.
                 "7200",
             ],
@@ -196,10 +200,12 @@ async def _snapshot(dsn: str) -> dict[str, object]:
                             "SELECT encoding::text, datlocprovider::text, datistemplate::text, "
                             "datallowconn::text, datconnlimit::text, "
                             "dattablespace::regclass::text, "
-                            "datcollate, datctype, coalesce(daticulocale, '<null>'), "
+                            "datcollate, datctype, coalesce(to_jsonb(d) ->> 'datlocale', "
+                            "to_jsonb(d) ->> 'daticulocale', '<null>'), "
                             "coalesce(daticurules, '<null>'), coalesce(datcollversion, '<null>'), "
                             "coalesce(datacl::text, '<null>') "
-                            "FROM pg_catalog.pg_database WHERE datname = current_database()"
+                            "FROM pg_catalog.pg_database AS d "
+                            "WHERE datname = current_database()"
                         )
                     )
                 ).one()

@@ -2,9 +2,9 @@
 
 ``docs/test-strategy.md §4.1`` 명세 구현:
 
-- ``pg_container`` — session-scope source image digest가 고정된
-  ``postgis/postgis:16-3.5-alpine`` (기본 lane). ``KTM_TEST_POSTGIS_IMAGE``가
-  주어지면 그 digest(공용 instance의 glibc lane, ADR-103).
+- ``pg_container`` — session-scope. n150 공용 instance digest
+  (``postgis/postgis:18-3.6``, glibc, ADR-118). ``KTM_TEST_POSTGIS_IMAGE``가
+  주어지면 그 digest(이행 lane).
 - ``pg_engine`` — session-scope ``AsyncEngine`` + 4 schema + 3 extension 생성.
 - ``feature_schema`` — session-scope (현재는 placeholder, Sprint 2 실 DDL 박힘).
 - ``pg_session`` — per-test ``AsyncSession`` + 자동 rollback.
@@ -14,7 +14,7 @@ Docker가 없거나 testcontainers가 설치되지 않은 환경에서는 모든
 
 ADR 참조
 --------
-- ADR-007 — PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto
+- ADR-007·ADR-118 — PostgreSQL 18 + PostGIS 3.6 + pg_trgm + pgcrypto
 - ADR-008 — extension은 ``x_extension`` schema 격리
 - ADR-002 — async-only (asyncpg driver)
 """
@@ -49,13 +49,12 @@ _SCHEMAS: tuple[str, ...] = ("feature", "provider_sync", "ops", "x_extension")
 _EXTENSIONS: tuple[str, ...] = ("postgis", "pg_trgm", "pgcrypto")
 
 # Docker image (docs/test-strategy.md §4.1)
-# The immutable baseline receipt was materialized from the alpine digest.  A
-# floating tag can move to a new PostGIS/PostgreSQL patch build with different
-# locale, role settings, or catalog definitions and make a fresh-300 test fail
-# before it reaches the application assertions.  CI also runs the whole suite on
-# the n150 shared instance's glibc digest (ADR-103); the lane picks it with
-# ``KTM_TEST_POSTGIS_IMAGE``, which must be a digest reference or the fixture
-# fails.  The single source of both digests is ``_postgis_image.py``.
+# The suite runs on the n150 shared instance's digest (PG18 + PostGIS 3.6, glibc,
+# ADR-118).  A floating tag can move to a new PostGIS/PostgreSQL build with
+# different locale, role settings, or catalog definitions and make a fresh-install
+# test fail before it reaches the application assertions.  A transition lane picks
+# another image with ``KTM_TEST_POSTGIS_IMAGE``, which must be a digest reference or
+# the fixture fails.  The single source of the digest is ``_postgis_image.py``.
 
 
 def postgis_image() -> str:
@@ -178,7 +177,7 @@ async def pg_engine(pg_container: Any) -> AsyncIterator[AsyncEngine]:
     async with engine.begin() as conn:
         for schema in _SCHEMAS:
             await conn.execute(text(f"CREATE SCHEMA IF NOT EXISTS {schema}"))
-        # 공식 `postgis/postgis:16-3.5-alpine`의 새 cluster에는 extension이 자동
+        # 공식 `postgis/postgis` 이미지의 새 cluster에는 extension이 자동
         # 생성되지 않는다. fixture도 production fresh bootstrap과 같은 방향으로
         # `x_extension`에 명시 생성한다. public 등에 이미 존재하는 extension을 여기서
         # drop/repair하면 actual fresh deployment의 precondition을 가리므로 허용하지 않는다.

@@ -40,14 +40,16 @@ CREATE INDEX idx_features_coord_5179_gist ON feature.features
 
 ## 2. 버전 고정 (Pin)
 
-- PostGIS 버전은 배포 image tag **`postgis/postgis:16-3.5-alpine`** 이 이미 고정한다
-  (테스트: testcontainers, ADR-007; 참고 [`../test-strategy.md`](../test-strategy.md)).
+- PostGIS 버전은 배포 image **`postgis/postgis:18-3.6`**(n150 공용 instance digest `4a43e3c3…`)이 이미 고정한다
+  (테스트: testcontainers 같은 digest, ADR-118; 참고 [`../test-strategy.md`](../test-strategy.md)).
   **PROJ 버전은 그 image에 번들된 값에 결박**되며, tag를 바꾸지 않는 한 고정이다.
 - 이 tag를 올리는 것은 **PROJ upgrade와 동치**다. §3 drift 검사 + §4 재계산/REINDEX 없이는
   image tag(PostGIS/PROJ)를 올리지 않는다. tag 상향은 ADR-075 cutover 절차를 따르는 별도
   변경으로 다루고, 상향 전후로 §3을 반드시 실행한다.
-- 현재 고정 baseline(참고값, `postgis/postgis:16-3.5` 계열 실측):
-  PostGIS `3.5.2`, PROJ `7.2.1`. 실 배포 DB에서 정확한 baseline을 캡처해 배포 기록에 남긴다:
+- 현재 고정 baseline(참고값, `postgis/postgis:18-3.6` digest 실측 2026-10-28): PostGIS `3.6.4`, PROJ `9.8.1`,
+  GEOS `3.13.1`. 이전 baseline은 `16-3.5` 계열 PostGIS `3.5.2`·PROJ `7.2.1`이었다 — 2026-10-27 공용 PG 16→18이 곧
+  PROJ 7→9 상향이다(표본 점 4326→5179 결과는 두 판에서 비트 동일, 실 데이터 §3은 T-PG18-CI 후속).
+  실 배포 DB에서 정확한 baseline을 캡처해 배포 기록에 남긴다:
 
 ```sql
 SELECT postgis_full_version();   -- POSTGIS/PROJ/GEOS 전체 문자열

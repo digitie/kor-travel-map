@@ -17,8 +17,8 @@ table/column/index/constraint를 한눈에. 자세한 의미·근거·인덱스 
 
 | 항목 | 값 |
 |------|----|
-| RDBMS | PostgreSQL 16 |
-| 공간 | PostGIS 3.5 + `postgis_topology` |
+| RDBMS | PostgreSQL 18 (ADR-118) |
+| 공간 | PostGIS 3.6 + `postgis_topology` |
 | 인덱스 보조 | `pg_trgm`, `pgcrypto` |
 | 확장 schema | `x_extension` (ADR-008) |
 | `search_path` | `public, x_extension` |

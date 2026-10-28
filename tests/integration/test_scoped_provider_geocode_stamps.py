@@ -1074,6 +1074,13 @@ _PARENT420_ACL_SHA_BY_IMAGE = {
     "postgis/postgis@sha256:8b33190b6486ab9905dea999171817c1ac461733a7078dd4c836091c6e6b5d40": (
         "528ccce668ca6486cebbc1e811424c34ab89333c7cc10616e5011bdb070b3277"
     ),
+    # PG18.6 + PostGIS 3.6.4 공용 instance digest(ADR-118). 2026-10-28 위 PG16 glibc 값을 같은
+    # fixture로 재현(528ccce…)한 뒤 두 snapshot을 대조했다: 차이는 ① table 소유자의 MAINTAIN
+    # 138행(PG17 기본 권한), ② extension 판올림 routine(PostGIS `st_coverageclean` 추가·
+    # `_st_concavehull` 삭제, pgcrypto `fips_mode()` 추가)뿐이다. ktm_* role·membership은 같다.
+    "postgis/postgis@sha256:4a43e3c3e5d55b9208240fc71db543b79c638766280c625a425bd0a2390989c4": (
+        "6e43c06e9c3a2e4e1ea6504fafbf7ef9a79f4cce2351f5cbba391145d490affa"
+    ),
 }
 _PARENT50_GUARDS_SHA = "70ba8fdeebadbde52a5aa81c9841d89a06481222efbbd386b0072874b8b9ad59"
 _PARENT420_INSTALLER_SHA = "f8db128ea1712051475ecd5af20d14788facda20b61ca160c944d28a8d860ea2"

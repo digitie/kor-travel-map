@@ -59,8 +59,7 @@ lint
 pytest (Python 3.11)
 pytest (Python 3.12)
 pytest (Python 3.13)
-pytest integration (PostGIS, alpine)
-pytest integration (PostGIS, glibc)
+pytest integration (PostGIS, pg18)
 pytest fixture replay
 openapi-drift
 type-check + next build (Node 20)
@@ -70,12 +69,12 @@ type-check + next build (Node 20)
 내용은 unit/lint/admin/dagster unit test다. PostGIS 통합 테스트와 fixture replay는
 별도 check로 분리한다.
 
-PostGIS 통합 테스트는 lane 두 개다(ADR-103). `alpine`은 immutable baseline을 만든
-musl digest, `glibc`는 n150 공용 instance가 실제로 도는 digest다. 2026-09-28 기준 main에
-required status check가 걸려 있지 않으므로, **두 leg가 모두 초록**이어야 한다는 것은
-PR 본문과 리뷰가 확인한다. branch protection을 켤 때는 옛 단일 이름
-`pytest integration (PostGIS)` 대신 위 두 이름을 넣는다 — 옛 이름은 더 이상 생성되지
-않아 required로 남기면 모든 PR이 영원히 대기한다.
+PostGIS 통합 테스트는 lane 하나다(ADR-118). `pg18`은 n150 공용 instance가 실제로 도는
+digest(PostgreSQL 18 + PostGIS 3.6, glibc)다. 2026-10-28에 PG16 `alpine`·`glibc` 두 lane을
+이것으로 바꿨다(ADR-103의 두 lane 결정 대체). main에 required status check가 걸려 있지
+않으므로 초록 확인은 PR 본문과 리뷰가 한다. branch protection을 켤 때는 옛 이름
+(`pytest integration (PostGIS)`·`(PostGIS, alpine)`·`(PostGIS, glibc)`) 대신 위 이름을
+넣는다 — 옛 이름은 더 이상 생성되지 않아 required로 남기면 모든 PR이 영원히 대기한다.
 
 `openapi-drift`와 `type-check + next build (Node 20)`은 path filter를 제거해 모든 PR에서
 생성된다. frontend check 이름의 `Node 20`은 branch protection의 legacy identity일 뿐이며 실제

@@ -2836,9 +2836,14 @@ ADR-116(geo 부하 줄이기 0단계). 브랜치 `feat/skip-geocode-unchanged`.
 공용 PG 16→18(2026-10-27, Manager #562, pg_upgrade --link). prod Map은 업그레이드된 DB에서 정상(map-api 기동·`/health` 200,
 리허설 행 수·amcheck 일치)이지만 **빈 DB 재구축과 catalog를 들여다보는 이후 migration**은 PG18에서 검증된 적이 없다.
 
-- [ ] ADR-007 개정(테스트 PostGIS 이미지 핀) — PG18 lane 추가(또는 기본 lane 전환)를 결정·기록한다.
-- [ ] CI에 PG18(`postgis/postgis:18-3.6-alpine` digest 핀) lane이 있고 초록이다.
-- [ ] 그 lane이 드러낸 PG16 가정을 고쳤다 — 알려진 후보: `alembic/versions/400_schema_baseline.py`의 fresh guard
-  (`attribute.attstattarget <> -1` — PG17부터 기본 NULL, `alembic_version` constraint 개수 = 1 — PG18은 NOT NULL을
-  contype `'n'` constraint로도 둔다). `pg_database.daticulocale`(PG17 `datlocale`)은 #1429에서 고쳤다.
-- [ ] `contracts/vnext/target-schema-fingerprints-v1.json`·`alembic/head-schema.sql` 같은 PG16 산출물의 major 의존을 정리했다.
+- [x] ADR-007 개정 — ADR-118(proposed)이 기본 lane 전환을 결정했다: CI 통합 suite는 공용 instance digest
+  (`postgis/postgis:18-3.6@sha256:4a43e3c3…`, glibc) 한 lane이다. alpine 18 lane은 두지 않는다(prod가 glibc다). PR #1431.
+- [ ] CI에 그 lane(`pytest integration (PostGIS, pg18)`)이 있고 초록이다. n150 CI-parity 4세션은 2026-10-28 초록(통합
+  1988 PASS/23 skip) — GitHub CI 초록은 PR 머지 때 확인한다.
+- [x] 그 lane이 드러낸 PG16 가정을 고쳤다 — `400_schema_baseline` fresh guard(`attstattarget` NULL, 소유자 `MAINTAIN`,
+  contype `'n'`), catalog 해시의 contype `'n'`, `ON DELETE RESTRICT` 23001, parent420 ACL digest. `pg_database.daticulocale`
+  (PG17 `datlocale`)은 #1429에서 고쳤다.
+- [x] PG16 산출물의 major 의존을 정리했다 — `alembic/head-schema.sql`은 pg_dump 18로 재생성, target fingerprint 7축은 PG18에서
+  같은 값으로 재현(environment에 기록).
+- [ ] PROJ 7.2.1 → 9.8.1(PostGIS 3.5.2 → 3.6.4) — `docs/runbooks/coord-5179-proj-pin.md` §3 drift 검사를 prod에서 읽기 전용으로
+  한 번 돌려 `drifted = 0`을 journal에 적는다(0이 아니면 §4).

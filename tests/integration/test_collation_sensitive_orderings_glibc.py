@@ -1,7 +1,7 @@
 """collation에 민감한 text 정렬을 byte 순서로 고정했는지 — 공용 glibc instance 대비 (ADR-103).
 
 n150 prod의 Map DB는 Manager 공용 instance(glibc, default collation ``en_US.utf8``)로
-옮긴다. alpine(musl) lane에서는 default collation이 byte 순서와 사실상 같아
+옮겼다. musl(옛 alpine lane)에서는 default collation이 byte 순서와 사실상 같아
 ``COLLATE "C"``를 빼는 변이가 테스트를 전부 통과한 채 살아남는다
 (``test_alias_map_collation_glibc`` 모듈과 같은 이유). 본 모듈은 **lane의 이미지**
 (``KTM_TEST_POSTGIS_IMAGE``)를 별도 cluster로 띄워 최소 격리 표면을 만들고, en_US와
@@ -10,9 +10,9 @@ C에서 갈리는 key(``'a-b'``·``'ab'``·``'B'``·``'a'``)를 고친 함수마
 ① 결과 순서·digest·잠금 순서가 UTF-8 byte 순서(= Python ``sorted()``)임을 단언하고
    (``COLLATE "C"`` 제거 변이는 glibc에서 en_US 순서로 갈라져 여기서 죽는다),
 ② ``ORDER BY``(default)와 ``ORDER BY … COLLATE "C"``가 실제로 **다름**을 단언한다
-   (collation 감지 가드). 같으면 이 환경은 판별력이 없다 — alpine lane에서는 사유를
-   적고 skip하지만, lane이 공용 glibc digest면 skip하지 않고 **실패**한다. 판별력 없는
-   초록이 glibc lane을 조용히 무력화하지 못하게 한다.
+   (collation 감지 가드). 같으면 이 환경은 판별력이 없다 — 다른 이미지(이행 lane 등)에서는
+   사유를 적고 skip하지만, lane이 공용 glibc digest(ADR-118 기본값)면 skip하지 않고
+   **실패**한다. 판별력 없는 초록이 이 검사를 조용히 무력화하지 못하게 한다.
 
 잠금 순서는 직접 볼 수 없으므로 효과로 잰다. advisory lock은 같은 이름의 함수를
 ``search_path`` 앞 schema에 두어 호출 순서를 기록하고(``pg_catalog``를 path에 명시하면
@@ -271,8 +271,8 @@ async def collation_engine(lane_pg_container: Any) -> AsyncIterator[AsyncEngine]
 async def _assert_collation_discriminates(engine: AsyncEngine) -> None:
     """default collation 순서가 byte 순서와 같으면 판별력이 없다.
 
-    alpine lane에서는 사유를 적고 skip한다. 공용 glibc lane에서는 실패한다 — 그
-    lane의 존재 이유가 바로 이 판별이다.
+    공용 instance가 아닌 이미지에서는 사유를 적고 skip한다. 공용 glibc digest(기본값)에서는
+    실패한다 — prod collation에서 이 판별이 서야 한다.
     """
 
     values = ", ".join(f"('{key}')" for key in _SEED_KEYS)

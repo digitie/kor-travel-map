@@ -535,10 +535,15 @@ BEGIN
               'ktm_feature_runtime', object.oid, 'INSERT, UPDATE, DELETE, '
               || 'TRUNCATE, REFERENCES, TRIGGER'
           )
+          -- 소유자 몫은 이 major의 table 기본 권한 집합 그대로다(PG17이 MAINTAIN을
+          -- 더했다 — 개수를 숫자로 박으면 major마다 틀린다). 그 위에 runtime SELECT 하나.
           AND (
               SELECT count(*)
               FROM aclexplode(object.relacl)
-          ) = 8
+          ) = (
+              SELECT count(*)
+              FROM aclexplode(acldefault('r'::"char", object.relowner))
+          ) + 1
           AND NOT EXISTS (
               SELECT 1
               FROM aclexplode(object.relacl) AS privilege
@@ -546,11 +551,11 @@ BEGIN
                   (
                       privilege.grantee = object.relowner
                       AND privilege.grantor = object.relowner
-                      AND privilege.privilege_type = ANY (
-                          ARRAY[
-                              'INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE',
-                              'REFERENCES', 'TRIGGER'
-                          ]::text[]
+                      AND privilege.privilege_type IN (
+                          SELECT owner_default.privilege_type
+                          FROM aclexplode(
+                              acldefault('r'::"char", object.relowner)
+                          ) AS owner_default
                       )
                       AND NOT privilege.is_grantable
                   )
@@ -627,7 +632,8 @@ BEGIN
                     OR attribute.attidentity <> ''::"char"
                     OR attribute.attgenerated <> ''::"char"
                     OR attribute.attndims <> 0
-                    OR attribute.attstattarget <> -1
+                    -- PG17부터 기본 통계 목표는 -1이 아니라 NULL이다(major 무관 비교).
+                    OR COALESCE(attribute.attstattarget, -1) <> -1
                     OR attribute.attstorage <> 'x'::"char"
                     OR attribute.attcompression <> ''::"char"
                     OR attribute.attacl IS NOT NULL
@@ -635,11 +641,21 @@ BEGIN
                     OR attribute.attfdwoptions IS NOT NULL
                 )
           )
+          -- PG18은 NOT NULL도 contype 'n' constraint 행으로 둔다. NOT NULL은 위
+          -- attnotnull이 이미 닫으므로, 'n' 행은 version_num 하나에 걸린 것만 허용한다.
           AND (
               SELECT count(*)
               FROM pg_catalog.pg_constraint AS constraint_row
               WHERE constraint_row.conrelid = object.oid
+                AND constraint_row.contype <> 'n'::"char"
           ) = 1
+          AND NOT EXISTS (
+              SELECT 1
+              FROM pg_catalog.pg_constraint AS constraint_row
+              WHERE constraint_row.conrelid = object.oid
+                AND constraint_row.contype = 'n'::"char"
+                AND constraint_row.conkey <> ARRAY[1]::smallint[]
+          )
           AND EXISTS (
               SELECT 1
               FROM pg_catalog.pg_constraint AS constraint_row

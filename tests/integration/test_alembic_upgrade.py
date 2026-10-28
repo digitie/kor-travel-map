@@ -1114,6 +1114,9 @@ async def _tvn40_raw_sql_catalog_sha256(
                     CAST(:table_names AS text[])
                 )
             )
+              -- PG18의 contype 'n'(NOT NULL) 행은 세지 않는다 — NOT NULL은 열 대조
+              -- (`not_null`)가 보고, 세면 같은 계약이 major마다 다른 해시가 된다(ADR-118).
+              AND constraint_.contype <> 'n'
             UNION ALL
             SELECT
                 namespace.nspname AS schema_name,

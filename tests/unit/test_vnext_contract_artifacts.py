@@ -48,8 +48,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-09-10 T-VN-39 — 재키가 `target_schema_sql_sha256`을 바꿨다. 이 핀은
     # 그때 함께 갱신됐어야 했고, 로컬(CRLF)에서만 재면 값이 또 갈린다 —
     # `.gitattributes`가 `eol=lf`라 **정본은 LF 바이트**다.
+    # 2026-10-28 ADR-118 — environment에 PG18 재현 사실만 더했다(7축 값 불변).
     "target-schema-fingerprints-v1.json": (
-        "b08ed8a7684799614ad02fb957aff5945b7a69e34080903dcdee06cf9c5150da"
+        "31a97fe0fb4f4b88049892dbe5b1e1ef34a32086deebecf995d7d923d9054ff8"
     ),
     "tvn33-reference-ownership-v1.sql": (
         "2e72796b373691b4d6e10f71eceec4504df94af1a2582edbf445fb2390f20b6b"

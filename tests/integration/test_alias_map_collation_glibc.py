@@ -1,10 +1,12 @@
 """alias-map canonical 순서의 collation 회귀 방어 — glibc 전용 (T-VN-32C 리뷰 H2).
 
-기본 conftest PostGIS는 alpine(musl)이라 DB default collation이 byte order와
+옛 기본 conftest PostGIS는 alpine(musl)이라 DB default collation이 byte order와
 사실상 같아, ``COLLATE "C"``를 제거하는 변이가 테스트를 전부 통과한 채
-생존한다(적대 리뷰 실측). 본 모듈은 **glibc 이미지**(n150 공용 instance와 같은
-digest — ``_postgis_image.SHARED_GLIBC_POSTGIS_IMAGE``, default collation
-``en_US.utf8``, ADR-103)를 별도로 띄워:
+생존했다(적대 리뷰 실측). ADR-118부터 기본값도 이 glibc digest지만, lane 이미지와
+무관하게 판별력을 갖도록 별도로 띄우는 구조는 그대로 둔다. 본 모듈은
+**glibc 이미지**(n150 공용 instance와 같은 digest —
+``_postgis_image.SHARED_GLIBC_POSTGIS_IMAGE``, default collation ``en_US.utf8``,
+ADR-103·ADR-118)를 별도로 띄워:
 
 ① keyset 페이지 순서 == checksum canonical 정렬 == UTF-8 byte 순서를 단언하고
    (COLLATE 제거 변이는 glibc에서 en_US 순서로 갈라져 여기서 죽는다),
@@ -61,7 +63,7 @@ _SEED_IDS: Final[tuple[str, ...]] = (
 
 @pytest.fixture(scope="module")
 def glibc_pg_container() -> Any:
-    """glibc PostGIS 컨테이너 — conftest alpine 컨테이너와 별개."""
+    """glibc PostGIS 컨테이너 — conftest 공유 컨테이너와 별개."""
     try:
         from testcontainers.postgres import PostgresContainer
     except ImportError:
@@ -83,8 +85,8 @@ async def glibc_engine(glibc_pg_container: Any) -> AsyncIterator[AsyncEngine]:
     async with admin_engine.connect() as connection:
         autocommit = await connection.execution_options(isolation_level="AUTOCOMMIT")
         # 이 축은 immutable 300/PostGIS receipt가 아니라 alias SQL의 collation
-        # 판별만 검증한다. glibc image는 alpine baseline과 PostGIS patch level이
-        # 다를 수 있으므로 전체 baseline을 끌어오지 않고 최소 격리 표면만 만든다.
+        # 판별만 검증한다. lane 이미지와 PostGIS patch level이 다를 수 있으므로
+        # 전체 baseline을 끌어오지 않고 최소 격리 표면만 만든다.
         await autocommit.execute(text(f'CREATE DATABASE "{database}" TEMPLATE template0'))
     await admin_engine.dispose()
 

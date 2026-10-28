@@ -10,6 +10,16 @@
 
 ## [Unreleased]
 
+### PostgreSQL 18 + PostGIS 3.6 기준 (2026-10-28, ADR-118)
+
+- **CHANGED (CI)**: 통합 suite는 n150 공용 instance digest(`postgis/postgis:18-3.6@sha256:4a43e3c3…`) 한 lane에서
+  돈다. 필수 check 이름은 `pytest integration (PostGIS, pg18)`이다(옛 `alpine`·`glibc` 두 lane 삭제).
+- **CHANGED (standalone compose)**: `postgres`는 같은 PG18 digest, volume은 `/var/lib/postgresql`(PG18 PGDATA
+  규약), one-shot client는 `postgres:18-alpine`이다. PG16 volume은 이어 쓸 수 없다 — 새 volume으로 다시 만든다.
+- **FIXED**: 빈 DB 설치(`400_schema_baseline`)가 PG17+에서 `alembic_version contract is not exact`로 멈추던 것 —
+  `attstattarget` NULL, 소유자 `MAINTAIN` 권한, NOT NULL constraint 행을 major와 무관하게 판정한다.
+- **FIXED (API)**: `ON DELETE RESTRICT` 위반(PG18 23001)을 curated·curation 명령에서 23503과 같은 422로 응답한다.
+
 ### Codex PR 통합 리뷰의 비잠금 수정 (2026-10-27)
 
 - **FIXED**: shadow 후보 수집이 순서가 뒤바뀐(오래된) bundle에서 적재 transaction 전체를

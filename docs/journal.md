@@ -1,3 +1,10 @@
+## 2026-10-28 — T-PG18-CI: CI·compose를 PG18 공용 digest 한 lane으로(ADR-118, #1431)
+
+공용 PG 16→18 뒤 CI 통합 suite를 `postgis/postgis:18-3.6@sha256:4a43e3c3…` 한 lane으로 바꿨다(옛 PG16 alpine·glibc 삭제).
+PG18이 드러낸 가정 — `400` fresh guard(`attstattarget` NULL·소유자 MAINTAIN·contype `'n'`), catalog 해시의 `'n'` 행,
+RESTRICT 23001, parent420 ACL digest — 을 major 무관하게 고쳤고 head 오라클을 pg_dump 18로 재생성했다. migration은 없다.
+n150 CI-parity 4세션 초록(통합 1988 PASS/23 skip). 남은 것: GitHub CI·머지, prod PROJ 7→9 drift 검사(acceptance).
+
 ## 2026-10-28 — #1426의 main 병합 뒤 resume 크기 경계 복구
 
 ebb92ca9의 새 Python CI는 문서 크기 한 항목에서 실패했다(resume 227100B > 225280B).

@@ -3,7 +3,7 @@
 본 PR(#21)은 infra/ skeleton 단계 — 실 테이블/repo는 Sprint 2 첫 provider
 적재 PR. 본 테스트는 *환경*만 보증한다:
 
-1. PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto extension 모두 박혀 있다.
+1. PostgreSQL 18 + PostGIS 3.6 + pg_trgm + pgcrypto extension 모두 박혀 있다(ADR-118).
 2. ``x_extension`` schema에 격리되어 있다 (ADR-008).
 3. ``feature``/``provider_sync``/``ops``/``x_extension`` 4 schema 존재.
 4. ``ST_Transform``이 EPSG:4326 ↔ 5179 변환 가능 (ADR-012).

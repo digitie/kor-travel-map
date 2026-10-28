@@ -1,7 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-117.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-119.**
 
+- [ADR-118 — DB 기준을 PostgreSQL 18 + PostGIS 3.6으로, CI는 공용 instance digest 한 lane](118-postgres-18-ci-target.md) — proposed, 2026-10-28 (T-PG18-CI; ADR-007 DB major·ADR-103 CI lane 대체).
 - [ADR-116 — payload·좌표·geo 토큰이 그대로인 비-MOIS 행은 역지오코딩하지 않고 저장값을 재사용한다](116-reuse-stored-geo-for-unchanged-rows.md) — **accepted**, 2026-10-24 (#1356·#1357; MCST 첫 적재 재사용 45,930행).
 - [ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리](115-scoped-concurrent-feature-writes.md) — **accepted(부분 구현)**, 2026-10-23 제안·2026-10-27 개정 (alembic 411~434, 운영 head 432; SH 스냅샷·스칼라 정책 경로는 운영 OFF·동결, §11이 현행 잠금 순서·writer 분류 정본).
 - [ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다](114-weather-transport-state-in-memory-db.md) — proposed, 2026-10-23 (소유자 방향 결정, ADR-105 부분 대체; 1단계 transport 키 설계·구현 PR 2026-10-23; 2단계 weather 설계·구현 PR 2026-10-24).
@@ -32,7 +33,7 @@
 | ADR-004 | ORM은 매핑만, 쿼리는 raw SQL `text()` | [004-orm-mapping-only-raw-sql-text.md](004-orm-mapping-only-raw-sql-text.md) |
 | ADR-005 | 디버그 REST API는 인증 없음, 내부망 전용 (인증 결정은 ADR-066으로 superseded) | [005-debug-rest-api-no-auth-internal-only.md](005-debug-rest-api-no-auth-internal-only.md) |
 | ADR-006 | provider adapter/wrapper 신규 생성 금지 | → 개발 규칙 ([SKILL.md §4](../../SKILL.md)) |
-| ADR-007 | 의존 스택 — Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas | [007-dependency-stack-postgres-postgis-sqlalchemy.md](007-dependency-stack-postgres-postgis-sqlalchemy.md) |
+| ADR-007 | 의존 스택 — Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas (DB major는 ADR-118이 대체 제안) | [007-dependency-stack-postgres-postgis-sqlalchemy.md](007-dependency-stack-postgres-postgis-sqlalchemy.md) |
 | ADR-008 | PostGIS extension은 `x_extension` schema에 격리 | [008-postgis-extension-x-extension-schema.md](008-postgis-extension-x-extension-schema.md) |
 | ADR-009 | `feature_id` 결정적 생성 (`make_feature_id`) (ADR-068로 superseded) | [009-deterministic-feature-id.md](009-deterministic-feature-id.md) |
 | ADR-010 | weather forecast_style + timeline_bucket 두 축 분리 | → 이관 [etl/weather-feature-normalization.md](../etl/weather-feature-normalization.md) |
@@ -142,6 +143,7 @@
 
 | ADR-115 | 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리 (accepted, 부분 구현; SH·정책 경로 운영 OFF·동결) | [115-scoped-concurrent-feature-writes.md](115-scoped-concurrent-feature-writes.md) |
 | ADR-116 | 바뀌지 않은 비-MOIS 행은 저장 geo를 재사용한다 (accepted) | [116-reuse-stored-geo-for-unchanged-rows.md](116-reuse-stored-geo-for-unchanged-rows.md) |
+| ADR-118 | DB 기준 PostgreSQL 18 + PostGIS 3.6, CI는 공용 instance digest 한 lane (proposed; ADR-007 DB major·ADR-103 CI lane 대체) | [118-postgres-18-ci-target.md](118-postgres-18-ci-target.md) |
 
 ## 새 ADR 작성 규약
 

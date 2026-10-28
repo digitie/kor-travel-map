@@ -199,7 +199,7 @@ BEGIN
             USING ERRCODE = '55000';
     END IF;
 
-    -- pristine stock PostGIS 16 Alpine database의 input inventory는 plpgsql 하나다.
+    -- pristine stock PostGIS(16 Alpine·18 glibc 같음) database의 input inventory는 plpgsql 하나다.
     -- source `0236`의 fuzzystrmatch는 아래 dedicated bootstrap이 명시적으로 만드는
     -- final contract이지, pre-bootstrap input에 허용할 public residue가 아니다.
     IF (
@@ -222,7 +222,7 @@ BEGIN
 
     -- procedural language는 relation/extension inventory에 나타나지 않는다. 여기에
     -- foreign language가 있으면 final `300` guard만 뒤늦게 거절해 role/schema가
-    -- 남을 수 있으므로, 첫 bootstrap mutation 전에 stock PostgreSQL 16 inventory를
+    -- 남을 수 있으므로, 첫 bootstrap mutation 전에 stock PostgreSQL(16·18 같음) inventory를
     -- exact하게 닫는다. final root migration의 language contract와 같은 네 언어만
     -- 수용한다.
     IF (
