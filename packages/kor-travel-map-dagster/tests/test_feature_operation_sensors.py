@@ -50,6 +50,7 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _apply_run_record,
     _dagster_run_page,
     _evaluate_reconciliation_sensor,
+    _EVENT_HANDLED,
     _evaluate_status_event,
     _failure_of,
     _map_run_count,
@@ -1356,7 +1357,9 @@ async def test_success_event_requests_a_sweep_instead_of_reconciling() -> None:
     record = _record(DagsterRunStatus.SUCCESS)
     client = _Client()
 
-    result = await _evaluate_status_event(_status_context(record), client)
+    result = await _evaluate_status_event(
+        _status_context(record), client, requests_completion=True
+    )
 
     assert isinstance(result, RunRequest)
     assert result.run_key == "feature-operation-completion:success:run-1"
@@ -1368,10 +1371,12 @@ async def test_success_event_skips_when_a_sweep_has_not_started_yet() -> None:
     queued = _completion_run(run_id="sweep-a", status=DagsterRunStatus.QUEUED, storage_id=3)
     client = _Client()
 
-    result = await _evaluate_status_event(_status_context(record, queued), client)
+    result = await _evaluate_status_event(
+        _status_context(record, queued), client, requests_completion=True
+    )
 
-    # SkipReason이 아니라 None — 같은 tick의 다른 이벤트 reaction과 섞여도 tick이 산다.
-    assert result is None
+    # SkipReason이 아니라 handled — sensor가 reaction으로 tick을 끝낸다(다른 reaction과 섞여도 산다).
+    assert result == _EVENT_HANDLED
     assert len(client.ensure_calls) == 1
 
 
@@ -1381,7 +1386,9 @@ async def test_success_event_requests_again_when_the_sweep_already_started() -> 
     record = _record(DagsterRunStatus.SUCCESS)
     started = _completion_run(run_id="sweep-a", status=DagsterRunStatus.STARTED, storage_id=3)
 
-    result = await _evaluate_status_event(_status_context(record, started), _Client())
+    result = await _evaluate_status_event(
+        _status_context(record, started), _Client(), requests_completion=True
+    )
 
     assert isinstance(result, RunRequest)
 
@@ -1636,6 +1643,9 @@ def test_status_tick_survives_a_panel_only_run_then_an_unresolvable_operation_ru
         data, context = _evaluate_real_tick(feature_operation_started_sensor, instance, client)
 
         assert data.run_requests == []
+        # panel-only reaction 1 + 해석 실패한 operation 이벤트 reaction 1 — 둘 다 평가됐다.
+        assert len(data.dagster_run_reactions) == 2
+        assert len(client.membership_calls) == 1
         cursor = RunStatusSensorCursor.from_json(context.cursor)
         last_started = instance.fetch_run_status_changes(
             DagsterEventType.RUN_START, limit=1
@@ -1654,7 +1664,32 @@ def test_status_tick_survives_a_panel_only_run_then_a_normal_operation_run() -> 
         data, _context = _evaluate_real_tick(feature_operation_success_sensor, instance, client)
 
         assert data.run_requests == []
+        assert len(data.dagster_run_reactions) == 2
         assert len(client.ensure_calls) == 1
+
+
+def test_status_tick_applies_at_most_one_operation_event() -> None:
+    """operation 이벤트는 tick당 하나 — 둘째는 다음 tick이다.
+
+    client는 tick마다 한 번 만들어지고(엔진 pool 1) 이벤트마다 ``asyncio.run``이 새 loop를
+    쓴다. 한 tick에서 두 이벤트가 client를 쓰면 앞 loop에 묶인 연결을 다시 집는다. 이벤트당
+    20초 예산을 여러 번 쓰면 sensor 평가 timeout(60초)도 넘는다.
+    """
+    with DagsterInstance.ephemeral() as instance:
+        first = _execute_run(instance, name=_JOB_NAME, tags=_operation_tags())
+        _execute_run(instance, name=_JOB_NAME, tags=_operation_tags())
+        client = _Client()
+
+        data, context = _evaluate_real_tick(feature_operation_started_sensor, instance, client)
+
+        assert [call["dagster_run_id"] for call in client.ensure_calls] == [first]
+        assert len(data.dagster_run_reactions) == 1
+        cursor = RunStatusSensorCursor.from_json(context.cursor)
+        first_started = instance.fetch_run_status_changes(
+            DagsterEventType.RUN_START, limit=2, ascending=True
+        ).records[0]
+        assert first_started.event_log_entry.run_id == first
+        assert cursor.record_id == first_started.storage_id
 
 
 def test_non_success_status_sensor_never_requests_a_completion_run() -> None:

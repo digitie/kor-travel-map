@@ -10,7 +10,7 @@ from collections.abc import Awaitable, Callable, Coroutine, Mapping, Sequence, S
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from functools import partial
-from typing import TYPE_CHECKING, Any, Final, Protocol, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Final, Literal, Protocol, TypeVar, cast
 
 from kortravelcommon.deadline import DeadlineExceeded, call_with_deadline
 from kortravelcommon.pg_errors import pg_error_info
@@ -38,6 +38,7 @@ from dagster import (
     run_status_sensor,
     sensor,
 )
+from dagster._core.definitions.sensor_definition import DagsterRunReaction
 
 from .feature_operation_completion import (
     FEATURE_OPERATION_COMPLETION_JOB_NAME,
@@ -162,6 +163,9 @@ _T = TypeVar("_T")
 _OPERATION_KEY_TAG: Final[str] = "kor_travel_map.operation_key"
 _TRIGGER_KIND_TAG: Final[str] = "kor_travel_map.trigger_kind"
 _ADMIN_MANUAL_TRIGGER_TAG: Final[str] = "kor_travel_map.admin_manual_trigger"
+_EventHandled = Literal["event_handled"]
+_EVENT_HANDLED: Final[_EventHandled] = "event_handled"
+"""status sensor가 DB를 건드린(또는 건드리려 한) 이벤트 — tick을 reaction으로 끝낸다."""
 _COMPLETION_PENDING: Final[str] = "completion_pending"
 """sensor가 SUCCESS run의 root를 ensure만 하고 완결을 completion run에 넘겼다는 outcome."""
 
@@ -403,14 +407,18 @@ def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
     def _status_sensor(
         context: RunStatusSensorContext,
         kor_travel_map_client: ResourceParam[object],
-    ) -> RunRequest | None:
-        return _run_async(
+    ) -> RunRequest | DagsterRunReaction | None:
+        result = _run_async(
             _evaluate_status_event(
                 context,
                 cast("AsyncKorTravelMapClient", kor_travel_map_client),
                 requests_completion=requests_completion,
             )
         )
+        if result == _EVENT_HANDLED:
+            # tick을 끝낸다. ``SkipReason``과 달리 앞 이벤트의 reaction과 섞여도 된다.
+            return DagsterRunReaction(dagster_run=context.dagster_run, run_status=status)
+        return cast("RunRequest | None", result)
 
     return _status_sensor
 
@@ -461,20 +469,28 @@ async def _evaluate_status_event(
     context: RunStatusSensorContext,
     client: AsyncKorTravelMapClient,
     *,
-    requests_completion: bool = True,
-) -> RunRequest | None:
-    """run-status 이벤트 하나를 반영한다. 돌려주는 값은 ``RunRequest`` 아니면 ``None``뿐이다.
+    requests_completion: bool = False,
+) -> RunRequest | _EventHandled | None:
+    """run-status 이벤트 하나를 반영한다.
+
+    돌려주는 값은 셋뿐이다 — ``None``(panel-only: 같은 tick의 다음 이벤트로 간다),
+    ``_EVENT_HANDLED``(DB를 건드린 operation 이벤트: sensor가 ``DagsterRunReaction``으로 tick을
+    끝낸다), ``RunRequest``(completion sweep, target job이 있는 sensor(``requests_completion``)만).
 
     **``SkipReason``을 돌려주지 않는다.** Dagster run-status sensor는 ``None``이면 그 이벤트를
-    ``DagsterRunReaction``으로 내고 같은 tick에서 다음 이벤트로 가고, 그 밖의 값이면 그것을 내고
-    tick을 끝낸다. 그런데 ``evaluate_tick``은 ``SkipReason``과 reaction이 한 tick에 섞이면
-    ``CheckError``로 tick 전체를 실패시키고, 실패한 tick은 cursor를 commit하지 않는다 — 앞
-    이벤트가 ``None``이고 뒤 이벤트가 ``SkipReason``이면 그 sensor는 같은 이벤트에서 영원히
-    멈춘다(2026-10-22~28 prod). reaction과 ``RunRequest``는 섞여도 된다.
+    reaction으로 내고 같은 tick에서 다음 이벤트로 가고, 그 밖의 값이면 그것을 내고 tick을
+    끝낸다. ``evaluate_tick``은 ``SkipReason``과 reaction이 한 tick에 섞이면 ``CheckError``로
+    tick을 실패시키고, 실패한 tick은 cursor를 commit하지 않는다 — panel-only 이벤트(``None``)
+    뒤에 ``SkipReason``이 오면 sensor가 같은 이벤트에서 영원히 멈춘다(2026-10-22~28 prod).
+    reaction·``RunRequest``는 서로 섞여도 된다. target 없는 sensor의 ``RunRequest``도 tick을
+    실패시키므로 같은 정지를 낸다.
 
-    그래서 반영 결과와 실패는 ``context.log``에만 남기고, 실패한 이벤트도 지나간다 — 놓친
-    반영은 reconcile sensor가 다시 집는다. ``RunRequest``는 target job이 있는 sensor
-    (``requests_completion``)만 낸다.
+    operation 이벤트는 **tick당 하나**다. client(엔진 pool 1)는 tick마다 한 번 만들어지고
+    이벤트마다 ``asyncio.run``이 새 loop를 쓰므로, 한 tick에서 두 번 쓰면 앞 loop에 묶인 연결을
+    다시 집는다. 이벤트당 20초 예산을 여러 번 쓰면 sensor 평가 timeout(60초)도 넘는다.
+
+    반영 결과와 실패는 ``context.log``에만 남기고 이벤트는 지나간다 — 놓친 반영은 reconcile
+    sensor가 다시 집는다.
     """
     try:
         record = cast(
@@ -486,13 +502,13 @@ async def _evaluate_status_event(
             "provider feature operation event의 Dagster run 관측 실패: "
             f"run_id={context.dagster_run.run_id} error_type={type(exc).__name__}"
         )
-        return None
+        return _EVENT_HANDLED
     if record is None:
         context.log.error(
             "provider feature operation event의 Dagster run record를 찾지 못함: "
             f"run_id={context.dagster_run.run_id}"
         )
-        return None
+        return _EVENT_HANDLED
     try:
         # 상태 sensor도 공용 code server의 sensor thread를 나눠 쓴다 — reconcile tick과 같은 서버 쪽
         # 상한을 건다(ADR-112 결정 2). 반영은 다음 이벤트·reconcile이 다시 하므로 짧게 끊어도 된다.
@@ -504,13 +520,13 @@ async def _evaluate_status_event(
                 outcome = await _apply_run_record(record, client)
     except FeatureOperationObservationError as exc:
         context.log.error("provider feature operation panel-only conflict: %s", exc)
-        return None
+        return _EVENT_HANDLED
     except Exception as exc:
         context.log.error(
             "provider feature operation event DB 반영 실패: "
             f"run_id={record.dagster_run.run_id} error_type={type(exc).__name__}"
         )
-        return None
+        return _EVENT_HANDLED
     if outcome == "panel_only":
         # operation key가 없는 run(completion sweep 자신 등)에는 할 일이 없다.
         return None
@@ -526,7 +542,7 @@ async def _evaluate_status_event(
         "provider feature operation 상태 반영: "
         f"run_id={record.dagster_run.run_id} outcome={outcome}"
     )
-    return None
+    return _EVENT_HANDLED
 
 
 def _utcnow() -> datetime:
