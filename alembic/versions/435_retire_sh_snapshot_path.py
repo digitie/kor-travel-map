@@ -665,7 +665,7 @@ ALTER TABLE ops.application_schema_operation_receipts
 
 #: 지우는 표의 trigger가 부르는 함수. 표가 먼저 사라져야 지울 수 있다.
 _TRIGGER_FUNCTIONS: Final[frozenset[str]] = frozenset(
-    {"ops.reject_provider_snapshot_artifact_update"}
+    {"ops._guard_scoped_feature_write_completion", "ops.reject_provider_snapshot_artifact_update"}
 )
 
 
@@ -688,7 +688,13 @@ def _drop_statements() -> tuple[str, ...]:
         )
     statements.extend("DROP TABLE " + table for table in _TABLES)
     statements.extend("DROP INDEX " + index for index in _INDEXES)
-    statements.extend(_drop_routine(drop) for drop in _DROPS if drop.name in _TRIGGER_FUNCTIONS)
+    for owner in (_STATE_OWNER, _SCHEMA_OWNER):
+        statements.append("SET ROLE " + owner)
+        statements.extend(
+            _drop_routine(drop)
+            for drop in _DROPS
+            if drop.owner == owner and drop.name in _TRIGGER_FUNCTIONS
+        )
     return tuple(statements)
 
 
