@@ -1,3 +1,10 @@
+## 2026-10-28 — run-status sensor tick 실패로 cursor 엿새 정지(#1434)
+
+prod code server가 30초마다 `operation_has_no_enabled_memberships`(419로 끈 transport run 3건)를 찍었다. 원인은
+tick 실패다: 앞 이벤트가 `None`(reaction), 뒤 이벤트가 `SkipReason`이면 `evaluate_tick`이 `CheckError`로 tick을
+죽이고 cursor를 commit하지 않는다(#1345 뒤). 추적 행은 이미 terminal이었다. 수정: operation 이벤트는 `DagsterRunReaction`(tick당 하나),
+`RunRequest`는 success만; 실제 `evaluate_tick` 테스트 4건. 운영: 네 sensor cursor를 최신 이벤트로 옮김(백업 n150 `~/mapnoise-cursor-backup-*`).
+
 ## 2026-10-28 — ADR-117: SH 스냅샷·스칼라 정책 경로 퇴역(alembic 435)
 
 소유자 승인(DC-2). prod 읽기 전용 측정에서 SH 경로는 한 번도 돌지 않았다(flag OFF, 정책 0, attempt·artifact 0,

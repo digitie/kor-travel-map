@@ -10,6 +10,16 @@
 
 ## [Unreleased]
 
+### run-status sensor tick 실패로 cursor가 멈추던 문제 (2026-10-28)
+
+- **FIXED (Dagster)**: `feature_operation_*` run-status sensor가 `SkipReason`을 내지 않는다. 같은 tick에서 앞 이벤트가
+  `None`(reaction)이고 뒤 이벤트가 `SkipReason`이면 Dagster `evaluate_tick`이 `CheckError`로 tick을 실패시키고 cursor를
+  commit하지 않아, queued·starting·started·failure sensor가 2026-10-22~23 이벤트에 멈춰 30초마다 같은 오류를 찍었다
+  (#1345 회귀). operation 이벤트는 `DagsterRunReaction`으로 tick을 끝내고(tick당 하나), panel-only만 `None`으로 계속한다.
+  반영 결과·실패는 sensor 로그에 남고 이벤트는 지나간다(누락은 reconcile sensor가 집는다).
+- **FIXED (Dagster)**: completion sweep `RunRequest`는 target job이 있는 success sensor만 낸다. 다른 status sensor가
+  이미 SUCCESS가 된 run을 늦게 보면 target 없는 요청으로 tick이 실패해 같은 방식으로 cursor가 멈추던 경로를 닫았다.
+
 ### SH 스냅샷·스칼라 정책 경로 퇴역 — ADR-117 (2026-10-28)
 
 - **REMOVED (DB, alembic 435)**: ADR-115 SH 스냅샷·스칼라 정책·scope 커널 경로(411~433)의 루틴 74개, 표 10개

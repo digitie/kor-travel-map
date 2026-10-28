@@ -10,12 +10,17 @@ from typing import Any
 
 import pytest
 from dagster import (
+    DagsterEventType,
     DagsterInstance,
     DagsterRun,
     DagsterRunStatus,
     DefaultSensorStatus,
     RunRequest,
+    build_sensor_context,
+    job,
+    op,
 )
+from dagster._core.definitions.run_status_sensor_definition import RunStatusSensorCursor
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
@@ -31,6 +36,7 @@ from kortravelmap.dagster.feature_operation_completion import (
     FEATURE_OPERATION_COMPLETION_POOL,
 )
 from kortravelmap.dagster.feature_operation_sensors import (
+    _EVENT_HANDLED,
     FEATURE_OPERATION_COMPLETION_BACKSTOP_SECONDS,
     FEATURE_OPERATION_DAGSTER_PAGE_SECONDS,
     FEATURE_OPERATION_REALERT_SECONDS,
@@ -51,6 +57,8 @@ from kortravelmap.dagster.feature_operation_sensors import (
     _reconcile_tick,
     apply_completion_record,
     feature_operation_reconciliation_sensor,
+    feature_operation_started_sensor,
+    feature_operation_success_sensor,
 )
 from kortravelmap.dagster.run_scope import (
     CODE_LOCATION_RUN_TAG,
@@ -1349,7 +1357,9 @@ async def test_success_event_requests_a_sweep_instead_of_reconciling() -> None:
     record = _record(DagsterRunStatus.SUCCESS)
     client = _Client()
 
-    result = await _evaluate_status_event(_status_context(record), client)
+    result = await _evaluate_status_event(
+        _status_context(record), client, requests_completion=True
+    )
 
     assert isinstance(result, RunRequest)
     assert result.run_key == "feature-operation-completion:success:run-1"
@@ -1361,10 +1371,13 @@ async def test_success_event_skips_when_a_sweep_has_not_started_yet() -> None:
     queued = _completion_run(run_id="sweep-a", status=DagsterRunStatus.QUEUED, storage_id=3)
     client = _Client()
 
-    result = await _evaluate_status_event(_status_context(record, queued), client)
+    result = await _evaluate_status_event(
+        _status_context(record, queued), client, requests_completion=True
+    )
 
-    assert not isinstance(result, RunRequest)
-    assert "completion_pending" in (result.skip_message or "")
+    # SkipReason이 아니라 handled — sensor가 reaction으로 tick을 끝낸다.
+    assert result == _EVENT_HANDLED
+    assert len(client.ensure_calls) == 1
 
 
 async def test_success_event_requests_again_when_the_sweep_already_started() -> None:
@@ -1373,7 +1386,9 @@ async def test_success_event_requests_again_when_the_sweep_already_started() -> 
     record = _record(DagsterRunStatus.SUCCESS)
     started = _completion_run(run_id="sweep-a", status=DagsterRunStatus.STARTED, storage_id=3)
 
-    result = await _evaluate_status_event(_status_context(record, started), _Client())
+    result = await _evaluate_status_event(
+        _status_context(record, started), _Client(), requests_completion=True
+    )
 
     assert isinstance(result, RunRequest)
 
@@ -1567,6 +1582,131 @@ async def test_status_event_for_a_panel_only_run_yields_to_the_next_event() -> N
 
     assert await _evaluate_status_event(_status_context(record), client) is None
     assert client.ensure_calls == []
+
+
+# -- 실제 Dagster run-status sensor tick 계약 ---------------------------------
+#
+# Dagster(1.13)의 run-status sensor는 함수가 ``None``을 돌려주면 그 이벤트를
+# ``DagsterRunReaction``으로 내고 **같은 tick에서** 다음 이벤트로 간다. ``None``이
+# 아닌 값을 돌려주면 그것을 내고 tick을 끝낸다. 그리고 ``evaluate_tick``은 한 tick
+# 결과에 ``SkipReason``과 ``DagsterRunReaction``이 함께 있으면 ``CheckError``로
+# tick 전체를 실패시킨다 — 실패한 tick은 cursor를 commit하지 않으므로 같은 이벤트를
+# 영원히 다시 읽는다(2026-10-22~28 prod: started/starting/queued/failure sensor가
+# 엿새 동안 같은 transport run에 멈춰 30초마다 같은 오류를 찍었다). 아래 테스트는
+# fake context가 아니라 실제 ``evaluate_tick``으로 그 계약을 건다.
+
+
+def _execute_run(instance: DagsterInstance, *, name: str, tags: dict[str, str]) -> str:
+    @op(name=f"{name}_op")
+    def _noop() -> None:
+        return None
+
+    @job(name=name)
+    def _job() -> None:
+        _noop()
+
+    result = _job.execute_in_process(instance=instance, tags=tags)
+    return result.run_id
+
+
+def _operation_tags() -> dict[str, str]:
+    return {
+        "kor_travel_map.operation_key": _JOB_NAME,
+        "kor_travel_map.trigger_kind": "schedule",
+    }
+
+
+def _evaluate_real_tick(
+    sensor_def: Any,
+    instance: DagsterInstance,
+    client: object,
+) -> Any:
+    context = build_sensor_context(
+        instance=instance,
+        cursor=RunStatusSensorCursor(record_id=0, record_timestamp=None).to_json(),
+        resources={"kor_travel_map_client": client},
+    )
+    return sensor_def.evaluate_tick(context), context
+
+
+def test_status_tick_survives_a_panel_only_run_then_an_unresolvable_operation_run() -> None:
+    """panel-only run 뒤에 manifest를 풀 수 없는 operation run이 와도 tick이 산다.
+
+    prod 재현: operation이 disable돼(migration 419) 실행 가능 member가 0건인 run.
+    오류는 로그로 한 번 남기고 cursor는 그 이벤트를 지나가야 한다.
+    """
+    with DagsterInstance.ephemeral() as instance:
+        _execute_run(instance, name="panel_only_job", tags={})
+        stuck = _execute_run(instance, name=_JOB_NAME, tags=_operation_tags())
+        client = _NoEnabledMembershipClient()
+
+        data, context = _evaluate_real_tick(feature_operation_started_sensor, instance, client)
+
+        assert data.run_requests == []
+        # panel-only reaction 1 + 해석 실패한 operation 이벤트 reaction 1 — 둘 다 평가됐다.
+        assert len(data.dagster_run_reactions) == 2
+        assert len(client.membership_calls) == 1
+        cursor = RunStatusSensorCursor.from_json(context.cursor)
+        last_started = instance.fetch_run_status_changes(
+            DagsterEventType.RUN_START, limit=1
+        ).records[0]
+        assert last_started.event_log_entry.run_id == stuck
+        assert cursor.record_id == last_started.storage_id
+
+
+def test_status_tick_survives_a_panel_only_run_then_a_normal_operation_run() -> None:
+    """정상 반영 outcome도 SkipReason으로 돌려주면 같은 방식으로 tick이 죽는다."""
+    with DagsterInstance.ephemeral() as instance:
+        _execute_run(instance, name="panel_only_job", tags={})
+        _execute_run(instance, name=_JOB_NAME, tags=_operation_tags())
+        client = _Client(ensure_outcomes=["blocked"])
+
+        data, _context = _evaluate_real_tick(feature_operation_success_sensor, instance, client)
+
+        assert data.run_requests == []
+        assert len(data.dagster_run_reactions) == 2
+        assert len(client.ensure_calls) == 1
+
+
+def test_status_tick_applies_at_most_one_operation_event() -> None:
+    """operation 이벤트는 tick당 하나 — 둘째는 다음 tick이다.
+
+    client는 tick마다 한 번 만들어지고(엔진 pool 1) 이벤트마다 ``asyncio.run``이 새 loop를
+    쓴다. 한 tick에서 두 이벤트가 client를 쓰면 앞 loop에 묶인 연결을 다시 집는다. 이벤트당
+    20초 예산을 여러 번 쓰면 sensor 평가 timeout(60초)도 넘는다.
+    """
+    with DagsterInstance.ephemeral() as instance:
+        first = _execute_run(instance, name=_JOB_NAME, tags=_operation_tags())
+        _execute_run(instance, name=_JOB_NAME, tags=_operation_tags())
+        client = _Client()
+
+        data, context = _evaluate_real_tick(feature_operation_started_sensor, instance, client)
+
+        assert [call["dagster_run_id"] for call in client.ensure_calls] == [first]
+        assert len(data.dagster_run_reactions) == 1
+        cursor = RunStatusSensorCursor.from_json(context.cursor)
+        first_started = instance.fetch_run_status_changes(
+            DagsterEventType.RUN_START, limit=2, ascending=True
+        ).records[0]
+        assert first_started.event_log_entry.run_id == first
+        assert cursor.record_id == first_started.storage_id
+
+
+def test_non_success_status_sensor_never_requests_a_completion_run() -> None:
+    """started sensor가 이미 SUCCESS가 된 run을 늦게 보아도 completion run을 내지 않는다.
+
+    target job은 success sensor에만 있다. 다른 status sensor가 ``RunRequest``를 내면
+    ``evaluate_tick``이 target 없는 요청으로 tick을 실패시킨다 — 밀린 이벤트를 따라잡는
+    동안 그대로 다시 멈춘다. completion은 success sensor와 reconcile backstop이 맡는다.
+    """
+    with DagsterInstance.ephemeral() as instance:
+        _execute_run(instance, name=_JOB_NAME, tags=_operation_tags())
+        client = _Client()
+
+        data, _context = _evaluate_real_tick(feature_operation_started_sensor, instance, client)
+
+        assert data.run_requests == []
+        assert len(client.ensure_calls) == 1
 
 
 async def test_backstop_fires_after_a_sweep_cancelled_before_it_started() -> None:
