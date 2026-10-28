@@ -17,7 +17,7 @@ ADR 참조
 - ADR-002 — async-only API
 - ADR-003 — 호출자는 engine을 주입
 - ADR-004 — ORM 매핑만, 쿼리는 raw SQL ``text()``
-- ADR-007 — PostgreSQL 16 + SQLAlchemy 2 async + asyncpg
+- ADR-007·ADR-118 — PostgreSQL 18 + SQLAlchemy 2 async + asyncpg
 - ADR-008 — extension은 ``x_extension`` schema 격리
 
 Sprint 1 scope

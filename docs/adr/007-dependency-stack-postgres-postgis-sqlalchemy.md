@@ -1,6 +1,6 @@
 # ADR-007: 의존 스택 — Postgres + PostGIS + SQLAlchemy 2 async + GeoAlchemy2 + GeoPandas
 
-- **상태**: accepted
+- **상태**: accepted — DB major는 **ADR-118로 대체**(2026-10-28: PostgreSQL 18 + PostGIS 3.6). 나머지 스택은 유효.
 - **날짜**: 2026-05-24
 - **결정자**: 사용자
 - **컨텍스트**: `kor-travel-geo`가 동일 운영 환경에서 PostgreSQL 16 +

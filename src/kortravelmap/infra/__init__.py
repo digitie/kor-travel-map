@@ -23,7 +23,7 @@ ADR 참조
 --------
 - ADR-002 — async-only (SQLAlchemy 2 async + asyncpg)
 - ADR-004 — ORM 매핑만, 쿼리는 raw SQL (EXPLAIN 친화 + 인덱스 hint 자유)
-- ADR-007 — PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto
+- ADR-007·ADR-118 — PostgreSQL 18 + PostGIS 3.6 + pg_trgm + pgcrypto
 - ADR-008 — extension은 ``x_extension`` schema에 격리
 - ADR-011 — 작업 큐 ``ops.import_jobs`` 영속화 + advisory lock + SKIP LOCKED
 - ADR-012 — 공간 쿼리 입력 좌표 1회 변환, 반경은 ``coord_5179`` (meter)

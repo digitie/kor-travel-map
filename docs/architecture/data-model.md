@@ -12,7 +12,7 @@ CHECK constraint가 여기에 박혀 있고, Alembic migration 작성 시 본 �
 
 ## 0. 공통
 
-- **DB**: PostgreSQL 16
+- **DB**: PostgreSQL 18 (ADR-118)
 - **확장**: `postgis`, `postgis_topology`, `pg_trgm`, `pgcrypto`
   → 모두 `x_extension` schema에 설치 (ADR-008). `search_path = public, x_extension`.
 - **schema 분리**:

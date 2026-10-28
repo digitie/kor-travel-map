@@ -6,7 +6,7 @@
 ADR 참조
 --------
 - ADR-005 — 디버그 UI 인증 없음 + 내부망 전용
-- ADR-007 — PostgreSQL 16 + PostGIS 3.5 + SQLAlchemy 2 async + asyncpg
+- ADR-007·ADR-118 — PostgreSQL 18 + PostGIS 3.6 + SQLAlchemy 2 async + asyncpg
 - ADR-015 — S3 호환 객체 저장소 (RustFS 1차, MinIO/Ceph/R2 swap)
 - ADR-019 — KST aware datetime
 - ADR-030 — in-memory 캐시 금지 (``functools.cache`` 한정 narrow 예외)

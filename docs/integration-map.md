@@ -35,7 +35,7 @@
 >
 > | 포트 | 컨테이너 | 담는 것 | listen |
 > |---|---|---|---|
-> | **11000** | `kor-travel-shared-postgres` (`postgis/postgis:16-3.5`, 실행 image `sha256:8b33190b…`) | `kor_travel_geo`·`kor_travel_weather`·`kor_travel_transport`·`kor_travel_concierge`·`pinvi`와 각 `_dagster`, **`kor_travel_map`·`kor_travel_map_dagster`(2026-09-29부터)** | `127.0.0.1` |
+> | **11000** | `kor-travel-shared-postgres` (`postgis/postgis:18-3.6`, 실행 image `sha256:4a43e3c3…`; 2026-10-27 16→18 pg_upgrade, Manager #562) | `kor_travel_geo`·`kor_travel_weather`·`kor_travel_transport`·`kor_travel_concierge`·`pinvi`와 각 `_dagster`, **`kor_travel_map`·`kor_travel_map_dagster`(2026-09-29부터)** | `127.0.0.1` |
 > | ~~12700~~ | `kor-travel-map-postgres` | **2026-09-29 멈춤(exited, 컨테이너·PGDATA 보존)** — 이전 전 `kor_travel_map` · `_dagster`와 검증 잔여 `ktm_40b`·`ktm_bootstrap`·`ktm_gcverify*`. 72시간 관찰·소유자 수락 뒤 컨테이너만 제거(PGDATA는 롤백용으로 계속 보존) | — |
 >
 > 2026-08-17부터 한동안은 프로젝트마다 전용 인스턴스(geo 12500 · concierge 12600 · map 12700 ·
@@ -46,9 +46,9 @@
 > (다른 프로젝트 role은 CONNECT할 수 없다), 앱 DB에 연결 상한을 건다. `ktm_*` role 이름은
 > cluster 전역을 점유한다(받아들인 위험).
 >
-> **이전 뒤 달라지는 것** — 공용 instance는 glibc 이미지(PG 16.9·PostGIS 3.5.2, collation
-> `en_US.utf8`)다. 순서가 digest·lock·Python 비교에 들어가는 text 키는 `COLLATE "C"`로
-> 고정했고, CI `integration` job은 그 digest에서도 돈다(`lane: glibc`). Map bootstrap은 그
+> **이전 뒤 달라지는 것** — 공용 instance는 glibc 이미지(이전 당시 PG 16.9·PostGIS 3.5.2, 2026-10-27부터
+> PG 18.6·PostGIS 3.6.4, collation `en_US.utf8`)다. 순서가 digest·lock·Python 비교에 들어가는 text 키는
+> `COLLATE "C"`로 고정했고, CI `integration` job은 그 digest 하나에서 돈다(`lane: pg18`, ADR-118). Map bootstrap은 그
 > instance의 기존 admin으로 fresh DB에서 한 번 돈다(새 superuser 없음).
 >
 > **`5432`를 듣는 것은 없다.** 옛 문서를 보고 그리로 붙으면 연결 자체가 실패한다.

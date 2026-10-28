@@ -22,7 +22,8 @@ loader가 다시 쓸 때까지 비어 있음. bootstrap 동안 instance admin �
   curation collection advisory lock, cache target source head capture·member 조회.
   회귀 탐지기는 `tests/integration/test_collation_sensitive_orderings_glibc.py`다.
 - CI `integration` job은 `lane: alpine`·`lane: glibc` 두 leg이고, 이미지 정본은
-  `tests/integration/_postgis_image.py`(`KTM_TEST_POSTGIS_IMAGE`)다.
+  `tests/integration/_postgis_image.py`(`KTM_TEST_POSTGIS_IMAGE`)다. **2026-10-28 ADR-118이 대체** — 공용 PG가
+  18로 오른 뒤 lane은 공용 instance digest 하나(`lane: pg18`)다.
 - `scripts/n150/adjudicate.sh`는 Map API 컨테이너 안에서 읽기 전용으로 세고,
   `scripts/n150/repin.sh`는 D2 fixture DSN을 그 컨테이너의 DSN에서 유도한다. 두 스크립트에는
   instance 이름·port·superuser가 없다(`tests/unit/test_n150_scripts_have_no_instance_literals.py`).

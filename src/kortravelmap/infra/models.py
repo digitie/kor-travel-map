@@ -29,7 +29,7 @@ raw SQL로 읽는다. typed detail 조립은 public projection·materializer·re
 ADR 참조
 --------
 - ADR-004 — ORM 매핑만, 쿼리는 raw SQL (``infra/*_repo.py``)
-- ADR-007 — PostgreSQL 16 + PostGIS 3.5 + pg_trgm + pgcrypto
+- ADR-007·ADR-118 — PostgreSQL 18 + PostGIS 3.6 + pg_trgm + pgcrypto
 - ADR-008 — extension은 ``x_extension`` schema 격리
 - ADR-012 — ``coord_5179`` STORED generated column (반경 검색 인덱스)
 - ADR-018 — Feature.detail은 kind별 Pydantic 모델 (자유 dict 금지)
