@@ -954,7 +954,8 @@ services:
         condition: service_healthy
 
 volumes:
-  kor-travel-map-postgres:
+  # PG18 PGDATA(`/var/lib/postgresql/18/docker`). 이름에 major를 넣어 옛 PG16 volume과 섞지 않는다(ADR-118).
+  kor-travel-map-postgres-18:
   kor-travel-map-mois-source:
     name: ${KOR_TRAVEL_MAP_MOIS_SOURCE_DB_VOLUME:-kor-travel-map-mois-source}
   kor-travel-map-rustfs-data:
