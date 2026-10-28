@@ -4,8 +4,9 @@
 사실상 같아, ``COLLATE "C"``를 제거하는 변이가 테스트를 전부 통과한 채
 생존했다(적대 리뷰 실측). ADR-118부터 기본값도 이 glibc digest지만, lane 이미지와
 무관하게 판별력을 갖도록 별도로 띄우는 구조는 그대로 둔다. 본 모듈은
-**glibc 이미지**(n150 공용 instance와 같은 digest — ``_postgis_image.SHARED_GLIBC_POSTGIS_IMAGE``, default collation
-``en_US.utf8``, ADR-103·ADR-118)를 별도로 띄워:
+**glibc 이미지**(n150 공용 instance와 같은 digest —
+``_postgis_image.SHARED_GLIBC_POSTGIS_IMAGE``, default collation ``en_US.utf8``,
+ADR-103·ADR-118)를 별도로 띄워:
 
 ① keyset 페이지 순서 == checksum canonical 정렬 == UTF-8 byte 순서를 단언하고
    (COLLATE 제거 변이는 glibc에서 en_US 순서로 갈라져 여기서 죽는다),
