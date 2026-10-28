@@ -1,12 +1,9 @@
-## 2026-10-28 — run-status sensor tick 실패(SkipReason·reaction 혼합)로 cursor 엿새 정지
+## 2026-10-28 — run-status sensor tick 실패로 cursor 엿새 정지(#1434)
 
-prod Map code server가 30초마다 `operation_has_no_enabled_memberships`(419로 끈 transport run 3건)를 찍었다. 원인은
-데이터가 아니라 tick 실패다: Dagster run-status sensor는 `None`이면 reaction을 내고 같은 tick의 다음 이벤트로 가는데,
-뒤 이벤트가 `SkipReason`이면 `evaluate_tick`이 `CheckError`로 tick 전체를 실패시키고 cursor를 commit하지 않는다
-(#1345가 panel_only를 `None`으로 바꾼 뒤). queued·starting·started·failure sensor가 10-22~23 cursor에 멈춰 있었고,
-Map 추적 행(`ops.import_jobs`)은 그 run들에 대해 이미 terminal이었다. 수정: status sensor는 `RunRequest`(success
-sensor만) 아니면 `None`. 실제 `evaluate_tick` 테스트 3건(실패 선행 확인). 운영 즉시 조치로 네 sensor cursor를 최신
-이벤트로 옮겼다(옛 cursor는 n150 `~/mapnoise-cursor-backup-*.json`, 놓친 반영은 reconcile sensor가 이미 따라잡은 상태).
+prod code server가 30초마다 `operation_has_no_enabled_memberships`(419로 끈 transport run 3건)를 찍었다. 원인은
+tick 실패다: 앞 이벤트가 `None`(reaction), 뒤 이벤트가 `SkipReason`이면 `evaluate_tick`이 `CheckError`로 tick을
+죽이고 cursor를 commit하지 않는다(#1345 뒤). 추적 행은 이미 terminal이었다. 수정: status sensor는 `RunRequest`
+(success만) 아니면 `None`; 실제 `evaluate_tick` 테스트 3건. 운영: 네 sensor cursor를 최신 이벤트로 옮김(백업 n150 `~/mapnoise-cursor-backup-*`).
 
 ## 2026-10-28 — ADR-117: SH 스냅샷·스칼라 정책 경로 퇴역(alembic 435)
 
