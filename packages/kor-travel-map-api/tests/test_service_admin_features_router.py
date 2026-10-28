@@ -66,6 +66,39 @@ def test_exact_read_auth_and_rotation(suffix: str, monkeypatch: pytest.MonkeyPat
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    "setting",
+    [
+        "admin_feature_create_token_sha256",
+        "feature_request_token_sha256",
+        "feature_reference_reconciliation_read_token_sha256",
+        "feature_reference_reconciliation_ack_token_sha256",
+    ],
+)
+def test_other_scope_digest_token_is_forbidden_not_unauthenticated(
+    setting: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """다른 scope의 유효 토큰은 403이다. 판정은 기동 distinctness와 같은 단일 목록을 쓴다.
+
+    수동 생성 digest는 예전 목록에 없어 401(``..._TOKEN_INVALID``)로 떨어졌다.
+    """
+
+    query = AsyncMock()
+    monkeypatch.setattr(admin_features, "list_admin_features", query)
+    other = f"{setting}-test-token"
+    settings = {
+        "feature_reference_reconciliation_read_token_sha256": hashlib.sha256(b"read").hexdigest(),
+        "feature_reference_reconciliation_ack_token_sha256": hashlib.sha256(b"ack").hexdigest(),
+        setting: hashlib.sha256(other.encode()).hexdigest(),
+    }
+    client = _client(pinvi_admin_features_read_token_sha256=DIGEST, **settings)
+    response = client.get("/v1/service/admin-features", headers=_headers(other))
+    assert response.status_code == 403
+    assert response.json()["code"] == "PINVI_ADMIN_FEATURES_READ_SERVICE_SCOPE_FORBIDDEN"
+    query.assert_not_awaited()
+
+
+@pytest.mark.unit
 def test_list_reuses_all_admin_filters_and_operational_dto(monkeypatch: pytest.MonkeyPatch) -> None:
     query = AsyncMock(return_value=AdminFeaturePage(items=(_feature_row(),), next_cursor="next"))
     monkeypatch.setattr(admin_features, "list_admin_features", query)

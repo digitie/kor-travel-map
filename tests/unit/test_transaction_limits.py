@@ -40,6 +40,8 @@ class _Transaction:
 class _Session:
     def __init__(self) -> None:
         self.executed: list[str] = []
+        # AsyncSession.info처럼 — 권위 finish가 무장 대기를 여기에 싣는다(434 WI-1).
+        self.info: dict[str, object] = {}
 
     async def __aenter__(self) -> _Session:
         return self

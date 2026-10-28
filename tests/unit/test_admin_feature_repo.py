@@ -70,7 +70,8 @@ def fake_session_feature_fence(monkeypatch: pytest.MonkeyPatch) -> None:
     async def _fence(session: object) -> None:
         assert isinstance(session, _Session)
 
-    monkeypatch.setattr(repo, "lock_feature_curation_write", _fence)
+    # 434 DC-1: 관리 field override는 적재 fence 대신 regime 진입만 잡는다.
+    monkeypatch.setattr(repo, "lock_single_feature_writer_protocol", _fence)
 
 
 def _feature_row(feature_id: str = "feature-1") -> dict[str, Any]:

@@ -1,5 +1,16 @@
 # Feature 생성 SQL의 첫 protocol EX와 요청 승인 복구
 
+> **정오표(2026-10-27).** 아래 "수동 생성·요청 승인 내부 owner 2개에 함수 EXECUTE를 추가"는
+> migration에서 실제로 일어나지 않았다. 418은 `SET ROLE ktm_feature_schema_owner` 뒤에
+> `GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(boolean)`을 실행한다. 그 함수의
+> owner는 `ktm_feature_state_procedure_owner`이고 schema owner에는 grant option이 없다. PostgreSQL은
+> 경고만 내고 아무것도 부여하지 않는다. 그래서 migration만으로 만든 oracle의 ACL
+> (`head-schema.sql`)에 두 GRANT가 없다. 두 프로시저는 첫 문장에서 이 gate를 호출하는데도
+> 운영이 동작한 것은 post-migration `runtime_privileges` reconcile이 같은 권한을 다시 주기
+> 때문이다. 공용 통합 fixture(`tests/integration/conftest.py`)도 migration 뒤 같은 reconcile을
+> 돌리므로 시험이 이 누락을 드러내지 못했다. 함수 owner 역할로 GRANT하는 forward migration이
+> 2026-10-27 Codex PR 통합 리뷰 PR(WI-3)에서 이것을 바로잡는다.
+
 ## 범위와 잠금 순서
 
 migration418은 다음4개 SQL의 첫 BEGIN 직후 기존 protocol EX를 획득한다.
@@ -73,3 +84,13 @@ root 소유 제품·HTTP·문서는 J/W, J 소유 경계 시험은 root/W 검토
 생성/승인 UI 증거가 아니다. 기본 OFF·정책 seed0·운영 변경0이며 mixed binary 전환 전
 관련 writer drain이 필요하다. 모든 domain command 선점·catalog/Geo·지역 이동·전체 collector
 배선과 의미 지원, 대량/운영 ARM의 CPU·메모리 수용, Weather/Transport 전파는 미완이다.
+
+## 434 이후(2026-10-27)
+
+- GRANT 누락(머리말 정오표)은 434가 함수 소유자(`ktm_feature_state_procedure_owner`)로 다시
+  부여해 고친다.
+- 434부터 이 네 루틴의 첫 줄은 무조건 P EX가 아니라 regime 진입
+  (`ops.lock_single_feature_writer_protocol()`)이다. 정책 활성화 전(epoch=0)에는 P를 잡지 않으므로
+  위 "실제 SH 대기 503" 관측은 epoch>0에서만 성립한다(ADR-115 §11.3).
+- 상수 ACL을 다시 적던 단위 시험은 지우고, head의 SECURITY DEFINER 호출자가 진입 함수를
+  실행할 수 있는지 계산하는 `tests/lint/test_protocol_entry_acl_oracle.py`로 바꿨다.

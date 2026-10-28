@@ -1,5 +1,10 @@
 # Rest432 영속 재관측의 제한된 첫 profile — 설계 초안
 
+> **상태(2026-10-27): 대체됨(superseded).** 구현 전 설계 초안이다. 432 제한 profile은 PR #1418로
+> 머지·배포됐고 결과의 정본은 [432 구현 원장](2026-10-26-rest-snapshot-atomic-implementation.md)이다.
+> 새 profile은 기본 OFF이며 SH 스냅샷 경로는 동결됐다(동결 → 측정 → 퇴역 결정 대기). 현재 상태의
+> 정본은 [ADR-115](../adr/115-scoped-concurrent-feature-writes.md)다.
+
 ## 상태와 근거
 
 기준은 reader 후보65e4943d8ae21ef17123a33de4d74a107f30f473이다. 이 문서는 제품코드·

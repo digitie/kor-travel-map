@@ -1,3 +1,26 @@
+## 2026-10-28 — #1426의 main 병합 뒤 resume 크기 경계 복구
+
+ebb92ca9의 새 Python CI는 문서 크기 한 항목에서 실패했다(resume 227100B > 225280B).
+§8에 따라 9월8일 M05 완료 이력 한 절 5075B를 원문 그대로 기존 9월 archive로 옮겼다.
+기존 archive 세 절과 나머지 live 본문은 보존하고 원래 위치의 원문 링크·상단 탐색표를 남긴다.
+제품·시험·상한·현재 미완 판정과 snapshot profiles OFF는 그대로다. 새 exact-head CI와 UI는 별도다.
+
+## 2026-10-28 — #1426의 main 충돌·기존 통합 회귀 호환 교정
+
+기준 head `28a97e6d`의 양 PostGIS CI는 각각 6개가 실패했다. main `fddc1659`의
+배포·공개 UI 수용 기록과 PR의 WI-5~11 기록을 모두 보존해 두 문서 충돌을 해결했다.
+434의 장부 L-only·epoch=0 단건 진입을 따르도록 기존 시험 네 파일을 교정했다.
+승인 요청 행의 실제 잠금 timeout·rollback·동일 key 복구, K→L 대기 task 취소와
+pool1 재사용, 현재 schema head의 ACL, 같은 TX의 확정 prefix 선점을 검증한다.
+장부 뒤 확정으로 승격하는 역순은 계속 23514이며 실패 TX의 변경은 rollback된다.
+제품 코드·SQL·마이그레이션·운영 flag는 바꾸지 않았다.
+
+로컬 alpine 고정 digest에서 기존 실패 6개가 77.93초에 통과했다. CI 범위 Ruff,
+main mypy 198파일, import-linter 4계약도 통과했다. 넓은 `ruff check .`의 기존
+비제품 문서 스크립트·journal 검사 스크립트 7건은 별도 실패로 보존했다.
+새 후보 전체 CI·독립 최종 리뷰·UI·434 운영 배포는 아직 미완이며 전체
+T-CWRITE-01~09 미완·snapshot profiles OFF와 ADR-117 선행 조건을 유지한다.
+
 ## 2026-10-28 — 현재 배포·원51복구·공개 UI13 수용
 
 Map001487에 검증6611이 포함돼 별도 구버전 재배포는 하지 않았다.
@@ -14,6 +37,30 @@ pair2·후보 실제UI14 및 두 독립 검토 뒤 #1424를 mainc3adc0c로 정�
 [최종 정산](reports/2026-10-27-bound-snapshot-stale-replan.md#정확6611의-최종-ci실제-ui정상-머지-수용)에
 원 실패·source6611/API와 f29 UI build 구분·쿠키 삭제/401/정리를 남겼다. archive 원문
 9819B 뒤 footer로 EOF P3를 닫는다. 운영433/공개UI는 후속이며 전체9미완/OFF를 유지한다.
+
+## 2026-10-27 — Codex PR 통합 리뷰의 비잠금 항목(WI-5~11)
+
+최근 1주 Codex PR 46건(#1358~#1419) 통합 리뷰를 하나의 PR로 정리하는 작업 중 잠금 순서와
+무관한 항목이다. 브랜치 `feat/map-codex-review-misc`에서 만들어 통합 PR 브랜치에 합친다.
+
+- **WI-5** shadow hook이 순서가 뒤바뀐 bundle의 record key를 recorder에 넘겨 23514로 적재
+  transaction 전체를 rollback시켰다. 저장 head가 그 record일 때만 capture한다. 운영은 shadow
+  scope 미설정이라 휴면이었다(n150 Dagster env 읽기 확인).
+- **WI-6** 관리 파일의 오프라인 업로드 링크가 없는 상세 경로(404)를 가리켰다.
+  `/admin/offline-uploads`로 고치고 `_build_links`의 모든 href가 `page.tsx`에 대응하는지 본다.
+- **WI-7** inbound 자격 증명 목록 하나로 기동 distinctness와 `/v1/service/*`의 403 판정을 묶었다.
+  수동 생성 digest가 feature-request·reconciliation digest와 같아도 통과했고, 그 토큰은 403이
+  아니라 401로 떨어졌다. 운영 API env(읽기만)는 설정된 8종 사이 충돌 0건이다.
+- **WI-8** K 없는 정상 반환에서 정리만 실패하면 503 대신 연결을 폐기하고 commit된 결과를
+  돌려준다. ownership reload는 일반 session을 쓴다.
+- **WI-9** 기준선 측정 harness를 필수 CI에서 뺐다. 공용 container 안의 전용 DB에서 DML 비중첩·cold/warm
+  hash·개수만 본다. reader snapshot pool 경합 시험의 대기를 5초로 올렸다.
+- **WI-10** 지도 cluster·geometry label·clickable marker를 Tab·Enter/Space로 고를 수 있다.
+  `audit:dev`의 `|| true`를 뺐다(redocly 1.34.22로 dev 전체 audit 0건).
+- **WI-11** SH 설계 문서 3건 superseded, 418·424 정오표, integration-map §3 admin-features 행,
+  runtime_privileges docstring(ADR-100). T-CWRITE-04 링크는 main이 먼저 고쳤다.
+
+검증은 n150의 CI와 같은 네 pytest 세션·lint·frontend·Playwright에서 했다(결과는 PR 본문).
 
 ## 2026-10-27 — alpine 관찰자 cold-array codec 경계 최소 교정
 
@@ -191,6 +238,50 @@ CI가 발견한 ledger300자 위반은 task 본문을 원장 link로 단축해 �
 코드/SQL/schema·운영 OFF 설정 및 기존 예산은 바꾸지 않으며 최종 CI·머지는 아직 대기다.
 T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
 [범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
+
+## 2026-10-27 — Codex PR 통합 리뷰의 비잠금 항목(WI-5~11)
+
+최근 1주 Codex PR 46건(#1358~#1419) 통합 리뷰를 하나의 PR로 정리하는 작업 중 잠금 순서와
+무관한 항목이다. 브랜치 `feat/map-codex-review-misc`에서 만들어 통합 PR 브랜치에 합친다.
+
+- **WI-5** shadow hook이 순서가 뒤바뀐 bundle의 record key를 recorder에 넘겨 23514로 적재
+  transaction 전체를 rollback시켰다. 저장 head가 그 record일 때만 capture한다. 운영은 shadow
+  scope 미설정이라 휴면이었다(n150 Dagster env 읽기 확인).
+- **WI-6** 관리 파일의 오프라인 업로드 링크가 없는 상세 경로(404)를 가리켰다.
+  `/admin/offline-uploads`로 고치고 `_build_links`의 모든 href가 `page.tsx`에 대응하는지 본다.
+- **WI-7** inbound 자격 증명 목록 하나로 기동 distinctness와 `/v1/service/*`의 403 판정을 묶었다.
+  수동 생성 digest가 feature-request·reconciliation digest와 같아도 통과했고, 그 토큰은 403이
+  아니라 401로 떨어졌다. 운영 API env(읽기만)는 설정된 8종 사이 충돌 0건이다.
+- **WI-8** K 없는 정상 반환에서 정리만 실패하면 503 대신 연결을 폐기하고 commit된 결과를
+  돌려준다. ownership reload는 일반 session을 쓴다.
+- **WI-9** 기준선 측정 harness를 필수 CI에서 뺐다. 공용 pg_container에서 DML 비중첩·cold/warm
+  hash·개수만 본다. reader snapshot pool 경합 시험의 대기를 5초로 올렸다.
+- **WI-10** 지도 cluster·geometry label·clickable marker를 Tab·Enter/Space로 고를 수 있다.
+  `audit:dev`의 `|| true`를 뺐다(redocly 1.34.22로 dev 전체 audit 0건).
+- **WI-11** SH 설계 문서 3건 superseded, 418·424 정오표, integration-map §3 admin-features 행,
+  runtime_privileges docstring(ADR-100), T-CWRITE-04 링크.
+
+검증은 n150의 CI와 같은 네 pytest 세션·lint·frontend·Playwright에서 했다(결과는 PR 본문).
+
+## 2026-10-27 — Codex PR 리뷰 정리: tracking 장부는 L만, 단건 writer는 regime 진입(434)
+
+Codex PR #1358~#1419 리뷰를 정리한 잠금 핵심을 `feat/map-codex-review-core`에 구현했다(PR은
+gate 뒤에 연다, 미머지). 434는 432 정본 루틴 20개의 본문 SHA·소유자·시그니처를 고정하고
+검토한 바늘만 바꾼다. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
+
+- WI-1: tracking 장부 쓰기는 L만, 큐레이션 확정(seal·root 완결·권위 finish·SUCCESS 완결 취소
+  전이)만 P EX→L. 430 write-prefix guard도 같은 분류로 좁혔다.
+- DC-1: 단건·관리 writer(SQL 10개+Python 관리 경로)는 regime 진입 — epoch=0이면 P 없음,
+  epoch>0이면 P EX. 계획의 "epoch>0 공유"는 strict guard가 manifest 없는 SH를 거부해 배타로
+  바꿨다. 전화 override·curation import와 provider 증거를 먼저 잡는 M05·재활성화는 P EX를
+  유지한다(적대 리뷰가 다중 bundle 적재·병합과의 순환을 찾았다).
+- WI-2 무장 대기 0→1초 결함, WI-3 418 GRANT 재부여+ACL 오라클, WI-4 lock-order lint의 P·L·leaf
+  규칙과 Python helper 분석.
+
+운영 읽기 전용 확인: flag 3종 OFF, shadow scope 미설정, epoch 0, active policy·write attempt 0,
+남은 로그 창과 DB 원장에서 LOCK_TIMEOUT 503·55P03 0건 — 결함은 잠재 상태였다.
+[ADR-115 §11](adr/115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-434-기준).
+문서 한도: 병합 뒤 journal이 220 KiB를 넘어 가장 오래된 2026-10-13 두 절을 [아카이브](archive/journal-2026-10d.md)로 원문 이동했다(tasks-rule §8).
 
 ## 2026-10-27 — kor-travel-common 최신(`aa232ad5`) 반영: 브랜치 `chore/common-latest-map`
 
@@ -1943,65 +2034,6 @@ CHANGELOG·OpenAPI·테스트는 건드리지 않았다. 호스트 플립 자체
   ADR-109 31,807 B · `address-geocoding.md` 31,218 B(전부 225,280 B 아래).
 - **미결 소유자 결정**: ADR-109 "열린 결정" 13건(task 접두사 `T-GR-` 임시 포함).
 
-## 2026-10-13 — 고속도로 돌발 job pool 고갈(prod run `bfd18ef5`): 브랜치 `fix/highway-incidents-pool`
-
-- 증상: 2026-10-12 12:09Z 수동 첫 적재가 807초 뒤 실패. 4회 시도 모두 step 시작 30초 만에 `get_notice_snapshot_watermark`
-  (lock 안 첫 DB 호출)에서 `QueuePool limit of size 1 overflow 0 reached, timeout 30`. 같은 캠페인의 주유소·휴게소 job은 성공.
-- 원인: `provider_run_lock`이 advisory lock용 session으로 pool의 유일한 연결을 끝까지 쥔 채, 본문 client 호출이 각자 새
-  session(두 번째 연결)을 열었다. 2026-10-05 ADR-107(acde37264)이 Dagster `kor_travel_map_client`를 `pool_size=1,
-  max_overflow=0`으로 줄이면서 드러났다(그 전 기본 5+10에서는 조용했다). 2026-10-03 ADR-106이 주유소 asset의 lock을
-  걷어내 lock을 쓰는 asset은 고속도로 돌발 하나만 남았다 — 그래서 그것만 죽었다. 공용 Dagster에서 이 job은 이 run 한 번뿐이고
-  성공한 적이 없다. 10분 schedule(STOPPED)의 coalescing은 RunRequest 발행 여부만 정하므로 켜도 매 tick 같은 자리에서 죽는다.
-  큐 경로는 client를 executor 연결에 결합하므로 영향 없다.
-- 못 잡은 이유: asset 단위 테스트의 fake client lock은 연결을 쥐지 않았고, 통합 테스트는 기본 pool(5+10) engine을 썼다.
-- 수정: lock을 잡은 연결에 client의 session factory를 lock 구간 동안 묶는다(객체 identity 유지 — guard identity 대조와
-  `context.resources` 재조회 때문에 복사본은 안 된다). 전역 pool 상향은 하지 않았다 — ADR-107 runbook의 "DB 연결 1개" 계약을
-  지키고, 본문은 원래 순차다. 같은 결함의 `cache_target_snapshot_gc` drain(prod 미실행, 잠복)도 같은 방식으로 고쳤다.
-- 리뷰(PR #1314 @ffa0986e) 반영: H1 — GC drain 수정이 `tests/unit/test_cache_target_snapshot_gc_client.py` 3건을
-  깼다(fake connection에 실제 `make_connection_session_factory`가 불림, 내 전체 unit run이 그 commit보다 먼저 시작됐다).
-  테스트가 그 함수를 lock 연결일 때만 fake factory를 주도록 바꾸고 engine-bound factory는 호출되면 실패시켜 "lock 연결
-  위에서만 session을 연다"를 단언한다. L3 — `connection_advisory_lock`/`discard_connection_on_failure`(infra): 획득·본문
-  실패·해제 실패 때 lock 연결을 invalidate해(server가 lock을 푼다) lock을 쥔 채 pool로 돌아가지 않게 한다. 본문 실패 때는
-  unlock을 시도하지 않아 원래 예외를 가리지 않는다. L4 — asset 통합 테스트를 Dagster runtime login으로. mutation 5종 RED.
-- 남은 것(미수정): 큐 경로 strict 실패 증거(`feature_update_evidence_client`)는 executor 연결 밖에서 별도 commit하려고
-  두 번째 연결을 요구한다 — 실패 경로에서만, 설계 결정이 필요하다.
-- 검증(로컬 WSL + testcontainers PostGIS): 회귀 테스트 4종(단위 SQLite pool 1/0 2건, 통합 lock·asset 전체·GC drain) 모두
-  수정 전 client에서 prod와 같은 TimeoutError로 RED 확인. dagster 패키지 679 passed, 관련 통합 executor·notice·advisory·GC
-  통과, ruff·mypy --strict·lint-imports 통과.
-
-## 2026-10-13 — weather 잔재 정리(ADR-104/105 후속): 브랜치 `chore/weather-remnant-cleanup`
-
-소유자 승인 정리. 세 갈래 스캔이 live weather 경로는 없고 죽은 코드와 낡은 문서만 남았다고 봤다. PR·머지·배포는 하지 않았다.
-
-- **지운 코드.** `core.ids.make_weather_value_key`·`WEATHER_VALUE_KEY_HASH_LENGTH`와 `core` 재수출,
-  `tests/unit/test_ids_weather.py`(호출자 0, grep 전수). `core.scoring.SOURCE_PRIORITY`의 `python-kma-api`·
-  `python-airkorea-api` 항목(읽는 곳은 `source_priority()` 하나, master 선정 후보에 그 provider feature가 402/403 뒤
-  남지 않는다). `test_export_openapi.py`의 `_CURATED_*` 상수 다섯 개 — `"weather"` variant만 죽은 게 아니라 #1023이
-  소비 테스트를 지운 뒤 블록 전체가 아무도 읽지 않았다. admin frontend `vworld-map-view`·`poi-cache-targets`의
-  weather 라벨·색(`Record<string,string>` + `??` fallback이라 kind union과 무관; dedup-review 표는 이미 깨끗했다).
-- **남긴 것(결정).** `FeatureKind.WEATHER`·kind CHECK, `WeatherValue` DTO·weather enum(API 재도입 방지 검사가 기댄다),
-  provider alias, baseline/seed/legacy migration, frozen H35 SQL(`feature_repo`의 KMA 분기 포함), maki weather 아이콘,
-  `SourceRole.WEATHER_CONTEXT`(migration 필요 → 백로그).
-- **문서.** ADR-062·072 superseded by ADR-104/105(본문 유지, 머리 노트), README 색인. ADR-105의 소유 참조를 ADR-068
-  (Feature UUID)에서 ADR-104로 정정. integration-map(service resource는 `/v1/features/batch`뿐), live 인수 runbook
-  (owned ID 7개 = place 6 + price 1, `_owned_ids` 대조), ETL 배너 다섯, architecture·data-model(§8.2 제거 노트,
-  `current_summary_runs` CHECK는 402 이후 `'price'`)·feature-model·public-views(`latest_weather` 행)·poi-cache·test-strategy.
-  stale 주석: maki.ts·mois.py·client docstring·dto/bundle.py.
-- **백로그.** `T-WX-VNEXT-FREEZE`(계약↔계약 대조라 지워진 weather 표를 못 잡는다 — 확인함), `T-WX-SOURCEROLE`,
-  `T-WX-DTO`, 그리고 스캔 중 찾은 `T-WX-NOTICE-CLOSE`(`close_notice_features`의 production 호출자 0). Manager compose
-  `KOR_TRAVEL_MAP_KMA_*` env 제거는 외부 추적(Manager 저장소에서 진행 중).
-- 검증(로컬 WSL ext4 사본 + uv venv, n150은 IO 포화라 쓰지 않았다): ruff check(CI 경로) 통과, mypy --strict
-  main 153·api 67·dagster 30 통과, lint-imports 4 kept, `check_prod_redaction` 통과. pytest: core import 단위 704 passed,
-  `tests/lint` 303 passed(+ `test_sealed_runtime_tree_ship` 2건은 git이 필요해 실제 worktree에서 2 passed),
-  `test_export_openapi.py` 11 passed. frontend: admin type-check·touched ESLint 0 경고·vitest 46파일 391 passed,
-  map-marker-react vitest 4 passed·typecheck 통과. 최종 게이트는 GitHub CI다.
-- 기존 결함(이번 변경과 무관, 기록만): `make_feature_id` doctest 기대값이 origin/main에서도 틀린다(CI는 doctest를
-  돌리지 않는다). 로컬 ruff의 `format --check`는 손대지 않은 줄 다수에 diff를 낸다(CI format step은 `if: false`).
-- **journal 분리(규약 §8).** 이 항목으로 `journal.md`가 225,613 bytes가 돼 CI의
-  `test_every_docs_markdown_stays_within_readable_limit`(225,280)이 붉었다. 가장 오래된 2026-09-11~09-13 5개 절을
-  `archive/journal-2026-09b.md`로 옮겼다(하단 인덱스 표 갱신, 현행 창 2026-09-14~). 옮긴 절에 상대 링크는 없다.
-  바이트 보존 검산: 새 live 문서에서 인덱스 행·창 문구를 되돌리고 옮긴 블록을 제자리에 넣으면 원본과 byte 단위로 같다.
-
 ## 과거 기록 아카이브
 
 > 현행 작업 창(2026-10-01~) 이전 기록은 아래로 분리했다. 검색은
@@ -2009,6 +2041,7 @@ CHANGELOG·OpenAPI·테스트는 건드리지 않았다. 호스트 플립 자체
 
 | 파일 | 기간 | 엔트리 | 크기 |
 | --- | --- | --- | --- |
+| [`journal-2026-10d.md`](archive/journal-2026-10d.md) | 2026-10-13 | 2건 | 7200 bytes |
 | [`journal-2026-10c.md`](archive/journal-2026-10c.md) | 2026-10-01 ~ 2026-10-12 | 28건 | 53974 bytes |
 | [`journal-2026-10b.md`](archive/journal-2026-10b.md) | 2026-10-01 | 1건 | 6 KB |
 | [`journal-2026-10a.md`](archive/journal-2026-10a.md) | 2026-10-01 | 1건 | 6 KB |

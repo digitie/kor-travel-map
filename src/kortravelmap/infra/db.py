@@ -330,6 +330,7 @@ _EXPECTED_RUNTIME_APPLICATION_SECURITY_DEFINER_FUNCTIONS = {
                 "feature._provider_field_projection_dependency_active(text,text)",
                 "ops.scoped_feature_write_membership_digest(uuid)",
                 "ops.lock_scoped_feature_write_protocol(boolean)",
+                "ops.lock_single_feature_writer_protocol()",
                 "ops.lock_provider_feature_tracking_protocol(boolean)",
                 "ops.register_provider_snapshot_artifact(uuid,uuid,uuid,bytea,bytea,text,integer)",
                 "ops.read_provider_snapshot_for_member(uuid,uuid,uuid)",

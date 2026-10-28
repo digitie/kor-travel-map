@@ -78,6 +78,8 @@ class _Session:
                 )
             elif "feature-curation-write" in sql:
                 out.append("lock")
+            elif "lock_provider_feature_tracking_protocol(true)" in sql:
+                out.append("prefix")
             else:  # pragma: no cover - 방어
                 out.append(sql)
         return out
@@ -154,7 +156,7 @@ async def test_a_failed_long_wait_is_logged_and_reraised(
     session = _Session(lock_error=error)
     arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
     with (
-        caplog.at_level(logging.WARNING, logger="kortravelmap.infra.feature_repo"),
+        caplog.at_level(logging.WARNING, logger="kortravelmap.infra.lock_wait"),
         pytest.raises(DBAPIError),
     ):
         await lock_feature_curation_write(session)  # type: ignore[arg-type]
@@ -162,14 +164,46 @@ async def test_a_failed_long_wait_is_logged_and_reraised(
     assert any("기다리다 실패" in record.getMessage() for record in caplog.records)
 
 
-@pytest.mark.parametrize("prior_lock_ms", [0, 900_000, 1_800_000])
+@pytest.mark.parametrize("prior_lock_ms", [900_000, 1_800_000])
 @pytest.mark.asyncio
 async def test_never_shortens_an_engine_wait(prior_lock_ms: int) -> None:
-    """늘리기만 한다 — 무한(0)이나 이미 더 긴 상한은 그대로 둔다."""
+    """늘리기만 한다 — 이미 무장 이상인 유한 상한은 그대로 둔다."""
     session = _Session(lock_timeout=prior_lock_ms)
     arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
     await lock_feature_curation_write(session)  # type: ignore[arg-type]
     assert session.kinds() == ["read", "lock"]
+
+
+@pytest.mark.asyncio
+async def test_unset_engine_timeout_is_armed_not_left_to_the_gate() -> None:
+    """434 WI-2: ``lock_timeout=0``(미설정)을 그대로 두면 protocol gate가 1초로 바꾼다.
+
+    무장은 그 1초를 우회해 무장값까지 기다리게 하고, 끝나면 0을 되돌린다.
+    """
+    session = _Session(lock_timeout=0)
+    arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
+    await lock_feature_curation_write(session)  # type: ignore[arg-type]
+    assert session.kinds() == ["read", "set(900000,960000,10000)", "lock", "set(0,600000,0)"]
+
+
+@pytest.mark.asyncio
+async def test_armed_finalization_prefix_waits_like_the_fence() -> None:
+    """434 WI-1/2: 권위 finish의 확정 prefix(P EX→L)도 무장값으로 그 한 문장만 기다린다."""
+    from kortravelmap.infra.pipeline_cancellation_repo import lock_provider_feature_finalization
+
+    session = _Session(lock_timeout=30_000)
+    arm_feature_curation_write_wait(session, 900_000)  # type: ignore[arg-type]
+    await lock_provider_feature_finalization(session)  # type: ignore[arg-type]
+    await lock_feature_curation_write(session)  # type: ignore[arg-type]
+    # 무장은 첫 P EX 획득이 한 번 꺼내 쓴다 — 뒤의 fence는 엔진 상한 그대로다.
+    assert session.kinds() == [
+        "read",
+        "set(900000,960000,10000)",
+        "prefix",
+        "set(30000,600000,0)",
+        "lock",
+    ]
+    assert FEATURE_CURATION_WRITE_WAIT_INFO_KEY not in session.info
 
 
 @pytest.mark.asyncio
@@ -249,6 +283,52 @@ async def test_settings_value_reaches_the_snapshot_load(
         [], provider="p", dataset_key="d", source_entity_type="t"
     )
     assert seen == [120_000]
+
+
+class _FinishSession(_ClientSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.statements: list[str] = []
+
+    async def execute(self, statement: Any, *_args: Any) -> None:
+        self.statements.append(str(statement))
+
+
+@pytest.mark.parametrize("authoritative", [True, False])
+@pytest.mark.asyncio
+async def test_only_authoritative_finish_arms_the_tracking_wait(
+    authoritative: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """434 WI-1: 권위 finish(P EX→L)만 적재 상한까지 기다린다. 비권위 finish는 L만 잡는다."""
+    from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+
+    instance = AsyncKorTravelMapClient(object())  # type: ignore[arg-type]
+    sessions: list[_FinishSession] = []
+
+    def _factory() -> _FinishSession:
+        sessions.append(_FinishSession())
+        return sessions[-1]
+
+    instance._session_factory = _factory  # type: ignore[assignment]  # noqa: SLF001
+    seen: list[object] = []
+
+    async def _fake_finish(session: Any, **kwargs: Any) -> object:
+        seen.append(session.info.get(FEATURE_CURATION_WRITE_WAIT_INFO_KEY))
+        assert kwargs["authoritative_snapshot_complete"] is authoritative
+        return object()
+
+    monkeypatch.setattr("kortravelmap.client.repo_finish_dagster_feature_membership", _fake_finish)
+    await instance.finish_dagster_feature_membership(
+        dagster_run_id="run-434",
+        membership=ProviderDatasetOperationMembership(1, "dataset_wide", "op"),
+        authoritative_snapshot_complete=authoritative,
+    )
+    if authoritative:
+        assert seen == [FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT * 1000]
+        assert sessions[0].statements == ["SET TRANSACTION ISOLATION LEVEL READ COMMITTED"]
+    else:
+        assert seen == [None]
+        assert sessions[0].statements == []
 
 
 @pytest.mark.asyncio

@@ -3,13 +3,17 @@
 The dedicated bootstrap transfers application-object ownership to the NOLOGIN
 schema owner *before* Alembic runs.  PostgreSQL default privileges are an
 unsafe way to restore old broad writer access: a later state or audit table
-would silently become mutable by API/Dagster.  Instead the migrator performs
-this explicit, fail-closed reconciliation after every upgrade and before the
-API process discards its migrator DSN.
+would silently become mutable by API/Dagster.  Instead the deployment runs
+this explicit, fail-closed reconciliation after every upgrade.
 
-Only the migrator LOGIN can enter ``ktm_feature_schema_owner``.  Runtime
-LOGINs merely inherit the resulting table grants and cannot ``SET ROLE`` into
-any owner/group role.
+ADR-100 collapsed the three LOGINs into one, ``ktm_feature_service``, which
+also runs the migrations.  It is a member of ``ktm_feature_schema_owner`` with
+``INHERIT FALSE, SET TRUE``: it does not hold the owner's privileges passively,
+but it *can* ``SET ROLE`` into the owner (migrations and this reconciliation
+do exactly that).  Ordinary runtime access comes only from the ``INHERIT TRUE``
+memberships (``ktm_feature_runtime`` and the executor roles), whose grants this
+module reconciles; ``ktm_feature_runtime`` itself is ``SET FALSE``.  What that
+trade-off gives up is spelled out in ``infra/db.py`` ("잃는 것을 정확히 적는다").
 
 이 인벤토리는 **두 스키마 상태**에서 돈다 — ``0236 → 300`` handoff는 baseline
 root로 stamp한 직후, finalize/API entrypoint는 head에서. 그래서 루틴은 이름으로만
@@ -532,6 +536,11 @@ _STATE_OWNER_FUNCTION_ACL = (
     "TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) "
     "TO ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
+    # 434 DC-1: 단건·관리 writer의 regime 진입(epoch>0에서만 P EX). 414~418 루틴 소유자와
+    # Python 관리 경로(runtime)가 부른다.
+    "REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol(...) FROM PUBLIC",
+    "GRANT EXECUTE ON FUNCTION ops.lock_single_feature_writer_protocol(...) "
+    "TO ktm_feature_runtime,ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
     "REVOKE ALL ON FUNCTION ops.claim_scoped_feature_write(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.claim_scoped_feature_write(...) TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION ops.append_scoped_feature_write_manifest(...) FROM PUBLIC",
@@ -1029,7 +1038,7 @@ _SNAPSHOT_COMMAND_OWNER_ACL = tuple(
     "TO ktm_curation_provider_executor",
 )
 
-# 433만 필요한 직접 scope 관측이다. lease/UPDATE/runtime 표 읽기 권한은 추가하지 않는다.
+# 434만 필요한 직접 scope 관측이다. lease/UPDATE/runtime 표 읽기 권한은 추가하지 않는다.
 _SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL = (
     "DO $snapshot_ready_scope$ BEGIN IF EXISTS ("
     "SELECT 1 FROM pg_catalog.pg_proc p "
@@ -1143,6 +1152,7 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
+    "ops.lock_single_feature_writer_protocol": "434_protocol_entry_narrowing",
     "ops.reject_provider_snapshot_artifact_update": "430_provider_snapshot_recovery",
     "ops.reject_pipeline_cancellation_prefix": "430_provider_snapshot_recovery",
     "feature._member_provider_curation_input_set": "430_provider_snapshot_recovery",

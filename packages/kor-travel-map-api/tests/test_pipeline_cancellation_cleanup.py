@@ -154,6 +154,63 @@ async def test_normal_session_preserves_business_budget_and_restores_exact_guc(
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("fault", ["restore_error", "restore_delay"])
+async def test_committed_result_survives_normal_cleanup_failure(monkeypatch, caplog, fault):
+    """K 없는 정상 반환에서 정리만 실패하면 503이 아니다. 연결을 폐기하고 결과를 돌려준다.
+
+    업무는 이미 commit됐다. 503을 내면 호출자는 같은 취소를 다시 보내고, 그동안 화면은
+    commit된 상세 대신 오류를 보여 준다.
+    """
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    observer = Connection(Driver(11, [{"backend_present": False, "advisory_present": False}]))
+    engine = Engine(original, observer)
+    execute = original.execute
+
+    async def faulty_restore(sql, params=None):
+        if params is not None and "previous" in params:
+            if fault == "restore_error":
+                raise RuntimeError("injected GUC restore failure")
+            await asyncio.sleep(service._CLEANUP_SECONDS * 3)
+        return await execute(sql, params)
+
+    original.execute = faulty_restore
+
+    async def committed_request():
+        async with service._coordinator_session(engine) as (_, session):
+            return "committed-detail", service._session_backend(session)
+
+    result, backend = await asyncio.wait_for(committed_request(), 5)
+    assert result == "committed-detail"
+    # 정리를 확인하지 못한 원 연결은 pool로 돌려보내지 않고 폐기한다.
+    assert backend.cleanup_attempted
+    assert original.driver.closed
+    assert not engine.connections
+    assert "after the committed result" in caplog.text
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("unsafe", ["lease_possible", "invalidated"])
+async def test_unverifiable_success_still_maps_to_503(monkeypatch, unsafe):
+    """위 완화의 경계: K를 쥐었을 수 있거나 연결이 무효화됐으면 정상 반환도 503이다."""
+    monkeypatch.setattr(service, "AsyncSession", Session)
+    original = Connection(Driver(10))
+    observer = Connection(Driver(11, [{"backend_present": False, "advisory_present": False}]))
+
+    async def request():
+        async with service._coordinator_session(Engine(original, observer)) as (_, session):
+            if unsafe == "lease_possible":
+                service._session_backend(session).lease_possible = True
+            else:
+                original.invalidated = True
+            return "unverifiable"
+
+    with pytest.raises(service.PipelineCancellationDatabaseUnavailable):
+        await request()
+    assert original.driver.closed
+
+
+@pytest.mark.asyncio
 async def test_level_cancellation_shields_exact_termination_and_readback(monkeypatch):
     monkeypatch.setattr(service, "AsyncSession", Session)
     original = Connection(Driver(10))

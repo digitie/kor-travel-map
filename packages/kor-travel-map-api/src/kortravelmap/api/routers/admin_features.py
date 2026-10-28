@@ -78,6 +78,7 @@ from kortravelmap.api.domain_command_service import (
     current_domain_command,
     domain_command_transaction,
     idempotent_domain_command,
+    sqlstate_of,
 )
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
@@ -1783,7 +1784,7 @@ async def create_feature_route(
             constraint=exc.constraint,
         ) from exc
     except (AdminManualFeatureInvariantError, DBAPIError, ValueError) as exc:
-        if isinstance(exc, DBAPIError) and getattr(exc.orig, "sqlstate", None) == "55P03":
+        if isinstance(exc, DBAPIError) and sqlstate_of(exc) == "55P03":
             raise
         raise _manual_feature_create_internal_error() from exc
     if isinstance(result, AdminManualFeatureExactDuplicate):

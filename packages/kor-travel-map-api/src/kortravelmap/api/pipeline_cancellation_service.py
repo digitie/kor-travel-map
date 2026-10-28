@@ -41,12 +41,13 @@ from kortravelmap.infra.pipeline_cancellation_repo import (
     PipelineCancellationMember,
     PipelineCancellationTimelineConflict,
     cancel_queued_pipeline_cancellation_member,
+    cancellation_transition_finalizes,
     create_pipeline_cancellation_attempt,
     fill_pipeline_cancellation_canonical_starts,
     finish_pipeline_cancellation_attempt,
     get_current_pipeline_cancellation_summary,
     get_pipeline_cancellation_detail,
-    lock_provider_feature_finalization,
+    lock_provider_feature_tracking,
     mark_pipeline_cancellation_run_termination_reserved,
     resolve_pipeline_cancellation_scope,
     retry_pipeline_cancellation_attempt,
@@ -436,11 +437,19 @@ async def _hard_invalidate_connection(
 async def _coordinator_session(
     engine: AsyncEngine,
 ) -> AsyncIterator[tuple[AsyncConnection, AsyncSession]]:
-    """정상 업무의 기존 시간 예산은 보존하고 연결 수명만 명시적으로 회수한다."""
+    """정상 업무의 기존 시간 예산은 보존하고 연결 수명만 명시적으로 회수한다.
+
+    503은 업무 결과를 믿을 수 없을 때만 낸다: K를 쥐었을 수 있거나(lease 가능),
+    연결이 무효화됐거나, 설정이 실패한 경우다. K가 없는 정상 반환에서 정리(session close,
+    GUC 복원, close)만 실패하면 업무는 이미 commit됐다. 그때는 연결을 폐기하고 로그만
+    남긴 뒤 commit된 결과를 그대로 돌려준다.
+    """
     connection = engine.connect()
     backend: _CoordinatorBackend | None = None
     session: AsyncSession | None = None
     primary: BaseException | None = None
+    # K 없이 정상 반환하는 정리 분기에 들어갔는지. 그 분기의 실패는 503 사유가 아니다.
+    normal_return = False
     try:
         await connection.start()
         backend = _capture_backend(connection, engine)
@@ -488,6 +497,7 @@ async def _coordinator_session(
                             retry_after_seconds=1,
                         )
                 elif backend is not None and not backend.discarded:
+                    normal_return = True
                     async with asyncio.timeout(_CLEANUP_SECONDS):
                         if session is not None:
                             await session.close()
@@ -516,12 +526,20 @@ async def _coordinator_session(
             if isinstance(cleanup_error, asyncio.CancelledError):
                 # restore/close가 처음 취소된 경우 domain 오류나 503으로 덮지 않는다.
                 raise
-            if primary is None:
+            if primary is None and not normal_return:
                 raise PipelineCancellationDatabaseUnavailable(
                     "cancellation connection cleanup could not be verified",
                     retry_after_seconds=1,
                 ) from cleanup_error
-            _LOG.error("pipeline cancellation cleanup failed while propagating caller error")
+            if primary is None:
+                # K가 없고 업무는 이미 commit됐다. 연결은 위에서 폐기했으니 결과를 돌려준다.
+                _LOG.error(
+                    "pipeline cancellation connection cleanup failed after the committed "
+                    "result; the connection was discarded: error_type=%s",
+                    type(cleanup_error).__name__,
+                )
+            else:
+                _LOG.error("pipeline cancellation cleanup failed while propagating caller error")
         # pending AnyIO level 취소를 정상 응답/도메인 오류보다 우선한다.
         if primary is None or isinstance(primary, Exception):
             await anyio.lowlevel.checkpoint()
@@ -1282,12 +1300,16 @@ async def _record_terminal_run(
         ):
             continue
         async with session.begin():
-            if (
-                terminal_status == "SUCCESS"
-                and member.operation_kind == "provider_feature_load_run"
-            ):
+            # 434 WI-1: SUCCESS 완결 전이만 root 완결에 닿는다(P EX→L, READ COMMITTED).
+            # 실패·취소 전이와 그 뒤의 실패 기록은 장부 쓰기라 L만 잡는다.
+            finalizing = cancellation_transition_finalizes(
+                result=run_result,
+                target_status=target_status,
+                dagster_terminal_status=stored_terminal,
+            )
+            if finalizing:
                 await session.execute(text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED"))
-            await lock_provider_feature_finalization(session)
+            await lock_provider_feature_tracking(session, finalizing=finalizing)
             try:
                 changed = await transition_pipeline_cancellation_member(
                     session,
@@ -1756,9 +1778,13 @@ async def _reload_after_ownership_loss(
     fallback_root: PipelineCancellationRootRecord,
     settings: ApiSettings,
 ) -> PipelineCancellationDetailRecord:
-    """canonical current를 우선하고 old exact attempt는 마지막 fallback으로 쓴다."""
+    """canonical current를 우선하고 old exact attempt는 마지막 fallback으로 쓴다.
+
+    읽기 한 transaction뿐이고 K를 잡지 않는다. coordinator 연결(GUC 설정·exact backend
+    추적·observer 정리)은 K를 쥘 수 있는 연결에만 필요하므로 일반 session을 쓴다.
+    """
     async with (
-        _coordinator_session(engine) as (_, fresh_session),
+        AsyncSession(engine, expire_on_commit=False) as fresh_session,
         fresh_session.begin(),
     ):
         canonical_scope = await resolve_pipeline_cancellation_scope(

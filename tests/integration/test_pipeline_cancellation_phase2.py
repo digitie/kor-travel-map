@@ -1368,8 +1368,16 @@ async def test_queued_canonical_terminate_failure_retries_same_frozen_scope(
 async def test_ownership_loss_prefers_canonical_current_over_exact_old_attempt(
     migrated_engine: AsyncEngine,
     committed_running_job: tuple[str, str],
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     job_id, run_id = committed_running_job
+
+    def _no_coordinator(*_args: Any, **_kwargs: Any) -> Any:
+        # reload는 K를 잡지 않는 읽기다. coordinator 연결(GUC·exact backend·observer)을
+        # 열지 않고 일반 session 하나로 끝나야 한다.
+        raise AssertionError("ownership reload opened a coordinator connection")
+
+    monkeypatch.setattr(service, "_coordinator_session", _no_coordinator)
     retryable = {"code": "DAGSTER_UNAVAILABLE", "message": "response lost"}
     async with AsyncSession(migrated_engine) as session, session.begin():
         first = await _create_attempt(session, job_id=job_id)
@@ -1417,6 +1425,7 @@ async def test_ownership_loss_prefers_canonical_current_over_exact_old_attempt(
     assert raised.value.detail.cancellation_id == UUID(
         current.attempt.cancellation_id
     )
+    assert migrated_engine.pool.checkedout() == 0
 
 
 async def test_unexpected_service_close_keeps_pending_facts(

@@ -77,10 +77,13 @@ def _locks_and_read(
 ) -> list[str]:
     order: list[str] = []
 
-    async def lock(_session: Any, **kwargs: Any) -> None:
-        order.append("root" if kwargs else "prefix")
+    async def tracking(_session: Any, *, finalizing: bool) -> None:
+        order.append("final" if finalizing else "leaf")
 
-    monkeypatch.setattr(repo, "lock_provider_feature_finalization", lock)
+    async def lock(_session: Any, **kwargs: Any) -> None:
+        order.append("root" if kwargs else "lineage")
+
+    monkeypatch.setattr(repo, "lock_provider_feature_tracking", tracking)
     monkeypatch.setattr(repo, "lock_pipeline_lineage_mutation", lock)
     monkeypatch.setattr(repo, "lock_pipeline_cancellation_root", lock)
     monkeypatch.setattr(repo, "_load_operation", AsyncMock(return_value=operation))
@@ -102,7 +105,8 @@ async def test_successful_root_after_child_finish_is_read_only_noop(
     )
     assert result.outcome == "noop"
     assert result.operation is operation
-    assert order == ["prefix", "prefix", "root"]
+    # 434 WI-1: 권위 완료만 P EX→L(final)이다.
+    assert order == ["final", "lineage", "root"]
     assert len(session.statements) == 2
     assert session.statements[1][1] == {
         "root_job_id": operation.root_job_id,
@@ -209,7 +213,7 @@ async def test_running_root_completed_child_preserves_existing_noop(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     operation = replace(_operation(), status="running", dagster_run_status="STARTED")
-    _locks_and_read(monkeypatch, operation)
+    order = _locks_and_read(monkeypatch, operation)
     session = _Session(operation)
     result = await repo.finish_dagster_feature_membership(
         session,  # type: ignore[arg-type]
@@ -218,3 +222,5 @@ async def test_running_root_completed_child_preserves_existing_noop(
     )
     assert result.outcome == "noop"
     assert len(session.statements) == 1
+    # 434 WI-1: 비권위 완료는 장부 쓰기라 L만 잡는다(다른 적재의 P EX 뒤에서 기다리지 않는다).
+    assert order == ["leaf", "lineage", "root"]

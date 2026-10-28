@@ -2,7 +2,8 @@
 
 - 상태: accepted (2026-10-21). O1은 2026-10-20, O2~O5는 2026-10-21 소유자가 권고대로 수락했다. 결정 0-1은 #1345로,
   결정 1~7은 같은 항목 `T-RECONCILE-RETRY`의 둘째 하위 단계로 구현했다(맨 아래 "구현 결과").
-- 날짜: 2026-10-20 (같은 날 적대 리뷰 2회를 반영했다. 반영 내용은 맨 아래 "리뷰 반영" 절에 있다), 2026-10-21 수락·구현
+- 날짜: 2026-10-20 (같은 날 적대 리뷰 2회를 반영했다. 반영 내용은 맨 아래 "리뷰 반영" 절에 있다), 2026-10-21 수락·구현,
+  2026-10-27 결정 0-1 경쟁 절 개정(430의 READ COMMITTED 완결, 434의 장부 L — ADR-115 §11)
 - 결정자: Claude (소유자 수락 2026-10-20·21)
 - 관계: ADR-111 결정 4(이 설계를 후속으로 넘겼다), ADR-107(공용 Dagster 런타임), ADR-021(forward-only)
 - 설계 입력: PR #1319의 세 판과 그 리뷰(ADR-111 결정 4의 목록, journal 2026-10-13 ADR-111 항목). 마지막 판 코드는 커밋
@@ -85,6 +86,12 @@ feature.finalize_provider_curation_root` 평균·최대 등). 최대가 15초에
   대기) 시점에 snapshot을 잡으므로, 그 사이 다른 트랜잭션(취소 coordinator 등)이 root를 바꿨다면 `blocked/*`가 아니라
   40001로 끝난다. 데이터는 롤백되고 아무것도 쓰이지 않는다. root가 terminal이 되었거나 marker가 붙었으면 다음 sweep 목록에서
   빠지므로 다시 시도되지 않는다. sweep 둘이 겹치지 않는 것은 pool이 맡는다.
+  > **2026-10-27 개정(430·434).** 430부터 SUCCESS reconcile과 root 완결은 SERIALIZABLE이 아니다. READ COMMITTED에서
+  > P EX → L → `feature-curation-write`(fence)를 먼저 잡고, 잠금을 얻은 뒤의 문장마다 새 snapshot으로 root와 입력을 다시
+  > 읽는다. 그래서 이 경쟁은 40001이 아니라 `blocked/*`(그사이 root가 terminal이 됐거나 marker가 붙었다), `stale_input`
+  > (입력이 바뀌었다), 55P03(잠금 대기 상한 또는 `feature-write-all gate is busy` 표지)으로 끝난다. 쓰이는 것이 없다는
+  > 점은 같다. 434부터 FAILURE·CANCELED reconcile·abandon과 비권위 finish는 L만 잡는다 — 완결이 P EX를 쥐는 동안에도
+  > 그 장부 쓰기는 P에서 기다리지 않고, lineage L에서만 직렬화된다(ADR-115 §11.2).
 - **취소 coordinator.** 바꾸지 않는다. marker가 붙은 root는 목록에 오지 않으므로 sweep이 손대지 않는다. coordinator의
   `already_terminal`·SUCCESS 완결(API 트랜잭션 안)은 이 단계 밖이다. 다만 SUCCESS와 완결 사이 구간이 길어진 만큼 그 경로를
   타는 경우가 늘 수 있다.

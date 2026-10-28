@@ -1001,7 +1001,11 @@ class AsyncKorTravelMapClient:
                     await session.execute(
                         text("SET TRANSACTION ISOLATION LEVEL READ COMMITTED")
                     )
-                # 명시 RC 설정 뒤 repository가 P EX→L을 행보다 먼저 확보한다.
+                    # 434 WI-1: 권위 완료의 P EX→L은 다른 적재가 P EX를 쥔 동안 적재와 같은
+                    # 상한까지 기다린다. 이미 commit한 적재의 완료가 엔진의 짧은 상한(30초)에
+                    # 55P03으로 죽어 fetch·적재를 처음부터 다시 돌지 않게 한다.
+                    arm_feature_curation_write_wait(session, self._feature_load_lock_wait_ms)
+                # 명시 RC 설정 뒤 repository가 tracking prefix를 행보다 먼저 확보한다.
                 return await repo_finish_dagster_feature_membership(
                     session,
                     dagster_run_id=dagster_run_id,

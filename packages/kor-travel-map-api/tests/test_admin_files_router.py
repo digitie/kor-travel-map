@@ -137,6 +137,97 @@ def test_backup_file_link_targets_existing_backup_page() -> None:
 
 
 @pytest.mark.unit
+def test_offline_upload_link_targets_existing_list_page() -> None:
+    from kortravelmap.api.routers.admin_files import _build_links
+
+    links = _build_links(
+        SimpleNamespace(
+            origin_import_job_id=None,
+            upload_id="0193f2a4-7c1e-7d3a-9b2c-5e6f7a8b9c0d",
+            location="object_store",
+            kind="offline_upload",
+            path="offline-uploads/0193f2a4/features.jsonl",
+            provider_dataset_id=None,
+            origin_dagster_run_id=None,
+        )
+    )
+
+    # 업로드별 상세 route는 없다. 목록 페이지에서 선택하므로 upload_id를 경로에 넣지 않는다.
+    assert [(link.rel, link.href) for link in links] == [
+        ("offline-upload", "/admin/offline-uploads")
+    ]
+
+
+_FRONTEND_APP = (
+    Path(__file__).resolve().parents[2] / "kor-travel-map-admin" / "frontend" / "src" / "app"
+)
+
+
+def _frontend_page_routes() -> list[tuple[str, ...]]:
+    """App Router ``page.tsx``의 URL 경로. route group ``(x)``는 URL에 없다."""
+
+    return [
+        tuple(
+            part
+            for part in page.parent.relative_to(_FRONTEND_APP).parts
+            if not (part.startswith("(") and part.endswith(")"))
+        )
+        for page in _FRONTEND_APP.rglob("page.tsx")
+    ]
+
+
+def _route_matches(route: tuple[str, ...], segments: tuple[str, ...]) -> bool:
+    for index, part in enumerate(route):
+        if part.startswith(("[[...", "[...")):
+            return len(segments) > index or part.startswith("[[...")
+        if index >= len(segments):
+            return False
+        if not (part.startswith("[") and part.endswith("]")) and part != segments[index]:
+            return False
+    return len(route) == len(segments)
+
+
+@pytest.mark.unit
+def test_every_managed_file_link_href_has_a_frontend_page() -> None:
+    """서버가 조립한 deep-link는 프론트에 실제 페이지가 있어야 한다(없으면 prefetch·클릭이 404).
+
+    모든 링크 근원을 한 행에 채워 ``_build_links``가 내는 href를 전부 본다. 함수가 새 속성을
+    읽기 시작하면 ``SimpleNamespace``가 AttributeError로 이 테스트를 다시 쓰게 만든다.
+    """
+    from urllib.parse import urlsplit
+
+    from kortravelmap.api.routers.admin_files import _build_links
+
+    routes = _frontend_page_routes()
+    assert ("admin", "offline-uploads") in routes, (
+        f"frontend app 경로를 못 찾았다: {_FRONTEND_APP}"
+    )
+    links = _build_links(
+        SimpleNamespace(
+            origin_import_job_id="job/1",
+            upload_id="0193f2a4-7c1e-7d3a-9b2c-5e6f7a8b9c0d",
+            location="backup_root",
+            kind="backup",
+            path="nested/기록 1.dump",
+            provider_dataset_id=7,
+            origin_dagster_run_id="0f1e2d3c4b5a69788796a5b4c3d2e1f0",
+        )
+    )
+    hrefs = {link.rel: link.href for link in links if link.href is not None}
+    # 본 것에 하한을 건다: 링크 근원 넷이 모두 href를 냈는지 먼저 본다.
+    assert set(hrefs) == {"import-job", "offline-upload", "backup", "provider"}
+    missing = {
+        rel: href
+        for rel, href in hrefs.items()
+        if not any(
+            _route_matches(route, tuple(filter(None, urlsplit(href).path.split("/"))))
+            for route in routes
+        )
+    }
+    assert not missing, f"page.tsx가 없는 deep-link: {missing}"
+
+
+@pytest.mark.unit
 def test_list_rejects_unknown_status(client: TestClient) -> None:
     # enum 검증은 세션 사용 전에 422로 끊는다.
     response = client.get("/v1/admin/files", params={"status": "bogus"})

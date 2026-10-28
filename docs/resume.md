@@ -1,3 +1,32 @@
+## 2026-10-28 — #1426의 main 병합 뒤 resume 크기 경계 복구
+
+ebb92ca9의 새 Python CI는 문서 크기 한 항목에서 실패했다(resume 227100B > 225280B).
+§8에 따라 9월8일 M05 완료 이력 한 절 5075B를 원문 그대로 기존 9월 archive로 옮겼다.
+기존 archive 세 절과 나머지 live 본문은 보존하고 원래 위치의 원문 링크·상단 탐색표를 남긴다.
+제품·시험·상한·현재 미완 판정과 snapshot profiles OFF는 그대로다. 새 exact-head CI와 UI는 별도다.
+
+## 과거 기록 아카이브
+
+| 파일 | 기간 | 엔트리 수 | 크기 |
+| --- | --- | --- | --- |
+| [resume-2026-09a.md](archive/resume-2026-09a.md) | 2026-09-05 ~ 2026-09-08 | 4 | 15316B |
+
+## 2026-10-28 — #1426의 main 충돌·기존 통합 회귀 호환 교정
+
+기준 head `28a97e6d`의 양 PostGIS CI는 각각 6개가 실패했다. main `fddc1659`의
+배포·공개 UI 수용 기록과 PR의 WI-5~11 기록을 모두 보존해 두 문서 충돌을 해결했다.
+434의 장부 L-only·epoch=0 단건 진입을 따르도록 기존 시험 네 파일을 교정했다.
+승인 요청 행의 실제 잠금 timeout·rollback·동일 key 복구, K→L 대기 task 취소와
+pool1 재사용, 현재 schema head의 ACL, 같은 TX의 확정 prefix 선점을 검증한다.
+장부 뒤 확정으로 승격하는 역순은 계속 23514이며 실패 TX의 변경은 rollback된다.
+제품 코드·SQL·마이그레이션·운영 flag는 바꾸지 않았다.
+
+로컬 alpine 고정 digest에서 기존 실패 6개가 77.93초에 통과했다. CI 범위 Ruff,
+main mypy 198파일, import-linter 4계약도 통과했다. 넓은 `ruff check .`의 기존
+비제품 문서 스크립트·journal 검사 스크립트 7건은 별도 실패로 보존했다.
+새 후보 전체 CI·독립 최종 리뷰·UI·434 운영 배포는 아직 미완이며 전체
+T-CWRITE-01~09 미완·snapshot profiles OFF와 ADR-117 선행 조건을 유지한다.
+
 ## 2026-10-28 — 현재 배포·원51복구·공개 UI13 수용
 
 Map001487에 검증6611이 포함돼 별도 구버전 재배포는 하지 않았다.
@@ -14,6 +43,30 @@ pair2·후보 실제UI14 및 두 독립 검토 뒤 #1424를 mainc3adc0c로 정�
 [최종 정산](reports/2026-10-27-bound-snapshot-stale-replan.md#정확6611의-최종-ci실제-ui정상-머지-수용)에
 원 실패·source6611/API와 f29 UI build 구분·쿠키 삭제/401/정리를 남겼다. archive 원문
 9819B 뒤 footer로 EOF P3를 닫는다. 운영433/공개UI는 후속이며 전체9미완/OFF를 유지한다.
+
+## 2026-10-27 — Codex PR 통합 리뷰의 비잠금 항목(WI-5~11)
+
+최근 1주 Codex PR 46건(#1358~#1419) 통합 리뷰를 하나의 PR로 정리하는 작업 중 잠금 순서와
+무관한 항목이다. 브랜치 `feat/map-codex-review-misc`에서 만들어 통합 PR 브랜치에 합친다.
+
+- **WI-5** shadow hook이 순서가 뒤바뀐 bundle의 record key를 recorder에 넘겨 23514로 적재
+  transaction 전체를 rollback시켰다. 저장 head가 그 record일 때만 capture한다. 운영은 shadow
+  scope 미설정이라 휴면이었다(n150 Dagster env 읽기 확인).
+- **WI-6** 관리 파일의 오프라인 업로드 링크가 없는 상세 경로(404)를 가리켰다.
+  `/admin/offline-uploads`로 고치고 `_build_links`의 모든 href가 `page.tsx`에 대응하는지 본다.
+- **WI-7** inbound 자격 증명 목록 하나로 기동 distinctness와 `/v1/service/*`의 403 판정을 묶었다.
+  수동 생성 digest가 feature-request·reconciliation digest와 같아도 통과했고, 그 토큰은 403이
+  아니라 401로 떨어졌다. 운영 API env(읽기만)는 설정된 8종 사이 충돌 0건이다.
+- **WI-8** K 없는 정상 반환에서 정리만 실패하면 503 대신 연결을 폐기하고 commit된 결과를
+  돌려준다. ownership reload는 일반 session을 쓴다.
+- **WI-9** 기준선 측정 harness를 필수 CI에서 뺐다. 공용 container 안의 전용 DB에서 DML 비중첩·cold/warm
+  hash·개수만 본다. reader snapshot pool 경합 시험의 대기를 5초로 올렸다.
+- **WI-10** 지도 cluster·geometry label·clickable marker를 Tab·Enter/Space로 고를 수 있다.
+  `audit:dev`의 `|| true`를 뺐다(redocly 1.34.22로 dev 전체 audit 0건).
+- **WI-11** SH 설계 문서 3건 superseded, 418·424 정오표, integration-map §3 admin-features 행,
+  runtime_privileges docstring(ADR-100). T-CWRITE-04 링크는 main이 먼저 고쳤다.
+
+검증은 n150의 CI와 같은 네 pytest 세션·lint·frontend·Playwright에서 했다(결과는 PR 본문).
 
 ## 2026-10-27 — alpine 관찰자 cold-array codec 경계 최소 교정
 
@@ -191,6 +244,52 @@ CI가 발견한 ledger300자 위반은 task 본문을 원장 link로 단축해 �
 코드/SQL/schema·운영 OFF 설정 및 기존 예산은 바꾸지 않으며 최종 CI·머지는 아직 대기다.
 T-CWRITE-01–09와 운영 CPU/RSS 개선 수용은 미완료 상태를 유지한다.
 [범위와 원장](reports/2026-10-27-provider-snapshot-os-worker-pair.md).
+
+## 2026-10-27 — Codex PR 통합 리뷰의 비잠금 항목(WI-5~11)
+
+최근 1주 Codex PR 46건(#1358~#1419) 통합 리뷰를 하나의 PR로 정리하는 작업 중 잠금 순서와
+무관한 항목이다. 브랜치 `feat/map-codex-review-misc`에서 만들어 통합 PR 브랜치에 합친다.
+
+- **WI-5** shadow hook이 순서가 뒤바뀐 bundle의 record key를 recorder에 넘겨 23514로 적재
+  transaction 전체를 rollback시켰다. 저장 head가 그 record일 때만 capture한다. 운영은 shadow
+  scope 미설정이라 휴면이었다(n150 Dagster env 읽기 확인).
+- **WI-6** 관리 파일의 오프라인 업로드 링크가 없는 상세 경로(404)를 가리켰다.
+  `/admin/offline-uploads`로 고치고 `_build_links`의 모든 href가 `page.tsx`에 대응하는지 본다.
+- **WI-7** inbound 자격 증명 목록 하나로 기동 distinctness와 `/v1/service/*`의 403 판정을 묶었다.
+  수동 생성 digest가 feature-request·reconciliation digest와 같아도 통과했고, 그 토큰은 403이
+  아니라 401로 떨어졌다. 운영 API env(읽기만)는 설정된 8종 사이 충돌 0건이다.
+- **WI-8** K 없는 정상 반환에서 정리만 실패하면 503 대신 연결을 폐기하고 commit된 결과를
+  돌려준다. ownership reload는 일반 session을 쓴다.
+- **WI-9** 기준선 측정 harness를 필수 CI에서 뺐다. 공용 pg_container에서 DML 비중첩·cold/warm
+  hash·개수만 본다. reader snapshot pool 경합 시험의 대기를 5초로 올렸다.
+- **WI-10** 지도 cluster·geometry label·clickable marker를 Tab·Enter/Space로 고를 수 있다.
+  `audit:dev`의 `|| true`를 뺐다(redocly 1.34.22로 dev 전체 audit 0건).
+- **WI-11** SH 설계 문서 3건 superseded, 418·424 정오표, integration-map §3 admin-features 행,
+  runtime_privileges docstring(ADR-100), T-CWRITE-04 링크.
+
+검증은 n150의 CI와 같은 네 pytest 세션·lint·frontend·Playwright에서 했다(결과는 PR 본문).
+
+## 2026-10-27 — Codex PR 리뷰 정리: tracking 장부는 L만, 단건 writer는 regime 진입(434)
+
+Codex PR #1358~#1419 리뷰를 정리한 잠금 핵심을 `feat/map-codex-review-core`에 구현했다(PR은
+gate 뒤에 연다, 미머지). 434는 432 정본 루틴 20개의 본문 SHA·소유자·시그니처를 고정하고
+검토한 바늘만 바꾼다. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
+
+- WI-1: tracking 장부 쓰기는 L만, 큐레이션 확정(seal·root 완결·권위 finish·SUCCESS 완결 취소
+  전이)만 P EX→L. 430 write-prefix guard도 같은 분류로 좁혔다.
+- DC-1: 단건·관리 writer(SQL 10개+Python 관리 경로)는 regime 진입 — epoch=0이면 P 없음,
+  epoch>0이면 P EX. 계획의 "epoch>0 공유"는 strict guard가 manifest 없는 SH를 거부해 배타로
+  바꿨다. 전화 override·curation import와 provider 증거를 먼저 잡는 M05·재활성화는 P EX를
+  유지한다(적대 리뷰가 다중 bundle 적재·병합과의 순환을 찾았다).
+- WI-2 무장 대기 0→1초 결함, WI-3 418 GRANT 재부여+ACL 오라클, WI-4 lock-order lint의 P·L·leaf
+  규칙과 Python helper 분석.
+
+운영 읽기 전용 확인: flag 3종 OFF, shadow scope 미설정, epoch 0, active policy·write attempt 0,
+남은 로그 창과 DB 원장에서 LOCK_TIMEOUT 503·55P03 0건 — 결함은 잠재 상태였다.
+[ADR-115 §11](adr/115-scoped-concurrent-feature-writes.md#11-구현-상태2026-10-27-alembic-434-기준).
+
+다음 한 작업: n150 gate(lint·unit·api·dagster·integration) 통과 → PR 개설과 misc 브랜치 병합 →
+CI green → 두 독립 적대 리뷰와 수정. 머지·배포는 weather export 작업 완료 뒤 lead가 한다.
 
 ## 2026-10-27 — kor-travel-common 최신(`aa232ad5`) 반영: 브랜치 `chore/common-latest-map`
 
@@ -2575,71 +2674,7 @@ Manager 리뷰(14건 → 2 확정)의 P1이 결정적이었다 — 소비 검사
 
 ## 2026-09-08 — T-VN-M05 완주. 열린 항목은 여섯이고 소유자 판정은 셋이다
 
-| 항목 | 상태 |
-|---|---|
-| `T-VN-M05` | **완료** — 조문 M05-1~M05-7 전부 충족 |
-| M05-2 | evidence export(A)·오프라인 검증(B)·리허설 소유권 증명(C)·**복원본 수리(D)** |
-| M05-5 | 전용 admin 라우트 `src/app/admin/manual-provider-dedup/` |
-| 실측 | n150 M05 통합 42건, 세 배치 순서 36건, 변이 14축 전부 RED |
-| restore 정책 | **변함없이 닫혀 있다**(2026-08-26 소유자 결정) |
-
-M05-2를 닫으면서 판정을 한 번 되돌렸다. "lease를 evidence root에 담지 않으니 fencing
-token이 되살아날 자리가 없다"는 **번들에 대해서만** 참이었다 — `pg_dump`는 스키마 전체를
-담으므로 복원본에는 lease 행이 dump 시점 `(worker_id, lease_epoch)`를 달고 살아 돌아오고,
-복원본은 사본이라 그 토큰이 양쪽에서 동시에 유효하다.
-
-### 착수 가능 — 소유자 판정 없이 지금 할 수 있는 것
-
-1. **`T-VN-M05-VERIFY-RECEIPT`** — V1·V2·V3 미충족. `verify_leaf`는 정말 아무것도 쓰지
-   않는다(`m05_isolated_e2e.py:2388-2405`). 다만 **V2가 요구하는 값은 전부 이미 지역변수로
-   살아 있다**(pinset·Map/PinVi revision·binding의 Manager revision·claim). 두 갈래 함정:
-   신뢰 경계 거부 경로(`:2445`/`:2448`)는 axis를 하나도 안 남기고 `return 1`하므로 "실패도
-   남긴다"가 가장 필요한 곳이 비어 있고, V3는 조문 `:1386-1388`이 "출력을 이 절에
-   기록한다"고 **명령**하고 있어 조문 정정이 함께 간다.
-2. **`T-VN-M05-ONESHOT-CONSUME`** — 성공 분기가 아무것도 안 남긴다. **소비를 scoped
-   `phase`로 기록하면 L8 호환이 공짜로 풀린다**(L8은 `entry.phase is None`만 본다).
-   **`result.json`에 키를 추가하면 안 된다** — 런처가 정확한 키 집합을 강제해
-   (`run-m05-isolated-e2e-once:505-519`) 불일치가 성공한 실행을 무조건 소각한다.
-3. **`T-VN-M02-TRUNCATE-FENCE`** — 원장 서술 둘이 틀렸다(아래 §정정). 트리거를 더하는
-   비용은 통합 테스트 **0곳**이다.
-4. **`T-VN-39`의 TEXT `feature_id` PK 제거** — 소유자 판정 대상이 아니다. 대체 identity
-   (`feature_uuid` + unique 둘)와 fence 트리거가 이미 prod에 있고 `feature.features`는 0행이라
-   데이터 이행 위험이 없다. 남은 것은 컬럼 37 · FK 34 · 인덱스 57의 rekey 공학이다.
-5. **`T-VN-H49` 잔여** — `geo` 예약 성공 2건 더 쌓이기를 기다리는 것과 문서 갱신뿐이다.
-
-### 소유자 판정 대기 — 둘
-
-~~`T-VN-H49` manual Feature hard purge 정책~~ — **2026-09-08 판정·구현 완료**(migration
-306). 감사되는 운영 명령으로 열되 UI 버튼이 아니고, purge가 자기 복구점을 담아 H43
-보류에 묶이지 않게 했다. claim의 두 역할을 갈라 tombstone을 관리 가능하게 했고 ADR-093에
-개정 한 문장을 박았다. 상세는 `docs/tasks-acceptance.md` §T-VN-H49.
-
-1. `T-VN-H49-OFFBOX` — 목적지 호스트·계정·**root가 쓸 수 있는** ssh 키. 코드는 이미 있다
-   (`offbox_backup_sync.py`, CLI, 상태 API). `/opt` `.env`에 `KTDM_OFFBOX*` 0개.
-2. `T-VN-39` — `provider_sync.notice_states`를 어디가 소유할 것인가. 새 선행 항목을 세울
-   것인가, 아니면 removal manifest에서 (c)를 뺄 것인가(frozen 계약 개정).
-
-**보류/제외 셋**: `T-VN-41C`·`T-VN-H43`·`T-101` — 셋 다 재개 조건이 아직 발화하지 않았다
-(41C·H43은 실 production 전환, T-101은 SLO 정의와 ADR-073 의미 택일).
-**외부 추적**: `GM-17`(가장 마지막).
-
-### 정정 — 이전 실측 둘이 틀렸다
-
-- **"n150에 예약 백업이 아예 없다"는 틀렸다.** `digitie` crontab에 `geo_dagster`·
-  `concierge`·`pinvi` 셋이 매일 돌고 2026-08-21부터 **18일 연속 성공**했다. root로 실행한
-  조회가 `/root/backups`를 봤고 cron은 `KTDM_BACKUP_ROOT=/home/digitie/backups`를 쓴다 —
-  **다른 디렉터리를 보고 "없다"고 적었다.** `map_application`이 어느 cron에도 없는 것은
-  `T-VN-H43`의 의도된 보류다.
-- **"TRUNCATE CASCADE가 hard-purge fence를 통째로 우회한다"도 틀렸다.** CASCADE 폐포 30개
-  중 10개에 BEFORE TRUNCATE 가드가 켜져 있어 실제로는 중단된다. fence가 그 거부에 기여하지
-  않고 진단이 엉뚱한 이유를 대는 것이 진짜 결함이다. "통합 테스트 24곳"도 **14곳**이고,
-  `_db_cleanup.py:49`가 이미 `session_replication_role = replica`로 돌아 트리거를 더해도
-  **0곳이 깨진다**. 원장이 놓친 더 큰 구멍은 `ops.feature_requests`로, TRUNCATE 가드도
-  append-only 가드도 없다.
-- **`~/ktm-live-301`은 "정지"가 아니라 사라졌다** — 컨테이너도 볼륨도 없고, 그 체크아웃은
-  302 head이며 해당 spec 자체가 없다. `T-VN-M02` live acceptance는 재기동이 아니라 재구축이
-  선행이다.
-
+[완전한 원문](archive/resume-2026-09a.md#2026-09-08--t-vn-m05-완주-열린-항목은-여섯이고-소유자-판정은-셋이다)은 읽기 크기 상한에 따라 분리했다.
 
 ## 2026-09-05 ~ 2026-09-06 이력
 

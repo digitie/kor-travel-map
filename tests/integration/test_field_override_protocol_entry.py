@@ -1,4 +1,9 @@
-"""field SQL·Python 선점 폐포를 실제 runtime/PG/ASGI로 검증한다."""
+"""field SQL·Python 선점 폐포를 실제 runtime/PG/ASGI로 검증한다.
+
+434 DC-1 이후 이 모듈은 두 세계를 순서대로 본다. 앞쪽 테스트는 정책 활성화 전(epoch=0)이라
+단건 writer가 P를 잡지 않는다. 활성화 테스트가 epoch를 올린 뒤의 HTTP 503 테스트는 regime
+진입이 P EX를 기다리는 경로다(``_ensure_regime``이 단독 실행에서도 그 세계를 만든다).
+"""
 
 from __future__ import annotations
 
@@ -24,7 +29,9 @@ from kortravelmap.infra.scoped_feature_writes import (
     begin_scoped_feature_write,
     finish_scoped_feature_write,
 )
-from tests.integration.test_admin_override_protocol_entry import _wait_protocol_blocker
+from tests.integration.test_admin_override_protocol_entry import (
+    _wait_row_blocker_without_protocol,
+)
 from tests.integration.test_provider_field_scalar_projection import (
     _activate,
     _plan,
@@ -196,6 +203,28 @@ async def _state(admin, case):
     return hashlib.sha256(json.dumps(rows, sort_keys=True).encode()).hexdigest()
 
 
+_OWN_PROTOCOL_MODES = """SELECT mode FROM pg_locks WHERE pid=pg_backend_pid()
+AND locktype='advisory' AND classid=1369104691::oid AND objid=115::oid AND objsubid=2
+AND granted"""
+
+
+async def _epoch(admin) -> int:
+    async with AsyncSession(admin) as session:
+        return int(
+            await session.scalar(
+                text("SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton")
+            )
+        )
+
+
+async def _ensure_regime(admin, runtime) -> None:
+    """epoch>0을 보장한다. 이 모듈의 활성화 테스트가 이미 올렸으면 그대로 둔다."""
+    if await _epoch(admin) == 0:
+        other = await _case(admin, runtime)
+        await _activate(admin, other.feature)
+    assert await _epoch(admin) > 0
+
+
 @pytest.mark.parametrize(
     ("kind", "same_feature"),
     [
@@ -208,10 +237,16 @@ async def _state(admin, case):
         ("create", True),
     ],
 )
-async def test_valid_writer_waits_before_first_feature_or_manual_claim(
+async def test_epoch0_writer_waits_only_on_the_same_feature_row(
     scalar_engines, kind, same_feature
 ):
+    """434 DC-1: epoch=0의 단건 writer는 applying kernel의 P SH 뒤에 줄 서지 않는다.
+
+    같은 Feature면 kernel이 잡은 Feature 행에서만 기다리고, 다른 Feature와 신규 생성은
+    kernel이 열려 있는 동안 끝난다. 이 모듈의 활성화 테스트보다 앞에 있어야 epoch=0이다.
+    """
     admin, runtime = scalar_engines
+    assert await _epoch(admin) == 0
     case = await _prepare(admin, runtime, kind)
     held = case if same_feature else await _case(admin, runtime)
     attempt, owner, digest = await _plan(runtime, held.feature, held.dataset)
@@ -234,48 +269,12 @@ async def test_valid_writer_waits_before_first_feature_or_manual_claim(
             blocker = int(await scoped.scalar(text("SELECT pg_backend_pid()")))
             task = asyncio.create_task(write())
             pid = await asyncio.wait_for(asyncio.shield(started), 3)
-            await _wait_protocol_blocker(admin, pid, blocker)
-            assert not task.done()
-            if not same_feature:
-                async with AsyncSession(admin) as observer, observer.begin():
-                    assert (
-                        await observer.scalar(
-                            text(
-                                "SELECT 1 FROM feature.features "
-                                "WHERE feature_id=CAST(:id AS uuid) FOR UPDATE NOWAIT"
-                            ),
-                            dict(id=case.feature),
-                        )
-                        == 1
-                    )
-            if kind == "create":
-                # MVCC count만으로는 미커밋 claim 부재를 증명하지 못한다. 같은 unique key를
-                # 실제 삽입·rollback하여 선점 여부를 확인한다.
-                async with AsyncSession(admin) as observer:
-                    tx = await observer.begin()
-                    try:
-                        await observer.execute(text("SET LOCAL lock_timeout='150ms'"))
-                        await observer.execute(
-                            text("""INSERT INTO feature.manual_feature_identity_claims(
-                            feature_id,feature_kind,name_key,lon_e6,lat_e6,
-                            claimed_by_command_id,claim_basis,claimed_at)
-                            SELECT :probe,key.feature_kind,key.name_key,key.lon_e6,key.lat_e6,
-                            :command,'manual_create',clock_timestamp()
-                            FROM feature.manual_feature_identity_key('place',:name,127.5,36.5) key
-                            """),
-                            dict(probe=uuid4(), command=case.command, name=case.actor),
-                        )
-                    finally:
-                        await tx.rollback()
-            async with AsyncSession(admin) as observer:
-                # create가 protocol 대기 전에 claim/core를 쓰지 않았는지 직접 확인한다.
-                assert (
-                    await observer.scalar(
-                        text("SELECT count(*) FROM feature.features WHERE name=:name"),
-                        dict(name=case.actor),
-                    )
-                    == 0
-                )
+            if same_feature and kind != "create":
+                await _wait_row_blocker_without_protocol(admin, pid, blocker, task)
+                assert not task.done()
+            else:
+                # 종전(414~418)에는 여기서 P EX를 기다렸다. 이제 kernel과 겹치지 않으면 끝난다.
+                await asyncio.wait_for(asyncio.shield(task), 8)
             assert (
                 await finish_scoped_feature_write(
                     scoped, attempt_id=attempt, owner=owner, result_digest="f" * 64
@@ -310,18 +309,32 @@ async def test_valid_writer_waits_before_first_feature_or_manual_claim(
 
 
 @pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
-async def test_shared_upgrade_rollback_and_new_transaction_retry(scalar_engines, kind):
+async def test_epoch0_writer_under_shared_protocol_does_not_upgrade(scalar_engines, kind):
+    """434 DC-1: epoch=0이면 SH caller 안에서도 승격 없이 쓴다.
+
+    epoch>0의 SH→EX 승격 거부(23514)는 ``test_single_writer_regime_entry.py``가 본다.
+    """
     admin, runtime = scalar_engines
+    assert await _epoch(admin) == 0
     case = await _prepare(admin, runtime, kind)
-    before = await _state(admin, case)
-    with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 같은 TX의 gate와 실제 CALL
-        async with AsyncSession(runtime) as session, session.begin():
-            await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-            await _apply(session, kind, case)
-    assert caught.value.orig.sqlstate == "23514"
-    assert await _state(admin, case) == before
     async with AsyncSession(runtime) as session, session.begin():
+        await session.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
         assert await _apply(session, kind, case) is not None
+        modes = (await session.scalars(text(_OWN_PROTOCOL_MODES))).all()
+    assert modes == ["ShareLock"]
+
+
+@pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
+async def test_epoch0_writer_finishes_while_a_load_holds_protocol_ex(scalar_engines, kind):
+    """434 DC-1: 적재가 P EX를 쥔 동안에도 다른 Feature의 관리 writer는 끝난다(종전 503)."""
+    admin, runtime = scalar_engines
+    assert await _epoch(admin) == 0
+    case = await _prepare(admin, runtime, kind)
+    async with AsyncSession(runtime) as holder, holder.begin():
+        await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(true)"))
+        async with AsyncSession(runtime) as session, session.begin():
+            await session.execute(text("SET LOCAL lock_timeout='300ms'"))
+            assert await _apply(session, kind, case) is not None
 
 
 @pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
@@ -365,8 +378,11 @@ async def test_original_body_acl_config_and_owner_are_preserved(scalar_engines, 
                 dict(name=name),
             )
         ).one()
-    gate = "  PERFORM ops.lock_scoped_feature_write_protocol(true);\n"
+    # 434 DC-1: 416의 P EX 첫 줄이 같은 자리의 regime 진입으로 바뀌었다.
+    gate = "  PERFORM ops.lock_single_feature_writer_protocol();\n"
+    assert "lock_scoped_feature_write_protocol" not in row.prosrc
     assert row.prosrc.count(gate) == 1
+    assert row.prosrc.partition("\nBEGIN\n")[2].startswith(gate)
     assert (
         hashlib.sha256(row.prosrc.replace(gate, "", 1).encode()).hexdigest() == _ORIGINAL_BODY[name]
     )
@@ -500,7 +516,9 @@ async def test_active_unsupported_fields_still_rollback(scalar_engines, path, va
 
 @pytest.mark.parametrize("kind", ["author", "revoke", "patch", "create"])
 async def test_http_lock_timeout_rolls_back_and_retry_is_valid(scalar_engines, kind, monkeypatch):
+    """regime(epoch>0)의 단건 writer는 P EX를 기다리다 503으로 끝나고 재시도가 유효하다."""
     admin, runtime = scalar_engines
+    await _ensure_regime(admin, runtime)
     case = await _prepare(admin, runtime, kind)
     app = create_app(
         ApiSettings(

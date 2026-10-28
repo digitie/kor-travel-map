@@ -1,5 +1,11 @@
 # 작은 전체 dataset의 bounded evidence chunk 계획과 큰 snapshot의 별도 로드맵
 
+> **상태(2026-10-27): 대체됨(superseded).** 작성 시점의 설계다. 구현은 411~432로 머지됐고
+> ([432 구현 원장](2026-10-26-rest-snapshot-atomic-implementation.md)), SH 스냅샷·스칼라 정책
+> 경로는 운영에서 꺼진 채 동결됐다(동결 → 측정 → 퇴역 결정 대기). 현재 상태의 정본은
+> [ADR-115](../adr/115-scoped-concurrent-feature-writes.md)다. 이 문서로 활성화나 운영 수용을
+> 판단하지 않는다.
+
 2026-10-25. 설계만. 정본 읽기 기준 f89b6416470168521b03b009f45d87374c4fb720(제품은7e와동일) + 별도 reviewed reader3bfa51bc8d52cf17cd05d49f479bfbc82d9e75af의 실제 공개 인터페이스. 이 문서는 실제 운영 수집기의 구현·활성화 완료를 뜻하지 않는다. 잠금·stamp 기반은 PR #1394로 머지됐고, reader는 PR #1395에서 별도로 검증 중이다.
 
 ## 0. 먼저 통과해야 할 실제 전체 입력 문턱

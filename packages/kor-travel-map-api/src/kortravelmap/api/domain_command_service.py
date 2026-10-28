@@ -24,6 +24,7 @@ from kortravelmap.infra.domain_command_repo import (
     get_domain_command_record,
     lock_domain_command,
 )
+from kortravelmap.infra.sqlstate import sqlstate_of
 from pydantic import BaseModel
 from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
@@ -74,31 +75,6 @@ _ACTIVE_DOMAIN_COMMAND: ContextVar[DomainCommandHandle | None] = ContextVar(
     default=None,
 )
 _SERIALIZATION_ATTEMPTS = 3
-
-
-def sqlstate_of(error: BaseException) -> str | None:
-    """SQLAlchemy/asyncpg wrapper chain에서 PostgreSQL SQLSTATE를 찾는다.
-
-    명시적 연결(``orig``·``raise ... from``)만 따른다 — ``__context__``는 처리 중에 우연히
-    겹친 다른 예외일 수 있다.
-    """
-
-    current: BaseException | None = error
-    seen: set[int] = set()
-    while current is not None and id(current) not in seen:
-        seen.add(id(current))
-        for candidate in (
-            current,
-            getattr(current, "orig", None),
-            getattr(current, "__cause__", None),
-        ):
-            if candidate is None:
-                continue
-            value = getattr(candidate, "sqlstate", None) or getattr(candidate, "pgcode", None)
-            if value is not None:
-                return str(value)
-        current = getattr(current, "orig", None) or getattr(current, "__cause__", None)
-    return None
 
 
 class DomainCommandError(Exception):

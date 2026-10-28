@@ -1,7 +1,9 @@
 # ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌을 분리한다
 
-- 상태: proposed — 설계·문서만. 이 PR은 잠금을 제거하거나 동시 실행 수를 바꾸지 않는다.
-- 날짜: 2026-10-23
+- 상태: accepted — 부분 구현. alembic 411~434(운영 head 432). 스냅샷 SH 경로와 스칼라 정책
+  경로는 구현됐지만 **운영 OFF·동결**이다(DC-2 결정 대기). 현재 잠금 순서·writer 분류·동결
+  조건의 정본은 §11이다. 2026-10-27 개정: §5.2(3)·§8(3)의 writer 분류(434 DC-1), §11 신설.
+- 날짜: 2026-10-23(제안), 2026-10-27(accepted·개정)
 - 결정자: 사용자(설계·문서화·후속 구현 요청), Codex(설계)
 - 근거 코드: `cdd2614007a86e8627949cd1176c61eb14c0ce3e`(main, PR #1350).
 - 원격 main 재확인: `beec868128500aff8827646c351c6bf2f34ec709`(PR #1352·#1353)는 문서만
@@ -193,8 +195,14 @@ identity를 만들지 않는다. 초기 opt-in은 provider가 완전성을 보�
 2. **계획**: read-only 조회로 mutation closure를 manifest에 작성한다. source head뿐 아니라
    retire 대상의 기존 link, merge의 canonical closure, rule/candidate/collection, seal 의존을 포함한다.
    전체 UUID 목록을 Python list로 올리지 않고 임시 표/정렬 커서·COPY를 이용한다.
-3. **진입**: 모든 writer가 공통 protocol gate를 잡는다. 새 규약 writer는 공유, 잠금 세분화가
-   미지원인 경로·restore·DDL은 배타다. 단, policy 활성 scope의 의미 writer는 공유/배타 모두
+3. **진입**: 데이터 writer는 쓰기 전에 protocol gate(P)를 잡는다. 새 규약 writer(scoped
+   kernel)는 공유, 잠금 세분화가 미지원인 대량 경로·restore·DDL·정책 cutover는 배타다.
+   **2026-10-27 개정(434 DC-1):** 단건·관리 writer는 regime 진입으로 들어간다. 정책 활성화
+   전(epoch=0)에는 P를 잡지 않고 기존 행 잠금 순서(source→link→Feature)로만 직렬화하며,
+   활성화 뒤(epoch>0)에는 배타 P다 — strict guard가 manifest 없는 공유를 거부하므로 공유가
+   아니다. 첫 활성화가 진행 중인 epoch=0 writer를 drain하고, 진입을 건너뛴 DML은 23514로
+   닫힌다(§11.3). provider tracking 장부 쓰기는 데이터 writer가 아니라 P 없이 L만 잡는다
+   (§11.2). 단, policy 활성 scope의 의미 writer는 공유/배타 모두
    §3의 후보/winner 프로토콜을 구현해야 한다. 구형 직접 base writer는 gate mode와 무관하게
    DB에서 거부한다. 유지보수 restore도 활성 정책과 후보/projection의 일치 검증을 통과하기
    전에는 일반 쓰기를 재개하지 않는다. gate는 정상 쓰기끼리 직렬화하지 않는 잠금 경계다.
@@ -314,7 +322,10 @@ fence다. claim은 짧은 transaction으로 epoch를 발급한다. 적용 transa
 1. 측정/호출·trigger 전수 목록, 재현 fixture, field winner 정책을 먼저 만든다.
 2. 후보 원장·정책·redirect·scope 원장을 additive migration으로 넣고 **기존 전역 잠금 아래에서**
    backfill·winner 비교·회복 테스트를 끝낸다. shadow 계산은 공개값을 바꾸지 않는다.
-3. **정책 활성화 전** 모든 writer에 protocol gate와 후보/winner 의미 경로를 배포한다.
+3. **정책 활성화 전** 모든 writer에 protocol gate(단건·관리 writer는 regime 진입)와
+   후보/winner 의미 경로를 배포한다. **2026-10-27 개정(434 DC-1):** 단건·관리 writer는
+   epoch=0 동안 P를 잡지 않는다. 첫 활성화가 그들을 drain한 뒤에는 같은 binary가 스스로
+   배타 P를 잡으므로, 활성화를 위해 binary를 바꿔 끼우지 않는다(§11.3).
    전역 잠금 경로도 같은 의미를 쓰며 잠금만 배타다. 미변환 legacy 직접 base 호출은 DB에서
    거부한다. 필요한 writer가 의미 프로토콜을 지원하지 않거나 구 binary가 gate를 우회하면
    scope의 policy cutover와 세분화 enable을 모두 막는다. drain 후 API/CS/CLI·DB head를 확인한다.
@@ -367,3 +378,78 @@ CPU core-seconds/row와 peak RAM, API p95는 기준선 대비 10% 초과 악화�
 부정: 후보·정책·closure·fencing을 전수 구현해야 하므로 잠금 이름만 바꾸는 작은 패치가 아니다.
 지금은 proposed 설계다. 두 적대 리뷰 후 doc-only PR을 CI 검토 없이 머지하며, 구현·운영 수용은
 아래 task가 담당한다. ADR-111의 현행 잠금 규칙을 아직 superseded로 표시하지 않는다.
+
+2026-10-27: 부분 구현이 운영 중이라 accepted로 바꿨다(§11). ADR-111은 superseded가 아니라
+P·L을 앞에 둔 순서로 개정했다.
+
+## 11. 구현 상태(2026-10-27, alembic 434 기준)
+
+Codex PR(#1358~#1419) 리뷰를 정리한 PR이 이 절을 고정한다. 앞 절의 설계와 다르면 이 절이
+현행 정본이다.
+
+### 11.1 전역 잠금 순서
+
+`P`(protocol gate, 411) → `L`(pipeline lineage, 424) → `kortravelmap:curation-import` →
+`feature-curation-write` → `feature-write-all` → `feature-write:<id>` → `curation-catalog-write`
+
+- P는 Feature 도메인 행 잠금(source→link→Feature)보다 먼저다. 같은 transaction에서 공유 P를
+  배타로 올리지 않는다(23514 "upgrade requires replan").
+- L 뒤에 P를 새로 잡지 않는다. 확정 진입은 P EX를 먼저, L을 나중에 잡는다.
+- `tests/lint/test_feature_write_lock_order.py`가 head의 모든 루틴(중첩 CALL·trigger 포함)과
+  Python helper 호출을 epoch=0·epoch>0 두 세계에서 이 순서로 센다. 일부러 어긴 fixture가
+  빨개지는지도 같은 파일이 본다.
+
+### 11.2 writer 분류
+
+| writer | 잡는 것 |
+|---|---|
+| legacy 적재(fence)·curation import·root 완결·병합·purge·provider field patch·DDL·정책 cutover | P EX(무조건) |
+| scoped kernel(411 begin) | P SH + 적용 중 manifest |
+| 단건·관리 writer — SQL 10개(상태/lifecycle 4, 필드 override 2, 생성·승인 4)와 Python 관리 생성·patch·주소 override | regime 진입: epoch=0이면 P 없음, epoch>0이면 P EX |
+| provider 증거를 먼저 잡는 관리 writer — M05 3개·재활성화 | P EX(무조건, 종전대로) — 적재는 bundle을 차례로 쓰며 Feature를 쥔 채 다음 head를 갱신하고, 병합은 Feature 뒤 link를 잡는다. 증거를 먼저 잡고 Feature를 기다리는 writer가 P 없이 겹치면 순환이다 |
+| 전화 override(`set_feature_phones`) | P EX(fence) — enrichment가 같은 transaction에서 source record/link를 쓴다 |
+| tracking 확정: seal·root 완결·권위 finish·SUCCESS 완결 취소 전이 | P EX → L |
+| tracking 장부: ensure·attempt event·fill-starts·실패/취소 terminal·비권위 finish·취소 원장 | L만 |
+
+- 장부 진입을 P를 쥔 transaction에서 부르면 23514(`ck_provider_tracking_prefix`)다. 확정 진입
+  (P EX→L) 뒤의 재진입만 통과한다. 430 write-prefix guard도 같은 분류다. `done` 전이 중
+  root(`provider_feature_load_run`)와 권위 child만 P EX를 요구하고, 나머지 provider job·취소
+  원장 쓰기는 L(그리고 P를 쥐었다면 EX)만 요구한다.
+- 권위 finish의 P EX 대기는 적재와 같은 무장 상한(`feature_load_curation_lock_wait_seconds`)을
+  쓴다. 엔진 `lock_timeout`이 0이어도 gate가 1초로 줄이지 않는다(434 WI-2).
+
+### 11.3 regime 진입과 cutover 안전성
+
+- `ops.lock_single_feature_writer_protocol()`은 epoch 표를 평범하게 읽는다(ACCESS SHARE, 행
+  잠금 없음). epoch>0이면 P EX를 잡는다.
+- 첫 활성화(epoch=0)는 P EX 바로 뒤 epoch 표를 먼저 ACCESS EXCLUSIVE로 잠그고, 그다음 보호
+  표 25개를 잠근다. 이후 활성화는 epoch 표를 잠그지 않는다 — 단건 writer가 epoch를 읽은 뒤
+  P를 기다리므로 역순이 된다. 진입만 지난 epoch=0 writer는 다른 표가 아직 비어 있으므로 끝까지 쓰고 commit하며,
+  활성화는 그때까지 기다린다(drain). epoch 표를 목록 순서대로 잠그면 이 writer의 다음 DML과
+  순환한다(434 적대 리뷰). cutover 중에 들어온 진입은 epoch
+  표에서 기다리고, PL/pgSQL은 문장의 잠금을 snapshot보다 먼저 얻으므로(READ COMMITTED) 새
+  epoch를 읽고 P EX를 잡는다. 오래된 snapshot의 RR/SERIALIZABLE writer는 412 barrier·430
+  strict guard에 23514로 닫힌다.
+- M05와 재활성화는 P EX를 유지한다. 계획(DC-1)은 M05가 source 증거를 먼저 잡게 해 P 없이
+  역순을 없애려 했지만, 적대 리뷰가 다중 bundle 적재(앞 bundle의 Feature를 쥔 채 뒤 head 갱신)와
+  병합(Feature 뒤 link)과의 순환을 찾았다. 적재 중 M05 detector가 기다리는 문제는 남는다.
+- epoch=0에서 같은 Feature를 쥔 대량 writer가 있으면 단건 writer는 그 행에서 그 transaction이
+  끝날 때까지 기다린다(종전처럼 P에서 1~5초 뒤 503이 아니다). 다른 Feature는 기다리지 않는다.
+- 실제 PG 시험: `tests/integration/test_single_writer_regime_entry.py`.
+
+### 11.4 SH 스냅샷·스칼라 정책 경로는 운영 OFF·동결이다(DC-2 1단계)
+
+- 2026-10-27 운영 읽기 전용 확인: 스냅샷 flag(AIRPORT·REST·KRHERITAGE_EXCLUSIVE) 미설정(기본
+  OFF), `provider_field_shadow_scopes` 미설정, epoch 0, active policy 0행, write attempt 0행.
+- **운영에서 `feature.activate_provider_field_policy`를 부르지 않는다.** 되돌릴 수 없다 —
+  deactivate 경로가 없고, strict guard trigger 33개와 projection guard가 모든 writer에 영구히
+  붙으며, 설치가 보호 표 ACCESS EXCLUSIVE를 상한 없이 기다린다.
+- flag를 켜거나 정책을 활성화하기 전에 해소할 조건(리뷰 지적 ID): Rest·Airport runner의
+  부적격 입력 fallback·scope 축소·비활성 override/retired 거부·lease와 plan reset·GC 실패 전파
+  (D1·D2·C2-04·C1-01~05·D11·D12·D15), 잠금·예산(SH의 1초 gate 대기·30초 예산 안의 COMMIT·
+  reader 예산·반복 decode/hash·행/재진입 pg_locks 스캔 — F-DES-02~04·D3·C1-09·C2-09·C2-01·
+  C2-07·B4·A1-05·A2-04), 활성화·보존(deactivate·installer 잠금·attempt/manifest prune — B3·
+  B9·C2-06·A1-03·B5·C1-06), 기타(heritage EX 상한·427 인덱스·URL 예산·encoder 단일화 등).
+- 다음 단계는 측정이다(Airport·Rest EX 적재의 elapsed·P 보유·lock wait, 427 인덱스 크기·
+  idx_scan). 경합 사례가 측정되지 않으면 ADR-117로 이 경로를 퇴역한다(권장). 그때 P를 DDL·
+  유지보수 gate로만 남길지 ADR-111 모델로 되돌릴지 함께 정한다.

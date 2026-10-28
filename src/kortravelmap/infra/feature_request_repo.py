@@ -19,6 +19,7 @@ from sqlalchemy.exc import DBAPIError
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
 from kortravelmap.infra.feature_subtype import SubtypeDetailError, write_subtype
 from kortravelmap.infra.feature_update_active_repo import _driver_constraint_identity
+from kortravelmap.infra.sqlstate import LOCK_NOT_AVAILABLE, sqlstate_of
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -292,7 +293,7 @@ async def approve_feature_request(
             .one()
         )
     except DBAPIError as error:
-        if _driver_constraint_identity(error)[0] == "55P03":
+        if sqlstate_of(error) == LOCK_NOT_AVAILABLE:
             raise
         _procedure_error(error)
     outcome = row.get("o_outcome")

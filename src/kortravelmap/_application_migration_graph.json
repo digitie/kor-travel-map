@@ -201,6 +201,12 @@
         "432_rest_snapshot_atomic"
       ],
       "revision": "433_snapshot_ready_plan_reset"
+    },
+    {
+      "down_revision": [
+        "433_snapshot_ready_plan_reset"
+      ],
+      "revision": "434_protocol_entry_narrowing"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -3,10 +3,10 @@
 from __future__ import annotations
 
 import hashlib
-import hmac
 import re
 import secrets
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -26,6 +26,9 @@ __all__ = [
     "CacheTargetServicePrincipalSetting",
     "CacheTargetServiceScope",
     "CurationSnapshotServiceScope",
+    "InboundCredential",
+    "inbound_credential_problems",
+    "inbound_credentials",
 ]
 
 
@@ -36,14 +39,63 @@ _LOWER_SHA256_HEX_PATTERN = re.compile(r"\A[0-9a-f]{64}\Z")
 _LOCAL_DEV_CURSOR_SIGNING_KEY = secrets.token_bytes(32)
 _CURSOR_SIGNING_SECRET_NAME = "KOR_TRAVEL_MAP_API_CURSOR_SIGNING_SECRET"
 _ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME = "KOR_TRAVEL_MAP_API_ADMIN_FEATURE_CREATE_TOKEN_SHA256"
-_CURSOR_SIGNING_PROTECTED_FIELDS = (
-    ("admin proxy secret", "admin_proxy_secret"),
-    ("service token", "service_token"),
-    ("ops read token", "ops_read_token"),
-    ("ops cancel token", "ops_cancel_token"),
-    ("ops fixture token", "ops_fixture_token"),
-    ("metrics token", "metrics_token"),
-    ("public API key", "vworld_api_key"),
+
+#: 서로 달라야 하는 inbound 자격 증명의 **단일 목록**이다. 원문 항목은 (오류 이름, 설정 필드,
+#: env, scope), digest 항목은 (오류 이름, 설정 필드, scope)다. distinctness 검증과
+#: ``auth``의 "다른 scope의 유효 토큰"(403) 판정이 모두 이 목록만 쓴다. 검증기마다
+#: 비교 대상을 따로 적던 때는 수동 생성 digest가 feature-request·reconciliation digest와
+#: 같아도 통과했다. 새 자격 증명은 여기 한 줄을 더하는 것으로 두 판정에 함께 들어간다.
+#: 순서가 오류 문구의 방향을 정한다. 뒤 항목이 앞 항목과 같으면
+#: "뒤 must be distinct from 앞"이다. cache-target principal digest는 cursor 뒤,
+#: scoped digest 앞에 principal마다 하나씩 끼워 넣는다(``_inbound_credential_inventory``).
+#: ``public API key``는 VWorld 키다. 브라우저에 공개되는 값이라 어떤 비밀과도 같으면 안 된다.
+_INBOUND_RAW_CREDENTIALS: tuple[tuple[str, str, str, str], ...] = (
+    ("admin proxy secret", "admin_proxy_secret", "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET", "admin:bff"),
+    ("service token", "service_token", "KOR_TRAVEL_MAP_API_SERVICE_TOKEN", "service"),
+    ("ops read token", "ops_read_token", "KOR_TRAVEL_MAP_API_OPS_READ_TOKEN", "ops:read"),
+    ("ops cancel token", "ops_cancel_token", "KOR_TRAVEL_MAP_API_OPS_CANCEL_TOKEN", "ops:cancel"),
+    (
+        "ops fixture token",
+        "ops_fixture_token",
+        "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN",
+        "ops:fixture",
+    ),
+    ("metrics token", "metrics_token", "KOR_TRAVEL_MAP_API_METRICS_TOKEN", "metrics"),
+    ("public API key", "vworld_api_key", "KOR_TRAVEL_MAP_API_VWORLD_API_KEY", "vworld"),
+    ("cursor signing secret", "cursor_signing_secret", _CURSOR_SIGNING_SECRET_NAME, "cursor:sign"),
+)
+_INBOUND_DIGEST_CREDENTIALS: tuple[tuple[str, str, str], ...] = (
+    (
+        "PinVi admin features read token digest",
+        "pinvi_admin_features_read_token_sha256",
+        "pinvi:admin-features:read",
+    ),
+    (
+        "PinVi curation snapshot token digest",
+        "pinvi_curation_snapshot_token_sha256",
+        "pinvi:curation-snapshot:read",
+    ),
+    (
+        "PinVi curation cutover mapping token digest",
+        "pinvi_curation_cutover_mapping_token_sha256",
+        "pinvi:curation-cutover:read",
+    ),
+    ("feature request token digest", "feature_request_token_sha256", "feature-request:submit"),
+    (
+        "feature reference reconciliation read token digest",
+        "feature_reference_reconciliation_read_token_sha256",
+        "feature-reference-reconciliation:read",
+    ),
+    (
+        "feature reference reconciliation ack token digest",
+        "feature_reference_reconciliation_ack_token_sha256",
+        "feature-reference-reconciliation:ack",
+    ),
+    (
+        "admin feature create token digest",
+        "admin_feature_create_token_sha256",
+        "admin:feature:create",
+    ),
 )
 
 CacheTargetServiceScope = Literal[
@@ -217,36 +269,75 @@ def _validated_cursor_signing_secret(value: object) -> str | None:
     return raw
 
 
-def _cursor_signing_secret_distinct_problems(
-    cursor_secret: str | None,
-    protected_secrets: Mapping[str, object],
-) -> list[str]:
-    """Cursor HMAC secret과 다른 trust-boundary credential의 중복을 찾는다."""
+@dataclass(frozen=True, slots=True)
+class InboundCredential:
+    """설정된 inbound 자격 증명 하나. 원문은 담지 않고 SHA-256 digest만 든다."""
 
-    if cursor_secret is None:
-        return []
+    name: str
+    sha256: str
+    scope: str
+
+
+def _inbound_credential_inventory(
+    settings: object,
+) -> tuple[list[InboundCredential], list[str]]:
+    """``_INBOUND_*`` 목록을 현재 값으로 펼친다. 형태 문제는 민감값 없이 따로 돌려준다.
+
+    ``model_copy``/``model_construct`` 우회 객체도 읽으므로 속성은 ``getattr``로만 본다.
+    compose의 ``${X:-}``가 넣는 빈 문자열은 미설정이다(빈 값 둘을 같은 자격 증명으로
+    오판하면 기동이 막힌다).
+    """
+
+    credentials: list[InboundCredential] = []
     problems: list[str] = []
-    for protected_name, protected_secret in protected_secrets.items():
+    for name, field_name, env_name, scope in _INBOUND_RAW_CREDENTIALS:
         try:
-            protected_raw = _optional_secret_text(
-                protected_secret,
-                setting_name=protected_name,
-            )
+            raw = _optional_secret_text(getattr(settings, field_name, None), setting_name=env_name)
         except ValueError as exc:
             problems.append(str(exc))
             continue
-        if protected_raw is not None and cursor_secret == protected_raw:
-            problems.append(f"cursor signing secret must be distinct from {protected_name}")
+        if raw:
+            credentials.append(
+                InboundCredential(name, hashlib.sha256(raw.encode("utf-8")).hexdigest(), scope)
+            )
+    for principal in getattr(settings, "cache_target_service_principals", None) or ():
+        if isinstance(principal, Mapping):
+            digest = principal.get("token_sha256")
+            principal_id = principal.get("principal_id")
+        else:
+            digest = getattr(principal, "token_sha256", None)
+            principal_id = getattr(principal, "principal_id", None)
+        if isinstance(digest, str) and digest:
+            credentials.append(
+                InboundCredential(
+                    f"cache target principal {principal_id} token digest",
+                    digest,
+                    f"cache-target:{principal_id}",
+                )
+            )
+    for name, field_name, scope in _INBOUND_DIGEST_CREDENTIALS:
+        digest = getattr(settings, field_name, None)
+        if isinstance(digest, str) and digest:
+            credentials.append(InboundCredential(name, digest, scope))
+    return credentials, problems
+
+
+def inbound_credentials(settings: object) -> tuple[InboundCredential, ...]:
+    """auth의 403 판정이 쓰는 목록. 형태가 틀린 항목은 빠진다(기동 검증이 이미 거부한다)."""
+
+    return tuple(_inbound_credential_inventory(settings)[0])
+
+
+def inbound_credential_problems(settings: object) -> list[str]:
+    """설정된 inbound 자격 증명이 모두 서로 다른지 본다. 이름만 보고하고 값은 내지 않는다."""
+
+    credentials, problems = _inbound_credential_inventory(settings)
+    first_by_digest: dict[str, InboundCredential] = {}
+    for credential in credentials:
+        earlier = first_by_digest.setdefault(credential.sha256, credential)
+        if earlier is not credential:
+            problems.append(f"{credential.name} must be distinct from {earlier.name}")
     return problems
-
-
-def _cursor_signing_protected_secrets(settings: object) -> dict[str, object]:
-    """전용성 검증 대상 필드 목록의 단일 정본을 현재 settings 값에 매핑한다."""
-
-    return {
-        protected_name: getattr(settings, field_name, None)
-        for protected_name, field_name in _CURSOR_SIGNING_PROTECTED_FIELDS
-    }
 
 
 def _admin_feature_create_credential_problems(
@@ -254,7 +345,10 @@ def _admin_feature_create_credential_problems(
     *,
     require_digest: bool,
 ) -> list[str]:
-    """수동 Feature 생성 digest의 형태·전용성 문제를 민감값 없이 반환한다."""
+    """수동 Feature 생성 digest의 형태와 BFF secret 전제를 민감값 없이 반환한다.
+
+    다른 자격 증명과의 전용성은 ``inbound_credential_problems``의 단일 목록이 본다.
+    """
 
     problems: list[str] = []
     if bool(getattr(settings, "admin_manual_feature_create_enabled", False)):
@@ -280,66 +374,6 @@ def _admin_feature_create_credential_problems(
         return problems
     if not isinstance(digest, str) or _LOWER_SHA256_HEX_PATTERN.fullmatch(digest) is None:
         problems.append(f"{_ADMIN_FEATURE_CREATE_TOKEN_SHA256_NAME} must be lowercase SHA-256 hex")
-        return problems
-
-    protected_secrets = {
-        "admin proxy secret": getattr(settings, "admin_proxy_secret", None),
-        "service token": getattr(settings, "service_token", None),
-        "ops read token": getattr(settings, "ops_read_token", None),
-        "ops cancel token": getattr(settings, "ops_cancel_token", None),
-        "ops fixture token": getattr(settings, "ops_fixture_token", None),
-        "metrics token": getattr(settings, "metrics_token", None),
-    }
-    for protected_name, protected_secret in protected_secrets.items():
-        try:
-            protected_raw = _optional_secret_text(
-                protected_secret,
-                setting_name=protected_name,
-            )
-        except ValueError as exc:
-            problems.append(str(exc))
-            continue
-        if protected_raw is not None and hmac.compare_digest(
-            hashlib.sha256(protected_raw.encode("utf-8")).hexdigest(),
-            digest,
-        ):
-            problems.append(
-                f"admin feature create token digest must be distinct from {protected_name}"
-            )
-
-    for curation_name, curation_digest in (
-        (
-            "PinVi admin features read token digest",
-            getattr(settings, "pinvi_admin_features_read_token_sha256", None),
-        ),
-        (
-            "PinVi curation snapshot token digest",
-            getattr(settings, "pinvi_curation_snapshot_token_sha256", None),
-        ),
-        (
-            "PinVi curation cutover mapping token digest",
-            getattr(settings, "pinvi_curation_cutover_mapping_token_sha256", None),
-        ),
-    ):
-        if isinstance(curation_digest, str) and hmac.compare_digest(curation_digest, digest):
-            problems.append(
-                f"admin feature create token digest must be distinct from {curation_name}"
-            )
-
-    for principal in getattr(settings, "cache_target_service_principals", ()):
-        principal_digest = (
-            principal.get("token_sha256")
-            if isinstance(principal, Mapping)
-            else getattr(principal, "token_sha256", None)
-        )
-        if isinstance(principal_digest, str) and hmac.compare_digest(
-            principal_digest,
-            digest,
-        ):
-            problems.append(
-                "admin feature create token digest must be distinct from cache-target tokens"
-            )
-            break
     return problems
 
 
@@ -810,75 +844,18 @@ class ApiSettings(BaseSettings):
             raise ValueError(
                 "ops principal is required but read/cancel/fixture tokens are not configured"
             )
-        enabled_tokens = {
-            "ops read token": read,
-            "ops cancel token": cancel,
-            "ops fixture token": fixture,
-        }
-        raw_enabled_tokens = {
-            name: token.get_secret_value()
-            for name, token in enabled_tokens.items()
-            if token is not None
-        }
-        if len(raw_enabled_tokens) != len(set(raw_enabled_tokens.values())):
-            raise ValueError("ops read, cancel, and fixture tokens must be distinct")
-        protected_secrets = {
-            "admin proxy secret": self.admin_proxy_secret,
-            "service token": self.service_token,
-        }
-        for ops_name, ops_token in enabled_tokens.items():
-            if ops_token is None:
-                continue
-            raw_ops_token = ops_token.get_secret_value()
-            for protected_name, protected_secret in protected_secrets.items():
-                if (
-                    protected_secret is not None
-                    and raw_ops_token == protected_secret.get_secret_value()
-                ):
-                    raise ValueError(f"{ops_name} must be distinct from {protected_name}")
-        return self
-
-    @model_validator(mode="after")
-    def _validate_metrics_token_distinct(self) -> ApiSettings:
-        """scrape token은 다른 신뢰 경계 secret과 재사용을 금지한다 (T-VN-02)."""
-
-        if self.metrics_token is None:
-            return self
-        raw_metrics_token = self.metrics_token.get_secret_value()
-        for protected_name, protected_secret in (
-            ("admin proxy secret", self.admin_proxy_secret),
-            ("service token", self.service_token),
-            ("ops read token", self.ops_read_token),
-            ("ops cancel token", self.ops_cancel_token),
-            ("ops fixture token", self.ops_fixture_token),
-        ):
-            if (
-                protected_secret is not None
-                and raw_metrics_token == protected_secret.get_secret_value()
-            ):
-                raise ValueError(f"metrics token must be distinct from {protected_name}")
-        return self
-
-    @model_validator(mode="after")
-    def _validate_cursor_signing_secret_distinct(self) -> ApiSettings:
-        """Cursor HMAC key를 인증·scrape trust boundary secret과 분리한다."""
-
-        raw_cursor_secret = _validated_cursor_signing_secret(self.cursor_signing_secret)
-        problems = _cursor_signing_secret_distinct_problems(
-            raw_cursor_secret,
-            _cursor_signing_protected_secrets(self),
-        )
-        if problems:
-            raise ValueError("; ".join(problems))
         return self
 
     @model_validator(mode="after")
     def _validate_cache_target_service_principal_registry(self) -> ApiSettings:
-        """cache-target principal registry는 설정 시점에 fail-fast 검증한다."""
+        """cache-target principal registry는 설정 시점에 fail-fast 검증한다.
+
+        token digest의 전용성(principal끼리, 다른 자격 증명과)은 단일 목록 검증
+        ``_validate_inbound_credentials_distinct``가 본다.
+        """
 
         if not self.cache_target_service_principals:
             return self
-        digests: set[str] = set()
         principal_ids: set[str] = set()
         roles_by_binding: dict[
             tuple[str, tuple[str, ...]],
@@ -887,8 +864,6 @@ class ApiSettings(BaseSettings):
         consumer_binding_owners: dict[str, tuple[str, ...]] = {}
         external_system_owners: dict[str, tuple[str, tuple[str, ...]]] = {}
         for principal in self.cache_target_service_principals:
-            if principal.token_sha256 in digests:
-                raise ValueError("cache target service token digests must be unique")
             if principal.principal_id in principal_ids:
                 raise ValueError("cache target service principal_id values must be unique")
             role = _CACHE_TARGET_SERVICE_SCOPES_ROLE[frozenset(principal.scopes)]
@@ -918,7 +893,6 @@ class ApiSettings(BaseSettings):
                 raise ValueError(
                     f"cache target service binding role must have exactly one principal: {role}"
                 )
-            digests.add(principal.token_sha256)
             principal_ids.add(principal.principal_id)
             binding_roles.add(role)
         for binding, roles in roles_by_binding.items():
@@ -929,28 +903,6 @@ class ApiSettings(BaseSettings):
                     "cache target service binding is missing exact roles for "
                     f"consumer_id={consumer_id}, external_systems={list(external_systems)}: "
                     + ", ".join(sorted(missing_roles))
-                )
-        protected_secrets = {
-            "admin proxy secret": self.admin_proxy_secret,
-            "service token": self.service_token,
-            "ops read token": self.ops_read_token,
-            "ops cancel token": self.ops_cancel_token,
-            "ops fixture token": self.ops_fixture_token,
-            "metrics token": self.metrics_token,
-            "cursor signing secret": self.cursor_signing_secret,
-            "public API key": self.vworld_api_key,
-        }
-        for protected_name, protected_secret in protected_secrets.items():
-            protected_raw = _optional_secret_text(
-                protected_secret,
-                setting_name=protected_name,
-            )
-            if protected_raw is None:
-                continue
-            protected_digest = hashlib.sha256(protected_raw.encode("utf-8")).hexdigest()
-            if protected_digest in digests:
-                raise ValueError(
-                    f"cache target service token digest must be distinct from {protected_name}"
                 )
         return self
 
@@ -984,7 +936,7 @@ class ApiSettings(BaseSettings):
         return value
 
     @model_validator(mode="after")
-    def _validate_scoped_service_tokens_distinct(self) -> ApiSettings:
+    def _validate_reconciliation_tokens_paired(self) -> ApiSettings:
         if (self.feature_reference_reconciliation_read_token_sha256 is None) != (
             self.feature_reference_reconciliation_ack_token_sha256 is None
         ):
@@ -992,52 +944,6 @@ class ApiSettings(BaseSettings):
                 "Feature reference reconciliation read and ACK token digests must be "
                 "configured together"
             )
-        digests = {
-            "PinVi admin features read": self.pinvi_admin_features_read_token_sha256,
-            "snapshot": self.pinvi_curation_snapshot_token_sha256,
-            "cutover mapping": self.pinvi_curation_cutover_mapping_token_sha256,
-            "feature request": self.feature_request_token_sha256,
-            "feature reference reconciliation read": (
-                self.feature_reference_reconciliation_read_token_sha256
-            ),
-            "feature reference reconciliation ack": (
-                self.feature_reference_reconciliation_ack_token_sha256
-            ),
-        }
-        configured = {name: digest for name, digest in digests.items() if digest is not None}
-        if len(configured) != len(set(configured.values())):
-            raise ValueError("Scoped service token digests must be distinct")
-        cache_target_digests = {
-            principal.token_sha256 for principal in self.cache_target_service_principals
-        }
-        protected_secrets = {
-            "admin proxy secret": self.admin_proxy_secret,
-            "service token": self.service_token,
-            "ops read token": self.ops_read_token,
-            "ops cancel token": self.ops_cancel_token,
-            "ops fixture token": self.ops_fixture_token,
-            "metrics token": self.metrics_token,
-            "cursor signing secret": self.cursor_signing_secret,
-            "public API key": self.vworld_api_key,
-        }
-        for curation_name, digest in configured.items():
-            if digest in cache_target_digests:
-                raise ValueError(
-                    f"Scoped {curation_name} token digest must be distinct from cache-target tokens"
-                )
-            for protected_name, protected_secret in protected_secrets.items():
-                protected_raw = _optional_secret_text(
-                    protected_secret,
-                    setting_name=protected_name,
-                )
-                if (
-                    protected_raw is not None
-                    and hashlib.sha256(protected_raw.encode("utf-8")).hexdigest() == digest
-                ):
-                    raise ValueError(
-                        f"Scoped {curation_name} token digest must be distinct from "
-                        f"{protected_name}"
-                    )
         return self
 
     @model_validator(mode="after")
@@ -1046,6 +952,15 @@ class ApiSettings(BaseSettings):
             self,
             require_digest=self.admin_manual_feature_create_enabled,
         )
+        if problems:
+            raise ValueError("; ".join(problems))
+        return self
+
+    @model_validator(mode="after")
+    def _validate_inbound_credentials_distinct(self) -> ApiSettings:
+        """모든 inbound 자격 증명은 서로 다르다. 비교 목록은 ``_INBOUND_*`` 하나뿐이다."""
+
+        problems = inbound_credential_problems(self)
         if problems:
             raise ValueError("; ".join(problems))
         return self
@@ -1272,8 +1187,8 @@ class ApiSettings(BaseSettings):
         ``/debug`` mount)은 non-production profile에서만 허용한다. Docker 밖
         배포도 같은 검증을 받도록 entrypoint(shell)가 아닌 settings에서 검사하며,
         admin/service secret 기준은 ``docker/api-entrypoint.sh``의 admin secret과
-        동일하다(앞뒤 공백 없는 32자 이상). cursor secret은 profile과 무관하게
-        설정된 값의 형태·전용성을 재검증해 Pydantic validator 우회도 fail-closed한다.
+        동일하다(앞뒤 공백 없는 32자 이상). cursor secret 형태와 모든 inbound 자격 증명의
+        전용성은 profile과 무관하게 재검증해 Pydantic validator 우회도 fail-closed한다.
         """
 
         problems: list[str] = []
@@ -1283,13 +1198,6 @@ class ApiSettings(BaseSettings):
             cursor_secret_raw = _validated_cursor_signing_secret(self.cursor_signing_secret)
         except ValueError as exc:
             problems.append(str(exc))
-        else:
-            problems.extend(
-                _cursor_signing_secret_distinct_problems(
-                    cursor_secret_raw,
-                    _cursor_signing_protected_secrets(self),
-                )
-            )
 
         problems.extend(
             _admin_feature_create_credential_problems(
@@ -1297,6 +1205,10 @@ class ApiSettings(BaseSettings):
                 require_digest=(self.is_production or self.admin_manual_feature_create_enabled),
             )
         )
+        # 우회 객체(model_copy/model_construct)도 같은 단일 목록으로 전용성을 다시 본다.
+        # 형태 문제는 cursor 검사와 같은 문구가 나올 수 있어 순서를 지키며 한 번만 남긴다.
+        problems.extend(inbound_credential_problems(self))
+        problems = list(dict.fromkeys(problems))
 
         if not self.is_production:
             if problems:
@@ -1379,11 +1291,6 @@ class ApiSettings(BaseSettings):
             )
         except ValueError as exc:
             problems.append(str(exc))
-        if admin_secret is not None and admin_secret == service_token_raw:
-            problems.append(
-                "KOR_TRAVEL_MAP_API_SERVICE_TOKEN must be distinct from "
-                "KOR_TRAVEL_MAP_ADMIN_PROXY_SECRET"
-            )
         if self.features_routes_enabled:
             # D-1-2의 service secret: `/v1/features/batch` 같은 service surface가
             # public key로만 조용히 격하되지 않도록 features surface에서는 필수다.
@@ -1400,7 +1307,10 @@ class ApiSettings(BaseSettings):
             )
 
         if problems:
-            raise ValueError("production profile is fail-closed (ADR-066): " + "; ".join(problems))
+            raise ValueError(
+                "production profile is fail-closed (ADR-066): "
+                + "; ".join(dict.fromkeys(problems))
+            )
 
     @model_validator(mode="after")
     def _validate_production_fail_closed(self) -> ApiSettings:

@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra import db as runtime_db
 from kortravelmap.infra import runtime_privileges as acl
+from kortravelmap.infra.application_schema_head import application_schema_head
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
 )
@@ -37,7 +38,7 @@ async def test_ready_reset433_catalog_owner_search_path_and_execute_acl(scalar_e
     async with AsyncSession(admin) as session:
         await _bounded(session)
         assert (await session.scalars(text("SELECT version_num FROM alembic_version"))).all() == [
-            "433_snapshot_ready_plan_reset"
+            application_schema_head()
         ]
         routine = (
             (

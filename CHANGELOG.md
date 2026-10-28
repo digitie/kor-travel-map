@@ -10,6 +10,39 @@
 
 ## [Unreleased]
 
+### Codex PR 통합 리뷰의 비잠금 수정 (2026-10-27)
+
+- **FIXED**: shadow 후보 수집이 순서가 뒤바뀐(오래된) bundle에서 적재 transaction 전체를
+  rollback시키지 않는다. 저장된 head가 그 record일 때만 수집한다(기본 OFF 경로).
+- **FIXED (admin)**: 관리 파일 상세의 오프라인 업로드 링크가 없는 상세 경로(404) 대신
+  `/admin/offline-uploads` 목록 페이지를 가리킨다.
+- **CHANGED (API settings)**: inbound 자격 증명은 목록 하나로 모두 서로 달라야 한다. 수동 생성 digest와
+  feature-request·reconciliation digest, cursor·VWorld 키와 다른 비밀의 쌍도 이제 기동을 거부한다.
+  오류 문구는 "X must be distinct from Y" 한 형식이다. `/v1/service/*`에서 다른 scope의 유효
+  토큰(수동 생성 토큰 포함)은 401이 아니라 403이다. 빈 문자열은 미설정이다.
+- **FIXED (API)**: 취소 API가 이미 commit한 결과를 연결 정리 실패만으로 503으로 응답하지 않는다.
+  lease 가능·무효화·설정 실패만 503이다.
+- **CHANGED (CI)**: scoped write 기준선 측정(전용 container·PG 재시작)을 필수 CI에서 뺐다.
+  불변식만 공용 PostGIS에서 본다. 측정은 `python -m scripts.scoped_write_baseline --run` 수동.
+- **FIXED (admin UI)**: 지도 cluster·geometry label·마커를 Tab과 Enter/Space로 고를 수 있다.
+- **CHANGED (CI)**: dev 의존성을 포함한 `npm audit --audit-level=high`를 다시 차단 단계로 둔다.
+
+
+### 적재 중 관리 쓰기·장부 쓰기가 전역 protocol gate 뒤에 줄 서지 않는다 (2026-10-27, migration 434)
+
+- **CHANGED (DB)**: provider tracking 장부 쓰기(취소 생성·queued 취소·fill-starts·실패/취소
+  terminal·비권위 finish)는 lineage 잠금만 잡는다. 큐레이션을 확정하는 쓰기(seal·root 완결·권위
+  finish·SUCCESS 완결 취소 전이)만 protocol gate 배타 뒤 lineage다. 적재가 쓰는 동안 취소 API가
+  503을 내거나 다른 dataset의 완료가 30초 뒤 55P03으로 실패하던 문제를 없앤다.
+- **CHANGED (DB)**: 단건·관리 writer(상태·lifecycle·필드/주소 override·수동 생성·요청 승인)는
+  스칼라 정책이 켜졌을 때(epoch>0)만 protocol gate를 배타로 잡는다. 정책 활성화 전에는 행 잠금
+  순서만 쓴다 — 적재 중 관리 UI 503이 사라진다. 같은 Feature를 적재가 쥐고 있으면 그 행에서
+  기다린다. provider 증거를 먼저 잡는 M05·재활성화는 적재·병합과 순환하지 않도록 종전대로 gate를
+  배타로 잡는다.
+- **FIXED**: 무장한 적재·권위 finish가 `lock_timeout=0` 세션에서 1초 만에 포기하던 문제.
+  418이 실제로는 부여하지 못한 수동 생성·요청 승인 owner의 진입 함수 EXECUTE를 다시 부여한다.
+- **REST·OpenAPI 변경 없음.** 운영 스냅샷 SH·스칼라 정책 경로는 OFF로 동결한다(ADR-115 §11).
+
 ### kor-travel-common 최신 main 반영 (2026-10-27)
 
 - **CHANGED (deps)**: kor-travel-common 핀 `e746e4b8` → `aa232ad5`(#44~#47; 뒤의 #48은 문서만). 그 사이 Python 변경은

@@ -54,7 +54,6 @@ import json
 import logging
 import math
 import os
-import time
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -107,6 +106,10 @@ from kortravelmap.infra.feature_projection import (
     typed_feature_detail_joins_sql,
 )
 from kortravelmap.infra.feature_subtype import subtype_params, write_subtype
+from kortravelmap.infra.lock_wait import (
+    FEATURE_CURATION_WRITE_WAIT_INFO_KEY as FEATURE_CURATION_WRITE_WAIT_INFO_KEY,
+)
+from kortravelmap.infra.lock_wait import execute_with_lock_wait, pop_armed_lock_wait
 from kortravelmap.infra.provider_field_candidates import (
     capture_provider_field_candidates,
     provider_field_shadow_enabled,
@@ -182,35 +185,12 @@ FROM protocol_gate
 """
 
 
-FEATURE_CURATION_WRITE_WAIT_INFO_KEY: Final[str] = (
-    "kortravelmap.feature_curation_write_wait_ms"
+_FEATURE_WRITE_PROTOCOL_SQL: Final[str] = (
+    "SELECT ops.lock_scoped_feature_write_protocol(CAST(:exclusive AS boolean))"
 )
-"""``session.info`` 키 — provider 적재 transaction이 fence를 **처음** 잡을 때 기다릴 상한(ms).
-
-:func:`arm_feature_curation_write_wait`만 쓴다. 값은 그 session의 첫
-:func:`lock_feature_curation_write` 호출이 꺼내 쓰고 지운다(한 번)."""
-
-_FEATURE_CURATION_WRITE_WAIT_STATEMENT_MARGIN_MS: Final[int] = 60_000
-"""긴 대기 동안 ``statement_timeout``을 ``대기 + 이 여유``까지 올린다 — lock 대기가 먼저 끝나
-statement 취소(57014)가 아니라 종전과 같은 55P03으로 실패하게."""
-
-_FEATURE_CURATION_WRITE_WAIT_CONNECTION_CHECK_MS: Final[int] = 10_000
-"""긴 대기 동안 ``client_connection_check_interval``(꺼져 있을 때만). run worker가 죽으면 그
-backend가 최대 대기 내내 줄에 남지 않고 10초 안에 빠진다(completion sweep과 같은 값)."""
-
-_SESSION_LOCK_TIMEOUTS_SQL: Final[str] = """
-SELECT name, setting
-FROM pg_catalog.pg_settings
-WHERE name IN ('lock_timeout', 'statement_timeout', 'client_connection_check_interval')
-"""
-
-_SET_LOCAL_LOCK_TIMEOUTS_SQL: Final[str] = """
-SELECT pg_catalog.set_config('lock_timeout', :lock_timeout, true),
-       pg_catalog.set_config('statement_timeout', :statement_timeout, true),
-       pg_catalog.set_config(
-         'client_connection_check_interval', :client_connection_check_interval, true
-       )
-"""
+_SINGLE_FEATURE_WRITER_PROTOCOL_SQL: Final[str] = (
+    "SELECT ops.lock_single_feature_writer_protocol()"
+)
 
 
 def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None:
@@ -230,6 +210,13 @@ def arm_feature_curation_write_wait(session: AsyncSession, wait_ms: int) -> None
 
 _FEATURE_CURATION_FENCE_INFO_KEY: Final[str] = "kortravelmap.feature_curation_fence"
 _FEATURE_CURATION_FENCE_STAMP_KEY: Final[str] = "kortravelmap.feature_curation_fence_stamp"
+#: fence 없이 P EX만 쥔 transaction의 재진입 증거(434 WI-2). fence는 언제나 P EX를 함께 든다.
+_FEATURE_WRITE_PROTOCOL_EX_INFO_KEY: Final[str] = "kortravelmap.feature_write_protocol_ex"
+_FEATURE_WRITE_PROTOCOL_EX_STAMP_KEY: Final[str] = "kortravelmap.feature_write_protocol_ex_stamp"
+_TRANSACTION_LOCK_STAMP_KEYS: Final[tuple[str, ...]] = (
+    _FEATURE_CURATION_FENCE_STAMP_KEY,
+    _FEATURE_WRITE_PROTOCOL_EX_STAMP_KEY,
+)
 
 
 def _invalidate_feature_curation_fence(context: ExceptionContext) -> None:
@@ -237,8 +224,8 @@ def _invalidate_feature_curation_fence(context: ExceptionContext) -> None:
     # driver의 private 상태 대신 공식 오류 event로 성공 획득 stamp만 무효화한다.
     connection = context.connection
     if connection is not None and not connection.closed and not connection.invalidated:
-        connection.info.pop(_FEATURE_CURATION_FENCE_STAMP_KEY, None)
-
+        for key in _TRANSACTION_LOCK_STAMP_KEYS:
+            connection.info.pop(key, None)
 
 
 @dataclass(frozen=True)
@@ -249,6 +236,7 @@ class _FeatureCurationFence:
     connection: Connection
     connection_root: Transaction
     stamp: object
+    stamp_key: str = _FEATURE_CURATION_FENCE_STAMP_KEY
 
     def held_by(self, session: AsyncSession) -> bool:
         bind = session.sync_session.get_bind()
@@ -260,11 +248,11 @@ class _FeatureCurationFence:
             and not self.connection.invalidated
             and self.connection.get_transaction() is self.connection_root
             and self.connection_root.is_active
-            and self.connection.info.get(_FEATURE_CURATION_FENCE_STAMP_KEY) is self.stamp
+            and self.connection.info.get(self.stamp_key) is self.stamp
         )
 
 
-async def _remember_feature_curation_fence(session: AsyncSession) -> None:
+async def _remember_transaction_lock(session: AsyncSession, info_key: str, stamp_key: str) -> None:
     # SQL 대역은 실제 transaction 수명을 증명하지 못하므로 재사용하지 않는다.
     if not isinstance(session, AsyncSession):
         return
@@ -283,20 +271,82 @@ async def _remember_feature_curation_fence(session: AsyncSession) -> None:
         event.listen(connection.engine, "handle_error", _invalidate_feature_curation_fence)
     # pool connection 정보에는 Session/증거 객체 대신 plain stamp만 둔다.
     stamp = object()
-    connection.info[_FEATURE_CURATION_FENCE_STAMP_KEY] = stamp
-    session.info[_FEATURE_CURATION_FENCE_INFO_KEY] = _FeatureCurationFence(
+    connection.info[stamp_key] = stamp
+    session.info[info_key] = _FeatureCurationFence(
         session_root=root,
         connection=connection,
         connection_root=connection_root,
         stamp=stamp,
+        stamp_key=stamp_key,
     )
+
+
+async def _remember_feature_curation_fence(session: AsyncSession) -> None:
+    await _remember_transaction_lock(
+        session, _FEATURE_CURATION_FENCE_INFO_KEY, _FEATURE_CURATION_FENCE_STAMP_KEY
+    )
+
+
+def _transaction_lock_held(session: AsyncSession, info_key: str) -> bool:
+    """이 transaction이 ``info_key``의 잠금을 실제로 쥐고 있다는 증거가 살아 있는가."""
+    info = getattr(session, "info", None)
+    if not isinstance(info, dict):
+        return False
+    held = info.pop(info_key, None)
+    if isinstance(held, _FeatureCurationFence) and held.held_by(session):
+        info[info_key] = held
+        return True
+    return False
+
+
+def _protocol_ex_held(session: AsyncSession) -> bool:
+    return _transaction_lock_held(session, _FEATURE_CURATION_FENCE_INFO_KEY) or (
+        _transaction_lock_held(session, _FEATURE_WRITE_PROTOCOL_EX_INFO_KEY)
+    )
+
+
+async def lock_feature_write_protocol(
+    session: AsyncSession, *, exclusive: bool, wait_ms: int | None = None
+) -> None:
+    """공통 protocol gate(P)의 **단일** Python 진입이다(434 WI-2).
+
+    배타·공유를 받고, 이 transaction이 P EX를 이미 쥐었으면(fence 포함) SQL 없이 돌아간다.
+    ``wait_ms``를 주면 그 한 문장만 상한을 늘린다(:func:`execute_with_lock_wait`). 공유를 쥔
+    transaction의 배타 요청은 DB가 23514로 거부한다 — rollback 뒤 배타로 재계획해야 한다.
+    """
+    if _protocol_ex_held(session):
+        return
+    params = {"exclusive": exclusive}
+    if wait_ms is not None and wait_ms > 0:
+        await execute_with_lock_wait(
+            session, _FEATURE_WRITE_PROTOCOL_SQL, wait_ms, label="protocol gate", params=params
+        )
+    else:
+        await session.execute(text(_FEATURE_WRITE_PROTOCOL_SQL), params)
+    if exclusive:
+        await _remember_transaction_lock(
+            session, _FEATURE_WRITE_PROTOCOL_EX_INFO_KEY, _FEATURE_WRITE_PROTOCOL_EX_STAMP_KEY
+        )
+
+
+async def lock_single_feature_writer_protocol(session: AsyncSession) -> None:
+    """단건·관리 writer의 첫 잠금이다(434 DC-1, ADR-115 §5.2(3) 개정).
+
+    scalar policy regime(epoch>0)에서만 P EX를 잡는다. regime 전(epoch=0)에는 P 없이 기존
+    행 잠금 순서(source → link → Feature)와 기존 advisory만 쓴다 — 적재가 P EX를 쥔 동안에도
+    다른 Feature를 쓰는 관리 명령은 기다리지 않는다. **첫 행 잠금보다 먼저** 불러야 한다.
+    이미 P EX(또는 fence)를 쥔 transaction은 SQL 없이 지나간다.
+    """
+    if _protocol_ex_held(session):
+        return
+    await session.execute(text(_SINGLE_FEATURE_WRITER_PROTOCOL_SQL), {})
 
 
 async def lock_feature_curation_write(session: AsyncSession) -> None:
     """Feature/source/link/curation 의미 writer의 공통 transaction fence.
 
     session이 :func:`arm_feature_curation_write_wait`로 무장돼 있으면 첫 획득만 긴 대기로
-    잡는다(:func:`_lock_feature_curation_write_waiting`). 같은 transaction의 다음 호출은
+    잡는다(:func:`execute_with_lock_wait`). 같은 transaction의 다음 호출은
     이미 쥔 xact lock은 실제 session·DB transaction의 수명이 유지되는 동안 SQL 없이 재사용한다.
     savepoint 안에서 획득한 잠금은 캐시하지 않는다. 외부 connection transaction 종료나
     새 transaction에서도 다시 잡는다.
@@ -307,82 +357,20 @@ async def lock_feature_curation_write(session: AsyncSession) -> None:
     전수 전환이나 동시 쓰기 활성화가 완료되지는 않는다(ADR-115).
     """
 
-    info = getattr(session, "info", None)
-    wait_ms = (
-        info.pop(FEATURE_CURATION_WRITE_WAIT_INFO_KEY, None)
-        if isinstance(info, dict)
-        else None
-    )
-    held = info.pop(_FEATURE_CURATION_FENCE_INFO_KEY, None) if isinstance(info, dict) else None
-    if isinstance(info, dict) and isinstance(held, _FeatureCurationFence) and held.held_by(session):
-        info[_FEATURE_CURATION_FENCE_INFO_KEY] = held
+    wait_ms = pop_armed_lock_wait(session)
+    if _transaction_lock_held(session, _FEATURE_CURATION_FENCE_INFO_KEY):
         return
-    if isinstance(wait_ms, int) and wait_ms > 0:
-        await _lock_feature_curation_write_waiting(session, wait_ms)
+    if wait_ms is not None:
+        await execute_with_lock_wait(
+            session,
+            _FEATURE_CURATION_WRITE_LOCK_SQL,
+            wait_ms,
+            label="feature-curation-write fence",
+        )
     else:
         await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
     # 실패·취소에서는 도달하지 않는다. SQL이 성공한 뒤의 transaction/savepoint만 기억한다.
     await _remember_feature_curation_fence(session)
-
-
-async def _lock_feature_curation_write_waiting(session: AsyncSession, wait_ms: int) -> None:
-    """``lock_timeout``(필요하면 ``statement_timeout``·``client_connection_check_interval``도)을
-    그 한 문장 동안만 바꿔 fence를 잡는다.
-
-    늘리기만 한다 — 현재 ``lock_timeout``이 0(무한)이거나 이미 ``wait_ms`` 이상이면 그대로
-    잡는다. 잡은 뒤에는 두 값을 직전 값으로 되돌려(``SET LOCAL``) 이 transaction의 다른
-    잠금(행 잠금·다른 advisory)은 종전 짧은 상한을 그대로 쓴다. 대기가 55P03으로 끝나면
-    transaction이 abort되므로 되돌릴 필요가 없다(rollback이 ``SET LOCAL``을 지운다).
-    """
-    rows = (await session.execute(text(_SESSION_LOCK_TIMEOUTS_SQL), {})).all()
-    current = {str(name): int(setting) for name, setting in rows}
-    prior_lock_ms = current["lock_timeout"]
-    prior_statement_ms = current["statement_timeout"]
-    prior_check_ms = current["client_connection_check_interval"]
-    if prior_lock_ms == 0 or prior_lock_ms >= wait_ms:
-        await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
-        return
-    statement_ms = prior_statement_ms
-    floor_ms = wait_ms + _FEATURE_CURATION_WRITE_WAIT_STATEMENT_MARGIN_MS
-    if statement_ms != 0 and statement_ms < floor_ms:
-        statement_ms = floor_ms
-    check_ms = prior_check_ms or _FEATURE_CURATION_WRITE_WAIT_CONNECTION_CHECK_MS
-    await session.execute(
-        text(_SET_LOCAL_LOCK_TIMEOUTS_SQL),
-        {
-            "lock_timeout": str(wait_ms),
-            "statement_timeout": str(statement_ms),
-            "client_connection_check_interval": str(check_ms),
-        },
-    )
-    started = time.monotonic()
-    try:
-        await session.execute(text(_FEATURE_CURATION_WRITE_LOCK_SQL), {})
-    except DBAPIError:
-        # 성공만 남기면 15분 뒤의 맨 55P03이 왜 그렇게 늦었는지 아무도 모른다.
-        _LOG.warning(
-            "feature-curation-write fence를 %.1f초 기다리다 실패했다 (상한 %dms, 종전 %dms)",
-            time.monotonic() - started,
-            wait_ms,
-            prior_lock_ms,
-        )
-        raise
-    waited = time.monotonic() - started
-    await session.execute(
-        text(_SET_LOCAL_LOCK_TIMEOUTS_SQL),
-        {
-            "lock_timeout": str(prior_lock_ms),
-            "statement_timeout": str(prior_statement_ms),
-            "client_connection_check_interval": str(prior_check_ms),
-        },
-    )
-    if waited >= 1.0:
-        _LOG.info(
-            "feature-curation-write fence를 %.1f초 기다려 잡았다 (상한 %dms, 종전 %dms)",
-            waited,
-            wait_ms,
-            prior_lock_ms,
-        )
 
 
 @dataclass(frozen=True)
@@ -2946,6 +2934,31 @@ async def _upsert_source_record_state(
     )
 
 
+_CURRENT_SOURCE_RECORD_KEY_SQL: Final[str] = """
+SELECT current_source_record_key
+FROM provider_sync.source_entity_heads
+WHERE source_entity_key = :source_entity_key
+"""
+
+
+async def _source_record_is_current_head(
+    session: AsyncSession, record_state: _SourceRecordUpsertState
+) -> bool:
+    """이 record가 entity의 저장된 head인지 본다. 순서가 뒤바뀐 artifact를 가린다.
+
+    ``became_current``가 참이면 같은 문장이 head를 이 key로 옮겼다. 거짓은 동일 재관측과
+    오래된 artifact 둘 다이므로 저장된 head로 구분한다
+    (``scoped_provider_refresh._apply_provider_scalar``와 같은 판정이다).
+    """
+    if record_state.became_current:
+        return True
+    current_key: str | None = await session.scalar(
+        text(_CURRENT_SOURCE_RECORD_KEY_SQL),
+        {"source_entity_key": record_state.source_entity_key},
+    )
+    return current_key == record_state.source_record_key
+
+
 async def upsert_source_record(session: AsyncSession, record: SourceRecord) -> bool:
     """``provider_sync.source_records`` insert. 신규면 ``True``, 이미 있으면 ``False``.
 
@@ -3612,9 +3625,12 @@ async def load_bundle(
         session,
         provider=bundle.source_record.provider,
         dataset_key=bundle.source_record.dataset_key,
-    ):
+    ) and await _source_record_is_current_head(session, record_state):
         # 기존 typed DTO의 기본 None과 원천 필드 존재는 별개다. 증거가 없으면 recorder가
         # unresolved로 남기며 winner/effective를 갱신하지 않는다. 기본 OFF에는 변환/SQL0회다.
+        # 순서가 뒤바뀐 오래된 artifact는 head를 바꾸지 않으므로 건너뛴다. recorder는 현재
+        # head만 증거로 받는다(23514). 그대로 넘기면 적재 transaction 전체가 rollback되고
+        # 재시도마다 같은 bundle에서 다시 멈춘다. 후보는 현재 head의 것으로 남는다.
         shadow_values, shadow_geometry = "{}", "{}"
         if (
             bundle.provider_field_presence is not None
@@ -5827,6 +5843,9 @@ async def set_feature_phones(session: AsyncSession, feature_id: str, phones: lis
     domain-command ledger와 override provenance에서 모두 추적된다.
     """
     # 공유 writer의 source/link→Feature 순서와 교차하기 전에 protocol EX를 잡는다.
+    # 434 DC-1에서도 단건 regime 진입으로 바꾸지 않는다 — 유일한 호출자(전화 enrichment)가
+    # 같은 transaction에서 source record/link를 쓰며 그 쓰기는 적재 fence를 잡는다. fence를
+    # 여기서 먼저 잡지 않으면 Feature 행 잠금 뒤에 P EX를 기다리는 역순이 된다.
     await lock_feature_curation_write(session)
     locked = (
         await session.execute(

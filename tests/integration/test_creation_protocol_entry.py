@@ -12,7 +12,6 @@ from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
-from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.core.ids import make_feature_id
@@ -20,7 +19,6 @@ from kortravelmap.infra.scoped_feature_writes import (
     begin_scoped_feature_write,
     finish_scoped_feature_write,
 )
-from tests.integration.test_admin_override_protocol_entry import _wait_protocol_blocker
 from tests.integration.test_provider_field_scalar_projection import _plan, _seed
 from tests.integration.test_provider_field_scalar_projection import (
     scalar_container as scalar_container,
@@ -41,6 +39,7 @@ assert _spec.loader is not None
 _migration = module_from_spec(_spec)
 _spec.loader.exec_module(_migration)
 _KINDS = ["core", "provider", "manual", "approve"]
+_ENTRY = "PERFORM ops.lock_single_feature_writer_protocol();"
 _CALLS = {
     "core": """CALL feature.create_feature_with_initial_state(CAST(:payload AS jsonb),
  'active','published','valid',CAST(:context AS jsonb),NULL,NULL,NULL)""",
@@ -205,64 +204,6 @@ creation_command_id=:id""",
     return hashlib.sha256(json.dumps(rows, sort_keys=True, default=str).encode()).hexdigest()
 
 
-async def _probe_unclaimed(admin, case, kind):
-    # 미커밋 행은 count만으로 판정하지 않는다. 동일 unique identity를 실제 삽입·rollback한다.
-    async with AsyncSession(admin) as observer:
-        tx = await observer.begin()
-        try:
-            await observer.execute(text("SET LOCAL lock_timeout='150ms'"))
-            assert await observer.scalar(
-                text("SELECT pg_try_advisory_xact_lock(hashtextextended('feature-write-all',0))")
-            )
-            if case.command:
-                assert (
-                    await observer.scalar(
-                        text(
-                            "SELECT command_id FROM ops.domain_commands "
-                            "WHERE command_id=:id FOR UPDATE NOWAIT"
-                        ),
-                        dict(id=case.command),
-                    )
-                    == case.command
-                )
-            if kind == "approve":
-                assert (
-                    await observer.scalar(
-                        text(
-                            """SELECT request_id FROM ops.feature_requests
-WHERE request_id=CAST(:id AS uuid)
-FOR UPDATE NOWAIT"""
-                        ),
-                        dict(id=case.request),
-                    )
-                    == case.request
-                )
-            if kind in {"manual", "approve"}:
-                await observer.execute(
-                    text("""INSERT INTO feature.manual_feature_identity_claims(
-feature_id,feature_kind,name_key,lon_e6,lat_e6,claimed_by_command_id,claim_basis,claimed_at)
-SELECT
-:probe,k.feature_kind,k.name_key,k.lon_e6,k.lat_e6,:command,'manual_create',clock_timestamp()
-FROM feature.manual_feature_identity_key('place',:name,127.5,36.5) k"""),
-                    dict(probe=uuid4(), command=case.command, name=case.name),
-                )
-            elif kind == "provider":
-                await observer.execute(
-                    text("""INSERT INTO provider_sync.provider_feature_identities(
-provider_dataset_id,feature_kind,natural_key,feature_id,bound_by_operation)
-VALUES(:dataset,'place',:natural,CAST(:feature AS uuid),'provider_sync')"""),
-                    dict(dataset=case.dataset, natural=case.natural, feature=case.held_feature),
-                )
-            else:
-                await observer.execute(
-                    text("""INSERT INTO feature.features(feature_id,kind,name,category)
-                  VALUES(CAST(:id AS uuid),'place',:name,'01070300')"""),
-                    dict(id=case.feature, name=case.name),
-                )
-        finally:
-            await tx.rollback()
-
-
 async def _assert_created(admin, case, kind, result):
     assert result["o_row_revision"] >= 1
     if kind in {"manual", "approve"}:
@@ -342,9 +283,29 @@ ops.feature_requests WHERE request_id=:id"""
             ).one() == ("approved", case.command, target)
 
 
+_PROTOCOL_LOCKS_OF_PID = """SELECT count(*) FROM pg_locks WHERE pid=:pid
+AND locktype='advisory' AND classid=1369104691::oid AND objid=115::oid AND objsubid=2"""
+
+
+async def _never_requests_protocol(admin, pid, task, *, window=1.0):
+    """434 DC-1(epoch=0): 생성은 P를 보유·대기하지 않는다. 끝나거나 창이 닫힐 때까지 본다."""
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + window
+    while not task.done() and loop.time() < deadline:
+        async with admin.connect() as c:
+            assert await c.scalar(text(_PROTOCOL_LOCKS_OF_PID), dict(pid=pid)) == 0
+        await asyncio.sleep(0.01)
+
+
 @pytest.mark.parametrize("kind", _KINDS)
-async def test_valid_creation_waits_before_identity_command_request_or_core(scalar_engines, kind):
+async def test_epoch0_creation_does_not_wait_on_protocol_behind_an_applying_kernel(
+    scalar_engines, kind
+):
     admin, runtime = scalar_engines
+    async with admin.connect() as c:
+        assert await c.scalar(
+            text("SELECT epoch FROM feature.provider_field_policy_epoch WHERE singleton")
+        ) == 0
     case = await _case(admin, runtime, kind)
     attempt, owner, digest = await _plan(runtime, case.held_feature, case.dataset)
     started = asyncio.get_running_loop().create_future()
@@ -363,12 +324,11 @@ async def test_valid_creation_waits_before_identity_command_request_or_core(scal
                     scoped, attempt_id=attempt, owner=owner, manifest_digest=digest
                 )
             )["status"] == "applying"
-            blocker = int(await scoped.scalar(text("SELECT pg_backend_pid()")))
             task = asyncio.create_task(write())
             pid = await asyncio.wait_for(asyncio.shield(started), 3)
-            await _wait_protocol_blocker(admin, pid, blocker)
-            assert not task.done()
-            await _probe_unclaimed(admin, case, kind)
+            # 새 Feature 생성은 kernel이 쥔 Feature와 겹치지 않는다 — P 뒤에 줄 서지 않는다.
+            await _never_requests_protocol(admin, pid, task, window=8.0)
+            assert task.done()
             assert (
                 await finish_scoped_feature_write(
                     scoped, attempt_id=attempt, owner=owner, result_digest="e" * 64
@@ -384,63 +344,20 @@ async def test_valid_creation_waits_before_identity_command_request_or_core(scal
 
 
 @pytest.mark.parametrize("kind", _KINDS)
-async def test_creation_ex_blocks_other_backend_share_until_caller_rollback(scalar_engines, kind):
+async def test_epoch0_creation_holds_no_protocol_until_caller_rollback(scalar_engines, kind):
     admin, runtime = scalar_engines
     case = await _case(admin, runtime, kind)
     before = await _snapshot(admin, case)
-    started = asyncio.get_running_loop().create_future()
-    task = None
-
-    async def share():
+    async with AsyncSession(runtime) as creator:
+        tx = await creator.begin()
+        await _apply(creator, kind, case)
+        own = _PROTOCOL_LOCKS_OF_PID.replace(":pid", "pg_backend_pid()")
+        assert await creator.scalar(text(own)) == 0
+        # 다른 backend의 P SH는 기다리지 않는다(생성이 P EX를 쥐지 않는다).
         async with AsyncSession(runtime) as s, s.begin():
-            await s.execute(text("SET LOCAL lock_timeout='8s'"))
-            started.set_result(int(await s.scalar(text("SELECT pg_backend_pid()"))))
+            await s.execute(text("SET LOCAL lock_timeout='150ms'"))
             await s.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-
-    try:
-        async with AsyncSession(runtime) as creator:
-            tx = await creator.begin()
-            await _apply(creator, kind, case)
-            blocker = int(await creator.scalar(text("SELECT pg_backend_pid()")))
-            task = asyncio.create_task(share())
-            pid = await asyncio.wait_for(asyncio.shield(started), 3)
-            async with asyncio.timeout(3):
-                while True:
-                    async with admin.connect() as c:
-                        blocked = await c.scalar(
-                            text("""SELECT EXISTS(SELECT 1 FROM pg_locks WHERE pid=:pid
-AND locktype='advisory'
-AND classid=1369104691::oid AND objid=115::oid AND objsubid=2 AND
-mode='ShareLock' AND NOT granted) AND :blocker=ANY(pg_blocking_pids(:pid))"""),
-                            dict(pid=pid, blocker=blocker),
-                        )
-                    if blocked:
-                        break
-                    await asyncio.sleep(0.005)
-            assert not task.done()
-            await tx.rollback()
-        await asyncio.wait_for(asyncio.shield(task), 3)
-        assert await _snapshot(admin, case) == before
-        async with AsyncSession(runtime) as fresh, fresh.begin():
-            result = await _apply(fresh, kind, case)
-        await _assert_created(admin, case, kind, result)
-    finally:
-        if task is not None:
-            if not task.done():
-                task.cancel()
-            await asyncio.gather(task, return_exceptions=True)
-
-
-@pytest.mark.parametrize("kind", _KINDS)
-async def test_shared_upgrade_fails_before_dml_and_same_identity_retries(scalar_engines, kind):
-    admin, runtime = scalar_engines
-    case = await _case(admin, runtime, kind)
-    before = await _snapshot(admin, case)
-    with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 같은 TX의 gate와 실제 CALL
-        async with AsyncSession(runtime) as s, s.begin():
-            await s.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-            await _apply(s, kind, case)
-    assert caught.value.orig.sqlstate == "23514"
+        await tx.rollback()
     assert await _snapshot(admin, case) == before
     async with AsyncSession(runtime) as fresh, fresh.begin():
         result = await _apply(fresh, kind, case)
@@ -448,21 +365,40 @@ async def test_shared_upgrade_fails_before_dml_and_same_identity_retries(scalar_
 
 
 @pytest.mark.parametrize("kind", _KINDS)
-async def test_real_timeout_rolls_back_and_same_identity_retries(scalar_engines, kind):
+async def test_epoch0_creation_under_shared_protocol_does_not_upgrade(scalar_engines, kind):
+    """epoch>0의 SH→EX 승격 거부는 ``test_single_writer_regime_entry.py``가 활성화 뒤에 본다."""
     admin, runtime = scalar_engines
     case = await _case(admin, runtime, kind)
-    before = await _snapshot(admin, case)
+    async with AsyncSession(runtime) as s, s.begin():
+        await s.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
+        result = await _apply(s, kind, case)
+        modes = (
+            await s.scalars(
+                text("""SELECT mode FROM pg_locks WHERE pid=pg_backend_pid()
+                AND locktype='advisory' AND classid=1369104691::oid
+                AND objid=115::oid AND objsubid=2 AND granted""")
+            )
+        ).all()
+    assert modes == ["ShareLock"]
+    await _assert_created(admin, case, kind, result)
+
+
+@pytest.mark.parametrize("exclusive", [False, True], ids=["scoped-sh", "load-ex"])
+@pytest.mark.parametrize("kind", _KINDS)
+async def test_epoch0_creation_completes_while_another_backend_holds_the_protocol(
+    scalar_engines, kind, exclusive
+):
+    admin, runtime = scalar_engines
+    case = await _case(admin, runtime, kind)
     async with AsyncSession(runtime) as holder, holder.begin():
-        await holder.execute(text("SELECT ops.lock_scoped_feature_write_protocol(false)"))
-        with pytest.raises(DBAPIError) as caught:  # noqa: PT012 - 같은 TX의 gate와 실제 CALL
-            async with AsyncSession(runtime) as s, s.begin():
-                # approve 정본 proconfig5초는 그대로다. 다른3경로는 caller 유한값 보존.
-                await s.execute(text("SET LOCAL lock_timeout='150ms'"))
-                await _apply(s, kind, case)
-        assert caught.value.orig.sqlstate == "55P03"
-    assert await _snapshot(admin, case) == before
-    async with AsyncSession(runtime) as fresh, fresh.begin():
-        result = await _apply(fresh, kind, case)
+        await holder.execute(
+            text("SELECT ops.lock_scoped_feature_write_protocol(:exclusive)"),
+            {"exclusive": exclusive},
+        )
+        async with AsyncSession(runtime) as s, s.begin():
+            # 종전(418)에는 이 짧은 상한에서 55P03이었다. 434 epoch=0은 P를 기다리지 않는다.
+            await s.execute(text("SET LOCAL lock_timeout='150ms'"))
+            result = await _apply(s, kind, case)
     await _assert_created(admin, case, kind, result)
 
 
@@ -487,9 +423,11 @@ n.nspname='feature' AND p.proname=ANY(CAST(:names AS text[]))"""),
         )
         assert len(rows) == 4
         for row in rows:
-            assert row["prosrc"].count("  " + _migration._PROTOCOL + "\n") == 1
-            assert row["prosrc"].partition("\nBEGIN\n")[2].lstrip().startswith(_migration._PROTOCOL)
-            original = row["prosrc"].replace("  " + _migration._PROTOCOL + "\n", "", 1)
+            # 434 DC-1: 418의 P EX 첫 줄이 같은 자리의 regime 진입으로 바뀌었다.
+            assert "lock_scoped_feature_write_protocol" not in row["prosrc"]
+            assert row["prosrc"].count("  " + _ENTRY + "\n") == 1
+            assert row["prosrc"].partition("\nBEGIN\n")[2].lstrip().startswith(_ENTRY)
+            original = row["prosrc"].replace("  " + _ENTRY + "\n", "", 1)
             assert (
                 hashlib.sha256(original.encode()).hexdigest()
                 == _migration._EXPECTED_DEFINITIONS[row["proname"]][1]
@@ -551,6 +489,27 @@ a.privilege_type='EXECUTE'""")
             "ktm_manual_feature_procedure_owner",
             "ktm_feature_request_procedure_owner",
         }
+        entry = (
+            await c.execute(
+                text("""SELECT r.rolname,p.prosecdef,p.proconfig,
+                EXISTS(SELECT 1 FROM aclexplode(p.proacl) a WHERE a.grantee=0)
+                FROM pg_proc p JOIN pg_roles r ON r.oid=p.proowner
+                WHERE p.oid='ops.lock_single_feature_writer_protocol()'::regprocedure""")
+            )
+        ).one()
+        assert tuple(entry) == (
+            "ktm_feature_state_procedure_owner",
+            True,
+            ["search_path=pg_catalog"],
+            False,
+        )
+        # 생성4의 소유자 셋은 모두 진입을 실행할 수 있어야 한다(WI-3 ACL 오라클과 같은 질문).
+        for owner in set(_migration._LEGACY_OWNERS.values()):
+            assert await c.scalar(
+                text("""SELECT has_function_privilege(:role,
+                'ops.lock_single_feature_writer_protocol()','EXECUTE')"""),
+                dict(role=owner),
+            ), owner
 
 
 @pytest.mark.parametrize("regression", ["manual", "approve", "reject"])
