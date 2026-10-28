@@ -535,10 +535,15 @@ BEGIN
               'ktm_feature_runtime', object.oid, 'INSERT, UPDATE, DELETE, '
               || 'TRUNCATE, REFERENCES, TRIGGER'
           )
+          -- 소유자 몫은 이 major의 table 기본 권한 집합 그대로다(PG17이 MAINTAIN을
+          -- 더했다 — 개수를 숫자로 박으면 major마다 틀린다). 그 위에 runtime SELECT 하나.
           AND (
               SELECT count(*)
               FROM aclexplode(object.relacl)
-          ) = 8
+          ) = (
+              SELECT count(*)
+              FROM aclexplode(acldefault('r'::"char", object.relowner))
+          ) + 1
           AND NOT EXISTS (
               SELECT 1
               FROM aclexplode(object.relacl) AS privilege
@@ -546,11 +551,11 @@ BEGIN
                   (
                       privilege.grantee = object.relowner
                       AND privilege.grantor = object.relowner
-                      AND privilege.privilege_type = ANY (
-                          ARRAY[
-                              'INSERT', 'SELECT', 'UPDATE', 'DELETE', 'TRUNCATE',
-                              'REFERENCES', 'TRIGGER'
-                          ]::text[]
+                      AND privilege.privilege_type IN (
+                          SELECT owner_default.privilege_type
+                          FROM aclexplode(
+                              acldefault('r'::"char", object.relowner)
+                          ) AS owner_default
                       )
                       AND NOT privilege.is_grantable
                   )
