@@ -390,23 +390,25 @@ def _build_status_sensor(status: DagsterRunStatus) -> SensorDefinition:
     # Map의 feature-load job은 전부 이 code location 하나에 있으므로 오늘 배포에서는
     # 평가 대상이 바뀌지 않는다.
     #
-    # success sensor만 completion sweep job을 요청 대상으로 둔다(ADR-112 결정 0-1).
+    # success sensor만 completion sweep job을 요청 대상으로 둔다(ADR-112 결정 0-1). target이 없는
+    # sensor가 ``RunRequest``를 내면 tick이 실패하므로 요청 권한도 같은 조건으로 묶는다.
+    requests_completion = status == DagsterRunStatus.SUCCESS
+
     @run_status_sensor(
         run_status=status,
         name=sensor_name,
         default_status=DefaultSensorStatus.RUNNING,
-        request_job=(
-            feature_operation_completion_job if status == DagsterRunStatus.SUCCESS else None
-        ),
+        request_job=feature_operation_completion_job if requests_completion else None,
     )
     def _status_sensor(
         context: RunStatusSensorContext,
         kor_travel_map_client: ResourceParam[object],
-    ) -> SkipReason | RunRequest | None:
+    ) -> RunRequest | None:
         return _run_async(
             _evaluate_status_event(
                 context,
                 cast("AsyncKorTravelMapClient", kor_travel_map_client),
+                requests_completion=requests_completion,
             )
         )
 
@@ -458,26 +460,39 @@ FEATURE_OPERATION_TRACKING_SENSORS: Final = [
 async def _evaluate_status_event(
     context: RunStatusSensorContext,
     client: AsyncKorTravelMapClient,
-) -> SkipReason | RunRequest | None:
+    *,
+    requests_completion: bool = True,
+) -> RunRequest | None:
+    """run-status 이벤트 하나를 반영한다. 돌려주는 값은 ``RunRequest`` 아니면 ``None``뿐이다.
+
+    **``SkipReason``을 돌려주지 않는다.** Dagster run-status sensor는 ``None``이면 그 이벤트를
+    ``DagsterRunReaction``으로 내고 같은 tick에서 다음 이벤트로 가고, 그 밖의 값이면 그것을 내고
+    tick을 끝낸다. 그런데 ``evaluate_tick``은 ``SkipReason``과 reaction이 한 tick에 섞이면
+    ``CheckError``로 tick 전체를 실패시키고, 실패한 tick은 cursor를 commit하지 않는다 — 앞
+    이벤트가 ``None``이고 뒤 이벤트가 ``SkipReason``이면 그 sensor는 같은 이벤트에서 영원히
+    멈춘다(2026-10-22~28 prod). reaction과 ``RunRequest``는 섞여도 된다.
+
+    그래서 반영 결과와 실패는 ``context.log``에만 남기고, 실패한 이벤트도 지나간다 — 놓친
+    반영은 reconcile sensor가 다시 집는다. ``RunRequest``는 target job이 있는 sensor
+    (``requests_completion``)만 낸다.
+    """
     try:
         record = cast(
             "_RunRecord | None",
             context.instance.get_run_record_by_id(context.dagster_run.run_id),
         )
     except Exception as exc:
-        message = (
+        context.log.error(
             "provider feature operation event의 Dagster run 관측 실패: "
             f"run_id={context.dagster_run.run_id} error_type={type(exc).__name__}"
         )
-        context.log.error(message)
-        return SkipReason(message)
+        return None
     if record is None:
-        message = (
+        context.log.error(
             "provider feature operation event의 Dagster run record를 찾지 못함: "
             f"run_id={context.dagster_run.run_id}"
         )
-        context.log.error(message)
-        return SkipReason(message)
+        return None
     try:
         # 상태 sensor도 공용 code server의 sensor thread를 나눠 쓴다 — reconcile tick과 같은 서버 쪽
         # 상한을 건다(ADR-112 결정 2). 반영은 다음 이벤트·reconcile이 다시 하므로 짧게 끊어도 된다.
@@ -489,28 +504,29 @@ async def _evaluate_status_event(
                 outcome = await _apply_run_record(record, client)
     except FeatureOperationObservationError as exc:
         context.log.error("provider feature operation panel-only conflict: %s", exc)
-        return SkipReason(str(exc))
+        return None
     except Exception as exc:
-        message = (
+        context.log.error(
             "provider feature operation event DB 반영 실패: "
             f"run_id={record.dagster_run.run_id} error_type={type(exc).__name__}"
         )
-        context.log.error(message)
-        return SkipReason(message)
-    if outcome == "panel_only":
-        # operation key가 없는 run(completion sweep 자신 등)에는 할 일이 없다. None을 돌려주면
-        # Dagster가 같은 tick에서 다음 이벤트로 넘어간다 — 그런 run이 tick을 하나씩 먹지 않는다.
         return None
-    if outcome == _COMPLETION_PENDING and not _completion_sweep_queued(
-        cast(_DagsterInstance, context.instance)
+    if outcome == "panel_only":
+        # operation key가 없는 run(completion sweep 자신 등)에는 할 일이 없다.
+        return None
+    if (
+        requests_completion
+        and outcome == _COMPLETION_PENDING
+        and not _completion_sweep_queued(cast(_DagsterInstance, context.instance))
     ):
         # 1차 요청: SUCCESS run마다 sweep 하나. 아직 시작하지 않은 sweep이 있으면 그것이 이
         # root를 볼 것이므로 내지 않는다. 시작한 sweep은 이미 지나쳤을 수 있어 새로 낸다.
         return _completion_run_request(f"success:{record.dagster_run.run_id}")
-    return SkipReason(
+    context.log.info(
         "provider feature operation 상태 반영: "
         f"run_id={record.dagster_run.run_id} outcome={outcome}"
     )
+    return None
 
 
 def _utcnow() -> datetime:

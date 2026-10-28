@@ -1370,8 +1370,9 @@ async def test_success_event_skips_when_a_sweep_has_not_started_yet() -> None:
 
     result = await _evaluate_status_event(_status_context(record, queued), client)
 
-    assert not isinstance(result, RunRequest)
-    assert "completion_pending" in (result.skip_message or "")
+    # SkipReason이 아니라 None — 같은 tick의 다른 이벤트 reaction과 섞여도 tick이 산다.
+    assert result is None
+    assert len(client.ensure_calls) == 1
 
 
 async def test_success_event_requests_again_when_the_sweep_already_started() -> None:
