@@ -77,7 +77,8 @@ Python·Dagster·CI 정리로 없앤다. 루틴 74개·표 10개·index 3개다(
 | 묶음 | DB 객체(migration) | Python·Dagster·CI |
 |---|---|---|
 | scope 커널 | 411의 `ops.*scoped_feature_write*` 13개 루틴, 표 `feature_write_{attempts,manifests,dataset_scopes,region_scopes}`와 index | `infra/scoped_feature_writes.py`, `infra/scoped_provider_batch.py`, `client`의 `cancel_scoped_feature_write` 호출 |
-| 스칼라 정책 | 412의 활성 정책·epoch·projection guard·statement barrier·scalar winner·`record_scoped_*`·`recompute_*`·`activate_provider_field_policy`, 표 `provider_field_active_policies`·`provider_field_policy_epoch`, trigger `trg_scalar_epoch`·`trg_scalar_unsupported`·`trg_feature_base_field_values_validate`(활성 정책 전용 분기) | `infra/scoped_provider_refresh.py`, `provider_field_candidates`의 정책·epoch 함수 |
+| 스칼라 정책 | 412의 활성 정책·epoch·projection guard·statement barrier·scalar winner·`record_scoped_*`·`recompute_*`·`activate_provider_field_policy`, 표 `provider_field_active_policies`·`provider_field_policy_epoch`, 정책 활성화 때만 설치되던 trigger(`trg_scalar_*` — 운영·새 DB 모두 없음. `trg_feature_base_field_values_validate`는
+  410 이전부터의 검증 trigger라 남는다) | `infra/scoped_provider_refresh.py`, `provider_field_candidates`의 정책·epoch 함수 |
 | 배타 opt-in | 420·423 `_exclusive_provider_refresh_context`·`validate_exclusive_provider_snapshot`·`reject_unsupported_active_*`·`validate_active_*` | `infra/exclusive_provider_refresh.py`, `resources.py`·`client`의 opt-in 분기, env `KOR_TRAVEL_MAP_KRHERITAGE_EXCLUSIVE_SNAPSHOT_ENABLED` |
 | SH stamp SD | 421 `lock_/reobserve_/_validate_scoped_provider_geocode_stamps`·`guard_stamp_writer_entry`·`_assert_stamp_projection_guard_inventory`. `upsert_provider_geocode_stamps_ex`는 legacy 적재의 유일한 stamp 경로라 **남기고** epoch·활성 정책 검사만 뺀다(§2.3) | `feature_geocode_stamp_repo`의 scoped lock/reobserve |
 | reader | 422 국가유산, 427 Airport, 431 Rest의 bounded reader와 helper 15개, 427 index 3개 | `infra/heritage_evidence_reader.py`, `transport_{airport,rest}_evidence_reader.py`, `providers/kor_travel_{transport,rest}_{apply,evidence}.py` |
@@ -97,19 +98,27 @@ Python·Dagster·CI 정리로 없앤다. 루틴 74개·표 10개·index 3개다(
 검토한 두 안:
 
 - **(A) P를 배타 전용으로 남긴다.** SH 모드와 regime(PR #1426 434의 `ops.lock_single_feature_writer_protocol()` — epoch>0이면
-  P EX) 분기를 없앤다. epoch 표가 사라지므로 단건·관리 writer는 P를 잡지 않는다. 414 이전과 같이 행 잠금과
-  ADR-111 gate만 쓴다. 이것은 #1426의 epoch=0 동작과 같다. P를 잡는 것은 대량 적재(`lock_feature_curation_write`),
-  권위 finalize·seal의 tracking prefix(P EX → L), provider patch 재진입, curation import, 유지보수·DDL만 남는다.
+  P EX) 분기를 없앤다. epoch 표가 사라지므로 **434가 나열한 단건 writer 10개**(state·lifecycle·field override·생성·
+  승인 — ADR-115 §11.2)는 P를 잡지 않는다. 414 이전과 같이 행 잠금과 ADR-111 gate만 쓴다. 이것은 #1426의 epoch=0
+  동작과 같다. P EX는 그대로 대량 적재(`lock_feature_curation_write`), 권위 finalize·seal의 tracking prefix(P EX → L),
+  provider patch 재진입, curation import, M05 세 루틴·재활성화·manual purge, curation item 명령, shadow 정책 등록·
+  기록, stamp SD writer, 유지보수·DDL이 잡는다.
   `lock_scoped_feature_write_protocol(false)`는 23514로 거부한다. 남는 공유 호출자가 없음을 lint로 센다.
-- **(B) P를 없애고 ADR-111 모델로 완전히 돌아간다.** 기각한다. 430은 seal·finalize를 SERIALIZABLE에서
-  READ COMMITTED로 바꿨다. 그 근거가 "P EX 아래에서는 큐레이션 입력이 바뀌지 않는다"는 것이다.
-  `seal_provider_curation_snapshot_receipt`처럼 `feature-curation-write`·`feature-write-all` 없이 P만 잡는 확정 루틴이
-  있다. P를 빼려면 그 격리를 다시 증명하거나 SERIALIZABLE로 되돌려야 한다. 이것은 퇴역이 아니라 재설계이고,
-  측정된 효익도 없다.
+- **(B) P를 없애고 ADR-111 모델로 완전히 돌아간다.** 기각한다. P EX를 잡는 위 경로 각각(M05 순서, purge,
+  재활성화, curation 명령, provider patch, seal·finalize prefix)에 대해 `feature-curation-write`·`feature-write-all`만으로
+  같은 배제와 잠금 순서가 성립하는지 새로 증명해야 한다. 이것은 퇴역이 아니라 재설계이고, 측정된 효익도 없다.
+
+  **알려진 잔여(정직한 경계).** 430은 seal·finalize를 SERIALIZABLE에서 READ COMMITTED + P EX로 바꿨다. 그러나 434
+  이후 단건 writer 10개는 P를 잡지 않으므로, P EX가 seal의 큐레이션 입력(`current_provider_curation_input_set` —
+  Feature row revision·상태·상세·override lineage)을 **단건 writer로부터** 지켜 주지는 않는다. 적재의 입력 capture와
+  seal 사이에 관리자 편집이 commit되면 seal이 입력 hash를 다시 계산해 23514(`ck_tvn40_provider_snapshot_load_input`)로
+  닫히고 적재 transaction이 rollback된다 — 데이터는 틀리지 않고 실패한 적재가 재시도된다(liveness 비용). 이것은
+  #1426(434 DC-1)이 관리 UI 503을 없애려고 택한 교환이고 ADR-117은 그대로 둔다. 빈도가 문제가 되면 seal·finalize가
+  단건 writer도 잡는 잠금(예: `feature-write-all` EX 대 SH)을 잡도록 하는 별도 변경이 필요하다.
 
 **(A)를 채택한다.** 정확성 증명을 새로 하지 않고 바꿀 수 있는 가장 단순한 안이다. 남는 중복(P EX와
-`feature-curation-write`를 함께 잡는 경로, 리뷰 A2-06)은 알려진 잔여로 기록한다. 이 중복을 없애는 일은 seal 격리를
-다시 증명하는 별도 ADR의 몫이다. ADR-111 §2의 순서는
+`feature-curation-write`를 함께 잡는 경로, 리뷰 A2-06)은 알려진 잔여로 기록한다. 이 중복을 없애는 일은 위 경로들의
+배제를 다시 증명하는 별도 ADR의 몫이다. ADR-111 §2의 순서는
 `P(EX 전용) → curation-import → feature-curation-write → feature-write-all → feature-write:<id> → curation-catalog-write`이다.
 L(pipeline-lineage)은 확정 경로에서 P 뒤, 장부 경로에서는 P 없이 잡는다(PR #1426 WI-1).
 
@@ -143,7 +152,9 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
    SECURITY DEFINER·`prosrc` SHA-256을 고정한다. 하나라도 다르면 아무것도 바꾸지 않고 실패한다.
    DROP 대상도 시그니처와 소유자를 확인한다.
 2. **prod 사전 조건을 migration이 확인한다.** `provider_field_active_policies` 0행, epoch 0, `feature_write_attempts`·
-   스냅샷 표 0행이어야 한다. 아니면 23514로 실패한다(활성화된 DB를 조용히 끊지 않는다).
+   manifest·스냅샷 artifact/control/quota 예약 0행, 살아 있는 region lease 0, 지울 함수를 쓰는 활성화 trigger 0이어야
+   한다. 아니면 아무것도 지우지 않고 실패한다(활성화된 DB를 조용히 끊지 않는다). dataset scope 행·quota 한도 행은
+   설정·흔적일 뿐이라 함께 지운다.
 3. `lock_timeout` 1 s / `statement_timeout` 30 s 상한 아래에서 P EX → L을 먼저 잡는다.
 4. 보존 루틴을 다시 쓴 **뒤에** 대상 루틴·trigger·표·index를 의존 순서대로 DROP한다. CASCADE는 쓰지 않는다.
    남은 의존이 있으면 실패해야 한다.
@@ -157,13 +168,16 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
    `DROP TABLE`도 `ALTER TABLE … DROP CONSTRAINT`도 FK가 가리키는 표를 ACCESS EXCLUSIVE로 잠근다. 그 순간에는 API
    읽기도 기다린다). 1 s lock_timeout 아래에서 실패하면 transaction 전체가 rollback되고 재시도한다. CONCURRENTLY는 transaction 안에서 쓸 수 없으므로 쓰지
    않는다. 배포 runbook은 ADR-114 419와 같다. 적재 schedule을 멈추고 in-flight 0을 확인한 뒤 실행한다.
+   API·Dagster code-server는 같은 pair로 함께 바꾼다 — 옛 image는 435 뒤 없는 `lock_single_feature_writer_protocol()`을
+   불러 42883으로 실패한다(head 불일치 preflight가 재시작 때 막는다).
 2. legacy 적재의 stamp는 421 이후 `upsert_provider_geocode_stamps_ex`(SD)를 거친다. 그래서 그 함수는 지우지 않고
    본문만 다시 쓴다(위 §2.3).
 
 ## 4. 시험
 
 1. migration-only DB에서 이 migration 뒤 `head-schema.sql`과 정확히 같다(기존 oracle 시험).
-2. 선행 본문 hash가 하나라도 다르면 실패하고, 활성 정책 1행·attempt 1행 fixture에서는 23514로 실패한다.
+2. 선행 본문 hash가 하나라도 다르면 실패하고, 사전 조건 중 하나라도 0이 아니면 실패한다
+   (`tests/unit/test_retire_sh_snapshot_migration.py`).
 3. `lock_scoped_feature_write_protocol(false)`는 23514다. lock-order lint(PR #1426 WI-4)는 공유 P 호출자 0과
    regime 함수 부재를 센다. 일부러 공유 호출을 심은 fixture로 빨개지는지 확인한다.
 4. 기존 legacy 적재·finalize·seal·tracking·단건 writer 통합 시험이 그대로 초록이다. Airport·Rest·국가유산 asset은

@@ -144,6 +144,7 @@
 
 | ADR-115 | 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리 (accepted, 부분 구현; SH·정책 경로는 ADR-117이 대체) | [115-scoped-concurrent-feature-writes.md](115-scoped-concurrent-feature-writes.md) |
 | ADR-116 | 바뀌지 않은 비-MOIS 행은 저장 geo를 재사용한다 (accepted) | [116-reuse-stored-geo-for-unchanged-rows.md](116-reuse-stored-geo-for-unchanged-rows.md) |
+| ADR-117 | SH 스냅샷·스칼라 정책 경로(411~433) 퇴역, P는 배타 전용 (proposed; alembic 435) | [117-retire-sh-snapshot-scalar-policy-path.md](117-retire-sh-snapshot-scalar-policy-path.md) |
 | ADR-118 | DB 기준 PostgreSQL 18 + PostGIS 3.6, CI는 공용 instance digest 한 lane (proposed; ADR-007 DB major·ADR-103 CI lane 대체) | [118-postgres-18-ci-target.md](118-postgres-18-ci-target.md) |
 
 ## 새 ADR 작성 규약

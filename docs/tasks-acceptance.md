@@ -2851,16 +2851,17 @@ ADR-116(geo 부하 줄이기 0단계). 브랜치 `feat/skip-geocode-unchanged`.
 
 ## T-ADR117-RETIRE
 
-ADR-117(SH 스냅샷·스칼라 정책 경로 퇴역). 브랜치 `feat/adr117-retire-sh-snapshot`. 착수 조건: PR #1426(434로 재번호) 머지.
+ADR-117(SH 스냅샷·스칼라 정책 경로 퇴역). 브랜치 `feat/adr117-retire-sh-snapshot`. 착수 조건: PR #1426(434) 머지 — 2026-10-28 충족(main `7d10d559`), PG18 기준(ADR-118) 위에서 재기준.
 
 - [x] prod 읽기 전용 측정(2026-10-27): flag 3종 미설정(OFF), 활성 정책 0·epoch 0, attempt·스냅샷 표 0행, Airport·Rest
   run은 모두 manual(schedule 0건), 427 index 3개 100 MB `idx_scan`=0. 결과는 ADR-117 §1이다.
-- [ ] 새 migration(착수 시점 다음 빈 번호, #1426은 434): 그 head 기준 보존 루틴 hash 고정, #1424 433의 reset 함수·ACL 포함, prod 사전 조건(정책·attempt·스냅샷 0행) 확인, 대상 DROP(CASCADE 없음),
-  P 공유 모드·regime 분기 제거, 1 s/30 s 상한, `SET ROLE ktm_feature_schema_owner`로 끝남. head-schema·graph·receipts 갱신.
-- [ ] Python·Dagster·CI: ADR-117 §2.1 표의 모듈·env·스크립트·시험 삭제. 공유 P 호출자 0을 lock-order lint가 센다.
-  지운 env가 설정돼 있으면 기동을 거부한다.
-- [ ] n150 CI-parity 4세션·CI 초록, 적대 리뷰 2인, ADR-117 §4 시험 1~6. ADR-115 머리말·T-CWRITE-03·04·05·07·09
-  대체 표시, journal·resume·CHANGELOG.
+- [x] migration 435: 434 head 기준 보존 루틴 15개 hash 고정, #1424 433의 reset 함수·ACL 포함, prod 사전 조건 확인,
+  대상 DROP(CASCADE 없음), P 공유 모드·regime 분기 제거, 1 s/30 s 상한, `SET ROLE ktm_feature_schema_owner`로 끝남.
+  head-schema(pg_dump 18)·graph·receipts 갱신.
+- [x] Python·Dagster·CI: ADR-117 §2.1 표의 모듈·env·스크립트·시험 삭제. 공유 P 호출자 0을 lock-order lint가 센다.
+  지운 env는 설정돼 있어도 무시된다(기동 거부 같은 결박은 두지 않는다).
+- [ ] n150 CI-parity 4세션·CI 초록, 적대 리뷰 2인, ADR-117 §4 시험. ADR-115 머리말·T-CWRITE-01~09 대체 이관,
+  journal·resume·CHANGELOG.
 - [ ] 배포(소유자): 419 runbook 순서로 대상 schedule 정지·in-flight 0 → pair 배포 → 표·index 부재와 적재 1회 초록을 journal에 적는다.
 
 ## T-UI-MAPWORKSPACE

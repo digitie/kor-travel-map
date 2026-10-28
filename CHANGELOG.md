@@ -16,7 +16,7 @@
   (`ops.feature_write_*`, `ops.provider_snapshot_*`, `feature.provider_field_{active_policies,policy_epoch}`),
   427 expression index 3개. 운영에서 한 번도 쓰이지 않았다(측정은 ADR-117 §1).
 - **CHANGED (DB)**: `ops.lock_scoped_feature_write_protocol(false)`(공유 모드)는 23514로 거부한다. P는 배타 전용이다.
-  단건·관리 writer는 P를 잡지 않는다.
+  434가 나열한 단건 writer 10개(state·lifecycle·field override·생성·승인)는 P를 잡지 않는다.
 - **REMOVED (env)**: `KOR_TRAVEL_MAP_{AIRPORT,REST}_SNAPSHOT_ENABLED`, `KOR_TRAVEL_MAP_KRHERITAGE_EXCLUSIVE_SNAPSHOT_ENABLED`
   (설정돼 있어도 무시된다).
 - **REMOVED (scripts)**: `scripts/scoped_write_baseline.py`, `scripts/measure_scoped_native_scalar.py`.

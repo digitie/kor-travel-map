@@ -9,11 +9,12 @@ flag 3종 미설정(OFF), 활성 정책 0·epoch 0, attempt·artifact·control·
   writer의 스냅샷/정책 분기 제거) SH 전용 루틴 74개·표 10개·index 3개를 CASCADE 없이 지운다. 430이 후처리용으로만
   준 command owner 표 권한도 회수한다. 사전 조건(정책·epoch·attempt·artifact·control·예약 0) 미충족이면 실패한다.
 - **P는 배타 전용**으로 남는다. ADR-111 모델 완전 복귀는 기각했다 — 430이 seal을 SERIALIZABLE에서 READ COMMITTED로
-  바꾼 근거가 P EX다. 단건·관리 writer는 P를 잡지 않는다(#1426 epoch=0 동작과 같다).
+  바꾼 근거가 P EX다. 434가 나열한 단건 writer 10개는 P를 잡지 않는다(#1426 epoch=0 동작과 같다). 그래서 seal은
+  단건 writer의 동시 편집을 배제하지 않고, 입력 hash 재검증으로 닫혀(23514) 적재가 재시도된다 — ADR-117 §2.2 잔여.
 - **Python·Dagster**: Airport·Rest 스냅샷 runner/runtime, scoped kernel·batch·native refresh, 국가유산 배타 opt-in,
   bounded reader, artifact/recovery/postprocess, scoped write 기준선 harness·측정 스크립트, env 3종을 지웠다.
   지운 env는 설정돼 있어도 무시된다(별도 거부 결박 없음).
-- 운영 측정 중 첫 regen에서 두 결함을 잡았다 — identity 인자 문자열이 search_path에 따라 `x_extension.geometry`
+- head-schema 재생성(빈 DB에 435 적용) 중 두 결함을 잡았다 — identity 인자 문자열이 search_path에 따라 `x_extension.geometry`
   한정이 달라졌고, `feature_write_attempts`의 trigger 함수 하나를 표보다 먼저 지우려 했다. 둘 다 고쳤다.
 - T-CWRITE-01~09는 ADR-117로 대체해 `tasks-done.md`로 옮겼다(대체이지 완료가 아니다).
 
