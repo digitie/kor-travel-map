@@ -1,3 +1,22 @@
+## 2026-10-28 — ADR-117: SH 스냅샷·스칼라 정책 경로 퇴역(alembic 435)
+
+소유자 승인(2026-10-27 "권장대로", DC-2). n150 prod 읽기 전용 측정에서 SH 경로는 한 번도 돌지 않았다 —
+flag 3종 미설정(OFF), 활성 정책 0·epoch 0, attempt·artifact·control·quota 예약 0행, Airport·Rest run은
+모두 manual(schedule 0건), 427 expression index 3개 100 MB `idx_scan`=0. 수치는 ADR-117 §1이다.
+
+- **alembic 435** `435_retire_sh_snapshot_path`(#1426의 434 위). 434 head의 보존 루틴 15개를 본문 SHA-256으로 고정해
+  다시 쓰고(단건 writer 10개의 regime 진입 제거, P 공유 모드 23514, seal 입력·권위 finish·shadow 기록기·stamp SD
+  writer의 스냅샷/정책 분기 제거) SH 전용 루틴 74개·표 10개·index 3개를 CASCADE 없이 지운다. 430이 후처리용으로만
+  준 command owner 표 권한도 회수한다. 사전 조건(정책·epoch·attempt·artifact·control·예약 0) 미충족이면 실패한다.
+- **P는 배타 전용**으로 남는다. ADR-111 모델 완전 복귀는 기각했다 — 430이 seal을 SERIALIZABLE에서 READ COMMITTED로
+  바꾼 근거가 P EX다. 단건·관리 writer는 P를 잡지 않는다(#1426 epoch=0 동작과 같다).
+- **Python·Dagster**: Airport·Rest 스냅샷 runner/runtime, scoped kernel·batch·native refresh, 국가유산 배타 opt-in,
+  bounded reader, artifact/recovery/postprocess, scoped write 기준선 harness·측정 스크립트, env 3종을 지웠다.
+  지운 env는 설정돼 있어도 무시된다(별도 거부 결박 없음).
+- 운영 측정 중 첫 regen에서 두 결함을 잡았다 — identity 인자 문자열이 search_path에 따라 `x_extension.geometry`
+  한정이 달라졌고, `feature_write_attempts`의 trigger 함수 하나를 표보다 먼저 지우려 했다. 둘 다 고쳤다.
+- T-CWRITE-01~09는 ADR-117로 대체해 `tasks-done.md`로 옮겼다(대체이지 완료가 아니다).
+
 ## 2026-10-28 — T-PG18-CI: prod coord_5179 PROJ 7→9 drift 검사 clean
 
 공용 PG 16→18(pg_upgrade)로 PROJ 7.2.1 → 9.8.1이 된 뒤 runbook `coord-5179-proj-pin.md` §3을 n150 prod Map DB에서

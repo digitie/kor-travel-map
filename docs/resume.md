@@ -1,3 +1,9 @@
+## 2026-10-28 — ADR-117 퇴역 PR 진행 중
+
+브랜치 `feat/adr117-retire-sh-snapshot`(draft PR, base `feat/map-codex-review-core`). alembic 435가 SH 스냅샷·
+스칼라 정책·scope 경로(411~433)를 지운다. **다음 한 작업**: #1426 머지 → main으로 재기준·retarget → n150 네 세션·CI
+초록 → 적대 리뷰 2인 → 소유자 머지·배포(배포는 419 runbook처럼 적재 schedule 정지·in-flight 0 확인 뒤).
+
 ## 2026-10-28 — T-PG18-CI: CI·compose를 PG18 공용 digest 한 lane으로(ADR-118, #1431)
 
 공용 PG 16→18 뒤 CI 통합 suite를 `postgis/postgis:18-3.6@sha256:4a43e3c3…` 한 lane으로 바꿨다(옛 PG16 alpine·glibc 삭제).

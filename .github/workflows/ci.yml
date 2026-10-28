@@ -179,9 +179,6 @@ jobs:
         # EXPLAIN(no features Seq Scan)·query-count(N+1)·response-shape 회귀는
         # tests/integration/test_perf_gate_tier1.py 가 같은 job 에서 상시 실행한다.
         # tier-2(대용량 실분포)는 CI 아님 — scripts/perf_tier2_release_harness.py 수동.
-        # scoped write 기준선 측정(전용 container·PG 재시작·3회 반복)도 CI가 아니다 —
-        # `python -m scripts.scoped_write_baseline --run --output <파일>` 수동. 그 불변식
-        # (DML 비중첩·cold/warm hash·개수)만 test_scoped_write_baseline.py가 공용 container에서 본다.
         run: |
           pytest tests/integration -q \
             --cov=src/kortravelmap --cov-append \

@@ -72,47 +72,12 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   공통 helper가 변환을 두 번 돌려 그런 행은 저장 주소 열을 답으로 쓴다. 설계는 [ADR-116](adr/116-reuse-stored-geo-for-unchanged-rows.md), 해제 조건은 acceptance의 같은 ID다.
 
-**동시 쓰기 설계(ADR-115, proposed)** — 현재 Weather·Transport 작업을 마친 뒤 아래 의존 순서로 구현한다. 설계 문서 PR은 구현 완료가 아니며, 수용 조건 정본은 `tasks-acceptance.md`의 같은 ID다.
+**동시 쓰기 설계(ADR-115)** — T-CWRITE-01~09는 ADR-117(SH 스냅샷·스칼라 정책 경로 퇴역)로 대체해 2026-10-28
+`tasks-done.md`로 이관했다. 동시 쓰기를 다시 추진하려면 실제 경합을 먼저 측정해 새 ADR로 시작한다.
 
 - [ ] T-ADR117-RETIRE — **SH 스냅샷·스칼라 정책 경로(411~433) 퇴역**
 
   prod 측정에서 경합 효익이 0이라 다음 빈 번호의 forward migration으로 지우고(#1424의 433 포함) P는 배타 전용으로 남긴다. PR #1426 머지 뒤 착수한다. 설계는 [ADR-117](adr/117-retire-sh-snapshot-scalar-policy-path.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-01 — **현재 writer·trigger·성능 기준선**
-
-  ADR-115의 근거 버전부터 전체 쓰기 경로와 실제 부하를 고정한다. [413 기준 정적 SQL/Python/trigger 목록](reports/2026-10-24-scoped-sql-writer-inventory.md)은 조사 증거이며 실제 부하·전체 closure 수용은 미완이다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-02 — **공유 Feature의 후보·필드 winner·병합 정본**
-
-  기존 전역 잠금 아래에서 후보 원장과 결정적 winner를 먼저 완성한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-03 — **scope·epoch·manifest와 protocol gate**
-
-  기존 writer가 우회할 수 없는 계층 scope와 복구 fence를 추가한다. [stamp SD 기반](reports/2026-10-25-stamp-writer-boundary.md)은 별도 수용 중이다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-04 — **독립 데이터셋 동시 쓰기**
-
-  독립 snapshot과 [공유 Feature 재계획 제한 시험](reports/2026-10-27-shared-feature-artifact-replan.md)을 수용했다. [OS worker 제한 수용](reports/2026-10-27-provider-snapshot-os-worker-pair.md)과 새 profile OFF를 유지한다. 일반 coordinator·전 writer 전환은 미완이며 정본은 ADR-115/acceptance 같은 ID다.
-
-- [ ] T-CWRITE-05 — **완전 지역의 동시 쓰기·경계 이동**
-
-  coverage가 입증된 지역만 나누고 이동·unknown·전체 snapshot 충돌을 처리한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-06 — **curation·root·관리·병합 전수 전환**
-
-  catalog 전역 병목과 trigger closure를 함께 처리한다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-07 — **실패·취소·worker 사망 복구**
-
-  idempotency·epoch fencing·artifact 재사용과 bounded retry를 완성한다. [bound READY 복구](reports/2026-10-27-bound-snapshot-stale-replan.md)는 구현·검증 중이며 전수 복구는 미완이다. 정본은 [ADR-115](adr/115-scoped-concurrent-feature-writes.md)와 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-08 — **적대 리뷰 2인·실부하·UI 수용**
-
-  정확성 반증·live API/UI·CPU/RAM/DB 전후 비교를 통과시킨다. Rest 제한 profile의 byte quota·최종 CI·공개 UI는 수용했으나 운영 부하 CPU/RAM과 상위 전수 수용은 미완이다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
-
-- [ ] T-CWRITE-09 — **배포·확대·되돌림과 문서 마감**
-
-  drain·호환 검사·flag 전환·롤백 훈련 후 실제 운영 generation 증거로 닫는다. 설계는 [ADR-115](adr/115-scoped-concurrent-feature-writes.md), 해제 조건은 acceptance의 같은 ID다.
 
 - [ ] T-VN-41C — **cache-target consumer enable** — **보류**(소유자 지시 2026-09-07)
 

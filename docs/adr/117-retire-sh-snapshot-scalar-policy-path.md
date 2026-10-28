@@ -1,7 +1,8 @@
 # ADR-117 — SH 스냅샷·스칼라 정책 경로(411~433)를 퇴역하고, P는 배타 전용 bulk gate로 남긴다
 
 - 상태: **proposed** (2026-10-27 소유자 승인 "권장대로" — 측정에서 실제 경합 효익이 나오지 않으면 퇴역. 측정 결과는
-  아래 §1이고 효익은 0이다. 구현은 진행 중인 통합 PR #1426(현재 434로 재번호) 머지 뒤 별도 PR, 머지 때 accepted)
+  아래 §1이고 효익은 0이다. 구현은 alembic 435, PR #1426(434) 위에 쌓은 별도 PR이며 #1426 머지 뒤 main으로
+  재기준한다. 머지 때 accepted)
 - 날짜: 2026-10-27
 - 결정자: human(DC-2 방향 승인), Claude(측정·설계)
 - 관계: **ADR-115를 부분 대체한다**(§2 표 참고). ADR-111(전역 gate·순서)은 유지하되 순서 맨 앞의 P를 배타 전용으로
@@ -70,22 +71,26 @@ Rest 4 min이고, 실제 쓰기 구간은 geo 호출(ADR-113 spool: 쓰기 trans
 
 ### 2.1 퇴역한다
 
-다음을 forward-only alembic 한 개(번호는 착수 시점 main head의 **다음 빈 번호** — #1424가 433을, #1426이 434를
-쓰므로 435 이후. 고정 번호를 가정하지 않는다)와 같은 PR의 Python·Dagster·CI 정리로 없앤다.
+다음을 forward-only alembic **435**(`435_retire_sh_snapshot_path` — #1424가 433을, #1426이 434를 쓴다)와 같은 PR의
+Python·Dagster·CI 정리로 없앤다. 루틴 74개·표 10개·index 3개다(정확한 목록은 migration의 `_DROPS`·`_TABLES`·`_INDEXES`).
 
 | 묶음 | DB 객체(migration) | Python·Dagster·CI |
 |---|---|---|
 | scope 커널 | 411의 `ops.*scoped_feature_write*` 13개 루틴, 표 `feature_write_{attempts,manifests,dataset_scopes,region_scopes}`와 index | `infra/scoped_feature_writes.py`, `infra/scoped_provider_batch.py`, `client`의 `cancel_scoped_feature_write` 호출 |
 | 스칼라 정책 | 412의 활성 정책·epoch·projection guard·statement barrier·scalar winner·`record_scoped_*`·`recompute_*`·`activate_provider_field_policy`, 표 `provider_field_active_policies`·`provider_field_policy_epoch`, trigger `trg_scalar_epoch`·`trg_scalar_unsupported`·`trg_feature_base_field_values_validate`(활성 정책 전용 분기) | `infra/scoped_provider_refresh.py`, `provider_field_candidates`의 정책·epoch 함수 |
 | 배타 opt-in | 420·423 `_exclusive_provider_refresh_context`·`validate_exclusive_provider_snapshot`·`reject_unsupported_active_*`·`validate_active_*` | `infra/exclusive_provider_refresh.py`, `resources.py`·`client`의 opt-in 분기, env `KOR_TRAVEL_MAP_KRHERITAGE_EXCLUSIVE_SNAPSHOT_ENABLED` |
-| SH stamp SD | 421 `upsert_provider_geocode_stamps_ex`·`lock_/reobserve_/_validate_scoped_provider_geocode_stamps`·`guard_stamp_writer_entry`와 그 trigger·inventory | legacy stamp 경로(`_421_legacy_stamp_upsert`가 대체한 본문)는 남긴다 — §3 주의 2 |
+| SH stamp SD | 421 `lock_/reobserve_/_validate_scoped_provider_geocode_stamps`·`guard_stamp_writer_entry`·`_assert_stamp_projection_guard_inventory`. `upsert_provider_geocode_stamps_ex`는 legacy 적재의 유일한 stamp 경로라 **남기고** epoch·활성 정책 검사만 뺀다(§2.3) | `feature_geocode_stamp_repo`의 scoped lock/reobserve |
 | reader | 422 국가유산, 427 Airport, 431 Rest의 bounded reader와 helper 15개, 427 index 3개 | `infra/heritage_evidence_reader.py`, `transport_{airport,rest}_evidence_reader.py`, `providers/kor_travel_{transport,rest}_{apply,evidence}.py` |
-| strict guard | 429·430의 strict SH data guard·설치기·inventory 6개 | — |
+| strict guard | 429·430의 strict SH data guard·설치기·inventory 6개 | `infra/db.py` runtime preflight의 strict inventory·스냅샷 표 접근 검사 |
+| bounded capture | 428 `_bounded_provider_curation_input_set`·`_bounded_curation_string_object`, 422 `_heritage_evidence_metadata_bytes`(스냅샷 member seal만 불렀다) | — |
 | 스냅샷 복구 | 430·432의 artifact·control·quota·executor lease·plan bind/reset·apply·postprocess·GC 루틴, 433(#1424)의 `ops.reset_ready_provider_snapshot_plan`과 그 ACL(`ktm_curation_provider_executor` EXECUTE, `feature_write_dataset_scopes`의 열 SELECT 3개, command owner의 `ops` CREATE)과 표 4개(`provider_snapshot_{artifacts,controls,quota_limits,quota_reservations}`), trigger `trg_provider_snapshot_immutable_input` | Dagster `{airport,rest}_snapshot_{backend,observation,postprocess,runner,runtime}.py`(#1424의 atomic-apply catch 안 typed reset 호출 포함), `definitions.py` 결선, `assets.py`의 `run_*_snapshot_if_supported`, `client/_{airport,rest}_snapshot.py`·`_snapshot_atomic.py`·`_snapshot_postprocess.py`, `infra/provider_snapshot_{artifact,postprocess_repo,recovery_repo}.py`, `infra/rest_area_snapshot_artifact.py`, env 두 개 |
-| 측정·CI | — | `scripts/measure_scoped_native_scalar.py`(PR #1426이 옮김)와 그 단위 시험, `test_scoped_write_baseline.py`, 위 모듈의 단위·통합 시험(약 60개 파일, #1424의 `test_snapshot_{bound_runner_recovery,ready_reset_acl,ready_reset_races,stale_bound_replan}.py`·`test_snapshot_ready_plan_reset.py` 포함) |
+| 측정·CI | — | `scripts/measure_scoped_native_scalar.py`(PR #1426이 옮김)와 `scripts/scoped_write_baseline.py`·`_scoped_write_baseline_pg.py`·fixture, 위 모듈의 단위·통합 시험(80여 개 파일, #1424의 `test_snapshot_{bound_runner_recovery,ready_reset_acl,ready_reset_races,stale_bound_replan}.py`·`test_snapshot_ready_plan_reset.py` 포함) |
 
 없애는 것은 **flag OFF·정책 0행에서 도달할 수 없는 코드와 그 저장소**다. prod의 해당 표는 모두 0행이라 데이터
-이관은 없다.
+이관은 없다. 430이 스냅샷 후처리용으로만 command owner에게 준 표 권한(`provider_sync_state` SELECT·UPDATE,
+`integrity_finding_observations` SELECT, `integrity_observation_{scopes,runs}` SELECT·UPDATE)도 435가 회수한다 —
+보존 루틴은 쓰지 않고 baseline에도 없다. 그래야 새 DB와 prod의 ACL이 같다. 지운 env 3종은 설정돼 있어도
+무시된다(settings `extra="ignore"`). 기동 거부 같은 별도 결박은 두지 않는다(소유자 단순성 원칙).
 
 ### 2.2 P는 배타 전용 bulk gate로 남긴다 (ADR-111 모델로 완전 복귀는 하지 않는다)
 
@@ -113,17 +118,21 @@ L(pipeline-lineage)은 확정 경로에서 P 뒤, 장부 경로에서는 P 없�
 - 410 shadow(`provider_field_shadow_*`, `record_provider_field_candidates`의 shadow capture). 리뷰 WI-5 범위이고 운영
   OFF·0행이지만 ADR-115 §3의 후보 원장 기록이라 이 ADR 범위 밖이다. 412가 그 capture와 정책 경로를 한 루틴에
   섞어 두었으므로 migration은 shadow 분기만 남기고 다시 쓴다.
-- 424·434(#1426) tracking prefix, 425·426 provider patch의 P 진입, 428 bounded curation capture(seal 공통). 430이 고친
-  finalize·seal·`refresh_curated_source_observation`·`sync_concierge_theme_catalog`·tracking 명령의 본문에서는
-  스냅샷 분기만 빼고 다시 쓴다.
+- 424·434(#1426) tracking prefix, 425·426 provider patch의 P 진입, 430 tracking prefix guard. 435가 다시 쓰는 보존 루틴은
+  15개다 — 단건 writer 10개(regime 진입 줄 제거), P(공유 모드 23514), `_member_provider_curation_input_set`(artifact
+  분기 제거 — 언제나 P EX 아래 `current_provider_curation_input_set`), `finish_provider_feature_membership_command`
+  (스냅샷 binding 블록 제거), `_record_provider_field_candidates`(scoped·활성 정책 분기 제거), `upsert_provider_geocode_stamps_ex`
+  (epoch·활성 정책 검사 제거). finalize·seal·`refresh_curated_source_observation`·`sync_concierge_theme_catalog`는
+  지우는 객체를 부르지 않아 그대로다(`curation_provider_snapshot_receipts`는 별개의 보존 표다).
 - 413 legacy SQL 진입(P EX 첫 줄). 배타 전용 P와 그대로 맞는다.
 
 ### 2.4 ADR-115와의 관계
 
 ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active revision, §5.1 지역 scope 계층, §5.2(3)의 공유 진입,
-§7의 scope epoch·lease, §8 4~5단계(opt-in 확대), §9의 "독립 2작업 동시 완료" 수용 기준이다. T-CWRITE-03·04·05·07·
-09는 이 ADR 머지 때 "ADR-117로 대체"로 닫는다. ADR-115의 문제 정의(§1·§2 불변식·§4 winner·retire·병합 규약)는
-살아 있다. 동시 쓰기를 다시 추진하려면 **먼저 실제 경합을 측정해** 효익을 보인 뒤 새 ADR로 시작한다. 측정 없는
+§7의 scope epoch·lease, §8 4~5단계(opt-in 확대), §9의 "독립 2작업 동시 완료" 수용 기준이다. T-CWRITE-01~09는
+한 사슬(01→…→09)이라 이 PR에서 모두 "ADR-117로 대체"로 닫는다(`tasks-done.md`). 410 shadow 후보 원장(02의 일부)은
+코드로 남지만 활성화 경로가 없으므로 별도 task로 두지 않는다. ADR-115의 문제 정의(§1·§2 불변식·§4 winner·retire·
+병합 규약)는 살아 있다. 동시 쓰기를 다시 추진하려면 **먼저 실제 경합을 측정해** 효익을 보인 뒤 새 ADR로 시작한다. 측정 없는
 성능 전용 마이그레이션은 하지 않는다(리뷰 A2-05의 프로세스 규칙).
 
 ## 3. 마이그레이션 규칙 (다음 빈 번호)
@@ -143,11 +152,12 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
 6. 마지막 문장은 `SET ROLE ktm_feature_schema_owner`다. **RESET ROLE은 쓰지 않는다.**
 
 주의:
-1. 427 index 3개 DROP은 각 표에 ACCESS EXCLUSIVE를 잠깐 건다. 1 s lock_timeout 아래에서 실패하면 재시도로 처리한다.
-   CONCURRENTLY는 transaction 안에서 쓸 수 없으므로 쓰지 않는다. 배포 runbook은 ADR-114 419와 같다. 대상
-   schedule을 멈추고 in-flight 0을 확인한 뒤 실행한다.
-2. 421은 legacy stamp upsert의 본문도 바꿨다. legacy 경로가 SD 함수를 거치는지 먼저 확인한다. 거치면 legacy
-   본문으로 되돌린 뒤 SD를 지운다.
+1. 427 index 3개 DROP과 FK를 가진 표 DROP은 대상 표와 FK가 가리키는 표(`feature.features`, `ops.import_jobs`,
+   `ops.import_job_datasets`, `provider_sync.provider_datasets`)에 잠깐 강한 잠금을 건다. 1 s lock_timeout 아래에서
+   실패하면 transaction 전체가 rollback되고 재시도한다. CONCURRENTLY는 transaction 안에서 쓸 수 없으므로 쓰지
+   않는다. 배포 runbook은 ADR-114 419와 같다. 적재 schedule을 멈추고 in-flight 0을 확인한 뒤 실행한다.
+2. legacy 적재의 stamp는 421 이후 `upsert_provider_geocode_stamps_ex`(SD)를 거친다. 그래서 그 함수는 지우지 않고
+   본문만 다시 쓴다(위 §2.3).
 
 ## 4. 시험
 
@@ -156,7 +166,7 @@ ADR-115 중 다음은 **이 ADR이 대체한다**. §3의 정책 cutover·active
 3. `lock_scoped_feature_write_protocol(false)`는 23514다. lock-order lint(PR #1426 WI-4)는 공유 P 호출자 0과
    regime 함수 부재를 센다. 일부러 공유 호출을 심은 fixture로 빨개지는지 확인한다.
 4. 기존 legacy 적재·finalize·seal·tracking·단건 writer 통합 시험이 그대로 초록이다. Airport·Rest·국가유산 asset은
-   flag 없이 legacy 경로만 탄다. 지운 env를 설정해도 무시하지 않고 기동을 거부한다(오설정 탐지).
+   flag 없이 legacy 경로만 탄다.
 5. 단건 writer는 P EX holder 뒤에서 기다리지 않는다(#1426 epoch=0 시험을 epoch 표 없이 유지).
 6. n150 격리 DB에서 Airport fixture 적재 한 번의 P 보유 시간을 `pg_locks` 표본으로 기록한다. 퇴역 뒤 legacy 경로의
    P 보유 시간이 퇴역 전과 같다(±10 %, 3회).

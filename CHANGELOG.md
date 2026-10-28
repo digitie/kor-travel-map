@@ -10,6 +10,17 @@
 
 ## [Unreleased]
 
+### SH 스냅샷·스칼라 정책 경로 퇴역 — ADR-117 (2026-10-28)
+
+- **REMOVED (DB, alembic 435)**: ADR-115 SH 스냅샷·스칼라 정책·scope 커널 경로(411~433)의 루틴 74개, 표 10개
+  (`ops.feature_write_*`, `ops.provider_snapshot_*`, `feature.provider_field_{active_policies,policy_epoch}`),
+  427 expression index 3개. 운영에서 한 번도 쓰이지 않았다(측정은 ADR-117 §1).
+- **CHANGED (DB)**: `ops.lock_scoped_feature_write_protocol(false)`(공유 모드)는 23514로 거부한다. P는 배타 전용이다.
+  단건·관리 writer는 P를 잡지 않는다.
+- **REMOVED (env)**: `KOR_TRAVEL_MAP_{AIRPORT,REST}_SNAPSHOT_ENABLED`, `KOR_TRAVEL_MAP_KRHERITAGE_EXCLUSIVE_SNAPSHOT_ENABLED`
+  (설정돼 있어도 무시된다).
+- **REMOVED (scripts)**: `scripts/scoped_write_baseline.py`, `scripts/measure_scoped_native_scalar.py`.
+
 ### PostgreSQL 18 + PostGIS 3.6 기준 (2026-10-28, ADR-118)
 
 - **CHANGED (CI)**: 통합 suite는 n150 공용 instance digest(`postgis/postgis:18-3.6@sha256:4a43e3c3…`) 한 lane에서
@@ -33,7 +44,7 @@
 - **FIXED (API)**: 취소 API가 이미 commit한 결과를 연결 정리 실패만으로 503으로 응답하지 않는다.
   lease 가능·무효화·설정 실패만 503이다.
 - **CHANGED (CI)**: scoped write 기준선 측정(전용 container·PG 재시작)을 필수 CI에서 뺐다.
-  불변식만 공용 PostGIS에서 본다. 측정은 `python -m scripts.scoped_write_baseline --run` 수동.
+  불변식만 공용 PostGIS에서 본다(이 harness는 ADR-117에서 지웠다).
 - **FIXED (admin UI)**: 지도 cluster·geometry label·마커를 Tab과 Enter/Space로 고를 수 있다.
 - **CHANGED (CI)**: dev 의존성을 포함한 `npm audit --audit-level=high`를 다시 차단 단계로 둔다.
 

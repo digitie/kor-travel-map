@@ -3,9 +3,9 @@
 `kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-119.**
 
 - [ADR-118 — DB 기준을 PostgreSQL 18 + PostGIS 3.6으로, CI는 공용 instance digest 한 lane](118-postgres-18-ci-target.md) — proposed, 2026-10-28 (T-PG18-CI; ADR-007 DB major·ADR-103 CI lane 대체).
-- [ADR-117 — SH 스냅샷·스칼라 정책 경로(411~433)를 퇴역하고, P는 배타 전용 bulk gate로 남긴다](117-retire-sh-snapshot-scalar-policy-path.md) — proposed, 2026-10-27 (소유자 승인; prod 읽기 전용 측정에서 경합 효익 0; ADR-115 부분 대체; 구현은 #1426 머지 뒤 다음 빈 migration 번호; #1424의 433 포함).
+- [ADR-117 — SH 스냅샷·스칼라 정책 경로(411~433)를 퇴역하고, P는 배타 전용 bulk gate로 남긴다](117-retire-sh-snapshot-scalar-policy-path.md) — proposed, 2026-10-27 (소유자 승인; prod 읽기 전용 측정에서 경합 효익 0; ADR-115 부분 대체; 구현 alembic 435, #1424의 433 포함; 머지 때 accepted).
 - [ADR-116 — payload·좌표·geo 토큰이 그대로인 비-MOIS 행은 역지오코딩하지 않고 저장값을 재사용한다](116-reuse-stored-geo-for-unchanged-rows.md) — **accepted**, 2026-10-24 (#1356·#1357; MCST 첫 적재 재사용 45,930행).
-- [ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리](115-scoped-concurrent-feature-writes.md) — **accepted(부분 구현)**, 2026-10-23 제안·2026-10-27 개정 (alembic 411~434, 운영 head 432; SH 스냅샷·스칼라 정책 경로는 운영 OFF·동결, §11이 현행 잠금 순서·writer 분류 정본).
+- [ADR-115 — 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리](115-scoped-concurrent-feature-writes.md) — **accepted(부분 구현)**, 2026-10-23 제안·2026-10-27 개정 (alembic 411~434, 운영 head 432; **ADR-117이 SH 스냅샷·스칼라 정책·scope 경로를 부분 대체**(435), §11이 현행 잠금 순서 정본).
 - [ADR-114 — weather·transport의 현재·예보 상태는 Map이 메모리 DB(Valkey)에 들고, PinVi는 Map REST로 읽는다](114-weather-transport-state-in-memory-db.md) — proposed, 2026-10-23 (소유자 방향 결정, ADR-105 부분 대체; 1단계 transport 키 설계·구현 PR 2026-10-23; 2단계 weather 설계·구현 PR 2026-10-24).
 - [ADR-113 — 스트리밍 snapshot 적재는 먼저 다 받아 두고, 쓰기 transaction은 그 뒤에 짧게 연다](113-snapshot-load-spool-then-write.md) — proposed, 2026-10-22 (`T-LOAD-LOCK-WAIT` 2안, PR 미머지; 배포 뒤 8개 asset 쓰기 시간 실측으로 accepted).
 - [ADR-112 — reconcile sensor는 DB root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다](112-reconcile-sensor-retry-alert-close.md) — **accepted**, 2026-10-21 (`T-RECONCILE-RETRY` 구현; 2026-10-27 경쟁 절 개정 — 430 READ COMMITTED 완결·434 장부 L).
@@ -142,7 +142,7 @@
 | ADR-112 | reconcile sensor는 DB root가 생긴 run만 지나가고, 멈춤은 경과 시간으로 알리고, 정한 실패만 닫는다 (accepted, 구현; 2026-10-27 경쟁 절 개정) | [112-reconcile-sensor-retry-alert-close.md](112-reconcile-sensor-retry-alert-close.md) |
 | ADR-113 | 스트리밍 snapshot 적재는 먼저 다 받아 두고(spool), 쓰기 transaction은 그 뒤에 짧게 연다 (proposed) | [113-snapshot-load-spool-then-write.md](113-snapshot-load-spool-then-write.md) |
 
-| ADR-115 | 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리 (accepted, 부분 구현; SH·정책 경로 운영 OFF·동결) | [115-scoped-concurrent-feature-writes.md](115-scoped-concurrent-feature-writes.md) |
+| ADR-115 | 데이터셋·지역 쓰기 범위와 Feature 병합 충돌 분리 (accepted, 부분 구현; SH·정책 경로는 ADR-117이 대체) | [115-scoped-concurrent-feature-writes.md](115-scoped-concurrent-feature-writes.md) |
 | ADR-116 | 바뀌지 않은 비-MOIS 행은 저장 geo를 재사용한다 (accepted) | [116-reuse-stored-geo-for-unchanged-rows.md](116-reuse-stored-geo-for-unchanged-rows.md) |
 | ADR-118 | DB 기준 PostgreSQL 18 + PostGIS 3.6, CI는 공용 instance digest 한 lane (proposed; ADR-007 DB major·ADR-103 CI lane 대체) | [118-postgres-18-ci-target.md](118-postgres-18-ci-target.md) |
 
