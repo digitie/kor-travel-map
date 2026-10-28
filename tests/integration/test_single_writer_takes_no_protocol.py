@@ -5,7 +5,7 @@
 적재가 P EX를 쥐어도 단건 writer는 P를 기다리지 않고 끝난다(ADR-117 §4-5).
 
 434의 cutover·첫 활성화 drain·epoch>0 P EX·SH caller 승격 거부·barrier 사례는 그 객체가 없으므로
-지웠다(`git show 3a2641a0f~1:tests/integration/test_single_writer_regime_entry.py`).
+지웠다(#1426 머지 시점 `git show 7d10d559a:tests/integration/test_single_writer_regime_entry.py`).
 """
 
 from __future__ import annotations
