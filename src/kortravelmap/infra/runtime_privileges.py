@@ -222,10 +222,6 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     # application schema root/finalize의 DB-atomic immutable outbox다. runtime은
     # 직접 읽거나 쓰지 않고 restricted migrator의 recovery command만 조회한다.
     "application_schema_operation_receipts": (),
-    "provider_snapshot_artifacts": (),
-    "provider_snapshot_controls": (),
-    "provider_snapshot_quota_limits": (),
-    "provider_snapshot_quota_reservations": (),
     "api_call_log": _ORDINARY_OPS,
     "backup_command_executions": _ORDINARY_OPS,
     "c6c_cancel_probe_fixtures": _ORDINARY_OPS,
@@ -306,11 +302,6 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "kor_travel_geo_releases": ("SELECT", "INSERT", "UPDATE"),
     "curation_rule_reconcile_operations": (),
     "curation_rule_reconcile_scope_members": (),
-    # ADR115 scope/epoch/manifest는 typed SD kernel만 쓴다. runtime 직접 접근은 닫는다.
-    "feature_write_dataset_scopes": (),
-    "feature_write_region_scopes": (),
-    "feature_write_attempts": (),
-    "feature_write_manifests": (),
     "feature_override_field_paths": ("SELECT",),
     "feature_overrides": ("SELECT",),
     # T-VN-M04 queue는 service와 admin route가 SECURITY DEFINER routine을
@@ -335,8 +326,6 @@ _PROTECTED_FEATURE_TABLES = frozenset(
         "features",
         "feature_base_field_values",
         "provider_field_shadow_policies",
-        "provider_field_policy_epoch",
-        "provider_field_active_policies",
         "provider_field_shadow_candidates",
         "feature_state_transitions",
         "manual_feature_identity_claims",
@@ -419,114 +408,9 @@ _CORE_FEATURE_GRANTS = (
     "GRANT SELECT ON feature.feature_state_transitions TO ktm_feature_runtime",
 )
 
-_BOUNDED_CAPTURE_SCHEMA_OWNER_ACL = (
-    "REVOKE ALL ON FUNCTION feature._bounded_curation_string_object(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service",
-    "REVOKE ALL ON FUNCTION feature._bounded_provider_curation_input_set(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION feature._bounded_provider_curation_input_set(...) "
-    "TO ktm_curation_command_owner",
-)
-
-
-# 429 private 함수는 실제 routine owner별 창에서만 복원한다. trigger 설치는 호출하지 않는다.
-_STRICT_SH_DATA_SCHEMA_OWNER_ACL = (
-    "REVOKE ALL ON FUNCTION feature._install_strict_sh_data_guards(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
-)
-
-_STRICT_SH_DATA_STATE_OWNER_ACL = (
-    "REVOKE ALL ON FUNCTION feature._strict_sh_data_context(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION feature._strict_sh_data_context(...) TO ktm_feature_schema_owner",
-    "REVOKE ALL ON FUNCTION feature._strict_sh_data_statement_guard(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION feature._strict_sh_data_statement_guard(...) "
-    "TO ktm_feature_schema_owner",
-    "REVOKE ALL ON FUNCTION feature._strict_sh_source_row_guard(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION feature._strict_sh_source_row_guard(...) "
-    "TO ktm_feature_schema_owner",
-    "REVOKE ALL ON FUNCTION feature._strict_sh_feature_row_guard(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION feature._strict_sh_feature_row_guard(...) "
-    "TO ktm_feature_schema_owner",
-)
-
-
 _STATE_OWNER_FUNCTION_ACL = (
-    # 428이 존재할 때만 owner간 dependency EXEC를 복구한다. 이전 head ACL은 유지한다.
-    "DO $bounded_capture_acl$ BEGIN IF EXISTS ("
-    "SELECT 1 FROM pg_catalog.pg_proc routine "
-    "JOIN pg_catalog.pg_namespace namespace ON namespace.oid=routine.pronamespace "
-    "WHERE namespace.nspname='feature' "
-    "AND routine.proname='_bounded_provider_curation_input_set') THEN "
-    "GRANT EXECUTE ON FUNCTION feature._heritage_evidence_metadata_bytes(...) "
-    "TO ktm_feature_schema_owner; "
-    "END IF; END $bounded_capture_acl$",
-    "REVOKE ALL ON FUNCTION feature._transport_rest_evidence_shape(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._transport_rest_evidence_inventory(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.read_transport_rest_snapshot_evidence(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.read_transport_rest_snapshot_evidence(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_shape(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._transport_airport_evidence_inventory(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.read_transport_airport_snapshot_evidence(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.read_transport_airport_snapshot_evidence(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._heritage_evidence_metadata_bytes(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._heritage_evidence_string_object(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._heritage_evidence_shape(...) FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._heritage_evidence_inventory(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._heritage_evidence_retire0(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.read_heritage_name_refresh_evidence(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.read_heritage_name_refresh_evidence(...) "
-    "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION feature.upsert_provider_geocode_stamps_ex(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION feature.upsert_provider_geocode_stamps_ex(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.lock_scoped_provider_geocode_stamps(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.lock_scoped_provider_geocode_stamps(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.reobserve_scoped_provider_geocode_stamps(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.reobserve_scoped_provider_geocode_stamps(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.guard_stamp_writer_entry(...) FROM PUBLIC,ktm_feature_runtime",
-    "GRANT EXECUTE ON FUNCTION feature.guard_stamp_writer_entry(...) TO ktm_feature_schema_owner",
-    "REVOKE ALL ON FUNCTION "
-    "feature._validate_scoped_provider_geocode_stamps(...) FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.validate_exclusive_provider_snapshot(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.validate_exclusive_provider_snapshot(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.lock_provider_field_policy_epoch(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.lock_provider_field_policy_epoch(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature.assert_scoped_provider_scalar_target(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature.assert_scoped_provider_scalar_target(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON PROCEDURE feature.record_scoped_provider_field_candidates(...) FROM PUBLIC",
-    "GRANT EXECUTE ON PROCEDURE feature.record_scoped_provider_field_candidates(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON PROCEDURE feature.recompute_provider_field_candidates(...) FROM PUBLIC",
-    "GRANT EXECUTE ON PROCEDURE feature.recompute_provider_field_candidates(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._provider_field_projection_dependency_active(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION feature._provider_field_projection_dependency_active(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON PROCEDURE feature.activate_provider_field_policy(...) "
-    "FROM PUBLIC, ktm_feature_runtime",
-    "GRANT EXECUTE ON PROCEDURE feature.activate_provider_field_policy(...) "
-    "TO ktm_feature_schema_owner",
-    "REVOKE ALL ON FUNCTION ops.scoped_feature_write_membership_digest(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.scoped_feature_write_membership_digest(...) "
     "TO ktm_feature_runtime",
     "REVOKE ALL ON FUNCTION ops.lock_scoped_feature_write_protocol(...) FROM PUBLIC",
     "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) TO ktm_feature_runtime",
@@ -536,26 +420,6 @@ _STATE_OWNER_FUNCTION_ACL = (
     "TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT EXECUTE ON FUNCTION ops.lock_scoped_feature_write_protocol(...) "
     "TO ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
-    # 434 DC-1: 단건·관리 writer의 regime 진입(epoch>0에서만 P EX). 414~418 루틴 소유자와
-    # Python 관리 경로(runtime)가 부른다.
-    "REVOKE ALL ON FUNCTION ops.lock_single_feature_writer_protocol(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.lock_single_feature_writer_protocol(...) "
-    "TO ktm_feature_runtime,ktm_manual_feature_procedure_owner,ktm_feature_request_procedure_owner",
-    "REVOKE ALL ON FUNCTION ops.claim_scoped_feature_write(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.claim_scoped_feature_write(...) TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION ops.append_scoped_feature_write_manifest(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.append_scoped_feature_write_manifest(...) "
-    "TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION ops.seal_scoped_feature_write_manifest(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.seal_scoped_feature_write_manifest(...) TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION ops.begin_scoped_feature_write(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.begin_scoped_feature_write(...) TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION ops.finish_scoped_feature_write(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.finish_scoped_feature_write(...) TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION ops.cancel_scoped_feature_write(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.cancel_scoped_feature_write(...) TO ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION ops.expire_scoped_feature_write_attempt(...) FROM PUBLIC",
-    "GRANT EXECUTE ON FUNCTION ops.expire_scoped_feature_write_attempt(...) TO ktm_feature_runtime",
     "REVOKE ALL ON PROCEDURE feature.record_provider_field_candidates(...) FROM PUBLIC",
     "GRANT EXECUTE ON PROCEDURE feature.record_provider_field_candidates(...) "
     "TO ktm_feature_runtime",
@@ -933,128 +797,14 @@ _CURATION_CANDIDATE_READ_ACL = tuple(
 )
 
 
-_SCALAR_GUARD_INSTALLER_ACL = (
-    "REVOKE ALL ON FUNCTION feature._assert_stamp_projection_guard_inventory(...) "
-    "FROM PUBLIC,ktm_feature_runtime",
-    "REVOKE ALL ON FUNCTION feature._install_provider_field_projection_guards(...) "
-    "FROM PUBLIC, ktm_feature_runtime",
-    "GRANT EXECUTE ON FUNCTION feature._install_provider_field_projection_guards(...) "
-    "TO ktm_feature_state_procedure_owner",
-)
-
-
-# 430 private replay 입력/control. baseline300~429에서는 행/권한 모두 추가하지 않는다.
-# table 존재는 같은 forward TX의 전체430 설치 표시이며 부분 수동 설치는 지원하지 않는다.
-_SNAPSHOT_SCHEMA_OWNER_ACL = (
-    "DO $snapshot_tables$ BEGIN IF to_regclass('ops.provider_snapshot_artifacts') IS NOT NULL THEN "
-    "REVOKE ALL ON TABLE ops.provider_snapshot_artifacts,ops.provider_snapshot_controls,"
-    "ops.provider_snapshot_quota_limits,ops.provider_snapshot_quota_reservations "
-    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor; "
-    "GRANT SELECT,INSERT,DELETE ON TABLE ops.provider_snapshot_artifacts "
-    "TO ktm_curation_command_owner; "
-    "GRANT SELECT,INSERT,UPDATE,DELETE ON TABLE ops.provider_snapshot_controls "
-    "TO ktm_curation_command_owner; "
-    "GRANT SELECT,UPDATE ON TABLE ops.provider_snapshot_quota_limits TO "
-    "ktm_curation_command_owner; "
-    "GRANT SELECT,INSERT,DELETE ON TABLE ops.provider_snapshot_quota_reservations "
-    "TO ktm_curation_command_owner; "
-    "GRANT SELECT ON TABLE ops.feature_write_attempts,ops.feature_write_manifests,"
-    "provider_sync.source_entities,provider_sync.source_links,provider_sync.source_records,"
-    "feature.features,provider_sync.provider_sync_state,ops.integrity_finding_observations "
-    "TO ktm_curation_command_owner; "
-    "GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_sync_state "
-    "TO ktm_curation_command_owner; "
-    "GRANT UPDATE(attempt_id) ON TABLE ops.feature_write_attempts TO ktm_curation_command_owner; "
-    "GRANT SELECT,UPDATE ON TABLE ops.integrity_observation_scopes,ops.integrity_observation_runs "
-    "TO ktm_curation_command_owner; "
-    "END IF; END $snapshot_tables$",
-    "REVOKE ALL ON FUNCTION ops.reject_provider_snapshot_artifact_update(...) "
-    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
+# 430 seal 입력·취소 prefix guard의 private ACL. 스냅샷 경로는 ADR-117로 퇴역했다.
+_SEAL_SCHEMA_OWNER_ACL = (
     "REVOKE ALL ON FUNCTION ops.reject_pipeline_cancellation_prefix(...) "
     "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
     "REVOKE ALL ON FUNCTION feature._member_provider_curation_input_set(...) "
     "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
     "GRANT EXECUTE ON FUNCTION feature._member_provider_curation_input_set(...) "
     "TO ktm_curation_command_owner",
-    "GRANT EXECUTE ON FUNCTION feature._bounded_provider_curation_input_set(...) "
-    "TO ktm_curation_command_owner",
-    "REVOKE ALL ON FUNCTION feature._assert_strict_sh_data_guard_inventory(...) "
-    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION feature._assert_strict_sh_data_guard_inventory(...) "
-    "TO ktm_curation_command_owner,ktm_feature_service",
-    "DO $snapshot_activation$ BEGIN IF "
-    "to_regclass('ops.provider_snapshot_artifacts') IS NOT NULL THEN "
-    "GRANT EXECUTE ON FUNCTION feature._install_strict_sh_data_guards(...) "
-    "TO ktm_feature_state_procedure_owner; END IF; END $snapshot_activation$",
-)
-
-# 432의 새 private helper만 추가한다. frozen430 ACL tuple은 그대로 보존한다.
-_SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL = (
-    "REVOKE ALL ON FUNCTION ops._lock_snapshot_postprocess_topic_revisions(...) "
-    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION ops._lock_snapshot_postprocess_topic_revisions(...) "
-    "TO ktm_curation_command_owner",
-)
-
-
-_SNAPSHOT_STATE_OWNER_DEPENDENCY_ACL = (
-    "DO $snapshot_kernel$ BEGIN IF to_regclass('ops.provider_snapshot_artifacts') IS NOT NULL THEN "
-    "GRANT EXECUTE ON FUNCTION ops._arm_scoped_feature_write_deadline(...),"
-    "ops._lock_scoped_feature_write_scope(...),ops.begin_scoped_feature_write(...),"
-    "ops.cancel_scoped_feature_write(...) TO ktm_curation_command_owner; "
-    "END IF; END $snapshot_kernel$",
-)
-
-_SNAPSHOT_TYPED_FUNCTION_NAMES = (
-    "ops.register_provider_snapshot_artifact",
-    "ops.read_provider_snapshot_for_member",
-    "ops.claim_provider_snapshot_executor",
-    "ops.bind_provider_snapshot_plan",
-    "ops.begin_provider_snapshot_apply",
-    "ops.finish_provider_snapshot_apply",
-    "ops.provider_snapshot_scalar_counter_state",
-    "ops.capture_provider_snapshot_apply_input_set",
-    "ops.reset_expired_provider_snapshot_plan",
-    "ops.begin_provider_snapshot_postprocess",
-    "ops.finish_provider_snapshot_postprocess",
-    "ops.collect_expired_provider_snapshots",
-)
-_SNAPSHOT_COMMAND_OWNER_ACL = tuple(
-    statement
-    for name in _SNAPSHOT_TYPED_FUNCTION_NAMES
-    for statement in (
-        "REVOKE ALL ON FUNCTION " + name + "(...) "
-        "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
-        "GRANT EXECUTE ON FUNCTION " + name + "(...) TO ktm_curation_provider_executor",
-    )
-) + (
-    "REVOKE ALL ON FUNCTION ops._lock_provider_snapshot_executor(...) "
-    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
-    "REVOKE ALL ON FUNCTION ops._provider_snapshot_postprocess_receipt(...) "
-    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
-    "REVOKE ALL ON PROCEDURE ops.seal_provider_snapshot_member(...) "
-    "FROM PUBLIC,ktm_feature_runtime,ktm_feature_service,ktm_curation_provider_executor",
-    "GRANT EXECUTE ON PROCEDURE ops.seal_provider_snapshot_member(...) "
-    "TO ktm_curation_provider_executor",
-)
-
-# 434만 필요한 직접 scope 관측이다. lease/UPDATE/runtime 표 읽기 권한은 추가하지 않는다.
-_SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL = (
-    "DO $snapshot_ready_scope$ BEGIN IF EXISTS ("
-    "SELECT 1 FROM pg_catalog.pg_proc p "
-    "JOIN pg_catalog.pg_namespace n ON n.oid=p.pronamespace "
-    "WHERE n.nspname='ops' AND p.proname='reset_ready_provider_snapshot_plan' "
-    "AND p.prokind='f') THEN "
-    "GRANT SELECT(provider_dataset_id,epoch,owner) ON TABLE ops.feature_write_dataset_scopes "
-    "TO ktm_curation_command_owner; END IF; END $snapshot_ready_scope$",
-)
-
-
-_SNAPSHOT_READY_RESET_COMMAND_OWNER_ACL = (
-    "REVOKE ALL ON FUNCTION ops.reset_ready_provider_snapshot_plan(...) "
-    "FROM PUBLIC, ktm_feature_runtime, ktm_feature_service, ktm_curation_provider_executor",
-    "GRANT EXECUTE ON FUNCTION ops.reset_ready_provider_snapshot_plan(...) "
-    "TO ktm_curation_provider_executor",
 )
 
 
@@ -1077,21 +827,14 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
         + _PROVIDER_CURATION_SEAL_ACL
         + _CURATION_CANDIDATE_READ_ACL
-        + _SCALAR_GUARD_INSTALLER_ACL
-        + _BOUNDED_CAPTURE_SCHEMA_OWNER_ACL
-        + _STRICT_SH_DATA_SCHEMA_OWNER_ACL
-        + _SNAPSHOT_SCHEMA_OWNER_ACL
-        + _SNAPSHOT_TOPIC_LOCK_SCHEMA_OWNER_ACL
-        + _SNAPSHOT_READY_RESET_SCOPE_OWNER_ACL,
+        + _SEAL_SCHEMA_OWNER_ACL,
     ),
     (
         "ktm_feature_state_procedure_owner",
         _STATE_OWNER_FUNCTION_ACL
-        + _STRICT_SH_DATA_STATE_OWNER_ACL
         + _SUBTYPE_READY_FUNCTION_ACL
         + _FEATURE_REQUEST_STATE_OWNER_DEPENDENCY_ACL
-        + _M05_STATE_OWNER_DEPENDENCY_ACL
-        + _SNAPSHOT_STATE_OWNER_DEPENDENCY_ACL,
+        + _M05_STATE_OWNER_DEPENDENCY_ACL,
     ),
     ("ktm_feature_audit_writer", _AUDIT_WRITER_FUNCTION_ACL),
     (
@@ -1100,9 +843,7 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         "ktm_curation_command_owner",
-        _MANUAL_CURATION_WRITER_ACL
-        + _SNAPSHOT_COMMAND_OWNER_ACL
-        + _SNAPSHOT_READY_RESET_COMMAND_OWNER_ACL,
+        _MANUAL_CURATION_WRITER_ACL,
     ),
     ("ktm_feature_request_procedure_owner", _FEATURE_REQUEST_WRITER_ACL),
     ("ktm_manual_provider_dedup_procedure_owner", _M05_WRITER_ACL),
@@ -1152,75 +893,13 @@ _ARGUMENT_TYPES = re.compile(rf"(?:{_ARGUMENT_TYPE}(?:, {_ARGUMENT_TYPE})*)?")
 #: 해석 실패는 생략하지 않는다. head 존재와 baseline 부재는 오라클을 대조하는 lint가
 #: 검증하며, 향후 baseline에 합쳐질 때 이 예외도 제거해야 한다.
 _OPTIONAL_ROUTINES: Mapping[str, str] = {
-    "ops.lock_single_feature_writer_protocol": "434_protocol_entry_narrowing",
-    "ops.reject_provider_snapshot_artifact_update": "430_provider_snapshot_recovery",
     "ops.reject_pipeline_cancellation_prefix": "430_provider_snapshot_recovery",
     "feature._member_provider_curation_input_set": "430_provider_snapshot_recovery",
-    "ops._lock_provider_snapshot_executor": "430_provider_snapshot_recovery",
-    "ops.seal_provider_snapshot_member": "430_provider_snapshot_recovery",
-    "feature._assert_strict_sh_data_guard_inventory": "430_provider_snapshot_recovery",
-    "ops._provider_snapshot_postprocess_receipt": "430_provider_snapshot_recovery",
-    "ops.begin_provider_snapshot_postprocess": "430_provider_snapshot_recovery",
-    "ops.finish_provider_snapshot_postprocess": "430_provider_snapshot_recovery",
-    "ops.collect_expired_provider_snapshots": "430_provider_snapshot_recovery",
-    "ops.register_provider_snapshot_artifact": "430_provider_snapshot_recovery",
-    "ops.read_provider_snapshot_for_member": "430_provider_snapshot_recovery",
-    "ops.claim_provider_snapshot_executor": "430_provider_snapshot_recovery",
-    "ops.bind_provider_snapshot_plan": "430_provider_snapshot_recovery",
-    "ops.begin_provider_snapshot_apply": "430_provider_snapshot_recovery",
-    "ops.finish_provider_snapshot_apply": "430_provider_snapshot_recovery",
-    "ops.provider_snapshot_scalar_counter_state": "430_provider_snapshot_recovery",
-    "ops.capture_provider_snapshot_apply_input_set": "430_provider_snapshot_recovery",
-    "ops.reset_expired_provider_snapshot_plan": "430_provider_snapshot_recovery",
-    "ops.reset_ready_provider_snapshot_plan": "433_snapshot_ready_plan_reset",
-    "ops._arm_scoped_feature_write_deadline": "411_scoped_feature_write_kernel",
-    "ops._lock_scoped_feature_write_scope": "411_scoped_feature_write_kernel",
-    "feature._strict_sh_data_context": "429_strict_sh_data_guards",
-    "feature._strict_sh_data_statement_guard": "429_strict_sh_data_guards",
-    "feature._strict_sh_source_row_guard": "429_strict_sh_data_guards",
-    "feature._strict_sh_feature_row_guard": "429_strict_sh_data_guards",
-    "feature._install_strict_sh_data_guards": "429_strict_sh_data_guards",
-    "feature._bounded_curation_string_object": "428_bounded_curation_capture",
-    "feature._bounded_provider_curation_input_set": "428_bounded_curation_capture",
-    "ops._lock_snapshot_postprocess_topic_revisions": "432_rest_snapshot_atomic",
-    "feature._transport_rest_evidence_shape": "431_transport_rest_reader",
-    "feature._transport_rest_evidence_inventory": "431_transport_rest_reader",
-    "feature.read_transport_rest_snapshot_evidence": "431_transport_rest_reader",
-    "feature._transport_airport_evidence_shape": "427_transport_airport_reader",
-    "feature._transport_airport_evidence_inventory": "427_transport_airport_reader",
-    "feature.read_transport_airport_snapshot_evidence": "427_transport_airport_reader",
     "ops.lock_provider_feature_tracking_protocol": "424_tracking_protocol_prefix",
-    "feature._heritage_evidence_metadata_bytes": "422_heritage_evidence_reader",
-    "feature._heritage_evidence_string_object": "422_heritage_evidence_reader",
-    "feature._heritage_evidence_shape": "422_heritage_evidence_reader",
-    "feature._heritage_evidence_inventory": "422_heritage_evidence_reader",
-    "feature._heritage_evidence_retire0": "422_heritage_evidence_reader",
-    "feature.read_heritage_name_refresh_evidence": "422_heritage_evidence_reader",
-    "feature._assert_stamp_projection_guard_inventory": "421_stamp_writer_boundary",
     "feature.upsert_provider_geocode_stamps_ex": "421_stamp_writer_boundary",
-    "feature.lock_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
-    "feature.reobserve_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
-    "feature.guard_stamp_writer_entry": "421_stamp_writer_boundary",
-    "feature._validate_scoped_provider_geocode_stamps": "421_stamp_writer_boundary",
-    "feature.validate_exclusive_provider_snapshot": "420_exclusive_provider_refresh",
-    "feature.lock_provider_field_policy_epoch": "412_provider_scalar_projection",
-    "feature.assert_scoped_provider_scalar_target": "412_provider_scalar_projection",
-    "feature.record_scoped_provider_field_candidates": "412_provider_scalar_projection",
-    "feature.recompute_provider_field_candidates": "412_provider_scalar_projection",
-    "feature._provider_field_projection_dependency_active": "412_provider_scalar_projection",
-    "feature.activate_provider_field_policy": "412_provider_scalar_projection",
-    "feature._install_provider_field_projection_guards": "412_provider_scalar_projection",
     # baseline400에는 아직 없으며410이 같은 전역 fence 아래 shadow 전용으로 추가한다.
     "feature.record_provider_field_candidates": "410_provider_field_shadow",
-    "ops.scoped_feature_write_membership_digest": "411_scoped_feature_write_kernel",
     "ops.lock_scoped_feature_write_protocol": "411_scoped_feature_write_kernel",
-    "ops.claim_scoped_feature_write": "411_scoped_feature_write_kernel",
-    "ops.append_scoped_feature_write_manifest": "411_scoped_feature_write_kernel",
-    "ops.seal_scoped_feature_write_manifest": "411_scoped_feature_write_kernel",
-    "ops.begin_scoped_feature_write": "411_scoped_feature_write_kernel",
-    "ops.finish_scoped_feature_write": "411_scoped_feature_write_kernel",
-    "ops.cancel_scoped_feature_write": "411_scoped_feature_write_kernel",
-    "ops.expire_scoped_feature_write_attempt": "411_scoped_feature_write_kernel",
 }
 
 #: 인벤토리가 지목하는 루틴 전부. `db.py`의 head 전용 preflight 목록과 달리 이것은

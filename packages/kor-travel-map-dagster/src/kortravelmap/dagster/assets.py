@@ -318,12 +318,6 @@ async def run_feature_place_transport_rest_areas(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """고속도로 휴게소(transport export)를 place Feature로 적재한다."""
-    from .rest_snapshot_runner import run_rest_snapshot_if_supported
-
-    recovered = await run_rest_snapshot_if_supported(context)
-    if recovered is not None:
-        return recovered
-
     records = await _record_list(context, "transport_rest_areas")
     fetched_at = await _fetched_at(context)
     bundles = await _transform_reusing_geo(
@@ -346,7 +340,7 @@ async def run_feature_place_transport_rest_areas(
 @asset(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS
-    | {"transport_rest_areas", "rest_snapshot_runtime", "rest_snapshot_input"},
+    | {"transport_rest_areas"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
     pool=GEO_HEAVY_POOL,
 )
@@ -1090,12 +1084,6 @@ async def run_feature_place_transport_airports(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """국내 운영 공항(transport export)을 place Feature로 적재한다."""
-    from .airport_snapshot_runner import run_airport_snapshot_if_supported
-
-    recovered = await run_airport_snapshot_if_supported(context)
-    if recovered is not None:
-        return recovered
-
     fetched_at = await _fetched_at(context)
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
@@ -1118,7 +1106,7 @@ async def run_feature_place_transport_airports(
 @asset(
     group_name="features_place",
     required_resource_keys=_COMMON_RESOURCE_KEYS
-    | {"transport_airports", "airport_snapshot_runtime"},
+    | {"transport_airports"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
     pool=GEO_HEAVY_POOL,
 )

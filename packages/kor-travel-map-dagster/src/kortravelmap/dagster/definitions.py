@@ -17,7 +17,6 @@ from dagster import (
     Field as DagsterField,
 )
 
-from .airport_snapshot_runtime import load_airport_snapshot_runtime
 from .assets import FEATURE_LOAD_ASSETS
 from .batch_dag import BATCH_DAG_JOBS
 from .feature_operation_completion import FEATURE_OPERATION_COMPLETION_JOBS
@@ -47,7 +46,6 @@ from .resources import (
     offline_upload_store_resource,
     reverse_geocoder_resource,
 )
-from .rest_snapshot_runtime import load_rest_snapshot_runtime
 from .run_heartbeat import RUN_HEARTBEAT_JOBS
 from .schedule_overrides import load_schedule_cron_overrides
 from .schedules import FEATURE_LOAD_JOBS, FEATURE_LOAD_SCHEDULES
@@ -116,31 +114,8 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
 }
 """resource key → 같은 값을 제공하는 ``KorTravelMapSettings`` 속성명."""
 
-@resource(description="이미지 설치본을 검증한 Airport 복구 pin. 기본 비활성.")
-def _airport_snapshot_runtime_resource() -> object:
-    return load_airport_snapshot_runtime()
-
-
-@resource(description="이미지 설치본을 검증한 Rest 복구 pin. 기본 비활성.")
-def _rest_snapshot_runtime_resource() -> object:
-    return load_rest_snapshot_runtime()
-
-
-@resource(description="Rest의 metadata를 보존하는 단일응답. 실제 소비 전에는 HTTP를 열지 않는다.")
-def _rest_snapshot_input_resource() -> object:
-    async def _capture_rest_snapshot_input() -> object:
-        from .provider_fetchers import fetch_transport_rest_area_snapshot
-
-        return await fetch_transport_rest_area_snapshot(KorTravelMapSettings())
-
-    return _capture_rest_snapshot_input
-
-
 DEFAULT_RESOURCE_DEFINITIONS: Final[dict[str, ResourceDefinition]] = {
     "kor_travel_map_client": kor_travel_map_client_resource,
-    "airport_snapshot_runtime": _airport_snapshot_runtime_resource,
-    "rest_snapshot_runtime": _rest_snapshot_runtime_resource,
-    "rest_snapshot_input": _rest_snapshot_input_resource,
     "feature_operation_guard": feature_operation_guard_resource,
     "feature_update_runner": feature_update_runner_resource,
     "offline_upload_store": offline_upload_store_resource,

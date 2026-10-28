@@ -15,7 +15,6 @@ lazy import**한다 — 본 모듈 import만으로 provider 패키지를 hard-re
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import importlib
 import logging
 import pathlib
@@ -28,11 +27,9 @@ from collections.abc import (
     Iterator,
     Mapping,
 )
-from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from functools import partial
 from typing import TYPE_CHECKING, Any, Final, cast
-from zoneinfo import ZoneInfo
 
 import httpx
 from kortravelmap.providers.kor_travel_transport import (
@@ -77,7 +74,6 @@ from .upstream_requests import note_upstream_request
 if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
 
-    from .rest_snapshot_observation import RestExportWindow
 
 _LOGGER = logging.getLogger(__name__)
 """H45 재시도 텔레메트리. ``docker/dagster.yaml``의 ``python_logs``가 이
@@ -111,7 +107,6 @@ __all__ = [
     "fetch_transport_highway_incidents",
     "fetch_transport_rest_area_fuel_prices",
     "fetch_transport_rest_areas",
-    "fetch_transport_rest_area_snapshot",
     "fetch_visitkorea_festival_events",
 ]
 
@@ -505,68 +500,6 @@ async def fetch_transport_rest_areas(
         settings, EXPORT_PATH_REST_AREAS, parse_rest_area, on_collected_at
     ):
         yield area
-
-
-@dataclass(frozen=True)
-class TransportRestExportCapture:
-    """단일 window의 tuple과 EOF metadata를 함께 넘겨 iterator의 관측 유실을 막는다."""
-
-    records: tuple[TransportRestArea, ...]
-    export_window: RestExportWindow
-
-
-async def fetch_transport_rest_area_snapshot(
-    settings: KorTravelMapSettings,
-) -> TransportRestExportCapture:
-    """단일 limit256 응답만 받는다. 다음 페이지/최신 batch/absence retirement 권위는 없다."""
-    from .rest_snapshot_observation import (
-        REST_EXPORT_BODY_LIMIT,
-        RestExportWindow,
-        export_window_value,
-    )
-
-    base_url, headers = _transport_connection(settings)
-    async with asyncio.timeout(settings.kor_travel_transport_timeout_seconds):
-        async with httpx.AsyncClient(
-            base_url=base_url,
-            timeout=transport_http_timeout(settings),
-            headers=headers,
-        ) as client:
-            response = await _transport_get(
-                client,
-                EXPORT_PATH_REST_AREAS,
-                {"limit": 256},
-                budget=_transport_run_budget(),
-                response_byte_limit=REST_EXPORT_BODY_LIMIT,
-            )
-        captured_at = datetime.now(ZoneInfo("Asia/Seoul"))
-        payload = _transport_json(response, EXPORT_PATH_REST_AREAS)
-        # 기존 parser는 nonstring cursor를 None로 바꾼다. 원 envelope를 먼저 검사한다.
-        if type(payload) is not dict or payload.get("next_cursor", object()) is not None:
-            raise TransportExportContractError("rest snapshot requires an explicit null cursor")
-        page = parse_export_page(payload, where=EXPORT_PATH_REST_AREAS)
-        require_current_collection(page.collection, where=EXPORT_PATH_REST_AREAS)
-        if page.has_more is not False or not 1 <= len(page.items) <= 256:
-            raise TransportExportContractError(
-                "rest snapshot requires one complete nonempty window"
-            )
-        records = tuple(parse_rest_area(item) for item in page.items)
-        keys = [record.natural_key for record in records]
-        if any(not key.strip() or key != key.strip() for key in keys) or len(set(keys)) != len(
-            keys
-        ):
-            raise TransportExportContractError(
-                "rest snapshot requires unique canonical natural keys"
-            )
-        window = RestExportWindow(
-            len(records),
-            len(response.content),
-            hashlib.sha256(response.content).hexdigest(),
-            captured_at,
-            page.collection,
-        )
-        export_window_value(window)
-        return TransportRestExportCapture(records, window)
 
 
 async def fetch_transport_rest_area_fuel_prices(
