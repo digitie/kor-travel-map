@@ -1473,7 +1473,9 @@ def test_search_alias_key_output_passes_the_436_alias_check_for_letter_mark_pair
 def test_search_tail_sql_translate_lengths_match_and_trim_first() -> None:
     """tail 분할의 ``translate`` 대상 길이가 공백 집합 크기와 같고, 앞뒤 공백을 먼저 걷는다."""
     sql = feature_repo._search_tail_sql("display_name")
-    assert sql.count("chr(") == 2 * len(feature_repo.SEARCH_WHITESPACE_CODEPOINTS)
+    # 공백 집합이 세 번 나온다: btrim(substr 인자) · btrim(translate 인자) · translate의 from.
+    assert sql.count(feature_repo._SEARCH_WHITESPACE_SQL) == 3
+    assert sql.count("chr(") == 3 * len(feature_repo.SEARCH_WHITESPACE_CODEPOINTS)
     assert f"repeat(' ', {len(feature_repo.SEARCH_WHITESPACE_CODEPOINTS)})" in sql
     assert sql.startswith("substr(btrim(display_name, ")
     assert feature_repo._search_compact_sql(sql) in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
