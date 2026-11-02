@@ -109,13 +109,25 @@ DATASET_FORECAST_ULTRA_SHORT: Final = WeatherStateDataset(
 )
 DATASET_FORECAST_SHORT: Final = WeatherStateDataset(
     name="weather.forecast_short",
-    guard=ShrinkGuard(min_ratio=0.9, baseline_min=100, min_count=1_000),
+    # 하한은 실측으로 정한다(ADR-114 "켜기 전 live 개수와 대조"). 2026-11-02 운영: 단기예보 한 회차
+    # (기상청 격자 300개 상한)의 attempt 218개가 공개된 시점에 위치 273곳(airkorea 126·krforest 90·
+    # krex 39·khoa 11·kma 7), 완결 추정 약 340~375곳이다. 1,000이면 완결된 회차도 "53건 < 1000"처럼
+    # 매번 교체를 거부해 한 번도 적재되지 않았다. 포화된 odroid에서는 한 회차 격자의 1/3 가까이가
+    # artifact 쓰기·증명 실패로 빠지므로 절대 하한은 완결 추정의 약 2/3(250곳)이고, 비율도 같은 몫
+    # (65%)이라 완결 회차(375곳) 뒤의 그런 회차(약 250곳)도 받는다. 소수만 온 깨진 집합(53곳)은
+    # 거부한다.
+    guard=ShrinkGuard(min_ratio=0.65, baseline_min=100, min_count=250),
     max_age=timedelta(hours=12),
     style="short",
 )
 DATASET_FORECAST_MID: Final = WeatherStateDataset(
     name="weather.forecast_mid",
-    guard=ShrinkGuard(min_ratio=0.8, baseline_min=50, min_count=300),
+    # 중기예보는 weather가 중기 지역 코드를 단 target에만 낸다(2026-11-02 운영 21곳:
+    # 서울·인천·수원·춘천·원주·강릉·대전·세종·청주·광주·목포·여수·전주·대구·안동·포항·
+    # 부산·울산·창원·제주·서귀포). 하한 300곳이면 완결된 집합도 "21건 < 300"으로 매번
+    # 거부된다. 절대 하한은 그 2/3(14곳)이다. baseline_min도 그 아래라야 비율 검사(80%)가
+    # 작동한다.
+    guard=ShrinkGuard(min_ratio=0.8, baseline_min=10, min_count=14),
     max_age=timedelta(hours=36),
     style="mid",
 )
