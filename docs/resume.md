@@ -1,7 +1,8 @@
 ## 2026-11-02 — weather_state 단기 하한·W5 상한(운영 실측)
 
-weather export 재개 뒤 prod 실측으로 `weather.forecast_short` 하한을 1,000곳·90%에서 250곳·80%로, W5 상한을
-900초에서 2,700초로 바꿨다(journal 같은 날). **다음 한 작업**: CI 초록 → 머지 → 소유자 pair 회전(Manager #576 timeout env와 함께).
+prod `weather_state_forecast_short`가 "53건 < 하한 1000"으로 교체를 거부했다. 단기 한 회차(격자 300)는 완결돼도 약
+340~375곳(실측 273곳)이라 하한을 250곳·80%로(ADR-114 표). W5는 약 6만 1천 건·페이지당 약 27초라 상한 900→2,700초.
+**다음 한 작업**: CI → 머지 → 소유자 pair 회전(Manager #576 timeout env와 함께).
 
 ## 2026-10-28 — ADR-117 퇴역 PR 진행 중
 
