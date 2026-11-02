@@ -1,3 +1,12 @@
+## 2026-11-02 — weather_state 단기예보 하한·W5 상한을 운영 실측에 맞춤
+
+weather export 재개(소유자) 뒤 n150 prod에서 `weather_state_forecast_short`가 "새 집합 53건이 절대 하한 1000건
+미만"으로 매번 교체를 거부했다. 단기예보 한 회차(기상청 격자 300개 상한)는 완결돼도 약 340~375곳이다(공개 도중
+실측 273곳: airkorea 126·krforest 90·krex 39·khoa 11·kma 7). 그래서 하한 1,000곳·90%를 250곳·80%(초단기와 같은
+비율)로 내렸다(ADR-114 표 갱신). `weather_state_daily_summaries` 상한은 900→2,700초로 올렸다. W5 약 6만 1천 건이
+2,000건 페이지 약 31개이고 포화된 odroid에서 페이지당 약 27초라, 재시도까지 900초 상한을 넘겼다. lock TTL(상한+660초)은
+매시 발화 간격 안이다. read timeout 60초 문제(외부 예보 한 페이지 약 100초)는 Manager가 env로 넘긴다(Manager #576).
+
 ## 2026-10-28 — run-status sensor tick 실패로 cursor 엿새 정지(#1434)
 
 prod code server가 30초마다 `operation_has_no_enabled_memberships`(419로 끈 transport run 3건)를 찍었다. 원인은

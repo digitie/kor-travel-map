@@ -136,6 +136,25 @@ def test_lock_ttl_follows_the_run_ceiling() -> None:
         assert weather_lock_ttl_seconds(spec) == spec.max_runtime_seconds + 660
 
 
+def test_hourly_weather_jobs_release_their_lock_before_the_next_tick() -> None:
+    # 매시 job의 lock TTL(상한 + 취소 유예)이 발화 간격 안에 들어가야 멈춘 run이 다음 tick을 막지 않는다.
+    for spec in WEATHER_STATE_SPECS:
+        minute, hour, *_ = spec.cron_schedule.split()
+        if hour == "*" and "," not in minute and "/" not in minute:
+            assert weather_lock_ttl_seconds(spec) < 3_600, spec.job_name
+
+
+def test_short_forecast_floor_fits_a_measured_live_cycle() -> None:
+    # 2026-11-02 운영 실측: 단기예보 한 회차의 위치는 완결 추정 약 340~375곳(공개 도중 273곳)이다.
+    # 하한이 그보다 크면 완결된 회차도 영영 교체를 거부한다(그날 "53건 < 1000"). 깨진 집합(53곳)은
+    # 계속 거부해야 하고, 비율은 같은 격자 기반인 초단기와 같다.
+    from kortravelmap.providers.kor_travel_weather_state import DATASET_FORECAST_ULTRA_SHORT
+
+    guard = DATASET_FORECAST_SHORT.guard
+    assert 53 < guard.min_count <= 273
+    assert guard.min_ratio == DATASET_FORECAST_ULTRA_SHORT.guard.min_ratio
+
+
 # -- fetcher -----------------------------------------------------------------------------
 
 
