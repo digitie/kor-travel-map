@@ -137,7 +137,8 @@ def test_lock_ttl_follows_the_run_ceiling() -> None:
 
 
 def test_hourly_weather_jobs_release_their_lock_before_the_next_tick() -> None:
-    # 매시 job의 lock TTL(상한 + 취소 유예)이 발화 간격 안에 들어가야 멈춘 run이 다음 tick을 막지 않는다.
+    # 매시 job의 lock TTL(상한 + 취소 유예)이 발화 간격 안에 들어가야
+    # 멈춘 run이 다음 tick을 막지 않는다.
     for spec in WEATHER_STATE_SPECS:
         minute, hour, *_ = spec.cron_schedule.split()
         if hour == "*" and "," not in minute and "/" not in minute:
@@ -153,6 +154,14 @@ def test_short_forecast_floor_fits_a_measured_live_cycle() -> None:
     guard = DATASET_FORECAST_SHORT.guard
     assert 53 < guard.min_count <= 273
     assert guard.min_ratio == DATASET_FORECAST_ULTRA_SHORT.guard.min_ratio
+
+
+def test_mid_forecast_floor_fits_the_configured_mid_targets() -> None:
+    # 중기예보는 weather의 중기 지역 코드 target(운영 21곳: 서울…서귀포)에만 있다. 하한 300곳이면
+    # 완결된 집합도 "21건 < 300"으로 영영 거부된다(2026-11-02 운영).
+    from kortravelmap.providers.kor_travel_weather_state import DATASET_FORECAST_MID
+
+    assert 0 < DATASET_FORECAST_MID.guard.min_count <= 21
 
 
 # -- fetcher -----------------------------------------------------------------------------

@@ -121,7 +121,12 @@ DATASET_FORECAST_SHORT: Final = WeatherStateDataset(
 )
 DATASET_FORECAST_MID: Final = WeatherStateDataset(
     name="weather.forecast_mid",
-    guard=ShrinkGuard(min_ratio=0.8, baseline_min=50, min_count=300),
+    # 중기예보는 weather가 중기 지역 코드를 단 target에만 낸다(2026-11-02 운영 21곳:
+    # 서울·인천·수원·춘천·원주·강릉·대전·세종·청주·광주·목포·여수·전주·대구·안동·포항·
+    # 부산·울산·창원·제주·서귀포). 하한 300곳이면 완결된 집합도 "21건 < 300"으로 매번
+    # 거부된다. 절대 하한은 그 2/3(14곳)이다. baseline_min도 그 아래라야 비율 검사(80%)가
+    # 작동한다.
+    guard=ShrinkGuard(min_ratio=0.8, baseline_min=10, min_count=14),
     max_age=timedelta(hours=36),
     style="mid",
 )
