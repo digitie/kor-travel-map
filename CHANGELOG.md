@@ -23,7 +23,7 @@
 - **ADDED (DB, alembic 436)**: `feature.feature_search_aliases(alias PK, canonical_name)` — 정규화 검색어 → Feature 이름.
   첫 별칭 4개(고씨동굴·영월고씨동굴 → 영월 고씨굴, 하회마을·하회민속마을 → 안동하회마을). 런타임 SELECT만.
 - **CHANGED (API)**: 공개 feature read는 주차장(`06.01`) 이름에 "주차"가 없으면 "<이름> 주차장"으로 보인다
-  ("도산서원" → "도산서원 주차장"). 저장 값·검색 대상·ETag·JSON schema는 그대로다.
+  ("도산서원" → "도산서원 주차장"). 저장 값·ETag·JSON schema는 그대로다(검색의 포함·일치 비교는 보이는 이름으로 한다).
 
 ### run-status sensor tick 실패로 cursor가 멈추던 문제 (2026-10-28)
 

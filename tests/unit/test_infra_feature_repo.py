@@ -1456,8 +1456,11 @@ def test_search_whitespace_set_is_python_isspace_and_matches_migration_436() -> 
         assert feature_repo.search_alias_key(f"가{chr(codepoint)}나") == "가나"
 
 
-def test_search_alias_key_output_passes_the_436_alias_check_for_letter_mark_pairs() -> None:
-    """436 별칭 CHECK(공백 없음·소문자·NFC)를 ``search_alias_key``의 모든 출력이 통과한다."""
+def test_search_alias_key_output_is_lower_nfc_space_free_for_letter_marks() -> None:
+    """``search_alias_key`` 출력은 436 별칭 CHECK가 요구하는 모양(공백 없음·소문자·NFC)이다.
+
+    Python 쪽 성질만 본다 — DB CHECK 자체는 통합 테스트(별칭 거부 케이스)가 본다.
+    """
     import unicodedata
 
     marks = [chr(c) for c in range(0x300, 0x370)]
@@ -1506,6 +1509,10 @@ def test_feature_search_score_sql_keeps_bbox_out_of_predicates() -> None:
     name_candidates = sql.split("WITH name_candidates AS MATERIALIZED (", 1)[1]
     name_candidates = name_candidates.split("\nfiltered AS (", 1)[0]
     assert "ST_MakeEnvelope" not in name_candidates
+    # bbox 식은 정확히 한 번, search_rank 정렬식 안에만 있다(filtered·최종 WHERE에 술어로 없다).
+    assert sql.count("ST_MakeEnvelope") == 1
+    rank_block = sql.split("\ncandidates AS (", 1)[1].split(") AS search_rank", 1)[0]
+    assert "ST_MakeEnvelope" in rank_block
     assert "ST_Transform" not in sql
     assert "ORDER BY search_rank ASC, score DESC, feature_id ASC" in sql
     assert "(search_rank, -score, feature_id) >" in sql

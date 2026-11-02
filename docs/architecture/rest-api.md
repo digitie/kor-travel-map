@@ -258,8 +258,8 @@ Python `str.isspace()` 공백 집합 제거 → 소문자 → 다시 NFC다(SQL�
 
 공개 feature read(`/v1/features`·`in-bounds`·`search`·`nearby`·`nearby/by-target`·
 `{feature_id}`·`contained-features`, `/v1/features/batch` trip_card)는 주차장(`06.01`) Feature의
-이름에 "주차"가 없으면 "<이름> 주차장"으로 보여 준다. 저장 값·검색 대상·ETag(`row_revision`)·
-JSON schema는 그대로다 — 표시 규칙일 뿐이라 배포 직후 ETag/`known_row_revision`으로 캐시된
+이름에 "주차"가 없으면 "<이름> 주차장"으로 보여 준다(검색의 포함·일치 비교도 이 이름을 쓴다).
+저장 값·ETag(`row_revision`)·JSON schema는 그대로다 — 표시 규칙일 뿐이라 배포 직후 ETag/`known_row_revision`으로 캐시된
 응답(304·`unchanged`)은 그 Feature의 다음 revision까지 옛 이름을 유지한다.
 
 ### 1.7 idempotency · rate limit (T-214g)

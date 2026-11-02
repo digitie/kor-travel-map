@@ -68,9 +68,9 @@ def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> N
         PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL,
     ):
         assert group(rest) == parking, rest
-    # 접두 예외 표의 키는 카탈로그 코드의 교통 접두(4·6자리)다.
+    # 접두 예외 표의 키는 카탈로그 코드의 교통 접두(4·6·8자리 — SQL 빌더가 받는 길이)다.
     for prefix in PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES:
-        assert len(prefix) in (4, 6)
+        assert len(prefix) in (4, 6, 8)
         assert prefix.ljust(8, "0") in PLACE_CATEGORY_CODES
         assert prefix.startswith(PlaceCategoryTier1Code.TRANSPORT.value)
     # 카탈로그 밖 코드(notice의 99000000)와 None은 맨 뒤 그룹이다.

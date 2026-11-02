@@ -134,9 +134,9 @@ class _PublicDisplayName(BaseModel):
 
     주차장 Feature는 공공 주차장 데이터셋이 관광지 이름만 싣는 일이 많다("도산서원").
     (공개 큐레이션 응답의 ``feature_name``은 이 규칙을 쓰지 않아 저장 이름 그대로다.)
-    ``public_feature_display_name``이 그때 "도산서원 주차장"으로 보이게 한다. 저장 값·검색
-    대상·ETag(``row_revision``)는 그대로다 — 응답 직렬화 직전의 표시 규칙일 뿐이고 JSON
-    schema(OpenAPI)도 바뀌지 않는다.
+    ``public_feature_display_name``이 그때 "도산서원 주차장"으로 보이게 한다. 저장 값·
+    ETag(``row_revision``)는 그대로다 — 응답 직렬화 직전의 표시 규칙일 뿐이고 JSON
+    schema(OpenAPI)도 바뀌지 않는다(검색 SQL의 포함·일치 비교는 같은 규칙의 SQL 짝을 쓴다).
     """
 
     @model_validator(mode="before")
