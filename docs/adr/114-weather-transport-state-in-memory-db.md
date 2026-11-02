@@ -356,7 +356,8 @@ header `X-Admin-Token`(값 = weather `KOR_TRAVEL_WEATHER_ADMIN_TOKEN`)이고 실
 응답은 `{items, meta}`이고 `meta`는 `generated_at`·`source_collected_at`(null 가능)·`source_status`(`ok|stale|failed`)·
 `item_count`(페이지 항목 수)·`snapshot_id`·`next_cursor`·`has_more`·`next_since`다. 페이지는 `limit` ≤ 5,000(기본 500)과
 본문 4 MiB 중 먼저 닿는 쪽까지이고, cursor는 서명된 불투명 값(TTL 15분)이다. 오류: 503 = 완결된 성공 export 없음
-(`EXPORT_NOT_READY` — 빈 정상 집합이 아니다), 410 = snapshot 만료(첫 페이지부터 다시), 422 = cursor 위조·도중 필터 변경.
+(`EXPORT_NOT_READY` — 빈 정상 집합이 아니다) 또는 읽기 경합(`EXPORT_TEMPORARILY_UNAVAILABLE` + `Retry-After`, 같은 요청을
+다시), 410 = snapshot 만료(첫 페이지부터 다시), 422 = cursor 위조·도중 필터 변경.
 gzip·약한 ETag/304를 지원한다(Map은 첫 페이지에만 `If-None-Match`를 보낸다 — 아래 W3).
 
 | export | 항목 하나 | 주요 필드 |
@@ -428,7 +429,13 @@ D3 그대로(잠금 → 원천 끝까지 → 거부 검사 → build TTL로 쓰�
 - 페이지 내내 `snapshot_id`가 같아야 한다(다르면 계약 위반). **410**(snapshot 만료)이나 **둘째 페이지 이후의 422**(순회
   도중 weather가 재배포돼 provider 선택·cursor 서명이 바뀐 경우)면 첫 페이지부터 **한 번** 다시 받는다 — 두 번째도
   410이면 재시도 가능한 실패, 두 번째도 422면 재시도 없는 계약 위반이다. 첫 페이지 422는 질의 계약 위반(재시도 없음).
-  503은 재시도 가능한 실패(`weather_not_ready` — weather의 다음 성공 승격에서 풀린다), 401·404·그 밖의 4xx·JSON 아님·
+  503은 먼저 **그 페이지만** 같은 cursor로 다시 묻는다(첫 요청 포함 4번, 5·10·20초 간격, `Retry-After`가 더 길면 그것).
+  재시도는 대기 + 이 순회의 가장 긴 요청이 run 상한(run의 `dagster/max_runtime` − 60초, run 시작부터) 안일 때만 시작하고,
+  한 순회의 대기 합은 60초, 재시도마다 run 재시도 예산(HTTP 층과 공유)을 쓴다. 남은 페이지 수는 미리 모르므로 이것이 상한을
+  넘지 않는다는 보장은 아니고 넘길 재시도를 줄이는 것이다. 60초를 넘는 `Retry-After`는 페이지 재시도 대신 step 재시도(30초
+  뒤)에 맡긴다. 대상 code는 weather의 `EXPORT_TEMPORARILY_UNAVAILABLE`(읽기 경합)·이전 weather의 `EXPORT_NOT_READY`(경합 code를
+  내는 weather 배포 뒤 뺀다)·code 없음(프록시)이다(2026-11-03).
+  소진하면 재시도 가능한 실패(`weather_not_ready` — weather의 다음 성공 승격에서 풀린다), 401·404·그 밖의 4xx·JSON 아님·
   계약 위반·조건 없는 304는 step 재시도를 끄는 실패다(401 = 토큰, 404 = W1~W5가 없는 weather 버전). 429와 503을 뺀
   5xx(500 포함)·연결 오류는 HTTP 층에서 유한 재시도하고, 다 쓰면 step 재시도 대상이다(1단계 transport fetcher와 같은
   예산·계수 규약).

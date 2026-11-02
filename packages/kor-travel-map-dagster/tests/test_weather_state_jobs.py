@@ -6,10 +6,12 @@
 
 from __future__ import annotations
 
+import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
 from typing import Any, cast
 
 import httpx
@@ -68,8 +70,16 @@ def _settings(**overrides: Any) -> KorTravelMapSettings:
 
 
 @pytest.fixture(autouse=True)
-def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+def page_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """HTTP 층 재시도 간격을 0으로, 503 페이지 재시도 대기는 기록만 한다(기록을 돌려준다)."""
     monkeypatch.setattr(weather_state, "_WEATHER_RETRY_BASE_DELAY_SECONDS", 0.0)
+    slept: list[float] = []
+
+    async def _record(delay: float) -> None:
+        slept.append(delay)
+
+    monkeypatch.setattr(weather_state, "_page_retry_sleep", _record)
+    return slept
 
 
 _REAL_ASYNC_CLIENT = httpx.AsyncClient
@@ -292,7 +302,6 @@ async def test_expired_snapshot_twice_is_retryable(monkeypatch: pytest.MonkeyPat
     [
         (401, WeatherExportUnauthorized, False),
         (404, WeatherExportMissing, False),
-        (503, WeatherExportNotReady, True),
         (422, WeatherExportContractError, False),
         (400, WeatherExportFailure, False),
     ],
@@ -319,6 +328,207 @@ async def test_gateway_errors_are_retried_and_counted(
     assert fetch.rows == []
     assert len(seen) == 2
     assert counted == 2
+
+
+# -- 503 페이지 재시도 ----------------------------------------------------------------------
+
+_BUSY: dict[str, Any] = {"code": "EXPORT_TEMPORARILY_UNAVAILABLE"}
+
+
+def _second_page_fails(
+    calls: list[str | None], failures: list[httpx.Response]
+) -> Callable[[httpx.Request], httpx.Response]:
+    """첫 페이지는 성공, 둘째 페이지(c2)는 ``failures``를 차례로 낸 뒤 성공한다."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        calls.append(cursor)
+        if cursor is None:
+            return httpx.Response(
+                200,
+                json={"items": [_location("a")], "meta": _meta(1, has_more=True, next_cursor="c2")},
+            )
+        if failures:
+            return failures.pop(0)
+        return httpx.Response(200, json={"items": [_location("b")], "meta": _meta(1)})
+
+    return handler
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"json": _BUSY},
+        {"json": {"code": "EXPORT_NOT_READY"}},  # 읽기 경합을 이 이름으로 내던 이전 weather
+        {"text": "<html>503 Service Unavailable</html>"},  # code 없는 앞단 프록시
+    ],
+    ids=["temporarily_unavailable", "old_not_ready", "proxy"],
+)
+async def test_a_503_retries_only_that_page_with_its_cursor_after_retry_after(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float], body: dict[str, Any]
+) -> None:
+    calls: list[str | None] = []
+    failure = httpx.Response(503, headers={"retry-after": "7"}, **body)
+    _install(monkeypatch, _second_page_fails(calls, [failure]))
+    with counting_upstream_requests():
+        fetch = await fetch_weather_locations(_settings())
+        counted = observed_upstream_requests()
+    assert calls == [None, "c2", "c2"]  # 순회를 처음부터 다시 하지 않는다
+    assert [row.location_id for row in fetch.rows] == ["a", "b"]
+    assert counted == 3  # 재시도도 요청이다
+    assert page_sleeps == [7.0]  # 기준 5초보다 긴 Retry-After를 따른다
+
+
+@pytest.mark.parametrize(("deadline", "retried"), [(100.0, True), (90.0, False)])
+async def test_a_page_retry_starts_only_if_wait_plus_the_slowest_request_fits(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float], deadline: float, retried: bool
+) -> None:
+    # 첫 페이지가 40초 걸렸다. 45초에 503(Retry-After 7)이면 45 + 7 + 40 = 92초가 deadline 안이어야
+    # 다시 묻는다 — 운영의 op는 언제나 유한 deadline으로 돈다.
+    now = [0.0]
+    monkeypatch.setattr(
+        weather_state, "time", SimpleNamespace(monotonic=lambda: now[0], time=time.time)
+    )
+    calls: list[str | None] = []
+    busy = httpx.Response(503, json=_BUSY, headers={"retry-after": "7"})
+    inner = _second_page_fails(calls, [busy])
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        now[0] += 40.0 if request.url.params.get("cursor") is None else 5.0
+        return inner(request)
+
+    _install(monkeypatch, slow)
+    with weather_state._paging_deadline(deadline):
+        if retried:
+            fetch = await fetch_weather_locations(_settings())
+            assert [row.location_id for row in fetch.rows] == ["a", "b"]
+        else:
+            with pytest.raises(WeatherExportNotReady):
+                await fetch_weather_locations(_settings())
+    assert page_sleeps == ([7.0] if retried else [])
+
+
+async def test_page_503_retries_are_bounded_and_stay_step_retryable(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
+) -> None:
+    seen = _install(
+        monkeypatch,
+        lambda _request: httpx.Response(503, json=_BUSY, headers={"retry-after": "5"}),
+    )
+    with pytest.raises(WeatherExportNotReady) as excinfo:
+        await fetch_weather_current(_settings())
+    assert excinfo.value.retryable is True  # 소진하면 step 재시도에 맡긴다
+    assert len(seen) == 4
+    assert page_sleeps == [5.0, 10.0, 20.0]
+
+
+async def test_page_retries_share_one_sleep_cap_per_walk(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
+) -> None:
+    # 페이지마다 따로 맞는 재시도가 쌓여 run 상한을 넘지 않게 한 순회의 대기 합을 60초로 묶는다.
+    seen = _install(
+        monkeypatch,
+        lambda _request: httpx.Response(503, json=_BUSY, headers={"retry-after": "25"}),
+    )
+    with pytest.raises(WeatherExportNotReady):
+        await fetch_weather_current(_settings())
+    assert page_sleeps == [25.0, 25.0]
+    assert len(seen) == 3
+
+
+async def test_page_retries_spend_the_run_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
+) -> None:
+    from kortravelmap.dagster.upstream_retry import RetryBudget, sharing_run_retry_budget
+
+    seen = _install(
+        monkeypatch,
+        lambda _request: httpx.Response(503, json=_BUSY, headers={"retry-after": "5"}),
+    )
+    with sharing_run_retry_budget(RetryBudget(limit=1)) as budget:
+        with pytest.raises(WeatherExportNotReady):
+            await fetch_weather_current(_settings())
+        assert budget.used == 1
+    assert len(seen) == 2  # 상관 장애면 run 예산이 먼저 끊는다
+    assert page_sleeps == [5.0]
+
+
+@pytest.mark.parametrize(
+    ("body", "retry_after", "deadline_in"),
+    [
+        (_BUSY, "5", 3.0),  # 대기만으로 run 상한(꼬리 제외)을 넘긴다
+        (_BUSY, "3600", None),  # 한 번 대기 상한보다 긴 Retry-After — 앞당겨 묻지 않는다
+        (_BUSY, "9" * 40, None),  # 아주 긴 delta-seconds도 "아주 오래"다(날짜 해석으로 새지 않는다)
+        ({"code": "EXPORT_GONE"}, "5", None),  # 모르는 명시 code는 페이지 재시도하지 않는다
+        ({"code": "not a code"}, "5", None),  # 모양이 틀린 명시 code도 프록시 503이 아니다
+    ],
+    ids=["past_run_deadline", "retry_after_too_long", "huge_delta", "unknown_code", "bad_code"],
+)
+async def test_page_503_is_not_retried_past_the_run_deadline_or_early(
+    monkeypatch: pytest.MonkeyPatch,
+    page_sleeps: list[float],
+    body: dict[str, Any],
+    retry_after: str,
+    deadline_in: float | None,
+) -> None:
+    seen = _install(
+        monkeypatch,
+        lambda _request: httpx.Response(503, json=body, headers={"retry-after": retry_after}),
+    )
+    deadline = None if deadline_in is None else time.monotonic() + deadline_in
+    with weather_state._paging_deadline(deadline), pytest.raises(WeatherExportNotReady):
+        await fetch_weather_current(_settings())
+    assert len(seen) == 1
+    assert page_sleeps == []
+
+
+async def test_load_hands_its_run_deadline_to_page_retries(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
+) -> None:
+    seen = _install(
+        monkeypatch,
+        lambda _request: httpx.Response(503, json=_BUSY, headers={"retry-after": "5"}),
+    )
+    with pytest.raises(WeatherExportNotReady):
+        await load_weather_state(
+            WEATHER_STATE_SPECS[0],
+            settings=_settings(),
+            run_id=None,
+            allow_shrink=False,
+            store=cast(ValkeyStateStore, _FakeStore()),
+            deadline=time.monotonic(),
+        )
+    assert len(seen) == 1
+    assert page_sleeps == []
+
+
+def test_run_deadline_counts_from_the_run_start_and_keeps_a_tail() -> None:
+    # run monitor는 run 시작부터 센다. step 재시도가 쓴 100초도 남은 시간에서 빠진다.
+    spec = WEATHER_STATE_SPECS[1]
+    started = time.time() - 100
+
+    def record(run_id: str) -> Any:
+        assert run_id == "run-x"
+        return SimpleNamespace(start_time=started)
+
+    context = SimpleNamespace(
+        instance=SimpleNamespace(get_run_record_by_id=record),
+        run_id="run-x",
+        run=SimpleNamespace(tags={"dagster/max_runtime": "1000"}),  # run의 실제 tag가 우선
+    )
+    remaining = weather_state._run_deadline(cast(Any, context), spec) - time.monotonic()
+    assert 1000 - 165 < remaining < 1000 - 159.99
+
+    def unavailable(_run_id: str) -> Any:
+        raise RuntimeError("instance 조회 실패")
+
+    unknown = SimpleNamespace(
+        instance=SimpleNamespace(get_run_record_by_id=unavailable),
+        run_id="run-y",
+        run=SimpleNamespace(tags={}),
+    )
+    remaining = weather_state._run_deadline(cast(Any, unknown), spec) - time.monotonic()
+    assert spec.max_runtime_seconds - 65 < remaining < spec.max_runtime_seconds - 59.99
 
 
 @pytest.mark.parametrize(
