@@ -1,0 +1,104 @@
+"""분류 체계에서 유도한 검색 순위 그룹·공개 표시 이름 규칙.
+
+대상: ``kortravelmap.category._presentation``.
+"""
+
+from __future__ import annotations
+
+import pytest
+
+from kortravelmap.category import (
+    PLACE_CATEGORY_CODES,
+    PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+    PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+    PLACE_CATEGORY_TIER2_NAMES_BY_TIER1,
+    PlaceCategoryCode,
+    PlaceCategoryTier1Code,
+    category_search_group,
+    get_category,
+    is_parking_category_code,
+    is_tier1_only_category_code,
+    public_feature_display_name,
+)
+
+pytestmark = pytest.mark.unit
+
+
+def test_every_tier1_code_has_a_search_group() -> None:
+    assert set(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) == {
+        code.value for code in PlaceCategoryTier1Code
+    }
+    highest = max(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.values())
+    assert highest == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
+
+
+def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> None:
+    """소유자 결정(2026-11-02): 관광(국가유산·문화 포함) > 숙박 > 식음 > 주차·편의."""
+
+    heritage = category_search_group(PlaceCategoryCode.TOURISM_HERITAGE_HISTORIC_SITE.value)
+    culture = category_search_group(PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value)
+    lodging = category_search_group(PlaceCategoryCode.LODGING_HOTEL.value)
+    spa = category_search_group(PlaceCategoryCode.HOT_SPRING_SPA_HOT_SPRING.value)
+    food = category_search_group(PlaceCategoryCode.FOOD_RESTAURANT_KOREAN.value)
+    parking = category_search_group(PlaceCategoryCode.TRANSPORT_PARKING.value)
+    convenience = category_search_group(PlaceCategoryCode.CONVENIENCE_STORE.value)
+    assert heritage == culture < lodging == spa < food < parking == convenience
+    # 카탈로그 밖 코드(notice의 99000000)와 None은 맨 뒤 그룹이다.
+    assert category_search_group("99000000") == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
+    assert category_search_group(None) == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
+
+
+def test_tier1_only_codes_match_catalog_depth_one() -> None:
+    """``XX000000`` 판정이 카탈로그의 depth 1과 정확히 같다(분류 체계가 정본)."""
+
+    for code in PLACE_CATEGORY_CODES:
+        expected = get_category(code).depth == 1
+        assert is_tier1_only_category_code(code) is expected, code
+    assert not is_tier1_only_category_code(None)
+    assert not is_tier1_only_category_code("01")
+
+
+def test_parking_codes_are_the_parking_subtree() -> None:
+    parking_codes = {
+        code for code in PLACE_CATEGORY_CODES if is_parking_category_code(code)
+    }
+    assert PlaceCategoryCode.TRANSPORT_PARKING.value in parking_codes
+    for code in parking_codes:
+        category = get_category(code)
+        assert category.tier1_code == "06"
+        assert category.tier2_name == PLACE_CATEGORY_TIER2_NAMES_BY_TIER1["06"]["01"]
+    assert not is_parking_category_code(PlaceCategoryCode.TRANSPORT_FUEL.value)
+    assert not is_parking_category_code(None)
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("도산서원", "도산서원 주차장"),
+        ("고씨굴", "고씨굴 주차장"),
+        ("고씨굴(강변)", "고씨굴(강변) 주차장"),
+        ("하회마을관광지", "하회마을관광지 주차장"),
+        (" 와부 제5공영 ", "와부 제5공영 주차장"),
+        # 이미 주차 시설임을 말하는 이름은 그대로다.
+        ("소수서원 주차장", "소수서원 주차장"),
+        ("부석사 공영주차장", "부석사 공영주차장"),
+        ("시청 주차타워", "시청 주차타워"),
+        ("", ""),
+    ],
+)
+def test_parking_display_name_appends_label_when_missing(name: str, expected: str) -> None:
+    assert public_feature_display_name(name, PlaceCategoryCode.TRANSPORT_PARKING.value) == expected
+
+
+def test_display_name_is_idempotent_and_leaves_other_categories_alone() -> None:
+    parking = PlaceCategoryCode.TRANSPORT_PARKING.value
+    once = public_feature_display_name("도산서원", parking)
+    assert public_feature_display_name(once, parking) == once
+    for code in (
+        PlaceCategoryCode.TOURISM_HERITAGE_HISTORIC_SITE.value,
+        PlaceCategoryCode.TRANSPORT_FUEL.value,
+        PlaceCategoryCode.FOOD_RESTAURANT_KOREAN.value,
+        "99000000",
+        None,
+    ):
+        assert public_feature_display_name("도산서원", code) == "도산서원"

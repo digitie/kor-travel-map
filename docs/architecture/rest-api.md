@@ -210,16 +210,18 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   `include_total=false`일 때 COUNT SQL을 만들거나 실행하지 않고 page-size+1 keyset 조회 한 번만
   수행한다. `true`일 때만 같은 정규화 filter의 별도 COUNT를 실행한다.
 
-#### 1.6.1 feature search cursor v1
+#### 1.6.1 feature search cursor v2
 
 - cursor는 `base64url(canonical_payload).base64url(hmac_sha256)`의 opaque token이다. payload는
-  `v=1`, cursor kind, query fingerprint, 마지막 keyset(`score`+`feature_id` 또는
-  `feature_id`)만 가진다. 서명은 payload 원문과 cursor kind domain separator를 함께 덮고
-  `hmac.compare_digest`로 검증한다. 원 검색어·secret은 cursor에 넣지 않는다.
+  `v=2`, cursor kind, query fingerprint, 마지막 keyset(`rank`+`score`+`feature_id` 또는
+  `feature_id`)만 가진다. v1(`score`+`feature_id`)은 migration 436과 함께 퇴역했다 — 배포 전에
+  받은 v1 cursor는 `FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`다(첫 페이지부터 다시).
+  서명은 payload 원문과 cursor kind domain separator를 함께 덮고 `hmac.compare_digest`로
+  검증한다. 원 검색어·secret은 cursor에 넣지 않는다.
 - query fingerprint는 repository가 실제 SQL에 사용하는 정규화 계약을 canonical JSON으로 만든 뒤
   SHA-256한다. `q`는 trim 후 빈 문자열을 `null`, bbox는 유한한 WGS84 float 4개, `kind`/`category`는
   중복 제거·사전순 정렬(빈 배열은 `null`)한다. 여기에 q 유무로 결정되는 sort
-  (`score DESC, feature_id ASC` 또는 `feature_id ASC`), `page_size`, `include_total`을 포함한다.
+  (`rank ASC, score DESC, feature_id ASC` 또는 `feature_id ASC`), `page_size`, `include_total`을 포함한다.
   따라서 필터 순서만 바꾼 요청은 같은 계약이고, 결과집합·정렬·page metadata를 바꾸는 요청은
   다른 계약이다.
 - 디코드 순서는 형식/길이 → HMAC → version/kind → fingerprint → keyset type·finite score다.
@@ -232,6 +234,26 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
   켜져 있으면 공백 없는 최소 32자 secret이 없을 때 기동을 거부한다. `local-dev` 미설정 시에만
   process-local 난수 key를 허용하며 재시작·다중 worker 사이 cursor 지속성을 보장하지 않는다.
   운영 rotation은 새 key 배포와 동시에 기존 cursor를 의도적으로 무효화하는 clean cut이다.
+
+#### 1.6.2 feature search 순위·별칭·표시 이름 (migration 436)
+
+`q`가 있으면 후보는 `name % q`(pg_trgm, 문턱 0.2)와 **별칭이 가리키는 이름**
+(`feature.feature_search_aliases`, 검색어를 NFC·공백 제거·소문자로 정규화한 키)이고, 정렬은
+`rank ASC, score DESC, feature_id ASC`다. `rank`는 큰 자리부터 다음 순서로 갈린다.
+
+1. 일치 단계 — 별칭이 가리키는 이름 → 이름이 검색어를 품음(공백 무시) → 유사도만.
+2. bbox — `q`와 함께 온 bbox는 **필터가 아니라 가중**이다. bbox 안이 먼저이고 밖도 결과에
+   남는다(`include_total`도 bbox와 무관). `q` 없이 bbox만 오면 종전처럼 필터다.
+3. 분류 그룹 — 관광(국가유산·문화시설 포함) → 숙박·온천 → 식음 → 그 밖(편의·교통·의료·미분류).
+   Tier 1 표(`kortravelmap.category.PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1`)에서 유도한다.
+4. 이름 일치 — 이름이 검색어와 같거나, 첫 낱말(지역명, "안동 도산서원")을 뗀 나머지가 같으면 먼저.
+5. 분류 구체성 — Tier 1만 있는 코드(`XX000000`)는 하위 분류가 있는 코드보다 뒤.
+
+공개 feature read(`/v1/features`·`in-bounds`·`search`·`nearby`·`nearby/by-target`·
+`{feature_id}`·`contained-features`, `/v1/features/batch` trip_card)는 주차장(`06.01`) Feature의
+이름에 "주차"가 없으면 "<이름> 주차장"으로 보여 준다. 저장 값·검색 대상·ETag(`row_revision`)·
+JSON schema는 그대로다 — 표시 규칙일 뿐이라 배포 직후 ETag/`known_row_revision`으로 캐시된
+응답(304·`unchanged`)은 그 Feature의 다음 revision까지 옛 이름을 유지한다.
 
 ### 1.7 idempotency · rate limit (T-214g)
 - 일반 변경 POST는 endpoint 계약에 따라 `Idempotency-Key`를 사용할 수 있다. canonical

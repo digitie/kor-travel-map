@@ -2864,6 +2864,24 @@ ADR-117(SH 스냅샷·스칼라 정책 경로 퇴역). 브랜치 `feat/adr117-re
   journal·resume·CHANGELOG.
 - [ ] 배포(소유자): 419 runbook 순서로 대상 schedule 정지·in-flight 0 → pair 배포 → 표·index 부재와 적재 1회 초록을 journal에 적는다.
 
+## T-HERITAGE-ENRICH
+
+2026-11 PinVi live e2e(봉화·영주·안동)에서 본 국가유산 데이터 결손. 검색 순위·별칭(migration 436)은 이 결손을 가리지 못한다.
+
+- [ ] "안동 하회마을"(국가민속문화유산) 공개 Feature가 있다 — 지금은 "안동 하회마을 만송정 숲" 등 하위 유산만 있다. 빠진 원인
+  (provider 목록 범위·분류·적재 필터)을 journal에 적는다.
+- [ ] 국가유산 Feature의 설명·운영시간·요금·이미지·전화가 provider 응답에 있으면 채워진다(없는 값은 비워 두고 사유를 적는다).
+- [ ] 영월 고씨굴에 도로명 주소가 있다(geo 역지오코딩 또는 provider 주소).
+
+## T-DEDUP-MEDIA-HERITAGE
+
+MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸다: "도산서원"(01000000) ↔ "안동 도산서원"(약 300 m),
+"영주소수서원" ↔ "영주 소수서원".
+
+- [ ] 두 쌍이 dedup 후보(검토 큐)에 오르는지 확인하고, 오르지 않으면 원인(거리 문턱·이름 정규화·분류 조합)을 고친다.
+- [ ] 지역명 접두("안동 ", "영주")를 뗀 이름 일치를 이름 점수에 반영할지 결정하고 근거를 적는다.
+- [ ] 회귀 테스트가 두 쌍을 고정한다.
+
 ## T-UI-MAPWORKSPACE
 
 보류(선택 기능, 2026-10-27). `@kor-travel/ui` dev.8 지도 작업면(`MapWorkspace`·`MapFilterPanel`·`MapStage`)은 opt-in이다.

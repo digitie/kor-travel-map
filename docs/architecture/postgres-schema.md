@@ -80,6 +80,7 @@ rollback 조건은 ADR-075와 [`../deploy.md`](../deploy.md)를 따른다.
 | `feature_notices` | `feature_id` | notice_type (NOT NULL), severity (0-5 CHECK), valid_start/end_time `timestamptz`, generated `valid_during` `tstzrange`, source_agency, officer_name, payload |
 | `feature_routes` | `feature_id` | geom `MULTILINESTRING(4326)` NOT NULL, route_type (NOT NULL), geometry_source/status, total_distance_meters, expected_duration_minutes, difficulty, begin_*/end_*, payload |
 | `feature_areas` | `feature_id` | geom `MULTIPOLYGON(4326)` NOT NULL, area_kind (NOT NULL), boundary_source, area_square_meters, regulation_scope, administrative_office, description, payload |
+| `feature_search_aliases` | `alias` | migration 436. 정규화 검색어(NFC·공백 제거·소문자, CHECK) → `canonical_name`(= `features.name`). `/v1/features/search`가 이름이 정확히 같은 공개 Feature를 맨 앞 순위로 더한다. Feature id가 아니라 이름을 담는다(id는 환경·재적재마다 다르다). 식별자 별칭 `feature_aliases`와 별개 |
 | `features_detailed` (view) | — | core + subtype 5종에서 `detail`/`geom`을 조립하는 단일 정본. `public_features`는 이 뷰 위의 `active AND deleted_at IS NULL` projection이다 |
 | `feature_versions` | `(feature_id, version)` | provider version 0과 user_request version 1 snapshot 보존; payload JSONB |
 | `feature_files` | `file_id` | feature_id FK CASCADE; UNIQUE (storage_backend,bucket,object_key); file_type CHECK |

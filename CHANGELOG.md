@@ -10,6 +10,20 @@
 
 ## [Unreleased]
 
+### feature 검색 순위·별칭·주차장 표시 이름 (2026-11-02, alembic 436)
+
+- **CHANGED (API)**: `/v1/features/search`의 `q` 검색 순서가 `rank ASC, score DESC, feature_id ASC`다. `rank`는 일치
+  단계(별칭 → 이름이 검색어를 품음 → 유사도만) → bbox 안 → 분류 그룹(관광 → 숙박·온천 → 식음 → 그 밖, Tier 1 표에서
+  유도) → 이름 일치(첫 낱말 지역명을 뗀 일치 포함) → 분류 구체성 순으로 갈린다. "하회마을"·"고씨동굴"·"도산서원"이
+  서울 음식점·주차장보다 안동하회마을·영월 고씨굴·안동 도산서원을 먼저 낸다.
+- **CHANGED (API, 동작)**: `q`와 함께 온 bbox(`min_lon`…`max_lat`)는 필터가 아니라 순위 가중이다(bbox 안이 먼저,
+  밖도 남는다, `include_total`도 bbox와 무관). `q` 없이 bbox만 오면 종전처럼 필터다. OpenAPI schema는 그대로다.
+- **CHANGED (API)**: search cursor v2(keyset에 `rank`). 배포 전 v1 cursor는 `FEATURE_SEARCH_CURSOR_VERSION_UNSUPPORTED`.
+- **ADDED (DB, alembic 436)**: `feature.feature_search_aliases(alias PK, canonical_name)` — 정규화 검색어 → Feature 이름.
+  첫 별칭 4개(고씨동굴·영월고씨동굴 → 영월 고씨굴, 하회마을·하회민속마을 → 안동하회마을). 런타임 SELECT만.
+- **CHANGED (API)**: 공개 feature read는 주차장(`06.01`) 이름에 "주차"가 없으면 "<이름> 주차장"으로 보인다
+  ("도산서원" → "도산서원 주차장"). 저장 값·검색 대상·ETag·JSON schema는 그대로다.
+
 ### run-status sensor tick 실패로 cursor가 멈추던 문제 (2026-10-28)
 
 - **FIXED (Dagster)**: `feature_operation_*` run-status sensor가 `SkipReason`을 내지 않는다. 같은 tick에서 앞 이벤트가

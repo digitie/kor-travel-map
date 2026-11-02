@@ -27,6 +27,7 @@ from time import perf_counter
 from typing import Annotated, Any, Literal, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from kortravelmap.category import public_feature_display_name
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorError,
     FeatureSearchCursorInvalidError,
@@ -128,6 +129,31 @@ def _search_cursor_http_error(exc: FeatureSearchCursorError) -> HTTPException:
 # ── 응답 schema ────────────────────────────────────────────────────────
 
 
+class _PublicDisplayName(BaseModel):
+    """공개 feature read의 ``name``을 표시 이름으로 바꾸는 mixin.
+
+    주차장 Feature는 공공 주차장 데이터셋이 관광지 이름만 싣는 일이 많다("도산서원").
+    ``public_feature_display_name``이 그때 "도산서원 주차장"으로 보이게 한다. 저장 값·검색
+    대상·ETag(``row_revision``)는 그대로다 — 응답 직렬화 직전의 표시 규칙일 뿐이고 JSON
+    schema(OpenAPI)도 바뀌지 않는다.
+    """
+
+    @model_validator(mode="before")
+    @classmethod
+    def _apply_public_display_name(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        name = data.get("name")
+        category = data.get("category")
+        if not isinstance(name, str):
+            return data
+        display = public_feature_display_name(
+            name, category if isinstance(category, str) else None
+        )
+        return data if display == name else {**data, "name": display}
+
+
+
 class PricePointOut(BaseModel):
     """canonical dataset/price_domain/product series의 가격 관측 1건."""
 
@@ -148,7 +174,7 @@ class PricePointOut(BaseModel):
     known_at: datetime
 
 
-class FeatureSummary(BaseModel):
+class FeatureSummary(_PublicDisplayName):
     """지도/목록용 경량 feature 표현 (bbox 조회 결과 1건)."""
 
     model_config = ConfigDict(extra="forbid")
@@ -231,7 +257,7 @@ class FeatureObservationView(BaseModel):
     is_current: bool
 
 
-class FeatureDetailResponse(BaseModel):
+class FeatureDetailResponse(_PublicDisplayName):
     """feature 단건 상세 data payload."""
 
     model_config = ConfigDict(extra="forbid")
@@ -479,7 +505,7 @@ class FeatureBatchRequest(BaseModel):
         return self
 
 
-class FeatureTripCard(BaseModel):
+class FeatureTripCard(_PublicDisplayName):
     """여행 일정 POI 표시에 필요한 공개-안전 고정 projection."""
 
     model_config = ConfigDict(extra="forbid")
@@ -644,7 +670,7 @@ class NearbyTargetSummary(BaseModel):
     lat: float
 
 
-class NearbyFeatureSummary(BaseModel):
+class NearbyFeatureSummary(_PublicDisplayName):
     """POI/cache target 주변 public feature summary."""
 
     model_config = ConfigDict(extra="forbid")

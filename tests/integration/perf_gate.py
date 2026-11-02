@@ -157,6 +157,9 @@ _NEARBY_PARAMS: dict[str, Any] = {
 }
 _SEARCH_PARAMS: dict[str, Any] = {
     "q": "광화문 실측 카페 37",
+    "q_compact": "광화문실측카페37",
+    # 별칭 팔도 계획에 남겨 둔다 — 값이 있을 때 trigram GIN ``=``로 도는지 함께 본다.
+    "alias_name": "광화문 실측 카페 1",
     "bbox_enabled": False,
     "min_lon": None,
     "min_lat": None,
@@ -164,6 +167,7 @@ _SEARCH_PARAMS: dict[str, Any] = {
     "max_lat": None,
     "kinds": None,
     "categories": None,
+    "cursor_rank": None,
     "cursor_score": None,
     "cursor_feature_id": None,
     "limit_plus_one": 51,

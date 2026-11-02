@@ -1036,6 +1036,7 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         marker_color="P-01",
         score=0.95,
         score_cursor="0.9500000476837158",
+        rank=1001,
     )
 
     score_contract = feature_repo._feature_search_contract(
@@ -1056,6 +1057,7 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         contract=score_contract,
         signing_key=_SEARCH_CURSOR_KEY,
     ) == {
+        "cursor_rank": 1001,
         "cursor_score": "0.9500000476837158",
         "cursor_feature_id": "feature-1",
     }
@@ -1078,6 +1080,7 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         contract=id_contract,
         signing_key=_SEARCH_CURSOR_KEY,
     ) == {
+        "cursor_rank": None,
         "cursor_score": None,
         "cursor_feature_id": "feature-1",
     }
@@ -1121,6 +1124,7 @@ def test_feature_search_cursor_fingerprint_uses_normalized_repository_contract()
             marker_color="P-01",
             score=0.95,
             score_cursor="0.9500000476837158",
+            rank=1001,
         ),
         contract=first,
         signing_key=_SEARCH_CURSOR_KEY,
@@ -1152,6 +1156,7 @@ def test_feature_search_cursor_rejects_tamper_unknown_version_and_query_reuse() 
         marker_color="P-01",
         score=0.95,
         score_cursor="0.9500000476837158",
+        rank=1001,
     )
     cursor = feature_repo._encode_search_cursor(
         row,
@@ -1214,21 +1219,48 @@ def test_feature_search_cursor_rejects_tamper_unknown_version_and_query_reuse() 
             signing_key=_SEARCH_CURSOR_KEY,
         )
 
+    version = feature_repo._SEARCH_CURSOR_VERSION
     for invalid_payload in (
         {
-            "v": 1,
+            "v": version,
             "kind": "other",
             "query": contract.fingerprint,
             "keyset": {
                 "feature_id": "feature-1",
+                "rank": 1001,
                 "score": "0.9500000476837158",
             },
         },
         {
-            "v": 1,
+            "v": version,
             "kind": "feature_search",
             "query": contract.fingerprint,
-            "keyset": {"feature_id": "feature-1", "score": "NaN"},
+            "keyset": {"feature_id": "feature-1", "rank": 1001, "score": "NaN"},
+        },
+        # 436: q 검색 keyset은 rank를 반드시 싣는다 — 빠지거나 정수가 아니면 거부한다.
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "score": "0.9500000476837158"},
+        },
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "rank": True, "score": "0.95"},
+        },
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "rank": -1, "score": "0.95"},
+        },
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "rank": "1001", "score": "0.95"},
         },
     ):
         invalid_cursor = feature_repo._encode_search_cursor_payload(
@@ -1266,6 +1298,114 @@ def test_feature_search_cursor_rejects_malformed_tokens(cursor: str) -> None:
             contract=contract,
             signing_key=_SEARCH_CURSOR_KEY,
         )
+
+
+def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
+    """436이 keyset에 rank를 더하며 version을 올렸다 — 배포 전 v1 cursor는 조용히 다른
+    순서로 이어지지 않고 VERSION_UNSUPPORTED가 된다."""
+
+    contract = feature_repo._feature_search_contract(
+        q="하회마을",
+        bbox=None,
+        kinds=None,
+        categories=None,
+        page_size=10,
+        include_total=False,
+    )
+    assert feature_repo._SEARCH_CURSOR_VERSION == 2
+    v1_cursor = feature_repo._encode_search_cursor_payload(
+        {
+            "v": 1,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "score": "0.5"},
+        },
+        signing_key=_SEARCH_CURSOR_KEY,
+    )
+    with pytest.raises(FeatureSearchCursorVersionUnsupportedError):
+        feature_repo._search_cursor_params(
+            v1_cursor,
+            contract=contract,
+            signing_key=_SEARCH_CURSOR_KEY,
+        )
+
+
+def test_feature_search_q_cursor_requires_row_rank() -> None:
+    contract = feature_repo._feature_search_contract(
+        q="하회마을",
+        bbox=None,
+        kinds=None,
+        categories=None,
+        page_size=10,
+        include_total=False,
+    )
+    row = FeatureSearchRow(
+        feature_id="feature-1",
+        kind="place",
+        name="하회마을",
+        category="02010100",
+        lon=126.97,
+        lat=37.54,
+        marker_icon=None,
+        marker_color=None,
+        score=1.0,
+        score_cursor="1",
+    )
+    with pytest.raises(ValueError, match="rank cursor is required"):
+        feature_repo._encode_search_cursor(
+            row,
+            contract=contract,
+            signing_key=_SEARCH_CURSOR_KEY,
+        )
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("고씨동굴", "고씨동굴"),
+        ("  영월  고씨동굴 ", "영월고씨동굴"),
+        ("안동\u3000하회마을", "안동하회마을"),
+        ("Lotte World", "lotteworld"),
+        # NFD(자모 분리) 입력도 NFC 키와 같아진다.
+        ("\u1100\u1169\u110a\u1175", "고씨"),
+    ],
+)
+def test_search_alias_key_normalizes_nfc_whitespace_and_case(query: str, expected: str) -> None:
+    assert feature_repo.search_alias_key(query) == expected
+
+
+def test_search_category_group_sql_is_derived_from_the_taxonomy() -> None:
+    """순위 CASE는 분류 체계 표에서 만들어진다 — Tier 1마다 한 WHEN, 표에 없는 코드는 fallback."""
+
+    from kortravelmap.category import (
+        PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+        PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+        PlaceCategoryTier1Code,
+    )
+
+    sql = feature_repo._search_category_group_sql("category")
+    tier1_codes = {code.value for code in PlaceCategoryTier1Code}
+    assert set(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) == tier1_codes
+    for tier1, group in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items():
+        assert f"WHEN '{tier1}' THEN {group}" in sql
+    assert sql.endswith(f"ELSE {PLACE_CATEGORY_SEARCH_GROUP_FALLBACK} END)")
+    assert sql.count("WHEN '") == len(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1)
+    assert "{_search_category_group_sql" not in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    assert sql in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    with pytest.raises(ValueError, match="trusted SQL identifier"):
+        feature_repo._search_category_group_sql("category); DROP TABLE x; --")
+
+
+def test_feature_search_score_sql_keeps_bbox_out_of_predicates() -> None:
+    """q 검색에서 bbox는 정렬식(순위 가중)이고 술어가 아니다. 공간식에 ST_Transform이 없다."""
+
+    sql = feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    name_candidates = sql.split("WITH name_candidates AS MATERIALIZED (", 1)[1]
+    name_candidates = name_candidates.split("\nfiltered AS (", 1)[0]
+    assert "ST_MakeEnvelope" not in name_candidates
+    assert "ST_Transform" not in sql
+    assert "ORDER BY search_rank ASC, score DESC, feature_id ASC" in sql
+    assert "(search_rank, -score, feature_id) >" in sql
 
 
 @pytest.mark.asyncio
@@ -1344,6 +1484,7 @@ async def test_search_features_validates_before_db_call() -> None:
             marker_color="P-01",
             score=0.95,
             score_cursor="0.9500000476837158",
+            rank=1001,
         ),
         contract=contract,
         signing_key=_SEARCH_CURSOR_KEY,

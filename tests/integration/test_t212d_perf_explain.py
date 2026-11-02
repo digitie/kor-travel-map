@@ -930,6 +930,8 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
         _FEATURE_SEARCH_BY_SCORE_SQL,
         {
             "q": "광화문 실측 카페 37",
+            "q_compact": "광화문실측카페37",
+            "alias_name": "광화문 실측 카페 1",
             "bbox_enabled": False,
             "min_lon": None,
             "min_lat": None,
@@ -937,6 +939,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "max_lat": None,
             "kinds": None,
             "categories": None,
+            "cursor_rank": None,
             "cursor_score": None,
             "cursor_feature_id": None,
             "limit_plus_one": 51,

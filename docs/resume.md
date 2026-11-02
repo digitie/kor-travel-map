@@ -1,3 +1,9 @@
+## 2026-11-02 — feature 검색 순위·별칭·주차장 표시 이름(alembic 436)
+
+브랜치 `feat/search-relevance-aliases`. `/v1/features/search` 순위(별칭·포함·bbox 가중·분류 그룹·이름 일치), 별칭 표
+436, 공개 read 주차장 표시 이름. OpenAPI 불변(PinVi 재vendor 불필요). **다음 한 작업**: CI 초록·적대 리뷰 2회 → 머지 →
+다음 pair 회전(PinVi #615와 함께)에 배포 — 436은 새 표·seed 4행·receipt CHECK뿐이라 적재 정지 불필요.
+
 ## 2026-10-28 — ADR-117 퇴역 PR 진행 중
 
 PR #1432(브랜치 `feat/adr117-retire-sh-snapshot`, base main — #1426·#1431 머지 뒤 재기준). alembic 435가 SH 스냅샷·

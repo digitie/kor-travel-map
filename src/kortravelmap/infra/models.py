@@ -1704,6 +1704,38 @@ class FeatureGeocodeStampRow(Base):
     )
 
 
+class FeatureSearchAliasRow(Base):
+    """``feature.feature_search_aliases`` — 검색어 별칭(migration 436).
+
+    ``alias``는 정규화한 검색어(NFC·공백 제거·소문자, ``feature_repo.search_alias_key``)이고
+    ``canonical_name``은 그 검색어가 뜻하는 ``features.name``이다. ``/v1/features/search``가
+    이름이 정확히 같은 공개 Feature를 맨 앞 순위로 더한다. Feature id가 아니라 이름을 담는
+    이유는 migration 436 docstring에 있다. 식별자 별칭 ``feature_aliases``와는 다른 표다.
+    """
+
+    __tablename__ = "feature_search_aliases"
+    __table_args__ = (
+        CheckConstraint(
+            "alias <> '' AND char_length(alias) <= 200 AND alias !~ '\\s' "
+            "AND alias = lower(alias) AND alias IS NFC NORMALIZED",
+            name=conv("ck_feature_search_aliases_alias_key"),
+        ),
+        CheckConstraint(
+            "canonical_name <> '' AND char_length(canonical_name) <= 500 "
+            "AND canonical_name = btrim(canonical_name) AND canonical_name IS NFC NORMALIZED",
+            name=conv("ck_feature_search_aliases_canonical_name"),
+        ),
+        {"schema": "feature"},
+    )
+
+    alias: Mapped[str] = mapped_column(Text, primary_key=True)
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class FeatureAliasRow(Base):
     """``feature.feature_aliases`` — legacy ``f_*`` alias 보존 (T-VN-32A, ADR-068 결정 3).
 
