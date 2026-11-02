@@ -10,6 +10,7 @@ import pytest
 from kortravelmap.category import (
     PLACE_CATEGORY_CODES,
     PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+    PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2,
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
     PLACE_CATEGORY_TIER2_NAMES_BY_TIER1,
     PlaceCategoryCode,
@@ -33,16 +34,37 @@ def test_every_tier1_code_has_a_search_group() -> None:
 
 
 def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> None:
-    """소유자 결정(2026-11-02): 관광(국가유산·문화 포함) > 숙박 > 식음 > 주차·편의."""
+    """소유자 결정(2026-11-02): 관광(국가유산·문화 포함) > 숙박 > 식음 > 주차·편의.
 
-    heritage = category_search_group(PlaceCategoryCode.TOURISM_HERITAGE_HISTORIC_SITE.value)
-    culture = category_search_group(PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value)
-    lodging = category_search_group(PlaceCategoryCode.LODGING_HOTEL.value)
-    spa = category_search_group(PlaceCategoryCode.HOT_SPRING_SPA_HOT_SPRING.value)
-    food = category_search_group(PlaceCategoryCode.FOOD_RESTAURANT_KOREAN.value)
-    parking = category_search_group(PlaceCategoryCode.TRANSPORT_PARKING.value)
-    convenience = category_search_group(PlaceCategoryCode.CONVENIENCE_STORE.value)
-    assert heritage == culture < lodging == spa < food < parking == convenience
+    이름으로 찾아가는 시설(역·정류장·휴게소·공항·의료)은 숙박과 같은 그룹이다 — "서울역"이
+    "…서울역점" 음식점보다 뒤로 밀리지 않게(적대 리뷰 2026-11-02). 주차·주유는 맨 뒤 그대로다.
+    """
+
+    def group(code: PlaceCategoryCode) -> int:
+        return category_search_group(code.value)
+
+    heritage = group(PlaceCategoryCode.TOURISM_HERITAGE_HISTORIC_SITE)
+    culture = group(PlaceCategoryCode.TOURISM_CULTURAL_FACILITY)
+    lodging = group(PlaceCategoryCode.LODGING_HOTEL)
+    spa = group(PlaceCategoryCode.HOT_SPRING_SPA_HOT_SPRING)
+    food = group(PlaceCategoryCode.FOOD_RESTAURANT_KOREAN)
+    parking = group(PlaceCategoryCode.TRANSPORT_PARKING)
+    fuel = group(PlaceCategoryCode.TRANSPORT_FUEL)
+    convenience = group(PlaceCategoryCode.CONVENIENCE_STORE)
+    assert heritage == culture < lodging == spa < food < parking == fuel == convenience
+    for destination in (
+        PlaceCategoryCode.TRANSPORT_STOP_TRAIN,
+        PlaceCategoryCode.TRANSPORT_STOP_BUS,
+        PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY,
+        PlaceCategoryCode.TRANSPORT_AIRPORT,
+        PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL,
+    ):
+        assert group(destination) == lodging, destination
+    # Tier 2 예외 표의 키는 카탈로그에 있는 교통 Tier 2 접두다.
+    for prefix in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2:
+        assert len(prefix) == 4
+        assert f"{prefix}0000" in PLACE_CATEGORY_CODES
+        assert prefix.startswith(PlaceCategoryTier1Code.TRANSPORT.value)
     # 카탈로그 밖 코드(notice의 99000000)와 None은 맨 뒤 그룹이다.
     assert category_search_group("99000000") == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
     assert category_search_group(None) == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK

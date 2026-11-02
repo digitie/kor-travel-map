@@ -20,9 +20,9 @@ PinVi alias-map 체크섬 계약(``feature-alias-map-v1``)의 입력이다. 검�
 
 무엇을 하는가.
 
-- ``alias``(PK): 정규화한 검색어 — NFC, 공백 전부 제거, 소문자. CHECK가 그 형식을 고정한다
-  (형식이 틀린 행은 조회 키와 영영 같아지지 않아 조용히 죽는다). 정규화 정본은
-  ``feature_repo.search_alias_key``다.
+- ``alias``(PK): 정규화한 검색어 — NFC, 공백(Python ``str.isspace()`` 집합) 제거, 소문자.
+  CHECK가 그 형식을 고정한다(형식이 틀린 행은 조회 키와 영영 같아지지 않아 조용히 죽는다).
+  정규화 정본은 ``feature_repo.search_alias_key``다.
 - ``canonical_name``: 별칭이 가리키는 ``features.name``(NFC, 앞뒤 공백 없음).
 - 소유자 ``ktm_feature_schema_owner``. 런타임 SELECT는 배포 조정기
   (``infra/runtime_privileges.py`` ``_FEATURE_TABLE_PRIVILEGES``)가 건다.
@@ -54,7 +54,19 @@ depends_on: str | Sequence[str] | None = None
 #: 스키마 소유자. env가 켠 롤이고, 마이그레이션은 이 롤로 끝나야 한다.
 _SCHEMA_OWNER: Final[str] = "ktm_feature_schema_owner"
 
-_CREATE_ALIASES_SQL: Final[str] = """
+#: 별칭 키에 있으면 안 되는 공백 — Python ``str.isspace()``가 참인 문자 전부.
+#: ``feature_repo.SEARCH_WHITESPACE_CODEPOINTS``와 같아야 한다(unit test가 대조한다). migration은
+#: 앱 코드를 import하지 않으므로 값을 여기 고정한다.
+_WHITESPACE_CODEPOINTS: Final[tuple[int, ...]] = (
+    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0, 0x1680,
+    0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A,
+    0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+)  # fmt: skip
+_WHITESPACE_SQL: Final[str] = (
+    "(" + " || ".join(f"chr({codepoint})" for codepoint in _WHITESPACE_CODEPOINTS) + ")"
+)
+
+_CREATE_ALIASES_SQL: Final[str] = f"""
 CREATE TABLE feature.feature_search_aliases (
     alias text NOT NULL,
     canonical_name text NOT NULL,
@@ -64,14 +76,14 @@ CREATE TABLE feature.feature_search_aliases (
     CONSTRAINT ck_feature_search_aliases_alias_key CHECK (
         alias <> ''
         AND char_length(alias) <= 200
-        AND alias !~ '\\s'
+        AND alias = translate(alias, {_WHITESPACE_SQL}, '')
         AND alias = lower(alias)
         AND alias IS NFC NORMALIZED
     ),
     CONSTRAINT ck_feature_search_aliases_canonical_name CHECK (
         canonical_name <> ''
         AND char_length(canonical_name) <= 500
-        AND canonical_name = btrim(canonical_name)
+        AND canonical_name = btrim(canonical_name, {_WHITESPACE_SQL})
         AND canonical_name IS NFC NORMALIZED
     )
 )

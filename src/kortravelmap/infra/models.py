@@ -40,7 +40,7 @@ ADR 참조
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Final
 
 from geoalchemy2 import Geometry
 from sqlalchemy import (
@@ -1704,6 +1704,21 @@ class FeatureGeocodeStampRow(Base):
     )
 
 
+#: migration 436 CHECK의 공백 집합(Python ``str.isspace()``) — ``feature_repo``와 같은 값이다.
+_SEARCH_ALIAS_WHITESPACE_SQL: Final[str] = (
+    "("
+    + " || ".join(
+        f"chr({codepoint})"
+        for codepoint in (
+            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0, 0x1680,
+            0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
+            0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+        )
+    )
+    + ")"
+)  # fmt: skip
+
+
 class FeatureSearchAliasRow(Base):
     """``feature.feature_search_aliases`` — 검색어 별칭(migration 436).
 
@@ -1716,13 +1731,15 @@ class FeatureSearchAliasRow(Base):
     __tablename__ = "feature_search_aliases"
     __table_args__ = (
         CheckConstraint(
-            "alias <> '' AND char_length(alias) <= 200 AND alias !~ '\\s' "
+            "alias <> '' AND char_length(alias) <= 200 "
+            f"AND alias = translate(alias, {_SEARCH_ALIAS_WHITESPACE_SQL}, '') "
             "AND alias = lower(alias) AND alias IS NFC NORMALIZED",
             name=conv("ck_feature_search_aliases_alias_key"),
         ),
         CheckConstraint(
             "canonical_name <> '' AND char_length(canonical_name) <= 500 "
-            "AND canonical_name = btrim(canonical_name) AND canonical_name IS NFC NORMALIZED",
+            f"AND canonical_name = btrim(canonical_name, {_SEARCH_ALIAS_WHITESPACE_SQL}) "
+            "AND canonical_name IS NFC NORMALIZED",
             name=conv("ck_feature_search_aliases_canonical_name"),
         ),
         {"schema": "feature"},

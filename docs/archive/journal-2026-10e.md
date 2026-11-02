@@ -1,6 +1,6 @@
 # journal 아카이브 — 2026-10-13 (e)
 
-> live journal이 220 KiB 경계를 넘어 가장 오래된 완전한 절 둘을 분리했다(docs/tasks-rule.md §8). 본문은 상대 링크의 기준 경로만 바꿨다. 읽기 전용 이력이다.
+> live journal이 220 KiB 경계를 넘어 가장 오래된 완전한 절 둘을 분리했다(docs/tasks-rule.md §8). 두 절에 상대 링크가 없어 본문은 바꾸지 않았다. 읽기 전용 이력이다.
 
 ## 2026-10-13 — geo·transport 호스트 odroid 이전(Track 2) Map 쪽 문서: 브랜치 `docs/adr-110-geo-transport-on-odroid`
 

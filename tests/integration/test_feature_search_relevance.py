@@ -232,6 +232,50 @@ async def test_dosan_seowon_heritage_ranks_before_media_spot_and_parking(
     assert labels == ["dosan_heritage", "dosan_media", "dosan_painting", "dosan_parking"], labels
 
 
+async def test_transport_hub_exact_name_is_not_buried_under_partial_matches(
+    migrated_session: AsyncSession,
+) -> None:
+    """역·공항·휴게소는 이름으로 찾아가는 시설이다 — 숙박과 같은 그룹(적대 리뷰 2026-11-02).
+
+    분류 그룹을 Tier 1로만 가르면 역(06)이 주차장과 같은 맨 뒤 그룹이라 "롯데리아 서울역점"
+    같은 음식점이 역 자체보다 앞섰다. 관광(이름에 검색어를 품은 박물관)은 여전히 앞이다.
+    """
+    ids = {
+        "seoul_station": await _place(
+            migrated_session, "seoul_station", name="서울역", category="06030300",
+            lon=126.9707, lat=37.5547, place_kind="station",
+        ),
+        "seoul_museum": await _place(
+            migrated_session, "seoul_museum", name="서울역사박물관", category="01040100",
+            lon=126.9706, lat=37.5703,
+        ),
+        "seoul_food": await _place(
+            migrated_session, "seoul_food", name="롯데리아 서울역점", category="02010100",
+            lon=126.9720, lat=37.5550, place_kind="restaurant",
+        ),
+        "seoul_parking": await _place(
+            migrated_session, "seoul_parking", name="서울역", category="06010000",
+            lon=126.9715, lat=37.5540, place_kind="parking",
+        ),
+    }
+    await migrated_session.flush()
+    labels = await _search_ids(migrated_session, "서울역", ids)
+    assert labels == ["seoul_museum", "seoul_station", "seoul_food", "seoul_parking"], labels
+
+
+async def test_displayed_parking_name_is_searchable(
+    migrated_session: AsyncSession,
+) -> None:
+    """응답에 "도산서원 주차장"으로 보이는 주차장은 그 이름으로 찾으면 맨 앞이다.
+
+    저장 이름은 "도산서원"이지만 포함·일치 단계는 보이는 이름으로 비교한다.
+    """
+    ids = await _seed_trip_places(migrated_session)
+    labels = await _search_ids(migrated_session, "도산서원 주차장", ids)
+    assert labels[0] == "dosan_parking", labels
+    assert labels.index("dosan_heritage") < labels.index("dosan_media"), labels
+
+
 async def test_bbox_is_a_relevance_bias_not_a_filter(
     migrated_session: AsyncSession,
 ) -> None:

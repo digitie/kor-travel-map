@@ -163,3 +163,18 @@ def test_main_does_not_emit_success_report_on_cardinality_failure(
     captured = capsys.readouterr()
     assert captured.out == ""
     assert "cardinality 검증 실패" in captured.err
+
+
+def test_search_viewport_params_cover_every_search_bind_parameter() -> None:
+    """tier-2 search viewport의 파라미터가 검색 SQL의 bind를 전부 채운다(436 회귀 방지).
+
+    검색 SQL에 bind가 늘면(436: ``q_compact``·``alias_name``·``cursor_rank``) 이 dict와
+    ``tests/integration/perf_gate.py``·``test_t212d_perf_explain.py``의 사본이 함께 따라가야
+    한다. 빠지면 tier-2 하네스가 ``A value is required for bind parameter``로 죽는다.
+    """
+    from sqlalchemy import text
+
+    from kortravelmap.infra.feature_repo import _FEATURE_SEARCH_BY_SCORE_SQL
+
+    required = set(text(_FEATURE_SEARCH_BY_SCORE_SQL)._bindparams)
+    assert required <= set(harness._COMMON_SEARCH)

@@ -244,10 +244,14 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 1. 일치 단계 — 별칭이 가리키는 이름 → 이름이 검색어를 품음(공백 무시) → 유사도만.
 2. bbox — `q`와 함께 온 bbox는 **필터가 아니라 가중**이다. bbox 안이 먼저이고 밖도 결과에
    남는다(`include_total`도 bbox와 무관). `q` 없이 bbox만 오면 종전처럼 필터다.
-3. 분류 그룹 — 관광(국가유산·문화시설 포함) → 숙박·온천 → 식음 → 그 밖(편의·교통·의료·미분류).
-   Tier 1 표(`kortravelmap.category.PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1`)에서 유도한다.
+3. 분류 그룹 — 관광(국가유산·문화시설 포함) → 숙박·온천·이름으로 찾아가는 시설(역·정류장, 휴게소,
+   공항, 의료) → 식음 → 편의·주차·주유·미분류. `kortravelmap.category`의
+   `PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2`(교통 Tier 2 예외) → `…_BY_TIER1`에서 유도한다.
 4. 이름 일치 — 이름이 검색어와 같거나, 첫 낱말(지역명, "안동 도산서원")을 뗀 나머지가 같으면 먼저.
 5. 분류 구체성 — Tier 1만 있는 코드(`XX000000`)는 하위 분류가 있는 코드보다 뒤.
+
+이름 비교(포함·일치)는 **보이는 이름**(아래 주차장 표시 이름)으로 하고, 비교 키는 양쪽 모두 NFC →
+Python `str.isspace()` 공백 집합 제거 → 소문자다(SQL은 같은 집합을 `translate`로 지운다).
 
 공개 feature read(`/v1/features`·`in-bounds`·`search`·`nearby`·`nearby/by-target`·
 `{feature_id}`·`contained-features`, `/v1/features/batch` trip_card)는 주차장(`06.01`) Feature의

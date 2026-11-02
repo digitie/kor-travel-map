@@ -1262,6 +1262,17 @@ def test_feature_search_cursor_rejects_tamper_unknown_version_and_query_reuse() 
             "query": contract.fingerprint,
             "keyset": {"feature_id": "feature-1", "rank": "1001", "score": "0.95"},
         },
+        # 순위 상한(_SEARCH_RANK_MAX) 밖 — int4 밖 값이 SQL까지 가지 않는다.
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {
+                "feature_id": "feature-1",
+                "rank": feature_repo._SEARCH_RANK_MAX + 1,
+                "score": "0.95",
+            },
+        },
     ):
         invalid_cursor = feature_repo._encode_search_cursor_payload(
             invalid_payload,
@@ -1365,6 +1376,8 @@ def test_feature_search_q_cursor_requires_row_rank() -> None:
         ("고씨동굴", "고씨동굴"),
         ("  영월  고씨동굴 ", "영월고씨동굴"),
         ("안동\u3000하회마을", "안동하회마을"),
+        # NBSP·좁은 NBSP(U+202F)도 지운다 — PostgreSQL ``\s``가 놓치는 문자다.
+        ("안동\u00a0도산서원\u202f", "안동도산서원"),
         ("Lotte World", "lotteworld"),
         # NFD(자모 분리) 입력도 NFC 키와 같아진다.
         ("\u1100\u1169\u110a\u1175", "고씨"),
@@ -1375,10 +1388,11 @@ def test_search_alias_key_normalizes_nfc_whitespace_and_case(query: str, expecte
 
 
 def test_search_category_group_sql_is_derived_from_the_taxonomy() -> None:
-    """순위 CASE는 분류 체계 표에서 만들어진다 — Tier 1마다 한 WHEN, 표에 없는 코드는 fallback."""
+    """순위 CASE는 분류 체계 표에서 만들어진다 — Tier 2 예외가 먼저, Tier 1마다 한 WHEN."""
 
     from kortravelmap.category import (
         PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+        PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2,
         PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
         PlaceCategoryTier1Code,
     )
@@ -1387,13 +1401,67 @@ def test_search_category_group_sql_is_derived_from_the_taxonomy() -> None:
     tier1_codes = {code.value for code in PlaceCategoryTier1Code}
     assert set(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) == tier1_codes
     for tier1, group in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items():
-        assert f"WHEN '{tier1}' THEN {group}" in sql
+        assert f"WHEN left(category, 2) = '{tier1}' THEN {group}" in sql
+    last_tier2 = max(
+        sql.index(f"WHEN left(category, 4) = '{tier2}' THEN {group}")
+        for tier2, group in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2.items()
+    )
+    # Tier 2 예외는 Tier 1보다 먼저 평가돼야 한다(CASE는 첫 일치에서 멈춘다).
+    assert last_tier2 < sql.index("WHEN left(category, 2) =")
     assert sql.endswith(f"ELSE {PLACE_CATEGORY_SEARCH_GROUP_FALLBACK} END)")
-    assert sql.count("WHEN '") == len(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1)
+    assert sql.count("WHEN left(") == len(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) + len(
+        PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2
+    )
     assert "{_search_category_group_sql" not in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
     assert sql in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
     with pytest.raises(ValueError, match="trusted SQL identifier"):
         feature_repo._search_category_group_sql("category); DROP TABLE x; --")
+
+
+def test_search_whitespace_set_is_python_isspace_and_matches_migration_436() -> None:
+    """검색 비교 키의 공백 집합이 세 곳(repo SQL·Python 키·436 CHECK·model)에서 같다."""
+
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from kortravelmap.infra import models
+
+    every_space = tuple(c for c in range(0x110000) if chr(c).isspace())
+    assert every_space == feature_repo.SEARCH_WHITESPACE_CODEPOINTS
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "436_feature_search_aliases.py"
+    )
+    spec = importlib.util.spec_from_file_location("_m436_whitespace", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    assert module._WHITESPACE_CODEPOINTS == feature_repo.SEARCH_WHITESPACE_CODEPOINTS
+    assert module._WHITESPACE_SQL == feature_repo._SEARCH_WHITESPACE_SQL
+    assert models._SEARCH_ALIAS_WHITESPACE_SQL == feature_repo._SEARCH_WHITESPACE_SQL
+    for codepoint in every_space:
+        assert feature_repo.search_alias_key(f"가{chr(codepoint)}나") == "가나"
+
+
+def test_search_display_name_sql_mirrors_python_display_rule() -> None:
+    from kortravelmap.category import (
+        PARKING_CATEGORY_PREFIX,
+        PARKING_DISPLAY_LABEL,
+        PARKING_NAME_MARKER,
+    )
+
+    sql = feature_repo._search_display_name_sql("name", "category")
+    assert f"left(category, {len(PARKING_CATEGORY_PREFIX)}) = '{PARKING_CATEGORY_PREFIX}'" in sql
+    assert f"strpos(name, '{PARKING_NAME_MARKER}') = 0" in sql
+    assert f"name || ' {PARKING_DISPLAY_LABEL}'" in sql
+    assert sql in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    with pytest.raises(ValueError, match="trusted SQL identifier"):
+        feature_repo._search_display_name_sql("name; --", "category")
 
 
 def test_feature_search_score_sql_keeps_bbox_out_of_predicates() -> None:

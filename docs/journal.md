@@ -3,13 +3,17 @@
 PinVi live e2e(봉화·영주·안동)에서 "하회마을"이 서울 음식점 셋, "고씨동굴"이 고씨네·단양 고수동굴, "도산서원"이
 주차장·미디어 명소를 국가유산보다 먼저 냈다(prod 읽기 전용 실측). 소유자 "권장안 대로".
 
-- 순위 `rank`: 일치 단계(별칭 → 이름이 검색어를 품음 → 유사도) → bbox 안 → 분류 그룹(Tier 1 표에서 유도) → 이름
-  일치(첫 낱말 지역명을 뗀 일치 포함 — "안동 도산서원") → Tier 1만 있는 코드 뒤. q와 함께 온 bbox는 가중(필터 아님).
-  cursor v2(keyset에 rank). 별칭 팔은 trigram GIN `=`로 BitmapOr(prod 35 ms).
+- 순위 `rank`: 일치 단계(별칭 → 이름이 검색어를 품음 → 유사도) → bbox 안 → 분류 그룹 → 이름 일치(첫 낱말 지역명을
+  뗀 일치 포함 — "안동 도산서원") → Tier 1만 있는 코드 뒤. q와 함께 온 bbox는 가중(필터 아님). cursor v2(keyset에
+  rank, 상한 21911). 별칭 팔은 trigram GIN `=`로 BitmapOr(prod 35 ms).
+- 분류 그룹은 Tier 1 표 + 교통 Tier 2 예외: 관광 0 → 숙박·온천·역·휴게소·공항·의료 1 → 식음 2 → 편의·주차·주유 3.
+  적대 리뷰 2인이 함께 짚었다 — Tier 1만이면 "서울역" 역이 "롯데리아 서울역점"보다 뒤였다.
+- 이름 비교 키는 보이는 이름(주차장 표시 이름)에서, NFC·Python `isspace` 공백 집합 제거·소문자로 만든다. SQL은
+  `translate`로 같은 집합을 지운다(PG `\s`는 NBSP를 놓친다). 436 CHECK도 같은 집합. tier-2 하네스 bind 누락도 고쳤다.
 - 436 `feature.feature_search_aliases`: 정규화 검색어 → Feature **이름**(id는 환경·재적재마다 달라 migration이 못 심는다).
 - 주차장 표시 이름은 응답 모델 before-validator — 저장 값·ETag·OpenAPI 불변. backlog: T-HERITAGE-ENRICH·T-DEDUP-MEDIA-HERITAGE.
-- 이 절을 더하자 journal이 220 KiB를 넘어 가장 오래된 2026-10-13 두 절(21,529 B)을 `archive/journal-2026-10e.md`로
-  옮겼다(§8, 본문 바이트 보존·링크 없음).
+- 이 절을 더하자 journal이 220 KiB를 넘어 가장 오래된 2026-10-13 두 절을 `archive/journal-2026-10e.md`(머리말 포함
+  21,529 B)로 옮겼다(§8, 본문 그대로·상대 링크 없음). resume도 같은 이유로 가장 오래된 절들을 옮겼다.
 
 ## 2026-10-28 — run-status sensor tick 실패로 cursor 엿새 정지(#1434)
 

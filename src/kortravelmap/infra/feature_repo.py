@@ -69,7 +69,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Text
 
 from kortravelmap.category import (
+    PARKING_CATEGORY_PREFIX,
+    PARKING_DISPLAY_LABEL,
+    PARKING_NAME_MARKER,
     PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+    PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2,
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
 )
 from kortravelmap.core.exceptions import (
@@ -172,6 +176,7 @@ __all__ = [
     "features_in_bbox",
     "features_contained_in_area",
     "encode_bbox_cursor",
+    "SEARCH_WHITESPACE_CODEPOINTS",
     "search_alias_key",
     "search_features",
     "features_nearby_poi_cache_target",
@@ -1714,27 +1719,85 @@ _SEARCH_RANK_BBOX_WEIGHT: Final[int] = 1_000
 _SEARCH_RANK_GROUP_WEIGHT: Final[int] = 100
 _SEARCH_RANK_EXACT_WEIGHT: Final[int] = 10
 _SEARCH_RANK_DIGIT_MAX: Final[int] = 9
+#: 순위가 가질 수 있는 가장 큰 값(유사도만·bbox 밖·가장 큰 그룹·불일치·Tier 1만). cursor 검증 상한.
+_SEARCH_RANK_MAX: Final[int] = (
+    2 * _SEARCH_RANK_MATCH_WEIGHT
+    + _SEARCH_RANK_BBOX_WEIGHT
+    + _SEARCH_RANK_DIGIT_MAX * _SEARCH_RANK_GROUP_WEIGHT
+    + _SEARCH_RANK_EXACT_WEIGHT
+    + 1
+)
+
+#: 검색 비교 키에서 지우는 공백 — Python ``str.isspace()``가 참인 문자 전부(유니코드 고정 집합).
+#: ``search_alias_key``와 검색 SQL의 ``translate``가 **같은 집합**을 쓴다. PostgreSQL ``\s``는
+#: locale마다 다르고 NBSP(U+00A0)·U+202F 등을 빼므로 쓰지 않는다. migration 436의 별칭 키
+#: CHECK도 같은 집합이다(``tests/unit/test_infra_feature_repo.py``가 셋을 대조한다).
+SEARCH_WHITESPACE_CODEPOINTS: Final[tuple[int, ...]] = (
+    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0, 0x1680,
+    0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A,
+    0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+)  # fmt: skip
+_SEARCH_WHITESPACE: Final[frozenset[str]] = frozenset(map(chr, SEARCH_WHITESPACE_CODEPOINTS))
+_SEARCH_WHITESPACE_SQL: Final[str] = (
+    "(" + " || ".join(f"chr({codepoint})" for codepoint in SEARCH_WHITESPACE_CODEPOINTS) + ")"
+)
+
+
+def _trusted_sql_identifier(column: str) -> str:
+    if not column.replace("_", "").replace(".", "").isalnum():
+        raise ValueError("column must be a trusted SQL identifier")
+    return column
 
 
 def _search_category_group_sql(column: str) -> str:
-    """``PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1``에서 유도한 분류 그룹 ``CASE``.
+    """분류 체계 표(Tier 2 예외 → Tier 1)에서 유도한 분류 그룹 ``CASE``.
 
-    코드를 SQL에 따로 박지 않는다 — 분류 체계 표가 정본이다. 키는 Tier 1 두 자리 숫자,
-    값은 한 자리 정수라 문자열로 이어 붙여도 SQL 주입 자리가 없다(아래 검사가 강제한다).
+    코드를 SQL에 따로 박지 않는다 — ``PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2``·``…_BY_TIER1``이
+    정본이다. 키는 숫자(4자리·2자리), 값은 한 자리 정수라 이어 붙여도 SQL 주입 자리가 없다
+    (아래 검사가 강제한다).
     """
-    if not column.replace("_", "").replace(".", "").isalnum():
-        raise ValueError("column must be a trusted SQL identifier")
+    column = _trusted_sql_identifier(column)
+
+    def _group(value: int) -> int:
+        if not 0 <= value <= _SEARCH_RANK_DIGIT_MAX:
+            raise ValueError(f"search group must be a single digit: {value!r}")
+        return value
+
     whens: list[str] = []
+    for tier2, group in sorted(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2.items()):
+        if not (len(tier2) == 4 and tier2.isdigit()):
+            raise ValueError(f"tier2 prefix must be four digits: {tier2!r}")
+        whens.append(f"WHEN left({column}, 4) = '{tier2}' THEN {_group(group)}")
     for tier1, group in sorted(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items()):
         if not (len(tier1) == 2 and tier1.isdigit()):
             raise ValueError(f"tier1 code must be two digits: {tier1!r}")
-        if not 0 <= group <= _SEARCH_RANK_DIGIT_MAX:
-            raise ValueError(f"search group must be a single digit: {group!r}")
-        whens.append(f"WHEN '{tier1}' THEN {group}")
-    fallback = PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
-    if not 0 <= fallback <= _SEARCH_RANK_DIGIT_MAX:
-        raise ValueError(f"search group must be a single digit: {fallback!r}")
-    return f"(CASE left({column}, 2) {' '.join(whens)} ELSE {fallback} END)"
+        whens.append(f"WHEN left({column}, 2) = '{tier1}' THEN {_group(group)}")
+    fallback = _group(PLACE_CATEGORY_SEARCH_GROUP_FALLBACK)
+    return f"(CASE {' '.join(whens)} ELSE {fallback} END)"
+
+
+def _search_display_name_sql(name: str, category: str) -> str:
+    """``public_feature_display_name``의 SQL 짝 — 주차장인데 이름에 "주차"가 없으면 덧붙인다.
+
+    검색의 포함·일치 단계가 **보이는 이름**으로 비교하게 한다("도산서원 주차장"을 찾으면 저장
+    이름이 "도산서원"인 주차장이 일치한다). 앞뒤 공백 처리는 Python과 다르지만 비교 키는 공백을
+    지우므로 결과가 같다.
+    """
+    name = _trusted_sql_identifier(name)
+    category = _trusted_sql_identifier(category)
+    for literal in (PARKING_CATEGORY_PREFIX, PARKING_NAME_MARKER, PARKING_DISPLAY_LABEL):
+        if "'" in literal or "\\" in literal or ":" in literal:
+            raise ValueError(f"display literal is not SQL-safe: {literal!r}")
+    return (
+        f"(CASE WHEN left({category}, {len(PARKING_CATEGORY_PREFIX)}) = '{PARKING_CATEGORY_PREFIX}'"
+        f" AND strpos({name}, '{PARKING_NAME_MARKER}') = 0"
+        f" THEN {name} || ' {PARKING_DISPLAY_LABEL}' ELSE {name} END)"
+    )
+
+
+def _search_compact_sql(expression: str) -> str:
+    """``search_alias_key``의 SQL 짝 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 소문자."""
+    return f"lower(translate(normalize({expression}, NFC), {_SEARCH_WHITESPACE_SQL}, ''))"
 
 
 # 별칭 이름 일치(``name = :alias_name``)는 trigram GIN의 ``=`` 연산자(pg_trgm 1.6, strategy 11)로
@@ -1765,16 +1828,23 @@ WITH name_candidates AS MATERIALIZED (
 filtered AS (
     SELECT
         name_candidates.*,
-        lower(regexp_replace(name, '\\s+', '', 'g')) AS compact_name,
-        lower(
-          regexp_replace(regexp_replace(name, '^\\S+\\s+', ''), '\\s+', '', 'g')
-        ) AS compact_tail
+        {_search_display_name_sql("name", "category")} AS display_name
     FROM name_candidates
     WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
       AND (
         CAST(:categories AS text[]) IS NULL
         OR category = ANY(CAST(:categories AS text[]))
       )
+),
+compacted AS (
+    -- 비교 키는 보이는 이름(주차장 표시 이름 포함)에서 만든다. tail은 첫 공백까지(지역명 —
+    -- "안동 도산서원")를 뗀 나머지다. 공백이 없으면 이름 전체다.
+    SELECT
+        filtered.*,
+        {_search_compact_sql("display_name")} AS compact_name,
+        {_search_compact_sql("substr(display_name, strpos(display_name, ' ') + 1)")}
+          AS compact_tail
+    FROM filtered
 ),
 candidates AS (
     SELECT
@@ -1808,7 +1878,8 @@ candidates AS (
                 ) THEN 0
               ELSE 1
             END * {_SEARCH_RANK_BBOX_WEIGHT}
-          -- 분류 그룹: 관광 → 숙박·온천 → 식음 → 그 밖(분류 체계에서 유도).
+          -- 분류 그룹: 관광 → 숙박·온천·역·휴게소·공항·의료 → 식음 → 편의·주차·주유·미분류
+          -- (분류 체계에서 유도, Tier 2 예외 먼저).
           + {_search_category_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
           -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
           -- 검색어와 같으면 0(공백 무시).
@@ -1820,7 +1891,7 @@ candidates AS (
           -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
         ) AS search_rank
-    FROM filtered
+    FROM compacted
 )
 """
 
@@ -6289,8 +6360,8 @@ def _search_cursor_params(
         except (KeyError, TypeError, ValueError) as exc:
             raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
         rank = keyset["rank"]
-        # bool은 int의 하위형이라 따로 막는다. 순위는 0 이상의 정수다.
-        if type(rank) is not int or rank < 0:
+        # bool은 int의 하위형이라 따로 막는다. 순위는 0 이상 ``_SEARCH_RANK_MAX`` 이하의 정수다.
+        if type(rank) is not int or not 0 <= rank <= _SEARCH_RANK_MAX:
             raise FeatureSearchCursorInvalidError("invalid feature search cursor")
         params["cursor_rank"] = rank
     return params
@@ -6344,13 +6415,14 @@ def _search_row(row: Any) -> FeatureSearchRow:
 
 
 def search_alias_key(q: str) -> str:
-    """검색어 정규화 — NFC, 공백 전부 제거, 소문자.
+    """검색어 정규화 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 소문자.
 
     ``feature.feature_search_aliases.alias``의 형식(migration 436 CHECK)이자 순위의 "이름이
-    검색어를 품는가/같은가" 비교 키다. SQL 쪽 이름은 ``lower(regexp_replace(name, '\\s+', ''))``로
-    같은 모양을 만든다.
+    검색어를 품는가/같은가" 비교 키다. 이름 쪽은 ``_search_compact_sql``이 같은 순서·같은
+    공백 집합으로 만든다.
     """
-    return "".join(unicodedata.normalize("NFC", q).split()).lower()
+    normalized = unicodedata.normalize("NFC", q)
+    return "".join(ch for ch in normalized if ch not in _SEARCH_WHITESPACE).lower()
 
 
 _SEARCH_ALIAS_LOOKUP_SQL: Final[str] = """
@@ -6379,7 +6451,8 @@ async def search_features(
     bbox 술어는 stored ``coord`` 컬럼과 ``ST_MakeEnvelope``만 사용한다.
 
     ``q`` 검색의 순서(436): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만, 그 안에서
-    bbox 안 → 분류 그룹(관광 → 숙박·온천 → 식음 → 그 밖) → 이름 일치 → 분류 구체성 →
+    bbox 안 → 분류 그룹(관광 → 숙박·온천·역·휴게소·공항·의료 → 식음 → 편의·주차·주유) →
+    이름 일치(보이는 이름 기준) → 분류 구체성 →
     ``score`` 내림차순 → ``feature_id``. ``q``와 함께 온 ``bbox``는 **필터가 아니라 순위
     가중**이다. ``q`` 없이 ``bbox``만 오면 종전처럼 bbox 필터 + ``feature_id`` 순이다.
     """
