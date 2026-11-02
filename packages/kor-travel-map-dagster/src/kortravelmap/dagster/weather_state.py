@@ -12,18 +12,29 @@ D3·D4와 "2단계" W3·W4가 정본이다.
 - schedule은 **기본 STOPPED**다. weather에 W1~W5가 배포되고
   (``KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED``) Map code-server에 weather 주소·토큰이
   들어간 뒤 켠다. 첫 교체 전에는 REST가 503이다.
-- 실패 분류: 503(``weather_not_ready``)·410 재시도 소진·Valkey 연결 실패는 step 재시도 대상이고,
-  401·404·계약 위반·JSON 아님·교체 거부·동시 교체·Valkey OOM·미설정은 step 재시도를 끈다.
+- 503은 먼저 **그 페이지만** 같은 cursor로 유한 재시도한다(``Retry-After``를 따르고, 대기와 가장 긴
+  요청이 run 상한 안에 들 때만, 한 순회 대기 합 60초·run 재시도 예산 안에서). weather의
+  ``EXPORT_TEMPORARILY_UNAVAILABLE``(읽기 경합)과, 그 구분이 없던 이전 weather의
+  ``EXPORT_NOT_READY``가 대상이다.
+- 실패 분류: 503(``weather_not_ready``) 페이지 재시도 소진·410 재시도 소진·Valkey 연결 실패는 step
+  재시도 대상이고, 401·404·계약 위반·JSON 아님·교체 거부·동시 교체·Valkey OOM·미설정은 step
+  재시도를 끈다.
 - 다른 적재가 같은 데이터셋을 잡고 있으면(잠금) 이번 run은 아무것도 하지 않고 성공으로 끝난다.
 """
 
 # ``from __future__ import annotations``를 쓰지 않는다 — Dagster가 op의 ``context`` 주석을
 # 실제 타입으로 검사한다(transport_state.py와 같다).
 import asyncio
+import contextlib
 import logging
-from collections.abc import Awaitable, Callable, Mapping
+import math
+import re
+import time
+from collections.abc import Awaitable, Callable, Iterator, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Any, Final, TypeVar
 
 import httpx
@@ -182,6 +193,51 @@ _WEATHER_MAX_PAGES: Final[int] = 2_000
 _WEATHER_RETRY_BASE_DELAY_SECONDS: float = upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS
 """HTTP 층 재시도 간격 기준(테스트가 0으로 바꾼다)."""
 
+_WEATHER_PAGE_ATTEMPTS: Final[int] = 4
+"""503 한 페이지의 시도 상한(첫 요청 포함). 실패한 페이지만 같은 cursor로 다시 묻는다."""
+
+_WEATHER_PAGE_RETRY_BASE_DELAY_SECONDS: Final[float] = 5.0
+"""503 페이지 재시도 간격 기준(5·10·20초). ``Retry-After``가 더 길면 그것을 따른다."""
+
+_WEATHER_PAGE_RETRY_MAX_DELAY_SECONDS: Final[float] = 60.0
+"""한 번 기다리는 상한. ``Retry-After``가 이보다 길면 이 페이지를 다시 묻지 않고 실패한다(그 뒤는
+step 재시도 몫이다 — ``RetryPolicy`` 30초가 ``Retry-After``보다 이를 수 있다)."""
+
+_WEATHER_WALK_RETRY_SLEEP_SECONDS: Final[float] = 60.0
+"""한 순회(``_read_all_pages``)의 503 페이지 재시도 대기 합 상한. 페이지마다 따로 맞는 재시도가
+쌓여 run 상한을 넘기지 않게 한다 — 남은 페이지 수는 미리 알 수 없다."""
+
+_WEATHER_RUN_TAIL_SECONDS: Final[int] = 60
+"""페이지를 다 받은 뒤 Valkey 교체·정리에 남겨 두는 시간. run 상한에서 뺀다."""
+
+_PAGE_RETRY_CODES: Final[frozenset[str | None]] = frozenset(
+    {"EXPORT_TEMPORARILY_UNAVAILABLE", "EXPORT_NOT_READY", None}
+)
+"""페이지 재시도 대상 503 code. ``EXPORT_NOT_READY``는 읽기 경합을 그 이름으로 내던 이전 weather
+때문이다(경합 code를 내는 weather가 배포되면 뺀다). ``None``은 code가 없는 503(앞단 프록시)이다.
+그 밖의 명시 code(모양이 틀린 것 포함)는 곧바로 실패한다."""
+
+_PROBLEM_CODE: Final[re.Pattern[str]] = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+_INVALID_PROBLEM_CODE: Final[str] = "<invalid>"
+"""``code``가 있으나 모양이 틀린 503 — 명시 code로 보고 재시도하지 않는다."""
+
+_WEATHER_DEADLINE: Final[ContextVar[float | None]] = ContextVar(
+    "kortravelmap_weather_deadline", default=None
+)
+"""이 적재가 페이지 재시도를 시작해도 되는 마지막 monotonic 시각. 없으면 시도 상한만 건다."""
+
+_page_retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+"""503 페이지 재시도 대기(테스트가 기록용으로 바꾼다)."""
+
+
+@contextlib.contextmanager
+def _paging_deadline(deadline: float | None) -> Iterator[None]:
+    token = _WEATHER_DEADLINE.set(deadline)
+    try:
+        yield
+    finally:
+        _WEATHER_DEADLINE.reset(token)
+
 
 class _WeatherCursorRejected(WeatherExportContractError):
     """422. 첫 페이지면 질의 계약 위반(terminal)이고, 둘째 페이지 이후면 순회 도중 weather가
@@ -195,6 +251,43 @@ class _WeatherTransientStatus(WeatherExportFailure):
 
     failure_kind = "weather_transient_status"
     retryable = True
+
+
+class _WeatherUnavailable(WeatherExportNotReady):
+    """503. 페이지 재시도가 쓰는 problem ``code``와 ``Retry-After``(초)를 함께 든다."""
+
+    def __init__(self, message: str, *, code: str | None, retry_after: float | None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retry_after = retry_after
+
+
+def _problem_code(response: httpx.Response) -> str | None:
+    """503 problem의 ``code``. JSON 객체가 아니거나 ``code``가 없으면(앞단 프록시) ``None``."""
+    try:
+        body = response.json()
+    except (ValueError, RecursionError):
+        return None
+    if not isinstance(body, dict) or "code" not in body:
+        return None
+    code = body["code"]
+    if isinstance(code, str) and _PROBLEM_CODE.fullmatch(code):
+        return code
+    return _INVALID_PROBLEM_CODE
+
+
+def _retry_after_seconds(value: str | None) -> float | None:
+    """``Retry-After``(초 또는 HTTP-date)를 초로. 읽을 수 없으면 ``None``."""
+    text = (value or "").strip()
+    if text.isascii() and text.isdigit():
+        return float(int(text)) if len(text) <= 12 else 1e12  # 아주 길면 그냥 "아주 오래"
+    try:
+        when = parsedate_to_datetime(text)
+    except (TypeError, ValueError, IndexError, OverflowError):
+        return None
+    if when.tzinfo is None:
+        return None
+    return max(0.0, (when - datetime.now(UTC)).total_seconds())
 
 
 def _raise_weather_status(response: httpx.Response, path: str) -> None:
@@ -212,9 +305,17 @@ def _raise_weather_status(response: httpx.Response, path: str) -> None:
     if status == 410:
         raise WeatherExportSnapshotExpired(f"kor-travel-weather {path} snapshot이 만료됐다(410).")
     if status == 503:
-        raise WeatherExportNotReady(
-            f"kor-travel-weather {path}가 503이다 — 완결된 성공 export가 아직 없다(빈 정상 "
-            "집합이 아니다). 이번 run은 아무것도 쓰지 않는다."
+        code = _problem_code(response)
+        reason = (
+            "읽기 경합이다(같은 요청을 다시 보내면 된다)"
+            if code == "EXPORT_TEMPORARILY_UNAVAILABLE"
+            else "완결된 성공 export가 아직 없다(빈 정상 집합이 아니다)"
+        )
+        raise _WeatherUnavailable(
+            f"kor-travel-weather {path}가 503(code={code})이다 — {reason}. 이번 run은 아무것도 "
+            "쓰지 않는다.",
+            code=code,
+            retry_after=_retry_after_seconds(response.headers.get("retry-after")),
         )
     if status == 422:
         raise _WeatherCursorRejected(f"kor-travel-weather {path}가 422다(cursor·질의 계약).")
@@ -271,6 +372,64 @@ async def _weather_get(
     raise AssertionError(f"unreachable: kor-travel-weather {path}")  # pragma: no cover
 
 
+@dataclass(slots=True)
+class _PageClock:
+    """한 순회의 503 페이지 재시도 시계.
+
+    ``slowest``는 이 순회에서 가장 오래 걸린 요청이다. 재시도는 대기 + 그만큼의 요청이
+    ``deadline``(run 상한 - 꼬리) 안에 들어갈 때만 시작한다 — 시작한 요청의 길이는 이미
+    ``kor_travel_weather_timeout_seconds``가 묶는다.
+    """
+
+    deadline: float | None
+    slowest: float = 0.0
+    slept: float = 0.0
+
+    def fits(self, delay: float) -> bool:
+        if self.slept + delay > _WEATHER_WALK_RETRY_SLEEP_SECONDS:
+            return False
+        return self.deadline is None or time.monotonic() + delay + self.slowest <= self.deadline
+
+
+async def _weather_get_page(
+    client: httpx.AsyncClient,
+    path: str,
+    params: Mapping[str, Any],
+    *,
+    budget: upstream_retry.RetryBudget,
+    clock: _PageClock,
+    headers: Mapping[str, str] | None = None,
+) -> httpx.Response:
+    """페이지 요청 1건. 503이면 **그 페이지만** 같은 cursor로 유한 재시도한다(순회는 이어 간다)."""
+    for attempt in range(1, _WEATHER_PAGE_ATTEMPTS + 1):
+        started = time.monotonic()
+        try:
+            response = await _weather_get(client, path, params, budget=budget, headers=headers)
+        except _WeatherUnavailable as exc:
+            clock.slowest = max(clock.slowest, time.monotonic() - started)
+            delay = max(
+                _WEATHER_PAGE_RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1), exc.retry_after or 0.0
+            )
+            if (
+                attempt >= _WEATHER_PAGE_ATTEMPTS
+                or exc.code not in _PAGE_RETRY_CODES
+                or delay > _WEATHER_PAGE_RETRY_MAX_DELAY_SECONDS
+                or not clock.fits(delay)
+                or not budget.try_consume()  # 상관 장애면 run 재시도 예산이 먼저 끊는다
+            ):
+                raise
+            clock.slept += delay
+            _LOGGER.warning(
+                "kor-travel-weather %s 503(code=%s) — %.0f초 뒤 같은 페이지 재시도 %d/%d",
+                path, exc.code, delay, attempt, _WEATHER_PAGE_ATTEMPTS - 1,
+            )
+            await _page_retry_sleep(delay)
+            continue
+        clock.slowest = max(clock.slowest, time.monotonic() - started)
+        return response
+    raise AssertionError(f"unreachable: kor-travel-weather {path}")  # pragma: no cover
+
+
 def _weather_json(response: httpx.Response, path: str) -> Any:
     try:
         return response.json()
@@ -312,12 +471,14 @@ async def _read_all_pages(
     """cursor를 끝까지 따라간다.
 
     410(snapshot 만료)이나 둘째 페이지 이후의 422(순회 도중 weather 재배포)이면 첫 페이지부터
-    **한 번** 다시 받는다. 첫 페이지 422는 질의 계약 위반이라 그대로 실패한다.
+    **한 번** 다시 받는다. 첫 페이지 422는 질의 계약 위반이라 그대로 실패한다. 503은 그 페이지만
+    다시 묻는다(:func:`_weather_get_page`).
     ``if_none_match``가 있으면 첫 페이지에 보내고, 304면 바로 ``not_modified``로 끝낸다.
     """
     base_url, headers = _weather_connection(settings)
     shared = upstream_retry.active_run_retry_budget()
     budget = shared if shared is not None else upstream_retry.RetryBudget()
+    clock = _PageClock(_WEATHER_DEADLINE.get())
     async with httpx.AsyncClient(
         base_url=base_url,
         timeout=weather_http_timeout(settings),
@@ -326,7 +487,8 @@ async def _read_all_pages(
         for restart in range(2):
             try:
                 return await _walk_pages(
-                    client, path, params, parse, budget=budget, if_none_match=if_none_match
+                    client, path, params, parse, budget=budget, clock=clock,
+                    if_none_match=if_none_match,
                 )
             except (WeatherExportSnapshotExpired, _MidWalkCursorRejected) as exc:
                 if restart:
@@ -355,6 +517,7 @@ async def _walk_pages(
     parse: Callable[[Any], WeatherExportPage[_ItemT]],
     *,
     budget: upstream_retry.RetryBudget,
+    clock: _PageClock,
     if_none_match: str | None = None,
 ) -> WeatherFetch:
     rows: list[Any] = []
@@ -371,7 +534,9 @@ async def _walk_pages(
         first = page_number == 1
         headers = {"If-None-Match": if_none_match} if first and if_none_match else None
         try:
-            response = await _weather_get(client, path, query, budget=budget, headers=headers)
+            response = await _weather_get_page(
+                client, path, query, budget=budget, clock=clock, headers=headers
+            )
         except _WeatherCursorRejected as exc:
             if first:
                 raise
@@ -663,10 +828,12 @@ async def load_weather_state(
     run_id: str | None,
     allow_shrink: bool,
     store: ValkeyStateStore | None = None,
+    deadline: float | None = None,
 ) -> dict[str, Any]:
     """한 데이터셋을 받아 Valkey 세대를 교체한다. 반환값은 op metadata다.
 
-    ``store``를 넘기지 않으면 settings로 client를 만들고 끝나면 닫는다.
+    ``store``를 넘기지 않으면 settings로 client를 만들고 끝나면 닫는다. ``deadline``
+    (monotonic)을 넘기면 그 뒤로는 503 페이지 재시도를 시작하지 않는다(:func:`_run_deadline`).
     """
     owned = store is None
     try:
@@ -681,7 +848,11 @@ async def load_weather_state(
                 return {"dataset": spec.dataset.name, "skipped": "locked"}
             current = await _current_meta_or_none(active, spec.dataset.name)
             etag = current.source_etag if current is not None and not allow_shrink else None
-            with counting_upstream_requests(), sharing_run_retry_budget():
+            with (
+                counting_upstream_requests(),
+                sharing_run_retry_budget(),
+                _paging_deadline(deadline),
+            ):
                 try:
                     collected = await spec.collect(settings, etag)
                 except Exception as exc:
@@ -775,6 +946,33 @@ _OP_CONFIG: Final[dict[str, Field]] = {
 }
 
 
+def _run_deadline(context: OpExecutionContext, spec: WeatherStateJobSpec) -> float:
+    """run 상한(``dagster/max_runtime``)에서 꼬리를 뺀 monotonic 시각.
+
+    run monitor는 step이 아니라 **run** 시작부터 센다 — step 재시도가 이미 쓴 시간도 뺀다
+    (``mois_chunked_load._run_clock_start``와 같은 규칙). 상한은 run의 실제 tag(없으면 spec)다.
+    run 시작을 모르면(조회 실패 포함) 지금부터 센다.
+    """
+    now = time.time()
+    cap = spec.max_runtime_seconds
+    with contextlib.suppress(AttributeError, TypeError, ValueError):
+        cap = int(context.run.tags.get(MAX_RUNTIME_SECONDS_TAG, cap))
+    try:
+        record = context.instance.get_run_record_by_id(context.run_id)
+    except Exception:  # noqa: BLE001 — 시작 시각을 모르면 지금부터 센다(적재를 막지 않는다)
+        record = None
+    start_time = getattr(record, "start_time", None)
+    elapsed = 0.0
+    if (
+        isinstance(start_time, int | float)
+        and not isinstance(start_time, bool)
+        and math.isfinite(start_time)
+        and 0 < start_time <= now
+    ):
+        elapsed = now - float(start_time)
+    return time.monotonic() + cap - _WEATHER_RUN_TAIL_SECONDS - elapsed
+
+
 def _build_job(spec: WeatherStateJobSpec) -> JobDefinition:
     @op(
         name=f"{spec.job_name}_op",
@@ -788,6 +986,7 @@ def _build_job(spec: WeatherStateJobSpec) -> JobDefinition:
             settings=KorTravelMapSettings(),
             run_id=context.run_id,
             allow_shrink=bool(context.op_config.get("allow_shrink", False)),
+            deadline=_run_deadline(context, spec),
         )
         if metadata.get("skipped"):
             context.log.info("%s: 다른 적재가 잠금을 쥐고 있어 건너뛴다.", spec.dataset.name)

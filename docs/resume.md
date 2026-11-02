@@ -1,3 +1,8 @@
+## 2026-11-03 — weather_state 503 페이지 재시도(PR #1437)
+
+weather 503은 실패한 페이지만 `Retry-After`를 지켜 다시 묻는다(ADR-114 W3). **다음 한 작업**: 머지 → 다음 후속 회전
+(PinVi #615와 함께). 경합 code를 내는 weather 배포 뒤 재시도 대상에서 `EXPORT_NOT_READY`를 뺀다.
+
 ## 2026-11-02 — feature 검색 순위·별칭·주차장 표시 이름(alembic 436)
 
 브랜치 `feat/search-relevance-aliases`. `/v1/features/search` 순위(별칭·포함·bbox 가중·분류 그룹·이름 일치), 별칭 표

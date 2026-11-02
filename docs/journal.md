@@ -1,3 +1,9 @@
+## 2026-11-03 — weather_state 503 페이지 재시도
+
+weather 503(읽기 경합 `EXPORT_TEMPORARILY_UNAVAILABLE`·이전 `EXPORT_NOT_READY`·code 없음)은 그 페이지만 같은
+cursor로 최대 3번 다시 묻는다(5·10·20초, `Retry-After` 우선; 대기+가장 긴 요청이 run 상한 −60초 안, 순회당 대기 합
+60초, run 재시도 예산 공유). 소진하면 종전처럼 step 재시도.
+
 ## 2026-11-02 — feature 검색 순위·별칭(alembic 436)·주차장 표시 이름
 
 PinVi live e2e(봉화·영주·안동)에서 "하회마을"이 서울 음식점 셋, "고씨동굴"이 고씨네·단양 고수동굴, "도산서원"이
