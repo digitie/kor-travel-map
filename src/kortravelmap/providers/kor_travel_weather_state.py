@@ -113,9 +113,10 @@ DATASET_FORECAST_SHORT: Final = WeatherStateDataset(
     # (기상청 격자 300개 상한)의 attempt 218개가 공개된 시점에 위치 273곳(airkorea 126·krforest 90·
     # krex 39·khoa 11·kma 7), 완결 추정 약 340~375곳이다. 1,000이면 완결된 회차도 "53건 < 1000"처럼
     # 매번 교체를 거부해 한 번도 적재되지 않았다. 포화된 odroid에서는 한 회차 격자의 1/3 가까이가
-    # artifact 쓰기·증명 실패로 빠지므로 절대 하한은 완결 추정의 약 2/3(250곳), 비율은 초단기와 같은
-    # 80%다. 소수만 온 깨진 집합(53곳)은 계속 거부한다.
-    guard=ShrinkGuard(min_ratio=0.8, baseline_min=100, min_count=250),
+    # artifact 쓰기·증명 실패로 빠지므로 절대 하한은 완결 추정의 약 2/3(250곳)이고, 비율도 같은 몫
+    # (65%)이라 완결 회차(375곳) 뒤의 그런 회차(약 250곳)도 받는다. 소수만 온 깨진 집합(53곳)은
+    # 거부한다.
+    guard=ShrinkGuard(min_ratio=0.65, baseline_min=100, min_count=250),
     max_age=timedelta(hours=12),
     style="short",
 )

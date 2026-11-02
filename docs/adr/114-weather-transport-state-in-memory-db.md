@@ -378,7 +378,7 @@ OpenAPI·weather 저장소의 실제 HTTP 예시(`docs/examples/map-service/`)�
 | `weather.locations` | W1 | 위치 + 주소(시도·시군구·법정동) | 좌표 있는 것 | 1,000곳 · 90% · 100 | 8일(`loaded_at` 기준) | 매일 04:37 |
 | `weather.current` | W2 | 그 위치의 최신 관측 값 목록 | 없음 | 500곳 · 80% · 50 | 3시간 | 매시 :25·:40 |
 | `weather.forecast_ultra_short` | W3 `ultra_short` | 그 위치의 provider별 예보 묶음 | 없음 | 500곳 · 80% · 50 | 3시간 | 매시 :48 |
-| `weather.forecast_short` | W3 `short` | 〃 | 없음 | 250곳 · 80% · 100(2026-11-02 실측으로 1,000곳·90%에서 내림) | 12시간 | 하루 8회 02·05·…·23시 :30 |
+| `weather.forecast_short` | W3 `short` | 〃 | 없음 | 250곳 · 65% · 100(2026-11-02 실측으로 1,000곳·90%에서 내림) | 12시간 | 하루 8회 02·05·…·23시 :30 |
 | `weather.forecast_mid` | W3 `mid` | 〃 | 없음 | 14곳 · 80% · 10(2026-11-02 실측 중기 target 21곳으로 300곳에서 내림) | 36시간 | 06·07·18·19시 :40 |
 | `weather.forecast_external` | W3 `external` | 〃 | 없음 | 없음 · 80% · 50(기준 미만이면 0곳 허용) | 12시간 | 3시간마다 :55 |
 | `weather.daily_summaries` | W5 `days=N` | 그 위치의 (날짜, 구간) 요약 목록 | 없음 | 1,000곳 · 90% · 100 | 6시간 | 매시 :41 |
