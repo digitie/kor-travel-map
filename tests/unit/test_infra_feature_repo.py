@@ -1036,6 +1036,7 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         marker_color="P-01",
         score=0.95,
         score_cursor="0.9500000476837158",
+        rank=1001,
     )
 
     score_contract = feature_repo._feature_search_contract(
@@ -1056,6 +1057,7 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         contract=score_contract,
         signing_key=_SEARCH_CURSOR_KEY,
     ) == {
+        "cursor_rank": 1001,
         "cursor_score": "0.9500000476837158",
         "cursor_feature_id": "feature-1",
     }
@@ -1078,6 +1080,7 @@ def test_feature_search_cursor_round_trips_score_and_id_modes() -> None:
         contract=id_contract,
         signing_key=_SEARCH_CURSOR_KEY,
     ) == {
+        "cursor_rank": None,
         "cursor_score": None,
         "cursor_feature_id": "feature-1",
     }
@@ -1121,6 +1124,7 @@ def test_feature_search_cursor_fingerprint_uses_normalized_repository_contract()
             marker_color="P-01",
             score=0.95,
             score_cursor="0.9500000476837158",
+            rank=1001,
         ),
         contract=first,
         signing_key=_SEARCH_CURSOR_KEY,
@@ -1152,6 +1156,7 @@ def test_feature_search_cursor_rejects_tamper_unknown_version_and_query_reuse() 
         marker_color="P-01",
         score=0.95,
         score_cursor="0.9500000476837158",
+        rank=1001,
     )
     cursor = feature_repo._encode_search_cursor(
         row,
@@ -1214,21 +1219,59 @@ def test_feature_search_cursor_rejects_tamper_unknown_version_and_query_reuse() 
             signing_key=_SEARCH_CURSOR_KEY,
         )
 
+    version = feature_repo._SEARCH_CURSOR_VERSION
     for invalid_payload in (
         {
-            "v": 1,
+            "v": version,
             "kind": "other",
             "query": contract.fingerprint,
             "keyset": {
                 "feature_id": "feature-1",
+                "rank": 1001,
                 "score": "0.9500000476837158",
             },
         },
         {
-            "v": 1,
+            "v": version,
             "kind": "feature_search",
             "query": contract.fingerprint,
-            "keyset": {"feature_id": "feature-1", "score": "NaN"},
+            "keyset": {"feature_id": "feature-1", "rank": 1001, "score": "NaN"},
+        },
+        # 436: q 검색 keyset은 rank를 반드시 싣는다 — 빠지거나 정수가 아니면 거부한다.
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "score": "0.9500000476837158"},
+        },
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "rank": True, "score": "0.95"},
+        },
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "rank": -1, "score": "0.95"},
+        },
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "rank": "1001", "score": "0.95"},
+        },
+        # 순위 상한(_SEARCH_RANK_MAX) 밖 — int4 밖 값이 SQL까지 가지 않는다.
+        {
+            "v": version,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {
+                "feature_id": "feature-1",
+                "rank": feature_repo._SEARCH_RANK_MAX + 1,
+                "score": "0.95",
+            },
         },
     ):
         invalid_cursor = feature_repo._encode_search_cursor_payload(
@@ -1266,6 +1309,213 @@ def test_feature_search_cursor_rejects_malformed_tokens(cursor: str) -> None:
             contract=contract,
             signing_key=_SEARCH_CURSOR_KEY,
         )
+
+
+def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
+    """436이 keyset에 rank를 더하며 version을 올렸다 — 배포 전 v1 cursor는 조용히 다른
+    순서로 이어지지 않고 VERSION_UNSUPPORTED가 된다."""
+
+    contract = feature_repo._feature_search_contract(
+        q="하회마을",
+        bbox=None,
+        kinds=None,
+        categories=None,
+        page_size=10,
+        include_total=False,
+    )
+    assert feature_repo._SEARCH_CURSOR_VERSION == 2
+    v1_cursor = feature_repo._encode_search_cursor_payload(
+        {
+            "v": 1,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "score": "0.5"},
+        },
+        signing_key=_SEARCH_CURSOR_KEY,
+    )
+    with pytest.raises(FeatureSearchCursorVersionUnsupportedError):
+        feature_repo._search_cursor_params(
+            v1_cursor,
+            contract=contract,
+            signing_key=_SEARCH_CURSOR_KEY,
+        )
+
+
+def test_feature_search_q_cursor_requires_row_rank() -> None:
+    contract = feature_repo._feature_search_contract(
+        q="하회마을",
+        bbox=None,
+        kinds=None,
+        categories=None,
+        page_size=10,
+        include_total=False,
+    )
+    row = FeatureSearchRow(
+        feature_id="feature-1",
+        kind="place",
+        name="하회마을",
+        category="02010100",
+        lon=126.97,
+        lat=37.54,
+        marker_icon=None,
+        marker_color=None,
+        score=1.0,
+        score_cursor="1",
+    )
+    with pytest.raises(ValueError, match="rank cursor is required"):
+        feature_repo._encode_search_cursor(
+            row,
+            contract=contract,
+            signing_key=_SEARCH_CURSOR_KEY,
+        )
+
+
+@pytest.mark.parametrize(
+    ("query", "expected"),
+    [
+        ("고씨동굴", "고씨동굴"),
+        ("  영월  고씨동굴 ", "영월고씨동굴"),
+        ("안동\u3000하회마을", "안동하회마을"),
+        # NBSP·좁은 NBSP(U+202F)도 지운다 — PostgreSQL ``\s``가 놓치는 문자다.
+        ("안동\u00a0도산서원\u202f", "안동도산서원"),
+        # 공백이 갈라 둔 자모는 지운 뒤 NFC로 한 음절이 된다.
+        ("\u1100 \u1161", "가"),
+        # 대문자+결합 부호는 소문자로 바꾼 뒤 NFC여야 한 글자(U+01F0)다.
+        ("J\u030c", "\u01f0"),
+        ("Lotte World", "lotteworld"),
+        # NFD(자모 분리) 입력도 NFC 키와 같아진다.
+        ("\u1100\u1169\u110a\u1175", "고씨"),
+    ],
+)
+def test_search_alias_key_normalizes_nfc_whitespace_and_case(query: str, expected: str) -> None:
+    assert feature_repo.search_alias_key(query) == expected
+
+
+def test_search_category_group_sql_is_derived_from_the_taxonomy() -> None:
+    """순위 CASE는 분류 체계 표에서 만들어진다 — 접두 예외(긴 것)가 먼저, Tier 1마다 한 WHEN."""
+
+    from kortravelmap.category import (
+        PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+        PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+        PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
+        PlaceCategoryTier1Code,
+    )
+
+    sql = feature_repo._search_category_group_sql("category")
+    tier1_codes = {code.value for code in PlaceCategoryTier1Code}
+    assert set(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) == tier1_codes
+    for tier1, group in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items():
+        assert f"WHEN left(category, 2) = '{tier1}' THEN {group}" in sql
+    positions = {
+        prefix: sql.index(f"WHEN left(category, {len(prefix)}) = '{prefix}' THEN {group}")
+        for prefix, group in PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES.items()
+    }
+    # 접두 예외는 Tier 1보다 먼저, 긴 접두가 짧은 접두보다 먼저다(CASE는 첫 일치에서 멈춘다).
+    assert max(positions.values()) < sql.index("WHEN left(category, 2) =")
+    for long_prefix, long_at in positions.items():
+        for short_prefix, short_at in positions.items():
+            if len(long_prefix) > len(short_prefix):
+                assert long_at < short_at
+    assert sql.endswith(f"ELSE {PLACE_CATEGORY_SEARCH_GROUP_FALLBACK} END)")
+    assert sql.count("WHEN left(") == len(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) + len(
+        PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES
+    )
+    assert "{_search_category_group_sql" not in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    assert sql in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    with pytest.raises(ValueError, match="trusted SQL identifier"):
+        feature_repo._search_category_group_sql("category); DROP TABLE x; --")
+
+
+def test_search_whitespace_set_is_python_isspace_and_matches_migration_436() -> None:
+    """검색 비교 키의 공백 집합이 세 곳(repo SQL·Python 키·436 CHECK·model)에서 같다."""
+
+    import importlib.util
+    import sys
+    from pathlib import Path
+
+    from kortravelmap.infra import models
+
+    every_space = tuple(c for c in range(0x110000) if chr(c).isspace())
+    assert every_space == feature_repo.SEARCH_WHITESPACE_CODEPOINTS
+    path = (
+        Path(__file__).resolve().parents[2]
+        / "alembic"
+        / "versions"
+        / "436_feature_search_aliases.py"
+    )
+    spec = importlib.util.spec_from_file_location("_m436_whitespace", path)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    assert module._WHITESPACE_CODEPOINTS == feature_repo.SEARCH_WHITESPACE_CODEPOINTS
+    assert module._WHITESPACE_SQL == feature_repo._SEARCH_WHITESPACE_SQL
+    assert models._SEARCH_ALIAS_WHITESPACE_SQL == feature_repo._SEARCH_WHITESPACE_SQL
+    for codepoint in every_space:
+        assert feature_repo.search_alias_key(f"가{chr(codepoint)}나") == "가나"
+
+
+def test_search_alias_key_output_is_lower_nfc_space_free_for_letter_marks() -> None:
+    """``search_alias_key`` 출력은 436 별칭 CHECK가 요구하는 모양(공백 없음·소문자·NFC)이다.
+
+    Python 쪽 성질만 본다 — DB CHECK 자체는 통합 테스트(별칭 거부 케이스)가 본다.
+    """
+    import unicodedata
+
+    marks = [chr(c) for c in range(0x300, 0x370)]
+    letters = [chr(c) for c in range(0x41, 0x5B)] + [chr(c) for c in range(0xC0, 0x250)]
+    for letter in letters:
+        for mark in marks:
+            key = feature_repo.search_alias_key(letter + mark)
+            assert key == unicodedata.normalize("NFC", key), (letter, mark)
+            assert key == key.lower(), (letter, mark)
+            assert not any(ch.isspace() for ch in key)
+
+
+def test_search_tail_sql_translate_lengths_match_and_trim_first() -> None:
+    """tail 분할의 ``translate`` 대상 길이가 공백 집합 크기와 같고, 앞뒤 공백을 먼저 걷는다."""
+    sql = feature_repo._search_tail_sql("display_name")
+    # 공백 집합이 세 번 나온다: btrim(substr 인자) · btrim(translate 인자) · translate의 from.
+    assert sql.count(feature_repo._SEARCH_WHITESPACE_SQL) == 3
+    assert sql.count("chr(") == 3 * len(feature_repo.SEARCH_WHITESPACE_CODEPOINTS)
+    assert f"repeat(' ', {len(feature_repo.SEARCH_WHITESPACE_CODEPOINTS)})" in sql
+    assert sql.startswith("substr(btrim(display_name, ")
+    assert feature_repo._search_compact_sql(sql) in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+
+
+def test_search_display_name_sql_mirrors_python_display_rule() -> None:
+    from kortravelmap.category import (
+        PARKING_CATEGORY_PREFIX,
+        PARKING_DISPLAY_LABEL,
+        PARKING_NAME_MARKER,
+    )
+
+    sql = feature_repo._search_display_name_sql("name", "category")
+    assert f"left(category, {len(PARKING_CATEGORY_PREFIX)}) = '{PARKING_CATEGORY_PREFIX}'" in sql
+    assert f"strpos(name, '{PARKING_NAME_MARKER}') = 0" in sql
+    assert f"name || ' {PARKING_DISPLAY_LABEL}'" in sql
+    # 공백만인 이름에는 붙이지 않는다(Python ``str.strip()``이 빈 문자열이면 그대로인 것과 같다).
+    assert f"translate(name, {feature_repo._SEARCH_WHITESPACE_SQL}, '') <> ''" in sql
+    assert sql in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    with pytest.raises(ValueError, match="trusted SQL identifier"):
+        feature_repo._search_display_name_sql("name; --", "category")
+
+
+def test_feature_search_score_sql_keeps_bbox_out_of_predicates() -> None:
+    """q 검색에서 bbox는 정렬식(순위 가중)이고 술어가 아니다. 공간식에 ST_Transform이 없다."""
+
+    sql = feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+    name_candidates = sql.split("WITH name_candidates AS MATERIALIZED (", 1)[1]
+    name_candidates = name_candidates.split("\nfiltered AS (", 1)[0]
+    assert "ST_MakeEnvelope" not in name_candidates
+    # bbox 식은 정확히 한 번, search_rank 정렬식 안에만 있다(filtered·최종 WHERE에 술어로 없다).
+    assert sql.count("ST_MakeEnvelope") == 1
+    rank_block = sql.split("\ncandidates AS (", 1)[1].split(") AS search_rank", 1)[0]
+    assert "ST_MakeEnvelope" in rank_block
+    assert "ST_Transform" not in sql
+    assert "ORDER BY search_rank ASC, score DESC, feature_id ASC" in sql
+    assert "(search_rank, -score, feature_id) >" in sql
 
 
 @pytest.mark.asyncio
@@ -1344,6 +1594,7 @@ async def test_search_features_validates_before_db_call() -> None:
             marker_color="P-01",
             score=0.95,
             score_cursor="0.9500000476837158",
+            rank=1001,
         ),
         contract=contract,
         signing_key=_SEARCH_CURSOR_KEY,

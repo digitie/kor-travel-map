@@ -889,8 +889,11 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   적용해 `idx_features_coord_gist` 사용을 고정한다. `LIMIT`으로 잘리는 subset이 호출마다
   흔들리지 않도록 후보 materialize 뒤 `feature_id ASC`로 결정적 정렬을 유지한다.
 - `/features/search`: q 검색 경로는 `name % :q` 후보를 먼저 materialize해 기존
-  `idx_features_name_trgm` full GIN을 탄 뒤, `deleted_at`/bbox/kind/category 필터와
-  score keyset을 적용한다. count query도 같은 q 전용 CTE를 사용한다.
+  `idx_features_name_trgm` full GIN을 탄 뒤, `deleted_at`/kind/category 필터와
+  `(rank, score, feature_id)` keyset을 적용한다. count query도 같은 q 전용 CTE를 사용한다.
+  436부터 별칭 이름(`name = :alias_name`)이 같은 GIN의 `=`(pg_trgm 1.6 strategy 11)로
+  BitmapOr 팔을 하나 더 만들고, q와 함께 온 bbox는 술어가 아니라 정렬식(순위 가중)이다
+  (2026-11-02 prod 실측: "고씨동굴" 별칭 포함 35ms, "카페" 1,494 후보 43ms).
 - dedup/enrichment review list: cursor tie-breaker를 `review_id::text`가 아니라 UUID
   그대로 비교하고, queue 후보를 materialize한 뒤 feature/source 정보를 붙인다.
 - enrichment review list: 단일 `status + provider` 필터는 scalar equality SQL로 분리해

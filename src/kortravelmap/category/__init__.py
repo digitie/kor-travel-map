@@ -52,6 +52,18 @@ from ._definitions import (
     mapbox_maki_icon_or_none,
     print_category_tree,
 )
+from ._presentation import (
+    PARKING_CATEGORY_PREFIX,
+    PARKING_DISPLAY_LABEL,
+    PARKING_NAME_MARKER,
+    PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+    PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+    PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
+    category_search_group,
+    is_parking_category_code,
+    is_tier1_only_category_code,
+    public_feature_display_name,
+)
 
 __all__ = [
     # 메타
@@ -82,4 +94,15 @@ __all__ = [
     "mapbox_maki_icon_or_none",
     "format_category_tree",
     "print_category_tree",
+    # 검색 순위·표시 이름 (분류 체계에서 유도)
+    "PARKING_CATEGORY_PREFIX",
+    "PARKING_DISPLAY_LABEL",
+    "PARKING_NAME_MARKER",
+    "PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1",
+    "PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES",
+    "PLACE_CATEGORY_SEARCH_GROUP_FALLBACK",
+    "category_search_group",
+    "is_tier1_only_category_code",
+    "is_parking_category_code",
+    "public_feature_display_name",
 ]

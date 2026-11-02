@@ -54,6 +54,7 @@ import json
 import logging
 import math
 import os
+import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
@@ -67,6 +68,14 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.types import Text
 
+from kortravelmap.category import (
+    PARKING_CATEGORY_PREFIX,
+    PARKING_DISPLAY_LABEL,
+    PARKING_NAME_MARKER,
+    PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
+    PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+    PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
+)
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
     FeatureSearchCursorQueryMismatchError,
@@ -167,6 +176,8 @@ __all__ = [
     "features_in_bbox",
     "features_contained_in_area",
     "encode_bbox_cursor",
+    "SEARCH_WHITESPACE_CODEPOINTS",
+    "search_alias_key",
     "search_features",
     "features_nearby_poi_cache_target",
 ]
@@ -1700,6 +1711,125 @@ WITH candidates AS (
 )
 """
 
+#: 검색 순위(``rank``)의 자리. 큰 자리가 먼저 갈린다 — 일치 단계 → bbox 안 → 분류 그룹 →
+#: 이름 일치 → 분류 구체성. 같은 ``rank`` 안에서는 trigram ``score`` 내림차순, ``feature_id``
+#: 오름차순이다. 각 자리 값은 한 자리 수다(``_SEARCH_RANK_DIGIT_MAX``).
+_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 10_000
+_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 1_000
+_SEARCH_RANK_GROUP_WEIGHT: Final[int] = 100
+_SEARCH_RANK_EXACT_WEIGHT: Final[int] = 10
+_SEARCH_RANK_DIGIT_MAX: Final[int] = 9
+#: 순위가 가질 수 있는 가장 큰 값(유사도만·bbox 밖·가장 큰 그룹·불일치·Tier 1만). cursor 검증 상한.
+_SEARCH_RANK_MAX: Final[int] = (
+    2 * _SEARCH_RANK_MATCH_WEIGHT
+    + _SEARCH_RANK_BBOX_WEIGHT
+    + _SEARCH_RANK_DIGIT_MAX * _SEARCH_RANK_GROUP_WEIGHT
+    + _SEARCH_RANK_EXACT_WEIGHT
+    + 1
+)
+
+#: 검색 비교 키에서 지우는 공백 — Python ``str.isspace()``가 참인 문자 전부(유니코드 고정 집합).
+#: ``search_alias_key``와 검색 SQL의 ``translate``가 **같은 집합**을 쓴다. PostgreSQL ``\s``는
+#: locale마다 다르고 NBSP(U+00A0)·U+202F 등을 빼므로 쓰지 않는다. migration 436의 별칭 키
+#: CHECK도 같은 집합이다(``tests/unit/test_infra_feature_repo.py``가 셋을 대조한다).
+SEARCH_WHITESPACE_CODEPOINTS: Final[tuple[int, ...]] = (
+    0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0, 0x1680,
+    0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009, 0x200A,
+    0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+)  # fmt: skip
+_SEARCH_WHITESPACE: Final[frozenset[str]] = frozenset(map(chr, SEARCH_WHITESPACE_CODEPOINTS))
+_SEARCH_WHITESPACE_SQL: Final[str] = (
+    "(" + " || ".join(f"chr({codepoint})" for codepoint in SEARCH_WHITESPACE_CODEPOINTS) + ")"
+)
+
+
+def _trusted_sql_identifier(column: str) -> str:
+    if not column.replace("_", "").replace(".", "").isalnum():
+        raise ValueError("column must be a trusted SQL identifier")
+    return column
+
+
+def _search_category_group_sql(column: str) -> str:
+    """분류 체계 표(접두 예외, 긴 것 먼저 → Tier 1)에서 유도한 분류 그룹 ``CASE``.
+
+    코드를 SQL에 따로 박지 않는다 — ``PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES``·
+    ``…_BY_TIER1``이 정본이다. 키는 숫자(짝수 자리), 값은 한 자리 정수라 이어 붙여도 SQL 주입
+    자리가 없다(아래 검사가 강제한다).
+    """
+    column = _trusted_sql_identifier(column)
+
+    def _group(value: int) -> int:
+        if not 0 <= value <= _SEARCH_RANK_DIGIT_MAX:
+            raise ValueError(f"search group must be a single digit: {value!r}")
+        return value
+
+    whens: list[str] = []
+    overrides = sorted(
+        PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES.items(),
+        key=lambda item: (-len(item[0]), item[0]),
+    )
+    for prefix, group in overrides:
+        if not (prefix.isdigit() and len(prefix) in (4, 6, 8)):
+            raise ValueError(f"category prefix must be 4, 6 or 8 digits: {prefix!r}")
+        whens.append(f"WHEN left({column}, {len(prefix)}) = '{prefix}' THEN {_group(group)}")
+    for tier1, group in sorted(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items()):
+        if not (len(tier1) == 2 and tier1.isdigit()):
+            raise ValueError(f"tier1 code must be two digits: {tier1!r}")
+        whens.append(f"WHEN left({column}, 2) = '{tier1}' THEN {_group(group)}")
+    fallback = _group(PLACE_CATEGORY_SEARCH_GROUP_FALLBACK)
+    return f"(CASE {' '.join(whens)} ELSE {fallback} END)"
+
+
+def _search_display_name_sql(name: str, category: str) -> str:
+    """``public_feature_display_name``의 SQL 짝 — 주차장인데 이름에 "주차"가 없으면 덧붙인다.
+
+    검색의 포함·일치 단계가 **보이는 이름**으로 비교하게 한다("도산서원 주차장"을 찾으면 저장
+    이름이 "도산서원"인 주차장이 일치한다). 앞뒤 공백 처리는 Python과 다르지만 비교 키는 공백을
+    지우므로 결과가 같다.
+    """
+    name = _trusted_sql_identifier(name)
+    category = _trusted_sql_identifier(category)
+    for literal in (PARKING_CATEGORY_PREFIX, PARKING_NAME_MARKER, PARKING_DISPLAY_LABEL):
+        if "'" in literal or "\\" in literal or ":" in literal:
+            raise ValueError(f"display literal is not SQL-safe: {literal!r}")
+    return (
+        f"(CASE WHEN left({category}, {len(PARKING_CATEGORY_PREFIX)}) = '{PARKING_CATEGORY_PREFIX}'"
+        f" AND strpos({name}, '{PARKING_NAME_MARKER}') = 0"
+        f" AND translate({name}, {_SEARCH_WHITESPACE_SQL}, '') <> ''"
+        f" THEN {name} || ' {PARKING_DISPLAY_LABEL}' ELSE {name} END)"
+    )
+
+
+def _search_compact_sql(expression: str) -> str:
+    """``search_alias_key``의 SQL 짝 — NFC, 공백 제거, 소문자, 마지막에 다시 NFC.
+
+    마지막 NFC의 이유: 공백이 갈라 둔 자모("ᄀ ᅡ")는 공백을 지운 뒤에야, 대문자+결합 부호
+    ("J" + U+030C)는 소문자로 바꾼 뒤에야 한 글자로 합쳐진다.
+    """
+    stripped = f"translate(normalize({expression}, NFC), {_SEARCH_WHITESPACE_SQL}, '')"
+    return f"normalize(lower({stripped}), NFC)"
+
+
+def _search_tail_sql(expression: str) -> str:
+    """앞뒤 공백을 걷은 뒤 첫 공백(``SEARCH_WHITESPACE_CODEPOINTS`` 어느 것이든)까지 뗀 나머지.
+
+    공백이 없으면 전체다. ``translate``의 대상 문자열은 공백 집합과 길이가 같아야 위치가 맞는다
+    (``repeat(' ', N)``, N = 집합 크기).
+    """
+    trimmed = f"btrim({expression}, {_SEARCH_WHITESPACE_SQL})"
+    spaces = "repeat(' ', " + str(len(SEARCH_WHITESPACE_CODEPOINTS)) + ")"
+    return (
+        f"substr({trimmed}, strpos(translate({trimmed}, {_SEARCH_WHITESPACE_SQL}, {spaces}),"
+        " ' ') + 1)"
+    )
+
+
+# 별칭 이름 일치(``name = :alias_name``)는 trigram GIN의 ``=`` 연산자(pg_trgm 1.6, strategy 11)로
+# 같은 ``idx_features_name_trgm``을 탄다 — ``%``와 함께 BitmapOr가 된다(2026-11-02 prod 실측
+# 35ms). ``:alias_name``이 NULL이면 그 팔은 아무 것도 찾지 않는다.
+#
+# bbox는 q 검색에서 **필터가 아니라 순위 가중**이다(bbox 안이 먼저). 술어가 아니라 정렬식이라
+# 인덱스와 무관하고, 4326 ``coord``와 ``ST_MakeEnvelope``만 쓴다(ADR-012, ST_Transform 없음).
 _FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = f"""
 WITH name_candidates AS MATERIALIZED (
     SELECT
@@ -1713,8 +1843,31 @@ WITH name_candidates AS MATERIALIZED (
         f.marker_color,
         x_extension.similarity(f.name, CAST(:q AS text)) AS score
     FROM feature.public_features AS f
-    WHERE f.name OPERATOR(x_extension.%) CAST(:q AS text)
+    WHERE (
+        f.name OPERATOR(x_extension.%) CAST(:q AS text)
+        OR f.name = CAST(:alias_name AS text)
+      )
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+),
+filtered AS (
+    SELECT
+        name_candidates.*,
+        {_search_display_name_sql("name", "category")} AS display_name
+    FROM name_candidates
+    WHERE (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
+      AND (
+        CAST(:categories AS text[]) IS NULL
+        OR category = ANY(CAST(:categories AS text[]))
+      )
+),
+compacted AS (
+    -- 비교 키는 보이는 이름(주차장 표시 이름 포함)에서 만든다. tail은 첫 공백까지(지역명 —
+    -- "안동 도산서원")를 뗀 나머지다. 공백이 없으면 이름 전체다.
+    SELECT
+        filtered.*,
+        {_search_compact_sql("display_name")} AS compact_name,
+        {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail
+    FROM filtered
 ),
 candidates AS (
     SELECT
@@ -1727,26 +1880,41 @@ candidates AS (
         x_extension.ST_Y(coord) AS lat,
         marker_icon,
         marker_color,
-        score
-    FROM name_candidates
-    WHERE (
-        CAST(:bbox_enabled AS boolean) IS FALSE
-        OR (
-          coord IS NOT NULL
-          AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-            CAST(:min_lon AS double precision),
-            CAST(:min_lat AS double precision),
-            CAST(:max_lon AS double precision),
-            CAST(:max_lat AS double precision),
-            4326
-          )
-        )
-      )
-      AND (CAST(:kinds AS text[]) IS NULL OR kind = ANY(CAST(:kinds AS text[])))
-      AND (
-        CAST(:categories AS text[]) IS NULL
-        OR category = ANY(CAST(:categories AS text[]))
-      )
+        score,
+        (
+          -- 일치 단계: 0 별칭이 가리키는 이름, 1 이름이 검색어를 품음(공백 무시), 2 유사도만.
+          CASE
+            WHEN name = CAST(:alias_name AS text) THEN 0
+            WHEN strpos(compact_name, CAST(:q_compact AS text)) > 0 THEN 1
+            ELSE 2
+          END * {_SEARCH_RANK_MATCH_WEIGHT}
+          -- bbox 가중: bbox가 없거나 그 안이면 0.
+          + CASE
+              WHEN CAST(:bbox_enabled AS boolean) IS NOT TRUE THEN 0
+              WHEN coord IS NOT NULL
+                AND coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+                  CAST(:min_lon AS double precision),
+                  CAST(:min_lat AS double precision),
+                  CAST(:max_lon AS double precision),
+                  CAST(:max_lat AS double precision),
+                  4326
+                ) THEN 0
+              ELSE 1
+            END * {_SEARCH_RANK_BBOX_WEIGHT}
+          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖
+          -- (분류 체계에서 유도, 접두 예외 먼저).
+          + {_search_category_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
+          -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
+          -- 검색어와 같으면 0(공백 무시).
+          + CASE
+              WHEN compact_name = CAST(:q_compact AS text)
+                OR compact_tail = CAST(:q_compact AS text) THEN 0
+              ELSE 1
+            END * {_SEARCH_RANK_EXACT_WEIGHT}
+          -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
+          + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
+        ) AS search_rank
+    FROM compacted
 )
 """
 
@@ -1757,7 +1925,8 @@ SELECT candidates.*, score::text AS score_cursor
 FROM candidates
 WHERE (
     CAST(:cursor_score AS text) IS NULL
-    OR (-score, feature_id) > (
+    OR (search_rank, -score, feature_id) > (
+        CAST(:cursor_rank AS integer),
         -- score 컬럼은 x_extension.similarity(...) = real(float4). cursor_score는
         -- score::text 왕복값이므로 real로 캐스팅해야 경계값이 정확히 일치하고, 동점 시
         -- feature_id tiebreak로 넘어가 커서 행 자신이 다음 페이지에 재등장(같은 feature_id
@@ -1766,7 +1935,7 @@ WHERE (
         CAST(:cursor_feature_id AS uuid)
     )
 )
-ORDER BY score DESC, feature_id ASC
+ORDER BY search_rank ASC, score DESC, feature_id ASC
 LIMIT :limit_plus_one
 """
 )
@@ -2299,6 +2468,8 @@ class FeatureSearchRow:
     score: float | None = None
     score_cursor: str | None = None
     feature_uuid: str | None = None
+    rank: int | None = None
+    """q 검색 순위(작을수록 앞). bbox만 쓴 검색은 ``None``."""
 
 
 @dataclass(frozen=True)
@@ -5952,7 +6123,8 @@ def encode_bbox_cursor(feature_id: str) -> str:
 
 
 _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
-_SEARCH_CURSOR_VERSION: Final[int] = 1
+#: v2(436): q 검색 keyset에 ``rank``가 더해졌다 — v1 cursor는 VERSION_UNSUPPORTED다.
+_SEARCH_CURSOR_VERSION: Final[int] = 2
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -5972,7 +6144,9 @@ class _FeatureSearchContract:
 
     @property
     def sort(self) -> str:
-        return "score_desc_feature_id_asc" if self.q_enabled else "feature_id_asc"
+        return (
+            "rank_asc_score_desc_feature_id_asc" if self.q_enabled else "feature_id_asc"
+        )
 
     @property
     def fingerprint(self) -> str:
@@ -6180,13 +6354,16 @@ def _search_cursor_params(
         signing_key=signing_key,
     )
     params: dict[str, Any] = {
+        "cursor_rank": None,
         "cursor_score": None,
         "cursor_feature_id": None,
     }
     if not payload:
         return params
     keyset = payload["keyset"]
-    expected_keys = {"feature_id", "score"} if contract.q_enabled else {"feature_id"}
+    expected_keys = (
+        {"feature_id", "rank", "score"} if contract.q_enabled else {"feature_id"}
+    )
     if set(keyset) != expected_keys:
         raise FeatureSearchCursorInvalidError("invalid feature search cursor")
     feature_id = keyset["feature_id"]
@@ -6205,6 +6382,11 @@ def _search_cursor_params(
             params["cursor_score"] = score
         except (KeyError, TypeError, ValueError) as exc:
             raise FeatureSearchCursorInvalidError("invalid feature search cursor") from exc
+        rank = keyset["rank"]
+        # bool은 int의 하위형이라 따로 막는다. 순위는 0 이상 ``_SEARCH_RANK_MAX`` 이하의 정수다.
+        if type(rank) is not int or not 0 <= rank <= _SEARCH_RANK_MAX:
+            raise FeatureSearchCursorInvalidError("invalid feature search cursor")
+        params["cursor_rank"] = rank
     return params
 
 
@@ -6219,7 +6401,10 @@ def _encode_search_cursor(
         score = item.score_cursor if item.score_cursor is not None else str(item.score)
         if not math.isfinite(float(score)):
             raise ValueError("feature search score cursor must be finite")
+        if item.rank is None:
+            raise ValueError("feature search rank cursor is required for q search")
         keyset["score"] = score
+        keyset["rank"] = item.rank
     payload: dict[str, Any] = {
         "v": _SEARCH_CURSOR_VERSION,
         "kind": _SEARCH_CURSOR_KIND,
@@ -6235,6 +6420,7 @@ def _search_row(row: Any) -> FeatureSearchRow:
     score = row["score"]
     score_cursor = row.get("score_cursor")
     feature_uuid = row.get("feature_uuid")
+    search_rank = row.get("search_rank")
     return FeatureSearchRow(
         feature_id=str(row["feature_id"]),
         kind=str(row["kind"]),
@@ -6247,7 +6433,29 @@ def _search_row(row: Any) -> FeatureSearchRow:
         score=float(score) if score is not None else None,
         score_cursor=str(score_cursor) if score_cursor is not None else None,
         feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
+        rank=int(search_rank) if search_rank is not None else None,
     )
+
+
+def search_alias_key(q: str) -> str:
+    """검색어 정규화 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 소문자, 마지막에 다시 NFC.
+
+    ``feature.feature_search_aliases.alias``의 형식(migration 436 CHECK)이자 순위의 "이름이
+    검색어를 품는가/같은가" 비교 키다. 이름 쪽은 ``_search_compact_sql``이 같은 순서·같은
+    공백 집합으로 만든다.
+    """
+    normalized = unicodedata.normalize("NFC", q)
+    compact = "".join(ch for ch in normalized if ch not in _SEARCH_WHITESPACE)
+    # 공백이 갈라 둔 자모("ᄀ ᅡ")·대문자+결합 부호("J\u030c")는 지우고 소문자로 바꾼 뒤에야 한
+    # 글자로 합쳐진다 — 그래서 마지막에 NFC. 436 별칭 CHECK(``IS NFC NORMALIZED``)와 맞물린다.
+    return unicodedata.normalize("NFC", compact.lower())
+
+
+_SEARCH_ALIAS_LOOKUP_SQL: Final[str] = """
+SELECT canonical_name
+FROM feature.feature_search_aliases
+WHERE alias = CAST(:alias_key AS text)
+"""
 
 
 async def search_features(
@@ -6267,6 +6475,12 @@ async def search_features(
     ``q`` 또는 ``bbox`` 중 하나는 필수다. ``q``는 pg_trgm ``%`` 연산자를 사용하고,
     threshold는 현재 transaction에만 ``SET LOCAL``로 적용한다(ADR-004/성능 가이드).
     bbox 술어는 stored ``coord`` 컬럼과 ``ST_MakeEnvelope``만 사용한다.
+
+    ``q`` 검색의 순서(436): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만, 그 안에서
+    bbox 안 → 분류 그룹(관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖) →
+    이름 일치(보이는 이름 기준) → 분류 구체성 →
+    ``score`` 내림차순 → ``feature_id``. ``q``와 함께 온 ``bbox``는 **필터가 아니라 순위
+    가중**이다. ``q`` 없이 ``bbox``만 오면 종전처럼 bbox 필터 + ``feature_id`` 순이다.
     """
     contract = _feature_search_contract(
         q=q,
@@ -6291,8 +6505,16 @@ async def search_features(
         min_lon = min_lat = max_lon = max_lat = None
 
     q_enabled = contract.q_enabled
-    if q_enabled:
+    q_compact: str | None = None
+    alias_name: str | None = None
+    if contract.q is not None:
+        q_compact = search_alias_key(contract.q)
         await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
+        # 별칭은 PK 조회 한 번이다. 이름을 bind 값으로 넘겨야 본 질의의 별칭 팔이 trigram
+        # GIN ``=``로 계획된다(하위 질의로 두면 계획 시점에 값을 모른다).
+        alias_name = (
+            await session.execute(text(_SEARCH_ALIAS_LOOKUP_SQL), {"alias_key": q_compact})
+        ).scalar_one_or_none()
     effective_limit = contract.page_size
     rows = (
         (
@@ -6300,6 +6522,8 @@ async def search_features(
                 text(_FEATURE_SEARCH_BY_SCORE_SQL if q_enabled else _FEATURE_SEARCH_BY_ID_SQL),
                 {
                     "q": contract.q,
+                    "q_compact": q_compact,
+                    "alias_name": alias_name,
                     "bbox_enabled": contract.bbox is not None,
                     "min_lon": min_lon,
                     "min_lat": min_lat,
@@ -6325,6 +6549,8 @@ async def search_features(
             text(_FEATURE_SEARCH_SCORE_COUNT_SQL if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
             {
                 "q": contract.q,
+                "q_compact": q_compact,
+                "alias_name": alias_name,
                 "bbox_enabled": contract.bbox is not None,
                 "min_lon": min_lon,
                 "min_lat": min_lat,

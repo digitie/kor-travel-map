@@ -40,7 +40,7 @@ ADR 참조
 from __future__ import annotations
 
 from datetime import date, datetime
-from typing import Any
+from typing import Any, Final
 
 from geoalchemy2 import Geometry
 from sqlalchemy import (
@@ -1700,6 +1700,55 @@ class FeatureGeocodeStampRow(Base):
     geo_data_token: Mapped[str] = mapped_column(Text, nullable=False)
     reverse_outcome: Mapped[str] = mapped_column(Text, nullable=False)
     stamped_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
+#: migration 436 CHECK의 공백 집합(Python ``str.isspace()``) — ``feature_repo``와 같은 값이다.
+_SEARCH_ALIAS_WHITESPACE_SQL: Final[str] = (
+    "("
+    + " || ".join(
+        f"chr({codepoint})"
+        for codepoint in (
+            0x09, 0x0A, 0x0B, 0x0C, 0x0D, 0x1C, 0x1D, 0x1E, 0x1F, 0x20, 0x85, 0xA0, 0x1680,
+            0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
+            0x200A, 0x2028, 0x2029, 0x202F, 0x205F, 0x3000,
+        )
+    )
+    + ")"
+)  # fmt: skip
+
+
+class FeatureSearchAliasRow(Base):
+    """``feature.feature_search_aliases`` — 검색어 별칭(migration 436).
+
+    ``alias``는 정규화한 검색어(NFC·공백 제거·소문자, ``feature_repo.search_alias_key``)이고
+    ``canonical_name``은 그 검색어가 뜻하는 ``features.name``이다. ``/v1/features/search``가
+    이름이 정확히 같은 공개 Feature를 맨 앞 순위로 더한다. Feature id가 아니라 이름을 담는
+    이유는 migration 436 docstring에 있다. 식별자 별칭 ``feature_aliases``와는 다른 표다.
+    """
+
+    __tablename__ = "feature_search_aliases"
+    __table_args__ = (
+        CheckConstraint(
+            "alias <> '' AND char_length(alias) <= 200 "
+            f"AND alias = translate(alias, {_SEARCH_ALIAS_WHITESPACE_SQL}, '') "
+            "AND alias = lower(alias) AND alias IS NFC NORMALIZED",
+            name=conv("ck_feature_search_aliases_alias_key"),
+        ),
+        CheckConstraint(
+            "canonical_name <> '' AND char_length(canonical_name) <= 500 "
+            f"AND canonical_name = btrim(canonical_name, {_SEARCH_ALIAS_WHITESPACE_SQL}) "
+            "AND canonical_name IS NFC NORMALIZED",
+            name=conv("ck_feature_search_aliases_canonical_name"),
+        ),
+        {"schema": "feature"},
+    )
+
+    alias: Mapped[str] = mapped_column(Text, primary_key=True)
+    canonical_name: Mapped[str] = mapped_column(Text, nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("now()")
     )
 

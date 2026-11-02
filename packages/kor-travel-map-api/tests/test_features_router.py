@@ -1494,3 +1494,103 @@ def test_search_features_rejects_missing_scope(
         assert "q 또는 bbox" in r.json()["detail"]
     finally:
         client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_search_features_shows_parking_display_name(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """주차장 Feature는 "<이름> 주차장"으로 보이고, 순서·다른 분류 이름은 그대로다(436)."""
+    from kortravelmap.infra.feature_repo import FeatureSearchPage, FeatureSearchRow
+
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
+    from kortravelmap.api.routers import features as features_mod
+
+    def _row(feature_id: str, name: str, category: str) -> FeatureSearchRow:
+        return FeatureSearchRow(
+            feature_id=feature_id,
+            kind="place",
+            name=name,
+            category=category,
+            lon=128.84,
+            lat=36.728,
+            marker_icon=None,
+            marker_color=None,
+            score=1.0,
+            rank=1,
+            feature_uuid=_expected_uuid(feature_id),
+        )
+
+    async def _search(_session: Any, **_kw: Any) -> FeatureSearchPage:
+        return FeatureSearchPage(
+            items=(
+                _row("heritage", "안동 도산서원", "01070300"),
+                _row("parking", "도산서원", "06010000"),
+                _row("named-parking", "소수서원 주차장", "06010000"),
+            ),
+            total_count=None,
+            next_cursor=None,
+        )
+
+    monkeypatch.setattr(features_mod.feature_repo, "search_features", _search)
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
+    try:
+        response = client.get("/v1/features/search", params={"q": "도산서원"})
+        assert response.status_code == 200
+        names = [item["name"] for item in response.json()["data"]["items"]]
+        assert names == ["안동 도산서원", "도산서원 주차장", "소수서원 주차장"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_public_feature_models_apply_parking_display_name() -> None:
+    """공개 feature read 모델 네 개가 같은 표시 규칙을 쓴다(검색·bbox·상세·batch·주변)."""
+    from datetime import UTC, datetime
+
+    from kortravelmap.api.routers.features import (
+        FeatureDetailResponse,
+        FeatureSummary,
+        FeatureTripCard,
+        NearbyFeatureSummary,
+    )
+
+    common = {"feature_id": "f1", "kind": "place", "category": "06010000"}
+    summary = FeatureSummary(**common, name="고씨굴", lon=128.53, lat=37.13)
+    assert summary.name == "고씨굴 주차장"
+    trip_card = FeatureTripCard.model_validate(
+        {
+            **common,
+            "name": "고씨굴(강변)",
+            "lon": 128.53,
+            "lat": 37.13,
+            "address": {},
+            "marker_icon": None,
+            "marker_color": None,
+        }
+    )
+    assert trip_card.name == "고씨굴(강변) 주차장"
+    nearby = NearbyFeatureSummary(
+        **common, name="하회마을관광지", lon=128.53, lat=36.55, distance_m=12.0
+    )
+    assert nearby.name == "하회마을관광지 주차장"
+    detail = FeatureDetailResponse(
+        **common,
+        name="도산서원",
+        address={},
+        detail={},
+        urls={},
+        row_revision=1,
+        updated_at=datetime(2026, 11, 2, tzinfo=UTC),
+    )
+    assert detail.name == "도산서원 주차장"
+    # 주차장이 아니면 이름을 건드리지 않는다.
+    heritage = FeatureSummary(
+        feature_id="f2", kind="place", category="01070300", name="도산서원", lon=1.0, lat=2.0
+    )
+    assert heritage.name == "도산서원"

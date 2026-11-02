@@ -144,6 +144,16 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   1안(대기 상한)은 #1348로 머지됐고 2안(스트리밍 snapshot은 다 받은 뒤 짧게 쓴다)은 ADR-113이다. 해제 조건은 acceptance
   §T-LOAD-LOCK-WAIT. 큐 경로 executor transaction의 받는 동안 `idle in transaction`은 남는다(ADR-113 결정 4).
 
+- [ ] T-HERITAGE-ENRICH — **국가유산 Feature 보강: 누락 기록·설명·운영 정보·도로명 주소**
+
+  안동 하회마을(국가민속문화유산) 기록이 없다. 국가유산 Feature에 설명·운영시간·요금·이미지·전화가 비어 있고 영월 고씨굴은
+  도로명 주소가 없다(2026-11 PinVi live e2e, 봉화·영주·안동). provider 응답에 있는 값부터 매핑한다. 해제 조건은 acceptance.
+
+- [ ] T-DEDUP-MEDIA-HERITAGE — **dedup 규칙 검토: 미디어 명소 vs 국가유산 중복**
+
+  `media_famous_place`(MCST)와 국가유산이 같은 장소로 두 번 나온다 — 도산서원(약 300 m), 소수서원. 거리·이름(지역명 접두
+  "안동 도산서원")·분류 기준으로 dedup 후보에 오르는지 확인하고 규칙을 고친다. 해제 조건은 acceptance.
+
 - [ ] T-PG18-CI — **공용 PG 18 대응: CI를 PG18 lane으로 바꾸고 fresh-install catalog 가정 정리**
 
   ADR-118(proposed): CI 통합 suite를 공용 instance digest(PG18 + PostGIS 3.6) 한 lane으로 바꾸고 PG16 catalog 가정을

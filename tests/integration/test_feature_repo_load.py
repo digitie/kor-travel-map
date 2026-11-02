@@ -1280,9 +1280,14 @@ async def test_get_feature_rows_by_ids_and_search_features(
 
     lon = float(first.feature.coord.lon)
     lat = float(first.feature.coord.lat)
+    # 436부터 q와 함께 온 bbox는 필터가 아니라 순위 가중이다 — 같은 이름의 행이 공유 DB
+    # 어디에 있든 결과에 남는다. 그래서 개수 대신 "내 세 행이 keyset을 따라 빠짐·중복 없이
+    # 나오는가"를 본다.
+    mine = {first_uuid, second_uuid, third_uuid}
     seen: list[str] = []
+    total: int | None = None
     cursor: str | None = None
-    for _ in range(3):
+    for _ in range(200):
         page = await feature_repo.search_features(
             migrated_session,
             q="서울 봄꽃 축제",
@@ -1295,14 +1300,20 @@ async def test_get_feature_rows_by_ids_and_search_features(
             cursor_signing_key=_SEARCH_CURSOR_KEY,
         )
         assert len(page.items) == 1
-        assert page.total_count == 3
         assert page.items[0].score_cursor is not None
+        assert page.items[0].rank is not None
+        total = page.total_count
         seen.append(page.items[0].feature_id)
         cursor = page.next_cursor
+        if cursor is None:
+            break
 
-    # 세 Feature의 이름이 같아 점수가 동점이다 — tie-break 축은 정본 키(uuid).
-    assert seen == sorted([first_uuid, second_uuid, third_uuid])
     assert cursor is None
+    assert len(seen) == len(set(seen)) == total
+    assert total is not None
+    assert total >= 3
+    # 세 Feature는 이름·좌표·분류가 같아 순위·점수가 동점이다 — tie-break 축은 정본 키(uuid).
+    assert [feature_id for feature_id in seen if feature_id in mine] == sorted(mine)
 
     bbox_only = await feature_repo.search_features(
         migrated_session,

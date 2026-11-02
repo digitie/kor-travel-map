@@ -213,6 +213,12 @@
         "434_protocol_entry_narrowing"
       ],
       "revision": "435_retire_sh_snapshot_path"
+    },
+    {
+      "down_revision": [
+        "435_retire_sh_snapshot_path"
+      ],
+      "revision": "436_feature_search_aliases"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

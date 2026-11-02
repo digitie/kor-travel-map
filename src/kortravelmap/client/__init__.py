@@ -2628,7 +2628,8 @@ class AsyncKorTravelMapClient:
         (둘 다 없으면 ``ValueError``). ``cursor_signing_key``는 인증 credential과
         분리한 32-byte 이상 HMAC key다. ``include_total=False``면 COUNT를 실행하지
         않고 ``total_count=None``을 반환한다. ``q``는 ``SET LOCAL`` threshold로만
-        적용한다(ADR-004).
+        적용한다(ADR-004). ``q``와 함께 온 ``bbox``는 필터가 아니라 순위 가중이다
+        (bbox 안이 먼저, migration 436 — 순위 규칙은 repo docstring).
         """
         async with self._session_factory() as session:
             return await repo_search_features(

@@ -95,6 +95,9 @@ _NEARBY_100KM = {
 }
 _COMMON_SEARCH = {
     "q": "카페",
+    # 436: 순위 비교 키와 별칭 이름. 상용 검색어라 별칭은 없다.
+    "q_compact": "카페",
+    "alias_name": None,
     "bbox_enabled": False,
     "min_lon": None,
     "min_lat": None,
@@ -102,6 +105,7 @@ _COMMON_SEARCH = {
     "max_lat": None,
     "kinds": None,
     "categories": None,
+    "cursor_rank": None,
     "cursor_score": None,
     "cursor_feature_id": None,
     "limit_plus_one": 51,
