@@ -49,11 +49,15 @@ def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> N
 
 
 def test_tier1_only_codes_match_catalog_depth_one() -> None:
-    """``XX000000`` 판정이 카탈로그의 depth 1과 정확히 같다(분류 체계가 정본)."""
+    """``XX000000`` 판정이 카탈로그의 depth ≤ 1과 정확히 같다(분류 체계가 정본).
+
+    depth 0은 sentinel ``00000000``(미분류) 하나다 — 그것도 하위 분류가 없는 코드다.
+    """
 
     for code in PLACE_CATEGORY_CODES:
-        expected = get_category(code).depth == 1
+        expected = get_category(code).depth <= 1
         assert is_tier1_only_category_code(code) is expected, code
+    assert get_category(PlaceCategoryCode.UNCLASSIFIED.value).depth == 0
     assert not is_tier1_only_category_code(None)
     assert not is_tier1_only_category_code("01")
 
