@@ -118,6 +118,7 @@ def test_parking_codes_are_the_parking_subtree() -> None:
         ("부석사 공영주차장", "부석사 공영주차장"),
         ("시청 주차타워", "시청 주차타워"),
         ("", ""),
+        ("\u3000", "\u3000"),
     ],
 )
 def test_parking_display_name_appends_label_when_missing(name: str, expected: str) -> None:

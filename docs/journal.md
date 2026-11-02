@@ -8,10 +8,11 @@ PinVi live e2e(봉화·영주·안동)에서 "하회마을"이 서울 음식점 
   rank, 상한 21911). 별칭 팔은 trigram GIN `=`로 BitmapOr(prod 35 ms).
 - 분류 그룹은 Tier 1 표 + 교통 목적지 접두 예외: 관광 0 → 숙박·온천·기차역·지하철역·휴게소·공항 1 → 식음 2 →
   그 밖 3. 리뷰 2인이 "서울역" 역이 "롯데리아 서울역점"보다 뒤인 것을 짚었고, 3번째 리뷰가 정류장 전체·의료까지
-  올린 것은 소유자 순서를 넘는다고 짚어 기차·지하철역·휴게소·공항만 남겼다. 관광 부분 일치는 여전히 앞이다.
+  올린 것은 소유자 순서를 넘는다고 짚어 기차·지하철역·휴게소·공항만 남겼다. 관광 부분 일치는 여전히 앞이고, 의료는
+  맨 뒤라 "서울대병원점" 음식점이 "서울대병원"보다 앞선다(소유자 판단 대상).
 - 이름 비교 키는 보이는 이름(주차장 표시 이름)에서, NFC·Python `isspace` 공백 집합 제거·소문자로 만든다. SQL은
-  `translate`로 같은 집합을 지운다(PG `\s`는 NBSP를 놓친다), 지운 뒤 다시 NFC. 436 CHECK도 같은 집합. tier-2 하네스
-  bind 누락도 고쳤다.
+  `translate`로 같은 집합을 지운다(PG `\s`는 NBSP를 놓친다). 양쪽 다 소문자 뒤 다시 NFC(자모·결합 부호). 436 CHECK도
+  같은 집합. 지역명 tail은 앞뒤 공백을 걷고 집합 어느 문자에서든 자른다. tier-2 하네스 bind 누락도 고쳤다.
 - 436 `feature.feature_search_aliases`: 정규화 검색어 → Feature **이름**(id는 환경·재적재마다 달라 migration이 못 심는다).
 - 주차장 표시 이름은 응답 모델 before-validator — 저장 값·ETag·OpenAPI 불변. backlog: T-HERITAGE-ENRICH·T-DEDUP-MEDIA-HERITAGE.
 - 이 절을 더하자 journal이 220 KiB를 넘어 가장 오래된 2026-10-13 두 절을 `archive/journal-2026-10e.md`(머리말 포함

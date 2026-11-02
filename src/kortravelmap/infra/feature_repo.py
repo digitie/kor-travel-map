@@ -1769,8 +1769,8 @@ def _search_category_group_sql(column: str) -> str:
         key=lambda item: (-len(item[0]), item[0]),
     )
     for prefix, group in overrides:
-        if not (prefix.isdigit() and len(prefix) in (4, 6)):
-            raise ValueError(f"category prefix must be four or six digits: {prefix!r}")
+        if not (prefix.isdigit() and len(prefix) in (4, 6, 8)):
+            raise ValueError(f"category prefix must be 4, 6 or 8 digits: {prefix!r}")
         whens.append(f"WHEN left({column}, {len(prefix)}) = '{prefix}' THEN {_group(group)}")
     for tier1, group in sorted(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items()):
         if not (len(tier1) == 2 and tier1.isdigit()):
@@ -1801,19 +1801,25 @@ def _search_display_name_sql(name: str, category: str) -> str:
 
 
 def _search_compact_sql(expression: str) -> str:
-    """``search_alias_key``의 SQL 짝 — NFC, 공백 제거, 다시 NFC, 소문자.
+    """``search_alias_key``의 SQL 짝 — NFC, 공백 제거, 소문자, 마지막에 다시 NFC.
 
-    다시 NFC를 거는 이유: 공백이 갈라 둔 자모("ᄀ ᅡ")는 공백을 지운 뒤에야 한 음절로 합쳐진다.
+    마지막 NFC의 이유: 공백이 갈라 둔 자모("ᄀ ᅡ")는 공백을 지운 뒤에야, 대문자+결합 부호
+    ("J" + U+030C)는 소문자로 바꾼 뒤에야 한 글자로 합쳐진다.
     """
     stripped = f"translate(normalize({expression}, NFC), {_SEARCH_WHITESPACE_SQL}, '')"
-    return f"lower(normalize({stripped}, NFC))"
+    return f"normalize(lower({stripped}), NFC)"
 
 
 def _search_tail_sql(expression: str) -> str:
-    """첫 공백(``SEARCH_WHITESPACE_CODEPOINTS`` 어느 것이든)까지 뗀 나머지. 공백이 없으면 전체다."""
+    """앞뒤 공백을 걷은 뒤 첫 공백(``SEARCH_WHITESPACE_CODEPOINTS`` 어느 것이든)까지 뗀 나머지.
+
+    공백이 없으면 전체다. ``translate``의 대상 문자열은 공백 집합과 길이가 같아야 위치가 맞는다
+    (``repeat(' ', N)``, N = 집합 크기).
+    """
+    trimmed = f"btrim({expression}, {_SEARCH_WHITESPACE_SQL})"
     spaces = "repeat(' ', " + str(len(SEARCH_WHITESPACE_CODEPOINTS)) + ")"
     return (
-        f"substr({expression}, strpos(translate({expression}, {_SEARCH_WHITESPACE_SQL}, {spaces}),"
+        f"substr({trimmed}, strpos(translate({trimmed}, {_SEARCH_WHITESPACE_SQL}, {spaces}),"
         " ' ') + 1)"
     )
 
@@ -6432,7 +6438,7 @@ def _search_row(row: Any) -> FeatureSearchRow:
 
 
 def search_alias_key(q: str) -> str:
-    """검색어 정규화 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 다시 NFC, 소문자.
+    """검색어 정규화 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 소문자, 마지막에 다시 NFC.
 
     ``feature.feature_search_aliases.alias``의 형식(migration 436 CHECK)이자 순위의 "이름이
     검색어를 품는가/같은가" 비교 키다. 이름 쪽은 ``_search_compact_sql``이 같은 순서·같은
@@ -6440,8 +6446,9 @@ def search_alias_key(q: str) -> str:
     """
     normalized = unicodedata.normalize("NFC", q)
     compact = "".join(ch for ch in normalized if ch not in _SEARCH_WHITESPACE)
-    # 공백이 갈라 둔 자모("ᄀ ᅡ")는 지운 뒤에야 한 음절로 합쳐진다 — 그래서 한 번 더 NFC.
-    return unicodedata.normalize("NFC", compact).lower()
+    # 공백이 갈라 둔 자모("ᄀ ᅡ")·대문자+결합 부호("J\u030c")는 지우고 소문자로 바꾼 뒤에야 한
+    # 글자로 합쳐진다 — 그래서 마지막에 NFC. 436 별칭 CHECK(``IS NFC NORMALIZED``)와 맞물린다.
+    return unicodedata.normalize("NFC", compact.lower())
 
 
 _SEARCH_ALIAS_LOOKUP_SQL: Final[str] = """

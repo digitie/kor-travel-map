@@ -238,20 +238,21 @@ in-bounds/search · `page_size` 그 외 · `run_limit`/`event_limit` dagster), �
 #### 1.6.2 feature search 순위·별칭·표시 이름 (migration 436)
 
 `q`가 있으면 후보는 `name % q`(pg_trgm, 문턱 0.2)와 **별칭이 가리키는 이름**
-(`feature.feature_search_aliases`, 검색어를 NFC·공백 제거·소문자로 정규화한 키)이고, 정렬은
+(`feature.feature_search_aliases`, 검색어를 NFC·공백 제거·소문자·NFC로 정규화한 키)이고, 정렬은
 `rank ASC, score DESC, feature_id ASC`다. `rank`는 큰 자리부터 다음 순서로 갈린다.
 
 1. 일치 단계 — 별칭이 가리키는 이름 → 이름이 검색어를 품음(공백 무시) → 유사도만.
 2. bbox — `q`와 함께 온 bbox는 **필터가 아니라 가중**이다. bbox 안이 먼저이고 밖도 결과에
    남는다(`include_total`도 bbox와 무관). `q` 없이 bbox만 오면 종전처럼 필터다.
 3. 분류 그룹 — 관광(국가유산·문화시설 포함) → 숙박·온천·교통 목적지(기차역·지하철역·휴게소·공항)
-   → 식음 → 그 밖(편의·버스 정류장·주차·주유·의료·미분류). `kortravelmap.category`의
+   → 식음 → 그 밖(편의·버스 정류장·택시 승강장·주차·주유·의료·미분류). `kortravelmap.category`의
    `PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES`(긴 접두 먼저) → `…_BY_TIER1`에서 유도한다.
 4. 이름 일치 — 이름이 검색어와 같거나, 첫 낱말(지역명, "안동 도산서원")을 뗀 나머지가 같으면 먼저.
 5. 분류 구체성 — Tier 1만 있는 코드(`XX000000`)는 하위 분류가 있는 코드보다 뒤.
 
 이름 비교(포함·일치)는 **보이는 이름**(아래 주차장 표시 이름)으로 하고, 비교 키는 양쪽 모두 NFC →
-Python `str.isspace()` 공백 집합 제거 → 다시 NFC → 소문자다(SQL은 같은 집합을 `translate`로 지운다).
+Python `str.isspace()` 공백 집합 제거 → 소문자 → 다시 NFC다(SQL은 같은 집합을 `translate`로 지운다).
+지역명 tail은 앞뒤 공백을 걷은 뒤 공백 집합 어느 문자에서든 첫 공백까지 뗀다.
 알려진 한계: 관광 그룹의 부분 일치("서울역사박물관")는 교통 목적지의 정확 일치("서울역")보다 앞선다 —
 분류 그룹이 이름 일치보다 큰 자리이기 때문이고, 이를 뒤집으면 "하회마을" 음식점이 하회마을 유산보다 앞선다.
 

@@ -263,6 +263,29 @@ async def test_transport_hub_exact_name_is_not_buried_under_partial_matches(
     assert labels == ["seoul_museum", "seoul_station", "seoul_food", "seoul_parking"], labels
 
 
+async def test_region_prefix_split_handles_any_whitespace_and_leading_space(
+    migrated_session: AsyncSession,
+) -> None:
+    """지역명 tail은 공백 집합 어느 문자(U+3000)에서든, 앞 공백을 걷은 뒤 자른다.
+
+    "\u3000영주\u3000소수서원"(국가유산)은 "소수서원"과 이름 일치로 보여야 Tier 1만 있는 미디어 명소
+    "소수서원"(01000000)보다 앞선다. ASCII 공백만 보면 일치를 놓쳐 미디어 명소 뒤로 간다.
+    """
+    ids = {
+        "sosu_heritage": await _place(
+            migrated_session, "sosu_heritage", name="\u3000영주\u3000소수서원", category="01070300",
+            lon=128.5806, lat=36.9253,
+        ),
+        "sosu_media": await _place(
+            migrated_session, "sosu_media", name="소수서원", category="01000000",
+            lon=128.5803, lat=36.9255, place_kind="media_famous_place",
+        ),
+    }
+    await migrated_session.flush()
+    labels = await _search_ids(migrated_session, "소수서원", ids)
+    assert labels == ["sosu_heritage", "sosu_media"], labels
+
+
 async def test_displayed_parking_name_is_searchable(
     migrated_session: AsyncSession,
 ) -> None:

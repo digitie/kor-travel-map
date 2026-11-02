@@ -123,7 +123,7 @@ def public_feature_display_name(name: str, category: str | None) -> str:
 
     저장 값은 바꾸지 않는다. 결과에 "주차"가 들어가므로 두 번 적용해도 같다. 검색 SQL의
     ``_search_display_name_sql``이 같은 규칙을 SQL로 쓴다(공백만인 이름은 양쪽 다 그대로 두고,
-    앞뒤 공백 처리만 달라 그 차이는 공백을 지운 비교 키에서 사라진다).
+    앞뒤 공백 처리만 다르다 — 검색 SQL은 비교 키를 만들기 전에 공백을 걷으므로 순위에는 같다).
     """
 
     if not is_parking_category_code(category):

@@ -1378,8 +1378,10 @@ def test_feature_search_q_cursor_requires_row_rank() -> None:
         ("안동\u3000하회마을", "안동하회마을"),
         # NBSP·좁은 NBSP(U+202F)도 지운다 — PostgreSQL ``\s``가 놓치는 문자다.
         ("안동\u00a0도산서원\u202f", "안동도산서원"),
-        # 공백이 갈라 둔 자모는 지운 뒤 다시 NFC로 한 음절이 된다(436 별칭 CHECK의 NFC와 맞물린다).
+        # 공백이 갈라 둔 자모는 지운 뒤 NFC로 한 음절이 된다.
         ("\u1100 \u1161", "가"),
+        # 대문자+결합 부호는 소문자로 바꾼 뒤 NFC여야 한 글자(U+01F0)다.
+        ("J\u030c", "\u01f0"),
         ("Lotte World", "lotteworld"),
         # NFD(자모 분리) 입력도 NFC 키와 같아진다.
         ("\u1100\u1169\u110a\u1175", "고씨"),
@@ -1454,6 +1456,29 @@ def test_search_whitespace_set_is_python_isspace_and_matches_migration_436() -> 
         assert feature_repo.search_alias_key(f"가{chr(codepoint)}나") == "가나"
 
 
+def test_search_alias_key_output_passes_the_436_alias_check_for_letter_mark_pairs() -> None:
+    """436 별칭 CHECK(공백 없음·소문자·NFC)를 ``search_alias_key``의 모든 출력이 통과한다."""
+    import unicodedata
+
+    marks = [chr(c) for c in range(0x300, 0x370)]
+    letters = [chr(c) for c in range(0x41, 0x5B)] + [chr(c) for c in range(0xC0, 0x250)]
+    for letter in letters:
+        for mark in marks:
+            key = feature_repo.search_alias_key(letter + mark)
+            assert key == unicodedata.normalize("NFC", key), (letter, mark)
+            assert key == key.lower(), (letter, mark)
+            assert not any(ch.isspace() for ch in key)
+
+
+def test_search_tail_sql_translate_lengths_match_and_trim_first() -> None:
+    """tail 분할의 ``translate`` 대상 길이가 공백 집합 크기와 같고, 앞뒤 공백을 먼저 걷는다."""
+    sql = feature_repo._search_tail_sql("display_name")
+    assert sql.count("chr(") == 2 * len(feature_repo.SEARCH_WHITESPACE_CODEPOINTS)
+    assert f"repeat(' ', {len(feature_repo.SEARCH_WHITESPACE_CODEPOINTS)})" in sql
+    assert sql.startswith("substr(btrim(display_name, ")
+    assert feature_repo._search_compact_sql(sql) in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
+
+
 def test_search_display_name_sql_mirrors_python_display_rule() -> None:
     from kortravelmap.category import (
         PARKING_CATEGORY_PREFIX,
@@ -1465,6 +1490,8 @@ def test_search_display_name_sql_mirrors_python_display_rule() -> None:
     assert f"left(category, {len(PARKING_CATEGORY_PREFIX)}) = '{PARKING_CATEGORY_PREFIX}'" in sql
     assert f"strpos(name, '{PARKING_NAME_MARKER}') = 0" in sql
     assert f"name || ' {PARKING_DISPLAY_LABEL}'" in sql
+    # 공백만인 이름에는 붙이지 않는다(Python ``str.strip()``이 빈 문자열이면 그대로인 것과 같다).
+    assert f"translate(name, {feature_repo._SEARCH_WHITESPACE_SQL}, '') <> ''" in sql
     assert sql in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
     with pytest.raises(ValueError, match="trusted SQL identifier"):
         feature_repo._search_display_name_sql("name; --", "category")
