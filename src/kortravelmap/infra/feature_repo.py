@@ -73,8 +73,8 @@ from kortravelmap.category import (
     PARKING_DISPLAY_LABEL,
     PARKING_NAME_MARKER,
     PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
-    PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2,
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+    PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
 )
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
@@ -1750,11 +1750,11 @@ def _trusted_sql_identifier(column: str) -> str:
 
 
 def _search_category_group_sql(column: str) -> str:
-    """분류 체계 표(Tier 2 예외 → Tier 1)에서 유도한 분류 그룹 ``CASE``.
+    """분류 체계 표(접두 예외, 긴 것 먼저 → Tier 1)에서 유도한 분류 그룹 ``CASE``.
 
-    코드를 SQL에 따로 박지 않는다 — ``PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2``·``…_BY_TIER1``이
-    정본이다. 키는 숫자(4자리·2자리), 값은 한 자리 정수라 이어 붙여도 SQL 주입 자리가 없다
-    (아래 검사가 강제한다).
+    코드를 SQL에 따로 박지 않는다 — ``PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES``·
+    ``…_BY_TIER1``이 정본이다. 키는 숫자(짝수 자리), 값은 한 자리 정수라 이어 붙여도 SQL 주입
+    자리가 없다(아래 검사가 강제한다).
     """
     column = _trusted_sql_identifier(column)
 
@@ -1764,10 +1764,14 @@ def _search_category_group_sql(column: str) -> str:
         return value
 
     whens: list[str] = []
-    for tier2, group in sorted(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2.items()):
-        if not (len(tier2) == 4 and tier2.isdigit()):
-            raise ValueError(f"tier2 prefix must be four digits: {tier2!r}")
-        whens.append(f"WHEN left({column}, 4) = '{tier2}' THEN {_group(group)}")
+    overrides = sorted(
+        PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES.items(),
+        key=lambda item: (-len(item[0]), item[0]),
+    )
+    for prefix, group in overrides:
+        if not (prefix.isdigit() and len(prefix) in (4, 6)):
+            raise ValueError(f"category prefix must be four or six digits: {prefix!r}")
+        whens.append(f"WHEN left({column}, {len(prefix)}) = '{prefix}' THEN {_group(group)}")
     for tier1, group in sorted(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items()):
         if not (len(tier1) == 2 and tier1.isdigit()):
             raise ValueError(f"tier1 code must be two digits: {tier1!r}")
@@ -1791,13 +1795,27 @@ def _search_display_name_sql(name: str, category: str) -> str:
     return (
         f"(CASE WHEN left({category}, {len(PARKING_CATEGORY_PREFIX)}) = '{PARKING_CATEGORY_PREFIX}'"
         f" AND strpos({name}, '{PARKING_NAME_MARKER}') = 0"
+        f" AND translate({name}, {_SEARCH_WHITESPACE_SQL}, '') <> ''"
         f" THEN {name} || ' {PARKING_DISPLAY_LABEL}' ELSE {name} END)"
     )
 
 
 def _search_compact_sql(expression: str) -> str:
-    """``search_alias_key``의 SQL 짝 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 소문자."""
-    return f"lower(translate(normalize({expression}, NFC), {_SEARCH_WHITESPACE_SQL}, ''))"
+    """``search_alias_key``의 SQL 짝 — NFC, 공백 제거, 다시 NFC, 소문자.
+
+    다시 NFC를 거는 이유: 공백이 갈라 둔 자모("ᄀ ᅡ")는 공백을 지운 뒤에야 한 음절로 합쳐진다.
+    """
+    stripped = f"translate(normalize({expression}, NFC), {_SEARCH_WHITESPACE_SQL}, '')"
+    return f"lower(normalize({stripped}, NFC))"
+
+
+def _search_tail_sql(expression: str) -> str:
+    """첫 공백(``SEARCH_WHITESPACE_CODEPOINTS`` 어느 것이든)까지 뗀 나머지. 공백이 없으면 전체다."""
+    spaces = "repeat(' ', " + str(len(SEARCH_WHITESPACE_CODEPOINTS)) + ")"
+    return (
+        f"substr({expression}, strpos(translate({expression}, {_SEARCH_WHITESPACE_SQL}, {spaces}),"
+        " ' ') + 1)"
+    )
 
 
 # 별칭 이름 일치(``name = :alias_name``)는 trigram GIN의 ``=`` 연산자(pg_trgm 1.6, strategy 11)로
@@ -1842,8 +1860,7 @@ compacted AS (
     SELECT
         filtered.*,
         {_search_compact_sql("display_name")} AS compact_name,
-        {_search_compact_sql("substr(display_name, strpos(display_name, ' ') + 1)")}
-          AS compact_tail
+        {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail
     FROM filtered
 ),
 candidates AS (
@@ -1878,8 +1895,8 @@ candidates AS (
                 ) THEN 0
               ELSE 1
             END * {_SEARCH_RANK_BBOX_WEIGHT}
-          -- 분류 그룹: 관광 → 숙박·온천·역·휴게소·공항·의료 → 식음 → 편의·주차·주유·미분류
-          -- (분류 체계에서 유도, Tier 2 예외 먼저).
+          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖
+          -- (분류 체계에서 유도, 접두 예외 먼저).
           + {_search_category_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
           -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
           -- 검색어와 같으면 0(공백 무시).
@@ -6415,14 +6432,16 @@ def _search_row(row: Any) -> FeatureSearchRow:
 
 
 def search_alias_key(q: str) -> str:
-    """검색어 정규화 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 소문자.
+    """검색어 정규화 — NFC, ``SEARCH_WHITESPACE_CODEPOINTS`` 제거, 다시 NFC, 소문자.
 
     ``feature.feature_search_aliases.alias``의 형식(migration 436 CHECK)이자 순위의 "이름이
     검색어를 품는가/같은가" 비교 키다. 이름 쪽은 ``_search_compact_sql``이 같은 순서·같은
     공백 집합으로 만든다.
     """
     normalized = unicodedata.normalize("NFC", q)
-    return "".join(ch for ch in normalized if ch not in _SEARCH_WHITESPACE).lower()
+    compact = "".join(ch for ch in normalized if ch not in _SEARCH_WHITESPACE)
+    # 공백이 갈라 둔 자모("ᄀ ᅡ")는 지운 뒤에야 한 음절로 합쳐진다 — 그래서 한 번 더 NFC.
+    return unicodedata.normalize("NFC", compact).lower()
 
 
 _SEARCH_ALIAS_LOOKUP_SQL: Final[str] = """
@@ -6451,7 +6470,7 @@ async def search_features(
     bbox 술어는 stored ``coord`` 컬럼과 ``ST_MakeEnvelope``만 사용한다.
 
     ``q`` 검색의 순서(436): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만, 그 안에서
-    bbox 안 → 분류 그룹(관광 → 숙박·온천·역·휴게소·공항·의료 → 식음 → 편의·주차·주유) →
+    bbox 안 → 분류 그룹(관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖) →
     이름 일치(보이는 이름 기준) → 분류 구체성 →
     ``score`` 내림차순 → ``feature_id``. ``q``와 함께 온 ``bbox``는 **필터가 아니라 순위
     가중**이다. ``q`` 없이 ``bbox``만 오면 종전처럼 bbox 필터 + ``feature_id`` 순이다.

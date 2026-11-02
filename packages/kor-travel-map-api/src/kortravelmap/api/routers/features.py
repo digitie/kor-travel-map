@@ -133,8 +133,7 @@ class _PublicDisplayName(BaseModel):
     """공개 feature read의 ``name``을 표시 이름으로 바꾸는 mixin.
 
     주차장 Feature는 공공 주차장 데이터셋이 관광지 이름만 싣는 일이 많다("도산서원").
-    (공개 큐레이션 응답의 ``feature_name``은 원래 이름 그대로다 — 큐레이션이 주차장을 가리키는
-    일은 연결 모순으로 이미 걸러진다.)
+    (공개 큐레이션 응답의 ``feature_name``은 이 규칙을 쓰지 않아 저장 이름 그대로다.)
     ``public_feature_display_name``이 그때 "도산서원 주차장"으로 보이게 한다. 저장 값·검색
     대상·ETag(``row_revision``)는 그대로다 — 응답 직렬화 직전의 표시 규칙일 뿐이고 JSON
     schema(OpenAPI)도 바뀌지 않는다.

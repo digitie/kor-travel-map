@@ -2,11 +2,12 @@
 
 둘 다 **카탈로그에서 유도한다** — 8자리 코드를 하나씩 박지 않는다.
 
-- 검색 순위 그룹(작을수록 앞): 관광(국가유산·문화시설 포함) 0 → 숙박·온천과 **이름으로 찾아가는
-  시설**(정류장·역, 휴게소, 공항, 의료) 1 → 식음 2 → 편의·주차·주유·미분류 3. 기본은 Tier 1 코드
-  (앞 2자리)마다 하나이고, 교통(06)만 Tier 2(앞 4자리)로 갈라 주차·주유를 정류장·휴게소·공항과
-  떼어 놓는다 — "서울역"·"김포공항"을 찾을 때 그 시설이 "…서울역점" 음식점보다 뒤로 밀리지 않게
-  한다. Tier 1만 있는 코드(예: ``01000000``)는 같은 그룹 안에서 하위 분류가 있는 코드보다 덜
+- 검색 순위 그룹(작을수록 앞): 관광(국가유산·문화시설 포함) 0 → 숙박·온천 1 → 식음 2 →
+  편의·교통·의료·미분류 3(소유자 결정 2026-11-02). 기본은 Tier 1 코드(앞 2자리)마다 하나다.
+  예외는 교통 가운데 **이름으로 찾아가는 목적지** — 기차역·지하철역(Tier 3), 휴게소·공항(Tier 2)
+  — 만 숙박과 같은 1이다. "서울역"·"김포공항"을 찾을 때 그 시설이 "…서울역점" 음식점보다 뒤로
+  밀리지 않게 한다(적대 리뷰 2026-11-02). 버스 정류장·택시 승강장·주차·주유는 3 그대로다.
+  Tier 1만 있는 코드(예: ``01000000``)는 같은 그룹 안에서 하위 분류가 있는 코드보다 덜
   구체적인 것으로 본다. ``feature_repo``의 검색 SQL이 이 표로 ``CASE``를 만든다.
 - 표시 이름: 주차장(``06.01``) Feature는 공공 주차장 데이터셋이 관광지 이름만 싣는 경우가 많다
   ("도산서원", "고씨굴(강변)"). 이름에 "주차"가 없으면 Tier 2 표시명("주차장")을 붙여 보여 준다.
@@ -30,7 +31,7 @@ __all__ = [
     "PARKING_DISPLAY_LABEL",
     "PARKING_NAME_MARKER",
     "PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1",
-    "PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2",
+    "PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES",
     "PLACE_CATEGORY_SEARCH_GROUP_FALLBACK",
     "category_search_group",
     "is_tier1_only_category_code",
@@ -45,21 +46,32 @@ PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1: Final[Mapping[str, int]] = MappingProxyTyp
         PlaceCategoryTier1Code.TOURISM.value: 0,
         PlaceCategoryTier1Code.LODGING.value: 1,
         PlaceCategoryTier1Code.HOT_SPRING_SPA.value: 1,
-        PlaceCategoryTier1Code.MEDICAL.value: 1,
         PlaceCategoryTier1Code.FOOD.value: 2,
         PlaceCategoryTier1Code.CONVENIENCE.value: 3,
         PlaceCategoryTier1Code.TRANSPORT.value: 3,
+        PlaceCategoryTier1Code.MEDICAL.value: 3,
         PlaceCategoryTier1Code.UNCLASSIFIED.value: 3,
     }
 )
 
-#: Tier 2(앞 4자리) 예외 — Tier 1 표보다 먼저 본다. 교통 가운데 이름으로 찾아가는 시설만 앞으로.
-#: 주차(06.01)·주유(06.02)는 Tier 1 그대로(맨 뒤)다.
-PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2: Final[Mapping[str, int]] = MappingProxyType(
+
+def _category_prefix(code: PlaceCategoryCode) -> str:
+    """코드에서 끝의 ``00`` 단계를 뗀 접두(``06040000`` → ``0604``, ``06030300`` → ``060303``)."""
+
+    value = code.value
+    while value.endswith("00") and len(value) > 2:
+        value = value[:-2]
+    return value
+
+
+#: 분류 접두(4·6자리) → 그룹 예외. Tier 1 표보다 먼저, **긴 접두부터** 본다. 교통 가운데 이름으로
+#: 찾아가는 목적지만 숙박과 같은 1로 올린다. 키는 카탈로그 코드에서 유도한다.
+PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES: Final[Mapping[str, int]] = MappingProxyType(
     {
-        PlaceCategoryCode.TRANSPORT_STOP.value[:4]: 1,
-        PlaceCategoryCode.TRANSPORT_REST_AREA.value[:4]: 1,
-        PlaceCategoryCode.TRANSPORT_AIRPORT.value[:4]: 1,
+        _category_prefix(PlaceCategoryCode.TRANSPORT_STOP_SUBWAY): 1,
+        _category_prefix(PlaceCategoryCode.TRANSPORT_STOP_TRAIN): 1,
+        _category_prefix(PlaceCategoryCode.TRANSPORT_REST_AREA): 1,
+        _category_prefix(PlaceCategoryCode.TRANSPORT_AIRPORT): 1,
     }
 )
 
@@ -86,9 +98,9 @@ def category_search_group(code: str | None) -> int:
     if code is None:
         return PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
     text_code = str(code)
-    tier2 = PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2.get(text_code[:4])
-    if tier2 is not None:
-        return tier2
+    for prefix in sorted(PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES, key=len, reverse=True):
+        if text_code.startswith(prefix):
+            return PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES[prefix]
     return PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.get(
         text_code[:2], PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
     )
@@ -110,8 +122,8 @@ def public_feature_display_name(name: str, category: str | None) -> str:
     """공개 응답에 보일 이름. 주차장인데 이름에 "주차"가 없으면 "<이름> 주차장"이다.
 
     저장 값은 바꾸지 않는다. 결과에 "주차"가 들어가므로 두 번 적용해도 같다. 검색 SQL의
-    ``_search_display_name_sql``이 같은 규칙을 SQL로 쓴다(앞뒤 공백 처리만 다르고, 그 결과는
-    공백을 지운 비교 키에서 같다).
+    ``_search_display_name_sql``이 같은 규칙을 SQL로 쓴다(공백만인 이름은 양쪽 다 그대로 두고,
+    앞뒤 공백 처리만 달라 그 차이는 공백을 지운 비교 키에서 사라진다).
     """
 
     if not is_parking_category_code(category):

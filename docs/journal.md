@@ -6,14 +6,17 @@ PinVi live e2e(봉화·영주·안동)에서 "하회마을"이 서울 음식점 
 - 순위 `rank`: 일치 단계(별칭 → 이름이 검색어를 품음 → 유사도) → bbox 안 → 분류 그룹 → 이름 일치(첫 낱말 지역명을
   뗀 일치 포함 — "안동 도산서원") → Tier 1만 있는 코드 뒤. q와 함께 온 bbox는 가중(필터 아님). cursor v2(keyset에
   rank, 상한 21911). 별칭 팔은 trigram GIN `=`로 BitmapOr(prod 35 ms).
-- 분류 그룹은 Tier 1 표 + 교통 Tier 2 예외: 관광 0 → 숙박·온천·역·휴게소·공항·의료 1 → 식음 2 → 편의·주차·주유 3.
-  적대 리뷰 2인이 함께 짚었다 — Tier 1만이면 "서울역" 역이 "롯데리아 서울역점"보다 뒤였다.
+- 분류 그룹은 Tier 1 표 + 교통 목적지 접두 예외: 관광 0 → 숙박·온천·기차역·지하철역·휴게소·공항 1 → 식음 2 →
+  그 밖 3. 리뷰 2인이 "서울역" 역이 "롯데리아 서울역점"보다 뒤인 것을 짚었고, 3번째 리뷰가 정류장 전체·의료까지
+  올린 것은 소유자 순서를 넘는다고 짚어 기차·지하철역·휴게소·공항만 남겼다. 관광 부분 일치는 여전히 앞이다.
 - 이름 비교 키는 보이는 이름(주차장 표시 이름)에서, NFC·Python `isspace` 공백 집합 제거·소문자로 만든다. SQL은
-  `translate`로 같은 집합을 지운다(PG `\s`는 NBSP를 놓친다). 436 CHECK도 같은 집합. tier-2 하네스 bind 누락도 고쳤다.
+  `translate`로 같은 집합을 지운다(PG `\s`는 NBSP를 놓친다), 지운 뒤 다시 NFC. 436 CHECK도 같은 집합. tier-2 하네스
+  bind 누락도 고쳤다.
 - 436 `feature.feature_search_aliases`: 정규화 검색어 → Feature **이름**(id는 환경·재적재마다 달라 migration이 못 심는다).
 - 주차장 표시 이름은 응답 모델 before-validator — 저장 값·ETag·OpenAPI 불변. backlog: T-HERITAGE-ENRICH·T-DEDUP-MEDIA-HERITAGE.
 - 이 절을 더하자 journal이 220 KiB를 넘어 가장 오래된 2026-10-13 두 절을 `archive/journal-2026-10e.md`(머리말 포함
-  21,529 B)로 옮겼다(§8, 본문 그대로·상대 링크 없음). resume도 같은 이유로 가장 오래된 절들을 옮겼다.
+  21,540 B)로 옮겼다(§8, 본문 그대로·상대 링크 없음). resume도 같은 이유로 가장 오래된 네 절을
+  `archive/resume-2026-09b.md`로 옮겼다.
 
 ## 2026-10-28 — run-status sensor tick 실패로 cursor 엿새 정지(#1434)
 
@@ -1925,7 +1928,7 @@ n150 chain t1013e(2026-10-13 09:11Z)에서 `/root/chain17-pv.sh`(운영자 변�
 
 | 파일 | 기간 | 엔트리 | 크기 |
 | --- | --- | --- | --- |
-| [`journal-2026-10e.md`](archive/journal-2026-10e.md) | 2026-10-13 | 2건 | 21529 bytes |
+| [`journal-2026-10e.md`](archive/journal-2026-10e.md) | 2026-10-13 | 2건 | 21540 bytes |
 | [`journal-2026-10d.md`](archive/journal-2026-10d.md) | 2026-10-13 | 2건 | 7200 bytes |
 | [`journal-2026-10c.md`](archive/journal-2026-10c.md) | 2026-10-01 ~ 2026-10-12 | 28건 | 53974 bytes |
 | [`journal-2026-10b.md`](archive/journal-2026-10b.md) | 2026-10-01 | 1건 | 6 KB |

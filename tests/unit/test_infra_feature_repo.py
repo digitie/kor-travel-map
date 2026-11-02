@@ -1378,6 +1378,8 @@ def test_feature_search_q_cursor_requires_row_rank() -> None:
         ("안동\u3000하회마을", "안동하회마을"),
         # NBSP·좁은 NBSP(U+202F)도 지운다 — PostgreSQL ``\s``가 놓치는 문자다.
         ("안동\u00a0도산서원\u202f", "안동도산서원"),
+        # 공백이 갈라 둔 자모는 지운 뒤 다시 NFC로 한 음절이 된다(436 별칭 CHECK의 NFC와 맞물린다).
+        ("\u1100 \u1161", "가"),
         ("Lotte World", "lotteworld"),
         # NFD(자모 분리) 입력도 NFC 키와 같아진다.
         ("\u1100\u1169\u110a\u1175", "고씨"),
@@ -1388,12 +1390,12 @@ def test_search_alias_key_normalizes_nfc_whitespace_and_case(query: str, expecte
 
 
 def test_search_category_group_sql_is_derived_from_the_taxonomy() -> None:
-    """순위 CASE는 분류 체계 표에서 만들어진다 — Tier 2 예외가 먼저, Tier 1마다 한 WHEN."""
+    """순위 CASE는 분류 체계 표에서 만들어진다 — 접두 예외(긴 것)가 먼저, Tier 1마다 한 WHEN."""
 
     from kortravelmap.category import (
         PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
-        PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2,
         PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+        PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
         PlaceCategoryTier1Code,
     )
 
@@ -1402,15 +1404,19 @@ def test_search_category_group_sql_is_derived_from_the_taxonomy() -> None:
     assert set(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) == tier1_codes
     for tier1, group in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.items():
         assert f"WHEN left(category, 2) = '{tier1}' THEN {group}" in sql
-    last_tier2 = max(
-        sql.index(f"WHEN left(category, 4) = '{tier2}' THEN {group}")
-        for tier2, group in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2.items()
-    )
-    # Tier 2 예외는 Tier 1보다 먼저 평가돼야 한다(CASE는 첫 일치에서 멈춘다).
-    assert last_tier2 < sql.index("WHEN left(category, 2) =")
+    positions = {
+        prefix: sql.index(f"WHEN left(category, {len(prefix)}) = '{prefix}' THEN {group}")
+        for prefix, group in PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES.items()
+    }
+    # 접두 예외는 Tier 1보다 먼저, 긴 접두가 짧은 접두보다 먼저다(CASE는 첫 일치에서 멈춘다).
+    assert max(positions.values()) < sql.index("WHEN left(category, 2) =")
+    for long_prefix, long_at in positions.items():
+        for short_prefix, short_at in positions.items():
+            if len(long_prefix) > len(short_prefix):
+                assert long_at < short_at
     assert sql.endswith(f"ELSE {PLACE_CATEGORY_SEARCH_GROUP_FALLBACK} END)")
     assert sql.count("WHEN left(") == len(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1) + len(
-        PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2
+        PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES
     )
     assert "{_search_category_group_sql" not in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL
     assert sql in feature_repo._FEATURE_SEARCH_BY_SCORE_SQL

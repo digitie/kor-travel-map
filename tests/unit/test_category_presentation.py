@@ -10,8 +10,8 @@ import pytest
 from kortravelmap.category import (
     PLACE_CATEGORY_CODES,
     PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
-    PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2,
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
+    PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
     PLACE_CATEGORY_TIER2_NAMES_BY_TIER1,
     PlaceCategoryCode,
     PlaceCategoryTier1Code,
@@ -36,8 +36,9 @@ def test_every_tier1_code_has_a_search_group() -> None:
 def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> None:
     """소유자 결정(2026-11-02): 관광(국가유산·문화 포함) > 숙박 > 식음 > 주차·편의.
 
-    이름으로 찾아가는 시설(역·정류장·휴게소·공항·의료)은 숙박과 같은 그룹이다 — "서울역"이
-    "…서울역점" 음식점보다 뒤로 밀리지 않게(적대 리뷰 2026-11-02). 주차·주유는 맨 뒤 그대로다.
+    교통 가운데 이름으로 찾아가는 목적지(기차역·지하철역·휴게소·공항)만 숙박과 같은 그룹이다 —
+    "서울역"이 "…서울역점" 음식점보다 뒤로 밀리지 않게(적대 리뷰 2026-11-02). 버스 정류장·택시·
+    주차·주유·의료는 맨 뒤 그대로다(소유자 순서를 넘어 넓히지 않는다).
     """
 
     def group(code: PlaceCategoryCode) -> int:
@@ -54,16 +55,23 @@ def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> N
     assert heritage == culture < lodging == spa < food < parking == fuel == convenience
     for destination in (
         PlaceCategoryCode.TRANSPORT_STOP_TRAIN,
-        PlaceCategoryCode.TRANSPORT_STOP_BUS,
-        PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY,
+        PlaceCategoryCode.TRANSPORT_STOP_SUBWAY,
+        PlaceCategoryCode.TRANSPORT_REST_AREA,
+        PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY_EX,
         PlaceCategoryCode.TRANSPORT_AIRPORT,
-        PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL,
     ):
         assert group(destination) == lodging, destination
-    # Tier 2 예외 표의 키는 카탈로그에 있는 교통 Tier 2 접두다.
-    for prefix in PLACE_CATEGORY_SEARCH_GROUP_BY_TIER2:
-        assert len(prefix) == 4
-        assert f"{prefix}0000" in PLACE_CATEGORY_CODES
+    for rest in (
+        PlaceCategoryCode.TRANSPORT_STOP,
+        PlaceCategoryCode.TRANSPORT_STOP_BUS,
+        PlaceCategoryCode.TRANSPORT_STOP_TAXI,
+        PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL,
+    ):
+        assert group(rest) == parking, rest
+    # 접두 예외 표의 키는 카탈로그 코드의 교통 접두(4·6자리)다.
+    for prefix in PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES:
+        assert len(prefix) in (4, 6)
+        assert prefix.ljust(8, "0") in PLACE_CATEGORY_CODES
         assert prefix.startswith(PlaceCategoryTier1Code.TRANSPORT.value)
     # 카탈로그 밖 코드(notice의 99000000)와 None은 맨 뒤 그룹이다.
     assert category_search_group("99000000") == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
