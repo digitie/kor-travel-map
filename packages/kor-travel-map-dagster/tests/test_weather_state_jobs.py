@@ -136,6 +136,38 @@ def test_lock_ttl_follows_the_run_ceiling() -> None:
         assert weather_lock_ttl_seconds(spec) == spec.max_runtime_seconds + 660
 
 
+def test_daily_summaries_lock_expires_before_its_next_hourly_tick() -> None:
+    # W5 상한을 2,700초로 올렸다. lock TTL(상한 + 취소 유예)이 매시 발화 간격 안이어야
+    # 멈춘 run의 lock이 다음 tick을 막지 않는다.
+    from kortravelmap.providers.kor_travel_weather_state import DATASET_DAILY_SUMMARIES
+
+    spec = next(spec for spec in WEATHER_STATE_SPECS if spec.dataset is DATASET_DAILY_SUMMARIES)
+    assert spec.cron_schedule == "41 * * * *"
+    assert weather_lock_ttl_seconds(spec) < 3_600
+
+
+def test_short_forecast_guard_accepts_measured_live_cycles() -> None:
+    # 2026-11-02 운영 실측: 단기예보 한 회차는 완결 추정 약 375곳, 공개 도중 273곳이었다. 포화된
+    # odroid에서는 격자 1/3이 빠진 약 250곳 회차도 나온다. 그날 하한 1,000은 "53건 < 1000"으로
+    # 모두 거부했다. 깨진 집합(53곳)은 계속 거부한다.
+    from kortravelmap.infra.valkey_state import evaluate_shrink_guard
+
+    guard = DATASET_FORECAST_SHORT.guard
+    assert evaluate_shrink_guard([], 273, guard) is None
+    assert evaluate_shrink_guard([375], 273, guard) is None
+    assert evaluate_shrink_guard([375, 340], 250, guard) is None
+    assert evaluate_shrink_guard([], 53, guard) is not None
+    assert evaluate_shrink_guard([375], 120, guard) is not None
+
+
+def test_mid_forecast_floor_fits_the_configured_mid_targets() -> None:
+    # 중기예보는 weather의 중기 지역 코드 target(운영 21곳: 서울…서귀포)에만 있다. 하한 300곳이면
+    # 완결된 집합도 "21건 < 300"으로 영영 거부된다(2026-11-02 운영).
+    from kortravelmap.providers.kor_travel_weather_state import DATASET_FORECAST_MID
+
+    assert 0 < DATASET_FORECAST_MID.guard.min_count <= 21
+
+
 # -- fetcher -----------------------------------------------------------------------------
 
 

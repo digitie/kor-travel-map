@@ -19,6 +19,10 @@ PinVi live e2e(봉화·영주·안동)에서 "하회마을"이 서울 음식점 
   21,540 B)로 옮겼다(§8, 본문 그대로·상대 링크 없음). resume도 같은 이유로 가장 오래된 네 절을
   `archive/resume-2026-09b.md`로 옮겼다.
 
+## 2026-11-02 — weather_state 하한·W5 상한 실측 조정
+
+단기 하한 1,000곳·90%→250곳·65%, W5 상한 900→2,700초. 근거는 resume 같은 날.
+
 ## 2026-10-28 — run-status sensor tick 실패로 cursor 엿새 정지(#1434)
 
 prod code server가 30초마다 `operation_has_no_enabled_memberships`(419로 끈 transport run 3건)를 찍었다. 원인은

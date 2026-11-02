@@ -591,8 +591,11 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
         _forecast_collector(DATASET_FORECAST_EXTERNAL),
         "weather 외부 provider 예보(W3 external) → Valkey 세대 교체(3시간마다).",
     ),
+    # W5는 14일 × 세 구간 × 위치(운영 약 6만 1천 건, 2,000건 페이지 약 31개)다. 포화된 odroid에서
+    # 페이지당 약 27초라(2026-11-02 실측) 한 번 전량에 14분, 재시도까지 900초 상한을 넘겼다.
+    # 매시 발화 간격(3,600초) 안에 lock TTL(상한 + 660초)이 들어가는 2,700초로 둔다.
     _spec(
-        DATASET_DAILY_SUMMARIES, "daily_summaries", "41 * * * *", 900, _collect_daily_summaries,
+        DATASET_DAILY_SUMMARIES, "daily_summaries", "41 * * * *", 2_700, _collect_daily_summaries,
         "weather 하루 세 구간 요약(W5) → Valkey 세대 교체(매시).",
     ),
 )
