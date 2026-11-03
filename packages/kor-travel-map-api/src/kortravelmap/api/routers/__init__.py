@@ -44,6 +44,7 @@ from kortravelmap.api.routers.curations import router as curations_router
 from kortravelmap.api.routers.dedup_review import (
     feature_router as feature_dedup_review_router,
 )
+from kortravelmap.api.routers.dedup_review import ops_read_router as ops_dedup_reviews_router
 from kortravelmap.api.routers.dedup_review import router as dedup_review_router
 from kortravelmap.api.routers.enrichment_review import (
     feature_router as feature_enrichment_review_router,
@@ -111,6 +112,7 @@ __all__ = [
     "admin_curation_candidates_router",
     "admin_issues_router",
     "dedup_review_router",
+    "ops_dedup_reviews_router",
     "feature_dedup_review_router",
     "enrichment_review_router",
     "feature_enrichment_review_router",

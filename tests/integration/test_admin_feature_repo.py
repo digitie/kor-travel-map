@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import md5
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from geoalchemy2 import WKTElement
@@ -222,6 +222,9 @@ async def _seed_feature(
     feature_id: str,
     *,
     natural_key: str | None = None,
+    source_payload: dict[str, Any] | None = None,
+    name: str = "광화문",
+    road_address: str | None = None,
 ) -> None:
     """정본 키(uuid)로 심은 feature 1건 + 그 feature의 provider 계보.
 
@@ -233,7 +236,10 @@ async def _seed_feature(
     uuid를 주조하고, "admin retirement를 우회하지 못한다"는 명제가 관측 불가능한
     다른 Feature 위에서 참이 되어 버린다.
     """
-    session.add(_feature_row(feature_id, name="광화문"))
+    row = _feature_row(feature_id, name=name)
+    if road_address is not None:
+        row.address = {"road": road_address}
+    session.add(row)
     await session.flush()
     await seed_feature_subtype(session, feature_id=feature_id, kind="place")
     provider_dataset_id = await _provider_dataset_id(session)
@@ -248,7 +254,10 @@ async def _seed_feature(
     entity = _source_entity(f"sr-{feature_id}", provider_dataset_id)
     session.add(entity)
     await session.flush()
-    session.add(_source_record(f"sr-{feature_id}"))
+    source_record = _source_record(f"sr-{feature_id}")
+    if source_payload is not None:
+        source_record.raw_data = source_payload
+    session.add(source_record)
     await session.flush()
     # T-VN-33: 현재 record 포인터는 entity가 아니라 head가 소유한다.
     session.add(

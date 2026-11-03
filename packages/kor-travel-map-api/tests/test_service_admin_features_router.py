@@ -341,3 +341,28 @@ def test_read_token_cannot_be_promoted_to_create_with_valid_bff() -> None:
     )
     assert response.status_code == 403
     assert response.json()["code"] == "ADMIN_FEATURE_CREATE_SCOPE_REQUIRED"
+
+@pytest.mark.unit
+@pytest.mark.parametrize("scope", ["feature", "all"])
+def test_service_feature_search_scope_is_explicit(
+    scope: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    query = AsyncMock(return_value=AdminFeaturePage(items=(_feature_row(),), next_cursor=None))
+    monkeypatch.setattr(admin_features, "list_admin_features", query)
+    client = _client(pinvi_admin_features_read_token_sha256=DIGEST)
+    response = client.get("/v1/service/admin-features", headers=_headers(),
+        params={"q": "안동하회마을", "search_scope": scope})
+    assert response.status_code == 200, response.text
+    assert query.await_args.kwargs["search_scope"] == scope
+    assert query.await_args.kwargs["q"] == "안동하회마을"
+
+
+@pytest.mark.unit
+def test_service_feature_search_rejects_unknown_scope(monkeypatch: pytest.MonkeyPatch) -> None:
+    query = AsyncMock()
+    monkeypatch.setattr(admin_features, "list_admin_features", query)
+    client = _client(pinvi_admin_features_read_token_sha256=DIGEST)
+    response = client.get("/v1/service/admin-features", headers=_headers(),
+        params={"q": "하회", "search_scope": "unknown"})
+    assert response.status_code == 422
+    query.assert_not_awaited()

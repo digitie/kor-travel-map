@@ -554,6 +554,20 @@ GET    /v1/admin/curations/import-template.csv          # UTF-8 BOM CSV 양식 �
 POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 authoritative replace
 ```
 
+#### 관리자 Feature 검색 범위와 중복 검토 읽기
+
+`GET /v1/admin/features`와 전용 service 읽기 `GET /v1/service/admin-features`는
+`search_scope=all|feature`를 받는다. 기본 all은 기존 원천 내용 검색을 보존한다.
+feature는 이름·주소·UUID/legacy alias만 검색하며 비일치 후보의 원천 JSON을 읽지 않는다.
+PinVi 후속 소비자 PR은 기본 관리자 장소 검색에 feature 범위를 명시적으로 선택한다.
+두 범위 모두 기존 필터·정렬·cursor와 현재 원천 head의 provenance를 유지한다.
+
+`GET /v1/ops/dedup-reviews`는 기존 중복 검토 목록 DTO와 필터를 제공한다.
+인증은 기존 `require_ops_operator`의 trusted Admin BFF 또는 ops token + `ops:read`다.
+public/service token과 cancel token은 이 목록을 읽을 수 없다.
+이 읽기 표면에는 판정·병합 mutation이나 detail write route를 만들지 않는다.
+기존 `/v1/admin/features/dedup-reviews/{id}`의 쓰기 인증·멱등 계약은 그대로다.
+
 ### 2.6 cache target service stream (ADR-081, T-VN-41 producer foundation)
 
 ```text

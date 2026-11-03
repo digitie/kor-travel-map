@@ -100,6 +100,7 @@ from kortravelmap.api.routers import (
     ops_cache_target_streams_router,
     ops_contract_fixtures_router,
     ops_datasets_router,
+    ops_dedup_reviews_router,
     ops_geo_releases_router,
     ops_live_router,
     ops_logs_router,
@@ -210,6 +211,7 @@ _OPS_OBSERVABILITY_PATHS = frozenset(
         "/v1/ops/api-call-logs",
         "/v1/ops/consistency/issues",
         "/v1/ops/consistency/reports",
+        "/v1/ops/dedup-reviews",
         "/v1/ops/health-deep",
         "/v1/ops/metrics",
         "/v1/ops/system-logs",
@@ -1331,6 +1333,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             dependencies=observability_dependencies,
         )
         application.include_router(ops_live_router, prefix="/v1")
+        application.include_router(
+            ops_dedup_reviews_router,
+            prefix="/v1",
+            dependencies=observability_dependencies,
+        )
         application.include_router(
             ops_logs_router,
             prefix="/v1",

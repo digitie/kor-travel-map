@@ -199,11 +199,17 @@ PinVi admin Feature 목록·단건의 별도 service read 계약은
 | kor-travel-map admin + canonical ops (`/v1/admin/*`·`/v1/ops/{datasets,pipeline}*`) | same-origin Next.js BFF의 proxy secret + actor + trusted peer CIDR. Docker는 secret 필수·frontend 단일 `/32` | 〃 | 〃 |
 | kor-travel-map ops live WebSocket | BFF가 발급한 짧은 수명 HMAC subprotocol ticket + DB nonce 단일 소비 + bounded lease | WebSocket event frame | 인증/만료는 data frame 없이 close 4401/4408 |
 | kor-travel-map Prometheus `/metrics` | production 필수 `KOR_TRAVEL_MAP_API_METRICS_TOKEN`의 `Authorization: Bearer` scrape identity(ADR-066 결정 4, T-VN-02) | Prometheus exposition | 비-Bearer/불일치 401 |
-| kor-travel-map 관측 ops (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep}`) | AdminBFF 또는 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:read` | 표면별 기존 envelope | RFC7807 `problem+json` |
+| kor-travel-map 관측 ops (`/v1/ops/{metrics,system-logs,api-call-logs,consistency/*,health-deep,dedup-reviews}`) | AdminBFF 또는 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:read` | 표면별 기존 envelope | RFC7807 `problem+json` |
 | kor-travel-map C6c contract fixture (`/v1/ops/contract-fixtures/c6c-cancel-probe/*`) | Docker Manager만 `X-Kor-Travel-Map-Ops-Token` + `X-Kor-Travel-Map-Ops-Scope: ops:fixture`; AdminBFF·PinVi·read/cancel token은 불허 | `{data, meta}` durable fixture receipt | RFC7807 `problem+json` |
 | kor-travel-concierge export (`/api/v1/features/*`) | DB `read` scope `X-API-Key` | **무-envelope** `{items, next_cursor, has_more}` (내부 export 단순 계약) | HTTP status |
 | kor-travel-transport export (`/v1/service/exports/*`) | `X-Kor-Travel-Transport-Service-Token`(32자+, transport `TRANSPORT_SERVICE_EXPORT_TOKEN` = Map `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN`) **그리고** 접속 peer 주소(transport `SERVICE_EXPORT_ALLOWED_CLIENTS_CSV`, 기본 loopback — `Host` header는 보지 않는다). 어긋나면 404로 경로를 숨긴다. Map 쪽 base URL은 `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL`(운영: **2026-10-14부터 odroid transport API gateway `12301`** — 값은 Manager compose 기본값/root `.env`; gateway가 `/v1/service/exports/*`를 n150 LAN 주소에만 연다(XFF 불가, peer = Map code-server의 LAN 주소). 2026-10-15 실측: 토큰 200·무토큰 404 — ADR-110 사실 갱신 절 3) | **무-envelope**. 주유소·휴게소·휴게소 유가는 `{items, next_cursor, has_more, collection}` cursor 페이지, 돌발은 `{collected_at, items, collection}` 활성 집합 전체, 공항은 `{generated_at, items}`. 근거 수집 이력 없음·실패·stale이면 모든 export가 503 | RFC7807 `problem+json`. Map은 `failure_kind`(`transport_hidden`·`transport_not_current`·`transport_empty`·`transport_contract`·`transport_malformed_upstream`)로 가른다 — packages/kor-travel-map-dagster/README.md |
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
+
+PinVi 기본 관리자 Feature 검색을 연결할 때는 `search_scope=feature`로 이름·주소·ID를 검색한다.
+기본 all은 원천 내용 검색을 보존한다. 중복 검토 목록은 `GET /v1/ops/dedup-reviews`에
+기존 ops read 자격을 보내며, admin 쓰기나 public/service principal로 fallback하지 않는다.
+Map 변경 머지 뒤 PinVi 소비자 PR에서 경로·parameter를 연결한다.
+
 
 좌표는 전 구간 WGS84 평면 `lon`/`lat`(lon-first), bbox는 분리 4-float
 `min_lon/min_lat/max_lon/max_lat`(ADR-048 #10 — cross-repo 정본).

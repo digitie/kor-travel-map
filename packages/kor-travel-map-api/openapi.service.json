@@ -9252,7 +9252,7 @@
         "operationId": "service_admin_features_list",
         "parameters": [
           {
-            "description": "name/address/feature/source 검색",
+            "description": "검색어. search_scope에 따라 원천 내용 포함 여부 선택",
             "in": "query",
             "name": "q",
             "required": false,
@@ -9265,8 +9265,24 @@
                   "type": "null"
                 }
               ],
-              "description": "name/address/feature/source 검색",
+              "description": "검색어. search_scope에 따라 원천 내용 포함 여부 선택",
               "title": "Q"
+            }
+          },
+          {
+            "description": "all은 기존 원천 내용 검색 포함, feature는 이름·주소·정본/별칭 ID만 검색.",
+            "in": "query",
+            "name": "search_scope",
+            "required": false,
+            "schema": {
+              "default": "all",
+              "description": "all은 기존 원천 내용 검색 포함, feature는 이름·주소·정본/별칭 ID만 검색.",
+              "enum": [
+                "all",
+                "feature"
+              ],
+              "title": "Search Scope",
+              "type": "string"
             }
           },
           {

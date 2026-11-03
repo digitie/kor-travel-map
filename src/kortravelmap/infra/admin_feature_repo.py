@@ -1276,7 +1276,9 @@ _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE: Final = (
 #
 # alias EXISTS는 ``idx_feature_aliases_feature``(feature_id) 단건 조회 + 그 한 행에 대한
 # ILIKE라, 바로 아래 source_records 상관 서브쿼리에 비하면 무시할 수 있다.
-_ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
+AdminFeatureSearchScope: TypeAlias = Literal["all", "feature"]
+
+_ADMIN_FEATURES_Q_FEATURE_FIELDS: Final = """
         CAST(:q_like AS text) IS NULL
         OR CAST(f.feature_id AS text) ILIKE CAST(:q_like AS text)
         OR EXISTS (
@@ -1287,7 +1289,8 @@ _ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
         )
         OR f.name ILIKE CAST(:q_like AS text)
         OR f.address::text ILIKE CAST(:q_like AS text)
-        OR EXISTS (
+"""
+_ADMIN_FEATURES_Q_SOURCE_FIELDS: Final = """EXISTS (
             SELECT 1
             FROM provider_sync.source_links AS qsl
             JOIN provider_sync.source_entities AS qse
@@ -1303,12 +1306,17 @@ _ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = """AND (
                 OR qse.source_entity_id ILIKE CAST(:q_like AS text)
                 OR qsr.raw_data::text ILIKE CAST(:q_like AS text)
               )
-        )
-      )"""
+        )"""
+_ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = (
+    f"AND ({_ADMIN_FEATURES_Q_FEATURE_FIELDS} OR {_ADMIN_FEATURES_Q_SOURCE_FIELDS})"
+)
+_ADMIN_FEATURES_Q_FEATURE_CLAUSE: Final = f"AND ({_ADMIN_FEATURES_Q_FEATURE_FIELDS})"
+
 
 
 def _admin_features_sql(
-    *, sort: str, order: str, exact_id: bool = False, exact_uuid: bool = False
+    *, sort: str, order: str, exact_id: bool = False, exact_uuid: bool = False,
+    search_scope: AdminFeatureSearchScope = "all",
 ) -> str:
     column = _ADMIN_FEATURE_SORT_COLUMNS[sort]
     order_sql = "ASC" if order == "asc" else "DESC"
@@ -1316,6 +1324,8 @@ def _admin_features_sql(
         q_clause = _ADMIN_FEATURES_Q_EXACT_CLAUSE
     elif exact_uuid:
         q_clause = _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE
+    elif search_scope == "feature":
+        q_clause = _ADMIN_FEATURES_Q_FEATURE_CLAUSE
     else:
         q_clause = _ADMIN_FEATURES_Q_LIKE_CLAUSE
     return f"""
@@ -2064,6 +2074,7 @@ async def list_admin_features(
     session: AsyncSession,
     *,
     q: str | None = None,
+    search_scope: AdminFeatureSearchScope = "all",
     kinds: Sequence[str] | None = None,
     categories: Sequence[str] | None = None,
     lifecycle_states: Sequence[str] | None = None,
@@ -2087,6 +2098,8 @@ async def list_admin_features(
     채워진) notice는 감사 목록에서도 기본 제외한다(#632, 사용자 요구: 수집에 없는
     notice는 과거 자료로 노출하지 않음). 감사가 필요하면 ``True``로 명시 조회.
     """
+    if search_scope not in {"all", "feature"}:
+        raise ValueError("search_scope must be all or feature")
     if page_size <= 0:
         raise ValueError("page_size must be greater than 0")
     effective_limit = min(page_size, 500)
@@ -2121,6 +2134,7 @@ async def list_admin_features(
             text(
                 _admin_features_sql(
                     sort=sort,
+                    search_scope=search_scope,
                     order=order,
                     exact_id=q_exact is not None,
                     exact_uuid=q_exact_uuid is not None,
