@@ -1952,6 +1952,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/dedup-reviews": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Reviews
+         * @description 기존 ops read principal로 후보 목록만 조회한다. 판정·병합 권한은 제공하지 않는다.
+         */
+        get: operations["ops_dedup_reviews_list"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/geo-releases": {
         parameters: {
             query?: never;
@@ -17413,8 +17433,10 @@ export interface operations {
     list_features_v1_admin_features_get: {
         parameters: {
             query?: {
-                /** @description name/address/feature/source 검색 */
+                /** @description 검색어. search_scope에 따라 원천 내용 포함 여부 선택 */
                 q?: string | null;
+                /** @description all은 기존 원천 내용 검색 포함, feature는 이름·주소·정본/별칭 ID만 검색. */
+                search_scope?: "all" | "feature";
                 /** @description feature kind 반복 필터 */
                 kind?: string[] | null;
                 /** @description category code 반복 필터 */
@@ -22173,6 +22195,59 @@ export interface operations {
             };
         };
     };
+    ops_dedup_reviews_list: {
+        parameters: {
+            query?: {
+                /** @description dedup review status 반복 필터 */
+                status?: ("pending" | "accepted" | "rejected" | "merged" | "ignored")[] | null;
+                provider?: string[] | null;
+                dataset_key?: string[] | null;
+                kind?: string[] | null;
+                category?: string[] | null;
+                min_score?: number | null;
+                max_score?: number | null;
+                q?: string | null;
+                page_size?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DedupReviewListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     list_geo_releases_v1_ops_geo_releases_get: {
         parameters: {
             query?: {
@@ -24275,8 +24350,10 @@ export interface operations {
     service_admin_features_list: {
         parameters: {
             query?: {
-                /** @description name/address/feature/source 검색 */
+                /** @description 검색어. search_scope에 따라 원천 내용 포함 여부 선택 */
                 q?: string | null;
+                /** @description all은 기존 원천 내용 검색 포함, feature는 이름·주소·정본/별칭 ID만 검색. */
+                search_scope?: "all" | "feature";
                 /** @description feature kind 반복 필터 */
                 kind?: string[] | null;
                 /** @description category code 반복 필터 */
