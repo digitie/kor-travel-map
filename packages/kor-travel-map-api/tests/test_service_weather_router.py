@@ -371,3 +371,16 @@ def test_pick_skips_candidates_without_usable_data() -> None:
         WeatherCurrentState,
         _usable,
     )[0] == "not_loaded"
+
+
+@pytest.mark.parametrize(
+    ("metric", "value"),
+    [("precip_sum_mm", 0.0), ("precip_occurred", False), ("sky_code", 0), ("wind_speed_avg", 0.0)],
+)
+def test_zero_or_false_daily_metric_is_usable(metric: str, value: float | bool) -> None:
+    from kortravelmap.api.routers.service_weather import usable_daily_slots
+
+    slot = _slot(23, "morning", temp=None, humidity=None).model_copy(update={metric: value})
+    selected = usable_daily_slots([slot], NOW)
+    assert len(selected) == 1
+    assert getattr(selected[0], metric) == value

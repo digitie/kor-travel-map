@@ -580,6 +580,30 @@ def with_previous_day(
     return out
 
 
+def usable_daily_slots(
+    slots: Sequence[WeatherDailySlotState], now: datetime
+) -> list[WeatherDailySlotOut]:
+    """실제 표본·출처·값이 있는 요약만 후보 선택을 성립시킨다.
+
+    구간 목록의 존재만으로 고르면 가까운 위치의 빈 구간이 다음 위치의 과거 요약을 가린다.
+    선택된 위치의 전체 구간과 전날 비교는 그대로 보존한다.
+    """
+    if not any(
+        slot.sample_count > 0
+        and slot.source_providers
+        and any(
+            value is not None
+            for value in (
+                slot.temp_min, slot.temp_max, slot.temp_avg, slot.humidity_avg,
+                slot.precip_sum_mm, slot.precip_occurred, slot.sky_code, slot.wind_speed_avg,
+            )
+        )
+        for slot in slots
+    ):
+        return []
+    return with_previous_day(slots, now)
+
+
 # -- 질의 -----------------------------------------------------------------------
 
 
@@ -824,7 +848,7 @@ async def _bundles(
                 read,
                 near,
                 WeatherDailySummaryState,
-                lambda v: with_previous_day(v.slots, now) or None,
+                lambda v: usable_daily_slots(v.slots, now) or None,
             )
             daily = WeatherDailySection(
                 status=state,

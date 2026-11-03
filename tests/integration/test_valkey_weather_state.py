@@ -542,3 +542,71 @@ async def test_nearest_forecast_scans_past_ten_closer_stations_without_forecasts
     assert short["status"] == "ok"
     assert short["source"]["location_id"] == "kma-x"
     assert 4_000 < short["source"]["distance_m"] < 5_000
+
+
+@pytest.mark.parametrize("empty_kind", ["zero_samples", "no_providers", "no_metrics"])
+async def test_empty_daily_candidate_does_not_hide_five_day_history(
+    store: ValkeyStateStore,
+    api: httpx.AsyncClient,
+    monkeypatch: pytest.MonkeyPatch,
+    empty_kind: str,
+) -> None:
+    day = (datetime.now(UTC) + timedelta(hours=9)).date() - timedelta(days=5)
+    locations = [
+        _location("history-empty", 126.978, 37.5665),
+        _location("history-valid", 126.979, 37.5665),
+    ]
+    valid: dict[str, Any] = {
+        "location_id": "history-valid", "date": day.isoformat(), "slot": "morning",
+        "temp_min": 10.0, "temp_max": 15.0, "temp_avg": 12.5, "humidity_avg": 60.0,
+        "precip_sum_mm": 0.0, "precip_occurred": False, "sky_code": 1,
+        "wind_speed_avg": 0.0, "sample_count": 6,
+        "source_providers": ["python-kma-api"], "partial": False,
+    }
+    empty = {**valid, "location_id": "history-empty"}
+    if empty_kind == "zero_samples":
+        empty["sample_count"] = 0
+    elif empty_kind == "no_providers":
+        empty["source_providers"] = []
+    else:
+        for name in (
+            "temp_min", "temp_max", "temp_avg", "humidity_avg", "precip_sum_mm",
+            "precip_occurred", "sky_code", "wind_speed_avg",
+        ):
+            empty[name] = None
+    _serve(monkeypatch, {
+        "/v1/service/exports/locations": _pages(locations),
+        "/v1/service/exports/daily-summaries": _pages([empty, valid]),
+    })
+    await _load(store, DATASET_LOCATIONS)
+    await _load(store, DATASET_DAILY_SUMMARIES)
+    near = await api.get("/v1/service/weather/nearest", params={
+        "lon": 126.978, "lat": 37.5665, "sections": "daily_summaries",
+    })
+    assert near.status_code == 200, near.text
+    data = near.json()["data"]
+    assert data["location"]["location_id"] == "history-empty"
+    daily = data["daily_summaries"]
+    assert daily["status"] == "ok"
+    assert daily["source"]["location_id"] == "history-valid"
+    assert daily["freshness"]["dataset"] == DATASET_DAILY_SUMMARIES.name
+    assert daily["slots"][0]["date"] == day.isoformat()
+    assert daily["slots"][0]["temp_min"] == 10.0
+    assert daily["slots"][0]["precip_sum_mm"] == 0.0
+    assert daily["slots"][0]["sample_count"] == 6
+
+    # 단일/묶음 조회는 다른 위치로 대체하지 않으며 확인된 빈 부분을 no_data로 낸다.
+    empty_id = weather_location_feature_id("history-empty")
+    detail = await api.get(f"/v1/service/weather/locations/{empty_id}", params={
+        "sections": "daily_summaries",
+    })
+    assert detail.json()["data"]["daily_summaries"]["status"] == "no_data"
+    assert detail.json()["data"]["daily_summaries"]["source"] is None
+    assert detail.json()["data"]["daily_summaries"]["slots"] == []
+    batch = await api.post("/v1/service/weather/locations/batch", json={
+        "location_ids": ["history-empty", "history-valid"], "sections": ["daily_summaries"],
+    })
+    assert batch.status_code == 200, batch.text
+    by_location = {item["location"]["location_id"]: item for item in batch.json()["data"]["items"]}
+    assert by_location["history-empty"]["daily_summaries"]["status"] == "no_data"
+    assert by_location["history-valid"]["daily_summaries"]["status"] == "ok"
