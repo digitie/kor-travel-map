@@ -1825,9 +1825,9 @@ def _search_tail_sql(expression: str) -> str:
     )
 
 
-# 별칭 이름 일치(``name = :alias_name``)는 trigram GIN의 ``=`` 연산자(pg_trgm 1.6, strategy 11)로
-# 같은 ``idx_features_name_trgm``을 탄다 — ``%``와 함께 BitmapOr가 된다(2026-11-02 prod 실측
-# 35ms). ``:alias_name``이 NULL이면 그 팔은 아무 것도 찾지 않는다.
+# 별칭의 정확 이름 및 trigram 후보는 기존 idx_features_name_trgm을 사용한다.
+# 별칭 trigram 팔은 원래 이름의 공백 정규화 일치로 좁힌다. 임의의 글자 사이 공백까지
+# 모두 찾는 보장은 없으며, 알려진 원천 이름 변형과 기본 planner의 GIN 사용을 검증한다.
 #
 # bbox는 q 검색에서 **필터가 아니라 순위 가중**이다(bbox 안이 먼저). 술어가 아니라 정렬식이라
 # 인덱스와 무관하고, 4326 ``coord``와 ``ST_MakeEnvelope``만 쓴다(ADR-012, ST_Transform 없음).
@@ -1847,6 +1847,10 @@ WITH name_candidates AS MATERIALIZED (
     WHERE (
         f.name OPERATOR(x_extension.%) CAST(:q AS text)
         OR f.name = CAST(:alias_name AS text)
+        OR (
+            f.name OPERATOR(x_extension.%) CAST(:alias_name AS text)
+            AND {_search_compact_sql("f.name")} = CAST(:alias_compact AS text)
+        )
       )
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ),
@@ -1867,6 +1871,8 @@ compacted AS (
     SELECT
         filtered.*,
         {_search_compact_sql("display_name")} AS compact_name,
+        CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
+             THEN {_search_compact_sql("name")} END AS compact_raw_name,
         {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail
     FROM filtered
 ),
@@ -1885,7 +1891,7 @@ candidates AS (
         (
           -- 일치 단계: 0 별칭이 가리키는 이름, 1 이름이 검색어를 품음(공백 무시), 2 유사도만.
           CASE
-            WHEN name = CAST(:alias_name AS text) THEN 0
+            WHEN compact_raw_name = CAST(:alias_compact AS text) THEN 0
             WHEN strpos(compact_name, CAST(:q_compact AS text)) > 0 THEN 1
             ELSE 2
           END * {_SEARCH_RANK_MATCH_WEIGHT}
@@ -6276,8 +6282,8 @@ def encode_bbox_cursor(feature_id: str) -> str:
 
 
 _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
-#: v2(436): q 검색 keyset에 ``rank``가 더해졌다 — v1 cursor는 VERSION_UNSUPPORTED다.
-_SEARCH_CURSOR_VERSION: Final[int] = 2
+#: v3: 별칭의 공백 정규화로 순위 의미가 달라져 이전 cursor를 재사용하지 않는다.
+_SEARCH_CURSOR_VERSION: Final[int] = 3
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -6677,6 +6683,7 @@ async def search_features(
                     "q": contract.q,
                     "q_compact": q_compact,
                     "alias_name": alias_name,
+                    "alias_compact": search_alias_key(alias_name) if alias_name else None,
                     "bbox_enabled": contract.bbox is not None,
                     "min_lon": min_lon,
                     "min_lat": min_lat,
@@ -6704,6 +6711,7 @@ async def search_features(
                 "q": contract.q,
                 "q_compact": q_compact,
                 "alias_name": alias_name,
+                "alias_compact": search_alias_key(alias_name) if alias_name else None,
                 "bbox_enabled": contract.bbox is not None,
                 "min_lon": min_lon,
                 "min_lat": min_lat,

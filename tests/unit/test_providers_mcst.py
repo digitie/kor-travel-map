@@ -510,9 +510,9 @@ async def test_same_row_is_deterministic_and_id_stable() -> None:
         ("교통시설", "주차장", "", "06010000"),
         ("여가활동", "캠핑장", "오토캠핑장", "03060100"),
         ("관광지", "민속마을", "", "01070400"),
-        ("알 수 없는 분류", "미분류", "", "01040000"),
-        ("숙박시설", "호텔", "카페", "01040000"),
-        ("숙박시설", "호텔", "캠핑장", "01040000"),
+        ("알 수 없는 분류", "미분류", "", "00000000"),
+        ("숙박시설", "호텔", "카페", "00000000"),
+        ("숙박시설", "호텔", "캠핑장", "00000000"),
     ],
 )
 async def test_mixed_facility_taxonomy_uses_structured_category_and_keeps_identity(
@@ -558,3 +558,45 @@ async def test_structured_cafe_taxonomy_is_not_overridden_by_hotel_or_camp_in_na
         fetched_at=_NOW,
     )
     assert bundle.feature.category == "02020000"
+
+
+@pytest.mark.parametrize(
+    ("slug", "name", "root", "leaf", "expected"),
+    [
+        ("pet_friendly_culture_facilities_csv", "개울가 오토 캠핑장",
+         "반려동반여행", "펜션", "03050000"),
+        ("pet_friendly_culture_facilities_csv", "공개 원본 식당",
+         "반려동물식당카페", "식당", "02010000"),
+        ("pet_friendly_culture_facilities_csv", "공개 원본 미술관",
+         "반려동반여행", "미술관", "01040201"),
+        ("pet_friendly_culture_facilities_csv", "공개 원본 박물관",
+         "반려동반여행", "박물관", "01040100"),
+        ("pet_friendly_culture_facilities_csv", "롯데마트 서울역점",
+         "반려동물 서비스", "반려동물용품", "00000000"),
+        ("pet_friendly_culture_facilities_csv", "동물병원은 사람 병원으로 추정하지 않음",
+         "반려의료", "동물병원", "00000000"),
+        ("barrier_free_places_csv", "공개 원본 공원",
+         "레저/체육/공원", "공원", "01050200"),
+        ("family_infant_culture_facilities_csv", "공개 원본 관광지",
+         "문화관광/명소", "관광지", "01000000"),
+    ],
+)
+async def test_published_source_taxonomy_is_not_a_thematic_cultural_facility_fallback(
+    slug: str, name: str, root: str, leaf: str, expected: str,
+) -> None:
+    # 2026-11-04 공식 CSV의 분류 tuple. 명칭으로 원천과 다른 업종을 만들어 넣지 않는다.
+    row = _world_restaurant_row(TITLE=name, CATEGORY1=root, CATEGORY2=leaf, CATEGORY3="")
+    [bundle] = await file_rows_to_bundles([row], slug=slug, fetched_at=_NOW)
+    assert bundle.feature.category == expected
+
+
+@pytest.mark.parametrize("name", ["롯데호텔 서울", "서울김포공항 우리들병원", "동작대교 주차장"])
+async def test_media_format_without_physical_type_remains_unclassified(name: str) -> None:
+    row = {"PLACENAME": name, "FORMAT": "drama", "MEDIATITLE": "공식 원본 형식 회귀",
+           "TYPE": "", "ADDRESS": "서울특별시 중구 을지로 30",
+           "COORDINATES": "N37.565357, E126.980918"}
+    [bundle] = await file_rows_to_bundles(
+        [row], slug="media_famous_places_csv", fetched_at=_NOW,
+    )
+    assert bundle.feature.category == "00000000"
+    assert bundle.source_record.raw_data == row

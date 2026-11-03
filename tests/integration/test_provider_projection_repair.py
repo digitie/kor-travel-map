@@ -31,6 +31,16 @@ async def _mcst_bundle(info: str = "", fetched_at: datetime = _FETCHED):
     return bundle
 
 
+async def _media_bundle():
+    [bundle] = await file_rows_to_bundles(
+        [{"PLACENAME": "롯데호텔 서울", "FORMAT": "drama", "TYPE": "",
+          "MEDIATITLE": "원천 유형 부재 회귀", "ADDRESS": "서울특별시 중구 을지로 30",
+          "COORDINATES": "N37.565357, E126.980918"}],
+        slug="media_famous_places_csv", fetched_at=_FETCHED,
+    )
+    return bundle
+
+
 async def _revision(session: AsyncSession, feature_id: str) -> int:
     return int(await session.scalar(text(
         "SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"
@@ -51,12 +61,15 @@ async def _snapshot(session: AsyncSession, feature_id: str):
 
 
 @pytest.mark.parametrize("override", [False, True])
+@pytest.mark.parametrize("source_shape", ["hotel", "media"])
 async def test_same_raw_head_reprojects_once_and_preserves_effective_override(
-    migrated_session: AsyncSession, override: bool,
+    migrated_session: AsyncSession, override: bool, source_shape: str,
 ) -> None:
-    bundle = await _mcst_bundle()
+    bundle = await (_mcst_bundle() if source_shape == "hotel" else _media_bundle())
+    expected = "03010100" if source_shape == "hotel" else "00000000"
     old = bundle.model_copy(update={"feature": bundle.feature.model_copy(update={
-        "category": "01040000", "marker_icon": "museum",
+        "category": "01040000" if source_shape == "hotel" else "01000000",
+        "marker_icon": "museum" if source_shape == "hotel" else "attraction",
     })})
     async with as_dagster_runtime(migrated_session):
         await feature_repo.load_bundle(migrated_session, old)
@@ -85,7 +98,7 @@ async def test_same_raw_head_reprojects_once_and_preserves_effective_override(
         result = await feature_repo.load_bundle(migrated_session, bundle)
     assert result.features_updated == 1
     after = await _snapshot(migrated_session, feature_id)
-    assert after["core"]["category"] == ("01070400" if override else "03010100")
+    assert after["core"]["category"] == ("01070400" if override else expected)
     assert after["core"]["marker_color"] == before["core"]["marker_color"]
     assert after["core"]["address"] == before["core"]["address"]
     assert after["links"] == before["links"]
@@ -94,7 +107,7 @@ async def test_same_raw_head_reprojects_once_and_preserves_effective_override(
         "SELECT to_jsonb(h) FROM provider_sync.source_entity_heads h"
     ))).all() == before_heads
     base = {r["field_path"]: r for r in after["base"]}
-    assert base["core.category"]["value_json"] == "03010100"
+    assert base["core.category"]["value_json"] == expected
     async with as_dagster_runtime(migrated_session):
         again = await feature_repo.load_bundle(migrated_session, bundle)
     assert again.features_updated == 0
@@ -111,7 +124,7 @@ async def test_same_raw_head_reprojects_once_and_preserves_effective_override(
                 reason_code="operator_revoke", operator="admin:projection-test",
                 command_id=command, field_paths=["core.category"],
             )
-        assert (await _snapshot(migrated_session, feature_id))["core"]["category"] == "03010100"
+        assert (await _snapshot(migrated_session, feature_id))["core"]["category"] == expected
 
 
 @pytest.mark.parametrize("operator_state", ["none", "quarantined", "venue_override", "retired"])

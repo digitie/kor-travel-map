@@ -1323,7 +1323,7 @@ def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
         page_size=10,
         include_total=False,
     )
-    assert feature_repo._SEARCH_CURSOR_VERSION == 2
+    assert feature_repo._SEARCH_CURSOR_VERSION == 3
     v1_cursor = feature_repo._encode_search_cursor_payload(
         {
             "v": 1,
@@ -1814,3 +1814,19 @@ async def test_place_locator_keeps_going_when_one_row_has_a_bad_region_code(
     assert rows[0][4].sigungu_code == "11110"
     assert rows[1][4].sigungu_code is None
     assert "f-bad" in caplog.text
+
+
+def test_alias_rank_revision_rejects_signed_v2_cursor() -> None:
+    contract = feature_repo._feature_search_contract(
+        q="하회마을", bbox=None, kinds=["place"], categories=None, page_size=2,
+        include_total=False,
+    )
+    cursor = feature_repo._encode_search_cursor_payload(
+        {"v": 2, "kind": "feature_search", "query": contract.fingerprint,
+         "keyset": {"feature_id": "feature-1", "rank": 10010, "score": "0.8"}},
+        signing_key=_SEARCH_CURSOR_KEY,
+    )
+    with pytest.raises(FeatureSearchCursorVersionUnsupportedError):
+        feature_repo._search_cursor_params(
+            cursor, contract=contract, signing_key=_SEARCH_CURSOR_KEY,
+        )
