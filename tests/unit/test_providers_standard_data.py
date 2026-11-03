@@ -477,3 +477,23 @@ def test_address_resolver_fills_bjd_when_coord_missing() -> None:
     assert addr.sido_code == "29"
     assert addr.admin == "광주광역시 광산구 송정동"
     assert bundles[0].feature.feature_id.startswith("f_2920010100_e_")
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "venue", "quality"),
+    [
+        (None, date(2026, 5, 3), "공원", "quarantined"),
+        (date(2026, 5, 1), None, "공원", "quarantined"),
+        (date(2026, 5, 1), date(2026, 5, 3), " ", "quarantined"),
+        (date(2026, 5, 3), date(2026, 5, 1), "공원", "quarantined"),
+        (date(2025, 5, 1), date(2025, 5, 3), "공원", "valid"),
+    ],
+)
+def test_festival_requires_period_and_venue(
+    start: date | None, end: date | None, venue: str, quality: str,
+) -> None:
+    record = dataclasses.replace(_F1, fstvl_start_date=start, fstvl_end_date=end, opar=venue)
+    [bundle] = cultural_festivals_to_bundles([record], fetched_at=_now())
+    assert bundle.feature.quality_state.value == quality
+    assert bundle.feature.category == "01090000"
+    assert bundle.feature.marker_color == FESTIVAL_MARKER_COLOR

@@ -340,7 +340,7 @@ async def test_event_bundle_mapping() -> None:
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     feat = bundle.feature
     assert feat.kind is FeatureKind.EVENT
-    assert feat.category == "01070000"
+    assert feat.category == "01090000"
     assert feat.detail.event_kind == "heritage_event"
     assert feat.detail.starts_on == date(2026, 5, 1)
     assert feat.detail.ends_on == date(2026, 5, 3)
@@ -612,3 +612,27 @@ async def test_event_main_image_becomes_file_source() -> None:
     assert bundle.file_sources[0].source_url == "https://www.khs.go.kr/img/event/9.jpg"
     assert bundle.file_sources[0].dataset_key == DATASET_KEY_EVENT
     assert bundle.file_sources[0].feature_id == bundle.feature.feature_id
+
+
+@pytest.mark.parametrize(
+    ("start", "end", "venue", "quality"),
+    [
+        (None, date(2026, 5, 3), "종묘", "quarantined"),
+        (date(2026, 5, 1), None, "종묘", "quarantined"),
+        (date(2026, 5, 1), date(2026, 5, 3), " ", "quarantined"),
+        (date(2026, 5, 3), date(2026, 5, 1), "종묘", "quarantined"),
+        (date(2025, 5, 1), date(2025, 5, 3), "종묘", "valid"),
+    ],
+)
+async def test_event_requires_period_and_venue_without_losing_raw_or_identity(
+    start: date | None, end: date | None, venue: str, quality: str,
+) -> None:
+    raw = {"sDate": str(start), "eDate": str(end), "subDesc": venue}
+    event = _Event(sn="QUALITY", title="동명 행사", starts_on=start, ends_on=end,
+                   place=venue, raw=raw)
+    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
+    assert bundle.feature.quality_state.value == quality
+    assert bundle.feature.category == "01090000"
+    assert bundle.source_record.raw_data == raw
+    assert bundle.feature.lifecycle_state.value == "active"
+    assert bundle.feature.marker_color == HERITAGE_MARKER_COLOR

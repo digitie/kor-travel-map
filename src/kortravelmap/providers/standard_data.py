@@ -58,6 +58,7 @@ from kortravelmap.core.address import (
     normalize_korean_text,
     normalize_phone_number,
 )
+from kortravelmap.core.events import has_required_event_details
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -71,6 +72,7 @@ from kortravelmap.dto import (
     Feature,
     FeatureBundle,
     FeatureKind,
+    FeatureQualityState,
     PlaceDetail,
     SourceLink,
     SourceRecord,
@@ -126,10 +128,10 @@ _PROVIDER_NAME: Final[str] = "data.go.kr-standard"
 _SOURCE_ENTITY_TYPE: Final[str] = "cultural_festival"
 """provider 내 entity 종류 — ``source_records.source_entity_type``."""
 
-FESTIVAL_CATEGORY: Final[str] = "01000000"
+FESTIVAL_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM_EVENT.value
 """``Feature.category`` — ``PlaceCategoryCode.TOURISM`` 8자리 (ADR-042).
 
-festival은 sub-category 없이 ``EventDetail.event_kind='festival'``에서 분기.
+festival은 축제·행사 category와 ``EventDetail.event_kind='festival'``에서 분기.
 """
 
 FESTIVAL_MARKER_ICON: Final[str] = "star"
@@ -358,7 +360,7 @@ async def _item_to_bundle(
     feature_id = make_feature_id(
         bjd_code=bjd_code,
         kind=FeatureKind.EVENT.value,
-        category=FESTIVAL_CATEGORY,
+        category=PlaceCategoryCode.TOURISM.value,
         source_type=f"{_PROVIDER_NAME}:{DATASET_KEY_CULTURAL_FESTIVALS}",
         source_natural_key=natural_key,
     )
@@ -400,6 +402,9 @@ async def _item_to_bundle(
             },
         ),
     )
+
+    if not has_required_event_details(feature.detail):
+        feature = feature.model_copy(update={"quality_state": FeatureQualityState.QUARANTINED})
 
     # 9) SourceRecord (raw 보존).
     source_record = SourceRecord(

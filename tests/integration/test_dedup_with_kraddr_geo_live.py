@@ -79,6 +79,8 @@ class _DedupFeature:
     name: str
     coord: Coordinate | None
     category: str
+    kind: str = "place"
+    detail: object = None
 
 
 _CANONICAL_FOR_ALIAS_SQL = """

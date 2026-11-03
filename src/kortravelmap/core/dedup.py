@@ -18,6 +18,7 @@ from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
+from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.scoring import (
     DedupDecision,
     category_similarity,
@@ -57,6 +58,12 @@ class DedupInput(Protocol):
 
     @property
     def category(self) -> str: ...
+
+    @property
+    def kind(self) -> str: ...
+
+    @property
+    def detail(self) -> object: ...
 
 
 @dataclass(frozen=True)
@@ -128,6 +135,11 @@ def _score_candidate(
     ``KEEP_SEPARATE``(< THRESHOLD_MANUAL)는 ``None``. ``include_auto_merge=False``면
     ``auto_merge`` 밴드도 ``None``.
     """
+    if a.kind != b.kind:
+        return None
+    occurrence = compare_event_occurrences(a.detail, b.detail) if a.kind == "event" else "same"
+    if occurrence == "different":
+        return None
     score = score_pair(
         name_a=a.name,
         name_b=b.name,
@@ -139,6 +151,8 @@ def _score_candidate(
     decision = classify_decision(score)
     if decision == DedupDecision.KEEP_SEPARATE:
         return None
+    if decision == DedupDecision.AUTO_MERGE and occurrence == "unknown":
+        decision = DedupDecision.MANUAL_REVIEW
     if decision == DedupDecision.AUTO_MERGE and not include_auto_merge:
         return None
     return DedupCandidate(

@@ -1,7 +1,7 @@
 """``kortravelmap.category`` 단위 테스트 (PR#18 - ADR-023 이전 + ADR-027 적용).
 
 검증 항목:
-- 총 145건 (기존 144 + 등대 1건)
+- 총 146건 (기존 144 + 등대 1건)
 - depth별 통계 (sentinel 1 / Tier1 7 / Tier2 34 / Tier3 74 / Tier4 29)
 - Tier 1 enum 8개 (00 sentinel + 01~07)
 - ADR-027 신규 3건 (LODGING_MOUNTAIN_SHELTER + KNPS + KFS)
@@ -31,13 +31,13 @@ from kortravelmap.category import (
     mapbox_maki_icon_or_none,
 )
 
-# ── 145 카탈로그 ─────────────────────────────────────────────────────────
+# ── 146 카탈로그 ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 def test_total_definitions_count() -> None:
-    """기존 144 + 등대 1건 = 145."""
-    assert len(PLACE_CATEGORY_DEFINITIONS) == 145
+    """기존 145 + 축제·행사 1건 = 146."""
+    assert len(PLACE_CATEGORY_DEFINITIONS) == 146
 
 
 @pytest.mark.unit
@@ -50,7 +50,7 @@ def test_depth_distribution() -> None:
     assert depth_counts == {
         0: 1,   # sentinel UNCLASSIFIED
         1: 7,   # Tier 1 (01~07, 00 제외)
-        2: 34,  # Tier 2 (원본 33 + ADR-027 1)
+        2: 35,  # Tier 2 (원본 33 + ADR-027 1 + 행사 1)
         3: 74,  # Tier 3 (기존 73 + 등대)
         4: 29,  # Tier 4
     }
@@ -66,15 +66,15 @@ def test_tier1_enum_count() -> None:
 
 @pytest.mark.unit
 def test_unique_codes() -> None:
-    """145건 모두 고유한 code."""
+    """146건 모두 고유한 code."""
     codes = [c.code for c in PLACE_CATEGORY_DEFINITIONS]
-    assert len(codes) == len(set(codes)) == 145
+    assert len(codes) == len(set(codes)) == 146
 
 
 @pytest.mark.unit
 def test_by_code_lookup() -> None:
-    """`PLACE_CATEGORY_BY_CODE` lookup 145 entries."""
-    assert len(PLACE_CATEGORY_BY_CODE) == 145
+    """`PLACE_CATEGORY_BY_CODE` lookup 146 entries."""
+    assert len(PLACE_CATEGORY_BY_CODE) == 146
     for category in PLACE_CATEGORY_DEFINITIONS:
         assert PLACE_CATEGORY_BY_CODE[category.code] is category
 
@@ -189,9 +189,9 @@ def test_category_path_and_label() -> None:
 
 @pytest.mark.unit
 def test_iter_categories_all() -> None:
-    """`iter_categories()` 기본은 active_only=True (145건 모두 active)."""
+    """`iter_categories()` 기본은 active_only=True (146건 모두 active)."""
     all_categories = list(iter_categories())
-    assert len(all_categories) == 145
+    assert len(all_categories) == 146
 
 
 @pytest.mark.unit

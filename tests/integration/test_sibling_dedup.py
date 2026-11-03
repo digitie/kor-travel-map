@@ -116,6 +116,8 @@ async def test_sibling_candidates_enqueued(migrated_session: AsyncSession) -> No
         name: str
         coord: Coordinate | None
         category: str
+        kind: str = "place"
+        detail: object = None
 
     feats = [
         _Feat(

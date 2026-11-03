@@ -151,6 +151,7 @@ async def _seed_feature(
     label: str,
     updated_at: datetime,
     coord_precision_digits: int,
+    kind: str = "place",
 ) -> None:
     """정본 키(uuid)로 core 행을, 라벨로 lineage 자연키를 심는다.
 
@@ -161,7 +162,7 @@ async def _seed_feature(
     session.add(
         FeatureRow(
             feature_id=feature_id,
-            kind="place",
+            kind=kind,
             name=f"중복 후보 {label}",
             category=_CAT,
             coord=WKTElement("POINT(129.3320 35.7900)", srid=4326),
@@ -215,3 +216,31 @@ async def _seed_feature(
         )
     )
     await session.flush()
+
+
+async def test_refresh_reads_event_occurrence_before_scoring(
+    migrated_session: AsyncSession,
+) -> None:
+    from kortravelmap.core.dedup import find_sibling_candidates
+    from tests.integration._subtype_seed import seed_feature_subtype
+
+    for feature_id, year in ((_F_A, 2025), (_F_B, 2026)):
+        await _seed_feature(
+            migrated_session, feature_id=feature_id, label=f"occurrence-{year}",
+            updated_at=_T2, coord_precision_digits=6, kind="event",
+        )
+        await migrated_session.execute(text(
+            "UPDATE feature.features SET name='회차 정합성 축제' WHERE feature_id=CAST(:id AS uuid)"
+        ), {"id": feature_id})
+        await seed_feature_subtype(
+            migrated_session, feature_id=feature_id, kind="event",
+            detail={"starts_on": f"{year}-05-01", "ends_on": f"{year}-05-03",
+                    "venue_name": "같은 장소"},
+        )
+    rows = await list_dedup_refresh_features(
+        migrated_session,
+        DedupRefreshScope(provider=_PROVIDER, dataset_key=_DATASET, kinds=("event",)),
+    )
+    assert len(rows) == 2
+    assert all(row.kind == "event" and row.detail is not None for row in rows)
+    assert find_sibling_candidates(rows) == []

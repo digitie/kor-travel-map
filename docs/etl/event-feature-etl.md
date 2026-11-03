@@ -46,7 +46,7 @@
 | natural key | **`name::address` 파생** (ADR-009 `::`) — 원천에 관리번호 컬럼이 **없어** `정규화(축제명)::도로명주소(없으면 지번주소, 둘 다 없으면 빈 문자열)`로 파생한다 (#374). enrichment(visitkorea)의 natural key는 `content_id` |
 | FeatureKind | `event` |
 | detail table | `feature_events` |
-| category | event는 `EventDetail.event_kind`(`festival`/`concert`/`exhibition` 등)로 1차 분류. `features.category` 컬럼에는 `01000000` `TOURISM` (대분류) 또는 행사 성격에 맞는 `01040*` (문화시설) 카테고리 — 공식 카테고리 트리는 `docs/architecture/category.md` §4 |
+| category | `01090000` 축제·행사. 세부 종류는 `EventDetail.event_kind`로 구분하며 기존 legacy ID seed는 유지한다. |
 | source_role | `primary` |
 | marker_icon | `star` |
 | marker_color | `P-11` (자홍) |
@@ -253,3 +253,15 @@ commit/rollback은 caller.
 - 상세 정보 endpoint (`detailIntro1`, `detailInfo1`) 추가 적재 검토 (v2 1차
   범위 외).
 - `python-visitkorea-api`에서 부족한 typed field는 그쪽 PR로 안정화.
+
+
+## #1439 행사 품질 경계
+
+표준축제·국가유산 행사는 시작·종료일과 행사장 이름이 없거나 기간이 역전되면 새 행을
+`quarantined`로 생성한다. 원문과 기존 자연키·legacy ID seed·색상은 보존하며 날짜를
+수집 연도나 주소로 만들어 채우지 않는다. 종료된 정상 행사는 격리하지 않는다.
+
+중복 후보는 행사 기간·장소를 이름 점수보다 먼저 비교한다. 다른 회차는 제외하고,
+근거가 부족하면 자동 병합 제안을 수동 검토로 낮춘다. 실제 병합도 Feature 부모 잠금 뒤
+typed 행사 행을 다시 잠가 비교하므로 오래된 검토 큐나 명시 master 요청이 다른 회차를
+우회 병합할 수 없다. 날짜 불명 행사의 명시적 수동 판단은 허용한다.

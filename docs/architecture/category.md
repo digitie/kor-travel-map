@@ -41,7 +41,7 @@ from kortravelmap.category import (
 
 ### 3.1 `PlaceCategoryCode` (StrEnum)
 
-8자리 코드 `AABBCCDD` 형식. 총 145개 enum member다.
+8자리 코드 `AABBCCDD` 형식. 총 146개 enum member다.
 
 ```
 AA — Tier 1 (대분류, 예: "01" 관광, "02" 음식, "03" 숙박)
@@ -90,7 +90,7 @@ class PlaceCategory:
 
 | 이름 | 타입 | 의미 |
 |------|------|------|
-| `PLACE_CATEGORY_DEFINITIONS` | `tuple[PlaceCategory, ...]` | 145개 정의 |
+| `PLACE_CATEGORY_DEFINITIONS` | `tuple[PlaceCategory, ...]` | 146개 정의 |
 | `PLACE_CATEGORY_BY_CODE` | `dict[PlaceCategoryCode, PlaceCategory]` | 코드 → 정의 |
 | `PLACE_CATEGORY_CODES` | `tuple[PlaceCategoryCode, ...]` | 모든 코드 (sort_order 순) |
 | `PLACE_CATEGORY_TIER1_NAMES` | `dict[PlaceCategoryTier1Code, str]` | 예: `"01"→"관광"` |
@@ -112,12 +112,12 @@ class PlaceCategory:
 | `format_category_tree(root_code=None, include_codes=True, active_only=True) -> str` | 트리 문자열 |
 | `print_category_tree(...)` | 위 결과 print |
 
-## 4. Tier 1~4 카탈로그 (145건 전체)
+## 4. Tier 1~4 카탈로그 (146건 전체)
 
 > 소스: `python-kraddr-base/src/kraddr/base/categories.py` (sync date
-> `2026-05-12`, ADR-023으로 본 저장소 이전 완료 PR#18). 총 **145건** = sentinel 1 +
-> Tier 1 7개 + Tier 2 34개 + Tier 3 74개 + Tier 4 29개다. 기존 144건에
-> `01.05.04 TOURISM_NATURE_LIGHTHOUSE`를 추가했다. depth별 정확한 통계는 §4.3.
+> `2026-05-12`, ADR-023으로 본 저장소 이전 완료 PR#18). 총 **146건** = sentinel 1 +
+> Tier 1 7개 + Tier 2 35개 + Tier 3 74개 + Tier 4 29개다. 기존 145건에
+> `01.09 TOURISM_EVENT`(축제·행사)를 추가했다. depth별 정확한 통계는 §4.3.
 
 ### 4.1 Tier 1 (대분류, 8개)
 
@@ -206,6 +206,8 @@ provider는 `kma`(기상특보)·`airkorea`(대기질 측정소)·`krex`(교통 
     01.08.03 관광유람선 (..._CRUISE) [maki: ferry]
     01.08.04 레저스포츠 (..._LEISURE_SPORTS) [maki: pitch]
     01.08.05 트레킹·둘레길 (..._TREKKING) [maki: park]
+
+  01.09 축제·행사 (TOURISM_EVENT) [maki: star]
 
 02 식음 (FOOD) [maki: restaurant]
   02.01 음식점 (FOOD_RESTAURANT) [maki: restaurant]
@@ -299,7 +301,7 @@ provider는 `kma`(기상특보)·`airkorea`(대기질 측정소)·`krex`(교통 
     07.02.01 일반 약국 (..._GENERAL) [maki: pharmacy]
 ```
 
-### 4.3 표 형식 (전체 145 rows)
+### 4.3 표 형식 (전체 146 rows)
 
 전체 표는 `src/kortravelmap/category/_definitions.py`의 `PLACE_CATEGORY_DEFINITIONS`
 tuple에서 자동 생성된다 (ADR-023으로 본 라이브러리로 이전, PR#18). depth별
@@ -309,10 +311,10 @@ tuple에서 자동 생성된다 (ADR-023으로 본 라이브러리로 이전, PR
 |-------|----:|-----|
 | 0 (sentinel) | 1 | `UNCLASSIFIED` |
 | 1 (Tier 1 대분류) | 7 | `01 TOURISM` ~ `07 MEDICAL` — `00 UNCLASSIFIED`는 depth 0 sentinel로 분리 |
-| 2 (Tier 2 중분류) | 34 | 원본 33 + ADR-027 `03.08 LODGING_MOUNTAIN_SHELTER` |
+| 2 (Tier 2 중분류) | 35 | 원본 33 + ADR-027 `03.08 LODGING_MOUNTAIN_SHELTER` |
 | 3 (Tier 3 소분류) | 74 | 기존 73 + `01.05.04 등대` |
 | 4 (Tier 4 세분류) | 29 | ADR-027에서 추가 없음 |
-| **합계** | **145** | 기존 144 + 등대 신규 1 |
+| **합계** | **146** | 기존 145 + 축제·행사 신규 1 |
 
 `PlaceCategoryTier1Code` enum은 `00 UNCLASSIFIED` 포함 **8개** (depth 0 +
 depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
@@ -322,7 +324,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 
 ### 4.4 maki icon 분포
 
-`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (58 unique icons → 145 rows):
+`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (58 unique icons → 146 rows):
 
 > 본 표의 사용 코드 수는 손으로 유지하는 값이라 자동 생성 dict와 drift할 수
 > 있다. 정확한 분포는 코드(`PLACE_CATEGORY_MAPBOX_MAKI_ICONS`)를 정본으로 본다.
@@ -365,7 +367,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 
 | Provider / dataset | 매핑되는 카테고리 (대표) | docs reference |
 |--------------------|-------------------------|----------------|
-| `python-visitkorea-api` (축제) | (이벤트는 카테고리 외 — `EventDetail.event_kind`) | event-feature-etl.md |
+| `python-visitkorea-api` (축제) | `01090000` 축제·행사, 세부 종류는 `EventDetail.event_kind` | event-feature-etl.md |
 | `python-mois-api` (식음 슬러그) | `02010100` ~ `02011000`, `02020100` (카페) | mois-feature-etl.md §6.1 |
 | `python-mois-api` (숙박 슬러그) | `03010100`, `03050100`, `03050200`, `03060100`, `03060200`, `03070200` 등 | mois-feature-etl.md §6.1 |
 | `python-mois-api` (관광 슬러그) | `01070100` 전통사찰, `01080300` 관광유람선, `01040100` 박물관 등 | mois-feature-etl.md §6.1 |
@@ -470,7 +472,7 @@ ADR-023 결정으로 본 저장소에 이전. 변경 이력은 git log 참조.
 
 `tests/unit/test_category.py` (코드 작성 단계에서 추가):
 
-- 145개 seed의 결정성: `PLACE_CATEGORY_DEFINITIONS` 길이 + `PLACE_CATEGORY_BY_CODE`
+- 146개 seed의 결정성: `PLACE_CATEGORY_DEFINITIONS` 길이 + `PLACE_CATEGORY_BY_CODE`
   key 집합 일치.
 - `category_path("01050100")` → `("관광", "자연", "해변", ...)`
 - `mapbox_maki_icon_for_category` fallback (unknown → "marker")
