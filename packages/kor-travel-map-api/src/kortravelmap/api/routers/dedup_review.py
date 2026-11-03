@@ -42,6 +42,7 @@ from kortravelmap.api.response import Meta, make_meta
 __all__ = [
     "router",
     "feature_router",
+    "ops_read_router",
     "DedupReviewRecord",
     "DedupReviewListResponse",
     "DedupReviewDetailResponse",
@@ -58,6 +59,11 @@ router = APIRouter(
 feature_router = APIRouter(
     prefix="/admin/features/dedup-reviews",
     tags=["admin-dedup"],
+)
+
+ops_read_router = APIRouter(
+    prefix="/ops/dedup-reviews",
+    tags=["ops-dedup"],
 )
 
 DedupStatus = Literal["pending", "accepted", "rejected", "merged", "ignored"]
@@ -339,6 +345,12 @@ def _decision_response(
     )
 
 
+@ops_read_router.get(
+    "",
+    response_model=DedupReviewListResponse,
+    operation_id="ops_dedup_reviews_list",
+    description="기존 ops read principal로 후보 목록만 조회한다. 판정·병합 권한은 제공하지 않는다.",
+)
 @feature_router.get("", response_model=DedupReviewListResponse)
 @router.get("", response_model=DedupReviewListResponse)
 async def list_reviews(

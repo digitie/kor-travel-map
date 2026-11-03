@@ -370,6 +370,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/ops/metrics": RoutePolicy.OPERATOR,
     "/v1/ops/system-logs": RoutePolicy.OPERATOR,
     "/v1/ops/api-call-logs": RoutePolicy.OPERATOR,
+    "/v1/ops/dedup-reviews": RoutePolicy.OPERATOR,
     "/v1/ops/consistency/reports": RoutePolicy.OPERATOR,
     "/v1/ops/consistency/issues": RoutePolicy.OPERATOR,
     "/v1/ops/health-deep": RoutePolicy.OPERATOR,

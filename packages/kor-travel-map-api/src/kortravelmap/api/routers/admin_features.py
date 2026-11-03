@@ -1495,7 +1495,12 @@ async def get_admin_feature_price(
 @router.get("", response_model=AdminFeaturesListResponse)
 async def list_features(
     session: Annotated[AsyncSession, Depends(get_session)],
-    q: Annotated[str | None, Query(description="name/address/feature/source 검색")] = None,
+    q: Annotated[
+        str | None, Query(description="검색어. search_scope에 따라 원천 내용 포함 여부 선택")
+    ] = None,
+    search_scope: Annotated[Literal["all", "feature"], Query(
+        description="all은 기존 원천 내용 검색 포함, feature는 이름·주소·정본/별칭 ID만 검색."
+    )] = "all",
     kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터")] = None,
     category: Annotated[
         list[str] | None,
@@ -1542,6 +1547,7 @@ async def list_features(
         page: AdminFeaturePage = await list_admin_features(
             session,
             q=q,
+            search_scope=search_scope,
             kinds=kind,
             categories=category,
             lifecycle_states=lifecycle_filter,

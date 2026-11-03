@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from hashlib import md5
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import pytest
 from geoalchemy2 import WKTElement
@@ -222,6 +222,7 @@ async def _seed_feature(
     feature_id: str,
     *,
     natural_key: str | None = None,
+    source_payload: dict[str, Any] | None = None,
 ) -> None:
     """정본 키(uuid)로 심은 feature 1건 + 그 feature의 provider 계보.
 
@@ -248,7 +249,10 @@ async def _seed_feature(
     entity = _source_entity(f"sr-{feature_id}", provider_dataset_id)
     session.add(entity)
     await session.flush()
-    session.add(_source_record(f"sr-{feature_id}"))
+    source_record = _source_record(f"sr-{feature_id}")
+    if source_payload is not None:
+        source_record.raw_data = source_payload
+    session.add(source_record)
     await session.flush()
     # T-VN-33: 현재 record 포인터는 entity가 아니라 head가 소유한다.
     session.add(

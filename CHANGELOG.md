@@ -10,6 +10,14 @@
 
 ## [Unreleased]
 
+### 관리자 검색 범위·중복 검토 읽기 (2026-11-03)
+
+- 관리자 Feature 읽기에 `search_scope=feature`를 추가해 이름·주소·ID만 검색할 수 있다.
+  기본 all은 기존 원천 내용 검색을 보존한다.
+- `GET /v1/ops/dedup-reviews`는 기존 ops read 자격으로 후보 목록을 제공한다.
+  public/service·cancel 자격과 mutation은 허용하지 않는다.
+- PinVi 소비자 연결·WSL 검증·리뷰를 별도 순차 PR로 진행하며 운영 배포는 이 작업에서 수행하지 않는다.
+
 ### feature 검색 순위·별칭·주차장 표시 이름 (2026-11-02, alembic 436)
 
 - **CHANGED (API)**: `/v1/features/search`의 `q` 검색 순서가 `rank ASC, score DESC, feature_id ASC`다. `rank`는 일치

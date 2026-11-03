@@ -270,9 +270,7 @@ def test_list_dedup_reviews_passes_filters(
     body = response.json()
     assert body["data"]["items"][0]["review_id"] == "review-1"
     # T-VN-32C 값 전환 — 응답 feature 참조 표시는 UUID 정본.
-    assert body["data"]["items"][0]["feature_a"]["feature_id"] == (
-        _expected_uuid("feature-a")
-    )
+    assert body["data"]["items"][0]["feature_a"]["feature_id"] == (_expected_uuid("feature-a"))
     assert body["meta"]["page"] == {
         "page_size": 25,
         "next_cursor": "next-abc",
@@ -505,3 +503,66 @@ def test_patch_merged_unknown_merge_error_hides_internal_message(
 
     assert response.status_code == 500
     assert response.json()["detail"] == "dedup review merge failed"
+
+
+def test_ops_dedup_list_is_read_only_and_uses_ops_principal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from pydantic import SecretStr
+
+    from kortravelmap.api.routers import dedup_review as router_mod
+
+    read_token = "read-token-" + "r" * 32
+    cancel_token = "cancel-token-" + "c" * 32
+    app = create_app(
+        ApiSettings(
+            admin_proxy_secret=SecretStr("admin-proxy-" + "a" * 32),
+            ops_read_token=SecretStr(read_token),
+            ops_cancel_token=SecretStr(cancel_token),
+            ops_fixture_token=SecretStr("fixture-token-" + "f" * 32),
+            public_api_key_required=False,
+            service_token=SecretStr("consumer-token-" + "s" * 32),
+            vworld_api_key=None,
+        )
+    )
+
+    async def fake_session() -> AsyncIterator[_FakeSession]:
+        yield _FakeSession()
+
+    app.dependency_overrides[get_read_snapshot_session] = fake_session
+    calls: list[dict[str, Any]] = []
+
+    async def list_candidates(_session: Any, **kwargs: Any) -> DedupReviewPage:
+        calls.append(kwargs)
+        return DedupReviewPage(items=(_review_row(),), total_count=1, next_cursor=None)
+
+    monkeypatch.setattr(router_mod, "list_dedup_reviews", list_candidates)
+    client = TestClient(app)
+    headers = {"X-Kor-Travel-Map-Ops-Token": read_token, "X-Kor-Travel-Map-Ops-Scope": "ops:read"}
+    response = client.get(
+        "/v1/ops/dedup-reviews",
+        headers=headers,
+        params={"status": "pending", "min_score": 70, "page_size": 25},
+    )
+    assert response.status_code == 200, response.text
+    assert len(response.json()["data"]["items"]) == 1
+    assert calls[-1]["min_score"] == 70
+    assert calls[-1]["statuses"] == ["pending"]
+    assert calls[-1]["page_size"] == 25
+    for method, path in [
+        ("POST", "/v1/ops/dedup-reviews"),
+        ("PATCH", "/v1/ops/dedup-reviews/review-1"),
+        ("PATCH", "/v1/admin/features/dedup-reviews/review-1"),
+    ]:
+        denied = client.request(method, path, headers=headers, json={"decision": "accepted"})
+        assert denied.status_code in {403, 404, 405}
+    assert len(calls) == 1
+    for denied_headers in [
+        {"X-Kor-Travel-Map-Service-Token": "consumer-token-" + "s" * 32},
+        {"X-Kor-Travel-Map-Ops-Token": cancel_token, "X-Kor-Travel-Map-Ops-Scope": "ops:read"},
+        {"X-Kor-Travel-Map-Ops-Token": read_token},
+        {},
+    ]:
+        denied = client.get("/v1/ops/dedup-reviews", headers=denied_headers)
+        assert denied.status_code in {401, 403, 422}
+    assert len(calls) == 1

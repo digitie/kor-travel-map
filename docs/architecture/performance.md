@@ -1046,3 +1046,16 @@ autovacuum cadence를 측정해 조정한다. final receipt/material schema의 h
 - bulk insert는 `psycopg.copy_*` 우선, 안전 마진 30k 파라미터 (구 ADR-013에서
   결정) — §1 원칙 5, §5.2/§5.3 표준 예시, §13 안티패턴 표에 본문이 충분히
   반영되어 있다.
+
+
+## 관리자 Feature 텍스트 검색 범위 (PinVi #648)
+
+전체 원천 JSON의 ILIKE 검색은 현재 원천 수·payload 크기에 비례한다.
+WSL PG18의 희소 한국어 질의에서 기존 planner는 원천 검색을 한 번으로 접었으나
+비일치 Feature 48건의 원천 record 48건을 여전히 읽었다. 반복 서브쿼리 제거를
+성능 개선 근거로 주장하지 않는다.
+
+`search_scope=feature`는 이름·주소·UUID/legacy alias만 검사한다.
+비일치 후보의 source_records 접근이 실제 실행계획에서 0인지 통합 테스트로 검증한다.
+일치 결과의 현재 provider metadata 조회는 유지한다. 원천 내용을 찾으려는 호출자는
+기존 기본값인 all을 사용한다. 정렬·cursor·필터와 원천 head 선택은 두 범위에서 동일하다.
