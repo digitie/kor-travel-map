@@ -1,3 +1,10 @@
+## 2026-11-04 — Feature 품질 최종 WSL 검증
+
+- 제품 15b75fe의 독립 전문 적대적 리뷰 A/B 모두 잔여 P0/P1/P2 없음이다.
+- 최종 WSL 전체 PG 통합 1,617개 통과·조건부 14개 skip(743.78초), 전체 unit/lint 3,631개 통과·조건부 6개 skip, 관련 API 48개를 통과했다. API 카테고리 회귀의 이전 145개 고정값을 146개로 맞추고 행사 path·star 아이콘을 명시적으로 검증했다. 이 보완에는 제품 코드 변경이 없다.
+- 실제 Map 15b75fe → Pinvi 80593b4 → Chromium UI 11항목을 통과했다. 별도 테스트 DB·정상 앱 lifespan·실제 HTTP를 사용했고 배경 raster 타일만 고정했다. 제품 API mock·dependency override는 없다. 행사 기간·장소 모달, 업종 라벨 5종, 격리 행 공개 제외를 확인하고 소유 fixture 서버·컨테이너를 종료했다.
+- 관련 안전 결과는 소비자 PR #662의 `docs/reviews/pinvi-1439-event-local-live.json`에 보존한다. 최종 테스트/문서 커밋의 exact HEAD 리뷰와 CI 후 Map → Pinvi 순서로 병합한다. 운영 접속·배포·검증은 하지 않았다.
+
 ## 2026-11-04 — 적대적 리뷰의 회차 비교/관리자 보정 충돌 수정
 
 - 두 최종 리뷰어가 KHA fallback guard의 effective 값 비교를 지적했다. 동일 원문이 관리자 보정 때문에 거부되거나, 반대로 보정값과 같은 다른 원천 회차가 통과할 수 있었다.
