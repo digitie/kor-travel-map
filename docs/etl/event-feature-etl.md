@@ -277,3 +277,8 @@ KHA의 `sn` 없는 legacy fallback 키에는 종료일이 없다. 이 키는 보
 DB에 수집됐다는 뜻은 아니다. 오래된 artifact는 현재 head가 아니므로 이 충돌 검사도 건너뛴다.
 표준데이터의 기존 series identity와 VisitKorea 이름 기반 enrichment를 새 occurrence identity로
 이행하는 작업은 이 변경 범위가 아니다.
+
+
+회차 충돌은 같은 source entity 소유의 provider base 기간·장소와 비교한다. 관리자 표시값과
+비교하면 정상 재수집을 거부하거나 다른 원천 회차가 보정값에 가려질 수 있다.
+동일 원문과 연락처만 변경한 원문은 관리자 보완을 유지하며 재수집할 수 있다.

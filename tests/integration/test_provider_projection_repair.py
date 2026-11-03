@@ -205,8 +205,9 @@ async def test_projection_reader_has_only_required_base_columns(
     """))
 
 
+@pytest.mark.parametrize("operator_period_override", [False, True])
 async def test_kha_legacy_fallback_period_conflict_preserves_existing_source_and_feature(
-    migrated_session: AsyncSession,
+    migrated_session: AsyncSession, operator_period_override: bool,
 ) -> None:
     from dataclasses import replace
     from datetime import date
@@ -232,6 +233,18 @@ async def test_kha_legacy_fallback_period_conflict_preserves_existing_source_and
         migrated_session, a.feature.feature_id,
     )
     assert identity is not None
+    if operator_period_override:
+        async with as_api_runtime(migrated_session):
+            command = await _open_domain_command(
+                migrated_session, actor="admin:projection-test",
+                operation="admin.feature.override.author",
+            )
+            await admin_feature_repo.author_admin_feature_field_overrides(
+                migrated_session, identity.feature_id,
+                expected_row_revision=await _revision(migrated_session, identity.feature_id),
+                reason_code="period_correction", operator="admin:projection-test",
+                command_id=command, values={"event.ends_on": "2026-05-04"}, geometry_wkt={},
+            )
     before = await _snapshot(migrated_session, identity.feature_id)
     source_before = (await migrated_session.execute(text(
         "SELECT to_jsonb(h) FROM provider_sync.source_entity_heads h"
@@ -360,3 +373,56 @@ async def test_projection_column_acl_reconcile_removes_drift_and_converges(
                 assert tuple(row) == (True, False, False)
     finally:
         await setup.dispose()
+
+
+@pytest.mark.parametrize("contact_changed", [False, True])
+async def test_kha_fallback_venue_override_is_not_a_new_provider_occurrence(
+    migrated_session: AsyncSession, contact_changed: bool,
+) -> None:
+    from dataclasses import replace
+    from datetime import date
+
+    from kortravelmap.providers.krheritage import heritage_events_to_bundles
+    from tests.unit.test_providers_krheritage import _Event
+
+    event = _Event(sn=None, title="fallback 관리자 보완 행사",
+                   starts_on=date(2026, 5, 1), ends_on=date(2026, 5, 3), place="종묘",
+                   raw={"sDate": "2026-05-01", "eDate": "2026-05-03", "subDesc": "종묘"})
+    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
+    async with as_dagster_runtime(migrated_session):
+        await feature_repo.load_bundle(migrated_session, bundle)
+    identity = await feature_identity.resolve_feature_identity(
+        migrated_session, bundle.feature.feature_id,
+    )
+    assert identity is not None
+    async with as_api_runtime(migrated_session):
+        command = await _open_domain_command(
+            migrated_session, actor="admin:projection-test",
+            operation="admin.feature.override.author",
+        )
+        await admin_feature_repo.author_admin_feature_field_overrides(
+            migrated_session, identity.feature_id,
+            expected_row_revision=await _revision(migrated_session, identity.feature_id),
+            reason_code="venue_clarification", operator="admin:projection-test",
+            command_id=command, values={"event.venue_name": "종묘 정문"}, geometry_wkt={},
+        )
+    before = await _snapshot(migrated_session, identity.feature_id)
+    if contact_changed:
+        changed = replace(event, tel_name="02-1234-5678",
+                          raw={**event.raw, "telName": "02-1234-5678"})
+        [bundle] = await heritage_events_to_bundles(
+            [changed], fetched_at=_FETCHED + timedelta(days=1),
+        )
+    async with as_dagster_runtime(migrated_session):
+        result = await feature_repo.load_bundle(migrated_session, bundle)
+    assert result.features_updated == int(contact_changed)
+    row = (await migrated_session.execute(text("""
+        SELECT venue_name, tel FROM feature.feature_events WHERE feature_id=CAST(:id AS uuid)
+    """), {"id": identity.feature_id})).one()
+    assert row[0] == "종묘 정문"
+    if contact_changed:
+        assert row[1] == "02-1234-5678"
+    after = await _snapshot(migrated_session, identity.feature_id)
+    assert after["states"] == before["states"]
+    if not contact_changed:
+        assert after == before

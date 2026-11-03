@@ -3585,13 +3585,18 @@ async def _reject_legacy_event_occurrence_conflict(
     await session.execute(text(
         "SELECT feature_id FROM feature.features WHERE feature_id=CAST(:id AS uuid) FOR UPDATE"
     ), {"id": feature_id})
-    row = (await session.execute(text("""
-        SELECT event_kind, starts_on, ends_on, venue_name FROM feature.feature_events
-        WHERE feature_id=CAST(:id AS uuid) FOR UPDATE
-    """), {"id": feature_id})).mappings().one_or_none()
-    if row is None:
-        return
-    current = EventDetail(feature_id=feature_id, **dict(row))
+    # 관리자 effective 보완값은 원천 회차의 변경이 아니다. 해당 원천이 소유한
+    # provider base만 비교하며, 날짜·장소 누락은 기존 unknown 정책을 유지한다.
+    rows = (await session.execute(text("""
+        SELECT field_path, value_json FROM feature.feature_base_field_values
+        WHERE feature_id=CAST(:id AS uuid)
+          AND provider_dataset_id=:dataset AND source_entity_key=:entity
+          AND field_path IN ('event.starts_on', 'event.ends_on', 'event.venue_name')
+        ORDER BY field_path
+    """), {"id": feature_id, "dataset": record_state.provider_dataset_id,
+           "entity": record_state.source_entity_key})).mappings().all()
+    values = {str(row["field_path"]).removeprefix("event."): row["value_json"] for row in rows}
+    current = EventDetail(feature_id=feature_id, **values)
     if compare_event_occurrences(current, detail) == "different":
         raise FeatureIdentityAnchorError(
             "KHA fallback 자연키의 행사 기간·장소 충돌: 다른 회차를 기존 Feature에 "
