@@ -98,6 +98,7 @@ _COMMON_SEARCH = {
     # 436: 순위 비교 키와 별칭 이름. 상용 검색어라 별칭은 없다.
     "q_compact": "카페",
     "alias_name": None,
+    "alias_compact": None,
     "bbox_enabled": False,
     "min_lon": None,
     "min_lat": None,

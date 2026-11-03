@@ -160,6 +160,7 @@ _SEARCH_PARAMS: dict[str, Any] = {
     "q_compact": "광화문실측카페37",
     # 별칭 팔도 계획에 남겨 둔다 — 값이 있을 때 trigram GIN ``=``로 도는지 함께 본다.
     "alias_name": "광화문 실측 카페 1",
+    "alias_compact": "광화문실측카페1",
     "bbox_enabled": False,
     "min_lon": None,
     "min_lat": None,
