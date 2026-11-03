@@ -590,6 +590,75 @@ async def _resolve_address(
     )
 
 
+# 혼합 시설 CSV의 구조화된 분류에만 적용한다. 사업장명으로 업종을 추정하지 않는다.
+_MCST_CATEGORY_LABELS: Final[Mapping[str, PlaceCategoryCode]] = {
+    "호텔": PlaceCategoryCode.LODGING_HOTEL,
+    "관광호텔": PlaceCategoryCode.LODGING_HOTEL_TOURIST,
+    "비즈니스호텔": PlaceCategoryCode.LODGING_HOTEL_BUSINESS,
+    "한옥호텔": PlaceCategoryCode.LODGING_HOTEL_HANOK,
+    "캠핑장": PlaceCategoryCode.LODGING_CAMPGROUND,
+    "야영장": PlaceCategoryCode.LODGING_CAMPGROUND,
+    "일반야영장": PlaceCategoryCode.LODGING_CAMPGROUND,
+    "오토캠핑장": PlaceCategoryCode.LODGING_CAMPGROUND_AUTO,
+    "자동차야영장": PlaceCategoryCode.LODGING_CAMPGROUND_AUTO,
+    "카페": PlaceCategoryCode.FOOD_CAFE,
+    "커피전문점": PlaceCategoryCode.FOOD_CAFE_COFFEE,
+    "마트": PlaceCategoryCode.CONVENIENCE_MART,
+    "대형마트": PlaceCategoryCode.CONVENIENCE_MART,
+    "병원": PlaceCategoryCode.MEDICAL_HOSPITAL,
+    "종합병원": PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL,
+    "의원": PlaceCategoryCode.MEDICAL_HOSPITAL_CLINIC,
+    "치과": PlaceCategoryCode.MEDICAL_HOSPITAL_DENTAL,
+    "주차장": PlaceCategoryCode.TRANSPORT_PARKING,
+    "민속마을": PlaceCategoryCode.TOURISM_HERITAGE_HANOK_FOLK_VILLAGE,
+    "전통마을": PlaceCategoryCode.TOURISM_HERITAGE_HANOK_FOLK_VILLAGE,
+    "한옥마을": PlaceCategoryCode.TOURISM_HERITAGE_HANOK_FOLK_VILLAGE,
+}
+_MCST_CATEGORY_ROOTS: Final[Mapping[str, PlaceCategoryCode]] = {
+    "숙박": PlaceCategoryCode.LODGING,
+    "숙박시설": PlaceCategoryCode.LODGING,
+    "음식점": PlaceCategoryCode.FOOD_RESTAURANT,
+    "음식점/유흥시설": PlaceCategoryCode.FOOD,
+    "쇼핑": PlaceCategoryCode.CONVENIENCE,
+    "의료": PlaceCategoryCode.MEDICAL,
+    "의료시설": PlaceCategoryCode.MEDICAL,
+    "교통": PlaceCategoryCode.TRANSPORT,
+    "교통시설": PlaceCategoryCode.TRANSPORT,
+}
+
+
+def _structured_category(row: Mapping[str, Any], spec: McstDatasetSpec) -> str:
+    """KCISA 분류 tuple의 일관된 세부 업종을 쓰고 불명·충돌은 기존 fallback을 보존한다."""
+    if spec.slug not in {
+        "pet_friendly_culture_facilities_csv",
+        "barrier_free_places_csv",
+        "family_infant_culture_facilities_csv",
+        "media_famous_places_csv",
+        "leisure_camping_facilities_csv",
+    }:
+        return spec.category
+    labels = [
+        re.sub(r"\s+", "", _row_text(row, (key,)) or "")
+        for key in ("CATEGORY1", "CATEGORY2", "CATEGORY3")
+    ]
+    codes = [_MCST_CATEGORY_LABELS[label] for label in labels if label in _MCST_CATEGORY_LABELS]
+    root = _MCST_CATEGORY_ROOTS.get(labels[0])
+    domains = {code.value[:2] for code in codes}
+    if root is not None:
+        domains.add(root.value[:2])
+    if len(domains) > 1:
+        return spec.category
+    if codes:
+        # 같은 대분류여도 호텔/야영장처럼 서로 다른 업종 tuple은 확정하지 않는다.
+        for parent, child in zip(codes, codes[1:], strict=False):
+            if not child.value.startswith(parent.value.rstrip("0")):
+                return spec.category
+        return codes[-1].value
+    if root is not None and root.value[:2] != spec.category[:2]:
+        return root.value
+    return spec.category
+
+
 _MCST_NAME_PRESENCE: Final[ProviderFieldPresence] = ProviderFieldPresence(
     normalizer_revision="mcst-name-v1", supplied_fields=frozenset({"core.name"})
 )
@@ -606,6 +675,7 @@ def _build_bundle(
     raw_data: dict[str, Any],
     fetched_at: datetime,
 ) -> FeatureBundle:
+    category = _structured_category(raw_data, spec)
     natural_key = "::".join([name, raw_address or ""])
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
@@ -629,8 +699,8 @@ def _build_bundle(
         name=name,
         coord=coord,
         address=address,
-        category=spec.category,
-        marker_icon=mapbox_maki_icon_or_none(spec.category) or _DEFAULT_MCST_ICON,
+        category=category,
+        marker_icon=mapbox_maki_icon_or_none(category) or _DEFAULT_MCST_ICON,
         marker_color=MCST_MARKER_COLOR,
         detail=PlaceDetail(
             feature_id=feature_id,

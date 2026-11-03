@@ -506,6 +506,36 @@ def resolve_license_category(slug: str) -> str | None:
     return PROMOTED_CATEGORY_BY_SLUG.get(slug)
 
 
+# 원천의 명시적인 업태만 기존 승격 업종 안에서 세분화한다.
+_LICENSE_SUBTYPE_CATEGORIES: Final[Mapping[str, Mapping[str, str]]] = {
+    "general_restaurants": {
+        "한식": "02010100", "경양식": "02010200", "일식": "02010300",
+        "중국식": "02010400", "외국음식전문점(인도,태국등)": "02010500",
+        "패스트푸드": "02010600", "뷔페식": "02010700", "분식": "02010900",
+    },
+    "rest_cafes": {"다방": "02020000", "커피숍": "02020100"},
+    "tourist_accommodations": {
+        "관광호텔업": "03010100", "가족호텔업": "03010000",
+        "비즈니스호텔": "03010200", "한옥호텔": "03010300",
+    },
+    "large_scale_retail_stores": {"대형마트": "05030000", "백화점": "05050000"},
+}
+
+
+def _record_category(record: MoisLicensePlaceRecord) -> str | None:
+    fallback = resolve_license_category(record.service_slug)
+    mapping = _LICENSE_SUBTYPE_CATEGORIES.get(record.service_slug, {})
+    categories = {
+        mapping[label.strip()]
+        for label in (
+            record.subtype_name, record.business_type_name,
+            record.culture_sports_business_type_name,
+        )
+        if label is not None and label.strip() in mapping
+    }
+    return next(iter(categories)) if len(categories) == 1 else fallback
+
+
 def resolve_license_place_kind(slug: str) -> str:
     """PROMOTED 슬러그 → ``place_kind``. 미매핑이면 ``license_place`` fallback."""
     return PROMOTED_PLACE_KIND_BY_SLUG.get(slug, _LICENSE_ENTITY_TYPE)
@@ -528,7 +558,7 @@ def license_record_payload_hash(record: MoisLicensePlaceRecord) -> str:
     적재돼 있는가"를 지오코딩 없이 물을 수 있다. PROMOTED 슬러그가 아니면 변환 함수와
     같은 이유로 ``ValueError``다.
     """
-    category = resolve_license_category(record.service_slug)
+    category = _record_category(record)
     if category is None:
         raise ValueError(
             f"service_slug={record.service_slug!r}는 PROMOTED 슬러그가 아님 — 변환 불가."
@@ -677,6 +707,9 @@ def _raw_data(record: MoisLicensePlaceRecord, *, category: str) -> dict[str, Any
         "source_x": record.source_x,
         "source_y": record.source_y,
         "krtour_category": category,
+        "subtype_name": record.subtype_name,
+        "business_type_name": record.business_type_name,
+        "culture_sports_business_type_name": record.culture_sports_business_type_name,
     }
 
 
@@ -697,7 +730,7 @@ async def license_record_to_bundle(
     권장하나, 본 함수는 category 미상(PROMOTED 외) record에 ``ValueError``를 낸다.
     """
     slug = record.service_slug
-    category = resolve_license_category(slug)
+    category = _record_category(record)
     if category is None:
         raise ValueError(f"service_slug={slug!r}는 PROMOTED 슬러그가 아님 — 변환 불가.")
     place_kind = resolve_license_place_kind(slug)
@@ -747,7 +780,8 @@ async def license_record_to_bundle(
     feature_id = make_feature_id(
         bjd_code=bjd_code,
         kind=FeatureKind.PLACE.value,
-        category=category,
+        # 재분류로 기존 legacy ID 별칭이 달라지지 않도록 이전 slug seed를 유지한다.
+        category=PROMOTED_CATEGORY_BY_SLUG[slug],
         source_type=f"{PROVIDER_NAME}:{dataset_key}",
         source_natural_key=natural_key,
     )
