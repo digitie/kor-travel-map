@@ -1,5 +1,13 @@
 # CHANGELOG
 
+
+## 2026-11-04 — 원천 시설 분류·행사 품질
+
+- MCST 혼합 시설의 구조화된 업종과 MOIS 승격 업태를 기존 category 체계에 매핑한다.
+- 같은 원본의 분류 base를 재투영하되 관리자 보정값·기존 식별자·색상을 유지한다.
+- 축제·행사 category를 추가하고 필수 기간·장소가 없는 행사를 격리한다.
+- 다른 회차 행사의 중복 후보·직접 병합과 KHA fallback 동일 키 덮어쓰기를 차단한다.
+
 ## 공통 Dagster 채택 (2026-10-05)
 
 관리자 로그인·메뉴·Dagster 대시보드를 Common으로 통합하고 최근 실행 밖의 활성 job과 마지막 정상 상태를 표시한다. GraphQL 전체 timeout/본문 상한·요청별 연결, 쓰기 job runtime tags와 executor/DB 연결 제한, snapshot 8종의 100개 배치 적재를 적용했다. 관리자 summary OpenAPI/타입을 동기화했다. [가이드](docs/runbooks/common-dagster.md)를 따른다.

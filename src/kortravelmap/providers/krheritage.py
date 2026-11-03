@@ -966,6 +966,10 @@ async def _event_to_bundle(
             venue_name=normalize_korean_text(_event_place(event)),
             tel=normalize_phone_number(_event_tel(event)),
             content_id=natural_key,
+            payload=(
+                {"occurrence_key_basis": "title_start_venue"}
+                if not _event_sn(event) else {}
+            ),
         ),
     )
     if not has_required_event_details(feature.detail):

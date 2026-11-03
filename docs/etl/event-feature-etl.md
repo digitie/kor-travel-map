@@ -265,3 +265,15 @@ commit/rollback은 caller.
 근거가 부족하면 자동 병합 제안을 수동 검토로 낮춘다. 실제 병합도 Feature 부모 잠금 뒤
 typed 행사 행을 다시 잠가 비교하므로 오래된 검토 큐나 명시 master 요청이 다른 회차를
 우회 병합할 수 없다. 날짜 불명 행사의 명시적 수동 판단은 허용한다.
+
+
+기존 행은 현재 primary 원문을 재관측할 때 최종 표시 정보(관리자 override 포함)를 검사한다.
+필수 정보가 비어 있는 `valid` 행만 기존 provider state procedure로 격리한다.
+이미 격리된 행을 자동 해제하지 않으며 관리자 격리의 사유·감사도 덮지 않는다.
+
+KHA의 `sn` 없는 legacy fallback 키에는 종료일이 없다. 이 키는 보존하되, 같은 키로
+확정된 다른 기간·장소가 들어오면 field patch 전에 명시적인 identity 충돌로 수집을 거부한다.
+해당 load 트랜잭션을 rollback하여 기존 raw/head/base/표시값을 보존한다. 거부된 새 입력이
+DB에 수집됐다는 뜻은 아니다. 오래된 artifact는 현재 head가 아니므로 이 충돌 검사도 건너뛴다.
+표준데이터의 기존 series identity와 VisitKorea 이름 기반 enrichment를 새 occurrence identity로
+이행하는 작업은 이 변경 범위가 아니다.

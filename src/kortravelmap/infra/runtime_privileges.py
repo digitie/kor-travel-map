@@ -799,6 +799,26 @@ _CURATION_CANDIDATE_READ_ACL = tuple(
 )
 
 
+# #1438/#1439의 base 비교는 다섯 열만 읽는다. provider 원본·geometry·감사
+# 열과 DML은 열지 않는다. 300 봉인 catalog는 436 별칭 표가 없으므로 유지한다.
+# 향후 436을 baseline에 접을 때 이 catalog 경계도 함께 재검토한다.
+# 열 권한은 행 제한이 아니다. 내부 runtime은 허용된 다섯 열을 모든 base 행에서 읽을 수 있다.
+_CATEGORY_REPROJECTION_READ_ACL = (
+    """DO $category_base_acl$ BEGIN
+    IF to_regclass('feature.feature_search_aliases') IS NOT NULL THEN
+        REVOKE ALL (
+            feature_id, field_path, provider_dataset_id, source_entity_key,
+            source_record_key, source_raw_payload_hash, value_json, value_geometry,
+            base_revision, observed_at, updated_at
+        ) ON feature.feature_base_field_values FROM ktm_feature_runtime;
+        GRANT SELECT (
+            feature_id, field_path, provider_dataset_id, source_entity_key, value_json
+        ) ON feature.feature_base_field_values TO ktm_feature_runtime;
+    END IF;
+    END $category_base_acl$""",
+)
+
+
 # 430 seal 입력·취소 prefix guard의 private ACL. 스냅샷 경로는 ADR-117로 퇴역했다.
 _SEAL_SCHEMA_OWNER_ACL = (
     "REVOKE ALL ON FUNCTION ops.reject_pipeline_cancellation_prefix(...) "
@@ -829,6 +849,7 @@ _ACL_ROLE_WINDOWS: tuple[tuple[str, tuple[str, ...]], ...] = (
         + _M05_SCHEMA_OWNER_DEPENDENCY_ACL
         + _PROVIDER_CURATION_SEAL_ACL
         + _CURATION_CANDIDATE_READ_ACL
+        + _CATEGORY_REPROJECTION_READ_ACL
         + _SEAL_SCHEMA_OWNER_ACL,
     ),
     (

@@ -1,3 +1,12 @@
+## 2026-11-04 — #1438/#1439 현재 원본 재투영·품질 전이 검증
+
+- 현재 primary 원본의 명시적 7개 dataset만 분류·marker base를 재투영한다. 소유 원천이 다른 base·override·주소·상세·팔레트·퇴역 상태를 보존하고 두 번째 실행은 무변경이다.
+- 실제 Dagster 역할의 base 조회 권한 누락을 재현했다. protected table의 DML 금지는 유지하고 필요한 5열 SELECT만 허용한다. 436 catalog marker 이전의 봉인 baseline은 그대로 두며 열 권한 drift를 reconcile에서 제거한다. 열 제한은 행 제한이 아니며 내부 공통 runtime에 적용된다.
+- KHA fallback 동일 키의 다른 기간 유입을 실제 PG에서 재현·거부하고 rollback 뒤 기존 원문/head/base/표시 보존을 확인했다. 기존 행사 격리는 override가 반영된 표시 정보를 사용하고 자동 해제하지 않는다.
+- 전체 unit/lint 3,631개·조건부 skip 6개, main 174개 파일 mypy, import-linter 4계약, CI 범위 Ruff 및 OpenAPI all-profile drift 검사를 통과했다. 분류/ACL/검색 PG 28개, 확장 재투영/ACL 거부·반복 reconcile PG 15개를 통과했다. 새 repair·merge guard를 끈 음성 대조는 5개 단언 실패·오류 0개였다.
+- 별칭 전국 검색은 현행 migration 436 seed와 source 순위가 WSL 실제 PG에서 기대 순서를 만족했다. 운영 결과와의 차이는 최종 Claude Code 검증 시 alias seed·원천 분류·배포 revision을 확인해야 한다. 운영 접근·배포는 수행하지 않았다.
+- 초안 #1447에서 두 독립 전문 적대적 최종 리뷰와 전체 PG/CI를 이어간다. Pinvi 정본 행사 필드 투영은 별도 소비자 PR에서 연결한다.
+
 ## 2026-11-04 — #1438 구조화된 시설 분류 회귀
 
 - MCST 혼합 시설 4종·캠핑 CSV의 CATEGORY1/2/3로 업종을 결정하며, 불명·충돌은 기존 fallback을 유지한다. 이름·브랜드로 업종을 추정하지 않는다.
