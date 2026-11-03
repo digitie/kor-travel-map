@@ -45,7 +45,7 @@ async def test_korean_feature_scope_does_not_scan_raw_source_candidates(
     try:
         page = await list_admin_features(
             migrated_session,
-            q="안동하회마을",
+            q="관리자희소검색용비일치명칭",
             search_scope="feature",
             page_size=50,
         )
@@ -79,6 +79,8 @@ async def test_source_scope_preserves_full_search_and_default(
         migrated_session,
         feature_id,
         source_payload={"operator_note": "원천전용명칭"},
+        name="관리자범위검색전용장소",
+        road_address="관리자범위검색전용도로 43",
     )
     bounded = await list_admin_features(
         migrated_session,
@@ -90,7 +92,7 @@ async def test_source_scope_preserves_full_search_and_default(
         kwargs: dict[str, Any] = {} if scope is None else {"search_scope": scope}
         page = await list_admin_features(migrated_session, q="원천전용명칭", **kwargs)
         assert [item.feature_id for item in page.items] == [feature_id]
-    for query in ("광화문", "세종대로", feature_id):
+    for query in ("관리자범위검색전용장소", "관리자범위검색전용도로", feature_id):
         page = await list_admin_features(
             migrated_session,
             q=query,
@@ -104,17 +106,19 @@ async def test_feature_scope_paginates_without_duplicates(
 ) -> None:
     ids = {feature_uuid(f"admin-feature-scope-page-{index}") for index in range(3)}
     for feature_id in ids:
-        await _seed_feature(migrated_session, feature_id)
+        await _seed_feature(
+            migrated_session, feature_id, name=f"관리자페이지범위전용장소-{feature_id}"
+        )
     first = await list_admin_features(
         migrated_session,
-        q="광화문",
+        q="관리자페이지범위전용장소",
         search_scope="feature",
         page_size=2,
     )
     assert first.next_cursor is not None
     second = await list_admin_features(
         migrated_session,
-        q="광화문",
+        q="관리자페이지범위전용장소",
         search_scope="feature",
         page_size=2,
         cursor=first.next_cursor,

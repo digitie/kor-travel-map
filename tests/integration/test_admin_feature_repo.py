@@ -223,6 +223,8 @@ async def _seed_feature(
     *,
     natural_key: str | None = None,
     source_payload: dict[str, Any] | None = None,
+    name: str = "광화문",
+    road_address: str | None = None,
 ) -> None:
     """정본 키(uuid)로 심은 feature 1건 + 그 feature의 provider 계보.
 
@@ -234,7 +236,10 @@ async def _seed_feature(
     uuid를 주조하고, "admin retirement를 우회하지 못한다"는 명제가 관측 불가능한
     다른 Feature 위에서 참이 되어 버린다.
     """
-    session.add(_feature_row(feature_id, name="광화문"))
+    row = _feature_row(feature_id, name=name)
+    if road_address is not None:
+        row.address = {"road": road_address}
+    session.add(row)
     await session.flush()
     await seed_feature_subtype(session, feature_id=feature_id, kind="place")
     provider_dataset_id = await _provider_dataset_id(session)
