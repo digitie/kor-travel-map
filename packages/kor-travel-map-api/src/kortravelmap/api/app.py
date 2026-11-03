@@ -211,6 +211,7 @@ _OPS_OBSERVABILITY_PATHS = frozenset(
         "/v1/ops/api-call-logs",
         "/v1/ops/consistency/issues",
         "/v1/ops/consistency/reports",
+        "/v1/ops/dedup-reviews",
         "/v1/ops/health-deep",
         "/v1/ops/metrics",
         "/v1/ops/system-logs",

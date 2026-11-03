@@ -566,3 +566,15 @@ def test_ops_dedup_list_is_read_only_and_uses_ops_principal(
         denied = client.get("/v1/ops/dedup-reviews", headers=denied_headers)
         assert denied.status_code in {401, 403, 422}
     assert len(calls) == 1
+
+
+def test_ops_dedup_openapi_requires_token_and_scope_together() -> None:
+    app = create_app(ApiSettings(public_api_key_required=False, vworld_api_key=None))
+    schema = app.openapi()
+    security = schema["paths"]["/v1/ops/dedup-reviews"]["get"]["security"]
+    assert {"AdminBFF": []} in security
+    assert {"OpsToken": [], "OpsScope": []} in security
+    assert {"OpsToken": []} not in security
+    scope = schema["components"]["securitySchemes"]["OpsScope"]
+    assert scope["in"] == "header"
+    assert scope["name"] == "X-Kor-Travel-Map-Ops-Scope"
