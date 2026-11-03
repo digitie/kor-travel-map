@@ -105,9 +105,10 @@ async def test_feature_scope_paginates_without_duplicates(
     migrated_session: AsyncSession,
 ) -> None:
     ids = {feature_uuid(f"admin-feature-scope-page-{index}") for index in range(3)}
+    # 세 이름을 같게 유지해 cursor의 UUID tie-breaker도 검증한다.
     for feature_id in ids:
         await _seed_feature(
-            migrated_session, feature_id, name=f"관리자페이지범위전용장소-{feature_id}"
+            migrated_session, feature_id, name="관리자페이지범위전용장소"
         )
     first = await list_admin_features(
         migrated_session,
