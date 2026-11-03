@@ -1,3 +1,13 @@
+## 2026-11-03 — PinVi #643 관리자 조회 연계 (#648/#651)
+
+**작업**: 한국어 관리자 Feature 검색의 source 조회 비용을 재현·개선하고,
+중복 검토 목록을 기존 ops read principal로 조회할 명시적 읽기 경계를 제공한다.
+기존 operator 쓰기 권한을 public/service token으로 확장하지 않는다.
+**검증**: WSL 재현·회귀와 독립 적대적 리뷰 2인·GitHub CI 뒤 머지한다.
+운영 배포·테스트는 사용자 지시대로 Claude Code가 최종 담당한다.
+**이전**: PinVi PR #659(d6e0ddc)로 관리자 제안 큐 세 항목을 머지했다.
+**다음**: Map 읽기 변경 머지 후 PinVi 소비자 경로·오류 표시를 연결하고 남은 데이터·지도·날씨·알림을 진행한다.
+
 ## 2026-11-03 — weather_state 503 페이지 재시도
 
 weather 503(읽기 경합 `EXPORT_TEMPORARILY_UNAVAILABLE`·이전 `EXPORT_NOT_READY`·code 없음)은 그 페이지만 같은
