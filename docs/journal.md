@@ -2063,3 +2063,11 @@ n150 chain t1013e(2026-10-13 09:11Z)에서 `/root/chain17-pv.sh`(운영자 변�
 - 정본 package graph 누락1F28P를 공식 generator로 수정하고29P, 두 명 검토 후 반영했다.
 - 별도 fresh 공식 schema432 생성·재비교1P27.459초, dump a55cf046. 예상2추가/5변경만이며
   역치환은 기존431 전체 bytes exact다. startup ACL/metadata 및 최종 CI/live·배포는 진행 중이다.
+
+
+### 2026-11-04 — #1448 중간 구현
+- #643/#1444 최신 본문·댓글을 다시 읽었다. 추가 변경 없음. WSL 검증·머지만 수행한다.
+- python-mcst-api PR #20 merge SHA로 consumer pin을 갱신했다.
+- MCST 적재 직후 dataset별 causal seal을 완료하고, 재시도에서 done member는 재적재하지 않는다.
+- fetch/load 실패를 dataset별로 모으고 성공 member에는 실패 attempt를 쓰지 않는다.
+- WSL MCST 단위 22건·변경 source mypy 통과. 실제 PG·UI·두 독립 리뷰·최종 CI는 진행 중이다.

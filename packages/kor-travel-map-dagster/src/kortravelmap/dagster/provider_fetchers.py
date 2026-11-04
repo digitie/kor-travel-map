@@ -1460,6 +1460,14 @@ async def fetch_datagokr_file_data_records(
         await client.aclose()
 
 
+_MCST_SAFE_ERROR_CODES = frozenset({
+    "FILE_APPROVAL_REDIRECT", "FILE_APPROVAL_SESSION_REQUIRED",
+    "FILE_METADATA_FAILED", "DOWNLOAD_CHECK_FAILED", "CAPTCHA_REQUIRED",
+    "FILE_NOT_FOUND", "CSV_SCHEMA_MISMATCH", "CSV_PARSE_ERROR",
+    "ZIP_AMBIGUOUS", "INVALID_ZIP",
+})
+
+
 async def fetch_mcst_culture_records(
     settings: KorTravelMapSettings,
     *,
@@ -1528,7 +1536,11 @@ async def fetch_mcst_culture_records(
                 # 일시적 네트워크 실패에도 그대로 적용한다(적대 리뷰 지적).
                 yield McstSlugFailure(
                     slug=slug,
-                    reason=f"{type(exc).__name__}: {exc}",
+                    reason=(
+                        str(getattr(exc, "result_code", None))
+                        if getattr(exc, "result_code", None) in _MCST_SAFE_ERROR_CODES
+                        else type(exc).__name__
+                    ),
                     retryable=_is_transient_upstream_error(exc),
                 )
     finally:

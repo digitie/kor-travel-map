@@ -166,7 +166,7 @@ providers = [
   # 0f5a8fe 상향(2026-09-19). 아동서점 CSV 원천이 fileDataNo 282에서 484로
   # 옮겨가 카탈로그의 링크가 죽어 있었다(provider PR#19). 카탈로그가 틀리면
   # 이 저장소의 변환 수정은 닿지도 못한다.
-  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@0f5a8fefc8118be5c7212ef66b1aca1a5138dd85",
+  "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@00a78dfdba5a1a87d87c5238ef1566621989b1ae",
   # data.go.kr-standard 6종 + curated fileData 4종은 본 라이브러리 +
   # python-datagokr-api 경유 (ADR-042/T-223b).
 ]
