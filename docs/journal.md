@@ -2088,3 +2088,13 @@ n150 chain t1013e(2026-10-13 09:11Z)에서 `/root/chain17-pv.sh`(운영자 변�
 ### 2026-11-04 — #1448 최종 타입 경계 보완
 - CI strict API mypy에서 조건부 kwargs의 bool dict 추론 오류를 확인했다. 같은 조건을 명시적 bool 인자로 전달하도록 보완했다.
 - API 72개·Dagster 38개 파일 strict mypy 및 pipeline API 162개를 다시 통과했다. 최종 CI는 새 head에서 확인한다.
+
+
+### 2026-11-04 — #1448 최종 적대 리뷰 보완
+- 앞선 영구 수집 실패와 후속 완료 기록의 일시 실패를 함께 보존한다. 아직 loop에 도달하지 않은 fetch 실패도 집계하며 영구 실패가 하나라도 있으면 전체 재시도는 닫힌다.
+- 원문 예외 연쇄를 억제하고 실제 Dagster 오류 직렬화에서 sentinel 미노출을 확인했다. dataset 순서 두 경우 모두 양성 통과, 직전 구현은 새 단언 2건 모두 실패했다.
+- SDK 승인·quota 경계·MCST 회귀·schedule fail-closed 114건 통과. 실제 PostgreSQL 전체 1,624건 통과·기존 조건부 skip14. 실제 wrapper/narrow 2건과 관련 lifecycle/ops54건 포함.
+- 최신 source로 실제 WSL PG/API/Next/Chromium 5흐름을 재검증했다. root/child 작업 이동은 실제 child 응답과 event job ID까지 대조했고 dataset 이력에서도 같은 원인을 확인했다. API 응답 대체 없음. 스크린샷 직접 검사 및 소유 스택 종료.
+- additive admin payload 변경에 맞춰 OpenAPI baseline과 기존 pending consumer receipt의 SHA만 재핀했다. pending 상태·배포 차단 사유는 보존하며 운영 검증을 완료로 바꾸지 않았다.
+- provider 원본은 immutable pin SHA를 읽어 표면 manifest --check를 통과했다. 기존 형제 checkout은 읽기만 했고 수정하지 않았다. 계약·표면 검사 43건 통과.
+- 최종 head의 두 독립 재리뷰와 CI 후에만 머지한다. 운영 접근·배포·테스트 없음.

@@ -775,3 +775,49 @@ async def test_wrapper_rejects_invalid_completion_without_failing_finished_membe
     if mode == "finalize_failure":
         assert attempts[0]["error"]["phase"] == "finalize"
         assert attempts[0]["error"]["retryable"] is True
+
+
+@pytest.mark.parametrize("failed_fetch_after_finalize", [False, True])
+async def test_finalize_failure_preserves_other_fetch_failure_and_redacts_dagster_chain(
+    monkeypatch: pytest.MonkeyPatch, failed_fetch_after_finalize: bool,
+) -> None:
+    from dagster._utils.error import serializable_error_info_from_exc_info
+
+    slugs = tuple(MCST_FILE_DATASETS)[:2]
+    fetch_slug, finalize_slug = slugs if not failed_fetch_after_finalize else slugs[::-1]
+    fetch_key = MCST_FILE_DATASETS[fetch_slug].dataset_key
+    finalize_key = MCST_FILE_DATASETS[finalize_slug].dataset_key
+
+    async def finish(*_args: Any, **_kwargs: Any) -> None:
+        raise ConnectionError("SECRET_UPSTREAM_BODY_TOKEN")
+
+    async def load(_context: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(dataset_key=kwargs["dataset_key"], load=FeatureLoadResult(
+            curation_input_member_count=0, curation_input_set_hash="0" * 64,
+        ))
+
+    async def completed(loaded: Any) -> None:
+        await mcst_module._finalize_mcst_dataset(
+            cast(Any, object()),
+            ProviderDatasetOperationMembership(1, "dataset_wide", "feature_place_mcst_culture_job"),
+            loaded, completed_dataset_keys=(),
+        )
+
+    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", finish)
+    monkeypatch.setattr(mcst_module, "_load", load)
+    with pytest.raises(mcst_module.McstImportFailure) as captured:
+        await run_feature_place_mcst_culture(
+            _context([
+                *(McstSlugAttempt(slug) for slug in slugs),
+                McstSlugFailure(fetch_slug, "CAPTCHA_REQUIRED", retryable=False),
+            ]),
+            on_dataset_completed=completed,
+        )
+    error = captured.value
+    serialized = serializable_error_info_from_exc_info((type(error), error, error.__traceback__))
+    assert "SECRET_UPSTREAM_BODY_TOKEN" not in serialized.to_string()
+    assert captured.value.failures[fetch_key]["reason"] == "CAPTCHA_REQUIRED"
+    assert captured.value.failures[finalize_key]["phase"] == "finalize"
+    assert captured.value.failures[finalize_key]["retryable"] is True
+    assert captured.value.allow_retries is False
+    assert captured.value.__cause__ is None

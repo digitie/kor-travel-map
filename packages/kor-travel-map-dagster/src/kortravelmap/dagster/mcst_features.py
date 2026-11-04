@@ -205,7 +205,21 @@ async def run_feature_place_mcst_culture(
     fetched_at = await _fetched_at(context)
     geocoder = _reverse_geocoder(context)
     results: list[DagsterFeatureLoadResult] = []
-    failures: dict[str, dict[str, object]] = {}
+    failures: dict[str, dict[str, object]] = {
+        MCST_FILE_DATASETS[slug].dataset_key: {
+            "code": "MCST_DATASET_FETCH_FAILED",
+            "phase": "fetch",
+            "reason": failure.reason,
+            "retryable": failure.retryable,
+        }
+        for slug, failure in slug_failures.items()
+        if slug in MCST_FILE_DATASETS
+        and MCST_FILE_DATASETS[slug].dataset_key not in completed_dataset_keys
+        and (
+            selected_dataset_keys is None
+            or MCST_FILE_DATASETS[slug].dataset_key in selected_dataset_keys
+        )
+    }
     for slug, spec in MCST_FILE_DATASETS.items():
         if selected_dataset_keys is not None and spec.dataset_key not in selected_dataset_keys:
             continue
@@ -219,13 +233,6 @@ async def run_feature_place_mcst_culture(
             # 보이게 된다.
             continue
         if slug in slug_failures:
-            failure = slug_failures[slug]
-            failures[spec.dataset_key] = {
-                "code": "MCST_DATASET_FETCH_FAILED",
-                "phase": "fetch",
-                "reason": failure.reason,
-                "retryable": failure.retryable,
-            }
             # **적재를 건너뛴다.** 이 provider는 `retire_absent_from_snapshot`을
             # 넘기지 않으므로 빈 목록이 기존 feature를 지우지는 않는다.
             # 대신 빈 목록을 적재하면 그 dataset의 **sync cursor가 전진해
@@ -280,7 +287,15 @@ async def run_feature_place_mcst_culture(
             }
             continue
         if on_dataset_completed is not None:
-            await on_dataset_completed(loaded)
+            try:
+                await on_dataset_completed(loaded)
+            except McstImportFailure as exc:
+                # 완료 기록 오류가 이미 관측한 다른 dataset 실패를 지우면 안 된다.
+                # 영구 수집 실패가 하나라도 있으면 집계 재시도도 닫힌다.
+                raise McstImportFailure(
+                    failures={**failures, **exc.failures},
+                    loaded_dataset_keys=tuple(result.dataset_key for result in results),
+                ) from None
         results.append(loaded)
     if failures:
         raise McstImportFailure(
@@ -300,7 +315,7 @@ async def _finalize_mcst_dataset(
     *,
     completed_dataset_keys: tuple[str, ...],
 ) -> None:
-    """완료 command의 오류를 해당 dataset에 묶고 원 예외 연쇄는 보존한다."""
+    """완료 command 오류를 해당 dataset에 묶고 원문 예외를 직렬화하지 않는다."""
     try:
         await finish_tracked_feature_membership(
             guard, member,
@@ -317,7 +332,7 @@ async def _finalize_mcst_dataset(
                 "retryable": _retryable_load_failure(exc),
             }},
             loaded_dataset_keys=completed_dataset_keys,
-        ) from exc
+        ) from None
 
 
 @asset(
