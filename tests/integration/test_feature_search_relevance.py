@@ -465,7 +465,9 @@ async def test_alias_space_variants_do_not_hide_typed_source_behind_unclassified
             lon=128.5, lat=36.5,
         )
     labels = await _search_ids(migrated_session, query, ids)
-    assert labels[0] == "typed", labels
+    # 별칭 대상(분류 있음) → 별칭 대상(미분류) → 이름이 비슷한 식음 순이다(#1443).
+    assert labels[:2] == ["typed", "theme"], labels
+    assert labels[2:] in ([], ["food"]), labels
     full = await feature_repo.search_features(
         migrated_session, q=query, kinds=["place"], page_size=200,
         include_total=True, cursor_signing_key=_SEARCH_CURSOR_KEY,

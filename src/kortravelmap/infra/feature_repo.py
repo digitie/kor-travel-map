@@ -3575,7 +3575,12 @@ async def _reject_legacy_event_occurrence_conflict(
     session: AsyncSession, bundle: FeatureBundle, *, feature_id: str,
     record_state: _SourceRecordUpsertState,
 ) -> None:
-    """종료일 없는 기존 KHA fallback 키로 다른 회차가 같은 Feature를 덮는 것을 거부한다."""
+    """종료일 없는 기존 KHA fallback 키로 다른 회차가 같은 Feature를 덮는 것을 거부한다.
+
+    날짜가 다른 회차를 **증명할 때만** 거부한다. 키가 같으면 시작일·장소가 같으므로
+    종료일만 바뀐 행은 같은 회차의 연장·정정으로 적재한다 — 거부하면 KHA 적재 전체가
+    rollback되고 재실행도 같은 행에서 영구히 실패한다(#1444 리뷰).
+    """
     detail = bundle.feature.detail
     if (
         (bundle.source_record.provider, bundle.source_record.dataset_key)

@@ -833,7 +833,7 @@ async def _reject_different_event_occurrence(
                            starts_on=row["starts_on"], ends_on=row["ends_on"],
                            venue_name=row["venue_name"]) for row in rows]
     if compare_event_occurrences(*details) == "different":
-        raise MergeConflictError("기간 또는 장소가 다른 행사 회차는 병합할 수 없음")
+        raise MergeConflictError("기간이 다른 회차로 증명된 행사는 병합할 수 없음")
 
 
 async def apply_feature_merge(

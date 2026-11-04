@@ -154,6 +154,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   `media_famous_place`(MCST)와 국가유산이 같은 장소로 두 번 나온다 — 도산서원(약 300 m), 소수서원. 거리·이름(지역명 접두
   "안동 도산서원")·분류 기준으로 dedup 후보에 오르는지 확인하고 규칙을 고친다. 해제 조건은 acceptance.
 
+- [ ] T-EVENT-QUARANTINE-RELEASE — **원천 보완 뒤 행사 품질 격리 자동 해제 여부 결정**
+
+  `provider_event_required_details_v1` 격리는 원천이 기간·장소를 채워도 풀리지 않는다(#1444 리뷰). 해제 조건은 acceptance.
+
 - [ ] T-PG18-CI — **공용 PG 18 대응: CI를 PG18 lane으로 바꾸고 fresh-install catalog 가정 정리**
 
   ADR-118(proposed): CI 통합 suite를 공용 instance digest(PG18 + PostGIS 3.6) 한 lane으로 바꾸고 PG16 catalog 가정을

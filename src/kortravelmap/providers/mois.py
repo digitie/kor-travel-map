@@ -682,7 +682,7 @@ def _facility_info(record: MoisLicensePlaceRecord) -> dict[str, Any]:
 
 def _raw_data(record: MoisLicensePlaceRecord, *, category: str) -> dict[str, Any]:
     """payload_hash 입력용 canonical dict (안정적 key 순서, JSON 직렬화 가능)."""
-    return {
+    raw: dict[str, Any] = {
         "service_slug": record.service_slug,
         "mng_no": record.mng_no,
         "category": record.category,
@@ -707,10 +707,16 @@ def _raw_data(record: MoisLicensePlaceRecord, *, category: str) -> dict[str, Any
         "source_x": record.source_x,
         "source_y": record.source_y,
         "krtour_category": category,
-        "subtype_name": record.subtype_name,
-        "business_type_name": record.business_type_name,
-        "culture_sports_business_type_name": record.culture_sports_business_type_name,
     }
+    if record.service_slug in _LICENSE_SUBTYPE_CATEGORIES:
+        # 분류를 세분화하는 슬러그만 업태를 담는다 — 복원 되먹임이 같은 분류를 다시 내고,
+        # 다른 슬러그의 해시(재개형 적재 키)는 바뀌지 않는다(#1444 리뷰).
+        raw.update(
+            subtype_name=record.subtype_name,
+            business_type_name=record.business_type_name,
+            culture_sports_business_type_name=record.culture_sports_business_type_name,
+        )
+    return raw
 
 
 # -- 변환 ---------------------------------------------------------------------

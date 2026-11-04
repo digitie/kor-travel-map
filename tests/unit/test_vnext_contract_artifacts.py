@@ -74,8 +74,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-24 T-STATE-02(ADR-114 2단계) — service·admin baseline 재고정(`/v1/service/weather/*`
     # 5 operation 추가, user 불변). service added 5건.
     # 2026-10-25 PR #1410 — 기존 취소 503 description 두 곳의 DB 정리 실패 문구만 반영.
+    # 2026-11-04 #1444 리뷰 — #1445·#1448의 추가 operation·query·필드를 장부에 기록.
     "openapi-diff-v1.json": (
-        "6ee347bf2b5ca1cf480b7f6b90eeb67f35cc2ec0c1c3de593bfc4e490cd38253"
+        "6e11e2e0f3c7a29106833e0588f4cd46b4de1c2bf6853e962b9c5589ba4016f7"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.

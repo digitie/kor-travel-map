@@ -219,17 +219,21 @@ async def test_projection_reader_has_only_required_base_columns(
 
 
 @pytest.mark.parametrize("operator_period_override", [False, True])
-async def test_kha_legacy_fallback_period_conflict_preserves_existing_source_and_feature(
+async def test_kha_legacy_fallback_end_date_change_updates_the_same_occurrence(
     migrated_session: AsyncSession, operator_period_override: bool,
 ) -> None:
+    """fallback 키(행사명::시작일::장소)가 같으면 종료일만 다를 수 있다 — 연장·정정이다.
+
+    #1444 리뷰: 종전에는 이것을 다른 회차로 보고 예외를 던져 KHA 행사 적재 전체가
+    rollback됐고, 재실행도 같은 행에서 영구히 실패했다.
+    """
     from dataclasses import replace
     from datetime import date
 
-    from kortravelmap.infra.feature_identity import FeatureIdentityAnchorError
     from kortravelmap.providers.krheritage import heritage_events_to_bundles
     from tests.unit.test_providers_krheritage import _Event
 
-    first = _Event(sn=None, title="fallback 동명 행사", starts_on=date(2026, 5, 1),
+    first = _Event(sn=None, title="fallback 기간 연장 행사", starts_on=date(2026, 5, 1),
                    ends_on=date(2026, 5, 3), place="종묘",
                    raw={"sDate": "2026-05-01", "eDate": "2026-05-03", "subDesc": "종묘"})
     [a] = await heritage_events_to_bundles([first], fetched_at=_FETCHED)
@@ -238,7 +242,6 @@ async def test_kha_legacy_fallback_period_conflict_preserves_existing_source_and
     [b] = await heritage_events_to_bundles(
         [second], fetched_at=_FETCHED + timedelta(days=1),
     )
-    # 기존 fallback natural key와 legacy 별칭의 호환을 유지하므로 최종 writer에서 거부한다.
     assert a.feature.provider_natural_key == b.feature.provider_natural_key
     async with as_dagster_runtime(migrated_session):
         await feature_repo.load_bundle(migrated_session, a)
@@ -259,18 +262,21 @@ async def test_kha_legacy_fallback_period_conflict_preserves_existing_source_and
                 command_id=command, values={"event.ends_on": "2026-05-04"}, geometry_wkt={},
             )
     before = await _snapshot(migrated_session, identity.feature_id)
-    source_before = (await migrated_session.execute(text(
-        "SELECT to_jsonb(h) FROM provider_sync.source_entity_heads h"
-    ))).all()
-    with pytest.raises(FeatureIdentityAnchorError, match="회차"):
-        async with migrated_session.begin_nested(), as_dagster_runtime(migrated_session):
-            await feature_repo.load_bundle(migrated_session, b)
-    assert await _snapshot(migrated_session, identity.feature_id) == before
-    assert (await migrated_session.execute(text(
-        "SELECT to_jsonb(h) FROM provider_sync.source_entity_heads h"
-    ))).all() == source_before
     async with as_dagster_runtime(migrated_session):
-        again = await feature_repo.load_bundle(migrated_session, a)
+        await feature_repo.load_bundle(migrated_session, b)
+    after = await _snapshot(migrated_session, identity.feature_id)
+    base_ends = {
+        row["field_path"]: row["value_json"] for row in after["base"]
+    }.get("event.ends_on")
+    assert base_ends == "2026-05-04"
+    assert after["core"]["quality_state"] == "valid"
+    assert after["states"] == before["states"]
+    ends_on = await migrated_session.scalar(text(
+        "SELECT ends_on FROM feature.feature_events WHERE feature_id=CAST(:id AS uuid)"
+    ), {"id": identity.feature_id})
+    assert ends_on == date(2026, 5, 4)
+    async with as_dagster_runtime(migrated_session):
+        again = await feature_repo.load_bundle(migrated_session, b)
     assert again.features_updated == 0
 
 

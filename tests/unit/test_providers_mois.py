@@ -632,3 +632,22 @@ async def test_conflicting_structured_license_fields_keep_slug_fallback() -> Non
         service_slug="general_restaurants", subtype_name="중국식", business_type_name="일식",
     )])
     assert bundle.feature.category == "02010100"
+
+
+async def test_subtype_fields_do_not_churn_the_hash_of_slugs_they_cannot_reclassify() -> None:
+    """업태 필드는 분류를 세분화하는 슬러그의 해시에만 들어간다(#1444 리뷰).
+
+    다른 슬러그(제과점 등)는 업태가 분류를 바꾸지 못한다. 그런데도 해시에 넣으면 배포 뒤
+    재개형 적재(ADR-108)가 그 슬러그 전체를 "바뀐 것"으로 보고 역지오코딩부터 다시 한다.
+    """
+    from kortravelmap.providers.mois import license_record_payload_hash
+
+    plain = _Record(service_slug="bakeries", mng_no="3000000-101-2024-00078")
+    typed = dataclasses.replace(
+        plain, subtype_name="제과점", business_type_name="제과점영업",
+        culture_sports_business_type_name="기타",
+    )
+    assert license_record_payload_hash(typed) == license_record_payload_hash(plain)
+    [bundle] = await _bundles([typed])
+    assert "subtype_name" not in bundle.source_record.raw_data
+    assert bundle.source_record.raw_payload_hash == license_record_payload_hash(typed)

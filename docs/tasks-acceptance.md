@@ -2882,6 +2882,14 @@ MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸
 - [ ] 지역명 접두("안동 ", "영주")를 뗀 이름 일치를 이름 점수에 반영할지 결정하고 근거를 적는다.
 - [ ] 회귀 테스트가 두 쌍을 고정한다.
 
+## T-EVENT-QUARANTINE-RELEASE
+
+#1447은 기간·장소가 없는 KHA·축제 행사를 `provider_event_required_details_v1`로 격리하고 자동 해제하지 않는다. 운영 원본
+기준 재적재 때 85건이 격리된다(2026-11-04 읽기 전용 측정).
+
+- [ ] 원천이 같은 사유의 결손을 채웠을 때 자동 해제할지 소유자가 결정하고 근거를 적는다.
+- [ ] 자동 해제로 정하면 그 사유로 격리된 행만 풀고, 다른 사유·관리자 격리는 유지하는 회귀 테스트를 둔다.
+
 ## T-UI-MAPWORKSPACE
 
 보류(선택 기능, 2026-10-27). `@kor-travel/ui` dev.8 지도 작업면(`MapWorkspace`·`MapFilterPanel`·`MapStage`)은 opt-in이다.
