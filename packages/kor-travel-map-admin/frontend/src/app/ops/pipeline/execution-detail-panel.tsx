@@ -18,6 +18,7 @@ import { DetailList } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
 import { JsonViewer } from "@/components/json-viewer";
+import { McstAttemptError } from "@/components/mcst-attempt-error";
 import { LevelBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -279,6 +280,25 @@ function ExecutionRunSummary({
         </Alert>
       ) : null}
 
+      {root?.operation_key === "feature_place_mcst_culture_job" ? (
+        <section aria-label="MCST 데이터셋별 결과" className="space-y-2">
+          <h3 className={SUBHEADING_CLASS}>데이터셋별 결과</h3>
+          <p className="text-sm">
+            완료 {root.provider_datasets.filter((item) => item.status === "done").length} ·{" "}
+            실패 {root.provider_datasets.filter((item) => item.status === "failed").length} ·{" "}
+            전체 {root.provider_datasets.length}
+          </p>
+          <ul className="space-y-1 text-sm">
+            {root.provider_datasets.map((item) => (
+              <li className="flex flex-wrap items-center gap-2" key={item.operation_member_id}>
+                <StatusBadge status={item.status} />
+                <span className="break-all font-mono text-xs">{item.dataset_key}</span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       {execution ? (
         <DetailList
           items={[
@@ -463,6 +483,7 @@ function ExecutionClaimResolution({
   events,
   eventsNextCursor,
   level,
+  onSelectExecution,
   setCursorStack,
   setLevel,
 }: Pick<
@@ -472,6 +493,7 @@ function ExecutionClaimResolution({
   | "events"
   | "eventsNextCursor"
   | "level"
+  | "onSelectExecution"
   | "setCursorStack"
   | "setLevel"
 >) {
@@ -521,6 +543,12 @@ function ExecutionClaimResolution({
                   ) : null}
                 </div>
                 <p className="mt-1 break-all">{event.message}</p>
+                {event.code === "feature_operation.attempt" ? (
+                  <McstAttemptError
+                    error={event.payload.error}
+                    onSelectJob={() => onSelectExecution("import_job", event.job_id)}
+                  />
+                ) : null}
               </li>
             ))}
           </ul>
@@ -800,6 +828,7 @@ function ExecutionDetailPanelView({
         />
 
         <ExecutionClaimResolution
+          onSelectExecution={onSelectExecution}
           cursorStack={cursorStack}
           detail={detail}
           events={events}

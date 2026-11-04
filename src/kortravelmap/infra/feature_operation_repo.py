@@ -54,6 +54,7 @@ __all__ = [
     "list_feature_operation_memberships",
     "resolve_feature_operation_memberships",
     "resolve_feature_operation_dataset_membership",
+    "resolve_frozen_feature_operation_datasets",
     "reconcile_dagster_feature_run",
     "record_feature_operation_invariant_conflict",
     "record_feature_operation_reconcile_stalled",
@@ -383,6 +384,34 @@ async def resolve_feature_operation_memberships(
         session,
         operation_key=operation_key,
     )
+
+
+
+async def resolve_frozen_feature_operation_datasets(
+    session: AsyncSession,
+    *,
+    memberships: Sequence[ProviderDatasetOperationMembership],
+    provider: str,
+) -> dict[str, ProviderDatasetOperationMembership]:
+    """이미 얼린 member ID만 표시용 dataset key에 연결한다.
+
+    현재 enabled catalog 전체를 재해석하지 않는다. 비선택·비활성 dataset은
+    실행 manifest에 없으므로 조회하거나 필수로 요구하지 않는다.
+    """
+    by_id = {member.provider_dataset_id: member for member in memberships}
+    if len(by_id) != len(memberships):
+        raise ValueError("frozen dataset mapping requires one scope per dataset")
+    rows = (await session.execute(text(
+        "SELECT provider_dataset_id, dataset_key "
+        "FROM provider_sync.provider_datasets "
+        "WHERE provider = :provider AND provider_dataset_id = ANY(:dataset_ids)"
+    ), {"provider": provider, "dataset_ids": list(by_id)})).all()
+    if {int(row.provider_dataset_id) for row in rows} != set(by_id):
+        raise FeatureOperationInvariantConflict(
+            "frozen dataset provider does not match",
+            dagster_run_id="unknown",
+        )
+    return {str(row.dataset_key): by_id[int(row.provider_dataset_id)] for row in rows}
 
 
 async def resolve_feature_operation_dataset_membership(

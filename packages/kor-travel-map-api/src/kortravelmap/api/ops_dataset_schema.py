@@ -318,6 +318,7 @@ class OpsDatasetEventRecord(BaseModel):
     level: str
     code: str | None
     message: str
+    payload: dict[str, Any] = Field(default_factory=dict)
     occurred_at: datetime
 
 

@@ -1390,6 +1390,10 @@ async def _load_execution_detail(
                 level=level,
                 limit=page_size,
                 cursor=cursor,
+                include_direct_children=(
+                    job.kind == "provider_feature_load_run"
+                    and job.operation_key == "feature_place_mcst_culture_job"
+                ),
             )
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

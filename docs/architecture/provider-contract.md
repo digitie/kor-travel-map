@@ -465,7 +465,7 @@ def test_no_provider_wrapper_classes():
 | python-krairport-api | `@fe2143b` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@3cdee09` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |
 | python-kasi-api | placeholder | (Sprint 4 PR) | — | KASI 영업주기 |
-| python-mcst-api | `@0f5a8fe` | slug 메타표 13종 + 방언 4종 + `parse_kcisa_coordinates` (#395/T-223b) | T-220a~c → #395 재배선, provider PR#11 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 13 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). `c011f6e`: 중고서점 OpenAPI/CSV 보강. asset 1종(slug별 분리 적재). `0f5a8fe`(2026-09-19): 아동서점 CSV 원천이 fileDataNo 282→484로 이동(provider PR#19). dedup pair는 실데이터 확인 후 등록 검토(`docs/etl/mcst-feature-etl.md` §7) |
+| python-mcst-api | `@00a78df` | slug 메타표 13종 + 방언 4종 + `parse_kcisa_coordinates` (#395/T-223b) | T-220a~c → #395 재배선, provider PR#11 | CSV 파일 다운로드 주경로(keyless `FileDataClient`, provider #6/#7/#9). 적재 13 + 제외 3(기사형/통계 — `MCST_EXCLUDED_FILE_DATASETS`). `c011f6e`: 중고서점 OpenAPI/CSV 보강. asset 1종(slug별 분리 적재). `0f5a8fe`(2026-09-19): 아동서점 CSV 원천이 fileDataNo 282→484로 이동(provider PR#19). dedup pair는 실데이터 확인 후 등록 검토(`docs/etl/mcst-feature-etl.md` §7) |
 
 **상향 보류였던 핀 — 2026-09-11 해소.** 아래 두 건은 provider HEAD가 Map에 회귀를
 일으켜 의도적으로 올리지 않던 것이고, `T-VN-39-PROVIDER-PAGINATION`이 **upstream에서**

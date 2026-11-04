@@ -472,6 +472,7 @@ def _list_import_job_events_sql(
     sync_scope: str | None,
     operation_key: str | None,
     cursor_occurred_at: datetime | None,
+    include_direct_children: bool = False,
 ) -> str:
     """고정 clause만 조합해 각 감사 filter의 B-tree 경로를 보존한다."""
     if provider_dataset_id is not None:
@@ -486,7 +487,15 @@ def _list_import_job_events_sql(
         "event.quarantined_at IS NULL",
     ]
     if job_id is not None:
-        clauses.append("event.job_id = CAST(:job_id AS uuid)")
+        if include_direct_children:
+            clauses.append(
+                "event.job_id IN (SELECT CAST(:job_id AS uuid) UNION ALL "
+                "SELECT child.job_id FROM ops.import_jobs AS child "
+                "WHERE child.parent_job_id = CAST(:job_id AS uuid) "
+                "AND child.kind = 'provider_feature_load' AND child.quarantined_at IS NULL)"
+            )
+        else:
+            clauses.append("event.job_id = CAST(:job_id AS uuid)")
     if level is not None:
         clauses.append("event.level = CAST(:level AS text)")
     if cursor_occurred_at is not None:
@@ -787,6 +796,7 @@ async def list_ops_import_job_events(
     operation_key: str | None = None,
     limit: int = 50,
     cursor: str | None = None,
+    include_direct_children: bool = False,
 ) -> OpsImportJobEventPage:
     """event를 시간 역순으로 조회한다.
 
@@ -806,6 +816,8 @@ async def list_ops_import_job_events(
         raise ValueError("operation_key event filter requires provider_dataset_id")
     if sync_scope is not None:
         parse_canonical_sync_scope(sync_scope)
+    if include_direct_children and (job_id is None or provider_dataset_id is not None):
+        raise ValueError("child event history requires only an exact root job")
     page_size = _limit(limit)
     cursor_filters = {
         "job_id": job_id,
@@ -816,6 +828,8 @@ async def list_ops_import_job_events(
         # cursor를 재사용해 페이지가 조용히 어긋난다.
         "operation_key": operation_key,
     }
+    if include_direct_children:
+        cursor_filters["include_direct_children"] = "true"
     cursor_occurred_at, cursor_event_id = _decode_bound_cursor(
         cursor,
         kind="import_job_events",
@@ -828,6 +842,7 @@ async def list_ops_import_job_events(
         sync_scope=sync_scope,
         operation_key=operation_key,
         cursor_occurred_at=cursor_occurred_at,
+        include_direct_children=include_direct_children,
     )
     rows = (
         await session.execute(

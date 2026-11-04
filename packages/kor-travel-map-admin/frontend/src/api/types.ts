@@ -11416,6 +11416,10 @@ export interface components {
             occurred_at: string;
             /** Operation Key */
             operation_key: string | null;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
             /** Provider Dataset Id */
             provider_dataset_id: number | null;
             /** Stage */

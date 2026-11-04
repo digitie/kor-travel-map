@@ -33,6 +33,7 @@ _TVN34_CURRENT_MIGRATION: Final = (
 
 # artifact bytes 고정 — 갱신 절차: artifact 수정 → 통합 테스트로 fingerprint 재고정
 # → 여기 sha256 갱신 (한 PR에서 함께).
+# 2026-11-04 MCST 진단 payload additive admin 계약·pending receipt hash 재핀.
 ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-09-08 T-VN-39 — notice_states를 "채택되지 않음"으로 표시(소유자 승인).
     # 2026-09-09 T-VN-39/ADR-098 결정 6 — alias는 발행된 적 있는 외부 주소의 등록부다:
@@ -74,7 +75,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 5 operation 추가, user 불변). service added 5건.
     # 2026-10-25 PR #1410 — 기존 취소 503 description 두 곳의 DB 정리 실패 문구만 반영.
     "openapi-diff-v1.json": (
-        "d639c6b49d62c8bf3c3399cd89b251e2c1e410af859d4785ccf178642c35a0ff"
+        "6ee347bf2b5ca1cf480b7f6b90eeb67f35cc2ec0c1c3de593bfc4e490cd38253"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -89,7 +90,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-24 T-STATE-02(ADR-114 2단계) — 같은 receipt 재핀(weather 5 operation 추가).
     # 2026-10-25 PR #1410 — full-admin description SHA 재핀, pending/re-vendor 조건 유지.
     "consumer-rollout-v1.json": (
-        "53bf3914ed75db9dc31b7ecb6c74c72a5fe5c07190d4abe38a390e0ffec88c48"
+        "77956034c1a1e225a3a0985ee344405dd6ac57be3c1a5cae98f6718328158c69"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

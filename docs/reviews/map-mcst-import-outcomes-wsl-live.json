@@ -1,0 +1,55 @@
+{
+  "checks": [
+    "actual admin UI login",
+    "actual DB root FAILURE with 12 done / 1 failed",
+    "typed safe fetch reason and retryability visible from child event on root detail",
+    "actual child job navigation and durable cause",
+    "dataset history additive API payload renders the same safe durable cause"
+  ],
+  "api_response_mocking": false,
+  "db": "disposable PG18/PostGIS",
+  "frontend": "actual Next.js",
+  "prod_access": false,
+  "http_failures": [],
+  "browser_errors": [],
+  "source_blobs": {
+    "packages/kor-travel-map-dagster/src/kortravelmap/dagster/mcst_features.py": "eaa61467c1b3bf00f5b0accda0c0f378e9864f94",
+    "packages/kor-travel-map-dagster/src/kortravelmap/dagster/provider_fetchers.py": "fbb2995d31138206bee10bcb54e7d28368fba38b",
+    "packages/kor-travel-map-api/src/kortravelmap/api/routers/ops_pipeline.py": "351060dd24ff7cbff4d8aa8f26b3c2fb5e6f4adc",
+    "packages/kor-travel-map-admin/frontend/src/app/ops/pipeline/execution-detail-panel.tsx": "2763da09f3d0f73f86581ccd58d7084f7f2aadfe",
+    "packages/kor-travel-map-admin/frontend/src/components/mcst-attempt-error.tsx": "4eade3b4cf8952ab14729a24032e2cd8a82dd7a3",
+    "src/kortravelmap/infra/feature_operation_repo.py": "a68336ee4ae4051a8df20c736f13c1024a0ba0a5",
+    "src/kortravelmap/infra/ops_repo.py": "bfc7593cd1a51bb1639a818140ce6bae21c745b6",
+    "src/kortravelmap/client/__init__.py": "114d0e820e9bf28be14ec3f88bcc45f06ab61140",
+    "packages/kor-travel-map-api/src/kortravelmap/api/ops_dataset_schema.py": "47f372cf60bd6f6cbe9fd489ef9453e6ed2dfd17",
+    "packages/kor-travel-map-api/src/kortravelmap/api/ops_dataset_service.py": "945eb858344b5723d0ee4aa9d213463908eab4b2"
+  },
+  "official_factory_probe": {
+    "sdk_revision": "00a78dfdba5a1a87d87c5238ef1566621989b1ae",
+    "factory": "fetch_mcst_culture_records -> FileDataClient()",
+    "source": "official public Data.go.kr",
+    "row_cap": 1,
+    "rows_returned": 1,
+    "column_count": 14,
+    "required_headers": [
+      "구분",
+      "면적(제곱미터)",
+      "사업자",
+      "소재지",
+      "이름",
+      "지역",
+      "홀"
+    ],
+    "prod_access": false
+  },
+  "limitations": [
+    "MCST 12 success snapshots use authoritative empty fixtures; actual source CSV is checked separately with row cap 1.",
+    "Only the owned WSL environment was used. No production deployment or test.",
+    "Dagster scheduling service is absent from the owned UI fixture; scheduling actions were excluded."
+  ],
+  "dagster_finalize_serialization": {
+    "regressions_passed": 2,
+    "previous_implementation_negative_assertion_failures": 2,
+    "raw_exception_visible": false
+  }
+}

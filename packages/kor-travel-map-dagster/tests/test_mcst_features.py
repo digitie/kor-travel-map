@@ -4,16 +4,14 @@ from __future__ import annotations
 
 import sys
 from collections.abc import AsyncIterator
-from datetime import UTC, datetime
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
-from dagster import AssetKey, Failure, build_asset_context
+from dagster import Failure, build_asset_context
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto import Address, Coordinate
-from kortravelmap.dto.geo_dataset import GeoApplied
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 from kortravelmap.providers.mcst import (
     MCST_FILE_DATASETS,
@@ -23,9 +21,6 @@ from kortravelmap.providers.mcst import (
 from kortravelmap.settings import KorTravelMapSettings
 
 from kortravelmap.dagster import mcst_features as mcst_module
-from kortravelmap.dagster.feature_operation_tracking import (
-    FeatureOperationExecutionGuard,
-)
 from kortravelmap.dagster.mcst_features import (
     feature_place_mcst_culture,
     group_records_by_slug,
@@ -197,7 +192,7 @@ async def test_one_failing_slug_does_not_take_down_the_others() -> None:
         await run_feature_place_mcst_culture(_context(records))
 
     # (1) run은 실패로 끝난다 — 일부가 죽었는데 초록이면 그것이 다음 사고다.
-    assert failed_slug in str(excinfo.value)
+    assert failed_slug in excinfo.value.metadata["failed_slugs"].value
     # (2) 재시도는 끈다 — 상류 이동은 같은 run 안에서 나아지지 않는다.
     assert excinfo.value.allow_retries is False
 
@@ -288,312 +283,6 @@ async def test_culture_asset_skips_unidentifiable_rows_with_warning() -> None:
     by_key = {r.dataset_key: r for r in result.results}
     assert by_key["mcst_golf_courses_status"].load.bundles_total == 1
     assert result.bundles_total == 1
-
-
-async def test_culture_raw_callback_completes_exact_membership_snapshot() -> None:
-    memberships = tuple(
-        ProviderDatasetOperationMembership(
-            provider_dataset_id=index,
-            sync_scope="dataset_wide",
-            operation_key="feature_place_mcst_culture_job",
-        )
-        for index, _spec in enumerate(MCST_FILE_DATASETS.values(), start=1)
-    )
-    completed: list[ProviderDatasetOperationMembership] = []
-
-    async def _done(
-        completed_memberships: tuple[ProviderDatasetOperationMembership, ...],
-    ) -> None:
-        completed.extend(completed_memberships)
-
-    result = await run_feature_place_mcst_culture(
-        _context(_attempt_all()),
-        memberships=memberships,
-        on_memberships_completed=_done,
-    )
-
-    assert len(result.results) == len(MCST_FILE_DATASETS)
-    assert all(item.load.bundles_total == 0 for item in result.results)
-    assert completed == list(memberships)
-
-
-async def test_culture_raw_callback_emits_no_membership_on_late_failure(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    first_slug, second_slug = tuple(MCST_FILE_DATASETS)[:2]
-    first_dataset = MCST_FILE_DATASETS[first_slug].dataset_key
-    second_dataset = MCST_FILE_DATASETS[second_slug].dataset_key
-    events: list[tuple[str, str]] = []
-
-    async def _load(
-        _context: object,
-        *,
-        provider: str,
-        dataset_key: str,
-        bundles: object,
-        authoritative_snapshot_complete: bool,
-        geo_applied: GeoApplied,
-    ) -> Any:
-        del provider, bundles
-        assert authoritative_snapshot_complete is True
-        # MCST 변환은 reverse를 넘긴다(ADR-109 결정 3).
-        assert geo_applied == GeoApplied(reverse=True, geocode=False)
-        events.append(("load", dataset_key))
-        if dataset_key == second_dataset:
-            raise RuntimeError("late MCST failure")
-        return object()
-
-    async def _done(
-        completed_memberships: tuple[ProviderDatasetOperationMembership, ...],
-    ) -> None:
-        events.append(("done", str(len(completed_memberships))))
-
-    monkeypatch.setattr(mcst_module, "_load", _load)
-    records = [
-        *_attempt_all(),
-        (first_slug, _common_row("첫 dataset")),
-        (second_slug, _common_row("둘째 dataset")),
-    ]
-
-    with pytest.raises(RuntimeError, match="late MCST failure"):
-        await run_feature_place_mcst_culture(
-            _context(records),
-            memberships=(
-                ProviderDatasetOperationMembership(
-                    provider_dataset_id=1,
-                    sync_scope="dataset_wide",
-                    operation_key="feature_place_mcst_culture_job",
-                ),
-            ),
-            on_memberships_completed=_done,
-        )
-
-    assert events == [
-        ("load", first_dataset),
-        ("load", second_dataset),
-    ]
-
-
-async def test_culture_public_wrapper_retries_canonical_members_stably(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    first_slug, second_slug = tuple(MCST_FILE_DATASETS)[:2]
-    second_dataset = MCST_FILE_DATASETS[second_slug].dataset_key
-    operation_key = "feature_place_mcst_culture_job"
-    memberships = tuple(
-        ProviderDatasetOperationMembership(
-            provider_dataset_id=index,
-            sync_scope="dataset_wide",
-            operation_key=operation_key,
-        )
-        for index, _spec in enumerate(MCST_FILE_DATASETS.values(), start=1)
-    )
-
-    class _TrackingClient:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, dict[str, Any]]] = []
-            self.done_memberships: set[Any] = set()
-            self.finish_outcomes: list[str] = []
-
-        async def ensure_dagster_feature_operation(self, **kwargs: Any) -> Any:
-            self.calls.append(("ensure", kwargs))
-            return SimpleNamespace(outcome="applied", block_reason=None)
-
-        async def finish_dagster_feature_membership(self, **kwargs: Any) -> Any:
-            self.calls.append(("finish", kwargs))
-            membership = kwargs["membership"]
-            outcome = "noop" if membership in self.done_memberships else "applied"
-            self.done_memberships.add(membership)
-            self.finish_outcomes.append(outcome)
-            return SimpleNamespace(outcome=outcome, block_reason=None)
-
-        async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> Any:
-            self.calls.append(("attempt", kwargs))
-            return object()
-
-    tracking_client = _TrackingClient()
-    authoritative_run = SimpleNamespace(
-        job_name=operation_key,
-        run_id="mcst-run",
-        run_config={},
-        tags={
-            "kor_travel_map.operation_key": operation_key,
-            "kor_travel_map.trigger_kind": "schedule",
-        },
-        asset_selection=None,
-        resolved_op_selection=None,
-        status=SimpleNamespace(value="STARTED"),
-    )
-    record = SimpleNamespace(
-        dagster_run=authoritative_run,
-        create_timestamp=datetime(2026, 7, 16, 1, 0, tzinfo=UTC),
-        start_time=datetime(2026, 7, 16, 1, 1, tzinfo=UTC).timestamp(),
-    )
-    instance = SimpleNamespace(
-        run=authoritative_run,
-        get_run_record_by_id=lambda _run_id: record,
-    )
-    guard = FeatureOperationExecutionGuard(
-        client=tracking_client,  # type: ignore[arg-type]
-        instance=instance,
-        operation_key=operation_key,
-        memberships=memberships,
-        dagster_run_id="mcst-run",
-        trigger_kind="schedule",
-    )
-
-    async def _load(
-        _context: object,
-        *,
-        provider: str,
-        dataset_key: str,
-        bundles: object,
-        authoritative_snapshot_complete: bool,
-        geo_applied: GeoApplied,
-    ) -> Any:
-        del provider, bundles
-        assert authoritative_snapshot_complete is True
-        # MCST 변환은 reverse를 넘긴다(ADR-109 결정 3).
-        assert geo_applied == GeoApplied(reverse=True, geocode=False)
-        if dataset_key == second_dataset:
-            raise RuntimeError("late MCST failure")
-        return object()
-
-    monkeypatch.setattr(mcst_module, "_load", _load)
-    base = _context([*_attempt_all(), (first_slug, _common_row("첫 dataset")),
-            (second_slug, _common_row("둘째 dataset")),
-        ]
-    )
-    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
-
-    def _wrapper_context(retry_number: int) -> Any:
-        return SimpleNamespace(
-            resources=SimpleNamespace(
-                feature_operation_guard=guard,
-                kor_travel_map_client=tracking_client,
-                mcst_culture_records=base.resources.mcst_culture_records,
-                reverse_geocoder=base.resources.reverse_geocoder,
-                fetched_at=None,
-            ),
-            log=base.log,
-            add_output_metadata=base.add_output_metadata,
-            instance=instance,
-            run=authoritative_run,
-            run_id=authoritative_run.run_id,
-            selected_asset_keys={AssetKey("feature_place_mcst_culture")},
-            asset_key=AssetKey("feature_place_mcst_culture"),
-            job_name="feature_place_mcst_culture_job",
-            retry_number=retry_number,
-        )
-
-    with pytest.raises(RuntimeError, match="late MCST failure"):
-        await wrapper(_wrapper_context(0))
-    with pytest.raises(RuntimeError, match="late MCST failure"):
-        await wrapper(_wrapper_context(1))
-
-    attempts_per_run = len(memberships)
-    assert [name for name, _kwargs in tracking_client.calls] == [
-        "ensure",
-        *["attempt"] * attempts_per_run,
-        "ensure",
-        *["attempt"] * attempts_per_run,
-    ]
-    assert tracking_client.calls[0][1]["selected_memberships"] == memberships
-    first_attempts = tracking_client.calls[1 : 1 + attempts_per_run]
-    second_ensure_index = 1 + attempts_per_run
-    second_attempts = tracking_client.calls[second_ensure_index + 1 :]
-    assert [call[1]["membership"] for call in first_attempts] == list(memberships)
-    assert [call[1]["membership"] for call in second_attempts] == list(memberships)
-    assert [call[1]["attempt_number"] for call in first_attempts] == [1] * attempts_per_run
-    assert [call[1]["attempt_number"] for call in second_attempts] == [2] * attempts_per_run
-    assert tracking_client.finish_outcomes == []
-
-
-async def test_culture_public_wrapper_finishes_every_exact_member_after_success(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    memberships = (
-        ProviderDatasetOperationMembership(
-            provider_dataset_id=1,
-            sync_scope="dataset_wide",
-            operation_key="feature_place_mcst_culture_job",
-        ),
-        ProviderDatasetOperationMembership(
-            provider_dataset_id=2,
-            sync_scope="dataset_wide",
-            operation_key="feature_place_mcst_culture_job",
-        ),
-    )
-    dataset_memberships = {
-        "dataset-one": memberships[0],
-        "dataset-two": memberships[1],
-    }
-
-    class _GuardClient:
-        async def resolve_feature_operation_dataset_membership(
-            self,
-            *,
-            operation_key: str,
-            provider: str,
-            dataset_key: str,
-        ) -> ProviderDatasetOperationMembership:
-            assert operation_key == "feature_place_mcst_culture_job"
-            assert provider == "python-mcst-api"
-            return dataset_memberships[dataset_key]
-
-    guard = SimpleNamespace(
-        memberships=memberships,
-        operation_key="feature_place_mcst_culture_job",
-        client=_GuardClient(),
-    )
-    finished: list[ProviderDatasetOperationMembership] = []
-
-    async def _ensure(_context: object) -> object:
-        return guard
-
-    async def _finish(
-        received_guard: object,
-        membership: ProviderDatasetOperationMembership,
-        *,
-        authoritative_snapshot_complete: bool,
-        curation_input_member_count: int | None,
-        curation_input_set_hash: str | None,
-    ) -> None:
-        assert received_guard is guard
-        assert authoritative_snapshot_complete is True
-        assert curation_input_member_count == 0
-        assert curation_input_set_hash == "0" * 64
-        finished.append(membership)
-
-    async def _run(
-        _context: object,
-        *,
-        memberships: tuple[ProviderDatasetOperationMembership, ...],
-        on_memberships_completed: Any,
-    ) -> Any:
-        assert on_memberships_completed is not None
-        await on_memberships_completed(memberships)
-        load = FeatureLoadResult(
-            curation_input_member_count=0,
-            curation_input_set_hash="0" * 64,
-        )
-        return SimpleNamespace(
-            status="done",
-            results=(
-                SimpleNamespace(dataset_key="dataset-one", load=load),
-                SimpleNamespace(dataset_key="dataset-two", load=load),
-            ),
-        )
-
-    monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", _ensure)
-    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", _finish)
-    monkeypatch.setattr(mcst_module, "run_feature_place_mcst_culture", _run)
-
-    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
-    result = await wrapper(SimpleNamespace())
-
-    assert result.status == "done"
-    assert finished == list(memberships)
 
 
 # -- fetcher ------------------------------------------------------------------
@@ -773,133 +462,6 @@ async def test_fetch_mcst_culture_records_counts_one_request_per_dataset(
 
 
 
-# -- multi-member 완료 스냅샷 불변식 ---------------------------------------
-
-
-def _mcst_memberships() -> tuple[ProviderDatasetOperationMembership, ...]:
-    return (
-        ProviderDatasetOperationMembership(
-            provider_dataset_id=1,
-            sync_scope="dataset_wide",
-            operation_key="feature_place_mcst_culture_job",
-        ),
-        ProviderDatasetOperationMembership(
-            provider_dataset_id=2,
-            sync_scope="dataset_wide",
-            operation_key="feature_place_mcst_culture_job",
-        ),
-    )
-
-
-def _patched_wrapper(
-    monkeypatch: pytest.MonkeyPatch,
-    *,
-    guard: Any,
-    run: Any,
-    finished: list[ProviderDatasetOperationMembership],
-    attempts: list[ProviderDatasetOperationMembership],
-) -> Any:
-    async def _ensure(_context: object) -> object:
-        return guard
-
-    async def _finish(
-        received_guard: object,
-        membership: ProviderDatasetOperationMembership,
-        *,
-        authoritative_snapshot_complete: bool,
-        curation_input_member_count: int | None = None,
-        curation_input_set_hash: str | None = None,
-    ) -> None:
-        del curation_input_member_count, curation_input_set_hash
-        assert received_guard is guard
-        assert authoritative_snapshot_complete is True
-        finished.append(membership)
-
-    async def _attempt(
-        _context: object,
-        received_guard: object,
-        membership: ProviderDatasetOperationMembership,
-        _error: Exception,
-    ) -> None:
-        assert received_guard is guard
-        attempts.append(membership)
-
-    monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", _ensure)
-    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", _finish)
-    monkeypatch.setattr(mcst_module, "append_failed_multi_member_attempt", _attempt)
-    monkeypatch.setattr(mcst_module, "run_feature_place_mcst_culture", run)
-    return cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
-
-
-async def test_culture_wrapper_rejects_a_completion_snapshot_that_is_not_the_guard_set(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """runner가 guard와 **다른** 집합을 완료로 돌려주면 그 자리에서 죽는다.
-
-    이 콜백은 완료 처리할 member 목록의 유일한 입력이다. 부분집합을 그대로 받으면
-    실행되지 않은 member가 running으로 남아 terminal reconcile이 operation을
-    ``tracking_invariant``로 떨어뜨리고, 초과집합을 받으면 이 run이 실행하지 않은
-    member가 ``done``이 된다.
-    """
-    memberships = _mcst_memberships()
-    guard = SimpleNamespace(memberships=memberships)
-    finished: list[ProviderDatasetOperationMembership] = []
-    attempts: list[ProviderDatasetOperationMembership] = []
-
-    async def _run(
-        _context: object,
-        *,
-        memberships: tuple[ProviderDatasetOperationMembership, ...],
-        on_memberships_completed: Any,
-    ) -> Any:
-        # 한 member만 완료했다고 보고한다 — guard가 frozen한 집합과 다르다.
-        await on_memberships_completed(memberships[:1])
-        return SimpleNamespace(status="done")
-
-    wrapper = _patched_wrapper(
-        monkeypatch, guard=guard, run=_run, finished=finished, attempts=attempts
-    )
-
-    with pytest.raises(RuntimeError, match="completed membership snapshot이 guard와 다름"):
-        await wrapper(SimpleNamespace())
-
-    assert finished == [], "거부해야 할 완료 스냅샷이 member를 종결했다"
-    assert attempts == list(memberships), "실패가 frozen member 전부에 기록되지 않았다"
-
-
-async def test_culture_wrapper_rejects_a_runner_that_never_emits_completion(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """runner가 완료를 아예 emit하지 않으면 성공으로 닫히지 않는다.
-
-    이 검사가 없으면 완료 콜백을 부르지 않은 run이 member 0건을 종결한 채 asset
-    성공으로 끝나고, member가 running으로 남아 조용히 어긋난다.
-    """
-    memberships = _mcst_memberships()
-    guard = SimpleNamespace(memberships=memberships)
-    finished: list[ProviderDatasetOperationMembership] = []
-    attempts: list[ProviderDatasetOperationMembership] = []
-
-    async def _run(
-        _context: object,
-        *,
-        memberships: tuple[ProviderDatasetOperationMembership, ...],
-        on_memberships_completed: Any,
-    ) -> Any:
-        del memberships, on_memberships_completed
-        return SimpleNamespace(status="done")
-
-    wrapper = _patched_wrapper(
-        monkeypatch, guard=guard, run=_run, finished=finished, attempts=attempts
-    )
-
-    with pytest.raises(RuntimeError, match="exact membership completion을 emit하지 않음"):
-        await wrapper(SimpleNamespace())
-
-    assert finished == []
-    assert attempts == list(memberships)
-
-
 async def test_a_stream_with_no_attempt_markers_is_not_a_quiet_success() -> None:
     """**시도 표식이 하나도 없으면 0건 적재로 초록이 된다** — 그것을 막는다.
 
@@ -912,23 +474,15 @@ async def test_a_stream_with_no_attempt_markers_is_not_a_quiet_success() -> None
 
     completed: list[object] = []
 
-    async def _done(memberships: tuple[Any, ...]) -> None:
-        completed.extend(memberships)
+    async def _done(loaded: Any) -> None:
+        completed.append(loaded)
 
     with pytest.raises(Failure, match="시도 표식이 하나도 없다"):
         await run_feature_place_mcst_culture(
             _context([]),
-            memberships=(
-                ProviderDatasetOperationMembership(
-                    provider_dataset_id=1,
-                    sync_scope="dataset_wide",
-                    operation_key="feature_place_mcst_culture_job",
-                ),
-            ),
-            on_memberships_completed=_done,
+            on_dataset_completed=_done,
         )
-
-    assert completed == [], "실패했는데 완료 콜백이 불렸다"
+    assert completed == []
 
 
 async def test_a_transient_failure_keeps_retries_open() -> None:
@@ -970,3 +524,300 @@ async def test_a_mixed_failure_set_closes_retries() -> None:
         await run_feature_place_mcst_culture(_context(records))
 
     assert excinfo.value.allow_retries is False
+
+
+async def test_dataset_completion_is_immediate_and_preserves_load_seal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    slugs = tuple(MCST_FILE_DATASETS)[:2]
+    keys = tuple(MCST_FILE_DATASETS[slug].dataset_key for slug in slugs)
+    events: list[tuple[str, str]] = []
+
+    async def _load(_context: object, **kwargs: Any) -> Any:
+        key = kwargs["dataset_key"]
+        events.append(("load", key))
+        if key == keys[1]:
+            raise RuntimeError("private upstream response ?token=secret")
+        return SimpleNamespace(
+            dataset_key=key,
+            load=FeatureLoadResult(
+                curation_input_member_count=7, curation_input_set_hash="a" * 64,
+            ),
+        )
+
+    async def _done(loaded: Any) -> None:
+        assert loaded.load.curation_input_member_count == 7
+        assert loaded.load.curation_input_set_hash == "a" * 64
+        events.append(("done", loaded.dataset_key))
+
+    monkeypatch.setattr(mcst_module, "_load", _load)
+    with pytest.raises(mcst_module.McstImportFailure) as caught:
+        await run_feature_place_mcst_culture(
+            _context([McstSlugAttempt(slug) for slug in slugs]),
+            on_dataset_completed=_done,
+        )
+    assert events == [("load", keys[0]), ("done", keys[0]), ("load", keys[1])]
+    assert caught.value.failures[keys[1]] == {
+        "code": "MCST_DATASET_LOAD_FAILED", "phase": "load",
+        "reason": "RuntimeError", "retryable": False,
+    }
+    assert "secret" not in str(caught.value)
+
+
+async def test_completed_dataset_is_never_reloaded_or_failed_on_retry(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    first, second = tuple(MCST_FILE_DATASETS)[:2]
+    first_key = MCST_FILE_DATASETS[first].dataset_key
+    context = _context([
+        McstSlugAttempt(first), McstSlugFailure(first, "DOWNLOAD_CHECK_FAILED"),
+        McstSlugAttempt(second),
+    ])
+    loaded: list[str] = []
+    original = mcst_module._load
+
+    async def _load(ctx: Any, **kwargs: Any) -> Any:
+        loaded.append(kwargs["dataset_key"])
+        return await original(ctx, **kwargs)
+
+    monkeypatch.setattr(mcst_module, "_load", _load)
+    result = await run_feature_place_mcst_culture(
+        context, completed_dataset_keys=frozenset({first_key}),
+    )
+    assert loaded == [MCST_FILE_DATASETS[second].dataset_key]
+    assert len(result.results) == 1
+
+
+@pytest.mark.parametrize("failure_phase", ["fetch", "load"])
+async def test_public_wrapper_records_twelve_successes_and_only_one_failure(
+    monkeypatch: pytest.MonkeyPatch, failure_phase: str,
+) -> None:
+    specs = tuple(MCST_FILE_DATASETS.values())
+    memberships = tuple(
+        ProviderDatasetOperationMembership(i + 1, "dataset_wide", "feature_place_mcst_culture_job")
+        for i in range(len(specs))
+    )
+    by_key = dict(zip((spec.dataset_key for spec in specs), memberships, strict=True))
+    done: set[Any] = set()
+    attempts: list[dict[str, Any]] = []
+    loads: list[str] = []
+    failing = specs[-1]
+
+    class Client:
+        async def resolve_frozen_feature_operation_datasets(self, **kwargs: Any) -> Any:
+            assert kwargs["memberships"] == memberships
+            return by_key
+
+        async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> None:
+            attempts.append(kwargs)
+
+    class Guard:
+        operation_key = "feature_place_mcst_culture_job"
+        dagster_run_id = "mcst-partial"
+        client = Client()
+
+        async def ensure(self) -> Any:
+            return SimpleNamespace(operation=SimpleNamespace(members=tuple(
+                SimpleNamespace(membership=m, status="done" if m in done else "running")
+                for m in memberships
+            )))
+
+    guard = Guard()
+    guard.memberships = memberships
+
+    async def ensure(_context: Any) -> Any:
+        return guard
+
+    async def finish(_guard: Any, member: Any, **kwargs: Any) -> None:
+        assert kwargs["curation_input_member_count"] == 0
+        assert kwargs["curation_input_set_hash"] == "0" * 64
+        assert member not in done
+        done.add(member)
+
+    async def load(_context: Any, **kwargs: Any) -> Any:
+        key = kwargs["dataset_key"]
+        loads.append(key)
+        if failure_phase == "load" and key == failing.dataset_key:
+            raise RuntimeError("secret sql")
+        return SimpleNamespace(dataset_key=key, load=FeatureLoadResult(
+            curation_input_member_count=0, curation_input_set_hash="0" * 64,
+        ))
+
+    monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", ensure)
+    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", finish)
+    monkeypatch.setattr(mcst_module, "_load", load)
+    records: list[Any] = _attempt_all()
+    if failure_phase == "fetch":
+        records.append(McstSlugFailure(failing.slug, "DOWNLOAD_CHECK_FAILED", retryable=True))
+    base = _context(records)
+    context = SimpleNamespace(
+        resources=base.resources, log=base.log,
+        add_output_metadata=base.add_output_metadata, retry_number=0,
+    )
+    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
+    for retry in range(2):
+        context.retry_number = retry
+        with pytest.raises(mcst_module.McstImportFailure):
+            await wrapper(context)
+    assert len(done) == 12
+    assert len(attempts) == 2
+    assert [a["membership"] for a in attempts] == [memberships[-1]] * 2
+    assert [a["attempt_number"] for a in attempts] == [1, 2]
+    assert all(a["error"]["phase"] == failure_phase for a in attempts)
+    assert all(loads.count(spec.dataset_key) == 1 for spec in specs[:-1])
+
+
+async def test_narrowed_selection_never_transforms_or_loads_unselected_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chosen = tuple(MCST_FILE_DATASETS.values())[0]
+    context = _context(_attempt_all())
+    loaded: list[str] = []
+    original = mcst_module._load
+
+    async def load(ctx: Any, **kwargs: Any) -> Any:
+        loaded.append(kwargs["dataset_key"])
+        return await original(ctx, **kwargs)
+
+    monkeypatch.setattr(mcst_module, "_load", load)
+    result = await run_feature_place_mcst_culture(
+        context, selected_dataset_keys=frozenset({chosen.dataset_key}),
+    )
+    assert loaded == [chosen.dataset_key]
+    assert len(result.results) == 1
+
+
+@pytest.mark.parametrize("sqlstate", ["40001", "40P01", "55P03", "08006", "23514"])
+async def test_load_db_failure_preserves_typed_retry_policy(
+    monkeypatch: pytest.MonkeyPatch, sqlstate: str,
+) -> None:
+    from sqlalchemy.exc import DBAPIError
+
+    class DatabaseFailure(Exception):
+        pass
+
+    original = DatabaseFailure("SECRET SQL")
+    original.sqlstate = sqlstate
+    failure = DBAPIError("SECRET SQL", {}, original)
+
+    async def load(_ctx: Any, **_kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(mcst_module, "_load", load)
+    slug = tuple(MCST_FILE_DATASETS)[0]
+    with pytest.raises(mcst_module.McstImportFailure) as captured:
+        await run_feature_place_mcst_culture(_context([McstSlugAttempt(slug)]))
+    assert captured.value.allow_retries is (sqlstate != "23514")
+    assert "SECRET" not in str(captured.value)
+
+
+@pytest.mark.parametrize("mode", ["missing", "foreign", "duplicate", "finalize_failure"])
+async def test_wrapper_rejects_invalid_completion_without_failing_finished_members(
+    monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    specs = tuple(MCST_FILE_DATASETS.values())[:2]
+    memberships = tuple(
+        ProviderDatasetOperationMembership(i + 1, "dataset_wide", "feature_place_mcst_culture_job")
+        for i in range(2)
+    )
+    mapping = dict(zip((spec.dataset_key for spec in specs), memberships, strict=True))
+    finished: list[Any] = []
+    attempts: list[dict[str, Any]] = []
+
+    class Client:
+        async def resolve_frozen_feature_operation_datasets(self, **_kwargs: Any) -> Any:
+            return mapping
+
+        async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> None:
+            attempts.append(kwargs)
+
+    class Guard:
+        client = Client()
+        dagster_run_id = "invalid-completion"
+
+        async def ensure(self) -> Any:
+            return SimpleNamespace(operation=SimpleNamespace(members=()))
+
+    guard = Guard()
+    guard.memberships = memberships
+
+    async def ensure(_context: Any) -> Any:
+        return guard
+
+    async def finish(_guard: Any, member: Any, **_kwargs: Any) -> None:
+        if mode == "finalize_failure":
+            raise ConnectionError("SECRET connection details")
+        finished.append(member)
+
+    async def run(_context: Any, **kwargs: Any) -> Any:
+        callback = kwargs["on_dataset_completed"]
+        if mode != "missing":
+            loaded = SimpleNamespace(
+                dataset_key="foreign" if mode == "foreign" else specs[0].dataset_key,
+                load=FeatureLoadResult(
+                    curation_input_member_count=0, curation_input_set_hash="0" * 64,
+                ),
+            )
+            await callback(loaded)
+            if mode == "duplicate":
+                await callback(loaded)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", ensure)
+    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", finish)
+    monkeypatch.setattr(mcst_module, "run_feature_place_mcst_culture", run)
+    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
+    with pytest.raises((RuntimeError, mcst_module.McstImportFailure)):
+        await wrapper(SimpleNamespace(retry_number=0))
+    assert finished == ([memberships[0]] if mode == "duplicate" else [])
+    assert {a["membership"] for a in attempts} == set(memberships) - set(finished)
+    assert "SECRET" not in str(attempts)
+    if mode == "finalize_failure":
+        assert attempts[0]["error"]["phase"] == "finalize"
+        assert attempts[0]["error"]["retryable"] is True
+
+
+@pytest.mark.parametrize("failed_fetch_after_finalize", [False, True])
+async def test_finalize_failure_preserves_other_fetch_failure_and_redacts_dagster_chain(
+    monkeypatch: pytest.MonkeyPatch, failed_fetch_after_finalize: bool,
+) -> None:
+    from dagster._utils.error import serializable_error_info_from_exc_info
+
+    slugs = tuple(MCST_FILE_DATASETS)[:2]
+    fetch_slug, finalize_slug = slugs if not failed_fetch_after_finalize else slugs[::-1]
+    fetch_key = MCST_FILE_DATASETS[fetch_slug].dataset_key
+    finalize_key = MCST_FILE_DATASETS[finalize_slug].dataset_key
+
+    async def finish(*_args: Any, **_kwargs: Any) -> None:
+        raise ConnectionError("SECRET_UPSTREAM_BODY_TOKEN")
+
+    async def load(_context: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(dataset_key=kwargs["dataset_key"], load=FeatureLoadResult(
+            curation_input_member_count=0, curation_input_set_hash="0" * 64,
+        ))
+
+    async def completed(loaded: Any) -> None:
+        await mcst_module._finalize_mcst_dataset(
+            cast(Any, object()),
+            ProviderDatasetOperationMembership(1, "dataset_wide", "feature_place_mcst_culture_job"),
+            loaded, completed_dataset_keys=(),
+        )
+
+    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", finish)
+    monkeypatch.setattr(mcst_module, "_load", load)
+    with pytest.raises(mcst_module.McstImportFailure) as captured:
+        await run_feature_place_mcst_culture(
+            _context([
+                *(McstSlugAttempt(slug) for slug in slugs),
+                McstSlugFailure(fetch_slug, "CAPTCHA_REQUIRED", retryable=False),
+            ]),
+            on_dataset_completed=completed,
+        )
+    error = captured.value
+    serialized = serializable_error_info_from_exc_info((type(error), error, error.__traceback__))
+    assert "SECRET_UPSTREAM_BODY_TOKEN" not in serialized.to_string()
+    assert captured.value.failures[fetch_key]["reason"] == "CAPTCHA_REQUIRED"
+    assert captured.value.failures[finalize_key]["phase"] == "finalize"
+    assert captured.value.failures[finalize_key]["retryable"] is True
+    assert captured.value.allow_retries is False
+    assert captured.value.__cause__ is None

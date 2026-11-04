@@ -26,6 +26,7 @@ from kortravelmap.providers.mcst import (
     McstSlugFailure,
     file_rows_to_bundles,
 )
+from sqlalchemy.exc import DBAPIError
 
 from dagster import AssetExecutionContext, Failure, asset
 
@@ -41,12 +42,12 @@ from .assets import (
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
     _log_spend_on_failure,
-    append_failed_multi_member_attempt,
     ensure_tracked_multi_member_asset,
     finish_tracked_feature_membership,
 )
-from .quota_exhaustion import raise_terminal_if_quota_exhausted
+from .quota_exhaustion import quota_exhaustion_cause, raise_terminal_if_quota_exhausted
 from .stall_watchdog import stall_watchdog
 from .upstream_requests import counting_upstream_requests
 
@@ -82,6 +83,55 @@ class McstLoadResult:
                 result.dataset_key: result.load.bundles_total for result in self.results
             },
         }
+
+
+
+
+def _retryable_load_failure(error: Exception) -> bool:
+    """영구 검증 오류는 닫고, DB의 일시 실패와 연결 장애만 재시도한다."""
+    if isinstance(error, TimeoutError | ConnectionError):
+        return True
+    if not isinstance(error, DBAPIError):
+        return False
+    if error.connection_invalidated:
+        return True
+    original = error.orig
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    return sqlstate in {"40001", "40P01", "55P03", "53300", "57P01", "57P02", "57P03"} or (
+        isinstance(sqlstate, str) and sqlstate.startswith("08")
+    )
+
+
+class McstImportFailure(Failure):
+    """성공 dataset을 보존하며 실패한 dataset의 안전한 원인만 전달한다."""
+
+    def __init__(
+        self,
+        *,
+        failures: dict[str, dict[str, object]],
+        loaded_dataset_keys: tuple[str, ...],
+    ) -> None:
+        self.failures = failures
+        retryable = all(item["retryable"] is True for item in failures.values())
+        super().__init__(
+            description=(
+                f"MCST dataset {len(failures)}건 실패, "
+                f"{len(loaded_dataset_keys)}건 적재 완료"
+            ),
+            metadata={
+                "failed_slugs": ", ".join(
+                    slug for slug, spec in MCST_FILE_DATASETS.items()
+                    if spec.dataset_key in failures
+                ),
+                "loaded_datasets": ", ".join(loaded_dataset_keys),
+                "step_retries_suppressed": "false" if retryable else "true",
+                "retryable_failures": ", ".join(
+                    slug for slug, spec in MCST_FILE_DATASETS.items()
+                    if failures.get(spec.dataset_key, {}).get("retryable") is True
+                ),
+            },
+            allow_retries=retryable,
+        )
 
 
 def split_slug_markers(
@@ -127,20 +177,14 @@ def group_records_by_slug(
 async def run_feature_place_mcst_culture(
     context: AssetExecutionContext,
     *,
-    memberships: tuple[ProviderDatasetOperationMembership, ...] = (),
-    on_memberships_completed: (
-        Callable[[tuple[ProviderDatasetOperationMembership, ...]], Awaitable[None]] | None
-    ) = None,
+    selected_dataset_keys: frozenset[str] | None = None,
+    completed_dataset_keys: frozenset[str] = frozenset(),
+    on_dataset_completed: Callable[[DagsterFeatureLoadResult], Awaitable[None]] | None = None,
 ) -> McstLoadResult:
-    """MCST 파일데이터 등록 dataset CSV row를 slug별 place Feature로 적재한다.
-
-    multi-member operation의 completion은 slug/provider label을 identity로 다시
-    해석하지 않는다. 모든 load가 성공한 뒤 caller가 전달한 exact membership
-    snapshot 전체를 한 번에 완료 처리한다.
-    """
+    """각 적재의 인과 seal을 즉시 완료하고 이미 완료한 dataset은 다시 적재하지 않는다."""
     records = await _record_list(context, "mcst_culture_records")
     records, attempted_slugs, slug_failures = split_slug_markers(records)
-    if not attempted_slugs:
+    if not attempted_slugs and not completed_dataset_keys:
         # **시도 표식이 하나도 없는 stream은 무작업 성공이 된다.** 아래 loop가
         # 13개를 전부 `continue`하므로 `results`도 `slug_failures`도 비고, run은
         # 0건 적재로 초록이 된다 — 이 asset이 막으려던 "조용한 0건"의 새 입구다
@@ -161,7 +205,26 @@ async def run_feature_place_mcst_culture(
     fetched_at = await _fetched_at(context)
     geocoder = _reverse_geocoder(context)
     results: list[DagsterFeatureLoadResult] = []
+    failures: dict[str, dict[str, object]] = {
+        MCST_FILE_DATASETS[slug].dataset_key: {
+            "code": "MCST_DATASET_FETCH_FAILED",
+            "phase": "fetch",
+            "reason": failure.reason,
+            "retryable": failure.retryable,
+        }
+        for slug, failure in slug_failures.items()
+        if slug in MCST_FILE_DATASETS
+        and MCST_FILE_DATASETS[slug].dataset_key not in completed_dataset_keys
+        and (
+            selected_dataset_keys is None
+            or MCST_FILE_DATASETS[slug].dataset_key in selected_dataset_keys
+        )
+    }
     for slug, spec in MCST_FILE_DATASETS.items():
+        if selected_dataset_keys is not None and spec.dataset_key not in selected_dataset_keys:
+            continue
+        if spec.dataset_key in completed_dataset_keys:
+            continue
         if slug not in attempted_slugs:
             # 이 run이 **시도하지 않은** dataset이다. feature-update worker는
             # fetcher를 slug 하나로 좁혀 부르므로(`_mcst_resources`), 종전처럼
@@ -188,71 +251,88 @@ async def run_feature_place_mcst_culture(
                 "MCST %s row 없음 — authoritative empty snapshot으로 seal.",
                 spec.dataset_key,
             )
-        bundles = await _transform_reusing_geo(
-            context,
-            file_rows_to_bundles,
-            slug_rows,
-            slug=slug,
-            fetched_at=fetched_at,
-            reverse_geocoder=geocoder,
-        )
-        skipped = len(slug_rows) - len(bundles)
-        if skipped:
-            context.log.warning(
-                "MCST %s row %d건이 이름/위치 단서 부재로 제외됨(전체 %d건).",
-                spec.dataset_key,
-                skipped,
-                len(slug_rows),
+        try:
+            bundles = await _transform_reusing_geo(
+                context,
+                file_rows_to_bundles,
+                slug_rows,
+                slug=slug,
+                fetched_at=fetched_at,
+                reverse_geocoder=geocoder,
             )
-        loaded = await _load(
-            context,
-            provider=MCST_PROVIDER_NAME,
-            dataset_key=spec.dataset_key,
-            bundles=bundles,
-            authoritative_snapshot_complete=True,
-            geo_applied=GeoApplied(reverse=True, geocode=False),
-        )
+            skipped = len(slug_rows) - len(bundles)
+            if skipped:
+                context.log.warning(
+                    "MCST %s row %d건이 이름/위치 단서 부재로 제외됨(전체 %d건).",
+                    spec.dataset_key,
+                    skipped,
+                    len(slug_rows),
+                )
+            loaded = await _load(
+                context,
+                provider=MCST_PROVIDER_NAME,
+                dataset_key=spec.dataset_key,
+                bundles=bundles,
+                authoritative_snapshot_complete=True,
+                geo_applied=GeoApplied(reverse=True, geocode=False),
+            )
+        except Exception as exc:
+            if quota_exhaustion_cause(exc) is not None:
+                raise
+            failures[spec.dataset_key] = {
+                "code": "MCST_DATASET_LOAD_FAILED",
+                "phase": "load",
+                "reason": type(exc).__name__,
+                "retryable": _retryable_load_failure(exc),
+            }
+            continue
+        if on_dataset_completed is not None:
+            try:
+                await on_dataset_completed(loaded)
+            except McstImportFailure as exc:
+                # 완료 기록 오류가 이미 관측한 다른 dataset 실패를 지우면 안 된다.
+                # 영구 수집 실패가 하나라도 있으면 집계 재시도도 닫힌다.
+                raise McstImportFailure(
+                    failures={**failures, **exc.failures},
+                    loaded_dataset_keys=tuple(result.dataset_key for result in results),
+                ) from None
         results.append(loaded)
-    if slug_failures:
-        # 성공한 dataset은 이미 적재됐다 — 그것이 이 변경의 요지다.
-        # 그래도 run은 **실패로 끝낸다**: 일부가 죽었는데 초록으로 보이면
-        # 그것이 다음 사고다.
-        #
-        # 재시도는 끈다. 여기 오는 실패는 상류 스키마·원천 이동처럼
-        # **같은 run 안에서 나아지지 않는** 종류다(쿼터 소진은 fetcher가
-        # 위로 올려 별도 경로를 탄다). 재시도하면 성공한 12개를 다시
-        # 적재하고 같은 자리에서 또 죽는다.
-        loaded_keys = [result.dataset_key for result in results]
-        # **전부 재시도 가능할 때만 재시도를 연다.** 연결 끊김·타임아웃은 다음
-        # 시도에 지나갈 수 있지만, 원천 이동·스키마 변경이 하나라도 섞여 있으면
-        # 재시도는 성공한 것들을 다시 적재한 뒤 같은 자리에서 또 죽는다.
-        #
-        # 종전에는 **모든** 비-쿼터 예외를 같은 바구니에 넣어 재시도를 껐다 —
-        # 일시적 장애 한 번이 그 달의 적재를 통째로 버렸다(적대 리뷰 지적).
-        # 판정은 fetcher가 예외 타입을 보고 표식에 실어 둔다.
-        retryable = all(failure.retryable for failure in slug_failures.values())
-        reasons = {slug: failure.reason for slug, failure in slug_failures.items()}
-        raise Failure(
-            description=(
-                f"MCST slug {len(slug_failures)}건의 수집이 실패했다 — "
-                f"나머지 {len(loaded_keys)}건은 적재했다. "
-                f"실패: {reasons}"
-            ),
-            metadata={
-                "failed_slugs": ", ".join(sorted(slug_failures)),
-                "loaded_datasets": ", ".join(loaded_keys),
-                "step_retries_suppressed": "false" if retryable else "true",
-                "retryable_failures": ", ".join(
-                    sorted(slug for slug, f in slug_failures.items() if f.retryable)
-                ),
-            },
-            allow_retries=retryable,
+    if failures:
+        raise McstImportFailure(
+            failures=failures,
+            loaded_dataset_keys=tuple(result.dataset_key for result in results),
         )
     result = McstLoadResult(provider=MCST_PROVIDER_NAME, results=tuple(results))
-    if on_memberships_completed is not None and memberships:
-        await on_memberships_completed(memberships)
     _add_output_metadata(context, result.as_metadata())
     return result
+
+
+
+async def _finalize_mcst_dataset(
+    guard: FeatureOperationExecutionGuard,
+    member: ProviderDatasetOperationMembership,
+    loaded: DagsterFeatureLoadResult,
+    *,
+    completed_dataset_keys: tuple[str, ...],
+) -> None:
+    """완료 command 오류를 해당 dataset에 묶고 원문 예외를 직렬화하지 않는다."""
+    try:
+        await finish_tracked_feature_membership(
+            guard, member,
+            authoritative_snapshot_complete=True,
+            curation_input_member_count=loaded.load.curation_input_member_count,
+            curation_input_set_hash=loaded.load.curation_input_set_hash,
+        )
+    except Exception as exc:
+        raise McstImportFailure(
+            failures={loaded.dataset_key: {
+                "code": "MCST_DATASET_FINALIZE_FAILED",
+                "phase": "finalize",
+                "reason": type(exc).__name__,
+                "retryable": _retryable_load_failure(exc),
+            }},
+            loaded_dataset_keys=completed_dataset_keys,
+        ) from None
 
 
 @asset(
@@ -271,59 +351,78 @@ async def feature_place_mcst_culture(
         with counting_upstream_requests():
             guard = await ensure_tracked_multi_member_asset(context)
             memberships = guard.memberships if guard is not None else ()
-            completed_memberships: tuple[ProviderDatasetOperationMembership, ...] = ()
+            completed_memberships: set[ProviderDatasetOperationMembership] = set()
+            dataset_memberships: dict[str, ProviderDatasetOperationMembership] = {}
+            if guard is not None:
+                # ensure는 잠금 아래 현재 run 장부를 읽는다. 재시도의 완료 member는
+                # 재적재하지 않아 최초 causal seal과 실제 데이터가 어긋나지 않는다.
+                snapshot = await guard.ensure()
+                assert snapshot is not None
+                completed_memberships.update(
+                    member.membership
+                    for member in snapshot.operation.members
+                    if member.status == "done"
+                )
+                dataset_memberships = await guard.client.resolve_frozen_feature_operation_datasets(
+                    memberships=memberships, provider=MCST_PROVIDER_NAME,
+                )
+                if set(dataset_memberships.values()) != set(memberships):
+                    raise RuntimeError("MCST frozen membership과 dataset 집합이 다름")
+                if set(dataset_memberships) - {
+                    spec.dataset_key for spec in MCST_FILE_DATASETS.values()
+                }:
+                    raise RuntimeError("MCST frozen membership에 미등록 dataset이 있음")
 
-            async def _on_memberships_completed(
-                received_memberships: tuple[ProviderDatasetOperationMembership, ...],
-            ) -> None:
-                nonlocal completed_memberships
-                if guard is not None and received_memberships != memberships:
-                    raise RuntimeError("MCST completed membership snapshot이 guard와 다름")
-                completed_memberships = received_memberships
+            async def _on_dataset_completed(loaded: DagsterFeatureLoadResult) -> None:
+                assert guard is not None
+                member = dataset_memberships.get(loaded.dataset_key)
+                if member is None:
+                    raise RuntimeError("MCST load seal이 frozen membership 밖을 가리킴")
+                if member in completed_memberships:
+                    raise RuntimeError("MCST 완료 member가 다시 적재됨")
+                await _finalize_mcst_dataset(
+                    guard, member, loaded,
+                    completed_dataset_keys=tuple(
+                        key for key, value in dataset_memberships.items()
+                        if value in completed_memberships
+                    ),
+                )
+                completed_memberships.add(member)
 
             try:
                 result = await run_feature_place_mcst_culture(
                     context,
-                    memberships=memberships,
-                    on_memberships_completed=(
-                        _on_memberships_completed if guard is not None else None
+                    selected_dataset_keys=frozenset(dataset_memberships) if guard else None,
+                    completed_dataset_keys=frozenset(
+                        key for key, member in dataset_memberships.items()
+                        if member in completed_memberships
                     ),
+                    on_dataset_completed=_on_dataset_completed if guard is not None else None,
                 )
-                if guard is not None and completed_memberships != memberships:
-                    raise RuntimeError(
-                        "MCST raw runner가 exact membership completion을 emit하지 않음"
-                    )
+                if guard is not None and completed_memberships != set(memberships):
+                    raise RuntimeError("MCST raw runner가 모든 exact member를 완료하지 않음")
             except Exception as exc:
                 if guard is not None:
-                    for membership in memberships:
-                        await append_failed_multi_member_attempt(context, guard, membership, exc)
-                # 이 asset만 multi-member라 `run_tracked_feature_asset`를 지나지 않는다.
-                # 같은 판정을 여기서 직접 건다(:mod:`~.quota_exhaustion`). 실패한 step은
-                # output을 내지 않으므로 소비량 로그도 같은 이유로 여기서 남긴다.
+                    failures = exc.failures if isinstance(exc, McstImportFailure) else {}
+                    for key, member in dataset_memberships.items():
+                        if member in completed_memberships:
+                            continue
+                        error = failures.get(key, {
+                            "code": "MCST_DATASET_RUN_ABORTED",
+                            "phase": "run",
+                            "reason": type(exc).__name__,
+                            "retryable": False,
+                        })
+                        await guard.client.append_dagster_feature_attempt_event(
+                            dagster_run_id=guard.dagster_run_id,
+                            membership=member,
+                            attempt_number=int(context.retry_number) + 1,
+                            outcome="retryable_failure" if error["retryable"] else "failed",
+                            error=error,
+                        )
                 _log_spend_on_failure(context)
                 raise_terminal_if_quota_exhausted(exc)
                 raise
-            if guard is not None:
-                assert guard.operation_key is not None
-                if len(result.results) != len(completed_memberships):
-                    raise RuntimeError("MCST authoritative member와 load seal 수가 다름")
-                for loaded in result.results:
-                    membership = await guard.client.resolve_feature_operation_dataset_membership(
-                        operation_key=guard.operation_key,
-                        provider=MCST_PROVIDER_NAME,
-                        dataset_key=loaded.dataset_key,
-                    )
-                    if membership not in completed_memberships:
-                        raise RuntimeError("MCST load seal이 frozen membership 밖을 가리킴")
-                    await finish_tracked_feature_membership(
-                        guard,
-                        membership,
-                        authoritative_snapshot_complete=True,
-                        curation_input_member_count=(
-                            loaded.load.curation_input_member_count
-                        ),
-                        curation_input_set_hash=loaded.load.curation_input_set_hash,
-                    )
             return result
 
 

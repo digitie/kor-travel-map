@@ -1,3 +1,25 @@
+## 2026-11-04 — #1448 최종 리뷰 보완·검증
+- 후속 finalize 실패와 이미 관측한 fetch/load 실패를 병합하고 원문 예외의 Dagster 직렬화를 차단했다. 두 순서 회귀·직전 구현 음성 대조 통과.
+- 전체 WSL PG 1,624개 통과·기존 조건부 skip14, targeted114 및 계약/표면43 통과. 실제 UI는 dataset 이력까지 5흐름을 최신 source로 재검증했다.
+- additive admin OpenAPI의 baseline/pending receipt SHA를 동기화했다. 운영 receipt 상태는 pending을 유지한다.
+- 최종 두 리뷰·CI를 확인하고 Map #1448을 머지한 뒤 Pinvi #635로 진행한다. 운영 검증은 Claude Code 담당이다.
+
+## 2026-11-04 — #1448 MCST 실제 결과 추적
+- SDK #20 merge00a78df 핀과 dataset별 즉시 완료·재시도 보존·선택 전 적재 경계를 구현했다.
+- 실제 PG 12 done/1 failed·root FAILURE/92%·완료 시각/causal seal 보존, 좁힌 선택/비선택 비활성 2건 및 관련 PG54/API198 통과.
+- WSL 실제 Map 운영 UI 4흐름과 공식 golf 기본 factory 조회 통과. 안전한 증거는 docs/reviews/map-mcst-import-outcomes-wsl-live.json.
+- 두 예비 리뷰 지적은 반영했다. 최종 head 전체 CI·두 독립 최종 리뷰 후 머지한다. 운영 접근·배포 없음.
+- #643/#1444를 다시 읽었다. 남은 Pinvi635/636/637/638/641/653은 다음 묶음에서 진행한다.
+
+## 2026-11-04 — MCST 승인 복구·데이터셋별 적재 완료 보존 착수 (#1441/#1442)
+
+- 최신 Pinvi #643 본문/댓글과 Map #1444를 다시 읽었다. 남은 Map #1441/#1442를 같은 소비자 PR로 처리한다.
+- 공급자 python-mcst-api #20을 00a78df로 병합했다. 두 최종 전문 적대적 리뷰·전체 CI·WSL 오프라인 113개/14 subtest 및 공식 공개 골프장 키 없는 live가 통과했다. 실제 SDK가 541행·14열을 읽었고 원문 CSV는 커밋하지 않았다.
+- Map은 공급자 핀을 실제 병합 커밋으로 올리고 기존 요청 계측 세션과 승인 경로의 호환성을 확인한다.
+- 각 데이터셋 load가 커밋되면 기존 frozen membership과 인과적 seal로 즉시 완료한다. 늦은 다른 fetch/load 실패로 완료 결과를 되돌리지 않고 재시도는 이미 완료된 membership을 다시 적재하지 않는다.
+- 전체 run 실패 사실은 보존하고 실제 성공/실패와 원인·진척을 데이터셋별로 표시한다. 다른 provider의 완료 정책이나 보호된 baseline을 바꾸지 않는다.
+- 초안 PR을 먼저 만들고 실패 우선·실제 PG runtime·운영 화면의 로컬 UI·두 독립 전문 적대적 리뷰와 최종 CI 뒤 병합한다. 운영 접속·배포·검증은 하지 않는다.
+
 ## 2026-11-04 — 실제 분류 UI 검증·성능 하네스 파라미터 보완
 
 - Map 5fcb015 → Pinvi 5048156 → Chromium 실제 UI 13항목을 통과했다. 공개 CSV의 실제 열·분류 tuple을 재현한 fixture로 호텔·카페·펜션·박물관, TYPE이 빈 촬영지의 미분류, 공백이 다른 국가유산 우선 순위와 행사 상세를 확인했다. 이름·주소·좌표는 테스트 값이며 원문 CSV를 저장소에 넣지 않았다.

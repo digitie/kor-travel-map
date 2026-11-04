@@ -57,6 +57,7 @@ import { DetailList } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar, FilterField } from "@/components/filter-bar";
 import { JsonViewer } from "@/components/json-viewer";
+import { McstAttemptError } from "@/components/mcst-attempt-error";
 import { LevelBadge, LiveBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -1738,6 +1739,9 @@ function EventRow({ event }: { event: OpsDatasetEventRecord }) {
         {event.sync_scope} · {event.operation_key ?? NULL_GLYPH}
       </span>
       <span className="min-w-0 flex-1 break-all">{event.message}</span>
+      {event.code === "feature_operation.attempt" ? (
+        <McstAttemptError error={event.payload?.error} />
+      ) : null}
       <span className="text-2xs text-text-secondary tabular-nums">
         {formatDateTime(event.occurred_at)}
       </span>
