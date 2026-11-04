@@ -1390,11 +1390,9 @@ async def _load_execution_detail(
                 level=level,
                 limit=page_size,
                 cursor=cursor,
-                **(
-                    {"include_direct_children": True}
-                    if job.kind == "provider_feature_load_run"
+                include_direct_children=(
+                    job.kind == "provider_feature_load_run"
                     and job.operation_key == "feature_place_mcst_culture_job"
-                    else {}
                 ),
             )
         except ValueError as exc:

@@ -2083,3 +2083,8 @@ n150 chain t1013e(2026-10-13 09:11Z)에서 `/root/chain17-pv.sh`(운영자 변�
 - 실제 WSL PG/API/Next/Chromium에서 관리자 로그인·12/1 요약·원인·하위 작업 응답 후 이동 4흐름 통과. root/child 스크린샷을 직접 검사했다. 원본 API 응답 대체 없음.
 - WSL 폐쇄 포트가 reject 대신 drop되는 경우를 허용하도록 fail-closed 테스트의 psycopg OperationalError 하위 ConnectionTimeout 표기를 보완했다. 제품 연결 정책은 그대로다.
 - 전체 API 1,600건·main unit/lint 3,643건·frontend 418건, frontend type/lint를 통과했다. 이후 최종 head의 전체 CI·두 독립 재리뷰를 진행한다.
+
+
+### 2026-11-04 — #1448 최종 타입 경계 보완
+- CI strict API mypy에서 조건부 kwargs의 bool dict 추론 오류를 확인했다. 같은 조건을 명시적 bool 인자로 전달하도록 보완했다.
+- API 72개·Dagster 38개 파일 strict mypy 및 pipeline API 162개를 다시 통과했다. 최종 CI는 새 head에서 확인한다.
