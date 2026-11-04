@@ -253,6 +253,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/features/{feature_id}/observations/{source_entity_key}/history": (RoutePolicy.OPERATOR),
     # -- operator — admin BFF(trusted proxy secret+actor) 표면.
     "/v1/admin/auth-events": RoutePolicy.OPERATOR,
+    "/v1/admin/feature-commands/reconcile": RoutePolicy.OPERATOR,
     "/v1/admin/backups": RoutePolicy.OPERATOR,
     "/v1/admin/backups/{backup_id}": RoutePolicy.OPERATOR,
     "/v1/admin/curated-source-rules": RoutePolicy.OPERATOR,

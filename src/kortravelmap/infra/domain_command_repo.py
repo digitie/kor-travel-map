@@ -88,7 +88,7 @@ INSERT INTO ops.domain_commands (
     actor, operation, idempotency_key, fingerprint_version,
     request_fingerprint
 ) VALUES (
-    :actor, :operation, CAST(:idempotency_key AS uuid), 1,
+    :actor, :operation, CAST(:idempotency_key AS uuid), :fingerprint_version,
     :request_fingerprint
 )
 RETURNING command_id, actor, operation, idempotency_key, fingerprint_version,
@@ -127,9 +127,7 @@ async def lock_domain_command(
 ) -> None:
     """Acquire the transaction lock for one actor-scoped command key."""
 
-    lock_id = advisory_lock_key(
-        f"domain-command:{actor}:{operation}:{idempotency_key}"
-    )
+    lock_id = advisory_lock_key(f"domain-command:{actor}:{operation}:{idempotency_key}")
     await session.execute(
         text("SELECT pg_advisory_xact_lock(CAST(:lock_id AS bigint))"),
         {"lock_id": lock_id},
@@ -159,8 +157,7 @@ def _record(row: Any) -> DomainCommandRecord:
         response_status=int(row.response_status),
         response_body=dict(row.response_body),
         response_headers={
-            str(key): str(value)
-            for key, value in dict(row.response_headers).items()
+            str(key): str(value) for key, value in dict(row.response_headers).items()
         },
         claimed_at=row.claimed_at,
         completed_at=row.completed_at,
@@ -208,6 +205,7 @@ async def create_domain_command_claim(
     operation: str,
     idempotency_key: str,
     request_fingerprint: str,
+    fingerprint_version: int = 1,
 ) -> DomainCommandClaim:
     row = (
         await session.execute(
@@ -217,6 +215,7 @@ async def create_domain_command_claim(
                 "operation": operation,
                 "idempotency_key": idempotency_key,
                 "request_fingerprint": request_fingerprint,
+                "fingerprint_version": fingerprint_version,
             },
         )
     ).one()

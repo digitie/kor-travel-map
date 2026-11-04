@@ -272,7 +272,9 @@ async def test_same_key_and_body_with_different_if_match_conflicts(
         operation: str,
         idempotency_key: UUID,
         payload: object,
+        fingerprint_version: int = 1,
     ) -> service.DomainCommandHandle:
+        assert fingerprint_version == (2 if operation == "admin.feature.patch" else 1)
         nonlocal first_fingerprint
         fingerprint = canonical_domain_command_fingerprint(payload)
         if first_fingerprint is None:

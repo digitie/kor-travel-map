@@ -24,3 +24,11 @@ GET으로 기록 없음만 확인한 뒤 dispatch를 지우면 늦게 도착한 
 ## 직전 완료
 
 Pinvi #667은 PR681로 cb3b2f6에 병합했다. 정확 최종35f84c8에 두 독립 리뷰 무차단·CI15 SUCCESS, 최신main 통합 WSL 단위1975/관련155·웹389·실제UI7/RustFS물리3을 확인했다. #643 체크를 갱신했고 남은6개는668/650/636/637/638/641이다. #671/#672는 다른 Code가 완료했다.
+
+## 지문 호환의 보완
+
+초기 전문 리뷰에서 v1 PATCH가 생략 필드와 명시 NULL을 같은 지문으로 만드는 기존 결함을 발견했고 단위 실패로 확인했다. PATCH만 v2로 전환하여 typed body의 exclude_unset=True를 사용하되 NULL/False/0/빈 배열은 보존한다. 다른 명령의 v1은 유지한다.
+
+기존 actor/operation/key 잠금·UNIQUE를 그대로 두고 begin/preflight가 지문 비교보다 먼저 버전을 확인한다. v1 PATCH의 필드 존재 여부를 원장으로 복원할 수 없으므로 LEGACY_FINGERPRINT_UNVERIFIABLE은 해제 증거가 아니며 원장/Pinvi dispatch를 보존한다. 기존 v1을 v2로 재표기하지 않는다. 부재 키는 새 버전 원장으로 영구 중단하여 옛 binary의 늦은 요청도 차단한다.
+
+expected_actor는 권한 선택이 아니라 인증 context 일치 assertion이다. 불일치면 원장 접근 전에 종료하며, 소비자는 저장된 원래 actor와 응답 actor가 일치해야만 해제/확정한다.
