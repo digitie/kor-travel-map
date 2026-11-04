@@ -173,3 +173,12 @@ restore는 **여전히 비활성이다.** 위 §명시적으로 지원하지 않
 
 이 도구는 복원 자체(`pg_restore` 실행)를 하지 않는다. 이미 복원된 연결을 받아 M05
 delivery 상태만 본다. evidence root 밖 relation과 RustFS 실물은 다루지 않는다.
+
+
+## MOIS 분류 근거 보존 (#1438)
+
+이 변경 뒤 새로 수집하는 MOIS 원본에는 `subtype_name`, `business_type_name`,
+`culture_sports_business_type_name`도 저장한다. 재수집과 hash 사전 계산은 같은
+분류 함수를 사용한다. 이전에 저장한 원본에는 세 필드가 없을 수 있으므로 원천 재수집이
+필요하며, 완전한 typed record 복원이나 과거 원본의 무손실 replay를 의미하지 않는다.
+건물·의료·위생·시설 세부 필드 손실 회귀는 계속 유지한다.

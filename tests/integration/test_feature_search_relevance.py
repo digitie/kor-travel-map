@@ -442,3 +442,68 @@ async def test_migration_seeds_trip_aliases_in_normalized_form(
     assert expected.items() <= rows.items()
     for alias in expected:
         assert feature_repo.search_alias_key(alias) == alias
+
+
+@pytest.mark.parametrize(
+    ("query", "typed_name", "generic_name", "category", "food_name"),
+    [
+        ("하회마을", "안동 하회마을", "안동하회마을", "01070400", "하회마을"),
+        ("고씨동굴", "영월고씨굴", "영월 고씨굴", "01020400", "고씨네"),
+    ],
+)
+async def test_alias_space_variants_do_not_hide_typed_source_behind_unclassified_theme(
+    migrated_session: AsyncSession, query: str, typed_name: str, generic_name: str,
+    category: str, food_name: str,
+) -> None:
+    ids = {}
+    for label, name, code in (
+        ("typed", typed_name, category), ("theme", generic_name, "00000000"),
+        ("food", food_name, "02010100"),
+    ):
+        ids[label] = await _place(
+            migrated_session, "space-variant-" + query + label, name=name, category=code,
+            lon=128.5, lat=36.5,
+        )
+    labels = await _search_ids(migrated_session, query, ids)
+    assert labels[0] == "typed", labels
+    full = await feature_repo.search_features(
+        migrated_session, q=query, kinds=["place"], page_size=200,
+        include_total=True, cursor_signing_key=_SEARCH_CURSOR_KEY,
+    )
+    assert full.total_count == len(full.items)
+    walked = []
+    cursor = None
+    for _ in range(len(full.items) + 1):
+        page = await feature_repo.search_features(
+            migrated_session, q=query, kinds=["place"], page_size=1,
+            cursor=cursor, include_total=True, cursor_signing_key=_SEARCH_CURSOR_KEY,
+        )
+        assert page.total_count == full.total_count
+        walked.extend(item.feature_id for item in page.items)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert cursor is None
+    assert walked == [item.feature_id for item in full.items]
+
+
+async def test_alias_normalization_uses_raw_parking_name_before_display_suffix(
+    migrated_session: AsyncSession,
+) -> None:
+    target = await _place(
+        migrated_session, "raw-alias-parking", name="별칭 정자", category="06010000",
+        lon=128.5, lat=36.5, place_kind="parking",
+    )
+    await migrated_session.execute(text(
+        "INSERT INTO feature.feature_search_aliases(alias,canonical_name) "
+        "VALUES ('공백주차별칭검증','별칭정자')"
+    ))
+    page = await feature_repo.search_features(
+        migrated_session, q="공백주차별칭검증", include_total=True,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
+    )
+    assert page.items[0].feature_id == target
+    assert page.items[0].rank is not None
+    assert page.items[0].rank < 10000
+    assert page.total_count is not None
+    assert page.total_count >= 1

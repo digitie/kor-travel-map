@@ -131,6 +131,7 @@ class PlaceCategoryCode(StrEnum):
     TOURISM_ACTIVITY_CRUISE = "01080300"
     TOURISM_ACTIVITY_LEISURE_SPORTS = "01080400"
     TOURISM_ACTIVITY_TREKKING = "01080500"
+    TOURISM_EVENT = "01090000"
     FOOD = "02000000"
     FOOD_RESTAURANT = "02010000"
     FOOD_RESTAURANT_KOREAN = "02010100"
@@ -322,6 +323,7 @@ PLACE_CATEGORY_TIER2_NAMES_BY_TIER1: Final[dict[str, dict[str, str]]] = {
         "06": "관광안내",
         "07": "국가유산",
         "08": "액티비티",
+        "09": "축제·행사",
     },
     "02": {"01": "음식점", "02": "카페"},
     "03": {
@@ -959,6 +961,10 @@ PLACE_CATEGORY_DEFINITIONS: Final[tuple[PlaceCategory, ...]] = tuple(
                 3,
                 PlaceCategoryCode.TOURISM_ACTIVITY,
                 85,
+            ),
+            _category(
+                PlaceCategoryCode.TOURISM_EVENT,
+                "관광", "축제·행사", None, None, 2, PlaceCategoryCode.TOURISM, 90,
             ),
             _category(PlaceCategoryCode.FOOD, "식음", None, None, None, 1, None, 200),
             _category(
@@ -1850,6 +1856,7 @@ PLACE_CATEGORY_MAPBOX_MAKI_ICONS: Final[dict[str, str]] = {
     PlaceCategoryCode.TOURISM_ACTIVITY_CRUISE.value: "ferry",
     PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS.value: "pitch",
     PlaceCategoryCode.TOURISM_ACTIVITY_TREKKING.value: "park",
+    PlaceCategoryCode.TOURISM_EVENT.value: "star",
     PlaceCategoryCode.FOOD.value: "restaurant",
     PlaceCategoryCode.FOOD_RESTAURANT.value: "restaurant",
     PlaceCategoryCode.FOOD_RESTAURANT_KOREAN.value: "restaurant",

@@ -1,6 +1,6 @@
 """카탈로그 self-consistency + ``@kor-travel-map/map-marker-react`` maki 교차 점검 (T-213f).
 
-- Python 카탈로그(145건)의 maki icon이 자기 일관적인지.
+- Python 카탈로그(146건)의 maki icon이 자기 일관적인지.
 - marker-react ``maki.ts``의 maki name이 valid kebab-case이고, provider가 자주
   emit하는 핵심 maki는 글리프로 커버되는지(미지정 maki는 첫 글자 fallback이라 전부
   커버할 필요는 없음 — ADR-029의 category↔TS 1:1 게이트는 name→glyph 구조에 맞춰
@@ -32,7 +32,7 @@ _MAKI_TS = (
 
 
 def test_catalog_count_and_maki_self_consistency() -> None:
-    assert len(PLACE_CATEGORY_DEFINITIONS) == 145
+    assert len(PLACE_CATEGORY_DEFINITIONS) == 146
     values = set(PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES)
     for cat in PLACE_CATEGORY_DEFINITIONS:
         assert cat.mapbox_maki_icon in values

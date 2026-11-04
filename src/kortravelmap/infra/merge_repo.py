@@ -34,7 +34,9 @@ from typing import TYPE_CHECKING, Final
 
 from sqlalchemy import text
 
+from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.scoring import MasterCandidate, select_master
+from kortravelmap.dto import EventDetail
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.feature_repo import lock_feature_curation_write
 
@@ -815,6 +817,25 @@ def _reject_cross_kind_merge(
     )
 
 
+async def _reject_different_event_occurrence(
+    session: AsyncSession, *, master_id: str, loser_id: str,
+) -> None:
+    # 부모 Feature 잠금을 얻은 뒤 별도 문장으로 읽어 최신 subtype을 비교한다.
+    rows = (await session.execute(text("""
+        SELECT feature_id, event_kind, starts_on, ends_on, venue_name
+        FROM feature.feature_events
+        WHERE feature_id IN (CAST(:master AS uuid), CAST(:loser AS uuid))
+        ORDER BY feature_id FOR UPDATE
+    """), {"master": master_id, "loser": loser_id})).mappings().all()
+    if len(rows) != 2:
+        raise MergeConflictError("행사 subtype이 없어 병합 회차를 확인할 수 없음")
+    details = [EventDetail(feature_id=str(row["feature_id"]), event_kind=row["event_kind"],
+                           starts_on=row["starts_on"], ends_on=row["ends_on"],
+                           venue_name=row["venue_name"]) for row in rows]
+    if compare_event_occurrences(*details) == "different":
+        raise MergeConflictError("기간 또는 장소가 다른 행사 회차는 병합할 수 없음")
+
+
 async def apply_feature_merge(
     session: AsyncSession,
     *,
@@ -842,6 +863,10 @@ async def apply_feature_merge(
     ).mappings().all()
     locked_kinds = {str(row["feature_id"]): str(row["kind"]) for row in locked_rows}
     _reject_cross_kind_merge(locked_kinds, master_id=master_id, loser_id=loser_id)
+    if locked_kinds.get(master_id) == locked_kinds.get(loser_id) == "event":
+        await _reject_different_event_occurrence(
+            session, master_id=master_id, loser_id=loser_id,
+        )
     loser_state = next(
         (row for row in locked_rows if str(row["feature_id"]) == loser_id), None
     )

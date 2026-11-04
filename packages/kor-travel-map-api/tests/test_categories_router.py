@@ -48,7 +48,7 @@ def test_categories_static_returns_full_catalog(client: TestClient) -> None:
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["include_counts"] is False
-        assert len(body["data"]["items"]) == 145
+        assert len(body["data"]["items"]) == 146
         item = body["data"]["items"][0]
         assert {"code", "depth", "label", "path", "maki_icon", "is_active"} <= set(item)
         assert item["db_feature_count"] is None
@@ -56,6 +56,9 @@ def test_categories_static_returns_full_catalog(client: TestClient) -> None:
         codes = {i["code"] for i in body["data"]["items"]}
         assert "00000000" in codes  # sentinel 포함
         assert "01050400" in codes  # 관광 > 자연명소 > 등대
+        event = next(i for i in body["data"]["items"] if i["code"] == "01090000")
+        assert event["path"] == ["관광", "축제·행사"]
+        assert event["maki_icon"] == "star"
     finally:
         client.app.dependency_overrides.clear()
 

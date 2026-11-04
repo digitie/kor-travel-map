@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any, Final
 from sqlalchemy import text
 
 from kortravelmap.core.scoring import MasterCandidate
-from kortravelmap.dto import Coordinate
+from kortravelmap.dto import Coordinate, EventDetail
 from kortravelmap.infra import feature_identity
 
 if TYPE_CHECKING:
@@ -74,6 +74,8 @@ class DedupRefreshFeature:
     provider: str
     dataset_key: str
     updated_at: datetime
+    kind: str
+    detail: EventDetail | None
 
     @property
     def has_coord(self) -> bool:
@@ -95,6 +97,8 @@ WITH ranked AS (
   SELECT
     f.feature_id,
     f.name,
+    f.kind,
+    e.event_kind, e.starts_on, e.ends_on, e.venue_name,
     f.category,
     f.updated_at,
     f.coord_precision_digits,
@@ -107,6 +111,7 @@ WITH ranked AS (
       ORDER BY sr.imported_at DESC NULLS LAST, sr.source_record_key
     ) AS rn
   FROM feature.features AS f
+  LEFT JOIN feature.feature_events AS e ON e.feature_id = f.feature_id
   JOIN provider_sync.source_links AS sl
     ON sl.feature_id = f.feature_id
    AND sl.source_role = 'primary'
@@ -150,6 +155,7 @@ WITH ranked AS (
 SELECT
     feature_id,
     name,
+    kind, event_kind, starts_on, ends_on, venue_name,
     category,
     updated_at,
     coord_precision_digits,
@@ -230,4 +236,11 @@ def _row_to_feature(row: Any) -> DedupRefreshFeature:
         provider=str(row["provider"]),
         dataset_key=str(row["dataset_key"]),
         updated_at=row["updated_at"],
+        kind=str(row["kind"]),
+        detail=(
+            EventDetail(feature_id=str(row["feature_id"]), event_kind=row["event_kind"],
+                        starts_on=row["starts_on"], ends_on=row["ends_on"],
+                        venue_name=row["venue_name"])
+            if row["event_kind"] is not None else None
+        ),
     )

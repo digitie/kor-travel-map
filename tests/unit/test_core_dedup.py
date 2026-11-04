@@ -33,6 +33,8 @@ class _Stub:
     name: str
     coord: Coordinate | None
     category: str
+    kind: str = "place"
+    detail: object = None
 
 
 def _c(lon: str, lat: str) -> Coordinate:
@@ -324,3 +326,44 @@ def test_sibling_exclude_auto_merge() -> None:
     ]
     # auto_merge 후보 → include_auto_merge=False면 제외.
     assert find_sibling_candidates(feats, include_auto_merge=False) == []
+
+
+@pytest.mark.parametrize("generator", ["cross", "sibling"])
+@pytest.mark.parametrize(
+    ("start", "end", "venue", "expected"),
+    [
+        ("2026-05-01", "2026-05-03", "종묘", "auto_merge"),
+        ("2025-05-01", "2025-05-03", "종묘", None),
+        ("2026-05-02", "2026-05-04", "종묘", None),
+        ("2026-05-01", "2026-05-03", "다른 행사장", None),
+        (None, None, "종묘", "manual_review"),
+    ],
+)
+def test_event_occurrence_precedes_identical_name_and_location(
+    generator: str, start: str | None, end: str | None, venue: str, expected: str | None,
+) -> None:
+    from datetime import date
+
+    from kortravelmap.dto import EventDetail, Feature, FeatureKind
+
+    def event(key: str, begins: str | None, ends: str | None, place: str) -> Feature:
+        return Feature(
+            feature_id=key, kind=FeatureKind.EVENT, name="우리들의 축제",
+            coord=_c("126.994", "37.574"), category="01090000",
+            marker_icon="star", marker_color="P-11",
+            detail=EventDetail(feature_id=key,
+                               starts_on=date.fromisoformat(begins) if begins else None,
+                               ends_on=date.fromisoformat(ends) if ends else None,
+                               venue_name=place),
+        )
+
+    a = event("f_event_a", "2026-05-01", "2026-05-03", "종묘")
+    b = event("f_event_b", start, end, venue)
+    for left, right in ((a, b), (b, a)):
+        if generator == "cross":
+            found = find_dedup_candidates([left], [right])
+        else:
+            found = find_sibling_candidates([left, right])
+        assert [c.decision for c in found] == ([expected] if expected else [])
+        if expected == "manual_review":
+            assert len(find_dedup_candidates([left], [right], include_auto_merge=False)) == 1

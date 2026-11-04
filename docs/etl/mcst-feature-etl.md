@@ -150,3 +150,16 @@ reload 이후) `DEFAULT_DEDUP_SCOPE_PAIRS` 후보로 재검토한다.
 - 카탈로그 LINK dataset(전통사찰/등록공연장/공공체육시설 등 — 연결 원천)의
   적재 가능성 검토.
 - CSV 갱신주기(파일 페이지 표기 월간/연간)에 맞춘 schedule 세분화.
+
+
+## 구조화된 분류 재투영 (#1438)
+
+혼합 시설 4종(반려동물·무장애·가족/영유아·촬영지)과 캠핑 CSV의
+`CATEGORY1/2/3` tuple에서 명시적 업종을 읽는다. 모르는 값·서로 다른 업종의 충돌은
+기존 dataset fallback을 유지한다. 시설명이나 브랜드로 업종을 만들지 않는다.
+
+해당 dataset의 현재 primary 원본을 다시 수집하면 원본 hash가 같아도 category와 marker
+base만 비교한다. 같은 원천이 소유한 base의 실제 변경만 기존 field-patch procedure로 적용하며
+다른 provider의 base·주소·상세·팔레트는 건드리지 않는다. 관리자 override는 표시값으로
+유지되고 해제하면 새 base가 드러난다. 같은 입력의 두 번째 실행은 Feature revision을
+올리지 않는다. 오래된 artifact와 퇴역 상태는 이 재투영에서 제외한다.

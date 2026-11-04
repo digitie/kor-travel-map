@@ -76,6 +76,7 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
 )
+from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
     FeatureSearchCursorQueryMismatchError,
@@ -83,7 +84,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorVersionUnsupportedError,
 )
 from kortravelmap.core.providers import normalize_provider_name
-from kortravelmap.dto import Address
+from kortravelmap.dto import Address, EventDetail
 from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
@@ -1824,9 +1825,9 @@ def _search_tail_sql(expression: str) -> str:
     )
 
 
-# 별칭 이름 일치(``name = :alias_name``)는 trigram GIN의 ``=`` 연산자(pg_trgm 1.6, strategy 11)로
-# 같은 ``idx_features_name_trgm``을 탄다 — ``%``와 함께 BitmapOr가 된다(2026-11-02 prod 실측
-# 35ms). ``:alias_name``이 NULL이면 그 팔은 아무 것도 찾지 않는다.
+# 별칭의 정확 이름 및 trigram 후보는 기존 idx_features_name_trgm을 사용한다.
+# 별칭 trigram 팔은 원래 이름의 공백 정규화 일치로 좁힌다. 임의의 글자 사이 공백까지
+# 모두 찾는 보장은 없으며, 알려진 원천 이름 변형과 기본 planner의 GIN 사용을 검증한다.
 #
 # bbox는 q 검색에서 **필터가 아니라 순위 가중**이다(bbox 안이 먼저). 술어가 아니라 정렬식이라
 # 인덱스와 무관하고, 4326 ``coord``와 ``ST_MakeEnvelope``만 쓴다(ADR-012, ST_Transform 없음).
@@ -1846,6 +1847,10 @@ WITH name_candidates AS MATERIALIZED (
     WHERE (
         f.name OPERATOR(x_extension.%) CAST(:q AS text)
         OR f.name = CAST(:alias_name AS text)
+        OR (
+            f.name OPERATOR(x_extension.%) CAST(:alias_name AS text)
+            AND {_search_compact_sql("f.name")} = CAST(:alias_compact AS text)
+        )
       )
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ),
@@ -1866,6 +1871,8 @@ compacted AS (
     SELECT
         filtered.*,
         {_search_compact_sql("display_name")} AS compact_name,
+        CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
+             THEN {_search_compact_sql("name")} END AS compact_raw_name,
         {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail
     FROM filtered
 ),
@@ -1884,7 +1891,7 @@ candidates AS (
         (
           -- 일치 단계: 0 별칭이 가리키는 이름, 1 이름이 검색어를 품음(공백 무시), 2 유사도만.
           CASE
-            WHEN name = CAST(:alias_name AS text) THEN 0
+            WHEN compact_raw_name = CAST(:alias_compact AS text) THEN 0
             WHEN strpos(compact_name, CAST(:q_compact AS text)) > 0 THEN 1
             ELSE 2
           END * {_SEARCH_RANK_MATCH_WEIGHT}
@@ -3461,6 +3468,148 @@ class _GeoChunk:
         return feature_id in self.stale, self.stored[feature_id]
 
 
+# 원본이 같아도 정규화가 달라지는 #1438/#1439 대상만 재투영한다.
+# provider 코드를 import하지 않고 scope만 제한한다(의존 방향 보존).
+_CATEGORY_REPROJECTION_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
+    ("python-mcst-api", "mcst_pet_friendly_culture_facilities_csv"),
+    ("python-mcst-api", "mcst_barrier_free_places_csv"),
+    ("python-mcst-api", "mcst_family_infant_culture_facilities_csv"),
+    ("python-mcst-api", "mcst_media_famous_places_csv"),
+    ("python-mcst-api", "mcst_leisure_camping_facilities_csv"),
+    ("python-krheritage-api", "krheritage_event_list"),
+    ("data.go.kr-standard", "datagokr_cultural_festivals"),
+})
+_EVENT_QUALITY_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
+    ("python-krheritage-api", "krheritage_event_list"),
+    ("data.go.kr-standard", "datagokr_cultural_festivals"),
+})
+
+
+async def _repair_current_provider_projection(
+    session: AsyncSession, bundle: FeatureBundle, *,
+    feature_id: str, record_state: _SourceRecordUpsertState,
+) -> bool:
+    """현재 primary의 분류 base만 수렴시키고 유효하지 않은 행사를 단방향 격리한다.
+
+    호출자는 source upsert와 link write의 잠금을 유지한다. 동일 head 재수집에서도
+    원문/hash/관측 증거를 위조하지 않고 field-patch procedure를 거친다.
+    다른 provider의 base, lifecycle/publication, 주소/상세는 재투영하지 않는다.
+    """
+    scope = (bundle.source_record.provider, bundle.source_record.dataset_key)
+    if scope not in _CATEGORY_REPROJECTION_SCOPES:
+        return False
+    if not await _source_record_is_current_head(session, record_state):
+        return False
+    current = (await session.execute(text("""
+        SELECT f.row_revision, f.lifecycle_state, f.publication_state, f.quality_state
+        FROM feature.features f
+        JOIN provider_sync.source_links sl ON sl.feature_id = f.feature_id
+        WHERE f.feature_id = CAST(:id AS uuid)
+          AND sl.source_entity_key = :entity AND sl.source_role = 'primary'
+        FOR UPDATE OF f, sl
+    """), {"id": feature_id, "entity": record_state.source_entity_key})).mappings().one_or_none()
+    if current is None or current["lifecycle_state"] != "active":
+        return False
+    revision = int(current["row_revision"])
+    desired = {
+        "core.category": bundle.feature.category,
+        "core.marker_icon": bundle.feature.marker_icon,
+    }
+    base = (await session.execute(text("""
+        SELECT field_path, provider_dataset_id, source_entity_key, value_json
+        FROM feature.feature_base_field_values
+        WHERE feature_id = CAST(:id AS uuid) AND field_path = ANY(CAST(:paths AS text[]))
+        ORDER BY field_path
+    """), {"id": feature_id, "paths": list(desired)})).mappings().all()
+    owns_base = len(base) == len(desired) and all(
+        row["provider_dataset_id"] == record_state.provider_dataset_id
+        and row["source_entity_key"] == record_state.source_entity_key
+        for row in base
+    )
+    changed = {
+        str(row["field_path"]): desired[str(row["field_path"])]
+        for row in base if row["value_json"] != desired[str(row["field_path"])]
+    } if owns_base else {}
+    membership = _ProviderSourceMembership(
+        source_entity_key=record_state.source_entity_key,
+        source_record_key=record_state.source_record_key,
+    )
+    if changed:
+        revision = await _apply_provider_field_values(
+            session, feature_id=feature_id,
+            provider_dataset_id=record_state.provider_dataset_id,
+            source_membership=membership, expected_row_revision=revision,
+            values=json.dumps(changed, ensure_ascii=False), geometry_wkt="{}",
+        )
+    quarantined = False
+    if (
+        scope in _EVENT_QUALITY_SCOPES and bundle.feature.kind.value == "event"
+        and current["quality_state"] == "valid"
+    ):
+        # provider DTO보다 관리자 override가 반영된 최종 표시 정보를 검사한다.
+        event = (await session.execute(text("""
+            SELECT starts_on, ends_on, venue_name FROM feature.feature_events
+            WHERE feature_id = CAST(:id AS uuid)
+        """), {"id": feature_id})).mappings().one_or_none()
+        incomplete = event is None or (
+            event["starts_on"] is None or event["ends_on"] is None
+            or not (event["venue_name"] or "").strip()
+        )
+        if incomplete:
+            await session.execute(text(_TRANSITION_FEATURE_STATE_SQL), {
+                "feature_id": feature_id,
+                "lifecycle_state": current["lifecycle_state"],
+                "publication_state": current["publication_state"],
+                "quality_state": "quarantined", "expected_row_revision": revision,
+                "state_context": _provider_state_context(
+                    provider_dataset_id=record_state.provider_dataset_id,
+                    reason_code="provider_event_required_details_v1",
+                    source_membership=membership,
+                ),
+            })
+            quarantined = True
+    return bool(changed) or quarantined
+
+
+async def _reject_legacy_event_occurrence_conflict(
+    session: AsyncSession, bundle: FeatureBundle, *, feature_id: str,
+    record_state: _SourceRecordUpsertState,
+) -> None:
+    """종료일 없는 기존 KHA fallback 키로 다른 회차가 같은 Feature를 덮는 것을 거부한다."""
+    detail = bundle.feature.detail
+    if (
+        (bundle.source_record.provider, bundle.source_record.dataset_key)
+        != ("python-krheritage-api", "krheritage_event_list")
+        or not isinstance(detail, EventDetail)
+        or detail.payload.get("occurrence_key_basis") != "title_start_venue"
+    ):
+        return
+    if not await _source_record_is_current_head(session, record_state):
+        return
+    # 부모 잠금 뒤 별도 문장으로 최신 기간을 읽는다. 거부 시 호출자의 load transaction이
+    # rollback되어 기존 raw/head/base/표시값이 함께 유지된다. 자동 identity 이행은 하지 않는다.
+    await session.execute(text(
+        "SELECT feature_id FROM feature.features WHERE feature_id=CAST(:id AS uuid) FOR UPDATE"
+    ), {"id": feature_id})
+    # 관리자 effective 보완값은 원천 회차의 변경이 아니다. 해당 원천이 소유한
+    # provider base만 비교하며, 날짜·장소 누락은 기존 unknown 정책을 유지한다.
+    rows = (await session.execute(text("""
+        SELECT field_path, value_json FROM feature.feature_base_field_values
+        WHERE feature_id=CAST(:id AS uuid)
+          AND provider_dataset_id=:dataset AND source_entity_key=:entity
+          AND field_path IN ('event.starts_on', 'event.ends_on', 'event.venue_name')
+        ORDER BY field_path
+    """), {"id": feature_id, "dataset": record_state.provider_dataset_id,
+           "entity": record_state.source_entity_key})).mappings().all()
+    values = {str(row["field_path"]).removeprefix("event."): row["value_json"] for row in rows}
+    current = EventDetail(feature_id=feature_id, **values)
+    if compare_event_occurrences(current, detail) == "different":
+        raise FeatureIdentityAnchorError(
+            "KHA fallback 자연키의 행사 기간·장소 충돌: 다른 회차를 기존 Feature에 "
+            "덮어쓸 수 없습니다. 원천 회차 식별자를 확인한 뒤 별도로 처리하십시오."
+        )
+
+
 async def load_bundle(
     session: AsyncSession,
     bundle: FeatureBundle,
@@ -3515,6 +3664,11 @@ async def load_bundle(
         else await _feature_load_state(session, resolved_feature_id)
     )
     feature_missing = not feature_state.exists
+    if not feature_missing:
+        assert resolved_feature_id is not None
+        await _reject_legacy_event_occurrence_conflict(
+            session, bundle, feature_id=resolved_feature_id, record_state=record_state,
+        )
     link_inserted = False
     # Existing Feature refresh must prove the same primary link inside the
     # provider field-patch procedure. New Feature has no FK target until the
@@ -3683,6 +3837,11 @@ async def load_bundle(
             source_record_key=record_state.source_record_key,
         ),
     )
+
+    projection_updated = await _repair_current_provider_projection(
+        session, bundle, feature_id=lifecycle_feature_id, record_state=record_state,
+    )
+    feature_updated = feature_updated or projection_updated
 
     # -- override finding·스탬프(ADR-109 결정 1·4) ---------------------------------------
     override_finding = False
@@ -6123,8 +6282,8 @@ def encode_bbox_cursor(feature_id: str) -> str:
 
 
 _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
-#: v2(436): q 검색 keyset에 ``rank``가 더해졌다 — v1 cursor는 VERSION_UNSUPPORTED다.
-_SEARCH_CURSOR_VERSION: Final[int] = 2
+#: v3: 별칭의 공백 정규화로 순위 의미가 달라져 이전 cursor를 재사용하지 않는다.
+_SEARCH_CURSOR_VERSION: Final[int] = 3
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -6524,6 +6683,7 @@ async def search_features(
                     "q": contract.q,
                     "q_compact": q_compact,
                     "alias_name": alias_name,
+                    "alias_compact": search_alias_key(alias_name) if alias_name else None,
                     "bbox_enabled": contract.bbox is not None,
                     "min_lon": min_lon,
                     "min_lat": min_lat,
@@ -6551,6 +6711,7 @@ async def search_features(
                 "q": contract.q,
                 "q_compact": q_compact,
                 "alias_name": alias_name,
+                "alias_compact": search_alias_key(alias_name) if alias_name else None,
                 "bbox_enabled": contract.bbox is not None,
                 "min_lon": min_lon,
                 "min_lat": min_lat,

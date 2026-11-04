@@ -30,6 +30,8 @@ class _Stub:
     name: str
     coord: Coordinate | None
     category: str
+    kind: str = "place"
+    detail: object = None
 
 
 def _c(lon: str, lat: str) -> Coordinate:

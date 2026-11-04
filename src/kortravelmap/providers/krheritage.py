@@ -40,8 +40,9 @@ from typing import Any, Final, Protocol, runtime_checkable
 
 from shapely.geometry import shape as shapely_shape
 
-from kortravelmap.category import get_category, is_known_category_code
+from kortravelmap.category import PlaceCategoryCode, get_category, is_known_category_code
 from kortravelmap.core.address import normalize_korean_text, normalize_phone_number
+from kortravelmap.core.events import has_required_event_details
 from kortravelmap.core.geometry import (
     AREA_GEOMETRY_TYPES,
     GeometryError,
@@ -63,6 +64,7 @@ from kortravelmap.dto import (
     FeatureBundle,
     FeatureFileSource,
     FeatureKind,
+    FeatureQualityState,
     PlaceDetail,
     SourceLink,
     SourceRecord,
@@ -953,7 +955,7 @@ async def _event_to_bundle(
         name=name,
         coord=coord,
         address=address,
-        category=_HERITAGE_CATEGORY,
+        category=PlaceCategoryCode.TOURISM_EVENT.value,
         marker_icon=_EVENT_MARKER_ICON,
         marker_color=HERITAGE_MARKER_COLOR,
         detail=EventDetail(
@@ -964,8 +966,14 @@ async def _event_to_bundle(
             venue_name=normalize_korean_text(_event_place(event)),
             tel=normalize_phone_number(_event_tel(event)),
             content_id=natural_key,
+            payload=(
+                {"occurrence_key_basis": "title_start_venue"}
+                if not _event_sn(event) else {}
+            ),
         ),
     )
+    if not has_required_event_details(feature.detail):
+        feature = feature.model_copy(update={"quality_state": FeatureQualityState.QUARANTINED})
     source_record = SourceRecord(
         provider=normalize_provider_name(PROVIDER_NAME),
         dataset_key=DATASET_KEY_EVENT,

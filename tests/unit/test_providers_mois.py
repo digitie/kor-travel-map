@@ -417,8 +417,6 @@ _RAW_DATA_DROPS = frozenset(
         "bed_count",
         "building_management_number",
         "building_usage_name",
-        "business_type_name",
-        "culture_sports_business_type_name",
         "designation_date",
         "facility_area",
         "facility_total_scale",
@@ -433,7 +431,6 @@ _RAW_DATA_DROPS = frozenset(
         "sales_method_name",
         "sanitation_business_status_name",
         "sickbed_count",
-        "subtype_name",
         "total_area",
         "total_floor_count",
         "underground_floor_count",
@@ -446,7 +443,7 @@ def test_raw_data_round_trip_drops_exactly_the_known_fields() -> None:
     """``raw_data`` → NDJSON → record 되먹임에서 무엇이 사라지는지 못박는다.
 
     ``docs/backup-restore.md`` §10 절차 4는 ``source_records.raw_data``를 되먹여 결손을
-    메운다. 그런데 ``_raw_data``는 payload_hash용 canonical dict라 Protocol 45개 중 22개만
+    메운다. 그런데 ``_raw_data``는 payload_hash용 canonical dict라 Protocol 중 기본·분류 필드만
     담고, NDJSON 래퍼(``MoisLicenseJsonRecord.__getattr__``)는 없는 key를 **조용히 None**으로
     돌려준다. 그래서 되먹임은 실패하지 않고 **부분 복원**된다 — 이쪽이 훨씬 위험하다.
     """
@@ -469,7 +466,7 @@ def test_raw_data_round_trip_empties_facility_info_blocks() -> None:
     """손실이 **본문 어디에 나타나는지**까지 고정한다.
 
     이름 목록만 비교하면 "그래서 뭐가 나빠지나"가 안 보인다. 복원 드릴이 실제로 놓치는
-    것은 ``PlaceDetail.facility_info``의 building/medical/food/culture_sports 네 블록이다.
+    것은 ``PlaceDetail.facility_info``의 building/medical/food와 culture_sports의 나머지 필드다.
     절차 5의 확인 축(F1, feature 카운트, identity 4축)은 이 손실을 전혀 보지 못한다.
     """
 
@@ -482,10 +479,14 @@ def test_raw_data_round_trip_empties_facility_info_blocks() -> None:
     assert set(before) >= {"building", "medical", "food", "culture_sports"}, (
         "전제가 깨졌다 — 모든 필드를 채운 record인데 facility_info 블록이 안 생긴다"
     )
-    assert set(after) == {"service_slug", "category", "subtype_name", "sales_method_name"}, (
+    assert set(after) == {
+        "service_slug", "category", "subtype_name", "sales_method_name", "culture_sports",
+    }, (
         f"되먹임 후 facility_info가 예상과 다르다: {sorted(after)}"
     )
-    assert after["subtype_name"] is None
+    assert after["subtype_name"] == original.subtype_name
+    assert after["culture_sports"]["type"] == original.culture_sports_business_type_name
+    assert after["culture_sports"]["designation_date"] is None
     assert after["sales_method_name"] is None
 
 
@@ -591,3 +592,43 @@ async def test_bundle_carries_the_geo_attempt_evidence(
         bundle.geo_attempt.reverse_attempted,
         bundle.geo_attempt.geocode_obtained_code,
     ) == expected
+
+
+@pytest.mark.parametrize(
+    ("slug", "subtype", "expected"),
+    [
+        ("general_restaurants", "중국식", "02010400"),
+        ("general_restaurants", "일식", "02010300"),
+        ("general_restaurants", "경양식", "02010200"),
+        ("general_restaurants", "한식", "02010100"),
+        ("rest_cafes", "다방", "02020000"),
+        ("large_scale_retail_stores", "대형마트", "05030000"),
+        ("large_scale_retail_stores", "백화점", "05050000"),
+        ("large_scale_retail_stores", "모르는 업태", "05050000"),
+        ("tourist_accommodations", "가족호텔업", "03010000"),
+        ("tourist_accommodations", "비즈니스호텔", "03010200"),
+        ("general_restaurants", "관광호텔", "02010100"),
+    ],
+)
+async def test_structured_license_subtype_preserves_legacy_identity_and_hash_prediction(
+    slug: str, subtype: str, expected: str,
+) -> None:
+    from kortravelmap.providers.mois import license_record_payload_hash
+
+    original = _Record(service_slug=slug, place_name="호텔 앞 중국식당")
+    [old] = await _bundles([original])
+    record = dataclasses.replace(original, subtype_name=subtype)
+    [bundle] = await _bundles([record])
+    assert bundle.feature.category == expected
+    assert bundle.feature.feature_id == old.feature.feature_id
+    assert bundle.feature.provider_natural_key == old.feature.provider_natural_key
+    assert bundle.feature.marker_color == MOIS_MARKER_COLOR
+    assert bundle.source_record.raw_payload_hash == license_record_payload_hash(record)
+    assert bundle.source_record.raw_data.get("subtype_name") == subtype
+
+
+async def test_conflicting_structured_license_fields_keep_slug_fallback() -> None:
+    [bundle] = await _bundles([_Record(
+        service_slug="general_restaurants", subtype_name="중국식", business_type_name="일식",
+    )])
+    assert bundle.feature.category == "02010100"

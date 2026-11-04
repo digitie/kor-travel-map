@@ -114,7 +114,7 @@ class McstDatasetSpec:
     """provider_sync dataset_key — ``mcst_<slug>``."""
 
     category: str
-    """``Feature.category`` (기존 ``PlaceCategoryCode`` 값)."""
+    """기본 분류이자 legacy ID seed. 혼합 시설 표시 분류는 행에서 별도로 해석한다."""
 
     place_kind: str
     """``PlaceDetail.place_kind`` — dataset 세부 구분."""
@@ -590,6 +590,96 @@ async def _resolve_address(
     )
 
 
+# 혼합 시설 CSV의 구조화된 분류에만 적용한다. 사업장명으로 업종을 추정하지 않는다.
+_MCST_CATEGORY_LABELS: Final[Mapping[str, PlaceCategoryCode]] = {
+    "식당": PlaceCategoryCode.FOOD_RESTAURANT,
+    "펜션": PlaceCategoryCode.LODGING_PENSION,
+    "박물관": PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_MUSEUM,
+    "미술관": PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_ART_MUSEUM,
+    "문예회관": PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_CULTURE_CENTER,
+    "관광지": PlaceCategoryCode.TOURISM,
+    "여행지": PlaceCategoryCode.TOURISM,
+    "명승지": PlaceCategoryCode.TOURISM,
+    "공원": PlaceCategoryCode.TOURISM_NATURE_PARK,
+    "대형레저시설": PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS,
+    "대형체육시설": PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS,
+    "전시/기념관": PlaceCategoryCode.TOURISM_CULTURAL_FACILITY,
+    "영화/연극/공연": PlaceCategoryCode.TOURISM_CULTURAL_FACILITY,
+    "캠핑": PlaceCategoryCode.LODGING_CAMPGROUND,
+    "호텔": PlaceCategoryCode.LODGING_HOTEL,
+    "관광호텔": PlaceCategoryCode.LODGING_HOTEL_TOURIST,
+    "비즈니스호텔": PlaceCategoryCode.LODGING_HOTEL_BUSINESS,
+    "한옥호텔": PlaceCategoryCode.LODGING_HOTEL_HANOK,
+    "캠핑장": PlaceCategoryCode.LODGING_CAMPGROUND,
+    "야영장": PlaceCategoryCode.LODGING_CAMPGROUND,
+    "일반야영장": PlaceCategoryCode.LODGING_CAMPGROUND,
+    "오토캠핑장": PlaceCategoryCode.LODGING_CAMPGROUND_AUTO,
+    "자동차야영장": PlaceCategoryCode.LODGING_CAMPGROUND_AUTO,
+    "카페": PlaceCategoryCode.FOOD_CAFE,
+    "커피전문점": PlaceCategoryCode.FOOD_CAFE_COFFEE,
+    "마트": PlaceCategoryCode.CONVENIENCE_MART,
+    "대형마트": PlaceCategoryCode.CONVENIENCE_MART,
+    "병원": PlaceCategoryCode.MEDICAL_HOSPITAL,
+    "종합병원": PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL,
+    "의원": PlaceCategoryCode.MEDICAL_HOSPITAL_CLINIC,
+    "치과": PlaceCategoryCode.MEDICAL_HOSPITAL_DENTAL,
+    "주차장": PlaceCategoryCode.TRANSPORT_PARKING,
+    "민속마을": PlaceCategoryCode.TOURISM_HERITAGE_HANOK_FOLK_VILLAGE,
+    "전통마을": PlaceCategoryCode.TOURISM_HERITAGE_HANOK_FOLK_VILLAGE,
+    "한옥마을": PlaceCategoryCode.TOURISM_HERITAGE_HANOK_FOLK_VILLAGE,
+}
+_MCST_CATEGORY_ROOTS: Final[Mapping[str, PlaceCategoryCode]] = {
+    "숙박": PlaceCategoryCode.LODGING,
+    "숙박시설": PlaceCategoryCode.LODGING,
+    "음식점": PlaceCategoryCode.FOOD_RESTAURANT,
+    "음식점/유흥시설": PlaceCategoryCode.FOOD,
+    "쇼핑": PlaceCategoryCode.CONVENIENCE,
+    "의료": PlaceCategoryCode.MEDICAL,
+    "의료시설": PlaceCategoryCode.MEDICAL,
+    "교통": PlaceCategoryCode.TRANSPORT,
+    "교통시설": PlaceCategoryCode.TRANSPORT,
+}
+
+
+def _structured_category(row: Mapping[str, Any], spec: McstDatasetSpec) -> str:
+    """물리 업종이 없는 테마 원천을 관광/문화시설로 단정하지 않는다."""
+    if spec.slug not in {
+        "pet_friendly_culture_facilities_csv",
+        "barrier_free_places_csv",
+        "family_infant_culture_facilities_csv",
+        "media_famous_places_csv",
+        "leisure_camping_facilities_csv",
+    }:
+        return spec.category
+    fallback = (
+        spec.category if spec.slug == "leisure_camping_facilities_csv"
+        else PlaceCategoryCode.UNCLASSIFIED.value
+    )
+    labels = [
+        re.sub(r"\s+", "", _row_text(row, (key,)) or "")
+        for key in ("CATEGORY1", "CATEGORY2", "CATEGORY3")
+    ]
+    if not any(labels) and spec.slug == "media_famous_places_csv":
+        # FORMAT은 drama/movie 등 촬영 매체이며 물리 업종이 아니다.
+        labels = [re.sub(r"\s+", "", _row_text(row, ("TYPE",)) or "")]
+    codes = [_MCST_CATEGORY_LABELS[label] for label in labels if label in _MCST_CATEGORY_LABELS]
+    root = _MCST_CATEGORY_ROOTS.get(labels[0])
+    domains = {code.value[:2] for code in codes}
+    if root is not None:
+        domains.add(root.value[:2])
+    if len(domains) > 1:
+        return fallback
+    if codes:
+        # 같은 대분류여도 호텔/야영장처럼 서로 다른 업종 tuple은 확정하지 않는다.
+        for parent, child in zip(codes, codes[1:], strict=False):
+            if not child.value.startswith(parent.value.rstrip("0")):
+                return fallback
+        return codes[-1].value
+    if root is not None and root.value[:2] != spec.category[:2]:
+        return root.value
+    return fallback
+
+
 _MCST_NAME_PRESENCE: Final[ProviderFieldPresence] = ProviderFieldPresence(
     normalizer_revision="mcst-name-v1", supplied_fields=frozenset({"core.name"})
 )
@@ -606,6 +696,7 @@ def _build_bundle(
     raw_data: dict[str, Any],
     fetched_at: datetime,
 ) -> FeatureBundle:
+    category = _structured_category(raw_data, spec)
     natural_key = "::".join([name, raw_address or ""])
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
@@ -629,8 +720,8 @@ def _build_bundle(
         name=name,
         coord=coord,
         address=address,
-        category=spec.category,
-        marker_icon=mapbox_maki_icon_or_none(spec.category) or _DEFAULT_MCST_ICON,
+        category=category,
+        marker_icon=mapbox_maki_icon_or_none(category) or _DEFAULT_MCST_ICON,
         marker_color=MCST_MARKER_COLOR,
         detail=PlaceDetail(
             feature_id=feature_id,
