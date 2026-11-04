@@ -177,6 +177,9 @@ from kortravelmap.infra.feature_operation_repo import (
 from kortravelmap.infra.feature_operation_repo import (
     resolve_feature_operation_memberships as repo_resolve_feature_operation_memberships,
 )
+from kortravelmap.infra.feature_operation_repo import (
+    resolve_frozen_feature_operation_datasets as repo_resolve_frozen_feature_operation_datasets,
+)
 from kortravelmap.infra.feature_repo import (
     EnrichmentLoadResult,
     FeatureLoadResult,
@@ -1163,6 +1166,19 @@ class AsyncKorTravelMapClient:
             return await repo_resolve_feature_operation_memberships(
                 session,
                 operation_key=operation_key,
+            )
+
+    async def resolve_frozen_feature_operation_datasets(
+        self,
+        *,
+        memberships: Sequence[ProviderDatasetOperationMembership],
+        provider: str,
+    ) -> dict[str, ProviderDatasetOperationMembership]:
+        """현재 활성 목록을 재선택하지 않고 frozen ID의 dataset key만 읽는다."""
+        async with self._session_factory() as session, session.begin():
+            await apply_transaction_limits(session)
+            return await repo_resolve_frozen_feature_operation_datasets(
+                session, memberships=memberships, provider=provider,
             )
 
     async def resolve_feature_operation_dataset_membership(

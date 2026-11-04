@@ -604,8 +604,9 @@ async def test_public_wrapper_records_twelve_successes_and_only_one_failure(
     failing = specs[-1]
 
     class Client:
-        async def resolve_feature_operation_dataset_membership(self, **kwargs: Any) -> Any:
-            return by_key[kwargs["dataset_key"]]
+        async def resolve_frozen_feature_operation_datasets(self, **kwargs: Any) -> Any:
+            assert kwargs["memberships"] == memberships
+            return by_key
 
         async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> None:
             attempts.append(kwargs)
@@ -664,3 +665,113 @@ async def test_public_wrapper_records_twelve_successes_and_only_one_failure(
     assert [a["attempt_number"] for a in attempts] == [1, 2]
     assert all(a["error"]["phase"] == failure_phase for a in attempts)
     assert all(loads.count(spec.dataset_key) == 1 for spec in specs[:-1])
+
+
+async def test_narrowed_selection_never_transforms_or_loads_unselected_records(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    chosen = tuple(MCST_FILE_DATASETS.values())[0]
+    context = _context(_attempt_all())
+    loaded: list[str] = []
+    original = mcst_module._load
+
+    async def load(ctx: Any, **kwargs: Any) -> Any:
+        loaded.append(kwargs["dataset_key"])
+        return await original(ctx, **kwargs)
+
+    monkeypatch.setattr(mcst_module, "_load", load)
+    result = await run_feature_place_mcst_culture(
+        context, selected_dataset_keys=frozenset({chosen.dataset_key}),
+    )
+    assert loaded == [chosen.dataset_key]
+    assert len(result.results) == 1
+
+
+@pytest.mark.parametrize("sqlstate", ["40001", "40P01", "55P03", "08006", "23514"])
+async def test_load_db_failure_preserves_typed_retry_policy(
+    monkeypatch: pytest.MonkeyPatch, sqlstate: str,
+) -> None:
+    from sqlalchemy.exc import DBAPIError
+
+    class DatabaseFailure(Exception):
+        pass
+
+    original = DatabaseFailure("SECRET SQL")
+    original.sqlstate = sqlstate
+    failure = DBAPIError("SECRET SQL", {}, original)
+
+    async def load(_ctx: Any, **_kwargs: Any) -> Any:
+        raise failure
+
+    monkeypatch.setattr(mcst_module, "_load", load)
+    slug = tuple(MCST_FILE_DATASETS)[0]
+    with pytest.raises(mcst_module.McstImportFailure) as captured:
+        await run_feature_place_mcst_culture(_context([McstSlugAttempt(slug)]))
+    assert captured.value.allow_retries is (sqlstate != "23514")
+    assert "SECRET" not in str(captured.value)
+
+
+@pytest.mark.parametrize("mode", ["missing", "foreign", "duplicate", "finalize_failure"])
+async def test_wrapper_rejects_invalid_completion_without_failing_finished_members(
+    monkeypatch: pytest.MonkeyPatch, mode: str,
+) -> None:
+    specs = tuple(MCST_FILE_DATASETS.values())[:2]
+    memberships = tuple(
+        ProviderDatasetOperationMembership(i + 1, "dataset_wide", "feature_place_mcst_culture_job")
+        for i in range(2)
+    )
+    mapping = dict(zip((spec.dataset_key for spec in specs), memberships, strict=True))
+    finished: list[Any] = []
+    attempts: list[dict[str, Any]] = []
+
+    class Client:
+        async def resolve_frozen_feature_operation_datasets(self, **_kwargs: Any) -> Any:
+            return mapping
+
+        async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> None:
+            attempts.append(kwargs)
+
+    class Guard:
+        client = Client()
+        dagster_run_id = "invalid-completion"
+
+        async def ensure(self) -> Any:
+            return SimpleNamespace(operation=SimpleNamespace(members=()))
+
+    guard = Guard()
+    guard.memberships = memberships
+
+    async def ensure(_context: Any) -> Any:
+        return guard
+
+    async def finish(_guard: Any, member: Any, **_kwargs: Any) -> None:
+        if mode == "finalize_failure":
+            raise ConnectionError("SECRET connection details")
+        finished.append(member)
+
+    async def run(_context: Any, **kwargs: Any) -> Any:
+        callback = kwargs["on_dataset_completed"]
+        if mode != "missing":
+            loaded = SimpleNamespace(
+                dataset_key="foreign" if mode == "foreign" else specs[0].dataset_key,
+                load=FeatureLoadResult(
+                    curation_input_member_count=0, curation_input_set_hash="0" * 64,
+                ),
+            )
+            await callback(loaded)
+            if mode == "duplicate":
+                await callback(loaded)
+        return SimpleNamespace()
+
+    monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", ensure)
+    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", finish)
+    monkeypatch.setattr(mcst_module, "run_feature_place_mcst_culture", run)
+    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
+    with pytest.raises((RuntimeError, mcst_module.McstImportFailure)):
+        await wrapper(SimpleNamespace(retry_number=0))
+    assert finished == ([memberships[0]] if mode == "duplicate" else [])
+    assert {a["membership"] for a in attempts} == set(memberships) - set(finished)
+    assert "SECRET" not in str(attempts)
+    if mode == "finalize_failure":
+        assert attempts[0]["error"]["phase"] == "finalize"
+        assert attempts[0]["error"]["retryable"] is True

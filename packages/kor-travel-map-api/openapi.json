@@ -21493,6 +21493,11 @@
             ],
             "title": "Operation Key"
           },
+          "payload": {
+            "additionalProperties": true,
+            "title": "Payload",
+            "type": "object"
+          },
           "provider_dataset_id": {
             "anyOf": [
               {

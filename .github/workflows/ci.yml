@@ -94,6 +94,8 @@ jobs:
         # unit/lint·api 단계 뒤라 그 세션은 종전처럼 provider 없이 돈다.
         run: |
           pip install -c docker/constraints-dagster.txt "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@99d8427510b027d7280fd8bc9532828c3c25f4f5"
+          # 실제 MCST 기본 factory와 native 승인형 다운로드를 MockTransport로 검사한다.
+          pip install -c docker/constraints-dagster.txt "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@00a78dfdba5a1a87d87c5238ef1566621989b1ae"
 
       - name: Run kor-travel-map-dagster unit tests
         env:

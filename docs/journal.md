@@ -2071,3 +2071,15 @@ n150 chain t1013e(2026-10-13 09:11Z)에서 `/root/chain17-pv.sh`(운영자 변�
 - MCST 적재 직후 dataset별 causal seal을 완료하고, 재시도에서 done member는 재적재하지 않는다.
 - fetch/load 실패를 dataset별로 모으고 성공 member에는 실패 attempt를 쓰지 않는다.
 - WSL MCST 단위 22건·변경 source mypy 통과. 실제 PG·UI·두 독립 리뷰·최종 CI는 진행 중이다.
+
+
+### 2026-11-04 — #1448 선택 경계·실제 PG/UI 보완
+- 두 독립 예비 적대 리뷰의 범위 밖 적재(P1), 비선택·비활성 필수 resolve, 일시 DB/SDK 네트워크 재시도, SDK 코드명, UI 원인 누락을 수정했다.
+- frozen ID만 표시 key로 연결하고 변환·적재 전에 선택 집합을 적용한다. 완료·중복·외부 callback 거부와 완료 command 실패를 구분한다.
+- MCST root 상세에 하위 작업 이벤트를 시간순 cursor로 합쳐 실패 원인·작업 이동을 제공한다. cursor는 child 포함 여부에도 묶이며 기존 다른 조회는 유지한다.
+- dataset 이벤트에도 기존 payload를 전달하는 additive admin API 필드를 추가했다. 진단 UI는 허용한 code/phase/reason/retryable만 렌더링한다.
+- 실제 PG wrapper 12/13 및 좁힌 manifest·비선택 비활성 회귀 2건, 관련 lifecycle/ops PG 54건, 관련 API 198건, targeted Dagster 112건을 통과했다.
+- 실제 공식 keyless golf CSV를 Map 기본 factory로 1행 제한 조회(14열·필수7열)했다. MockTransport SDK 승인·CAPTCHA·메타·네트워크·ZIP 모호성·HTML 오류를 별도로 검증했다.
+- 실제 WSL PG/API/Next/Chromium에서 관리자 로그인·12/1 요약·원인·하위 작업 응답 후 이동 4흐름 통과. root/child 스크린샷을 직접 검사했다. 원본 API 응답 대체 없음.
+- WSL 폐쇄 포트가 reject 대신 drop되는 경우를 허용하도록 fail-closed 테스트의 psycopg OperationalError 하위 ConnectionTimeout 표기를 보완했다. 제품 연결 정책은 그대로다.
+- 전체 API 1,600건·main unit/lint 3,643건·frontend 418건, frontend type/lint를 통과했다. 이후 최종 head의 전체 CI·두 독립 재리뷰를 진행한다.

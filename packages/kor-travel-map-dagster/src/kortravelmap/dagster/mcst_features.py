@@ -26,6 +26,7 @@ from kortravelmap.providers.mcst import (
     McstSlugFailure,
     file_rows_to_bundles,
 )
+from sqlalchemy.exc import DBAPIError
 
 from dagster import AssetExecutionContext, Failure, asset
 
@@ -41,11 +42,12 @@ from .assets import (
 )
 from .etl import DagsterFeatureLoadResult, _add_output_metadata
 from .feature_operation_tracking import (
+    FeatureOperationExecutionGuard,
     _log_spend_on_failure,
     ensure_tracked_multi_member_asset,
     finish_tracked_feature_membership,
 )
-from .quota_exhaustion import raise_terminal_if_quota_exhausted
+from .quota_exhaustion import quota_exhaustion_cause, raise_terminal_if_quota_exhausted
 from .stall_watchdog import stall_watchdog
 from .upstream_requests import counting_upstream_requests
 
@@ -82,6 +84,22 @@ class McstLoadResult:
             },
         }
 
+
+
+
+def _retryable_load_failure(error: Exception) -> bool:
+    """영구 검증 오류는 닫고, DB의 일시 실패와 연결 장애만 재시도한다."""
+    if isinstance(error, TimeoutError | ConnectionError):
+        return True
+    if not isinstance(error, DBAPIError):
+        return False
+    if error.connection_invalidated:
+        return True
+    original = error.orig
+    sqlstate = getattr(original, "sqlstate", None) or getattr(original, "pgcode", None)
+    return sqlstate in {"40001", "40P01", "55P03", "53300", "57P01", "57P02", "57P03"} or (
+        isinstance(sqlstate, str) and sqlstate.startswith("08")
+    )
 
 
 class McstImportFailure(Failure):
@@ -159,6 +177,7 @@ def group_records_by_slug(
 async def run_feature_place_mcst_culture(
     context: AssetExecutionContext,
     *,
+    selected_dataset_keys: frozenset[str] | None = None,
     completed_dataset_keys: frozenset[str] = frozenset(),
     on_dataset_completed: Callable[[DagsterFeatureLoadResult], Awaitable[None]] | None = None,
 ) -> McstLoadResult:
@@ -188,6 +207,8 @@ async def run_feature_place_mcst_culture(
     results: list[DagsterFeatureLoadResult] = []
     failures: dict[str, dict[str, object]] = {}
     for slug, spec in MCST_FILE_DATASETS.items():
+        if selected_dataset_keys is not None and spec.dataset_key not in selected_dataset_keys:
+            continue
         if spec.dataset_key in completed_dataset_keys:
             continue
         if slug not in attempted_slugs:
@@ -249,12 +270,13 @@ async def run_feature_place_mcst_culture(
                 geo_applied=GeoApplied(reverse=True, geocode=False),
             )
         except Exception as exc:
-            raise_terminal_if_quota_exhausted(exc)
+            if quota_exhaustion_cause(exc) is not None:
+                raise
             failures[spec.dataset_key] = {
                 "code": "MCST_DATASET_LOAD_FAILED",
                 "phase": "load",
                 "reason": type(exc).__name__,
-                "retryable": False,
+                "retryable": _retryable_load_failure(exc),
             }
             continue
         if on_dataset_completed is not None:
@@ -268,6 +290,34 @@ async def run_feature_place_mcst_culture(
     result = McstLoadResult(provider=MCST_PROVIDER_NAME, results=tuple(results))
     _add_output_metadata(context, result.as_metadata())
     return result
+
+
+
+async def _finalize_mcst_dataset(
+    guard: FeatureOperationExecutionGuard,
+    member: ProviderDatasetOperationMembership,
+    loaded: DagsterFeatureLoadResult,
+    *,
+    completed_dataset_keys: tuple[str, ...],
+) -> None:
+    """완료 command의 오류를 해당 dataset에 묶고 원 예외 연쇄는 보존한다."""
+    try:
+        await finish_tracked_feature_membership(
+            guard, member,
+            authoritative_snapshot_complete=True,
+            curation_input_member_count=loaded.load.curation_input_member_count,
+            curation_input_set_hash=loaded.load.curation_input_set_hash,
+        )
+    except Exception as exc:
+        raise McstImportFailure(
+            failures={loaded.dataset_key: {
+                "code": "MCST_DATASET_FINALIZE_FAILED",
+                "phase": "finalize",
+                "reason": type(exc).__name__,
+                "retryable": _retryable_load_failure(exc),
+            }},
+            loaded_dataset_keys=completed_dataset_keys,
+        ) from exc
 
 
 @asset(
@@ -298,17 +348,15 @@ async def feature_place_mcst_culture(
                     for member in snapshot.operation.members
                     if member.status == "done"
                 )
-                assert guard.operation_key is not None
-                for spec in MCST_FILE_DATASETS.values():
-                    member = await guard.client.resolve_feature_operation_dataset_membership(
-                        operation_key=guard.operation_key,
-                        provider=MCST_PROVIDER_NAME,
-                        dataset_key=spec.dataset_key,
-                    )
-                    if member in memberships:
-                        dataset_memberships[spec.dataset_key] = member
+                dataset_memberships = await guard.client.resolve_frozen_feature_operation_datasets(
+                    memberships=memberships, provider=MCST_PROVIDER_NAME,
+                )
                 if set(dataset_memberships.values()) != set(memberships):
                     raise RuntimeError("MCST frozen membership과 dataset 집합이 다름")
+                if set(dataset_memberships) - {
+                    spec.dataset_key for spec in MCST_FILE_DATASETS.values()
+                }:
+                    raise RuntimeError("MCST frozen membership에 미등록 dataset이 있음")
 
             async def _on_dataset_completed(loaded: DagsterFeatureLoadResult) -> None:
                 assert guard is not None
@@ -317,18 +365,19 @@ async def feature_place_mcst_culture(
                     raise RuntimeError("MCST load seal이 frozen membership 밖을 가리킴")
                 if member in completed_memberships:
                     raise RuntimeError("MCST 완료 member가 다시 적재됨")
-                await finish_tracked_feature_membership(
-                    guard,
-                    member,
-                    authoritative_snapshot_complete=True,
-                    curation_input_member_count=loaded.load.curation_input_member_count,
-                    curation_input_set_hash=loaded.load.curation_input_set_hash,
+                await _finalize_mcst_dataset(
+                    guard, member, loaded,
+                    completed_dataset_keys=tuple(
+                        key for key, value in dataset_memberships.items()
+                        if value in completed_memberships
+                    ),
                 )
                 completed_memberships.add(member)
 
             try:
                 result = await run_feature_place_mcst_culture(
                     context,
+                    selected_dataset_keys=frozenset(dataset_memberships) if guard else None,
                     completed_dataset_keys=frozenset(
                         key for key, member in dataset_memberships.items()
                         if member in completed_memberships

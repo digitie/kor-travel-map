@@ -1461,10 +1461,10 @@ async def fetch_datagokr_file_data_records(
 
 
 _MCST_SAFE_ERROR_CODES = frozenset({
-    "FILE_APPROVAL_REDIRECT", "FILE_APPROVAL_SESSION_REQUIRED",
-    "FILE_METADATA_FAILED", "DOWNLOAD_CHECK_FAILED", "CAPTCHA_REQUIRED",
-    "FILE_NOT_FOUND", "CSV_SCHEMA_MISMATCH", "CSV_PARSE_ERROR",
-    "ZIP_AMBIGUOUS", "INVALID_ZIP",
+    "FILE_APPROVAL_REDIRECT", "SESSION_REDIRECT_UNSUPPORTED", "SESSION_POST_UNSUPPORTED",
+    "FILE_METADATA_INVALID", "DOWNLOAD_CHECK_FAILED", "CAPTCHA_REQUIRED",
+    "FILE_NOT_FOUND", "CSV_SCHEMA_MISMATCH", "CSV_INVALID_CONTENT",
+    "AMBIGUOUS_CSV",
 })
 
 
@@ -1541,7 +1541,10 @@ async def fetch_mcst_culture_records(
                         if getattr(exc, "result_code", None) in _MCST_SAFE_ERROR_CODES
                         else type(exc).__name__
                     ),
-                    retryable=_is_transient_upstream_error(exc),
+                    retryable=(
+                        _is_transient_upstream_error(exc)
+                        or isinstance(exc, getattr(mcst, "McstNetworkError", ()))
+                    ),
                 )
     finally:
         await client.aclose()

@@ -177,7 +177,11 @@ def test_definitions_import_fails_closed_without_override_storage() -> None:
     result = _definitions_import(required=True)
 
     assert result.returncode != 0
-    assert "psycopg.OperationalError" in result.stderr
+    # WSL의 폐쇄 포트가 reject 대신 drop되면 같은 OperationalError 하위형으로 끝난다.
+    assert any(
+        name in result.stderr
+        for name in ("psycopg.OperationalError", "psycopg.errors.ConnectionTimeout")
+    )
     assert SENTINEL_PASSWORD not in result.stdout
     assert SENTINEL_PASSWORD not in result.stderr
 

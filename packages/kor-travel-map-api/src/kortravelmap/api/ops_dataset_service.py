@@ -986,6 +986,7 @@ def _event_record(
         level=event.level,
         code=event.code,
         message=event.message,
+        payload=event.payload,
         occurred_at=event.occurred_at,
     )
 
