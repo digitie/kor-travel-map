@@ -821,3 +821,67 @@ async def test_finalize_failure_preserves_other_fetch_failure_and_redacts_dagste
     assert captured.value.failures[finalize_key]["retryable"] is True
     assert captured.value.allow_retries is False
     assert captured.value.__cause__ is None
+
+
+async def test_retryable_finalize_abort_keeps_unreached_datasets_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """일시적 완료 기록 실패로 멈춘 run에서 아직 못 간 dataset도 재시도 대상이다(#1444 리뷰).
+
+    집계 실패는 재시도를 허용하는데, 도달하지 못한 dataset을 영구 ``failed``로 기록하면
+    운영 화면이 재시도될 dataset을 실패로 보여 준다.
+    """
+    specs = tuple(MCST_FILE_DATASETS.values())
+    memberships = tuple(
+        ProviderDatasetOperationMembership(i + 1, "dataset_wide", "feature_place_mcst_culture_job")
+        for i in range(len(specs))
+    )
+    by_key = dict(zip((spec.dataset_key for spec in specs), memberships, strict=True))
+    attempts: list[dict[str, Any]] = []
+
+    class Client:
+        async def resolve_frozen_feature_operation_datasets(self, **_kwargs: Any) -> Any:
+            return by_key
+
+        async def append_dagster_feature_attempt_event(self, **kwargs: Any) -> None:
+            attempts.append(kwargs)
+
+    class Guard:
+        operation_key = "feature_place_mcst_culture_job"
+        dagster_run_id = "mcst-finalize-abort"
+        client = Client()
+
+        async def ensure(self) -> Any:
+            return SimpleNamespace(operation=SimpleNamespace(members=tuple(
+                SimpleNamespace(membership=m, status="running") for m in memberships
+            )))
+
+    guard = Guard()
+    guard.memberships = memberships
+
+    async def ensure(_context: Any) -> Any:
+        return guard
+
+    async def finish(*_args: Any, **_kwargs: Any) -> None:
+        raise ConnectionError("transient")
+
+    async def load(_context: Any, **kwargs: Any) -> Any:
+        return SimpleNamespace(dataset_key=kwargs["dataset_key"], load=FeatureLoadResult(
+            curation_input_member_count=0, curation_input_set_hash="0" * 64,
+        ))
+
+    monkeypatch.setattr(mcst_module, "ensure_tracked_multi_member_asset", ensure)
+    monkeypatch.setattr(mcst_module, "finish_tracked_feature_membership", finish)
+    monkeypatch.setattr(mcst_module, "_load", load)
+    base = _context(_attempt_all())
+    context = SimpleNamespace(
+        resources=base.resources, log=base.log,
+        add_output_metadata=base.add_output_metadata, retry_number=0,
+    )
+    wrapper = cast(Any, feature_place_mcst_culture.op.compute_fn).decorated_fn
+    with pytest.raises(mcst_module.McstImportFailure) as captured:
+        await wrapper(context)
+    assert captured.value.allow_retries is True
+    assert len(attempts) == len(specs)
+    assert attempts[0]["error"]["phase"] == "finalize"
+    assert {a["outcome"] for a in attempts} == {"retryable_failure"}

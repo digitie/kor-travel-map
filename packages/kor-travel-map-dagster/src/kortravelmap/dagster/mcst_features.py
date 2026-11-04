@@ -404,6 +404,11 @@ async def feature_place_mcst_culture(
             except Exception as exc:
                 if guard is not None:
                     failures = exc.failures if isinstance(exc, McstImportFailure) else {}
+                    # 도달하지 못한 dataset은 집계 실패의 재시도 판정을 따른다 — 재시도될
+                    # run에서 영구 실패로 보이면 안 된다(#1444 리뷰).
+                    aborted_retryable = isinstance(exc, McstImportFailure) and bool(
+                        exc.allow_retries
+                    )
                     for key, member in dataset_memberships.items():
                         if member in completed_memberships:
                             continue
@@ -411,7 +416,7 @@ async def feature_place_mcst_culture(
                             "code": "MCST_DATASET_RUN_ABORTED",
                             "phase": "run",
                             "reason": type(exc).__name__,
-                            "retryable": False,
+                            "retryable": aborted_retryable,
                         })
                         await guard.client.append_dagster_feature_attempt_event(
                             dagster_run_id=guard.dagster_run_id,

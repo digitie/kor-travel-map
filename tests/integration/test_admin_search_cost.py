@@ -8,7 +8,7 @@ import pytest
 from sqlalchemy import event
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.infra.admin_feature_repo import list_admin_features
+from kortravelmap.infra.admin_feature_repo import AdminFeatureSearchScope, list_admin_features
 from tests.integration._feature_ids import feature_uuid
 from tests.integration.test_admin_feature_repo import _seed_feature
 
@@ -28,6 +28,20 @@ async def test_korean_feature_scope_does_not_scan_raw_source_candidates(
     for index in range(48):
         await _seed_feature(migrated_session, feature_uuid(f"admin-search-cost-{index}"))
 
+    feature_reads = await _raw_source_loops(migrated_session, "feature")
+    assert feature_reads == [], (
+        "이름·주소·ID 검색은 비일치 후보의 원천 JSON을 읽지 않아야 합니다."
+    )
+    # 대조군: 같은 seed에서 all 범위는 원천 JSON을 실제로 읽는다. 이것이 없으면 위
+    # 단언은 seed가 원천 기록을 만들지 않아도 통과한다(#1444 리뷰).
+    all_reads = await _raw_source_loops(migrated_session, "all")
+    assert all_reads, all_reads
+    assert all(loops > 0 for loops in all_reads), all_reads
+
+
+async def _raw_source_loops(
+    session: AsyncSession, search_scope: AdminFeatureSearchScope,
+) -> list[int]:
     statements: list[tuple[str, Any]] = []
 
     def record(
@@ -40,13 +54,13 @@ async def test_korean_feature_scope_does_not_scan_raw_source_candidates(
     ) -> None:
         statements.append((statement, parameters))
 
-    bind = migrated_session.get_bind()
+    bind = session.get_bind()
     event.listen(bind, "before_cursor_execute", record)
     try:
         page = await list_admin_features(
-            migrated_session,
+            session,
             q="관리자희소검색용비일치명칭",
-            search_scope="feature",
+            search_scope=search_scope,
             page_size=50,
         )
     finally:
@@ -54,21 +68,18 @@ async def test_korean_feature_scope_does_not_scan_raw_source_candidates(
 
     assert page.items == ()
     assert len(statements) == 1
-    connection = await migrated_session.connection()
+    connection = await session.connection()
     statement, parameters = statements[0]
     result = await connection.exec_driver_sql(
         "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + statement,
         parameters,
     )
     plan = result.scalar_one()[0]["Plan"]
-    raw_source_reads = [
-        node.get("Actual Loops", 0)
+    return [
+        int(node.get("Actual Loops", 0))
         for node in _nodes(plan)
         if node.get("Relation Name") == "source_records" and node.get("Actual Loops", 0) > 0
     ]
-    assert raw_source_reads == [], (
-        "이름·주소·ID 검색은 비일치 후보의 원천 JSON을 읽지 않아야 합니다."
-    )
 
 
 async def test_source_scope_preserves_full_search_and_default(

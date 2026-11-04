@@ -1,3 +1,8 @@
+## 2026-11-04 — #1444 묶음 리뷰 보완(Claude Code)
+- #1445~#1448 리뷰 보완: 행사 회차 비교 완화·KHA fallback 종료일 정정 적재·MOIS 업태 해시 범위·MCST 미도달 dataset 재시도 표기·OpenAPI 장부.
+- 배포 전 확인: admin OpenAPI digest 변경 → PinVi 재vendor 먼저. MCST 약 2.9만 건 미분류 전환·행사 85건 격리는 재적재 때 일어난다.
+- 다음: PinVi 재vendor 후 회전. 행사 격리 자동 해제는 T-EVENT-QUARANTINE-RELEASE에서 소유자 결정.
+
 ## 2026-11-04 — #1448 최종 리뷰 보완·검증
 - 후속 finalize 실패와 이미 관측한 fetch/load 실패를 병합하고 원문 예외의 Dagster 직렬화를 차단했다. 두 순서 회귀·직전 구현 음성 대조 통과.
 - 전체 WSL PG 1,624개 통과·기존 조건부 skip14, targeted114 및 계약/표면43 통과. 실제 UI는 dataset 이력까지 5흐름을 최신 source로 재검증했다.

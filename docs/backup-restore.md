@@ -177,8 +177,11 @@ delivery 상태만 본다. evidence root 밖 relation과 RustFS 실물은 다루
 
 ## MOIS 분류 근거 보존 (#1438)
 
-이 변경 뒤 새로 수집하는 MOIS 원본에는 `subtype_name`, `business_type_name`,
-`culture_sports_business_type_name`도 저장한다. 재수집과 hash 사전 계산은 같은
+이 변경 뒤 새로 수집하는 MOIS 원본 중 업태로 분류를 세분화하는 슬러그(일반음식점·
+휴게음식점·관광숙박업·대규모점포)에는 `subtype_name`, `business_type_name`,
+`culture_sports_business_type_name`도 저장한다. 그 밖의 슬러그는 업태가 분류를 바꾸지
+못하므로 저장하지 않는다 — 넣으면 배포 뒤 재개형 적재가 그 슬러그 전체를 바뀐 것으로
+보고 역지오코딩부터 다시 한다(#1444 리뷰). 재수집과 hash 사전 계산은 같은
 분류 함수를 사용한다. 이전에 저장한 원본에는 세 필드가 없을 수 있으므로 원천 재수집이
 필요하며, 완전한 typed record 복원이나 과거 원본의 무손실 replay를 의미하지 않는다.
 건물·의료·위생·시설 세부 필드 손실 회귀는 계속 유지한다.
