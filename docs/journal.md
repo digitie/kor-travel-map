@@ -1,3 +1,9 @@
+## 2026-11-05 — Pinvi #668 명령 조정 계약 착수
+
+- Pinvi#667/PR681(cb3b2f6)을 두 최종 리뷰·CI15성공·WSL 실제UI/RustFS 검증 후 병합했다. 다음은#668이며 최신Map mainad75031에서 시작한다.
+- 단순 부재 조회는 늦은 옛 명령을 막지 못하므로 actor/operation/key 잠금 아래 영구 중단 결과와 기존 terminal/pending을 구분한다. Pinvi는 해제 후 새 승인 attempt 키를 써야 한다.
+- 설계·검증 계획은 docs/execplan/pinvi-668-feature-command-reconciliation.md. draft먼저/자주push, WSL·두 독립 리뷰·CI 후 소유자Map부터 머지한다. 운영 접근·배포·시험은 없고 최종prod는Claude Code 담당이다.
+
 ## 2026-11-04 — #1444 묶음(#1445~#1448) 리뷰 보완
 
 - f88b0759(운영)..dd0238c3를 두 독립 적대적 리뷰(데이터·적재 / API·계약)로 다시 봤다. 마이그레이션 추가 없음(head 436), ST_Transform 없음.
