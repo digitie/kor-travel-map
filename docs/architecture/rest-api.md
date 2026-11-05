@@ -1323,3 +1323,15 @@ codegraph impact 선행). raw `text()` SQL이 물리명을 써서 ORM attr만으
 - 2026-06-09(4차, #316 PinVi 3차 잔여 반영): batch id-keyed map은 `items`가 아니라
   `found`로 분리하고, in-bounds `cluster_unit`은 payload에서 `meta.cluster.cluster_unit`로 이동.
   base URL은 host root만 포함하고 path가 `/v1`를 명시한다고 고정.
+
+## Feature 명령의 결과 조정 (ADR-119)
+
+POST /v1/admin/feature-commands/reconcile은 기존 admin frontend 인증을 사용한다. operation은 admin.feature.patch 또는 admin.feature.delete, 원래 feature_id·typed payload·expected_revision(원래 strong If-Match), UUID idempotency_key, expected_actor와 access_reason(공백 제거 후5~500자)이 필수다. expected_actor는 인증 context와 같아야 하며 다른 actor의 원장을 조회하는 권한이 아니다.
+
+응답 data는 state(abandoned/pending/completed), actor, operation, idempotency_key, feature_id, request_fingerprint, command_id와 receipt다. completed에만 원래 typed receipt가 있다. 현재 Feature가 없거나 revision이 바뀌어도 같은 입력의 확정 결과를 원장에서 회수한다. claim-only는 pending이며 dispatch 해제 증거가 아니다.
+
+abandoned는 같은 actor/op/key의 실행 기록이 없는 것을 잠금 아래 확인하고 claim+terminal409를 커밋한 결과다. 이후 늦은 원래 요청은 DOMAIN_COMMAND_ABANDONED409(또는 지문 충돌)로 닫히며 mutation하지 않는다. 조정 응답 유실 뒤 동일 요청을 재시도해도 같은 command_id의 결과를 돌려준다. 조정 사유는 원래 중단 기록에 원자적으로 남긴다.
+
+PATCH는437 이후 필드 존재를 보존하는 지문v2를 쓴다. 기존v1 PATCH는 생략/명시NULL을 증명할 수 없어 원래 PATCH 재시도와 조정 모두 LEGACY_FINGERPRINT_UNVERIFIABLE409다. 원장을 재표기하거나 자동 해제하지 않는다. DELETE와 다른 operation의v1은 유지한다. 다른 입력은 IDEMPOTENCY_KEY_REUSED409, actor assertion 불일치는403, 검증 불가능한 저장 receipt는 COMMAND_RECEIPT_UNVERIFIABLE503이다. 오류·pending·legacy불확정은 소비자의 해제 증거가 아니다.
+
+새 승인에는 새로운 attempt 키를 쓰되 전송 전에 영속화하고 재시도에는 같은 키/입력/actor를 사용해야 한다. 단순 부재 GET·키 재사용·임의 actor·직접 DB 조회로 이 계약을 대체하지 않는다.

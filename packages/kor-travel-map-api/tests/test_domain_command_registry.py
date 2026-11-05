@@ -45,6 +45,7 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     # 2026-10-01 77 → 76: POST /v1/features/weather/batch가 ADR-105로 사라졌다.
     # 2026-10-16 76 → 79: T-GR-04 geo 릴리스 POST 셋(detect·item skip·replan, ADR-109 결정 8).
     # 2026-10-24 79 → 80: ADR-114 2단계 weather 상태 읽기 batch(POST, 쓰기 아님 — `_query`).
+    # 2026-11-05 #668: 부재를 영구 중단하는 Feature 조정 1개를 추가했다.
     assert len(writes) == 81
 
 

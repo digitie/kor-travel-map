@@ -941,7 +941,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             status_code=exc.record.response_status,
             content=jsonable_encoder(body),
             headers=headers,
-            media_type="application/problem+json" if exc.record.response_status >= 400 else None,
+            media_type=(
+                "application/problem+json"
+                if exc.record.response_status >= 400 and isinstance(body.get("type"), str)
+                else None
+            ),
         )
 
     @application.exception_handler(DomainCommandFingerprintConflict)

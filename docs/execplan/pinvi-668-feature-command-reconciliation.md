@@ -19,7 +19,7 @@ GET으로 기록 없음만 확인한 뒤 dispatch를 지우면 늦게 도착한 
 
 실제 PostgreSQL에서 부재 중단/응답 유실 재시도, terminal 성공 회수, claim-only 보존, 다른 actor/operation/fingerprint 격리, 지연된 옛 명령과 조정의 양방향 경합을 확인한다. API 권한·payload/receipt 계약과 기존 command 동작을 함께 검사한다. OpenAPI·정적 write registry·baseline/pending 문서를 정합화한다.
 
-초안 PR을 먼저 만들고 자주 commit/push한다. WSL 검증·실제 HTTP 경계·두 독립 전문 적대 리뷰·정확 최종 HEAD의 CI 후 Map PR을 일반 merge한다. 이어 Pinvi의 SDK/schema/UI·감사·새 attempt 키·실제 UI를 같은 순서로 검증하고 merge한다. 최종 prod 적용·시험은 Claude Code 담당이며 이 작업에서는 운영 접근/배포/시험을 하지 않는다.
+초안 PR을 먼저 만들고 자주 commit/push한다. WSL 검증·실제 HTTP 경계·두 독립 전문 적대 리뷰·정확 최종 HEAD의 CI 후 Map PR을 일반 merge한다. Map owner merge 전에 Pinvi draft PR683의 SDK/schema/UI·감사·새 attempt 키를 로컬 owner에 연결해 실제 UI까지 검증한다. Map PR1451을 먼저 merge하고 Pinvi는 정확 merged owner OpenAPI를 vendor한 뒤 최종 검증·리뷰·CI를 거쳐 merge한다. 최종 prod 적용·시험은 Claude Code 담당이며 이 작업에서는 운영 접근/배포/시험을 하지 않는다.
 
 ## 직전 완료
 
@@ -32,3 +32,7 @@ Pinvi #667은 PR681로 cb3b2f6에 병합했다. 정확 최종35f84c8에 두 독�
 기존 actor/operation/key 잠금·UNIQUE를 그대로 두고 begin/preflight가 지문 비교보다 먼저 버전을 확인한다. v1 PATCH의 필드 존재 여부를 원장으로 복원할 수 없으므로 LEGACY_FINGERPRINT_UNVERIFIABLE은 해제 증거가 아니며 원장/Pinvi dispatch를 보존한다. 기존 v1을 v2로 재표기하지 않는다. 부재 키는 새 버전 원장으로 영구 중단하여 옛 binary의 늦은 요청도 차단한다.
 
 expected_actor는 권한 선택이 아니라 인증 context 일치 assertion이다. 불일치면 원장 접근 전에 종료하며, 소비자는 저장된 원래 actor와 응답 actor가 일치해야만 해제/확정한다.
+
+## 중간 검증 (2026-11-05)
+
+WSL API 전체 1,601개, root 단위 전체 3,279개, 실제 PostgreSQL/auth/HTTP·원장 33개를 통과했다. 그래프 누락을 지적한 전문 리뷰의 P1을 재현한 뒤 437 packaged migration graph를 재생성하여 18개로 확인했다. 계약·artifact 39개와 문서·registry 등 수정 gate 53개도 통과했다. 실제 Feature runtime 변경·쌍방 UI와 최종 두 리뷰·정확 HEAD CI는 이어서 수행한다.

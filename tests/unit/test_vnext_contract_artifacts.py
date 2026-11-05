@@ -76,7 +76,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-25 PR #1410 — 기존 취소 503 description 두 곳의 DB 정리 실패 문구만 반영.
     # 2026-11-04 #1444 리뷰 — #1445·#1448의 추가 operation·query·필드를 장부에 기록.
     "openapi-diff-v1.json": (
-        "6e11e2e0f3c7a29106833e0588f4cd46b4de1c2bf6853e962b9c5589ba4016f7"
+        "99c5bb945daa363fa8017b81a5c0596d73c1999fffc7cc8d4601107fdd807aa4"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -91,7 +91,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-24 T-STATE-02(ADR-114 2단계) — 같은 receipt 재핀(weather 5 operation 추가).
     # 2026-10-25 PR #1410 — full-admin description SHA 재핀, pending/re-vendor 조건 유지.
     "consumer-rollout-v1.json": (
-        "77956034c1a1e225a3a0985ee344405dd6ac57be3c1a5cae98f6718328158c69"
+        "367d4c6c8cd471326e5b0f9c9dd71038a90e3290659cdcc99e526089cb2afffc"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

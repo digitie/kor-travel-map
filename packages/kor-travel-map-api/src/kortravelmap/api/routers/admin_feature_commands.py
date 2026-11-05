@@ -8,7 +8,7 @@ from typing import Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import AdminProxyContext, require_admin_frontend
@@ -173,7 +173,19 @@ async def reconcile_feature_command(
                 )
                 try:
                     receipt = schema.model_validate(record.response_body)
-                except ValidationError as error:
+                    if (
+                        isinstance(receipt, AdminFeatureFieldOverrideResponse)
+                        and receipt.data.command_id != record.command_id
+                    ):
+                        raise ValueError("stored command identity mismatch")
+                    try:
+                        expected_feature = UUID(command.feature_id)
+                    except ValueError:
+                        pass  # 원래 opaque alias는 현재 feature 해석 없이 원장 지문으로 결박한다.
+                    else:
+                        if UUID(receipt.data.feature_id) != expected_feature:
+                            raise ValueError("stored feature identity mismatch")
+                except ValueError as error:
                     raise HTTPException(
                         status_code=503,
                         detail={
