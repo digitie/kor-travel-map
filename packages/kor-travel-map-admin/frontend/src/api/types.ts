@@ -520,6 +520,23 @@ export interface paths {
         patch: operations["patch_admin_curation_item_v1_admin_curations__collection_id__items__curation_item_id__patch"];
         trace?: never;
     };
+    "/v1/admin/feature-commands/reconcile": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** Reconcile Feature Command Endpoint */
+        post: operations["reconcile_feature_command_endpoint_v1_admin_feature_commands_reconcile_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/admin/feature-reference-reconciliation-subscriptions": {
         parameters: {
             query?: never;
@@ -9136,6 +9153,39 @@ export interface components {
              */
             state: "unchanged";
         };
+        /** FeatureCommandResolution */
+        FeatureCommandResolution: {
+            /** Actor */
+            actor: string;
+            /** Command Id */
+            command_id: number;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Idempotency Key
+             * Format: uuid
+             */
+            idempotency_key: string;
+            /**
+             * Operation
+             * @enum {string}
+             */
+            operation: "admin.feature.patch" | "admin.feature.delete";
+            /** Receipt */
+            receipt?: components["schemas"]["AdminFeatureFieldOverrideResponse"] | components["schemas"]["AdminFeatureStateResponse"] | null;
+            /** Request Fingerprint */
+            request_fingerprint: string;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "abandoned" | "pending" | "completed";
+        };
+        /** FeatureCommandResolutionResponse */
+        FeatureCommandResolutionResponse: {
+            data: components["schemas"]["FeatureCommandResolution"];
+            meta: components["schemas"]["Meta"];
+        };
         /** FeatureCurationGroupResponse */
         FeatureCurationGroupResponse: {
             data: components["schemas"]["FeatureCurationGroupView"];
@@ -9158,6 +9208,28 @@ export interface components {
         FeatureCurationGroupsResponse: {
             data: components["schemas"]["FeatureCurationGroupsData"];
             meta: components["schemas"]["Meta"];
+        };
+        /** FeatureDeleteCommand */
+        FeatureDeleteCommand: {
+            /** Access Reason */
+            access_reason: string;
+            /** Expected Actor */
+            expected_actor: string;
+            /** Expected Revision */
+            expected_revision: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Idempotency Key
+             * Format: uuid
+             */
+            idempotency_key: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            operation: "admin.feature.delete";
+            payload: components["schemas"]["AdminFeatureDeleteRequest"];
         };
         /**
          * FeatureDetailEnvelopeResponse
@@ -9329,6 +9401,28 @@ export interface components {
             source_record_key: string;
             /** Source Role */
             source_role: string;
+        };
+        /** FeaturePatchCommand */
+        FeaturePatchCommand: {
+            /** Access Reason */
+            access_reason: string;
+            /** Expected Actor */
+            expected_actor: string;
+            /** Expected Revision */
+            expected_revision: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Idempotency Key
+             * Format: uuid
+             */
+            idempotency_key: string;
+            /**
+             * @description discriminator enum property added by openapi-typescript
+             * @enum {string}
+             */
+            operation: "admin.feature.patch";
+            payload: components["schemas"]["AdminFeaturePatchRequest"];
         };
         /**
          * FeaturePriceResponse
@@ -17090,6 +17184,48 @@ export interface operations {
             };
             /** @description If-Match 누락 */
             428: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    reconcile_feature_command_endpoint_v1_admin_feature_commands_reconcile_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["FeaturePatchCommand"] | components["schemas"]["FeatureDeleteCommand"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FeatureCommandResolutionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

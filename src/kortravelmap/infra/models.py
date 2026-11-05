@@ -5166,7 +5166,7 @@ class DomainCommandRow(Base):
             name=conv("ck_domain_commands_operation"),
         ),
         CheckConstraint(
-            "fingerprint_version = 1",
+            "fingerprint_version IN (1, 2)",
             name=conv("ck_domain_commands_fingerprint_version"),
         ),
         CheckConstraint(

@@ -46,6 +46,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DomainCommandFingerprintConflict",
+    "DomainCommandFingerprintVersionConflict",
     "DomainCommandHandle",
     "DomainCommandPending",
     "DomainCommandReplay",
@@ -86,6 +87,17 @@ class DomainCommandFingerprintConflict(DomainCommandError):
 
     def __init__(self, claim: DomainCommandClaim) -> None:
         super().__init__("같은 Idempotency-Key를 다른 command payload에 재사용할 수 없습니다.")
+        self.claim = claim
+
+
+class DomainCommandFingerprintVersionConflict(DomainCommandError):
+    """과거 지문은 필드 존재 여부를 증명하지 못하므로 자동 재생/확정하지 않는다."""
+
+    def __init__(self, claim: DomainCommandClaim) -> None:
+        super().__init__(
+            "서로 다른 버전의 명령 기록은 입력의 필드 존재 여부를 증명할 수 없어 "
+            "자동 확정할 수 없습니다."
+        )
         self.claim = claim
 
 
@@ -144,6 +156,7 @@ async def begin_domain_command(
     operation: str,
     idempotency_key: UUID,
     payload: object,
+    fingerprint_version: int = 1,
 ) -> DomainCommandHandle:
     """현재 transaction에서 claim하고 replay/conflict/pending을 fail-close한다.
 
@@ -170,6 +183,8 @@ async def begin_domain_command(
         idempotency_key=normalized_key,
     )
     if claim is not None:
+        if claim.fingerprint_version != fingerprint_version:
+            raise DomainCommandFingerprintVersionConflict(claim)
         if claim.request_fingerprint != request_fingerprint:
             raise DomainCommandFingerprintConflict(claim)
         record = await get_domain_command_record(
@@ -185,6 +200,7 @@ async def begin_domain_command(
         operation=operation,
         idempotency_key=normalized_key,
         request_fingerprint=request_fingerprint,
+        fingerprint_version=fingerprint_version,
     )
     return DomainCommandHandle(
         command_id=claim.command_id,
@@ -202,6 +218,7 @@ async def preflight_domain_command_claim(
     operation: str,
     idempotency_key: UUID,
     payload: object,
+    fingerprint_version: int = 1,
 ) -> None:
     """기존 key의 replay/conflict를 새 semantic preflight보다 먼저 해석한다.
 
@@ -228,6 +245,8 @@ async def preflight_domain_command_claim(
     )
     if claim is None:
         return
+    if claim.fingerprint_version != fingerprint_version:
+        raise DomainCommandFingerprintVersionConflict(claim)
     if claim.request_fingerprint != request_fingerprint:
         raise DomainCommandFingerprintConflict(claim)
     record = await get_domain_command_record(session, command_id=claim.command_id)
@@ -293,6 +312,7 @@ async def _route_payload(
     kwargs: dict[str, object],
     *,
     fingerprint_headers: tuple[str, ...],
+    fingerprint_version: int = 2,
 ) -> dict[str, object]:
     bound = function_signature.bind(*args, **kwargs)
     bound.apply_defaults()
@@ -308,7 +328,7 @@ async def _route_payload(
             await value.seek(0)
             payload[name] = {"sha256": digest.hexdigest()}
             continue
-        payload[name] = jsonable_encoder(value)
+        payload[name] = jsonable_encoder(value, exclude_unset=fingerprint_version == 2)
     if fingerprint_headers:
         request = cast(Request, bound.arguments["request"])
         payload["headers"] = {
@@ -416,6 +436,7 @@ def idempotent_domain_command(
                 args,
                 kwargs,
                 fingerprint_headers=policy.fingerprint_headers,
+                fingerprint_version=policy.fingerprint_version,
             )
             for attempt in range(_SERIALIZATION_ATTEMPTS):
                 command_token = None
@@ -439,6 +460,7 @@ def idempotent_domain_command(
                                 operation=operation,
                                 idempotency_key=idempotency_key,
                                 payload=payload,
+                                fingerprint_version=policy.fingerprint_version,
                             )
                             command_token = _ACTIVE_DOMAIN_COMMAND.set(command)
                             await _rewind_route_uploads(

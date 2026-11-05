@@ -61,6 +61,7 @@ from kortravelmap.api.dagster_http import DagsterHttpClientMiddleware
 from kortravelmap.api.db import configure_prometheus_metrics
 from kortravelmap.api.domain_command_service import (
     DomainCommandFingerprintConflict,
+    DomainCommandFingerprintVersionConflict,
     DomainCommandPending,
     DomainCommandReplay,
     sqlstate_of,
@@ -82,6 +83,7 @@ from kortravelmap.api.routers import (
     admin_curated_router,
     admin_curation_candidates_router,
     admin_curations_router,
+    admin_feature_commands_router,
     admin_feature_reference_reconciliation_subscriptions_router,
     admin_feature_requests_router,
     admin_features_router,
@@ -731,9 +733,7 @@ async def _verify_kor_travel_geo_credentials(core_settings: KorTravelMapSettings
             _logger.warning("kor-travel-geo 자격증명 확인 불가 — 기동은 계속한다: %s", exc)
 
 
-def _assert_no_production_debug_surface(
-    application: FastAPI, settings: ApiSettings
-) -> None:
+def _assert_no_production_debug_surface(application: FastAPI, settings: ApiSettings) -> None:
     """production에서 ``/v1/debug`` 표면이 마운트되면 기동을 거부한다.
 
     ``debug_routes_enabled``는 **flag**를 거부할 뿐 표면을 거부하지 않는다. 그
@@ -760,8 +760,7 @@ def _assert_no_production_debug_surface(
     )
     if mounted:
         raise RoutePolicyError(
-            "production must not serve a /v1/debug surface (ADR-005/ADR-066): "
-            + ", ".join(mounted)
+            "production must not serve a /v1/debug surface (ADR-005/ADR-066): " + ", ".join(mounted)
         )
 
 
@@ -942,6 +941,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             status_code=exc.record.response_status,
             content=jsonable_encoder(body),
             headers=headers,
+            media_type=(
+                "application/problem+json"
+                if exc.record.response_status >= 400 and isinstance(body.get("type"), str)
+                else None
+            ),
         )
 
     @application.exception_handler(DomainCommandFingerprintConflict)
@@ -956,6 +960,23 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             details={
                 "operation": exc.claim.operation,
                 "idempotency_key": exc.claim.idempotency_key,
+            },
+            request_id=_request_id(request),
+        )
+
+    @application.exception_handler(DomainCommandFingerprintVersionConflict)
+    async def domain_command_fingerprint_version_handler(
+        request: Request,
+        exc: DomainCommandFingerprintVersionConflict,
+    ) -> JSONResponse:
+        return _error_response(
+            status_code=409,
+            code="LEGACY_FINGERPRINT_UNVERIFIABLE",
+            message=str(exc),
+            details={
+                "operation": exc.claim.operation,
+                "idempotency_key": exc.claim.idempotency_key,
+                "fingerprint_version": exc.claim.fingerprint_version,
             },
             request_id=_request_id(request),
         )
@@ -1271,6 +1292,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             feature_enrichment_review_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        application.include_router(
+            admin_feature_commands_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

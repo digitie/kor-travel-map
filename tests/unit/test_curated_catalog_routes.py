@@ -166,7 +166,9 @@ def test_retained_source_http_commands_separate_representation_and_cas_etags(
         operation: str,
         idempotency_key: object,
         payload: object,
+        fingerprint_version: int = 1,
     ) -> domain_command_service.DomainCommandHandle:
+        assert fingerprint_version == 1
         del payload
         return domain_command_service.DomainCommandHandle(
             command_id=703,
@@ -279,7 +281,9 @@ def test_retained_theme_http_commands_use_strong_etag_and_typed_repo(
         operation: str,
         idempotency_key: object,
         payload: object,
+        fingerprint_version: int = 1,
     ) -> domain_command_service.DomainCommandHandle:
+        assert fingerprint_version == 1
         del payload
         return domain_command_service.DomainCommandHandle(
             command_id=702,
@@ -382,7 +386,9 @@ def test_retained_rule_http_commands_use_strong_etag_and_typed_repo(
         operation: str,
         idempotency_key: object,
         payload: object,
+        fingerprint_version: int = 1,
     ) -> domain_command_service.DomainCommandHandle:
+        assert fingerprint_version == 1
         del payload
         return domain_command_service.DomainCommandHandle(
             command_id=701,

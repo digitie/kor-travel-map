@@ -1,3 +1,17 @@
+## 2026-11-05 — #668 명령 조정 첫 구현·실패 우선 검증
+
+- draft1451을 먼저 만들고 새 API 부재1실패, 기존PATCH 지문의 생략/명시NULL 충돌1실패를 확인했다.
+- 동일actor/op/key 잠금에서 부재 claim+terminal409를 커밋하고 늦은 원래 요청을 막는다. 처리중 claim은 pending, 검증한 terminal은 completed로 반환한다. expected_actor는 인증 context와 비교만 하며 권한 선택에 쓰지 않는다.
+- PATCH에만presence 보존 지문v2를 적용한다.437은기존v1을수정하지않고1/2를허용한다. 원래PATCH와조정 모두버전검사를먼저해과거v1을자동확정하지않는다. 다른명령v1은유지한다.
+- API관련단위29·실제HTTP/auth/PostgreSQL 핵심1개·mypy247파일을통과했다. 초기라우팅정책미등록과바뀐helper테스트signature2건은보완했다. 아직경합/권한/과거지문/실패확장·OpenAPI·두최종리뷰·전체CI·머지는남아있다.
+- 운영접근/배포/시험은없고최종prod는Claude Code담당이다.
+
+## 2026-11-05 — Pinvi #668 명령 조정 계약 착수
+
+- Pinvi#667/PR681(cb3b2f6)을 두 최종 리뷰·CI15성공·WSL 실제UI/RustFS 검증 후 병합했다. 다음은#668이며 최신Map mainad75031에서 시작한다.
+- 단순 부재 조회는 늦은 옛 명령을 막지 못하므로 actor/operation/key 잠금 아래 영구 중단 결과와 기존 terminal/pending을 구분한다. Pinvi는 해제 후 새 승인 attempt 키를 써야 한다.
+- 설계·검증 계획은 docs/execplan/pinvi-668-feature-command-reconciliation.md. draft먼저/자주push, WSL·두 독립 리뷰·CI 후 소유자Map부터 머지한다. 운영 접근·배포·시험은 없고 최종prod는Claude Code 담당이다.
+
 ## 2026-11-04 — #1444 묶음(#1445~#1448) 리뷰 보완
 
 - f88b0759(운영)..dd0238c3를 두 독립 적대적 리뷰(데이터·적재 / API·계약)로 다시 봤다. 마이그레이션 추가 없음(head 436), ST_Transform 없음.

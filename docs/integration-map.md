@@ -615,3 +615,11 @@ executor transaction 하나로 묶는다(`dagster/feature_update_runner.py:490-5
 job(ADR-109, 구현됨)이 큐 run과 겹치면 첫 chunk가 잠금 대기로 `GEO_HEAVY_POOL`을 쥔 채 run 상한까지
 멎을 수 있다. 릴리스 센서의 Skip 규칙은 ADR-109 결정 5(4)가 정본이다. 반대 방향(전용 job 중 큐 run)은 chunk
 사이에 끼어들 뿐 손상이 없다(둘 다 run-scoped 토큰).
+
+## Pinvi 미확정 Feature 승인 조정 (ADR-119 / Pinvi #668)
+
+Map #1451은 admin Feature PATCH/DELETE 원장에 한정한 POST /v1/admin/feature-commands/reconcile을 추가한다. 원래 actor/operation/key·입력을 같은 canonical 규칙으로 비교하고 부재를 영구 중단한다. Pinvi는 저장 actor를 현재 인증 actor와 대조하고, aborted를 추측하거나 claim-only/인증 오류/계약 오류에서 dispatch를 비우지 않는다.
+
+Pinvi 소비자 PR은 이 owner 계약이 병합된 뒤 admin OpenAPI를 exact vendor하고, 명시적인 사유·확인/감사·typed 오류와 해제 후 새 attempt 키를 연결한다. 새 attempt 키는 전송 전에 저장하며 재시도마다 새로 만들지 않는다. 과거v1 PATCH는 원래 필드 존재 기록이 없어 자동 확정할 수 없다. Map/Pinvi 둘 다 그 불확정을 표시하고 기존 dispatch를 보존한다.
+
+이 변경은 운영 실행·배포·receipt 승격을 뜻하지 않는다. paired receipt는 pending이며 최종 prod 적용/시험은 Claude Code 담당이다.

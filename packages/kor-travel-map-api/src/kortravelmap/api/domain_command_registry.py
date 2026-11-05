@@ -44,9 +44,14 @@ class CommandPolicy:
     success_status: int | None = None
     replay_headers: tuple[str, ...] = ()
     fingerprint_headers: tuple[str, ...] = ()
+    fingerprint_version: int = 1
     transaction_isolation: str | None = None
 
     def __post_init__(self) -> None:
+        if self.fingerprint_version not in {1, 2}:
+            raise ValueError("unsupported command fingerprint version")
+        if self.fingerprint_version != 1 and self.kind is not CommandPolicyKind.DOMAIN_LEDGER:
+            raise ValueError("only domain ledger commands may use versioned fingerprints")
         if self.kind in {
             CommandPolicyKind.DOMAIN_LEDGER,
             CommandPolicyKind.SPECIALIZED_LEDGER,
@@ -100,6 +105,7 @@ def _domain(
     success_status: int = 200,
     replay_headers: tuple[str, ...] = (),
     fingerprint_headers: tuple[str, ...] = (),
+    fingerprint_version: int = 1,
     transaction_isolation: str | None = None,
 ) -> CommandPolicy:
     return CommandPolicy(
@@ -109,6 +115,7 @@ def _domain(
         success_status=success_status,
         replay_headers=replay_headers,
         fingerprint_headers=fingerprint_headers,
+        fingerprint_version=fingerprint_version,
         transaction_isolation=transaction_isolation,
     )
 
@@ -211,11 +218,16 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
     ),
+    ("POST", "/v1/admin/feature-commands/reconcile"): _specialized(
+        "admin.feature.command.reconcile-v1",
+        "원래 actor/operation/key 잠금과 원장으로 terminal/pending/부재 중단을 영속 판정한다.",
+    ),
     ("PATCH", "/v1/admin/features/{feature_id}"): _domain(
         "admin.feature.patch",
         _MUTATION_RESULT,
         replay_headers=("ETag",),
         fingerprint_headers=("If-Match",),
+        fingerprint_version=2,
     ),
     ("DELETE", "/v1/admin/features/{feature_id}"): _domain(
         "admin.feature.delete",

@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "43df297363745e3c618b0c757caa2e61b3218a5ae8cde4939c9c8938420d97c6"
+      "sha256": "0027b8e8a6c1c88250ae562bb4ac04fa1b10fd17e278177a4089871dda87a072"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -17,6 +17,11 @@
     }
   },
   "revisions": [
+    {
+      "date": "2026-11-05",
+      "task": "Pinvi #668 / Map #1451 / ADR-119",
+      "change": "관리자 Feature 명령 조정 POST와 typed 요청/결과를 추가해 admin baseline을 재고정한다. 같은 actor/op/key 원장으로 terminal/pending/부재 영구 중단을 구분하고 PATCH만 presence 보존 지문v2를 사용한다. 기존v1 PATCH는 자동 확정하지 않는다. user/service bytes와 목표 diff 항목/count는 불변이며 Pinvi admin 재vendor·소비자 검증 전 paired receipt는 pending을 유지한다."
+    },
     {
       "date": "2026-11-04",
       "task": "PR #1445/#1448 PinVi #643 admin read",
