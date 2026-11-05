@@ -40,3 +40,9 @@ WSL API 전체 1,601개, root 단위 전체 3,279개, 실제 PostgreSQL/auth/HTT
 ## 실제 runtime·UI 증거
 
 정본 runtime 역할의 실제 Feature PATCH/DELETE 4개가 통과했다. Map86034cb·Pinvi d54b78f를 실제 HTTP·로그인·Chromium으로 연결해 UI9개를 통과했고 owner DB에서 수정2·폐쇄1·보존4·봉인2를 별도로 대조했다. 제품 응답 mock은 없고 소유 HTTP proxy가 전송 전/커밋 후 유실만 주입했다. 세부 SHA·로그 hash·한계는 [검증 증거](../reviews/feature-command-reconciliation-wsl-live.json)에 기록했다. consumer 후속 확인창 snapshot 수정의 UI 재검증은 Pinvi 최종 증거로 남긴다.
+
+## 전체 CI의 head 오라클 보완
+
+정확 f5a7215에서 Python3.11/3.12/3.13·API1601·Dagster937 및 프론트/린트/OpenAPI/Docker는 통과했다. 전체 PostGIS는1650pass14skip1fail이며 실패는 현행 head 오라클 미갱신 한 건이다. 봉인 baseline은 수정하지 않고 실제 fresh DB의 정본 generator로 alembic/head-schema.sql 두 줄(head437·지문1/2 허용)만 갱신했다. 재생성 모드의 skip1은 검증 통과로 세지 않았으며 이후 모드 없이 metadata 전체4pass, 오라클을 소비하는 전체 단위/정적3658pass5skip을 확인했다.
+
+제품 API는 f5a7215 이후 같고 최신 쌍방 실제UI10(Map f5a7215/Pinvi6aad6ad, 봉인 응답 유실 포함)을 확인했다. 최종 owner candidate의 계약으로 Pinvi 검증을 병행 준비한다. owner를 먼저 두 재리뷰·최종 전체CI 뒤 병합하고, Pinvi 병합 전에는 실제 merge의 admin OpenAPI와 source/vendored 바이트·제품 지문 일치를 확인한다. 최종 판정과 merge 증거는 PR 댓글에 기록하여 문서만 바뀐 commit의 불필요한 재핀을 피한다.

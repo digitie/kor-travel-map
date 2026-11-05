@@ -2,7 +2,7 @@
   "issue": "digitie/pinvi#668",
   "owner_pr": 1451,
   "consumer_pr": "digitie/pinvi#683",
-  "recorded_at": "2026-11-05T00:22:45.429207+00:00",
+  "recorded_at": "2026-11-05T01:12:09.285836+00:00",
   "scope": "WSL 소유 fixture만 사용; prod 접근/배포/시험 없음",
   "source_head": "86034cbbfeeb664de8609c37c925b18a0c008e0b",
   "source_sha256": {
@@ -82,11 +82,25 @@
       "passed": true,
       "log": "668-map-web-types.log",
       "log_sha256": "84cc83409442e82e5129ac075d103c4d1278e35037609e7fcad62605791a63bd"
+    },
+    {
+      "name": "head 스키마 정본 재생성 뒤 빈 DB 업그레이드·metadata·오라클 전체",
+      "passed": 4,
+      "log": "668-map-head-schema-positive.log",
+      "log_sha256": "01e8d9f136f372a57340ae6e86cd088290370075fca43ed8c9fc3acd7bcd7acd"
+    },
+    {
+      "name": "갱신된 오라클을 소비하는 전체 단위·정적 검사",
+      "passed": 3658,
+      "skipped": 5,
+      "log": "668-map-oracle-derived-gates.log",
+      "log_sha256": "2455050084c5fc51e462c7fab5bd10cbf51b634c5d0ce11acfea686f572bbdcf"
     }
   ],
   "paired_ui": {
     "checks": [
       "실제 관리자 로그인·역할 인증",
+      "봉인 commit 뒤 확인 응답도 유실→dispatch 보존·재확인",
       "전송 전 유실→미실행 영구 봉인·새 키1회·짧은 사유/확인 포커스",
       "새 시도 키로 실제 Map 수정 승인",
       "실제 PATCH 커밋 뒤 응답 유실→typed receipt 회수·반영 완료",
@@ -98,9 +112,9 @@
     ],
     "real_ui": true,
     "map_business_response_mocked": false,
-    "map_head": "86034cbbfeeb664de8609c37c925b18a0c008e0b",
-    "pinvi_head": "d54b78f79d9ec7a9dfd51796c172bbb66dc20e66",
-    "fault_event_count": 16,
+    "map_head": "f5a7215317bf3f7a104683e7a2a4d8a5bbcb3fb5",
+    "pinvi_head": "6aad6ad15f445e8cabf73c4e5abc50d38d1818b5",
+    "fault_event_count": 17,
     "console_errors": []
   },
   "owner_physical_state": {
@@ -156,12 +170,44 @@
     "전문 리뷰의 437 packaged graph 누락 P1을 실패로 확인 후 generator로 수정",
     "root 전체 최초6실패: graph2/curated test signature3/문서 크기1; 수정 후3279pass",
     "CI OpenAPI 생성 TS 미갱신 실패; 정본 generator 실행 후 drift/전체 타입pass",
-    "쌍방 fixture proxy의 로컬 Request annotation으로 422 발생; fixture만 수정하여 실제UI9pass"
+    "쌍방 fixture proxy의 로컬 Request annotation으로 422 발생; fixture만 수정하여 실제UI9pass",
+    "최종 전체 CI에서 head 오라클 미갱신1실패(통합1650pass14skip); 실제 generator로 두 줄만 재생성 후 WSL metadata4 및 전체 단위/정적3658pass5skip"
   ],
   "limits": [
     "과거 v1 PATCH의 필드 존재 정보는 복원할 수 없어 LEGACY_FINGERPRINT_UNVERIFIABLE로 보존",
     "원래 actor가 없는 Pinvi dispatch는 추측해 해제하지 않음",
     "실제 브라우저 제품 응답은 mock하지 않았으며 owned HTTP proxy가 전송 전/커밋 후 응답 유실만 주입",
-    "최종 두 전문 리뷰·최종 HEAD CI는 PR 검토 증거에 별도 기록"
-  ]
+    "최종 두 전문 소스 재리뷰·정확 최종 HEAD 전체 CI·owner merge와 consumer의 병합본 바이트 대조는 PR에 별도로 기록한다."
+  ],
+  "source_scope": "제품 소스는 f5a7215와 동일하다. 후속 수정은 생성된 head 스키마 오라클과 이 검증 문서뿐이다.",
+  "artifact_sha256": {
+    "alembic/head-schema.sql": "3e2cc740ba733b4287f638fadad3a118914cf4bd1df993d57f5dee131885fb47"
+  },
+  "prior_full_ci": {
+    "head": "f5a7215317bf3f7a104683e7a2a4d8a5bbcb3fb5",
+    "run_id": 41940888840,
+    "python_matrix": [
+      "3.11 SUCCESS",
+      "3.12 SUCCESS",
+      "3.13 SUCCESS"
+    ],
+    "python313": {
+      "unit_and_lint_passed": 3657,
+      "unit_and_lint_skipped": 6,
+      "api_passed": 1601,
+      "api_coverage_percent": 77.66,
+      "dagster_passed": 937,
+      "dagster_skipped": 4,
+      "dagster_coverage_percent": 86.4
+    },
+    "postgis": {
+      "passed": 1650,
+      "skipped": 14,
+      "failed": 1,
+      "coverage_percent": 87.68,
+      "failed_case": "test_head_schema_artifact_matches_head"
+    },
+    "repair": "정본 generator의 실제 fresh DB dump로 head-schema.sql 두 줄만 갱신했다. WSL metadata4·전체 단위/정적3658pass5skip.",
+    "full_final_ci": "새 최종 HEAD 전체 CI는 재실행 후 PR에 별도로 확인·기록한다."
+  }
 }

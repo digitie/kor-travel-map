@@ -453,5 +453,7 @@
 ## 명령 조정 계약 변경의 생성물 누락 (#668)
 
 - 증상: 로컬 API 테스트 통과 후 CI frontend 생성 타입 drift 실패, 또는 migration head가 packaged graph에 없어 runtime readiness 실패.
-- 원인: 새 migration/OpenAPI만 갱신하고 정본 파생 graph·admin TS를 빠뜨렸다.
-- 회피·복구: application migration graph generator와 admin gen:types를 함께 실행하고 graph/contract gate·gen:types:check·전체 프론트 타입을 확인한다. 이 작업에서 graph negative1→18pass, 생성 TS drift 실패→검사 통과로 확인했다.
+- 원인: 새 migration/OpenAPI만 갱신하고 정본 파생 graph·admin TS·현행 head 오라클을 빠뜨렸다.
+- 회피·복구: application migration graph generator와 admin gen:types를 함께 실행하고 graph/contract gate·gen:types:check·전체 프론트 타입을 확인한다. migration 후 KTM_WRITE_HEAD_SCHEMA=1로 head 오라클을 실제 DB에서 다시 뽑고, flag 없이 metadata 전체·단위/정적 검사를 확인한다. 봉인 baseline은 수정하지 않는다. 이 작업에서 graph negative1→18pass, 생성 TS drift 실패→검사 통과로 확인했다.
+
+- #668 후속 실제 실패: 전체 PostGIS1650pass14skip1fail 중 head 오라클만 drift. generator 두 줄 수정 뒤 WSL metadata4·전체 단위/정적3658pass5skip을 확인했다.
