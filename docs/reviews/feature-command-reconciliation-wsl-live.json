@@ -1,0 +1,167 @@
+{
+  "issue": "digitie/pinvi#668",
+  "owner_pr": 1451,
+  "consumer_pr": "digitie/pinvi#683",
+  "recorded_at": "2026-11-05T00:22:45.429207+00:00",
+  "scope": "WSL 소유 fixture만 사용; prod 접근/배포/시험 없음",
+  "source_head": "86034cbbfeeb664de8609c37c925b18a0c008e0b",
+  "source_sha256": {
+    "alembic/versions/437_feature_command_fingerprints.py": "f25ebe2fcd17502b6fbf0a800776fa890f087f0e0c2cfd7638301abf8ded8c4b",
+    "packages/kor-travel-map-admin/frontend/src/api/types.ts": "7ba7c93574f61feabe10b28e14eee5135cac90fe8f2d71d9078634127dcc92d0",
+    "packages/kor-travel-map-api/openapi.json": "0027b8e8a6c1c88250ae562bb4ac04fa1b10fd17e278177a4089871dda87a072",
+    "packages/kor-travel-map-api/src/kortravelmap/api/app.py": "fd75bef11f672d6eaf3127fdabc67b490898a26023107841f0b51e1df32248ff",
+    "packages/kor-travel-map-api/src/kortravelmap/api/domain_command_registry.py": "78fe1fe5d5702311e8c29c237fccd6abbb4cb0b4496d28dbbe62502205615b04",
+    "packages/kor-travel-map-api/src/kortravelmap/api/domain_command_service.py": "02d9e5afba9ac87ca78a0793662392448117549bcb519002569b6effad5512c0",
+    "packages/kor-travel-map-api/src/kortravelmap/api/route_policy.py": "f3da69bac2336fd773cddcffe61c91422c140766f6876811e09047a681b2c9eb",
+    "packages/kor-travel-map-api/src/kortravelmap/api/routers/__init__.py": "f045510f041996ae41650f7bad5e90fedf0174a51908d6c52599c1a9d5f2794f",
+    "packages/kor-travel-map-api/src/kortravelmap/api/routers/admin_feature_commands.py": "037dd744f75d2a3fe8c19018882e193e22fcd69c6b2b61abd1ed2588e6c534b6",
+    "packages/kor-travel-map-api/tests/test_domain_command_registry.py": "6e1774ff6714fa268e1d6d561c16d3a2967f07192df138f8a509b0ac65dccf17",
+    "packages/kor-travel-map-api/tests/test_domain_command_service.py": "7edc62fb246e7d7a806c461d34fff89f0838ed701e571e0c2717a02f348dd677",
+    "packages/kor-travel-map-api/tests/test_feature_command_reconciliation.py": "2369ef68fcdd3ffdcf73746115402bad8872f4cf76e193eac4cae3f61bff035d",
+    "src/kortravelmap/_application_migration_graph.json": "c0fee35c941e2d11964a5ae03793ea9c1b1fb9f14d4aa5c328c445a7317d8352",
+    "src/kortravelmap/infra/domain_command_repo.py": "cd414e7da63d49a0fafcd2bf0f4b5ca047269482c8ee956dfa2e2776bca4e774",
+    "src/kortravelmap/infra/models.py": "8e495f3d52916159fffc168e3555f182d38124954d852b7c47fedbf9f98e64b6",
+    "tests/integration/test_feature_command_reconciliation.py": "d436f2767e304126267277a6aeef958f9c2a81cf1ceedca667fcb5ecfc9ade32",
+    "tests/integration/test_feature_command_reconciliation_runtime.py": "4358c55fe3c12eef77a7962cd9b046657128c5fb6dd5dfccb8ffa7425258708a",
+    "tests/unit/test_curated_catalog_routes.py": "0f6ed7b8e039b80c1bf29b2a224d45f4150dba2c54c48f2da6f75b277f9a3285",
+    "tests/unit/test_migration_forward_only.py": "52ac7cffb53fc569c15aad041b2b4994b127e2a1d102bddb4d0fe957de11eaee",
+    "tests/unit/test_vnext_contract_artifacts.py": "9848b1e5eb3df26bd8af5509e28d22c730e8da283ce766f6fcdb77a63a9239d8"
+  },
+  "checks": [
+    {
+      "name": "root 전체 단위",
+      "passed": 3279,
+      "log": "668-map-unit-all-repaired.log",
+      "log_sha256": "488bfb3e6f7b4b92c9fac2e705fb302e5fad853087098a096711928834bdebbb"
+    },
+    {
+      "name": "API 전체",
+      "passed": 1601,
+      "log": "668-map-api-all.log",
+      "scope": "24d520c checkpoint 제품 코드; 이후 owner 제품 코드 동일",
+      "log_sha256": "25751cfd4c4763154f2b6223bb613fd0f8777700aaaf9fed84804d56e6c626c9"
+    },
+    {
+      "name": "실제 PostgreSQL/auth/HTTP 및 원장·양방향 경합",
+      "passed": 33,
+      "log": "668-map-expanded-ledger-api.log",
+      "log_sha256": "2c16df1d8005afb3770d03ee01c880e940b5cf8c8ed030519fa6d56e949c6181"
+    },
+    {
+      "name": "정본 runtime 실제 PATCH/DELETE commit 회수·봉인·지연 재생",
+      "passed": 4,
+      "log": "668-map-real-runtime.log",
+      "log_sha256": "f3674b98d63bbb67dbc1e37e87d7b8c702e722525717b1e43f9f9d1a51994733"
+    },
+    {
+      "name": "계약/forward migration/write registry/artifact",
+      "passed": 39,
+      "log": "668-map-contracts.log",
+      "log_sha256": "92e23fcd01f3f18cbdd9d68d3bce7801cb06cfb98124aa026253d6a9dec39d6b"
+    },
+    {
+      "name": "packaged graph 보완",
+      "passed": 18,
+      "log": "668-map-graph-positive.log",
+      "log_sha256": "5a64c522e11f7def4e835c5e2d62cec04dbe7854d85418b19a2fd281765506ea"
+    },
+    {
+      "name": "문서 archive·registry 등 gate",
+      "passed": 53,
+      "log": "668-map-gate-repairs.log",
+      "log_sha256": "e85ec11f8944442f9b41d96a9026515b6e291dabd269ac6a272786edc166dce3"
+    },
+    {
+      "name": "mypy",
+      "sources": 247,
+      "log": "668-map-mypy.log",
+      "log_sha256": "ec21cafb79de86d2a0a28d4646d59acfcbb4bc782bc0c864ef5f26c34cbe1a40"
+    },
+    {
+      "name": "OpenAPI 생성 TS drift 및 전체 프론트 타입",
+      "passed": true,
+      "log": "668-map-web-types.log",
+      "log_sha256": "84cc83409442e82e5129ac075d103c4d1278e35037609e7fcad62605791a63bd"
+    }
+  ],
+  "paired_ui": {
+    "checks": [
+      "실제 관리자 로그인·역할 인증",
+      "전송 전 유실→미실행 영구 봉인·새 키1회·짧은 사유/확인 포커스",
+      "새 시도 키로 실제 Map 수정 승인",
+      "실제 PATCH 커밋 뒤 응답 유실→typed receipt 회수·반영 완료",
+      "실제 DELETE 커밋 뒤 응답 유실→폐쇄 receipt 회수",
+      "claim-only 처리 중은 입력/거절 잠금 보존",
+      "원래 actor 없는 과거 명령은 확인/해제 차단",
+      "모호한 v1 PATCH는 안전한 오류·잠금 유지·390px 가로넘침 없음",
+      "미실행 봉인 후 안전한 거절"
+    ],
+    "real_ui": true,
+    "map_business_response_mocked": false,
+    "map_head": "86034cbbfeeb664de8609c37c925b18a0c008e0b",
+    "pinvi_head": "d54b78f79d9ec7a9dfd51796c172bbb66dc20e66",
+    "fault_event_count": 16,
+    "console_errors": []
+  },
+  "owner_physical_state": {
+    "feature_states": [
+      {
+        "label": "미실행 뒤 새 승인",
+        "name": "새 검토 승인668",
+        "lifecycle_state": "active",
+        "revision": 3
+      },
+      {
+        "label": "완료 응답 유실",
+        "name": "유실된 완료668",
+        "lifecycle_state": "active",
+        "revision": 3
+      },
+      {
+        "label": "폐쇄 완료 응답 유실",
+        "name": "base",
+        "lifecycle_state": "retired",
+        "revision": 3
+      },
+      {
+        "label": "처리 중 원장",
+        "name": "base",
+        "lifecycle_state": "active",
+        "revision": 2
+      },
+      {
+        "label": "실행 계정 없는 과거 명령",
+        "name": "base",
+        "lifecycle_state": "active",
+        "revision": 2
+      },
+      {
+        "label": "과거 지문 명령",
+        "name": "base",
+        "lifecycle_state": "active",
+        "revision": 2
+      },
+      {
+        "label": "미실행 뒤 거절",
+        "name": "base",
+        "lifecycle_state": "active",
+        "revision": 2
+      }
+    ],
+    "sealed_keys": 2
+  },
+  "negative_and_repairs": [
+    "최초 route 404 실패를 실제 HTTP로 확인 후 구현",
+    "v1 PATCH의 생략/명시 NULL 지문 충돌을 단위 실패로 확인 후 PATCH만 v2",
+    "전문 리뷰의 437 packaged graph 누락 P1을 실패로 확인 후 generator로 수정",
+    "root 전체 최초6실패: graph2/curated test signature3/문서 크기1; 수정 후3279pass",
+    "CI OpenAPI 생성 TS 미갱신 실패; 정본 generator 실행 후 drift/전체 타입pass",
+    "쌍방 fixture proxy의 로컬 Request annotation으로 422 발생; fixture만 수정하여 실제UI9pass"
+  ],
+  "limits": [
+    "과거 v1 PATCH의 필드 존재 정보는 복원할 수 없어 LEGACY_FINGERPRINT_UNVERIFIABLE로 보존",
+    "원래 actor가 없는 Pinvi dispatch는 추측해 해제하지 않음",
+    "실제 브라우저 제품 응답은 mock하지 않았으며 owned HTTP proxy가 전송 전/커밋 후 응답 유실만 주입",
+    "최종 두 전문 리뷰·최종 HEAD CI는 PR 검토 증거에 별도 기록"
+  ]
+}

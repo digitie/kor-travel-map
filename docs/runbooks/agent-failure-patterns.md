@@ -449,3 +449,9 @@
     trusted proxy CIDR, UI 로그인 `200 + Set-Cookie`를 먼저 검증한다.
   - 오결선이면 write를 진행하지 않고 잘못 뜬 UI/API와 브라우저 artifact를 폐기한 뒤 해당
     컨테이너 설정 단계부터 재개한다. 로그·env·cookie의 실제 값은 출력하거나 보존하지 않는다.
+
+## 명령 조정 계약 변경의 생성물 누락 (#668)
+
+- 증상: 로컬 API 테스트 통과 후 CI frontend 생성 타입 drift 실패, 또는 migration head가 packaged graph에 없어 runtime readiness 실패.
+- 원인: 새 migration/OpenAPI만 갱신하고 정본 파생 graph·admin TS를 빠뜨렸다.
+- 회피·복구: application migration graph generator와 admin gen:types를 함께 실행하고 graph/contract gate·gen:types:check·전체 프론트 타입을 확인한다. 이 작업에서 graph negative1→18pass, 생성 TS drift 실패→검사 통과로 확인했다.

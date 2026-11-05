@@ -36,3 +36,7 @@ expected_actor는 권한 선택이 아니라 인증 context 일치 assertion이�
 ## 중간 검증 (2026-11-05)
 
 WSL API 전체 1,601개, root 단위 전체 3,279개, 실제 PostgreSQL/auth/HTTP·원장 33개를 통과했다. 그래프 누락을 지적한 전문 리뷰의 P1을 재현한 뒤 437 packaged migration graph를 재생성하여 18개로 확인했다. 계약·artifact 39개와 문서·registry 등 수정 gate 53개도 통과했다. 실제 Feature runtime 변경·쌍방 UI와 최종 두 리뷰·정확 HEAD CI는 이어서 수행한다.
+
+## 실제 runtime·UI 증거
+
+정본 runtime 역할의 실제 Feature PATCH/DELETE 4개가 통과했다. Map86034cb·Pinvi d54b78f를 실제 HTTP·로그인·Chromium으로 연결해 UI9개를 통과했고 owner DB에서 수정2·폐쇄1·보존4·봉인2를 별도로 대조했다. 제품 응답 mock은 없고 소유 HTTP proxy가 전송 전/커밋 후 유실만 주입했다. 세부 SHA·로그 hash·한계는 [검증 증거](../reviews/feature-command-reconciliation-wsl-live.json)에 기록했다. consumer 후속 확인창 snapshot 수정의 UI 재검증은 Pinvi 최종 증거로 남긴다.
