@@ -9,7 +9,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr
 
 from kortravelmap.api.response import Meta
 
@@ -119,6 +119,8 @@ class DagsterSchedule(BaseModel):
     can_run_now: bool
     disabled_reason: str | None
     recent_ticks: list[DagsterInstigationTick] = Field(default_factory=list)
+    _execution_scopes_tag: str | None = PrivateAttr(default=None)
+    """schedule 정의의 실행 manifest tag 원문. 응답 계약에는 싣지 않는다(내부 launch 입력)."""
 
 
 class DagsterSensor(BaseModel):

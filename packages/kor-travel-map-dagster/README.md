@@ -175,6 +175,7 @@ asset step과 큐 run(`execute_feature_update_request`, scope 여러 개)이 `up
 | `feature_place_mois_licenses_monthly_schedule` | `feature_place_mois_licenses_job` | `35 4 2 * *` |
 | `feature_place_knps_points_monthly_schedule` | `feature_place_knps_points_job` | `45 3 3 * *` |
 | `feature_geometry_knps_records_monthly_schedule` | `feature_geometry_knps_records_job` | `15 4 3 * *` |
+| `feature_{place_knps_points,geometry_knps_records}_<dataset>_monthly_schedule` | 같은 KNPS job | 기본 cron + 2분 간격 (#1450) |
 | `feature_place_kor_travel_concierge_youtube_monthly_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 3 * *` |
 | `feature_route_krforest_mountain_trails_monthly_schedule` | `feature_route_krforest_mountain_trails_job` | `0 2 1 * *` |
 | `feature_route_krforest_dulle_trails_monthly_schedule` | `feature_route_krforest_dulle_trails_job` | `15 2 1 * *` |

@@ -1,3 +1,8 @@
+## 2026-11-06 — #1450 KNPS dataset별 schedule
+
+- KNPS operation에 결박된 dataset마다 월간 schedule(registry 유도, 2분 간격)과 admin "지금 실행"의 dataset 결박을 넣었다. 새 schedule은 STOPPED로 생기므로 배포 후 운영에서 켠다.
+- 다음: T-KNPS-DATA-GAPS 소유자 결정.
+
 ## 2026-11-05 — #668 패키지 head·검증 fixture와 문서 크기 보완
 
 - 437 누락의 실제 graph 회귀1실패를 확인하고 정본 생성기로 패키지 graph를 갱신했다. head 검사는 유지하며 관련18개가 통과했다.

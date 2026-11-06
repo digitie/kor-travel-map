@@ -7,6 +7,7 @@ from kortravelmap.dagster.schedules import (
     FEATURE_LOAD_JOBS,
     FEATURE_LOAD_SCHEDULE_SPECS,
     FEATURE_LOAD_SCHEDULES,
+    KNPS_DATASET_SCHEDULE_SPECS,
 )
 
 
@@ -15,13 +16,22 @@ def test_every_feature_definition_uses_its_job_name_as_operation_key() -> None:
     # (`DISABLED_FEATURE_LOAD_SCHEDULES`). **job은 남는다** — 끄는 것은 시계이지
     # 능력이 아니므로 job 쪽 단언은 spec 전량을 그대로 본다.
     assert len(FEATURE_LOAD_SCHEDULE_SPECS) == len(FEATURE_LOAD_JOBS)
+    # KNPS dataset별 schedule(#1450)은 기본 spec의 job을 나눠 쓴다 — job은 늘지 않는다.
     scheduled = [
+        spec
+        for spec in (*FEATURE_LOAD_SCHEDULE_SPECS, *KNPS_DATASET_SCHEDULE_SPECS)
+        if spec.schedule_name not in DISABLED_FEATURE_LOAD_SCHEDULES
+    ]
+    assert len(scheduled) == len(FEATURE_LOAD_SCHEDULES)
+    assert {spec.job_name for spec in KNPS_DATASET_SCHEDULE_SPECS} <= {
+        spec.job_name for spec in FEATURE_LOAD_SCHEDULE_SPECS
+    }
+    enabled_base = [
         spec
         for spec in FEATURE_LOAD_SCHEDULE_SPECS
         if spec.schedule_name not in DISABLED_FEATURE_LOAD_SCHEDULES
     ]
-    assert len(scheduled) == len(FEATURE_LOAD_SCHEDULES)
-    assert len(scheduled) < len(FEATURE_LOAD_SCHEDULE_SPECS), (
+    assert len(enabled_base) < len(FEATURE_LOAD_SCHEDULE_SPECS), (
         "끈 목록이 비었다 — 이 분기가 공회전한다."
     )
     assert len({spec.job_name for spec in FEATURE_LOAD_SCHEDULE_SPECS}) == len(

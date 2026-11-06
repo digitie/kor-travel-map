@@ -12,6 +12,10 @@ from typing import Final, Literal, Protocol, cast
 from uuid import UUID
 
 import httpx
+from kortravelmap.core.feature_operation import (
+    DATASET_CONFIGURED_OPERATION_RESOURCES,
+    EXECUTION_SCOPES_TAG,
+)
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -126,6 +130,7 @@ query KorTravelMapDagsterSchedules($repositorySelector: RepositorySelector!) {
         name
         description
         pipelineName
+        tags { key value }
         mode
         cronSchedule
         executionTimezone
@@ -256,16 +261,47 @@ _MIN_CRON_MINUTE_STEP: Final[int] = 10
 
 def _admin_feature_operation_launch(
     job_name: str,
+    execution_scopes_tag: str | None = None,
 ) -> tuple[dict[str, object], dict[str, str]]:
-    """수동 schedule launch의 generic audit tag만 추가한다.
+    """수동 schedule launch의 run_config와 tag.
 
-    provider/dataset membership은 schedule tag나 Python static registry가 아니라
-    실행 뒤 DB operation-key binding으로만 해석한다. schedule의 normal config는
-    Dagster definition이 정본이다.
+    기본은 generic audit tag만 붙이고 run_config는 비운다 — job 정의의 config·tag가
+    정본이다. 예외는 dataset을 run_config로 고르는 operation(KNPS)의 schedule이다: job
+    하나를 dataset별 schedule 여럿이 나눠 쓰므로(#1450) job 기본값으로 띄우면 다른
+    dataset이 돈다. 그 schedule이 실행 manifest tag로 dataset **하나**를 선언했으면 같은
+    dataset의 run_config와 tag를 싣는다. membership 해석은 여전히 실행 뒤 DB
+    operation-key binding이 한다(guard가 이 선언을 canonical resolver로 검증한다).
     """
     if not job_name or job_name != job_name.strip():
         raise ValueError("Dagster job_name must be a trimmed non-empty string")
-    return {}, {_ADMIN_MANUAL_TRIGGER_TAG: "admin-ui"}
+    tags = {_ADMIN_MANUAL_TRIGGER_TAG: "admin-ui"}
+    resources = DATASET_CONFIGURED_OPERATION_RESOURCES.get(job_name)
+    dataset_key = _single_declared_dataset_key(execution_scopes_tag)
+    if not resources or dataset_key is None or execution_scopes_tag is None:
+        return {}, tags
+    tags[EXECUTION_SCOPES_TAG] = execution_scopes_tag
+    run_config: dict[str, object] = {
+        "resources": {
+            resource: {"config": {"dataset_key": dataset_key}} for resource in resources
+        }
+    }
+    return run_config, tags
+
+
+def _single_declared_dataset_key(execution_scopes_tag: str | None) -> str | None:
+    """실행 manifest tag가 dataset 정확히 하나를 선언하면 그 key, 아니면 None."""
+    if execution_scopes_tag is None:
+        return None
+    try:
+        scopes = json.loads(execution_scopes_tag)
+    except ValueError:
+        return None
+    if not isinstance(scopes, list) or len(scopes) != 1 or not isinstance(scopes[0], dict):
+        return None
+    dataset_key = scopes[0].get("dataset_key")
+    if not isinstance(dataset_key, str) or not dataset_key or dataset_key != dataset_key.strip():
+        return None
+    return dataset_key
 
 
 def _cron_part_is_valid(part: str, *, min_value: int, max_value: int) -> bool:
@@ -1905,7 +1941,9 @@ async def run_schedule_now(
             started_at=started_at,
         )
     reason = body.reason if body else None
-    run_config, operation_tags = _admin_feature_operation_launch(schedule.pipeline_name)
+    run_config, operation_tags = _admin_feature_operation_launch(
+        schedule.pipeline_name, schedule._execution_scopes_tag
+    )
     metadata_tags = {
         **operation_tags,
         "kor_travel_map.schedule_name": schedule_name,

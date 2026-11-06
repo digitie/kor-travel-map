@@ -26,6 +26,7 @@ from typing import Any, TypeVar, cast
 
 from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.core.feature_operation import (
+    EXECUTION_SCOPES_TAG,
     TRIGGER_KIND_VALUES,
     DagsterFeatureOperationMutation,
     DagsterFeatureRunStatus,
@@ -53,8 +54,6 @@ _MISSING = object()
 _OPERATION_KEY_TAG = "kor_travel_map.operation_key"
 _TRIGGER_KIND_TAG = "kor_travel_map.trigger_kind"
 _ADMIN_MANUAL_TRIGGER_TAG = "kor_travel_map.admin_manual_trigger"
-EXECUTION_SCOPES_TAG = "kor_travel_map.execution_scopes"
-"""run이 실행할 scope를 자연키로 선언하는 tag. 없으면 operation 전체가 manifest다."""
 
 
 class FeatureOperationExecutionBlocked(RuntimeError):
