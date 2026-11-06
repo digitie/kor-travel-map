@@ -210,3 +210,74 @@ async def test_public_nested_shelter_replay_keeps_identity_and_raw() -> None:
 
     assert len(first) == len(again) == len(reordered) == 2
     assert await project(first) == await project(again) == await project(reordered)
+
+
+@pytest.mark.asyncio
+async def test_public_shelter_geometry_only_update_keeps_identity_but_versions_source(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_points = SHELTER_POINTS
+    original_archive = build_shelter_archive()
+    source_id, name, lon, lat, note = original_points[0]
+    shifted_points = (
+        (source_id, name, lon + 0.001, lat, note),
+        *original_points[1:],
+    )
+    with monkeypatch.context() as patch:
+        patch.setitem(globals(), "SHELTER_POINTS", shifted_points)
+        moved_archive = build_shelter_archive()
+    assert SHELTER_POINTS is original_points
+
+    async def convert(payload: bytes) -> dict[str, Any]:
+        records = await _public_records(payload)
+        bundles = await knps_point_records_to_bundles(
+            records,
+            dataset_key=SHELTER_DATASET,
+            fetched_at=FETCHED_AT,
+            reverse_geocoder=fixture_address,
+        )
+        assert len(bundles) == 2
+        return {bundle.source_record.source_entity_id: bundle for bundle in bundles}
+
+    before = await convert(original_archive)
+    after = await convert(moved_archive)
+    assert before.keys() == after.keys()
+    old, new = before[source_id], after[source_id]
+    assert old.feature.name == new.feature.name == name
+    assert old.feature.feature_id == new.feature.feature_id
+    assert old.feature.provider_natural_key == new.feature.provider_natural_key == source_id
+    assert old.feature.address.bjd_code == new.feature.address.bjd_code == FIXTURE_BJD
+    assert old.feature.coord is not None
+    assert new.feature.coord is not None
+    assert float(old.feature.coord.lon) == pytest.approx(lon, abs=1e-7)
+    assert float(new.feature.coord.lon) == pytest.approx(lon + 0.001, abs=1e-7)
+    assert float(old.feature.coord.lat) == pytest.approx(lat, abs=1e-7)
+    assert float(new.feature.coord.lat) == pytest.approx(lat, abs=1e-7)
+
+    old_source, new_source = old.source_record, new.source_record
+    assert old_source.source_entity_id == new_source.source_entity_id == source_id
+    assert old_source.fetched_at == new_source.fetched_at == FETCHED_AT
+    # Every DBF property is unchanged. A changed geometry string in raw must
+    # version the Map source even though facility identity and name are stable.
+    for key, value in {"ID_CD": source_id, "OBJECTID": "1", "KOR_NM": name, "NOTE": note}.items():
+        assert old_source.raw_data[key] == new_source.raw_data[key] == value
+    assert old_source.raw_data.keys() == new_source.raw_data.keys()
+    changed_keys = {
+        key for key in old_source.raw_data if old_source.raw_data[key] != new_source.raw_data[key]
+    }
+    assert changed_keys
+    for key in changed_keys:
+        assert isinstance(old_source.raw_data[key], str)
+        assert isinstance(new_source.raw_data[key], str)
+    assert old_source.raw_payload_hash == make_payload_hash(old_source.raw_data)
+    assert new_source.raw_payload_hash == make_payload_hash(new_source.raw_data)
+    assert old_source.raw_payload_hash != new_source.raw_payload_hash
+    assert old_source.source_record_key != new_source.source_record_key
+    assert old.source_link.source_record_key == old_source.source_record_key
+    assert new.source_link.source_record_key == new_source.source_record_key
+
+    # A second, stationary facility must not be versioned by ZIP-wide changes.
+    unchanged_id = original_points[1][0]
+    assert before[unchanged_id].model_dump(mode="json") == after[unchanged_id].model_dump(
+        mode="json"
+    )
