@@ -9,7 +9,10 @@ from typing import Any, Final
 from kortravelcommon.dagster import RecoveryPolicy
 from kortravelmap.core.sync_scope import DATASET_WIDE_SYNC_SCOPE
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
-from kortravelmap.providers.knps import KNPS_GEOMETRY_DATASETS, KNPS_PLACE_DATASETS
+from kortravelmap.providers.knps import (
+    KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
+    KNPS_PLACE_DATASETS,
+)
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -418,7 +421,7 @@ _KNPS_SCHEDULE_FAMILIES: Final[tuple[_KnpsScheduleFamily, ...]] = (
     ),
     _KnpsScheduleFamily(
         job_name="feature_geometry_knps_records_job",
-        dataset_keys=frozenset(KNPS_GEOMETRY_DATASETS),
+        dataset_keys=KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
         default=_KNPS_GEOMETRY_SCHEDULE,
         dataset_key_resource="knps_geometry_dataset_key",
         records_resource="knps_geometry_records",

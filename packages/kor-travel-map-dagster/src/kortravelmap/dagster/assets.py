@@ -129,6 +129,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from dagster import AssetExecutionContext, Backoff, Failure, RetryPolicy, asset
 
 from .etl import (
+    _DATASET_LOSS_DROP_RATIO,
     AddressFindingObservationReceipt,
     DagsterFeatureLoadResult,
     _add_output_metadata,
@@ -569,13 +570,20 @@ async def run_feature_geometry_knps_records(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     """KNPS route/area geometry record를 Feature로 적재한다."""
-    records = await _record_list(context, "knps_geometry_records")
-    fetched_at = await _fetched_at(context)
     dataset_key = str(
         await _resource_value(context, "knps_geometry_dataset_key", default="knps_trails")
     )
     if dataset_key not in KNPS_GEOMETRY_DATASETS:
         raise KeyError(f"KNPS geometry dataset_key가 아님: {dataset_key!r}")
+    spec = KNPS_GEOMETRY_DATASETS[dataset_key]
+    if spec.unloaded_reason is not None:
+        # 싣지 않기로 한 dataset(#1450) — 원천을 받지도 않는다. 0건 성공으로 끝내야
+        # 누가 갱신 요청을 넣어도 빨간 run이 쌓이지 않는다.
+        context.log.warning("KNPS %s는 적재하지 않는다: %s", dataset_key, spec.unloaded_reason)
+        records: list[Any] = []
+    else:
+        records = await _record_list(context, "knps_geometry_records")
+    fetched_at = await _fetched_at(context)
     bundles = await _transform_reusing_geo(
         context,
         knps_geometry_records_to_bundles,
@@ -591,6 +599,7 @@ async def run_feature_geometry_knps_records(
         bundles=bundles,
         authoritative_snapshot_complete=True,
         geo_applied=GeoApplied(reverse=True, geocode=False),
+        address_failure_mode=spec.address_failure_mode,
     )
 
 
@@ -1344,6 +1353,28 @@ async def _load_snapshot_batches(
     return result
 
 
+def _effective_address_validation(configured: bool | str, dataset_mode: str) -> bool | str:
+    """dataset이 ``drop``을 고르면 운영자 ``strict``만 ``drop``으로 완화한다(#1450).
+
+    ``off``·``drop``은 그대로 둔다 — dataset은 완화만 하고 조이지 않는다. 바다 centroid처럼
+    행 단위로 법정동이 없을 수밖에 없는 dataset이 run 전체를 롤백하지 않게 한다. 버린 행은
+    drop 경로가 metadata와 ``ops.data_integrity_violations``에 센다(소실 하한도 그대로다).
+    """
+    if dataset_mode == "drop" and configured in (True, "strict"):
+        return "drop"
+    return configured
+
+
+def _dataset_empty_reverse_ratio(dataset_mode: str) -> float | None:
+    """drop dataset의 run 빈 답 가드 문턱 — 소실 하한과 같은 값(#1450).
+
+    그 dataset에서 빈 답 행은 곧 버린 행이고 소실 하한(:data:`etl._DATASET_LOSS_DROP_RATIO`)이
+    이미 센다. 5% 문턱으로 한 번 더 세면 drop을 골라도 run이 죽는다(실측 450건 중 49건).
+    geo 전면 장애는 여전히 잡힌다 — 전 행이 비면 두 가드 모두 넘는다.
+    """
+    return _DATASET_LOSS_DROP_RATIO if dataset_mode == "drop" else None
+
+
 async def _load(
     context: AssetExecutionContext,
     *,
@@ -1357,12 +1388,16 @@ async def _load(
     load_all: Callable[[Sequence[Any], GeoLoadContext | None], Awaitable[FeatureLoadResult]]
     | None = None,
     geo_applied: GeoApplied,
+    address_failure_mode: str = "strict",
 ) -> DagsterFeatureLoadResult:
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     # bool(True/False) 하위호환 + settings 모드 문자열(strict/drop/off, #376).
-    strict_address = cast(
-        "bool | str",
-        await _resource_value(context, "strict_address", default="strict"),
+    strict_address = _effective_address_validation(
+        cast(
+            "bool | str",
+            await _resource_value(context, "strict_address", default="strict"),
+        ),
+        address_failure_mode,
     )
     result = await load_feature_bundles_for_dagster(
         context=context,
@@ -1375,6 +1410,7 @@ async def _load(
         source_entity_type=source_entity_type,
         retire_absent_from_snapshot=retire_absent_from_snapshot,
         load_all=load_all,
+        empty_reverse_ratio=_dataset_empty_reverse_ratio(address_failure_mode),
         **(await _geo_run_inputs(context, geo_applied)),
     )
     if record_sync_state:

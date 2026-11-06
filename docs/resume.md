@@ -1,3 +1,8 @@
+## 2026-11-06 — #1450 Option A 보호지역 allowlist
+
+- 보호지역 지정 allowlist·역지오 실패 행 drop, 위험지역·선형시설 미적재(schedule 6개로 줄어듦). 배포 뒤 보호지역 재적재.
+- 다음: knps-api#17(대피소 원천) 해소 뒤 핀 상향.
+
 ## 2026-11-06 — #1450 KNPS dataset별 schedule
 
 - KNPS operation에 결박된 dataset마다 월간 schedule(registry 유도, 2분 간격)과 admin "지금 실행"의 dataset 결박을 넣었다. 새 schedule은 STOPPED로 생기므로 배포 후 운영에서 켠다.

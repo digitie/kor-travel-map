@@ -129,10 +129,10 @@ system
 | `krheritage_event_list` | python-krheritage-api | 국가유산 행사 |
 | `knps_park_boundaries` | python-knps-api | 국립공원 경계 (area, MultiPolygon, SHP) |
 | `knps_trails` | python-knps-api | 국립공원 탐방로 (route, LineString) |
-| `knps_linear_facilities` | python-knps-api | 국립공원 선형시설 (route, `route_type='facility_road'`) |
+| `knps_linear_facilities` | python-knps-api | 국립공원 선형시설 — **싣지 않음**(이름이 일반명뿐, #1450) |
 | `knps_visitor_centers` | python-knps-api | 탐방안내소 (place) |
-| `knps_hazard_zones` | python-knps-api | 위험지역 (area, `area_kind='hazard_zone'`, ADR-027) |
-| `knps_protected_areas` | python-knps-api | 특별보호구역 (area, `area_kind='protected_area'`) |
+| `knps_hazard_zones` | python-knps-api | 위험지역 — **싣지 않음**(원천이 POINT·유효기간 없음, #1450) |
+| `knps_protected_areas` | python-knps-api | 보호지역 중 여행 관련 지정만 (area, `area_kind='protected_area'`, 지정 종류별 category, #1450) |
 | `knps_weather_stations` | python-knps-api | 산악 기상관측시설 (weather anchor) |
 | `knps_restrooms` | python-knps-api | 국립공원 화장실 (place) |
 | `knps_cultural_resources` | python-knps-api | 국립공원 문화자원 (place, RESOURCE_TYPE 분기) |

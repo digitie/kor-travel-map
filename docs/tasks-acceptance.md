@@ -2886,10 +2886,10 @@ MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸
 
 #1450 운영 1회 적재(2026-11-06)에서 KNPS dataset 넷이 들어오지 않았다. 원인은 읽기 전용 재현으로 확인했다.
 
-- [ ] `knps_linear_facilities`(671행): `시설명`·`라벨`만 있고 값이 `탐방로`·`탐방로12` 같은 일반명이다. 적재할지·이름 규칙을 소유자가 정한다.
-- [ ] `knps_hazard_zones`(83행): 원천 geometry가 POINT다. place로 바꿀지 제외할지 정한다.
-- [ ] `knps_protected_areas`(1,516행): 해상 보호구역 134건 centroid가 바다라 역지오 결과가 없어 strict 검증이 run을 실패시킨다. area의 bjd 없는 적재 허용 여부를 정한다.
-- [ ] `knps_shelters`: 원천 ZIP에 CSV/TXT가 없다(`KnpsParseError`). python-knps-api 쪽 원천 갱신을 확인한다.
+- [x] `knps_linear_facilities`(671행): `시설명`·`라벨`만 있고 값이 `탐방로`·`탐방로12` 같은 일반명이다. 싣지 않는다(`unloaded_reason`, schedule 없음, 2026-11-06 소유자 결정).
+- [x] `knps_hazard_zones`(83행): 원천 geometry가 POINT다. area·notice(발령·유효기간 없음)·place(목적지 아님) 어느 쪽도 아니라 싣지 않는다.
+- [x] `knps_protected_areas`(1,516행): 여행 관련 지정만 `DESIG_ENG` 표로 category를 주어 싣고(국립공원 중복 제외), 역지오 실패 행은 drop으로 세어 버린다. 배포 뒤 재적재로 확인한다.
+- [ ] `knps_shelters`: 원천 ZIP이 중첩 SHP 묶음이다(`KnpsParseError`). python-knps-api#17 해소 뒤 핀을 올리고 재적재한다.
 
 ## T-EVENT-QUARANTINE-RELEASE
 

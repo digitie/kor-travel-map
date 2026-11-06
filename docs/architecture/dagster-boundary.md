@@ -529,7 +529,7 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 | `feature_place_knps_points_monthly_schedule` | `feature_place_knps_points_job` | `45 3 3 * *` | KNPS point 월 1회(노브 dataset) |
 | `feature_place_knps_points_<dataset>_monthly_schedule` | `feature_place_knps_points_job` | `47~53 3 3 * *` | 나머지 KNPS point dataset마다 1개(registry 유도, #1450) |
 | `feature_geometry_knps_records_monthly_schedule` | `feature_geometry_knps_records_job` | `15 4 3 * *` | KNPS geometry 월 1회(노브 dataset) |
-| `feature_geometry_knps_records_<dataset>_monthly_schedule` | `feature_geometry_knps_records_job` | `17~23 4 3 * *` | 나머지 KNPS geometry dataset마다 1개(registry 유도, #1450) |
+| `feature_geometry_knps_records_<dataset>_monthly_schedule` | `feature_geometry_knps_records_job` | `17~19 4 3 * *` | 나머지 적재 대상 KNPS geometry dataset마다 1개(위험지역·선형시설 제외, #1450) |
 | `feature_place_kor_travel_concierge_youtube_monthly_schedule` | `feature_place_kor_travel_concierge_youtube_job` | `40 3 3 * *` | kor-travel-concierge YouTube 후보 월 1회 |
 | `feature_place_mcst_culture_monthly_schedule` | `feature_place_mcst_culture_job` | `30 4 3 * *` | MCST 문화 파일데이터 13종 월 1회 |
 | `mois_localdata_source_sync_weekly_schedule` | `mois_localdata_source_sync` | `0 4 * * 1` | MOIS LOCALDATA source DB sync 주 1회 |

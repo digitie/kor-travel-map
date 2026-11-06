@@ -1,3 +1,8 @@
+## 2026-11-06 — #1450 Option A: KNPS 보호지역 지정 allowlist
+
+- 보호지역은 여행 관련 지정만 DESIG_ENG 표로 category를 준다(국립공원 중복 제외). 역지오 실패 행은 drop으로 센다.
+- 위험지역(POINT)·선형시설(일반명)은 싣지 않고 schedule도 없다. 대피소는 knps-api#17.
+
 ## 2026-11-06 — #1450 KNPS dataset별 schedule·운영 1회 적재
 
 - 원인: KNPS job은 dataset 5개를 묶는데 월간 schedule은 노브 dataset 하나만 돌렸다. 운영 갱신 요청으로 경계 21·화장실 325·야영장 36·문화자원 554건을 적재했다.

@@ -139,14 +139,22 @@ ADR-027 generic notice_type (`access_restriction` / `fire_alert`)은 유효 —
 
 ## 4. category 매핑 요약 (검증된 표)
 
+> **2026-11-06 운영 실측(#1450)으로 정한 것.** 보호지역은 여행 관련 지정만 싣는다 — 도립·군립공원
+> (`01020102`), 명승(`01070300`), 천연기념물(`01020400`, krheritage와 같은 자리), 습지보호지역·Ramsar
+> (육상 `01020200` / 연안·해상 `01020300`, 원천 `MARINE`로 고른다), 생태·경관보전지역(`01020000` /
+> `01020300`). 국립공원(경계 21건과 중복)·야생생물·상수원·특정도서·산림유전자원·해양보호구역 등은
+> 싣지 않는다. 바다 centroid로 역지오가 법정동을 못 주는 행은 run을 죽이지 않고 drop으로 센다.
+> 위험지역(POINT 83행)과 선형시설(일반명 671행)은 싣지 않고 schedule도 만들지 않는다. 대피소는 원천
+> ZIP이 중첩 SHP라 python-knps-api#17을 기다린다.
+
 | 종류 | category 코드 | detail | maki |
 |------|---------------|--------|------|
 | 국립공원 경계 | `01020101` `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_NATIONAL_PARK` | `area_kind='national_park'` | `park` (centroid 마커) |
 | 탐방로 | `01020103` `TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_FOREST_TRAIL` | `route_type='hiking_trail'` | `park` |
-| 시설 도로 (linear_facilities) | `01020103` 동일 | `route_type='facility_road'` | `park` |
+| 시설 도로 (linear_facilities) | **싣지 않음**(이름이 일반명뿐, #1450) | `route_type='facility_road'` | — |
 | 탐방안내소 | `01060101` `TOURISM_INFORMATION_CENTER_PUBLIC` | `place_kind='visitor_center'` | `information` |
-| 위험지역 | (area, no category) | `area_kind='hazard_zone'` | (polygon, marker maki `barrier`) |
-| 특별보호구역 (protected_areas) | (area, no category) | `area_kind='protected_area'` | (polygon, marker maki `barrier`) |
+| 위험지역 | **싣지 않음**(원천이 POINT·유효기간 없음, #1450) | `area_kind='hazard_zone'` | — |
+| 보호지역 (protected_areas) | 지정 종류(`DESIG_ENG`)별 — `KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES` | `area_kind='protected_area'` | `park` |
 | 화장실 | `05060000` `CONVENIENCE_TOILET` | `place_kind='restroom_national_park'` | `toilet` |
 | 문화자원: 사찰 | `01070100` `TOURISM_HERITAGE_TEMPLE` | `place_kind='temple'` | `religious-buddhist` |
 | 문화자원: 유적 | `01070300` `TOURISM_HERITAGE_HISTORIC_SITE` | `place_kind='historic_site'` | `monument` |
@@ -251,6 +259,10 @@ centroid·DTO 조립은 `core/geometry.py`(shapely WKT). `shapely`/`pyproj`는 �
 라이브러리 본 의존이지만 **`pyshp`/SHP 디코딩은 본 lib에 두지 않는다**(knps-api).
 
 ## 6. Dagster asset 카탈로그 (Sprint 3 KNPS 적재 시점, ADR-034 7단계)
+
+> **현행은 이 표가 아니다.** 지금은 KNPS job 둘(`feature_place_knps_points_job`·
+> `feature_geometry_knps_records_job`)이 dataset별 schedule로 돈다 — 정본은
+> `docs/architecture/dagster-boundary.md`. 위험지역·선형시설은 schedule이 없다(#1450). 아래는 계획 당시 기록이다.
 
 | asset | dataset_key | cron | group | concurrency |
 |-------|-------------|------|-------|-------------|
