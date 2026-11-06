@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import pytest
 from dagster import DefaultScheduleStatus, build_schedule_context
-from kortravelmap.providers.knps import KNPS_GEOMETRY_DATASETS, KNPS_PLACE_DATASETS
+from kortravelmap.providers.knps import (
+    KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
+    KNPS_PLACE_DATASETS,
+)
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 
 from kortravelmap.dagster.definitions import defs
@@ -39,7 +42,8 @@ _FAMILIES = (
     pytest.param(
         "feature_geometry_knps_records_job",
         ("knps_geometry_dataset_key", "knps_geometry_records"),
-        frozenset(KNPS_GEOMETRY_DATASETS),
+        # 싣지 않기로 한 dataset(위험지역 POINT·선형시설 일반명, #1450)은 schedule도 없다.
+        KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
         id="geometry",
     ),
 )

@@ -22,7 +22,12 @@ from typing import Any
 
 import pytest
 
+from kortravelmap.category import is_known_category_code
 from kortravelmap.dto import FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.providers.knps import (
+    KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
+    KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES,
+)
 from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_GEOMETRY_DATASETS,
@@ -276,11 +281,11 @@ def test_trail_route_mapping() -> None:
     assert float(b.feature.coord.lon) == pytest.approx(126.99)
 
 
-def test_linear_facility_route_type() -> None:
-    b = _geo_one("knps_linear_facilities", _LINE)[0]
-    assert b.feature.detail.route_type == "facility_road"
-    assert b.feature.category == "01020103"
-    assert b.feature.marker_icon == "park"
+def test_linear_facility_is_left_unloaded() -> None:
+    """선형시설 671행은 이름이 `탐방로`·`탐방로12` 같은 일반명뿐이다(#1450) — 이름을 지어내지 않는다."""
+    assert KNPS_GEOMETRY_DATASETS["knps_linear_facilities"].unloaded_reason
+    assert _geo_one("knps_linear_facilities", _LINE, name="북한산 순환도로") == []
+    assert "knps_linear_facilities" not in KNPS_LOADABLE_GEOMETRY_DATASET_KEYS
 
 
 def test_park_boundary_area_mapping() -> None:
@@ -312,7 +317,7 @@ def test_protected_area_translates_raw_english_name() -> None:
         "knps_protected_areas",
         _POLY,
         name=None,
-        raw={"NAME": "Jeju Island", "MNUM": "PROTECTED-1"},
+        raw={"NAME": "Jeju Island", "MNUM": "PROTECTED-1", "DESIG_ENG": "Provincial Park"},
     )[0]
     assert b.feature.kind is FeatureKind.AREA
     assert b.feature.name == "제주도"
@@ -324,7 +329,12 @@ def test_protected_area_prefers_recoverable_raw_korean_name() -> None:
         "knps_protected_areas",
         _POLY,
         name="Bongpyeong",
-        raw={"ORIG_NAME": "遊됲룊", "NAME": "Bongpyeong", "MNUM": "PROTECTED-1"},
+        raw={
+            "ORIG_NAME": "遊됲룊",
+            "NAME": "Bongpyeong",
+            "MNUM": "PROTECTED-1",
+            "DESIG_ENG": "Provincial Park",
+        },
     )[0]
     assert b.feature.name == "봉평"
     assert b.source_record.raw_data["NAME"] == "Bongpyeong"
@@ -393,15 +403,81 @@ def test_geometry_raw_payload_is_verbatim_not_normalized() -> None:
     assert park.source_record.raw_data["NPK_NM"] == "북한산"
 
 
-def test_hazard_and_protected_area_kinds() -> None:
-    # 위험/보호지역은 관광 category 없음 → sentinel + barrier (upstream §3/§4)
-    hazard = _geo_one("knps_hazard_zones", _POLY)[0]
-    assert hazard.feature.detail.area_kind == "hazard_zone"
-    assert hazard.feature.category == "00000000"
-    assert hazard.feature.marker_icon == "barrier"
-    protected = _geo_one("knps_protected_areas", _POLY)[0]
-    assert protected.feature.detail.area_kind == "protected_area"
-    assert protected.feature.category == "00000000"
+def test_hazard_zones_are_left_unloaded() -> None:
+    """원천 83행이 전부 POINT다(#1450). area로 싣지 않고, 지정 기간 없는 2018 스냅샷이라
+    notice도 아니며, 가는 곳이 아니라 place도 아니다 — 싣지 않는다."""
+    assert KNPS_GEOMETRY_DATASETS["knps_hazard_zones"].unloaded_reason
+    assert _geo_one("knps_hazard_zones", _POLY) == []
+    assert _geo_one("knps_hazard_zones", "POINT(127.64 35.32)") == []
+    assert "knps_hazard_zones" not in KNPS_LOADABLE_GEOMETRY_DATASET_KEYS
+    assert "knps_protected_areas" in KNPS_LOADABLE_GEOMETRY_DATASET_KEYS
+
+
+def _protected(desig_eng: str | None, *, marine: str = "0", **raw: Any):
+    return _geo_one(
+        "knps_protected_areas",
+        _POLY,
+        name="가상 보호지역",
+        raw={"WDPAID": "1", "DESIG_ENG": desig_eng, "MARINE": marine, **raw},
+    )
+
+
+@pytest.mark.parametrize(
+    ("desig_eng", "marine", "category"),
+    [
+        ("Provincial Park", "0", "01020102"),
+        ("County Park", "1", "01020102"),
+        ("Scenic Site", "0", "01070300"),
+        ("Natural Monument", "2", "01020400"),
+        ("Wetland Protected Area", "0", "01020200"),
+        ("Wetland Protected Area - Tidal Flat", "2", "01020300"),
+        ("Ramsar Site, Wetland of International Importance", "0", "01020200"),
+        ("Ramsar Site, Wetland of International Importance", "1", "01020300"),
+        ("Ecosystem and Landscape Conservation Area", "0", "01020000"),
+        ("  scenic site ", "0", "01070300"),
+    ],
+)
+def test_protected_area_keeps_travel_designations_with_real_category(
+    desig_eng: str, marine: str, category: str
+) -> None:
+    bundles = _protected(desig_eng, marine=marine)
+    assert len(bundles) == 1
+    feature = bundles[0].feature
+    assert feature.kind is FeatureKind.AREA
+    assert feature.detail.area_kind == "protected_area"
+    assert feature.category == category
+    assert feature.category != "00000000"
+    assert feature.marker_icon == "park"
+
+
+@pytest.mark.parametrize(
+    "desig_eng",
+    [
+        "National Park",  # 국립공원 경계 21건(knps_park_boundaries)과 중복
+        "Wildlife Protection Area",
+        "Water Source Protection Area",
+        "Special Island",
+        "Forest Genetic Resources Reserve",
+        "MARINE Protected Area",
+        "Urban Natural Park Areas",
+        None,
+        "",
+    ],
+)
+def test_protected_area_drops_non_travel_designations(desig_eng: str | None) -> None:
+    assert _protected(desig_eng) == []
+
+
+def test_protected_area_designation_table_uses_known_categories() -> None:
+    for categories in KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES.values():
+        for code in categories:
+            assert is_known_category_code(code), code
+
+
+def test_protected_area_reverse_geocode_failure_drops_row_not_run() -> None:
+    """바다 한가운데 centroid는 역지오코딩이 법정동을 못 준다 — 그 행만 버린다(#1450)."""
+    assert KNPS_GEOMETRY_DATASETS["knps_protected_areas"].address_failure_mode == "drop"
+    assert KNPS_GEOMETRY_DATASETS["knps_park_boundaries"].address_failure_mode == "strict"
 
 
 def test_invalid_wkt_is_skipped() -> None:
