@@ -637,7 +637,15 @@ def _protected_area_category(raw: Mapping[str, Any]) -> str | None:
     if categories is None:
         return None
     inland, coastal = categories
-    return inland if str(raw.get("MARINE", "0")).strip() in {"", "0"} else coastal
+    return coastal if _is_marine(raw.get("MARINE")) else inland
+
+
+def _is_marine(value: object) -> bool:
+    """WDPA ``MARINE``(0 육상 / 1 연안 / 2 해상)이 연안·해상인가. 읽을 수 없으면 육상."""
+    try:
+        return int(float(str(value).strip())) > 0
+    except ValueError:
+        return False
 
 KNPS_GEOMETRY_DATASET_KEYS: Final[frozenset[str]] = frozenset(KNPS_GEOMETRY_DATASETS)
 

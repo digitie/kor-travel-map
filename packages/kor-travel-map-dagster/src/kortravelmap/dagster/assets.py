@@ -129,6 +129,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from dagster import AssetExecutionContext, Backoff, Failure, RetryPolicy, asset
 
 from .etl import (
+    _DATASET_LOSS_DROP_RATIO,
     AddressFindingObservationReceipt,
     DagsterFeatureLoadResult,
     _add_output_metadata,
@@ -1364,6 +1365,16 @@ def _effective_address_validation(configured: bool | str, dataset_mode: str) -> 
     return configured
 
 
+def _dataset_empty_reverse_ratio(dataset_mode: str) -> float | None:
+    """drop dataset의 run 빈 답 가드 문턱 — 소실 하한과 같은 값(#1450).
+
+    그 dataset에서 빈 답 행은 곧 버린 행이고 소실 하한(:data:`etl._DATASET_LOSS_DROP_RATIO`)이
+    이미 센다. 5% 문턱으로 한 번 더 세면 drop을 골라도 run이 죽는다(실측 450건 중 49건).
+    geo 전면 장애는 여전히 잡힌다 — 전 행이 비면 두 가드 모두 넘는다.
+    """
+    return _DATASET_LOSS_DROP_RATIO if dataset_mode == "drop" else None
+
+
 async def _load(
     context: AssetExecutionContext,
     *,
@@ -1399,6 +1410,7 @@ async def _load(
         source_entity_type=source_entity_type,
         retire_absent_from_snapshot=retire_absent_from_snapshot,
         load_all=load_all,
+        empty_reverse_ratio=_dataset_empty_reverse_ratio(address_failure_mode),
         **(await _geo_run_inputs(context, geo_applied)),
     )
     if record_sync_state:

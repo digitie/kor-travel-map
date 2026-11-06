@@ -260,6 +260,10 @@ centroid·DTO 조립은 `core/geometry.py`(shapely WKT). `shapely`/`pyproj`는 �
 
 ## 6. Dagster asset 카탈로그 (Sprint 3 KNPS 적재 시점, ADR-034 7단계)
 
+> **현행은 이 표가 아니다.** 지금은 KNPS job 둘(`feature_place_knps_points_job`·
+> `feature_geometry_knps_records_job`)이 dataset별 schedule로 돈다 — 정본은
+> `docs/architecture/dagster-boundary.md`. 위험지역·선형시설은 schedule이 없다(#1450). 아래는 계획 당시 기록이다.
+
 | asset | dataset_key | cron | group | concurrency |
 |-------|-------------|------|-------|-------------|
 | `feature_area_knps_park_boundaries` | `knps_park_boundaries` | `0 3 1 1 *` (연) | `features_area` | `knps_api: 1` |

@@ -344,8 +344,12 @@ async def load_feature_bundles_for_dagster(
     geo_applied: GeoApplied | None = None,
     current_dataset: DatasetRef | None = None,
     geo_stats: GeoCallStats | None = None,
+    empty_reverse_ratio: float | None = None,
 ) -> DagsterFeatureLoadResult:
     """주소/좌표 검증 후 ``AsyncKorTravelMapClient``로 PostGIS에 적재한다.
+
+    ``empty_reverse_ratio``는 run 빈 답 가드의 문턱을 dataset이 바꿀 때만 준다(None이면
+    settings 값). 행 단위로 법정동이 없을 수밖에 없어 drop을 고른 dataset이 쓴다(#1450).
 
     ``strict_address``(모드 ``strict``/``drop``/``off``, bool 하위호환)는
     error-severity 검증 이슈 처리 정책을 정한다 — ``strict``는 run 실패,
@@ -437,7 +441,9 @@ async def load_feature_bundles_for_dagster(
     geo_load = _geo_load_context(geo_applied, current_dataset, geo_stats)
     # run 빈 답 가드(ADR-109 결정 4) — 적재 **전**에 본다. 문턱을 넘으면 아무것도 쓰지 않고
     # 실패한다.
-    _raise_if_empty_answers_exceeded(geo_applied, geo_stats, dataset_key=dataset_key)
+    _raise_if_empty_answers_exceeded(
+        geo_applied, geo_stats, dataset_key=dataset_key, ratio=empty_reverse_ratio
+    )
     if load_all is not None:
         load = await load_all(bundles, geo_load)
     elif authoritative_snapshot_complete:
@@ -947,8 +953,11 @@ def _raise_if_empty_answers_exceeded(
     geo_stats: GeoCallStats | None,
     *,
     dataset_key: str,
+    ratio: float | None = None,
 ) -> None:
     """비-MOIS run의 역지오코딩 빈 답 비율이 문턱을 넘으면 run을 실패시킨다(ADR-109 결정 4).
+
+    ``ratio``가 None이면 settings 문턱(``mois_geocode_degraded_ratio``)을 쓴다.
 
     분모는 ``calls['reverse']``(좌표 있는 행만 reverse로 간다), 분자는 행 단위 최종 빈 답
     ``empty[REVERSE_RESULT_EMPTY_KEY]``(region fallback까지 비었을 때) — 둘 다
@@ -959,7 +968,8 @@ def _raise_if_empty_answers_exceeded(
         return
     total = geo_stats.calls.get("reverse", 0)
     empty = geo_stats.empty.get(REVERSE_RESULT_EMPTY_KEY, 0)
-    ratio = KorTravelMapSettings().mois_geocode_degraded_ratio
+    if ratio is None:
+        ratio = KorTravelMapSettings().mois_geocode_degraded_ratio
     if geocode_ratio_exceeded(empty=empty, total=total, ratio=ratio):
         raise Failure(
             description=(
