@@ -25,14 +25,12 @@ import pytest
 from kortravelmap.category import is_known_category_code
 from kortravelmap.dto import FeatureBundle, FeatureKind, SourceRole
 from kortravelmap.providers.knps import (
-    KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
-    KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES,
-)
-from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_GEOMETRY_DATASETS,
+    KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
     KNPS_PLACE_DATASETS,
     KNPS_POINT_DATASET_KEYS,
+    KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES,
     PROVIDER_NAME,
     KnpsGeometryColumnMap,
     KnpsPointColumnMap,
@@ -282,7 +280,10 @@ def test_trail_route_mapping() -> None:
 
 
 def test_linear_facility_is_left_unloaded() -> None:
-    """선형시설 671행은 이름이 `탐방로`·`탐방로12` 같은 일반명뿐이다(#1450) — 이름을 지어내지 않는다."""
+    """선형시설 671행은 이름이 `탐방로`·`탐방로12` 같은 일반명뿐이다(#1450).
+
+    이름을 지어내지 않는다.
+    """
     assert KNPS_GEOMETRY_DATASETS["knps_linear_facilities"].unloaded_reason
     assert _geo_one("knps_linear_facilities", _LINE, name="북한산 순환도로") == []
     assert "knps_linear_facilities" not in KNPS_LOADABLE_GEOMETRY_DATASET_KEYS

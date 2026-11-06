@@ -34,9 +34,9 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final, Literal, Protocol, runtime_checkable
 
-from kortravelmap.category import get_category, is_known_category_code
+from kortravelmap.category import PlaceCategoryCode, get_category, is_known_category_code
 from kortravelmap.core.address import normalize_korean_text
 from kortravelmap.core.geometry import (
     AREA_GEOMETRY_TYPES,
@@ -77,6 +77,9 @@ __all__ = [
     "KNPS_POINT_DATASET_KEYS",
     "KNPS_GEOMETRY_DATASETS",
     "KNPS_GEOMETRY_DATASET_KEYS",
+    "KNPS_LOADABLE_GEOMETRY_DATASET_KEYS",
+    "KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES",
+    "AddressFailureMode",
     "knps_point_records_to_bundles",
     "knps_geometry_records_to_bundles",
     "resolve_cultural_resource_category",
@@ -430,6 +433,10 @@ class KnpsGeometryRecord(Protocol):
         ...
 
 
+AddressFailureMode = Literal["strict", "drop"]
+"""dataset이 고르는 주소 검증 error 처리 — 운영자 ``strict``를 완화할 뿐 조이지 않는다."""
+
+
 class KnpsGeometryDatasetSpec:
     """KNPS route/area dataset 1건의 변환 사양.
 
@@ -443,6 +450,7 @@ class KnpsGeometryDatasetSpec:
     __slots__ = (
         "dataset_key", "feature_kind", "category", "detail_kind",
         "allowed_geom_types", "marker_icon", "marker_color",
+        "unloaded_reason", "address_failure_mode",
     )
 
     def __init__(
@@ -455,6 +463,8 @@ class KnpsGeometryDatasetSpec:
         category: str | None = None,
         marker_icon: str = "marker",
         marker_color: str = _DEFAULT_MARKER_COLOR,
+        unloaded_reason: str | None = None,
+        address_failure_mode: AddressFailureMode = "strict",
     ) -> None:
         self.dataset_key = dataset_key
         self.feature_kind = feature_kind
@@ -464,6 +474,11 @@ class KnpsGeometryDatasetSpec:
         self.allowed_geom_types = allowed_geom_types
         self.marker_icon = marker_icon
         self.marker_color = marker_color
+        # 싣지 않기로 결정한 dataset의 사유(#1450). 값이 있으면 변환은 빈 결과를 내고
+        # schedule도 만들지 않는다 — DB 결박(seed)은 그대로 둔다.
+        self.unloaded_reason = unloaded_reason
+        # 주소 검증 error의 처리. ``drop``이면 그 행만 세어 버리고 run은 계속한다.
+        self.address_failure_mode = address_failure_mode
 
 
 # 일부 area(hazard/protected)는 관광 category 없음 → sentinel (Feature.category는
@@ -531,6 +546,10 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         category=_TRAIL_CATEGORY,
         marker_icon=_PARK_MAKI,
         marker_color="P-06",
+        unloaded_reason=(
+            "원천 671행의 이름 열이 `시설명`(탐방로·진입도로·삭도…)·`라벨`(탐방로12…) "
+            "일반명뿐이다 — 같은 이름 수백 개를 지어 싣지 않는다(#1450, 2026-11-06 실측)."
+        ),
     ),
     "knps_park_boundaries": KnpsGeometryDatasetSpec(
         "knps_park_boundaries",
@@ -549,17 +568,76 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         category=None,  # 위험지역은 관광 category 없음 (upstream §3/§4)
         marker_icon="barrier",
         marker_color="P-13",
+        unloaded_reason=(
+            "원천 83행이 전부 POINT(고립·유실·침수 위험 지점, 2018 스냅샷)다 — 면이 아니라 "
+            "area가 아니고, 발령·유효기간이 없어 notice가 아니며, 가는 곳이 아니라 place도 "
+            "아니다(#1450)."
+        ),
     ),
     "knps_protected_areas": KnpsGeometryDatasetSpec(
         "knps_protected_areas",
         feature_kind=FeatureKind.AREA,
         detail_kind="protected_area",
         allowed_geom_types=AREA_GEOMETRY_TYPES,
-        category=None,  # 보호지역도 관광 category 없음 (upstream §2 layer)
-        marker_icon="barrier",
-        marker_color="P-13",
+        # category는 행마다 지정 종류(DESIG_ENG)에서 정한다 —
+        # :data:`KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES`. 표에 없는 지정은 싣지 않는다.
+        category=None,
+        marker_icon=_PARK_MAKI,
+        marker_color="P-06",
+        # 해상·연안 보호구역은 centroid가 바다라 역지오가 법정동을 못 준다(2026-11-06 134건).
+        address_failure_mode="drop",
     ),
 }
+
+KNPS_LOADABLE_GEOMETRY_DATASET_KEYS: Final[frozenset[str]] = frozenset(
+    key for key, spec in KNPS_GEOMETRY_DATASETS.items() if spec.unloaded_reason is None
+)
+"""적재하는 geometry dataset. ``unloaded_reason``이 있는 dataset은 schedule을 만들지 않는다."""
+
+_LOCAL_PARK: Final[str] = (
+    PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE_MOUNTAIN_VALLEY_LOCAL_PARK.value
+)
+_RIVER_LAKE: Final[str] = PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE_RIVER_LAKE.value
+_COAST_ISLAND: Final[str] = PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE_COAST_ISLAND.value
+
+KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES: Final[dict[str, tuple[str, str]]] = {
+    "provincial park": (_LOCAL_PARK, _LOCAL_PARK),
+    "county park": (_LOCAL_PARK, _LOCAL_PARK),
+    # 명승·천연기념물은 krheritage 분류와 같은 자리에 둔다(사적·기념물 / 자연경관 계열).
+    "scenic site": (
+        PlaceCategoryCode.TOURISM_HERITAGE_HISTORIC_SITE.value,
+        PlaceCategoryCode.TOURISM_HERITAGE_HISTORIC_SITE.value,
+    ),
+    "natural monument": (
+        PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE_WATERFALL_CAVE.value,
+        PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE_WATERFALL_CAVE.value,
+    ),
+    "wetland protected area": (_RIVER_LAKE, _COAST_ISLAND),
+    "wetland protected area - tidal flat": (_RIVER_LAKE, _COAST_ISLAND),
+    "ramsar site, wetland of international importance": (_RIVER_LAKE, _COAST_ISLAND),
+    "ecosystem and landscape conservation area": (
+        PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE.value,
+        _COAST_ISLAND,
+    ),
+}
+"""보호지역 원천 지정 종류(``DESIG_ENG``, 소문자·공백 정규화) → (육상, 연안·해상) category.
+
+여행과 관련된 지정만 둔다(#1450 소유자 결정 Option A). 원천 ``MARINE``이 ``0``이면 육상, 그
+밖이면 연안·해상 칸을 쓴다. 표에 없는 지정 — 국립공원(``knps_park_boundaries`` 21건과 중복)·
+야생생물·상수원·특정도서·산림유전자원·해양보호구역·도시자연공원구역 등 — 은 싣지 않는다."""
+
+
+def _protected_area_category(raw: Mapping[str, Any]) -> str | None:
+    """보호지역 행의 지정 종류로 category를 고른다. 싣지 않을 지정이면 None."""
+    designation = raw.get("DESIG_ENG")
+    if not isinstance(designation, str):
+        return None
+    key = " ".join(designation.split()).casefold()
+    categories = KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES.get(key)
+    if categories is None:
+        return None
+    inland, coastal = categories
+    return inland if str(raw.get("MARINE", "0")).strip() in {"", "0"} else coastal
 
 KNPS_GEOMETRY_DATASET_KEYS: Final[frozenset[str]] = frozenset(KNPS_GEOMETRY_DATASETS)
 
@@ -775,8 +853,16 @@ async def _geometry_record_to_bundle(
     route는 이름 없는 record를 건너뛰고, area dataset은 raw 속성에서 이름을
     복구한다. geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환(호출자가 skip/집계).
     """
+    if spec.unloaded_reason is not None:
+        return None
     if spec.dataset_key == "knps_trails" and _is_unmatched_trail_course(record):
         return None
+    if spec.dataset_key == "knps_protected_areas":
+        row_category = _protected_area_category(record.raw)
+        if row_category is None:
+            return None
+    else:
+        row_category = spec.category
 
     normalized_name = _geometry_record_name(record, spec)
     if normalized_name is None:  # None/빈/공백-only 이름 모두 skip
@@ -788,7 +874,7 @@ async def _geometry_record_to_bundle(
     except GeometryError:
         return None
 
-    category = spec.category if spec.category is not None else _SENTINEL_CATEGORY
+    category = row_category if row_category is not None else _SENTINEL_CATEGORY
     raw_data = dict(record.raw)
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
