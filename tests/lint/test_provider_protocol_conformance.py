@@ -68,7 +68,7 @@ PROVIDERS_DIR = REPO_ROOT / "src" / "kortravelmap" / "providers"
 MANIFEST_PATH = PROVIDERS_DIR / "_provider_surface.json"
 
 _PIN_RE = re.compile(
-    r'"(?P<dist>python-[a-z0-9-]+)\s*@\s*git\+https://github\.com/digitie/'
+    r'"(?P<dist>python-[a-z0-9-]+)(?:\[[A-Za-z0-9_, -]+\])?\s*@\s*git\+https://github\.com/digitie/'
     r"(?P<repo>[a-z0-9-]+)\.git@(?P<sha>[0-9a-f]{40})\""
 )
 
@@ -300,7 +300,7 @@ def test_contract_table_pins_match_pyproject() -> None:
     declared = _declared_pins()
 
     row_re = re.compile(
-        r"^\| (?P<dist>python-[a-z0-9-]+) \| `@(?P<sha>[0-9a-f]{7,40})`",
+        r"^\| (?P<dist>python-[a-z0-9-]+)(?:\[[A-Za-z0-9_, -]+\])? \| `@(?P<sha>[0-9a-f]{7,40})`",
         re.MULTILINE,
     )
     documented = {m.group("dist"): m.group("sha") for m in row_re.finditer(contract)}

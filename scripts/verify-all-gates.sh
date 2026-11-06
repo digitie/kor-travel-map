@@ -247,7 +247,7 @@ run_gate "OpenAPI drift" py 'python packages/kor-travel-map-api/scripts/export_o
 
 echo "===== ci.yml"
 run_gate "pytest unit+lint" py \
-  'timeout 1800 python -m pytest tests/unit tests/lint -q > /tmp/g1.log 2>&1; rc=$?; tail -20 /tmp/g1.log; exit $rc'
+  'pip install -c docker/constraints-dagster.txt "$(python scripts/knps_provider_requirement.py)" && timeout 1800 python -m pytest tests/unit tests/lint -q > /tmp/g1.log 2>&1; rc=$?; tail -20 /tmp/g1.log; exit $rc'
 run_gate "pytest api" py \
   'timeout 1800 python -m pytest packages/kor-travel-map-api/tests/ -q --cov=packages/kor-travel-map-api/src/kortravelmap/api --cov-report=term-missing --cov-fail-under=70 > /tmp/g2.log 2>&1; rc=$?; tail -20 /tmp/g2.log; exit $rc'
 run_gate "pytest dagster" py \
