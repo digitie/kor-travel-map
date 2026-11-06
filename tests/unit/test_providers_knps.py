@@ -350,6 +350,8 @@ def test_protected_area_ignores_lossy_mojibake_korean_name() -> None:
             "ORIG_NAME": "�쟾遺� �젙�쓭�떆 �떊�젙�룞",
             "NAME": "Jeonbuk Jeongeup Shinseongdong",
             "MNUM": "PROTECTED-1",
+            # 이름 해석 검사다 — 지정 종류는 적재 대상으로 둔다(#1450 allowlist).
+            "DESIG_ENG": "Provincial Park",
         },
     )[0]
     assert b.feature.name == "전북 정읍 신성동 야생동물보호구역"
@@ -360,7 +362,12 @@ def test_protected_area_ignores_unrecoverable_cjk_mojibake_name() -> None:
         "knps_protected_areas",
         _POLY,
         name="Cheokchi",
-        raw={"ORIG_NAME": "泥숈튂", "NAME": "Cheokchi", "MNUM": "PROTECTED-1"},
+        raw={
+            "ORIG_NAME": "泥숈튂",
+            "NAME": "Cheokchi",
+            "MNUM": "PROTECTED-1",
+            "DESIG_ENG": "Provincial Park",
+        },
     )[0]
     assert b.feature.name == "척치 상수원보호구역"
 
@@ -374,6 +381,7 @@ def test_protected_area_ignores_latin_mixed_mojibake_name() -> None:
             "ORIG_NAME": "횓le volcanique et tunnels de lave de Jeju",
             "NAME": "Jeju Volcanic Island and Lava Tubes",
             "MNUM": "PROTECTED-1",
+            "DESIG_ENG": "Provincial Park",
         },
     )[0]
     assert b.feature.name == "제주 화산섬과 용암동굴"
