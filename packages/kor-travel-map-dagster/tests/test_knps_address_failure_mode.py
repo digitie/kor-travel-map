@@ -8,8 +8,15 @@
 from __future__ import annotations
 
 import pytest
+from dagster import Failure
+from kortravelmap.dto.geo_dataset import GeoApplied
+from kortravelmap.geocoding import REVERSE_RESULT_EMPTY_KEY, GeoCallStats
 
-from kortravelmap.dagster.assets import _effective_address_validation
+from kortravelmap.dagster.assets import (
+    _dataset_empty_reverse_ratio,
+    _effective_address_validation,
+)
+from kortravelmap.dagster.etl import _raise_if_empty_answers_exceeded
 
 
 @pytest.mark.parametrize(
@@ -29,3 +36,34 @@ def test_dataset_mode_only_relaxes_strict(
     configured: bool | str, dataset_mode: str, expected: bool | str
 ) -> None:
     assert _effective_address_validation(configured, dataset_mode) == expected
+
+
+def _stats(*, calls: int, empty: int) -> GeoCallStats:
+    stats = GeoCallStats()
+    stats.calls["reverse"] = calls
+    stats.empty[REVERSE_RESULT_EMPTY_KEY] = empty
+    return stats
+
+
+def test_drop_dataset_uses_the_loss_bound_for_the_empty_answer_guard() -> None:
+    """빈 답 가드(5%)가 drop dataset을 다시 죽이지 않는다 — 실측 450건 중 49건(10.9%).
+
+    drop dataset에서 빈 답 행은 곧 버린 행이고, 그 수는 소실 하한(50%)이 이미 센다. 같은
+    사건을 더 낮은 문턱으로 두 번 세면 drop이 의미를 잃는다. 문턱은 dataset 정책에서만
+    완화된다 — 운영자가 전역으로 drop을 골라도 다른 dataset의 5%는 그대로다.
+    """
+    reverse = GeoApplied(reverse=True, geocode=False)
+    ratio = _dataset_empty_reverse_ratio("drop")
+    assert ratio == 0.5
+    assert _dataset_empty_reverse_ratio("strict") is None
+    _raise_if_empty_answers_exceeded(
+        reverse, _stats(calls=450, empty=49), dataset_key="knps_protected_areas", ratio=ratio
+    )
+    with pytest.raises(Failure):
+        _raise_if_empty_answers_exceeded(
+            reverse, _stats(calls=450, empty=49), dataset_key="knps_protected_areas"
+        )
+    with pytest.raises(Failure):
+        _raise_if_empty_answers_exceeded(
+            reverse, _stats(calls=450, empty=300), dataset_key="knps_protected_areas", ratio=ratio
+        )
