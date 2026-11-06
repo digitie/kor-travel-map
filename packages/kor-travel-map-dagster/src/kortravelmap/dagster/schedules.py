@@ -443,6 +443,10 @@ def _knps_dataset_schedule_specs() -> tuple[FeatureLoadScheduleSpec, ...]:
 
     기대 집합은 provider registry에서 유도한다 — 운영자 노브가 고른 dataset은 기본
     spec이 이미 돌리므로 빠진다. 같은 job을 쓰고 run_config·실행 manifest만 다르다.
+
+    이름은 dataset key에서 나오므로 노브를 바꾸면 schedule 이름 집합이 바뀐다(Dagster
+    RUNNING 상태·DB cron override는 이름에 묶인다). cron은 기본 spec의 **코드 기본값**에서
+    민다 — 기본 spec의 override는 형제를 옮기지 않으며 각자 이름으로 override한다.
     """
     base = {spec.job_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS}
     specs: list[FeatureLoadScheduleSpec] = []
@@ -653,6 +657,9 @@ job을 직접 돌리는 백필은 여전히 된다(그 경로는 이 runner를 �
 """
 
 _FEATURE_LOAD_JOBS_BY_NAME: Final = {job.name: job for job in FEATURE_LOAD_JOBS}
+_BASE_SCHEDULE_NAME_BY_JOB: Final = {
+    spec.job_name: spec.schedule_name for spec in FEATURE_LOAD_SCHEDULE_SPECS
+}
 
 FEATURE_LOAD_SCHEDULES: Final = [
     ScheduleDefinition(
@@ -668,6 +675,8 @@ FEATURE_LOAD_SCHEDULES: Final = [
     )
     for spec in (*FEATURE_LOAD_SCHEDULE_SPECS, *KNPS_DATASET_SCHEDULE_SPECS)
     if spec.schedule_name not in DISABLED_FEATURE_LOAD_SCHEDULES
+    # KNPS dataset schedule은 기본 spec을 끄면 함께 꺼진다 — 시계 절반만 남지 않게.
+    and _BASE_SCHEDULE_NAME_BY_JOB[spec.job_name] not in DISABLED_FEATURE_LOAD_SCHEDULES
 ]
 """Provider별 KST cron schedule 목록.
 

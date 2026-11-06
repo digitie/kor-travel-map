@@ -12,6 +12,10 @@ from typing import Final, Literal, Protocol, cast
 from uuid import UUID
 
 import httpx
+from kortravelmap.core.feature_operation import (
+    DATASET_CONFIGURED_OPERATION_RESOURCES,
+    EXECUTION_SCOPES_TAG,
+)
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,10 +33,6 @@ from kortravelmap.api.dagster_schema import (
 )
 from kortravelmap.api.response import make_meta
 from kortravelmap.api.settings import ApiSettings
-from kortravelmap.core.feature_operation import (
-    DATASET_CONFIGURED_OPERATION_RESOURCES,
-    EXECUTION_SCOPES_TAG,
-)
 
 __all__ = [
     "DagsterScheduleValidationError",

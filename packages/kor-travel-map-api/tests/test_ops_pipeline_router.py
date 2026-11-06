@@ -3601,6 +3601,7 @@ def test_admin_launch_ignores_unusable_execution_scope_declarations(scopes: str 
     assert tags == {"kor_travel_map.admin_manual_trigger": "admin-ui"}
 
 
+@pytest.mark.unit
 def test_admin_launch_ignores_scopes_for_operations_without_dataset_config() -> None:
     """dataset을 run_config로 고르지 않는 operation은 선언이 있어도 config를 만들지 않는다."""
     run_config, tags = dagster_schedule._admin_feature_operation_launch(
