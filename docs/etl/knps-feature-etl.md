@@ -18,7 +18,7 @@ provider 등록) + Amendment 2026-05-25 (keyless + file-only)** 기준.
 
 | 항목 | 값 |
 |------|----|
-| provider | `python-knps-api` (`digitie/python-knps-api`, commit `06da125f`) |
+| provider | `python-knps-api` (`digitie/python-knps-api`, commit `aa9acd67807c929cdcf8629c39f6bc0330f810d9`) |
 | import | `from knps import KnpsClient, FileDataset, FileArtifact, ...` (아래 §5) |
 | Python | `>=3.11` |
 | 인증 | **없음 (keyless)** — knps-api PR#4. data.go.kr 직접 다운로드 URL 사용. `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함 (ADR-028 amendment) |
@@ -145,7 +145,8 @@ ADR-027 generic notice_type (`access_restriction` / `fire_alert`)은 유효 —
 > `01020300`). 국립공원(경계 21건과 중복)·야생생물·상수원·특정도서·산림유전자원·해양보호구역 등은
 > 싣지 않는다. 바다 centroid로 역지오가 법정동을 못 주는 행은 run을 죽이지 않고 drop으로 센다.
 > 위험지역(POINT 83행)과 선형시설(일반명 671행)은 싣지 않고 schedule도 만들지 않는다. 대피소는 원천
-> ZIP이 중첩 SHP라 python-knps-api#17을 기다린다.
+> ZIP의 중첩 SHP Point 파싱은 python-knps-api#18/Map#1454에서 보완한다. 공식 원천 확인·운영 재적재는
+> [대피소 인계](../runbooks/knps-shelters-reimport.md)를 따른다. 합성 회귀는 공식 원천 검증을 대신하지 않는다.
 
 | 종류 | category 코드 | detail | maki |
 |------|---------------|--------|------|

@@ -1,0 +1,92 @@
+{
+  "date_kst": "2026-11-07",
+  "map_runtime_base": "70b86c5234e5f34b623945767e3db563a9edb9ef",
+  "upstream_ui_candidate": "375e7415d474b0746400ad506ee8decede585549",
+  "upstream_merge": "aa9acd67807c929cdcf8629c39f6bc0330f810d9",
+  "upstream_candidate_merge_tree": "2e74f5f7676552a052460b37ab983e7939761057",
+  "pinvi_runtime": "94e7b604a80c8b3e189ff814849756e7b8babe59",
+  "provider_installed_merge_matches_tested_candidate_bytes": true,
+  "provider_sha256": {
+    "knps/files.py": "86f670b473a65cdd3e4a981b7dd07ccfbd74de41609eff4903f0a264c1f1e17b",
+    "knps/place_shp.py": "4c0f005047f739e7d6e6308279b5a437d9cd381de1f5153006f23477e1226607",
+    "knps/models.py": "7261f179b96d1122682084161ba9fe1427ebc00f10a2e4e0ea0343c611d444f0",
+    "knps/records.py": "f618bcdaa7282318f30e880bc770415bd4e52ea98a95f82f4b714d3a21d5f6d9",
+    "knps/catalog.py": "422ac387f57e84222edd28125c9713b9936c31985aca22be65f1116ae4d64b85",
+    "knps/geometry.py": "cbfeb8e589a65c437b6f76ba230db687b58c799564cd9eddb7e52256c5aa8c25"
+  },
+  "map_inputs_sha256": {
+    "src/kortravelmap/providers/knps.py": "7f06d067e1738c9a198dc79df13cb5e3e57a2c7746cc156077d360091def39bd",
+    "src/kortravelmap/infra/feature_repo.py": "c51e3965eef692d8251ef937cbf7e709f721816bf948761bbc9a8de2e27ad183",
+    "src/kortravelmap/infra/feature_identity.py": "e9a656288f67d0637de0b673f9a62e0b9346f447e6cb649a46d31553bd0ea361",
+    "pyproject.toml": "804907350d13437f11cb447c620c33629852d1534d29bd227926e2acd75895bd",
+    "src/kortravelmap/providers/_provider_surface.json": "0ebaae9b52b246e5158bdad2c255360aa543bf6442721e456402c3220401d200",
+    "tests/unit/test_knps_shelters_public_records.py": "17230f9ba9ffe4d0bdb5ad9d81cd4138843bc03a8c1f7e76fa38f7d675cf87b7",
+    ".github/workflows/ci.yml": "27412ff275192434c9793c5d69cf3c9091c57e0a5aaf4c27b7b3fa4812461aec",
+    "scripts/knps_provider_requirement.py": "77648c475895d502a2eab35c5b4c98d2830c40afd835a9d3a452ab0e0b788989",
+    "scripts/generate_provider_surface_manifest.py": "84f90cbcf2cc197f97f62fdca9854e8e3aeacd84b99ddd0192b4e3c8a1d15d4f",
+    "scripts/verify-all-gates.sh": "7f907e3f443c2a92d87ec86f874d8d35b6d752e2e2946b835d36eed7abcd8dfc",
+    "tests/lint/test_provider_protocol_conformance.py": "c8bb4156f2ef897d27f486e937c684902c20af1c6f5dbe8a04472108b063f021"
+  },
+  "harness_sha256": {
+    "shelter_fixture.py": "9c0d656d99b3ec218b8702b2c3e44196e449c10b265881e99cd314854750eb23",
+    "shelters_live_stack.py": "713941156ba849d20c8858809310d9f787c2c2b209c43adeda68cb428f91d228",
+    "shelters_live_browser.cjs": "d793425337708f56915e90dc12c0e7906b236472f523c1c054c1eba813b371af"
+  },
+  "log_sha256": {
+    "map-baseline-2676c74.log": "2ddbdd55bffd78ad78b72b5eab413401f88446f4ec657ecda2fa3d042a7520e9",
+    "map-global-id-88-negative.log": "d181dbad57c952c787f409a53505873a41329f7e92738d16c24e1ffc65442789",
+    "map-public-records-375.log": "d6f14c74feec45c9b9ddd61e7d88caaf397d533aaf819bf07ee530e3523f29d8",
+    "map-merged-contracts.log": "f8d3131df08a12995ebb0510762b623a28d8f8ca051f9fabe1fe0df017ec4c90",
+    "live-controller-final.log": "5b163a2b85450b03b249dfaaf6a460e78a346cf25cd1ff4d8f1d023a85902cd9",
+    "map-install-merged.log": "73cbb1c4f5aed31926722831227d86907ddbb76fe89af5be31d2db1f686c41b5"
+  },
+  "negative_controls": {
+    "old_provider2676": "3 public ZIP parse failures",
+    "intermediate88": "4 global ID preservation failures"
+  },
+  "results": {
+    "merged_public_contract_and_gate_checks": 46,
+    "source375_public_contract": 4,
+    "database": {
+      "engine": "owned PostGIS18 + actual schema head437",
+      "fixture": "2 synthetic shelter Points plus excluded Polygon",
+      "reload_same_identity": true,
+      "features_after_coordinate_update": 2,
+      "longitude_delta_verified": 0.001
+    },
+    "ui": {
+      "ok": true,
+      "fixtureOnly": true,
+      "production_validation": false,
+      "tileFixtureOnly": true,
+      "httpProductMocks": false,
+      "browser": "156.0.8078.4",
+      "pageErrors": [],
+      "blockedExternalOrigins": [
+        "https://unpkg.com"
+      ],
+      "checks": [
+        "실제 Pinvi 로그인과 세션",
+        "WSL대피소1701 공개 검색·분류와 실제 지도 선택",
+        "WSL대피소1702 공개 검색·분류와 실제 지도 선택",
+        "대피소 상세 카드 실제 UI",
+        "Polygon 부지가 place로 공개되지 않음",
+        "브라우저는 Pinvi API 경유",
+        "배경 타일만 고정한 실제 MapLibre 렌더러"
+      ]
+    }
+  },
+  "fixture_boundaries": {
+    "source_download": "synthetic nested SHP bytes via public KnpsClient HTTP MockTransport",
+    "geocoder": "explicit fixture Address, not official geographic validation",
+    "product_http": "real Map and Pinvi APIs",
+    "background": "synthetic PNG only, real MapLibre Chromium SwiftShader",
+    "external_browser_requests": "blocked except owned HTTP and fixture tile handler"
+  },
+  "limitations": [
+    "Official current KNPS fields, PRJ/CPG and facility counts were not fetched/verified.",
+    "No production, SSH, provider live requests, schedule activation or Telegram.",
+    "Real provider catalog remains needs_verification.",
+    "Additional full local suite and exact final CI results are recorded in the final PR1454 check comment."
+  ]
+}

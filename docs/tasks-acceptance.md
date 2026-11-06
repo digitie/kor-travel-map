@@ -2889,7 +2889,7 @@ MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸
 - [x] `knps_linear_facilities`(671행): `시설명`·`라벨`만 있고 값이 `탐방로`·`탐방로12` 같은 일반명이다. 싣지 않는다(`unloaded_reason`, schedule 없음, 2026-11-06 소유자 결정).
 - [x] `knps_hazard_zones`(83행): 원천 geometry가 POINT다. area·notice(발령·유효기간 없음)·place(목적지 아님) 어느 쪽도 아니라 싣지 않는다.
 - [x] `knps_protected_areas`(1,516행): 여행 관련 지정만 `DESIG_ENG` 표로 category를 주어 싣고(국립공원 중복 제외), 역지오 실패 행은 drop으로 세어 버린다. 배포 뒤 재적재로 확인한다.
-- [ ] `knps_shelters`: 원천 ZIP이 중첩 SHP 묶음이다(`KnpsParseError`). python-knps-api#17 해소 뒤 핀을 올리고 재적재한다.
+- [ ] `knps_shelters`: provider PR18/Map1454의 중첩 SHP Point·전역ID·geometry 지문과 geo 핀으로 WSL 회귀를 검증한다. 공식 원천 필드·PRJ·CPG 확인과 운영 재적재·최종 UI는 [대피소 인계](runbooks/knps-shelters-reimport.md) 후 종료한다.
 
 ## T-EVENT-QUARANTINE-RELEASE
 
