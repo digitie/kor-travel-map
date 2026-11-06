@@ -3526,6 +3526,92 @@ def test_schedule_command_knps_manual_launch_persists_resolved_config_and_tags(
 
 
 @pytest.mark.unit
+def test_schedule_command_knps_dataset_schedule_runs_its_own_dataset(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """KNPS job 하나를 dataset별 schedule이 나눠 쓴다(#1450) — "지금 실행"은 그 schedule의
+    dataset을 돌려야 한다. job 기본값으로 띄우면 운영자 노브의 dataset이 대신 돈다."""
+    schedule_name = "feature_geometry_knps_records_hazard_zones_monthly_schedule"
+    job_name = "feature_geometry_knps_records_job"
+    scopes = (
+        '[{"provider":"python-knps-api","dataset_key":"knps_hazard_zones",'
+        '"sync_scope":"dataset_wide"}]'
+    )
+    launches: list[dict[str, Any]] = []
+
+    async def _fake_post_graphql(**kwargs: Any) -> dict[str, Any]:
+        if kwargs["query"] == dagster_schedule._DAGSTER_SCHEDULES_QUERY:
+            payload = _single_schedule_payload(schedule_name, job_name)
+            payload["data"]["repositoryOrError"]["schedules"][0]["tags"] = [
+                {"key": "kor_travel_map.execution_scopes", "value": scopes},
+                {"key": "kor_travel_map.operation_key", "value": job_name},
+            ]
+            return payload
+        assert kwargs["query"] == dagster_schedule._DAGSTER_LAUNCH_RUN_MUTATION
+        launches.append(kwargs["variables"])
+        return {
+            "data": {
+                "launchRun": {
+                    "__typename": "LaunchRunSuccess",
+                    "run": {"runId": "run-knps-hazard", "status": "QUEUED"},
+                }
+            }
+        }
+
+    monkeypatch.setattr(dagster_mod, "post_graphql", _fake_post_graphql)
+
+    response = client.post(
+        f"/v1/ops/pipeline/schedules/{schedule_name}/commands",
+        json={"command": "run"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]["status"] == "ok"
+    assert len(launches) == 1
+    execution_params = launches[0]["executionParams"]
+    assert execution_params["runConfigData"] == {
+        "resources": {
+            "knps_geometry_dataset_key": {"config": {"dataset_key": "knps_hazard_zones"}},
+            "knps_geometry_records": {"config": {"dataset_key": "knps_hazard_zones"}},
+        }
+    }
+    tags = {tag["key"]: tag["value"] for tag in execution_params["executionMetadata"]["tags"]}
+    assert tags["kor_travel_map.execution_scopes"] == scopes
+    assert tags["kor_travel_map.schedule_name"] == schedule_name
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    "scopes",
+    [
+        None,
+        "not json",
+        "[]",
+        '[{"dataset_key":"knps_trails"},{"dataset_key":"knps_hazard_zones"}]',
+        '[{"dataset_key":""}]',
+    ],
+)
+def test_admin_launch_ignores_unusable_execution_scope_declarations(scopes: str | None) -> None:
+    """선언이 없거나 하나가 아니면 job 정의가 정본이다 — 추측해서 dataset을 고르지 않는다."""
+    run_config, tags = dagster_schedule._admin_feature_operation_launch(
+        "feature_geometry_knps_records_job", scopes
+    )
+    assert run_config == {}
+    assert tags == {"kor_travel_map.admin_manual_trigger": "admin-ui"}
+
+
+def test_admin_launch_ignores_scopes_for_operations_without_dataset_config() -> None:
+    """dataset을 run_config로 고르지 않는 operation은 선언이 있어도 config를 만들지 않는다."""
+    run_config, tags = dagster_schedule._admin_feature_operation_launch(
+        "feature_place_krheritage_items_job",
+        '[{"provider":"python-krheritage-api","dataset_key":"x","sync_scope":"dataset_wide"}]',
+    )
+    assert run_config == {}
+    assert tags == {"kor_travel_map.admin_manual_trigger": "admin-ui"}
+
+
+@pytest.mark.unit
 @pytest.mark.parametrize("dataset_key", tuple(DATAGOKR_FILEDATA_DATASETS))
 def test_schedule_command_filedata_manual_launch_persists_exact_config_and_tags(
     dataset_key: str,
