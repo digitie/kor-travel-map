@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 from kortravelcommon.http import bounded_request
 from kortravelmap.core.dagster_asset_labels import DAGSTER_ASSET_KOREAN_LABELS
+from kortravelmap.core.feature_operation import EXECUTION_SCOPES_TAG
 
 from kortravelmap.api.dagster_schema import (
     DagsterAssetGroup,
@@ -461,37 +462,49 @@ def _parse_schedules(
         default_cron = default_cron_for_schedule(name, cron_schedule)
         pipeline_name = optional_string(entry.get("pipelineName"))
         override_cron = overrides.get(name)
-        schedules.append(
-            DagsterSchedule(
-                name=name,
-                description=optional_string(entry.get("description")),
-                pipeline_name=pipeline_name,
-                mode=optional_string(entry.get("mode")),
-                cron_schedule=cron_schedule,
-                default_cron_schedule=default_cron,
-                override_cron_schedule=override_cron,
-                effective_cron_schedule=cron_schedule,
-                override_saved=override_cron is not None,
-                override_effective=(
-                    None if override_cron is None else override_cron == cron_schedule
-                ),
-                execution_timezone=optional_string(entry.get("executionTimezone")),
-                default_status=optional_string(entry.get("defaultStatus")),
-                can_reset=bool(entry.get("canReset")),
-                status=optional_string(state.get("status")),
-                state_id=optional_string(state.get("id")),
-                selector_id=optional_string(state.get("selectorId")),
-                repository_name=optional_string(state.get("repositoryName")),
-                repository_location_name=optional_string(state.get("repositoryLocationName")),
-                schedule_note=_schedule_note(name, default_cron),
-                can_run_now=pipeline_name is not None,
-                disabled_reason=(
-                    None if pipeline_name is not None else "schedule job 이름이 없습니다."
-                ),
-                recent_ticks=_parse_ticks(state.get("ticks")),
-            )
+        schedule = DagsterSchedule(
+            name=name,
+            description=optional_string(entry.get("description")),
+            pipeline_name=pipeline_name,
+            mode=optional_string(entry.get("mode")),
+            cron_schedule=cron_schedule,
+            default_cron_schedule=default_cron,
+            override_cron_schedule=override_cron,
+            effective_cron_schedule=cron_schedule,
+            override_saved=override_cron is not None,
+            override_effective=(
+                None if override_cron is None else override_cron == cron_schedule
+            ),
+            execution_timezone=optional_string(entry.get("executionTimezone")),
+            default_status=optional_string(entry.get("defaultStatus")),
+            can_reset=bool(entry.get("canReset")),
+            status=optional_string(state.get("status")),
+            state_id=optional_string(state.get("id")),
+            selector_id=optional_string(state.get("selectorId")),
+            repository_name=optional_string(state.get("repositoryName")),
+            repository_location_name=optional_string(state.get("repositoryLocationName")),
+            schedule_note=_schedule_note(name, default_cron),
+            can_run_now=pipeline_name is not None,
+            disabled_reason=(
+                None if pipeline_name is not None else "schedule job 이름이 없습니다."
+            ),
+            recent_ticks=_parse_ticks(state.get("ticks")),
         )
+        schedule._execution_scopes_tag = _definition_tag(entry, EXECUTION_SCOPES_TAG)
+        schedules.append(schedule)
     return schedules
+
+
+def _definition_tag(entry: JsonDict, key: str) -> str | None:
+    """GraphQL ``tags { key value }`` 목록에서 한 key의 값을 꺼낸다(없으면 None)."""
+    raw_tags = entry.get("tags")
+    if not isinstance(raw_tags, list):
+        return None
+    for raw in raw_tags:
+        tag = as_dict(raw)
+        if tag.get("key") == key:
+            return optional_string(tag.get("value"))
+    return None
 
 
 def _parse_sensors(raw_sensors: list[object]) -> list[DagsterSensor]:

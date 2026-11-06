@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Any, Literal, TypeAlias
+from typing import Any, Final, Literal, TypeAlias
 
 from kortravelmap.core.sync_scope import parse_canonical_sync_scope
 
@@ -128,6 +128,12 @@ FEATURE_LOAD_DISABLED_OPERATION_KEYS: frozenset[str] = frozenset(
 )
 """자동 적재를 끈 operation — Dagster ``schedules.DISABLED_FEATURE_LOAD_OPERATION_KEYS``와 같은
 값이다(dagster 패키지 테스트가 동등을 고정한다). 릴리스 계획은 ``skipped(disabled)``로 남긴다."""
+
+EXECUTION_SCOPES_TAG: Final[str] = "kor_travel_map.execution_scopes"
+"""run이 실행할 scope를 자연키로 선언하는 Dagster tag. 없으면 operation 전체가 manifest다.
+
+Dagster 정의(schedule·job tag)가 싣고 run guard가 읽는다. admin "지금 실행"도 schedule의 이
+tag로 그 schedule이 고른 dataset을 다시 만든다(#1450)."""
 
 DATASET_CONFIGURED_OPERATION_RESOURCES: dict[str, tuple[str, ...]] = {
     "feature_place_knps_points_job": ("knps_point_dataset_key", "knps_point_records"),

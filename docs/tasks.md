@@ -158,6 +158,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   `provider_event_required_details_v1` 격리는 원천이 기간·장소를 채워도 풀리지 않는다(#1444 리뷰). 해제 조건은 acceptance.
 
+- [ ] T-KNPS-DATA-GAPS — **KNPS dataset 넷이 0건 또는 실패로 적재되지 않는다**
+
+  선형시설은 이름 열이 없어 0건, 위험지역은 원천이 POINT라 area spec에서 0건이다. 보호지역은 해상 134건 역지오 실패로 strict 실패, 대피소는 원천 ZIP에 CSV가 없다(#1450). 해제 조건은 acceptance.
+
 - [ ] T-PG18-CI — **공용 PG 18 대응: CI를 PG18 lane으로 바꾸고 fresh-install catalog 가정 정리**
 
   ADR-118(proposed): CI 통합 suite를 공용 instance digest(PG18 + PostGIS 3.6) 한 lane으로 바꾸고 PG16 catalog 가정을

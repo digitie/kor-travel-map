@@ -2882,6 +2882,15 @@ MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸
 - [ ] 지역명 접두("안동 ", "영주")를 뗀 이름 일치를 이름 점수에 반영할지 결정하고 근거를 적는다.
 - [ ] 회귀 테스트가 두 쌍을 고정한다.
 
+## T-KNPS-DATA-GAPS
+
+#1450 운영 1회 적재(2026-11-06)에서 KNPS dataset 넷이 들어오지 않았다. 원인은 읽기 전용 재현으로 확인했다.
+
+- [ ] `knps_linear_facilities`(671행): `시설명`·`라벨`만 있고 값이 `탐방로`·`탐방로12` 같은 일반명이다. 적재할지·이름 규칙을 소유자가 정한다.
+- [ ] `knps_hazard_zones`(83행): 원천 geometry가 POINT다. place로 바꿀지 제외할지 정한다.
+- [ ] `knps_protected_areas`(1,516행): 해상 보호구역 134건 centroid가 바다라 역지오 결과가 없어 strict 검증이 run을 실패시킨다. area의 bjd 없는 적재 허용 여부를 정한다.
+- [ ] `knps_shelters`: 원천 ZIP에 CSV/TXT가 없다(`KnpsParseError`). python-knps-api 쪽 원천 갱신을 확인한다.
+
 ## T-EVENT-QUARANTINE-RELEASE
 
 #1447은 기간·장소가 없는 KHA·축제 행사를 `provider_event_required_details_v1`로 격리하고 자동 해제하지 않는다. 운영 원본

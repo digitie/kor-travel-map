@@ -40,6 +40,7 @@ from kortravelmap.dagster.schedules import (
     DISABLED_FEATURE_LOAD_SCHEDULES,
     FEATURE_LOAD_SCHEDULE_SPECS,
     FEATURE_LOAD_SCHEDULES,
+    KNPS_DATASET_SCHEDULE_SPECS,
     KST_TIMEZONE,
     knps_schedule_binding,
 )
@@ -264,7 +265,7 @@ def test_feature_load_schedules_registered_with_kst_cron() -> None:
     # **명시적으로 확인**한다 — 목록이 조용히 늘면 이 단언이 먼저 빨개져야 한다.
     expected = {
         spec.schedule_name: spec
-        for spec in FEATURE_LOAD_SCHEDULE_SPECS
+        for spec in (*FEATURE_LOAD_SCHEDULE_SPECS, *KNPS_DATASET_SCHEDULE_SPECS)
         if spec.schedule_name not in DISABLED_FEATURE_LOAD_SCHEDULES
     }
     disabled = {

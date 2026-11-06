@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Final
 
 from kortravelcommon.dagster import RecoveryPolicy
 from kortravelmap.core.sync_scope import DATASET_WIDE_SYNC_SCOPE
 from kortravelmap.providers.datagokr_file_data import DATAGOKR_FILEDATA_DATASETS
+from kortravelmap.providers.knps import KNPS_GEOMETRY_DATASETS, KNPS_PLACE_DATASETS
 from kortravelmap.providers.knps import PROVIDER_NAME as KNPS_PROVIDER_NAME
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -151,7 +152,20 @@ def knps_schedule_binding(
     그 tag가 그때 고정되므로 dataset key도 같은 시점이어야 한다 — cron override를
     import 시점에 읽는 ``schedule_overrides.cron_for_schedule``과 같은 계약이다.
     """
-    dataset_key = str(getattr(KorTravelMapSettings(), setting_name))
+    return knps_dataset_binding(
+        dataset_key=str(getattr(KorTravelMapSettings(), setting_name)),
+        dataset_key_resource=dataset_key_resource,
+        records_resource=records_resource,
+    )
+
+
+def knps_dataset_binding(
+    *,
+    dataset_key: str,
+    dataset_key_resource: str,
+    records_resource: str,
+) -> KnpsScheduleBinding:
+    """KNPS dataset 1개의 run_config와 실행 manifest 선언을 한 값에서 만든다."""
     return KnpsScheduleBinding(
         dataset_key=dataset_key,
         run_config={
@@ -257,8 +271,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
     # KNPS: ``0089_tvn33_expand_seed``가 이 두 operation에 각각 dataset 5개를
     # 결박하지만 asset은 run 1회에 ``knps_*_dataset_key`` resource가 가리키는 1개만
     # 적재한다. 그래서 실행 manifest와 run_config를 한 값에서 함께 만들어 선언과
-    # 실행이 갈라질 수 없게 한다. 나머지 4개 dataset은 이 schedule이 적재하지
-    # 않는다 — feature update request 경로로만 갱신된다.
+    # 실행이 갈라질 수 없게 한다. 이 spec은 운영자 노브가 고른 dataset을 돌리고,
+    # 나머지 dataset은 :data:`KNPS_DATASET_SCHEDULE_SPECS`가 하나씩 돌린다(#1450).
     FeatureLoadScheduleSpec(
         asset=feature_place_knps_points,
         job_name="feature_place_knps_points_job",
@@ -380,7 +394,94 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description="MCST 파일데이터 CSV 등록 dataset place Feature 월 1회 적재(slug별 분리 적재).",
     ),
 )
-"""현재 구현된 Feature provider asset의 기본 schedule 사양."""
+"""현재 구현된 Feature provider asset의 기본 schedule 사양(job 1개당 1개)."""
+
+
+@dataclass(frozen=True)
+class _KnpsScheduleFamily:
+    """KNPS operation 1개 — dataset 여럿이 결박된 job과 그 dataset registry."""
+
+    job_name: str
+    dataset_keys: frozenset[str]
+    default: KnpsScheduleBinding
+    dataset_key_resource: str
+    records_resource: str
+
+
+_KNPS_SCHEDULE_FAMILIES: Final[tuple[_KnpsScheduleFamily, ...]] = (
+    _KnpsScheduleFamily(
+        job_name="feature_place_knps_points_job",
+        dataset_keys=frozenset(KNPS_PLACE_DATASETS),
+        default=_KNPS_POINT_SCHEDULE,
+        dataset_key_resource="knps_point_dataset_key",
+        records_resource="knps_point_records",
+    ),
+    _KnpsScheduleFamily(
+        job_name="feature_geometry_knps_records_job",
+        dataset_keys=frozenset(KNPS_GEOMETRY_DATASETS),
+        default=_KNPS_GEOMETRY_SCHEDULE,
+        dataset_key_resource="knps_geometry_dataset_key",
+        records_resource="knps_geometry_records",
+    ),
+)
+
+_KNPS_DATASET_SCHEDULE_STEP_MINUTES: Final[int] = 2
+"""같은 KNPS job의 dataset schedule 사이 간격(분). GEO_HEAVY pool에서 차례로 돈다."""
+
+
+def _shift_cron_minute(cron_schedule: str, minutes: int) -> str:
+    """``M H dom mon dow`` cron의 분만 민다. 시를 넘기면 거부한다(조용히 겹치지 않게)."""
+    minute, *rest = cron_schedule.split()
+    shifted = int(minute) + minutes
+    if shifted > 59:
+        raise ValueError(f"cron 분 {minute}+{minutes}가 시를 넘는다: {cron_schedule!r}")
+    return " ".join((str(shifted), *rest))
+
+
+def _knps_dataset_schedule_specs() -> tuple[FeatureLoadScheduleSpec, ...]:
+    """KNPS operation에 결박된 dataset 중 기본 spec이 돌리지 않는 것마다 schedule 1개.
+
+    기대 집합은 provider registry에서 유도한다 — 운영자 노브가 고른 dataset은 기본
+    spec이 이미 돌리므로 빠진다. 같은 job을 쓰고 run_config·실행 manifest만 다르다.
+    """
+    base = {spec.job_name: spec for spec in FEATURE_LOAD_SCHEDULE_SPECS}
+    specs: list[FeatureLoadScheduleSpec] = []
+    for family in _KNPS_SCHEDULE_FAMILIES:
+        spec = base[family.job_name]
+        prefix = family.job_name.removesuffix("_job")
+        others = sorted(family.dataset_keys - {family.default.dataset_key})
+        for index, dataset_key in enumerate(others, start=1):
+            binding = knps_dataset_binding(
+                dataset_key=dataset_key,
+                dataset_key_resource=family.dataset_key_resource,
+                records_resource=family.records_resource,
+            )
+            specs.append(
+                replace(
+                    spec,
+                    schedule_name=(
+                        f"{prefix}_{dataset_key.removeprefix('knps_')}_monthly_schedule"
+                    ),
+                    cron_schedule=_shift_cron_minute(
+                        spec.cron_schedule, index * _KNPS_DATASET_SCHEDULE_STEP_MINUTES
+                    ),
+                    description=f"{spec.description} dataset {dataset_key}.",
+                    run_config=binding.run_config,
+                    execution_scopes=binding.execution_scopes,
+                )
+            )
+    return tuple(specs)
+
+
+KNPS_DATASET_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
+    _knps_dataset_schedule_specs()
+)
+"""KNPS dataset별 추가 schedule 사양. job은 :data:`FEATURE_LOAD_SCHEDULE_SPECS`의 것을 쓴다.
+
+job 정의(와 그 tag·기본 config)는 기본 spec의 것이다 — admin "지금 실행"이 이 schedule의
+dataset을 돌리려면 schedule tag의 실행 manifest를 읽어 run_config를 만든다
+(``kortravelmap.api.dagster_schedule_service``).
+"""
 
 
 def _resolved_run_config(spec: FeatureLoadScheduleSpec) -> dict[str, object]:
@@ -551,10 +652,12 @@ job을 직접 돌리는 백필은 여전히 된다(그 경로는 이 runner를 �
 막는 것은 **자동으로 도는 것**뿐이고, 큐는 자동이다.
 """
 
+_FEATURE_LOAD_JOBS_BY_NAME: Final = {job.name: job for job in FEATURE_LOAD_JOBS}
+
 FEATURE_LOAD_SCHEDULES: Final = [
     ScheduleDefinition(
         name=spec.schedule_name,
-        job=job,
+        job=_FEATURE_LOAD_JOBS_BY_NAME[spec.job_name],
         cron_schedule=cron_for_schedule(spec.schedule_name, spec.cron_schedule),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,
@@ -563,7 +666,7 @@ FEATURE_LOAD_SCHEDULES: Final = [
         tags=_feature_load_schedule_tags(spec),
         description=spec.description,
     )
-    for spec, job in zip(FEATURE_LOAD_SCHEDULE_SPECS, FEATURE_LOAD_JOBS, strict=True)
+    for spec in (*FEATURE_LOAD_SCHEDULE_SPECS, *KNPS_DATASET_SCHEDULE_SPECS)
     if spec.schedule_name not in DISABLED_FEATURE_LOAD_SCHEDULES
 ]
 """Provider별 KST cron schedule 목록.
