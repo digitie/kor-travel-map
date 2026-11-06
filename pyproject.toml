@@ -130,7 +130,7 @@ providers = [
   # 구현됨). SHP(area)/route는 후속. 다른 provider처럼 본 lib 본 의존 X (Protocol).
   # 16e3954: trails vertex 행 → 코스 단위 LINESTRING 조립(provider #9/PR#10,
   # T-212e 실측 — knps_trails 적재 0건(#407) 해소, 910,110 vertex → 625 코스).
-  "python-knps-api @ git+https://github.com/digitie/python-knps-api.git@2676c745301ff4ce69ff9adc5e0fed7ef9db624d",
+  "python-knps-api[geo] @ git+https://github.com/digitie/python-knps-api.git@2676c745301ff4ce69ff9adc5e0fed7ef9db624d",
   # 70814c9 상향(2026-09-19). 표준데이터 gateway가 어느 시점부터 response
   # 래퍼(`{header, body}`)를 벗고 payload를 그대로 내려서, 산림 표준데이터
   # 3종이 파싱 단계에서 전멸했다. 좁은 가지 하나로 두 모양을 다 받는다

@@ -72,6 +72,26 @@ jobs:
         run: |
           pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
+      - name: Install pinned KNPS geometry provider (contract regression)
+        # 실제 public client의 중첩 SHP 계약을 검사한다. providers 전체나 별도 SHA를
+        # 다시 선언하지 않고 pyproject의 단일 pin + geo extra를 설치한다.
+        run: |
+          python - <<'PYCODE'
+          import subprocess
+          import sys
+          import tomllib
+          from pathlib import Path
+          project = tomllib.loads(Path("pyproject.toml").read_text())
+          providers = project["project"]["optional-dependencies"]["providers"]
+          matches = [requirement for requirement in providers if requirement.startswith("python-knps-api[geo] @ ")]
+          if len(matches) != 1:
+              raise SystemExit("expected one pinned KNPS geo provider requirement")
+          subprocess.run(
+              [sys.executable, "-m", "pip", "install", "-c", "docker/constraints-dagster.txt", matches[0]],
+              check=True,
+          )
+          PYCODE
+
       - name: Run unit + lint tests
         run: |
           pytest tests/unit tests/lint -q \
