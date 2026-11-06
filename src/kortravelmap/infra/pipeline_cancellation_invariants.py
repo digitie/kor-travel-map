@@ -184,14 +184,14 @@ def _validate_resolved_member(
             raise PipelineCancellationInvariantError(
                 "queued cancellation requires the explicit no-run DB path"
             )
-    elif member.initial_status in _BASE_TERMINAL_STATUSES:
-        if (
-            member.result != "already_terminal"
-            or member.terminal_status != member.initial_status
-        ):
-            raise PipelineCancellationInvariantError(
-                "initially terminal member must remain already_terminal"
-            )
+    elif member.initial_status in _BASE_TERMINAL_STATUSES and (
+        member.result != "already_terminal"
+        or member.terminal_status != member.initial_status
+    ):
+        # 마지막 분기라 조건을 합쳐도 흐름이 같다(ruff 0.17 SIM102).
+        raise PipelineCancellationInvariantError(
+            "initially terminal member must remain already_terminal"
+        )
 
 
 def _retry_capable_member(
