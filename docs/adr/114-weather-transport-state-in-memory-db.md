@@ -549,6 +549,9 @@ schedule을 켠 뒤 journal에 적는다.
   는다(단기예보 15 MB 세대 하루 8번 등) — `save 60 10000` 조건이 자주 걸려 n150 디스크 대기가 늘 수 있다. schedule을 켠 뒤
   `INFO persistence`(`rdb_changes_since_last_save`·`aof_rewrites`)와 n150 iowait를 재서 journal에 적고, 필요하면 Manager에서
   AOF를 끄거나 save 조건을 늦춘다(D7 설계 리뷰 의견과 같다).
+  **2026-11-07 실측·적용**: 사흘에 53 GB(rdb_saves 788·aof_rewrites 79), 같은 sda의 flush 대기로 세대 쓰기가 2초
+  timeout. Manager #583이 `appendonly no`·`save 900 1`과 code-server 쓰기 timeout 10초(API 2초 유지)로 바꾸고, Map은 교체
+  쓰기를 그 자리에서 유한 재시도한다(응답 잃은 교체는 포인터 CAS로 판정).
 - **회전 순서**: #1365(transport 가격 추이 T4)와 이 PR이 **둘 다** 머지된 뒤의 정확한 Map commit에서 PinVi가 admin·service
   스냅샷을 **한 번** 재vendor한다(1단계 transport 재vendor 대기분을 함께 접는다) → 그다음 Manager pair 핀.
 - weather 쪽 선행: W1~W5가 든 weather 배포와 `KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED=true`(API·code-server 함께),
