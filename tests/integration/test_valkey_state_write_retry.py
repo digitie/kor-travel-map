@@ -2,12 +2,14 @@
 
 2026-11-07 n150: 디스크 flush 대기로 Valkey 응답이 2초 socket timeout을 넘겨
 ``weather_state_daily_summaries``가 step 재시도 세 번 모두 ``Valkey 세대 쓰기 실패: TimeoutError``로
-죽었다. step 재시도는 원천을 처음부터 다시 받는다 — 같은 디스크 대기 속에서 같은 자리에서 다시 죽는다.
-그래서 교체 쓰기(세대 묶음·meta·포인터 교체·잠금 해제) 하나하나를 그 자리에서 다시 한다.
+죽었다. step 재시도는 원천을 처음부터 다시 받는다 — 같은 디스크 대기 속에서 같은 자리에서
+다시 죽는다. 그래서 교체 쓰기(세대 묶음·meta·포인터 교체·잠금 해제) 하나하나를
+그 자리에서 다시 한다.
 
 - 세대 묶음·meta 쓰기는 같은 값을 다시 쓰는 것이라 반쯤 적용됐어도 안전하다.
 - 포인터 교체는 기존 compare-and-set이 판정한다: 응답만 잃었다면 포인터가 이미 **이 세대**이고
-  그것은 성공이다(이 세대 id는 이 적재만 만든다). 포인터가 그대로면 다시 교체하고, 다른 세대면 충돌이다.
+  그것은 성공이다(이 세대 id는 이 적재만 만든다). 포인터가 그대로면 다시 교체하고, 다른
+  세대면 충돌이다.
 - OOM(``noeviction``)·미설정은 기다려도 풀리지 않으므로 다시 하지 않는다.
 """
 
@@ -97,7 +99,10 @@ async def _swap(store: ValkeyStateStore, dataset: str, count: int) -> str:
 def _flaky_pipelines(
     store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch, *, failures: int, apply_first: bool
 ) -> dict[str, int]:
-    """pipeline ``execute``가 앞의 ``failures``번 timeout을 낸다. ``apply_first``면 적용한 뒤 응답만 잃는다."""
+    """pipeline ``execute``가 앞의 ``failures``번 timeout을 낸다.
+
+    ``apply_first``면 적용한 뒤 응답만 잃는다.
+    """
     state = {"left": failures, "calls": 0}
     original = store.client.pipeline
 
@@ -225,8 +230,8 @@ async def test_out_of_memory_is_not_retried(
 async def test_lock_release_timeout_is_retried(
     store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
 ) -> None:
-    """해제가 한 번 timeout나도 잠금이 TTL(run 상한+취소 유예)까지 남아 다음 step 재시도를 'locked'로
-    건너뛰게 하지 않는다."""
+    """해제가 한 번 timeout나도 잠금이 TTL(run 상한+취소 유예)까지 남아
+    다음 step 재시도를 'locked'로 건너뛰게 하지 않는다."""
     original = store.client.eval
     failures = {"left": 1}
 

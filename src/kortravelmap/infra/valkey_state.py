@@ -90,9 +90,9 @@ _WRITE_BATCH: Final[int] = 500
 """pipeline 하나에 싣는 엔티티 수."""
 
 DEFAULT_WRITE_RETRIES: Final[int] = 3
-"""교체 쓰기 하나(세대 묶음·meta·포인터 교체·잠금 해제)가 일시 실패(연결·timeout)했을 때 그 자리에서
-다시 하는 횟수. step 재시도는 원천을 처음부터 다시 받으므로 디스크 대기 같은 짧은 정지는 여기서 넘긴다
-(2026-11-07 n150)."""
+"""교체 쓰기 하나(세대 묶음·meta·포인터 교체·잠금 해제)가 일시 실패(연결·timeout)했을 때
+그 자리에서 다시 하는 횟수. step 재시도는 원천을 처음부터 다시 받으므로 디스크 대기 같은
+짧은 정지는 여기서 넘긴다(2026-11-07 n150)."""
 
 DEFAULT_WRITE_RETRY_BASE_DELAY_SECONDS: Final[float] = 1.0
 """재시도 대기의 기준. 1·2·4초로 늘어난다(:data:`WRITE_RETRY_MAX_DELAY_SECONDS` 상한)."""
@@ -735,7 +735,8 @@ class ValkeyStateStore:
     # -- 쓰기 ------------------------------------------------------------------
 
     async def _retrying(self, what: str, attempt: Callable[[], Awaitable[_T]]) -> _T:
-        """``attempt``를 일시 실패(재시도 가능한 :class:`StateStoreUnavailable`)에 한해 유한 번 다시 한다.
+        """``attempt``를 일시 실패(재시도 가능한 :class:`StateStoreUnavailable`)에 한해
+        유한 번 다시 한다.
 
         ``attempt``는 다시 해도 결과가 같아야 한다(같은 값 쓰기, CAS 스크립트). OOM·미설정·응답
         오류는 ``retryable``이 아니므로 바로 올린다. 횟수를 다 쓰면 마지막 실패를 그대로 올린다 —
@@ -783,8 +784,8 @@ class ValkeyStateStore:
                         await _resolve(self._client.eval(_RELEASE_LOCK_SCRIPT, 1, key, token))
 
                 try:
-                    # 해제는 내 token일 때만 지우는 CAS라 다시 해도 같다. 못 풀면 잠금이 TTL(run 상한 +
-                    # 취소 유예)까지 남아 step 재시도가 'locked'로 건너뛴다.
+                    # 해제는 내 token일 때만 지우는 CAS라 다시 해도 같다. 못 풀면 잠금이
+                    # TTL(run 상한 + 취소 유예)까지 남아 step 재시도가 'locked'로 건너뛴다.
                     await self._retrying("잠금 해제", _release)
                 except StateStoreError:
                     _LOGGER.warning("%s 적재 잠금을 풀지 못했다 — TTL로 풀린다.", dataset)
@@ -975,7 +976,10 @@ class ValkeyStateStore:
         geo_values: list[Any],
         lookup: dict[str, str],
     ) -> None:
-        """세대 키에 한 묶음을 쓴다. 같은 값을 다시 쓰는 것이라 앞선 시도가 반쯤 적용됐어도 결과가 같다."""
+        """세대 키에 한 묶음을 쓴다.
+
+        같은 값을 다시 쓰는 것이라 앞선 시도가 반쯤 적용됐어도 결과가 같다.
+        """
         touched = [keys["items"], keys["ids"]]
         async with (
             _unavailable_on_error("세대 쓰기"),
