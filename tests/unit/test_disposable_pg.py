@@ -51,7 +51,7 @@ class _Modern(_Legacy):
 
 
 def test_command_turns_off_every_durability_knob() -> None:
-    for knob in ("fsync=off", "synchronous_commit=off", "full_page_writes=off"):
+    for knob in ("fsync=off", "synchronous_commit=off", "full_page_writes=off", "max_wal_size="):
         assert f"-c {knob}" in NONDURABLE_COMMAND
 
 

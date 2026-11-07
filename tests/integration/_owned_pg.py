@@ -57,7 +57,9 @@ def scalar_container():
             memswap_limit="1536m",
             nano_cpus=2_000_000_000,
             pids_limit=256,
-        )
+        ),
+        # tmpfs는 컨테이너 메모리 cgroup에 잡힌다 — mem_limit(1536m) 안에 들도록 1g로 묶는다.
+        size="1g",
     )
     wrapped = None
     try:

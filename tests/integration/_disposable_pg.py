@@ -26,6 +26,8 @@ from typing import Any, Final
 #: 모든 테스트 cluster의 서버 명령. 이미지 entrypoint가 ``postgres``를 그대로 실행한다.
 NONDURABLE_COMMAND: Final = (
     "postgres -c fsync=off -c synchronous_commit=off -c full_page_writes=off"
+    # WAL도 tmpfs(=메모리)에 산다 — 기본 1GB까지 쌓이지 않게 묶는다.
+    " -c max_wal_size=256MB"
 )
 
 #: PG18+ 공식 이미지의 ``VOLUME``(PGDATA는 그 아래 ``18/docker``).
