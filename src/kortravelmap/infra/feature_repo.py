@@ -1577,9 +1577,11 @@ ORDER BY candidate.feature_id ASC
 # 두 arm은 서로소다 — point arm은 route/area kind를 배제하고, subtype 행은
 # ``(feature_id, kind)`` FK로 route/area만 가리킨다. geometry 대표점은 MATERIALIZED
 # CTE에서 한 번만 계산한다(조립 view의 COALESCE geom 산출식이 술어·ST_X·ST_Y에서
-# 세 번 평가되던 것을 없앤다). geometry가 bbox 안에 완전히 들어 있으면(``@``는
-# envelope 포함, 직사각형 bbox라 정확) 교차 = 원 geometry이므로 비싼 ST_Intersection을
-# 건너뛴다. 요청 kind에 route/area가 없으면 geometry arm 자체를 싣지 않는다.
+# 세 번 평가되던 것을 없앤다). geometry가 bbox 안에 완전히 들어 있으면 교차 = 원
+# geometry이므로 비싼 ST_Intersection을 건너뛴다 — ``@``(float4로 바깥 반올림된 bbox
+# 비교)는 값싼 선별일 뿐이라 exact ``ST_CoveredBy``로 확정해 대표점이 bbox 밖으로 나갈
+# 수 없게 한다. 요청 kind에 route/area가 없으면 geometry arm 자체를 싣지 않고, 한쪽만
+# 있으면 다른 subtype 표는 kind 상수 가드로 건너뛴다.
 def _cluster_bbox_sql(code_col: str, *, include_geometry_arm: bool = True) -> str:
     env = _bbox_envelope_sql()
     point_arm = f"""
@@ -1614,6 +1616,7 @@ WITH geometry_candidates AS MATERIALIZED (
       f.{code_col} AS cluster_key,
       CASE
         WHEN bbox_hit.geom OPERATOR(x_extension.@) {env}
+          AND x_extension.ST_CoveredBy(bbox_hit.geom, {env})
           THEN x_extension.ST_PointOnSurface(bbox_hit.geom)
         ELSE x_extension.ST_PointOnSurface(
           x_extension.ST_Intersection(bbox_hit.geom, {env})
@@ -1622,13 +1625,15 @@ WITH geometry_candidates AS MATERIALIZED (
   FROM (
     SELECT bbox_hit_route.feature_id, bbox_hit_route.geom
     FROM feature.feature_route_geometries AS bbox_hit_route
-    WHERE bbox_hit_route.public_ready
+    WHERE (CAST(:kinds AS text[]) IS NULL OR 'route' = ANY(CAST(:kinds AS text[])))
+      AND bbox_hit_route.public_ready
       AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
       AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})
     UNION ALL
     SELECT bbox_hit_area.feature_id, bbox_hit_area.geom
     FROM feature.feature_areas AS bbox_hit_area
-    WHERE bbox_hit_area.public_ready
+    WHERE (CAST(:kinds AS text[]) IS NULL OR 'area' = ANY(CAST(:kinds AS text[])))
+      AND bbox_hit_area.public_ready
       AND bbox_hit_area.geom OPERATOR(x_extension.&&) {env}
       AND x_extension.ST_Intersects(bbox_hit_area.geom, {env})
   ) AS bbox_hit

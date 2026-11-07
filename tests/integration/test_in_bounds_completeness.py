@@ -408,6 +408,18 @@ async def test_cluster_point_only_kinds_skip_geometry_candidates(
     결과는 geometry arm을 실은 SQL과 같아야 한다 — kind 필터가 어차피 거른다.
     """
     await _seed(migrated_session)
+    # 행정코드가 있는 bbox 밖 point — 이전 SQL에서 coord arm이 거짓이 되어 OR의
+    # geometry 후보 배열(InitPlan)까지 평가하게 만드는 행이다(plan과 무관하게).
+    await _ins_point(
+        migrated_session,
+        label="ib:place-out-coded",
+        lon=128.0,
+        lat=38.0,
+        sido_code="11",
+        sigungu_code="11110",
+        legal_dong_code="1111010100",
+    )
+    await migrated_session.flush()
     await migrated_session.execute(text("SET LOCAL track_functions = 'all'"))
     before = await _xact_postgis_calls(migrated_session, "st_intersects")
 

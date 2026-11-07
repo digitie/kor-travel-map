@@ -27,6 +27,7 @@ from kortravelmap.infra.admin_feature_repo import (  # noqa: PLC2701 - EXPLAIN �
     _ENRICHMENT_REVIEW_STATUS_SQL,
 )
 from kortravelmap.infra.feature_repo import (  # noqa: PLC2701 - EXPLAIN 대상
+    _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT,
     _CLUSTER_BBOX_SQL_BY_UNIT,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
@@ -967,14 +968,14 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
     for cluster_unit in ("sido", "sigungu", "eupmyeondong"):
         cluster = await _explain_json(
             migrated_session,
-            _CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit],
+            _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT[cluster_unit],
             params,
         )
         _assert_uses_index(cluster, *_COORD_SPATIAL_INDEXES)
 
     representative = await _explain_json(
         migrated_session,
-        _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
+        _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
         params,
         force_index=False,
     )

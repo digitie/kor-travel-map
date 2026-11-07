@@ -47,7 +47,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn  # noqa: E402
 from kortravelmap.infra.feature_repo import (  # noqa: E402
-    _CLUSTER_BBOX_SQL_BY_UNIT,
+    _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
     _GET_PUBLIC_FEATURES_BY_IDS_SQL,
@@ -204,7 +204,7 @@ def _build_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
         ),
         Viewport(
             name="전국 low-zoom cluster(sido)",
-            sql=_CLUSTER_BBOX_SQL_BY_UNIT["sido"],
+            sql=_CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sido"],
             params=_NATIONWIDE_LOWZOOM_BBOX,
             min_returned_rows=1,
             terminal_limit_parameter="limit",
