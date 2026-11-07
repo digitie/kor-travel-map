@@ -1,3 +1,10 @@
+## 2026-11-07 — KNPS 대피소 미적재 후속
+
+- 사용자가 다른 미적재 KNPS로 범위를 확대했다. Claude Code의1452/1453과 완료된1회 적재·정책 결정을 먼저 읽고 대피소 upstream17만 남았음을 확인했다.
+- source draft18과 Map draft1454를 먼저 만들었다. 구 공급자2676c74의 실제 public ZIP 파싱 실패3건, 첫 수정88f의 전역ID 불일치4건을 소비자에서 재현했다. source 보안·지리 리뷰 지적은 provider에서 보완하고 소비자 wrapper는 추가하지 않는다.
+- geo 선택 의존성을 명시하며 핀 생성기·프로토콜 검사도 extras를 읽게 했다. CI 설치와 로컬 unit 게이트는 pyproject의 단일 KNPS 요구사항을 사용한다. 연결 회귀42개가 통과했다.
+- 운영/SSH/provider live 호출은 없고 공식 fixture 검증과 운영 재적재는 Claude Code에게 남긴다.
+
 ## 2026-11-06 — #1450 Option A: KNPS 보호지역 지정 allowlist
 
 - 보호지역은 여행 관련 지정만 DESIG_ENG 표로 category를 준다(국립공원 중복 제외). 역지오 실패 행은 drop으로 센다.

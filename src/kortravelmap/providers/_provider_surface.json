@@ -1402,7 +1402,17 @@
             "raw",
             "road_address",
             "source_id",
+            "source_member",
             "tel"
+          ]
+        },
+        "knps.place_shp._Budget": {
+          "external_bases": [],
+          "members": [
+            "include",
+            "members",
+            "records",
+            "unpacked"
           ]
         },
         "knps.records.HeaderIndex": {
@@ -1413,7 +1423,7 @@
         }
       },
       "package": "knps",
-      "pinned_sha": "2676c745301ff4ce69ff9adc5e0fed7ef9db624d"
+      "pinned_sha": "aa9acd67807c929cdcf8629c39f6bc0330f810d9"
     },
     "python-krforest-api": {
       "classes": {

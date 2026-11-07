@@ -1,3 +1,8 @@
+## 2026-11-07 — KNPS 미적재 확대: 대피소 원천 소비
+
+- 최신1452/1453의 스케줄·보호지역 정책을 보존한다. 공급자PR18의 중첩 SHP Point·CRS/인코딩·전역ID·geometry-only 지문과 손상 입력 경계를 보완하고 소비자draft1454에서 실제 병합 핀으로 연결한다.
+- WSL 합성 public client→Map 변환, 격리PG→실제 Map/Pinvi API/Chromium 검증을 진행한다. 공식 원천·운영 적재·최종 UI는 docs/runbooks/knps-shelters-reimport.md의 Claude Code 인계를 따른다.
+
 ## 2026-11-06 — #1450 Option A 보호지역 allowlist
 
 - 보호지역 지정 allowlist·역지오 실패 행 drop, 위험지역·선형시설 미적재(schedule 6개로 줄어듦). 배포 뒤 보호지역 재적재.

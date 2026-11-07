@@ -72,6 +72,11 @@ jobs:
         run: |
           pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
+      - name: Install pinned KNPS geometry provider (contract regression)
+        # 실제 public client의 중첩 SHP 계약을 검사한다. providers 전체나 별도 SHA를
+        # 다시 선언하지 않고 pyproject의 단일 pin + geo extra를 설치한다.
+        run: pip install -c docker/constraints-dagster.txt "$(python scripts/knps_provider_requirement.py)"
+
       - name: Run unit + lint tests
         run: |
           pytest tests/unit tests/lint -q \

@@ -62,7 +62,7 @@ PROVIDERS_WITHOUT_PROTOCOLS: Mapping[str, str] = {
 """
 
 _PIN_RE = re.compile(
-    r'"(?P<dist>python-[a-z0-9-]+)\s*@\s*git\+https://github\.com/digitie/'
+    r'"(?P<dist>python-[a-z0-9-]+)(?:\[[A-Za-z0-9_, -]+\])?\s*@\s*git\+https://github\.com/digitie/'
     r"(?P<repo>[a-z0-9-]+)\.git@(?P<sha>[0-9a-f]{40})\""
 )
 
