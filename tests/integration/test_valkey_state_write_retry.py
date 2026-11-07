@@ -57,7 +57,7 @@ def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     async def _sleep(delay: float) -> None:
         recorded.append(delay)
 
-    monkeypatch.setattr(valkey_state, "_retry_sleep", _sleep)
+    monkeypatch.setattr(valkey_state, "_retry_sleep", _sleep, raising=False)
     return recorded
 
 
