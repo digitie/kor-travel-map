@@ -1,6 +1,6 @@
 ## 2026-11-07 — #1455 저배율 cluster 집계
 
-- in-bounds cluster SQL 재작성(마이그레이션·OpenAPI 변경 없음). 배포 뒤 PinVi zoom 6~8 응답을 다시 잰다. worker 수는 DB 연결 상한 55 안에서 별도 판단(이번 PR 범위 밖).
+- in-bounds cluster SQL 재작성(마이그레이션·OpenAPI 변경 없음). 배포 뒤 PinVi zoom 6~8 응답을 다시 잰다. worker 증설은 하지 않는다 — 느린 요청이 작은 요청을 막지 않음을 실측했고, worker마다 DB 풀(최대 15)·process-local 공개 키 캐시가 생긴다.
 
 ## 2026-11-07 — KNPS 미적재 확대: 대피소 원천 소비
 

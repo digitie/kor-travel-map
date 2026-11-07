@@ -8,7 +8,7 @@ p95 실행시간·shared read blocks·응답 bytes budget을 기록한다. CI에
 
 대표 viewport (§8.3):
   - 서울 밀집 in-bounds
-  - 전국 low-zoom cluster rollup
+  - 전국 low-zoom cluster rollup (place/event = point-only, 전 kind = geometry arm 포함)
   - 100km nearby
   - 상용 검색어 search
   - 200건 batch
@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn  # noqa: E402
 from kortravelmap.infra.feature_repo import (  # noqa: E402
     _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT,
+    _CLUSTER_BBOX_SQL_BY_UNIT,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
     _GET_PUBLIC_FEATURES_BY_IDS_SQL,
@@ -206,6 +207,14 @@ def _build_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
             name="전국 low-zoom cluster(sido)",
             sql=_CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sido"],
             params=_NATIONWIDE_LOWZOOM_BBOX,
+            min_returned_rows=1,
+            terminal_limit_parameter="limit",
+        ),
+        # #1455 — route/area를 포함하는 요청은 geometry arm이 실린 SQL을 탄다.
+        Viewport(
+            name="전국 low-zoom cluster(sido, 전 kind)",
+            sql=_CLUSTER_BBOX_SQL_BY_UNIT["sido"],
+            params={**_NATIONWIDE_LOWZOOM_BBOX, "kinds": None},
             min_returned_rows=1,
             terminal_limit_parameter="limit",
         ),
