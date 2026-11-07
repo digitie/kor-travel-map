@@ -42,6 +42,7 @@ from kortravelmap.infra.curation_repo import _lock_collection_keys
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
 from kortravelmap.infra.evidence_export import canonical_jsonl, export_evidence
 from kortravelmap.infra.evidence_restore import invalidate_leases, rebuild_acked_through
+from tests.integration._disposable_pg import make_nondurable
 from tests.integration._postgis_image import SHARED_GLIBC_POSTGIS_IMAGE
 from tests.integration.conftest import postgis_image
 
@@ -241,7 +242,7 @@ def lane_pg_container() -> Iterator[Any]:
     except ImportError:
         pytest.skip("testcontainers not installed")
     try:
-        container = PostgresContainer(image)
+        container = make_nondurable(PostgresContainer(image))
     except Exception as exc:  # pragma: no cover — Docker 없음
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
     with container:

@@ -36,6 +36,7 @@ from tests.integration._application_300_bootstrap import (
     _TEST_RUNTIME_PASSWORD,
     upgrade_head_with_application_300_bootstrap,
 )
+from tests.integration._disposable_pg import make_nondurable
 from tests.integration._postgis_image import resolve_postgis_image
 
 if TYPE_CHECKING:
@@ -93,7 +94,7 @@ def pg_container() -> Iterator[Any]:
             "integration tests."
         )
     try:
-        container = container_cls(image)
+        container = make_nondurable(container_cls(image))
     except Exception as exc:  # pragma: no cover — Docker not available
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
     with container:

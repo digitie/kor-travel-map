@@ -22,6 +22,7 @@ from sqlalchemy import text
 from sqlalchemy.engine import make_url
 
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
+from tests.integration._disposable_pg import make_nondurable
 from tests.integration.conftest import postgis_image
 
 if TYPE_CHECKING:
@@ -70,7 +71,7 @@ def pg_container() -> Iterator[Any]:
     # 안에 두면 이 모듈 19건(S1 리허설)이 두 lane 모두에서 조용히 skip으로 바뀐다.
     from testcontainers.core.labels import create_labels
     try:
-        container = PostgresContainer(image)
+        container = make_nondurable(PostgresContainer(image))
     except Exception as exc:  # pragma: no cover — Docker not available
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
 

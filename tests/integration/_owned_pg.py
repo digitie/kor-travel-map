@@ -29,6 +29,7 @@ from tests.integration._application_300_bootstrap import (
     _TEST_RUNTIME_PASSWORD,
     upgrade_head_with_application_300_bootstrap,
 )
+from tests.integration._disposable_pg import make_nondurable
 from tests.integration._postgis_image import resolve_postgis_image
 
 _ROOT = Path(__file__).resolve().parents[2]
@@ -41,7 +42,8 @@ def scalar_container():
     if os.environ.get("DOCKER_HOST") and not os.environ["DOCKER_HOST"].startswith("unix://"):
         raise RuntimeError("scalar projection tests require the local owned Docker daemon")
     identity = uuid4().hex
-    container = (
+    # with_kwargs는 kwargs를 대체하므로 비내구 설정(make_nondurable)은 체인 바깥에서 마지막에 얹는다.
+    container = make_nondurable(
         PostgresContainer(
             resolve_postgis_image(),
             username="scalar_admin",

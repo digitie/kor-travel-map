@@ -33,6 +33,7 @@ from kortravelmap.infra.feature_alias_map_repo import (
     compute_feature_alias_map_checksum,
     fetch_feature_alias_map_page,
 )
+from tests.integration._disposable_pg import make_nondurable
 from tests.integration._postgis_image import SHARED_GLIBC_POSTGIS_IMAGE
 
 if TYPE_CHECKING:
@@ -69,7 +70,7 @@ def glibc_pg_container() -> Any:
     except ImportError:
         pytest.skip("testcontainers not installed")
     try:
-        container = PostgresContainer(_GLIBC_POSTGIS_IMAGE)
+        container = make_nondurable(PostgresContainer(_GLIBC_POSTGIS_IMAGE))
     except Exception as exc:  # pragma: no cover — Docker 없음
         pytest.skip(f"PostgresContainer init failed (Docker?): {exc}")
     with container:
