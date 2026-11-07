@@ -281,8 +281,8 @@ async def test_the_swap_wide_budget_caps_retries_across_operations(
             await _swap(store, "r.budget", 3)
     finally:
         await client.aclose()
-    # 5 + 10 = 15초 뒤 다음 대기 20초가 30초 예산을 넘는다.
-    assert sleeps == [5.0, 10.0]
+    # 대기는 5·10·20…이지만 한 번 상한 8초 → 5·8·8·8(=29초). 다음 8초가 30초 예산을 넘는다.
+    assert sleeps == [5.0, 8.0, 8.0, 8.0]
     assert valkey_state.WRITE_RETRY_BUDGET_SECONDS == 30.0
 
 
