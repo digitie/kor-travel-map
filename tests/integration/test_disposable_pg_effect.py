@@ -22,7 +22,8 @@ def _run(pg_container: Any, *argv: str) -> str:
 
 
 def _psql(pg_container: Any, query: str) -> str:
-    return _run(pg_container, "psql", "-XtA", "-U", str(pg_container.username), "-d", "postgres", "-c", query)
+    role = str(pg_container.username)
+    return _run(pg_container, "psql", "-XtA", "-U", role, "-d", "postgres", "-c", query)
 
 
 @pytest.mark.parametrize("knob", ["fsync", "synchronous_commit", "full_page_writes"])

@@ -73,7 +73,7 @@ def test_tmpfs_size_absent_is_default_and_malformed_fails() -> None:
     assert resolve_tmpfs_size({}) == DEFAULT_TMPFS_SIZE
     assert resolve_tmpfs_size({TMPFS_SIZE_ENV: "512m"}) == "512m"
     for bad in ("", "3", "3G", "0g", "3gb", " 3g"):
-        with pytest.raises(ValueError):
+        with pytest.raises(ValueError, match=TMPFS_SIZE_ENV):
             resolve_tmpfs_size({TMPFS_SIZE_ENV: bad})
 
 

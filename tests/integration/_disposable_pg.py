@@ -9,8 +9,8 @@ cluster는
 - 데이터 디렉터리 부모(``/var/lib/postgresql``, PG18+ 이미지의 ``VOLUME``)를 크기 상한이 있는
   tmpfs로 덮는다(익명 volume이 생기지 않는다).
 
-크기 상한은 ``KTM_TEST_PG_TMPFS_SIZE``(기본 ``3g``)로 바꾼다. 비어 있거나 모양이 틀린 값은 기본값으로
-조용히 바꾸지 않고 실패한다. 상한은 RAM 예약이 아니다 — tmpfs는 쓴 만큼만 메모리를 쓴다.
+크기 상한은 ``KTM_TEST_PG_TMPFS_SIZE``(기본 ``3g``)로 바꾼다. 비어 있거나 모양이 틀린 값은
+기본값으로 조용히 바꾸지 않고 실패한다. 상한은 RAM 예약이 아니다 — tmpfs는 쓴 만큼만 메모리를 쓴다.
 
 PG17 이하 이미지는 ``VOLUME``이 ``/var/lib/postgresql/data``라 이 마운트로 덮이지 않는다. Map의
 통합 suite는 PG18+만 쓴다(ADR-118, ``_postgis_image.py``).

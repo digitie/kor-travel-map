@@ -42,7 +42,7 @@ def scalar_container():
     if os.environ.get("DOCKER_HOST") and not os.environ["DOCKER_HOST"].startswith("unix://"):
         raise RuntimeError("scalar projection tests require the local owned Docker daemon")
     identity = uuid4().hex
-    # with_kwargs는 kwargs를 대체하므로 비내구 설정(make_nondurable)은 체인 바깥에서 마지막에 얹는다.
+    # with_kwargs는 kwargs를 대체한다 — 비내구 설정은 체인 바깥에서 마지막에 얹는다.
     container = make_nondurable(
         PostgresContainer(
             resolve_postgis_image(),
