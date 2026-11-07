@@ -124,7 +124,7 @@ async def _seed_custom_public_features(
 def _assert_report_cardinality(report: dict[str, object]) -> None:
     viewports = report["viewports"]
     assert isinstance(viewports, list)
-    assert len(viewports) == 5
+    assert len(viewports) == 6
     for viewport in viewports:
         assert isinstance(viewport, dict)
         assert viewport["matched_rows"] >= viewport["returned_rows"]

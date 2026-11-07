@@ -24,6 +24,7 @@ from sqlalchemy import event, text
 
 from kortravelmap.infra.feature_repo import (
     _CATEGORY_FEATURE_COUNTS_SQL,
+    _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT,
     _CLUSTER_BBOX_SQL_BY_UNIT,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
@@ -271,20 +272,27 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
     ),
     HotQuery(
         "cluster rollup — sido",
-        _CLUSTER_BBOX_SQL_BY_UNIT["sido"],
+        _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sido"],
         _CLUSTER_PARAMS,
         expected_indexes=_COORD_SPATIAL,
     ),
     HotQuery(
         "cluster rollup — sigungu",
-        _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
+        _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
         _CLUSTER_PARAMS,
         expected_indexes=_COORD_SPATIAL,
     ),
     HotQuery(
         "cluster rollup — eupmyeondong",
-        _CLUSTER_BBOX_SQL_BY_UNIT["eupmyeondong"],
+        _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["eupmyeondong"],
         _CLUSTER_PARAMS,
+        expected_indexes=_COORD_SPATIAL,
+    ),
+    # route/area를 포함하는(kind 미지정) 요청은 geometry arm이 실린 SQL을 탄다(#1455).
+    HotQuery(
+        "cluster rollup — sigungu (all kinds)",
+        _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
+        {**_CLUSTER_PARAMS, "kinds": None},
         expected_indexes=_COORD_SPATIAL,
     ),
 )

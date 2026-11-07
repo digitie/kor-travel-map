@@ -1569,32 +1569,98 @@ ORDER BY candidate.feature_id ASC
 # 대표 좌표는 coord, geometry 후보의 대표 좌표는 bbox와 실제 교차한 부분 위의 점이다.
 # 따라서 centroid가 bbox 밖인 route/area도 count와 지도 마커에 빠지지 않으며 반환
 # marker는 bbox 내부에 있다. ``ST_Transform``은 술어에 넣지 않는다(ADR-012).
-def _cluster_bbox_sql(code_col: str) -> str:
+#
+# #1455 — 후보 술어는 ``_bbox_candidate_predicate_sql``과 같은 두 arm(point coord /
+# subtype geometry)이지만, 집계에서는 OR + ``feature_id = ANY(ARRAY(...))`` 대신 두
+# arm을 UNION ALL로 나눈다. 전국 bbox에서 geometry 후보 배열이 5.8만 개가 되자
+# ``= ANY``가 행마다 배열을 선형 탐색해(5.8만×5.8만) route/area 집계가 15~30 s 걸렸다.
+# 두 arm은 서로소다 — point arm은 route/area kind를 배제하고, subtype 행은
+# ``(feature_id, kind)`` FK로 route/area만 가리킨다. geometry 대표점은 MATERIALIZED
+# CTE에서 한 번만 계산한다(조립 view의 COALESCE geom 산출식이 술어·ST_X·ST_Y에서
+# 세 번 평가되던 것을 없앤다). geometry가 bbox 안에 완전히 들어 있으면 교차 = 원
+# geometry이므로 비싼 ST_Intersection을 건너뛴다. 포함 판정은 좌표에서 다시 계산한
+# double 범위(ST_XMin 등 — box3d 변환은 좌표로 계산한다)를 bbox와 비교한다. ``@``는
+# float4로 바깥 반올림된 캐시 bbox라 bbox를 아주 조금 벗어난 geometry도 포함으로 보고
+# 대표점이 bbox 밖에 찍힐 수 있고, ``ST_CoveredBy``는 같은 판정에 GEOS relate를 불러
+# 전국 5.4만 건에서 0.4 s를 더 썼다(prod 실측). 요청 kind에 route/area가 없으면
+# geometry arm 자체를 싣지 않고, 한쪽만 있으면 다른 subtype 표는 kind 가드로 건너뛴다.
+def _cluster_bbox_sql(code_col: str, *, include_geometry_arm: bool = True) -> str:
     env = _bbox_envelope_sql()
-    return f"""
-WITH bbox_candidates AS (
+    point_arm = f"""
   SELECT
       f.{code_col} AS cluster_key,
-      CASE
-        WHEN f.kind IN ('route', 'area') AND f.geom IS NOT NULL
-          THEN x_extension.ST_PointOnSurface(
-            x_extension.ST_Intersection(f.geom, {env})
-          )
-        ELSE f.coord
-      END AS marker_coord
+      x_extension.ST_X(f.coord) AS lon,
+      x_extension.ST_Y(f.coord) AS lat
   FROM feature.public_features AS f
   WHERE f.{code_col} IS NOT NULL
-    AND {_bbox_candidate_predicate_sql("f")}
+    AND f.coord IS NOT NULL
+    AND f.coord OPERATOR(x_extension.&&) {env}
+    AND f.kind NOT IN ('route', 'area')
 {_bbox_attribute_filter_sql("f")}
-{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}"""
+    if not include_geometry_arm:
+        return f"""
+WITH bbox_candidates AS ({point_arm}
 )
 SELECT
     cluster_key,
     count(*) AS feature_count,
-    avg(x_extension.ST_X(marker_coord)) AS lon,
-    avg(x_extension.ST_Y(marker_coord)) AS lat
+    avg(lon) AS lon,
+    avg(lat) AS lat
 FROM bbox_candidates
-WHERE marker_coord IS NOT NULL
+GROUP BY cluster_key
+ORDER BY feature_count DESC, cluster_key
+LIMIT :limit
+"""
+    return f"""
+WITH geometry_candidates AS MATERIALIZED (
+  SELECT
+      f.{code_col} AS cluster_key,
+      CASE
+        WHEN x_extension.ST_XMin(bbox_hit.geom) >= CAST(:min_lon AS double precision)
+          AND x_extension.ST_XMax(bbox_hit.geom) <= CAST(:max_lon AS double precision)
+          AND x_extension.ST_YMin(bbox_hit.geom) >= CAST(:min_lat AS double precision)
+          AND x_extension.ST_YMax(bbox_hit.geom) <= CAST(:max_lat AS double precision)
+          THEN x_extension.ST_PointOnSurface(bbox_hit.geom)
+        ELSE x_extension.ST_PointOnSurface(
+          x_extension.ST_Intersection(bbox_hit.geom, {env})
+        )
+      END AS marker_coord
+  FROM (
+    SELECT bbox_hit_route.feature_id, bbox_hit_route.geom
+    FROM feature.feature_route_geometries AS bbox_hit_route
+    WHERE (CAST(:kinds AS text[]) IS NULL OR 'route' = ANY(CAST(:kinds AS text[])))
+      AND bbox_hit_route.public_ready
+      AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
+      AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})
+    UNION ALL
+    SELECT bbox_hit_area.feature_id, bbox_hit_area.geom
+    FROM feature.feature_areas AS bbox_hit_area
+    WHERE (CAST(:kinds AS text[]) IS NULL OR 'area' = ANY(CAST(:kinds AS text[])))
+      AND bbox_hit_area.public_ready
+      AND bbox_hit_area.geom OPERATOR(x_extension.&&) {env}
+      AND x_extension.ST_Intersects(bbox_hit_area.geom, {env})
+  ) AS bbox_hit
+  JOIN feature.public_features AS f ON f.feature_id = bbox_hit.feature_id
+  WHERE f.{code_col} IS NOT NULL
+{_bbox_attribute_filter_sql("f")}
+{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+),
+bbox_candidates AS ({point_arm}
+  UNION ALL
+  SELECT
+      cluster_key,
+      x_extension.ST_X(marker_coord) AS lon,
+      x_extension.ST_Y(marker_coord) AS lat
+  FROM geometry_candidates
+  WHERE marker_coord IS NOT NULL
+)
+SELECT
+    cluster_key,
+    count(*) AS feature_count,
+    avg(lon) AS lon,
+    avg(lat) AS lat
+FROM bbox_candidates
 GROUP BY cluster_key
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
@@ -1610,6 +1676,14 @@ _CLUSTER_CODE_COL: Final[dict[str, str]] = {
 _CLUSTER_BBOX_SQL_BY_UNIT: Final[dict[str, str]] = {
     unit: _cluster_bbox_sql(col) for unit, col in _CLUSTER_CODE_COL.items()
 }
+# 요청 kind에 route/area가 없을 때 쓰는 point-only 변형(#1455). geometry arm이 없을
+# 뿐 point arm은 위 SQL과 글자까지 같다 — kind 필터가 geometry 후보를 어차피 전부
+# 걸러내므로 결과 집합이 같다.
+_CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT: Final[dict[str, str]] = {
+    unit: _cluster_bbox_sql(col, include_geometry_arm=False)
+    for unit, col in _CLUSTER_CODE_COL.items()
+}
+_GEOMETRY_FEATURE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
 
 
 async def cluster_features_in_bbox(
@@ -1639,16 +1713,22 @@ async def cluster_features_in_bbox(
         raise ValueError("cluster_unit must be one of sido, sigungu, eupmyeondong")
     if min_lon > max_lon or min_lat > max_lat:
         raise ValueError("invalid bbox")
+    normalized_kinds = _normalized_filter(kinds)
+    sql_by_unit = (
+        _CLUSTER_BBOX_SQL_BY_UNIT
+        if normalized_kinds is None or not _GEOMETRY_FEATURE_KINDS.isdisjoint(normalized_kinds)
+        else _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT
+    )
     rows = (
         (
             await session.execute(
-                text(_CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit]),
+                text(sql_by_unit[cluster_unit]),
                 {
                     "min_lon": min_lon,
                     "min_lat": min_lat,
                     "max_lon": max_lon,
                     "max_lat": max_lat,
-                    "kinds": _normalized_filter(kinds),
+                    "kinds": normalized_kinds,
                     "categories": _normalized_filter(categories),
                     "providers": _normalized_filter(providers),
                     "limit": limit,
