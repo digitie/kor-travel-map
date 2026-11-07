@@ -1578,10 +1578,12 @@ ORDER BY candidate.feature_id ASC
 # ``(feature_id, kind)`` FK로 route/area만 가리킨다. geometry 대표점은 MATERIALIZED
 # CTE에서 한 번만 계산한다(조립 view의 COALESCE geom 산출식이 술어·ST_X·ST_Y에서
 # 세 번 평가되던 것을 없앤다). geometry가 bbox 안에 완전히 들어 있으면 교차 = 원
-# geometry이므로 비싼 ST_Intersection을 건너뛴다 — ``@``(float4로 바깥 반올림된 bbox
-# 비교)는 값싼 선별일 뿐이라 exact ``ST_CoveredBy``로 확정해 대표점이 bbox 밖으로 나갈
-# 수 없게 한다. 요청 kind에 route/area가 없으면 geometry arm 자체를 싣지 않고, 한쪽만
-# 있으면 다른 subtype 표는 kind 상수 가드로 건너뛴다.
+# geometry이므로 비싼 ST_Intersection을 건너뛴다. 포함 판정은 좌표에서 다시 계산한
+# double 범위(ST_XMin 등 — box3d 변환은 좌표로 계산한다)를 bbox와 비교한다. ``@``는
+# float4로 바깥 반올림된 캐시 bbox라 bbox를 아주 조금 벗어난 geometry도 포함으로 보고
+# 대표점이 bbox 밖에 찍힐 수 있고, ``ST_CoveredBy``는 같은 판정에 GEOS relate를 불러
+# 전국 5.4만 건에서 0.4 s를 더 썼다(prod 실측). 요청 kind에 route/area가 없으면
+# geometry arm 자체를 싣지 않고, 한쪽만 있으면 다른 subtype 표는 kind 가드로 건너뛴다.
 def _cluster_bbox_sql(code_col: str, *, include_geometry_arm: bool = True) -> str:
     env = _bbox_envelope_sql()
     point_arm = f"""
@@ -1615,8 +1617,10 @@ WITH geometry_candidates AS MATERIALIZED (
   SELECT
       f.{code_col} AS cluster_key,
       CASE
-        WHEN bbox_hit.geom OPERATOR(x_extension.@) {env}
-          AND x_extension.ST_CoveredBy(bbox_hit.geom, {env})
+        WHEN x_extension.ST_XMin(bbox_hit.geom) >= CAST(:min_lon AS double precision)
+          AND x_extension.ST_XMax(bbox_hit.geom) <= CAST(:max_lon AS double precision)
+          AND x_extension.ST_YMin(bbox_hit.geom) >= CAST(:min_lat AS double precision)
+          AND x_extension.ST_YMax(bbox_hit.geom) <= CAST(:max_lat AS double precision)
           THEN x_extension.ST_PointOnSurface(bbox_hit.geom)
         ELSE x_extension.ST_PointOnSurface(
           x_extension.ST_Intersection(bbox_hit.geom, {env})
