@@ -48,7 +48,9 @@ async def store(valkey_url: str) -> AsyncIterator[ValkeyStateStore]:
     )
     client = make_valkey_client(settings)
     await client.flushdb()
-    active = ValkeyStateStore(client, build_ttl_seconds=120, retire_grace_seconds=60)
+    active = ValkeyStateStore(
+        client, build_ttl_seconds=120, retire_grace_seconds=60, write_retry_base_delay_seconds=0.0
+    )
     try:
         yield active
     finally:

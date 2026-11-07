@@ -23,11 +23,13 @@ Valkey 오류는 :class:`StateStoreUnavailable`(연결·timeout — 재시도 �
 
 from __future__ import annotations
 
+import asyncio
+import functools
 import inspect
 import logging
 import math
 import secrets
-from collections.abc import AsyncIterator, Awaitable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -86,6 +88,20 @@ RECENT_COUNTS_WINDOW: Final[int] = 6
 
 _WRITE_BATCH: Final[int] = 500
 """pipeline 하나에 싣는 엔티티 수."""
+
+DEFAULT_WRITE_RETRIES: Final[int] = 3
+"""교체 쓰기 하나(세대 묶음·meta·포인터 교체·잠금 해제)가 일시 실패(연결·timeout)했을 때 그 자리에서
+다시 하는 횟수. step 재시도는 원천을 처음부터 다시 받으므로 디스크 대기 같은 짧은 정지는 여기서 넘긴다
+(2026-11-07 n150)."""
+
+DEFAULT_WRITE_RETRY_BASE_DELAY_SECONDS: Final[float] = 1.0
+"""재시도 대기의 기준. 1·2·4초로 늘어난다(:data:`WRITE_RETRY_MAX_DELAY_SECONDS` 상한)."""
+
+WRITE_RETRY_MAX_DELAY_SECONDS: Final[float] = 8.0
+"""재시도 대기 한 번의 상한."""
+
+_retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+"""재시도 대기(테스트가 바꾼다)."""
 
 GEO_LAT_LIMIT: Final[float] = 85.05112878
 """Valkey GEO가 받는 위도 절댓값 상한. 넘는 좌표는 GEO에 넣지 않는다(값에는 남는다)."""
@@ -460,13 +476,19 @@ class ValkeyStateStore:
         build_ttl_seconds: int = DEFAULT_BUILD_TTL_SECONDS,
         retire_grace_seconds: int = DEFAULT_RETIRE_GRACE_SECONDS,
         write_batch: int = _WRITE_BATCH,
+        write_retries: int = DEFAULT_WRITE_RETRIES,
+        write_retry_base_delay_seconds: float = DEFAULT_WRITE_RETRY_BASE_DELAY_SECONDS,
     ) -> None:
         if build_ttl_seconds < 1 or retire_grace_seconds < 1 or write_batch < 1:
             raise ValueError("TTL·batch는 1 이상이어야 한다.")
+        if write_retries < 0 or write_retry_base_delay_seconds < 0:
+            raise ValueError("재시도 횟수·대기는 0 이상이어야 한다.")
         self._client = client
         self._build_ttl = build_ttl_seconds
         self._grace = retire_grace_seconds
         self._batch = write_batch
+        self._retries = write_retries
+        self._retry_base = write_retry_base_delay_seconds
 
     @property
     def client(self) -> Redis:
@@ -712,6 +734,32 @@ class ValkeyStateStore:
 
     # -- 쓰기 ------------------------------------------------------------------
 
+    async def _retrying(self, what: str, attempt: Callable[[], Awaitable[_T]]) -> _T:
+        """``attempt``를 일시 실패(재시도 가능한 :class:`StateStoreUnavailable`)에 한해 유한 번 다시 한다.
+
+        ``attempt``는 다시 해도 결과가 같아야 한다(같은 값 쓰기, CAS 스크립트). OOM·미설정·응답
+        오류는 ``retryable``이 아니므로 바로 올린다. 횟수를 다 쓰면 마지막 실패를 그대로 올린다 —
+        그다음은 step 재시도의 몫이다.
+        """
+        tries = 0
+        while True:
+            try:
+                return await attempt()
+            except StateStoreUnavailable as exc:
+                if not exc.retryable or tries >= self._retries:
+                    raise
+                delay = min(self._retry_base * 2**tries, WRITE_RETRY_MAX_DELAY_SECONDS)
+                tries += 1
+                _LOGGER.warning(
+                    "Valkey %s 일시 실패(%s) — %.1f초 뒤 다시 한다(%d/%d).",
+                    what,
+                    exc,
+                    delay,
+                    tries,
+                    self._retries,
+                )
+                await _retry_sleep(delay)
+
     @asynccontextmanager
     async def load_lock(
         self, dataset: str, *, ttl_seconds: int | None = None
@@ -729,9 +777,15 @@ class ValkeyStateStore:
             yield acquired
         finally:
             if acquired:
-                try:
+
+                async def _release() -> None:
                     async with _unavailable_on_error("잠금 해제"):
                         await _resolve(self._client.eval(_RELEASE_LOCK_SCRIPT, 1, key, token))
+
+                try:
+                    # 해제는 내 token일 때만 지우는 CAS라 다시 해도 같다. 못 풀면 잠금이 TTL(run 상한 +
+                    # 취소 유예)까지 남아 step 재시도가 'locked'로 건너뛴다.
+                    await self._retrying("잠금 해제", _release)
                 except StateStoreError:
                     _LOGGER.warning("%s 적재 잠금을 풀지 못했다 — TTL로 풀린다.", dataset)
 
@@ -793,16 +847,23 @@ class ValkeyStateStore:
                 "source_status": source_status or "",
                 "source_etag": source_etag or "",
             }
-            async with (
-                _unavailable_on_error("메타 쓰기"),
-                self._client.pipeline(transaction=False) as pipe,
-            ):
-                pipe.hset(keys["meta"], mapping=meta_fields)
-                pipe.expire(keys["meta"], self._build_ttl)
-                await pipe.execute()
-            await self._flip(
-                dataset, keys, previous_generation, generation, reset_recent=allow_shrink
-            )
+
+            async def _write_meta() -> None:
+                async with (
+                    _unavailable_on_error("메타 쓰기"),
+                    self._client.pipeline(transaction=False) as pipe,
+                ):
+                    pipe.hset(keys["meta"], mapping=meta_fields)
+                    pipe.expire(keys["meta"], self._build_ttl)
+                    await pipe.execute()
+
+            async def _flip_once() -> None:
+                await self._flip(
+                    dataset, keys, previous_generation, generation, reset_recent=allow_shrink
+                )
+
+            await self._retrying("메타 쓰기", _write_meta)
+            await self._retrying("포인터 교체", _flip_once)
         except BaseException:
             await self._discard_unless_current(dataset, keys, generation)
             raise
@@ -851,6 +912,10 @@ class ValkeyStateStore:
             )
         status = int(outcome[0])
         detail = _text(outcome[1]) if len(outcome) > 1 else ""
+        if status == 0 and detail == generation:
+            # 앞선 시도의 스크립트는 돌았고 응답만 잃었다(재시도). 이 세대 id는 이 적재만 만들므로
+            # 포인터가 이 세대라는 것은 그 교체가 이미 반영됐다는 뜻이다 — 다시 반영하지 않는다.
+            return
         if status == 0:
             raise StateSwapConflict(
                 f"{dataset} 포인터가 교체 직전에 바뀌었다(기대 {previous_generation!r}, "
@@ -885,34 +950,48 @@ class ValkeyStateStore:
     ) -> tuple[int, int]:
         geo_count = 0
         lookup_seen: set[str] = set()
-        async with _unavailable_on_error("세대 쓰기"):
-            for offset in range(0, len(items), self._batch):
-                chunk = items[offset : offset + self._batch]
-                touched = [keys["items"], keys["ids"]]
-                async with self._client.pipeline(transaction=False) as pipe:
-                    pipe.hset(keys["items"], mapping={item.id: item.value for item in chunk})
-                    pipe.zadd(keys["ids"], {item.id: 0 for item in chunk})
-                    geo_values: list[Any] = []
-                    for item in chunk:
-                        if item.coord is not None and _geo_ok(item.coord):
-                            geo_values.extend((item.coord[0], item.coord[1], item.id))
-                    if geo_values:
-                        pipe.geoadd(keys["geo"], geo_values)
-                        geo_count += len(geo_values) // 3
-                        touched.append(keys["geo"])
-                    lookup: dict[str, str] = {}
-                    for item in chunk:
-                        for lookup_key in item.lookup_keys:
-                            if lookup_key and lookup_key not in lookup_seen:
-                                lookup_seen.add(lookup_key)
-                                lookup[lookup_key] = item.id
-                    if lookup:
-                        pipe.hset(keys["lookup"], mapping=lookup)
-                        touched.append(keys["lookup"])
-                    for key in touched:
-                        pipe.expire(key, self._build_ttl)
-                    await pipe.execute()
+        for offset in range(0, len(items), self._batch):
+            chunk = items[offset : offset + self._batch]
+            geo_values: list[Any] = []
+            for item in chunk:
+                if item.coord is not None and _geo_ok(item.coord):
+                    geo_values.extend((item.coord[0], item.coord[1], item.id))
+            geo_count += len(geo_values) // 3
+            lookup: dict[str, str] = {}
+            for item in chunk:
+                for lookup_key in item.lookup_keys:
+                    if lookup_key and lookup_key not in lookup_seen:
+                        lookup_seen.add(lookup_key)
+                        lookup[lookup_key] = item.id
+            await self._retrying(
+                "세대 쓰기", functools.partial(self._write_chunk, keys, chunk, geo_values, lookup)
+            )
         return geo_count, len(lookup_seen)
+
+    async def _write_chunk(
+        self,
+        keys: dict[str, str],
+        chunk: list[StateItem],
+        geo_values: list[Any],
+        lookup: dict[str, str],
+    ) -> None:
+        """세대 키에 한 묶음을 쓴다. 같은 값을 다시 쓰는 것이라 앞선 시도가 반쯤 적용됐어도 결과가 같다."""
+        touched = [keys["items"], keys["ids"]]
+        async with (
+            _unavailable_on_error("세대 쓰기"),
+            self._client.pipeline(transaction=False) as pipe,
+        ):
+            pipe.hset(keys["items"], mapping={item.id: item.value for item in chunk})
+            pipe.zadd(keys["ids"], {item.id: 0 for item in chunk})
+            if geo_values:
+                pipe.geoadd(keys["geo"], geo_values)
+                touched.append(keys["geo"])
+            if lookup:
+                pipe.hset(keys["lookup"], mapping=lookup)
+                touched.append(keys["lookup"])
+            for key in touched:
+                pipe.expire(key, self._build_ttl)
+            await pipe.execute()
 
     async def retire_other_versions(self, dataset: str) -> int:
         """이 데이터셋의 **옛** 스키마 버전 만료 없는 키에 grace TTL을 건다(D2). 건 개수를 돌려준다.

@@ -1,6 +1,10 @@
+## 2026-11-07 — Valkey 상태 쓰기 재시도
+
+- 다음 회전에 묶는다(소유자). writer socket timeout 10 s는 Manager env(code-server만), API는 2 s 유지.
 ## 2026-11-07 — 통합 테스트 PG 비내구·tmpfs
 
 - 테스트 cluster는 전부 `make_nondurable`을 거친다(새 fixture도). tmpfs가 모자라면 `KTM_TEST_PG_TMPFS_SIZE`.
+||||||| parent of 50c5aa850 (fix(valkey): 상태 쓰기 일시 실패를 교체 안에서 유한 재시도한다)
 
 ## 2026-11-07 — #1455 저배율 cluster 집계
 

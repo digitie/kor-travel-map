@@ -1,5 +1,9 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-11-07 — Valkey 상태 쓰기 일시 실패 재시도
+
+- [x] T-VALKEY-WRITE-RETRY — **디스크 대기 timeout이 상태 적재를 죽였다.** 교체 쓰기를 유한 재시도하고 응답 잃은 교체는 기존 CAS로 판정한다. 근거는 journal 2026-11-07.
+
 ## 2026-11-07 — #1455 저배율 in-bounds cluster 집계
 
 - [x] T-INBOUNDS-LOWZOOM — **전국 저배율 cluster 집계 1.3~30 s.** geometry arm을 조인·대표점 1회·point-only 변형으로 바꿨다. 근거는 journal 2026-11-07.
