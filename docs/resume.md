@@ -4,7 +4,6 @@
 ## 2026-11-07 — 통합 테스트 PG 비내구·tmpfs
 
 - 테스트 cluster는 전부 `make_nondurable`을 거친다(새 fixture도). tmpfs가 모자라면 `KTM_TEST_PG_TMPFS_SIZE`.
-||||||| parent of 50c5aa850 (fix(valkey): 상태 쓰기 일시 실패를 교체 안에서 유한 재시도한다)
 
 ## 2026-11-07 — #1455 저배율 cluster 집계
 
