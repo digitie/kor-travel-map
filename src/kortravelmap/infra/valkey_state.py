@@ -16,6 +16,11 @@ transport(이후 weather)의 **현재 상태**를 Valkey(Redis 호환)에 데이
 - 값은 이미 직렬화된 문자열(JSON)이다. 이 모듈은 값의 모양을 모른다(``dto.transport_state``가
   안다).
 
+교체 쓰기(세대 묶음·meta·포인터 교체·잠금 해제)의 일시 실패(연결·timeout)는 그 자리에서
+작업마다 :data:`DEFAULT_WRITE_RETRIES`번(1·2·4초), 교체마다
+:data:`WRITE_RETRY_BUDGET_SECONDS` 안에서 다시 한다. 응답만 잃은 포인터 교체는
+compare-and-set이 이 세대를 돌려주면 성공으로 본다(2026-11-07 n150 디스크 대기).
+
 Valkey 오류는 :class:`StateStoreUnavailable`(연결·timeout — 재시도 가능)과
 :class:`StateStoreOutOfMemory`(``noeviction`` 쓰기 거부 — 재시도로 안 풀림)로 올린다. 읽는 쪽은 둘
 다 503이다. 메시지에 URL·비밀번호를 싣지 않는다.
@@ -29,6 +34,7 @@ import inspect
 import logging
 import math
 import secrets
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -38,7 +44,7 @@ from typing import Any, Final, TypeVar, cast
 from redis.asyncio import Redis
 from redis.asyncio.retry import Retry
 from redis.backoff import NoBackoff
-from redis.exceptions import OutOfMemoryError, RedisError, ResponseError
+from redis.exceptions import DataError, OutOfMemoryError, RedisError, ResponseError
 
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -99,6 +105,19 @@ DEFAULT_WRITE_RETRY_BASE_DELAY_SECONDS: Final[float] = 1.0
 
 WRITE_RETRY_MAX_DELAY_SECONDS: Final[float] = 8.0
 """재시도 대기 한 번의 상한."""
+
+WRITE_RETRY_BUDGET_SECONDS: Final[float] = 30.0
+"""교체 하나(또는 잠금 해제 하나)가 재시도에 쓸 수 있는 시간 — 실패한 시도의 시간과 대기의
+합. 묶음마다 횟수가 새로 시작해도 교체 전체가 run 상한(``dagster/max_runtime``)을 넘겨
+끌려가지 않게 한다. 다 쓰면 마지막 실패를 올리고 step 재시도에 넘긴다."""
+
+
+@dataclass
+class _RetryBudget:
+    """교체 하나의 재시도 예산(:data:`WRITE_RETRY_BUDGET_SECONDS`)."""
+
+    seconds_left: float = WRITE_RETRY_BUDGET_SECONDS
+    retried: bool = False
 
 _retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 """재시도 대기(테스트가 바꾼다)."""
@@ -412,6 +431,13 @@ redis.call('HSET', KEYS[2], 'checked_at', ARGV[2])
 return 1
 """
 
+# KEYS[1]=current KEYS[2..]=그 세대 키. ARGV[1]=세대. 포인터가 그 세대일 때만 만료를 지운다.
+_PERSIST_IF_CURRENT_SCRIPT: Final[str] = """
+if redis.call('GET', KEYS[1]) ~= ARGV[1] then return 0 end
+for i = 2, #KEYS do redis.call('PERSIST', KEYS[i]) end
+return 1
+"""
+
 _RELEASE_LOCK_SCRIPT: Final[str] = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0
@@ -461,6 +487,9 @@ async def _unavailable_on_error(what: str) -> AsyncIterator[None]:
                 f"Valkey {what} 실패: maxmemory 도달(noeviction 쓰기 거부)"
             ) from exc
         # 그 밖의 응답 오류(WRONGTYPE·NOSCRIPT·인자 오류)는 기다려도 풀리지 않는다.
+        raise StateStoreError(f"Valkey {what} 실패: {type(exc).__name__}") from exc
+    except DataError as exc:
+        # 클라이언트 쪽 입력 오류(인자 모양) — 다시 해도 같다.
         raise StateStoreError(f"Valkey {what} 실패: {type(exc).__name__}") from exc
     except (RedisError, OSError) as exc:
         raise StateStoreUnavailable(f"Valkey {what} 실패: {type(exc).__name__}") from exc
@@ -734,22 +763,29 @@ class ValkeyStateStore:
 
     # -- 쓰기 ------------------------------------------------------------------
 
-    async def _retrying(self, what: str, attempt: Callable[[], Awaitable[_T]]) -> _T:
+    async def _retrying(
+        self, what: str, attempt: Callable[[], Awaitable[_T]], budget: _RetryBudget
+    ) -> _T:
         """``attempt``를 일시 실패(재시도 가능한 :class:`StateStoreUnavailable`)에 한해
         유한 번 다시 한다.
 
         ``attempt``는 다시 해도 결과가 같아야 한다(같은 값 쓰기, CAS 스크립트). OOM·미설정·응답
-        오류는 ``retryable``이 아니므로 바로 올린다. 횟수를 다 쓰면 마지막 실패를 그대로 올린다 —
-        그다음은 step 재시도의 몫이다.
+        오류는 ``retryable``이 아니므로 바로 올린다. 횟수(작업마다)나 ``budget``(교체마다)을 다 쓰면
+        마지막 실패를 그대로 올린다 — 그다음은 step 재시도의 몫이다.
         """
         tries = 0
         while True:
+            started = time.monotonic()
             try:
                 return await attempt()
             except StateStoreUnavailable as exc:
                 if not exc.retryable or tries >= self._retries:
                     raise
                 delay = min(self._retry_base * 2**tries, WRITE_RETRY_MAX_DELAY_SECONDS)
+                budget.seconds_left -= time.monotonic() - started + delay
+                if budget.seconds_left < 0:
+                    raise
+                budget.retried = True
                 tries += 1
                 _LOGGER.warning(
                     "Valkey %s 일시 실패(%s) — %.1f초 뒤 다시 한다(%d/%d).",
@@ -786,7 +822,7 @@ class ValkeyStateStore:
                 try:
                     # 해제는 내 token일 때만 지우는 CAS라 다시 해도 같다. 못 풀면 잠금이
                     # TTL(run 상한 + 취소 유예)까지 남아 step 재시도가 'locked'로 건너뛴다.
-                    await self._retrying("잠금 해제", _release)
+                    await self._retrying("잠금 해제", _release, _RetryBudget())
                 except StateStoreError:
                     _LOGGER.warning("%s 적재 잠금을 풀지 못했다 — TTL로 풀린다.", dataset)
 
@@ -830,9 +866,10 @@ class ValkeyStateStore:
 
         generation = f"{loaded_at.astimezone(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}"
         keys = _gen_keys(dataset, generation)
+        budget = _RetryBudget()
         try:
             geo_count, lookup_count = await self._write_generation(
-                keys, list(unique.values())
+                keys, list(unique.values()), budget
             )
             meta_fields = {
                 "count": str(len(unique)),
@@ -863,8 +900,16 @@ class ValkeyStateStore:
                     dataset, keys, previous_generation, generation, reset_recent=allow_shrink
                 )
 
-            await self._retrying("메타 쓰기", _write_meta)
-            await self._retrying("포인터 교체", _flip_once)
+            await self._retrying("메타 쓰기", _write_meta, budget)
+            try:
+                await self._retrying("포인터 교체", _flip_once, budget)
+            except StateStoreUnavailable as exc:
+                # 모든 시도의 응답을 잃었어도 교체는 반영됐을 수 있다 — 한 번 더 묻고 이 세대면
+                # 성공이다(step 재시도가 같은 집합을 다시 교체해 recent_counts에 두 번 쌓지 않게).
+                if not exc.retryable or not await self._is_current(dataset, generation):
+                    raise
+            if budget.retried:
+                await self._persist_if_current(dataset, keys, generation)
         except BaseException:
             await self._discard_unless_current(dataset, keys, generation)
             raise
@@ -928,6 +973,35 @@ class ValkeyStateStore:
                 f"{self._build_ttl}초 초과 또는 부분 쓰기)."
             )
 
+    async def _is_current(self, dataset: str, generation: str) -> bool:
+        try:
+            return await self.current_generation(dataset) == generation
+        except StateStoreError:
+            return False
+
+    async def _persist_if_current(
+        self, dataset: str, keys: dict[str, str], generation: str
+    ) -> None:
+        """재시도가 있었던 교체 뒤에 이 세대 키의 만료를 한 번 더 지운다(최선).
+
+        timeout난 앞선 시도의 pipeline(``EXPIRE`` 포함)이 서버에서 교체보다 늦게 돌면 교체의
+        ``PERSIST``를 되돌릴 수 있다. 서버는 먼저 도착한 연결부터 읽으므로 실제로는 거의 없지만,
+        포인터가 여전히 이 세대일 때만 다시 지운다(그 사이 교체됐으면 grace 만료를 건드리지 않는다).
+        """
+        try:
+            async with _unavailable_on_error("만료 재확인"):
+                await _resolve(
+                    self._client.eval(
+                        _PERSIST_IF_CURRENT_SCRIPT,
+                        1 + len(_GEN_KEY_NAMES),
+                        state_key(dataset, "current"),
+                        *(keys[name] for name in _GEN_KEY_NAMES),
+                        generation,
+                    )
+                )
+        except StateStoreError:
+            _LOGGER.warning("%s 세대 만료 재확인을 하지 못했다.", dataset)
+
     async def _discard_unless_current(
         self, dataset: str, keys: dict[str, str], generation: str
     ) -> None:
@@ -947,7 +1021,7 @@ class ValkeyStateStore:
             _LOGGER.warning("교체하지 못한 세대 키를 정리하지 못했다 — build TTL로 사라진다.")
 
     async def _write_generation(
-        self, keys: dict[str, str], items: list[StateItem]
+        self, keys: dict[str, str], items: list[StateItem], budget: _RetryBudget
     ) -> tuple[int, int]:
         geo_count = 0
         lookup_seen: set[str] = set()
@@ -965,7 +1039,9 @@ class ValkeyStateStore:
                         lookup_seen.add(lookup_key)
                         lookup[lookup_key] = item.id
             await self._retrying(
-                "세대 쓰기", functools.partial(self._write_chunk, keys, chunk, geo_values, lookup)
+                "세대 쓰기",
+                functools.partial(self._write_chunk, keys, chunk, geo_values, lookup),
+                budget,
             )
         return geo_count, len(lookup_seen)
 

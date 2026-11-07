@@ -267,9 +267,10 @@ async def test_crashed_build_leaves_only_expiring_keys(
 async def test_lost_flip_reply_does_not_delete_the_now_current_generation(
     store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """교체 스크립트는 돌았는데 응답만 잃었다.
+    """교체 스크립트는 돌았는데 응답만 잃었다(재시도 때마다 또 잃는다).
 
-    정리가 새 지금 세대를 지우면 포인터가 허공을 가리킨다.
+    정리가 새 지금 세대를 지우면 포인터가 허공을 가리킨다. 포인터가 이미 이 세대이므로 교체는
+    성공으로 끝난다 — step 재시도가 같은 집합을 다시 교체하지 않는다.
     """
     original = store._flip
 
@@ -278,10 +279,11 @@ async def test_lost_flip_reply_does_not_delete_the_now_current_generation(
         raise StateStoreUnavailable("응답을 읽기 전에 연결이 끊겼다")
 
     monkeypatch.setattr(store, "_flip", _flip_then_lose_reply)
-    with pytest.raises(StateStoreUnavailable):
-        await _swap(store, "t.lost_reply", _items(3))
+    generation = await _swap(store, "t.lost_reply", _items(3))
     meta = await store.current_meta("t.lost_reply")
+    assert meta.generation == generation
     assert meta.count == 3
+    assert await store.recent_counts("t.lost_reply") == [3]
     values = await store.get_values("t.lost_reply", meta.generation, ["f_test_00002"])
     assert values == [b'{"n": 2}']
 

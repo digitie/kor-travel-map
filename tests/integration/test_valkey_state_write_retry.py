@@ -15,6 +15,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -97,7 +98,12 @@ async def _swap(store: ValkeyStateStore, dataset: str, count: int) -> str:
 
 
 def _flaky_pipelines(
-    store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch, *, failures: int, apply_first: bool
+    store: ValkeyStateStore,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    failures: int,
+    apply_first: bool,
+    first_call: int = 1,
 ) -> dict[str, int]:
     """pipeline ``execute``가 앞의 ``failures``번 timeout을 낸다.
 
@@ -112,7 +118,7 @@ def _flaky_pipelines(
 
         async def _execute(*eargs: Any, **ekwargs: Any) -> Any:
             state["calls"] += 1
-            if state["left"] > 0:
+            if state["calls"] >= first_call and state["left"] > 0:
                 state["left"] -= 1
                 if apply_first:
                     await execute(*eargs, **ekwargs)
@@ -211,6 +217,115 @@ async def test_persistent_timeouts_fail_unavailable_after_a_bounded_number_of_tr
     assert len(sleeps) == valkey_state.DEFAULT_WRITE_RETRIES
     assert max(sleeps) <= valkey_state.WRITE_RETRY_MAX_DELAY_SECONDS
     assert (await store.current_meta("r.down")).generation == previous
+
+
+def test_the_retry_sleep_hook_exists() -> None:
+    """``sleeps`` fixture는 ``raising=False``로 바꾼다(실패 우선 검증용).
+
+    이름이 바뀌면 시험이 실제로 자게 된다 — 여기서 잡는다.
+    """
+    assert callable(getattr(valkey_state, "_retry_sleep", None))
+
+
+async def test_meta_write_timeout_is_retried(
+    store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    # 3건·묶음 2 → 묶음 pipeline 2개, 그다음(3번째)이 meta pipeline이다.
+    state = _flaky_pipelines(store, monkeypatch, failures=1, apply_first=True, first_call=3)
+    generation = await _swap(store, "r.meta", 3)
+    meta = await store.current_meta("r.meta")
+    assert (meta.generation, meta.count) == (generation, 3)
+    assert state["left"] == 0
+    assert len(sleeps) == 1
+
+
+async def test_every_flip_reply_lost_still_settles_as_success(
+    store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """모든 시도의 응답을 잃어도 포인터가 이 세대면 성공이다 — 한 번만 반영된다."""
+    previous = await _swap(store, "r.flipall", 3)
+    original = store.client.eval
+
+    async def _eval(script: str, *args: Any) -> Any:
+        result = await original(script, *args)
+        if script == valkey_state._FLIP_SCRIPT:
+            raise RedisTimeoutError("Timeout reading from 127.0.0.1:12704")
+        return result
+
+    monkeypatch.setattr(store.client, "eval", _eval)
+    generation = await _swap(store, "r.flipall", 4)
+    assert generation != previous
+    assert (await store.current_meta("r.flipall")).generation == generation
+    assert await store.recent_counts("r.flipall") == [4, 3]
+    for name in ("meta", "items", "ids", "geo"):
+        assert await store.client.ttl(state_key("r.flipall", generation, name)) == -1, name
+
+
+async def test_the_swap_wide_budget_caps_retries_across_operations(
+    valkey_url: str, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """작업마다 횟수가 남아도 교체 전체 예산(실패 시간 + 대기)을 넘기면 그만 둔다."""
+    settings = KorTravelMapSettings.model_construct(
+        valkey_url=SecretStr(valkey_url),
+        valkey_connect_timeout_seconds=1.0,
+        valkey_socket_timeout_seconds=2.0,
+    )
+    client = make_valkey_client(settings)
+    try:
+        await client.flushdb()
+        store = ValkeyStateStore(
+            client, write_batch=2, write_retries=10, write_retry_base_delay_seconds=5.0
+        )
+        _flaky_pipelines(store, monkeypatch, failures=1_000, apply_first=False)
+        with pytest.raises(StateStoreUnavailable):
+            await _swap(store, "r.budget", 3)
+    finally:
+        await client.aclose()
+    # 5 + 10 = 15초 뒤 다음 대기 20초가 30초 예산을 넘는다.
+    assert sleeps == [5.0, 10.0]
+    assert valkey_state.WRITE_RETRY_BUDGET_SECONDS == 30.0
+
+
+async def test_a_real_write_stall_is_ridden_out(
+    valkey_url: str, sleeps: list[float], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """실제 서버 정지(``CLIENT PAUSE WRITE``)로 진짜 socket timeout·연결 끊김을 일으킨다.
+
+    timeout난 앞선 pipeline은 서버에 남아 정지가 풀릴 때 돈다(``EXPIRE`` 포함) — 교체 뒤에도
+    지금 세대 키에 만료가 없어야 한다.
+    """
+    del sleeps  # 이 시험은 실제로 잔다.
+    settings = KorTravelMapSettings.model_construct(
+        valkey_url=SecretStr(valkey_url),
+        valkey_connect_timeout_seconds=1.0,
+        valkey_socket_timeout_seconds=0.5,
+    )
+    writer = make_valkey_client(settings)
+    admin = make_valkey_client(
+        KorTravelMapSettings.model_construct(
+            valkey_url=SecretStr(valkey_url),
+            valkey_connect_timeout_seconds=1.0,
+            valkey_socket_timeout_seconds=5.0,
+        )
+    )
+    # fixture가 바꾼 대기를 실제 대기로 되돌린다.
+    monkeypatch.setattr(valkey_state, "_retry_sleep", asyncio.sleep, raising=False)
+    try:
+        await admin.flushdb()
+        store = ValkeyStateStore(writer, build_ttl_seconds=120, write_batch=2)
+        previous = await _swap(store, "r.stall", 2)
+        await admin.client_pause(1_800, all=False)
+        generation = await _swap(store, "r.stall", 5)
+        await asyncio.sleep(0.5)  # 늦게 도는 앞선 pipeline이 있으면 다 돌 시간
+        meta = await store.current_meta("r.stall")
+        assert (meta.generation, meta.count) == (generation, 5)
+        assert generation != previous
+        for name in ("meta", "items", "ids", "geo"):
+            assert await admin.ttl(state_key("r.stall", generation, name)) == -1, name
+    finally:
+        await admin.client_unpause()
+        await writer.aclose()
+        await admin.aclose()
 
 
 async def test_out_of_memory_is_not_retried(
