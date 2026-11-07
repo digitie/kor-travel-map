@@ -1,3 +1,8 @@
+## 2026-11-07 — #1455 저배율 in-bounds cluster 집계
+
+- prod 읽기 전용 EXPLAIN: 전국 bbox route/area cluster가 `feature_id = ANY(5.8만 배열)` 선형 대조와 view geom 산출식 3중 평가로 15~30 s, PinVi 기본 kind도 쓰지 않는 등산로 후보를 매번 계산했다.
+- point/geometry arm UNION ALL·대표점 1회·bbox 내부 geometry는 교차 생략·point-only 변형. 군집 수·개수 동일(좌표 차 ≤8e-6°).
+
 ## 2026-11-07 — KNPS 대피소 미적재 후속
 
 - 사용자가 다른 미적재 KNPS로 범위를 확대했다. Claude Code의1452/1453과 완료된1회 적재·정책 결정을 먼저 읽고 대피소 upstream17만 남았음을 확인했다.

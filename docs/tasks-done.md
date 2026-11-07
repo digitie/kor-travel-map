@@ -1,5 +1,9 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-11-07 — #1455 저배율 in-bounds cluster 집계
+
+- [x] T-INBOUNDS-LOWZOOM — **전국 저배율 cluster 집계 1.3~30 s.** geometry arm을 조인·대표점 1회·point-only 변형으로 바꿨다. 근거는 journal 2026-11-07.
+
 ## 2026-10-28 — ADR-115 동시 쓰기 사슬을 ADR-117로 대체
 
 ADR-115 동시 쓰기 구현 사슬(01→…→09)은 prod 측정에서 SH 경로가 한 번도 돌지 않았고 경합 효익이 0이라
