@@ -942,6 +942,8 @@ def test_every_composed_public_read_sql_embeds_typed_notice_filter() -> None:
     # cluster는 unit별 3종을 dict로 조립 — 각 변형이 같은 계약을 담아야 한다.
     for unit, sql in feature_repo._CLUSTER_BBOX_SQL_BY_UNIT.items():
         _assert_typed_notice_filter(sql, "f", label=f"cluster SQL[{unit}]")
+    for unit, sql in feature_repo._CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT.items():
+        _assert_typed_notice_filter(sql, "f", label=f"point-only cluster SQL[{unit}]")
 
 
 def test_curation_and_curated_route_through_shared_notice_filter() -> None:

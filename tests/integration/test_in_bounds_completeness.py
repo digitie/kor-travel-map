@@ -384,3 +384,86 @@ async def test_cross_boundary_geometry_uses_stored_canonical_code_once(
         }
         assert actual == expected
         assert sum(actual.values()) == len(items)
+
+
+async def _xact_postgis_calls(session: AsyncSession, name: str) -> int:
+    """현재 transaction에서 PostGIS C 함수 ``name``이 불린 횟수(오버로드 합계)."""
+    value = await session.scalar(
+        text(
+            "SELECT COALESCE(sum(pg_stat_get_xact_function_calls(p.oid)), 0) "
+            "FROM pg_proc AS p WHERE p.proname = :name"
+        ),
+        {"name": name},
+    )
+    return int(value or 0)
+
+
+async def test_cluster_point_only_kinds_skip_geometry_candidates(
+    migrated_session: AsyncSession,
+) -> None:
+    """#1455 — route/area가 없는 kind 요청은 geometry 후보를 아예 계산하지 않는다.
+
+    이전에는 PinVi 기본 kind(place/event/notice/price)에서도 route/area geometry 후보
+    배열을 InitPlan으로 전부 만들었다(전국 bbox에서 등산로 5.8만 건 ST_Intersects).
+    결과는 geometry arm을 실은 SQL과 같아야 한다 — kind 필터가 어차피 거른다.
+    """
+    await _seed(migrated_session)
+    await migrated_session.execute(text("SET LOCAL track_functions = 'all'"))
+    before = await _xact_postgis_calls(migrated_session, "st_intersects")
+
+    clusters = await feature_repo.cluster_features_in_bbox(
+        migrated_session, **_BBOX, cluster_unit="sigungu", kinds=["place", "event"]
+    )
+
+    assert await _xact_postgis_calls(migrated_session, "st_intersects") == before
+    assert [(c["cluster_key"], c["feature_count"]) for c in clusters] == [("11110", 1)]
+    full = (
+        await migrated_session.execute(
+            text(feature_repo._CLUSTER_BBOX_SQL_BY_UNIT["sigungu"]),
+            {
+                **_BBOX,
+                "kinds": ["place", "event"],
+                "categories": None,
+                "providers": None,
+                "limit": 2001,
+            },
+        )
+    ).mappings().all()
+    assert [
+        (row["cluster_key"], int(row["feature_count"]), float(row["lon"]), float(row["lat"]))
+        for row in full
+    ] == [(c["cluster_key"], c["feature_count"], c["lon"], c["lat"]) for c in clusters]
+
+
+async def test_cluster_geometry_marker_is_computed_once_and_only_when_clipped(
+    migrated_session: AsyncSession,
+) -> None:
+    """#1455 — geometry 대표점은 후보마다 한 번, bbox를 벗어나는 것만 잘라서 만든다.
+
+    이전 SQL은 ``CASE … ST_PointOnSurface(ST_Intersection(geom, bbox))``를 조립 view
+    위의 산출식으로 두어 술어·ST_X·ST_Y에서 세 번 평가했고, bbox 안에 완전히 들어온
+    geometry에도 비싼 ST_Intersection을 불렀다. seed의 두 geometry 후보 중
+    ``ib:route-cross``만 bbox를 가로지르고 ``ib:area-in``은 완전히 안에 있다.
+    """
+    expected = await _seed(migrated_session)
+    await migrated_session.execute(text("SET LOCAL track_functions = 'all'"))
+    intersection_before = await _xact_postgis_calls(migrated_session, "st_intersection")
+    point_before = await _xact_postgis_calls(migrated_session, "st_pointonsurface")
+
+    clusters = await feature_repo.cluster_features_in_bbox(
+        migrated_session, **_BBOX, cluster_unit="sido"
+    )
+
+    assert (
+        await _xact_postgis_calls(migrated_session, "st_intersection") - intersection_before
+        == 1
+    )
+    assert (
+        await _xact_postgis_calls(migrated_session, "st_pointonsurface") - point_before
+        == 2
+    )
+    assert [(c["cluster_key"], c["feature_count"]) for c in clusters] == [
+        ("11", len(expected))
+    ]
+    assert _BBOX["min_lon"] <= clusters[0]["lon"] <= _BBOX["max_lon"]
+    assert _BBOX["min_lat"] <= clusters[0]["lat"] <= _BBOX["max_lat"]
