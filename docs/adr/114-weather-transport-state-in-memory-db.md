@@ -550,7 +550,7 @@ schedule을 켠 뒤 journal에 적는다.
   `INFO persistence`(`rdb_changes_since_last_save`·`aof_rewrites`)와 n150 iowait를 재서 journal에 적고, 필요하면 Manager에서
   AOF를 끄거나 save 조건을 늦춘다(D7 설계 리뷰 의견과 같다).
   **2026-11-07 실측·적용**: 사흘에 53 GB(rdb_saves 788·aof_rewrites 79), 같은 sda의 flush 대기로 세대 쓰기가 2초
-  timeout. Manager가 `appendonly no`·`save 3600 1`과 code-server 쓰기 timeout 10초(API 2초 유지)로 바꿨고, Map은 교체
+  timeout. Manager #583이 `appendonly no`·`save 900 1`과 code-server 쓰기 timeout 10초(API 2초 유지)로 바꾸고, Map은 교체
   쓰기를 그 자리에서 유한 재시도한다(응답 잃은 교체는 포인터 CAS로 판정).
 - **회전 순서**: #1365(transport 가격 추이 T4)와 이 PR이 **둘 다** 머지된 뒤의 정확한 Map commit에서 PinVi가 admin·service
   스냅샷을 **한 번** 재vendor한다(1단계 transport 재vendor 대기분을 함께 접는다) → 그다음 Manager pair 핀.
