@@ -1,3 +1,7 @@
+## 2026-11-07 — 통합 테스트 PG 비내구·tmpfs
+
+- 테스트 cluster는 전부 `make_nondurable`을 거친다(새 fixture도). tmpfs가 모자라면 `KTM_TEST_PG_TMPFS_SIZE`.
+
 ## 2026-11-07 — #1455 저배율 cluster 집계
 
 - in-bounds cluster SQL 재작성(마이그레이션·OpenAPI 변경 없음). 배포 뒤 PinVi zoom 6~8 응답을 다시 잰다. worker 증설은 하지 않는다 — 느린 요청이 작은 요청을 막지 않음을 실측했고, worker마다 DB 풀(최대 15)·process-local 공개 키 캐시가 생긴다.

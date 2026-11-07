@@ -1,3 +1,7 @@
+## 2026-11-07 — 통합 테스트 PG 비내구·tmpfs
+
+- n150 sda flush 포화의 최상위 기록자가 test gate PG(fsync on)였다. 모든 테스트 cluster를 `_disposable_pg.make_nondurable`로 fsync·synchronous_commit·full_page_writes off + `/var/lib/postgresql` tmpfs(기본 3g, `KTM_TEST_PG_TMPFS_SIZE`)로 띄운다. unit 가드·서버 효과 검사 추가.
+
 ## 2026-11-07 — #1455 저배율 in-bounds cluster 집계
 
 - prod 읽기 전용 EXPLAIN: 전국 bbox route/area cluster가 `feature_id = ANY(5.8만 배열)` 선형 대조와 view geom 산출식 3중 평가로 15~30 s, PinVi 기본 kind도 쓰지 않는 등산로 후보를 매번 계산했다.
