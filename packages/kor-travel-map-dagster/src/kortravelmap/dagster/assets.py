@@ -55,7 +55,9 @@ from kortravelmap.providers.kor_travel_concierge import (
 )
 from kortravelmap.providers.kor_travel_transport import (
     DATASET_KEY_AIRPORTS,
+    DATASET_KEY_FERRY_PORTS,
     DATASET_KEY_FUEL_STATIONS,
+    DATASET_KEY_RAIL_STATIONS,
     DATASET_KEY_REST_AREAS,
     KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
 )
@@ -123,6 +125,10 @@ from kortravelmap.providers.standard_data import (
     parking_lots_to_bundles,
     special_streets_to_bundles,
     tourist_attractions_to_bundles,
+)
+from kortravelmap.providers.transport_reference_places import (
+    ferry_ports_to_bundles,
+    rail_stations_to_bundles,
 )
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -349,6 +355,80 @@ async def feature_place_transport_rest_areas(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
     return await run_tracked_feature_asset(context, run_feature_place_transport_rest_areas)
+
+
+async def run_feature_place_transport_rail_stations(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """도시·광역철도 역(transport 기준정보 export)을 역마다 place Feature 하나로 적재한다(ADR-120).
+
+    원천은 노선마다 한 행이라 변환기가 같은 역을 묶는다 — 묶음은 전체 집합을 봐야 하므로 batch로
+    나누지 않고 한 번에 변환한다(전국 약 1천 행).
+    """
+    records = await _record_list(context, "transport_rail_stations")
+    fetched_at = await _fetched_at(context)
+    bundles = await _transform_reusing_geo(
+        context,
+        rail_stations_to_bundles,
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_RAIL_STATIONS,
+        bundles=bundles,
+        authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"transport_rail_stations"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
+)
+async def feature_place_transport_rail_stations(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(context, run_feature_place_transport_rail_stations)
+
+
+async def run_feature_place_transport_ferry_ports(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """여객선 항구(transport 기준정보 export)를 place Feature로 적재한다(ADR-120)."""
+    records = await _record_list(context, "transport_ferry_ports")
+    fetched_at = await _fetched_at(context)
+    bundles = await _transform_reusing_geo(
+        context,
+        ferry_ports_to_bundles,
+        records,
+        fetched_at=fetched_at,
+        reverse_geocoder=_reverse_geocoder(context),
+    )
+    return await _load(
+        context,
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_FERRY_PORTS,
+        bundles=bundles,
+        authoritative_snapshot_complete=True,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"transport_ferry_ports"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
+)
+async def feature_place_transport_ferry_ports(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(context, run_feature_place_transport_ferry_ports)
 
 
 async def run_feature_place_krheritage_items(
@@ -1274,6 +1354,8 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_event_datagokr_cultural_festivals,
     feature_place_transport_fuel_stations,
     feature_place_transport_rest_areas,
+    feature_place_transport_rail_stations,
+    feature_place_transport_ferry_ports,
     feature_place_krheritage_items,
     feature_event_krheritage_events,
     feature_place_mois_licenses,

@@ -225,6 +225,12 @@
         "436_feature_search_aliases"
       ],
       "revision": "437_feature_command_fingerprints"
+    },
+    {
+      "down_revision": [
+        "437_feature_command_fingerprints"
+      ],
+      "revision": "438_transport_reference_places"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

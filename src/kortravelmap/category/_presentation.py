@@ -4,7 +4,8 @@
 
 - 검색 순위 그룹(작을수록 앞): 관광(국가유산·문화시설 포함) 0 → 숙박·온천 1 → 식음 2 →
   편의·교통·의료·미분류 3(소유자 결정 2026-11-02). 기본은 Tier 1 코드(앞 2자리)마다 하나다.
-  예외는 교통 가운데 **이름으로 찾아가는 목적지** — 기차역·지하철역(Tier 3), 휴게소·공항(Tier 2)
+  예외는 교통 가운데 **이름으로 찾아가는 목적지** — 기차역·지하철역(Tier 3), 휴게소·공항·
+  여객선터미널(Tier 2)
   — 만 숙박과 같은 1이다. "서울역"·"김포공항"을 찾을 때 그 시설이 "…서울역점" 음식점보다 뒤로
   밀리지 않게 한다(적대 리뷰 2026-11-02). 버스 정류장·택시 승강장·주차·주유는 3 그대로다.
   Tier 1만 있는 코드(예: ``01000000``)는 같은 그룹 안에서 하위 분류가 있는 코드보다 덜
@@ -33,6 +34,7 @@ __all__ = [
     "PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1",
     "PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES",
     "PLACE_CATEGORY_SEARCH_GROUP_FALLBACK",
+    "SEARCH_DESTINATION_GROUP_MAX",
     "category_search_group",
     "is_tier1_only_category_code",
     "is_parking_category_code",
@@ -72,6 +74,7 @@ PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES: Final[Mapping[str, int]] = Mapping
         _category_prefix(PlaceCategoryCode.TRANSPORT_STOP_TRAIN): 1,
         _category_prefix(PlaceCategoryCode.TRANSPORT_REST_AREA): 1,
         _category_prefix(PlaceCategoryCode.TRANSPORT_AIRPORT): 1,
+        _category_prefix(PlaceCategoryCode.TRANSPORT_FERRY_TERMINAL): 1,
     }
 )
 
@@ -79,6 +82,11 @@ PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES: Final[Mapping[str, int]] = Mapping
 PLACE_CATEGORY_SEARCH_GROUP_FALLBACK: Final[int] = max(
     PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.values()
 )
+
+#: 이름으로 찾아가는 **목적지** 그룹의 상한(관광 0, 숙박·온천·역·휴게소·공항·여객선터미널 1).
+#: 검색에서 이름이 검색어와 정확히 같은 목적지는 분류 그룹보다 앞이다(ADR-120) — 식음·편의·주차는
+#: 이름이 같아도 그룹 뒤에서만 가른다.
+SEARCH_DESTINATION_GROUP_MAX: Final[int] = 1
 
 _TIER1_ONLY_SUFFIX: Final[str] = "000000"
 _PARKING_CODE: Final[str] = PlaceCategoryCode.TRANSPORT_PARKING.value

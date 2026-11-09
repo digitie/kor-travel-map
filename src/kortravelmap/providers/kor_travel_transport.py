@@ -34,20 +34,25 @@ from typing import Any, Final, Literal
 
 __all__ = [
     "DATASET_KEY_AIRPORTS",
+    "DATASET_KEY_FERRY_PORTS",
     "DATASET_KEY_FUEL_PRICES",
     "DATASET_KEY_FUEL_STATIONS",
     "DATASET_KEY_HIGHWAY_INCIDENTS",
+    "DATASET_KEY_RAIL_STATIONS",
     "DATASET_KEY_REST_AREAS",
     "DATASET_KEY_REST_AREA_FUEL_PRICES",
     "EXPORT_PATH_AIRPORTS",
+    "EXPORT_PATH_FERRY_PORTS",
     "EXPORT_PATH_FUEL_STATIONS",
     "EXPORT_PATH_FUEL_STATION_PRICE_HISTORY",
     "EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE",
+    "EXPORT_PATH_RAIL_STATIONS",
     "EXPORT_PATH_REST_AREAS",
     "EXPORT_PATH_REST_AREA_FUEL_PRICES",
     "KOR_TRAVEL_TRANSPORT_PROVIDER_NAME",
     "INCIDENT_SET_MAX_AGE",
     "PriceHistorySourceStatus",
+    "ReferenceSourceStatus",
     "SERVICE_TOKEN_HEADER",
     "TransportAirport",
     "TransportCollection",
@@ -59,12 +64,16 @@ __all__ = [
     "TransportExportMalformed",
     "TransportExportNotCurrent",
     "TransportExportPage",
+    "TransportFerryPort",
     "TransportFuelPrice",
     "TransportFuelPriceHistory",
     "TransportFuelPriceHistoryPoint",
     "TransportFuelStation",
     "TransportHighwayIncident",
     "TransportIncidentActiveSet",
+    "TransportRailStation",
+    "TransportReferenceMeta",
+    "TransportReferencePage",
     "TransportRestArea",
     "TransportRestAreaFuelPrice",
     "parse_active_incident_set",
@@ -72,8 +81,11 @@ __all__ = [
     "parse_airports",
     "parse_collection",
     "parse_export_page",
+    "parse_ferry_port",
     "parse_fuel_price_history",
     "parse_fuel_station",
+    "parse_rail_station",
+    "parse_reference_page",
     "parse_rest_area",
     "parse_rest_area_fuel_price",
     "require_current_collection",
@@ -95,6 +107,10 @@ DATASET_KEY_HIGHWAY_INCIDENTS: Final[str] = "transport_highway_incidents"
 """고속도로 돌발·통제 notice Feature(활성 집합 reconcile)."""
 DATASET_KEY_AIRPORTS: Final[str] = "transport_airports"
 """국내 운영 공항 place Feature."""
+DATASET_KEY_RAIL_STATIONS: Final[str] = "transport_rail_stations"
+"""도시·광역철도 역 place Feature(KRIC dataset 1294, ADR-120)."""
+DATASET_KEY_FERRY_PORTS: Final[str] = "transport_ferry_ports"
+"""여객선 항구 place Feature(국내선박운항정보, ADR-120)."""
 
 SERVICE_TOKEN_HEADER: Final[str] = "X-Kor-Travel-Transport-Service-Token"
 """transport export 토큰 header(transport ADR-013)."""
@@ -104,6 +120,10 @@ EXPORT_PATH_REST_AREAS: Final[str] = "/v1/service/exports/rest-areas"
 EXPORT_PATH_REST_AREA_FUEL_PRICES: Final[str] = "/v1/service/exports/rest-area-fuel-prices"
 EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE: Final[str] = "/v1/service/exports/highway-incidents/active"
 EXPORT_PATH_AIRPORTS: Final[str] = "/v1/service/exports/airports"
+EXPORT_PATH_RAIL_STATIONS: Final[str] = "/v1/service/exports/rail-stations"
+"""철도역 기준정보 snapshot export(transport T3, ``docs/map-rail-reference-export.md``)."""
+EXPORT_PATH_FERRY_PORTS: Final[str] = "/v1/service/exports/ferry-ports"
+"""항구 기준정보 snapshot export(transport T3, ``docs/map-ferry-reference-export.md``)."""
 EXPORT_PATH_FUEL_STATION_PRICE_HISTORY: Final[str] = (
     "/v1/service/exports/fuel-stations/{station_key}/price-history"
 )
@@ -771,4 +791,203 @@ def parse_fuel_price_history(
         items=tuple(points),
         has_more=has_more,
         next_cursor=next_cursor,
+    )
+
+
+# -- 저변동 기준정보 export(철도역·항구) ------------------------------------------------
+#
+# transport T3(``/v1/service/exports/{rail-stations,ferry-ports}``)는 위 cursor export와 다른
+# envelope을 쓴다: ``{meta, snapshot_id, snapshot_expires_at, total_count, items, next_cursor,
+# has_more}``. 첫 페이지 요청이 transport 안에서 불변 snapshot을 고정하고(15분 TTL), 뒤 페이지는
+# 같은 ``snapshot_id``의 cursor로 읽는다. 그래서 Map은 페이지마다 ``snapshot_id``가 같은지,
+# ``meta.item_count``가 그 페이지 행 수와 같은지, 끝에서 행 합계가 ``total_count``와 같은지를
+# 잰다 — 셋 중 하나라도 어긋나면 완전 snapshot이 아니므로 reconcile 근거로 쓰지 않는다.
+
+ReferenceSourceStatus = Literal["ok", "stale"]
+"""200 기준정보 페이지의 ``meta.source_status``.
+
+``stale``은 transport가 마지막 **완결 성공** 집합을 그대로 내되 그 뒤 수집이 실패했거나 기한
+(철도 6일·항구 9일)을 넘겼다는 뜻이다. 역·항구 목록은 저변동이라 그 집합도 완결 snapshot으로
+쓴다(옛 성공 집합 그대로이므로 지울 것을 새로 만들지 않는다). ``failed``는 200 본문에 오면
+계약 위반이다.
+"""
+
+_REFERENCE_SOURCE_STATUSES: Final[dict[str, ReferenceSourceStatus]] = {
+    "ok": "ok",
+    "stale": "stale",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class TransportReferenceMeta:
+    """기준정보 페이지의 ``meta``(transport ``ServiceExportMeta``)."""
+
+    generated_at: datetime
+    source_collected_at: datetime
+    source_status: ReferenceSourceStatus
+    item_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class TransportReferencePage:
+    """기준정보 snapshot 한 페이지."""
+
+    meta: TransportReferenceMeta
+    snapshot_id: str
+    total_count: int
+    items: tuple[Mapping[str, Any], ...]
+    next_cursor: str | None
+    has_more: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TransportRailStation:
+    """KRIC dataset 1294(전국 도시·광역철도 역사정보) 역 1건 — 운영기관·노선마다 한 행이다.
+
+    ``natural_key``는 transport ``identity_key``(운영기관·노선·역번호·역명 조합)다. 같은 역이
+    노선마다 따로 온다(예: 서울역 1·4호선·공항철도·경의중앙선) — 한 Feature로 묶는 것은 Map
+    변환기(``providers.transport_reference_places``)의 몫이다.
+    """
+
+    natural_key: str
+    source: str
+    name: str
+    operator_name: str | None
+    line_name: str | None
+    station_number: str | None
+    lat: float | None
+    lon: float | None
+    operator_code: str | None
+    line_code: str | None
+    station_code: str | None
+    raw: Mapping[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class TransportFerryPort:
+    """국내선박운항정보 여객선 항구 1건. ``natural_key``는 ``{source}:{port_id}``다."""
+
+    natural_key: str
+    source: str
+    port_id: str
+    name: str
+    lat: float | None
+    lon: float | None
+    location_source: str | None
+    raw: Mapping[str, Any]
+
+
+def _required_count(item: Mapping[str, Any], key: str, where: str) -> int:
+    value = item.get(key)
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise TransportExportContractError(f"{where}.{key}: 0 이상의 정수여야 한다.")
+    return value
+
+
+def parse_reference_page(payload: Any, *, where: str) -> TransportReferencePage:
+    """기준정보 snapshot 페이지 envelope을 엄격히 읽는다.
+
+    ``meta.item_count``는 그 페이지 행 수와 같아야 하고, ``has_more``와 ``next_cursor`` 유무가
+    맞아야 한다. ``meta.source_status=failed``나 ``source_collected_at`` 부재는 200 본문에서
+    계약 위반이다(transport는 그때 503을 낸다).
+    """
+    body = _mapping(payload, where)
+    meta_where = f"{where}.meta"
+    meta_body = _mapping(body.get("meta"), meta_where)
+    raw_status = _required_text(meta_body, "source_status", meta_where)
+    source_status = _REFERENCE_SOURCE_STATUSES.get(raw_status)
+    if source_status is None:
+        raise TransportExportContractError(
+            f"{meta_where}.source_status: 200 본문에서 받을 수 없는 값({raw_status!r})이다."
+        )
+    meta = TransportReferenceMeta(
+        generated_at=_required_datetime(meta_body, "generated_at", meta_where),
+        source_collected_at=_required_datetime(meta_body, "source_collected_at", meta_where),
+        source_status=source_status,
+        item_count=_required_count(meta_body, "item_count", meta_where),
+    )
+    items = body.get("items")
+    if not isinstance(items, list):
+        raise TransportExportContractError(f"{where}.items: 배열이어야 한다.")
+    if meta.item_count != len(items):
+        raise TransportExportContractError(
+            f"{meta_where}.item_count({meta.item_count})가 items 수({len(items)})와 다르다."
+        )
+    has_more = _strict_bool(body, "has_more", where)
+    next_cursor = _text(body, "next_cursor", where)
+    if has_more != bool(next_cursor):
+        raise TransportExportContractError(
+            f"{where}: has_more({has_more})와 next_cursor 유무가 어긋난다."
+        )
+    return TransportReferencePage(
+        meta=meta,
+        snapshot_id=_required_text(body, "snapshot_id", where),
+        total_count=_required_count(body, "total_count", where),
+        items=tuple(_mapping(item, f"{where}.items[]") for item in items),
+        next_cursor=next_cursor,
+        has_more=has_more,
+    )
+
+
+def _check_admin_shape(item: Mapping[str, Any], where: str) -> None:
+    """``admin``은 object 또는 null이어야 한다.
+
+    Map은 PG place에서 이 값을 쓰지 않고 좌표를 Map geo로 역지오코딩한다(다른 transport place와
+    같다) — 모양만 확인한다.
+    """
+    value = item.get("admin")
+    if value is not None:
+        _mapping(value, f"{where}.admin")
+
+
+def _coordinate_pair(item: Mapping[str, Any], where: str) -> tuple[float | None, float | None]:
+    """``latitude``/``longitude``는 둘 다 있거나 둘 다 null이어야 한다."""
+    lat = _number(item, "latitude", where)
+    lon = _number(item, "longitude", where)
+    if (lat is None) != (lon is None):
+        raise TransportExportContractError(f"{where}: latitude·longitude 중 하나만 있다.")
+    return lat, lon
+
+
+def parse_rail_station(item: Mapping[str, Any]) -> TransportRailStation:
+    where = "rail-stations.item"
+    lat, lon = _coordinate_pair(item, where)
+    _check_admin_shape(item, where)
+    return TransportRailStation(
+        natural_key=_required_text(item, "natural_key", where),
+        source=_required_text(item, "source", where),
+        name=_required_text(item, "name", where).strip(),
+        operator_name=_text(item, "operator_name", where),
+        line_name=_text(item, "line_name", where),
+        station_number=_text(item, "station_number", where),
+        lat=lat,
+        lon=lon,
+        operator_code=_text(item, "operator_code", where),
+        line_code=_text(item, "line_code", where),
+        station_code=_text(item, "station_code", where),
+        raw=dict(item),
+    )
+
+
+def parse_ferry_port(item: Mapping[str, Any]) -> TransportFerryPort:
+    where = "ferry-ports.item"
+    lat, lon = _coordinate_pair(item, where)
+    _check_admin_shape(item, where)
+    source = _required_text(item, "source", where)
+    port_id = _required_text(item, "port_id", where)
+    natural_key = _required_text(item, "natural_key", where)
+    if natural_key != f"{source}:{port_id}":
+        # transport가 자연키 규칙을 바꾸면 같은 항구가 두 Feature로 갈린다 — 조용히 받지 않는다.
+        raise TransportExportContractError(
+            f"{where}.natural_key({natural_key!r})가 source:port_id와 다르다."
+        )
+    return TransportFerryPort(
+        natural_key=natural_key,
+        source=source,
+        port_id=port_id,
+        name=_required_text(item, "name", where).strip(),
+        lat=lat,
+        lon=lon,
+        location_source=_text(item, "location_source", where),
+        raw=dict(item),
     )

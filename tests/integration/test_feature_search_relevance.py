@@ -238,7 +238,8 @@ async def test_transport_hub_exact_name_is_not_buried_under_partial_matches(
     """역·공항·휴게소는 이름으로 찾아가는 시설이다 — 숙박과 같은 그룹(적대 리뷰 2026-11-02).
 
     분류 그룹을 Tier 1로만 가르면 역(06)이 주차장과 같은 맨 뒤 그룹이라 "롯데리아 서울역점"
-    같은 음식점이 역 자체보다 앞섰다. 관광(이름에 검색어를 품은 박물관)은 여전히 앞이다.
+    같은 음식점이 역 자체보다 앞섰다. ADR-120부터 이름이 검색어와 **같은** 목적지(역)는 이름에
+    검색어를 품기만 한 관광(박물관)보다도 앞이다. 주차장은 이름이 같아도 목적지가 아니라 맨 뒤다.
     """
     ids = {
         "seoul_station": await _place(
@@ -260,7 +261,98 @@ async def test_transport_hub_exact_name_is_not_buried_under_partial_matches(
     }
     await migrated_session.flush()
     labels = await _search_ids(migrated_session, "서울역", ids)
-    assert labels == ["seoul_museum", "seoul_station", "seoul_food", "seoul_parking"], labels
+    assert labels == ["seoul_station", "seoul_museum", "seoul_food", "seoul_parking"], labels
+
+
+async def test_exact_named_airport_ranks_before_a_tourism_row_that_only_contains_it(
+    migrated_session: AsyncSession,
+) -> None:
+    """#1459 §2(2026-11-08 운영): "양양국제공항" 1위가 숙소 "설해원(양양국제공항)"이었다.
+
+    설해원은 관광 그룹(01000000)이고 공항은 그룹 1이라 그룹이 이름 일치보다 앞서면 공항이
+    이름 일치로 절대 선택되지 않았다. 이름이 같은 목적지는 그룹보다 앞이다(ADR-120).
+    """
+    ids = {
+        "yangyang_airport": await _place(
+            migrated_session, "yangyang_airport", name="양양국제공항", category="06050000",
+            lon=128.6690, lat=38.0613, place_kind="airport",
+        ),
+        "seolhaewon": await _place(
+            migrated_session, "seolhaewon", name="설해원(양양국제공항)", category="01000000",
+            lon=128.6705, lat=38.0420,
+        ),
+        "yangyang_parking": await _place(
+            migrated_session, "yangyang_parking", name="양양국제공항", category="06010000",
+            lon=128.6680, lat=38.0600, place_kind="parking",
+        ),
+    }
+    await migrated_session.flush()
+    labels = await _search_ids(migrated_session, "양양국제공항", ids)
+    assert labels[0] == "yangyang_airport", labels
+    assert labels.index("seolhaewon") < labels.index("yangyang_parking"), labels
+
+
+async def test_exact_named_food_does_not_jump_the_category_groups(
+    migrated_session: AsyncSession,
+) -> None:
+    """목적지가 아닌 분류(식음)의 이름 일치는 여전히 그룹 뒤에서만 가른다 — 436의 결정 그대로.
+
+    "남이섬"이라는 서울 음식점이 이름에 "남이섬"을 품은 관광지보다 앞서지 않는다.
+    """
+    ids = {
+        "nami_island": await _place(
+            migrated_session, "nami_island", name="남이섬 유원지 검사", category="01080000",
+            lon=127.5255, lat=37.7906,
+        ),
+        "nami_food": await _place(
+            migrated_session, "nami_food", name="남이섬 유원지", category="02010100",
+            lon=126.9780, lat=37.5665, place_kind="restaurant",
+        ),
+    }
+    await migrated_session.flush()
+    labels = await _search_ids(migrated_session, "남이섬 유원지", ids)
+    assert labels == ["nami_island", "nami_food"], labels
+
+
+async def test_transport_reference_places_are_found_by_their_display_names(
+    migrated_session: AsyncSession,
+) -> None:
+    """휴게소·역·여객선터미널은 표시 이름("…휴게소(…방향)"·"…역")으로 저장된다(ADR-120) —
+    "강릉휴게소"·"대전역"·"인천항"을 찾으면 그 시설이 약국·주차장보다 앞이다."""
+    ids = {
+        "gangneung_rest": await _place(
+            migrated_session, "gangneung_rest", name="강릉휴게소(인천방향)", category="06040101",
+            lon=128.8054, lat=37.7603, place_kind="rest_area",
+        ),
+        "gangneung_pharmacy": await _place(
+            migrated_session, "gangneung_pharmacy", name="강릉휴게소약국", category="07020000",
+            lon=128.8050, lat=37.7600, place_kind="pharmacy",
+        ),
+        "daejeon_station": await _place(
+            migrated_session, "daejeon_station", name="대전역", category="06030200",
+            lon=127.4342, lat=36.3321, place_kind="rail_station",
+        ),
+        "daejeon_pharmacy": await _place(
+            migrated_session, "daejeon_pharmacy", name="대전역약국", category="07020000",
+            lon=127.4340, lat=36.3320, place_kind="pharmacy",
+        ),
+        "incheon_port": await _place(
+            migrated_session, "incheon_port", name="인천항", category="06060000",
+            lon=126.5996, lat=37.4517, place_kind="ferry_terminal",
+        ),
+        "incheon_parking": await _place(
+            migrated_session, "incheon_parking", name="인천항 공영주차장", category="06010000",
+            lon=126.6000, lat=37.4520, place_kind="parking",
+        ),
+    }
+    await migrated_session.flush()
+    for query, first in (
+        ("강릉휴게소", "gangneung_rest"),
+        ("대전역", "daejeon_station"),
+        ("인천항", "incheon_port"),
+    ):
+        labels = await _search_ids(migrated_session, query, ids)
+        assert labels and labels[0] == first, (query, labels)
 
 
 async def test_region_prefix_split_handles_any_whitespace_and_leading_space(
