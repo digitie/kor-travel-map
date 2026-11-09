@@ -15,6 +15,7 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
+from dagster import Failure
 from kortravelmap.dto import Address, Coordinate
 from kortravelmap.providers.visitkorea_attractions import (
     VisitKoreaAttractionItem,
@@ -23,7 +24,6 @@ from kortravelmap.providers.visitkorea_attractions import (
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
-from dagster import Failure
 from kortravelmap.dagster import assets
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
@@ -80,9 +80,12 @@ class _FakeClient:
             }
         )
         cls = type(self)
-        return _Page(cls.pages.get(page_no, []), cls.totals[page_no], raw={"page": page_no})
+        total = cls.totals.get(page_no, max(cls.totals.values()))
+        return _Page(cls.pages.get(page_no, []), total, raw={"page": page_no})
 
-    async def detail_common(self, content_id: str, *, page_no: int = 1, num_of_rows: int = 10) -> Any:
+    async def detail_common(
+        self, content_id: str, *, page_no: int = 1, num_of_rows: int = 10
+    ) -> Any:
         self.detail_calls.append(content_id)
         kind = type(self).detail_errors.get(content_id)
         if kind is not None:
