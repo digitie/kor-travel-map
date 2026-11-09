@@ -312,11 +312,10 @@ async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
             "limit_plus_one": 21,
             "region_codes": ["51150"],
             "rem_compact": "호텔",
+            "rem_categories": ["03010000", "03010100"],
         }
         if name_mode == "ilike":
             params["rem_like"] = "%호텔%"
-        if categories:
-            params["rem_categories"] = ["03010000", "03010100"]
         explained = (
             await migrated_session.execute(text("EXPLAIN (FORMAT JSON) " + sql), params)
         ).scalar_one()

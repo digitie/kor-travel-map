@@ -545,6 +545,12 @@ def _text_has_location_number(text_value: str | None) -> bool:
     return any(_LOCATION_NUMBER_TOKEN.match(token) for token in tokens[1:])
 
 
+#: 주소 정지오코딩 답을 **핀**으로 쓰는 하한. kor-travel-geo는 로컬 정확 일치 1.0, 건물 geometry
+#: 대표점 0.90, 국가지점번호 격자 0.72, 외부 fallback 0.65~0.70을 준다 — 격자·외부 답은 장소
+#: 위치로 쓰기에 거칠다(#1459 §4 적대 리뷰).
+ADDRESS_PIN_MIN_CONFIDENCE: Final[float] = 0.9
+
+
 def address_has_location_number(address: Address) -> bool:
     """도로명 또는 지번 주소에 건물번호·지번 낱말이 있는가 — 점으로 찍을 만큼 구체적인가.
 
@@ -1839,7 +1845,9 @@ class _KorTravelGeoObservedReverseGeocoder:
             queries.append((address.legal, "parcel"))
         for query, addr_type in queries:
             response = await self._client.geocode(query, type_=addr_type)
-            coord = geocode_response_to_coordinate(response)
+            coord = geocode_response_to_coordinate(
+                response, min_confidence=ADDRESS_PIN_MIN_CONFIDENCE
+            )
             if coord is not None:
                 return coord
         return None

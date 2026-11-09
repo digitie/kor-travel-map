@@ -1994,11 +1994,9 @@ def _feature_search_score_cte(
         else ""
     )
     region_arm = name_arm + category_arm if region else ""
-    category_hit = (
-        "\n            OR category = ANY(CAST(:rem_categories AS text[]))"
-        if region_categories
-        else ""
-    )
+    # 분류 일치는 후보 팔과 무관하게 언제나 지역 일치다 — 넓은 지역에서 분류 팔을 빼도 trigram
+    # 팔이 찾은 그 분류 행은 같은 자리를 얻는다(지역 크기가 순위를 바꾸지 않게).
+    category_hit = "\n            OR category = ANY(CAST(:rem_categories AS text[]))"
     region_hit_column = (
         f""",
         (
@@ -4102,6 +4100,8 @@ async def load_bundle(
         and not feature_missing
         and resolved_feature_id is not None
         and await _needs_coordinate_backfill(session, bundle, feature_id=resolved_feature_id)
+        # 옛 artifact replay는 현재 원본이 아니다 — 그 본문을 쓰지 않는다(재투영과 같은 조건).
+        and await _source_record_is_current_head(session, record_state)
     )
     new_address = bundle.feature.address
     new_geo_values = address_column_values(new_address)
@@ -4407,7 +4407,8 @@ class ProviderEntityReobservationConflict(RuntimeError):
 
 #: 이미 같은 payload로 적재되어 있고, 그 primary feature가 active인 entity.
 #:
-#: ``load_bundle``이 같은 record를 다시 받았을 때 **아무것도 바꾸지 않는** 조건과 같다.
+#: ``load_bundle``이 같은 record를 다시 받았을 때 **아무것도 바꾸지 않는** 조건과 같다(단
+#: ``_COORDINATE_BACKFILL_SCOPES``의 좌표 backfill은 예외다 — 그 dataset은 이 경로를 쓰지 않는다).
 #: head의 current record가 같은 payload hash면 ``became_current``가 거짓이라 feature 본문을
 #: 다시 쓰지 않고, feature가 active면 provider lifecycle 전이도 없다. 그 경우 남는 효과는
 #: 관측 시각 전진뿐이고, 그것은 :data:`_REOBSERVE_UNCHANGED_SQL`이 맡는다.
@@ -7087,8 +7088,7 @@ def _search_region_params(
     }
     if arms.name_mode == "ilike":
         params["rem_like"] = _like_contains_pattern(rem_compact)
-    if arms.categories:
-        params["rem_categories"] = list(region.category_codes)
+    params["rem_categories"] = list(region.category_codes)
     return params
 
 

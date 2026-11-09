@@ -255,3 +255,23 @@ async def test_heritage_place_with_region_only_location_stays_unplaced() -> None
     )
     assert bundle.feature.coord is None
     assert geocoder.calls == []
+
+
+class _GridOnlyClient(_GeoClient):
+    """국가지점번호 격자(0.72) 답만 준다 — 핀으로 쓰지 않는다."""
+
+    async def geocode(self, query: str, *, type_: str = "road", fallback: str = "none") -> Any:
+        self.queries.append((query, type_))
+        candidate = SimpleNamespace(
+            confidence=0.72, point=SimpleNamespace(lon=126.9, lat=37.5), address=None, region=None
+        )
+        return SimpleNamespace(status="OK", candidates=(candidate,))
+
+
+async def test_geo_reverse_geocoder_rejects_coarse_geocode_answers() -> None:
+    client = _GridOnlyClient()
+    geocoder = kor_travel_geo_reverse_geocoder(client)  # type: ignore[arg-type]
+    coord = await geocoder.geocode_address(  # type: ignore[attr-defined]
+        Address(road="서울 어딘가로 1")
+    )
+    assert coord is None
