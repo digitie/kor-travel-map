@@ -3753,11 +3753,60 @@ _CATEGORY_REPROJECTION_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
     ("python-mcst-api", "mcst_leisure_camping_facilities_csv"),
     ("python-krheritage-api", "krheritage_event_list"),
     ("data.go.kr-standard", "datagokr_cultural_festivals"),
+    # #1459 §6: 근거 없는 해수욕장 제안을 거르는 규칙이 같은 원본의 기존 행에도 닿게 한다.
+    ("kor-travel-concierge-youtube", "youtube_place_candidates"),
 })
 _EVENT_QUALITY_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
     ("python-krheritage-api", "krheritage_event_list"),
     ("data.go.kr-standard", "datagokr_cultural_festivals"),
 })
+
+
+#: 원천 좌표가 없어 주소 정지오코딩으로 점을 찾는 dataset(#1459 §4). 원본(payload)이 같으면
+#: ``became_current``가 거짓이라 본문을 다시 쓰지 않는다 — 그래서 fallback 이전에 좌표 없이
+#: 적재된 행은 원천이 바뀌기 전까지 영영 점을 얻지 못한다. 이 scope에서 원천에 좌표가 없고, 이번
+#: 변환이 좌표를 찾았고, 저장 좌표가 NULL이면 같은 원본이어도 본문을 다시 쓴다(한 번뿐 — 다음
+#: 실행은 저장 좌표가 있어 그대로다). provider 코드를 import하지 않고 scope만 둔다.
+_COORDINATE_BACKFILL_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
+    ("data.go.kr-standard", "datagokr_cultural_festivals"),
+    ("data.go.kr-standard", "datagokr_parking_lots"),
+    ("python-krheritage-api", "krheritage_heritage_features"),
+})
+
+_STORED_COORD_IS_NULL_SQL: Final[str] = """
+SELECT f.coord IS NULL
+FROM feature.features AS f
+WHERE f.feature_id = CAST(:feature_id AS uuid)
+  AND f.lifecycle_state = 'active'
+"""
+
+
+def _source_lacks_coordinate(raw_data: Mapping[str, Any]) -> bool:
+    """원천 payload의 ``latitude``/``longitude``가 없거나 0인가(국가유산 원천은 ``"0.0"``)."""
+    values = (raw_data.get("latitude"), raw_data.get("longitude"))
+    if any(value is None or str(value).strip() == "" for value in values):
+        return True
+    try:
+        return any(float(str(value)) == 0.0 for value in values)
+    except ValueError:
+        return True
+
+
+async def _needs_coordinate_backfill(
+    session: AsyncSession, bundle: FeatureBundle, *, feature_id: str
+) -> bool:
+    """같은 원본의 기존 행에 이번 변환이 찾은 좌표를 채워야 하는가(#1459 §4)."""
+    scope = (bundle.source_record.provider, bundle.source_record.dataset_key)
+    if (
+        scope not in _COORDINATE_BACKFILL_SCOPES
+        or bundle.feature.coord is None
+        or not _source_lacks_coordinate(bundle.source_record.raw_data)
+    ):
+        return False
+    stored_is_null = (
+        await session.execute(text(_STORED_COORD_IS_NULL_SQL), {"feature_id": feature_id})
+    ).scalar_one_or_none()
+    return bool(stored_is_null)
 
 
 async def _repair_current_provider_projection(
@@ -3994,11 +4043,17 @@ async def load_bundle(
             and target_id is not None
             and await is_stale(session, target_id, token)
         )
+    coord_backfill = (
+        not record_state.became_current
+        and not feature_missing
+        and resolved_feature_id is not None
+        and await _needs_coordinate_backfill(session, bundle, feature_id=resolved_feature_id)
+    )
     new_address = bundle.feature.address
     new_geo_values = address_column_values(new_address)
     stored: StoredGeoColumns | None = None
     guarded = False
-    if target_id is not None and (record_state.became_current or stale):
+    if target_id is not None and (record_state.became_current or stale or coord_backfill):
         stored = (
             prefetched[1]
             if prefetched is not None
@@ -4013,7 +4068,7 @@ async def load_bundle(
     stale_rewritten = False
     partial_kept = False
 
-    if record_state.became_current or feature_missing:
+    if record_state.became_current or feature_missing or coord_backfill:
         feature_to_write = bundle.feature
         if guarded and stored is not None and "address" not in stored.overridden_columns():
             # 빈 답 가드: payload가 바뀐 행도 주소 열만은 저장값을 지킨다(나머지 필드는 패치).
