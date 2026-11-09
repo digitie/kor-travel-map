@@ -67,11 +67,11 @@ from kortravelmap.providers.standard_data import (
     tourist_attractions_to_bundles,
     traditional_markets_to_bundles,
 )
-from kortravelmap.providers.visitkorea_attractions import tourapi_attractions_to_bundles
 from kortravelmap.providers.transport_reference_places import (
     ferry_ports_to_bundles,
     rail_stations_to_bundles,
 )
+from kortravelmap.providers.visitkorea_attractions import tourapi_attractions_to_bundles
 
 __all__ = [
     "EtlFixtureEntry",

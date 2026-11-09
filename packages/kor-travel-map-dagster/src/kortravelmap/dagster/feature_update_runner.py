@@ -59,12 +59,12 @@ from .assets import (
     run_feature_place_standard_special_streets,
     run_feature_place_standard_tourist_attractions,
     run_feature_place_standard_traditional_markets,
-    run_feature_place_visitkorea_tourist_attractions,
     run_feature_place_transport_airports,
     run_feature_place_transport_ferry_ports,
     run_feature_place_transport_fuel_stations,
     run_feature_place_transport_rail_stations,
     run_feature_place_transport_rest_areas,
+    run_feature_place_visitkorea_tourist_attractions,
     run_feature_route_krforest_dulle_trails,
     run_feature_route_krforest_mountain_trails,
 )

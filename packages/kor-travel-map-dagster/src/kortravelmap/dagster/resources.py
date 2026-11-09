@@ -37,8 +37,6 @@ from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_POINT_DATASET_KEYS,
 )
-from kortravelmap.providers.visitkorea import VISITKOREA_PROVIDER_NAME
-from kortravelmap.providers.visitkorea_attractions import DATASET_KEY_VISITKOREA_ATTRACTIONS
 from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
@@ -48,6 +46,8 @@ from kortravelmap.providers.standard_data import (
     DATASET_KEY_TRADITIONAL_MARKETS,
     STANDARD_DATA_PROVIDER_NAME,
 )
+from kortravelmap.providers.visitkorea import VISITKOREA_PROVIDER_NAME
+from kortravelmap.providers.visitkorea_attractions import DATASET_KEY_VISITKOREA_ATTRACTIONS
 from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import Array, InitResourceContext, Int, ResourceDefinition, String, resource
