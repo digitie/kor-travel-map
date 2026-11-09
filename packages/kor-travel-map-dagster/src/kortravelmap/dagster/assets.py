@@ -10,13 +10,24 @@ from collections.abc import (
     Mapping,
     Sequence,
 )
+from contextlib import asynccontextmanager
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
+import httpx
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.dto import Address, Coordinate
 from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
-from kortravelmap.geocoding import GeoCallStats, ReverseGeocoder
+from kortravelmap.geocoding import (
+    GEO_LOAD_TRANSIENT_ATTEMPTS,
+    AddressGeocoder,
+    GeoCallStats,
+    KorTravelGeoRestClient,
+    ReverseGeocoder,
+    geo_http_timeout,
+    kor_travel_geo_address_geocoder,
+)
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
@@ -117,12 +128,14 @@ from kortravelmap.providers.standard_data import (
     DATASET_KEY_PARKING_LOTS,
     DATASET_KEY_SPECIAL_STREETS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
+    DATASET_KEY_TRADITIONAL_MARKETS,
     STANDARD_DATA_PROVIDER_NAME,
     cultural_festivals_to_bundles,
     museums_to_bundles,
     parking_lots_to_bundles,
     special_streets_to_bundles,
     tourist_attractions_to_bundles,
+    traditional_markets_to_bundles,
 )
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -1013,6 +1026,108 @@ async def feature_place_standard_special_streets(
     )
 
 
+@asynccontextmanager
+async def _traditional_market_address_geocoder(
+    context: AssetExecutionContext,
+) -> AsyncIterator[AddressGeocoder | None]:
+    """좌표 없는 전통시장 행의 주소 정지오코더(run 동안 주소별 1회 — 변환이 여러 번 돈다).
+
+    역지오코더가 없는 run(테스트 대역 등)이나 geo base URL이 없으면 ``None``이다 —
+    그때 좌표 없는 행은 좌표 없이 적재된다. 원천의 99% 이상이 좌표를 가진다(2026-11-09
+    공식 미리보기 499행 중 좌표 없음 3행).
+    """
+    settings = KorTravelMapSettings()
+    reverse = _resource_object(context, "reverse_geocoder", default=None)
+    if reverse is None or settings.kor_travel_geo_base_url is None:
+        yield None
+        return
+    async with httpx.AsyncClient(
+        base_url=settings.kor_travel_geo_base_url.get_secret_value(),
+        timeout=geo_http_timeout(settings),
+    ) as http:
+        inner = kor_travel_geo_address_geocoder(
+            KorTravelGeoRestClient(
+                http,
+                api_key=settings.kor_travel_geo_api_key,
+                # 같은 run의 geo 경계 계수에 합친다 — 응답의 데이터셋 토큰도 함께 관측된다.
+                stats=cast("GeoCallStats | None", getattr(reverse, "stats", None)),
+                transient_attempts=GEO_LOAD_TRANSIENT_ATTEMPTS,
+            )
+        )
+        cache: dict[tuple[str | None, str | None], Coordinate | None] = {}
+
+        async def _geocode(address: Address) -> Coordinate | None:
+            key = (address.road, address.legal)
+            if key not in cache:
+                cache[key] = await inner(address)
+            return cache[key]
+
+        yield _geocode
+
+
+async def run_feature_place_standard_traditional_markets(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """전국전통시장표준데이터 record를 전통시장 place Feature로 적재한다(#1459).
+
+    전국 1,400건 안팎이라 snapshot을 한 번에 받아 ``retire_absent_from_snapshot``으로
+    적재한다 — 다음 적재에 없는 시장은 은퇴한다(krforest와 같은 경로). 0행 snapshot은
+    "없음"이 아니라 "못 받았음"이므로(datagokr는 resultCode 03을 빈 페이지로 준다) 은퇴로
+    이어지기 전에 실패시킨다. replay는 원천을 관측하지 않은 run이라 은퇴·봉인·sync 성공
+    기록을 하지 않는다.
+    """
+    source = await _resource_value(context, "standard_traditional_markets")
+    await prefetch_replay(source)
+    replay = is_replay(source)
+    fetched_at = await _fetched_at(context)
+    records = await _record_list(context, "standard_traditional_markets")
+    if not records and not replay:
+        raise Failure(
+            description=(
+                "전국전통시장표준데이터 snapshot이 0행이다 — 기존 시장을 전부 은퇴시키지 않도록 "
+                "적재를 멈춘다(서비스키 활용신청·원천 상태를 확인할 것)."
+            )
+        )
+    async with _traditional_market_address_geocoder(context) as address_geocoder:
+        bundles = apply_replay_provenance(
+            source,
+            await _transform_reusing_geo(
+                context,
+                traditional_markets_to_bundles,
+                records,
+                fetched_at=fetched_at,
+                reverse_geocoder=_reverse_geocoder(context),
+                address_geocoder=address_geocoder,
+            ),
+        )
+    ensure_replay_complete(source)
+    return await _load(
+        context,
+        provider=STANDARD_DATA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_TRADITIONAL_MARKETS,
+        bundles=bundles,
+        authoritative_snapshot_complete=not replay,
+        source_entity_type="traditional_market",
+        retire_absent_from_snapshot=not replay,
+        record_sync_state=not replay,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"standard_traditional_markets"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
+)
+async def feature_place_standard_traditional_markets(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(
+        context, run_feature_place_standard_traditional_markets
+    )
+
+
 async def run_feature_place_datagokr_file_data(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -1288,6 +1403,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_tourist_attractions,
     feature_place_standard_parking_lots,
     feature_place_standard_special_streets,
+    feature_place_standard_traditional_markets,
     feature_place_datagokr_file_data,
     feature_place_khoa_beaches,
     feature_place_transport_airports,

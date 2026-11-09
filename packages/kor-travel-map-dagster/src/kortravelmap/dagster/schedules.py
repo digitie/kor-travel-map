@@ -46,6 +46,7 @@ from .assets import (
     feature_place_standard_parking_lots,
     feature_place_standard_special_streets,
     feature_place_standard_tourist_attractions,
+    feature_place_standard_traditional_markets,
     feature_place_transport_airports,
     feature_place_transport_fuel_stations,
     feature_place_transport_rest_areas,
@@ -358,6 +359,14 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_place_standard_special_streets_monthly_schedule",
         cron_schedule="50 4 4 * *",
         description="전국지역특화거리표준데이터 place anchor Feature 월 1회 적재.",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_place_standard_traditional_markets,
+        job_name="feature_place_standard_traditional_markets_job",
+        schedule_name="feature_place_standard_traditional_markets_monthly_schedule",
+        # 원천은 연간 갱신이지만 기관별 등록분이 매월 초 전국 단위로 병합된다.
+        cron_schedule="40 5 5 * *",
+        description="전국전통시장표준데이터 place Feature 월 1회 적재.",
     ),
     *_datagokr_file_data_schedule_specs(),
     FeatureLoadScheduleSpec(

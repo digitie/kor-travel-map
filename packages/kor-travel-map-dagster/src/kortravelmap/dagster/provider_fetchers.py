@@ -100,6 +100,7 @@ __all__ = [
     "fetch_standard_museums",
     "fetch_standard_parking_lots",
     "fetch_standard_special_streets",
+    "fetch_standard_traditional_markets",
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
     "fetch_transport_airports",
@@ -1203,6 +1204,34 @@ async def fetch_standard_special_streets(
     try:
         async for record in _iter_datagokr_standard(
             client.special_street, label="datagokr special_street.list"
+        ):
+            yield record
+    finally:
+        await client.aclose()
+
+
+async def fetch_standard_traditional_markets(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """전국전통시장표준데이터(15012894) record를 datagokr public client로 stream한다.
+
+    서비스키마다 이 API를 따로 활용신청해야 한다 — 신청하지 않은 키는 HTTP 403
+    (``SERVICE_KEY_IS_NOT_REGISTERED_ERROR``)으로 실패한다.
+    """
+    secret = settings.data_go_kr_service_key
+    if secret is None:
+        raise ProviderCredentialMissing(
+            "standard traditional markets live fetch에는 "
+            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
+            "필요하다."
+        )
+    api_key = secret.get_secret_value()
+
+    datagokr = cast(Any, importlib.import_module("datagokr"))
+    client = datagokr.DataGoKrClient(api_key=api_key)
+    try:
+        async for record in _iter_datagokr_standard(
+            client.traditional_market, label="datagokr traditional_market.list"
         ):
             yield record
     finally:

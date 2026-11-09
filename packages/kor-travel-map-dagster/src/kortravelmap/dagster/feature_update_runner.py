@@ -58,6 +58,7 @@ from .assets import (
     run_feature_place_standard_parking_lots,
     run_feature_place_standard_special_streets,
     run_feature_place_standard_tourist_attractions,
+    run_feature_place_standard_traditional_markets,
     run_feature_place_transport_airports,
     run_feature_place_transport_fuel_stations,
     run_feature_place_transport_rest_areas,
@@ -87,6 +88,7 @@ from .provider_fetchers import (
     fetch_standard_parking_lots,
     fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
+    fetch_standard_traditional_markets,
     fetch_transport_airports,
     fetch_transport_fuel_stations,
     fetch_transport_rest_areas,
@@ -834,6 +836,12 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_place_standard_special_streets,
         resources=_records("standard_special_streets", fetch_standard_special_streets),
         asset_key="feature_place_standard_special_streets",
+    ),
+    *_operation_specs(
+        "feature_place_standard_traditional_markets_job",
+        run=run_feature_place_standard_traditional_markets,
+        resources=_records("standard_traditional_markets", fetch_standard_traditional_markets),
+        asset_key="feature_place_standard_traditional_markets",
     ),
     *_operation_specs(
         "feature_place_datagokr_seoul_bookstores_job",

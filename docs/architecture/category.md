@@ -41,7 +41,7 @@ from kortravelmap.category import (
 
 ### 3.1 `PlaceCategoryCode` (StrEnum)
 
-8자리 코드 `AABBCCDD` 형식. 총 146개 enum member다.
+8자리 코드 `AABBCCDD` 형식. 총 147개 enum member다.
 
 ```
 AA — Tier 1 (대분류, 예: "01" 관광, "02" 음식, "03" 숙박)
@@ -90,7 +90,7 @@ class PlaceCategory:
 
 | 이름 | 타입 | 의미 |
 |------|------|------|
-| `PLACE_CATEGORY_DEFINITIONS` | `tuple[PlaceCategory, ...]` | 146개 정의 |
+| `PLACE_CATEGORY_DEFINITIONS` | `tuple[PlaceCategory, ...]` | 147개 정의 |
 | `PLACE_CATEGORY_BY_CODE` | `dict[PlaceCategoryCode, PlaceCategory]` | 코드 → 정의 |
 | `PLACE_CATEGORY_CODES` | `tuple[PlaceCategoryCode, ...]` | 모든 코드 (sort_order 순) |
 | `PLACE_CATEGORY_TIER1_NAMES` | `dict[PlaceCategoryTier1Code, str]` | 예: `"01"→"관광"` |
@@ -112,11 +112,11 @@ class PlaceCategory:
 | `format_category_tree(root_code=None, include_codes=True, active_only=True) -> str` | 트리 문자열 |
 | `print_category_tree(...)` | 위 결과 print |
 
-## 4. Tier 1~4 카탈로그 (146건 전체)
+## 4. Tier 1~4 카탈로그 (147건 전체)
 
 > 소스: `python-kraddr-base/src/kraddr/base/categories.py` (sync date
-> `2026-05-12`, ADR-023으로 본 저장소 이전 완료 PR#18). 총 **146건** = sentinel 1 +
-> Tier 1 7개 + Tier 2 35개 + Tier 3 74개 + Tier 4 29개다. 기존 145건에
+> `2026-05-12`, ADR-023으로 본 저장소 이전 완료 PR#18). 총 **147건** = sentinel 1 +
+> Tier 1 7개 + Tier 2 36개 + Tier 3 74개 + Tier 4 29개다. 기존 145건에
 > `01.09 TOURISM_EVENT`(축제·행사)를 추가했다. depth별 정확한 통계는 §4.3.
 
 ### 4.1 Tier 1 (대분류, 8개)
@@ -278,6 +278,7 @@ provider는 `kma`(기상특보)·`airkorea`(대기질 측정소)·`krex`(교통 
   05.04 슈퍼마켓 (..._SUPERMARKET) [maki: shop]
   05.05 백화점 (..._DEPARTMENT_STORE) [maki: clothing-store]
   05.06 공중화장실 (..._TOILET) [maki: toilet]
+  05.07 전통시장 (..._TRADITIONAL_MARKET) [maki: shop]    ← 표준데이터 traditional_markets (§12)
 
 06 교통 (TRANSPORT) [maki: car]
   06.01 주차장 (TRANSPORT_PARKING) [maki: parking]    ← 표준데이터 parking_lots
@@ -301,7 +302,7 @@ provider는 `kma`(기상특보)·`airkorea`(대기질 측정소)·`krex`(교통 
     07.02.01 일반 약국 (..._GENERAL) [maki: pharmacy]
 ```
 
-### 4.3 표 형식 (전체 146 rows)
+### 4.3 표 형식 (전체 147 rows)
 
 전체 표는 `src/kortravelmap/category/_definitions.py`의 `PLACE_CATEGORY_DEFINITIONS`
 tuple에서 자동 생성된다 (ADR-023으로 본 라이브러리로 이전, PR#18). depth별
@@ -311,10 +312,10 @@ tuple에서 자동 생성된다 (ADR-023으로 본 라이브러리로 이전, PR
 |-------|----:|-----|
 | 0 (sentinel) | 1 | `UNCLASSIFIED` |
 | 1 (Tier 1 대분류) | 7 | `01 TOURISM` ~ `07 MEDICAL` — `00 UNCLASSIFIED`는 depth 0 sentinel로 분리 |
-| 2 (Tier 2 중분류) | 35 | 원본 33 + ADR-027 `03.08 LODGING_MOUNTAIN_SHELTER` |
+| 2 (Tier 2 중분류) | 36 | 원본 33 + ADR-027 `03.08 LODGING_MOUNTAIN_SHELTER` + `05.07 전통시장`(§12) |
 | 3 (Tier 3 소분류) | 74 | 기존 73 + `01.05.04 등대` |
 | 4 (Tier 4 세분류) | 29 | ADR-027에서 추가 없음 |
-| **합계** | **146** | 기존 145 + 축제·행사 신규 1 |
+| **합계** | **147** | 기존 145 + 축제·행사 1 + 전통시장 1 |
 
 `PlaceCategoryTier1Code` enum은 `00 UNCLASSIFIED` 포함 **8개** (depth 0 +
 depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
@@ -324,7 +325,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 
 ### 4.4 maki icon 분포
 
-`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (58 unique icons → 146 rows):
+`PLACE_CATEGORY_MAPBOX_MAKI_ICONS` (58 unique icons → 147 rows):
 
 > 본 표의 사용 코드 수는 손으로 유지하는 값이라 자동 생성 dict와 drift할 수
 > 있다. 정확한 분포는 코드(`PLACE_CATEGORY_MAPBOX_MAKI_ICONS`)를 정본으로 본다.
@@ -382,6 +383,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | KNPS (data.go.kr, 후속) | `01020101` 국립공원 + 보조 (안내소/위험지역/화장실 등) | forest-feature-etl.md §11 |
 | `data.go.kr-standard` (박물관) | `01040101` ~ `01040103` | standard-data-feature-etl.md |
 | `data.go.kr-standard` (주차장) | `06010000` TRANSPORT_PARKING | standard-data-feature-etl.md |
+| `data.go.kr-standard` (전통시장) | `05070000` CONVENIENCE_TRADITIONAL_MARKET | standard-data-feature-etl.md §7.6 |
 | `data.go.kr-standard` (관광지) | `01000000` 트리 다양 (provider 매핑별) | standard-data-feature-etl.md |
 | `data.go.kr-standard` (관광길) | route — `RouteDetail.route_type`으로 분류, category는 보조 | standard-data-feature-etl.md |
 | 공중화장실 (후속) | `05060000` CONVENIENCE_TOILET | (별도 dataset) |
@@ -472,7 +474,7 @@ ADR-023 결정으로 본 저장소에 이전. 변경 이력은 git log 참조.
 
 `tests/unit/test_category.py` (코드 작성 단계에서 추가):
 
-- 146개 seed의 결정성: `PLACE_CATEGORY_DEFINITIONS` 길이 + `PLACE_CATEGORY_BY_CODE`
+- 147개 seed의 결정성: `PLACE_CATEGORY_DEFINITIONS` 길이 + `PLACE_CATEGORY_BY_CODE`
   key 집합 일치.
 - `category_path("01050100")` → `("관광", "자연", "해변", ...)`
 - `mapbox_maki_icon_for_category` fallback (unknown → "marker")
@@ -542,3 +544,19 @@ KFS` 3행 추가(휴양림 `03.03`과 의미 분리: 휴양림은 휴양 목적,
 > §9 소관)와 **generic `access_restriction`/`fire_alert` notice_type**
 > (notice-feature-etl.md §3 소관, `forest_` prefix 없이 해변/도로/도시 도메인
 > 재사용)은 각 topic 문서가 정본이며 본 카테고리 문서 범위 밖이다.
+
+### 전통시장 PlaceCategory 신설 — `05.07 CONVENIENCE_TRADITIONAL_MARKET` (2026-11-09, #1459)
+
+전국전통시장표준데이터(15012894)를 place로 적재하며 **`05 CONVENIENCE` 하위 Tier 2
+`05.07 전통시장`**(maki `shop`) 한 행을 더했다. 이 결정은 ADR이 아니라 이 문서에 둔다 —
+ADR README가 도메인 taxonomy를 topic 문서 소관으로 정했다(구 ADR-027이 §12로 이관된 것과 같다).
+
+- **왜 새 코드인가.** 기존 트리에 시장이 없다. 가장 가까운 `05.03 마트`·`05.04 슈퍼마켓`·`05.05
+  백화점`은 단일 사업자 점포이고, 전통시장은 지자체가 인정한 점포 집합(장소 자체가 여행 목적지)이다.
+  MOIS 대규모점포는 업태 '시장'도 `05050000`(백화점) 기본값으로 적재하므로, 같은 코드에 넣으면
+  #1459의 "시장 대신 점포·백화점 행" 혼동이 범주에서도 되풀이된다.
+- **왜 `05 편의` 아래인가.** 소매·장보기 축(마트·슈퍼·백화점)과 같은 축이다. `01 관광` 아래에
+  두면 관광지 표준데이터와의 dedup 범주 유사도는 오르지만 "관광지로 지정된 시장"만 관광이다 —
+  그 경우는 dedup pair(관광지 ↔ 전통시장)가 이름·거리로 잡는다.
+- **영향.** Tier 2 한 행 추가라 Tier 1 enum·maki 집합(`shop` 기존)·다른 ETL 매핑이 바뀌지 않는다.
+  `/v1/categories` 목록이 147행이 된다(스키마 변경 없음).

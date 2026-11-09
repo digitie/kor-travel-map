@@ -12,6 +12,7 @@
 | ``datagokr_cultural_festivals`` | ``event`` | ``cultural_festivals_to_bundles`` | 2 (본 PR) |
 | ``datagokr_tourism_points`` | ``place`` | ``tourism_points_to_bundles`` | 5 |
 | ``standard_special_streets`` | ``place`` | ``special_streets_to_bundles`` | T-223b |
+| ``datagokr_traditional_markets`` | ``place`` | ``traditional_markets_to_bundles`` | #1459 |
 
 ADR 참조
 --------
@@ -79,6 +80,7 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.geocoding import (
+    AddressGeocoder,
     AddressResolver,
     ReverseGeocoder,
     cached_address_resolver,
@@ -91,11 +93,14 @@ __all__ = [
     "PublicParkingLotItem",
     "PublicSpecialStreetItem",
     "PublicTouristAttractionItem",
+    "PublicTraditionalMarketItem",
     "cultural_festivals_to_bundles",
     "museums_to_bundles",
     "parking_lots_to_bundles",
     "special_streets_to_bundles",
     "tourist_attractions_to_bundles",
+    "traditional_market_natural_key",
+    "traditional_markets_to_bundles",
     # 상수 (호출자가 source_role/marker 등 변경하고 싶을 때 참조)
     "DATASET_KEY_CULTURAL_FESTIVALS",
     "DATASET_KEY_MUSEUMS",
@@ -114,6 +119,9 @@ __all__ = [
     "DATASET_KEY_SPECIAL_STREETS",
     "SPECIAL_STREET_CATEGORY",
     "SPECIAL_STREET_MARKER_COLOR",
+    "DATASET_KEY_TRADITIONAL_MARKETS",
+    "TRADITIONAL_MARKET_CATEGORY",
+    "TRADITIONAL_MARKET_MARKER_COLOR",
 ]
 
 
@@ -736,9 +744,14 @@ async def _standard_place_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
+    fallback_coord: Coordinate | None = None,
 ) -> FeatureBundle:
-    """data.go.kr 표준데이터 place 1건 → ``FeatureBundle`` 공용 조립(관광지/주차장)."""
-    coord = _coordinate_or_none(longitude, latitude)
+    """data.go.kr 표준데이터 place 1건 → ``FeatureBundle`` 공용 조립(관광지/주차장).
+
+    ``fallback_coord``는 원천 좌표가 없거나 무효일 때만 쓰는 좌표다(전통시장의 주소
+    정지오코딩 결과). 원천 좌표가 유효하면 무시한다.
+    """
+    coord = _coordinate_or_none(longitude, latitude) or fallback_coord
 
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
@@ -1148,6 +1161,190 @@ async def special_streets_to_bundles(
                 fetched_at=fetched_at,
                 reverse_geocoder=geocoder,
                 address_resolver=resolver,
+            )
+        )
+    return bundles
+
+
+# -- 전통시장 (place, 전국전통시장표준데이터 15012894) ------------------------
+
+DATASET_KEY_TRADITIONAL_MARKETS: Final[str] = "datagokr_traditional_markets"
+"""``source_records.dataset_key`` — 전국전통시장표준데이터."""
+
+_TRADITIONAL_MARKET_ENTITY_TYPE: Final[str] = "traditional_market"
+TRADITIONAL_MARKET_CATEGORY: Final[str] = PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET.value
+"""``Feature.category`` — 편의 > 전통시장 05070000 (``docs/architecture/category.md`` §12)."""
+TRADITIONAL_MARKET_PLACE_KIND: Final[str] = "traditional_market"
+TRADITIONAL_MARKET_MARKER_COLOR: Final[str] = "P-04"
+_DEFAULT_TRADITIONAL_MARKET_ICON: Final[str] = "shop"
+
+
+@runtime_checkable
+class PublicTraditionalMarketItem(Protocol):
+    """전국전통시장표준데이터 1 row 입력 shape (``PublicTraditionalMarket``)."""
+
+    mrkt_nm: str | None
+    mrkt_type: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    mrkt_estbl_cycle: str | None
+    latitude: float | None
+    longitude: float | None
+    stor_number: int | None
+    trtmnt_prdlst: str | None
+    use_gcct: str | None
+    homepage_url: str | None
+    pblic_toilet_yn: str | None
+    prkplce_yn: str | None
+    estbl_year: int | None
+    phone_number: str | None
+    reference_date: date | None
+    instt_code: str | None
+    raw: Any
+
+
+def traditional_market_natural_key(name: str, road_text: str | None, legal_text: str | None) -> str:
+    """전통시장 자연키 — ``시장명::도로명(없으면 지번) 주소``, 주소의 공백은 지운다.
+
+    원천에 안정 관리번호가 없다. ``instt_code``는 제공 지자체 코드라 같은 시군구의 시장
+    여러 곳이 공유하고, 시장명은 전국에 겹친다("중앙시장"). 주소의 띄어쓰기 차이
+    ("177번길 25" ↔ "177번길25")가 연간 갱신마다 키를 바꾸지 않도록 공백을 지운다.
+    """
+    address = "".join((road_text or legal_text or "").split())
+    return "::".join([name, address])
+
+
+async def _geocode_market(
+    address_geocoder: AddressGeocoder,
+    road_text: str | None,
+    legal_text: str | None,
+) -> Coordinate | None:
+    """좌표 없는 시장의 주소 정지오코딩 — 도로명을 먼저, 못 찾으면 지번으로."""
+    for address in (
+        Address(road=road_text) if road_text else None,
+        Address(legal=legal_text) if legal_text else None,
+    ):
+        if address is None:
+            continue
+        coord = await address_geocoder(address)
+        if coord is not None:
+            return coord
+    return None
+
+
+async def _traditional_market_to_bundle(
+    item: PublicTraditionalMarketItem,
+    *,
+    name: str,
+    natural_key: str,
+    road_text: str | None,
+    legal_text: str | None,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+    address_geocoder: AddressGeocoder | None,
+) -> FeatureBundle:
+    fallback_coord: Coordinate | None = None
+    if _coordinate_or_none(item.longitude, item.latitude) is None and address_geocoder is not None:
+        fallback_coord = await _geocode_market(address_geocoder, road_text, legal_text)
+    reference_date = item.reference_date.isoformat() if item.reference_date is not None else None
+    raw_data: dict[str, Any] = {
+        "mrkt_nm": item.mrkt_nm,
+        "mrkt_type": item.mrkt_type,
+        "rdnmadr": item.rdnmadr,
+        "lnmadr": item.lnmadr,
+        "mrkt_estbl_cycle": item.mrkt_estbl_cycle,
+        "latitude": str(item.latitude) if item.latitude is not None else None,
+        "longitude": str(item.longitude) if item.longitude is not None else None,
+        "stor_number": item.stor_number,
+        "trtmnt_prdlst": item.trtmnt_prdlst,
+        "use_gcct": item.use_gcct,
+        "homepage_url": item.homepage_url,
+        "pblic_toilet_yn": item.pblic_toilet_yn,
+        "prkplce_yn": item.prkplce_yn,
+        "estbl_year": item.estbl_year,
+        "phone_number": item.phone_number,
+        "reference_date": reference_date,
+        "instt_code": item.instt_code,
+    }
+    return await _standard_place_to_bundle(
+        name=name,
+        natural_key=natural_key,
+        dataset_key=DATASET_KEY_TRADITIONAL_MARKETS,
+        entity_type=_TRADITIONAL_MARKET_ENTITY_TYPE,
+        category=TRADITIONAL_MARKET_CATEGORY,
+        place_kind=TRADITIONAL_MARKET_PLACE_KIND,
+        road_text=road_text,
+        legal_text=legal_text,
+        latitude=item.latitude,
+        longitude=item.longitude,
+        phone_raw=item.phone_number,
+        facility_info={
+            "mrkt_type": normalize_korean_text(item.mrkt_type),
+            "mrkt_estbl_cycle": normalize_korean_text(item.mrkt_estbl_cycle),
+            "stor_number": item.stor_number,
+            "trtmnt_prdlst": normalize_korean_text(item.trtmnt_prdlst),
+            "use_gcct": normalize_korean_text(item.use_gcct),
+            "homepage_url": item.homepage_url,
+            "pblic_toilet_yn": item.pblic_toilet_yn,
+            "prkplce_yn": item.prkplce_yn,
+            "estbl_year": item.estbl_year,
+            "reference_date": reference_date,
+            "coord_source": "geocode" if fallback_coord is not None else None,
+        },
+        raw_data=raw_data,
+        default_icon=_DEFAULT_TRADITIONAL_MARKET_ICON,
+        marker_color=TRADITIONAL_MARKET_MARKER_COLOR,
+        fetched_at=fetched_at,
+        reverse_geocoder=reverse_geocoder,
+        address_resolver=address_resolver,
+        fallback_coord=fallback_coord,
+    )
+
+
+async def traditional_markets_to_bundles(
+    items: Iterable[PublicTraditionalMarketItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
+) -> list[FeatureBundle]:
+    """전국전통시장표준데이터 items → 전통시장 place ``FeatureBundle`` (category 05070000).
+
+    - 좌표는 원천 위경도를 쓴다. 원천 좌표가 없거나 무효이고 ``address_geocoder``가
+      있으면 도로명 → 지번 순으로 정지오코딩한 좌표를 쓴다(``facility_info.coord_source
+      ='geocode'``). 그 좌표도 역지오코딩해 행정코드를 채운다.
+    - 시장명이 없거나, 좌표·도로명·지번이 모두 없는 행은 건너뛴다.
+    - 같은 호출 안에서 자연키(:func:`traditional_market_natural_key`)가 겹치는 뒤 행은
+      건너뛴다 — 한 batch에 같은 source entity가 두 번 실리지 않게 한다.
+    """
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
+    bundles: list[FeatureBundle] = []
+    seen: set[str] = set()
+    for item in items:
+        name = normalize_korean_text(item.mrkt_nm)
+        road_text = normalize_korean_text(item.rdnmadr)
+        legal_text = normalize_korean_text(item.lnmadr)
+        coord = _coordinate_or_none(item.longitude, item.latitude)
+        if name is None or (coord is None and road_text is None and legal_text is None):
+            continue
+        natural_key = traditional_market_natural_key(name, road_text, legal_text)
+        if natural_key in seen:
+            continue
+        seen.add(natural_key)
+        bundles.append(
+            await _traditional_market_to_bundle(
+                item,
+                name=name,
+                natural_key=natural_key,
+                road_text=road_text,
+                legal_text=legal_text,
+                fetched_at=fetched_at,
+                reverse_geocoder=geocoder,
+                address_resolver=resolver,
+                address_geocoder=address_geocoder,
             )
         )
     return bundles

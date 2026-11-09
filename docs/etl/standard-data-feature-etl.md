@@ -22,6 +22,7 @@
 | `datagokr_parking_lots` | `15012896` | `place` | **`06010000`** `TRANSPORT_PARKING` | 반기 1회 |
 | `datagokr_tourist_attractions` | `15021141` | `place` (경계 source 확인 후 `area` 후보) | **`01000000`** `TOURISM` (대분류, 세부는 trrsrt_se로 분기) | 연 1회 |
 | `standard_cultural_festivals` | `15013104` | `event` | event는 카테고리 외 — `EventDetail.event_kind="cultural_festival"`. `features.category`는 `01000000` `TOURISM` (대분류) | 주 1회 metadata + 월 1회 changed full scan |
+| `datagokr_traditional_markets` | `15012894` | `place` | **`05070000`** `CONVENIENCE_TRADITIONAL_MARKET` (§7.6) | 월 1회(원천 연간 갱신, 기관 등록분 매월 초 병합) |
 
 자세한 Tier 1~4 트리는 `docs/architecture/category.md` §4.
 
@@ -179,6 +180,35 @@ def _classify_route_type(road_name: str) -> str:
 
 `event_kind="cultural_festival"`. `EventDetail.starts_on`/`ends_on`. category:
 `EVENT_CULTURAL_FESTIVAL`.
+
+### 7.6 traditional_markets (place, #1459)
+
+원천: 공공데이터포털 15012894 전국전통시장표준데이터(소상공인시장진흥공단, 갱신 연간,
+수정일 2025-11-26 확인), 표준 Open API `tn_pubr_public_trdit_mrkt_api`(개발계정 자동승인,
+일 10,000건). provider client는 `python-datagokr-api`의 `client.traditional_market`
+(`PublicTraditionalMarket`, provider PR#23 `649fa1a`). **서비스키마다 이 API를 따로 활용신청해야
+한다** — 신청하지 않은 키는 HTTP 403 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`다(2026-11-09 운영 키로
+실측: 박물관은 200, 특화거리·전통시장은 403).
+
+- 변환: `providers.standard_data.traditional_markets_to_bundles` → place, category `05070000`
+  (`docs/architecture/category.md` §12), `place_kind="traditional_market"`, maki `shop`, `P-04`.
+- 자연키(`source_entity_id`): `시장명::도로명주소`(없으면 지번), **주소의 공백을 지운다** — 원천에
+  관리번호가 없고(`instt_code`는 제공 지자체 코드라 공유된다) 시장명은 전국에 겹친다("중앙시장").
+  같은 호출 안에서 자연키가 겹치는 뒤 행은 건너뛴다.
+- 좌표: 원천 위경도. 없거나 무효면 asset이 주는 주소 정지오코더로 도로명 → 지번 순으로 찾고
+  (`facility_info.coord_source="geocode"`), 그 좌표도 역지오코딩한다. 정지오코딩 좌표는
+  `raw_data`에 넣지 않는다(replay가 원천 그대로 다시 변환한다). 2026-11-09 공식 미리보기 499행 중
+  좌표 없는 행은 3행.
+- `facility_info`: 시장유형·개설주기·점포수·취급품목·사용가능상품권·홈페이지·공중화장실/주차장
+  보유여부(원문 `Y`/`N`)·개설연도·데이터기준일자.
+- dedup: `maintenance.DEFAULT_DEDUP_SCOPE_PAIRS`에 MOIS 대규모점포(`05050000`·`05030000` — 업태
+  '시장'인 대규모점포도 백화점 기본값으로 적재된다)와 관광지 표준데이터 pair. 범주가 달라 점수 상한
+  0.80 → manual_review만 생긴다.
+- 은퇴: 1,400건 안팎이라 snapshot을 한 번에 받아 `retire_absent_from_snapshot=True`로 적재한다
+  (krforest와 같은 경로) — 다음 적재에 없는 시장은 은퇴한다. **0행 snapshot은 실패시킨다**(datagokr는
+  resultCode 03을 빈 페이지로 주므로 "못 받았음"이 "없음"으로 읽혀 전부 은퇴할 수 있다). replay run은
+  은퇴·봉인·sync 성공 기록을 하지 않는다.
+- schedule `feature_place_standard_traditional_markets_monthly_schedule`(`40 5 5 * *`, 기본 STOPPED).
 
 ## 8. EtlJobSpec
 

@@ -95,6 +95,7 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_place_standard_tourist_attractions_monthly_schedule": "35 4 4 * *",
     "feature_place_standard_parking_lots_monthly_schedule": "45 4 4 * *",
     "feature_place_standard_special_streets_monthly_schedule": "50 4 4 * *",
+    "feature_place_standard_traditional_markets_monthly_schedule": "40 5 5 * *",
     "feature_place_datagokr_seoul_bookstores_monthly_schedule": "52 4 4 * *",
     "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule": "53 4 4 * *",
     "feature_place_datagokr_ansan_world_restaurants_monthly_schedule": "54 4 4 * *",

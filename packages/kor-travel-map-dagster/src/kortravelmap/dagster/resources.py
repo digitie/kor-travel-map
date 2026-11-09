@@ -43,6 +43,7 @@ from kortravelmap.providers.standard_data import (
     DATASET_KEY_PARKING_LOTS,
     DATASET_KEY_SPECIAL_STREETS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
+    DATASET_KEY_TRADITIONAL_MARKETS,
     STANDARD_DATA_PROVIDER_NAME,
 )
 from kortravelmap.settings import KorTravelMapSettings
@@ -76,6 +77,7 @@ from .provider_fetchers import (
     fetch_standard_parking_lots,
     fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
+    fetch_standard_traditional_markets,
     fetch_transport_airports,
     fetch_transport_fuel_stations,
     fetch_transport_rest_areas,
@@ -281,6 +283,14 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="standard_special_streets",
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="standard_traditional_markets",
+        provider_package="python-datagokr-api",
+        dataset_key="datagokr_traditional_markets",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="전국전통시장표준데이터(15012894) — 서비스키마다 따로 활용신청해야 한다.",
     ),
     ProviderRecordResourceSpec(
         resource_key="datagokr_file_data_records",
@@ -565,6 +575,7 @@ REPLAY_FROM_RAW: dict[str, Callable[[dict[str, Any]], Any]] = {
     "standard_tourist_attractions": datagokr_model_from_raw("PublicTouristAttraction"),
     "standard_parking_lots": datagokr_model_from_raw("PublicParkingLot"),
     "standard_special_streets": datagokr_model_from_raw("PublicSpecialStreet"),
+    "standard_traditional_markets": datagokr_model_from_raw("PublicTraditionalMarket"),
     "datagokr_file_data_records": raw_mapping_from_raw,
 }
 """``source_mode=replay``를 받는 records resource → 저장된 ``raw_data``를 fetch와 같은 record로
@@ -901,6 +912,22 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_special_streets"] = (
         replay=ReplaySource(
             STANDARD_DATA_PROVIDER_NAME,
             DATASET_KEY_SPECIAL_STREETS,
+        ),
+    )
+)
+
+_STANDARD_TRADITIONAL_MARKETS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "standard_traditional_markets"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_traditional_markets"] = (
+    build_provider_record_live_resource(
+        _STANDARD_TRADITIONAL_MARKETS_SPEC,
+        fetch_standard_traditional_markets,
+        replay=ReplaySource(
+            STANDARD_DATA_PROVIDER_NAME,
+            DATASET_KEY_TRADITIONAL_MARKETS,
         ),
     )
 )

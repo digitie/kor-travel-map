@@ -162,6 +162,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   원천 ZIP이 CSV가 아니라 중첩 SHP다(python-knps-api#17). 보호지역·위험지역·선형시설은 #1450 Option A로 정리했다. 해제 조건은 acceptance.
 
+- [ ] T-MARKET-LOAD — **전통시장 표준데이터 운영 적재·schedule 켜기(#1459)**
+
+  코드는 migration 438과 함께 들어간다. 운영 키의 15012894 활용신청(현재 403), 배포 뒤 첫 적재·검색 확인, schedule 활성이 남았다. 해제 조건은 acceptance.
+
 - [ ] T-PG18-CI — **공용 PG 18 대응: CI를 PG18 lane으로 바꾸고 fresh-install catalog 가정 정리**
 
   ADR-118(proposed): CI 통합 suite를 공용 instance digest(PG18 + PostGIS 3.6) 한 lane으로 바꾸고 PG16 catalog 가정을

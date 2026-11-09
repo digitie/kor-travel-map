@@ -1,3 +1,7 @@
+## 2026-11-09 — #1459 전통시장 표준데이터
+
+- 다음: 배포 회전에 Map 머지 SHA를 묶는다 → 운영 키로 15012894 Open API 활용신청(현재 403) → `POST /v1/ops/pipeline/requests`(preview 먼저) → 건수·#1459 시장 검색 확인 → schedule 켜기. 판정은 acceptance `T-MARKET-LOAD`.
+
 ## 2026-11-07 — Valkey 상태 쓰기 재시도
 
 - 다음 회전에 묶는다(소유자). writer socket timeout 10 s는 Manager env(code-server만), API는 2 s 유지.

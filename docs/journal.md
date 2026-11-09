@@ -1,3 +1,9 @@
+## 2026-11-09 — #1459 전통시장 표준데이터 적재 경로
+
+- 원천은 공공데이터포털 15012894(소상공인시장진흥공단, 연간) 표준 Open API `tn_pubr_public_trdit_mrkt_api`다. 필드명은 공식 명세, 단위 fixture는 같은 페이지 미리보기 실제 행이다. provider PR#23(`649fa1a`)로 `traditional_market`을 더했다.
+- Map: category `05.07 전통시장`(category.md §12), 자연키 `시장명::주소(공백 제거)`, 좌표 없으면 도로명→지번 정지오코딩, snapshot 은퇴(0행은 실패), MOIS 대규모점포·관광지 dedup pair, migration 438, 월간 schedule(STOPPED).
+- 운영 키는 이 API(그리고 기존 특화거리)에 활용신청이 없어 HTTP 403이다(박물관은 200). 적재 전에 소유자가 활용신청해야 한다.
+
 ## 2026-11-07 — Valkey 상태 쓰기 일시 실패 재시도
 
 - n150 sda flush 대기로 weather_state_daily_summaries가 step 재시도 3회 모두 `세대 쓰기 실패: TimeoutError`(2 s)로 죽었다. step 재시도는 원천을 다시 받아 같은 자리에서 또 죽는다. 세대 묶음·meta·포인터 교체·잠금 해제를 그 자리에서 3회(1·2·4 s) 다시 한다. 응답만 잃은 교체는 CAS가 이 세대를 돌려주면 성공으로 본다.

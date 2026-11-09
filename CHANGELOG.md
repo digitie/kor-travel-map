@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-11-09 — 전통시장 표준데이터(#1459)
+
+- 전국전통시장표준데이터(15012894)를 전통시장 place(`05070000 편의 > 전통시장`)로 적재하는 dataset·job·월간 schedule(기본 중지)을 추가한다. 좌표가 없는 시장은 주소로 정지오코딩하고, 원천에서 사라진 시장은 다음 적재에서 은퇴한다.
+- `/v1/categories`가 147행을 돌려준다(스키마 변경 없음). alembic head `438_traditional_market_dataset`.
+
 ## 2026-11-07 — 저배율 지도 cluster 집계 속도(#1455)
 
 - `/v1/features/in-bounds`의 행정구역 cluster 집계가 route/area 후보를 배열 대조 대신 조인으로 묶고, 대표점을 한 번만 계산하며, route/area를 요청하지 않으면 geometry 후보를 계산하지 않는다. 응답 계약은 바뀌지 않는다.
