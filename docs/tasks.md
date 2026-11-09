@@ -158,6 +158,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   `provider_event_required_details_v1` 격리는 원천이 기간·장소를 채워도 풀리지 않는다(#1444 리뷰). 해제 조건은 acceptance.
 
+- [ ] T-TRANSPORT-PLACES — **transport 철도역·항구 첫 적재와 남은 교통 거점 원천**
+
+  ADR-120 Map 쪽은 구현했다. transport T3 export 활성화 뒤 첫 적재·검색 확인, 일반·고속철도 전용 역과 버스터미널 원천이 남았다. 해제 조건은 acceptance.
+
 - [ ] T-KNPS-DATA-GAPS — **KNPS 대피소가 원천 형식 오류로 적재되지 않는다**
 
   원천 ZIP이 CSV가 아니라 중첩 SHP다(python-knps-api#17). 보호지역·위험지역·선형시설은 #1450 Option A로 정리했다. 해제 조건은 acceptance.

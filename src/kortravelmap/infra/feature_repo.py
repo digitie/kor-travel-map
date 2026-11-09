@@ -75,6 +75,7 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
+    SEARCH_DESTINATION_GROUP_MAX,
 )
 from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.exceptions import (
@@ -1800,17 +1801,27 @@ WITH candidates AS (
 """
 
 #: 검색 순위(``rank``)의 자리. 큰 자리가 먼저 갈린다 — (지역 검색만) 지역 일치 → 일치 단계 →
-#: bbox 안 → 분류 그룹 → 이름 일치 → 분류 구체성. 같은 ``rank`` 안에서는 trigram ``score``
-#: 내림차순, ``feature_id`` 오름차순이다. 각 자리 값은 한 자리 수다(``_SEARCH_RANK_DIGIT_MAX``).
-_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 10_000
-_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 1_000
+#: bbox 안 → 목적지 이름 일치 → 분류 그룹 → 이름 일치 → 분류 구체성. 같은 ``rank`` 안에서는
+#: trigram ``score`` 내림차순, ``feature_id`` 오름차순이다. 각 자리 값은 한 자리 수다
+#: (``_SEARCH_RANK_DIGIT_MAX``).
+#:
+#: **목적지 이름 일치**(ADR-120, #1459 §2): 이름이 검색어와 같고 분류가 목적지 그룹
+#: (``SEARCH_DESTINATION_GROUP_MAX`` 이하 — 관광·숙박·역·휴게소·공항·여객선터미널)이면 분류 그룹보다
+#: 앞이다. "양양국제공항"을 찾으면 이름이 정확히 같은 공항이 이름에 검색어를 품기만 한 관광지
+#: "설해원(양양국제공항)"보다, "서울역"을 찾으면 역이 "서울역사박물관"보다 앞이다. 식음·주차처럼
+#: 목적지가 아닌 분류의 이름 일치는 종전대로 그룹 **뒤**에서만 가른다 — "하회마을"이라는 서울
+#: 음식점이 이름에 "하회마을"을 품은 관광지보다 앞서지 않는다(436의 결정 그대로).
+_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 100_000
+_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 10_000
+_SEARCH_RANK_DESTINATION_EXACT_WEIGHT: Final[int] = 1_000
 _SEARCH_RANK_GROUP_WEIGHT: Final[int] = 100
 _SEARCH_RANK_EXACT_WEIGHT: Final[int] = 10
 _SEARCH_RANK_DIGIT_MAX: Final[int] = 9
-#: 지역 자리를 뺀 순위의 가장 큰 값(유사도만·bbox 밖·가장 큰 그룹·불일치·Tier 1만).
+#: 지역 자리를 뺀 순위의 가장 큰 값(유사도만·bbox 밖·목적지 불일치·가장 큰 그룹·불일치·Tier 1만).
 _SEARCH_RANK_BASE_MAX: Final[int] = (
     2 * _SEARCH_RANK_MATCH_WEIGHT
     + _SEARCH_RANK_BBOX_WEIGHT
+    + _SEARCH_RANK_DESTINATION_EXACT_WEIGHT
     + _SEARCH_RANK_DIGIT_MAX * _SEARCH_RANK_GROUP_WEIGHT
     + _SEARCH_RANK_EXACT_WEIGHT
     + 1
@@ -1821,11 +1832,10 @@ _SEARCH_RANK_BASE_MAX: Final[int] = (
 _SEARCH_RANK_REGION_WEIGHT: Final[int] = 10 * _SEARCH_RANK_MATCH_WEIGHT
 if _SEARCH_RANK_REGION_WEIGHT <= _SEARCH_RANK_BASE_MAX:  # pragma: no cover — 상수 검사
     raise RuntimeError("search region weight must exceed every other rank digit")
-#: 지역 자리 예외 — 이름이 검색어 **전체**와 같고 분류 그룹이 이 값 이하(관광 0, 숙박·온천·역·
-#: 휴게소·공항 1)인 행은 지역 밖이어도 지역 일치와 같은 자리다. "김포 공항"의 김포공항(서울
-#: 강서구)·"서울 대공원"의 서울대공원(과천)처럼 지역 이름이 이름의 일부인 목적지를 살린다.
-#: 식음(2)은 예외가 아니다 — "춘천 닭갈비"·"대구 막창"은 이름이 같은 서울 식당보다 그 지역이다.
-_SEARCH_REGION_EXACT_DESTINATION_GROUP_MAX: Final[int] = 1
+#: 지역 자리 예외 — 목적지 이름 일치(``destination_exact``, ADR-120) 행은 지역 밖이어도 지역
+#: 일치와 같은 자리다. "김포 공항"의 김포공항(서울 강서구)·"서울 대공원"의 서울대공원(과천)처럼
+#: 지역 이름이 이름의 일부인 목적지를 살린다. 식음은 예외가 아니다 — "춘천 닭갈비"·"대구 막창"은
+#: 이름이 같은 서울 식당보다 그 지역이다.
 #: 순위가 가질 수 있는 가장 큰 값(지역 밖 + 지역을 뺀 최댓값). cursor 검증 상한.
 _SEARCH_RANK_MAX: Final[int] = _SEARCH_RANK_REGION_WEIGHT + _SEARCH_RANK_BASE_MAX
 
@@ -1879,6 +1889,14 @@ def _search_category_group_sql(column: str) -> str:
         whens.append(f"WHEN left({column}, 2) = '{tier1}' THEN {_group(group)}")
     fallback = _group(PLACE_CATEGORY_SEARCH_GROUP_FALLBACK)
     return f"(CASE {' '.join(whens)} ELSE {fallback} END)"
+
+
+def _search_destination_group_max() -> int:
+    """목적지 그룹 상한(``SEARCH_DESTINATION_GROUP_MAX``) — SQL에 박는 한 자리 정수."""
+    value = SEARCH_DESTINATION_GROUP_MAX
+    if type(value) is not int or not 0 <= value <= _SEARCH_RANK_DIGIT_MAX:
+        raise ValueError(f"destination group max must be a single digit: {value!r}")
+    return value
 
 
 def _search_display_name_sql(name: str, category: str) -> str:
@@ -1999,9 +2017,7 @@ def _feature_search_score_cte(
           CASE
             WHEN compact_raw_name = CAST(:alias_compact AS text) THEN 0
             WHEN region_hit THEN 0
-            WHEN compact_name = CAST(:q_compact AS text)
-              AND {_search_category_group_sql("category")}
-                <= {_SEARCH_REGION_EXACT_DESTINATION_GROUP_MAX} THEN 0
+            WHEN destination_exact THEN 0
             ELSE 1
           END * {_SEARCH_RANK_REGION_WEIGHT}
           +"""
@@ -2067,11 +2083,32 @@ compacted AS (
         {_search_compact_sql("display_name")} AS compact_name,
         CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
              THEN {_search_compact_sql("name")} END AS compact_raw_name,
-        {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail
+        {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail,
+        {_search_category_group_sql("category")} AS search_group
     FROM filtered
 ),
 hits AS (
     SELECT compacted.*{region_hit_column}
+    FROM compacted
+),
+ranked AS (
+    -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
+    -- 검색어와 같다(공백 무시). 지역 검색이면 지역 일치 행은 나머지 검색어로도 본다.
+    -- 목적지 이름 일치(ADR-120): 이름 전체가 검색어와 같은 목적지. 첫 낱말을 뗀 나머지는 관광
+    -- (그룹 0)에만 쓴다 — "신라스테이 해운대"(숙박)가 "해운대"로 관광지 앞에 서지 않게 한다.
+    SELECT
+        hits.*,
+        (
+          compact_name = CAST(:q_compact AS text)
+          OR compact_tail = CAST(:q_compact AS text){region_exact}
+        ) IS TRUE AS name_exact,
+        (
+          search_group <= {_search_destination_group_max()}
+          AND (
+            compact_name = CAST(:q_compact AS text)
+            OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
+          )
+        ) IS TRUE AS destination_exact
     FROM compacted
 ),
 candidates AS (
@@ -2106,20 +2143,20 @@ candidates AS (
                 ) THEN 0
               ELSE 1
             END * {_SEARCH_RANK_BBOX_WEIGHT}
-          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖
-          -- (분류 체계에서 유도, 접두 예외 먼저).
-          + {_search_category_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
-          -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
-          -- 검색어와 같으면 0(공백 무시).
+          -- 목적지 이름 일치: 이름 일치이고 분류가 목적지 그룹이면 0 — 분류 그룹보다 앞(ADR-120).
           + CASE
-              WHEN compact_name = CAST(:q_compact AS text)
-                OR compact_tail = CAST(:q_compact AS text){region_exact} THEN 0
+              WHEN destination_exact THEN 0
               ELSE 1
-            END * {_SEARCH_RANK_EXACT_WEIGHT}
+            END * {_SEARCH_RANK_DESTINATION_EXACT_WEIGHT}
+          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널 → 식음 → 그 밖
+          -- (분류 체계에서 유도, 접두 예외 먼저).
+          + search_group * {_SEARCH_RANK_GROUP_WEIGHT}
+          -- 이름 일치(분류 불문): 같은 그룹 안에서 이름이 같은 행이 앞.
+          + CASE WHEN name_exact THEN 0 ELSE 1 END * {_SEARCH_RANK_EXACT_WEIGHT}
           -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
         ) AS search_rank
-    FROM hits
+    FROM ranked
 )
 """
 
@@ -6635,8 +6672,9 @@ def encode_bbox_cursor(feature_id: str) -> str:
 
 _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v3: 별칭의 공백 정규화로 순위 의미가 달라져 이전 cursor를 재사용하지 않는다.
-#: v4: 지역 검색(#1459 §7)이 순위 맨 앞 자리(지역 일치)를 더해 ``rank`` 값의 뜻이 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 4
+#: v4: 이름 일치를 분류 그룹 앞으로 옮겨(ADR-120) ``rank`` 값의 뜻이 바뀌었다.
+#: v5: 지역 검색(#1459 §7)이 순위 맨 앞 자리(지역 일치)를 더해 ``rank`` 값의 뜻이 바뀌었다.
+_SEARCH_CURSOR_VERSION: Final[int] = 5
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -7074,12 +7112,13 @@ async def search_features(
 
     검색어 앞(또는 뒤)에 지역 이름이 있고 나머지가 있으면 지역 검색이다(#1459 §7,
     ``core.search_region``): 그 지역에 있고 나머지 검색어를 이름에 품거나 그 분류인 행(그리고
-    별칭이 가리키는 이름)이 맨 앞이고, 그 안팎은 아래 순서 그대로다. 지역은 필터가 아니라 순위다.
-    ``q`` 검색은 좌표 없는 place·event를 내지 않는다(#1459 §4 — 핀으로 쓸 수 없다).
+    별칭이 가리키는 이름, 이름 전체가 검색어인 목적지)이 맨 앞이고, 그 안팎은 아래 순서 그대로다.
+    지역은 필터가 아니라 순위다. ``q`` 검색은 좌표 없는 place·event를 내지 않는다(#1459 §4).
 
-    ``q`` 검색의 순서(436): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만, 그 안에서
-    bbox 안 → 분류 그룹(관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖) →
-    이름 일치(보이는 이름 기준) → 분류 구체성 →
+    ``q`` 검색의 순서(436, ADR-120): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만,
+    그 안에서 bbox 안 → 목적지(관광·숙박·역·휴게소·공항·여객선터미널)의 이름 일치 → 분류 그룹
+    (관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널 → 식음 → 그 밖) → 이름 일치(보이는
+    이름 기준) → 분류 구체성 →
     ``score`` 내림차순 → ``feature_id``. ``q``와 함께 온 ``bbox``는 **필터가 아니라 순위
     가중**이다. ``q`` 없이 ``bbox``만 오면 종전처럼 bbox 필터 + ``feature_id`` 순이다.
     """

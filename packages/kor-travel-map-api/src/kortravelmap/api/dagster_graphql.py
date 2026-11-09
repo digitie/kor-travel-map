@@ -79,6 +79,8 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_event_datagokr_cultural_festivals_monthly_schedule": "10 3 1 * *",
     "feature_place_transport_fuel_stations_weekly_schedule": "5 3 * * 1",
     "feature_place_transport_rest_areas_weekly_schedule": "20 4 * * 1",
+    "feature_place_transport_rail_stations_weekly_schedule": "30 4 * * 1",
+    "feature_place_transport_ferry_ports_weekly_schedule": "40 4 * * 1",
     "feature_place_krheritage_items_monthly_schedule": "15 2 2 * *",
     "feature_event_krheritage_events_monthly_schedule": "25 3 2 * *",
     "feature_place_mois_licenses_monthly_schedule": "35 4 2 * *",

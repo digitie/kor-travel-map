@@ -1,6 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-120.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-121.**
+
+- [ADR-120 — transport 기준정보(휴게소·철도역·항구·공항)는 검색되는 Map place로 둔다](120-transport-reference-places-in-search.md) — proposed, 2026-11-09 (#1459; alembic 438, 검색 cursor v4; ADR-114 결정 7 ② 휴게소·공항 퇴역 취소).
 
 - [ADR-119 — 미확정 Feature 명령 조정과 필드 존재를 보존하는 지문](119-feature-command-reconciliation.md) — proposed, 2026-11-05 (Pinvi #668, Map #1451).
 - [ADR-118 — DB 기준을 PostgreSQL 18 + PostGIS 3.6으로, CI는 공용 instance digest 한 lane](118-postgres-18-ci-target.md) — proposed, 2026-10-28 (T-PG18-CI; ADR-007 DB major·ADR-103 CI lane 대체).

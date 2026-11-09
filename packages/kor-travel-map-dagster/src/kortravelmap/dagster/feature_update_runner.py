@@ -59,7 +59,9 @@ from .assets import (
     run_feature_place_standard_special_streets,
     run_feature_place_standard_tourist_attractions,
     run_feature_place_transport_airports,
+    run_feature_place_transport_ferry_ports,
     run_feature_place_transport_fuel_stations,
+    run_feature_place_transport_rail_stations,
     run_feature_place_transport_rest_areas,
     run_feature_route_krforest_dulle_trails,
     run_feature_route_krforest_mountain_trails,
@@ -88,7 +90,9 @@ from .provider_fetchers import (
     fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
     fetch_transport_airports,
+    fetch_transport_ferry_ports,
     fetch_transport_fuel_stations,
+    fetch_transport_rail_stations,
     fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
 )
@@ -747,6 +751,18 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_place_transport_rest_areas,
         resources=_records("transport_rest_areas", fetch_transport_rest_areas),
         asset_key="feature_place_transport_rest_areas",
+    ),
+    *_operation_specs(
+        "feature_place_transport_rail_stations_job",
+        run=run_feature_place_transport_rail_stations,
+        resources=_records("transport_rail_stations", fetch_transport_rail_stations),
+        asset_key="feature_place_transport_rail_stations",
+    ),
+    *_operation_specs(
+        "feature_place_transport_ferry_ports_job",
+        run=run_feature_place_transport_ferry_ports,
+        resources=_records("transport_ferry_ports", fetch_transport_ferry_ports),
+        asset_key="feature_place_transport_ferry_ports",
     ),
     *_operation_specs(
         "feature_place_krheritage_items_job",

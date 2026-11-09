@@ -1325,7 +1325,7 @@ def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
         page_size=10,
         include_total=False,
     )
-    assert feature_repo._SEARCH_CURSOR_VERSION == 4
+    assert feature_repo._SEARCH_CURSOR_VERSION == 5
     v1_cursor = feature_repo._encode_search_cursor_payload(
         {
             "v": 1,
@@ -1343,8 +1343,8 @@ def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
         )
 
 
-def test_feature_search_cursor_v3_is_rejected_after_region_rank() -> None:
-    """#1459 §7 지역 검색이 순위 맨 앞 자리를 더했다 — v3 cursor의 ``rank``는 다른 뜻이다."""
+def test_feature_search_cursor_v4_is_rejected_after_region_rank() -> None:
+    """#1459 §7 지역 검색이 순위 맨 앞 자리를 더했다 — v4 cursor의 ``rank``는 다른 뜻이다."""
     contract = feature_repo._feature_search_contract(
         q="강릉 호텔",
         bbox=None,
@@ -1355,7 +1355,7 @@ def test_feature_search_cursor_v3_is_rejected_after_region_rank() -> None:
     )
     v3_cursor = feature_repo._encode_search_cursor_payload(
         {
-            "v": 3,
+            "v": 4,
             "kind": "feature_search",
             "query": contract.fingerprint,
             "keyset": {"feature_id": "feature-1", "score": "0.5", "rank": 10_000},

@@ -31,6 +31,7 @@ from kortravelmap.providers.krex import (
     REST_AREA_MARKER_ICON,
     TRAFFIC_NOTICE_CATEGORY,
     build_rest_area_place_locator,
+    rest_area_display_name,
     rest_area_fuel_price_records_to_features_and_values,
     rest_area_place_locator_from_rows,
 )
@@ -183,6 +184,45 @@ def test_rest_areas_feature_metadata() -> None:
     facility = detail.facility_info  # type: ignore[union-attr]
     assert facility["direction"] == "부산방향"
     assert facility["highway_name"] == "서해안고속도로"
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("name", "display"),
+    [
+        # transport 휴게소 기준정보의 실제 표기(2026-11-09 prod 215건에서 본 꼴).
+        ("강릉(인천)", "강릉휴게소(인천방향)"),
+        ("서울만남(부산)", "서울만남휴게소(부산방향)"),
+        ("행담도", "행담도휴게소"),
+        ("덕평", "덕평휴게소"),
+        ("서산휴게소", "서산휴게소"),
+        ("횡성(강릉방향)", "횡성휴게소(강릉방향)"),
+        ("  문막(강릉) ", "문막휴게소(강릉방향)"),
+    ],
+)
+def test_rest_area_display_name_says_it_is_a_rest_area(name: str, display: str) -> None:
+    """"강릉휴게소"를 찾으면 이름이 검색어를 품어야 한다(ADR-120, #1459 §2)."""
+    assert rest_area_display_name(name) == display
+    assert rest_area_display_name(display) == display
+
+
+@pytest.mark.unit
+def test_rest_area_feature_name_uses_the_display_name_but_keeps_the_natural_key() -> None:
+    gangneung = _RestArea(
+        name="강릉(인천)",
+        route_name=None,
+        direction=None,
+        lat=37.7603,
+        lon=128.8054,
+        phone_number=None,
+    )
+    [bundle] = rest_areas_to_bundles([gangneung], fetched_at=_NOW)
+    assert bundle.feature.name == "강릉휴게소(인천방향)"
+    # 자연키·원천 이름은 그대로다 — 같은 휴게소가 새 Feature로 갈리지 않는다.
+    assert bundle.source_record.source_entity_id == "강릉(인천)::::"
+    assert bundle.source_record.raw_data["name"] == "강릉(인천)"
+    # 표시 규칙의 결과가 payload에 있어야 저장 이름이 한 번 다시 쓰인다(같은 payload는 건너뛴다).
+    assert bundle.source_record.raw_data["display_name"] == "강릉휴게소(인천방향)"
 
 
 @pytest.mark.unit
