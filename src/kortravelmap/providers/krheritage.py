@@ -591,9 +591,10 @@ async def _heritage_item_to_bundle(
         area_square_meters = None
         # 원천 좌표가 없으면("0.0" 포함) 소재지가 번지까지 있을 때 주소 좌표로 메운다
         # (#1459 §4 — 운영 국가유산 place 1,338건이 좌표 없이 적재됐다).
+        # 소재지는 도로명일 수도 지번일 수도 있어 두 형식으로 묻는다.
         coord = await geocode_missing_coordinate(
             _coord_from(item.longitude, item.latitude),
-            Address(legal=location_text),
+            Address(road=location_text, legal=location_text),
             address_geocoder,
         )
 

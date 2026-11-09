@@ -47,6 +47,7 @@ import asyncio
 import contextlib
 import logging
 import math
+import re
 from collections import Counter, OrderedDict, deque
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from dataclasses import dataclass, field
@@ -319,25 +320,6 @@ class _CachedObservedReverseGeocoder:
     async def __call__(self, coord: Coordinate) -> Address | None:
         return (await self.observe(coord)).address
 
-    async def geocode_address(self, address: Address) -> Coordinate | None:
-        """주소 → 좌표(``POST /v2/geocode``) — 같은 client·계수로 원천 좌표 결측을 메운다(#1459 §4).
-
-        도로명이 있으면 도로명 먼저, 지번이 다르면 지번을 다음에 묻는다. 둘 다 못 찾으면 None.
-        외부 API fallback은 쓰지 않는다(``fallback="none"`` —
-        ``kor_travel_geo_address_resolver``와 같다).
-        """
-        queries: list[tuple[str, Literal["road", "parcel"]]] = []
-        if address.road:
-            queries.append((address.road, "road"))
-        if address.legal and address.legal != address.road:
-            queries.append((address.legal, "parcel"))
-        for query, addr_type in queries:
-            response = await self._client.geocode(query, type_=addr_type)
-            coord = geocode_response_to_coordinate(response)
-            if coord is not None:
-                return coord
-        return None
-
 
 class PrefetchingReverseGeocoder:
     """run 수명의 bounded LRU 캐시 + bounded 동시성 선조회를 갖는 역지오코더 (ADR-108).
@@ -548,25 +530,29 @@ def cached_address_geocoder(geocoder: AddressGeocoder) -> AddressGeocoder:
     return _cached
 
 
-def address_has_location_number(address: Address) -> bool:
-    """도로명 또는 지번 주소에 숫자(건물번호·지번)가 있는가 — 점으로 찍을 만큼 구체적인가.
+#: 번지·건물번호 낱말 — ``135-9``·``15번지``·``599-4번지``·``산51``·``346(중곡동)``·``385(진현동,``.
+#: ``1층``·``B1``·``(30024)``·``3가``·``1동``·``세종대로23길``·``1100로``는 아니다.
+_LOCATION_NUMBER_TOKEN: Final[re.Pattern[str]] = re.compile(
+    r"^산?\d+(?:-\d+)?(?:번지)?(?:[(,].*)?$"
+)
 
-    "경상남도 밀양시"·"서울특별시 강서구 화곡6동"처럼 시군구·동까지만 있는 주소는 정지오코딩하면
-    행정구역 대표점이 나온다. 그런 점은 장소의 위치가 아니므로 좌표 fallback에 쓰지 않는다
-    (#1459 §4 — 국가유산 행사 5,286건·MCST 클래스 5,074건이 그 모양이다). 동 이름의 숫자
-    ("화곡6동")는 번지가 아니다 — 숫자 뒤가 "동"·"가"인 것만 있으면 거짓이다.
+
+def _text_has_location_number(text_value: str | None) -> bool:
+    if not text_value:
+        return False
+    tokens = text_value.split()
+    # 첫 낱말(시도)은 번지일 수 없다 — "1100로"처럼 숫자로 시작하는 도로명도 낱말 자체가 걸러진다.
+    return any(_LOCATION_NUMBER_TOKEN.match(token) for token in tokens[1:])
+
+
+def address_has_location_number(address: Address) -> bool:
+    """도로명 또는 지번 주소에 건물번호·지번 낱말이 있는가 — 점으로 찍을 만큼 구체적인가.
+
+    "경상남도 밀양시"·"서울특별시 강서구 화곡6동"·"을지로 3가"처럼 행정구역까지만 있는 주소는
+    정지오코딩하면 행정구역 대표점이 나온다. 그런 점은 장소의 위치가 아니므로 좌표 fallback에
+    쓰지 않는다(#1459 §4 — 국가유산 행사 5,286건·MCST 클래스 5,074건이 그 모양이다).
     """
-    for text_value in (address.road, address.legal):
-        if not text_value:
-            continue
-        for token in text_value.split():
-            if not any(ch.isdigit() for ch in token):
-                continue
-            if token[-1] in "동가" and token[:-1].rstrip("0123456789") and token[-2].isdigit():
-                # "화곡6동"·"을지로3가" — 행정동·가 이름.
-                continue
-            return True
-    return False
+    return _text_has_location_number(address.road) or _text_has_location_number(address.legal)
 
 
 async def geocode_missing_coordinate(
@@ -1837,6 +1823,26 @@ class _KorTravelGeoObservedReverseGeocoder:
 
     async def __call__(self, coord: Coordinate) -> Address | None:
         return (await self.observe(coord)).address
+
+    async def geocode_address(self, address: Address) -> Coordinate | None:
+        """주소 → 좌표(``POST /v2/geocode``) — 같은 client·계수로 원천 좌표 결측을 메운다(#1459 §4).
+
+        건물번호·지번 낱말이 있는 쪽만 묻는다(번호 없는 도로명은 도로 대표점이다). 도로명을 먼저,
+        지번을 다음에 묻는다 — 같은 문자열이어도 두 형식으로 묻는다(국가유산 소재지는 도로명일 수도
+        지번일 수도 있다). 둘 다 못 찾으면 None. 외부 API fallback은 쓰지 않는다
+        (``fallback="none"`` — ``kor_travel_geo_address_resolver``와 같다).
+        """
+        queries: list[tuple[str, Literal["road", "parcel"]]] = []
+        if address.road and _text_has_location_number(address.road):
+            queries.append((address.road, "road"))
+        if address.legal and _text_has_location_number(address.legal):
+            queries.append((address.legal, "parcel"))
+        for query, addr_type in queries:
+            response = await self._client.geocode(query, type_=addr_type)
+            coord = geocode_response_to_coordinate(response)
+            if coord is not None:
+                return coord
+        return None
 
 
 _LOGGER = logging.getLogger(__name__)

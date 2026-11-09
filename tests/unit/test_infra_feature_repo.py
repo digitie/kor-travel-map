@@ -1395,9 +1395,10 @@ def test_feature_search_region_sql_variants_bind_only_what_they_use() -> None:
         for categories in (False, True):
             sql, count_sql = feature_repo._FEATURE_SEARCH_REGION_SQL[(name_mode, categories)]
             used = set(_text(sql)._bindparams)
+            arms = feature_repo._SearchRegionArms(name_mode=name_mode, categories=categories)
             params = feature_repo._search_region_params(
                 region if categories else replace(region, category_codes=()),
-                name_mode,
+                arms,
             )
             region_binds = {"region_codes", "rem_compact", "rem_like", "rem_categories"}
             assert used & region_binds == set(params), (name_mode, categories)

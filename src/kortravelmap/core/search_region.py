@@ -18,7 +18,7 @@
   뗀 이름, 그리고 ``SIDO_SHORT_NAMES``의 관용 약칭(충북·전남·경북 …).
 - 시군구: ``sigungu_name``의 각 낱말("수원시 영통구" → "수원시", "영통구")과, 시·군·구로 끝나고
   뗀 뒤 두 글자 이상이면 접미사를 뗀 형태("강릉시" → "강릉", "중구"는 그대로).
-- 잘 알려진 하위 지역(``SUBAREA_ALIASES``): 애월·우도·해운대 밖의 광안리 같은 이름을 시도 약칭 +
+- 잘 알려진 하위 지역(``SUBAREA_ALIASES``): 애월·우도·광안리 같은 이름을 시도 약칭 +
   시군구 이름으로 고정한다. 읍면동 경계까지 좁히지 않는다 — 시군구가 순위의 단위다.
 
 검색어 해석(``split_region_query``). 공백으로 나눈 낱말 중 **앞쪽 연속 구간**(없으면 뒤쪽)에서
@@ -46,6 +46,7 @@ __all__ = [
     "SIDO_SHORT_NAMES",
     "SUBAREA_ALIASES",
     "SEARCH_CATEGORY_KEYWORD_SYNONYMS",
+    "TRAILING_REGION_STOP_TOKENS",
     "RegionSearch",
     "SearchRegionEntry",
     "build_region_token_index",
@@ -95,7 +96,8 @@ _SIGUNGU_SUFFIXES: Final[tuple[str, ...]] = ("시", "군", "구")
 #: 잘 알려진 하위 지역 → (시도 토큰, 시군구 토큰). 둘의 교집합 코드가 그 지역이다. 시도
 #: 토큰을 함께 두는 이유: 시군구 이름은 시도마다 겹친다("중구"·"고성").
 #: 2026-11-08 여행 시나리오 질의(애월 카페·우도 천진항·광안리 …)에서 나온 이름이 출발점이다.
-#: 시군구 이름과 겹치는 하위 지역(서귀포 "남원읍" vs 남원시)은 넣지 않는다.
+#: 다른 시군구 이름이나 다른 지역의 같은 지명과 겹치는 하위 지역(서귀포 "남원읍" vs 남원시,
+#: "성산"(창원 성산구), "송도"(부산 송도해수욕장), "서면"(여러 군의 서면))은 넣지 않는다.
 SUBAREA_ALIASES: Final[Mapping[str, tuple[str, str]]] = {
     "애월": ("제주", "제주시"),
     "한림": ("제주", "제주시"),
@@ -105,13 +107,10 @@ SUBAREA_ALIASES: Final[Mapping[str, tuple[str, str]]] = {
     "함덕": ("제주", "제주시"),
     "조천": ("제주", "제주시"),
     "우도": ("제주", "제주시"),
-    "성산": ("제주", "서귀포시"),
     "중문": ("제주", "서귀포시"),
     "표선": ("제주", "서귀포시"),
     "광안리": ("부산", "수영구"),
-    "서면": ("부산", "부산진구"),
     "남포동": ("부산", "중구"),
-    "송도": ("인천", "연수구"),
     "영종도": ("인천", "중구"),
     "을왕리": ("인천", "중구"),
     "강화도": ("인천", "강화군"),
@@ -129,6 +128,10 @@ SUBAREA_ALIASES: Final[Mapping[str, tuple[str, str]]] = {
     "명동": ("서울", "중구"),
     "잠실": ("서울", "송파구"),
 }
+
+#: 검색어 **뒤**에 오면 지역으로 읽지 않는 토큰 — 흔한 낱말과 같은 지역 이름("야구 경기",
+#: "광산 체험"은 경기도·광산구가 아니다). 앞에 오는 "경기 펜션"은 그대로 지역이다.
+TRAILING_REGION_STOP_TOKENS: Final[frozenset[str]] = frozenset({"경기", "광산"})
 
 #: 분류 이름이 아닌 흔한 검색 낱말 → 분류 이름. 분류 체계에 없는 말만 둔다.
 SEARCH_CATEGORY_KEYWORD_SYNONYMS: Final[Mapping[str, str]] = {
@@ -318,6 +321,8 @@ def split_region_query(
         used, codes = leading
         region_tokens, rest = tokens[:used], tokens[used:]
     else:
+        if _key(tokens[-1]) in TRAILING_REGION_STOP_TOKENS:
+            return None
         trailing = _leading_region(tuple(reversed(tokens)), index)
         if trailing is None:
             return None

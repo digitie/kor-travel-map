@@ -1821,6 +1821,11 @@ _SEARCH_RANK_BASE_MAX: Final[int] = (
 _SEARCH_RANK_REGION_WEIGHT: Final[int] = 10 * _SEARCH_RANK_MATCH_WEIGHT
 if _SEARCH_RANK_REGION_WEIGHT <= _SEARCH_RANK_BASE_MAX:  # pragma: no cover — 상수 검사
     raise RuntimeError("search region weight must exceed every other rank digit")
+#: 지역 자리 예외 — 이름이 검색어 **전체**와 같고 분류 그룹이 이 값 이하(관광 0, 숙박·온천·역·
+#: 휴게소·공항 1)인 행은 지역 밖이어도 지역 일치와 같은 자리다. "김포 공항"의 김포공항(서울
+#: 강서구)·"서울 대공원"의 서울대공원(과천)처럼 지역 이름이 이름의 일부인 목적지를 살린다.
+#: 식음(2)은 예외가 아니다 — "춘천 닭갈비"·"대구 막창"은 이름이 같은 서울 식당보다 그 지역이다.
+_SEARCH_REGION_EXACT_DESTINATION_GROUP_MAX: Final[int] = 1
 #: 순위가 가질 수 있는 가장 큰 값(지역 밖 + 지역을 뺀 최댓값). cursor 검증 상한.
 _SEARCH_RANK_MAX: Final[int] = _SEARCH_RANK_REGION_WEIGHT + _SEARCH_RANK_BASE_MAX
 
@@ -1939,9 +1944,8 @@ def _search_tail_sql(expression: str) -> str:
 # 이름 팔(``region_name``)은 셋 중 하나다. ``"ilike"``: 나머지가 3글자 이상 — trigram GIN이 받는다.
 # ``"strpos"``: 2글자 이하 — trigram은 3글자 단위라 ``ILIKE '%카페%'``는 GIN에서 거를 trigram이 없어
 # 공개 행 전부를 recheck한다(prod 2026-11-09 "서울 카페" 33만 행 recheck, 1.7초). ``strpos``는 GIN이
-# 받지 않아 그 팔은 ``idx_features_sigungu``로만 읽힌다. ``None``: 2글자 이하인데 지역이 너무
-# 넓다(``_SEARCH_REGION_SHORT_SCAN_MAX_ROWS`` 초과, 서울 전역 13만 행 — 0.7초). 이름 팔을 빼고
-# trigram·분류 팔이 찾은 후보 안에서만 지역 순위를 준다.
+# 받지 않아 그 팔은 ``idx_features_sigungu``로만 읽힌다. ``None``: 2글자 이하인데 지역이 넓다
+# (``_SEARCH_REGION_SCAN_MAX_ROWS`` 초과). 분류 팔도 같은 상한을 따른다(``_search_region_arms``).
 def _feature_search_score_cte_sql(
     *,
     region: bool,
@@ -1991,11 +1995,14 @@ def _feature_search_score_cte_sql(
     )
     region_rank = (
         f"""
-          -- 지역 일치(지역 검색만): 별칭이 가리키는 이름이거나, 지역 안에서
-          -- 나머지 검색어와 맞으면 0.
+          -- 지역 일치(지역 검색만): 별칭이 가리키는 이름이거나, 지역 안에서 나머지 검색어와
+          -- 맞거나, 이름이 검색어 전체와 같은 목적지(관광·숙박·역·휴게소·공항)이면 0.
           CASE
             WHEN compact_raw_name = CAST(:alias_compact AS text) THEN 0
             WHEN region_hit THEN 0
+            WHEN compact_name = CAST(:q_compact AS text)
+              AND {_search_category_group_sql("category")}
+                <= {_SEARCH_REGION_EXACT_DESTINATION_GROUP_MAX} THEN 0
             ELSE 1
           END * {_SEARCH_RANK_REGION_WEIGHT}
           +"""
@@ -2036,9 +2043,10 @@ WITH name_candidates AS MATERIALIZED (
             AND {_search_compact_sql("f.name")} = CAST(:alias_compact AS text)
         ){region_arm}
       )
-      -- 점이 없는 행은 검색에 내지 않는다(#1459 §4 — 좌표 없는 축제·주차장이 이름 일치 1위를 차지해
-      -- 핀·동선에 쓸 수 없었다). route·area는 geometry가 위치다.
-      AND (f.coord IS NOT NULL OR f.kind IN ('route', 'area'))
+      -- 점이 없는 place·event는 검색에 내지 않는다(#1459 §4 — 좌표 없는 축제·주차장이 이름 일치
+      -- 1위를 차지해 핀·동선에 쓸 수 없었다). route·area는 geometry가 위치이고, notice·price는
+      -- 원래 점 없이 행정구역에 걸리는 kind라 그대로 둔다.
+      AND (f.coord IS NOT NULL OR f.kind NOT IN ('place', 'event'))
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 ),
 filtered AS (
@@ -2195,11 +2203,13 @@ _FEATURE_SEARCH_REGION_SQL: Final[dict[tuple[_SearchRegionName, bool], tuple[str
     for categories in (False, True)
 }
 
-#: 2글자 이하 나머지로 지역 전체를 훑는 상한(공개 행 수). 넘으면 이름 팔을 뺀다. 경기 전역
-#: (3.7만 행)은 0.16초, 서울 전역(13.6만 행)은 0.7초였다(prod 2026-11-09, jit off, warm).
-_SEARCH_REGION_SHORT_SCAN_MAX_ROWS: Final[int] = 50_000
+#: 지역을 훑는 팔(2글자 이하 이름 팔·분류 팔)을 두는 상한(지역 공개 행 수). 넘으면 두 팔을 빼고
+#: trigram 팔(3글자 이상이면 지역 ILIKE 팔도)이 찾은 후보 안에서만 지역 순위를 준다. prod
+#: 2026-11-09(jit off, warm): "서울 맛집"(13.6만 행 지역, 음식점 분류 팔) 5~6초, "경기 관광"
+#: (3.7만 행) 1.3초, "부산 맛집"(1.1만 행) 0.16초, "대구 막창"(0.8만 행) 0.04초.
+_SEARCH_REGION_SCAN_MAX_ROWS: Final[int] = 30_000
 
-#: 지역 공개 행 수 — ``idx_features_sigungu`` index-only count. 2글자 이하 나머지에서만 부른다.
+#: 지역 공개 행 수 — ``idx_features_sigungu`` index-only count.
 _SEARCH_REGION_ROW_COUNT_SQL: Final[str] = """
 SELECT count(*) AS region_rows
 FROM feature.features AS f
@@ -2246,7 +2256,10 @@ CROSS JOIN LATERAL (
       AND f.publication_state = 'published'
       AND f.quality_state = 'valid'
       AND f.sigungu_code = codes.code
-      AND COALESCE(f.address ->> 'sigungu_name', '') <> ''
+      AND (
+        COALESCE(f.address ->> 'sigungu_name', '') <> ''
+        OR COALESCE(f.address ->> 'sido_name', '') <> ''
+      )
     LIMIT 8
 ) AS sample
 WHERE codes.code IS NOT NULL
@@ -6973,28 +6986,44 @@ async def _resolve_search_region(session: AsyncSession, q: str) -> RegionSearch 
 _SEARCH_REGION_TRIGRAM_MIN_CHARS: Final[int] = 3
 
 
-async def _search_region_name_mode(
-    session: AsyncSession, region: RegionSearch
-) -> _SearchRegionName:
-    """지역 이름 팔의 모양 — 3글자 이상 ``ilike``, 아니면 지역이 좁을 때 ``strpos``, 넓으면 없음."""
-    if len(search_alias_key(region.remainder)) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS:
-        return "ilike"
+@dataclass(frozen=True, slots=True)
+class _SearchRegionArms:
+    """지역 검색의 후보 팔 — 이름 팔 모양과 분류 팔 여부."""
+
+    name_mode: _SearchRegionName
+    categories: bool
+
+
+async def _search_region_arms(session: AsyncSession, region: RegionSearch) -> _SearchRegionArms:
+    """지역이 넓으면(``_SEARCH_REGION_SCAN_MAX_ROWS`` 초과) 지역을 훑는 팔을 뺀다.
+
+    3글자 이상 나머지의 이름 팔은 trigram GIN이 받으므로 넓어도 둔다(``ilike``).
+    """
     region_rows = (
         await session.execute(
             text(_SEARCH_REGION_ROW_COUNT_SQL),
             {"region_codes": list(region.sigungu_codes)},
         )
     ).scalar_one()
-    return "strpos" if int(region_rows) <= _SEARCH_REGION_SHORT_SCAN_MAX_ROWS else None
+    narrow = int(region_rows) <= _SEARCH_REGION_SCAN_MAX_ROWS
+    long_remainder = (
+        len(search_alias_key(region.remainder)) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS
+    )
+    name_mode: _SearchRegionName = (
+        "ilike" if long_remainder else ("strpos" if narrow else None)
+    )
+    return _SearchRegionArms(
+        name_mode=name_mode, categories=narrow and bool(region.category_codes)
+    )
 
 
 def _search_score_sql(
-    region: RegionSearch | None, name_mode: _SearchRegionName = "ilike"
+    region: RegionSearch | None, arms: _SearchRegionArms | None = None
 ) -> tuple[str, str]:
-    """(본 질의, 개수 질의) — 지역 검색이면 지역 팔이 있는 변형, 분류 이름이면 분류 팔까지."""
-    if region is None:
+    """(본 질의, 개수 질의) — 지역 검색이면 지역 팔이 있는 변형, 분류 팔은 ``arms``대로."""
+    if region is None or arms is None:
         return _FEATURE_SEARCH_BY_SCORE_SQL, _FEATURE_SEARCH_SCORE_COUNT_SQL
-    return _FEATURE_SEARCH_REGION_SQL[(name_mode, bool(region.category_codes))]
+    return _FEATURE_SEARCH_REGION_SQL[(arms.name_mode, arms.categories)]
 
 
 def _like_contains_pattern(value: str) -> str:
@@ -7004,19 +7033,19 @@ def _like_contains_pattern(value: str) -> str:
 
 
 def _search_region_params(
-    region: RegionSearch | None, name_mode: _SearchRegionName = "ilike"
+    region: RegionSearch | None, arms: _SearchRegionArms | None = None
 ) -> dict[str, Any]:
     """지역 검색 SQL의 bind 값. 지역 검색이 아니면 빈 dict(종전 SQL은 이 이름을 쓰지 않는다)."""
-    if region is None:
+    if region is None or arms is None:
         return {}
     rem_compact = search_alias_key(region.remainder)
     params: dict[str, Any] = {
         "region_codes": list(region.sigungu_codes),
         "rem_compact": rem_compact,
     }
-    if name_mode == "ilike":
+    if arms.name_mode == "ilike":
         params["rem_like"] = _like_contains_pattern(rem_compact)
-    if region.category_codes:
+    if arms.categories:
         params["rem_categories"] = list(region.category_codes)
     return params
 
@@ -7042,7 +7071,7 @@ async def search_features(
     검색어 앞(또는 뒤)에 지역 이름이 있고 나머지가 있으면 지역 검색이다(#1459 §7,
     ``core.search_region``): 그 지역에 있고 나머지 검색어를 이름에 품거나 그 분류인 행(그리고
     별칭이 가리키는 이름)이 맨 앞이고, 그 안팎은 아래 순서 그대로다. 지역은 필터가 아니라 순위다.
-    ``q`` 검색은 좌표 없는 place·event·notice를 내지 않는다(#1459 §4 — 핀으로 쓸 수 없다).
+    ``q`` 검색은 좌표 없는 place·event를 내지 않는다(#1459 §4 — 핀으로 쓸 수 없다).
 
     ``q`` 검색의 순서(436): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만, 그 안에서
     bbox 안 → 분류 그룹(관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖) →
@@ -7085,11 +7114,9 @@ async def search_features(
             await session.execute(text(_SEARCH_ALIAS_LOOKUP_SQL), {"alias_key": q_compact})
         ).scalar_one_or_none()
         region = await _resolve_search_region(session, contract.q)
-    name_mode: _SearchRegionName = None
-    if region is not None:
-        name_mode = await _search_region_name_mode(session, region)
-    region_params = _search_region_params(region, name_mode)
-    score_sql, score_count_sql = _search_score_sql(region, name_mode)
+    arms = await _search_region_arms(session, region) if region is not None else None
+    region_params = _search_region_params(region, arms)
+    score_sql, score_count_sql = _search_score_sql(region, arms)
     effective_limit = contract.page_size
     rows = (
         (

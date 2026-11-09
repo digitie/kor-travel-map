@@ -92,6 +92,7 @@ def test_split_region_query(
         "팔공산",
         "남산 둘레길",  # 지역 토큰 없음.
         "지리산 천왕봉",
+        "야구 경기",  # 뒤의 "경기"는 지역이 아니다(TRAILING_REGION_STOP_TOKENS).
         "",
     ],
 )

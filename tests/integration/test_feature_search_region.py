@@ -34,6 +34,8 @@ _CHUNCHEON = ("51110", "강원특별자치도", "춘천시")
 _DAEGU_JUNG = ("27110", "대구광역시", "중구")
 _SEOUL_JONGNO = ("11110", "서울특별시", "종로구")
 _PYEONGCHANG = ("51760", "강원특별자치도", "평창군")
+_SEOUL_GANGSEO = ("11500", "서울특별시", "강서구")
+_GIMPO = ("41570", "경기도", "김포시")
 
 
 def _uuid(label: str) -> str:
@@ -127,6 +129,15 @@ async def _seed(session: AsyncSession) -> dict[str, str]:
             session, "cc_dakgalbi", name="통나무집닭갈비", category="02010100",
             region=_CHUNCHEON, lon=127.7930, lat=37.9330,
         ),
+        # 김포 공항 — 김포공항은 서울 강서구다(지역 이름이 이름의 일부인 목적지).
+        "gimpo_airport": await _feature(
+            session, "gimpo_airport", name="김포공항", category="06050000",
+            region=_SEOUL_GANGSEO, lon=126.7960, lat=37.5580,
+        ),
+        "gimpo_noodle": await _feature(
+            session, "gimpo_noodle", name="공항칼국수", category="02010100",
+            region=_GIMPO, lon=126.7150, lat=37.6150,
+        ),
         # 좌표 없는 축제(같은 이름의 좌표 있는 행과 함께).
         "snow_unplaced": await _feature(
             session, "snow_unplaced", name="대관령눈꽃축제", category="01090000",
@@ -179,6 +190,15 @@ async def test_region_query_beats_same_name_in_another_city(
     assert labels.index("cc_dakgalbi") < labels.index("seoul_dakgalbi"), labels
 
 
+async def test_region_query_keeps_a_destination_whose_full_name_is_the_query(
+    migrated_session: AsyncSession,
+) -> None:
+    """이름이 검색어 전체와 같은 목적지는 지역 밖이어도 지역 일치 자리다(식음은 아니다)."""
+    ids = await _seed(migrated_session)
+    labels = await _search_labels(migrated_session, "김포 공항", ids, kinds=["place"])
+    assert labels.index("gimpo_airport") < labels.index("gimpo_noodle"), labels
+
+
 async def test_single_token_query_keeps_exact_name_behaviour(
     migrated_session: AsyncSession,
 ) -> None:
@@ -188,15 +208,15 @@ async def test_single_token_query_keeps_exact_name_behaviour(
     assert labels[0] == "seoul_dakgalbi", labels
 
 
-async def test_region_query_wide_short_scope_still_boosts_category_rows(
+async def test_region_query_wide_scope_still_boosts_trigram_candidates(
     migrated_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """지역이 넓어 이름 팔을 뺀 경우에도 분류 팔·trigram 후보 안에서 지역 순위가 산다."""
+    """지역이 넓어 지역을 훑는 팔을 뺀 경우에도 trigram 후보 안에서 지역 순위가 산다."""
     ids = await _seed(migrated_session)
-    monkeypatch.setattr(feature_repo, "_SEARCH_REGION_SHORT_SCAN_MAX_ROWS", 0)
+    monkeypatch.setattr(feature_repo, "_SEARCH_REGION_SCAN_MAX_ROWS", 0)
     labels = await _search_labels(migrated_session, "강릉 호텔", ids, kinds=["place"])
-    assert labels.index("gn_stjohns") < labels.index("daegu_hotel"), labels
+    assert labels.index("gn_seamarq") < labels.index("daegu_hotel"), labels
 
 
 async def test_region_query_keyset_pagination_matches_single_page(
@@ -260,18 +280,23 @@ async def test_region_entries_sql_reads_names_per_sigungu_code(
     assert {_GANGNEUNG, _CHUNCHEON, _DAEGU_JUNG} <= seen
 
 
-async def test_region_search_sql_uses_sigungu_and_trigram_indexes(
+async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
     migrated_session: AsyncSession,
 ) -> None:
-    """지역 팔은 ``idx_features_sigungu``, 이름 팔은 ``idx_features_name_trgm``(ADR-012 술어)."""
+    """지역 팔은 ``idx_features_sigungu``로 읽힌다 — features Seq Scan이 생기면 빨갛다(ADR-012).
+
+    ``enable_seqscan=off``는 금지가 아니라 벌점이다 — 인덱스로 받을 수 없는 술어면 계획에 Seq Scan이
+    그대로 남는다. 그래서 "sigungu 색인을 쓴다"와 "features Seq Scan이 없다"를 함께 본다.
+    """
     await _seed(migrated_session)
     await migrated_session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
     await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
-    for name_mode, remainder in (("ilike", "닭갈비"), ("strpos", "호텔")):
-        sql, _count_sql = feature_repo._FEATURE_SEARCH_REGION_SQL[(name_mode, False)]
-        params = {
-            "q": f"강릉 {remainder}",
-            "q_compact": f"강릉{remainder}",
+    for (name_mode, categories), (sql, _count) in feature_repo._FEATURE_SEARCH_REGION_SQL.items():
+        if name_mode != "strpos" and not categories:
+            continue  # 지역 팔이 sigungu 색인을 반드시 거치는 변형만(ilike는 trigram도 가능).
+        params: dict[str, Any] = {
+            "q": "강릉 호텔",
+            "q_compact": "강릉호텔",
             "alias_name": None,
             "alias_compact": None,
             "bbox_enabled": False,
@@ -286,14 +311,30 @@ async def test_region_search_sql_uses_sigungu_and_trigram_indexes(
             "cursor_feature_id": None,
             "limit_plus_one": 21,
             "region_codes": ["51150"],
-            "rem_compact": remainder,
+            "rem_compact": "호텔",
         }
         if name_mode == "ilike":
-            params["rem_like"] = f"%{remainder}%"
-        plan = json.dumps(
-            (
-                await migrated_session.execute(text("EXPLAIN (FORMAT JSON) " + sql), params)
-            ).scalar_one()
-        )
-        assert "idx_features_sigungu" in plan or "idx_features_name_trgm" in plan, plan
+            params["rem_like"] = "%호텔%"
+        if categories:
+            params["rem_categories"] = ["03010000", "03010100"]
+        explained = (
+            await migrated_session.execute(text("EXPLAIN (FORMAT JSON) " + sql), params)
+        ).scalar_one()
+        nodes = _plan_nodes(explained[0]["Plan"])
+        indexes = {node.get("Index Name") for node in nodes}
+        seq_on_features = [
+            node
+            for node in nodes
+            if node.get("Node Type") in {"Seq Scan", "Parallel Seq Scan"}
+            and node.get("Relation Name") == "features"
+        ]
+        assert "idx_features_sigungu" in indexes, (name_mode, categories, indexes)
+        assert not seq_on_features, (name_mode, categories, seq_on_features)
         assert "ST_Transform" not in sql
+
+
+def _plan_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes = [plan]
+    for child in plan.get("Plans", []):
+        nodes.extend(_plan_nodes(child))
+    return nodes

@@ -514,6 +514,7 @@ def _source_entity_id(
 #: 해수욕장 분류 제안을 받아들이는 이름 표지(#1459 §6). 해수욕장은 KHOA가 정본 목록을 주는
 #: 분류라, concierge의 제안(LLM·run 기본값)은 이름이 해수욕장이라고 말할 때만 믿는다.
 _BEACH_NAME_MARKERS: Final[tuple[str, ...]] = ("해수욕장", "해변", "비치", "beach")
+_TRAILING_PARENTHESIS: Final[re.Pattern[str]] = re.compile(r"\s*\([^()]*\)\s*$")
 
 
 def _category(place: Mapping[str, Any]) -> str:
@@ -528,8 +529,11 @@ def _category(place: Mapping[str, Any]) -> str:
     if value is None or len(value) != 8 or not value.isdigit():
         return KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK
     if value == PlaceCategoryCode.TOURISM_NATURE_BEACH.value:
+        # 이름이 해수욕장 표지로 **끝나야** 한다 — "해변카페"·"비치호텔"·"○○해수욕장 주차장"은
+        # 해수욕장이 아니다. 끝의 괄호 보충("(금능)")은 떼고 본다.
         name = (normalize_korean_text(_text(place, "name")) or "").lower()
-        if not any(marker in name for marker in _BEACH_NAME_MARKERS):
+        name = _TRAILING_PARENTHESIS.sub("", name).strip()
+        if not name.endswith(_BEACH_NAME_MARKERS):
             return KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK
     return value
 
