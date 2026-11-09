@@ -174,9 +174,9 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   코드는 migration 441과 함께 들어간다. 배포 뒤 첫 적재·#1459 관광지 검색 확인·daily schedule 활성이 남았다. 문화시설(14)·레포츠(28)는 후속. 해제 조건은 acceptance.
 
-- [ ] T-MARKET-LOAD — **전통시장 표준데이터 운영 적재·schedule 켜기(#1459)**
+- [ ] T-MARKET-LOAD — **전통시장·특화거리 표준데이터 운영 적재·schedule 켜기(#1459)**
 
-  코드는 migration 439과 함께 들어간다. 운영 키의 15012894 활용신청(현재 403), 배포 뒤 첫 적재·검색 확인, schedule 활성이 남았다. 해제 조건은 acceptance.
+  원천은 포털 공개 파일(서비스키 불필요)로 바뀌었다. 배포 뒤 두 dataset 첫 적재·검색 확인, schedule 활성이 남았다. 해제 조건은 acceptance.
 
 - [ ] T-PG18-CI — **공용 PG 18 대응: CI를 PG18 lane으로 바꾸고 fresh-install catalog 가정 정리**
 

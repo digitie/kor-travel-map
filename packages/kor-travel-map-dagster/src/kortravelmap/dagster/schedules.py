@@ -657,14 +657,18 @@ def _coalescing_execution_fn(
 #: OA-21062(`TbSlibBookstoreInfo`)로 옮기고 라이브로 606건을 확인했다. 되살린
 #: 것은 시계이고, 되살아난 근거는 원천 교체다 — 활용신청이 아니다.
 #:
-#: 남은 넷은 오너가 포털에서 활용신청을 마치면 이 목록에서 이름을 빼는 것으로
+#: 남은 셋(2026-11-09 기준)은 오너가 포털에서 활용신청을 마치면 이 목록에서 이름을 빼는 것으로
 #: 되살아난다.
+#:
+#: 2026-11-09 — 지역특화거리를 이 목록에서 **뺐다.** 원천을 Open API에서 포털 **공개
+#: 파일**(15017322, 서비스키 불필요 — provider ``special_street.iter_file_pages``)로
+#: 옮기고 274행을 실측했다. 서울 책방과 같이 되살린 근거는 원천 교체다. schedule은
+#: 여전히 STOPPED로 생기고 첫 적재 확인 뒤 켠다.
 DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
     {
         "feature_place_datagokr_ansan_world_restaurants_monthly_schedule",
         "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_monthly_schedule",
         "feature_place_datagokr_jeju_local_restaurants_monthly_schedule",
-        "feature_place_standard_special_streets_monthly_schedule",
     }
 )
 
