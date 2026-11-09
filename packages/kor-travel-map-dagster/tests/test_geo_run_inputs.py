@@ -351,7 +351,8 @@ def test_address_geocoder_wraps_the_real_resource_type_token_first_and_cached() 
         return await geocode(address), await geocode(address)
 
     first, second = asyncio.run(run())
-    assert first is not None and first == second
+    assert first is not None
+    assert first == second
     assert order[0] == "token"
     # 같은 주소는 run 동안 한 번만 묻는다(도로명 → 지번).
     assert [step for step in order if step.startswith("geocode")] == [
