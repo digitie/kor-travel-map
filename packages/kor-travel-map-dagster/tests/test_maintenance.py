@@ -293,7 +293,7 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         for left, right, _include_auto_merge in client.pairs
         if left.provider == "python-visitkorea-api"
     ]
-    assert {(right.provider, right.dataset_key) for _left, right in tourapi} == {
+    assert {(right.provider, right.dataset_key) for _left, right in tourapi} >= {
         ("python-krheritage-api", None),
         ("python-knps-api", None),
         ("python-krforest-api", None),
@@ -306,14 +306,28 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
     assert {left.dataset_key for left, _right in tourapi} == {"visitkorea_tourist_attractions"}
     assert {left.limit for left, _right in tourapi} == {20000}
     assert {right.limit for _left, right in tourapi} == {20000}
-    by_right = {right.provider: (left, right) for left, right in tourapi if not right.dataset_key}
+    by_right = {
+        right.provider: (left, right)
+        for left, right in tourapi
+        if not right.dataset_key and right.provider != "python-mois-api"
+    }
     assert by_right["python-khoa-api"][0].categories == ("01050100",)
     heritage_left = by_right["python-krheritage-api"][0].categories
     assert heritage_left
     assert all(code.startswith("0107") for code in heritage_left)
-    mois_left, mois_right = by_right["python-mois-api"]
-    assert mois_left.categories == mois_right.categories
-    assert "01080400" not in mois_right.categories  # 체육시설은 TourAPI 관광지가 아니다
+    mois_pairs = {
+        left.categories: right.categories
+        for left, right in tourapi
+        if right.provider == "python-mois-api"
+    }
+    assert all(left == right for left, right in mois_pairs.items())
+    # 레포츠(28)의 골프장·캠핑장은 MOIS 같은 슬러그와 견준다(#1459 14·28 확장).
+    assert ("01080100",) in mois_pairs
+    assert any(
+        "03060100" in cats and all(c.startswith("0306") for c in cats) for cats in mois_pairs
+    )
+    # 체육시설(01080400)은 MOIS 쪽 수가 너무 많아 비교하지 않는다.
+    assert all("01080400" not in cats for cats in mois_pairs.values())
     assert client.siblings == []
 
     dedup_output = result.output_for_node("refresh_dedup_candidates")

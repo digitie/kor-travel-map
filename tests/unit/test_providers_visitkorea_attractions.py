@@ -145,6 +145,51 @@ def test_attraction_category_maps_the_new_classification(
     assert attraction_category(*lcls) == expected.value
 
 
+@pytest.mark.parametrize(
+    ("content_type", "lcls3", "title", "expected"),
+    [
+        # #1459 수용 예시 — 산막이옛길(28)·태권도원·국립세종도서관(14)
+        ("28", "LS011900", "산막이옛길", PlaceCategoryCode.TOURISM_ACTIVITY_TREKKING),
+        ("14", "VE090400", "태권도원", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY),
+        ("14", "VE090300", "국립세종도서관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_LIBRARY),
+        # 문화시설(14) 대표 코드
+        ("14", "VE070100", "국립중앙박물관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_MUSEUM),
+        ("14", "VE070600", "리움미술관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_ART),
+        ("14", "VE060100", "세종문화회관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_PERFORMANCE_HALL),
+        ("14", "VE120300", "어느 문화공간", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY),
+        # 레포츠(28) 대표 코드
+        ("28", "LS010400", "어느 컨트리클럽", PlaceCategoryCode.TOURISM_ACTIVITY_GOLF),
+        ("28", "LS010800", "어느 스키장", PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS),
+        ("28", "LS011900", "어느 서바이벌장", PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS),
+        ("28", "LS020600", "어느 바다낚시터", PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS),
+        ("28", "AC050100", "어느 야영장", PlaceCategoryCode.LODGING_CAMPGROUND),
+        ("28", "AC050200", "어느 오토캠핑장", PlaceCategoryCode.LODGING_CAMPGROUND_AUTO),
+        ("28", "AC050300", "어느 카라반", PlaceCategoryCode.LODGING_CAMPGROUND_CARAVAN_RENTAL),
+        ("28", "AC050400", "어느 글램핑장", PlaceCategoryCode.LODGING_CAMPGROUND_GLAMPING),
+        ("28", "AC030100", "어느 펜션", PlaceCategoryCode.LODGING_PENSION),
+    ],
+)
+def test_culture_and_leisure_rows_get_their_own_categories(
+    content_type: str, lcls3: str, title: str, expected: PlaceCategoryCode
+) -> None:
+    item = replace(
+        _GWANGAN,
+        content_id="77",
+        content_type_id=content_type,
+        title=title,
+        lcls_systm1=lcls3[:2],
+        lcls_systm2=lcls3[:4],
+        lcls_systm3=lcls3,
+    )
+    (bundle,) = _bundles([item])
+    assert bundle.feature.category == expected.value
+    assert bundle.feature.detail.place_kind == {  # type: ignore[union-attr]
+        "12": "tourapi_attraction",
+        "14": "tourapi_culture_facility",
+        "28": "tourapi_leisure",
+    }[content_type]
+
+
 def test_every_mapped_category_exists_in_the_catalog() -> None:
     known = {definition.code for definition in PLACE_CATEGORY_DEFINITIONS}
     targets = {

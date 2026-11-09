@@ -52,8 +52,8 @@ class _ProviderError(Exception):
 
 class _FakeClient:
     instances: list[_FakeClient] = []
-    pages: dict[int, list[Any]] = {}
-    totals: dict[int, int] = {}
+    pages: dict[tuple[str | None, int], list[Any]] = {}
+    totals: dict[str | None, Any] = {}
     detail_errors: dict[str, str] = {}
 
     def __init__(self, service_key: str | None = None, **_: Any) -> None:
@@ -80,8 +80,11 @@ class _FakeClient:
             }
         )
         cls = type(self)
-        total = cls.totals.get(page_no, max(cls.totals.values()))
-        return _Page(cls.pages.get(page_no, []), total, raw={"page": page_no})
+        total = cls.totals[content_type_id] if content_type_id in cls.totals else 0
+        if isinstance(total, dict):
+            total = total.get(page_no, max(total.values()))
+        rows = cls.pages.get((content_type_id, page_no), [])
+        return _Page(rows, total, raw={"type": content_type_id, "page": page_no})
 
     async def detail_common(
         self, content_id: str, *, page_no: int = 1, num_of_rows: int = 10
@@ -124,31 +127,41 @@ async def test_missing_credential_is_refused() -> None:
         await fetch_visitkorea_attraction_details(settings, ["1"])
 
 
-async def test_the_list_walks_every_page_of_content_type_12_and_closes(
+async def test_the_list_walks_every_page_of_each_content_type_and_closes(
     fake: type[_FakeClient],
 ) -> None:
-    fake.pages = {1: _rows(*(str(n) for n in range(1000))), 2: _rows("x1", "x2")}
-    fake.totals = {1: 1002, 2: 1002}
+    fake.pages = {
+        ("12", 1): _rows(*(str(n) for n in range(1000))),
+        ("12", 2): _rows("x1", "x2"),
+        ("14", 1): _rows("c1"),
+        ("28", 1): _rows("l1", "l2"),
+    }
+    fake.totals = {"12": 1002, "14": 1, "28": 2}
 
     with counting_upstream_requests() as counter:
         records = await _drain()
 
-    assert len(records) == 1002
+    assert len(records) == 1005
     (client,) = fake.instances
     assert client.service_key == "service-key"
     assert client.closed is True
-    assert [call["page_no"] for call in client.list_calls] == [1, 2]
-    assert {call["content_type_id"] for call in client.list_calls} == {"12"}
+    # 관광지(12)·문화시설(14)·레포츠(28) — #1459 수용 예시가 14·28에 있다.
+    assert [(c["content_type_id"], c["page_no"]) for c in client.list_calls] == [
+        ("12", 1),
+        ("12", 2),
+        ("14", 1),
+        ("28", 1),
+    ]
     # 수정일순은 순회 중 수정된 행을 다른 페이지로 옮긴다 — 생성일순이어야 한다.
     assert {call["arrange"] for call in client.list_calls} == {"D"}
     assert {call["num_of_rows"] for call in client.list_calls} == {1000}
-    assert counter[0] == 2
+    assert counter[0] == 4
 
 
 async def test_a_short_list_fails_before_retiring_anything(fake: type[_FakeClient]) -> None:
     # 2페이지가 비어 오면 1,000건 밖의 관광지가 전부 은퇴한다 — 선언보다 적으면 실패.
-    fake.pages = {1: _rows(*(str(n) for n in range(1000)))}
-    fake.totals = {1: 1500, 2: 1500}
+    fake.pages = {("12", 1): _rows(*(str(n) for n in range(1000)))}
+    fake.totals = {"12": 1500, "14": 0, "28": 0}
 
     with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="1500건 중 고유 1000건"):
         await _drain()
@@ -158,8 +171,8 @@ async def test_a_short_list_fails_before_retiring_anything(fake: type[_FakeClien
 async def test_a_list_that_changes_during_the_walk_fails(fake: type[_FakeClient]) -> None:
     # 삭제 하나와 등록 하나가 겹치면 개수는 맞아도 경계 행 하나가 빠질 수 있다.
     first = _rows(*(str(n) for n in range(1000)))
-    fake.pages = {1: first, 2: _rows("new")}
-    fake.totals = {1: 1001, 2: 1002}
+    fake.pages = {("12", 1): first, ("12", 2): _rows("new")}
+    fake.totals = {"12": {1: 1001, 2: 1002}, "14": 0, "28": 0}
 
     with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="바뀌었다"):
         await _drain()
@@ -169,10 +182,19 @@ async def test_a_row_repeated_across_pages_is_not_counted_twice(
     fake: type[_FakeClient],
 ) -> None:
     first = _rows(*(str(n) for n in range(1000)))
-    fake.pages = {1: first, 2: [first[-1]]}
-    fake.totals = {1: 1001, 2: 1001}
+    fake.pages = {("12", 1): first, ("12", 2): [first[-1]]}
+    fake.totals = {"12": 1001, "14": 0, "28": 0}
 
     with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="고유 1000건"):
+        await _drain()
+
+
+async def test_a_short_culture_list_fails_the_whole_snapshot(fake: type[_FakeClient]) -> None:
+    # 한 타입이라도 짧으면 은퇴 적재 전에 멈춘다 — 셋이 한 snapshot이다.
+    fake.pages = {("12", 1): _rows("a"), ("14", 1): _rows("c1")}
+    fake.totals = {"12": 1, "14": 5, "28": 0}
+
+    with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="contentTypeId 14"):
         await _drain()
 
 
