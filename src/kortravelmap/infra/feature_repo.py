@@ -2109,7 +2109,7 @@ ranked AS (
             OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
           )
         ) IS TRUE AS destination_exact
-    FROM compacted
+    FROM hits
 ),
 candidates AS (
     SELECT
