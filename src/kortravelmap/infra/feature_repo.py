@@ -1952,8 +1952,7 @@ def _feature_search_score_cte_sql(
     region_categories: bool = False,
     region_name: Literal["ilike", "strpos"] | None = "ilike",
 ) -> str:
-    if region_categories and not region:
-        raise ValueError("region_categories requires region")
+    # ``region``이 거짓이면 다른 두 인자는 아무 조각도 만들지 않는다(종전 SQL 그대로).
     name_predicate = {
         "ilike": "f.name ILIKE CAST(:rem_like AS text)",
         "strpos": "strpos(lower(f.name), CAST(:rem_compact AS text)) > 0",
@@ -1973,7 +1972,7 @@ def _feature_search_score_cte_sql(
             f.sigungu_code = ANY(CAST(:region_codes AS text[]))
             AND {name_predicate[region_name]}
         )"""
-        if region_name is not None
+        if region and region_name is not None
         else ""
     )
     region_arm = name_arm + category_arm if region else ""
