@@ -391,7 +391,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         schedule_name="feature_place_visitkorea_tourist_attractions_daily_schedule",
         # 목록은 매일 바뀌고(수정·신규), 상세는 run마다 600건씩 채운다(#1459).
         cron_schedule="45 4 * * *",
-        description="TourAPI 관광지(contentTypeId 12) place Feature 매일 적재.",
+        description="TourAPI 관광지·문화시설·레포츠(12·14·28) place Feature 매일 적재.",
     ),
     *_datagokr_file_data_schedule_specs(),
     FeatureLoadScheduleSpec(

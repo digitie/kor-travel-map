@@ -1,4 +1,4 @@
-"""``kortravelmap.providers.visitkorea_attractions`` — TourAPI 관광지(contentTypeId 12) → place.
+"""``kortravelmap.providers.visitkorea_attractions`` — TourAPI 관광지·문화시설·레포츠 → place.
 
 한국관광공사 국문 관광정보 서비스(KorService2) ``areaBasedList2``의 관광지 목록을
 **1차 source** place Feature로 만든다(#1459 — 산막이옛길·고군산군도·부산타워 같은 대표
@@ -96,7 +96,7 @@ _PROVIDER_NAME: Final[str] = "python-visitkorea-api"
 """canonical provider name (ADR-024) — :mod:`visitkorea`의 ``VISITKOREA_PROVIDER_NAME``과 같다."""
 
 DATASET_KEY_VISITKOREA_ATTRACTIONS: Final[str] = "visitkorea_tourist_attractions"
-"""``provider_sync.source_records.dataset_key`` — TourAPI 관광지(contentTypeId 12)."""
+"""``provider_sync.source_records.dataset_key`` — TourAPI 관광지(12)·문화시설(14)·레포츠(28)."""
 
 TOURAPI_ATTRACTION_CONTENT_TYPE_ID: Final[str] = "12"
 """TourAPI 관광타입 — 관광지."""
@@ -181,6 +181,7 @@ TOURAPI_LCLS3_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "EX050200": _P.HOT_SPRING_SPA_SAUNA,  # 찜질방
     "EX070100": _P.TOURISM_ACTIVITY_CRUISE,  # 유람선/잠수함관광
     # 문화시설(14) — 2026-11-09 운영 키 2,753건의 3단계 분포 기준
+    "VE120100": _P.TOURISM_CULTURAL_FACILITY,  # 서점(MCST 서점과 같은 자리)
     "VE120300": _P.TOURISM_CULTURAL_FACILITY,  # 기타문화시설(14에서 154건)
     # 레포츠(28) — 3,717건. 레저스포츠(LS)는 대부분 2단계 표의 레저스포츠로 간다.
     "LS010400": _P.TOURISM_ACTIVITY_GOLF,  # 골프
@@ -190,6 +191,7 @@ TOURAPI_LCLS3_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "AC050300": _P.LODGING_CAMPGROUND_CARAVAN_RENTAL,  # 카라반
     "AC050400": _P.LODGING_CAMPGROUND_GLAMPING,  # 글램핑장
     "AC030100": _P.LODGING_PENSION,  # 펜션
+    "AC030300": _P.LODGING_PENSION_RURAL,  # 농어촌민박
 }
 """TourAPI 신 분류 3단계(``lclsSystm3``) → Map category. 여기 없는 코드는 2단계 표로 내려간다."""
 
@@ -230,9 +232,9 @@ TOURAPI_LCLS2_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
 }
 """``lclsSystm2`` → Map category(3단계 표에 없을 때).
 
-관광지(12) 목록에 실제로 오는 것은 NA·HS·EX 전부와 VE01~VE05·VE020500이다(공식 신분류체계
-연계 정의서). VE06~VE10·VE12·VE050200은 문화시설(14)·레포츠(28)·숙박(32)의 코드로, 같은 변환기로
-그 dataset을 더할 때를 위해 둔다(``docs/etl/visitkorea-tourist-attraction-etl.md`` §8)."""
+관광지(12) 목록에 오는 것은 NA·HS·EX 전부와 VE01~VE05·VE020500이고(공식 신분류체계 연계
+정의서), VE06~VE10·VE12는 문화시설(14), LS·AC·VE10은 레포츠(28)에서 온다
+(``docs/etl/visitkorea-tourist-attraction-etl.md`` §3.1)."""
 
 #: 적재하지 않는 2단계 — 교통시설(VE11: 공항·기차역·여객선·휴게소·지하철)은 transport 원천
 #: (``kor-travel-transport``)이 정본이라, TourAPI 행을 더하면 dedup 쌍 없이 중복 place가 된다.
@@ -258,7 +260,22 @@ TOURAPI_LCLS1_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
 
 
 #: "기타육상레저스포츠"(LS011900)에는 길·둘레길이 섞여 온다(산막이옛길) — 이름이 길이면 트레킹.
-_TRAIL_NAME_RE: Final = re.compile(r"(?:길|올레|트레킹|탐방로|산책로)$")
+#: 끝의 괄호·"N코스/N구간"·"입구"는 떼고 본다. 자전거길은 레저스포츠로 둔다.
+_TRAIL_NAME_RE: Final = re.compile(r"(?:길|올레|트레킹|탐방로|산책로|코스)$")
+_TRAIL_SUFFIX_RE: Final = re.compile(
+    r"(?:\([^)]*\)|\d*[①-⑳]?(?:코스|구간)|입구|[\d①-⑳]+)$"
+)
+_NOT_TRAIL_RE: Final = re.compile(r"자전거길$")
+
+
+def _is_trail_name(title: str | None) -> bool:
+    name = "".join((title or "").split())
+    for _ in range(3):  # "OO둘레길(1구간) 입구" 꼴의 겹친 꼬리
+        stripped = _TRAIL_SUFFIX_RE.sub("", name)
+        if stripped == name or not stripped:
+            break
+        name = stripped
+    return bool(_TRAIL_NAME_RE.search(name)) and not _NOT_TRAIL_RE.search(name)
 
 
 def attraction_category(
@@ -272,8 +289,7 @@ def attraction_category(
     ``title``은 기타육상레저스포츠(LS011900)를 트레킹·둘레길과 그 밖으로 가르는 데만 쓴다.
     """
     lcls3 = (lcls_systm3 or "").strip()
-    name = "".join((title or "").split())
-    if lcls3 == "LS011900" and _TRAIL_NAME_RE.search(name):
+    if lcls3 == "LS011900" and _is_trail_name(title):
         return _P.TOURISM_ACTIVITY_TREKKING.value
     lcls2 = (lcls_systm2 or "").strip() or lcls3[:4]
     lcls1 = (lcls_systm1 or "").strip() or lcls2[:2]

@@ -55,6 +55,7 @@ class _FakeClient:
     pages: dict[tuple[str | None, int], list[Any]] = {}
     totals: dict[str | None, Any] = {}
     detail_errors: dict[str, str] = {}
+    missing_total: frozenset[str] = frozenset()
 
     def __init__(self, service_key: str | None = None, **_: Any) -> None:
         self.service_key = service_key
@@ -84,7 +85,10 @@ class _FakeClient:
         if isinstance(total, dict):
             total = total.get(page_no, max(total.values()))
         rows = cls.pages.get((content_type_id, page_no), [])
-        return _Page(rows, total, raw={"type": content_type_id, "page": page_no})
+        raw: dict[str, Any] = {"type": content_type_id, "page": page_no}
+        if content_type_id not in cls.missing_total:
+            raw["totalCount"] = total
+        return _Page(rows, total, raw=raw)
 
     async def detail_common(
         self, content_id: str, *, page_no: int = 1, num_of_rows: int = 10
@@ -105,6 +109,7 @@ def fake(monkeypatch: pytest.MonkeyPatch) -> type[_FakeClient]:
     _FakeClient.pages = {}
     _FakeClient.totals = {}
     _FakeClient.detail_errors = {}
+    _FakeClient.missing_total = frozenset()
     module = ModuleType("visitkorea")
     module.__dict__["KrTourApiClient"] = _FakeClient
     monkeypatch.setitem(sys.modules, "visitkorea", module)
@@ -161,7 +166,7 @@ async def test_the_list_walks_every_page_of_each_content_type_and_closes(
 async def test_a_short_list_fails_before_retiring_anything(fake: type[_FakeClient]) -> None:
     # 2페이지가 비어 오면 1,000건 밖의 관광지가 전부 은퇴한다 — 선언보다 적으면 실패.
     fake.pages = {("12", 1): _rows(*(str(n) for n in range(1000)))}
-    fake.totals = {"12": 1500, "14": 0, "28": 0}
+    fake.totals = {"12": 1500}
 
     with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="1500건 중 고유 1000건"):
         await _drain()
@@ -172,7 +177,7 @@ async def test_a_list_that_changes_during_the_walk_fails(fake: type[_FakeClient]
     # 삭제 하나와 등록 하나가 겹치면 개수는 맞아도 경계 행 하나가 빠질 수 있다.
     first = _rows(*(str(n) for n in range(1000)))
     fake.pages = {("12", 1): first, ("12", 2): _rows("new")}
-    fake.totals = {"12": {1: 1001, 2: 1002}, "14": 0, "28": 0}
+    fake.totals = {"12": {1: 1001, 2: 1002}}
 
     with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="바뀌었다"):
         await _drain()
@@ -183,7 +188,7 @@ async def test_a_row_repeated_across_pages_is_not_counted_twice(
 ) -> None:
     first = _rows(*(str(n) for n in range(1000)))
     fake.pages = {("12", 1): first, ("12", 2): [first[-1]]}
-    fake.totals = {"12": 1001, "14": 0, "28": 0}
+    fake.totals = {"12": 1001}
 
     with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="고유 1000건"):
         await _drain()
@@ -191,10 +196,35 @@ async def test_a_row_repeated_across_pages_is_not_counted_twice(
 
 async def test_a_short_culture_list_fails_the_whole_snapshot(fake: type[_FakeClient]) -> None:
     # 한 타입이라도 짧으면 은퇴 적재 전에 멈춘다 — 셋이 한 snapshot이다.
-    fake.pages = {("12", 1): _rows("a"), ("14", 1): _rows("c1")}
-    fake.totals = {"12": 1, "14": 5, "28": 0}
+    fake.pages = {("12", 1): _rows("a"), ("14", 1): _rows("c1"), ("28", 1): _rows("l1")}
+    fake.totals = {"12": 1, "14": 5, "28": 1}
 
     with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="contentTypeId 14"):
+        await _drain()
+
+
+@pytest.mark.parametrize("empty_type", ["12", "14", "28"])
+async def test_an_empty_type_list_fails_instead_of_retiring_the_type(
+    fake: type[_FakeClient], empty_type: str
+) -> None:
+    # 원천은 resultCode 03을 빈 페이지(totalCount 0)로 준다 — 다른 두 타입이 멀쩡해도 그 타입
+    # 전체가 은퇴하면 안 된다.
+    fake.pages = {
+        (ct, 1): _rows(f"{ct}-a") for ct in ("12", "14", "28") if ct != empty_type
+    }
+    fake.totals = {ct: (0 if ct == empty_type else 1) for ct in ("12", "14", "28")}
+
+    with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="목록이 비었다"):
+        await _drain()
+
+
+async def test_a_list_without_total_count_fails(fake: type[_FakeClient]) -> None:
+    # totalCount가 없으면 provider가 받은 행 수로 채워 "1,000건 중 1,000건"이 된다.
+    fake.pages = {("12", 1): _rows("a"), ("14", 1): _rows("b"), ("28", 1): _rows("c")}
+    fake.totals = {"12": 1, "14": 1, "28": 1}
+    fake.missing_total = frozenset({"28"})
+
+    with pytest.raises(VisitKoreaAttractionSnapshotIncomplete, match="totalCount가 없다"):
         await _drain()
 
 

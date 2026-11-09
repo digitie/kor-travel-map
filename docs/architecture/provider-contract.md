@@ -94,7 +94,7 @@ system
 | dataset_key | provider | 의미 |
 |------------|----------|------|
 | `visitkorea_festival_events` | python-visitkorea-api | 축제/행사 검색 |
-| `visitkorea_tourist_attractions` | python-visitkorea-api | 관광지(contentTypeId 12) 1차 place, 자연키 contentid, 상세는 run 예산 600(#1459, `docs/etl/visitkorea-tourist-attraction-etl.md`) |
+| `visitkorea_tourist_attractions` | python-visitkorea-api | 관광지·문화시설·레포츠(contentTypeId 12·14·28) 1차 place, 자연키 contentid, 상세는 run 예산 600(#1459, `docs/etl/visitkorea-tourist-attraction-etl.md`) |
 | `mois_license_features_bulk` | python-mois-api | 인허가 영업중 snapshot (place 승격) |
 | `mois_license_features_history` | python-mois-api | 이력조회 기반 incremental |
 | `mois_license_features_closed` | python-mois-api | 폐업/취소 처리 |

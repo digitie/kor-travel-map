@@ -195,6 +195,41 @@ def test_culture_and_leisure_rows_get_their_own_categories(
     }[content_type]
 
 
+@pytest.mark.parametrize(
+    ("title", "trail"),
+    [
+        ("산막이옛길", True),
+        ("산막이옛길(괴산)", True),
+        ("제주올레 7코스", True),
+        ("강화나들길 ①코스", True),
+        ("어느 트레킹코스", True),
+        ("어느산책로 입구", True),
+        ("어느둘레길(1구간) 입구", True),
+        ("한강 자전거길", False),
+        ("어느 서바이벌장", False),
+        ("어느 짚라인", False),
+    ],
+)
+def test_other_land_leisure_is_trekking_only_when_the_name_is_a_trail(
+    title: str, trail: bool
+) -> None:
+    expected = (
+        PlaceCategoryCode.TOURISM_ACTIVITY_TREKKING
+        if trail
+        else PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS
+    )
+    assert attraction_category("LS", "LS01", "LS011900", title) == expected.value
+    # 다른 코드는 이름이 길이어도 그 코드의 분류다.
+    assert attraction_category("LS", "LS01", "LS010200", title) == (
+        PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS.value
+    )
+
+
+def test_the_fetcher_and_converter_share_one_content_type_list() -> None:
+    assert va.TOURAPI_PLACE_CONTENT_TYPE_IDS == ("12", "14", "28")
+    assert set(va._PLACE_KIND_BY_CONTENT_TYPE) == set(va.TOURAPI_PLACE_CONTENT_TYPE_IDS)
+
+
 def test_every_mapped_category_exists_in_the_catalog() -> None:
     known = {definition.code for definition in PLACE_CATEGORY_DEFINITIONS}
     targets = {

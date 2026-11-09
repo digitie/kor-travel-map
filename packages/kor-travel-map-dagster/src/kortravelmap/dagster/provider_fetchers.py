@@ -68,6 +68,7 @@ from kortravelmap.providers.kor_travel_transport import (
     require_current_collection,
     require_fresh_incident_set,
 )
+from kortravelmap.providers.visitkorea_attractions import TOURAPI_PLACE_CONTENT_TYPE_IDS
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -2007,9 +2008,6 @@ def _visitkorea_service_key(settings: KorTravelMapSettings, what: str) -> str:
     return secret.get_secret_value()
 
 
-#: 적재하는 TourAPI 관광타입 — 관광지(12)·문화시설(14)·레포츠(28). 순서대로 순회한다
-#: (``kortravelmap.providers.visitkorea_attractions.TOURAPI_PLACE_CONTENT_TYPE_IDS``와 같다).
-_VISITKOREA_PLACE_CONTENT_TYPES: Final = ("12", "14", "28")
 
 
 async def fetch_visitkorea_tourist_attractions(
@@ -2032,7 +2030,7 @@ async def fetch_visitkorea_tourist_attractions(
     visitkorea = cast(Any, importlib.import_module("visitkorea"))
     client = visitkorea.KrTourApiClient(service_key=api_key)
     try:
-        for content_type_id in _VISITKOREA_PLACE_CONTENT_TYPES:
+        for content_type_id in TOURAPI_PLACE_CONTENT_TYPE_IDS:
             declared: list[int] = []
             seen: set[str] = set()
 
@@ -2045,6 +2043,13 @@ async def fetch_visitkorea_tourist_attractions(
                     page_no=page_no,
                     num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
                 )
+                raw = getattr(page, "raw", None)
+                if isinstance(raw, Mapping) and raw.get("totalCount") in (None, ""):
+                    # provider는 totalCount가 없으면 받은 행 수로 채운다 — 그러면 "1,000건 중
+                    # 1,000건"이 되어 나머지가 은퇴한다. 선언이 없으면 완전성을 말할 수 없다.
+                    raise VisitKoreaAttractionSnapshotIncomplete(
+                        f"TourAPI contentTypeId {content_type_id}: 응답에 totalCount가 없다."
+                    )
                 declared.append(int(page.total_count))
                 return ProviderPage(
                     items=page.items,
@@ -2069,6 +2074,13 @@ async def fetch_visitkorea_tourist_attractions(
                     f"({min(declared)}~{max(declared)}) — 밀린 목록으로 은퇴시키지 않는다."
                 )
             expected = max(declared, default=0)
+            if expected == 0 or not seen:
+                # 원천은 "없음"(resultCode 03)을 빈 페이지로 준다 — 세 타입 모두 수천 건이라
+                # 0은 "못 받았음"이다. 받아들이면 그 타입 전체가 은퇴한다.
+                raise VisitKoreaAttractionSnapshotIncomplete(
+                    f"TourAPI contentTypeId {content_type_id}: 목록이 비었다 — 그 타입 전체를 "
+                    "은퇴시키지 않는다."
+                )
             if len(seen) < expected:
                 raise VisitKoreaAttractionSnapshotIncomplete(
                     f"TourAPI contentTypeId {content_type_id}: 선언 {expected}건 중 고유 "

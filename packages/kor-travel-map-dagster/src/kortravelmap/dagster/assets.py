@@ -1360,7 +1360,7 @@ async def run_feature_place_visitkorea_tourist_attractions(
         retire_absent_from_snapshot=not replay,
         record_sync_state=not replay,
         geo_applied=GeoApplied(reverse=True, geocode=False),
-        # 1만 2천 건 중 역지오코딩이 법정동을 못 내는 행(해상 등대·무인도 등)이 하나만 있어도
+        # 1만 9천 건 중 역지오코딩이 법정동을 못 내는 행(해상 등대·무인도 등)이 하나만 있어도
         # strict는 run 전체를 되감는다. 그 행만 버리고 기록한다(#1450과 같은 선택). 버린 행은
         # 은퇴하므로 그 수는 위 `_ensure_geo_resolved_enough`가 먼저 묶는다.
         address_failure_mode="drop",
