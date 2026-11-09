@@ -206,7 +206,9 @@ def test_dagster_job_installs_the_pinned_datagokr_for_the_replay_golden() -> Non
 
 @pytest.mark.unit
 def test_dagster_job_installs_the_pinned_visitkorea_for_the_replay_golden() -> None:
-    """TourAPI 관광지 replay golden(#1459)도 실모델 ``TourItem``으로 돈다 — 핀이 pyproject와 같다."""
+    """TourAPI 관광지 replay golden(#1459)도 실모델 ``TourItem``으로 돈다.
+
+    CI dagster job이 설치하는 핀이 pyproject와 같아야 한다."""
     pin = re.compile(
         r"python-visitkorea-api @ git\+https://github\.com/digitie/python-visitkorea-api\.git@[0-9a-f]{40}"
     )

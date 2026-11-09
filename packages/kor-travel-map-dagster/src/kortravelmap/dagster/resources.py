@@ -10,7 +10,7 @@ import asyncio
 import inspect
 import logging
 import threading
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Iterator
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Iterable, Iterator
 from dataclasses import dataclass
 from typing import Any, cast
 
@@ -449,7 +449,7 @@ class ReplaySource:
 
 def build_provider_record_live_resource(
     spec: ProviderRecordResourceSpec,
-    fetch: Callable[[KorTravelMapSettings], Iterable[Any] | AsyncIterator[Any]],
+    fetch: Callable[[KorTravelMapSettings], Iterable[Any] | AsyncIterable[Any]],
     *,
     replay: ReplaySource | None = None,
 ) -> ResourceDefinition:
@@ -484,7 +484,7 @@ def build_provider_record_live_resource(
     )
     def _resource(
         context: InitResourceContext,
-    ) -> Iterable[Any] | AsyncIterator[Any] | ReplayRecordStream:
+    ) -> Iterable[Any] | AsyncIterable[Any] | ReplayRecordStream:
         ensure_feature_operation_guard_for_provider(
             context,
             boundary=spec.resource_key,

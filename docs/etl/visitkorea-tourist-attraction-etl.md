@@ -114,6 +114,7 @@ data.go.kr 한도는 **오퍼레이션당** 1,000/일이다(`docs/etl/upstream-q
 - 고유 contentid 수가 선언 `totalCount`(페이지마다 받은 값 중 최대)보다 적으면
   `VisitKoreaAttractionSnapshotIncomplete`로 실패한다 — 은퇴 적재 전에 멈춘다. 0행 목록도 실패.
 - 같은 contentid가 두 번 오면 변환기가 하나만 남긴다(payload hash가 작은 쪽).
+- 주소 검증은 `drop` 모드다 — 역지오코딩이 법정동을 못 내는 행(해상 등대 등)만 버리고 기록한다. strict면 한 행이 run 전체를 되감는다. 소실 하한(절반 넘게 버리면 실패)은 그대로다.
 
 ## 6. 중복(dedup)
 
