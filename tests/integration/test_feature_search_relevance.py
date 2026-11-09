@@ -557,6 +557,72 @@ async def test_migration_seeds_trip_aliases_in_normalized_form(
         assert feature_repo.search_alias_key(alias) == alias
 
 
+async def _mois_lodging(
+    session: AsyncSession, mng_no: str, *, name: str, lon: float, lat: float
+) -> str:
+    """MOIS 숙박 인허가 한 건을 **실제 변환·적재 경로**로 싣고 feature id를 돌려준다."""
+    from dataclasses import replace
+
+    from kortravelmap.dto import kst_now
+    from kortravelmap.providers.mois import license_records_to_bundles
+    from tests.integration.test_mois_resumable_load_repo import _Record
+
+    record = replace(
+        _Record(service_slug="lodgings", mng_no=f"search-{mng_no}"),
+        place_name=name, subtype_name="관광호텔", business_type_name="관광호텔",
+        lon=lon, lat=lat,
+    )
+    [bundle] = await license_records_to_bundles([record], fetched_at=kst_now())
+    await feature_repo.load_bundles(session, [bundle])
+    return str(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT sl.feature_id FROM provider_sync.source_links AS sl
+                    JOIN provider_sync.source_entities AS se
+                      ON se.source_entity_key = sl.source_entity_key
+                    WHERE se.source_entity_id = :id AND sl.source_role = 'primary'
+                    """
+                ),
+                {"id": f"lodgings::search-{mng_no}"},
+            )
+        ).scalar_one()
+    )
+
+
+async def test_mois_hotels_are_found_by_common_name_with_lodging_category(
+    migrated_session: AsyncSession,
+) -> None:
+    """법인 상호로 적재된 호텔을 사람이 부르는 이름으로 찾는다(2026-11-09 감사 사례)."""
+    ids = {
+        "lotte_daejeon": await _mois_lodging(
+            migrated_session, "lotte", name="(주)호텔롯데 롯데시티호텔대전",
+            lon=127.3870, lat=36.3750,
+        ),
+        "shilla": await _mois_lodging(
+            migrated_session, "shilla", name="호텔신라", lon=127.0057, lat=37.5560,
+        ),
+        "shilla_motel": await _place(
+            migrated_session, "shilla-motel", name="신라호텔모텔", category="03040100",
+            lon=127.0800, lat=37.5900, place_kind="lodging_general",
+        ),
+    }
+
+    lotte = await _search_ids(migrated_session, "롯데시티호텔 대전", ids)
+    assert lotte[:1] == ["lotte_daejeon"]
+    shilla = await _search_ids(migrated_session, "신라호텔", ids)
+    assert shilla[:1] == ["shilla"], "별칭(442) 신라호텔 → 호텔신라가 같은 이름 모텔보다 앞선다"
+
+    page = await feature_repo.search_features(
+        migrated_session, q="롯데시티호텔대전", kinds=["place"], page_size=50,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
+    )
+    found = next(item for item in page.items if item.feature_id == ids["lotte_daejeon"])
+    assert found.name == "롯데시티호텔대전"
+    assert found.category == "03010100"
+
+
 @pytest.mark.parametrize(
     ("query", "typed_name", "generic_name", "category", "food_name"),
     [

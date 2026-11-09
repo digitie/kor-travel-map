@@ -651,3 +651,388 @@ async def test_subtype_fields_do_not_churn_the_hash_of_slugs_they_cannot_reclass
     [bundle] = await _bundles([typed])
     assert "subtype_name" not in bundle.source_record.raw_data
     assert bundle.source_record.raw_payload_hash == license_record_payload_hash(typed)
+
+
+# -- 적재 순서 (docs §10.1) ------------------------------------------------------
+
+
+def test_load_order_covers_every_promoted_slug_once_lodging_first_mass_food_last() -> None:
+    from kortravelmap.providers.mois import MOIS_SLUG_LOAD_GROUPS, MOIS_SLUG_LOAD_ORDER
+
+    assert len(MOIS_SLUG_LOAD_ORDER) == len(set(MOIS_SLUG_LOAD_ORDER)) == len(
+        PROMOTED_SERVICE_SLUGS
+    )
+    assert set(MOIS_SLUG_LOAD_ORDER) == PROMOTED_SERVICE_SLUGS
+    groups = [name for name, _slugs in MOIS_SLUG_LOAD_GROUPS]
+    assert groups[0] == "lodging"
+    assert groups[-1] == "mass_food"
+    rank = {slug: i for i, slug in enumerate(MOIS_SLUG_LOAD_ORDER)}
+    lodging = dict(MOIS_SLUG_LOAD_GROUPS)["lodging"]
+    for mass in ("general_restaurants", "rest_cafes", "bakeries"):
+        assert all(rank[slug] < rank[mass] for slug in lodging)
+        assert rank[mass] >= len(MOIS_SLUG_LOAD_ORDER) - 3
+    assert rank["lodgings"] < rank["tourist_accommodations"] < rank["tourism_businesses"]
+
+
+def test_order_service_slugs_sorts_by_priority_and_rejects_unknown() -> None:
+    from kortravelmap.providers.mois import order_service_slugs
+
+    assert order_service_slugs(["general_restaurants", "lodgings", "golf_courses", "lodgings"]) == (
+        "lodgings", "golf_courses", "general_restaurants",
+    )
+    with pytest.raises(ValueError, match="billiard_halls"):
+        order_service_slugs(["billiard_halls"])
+
+
+# -- 업태별 분류·승격 제외 (docs §6.1) -------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("subtype", "category"),
+    [
+        ("관광호텔", "03010100"),
+        ("일반호텔", "03010000"),
+        ("휴양콘도미니엄업", "03020100"),
+        ("숙박업(생활)", "03000000"),
+        ("여관업", "03040100"),
+        ("여인숙업", "03040100"),
+        ("숙박업 기타", "03040100"),
+    ],
+)
+async def test_lodging_category_follows_the_license_subtype(subtype: str, category: str) -> None:
+    record = _Record(
+        service_slug="lodgings", subtype_name=subtype, business_type_name=subtype,
+        legal_dong_code="1111010100",
+    )
+    [bundle] = await _bundles([record])
+    assert bundle.feature.category == category
+    # 업태가 분류를 바꾸므로 해시에 담는다(같은 payload면 같은 분류).
+    assert bundle.source_record.raw_data["subtype_name"] == subtype
+
+
+async def test_tourism_business_lodging_is_lodging_and_travel_agency_is_not_promoted() -> None:
+    from kortravelmap.providers.mois import license_record_is_promotable
+
+    hotel = _Record(
+        service_slug="tourism_businesses", mng_no="TB-1", subtype_name="관광숙박업",
+        culture_sports_business_type_name="관광숙박업", legal_dong_code="5011025300",
+    )
+    agency = _Record(
+        service_slug="tourism_businesses", mng_no="TB-2", place_name="㈜호텔신라",
+        subtype_name="여행업", culture_sports_business_type_name="여행업",
+        legal_dong_code="1114016200",
+    )
+    facility = dataclasses.replace(
+        hotel, mng_no="TB-3", subtype_name="관광객이용시설업",
+        culture_sports_business_type_name="관광객이용시설업",
+    )
+    assert license_record_is_promotable(hotel)
+    assert not license_record_is_promotable(agency)
+    bundles = await _bundles([hotel, agency, facility])
+    by_id = {b.source_record.source_entity_id: b for b in bundles}
+    assert set(by_id) == {"tourism_businesses::TB-1", "tourism_businesses::TB-3"}
+    assert by_id["tourism_businesses::TB-1"].feature.category == "03010100"
+    assert by_id["tourism_businesses::TB-1"].feature.detail.place_kind == "lodging_tourist_hotel"
+    assert by_id["tourism_businesses::TB-3"].feature.category == "01000000"
+    assert by_id["tourism_businesses::TB-3"].feature.detail.place_kind == "tourism_business_office"
+
+
+# -- 표시 이름 (docs §6.4) --------------------------------------------------------
+
+
+async def test_feature_name_drops_the_legal_form_and_keeps_it_in_detail() -> None:
+    record = _Record(
+        service_slug="lodgings", place_name="(주)호텔롯데 롯데시티호텔대전",
+        subtype_name="관광호텔", legal_dong_code="3020012800",
+    )
+    [bundle] = await _bundles([record])
+    assert bundle.feature.name == "롯데시티호텔대전"
+    assert bundle.feature.detail.payload["legal_name"] == "(주)호텔롯데 롯데시티호텔대전"
+    assert bundle.source_record.raw_data["place_name"] == "(주)호텔롯데 롯데시티호텔대전"
+    # 규칙 판이 아니라 결과를 해시한다 — 결과가 바뀐 행만 다시 변환된다.
+    assert bundle.source_record.raw_data["display_name"] == "롯데시티호텔대전"
+    assert bundle.feature.detail.place_kind == "lodging_tourist_hotel"
+
+    english = dataclasses.replace(
+        record, mng_no="X-2",
+        place_name="페어필드 바이 메리어트 서울(Fairfield by Marriott-Seoul)",
+    )
+    [bundle] = await _bundles([english])
+    assert bundle.feature.name == "페어필드 바이 메리어트 서울(Fairfield by Marriott-Seoul)"
+    assert "display_name" not in bundle.source_record.raw_data
+
+
+async def test_hangul_branch_bracket_expands_for_lodging_only() -> None:
+    hotel = _Record(
+        service_slug="lodgings", place_name="주식회사 라한호텔(경주)",
+        subtype_name="관광호텔", legal_dong_code="4713012500",
+    )
+    bakery = _Record(
+        service_slug="bakeries", mng_no="B-9", place_name="베이커리(본점)",
+        legal_dong_code="1111010100",
+    )
+    [lodging, bread] = await _bundles([hotel, bakery])
+    assert lodging.feature.name == "라한호텔 경주"
+    assert bread.feature.name == "베이커리(본점)"
+    assert "display_name" not in bread.source_record.raw_data
+
+
+async def test_name_rule_does_not_touch_the_hash_of_rows_whose_name_is_unchanged() -> None:
+    """이미 적재된 업종의 평범한 상호는 해시 입력이 그대로여야 한다(재개형 적재가 건너뛴다).
+
+    해시 입력 키 집합을 이 변경 전 그대로 박는다. 새 키가 모든 행에 붙으면 이미 적재된 13만 행이
+    전부 "바뀐 것"이 되어 역지오코딩부터 다시 한다.
+    """
+    legacy_keys = {
+        "service_slug", "mng_no", "category", "title", "place_name", "opn_authority_code",
+        "status_code", "status_name", "detail_status_code", "detail_status_name", "is_open",
+        "license_date", "telno", "road_address", "lot_address", "legal_dong_code",
+        "road_name_code", "lon", "lat", "source_x", "source_y", "krtour_category",
+    }
+    names = ("파리바게뜨 광화문점", "  뚜레쥬르   서촌점 ", "베이커리(본점)", "스타벅스(STARBUCKS)")
+    for name in names:
+        plain = _Record(
+            service_slug="bakeries", mng_no="B-1", place_name=name, lon=126.97, lat=37.57,
+            legal_dong_code="1111010100",
+        )
+        [bundle] = await _bundles([plain])
+        assert bundle.feature.name == " ".join(name.split()), name
+        assert set(bundle.source_record.raw_data) == legacy_keys, name
+        assert "legal_name" not in bundle.feature.detail.payload
+    # 법인 표기가 붙은 행만 표시 이름을 싣는다(그 행만 한 번 다시 변환된다).
+    marked = _Record(
+        service_slug="bakeries", mng_no="B-3", place_name="(주)파리크라상 광화문점",
+        lon=126.97, lat=37.57, legal_dong_code="1111010100",
+    )
+    [bundle] = await _bundles([marked])
+    assert set(bundle.source_record.raw_data) == legacy_keys | {"display_name"}
+    # 원천 좌표가 없고 주소가 있는 행만 좌표 규칙 판을 싣는다 — 한 번 정지오코딩된다.
+    no_point = _Record(
+        service_slug="bakeries", mng_no="B-2", place_name="파리바게뜨 서촌점",
+        road_address="서울특별시 종로구 자하문로 1",
+    )
+    [bundle] = await _bundles([no_point])
+    assert set(bundle.source_record.raw_data) == legacy_keys | {"coord_rule"}
+    nothing = dataclasses.replace(no_point, mng_no="B-4", road_address=None)
+    [bundle] = await _bundles([nothing])
+    assert set(bundle.source_record.raw_data) == legacy_keys
+
+
+# -- 숙박 계열 중복 흡수 (docs §6.3) ----------------------------------------------
+
+
+def _family(slug: str, mng_no: str, name: str, **kw: Any) -> _Record:
+    subtype = "관광호텔" if slug == "lodgings" else "관광숙박업"
+    fields: dict[str, Any] = {
+        "service_slug": slug,
+        "mng_no": mng_no,
+        "place_name": name,
+        "subtype_name": subtype,
+        "road_address": "강원특별자치도 속초시 설악산로 998 (설악동)",
+        "lon": 128.5072,
+        "lat": 38.1729,
+    }
+    if slug == "lodgings":
+        fields["business_type_name"] = subtype
+    else:
+        fields["culture_sports_business_type_name"] = subtype
+    fields.update(kw)
+    return _Record(**fields)
+
+
+def test_same_hotel_in_three_license_slugs_is_one_place_lodgings_wins() -> None:
+    from kortravelmap.providers.mois import LicenseShadowIndex, license_source_entity_id
+
+    lodging = _family("lodgings", "L-1", "(주)이랜드파크켄싱턴호텔설악(스타)")
+    tourist = _family("tourist_accommodations", "T-1", "(주)이랜드파크 켄싱턴호텔 설악(스타)")
+    business = _family("tourism_businesses", "B-1", "켄싱턴호텔설악(스타)")
+    index = LicenseShadowIndex.build([business, tourist, lodging])
+
+    assert index.winner_for(lodging) is None
+    assert index.winner_for(tourist) == license_source_entity_id(lodging)
+    assert index.winner_for(business) == license_source_entity_id(lodging)
+
+
+def test_shadowing_needs_the_same_name_and_the_same_building_or_a_near_point() -> None:
+    from kortravelmap.providers.mois import LicenseShadowIndex
+
+    lodging = _family("lodgings", "L-1", "라한호텔전주")
+    other_name = _family("tourist_accommodations", "T-1", "라한호텔울산")
+    far_same_name = _family(
+        "tourist_accommodations", "T-2", "라한호텔전주",
+        road_address="전북특별자치도 전주시 덕진구 다른로 1", lon=127.20, lat=35.90,
+    )
+    near_other_address = _family(
+        "tourist_accommodations", "T-3", "라한호텔전주",
+        road_address=None, lon=128.5075, lat=38.1730,  # 약 30 m
+    )
+    same_building_detail = _family(
+        "tourist_accommodations", "T-4", "라한호텔 전주",
+        road_address="강원특별자치도 속초시 설악산로 998, 1층일부", lon=None, lat=None,
+    )
+    index = LicenseShadowIndex.build([lodging])
+
+    assert index.winner_for(other_name) is None
+    assert index.winner_for(far_same_name) is None
+    assert index.winner_for(near_other_address) is not None
+    assert index.winner_for(same_building_detail) is not None
+
+
+def test_same_slug_duplicates_and_non_lodging_rows_are_not_shadowed() -> None:
+    from kortravelmap.providers.mois import LicenseShadowIndex
+
+    first = _family("lodgings", "L-1", "켄싱턴리조트설악밸리")
+    second = _family("lodgings", "L-2", "켄싱턴리조트설악밸리")
+    agency = _family(
+        "tourism_businesses", "B-1", "켄싱턴리조트설악밸리",
+        subtype_name="여행업", culture_sports_business_type_name="여행업",
+    )
+    facility = _family(
+        "tourism_businesses", "B-2", "켄싱턴리조트설악밸리",
+        subtype_name="관광객이용시설업", culture_sports_business_type_name="관광객이용시설업",
+    )
+    bakery = _family("bakeries", "K-1", "켄싱턴리조트설악밸리", subtype_name=None)
+    index = LicenseShadowIndex.build([first, second, agency, facility, bakery])
+
+    assert len(index) == 2
+    assert index.winner_for(second) is None, "같은 업종 안의 중복은 이 규칙의 대상이 아니다"
+    assert index.winner_for(facility) is None
+    assert index.winner_for(bakery) is None
+
+
+def test_same_building_name_containment_is_one_hotel() -> None:
+    """제주신라: lodgings "호텔신라제주" ↔ 관광숙박업 "(주)호텔신라 제주신라"(같은 건물)."""
+    from kortravelmap.providers.mois import LicenseShadowIndex, license_source_entity_id
+
+    road = "제주특별자치도 서귀포시 중문관광로72번길 75 (색달동)"
+    lodging = _family("lodgings", "L-9", "호텔신라제주", road_address=road)
+    tourist = _family("tourist_accommodations", "T-9", "(주)호텔신라 제주신라", road_address=road)
+    other_building = _family(
+        "tourist_accommodations", "T-8", "(주)호텔신라 제주신라",
+        road_address="제주특별자치도 제주시 노연로 69", lon=126.49, lat=33.49,
+    )
+    short = _family("tourist_accommodations", "T-7", "호텔", road_address=road)
+    index = LicenseShadowIndex.build([lodging])
+
+    assert index.winner_for(tourist) == license_source_entity_id(lodging)
+    assert index.winner_for(other_building) is None
+    assert index.winner_for(short) is None, "짧은 키는 포함 규칙을 쓰지 않는다"
+
+
+def test_winner_chain_resolves_to_the_root_lodging() -> None:
+    """B가 T와 이름이 같고 T가 L에 포함 규칙으로 가려지면 B의 답은 L이다(사슬의 맨 앞).
+
+    T를 답으로 주면 T가 철회돼 지도에 없으므로 적재기가 B를 다시 싣는다(델타 리뷰 MED).
+    """
+    from kortravelmap.providers.mois import LicenseShadowIndex, license_source_entity_id
+
+    road = "제주특별자치도 서귀포시 중문관광로72번길 75 (색달동)"
+    lodging = _family("lodgings", "L-9", "호텔신라제주", road_address=road)
+    tourist = _family("tourist_accommodations", "T-9", "(주)호텔신라 제주신라", road_address=road)
+    business = _family("tourism_businesses", "B-9", "(주)호텔신라 제주신라", road_address=road)
+    index = LicenseShadowIndex.build([lodging, tourist, business])
+
+    assert index.winner_for(business) == license_source_entity_id(lodging)
+    assert index.winner_for(tourist) == license_source_entity_id(lodging)
+
+
+def test_containment_needs_a_prefix_and_the_same_lodging_class() -> None:
+    from kortravelmap.providers.mois import LicenseShadowIndex
+
+    road = "서울특별시 강남구 테헤란로 1"
+    residence = _family(
+        "lodgings", "L-1", "OO호텔레지던스", road_address=road,
+        subtype_name="숙박업(생활)", business_type_name="숙박업(생활)",
+    )
+    hotel = _family("tourist_accommodations", "T-1", "OO호텔", road_address=road)
+    suffix = _family("tourist_accommodations", "T-2", "레지던스", road_address=road)
+    index = LicenseShadowIndex.build([residence])
+
+    assert index.winner_for(hotel) is None, "생활숙박(0300)은 관광호텔(0301)을 가리지 않는다"
+    assert index.winner_for(suffix) is None, "뒷부분 포함은 같은 시설이 아니다"
+
+
+def test_in_hotel_facility_with_the_hotels_exact_name_is_shadowed() -> None:
+    """호텔 사우나·공연장이 호텔 상호 그대로 같은 건물에 있으면 가려진다(이름이 다르면 남는다)."""
+    from kortravelmap.providers.mois import LicenseShadowIndex, license_source_entity_id
+
+    road = "전북특별자치도 전주시 완산구 기린대로 85, 1층일부"
+    lodging = _family("lodgings", "L-5", "주식회사라한호텔전주", road_address=road)
+    bath = _Record(
+        service_slug="public_baths", mng_no="P-1", place_name="주식회사라한호텔전주",
+        subtype_name="공동탕업", road_address="전북특별자치도 전주시 완산구 기린대로 85, 라한",
+    )
+    named_sauna = dataclasses.replace(bath, mng_no="P-2", place_name="라한호텔전주 사우나")
+    elsewhere = dataclasses.replace(bath, mng_no="P-3", road_address="전주시 다른로 1")
+    hall = _Record(
+        service_slug="performance_halls", mng_no="H-1", place_name="라한호텔전주",
+        road_address=road,
+    )
+    index = LicenseShadowIndex.build([lodging, bath, hall])
+
+    assert len(index) == 1, "시설 업종은 이기지 않는다"
+    assert index.winner_for(bath) == license_source_entity_id(lodging)
+    assert index.winner_for(hall) == license_source_entity_id(lodging)
+    assert index.winner_for(named_sauna) is None
+    assert index.winner_for(elsewhere) is None
+
+
+# -- 원천 좌표 없는 행의 정지오코딩 (docs §7) ----------------------------------------
+
+
+async def test_address_geocoder_supplies_a_point_only_when_the_source_has_none() -> None:
+    """공용 원천 좌표 결측 fallback(#1463)을 쓴다 — 같은 주소는 한 번, 원천 법정동이 이긴다."""
+    calls: list[str | None] = []
+
+    async def geocode(address: Address) -> Coordinate | None:
+        calls.append(address.road)
+        return Coordinate(lon=Decimal("127.1"), lat=Decimal("37.5"))
+
+    no_point = _Record(
+        service_slug="lodgings", mng_no="N-1", road_address="서울특별시 송파구 올림픽로 300",
+        legal_dong_code="1171010200",
+    )
+    has_point = dataclasses.replace(no_point, mng_no="N-2", lon=127.0, lat=37.4)
+    duplicate = dataclasses.replace(no_point, mng_no="N-3")
+    district_only = dataclasses.replace(
+        no_point, mng_no="N-4", road_address="서울특별시 송파구", lot_address=None
+    )
+    bundles = await _bundles(
+        [no_point, has_point, duplicate, district_only], address_geocoder=geocode
+    )
+
+    # 같은 주소는 한 번, 번지 없는 주소는 묻지 않는다.
+    assert calls == ["서울특별시 송파구 올림픽로 300"]
+    located = bundles[0].feature
+    assert located.coord is not None
+    assert float(located.coord.lon) == pytest.approx(127.1)
+    assert located.address.bjd_code == "1171010200"
+    assert located.detail.payload["coord_source"] == "kor_travel_geo_geocode"
+    assert "coord_source" not in bundles[1].feature.detail.payload
+    kept = bundles[1].feature.coord
+    assert kept is not None
+    assert float(kept.lon) == pytest.approx(127.0)
+    assert bundles[3].feature.coord is None
+
+
+async def test_located_point_is_reverse_geocoded_when_the_source_has_no_code() -> None:
+    async def geocode(_address: Address) -> Coordinate | None:
+        return Coordinate(lon=Decimal("127.1"), lat=Decimal("37.5"))
+
+    reverse = _FakeGeocoder(Address(bjd_code="1171010100", sigungu_code="11710", sido_code="11"))
+    record = _Record(service_slug="lodgings", road_address="서울특별시 송파구 올림픽로 300")
+    [bundle] = await _bundles([record], address_geocoder=geocode, reverse_geocoder=reverse)
+    assert reverse.calls == 1
+    assert bundle.feature.address.bjd_code == "1171010100"
+    assert bundle.geo_attempt is not None
+    assert bundle.geo_attempt.reverse_attempted, "스탬프는 called — geo 릴리스가 바뀌면 다시 푼다"
+
+
+async def test_address_geocoder_miss_leaves_the_row_without_a_point() -> None:
+    async def geocode(_address: Address) -> None:
+        return None
+
+    record = _Record(service_slug="lodgings", road_address="어딘가 1", legal_dong_code="1111010100")
+    [bundle] = await _bundles([record], address_geocoder=geocode)
+    assert bundle.feature.coord is None
+    assert "coord_source" not in bundle.feature.detail.payload

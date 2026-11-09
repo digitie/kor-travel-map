@@ -37,9 +37,9 @@ from typing import Any, Final, cast
 from kortravelmap.client import AddressValidationFinding, AsyncKorTravelMapClient
 from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.core.ids import make_integrity_finding_key, make_source_record_key
-from kortravelmap.dto import Coordinate, FeatureBundle
+from kortravelmap.dto import Address, Coordinate, FeatureBundle
 from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
-from kortravelmap.geocoding import PrefetchingReverseGeocoder, ReverseGeocoder
+from kortravelmap.geocoding import AddressGeocoder, PrefetchingReverseGeocoder, ReverseGeocoder
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     ProviderEntityReobservationConflict,
@@ -47,10 +47,14 @@ from kortravelmap.infra.feature_repo import (
 from kortravelmap.providers.mois import (
     PROMOTED_SERVICE_SLUGS,
     PROVIDER_NAME,
+    ShadowedLicenseRecord,
+    license_needs_forward_geocode,
+    license_record_is_promotable,
     license_record_payload_hash,
     license_records_to_bundles,
     license_reverse_geocode_coordinate,
     license_source_entity_id,
+    order_service_slugs,
 )
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -184,7 +188,7 @@ class MoisLoadPlan:
     """run 하나의 적재 범위와 손잡이. run_config(업종 선택)와 settings(나머지)에서 온다."""
 
     service_slugs: tuple[str, ...]
-    """이번 run이 볼 업종(정렬). 비어 있지 않다."""
+    """이번 run이 볼 업종(적재 순서 ``MOIS_SLUG_LOAD_ORDER``). 비어 있지 않다."""
     full_coverage: bool
     """전 PROMOTED 업종인가 — 그래야 완료 run이 snapshot 전체를 봉인할 수 있다."""
     source_db_path: str | None
@@ -225,7 +229,8 @@ def resolve_mois_load_plan(
     unknown = sorted(set(requested) - PROMOTED_SERVICE_SLUGS)
     if unknown:
         raise ValueError(f"MOIS 적재 업종 선택에 PROMOTED가 아닌 이름이 있다: {unknown}")
-    selected = tuple(sorted(set(requested) or PROMOTED_SERVICE_SLUGS))
+    # 이름순이 아니라 적재 우선순위 순이다 — 상한으로 멈추는 run이 숙박·관광을 먼저 끝낸다.
+    selected = order_service_slugs(set(requested) or PROMOTED_SERVICE_SLUGS)
     return MoisLoadPlan(
         service_slugs=selected,
         full_coverage=set(selected) == PROMOTED_SERVICE_SLUGS,
@@ -237,7 +242,7 @@ def resolve_mois_load_plan(
 
 
 def iter_slug_chunks(records: Iterable[Any], size: int) -> Iterator[list[Any]]:
-    """``(service_slug, mng_no)`` 순 stream을 **업종 경계에서 끊기는** chunk로 나눈다.
+    """업종이 연속되는 record stream을 **업종 경계에서 끊기는** chunk로 나눈다.
 
     chunk 하나는 언제나 한 업종이다 — 업종별 진행을 정확히 보고하고, 업종 하나가 끝나면
     그 업종의 마지막 chunk가 곧바로 commit된다.
@@ -286,6 +291,16 @@ class MoisChunkedLoadOutcome:
     """지오코더로 보낸 행 수(이미 적재된 행·원천 법정동 코드 행·역지오코딩 불가 표식 행 제외)."""
     known_unresolvable: int = 0
     """역지오코딩 불가 표식이 현재 payload와 맞아 조회하지 않은 행 수."""
+    records_withdrawn: int = 0
+    """Feature로 내지 않은 행 — 승격 제외 업태(여행업)·앞 업종의 같은 시설에 가려진 숙박 행."""
+    records_shadowed: int = 0
+    """그중 앞 업종의 같은 시설에 가려진 행(``ShadowedLicenseRecord``)."""
+    withdrawn_retired: int = 0
+    """그 행의 이미 있던 Feature를 이번 run이 retired로 내린 수(관리자 병합·override는 남는다)."""
+    forward_geocode_misses: int = 0
+    """원천 좌표가 없어 정지오코딩했지만 점을 얻지 못한 행(점 없이 적재됐다)."""
+    records_shadowed_loaded: int = 0
+    """가려졌지만 이긴 쪽 Feature가 지도에 없어 그대로 적재한 행(다음 run이 다시 판정한다)."""
 
     @property
     def outcome(self) -> str:
@@ -325,6 +340,11 @@ class MoisChunkedLoadOutcome:
             "mois_geo_probe_passes": self.geo_probe_passes,
             "mois_geocoded_rows": self.geocoded_rows,
             "mois_known_unresolvable": self.known_unresolvable,
+            "mois_records_withdrawn": self.records_withdrawn,
+            "mois_records_shadowed": self.records_shadowed,
+            "mois_withdrawn_retired": self.withdrawn_retired,
+            "mois_forward_geocode_misses": self.forward_geocode_misses,
+            "mois_records_shadowed_loaded": self.records_shadowed_loaded,
         }
 
 
@@ -383,6 +403,53 @@ class _ChunkLoad:
     known_unresolvable: int
     empties: tuple["_Unresolvable", ...]
     """이 chunk에서 빈 답을 받은 행(표식 후보). 쓸지는 run 끝에 업종 상태를 보고 정한다."""
+    withdrawn: int = 0
+    shadowed: int = 0
+    forward_misses: int = 0
+    shadowed_loaded: int = 0
+
+
+def _split_withdrawn(
+    chunk: Sequence[Any], active_winners: AbstractSet[str]
+) -> tuple[list[Any], list[str], int]:
+    """chunk → (적재할 record, Feature로 내지 않을 entity id, 그중 가려진 수).
+
+    가려진 숙박 행(``ShadowedLicenseRecord``)과 승격 제외 업태 행은 "그대로" 판정·변환에 넣지
+    않는다 — 넣으면 예전에 적재된 같은 payload의 Feature가 재관측되어 active로 남는다. 단 가리는
+    쪽(이긴 record)의 Feature가 지금 active가 아니면(아직 적재 전·좌표 없어 버려짐) 가려진 행을
+    그대로 적재한다 — 그 시설이 지도에서 사라지지 않게(적대 리뷰 MED). 이긴 쪽이 적재되면 다음
+    run이 철회한다.
+    """
+    active: list[Any] = []
+    withdrawn: list[str] = []
+    shadowed = 0
+    for item in chunk:
+        if isinstance(item, ShadowedLicenseRecord):
+            if item.winner_source_entity_id in active_winners:
+                withdrawn.append(license_source_entity_id(item.record))
+                shadowed += 1
+            else:
+                active.append(item.record)
+        elif not license_record_is_promotable(item):
+            withdrawn.append(license_source_entity_id(item))
+        else:
+            active.append(item)
+    return active, withdrawn, shadowed
+
+
+def _forward_misses(bundles: Sequence[FeatureBundle]) -> frozenset[str]:
+    """정지오코딩을 받을 차례였는데 점을 얻지 못한 행의 feature id(행은 점 없이 적재된다)."""
+    return frozenset(
+        bundle.feature.feature_id
+        for bundle in bundles
+        if bundle.feature.coord is None
+        and "coord_rule" in bundle.source_record.raw_data
+        # 물을 주소가 있었던 행만 — 주소도 없는 행은 물을 것이 없으니 종전처럼 적재한다.
+        and (
+            (bundle.source_record.raw_data.get("road_address") or "").strip()
+            or (bundle.source_record.raw_data.get("lot_address") or "").strip()
+        )
+    )
 
 
 def _run_clock_start(context: Any, fallback: float) -> float:
@@ -443,10 +510,12 @@ async def load_mois_license_records_chunked(
     clock: Callable[[], float] = time.time,
     convert: Callable[..., Awaitable[list[FeatureBundle]]] = license_records_to_bundles,
     current_dataset: DatasetRef | None = None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> MoisChunkedLoadOutcome:
     """선택 업종의 영업중 record를 chunk 단위로 commit하며 적재한다(재개형).
 
-    ``records``는 ``(service_slug, mng_no)`` 순 stream이다(provider가 그 순서를 보장).
+    ``records``는 업종이 적재 순서(``MOIS_SLUG_LOAD_ORDER``)로 하나씩 연속되고 업종 안은 ``mng_no``
+    순인 stream이다(``fetch_mois_license_records``가 보장).
     ``clock``(epoch 초)·``convert``는 테스트가 시간과 변환을 대신하기 위한 자리다.
     시간 상한은 **run 시작**부터 재고, run 상한 tag(``dagster/max_runtime``)에서
     ``RUN_FINAL_MARGIN_SECONDS``를 뺀 값을 넘지 않는다.
@@ -455,6 +524,10 @@ async def load_mois_license_records_chunked(
     있으면 "그대로" 판정에 스탬프 토큰 조건이 붙고(스탬프가 없거나 옛 토큰인 ``called|geocoded``
     행은 다시 변환), 행마다 변환 evidence로 스탬프를 쓰며, 빈 답 표식은 같은 토큰에서만 믿는다.
     응답에서 다른 토큰을 보면 그 뒤로는 스탬프를 쓰지 않는다(:class:`GeoLoadContext`).
+
+    ``address_geocoder``는 원천 좌표가 없는 행의 주소 정지오코더다(공용 fallback #1463 — 같은
+    geo client, 변환이 행 순서로 하나씩 부른다). 숙박 계열의 가려진 행과 승격 제외 업태 행은
+    변환하지 않고, 그 entity만이 primary인 Feature를 같은 chunk transaction에서 retired로 내린다.
     """
     from .mois_source_sync import read_mois_source_synced_at  # schedules→assets 순환 회피
 
@@ -485,9 +558,27 @@ async def load_mois_license_records_chunked(
     )
 
     async def _load_chunk(chunk: list[Any], slug_seen: int, slug_invalid: int) -> _ChunkLoad:
+        winners = sorted(
+            {
+                item.winner_source_entity_id
+                for item in chunk
+                if isinstance(item, ShadowedLicenseRecord)
+            }
+        )
+        active_winners = (
+            await client.find_active_primary_source_entities(
+                provider=PROVIDER_NAME,
+                dataset_key=dataset_key,
+                source_entity_type=_LICENSE_ENTITY_TYPE,
+                source_entity_ids=winners,
+            )
+            if winners
+            else frozenset()
+        )
+        promoted, withdrawn_ids, shadowed = _split_withdrawn(chunk, active_winners)
         payload_hashes = {
             license_source_entity_id(record): license_record_payload_hash(record)
-            for record in chunk
+            for record in promoted
         }
         unchanged = await client.find_unchanged_active_source_entities(
             provider=PROVIDER_NAME,
@@ -497,7 +588,7 @@ async def load_mois_license_records_chunked(
             current_data_token=geo.effective_token(),
         )
         to_convert = [
-            record for record in chunk if license_source_entity_id(record) not in unchanged
+            record for record in promoted if license_source_entity_id(record) not in unchanged
         ]
         known = await _known_unresolvable(
             client,
@@ -527,7 +618,19 @@ async def load_mois_license_records_chunked(
             fetched_at=fetched_at,
             dataset_key=dataset_key,
             reverse_geocoder=prefetcher if prefetcher is not None else reverse_geocoder,
+            **({"address_geocoder": address_geocoder} if address_geocoder is not None else {}),
         )
+        forward_missed = _forward_misses(bundles) if address_geocoder is not None else frozenset()
+        if address_geocoder is not None:
+            # 점을 못 얻은 행은 **점 없이 적재한다**(검색·목록에는 남는다). 다만 그것이 geo 장애라면
+            # 같은 payload의 다음 run이 다시 묻지 않으므로, 빈 답이 대부분이면 probe로 가른다 —
+            # 알려진 좋은 주소도 빈 답이면 chunk를 commit하지 않고 멈춘다(적대 리뷰 MED).
+            await _raise_if_forward_geocode_outage(
+                address_geocoder,
+                attempts=sum(1 for r in to_convert if license_needs_forward_geocode(r)),
+                misses=len(forward_missed),
+                slug=str(chunk[0].service_slug),
+            )
         geocode_empty_ids, invalid_drops = _classify_drops(bundles, mode=mode)
         empty_bundles = [b for b in bundles if b.feature.feature_id in geocode_empty_ids]
         if geocode_empty_ids and mode == "off":
@@ -556,6 +659,7 @@ async def load_mois_license_records_chunked(
                 reobserved={key: payload_hashes[key] for key in unchanged},
                 observed_at=observed_at,
                 geo=geo,
+                withdrawn=withdrawn_ids,
             ),
             enforce_loss_guard=False,
             geo_applied=geo.geo_applied,
@@ -600,6 +704,15 @@ async def load_mois_license_records_chunked(
                 )
                 for b in empty_bundles
             ),
+            withdrawn=len(withdrawn_ids),
+            shadowed=shadowed,
+            forward_misses=len(forward_missed),
+            shadowed_loaded=sum(
+                1
+                for item in chunk
+                if isinstance(item, ShadowedLicenseRecord)
+                and item.winner_source_entity_id not in active_winners
+            ),
         )
 
     merged: DagsterFeatureLoadResult | None = None
@@ -609,6 +722,7 @@ async def load_mois_license_records_chunked(
     records_seen = records_unchanged = records_converted = chunks = 0
     slug_seen = slug_invalid = slug_geocode_empty = slug_passing_trips = slug_geocoded = 0
     run_geocode_empty = run_geocoded = run_known_unresolvable = 0
+    run_withdrawn = run_shadowed = run_forward_misses = run_shadowed_loaded = 0
     degraded: list[str] = []
     slug_geocoded_totals: dict[str, int] = {}
     """업종별 조회 행 수 — 표본(``GEOCODE_RATIO_MIN_SAMPLE``)에 못 미친 업종을 가린다."""
@@ -671,6 +785,10 @@ async def load_mois_license_records_chunked(
         slug_geocoded += loaded.geocoded
         run_geocoded += loaded.geocoded
         run_known_unresolvable += loaded.known_unresolvable
+        run_withdrawn += loaded.withdrawn
+        run_shadowed += loaded.shadowed
+        run_forward_misses += loaded.forward_misses
+        run_shadowed_loaded += loaded.shadowed_loaded
         slug_geocoded_totals[slug] = slug_geocoded_totals.get(slug, 0) + loaded.geocoded
         if not loaded.passing_trip:
             marker_candidates.setdefault(slug, []).extend(loaded.empties)
@@ -752,6 +870,11 @@ async def load_mois_license_records_chunked(
         geo_probe_passes=prefetcher.probe_passes if prefetcher is not None else 0,
         geocoded_rows=run_geocoded,
         known_unresolvable=run_known_unresolvable,
+        records_withdrawn=run_withdrawn,
+        records_shadowed=run_shadowed,
+        withdrawn_retired=merged.load.withdrawn_retired,
+        forward_geocode_misses=run_forward_misses,
+        records_shadowed_loaded=run_shadowed_loaded,
     )
 
     if outcome.authoritative:
@@ -1022,6 +1145,33 @@ def _raise_if_slug_lost(*, slug: str, seen: int, invalid: int) -> None:
     )
 
 
+FORWARD_PROBE_ADDRESS: Final[Address] = Address(road="서울특별시 중구 세종대로 110")
+"""정지오코딩 장애 판정 probe 주소(서울시청 도로명). 이것도 빈 답이면 geo 장애다."""
+
+
+async def _raise_if_forward_geocode_outage(
+    address_geocoder: AddressGeocoder, *, attempts: int, misses: int, slug: str
+) -> None:
+    """chunk의 정지오코딩 대부분이 빈 답이고 **좋은 주소도** 빈 답이면 commit 전에 멈춘다.
+
+    점 없이 적재된 행은 payload가 같은 한 다시 묻지 않는다 — 장애 중의 빈 답을 행 사실로 굳히면
+    안 된다. 문턱은 역지오코딩 장애 판정과 같다(최근 조회 ``GEO_OUTAGE_MIN_LOOKUPS``건 이상, 빈 답
+    ``GEO_OUTAGE_EMPTY_RATIO`` 이상). probe가 답하면 빈 답은 행 단위 사실이다(오래된 지번 등).
+    """
+    if attempts < GEO_OUTAGE_MIN_LOOKUPS or misses / attempts < GEO_OUTAGE_EMPTY_RATIO:
+        return
+    if await address_geocoder(FORWARD_PROBE_ADDRESS) is not None:
+        return
+    raise Failure(
+        description=(
+            f"kor-travel-geo 정지오코딩이 업종 {slug} chunk에서 {misses}/{attempts}건 빈 답이고 "
+            "알려진 좋은 주소 probe도 빈 답이다 — upstream 장애로 보고 chunk를 commit하지 않는다. "
+            "재시도·재실행은 이어서 적재한다."
+        ),
+        metadata={"mois_forward_geocode_attempts": attempts, "mois_forward_geocode_misses": misses},
+    )
+
+
 async def _raise_if_geo_outage(prefetcher: PrefetchingReverseGeocoder, *, slug: str) -> bool:
     """최근 조회 대부분이 빈 답이고 **알려진 좋은 좌표도** 빈 답이면 upstream 장애로 멈춘다.
 
@@ -1059,8 +1209,10 @@ def _chunk_loader(
     reobserved: Mapping[str, str],
     observed_at: datetime,
     geo: GeoLoadContext,
+    withdrawn: Sequence[str] = (),
 ) -> Callable[[Sequence[FeatureBundle], GeoLoadContext | None], Awaitable[FeatureLoadResult]]:
-    """chunk 하나의 transaction — 미변경 재관측 + 변경분 적재 + 지오코딩 스탬프를 함께 commit한다.
+    """chunk 하나의 transaction — 미변경 재관측 + 변경분 적재 + 지오코딩 스탬프 + 철회 은퇴를 함께
+    commit한다.
 
     wrapper가 넘기는 geo 입력 대신 이 run의 것(관측 토큰 포함)을 쓴다 — MOIS는 wrapper에 계수를
     넘기지 않는다(run 빈 답 가드는 자기 루프의 degraded 규칙이다).
@@ -1077,6 +1229,7 @@ def _chunk_loader(
             reobserved_payload_hashes=reobserved,
             observed_at=observed_at,
             geo=geo,
+            **({"withdrawn_source_entity_ids": tuple(withdrawn)} if withdrawn else {}),
         )
 
     return _load

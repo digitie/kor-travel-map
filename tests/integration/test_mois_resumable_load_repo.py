@@ -353,3 +353,112 @@ async def test_resolving_a_marker_closes_only_open_findings_of_that_type(
         )
     ).scalar_one()
     assert status == "resolved"
+
+
+# -- 철회 은퇴: provider가 더는 Feature로 내지 않는 entity (가려진 숙박·여행업) -------------
+
+
+async def _feature_of(session: AsyncSession, entity_id: str) -> str:
+    return str(
+        (
+            await session.execute(
+                text(
+                    """
+                    SELECT DISTINCT sl.feature_id
+                    FROM provider_sync.source_links AS sl
+                    JOIN provider_sync.source_entities AS se
+                      ON se.source_entity_key = sl.source_entity_key
+                    WHERE se.source_entity_id = :id AND sl.source_role = 'primary'
+                    """
+                ),
+                {"id": entity_id},
+            )
+        ).scalar_one()
+    )
+
+
+async def _lifecycle(session: AsyncSession, feature_id: str) -> str:
+    return str(
+        (
+            await session.execute(
+                text(
+                    "SELECT lifecycle_state FROM feature.features "
+                    "WHERE CAST(feature_id AS text) = :id"
+                ),
+                {"id": feature_id},
+            )
+        ).scalar_one()
+    )
+
+
+async def test_withdrawn_entity_retires_its_sole_source_feature(
+    migrated_session: AsyncSession,
+) -> None:
+    from kortravelmap.infra.feature_repo import retire_features_withdrawn_by_provider
+
+    records = _records("w")
+    await _load(migrated_session, records)
+    withdrawn = license_source_entity_id(records[0])
+    kept = license_source_entity_id(records[1])
+
+    from kortravelmap.infra.feature_repo import find_active_primary_source_entities
+
+    assert await find_active_primary_source_entities(
+        migrated_session, source_entity_ids=[withdrawn, kept, "bakeries::never-loaded"], **_KW
+    ) == {withdrawn, kept}
+
+    retired = await retire_features_withdrawn_by_provider(
+        migrated_session, source_entity_ids=[withdrawn, "bakeries::never-loaded"], **_KW
+    )
+    assert await find_active_primary_source_entities(
+        migrated_session, source_entity_ids=[withdrawn, kept], **_KW
+    ) == {kept}, "retired Feature의 entity는 지도에 없는 것으로 본다"
+
+    assert retired == 1
+    assert await _lifecycle(migrated_session, await _feature_of(migrated_session, withdrawn)) == (
+        "retired"
+    )
+    assert await _lifecycle(migrated_session, await _feature_of(migrated_session, kept)) == (
+        "active"
+    )
+    # 두 번째 호출은 아무것도 하지 않는다(이미 retired).
+    assert (
+        await retire_features_withdrawn_by_provider(
+            migrated_session, source_entity_ids=[withdrawn], **_KW
+        )
+        == 0
+    )
+
+
+async def test_withdrawn_entity_does_not_retire_a_merged_master_with_another_source(
+    migrated_session: AsyncSession,
+) -> None:
+    """병합 master는 철회된 entity의 link를 가져도 다른 primary source가 있으면 남는다."""
+    from kortravelmap.infra.feature_repo import retire_features_withdrawn_by_provider
+    from kortravelmap.infra.merge_repo import apply_feature_merge
+
+    records = _records("m")
+    await _load(migrated_session, records)
+    master_entity = license_source_entity_id(records[0])
+    loser_entity = license_source_entity_id(records[1])
+    master = await _feature_of(migrated_session, master_entity)
+    loser = await _feature_of(migrated_session, loser_entity)
+    await apply_feature_merge(migrated_session, master_id=master, loser_id=loser)
+    assert await _feature_of(migrated_session, loser_entity) == master
+
+    assert (
+        await retire_features_withdrawn_by_provider(
+            migrated_session, source_entity_ids=[loser_entity], **_KW
+        )
+        == 0
+    )
+    assert await _lifecycle(migrated_session, master) == "active"
+
+    # 두 source가 다 철회되면 그때는 내린다.
+    assert (
+        await retire_features_withdrawn_by_provider(
+            migrated_session, source_entity_ids=[loser_entity, master_entity], **_KW
+        )
+        == 1
+    )
+    assert await _lifecycle(migrated_session, master) == "retired"

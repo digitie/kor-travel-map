@@ -22,7 +22,9 @@ from kortravelmap.infra.feature_repo import (
     ProviderEntityReobservationConflict,
 )
 from kortravelmap.providers.mois import (
+    MOIS_SLUG_LOAD_ORDER,
     PROMOTED_SERVICE_SLUGS,
+    ShadowedLicenseRecord,
     license_records_to_bundles,
     license_source_entity_id,
 )
@@ -142,6 +144,8 @@ class _FakeDb:
     resolve_error: Exception | None = None
     tokens_seen: list[tuple[str, str | None]] = field(default_factory=list)
     """토큰 조건을 받는 세 자리가 받은 토큰: ("unchanged"|"marker"|"load", token)."""
+    withdrawn: list[tuple[str, ...]] = field(default_factory=list)
+    """chunk transaction마다 받은 철회 entity id."""
 
 
 class _FakeClient:
@@ -166,6 +170,21 @@ class _FakeClient:
             if self.db.current.get(key) == value and key not in self.db.retired
         )
 
+    async def find_active_primary_source_entities(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        source_entity_ids: Sequence[str],
+    ) -> frozenset[str]:
+        del provider, dataset_key, source_entity_type
+        return frozenset(
+            key
+            for key in source_entity_ids
+            if key in self.db.current and key not in self.db.retired
+        )
+
     async def load_feature_bundles_reobserving(
         self,
         bundles: Iterable[FeatureBundle],
@@ -176,6 +195,7 @@ class _FakeClient:
         reobserved_payload_hashes: Mapping[str, str],
         observed_at: datetime,
         geo: Any = None,
+        withdrawn_source_entity_ids: Sequence[str] = (),
     ) -> FeatureLoadResult:
         del provider, dataset_key, source_entity_type, observed_at
         self.db.tokens_seen.append(("load", geo.effective_token() if geo is not None else None))
@@ -198,14 +218,22 @@ class _FakeClient:
             staged[bundle.source_record.source_entity_id] = bundle.source_record.raw_payload_hash
             written.append(bundle.source_record.source_entity_id)
         inserted = sum(1 for key in written if key not in self.db.current)
+        withdrawn_retired = [
+            key
+            for key in withdrawn_source_entity_ids
+            if key in staged and key not in self.db.retired
+        ]
         # commit — 여기까지 와야만 보인다.
         self.db.current = staged
+        self.db.retired.update(withdrawn_retired)
+        self.db.withdrawn.append(tuple(withdrawn_source_entity_ids))
         self.db.commits.append(tuple(written))
         self.db.reobserved.append(tuple(sorted(reobserved_payload_hashes)))
         return FeatureLoadResult(
             bundles_total=len(written),
             features_inserted=inserted,
             source_records_inserted=len(written),
+            withdrawn_retired=len(withdrawn_retired),
         )
 
     async def load_feature_bundles(
@@ -343,12 +371,15 @@ async def _run(
     strict_address: str = "off",
     context: Any = None,
     current_dataset: Any = None,
+    address_geocoder: Any = None,
 ) -> chunked.MoisChunkedLoadOutcome:
     kwargs: dict[str, Any] = {}
     if clock is not None:
         kwargs["clock"] = clock
     if current_dataset is not None:
         kwargs["current_dataset"] = current_dataset
+    if address_geocoder is not None:
+        kwargs["address_geocoder"] = address_geocoder
     return await load_mois_license_records_chunked(
         context=cast(Any, context or _Context()),
         client=cast(Any, _FakeClient(db)),
@@ -585,7 +616,25 @@ def test_plan_defaults_to_every_promoted_slug() -> None:
         mois_load_run_budget_seconds=14_400,
     ))
     assert plan.full_coverage
-    assert plan.service_slugs == tuple(sorted(PROMOTED_SERVICE_SLUGS))
+    assert set(plan.service_slugs) == PROMOTED_SERVICE_SLUGS
+    # 이름순이 아니라 적재 우선순위다 — 숙박이 먼저, 일반음식점(전체의 약 70%)이 마지막.
+    assert plan.service_slugs == MOIS_SLUG_LOAD_ORDER
+    assert plan.service_slugs[0] == "lodgings"
+    assert plan.service_slugs[-1] == "general_restaurants"
+    assert plan.service_slugs != tuple(sorted(PROMOTED_SERVICE_SLUGS))
+
+
+def test_plan_selection_keeps_load_priority_not_name_order() -> None:
+    settings = KorTravelMapSettings.model_construct(
+        mois_source_db_path=None, mois_geocode_concurrency=2,
+        mois_load_run_budget_seconds=14_400,
+    )
+    plan = resolve_mois_load_plan(
+        settings, ["general_restaurants", "bakeries", "tourist_accommodations", "lodgings"]
+    )
+    assert plan.service_slugs == (
+        "lodgings", "tourist_accommodations", "bakeries", "general_restaurants",
+    )
 
 
 def test_plan_selection_is_a_subset_and_unknown_names_are_rejected() -> None:
@@ -1691,3 +1740,203 @@ async def test_mid_run_dataset_switch_stops_using_the_token_from_the_next_chunk_
     assert all(token is None for token in loads[first_none:])
     later = [token for kind, token in db.tokens_seen[db.tokens_seen.index(("load", None)) :]]
     assert all(token is None for token in later)
+
+
+# -- 철회(가려진 숙박·승격 제외 업태) · 원천 좌표 없는 행의 정지오코딩 -------------------
+
+
+def _hotel(slug: str, mng_no: str, name: str, subtype: str, **kw: Any) -> _Record:
+    fields: dict[str, Any] = {
+        "service_slug": slug,
+        "mng_no": mng_no,
+        "place_name": name,
+        "subtype_name": subtype,
+        "lon": 127.3870,
+        "lat": 36.3750,
+        "road_address": "대전광역시 유성구 엑스포로123번길 33 (도룡동)",
+    }
+    if slug == "lodgings":
+        fields["business_type_name"] = subtype
+    else:
+        fields["culture_sports_business_type_name"] = subtype
+    fields.update(kw)
+    return _Record(**fields)
+
+
+class _Capturing(_Converted):
+    def __init__(self) -> None:
+        super().__init__()
+        self.bundles: list[FeatureBundle] = []
+
+    async def __call__(self, records: list[Any], **kwargs: Any) -> list[FeatureBundle]:
+        bundles = await super().__call__(records, **kwargs)
+        self.bundles.extend(bundles)
+        return bundles
+
+
+async def test_shadowed_and_non_promoted_rows_are_withdrawn_not_reobserved() -> None:
+    """가려진 숙박 행·여행업 행은 변환하지 않고, 예전 적재본은 재관측 대신 retired로 내린다.
+
+    예전 적재본의 payload가 지금과 같아도("그대로") 재관측 집합에 들어가면 안 된다 — 들어가면
+    active로 남아 같은 호텔이 둘이 된다.
+    """
+    winner = _hotel("lodgings", "L-1", "(주)호텔롯데 롯데시티호텔대전", "관광호텔")
+    shadowed = _hotel("tourist_accommodations", "T-1", "롯데시티호텔대전", "관광숙박업")
+    travel = _hotel(
+        "tourism_businesses", "B-1", "㈜호텔신라", "여행업",
+        road_address="서울특별시 중구 동호로 249", lon=127.0057, lat=37.5560,
+    )
+    db = _FakeDb()
+    for old in (shadowed, travel):
+        db.current[license_source_entity_id(old)] = chunked.license_record_payload_hash(old)
+    converted = _Converted()
+    plan = replace(
+        _plan(), service_slugs=("lodgings", "tourist_accommodations", "tourism_businesses")
+    )
+
+    outcome = await _run(
+        [winner, ShadowedLicenseRecord(shadowed, license_source_entity_id(winner)), travel],
+        db, geocoder=_Geocoder(), converted=converted, plan=plan,
+    )
+
+    withdrawn_ids = {license_source_entity_id(shadowed), license_source_entity_id(travel)}
+    assert converted.ids == [license_source_entity_id(winner)]
+    assert {key for chunk in db.withdrawn for key in chunk} == withdrawn_ids
+    assert not {key for chunk in db.reobserved for key in chunk} & withdrawn_ids
+    assert db.retired == withdrawn_ids
+    assert (outcome.records_seen, outcome.records_withdrawn, outcome.records_shadowed) == (3, 2, 1)
+    assert outcome.withdrawn_retired == 2
+    assert outcome.as_metadata()["mois_records_shadowed"] == 1
+
+
+async def test_shadowed_row_is_loaded_while_its_winner_is_not_on_the_map() -> None:
+    """이긴 쪽 Feature가 아직 없으면(업종 선택·좌표 없어 버려짐) 가려진 행이 지도에 남는다."""
+    winner = _hotel("lodgings", "L-7", "롯데시티호텔대전", "관광호텔")
+    shadowed = _hotel("tourist_accommodations", "T-7", "롯데시티호텔대전", "관광숙박업")
+    db = _FakeDb()
+    converted = _Converted()
+
+    outcome = await _run(
+        [ShadowedLicenseRecord(shadowed, license_source_entity_id(winner))],
+        db, geocoder=_Geocoder(), converted=converted,
+        plan=replace(_plan(), service_slugs=("tourist_accommodations",)),
+    )
+
+    assert converted.ids == [license_source_entity_id(shadowed)]
+    assert outcome.records_withdrawn == 0
+    assert license_source_entity_id(shadowed) in db.current
+
+    # 이긴 쪽이 적재된 뒤의 run은 가려진 행을 철회한다.
+    db.current[license_source_entity_id(winner)] = "loaded"
+    outcome = await _run(
+        [ShadowedLicenseRecord(shadowed, license_source_entity_id(winner))],
+        db, geocoder=_Geocoder(),
+        plan=replace(_plan(), service_slugs=("tourist_accommodations",)),
+    )
+    assert outcome.records_shadowed == 1
+    assert license_source_entity_id(shadowed) in db.retired
+
+
+async def test_forward_geocode_miss_loads_the_row_without_a_point() -> None:
+    """점을 못 얻은 행(geo는 건강)은 점 없이 적재된다 — 검색·목록에서 사라지지 않는다."""
+
+    async def locator(address: Address) -> Coordinate | None:
+        return None
+
+    missing = _hotel(
+        "lodgings", "L-8", "어딘가호텔", "일반호텔", lon=None, lat=None,
+        legal_dong_code="1111010100", road_address="서울특별시 종로구 없는길 1",
+    )
+    db = _FakeDb()
+
+    outcome = await _run(
+        [missing], db, geocoder=_Geocoder(),
+        plan=replace(_plan(), service_slugs=("lodgings",)), address_geocoder=locator,
+    )
+
+    assert outcome.forward_geocode_misses == 1
+    assert license_source_entity_id(missing) in db.current
+
+
+async def test_forward_geocode_outage_stops_before_commit(monkeypatch: pytest.MonkeyPatch) -> None:
+    """chunk 대부분이 빈 답이고 좋은 주소 probe도 빈 답이면 commit하지 않고 멈춘다."""
+    monkeypatch.setattr(chunked, "GEO_OUTAGE_MIN_LOOKUPS", 2)
+    probes: list[str | None] = []
+
+    async def dead(address: Address) -> Coordinate | None:
+        probes.append(address.road)
+        return None
+
+    rows = [
+        _hotel(
+            "lodgings", f"L-{i}", f"어딘가호텔{i}", "일반호텔", lon=None, lat=None,
+            legal_dong_code="1111010100", road_address=f"서울특별시 종로구 없는길 {i}",
+        )
+        for i in range(3)
+    ]
+    db = _FakeDb()
+    plan = replace(_plan(), service_slugs=("lodgings",))
+
+    with pytest.raises(Failure, match="정지오코딩"):
+        await _run(rows, db, geocoder=_Geocoder(), plan=plan, address_geocoder=dead)
+    assert db.current == {}
+    assert probes[-1] == chunked.FORWARD_PROBE_ADDRESS.road
+
+    async def healthy_probe(address: Address) -> Coordinate | None:
+        if address.road == chunked.FORWARD_PROBE_ADDRESS.road:
+            return Coordinate(lon=126.978, lat=37.566)
+        return None
+
+    outcome = await _run(rows, db, geocoder=_Geocoder(), plan=plan, address_geocoder=healthy_probe)
+    assert outcome.forward_geocode_misses == 3
+    assert len(db.current) == 3, "probe가 답하면 빈 답은 행 사실이다 — 점 없이 적재한다"
+
+
+async def test_slug_limited_run_never_retires_or_seals_other_slugs() -> None:
+    """숙박만 고른 run은 다른 업종의 Feature를 건드리지 않는다(prune 범위 = 이번 행의 철회뿐)."""
+    other = license_source_entity_id(_Record(service_slug="general_restaurants", mng_no="G-1"))
+    db = _FakeDb(current={other: "already-loaded"})
+    records = [_hotel("lodgings", f"L-{i}", f"호텔{i}번", "관광호텔") for i in range(4)]
+
+    outcome = await _run(
+        records, db, geocoder=_Geocoder(),
+        plan=replace(_plan(full_coverage=False), service_slugs=("lodgings",)),
+    )
+
+    assert outcome.complete
+    assert not outcome.authoritative
+    assert db.seals == 0
+    assert db.current[other] == "already-loaded"
+    assert other not in db.retired
+    assert all(not chunk for chunk in db.withdrawn)
+
+
+async def test_rows_without_source_coordinates_get_a_point_from_the_address() -> None:
+    calls: list[str | None] = []
+
+    async def locator(address: Address) -> Coordinate | None:
+        calls.append(address.road)
+        return Coordinate(lon=127.3871, lat=36.3751)
+
+    no_point = _hotel("lodgings", "L-2", "라한호텔전주", "관광호텔", lon=None, lat=None)
+    with_point = _hotel("lodgings", "L-3", "JW메리어트호텔서울", "관광호텔")
+    captured = _Capturing()
+    geocoder = _Geocoder()
+
+    await _run(
+        [no_point, with_point], _FakeDb(), geocoder=geocoder, converted=captured,
+        plan=replace(_plan(), service_slugs=("lodgings",)), address_geocoder=locator,
+    )
+
+    assert calls == [no_point.road_address], "원천 좌표가 있는 행은 정지오코딩하지 않는다"
+    located = next(b for b in captured.bundles if b.feature.name == "라한호텔전주")
+    assert located.feature.coord is not None
+    assert float(located.feature.coord.lon) == pytest.approx(127.3871)
+    # 얻은 점으로 평소처럼 역지오코딩한다(공용 fallback #1463 — 스탬프 called).
+    assert located.feature.address.bjd_code == "1111010100"
+    assert located.feature.detail.payload["coord_source"] == "kor_travel_geo_geocode"
+    assert located.geo_attempt is not None
+    assert located.geo_attempt.reverse_attempted
+    kept = next(b for b in captured.bundles if b.feature.name == "JW메리어트호텔서울")
+    assert "coord_source" not in kept.feature.detail.payload
+    assert len(geocoder.calls) == 2

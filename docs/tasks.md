@@ -178,6 +178,11 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   원천은 포털 공개 파일(서비스키 불필요)로 바뀌었다. 배포 뒤 두 dataset 첫 적재·검색 확인, schedule 활성이 남았다. 해제 조건은 acceptance.
 
+- [ ] T-MOIS-LODGING-FIRST — **MOIS 숙박을 먼저 적재하고 통칭으로 찾는다**
+
+  42종 중 12종만 적재됐다(2026-11-09). 업종 우선순위·상호 정규화·숙박 계열 중복 흡수·좌표 정지오코딩을 넣고
+  숙박부터 적재한다. 해제 조건은 acceptance.
+
 - [ ] T-PG18-CI — **공용 PG 18 대응: CI를 PG18 lane으로 바꾸고 fresh-install catalog 가정 정리**
 
   ADR-118(proposed): CI 통합 suite를 공용 instance digest(PG18 + PostGIS 3.6) 한 lane으로 바꾸고 PG16 catalog 가정을

@@ -166,6 +166,8 @@ __all__ = [
     "load_notice_event_bundles",
     "retire_features_absent_from_snapshot",
     "retire_features_by_source_entity_ids",
+    "retire_features_withdrawn_by_provider",
+    "find_active_primary_source_entities",
     "retire_geometryless_area_features_by_source",
     "NoticeReconcileResult",
     "NoticeFeatureLoadResult",
@@ -2634,6 +2636,9 @@ class FeatureLoadResult:
     geo_override_stale_findings: int = 0
     #: stale 행에서 같은 법정동인데 새 답이 잃은 geo 전용 필드를 저장값으로 지킨 행.
     geo_partial_kept: int = 0
+    #: provider가 더는 Feature로 내지 않아 같은 transaction에서 retired로 내린 Feature
+    #: (``retire_features_withdrawn_by_provider`` — MOIS 승격 제외 업태·가려진 숙박 record).
+    withdrawn_retired: int = 0
 
     def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
         """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
@@ -2662,6 +2667,7 @@ class FeatureLoadResult:
                 self.geo_override_stale_findings + other.geo_override_stale_findings
             ),
             geo_partial_kept=self.geo_partial_kept + other.geo_partial_kept,
+            withdrawn_retired=self.withdrawn_retired + other.withdrawn_retired,
         )
 
 
@@ -4690,6 +4696,118 @@ async def retire_features_by_source_entity_ids(
                 "dataset_key": dataset_key,
                 "source_entity_type": source_entity_type,
                 "keys": sorted(source_entity_ids),
+            },
+        )
+    ).mappings().all()
+    return await _retire_provider_candidates(
+        session,
+        candidates,
+        reason_code="provider_tombstone",
+    )
+
+
+_WITHDRAWN_SOLE_SOURCE_SQL: Final[str] = """
+SELECT DISTINCT f.feature_id, pd.provider_dataset_id
+FROM feature.features AS f
+JOIN provider_sync.source_links AS sl ON sl.feature_id = f.feature_id
+JOIN provider_sync.source_entities AS se ON se.source_entity_key = sl.source_entity_key
+JOIN provider_sync.provider_datasets AS pd ON pd.provider_dataset_id = se.provider_dataset_id
+WHERE f.lifecycle_state = 'active'
+  AND sl.source_role = 'primary'
+  AND pd.provider = :provider
+  AND pd.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
+  AND se.source_entity_id = ANY(CAST(:keys AS text[]))
+  -- 병합 master처럼 철회 대상 밖의 primary source가 하나라도 있으면 그 Feature는 남긴다.
+  AND NOT EXISTS (
+      SELECT 1
+      FROM provider_sync.source_links AS other
+      JOIN provider_sync.source_entities AS ose
+        ON ose.source_entity_key = other.source_entity_key
+      JOIN provider_sync.provider_datasets AS opd
+        ON opd.provider_dataset_id = ose.provider_dataset_id
+      WHERE other.feature_id = f.feature_id
+        AND other.source_role = 'primary'
+        AND NOT (
+            opd.provider = :provider
+            AND opd.dataset_key = :dataset_key
+            AND ose.source_entity_type = :source_entity_type
+            AND ose.source_entity_id = ANY(CAST(:keys AS text[]))
+        )
+  )
+"""
+
+
+_ACTIVE_PRIMARY_ENTITIES_SQL: Final[str] = """
+SELECT DISTINCT se.source_entity_id
+FROM provider_sync.source_entities AS se
+JOIN provider_sync.provider_datasets AS pd ON pd.provider_dataset_id = se.provider_dataset_id
+JOIN provider_sync.source_links AS sl
+  ON sl.source_entity_key = se.source_entity_key AND sl.source_role = 'primary'
+JOIN feature.features AS f ON f.feature_id = sl.feature_id
+WHERE f.lifecycle_state = 'active'
+  AND pd.provider = :provider
+  AND pd.dataset_key = :dataset_key
+  AND se.source_entity_type = :source_entity_type
+  AND se.source_entity_id = ANY(CAST(:keys AS text[]))
+"""
+
+
+async def find_active_primary_source_entities(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    source_entity_ids: Collection[str],
+) -> frozenset[str]:
+    """주어진 entity 중 primary link가 active Feature를 가리키는 것(읽기만).
+
+    MOIS 숙박 계열 중복 흡수가 "가리는 쪽(이긴 record)이 실제로 지도에 있는가"를 묻는다 — 없으면
+    가려진 record를 철회하지 않는다(그 시설이 지도에서 사라지지 않게).
+    """
+    if not source_entity_ids:
+        return frozenset()
+    rows = await session.execute(
+        text(_ACTIVE_PRIMARY_ENTITIES_SQL),
+        {
+            "provider": provider,
+            "dataset_key": dataset_key,
+            "source_entity_type": source_entity_type,
+            "keys": sorted(set(source_entity_ids)),
+        },
+    )
+    return frozenset(str(value) for value in rows.scalars())
+
+
+async def retire_features_withdrawn_by_provider(
+    session: AsyncSession,
+    *,
+    provider: str,
+    dataset_key: str,
+    source_entity_type: str,
+    source_entity_ids: Collection[str],
+) -> int:
+    """provider가 **더는 Feature로 내지 않는** entity의 Feature를 retired로 내린다.
+
+    원천에는 영업중으로 남아 있지만 이 저장소가 승격하지 않게 된 record다 — MOIS의 승격 제외
+    업태(여행업)와 앞 업종의 같은 시설에 가려진 숙박 record(``providers.mois.LicenseShadowIndex``).
+    :func:`retire_features_by_source_entity_ids`(폐업 통지)와 달리 **그 entity만이 primary
+    source인** Feature만 내린다 — 관리자가 병합해 다른 primary source를 함께 가진 master는
+    남는다. active lifecycle override가 있는 Feature는 procedure가 건너뛴다(관리자 결정 보존).
+    빈 집합이면 no-op(0). commit은 호출자 책임.
+    """
+    await lock_feature_curation_write(session)
+    if not source_entity_ids:
+        return 0
+    candidates = (
+        await session.execute(
+            text(_WITHDRAWN_SOLE_SOURCE_SQL),
+            {
+                "provider": provider,
+                "dataset_key": dataset_key,
+                "source_entity_type": source_entity_type,
+                "keys": sorted(set(source_entity_ids)),
             },
         )
     ).mappings().all()

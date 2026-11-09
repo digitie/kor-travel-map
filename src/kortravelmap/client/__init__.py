@@ -190,6 +190,7 @@ from kortravelmap.infra.feature_repo import (
     arm_feature_curation_write_wait,
     capture_provider_curation_input,
     features_in_bbox,
+    find_active_primary_source_entities,
     get_feature_row,
     get_feature_rows_by_ids,
     load_bundles,
@@ -198,6 +199,7 @@ from kortravelmap.infra.feature_repo import (
     resolve_active_provider_dataset_id,
     retire_features_absent_from_snapshot,
     retire_features_by_source_entity_ids,
+    retire_features_withdrawn_by_provider,
     retire_geometryless_area_features_by_source,
     supersede_stale_notice_features,
 )
@@ -1254,6 +1256,24 @@ class AsyncKorTravelMapClient:
                 current_data_token=current_data_token,
             )
 
+    async def find_active_primary_source_entities(
+        self,
+        *,
+        provider: str,
+        dataset_key: str,
+        source_entity_type: str,
+        source_entity_ids: Sequence[str],
+    ) -> frozenset[str]:
+        """entity 중 primary link가 active Feature를 가리키는 것 — 읽기 전용."""
+        async with self._session_factory() as session, session.begin():
+            return await find_active_primary_source_entities(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                source_entity_ids=source_entity_ids,
+            )
+
     async def read_reusable_geo_columns(
         self,
         bundles: Sequence[FeatureBundle],
@@ -1404,6 +1424,7 @@ class AsyncKorTravelMapClient:
         reobserved_payload_hashes: Mapping[str, str],
         observed_at: datetime,
         geo: GeoLoadContext | None = None,
+        withdrawn_source_entity_ids: Sequence[str] = (),
     ) -> FeatureLoadResult:
         """chunk 하나를 **한 transaction**으로 닫는다 — 미변경 재관측 + 변경분 적재 (ADR-108).
 
@@ -1411,6 +1432,12 @@ class AsyncKorTravelMapClient:
         :class:`~kortravelmap.infra.feature_repo.ProviderEntityReobservationConflict`로
         chunk 전체를 되돌린다. 이 경계가 "반쯤 쓰인 chunk"를 만들지 않는 단위다 —
         commit된 chunk는 그 안의 행이 전부 있고, 되돌린 chunk는 하나도 없다.
+
+        ``withdrawn_source_entity_ids``는 이 chunk에서 provider가 더는 Feature로 내지 않는 entity다
+        (승격 제외 업태·앞 업종에 가려진 시설). 그 entity만이 primary인 Feature를 같은
+        transaction에서 retired로 내린다
+        (:func:`~kortravelmap.infra.feature_repo.retire_features_withdrawn_by_provider`) —
+        그 수는 결과의 ``withdrawn_retired``다.
         """
         materialized = list(bundles)
         async with self._feature_load_transaction() as session:
@@ -1423,7 +1450,17 @@ class AsyncKorTravelMapClient:
                 observed_at=observed_at,
                 current_data_token=geo.effective_token() if geo is not None else None,
             )
-            return await load_bundles(session, materialized, geo=geo)
+            result = await load_bundles(session, materialized, geo=geo)
+            if not withdrawn_source_entity_ids:
+                return result
+            retired = await retire_features_withdrawn_by_provider(
+                session,
+                provider=provider,
+                dataset_key=dataset_key,
+                source_entity_type=source_entity_type,
+                source_entity_ids=withdrawn_source_entity_ids,
+            )
+            return result.merge(FeatureLoadResult(withdrawn_retired=retired))
 
     async def load_feature_bundle_batches(
         self,

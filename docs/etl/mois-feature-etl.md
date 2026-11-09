@@ -395,6 +395,44 @@ def _facility_info(record: PlaceRecord) -> dict:
     return base
 ```
 
+### 6.3 숙박 계열 업종 사이 중복 흡수 (2026-11-09)
+
+관광호텔 하나가 `lodgings`(공중위생 숙박업, 업태로 호텔·콘도를 가른다)·`tourist_accommodations`
+(관광숙박업 등록, 업태는 `관광숙박업` 하나)·`tourism_businesses`의 `관광숙박업`에 함께 등록된다.
+`LICENSE_DEDUP_FAMILY` 순서(**앞이 이긴다**: lodgings → tourist_accommodations → tourism_businesses)로
+같은 시설 = **이름 키(§6.4 표시 이름, 공백·괄호·대소문자 무시)가 같고** 도로명 주소의 건물번호까지가
+같거나 좌표가 100 m 안이다. 또는 같은 건물·같은 숙박 분류(앞 네 자리)에서 한 키가 다른 키의
+앞부분이다(4자 이상 — 제주신라 "호텔신라제주" → "호텔신라제주신라"). 가리는 쪽은 사슬을 끝까지 따라간
+맨 앞 record다. 호텔 안 시설이 호텔 상호 그대로 등록된 `public_baths`·
+`performance_halls`(호텔 사우나·공연장)는 같은 건물·정확히 같은 키일 때만 가려지고 이기지 않는다.
+뒤 업종의 행은 `ShadowedLicenseRecord`로 감싸지고, **이긴 쪽 entity의 Feature가 active일 때만**
+Feature가 되지 않는다 — 그때 예전에 적재된 Feature는 같은 chunk transaction에서 retired로 내린다
+(`retire_features_withdrawn_by_provider` — 그 entity만이 primary source인 Feature만; 관리자 병합
+master·lifecycle override는 남는다). 이긴 쪽이 아직 없으면(업종 선택·점 없음) 가려진 행을 그대로
+적재하고, 이긴 쪽이 적재된 뒤의 run이 철회한다. 색인은 업종 선택과 무관하게 원천 전체 family로
+만든다. 같은 업종 안의 중복은 대상이 아니다. CLI bulk 경로(`sync_mois_license_features_bulk`)는 이
+흡수를 하지 않는다(그 경로로 숙박 업종을 싣지 말 것).
+
+업태 분류(`_LICENSE_SUBTYPE_CATEGORIES`): `lodgings` 관광호텔 `03010100`·일반호텔 `03010000`·
+휴양콘도미니엄업 `03020100`·숙박업(생활) `03000000`·여관업/여인숙업/기타 `03040100`.
+`tourism_businesses` 관광숙박업 `03010100`(place_kind `lodging_tourist_hotel`), **여행업은
+승격하지 않는다**(`license_record_is_promotable` — 사무소 등록이 호텔 검색을 가린다). MCST가 관광
+일반(`01000000`)으로 싣는 같은 호텔은 기본 dedup scope pair가 **검토 큐에 올린다** — 병합은 관리자가
+`master_feature_id`를 MOIS 쪽으로 지정해 한다(자동 master 선정은 MCST를 고를 수 있다).
+
+### 6.4 표시 이름 (2026-11-09)
+
+`Feature.name`은 `core.business_name.normalize_business_name`의 표시 이름이다 — 앞·뒤 법인 표기
+(`(주)`·`㈜`·`주식회사`·`(유)`·`유한회사` 등)와 큐레이션 모회사 접두(`호텔롯데`·`이랜드파크`·
+`조선호텔앤리조트`·`동승`)를 걷는다. 숙박 계열 세 업종만 맨 끝 짧은 한글 괄호를 공백 뒤 낱말로 편다
+(`(경주)` → ` 경주`). **라틴 괄호는 이름에 남긴다** — 검색이 `features.name`만 trigram으로 보므로
+떼면 영문 검색이 그 Feature를 잃는다(Feature별 별칭 검색은 후속 과제). 원문은
+`detail.payload.legal_name`(바뀐 행만)과 `raw_data.place_name`에 남는다. 이름이 바뀐 행만
+`raw_data.display_name`(결과)을 싣는다 — 결과가 바뀐 행만 해시가 바뀌어 한 번 다시 변환되고, 평범한
+상호의 해시는 그대로다. 통칭이 상호와 아예 다른 시설(신라호텔 → 호텔신라, 현대호텔 목포 →
+라한호텔목포)은 `CURATED_BRAND_SEARCH_ALIASES` → migration 442 `feature_search_aliases`다. 공백 없는
+검색어는 검색이 이미 공백을 지우고 비교한다.
+
 ## 7. 좌표·주소
 
 | mois 필드 | 처리 |
@@ -413,6 +451,16 @@ mois가 `legal_dong_code`를 직접 제공하므로 reverse geocoder는 **검증
 - legal_dong_code 있으면 그대로 사용
 - 없거나 검증 필요 시 좌표 reverse geocoder로 보강
 - 충돌 시 `AddressMatchReport(match_level="legal_dong_conflict")` 기록
+
+원천 좌표가 없는 행(2026-11-09 숙박·민박 영업중 4,170행)은 공용 원천 좌표 결측 fallback
+(`address_geocoder` — `docs/etl/address-geocoding.md`, #1463)으로 점을 얻는다. 주소에 건물번호·지번이
+있을 때만(`address_has_location_number`) `reverse_geocoder` resource의 `geocode_address`(같은 client·계수,
+`fallback=none`, run 캐시)를 행 순서대로 하나씩 부르고, 그 점으로 평소처럼 역지오코딩한다(원천 법정동
+코드가 있으면 그것이 이긴다). `detail.payload.coord_source = "kor_travel_geo_geocode"`. 그런 행은
+`raw_data.coord_rule`(`MOIS_COORD_RULE`)을 실어 이미 점 없이 적재된 행도 한 번 다시 변환된다.
+점을 얻지 못한 행은 점 없이 적재된다(검색·목록에는 남고, 같은 payload면 다시 묻지 않는다). 그래서 geo
+장애를 행 사실로 굳히지 않도록, chunk의 정지오코딩이 대부분(20건 이상·80% 이상) 빈 답이면 알려진 좋은
+주소(서울시청)로 probe하고 그것도 빈 답이면 chunk를 commit하지 않고 멈춘다.
 
 ## 8. provider 변환 함수 (계약)
 
@@ -532,6 +580,14 @@ bulk insert가 30k 파라미터 초과 가능 → `psycopg.copy_*` 자동 분기
 
 ConcurrencyConfig: `mois_api: max_concurrent=1` (rate limit 보호 + bulk 적재
 직렬화).
+
+### 10.1 업종 적재 순서 (2026-11-09)
+
+재개형 적재(ADR-108)는 업종을 `MOIS_SLUG_LOAD_GROUPS`(정본) 순서로 걷는다 — 숙박 → 리조트·테마 →
+관광·문화 → 레저·스포츠 → MICE → 쇼핑 → 관광식당 → 대량 식음(제과·휴게음식·일반음식점 마지막).
+`sorted()` 순서에서는 숙박이 일반음식점(67만 행) 뒤라 4시간 run 몇 번으로는 닿지 못했다(42종 중
+12종만 적재). 업종 선택(run_config)도 이 순서로 정렬된다. 업종 선택 run은 다른 업종의 Feature를
+은퇴시키지 않는다 — Dagster 경로는 snapshot 부재 은퇴를 하지 않고, 봉인은 전 업종·완료 run만 찍는다.
 
 ## 11. provider_sync_state cursor
 
