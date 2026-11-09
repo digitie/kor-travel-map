@@ -275,6 +275,17 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
     # 관광지 ↔ MOIS 관광사업체(01000000).
     assert client.pairs[3][0].dataset_key == "datagokr_tourist_attractions"
     assert client.pairs[3][1].categories == ("01000000",)
+    # 전통시장 쌍은 위치가 아니라 내용으로 찾는다(다른 PR이 pair를 더해도 깨지지 않게, #1459).
+    market_pairs = {
+        (right.provider, right.dataset_key, right.categories)
+        for left, right, _include_auto_merge in client.pairs
+        if left.provider == "data.go.kr-standard"
+        and left.dataset_key == "datagokr_traditional_markets"
+    }
+    assert market_pairs == {
+        ("python-mois-api", None, ("05050000", "05030000")),
+        ("data.go.kr-standard", "datagokr_tourist_attractions", ()),
+    }
     assert client.siblings == []
 
     dedup_output = result.output_for_node("refresh_dedup_candidates")

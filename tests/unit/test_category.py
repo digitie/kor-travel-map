@@ -1,8 +1,8 @@
 """``kortravelmap.category`` 단위 테스트 (PR#18 - ADR-023 이전 + ADR-027 적용).
 
 검증 항목:
-- 총 147건 (기존 144 + 등대 1건 + 여객선터미널 1건)
-- depth별 통계 (sentinel 1 / Tier1 7 / Tier2 36 / Tier3 74 / Tier4 29)
+- 총 148건 (기존 144 + 등대 1건 + 여객선터미널 1건 + 전통시장 1건)
+- depth별 통계 (sentinel 1 / Tier1 7 / Tier2 37 / Tier3 74 / Tier4 29)
 - Tier 1 enum 8개 (00 sentinel + 01~07)
 - ADR-027 신규 3건 (LODGING_MOUNTAIN_SHELTER + KNPS + KFS)
 - ADR-027 maki = ``shelter`` (3건 모두)
@@ -31,13 +31,13 @@ from kortravelmap.category import (
     mapbox_maki_icon_or_none,
 )
 
-# ── 147 카탈로그 ─────────────────────────────────────────────────────────
+# ── 148 카탈로그 ─────────────────────────────────────────────────────────
 
 
 @pytest.mark.unit
 def test_total_definitions_count() -> None:
-    """기존 145 + 축제·행사 1건 + 여객선터미널 1건 = 147."""
-    assert len(PLACE_CATEGORY_DEFINITIONS) == 147
+    """기존 145 + 축제·행사 1건 + 여객선터미널 1건 + 전통시장 1건 = 148."""
+    assert len(PLACE_CATEGORY_DEFINITIONS) == 148
 
 
 @pytest.mark.unit
@@ -50,7 +50,7 @@ def test_depth_distribution() -> None:
     assert depth_counts == {
         0: 1,   # sentinel UNCLASSIFIED
         1: 7,   # Tier 1 (01~07, 00 제외)
-        2: 36,  # Tier 2 (원본 33 + ADR-027 1 + 행사 1 + 여객선터미널 1)
+        2: 37,  # Tier 2 (원본 33 + ADR-027 1 + 행사 1 + 여객선터미널 1 + 전통시장 1)
         3: 74,  # Tier 3 (기존 73 + 등대)
         4: 29,  # Tier 4
     }
@@ -66,15 +66,15 @@ def test_tier1_enum_count() -> None:
 
 @pytest.mark.unit
 def test_unique_codes() -> None:
-    """147건 모두 고유한 code."""
+    """148건 모두 고유한 code."""
     codes = [c.code for c in PLACE_CATEGORY_DEFINITIONS]
-    assert len(codes) == len(set(codes)) == 147
+    assert len(codes) == len(set(codes)) == 148
 
 
 @pytest.mark.unit
 def test_by_code_lookup() -> None:
-    """`PLACE_CATEGORY_BY_CODE` lookup 147 entries."""
-    assert len(PLACE_CATEGORY_BY_CODE) == 147
+    """`PLACE_CATEGORY_BY_CODE` lookup 148 entries."""
+    assert len(PLACE_CATEGORY_BY_CODE) == 148
     for category in PLACE_CATEGORY_DEFINITIONS:
         assert PLACE_CATEGORY_BY_CODE[category.code] is category
 
@@ -189,9 +189,9 @@ def test_category_path_and_label() -> None:
 
 @pytest.mark.unit
 def test_iter_categories_all() -> None:
-    """`iter_categories()` 기본은 active_only=True (147건 모두 active)."""
+    """`iter_categories()` 기본은 active_only=True (148건 모두 active)."""
     all_categories = list(iter_categories())
-    assert len(all_categories) == 147
+    assert len(all_categories) == 148
 
 
 @pytest.mark.unit
@@ -256,3 +256,14 @@ def test_place_category_frozen() -> None:
     # dataclass frozen 위반은 dataclasses.FrozenInstanceError (AttributeError 서브클래스).
     with pytest.raises((AttributeError, TypeError)):
         cat.code = "modified"  # type: ignore[misc]
+
+
+@pytest.mark.unit
+def test_traditional_market_tier2() -> None:
+    """`05.07 전통시장` — 전국전통시장표준데이터의 place 분류(편의 > 전통시장)."""
+    market = get_category(PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET)
+    assert PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET.value == "05070000"
+    assert market.depth == 2
+    assert market.parent_code == PlaceCategoryCode.CONVENIENCE
+    assert category_path("05070000") == ("편의", "전통시장")
+    assert mapbox_maki_icon_for_category("05070000") == "shop"

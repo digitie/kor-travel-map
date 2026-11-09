@@ -248,6 +248,31 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
             "categories": ["01000000"],
         },
     },
+    # 전통시장(data.go.kr-standard, 05070000) ↔ MOIS 대규모점포(large_scale_retail_stores).
+    # MOIS는 업태 '시장'인 대규모점포도 백화점(05050000) 기본값으로, 대형마트는 05030000으로
+    # 적재한다. 범주가 다르므로 점수 상한은 0.80(이름 0.45 + 거리 0.35) — 자동 병합 없이
+    # manual_review로만 큐에 오른다(#1459).
+    {
+        "left": {
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_traditional_markets",
+        },
+        "right": {
+            "provider": "python-mois-api",
+            "categories": ["05050000", "05030000"],
+        },
+    },
+    # 전통시장 ↔ 관광지 표준데이터 — 관광지로 지정된 시장(예: 관광시장)이 양쪽에 있을 수 있다.
+    {
+        "left": {
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_traditional_markets",
+        },
+        "right": {
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_tourist_attractions",
+        },
+    },
 )
 """op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.
 

@@ -109,6 +109,10 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_place_standard_special_streets_job",
         "feature_place_standard_special_streets",
     ),
+    _handler(
+        "feature_place_standard_traditional_markets_job",
+        "feature_place_standard_traditional_markets",
+    ),
     _handler("feature_place_khoa_beaches_job", "feature_place_khoa_beaches"),
     _handler("feature_place_transport_airports_job", "feature_place_transport_airports"),
     _handler(

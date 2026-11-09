@@ -41,6 +41,7 @@ from kortravelmap.providers.standard_data import (
     parking_lots_to_bundles,
     special_streets_to_bundles,
     tourist_attractions_to_bundles,
+    traditional_markets_to_bundles,
 )
 
 from kortravelmap.dagster import assets, resources
@@ -251,6 +252,43 @@ _GOLDEN: dict[str, list[tuple[_Convert, list[Any]]]] = {
                         "instt_nm": "부산광역시 중구",
                     },
                 )
+            ],
+        )
+    ],
+    "standard_traditional_markets": [
+        (
+            _standard(traditional_markets_to_bundles),
+            [
+                _datagokr(
+                    "PublicTraditionalMarket",
+                    {
+                        "mrktNm": "망원시장",
+                        "mrktType": "상설장",
+                        "rdnmadr": "서울특별시 마포구 망원로8길 7",
+                        "lnmadr": "서울특별시 마포구 망원동 486-37",
+                        "mrktEstblCycle": "매일",
+                        "latitude": "37.55715742",
+                        "longitude": "126.9059507",
+                        "storNumber": "82",
+                        "trtmntPrdlst": "농산물+축산물+가공식품+가정용품+음식점",
+                        "useGcct": "",
+                        "pblicToiletYn": "Y",
+                        "prkplceYn": "Y",
+                        "estblYear": "2006",
+                        "phoneNumber": "02-335-3591",
+                        "referenceDate": "2025-11-10",
+                        "instt_code": "3130000",
+                    },
+                ),
+                _datagokr(
+                    "PublicTraditionalMarket",
+                    {
+                        "mrktNm": "함열시장",
+                        "rdnmadr": "전북특별차치도 익산시 함열읍 2길 8",
+                        "lnmadr": "전북특별차치도 익산시 와리 565-26",
+                        "storNumber": "약 50",
+                    },
+                ),
             ],
         )
     ],

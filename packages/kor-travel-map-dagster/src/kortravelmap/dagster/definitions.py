@@ -85,6 +85,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "standard_tourist_attractions",
     "standard_parking_lots",
     "standard_special_streets",
+    "standard_traditional_markets",
     "datagokr_file_data_records",
     "datagokr_file_data_dataset_key",
     "khoa_beaches",
