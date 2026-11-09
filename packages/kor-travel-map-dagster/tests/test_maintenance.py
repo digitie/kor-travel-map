@@ -286,6 +286,34 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         ("python-mois-api", None, ("05050000", "05030000")),
         ("data.go.kr-standard", "datagokr_tourist_attractions", ()),
     }
+    # TourAPI 관광지(#1459) — 기존 관광 원천 여덟과 비교한다. 양쪽 상한은 1만 2천 건 전체를
+    # 덮는다(기본 5,000이면 최근 갱신분만 비교된다).
+    tourapi = [
+        (left, right)
+        for left, right, _include_auto_merge in client.pairs
+        if left.provider == "python-visitkorea-api"
+    ]
+    assert {(right.provider, right.dataset_key) for _left, right in tourapi} == {
+        ("python-krheritage-api", None),
+        ("python-knps-api", None),
+        ("python-krforest-api", None),
+        ("python-khoa-api", None),
+        ("data.go.kr-standard", "datagokr_tourist_attractions"),
+        ("data.go.kr-standard", "datagokr_museums"),
+        ("python-mcst-api", None),
+        ("python-mois-api", None),
+    }
+    assert {left.dataset_key for left, _right in tourapi} == {"visitkorea_tourist_attractions"}
+    assert {left.limit for left, _right in tourapi} == {20000}
+    assert {right.limit for _left, right in tourapi} == {20000}
+    by_right = {right.provider: (left, right) for left, right in tourapi if not right.dataset_key}
+    assert by_right["python-khoa-api"][0].categories == ("01050100",)
+    heritage_left = by_right["python-krheritage-api"][0].categories
+    assert heritage_left
+    assert all(code.startswith("0107") for code in heritage_left)
+    mois_left, mois_right = by_right["python-mois-api"]
+    assert mois_left.categories == mois_right.categories
+    assert "01080400" not in mois_right.categories  # 체육시설은 TourAPI 관광지가 아니다
     assert client.siblings == []
 
     dedup_output = result.output_for_node("refresh_dedup_candidates")

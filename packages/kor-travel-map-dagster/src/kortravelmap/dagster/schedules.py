@@ -52,6 +52,7 @@ from .assets import (
     feature_place_transport_fuel_stations,
     feature_place_transport_rail_stations,
     feature_place_transport_rest_areas,
+    feature_place_visitkorea_tourist_attractions,
     feature_route_krforest_dulle_trails,
     feature_route_krforest_mountain_trails,
 )
@@ -383,6 +384,14 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         # 원천은 연간 갱신이지만 기관별 등록분이 매월 초 전국 단위로 병합된다.
         cron_schedule="40 5 5 * *",
         description="전국전통시장표준데이터 place Feature 월 1회 적재.",
+    ),
+    FeatureLoadScheduleSpec(
+        asset=feature_place_visitkorea_tourist_attractions,
+        job_name="feature_place_visitkorea_tourist_attractions_job",
+        schedule_name="feature_place_visitkorea_tourist_attractions_daily_schedule",
+        # 목록은 매일 바뀌고(수정·신규), 상세는 run마다 600건씩 채운다(#1459).
+        cron_schedule="45 4 * * *",
+        description="TourAPI 관광지(contentTypeId 12) place Feature 매일 적재.",
     ),
     *_datagokr_file_data_schedule_specs(),
     FeatureLoadScheduleSpec(

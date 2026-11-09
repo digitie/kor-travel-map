@@ -2924,6 +2924,10 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 
 - [ ] 재개 조건: 높이 작업면을 쓰는 Feature 지도 화면 설계(고정 70dvh stage 대체)와 698px 기준 e2e 재설계안을 소유자가 승인한다.
 
+## T-TOURAPI-LOAD
+
+441 배포 뒤: 첫 적재 성공(≈12,560) · #1459 관광지 검색 확인 · schedule 켜기.
+
 ## T-MARKET-LOAD
 
 #1459 전통시장 공백 + 지역특화거리 prod 0행. 코드(provider PR#23 `649fa1a`·PR#24 `9922dd2`, Map migration 439)는 머지로 들어가고, 아래가 참이면 닫는다.

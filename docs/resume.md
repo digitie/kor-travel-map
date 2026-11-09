@@ -1,3 +1,7 @@
+## 2026-11-09 — #1459 TourAPI 관광지
+
+- 다음: 회전에 Map SHA를 묶는다(alembic 441) → 관광지 job 1회(preview 먼저) → #1459 목록 검색 확인 → daily schedule 켜기 → #1459 댓글. 판정은 acceptance `T-TOURAPI-LOAD`.
+
 ## 2026-11-09 — 전통시장·특화거리 공개 파일
 
 - 다음: 배포 회전에 이 Map SHA를 묶는다 → 두 dataset `POST /v1/ops/pipeline/requests`(preview 먼저) → 건수(1,393·274)·#1459 시장 검색 → 두 schedule 켜기. 판정 acceptance `T-MARKET-LOAD`.

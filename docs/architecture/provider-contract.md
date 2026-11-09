@@ -94,7 +94,7 @@ system
 | dataset_key | provider | 의미 |
 |------------|----------|------|
 | `visitkorea_festival_events` | python-visitkorea-api | 축제/행사 검색 |
-| `visitkorea_tourist_attractions` | python-visitkorea-api | 관광지 |
+| `visitkorea_tourist_attractions` | python-visitkorea-api | 관광지(contentTypeId 12) 1차 place, 자연키 contentid, 상세는 run 예산 600(#1459, `docs/etl/visitkorea-tourist-attraction-etl.md`) |
 | `mois_license_features_bulk` | python-mois-api | 인허가 영업중 snapshot (place 승격) |
 | `mois_license_features_history` | python-mois-api | 이력조회 기반 incremental |
 | `mois_license_features_closed` | python-mois-api | 폐업/취소 처리 |
@@ -460,7 +460,7 @@ def test_no_provider_wrapper_classes():
 | python-krforest-api | `@70814c9` | `ForestSpatialFeature`, `MountainWeather`, `WildfireRiskForecast`, `LandslideForecastIssue` | PR#9 merge | C05A nested SHP route + C05B typed observed weather + C05C V2 fire index + C05D issue lifecycle. provider PR#9 merge SHA 고정. `70814c9`(2026-09-19): 표준데이터 gateway가 `{header, body}` 래퍼를 벗어 산림 표준데이터 3종이 파싱에서 전멸한 것을 좁은 가지로 수용(provider PR#15) |
 | python-opinet-api | `@dcfb41a` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
 | python-krex-api | `@d153f3c` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음. 휴게소 유가의 `X`/`-`/`N/A` 가격 sentinel은 결측값으로 파싱. `realTimeSMSList`와 0 이상 `count`가 없는 HTTP 200 본문은 authoritative empty가 아니라 `KrexParseError`(krex#11) |
-| python-visitkorea-api | `@151ef90` | (후속 PR — enrichment) | — | ADR-042: 축제는 enrichment 2차 |
+| python-visitkorea-api | `@151ef90` | `VisitKoreaFestivalItem`(enrichment) + `VisitKoreaAttractionItem`(#1459) | — | ADR-042: 축제는 enrichment 2차. 관광지(12)는 1차 place(`TourItem`, 신 분류 lclsSystm) |
 | python-knps-api | `@aa9acd67` | `KnpsPointRecord`/`KnpsGeometryRecord` | PR#25 | keyless file-only, geo extra 필수. PR18 대피소 중첩 SHP Point·ID/geometry 지문·손상 입력 사전 검증. ADR-028 amendment 2026-05-25. `16e3954`: trails vertex 행 → 코스 단위 LINESTRING 조립(provider PR#10) |
 | python-krheritage-api | `@e1b346f` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380), `manager`→`owner` (8cde3af) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event 자연키는 provider `HeritageEvent.occurrence_key`와 같은 `sn::starts_on::ends_on`(`seqNo`는 프로그램 id — 회차마다 반복), `sn` 빈 값은 `title::starts_on::place` fallback. `e1b346f` **상향(2026-10-22, provider #12 0.1.1)**: event 필드를 live 응답(`seqNo`/`sDate`/`eDate`/`subDesc`/`contact`/`sido`/`gugun` …)에 맞춤 — 그 전 핀은 전부 None을 내 prod 첫 적재가 5306/5306 `missing_address`였다. Map 변환부는 속성 → 원 payload 키 순으로 읽어 핀 전후 같은 값을 낸다. `6076b52`: 목록 응답 `result` 레벨 복합키/좌표 병합(live detail 100% 실패 수정) + 결측 key row skip(provider #5/PR#6, T-212e). `8cde3af` **상향(2026-09-11)**: `HeritageDetail.manager` 삭제 → 부모 `HeritageSummary.owner`(동일 alias `ccbaAdmin`)로 일원화 — Protocol은 이미 `owner`로 재결박돼 있다. 보류 사유였던 `iter_all` 종료 조건 퇴화(`page * size >= total` → `len(items) < page_size`, 결측 key row skip과 겹쳐 조용한 절단)는 `545a016` **상향(2026-09-11, PR#10)**으로 닫혔다 — declared total로 끝내되 **행이 아니라 페이지 수**로 센다(`page >= ceil(total/page_size)`). Map이 위임을 끊어 되찾은 권위(`fetch_krheritage_items`가 `search.list`를 `dagster/provider_pagination`의 `iter_paginated_items`로 소진)는 **그대로 둔다**. GIS 경계(geom) 보강은 후속. media → RustFS |
 | python-krairport-api | `@fe2143b` | (Sprint 3 PR) | — | 공항 운항·날씨 |

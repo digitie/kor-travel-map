@@ -5,6 +5,7 @@ from datetime import datetime
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Final, cast
 
+from kortravelmap.category import PlaceCategoryCode
 from kortravelmap.infra.consistency import DEDUP_PENDING_WARN_THRESHOLD
 from kortravelmap.infra.dedup_refresh_repo import (
     DEDUP_REFRESH_DEFAULT_LIMIT,
@@ -201,6 +202,54 @@ _CACHE_TARGET_SNAPSHOT_GC_CONFIG_SCHEMA: Final[dict[str, object]] = {
 }
 
 
+def _category_codes(*prefixes: str) -> list[str]:
+    """``PlaceCategoryCode`` 중 접두사가 맞는 코드(dedup scope ``categories``는 정확 일치다)."""
+    return sorted(code.value for code in PlaceCategoryCode if code.value.startswith(prefixes))
+
+
+_TOURAPI_ATTRACTIONS: Final[Mapping[str, object]] = {
+    "provider": "python-visitkorea-api",
+    "dataset_key": "visitkorea_tourist_attractions",
+}
+#: TourAPI 관광지 dedup은 **범주로 묶어** 비교한다(#1459). 비교가 O(left×right) 순수 Python이라
+#: 1만 2천 건 전체를 큰 provider와 곱하면 n150에서 refresh 한 번이 수십 분이 된다. 같은 실세계
+#: 관광지는 범주도 같은 묶음에 들어간다(이름 0.45 + 거리 0.35 + 범주 0.20 — 범주가 다르면
+#: 0.80이 상한이라 어차피 자동 병합되지 않는다).
+_TOURAPI_HERITAGE: Final = _category_codes("0107")
+_TOURAPI_NATURE: Final = _category_codes("0102")
+_TOURAPI_FOREST: Final = sorted({*_category_codes("0103"), *_category_codes("0303")})
+#: MCST 파일데이터 중 관광지와 겹칠 수 있는 범주(관광·문화시설·국가유산·자연명소·테마파크).
+#: 음식점·숙박 슬러그는 뺀다.
+_TOURAPI_MCST_OVERLAP: Final = sorted(
+    {PlaceCategoryCode.TOURISM.value, *_category_codes("0101", "0104", "0105", "0107")}
+)
+_TOURAPI_BEACH: Final = [PlaceCategoryCode.TOURISM_NATURE_BEACH.value]
+#: MOIS 관광 슬러그 중 TourAPI 관광지와 겹칠 수 있는 범주(관광사업체·박물관·전통사찰·유람선·
+#: 관광궤도·유원시설). 체육시설(01080400)·골프장은 수가 많고 TourAPI 관광지가 아니라 뺀다.
+_TOURAPI_MOIS_OVERLAP: Final = sorted(
+    {
+        PlaceCategoryCode.TOURISM.value,
+        *_category_codes("0101", "0104"),
+        PlaceCategoryCode.TOURISM_HERITAGE_TEMPLE.value,
+        PlaceCategoryCode.TOURISM_ACTIVITY_RAIL_CABLE.value,
+        PlaceCategoryCode.TOURISM_ACTIVITY_CRUISE.value,
+    }
+)
+_TOURAPI_SCOPE_LIMIT: Final = 20000
+"""TourAPI 쌍의 양쪽 scope 상한 — 기본 5,000이면 최근 갱신분만 비교된다(국가유산·MOIS 관광도
+5,000을 넘을 수 있다). 비교 비용은 ``core.dedup``의 상한 가지치기(범주가 다르면 28 m 밖은
+이름을 보지 않는다)와 이름 정규화 캐시가 묶는다."""
+
+
+def _tourapi_pair(
+    left_categories: Sequence[str] | None, right: Mapping[str, object]
+) -> Mapping[str, object]:
+    left: dict[str, object] = {**_TOURAPI_ATTRACTIONS, "limit": _TOURAPI_SCOPE_LIMIT}
+    if left_categories is not None:
+        left["categories"] = list(left_categories)
+    return {"left": left, "right": {**right, "limit": _TOURAPI_SCOPE_LIMIT}}
+
+
 DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     # KNPS 문화시설/사찰(cultural_resources) ↔ 국가유산(krheritage) — 동일 사찰·문화재가
     # 양 provider에 중복 적재될 수 있다(ADR-034 6단계 메모). 실제 중복만 threshold(0.65)
@@ -273,6 +322,31 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
             "dataset_key": "datagokr_tourist_attractions",
         },
     },
+    # TourAPI 관광지(python-visitkorea-api, #1459) ↔ 기존 관광 원천. 자동 병합은 공용
+    # 임계값(0.85) 이상 — 이름·거리·범주가 모두 강할 때만이고, 나머지는 manual_review다.
+    _tourapi_pair(_TOURAPI_HERITAGE, {"provider": "python-krheritage-api"}),
+    _tourapi_pair(_TOURAPI_NATURE, {"provider": "python-knps-api"}),
+    _tourapi_pair(_TOURAPI_FOREST, {"provider": "python-krforest-api"}),
+    _tourapi_pair(_TOURAPI_BEACH, {"provider": "python-khoa-api"}),
+    _tourapi_pair(
+        None,
+        {"provider": "data.go.kr-standard", "dataset_key": "datagokr_tourist_attractions"},
+    ),
+    # 관광지(12)에는 문화시설(0104) 코드가 거의 없다 — 박물관·전시관은 TourAPI에서 건물·기념물
+    # 등으로 온다. 그래서 왼쪽을 0104로만 좁히지 않고 관광·문화·자연명소·국가유산 묶음으로 둔다
+    # (범주가 다르면 자동 병합은 없고 28 m 안만 검토). 자연경관·숙박·온천 행은 비교하지 않는다.
+    _tourapi_pair(
+        _TOURAPI_MCST_OVERLAP,
+        {"provider": "data.go.kr-standard", "dataset_key": "datagokr_museums"},
+    ),
+    _tourapi_pair(
+        _TOURAPI_MCST_OVERLAP,
+        {"provider": "python-mcst-api", "categories": _TOURAPI_MCST_OVERLAP},
+    ),
+    _tourapi_pair(
+        _TOURAPI_MOIS_OVERLAP,
+        {"provider": "python-mois-api", "categories": _TOURAPI_MOIS_OVERLAP},
+    ),
 )
 """op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.
 

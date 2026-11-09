@@ -68,6 +68,9 @@ _CONVERTERS: dict[str, _Converter] = {
         "item",
         "datagokr.models.PublicTraditionalMarket",
     ),
+    "visitkorea_tourist_attractions": _Converter(
+        "visitkorea_attractions", "_attraction_to_bundle", "item", "visitkorea.models.TourItem"
+    ),
 }
 _RAW_ROW_RESOURCES = frozenset({"datagokr_file_data_records"})
 

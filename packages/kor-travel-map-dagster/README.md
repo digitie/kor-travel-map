@@ -90,6 +90,7 @@ provider record resource:
 - `standard_traditional_markets`
 - `khoa_beaches`
 - `visitkorea_festival_events`
+- `visitkorea_tourist_attractions`
 - `kor_travel_concierge_youtube_features`
 
 현재 기본 `defs`는 provider record key마다 guard 또는 live resource를 등록한다. code
@@ -125,6 +126,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `standard_special_streets` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |
 | `khoa_beaches` | `python-khoa-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `visitkorea_festival_events` | `python-visitkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `visitkorea_tourist_attractions` | `python-visitkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `kor_travel_concierge_youtube_features` | `kor-travel-concierge` | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL`, `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | 없음(DB `read` 키 발급) |
 
 ### kor-travel-transport export (ADR-106)

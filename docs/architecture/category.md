@@ -388,6 +388,7 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | `data.go.kr-standard` (주차장) | `06010000` TRANSPORT_PARKING | standard-data-feature-etl.md |
 | `data.go.kr-standard` (전통시장) | `05070000` CONVENIENCE_TRADITIONAL_MARKET | standard-data-feature-etl.md §7.6 |
 | `data.go.kr-standard` (관광지) | `01000000` 트리 다양 (provider 매핑별) | standard-data-feature-etl.md |
+| `python-visitkorea-api` (관광지, contentTypeId 12) | 신 분류 `lclsSystm1~3` → `0102`·`0103`·`0104`·`0105`·`0107`·`0108`·`03030000` 등 | visitkorea-tourist-attraction-etl.md §3 |
 | `data.go.kr-standard` (관광길) | route — `RouteDetail.route_type`으로 분류, category는 보조 | standard-data-feature-etl.md |
 | 공중화장실 (후속) | `05060000` CONVENIENCE_TOILET | (별도 dataset) |
 | `python-kma-api` (기상특보) | `99000000` sentinel (place 아님 — weather anchor) | kma-weather-etl.md |

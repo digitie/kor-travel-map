@@ -73,6 +73,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_standard_parking_lots",
         "feature_place_standard_special_streets",
         "feature_place_standard_traditional_markets",
+        "feature_place_visitkorea_tourist_attractions",
         "feature_place_datagokr_file_data",
         "feature_place_khoa_beaches",
         "feature_place_transport_airports",
@@ -235,6 +236,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "khoa_beaches",
     "transport_airports",
     "visitkorea_festival_events",
+    "visitkorea_tourist_attractions",
     "kor_travel_concierge_youtube_features",
     "mcst_culture_records",
 }

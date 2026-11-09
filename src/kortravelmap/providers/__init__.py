@@ -29,6 +29,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``standard_data`` | data.go.kr 표준데이터 | 표준데이터 5종 |
 | ``transport_reference_places`` | kor-travel-transport | 철도역·여객선 항구 place(ADR-120) |
 | ``visitkorea`` | python-visitkorea-api | TourAPI enrichment |
+| ``visitkorea_attractions`` | python-visitkorea-api | TourAPI 관광지 place(#1459) |
 
 **표에 없는 모듈** — 변환 모듈이 아니라서 위 표에 넣지 않는다:
 
@@ -258,6 +259,12 @@ from kortravelmap.providers.visitkorea import (
     VisitKoreaFestivalItem,
     festival_to_enrichment_links,
 )
+from kortravelmap.providers.visitkorea_attractions import (
+    DATASET_KEY_VISITKOREA_ATTRACTIONS,
+    VisitKoreaAttractionItem,
+    attraction_category,
+    tourapi_attractions_to_bundles,
+)
 
 __all__ = [
     # standard_data (PR#34, ADR-042 — datagokr 표준데이터)
@@ -337,6 +344,11 @@ __all__ = [
     "festival_to_enrichment_links",
     "VISITKOREA_PROVIDER_NAME",
     "DATASET_KEY_FESTIVAL_EVENTS",
+    # visitkorea 관광지 (#1459 — TourAPI contentTypeId 12 → place 1차)
+    "VisitKoreaAttractionItem",
+    "attraction_category",
+    "tourapi_attractions_to_bundles",
+    "DATASET_KEY_VISITKOREA_ATTRACTIONS",
     # krforest (T-RV-53, ADR-034 8단계 — 휴양림/수목원, MOIS-sibling)
     "RecreationForestItem",
     "ForestSpatialItem",

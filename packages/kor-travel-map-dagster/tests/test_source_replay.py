@@ -18,7 +18,7 @@ import asyncio
 import json
 from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, fields
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
@@ -43,6 +43,7 @@ from kortravelmap.providers.standard_data import (
     tourist_attractions_to_bundles,
     traditional_markets_to_bundles,
 )
+from kortravelmap.providers.visitkorea_attractions import tourapi_attractions_to_bundles
 
 from kortravelmap.dagster import assets, resources
 from kortravelmap.dagster.definitions import defs
@@ -96,10 +97,58 @@ def _datagokr(model: str, payload: dict[str, Any]) -> _Api:
     return _Api(model, payload)
 
 
+@dataclass(frozen=True)
+class _TourItem:
+    """python-visitkorea-api ``TourItem`` 한 행 — fetch 파서가 만드는 **파이썬 타입**(aware
+    datetime·float)으로 둔다. replay는 jsonb를 거친 문자열에서 되살리므로 타입 왕복이 검사된다.
+    상세(overview·homepage)는 asset이 ``model_copy``로 얹는 것과 같은 자리다."""
+
+    fields: dict[str, Any]
+
+
+_KST = timezone(timedelta(hours=9))
+
+
+def _tour_item(content_id: str, **fields: Any) -> _TourItem:
+    base: dict[str, Any] = {
+        "content_id": content_id,
+        "content_type_id": "12",
+        "title": f"관광지 {content_id}",
+        "addr1": "부산광역시 중구 용두산길 37-30",
+        "addr2": None,
+        "area_code": "6",
+        "sigungu_code": "16",
+        "cat1": None,
+        "cat2": None,
+        "cat3": None,
+        "l_dong_regn_cd": "26",
+        "l_dong_signgu_cd": "110",
+        "lcls_systm1": "VE",
+        "lcls_systm2": "VE01",
+        "lcls_systm3": "VE010200",
+        "created_time": datetime(2011, 1, 5, 9, 0, tzinfo=_KST),
+        "modified_time": datetime(2026, 3, 2, 10, 0, 1, tzinfo=_KST),
+        "tel": "051-661-9393",
+        "first_image": "http://tong.visitkorea.or.kr/a.jpg",
+        "first_image2": "http://tong.visitkorea.or.kr/b.jpg",
+        "map_x": 129.0324096,
+        "map_y": 35.1011207,
+        "map_level": "6",
+        "distance_m": None,
+        "zipcode": "48946",
+        "copyright_division_code": "Type1",
+        "show_flag": None,
+    }
+    return _TourItem({**base, **fields})
+
+
 def _materialize(record: Any) -> Any:
     if isinstance(record, _Api):
         datagokr = pytest.importorskip("datagokr")
         return getattr(datagokr, record.model).model_validate(record.payload)
+    if isinstance(record, _TourItem):
+        visitkorea = pytest.importorskip("visitkorea")
+        return visitkorea.TourItem.model_validate({**record.fields, "raw": {"contentid": "x"}})
     return record
 
 
@@ -289,6 +338,20 @@ _GOLDEN: dict[str, list[tuple[_Convert, list[Any]]]] = {
                         "storNumber": "약 50",
                     },
                 ),
+            ],
+        )
+    ],
+    "visitkorea_tourist_attractions": [
+        (
+            _standard(tourapi_attractions_to_bundles),
+            [
+                _tour_item(
+                    "1277679",
+                    overview="부산타워는 120m 높이의 전망대이다.<br>야경이 좋다.",
+                    homepage='<a href="https://www.visitbusan.net">visitbusan</a>',
+                ),
+                _tour_item("128164", addr1="부산광역시 수영구 민락동", map_x=129.1186),
+                _tour_item("2788875", overview="", homepage="", copyright_division_code="Type3"),
             ],
         )
     ],

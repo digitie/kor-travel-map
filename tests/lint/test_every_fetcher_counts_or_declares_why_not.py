@@ -118,7 +118,9 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_standard_special_streets",
         "fetch_standard_tourist_attractions",
         "fetch_standard_traditional_markets",
+        "fetch_visitkorea_attraction_details",
         "fetch_visitkorea_festival_events",
+        "fetch_visitkorea_tourist_attractions",
         # ADR-114 2단계 — weather Map export(W1·W2·W3·W5)를 Valkey 상태로 받는 fetcher. 시도마다
         # `_weather_request_once`가 센다.
         "fetch_weather_current",
@@ -189,7 +191,9 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: `_transport_request_once`로 센다(410 재읽기의 재요청까지).
 #: 2026-11-09 31 → 32: 전통시장 표준데이터(`fetch_standard_traditional_markets`, #1459) —
 #: (2026-11-09 공개 파일로 옮긴 뒤에는 `_iter_datagokr_standard_file`이 header·페이지마다 센다.)
-_EXPECTED_FULLY_COUNTED: int = 32
+#: 2026-11-09 32 → 34: TourAPI 관광지(#1459) — 목록(`fetch_visitkorea_tourist_attractions`)은
+#: `aiter_paginated_items`가, 상세(`fetch_visitkorea_attraction_details`)는 호출마다 센다.
+_EXPECTED_FULLY_COUNTED: int = 34
 
 
 def _module_trees() -> dict[str, ast.Module]:
