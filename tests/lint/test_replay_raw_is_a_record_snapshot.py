@@ -62,6 +62,12 @@ _CONVERTERS: dict[str, _Converter] = {
     "standard_special_streets": _Converter(
         "standard_data", "_special_street_to_bundle", "item", "datagokr.models.PublicSpecialStreet"
     ),
+    "standard_traditional_markets": _Converter(
+        "standard_data",
+        "_traditional_market_to_bundle",
+        "item",
+        "datagokr.models.PublicTraditionalMarket",
+    ),
 }
 _RAW_ROW_RESOURCES = frozenset({"datagokr_file_data_records"})
 

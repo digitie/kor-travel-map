@@ -31,6 +31,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_standard_museums,
     fetch_standard_parking_lots,
     fetch_standard_tourist_attractions,
+    fetch_standard_traditional_markets,
     fetch_visitkorea_festival_events,
 )
 from kortravelmap.dagster.provider_pagination import (
@@ -187,6 +188,7 @@ class _FakeDataGoKrClient:
         self.tourist_attraction = _FakeMuseumArtService([object(), object()])
         self.parking = _FakeMuseumArtService([object(), object(), object(), object()])
         self.special_street = _FakeStandardService([object(), object()])
+        self.traditional_market = _FakeStandardService([object(), object(), object()])
         _FakeDataGoKrClient.instances.append(self)
 
     async def aclose(self) -> None:
@@ -1258,6 +1260,25 @@ def test_standard_parking_lots_fetch_yields_and_closes(
     assert len(records) == 4
     assert fake.instances[0].closed is True
 
+
+def test_standard_traditional_markets_raises_when_credential_missing() -> None:
+    settings = KorTravelMapSettings(data_go_kr_service_key=None)
+
+    agen = fetch_standard_traditional_markets(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        asyncio.run(agen.__anext__())
+
+
+def test_standard_traditional_markets_fetch_yields_and_closes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_datagokr(monkeypatch)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    records = asyncio.run(_acollect(fetch_standard_traditional_markets(settings)))
+
+    assert len(records) == 3
+    assert fake.instances[0].closed is True
 
 async def test_krheritage_fetch_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)

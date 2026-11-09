@@ -115,6 +115,7 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_standard_parking_lots",
         "fetch_standard_special_streets",
         "fetch_standard_tourist_attractions",
+        "fetch_standard_traditional_markets",
         "fetch_visitkorea_festival_events",
         # ADR-114 2단계 — weather Map export(W1·W2·W3·W5)를 Valkey 상태로 받는 fetcher. 시도마다
         # `_weather_request_once`가 센다.
