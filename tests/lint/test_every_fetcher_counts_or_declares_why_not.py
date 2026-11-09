@@ -183,7 +183,9 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 2026-10-26 29 → 30: Rest 단일응답도 기존 transport 시도별 counter를 공유한다.
 #: 2026-10-28 30 → 29: ADR-117이 Rest 스냅샷 진입점(`fetch_transport_rest_area_snapshot`)을
 #: SH 스냅샷 경로와 함께 지웠다 — 코드가 없어졌다(완전 계측이었다).
-_EXPECTED_FULLY_COUNTED: int = 29
+#: 2026-11-09 29 → 30: 전통시장 표준데이터(`fetch_standard_traditional_markets`, #1459) —
+#: 공용 `aiter_paginated_items`로 페이지마다 센다.
+_EXPECTED_FULLY_COUNTED: int = 30
 
 
 def _module_trees() -> dict[str, ast.Module]:
