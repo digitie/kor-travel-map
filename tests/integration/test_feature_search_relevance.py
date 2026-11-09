@@ -292,6 +292,26 @@ async def test_exact_named_airport_ranks_before_a_tourism_row_that_only_contains
     assert labels.index("seolhaewon") < labels.index("yangyang_parking"), labels
 
 
+async def test_lodging_named_after_a_place_does_not_jump_the_tourism_spot(
+    migrated_session: AsyncSession,
+) -> None:
+    """목적지 이름 일치는 이름 전체로 잰다 — 숙박 "신라스테이 해운대"의 지역 꼬리("해운대")는
+    관광지 "해운대해수욕장"을 넘지 못한다(첫 낱말을 뗀 일치는 관광에만 쓴다, ADR-120 리뷰)."""
+    ids = {
+        "haeundae_beach": await _place(
+            migrated_session, "haeundae_beach", name="해운대해수욕장", category="01050100",
+            lon=129.1604, lat=35.1587,
+        ),
+        "haeundae_hotel": await _place(
+            migrated_session, "haeundae_hotel", name="신라스테이 해운대", category="03010000",
+            lon=129.1590, lat=35.1610, place_kind="hotel",
+        ),
+    }
+    await migrated_session.flush()
+    labels = await _search_ids(migrated_session, "해운대", ids)
+    assert labels == ["haeundae_beach", "haeundae_hotel"], labels
+
+
 async def test_exact_named_food_does_not_jump_the_category_groups(
     migrated_session: AsyncSession,
 ) -> None:

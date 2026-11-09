@@ -198,6 +198,36 @@ async def test_station_grouping_does_not_depend_on_input_order() -> None:
     assert len(expected) == 1  # 네 행 모두 anchor에서 500 m 안이다.
 
 
+async def test_a_new_line_does_not_re_mint_an_existing_station() -> None:
+    """환승역에 자연키가 더 작은 노선이 새로 들어와도 이미 적재된 자연키가 anchor로 남는다."""
+    old = _rail(natural_key="서울교통공사|1호선|133|서울역", name="서울역",
+                latitude=37.5546, longitude=126.9706)
+    [first] = await rail_stations_to_bundles([old], fetched_at=FETCHED_AT)
+    new_line = _rail(natural_key="공항철도|공항철도|A01|서울역", name="서울역",
+                     latitude=37.5536, longitude=126.9698)
+    without_history = await rail_stations_to_bundles([old, new_line], fetched_at=FETCHED_AT)
+    assert without_history[0].feature.provider_natural_key == "공항철도::공항철도::A01::서울역"
+    [kept] = await rail_stations_to_bundles(
+        [old, new_line],
+        fetched_at=FETCHED_AT,
+        existing_natural_keys={first.feature.provider_natural_key},
+    )
+    assert kept.feature.provider_natural_key == first.feature.provider_natural_key
+    assert kept.feature.detail is not None
+    assert kept.feature.detail.facility_info["line_count"] == 2
+
+
+async def test_a_member_within_the_radius_of_any_member_joins_the_station() -> None:
+    """반경은 anchor 한 점이 아니라 묶음의 어느 구성원에서든 잰다 — 큰 환승역이 갈리지 않는다."""
+    rows = [
+        _rail(natural_key=f"운영사{i}|{i}호선|{i}|김포공항", name="김포공항",
+              latitude=37.5620, longitude=126.8010 + i * 0.004)
+        for i in range(3)  # 이웃 사이 약 350 m, 양 끝 약 700 m
+    ]
+    bundles = await rail_stations_to_bundles(rows, fetched_at=FETCHED_AT)
+    assert len(bundles) == 1
+
+
 async def test_same_name_stations_far_apart_stay_separate() -> None:
     # 2호선 신촌과 경의중앙선 신촌 — 약 700 m 떨어진 별개 역.
     line2 = _rail(

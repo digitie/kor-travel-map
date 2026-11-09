@@ -37,19 +37,23 @@ ADR-114는 transport의 **현재값**(유가·돌발)을 Valkey로 옮기고 PG 
    `source_kind=internal`): `transport_rail_stations`·`transport_ferry_ports`. job·schedule·큐
    handler·fixture preview는 기존 transport place와 같은 모양이다. schedule은 주 1회(월 04:30·
    04:40 KST)이고 모든 Map schedule처럼 기본 STOPPED다 — transport가 export를 켠 뒤 운영이 첫
-   적재를 돌리고 켠다.
+   적재를 돌리고 켠다. operation은 켜 둔다: 그 전에 큐(geo 릴리스 계획·갱신 요청)가 job을 부르면
+   503 retryable 실패로 아무것도 적재·퇴역하지 않는다(소음은 받아들인다).
 3. **계약은 런타임 검증으로 지킨다**(내부 소비자 — 핀·vendoring 없음). Map은 T3 envelope을
    엄격히 읽는다: 페이지마다 같은 `snapshot_id`·`total_count`, `meta.item_count` = 그 페이지 행 수,
    끝에서 행 합계 = `total_count`, 0건 아님, cursor 순환 없음, 200 본문의 `source_status=failed`·
    `source_collected_at` 부재는 계약 위반. `stale`은 transport가 내는 **마지막 완결 성공 집합**이라
    받아들이고 경고만 남긴다(저변동 기준정보 — 옛 집합 그대로이므로 지울 것을 새로 만들지 않는다).
    503(꺼짐·완결 성공 없음)과 410(snapshot 만료)은 아무것도 적재·퇴역하지 않는 retryable 실패다.
-4. **퇴역은 완전 snapshot reconcile이다**(`authoritative_snapshot_complete=True`). transport가
-   빼면 다음 성공 적재가 그 Feature를 퇴역한다. 빈 집합은 위 3의 0건 거부로 막는다.
+4. **퇴역은 완전 snapshot reconcile이다**(`authoritative_snapshot_complete=True`,
+   `retire_absent_from_snapshot=True` — 등산로·둘레길과 같은 경로). transport가 빼면 다음 성공
+   적재가 그 Feature를 퇴역한다. 빈 집합은 위 3의 0건 거부로 막는다. 페이지 도중 snapshot이
+   만료(410)되면 첫 페이지부터 한 번 다시 읽고, 옛 snapshot 페이지와 섞지 않는다.
 5. **철도역은 역마다 하나다.** 원천(KRIC dataset 1294)은 운영기관·노선마다 한 행이다. 이름 키
-   (공백 제거·끝의 "역" 제거)가 같고 anchor에서 500 m 안이면 같은 역으로 묶는다. 행은 transport
-   자연키 순으로 보고 anchor는 묶음에서 자연키가 가장 작은 행이다 — 입력 순서와 무관하다.
-   Feature 자연키는 anchor의 transport 자연키(`|` → `::`, ADR-009)다. 좌표 없는 행은 Feature를
+   (공백 제거·끝의 "역" 제거)가 같고 묶음의 어느 구성원에서든 500 m 안이면 같은 역으로 묶는다.
+   행은 transport 자연키 순으로 본다 — 입력 순서와 무관하다. Feature 자연키는 anchor의 transport
+   자연키(`|` → `::`, ADR-009)이고, anchor는 **이미 적재된 Feature의 자연키인 구성원**(없으면
+   자연키가 가장 작은 구성원)이다 — 환승역에 노선이 새로 생겨도 역 Feature가 다시 주조되지 않는다. 좌표 없는 행은 Feature를
    만들지 않는다(#1459 §4). 묶음에 국가철도 운영사(한국철도공사·코레일·에스알) 노선이 있으면
    기차역(06030300), 아니면 지하철역(06030200)이다.
 6. **항구는 항구마다 하나**이고 자연키는 transport 자연키(`{source}:{port_id}`)다. 새 분류
@@ -63,8 +67,11 @@ ADR-114는 transport의 **현재값**(유가·돌발)을 Valkey로 옮기고 PG 
 9. **검색 순위에 "목적지 이름 일치" 자리를 더한다**(`/v1/features/search`, cursor v4). 순서는
    일치 단계 → bbox → **목적지 이름 일치** → 분류 그룹 → 이름 일치 → 분류 구체성. 목적지는 검색
    그룹 `SEARCH_DESTINATION_GROUP_MAX`(=1) 이하 — 관광·숙박·온천·역·휴게소·공항·여객선터미널이다.
-   이름이 검색어와 같은 목적지는 분류 그룹보다 앞이다("양양국제공항" → 공항, "서울역" → 역이
-   "서울역사박물관"보다 앞). 식음·주차처럼 목적지가 아닌 분류의 이름 일치는 종전대로 그룹 뒤에서만
+   이름 **전체**가 검색어와 같은 목적지는 분류 그룹보다 앞이다("양양국제공항" → 공항, "서울역" →
+   역이 "서울역사박물관"보다 앞). 첫 낱말을 뗀 일치("안동 도산서원")는 관광(그룹 0)에만 이 자리를
+   준다 — 숙박 "신라스테이 해운대"가 "해운대"로 "해운대해수욕장" 앞에 서지 않는다. 이름이 정확히
+   같은 목적지끼리는 분류 그룹이 가른다(이름이 "서울역"인 관광 행이 있으면 역보다 앞이다 — 그
+   중복은 결정 10의 dedup 검토 몫이다). 식음·주차처럼 목적지가 아닌 분류의 이름 일치는 종전대로 그룹 뒤에서만
    가른다 — "하회마을"이라는 서울 음식점이 관광지보다 앞서지 않는다(436 결정 유지).
 10. **중복**: 같은 dataset 안은 5·6이 막는다. 다른 출처(MCST·영상 후보의 "서울역" 관광 행 등)와는
     자동 병합하지 않는다 — 기존 cross-provider dedup 검토 큐(ADR-016)가 다룬다. 공항은 transport가
@@ -77,8 +84,11 @@ ADR-114는 transport의 **현재값**(유가·돌발)을 Valkey로 옮기고 PG 
   단양 등)은 transport에 원천이 없어 여전히 빠진다 — transport 쪽 원천 추가가 필요하다(Codex).
 - transport의 `ferry_terminal_references`(터미널 이름·주소, 좌표 없음)는 export가 없다. 이번은
   항구(`/ferry-ports`)만이다. 버스터미널(`/bus-terminals`)은 범위 밖이다(후속).
-- 철도역 anchor 행이 원천에서 빠지면 그 역은 새 자연키로 다시 주조된다(옛 Feature 퇴역 + 새
-  Feature). 역 기준정보는 저변동이라 드물다.
+- 철도역 anchor 행 자체가 원천에서 빠지면(운영기관·노선·역번호·역명이 바뀌면) 그 역은 새 자연키로
+  다시 주조된다(옛 Feature 퇴역 + 새 Feature). 노선 추가로는 바뀌지 않는다.
+- 분류는 운영기관으로 가른다 — 한국철도공사가 운영하는 수도권 전철 역(선릉·구로 등)도 기차역이다.
+  검색 그룹은 둘 다 1이라 순위에는 영향이 없다.
+- Valkey 휴게소 상태(`/v1/service/transport/rest-areas`)도 같은 표시 이름을 낸다(스키마 불변).
 - 검색 cursor v3은 배포 뒤 VERSION_UNSUPPORTED다(순위 값의 뜻이 바뀌었다).
 
 ## 기각한 대안

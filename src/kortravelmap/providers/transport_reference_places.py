@@ -14,12 +14,14 @@
 경의중앙선 …) 그대로 적재하면 "서울역" 검색에 같은 역이 네 번 나온다. 묶는 규칙은 이렇다.
 
 1. 좌표가 없는 행은 Feature를 만들지 않는다(지도·근처·동선에 쓸 수 없다 — #1459 §4).
-2. 이름 비교 키(공백 제거, 끝의 "역" 제거)가 같고, 묶음 기준 행(anchor)에서
-   :data:`RAIL_STATION_CLUSTER_RADIUS_M` 안이면 같은 역이다. 행은 transport 자연키 순으로 보고,
-   묶음의 anchor는 그 묶음에서 자연키가 가장 작은 행이다 — 입력 순서와 무관하게 같은 결과다.
-3. Feature 자연키는 anchor의 transport 자연키다(``|``는 ``::``로 바꾼다 — ADR-009가 ``|``를
-   id 구분자로 예약했다). anchor 행이 원천에서 빠지면 그 역은 새 자연키로 다시 주조되고 옛
-   Feature는 완전 snapshot reconcile이 퇴역시킨다(드문 일이다 — 역 기준정보는 저변동이다).
+2. 이름 비교 키(공백 제거, 끝의 "역" 제거)가 같고, 묶음의 **어느 구성원**에서든
+   :data:`RAIL_STATION_CLUSTER_RADIUS_M` 안이면 같은 역이다. 행은 transport 자연키 순으로 본다 —
+   입력 순서와 무관하게 같은 결과다.
+3. Feature 자연키는 묶음 anchor의 transport 자연키다(``|``는 ``::``로 바꾼다 — ADR-009가 ``|``를
+   id 구분자로 예약했다). anchor는 **이미 적재된 Feature의 자연키인 구성원**이 있으면 그것(여럿이면
+   가장 작은 것), 없으면 자연키가 가장 작은 구성원이다. 그래서 환승역에 노선이 새로 생겨 더 작은
+   자연키가 들어와도 역 Feature가 다시 주조되지 않는다. anchor 행 자체가 원천에서 빠질 때만 새
+   자연키로 다시 주조되고 옛 Feature는 완전 snapshot reconcile이 퇴역시킨다.
 4. 이름이 같아도 반경 밖이면 다른 역이다(예: 2호선 신촌과 경의중앙선 신촌은 약 700 m 떨어진
    별개 역이다).
 
@@ -170,9 +172,20 @@ def _distance_m(a: Coordinate, b: Coordinate) -> float:
 @dataclass
 class _RailCluster:
     name_key: str
-    anchor: TransportRailStation
-    coord: Coordinate
-    members: list[TransportRailStation] = field(default_factory=list)
+    members: list[tuple[TransportRailStation, Coordinate]] = field(default_factory=list)
+
+    def near(self, coord: Coordinate) -> bool:
+        return any(
+            _distance_m(member_coord, coord) <= RAIL_STATION_CLUSTER_RADIUS_M
+            for _, member_coord in self.members
+        )
+
+    def anchor(self, existing: frozenset[str]) -> tuple[TransportRailStation, Coordinate]:
+        """이미 적재된 자연키인 구성원 → 없으면 자연키가 가장 작은 구성원(members는 자연키 순)."""
+        for member, coord in self.members:
+            if _map_natural_key(member.natural_key) in existing:
+                return member, coord
+        return self.members[0]
 
 
 def _is_national_rail(operator_name: str | None) -> bool:
@@ -198,11 +211,11 @@ def _cluster_rail_stations(items: Iterable[TransportRailStation]) -> list[_RailC
         if coord is None or not name_key:
             continue
         for cluster in by_name.get(name_key, ()):
-            if _distance_m(cluster.coord, coord) <= RAIL_STATION_CLUSTER_RADIUS_M:
-                cluster.members.append(item)
+            if cluster.near(coord):
+                cluster.members.append((item, coord))
                 break
         else:
-            cluster = _RailCluster(name_key=name_key, anchor=item, coord=coord, members=[item])
+            cluster = _RailCluster(name_key=name_key, members=[(item, coord)])
             clusters.append(cluster)
             by_name.setdefault(name_key, []).append(cluster)
     return clusters
@@ -321,24 +334,28 @@ async def rail_stations_to_bundles(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    existing_natural_keys: Iterable[str] = (),
 ) -> list[FeatureBundle]:
     """transport 철도역 행 → 역마다 place ``FeatureBundle`` 하나(모듈 docstring의 묶음 규칙).
 
-    좌표는 묶음 anchor의 좌표이고, 행정구역은 그 좌표를 Map geo로 역지오코딩해 채운다. 노선별
-    원천 행은 ``facility_info.lines``와 raw에 남는다.
+    ``existing_natural_keys``는 이 dataset에 이미 적재된(active) Feature의 자연키다 — anchor를
+    고정해 역 Feature가 노선 추가로 다시 주조되지 않게 한다. 좌표는 anchor의 좌표이고, 행정구역은
+    그 좌표를 Map geo로 역지오코딩해 채운다. 노선별 원천 행은 ``facility_info.lines``와 raw에
+    남는다.
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    existing = frozenset(existing_natural_keys)
     bundles: list[FeatureBundle] = []
     for cluster in _cluster_rail_stations(items):
-        anchor = cluster.anchor
-        members = sorted(cluster.members, key=lambda member: member.natural_key)
+        anchor, anchor_coord = cluster.anchor(existing)
+        members = [member for member, _ in cluster.members]
         national = any(_is_national_rail(member.operator_name) for member in members)
         category = RAIL_STATION_TRAIN_CATEGORY if national else RAIL_STATION_SUBWAY_CATEGORY
         lines = [_rail_line(member) for member in members]
         operators = sorted({m.operator_name for m in members if m.operator_name})
         line_names = sorted({m.line_name for m in members if m.line_name})
         display_name = rail_station_display_name(anchor.name)
-        geo = await _reverse(cluster.coord, geocoder)
+        geo = await _reverse(anchor_coord, geocoder)
         bundles.append(
             _bundle(
                 dataset_key=DATASET_KEY_RAIL_STATIONS,
@@ -346,7 +363,7 @@ async def rail_stations_to_bundles(
                 natural_key=_map_natural_key(anchor.natural_key),
                 name=display_name,
                 category=category,
-                coord=cluster.coord,
+                coord=anchor_coord,
                 address=_address(geo),
                 place_kind=_RAIL_PLACE_KIND,
                 marker_color=_RAIL_MARKER_COLOR,

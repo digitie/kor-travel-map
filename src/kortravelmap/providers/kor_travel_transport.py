@@ -76,6 +76,7 @@ __all__ = [
     "TransportReferencePage",
     "TransportRestArea",
     "TransportRestAreaFuelPrice",
+    "TransportSnapshotExpired",
     "parse_active_incident_set",
     "parse_airport",
     "parse_airports",
@@ -180,6 +181,15 @@ class TransportExportNotCurrent(TransportExportFailure):
 
     failure_kind = "transport_not_current"
     retryable = True
+
+
+class TransportSnapshotExpired(TransportExportNotCurrent):
+    """기준정보 snapshot(transport T3, 15분 TTL)이 페이지를 다 읽기 전에 만료됐다(410).
+
+    첫 페이지부터 다시 읽으면 transport가 새 snapshot을 연다 — retryable이다.
+    """
+
+    failure_kind = "transport_snapshot_expired"
 
 
 class TransportExportMalformed(TransportExportFailure):

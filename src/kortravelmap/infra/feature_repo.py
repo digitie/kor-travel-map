@@ -1979,12 +1979,21 @@ compacted AS (
 ranked AS (
     -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
     -- 검색어와 같다(공백 무시).
+    -- 목적지 이름 일치(ADR-120): 이름 전체가 검색어와 같은 목적지. 첫 낱말을 뗀 나머지는 관광
+    -- (그룹 0)에만 쓴다 — "신라스테이 해운대"(숙박)가 "해운대"로 관광지 앞에 서지 않게 한다.
     SELECT
         compacted.*,
         (
           compact_name = CAST(:q_compact AS text)
           OR compact_tail = CAST(:q_compact AS text)
-        ) IS TRUE AS name_exact
+        ) IS TRUE AS name_exact,
+        (
+          search_group <= {_search_destination_group_max()}
+          AND (
+            compact_name = CAST(:q_compact AS text)
+            OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
+          )
+        ) IS TRUE AS destination_exact
     FROM compacted
 ),
 candidates AS (
@@ -2021,7 +2030,7 @@ candidates AS (
             END * {_SEARCH_RANK_BBOX_WEIGHT}
           -- 목적지 이름 일치: 이름 일치이고 분류가 목적지 그룹이면 0 — 분류 그룹보다 앞(ADR-120).
           + CASE
-              WHEN name_exact AND search_group <= {_search_destination_group_max()} THEN 0
+              WHEN destination_exact THEN 0
               ELSE 1
             END * {_SEARCH_RANK_DESTINATION_EXACT_WEIGHT}
           -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널 → 식음 → 그 밖

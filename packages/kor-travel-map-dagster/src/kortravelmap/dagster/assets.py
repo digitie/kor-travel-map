@@ -357,6 +357,22 @@ async def feature_place_transport_rest_areas(
     return await run_tracked_feature_asset(context, run_feature_place_transport_rest_areas)
 
 
+async def _current_source_entity_ids(
+    context: AssetExecutionContext, provider: str, dataset_key: str
+) -> frozenset[str]:
+    """dataset에 이미 적재된(primary Feature active) source entity id — 읽기 전용.
+
+    client가 이 읽기를 모르면(테스트 대역 등) 빈 집합이다 — 그때 철도역 anchor는 자연키 최소
+    규칙으로만 정해진다(첫 적재와 같다).
+    """
+    client = _resource_object(context, "kor_travel_map_client", default=None)
+    read = getattr(client, "read_current_source_records", None)
+    if not callable(read):
+        return frozenset()
+    records, _expected = await read(provider=provider, dataset_key=dataset_key)
+    return frozenset(record.source_entity_id for record in records)
+
+
 async def run_feature_place_transport_rail_stations(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -373,6 +389,9 @@ async def run_feature_place_transport_rail_stations(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
+        existing_natural_keys=await _current_source_entity_ids(
+            context, KOR_TRAVEL_TRANSPORT_PROVIDER_NAME, DATASET_KEY_RAIL_STATIONS
+        ),
     )
     return await _load(
         context,
@@ -380,6 +399,9 @@ async def run_feature_place_transport_rail_stations(
         dataset_key=DATASET_KEY_RAIL_STATIONS,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        # transport가 뺀 역(또는 anchor가 바뀐 옛 자연키)은 이번 완전 snapshot에 없으므로 퇴역한다.
+        source_entity_type="rail_station",
+        retire_absent_from_snapshot=True,
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
@@ -415,6 +437,8 @@ async def run_feature_place_transport_ferry_ports(
         dataset_key=DATASET_KEY_FERRY_PORTS,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        source_entity_type="ferry_port",
+        retire_absent_from_snapshot=True,
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
 
