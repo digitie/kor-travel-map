@@ -37,6 +37,8 @@ from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_POINT_DATASET_KEYS,
 )
+from kortravelmap.providers.visitkorea import VISITKOREA_PROVIDER_NAME
+from kortravelmap.providers.visitkorea_attractions import DATASET_KEY_VISITKOREA_ATTRACTIONS
 from kortravelmap.providers.standard_data import (
     DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
@@ -84,6 +86,7 @@ from .provider_fetchers import (
     fetch_transport_rail_stations,
     fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
+    fetch_visitkorea_tourist_attractions,
 )
 from .source_replay import (
     SOURCE_MODE_CONFIG_SCHEMA,
@@ -92,6 +95,7 @@ from .source_replay import (
     datagokr_model_from_raw,
     raw_mapping_from_raw,
     source_mode,
+    visitkorea_tour_item_from_raw,
 )
 
 __all__ = [
@@ -344,6 +348,14 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
         note="visitkorea는 datagokr 축제(1차) 적재 후 enrichment(2차)로 매칭/적재된다.",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="visitkorea_tourist_attractions",
+        provider_package="python-visitkorea-api",
+        dataset_key="visitkorea_tourist_attractions",
+        setting_names=("data_go_kr_service_key",),
+        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="TourAPI 관광지(contentTypeId 12) 1차 place — 상세는 asset이 예산 안에서 받는다(#1459).",
     ),
     ProviderRecordResourceSpec(
         resource_key="kor_travel_concierge_youtube_features",
@@ -599,6 +611,7 @@ REPLAY_FROM_RAW: dict[str, Callable[[dict[str, Any]], Any]] = {
     "standard_special_streets": datagokr_model_from_raw("PublicSpecialStreet"),
     "standard_traditional_markets": datagokr_model_from_raw("PublicTraditionalMarket"),
     "datagokr_file_data_records": raw_mapping_from_raw,
+    "visitkorea_tourist_attractions": visitkorea_tour_item_from_raw,
 }
 """``source_mode=replay``를 받는 records resource → 저장된 ``raw_data``를 fetch와 같은 record로
 되살리는 함수(ADR-109 결정 7, T-GR-08). core ``REPLAY_RECORDS_RESOURCES``의 resource 집합과 같다
@@ -1053,6 +1066,19 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["visitkorea_festival_events"] = (
     build_provider_record_live_resource(
         _VISITKOREA_FESTIVAL_EVENTS_SPEC,
         fetch_visitkorea_festival_events,
+    )
+)
+
+_VISITKOREA_TOURIST_ATTRACTIONS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "visitkorea_tourist_attractions"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["visitkorea_tourist_attractions"] = (
+    build_provider_record_live_resource(
+        _VISITKOREA_TOURIST_ATTRACTIONS_SPEC,
+        fetch_visitkorea_tourist_attractions,
+        replay=ReplaySource(VISITKOREA_PROVIDER_NAME, DATASET_KEY_VISITKOREA_ATTRACTIONS),
     )
 )
 

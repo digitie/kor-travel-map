@@ -91,6 +91,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "khoa_beaches",
     "transport_airports",
     "visitkorea_festival_events",
+    "visitkorea_tourist_attractions",
     "kor_travel_concierge_youtube_features",
     "provider_upstream_retry_budget_minimum",
     "provider_upstream_retry_budget_percent",

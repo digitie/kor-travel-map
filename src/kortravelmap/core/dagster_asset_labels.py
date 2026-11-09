@@ -23,6 +23,7 @@ DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
     "feature_place_standard_parking_lots": "주차장",
     "feature_place_standard_special_streets": "지역특화거리",
     "feature_place_standard_traditional_markets": "전통시장",
+    "feature_place_visitkorea_tourist_attractions": "관광지(TourAPI)",
     "feature_place_datagokr_file_data": "공공 파일 장소",
     "feature_place_khoa_beaches": "해수욕장",
     "feature_place_transport_airports": "공항",

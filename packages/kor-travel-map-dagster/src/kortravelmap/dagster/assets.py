@@ -1,5 +1,6 @@
 """kor-travel-map 소유 provider Feature 적재 Dagster asset."""
 
+import dataclasses
 import inspect
 from collections.abc import (
     AsyncIterable,
@@ -143,6 +144,12 @@ from kortravelmap.providers.standard_data import (
 from kortravelmap.providers.transport_reference_places import (
     ferry_ports_to_bundles,
     rail_stations_to_bundles,
+)
+from kortravelmap.providers.visitkorea import VISITKOREA_PROVIDER_NAME
+from kortravelmap.providers.visitkorea_attractions import (
+    DATASET_KEY_VISITKOREA_ATTRACTIONS,
+    plan_attraction_details,
+    tourapi_attractions_to_bundles,
 )
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -1240,6 +1247,120 @@ async def feature_place_standard_traditional_markets(
     )
 
 
+#: TourAPI ``detailCommon2`` run 예산 — 오퍼레이션 일일 한도 1,000의 60%(다른 data.go.kr
+#: dataset의 최악 sweep과 같은 비율, ``docs/etl/upstream-quota.md`` §2). 첫 적재는 상세 없이
+#: 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다(12,560건 ≈ 21 run).
+VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
+
+
+def _with_detail(record: Any, overview: str, homepage: str) -> Any:
+    """record에 상세를 얹은 사본(provider ``TourItem``은 frozen pydantic, 테스트 대역은 dataclass)."""
+    copy = getattr(record, "model_copy", None)
+    if callable(copy):
+        return copy(update={"overview": overview, "homepage": homepage})
+    return dataclasses.replace(record, overview=overview, homepage=homepage)
+
+
+async def _attach_attraction_details(
+    context: AssetExecutionContext, source: object, records: Sequence[Any]
+) -> list[Any]:
+    """저장 상세를 이어 쓰고, 예산 안에서 새·수정 항목의 상세를 받아 record에 얹는다.
+
+    저장값은 dataset의 current 원본(``raw_data``)이다 — 목록 ``modified_time``이 같으면 상세를
+    다시 받지 않는다. 상세 받기가 한도·장애로 멈추면 남은 항목은 상세 없이(``None``) 적재되고
+    다음 run이 다시 고른다.
+    """
+    stored: dict[str, Mapping[str, Any]] = {}
+    client = _resource_object(context, "kor_travel_map_client", default=None)
+    read = getattr(client, "read_current_source_records", None)
+    if callable(read):
+        current, _expected = await read(
+            provider=VISITKOREA_PROVIDER_NAME, dataset_key=DATASET_KEY_VISITKOREA_ATTRACTIONS
+        )
+        stored = {record.source_entity_id: record.raw_data for record in current}
+    fetch_details = getattr(source, "fetch_details", None)
+    plan = plan_attraction_details(
+        records,
+        stored,
+        budget=VISITKOREA_ATTRACTION_DETAIL_BUDGET if callable(fetch_details) else 0,
+    )
+    fetched: Mapping[str, tuple[str, str]] = (
+        await fetch_details(plan.fetch) if callable(fetch_details) and plan.fetch else {}
+    )
+    context.log.info(
+        f"TourAPI 관광지 상세: 재사용 {len(plan.reuse)} · 요청 {len(plan.fetch)} · "
+        f"수신 {len(fetched)} · 예산 밖 {plan.deferred}"
+    )
+    attached: list[Any] = []
+    for record in records:
+        content_id = str(getattr(record, "content_id", "") or "").strip()
+        pair = fetched.get(content_id) or plan.reuse.get(content_id)
+        attached.append(record if pair is None else _with_detail(record, *pair))
+    return attached
+
+
+async def run_feature_place_visitkorea_tourist_attractions(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    """TourAPI 관광지(contentTypeId 12) 목록을 place Feature로 적재한다(#1459).
+
+    전국 1만 2천여 건을 한 snapshot으로 받아 ``retire_absent_from_snapshot``으로 적재한다 —
+    목록에서 빠진 관광지는 은퇴한다. 0행 목록은 "없음"이 아니라 "못 받았음"이라 은퇴 전에
+    실패시킨다. 상세(overview·homepage)는 :func:`_attach_attraction_details`가 예산 안에서 얹는다.
+    replay는 저장 원본(상세 포함)을 그대로 쓰고 은퇴·봉인·sync 성공을 기록하지 않는다.
+    """
+    source = await _resource_value(context, "visitkorea_tourist_attractions")
+    await prefetch_replay(source)
+    replay = is_replay(source)
+    fetched_at = await _fetched_at(context)
+    records = await _record_list(context, "visitkorea_tourist_attractions")
+    if not records and not replay:
+        raise Failure(
+            description=(
+                "TourAPI 관광지 목록이 0행이다 — 기존 관광지를 전부 은퇴시키지 않도록 적재를 "
+                "멈춘다(서비스키 활용신청·원천 상태를 확인할 것)."
+            )
+        )
+    if not replay:
+        records = await _attach_attraction_details(context, source, records)
+    bundles = apply_replay_provenance(
+        source,
+        await _transform_reusing_geo(
+            context,
+            tourapi_attractions_to_bundles,
+            records,
+            fetched_at=fetched_at,
+            reverse_geocoder=_reverse_geocoder(context),
+        ),
+    )
+    ensure_replay_complete(source)
+    return await _load(
+        context,
+        provider=VISITKOREA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_VISITKOREA_ATTRACTIONS,
+        bundles=bundles,
+        authoritative_snapshot_complete=not replay,
+        source_entity_type="tourist_attraction",
+        retire_absent_from_snapshot=not replay,
+        record_sync_state=not replay,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
+    )
+
+
+@asset(
+    group_name="features_place",
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"visitkorea_tourist_attractions"},
+    retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
+)
+async def feature_place_visitkorea_tourist_attractions(
+    context: AssetExecutionContext,
+) -> DagsterFeatureLoadResult:
+    return await run_tracked_feature_asset(
+        context, run_feature_place_visitkorea_tourist_attractions
+    )
+
+
 async def run_feature_place_datagokr_file_data(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -1518,6 +1639,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_standard_parking_lots,
     feature_place_standard_special_streets,
     feature_place_standard_traditional_markets,
+    feature_place_visitkorea_tourist_attractions,
     feature_place_datagokr_file_data,
     feature_place_khoa_beaches,
     feature_place_transport_airports,

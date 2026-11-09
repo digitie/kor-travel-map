@@ -101,6 +101,8 @@ jobs:
           pip install -c docker/constraints-dagster.txt "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@649fa1a1b3e24f851a4f550a297a2d8ba5185c6c"
           # 실제 MCST 기본 factory와 native 승인형 다운로드를 MockTransport로 검사한다.
           pip install -c docker/constraints-dagster.txt "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@00a78dfdba5a1a87d87c5238ef1566621989b1ae"
+          # TourAPI 관광지 replay golden(`TourItem` 실모델, #1459).
+          pip install -c docker/constraints-dagster.txt "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@151ef90f07842863b986048a98a66a75d8e9d63d"
 
       - name: Run kor-travel-map-dagster unit tests
         env:

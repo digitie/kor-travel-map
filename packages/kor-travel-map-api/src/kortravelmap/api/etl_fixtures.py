@@ -67,6 +67,7 @@ from kortravelmap.providers.standard_data import (
     tourist_attractions_to_bundles,
     traditional_markets_to_bundles,
 )
+from kortravelmap.providers.visitkorea_attractions import tourapi_attractions_to_bundles
 from kortravelmap.providers.transport_reference_places import (
     ferry_ports_to_bundles,
     rail_stations_to_bundles,
@@ -697,6 +698,66 @@ async def _convert_traditional_markets(items: Sequence[Any]) -> list[Any]:
 
 
 @dataclass(frozen=True)
+class _TourApiAttraction:
+    """`VisitKoreaAttractionItem` Protocol 준수 (provider `TourItem`)."""
+
+    content_id: str | None
+    content_type_id: str | None
+    title: str | None
+    addr1: str | None
+    addr2: str | None
+    zipcode: str | None
+    tel: str | None
+    first_image: str | None
+    first_image2: str | None
+    map_x: float | None
+    map_y: float | None
+    lcls_systm1: str | None
+    lcls_systm2: str | None
+    lcls_systm3: str | None
+    l_dong_regn_cd: str | None
+    l_dong_signgu_cd: str | None
+    created_time: datetime | None
+    modified_time: datetime | None
+    copyright_division_code: str | None
+    overview: str | None
+    homepage: str | None
+
+
+def _tourapi_attraction_fixture() -> Sequence[_TourApiAttraction]:
+    return [
+        _TourApiAttraction(
+            content_id="1277679",
+            content_type_id="12",
+            title="부산타워",
+            addr1="부산광역시 중구 용두산길 37-30",
+            addr2=None,
+            zipcode="48946",
+            tel=None,
+            first_image="http://tong.visitkorea.or.kr/cms/resource/00/0000000_image2_1.jpg",
+            first_image2="http://tong.visitkorea.or.kr/cms/resource/00/0000000_image3_1.jpg",
+            map_x=129.0324,
+            map_y=35.1011,
+            lcls_systm1="VE",
+            lcls_systm2="VE01",
+            lcls_systm3="VE010200",
+            l_dong_regn_cd="26",
+            l_dong_signgu_cd="110",
+            created_time=datetime(2011, 1, 5, 9, 0, tzinfo=KST),
+            modified_time=datetime(2026, 3, 2, 10, 0, tzinfo=KST),
+            copyright_division_code="Type1",
+            overview="부산 원도심 용두산공원에 있는 120m 높이의 전망대이다.",
+            homepage='<a href="https://www.visitbusan.net">https://www.visitbusan.net</a>',
+        ),
+    ]
+
+
+async def _convert_tourapi_attractions(items: Sequence[Any]) -> list[Any]:
+    bundles = await tourapi_attractions_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+@dataclass(frozen=True)
 class _Beach:
     """`OceanBeachInfoItem` Protocol 준수 (provider `OceanBeachInfo`)."""
 
@@ -979,6 +1040,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="전국전통시장표준데이터 → 전통시장 place Feature (#1459).",
         build_fixture=_traditional_market_fixture,
         convert=_convert_traditional_markets,
+    ),
+    EtlFixtureEntry(
+        provider="python-visitkorea-api",
+        dataset="visitkorea_tourist_attractions",
+        variant="FeatureBundle",
+        description="TourAPI 관광지(contentTypeId 12) → 관광지 place Feature (#1459).",
+        build_fixture=_tourapi_attraction_fixture,
+        convert=_convert_tourapi_attractions,
     ),
     EtlFixtureEntry(
         provider="python-khoa-api",

@@ -79,6 +79,7 @@ FEATURE_LOAD_JOB_OPERATION_KEYS: frozenset[str] = frozenset(
         "feature_place_transport_fuel_stations_job",
         "feature_place_transport_rail_stations_job",
         "feature_place_transport_rest_areas_job",
+        "feature_place_visitkorea_tourist_attractions_job",
         "feature_route_krforest_dulle_trails_job",
         "feature_route_krforest_mountain_trails_job",
     }
@@ -116,6 +117,7 @@ GEO_DEPENDENT_OPERATION_KEYS: frozenset[str] = frozenset(
         "feature_place_transport_fuel_stations_job",
         "feature_place_transport_rail_stations_job",
         "feature_place_transport_rest_areas_job",
+        "feature_place_visitkorea_tourist_attractions_job",
         "feature_route_krforest_dulle_trails_job",
         "feature_route_krforest_mountain_trails_job",
     }
@@ -174,6 +176,7 @@ REPLAY_RECORDS_RESOURCES: dict[str, str] = {
     "feature_place_standard_parking_lots_job": "standard_parking_lots",
     "feature_place_standard_special_streets_job": "standard_special_streets",
     "feature_place_standard_traditional_markets_job": "standard_traditional_markets",
+    "feature_place_visitkorea_tourist_attractions_job": "visitkorea_tourist_attractions",
     "feature_place_datagokr_seoul_bookstores_job": "datagokr_file_data_records",
     "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job": (
         "datagokr_file_data_records"

@@ -59,6 +59,7 @@ from .assets import (
     run_feature_place_standard_special_streets,
     run_feature_place_standard_tourist_attractions,
     run_feature_place_standard_traditional_markets,
+    run_feature_place_visitkorea_tourist_attractions,
     run_feature_place_transport_airports,
     run_feature_place_transport_ferry_ports,
     run_feature_place_transport_fuel_stations,
@@ -97,6 +98,7 @@ from .provider_fetchers import (
     fetch_transport_rail_stations,
     fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
+    fetch_visitkorea_tourist_attractions,
 )
 from .schedules import DISABLED_FEATURE_LOAD_OPERATION_KEYS
 from .upstream_requests import (
@@ -858,6 +860,14 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         run=run_feature_place_standard_traditional_markets,
         resources=_records("standard_traditional_markets", fetch_standard_traditional_markets),
         asset_key="feature_place_standard_traditional_markets",
+    ),
+    *_operation_specs(
+        "feature_place_visitkorea_tourist_attractions_job",
+        run=run_feature_place_visitkorea_tourist_attractions,
+        resources=_records(
+            "visitkorea_tourist_attractions", fetch_visitkorea_tourist_attractions
+        ),
+        asset_key="feature_place_visitkorea_tourist_attractions",
     ),
     *_operation_specs(
         "feature_place_datagokr_seoul_bookstores_job",

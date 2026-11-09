@@ -113,6 +113,10 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_place_standard_traditional_markets_job",
         "feature_place_standard_traditional_markets",
     ),
+    _handler(
+        "feature_place_visitkorea_tourist_attractions_job",
+        "feature_place_visitkorea_tourist_attractions",
+    ),
     _handler("feature_place_khoa_beaches_job", "feature_place_khoa_beaches"),
     _handler("feature_place_transport_airports_job", "feature_place_transport_airports"),
     _handler(
