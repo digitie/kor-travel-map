@@ -12,7 +12,7 @@
 | fetcher | `fetch_visitkorea_tourist_attractions` → `VisitKoreaAttractionSource` |
 | asset / job | `feature_place_visitkorea_tourist_attractions` / `…_job` |
 | schedule | `feature_place_visitkorea_tourist_attractions_daily_schedule` `45 4 * * *` KST, 기본 STOPPED |
-| migration | `441_visitkorea_attraction_dataset` (dataset·refresh/preview·dataset_wide scope) |
+| migration | `441_tourapi_attraction_dataset` (dataset·refresh/preview·dataset_wide scope) |
 | 자연키 | TourAPI `contentid` |
 | 은퇴 | `retire_absent_from_snapshot` — 목록에서 빠진 관광지는 다음 적재에서 은퇴 |
 

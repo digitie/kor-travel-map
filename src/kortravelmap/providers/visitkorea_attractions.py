@@ -474,7 +474,7 @@ async def _attraction_to_bundle(
     sido_code = (
         (geo.sido_code if geo is not None else None)
         or extract_sido_code(bjd_code)
-        or extract_sido_code(sigungu_code)
+        or (sigungu_code[:2] if sigungu_code else None)
     )
     address = Address(
         road=road_text or (geo.road if geo is not None else None),

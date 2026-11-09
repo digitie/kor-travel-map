@@ -242,7 +242,7 @@
       "down_revision": [
         "439_traditional_market_dataset"
       ],
-      "revision": "441_visitkorea_attraction_dataset"
+      "revision": "441_tourapi_attraction_dataset"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

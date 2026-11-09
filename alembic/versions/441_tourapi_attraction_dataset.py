@@ -1,6 +1,6 @@
 """TourAPI 관광지(contentTypeId 12) dataset을 provider 카탈로그에 넣는다(#1459).
 
-Revision ID: 441_visitkorea_attraction_dataset
+Revision ID: 441_tourapi_attraction_dataset
 Revises: 439_traditional_market_dataset
 
 왜 필요한가. 운영 Map에 산막이옛길·고군산군도·부산타워·광안대교·아부오름 같은 대표 관광지가
@@ -36,7 +36,7 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "441_visitkorea_attraction_dataset"
+revision: str = "441_tourapi_attraction_dataset"
 down_revision: str | Sequence[str] | None = "439_traditional_market_dataset"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -136,7 +136,7 @@ ALTER TABLE ops.application_schema_operation_receipts
         '437_feature_command_fingerprints',
         '438_transport_reference_places',
         '439_traditional_market_dataset',
-        '441_visitkorea_attraction_dataset'
+        '441_tourapi_attraction_dataset'
     ))
 """
 
@@ -156,7 +156,7 @@ def upgrade() -> None:
     existing = bind.execute(text(_DATASET_SQL)).first()
     if existing is not None:
         raise RuntimeError(
-            f"441_visitkorea_attraction_dataset: {PROVIDER}/{DATASET_KEY}가 이미 있다 "
+            f"441_tourapi_attraction_dataset: {PROVIDER}/{DATASET_KEY}가 이미 있다 "
             f"(provider_dataset_id={existing[0]}) — 일부만 적용된 DB다. 사람이 확인한 뒤 다시 돌린다."
         )
     settings = {
@@ -182,4 +182,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("441_visitkorea_attraction_dataset is forward-only")
+    raise RuntimeError("441_tourapi_attraction_dataset is forward-only")

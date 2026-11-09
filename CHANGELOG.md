@@ -3,7 +3,7 @@
 ## 2026-11-09 — TourAPI 관광지(#1459)
 
 - 한국관광공사 국문 관광정보(TourAPI) 관광지 약 1만 2천 곳을 place로 적재하는 dataset·job·매일 schedule(기본 중지)을 추가한다. 분류는 TourAPI 신 분류체계를 Map 분류로 옮기고, 설명·홈페이지는 하루 한도 안에서 조금씩 채운다. 원천에서 사라진 관광지는 다음 적재에서 은퇴한다.
-- 스키마 변경 없음(카탈로그 행만). alembic head `441_visitkorea_attraction_dataset`.
+- 스키마 변경 없음(카탈로그 행만). alembic head `441_tourapi_attraction_dataset`.
 
 ## 2026-11-09 — 지역 검색과 좌표 없는 장소(#1459)
 
