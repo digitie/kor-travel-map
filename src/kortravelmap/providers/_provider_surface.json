@@ -1628,7 +1628,7 @@
         }
       },
       "package": "knps",
-      "pinned_sha": "aa9acd67807c929cdcf8629c39f6bc0330f810d9"
+      "pinned_sha": "3b8989550a2a5aacf8bb48065a6d433572f19d62"
     },
     "python-krforest-api": {
       "classes": {
