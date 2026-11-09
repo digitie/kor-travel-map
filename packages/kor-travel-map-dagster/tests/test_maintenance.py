@@ -278,7 +278,7 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
     # 전통시장 쌍은 위치가 아니라 내용으로 찾는다(다른 PR이 pair를 더해도 깨지지 않게, #1459).
     market_pairs = {
         (right.provider, right.dataset_key, right.categories)
-        for left, right in client.pairs
+        for left, right, _include_auto_merge in client.pairs
         if left.provider == "data.go.kr-standard"
         and left.dataset_key == "datagokr_traditional_markets"
     }
