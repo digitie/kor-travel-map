@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-11-09 — 휴게소·철도역·여객선 항구·공항 검색(#1459, ADR-120)
+
+- kor-travel-transport 철도역(KRIC 1294, 노선별 행을 역 하나로)·여객선 항구 기준정보를 place Feature로 적재하는 dataset 둘을 추가한다(alembic 438, 주 1회 schedule, 기본 STOPPED). 새 분류 `06060000` 여객선터미널.
+- 휴게소 이름을 "강릉휴게소(인천방향)"꼴로 저장한다. 역은 "…역", 항구는 필요하면 " 여객선터미널"을 붙인다.
+- `/v1/features/search`: 이름이 검색어와 같은 목적지(관광·숙박·역·휴게소·공항·여객선터미널)가 분류 그룹보다 앞이다. 검색 cursor v4.
+
 ## 2026-11-07 — 저배율 지도 cluster 집계 속도(#1455)
 
 - `/v1/features/in-bounds`의 행정구역 cluster 집계가 route/area 후보를 배열 대조 대신 조인으로 묶고, 대표점을 한 번만 계산하며, route/area를 요청하지 않으면 geometry 후보를 계산하지 않는다. 응답 계약은 바뀌지 않는다.

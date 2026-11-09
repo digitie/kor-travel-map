@@ -1325,7 +1325,7 @@ def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
         page_size=10,
         include_total=False,
     )
-    assert feature_repo._SEARCH_CURSOR_VERSION == 3
+    assert feature_repo._SEARCH_CURSOR_VERSION == 4
     v1_cursor = feature_repo._encode_search_cursor_payload(
         {
             "v": 1,

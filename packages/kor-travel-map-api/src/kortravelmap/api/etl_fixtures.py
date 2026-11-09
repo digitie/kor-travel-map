@@ -31,10 +31,14 @@ from typing import Any, Final
 from kortravelmap.providers.khoa import beaches_to_bundles
 from kortravelmap.providers.kor_travel_transport import (
     DATASET_KEY_AIRPORTS,
+    DATASET_KEY_FERRY_PORTS,
     DATASET_KEY_FUEL_STATIONS,
+    DATASET_KEY_RAIL_STATIONS,
     DATASET_KEY_REST_AREAS,
     KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+    parse_ferry_port,
     parse_fuel_station,
+    parse_rail_station,
     parse_rest_area,
 )
 from kortravelmap.providers.krairport import airports_to_bundles
@@ -61,6 +65,10 @@ from kortravelmap.providers.standard_data import (
     museums_to_bundles,
     parking_lots_to_bundles,
     tourist_attractions_to_bundles,
+)
+from kortravelmap.providers.transport_reference_places import (
+    ferry_ports_to_bundles,
+    rail_stations_to_bundles,
 )
 
 __all__ = [
@@ -241,6 +249,49 @@ def _transport_rest_areas_fixture() -> Sequence[Any]:
 
 async def _convert_transport_rest_areas(items: Sequence[Any]) -> list[Any]:
     bundles = await rest_areas_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+def _transport_rail_stations_fixture() -> Sequence[Any]:
+    # 서울역 두 노선 행은 한 Feature로 묶인다(ADR-120) — preview에서 묶음 규칙이 보인다.
+    return [
+        parse_rail_station({
+            "natural_key": "서울교통공사|1호선|133|서울역", "source": "kric_file",
+            "name": "서울역", "operator_name": "서울교통공사", "line_name": "1호선",
+            "station_number": "133", "latitude": 37.5546, "longitude": 126.9706,
+            "operator_code": None, "line_code": None, "station_code": None,
+            "code_station_name": None, "code_collected_at": None, "code_active": False,
+            "mapping_method": None, "mapping_revision": "r1", "admin": None,
+        }),
+        parse_rail_station({
+            "natural_key": "한국철도공사|경의중앙선|P313|서울역", "source": "kric_file",
+            "name": "서울역", "operator_name": "한국철도공사", "line_name": "경의중앙선",
+            "station_number": "P313", "latitude": 37.5572, "longitude": 126.9696,
+            "operator_code": None, "line_code": None, "station_code": None,
+            "code_station_name": None, "code_collected_at": None, "code_active": False,
+            "mapping_method": None, "mapping_revision": "r1", "admin": None,
+        }),
+    ]
+
+
+async def _convert_transport_rail_stations(items: Sequence[Any]) -> list[Any]:
+    bundles = await rail_stations_to_bundles(list(items), fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+def _transport_ferry_ports_fixture() -> Sequence[Any]:
+    return [
+        parse_ferry_port({
+            "natural_key": "datagokr_maritime:INC", "source": "datagokr_maritime",
+            "port_id": "INC", "name": "인천항", "latitude": 37.4517, "longitude": 126.5996,
+            "location_source": "komsa", "location_point_count": 1,
+            "manual_location_revision": None, "admin": None,
+        }),
+    ]
+
+
+async def _convert_transport_ferry_ports(items: Sequence[Any]) -> list[Any]:
+    bundles = await ferry_ports_to_bundles(list(items), fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
@@ -786,6 +837,22 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="고속도로 휴게소 place Feature (transport export, ADR-106).",
         build_fixture=_transport_rest_areas_fixture,
         convert=_convert_transport_rest_areas,
+    ),
+    EtlFixtureEntry(
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_RAIL_STATIONS,
+        variant="FeatureBundle",
+        description="도시·광역철도 역 place Feature (transport 기준정보 export, ADR-120).",
+        build_fixture=_transport_rail_stations_fixture,
+        convert=_convert_transport_rail_stations,
+    ),
+    EtlFixtureEntry(
+        provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
+        dataset=DATASET_KEY_FERRY_PORTS,
+        variant="FeatureBundle",
+        description="여객선 항구 place Feature (transport 기준정보 export, ADR-120).",
+        build_fixture=_transport_ferry_ports_fixture,
+        convert=_convert_transport_ferry_ports,
     ),
     EtlFixtureEntry(
         provider="python-krforest-api",

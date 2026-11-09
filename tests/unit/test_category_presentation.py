@@ -13,6 +13,7 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
     PLACE_CATEGORY_TIER2_NAMES_BY_TIER1,
+    SEARCH_DESTINATION_GROUP_MAX,
     PlaceCategoryCode,
     PlaceCategoryTier1Code,
     category_search_group,
@@ -59,8 +60,12 @@ def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> N
         PlaceCategoryCode.TRANSPORT_REST_AREA,
         PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY_EX,
         PlaceCategoryCode.TRANSPORT_AIRPORT,
+        PlaceCategoryCode.TRANSPORT_FERRY_TERMINAL,
     ):
         assert group(destination) == lodging, destination
+        # 이름이 검색어와 같으면 분류 그룹보다 앞서는 목적지 그룹이다(ADR-120).
+        assert group(destination) <= SEARCH_DESTINATION_GROUP_MAX, destination
+    assert heritage <= SEARCH_DESTINATION_GROUP_MAX < food
     for rest in (
         PlaceCategoryCode.TRANSPORT_STOP,
         PlaceCategoryCode.TRANSPORT_STOP_BUS,

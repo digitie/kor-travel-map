@@ -7,6 +7,8 @@
 > **2026-10-02 ADR-106 — 원천이 바뀌었다.** 이 dataset은 provider 라이브러리가 아니라 kor-travel-transport `GET /v1/service/exports/*`에서 받고 provider 정체성은 `kor-travel-transport`다(`providers/kor_travel_transport.py`, migration `404`). 아래 본문 중 provider 호출·쿼터·scope·핀에 관한 서술은 이력이다. dataset key: `transport_rest_areas`·`transport_rest_area_fuel_prices`·`transport_highway_incidents`.
 >
 > **2026-10-24 ADR-114 결정 7(1단계, migration `419_retire_pg_transport_values`)** — 유가(주유소·휴게소)·고속도로 돌발의 PG 적재(asset·job·schedule·resource·preview)는 퇴역했고 그 Feature는 `retired`·`suppressed`다. 현재 값은 Valkey `transport_state_*`와 `/v1/service/transport/*`가 준다. 아래 유가·돌발 서술은 이력이다. 장소(주유소·휴게소·공항 place) 적재는 그대로다.
+>
+> **2026-11-09 ADR-120** — 휴게소 place 이름은 표시 이름(`krex.rest_area_display_name`: "강릉(인천)" → "강릉휴게소(인천방향)")으로 저장하고 원천 이름은 raw·자연키에 남는다. 휴게소·공항 place는 ADR-114 결정 7 ②의 퇴역 대상에서 빠졌다. 철도역·여객선 항구도 같은 transport 기준정보 경로다(`providers.transport_reference_places`, dataset `transport_rail_stations`·`transport_ferry_ports`).
 
 본 문서는 한국도로공사(`python-krex-api`) 휴게소 데이터 — 위치, 시설, 유가,
 기상 — 를 적재하는 ETL이다.

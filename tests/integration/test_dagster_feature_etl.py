@@ -18,6 +18,7 @@ from kortravelmap.dagster.assets import (
     run_feature_place_krheritage_items,
     run_feature_place_mois_licenses,
     run_feature_place_transport_fuel_stations,
+    run_feature_place_transport_rail_stations,
     run_feature_place_transport_rest_areas,
 )
 from kortravelmap.dagster.feature_operation_tracking import (
@@ -32,6 +33,7 @@ from kortravelmap.dto import Address, Coordinate
 from kortravelmap.providers.feature_operation_registry import (
     FEATURE_OPERATION_HANDLERS,
 )
+from kortravelmap.providers.kor_travel_transport import parse_rail_station
 from kortravelmap.settings import KorTravelMapSettings
 from tests.integration._db_cleanup import truncate_committed_test_rows
 
@@ -437,6 +439,81 @@ async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     # 상태는 Valkey(`transport_state_*`)가 든다(`tests/integration/test_valkey_transport_state.py`).
     assert feature_count == 8
     assert source_count == 8
+
+
+def _rail_row(natural_key: str, name: str, operator: str, lat: float, lon: float) -> Any:
+    parts = natural_key.split("|")
+    return parse_rail_station(
+        {
+            "natural_key": natural_key,
+            "source": "kric_file",
+            "name": name,
+            "operator_name": operator,
+            "line_name": parts[1],
+            "station_number": parts[2],
+            "latitude": lat,
+            "longitude": lon,
+            "operator_code": None,
+            "line_code": None,
+            "station_code": None,
+            "code_station_name": None,
+            "code_collected_at": None,
+            "code_active": False,
+            "mapping_method": None,
+            "mapping_revision": "r1",
+            "admin": None,
+        }
+    )
+
+
+async def _active_rail_station_names(engine: Any) -> list[tuple[str, str]]:
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT i.natural_key, f.name "
+                    "FROM provider_sync.provider_feature_identities AS i "
+                    "JOIN provider_sync.provider_datasets AS d "
+                    "  ON d.provider_dataset_id = i.provider_dataset_id "
+                    "JOIN feature.features AS f ON f.feature_id = i.feature_id "
+                    "WHERE d.dataset_key = 'transport_rail_stations' "
+                    "  AND f.lifecycle_state = 'active' ORDER BY 1"
+                )
+            )
+        ).all()
+    return [(str(row[0]), str(row[1])) for row in rows]
+
+
+async def test_rail_stations_keep_their_anchor_and_retire_what_transport_drops(
+    map_client: AsyncKorTravelMapClient,
+    migrated_engine: Any,
+) -> None:
+    """ADR-120: 노선이 새로 생겨도 이미 적재된 역 자연키가 남고, transport가 뺀 역은 퇴역한다."""
+    seoul_line1 = _rail_row(
+        "서울교통공사|1호선|133|서울역", "서울역", "서울교통공사", 37.5546, 126.9706
+    )
+    jonggak = _rail_row("서울교통공사|1호선|131|종각", "종각", "서울교통공사", 37.5702, 126.9831)
+    await _run_asset(
+        run_feature_place_transport_rail_stations,
+        map_client,
+        transport_rail_stations=[seoul_line1, jonggak],
+    )
+    assert await _active_rail_station_names(migrated_engine) == [
+        ("서울교통공사::1호선::131::종각", "종각역"),
+        ("서울교통공사::1호선::133::서울역", "서울역"),
+    ]
+    # 자연키가 더 작은 공항철도 서울역 행이 새로 들어오고 종각이 빠진다.
+    airport_line = _rail_row(
+        "공항철도|공항철도|A01|서울역", "서울역", "공항철도", 37.5536, 126.9698
+    )
+    await _run_asset(
+        run_feature_place_transport_rail_stations,
+        map_client,
+        transport_rail_stations=[airport_line, seoul_line1],
+    )
+    assert await _active_rail_station_names(migrated_engine) == [
+        ("서울교통공사::1호선::133::서울역", "서울역"),
+    ]
 
 
 async def _run_asset(

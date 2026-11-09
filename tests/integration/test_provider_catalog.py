@@ -886,7 +886,13 @@ async def test_head_retires_every_operation_of_the_transport_moved_datasets(
     assert enabled == [], f"은퇴한 dataset의 operation이 켜져 있다: {enabled}"
     assert not [e for e in retired if e.is_active]
 
-    moved = [e for e in catalog if e.provider == "kor-travel-transport"]
+    # 438(ADR-120)이 더한 기준정보 dataset은 옮겨 온 것이 아니다 — 아래 별도 검사가 잰다.
+    moved = [
+        e
+        for e in catalog
+        if e.provider == "kor-travel-transport"
+        and e.dataset_key not in _TRANSPORT_REFERENCE_PLACE_DATASETS
+    ]
     assert len(moved) == len(_TRANSPORT_RETIRED_DATASETS)
     for entry in moved:
         kinds = {op.operation_kind for op in entry.operations if op.is_enabled}
@@ -896,6 +902,40 @@ async def test_head_retires_every_operation_of_the_transport_moved_datasets(
         else:
             # ADR-114 결정 7(migration 419): 유가·돌발 PG 적재는 operation이 전부 꺼졌다.
             assert kinds == set(), (entry.dataset_key, kinds)
+
+
+_TRANSPORT_REFERENCE_PLACE_DATASETS: dict[str, str] = {
+    "transport_rail_stations": "feature_place_transport_rail_stations_job",
+    "transport_ferry_ports": "feature_place_transport_ferry_ports_job",
+}
+"""438(ADR-120)이 넣은 transport 기준정보 place dataset → refresh operation(= Dagster job)."""
+
+
+async def test_head_catalogs_the_transport_reference_place_datasets(
+    seed_session: AsyncSession,
+) -> None:
+    """438: 철도역·항구 dataset이 카탈로그에 있고, refresh·preview가 켜져 있고, refresh는
+    dataset_wide scope로 실행 가능하며, 코드의 handler binding과 같은 key다(ADR-088 — 실행 가능
+    집합의 정본은 DB 카탈로그다)."""
+
+    catalog = {
+        entry.dataset_key: entry
+        for entry in await list_provider_dataset_catalog(seed_session)
+        if entry.provider == "kor-travel-transport"
+    }
+    bound = set(feature_operation_handler_keys())
+    for dataset_key, job in _TRANSPORT_REFERENCE_PLACE_DATASETS.items():
+        entry = catalog[dataset_key]
+        assert entry.is_active, dataset_key
+        assert entry.source_kind == "internal", dataset_key
+        assert _TRANSPORT_PLACE_KIND in entry.produces, dataset_key
+        enabled = {
+            (op.operation_key, op.operation_kind) for op in entry.operations if op.is_enabled
+        }
+        assert enabled == {(job, "refresh"), (f"{job}.preview", "preview")}, (dataset_key, enabled)
+        refresh = next(op for op in entry.operations if op.operation_kind == "refresh")
+        assert "dataset_wide" in refresh.sync_scopes, (dataset_key, refresh.sync_scopes)
+        assert job in bound, job
 
 
 async def test_head_serves_no_pg_transport_price_or_notice_load(
