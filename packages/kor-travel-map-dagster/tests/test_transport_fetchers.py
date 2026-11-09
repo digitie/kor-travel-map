@@ -25,8 +25,10 @@ from kortravelmap.dagster import upstream_retry
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
     fetch_transport_airports,
+    fetch_transport_ferry_ports,
     fetch_transport_fuel_stations,
     fetch_transport_highway_incidents,
+    fetch_transport_rail_stations,
     fetch_transport_rest_area_fuel_prices,
     fetch_transport_rest_areas,
 )
@@ -383,3 +385,178 @@ def test_an_explicit_budget_under_an_open_run_scope_is_refused() -> None:
         upstream_retry.sharing_run_retry_budget(upstream_retry.RetryBudget(limit=1)),
     ):
         pass
+
+
+# -- 기준정보 snapshot export(철도역·항구, ADR-120) ---------------------------------
+
+
+def _reference_pages(name: str) -> dict[str | None, dict[str, Any]]:
+    """golden 한 장을 한 행씩 cursor 페이지로 나눈다(같은 snapshot_id·total_count)."""
+    body = _golden(name)
+    items = body["items"]
+    pages: dict[str | None, dict[str, Any]] = {}
+    cursor: str | None = None
+    for index, item in enumerate(items):
+        following = f"c{index + 1}" if index + 1 < len(items) else None
+        pages[cursor] = {
+            **body,
+            "meta": {**body["meta"], "item_count": 1},
+            "items": [item],
+            "has_more": following is not None,
+            "next_cursor": following,
+        }
+        cursor = following
+    return pages
+
+
+@pytest.mark.parametrize(
+    ("fetch", "name", "path"),
+    [
+        (fetch_transport_rail_stations, "rail-stations.json", "/v1/service/exports/rail-stations"),
+        (fetch_transport_ferry_ports, "ferry-ports.json", "/v1/service/exports/ferry-ports"),
+    ],
+)
+async def test_reference_exports_read_one_snapshot_to_the_end(
+    monkeypatch: pytest.MonkeyPatch, fetch: Any, name: str, path: str
+) -> None:
+    pages = _reference_pages(name)
+    seen = _install(
+        monkeypatch,
+        lambda request: httpx.Response(200, json=pages[request.url.params.get("cursor")]),
+    )
+    with counting_upstream_requests():
+        items = [item async for item in fetch(_settings())]
+        counted = observed_upstream_requests()
+    assert [item.natural_key for item in items] == [
+        item["natural_key"] for item in _golden(name)["items"]
+    ]
+    assert [request.url.path for request in seen] == [path] * len(items)
+    assert all(request.headers[SERVICE_TOKEN_HEADER] == TOKEN for request in seen)
+    # transport는 cursor에 limit을 결박한다 — 모든 페이지에 같은 limit.
+    assert {request.url.params["limit"] for request in seen} == {"1"}
+    assert counted == len(items)
+
+
+async def test_a_reference_snapshot_that_changes_mid_walk_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = _reference_pages("rail-stations.json")
+    pages["c1"] = {**pages["c1"], "snapshot_id": "00000000-0000-4000-8000-000000000000"}
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(200, json=pages[request.url.params.get("cursor")]),
+    )
+    with pytest.raises(TransportExportContractError, match="snapshot"):
+        _ = [item async for item in fetch_transport_rail_stations(_settings())]
+
+
+async def test_a_reference_snapshot_short_of_its_total_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = _golden("ferry-ports.json")
+    short = {**body, "total_count": 4}
+    _install(monkeypatch, lambda request: httpx.Response(200, json=short))
+    with pytest.raises(TransportExportContractError, match="total_count"):
+        _ = [item async for item in fetch_transport_ferry_ports(_settings())]
+
+
+@pytest.mark.parametrize("status", [503, 410])
+async def test_a_disabled_or_expired_reference_export_loads_nothing(
+    monkeypatch: pytest.MonkeyPatch, status: int
+) -> None:
+    """503(export 꺼짐·완결 성공 없음)과 410(snapshot 만료)은 적재 없이 retryable 실패다."""
+    detail = {"detail": "터미널 export가 활성화되지 않았습니다."}
+    seen = _install(monkeypatch, lambda request: httpx.Response(status, json=detail))
+    with pytest.raises(TransportExportNotCurrent) as raised:
+        _ = [item async for item in fetch_transport_rail_stations(_settings())]
+    assert raised.value.retryable is True
+    # 410은 새 snapshot으로 한 번 다시 읽는다(첫 페이지부터), 503은 바로 실패한다.
+    assert len(seen) == (2 if status == 410 else 1)
+
+
+async def test_a_snapshot_expiring_mid_walk_is_reread_from_the_first_page(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """transport는 410을 cursor 페이지에서만 낸다 — 첫 페이지부터 새 snapshot으로 한 번 다시 읽고
+    옛 snapshot의 앞 페이지와 섞지 않는다. 두 번째도 만료면 retryable 실패다."""
+    pages = _reference_pages("rail-stations.json")
+    calls: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        calls.append(cursor)
+        if cursor == "c1" and calls.count("c1") == 1:
+            return httpx.Response(410, json={"detail": "snapshot이 만료되었습니다."})
+        return httpx.Response(200, json=pages[cursor])
+
+    _install(monkeypatch, handler)
+    stations = [item async for item in fetch_transport_rail_stations(_settings())]
+    assert [s.natural_key for s in stations] == [
+        item["natural_key"] for item in _golden("rail-stations.json")["items"]
+    ]
+    assert calls == [None, "c1", None, "c1", "c2"]
+
+    def always_expired(request: httpx.Request) -> httpx.Response:
+        if request.url.params.get("cursor") is None:
+            return httpx.Response(200, json=pages[None])
+        return httpx.Response(410, json={"detail": "snapshot이 만료되었습니다."})
+
+    _install(monkeypatch, always_expired)
+    with pytest.raises(TransportExportNotCurrent) as raised:
+        _ = [item async for item in fetch_transport_rail_stations(_settings())]
+    assert raised.value.failure_kind == "transport_snapshot_expired"
+    assert raised.value.retryable is True
+
+
+async def test_a_total_count_drifting_mid_walk_is_refused(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = _reference_pages("ferry-ports.json")
+    pages["c1"] = {**pages["c1"], "total_count": 4}
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(200, json=pages[request.url.params.get("cursor")]),
+    )
+    with pytest.raises(TransportExportContractError, match="snapshot"):
+        _ = [item async for item in fetch_transport_ferry_ports(_settings())]
+
+
+async def test_a_cycling_reference_cursor_is_a_contract_violation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = _golden("rail-stations.json")
+    following = {None: "A", "A": "B", "B": "A"}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        page = {
+            **body,
+            "meta": {**body["meta"], "item_count": 1},
+            "items": body["items"][:1],
+            "has_more": True,
+            "next_cursor": following[request.url.params.get("cursor")],
+        }
+        return httpx.Response(200, json=page)
+
+    _install(monkeypatch, handler)
+    with pytest.raises(TransportExportContractError, match="순환"):
+        _ = [item async for item in fetch_transport_rail_stations(_settings())]
+
+
+async def test_an_empty_reference_snapshot_is_a_transport_empty_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = _golden("rail-stations.json")
+    empty = {**body, "meta": {**body["meta"], "item_count": 0}, "items": [], "total_count": 0}
+    _install(monkeypatch, lambda request: httpx.Response(200, json=empty))
+    with pytest.raises(TransportExportEmpty):
+        _ = [item async for item in fetch_transport_rail_stations(_settings())]
+
+
+async def test_a_stale_reference_snapshot_is_loaded_as_the_last_complete_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    body = _golden("ferry-ports.json")
+    stale = {**body, "meta": {**body["meta"], "source_status": "stale"}}
+    _install(monkeypatch, lambda request: httpx.Response(200, json=stale))
+    ports = [item async for item in fetch_transport_ferry_ports(_settings())]
+    assert len(ports) == len(body["items"])

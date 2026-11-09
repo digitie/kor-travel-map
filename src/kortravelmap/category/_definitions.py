@@ -19,6 +19,9 @@ sync)를 **ADR-023**에 따라 본 라이브러리(``kortravelmap.category``)로
 등대 스탬프투어의 항로표지 시설을 항구·전망대와 구분하기 위해
 ``TOURISM_NATURE_LIGHTHOUSE = "01050400"``를 추가한다.
 
+여객선이 닿는 항구·여객터미널을 이름으로 찾게 하려고(ADR-120, kor-travel-transport
+항구 기준정보) ``TRANSPORT_FERRY_TERMINAL = "06060000"``을 추가한다.
+
 place category code는 ``AABBCCDD`` 형식이다.
 
 * ``AA``: Tier 1
@@ -43,7 +46,7 @@ from typing import Final, TextIO
 
 PLACE_CATEGORY_SOURCE: Final = (
     "python-kraddr-base/src/kraddr/base/categories.py (ADR-023 이전) + "
-    "ADR-027 LODGING_MOUNTAIN_SHELTER 3건 + LIGHTHOUSE 1건 추가"
+    "ADR-027 LODGING_MOUNTAIN_SHELTER 3건 + LIGHTHOUSE 1건 + FERRY_TERMINAL 1건 추가"
 )
 PLACE_CATEGORY_SCHEMA_DOC: Final = "docs/architecture/category.md"
 PLACE_CATEGORY_SYNCED_ON: Final = "2026-07-13"
@@ -212,6 +215,7 @@ class PlaceCategoryCode(StrEnum):
     TRANSPORT_REST_AREA_HIGHWAY = "06040100"
     TRANSPORT_REST_AREA_HIGHWAY_EX = "06040101"
     TRANSPORT_AIRPORT = "06050000"
+    TRANSPORT_FERRY_TERMINAL = "06060000"
     MEDICAL = "07000000"
     MEDICAL_HOSPITAL = "07010000"
     MEDICAL_HOSPITAL_GENERAL = "07010100"
@@ -346,7 +350,14 @@ PLACE_CATEGORY_TIER2_NAMES_BY_TIER1: Final[dict[str, dict[str, str]]] = {
         "05": "백화점",
         "06": "공중화장실",
     },
-    "06": {"01": "주차장", "02": "주유소", "03": "정류장", "04": "휴게소", "05": "공항"},
+    "06": {
+        "01": "주차장",
+        "02": "주유소",
+        "03": "정류장",
+        "04": "휴게소",
+        "05": "공항",
+        "06": "여객선터미널",
+    },
     "07": {"01": "병원", "02": "약국"},
 }
 """``place-schema.md``에서 가져온 kor-travel-map Tier 2 표시명."""
@@ -1722,6 +1733,16 @@ PLACE_CATEGORY_DEFINITIONS: Final[tuple[PlaceCategory, ...]] = tuple(
                 PlaceCategoryCode.TRANSPORT,
                 650,
             ),
+            _category(
+                PlaceCategoryCode.TRANSPORT_FERRY_TERMINAL,
+                "교통",
+                "여객선터미널",
+                None,
+                None,
+                2,
+                PlaceCategoryCode.TRANSPORT,
+                660,
+            ),
             _category(PlaceCategoryCode.MEDICAL, "의료", None, None, None, 1, None, 700),
             _category(
                 PlaceCategoryCode.MEDICAL_HOSPITAL,
@@ -1948,6 +1969,7 @@ PLACE_CATEGORY_MAPBOX_MAKI_ICONS: Final[dict[str, str]] = {
     PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY.value: "highway-rest-area",
     PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY_EX.value: "highway-rest-area",
     PlaceCategoryCode.TRANSPORT_AIRPORT.value: "airport",
+    PlaceCategoryCode.TRANSPORT_FERRY_TERMINAL.value: "ferry",
     PlaceCategoryCode.MEDICAL.value: "hospital",
     PlaceCategoryCode.MEDICAL_HOSPITAL.value: "hospital",
     PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL.value: "hospital",

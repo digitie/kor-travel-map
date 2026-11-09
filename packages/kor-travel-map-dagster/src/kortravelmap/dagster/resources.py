@@ -79,7 +79,9 @@ from .provider_fetchers import (
     fetch_standard_tourist_attractions,
     fetch_standard_traditional_markets,
     fetch_transport_airports,
+    fetch_transport_ferry_ports,
     fetch_transport_fuel_stations,
+    fetch_transport_rail_stations,
     fetch_transport_rest_areas,
     fetch_visitkorea_festival_events,
 )
@@ -173,6 +175,26 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="transport_rest_areas",
         setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
         note="고속도로 휴게소 기준정보(data.go.kr 표준데이터, transport 수집).",
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="transport_rail_stations",
+        provider_package="kor-travel-transport",
+        dataset_key="transport_rail_stations",
+        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
+        note=(
+            "도시·광역철도 역 기준정보(KRIC dataset 1294, transport 저변동 기준정보 snapshot "
+            "export — ADR-120)."
+        ),
+    ),
+    ProviderRecordResourceSpec(
+        resource_key="transport_ferry_ports",
+        provider_package="kor-travel-transport",
+        dataset_key="transport_ferry_ports",
+        setting_names=("kor_travel_transport_base_url", "kor_travel_transport_service_token"),
+        note=(
+            "여객선 항구 기준정보(국내선박운항정보, transport 저변동 기준정보 snapshot export — "
+            "ADR-120)."
+        ),
     ),
     ProviderRecordResourceSpec(
         resource_key="transport_airports",
@@ -633,6 +655,30 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_rest_areas"] = (
     build_provider_record_live_resource(
         _TRANSPORT_REST_AREAS_SPEC,
         fetch_transport_rest_areas,
+    )
+)
+
+_TRANSPORT_RAIL_STATIONS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "transport_rail_stations"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_rail_stations"] = (
+    build_provider_record_live_resource(
+        _TRANSPORT_RAIL_STATIONS_SPEC,
+        fetch_transport_rail_stations,
+    )
+)
+
+_TRANSPORT_FERRY_PORTS_SPEC: ProviderRecordResourceSpec = next(
+    spec
+    for spec in PROVIDER_RECORD_RESOURCE_SPECS
+    if spec.resource_key == "transport_ferry_ports"
+)
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_ferry_ports"] = (
+    build_provider_record_live_resource(
+        _TRANSPORT_FERRY_PORTS_SPEC,
+        fetch_transport_ferry_ports,
     )
 )
 

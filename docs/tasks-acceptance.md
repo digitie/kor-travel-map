@@ -2882,6 +2882,16 @@ MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸
 - [ ] 지역명 접두("안동 ", "영주")를 뗀 이름 일치를 이름 점수에 반영할지 결정하고 근거를 적는다.
 - [ ] 회귀 테스트가 두 쌍을 고정한다.
 
+## T-TRANSPORT-PLACES
+
+ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도역·항구(신규, alembic 438)를 검색되는 place로 둔다.
+
+- [ ] 배포 뒤 휴게소 job 1회: active 215건의 이름이 "…휴게소"꼴이고 "강릉휴게소"·"횡성휴게소"가 1위다.
+- [ ] "양양국제공항" 검색 1위가 공항 Feature다(운영 `/v1/features/search`).
+- [ ] transport `TRANSPORT_MAP_CURRENT_ENABLED`·철도/해운 기준정보 수집 활성화(Codex) 뒤 철도역·항구 job 1회 성공, 두 weekly schedule start.
+- [ ] 첫 적재 실측(역 행 수 → Feature 수, 좌표 없는 행 수, 항구 수)을 ADR-120에 적고 accepted로 올린다.
+- [ ] 일반·고속철도 전용 역(전주·순천·익산·여수엑스포·신경주·안동·단양)과 버스터미널(`/bus-terminals`)의 원천을 소유자와 정한다.
+
 ## T-KNPS-DATA-GAPS
 
 #1450 운영 1회 적재(2026-11-06)에서 KNPS dataset 넷이 들어오지 않았다. 원인은 읽기 전용 재현으로 확인했다.
@@ -2907,10 +2917,10 @@ MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸
 
 ## T-MARKET-LOAD
 
-#1459 전통시장 공백. 코드(provider PR#23 `649fa1a`, Map migration 438)는 머지로 들어가고, 아래가 참이면 닫는다.
+#1459 전통시장 공백. 코드(provider PR#23 `649fa1a`, Map migration 439)는 머지로 들어가고, 아래가 참이면 닫는다.
 
 - [ ] 운영 data.go.kr 키가 `tn_pubr_public_trdit_mrkt_api`를 200으로 받는다(활용신청 — 2026-11-09 운영 키는 403).
-- [ ] 438이 운영 DB에 적용되고 `datagokr_traditional_markets` refresh operation이 `/v1/ops/datasets`에 보인다.
+- [ ] 439가 운영 DB에 적용되고 `datagokr_traditional_markets` refresh operation이 `/v1/ops/datasets`에 보인다.
 - [ ] `POST /v1/ops/pipeline/requests`(preview 먼저)로 첫 적재가 성공하고 feature 수가 원천 totalCount와 맞는다(건너뛴 행은 사유와 함께).
 - [ ] #1459 목록의 시장(망원·통인·남대문·신포·강릉/속초 중앙·강화 풍물 등)이 PinVi `/search`에서 시장 feature로 3위 안에 나온다(없는 것은 원천 부재 여부와 함께 #1459에 기록).
 - [ ] `feature_place_standard_traditional_markets_monthly_schedule`을 켠다.

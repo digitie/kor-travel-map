@@ -75,6 +75,7 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1,
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
+    SEARCH_DESTINATION_GROUP_MAX,
 )
 from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.exceptions import (
@@ -1792,18 +1793,28 @@ WITH candidates AS (
 )
 """
 
-#: 검색 순위(``rank``)의 자리. 큰 자리가 먼저 갈린다 — 일치 단계 → bbox 안 → 분류 그룹 →
-#: 이름 일치 → 분류 구체성. 같은 ``rank`` 안에서는 trigram ``score`` 내림차순, ``feature_id``
-#: 오름차순이다. 각 자리 값은 한 자리 수다(``_SEARCH_RANK_DIGIT_MAX``).
-_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 10_000
-_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 1_000
+#: 검색 순위(``rank``)의 자리. 큰 자리가 먼저 갈린다 — 일치 단계 → bbox 안 → 목적지 이름
+#: 일치 → 분류 그룹 → 이름 일치 → 분류 구체성. 같은 ``rank`` 안에서는 trigram ``score``
+#: 내림차순, ``feature_id`` 오름차순이다. 각 자리 값은 한 자리 수다(``_SEARCH_RANK_DIGIT_MAX``).
+#:
+#: **목적지 이름 일치**(ADR-120, #1459 §2): 이름이 검색어와 같고 분류가 목적지 그룹
+#: (``SEARCH_DESTINATION_GROUP_MAX`` 이하 — 관광·숙박·역·휴게소·공항·여객선터미널)이면 분류 그룹보다
+#: 앞이다. "양양국제공항"을 찾으면 이름이 정확히 같은 공항이 이름에 검색어를 품기만 한 관광지
+#: "설해원(양양국제공항)"보다, "서울역"을 찾으면 역이 "서울역사박물관"보다 앞이다. 식음·주차처럼
+#: 목적지가 아닌 분류의 이름 일치는 종전대로 그룹 **뒤**에서만 가른다 — "하회마을"이라는 서울
+#: 음식점이 이름에 "하회마을"을 품은 관광지보다 앞서지 않는다(436의 결정 그대로).
+_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 100_000
+_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 10_000
+_SEARCH_RANK_DESTINATION_EXACT_WEIGHT: Final[int] = 1_000
 _SEARCH_RANK_GROUP_WEIGHT: Final[int] = 100
 _SEARCH_RANK_EXACT_WEIGHT: Final[int] = 10
 _SEARCH_RANK_DIGIT_MAX: Final[int] = 9
-#: 순위가 가질 수 있는 가장 큰 값(유사도만·bbox 밖·가장 큰 그룹·불일치·Tier 1만). cursor 검증 상한.
+#: 순위가 가질 수 있는 가장 큰 값(유사도만·bbox 밖·목적지 불일치·가장 큰 그룹·불일치·Tier 1만).
+#: cursor 검증 상한.
 _SEARCH_RANK_MAX: Final[int] = (
     2 * _SEARCH_RANK_MATCH_WEIGHT
     + _SEARCH_RANK_BBOX_WEIGHT
+    + _SEARCH_RANK_DESTINATION_EXACT_WEIGHT
     + _SEARCH_RANK_DIGIT_MAX * _SEARCH_RANK_GROUP_WEIGHT
     + _SEARCH_RANK_EXACT_WEIGHT
     + 1
@@ -1859,6 +1870,14 @@ def _search_category_group_sql(column: str) -> str:
         whens.append(f"WHEN left({column}, 2) = '{tier1}' THEN {_group(group)}")
     fallback = _group(PLACE_CATEGORY_SEARCH_GROUP_FALLBACK)
     return f"(CASE {' '.join(whens)} ELSE {fallback} END)"
+
+
+def _search_destination_group_max() -> int:
+    """목적지 그룹 상한(``SEARCH_DESTINATION_GROUP_MAX``) — SQL에 박는 한 자리 정수."""
+    value = SEARCH_DESTINATION_GROUP_MAX
+    if type(value) is not int or not 0 <= value <= _SEARCH_RANK_DIGIT_MAX:
+        raise ValueError(f"destination group max must be a single digit: {value!r}")
+    return value
 
 
 def _search_display_name_sql(name: str, category: str) -> str:
@@ -1953,8 +1972,29 @@ compacted AS (
         {_search_compact_sql("display_name")} AS compact_name,
         CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
              THEN {_search_compact_sql("name")} END AS compact_raw_name,
-        {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail
+        {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail,
+        {_search_category_group_sql("category")} AS search_group
     FROM filtered
+),
+ranked AS (
+    -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
+    -- 검색어와 같다(공백 무시).
+    -- 목적지 이름 일치(ADR-120): 이름 전체가 검색어와 같은 목적지. 첫 낱말을 뗀 나머지는 관광
+    -- (그룹 0)에만 쓴다 — "신라스테이 해운대"(숙박)가 "해운대"로 관광지 앞에 서지 않게 한다.
+    SELECT
+        compacted.*,
+        (
+          compact_name = CAST(:q_compact AS text)
+          OR compact_tail = CAST(:q_compact AS text)
+        ) IS TRUE AS name_exact,
+        (
+          search_group <= {_search_destination_group_max()}
+          AND (
+            compact_name = CAST(:q_compact AS text)
+            OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
+          )
+        ) IS TRUE AS destination_exact
+    FROM compacted
 ),
 candidates AS (
     SELECT
@@ -1988,20 +2028,20 @@ candidates AS (
                 ) THEN 0
               ELSE 1
             END * {_SEARCH_RANK_BBOX_WEIGHT}
-          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖
-          -- (분류 체계에서 유도, 접두 예외 먼저).
-          + {_search_category_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
-          -- 이름 일치: 이름이 검색어와 같거나, 첫 낱말(지역명 — "안동 도산서원")을 뗀 나머지가
-          -- 검색어와 같으면 0(공백 무시).
+          -- 목적지 이름 일치: 이름 일치이고 분류가 목적지 그룹이면 0 — 분류 그룹보다 앞(ADR-120).
           + CASE
-              WHEN compact_name = CAST(:q_compact AS text)
-                OR compact_tail = CAST(:q_compact AS text) THEN 0
+              WHEN destination_exact THEN 0
               ELSE 1
-            END * {_SEARCH_RANK_EXACT_WEIGHT}
+            END * {_SEARCH_RANK_DESTINATION_EXACT_WEIGHT}
+          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널 → 식음 → 그 밖
+          -- (분류 체계에서 유도, 접두 예외 먼저).
+          + search_group * {_SEARCH_RANK_GROUP_WEIGHT}
+          -- 이름 일치(분류 불문): 같은 그룹 안에서 이름이 같은 행이 앞.
+          + CASE WHEN name_exact THEN 0 ELSE 1 END * {_SEARCH_RANK_EXACT_WEIGHT}
           -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
         ) AS search_rank
-    FROM compacted
+    FROM ranked
 )
 """
 
@@ -6368,7 +6408,8 @@ def encode_bbox_cursor(feature_id: str) -> str:
 
 _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v3: 별칭의 공백 정규화로 순위 의미가 달라져 이전 cursor를 재사용하지 않는다.
-_SEARCH_CURSOR_VERSION: Final[int] = 3
+#: v4: 이름 일치를 분류 그룹 앞으로 옮겨(ADR-120) ``rank`` 값의 뜻이 바뀌었다.
+_SEARCH_CURSOR_VERSION: Final[int] = 4
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -6720,9 +6761,10 @@ async def search_features(
     threshold는 현재 transaction에만 ``SET LOCAL``로 적용한다(ADR-004/성능 가이드).
     bbox 술어는 stored ``coord`` 컬럼과 ``ST_MakeEnvelope``만 사용한다.
 
-    ``q`` 검색의 순서(436): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만, 그 안에서
-    bbox 안 → 분류 그룹(관광 → 숙박·온천·기차역·지하철역·휴게소·공항 → 식음 → 그 밖) →
-    이름 일치(보이는 이름 기준) → 분류 구체성 →
+    ``q`` 검색의 순서(436, ADR-120): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만,
+    그 안에서 bbox 안 → 목적지(관광·숙박·역·휴게소·공항·여객선터미널)의 이름 일치 → 분류 그룹
+    (관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널 → 식음 → 그 밖) → 이름 일치(보이는
+    이름 기준) → 분류 구체성 →
     ``score`` 내림차순 → ``feature_id``. ``q``와 함께 온 ``bbox``는 **필터가 아니라 순위
     가중**이다. ``q`` 없이 ``bbox``만 오면 종전처럼 bbox 필터 + ``feature_id`` 순이다.
     """

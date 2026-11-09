@@ -65,6 +65,14 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_place_transport_rest_areas_job",
         "feature_place_transport_rest_areas",
     ),
+    _handler(
+        "feature_place_transport_rail_stations_job",
+        "feature_place_transport_rail_stations",
+    ),
+    _handler(
+        "feature_place_transport_ferry_ports_job",
+        "feature_place_transport_ferry_ports",
+    ),
     _handler("feature_place_krheritage_items_job", "feature_place_krheritage_items"),
     _handler("feature_event_krheritage_events_job", "feature_event_krheritage_events"),
     _handler("feature_place_mois_licenses_job", "feature_place_mois_licenses"),

@@ -1,7 +1,7 @@
 """전국전통시장표준데이터를 provider 카탈로그에 넣는다(#1459).
 
-Revision ID: 438_traditional_market_dataset
-Revises: 437_feature_command_fingerprints
+Revision ID: 439_traditional_market_dataset
+Revises: 438_transport_reference_places
 
 왜 필요한가. 운영 Map에 전통시장 feature가 없다 — 망원·통인·남대문 같은 시장을 검색하면 안쪽
 점포·약국·주차장 행만 나온다(#1459 §2). 원천은 공공데이터포털 15012894(소상공인시장진흥공단,
@@ -33,8 +33,8 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "438_traditional_market_dataset"
-down_revision: str | Sequence[str] | None = "437_feature_command_fingerprints"
+revision: str = "439_traditional_market_dataset"
+down_revision: str | Sequence[str] | None = "438_transport_reference_places"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -132,7 +132,8 @@ ALTER TABLE ops.application_schema_operation_receipts
         '435_retire_sh_snapshot_path',
         '436_feature_search_aliases',
         '437_feature_command_fingerprints',
-        '438_traditional_market_dataset'
+        '438_transport_reference_places',
+        '439_traditional_market_dataset'
     ))
 """
 
@@ -152,7 +153,7 @@ def upgrade() -> None:
     existing = bind.execute(text(_DATASET_SQL)).first()
     if existing is not None:
         raise RuntimeError(
-            f"438_traditional_market_dataset: {PROVIDER}/{DATASET_KEY}가 이미 있다 "
+            f"439_traditional_market_dataset: {PROVIDER}/{DATASET_KEY}가 이미 있다 "
             f"(provider_dataset_id={existing[0]}) — 일부만 적용된 DB다. 사람이 확인한 뒤 다시 돌린다."
         )
     settings = {
@@ -178,4 +179,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    raise RuntimeError("438_traditional_market_dataset is forward-only")
+    raise RuntimeError("439_traditional_market_dataset is forward-only")

@@ -26,6 +26,8 @@ DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
     "feature_place_datagokr_file_data": "공공 파일 장소",
     "feature_place_khoa_beaches": "해수욕장",
     "feature_place_transport_airports": "공항",
+    "feature_place_transport_rail_stations": "철도역",
+    "feature_place_transport_ferry_ports": "여객선 항구",
     "feature_place_kor_travel_concierge_youtube": "영상 기반 장소 후보",
     "feature_event_visitkorea_enrichment": "VisitKorea 축제 보강 후보",
     "feature_place_mcst_culture": "문화시설 파일데이터",

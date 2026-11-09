@@ -97,6 +97,8 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_knps_point_records",
         "fetch_kor_travel_concierge_youtube_features",
         "fetch_transport_airports",
+        "fetch_transport_ferry_ports",
+        "fetch_transport_rail_stations",
         "fetch_transport_rest_area_fuel_prices",
         "fetch_transport_rest_areas",
         "fetch_transport_highway_incidents",
@@ -183,9 +185,11 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 2026-10-26 29 → 30: Rest 단일응답도 기존 transport 시도별 counter를 공유한다.
 #: 2026-10-28 30 → 29: ADR-117이 Rest 스냅샷 진입점(`fetch_transport_rest_area_snapshot`)을
 #: SH 스냅샷 경로와 함께 지웠다 — 코드가 없어졌다(완전 계측이었다).
-#: 2026-11-09 29 → 30: 전통시장 표준데이터(`fetch_standard_traditional_markets`, #1459) —
+#: 2026-11-09 29 → 31: ADR-120 transport 기준정보 fetcher 둘(철도역·항구)이 들어왔다 — 시도마다
+#: `_transport_request_once`로 센다(410 재읽기의 재요청까지).
+#: 2026-11-09 31 → 32: 전통시장 표준데이터(`fetch_standard_traditional_markets`, #1459) —
 #: 공용 `aiter_paginated_items`로 페이지마다 센다.
-_EXPECTED_FULLY_COUNTED: int = 30
+_EXPECTED_FULLY_COUNTED: int = 32
 
 
 def _module_trees() -> dict[str, ast.Module]:

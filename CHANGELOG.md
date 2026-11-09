@@ -3,7 +3,13 @@
 ## 2026-11-09 — 전통시장 표준데이터(#1459)
 
 - 전국전통시장표준데이터(15012894)를 전통시장 place(`05070000 편의 > 전통시장`)로 적재하는 dataset·job·월간 schedule(기본 중지)을 추가한다. 좌표가 없는 시장은 주소로 정지오코딩하고, 원천에서 사라진 시장은 다음 적재에서 은퇴한다.
-- `/v1/categories`가 147행을 돌려준다(스키마 변경 없음). alembic head `438_traditional_market_dataset`.
+- `/v1/categories`가 148행을 돌려준다(스키마 변경 없음). alembic head `439_traditional_market_dataset`.
+
+## 2026-11-09 — 휴게소·철도역·여객선 항구·공항 검색(#1459, ADR-120)
+
+- kor-travel-transport 철도역(KRIC 1294, 노선별 행을 역 하나로)·여객선 항구 기준정보를 place Feature로 적재하는 dataset 둘을 추가한다(alembic 438, 주 1회 schedule, 기본 STOPPED). 새 분류 `06060000` 여객선터미널.
+- 휴게소 이름을 "강릉휴게소(인천방향)"꼴로 저장한다. 역은 "…역", 항구는 필요하면 " 여객선터미널"을 붙인다.
+- `/v1/features/search`: 이름이 검색어와 같은 목적지(관광·숙박·역·휴게소·공항·여객선터미널)가 분류 그룹보다 앞이다. 검색 cursor v4.
 
 ## 2026-11-07 — 저배율 지도 cluster 집계 속도(#1455)
 

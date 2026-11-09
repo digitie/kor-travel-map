@@ -37,7 +37,8 @@ FORWARD_ONLY_REVISIONS = (
     "409_geo_release_item_reasons",
     "436_feature_search_aliases",
     "437_feature_command_fingerprints",
-    "438_traditional_market_dataset",
+    "438_transport_reference_places",
+    "439_traditional_market_dataset",
 )
 
 

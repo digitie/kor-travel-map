@@ -32,7 +32,7 @@ _MAKI_TS = (
 
 
 def test_catalog_count_and_maki_self_consistency() -> None:
-    assert len(PLACE_CATEGORY_DEFINITIONS) == 147
+    assert len(PLACE_CATEGORY_DEFINITIONS) == 148
     values = set(PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES)
     for cat in PLACE_CATEGORY_DEFINITIONS:
         assert cat.mapbox_maki_icon in values

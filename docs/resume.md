@@ -2,6 +2,10 @@
 
 - 다음: 배포 회전에 Map 머지 SHA를 묶는다 → 운영 키로 15012894 Open API 활용신청(현재 403) → `POST /v1/ops/pipeline/requests`(preview 먼저) → 건수·#1459 시장 검색 확인 → schedule 켜기. 판정은 acceptance `T-MARKET-LOAD`.
 
+## 2026-11-09 — #1459 transport 장소 검색(ADR-120)
+
+- 배포(438) 뒤 휴게소 job 1회로 이름 215건 갱신. 역·항구는 transport가 `TRANSPORT_MAP_CURRENT_ENABLED`·수집을 켠 뒤(Codex) job 1회 → schedule start. OpenAPI 불변.
+
 ## 2026-11-07 — Valkey 상태 쓰기 재시도
 
 - 다음 회전에 묶는다(소유자). writer socket timeout 10 s는 Manager env(code-server만), API는 2 s 유지.

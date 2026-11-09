@@ -1,0 +1,51 @@
+{
+  "meta": {
+    "generated_at": "2026-11-09T01:00:00Z",
+    "source_collected_at": "2026-11-08T18:00:00Z",
+    "source_status": "ok",
+    "item_count": 3
+  },
+  "snapshot_id": "8d0c2f4a-1b3e-4f6a-9c2d-5e7f8a9b0c12",
+  "snapshot_expires_at": "2026-11-09T01:15:00Z",
+  "total_count": 3,
+  "items": [
+    {
+      "natural_key": "datagokr_maritime:INC",
+      "source": "datagokr_maritime",
+      "port_id": "INC",
+      "name": "인천항",
+      "latitude": 37.4517,
+      "longitude": 126.5996,
+      "location_source": "komsa",
+      "location_point_count": 1,
+      "manual_location_revision": null,
+      "admin": null
+    },
+    {
+      "natural_key": "datagokr_maritime:BRD",
+      "source": "datagokr_maritime",
+      "port_id": "BRD",
+      "name": "백령도",
+      "latitude": 37.9597,
+      "longitude": 124.7286,
+      "location_source": "komsa",
+      "location_point_count": 1,
+      "manual_location_revision": null,
+      "admin": null
+    },
+    {
+      "natural_key": "datagokr_maritime:GUIDE",
+      "source": "datagokr_maritime",
+      "port_id": "GUIDE",
+      "name": "가이드라인항",
+      "latitude": null,
+      "longitude": null,
+      "location_source": null,
+      "location_point_count": 0,
+      "manual_location_revision": null,
+      "admin": null
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

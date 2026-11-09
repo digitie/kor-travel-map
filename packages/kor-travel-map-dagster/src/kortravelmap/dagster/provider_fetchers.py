@@ -34,8 +34,10 @@ from typing import TYPE_CHECKING, Any, Final, cast
 import httpx
 from kortravelmap.providers.kor_travel_transport import (
     EXPORT_PATH_AIRPORTS,
+    EXPORT_PATH_FERRY_PORTS,
     EXPORT_PATH_FUEL_STATIONS,
     EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
+    EXPORT_PATH_RAIL_STATIONS,
     EXPORT_PATH_REST_AREA_FUEL_PRICES,
     EXPORT_PATH_REST_AREAS,
     SERVICE_TOKEN_HEADER,
@@ -46,14 +48,20 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportExportHidden,
     TransportExportMalformed,
     TransportExportNotCurrent,
+    TransportFerryPort,
     TransportFuelStation,
     TransportHighwayIncident,
+    TransportRailStation,
     TransportRestArea,
     TransportRestAreaFuelPrice,
+    TransportSnapshotExpired,
     parse_active_incident_set,
     parse_airports,
     parse_export_page,
+    parse_ferry_port,
     parse_fuel_station,
+    parse_rail_station,
+    parse_reference_page,
     parse_rest_area,
     parse_rest_area_fuel_price,
     require_current_collection,
@@ -105,8 +113,10 @@ __all__ = [
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
     "fetch_transport_airports",
+    "fetch_transport_ferry_ports",
     "fetch_transport_fuel_stations",
     "fetch_transport_highway_incidents",
+    "fetch_transport_rail_stations",
     "fetch_transport_rest_area_fuel_prices",
     "fetch_transport_rest_areas",
     "fetch_visitkorea_festival_events",
@@ -305,7 +315,16 @@ def _raise_transport_status(response: httpx.Response, path: str) -> None:
     if status == 503:
         raise TransportExportNotCurrent(
             f"kor-travel-transport {path}가 503이다 — 근거 수집의 이력이 없거나 실패했거나 "
-            "stale이다(transport ADR-013). 이번 run은 아무것도 적재·삭제·종료하지 않는다."
+            "stale이다(transport ADR-013). 기준정보 export(철도역·항구)는 transport가 그 export를 "
+            "켜지 않았을 때도 503이다(``TRANSPORT_MAP_CURRENT_ENABLED``). 이번 run은 아무것도 "
+            "적재·삭제·종료하지 않는다."
+        )
+    if status == 410:
+        # 기준정보 snapshot(15분 TTL)이 페이지를 다 읽기 전에 만료됐다 — 첫 페이지부터 다시
+        # 읽어야 한다. 기준정보 fetcher가 한 번 다시 읽고, 그래도 만료면 step 재시도로 넘긴다.
+        raise TransportSnapshotExpired(
+            f"kor-travel-transport {path}가 410이다 — snapshot이 만료됐다. 이번 run은 아무것도 "
+            "적재·삭제하지 않는다."
         )
     if status in _TRANSPORT_TRANSIENT_STATUSES:
         raise _TransportTransientStatus(f"kor-travel-transport {path}가 {status}다.")
@@ -475,6 +494,132 @@ async def _iter_transport_export(
         raise TransportExportEmpty(
             f"kor-travel-transport {path}가 0건이다. 완전 snapshot으로 전량 삭제하지 않고 실패한다."
         )
+
+
+#: 기준정보 snapshot이 페이지 도중 만료(410)됐을 때 첫 페이지부터 다시 읽는 횟수. transport는
+#: 첫 페이지 요청에서 새 snapshot을 연다(15분 TTL) — 한 번 더 읽어도 만료되면 run을 실패시킨다.
+_REFERENCE_SNAPSHOT_RESTARTS: Final[int] = 1
+
+
+async def _read_transport_reference_snapshot(
+    client: httpx.AsyncClient,
+    settings: KorTravelMapSettings,
+    path: str,
+    parse: Callable[[Mapping[str, Any]], Any],
+    budget: upstream_retry.RetryBudget,
+) -> list[Any]:
+    """기준정보 snapshot 하나를 첫 페이지부터 끝까지 읽어 파싱한 item 목록을 돌려준다."""
+    cursor: str | None = None
+    seen_cursors: set[str] = set()
+    snapshot_id: str | None = None
+    total_count: int | None = None
+    items: list[Any] = []
+    stale_warned = False
+    for _page_number in range(_TRANSPORT_MAX_PAGES):
+        # transport는 cursor에 limit을 결박한다 — 모든 페이지에 같은 limit을 보낸다.
+        params: dict[str, Any] = {"limit": settings.kor_travel_transport_page_size}
+        if cursor is not None:
+            params["cursor"] = cursor
+        response = await _transport_get(client, path, params, budget=budget)
+        page = parse_reference_page(_transport_json(response, path), where=path)
+        if snapshot_id is None:
+            snapshot_id, total_count = page.snapshot_id, page.total_count
+        elif page.snapshot_id != snapshot_id or page.total_count != total_count:
+            raise TransportExportContractError(
+                f"{path}: 페이지 도중 snapshot이 바뀌었다"
+                f"({snapshot_id!r}→{page.snapshot_id!r}, total_count {total_count}→"
+                f"{page.total_count})."
+            )
+        if page.meta.source_status == "stale" and not stale_warned:
+            stale_warned = True
+            _LOGGER.warning(
+                "kor-travel-transport %s source_status=stale(source_collected_at=%s) — "
+                "마지막 완결 성공 집합으로 적재한다",
+                path,
+                page.meta.source_collected_at.isoformat(),
+            )
+        items.extend(parse(item) for item in page.items)
+        if not page.has_more:
+            break
+        assert page.next_cursor is not None  # parse_reference_page가 보장한다.
+        if page.next_cursor in seen_cursors or page.next_cursor == cursor:
+            raise TransportExportContractError(
+                f"{path}: next_cursor {page.next_cursor!r}가 이미 지난 cursor다(순환)."
+            )
+        seen_cursors.add(page.next_cursor)
+        cursor = page.next_cursor
+    else:
+        raise TransportExportContractError(
+            f"{path}: {_TRANSPORT_MAX_PAGES}페이지를 넘었다 — cursor 계약 이상."
+        )
+    if len(items) != total_count:
+        raise TransportExportContractError(
+            f"{path}: 받은 행({len(items)})이 total_count({total_count})와 다르다 — "
+            "완전 snapshot이 아니다."
+        )
+    if not items:
+        raise TransportExportEmpty(
+            f"kor-travel-transport {path}가 0건이다. 완전 snapshot으로 전량 삭제하지 않고 실패한다."
+        )
+    return items
+
+
+async def _iter_transport_reference_export(
+    settings: KorTravelMapSettings,
+    path: str,
+    parse: Callable[[Mapping[str, Any]], Any],
+) -> AsyncIterator[Any]:
+    """기준정보 snapshot export(철도역·항구, transport T3)를 끝까지 읽어 파싱한 item을 낸다.
+
+    완전 snapshot reconcile의 근거라서 다음 중 하나라도 어긋나면 적재 전에 실패한다:
+    페이지마다 같은 ``snapshot_id``·``total_count``, ``meta.item_count`` = 그 페이지 행 수(파서가
+    잰다), 끝에서 행 합계 = ``total_count``, 0건 아님, cursor 순환 없음.
+    ``meta.source_status=stale``은 마지막 완결 성공 집합이라 받아들이되 경고를 남긴다(저변동
+    기준정보 — ``ReferenceSourceStatus``). snapshot 전체를 다 읽은 **뒤에만** item을 낸다 —
+    페이지 도중 snapshot이 만료(410)되면 :data:`_REFERENCE_SNAPSHOT_RESTARTS`번 첫 페이지부터 새
+    snapshot을 다시 읽는다(옛 snapshot의 앞 페이지와 섞지 않는다).
+    """
+    base_url, headers = _transport_connection(settings)
+    budget = _transport_run_budget()
+    async with httpx.AsyncClient(
+        base_url=base_url,
+        timeout=transport_http_timeout(settings),
+        headers=headers,
+    ) as client:
+        for attempt in range(_REFERENCE_SNAPSHOT_RESTARTS + 1):
+            try:
+                items = await _read_transport_reference_snapshot(
+                    client, settings, path, parse, budget
+                )
+                break
+            except TransportSnapshotExpired:
+                if attempt >= _REFERENCE_SNAPSHOT_RESTARTS:
+                    raise
+                _LOGGER.warning(
+                    "kor-travel-transport %s snapshot 만료(410) — 첫 페이지부터 다시 읽는다", path
+                )
+    for item in items:
+        yield item
+
+
+async def fetch_transport_rail_stations(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[TransportRailStation]:
+    """도시·광역철도 역 기준정보(KRIC dataset 1294, 운영기관·노선마다 한 행 — ADR-120)."""
+    async for station in _iter_transport_reference_export(
+        settings, EXPORT_PATH_RAIL_STATIONS, parse_rail_station
+    ):
+        yield station
+
+
+async def fetch_transport_ferry_ports(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[TransportFerryPort]:
+    """여객선 항구 기준정보(국내선박운항정보 — ADR-120)."""
+    async for port in _iter_transport_reference_export(
+        settings, EXPORT_PATH_FERRY_PORTS, parse_ferry_port
+    ):
+        yield port
 
 
 async def fetch_transport_fuel_stations(

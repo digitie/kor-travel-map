@@ -37,6 +37,7 @@ ADR 참조
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime, time, timedelta, timezone
 from decimal import Decimal
@@ -97,6 +98,7 @@ __all__ = [
     # 자연키·표시 규칙 (ADR-114 Valkey 상태가 PG 경로와 같은 규칙을 쓴다)
     "fuel_price_match_key",
     "parse_krex_occurrence",
+    "rest_area_display_name",
     "rest_area_natural_key",
     "safe_notice_type",
     "synthesize_notice_title",
@@ -317,6 +319,40 @@ def _to_decimal_or_none(value: float | Decimal | None) -> Decimal | None:
     return Decimal(str(value))
 
 
+REST_AREA_DISPLAY_LABEL: Final[str] = "휴게소"
+"""휴게소 표시 이름에 붙이는 말."""
+
+_REST_AREA_DIRECTION_LABEL: Final[str] = "방향"
+_REST_AREA_DIRECTION_NAME = re.compile(r"^(?P<base>[^()]+)\((?P<direction>[^()]+)\)$")
+
+
+def rest_area_display_name(name: str) -> str:
+    """휴게소 Feature 이름(ADR-120).
+
+    transport 휴게소 기준정보(data.go.kr 표준데이터)는 "강릉(인천)"·"행담도"처럼 "휴게소"를 빼고,
+    괄호 안에 진행 방향(목적지)을 적는다. 그대로 저장하면 "강릉휴게소"를 찾을 때 이름이 검색어를
+    품지 않아 약국·주차장 행 뒤로 밀린다(#1459 §2). 그래서
+
+    - "휴게소"가 이미 있으면 그대로,
+    - "<이름>(<방향>)" 꼴이면 "<이름>휴게소(<방향>방향)" — 방향이 이미 "방향"으로 끝나면 덧붙이지
+      않는다,
+    - 그 밖에는 "<이름>휴게소".
+
+    두 번 적용해도 같다. 원천 이름은 raw ``name``과 자연키에 그대로 남는다.
+    """
+    stripped = name.strip()
+    if not stripped or REST_AREA_DISPLAY_LABEL in stripped:
+        return stripped
+    match = _REST_AREA_DIRECTION_NAME.match(stripped)
+    if match is None:
+        return f"{stripped}{REST_AREA_DISPLAY_LABEL}"
+    base = match.group("base").strip()
+    direction = match.group("direction").strip()
+    if not direction.endswith(_REST_AREA_DIRECTION_LABEL):
+        direction = f"{direction}{_REST_AREA_DIRECTION_LABEL}"
+    return f"{base}{REST_AREA_DISPLAY_LABEL}({direction})"
+
+
 def _rest_area_natural_key(item: KrexRestAreaItem) -> str:
     """krtour 측 파생 자연키 — ``name``+``route_name``+``direction``.
 
@@ -400,9 +436,14 @@ async def _rest_area_item_to_bundle(
         raise ValueError(
             f"휴게소 자연키 불일치: transport={supplied_key!r}, map={natural_key!r}"
         )
+    name_normalized = normalize_korean_text(item.name) or item.name
+    display_name = rest_area_display_name(name_normalized)
     raw_data: dict[str, Any] = {
         "natural_key": natural_key,
         "name": item.name,
+        # 표시 이름 규칙(ADR-120)이 바뀌면 payload hash도 바뀌어 저장 이름이 다시 쓰인다 — 같은
+        # payload는 적재가 건너뛰므로(재관측만) 규칙 결과를 payload에 싣는다.
+        "display_name": display_name,
         "route_name": item.route_name,
         "direction": item.direction,
         "lon": str(lon) if lon is not None else None,
@@ -425,7 +466,6 @@ async def _rest_area_item_to_bundle(
         source_natural_key=natural_key,
     )
 
-    name_normalized = normalize_korean_text(item.name) or item.name
     phones: list[str] = []
     if item.phone_number:
         normalized_tel = normalize_phone_number(item.phone_number)
@@ -436,7 +476,7 @@ async def _rest_area_item_to_bundle(
         feature_id=feature_id,
         provider_natural_key=natural_key,
         kind=FeatureKind.PLACE,
-        name=name_normalized,
+        name=display_name,
         coord=coord,
         address=address,
         category=REST_AREA_CATEGORY,

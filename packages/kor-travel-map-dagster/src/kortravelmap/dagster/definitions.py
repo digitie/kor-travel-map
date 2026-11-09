@@ -65,6 +65,8 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "datagokr_cultural_festivals",
     "transport_fuel_stations",
     "transport_rest_areas",
+    "transport_rail_stations",
+    "transport_ferry_ports",
     "krheritage_items",
     "krheritage_events",
     "mois_license_records",
