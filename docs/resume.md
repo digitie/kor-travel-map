@@ -1,3 +1,7 @@
+## 2026-11-09 — KNPS 대피소 공식 원본 핀 상향
+
+- python-knps-api PR19(`3b89895`) 핀. 현재 공식 배포본 22건(중청·장터목·세석 포함)이 Map place 22건이 된다. 배포 뒤 knps_shelters provider_dataset만 preview→실행(runbook `docs/runbooks/knps-shelters-reimport.md`), 기존 2013 ID 행은 snapshot으로 retire된다. 성공 뒤 대피소 schedule만 켠다.
+
 ## 2026-11-09 — MOIS 숙박 우선 적재
 
 - 머지·배포 뒤: 숙박 업종만 수동 적재 → 예시 호텔 검색 확인 → MCST 중복은 검토 큐에서 MOIS master로 병합 → 이어 달리기 sensor 켜기. alembic 442(별칭만).

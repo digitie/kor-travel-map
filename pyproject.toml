@@ -134,7 +134,8 @@ providers = [
   # 16e3954: trails vertex 행 → 코스 단위 LINESTRING 조립(provider #9/PR#10,
   # T-212e 실측 — knps_trails 적재 0건(#407) 해소, 910,110 vertex → 625 코스).
   # PR18: 대피소 중첩 SHP Point·전역 ID·raw geometry 지문과 손상 입력 사전 검증.
-  "python-knps-api[geo] @ git+https://github.com/digitie/python-knps-api.git@aa9acd67807c929cdcf8629c39f6bc0330f810d9",
+  # PR19: 대피소 현재 공식 배포본(FILE_000000003681543, 평면 SHP 22건·잘린 UTF-8 필드명).
+  "python-knps-api[geo] @ git+https://github.com/digitie/python-knps-api.git@3b8989550a2a5aacf8bb48065a6d433572f19d62",
   # 70814c9 상향(2026-09-19). 표준데이터 gateway가 어느 시점부터 response
   # 래퍼(`{header, body}`)를 벗고 payload를 그대로 내려서, 산림 표준데이터
   # 3종이 파싱 단계에서 전멸했다. 좁은 가지 하나로 두 모양을 다 받는다
