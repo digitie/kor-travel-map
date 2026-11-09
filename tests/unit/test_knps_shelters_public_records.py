@@ -315,6 +315,12 @@ async def test_official_current_shelter_archive_becomes_22_map_places() -> None:
     # 이름 없는 행 skip 없이 공식 22건이 모두 Map place가 된다.
     assert len(bundles) == 22
     assert len({bundle.feature.feature_id for bundle in bundles}) == 22
+    # 현재 배포본에는 전역 ID가 없다: 순번을 멤버 범위로 hash한 source_id가 시설 identity다.
+    source_ids = [bundle.source_record.source_entity_id for bundle in bundles]
+    assert len(set(source_ids)) == 22
+    assert all(source_id.startswith("shp:") for source_id in source_ids)
+    replay = await _public_records(OFFICIAL_ARCHIVE.read_bytes())
+    assert sorted(record.source_id for record in replay) == sorted(source_ids)
     by_name = {bundle.feature.name: bundle for bundle in bundles}
     assert {"중청대피소", "장터목대피소", "세석대피소", "희운각대피소"} <= set(by_name)
     for bundle in bundles:

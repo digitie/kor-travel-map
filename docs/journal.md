@@ -3,7 +3,7 @@
 - 공식 원본을 직접 받았다. 기존 카탈로그 URL(FILE_000000000377005)은 2013년 중첩 SHP 8건(한라산 7·오대산 1)뿐이라 중청·장터목·세석이 없었다. 포털 현재 배포본은 FILE_000000003681543(_20230928): 평면 SHP 22건, UTF-8, EPSG:5186.
 - PR18 파서는 현재 배포본을 DBF 필드명 10 bytes 잘림(`시설물\xeb`)으로 거부했다. provider PR19가 잘린 끝만 제거·대피소 전용 필드(시설물명/위치.주소/순번)·전부 이름 없음 시 실패·카탈로그 갱신을 했다.
 - Map은 핀만 올리고 공식 fixture로 public client→Map 변환 회귀를 고정했다(22 place, 03080100/mountain_shelter, 중청 좌표). 주소·tel은 Map이 쓰지 않는다(역지오).
-- source_id가 2013 ID_CD에서 순번 기반 `shp:` hash로 바뀐다. KNPS place loader가 authoritative snapshot이라 옛 행은 retire된다.
+- source_id가 2013 ID_CD에서 순번 기반 `shp:` hash로 바뀐다. KNPS point loader는 snapshot에서 빠진 행을 retire하지 않지만(리뷰 지적), 운영 knps_shelters(provider_dataset 57)는 identity 0·03080100 feature 0이라 남을 옛 행이 없다(읽기 전용 확인).
 
 ## 2026-11-09 — MOIS 숙박 우선 적재·상호 정규화
 

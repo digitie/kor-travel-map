@@ -1,6 +1,7 @@
 ## 2026-11-09 — KNPS 대피소 공식 원본 핀 상향
 
-- python-knps-api PR19(`3b89895`) 핀. 현재 공식 배포본 22건(중청·장터목·세석 포함)이 Map place 22건이 된다. 배포 뒤 knps_shelters provider_dataset만 preview→실행(runbook `docs/runbooks/knps-shelters-reimport.md`), 기존 2013 ID 행은 snapshot으로 retire된다. 성공 뒤 대피소 schedule만 켠다.
+- python-knps-api PR19(`3b89895`) 핀. 현재 공식 배포본 22건(중청·장터목·세석 포함)이 Map place 22건이 된다. 배포 뒤 knps_shelters provider_dataset만 preview→실행(runbook `docs/runbooks/knps-shelters-reimport.md`). 성공 뒤 대피소 schedule만 켠다.
+- 주의: KNPS point loader는 snapshot에서 빠진 행을 retire하지 않는다(`retire_absent_from_snapshot` 미사용). 운영에는 2013 ID 행이 없어서(2026-11-09 identity 0·03080100 feature 0) 이번엔 무관하다. 원천 파일명·순번이 바뀌면 source_id가 바뀌어 옛 행이 남는다.
 
 ## 2026-11-09 — MOIS 숙박 우선 적재
 
