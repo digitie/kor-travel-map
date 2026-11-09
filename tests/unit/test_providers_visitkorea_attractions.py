@@ -151,7 +151,12 @@ def test_attraction_category_maps_the_new_classification(
         # #1459 수용 예시 — 산막이옛길(28)·태권도원·국립세종도서관(14)
         ("28", "LS011900", "산막이옛길", PlaceCategoryCode.TOURISM_ACTIVITY_TREKKING),
         ("14", "VE090400", "태권도원", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY),
-        ("14", "VE090300", "국립세종도서관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_LIBRARY),
+        (
+            "14",
+            "VE090300",
+            "국립세종도서관",
+            PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_LIBRARY,
+        ),
         # 문화시설(14) 대표 코드
         ("14", "VE070100", "국립중앙박물관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_MUSEUM),
         ("14", "VE070600", "리움미술관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_ART),

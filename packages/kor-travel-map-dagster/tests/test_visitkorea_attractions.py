@@ -80,7 +80,7 @@ class _FakeClient:
             }
         )
         cls = type(self)
-        total = cls.totals[content_type_id] if content_type_id in cls.totals else 0
+        total = cls.totals.get(content_type_id, 0)
         if isinstance(total, dict):
             total = total.get(page_no, max(total.values()))
         rows = cls.pages.get((content_type_id, page_no), [])

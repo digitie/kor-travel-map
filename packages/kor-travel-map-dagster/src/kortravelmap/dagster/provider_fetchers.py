@@ -2015,7 +2015,7 @@ _VISITKOREA_PLACE_CONTENT_TYPES: Final = ("12", "14", "28")
 async def fetch_visitkorea_tourist_attractions(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """TourAPI ``areaBasedList2`` 관광지(12)·문화시설(14)·레포츠(28) 전 페이지의 ``TourItem``(#1459).
+    """TourAPI ``areaBasedList2`` 관광지(12)·문화시설(14)·레포츠(28)의 ``TourItem``(#1459).
 
     data.go.kr 서비스키에 "한국관광공사_국문 관광정보 서비스_GW"(15101578)가 활용신청돼 있어야
     한다 — 축제(``searchFestival2``)와 같은 서비스다. 2026-11-09 운영 키 기준 12,560·2,753·3,717건,
