@@ -213,6 +213,9 @@ __all__ = [
     "kor_travel_geo_reverse_geocoder",
     "kor_travel_geo_address_geocoder",
     "kor_travel_geo_address_resolver",
+    "cached_address_geocoder",
+    "address_has_location_number",
+    "geocode_missing_coordinate",
     "resolve_regions_within_radius",
     "resolve_sigungu_by_radius",
 ]
@@ -315,6 +318,24 @@ class _CachedObservedReverseGeocoder:
 
     async def __call__(self, coord: Coordinate) -> Address | None:
         return (await self.observe(coord)).address
+
+    async def geocode_address(self, address: Address) -> Coordinate | None:
+        """주소 → 좌표(``POST /v2/geocode``) — 같은 client·계수로 원천 좌표 결측을 메운다(#1459 §4).
+
+        도로명이 있으면 도로명 먼저, 지번이 다르면 지번을 다음에 묻는다. 둘 다 못 찾으면 None.
+        외부 API fallback은 쓰지 않는다(``fallback="none"``, ``kor_travel_geo_address_resolver``와 같다).
+        """
+        queries: list[tuple[str, Literal["road", "parcel"]]] = []
+        if address.road:
+            queries.append((address.road, "road"))
+        if address.legal and address.legal != address.road:
+            queries.append((address.legal, "parcel"))
+        for query, addr_type in queries:
+            response = await self._client.geocode(query, type_=addr_type)
+            coord = geocode_response_to_coordinate(response)
+            if coord is not None:
+                return coord
+        return None
 
 
 class PrefetchingReverseGeocoder:
@@ -505,6 +526,63 @@ class PrefetchingReverseGeocoder:
 
     async def __call__(self, coord: Coordinate) -> Address | None:
         return (await self.observe(coord)).address
+
+
+def cached_address_geocoder(geocoder: AddressGeocoder) -> AddressGeocoder:
+    """``AddressGeocoder``를 (도로명, 지번) 주소 쌍 기준으로 메모이즈한다(``None`` 결과 포함).
+
+    적재 변환은 저장값 재사용(ADR-116) 때문에 같은 입력으로 여러 번 돈다 — 변환 **밖에서**
+    한 번 감싸 넘기면 pass마다 geo를 다시 부르지 않는다.
+    """
+    cache: dict[tuple[str, str], Coordinate | None] = {}
+
+    async def _cached(address: Address) -> Coordinate | None:
+        key = ((address.road or "").strip(), (address.legal or "").strip())
+        if not any(key):
+            return None
+        if key not in cache:
+            cache[key] = await geocoder(address)
+        return cache[key]
+
+    return _cached
+
+
+def address_has_location_number(address: Address) -> bool:
+    """도로명 또는 지번 주소에 숫자(건물번호·지번)가 있는가 — 점으로 찍을 만큼 구체적인가.
+
+    "경상남도 밀양시"·"서울특별시 강서구 화곡6동"처럼 시군구·동까지만 있는 주소는 정지오코딩하면
+    행정구역 대표점이 나온다. 그런 점은 장소의 위치가 아니므로 좌표 fallback에 쓰지 않는다
+    (#1459 §4 — 국가유산 행사 5,286건·MCST 클래스 5,074건이 그 모양이다). 동 이름의 숫자
+    ("화곡6동")는 번지가 아니다 — 숫자 뒤가 "동"·"가"인 것만 있으면 거짓이다.
+    """
+    for text_value in (address.road, address.legal):
+        if not text_value:
+            continue
+        for token in text_value.split():
+            if not any(ch.isdigit() for ch in token):
+                continue
+            if token[-1] in "동가" and token[:-1].rstrip("0123456789") and token[-2].isdigit():
+                # "화곡6동"·"을지로3가" — 행정동·가 이름.
+                continue
+            return True
+    return False
+
+
+async def geocode_missing_coordinate(
+    coord: Coordinate | None,
+    address: Address,
+    address_geocoder: AddressGeocoder | None,
+) -> Coordinate | None:
+    """원천 좌표가 없을 때 주소로 좌표를 찾는다(#1459 §4) — 적재 시점 fallback.
+
+    원천 좌표가 있으면 그대로 돌려준다(덮어쓰지 않는다). ``address_geocoder``가 없거나 주소가
+    점으로 찍을 만큼 구체적이지 않으면(``address_has_location_number``) None이다.
+    """
+    if coord is not None or address_geocoder is None:
+        return coord
+    if not address_has_location_number(address):
+        return None
+    return await address_geocoder(address)
 
 
 def cached_address_resolver(resolver: AddressResolver) -> AddressResolver:

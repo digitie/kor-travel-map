@@ -42,6 +42,17 @@ datagokr_file_data·krforest·krheritage·opinet·krex)이고 그중 krex는 받
 | krex `rest_areas_to_bundles`(`krex.py:472-513`) | 항상(place만) | 받지만 **미사용**(`:496`) | 코드 중심 자기 `Address` 조립; 같은 모듈 price·notice 변환기는 geo 없음 |
 | khoa(`khoa.py:128-145`) · krairport(`krairport.py:113-135`) · mcst(`mcst.py:570-585`) | 항상 | 받지 않음 | 코드 + `admin`(없으면 provider 텍스트)·`admin_dong_code/zipcode/sido_name/sigungu_name` — 자기 `Address` 조립 |
 
+**원천 좌표 결측 fallback(`address_geocoder=`, #1459 §4, 2026-11-09).** 축제(`cultural_festivals_to_bundles`)·
+주차장(`parking_lots_to_bundles`, 공용 `_standard_place_to_bundle`)·국가유산 place(`heritage_items_to_bundles`)는
+`address_geocoder`(`Address → Coordinate`)를 받는다. 원천 좌표가 없고(`0.0` 포함) 주소에 건물번호·지번이 있을
+때만(`geocoding.address_has_location_number` — "경상남도 밀양시"·"화곡6동"처럼 행정구역까지인 주소는 대표점이라
+쓰지 않는다) `geocode_missing_coordinate`가 `/v2/geocode`(도로명 → 지번, `fallback="none"`)로 좌표를 찾고, 그
+좌표로 평소처럼 reverse를 부른다. 그래서 스탬프는 ③(`called`)이고 `geo_applied.geocode`는 그대로 False다(코드를 받는
+`address_resolver`와 다르다). Dagster는 `reverse_geocoder` resource의 `geocode_address`를 run마다 한 번
+`cached_address_geocoder`로 감싸 넘긴다(`assets._address_geocoder` — 저장값 재사용의 여러 pass가 geo를 다시 부르지
+않는다). `raw_data`는 원천 그대로다(좌표 없음). 행정구역까지만 있는 국가유산 행사·MCST 클래스·산사태 예보는 좌표가
+없는 채로 남고 검색에서 빠진다(`feature_repo` 검색의 좌표·geometry 술어).
+
 **호출자 인벤토리** — `geo_applied`(§2)는 여기서 유도된다.
 
 | 호출자 | `reverse_geocoder=` | `address_resolver=` |

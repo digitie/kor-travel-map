@@ -79,10 +79,12 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.geocoding import (
+    AddressGeocoder,
     AddressResolver,
     ReverseGeocoder,
     cached_address_resolver,
     cached_reverse_geocoder,
+    geocode_missing_coordinate,
 )
 
 __all__ = [
@@ -268,6 +270,7 @@ async def _item_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> FeatureBundle | None:
     """한 row → 한 ``FeatureBundle``. 본 함수는 모듈 private.
 
@@ -284,11 +287,16 @@ async def _item_to_bundle(
     if not name:
         return None
 
-    # 1) Coordinate (결측/검증 실패면 좌표 미상 — `_coordinate_or_none`).
-    coord = _coordinate_or_none(item.longitude, item.latitude)
-
     road_text = normalize_korean_text(item.rdnmadr)
     legal_text = normalize_korean_text(item.lnmadr)
+
+    # 1) Coordinate (결측/검증 실패면 좌표 미상 — `_coordinate_or_none`). 원천 좌표가 없고
+    #    주소가 번지까지 있으면 주소 정지오코딩으로 메운다(#1459 §4, raw_data는 원천 그대로).
+    coord = await geocode_missing_coordinate(
+        _coordinate_or_none(item.longitude, item.latitude),
+        Address(road=road_text, legal=legal_text),
+        address_geocoder,
+    )
 
     # 2) Geocoding 보강. 좌표 reverse를 먼저 쓰고, bjd_code가 없으면 주소
     #    geocode 결과의 structured legal_dong_code를 사용한다.
@@ -443,6 +451,7 @@ async def cultural_festivals_to_bundles(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """전국문화축제표준데이터 items → ``list[FeatureBundle]`` (ADR-042 1차 source).
 
@@ -464,6 +473,10 @@ async def cultural_festivals_to_bundles(
         bjd_code가 없을 때 road/jibun 주소로 ``/v2/geocode``를 호출해
         ``legal_dong_code``를 채운다. 중복 주소는 ``cached_address_resolver``로
         1회만 호출.
+    address_geocoder
+        주소 → 좌표 async 정지오코더. 원천 좌표가 없고 주소가 번지까지 있는 row만 부른다
+        (#1459 §4 — 운영 축제 240건이 좌표 없이 적재돼 지도·동선에 쓸 수 없었다). 같은 입력으로
+        여러 번 부르는 호출자(저장값 재사용)는 ``cached_address_geocoder``로 감싸 넘긴다.
 
     Returns
     -------
@@ -517,6 +530,7 @@ async def cultural_festivals_to_bundles(
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,
             address_resolver=resolver,
+            address_geocoder=address_geocoder,
         )
         if bundle is not None:
             bundles.append(bundle)
@@ -736,9 +750,17 @@ async def _standard_place_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> FeatureBundle:
-    """data.go.kr 표준데이터 place 1건 → ``FeatureBundle`` 공용 조립(관광지/주차장)."""
-    coord = _coordinate_or_none(longitude, latitude)
+    """data.go.kr 표준데이터 place 1건 → ``FeatureBundle`` 공용 조립(관광지/주차장).
+
+    원천 좌표가 없으면 ``address_geocoder``로 주소 좌표를 찾는다(#1459 §4).
+    """
+    coord = await geocode_missing_coordinate(
+        _coordinate_or_none(longitude, latitude),
+        Address(road=road_text, legal=legal_text),
+        address_geocoder,
+    )
 
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
@@ -952,6 +974,7 @@ async def _parking_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> FeatureBundle:
     name = item.prkplce_nm or ""
     road_text = normalize_korean_text(item.rdnmadr)
@@ -997,6 +1020,7 @@ async def _parking_to_bundle(
         fetched_at=fetched_at,
         reverse_geocoder=reverse_geocoder,
         address_resolver=address_resolver,
+        address_geocoder=address_geocoder,
     )
 
 
@@ -1006,10 +1030,12 @@ async def parking_lots_to_bundles(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """전국주차장표준데이터 items → ``list[FeatureBundle]`` (place, category 06010000).
 
     안정키 ``prkplce_no``(없으면 ``instt_code``, 그것도 없으면 ``name::road`` 파생).
+    원천 좌표가 없는 row는 ``address_geocoder``로 주소 좌표를 찾는다(#1459 §4 — 운영 735건).
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
@@ -1019,6 +1045,7 @@ async def parking_lots_to_bundles(
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,
             address_resolver=resolver,
+            address_geocoder=address_geocoder,
         )
         for item in items
     ]

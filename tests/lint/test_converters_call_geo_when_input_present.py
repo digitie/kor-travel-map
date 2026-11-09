@@ -29,7 +29,8 @@ _PROVIDERS = Path(__file__).resolve().parents[2] / "src" / "kortravelmap" / "pro
 _DECLARED_UNUSED: frozenset[tuple[str, str, str]] = frozenset(
     {("krex.py", "rest_areas_to_bundles", "address_resolver")}
 )
-_PARAMS = ("reverse_geocoder", "address_resolver")
+#: ``address_geocoder``(#1459 §4): 원천 좌표가 없을 때 주소 → 좌표. 받으면 써야 한다.
+_PARAMS = ("reverse_geocoder", "address_resolver", "address_geocoder")
 
 
 def _consumed(func: ast.AST, name: str) -> bool:
@@ -102,6 +103,10 @@ def test_every_converter_consumes_the_geo_callables_it_takes() -> None:
         (
             "async def f(record, *, address_resolver=None):\n    _ = address_resolver\n",
             "address_resolver를 받고도 부르지 않는다",
+        ),
+        (
+            "async def f(record, *, address_geocoder=None):\n    return record\n",
+            "address_geocoder를 받고도 부르지 않는다",
         ),
     ],
 )

@@ -532,3 +532,38 @@ async def test_kor_travel_concierge_preserves_producer_only_extras() -> None:
     assert raw["rejection_reason"] == "검수 제외"
     assert raw["youtube"]["video_summary"] == "요약"
     assert raw["evidence"]["providers"]["vworld"] == {}
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        # 2026-11-08 운영 — 내륙 명소·카페가 해수욕장 제안으로 왔다(#1459 §6).
+        ("공산성", KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK),
+        ("스타벅스 더춘천 의암호 R점", KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK),
+        ("고석정", KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK),
+        # 이름이 해수욕장이라고 말하면 제안을 그대로 받는다.
+        ("함덕해수욕장", "01050100"),
+        ("월정리 해변", "01050100"),
+        ("Haeundae Beach", "01050100"),
+    ],
+)
+async def test_kor_travel_concierge_beach_suggestion_needs_a_beach_name(
+    name: str, expected: str
+) -> None:
+    item = _item(
+        place={**_item()["place"], "name": name, "category_code_suggestion": "01050100"}
+    )
+
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+
+    assert bundle.feature.category == expected
+
+
+async def test_kor_travel_concierge_other_suggestions_pass_through_unchanged() -> None:
+    item = _item(
+        place={**_item()["place"], "name": "공산성", "category_code_suggestion": "01070300"}
+    )
+
+    [bundle] = await kor_travel_concierge_items_to_bundles([item], fetched_at=_FETCHED)
+
+    assert bundle.feature.category == "01070300"

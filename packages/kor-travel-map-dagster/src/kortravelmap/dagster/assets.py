@@ -16,7 +16,12 @@ from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
-from kortravelmap.geocoding import GeoCallStats, ReverseGeocoder
+from kortravelmap.geocoding import (
+    AddressGeocoder,
+    GeoCallStats,
+    ReverseGeocoder,
+    cached_address_geocoder,
+)
 from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
@@ -249,6 +254,7 @@ async def run_feature_event_datagokr_cultural_festivals(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
+        address_geocoder=_address_geocoder(context),
     )
     return await _load(
         context,
@@ -363,6 +369,7 @@ async def run_feature_place_krheritage_items(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
+        address_geocoder=_address_geocoder(context),
     )
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     retired = 0
@@ -932,6 +939,8 @@ async def run_feature_place_standard_parking_lots(
     source = await _resource_value(context, "standard_parking_lots")
     await prefetch_replay(source)
     fetched_at = await _fetched_at(context)
+    # batch마다 새로 만들지 않는다 — 같은 주소를 다시 묻지 않게 run 동안 한 캐시(#1459 §4).
+    address_geocoder = _address_geocoder(context)
 
     async def _bundle_batches() -> AsyncIterator[Sequence[Any]]:
         async for records in _record_batches(context, "standard_parking_lots", batch_size=100):
@@ -940,7 +949,10 @@ async def run_feature_place_standard_parking_lots(
                 await _transform_reusing_geo(
                     context,
                     parking_lots_to_bundles,
-                    records, fetched_at=fetched_at, reverse_geocoder=_reverse_geocoder(context)
+                    records,
+                    fetched_at=fetched_at,
+                    reverse_geocoder=_reverse_geocoder(context),
+                    address_geocoder=address_geocoder,
                 ),
             )
         ensure_replay_complete(source)
@@ -1720,6 +1732,28 @@ def _reverse_geocoder(context: AssetExecutionContext) -> ReverseGeocoder | None:
         "ReverseGeocoder",
         wrapper_type(inner, lambda: _current_geo_dataset(context)),
     )
+
+
+def _address_geocoder(context: AssetExecutionContext) -> AddressGeocoder | None:
+    """원천 좌표 결측 fallback(#1459 §4) — ``reverse_geocoder`` resource의 ``geocode_address``.
+
+    같은 kor-travel-geo client·경계 계수를 쓴다(새 resource 키 없음). 첫 호출 전에 run-scoped
+    현재 토큰을 읽고(ADR-109 결정 2 — ``_TokenFirstReverseGeocoder``와 같은 순서), 답은 run 동안
+    주소 쌍으로 기억한다 — 저장값 재사용(ADR-116)이 변환을 여러 번 돌려도 geo는 주소당 한 번이다.
+    resource가 정지오코딩을 모르면(테스트 대역 등) None이다.
+    """
+    inner = _resource_object(context, "reverse_geocoder", default=None)
+    geocode = getattr(inner, "geocode_address", None)
+    if not callable(geocode):
+        return None
+    token_first = _resource_object(context, "kor_travel_geo_dataset", default=None) is not None
+
+    async def _geocode(address: Any) -> Any:
+        if token_first:
+            await _current_geo_dataset(context)
+        return await geocode(address)
+
+    return cached_address_geocoder(cast("AddressGeocoder", _geocode))
 
 
 async def _transform_reusing_geo(
