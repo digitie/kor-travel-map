@@ -2882,6 +2882,16 @@ MCST `media_famous_place`와 국가유산이 같은 장소를 두 Feature로 낸
 - [ ] 지역명 접두("안동 ", "영주")를 뗀 이름 일치를 이름 점수에 반영할지 결정하고 근거를 적는다.
 - [ ] 회귀 테스트가 두 쌍을 고정한다.
 
+## T-TRANSPORT-PLACES
+
+ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도역·항구(신규, alembic 438)를 검색되는 place로 둔다.
+
+- [ ] 배포 뒤 휴게소 job 1회: active 215건의 이름이 "…휴게소"꼴이고 "강릉휴게소"·"횡성휴게소"가 1위다.
+- [ ] "양양국제공항" 검색 1위가 공항 Feature다(운영 `/v1/features/search`).
+- [ ] transport `TRANSPORT_MAP_CURRENT_ENABLED`·철도/해운 기준정보 수집 활성화(Codex) 뒤 철도역·항구 job 1회 성공, 두 weekly schedule start.
+- [ ] 첫 적재 실측(역 행 수 → Feature 수, 좌표 없는 행 수, 항구 수)을 ADR-120에 적고 accepted로 올린다.
+- [ ] 일반·고속철도 전용 역(전주·순천·익산·여수엑스포·신경주·안동·단양)과 버스터미널(`/bus-terminals`)의 원천을 소유자와 정한다.
+
 ## T-KNPS-DATA-GAPS
 
 #1450 운영 1회 적재(2026-11-06)에서 KNPS dataset 넷이 들어오지 않았다. 원인은 읽기 전용 재현으로 확인했다.

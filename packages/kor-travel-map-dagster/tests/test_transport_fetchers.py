@@ -465,10 +465,8 @@ async def test_a_disabled_or_expired_reference_export_loads_nothing(
     monkeypatch: pytest.MonkeyPatch, status: int
 ) -> None:
     """503(export 꺼짐·완결 성공 없음)과 410(snapshot 만료)은 적재 없이 retryable 실패다."""
-    seen = _install(
-        monkeypatch,
-        lambda request: httpx.Response(status, json={"detail": "터미널 export가 활성화되지 않았습니다."}),
-    )
+    detail = {"detail": "터미널 export가 활성화되지 않았습니다."}
+    seen = _install(monkeypatch, lambda request: httpx.Response(status, json=detail))
     with pytest.raises(TransportExportNotCurrent) as raised:
         _ = [item async for item in fetch_transport_rail_stations(_settings())]
     assert raised.value.retryable is True

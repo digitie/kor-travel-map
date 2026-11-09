@@ -352,7 +352,8 @@ async def test_transport_reference_places_are_found_by_their_display_names(
         ("인천항", "incheon_port"),
     ):
         labels = await _search_ids(migrated_session, query, ids)
-        assert labels and labels[0] == first, (query, labels)
+        assert labels, query
+        assert labels[0] == first, (query, labels)
 
 
 async def test_region_prefix_split_handles_any_whitespace_and_leading_space(

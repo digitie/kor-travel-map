@@ -97,6 +97,8 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_knps_point_records",
         "fetch_kor_travel_concierge_youtube_features",
         "fetch_transport_airports",
+        "fetch_transport_ferry_ports",
+        "fetch_transport_rail_stations",
         "fetch_transport_rest_area_fuel_prices",
         "fetch_transport_rest_areas",
         "fetch_transport_highway_incidents",

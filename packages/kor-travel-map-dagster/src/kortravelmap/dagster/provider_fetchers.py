@@ -531,7 +531,8 @@ async def _iter_transport_reference_export(
                 snapshot_id, total_count = page.snapshot_id, page.total_count
             elif page.snapshot_id != snapshot_id or page.total_count != total_count:
                 raise TransportExportContractError(
-                    f"{path}: 페이지 도중 snapshot이 바뀌었다({snapshot_id!r}→{page.snapshot_id!r})."
+                    f"{path}: 페이지 도중 snapshot이 바뀌었다"
+                    f"({snapshot_id!r}→{page.snapshot_id!r})."
                 )
             if page.meta.source_status == "stale" and not stale_warned:
                 stale_warned = True
@@ -559,7 +560,8 @@ async def _iter_transport_reference_export(
             )
     if seen != total_count:
         raise TransportExportContractError(
-            f"{path}: 받은 행({seen})이 total_count({total_count})와 다르다 — 완전 snapshot이 아니다."
+            f"{path}: 받은 행({seen})이 total_count({total_count})와 다르다 — "
+            "완전 snapshot이 아니다."
         )
     if seen == 0:
         raise TransportExportEmpty(

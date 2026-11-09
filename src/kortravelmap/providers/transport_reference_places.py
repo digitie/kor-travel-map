@@ -1,4 +1,4 @@
-"""``kortravelmap.providers.transport_reference_places`` — transport 철도역·항구 → place FeatureBundle.
+"""``kortravelmap.providers.transport_reference_places`` — transport 철도역·항구 → place.
 
 원천: kor-travel-transport 저변동 기준정보 export(ADR-120)
 

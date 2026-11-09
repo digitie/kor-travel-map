@@ -48,7 +48,8 @@ def test_reference_page_golden_parses() -> None:
     assert page.total_count == 3
     assert page.meta.item_count == len(page.items) == 3
     assert page.meta.source_status == "ok"
-    assert page.has_more is False and page.next_cursor is None
+    assert page.has_more is False
+    assert page.next_cursor is None
     assert page.snapshot_id == "3f2b6c1e-6a2d-4c55-9a1b-7f0e9d6a1c01"
 
 

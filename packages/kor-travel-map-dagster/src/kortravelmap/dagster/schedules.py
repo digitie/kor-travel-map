@@ -251,7 +251,7 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         job_name="feature_place_transport_rail_stations_job",
         schedule_name="feature_place_transport_rail_stations_weekly_schedule",
         cron_schedule="30 4 * * 1",
-        description="도시·광역철도 역 place Feature 주 1회 적재(transport 기준정보 export, ADR-120).",
+        description="도시·광역철도 역 place 주 1회 적재(transport 기준정보, ADR-120).",
     ),
     FeatureLoadScheduleSpec(
         asset=feature_place_transport_ferry_ports,

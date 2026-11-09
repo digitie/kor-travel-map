@@ -27,6 +27,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
 | ``opinet`` | kor-travel-transport | 주유소·유가 |
 | ``standard_data`` | data.go.kr 표준데이터 | 표준데이터 5종 |
+| ``transport_reference_places`` | kor-travel-transport | 철도역·여객선 항구 place(ADR-120) |
 | ``visitkorea`` | python-visitkorea-api | TourAPI enrichment |
 
 **표에 없는 모듈** — 변환 모듈이 아니라서 위 표에 넣지 않는다:
