@@ -6,6 +6,7 @@ import asyncio
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -147,3 +148,48 @@ def test_special_street_skips_rows_without_name_or_location() -> None:
         special_streets_to_bundles([blank, no_location, _S1], fetched_at=_now())[0].feature.name
         == "광릉숲음식문화특화테마거리"
     )
+
+
+@pytest.mark.unit
+def test_special_street_without_coord_uses_address_geocoder() -> None:
+    no_coord = _SpecialStreet(
+        stret_nm="좌표없는특화거리",
+        stret_intrcn=None,
+        rdnmadr="경기도 남양주시 진접읍 광릉수목원로 179-19",
+        lnmadr=None,
+        latitude=None,
+        longitude=None,
+        stret_lt=None,
+        stor_number=None,
+        appn_year=None,
+        phone_number=None,
+        institution_nm=None,
+        reference_date=None,
+        instt_code=None,
+        instt_nm=None,
+    )
+    asked: list[Address] = []
+
+    async def _geocode(address: Address) -> Coordinate | None:
+        asked.append(address)
+        return Coordinate(lon=Decimal("127.18"), lat=Decimal("37.74"))
+
+    async def _never(address: Address) -> Coordinate | None:
+        raise AssertionError("원천 좌표가 있는 행은 정지오코딩하지 않는다")
+
+    bundle = special_streets_to_bundles(
+        [no_coord], fetched_at=_now(), address_geocoder=_geocode
+    )[0]
+    assert bundle.feature.coord == Coordinate(lon=Decimal("127.18"), lat=Decimal("37.74"))
+    assert [a.road for a in asked] == ["경기도 남양주시 진접읍 광릉수목원로 179-19"]
+    assert bundle.source_record.raw_data["latitude"] is None
+    assert special_streets_to_bundles([_S1], fetched_at=_now(), address_geocoder=_never)
+
+
+@pytest.mark.unit
+def test_special_street_duplicate_keys_keep_one_regardless_of_order() -> None:
+    other = _SpecialStreet(**{**_S1.__dict__, "phone_number": "031-000-0000"})
+    forward = special_streets_to_bundles([_S1, other], fetched_at=_now())
+    backward = special_streets_to_bundles([other, _S1], fetched_at=_now())
+    assert len(forward) == len(backward) == 1
+    assert forward[0].source_record.raw_payload_hash == backward[0].source_record.raw_payload_hash

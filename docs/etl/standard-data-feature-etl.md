@@ -184,11 +184,18 @@ def _classify_route_type(road_name: str) -> str:
 ### 7.6 traditional_markets (place, #1459)
 
 원천: 공공데이터포털 15012894 전국전통시장표준데이터(소상공인시장진흥공단, 갱신 연간,
-수정일 2025-11-26 확인), 표준 Open API `tn_pubr_public_trdit_mrkt_api`(개발계정 자동승인,
-일 10,000건). provider client는 `python-datagokr-api`의 `client.traditional_market`
-(`PublicTraditionalMarket`, provider PR#23 `649fa1a`). **서비스키마다 이 API를 따로 활용신청해야
-한다** — 신청하지 않은 키는 HTTP 403 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`다(2026-11-09 운영 키로
-실측: 박물관은 200, 특화거리·전통시장은 403).
+수정일 2025-11-26 확인)의 **포털 공개 파일**이다 — `client.traditional_market.iter_file_pages()`
+(provider PR#24 `9922dd2`)가 상세 화면의 파일 다운로드와 같은 경로(`download/columList.json` →
+`download/standard.json`)로 **서비스키 없이** 전량을 받는다(2026-11-09 실측 1,393행, 좌표 없음 16).
+표준 Open API `tn_pubr_public_trdit_mrkt_api`는 운영 키가 활용신청되지 않아 HTTP 403이라 쓰지
+않는다(fallback도 두지 않는다 — 같은 키로는 403이다).
+
+- 파일 검산(provider): 선언 0·5만 건 상한 거부, 페이지 길이 불일치·기형 행 거부, 순회 전후
+  메타데이터 변경 거부, UTF-8(BOM)/CP949 해독. Map fetcher는 받은 행 수가 선언 `totalCount`와
+  같지 않거나 0이면 `StandardFileSnapshotIncomplete`로 실패한다(은퇴 전에).
+- 컬럼: 파일은 원천 테이블의 대문자 snake(`MRKT_NM`)라 Open API의 camelCase(`mrktNm`)와 다르다.
+  provider가 소문자로 typed 필드(`mrkt_nm`)에 대응하고 원문 행은 `raw`에 둔다 — Map 변환·
+  `raw_data`·replay는 typed 필드만 읽으므로 원천 경로와 무관하다. 파일에만 `INSTT_NM`이 있다.
 
 - 변환: `providers.standard_data.traditional_markets_to_bundles` → place, category `05070000`
   (`docs/architecture/category.md` §12), `place_kind="traditional_market"`, maki `shop`, `P-04`.
@@ -198,9 +205,7 @@ def _classify_route_type(road_name: str) -> str:
   같은 snapshot에서 시장명·지역이 겹치는 행만 `::전체 주소`를 붙이고(새 동명 시장이 같은 시군구에 생기면 그
   둘의 키가 바뀐다 — 감수한 비용), 주소가 없으면 좌표(소수 4자리)가 지역을 대신한다. 그래도 같은 키는 원천
   payload hash가 가장 작은 행 하나만 남긴다(페이지 순서 무관). 그래서 변환은 snapshot 전량을 한 번에 받는다.
-- 부분 snapshot: fetcher가 선언 `totalCount`보다 적게 받으면 `TraditionalMarketSnapshotIncomplete`로 실패한다
-  (2페이지가 resultCode 03 빈 페이지로 오거나 provider가 기형 행을 버리면 그만큼 실제 시장이 은퇴하므로).
-- 좌표: 원천 위경도. 없거나 무효면 asset이 주는 주소 정지오코더로 도로명 → 지번 순으로 찾고
+- 좌표: 원천 위경도. 없거나 무효면 공용 정지오코더(`_address_geocoder`, #1463)로 도로명 → 지번 순으로 찾고
   (`facility_info.coord_source="geocode"`), 그 좌표도 역지오코딩한다. 정지오코딩 좌표는
   `raw_data`에 넣지 않는다(replay가 원천 그대로 다시 변환한다). 2026-11-09 공식 미리보기 499행 중
   좌표 없는 행은 3행.
@@ -309,3 +314,12 @@ curl -X POST http://127.0.0.1:12701/debug/standard-data \
   처리한다(§1·§3). ADR-042의 임시 dataset_key(`datagokr_tourism_points` /
   `datagokr_cultural_festivals`)는 현 §2 명명(`datagokr_tourist_attractions` /
   `standard_cultural_festivals`)으로 대체됐다.
+
+### 7.7 special_streets (place anchor, 공개 파일 — 2026-11-09)
+
+`standard_special_streets`도 같은 이유(운영 키 403, prod 0행)로 Open API에서 **포털 공개 파일**
+(15017322, `client.special_street.iter_file_pages()`)로 옮겼다 — 실측 274행, 좌표 없음 28. 좌표 없는 행은
+공용 정지오코더로 찾는다. 적재는 전통시장과 같은 snapshot 은퇴 경로(`retire_absent_from_snapshot`, 0행·
+선언 미달 실패)다. 자연키 `거리명::도로명(없으면 지번)`은 그대로 둔다(prod 0행이라 재키 비용이 없고,
+실데이터에 같은 키가 없다). `DISABLED_FEATURE_LOAD_SCHEDULES`에서 뺐고 schedule은 STOPPED로 생긴다.
+

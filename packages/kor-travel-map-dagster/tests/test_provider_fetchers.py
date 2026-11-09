@@ -18,7 +18,7 @@ from kortravelmap.dagster.feature_operation_tracking import (
 )
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
-    TraditionalMarketSnapshotIncomplete,
+    StandardFileSnapshotIncomplete,
     fetch_datagokr_cultural_festivals,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
@@ -31,6 +31,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_mois_license_records,
     fetch_standard_museums,
     fetch_standard_parking_lots,
+    fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
     fetch_standard_traditional_markets,
     fetch_visitkorea_festival_events,
@@ -173,6 +174,20 @@ class _FakeStandardService:
         )
 
 
+class _FakeStandardFileService(_FakeStandardService):
+    """공개 파일 표면(``iter_file_pages``)까지 흉내낸다 — 전통시장·특화거리(키 없음)."""
+
+    def __init__(self, records: list[object], *, declared: int | None = None) -> None:
+        super().__init__(records)
+        self._declared = len(records) if declared is None else declared
+        self.file_reads = 0
+
+    async def iter_file_pages(self) -> Any:
+        self.file_reads += 1
+        if self._records:
+            yield _FakeStandardPage(list(self._records), self._declared)
+
+
 #: 이름은 유지한다 — 호출부(테스트)가 그대로 읽히게.
 _FakeFestivalService = _FakeStandardService
 _FakeMuseumArtService = _FakeStandardService
@@ -188,8 +203,8 @@ class _FakeDataGoKrClient:
         self.museum_art = _FakeMuseumArtService([object(), object(), object()])
         self.tourist_attraction = _FakeMuseumArtService([object(), object()])
         self.parking = _FakeMuseumArtService([object(), object(), object(), object()])
-        self.special_street = _FakeStandardService([object(), object()])
-        self.traditional_market = _FakeStandardService([object(), object(), object()])
+        self.special_street = _FakeStandardFileService([object(), object()])
+        self.traditional_market = _FakeStandardFileService([object(), object(), object()])
         _FakeDataGoKrClient.instances.append(self)
 
     async def aclose(self) -> None:
@@ -1262,56 +1277,57 @@ def test_standard_parking_lots_fetch_yields_and_closes(
     assert fake.instances[0].closed is True
 
 
-def test_standard_traditional_markets_raises_when_credential_missing() -> None:
+@pytest.mark.parametrize(
+    ("fetch", "attr", "expected"),
+    [
+        (fetch_standard_traditional_markets, "traditional_market", 3),
+        (fetch_standard_special_streets, "special_street", 2),
+    ],
+)
+def test_standard_files_are_keyless_and_close(
+    monkeypatch: pytest.MonkeyPatch, fetch: Any, attr: str, expected: int
+) -> None:
+    # 포털 공개 파일은 서비스키를 받지 않는다 — 키가 없어도 실패하지 않고, 있어도 넘기지 않는다.
+    fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
-    agen = fetch_standard_traditional_markets(settings)
-    with pytest.raises(ProviderCredentialMissing):
-        asyncio.run(agen.__anext__())
+    records = asyncio.run(_acollect(fetch(settings)))
+
+    assert len(records) == expected
+    client = fake.instances[0]
+    assert client.api_key is None
+    assert getattr(client, attr).file_reads == 1
+    assert getattr(client, attr).pages == []  # Open API ``list``는 부르지 않는다
+    assert client.closed is True
 
 
-def test_standard_traditional_markets_fetch_yields_and_closes(
-    monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize(
+    ("fetch", "attr"),
+    [
+        (fetch_standard_traditional_markets, "traditional_market"),
+        (fetch_standard_special_streets, "special_street"),
+    ],
+)
+@pytest.mark.parametrize(("rows", "declared"), [(3, 1393), (0, 0), (0, 274)])
+def test_standard_files_fail_on_short_or_empty_snapshot(
+    monkeypatch: pytest.MonkeyPatch, fetch: Any, attr: str, rows: int, declared: int
 ) -> None:
+    # 이 두 dataset은 snapshot에 없는 장소를 은퇴시킨다 — 선언보다 짧거나 빈 파일을 성공으로
+    # 넘기면 실제 장소가 내려간다.
     fake = _install_fake_datagokr(monkeypatch)
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
-
-    records = asyncio.run(_acollect(fetch_standard_traditional_markets(settings)))
-
-    assert len(records) == 3
-    assert fake.instances[0].closed is True
-
-
-class _ShortMarketService:
-    """선언 1,400건인데 2페이지가 빈 응답(resultCode 03을 빈 페이지로 준 경우)."""
-
-    def __init__(self) -> None:
-        self.pages: list[int] = []
-
-    async def list(self, *, page_no: int = 1, num_of_rows: int = 1000, **_: Any) -> Any:
-        self.pages.append(page_no)
-        items = [object()] * num_of_rows if page_no == 1 else []
-        return _FakeStandardPage(items, 1400)
-
-
-def test_standard_traditional_markets_fails_on_short_snapshot(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    # 이 dataset은 snapshot에 없는 시장을 은퇴시키므로 짧은 snapshot을 성공으로 넘기면
-    # 실제 시장 400곳이 내려간다 — 선언 건수보다 적으면 실패해야 한다.
-    fake = _install_fake_datagokr(monkeypatch)
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+    settings = KorTravelMapSettings(data_go_kr_service_key=None)
     original_init = fake.__init__
 
     def _init(self: Any, **kwargs: Any) -> None:
         original_init(self, **kwargs)
-        self.traditional_market = _ShortMarketService()
+        setattr(self, attr, _FakeStandardFileService([object()] * rows, declared=declared))
 
     monkeypatch.setattr(fake, "__init__", _init)
 
-    with pytest.raises(TraditionalMarketSnapshotIncomplete, match="1400건 중 1000건"):
-        asyncio.run(_acollect(fetch_standard_traditional_markets(settings)))
+    with pytest.raises(StandardFileSnapshotIncomplete, match="부분 snapshot"):
+        asyncio.run(_acollect(fetch(settings)))
     assert fake.instances[0].closed is True
+
 
 async def test_krheritage_fetch_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)

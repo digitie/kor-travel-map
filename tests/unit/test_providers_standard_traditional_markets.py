@@ -190,13 +190,12 @@ def test_market_reverse_geocoder_fills_codes() -> None:
 
 
 @pytest.mark.unit
-def test_market_without_coord_is_geocoded_road_then_jibun_and_reverse_geocoded() -> None:
+def test_market_without_coord_is_geocoded_and_reverse_geocoded() -> None:
     asked: list[Address] = []
 
+    # 도로명→지번 순서는 공용 정지오코더(``geocode_address``)의 일이다 — 변환은 주소 둘을 함께 준다.
     async def _geocode(address: Address) -> Coordinate | None:
         asked.append(address)
-        if address.road:  # 도로명은 못 찾고 지번으로 찾는다
-            return None
         return Coordinate(lon=Decimal("126.9629"), lat=Decimal("36.0703"))
 
     reversed_: list[Coordinate] = []
@@ -212,8 +211,7 @@ def test_market_without_coord_is_geocoded_road_then_jibun_and_reverse_geocoded()
         address_geocoder=_geocode,
     )[0]
     assert [(a.road, a.legal) for a in asked] == [
-        ("전북특별차치도 익산시 함열읍 2길 8", None),
-        (None, "전북특별차치도 익산시 와리 565-26"),
+        ("전북특별차치도 익산시 함열읍 2길 8", "전북특별차치도 익산시 와리 565-26"),
     ]
     geocoded = Coordinate(lon=Decimal("126.9629"), lat=Decimal("36.0703"))
     assert bundle.feature.coord == geocoded

@@ -109,7 +109,7 @@ __all__ = [
     "fetch_standard_parking_lots",
     "fetch_standard_special_streets",
     "fetch_standard_traditional_markets",
-    "TraditionalMarketSnapshotIncomplete",
+    "StandardFileSnapshotIncomplete",
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
     "fetch_transport_airports",
@@ -1332,24 +1332,51 @@ async def fetch_standard_tourist_attractions(
         await client.aclose()
 
 
+class StandardFileSnapshotIncomplete(RuntimeError):
+    """공개 파일 snapshot이 선언 건수와 다르다 — 은퇴 적재 전에 멈춘다."""
+
+
+
+async def _iter_datagokr_standard_file(service: Any, *, label: str) -> AsyncIterator[Any]:
+    """표준데이터 **포털 공개 파일**(서비스키 불필요)을 페이지마다 세며 소진한다.
+
+    provider ``iter_file_pages``가 선언 건수 0·5만 건 상한·짧은 페이지·기형 행·전후
+    메타데이터 변경을 거부한다. 여기서는 받은 행 수가 선언 ``total_count``와 같은지 한 번 더
+    본다 — 이 두 dataset은 snapshot에 없는 행을 **은퇴**시키므로 짧은 snapshot을 성공으로
+    넘기면 실제 장소가 내려간다(적대 리뷰 A HIGH, #1461). 요청 수는 페이지마다 센다(헤더 2회
+    포함 — 페이지 수 + 2).
+    """
+    seen = 0
+    declared = 0
+    note_upstream_request()  # 순회 전 header(columList.json)
+    async for page in service.iter_file_pages():
+        note_upstream_request()
+        declared = int(page.total_count)
+        for item in page.items:
+            seen += 1
+            yield item
+    note_upstream_request()  # 순회 후 header 재확인
+    if seen != declared or seen == 0:
+        raise StandardFileSnapshotIncomplete(
+            f"{label}: 선언 {declared}건 중 {seen}건을 받았다 — "
+            "부분 snapshot으로 은퇴시키지 않는다."
+        )
+
+
 async def fetch_standard_special_streets(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국지역특화거리표준데이터 record를 datagokr public client로 stream한다."""
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard special streets live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
+    """전국지역특화거리표준데이터(15017322) 공개 파일을 서비스키 없이 stream한다.
 
+    Open API(``tn_pubr_public_area_spcliz_stret_api``)는 운영 키가 활용신청되지 않아 403이었고
+    prod 0행이었다. 포털 공개 파일은 키를 받지 않는다(2026-11-09 실측 274행).
+    """
+    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard(
-            client.special_street, label="datagokr special_street.list"
+        async for record in _iter_datagokr_standard_file(
+            client.special_street, label="datagokr special_street file"
         ):
             yield record
     finally:
@@ -1359,56 +1386,21 @@ async def fetch_standard_special_streets(
 async def fetch_standard_traditional_markets(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국전통시장표준데이터(15012894) record를 datagokr public client로 stream한다.
+    """전국전통시장표준데이터(15012894) 공개 파일을 서비스키 없이 stream한다.
 
-    서비스키마다 이 API를 따로 활용신청해야 한다 — 신청하지 않은 키는 HTTP 403
-    (``SERVICE_KEY_IS_NOT_REGISTERED_ERROR``)으로 실패한다.
+    Open API는 운영 키가 활용신청되지 않아 403이다. 포털 공개 파일은 키를 받지 않는다
+    (2026-11-09 실측 1,393행).
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard traditional markets live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    del settings
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
-    service = client.traditional_market
-    declared: list[int] = []
-
-    async def _page(page_no: int) -> ProviderPage:
-        page = await service.list(page_no=page_no, num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE)
-        if getattr(page, "total_count_known", True):
-            declared.append(int(page.total_count))
-        return ProviderPage(items=list(page.items), total_count=page.total_count)
-
-    seen = 0
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in aiter_paginated_items(
-            _page,
-            num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE,
-            label="datagokr traditional_market.list",
-            warn=_LOGGER.warning,
+        async for record in _iter_datagokr_standard_file(
+            client.traditional_market, label="datagokr traditional_market file"
         ):
-            seen += 1
             yield record
     finally:
         await client.aclose()
-    # 이 dataset은 snapshot에 없는 시장을 **은퇴**시킨다. 짧은 snapshot(resultCode 03 빈
-    # 페이지·provider가 버린 기형 행)은 그 차이만큼 실제 시장을 내린다 — 선언 건수보다
-    # 적게 받았으면 은퇴로 이어지기 전에 실패시킨다(적대 리뷰 A HIGH).
-    expected = max(declared, default=0)
-    if seen < expected:
-        raise TraditionalMarketSnapshotIncomplete(
-            f"전국전통시장표준데이터: 선언 {expected}건 중 {seen}건만 받았다 — "
-            "부분 snapshot으로 은퇴시키지 않는다."
-        )
-
-
-class TraditionalMarketSnapshotIncomplete(RuntimeError):
-    """전통시장 snapshot이 upstream 선언 건수보다 짧다 — 은퇴 적재 전에 멈춘다."""
 
 
 #: 서울 열린데이터광장 OpenAPI base. **https가 없다** — 8088 포트는 TLS를 받지

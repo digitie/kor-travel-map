@@ -559,6 +559,9 @@ def test_provider_record_resource_env_mapping() -> None:
         "KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY",
     )
     assert specs["kor_travel_concierge_youtube_features"].source_env_names == ()
+    # 포털 공개 파일 원천은 서비스키를 요구하지 않는다(2026-11-09, #1459).
+    for key in ("standard_traditional_markets", "standard_special_streets"):
+        assert specs[key].kor_travel_map_env_names == ()
 
 
 def test_provider_record_guard_message_hides_secret(
