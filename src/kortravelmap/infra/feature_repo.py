@@ -1946,7 +1946,7 @@ def _search_tail_sql(expression: str) -> str:
 # 공개 행 전부를 recheck한다(prod 2026-11-09 "서울 카페" 33만 행 recheck, 1.7초). ``strpos``는 GIN이
 # 받지 않아 그 팔은 ``idx_features_sigungu``로만 읽힌다. ``None``: 2글자 이하인데 지역이 넓다
 # (``_SEARCH_REGION_SCAN_MAX_ROWS`` 초과). 분류 팔도 같은 상한을 따른다(``_search_region_arms``).
-def _feature_search_score_cte_sql(
+def _feature_search_score_cte(
     *,
     region: bool,
     region_categories: bool = False,
@@ -2124,7 +2124,7 @@ candidates AS (
 """
 
 
-_FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = _feature_search_score_cte_sql(region=False)
+_FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = _feature_search_score_cte(region=False)
 
 _FEATURE_SEARCH_PAGE_TAIL_SQL: Final[str] = """
 SELECT candidates.*, score::text AS score_cursor
@@ -2186,17 +2186,22 @@ FROM candidates
 _SearchRegionName = Literal["ilike", "strpos"] | None
 _SEARCH_REGION_NAME_MODES: Final[tuple[_SearchRegionName, ...]] = ("ilike", "strpos", None)
 
+
+def _feature_search_region_sql(
+    *, categories: bool, count: bool, name_mode: _SearchRegionName = "ilike"
+) -> str:
+    """지역 검색 문장 — 본 질의(``count=False``) 또는 개수 질의. ``categories``는 분류 팔."""
+    cte = _feature_search_score_cte(
+        region=True, region_categories=categories, region_name=name_mode
+    )
+    return cte + (_SEARCH_COUNT_TAIL_SQL if count else _FEATURE_SEARCH_PAGE_TAIL_SQL)
+
+
 #: 지역 검색 SQL — ``(이름 팔, 분류 팔 여부)`` → (본 질의, 개수 질의).
 _FEATURE_SEARCH_REGION_SQL: Final[dict[tuple[_SearchRegionName, bool], tuple[str, str]]] = {
     (name_mode, categories): (
-        _feature_search_score_cte_sql(
-            region=True, region_categories=categories, region_name=name_mode
-        )
-        + _FEATURE_SEARCH_PAGE_TAIL_SQL,
-        _feature_search_score_cte_sql(
-            region=True, region_categories=categories, region_name=name_mode
-        )
-        + _SEARCH_COUNT_TAIL_SQL,
+        _feature_search_region_sql(categories=categories, count=False, name_mode=name_mode),
+        _feature_search_region_sql(categories=categories, count=True, name_mode=name_mode),
     )
     for name_mode in _SEARCH_REGION_NAME_MODES
     for categories in (False, True)

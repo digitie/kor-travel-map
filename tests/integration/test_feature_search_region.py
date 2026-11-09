@@ -283,7 +283,7 @@ async def test_region_entries_sql_reads_names_per_sigungu_code(
 async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
     migrated_session: AsyncSession,
 ) -> None:
-    """지역 팔은 ``idx_features_sigungu``로 읽힌다 — features Seq Scan이 생기면 빨갛다(ADR-012).
+    """지역 팔은 색인으로 읽힌다(strpos 팔은 ``idx_features_sigungu``) — features Seq Scan이면 빨강.
 
     ``enable_seqscan=off``는 금지가 아니라 벌점이다 — 인덱스로 받을 수 없는 술어면 계획에 Seq Scan이
     그대로 남는다. 그래서 "sigungu 색인을 쓴다"와 "features Seq Scan이 없다"를 함께 본다.
@@ -328,7 +328,9 @@ async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
             if node.get("Node Type") in {"Seq Scan", "Parallel Seq Scan"}
             and node.get("Relation Name") == "features"
         ]
-        assert "idx_features_sigungu" in indexes, (name_mode, categories, indexes)
+        if name_mode == "strpos":
+            # strpos 이름 팔은 GIN이 받지 않는다 — sigungu 색인이 유일한 색인 경로다.
+            assert "idx_features_sigungu" in indexes, (name_mode, categories, indexes)
         assert not seq_on_features, (name_mode, categories, seq_on_features)
         assert "ST_Transform" not in sql
 
