@@ -59,7 +59,7 @@ datagokr_file_data·krforest·krheritage·opinet·krex)이고 그중 krex는 받
 |---|---|---|
 | Dagster feature load asset(`packages/kor-travel-map-dagster/src/kortravelmap/dagster/assets.py`, `_reverse_geocoder(context)` 20곳 + `reverse_geocoder=None` 1곳) | 넘김 — 단 `feature_price_transport_fuel_stations`·`…_rest_areas`(`:410-432`, `:533-`)는 좌표만 싣고, `feature_notice_transport_highway_incidents`는 `reverse_geocoder=None`(`:643`) | **넘기지 않음(0건)** — asset·큐 runner 경로의 `geo_applied.geocode`는 MOIS를 포함해 **전부 False** |
 | 큐 runner(`dagster/feature_update_runner.py:121-126`, 같은 asset run 함수) | resource로 넘김 | 넘기지 않음 |
-| 전통시장 asset `feature_place_standard_traditional_markets`(#1459) | 넘김 | 넘기지 않음 — 대신 **좌표 없는 행만** `address_geocoder=`(`/v2/geocode` → 좌표)로 좌표를 얻고 그 좌표를 역지오코딩한다. 최종 행은 좌표가 있으므로 §2 ③ `called`이고 `geo_applied.geocode=False`가 맞다. 클라이언트는 run마다 따로 열되 `reverse_geocoder`의 `GeoCallStats`를 공유한다 |
+| 전통시장 asset `feature_place_standard_traditional_markets`(#1459) | 넘김 | 넘기지 않음 — 대신 **좌표 없는 행만** `address_geocoder=`(`/v2/geocode` → 좌표)로 좌표를 얻고 그 좌표를 역지오코딩한다. 최종 행은 좌표가 있으므로 §2 ③ `called`이고 `geo_applied.geocode=False`가 맞다. 정지오코더는 공용 `_address_geocoder`(#1463, `reverse_geocoder` resource의 `geocode_address`)다. 특화거리 asset도 같다 |
 | offline upload(`dagster/offline_uploads.py:62-63`) | 넘김 | `kor_travel_geo_address_resolver(kraddr, fallback="api")`(VWorld 포함) |
 | API offline-upload **validation** job(`packages/kor-travel-map-api/src/kortravelmap/api/routers/offline_uploads.py:1503-1504` → `run_offline_upload_validation_job`) | 넘김 | 넘김(`fallback="api"`) — 검증만 하고 적재하지 않으므로(`src/kortravelmap/offline_upload.py:317`) **스탬프·토큰 대상 아님** |
 | CLI `ktmctl import`(`src/kortravelmap/cli/main.py:455-456`, `:557-558`, `:568-569`) | 넘김 | 넘김(`fallback="api"`) |

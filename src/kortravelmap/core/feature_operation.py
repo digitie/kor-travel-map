@@ -129,7 +129,6 @@ FEATURE_LOAD_DISABLED_OPERATION_KEYS: frozenset[str] = frozenset(
         "feature_place_datagokr_ansan_world_restaurants_job",
         "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
         "feature_place_datagokr_jeju_local_restaurants_job",
-        "feature_place_standard_special_streets_job",
     }
 )
 """자동 적재를 끈 operation — Dagster ``schedules.DISABLED_FEATURE_LOAD_OPERATION_KEYS``와 같은

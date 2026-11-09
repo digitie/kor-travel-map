@@ -303,16 +303,13 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         resource_key="standard_special_streets",
         provider_package="python-datagokr-api",
         dataset_key="standard_special_streets",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="전국지역특화거리표준데이터(15017322) 포털 공개 파일 — 서비스키 불필요.",
     ),
     ProviderRecordResourceSpec(
         resource_key="standard_traditional_markets",
         provider_package="python-datagokr-api",
         dataset_key="datagokr_traditional_markets",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note="전국전통시장표준데이터(15012894) — 서비스키마다 따로 활용신청해야 한다.",
+        note="전국전통시장표준데이터(15012894) 포털 공개 파일 — 서비스키 불필요.",
     ),
     ProviderRecordResourceSpec(
         resource_key="datagokr_file_data_records",

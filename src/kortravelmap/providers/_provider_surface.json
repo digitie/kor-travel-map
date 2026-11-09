@@ -371,6 +371,7 @@
             "estbl_year",
             "homepage_url",
             "instt_code",
+            "instt_nm",
             "latitude",
             "lnmadr",
             "longitude",
@@ -657,6 +658,8 @@
           ],
           "members": [
             "iter_all",
+            "iter_file_all",
+            "iter_file_pages",
             "iter_pages",
             "list"
           ]
@@ -687,8 +690,27 @@
           ],
           "members": [
             "iter_all",
+            "iter_file_all",
+            "iter_file_pages",
             "iter_pages",
             "list"
+          ]
+        },
+        "datagokr.services.standard_file.StandardFileSource": {
+          "external_bases": [
+            "Generic"
+          ],
+          "members": [
+            "iter_all",
+            "iter_pages"
+          ]
+        },
+        "datagokr.services.standard_file.StandardFileSpec": {
+          "external_bases": [],
+          "members": [
+            "dataset_id",
+            "required_columns",
+            "table_name"
           ]
         },
         "datagokr.transport.AsyncHttpxTransport": {
@@ -709,7 +731,7 @@
         }
       },
       "package": "datagokr",
-      "pinned_sha": "649fa1a1b3e24f851a4f550a297a2d8ba5185c6c"
+      "pinned_sha": "9922dd27d5208d68abb3c8c019abedd12097b2d8"
     },
     "python-khoa-api": {
       "classes": {

@@ -1,3 +1,7 @@
+## 2026-11-09 — 전통시장·특화거리 공개 파일
+
+- 다음: 배포 회전에 이 Map SHA를 묶는다 → 두 dataset `POST /v1/ops/pipeline/requests`(preview 먼저) → 건수(1,393·274)·#1459 시장 검색 → 두 schedule 켜기. 판정 acceptance `T-MARKET-LOAD`.
+
 ## 2026-11-09 — #1459 지역 검색·좌표 fallback
 
 - 배포 뒤 축제·주차장·국가유산 재적재로 좌표를 채우고 MCST 테마 4종은 재적재로 #1447 분류를 반영한다. 마이그레이션·OpenAPI 변경 없음.

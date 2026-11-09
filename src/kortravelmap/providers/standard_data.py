@@ -1101,6 +1101,7 @@ async def _special_street_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> FeatureBundle:
     name = item.stret_nm or ""
     road_text = normalize_korean_text(item.rdnmadr)
@@ -1153,6 +1154,7 @@ async def _special_street_to_bundle(
         fetched_at=fetched_at,
         reverse_geocoder=reverse_geocoder,
         address_resolver=address_resolver,
+        address_geocoder=address_geocoder,
     )
 
 
@@ -1162,12 +1164,15 @@ async def special_streets_to_bundles(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """전국지역특화거리표준데이터 items → place anchor ``FeatureBundle``.
 
     특화거리는 개별 POI가 아니라 거리/구역 메타 source다. T-223b에서는 geometry가
     없는 원천 좌표를 ``theme_area_anchor`` place로 보존하고, 후속 curated overlay가
     kor-travel-map 복사 시 ``curation_relation='theme_area_anchor'``로 해석한다.
+    원천 좌표가 없는 row는 ``address_geocoder``로 주소 좌표를 찾는다(공개 파일 274행 중
+    28행, 2026-11-09).
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
@@ -1185,6 +1190,7 @@ async def special_streets_to_bundles(
                 fetched_at=fetched_at,
                 reverse_geocoder=geocoder,
                 address_resolver=resolver,
+                address_geocoder=address_geocoder,
             )
         )
     return bundles
@@ -1263,24 +1269,6 @@ def traditional_market_natural_key(
     return "::".join(parts)
 
 
-async def _geocode_market(
-    address_geocoder: AddressGeocoder,
-    road_text: str | None,
-    legal_text: str | None,
-) -> Coordinate | None:
-    """좌표 없는 시장의 주소 정지오코딩 — 도로명을 먼저, 못 찾으면 지번으로."""
-    for address in (
-        Address(road=road_text) if road_text else None,
-        Address(legal=legal_text) if legal_text else None,
-    ):
-        if address is None:
-            continue
-        coord = await address_geocoder(address)
-        if coord is not None:
-            return coord
-    return None
-
-
 async def _traditional_market_to_bundle(
     item: PublicTraditionalMarketItem,
     *,
@@ -1293,9 +1281,15 @@ async def _traditional_market_to_bundle(
     address_resolver: AddressResolver | None,
     address_geocoder: AddressGeocoder | None,
 ) -> FeatureBundle:
-    fallback_coord: Coordinate | None = None
-    if _coordinate_or_none(item.longitude, item.latitude) is None and address_geocoder is not None:
-        fallback_coord = await _geocode_market(address_geocoder, road_text, legal_text)
+    source_coord = _coordinate_or_none(item.longitude, item.latitude)
+    # 원천 좌표가 없을 때만 주소로 찾는다 — 공용 규칙(번지 낱말 있는 주소만, 도로명→지번).
+    fallback_coord = (
+        await geocode_missing_coordinate(
+            None, Address(road=road_text, legal=legal_text), address_geocoder
+        )
+        if source_coord is None
+        else None
+    )
     reference_date = item.reference_date.isoformat() if item.reference_date is not None else None
     raw_data: dict[str, Any] = {
         "mrkt_nm": item.mrkt_nm,

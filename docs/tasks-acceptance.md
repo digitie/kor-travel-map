@@ -2926,11 +2926,12 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 
 ## T-MARKET-LOAD
 
-#1459 전통시장 공백. 코드(provider PR#23 `649fa1a`, Map migration 439)는 머지로 들어가고, 아래가 참이면 닫는다.
+#1459 전통시장 공백 + 지역특화거리 prod 0행. 코드(provider PR#23 `649fa1a`·PR#24 `9922dd2`, Map migration 439)는 머지로 들어가고, 아래가 참이면 닫는다.
 
-- [ ] 운영 data.go.kr 키가 `tn_pubr_public_trdit_mrkt_api`를 200으로 받는다(활용신청 — 2026-11-09 운영 키는 403).
+- [x] 원천: 두 dataset 모두 포털 공개 파일을 서비스키 없이 받는다(2026-11-09 실측 1,393·274행) — 활용신청이 필요 없다.
 - [ ] 439가 운영 DB에 적용되고 `datagokr_traditional_markets` refresh operation이 `/v1/ops/datasets`에 보인다.
 - [ ] `POST /v1/ops/pipeline/requests`(preview 먼저)로 첫 적재가 성공하고 feature 수가 원천 totalCount와 맞는다(건너뛴 행은 사유와 함께).
 - [ ] #1459 목록의 시장(망원·통인·남대문·신포·강릉/속초 중앙·강화 풍물 등)이 PinVi `/search`에서 시장 feature로 3위 안에 나온다(없는 것은 원천 부재 여부와 함께 #1459에 기록).
-- [ ] `feature_place_standard_traditional_markets_monthly_schedule`을 켠다.
+- [ ] `standard_special_streets`도 첫 적재가 성공하고 feature 수가 274(원천)와 맞는다.
+- [ ] `feature_place_standard_traditional_markets_monthly_schedule`·`feature_place_standard_special_streets_monthly_schedule`을 켠다.
 
