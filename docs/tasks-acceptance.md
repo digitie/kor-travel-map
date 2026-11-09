@@ -2924,6 +2924,15 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 
 - [ ] 재개 조건: 높이 작업면을 쓰는 Feature 지도 화면 설계(고정 70dvh stage 대체)와 698px 기준 e2e 재설계안을 소유자가 승인한다.
 
+## T-TOURAPI-LOAD
+
+#1459 관광지 공백. 코드(Map migration 441, `docs/etl/visitkorea-tourist-attraction-etl.md`)는 머지로 들어가고, 아래가 참이면 닫는다.
+
+- [ ] 441이 운영 DB에 적용되고 `visitkorea_tourist_attractions` refresh operation이 `/v1/ops/datasets`에 보인다.
+- [ ] 첫 적재가 성공하고 active feature 수가 `areaBasedList2` totalCount(2026-11-09 12,560)와 맞는다(건너뛴 행은 사유와 함께).
+- [ ] #1459 목록의 관광지(고군산군도·부산타워·광안대교·아부오름·얼음골케이블카·사천바다 케이블카·성판악·동래온천·반월도·박지도)가 검색에 나온다. 관광지(12)가 아닌 산막이옛길·태권도원·국립세종도서관은 따로 기록한다.
+- [ ] `feature_place_visitkorea_tourist_attractions_daily_schedule`을 켠다.
+
 ## T-MARKET-LOAD
 
 #1459 전통시장 공백. 코드(provider PR#23 `649fa1a`, Map migration 439)는 머지로 들어가고, 아래가 참이면 닫는다.

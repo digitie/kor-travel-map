@@ -122,6 +122,7 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_standard_tourist_attractions` | `standard_tourist_attractions` | `datagokr_tourist_attractions` | `features_place` |
 | `feature_place_standard_parking_lots` | `standard_parking_lots` | `datagokr_parking_lots` | `features_place` |
 | `feature_place_standard_traditional_markets` | `standard_traditional_markets` | `datagokr_traditional_markets` | `features_place` |
+| `feature_place_visitkorea_tourist_attractions` | `visitkorea_tourist_attractions` | `visitkorea_tourist_attractions` | `features_place` |
 | `feature_place_khoa_beaches` | `khoa_beaches` | `khoa_beaches` | `features_place` |
 | `feature_place_transport_airports` | `transport_airports` | `transport_airports` | `features_place` |
 | `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `visitkorea_festival_events` | `features_event` |

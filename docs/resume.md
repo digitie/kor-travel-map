@@ -1,3 +1,7 @@
+## 2026-11-09 — #1459 TourAPI 관광지
+
+- 다음: 회전에 Map SHA를 묶는다(alembic 441) → 관광지 job 1회(preview 먼저) → #1459 목록 검색 확인 → daily schedule 켜기 → #1459 댓글. 판정은 acceptance `T-TOURAPI-LOAD`.
+
 ## 2026-11-09 — #1459 지역 검색·좌표 fallback
 
 - 배포 뒤 축제·주차장·국가유산 재적재로 좌표를 채우고 MCST 테마 4종은 재적재로 #1447 분류를 반영한다. 마이그레이션·OpenAPI 변경 없음.
