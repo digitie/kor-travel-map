@@ -303,6 +303,12 @@ def test_plan_fetches_modified_rows_before_never_fetched_rows_within_budget() ->
     assert plan.reuse == {}  # 낡은 상세는 예산 밖이어도 이어 쓰지 않는다
 
 
+def test_plan_ignores_rows_that_are_not_loaded() -> None:
+    airport = replace(_GWANGAN, content_id="9", lcls_systm2="VE11", lcls_systm3="VE110100")
+    plan = plan_attraction_details([airport, _BUSAN_TOWER], {}, budget=10)
+    assert plan.fetch == ("1277679",)
+
+
 def test_plan_with_zero_budget_fetches_nothing() -> None:
     plan = plan_attraction_details([_GWANGAN, _BUSAN_TOWER], {}, budget=0)
     assert plan.fetch == ()

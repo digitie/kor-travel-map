@@ -1360,7 +1360,8 @@ async def run_feature_place_visitkorea_tourist_attractions(
         ),
     )
     ensure_replay_complete(source)
-    _ensure_geo_resolved_enough(bundles)
+    if not replay:  # replay는 은퇴시키지 않는다
+        _ensure_geo_resolved_enough(bundles)
     return await _load(
         context,
         provider=VISITKOREA_PROVIDER_NAME,

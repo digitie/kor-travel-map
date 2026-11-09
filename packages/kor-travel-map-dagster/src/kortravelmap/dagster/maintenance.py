@@ -333,13 +333,14 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
         {"provider": "data.go.kr-standard", "dataset_key": "datagokr_tourist_attractions"},
     ),
     # 관광지(12)에는 문화시설(0104) 코드가 거의 없다 — 박물관·전시관은 TourAPI에서 건물·기념물
-    # 등으로 온다. 왼쪽을 범주로 좁히지 않는다(범주가 다르면 자동 병합은 없고 28 m 안만 검토).
+    # 등으로 온다. 그래서 왼쪽을 0104로만 좁히지 않고 관광·문화·자연명소·국가유산 묶음으로 둔다
+    # (범주가 다르면 자동 병합은 없고 28 m 안만 검토). 자연경관·숙박·온천 행은 비교하지 않는다.
     _tourapi_pair(
-        None,
+        _TOURAPI_MCST_OVERLAP,
         {"provider": "data.go.kr-standard", "dataset_key": "datagokr_museums"},
     ),
     _tourapi_pair(
-        None,
+        _TOURAPI_MCST_OVERLAP,
         {"provider": "python-mcst-api", "categories": _TOURAPI_MCST_OVERLAP},
     ),
     _tourapi_pair(

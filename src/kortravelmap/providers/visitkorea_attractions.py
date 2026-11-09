@@ -209,6 +209,10 @@ TOURAPI_LCLS2_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
 #: (``kor-travel-transport``)이 정본이라, TourAPI 행을 더하면 dedup 쌍 없이 중복 place가 된다.
 _SKIPPED_LCLS2: Final[frozenset[str]] = frozenset({"VE11"})
 
+
+def _skipped(lcls_systm2: str | None, lcls_systm3: str | None) -> bool:
+    return ((lcls_systm2 or "").strip() or (lcls_systm3 or "").strip()[:4]) in _SKIPPED_LCLS2
+
 _NA02_RIVER_LAKE: Final[frozenset[str]] = frozenset(
     {"NA020100", "NA020200", "NA020300", "NA020400"}  # 강·호수·저수지·연못/늪
 )
@@ -312,8 +316,8 @@ def plan_attraction_details(
     missing: list[str] = []
     for item in items:
         content_id = (item.content_id or "").strip()
-        if not content_id:
-            continue
+        if not content_id or _skipped(item.lcls_systm2, item.lcls_systm3):
+            continue  # 적재하지 않는 행의 상세는 저장되지 않아 매 run 다시 고르게 된다
         raw = stored.get(content_id)
         overview = raw.get("overview") if raw is not None else None
         if raw is not None and isinstance(overview, str):
@@ -440,7 +444,7 @@ async def _attraction_to_bundle(
     name = normalize_korean_text(item.title)
     if not content_id or name is None:
         return None
-    if ((item.lcls_systm2 or "").strip() or (item.lcls_systm3 or "")[:4]) in _SKIPPED_LCLS2:
+    if _skipped(item.lcls_systm2, item.lcls_systm3):
         return None
     # raw_data 키는 TourItem 필드 이름 그대로다 — replay가 ``TourItem.model_validate``로 되살린다.
     raw_data: dict[str, Any] = {
