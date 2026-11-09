@@ -298,3 +298,69 @@ async def test_load_wrapper_never_touches_context_log_without_geo_applied() -> N
         load_all=_load_all,
         enforce_loss_guard=False,
     )
+
+
+# -- #1459 §4: 원천 좌표 결측 정지오코딩 ----------------------------------------------------
+
+
+class _GeocodeOnlyClient:
+    """``KorTravelGeoRestClient``의 ``geocode``만 흉내(지번만 찾는다)."""
+
+    _stats = None
+
+    def __init__(self, order: list[str]) -> None:
+        self.order = order
+
+    async def geocode(self, query: str, *, type_: str = "road", fallback: str = "none") -> Any:
+        self.order.append(f"geocode:{type_}")
+        if type_ == "road":
+            return SimpleNamespace(status="NOT_FOUND", candidates=())
+        point = SimpleNamespace(lon=128.7, lat=37.6)
+        candidate = SimpleNamespace(confidence=0.9, point=point, address=None, region=None)
+        return SimpleNamespace(status="OK", candidates=(candidate,))
+
+
+def test_address_geocoder_wraps_the_real_resource_type_token_first_and_cached() -> None:
+    """prod resource가 내는 형(``kor_travel_geo_reverse_geocoder``)에서 fallback이 켜진다.
+
+    resource 형에 ``geocode_address``가 없으면 asset의 fallback은 조용히 꺼진다 — 그 형으로
+    결박한다.
+    """
+    from kortravelmap.dto import Address
+
+    order: list[str] = []
+
+    class _OrderedHandle:
+        async def current(self) -> DatasetRef | None:
+            order.append("token")
+            return CURRENT
+
+    client: Any = _GeocodeOnlyClient(order)
+    context = _context(
+        reverse_geocoder=kor_travel_geo_reverse_geocoder(client),
+        kor_travel_geo_dataset=_OrderedHandle(),
+    )
+    geocode = assets._address_geocoder(context)
+    assert geocode is not None
+    address = Address(
+        road="강원특별자치도 평창군 대관령면 대관령로 135-9",
+        legal="강원특별자치도 평창군 대관령면 횡계리 661",
+    )
+
+    async def run() -> tuple[Any, Any]:
+        return await geocode(address), await geocode(address)
+
+    first, second = asyncio.run(run())
+    assert first is not None
+    assert first == second
+    assert order[0] == "token"
+    # 같은 주소는 run 동안 한 번만 묻는다(도로명 → 지번).
+    assert [step for step in order if step.startswith("geocode")] == [
+        "geocode:road",
+        "geocode:parcel",
+    ]
+
+
+def test_address_geocoder_is_none_without_forward_geocoding() -> None:
+    assert assets._address_geocoder(_context(reverse_geocoder=object())) is None
+    assert assets._address_geocoder(_context()) is None

@@ -166,6 +166,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   원천 ZIP이 CSV가 아니라 중첩 SHP다(python-knps-api#17). 보호지역·위험지역·선형시설은 #1450 Option A로 정리했다. 해제 조건은 acceptance.
 
+- [ ] T-TRIP-DATA-GAPS — **#1459 여행 시나리오 공백 잔여: 관광지 원천·검색 별칭·concierge 분류**
+
+  지역 검색·좌표 fallback은 2026-11-09에 넣었다. TourAPI place 원천 부재·이름이 다른 명소의 별칭·concierge 해수욕장 제안 원인이 남았다. 해제 조건은 acceptance.
+
 - [ ] T-MARKET-LOAD — **전통시장 표준데이터 운영 적재·schedule 켜기(#1459)**
 
   코드는 migration 439과 함께 들어간다. 운영 키의 15012894 활용신청(현재 403), 배포 뒤 첫 적재·검색 확인, schedule 활성이 남았다. 해제 조건은 acceptance.

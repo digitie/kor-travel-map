@@ -72,10 +72,12 @@ from kortravelmap.dto import (
 )
 from kortravelmap.dto.provider_field_presence import ProviderFieldPresence
 from kortravelmap.geocoding import (
+    AddressGeocoder,
     AddressResolver,
     ReverseGeocoder,
     cached_address_resolver,
     cached_reverse_geocoder,
+    geocode_missing_coordinate,
 )
 
 __all__ = [
@@ -540,6 +542,7 @@ async def _heritage_item_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> FeatureBundle | None:
     # 명칭 없는 row는 Feature를 만들 수 없어 skip (#374 축제 패턴, #380).
     name = normalize_korean_text(item.name_ko)
@@ -586,7 +589,14 @@ async def _heritage_item_to_bundle(
     else:
         geom_wkt = None
         area_square_meters = None
-        coord = _coord_from(item.longitude, item.latitude)
+        # 원천 좌표가 없으면("0.0" 포함) 소재지가 번지까지 있을 때 주소 좌표로 메운다
+        # (#1459 §4 — 운영 국가유산 place 1,338건이 좌표 없이 적재됐다).
+        # 소재지는 도로명일 수도 지번일 수도 있어 두 형식으로 묻는다.
+        coord = await geocode_missing_coordinate(
+            _coord_from(item.longitude, item.latitude),
+            Address(road=location_text, legal=location_text),
+            address_geocoder,
+        )
 
     # bjd_code는 feature_id 전에 채워야 함 (ADR-009).
     geo: Address | None = None
@@ -692,6 +702,7 @@ async def heritage_items_to_bundles(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """국가유산 items → place/area ``FeatureBundle`` 리스트.
 
@@ -709,6 +720,9 @@ async def heritage_items_to_bundles(
     address_resolver
         주소 → ``Address`` async 보강 geocoder. 좌표 reverse 결과에 bjd_code가 없을
         때 소재지 텍스트로 kor-travel-geo ``/v2/geocode``를 호출한다.
+    address_geocoder
+        주소 → 좌표 async 정지오코더. place row의 원천 좌표가 없고 소재지가 번지까지 있을 때만
+        부른다(#1459 §4). 여러 번 부르는 호출자는 ``cached_address_geocoder``로 감싸 넘긴다.
 
     Returns
     -------
@@ -734,6 +748,7 @@ async def heritage_items_to_bundles(
             fetched_at=fetched_at,
             reverse_geocoder=geocoder,
             address_resolver=resolver,
+            address_geocoder=address_geocoder,
         )
         if bundle is not None:
             bundles.append(bundle)

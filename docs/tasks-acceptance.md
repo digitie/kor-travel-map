@@ -2901,6 +2901,15 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 - [x] `knps_protected_areas`(1,516행): 여행 관련 지정만 `DESIG_ENG` 표로 category를 주어 싣고(국립공원 중복 제외), 역지오 실패 행은 drop으로 세어 버린다. 배포 뒤 재적재로 확인한다.
 - [ ] `knps_shelters`: provider PR18/Map1454의 중첩 SHP Point·전역ID·geometry 지문과 geo 핀으로 WSL 회귀를 검증한다. 공식 원천 필드·PRJ·CPG 확인과 운영 재적재·최종 UI는 [대피소 인계](runbooks/knps-shelters-reimport.md) 후 종료한다.
 
+## T-TRIP-DATA-GAPS
+
+#1459(2026-11-08 PinVi 여행 시나리오 검증)의 잔여. 숙박(MOIS)·교통 거점·전통시장은 각자의 PR이 맡는다. 2026-11-09 Map에 지역 검색(`core/search_region.py`)·좌표 결측 정지오코딩·좌표 없는 행 검색 제외·concierge 해수욕장 제안 검증을 넣었다.
+
+- [ ] 관광지 원천: TourAPI `areaBasedList`(또는 동급 원천)를 place로 싣거나 싣지 않기로 소유자가 정한다 — 산막이옛길·고군산군도·퍼플섬·태권도원·부산타워·광안대교·아부오름·얼음골/사천 케이블카·동래온천·국립세종도서관·한라산 성판악 탐방로는 지금 어느 원천에도 없다.
+- [ ] 검색 별칭(436 표): 리움미술관·리움 → "삼성미술관 Leeum", 수성못 → "수성유원지", 십리대숲·울산 십리대숲 → "태화강 국가정원십리대숲", 한라산 영실 → "한라산영실", 관음사 탐방로 → "관음사지구탐방지원센터"를 forward migration으로 심는다(prod 이름 재확인 후).
+- [ ] concierge YouTube 후보의 해수욕장 제안(91건)의 원인(LLM `category_code` vs run 기본값)을 concierge 저장소에서 확인하고 고친다. Map은 이름 근거 없는 해수욕장만 거른다.
+- [ ] 배포 뒤 축제·주차장·국가유산 place 재적재로 좌표가 채워지고, MCST 테마 4종 재적재로 #1447 분류가 반영됐는지 prod에서 확인한다.
+
 ## T-EVENT-QUARANTINE-RELEASE
 
 #1447은 기간·장소가 없는 KHA·축제 행사를 `provider_event_required_details_v1`로 격리하고 자동 해제하지 않는다. 운영 원본

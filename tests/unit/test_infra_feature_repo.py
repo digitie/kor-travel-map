@@ -1325,7 +1325,7 @@ def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
         page_size=10,
         include_total=False,
     )
-    assert feature_repo._SEARCH_CURSOR_VERSION == 4
+    assert feature_repo._SEARCH_CURSOR_VERSION == 5
     v1_cursor = feature_repo._encode_search_cursor_payload(
         {
             "v": 1,
@@ -1341,6 +1341,74 @@ def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
             contract=contract,
             signing_key=_SEARCH_CURSOR_KEY,
         )
+
+
+def test_feature_search_cursor_v4_is_rejected_after_region_rank() -> None:
+    """#1459 §7 지역 검색이 순위 맨 앞 자리를 더했다 — v4 cursor의 ``rank``는 다른 뜻이다."""
+    contract = feature_repo._feature_search_contract(
+        q="강릉 호텔",
+        bbox=None,
+        kinds=None,
+        categories=None,
+        page_size=10,
+        include_total=False,
+    )
+    v3_cursor = feature_repo._encode_search_cursor_payload(
+        {
+            "v": 4,
+            "kind": "feature_search",
+            "query": contract.fingerprint,
+            "keyset": {"feature_id": "feature-1", "score": "0.5", "rank": 10_000},
+        },
+        signing_key=_SEARCH_CURSOR_KEY,
+    )
+    with pytest.raises(FeatureSearchCursorVersionUnsupportedError):
+        feature_repo._search_cursor_params(
+            v3_cursor,
+            contract=contract,
+            signing_key=_SEARCH_CURSOR_KEY,
+        )
+
+
+def test_feature_search_region_rank_weight_dominates_every_other_digit() -> None:
+    assert feature_repo._SEARCH_RANK_REGION_WEIGHT > feature_repo._SEARCH_RANK_BASE_MAX
+    assert (
+        feature_repo._SEARCH_RANK_MAX
+        == feature_repo._SEARCH_RANK_REGION_WEIGHT + feature_repo._SEARCH_RANK_BASE_MAX
+    )
+
+
+def test_feature_search_region_sql_variants_bind_only_what_they_use() -> None:
+    from dataclasses import replace
+
+    from sqlalchemy import text as _text
+
+    from kortravelmap.core.search_region import RegionSearch
+
+    region = RegionSearch(
+        region_label="강릉",
+        sigungu_codes=("51150",),
+        remainder="호텔",
+        category_codes=("03010000",),
+    )
+    for name_mode in feature_repo._SEARCH_REGION_NAME_MODES:
+        for categories in (False, True):
+            sql, count_sql = feature_repo._FEATURE_SEARCH_REGION_SQL[(name_mode, categories)]
+            used = set(_text(sql)._bindparams)
+            arms = feature_repo._SearchRegionArms(name_mode=name_mode, categories=categories)
+            params = feature_repo._search_region_params(
+                region if categories else replace(region, category_codes=()),
+                arms,
+            )
+            region_binds = {"region_codes", "rem_compact", "rem_like", "rem_categories"}
+            assert used & region_binds == set(params), (name_mode, categories)
+            assert set(_text(count_sql)._bindparams) & region_binds <= set(params)
+            assert "ST_Transform" not in sql
+    assert "region_codes" not in set(_text(feature_repo._FEATURE_SEARCH_BY_SCORE_SQL)._bindparams)
+
+
+def test_feature_search_like_pattern_escapes_wildcards() -> None:
+    assert feature_repo._like_contains_pattern("50%_세일\\") == "%50\\%\\_세일\\\\%"
 
 
 def test_feature_search_q_cursor_requires_row_rank() -> None:

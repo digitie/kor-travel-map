@@ -1,3 +1,8 @@
+## 2026-11-09 — #1459 지역 검색·좌표 fallback
+
+- 배포 뒤 축제·주차장·국가유산 재적재로 좌표를 채우고 MCST 테마 4종은 재적재로 #1447 분류를 반영한다. 마이그레이션·OpenAPI 변경 없음.
+- 남은 일: T-TRIP-DATA-GAPS(TourAPI place 원천·검색 별칭 migration·concierge 분류 upstream).
+
 ## 2026-11-09 — #1459 전통시장 표준데이터
 
 - 다음: 배포 회전에 Map 머지 SHA를 묶는다 → 운영 키로 15012894 Open API 활용신청(현재 403) → `POST /v1/ops/pipeline/requests`(preview 먼저) → 건수·#1459 시장 검색 확인 → schedule 켜기. 판정은 acceptance `T-MARKET-LOAD`.

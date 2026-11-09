@@ -511,11 +511,31 @@ def _source_entity_id(
     return None
 
 
+#: 해수욕장 분류 제안을 받아들이는 이름 표지(#1459 §6). 해수욕장은 KHOA가 정본 목록을 주는
+#: 분류라, concierge의 제안(LLM·run 기본값)은 이름이 해수욕장이라고 말할 때만 믿는다.
+_BEACH_NAME_MARKERS: Final[tuple[str, ...]] = ("해수욕장", "해변", "비치", "beach")
+_TRAILING_PARENTHESIS: Final[re.Pattern[str]] = re.compile(r"\s*\([^()]*\)\s*$")
+
+
 def _category(place: Mapping[str, Any]) -> str:
+    """concierge의 분류 제안 → ``Feature.category``. 형식이 틀리면 fallback.
+
+    해수욕장(``01050100``) 제안은 이름에 해수욕장 표지가 없으면 fallback이다. 2026-11-08 운영에서
+    공산성·궁남지·경기전·청남대·정림사지·철원 고석정·"스타벅스 더춘천 의암호 R점"을 포함한 YouTube
+    후보 91건이 해수욕장으로 왔다(같은 payload의 카카오 분류는 "음식점 > 카페"였다) — 원인은
+    concierge 쪽 제안이고, Map은 근거 없는 해수욕장만 거른다.
+    """
     value = _text(place, "category_code_suggestion")
-    if value is not None and len(value) == 8 and value.isdigit():
-        return value
-    return KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK
+    if value is None or len(value) != 8 or not value.isdigit():
+        return KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK
+    if value == PlaceCategoryCode.TOURISM_NATURE_BEACH.value:
+        # 이름이 해수욕장 표지로 **끝나야** 한다 — "해변카페"·"비치호텔"·"○○해수욕장 주차장"은
+        # 해수욕장이 아니다. 끝의 괄호 보충("(금능)")은 떼고 본다.
+        name = (normalize_korean_text(_text(place, "name")) or "").lower()
+        name = _TRAILING_PARENTHESIS.sub("", name).strip()
+        if not name.endswith(_BEACH_NAME_MARKERS):
+            return KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK
+    return value
 
 
 def _coordinate(place: Mapping[str, Any]) -> Coordinate | None:
