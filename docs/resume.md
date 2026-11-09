@@ -1,3 +1,7 @@
+## 2026-11-10 — #1459 TourAPI 14·28
+
+- 관광지 job 하나가 12·14·28을 함께 적재한다(19,030건). 배포 뒤 산막이옛길·태권도원·국립세종도서관 검색을 T-TOURAPI-LOAD에서 함께 확인한다.
+
 ## 2026-11-09 — #1459 TourAPI 관광지
 
 - 다음: 회전에 Map SHA를 묶는다(alembic 441) → 관광지 job 1회(preview 먼저) → #1459 목록 검색 확인 → daily schedule 켜기 → #1459 댓글. 판정은 acceptance `T-TOURAPI-LOAD`.

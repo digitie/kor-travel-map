@@ -1,15 +1,15 @@
-# visitkorea-tourist-attraction-etl.md — TourAPI 관광지 → place (#1459)
+# visitkorea-tourist-attraction-etl.md — TourAPI 관광지·문화시설·레포츠 → place (#1459)
 
 한국관광공사 국문 관광정보 서비스(KorService2, 공공데이터포털 15101578 "한국관광공사_국문
-관광정보 서비스_GW") `areaBasedList2`의 **관광지(contentTypeId 12)** 를 1차 place Feature로
-적재한다. 축제(`searchFestival2`, `visitkorea_festival_events`)는 표준데이터 1차의 enrichment지만
+관광정보 서비스_GW") `areaBasedList2`의 **관광지(12)·문화시설(14)·레포츠(28)** 를 1차 place
+Feature로 적재한다(14·28은 2026-11-10 추가 — 한 dataset·한 snapshot, migration 없음). 축제(`searchFestival2`, `visitkorea_festival_events`)는 표준데이터 1차의 enrichment지만
 이 dataset은 Feature를 직접 만든다.
 
 | 항목 | 값 |
 |---|---|
 | provider / dataset_key | `python-visitkorea-api` / `visitkorea_tourist_attractions` |
 | 변환 | `kortravelmap.providers.visitkorea_attractions.tourapi_attractions_to_bundles` |
-| fetcher | `fetch_visitkorea_tourist_attractions` → `VisitKoreaAttractionSource` |
+| fetcher | `fetch_visitkorea_tourist_attractions`(목록 12→14→28) · `fetch_visitkorea_attraction_details` |
 | asset / job | `feature_place_visitkorea_tourist_attractions` / `…_job` |
 | schedule | `feature_place_visitkorea_tourist_attractions_daily_schedule` `45 4 * * *` KST, 기본 STOPPED |
 | migration | `441_tourapi_attraction_dataset` (dataset·refresh/preview·dataset_wide scope) |
@@ -26,7 +26,10 @@
 - #1459 누락 목록 대조: 고군산군도(4065077)·부산타워(1277679)·광안대교(128164)·아부오름(1351320)·
   영남알프스 얼음골케이블카(2629010)·사천바다 케이블카(2606216)·성판악(126436)·동래온천
   노천족욕탕(128706)·반월도·박지도(578024, 퍼플섬)는 관광지(12)다. **산막이옛길(28 레포츠)·
-  태권도원·국립세종도서관(14 문화시설)은 관광지가 아니다** — 이 dataset으로는 채워지지 않는다.
+  태권도원·국립세종도서관(14 문화시설)은 관광지가 아니다** — 2026-11-10에 14·28을 더해 채운다
+  (산막이옛길 1948361 LS011900, 태권도원 1904335 VE090400, 국립세종도서관 1896898 VE090300).
+- 문화시설(14) 2,753건(3호출)·레포츠(28) 3,717건(4호출), 둘 다 좌표 결측 0. 합계 19,030건·목록 20호출.
+  레포츠의 52%(1,948건)는 숙박 분류 캠핑장(AC05)이다.
 
 ## 2. 필드 대응
 
@@ -91,8 +94,30 @@ KorService2 목록은 옛 `cat1~3`을 비워 주므로 2025 신 분류체계로 
 | EX06 | 산업관광 | `01000000` 관광 |
 
 관광지(12) 목록에 실제로 오는 코드는 NA·HS·EX 전부와 VE01~VE05·VE020500이다(공식 신분류체계
-연계 정의서; 2026-11-09 1,000행 표본에서 VE11 1행). VE06~VE10·VE12·VE050200 행은 문화시설(14)·
-레포츠(28)·숙박(32)의 코드로, 같은 변환기로 그 dataset을 더할 때를 위해 표에 둔다.
+연계 정의서; 2026-11-09 1,000행 표본에서 VE11 1행). VE06~VE10·VE12는 문화시설(14), LS·AC·VE10은
+레포츠(28)에서 온다.
+
+### 3.1 문화시설(14)·레포츠(28) 추가분 (2026-11-10 실측 분포)
+
+| 타입 | lclsSystm | 건수 | Map |
+|---|---|---:|---|
+| 14 | VE070100 박물관 / VE070200 기념관 / VE070500 과학관 | 584 / 155 / 57 | `01040100` 박물관 |
+| 14 | VE070600 미술관·화랑 | 355 | `01040200` 미술관·갤러리 |
+| 14 | VE060100 공연장 / VE060200 영화관 | 350 / 19 | `01040300` / `01040400` |
+| 14 | VE090300 도서관(국립세종도서관) | 232 | `01040500` 도서관 |
+| 14 | VE090100·VE090200 문화원 | 181 | `01040600` 지방문화원 |
+| 14 | VE070300 전시관·VE070400 컨벤션·VE090400 문화전수시설(태권도원)·VE0906 학교·VE120300 기타문화시설 | 513·21·38·8·154 | `01040000` 문화시설 |
+| 14 | VE120100 서점 | 53 | `01000000` 관광 |
+| 14 | VE02·VE03·VE10 등 소수 | 33 | §3 표대로 |
+| 28 | LS010400 골프 | 231 | `01080100` 골프장 |
+| 28 | LS011900 기타육상레저(이름이 `…길`·올레·트레킹·탐방로·산책로로 끝나면 트레킹) | 482 | `01080500` 트레킹·둘레길 / `01080400` |
+| 28 | 그 밖의 LS(스키·승마·낚시·수영·래프팅·패러글라이딩 등) | 838 | `01080400` 레저스포츠 |
+| 28 | VE100100·VE100200 경기장·스포츠센터 | 193 | `01080400` 레저스포츠 |
+| 28 | AC050100 일반야영장 / AC050200 오토캠핑장 | 1,408 / 285 | `03060000` 캠핑장 / `03060100` 오토캠핑장 |
+| 28 | AC050300 카라반 / AC050400 글램핑장 | 67 / 188 | `03060202` / `03060201` |
+| 28 | AC030100 펜션 / VE050200 리조트 | 2 / 3 | `03050000` / `03020000` |
+
+`place_kind`는 타입별로 `tourapi_attraction`(12)·`tourapi_culture_facility`(14)·`tourapi_leisure`(28)다.
 
 정본은 코드(`TOURAPI_LCLS3_CATEGORY`·`TOURAPI_LCLS2_CATEGORY`·`TOURAPI_LCLS1_CATEGORY`)이고
 `tests/unit/test_providers_visitkorea_attractions.py`가 대표 행과 카탈로그 존재를 고정한다.
@@ -112,7 +137,7 @@ data.go.kr 한도는 **오퍼레이션당** 1,000/일이다(`docs/etl/upstream-q
 - 원천이 상세 없음(`failure_kind="no_data"`)으로 답하면 `("", "")`로 저장한다 — 매 run 다시 묻지 않는다.
 - **step 재시도(`retry_number > 0`)는 상세를 받지 않는다.** 받은 상세는 적재가 커밋돼야 남으므로,
   재시도마다 받으면 한 run이 한도를 넘긴다. 최악 sweep은 그래서 600(60%)이다.
-- 첫 적재는 상세 600건, 이후 매일 600건씩 — 약 21일이면 전량이 채워진다.
+- 첫 적재는 상세 600건, 이후 매일 600건씩 — 19,030건이라 약 32일이면 전량이 채워진다(12만이면 21일).
 - 알려진 낭비: 주소 검증에서 버려져 active가 되지 못한 행은 저장 상세가 없어 매 run 다시 고른다(소수).
 
 ## 5. 목록 완전성
@@ -129,8 +154,8 @@ data.go.kr 한도는 **오퍼레이션당** 1,000/일이다(`docs/etl/upstream-q
 
 기본 dedup pair(`DEFAULT_DEDUP_SCOPE_PAIRS`)에 TourAPI 관광지 쌍 8개를 더했다: 국가유산(0107)↔
 krheritage, 자연경관(0102)↔KNPS, 수목원·휴양림↔krforest, 해수욕장↔khoa, 전체↔관광지·박물관 표준데이터,
-전체↔MCST 관광·문화·국가유산·자연명소 범주, 관광사업체·유원·문화·사찰·궤도·유람선↔MOIS(체육시설·
-골프장 제외). 양쪽 scope 상한은 20,000(기본 5,000이면 최근 갱신분만 비교된다).
+전체↔MCST 관광·문화·국가유산·자연명소 범주, 관광사업체·유원·문화·사찰·궤도·유람선↔MOIS, 골프장↔MOIS 골프장,
+캠핑장(0306)↔MOIS 캠핑장(체육시설 01080400은 MOIS 쪽이 너무 커서 제외). 양쪽 scope 상한은 20,000(기본 5,000이면 최근 갱신분만 비교된다).
 
 비교는 O(left×right) 순수 Python이라 `core.dedup`에 **판정을 바꾸지 않는 가지치기**를 더했다 — 이름이
 완전히 같다고 쳐도 수동 검토 임계값(0.65)에 못 미치는 쌍(범주가 다르고 28 m 밖)은 이름 유사도를 부르지
@@ -147,6 +172,6 @@ Type3 출처표시·변경금지). Map은 이미지를 원본 URL로 참조만 �
 
 ## 8. 남은 것
 
-- 문화시설(14)·레포츠(28) — 태권도원·국립세종도서관·산막이옛길은 다른 contentTypeId다. 같은 변환기로
-  dataset을 더할 수 있다(분류표는 14·28의 lclsSystm도 덮어야 한다).
 - 검색 별칭 — 퍼플섬은 원천 이름이 "반월도·박지도", 사천 바다케이블카는 "사천바다 케이블카"다.
+- DB 카탈로그 `display_name`은 아직 "contentTypeId 12"라고 적혀 있다(441). 표시용 이름이라 migration을
+  따로 두지 않았다 — 다음 카탈로그 migration에 묶어 고친다.

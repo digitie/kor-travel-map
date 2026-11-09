@@ -235,6 +235,7 @@ _TOURAPI_MOIS_OVERLAP: Final = sorted(
         PlaceCategoryCode.TOURISM_ACTIVITY_CRUISE.value,
     }
 )
+_TOURAPI_CAMPGROUND: Final = _category_codes("0306")
 _TOURAPI_SCOPE_LIMIT: Final = 20000
 """TourAPI 쌍의 양쪽 scope 상한 — 기본 5,000이면 최근 갱신분만 비교된다(국가유산·MOIS 관광도
 5,000을 넘을 수 있다). 비교 비용은 ``core.dedup``의 상한 가지치기(범주가 다르면 28 m 밖은
@@ -346,6 +347,19 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     _tourapi_pair(
         _TOURAPI_MOIS_OVERLAP,
         {"provider": "python-mois-api", "categories": _TOURAPI_MOIS_OVERLAP},
+    ),
+    # 레포츠(28)의 골프장·캠핑장 ↔ MOIS 같은 슬러그. 체육시설(01080400)은 MOIS 쪽 수가 너무
+    # 많아(같은 범주 쌍은 가지치기되지 않는다) 비교하지 않는다.
+    _tourapi_pair(
+        [PlaceCategoryCode.TOURISM_ACTIVITY_GOLF.value],
+        {
+            "provider": "python-mois-api",
+            "categories": [PlaceCategoryCode.TOURISM_ACTIVITY_GOLF.value],
+        },
+    ),
+    _tourapi_pair(
+        _TOURAPI_CAMPGROUND,
+        {"provider": "python-mois-api", "categories": _TOURAPI_CAMPGROUND},
     ),
 )
 """op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.

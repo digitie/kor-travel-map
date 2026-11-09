@@ -1237,7 +1237,7 @@ async def feature_place_standard_traditional_markets(
 
 #: TourAPI ``detailCommon2`` run 예산 — 오퍼레이션 일일 한도 1,000의 60%(다른 data.go.kr
 #: dataset의 최악 sweep과 같은 비율, ``docs/etl/upstream-quota.md`` §2). 첫 적재는 상세 없이
-#: 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다(12,560건 ≈ 21 run). **step 재시도는 상세를
+#: 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다(관광지·문화시설·레포츠 19,030건 ≈ 32 run). **step 재시도는 상세를
 #: 받지 않는다** — 받은 상세는 적재가 커밋돼야 남으므로, 재시도마다 받으면 한 run이 한도를 넘긴다.
 VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 
@@ -1316,9 +1316,9 @@ def _ensure_geo_resolved_enough(bundles: Sequence[Any]) -> None:
 async def run_feature_place_visitkorea_tourist_attractions(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """TourAPI 관광지(contentTypeId 12) 목록을 place Feature로 적재한다(#1459).
+    """TourAPI 관광지(12)·문화시설(14)·레포츠(28) 목록을 place Feature로 적재한다(#1459).
 
-    전국 1만 2천여 건을 한 snapshot으로 받아 ``retire_absent_from_snapshot``으로 적재한다 —
+    전국 1만 9천여 건을 한 snapshot으로 받아 ``retire_absent_from_snapshot``으로 적재한다 —
     목록에서 빠진 관광지는 은퇴한다. 0행 목록은 "없음"이 아니라 "못 받았음"이라 은퇴 전에
     실패시킨다. 상세(overview·homepage)는 :func:`_attach_attraction_details`가 예산 안에서 얹는다.
     replay는 저장 원본(상세 포함)을 그대로 쓰고 은퇴·봉인·sync 성공을 기록하지 않는다.
