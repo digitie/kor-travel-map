@@ -18,6 +18,7 @@ from kortravelmap.dagster.feature_operation_tracking import (
 )
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
+    TraditionalMarketSnapshotIncomplete,
     fetch_datagokr_cultural_festivals,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
@@ -1278,6 +1279,38 @@ def test_standard_traditional_markets_fetch_yields_and_closes(
     records = asyncio.run(_acollect(fetch_standard_traditional_markets(settings)))
 
     assert len(records) == 3
+    assert fake.instances[0].closed is True
+
+
+class _ShortMarketService:
+    """선언 1,400건인데 2페이지가 빈 응답(resultCode 03을 빈 페이지로 준 경우)."""
+
+    def __init__(self) -> None:
+        self.pages: list[int] = []
+
+    async def list(self, *, page_no: int = 1, num_of_rows: int = 1000, **_: Any) -> Any:
+        self.pages.append(page_no)
+        items = [object()] * num_of_rows if page_no == 1 else []
+        return _FakeStandardPage(items, 1400)
+
+
+def test_standard_traditional_markets_fails_on_short_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 이 dataset은 snapshot에 없는 시장을 은퇴시키므로 짧은 snapshot을 성공으로 넘기면
+    # 실제 시장 400곳이 내려간다 — 선언 건수보다 적으면 실패해야 한다.
+    fake = _install_fake_datagokr(monkeypatch)
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+    original_init = fake.__init__
+
+    def _init(self: Any, **kwargs: Any) -> None:
+        original_init(self, **kwargs)
+        self.traditional_market = _ShortMarketService()
+
+    monkeypatch.setattr(fake, "__init__", _init)
+
+    with pytest.raises(TraditionalMarketSnapshotIncomplete, match="1400건 중 1000건"):
+        asyncio.run(_acollect(fetch_standard_traditional_markets(settings)))
     assert fake.instances[0].closed is True
 
 async def test_krheritage_fetch_raises_when_credential_missing() -> None:

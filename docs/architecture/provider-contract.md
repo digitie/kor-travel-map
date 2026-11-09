@@ -115,7 +115,7 @@ system
 | `datagokr_ansan_world_restaurants` | python-datagokr-api | 안산 세계맛집(다문화 세계음식점) fileData |
 | `datagokr_jeju_local_restaurants` | python-datagokr-api | 제주 향토음식점 지정 현황 fileData |
 | `standard_special_streets` | data.go.kr-standard | 전국지역특화거리표준데이터. 개별 POI보다 area/anchor source이며 현재는 `theme_area_anchor` place로 보존 |
-| `datagokr_traditional_markets` | data.go.kr-standard | 전국전통시장표준데이터(15012894, `tn_pubr_public_trdit_mrkt_api`). 전통시장 place `05070000`, 자연키 `시장명::주소(공백 제거)`. 서비스키마다 따로 활용신청해야 한다(#1459, `docs/etl/standard-data-feature-etl.md`) |
+| `datagokr_traditional_markets` | data.go.kr-standard | 전국전통시장표준데이터(15012894, `tn_pubr_public_trdit_mrkt_api`). 전통시장 place `05070000`, 자연키 `시장명::시도시군구`(동명 충돌 시 전체 주소). 서비스키마다 따로 활용신청해야 한다(#1459, `docs/etl/standard-data-feature-etl.md`) |
 | `khoa_beaches` | python-khoa-api | 해수욕장 정보. 이 문자열은 source_type/feature_id/source_record_key에 baked → 변경 시 기존 행 re-key 필요 (실제 코드 `khoa.py:64`) |
 | `krforest_recreation_forests` | python-krforest-api | 휴양림 (구현, `krforest.py:91`) |
 | `krforest_arboretums` | python-krforest-api | 수목원 (구현, `krforest.py:92`) |

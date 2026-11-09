@@ -1203,15 +1203,40 @@ class PublicTraditionalMarketItem(Protocol):
     raw: Any
 
 
-def traditional_market_natural_key(name: str, road_text: str | None, legal_text: str | None) -> str:
-    """전통시장 자연키 — ``시장명::도로명(없으면 지번) 주소``, 주소의 공백은 지운다.
+def _compact(text: str | None) -> str:
+    return "".join((text or "").split())
+
+
+def _market_region(road_text: str | None, legal_text: str | None) -> str:
+    """주소 앞 두 토큰(시도·시군구) — 번지·도로명 정정에 흔들리지 않는 지역 단서."""
+    tokens = (road_text or legal_text or "").split()
+    return "".join(tokens[:2])
+
+
+def traditional_market_natural_key(
+    name: str,
+    road_text: str | None,
+    legal_text: str | None,
+    *,
+    coord: Coordinate | None = None,
+    full_address: bool = False,
+) -> str:
+    """전통시장 자연키 — 기본 ``시장명::시도시군구``(주소 앞 두 토큰, 공백 제거).
 
     원천에 안정 관리번호가 없다. ``instt_code``는 제공 지자체 코드라 같은 시군구의 시장
-    여러 곳이 공유하고, 시장명은 전국에 겹친다("중앙시장"). 주소의 띄어쓰기 차이
-    ("177번길 25" ↔ "177번길25")가 연간 갱신마다 키를 바꾸지 않도록 공백을 지운다.
+    여러 곳이 공유하고, 시장명은 전국에 겹친다("중앙시장"). 도로명·번지 정정, 괄호 동명
+    추가, 비어 있던 도로명 채움 같은 연간 갱신의 흔한 편집이 키를 바꾸지 않도록 지역까지만
+    쓴다(적대 리뷰 A MED). 같은 snapshot에서 시장명·지역이 겹치는 행만
+    ``full_address=True``로 ``::공백 없는 전체 주소``를 붙인다. 주소가 없으면 좌표(소수 4자리)를
+    지역 대신 쓴다.
     """
-    address = "".join((road_text or legal_text or "").split())
-    return "::".join([name, address])
+    region = _market_region(road_text, legal_text)
+    if not region and coord is not None:
+        region = f"{coord.lat:.4f},{coord.lon:.4f}"
+    parts = [name, region]
+    if full_address:
+        parts.append(_compact(road_text or legal_text))
+    return "::".join(parts)
 
 
 async def _geocode_market(
@@ -1316,13 +1341,16 @@ async def traditional_markets_to_bundles(
       있으면 도로명 → 지번 순으로 정지오코딩한 좌표를 쓴다(``facility_info.coord_source
       ='geocode'``). 그 좌표도 역지오코딩해 행정코드를 채운다.
     - 시장명이 없거나, 좌표·도로명·지번이 모두 없는 행은 건너뛴다.
-    - 같은 호출 안에서 자연키(:func:`traditional_market_natural_key`)가 겹치는 뒤 행은
-      건너뛴다 — 한 batch에 같은 source entity가 두 번 실리지 않게 한다.
+    - 자연키(:func:`traditional_market_natural_key`)는 **이 호출에 넘긴 행 전체**를 보고
+      정한다 — 호출자는 snapshot 전량을 한 번에 넘긴다(asset이 그렇게 한다). 시장명·지역이
+      겹치는 행끼리만 전체 주소를 붙이고, 그래도 같은 키는 원천 payload hash가 가장 작은
+      행 하나만 남긴다(페이지 순서와 무관하게 결정적이다).
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
-    bundles: list[FeatureBundle] = []
-    seen: set[str] = set()
+    rows: list[
+        tuple[PublicTraditionalMarketItem, str, str | None, str | None, Coordinate | None]
+    ] = []
     for item in items:
         name = normalize_korean_text(item.mrkt_nm)
         road_text = normalize_korean_text(item.rdnmadr)
@@ -1330,15 +1358,28 @@ async def traditional_markets_to_bundles(
         coord = _coordinate_or_none(item.longitude, item.latitude)
         if name is None or (coord is None and road_text is None and legal_text is None):
             continue
-        natural_key = traditional_market_natural_key(name, road_text, legal_text)
-        if natural_key in seen:
-            continue
-        seen.add(natural_key)
-        bundles.append(
+        rows.append((item, name, road_text, legal_text, coord))
+
+    base_counts: dict[str, int] = {}
+    for _, name, road_text, legal_text, coord in rows:
+        base = traditional_market_natural_key(name, road_text, legal_text, coord=coord)
+        base_counts[base] = base_counts.get(base, 0) + 1
+
+    built: list[FeatureBundle] = []
+    for item, name, road_text, legal_text, coord in rows:
+        base = traditional_market_natural_key(name, road_text, legal_text, coord=coord)
+        key = (
+            traditional_market_natural_key(
+                name, road_text, legal_text, coord=coord, full_address=True
+            )
+            if base_counts[base] > 1
+            else base
+        )
+        built.append(
             await _traditional_market_to_bundle(
                 item,
                 name=name,
-                natural_key=natural_key,
+                natural_key=key,
                 road_text=road_text,
                 legal_text=legal_text,
                 fetched_at=fetched_at,
@@ -1347,4 +1388,12 @@ async def traditional_markets_to_bundles(
                 address_geocoder=address_geocoder,
             )
         )
-    return bundles
+
+    chosen: dict[str, FeatureBundle] = {}
+    for bundle in built:
+        key = bundle.source_record.source_entity_id
+        kept = chosen.get(key)
+        digest = bundle.source_record.raw_payload_hash
+        if kept is None or digest < kept.source_record.raw_payload_hash:
+            chosen[key] = bundle
+    return [b for b in built if chosen[b.source_record.source_entity_id] is b]

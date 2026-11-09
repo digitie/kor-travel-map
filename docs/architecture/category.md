@@ -359,7 +359,8 @@ depth 1 = 1 + 7). Tier 1 enum 자체는 ADR-027에서 변경 없음.
 | `rail` | 2 | 관광궤도, 기차역 |
 | `monument` | 2 | 국가유산 부모, 사적·기념물 |
 | `convenience` | 2 | 편의 부모, 편의점 |
-| 기타 (1씩) | 29 | swimming, aquarium, mountain, water, viewpoint, cinema, library, town-hall, religious-buddhist, castle, village, golf, ferry, pitch, restaurant-sushi, bar, bank, grocery, shop, clothing-store, toilet, car, parking, fuel, rail-metro, taxi, airport, doctor, dentist, marker |
+| `shop` | 2 | 슈퍼마켓, 전통시장 |
+| 기타 (1씩) | 28 | swimming, aquarium, mountain, water, viewpoint, cinema, library, town-hall, religious-buddhist, castle, village, golf, ferry, pitch, restaurant-sushi, bar, bank, grocery, clothing-store, toilet, car, parking, fuel, rail-metro, taxi, airport, doctor, dentist, marker |
 
 `PLACE_CATEGORY_MAPBOX_MAKI_ICON_VALUES`는 정렬된 unique icon name tuple
 (`("airport", "amusement-park", "aquarium", ...)` 형태).

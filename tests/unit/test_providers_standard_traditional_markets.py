@@ -136,23 +136,34 @@ def test_market_source_record_and_stable_natural_key() -> None:
     assert source.provider == "data.go.kr-standard"
     assert source.dataset_key == DATASET_KEY_TRADITIONAL_MARKETS == "datagokr_traditional_markets"
     assert source.source_entity_type == "traditional_market"
-    assert source.source_entity_id == "망원시장::서울특별시마포구망원로8길7"
+    assert source.source_entity_id == "망원시장::서울특별시마포구"
     assert source.raw_data["reference_date"] == "2025-11-10"
     assert source.raw_data["mrkt_nm"] == "망원시장"
     assert bundle.source_link.source_role == SourceRole.PRIMARY
 
-    # 주소 띄어쓰기만 바뀐 연간 갱신은 같은 entity·같은 feature다.
-    respaced = replace(_MANGWON, rdnmadr="서울특별시  마포구 망원로8길7")
-    again = traditional_markets_to_bundles([respaced], fetched_at=_now())[0]
-    assert again.source_record.source_entity_id == source.source_entity_id
-    assert again.feature.feature_id == bundle.feature.feature_id
+    # 연간 갱신의 흔한 주소 편집(띄어쓰기·번지·괄호 동명·도로명 채움)은 같은 entity·feature다.
+    for edited in (
+        replace(_MANGWON, rdnmadr="서울특별시  마포구 망원로8길7"),
+        replace(_MANGWON, rdnmadr="서울특별시 마포구 망원로8길 9 (망원동)"),
+        replace(_MANGWON, rdnmadr=None),
+    ):
+        again = traditional_markets_to_bundles([edited], fetched_at=_now())[0]
+        assert again.source_record.source_entity_id == source.source_entity_id
+        assert again.feature.feature_id == bundle.feature.feature_id
 
 
 @pytest.mark.unit
 def test_market_natural_key_falls_back_to_jibun_and_distinguishes_same_name() -> None:
     assert (
         traditional_market_natural_key("영동전통시장", None, "충청북도 영동군 영동읍 계산리 694-13")
-        == "영동전통시장::충청북도영동군영동읍계산리694-13"
+        == "영동전통시장::충청북도영동군"
+    )
+    # 주소가 없으면 좌표가 지역을 대신한다(주소 없는 "중앙시장"끼리 전국에서 겹치지 않게).
+    assert (
+        traditional_market_natural_key(
+            "중앙시장", None, None, coord=Coordinate(lon=Decimal("128.9"), lat=Decimal("37.75"))
+        )
+        == "중앙시장::37.7500,128.9000"
     )
     a = _Market(mrkt_nm="중앙시장", rdnmadr="강원특별자치도 강릉시 금성로 21", latitude=37.75,
                 longitude=128.9)
@@ -235,12 +246,37 @@ def test_market_without_coord_and_without_geocoder_keeps_row_without_coord() -> 
 
 
 @pytest.mark.unit
-def test_market_skips_nameless_locationless_and_duplicate_rows() -> None:
+def test_market_skips_nameless_and_locationless_rows() -> None:
     nameless = _Market(mrkt_nm="  ", rdnmadr="서울특별시 어딘가")
     locationless = _Market(mrkt_nm="위치없는시장")
-    duplicate = replace(_MANGWON, phone_number="02-000-0000")
     bundles = traditional_markets_to_bundles(
-        [nameless, locationless, _MANGWON, duplicate], fetched_at=_now()
+        [nameless, locationless, _MANGWON], fetched_at=_now()
     )
     assert [b.feature.name for b in bundles] == ["망원시장"]
-    assert bundles[0].feature.detail.phones == ["02-335-3591"]  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+def test_same_name_in_same_sigungu_gets_full_address_keys() -> None:
+    east = _Market(mrkt_nm="동부시장", rdnmadr="전라남도 해남군 해남읍 고산로 1", latitude=34.57,
+                   longitude=126.6)
+    west = _Market(mrkt_nm="동부시장", rdnmadr="전라남도 해남군 화원면 금평길 2", latitude=34.7,
+                   longitude=126.3)
+    alone = _Market(mrkt_nm="서부시장", rdnmadr="전라남도 해남군 해남읍 중앙1로 3", latitude=34.57,
+                    longitude=126.59)
+    bundles = traditional_markets_to_bundles([east, west, alone], fetched_at=_now())
+    ids = [b.source_record.source_entity_id for b in bundles]
+    assert ids == [
+        "동부시장::전라남도해남군::전라남도해남군해남읍고산로1",
+        "동부시장::전라남도해남군::전라남도해남군화원면금평길2",
+        "서부시장::전라남도해남군",
+    ]
+
+
+@pytest.mark.unit
+def test_duplicate_rows_keep_one_regardless_of_page_order() -> None:
+    other = replace(_MANGWON, phone_number="02-000-0000")
+    forward = traditional_markets_to_bundles([_MANGWON, other], fetched_at=_now())
+    backward = traditional_markets_to_bundles([other, _MANGWON], fetched_at=_now())
+    assert len(forward) == len(backward) == 1
+    assert forward[0].source_record.raw_payload_hash == backward[0].source_record.raw_payload_hash
+

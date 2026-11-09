@@ -192,9 +192,14 @@ def _classify_route_type(road_name: str) -> str:
 
 - 변환: `providers.standard_data.traditional_markets_to_bundles` → place, category `05070000`
   (`docs/architecture/category.md` §12), `place_kind="traditional_market"`, maki `shop`, `P-04`.
-- 자연키(`source_entity_id`): `시장명::도로명주소`(없으면 지번), **주소의 공백을 지운다** — 원천에
-  관리번호가 없고(`instt_code`는 제공 지자체 코드라 공유된다) 시장명은 전국에 겹친다("중앙시장").
-  같은 호출 안에서 자연키가 겹치는 뒤 행은 건너뛴다.
+- 자연키(`source_entity_id`): `시장명::시도시군구`(도로명, 없으면 지번 주소의 앞 두 토큰, 공백 제거) —
+  원천에 관리번호가 없고(`instt_code`는 제공 지자체 코드라 공유된다) 시장명은 전국에 겹친다("중앙시장").
+  번지·도로명 정정, 괄호 동명, 비어 있던 도로명 채움 같은 연간 편집이 키를 바꾸지 않게 지역까지만 쓴다.
+  같은 snapshot에서 시장명·지역이 겹치는 행만 `::전체 주소`를 붙이고(새 동명 시장이 같은 시군구에 생기면 그
+  둘의 키가 바뀐다 — 감수한 비용), 주소가 없으면 좌표(소수 4자리)가 지역을 대신한다. 그래도 같은 키는 원천
+  payload hash가 가장 작은 행 하나만 남긴다(페이지 순서 무관). 그래서 변환은 snapshot 전량을 한 번에 받는다.
+- 부분 snapshot: fetcher가 선언 `totalCount`보다 적게 받으면 `TraditionalMarketSnapshotIncomplete`로 실패한다
+  (2페이지가 resultCode 03 빈 페이지로 오거나 provider가 기형 행을 버리면 그만큼 실제 시장이 은퇴하므로).
 - 좌표: 원천 위경도. 없거나 무효면 asset이 주는 주소 정지오코더로 도로명 → 지번 순으로 찾고
   (`facility_info.coord_source="geocode"`), 그 좌표도 역지오코딩한다. 정지오코딩 좌표는
   `raw_data`에 넣지 않는다(replay가 원천 그대로 다시 변환한다). 2026-11-09 공식 미리보기 499행 중

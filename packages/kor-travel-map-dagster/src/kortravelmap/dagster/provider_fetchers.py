@@ -101,6 +101,7 @@ __all__ = [
     "fetch_standard_parking_lots",
     "fetch_standard_special_streets",
     "fetch_standard_traditional_markets",
+    "TraditionalMarketSnapshotIncomplete",
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
     "fetch_transport_airports",
@@ -1229,13 +1230,40 @@ async def fetch_standard_traditional_markets(
 
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient(api_key=api_key)
+    service = client.traditional_market
+    declared: list[int] = []
+
+    async def _page(page_no: int) -> ProviderPage:
+        page = await service.list(page_no=page_no, num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE)
+        if getattr(page, "total_count_known", True):
+            declared.append(int(page.total_count))
+        return ProviderPage(items=list(page.items), total_count=page.total_count)
+
+    seen = 0
     try:
-        async for record in _iter_datagokr_standard(
-            client.traditional_market, label="datagokr traditional_market.list"
+        async for record in aiter_paginated_items(
+            _page,
+            num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE,
+            label="datagokr traditional_market.list",
+            warn=_LOGGER.warning,
         ):
+            seen += 1
             yield record
     finally:
         await client.aclose()
+    # 이 dataset은 snapshot에 없는 시장을 **은퇴**시킨다. 짧은 snapshot(resultCode 03 빈
+    # 페이지·provider가 버린 기형 행)은 그 차이만큼 실제 시장을 내린다 — 선언 건수보다
+    # 적게 받았으면 은퇴로 이어지기 전에 실패시킨다(적대 리뷰 A HIGH).
+    expected = max(declared, default=0)
+    if seen < expected:
+        raise TraditionalMarketSnapshotIncomplete(
+            f"전국전통시장표준데이터: 선언 {expected}건 중 {seen}건만 받았다 — "
+            "부분 snapshot으로 은퇴시키지 않는다."
+        )
+
+
+class TraditionalMarketSnapshotIncomplete(RuntimeError):
+    """전통시장 snapshot이 upstream 선언 건수보다 짧다 — 은퇴 적재 전에 멈춘다."""
 
 
 #: 서울 열린데이터광장 OpenAPI base. **https가 없다** — 8088 포트는 TLS를 받지
