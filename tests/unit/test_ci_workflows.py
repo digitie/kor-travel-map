@@ -202,3 +202,17 @@ def test_dagster_job_installs_the_pinned_datagokr_for_the_replay_golden() -> Non
     assert pin.findall(by_name[name]["run"]) == pyproject
     assert steps.index("Run unit + lint tests") < steps.index(name)
     assert steps.index(name) < steps.index("Run kor-travel-map-dagster unit tests")
+
+
+@pytest.mark.unit
+def test_dagster_job_installs_the_pinned_visitkorea_for_the_replay_golden() -> None:
+    """TourAPI 관광지 replay golden(#1459)도 실모델 ``TourItem``으로 돈다 — 핀이 pyproject와 같다."""
+    pin = re.compile(
+        r"python-visitkorea-api @ git\+https://github\.com/digitie/python-visitkorea-api\.git@[0-9a-f]{40}"
+    )
+    name = "Install python-datagokr-api (replay golden only)"
+    pyproject = pin.findall(_read("pyproject.toml"))
+    workflow = yaml.safe_load(_read(".github/workflows/ci.yml"))
+    by_name = _steps_by_name(workflow["jobs"]["unit"])
+    assert len(pyproject) == 1
+    assert pin.findall(by_name[name]["run"]) == pyproject

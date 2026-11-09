@@ -39,6 +39,7 @@ FORWARD_ONLY_REVISIONS = (
     "437_feature_command_fingerprints",
     "438_transport_reference_places",
     "439_traditional_market_dataset",
+    "441_visitkorea_attraction_dataset",
 )
 
 
