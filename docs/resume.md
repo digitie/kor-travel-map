@@ -1,3 +1,7 @@
+## 2026-11-09 — MOIS 숙박 우선 적재
+
+- 머지·배포 뒤: 숙박 업종만 수동 적재 → 예시 호텔 검색 확인 → MCST 중복은 검토 큐에서 MOIS master로 병합 → 이어 달리기 sensor 켜기. alembic 442(별칭만).
+
 ## 2026-11-09 — #1459 TourAPI 관광지
 
 - 다음: 회전에 Map SHA를 묶는다(alembic 441) → 관광지 job 1회(preview 먼저) → #1459 목록 검색 확인 → daily schedule 켜기 → #1459 댓글. 판정은 acceptance `T-TOURAPI-LOAD`.

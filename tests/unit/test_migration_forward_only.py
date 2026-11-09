@@ -40,6 +40,7 @@ FORWARD_ONLY_REVISIONS = (
     "438_transport_reference_places",
     "439_traditional_market_dataset",
     "441_tourapi_attraction_dataset",
+    "442_mois_brand_search_aliases",
 )
 
 

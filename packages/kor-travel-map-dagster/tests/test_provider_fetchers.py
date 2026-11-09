@@ -522,13 +522,61 @@ def test_mois_fetch_reads_only_the_selected_slugs(tmp_path: Any) -> None:
         fetch_mois_license_records(settings, service_slugs=("yacht_marinas", "bakeries"))
     )
 
+    # 업종은 이름순이 아니라 적재 우선순위 순(레저가 대량 식음보다 먼저), 업종 안은 mng_no 순.
     assert [(r.service_slug, r.mng_no) for r in selected] == [
+        ("yacht_marinas", "Y-1"),
         ("bakeries", "B-1"),
         ("bakeries", "B-2"),
-        ("yacht_marinas", "Y-1"),
     ]
     with pytest.raises(ValueError, match="billiard_halls"):
         next(fetch_mois_license_records(settings, service_slugs=("billiard_halls",)))
+
+
+def test_mois_fetch_marks_lodging_rows_shadowed_by_an_unselected_earlier_slug(
+    tmp_path: Any,
+) -> None:
+    """관광숙박업만 고른 run도 lodgings의 같은 시설을 알고 가린다(색인은 선택과 무관)."""
+    mois_db = pytest.importorskip("mois.db")
+    from kortravelmap.providers.mois import ShadowedLicenseRecord
+    from sqlalchemy import create_engine
+    from sqlalchemy.orm import Session
+
+    db_file = tmp_path / "mois-source.sqlite"
+    setup_engine = create_engine(f"sqlite:///{db_file}")
+    mois_db.Base.metadata.create_all(setup_engine)
+    road = "서울특별시 서초구 신반포로 176 (반포동)"
+    with Session(setup_engine) as setup_session:
+        setup_session.add_all(
+            [
+                mois_db.PlaceMaster(
+                    service_slug="lodgings", mng_no="L-1", place_name="JW메리어트호텔서울",
+                    is_open=True, subtype_name="관광호텔", business_type_name="관광호텔",
+                    road_address=road, lon=127.0, lat=37.5,
+                ),
+                mois_db.PlaceMaster(
+                    service_slug="tourist_accommodations", mng_no="T-1",
+                    place_name="JW메리어트호텔 서울", is_open=True, subtype_name="관광숙박업",
+                    culture_sports_business_type_name="관광숙박업", road_address=road,
+                ),
+                mois_db.PlaceMaster(
+                    service_slug="tourist_accommodations", mng_no="T-2",
+                    place_name="다른호텔", is_open=True, subtype_name="관광숙박업",
+                    culture_sports_business_type_name="관광숙박업", road_address=road,
+                ),
+            ]
+        )
+        setup_session.commit()
+    setup_engine.dispose()
+    settings = KorTravelMapSettings(mois_source_db_path=str(db_file))
+
+    rows = list(fetch_mois_license_records(settings, service_slugs=("tourist_accommodations",)))
+
+    assert [type(row).__name__ for row in rows] == ["ShadowedLicenseRecord", "PlaceRecord"]
+    shadowed = rows[0]
+    assert isinstance(shadowed, ShadowedLicenseRecord)
+    assert shadowed.record.mng_no == "T-1"
+    assert shadowed.winner_source_entity_id == "lodgings::L-1"
+    assert rows[1].mng_no == "T-2"
 
 
 def test_mois_fetch_yields_open_records_and_cleans_up(

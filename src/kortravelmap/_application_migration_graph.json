@@ -243,6 +243,12 @@
         "439_traditional_market_dataset"
       ],
       "revision": "441_tourapi_attraction_dataset"
+    },
+    {
+      "down_revision": [
+        "441_tourapi_attraction_dataset"
+      ],
+      "revision": "442_mois_brand_search_aliases"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
