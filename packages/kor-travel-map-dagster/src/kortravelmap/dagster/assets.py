@@ -1254,7 +1254,10 @@ VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 
 
 def _with_detail(record: Any, overview: str, homepage: str) -> Any:
-    """record에 상세를 얹은 사본(provider ``TourItem``은 frozen pydantic, 테스트 대역은 dataclass)."""
+    """record에 상세를 얹은 사본.
+
+    provider ``TourItem``은 frozen pydantic이고 테스트 대역은 dataclass다.
+    """
     copy = getattr(record, "model_copy", None)
     if callable(copy):
         return copy(update={"overview": overview, "homepage": homepage})
@@ -1345,7 +1348,8 @@ async def run_feature_place_visitkorea_tourist_attractions(
         record_sync_state=not replay,
         geo_applied=GeoApplied(reverse=True, geocode=False),
         # 1만 2천 건 중 역지오코딩이 법정동을 못 내는 행(해상 등대·무인도 등)이 하나만 있어도
-        # strict는 run 전체를 되감는다. 그 행만 버리고 기록한다(#1450과 같은 선택, 소실 하한은 유지).
+        # strict는 run 전체를 되감는다. 그 행만 버리고 기록한다(#1450과 같은 선택,
+        # 소실 하한은 유지).
         address_failure_mode="drop",
     )
 

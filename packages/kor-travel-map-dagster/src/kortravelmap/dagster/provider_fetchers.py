@@ -2087,7 +2087,9 @@ class VisitKoreaAttractionSource:
                     kind = getattr(exc, "failure_kind", None)
                     if kind in _VISITKOREA_DETAIL_STOP_KINDS or quota_exhaustion_cause(exc):
                         _LOGGER.warning(
-                            "TourAPI detailCommon2 중단(%s) — 받은 %d건까지만 쓴다", kind, len(details)
+                            "TourAPI detailCommon2 중단(%s) — 받은 %d건까지만 쓴다",
+                            kind,
+                            len(details),
                         )
                         break
                     failures += 1
