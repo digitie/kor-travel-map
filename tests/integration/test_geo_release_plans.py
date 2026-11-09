@@ -284,7 +284,7 @@ async def test_items_follow_the_db_operations_and_the_core_policy(
     # Dagster job이 없는 큐 전용 operation → skipped(queue_only).
     reasons = {item.operation_key: (item.state, item.state_reason) for item in items}
     # 지역특화거리는 2026-11-09 공개 파일 원천으로 되살아나 disabled가 아니다.
-    assert reasons.get("feature_place_standard_special_streets_job") != ("skipped", "disabled")
+    assert reasons["feature_place_standard_special_streets_job"][0] == "pending"
     assert reasons["feature_place_datagokr_jeju_local_restaurants_job"] == ("skipped", "disabled")
     assert reasons["feature_event_visitkorea_enrichment_job"] == ("skipped", "no_geo_dependency")
     # ADR-114 결정 7(migration 419): 유가·돌발 PG operation은 꺼져 계획에 나오지 않는다.

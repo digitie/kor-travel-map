@@ -1087,6 +1087,23 @@ async def feature_place_standard_parking_lots(
     )
 
 
+def _refuse_empty_conversion(
+    bundles: Sequence[Any], records: Sequence[Any], *, replay: bool, label: str
+) -> None:
+    """원천 행은 있는데 변환 결과가 0건이면 은퇴 적재 전에 멈춘다(적대 리뷰 A2).
+
+    값 수준 회귀(이름·주소 열이 전부 빈 값)는 header 검산에 걸리지 않는다. 그 snapshot을
+    ``retire_absent_from_snapshot``으로 적재하면 기존 장소가 전부 내려간다.
+    """
+    if records and not bundles and not replay:
+        raise Failure(
+            description=(
+                f"{label}: 원천 {len(records)}행이 변환 뒤 0건이다 — 전부 은퇴시키지 않도록 "
+                "적재를 멈춘다(원천 컬럼 값을 확인할 것)."
+            )
+        )
+
+
 async def run_feature_place_standard_special_streets(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -1121,6 +1138,7 @@ async def run_feature_place_standard_special_streets(
         ),
     )
     ensure_replay_complete(source)
+    _refuse_empty_conversion(bundles, records, replay=replay, label="전국지역특화거리표준데이터")
     return await _load(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,
@@ -1182,6 +1200,7 @@ async def run_feature_place_standard_traditional_markets(
         ),
     )
     ensure_replay_complete(source)
+    _refuse_empty_conversion(bundles, records, replay=replay, label="전국전통시장표준데이터")
     return await _load(
         context,
         provider=STANDARD_DATA_PROVIDER_NAME,

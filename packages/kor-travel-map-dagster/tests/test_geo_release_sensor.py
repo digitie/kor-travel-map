@@ -444,7 +444,7 @@ def test_mois_budget_exhausted_without_progress_fails() -> None:
 def test_all_terminal_items_complete_the_plan_with_the_geo_resolver() -> None:
     """DISABLED(skipped) 항목이 섞여도 실행 항목이 끝나면 완료 — resolver는 이 tick의 geo에서."""
     skipped = dataclasses.replace(
-        _item(2, "feature_place_standard_special_streets_job"),
+        _item(2, "feature_place_datagokr_jeju_local_restaurants_job"),
         state="skipped",
         state_reason="disabled",
     )

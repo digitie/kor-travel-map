@@ -110,7 +110,6 @@ __all__ = [
     "fetch_standard_special_streets",
     "fetch_standard_traditional_markets",
     "StandardFileSnapshotIncomplete",
-    "TraditionalMarketSnapshotIncomplete",
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
     "fetch_transport_airports",
@@ -1336,9 +1335,6 @@ async def fetch_standard_tourist_attractions(
 class StandardFileSnapshotIncomplete(RuntimeError):
     """공개 파일 snapshot이 선언 건수와 다르다 — 은퇴 적재 전에 멈춘다."""
 
-
-#: 하위 호환 이름(#1461) — 전통시장이 먼저 이 예외를 썼다.
-TraditionalMarketSnapshotIncomplete = StandardFileSnapshotIncomplete
 
 
 async def _iter_datagokr_standard_file(service: Any, *, label: str) -> AsyncIterator[Any]:

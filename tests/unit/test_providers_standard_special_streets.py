@@ -185,3 +185,11 @@ def test_special_street_without_coord_uses_address_geocoder() -> None:
     assert bundle.source_record.raw_data["latitude"] is None
     assert special_streets_to_bundles([_S1], fetched_at=_now(), address_geocoder=_never)
 
+
+@pytest.mark.unit
+def test_special_street_duplicate_keys_keep_one_regardless_of_order() -> None:
+    other = _SpecialStreet(**{**_S1.__dict__, "phone_number": "031-000-0000"})
+    forward = special_streets_to_bundles([_S1, other], fetched_at=_now())
+    backward = special_streets_to_bundles([other, _S1], fetched_at=_now())
+    assert len(forward) == len(backward) == 1
+    assert forward[0].source_record.raw_payload_hash == backward[0].source_record.raw_payload_hash

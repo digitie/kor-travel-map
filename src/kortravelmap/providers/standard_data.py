@@ -1193,7 +1193,16 @@ async def special_streets_to_bundles(
                 address_geocoder=address_geocoder,
             )
         )
-    return bundles
+    # 같은 자연키가 둘이면 적재가 뒤 행으로 조용히 덮는다 — payload hash가 가장 작은 행 하나만
+    # 남겨 페이지 순서와 무관하게 결정적으로 고른다(전통시장과 같은 규칙, 적대 리뷰 A2).
+    chosen: dict[str, FeatureBundle] = {}
+    for bundle in bundles:
+        key = bundle.source_record.source_entity_id
+        kept = chosen.get(key)
+        digest = bundle.source_record.raw_payload_hash
+        if kept is None or digest < kept.source_record.raw_payload_hash:
+            chosen[key] = bundle
+    return [b for b in bundles if chosen[b.source_record.source_entity_id] is b]
 
 
 # -- 전통시장 (place, 전국전통시장표준데이터 15012894) ------------------------

@@ -188,7 +188,7 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: 2026-11-09 29 → 31: ADR-120 transport 기준정보 fetcher 둘(철도역·항구)이 들어왔다 — 시도마다
 #: `_transport_request_once`로 센다(410 재읽기의 재요청까지).
 #: 2026-11-09 31 → 32: 전통시장 표준데이터(`fetch_standard_traditional_markets`, #1459) —
-#: 공용 `aiter_paginated_items`로 페이지마다 센다.
+#: (2026-11-09 공개 파일로 옮긴 뒤에는 `_iter_datagokr_standard_file`이 header·페이지마다 센다.)
 _EXPECTED_FULLY_COUNTED: int = 32
 
 

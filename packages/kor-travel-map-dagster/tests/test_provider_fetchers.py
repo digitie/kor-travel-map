@@ -1329,6 +1329,14 @@ def test_standard_files_fail_on_short_or_empty_snapshot(
     assert fake.instances[0].closed is True
 
 
+async def test_krheritage_fetch_raises_when_credential_missing() -> None:
+    settings = KorTravelMapSettings(data_go_kr_service_key=None)
+
+    generator = fetch_krheritage_events(settings)
+    with pytest.raises(ProviderCredentialMissing):
+        await anext(generator)
+
+
 async def test_krheritage_fetch_yields_records_and_closes_client(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
