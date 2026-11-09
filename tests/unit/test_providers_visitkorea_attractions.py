@@ -160,7 +160,12 @@ def test_attraction_category_maps_the_new_classification(
         # 문화시설(14) 대표 코드
         ("14", "VE070100", "국립중앙박물관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_MUSEUM),
         ("14", "VE070600", "리움미술관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_ART),
-        ("14", "VE060100", "세종문화회관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_PERFORMANCE_HALL),
+        (
+            "14",
+            "VE060100",
+            "세종문화회관",
+            PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_PERFORMANCE_HALL,
+        ),
         ("14", "VE120300", "어느 문화공간", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY),
         # 레포츠(28) 대표 코드
         ("28", "LS010400", "어느 컨트리클럽", PlaceCategoryCode.TOURISM_ACTIVITY_GOLF),
