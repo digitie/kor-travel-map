@@ -80,7 +80,8 @@ async def test_geocode_missing_coordinate_keeps_source_coordinate() -> None:
 
 async def test_geocode_missing_coordinate_skips_coarse_address_and_missing_geocoder() -> None:
     geocoder = _Geocoder()
-    assert await geocode_missing_coordinate(None, Address(legal="경상남도 밀양시"), geocoder) is None
+    coarse = Address(legal="경상남도 밀양시")
+    assert await geocode_missing_coordinate(None, coarse, geocoder) is None
     assert geocoder.calls == []
     assert await geocode_missing_coordinate(None, Address(road="세종대로 1"), None) is None
 

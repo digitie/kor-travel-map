@@ -1,3 +1,8 @@
+## 2026-11-09 — #1459 지역 검색·좌표 fallback
+
+- 배포 뒤 축제·주차장·국가유산 재적재로 좌표를 채우고 MCST 테마 4종은 재적재로 #1447 분류를 반영한다. 마이그레이션·OpenAPI 변경 없음.
+- 남은 일: T-TRIP-DATA-GAPS(TourAPI place 원천·검색 별칭 migration·concierge 분류 upstream).
+
 ## 2026-11-07 — Valkey 상태 쓰기 재시도
 
 - 다음 회전에 묶는다(소유자). writer socket timeout 10 s는 Manager env(code-server만), API는 2 s 유지.

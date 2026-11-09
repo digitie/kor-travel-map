@@ -1991,7 +1991,8 @@ def _feature_search_score_cte_sql(
     )
     region_rank = (
         f"""
-          -- 지역 일치(지역 검색만): 별칭이 가리키는 이름이거나 지역 안에서 나머지 검색어와 맞으면 0.
+          -- 지역 일치(지역 검색만): 별칭이 가리키는 이름이거나, 지역 안에서
+          -- 나머지 검색어와 맞으면 0.
           CASE
             WHEN compact_raw_name = CAST(:alias_compact AS text) THEN 0
             WHEN region_hit THEN 0

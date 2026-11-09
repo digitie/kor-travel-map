@@ -323,7 +323,8 @@ class _CachedObservedReverseGeocoder:
         """주소 → 좌표(``POST /v2/geocode``) — 같은 client·계수로 원천 좌표 결측을 메운다(#1459 §4).
 
         도로명이 있으면 도로명 먼저, 지번이 다르면 지번을 다음에 묻는다. 둘 다 못 찾으면 None.
-        외부 API fallback은 쓰지 않는다(``fallback="none"``, ``kor_travel_geo_address_resolver``와 같다).
+        외부 API fallback은 쓰지 않는다(``fallback="none"`` —
+        ``kor_travel_geo_address_resolver``와 같다).
         """
         queries: list[tuple[str, Literal["road", "parcel"]]] = []
         if address.road:
