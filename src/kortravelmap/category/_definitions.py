@@ -202,6 +202,7 @@ class PlaceCategoryCode(StrEnum):
     CONVENIENCE_SUPERMARKET = "05040000"
     CONVENIENCE_DEPARTMENT_STORE = "05050000"
     CONVENIENCE_TOILET = "05060000"
+    CONVENIENCE_TRADITIONAL_MARKET = "05070000"
     TRANSPORT = "06000000"
     TRANSPORT_PARKING = "06010000"
     TRANSPORT_FUEL = "06020000"
@@ -1611,6 +1612,16 @@ PLACE_CATEGORY_DEFINITIONS: Final[tuple[PlaceCategory, ...]] = tuple(
                 PlaceCategoryCode.CONVENIENCE,
                 560,
             ),
+            _category(
+                PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET,
+                "편의",
+                "전통시장",
+                None,
+                None,
+                2,
+                PlaceCategoryCode.CONVENIENCE,
+                570,
+            ),
             _category(PlaceCategoryCode.TRANSPORT, "교통", None, None, None, 1, None, 600),
             _category(
                 PlaceCategoryCode.TRANSPORT_PARKING,
@@ -1945,6 +1956,7 @@ PLACE_CATEGORY_MAPBOX_MAKI_ICONS: Final[dict[str, str]] = {
     PlaceCategoryCode.CONVENIENCE_SUPERMARKET.value: "shop",
     PlaceCategoryCode.CONVENIENCE_DEPARTMENT_STORE.value: "clothing-store",
     PlaceCategoryCode.CONVENIENCE_TOILET.value: "toilet",
+    PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET.value: "shop",
     PlaceCategoryCode.TRANSPORT.value: "car",
     PlaceCategoryCode.TRANSPORT_PARKING.value: "parking",
     PlaceCategoryCode.TRANSPORT_FUEL.value: "fuel",

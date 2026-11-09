@@ -38,6 +38,7 @@ FORWARD_ONLY_REVISIONS = (
     "436_feature_search_aliases",
     "437_feature_command_fingerprints",
     "438_transport_reference_places",
+    "439_traditional_market_dataset",
 )
 
 

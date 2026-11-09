@@ -110,6 +110,12 @@
           ],
           "members": []
         },
+        "datagokr.exceptions.ResponseParseError": {
+          "external_bases": [
+            "Exception"
+          ],
+          "members": []
+        },
         "datagokr.exceptions.TransportError": {
           "external_bases": [
             "Exception"
@@ -357,6 +363,32 @@
             "trrsrt_se"
           ]
         },
+        "datagokr.models.PublicTraditionalMarket": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "estbl_year",
+            "homepage_url",
+            "instt_code",
+            "latitude",
+            "lnmadr",
+            "longitude",
+            "model_config",
+            "mrkt_estbl_cycle",
+            "mrkt_nm",
+            "mrkt_type",
+            "pblic_toilet_yn",
+            "phone_number",
+            "prkplce_yn",
+            "raw",
+            "rdnmadr",
+            "reference_date",
+            "stor_number",
+            "trtmnt_prdlst",
+            "use_gcct"
+          ]
+        },
         "datagokr.models.StandardItem": {
           "external_bases": [
             "BaseModel"
@@ -378,6 +410,107 @@
             "page_no",
             "total_count",
             "total_pages"
+          ]
+        },
+        "datagokr.models.TagoBusCity": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "city_code",
+            "city_name",
+            "model_config",
+            "raw"
+          ]
+        },
+        "datagokr.models.TagoBusClass": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "grade_id",
+            "grade_name",
+            "model_config",
+            "raw"
+          ]
+        },
+        "datagokr.models.TagoBusTerminal": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "city_name",
+            "model_config",
+            "raw",
+            "terminal_id",
+            "terminal_name"
+          ]
+        },
+        "datagokr.models.TagoBusTimetable": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "adult_charge",
+            "arr_place_name",
+            "arr_planned_time",
+            "dep_place_name",
+            "dep_planned_time",
+            "grade_name",
+            "model_config",
+            "normalize_planned_time",
+            "raw",
+            "route_id"
+          ]
+        },
+        "datagokr.models.TagoTrainCity": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "city_code",
+            "city_name",
+            "model_config",
+            "raw"
+          ]
+        },
+        "datagokr.models.TagoTrainClass": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "grade_id",
+            "grade_name",
+            "model_config",
+            "raw"
+          ]
+        },
+        "datagokr.models.TagoTrainStation": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "model_config",
+            "raw",
+            "station_id",
+            "station_name"
+          ]
+        },
+        "datagokr.models.TagoTrainTimetable": {
+          "external_bases": [
+            "BaseModel"
+          ],
+          "members": [
+            "adult_charge",
+            "arr_place_name",
+            "arr_planned_time",
+            "dep_place_name",
+            "dep_planned_time",
+            "grade_name",
+            "model_config",
+            "raw",
+            "reject_boolean_fare",
+            "train_number"
           ]
         },
         "datagokr.services.file_data.FileDataCatalogEntry": {
@@ -436,6 +569,46 @@
             "day_list",
             "hour_list",
             "ten_minute_list"
+          ]
+        },
+        "datagokr.services.openapi.TagoExpressBusService": {
+          "external_bases": [],
+          "members": [
+            "city_list",
+            "class_list",
+            "iter_terminals",
+            "terminal_list",
+            "timetable_list"
+          ]
+        },
+        "datagokr.services.openapi.TagoIntercityBusService": {
+          "external_bases": [],
+          "members": [
+            "city_list",
+            "class_list",
+            "iter_terminals",
+            "terminal_list",
+            "timetable_list"
+          ]
+        },
+        "datagokr.services.openapi.TagoTrainService": {
+          "external_bases": [],
+          "members": [
+            "city_list",
+            "class_list",
+            "iter_stations",
+            "station_list",
+            "timetable_list"
+          ]
+        },
+        "datagokr.services.openapi._TagoBusService": {
+          "external_bases": [],
+          "members": [
+            "city_list",
+            "class_list",
+            "iter_terminals",
+            "terminal_list",
+            "timetable_list"
           ]
         },
         "datagokr.services.pagination._PageLike": {
@@ -508,6 +681,16 @@
             "list"
           ]
         },
+        "datagokr.services.standard.TraditionalMarketService": {
+          "external_bases": [
+            "Generic"
+          ],
+          "members": [
+            "iter_all",
+            "iter_pages",
+            "list"
+          ]
+        },
         "datagokr.transport.AsyncHttpxTransport": {
           "external_bases": [],
           "members": [
@@ -526,7 +709,7 @@
         }
       },
       "package": "datagokr",
-      "pinned_sha": "99d8427510b027d7280fd8bc9532828c3c25f4f5"
+      "pinned_sha": "649fa1a1b3e24f851a4f550a297a2d8ba5185c6c"
     },
     "python-khoa-api": {
       "classes": {

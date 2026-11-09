@@ -65,6 +65,7 @@ from kortravelmap.providers.standard_data import (
     museums_to_bundles,
     parking_lots_to_bundles,
     tourist_attractions_to_bundles,
+    traditional_markets_to_bundles,
 )
 from kortravelmap.providers.transport_reference_places import (
     ferry_ports_to_bundles,
@@ -643,6 +644,59 @@ async def _convert_parking(items: Sequence[Any]) -> list[Any]:
 
 
 @dataclass(frozen=True)
+class _TraditionalMarket:
+    """`PublicTraditionalMarketItem` Protocol 준수 (provider `PublicTraditionalMarket`)."""
+
+    mrkt_nm: str | None
+    mrkt_type: str | None
+    rdnmadr: str | None
+    lnmadr: str | None
+    mrkt_estbl_cycle: str | None
+    latitude: float | None
+    longitude: float | None
+    stor_number: int | None
+    trtmnt_prdlst: str | None
+    use_gcct: str | None
+    homepage_url: str | None
+    pblic_toilet_yn: str | None
+    prkplce_yn: str | None
+    estbl_year: int | None
+    phone_number: str | None
+    reference_date: date | None
+    instt_code: str | None
+    raw: Any = None
+
+
+def _traditional_market_fixture() -> Sequence[_TraditionalMarket]:
+    return [
+        _TraditionalMarket(
+            mrkt_nm="망원시장",
+            mrkt_type="상설장",
+            rdnmadr="서울특별시 마포구 망원로8길 7",
+            lnmadr="서울특별시 마포구 망원동 486-37",
+            mrkt_estbl_cycle="매일",
+            latitude=37.55715742,
+            longitude=126.9059507,
+            stor_number=82,
+            trtmnt_prdlst="농산물+축산물+가공식품+가정용품+음식점",
+            use_gcct=None,
+            homepage_url=None,
+            pblic_toilet_yn="Y",
+            prkplce_yn="Y",
+            estbl_year=2006,
+            phone_number="02-335-3591",
+            reference_date=date(2025, 11, 10),
+            instt_code=None,
+        ),
+    ]
+
+
+async def _convert_traditional_markets(items: Sequence[Any]) -> list[Any]:
+    bundles = await traditional_markets_to_bundles(items, fetched_at=_now())
+    return [b.model_dump(mode="json") for b in bundles]
+
+
+@dataclass(frozen=True)
 class _Beach:
     """`OceanBeachInfoItem` Protocol 준수 (provider `OceanBeachInfo`)."""
 
@@ -917,6 +971,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="전국주차장표준데이터 → place Feature (ADR-034 보조). T-RV-55.",
         build_fixture=_parking_fixture,
         convert=_convert_parking,
+    ),
+    EtlFixtureEntry(
+        provider="data.go.kr-standard",
+        dataset="datagokr_traditional_markets",
+        variant="FeatureBundle",
+        description="전국전통시장표준데이터 → 전통시장 place Feature (#1459).",
+        build_fixture=_traditional_market_fixture,
+        convert=_convert_traditional_markets,
     ),
     EtlFixtureEntry(
         provider="python-khoa-api",

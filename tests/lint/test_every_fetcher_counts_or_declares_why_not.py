@@ -117,6 +117,7 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_standard_parking_lots",
         "fetch_standard_special_streets",
         "fetch_standard_tourist_attractions",
+        "fetch_standard_traditional_markets",
         "fetch_visitkorea_festival_events",
         # ADR-114 2단계 — weather Map export(W1·W2·W3·W5)를 Valkey 상태로 받는 fetcher. 시도마다
         # `_weather_request_once`가 센다.
@@ -186,7 +187,9 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: SH 스냅샷 경로와 함께 지웠다 — 코드가 없어졌다(완전 계측이었다).
 #: 2026-11-09 29 → 31: ADR-120 transport 기준정보 fetcher 둘(철도역·항구)이 들어왔다 — 시도마다
 #: `_transport_request_once`로 센다(410 재읽기의 재요청까지).
-_EXPECTED_FULLY_COUNTED: int = 31
+#: 2026-11-09 31 → 32: 전통시장 표준데이터(`fetch_standard_traditional_markets`, #1459) —
+#: 공용 `aiter_paginated_items`로 페이지마다 센다.
+_EXPECTED_FULLY_COUNTED: int = 32
 
 
 def _module_trees() -> dict[str, ast.Module]:

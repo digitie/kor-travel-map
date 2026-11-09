@@ -48,7 +48,7 @@ def test_categories_static_returns_full_catalog(client: TestClient) -> None:
         assert r.status_code == 200
         body = r.json()
         assert body["data"]["include_counts"] is False
-        assert len(body["data"]["items"]) == 147
+        assert len(body["data"]["items"]) == 148
         item = body["data"]["items"][0]
         assert {"code", "depth", "label", "path", "maki_icon", "is_active"} <= set(item)
         assert item["db_feature_count"] is None

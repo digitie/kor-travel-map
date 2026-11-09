@@ -47,6 +47,7 @@ PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
     "standard_data.PublicTouristAttractionItem": "datagokr.models.PublicTouristAttraction",
     "standard_data.PublicParkingLotItem": "datagokr.models.PublicParkingLot",
     "standard_data.PublicSpecialStreetItem": "datagokr.models.PublicSpecialStreet",
+    "standard_data.PublicTraditionalMarketItem": "datagokr.models.PublicTraditionalMarket",
     "visitkorea.VisitKoreaFestivalItem": "visitkorea.models.TourItem",
 }
 """provider 실모델이 **직접** 만족해야 하는 Protocol.

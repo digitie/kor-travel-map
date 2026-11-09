@@ -231,6 +231,12 @@
         "437_feature_command_fingerprints"
       ],
       "revision": "438_transport_reference_places"
+    },
+    {
+      "down_revision": [
+        "438_transport_reference_places"
+      ],
+      "revision": "439_traditional_market_dataset"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
