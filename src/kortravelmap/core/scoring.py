@@ -29,6 +29,7 @@ import math
 import re
 import unicodedata
 from dataclasses import dataclass
+from functools import lru_cache
 from typing import TYPE_CHECKING, Final
 
 import jellyfish
@@ -107,6 +108,7 @@ _NAME_TRIM_PATTERNS: Final[tuple[re.Pattern[str], ...]] = (
 _NAME_SUFFIX_TO_STRIP: Final[tuple[str, ...]] = ()
 
 
+@lru_cache(maxsize=65536)
 def normalize_kr_place_name(name: str) -> str:
     """한국어 장소명 정규화 — Unicode NFKC + lower + 괄호 제거 + 공백 모두 제거.
 

@@ -103,10 +103,14 @@ def visitkorea_tour_item_from_raw(raw_data: dict[str, Any]) -> Any:
     """``raw_data`` → python-visitkorea-api ``TourItem``(키가 모델 필드 이름 그대로다, #1459).
 
     ``TourItem.raw``(원 응답 행)는 저장하지 않는다 — 변환기가 읽지 않으므로 빈 mapping이다.
-    시각은 ISO 문자열로 저장돼 있어 pydantic이 같은 aware datetime으로 되살린다.
+    변환기가 읽지 않는 모델 필드(``area_code``·``cat1~3``·``map_level`` 등, 기본값 없는
+    ``X | None``)도 저장하지 않으므로 ``None``으로 채운다 — 채우지 않으면 pydantic이 "Field
+    required"로 거부한다. 시각은 ISO 문자열로 저장돼 있어 같은 aware datetime으로 되살린다.
     """
     visitkorea = importlib.import_module("visitkorea")
-    return visitkorea.TourItem.model_validate({**raw_data, "raw": {}})
+    model = visitkorea.TourItem
+    absent = dict.fromkeys(name for name in model.model_fields if name != "raw")
+    return model.model_validate({**absent, **raw_data, "raw": {}})
 
 
 def raw_mapping_from_raw(raw_data: dict[str, Any]) -> Any:

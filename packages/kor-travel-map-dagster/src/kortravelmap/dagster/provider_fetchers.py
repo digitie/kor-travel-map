@@ -121,9 +121,9 @@ __all__ = [
     "fetch_transport_rest_area_fuel_prices",
     "fetch_transport_rest_areas",
     "fetch_visitkorea_festival_events",
+    "fetch_visitkorea_attraction_details",
     "fetch_visitkorea_tourist_attractions",
     "VisitKoreaAttractionSnapshotIncomplete",
-    "VisitKoreaAttractionSource",
 ]
 
 
@@ -2000,127 +2000,130 @@ _VISITKOREA_DETAIL_STOP_KINDS: Final = frozenset({"rate_limit", "auth"})
 
 
 class VisitKoreaAttractionSnapshotIncomplete(RuntimeError):
-    """관광지 목록이 upstream 선언 건수보다 짧다 — 은퇴 적재 전에 멈춘다."""
+    """관광지 목록이 완전하지 않다(선언보다 짧거나 순회 중 바뀌었다) — 은퇴 적재 전에 멈춘다."""
 
 
-class VisitKoreaAttractionSource:
-    """TourAPI 관광지(contentTypeId 12) live source — 목록 순회 + 예산 상세 받기.
-
-    ``async for``는 ``areaBasedList2`` 전 페이지의 ``TourItem``을 낸다. 이 dataset은 목록에
-    없는 관광지를 **은퇴**시키므로, 고유 contentid 수가 선언 건수(페이지마다 받은 값 중 최대)보다
-    적으면 :class:`VisitKoreaAttractionSnapshotIncomplete`로 실패한다 — 순회 중 삭제로 한 행이
-    앞 페이지로 밀려 빠진 경우다. 순서는 생성일(``arrange=D``)이라 순회 중 신규 등록은 중복으로만
-    보이고(변환기가 contentid로 하나만 남긴다) 빠지지 않는다.
-
-    :meth:`fetch_details`는 asset이 고른 contentid만 ``detailCommon2``로 받는다(일일 한도 보호,
-    ``kortravelmap.providers.visitkorea_attractions.plan_attraction_details``).
-    """
-
-    def __init__(self, api_key: str) -> None:
-        self._api_key = api_key
-
-    def _client(self) -> Any:
-        visitkorea = cast(Any, importlib.import_module("visitkorea"))
-        return visitkorea.KrTourApiClient(service_key=self._api_key)
-
-    def __aiter__(self) -> AsyncIterator[Any]:
-        return self._iterate()
-
-    async def _iterate(self) -> AsyncIterator[Any]:
-        client = self._client()
-        declared: list[int] = []
-        seen: set[str] = set()
-
-        async def _page(page_no: int) -> ProviderPage:
-            page = await client.area_based_list(
-                content_type_id="12",
-                arrange="D",
-                page_no=page_no,
-                num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
-            )
-            declared.append(int(page.total_count))
-            return ProviderPage(
-                items=page.items,
-                total_count=page.total_count,
-                fingerprint=getattr(page, "raw", None),
-            )
-
-        try:
-            async for record in aiter_paginated_items(
-                _page,
-                num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
-                label="visitkorea area_based_list(12)",
-                absolute_max_pages=_VISITKOREA_ATTRACTION_MAX_PAGES,
-                warn=_LOGGER.warning,
-            ):
-                content_id = str(getattr(record, "content_id", "") or "").strip()
-                if content_id:
-                    seen.add(content_id)
-                yield record
-        finally:
-            await client.aclose()
-        expected = max(declared, default=0)
-        if len(seen) < expected:
-            raise VisitKoreaAttractionSnapshotIncomplete(
-                f"TourAPI 관광지: 선언 {expected}건 중 고유 {len(seen)}건만 받았다 — "
-                "부분 snapshot으로 은퇴시키지 않는다."
-            )
-
-    async def fetch_details(self, content_ids: Sequence[str]) -> dict[str, tuple[str, str]]:
-        """contentid별 ``(overview, homepage)`` — 받지 못한 항목은 결과에 없다.
-
-        일일 한도·속도 제한·인증 실패(``failure_kind``)를 만나면 그 자리에서 멈추고 받은 데까지
-        돌려준다(적재는 상세 없이 계속한다). 그 밖의 실패는 항목만 건너뛰고, 연속
-        :data:`_VISITKOREA_DETAIL_MAX_CONSECUTIVE_FAILURES`번이면 멈춘다.
-        """
-        if not content_ids:
-            return {}
-        details: dict[str, tuple[str, str]] = {}
-        failures = 0
-        client = self._client()
-        try:
-            for content_id in content_ids:
-                note_upstream_request()
-                try:
-                    detail = await client.detail_common(content_id)
-                except Exception as exc:  # noqa: BLE001 — provider 예외 계층을 import하지 않는다
-                    kind = getattr(exc, "failure_kind", None)
-                    if kind in _VISITKOREA_DETAIL_STOP_KINDS or quota_exhaustion_cause(exc):
-                        _LOGGER.warning(
-                            "TourAPI detailCommon2 중단(%s) — 받은 %d건까지만 쓴다",
-                            kind,
-                            len(details),
-                        )
-                        break
-                    failures += 1
-                    if failures >= _VISITKOREA_DETAIL_MAX_CONSECUTIVE_FAILURES:
-                        _LOGGER.warning(
-                            "TourAPI detailCommon2 연속 %d회 실패 — 받은 %d건까지만 쓴다",
-                            failures,
-                            len(details),
-                        )
-                        break
-                    continue
-                failures = 0
-                details[content_id] = (detail.overview or "", detail.homepage or "")
-        finally:
-            await client.aclose()
-        return details
-
-
-def fetch_visitkorea_tourist_attractions(
-    settings: KorTravelMapSettings,
-) -> VisitKoreaAttractionSource:
-    """TourAPI 관광지(contentTypeId 12) live source(#1459).
-
-    data.go.kr 서비스키에 "한국관광공사_국문 관광정보 서비스_GW"(15101578)가 활용신청돼 있어야
-    한다 — 축제(``searchFestival2``)와 같은 서비스다.
-    """
+def _visitkorea_service_key(settings: KorTravelMapSettings, what: str) -> str:
     secret = settings.data_go_kr_service_key
     if secret is None:
         raise ProviderCredentialMissing(
-            "visitkorea tourist attractions live fetch에는 "
+            f"visitkorea {what} live fetch에는 "
             "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
             "필요하다."
         )
-    return VisitKoreaAttractionSource(secret.get_secret_value())
+    return secret.get_secret_value()
+
+
+async def fetch_visitkorea_tourist_attractions(
+    settings: KorTravelMapSettings,
+) -> AsyncIterator[Any]:
+    """TourAPI 관광지(contentTypeId 12) ``areaBasedList2`` 전 페이지의 ``TourItem``(#1459).
+
+    data.go.kr 서비스키에 "한국관광공사_국문 관광정보 서비스_GW"(15101578)가 활용신청돼 있어야
+    한다 — 축제(``searchFestival2``)와 같은 서비스다.
+
+    이 dataset은 목록에 없는 관광지를 **은퇴**시키므로 목록이 완전해야 한다. 다음이면
+    :class:`VisitKoreaAttractionSnapshotIncomplete`로 실패한다(재시도는 목록 13호출뿐이다).
+
+    - 페이지마다 받은 ``totalCount``가 한 번이라도 다르다 — 순회 중 등록·삭제로 목록이 밀렸다.
+      밀린 목록은 경계 행 하나를 빠뜨릴 수 있고 그 행이 은퇴한다.
+    - 고유 contentid 수가 선언 건수보다 적다(빈 페이지·중복으로 채워진 페이지).
+    """
+    api_key = _visitkorea_service_key(settings, "tourist attractions")
+    visitkorea = cast(Any, importlib.import_module("visitkorea"))
+    client = visitkorea.KrTourApiClient(service_key=api_key)
+    declared: list[int] = []
+    seen: set[str] = set()
+
+    async def _page(page_no: int) -> ProviderPage:
+        page = await client.area_based_list(
+            content_type_id="12",
+            arrange="D",
+            page_no=page_no,
+            num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
+        )
+        declared.append(int(page.total_count))
+        return ProviderPage(
+            items=page.items,
+            total_count=page.total_count,
+            fingerprint=getattr(page, "raw", None),
+        )
+
+    try:
+        async for record in aiter_paginated_items(
+            _page,
+            num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
+            label="visitkorea area_based_list(12)",
+            absolute_max_pages=_VISITKOREA_ATTRACTION_MAX_PAGES,
+            warn=_LOGGER.warning,
+        ):
+            content_id = str(getattr(record, "content_id", "") or "").strip()
+            if content_id:
+                seen.add(content_id)
+            yield record
+    finally:
+        await client.aclose()
+    if len(set(declared)) > 1:
+        raise VisitKoreaAttractionSnapshotIncomplete(
+            f"TourAPI 관광지: 순회 중 선언 건수가 바뀌었다({min(declared)}~{max(declared)}) — "
+            "밀린 목록으로 은퇴시키지 않는다."
+        )
+    expected = max(declared, default=0)
+    if len(seen) < expected:
+        raise VisitKoreaAttractionSnapshotIncomplete(
+            f"TourAPI 관광지: 선언 {expected}건 중 고유 {len(seen)}건만 받았다 — "
+            "부분 snapshot으로 은퇴시키지 않는다."
+        )
+
+
+async def fetch_visitkorea_attraction_details(
+    settings: KorTravelMapSettings, content_ids: Sequence[str]
+) -> dict[str, tuple[str, str]]:
+    """contentid별 ``detailCommon2`` ``(overview, homepage)`` — 받지 못한 항목은 결과에 없다.
+
+    asset이 예산 안에서 고른 contentid만 넘긴다
+    (``kortravelmap.providers.visitkorea_attractions.plan_attraction_details``). 원천에 상세가
+    없다는 답(``failure_kind="no_data"``)은 ``("", "")``로 돌려준다 — 받은 것으로 저장돼 다음
+    run이 다시 묻지 않는다. 일일 한도·속도 제한·인증 실패를 만나면 그 자리에서 멈추고 받은 데까지
+    돌려준다(적재는 상세 없이 계속한다). 그 밖의 실패는 항목만 건너뛰고, 연속
+    :data:`_VISITKOREA_DETAIL_MAX_CONSECUTIVE_FAILURES`번이면 멈춘다.
+    """
+    if not content_ids:
+        return {}
+    api_key = _visitkorea_service_key(settings, "attraction details")
+    visitkorea = cast(Any, importlib.import_module("visitkorea"))
+    client = visitkorea.KrTourApiClient(service_key=api_key)
+    details: dict[str, tuple[str, str]] = {}
+    failures = 0
+    try:
+        for content_id in content_ids:
+            note_upstream_request()
+            try:
+                detail = await client.detail_common(content_id)
+            except Exception as exc:  # noqa: BLE001 — provider 예외 계층을 import하지 않는다
+                kind = getattr(exc, "failure_kind", None)
+                if kind == "no_data":
+                    details[content_id] = ("", "")
+                    failures = 0
+                    continue
+                if kind in _VISITKOREA_DETAIL_STOP_KINDS or quota_exhaustion_cause(exc):
+                    _LOGGER.warning(
+                        "TourAPI detailCommon2 중단(%s) — 받은 %d건까지만 쓴다",
+                        kind,
+                        len(details),
+                    )
+                    break
+                failures += 1
+                if failures >= _VISITKOREA_DETAIL_MAX_CONSECUTIVE_FAILURES:
+                    _LOGGER.warning(
+                        "TourAPI detailCommon2 연속 %d회 실패 — 받은 %d건까지만 쓴다",
+                        failures,
+                        len(details),
+                    )
+                    break
+                continue
+            failures = 0
+            details[content_id] = (detail.overview or "", detail.homepage or "")
+    finally:
+        await client.aclose()
+    return details

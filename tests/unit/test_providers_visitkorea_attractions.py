@@ -21,7 +21,6 @@ from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, So
 from kortravelmap.providers import visitkorea_attractions as va
 from kortravelmap.providers.visitkorea_attractions import (
     DATASET_KEY_VISITKOREA_ATTRACTIONS,
-    VisitKoreaAttractionItem,
     attraction_category,
     plan_attraction_details,
 )
@@ -125,6 +124,7 @@ def _bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBundle]:
         (("NA", "NA04", "NA040600"), PlaceCategoryCode.LODGING_RECREATION_FOREST),
         (("HS", "HS03", "HS030100"), PlaceCategoryCode.TOURISM_HERITAGE_TEMPLE),
         (("EX", "EX05", "EX050100"), PlaceCategoryCode.HOT_SPRING_SPA_HOT_SPRING),  # 동래온천
+        # 문화시설(14) 코드 — 같은 변환기로 14 dataset을 더할 때를 위해 둔다
         (("VE", "VE09", "VE090300"), PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_LIBRARY),
         # 강·호수 계열은 NA02 기본값(해안·섬)이 아니다
         (("NA", "NA02", "NA020200"), PlaceCategoryCode.TOURISM_NATURAL_LANDSCAPE_RIVER_LAKE),
@@ -156,10 +156,6 @@ def test_every_mapped_category_exists_in_the_catalog() -> None:
 
 
 # -- 변환 ------------------------------------------------------------------
-
-
-def test_fake_item_satisfies_the_protocol() -> None:
-    assert isinstance(_BUSAN_TOWER, VisitKoreaAttractionItem)
 
 
 def test_busan_tower_becomes_an_observatory_place() -> None:
@@ -198,6 +194,30 @@ def test_busan_tower_becomes_an_observatory_place() -> None:
         ("primary", _BUSAN_TOWER.first_image),
         ("thumbnail", _BUSAN_TOWER.first_image2),
     ]
+    # 파일이 객체 저장소로 옮겨져도 이용 조건이 함께 간다.
+    assert {source.payload["kogl_type"] for source in bundle.file_sources} == {"Type1"}
+    assert {source.payload["attribution"] for source in bundle.file_sources} == {"한국관광공사"}
+
+
+def test_transport_facility_rows_are_left_to_the_transport_source() -> None:
+    # 공항·기차역·여객선·휴게소는 kor-travel-transport가 정본이다 — 중복 place를 만들지 않는다.
+    airport = replace(_GWANGAN, content_id="9", lcls_systm2="VE11", lcls_systm3="VE110100")
+    assert _bundles([airport, replace(airport, lcls_systm2=None)]) == []
+
+
+@pytest.mark.parametrize(
+    ("addr1", "road"),
+    [
+        ("부산광역시 중구 용두산길 37-30", True),
+        ("서울특별시 종로구 세종대로 172", True),
+        ("서울특별시 종로구 종로1가 1", False),  # 법정동 '종로1가'의 지번
+        ("부산광역시 수영구 민락동", False),
+    ],
+)
+def test_addr1_is_split_into_road_or_jibun(addr1: str, road: bool) -> None:
+    (bundle,) = _bundles([replace(_GWANGAN, addr1=addr1)])
+    assert (bundle.feature.address.road == addr1) is road
+    assert (bundle.feature.address.legal == addr1) is not road
 
 
 def test_jibun_only_address_goes_to_legal() -> None:

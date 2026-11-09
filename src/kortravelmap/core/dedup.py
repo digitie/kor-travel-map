@@ -20,6 +20,10 @@ from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
 from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.scoring import (
+    THRESHOLD_MANUAL,
+    WEIGHT_CATEGORY,
+    WEIGHT_NAME,
+    WEIGHT_SPATIAL,
     DedupDecision,
     category_similarity,
     classify_decision,
@@ -139,6 +143,13 @@ def _score_candidate(
         return None
     occurrence = compare_event_occurrences(a.detail, b.detail) if a.kind == "event" else "same"
     if occurrence == "different":
+        return None
+    # 이름 유사도(가장 비싼 성분)를 부르기 전에 상한으로 거른다 — 이름이 완전히 같다고 쳐도
+    # 수동 검토 임계값에 못 미치면 결과는 KEEP_SEPARATE다(가지치기일 뿐 판정은 같다, #1459).
+    # 식은 ``score_pair``와 같은 순서·같은 가중치라 부동소수 결과도 같다.
+    spatial = spatial_similarity(a.coord, b.coord)
+    category = category_similarity({a.category}, {b.category})
+    if WEIGHT_NAME * 1.0 + WEIGHT_SPATIAL * spatial + WEIGHT_CATEGORY * category < THRESHOLD_MANUAL:
         return None
     score = score_pair(
         name_a=a.name,

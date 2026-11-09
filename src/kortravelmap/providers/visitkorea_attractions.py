@@ -161,11 +161,6 @@ TOURAPI_LCLS3_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "VE090100": _P.TOURISM_CULTURAL_FACILITY_CULTURE_CENTER,  # 한국문화원
     "VE090200": _P.TOURISM_CULTURAL_FACILITY_CULTURE_CENTER,  # 외국문화원
     "VE090300": _P.TOURISM_CULTURAL_FACILITY_LIBRARY,  # 도서관
-    "VE110100": _P.TRANSPORT_AIRPORT,  # 공항
-    "VE110200": _P.TRANSPORT_STOP_TRAIN,  # 기차역
-    "VE110400": _P.TRANSPORT_FERRY_TERMINAL,  # 여객선터미널
-    "VE110500": _P.TRANSPORT_REST_AREA_HIGHWAY,  # 고속도로휴게소
-    "VE110600": _P.TRANSPORT_STOP_SUBWAY,  # 지하철
     # 체험관광(EX)
     "EX040100": _P.TOURISM_HERITAGE_TEMPLE,  # 템플스테이
     "EX040200": _P.TOURISM_HERITAGE_TEMPLE,  # 사찰문화체험
@@ -195,7 +190,6 @@ TOURAPI_LCLS2_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "VE08": _P.TOURISM_CULTURAL_FACILITY,  # 행사시설
     "VE09": _P.TOURISM_CULTURAL_FACILITY,  # 교육시설
     "VE10": _P.TOURISM_ACTIVITY_LEISURE_SPORTS,  # 레저스포츠시설
-    "VE11": _P.TRANSPORT,  # 교통시설(버스터미널 등)
     "VE12": _P.TOURISM,  # 기타문화관광지
     "EX05": _P.HOT_SPRING_SPA_THERAPY,  # 웰니스관광(한방·명상·뷰티 등)
     "EX01": _P.TOURISM_ACTIVITY,  # 전통체험
@@ -205,7 +199,15 @@ TOURAPI_LCLS2_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "EX06": _P.TOURISM,  # 산업관광
     "EX07": _P.TOURISM_ACTIVITY,  # 기타체험
 }
-"""``lclsSystm2`` → Map category(3단계 표에 없을 때)."""
+"""``lclsSystm2`` → Map category(3단계 표에 없을 때).
+
+관광지(12) 목록에 실제로 오는 것은 NA·HS·EX 전부와 VE01~VE05·VE020500이다(공식 신분류체계
+연계 정의서). VE06~VE10·VE12·VE050200은 문화시설(14)·레포츠(28)·숙박(32)의 코드로, 같은 변환기로
+그 dataset을 더할 때를 위해 둔다(``docs/etl/visitkorea-tourist-attraction-etl.md`` §8)."""
+
+#: 적재하지 않는 2단계 — 교통시설(VE11: 공항·기차역·여객선·휴게소·지하철)은 transport 원천
+#: (``kor-travel-transport``)이 정본이라, TourAPI 행을 더하면 dedup 쌍 없이 중복 place가 된다.
+_SKIPPED_LCLS2: Final[frozenset[str]] = frozenset({"VE11"})
 
 _NA02_RIVER_LAKE: Final[frozenset[str]] = frozenset(
     {"NA020100", "NA020200", "NA020300", "NA020400"}  # 강·호수·저수지·연못/늪
@@ -335,7 +337,8 @@ _HREF_RE: Final = re.compile(r"""href\s*=\s*["']?(https?://[^"'\s>]+)""", re.IGN
 _URL_RE: Final = re.compile(r"https?://[^\s\"'<>]+", re.IGNORECASE)
 _TAG_RE: Final = re.compile(r"<[^>]+>")
 _BR_RE: Final = re.compile(r"<br\s*/?>", re.IGNORECASE)
-_ROAD_RE: Final = re.compile(r"\S+(?:로|길)\s*\d")
+_ROAD_RE: Final = re.compile(r"\S+(?:로|길)\s+\d")
+"""도로명 꼴 ``…로 12``/``…길 3-1``. 공백을 요구해 지번 ``종로1가 1``을 거른다."""
 
 
 def _homepage_url(value: str | None) -> str | None:
@@ -397,6 +400,7 @@ def _file_sources(
     primary: str | None,
     thumbnail: str | None,
     alt_text: str,
+    license_code: str | None,
 ) -> list[FeatureFileSource]:
     """대표·썸네일 이미지 URL → ``FeatureFileSource``(원본 참조, 가공 없음 — 공공누리 유형 준수)."""
     sources: list[FeatureFileSource] = []
@@ -414,6 +418,12 @@ def _file_sources(
                 provider=normalize_provider_name(_PROVIDER_NAME),
                 dataset_key=DATASET_KEY_VISITKOREA_ATTRACTIONS,
                 source_record_key=source_record_key,
+                # 파일이 객체 저장소로 옮겨져도 이용 조건이 함께 간다(Type3은 변경 금지).
+                payload={
+                    "attribution": _ATTRIBUTION,
+                    "kogl_type": license_code,
+                    "license": _KOGL_LICENSE.get(license_code or "", license_code),
+                },
             )
         )
     return sources
@@ -429,6 +439,8 @@ async def _attraction_to_bundle(
     content_id = (item.content_id or "").strip()
     name = normalize_korean_text(item.title)
     if not content_id or name is None:
+        return None
+    if ((item.lcls_systm2 or "").strip() or (item.lcls_systm3 or "")[:4]) in _SKIPPED_LCLS2:
         return None
     # raw_data 키는 TourItem 필드 이름 그대로다 — replay가 ``TourItem.model_validate``로 되살린다.
     raw_data: dict[str, Any] = {
@@ -565,6 +577,7 @@ async def _attraction_to_bundle(
             primary=item.first_image,
             thumbnail=item.first_image2,
             alt_text=name,
+            license_code=license_code,
         ),
     )
 

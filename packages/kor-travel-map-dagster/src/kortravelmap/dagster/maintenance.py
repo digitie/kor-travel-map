@@ -218,7 +218,11 @@ _TOURAPI_ATTRACTIONS: Final[Mapping[str, object]] = {
 _TOURAPI_HERITAGE: Final = _category_codes("0107")
 _TOURAPI_NATURE: Final = _category_codes("0102")
 _TOURAPI_FOREST: Final = sorted({*_category_codes("0103"), *_category_codes("0303")})
-_TOURAPI_CULTURE: Final = _category_codes("0104")
+#: MCST 파일데이터 중 관광지와 겹칠 수 있는 범주(관광·문화시설·국가유산·자연명소·테마파크).
+#: 음식점·숙박 슬러그는 뺀다.
+_TOURAPI_MCST_OVERLAP: Final = sorted(
+    {PlaceCategoryCode.TOURISM.value, *_category_codes("0101", "0104", "0105", "0107")}
+)
 _TOURAPI_BEACH: Final = [PlaceCategoryCode.TOURISM_NATURE_BEACH.value]
 #: MOIS 관광 슬러그 중 TourAPI 관광지와 겹칠 수 있는 범주(관광사업체·박물관·전통사찰·유람선·
 #: 관광궤도·유원시설). 체육시설(01080400)·골프장은 수가 많고 TourAPI 관광지가 아니라 뺀다.
@@ -231,8 +235,10 @@ _TOURAPI_MOIS_OVERLAP: Final = sorted(
         PlaceCategoryCode.TOURISM_ACTIVITY_CRUISE.value,
     }
 )
-_TOURAPI_SCOPE_LIMIT: Final = 15000
-"""TourAPI 쪽 scope 상한 — 기본 5,000이면 1만 2천 건 중 최근 갱신분만 비교된다."""
+_TOURAPI_SCOPE_LIMIT: Final = 20000
+"""TourAPI 쌍의 양쪽 scope 상한 — 기본 5,000이면 최근 갱신분만 비교된다(국가유산·MOIS 관광도
+5,000을 넘을 수 있다). 비교 비용은 ``core.dedup``의 상한 가지치기(범주가 다르면 28 m 밖은
+이름을 보지 않는다)와 이름 정규화 캐시가 묶는다."""
 
 
 def _tourapi_pair(
@@ -241,7 +247,7 @@ def _tourapi_pair(
     left: dict[str, object] = {**_TOURAPI_ATTRACTIONS, "limit": _TOURAPI_SCOPE_LIMIT}
     if left_categories is not None:
         left["categories"] = list(left_categories)
-    return {"left": left, "right": dict(right)}
+    return {"left": left, "right": {**right, "limit": _TOURAPI_SCOPE_LIMIT}}
 
 
 DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
@@ -326,13 +332,15 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
         None,
         {"provider": "data.go.kr-standard", "dataset_key": "datagokr_tourist_attractions"},
     ),
+    # 관광지(12)에는 문화시설(0104) 코드가 거의 없다 — 박물관·전시관은 TourAPI에서 건물·기념물
+    # 등으로 온다. 왼쪽을 범주로 좁히지 않는다(범주가 다르면 자동 병합은 없고 28 m 안만 검토).
     _tourapi_pair(
-        _TOURAPI_CULTURE,
+        None,
         {"provider": "data.go.kr-standard", "dataset_key": "datagokr_museums"},
     ),
     _tourapi_pair(
-        _TOURAPI_CULTURE,
-        {"provider": "python-mcst-api", "categories": _TOURAPI_CULTURE},
+        None,
+        {"provider": "python-mcst-api", "categories": _TOURAPI_MCST_OVERLAP},
     ),
     _tourapi_pair(
         _TOURAPI_MOIS_OVERLAP,

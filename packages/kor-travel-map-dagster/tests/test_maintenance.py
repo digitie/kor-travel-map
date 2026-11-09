@@ -286,8 +286,8 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         ("python-mois-api", None, ("05050000", "05030000")),
         ("data.go.kr-standard", "datagokr_tourist_attractions", ()),
     }
-    # TourAPI 관광지(#1459) — 기존 관광 원천 여덟과 범주로 묶어 비교한다. 왼쪽 상한은 1만
-    # 2천 건 전체를 덮는다(기본 5,000이면 최근 갱신분만 비교된다).
+    # TourAPI 관광지(#1459) — 기존 관광 원천 여덟과 비교한다. 양쪽 상한은 1만 2천 건 전체를
+    # 덮는다(기본 5,000이면 최근 갱신분만 비교된다).
     tourapi = [
         (left, right)
         for left, right, _include_auto_merge in client.pairs
@@ -304,7 +304,8 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         ("python-mois-api", None),
     }
     assert {left.dataset_key for left, _right in tourapi} == {"visitkorea_tourist_attractions"}
-    assert {left.limit for left, _right in tourapi} == {15000}
+    assert {left.limit for left, _right in tourapi} == {20000}
+    assert {right.limit for _left, right in tourapi} == {20000}
     by_right = {right.provider: (left, right) for left, right in tourapi if not right.dataset_key}
     assert by_right["python-khoa-api"][0].categories == ("01050100",)
     heritage_left = by_right["python-krheritage-api"][0].categories
