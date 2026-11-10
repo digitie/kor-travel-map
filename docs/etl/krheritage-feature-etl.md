@@ -41,7 +41,11 @@ feature로 적재하는 ETL이다.
 ## 3. natural key
 
 - place / area: `ccbaKdcd-ccbaAsno-ccbaCtcd` (3 코드 조합)
-- event: provider event id `sn`
+- event: 행사(프로그램) 키 `program::<sha256 앞 32자>` — 정규화한 행사명(`subTitle`)·주관 단체(`groupName`)·
+  지역(`sido`+`gugun`)·장소(`subDesc`)에서 만든다. 행사명이 없으면 `seqNo`를 더한다(#1468 D).
+  회차 날짜·`seqNo`는 키에 없다 — 원천은 회차마다 한 행이고 같은 행사가 `seqNo`를 바꿔 반복된다.
+  그 이전의 회차별 키(`seqNo::시작일::종료일`, `행사명::시작일::장소`)로 남은 Feature는 적재 asset이
+  비지 않은 snapshot에서 retired로 내린다.
 
 ## 4-pre. 카테고리 매핑 (`docs/architecture/category.md` §4)
 
@@ -102,10 +106,15 @@ def _classify_heritage_kind(item) -> FeatureKind:
 
 ### 5.3 event (`EventDetail`)
 
-- `event_kind`: `"heritage_event"` (또는 provider 세분)
-- `starts_on`/`ends_on`: 행사 기간
-- `venue_name`, `tel`: 장소/연락처
-- `content_id`: `sn` (provider event id)
+- `event_kind`: `"heritage_event"`
+- `starts_on`/`ends_on`: 회차 시작일의 최소 ~ 종료일의 최대
+- `venue_name`, `tel`: 장소 원문/첫 연락처
+- `content_id`: 행사 키(§3)
+- `payload.sessions`: 회차 기간 목록(`starts_on`/`ends_on`, 시간순·중복 제거), `payload.seq_nos`,
+  `payload.schedule_texts`(원 `subDate` — 요일·시간 문구), `payload.group_name`
+- `payload.coordinate_source`: `provider` / `venue_feature`(+`venue_feature_id`·`venue_feature_name`) /
+  `address_geocode`
+- `SourceRecord.raw_data`: `{"sessions": [원 행…]}` (같은 행이 여러 달 응답에 다시 와도 한 번)
 - `area_code`/`sigungu_code`: 행정구역 코드 (있으면)
 
 ## 6. 좌표·주소
@@ -113,6 +122,14 @@ def _classify_heritage_kind(item) -> FeatureKind:
 - 좌표: `longitude`/`latitude` (WGS84). `gis_spca`/`gis_3070426`에서 보강.
 - 주소: `location_text` 또는 GIS `properties.address`.
 - reverse geocoder 권장 — 정확한 `legal_dong_code` 보강.
+- event 좌표(#1468 D): 원천에 좌표·번지 주소가 없다. (1) 장소 문자열을 조각으로 나눠(`,`·`/`·" 및 "·
+  " 또는 ", 괄호·"일원/일대/주변/내/앞/등/외" 제거) 앞 조각부터 같은 시도·시군구의 **이름이 같은** 좌표 있는
+  공개 장소 Feature를 찾는다(`core/venue_match.py`, 후보는 `infra/venue_candidates_repo.py`의 trigram
+  `ILIKE`). 국가유산 본체 우선, 동명 후보가 1 km보다 흩어지면 고르지 않는다. 일반 시설 낱말뿐인
+  조각("기념관"·"행사장")은 보지 않는다. 빌린 점은 reverse가 법정동을 확인할 때만 쓴다(아니면 버린다). (2) 못 찾으면 번지가 든
+  조각만 kor-travel-geo 정지오코딩(`geocode_missing_coordinate`). 2026-11-10 prod 표본으로 1,316개
+  행사 중 310개(23.6%, 국가유산 본체 136)가 (1)로 좌표를 얻는다 — 나머지는 향교·서원·고택 등 Map에
+  아직 없는 장소다.
 
 ## 7. 미디어 (RustFS)
 
