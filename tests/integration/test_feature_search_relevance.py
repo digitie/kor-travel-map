@@ -264,6 +264,105 @@ async def test_transport_hub_exact_name_is_not_buried_under_partial_matches(
     assert labels == ["seoul_station", "seoul_museum", "seoul_food", "seoul_parking"], labels
 
 
+async def test_named_destination_ranks_before_same_name_unclassified_tourism_rows(
+    migrated_session: AsyncSession,
+) -> None:
+    """2026-11-10 운영 점검(Map 020edb8d): "서울역"·"김포국제공항"·"자갈치시장" 1위가 역·공항·시장
+    자체가 아니라 같은 이름의 Tier 1만 있는 관광 행(촬영지 목록·영상 후보·관광지 표준의
+    ``01000000``)이었다. 둘 다 목적지 이름 일치라 그룹(관광 0 < 역 1)이 갈랐다. 고유 이름
+    목적지의 이름 일치는 관광과 같은 그룹이고, 그 안에서 분류가 구체적인 쪽이 앞이다."""
+    ids = {
+        "seoul_station": await _place(
+            migrated_session, "nd_seoul_station", name="서울역", category="06030300",
+            lon=126.97082, lat=37.55186, place_kind="rail_station",
+        ),
+        "seoul_media": await _place(
+            migrated_session, "nd_seoul_media", name="서울역", category="01000000",
+            lon=126.97065, lat=37.55472, place_kind="media_famous_place",
+        ),
+        "seoul_youtube": await _place(
+            migrated_session, "nd_seoul_youtube", name="서울역", category="01000000",
+            lon=126.97200, lat=37.55500,
+        ),
+        "gimpo_airport": await _place(
+            migrated_session, "nd_gimpo_airport", name="김포국제공항", category="06050000",
+            lon=126.79100, lat=37.55830, place_kind="airport",
+        ),
+        "gimpo_media": await _place(
+            migrated_session, "nd_gimpo_media", name="김포국제공항", category="01000000",
+            lon=126.79228, lat=37.55866, place_kind="media_famous_place",
+        ),
+        "jagalchi_market": await _place(
+            migrated_session, "nd_jagalchi_market", name="자갈치시장", category="05070000",
+            lon=129.03057, lat=35.09663, place_kind="traditional_market",
+        ),
+        "jagalchi_attraction": await _place(
+            migrated_session, "nd_jagalchi_attraction", name="자갈치시장", category="01000000",
+            lon=129.03058, lat=35.09661,
+        ),
+    }
+    await migrated_session.flush()
+    for query, first in (
+        ("서울역", "seoul_station"),
+        ("김포국제공항", "gimpo_airport"),
+        ("자갈치시장", "jagalchi_market"),
+    ):
+        labels = await _search_ids(migrated_session, query, ids)
+        assert labels, query
+        assert labels[0] == first, (query, labels)
+
+
+async def test_market_exact_name_ranks_before_shops_and_station_named_after_it(
+    migrated_session: AsyncSession,
+) -> None:
+    """2026-11-10 운영 점검: "남대문시장" 1위가 시장 안 식당("남대문시장 전주식당", 관광
+    ``01000000``)이었고 시장(05070000, 편의 그룹 3)은 역·식당 뒤였다. 전통시장은 이름으로 찾아가는
+    목적지다 — 이름이 검색어와 같은 시장이 맨 앞이다."""
+    ids = {
+        "namdaemun_market": await _place(
+            migrated_session, "nd_namdaemun_market", name="남대문시장", category="05070000",
+            lon=126.97766, lat=37.55918, place_kind="traditional_market",
+        ),
+        "namdaemun_food_media": await _place(
+            migrated_session, "nd_namdaemun_food_media", name="남대문시장 전주식당",
+            category="01000000", lon=126.97701, lat=37.55977,
+            place_kind="media_famous_place",
+        ),
+        "hoehyeon_station": await _place(
+            migrated_session, "nd_hoehyeon_station", name="회현(남대문시장)역",
+            category="06030200", lon=126.97957, lat=37.55970, place_kind="rail_station",
+        ),
+        "namdaemun_cafe": await _place(
+            migrated_session, "nd_namdaemun_cafe", name="가배도 남대문시장점",
+            category="02010100", lon=126.97701, lat=37.56097, place_kind="restaurant",
+        ),
+    }
+    await migrated_session.flush()
+    labels = await _search_ids(migrated_session, "남대문시장", ids)
+    assert labels[0] == "namdaemun_market", labels
+    assert labels.index("namdaemun_food_media") < labels.index("namdaemun_cafe"), labels
+
+
+async def test_lodging_named_like_a_tourism_spot_stays_behind_it(
+    migrated_session: AsyncSession,
+) -> None:
+    """고유 이름 목적지 예외는 역·휴게소·공항·여객선터미널·전통시장뿐이다 — 이름이 관광 행과 같은
+    숙소는 여전히 그 관광 행(Tier 1만 있어도) 뒤다."""
+    ids = {
+        "gyeongpo_media": await _place(
+            migrated_session, "nd_gyeongpo_media", name="경포대", category="01000000",
+            lon=128.8963, lat=37.7954, place_kind="media_famous_place",
+        ),
+        "gyeongpo_hotel": await _place(
+            migrated_session, "nd_gyeongpo_hotel", name="경포대", category="03010000",
+            lon=128.9000, lat=37.7950, place_kind="hotel",
+        ),
+    }
+    await migrated_session.flush()
+    labels = await _search_ids(migrated_session, "경포대", ids)
+    assert labels == ["gyeongpo_media", "gyeongpo_hotel"], labels
+
+
 async def test_exact_named_airport_ranks_before_a_tourism_row_that_only_contains_it(
     migrated_session: AsyncSession,
 ) -> None:
