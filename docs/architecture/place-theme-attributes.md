@@ -181,7 +181,9 @@ CREATE TABLE provider_sync.theme_attach_decisions (
 - 채택(하나라도): `d ≤ 50m ∧ s ≥ 0.6` · `d ≤ 150m ∧ s ≥ 0.8`. 일반명(`공영주차장`·`관광안내소`·
   `화장실` 등 stop-name 목록)은 `d ≤ 30m ∧ s ≥ 0.9`에서만 채택한다. 거리 제한 없는 이름 일치나
   포함 보너스는 두지 않는다.
-- 동점: `(s, -d)`로 정렬. 1위와 2위가 **다른 Feature**이고 `s` 차 < 0.05이면 `ambiguous`.
+- 동점: `(s, -d)`로 정렬. **tier 1**의 1위와 2위가 다른 Feature이고 `s` 차 < 0.05이면 `ambiguous`.
+  tier 2(MCST끼리)의 동점은 같은 장소가 여러 목록에 있는 것이라 다툼이 아니다 — 1위를 고르고
+  전환 계획이 묶음을 하나로 접는다(R2 첫 dry-run에서 ambiguous의 3/4이 tier 2 동점이었다).
 
 ### 5.3 좌표 없는 행
 

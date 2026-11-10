@@ -136,6 +136,16 @@ def test_tie_between_two_masters_is_ambiguous() -> None:
     assert decision.state == "ambiguous"
 
 
+def test_tie_between_two_mcst_features_is_not_ambiguous() -> None:
+    # 같은 장소가 여러 MCST 목록에 있는 것 — 전환 계획이 묶음을 하나로 접는다.
+    decision = decide_attach(
+        "한국민속촌",
+        [_c("x2", "한국민속촌", 0, tier=2), _c("x1", "한국민속촌", 0, tier=2)],
+        master_category_prefixes=None,
+    )
+    assert (decision.state, decision.target_feature_id) == ("matched", "x1")
+
+
 def test_suppressed_master_makes_ambiguous() -> None:
     decision = decide_attach(
         "한국민속촌", [_c("m1", "한국민속촌", 30, published=False)], master_category_prefixes=None

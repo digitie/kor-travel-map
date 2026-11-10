@@ -14,8 +14,9 @@
   붙인 trigram 집합의 Jaccard).
 - 채택: ``d ≤ 50m ∧ s ≥ 0.6`` 또는 ``d ≤ 150m ∧ s ≥ 0.8``. 일반명은 ``d ≤ 30m ∧ s ≥ 0.9``만.
 - 양쪽 지점 토큰이 다르면 후보에서 버린다.
-- tier 1(비MCST master)이 하나라도 채택되면 tier 2(MCST)는 보지 않는다. 같은 tier의 1·2위가
-  다른 Feature이고 점수 차 < 0.05면 ``ambiguous``. 채택된 suppressed 후보가 있으면 ``ambiguous``.
+- tier 1(비MCST master)이 하나라도 채택되면 tier 2(MCST)는 보지 않는다. tier 1의 1·2위가
+  다른 Feature이고 점수 차 < 0.05면 ``ambiguous``(tier 2 동점은 같은 장소의 다른 목록이라 다툼이
+  아니다). 채택된 suppressed 후보가 있으면 ``ambiguous``.
 
 ADR-002(core 순수 함수) — DB·provider 의존 없음.
 """
@@ -294,7 +295,9 @@ def decide_attach(
             (s for s in ranked[1:] if s.candidate.feature_id != best.candidate.feature_id),
             None,
         )
-        if runner is not None and best.score - runner.score < AMBIGUITY_MARGIN:
+        # tier 2(MCST끼리)의 동점은 다툼이 아니다 — 같은 장소가 여러 목록에 있는 것이고 전환 계획이
+        # 그 묶음을 하나로 접는다(2026-11-10 R2 dry-run: tier 2 동점이 ambiguous의 3/4이었다).
+        if tier == 1 and runner is not None and best.score - runner.score < AMBIGUITY_MARGIN:
             return AttachDecision("ambiguous", None, tier, {**evidence, "reason": "tie"})
         return AttachDecision("matched", best.candidate.feature_id, tier, evidence)
     return AttachDecision("none", None, None, evidence)
