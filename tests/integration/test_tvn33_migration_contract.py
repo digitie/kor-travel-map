@@ -40,7 +40,7 @@ async def test_tvn33_fixture_preview_is_an_enabled_operation(
     ).mappings().all()
 
     # 옛 preview 전용 dataset ``airkorea_stations``는 402(ADR-105)가 weather dataset의
-    # operation을 종류 불문 끄면서 이 대조에서 빠졌다. 표준데이터 축제 preview는 448(축제 원천
+    # operation을 종류 불문 끄면서 이 대조에서 빠졌다. 표준데이터 축제 preview는 449(축제 원천
     # TourAPI 전환)이 끄고 같은 모양의 TourAPI 축제 preview를 넣었다.
     assert [(row["provider"], row["dataset_key"]) for row in rows] == [
         ("python-visitkorea-api", "visitkorea_festivals"),

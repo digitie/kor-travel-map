@@ -13,11 +13,11 @@
   `datagokr_cultural_festivals`)는 **쓰지 않는다**. 키가 403
   `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`(마지막 성공 2026-10-31)이 된 뒤 소유자가 원천을 바꾸기로
   했다. 코드(변환기·fetcher·asset·job·schedule·큐 spec·handler·preview fixture)를 지웠고,
-  migration 448이 카탈로그 operation을 끄고 dataset을 비활성으로 내렸다.
+  migration 449가 카탈로그 operation을 끄고 dataset을 비활성으로 내렸다.
 - 종전 구조(구 ADR-042, 2026-05-27): 표준데이터가 1차, TourAPI는 표준데이터 축제에 **이름으로**
   붙는 2차 enrichment(`visitkorea_festival_events`, `feature_event_visitkorea_enrichment_job`)였다.
   그 enrichment도 함께 퇴역했다 — 붙일 1차가 없다. 이름 매처·검토 분류 코드도 지웠다.
-- 기존 표준데이터 축제 Feature(2026-11-10 prod 1,296건)는 **병합하지 않고 퇴역**한다(448,
+- 기존 표준데이터 축제 Feature(2026-11-10 prod 1,296건)는 **병합하지 않고 퇴역**한다(449,
   `transition_kind=system`, reason `festival_source_moved_to_tourapi`). "그 원천을 쓰지 않는다"이므로
   표준데이터 값(본문·주관기관)을 TourAPI Feature로 옮기지도 않는다. TourAPI 쪽 같은 축제는 새 적재가
   자기 Feature로 만든다(이름이 맞는 행 314/1,296).
@@ -35,7 +35,7 @@
 | 항목 | 값 |
 |------|----|
 | provider | `python-visitkorea-api` |
-| dataset_key | `visitkorea_festivals` (migration 448) |
+| dataset_key | `visitkorea_festivals` (migration 449) |
 | Feature.kind | `event` |
 | source_entity_type | `festival` |
 | source_role | `primary` |

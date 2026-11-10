@@ -1,10 +1,16 @@
-## 2026-11-10 — 축제 원천 TourAPI 단독(alembic 448)
+## 2026-11-10 — 축제 원천 TourAPI 단독(alembic 449)
 
-- 회전에 묶는다(직접 회전 금지). 448이 표준데이터 축제 1,296건을 퇴역시키므로 배포 직후 `visitkorea_festivals` preview → `feature_event_visitkorea_festivals_job` 1회(약 880건 생성, 상세 ≤300) → `/v1/public/festivals/monthly` 확인 → daily schedule 켜기. Manager env 변경 없음.
+- 회전에 묶는다(직접 회전 금지). 449가 표준데이터 축제 1,296건을 퇴역시키므로 배포 직후 `visitkorea_festivals` preview → `feature_event_visitkorea_festivals_job` 1회(약 880건 생성, 상세 ≤300) → `/v1/public/festivals/monthly` 확인 → daily schedule 켜기. Manager env 변경 없음.
 
 ## 2026-11-10 — #1475 admin 검색 trigram(447)
 
 - 회전에 묶는다(직접 회전 금지). 447은 SHARE 잠금으로 인덱스 6개 빌드(prod 추정 50~75 s, 쓰기만 대기) — 배포 동안 Feature 적재 큐를 멈춘다. OpenAPI 바이트 동일, PinVi 재vendor 불필요.
+
+## 2026-11-11 — #1468 A R4 전환 실행기(alembic 448)
+
+- 운영 창 순서·되돌림 정본은 `docs/runbooks/mcst-theme-transition-r4.md`. 회전(448, attach `off`) → 동결(적재·dedup·관리자 쓰기, 국가유산 큐 미실행) → pg_dump → 새 계획·정밀도 표본 승인 → 표본 리허설 → `--execute --confirm-plan-sha256` → `apply` 회전 → 해제·MCST 적재 1회 → 촬영지 rule PATCH.
+- 새 계획·표본은 회전 뒤에 다시 뽑는다(규칙 변경: 부속 시설·번호 동/호·한쪽 지점 30m·물려받은 attach 자기 규칙 재확인·비공개 생존자 금지). 11-11 이전 표본은 무효.
+- 이미지 롤백은 DB 복원과 함께(448이 사건 표 FK를 출처별로 나눈다). PinVi M05 소비자는 sign-off까지 꺼 둔다.
 
 ## 2026-11-10 — #1468 A MCST 테마 속성(ADR-121) R1·R3
 

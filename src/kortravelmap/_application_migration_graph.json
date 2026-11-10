@@ -272,7 +272,13 @@
       "down_revision": [
         "447_admin_search_trgm_indexes"
       ],
-      "revision": "448_tourapi_festivals_primary"
+      "revision": "448_mcst_theme_transition"
+    },
+    {
+      "down_revision": [
+        "448_mcst_theme_transition"
+      ],
+      "revision": "449_tourapi_festivals_primary"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

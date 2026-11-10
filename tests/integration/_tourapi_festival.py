@@ -1,7 +1,7 @@
 """통합 테스트용 TourAPI 축제 입력 — 표준데이터 축제(2026-11-10 퇴역)를 대신한다.
 
 축제 원천은 TourAPI(``searchFestival2``) 하나다(``docs/etl/event-feature-etl.md``). 표준데이터
-축제 dataset은 migration 448에서 비활성이라 head DB에는 그 dataset으로 적재할 수 없다 — 축제
+축제 dataset은 migration 449에서 비활성이라 head DB에는 그 dataset으로 적재할 수 없다 — 축제
 Feature가 필요한 통합 테스트는 이 모듈로 TourAPI 행을 만든다.
 
 자연키는 ``content_id``다. 같은 이름의 Feature를 여럿 심으려면 ``content_id``만 바꾼다.

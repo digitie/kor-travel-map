@@ -150,7 +150,7 @@ system
 | `datagokr_museums` | data.go.kr-standard | 박물관·미술관 표준 (data.go.kr-standard provider는 짧은 이름과 달리 `datagokr_` prefix 사용) |
 | `datagokr_parking_lots` | data.go.kr-standard | 주차장 표준 |
 | `datagokr_tourist_attractions` | data.go.kr-standard | 관광지 표준 |
-| ~~`datagokr_cultural_festivals`~~ | data.go.kr-standard | 문화축제 표준 — **퇴역 2026-11-10**(migration 448) |
+| ~~`datagokr_cultural_festivals`~~ | data.go.kr-standard | 문화축제 표준 — **퇴역 2026-11-10**(migration 449) |
 | `place_phone_enrichment` | kakao-local-api / naver-search-api / google-places-api-new | 전화번호 보강 |
 
 신규 추가는 ADR + `docs/<provider>-feature-etl.md`.

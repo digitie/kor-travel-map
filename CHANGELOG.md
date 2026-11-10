@@ -3,13 +3,19 @@
 ## 2026-11-10 — 축제 원천을 TourAPI로 바꾼다
 
 - 축제·공연·행사는 한국관광공사 TourAPI(`searchFestival2`)가 유일한 원천이다. 매일 적재하며 새 dataset `visitkorea_festivals`(event)가 Feature를 직접 만든다.
-- data.go.kr 전국문화축제표준데이터 적재와, TourAPI 축제를 그 축제에 이름으로 잇던 보강을 없앴다. migration 448이 두 dataset의 operation을 끄고 비활성으로 내리며 기존 표준데이터 축제 Feature를 퇴역시킨다.
+- data.go.kr 전국문화축제표준데이터 적재와, TourAPI 축제를 그 축제에 이름으로 잇던 보강을 없앴다. migration 449가 두 dataset의 operation을 끄고 비활성으로 내리며 기존 표준데이터 축제 Feature를 퇴역시킨다.
 - 공개 축제 API(`/v1/public/festivals/*`) 계약은 그대로다. 표준데이터에만 있던 응답 필드(주최·후원 기관, 데이터기준일자 등)는 null이 된다.
 
 ## 2026-11-10 — 관리자 Feature 부분 검색 가속(#1475)
 
 - `GET /v1/admin/features?q=…`(및 `/v1/service/admin-features`)가 드문 검색어에서 수 초 걸리던 것을 trigram 인덱스(alembic 447)로 줄인다. parameter·기본값·응답은 그대로다.
 - 기본 `search_scope=all`은 이름·주소·ID에 원천 식별자(`source_entity_id`·현재 `source_record_key`)를 더해 찾는다. 원천 JSON 본문은 더 이상 검색하지 않는다.
+
+## 2026-11-11 — MCST 테마 전환 실행기(ADR-121 R4, #1468 A)
+
+- `ktmctl mcst-theme-transition`: 승인된 계획 파일로 기존 MCST Feature를 master에 병합하거나(attach·collapse) 반려 업종을 퇴역시키고, Feature마다 PinVi 참조 정리 사건(`rebind`·`detach`)을 남긴다. 기본은 되감는 리허설이고 `--execute --confirm-plan-sha256`일 때만 쓴다.
+- 사건 표에 `origin_kind`가 생긴다(`manual_provider_dedup`·`mcst_theme_transition`). 사건 payload 모양은 그대로다.
+- 퇴역한 Feature로는 병합할 수 없다(`MergeConflictError`). 붙임 규칙이 부속 시설·번호 다른 동/호·멀리 떨어진 한쪽 지점을 같은 장소로 보지 않는다. alembic 448.
 
 ## 2026-11-10 — 장소 속성(ADR-121, #1468 A)
 

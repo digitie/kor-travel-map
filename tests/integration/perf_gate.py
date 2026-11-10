@@ -299,6 +299,39 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         {**_CLUSTER_PARAMS, "kinds": None},
         expected_indexes=_COORD_SPATIAL,
     ),
+    # ADR-121 장소 속성 필터 — 필터가 있어도 bbox·근접·검색의 공간/trgm 색인을 그대로 타고
+    # features를 통째로 훑지 않아야 한다(속성 쪽 semi-join, §7.4). 한 코드·두 코드(AND) 둘 다.
+    HotQuery(
+        "in-bounds / bbox + attribute",
+        _FEATURES_IN_BBOX_SQL,
+        {**_BBOX_PARAMS, "attributes": ["barrier_free"]},
+        expected_indexes=_COORD_SPATIAL,
+    ),
+    HotQuery(
+        "in-bounds / bbox + 2 attributes (AND)",
+        _FEATURES_IN_BBOX_SQL,
+        {**_BBOX_PARAMS, "attributes": ["barrier_free", "pet_friendly"]},
+        expected_indexes=_COORD_SPATIAL,
+    ),
+    HotQuery(
+        "cluster rollup — sigungu + attribute",
+        _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
+        {**_CLUSTER_PARAMS, "attributes": ["barrier_free"]},
+        expected_indexes=_COORD_SPATIAL,
+    ),
+    HotQuery(
+        "nearby (5179 GiST) + attribute",
+        _NEARBY_COORD_DISTANCE_SQL,
+        {**_NEARBY_PARAMS, "attributes": ["pet_friendly"]},
+        expected_indexes=_COORD_5179_SPATIAL,
+    ),
+    HotQuery(
+        "search (trgm GIN) + attribute",
+        _FEATURE_SEARCH_BY_SCORE_SQL,
+        {**_SEARCH_PARAMS, "attributes": ["barrier_free"]},
+        expected_indexes=("idx_features_name_trgm",),
+        pre_statements=("SET LOCAL pg_trgm.similarity_threshold = 0.2",),
+    ),
 )
 
 

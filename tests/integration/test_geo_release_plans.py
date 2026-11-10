@@ -286,7 +286,7 @@ async def test_items_follow_the_db_operations_and_the_core_policy(
     # 지역특화거리는 2026-11-09 공개 파일 원천으로 되살아나 disabled가 아니다.
     assert reasons["feature_place_standard_special_streets_job"][0] == "pending"
     assert reasons["feature_place_datagokr_jeju_local_restaurants_job"] == ("skipped", "disabled")
-    # 축제 보강(enrichment) job은 2026-11-10 축제 원천 전환(448)으로 꺼졌다 — 계획에 나오지 않는다.
+    # 축제 보강(enrichment) job은 2026-11-10 축제 원천 전환(449)으로 꺼졌다 — 계획에 나오지 않는다.
     assert "feature_event_visitkorea_enrichment_job" not in reasons
     assert "feature_event_datagokr_cultural_festivals_job" not in reasons
     # TourAPI 축제는 역지오코딩하는 replay 적재다(관광지와 같다).

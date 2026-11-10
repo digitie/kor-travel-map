@@ -1,8 +1,8 @@
-"""migration 448 — 축제 원천을 TourAPI로 바꾼다(2026-11-10 소유자 결정).
+"""migration 449 — 축제 원천을 TourAPI로 바꾼다(2026-11-10 소유자 결정).
 
-**447까지 올린 빈 DB**(배포 경로: bootstrap → migrator → schema owner)에 seed 카탈로그의 실제
+**448까지 올린 빈 DB**(배포 경로: bootstrap → migrator → schema owner)에 seed 카탈로그의 실제
 표준데이터 축제 dataset으로 축제 Feature를 심고, 옛 TourAPI 축제 보강 dataset으로 그 Feature에
-enrichment link와 ``pending`` 검토 큐 행을 단 뒤 448을 올린다.
+enrichment link와 ``pending`` 검토 큐 행을 단 뒤 449을 올린다.
 
 - 퇴역해야 하는 것: 표준데이터 축제 Feature — ``retired``·``suppressed``, ``system`` 상태 전이
   감사(``festival_source_moved_to_tourapi``) 한 줄, 재활성화를 막는 lifecycle override 한 줄.
@@ -12,7 +12,7 @@ enrichment link와 ``pending`` 검토 큐 행을 단 뒤 448을 올린다.
   operation, ``dataset_wide`` scope.
 - 남아야 하는 것: 다른 원천의 행사(국가유산 행사)와 그 operation. source lineage 행(이력).
 
-"검사는 한 번 빨갛게 만든다": 퇴역을 재는 탐침은 447에서 **active**·켜진 operation을 먼저 본다.
+"검사는 한 번 빨갛게 만든다": 퇴역을 재는 탐침은 448에서 **active**·켜진 operation을 먼저 본다.
 """
 
 from __future__ import annotations
@@ -41,8 +41,8 @@ if TYPE_CHECKING:
 pytestmark = pytest.mark.integration
 
 _ROOT: Final = Path(__file__).resolve().parents[2]
-_BEFORE: Final = "447_admin_search_trgm_indexes"
-_AFTER: Final = "448_tourapi_festivals_primary"
+_BEFORE: Final = "448_mcst_theme_transition"
+_AFTER: Final = "449_tourapi_festivals_primary"
 
 _T0: Final = datetime(2026, 11, 10, 0, 0, tzinfo=UTC)
 
@@ -87,8 +87,8 @@ async def _admin_execute(url: str, statement: str) -> None:
 
 
 @pytest.fixture
-async def db_at_447(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
-    """fresh DB를 배포 경로로 **447까지만** 올린다. (Config, superuser DSN)."""
+async def db_at_448(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
+    """fresh DB를 배포 경로로 **448까지만** 올린다. (Config, superuser DSN)."""
 
     # 목표 revision은 모듈 상수 리터럴로만 넘긴다(`tests/unit/test_alembic_squash_boundary.py`).
     raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
@@ -109,7 +109,7 @@ async def db_at_447(pg_container: object) -> AsyncIterator[tuple[Config, str]]:
         await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')
 
 
-async def _upgrade_to_448(config: Config) -> None:
+async def _upgrade_to_449(config: Config) -> None:
     with alembic_schema_owner_role():
         await asyncio.to_thread(command.upgrade, config, _AFTER)
 
@@ -131,7 +131,7 @@ async def _dataset_id(connection: Any, identity: tuple[str, str]) -> int:
 async def _seed_entity(connection: Any, *, dataset_id: int, entity_type: str) -> tuple[str, str]:
     """entity·record·head 한 벌. (source_entity_key, source_record_key)."""
 
-    entity_key = f"448-{entity_type}-{uuid4().hex[:8]}"
+    entity_key = f"449-{entity_type}-{uuid4().hex[:8]}"
     record_key = f"{entity_key}-record"
     await connection.execute(
         """
@@ -182,7 +182,7 @@ async def _seed_event(
         "INSERT INTO feature.features (feature_id, kind, name, category) "
         "VALUES ($1, 'event', $2, '01090000')",
         feature_id,
-        f"448 {event_kind} {entity_key}",
+        f"449 {event_kind} {entity_key}",
     )
     await connection.execute(
         "INSERT INTO feature.feature_events (feature_id, kind, event_kind, starts_on, ends_on) "
@@ -296,10 +296,10 @@ async def _festival_dataset_count(connection: Any) -> int:
     )
 
 
-async def test_448_retires_standard_festivals_and_catalogs_the_tourapi_festival_load(
-    db_at_447: tuple[Config, str],
+async def test_449_retires_standard_festivals_and_catalogs_the_tourapi_festival_load(
+    db_at_448: tuple[Config, str],
 ) -> None:
-    config, superuser_dsn = db_at_447
+    config, superuser_dsn = db_at_448
     connection = await _connect(superuser_dsn)
     try:
         assert await _version(connection) == _BEFORE
@@ -307,7 +307,7 @@ async def test_448_retires_standard_festivals_and_catalogs_the_tourapi_festival_
         assert seeded.target is not None
         assert seeded.kept is not None
         before = await _states(connection, [seeded.target, seeded.kept])
-        # 447: 대상이 active이고 옛 operation이 켜져 있고 새 dataset은 없다(빨강).
+        # 448: 대상이 active이고 옛 operation이 켜져 있고 새 dataset은 없다(빨강).
         assert before[seeded.target][0] == "active"
         assert await _enabled_retired_operations(connection) > 0
         assert await _festival_dataset_count(connection) == 0
@@ -327,7 +327,7 @@ async def test_448_retires_standard_festivals_and_catalogs_the_tourapi_festival_
     finally:
         await connection.close()
 
-    await _upgrade_to_448(config)
+    await _upgrade_to_449(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -436,13 +436,13 @@ async def test_448_retires_standard_festivals_and_catalogs_the_tourapi_festival_
         await connection.close()
 
 
-async def test_448_refuses_when_a_target_feature_has_a_link_from_another_dataset(
-    db_at_447: tuple[Config, str],
+async def test_449_refuses_when_a_target_feature_has_a_link_from_another_dataset(
+    db_at_448: tuple[Config, str],
 ) -> None:
     """대상 축제에 옛 dataset 둘 밖의 link가 있으면 퇴역하지 않는다 — 그 dataset의 seal 입력이
-    바뀌기 때문이다. 트랜잭션 전체가 되돌아가 447 그대로여야 한다(새 dataset도 생기지 않는다)."""
+    바뀌기 때문이다. 트랜잭션 전체가 되돌아가 448 그대로여야 한다(새 dataset도 생기지 않는다)."""
 
-    config, superuser_dsn = db_at_447
+    config, superuser_dsn = db_at_448
     connection = await _connect(superuser_dsn)
     try:
         seeded = await _seed_population(connection)
@@ -467,7 +467,7 @@ async def test_448_refuses_when_a_target_feature_has_a_link_from_another_dataset
         await connection.close()
 
     with pytest.raises(Exception, match="source link outside the retired datasets"):
-        await _upgrade_to_448(config)
+        await _upgrade_to_449(config)
 
     connection = await _connect(superuser_dsn)
     try:
@@ -483,13 +483,13 @@ async def test_448_refuses_when_a_target_feature_has_a_link_from_another_dataset
         await connection.close()
 
 
-async def test_448_refuses_when_a_job_is_queued_on_a_retired_festival_operation(
-    db_at_447: tuple[Config, str],
+async def test_449_refuses_when_a_job_is_queued_on_a_retired_festival_operation(
+    db_at_448: tuple[Config, str],
 ) -> None:
     """옛 축제 operation을 member로 둔 queued job이 있으면 아무것도 바꾸지 않는다(419와 같은 이유 —
     operation을 끄면 그 job은 종결로 갈 수 없다)."""
 
-    config, superuser_dsn = db_at_447
+    config, superuser_dsn = db_at_448
     connection = await _connect(superuser_dsn)
     try:
         seeded = await _seed_population(connection)
@@ -511,7 +511,7 @@ async def test_448_refuses_when_a_job_is_queued_on_a_retired_festival_operation(
         async with connection.transaction():
             job_id = await connection.fetchval(
                 "INSERT INTO ops.import_jobs (kind, dataset_membership_mode) "
-                "VALUES ('448-in-flight-probe', 'single') RETURNING job_id"
+                "VALUES ('449-in-flight-probe', 'single') RETURNING job_id"
             )
             await connection.execute(
                 """
@@ -529,7 +529,7 @@ async def test_448_refuses_when_a_job_is_queued_on_a_retired_festival_operation(
         await connection.close()
 
     with pytest.raises(Exception, match="queued/running job on a retired festival operation"):
-        await _upgrade_to_448(config)
+        await _upgrade_to_449(config)
 
     connection = await _connect(superuser_dsn)
     try:
