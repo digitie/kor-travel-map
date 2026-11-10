@@ -287,7 +287,7 @@ right_zones AS MATERIALIZED (
     AND (CAST(:right_categories AS text[]) IS NULL
          OR f.category = ANY(CAST(:right_categories AS text[])))
 ),
-overlaps AS (
+line_overlaps AS (
   SELECT l.feature_id AS left_id, l.name AS left_name, l.category AS left_category,
          l.kind AS left_kind, l.lon AS left_lon, l.lat AS left_lat,
          r.feature_id AS right_id, r.name AS right_name, r.category AS right_category,
@@ -307,7 +307,7 @@ SELECT DISTINCT ON (left_id)
   left_id, left_name, left_category, left_kind, left_lon, left_lat,
   right_id, right_name, right_category, right_kind, right_lon, right_lat,
   LEAST(ratio, 1.0) AS ratio
-FROM overlaps
+FROM line_overlaps
 WHERE ratio >= CAST(:min_ratio AS double precision)
 ORDER BY left_id, ratio DESC, right_id
 LIMIT CAST(:limit AS integer)
