@@ -1272,7 +1272,13 @@ AdminFeatureQueryPath: TypeAlias = Literal["none", "scan", "candidates"]
 #   ``_ADMIN_FEATURES_Q_CANDIDATE_CAP``개까지 모은다(``_admin_feature_candidates_sql``). 그 안에
 #   들면 바깥 질의는 그 id 배열(``pk_features``)에서 시작한다. 종전에는 이 경우에도
 #   ``lower(name)`` keyset 인덱스로 36만 행을 끝까지 걸으며 행마다 ILIKE와 상관 서브쿼리를
-#   평가했다 — 101행을 못 채우는 드문 q일수록 오래 걸렸다(prod 3~12 s, #1475).
+#   평가했다 — 101행을 못 채우는 드문 q일수록 오래 걸렸다(prod 3~12 s, #1475). 이 경로의
+#   ``base``는 ``MATERIALIZED``다: 그러지 않으면 planner가 ``LIMIT``을 보고 다시 keyset
+#   인덱스를 걸으며 id 배열을 필터로 쓰는 계획을 고를 수 있다(일치가 101행 미만이면 끝까지
+#   간다 — prod 실측 23행 1.2 s). 후보는 상한 안이므로 LATERAL을 모두 돌려도 작다.
+#   UNION ALL이라 같은 Feature가 여러 갈래에서 나온다(MCST ``source_entity_id``는
+#   "이름::주소"다). 중복을 걸러 세도록 원시 행은 상한의 ``_ADMIN_FEATURES_Q_PROBE_FACTOR``배까지
+#   받는다.
 # - **훑기 경로(흔한 q).** 후보가 상한을 넘으면 종전처럼 keyset 인덱스를 걸으며 행마다
 #   검사한다. 일치가 촘촘하면 101행을 금방 채우므로 이것이 싸다. 반대로 흔한 q를 후보
 #   집합으로 풀면 provider·issue LATERAL을 후보 전부(``서울`` 14.8만 행)에 돌리고서야
@@ -1297,6 +1303,7 @@ AdminFeatureQueryPath: TypeAlias = Literal["none", "scan", "candidates"]
 # ``idx_features_name_trgm``(``name``)과 겨루지 않도록 ``lower(name)``으로 둔다 — ILIKE는
 # 대소문자를 보지 않으므로 뜻은 같다.
 _ADMIN_FEATURES_Q_CANDIDATE_CAP: Final = 2000
+_ADMIN_FEATURES_Q_PROBE_FACTOR: Final = 4
 _ADMIN_FEATURES_Q_TRGM_MIN_CHARS: Final = 3
 
 _ADMIN_FEATURES_Q_FEATURE_FIELDS: Final = """
@@ -1392,8 +1399,10 @@ def _admin_features_sql(
         q_clause = _ADMIN_FEATURES_Q_FEATURE_SCAN_CLAUSE
     else:
         q_clause = _ADMIN_FEATURES_Q_SCAN_CLAUSE
+    # 후보 경로는 id 배열에서 시작해야 한다 — 위 #1475 설명의 LIMIT 함정.
+    materialized = "MATERIALIZED " if q_clause == _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE else ""
     return f"""
-WITH base AS (
+WITH base AS {materialized}(
     SELECT
         f.feature_id,
         CAST(f.feature_id AS text) AS feature_uuid,
@@ -2200,15 +2209,18 @@ async def list_admin_features(
         and normalized_q is not None
         and len(normalized_q) >= _ADMIN_FEATURES_Q_TRGM_MIN_CHARS
     ):
+        probe_limit = _ADMIN_FEATURES_Q_CANDIDATE_CAP * _ADMIN_FEATURES_Q_PROBE_FACTOR + 1
         probed = (
             await session.execute(
                 text(_admin_feature_candidates_sql(search_scope)),
-                {"q_like": q_like, "q_candidate_limit": _ADMIN_FEATURES_Q_CANDIDATE_CAP + 1},
+                {"q_like": q_like, "q_candidate_limit": probe_limit},
             )
         ).scalars().all()
-        if len(probed) <= _ADMIN_FEATURES_Q_CANDIDATE_CAP:
+        # 원시 행이 probe 한도에 닿았으면 잘린 것이라 후보 집합이 완전하지 않다 — 훑는다.
+        candidate_ids = sorted({str(value) for value in probed})
+        if len(probed) < probe_limit and len(candidate_ids) <= _ADMIN_FEATURES_Q_CANDIDATE_CAP:
             q_path = "candidates"
-            params["q_candidate_ids"] = sorted({str(value) for value in probed})
+            params["q_candidate_ids"] = candidate_ids
     rows = (
         await session.execute(
             text(

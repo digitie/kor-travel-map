@@ -62,7 +62,7 @@ async def test_candidate_arms_use_admin_trigram_indexes(
     plan = await _explain(
         migrated_session,
         admin_feature_repo._admin_feature_candidates_sql("all"),
-        {"q_like": "%관리자후보인덱스%", "q_candidate_limit": 2001},
+        {"q_like": "%관리자후보인덱스%", "q_candidate_limit": 8001},
     )
     nodes = _nodes(plan)
     for relation, expected in _ARM_INDEXES.items():
