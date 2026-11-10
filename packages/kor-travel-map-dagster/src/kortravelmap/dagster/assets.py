@@ -1265,8 +1265,8 @@ VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 #: 사흘이면 상세가 다 차고, 그 뒤로는 수정된 행만 다시 받는다.
 VISITKOREA_FESTIVAL_DETAIL_BUDGET: Final = 300
 
-#: 축제의 법정동 미해석 허용 상한 — 축제는 900건 안팎이고 원천 좌표가 모두 육지 행사장이라 관광지(30)보다
-#: 좁게 둔다. 버린 행은 은퇴하므로 geo 장애가 한 run에 축제 수십 건을 지우지 않게 한다.
+#: 축제의 법정동 미해석 허용 상한 — 축제는 900건 안팎이고 원천 좌표가 모두 육지 행사장이라
+#: 관광지(30)보다 좁게 둔다. 버린 행은 은퇴하므로 geo 장애가 한 run에 축제 수십 건을 지우지 않게 한다.
 VISITKOREA_FESTIVAL_UNRESOLVED_FLOOR: Final = 5
 
 #: 역지오코딩이 법정동을 못 낸 행의 허용 상한 — ``max(이 수, 전체의 1%)``. 해상 등대·무인도처럼

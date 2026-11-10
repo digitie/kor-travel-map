@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import sys
-from datetime import datetime, timedelta, timezone
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
