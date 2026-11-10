@@ -346,6 +346,7 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     # 휴양림은 콘도/관광숙박과 중복 가능). MOIS side는 관련 LODGING 카테고리로 좁혀
     # 대규모 MOIS 전체 비교를 피한다. 수목원(arboretum)은 MOIS PROMOTED 슬러그에 식물원/
     # 수목원이 없어 dedup 후보가 없으므로 pair를 추가하지 않는다.
+    # 병합 시 휴양림이 master다(dataset 보정 55 > MOIS 50, 소유자 결정 2026-11-10).
     {
         "left": {
             "provider": "python-krforest-api",

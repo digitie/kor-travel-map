@@ -348,6 +348,9 @@ DATASET_SOURCE_PRIORITY: Final[dict[tuple[str, str], int]] = {
     ("python-knps-api", "knps_cultural_resources"): 40,
     # 같은 이름의 휴양림·수목원은 휴양림이 master다(산림청 같은 provider 안).
     ("python-krforest-api", "krforest_arboretums"): 40,
+    # 자연휴양림은 산림청이 원장이다 — MOIS 숙박·관광숙박 인허가(50)보다 위(소유자 결정
+    # 2026-11-10, 휴양림 ↔ MOIS 숙박 쌍).
+    ("python-krforest-api", "krforest_recreation_forests"): 55,
     # 국립공원 안 탐방로는 KNPS가 원장이다 — 산림청 등산로는 그 구간을 다시 적은 것.
     ("python-krforest-api", "krforest_mountain_trails"): 40,
 }
