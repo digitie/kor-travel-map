@@ -21,4 +21,5 @@ admin field-override는 재적재에도 남는다(`feature.apply_provider_featur
 3. 응답 200과 새 `ETag`를 확인하고, `GET`으로 `category`가 바뀐 것을 본다.
 
 412면 `row_revision`이 바뀐 것이다 — 1부터 다시. 되돌리기는 `POST …/field-overrides/revoke`
-`{"reason_code": "…", "field_paths": ["core.category"]}`(최신 provider 값으로 돌아간다).
+`{"reason_code": "…", "field_paths": ["core.category"]}`(같은 `If-Match`·`Idempotency-Key`·proxy 헤더가
+필요하다. 최신 provider 값으로 돌아간다).
