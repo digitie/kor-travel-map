@@ -2060,10 +2060,11 @@ _LATIN_BRACKET_NAME_SQL_LITERAL: Final[str] = (
 def search_bracket_like_pattern(q: str) -> str | None:
     """끝 괄호 이름 후보 팔(``:bracket_like``)의 ``ILIKE`` 패턴 — 검색어를 품는 이름.
 
-    후보는 다른 팔처럼 ``f.name % :q``(이름 **전체**와의 유사도)로 고르므로, 짧은 한글 이름 뒤에 긴
-    영문 괄호가 붙으면("롯데호텔 (Lotte Hotel Seoul Myeongdong)") 한글 이름만으로는 문턱을 못 넘는다.
-    이 팔은 이름이 검색어를 품고 닫는 괄호로 끝나는 행을 더한다 — trigram GIN이 받으므로 공백을 지운
-    검색어가 3글자 미만이면 ``None``(팔 없음; 조건이 trigram을 못 만들면 공개 행 전부를 recheck한다).
+    후보는 다른 팔처럼 ``f.name % :q``(이름 **전체**와의 유사도)로 고르므로, 짧은 한글 이름
+    뒤에 긴 영문 괄호가 붙으면("롯데호텔 (Lotte Hotel Seoul Myeongdong)") 한글 이름만으로는
+    문턱을 못 넘는다. 이 팔은 이름이 검색어를 품고 닫는 괄호로 끝나는 행을 더한다 — trigram
+    GIN이 받으므로 공백을 지운 검색어가 3글자 미만이면 ``None``(팔 없음; 조건이 trigram을 못
+    만들면 공개 행 전부를 recheck한다).
     """
     stripped = q.strip()
     if len(search_alias_key(stripped)) < _SEARCH_REGION_TRIGRAM_MIN_CHARS:
