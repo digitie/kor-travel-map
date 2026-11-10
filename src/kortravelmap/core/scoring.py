@@ -12,7 +12,8 @@ ADR-016 (SPEC V8 D-14):
   - spatial_sim: ``math.exp(-haversine_m / 50.0)`` (50m exponential decay)
   - category_sim: Jaccard on category tag set
 - **임계값**:
-  - `THRESHOLD_AUTO = 0.85` — 자동 병합 (master 선정 룰 적용).
+  - `THRESHOLD_AUTO = 0.85` — ``auto_merge`` **표시**(검토 큐 `decision_reason`). 자동으로
+    병합하는 실행기는 없다 — 병합은 관리자가 큐에서 한다(#1468).
   - `THRESHOLD_MANUAL = 0.65` — 수동 검토 큐 (`ops.dedup_review_queue`).
   - < 0.65 — 별개 feature 유지.
 
@@ -89,7 +90,9 @@ SPATIAL_DECAY_METERS: Final[float] = 50.0
 
 
 THRESHOLD_AUTO: Final[float] = 0.85
-"""auto-merge 임계값. 이상이면 ``master`` 선정 + 즉시 병합."""
+"""auto-merge 표시 임계값(0~1 척도). 이상이면 후보에 ``auto_merge``라고 적을 뿐 병합하지 않는다.
+
+큐 ``total_score``는 이 점수 ×100(0~100)이다 — 큐 값과 비교하려면 85로 본다."""
 
 THRESHOLD_MANUAL: Final[float] = 0.65
 """manual-review 임계값. 이 이상 ~ AUTO 미만이면 ``ops.dedup_review_queue``에
@@ -282,7 +285,8 @@ class DedupDecision:
     """
 
     AUTO_MERGE: Final[str] = "auto_merge"
-    """``>= THRESHOLD_AUTO``. master 선정 + 즉시 병합 (`feature_merge_history`)."""
+    """``>= THRESHOLD_AUTO``. 강한 중복 **제안**이다 — 큐에 ``auto_merge``로 올라갈 뿐,
+    이것을 보고 병합하는 실행기는 없다(병합은 관리자, `feature_merge_history`)."""
 
     MANUAL_REVIEW: Final[str] = "manual_review"
     """``THRESHOLD_MANUAL <= score < THRESHOLD_AUTO``. ``ops.dedup_review_queue``

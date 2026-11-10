@@ -2980,8 +2980,10 @@ ADR에서 빼고 본 문서로 이관한 provider/ETL·도메인·알고리즘·
 - **Scoring**: `0.45 * name_sim + 0.35 * spatial_sim + 0.20 * category_sim`.
   name_sim은 `normalize_kr_place_name` 후 Jaro-Winkler 유사도, spatial_sim은
   `exp(-haversine_m / 50.0)`, category_sim은 category tag set Jaccard.
-- **임계값**: `THRESHOLD_AUTO=0.85`(자동 병합), `THRESHOLD_MANUAL=0.65`(이 이상 ~ AUTO
-  미만은 `ops.dedup_review_queue` 수동 검토). 점수는 DB에 0~100 스케일로 저장한다.
+- **임계값**: `THRESHOLD_AUTO=0.85`(`decision_reason=auto_merge` 표시 — 자동 병합 실행기는
+  없고 병합은 관리자가 큐에서 한다), `THRESHOLD_MANUAL=0.65`(이 이상 ~ AUTO 미만은
+  `manual_review`). 판정은 0~1 점수로 하고 DB에는 ×100(0~100)으로 저장한다 — 큐 값은 85·65와
+  비교한다(#1468).
 - **마스터 선정**(`core.scoring.select_master`): (1) 좌표 정밀도 → (2) 원천 우선순위
   (`SOURCE_PRIORITY` — 행안부 > 국가유산·KNPS·산림청 > 표준데이터 > TourAPI > 문체부 테마
   목록 > YouTube 후보 > 사용자 등록, `DATASET_SOURCE_PRIORITY`로 dataset 보정) → (3)
