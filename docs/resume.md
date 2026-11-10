@@ -1,6 +1,10 @@
-## 2026-11-10 — 축제 원천 TourAPI 단독(alembic 447)
+## 2026-11-10 — 축제 원천 TourAPI 단독(alembic 448)
 
-- 회전에 묶는다(직접 회전 금지). 447이 표준데이터 축제 1,296건을 퇴역시키므로 배포 직후 `visitkorea_festivals` preview → `feature_event_visitkorea_festivals_job` 1회(약 880건 생성, 상세 ≤300) → `/v1/public/festivals/monthly` 확인 → daily schedule 켜기. Manager env 변경 없음.
+- 회전에 묶는다(직접 회전 금지). 448이 표준데이터 축제 1,296건을 퇴역시키므로 배포 직후 `visitkorea_festivals` preview → `feature_event_visitkorea_festivals_job` 1회(약 880건 생성, 상세 ≤300) → `/v1/public/festivals/monthly` 확인 → daily schedule 켜기. Manager env 변경 없음.
+
+## 2026-11-10 — #1475 admin 검색 trigram(447)
+
+- 회전에 묶는다(직접 회전 금지). 447은 SHARE 잠금으로 인덱스 6개 빌드(prod 추정 50~75 s, 쓰기만 대기) — 배포 동안 Feature 적재 큐를 멈춘다. OpenAPI 바이트 동일, PinVi 재vendor 불필요.
 
 ## 2026-11-10 — #1468 A MCST 테마 속성(ADR-121) R1·R3
 

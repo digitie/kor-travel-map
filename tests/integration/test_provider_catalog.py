@@ -938,7 +938,7 @@ async def test_head_catalogs_the_transport_reference_place_datasets(
         assert job in bound, job
 
 
-#: 447(2026-11-10 축제 원천 TourAPI 전환)이 퇴역시킨 축제 dataset — 표준데이터 축제와, TourAPI
+#: 448(2026-11-10 축제 원천 TourAPI 전환)이 퇴역시킨 축제 dataset — 표준데이터 축제와, TourAPI
 #: 축제를 그것에 이름으로 잇던 보강 dataset.
 _FESTIVAL_RETIRED_DATASETS = frozenset(
     {
@@ -952,7 +952,7 @@ _FESTIVAL_JOB = "feature_event_visitkorea_festivals_job"
 async def test_head_retires_the_standard_data_festival_datasets(
     seed_session: AsyncSession,
 ) -> None:
-    """447: 옛 축제 dataset 둘은 operation이 **종류 불문** 꺼지고 비활성이다(402·404와 같은 규율).
+    """448: 옛 축제 dataset 둘은 operation이 **종류 불문** 꺼지고 비활성이다(402·404와 같은 규율).
 
     하한은 본 것에 건다 — 두 dataset이 시드에 보이고 refresh·preview operation 행이 실제로 있어야
     이 검사가 무언가를 잰다(행은 이력 FK라 지우지 않는다).
@@ -984,7 +984,7 @@ async def test_head_retires_the_standard_data_festival_datasets(
 async def test_head_catalogs_the_tourapi_festival_dataset(
     seed_session: AsyncSession,
 ) -> None:
-    """447: TourAPI 축제가 유일한 축제 원천이다 — 활성 event dataset, refresh·preview가 켜져 있고,
+    """448: TourAPI 축제가 유일한 축제 원천이다 — 활성 event dataset, refresh·preview가 켜져 있고,
     refresh는 dataset_wide scope로 실행 가능하며 코드의 handler binding과 같은 key다(ADR-088)."""
 
     entry = next(

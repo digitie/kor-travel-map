@@ -192,7 +192,7 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: (2026-11-09 공개 파일로 옮긴 뒤에는 `_iter_datagokr_standard_file`이 header·페이지마다 센다.)
 #: 2026-11-09 32 → 34: TourAPI 관광지(#1459) — 목록(`fetch_visitkorea_tourist_attractions`)은
 #: `aiter_paginated_items`가, 상세(`fetch_visitkorea_attraction_details`)는 호출마다 센다.
-#: 2026-11-10 34 → 33: 표준데이터 축제(`fetch_datagokr_cultural_festivals`)가 퇴역했다(447). TourAPI
+#: 2026-11-10 34 → 33: 표준데이터 축제(`fetch_datagokr_cultural_festivals`)가 퇴역했다(448). TourAPI
 #: 축제 fetcher는 이름만 바뀌었다(`fetch_visitkorea_festivals`, 여전히 센다).
 _EXPECTED_FULLY_COUNTED: int = 33
 
@@ -483,7 +483,7 @@ def test_the_feature_asset_module_list_is_real_and_nonempty() -> None:
     # 2026-10-02 6 → 5: OpiNet 가격 asset의 쿼터 초크포인트가 ADR-106으로 사라졌다.
     # 2026-10-24 5 → 3: 주유소·휴게소 유가 asset이 ADR-114 결정 7(migration 419)로 사라졌다.
     # 2026-11-10 3 → 2: TourAPI 축제 보강 asset(`run_feature_event_visitkorea_enrichment`)이 축제
-    # 원천 전환(447)으로 사라졌다 — 새 축제 asset은 `_load`(etl 초크포인트)를 지난다.
+    # 원천 전환(448)으로 사라졌다 — 새 축제 asset은 `_load`(etl 초크포인트)를 지난다.
     assert len(scanned) >= 2, (
         f"초크포인트를 지나는 함수를 {len(scanned)}개만 찾았다 — 유도가 낡았다."
     )

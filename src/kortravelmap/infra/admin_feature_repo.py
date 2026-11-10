@@ -1275,26 +1275,53 @@ _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE: Final = (
     "AND f.feature_id = CAST(:q_exact_uuid AS uuid)"
 )
 
-# 부분 검색: 식별자(uuid 정본 + legacy alias)/name/address + source_records 상관
-# 서브쿼리 ILIKE.
+AdminFeatureSearchScope: TypeAlias = Literal["all", "feature"]
+#: 조각 검색이 바깥 질의에 붙는 방식 — 없음·훑기·후보 id 배열(아래 #1475 설명).
+AdminFeatureQueryPath: TypeAlias = Literal["none", "scan", "candidates"]
+
+# #1475 — 조각 검색은 **두 가지 계획 중 하나**로 간다. 둘은 같은 행 집합을 고르고(술어의
+# 뜻이 같다) 비용만 다르다. 그래서 어느 쪽을 고르든 결과는 같다.
+#
+# - **후보 경로(드문 q).** 먼저 비부분 trigram 인덱스(rev 447)로 일치 Feature id를 최대
+#   ``_ADMIN_FEATURES_Q_CANDIDATE_CAP``개까지 모은다(``_admin_feature_candidates_sql``). 그 안에
+#   들면 바깥 질의는 그 id 배열(``pk_features``)에서 시작한다. 종전에는 이 경우에도
+#   ``lower(name)`` keyset 인덱스로 36만 행을 끝까지 걸으며 행마다 ILIKE와 상관 서브쿼리를
+#   평가했다 — 101행을 못 채우는 드문 q일수록 오래 걸렸다(prod 3~12 s, #1475). 이 경로의
+#   ``base``는 ``MATERIALIZED``다: 그러지 않으면 planner가 ``LIMIT``을 보고 다시 keyset
+#   인덱스를 걸으며 id 배열을 필터로 쓰는 계획을 고를 수 있다(일치가 101행 미만이면 끝까지
+#   간다 — prod 실측 23행 1.2 s). 후보는 상한 안이므로 LATERAL을 모두 돌려도 작다.
+#   UNION ALL이라 같은 Feature가 여러 갈래에서 나온다(MCST ``source_entity_id``는
+#   "이름::주소"다). 중복을 걸러 세도록 원시 행은 상한의 ``_ADMIN_FEATURES_Q_PROBE_FACTOR``배까지
+#   받는다.
+# - **훑기 경로(흔한 q).** 후보가 상한을 넘으면 종전처럼 keyset 인덱스를 걸으며 행마다
+#   검사한다. 일치가 촘촘하면 101행을 금방 채우므로 이것이 싸다. 반대로 흔한 q를 후보
+#   집합으로 풀면 provider·issue LATERAL을 후보 전부(``서울`` 14.8만 행)에 돌리고서야
+#   정렬할 수 있다(prod 10.9 s 실측).
+#
+# trigram은 세 글자 미만 조각에서 뽑을 것이 없다(GIN 전 스캔). 그런 q는 후보를 모으지 않고
+# 바로 훑는다 — 대개 흔한 q이기도 하다.
 #
 # **식별자 갈래가 둘인 이유(T-VN-39).** 재키 후 ``f.feature_id``는 uuid라
-# ``uuid ILIKE text``가 42883이다. 이 절의 다른 갈래(name·address·source_entity_id)가
-# 전부 "운영자가 손에 든 문자열 조각"을 받는다는 것이 이 절의 뜻이므로 식별자 갈래도
-# 같은 뜻을 유지해야 하고, 조각 검색이라 ``CAST(... AS uuid)`` 등호로 바꾸는 선택지는
-# 애초에 없다. 운영자가 손에 드는 식별자는 두 가지다 — 응답이 돌려주는
-# uuid(``CAST(f.feature_id AS text)``)와, 과거 링크·로그에 남은 legacy ``f_*``
-# (``feature_aliases.alias``, text 유지). 그래서 둘 다 본다. 위 exact fast-path가 완전한
-# ``f_*``를 이미 alias로 풀므로, 조각만 여기로 오는데 그것이 빠지면 "완전한 id는 찾히고
-# 한 글자 짧은 조각은 안 찾힌다"는 비대칭이 남는다.
+# ``uuid ILIKE text``가 42883이다. 운영자가 손에 드는 식별자는 응답의
+# uuid(``CAST(f.feature_id AS text)``)와 과거 링크·로그에 남은 legacy ``f_*``
+# (``feature_aliases.alias``)다. 위 exact fast-path가 완전한 ``f_*``를 alias로 풀므로 조각만
+# 여기로 오는데, 그것이 빠지면 "완전한 id는 찾히고 한 글자 짧은 조각은 안 찾힌다"는 비대칭이
+# 남는다.
 #
-# alias EXISTS는 ``idx_feature_aliases_feature``(feature_id) 단건 조회 + 그 한 행에 대한
-# ILIKE라, 바로 아래 source_records 상관 서브쿼리에 비하면 무시할 수 있다.
-AdminFeatureSearchScope: TypeAlias = Literal["all", "feature"]
+# **원천 갈래(``all``)는 식별자만 본다** — ``source_entity_id``와 현재 head record의
+# ``source_record_key``. 원천 JSON 본문(``raw_data::text``, prod 505 MB)은 인덱스로 받을 수
+# 없어 매 검색이 그 전 스캔이었고(prod 단독 2.3 s), 검색 비용의 대부분이었다(#1475).
+#
+# 후보 SQL의 각 술어 식은 rev 447 인덱스 식과 **글자 그대로 같아야** 한다
+# (``lower(name)``·``CAST(feature_id AS text)``·``address::text``). 이름은 공개 부분 인덱스
+# ``idx_features_name_trgm``(``name``)과 겨루지 않도록 ``lower(name)``으로 둔다 — ILIKE는
+# 대소문자를 보지 않으므로 뜻은 같다.
+_ADMIN_FEATURES_Q_CANDIDATE_CAP: Final = 2000
+_ADMIN_FEATURES_Q_PROBE_FACTOR: Final = 4
+_ADMIN_FEATURES_Q_TRGM_MIN_CHARS: Final = 3
 
 _ADMIN_FEATURES_Q_FEATURE_FIELDS: Final = """
-        CAST(:q_like AS text) IS NULL
-        OR CAST(f.feature_id AS text) ILIKE CAST(:q_like AS text)
+        CAST(f.feature_id AS text) ILIKE CAST(:q_like AS text)
         OR EXISTS (
             SELECT 1
             FROM feature.feature_aliases AS qa
@@ -1311,26 +1338,66 @@ _ADMIN_FEATURES_Q_SOURCE_FIELDS: Final = """EXISTS (
               ON qse.source_entity_key = qsl.source_entity_key
             JOIN provider_sync.source_entity_heads AS qhead
               ON qhead.source_entity_key = qse.source_entity_key
-            JOIN provider_sync.source_records AS qsr
-              ON qsr.source_entity_key = qse.source_entity_key
-             AND qsr.source_record_key = qhead.current_source_record_key
             WHERE qsl.feature_id = f.feature_id
               AND (
-                qsr.source_record_key ILIKE CAST(:q_like AS text)
-                OR qse.source_entity_id ILIKE CAST(:q_like AS text)
-                OR qsr.raw_data::text ILIKE CAST(:q_like AS text)
+                qse.source_entity_id ILIKE CAST(:q_like AS text)
+                OR qhead.current_source_record_key ILIKE CAST(:q_like AS text)
               )
         )"""
-_ADMIN_FEATURES_Q_LIKE_CLAUSE: Final = (
+_ADMIN_FEATURES_Q_SCAN_CLAUSE: Final = (
     f"AND ({_ADMIN_FEATURES_Q_FEATURE_FIELDS} OR {_ADMIN_FEATURES_Q_SOURCE_FIELDS})"
 )
-_ADMIN_FEATURES_Q_FEATURE_CLAUSE: Final = f"AND ({_ADMIN_FEATURES_Q_FEATURE_FIELDS})"
+_ADMIN_FEATURES_Q_FEATURE_SCAN_CLAUSE: Final = f"AND ({_ADMIN_FEATURES_Q_FEATURE_FIELDS})"
+_ADMIN_FEATURES_Q_CANDIDATES_CLAUSE: Final = (
+    "AND f.feature_id = ANY(CAST(CAST(:q_candidate_ids AS text[]) AS uuid[]))"
+)
 
+# 후보 갈래 — 표 하나·술어 묶음 하나씩. 한 갈래에 두 표의 컬럼을 OR로 묶으면 그 갈래가
+# 다시 전 스캔이 된다. ``UNION ALL`` + ``LIMIT``이라 상한에 닿으면 멈춘다(중복은 호출자가
+# 걷는다 — 상한 판정은 중복을 센 값이라 보수적으로 훑기 쪽으로 기운다).
+_ADMIN_FEATURES_Q_FEATURE_ARMS: Final = (
+    """
+    SELECT qf.feature_id
+    FROM feature.features AS qf
+    WHERE lower(qf.name) ILIKE CAST(:q_like AS text)
+       OR CAST(qf.feature_id AS text) ILIKE CAST(:q_like AS text)
+       OR qf.address::text ILIKE CAST(:q_like AS text)""",
+    """
+    SELECT qa.feature_id
+    FROM feature.feature_aliases AS qa
+    WHERE qa.alias ILIKE CAST(:q_like AS text)""",
+)
+_ADMIN_FEATURES_Q_SOURCE_ARMS: Final = (
+    """
+    SELECT qsl.feature_id
+    FROM provider_sync.source_entities AS qse
+    JOIN provider_sync.source_entity_heads AS qhead
+      ON qhead.source_entity_key = qse.source_entity_key
+    JOIN provider_sync.source_links AS qsl
+      ON qsl.source_entity_key = qse.source_entity_key
+    WHERE qse.source_entity_id ILIKE CAST(:q_like AS text)""",
+    # 현재 record의 key는 head가 들고 있다(FK ``fk_source_entity_heads_record``) — 옛 record까지
+    # 담은 source_records 대신 head 열에 인덱스를 둔다.
+    """
+    SELECT qsl.feature_id
+    FROM provider_sync.source_entity_heads AS qhead
+    JOIN provider_sync.source_links AS qsl
+      ON qsl.source_entity_key = qhead.source_entity_key
+    WHERE qhead.current_source_record_key ILIKE CAST(:q_like AS text)""",
+)
+
+
+def _admin_feature_candidates_sql(search_scope: AdminFeatureSearchScope) -> str:
+    arms: tuple[str, ...] = _ADMIN_FEATURES_Q_FEATURE_ARMS
+    if search_scope == "all":
+        arms = (*arms, *_ADMIN_FEATURES_Q_SOURCE_ARMS)
+    union = "\n    UNION ALL".join(arms)
+    return f"SELECT cand.feature_id\nFROM ({union}\n) AS cand\nLIMIT :q_candidate_limit\n"
 
 
 def _admin_features_sql(
     *, sort: str, order: str, exact_id: bool = False, exact_uuid: bool = False,
-    search_scope: AdminFeatureSearchScope = "all",
+    search_scope: AdminFeatureSearchScope = "all", q_path: AdminFeatureQueryPath = "none",
 ) -> str:
     column = _ADMIN_FEATURE_SORT_COLUMNS[sort]
     order_sql = "ASC" if order == "asc" else "DESC"
@@ -1338,12 +1405,18 @@ def _admin_features_sql(
         q_clause = _ADMIN_FEATURES_Q_EXACT_CLAUSE
     elif exact_uuid:
         q_clause = _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE
+    elif q_path == "candidates":
+        q_clause = _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE
+    elif q_path == "none":
+        q_clause = ""
     elif search_scope == "feature":
-        q_clause = _ADMIN_FEATURES_Q_FEATURE_CLAUSE
+        q_clause = _ADMIN_FEATURES_Q_FEATURE_SCAN_CLAUSE
     else:
-        q_clause = _ADMIN_FEATURES_Q_LIKE_CLAUSE
+        q_clause = _ADMIN_FEATURES_Q_SCAN_CLAUSE
+    # 후보 경로는 id 배열에서 시작해야 한다 — 위 #1475 설명의 LIMIT 함정.
+    materialized = "MATERIALIZED " if q_clause == _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE else ""
     return f"""
-WITH base AS (
+WITH base AS {materialized}(
     SELECT
         f.feature_id,
         CAST(f.feature_id AS text) AS feature_uuid,
@@ -2126,12 +2199,13 @@ async def list_admin_features(
     normalized_q = _normalize_query(q)
     q_exact = _feature_id_exact_query(normalized_q)
     q_exact_uuid = None if q_exact is not None else _feature_uuid_exact_query(normalized_q)
+    q_like = (
+        None
+        if q_exact is not None or q_exact_uuid is not None
+        else (f"%{normalized_q}%" if normalized_q is not None else None)
+    )
     params = {
-        "q_like": (
-            None
-            if q_exact is not None or q_exact_uuid is not None
-            else (f"%{normalized_q}%" if normalized_q is not None else None)
-        ),
+        "q_like": q_like,
         "q_exact": q_exact,
         "q_exact_uuid": q_exact_uuid,
         "kinds": _normalize_values(kinds),
@@ -2150,6 +2224,24 @@ async def list_admin_features(
         "limit_plus_one": effective_limit + 1,
         **_cursor_params(cursor, sort=sort, order=order),
     }
+    q_path: AdminFeatureQueryPath = "none" if q_like is None else "scan"
+    if (
+        q_like is not None
+        and normalized_q is not None
+        and len(normalized_q) >= _ADMIN_FEATURES_Q_TRGM_MIN_CHARS
+    ):
+        probe_limit = _ADMIN_FEATURES_Q_CANDIDATE_CAP * _ADMIN_FEATURES_Q_PROBE_FACTOR + 1
+        probed = (
+            await session.execute(
+                text(_admin_feature_candidates_sql(search_scope)),
+                {"q_like": q_like, "q_candidate_limit": probe_limit},
+            )
+        ).scalars().all()
+        # 원시 행이 probe 한도에 닿았으면 잘린 것이라 후보 집합이 완전하지 않다 — 훑는다.
+        candidate_ids = sorted({str(value) for value in probed})
+        if len(probed) < probe_limit and len(candidate_ids) <= _ADMIN_FEATURES_Q_CANDIDATE_CAP:
+            q_path = "candidates"
+            params["q_candidate_ids"] = candidate_ids
     rows = (
         await session.execute(
             text(
@@ -2159,6 +2251,7 @@ async def list_admin_features(
                     order=order,
                     exact_id=q_exact is not None,
                     exact_uuid=q_exact_uuid is not None,
+                    q_path=q_path,
                 )
             ),
             params,
@@ -3429,7 +3522,7 @@ FROM expanded
 WHERE (
     CAST(:q_like AS text) IS NULL
     -- T-VN-39: 두 컬럼이 uuid가 됐다(``uuid ILIKE text``는 42883). 식별자 조각
-    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로 보존한다 —
+    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로 보존한다 —
     -- uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽을 본다.
     OR CAST(feature_id_a AS text) ILIKE CAST(:q_like AS text)
     OR CAST(feature_id_b AS text) ILIKE CAST(:q_like AS text)
@@ -3540,7 +3633,7 @@ FROM expanded
 WHERE (
     CAST(:q_like AS text) IS NULL
     -- T-VN-39: 두 컬럼이 uuid가 됐다(``uuid ILIKE text``는 42883). 식별자 조각
-    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로 보존한다 —
+    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로 보존한다 —
     -- uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽을 본다.
     OR CAST(feature_id_a AS text) ILIKE CAST(:q_like AS text)
     OR CAST(feature_id_b AS text) ILIKE CAST(:q_like AS text)
@@ -4034,7 +4127,7 @@ WITH reviews AS MATERIALIZED (
       AND (
         CAST(:q_like AS text) IS NULL
         -- T-VN-39: ``target_feature_id``가 uuid가 됐다(``uuid ILIKE text``는 42883).
-        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로
+        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로
         -- 보존한다 — uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽.
         OR CAST(q.target_feature_id AS text) ILIKE CAST(:q_like AS text)
         OR EXISTS (
@@ -4179,7 +4272,7 @@ JOIN provider_sync.provider_datasets AS pd
       AND (
         CAST(:q_like AS text) IS NULL
         -- T-VN-39: ``target_feature_id``가 uuid가 됐다(``uuid ILIKE text``는 42883).
-        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로
+        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로
         -- 보존한다 — uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽.
         OR CAST(q.target_feature_id AS text) ILIKE CAST(:q_like AS text)
         OR EXISTS (

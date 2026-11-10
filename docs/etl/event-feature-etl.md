@@ -13,11 +13,11 @@
   `datagokr_cultural_festivals`)는 **쓰지 않는다**. 키가 403
   `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`(마지막 성공 2026-10-31)이 된 뒤 소유자가 원천을 바꾸기로
   했다. 코드(변환기·fetcher·asset·job·schedule·큐 spec·handler·preview fixture)를 지웠고,
-  migration 447이 카탈로그 operation을 끄고 dataset을 비활성으로 내렸다.
+  migration 448이 카탈로그 operation을 끄고 dataset을 비활성으로 내렸다.
 - 종전 구조(구 ADR-042, 2026-05-27): 표준데이터가 1차, TourAPI는 표준데이터 축제에 **이름으로**
   붙는 2차 enrichment(`visitkorea_festival_events`, `feature_event_visitkorea_enrichment_job`)였다.
   그 enrichment도 함께 퇴역했다 — 붙일 1차가 없다. 이름 매처·검토 분류 코드도 지웠다.
-- 기존 표준데이터 축제 Feature(2026-11-10 prod 1,296건)는 **병합하지 않고 퇴역**한다(447,
+- 기존 표준데이터 축제 Feature(2026-11-10 prod 1,296건)는 **병합하지 않고 퇴역**한다(448,
   `transition_kind=system`, reason `festival_source_moved_to_tourapi`). "그 원천을 쓰지 않는다"이므로
   표준데이터 값(본문·주관기관)을 TourAPI Feature로 옮기지도 않는다. TourAPI 쪽 같은 축제는 새 적재가
   자기 Feature로 만든다(이름이 맞는 행 314/1,296).
@@ -35,7 +35,7 @@
 | 항목 | 값 |
 |------|----|
 | provider | `python-visitkorea-api` |
-| dataset_key | `visitkorea_festivals` (migration 447) |
+| dataset_key | `visitkorea_festivals` (migration 448) |
 | Feature.kind | `event` |
 | source_entity_type | `festival` |
 | source_role | `primary` |
@@ -110,7 +110,7 @@ data.go.kr 한도는 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quot
 
 ## 6. 운영 (배포 뒤)
 
-1. 배포(=migration 447 적용) 직후 preview: `POST /v1/ops/datasets/{id}/preview`
+1. 배포(=migration 448 적용) 직후 preview: `POST /v1/ops/datasets/{id}/preview`
    (`visitkorea_festivals`의 `feature_event_visitkorea_festivals_job.preview`, fixture — 외부 호출 0).
 2. 실제 적재: `feature_event_visitkorea_festivals_job` 1회(큐 또는 Dagster). 기대: 목록 1호출, 상세
    ≤300호출, Feature 약 880 생성(대부분 `valid`, 주소 없는 행만 격리).

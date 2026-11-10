@@ -1,7 +1,7 @@
 """축제 원천을 TourAPI로 바꾼다 — 표준데이터 축제·TourAPI 축제 보강을 퇴역하고 TourAPI 축제를 넣는다.
 
-Revision ID: 447_tourapi_festivals_primary
-Revises: 446_mcst_place_attributes
+Revision ID: 448_tourapi_festivals_primary
+Revises: 447_admin_search_trgm_indexes
 
 왜 필요한가. 2026-11-10 소유자 결정: "datagokr 축제데이터는 로드 끄고 다른 소스 쓰자", 이어
 "datagokr 축제 소스는 아예 쓰지마". data.go.kr 전국문화축제표준데이터(``tn_pubr_public_cltur_fstvl_api``)
@@ -59,7 +59,7 @@ schedule·큐 runner spec·handler binding·preview fixture·변환기와, TourA
 퇴역 dataset 둘 밖의 link(역할 무관)가 있으면 멈춘다(2026-11-10 prod 0건 — link는 표준데이터
 ``primary`` 1,296과 TourAPI 보강 ``enrichment`` 212뿐이다). 퇴역 dataset은 다시 적재되지 않는다.
 
-**트랜잭션**: 419와 달리 앞선 revision(prod는 446과 함께 오른다)과 같은 트랜잭션을 거부하지 않는다 —
+**트랜잭션**: 419와 달리 앞선 revision(prod는 446·447과 함께 오른다)과 같은 트랜잭션을 거부하지 않는다 —
 전이는 약 1,300 호출이다. 419는 약 1.4만 호출을 수 분에 돌았으므로 이것은 수십 초 안쪽으로 본다
 (실측 아님 — 배포 로그로 확인한다).
 
@@ -87,8 +87,8 @@ from alembic import op
 
 # ruff: noqa: E501
 
-revision: str = "447_tourapi_festivals_primary"
-down_revision: str | Sequence[str] | None = "446_mcst_place_attributes"
+revision: str = "448_tourapi_festivals_primary"
+down_revision: str | Sequence[str] | None = "447_admin_search_trgm_indexes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -111,12 +111,12 @@ FESTIVAL_OPERATION_KEY: Final[str] = "feature_event_visitkorea_festivals_job"
 
 #: 퇴역 전이의 감사 문맥. ``prepare_feature_state_context``가 받는 키만 쓴다. 값에 콜론을 넣지 않는다.
 RETIRE_REASON_CODE: Final[str] = "festival_source_moved_to_tourapi"
-RETIRE_PRINCIPAL: Final[str] = "system/alembic-447_tourapi_festivals_primary"
+RETIRE_PRINCIPAL: Final[str] = "system/alembic-448_tourapi_festivals_primary"
 RETIRE_CAUSATION_REF: Final[str] = "owner decision 2026-11-10 festival source"
 
 #: 검토 큐를 닫는 사유(``ops.enrichment_review_queue.decision_reason``).
 REVIEW_CLOSE_REASON: Final[str] = "festival_source_moved_to_tourapi"
-REVIEW_CLOSE_ACTOR: Final[str] = "system/alembic-447"
+REVIEW_CLOSE_ACTOR: Final[str] = "system/alembic-448"
 
 PROTOCOL_LOCK_TIMEOUT_MS: Final[int] = 30000
 MEMBER_LOCK_TIMEOUT_MS: Final[int] = 5000
@@ -319,7 +319,8 @@ ALTER TABLE ops.application_schema_operation_receipts
         '442_mois_brand_search_aliases',
         '444_trip_search_aliases',
         '446_mcst_place_attributes',
-        '447_tourapi_festivals_primary'
+        '447_admin_search_trgm_indexes',
+        '448_tourapi_festivals_primary'
     ))
 """
 
@@ -464,12 +465,12 @@ def upgrade() -> None:
     retired_datasets = _count(bind, _COUNT_RETIRED_DATASETS_SQL)
     if retired_datasets != len(RETIRED_DATASETS):
         raise RuntimeError(
-            f"447: 아무것도 바꾸지 않았다 — 퇴역 dataset이 {retired_datasets}개다"
+            f"448: 아무것도 바꾸지 않았다 — 퇴역 dataset이 {retired_datasets}개다"
             f"(기대 {len(RETIRED_DATASETS)}: {RETIRED_DATASETS!r})."
         )
     if _count(bind, _COUNT_FESTIVAL_DATASET_SQL):
         raise RuntimeError(
-            f"447: 아무것도 바꾸지 않았다 — {VISITKOREA_PROVIDER}/{FESTIVAL_DATASET_KEY}가 이미 있다"
+            f"448: 아무것도 바꾸지 않았다 — {VISITKOREA_PROVIDER}/{FESTIVAL_DATASET_KEY}가 이미 있다"
             " — 일부만 적용된 DB다. 사람이 확인한 뒤 다시 돌린다."
         )
 
@@ -493,7 +494,7 @@ def upgrade() -> None:
     if overridden:
         blockers.append(f"target Feature has an active lifecycle override: {overridden!r}")
     if blockers:
-        raise RuntimeError("447: 아무것도 바꾸지 않았다 — " + "; ".join(blockers))
+        raise RuntimeError("448: 아무것도 바꾸지 않았다 — " + "; ".join(blockers))
 
     bind.execute(text(disable_operations))
     _set_local(bind, "statement_timeout", "0")
@@ -515,17 +516,17 @@ def upgrade() -> None:
 
     remaining = [f"{kind}:{name}" for kind, name in bind.execute(text(_REMAINING_SQL)).all()]
     if remaining:
-        raise RuntimeError(f"447: 대상이 남았다: {remaining!r}")
+        raise RuntimeError(f"448: 대상이 남았다: {remaining!r}")
     retired = _count(bind, _COUNT_RETIRED_BY_THIS_REVISION_SQL)
     if retired != expected:
-        raise RuntimeError(f"447: 퇴역 전이 수가 대상 수와 다르다: retired={retired}, expected={expected}")
+        raise RuntimeError(f"448: 퇴역 전이 수가 대상 수와 다르다: retired={retired}, expected={expected}")
     late = _scalars(bind, _IN_FLIGHT_TARGET_JOBS_SQL)
     if late:
-        raise RuntimeError(f"447: 끄는 동안 대상 operation job이 생겼다: {late!r}")
+        raise RuntimeError(f"448: 끄는 동안 대상 operation job이 생겼다: {late!r}")
 
 
 def downgrade() -> None:
     """되돌리지 않는다 — 표준데이터 축제를 되살리는 것은 새 결정이다."""
     raise RuntimeError(
-        "447_tourapi_festivals_primary is forward-only: 축제 원천은 TourAPI다(2026-11-10 소유자 결정)."
+        "448_tourapi_festivals_primary is forward-only: 축제 원천은 TourAPI다(2026-11-10 소유자 결정)."
     )

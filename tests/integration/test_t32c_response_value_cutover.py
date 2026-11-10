@@ -81,7 +81,7 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 8, 5, 12, 0, tzinfo=_KST)
 
-# head 카탈로그의 **활성** dataset이어야 한다 — 표준데이터 축제는 447에서 비활성이다.
+# head 카탈로그의 **활성** dataset이어야 한다 — 표준데이터 축제는 448에서 비활성이다.
 _PROVIDER = "python-visitkorea-api"
 _DATASET = "visitkorea_festivals"
 _ENTITY_TYPE = "festival"

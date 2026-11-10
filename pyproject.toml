@@ -122,7 +122,7 @@ providers = [
   #
   # ── visitkorea TourAPI ─────────────────────────────────────────────────
   # 관광지·문화시설·레포츠 place(#1459)와 축제·행사 event의 1차 source다. 축제는 2026-11-10부터
-  # TourAPI가 유일한 원천이다(표준데이터 축제·이름 매칭 enrichment는 퇴역, migration 447).
+  # TourAPI가 유일한 원천이다(표준데이터 축제·이름 매칭 enrichment는 퇴역, migration 448).
   "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@151ef90f07842863b986048a98a66a75d8e9d63d",
   #
   # ── Sprint 3 — knps / krforest_trails / krheritage ──────────────────────

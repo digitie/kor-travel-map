@@ -21,7 +21,7 @@
 | `datagokr_museums` | `15017323` | `place` | **`01040000`** `TOURISM_CULTURAL_FACILITY` (fclty_type으로 박물관 `01040100`/미술관 `01040200` 정밀화) | 연 1회 |
 | `datagokr_parking_lots` | `15012896` | `place` | **`06010000`** `TRANSPORT_PARKING` | 반기 1회 |
 | `datagokr_tourist_attractions` | `15021141` | `place` (경계 source 확인 후 `area` 후보) | **`01000000`** `TOURISM` (대분류, 세부는 trrsrt_se로 분기) | 연 1회 |
-| ~~`datagokr_cultural_festivals`~~ | `15013104` | ~~`event`~~ | **퇴역(2026-11-10, migration 447)** — 축제 원천은 TourAPI다(`docs/etl/event-feature-etl.md` §0). dataset 비활성·operation 꺼짐, 기존 Feature는 퇴역 | — |
+| ~~`datagokr_cultural_festivals`~~ | `15013104` | ~~`event`~~ | **퇴역(2026-11-10, migration 448)** — 축제 원천은 TourAPI다(`docs/etl/event-feature-etl.md` §0). dataset 비활성·operation 꺼짐, 기존 Feature는 퇴역 | — |
 | `datagokr_traditional_markets` | `15012894` | `place` | **`05070000`** `CONVENIENCE_TRADITIONAL_MARKET` (§7.6) | 월 1회(원천 연간 갱신, 기관 등록분 매월 초 병합) |
 
 자세한 Tier 1~4 트리는 `docs/architecture/category.md` §4.
@@ -180,7 +180,7 @@ def _classify_route_type(road_name: str) -> str:
 
 2026-11-10 소유자 결정("datagokr 축제 소스는 아예 쓰지마")으로 쓰지 않는다. 키가 403
 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`(마지막 성공 2026-10-31)였다. 변환기·fetcher·asset·job·
-schedule을 지웠고 migration 447이 operation을 끄고 dataset을 비활성으로 내리며 기존 Feature를
+schedule을 지웠고 migration 448이 operation을 끄고 dataset을 비활성으로 내리며 기존 Feature를
 퇴역한다. 축제 정본은 `docs/etl/event-feature-etl.md`(TourAPI `searchFestival2`).
 
 ### 7.6 traditional_markets (place, #1459)

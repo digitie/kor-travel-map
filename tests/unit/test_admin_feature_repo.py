@@ -52,6 +52,12 @@ class _Result:
     def scalar_one(self) -> Any:
         return next(iter(self._rows[0].values()))
 
+    def scalars(self) -> _Result:
+        return self
+
+    def all(self) -> list[Any]:
+        return [next(iter(row.values())) for row in self._rows]
+
 
 class _Session:
     def __init__(self, results: list[_Result]) -> None:
@@ -700,7 +706,14 @@ async def test_manual_create_rejects_mismatched_override_receipt(
 
 @pytest.mark.asyncio
 async def test_list_admin_features_builds_params_and_next_cursor() -> None:
-    session = _Session([_Result([_feature_row("feature-1"), _feature_row("feature-2")])])
+    session = _Session(
+        [
+            # 후보 SQL: 같은 feature가 두 갈래에서 나와도 한 번만 넘긴다.
+            _Result([{"feature_id": "feature-2"}, {"feature_id": "feature-1"},
+                     {"feature_id": "feature-1"}]),
+            _Result([_feature_row("feature-1"), _feature_row("feature-2")]),
+        ]
+    )
 
     page = await repo.list_admin_features(
         session,  # type: ignore[arg-type]
@@ -714,13 +727,82 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
 
     assert len(page.items) == 1
     assert page.next_cursor is not None
-    params = session.calls[0]["params"]
+    probe, main = session.calls
+    assert probe["params"] == {"q_like": "%광화문%", "q_candidate_limit": 8001}
+    # 기본 범위(all)의 후보는 원천 식별자 갈래까지 보고, 원천 JSON 본문은 보지 않는다(#1475).
+    assert "qse.source_entity_id ILIKE" in probe["statement"]
+    assert "qhead.current_source_record_key ILIKE" in probe["statement"]
+    assert "raw_data" not in probe["statement"]
+    params = main["params"]
     assert params["q_like"] == "%광화문%"
     assert params["q_exact"] is None
+    assert params["q_candidate_ids"] == ["feature-1", "feature-2"]
     assert params["provider_dataset_id"] == 42
     assert params["has_issue"] is True
-    # 일반 검색어는 q-필터 상관 서브쿼리(source_records AS qsr, ILIKE 경로)를 그대로 탄다.
-    assert "AS qsr" in session.calls[0]["statement"]
+    assert "ANY(CAST(CAST(:q_candidate_ids AS text[]) AS uuid[]))" in main["statement"]
+    # LIMIT 함정 방지: 후보 경로의 base는 id 배열에서 시작하도록 물질화한다.
+    assert "WITH base AS MATERIALIZED (" in main["statement"]
+    assert "raw_data::text" not in main["statement"]
+
+
+@pytest.mark.asyncio
+async def test_list_admin_features_falls_back_to_scan_over_candidate_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(repo, "_ADMIN_FEATURES_Q_CANDIDATE_CAP", 1)
+    session = _Session(
+        [
+            _Result([{"feature_id": "feature-1"}, {"feature_id": "feature-2"}]),
+            _Result([_feature_row("feature-1")]),
+        ]
+    )
+
+    await repo.list_admin_features(
+        session,  # type: ignore[arg-type]
+        q="광화문",
+        search_scope="feature",
+    )
+
+    probe, main = session.calls
+    assert probe["params"]["q_candidate_limit"] == 5
+    # feature 범위 후보는 원천 갈래를 보지 않는다.
+    assert "provider_sync" not in probe["statement"]
+    assert "q_candidate_ids" not in main["params"]
+    assert ":q_candidate_ids" not in main["statement"]
+    assert "f.name ILIKE CAST(:q_like AS text)" in main["statement"]
+    assert "AS qsl" not in main["statement"]
+
+
+@pytest.mark.asyncio
+async def test_list_admin_features_truncated_probe_is_not_a_candidate_set(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """probe가 한도에 닿으면 중복을 걸러 상한 안이어도 잘린 집합이라 훑는다."""
+    monkeypatch.setattr(repo, "_ADMIN_FEATURES_Q_CANDIDATE_CAP", 1)
+    session = _Session(
+        [
+            _Result([{"feature_id": "feature-1"}] * 5),
+            _Result([_feature_row("feature-1")]),
+        ]
+    )
+
+    await repo.list_admin_features(session, q="광화문")  # type: ignore[arg-type]
+
+    probe, main = session.calls
+    assert probe["params"]["q_candidate_limit"] == 5
+    assert "q_candidate_ids" not in main["params"]
+    assert "MATERIALIZED" not in main["statement"]
+
+
+@pytest.mark.asyncio
+async def test_list_admin_features_without_query_has_no_text_clause() -> None:
+    session = _Session([_Result([_feature_row("feature-1")])])
+
+    await repo.list_admin_features(session)  # type: ignore[arg-type]
+
+    (call,) = session.calls
+    assert call["params"]["q_like"] is None
+    assert ":q_like" not in call["statement"]
 
 
 def test_feature_id_exact_query_detects_full_feature_ids() -> None:
