@@ -38,7 +38,6 @@ from kortravelmap.providers.knps import (
     KNPS_POINT_DATASET_KEYS,
 )
 from kortravelmap.providers.standard_data import (
-    DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
     DATASET_KEY_PARKING_LOTS,
     DATASET_KEY_SPECIAL_STREETS,
@@ -46,7 +45,10 @@ from kortravelmap.providers.standard_data import (
     DATASET_KEY_TRADITIONAL_MARKETS,
     STANDARD_DATA_PROVIDER_NAME,
 )
-from kortravelmap.providers.visitkorea import VISITKOREA_PROVIDER_NAME
+from kortravelmap.providers.visitkorea import (
+    DATASET_KEY_VISITKOREA_FESTIVALS,
+    VISITKOREA_PROVIDER_NAME,
+)
 from kortravelmap.providers.visitkorea_attractions import DATASET_KEY_VISITKOREA_ATTRACTIONS
 from kortravelmap.settings import KorTravelMapSettings
 
@@ -60,7 +62,6 @@ from .feature_operation_tracking import (
 from .mois_chunked_load import MoisLoadPlan, resolve_mois_load_plan
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
-    fetch_datagokr_cultural_festivals,
     fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
@@ -85,7 +86,7 @@ from .provider_fetchers import (
     fetch_transport_fuel_stations,
     fetch_transport_rail_stations,
     fetch_transport_rest_areas,
-    fetch_visitkorea_festival_events,
+    fetch_visitkorea_festivals,
     fetch_visitkorea_tourist_attractions,
 )
 from .source_replay import (
@@ -156,13 +157,6 @@ class _ProviderRecordIterable:
 
 
 PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
-    ProviderRecordResourceSpec(
-        resource_key="datagokr_cultural_festivals",
-        provider_package="python-datagokr-api",
-        dataset_key="datagokr_cultural_festivals",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-    ),
     ProviderRecordResourceSpec(
         resource_key="transport_fuel_stations",
         provider_package="kor-travel-transport",
@@ -338,12 +332,12 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         note="khoa 해수욕장정보는 시도별 페이지네이션으로 전국을 순회한다.",
     ),
     ProviderRecordResourceSpec(
-        resource_key="visitkorea_festival_events",
+        resource_key="visitkorea_festivals",
         provider_package="python-visitkorea-api",
-        dataset_key="visitkorea_festival_events",
+        dataset_key="visitkorea_festivals",
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note="visitkorea는 datagokr 축제(1차) 적재 후 enrichment(2차)로 매칭/적재된다.",
+        note="TourAPI 축제·공연·행사(15) 1차 event — 유일한 축제 원천, 상세는 예산 안에서 받는다.",
     ),
     ProviderRecordResourceSpec(
         resource_key="visitkorea_tourist_attractions",
@@ -600,7 +594,6 @@ def datagokr_file_data_dataset_key_resource(
 
 
 REPLAY_FROM_RAW: dict[str, Callable[[dict[str, Any]], Any]] = {
-    "datagokr_cultural_festivals": datagokr_model_from_raw("PublicCulturalFestival"),
     "standard_museums": datagokr_model_from_raw("PublicMuseumArtGallery"),
     "standard_tourist_attractions": datagokr_model_from_raw("PublicTouristAttraction"),
     "standard_parking_lots": datagokr_model_from_raw("PublicParkingLot"),
@@ -608,6 +601,7 @@ REPLAY_FROM_RAW: dict[str, Callable[[dict[str, Any]], Any]] = {
     "standard_traditional_markets": datagokr_model_from_raw("PublicTraditionalMarket"),
     "datagokr_file_data_records": raw_mapping_from_raw,
     "visitkorea_tourist_attractions": visitkorea_tour_item_from_raw,
+    "visitkorea_festivals": visitkorea_tour_item_from_raw,
 }
 """``source_mode=replay``를 받는 records resource → 저장된 ``raw_data``를 fetch와 같은 record로
 되살리는 함수(ADR-109 결정 7, T-GR-08). core ``REPLAY_RECORDS_RESOURCES``의 resource 집합과 같다
@@ -625,23 +619,6 @@ live fetcher가 연결된 provider는 아래에서 guard를 live resource로 교
 나머지는 비실행 guard로 남는다(later PR에서 점진 연결).
 """
 
-_DATAGOKR_CULTURAL_FESTIVALS_SPEC: ProviderRecordResourceSpec = next(
-    spec
-    for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "datagokr_cultural_festivals"
-)
-"""datagokr 축제 spec 참조 (live resource override용)."""
-
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"] = (
-    build_provider_record_live_resource(
-        _DATAGOKR_CULTURAL_FESTIVALS_SPEC,
-        fetch_datagokr_cultural_festivals,
-        replay=ReplaySource(
-            STANDARD_DATA_PROVIDER_NAME,
-            DATASET_KEY_CULTURAL_FESTIVALS,
-        ),
-    )
-)
 
 _TRANSPORT_FUEL_STATIONS_SPEC: ProviderRecordResourceSpec = next(
     spec
@@ -1053,15 +1030,16 @@ PROVIDER_RECORD_RESOURCE_DEFINITIONS["khoa_beaches"] = (
     )
 )
 
-_VISITKOREA_FESTIVAL_EVENTS_SPEC: ProviderRecordResourceSpec = next(
+_VISITKOREA_FESTIVALS_SPEC: ProviderRecordResourceSpec = next(
     spec
     for spec in PROVIDER_RECORD_RESOURCE_SPECS
-    if spec.resource_key == "visitkorea_festival_events"
+    if spec.resource_key == "visitkorea_festivals"
 )
-PROVIDER_RECORD_RESOURCE_DEFINITIONS["visitkorea_festival_events"] = (
+PROVIDER_RECORD_RESOURCE_DEFINITIONS["visitkorea_festivals"] = (
     build_provider_record_live_resource(
-        _VISITKOREA_FESTIVAL_EVENTS_SPEC,
-        fetch_visitkorea_festival_events,
+        _VISITKOREA_FESTIVALS_SPEC,
+        fetch_visitkorea_festivals,
+        replay=ReplaySource(VISITKOREA_PROVIDER_NAME, DATASET_KEY_VISITKOREA_FESTIVALS),
     )
 )
 

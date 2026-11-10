@@ -121,9 +121,9 @@ providers = [
   # python-opinet-api·python-krex-api 핀은 제거했다(ADR-106) — 주유소·유가·휴게소·
   # 휴게소 유가·고속도로 돌발은 kor-travel-transport export에서 받는다.
   #
-  # ── Sprint 2 §2.1 (enrichment 2차, ADR-042) ───────────────────────────
-  # visitkorea TourAPI는 datagokr 1차 source의 enrichment (image/description/
-  # contentId 매핑) 책임 — Sprint 2 끝물 PR.
+  # ── visitkorea TourAPI ─────────────────────────────────────────────────
+  # 관광지·문화시설·레포츠 place(#1459)와 축제·행사 event의 1차 source다. 축제는 2026-11-10부터
+  # TourAPI가 유일한 원천이다(표준데이터 축제·이름 매칭 enrichment는 퇴역, migration 449).
   "python-visitkorea-api @ git+https://github.com/digitie/python-visitkorea-api.git@151ef90f07842863b986048a98a66a75d8e9d63d",
   #
   # ── Sprint 3 — knps / krforest_trails / krheritage ──────────────────────

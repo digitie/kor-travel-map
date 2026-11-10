@@ -61,7 +61,6 @@ from kortravelmap.providers.opinet import (
     stations_to_bundles,
 )
 from kortravelmap.providers.standard_data import (
-    cultural_festivals_to_bundles,
     museums_to_bundles,
     parking_lots_to_bundles,
     tourist_attractions_to_bundles,
@@ -71,6 +70,7 @@ from kortravelmap.providers.transport_reference_places import (
     ferry_ports_to_bundles,
     rail_stations_to_bundles,
 )
+from kortravelmap.providers.visitkorea import tourapi_festivals_to_bundles
 from kortravelmap.providers.visitkorea_attractions import tourapi_attractions_to_bundles
 
 __all__ = [
@@ -89,83 +89,70 @@ def _now() -> datetime:
     return datetime(2026, 5, 28, 4, 30, tzinfo=KST)
 
 
-# ── datagokr 표준데이터 축제 fixture ────────────────────────────────────
+# ── TourAPI 축제 fixture (유일한 축제 원천, 2026-11-10) ─────────────────
 
 
 @dataclass(frozen=True)
-class _CulturalFestival:
-    """`kortravelmap.providers.standard_data.CulturalFestivalItem` Protocol 준수.
+class _TourApiFestival:
+    """`VisitKoreaFestivalItem` Protocol 준수 (provider `TourItem`)."""
 
-    provider 실모델 ``PublicCulturalFestival`` 필드명 (ADR-044 재정렬, #374).
-    """
+    content_id: str | None
+    content_type_id: str | None
+    title: str | None
+    addr1: str | None
+    addr2: str | None
+    zipcode: str | None
+    tel: str | None
+    first_image: str | None
+    first_image2: str | None
+    map_x: float | None
+    map_y: float | None
+    lcls_systm1: str | None
+    lcls_systm2: str | None
+    lcls_systm3: str | None
+    l_dong_regn_cd: str | None
+    l_dong_signgu_cd: str | None
+    created_time: datetime | None
+    modified_time: datetime | None
+    copyright_division_code: str | None
+    event_start_date: str | None
+    event_end_date: str | None
+    overview: str | None
+    homepage: str | None
 
-    fstvl_nm: str | None
-    opar: str | None
-    fstvl_start_date: date | None
-    fstvl_end_date: date | None
-    fstvl_co: str | None
-    mnnst_nm: str | None
-    auspc_instt_nm: str | None
-    suprt_instt_nm: str | None
-    phone_number: str | None
-    homepage_url: str | None
-    relate_info: str | None
-    rdnmadr: str | None
-    lnmadr: str | None
-    latitude: float | None
-    longitude: float | None
-    reference_date: date | None
-    instt_code: str | None
-    instt_nm: str | None
 
-
-def _datagokr_festival_fixture() -> Sequence[_CulturalFestival]:
+def _tourapi_festival_fixture() -> Sequence[_TourApiFestival]:
     return [
-        _CulturalFestival(
-            fstvl_nm="서울 봄꽃 축제",
-            opar="여의도공원",
-            fstvl_start_date=date(2026, 4, 5),
-            fstvl_end_date=date(2026, 4, 12),
-            fstvl_co="봄꽃 만개 축제 (fixture demo).",
-            mnnst_nm="영등포구청",
-            auspc_instt_nm=None,
-            suprt_instt_nm=None,
-            phone_number="02-2670-3114",
-            homepage_url=None,
-            relate_info=None,
-            rdnmadr="서울특별시 영등포구 여의공원로 120",
-            lnmadr="서울특별시 영등포구 여의도동 8",
-            latitude=37.5263,
-            longitude=126.9239,
-            reference_date=date(2026, 3, 1),
-            instt_code=None,
-            instt_nm="서울특별시 영등포구",
-        ),
-        _CulturalFestival(
-            fstvl_nm="제주 유채꽃 축제",
-            opar="가시리 마을",
-            fstvl_start_date=date(2026, 4, 1),
-            fstvl_end_date=date(2026, 4, 30),
-            fstvl_co="제주 유채꽃 축제 (fixture demo).",
-            mnnst_nm="서귀포시청",
-            auspc_instt_nm=None,
-            suprt_instt_nm=None,
-            phone_number="064-740-6000",
-            homepage_url=None,
-            relate_info=None,
-            rdnmadr="제주특별자치도 서귀포시 표선면 가시로 565번길 41",
-            lnmadr="제주특별자치도 서귀포시 표선면 가시리",
-            latitude=33.3893,
-            longitude=126.7831,
-            reference_date=date(2026, 3, 1),
-            instt_code=None,
-            instt_nm="제주특별자치도 서귀포시",
+        _TourApiFestival(
+            content_id="588175",
+            content_type_id="15",
+            title="포항국제불빛축제",
+            addr1="경상북도 포항시 북구 두호동 685-1",
+            addr2="영일대해수욕장 일원",
+            zipcode=None,
+            tel="054-270-5114",
+            first_image=None,
+            first_image2=None,
+            map_x=129.3655,
+            map_y=36.0567,
+            lcls_systm1="EV",
+            lcls_systm2="EV01",
+            lcls_systm3="EV010200",
+            l_dong_regn_cd="47",
+            l_dong_signgu_cd="113",
+            created_time=None,
+            modified_time=datetime(2026, 10, 30, 11, 2, tzinfo=KST),
+            copyright_division_code="Type3",
+            event_start_date="20261119",
+            event_end_date="20261121",
+            overview="포항의 밤바다를 수놓는 불빛축제 (fixture demo).",
+            homepage=None,
         ),
     ]
 
 
-async def _convert_datagokr_festival(items: Sequence[Any]) -> list[Any]:
-    bundles = await cultural_festivals_to_bundles(items, fetched_at=_now())
+async def _convert_tourapi_festivals(items: Sequence[Any]) -> list[Any]:
+    bundles = await tourapi_festivals_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 
@@ -927,17 +914,6 @@ class EtlFixtureEntry:
 
 FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
     EtlFixtureEntry(
-        provider="data.go.kr-standard",
-        dataset="datagokr_cultural_festivals",
-        variant="FeatureBundle",
-        description=(
-            "전국문화축제표준데이터 → event Feature (1차 source, ADR-042). "
-            "PR#34."
-        ),
-        build_fixture=_datagokr_festival_fixture,
-        convert=_convert_datagokr_festival,
-    ),
-    EtlFixtureEntry(
         provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
         dataset=DATASET_KEY_FUEL_STATIONS,
         variant="FeatureBundle",
@@ -1048,6 +1024,14 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         description="TourAPI 관광지·문화시설·레포츠(12·14·28) → place Feature (#1459).",
         build_fixture=_tourapi_attraction_fixture,
         convert=_convert_tourapi_attractions,
+    ),
+    EtlFixtureEntry(
+        provider="python-visitkorea-api",
+        dataset="visitkorea_festivals",
+        variant="FeatureBundle",
+        description="TourAPI 축제·공연·행사(15) → event Feature (유일한 축제 원천, 2026-11-10).",
+        build_fixture=_tourapi_festival_fixture,
+        convert=_convert_tourapi_festivals,
     ),
     EtlFixtureEntry(
         provider="python-khoa-api",

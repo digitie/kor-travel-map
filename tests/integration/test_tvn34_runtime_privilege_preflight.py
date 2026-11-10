@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 from datetime import UTC, date, datetime
-from types import SimpleNamespace
 from uuid import uuid4
 
 import pytest
@@ -12,13 +11,14 @@ from sqlalchemy import text
 from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
+from kortravelmap.dto import FeatureBundle
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.db import (
     RuntimeDbPrivilegeBoundaryError,
     assert_runtime_db_privilege_boundary,
     make_async_engine,
 )
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 pytestmark = pytest.mark.integration
 
@@ -45,32 +45,24 @@ async def _require_tvn34_provenance_bridge(engine: AsyncEngine) -> None:
             )
 
 
-async def _runtime_provider_bundle(suffix: str):
+async def _runtime_provider_bundle(suffix: str) -> FeatureBundle:
     """실 provider 변환 결과를 runtime ``load_bundle`` 검증에 사용한다."""
 
-    item = SimpleNamespace(
-        fstvl_nm="runtime bundle 축제",
-        opar="runtime fixture venue",
-        fstvl_start_date=date(2026, 8, 1),
-        fstvl_end_date=date(2026, 8, 2),
-        fstvl_co="runtime LOGIN provider load bundle proof",
-        mnnst_nm="runtime fixture organizer",
-        auspc_instt_nm=None,
-        suprt_instt_nm=None,
-        phone_number="02-0000-0000",
-        homepage_url=None,
-        relate_info=None,
-        rdnmadr=f"서울특별시 runtime구 runtime로 {suffix}",
-        lnmadr="서울특별시 runtime동",
-        latitude=37.5,
-        longitude=127.0,
-        reference_date=date(2026, 8, 1),
-        instt_code=None,
-        instt_nm="runtime fixture authority",
+    item = festival_item(
+        f"RUNTIME-{suffix}",
+        "runtime bundle 축제",
+        starts_on=date(2026, 8, 1),
+        ends_on=date(2026, 8, 2),
+        addr1=f"서울특별시 runtime구 runtime로 {suffix}",
+        addr2="runtime fixture venue",
+        lon=127.0,
+        lat=37.5,
+        tel="02-0000-0000",
+        overview="runtime LOGIN provider load bundle proof",
     )
     return (
-        await cultural_festivals_to_bundles(
-            [item],  # type: ignore[list-item]
+        await festival_bundles(
+            [item],
             fetched_at=datetime(2026, 8, 9, tzinfo=UTC),
         )
     )[0]

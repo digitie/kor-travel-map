@@ -1,4 +1,4 @@
-"""``test_enrichment_review_repo`` — ops.enrichment_review_queue (ADR-042, T-RV-52c).
+"""``test_enrichment_review_repo`` — ops.enrichment_review_queue (T-RV-52c).
 
 ``infra/enrichment_review_repo.py``의 enqueue / pending / decide를 실 PostGIS
 (migrated_session, alembic head)에서 검증한다:
@@ -29,6 +29,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession as _AsyncSession
 
 from kortravelmap.core.ids import make_source_record_key
+from kortravelmap.core.scoring import name_similarity
 from kortravelmap.infra.admin_feature_repo import (
     get_enrichment_review_detail,
     list_enrichment_reviews,
@@ -43,14 +44,9 @@ from kortravelmap.infra.enrichment_review_repo import (
 )
 from kortravelmap.infra.feature_repo import upsert_source_record
 from kortravelmap.infra.models import EnrichmentReviewQueueRow, FeatureRow
-from kortravelmap.providers.visitkorea import (
-    FestivalCandidate,
-    FestivalReviewCandidate,
-    ScoringFestivalMatcher,
-    festival_to_review_candidates,
-)
 from tests.integration._db_cleanup import truncate_committed_test_rows
 from tests.integration._subtype_seed import seed_feature_subtype
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -71,7 +67,7 @@ _EVT_GHOST = "00000000-0000-7000-8000-0000000e00f1"
 
 
 def _festival_feature(feature_id: str = _TARGET_ID, name: str = "서울 봄꽃 축제") -> FeatureRow:
-    """datagokr 1차 축제 event feature (enrichment FK 대상)."""
+    """1차 축제 event feature (enrichment FK 대상)."""
     return FeatureRow(
         feature_id=feature_id,
         kind="event",
@@ -103,68 +99,46 @@ async def _add_festival(
     )
 
 
-class _Item:
-    """``VisitKoreaFestivalItem`` Protocol 만족 최소 객체."""
-
-    def __init__(
-        self,
-        content_id: str,
-        title: str,
-        *,
-        map_x: float = 126.9245,
-        map_y: float = 37.526,
-    ) -> None:
-        self.content_id = content_id
-        self.title = title
-        self.overview = None
-        self.first_image = None
-        self.first_image2 = None
-        self.addr1 = "서울특별시 영등포구"
-        self.area_code = "1"
-        self.sigungu_code = "19"
-        self.map_x = map_x
-        self.map_y = map_y
-        self.event_start_date = "20260405"
-        self.event_end_date = "20260412"
-        self.tel = None
-        self.homepage = None
-        self.modified_time = "20260301120000"
-
-
 def _now() -> datetime:
     return datetime(2026, 5, 28, 10, 0, tzinfo=KST)
 
 
-def _review_candidate(
+async def _review_candidate(
     title: str,
     *,
     map_x: float = 126.9245,
     map_y: float = 37.526,
     target: str = _TARGET_ID,
     target_name: str = "서울 봄꽃 축제",
-) -> FestivalReviewCandidate:
-    """review-band 후보 1건 생성(점수 밴드를 넓혀 강제로 review로 보냄)."""
-    matcher = ScoringFestivalMatcher(
-        [FestivalCandidate(feature_id=target, name=target_name)]
-    )
-    plan = festival_to_review_candidates(
-        [_Item("c-" + title, title, map_x=map_x, map_y=map_y)],
-        matcher=matcher,
+) -> EnrichmentReviewInput:
+    """검토 큐 후보 1건 — TourAPI 축제 행의 source record + 이름 점수.
+
+    큐는 provider 무관 generic이다. 축제 이름 매처(표준데이터 축제 보강)는 2026-11-10 축제 원천
+    전환으로 사라졌으므로 후보를 직접 만든다. source record는 head에서 **활성**인 TourAPI 축제
+    dataset(``visitkorea_festivals``)의 것이어야 한다 — 큐 쓰기 가드가 활성 dataset을 요구한다.
+    좌표·기간은 raw_data(``map_x``/``map_y``/``event_start_date``)로 admin 목록에 드러난다.
+    """
+    [bundle] = await festival_bundles(
+        [
+            festival_item(
+                "c-" + title,
+                title,
+                addr1="서울특별시 영등포구",
+                lon=map_x,
+                lat=map_y,
+                overview=None,
+            )
+        ],
         fetched_at=_now(),
-        accept_threshold=0.999,
-        review_floor=0.3,
     )
-    assert len(plan.review) == 1
-    return plan.review[0]
-
-
-def _as_input(candidate: FestivalReviewCandidate) -> EnrichmentReviewInput:
+    score = name_similarity(title, target_name)
+    assert 0.3 <= score < 0.999
     return EnrichmentReviewInput(
-        target_feature_id=candidate.target_feature_id,
-        target_name=candidate.target_name,
-        source_name=candidate.source_name,
-        name_score=candidate.name_score,
-        source_record=candidate.enrichment.source_record,
+        target_feature_id=target,
+        target_name=target_name,
+        source_name=bundle.feature.name,
+        name_score=score,
+        source_record=bundle.source_record,
     )
 
 
@@ -173,7 +147,7 @@ async def test_enqueue_inserts_pending(migrated_session: AsyncSession) -> None:
     await migrated_session.flush()
 
     result = await enqueue_review_candidates(
-        migrated_session, [_as_input(_review_candidate("서울 봄꽃"))]
+        migrated_session, [await _review_candidate("서울 봄꽃")]
     )
     assert result == EnrichmentQueueResult(
         candidates_total=1, inserted=1, updated=0, skipped=0
@@ -206,7 +180,7 @@ async def test_reenqueue_updates_then_preserves_reviewed(
 ) -> None:
     await _add_festival(migrated_session)
     await migrated_session.flush()
-    candidate = _as_input(_review_candidate("서울 봄꽃"))
+    candidate = await _review_candidate("서울 봄꽃")
 
     first = await enqueue_review_candidate(migrated_session, candidate)
     second = await enqueue_review_candidate(migrated_session, candidate)
@@ -232,11 +206,11 @@ async def test_pending_sorted_desc_and_float(
     await _add_festival(migrated_session, _EVT_SPRING, "서울 봄꽃 축제")
     await migrated_session.flush()
 
-    high = _as_input(
-        _review_candidate("서울 봄꽃 축", target=_EVT_SPRING, target_name="서울 봄꽃 축제")
+    high = (
+        await _review_candidate("서울 봄꽃 축", target=_EVT_SPRING, target_name="서울 봄꽃 축제")
     )
-    low = _as_input(
-        _review_candidate("가나", target=_EVT_GANADA, target_name="가나다 축제")
+    low = (
+        await _review_candidate("가나", target=_EVT_GANADA, target_name="가나다 축제")
     )
     await enqueue_review_candidates(migrated_session, [low, high])
 
@@ -253,7 +227,7 @@ async def test_accept_applies_enrichment_link(
     await _add_festival(migrated_session)
     await migrated_session.flush()
     await enqueue_review_candidate(
-        migrated_session, _as_input(_review_candidate("서울 봄꽃"))
+        migrated_session, await _review_candidate("서울 봄꽃")
     )
     review_id = (
         await migrated_session.execute(
@@ -299,7 +273,7 @@ async def test_decide_idempotent_after_review(
     await _add_festival(migrated_session)
     await migrated_session.flush()
     await enqueue_review_candidate(
-        migrated_session, _as_input(_review_candidate("서울 봄꽃"))
+        migrated_session, await _review_candidate("서울 봄꽃")
     )
     review_id = (
         await migrated_session.execute(
@@ -333,11 +307,11 @@ async def test_list_enrichment_reviews_admin_query(
     await enqueue_review_candidates(
         migrated_session,
         [
-            _as_input(
-                _review_candidate("가나", target=_EVT_GANADA, target_name="가나다 축제")
+            (
+                await _review_candidate("가나", target=_EVT_GANADA, target_name="가나다 축제")
             ),
-            _as_input(
-                _review_candidate(
+            (
+                await _review_candidate(
                     "서울 봄꽃 축", target=_EVT_SPRING, target_name="서울 봄꽃 축제"
                 )
             ),
@@ -405,8 +379,8 @@ async def test_list_enrichment_reviews_far_distance_does_not_underflow(
     await enqueue_review_candidates(
         migrated_session,
         [
-            _as_input(
-                _review_candidate(
+            (
+                await _review_candidate(
                     "서울 봄꽃 축",
                     map_x=0.0,
                     map_y=0.0,
@@ -435,7 +409,7 @@ async def test_list_enrichment_reviews_far_distance_does_not_underflow(
 async def test_fk_requires_existing_target_feature(
     migrated_session: AsyncSession,
 ) -> None:
-    candidate = _as_input(_review_candidate("서울 봄꽃", target=_EVT_GHOST))
+    candidate = await _review_candidate("서울 봄꽃", target=_EVT_GHOST)
     with pytest.raises(IntegrityError):  # noqa: PT012 — savepoint 격리 필요
         async with migrated_session.begin_nested():
             await enqueue_review_candidate(migrated_session, candidate)
@@ -463,7 +437,7 @@ async def test_concurrent_decide_no_accepted_link_leak(
         async with _AsyncSession(migrated_engine) as session, session.begin():
             await _add_festival(session)
             await enqueue_review_candidate(
-                session, _as_input(_review_candidate("서울 봄꽃"))
+                session, await _review_candidate("서울 봄꽃")
             )
         async with _AsyncSession(migrated_engine) as session:
             review_id = (
@@ -523,7 +497,7 @@ async def _enrichment_queue_row(
     적재해야 한다. 후보 생성기는 이름 점수 밴드를 타므로 매칭되는 제목으로 template을
     만든 뒤 entity id만 갈아끼운다(점수는 인자로 따로 준다).
     """
-    template = _as_input(_review_candidate(source_name)).source_record
+    template = (await _review_candidate(source_name)).source_record
     record = template.model_copy(
         update={
             "source_entity_id": source_entity_id,

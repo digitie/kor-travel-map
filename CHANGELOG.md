@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-11-10 — 축제 원천을 TourAPI로 바꾼다
+
+- 축제·공연·행사는 한국관광공사 TourAPI(`searchFestival2`)가 유일한 원천이다. 매일 적재하며 새 dataset `visitkorea_festivals`(event)가 Feature를 직접 만든다.
+- data.go.kr 전국문화축제표준데이터 적재와, TourAPI 축제를 그 축제에 이름으로 잇던 보강을 없앴다. migration 449가 두 dataset의 operation을 끄고 비활성으로 내리며 기존 표준데이터 축제 Feature를 퇴역시킨다.
+- 공개 축제 API(`/v1/public/festivals/*`) 계약은 그대로다. 표준데이터에만 있던 응답 필드(주최·후원 기관, 데이터기준일자 등)는 null이 된다.
+
 ## 2026-11-10 — 주차장 공개 파일 원천
 
 - 전국주차장정보표준데이터를 서비스키 없이 포털 공개 파일로 받는다(운영 키는 Open API에서 403이다). 주차장 번호를 그대로 자연키로 쓰므로 기존 Feature는 바뀌지 않는다. 선언 건수보다 짧거나 빈 파일은 실패한다. 스키마·API 변경 없음.

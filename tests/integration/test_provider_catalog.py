@@ -938,6 +938,75 @@ async def test_head_catalogs_the_transport_reference_place_datasets(
         assert job in bound, job
 
 
+#: 449(2026-11-10 축제 원천 TourAPI 전환)이 퇴역시킨 축제 dataset — 표준데이터 축제와, TourAPI
+#: 축제를 그것에 이름으로 잇던 보강 dataset.
+_FESTIVAL_RETIRED_DATASETS = frozenset(
+    {
+        ("data.go.kr-standard", "datagokr_cultural_festivals"),
+        ("python-visitkorea-api", "visitkorea_festival_events"),
+    }
+)
+_FESTIVAL_JOB = "feature_event_visitkorea_festivals_job"
+
+
+async def test_head_retires_the_standard_data_festival_datasets(
+    seed_session: AsyncSession,
+) -> None:
+    """449: 옛 축제 dataset 둘은 operation이 **종류 불문** 꺼지고 비활성이다(402·404와 같은 규율).
+
+    하한은 본 것에 건다 — 두 dataset이 시드에 보이고 refresh·preview operation 행이 실제로 있어야
+    이 검사가 무언가를 잰다(행은 이력 FK라 지우지 않는다).
+    """
+
+    retired = [
+        entry
+        for entry in await list_provider_dataset_catalog(seed_session)
+        if (entry.provider, entry.dataset_key) in _FESTIVAL_RETIRED_DATASETS
+    ]
+    assert {(e.provider, e.dataset_key) for e in retired} == set(_FESTIVAL_RETIRED_DATASETS)
+    kinds_seen = {op.operation_kind for entry in retired for op in entry.operations}
+    assert {"refresh", "preview"} <= kinds_seen, kinds_seen
+    enabled = sorted(
+        f"{entry.provider}/{entry.dataset_key}:{operation.operation_key}:{operation.operation_kind}"
+        for entry in retired
+        for operation in entry.operations
+        if operation.is_enabled
+    )
+    assert enabled == [], f"퇴역한 축제 dataset의 operation이 켜져 있다: {enabled}"
+    assert not [e for e in retired if e.is_active]
+    assert not any(entry.is_refreshable for entry in retired)
+    bindings = await list_active_refresh_operation_bindings(seed_session)
+    assert not [
+        b for b in bindings if (b.provider, b.dataset_key) in _FESTIVAL_RETIRED_DATASETS
+    ]
+
+
+async def test_head_catalogs_the_tourapi_festival_dataset(
+    seed_session: AsyncSession,
+) -> None:
+    """449: TourAPI 축제가 유일한 축제 원천이다 — 활성 event dataset, refresh·preview가 켜져 있고,
+    refresh는 dataset_wide scope로 실행 가능하며 코드의 handler binding과 같은 key다(ADR-088)."""
+
+    entry = next(
+        entry
+        for entry in await list_provider_dataset_catalog(seed_session)
+        if (entry.provider, entry.dataset_key)
+        == ("python-visitkorea-api", "visitkorea_festivals")
+    )
+    assert entry.is_active
+    assert entry.source_kind == "openapi"
+    assert FeatureKind.EVENT.value in entry.produces
+    enabled = {(op.operation_key, op.operation_kind) for op in entry.operations if op.is_enabled}
+    assert enabled == {
+        (_FESTIVAL_JOB, "refresh"),
+        (f"{_FESTIVAL_JOB}.preview", "preview"),
+    }, enabled
+    refresh = next(op for op in entry.operations if op.operation_kind == "refresh")
+    assert "dataset_wide" in refresh.sync_scopes, refresh.sync_scopes
+    assert _FESTIVAL_JOB in set(feature_operation_handler_keys())
+    assert entry.is_refreshable
+
+
 async def test_head_serves_no_pg_transport_price_or_notice_load(
     seed_session: AsyncSession,
 ) -> None:

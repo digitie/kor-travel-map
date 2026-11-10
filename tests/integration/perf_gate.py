@@ -595,7 +595,7 @@ _PERF_DATASET_PAIRS_SQL = """
 SELECT * FROM (VALUES
     (0, 'python-mois-api', 'mois_license_features_bulk'),
     (1, 'python-datagokr-api', 'standard_tourist_attractions'),
-    (2, 'python-visitkorea-api', 'visitkorea_festival_events'),
+    (2, 'python-visitkorea-api', 'visitkorea_festivals'),
     (3, 'kor-travel-transport', 'transport_fuel_stations'),
     (4, 'python-krheritage-api', 'krheritage_events')
 ) AS pair(bucket, provider, dataset_key)

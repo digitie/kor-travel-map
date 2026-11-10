@@ -76,7 +76,6 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "weather_state_forecast_external_schedule": "55 */3 * * *",
     "weather_state_daily_summaries_schedule": "41 * * * *",
     "mois_localdata_source_sync_weekly_schedule": "0 4 * * 1",
-    "feature_event_datagokr_cultural_festivals_monthly_schedule": "10 3 1 * *",
     "feature_place_transport_fuel_stations_weekly_schedule": "5 3 * * 1",
     "feature_place_transport_rest_areas_weekly_schedule": "20 4 * * 1",
     "feature_place_transport_rail_stations_weekly_schedule": "30 4 * * 1",
@@ -106,7 +105,7 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "feature_place_khoa_beaches_monthly_schedule": "55 4 4 * *",
     "feature_place_transport_airports_monthly_schedule": "5 5 4 * *",
     "feature_place_kor_travel_concierge_youtube_monthly_schedule": "40 3 3 * *",
-    "feature_event_visitkorea_enrichment_monthly_schedule": "50 4 1 * *",
+    "feature_event_visitkorea_festivals_daily_schedule": "35 4 * * *",
     "feature_place_mcst_culture_monthly_schedule": "30 4 3 * *",
 }
 

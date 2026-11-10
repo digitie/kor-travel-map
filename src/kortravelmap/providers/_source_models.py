@@ -42,7 +42,6 @@ PROVIDER_MODEL_BINDINGS: Final[Mapping[str, str]] = {
     "krheritage.KrHeritageItem": "krheritage.models.heritage.HeritageDetail",
     "krheritage.KrHeritageEvent": "krheritage.models.event.HeritageEvent",
     "mois.MoisLicensePlaceRecord": "mois.db.PlaceRecord",
-    "standard_data.CulturalFestivalItem": "datagokr.models.PublicCulturalFestival",
     "standard_data.PublicMuseumArtItem": "datagokr.models.PublicMuseumArtGallery",
     "standard_data.PublicTouristAttractionItem": "datagokr.models.PublicTouristAttraction",
     "standard_data.PublicParkingLotItem": "datagokr.models.PublicParkingLot",
@@ -77,16 +76,12 @@ PROTOCOLS_WITHOUT_PROVIDER_MODEL: Final[Mapping[str, str]] = {
     "opinet.OpinetStationItem": _transport_reason("TransportFuelStation"),
     "opinet.OpinetStationWithPrices": _transport_reason("TransportFuelStation"),
     "opinet.OpinetStationPriceRow": _transport_reason("TransportFuelPrice"),
-    "visitkorea.FestivalMatch": "Map 내부 매칭 결과 shape — provider 모델이 아니다.",
-    "visitkorea.FestivalMatcher": "Map이 주입받는 매처 콜백 shape — provider 모델이 아니다.",
 }
 """provider 실모델과 결박되지 않는 Protocol과 그 사유.
 
-두 부류다.
-
-1. kor-travel-transport export 계약 shape(opinet·krex·krairport — ADR-106). provider 실모델이
-   아니라 ``providers.kor_travel_transport``의 dataclass가 만족한다.
-2. Map 내부 shape(visitkorea 매처·매칭 결과).
+kor-travel-transport export 계약 shape(opinet·krex·krairport — ADR-106)다. provider 실모델이
+아니라 ``providers.kor_travel_transport``의 dataclass가 만족한다. (visitkorea 축제 매처·매칭 결과
+shape는 2026-11-10 축제 enrichment와 함께 제거했다.)
 
 (옛 kma 전부 — raw dict 기반 row — 와 airkorea·krex 휴게소 기상·krforest 산악기상/
 산불위험 Protocol은 ADR-105로 weather 기능과 함께 제거했다.)

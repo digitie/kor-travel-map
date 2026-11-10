@@ -57,7 +57,8 @@ _INSERT_FEATURE = text(
 
 _DATASET_IDS = text(
     "SELECT provider_dataset_id FROM provider_sync.provider_datasets "
-    "ORDER BY provider_dataset_id LIMIT 2"
+    # 비활성 dataset(예: 449가 퇴역시킨 표준데이터 축제)은 쓰기를 거부한다.
+    "WHERE is_active ORDER BY provider_dataset_id LIMIT 2"
 )
 
 _INSERT_ENTITY = text(

@@ -70,7 +70,6 @@ PostgreSQL-backed instance config를 쓴다.
 
 provider record resource:
 
-- `datagokr_cultural_festivals`
 - `transport_fuel_stations`
 - `transport_rest_areas`
 - `transport_airports`
@@ -89,7 +88,7 @@ provider record resource:
 - `standard_parking_lots`
 - `standard_traditional_markets`
 - `khoa_beaches`
-- `visitkorea_festival_events`
+- `visitkorea_festivals`
 - `visitkorea_tourist_attractions`
 - `kor_travel_concierge_youtube_features`
 
@@ -105,7 +104,6 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 
 | resource | provider package | kor-travel-map env | source env |
 |----------|------------------|----------------|------------|
-| `datagokr_cultural_festivals` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `transport_fuel_stations` | `kor-travel-transport` | `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL`, `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` | transport `TRANSPORT_SERVICE_EXPORT_TOKEN`(같은 값) |
 | `transport_rest_areas` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
 | `transport_airports` | `kor-travel-transport` | 위와 같음 | 위와 같음 |
@@ -125,7 +123,7 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `standard_traditional_markets` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |
 | `standard_special_streets` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |
 | `khoa_beaches` | `python-khoa-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `visitkorea_festival_events` | `python-visitkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `visitkorea_festivals` | `python-visitkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `visitkorea_tourist_attractions` | `python-visitkorea-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `kor_travel_concierge_youtube_features` | `kor-travel-concierge` | `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_BASE_URL`, `KOR_TRAVEL_MAP_KOR_TRAVEL_CONCIERGE_API_KEY` | 없음(DB `read` 키 발급) |
 
@@ -171,7 +169,7 @@ asset step과 큐 run(`execute_feature_update_request`, scope 여러 개)이 `up
 
 | schedule | job | cron |
 |----------|-----|------|
-| `feature_event_datagokr_cultural_festivals_monthly_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 1 * *` |
+| `feature_event_visitkorea_festivals_daily_schedule` | `feature_event_visitkorea_festivals_job` | `35 4 * * *` |
 | `feature_place_transport_fuel_stations_weekly_schedule` | `feature_place_transport_fuel_stations_job` | `5 3 * * 1` |
 | `feature_place_transport_rest_areas_weekly_schedule` | `feature_place_transport_rest_areas_job` | `20 4 * * 1` |
 | `feature_place_transport_airports_monthly_schedule` | `feature_place_transport_airports_job` | `5 5 4 * *` |

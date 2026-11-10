@@ -91,7 +91,7 @@ structured `legal_dong_code`/`region.bjd_cd`를 보강한다. 좌표 후보가 �
 (변환기가 내부에서 자동 래핑).
 
 `reverse_geocoder`/`address_resolver`를 받는 변환 함수 (모두 async):
-- `standard_data.cultural_festivals_to_bundles` (datagokr 축제)
+- `visitkorea.tourapi_festivals_to_bundles` (TourAPI 축제 — 표준데이터 축제는 2026-11-10 퇴역)
 - `opinet.stations_to_bundles` (주유소)
 - `krex.rest_areas_to_bundles` (휴게소)
 - `krheritage.heritage_items_to_bundles` / `heritage_events_to_bundles`

@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Final
 
 DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
-    "feature_event_datagokr_cultural_festivals": "전국 문화축제",
     "feature_place_transport_fuel_stations": "주유소 위치",
     "feature_place_transport_rest_areas": "고속도로 휴게소",
     "feature_place_krheritage_items": "국가유산",
@@ -30,7 +29,7 @@ DAGSTER_ASSET_KOREAN_LABELS: Final[dict[str, str]] = {
     "feature_place_transport_rail_stations": "철도역",
     "feature_place_transport_ferry_ports": "여객선 항구",
     "feature_place_kor_travel_concierge_youtube": "영상 기반 장소 후보",
-    "feature_event_visitkorea_enrichment": "VisitKorea 축제 보강 후보",
+    "feature_event_visitkorea_festivals": "축제·행사(TourAPI)",
     "feature_place_mcst_culture": "문화시설 파일데이터",
 }
 """asset code-level name → 한국어 표시명."""

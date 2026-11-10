@@ -1,14 +1,18 @@
 """같은 원본의 기존 행 보정 — 좌표 결측 backfill·concierge 해수욕장 재투영(#1459 §4·§6).
 
 원본(payload)이 같으면 ``became_current``가 거짓이라 적재가 Feature 본문을 다시 쓰지 않는다. 그래서
-정지오코딩 fallback 이전에 좌표 없이 적재된 축제·주차장·국가유산 행, 그리고 근거 없는 해수욕장
+정지오코딩 fallback 이전에 좌표 없이 적재된 주차장·국가유산 행, 그리고 근거 없는 해수욕장
 제안으로 적재된 concierge 행은 원천이 바뀌기 전까지 고쳐지지 않았다. 이 파일은 재적재 한 번이 그것을
 고치고, 두 번째 재적재는 아무것도 바꾸지 않는다는 것을 실제 PostGIS에서 본다.
+
+(종전 대표 행은 표준데이터 축제였다 — 2026-11-10 축제 원천이 TourAPI로 바뀌며 그 dataset은
+퇴역했고, TourAPI 축제는 원천 좌표를 늘 준다. 같은 backfill scope의 주차장으로 옮겼다.)
 """
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from dataclasses import dataclass
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import TYPE_CHECKING, Any
 
@@ -23,8 +27,7 @@ from kortravelmap.providers.kor_travel_concierge import (
     KOR_TRAVEL_CONCIERGE_YOUTUBE_CATEGORY_FALLBACK,
     kor_travel_concierge_items_to_bundles,
 )
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
-from tests.integration.test_client_orchestration import _Festival
+from kortravelmap.providers.standard_data import parking_lots_to_bundles
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,17 +55,30 @@ async def _reverse(_coord: Coordinate) -> Address | None:
     )
 
 
-def _festival() -> _Festival:
-    return _Festival(
-        fstvl_nm="백필 눈꽃축제 1459",
-        opar="송천 주변",
-        fstvl_start_date=date(2026, 1, 24),
-        fstvl_end_date=date(2026, 2, 2),
+@dataclass(frozen=True)
+class _ParkingLot:
+    """``PublicParkingLotItem`` Protocol 만족(provider ``PublicParkingLot`` 필드 이름)."""
+
+    prkplce_no: str | None
+    prkplce_nm: str | None
+    prkplce_se: str | None = "공영"
+    rdnmadr: str | None = None
+    lnmadr: str | None = None
+    prkcmprt: int | None = 30
+    parkingchrge_info: str | None = "무료"
+    latitude: float | None = None
+    longitude: float | None = None
+    phone_number: str | None = None
+    instt_code: str | None = None
+    raw: Any = None
+
+
+def _parking_lot() -> _ParkingLot:
+    return _ParkingLot(
+        prkplce_no="BACKFILL-PARKING-1459",
+        prkplce_nm="백필 횡계 공영주차장 1459",
         rdnmadr="강원특별자치도 평창군 대관령면 대관령로 135-9",
         lnmadr="강원특별자치도 평창군 대관령면 횡계리 661",
-        latitude=None,
-        longitude=None,
-        reference_date=date(2026, 6, 20),
     )
 
 
@@ -85,15 +101,15 @@ async def _stored(session: AsyncSession, bundle: FeatureBundle) -> dict[str, Any
 async def test_same_payload_reload_backfills_a_geocoded_coordinate_once(
     migrated_session: AsyncSession,
 ) -> None:
-    [unplaced] = await cultural_festivals_to_bundles([_festival()], fetched_at=_FETCHED)
+    [unplaced] = await parking_lots_to_bundles([_parking_lot()], fetched_at=_FETCHED)
     assert unplaced.feature.coord is None
     first = await feature_repo.load_bundles(migrated_session, [unplaced])
     assert first.features_inserted == 1
     before = await _stored(migrated_session, unplaced)
     assert before["lon"] is None
 
-    [placed] = await cultural_festivals_to_bundles(
-        [_festival()],
+    [placed] = await parking_lots_to_bundles(
+        [_parking_lot()],
         fetched_at=_FETCHED,
         reverse_geocoder=_reverse,
         address_geocoder=_geocode,

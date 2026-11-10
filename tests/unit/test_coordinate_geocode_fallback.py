@@ -1,13 +1,14 @@
 """원천 좌표 결측 → 주소 정지오코딩 fallback(#1459 §4).
 
 운영 2026-11-09: 축제 240·주차장 735·국가유산 place 1,338건이 주소(번지까지)를 갖고도 좌표 없이
-적재됐다(asset이 reverse만 넘겼다). 행정구역까지인 주소(국가유산 행사 "경상남도 밀양시", MCST 클래스
-"서울특별시 강서구 화곡6동")는 대표점이라 쓰지 않는다.
+적재됐다(asset이 reverse만 넘겼다). 그 축제 원천(표준데이터)은 2026-11-10 퇴역했다 — TourAPI
+축제는 원천 좌표가 늘 있다(실측 879/879). 행정구역까지인 주소(국가유산 행사 "경상남도 밀양시",
+MCST 클래스 "서울특별시 강서구 화곡6동")는 대표점이라 쓰지 않는다.
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any
@@ -22,10 +23,7 @@ from kortravelmap.geocoding import (
     kor_travel_geo_reverse_geocoder,
 )
 from kortravelmap.providers.krheritage import heritage_items_to_bundles
-from kortravelmap.providers.standard_data import (
-    cultural_festivals_to_bundles,
-    parking_lots_to_bundles,
-)
+from kortravelmap.providers.standard_data import parking_lots_to_bundles
 
 pytestmark = pytest.mark.unit
 
@@ -130,64 +128,6 @@ async def test_geo_reverse_geocoder_geocodes_address_road_then_parcel() -> None:
     )
     assert coord == Coordinate(lon=Decimal("126.9"), lat=Decimal("37.5"))
     assert client.queries == [("서울 어딘가로 1", "road"), ("서울 어딘가동 1-1", "parcel")]
-
-
-def _festival(**overrides: Any) -> SimpleNamespace:
-    values: dict[str, Any] = {
-        "fstvl_nm": "대관령눈꽃축제",
-        "opar": "송천 주변",
-        "fstvl_start_date": date(2025, 1, 24),
-        "fstvl_end_date": date(2025, 2, 2),
-        "fstvl_co": None,
-        "mnnst_nm": "대관령면축제위원회",
-        "auspc_instt_nm": None,
-        "suprt_instt_nm": None,
-        "phone_number": "033-335-3995",
-        "homepage_url": None,
-        "relate_info": None,
-        "rdnmadr": "강원특별자치도 평창군 대관령면 대관령로 135-9",
-        "lnmadr": "강원특별자치도 평창군 대관령면 횡계리 661",
-        "latitude": None,
-        "longitude": None,
-        "reference_date": date(2025, 6, 20),
-        "instt_code": None,
-        "instt_nm": None,
-    }
-    values.update(overrides)
-    return SimpleNamespace(**values)
-
-
-async def test_festival_without_coordinate_is_geocoded_then_reverse_geocoded() -> None:
-    geocoder = _Geocoder()
-    reverse = _Reverse()
-    [bundle] = await cultural_festivals_to_bundles(
-        [_festival()],
-        fetched_at=_FETCHED,
-        reverse_geocoder=reverse,
-        address_geocoder=geocoder,
-    )
-    assert bundle.feature.coord == _POINT
-    assert reverse.calls == [_POINT]
-    assert bundle.feature.address.bjd_code == "5176025021"
-    # 원천 payload는 그대로다(좌표 없음).
-    assert bundle.source_record.raw_data["latitude"] is None
-    assert geocoder.calls[0].road == "강원특별자치도 평창군 대관령면 대관령로 135-9"
-
-
-async def test_festival_with_source_coordinate_does_not_call_geocoder() -> None:
-    geocoder = _Geocoder()
-    [bundle] = await cultural_festivals_to_bundles(
-        [_festival(latitude=37.6, longitude=128.7)],
-        fetched_at=_FETCHED,
-        address_geocoder=geocoder,
-    )
-    assert geocoder.calls == []
-    assert bundle.feature.coord == Coordinate(lon=Decimal("128.7"), lat=Decimal("37.6"))
-
-
-async def test_festival_without_geocoder_stays_unplaced() -> None:
-    [bundle] = await cultural_festivals_to_bundles([_festival()], fetched_at=_FETCHED)
-    assert bundle.feature.coord is None
 
 
 def _parking(**overrides: Any) -> SimpleNamespace:

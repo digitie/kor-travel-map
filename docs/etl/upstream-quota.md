@@ -86,14 +86,14 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 | op | 분모 | 총건수 실측 | 정상 sweep | 최악 sweep | 최악 % |
 |---|---:|---:|---:|---:|---:|
 | `parking` 공개 파일(2026-11-10~) | 쿼터 없음(키 없음) | **18,994**(2026-11-10) | 4(header·page 2·header) | 12(재시도 3) | — |
-| `festival` | 1,000 | 1,320 | 2 | 600 | 60% |
+| ~~`festival`~~ (2026-11-10 퇴역 — 축제는 TourAPI) | 1,000 | 1,320 | 0 | 0 | 0% |
 | `museum_art` | 1,000 | 1,076 | 2 | 600 | 60% |
 | `tourist_attraction` | 1,000 | 897 | 1 | 600 | 60% |
 | `special_street` 공개 파일 | 쿼터 없음(키 없음) | **274**(2026-11-09) | 3(header·page·header) | 9(재시도 3) | — |
 | `traditional_market` 공개 파일 | 쿼터 없음(키 없음) | **1,393**(2026-11-09) | 3 | 9 | — |
-| visitkorea 축제 | 1,000 | — | ≤50 | 50 | 5% |
+| visitkorea 축제 `searchFestival2` (유일한 축제 원천) | 1,000 | **879**(2026-11-10, 1,000행 페이지) | 1 | 10 | 1% |
 | visitkorea 관광지·문화시설·레포츠 `areaBasedList2` | 1,000 | 운영 키 **12,560·2,753·3,717**(1,000행 페이지) | 20(재시도 3 → 80) | 120×4 | 48% |
-| visitkorea 관광지 `detailCommon2` | 1,000 | 항목당 1호출 | ≤600(run 예산, step 재시도는 0) | 600 | 60% |
+| visitkorea `detailCommon2` (관광지 + 축제가 **나눠 쓴다**) | 1,000 | 항목당 1호출 | 관광지 ≤600 + 축제 ≤300(run 예산, step 재시도는 0) | 900 | 90% |
 | 산불위험예보 (2026-10-01 제거, ADR-105) | 1,000 | — | 0 | 0 | 0% |
 | 산악기상(2026-10-01 제거)·산사태 | 10,000 | — | 10 | 60 | 0.6% (산사태만) |
 | khoa 해수욕장 | 10,000 | — | ~70 | (아래) | — |
@@ -519,7 +519,7 @@ I/O를 할 수 있기 때문이다 — MOIS Phase A가 거기서 전국 파일�
 |---|---|---|
 | krex `latest_weather()` | `lookback_hours` 기본 48 → **최악 49 요청**. 저장소 문서는 "페이지네이션 불필요"라고만 적었다 | `_KREX_WEATHER_LOOKBACK_HOURS = 6` → 최악 7. 6시간을 못 찾으면 upstream이 멈춘 것이므로 48시간 전 관측을 "최신"으로 적재하지 않고 실패한다 |
 | krforest `client.iter_pages` ×4 | `max_pages` 미지정 → `totalCount`가 없으면 lib이 `total_count = len(items)`로 채워 상한이 **1페이지**가 되고 **조용히 `return`** — 행 누락이 성공으로 보인다 | 저장소 공통 `aiter_paginated_items`(`absolute_max_pages=10`) → 짧은 페이지를 마지막으로 읽지 않고, 넘으면 `ProviderPaginationOverrun` |
-| visitkorea `search_festival` | `iter_paginated_pages`는 `max_pages`가 없으면 **상한이 없다** | `absolute_max_pages=50`(100행 × 50 = 5,000건) |
+| visitkorea `search_festival` | `iter_paginated_pages`는 `max_pages`가 없으면 **상한이 없다** | `absolute_max_pages=10`(1,000행 × 10 = 10,000건, 2026-11-10 1차 전환 때 1,000행 페이지로) |
 
 **`max_pages`가 아니라 `absolute_max_pages`인 이유.** 처음에는 `max_pages`로
 줬다. 그것이 틀렸다 — 저장소 헬퍼에서 `max_pages`는 천장이 아니라 **바닥**이다.

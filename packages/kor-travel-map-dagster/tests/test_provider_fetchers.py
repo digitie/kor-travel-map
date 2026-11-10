@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import sys
 from collections.abc import AsyncIterator, Callable, Iterable, Iterator
+from datetime import datetime, timedelta, timezone
 from types import ModuleType, SimpleNamespace
 from typing import Any, cast
 
 import pytest
+from kortravelmap.providers.visitkorea import festival_window_start
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
 
@@ -19,7 +21,7 @@ from kortravelmap.dagster.feature_operation_tracking import (
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
     StandardFileSnapshotIncomplete,
-    fetch_datagokr_cultural_festivals,
+    VisitKoreaFestivalSnapshotIncomplete,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
     fetch_knps_point_records,
@@ -34,7 +36,7 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_standard_special_streets,
     fetch_standard_tourist_attractions,
     fetch_standard_traditional_markets,
-    fetch_visitkorea_festival_events,
+    fetch_visitkorea_festivals,
 )
 from kortravelmap.dagster.provider_pagination import (
     ProviderPaginationOverrun,
@@ -79,7 +81,7 @@ def _guarded_init_resource_context() -> Any:
 
 _DATAGOKR_SPEC = {
     spec.resource_key: spec for spec in PROVIDER_RECORD_RESOURCE_SPECS
-}["datagokr_cultural_festivals"]
+}["standard_museums"]
 
 
 class _FakeKrtourAiAgentResponse:
@@ -189,7 +191,6 @@ class _FakeStandardFileService(_FakeStandardService):
 
 
 #: 이름은 유지한다 — 호출부(테스트)가 그대로 읽히게.
-_FakeFestivalService = _FakeStandardService
 _FakeMuseumArtService = _FakeStandardService
 
 
@@ -199,7 +200,6 @@ class _FakeDataGoKrClient:
     def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
         self.api_key = api_key
         self.closed = False
-        self.festival = _FakeFestivalService([object(), object()])
         self.museum_art = _FakeMuseumArtService([object(), object(), object()])
         self.tourist_attraction = _FakeMuseumArtService([object(), object()])
         self.parking = _FakeStandardFileService([object(), object(), object(), object()])
@@ -948,37 +948,14 @@ def test_krforest_arboretums_fetch_yields_and_closes(
     assert fake.instances[0].closed is True
 
 
-def test_fetch_raises_when_credential_missing() -> None:
-    settings = KorTravelMapSettings(data_go_kr_service_key=None)
-
-    agen = fetch_datagokr_cultural_festivals(settings)
-    with pytest.raises(ProviderCredentialMissing):
-        asyncio.run(agen.__anext__())
-
-
-def test_fetch_yields_records_and_closes_client(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _install_fake_datagokr(monkeypatch)
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
-
-    records = asyncio.run(_acollect(fetch_datagokr_cultural_festivals(settings)))
-
-    assert len(records) == 2
-    assert len(fake.instances) == 1
-    client = fake.instances[0]
-    assert client.api_key == "service-key"
-    assert client.closed is True
-
-
-def test_fetch_closes_client_on_partial_consumption(
+def test_standard_museums_fetch_closes_client_on_partial_consumption(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
     async def _take_one_then_close() -> None:
-        agen = fetch_datagokr_cultural_festivals(settings)
+        agen = fetch_standard_museums(settings)
         first = await agen.__anext__()
         assert first is not None
         # 조기 종료 시에도 finally의 ``aclose()``가 실행되어 client가 닫혀야 한다.
@@ -1030,6 +1007,10 @@ class _FakeVisitKoreaClient:
     instances: list[_FakeVisitKoreaClient] = []
     items: list[object] = []
     declared_total: int | None = None
+    #: 페이지마다 다른 선언 건수(순회 중 목록이 밀린 경우) — 있으면 ``declared_total``보다 먼저.
+    declared_by_page: dict[int, int] | None = None
+    #: 응답 body에 ``totalCount``를 싣지 않는다(provider는 받은 행 수로 채운다).
+    omit_total_count: bool = False
     page_size_override: int | None = None
     never_advances: bool = False
 
@@ -1037,33 +1018,34 @@ class _FakeVisitKoreaClient:
         self.service_key = service_key
         self.closed = False
         self.search_calls: list[Any] = []
+        self.search_kwargs: list[dict[str, Any]] = []
         self.page_calls: list[int] = []
         _FakeVisitKoreaClient.instances.append(self)
 
     async def search_festival(
-        self, event_start_date: Any, *, page_no: int = 1, num_of_rows: int = 10, **_kw: Any
+        self, event_start_date: Any, *, page_no: int = 1, num_of_rows: int = 10, **kw: Any
     ) -> _FakeFestivalPage:
         self.search_calls.append(event_start_date)
+        self.search_kwargs.append({"num_of_rows": num_of_rows, **kw})
         self.page_calls.append(page_no)
-        size = type(self).page_size_override or num_of_rows
-        effective_page = 1 if type(self).never_advances else page_no
+        cls = type(self)
+        size = cls.page_size_override or num_of_rows
+        effective_page = 1 if cls.never_advances else page_no
         start = (effective_page - 1) * size
-        items = type(self).items
-        return _FakeFestivalPage(
-            items[start : start + size],
-            total_count=(
-                len(items)
-                if type(self).declared_total is None
-                else type(self).declared_total
-            ),
-            # 실물 `visitkorea.models.Page`는 파싱 전 body를 `raw`로 들고 있다.
-            # 대역이 그것을 흉내내지 않으면 `fingerprint`가 늘 None이 되어
-            # **전진 검사가 호출 지점에서 한 번도 돌지 않는다**(2차 리뷰 지적).
-            raw={
-                "pageNo": effective_page,
-                "items": [id(item) for item in items[start : start + size]],
-            },
-        )
+        items = cls.items
+        declared = len(items) if cls.declared_total is None else cls.declared_total
+        if cls.declared_by_page is not None:
+            declared = cls.declared_by_page.get(page_no, declared)
+        # 실물 `visitkorea.models.Page`는 파싱 전 body를 `raw`로 들고 있다.
+        # 대역이 그것을 흉내내지 않으면 `fingerprint`가 늘 None이 되어
+        # **전진 검사가 호출 지점에서 한 번도 돌지 않는다**(2차 리뷰 지적).
+        raw: dict[str, Any] = {
+            "pageNo": effective_page,
+            "items": [id(item) for item in items[start : start + size]],
+        }
+        if not cls.omit_total_count:
+            raw["totalCount"] = declared
+        return _FakeFestivalPage(items[start : start + size], total_count=declared, raw=raw)
 
     # ``iter_pages``는 일부러 두지 않는다 — 라이브러리 iterator는 ``max_pages``가
     # 없으면 상한이 없다. 프로덕션이 그쪽으로 되돌아가면 AttributeError로 빨개진다.
@@ -1080,12 +1062,16 @@ def _install_fake_visitkorea(
     *,
     items: list[object],
     declared_total: int | None = None,
+    declared_by_page: dict[int, int] | None = None,
+    omit_total_count: bool = False,
     page_size_override: int | None = None,
     never_advances: bool = False,
 ) -> type[_FakeVisitKoreaClient]:
     _FakeVisitKoreaClient.instances = []
     _FakeVisitKoreaClient.items = items
     _FakeVisitKoreaClient.declared_total = declared_total
+    _FakeVisitKoreaClient.declared_by_page = declared_by_page
+    _FakeVisitKoreaClient.omit_total_count = omit_total_count
     _FakeVisitKoreaClient.page_size_override = page_size_override
     _FakeVisitKoreaClient.never_advances = never_advances
     module = ModuleType("visitkorea")
@@ -1094,59 +1080,121 @@ def _install_fake_visitkorea(
     return _FakeVisitKoreaClient
 
 
-async def test_visitkorea_festival_events_raises_when_credential_missing() -> None:
+def _festival_rows(count: int, *, prefix: str = "fest") -> list[object]:
+    """축제 행 — fetcher는 ``content_id``로 고유 건수를 센다."""
+    return [SimpleNamespace(content_id=f"{prefix}-{index}") for index in range(count)]
+
+
+async def test_visitkorea_festivals_raises_when_credential_missing() -> None:
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
 
-    generator = fetch_visitkorea_festival_events(settings)
+    generator = fetch_visitkorea_festivals(settings)
     with pytest.raises(ProviderCredentialMissing):
         await anext(generator)
 
 
-async def test_visitkorea_festival_events_fetch_yields_and_closes(
+async def test_visitkorea_festivals_fetch_yields_and_closes(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    fake = _install_fake_visitkorea(monkeypatch, items=[object(), object()])
+    fake = _install_fake_visitkorea(monkeypatch, items=_festival_rows(2))
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = await _acollect(fetch_visitkorea_festival_events(settings))
+    records = await _acollect(fetch_visitkorea_festivals(settings))
 
     assert len(records) == 2
     client = fake.instances[0]
     assert client.service_key == "service-key"
     assert client.closed is True
-    # search_festival에 event_start_date(올해 1월 1일)를 넘긴다.
-    assert client.search_calls
-    assert client.search_calls[0].month == 1
+    # 수집 창 시작 = 한 해 전 그달 1일(KST). 원천은 그날 이후에 끝나는 행사를 준다.
+    today = datetime.now(timezone(timedelta(hours=9))).date()
+    assert client.search_calls == [festival_window_start(today)]
+    # 1,000행 페이지·수정순 — 창 안 축제(실측 879)가 1호출이다.
+    assert client.search_kwargs == [{"num_of_rows": 1000, "arrange": "C"}]
 
 
-async def test_visitkorea_festival_events_walks_every_page(
+async def test_visitkorea_festivals_walks_every_page(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """축제는 한 페이지에 다 담기지 않는다 — 전부 걷는지 본다."""
+    """한 페이지에 다 담기지 않으면 전부 걷는지 본다."""
 
-    items = [object() for _ in range(5)]
-    fake = _install_fake_visitkorea(monkeypatch, items=items, page_size_override=2)
+    fake = _install_fake_visitkorea(
+        monkeypatch, items=_festival_rows(5), page_size_override=2
+    )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
-    records = await _acollect(fetch_visitkorea_festival_events(settings))
+    records = await _acollect(fetch_visitkorea_festivals(settings))
 
     assert len(records) == 5
     assert fake.instances[0].page_calls == [1, 2, 3]
 
 
-async def test_visitkorea_festival_events_refuses_to_walk_past_the_ceiling(
+async def test_visitkorea_festivals_refuses_to_walk_past_the_ceiling(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """visitkorea ``iter_paginated_pages``는 ``max_pages``가 없으면 상한이 없다."""
 
-    items = [object() for _ in range(1000)]
     _install_fake_visitkorea(
-        monkeypatch, items=items, declared_total=10**9, page_size_override=1
+        monkeypatch, items=_festival_rows(1000), declared_total=10**9, page_size_override=1
     )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
     with pytest.raises(ProviderPaginationOverrun):
-        await _acollect(fetch_visitkorea_festival_events(settings))
+        await _acollect(fetch_visitkorea_festivals(settings))
+    pages = _FakeVisitKoreaClient.instances[0].page_calls
+    assert len(pages) <= provider_fetchers._VISITKOREA_FESTIVAL_MAX_PAGES + 1
+
+
+# -- 완전성 가드: 이 dataset은 목록에 없는 축제를 은퇴시킨다 -------------------
+
+
+async def test_visitkorea_festivals_refuses_a_response_without_total_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake = _install_fake_visitkorea(
+        monkeypatch, items=_festival_rows(3), omit_total_count=True
+    )
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    with pytest.raises(VisitKoreaFestivalSnapshotIncomplete, match="totalCount"):
+        await _acollect(fetch_visitkorea_festivals(settings))
+    assert fake.instances[0].closed is True
+
+
+async def test_visitkorea_festivals_refuses_a_list_that_shifted_while_walking(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_visitkorea(
+        monkeypatch,
+        items=_festival_rows(4),
+        declared_by_page={1: 4, 2: 5},
+        page_size_override=2,
+    )
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    with pytest.raises(VisitKoreaFestivalSnapshotIncomplete, match="선언 건수가 바뀌었다"):
+        await _acollect(fetch_visitkorea_festivals(settings))
+
+
+async def test_visitkorea_festivals_refuses_an_empty_list(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_visitkorea(monkeypatch, items=[])
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    with pytest.raises(VisitKoreaFestivalSnapshotIncomplete, match="비었다"):
+        await _acollect(fetch_visitkorea_festivals(settings))
+
+
+async def test_visitkorea_festivals_refuses_fewer_unique_rows_than_declared(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rows = _festival_rows(2)
+    # 3행이 왔지만 고유 contentid는 2개 — 페이지 경계에서 한 행이 겹치고 한 행이 빠졌다.
+    _install_fake_visitkorea(monkeypatch, items=[*rows, rows[0]])
+    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
+
+    with pytest.raises(VisitKoreaFestivalSnapshotIncomplete, match="고유 2건"):
+        await _acollect(fetch_visitkorea_festivals(settings))
 
 
 class _FakeBeachPage:
@@ -1565,7 +1613,7 @@ def test_live_resource_raises_guard_message_when_credentials_missing(
 
 
 def test_datagokr_resource_definition_is_live_not_guard() -> None:
-    live = PROVIDER_RECORD_RESOURCE_DEFINITIONS["datagokr_cultural_festivals"]
+    live = PROVIDER_RECORD_RESOURCE_DEFINITIONS["standard_museums"]
     guard = build_provider_record_guard_resource(_DATAGOKR_SPEC)
 
     assert live.description is not None
@@ -1622,12 +1670,11 @@ async def test_visitkorea_stalled_pagination_is_caught_at_the_call_site(
     늘 None이었다).
     """
 
-    items = [object() for _ in range(10)]
     _install_fake_visitkorea(
-        monkeypatch, items=items, declared_total=3000, page_size_override=2,
+        monkeypatch, items=_festival_rows(10), declared_total=3000, page_size_override=2,
         never_advances=True,
     )
     settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
 
     with pytest.raises(ProviderPaginationStalled):
-        await _acollect(fetch_visitkorea_festival_events(settings))
+        await _acollect(fetch_visitkorea_festivals(settings))

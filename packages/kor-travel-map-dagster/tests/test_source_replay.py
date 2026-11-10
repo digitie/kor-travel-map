@@ -36,13 +36,13 @@ from kortravelmap.infra.source_replay_repo import CurrentSourceRecord
 from kortravelmap.providers.datagokr_file_data import file_data_rows_to_bundles
 from kortravelmap.providers.mois import license_record_to_bundle
 from kortravelmap.providers.standard_data import (
-    cultural_festivals_to_bundles,
     museums_to_bundles,
     parking_lots_to_bundles,
     special_streets_to_bundles,
     tourist_attractions_to_bundles,
     traditional_markets_to_bundles,
 )
+from kortravelmap.providers.visitkorea import tourapi_festivals_to_bundles
 from kortravelmap.providers.visitkorea_attractions import tourapi_attractions_to_bundles
 
 from kortravelmap.dagster import assets, resources
@@ -174,44 +174,6 @@ def _file_data(dataset_key: str) -> _Convert:
 
 #: resource → [(변환기, fetch record들)]. fileData는 dataset 넷이 한 resource를 쓴다.
 _GOLDEN: dict[str, list[tuple[_Convert, list[Any]]]] = {
-    "datagokr_cultural_festivals": [
-        (
-            _standard(cultural_festivals_to_bundles),
-            [
-                _datagokr(
-                    "PublicCulturalFestival",
-                    {
-                        "fstvlNm": " 한강 불빛 축제 ",
-                        "opar": "여의도 한강공원",
-                        "fstvlStartDate": "2026-10-01",
-                        "fstvlEndDate": "2026-10-09",
-                        "fstvlCo": "불꽃과 음악",
-                        "mnnstNm": "서울특별시",
-                        "auspcInsttNm": "서울특별시",
-                        "suprtInsttNm": "",
-                        "phoneNumber": "02-120",
-                        "homepageUrl": "https://example.org/festival",
-                        "rdnmadr": "서울특별시 영등포구 여의동로 330",
-                        "lnmadr": "서울특별시 영등포구 여의도동 85",
-                        "latitude": "37.528312345678901",
-                        "longitude": "126.932949",
-                        "referenceDate": "2026-09-01",
-                        "instt_code": "3010000",
-                        "instt_nm": "서울특별시 영등포구",
-                        "insttCode": "알 수 없는 원천 열(extra)",
-                    },
-                ),
-                _datagokr(
-                    "PublicCulturalFestival",
-                    {
-                        "fstvlNm": "좌표 없는 축제",
-                        "rdnmadr": "제주특별자치도 제주시 문연로 6",
-                        "fstvlStartDate": "2026-11-01",
-                    },
-                ),
-            ],
-        )
-    ],
     "standard_museums": [
         (
             _standard(museums_to_bundles),
@@ -352,6 +314,48 @@ _GOLDEN: dict[str, list[tuple[_Convert, list[Any]]]] = {
                 ),
                 _tour_item("128164", addr1="부산광역시 수영구 민락동", map_x=129.1186),
                 _tour_item("2788875", overview="", homepage="", copyright_division_code="Type3"),
+            ],
+        )
+    ],
+    "visitkorea_festivals": [
+        (
+            _standard(tourapi_festivals_to_bundles),
+            [
+                _tour_item(
+                    "588175",
+                    content_type_id="15",
+                    title="포항국제불빛축제",
+                    addr1="경상북도 포항시 북구 두호동 685-1",
+                    addr2="영일대해수욕장 일원",
+                    lcls_systm1="EV",
+                    lcls_systm2="EV01",
+                    lcls_systm3="EV010200",
+                    event_start_date="20261119",
+                    event_end_date="20261121",
+                    overview="포항의 밤바다를 수놓는 불빛축제.<br>불꽃쇼",
+                    homepage='<a href="https://phfireworks.ipohang.org">홈페이지</a>',
+                ),
+                # 상세를 아직 받지 않은 행(overview None)과 날짜가 거꾸로 된 행(격리)
+                _tour_item(
+                    "2786391",
+                    content_type_id="15",
+                    title="거꾸로 된 날짜 축제",
+                    lcls_systm1="EV",
+                    lcls_systm2="EV03",
+                    lcls_systm3="EV030400",
+                    event_start_date="20261121",
+                    event_end_date="20261119",
+                ),
+                _tour_item(
+                    "3551206",
+                    content_type_id="15",
+                    title="광명동굴 빛 축제",
+                    event_start_date="20261016",
+                    event_end_date="20261017",
+                    overview="",
+                    homepage="",
+                    copyright_division_code="Type3",
+                ),
             ],
         )
     ],

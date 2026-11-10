@@ -36,9 +36,13 @@ from kortravelmap.geocoding import (
     cached_reverse_geocoder,
     kor_travel_geo_reverse_geocoder,
 )
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from kortravelmap.settings import KorTravelMapSettings
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._tourapi_festival import (
+    TourApiFestival,
+    festival_bundles,
+    festival_item,
+)
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
@@ -177,49 +181,25 @@ async def map_client(
 # ── 헬퍼 ─────────────────────────────────────────────────────────────────
 
 
-@dataclass(frozen=True)
-class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
-
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
-
-
 def _festival(
     *, no: str, name: str, lon: str, lat: str, org: str = "test-org"
-) -> _Festival:
-    # 자연키가 name::address 파생(#374)이라, 같은 이름의 두 제공처 row를
-    # 별개 feature로 만들려면 주소를 no로 구분한다.
-    return _Festival(
-        fstvl_nm=name,
-        fstvl_start_date=date(2026, 4, 1),
-        fstvl_end_date=date(2026, 4, 10),
-        rdnmadr=f"서울특별시 중구 세종대로 110 ({no})",
-        latitude=float(lat),
-        longitude=float(lon),
-        reference_date=date(2026, 3, 1),
-        instt_nm=org,
+) -> TourApiFestival:
+    # 자연키가 TourAPI contentid라, 같은 이름의 두 row를 별개 feature로 만들려면 no를
+    # contentid로 쓴다. ``org``는 두 row의 원본(payload)을 가르는 본문으로만 남긴다.
+    return festival_item(
+        no,
+        name,
+        starts_on=date(2026, 4, 1),
+        ends_on=date(2026, 4, 10),
+        addr1="서울특별시 중구 세종대로 110",
+        lon=float(lon),
+        lat=float(lat),
+        overview=f"제공 {org}",
     )
 
 
 async def _enrich_and_load(
-    base_url: str, client: AsyncKorTravelMapClient, items: list[_Festival]
+    base_url: str, client: AsyncKorTravelMapClient, items: list[TourApiFestival]
 ) -> list[object]:
     """축제 items → kor-travel-geo로 bjd 보강 → client.load_feature_bundles → bundles 반환."""
     async with httpx.AsyncClient(base_url=base_url, timeout=10.0) as http:
@@ -231,8 +211,8 @@ async def _enrich_and_load(
         reverse = cached_reverse_geocoder(
             kor_travel_geo_reverse_geocoder(kraddr, max_distance_m=500)
         )
-        bundles = await cultural_festivals_to_bundles(
-            items,  # type: ignore[arg-type]
+        bundles = await festival_bundles(
+            items,
             fetched_at=_FETCHED_AT,
             reverse_geocoder=reverse,
         )

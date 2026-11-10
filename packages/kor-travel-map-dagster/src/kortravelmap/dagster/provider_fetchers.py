@@ -69,6 +69,7 @@ from kortravelmap.providers.kor_travel_transport import (
     require_current_collection,
     require_fresh_incident_set,
 )
+from kortravelmap.providers.visitkorea import festival_window_start
 from kortravelmap.providers.visitkorea_attractions import TOURAPI_PLACE_CONTENT_TYPE_IDS
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
@@ -93,7 +94,6 @@ logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
 __all__ = [
     "ProviderCredentialMissing",
     "SeoulOpenDataError",
-    "fetch_datagokr_cultural_festivals",
     "fetch_datagokr_file_data_records",
     "fetch_khoa_beaches",
     "fetch_seoul_open_data_bookstores",
@@ -122,10 +122,11 @@ __all__ = [
     "fetch_transport_rail_stations",
     "fetch_transport_rest_area_fuel_prices",
     "fetch_transport_rest_areas",
-    "fetch_visitkorea_festival_events",
+    "fetch_visitkorea_festivals",
     "fetch_visitkorea_attraction_details",
     "fetch_visitkorea_tourist_attractions",
     "VisitKoreaAttractionSnapshotIncomplete",
+    "VisitKoreaFestivalSnapshotIncomplete",
 ]
 
 
@@ -756,41 +757,6 @@ def _iter_datagokr_standard(service: Any, *, label: str) -> AsyncIterator[Any]:
         warn=_LOGGER.warning,
     )
 
-
-
-async def fetch_datagokr_cultural_festivals(
-    settings: KorTravelMapSettings,
-) -> AsyncIterator[Any]:
-    """전국문화축제표준데이터 record를 datagokr public client로 stream한다.
-
-    ``settings.data_go_kr_service_key``에서 service key를 읽어
-    ``DataGoKrClient(api_key=...)``를 열고 ``client.festival``
-    record(``PublicCulturalFestival``, ``CulturalFestivalItem`` Protocol 충족)를
-    lazily yield한다. generator가 살아 있는 동안 client는 열려 있고,
-    소비 종료(또는 aclose)시 ``finally``에서 ``await client.aclose()``로 닫는다.
-    """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "datagokr cultural festivals live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
-    # provider public client는 ADR-044 로컬 체크아웃이며 hard dependency가
-    # 아니므로(부재 가능), boto3와 동일하게 import time이 아닌 호출 시점에
-    # ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
-    datagokr = cast(Any, importlib.import_module("datagokr"))
-
-    client = datagokr.DataGoKrClient(api_key=api_key)
-    try:
-        async for record in _iter_datagokr_standard(
-            client.festival, label="datagokr festival.list"
-        ):
-            yield record
-    finally:
-        await client.aclose()
 
 
 #: 국가유산 행사 rolling window. provider ``iter_months`` 기본값과 같은 창이지만
@@ -1960,73 +1926,87 @@ def _one_row_per_parking_number(records: Sequence[Any]) -> list[Any]:
     ]
 
 
-#: visitkorea 축제 순회의 **절대** 페이지 상한. 100행 × 50 = 5,000건이면 국내 연간
-#: 축제 수를 크게 넘는다. 이 오퍼레이션의 실측 일일 한도는 1,000이다
-#: (docs/etl/upstream-quota.md). 넘으면 조용히 자르지 않고
-#: ``ProviderPaginationOverrun``으로 실패한다 — 그때 숫자를 의도적으로 올려라.
-_VISITKOREA_FESTIVAL_MAX_PAGES: Final = 50
+#: TourAPI 축제 목록 한 페이지 행 수. ``searchFestival2``는 1,000행 페이지를 준다 — 수집 창
+#: 안의 축제는 900건 안팎이라(2026-11-10 실측 879) 한 sweep이 1호출이다.
+_VISITKOREA_FESTIVAL_PAGE_SIZE: Final = 1000
+#: 축제 순회의 **절대** 페이지 상한 — 1,000행 × 10 = 10,000건이면 국내 연간 축제 수를 크게 넘는다.
+#: 이 오퍼레이션의 일일 한도는 1,000이다(``docs/etl/upstream-quota.md``). 넘으면 조용히 자르지
+#: 않고 ``ProviderPaginationOverrun``으로 실패한다 — 그때 숫자를 의도적으로 올려라.
+_VISITKOREA_FESTIVAL_MAX_PAGES: Final = 10
 
 
-async def fetch_visitkorea_festival_events(
+class VisitKoreaFestivalSnapshotIncomplete(RuntimeError):
+    """축제 목록이 완전하지 않다(선언보다 짧거나 순회 중 바뀌었다) — 은퇴 적재 전에 멈춘다."""
+
+
+async def fetch_visitkorea_festivals(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """VisitKorea TourAPI 축제(searchFestival) record를 visitkorea client로 stream한다.
+    """TourAPI ``searchFestival2`` 축제·공연·행사의 ``TourItem``(유일한 축제 원천, 2026-11-10).
 
-    ``settings.data_go_kr_service_key``로 ``KrTourApiClient(service_key=...)``를 열고
-    ``search_festival(event_start_date=<올해 1월 1일 KST>)``을 ``iter_pages``로
-    페이지네이션하며 ``TourItem``(krtour ``VisitKoreaFestivalItem`` Protocol 충족)을
-    yield한다. enrichment 2차 source라 1차(datagokr) 적재 후 매칭에 쓰인다(ADR-042).
-    visitkorea client는 async이므로 async generator. 소비 종료/조기 close 시
-    ``finally``에서 ``aclose()``.
+    ``eventStartDate``는 :func:`kortravelmap.providers.visitkorea.festival_window_start`(한 해 전
+    그달 1일, KST)다 — 원천은 그날 이후에 끝나는 행사를 준다. 이 dataset은 목록에 없는 축제를
+    **은퇴**시키므로 목록이 완전해야 한다. 다음이면 :class:`VisitKoreaFestivalSnapshotIncomplete`로
+    실패한다(관광지 fetcher와 같은 규칙).
+
+    - 응답에 ``totalCount``가 없다(provider는 받은 행 수로 채운다 — 선언 없이는 완전성을 모른다).
+    - 페이지마다 받은 ``totalCount``가 다르다(순회 중 등록·삭제로 목록이 밀렸다).
+    - 목록이 비었거나 고유 contentid 수가 선언보다 적다.
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "visitkorea festival events live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    api_key = _visitkorea_service_key(settings, "festivals")
     visitkorea = cast(Any, importlib.import_module("visitkorea"))
     client = visitkorea.KrTourApiClient(service_key=api_key)
     kst = timezone(timedelta(hours=9))
-    start = date(datetime.now(kst).year, 1, 1)
-    num_of_rows = 100
+    start = festival_window_start(datetime.now(kst).date())
+    declared: list[int] = []
+    seen: set[str] = set()
 
     async def _page(page_no: int) -> ProviderPage:
-        page = await client.search_festival(start, page_no=page_no, num_of_rows=num_of_rows)
-        # `fingerprint`가 라이브러리에서 잃은 '전진하지 않는 페이지네이션' 검사를
-        # 되살린다(`ProviderPaginationStalled`).
+        page = await client.search_festival(
+            start,
+            arrange="C",
+            page_no=page_no,
+            num_of_rows=_VISITKOREA_FESTIVAL_PAGE_SIZE,
+        )
+        raw = getattr(page, "raw", None)
+        if isinstance(raw, Mapping) and raw.get("totalCount") in (None, ""):
+            raise VisitKoreaFestivalSnapshotIncomplete(
+                "TourAPI searchFestival2: 응답에 totalCount가 없다."
+            )
+        declared.append(int(page.total_count))
         return ProviderPage(
             items=page.items,
             total_count=page.total_count,
-            fingerprint=getattr(page, "raw", None),
+            fingerprint=raw,
         )
 
     try:
-        # visitkorea의 `iter_pages`는 `max_pages`를 주지 않으면 **상한이 없다**
-        # (`_pagination.iter_paginated_pages`: `total_count`가 말하는 만큼 전부 걷는다).
-        # 같은 페이지 반복은 잡지만 "너무 많은 페이지"는 잡지 않는다.
-        #
-        # `max_pages`가 아니라 `absolute_max_pages`를 쓴다 — 전자는 천장이 아니라
-        # 바닥이라 선언 건수가 그 위로 올린다(그것을 실측으로 확인했다).
-        #
-        # 라이브러리 iterator가 갖고 있던 "직전 페이지와 raw가 같으면 실패" 가드는
-        # 위 `_page`가 `fingerprint`로 넘겨 헬퍼 쪽에서 되살린다 — 처음 옮길 때
-        # 그것을 잃었고 적대 리뷰가 잡았다.
-        #
-        # **한계**: fingerprint가 응답 body 전체라, upstream이 매 페이지 달라지는
-        # 필드(요청 시각 등)를 실어 주면 같은 items를 받아도 가드가 발화하지
-        # 않는다. TourAPI 응답에는 그런 필드가 없지만 계약은 아니다.
         async for record in aiter_paginated_items(
             _page,
-            num_of_rows=num_of_rows,
+            num_of_rows=_VISITKOREA_FESTIVAL_PAGE_SIZE,
             label="visitkorea search_festival",
             absolute_max_pages=_VISITKOREA_FESTIVAL_MAX_PAGES,
             warn=_LOGGER.warning,
         ):
+            content_id = str(getattr(record, "content_id", "") or "").strip()
+            if content_id:
+                seen.add(content_id)
             yield record
+        if len(set(declared)) > 1:
+            raise VisitKoreaFestivalSnapshotIncomplete(
+                f"TourAPI searchFestival2: 순회 중 선언 건수가 바뀌었다({min(declared)}~"
+                f"{max(declared)}) — 밀린 목록으로 은퇴시키지 않는다."
+            )
+        expected = max(declared, default=0)
+        if expected == 0 or not seen:
+            raise VisitKoreaFestivalSnapshotIncomplete(
+                "TourAPI searchFestival2: 목록이 비었다 — 축제 전체를 은퇴시키지 않는다."
+            )
+        if len(seen) < expected:
+            raise VisitKoreaFestivalSnapshotIncomplete(
+                f"TourAPI searchFestival2: 선언 {expected}건 중 고유 {len(seen)}건만 받았다 — "
+                "부분 snapshot으로 은퇴시키지 않는다."
+            )
     finally:
         await client.aclose()
 

@@ -3,11 +3,11 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from kortravelmap.dto import Address, Coordinate
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.providers.visitkorea import tourapi_festivals_to_bundles
 
 from kortravelmap.dagster.validation import validate_feature_bundles_address
 
@@ -17,42 +17,44 @@ _FETCHED = datetime(2026, 6, 2, 12, 0, tzinfo=_KST)
 
 @dataclass(frozen=True)
 class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
+    """`VisitKoreaFestivalItem` Protocol 만족 — provider ``TourItem`` 필드명."""
 
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
+    content_id: str | None
+    title: str | None
+    content_type_id: str | None = "15"
+    addr1: str | None = None
+    addr2: str | None = None
+    zipcode: str | None = None
+    tel: str | None = None
+    first_image: str | None = None
+    first_image2: str | None = None
+    map_x: float | None = None
+    map_y: float | None = None
+    lcls_systm1: str | None = None
+    lcls_systm2: str | None = None
+    lcls_systm3: str | None = None
+    l_dong_regn_cd: str | None = None
+    l_dong_signgu_cd: str | None = None
+    created_time: datetime | None = None
+    modified_time: datetime | None = None
+    copyright_division_code: str | None = None
+    event_start_date: str | None = None
+    event_end_date: str | None = None
+    overview: str | None = None
+    homepage: str | None = None
 
 
 _FESTIVAL = _Festival(
-    fstvl_nm="서울 봄꽃 축제",
-    opar="여의도공원",
-    fstvl_start_date=date(2026, 4, 5),
-    fstvl_end_date=date(2026, 4, 12),
-    fstvl_co="봄꽃 축제.",
-    mnnst_nm="영등포구청",
-    phone_number="02-2670-3114",
-    rdnmadr="서울특별시 영등포구 여의공원로 120",
-    lnmadr="서울특별시 영등포구 여의도동 8",
-    latitude=37.5263,
-    longitude=126.9239,
-    reference_date=date(2026, 3, 1),
-    instt_nm="서울특별시 영등포구",
+    content_id="900101",
+    title="서울 봄꽃 축제",
+    addr1="서울특별시 영등포구 여의공원로 120",
+    addr2="여의도공원",
+    tel="02-2670-3114",
+    map_x=126.9239,
+    map_y=37.5263,
+    event_start_date="20260405",
+    event_end_date="20260412",
+    overview="봄꽃 축제.",
 )
 
 
@@ -70,7 +72,7 @@ async def _reverse(coord: Coordinate) -> Address:
 
 
 async def test_coordinate_without_reverse_code_is_error() -> None:
-    bundles = await cultural_festivals_to_bundles([_FESTIVAL], fetched_at=_FETCHED)
+    bundles = await tourapi_festivals_to_bundles([_FESTIVAL], fetched_at=_FETCHED)
 
     validation = validate_feature_bundles_address(bundles)
 
@@ -80,7 +82,7 @@ async def test_coordinate_without_reverse_code_is_error() -> None:
 
 
 async def test_reverse_geocoded_provider_address_matches() -> None:
-    bundles = await cultural_festivals_to_bundles(
+    bundles = await tourapi_festivals_to_bundles(
         [_FESTIVAL],
         fetched_at=_FETCHED,
         reverse_geocoder=_reverse,

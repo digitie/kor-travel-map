@@ -2,8 +2,8 @@
 
 한국관광공사 국문 관광정보 서비스(KorService2, 공공데이터포털 15101578 "한국관광공사_국문
 관광정보 서비스_GW") `areaBasedList2`의 **관광지(12)·문화시설(14)·레포츠(28)** 를 1차 place
-Feature로 적재한다(14·28은 2026-11-10 추가 — 한 dataset·한 snapshot, migration 없음). 축제(`searchFestival2`, `visitkorea_festival_events`)는 표준데이터 1차의 enrichment지만
-이 dataset은 Feature를 직접 만든다.
+Feature로 적재한다(14·28은 2026-11-10 추가 — 한 dataset·한 snapshot, migration 없음). 축제(`searchFestival2`, `visitkorea_festivals`)도 2026-11-10부터 1차 event다
+(`docs/etl/event-feature-etl.md`) — 같은 `detailCommon2` 한도를 나눠 쓴다(§4).
 
 | 항목 | 값 |
 |---|---|
@@ -126,7 +126,9 @@ KorService2 목록은 옛 `cat1~3`을 비워 주므로 2025 신 분류체계로 
 data.go.kr 한도는 **오퍼레이션당** 1,000/일이다(`docs/etl/upstream-quota.md` §2). 목록은 13호출이지만
 `detailCommon2`는 항목마다 1호출이라 1만 2천 건을 하루에 받을 수 없다.
 
-- run마다 상세 예산 `VISITKOREA_ATTRACTION_DETAIL_BUDGET = 600`(한도의 60%).
+- run마다 상세 예산 `VISITKOREA_ATTRACTION_DETAIL_BUDGET = 600`(한도의 60%). 축제 dataset이 같은
+  오퍼레이션을 `VISITKOREA_FESTIVAL_DETAIL_BUDGET = 300`으로 쓴다 — 둘의 합은
+  `VISITKOREA_DETAIL_DAILY_BUDGET = 900` 이하여야 한다(테스트 고정, 2026-11-10).
 - 저장 `raw_data`의 `modified_time`이 목록과 같고 `overview`가 `None`이 아니면 저장 상세를 이어 쓴다.
   받았으나 비어 있는 상세는 `""`로 저장한다(`None`=아직 받지 않음).
 - 필요 항목은 **수정된 것 먼저**, 한 번도 받지 않은 것 다음, 각각 contentid 순. 예산 밖의 수정 항목은

@@ -21,7 +21,7 @@
 | `datagokr_museums` | `15017323` | `place` | **`01040000`** `TOURISM_CULTURAL_FACILITY` (fclty_type으로 박물관 `01040100`/미술관 `01040200` 정밀화) | 연 1회 |
 | `datagokr_parking_lots` | `15012896` | `place` | **`06010000`** `TRANSPORT_PARKING` | 반기 1회 |
 | `datagokr_tourist_attractions` | `15021141` | `place` (경계 source 확인 후 `area` 후보) | **`01000000`** `TOURISM` (대분류, 세부는 trrsrt_se로 분기) | 연 1회 |
-| `standard_cultural_festivals` | `15013104` | `event` | event는 카테고리 외 — `EventDetail.event_kind="cultural_festival"`. `features.category`는 `01000000` `TOURISM` (대분류) | 주 1회 metadata + 월 1회 changed full scan |
+| ~~`datagokr_cultural_festivals`~~ | `15013104` | ~~`event`~~ | **퇴역(2026-11-10, migration 449)** — 축제 원천은 TourAPI다(`docs/etl/event-feature-etl.md` §0). dataset 비활성·operation 꺼짐, 기존 Feature는 퇴역 | — |
 | `datagokr_traditional_markets` | `15012894` | `place` | **`05070000`** `CONVENIENCE_TRADITIONAL_MARKET` (§7.6) | 월 1회(원천 연간 갱신, 기관 등록분 매월 초 병합) |
 
 자세한 Tier 1~4 트리는 `docs/architecture/category.md` §4.
@@ -189,10 +189,12 @@ identity는 그대로다(prod 17,986 entity 중 17,875가 파일에 있다. 나�
 `place_kind="tourist_site"`. category: `TOURISM_*`. 경계가 있는 일부는 향후
 `area`로 변환 후보.
 
-### 7.5 cultural_festivals (event)
+### 7.5 cultural_festivals (event) — 퇴역
 
-`event_kind="cultural_festival"`. `EventDetail.starts_on`/`ends_on`. category:
-`EVENT_CULTURAL_FESTIVAL`.
+2026-11-10 소유자 결정("datagokr 축제 소스는 아예 쓰지마")으로 쓰지 않는다. 키가 403
+`SERVICE_KEY_IS_NOT_REGISTERED_ERROR`(마지막 성공 2026-10-31)였다. 변환기·fetcher·asset·job·
+schedule을 지웠고 migration 449가 operation을 끄고 dataset을 비활성으로 내리며 기존 Feature를
+퇴역한다. 축제 정본은 `docs/etl/event-feature-etl.md`(TourAPI `searchFestival2`).
 
 ### 7.6 traditional_markets (place, #1459)
 
@@ -315,6 +317,8 @@ curl -X POST http://127.0.0.1:12701/debug/standard-data \
   데이터는 행안부/공공데이터포털이 안정 운영하여 갱신 주기가 명시되고 schema
   변경이 announce되며, visitkorea TourAPI 대비 좌표 nullable·축제 데이터 정합성
   문제가 적다. (5종 dataset·dataset_key·갱신주기는 §2에 정본.)
+- **[대체됨 2026-11-10 → `event-feature-etl.md` §0]** 아래 축제 결정은 더 이상 유효하지
+  않다. 축제는 TourAPI가 유일한 1차 원천이고 표준데이터 축제·이름 매칭 enrichment는 퇴역했다.
 - **축제 1차 source 전환 + visitkorea enrichment 강등** (구 ADR-042): 축제의
   1차 source를 visitkorea festival → `standard_cultural_festivals`로 바꾸고,
   visitkorea는 image/상세 description/contentId 매핑을 채우는 enrichment

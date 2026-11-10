@@ -3936,13 +3936,11 @@ _CATEGORY_REPROJECTION_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
     ("python-mcst-api", "mcst_media_famous_places_csv"),
     ("python-mcst-api", "mcst_leisure_camping_facilities_csv"),
     ("python-krheritage-api", "krheritage_event_list"),
-    ("data.go.kr-standard", "datagokr_cultural_festivals"),
     # #1459 §6: 근거 없는 해수욕장 제안을 거르는 규칙이 같은 원본의 기존 행에도 닿게 한다.
     ("kor-travel-concierge-youtube", "youtube_place_candidates"),
 })
 _EVENT_QUALITY_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
     ("python-krheritage-api", "krheritage_event_list"),
-    ("data.go.kr-standard", "datagokr_cultural_festivals"),
 })
 
 
@@ -3952,7 +3950,6 @@ _EVENT_QUALITY_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
 #: 변환이 좌표를 찾았고, 저장 좌표가 NULL이면 같은 원본이어도 본문을 다시 쓴다(한 번뿐 — 다음
 #: 실행은 저장 좌표가 있어 그대로다). provider 코드를 import하지 않고 scope만 둔다.
 _COORDINATE_BACKFILL_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
-    ("data.go.kr-standard", "datagokr_cultural_festivals"),
     ("data.go.kr-standard", "datagokr_parking_lots"),
     ("python-krheritage-api", "krheritage_heritage_features"),
     # 행사 좌표는 장소 Feature·주소에서 온다(#1468 D) — 장소가 나중에 적재되면 같은 원본에 채운다.

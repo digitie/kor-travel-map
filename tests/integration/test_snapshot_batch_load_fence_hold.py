@@ -18,7 +18,7 @@ from __future__ import annotations
 import asyncio
 import time
 from collections.abc import AsyncIterator, Sequence
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -32,10 +32,10 @@ from kortravelmap.infra.feature_repo import (
     capture_provider_curation_input,
     lock_feature_curation_write,
 )
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from kortravelmap.settings import KorTravelMapSettings
 from tests.integration._db_cleanup import truncate_committed_test_rows
-from tests.integration.test_client_orchestration import _canonical_uuid_for_alias, _Festival
+from tests.integration._tourapi_festival import festival_bundles, festival_item
+from tests.integration.test_client_orchestration import _canonical_uuid_for_alias
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -82,23 +82,10 @@ async def dagster_like_engine(
 
 
 async def _bundles(*seeds: str) -> list[FeatureBundle]:
-    items = [
-        _Festival(
-            fstvl_nm="스풀 검증 축제",
-            opar="여의도공원",
-            fstvl_start_date=date(2026, 4, 5),
-            fstvl_end_date=date(2026, 4, 12),
-            rdnmadr=f"서울특별시 영등포구 여의공원로 120 ({seed})",
-            lnmadr="서울특별시 영등포구 여의도동 8",
-            latitude=37.5263,
-            longitude=126.9239,
-            reference_date=date(2026, 3, 1),
-            instt_nm="서울특별시 영등포구",
-        )
-        for seed in seeds
-    ]
-    return await cultural_festivals_to_bundles(
-        items,  # type: ignore[arg-type]
+    # 자연키는 TourAPI contentid — seed마다 다른 Feature다.
+    items = [festival_item(seed, "스풀 검증 축제") for seed in seeds]
+    return await festival_bundles(
+        items,
         fetched_at=datetime(2026, 10, 22, 12, 0, tzinfo=_KST),
     )
 

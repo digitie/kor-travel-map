@@ -32,10 +32,13 @@ from kortravelmap.infra.db import make_async_engine, make_async_session_factory
 from kortravelmap.infra.feature_geocode_load import address_column_values
 from kortravelmap.infra.feature_geocode_reuse import read_reusable_geo_columns
 from kortravelmap.infra.feature_repo import load_bundles
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from kortravelmap.settings import KorTravelMapSettings
 from tests.integration._db_cleanup import truncate_committed_test_rows
-from tests.integration.test_client_orchestration import _Festival
+from tests.integration._tourapi_festival import (
+    TourApiFestival,
+    festival_bundles,
+    festival_item,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -86,26 +89,21 @@ class _Reverse:
         )
 
 
-def _item(seed: str, *, lat: float = 37.5263, description: str = "축제") -> _Festival:
-    return _Festival(
-        fstvl_nm=f"재사용 축제 {seed}",
-        opar="여의도공원",
-        fstvl_start_date=date(2026, 10, 1),
-        fstvl_end_date=date(2026, 10, 9),
-        fstvl_co=description,
-        rdnmadr=f"서울특별시 영등포구 여의공원로 120 ({seed})",
-        lnmadr="서울특별시 영등포구 여의도동 8",
-        latitude=lat,
-        longitude=126.9239,
-        reference_date=date(2026, 9, 1),
-        instt_nm="서울특별시 영등포구",
+def _item(seed: str, *, lat: float = 37.5263, description: str = "축제") -> TourApiFestival:
+    return festival_item(
+        f"REUSE-{seed}",
+        f"재사용 축제 {seed}",
+        starts_on=date(2026, 10, 1),
+        ends_on=date(2026, 10, 9),
+        lat=lat,
+        overview=description,
     )
 
 
-def _transform(items: Sequence[_Festival]) -> Any:
+def _transform(items: Sequence[TourApiFestival]) -> Any:
     async def run(geocoder: ReverseGeocoder) -> list[FeatureBundle]:
-        return await cultural_festivals_to_bundles(
-            items,  # type: ignore[arg-type]
+        return await festival_bundles(
+            items,
             fetched_at=_FETCHED,
             reverse_geocoder=geocoder,
         )
@@ -283,7 +281,7 @@ async def _state(engine: AsyncEngine, bundles: Sequence[FeatureBundle]) -> dict[
 
 async def _load_run(
     client: AsyncKorTravelMapClient,
-    items: Sequence[_Festival],
+    items: Sequence[TourApiFestival],
     *,
     live: _Reverse,
     ref: DatasetRef,

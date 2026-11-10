@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Final
 
 import pytest
 from sqlalchemy import text
 
-from kortravelmap.dto import SourceRecord
+from kortravelmap.dto import FeatureBundle, SourceRecord
 from kortravelmap.infra import feature_repo, scope_repo
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -80,30 +80,6 @@ async def _refresh_membership(
     return int(row.provider_dataset_id), str(row.sync_scope), str(row.operation_key)
 
 
-@dataclass(frozen=True)
-class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
-
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
-
-
 async def _bundle(
     seed: str,
     *,
@@ -111,31 +87,19 @@ async def _bundle(
     lat: str = "37.5263",
     bjd_code: str = "1156011000",
     sigungu_code: str = "11560",
-):
-    # 자연키는 name::address 파생(#374) — seed를 이름에 넣어 feature 구분.
+) -> FeatureBundle:
+    # 자연키는 TourAPI contentid — seed를 contentid와 이름에 넣어 feature 구분.
     # bjd_code/sigungu_code는 변환 입력이 아니라 _load()의 직접 UPDATE 값.
     del bjd_code, sigungu_code
-    item = _Festival(
-        fstvl_nm=f"스코프 테스트 축제 {seed}",
-        opar="테스트 공원",
-        fstvl_start_date=date(2026, 4, 5),
-        fstvl_end_date=date(2026, 4, 12),
-        fstvl_co="scope resolver 테스트용 fixture.",
-        mnnst_nm="영등포구청",
-        phone_number="02-2670-3114",
-        rdnmadr="서울특별시 영등포구 여의공원로 120",
-        lnmadr="서울특별시 영등포구 여의도동 8",
-        latitude=float(lat),
-        longitude=float(lon),
-        reference_date=date(2026, 3, 1),
-        instt_nm="서울특별시 영등포구",
+    item = festival_item(
+        seed,
+        f"스코프 테스트 축제 {seed}",
+        addr2="테스트 공원",
+        lon=float(lon),
+        lat=float(lat),
+        overview="scope resolver 테스트용 fixture.",
     )
-    return (
-        await cultural_festivals_to_bundles(
-            [item],  # type: ignore[list-item]
-            fetched_at=_FETCHED,
-        )
-    )[0]
+    return (await festival_bundles([item], fetched_at=_FETCHED))[0]
 
 
 @dataclass(frozen=True)

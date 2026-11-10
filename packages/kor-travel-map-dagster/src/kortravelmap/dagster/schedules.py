@@ -29,9 +29,8 @@ from dagster import (
 )
 
 from .assets import (
-    feature_event_datagokr_cultural_festivals,
     feature_event_krheritage_events,
-    feature_event_visitkorea_enrichment,
+    feature_event_visitkorea_festivals,
     feature_geometry_knps_records,
     feature_notice_krforest_landslide_forecast_issues,
     feature_place_datagokr_file_data,
@@ -224,13 +223,6 @@ def _datagokr_file_data_schedule_specs() -> tuple[FeatureLoadScheduleSpec, ...]:
 
 
 FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
-    FeatureLoadScheduleSpec(
-        asset=feature_event_datagokr_cultural_festivals,
-        job_name="feature_event_datagokr_cultural_festivals_job",
-        schedule_name="feature_event_datagokr_cultural_festivals_monthly_schedule",
-        cron_schedule="10 3 1 * *",
-        description="전국문화축제표준데이터 event Feature 월 1회 야간 적재.",
-    ),
     # 아래 둘(과 공항)은 kor-travel-transport export를 읽는다(ADR-106). 상류 쿼터는 transport가
     # 지고, Map은 transport 수집 주기 뒤에 맞춘다. 유가·돌발 PG 적재는 ADR-114 결정 7(1단계,
     # migration 419)로 퇴역했다 — 그 현재 상태는 Valkey(`transport_state`)가 든다.
@@ -416,11 +408,13 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         description="kor-travel-concierge YouTube 장소 후보 place Feature 월 1회 적재.",
     ),
     FeatureLoadScheduleSpec(
-        asset=feature_event_visitkorea_enrichment,
-        job_name="feature_event_visitkorea_enrichment_job",
-        schedule_name="feature_event_visitkorea_enrichment_monthly_schedule",
-        cron_schedule="50 4 1 * *",
-        description="VisitKorea 축제 enrichment review 월 1회 적재.",
+        asset=feature_event_visitkorea_festivals,
+        job_name="feature_event_visitkorea_festivals_job",
+        schedule_name="feature_event_visitkorea_festivals_daily_schedule",
+        # 유일한 축제 원천(2026-11-10). 축제는 시기에 민감해 매일 받는다. 같은 ``detailCommon2``
+        # 한도는 run 예산의 합(관광지 600 + 축제 300 ≤ 900)이 지킨다 — 실행 순서와는 무관하다.
+        cron_schedule="35 4 * * *",
+        description="TourAPI 축제·공연·행사(15) event Feature 매일 적재.",
     ),
     # MCST 파일데이터 (T-220 재배선, #395) — 저빈도 시설 데이터, 월 1회.
     FeatureLoadScheduleSpec(

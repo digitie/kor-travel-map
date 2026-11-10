@@ -11,7 +11,7 @@ from sqlalchemy import text
 
 from kortravelmap.infra import feature_repo, public_views_repo
 from kortravelmap.providers.khoa import beaches_to_bundles
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 pytestmark = pytest.mark.integration
 
@@ -55,28 +55,6 @@ class _Beach:
     beach_kind: str | None
     image_url: str | None
     raw: Any = None
-
-
-@dataclass(frozen=True)
-class _Festival:
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
 
 
 async def test_public_beaches_use_place_kind_not_category(migrated_session: Any) -> None:
@@ -124,25 +102,15 @@ async def test_public_beaches_use_place_kind_not_category(migrated_session: Any)
 
 async def test_public_festivals_monthly_uses_date_overlap(migrated_session: Any) -> None:
     bundle = (
-        await cultural_festivals_to_bundles(
+        await festival_bundles(
             [
-                _Festival(
-                    fstvl_nm="통합테스트 봄꽃 축제",
-                    opar="여의도공원",
-                    fstvl_start_date=date(2026, 4, 25),
-                    fstvl_end_date=date(2026, 5, 3),
-                    fstvl_co="봄꽃 축제 상세",
-                    mnnst_nm="영등포구청",
-                    auspc_instt_nm="서울시",
-                    suprt_instt_nm="후원기관",
-                    phone_number="02-2670-3114",
-                    homepage_url="https://example.test/festival",
-                    rdnmadr="서울특별시 영등포구 여의공원로 120",
-                    lnmadr="서울특별시 영등포구 여의도동 8",
-                    latitude=37.5263,
-                    longitude=126.9239,
-                    reference_date=date(2026, 4, 1),
-                    instt_nm="서울특별시 영등포구",
+                festival_item(
+                    "FEST-PUBLIC-MONTHLY",
+                    "통합테스트 봄꽃 축제",
+                    starts_on=date(2026, 4, 25),
+                    ends_on=date(2026, 5, 3),
+                    overview="봄꽃 축제 상세",
+                    homepage="https://example.test/festival",
                 )
             ],
             fetched_at=_FETCHED,
@@ -168,7 +136,10 @@ async def test_public_festivals_monthly_uses_date_overlap(migrated_session: Any)
     assert row.feature_uuid == feature_uuid
     assert row.detail["starts_on"] == "2026-04-25"
     assert row.detail["ends_on"] == "2026-05-03"
-    assert row.source_raw_data["fstvl_co"] == "봄꽃 축제 상세"
+    # 공개 축제 view의 ``festival_content``는 ``detail.payload.content``를 읽는다(TourAPI 상세).
+    assert row.detail["payload"]["content"] == "봄꽃 축제 상세"
+    assert row.source_raw_data["overview"] == "봄꽃 축제 상세"
+    assert "python-visitkorea-api" in row.source_providers
     assert any(
         month.year == 2026 and month.month == 5 and month.count >= 1
         for month in page.months

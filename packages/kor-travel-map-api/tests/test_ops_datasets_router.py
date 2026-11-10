@@ -961,8 +961,8 @@ def test_fixture_preview_enforces_response_budget(
     async def _catalog(*_args: object) -> tuple[ProviderDatasetCatalogEntry, ...]:
         return (
             _preview_catalog_entry(
-                provider="data.go.kr-standard",
-                dataset_key="datagokr_cultural_festivals",
+                provider="python-visitkorea-api",
+                dataset_key="visitkorea_festivals",
             ),
         )
 

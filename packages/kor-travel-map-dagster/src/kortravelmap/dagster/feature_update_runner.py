@@ -41,9 +41,8 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 from dagster import InitResourceContext, resource
 
 from .assets import (
-    run_feature_event_datagokr_cultural_festivals,
     run_feature_event_krheritage_events,
-    run_feature_event_visitkorea_enrichment,
+    run_feature_event_visitkorea_festivals,
     run_feature_geometry_knps_records,
     run_feature_notice_krforest_landslide_forecast_issues,
     run_feature_place_datagokr_file_data,
@@ -72,7 +71,6 @@ from .mcst_features import run_feature_place_mcst_culture
 from .mois_chunked_load import resolve_mois_load_plan
 from .mois_source_sync import ensure_mois_source_db_fresh
 from .provider_fetchers import (
-    fetch_datagokr_cultural_festivals,
     fetch_datagokr_file_data_records,
     fetch_khoa_beaches,
     fetch_knps_geometry_records,
@@ -97,7 +95,7 @@ from .provider_fetchers import (
     fetch_transport_fuel_stations,
     fetch_transport_rail_stations,
     fetch_transport_rest_areas,
-    fetch_visitkorea_festival_events,
+    fetch_visitkorea_festivals,
     fetch_visitkorea_tourist_attractions,
 )
 from .schedules import DISABLED_FEATURE_LOAD_OPERATION_KEYS
@@ -742,12 +740,6 @@ def _operation_specs(
 
 _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
     *_operation_specs(
-        "feature_event_datagokr_cultural_festivals_job",
-        run=run_feature_event_datagokr_cultural_festivals,
-        resources=_records("datagokr_cultural_festivals", fetch_datagokr_cultural_festivals),
-        asset_key="feature_event_datagokr_cultural_festivals",
-    ),
-    *_operation_specs(
         "feature_place_transport_fuel_stations_job",
         run=run_feature_place_transport_fuel_stations,
         resources=_records("transport_fuel_stations", fetch_transport_fuel_stations),
@@ -902,10 +894,10 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
         asset_key="feature_place_kor_travel_concierge_youtube",
     ),
     *_operation_specs(
-        "feature_event_visitkorea_enrichment_job",
-        run=run_feature_event_visitkorea_enrichment,
-        resources=_records("visitkorea_festival_events", fetch_visitkorea_festival_events),
-        asset_key="feature_event_visitkorea_enrichment",
+        "feature_event_visitkorea_festivals_job",
+        run=run_feature_event_visitkorea_festivals,
+        resources=_records("visitkorea_festivals", fetch_visitkorea_festivals),
+        asset_key="feature_event_visitkorea_festivals",
     ),
     *_operation_specs(
         "feature_place_mcst_culture_job",

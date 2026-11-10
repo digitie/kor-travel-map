@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -43,8 +43,8 @@ from kortravelmap.providers.kor_travel_concierge import (
     kor_travel_concierge_inactive_entity_ids,
     kor_travel_concierge_items_to_bundles,
 )
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from tests.integration._subtype_seed import seed_feature_subtype
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -91,57 +91,11 @@ async def _canonical_id(session: AsyncSession, legacy_ref: str) -> str:
     return identity.feature_id
 
 
-@dataclass(frozen=True)
-class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 (좌표 있는 케이스).
-
-    provider 실모델 ``PublicCulturalFestival`` 필드명 (ADR-044 재정렬, #374).
-    """
-
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
-
-
-async def _bundle(seed: str = "FEST-REPO-001"):
-    # 자연키는 name::address 파생(#374) — 이름은 동일하게 두고(검색 테스트
-    # 전제) 주소에 seed를 넣어 feature를 구분한다.
-    item = _Festival(
-        fstvl_nm="서울 봄꽃 축제",
-        opar="여의도공원",
-        fstvl_start_date=date(2026, 4, 5),
-        fstvl_end_date=date(2026, 4, 12),
-        fstvl_co="봄꽃 축제 상세.",
-        mnnst_nm="영등포구청",
-        phone_number="02-2670-3114",
-        rdnmadr=f"서울특별시 영등포구 여의공원로 120 ({seed})",
-        lnmadr="서울특별시 영등포구 여의도동 8",
-        latitude=37.5263,
-        longitude=126.9239,
-        reference_date=date(2026, 3, 1),
-        instt_nm="서울특별시 영등포구",
-    )
-    return (
-        await cultural_festivals_to_bundles(
-            [item],  # type: ignore[list-item]
-            fetched_at=_FETCHED,
-        )
-    )[0]
+async def _bundle(seed: str = "FEST-REPO-001") -> FeatureBundle:
+    # 자연키는 TourAPI contentid — 이름은 동일하게 두고(검색 테스트 전제)
+    # contentid에 seed를 넣어 feature를 구분한다.
+    item = festival_item(seed, "서울 봄꽃 축제", overview="봄꽃 축제 상세.")
+    return (await festival_bundles([item], fetched_at=_FETCHED))[0]
 
 
 def _first_probe_notice_bundle(

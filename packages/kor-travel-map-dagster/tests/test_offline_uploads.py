@@ -150,7 +150,7 @@ def _upload(upload_id: str) -> OfflineUpload:
         upload_id=upload_id,
         provider_dataset_id=1,
         sync_scope="dataset_wide",
-        operation_key="feature_event_datagokr_cultural_festivals_job",
+        operation_key="feature_place_standard_museums_job",
         original_filename="features.jsonl",
         storage_backend="rustfs",
         storage_key=f"offline/{upload_id}/features.jsonl",

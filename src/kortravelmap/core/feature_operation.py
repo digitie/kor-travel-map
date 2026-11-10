@@ -52,9 +52,8 @@ DEDICATED_JOB_ONLY_SKIP_REASON = "dedicated_job_only"
 
 FEATURE_LOAD_JOB_OPERATION_KEYS: frozenset[str] = frozenset(
     {
-        "feature_event_datagokr_cultural_festivals_job",
         "feature_event_krheritage_events_job",
-        "feature_event_visitkorea_enrichment_job",
+        "feature_event_visitkorea_festivals_job",
         "feature_geometry_knps_records_job",
         "feature_notice_krforest_landslide_forecast_issues_job",
         "feature_place_datagokr_ansan_world_restaurants_job",
@@ -92,8 +91,8 @@ DB의 ``refresh`` operation 중 여기 없는 것(MOIS 증분·상세·폐업 �
 
 GEO_DEPENDENT_OPERATION_KEYS: frozenset[str] = frozenset(
     {
-        "feature_event_datagokr_cultural_festivals_job",
         "feature_event_krheritage_events_job",
+        "feature_event_visitkorea_festivals_job",
         "feature_geometry_knps_records_job",
         "feature_place_datagokr_ansan_world_restaurants_job",
         "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job",
@@ -169,13 +168,13 @@ KNPS는 job 하나에 dataset 다섯이 결박돼 있어 dataset마다 run이 �
 dagster 패키지 테스트가 schedule spec의 run_config resource 이름과 같음을 고정한다."""
 
 REPLAY_RECORDS_RESOURCES: dict[str, str] = {
-    "feature_event_datagokr_cultural_festivals_job": "datagokr_cultural_festivals",
     "feature_place_standard_museums_job": "standard_museums",
     "feature_place_standard_tourist_attractions_job": "standard_tourist_attractions",
     "feature_place_standard_parking_lots_job": "standard_parking_lots",
     "feature_place_standard_special_streets_job": "standard_special_streets",
     "feature_place_standard_traditional_markets_job": "standard_traditional_markets",
     "feature_place_visitkorea_tourist_attractions_job": "visitkorea_tourist_attractions",
+    "feature_event_visitkorea_festivals_job": "visitkorea_festivals",
     "feature_place_datagokr_seoul_bookstores_job": "datagokr_file_data_records",
     "feature_place_datagokr_gyeonggi_muslim_friendly_restaurants_job": (
         "datagokr_file_data_records"

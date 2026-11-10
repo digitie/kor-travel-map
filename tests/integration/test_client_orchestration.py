@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
@@ -32,9 +32,9 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.models import FeatureRow
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from tests.integration._db_cleanup import truncate_committed_test_rows
 from tests.integration._feature_ids import feature_uuid
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -57,48 +57,7 @@ _TRUNCATE_SQL = (
 )
 
 
-@dataclass(frozen=True)
-class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 (좌표 있는 케이스).
-
-    provider 실모델 ``PublicCulturalFestival`` 필드명 (ADR-044 재정렬, #374).
-    """
-
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
-
-
-_FEST = _Festival(
-    fstvl_nm="서울 봄꽃 축제",
-    opar="여의도공원",
-    fstvl_start_date=date(2026, 4, 5),
-    fstvl_end_date=date(2026, 4, 12),
-    fstvl_co="봄꽃 축제 상세.",
-    mnnst_nm="영등포구청",
-    phone_number="02-2670-3114",
-    rdnmadr="서울특별시 영등포구 여의공원로 120",
-    lnmadr="서울특별시 영등포구 여의도동 8",
-    latitude=37.5263,
-    longitude=126.9239,
-    reference_date=date(2026, 3, 1),
-    instt_nm="서울특별시 영등포구",
-)
+_FEST = festival_item("FEST-CLIENT-001", "서울 봄꽃 축제", overview="봄꽃 축제 상세.")
 
 
 @dataclass(frozen=True)
@@ -248,8 +207,8 @@ async def _free_memberships(
 async def test_load_feature_bundles_commits_and_reads(
     map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
-    bundles = await cultural_festivals_to_bundles(
-        [_FEST],  # type: ignore[list-item]
+    bundles = await festival_bundles(
+        [_FEST],
         fetched_at=datetime(2026, 5, 28, 12, 0, tzinfo=_KST),
     )
     result = await map_client.load_feature_bundles(bundles)
@@ -279,8 +238,8 @@ async def test_load_feature_bundles_commits_and_reads(
 async def test_load_feature_bundle_batches_rolls_back_prior_batches(
     map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
 ) -> None:
-    bundles = await cultural_festivals_to_bundles(
-        [_FEST],  # type: ignore[list-item]
+    bundles = await festival_bundles(
+        [_FEST],
         fetched_at=datetime(2026, 5, 28, 12, 0, tzinfo=_KST),
     )
 
@@ -464,96 +423,6 @@ async def test_feature_update_request_client_lifecycle(
     assert failed.dagster_run_id == "dagster-run-client-test"
     assert failed.error_message == "client test failure"
 
-# -- T-RV-52c: festival enrichment review --------------------------------------
 
-
-@dataclass(frozen=True)
-class _VkItem:
-    """``VisitKoreaFestivalItem`` Protocol 만족 (enrichment 입력)."""
-
-    content_id: str
-    title: str | None
-    overview: str | None = None
-    first_image: str | None = None
-    first_image2: str | None = None
-    addr1: str | None = "서울특별시 영등포구"
-    area_code: str | None = "1"
-    sigungu_code: str | None = "19"
-    map_x: float | None = 126.9245
-    map_y: float | None = 37.526
-    event_start_date: str | None = "20260405"
-    event_end_date: str | None = "20260412"
-    tel: str | None = None
-    homepage: str | None = None
-    modified_time: str | None = "20260301120000"
-
-
-async def _seed_primary_festival(map_client: AsyncKorTravelMapClient) -> None:
-    """datagokr 1차 축제(event) feature를 commit 적재 (matcher 후보 대상)."""
-    bundles = await cultural_festivals_to_bundles(
-        [_FEST], fetched_at=datetime(2026, 3, 1, 9, 0, tzinfo=_KST)
-    )
-    await map_client.load_feature_bundles(bundles)
-
-
-async def test_refresh_festival_enrichment_reviews_classifies(
-    map_client: AsyncKorTravelMapClient,
-) -> None:
-    await _seed_primary_festival(map_client)
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=_KST)
-
-    # 부분 일치 → review-band, 완전 일치 → auto. 밴드를 넓혀 분류를 강제.
-    items = [
-        _VkItem(content_id="vk-review", title="서울 봄꽃"),
-        _VkItem(content_id="vk-auto", title="서울 봄꽃 축제"),
-    ]
-    result = await map_client.refresh_festival_enrichment_reviews(
-        items, fetched_at=fetched, accept_threshold=0.99, review_floor=0.5
-    )
-    assert result.auto.source_links_inserted == 1
-    assert result.review_queue.inserted == 1
-
-    pending = await map_client.list_pending_enrichment_reviews()
-    assert len(pending) == 1
-    assert pending[0]["source_name"] == "서울 봄꽃"
-    review_id = pending[0]["review_id"]
-
-    decision = await map_client.resolve_enrichment_review(
-        review_id, "accepted", reviewed_by="tester"
-    )
-    assert decision.changed is True
-    assert decision.applied is True
-
-    # accept 후 더 이상 pending 없음.
-    assert await map_client.list_pending_enrichment_reviews() == []
-
-
-async def test_resolve_enrichment_review_reject_keeps_no_link(
-    map_client: AsyncKorTravelMapClient, migrated_engine: AsyncEngine
-) -> None:
-    await _seed_primary_festival(map_client)
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=_KST)
-    await map_client.refresh_festival_enrichment_reviews(
-        [_VkItem(content_id="vk-review", title="서울 봄꽃")],
-        fetched_at=fetched,
-        accept_threshold=0.99,
-        review_floor=0.5,
-    )
-    pending = await map_client.list_pending_enrichment_reviews()
-    review_id = pending[0]["review_id"]
-
-    decision = await map_client.resolve_enrichment_review(review_id, "rejected")
-    assert decision.changed is True
-    assert decision.applied is False
-
-    # reject는 enrichment link을 만들지 않는다.
-    async with AsyncSession(migrated_engine) as session:
-        enrichment_links = (
-            await session.execute(
-                text(
-                    "SELECT count(*) FROM provider_sync.source_links "
-                    "WHERE source_role = 'enrichment'"
-                )
-            )
-        ).scalar_one()
-    assert enrichment_links == 0
+# T-RV-52c 축제 enrichment 검토 큐 시나리오(``refresh_festival_enrichment_reviews``)는
+# 2026-11-10 축제 원천 전환(TourAPI가 유일한 1차 원천)으로 그 client 메서드와 함께 삭제했다.

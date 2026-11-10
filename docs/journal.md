@@ -1,3 +1,7 @@
+## 2026-11-10 — 축제 원천 TourAPI 단독(449)
+
+- 소유자: 표준데이터 축제 아예 쓰지 않음(키 403). TourAPI searchFestival2가 1차 event(879건, 좌표 100%). 449가 표준축제·보강 op 끄고 비활성, 1,296건 퇴역. PinVi 참조는 삭제된 시험 여행뿐(M05 없음). detailCommon2는 관광지 600+축제 300.
+
 ## 2026-11-10 — 주차장 키 403 → 공개 파일
 
 - 운영 키가 주차장·박물관 Open API에서 403(관광지는 00). 주차장 파일 18,994행·고유 17,878, prod 키 17,986 중 17,875 일치(은퇴 경로 아님). 박물관·관광지는 다음 PR.
@@ -1019,6 +1023,7 @@ journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하�
 ## 2026-10-25 — 공개 provider patch P-first(426)
 
 실제25·공식 oracle1 PASS와 정리를 확인했다. 원실패를 보존한다. [근거·미완](reports/2026-10-25-provider-patch-protocol-entry.md). CI·운영·실제 SH는 미완이다.
+
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
 - 실제15·oracle1·EX18·제한 A/B를 정산했다. 원 실패를 보존하며 최종 CI·운영은 미완이다. [범위·한계](reports/2026-10-25-provider-base-update-first.md).
@@ -1026,6 +1031,7 @@ journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하�
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 
 - 기존 SER/capture/kernel/SH OFF를 보존했다. 직접25·정본oracle1·기존 client4와 별도 ASGI1(503→새요청200→재요청200)·fresh triple7을 검증했다. 공유 cutover DB의 통합11 원실패(9 PASS/2 FAIL)는 보존·합산하지 않는다. 정확 CI 양 PostGIS lane의28 FAIL/1 ERROR를 보존·분석 중이며 운영·whole snapshot은 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
+
 ## 2026-10-25 — Place projection 예산 검사 추출
 
 - Heritage 사전 검사를 core로 이동하고 기존 wrapper·9DTO·본문을 보존했다. 순수 회귀114 PASS이며 DB/수집 연결은 없다. [범위·미완](reports/2026-10-25-place-projection-budget-extraction.md).
@@ -1549,6 +1555,7 @@ main `0b2dc53d0`을 추가 통합하고 두 작업 기록을 양쪽 보존했다
 - 검사(n150 일회용 컨테이너): 새 단위·통합 초록(40초 holder: 무장 성공·끈 쪽 30초 55P03·5초 writer 5초), api 1251·dagster 826·
   관련 통합 23 초록, mypy·lint-imports 초록. 변이 검사와 unit 세션 main 대조는 PR 본문.
 - 문서 한도: acceptance §T-GR-03을 아카이브로 옮겼다(도구 검산 53건 보존).
+
 ## 2026-10-22 — prod 첫 적재 실패 2건: 브랜치 `fix/highway-evidence-krheritage-address`
 
 - prod(Map `edffdc8a`)에서 한 번도 성공하지 못한 job 둘을 고쳤다. migration·API·OpenAPI 변화 없음.

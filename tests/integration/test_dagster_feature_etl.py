@@ -10,9 +10,10 @@ from typing import Any
 
 import pytest
 from dagster import AssetExecutionContext, build_asset_context
+from kortravelmap.dagster import assets as dagster_assets
 from kortravelmap.dagster.assets import (
-    run_feature_event_datagokr_cultural_festivals,
     run_feature_event_krheritage_events,
+    run_feature_event_visitkorea_festivals,
     run_feature_geometry_knps_records,
     run_feature_place_knps_points,
     run_feature_place_krheritage_items,
@@ -36,6 +37,7 @@ from kortravelmap.providers.feature_operation_registry import (
 from kortravelmap.providers.kor_travel_transport import parse_rail_station
 from kortravelmap.settings import KorTravelMapSettings
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._tourapi_festival import festival_item
 
 pytestmark = pytest.mark.integration
 
@@ -56,28 +58,9 @@ _TRUNCATE_SQL = (
 )
 
 
-@dataclass(frozen=True)
-class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
-
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
+async def _no_tourapi_details(_settings: object, _content_ids: object) -> dict[str, Any]:
+    """TourAPI 상세(``detailCommon2``) 대역 — 통합 테스트는 원천을 부르지 않는다."""
+    return {}
 
 
 _KST_TZ = timezone(timedelta(hours=9))
@@ -277,27 +260,17 @@ async def _canonical_ids(
 async def test_dagster_assets_validate_coordinates_and_load_to_postgis(
     map_client: AsyncKorTravelMapClient,
     migrated_engine: Any,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setattr(
+        dagster_assets, "fetch_visitkorea_attraction_details", _no_tourapi_details
+    )
     results = [
         await _run_asset(
-            run_feature_event_datagokr_cultural_festivals,
+            run_feature_event_visitkorea_festivals,
             map_client,
-            datagokr_cultural_festivals=[
-                _Festival(
-                    fstvl_nm="서울 봄꽃 축제",
-                    opar="여의도공원",
-                    fstvl_start_date=date(2026, 4, 5),
-                    fstvl_end_date=date(2026, 4, 12),
-                    fstvl_co="봄꽃 축제.",
-                    mnnst_nm="영등포구청",
-                    phone_number="02-2670-3114",
-                    rdnmadr="서울특별시 영등포구 여의공원로 120",
-                    lnmadr="서울특별시 영등포구 여의도동 8",
-                    latitude=37.5263,
-                    longitude=126.9239,
-                    reference_date=date(2026, 3, 1),
-                    instt_nm="서울특별시 영등포구",
-                )
+            visitkorea_festivals=[
+                festival_item("DAGSTER-FESTIVAL-001", "서울 봄꽃 축제", overview="봄꽃 축제.")
             ],
         ),
         await _run_asset(
