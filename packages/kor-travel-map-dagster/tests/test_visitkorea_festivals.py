@@ -100,8 +100,9 @@ def wired(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
         seen["transformed"] = list(records)
         return await transform(records, **kwargs)
 
-    def _geo_guard(bundles: Any, *, label: str = "") -> None:
+    def _geo_guard(bundles: Any, *, label: str = "", floor: int | None = None) -> None:
         seen["geo_guard"] = (len(bundles), label)
+        seen["geo_floor"] = floor
 
     async def _load(context: Any, **kwargs: Any) -> str:
         del context

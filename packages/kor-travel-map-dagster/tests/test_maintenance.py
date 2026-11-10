@@ -310,8 +310,9 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         (left, right)
         for left, right, _include_auto_merge in client.pairs
         if left.provider == "python-visitkorea-api"
+        and left.dataset_key == "visitkorea_tourist_attractions"
     ]
-    assert {left.dataset_key for left, _right in tourapi} == {"visitkorea_tourist_attractions"}
+    assert tourapi
     assert {left.limit for left, _right in tourapi} == {40000}
     assert {right.limit for _left, right in tourapi} == {40000}
     # (오른쪽 provider, dataset, 왼쪽 범주 접두사 집합) — 쌍 하나하나를 고정한다(13쌍).
@@ -1026,7 +1027,8 @@ def test_existing_pairs_keep_their_call_shape() -> None:
     knps_heritage = by_key[("python-knps-api", None, "python-krheritage-api", None)]
     assert "max_distance_m" not in knps_heritage
     assert "match" not in knps_heritage
-    assert sum(1 for options in client.pair_options if options) == 3
+    # 2026-11-10 3 → 4: TourAPI 축제 ↔ 국가유산 행사(1 km, score_or_same_name).
+    assert sum(1 for options in client.pair_options if options) == 4
 
 
 def test_default_trail_rule_uses_route_overlap_with_knps_authoritative() -> None:
