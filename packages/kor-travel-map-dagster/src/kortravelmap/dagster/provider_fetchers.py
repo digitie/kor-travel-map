@@ -1373,9 +1373,9 @@ async def _iter_datagokr_standard_file(service: Any, *, label: str) -> AsyncIter
     provider ``iter_file_pages``가 선언 건수 0·5만 건 상한·짧은 페이지·기형 행·전후
     메타데이터 변경을 거부한다. 여기서는 받은 행 수가 선언 ``total_count``와 같은지 한 번 더
     본다 — 전통시장·특화거리는 snapshot에 없는 행을 **은퇴**시키므로 짧은 snapshot을 성공으로
-    넘기면 실제 장소가 내려간다(적대 리뷰 A HIGH, #1461). 주차장은 은퇴하지 않지만 snapshot을
-    authoritative 완료로 봉인하므로 짧은 snapshot을 완료로 기록하지 않는다. 요청 수는 페이지마다 센다(헤더 2회
-    포함 — 페이지 수 + 2).
+    넘기면 실제 장소가 내려간다(적대 리뷰 A HIGH, #1461). 주차장은 은퇴하지 않지만
+    snapshot을 authoritative 완료로 봉인하므로 짧은 snapshot을 완료로 기록하지 않는다.
+    요청 수는 페이지마다 센다(헤더 2회 포함 — 페이지 수 + 2).
     """
     seen = 0
     declared = 0

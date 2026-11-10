@@ -23,7 +23,6 @@
 - 반려동물 목록의 반려 업종 행(동물약국·용품·병원·미용·위탁)은 더 적재하지 않는다(기존 Feature는 그대로 — 전환 때 퇴역).
 - MCST 테마 목록 붙임 적재(`KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE`, 기본 `off`)와 전환 계획 `ktmctl mcst-theme-plan`.
   alembic 446. service 계약 변경 없음.
-||||||| parent of b8c18de32 (feat(standard-data): 주차장을 포털 공개 파일로 서비스키 없이 적재)
 
 ## 2026-11-10 — 역·공항·시장 검색 순위와 일반철도 역 분류(#1476·#1477·#1478)
 
