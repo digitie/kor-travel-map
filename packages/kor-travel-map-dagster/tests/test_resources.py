@@ -560,7 +560,11 @@ def test_provider_record_resource_env_mapping() -> None:
     )
     assert specs["kor_travel_concierge_youtube_features"].source_env_names == ()
     # 포털 공개 파일 원천은 서비스키를 요구하지 않는다(2026-11-09, #1459).
-    for key in ("standard_traditional_markets", "standard_special_streets"):
+    for key in (
+        "standard_traditional_markets",
+        "standard_special_streets",
+        "standard_parking_lots",
+    ):
         assert specs[key].kor_travel_map_env_names == ()
 
 
