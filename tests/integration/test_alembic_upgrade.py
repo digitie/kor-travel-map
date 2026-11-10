@@ -975,6 +975,8 @@ async def test_alembic_creates_source_tables(
         "source_entity_heads",
         "source_links",
         "source_records",
+        # ADR-121(446): apply 모드 MCST 적재의 행별 붙임 판정.
+        "theme_attach_decisions",
     ]
 
 

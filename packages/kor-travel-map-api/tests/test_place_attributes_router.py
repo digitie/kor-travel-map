@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import hashlib
 from collections.abc import AsyncIterator, Iterator
+from dataclasses import replace
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -483,9 +484,21 @@ def test_detail_carries_attributes_and_digest_etag(
         {"code": "pet_friendly", "label": "반려동물 동반 가능", "group": "companion"},
         {"code": "barrier_free", "label": "무장애 편의", "group": "accessibility"},
     ]
-    digest = hashlib.sha256(b"barrier_free\npet_friendly").hexdigest()[:16]
+    # digest는 코드·라벨·묶음·순서를 모두 접는다.
+    # 라벨만 바뀌어도 ETag가 바뀐다.
+    rows = "\n".join(
+        f"{item.code}\t{item.label}\t{item.group}\t{item.sort_order}"
+        for item in sorted(
+            (_CATALOG[0], _CATALOG[1]), key=lambda item: (item.sort_order, item.code)
+        )
+    )
+    digest = hashlib.sha256(rows.encode("utf-8")).hexdigest()[:16]
     etag = f'"7-{digest}"'
     assert response.headers["ETag"] == etag
+    relabeled = replace(_CATALOG[0], label="반려동물 동반")
+    assert features_mod.place_attribute_repo.place_attribute_digest(
+        (relabeled, _CATALOG[1])
+    ) != digest
 
     cached = client.get("/v1/features/f1", headers={"If-None-Match": etag})
     assert cached.status_code == 304
