@@ -638,6 +638,8 @@
           ],
           "members": [
             "iter_all",
+            "iter_file_all",
+            "iter_file_pages",
             "iter_pages",
             "list"
           ]
@@ -648,11 +650,25 @@
           ],
           "members": [
             "iter_all",
+            "iter_file_all",
+            "iter_file_pages",
             "iter_pages",
             "list"
           ]
         },
         "datagokr.services.standard.SpecialStreetService": {
+          "external_bases": [
+            "Generic"
+          ],
+          "members": [
+            "iter_all",
+            "iter_file_all",
+            "iter_file_pages",
+            "iter_pages",
+            "list"
+          ]
+        },
+        "datagokr.services.standard.StandardFileBackedService": {
           "external_bases": [
             "Generic"
           ],
@@ -680,6 +696,8 @@
           ],
           "members": [
             "iter_all",
+            "iter_file_all",
+            "iter_file_pages",
             "iter_pages",
             "list"
           ]
@@ -731,7 +749,7 @@
         }
       },
       "package": "datagokr",
-      "pinned_sha": "9922dd27d5208d68abb3c8c019abedd12097b2d8"
+      "pinned_sha": "615093261b4964eac4f522af174f8450b9b7c59d"
     },
     "python-khoa-api": {
       "classes": {

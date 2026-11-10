@@ -177,8 +177,11 @@ HTTP 403 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`(마지막 성공 2026-11-03)라
 750. 행은 같은 `PublicParkingLot` 모델이고 자연키 `prkplce_no`도 같은 문자열이라 feature
 identity는 그대로다(prod 17,986 entity 중 17,875가 파일에 있다. 나머지 111은 다음 적재에서
 갱신되지 않을 뿐 은퇴하지 않는다 — 이 asset은 은퇴 경로가 아니다). 파일의 `PRKPLCE_NO`는
-18,994행 중 17,878개만 고유하다 — Open API 시절(18,989 bundle → 17,986 entity)과 같은 성질이고
-적재 동작도 같다. 선언 건수와 받은 행 수가 다르거나 0이면 `StandardFileSnapshotIncomplete`로
+18,994행 중 17,878개만 고유하고 같은 번호의 행 내용이 다르다(1,030개 번호). Open API 시절에는 나중
+행이 덮었다(순서 의존). 이제 fetcher가 번호마다 원문 정렬 JSON이 가장 작은 행 하나만 내준다 —
+순서와 무관하게 같은 행이 남는다(첫 적재에서 이 번호들의 내용이 한 번 바뀔 수 있다). 페이지 크기
+1만·5천·단일 페이지 다운로드 결과가 같음을 확인했다. 행에는 `colNmList`에 없는 `INSTT_CODE`도
+실려 `instt_code`가 Open API 때처럼 채워진다. 선언 건수와 받은 행 수가 다르거나 0이면 `StandardFileSnapshotIncomplete`로
 실패한다.
 
 ### 7.4 tourist_sites (place)
