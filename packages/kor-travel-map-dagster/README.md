@@ -117,8 +117,8 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 | `krforest_mountain_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krforest_dulle_trails` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
 | `krforest_landslide_forecast_issues` | `python-krforest-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `standard_museums` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
-| `standard_tourist_attractions` | `python-datagokr-api` | `KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY` | `DATA_GO_KR_SERVICE_KEY` |
+| `standard_museums` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |
+| `standard_tourist_attractions` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |
 | `standard_parking_lots` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |
 | `standard_traditional_markets` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |
 | `standard_special_streets` | `python-datagokr-api` | — (포털 공개 파일, 서비스키 불필요) | — |

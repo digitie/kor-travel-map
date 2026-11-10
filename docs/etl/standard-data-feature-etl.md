@@ -184,6 +184,15 @@ identity는 그대로다(prod 17,986 entity 중 17,875가 파일에 있다. 나�
 실려 `instt_code`가 Open API 때처럼 채워진다. 선언 건수와 받은 행 수가 다르거나 0이면 `StandardFileSnapshotIncomplete`로
 실패한다.
 
+### 7.3a museums·tourist_sites 원천 (공개 파일 — 2026-11-10)
+
+박물관미술관(15017323)·관광지(15021141)도 `client.museum_art`·`client.tourist_attraction`의
+`iter_file_pages()`(서비스키 없음)로 받는다 — 실측 1,070행·897행. 박물관 Open API는 운영 키 403,
+관광지는 아직 `00`이지만 같은 키라 함께 옮겼다. 파일에 `INSTT_CODE`가 없고 Open API 경로에서도
+`instt_code`는 비어 있었으므로(provider 모델에 `insttCode` alias가 없다) 자연키는 두 경로 모두
+`이름::도로명`이다 — 파일에서 만든 키 1,043·879개가 전부 prod에 있다(prod에만 있는 10·2개는 옛
+적재분). 은퇴 경로가 아니므로 내려가는 Feature는 없다.
+
 ### 7.4 tourist_sites (place)
 
 `place_kind="tourist_site"`. category: `TOURISM_*`. 경계가 있는 일부는 향후

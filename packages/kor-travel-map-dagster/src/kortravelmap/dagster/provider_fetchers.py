@@ -1271,27 +1271,19 @@ async def fetch_krforest_landslide_forecast_issues(
 async def fetch_standard_museums(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국박물관미술관표준데이터 record를 datagokr public client로 stream한다.
+    """전국박물관미술관정보표준데이터(15017323) 공개 파일을 서비스키 없이 stream한다.
 
-    ``settings.data_go_kr_service_key``로 ``DataGoKrClient(api_key=...)``를 열고
-    ``client.museum_art`` record(``PublicMuseumArtGallery``, krtour
-    ``PublicMuseumArtItem`` Protocol 충족)를 lazily yield한다. datagokr client는
-    async이므로 async generator다. 소비 종료/aclose 시 ``finally``에서 ``aclose()``.
+    Open API(``tn_pubr_public_museum_artgr_info_api``)는 운영 키가 403
+    (``SERVICE_KEY_IS_NOT_REGISTERED_ERROR``, 2026-11-10)이다. 파일 행은 같은
+    ``PublicMuseumArtGallery`` 모델이고 파일에 ``INSTT_CODE``가 없어 자연키는 Open API 때와
+    같은 ``이름::도로명``이다(2026-11-10 실측 1,070행, 파일 키 전부가 prod에 있다).
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard museums live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard(
-            client.museum_art, label="datagokr museum_art.list"
+        async for record in _iter_datagokr_standard_file(
+            client.museum_art, label="datagokr museum_art file"
         ):
             yield record
     finally:
@@ -1301,27 +1293,18 @@ async def fetch_standard_museums(
 async def fetch_standard_tourist_attractions(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국관광지표준데이터 record를 datagokr public client로 stream한다.
+    """전국관광지정보표준데이터(15021141) 공개 파일을 서비스키 없이 stream한다.
 
-    ``settings.data_go_kr_service_key``로 ``DataGoKrClient``를 열고
-    ``client.tourist_attraction`` record(``PublicTouristAttraction``,
-    krtour ``PublicTouristAttractionItem`` Protocol 충족)를 lazily yield한다.
-    async client → async generator, ``finally``에서 ``aclose()``.
+    Open API(``tn_pubr_public_trrsrt_api``)는 2026-11-10 운영 키로 아직 ``00``이지만 같은 키가
+    다른 표준데이터 오퍼레이션에서 403이 됐다 — 키 상태에 묶이지 않게 공개 파일로 옮긴다.
+    자연키는 Open API 때와 같은 ``이름::도로명``이다(실측 897행, 파일 키 전부가 prod에 있다).
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard tourist attractions live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    del settings
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard(
-            client.tourist_attraction, label="datagokr tourist_attraction.list"
+        async for record in _iter_datagokr_standard_file(
+            client.tourist_attraction, label="datagokr tourist_attraction file"
         ):
             yield record
     finally:
