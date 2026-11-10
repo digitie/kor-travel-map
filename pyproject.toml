@@ -100,10 +100,11 @@ providers = [
   # total로 조건화해 그 퇴화를 닫았다 — total이 없으면 멈추지 않고 빈 페이지를
   # 기다린다. Map 쪽 `_iter_datagokr_standard` 우회는 **그대로 둔다**(방어는
   # 중복이어도 좋다).
-  # `9922dd2` 상향(2026-11-09, provider PR#24): 전통시장·특화거리 공개 파일 키 없는 다운로드
+  # `6150932` 상향(2026-11-10, provider PR#25): 주차장·박물관미술관·관광지 공개 파일 키 없는 다운로드
+  # (운영 키 Open API 403). `9922dd2` 상향(2026-11-09, provider PR#24): 전통시장·특화거리 공개 파일 키 없는 다운로드
   # (`iter_file_pages`). `649fa1a`(PR#23): 전국전통시장표준데이터
   # `traditional_market`(`PublicTraditionalMarket`) 추가(#1459).
-  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@9922dd27d5208d68abb3c8c019abedd12097b2d8",
+  "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@615093261b4964eac4f522af174f8450b9b7c59d",
   #
   # ── Sprint 2 §2.2 — 날씨 (ADR-010) ────────────────────────────────────
   # python-kma-api·python-airkorea-api 핀은 제거했다(ADR-104/105) — Map은 weather·

@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import logging
 import pathlib
 import zlib
@@ -1337,9 +1338,10 @@ async def _iter_datagokr_standard_file(service: Any, *, label: str) -> AsyncIter
 
     provider ``iter_file_pages``가 선언 건수 0·5만 건 상한·짧은 페이지·기형 행·전후
     메타데이터 변경을 거부한다. 여기서는 받은 행 수가 선언 ``total_count``와 같은지 한 번 더
-    본다 — 이 두 dataset은 snapshot에 없는 행을 **은퇴**시키므로 짧은 snapshot을 성공으로
-    넘기면 실제 장소가 내려간다(적대 리뷰 A HIGH, #1461). 요청 수는 페이지마다 센다(헤더 2회
-    포함 — 페이지 수 + 2).
+    본다 — 전통시장·특화거리는 snapshot에 없는 행을 **은퇴**시키므로 짧은 snapshot을 성공으로
+    넘기면 실제 장소가 내려간다(적대 리뷰 A HIGH, #1461). 주차장은 은퇴하지 않지만
+    snapshot을 authoritative 완료로 봉인하므로 짧은 snapshot을 완료로 기록하지 않는다.
+    요청 수는 페이지마다 센다(헤더 2회 포함 — 페이지 수 + 2).
     """
     seen = 0
     declared = 0
@@ -1354,7 +1356,7 @@ async def _iter_datagokr_standard_file(service: Any, *, label: str) -> AsyncIter
     if seen != declared or seen == 0:
         raise StandardFileSnapshotIncomplete(
             f"{label}: 선언 {declared}건 중 {seen}건을 받았다 — "
-            "부분 snapshot으로 은퇴시키지 않는다."
+            "부분 snapshot을 완료로 적재하지 않는다."
         )
 
 
@@ -1874,29 +1876,54 @@ _KHOA_BEACH_MAX_PAGES: Final = 30
 async def fetch_standard_parking_lots(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국주차장표준데이터 record를 datagokr public client로 stream한다.
+    """전국주차장정보표준데이터(15012896) 공개 파일을 서비스키 없이 stream한다.
 
-    ``client.parking`` record(``PublicParkingLot``, krtour
-    ``PublicParkingLotItem`` Protocol 충족)를 yield. async generator, finally aclose.
+    Open API(``tn_pubr_prkplce_info_api``)는 운영 키가 활용신청되지 않아 403
+    (``SERVICE_KEY_IS_NOT_REGISTERED_ERROR``)이다 — 마지막 성공 2026-11-03. 포털 공개
+    파일은 키를 받지 않는다(2026-11-10 실측 18,994행). 행은 같은 ``PublicParkingLot``
+    모델이고 자연키 ``prkplce_no``도 같은 값이라 feature identity가 바뀌지 않는다(prod
+    17,986 entity 중 17,875가 파일에 있다).
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard parking lots live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard(
-            client.parking, label="datagokr parking.list"
-        ):
-            yield record
+        records = [
+            record
+            async for record in _iter_datagokr_standard_file(
+                client.parking, label="datagokr parking file"
+            )
+        ]
     finally:
         await client.aclose()
+    for record in _one_row_per_parking_number(records):
+        yield record
+
+
+def _one_row_per_parking_number(records: Sequence[Any]) -> list[Any]:
+    """같은 ``prkplce_no``의 행 중 하나만 남긴다 — 파일 순서와 무관하게 같은 행을.
+
+    공개 파일의 ``PRKPLCE_NO``는 18,994행 중 17,878개만 고유하고 같은 번호의 행 내용이 다르다
+    (2026-11-10 실측 1,030개 번호). 적재는 같은 번호를 한 entity로 덮으므로 남는 행이 순서에
+    달리면 run마다 내용이 뒤집힐 수 있다. 원문(``raw``)을 정렬 JSON으로 만든 값이 가장 작은 행을
+    고른다. 번호 없는 행은 그대로 둔다(변환이 이름·주소로 키를 만든다). 순서는 처음 나온 자리.
+    """
+    chosen: dict[str, tuple[str, int]] = {}
+    for index, record in enumerate(records):
+        number = getattr(record, "prkplce_no", None)
+        if not number:
+            continue
+        digest = json.dumps(getattr(record, "raw", None), sort_keys=True, ensure_ascii=False,
+                            default=str)
+        kept = chosen.get(number)
+        if kept is None or digest < kept[0]:
+            chosen[number] = (digest, index)
+    keep = {index for _, index in chosen.values()}
+    return [
+        record
+        for index, record in enumerate(records)
+        if not getattr(record, "prkplce_no", None) or index in keep
+    ]
 
 
 #: TourAPI 축제 목록 한 페이지 행 수. ``searchFestival2``는 1,000행 페이지를 준다 — 수집 창
