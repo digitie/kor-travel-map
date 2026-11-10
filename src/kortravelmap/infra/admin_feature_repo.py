@@ -1374,7 +1374,7 @@ _ADMIN_FEATURES_Q_SOURCE_ARMS: Final = (
 
 
 def _admin_feature_candidates_sql(search_scope: AdminFeatureSearchScope) -> str:
-    arms = _ADMIN_FEATURES_Q_FEATURE_ARMS
+    arms: tuple[str, ...] = _ADMIN_FEATURES_Q_FEATURE_ARMS
     if search_scope == "all":
         arms = (*arms, *_ADMIN_FEATURES_Q_SOURCE_ARMS)
     union = "\n    UNION ALL".join(arms)

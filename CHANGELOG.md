@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-11-10 — 관리자 Feature 부분 검색 가속(#1475)
+
+- `GET /v1/admin/features?q=…`(및 `/v1/service/admin-features`)가 드문 검색어에서 수 초 걸리던 것을 trigram 인덱스(alembic 445)로 줄인다. parameter·기본값·응답은 그대로다.
+- 기본 `search_scope=all`은 이름·주소·ID에 원천 식별자(`source_entity_id`·현재 `source_record_key`)를 더해 찾는다. 원천 JSON 본문은 더 이상 검색하지 않는다.
+
 ## 2026-11-10 — 자연휴양림 ↔ MOIS 숙박 병합 master(#1468)
 
 - 같은 시설이 산림청 자연휴양림과 MOIS 숙박 인허가에 함께 있으면 병합 master는 휴양림이다.
