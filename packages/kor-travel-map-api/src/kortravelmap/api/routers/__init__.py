@@ -20,6 +20,7 @@ from kortravelmap.api.routers.admin_feature_commands import router as admin_feat
 from kortravelmap.api.routers.admin_features import router as admin_features_router
 from kortravelmap.api.routers.admin_files import router as admin_files_router
 from kortravelmap.api.routers.admin_issues import router as admin_issues_router
+from kortravelmap.api.routers.admin_theme_attach import router as admin_theme_attach_router
 from kortravelmap.api.routers.cache_target_streams import (
     admin_router as admin_cache_target_streams_router,
 )
@@ -84,6 +85,7 @@ from kortravelmap.api.routers.ops_geo_releases import router as ops_geo_releases
 from kortravelmap.api.routers.ops_live import router as ops_live_router
 from kortravelmap.api.routers.ops_logs import router as ops_logs_router
 from kortravelmap.api.routers.ops_pipeline import router as ops_pipeline_router
+from kortravelmap.api.routers.place_attributes import router as place_attributes_router
 from kortravelmap.api.routers.poi_cache_targets import (
     router as poi_cache_targets_router,
 )
@@ -113,6 +115,7 @@ __all__ = [
     "admin_curations_router",
     "admin_curation_candidates_router",
     "admin_issues_router",
+    "admin_theme_attach_router",
     "dedup_review_router",
     "ops_dedup_reviews_router",
     "feature_dedup_review_router",
@@ -124,6 +127,7 @@ __all__ = [
     "admin_manual_provider_dedup_cases_router",
     "features_router",
     "categories_router",
+    "place_attributes_router",
     "offline_uploads_router",
     "ops_router",
     "ops_contract_fixtures_router",

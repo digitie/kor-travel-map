@@ -66,6 +66,8 @@ def test_user_openapi_spec_filters_internal_routes_and_prunes_schemas() -> None:
     assert user["info"]["title"] == "kor-travel-map-user"
     assert set(user["paths"]) == {
         "/v1/categories",
+        # ADR-121 — 공개 장소 속성 catalog.
+        "/v1/place-attributes",
         "/v1/providers",
         "/v1/providers/{provider}/last-sync",
         "/health",

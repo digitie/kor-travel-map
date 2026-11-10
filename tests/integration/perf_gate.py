@@ -135,6 +135,7 @@ _BBOX_PARAMS: dict[str, Any] = {
     "kinds": ["place", "event"],
     "categories": None,
     "providers": None,
+    "attributes": None,
     "cursor_feature_id": None,
     "limit": 200,
     "price_stale_hide_days": 4,
@@ -150,6 +151,7 @@ _NEARBY_PARAMS: dict[str, Any] = {
     # 3축 어느 축으로도 옮길 자리가 없어졌다 — 옮기면 뷰가 이미 건 술어를 밖에서
     # 한 번 더 재구현하는 것이라 F-1(공개 술어 복제)이다. 그래서 키를 뺀다.
     "providers": None,
+    "attributes": None,
     "limit_plus_one": 51,
     "cursor_distance_m": None,
     "cursor_name": None,
@@ -169,6 +171,7 @@ _SEARCH_PARAMS: dict[str, Any] = {
     "max_lat": None,
     "kinds": None,
     "categories": None,
+    "attributes": None,
     "cursor_rank": None,
     "cursor_score": None,
     "cursor_feature_id": None,
@@ -182,6 +185,7 @@ _CLUSTER_PARAMS: dict[str, Any] = {
     "kinds": ["place", "event"],
     "categories": None,
     "providers": None,
+    "attributes": None,
     "limit": 200,
 }
 

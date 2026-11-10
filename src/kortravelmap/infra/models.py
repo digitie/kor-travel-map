@@ -1792,7 +1792,7 @@ class PlaceAttributeRow(Base):
 
 
 class DatasetPlaceAttributeRow(Base):
-    """``provider_sync.dataset_place_attributes`` — (dataset, entity 유형) → 속성(ADR-121)."""
+    """``feature.dataset_place_attributes`` — (dataset, entity 유형) → 속성(ADR-121)."""
 
     __tablename__ = "dataset_place_attributes"
     __table_args__ = (
@@ -1808,7 +1808,7 @@ class DatasetPlaceAttributeRow(Base):
             name="fk_dataset_place_attributes_attribute_code_place_attributes",
             ondelete="CASCADE",
         ),
-        {"schema": "provider_sync"},
+        {"schema": "feature"},
     )
 
     provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)

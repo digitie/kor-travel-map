@@ -649,6 +649,7 @@ async def test_snapshot_absence_keeps_feature_with_other_dataset_primary(
     records = [
         _Record(service_slug="general_restaurants", mng_no="guard-keep"),
         _Record(service_slug="bakeries", mng_no="guard-gone"),
+        _Record(service_slug="bakeries", mng_no="guard-sole"),
     ]
     await load_mois_license_features_bulk(migrated_session, records, fetched_at=_FETCHED)
     await migrated_session.flush()
@@ -692,9 +693,15 @@ async def test_snapshot_absence_keeps_feature_with_other_dataset_primary(
     )
     await migrated_session.flush()
 
-    snapshot = await _active_entity_ids(migrated_session) - {"bakeries::guard-gone"}
-    await retire_mois_license_features_absent_from_snapshot(migrated_session, snapshot)
+    snapshot = await _active_entity_ids(migrated_session) - {
+        "bakeries::guard-gone",
+        "bakeries::guard-sole",
+    }
+    retired = await retire_mois_license_features_absent_from_snapshot(migrated_session, snapshot)
     await migrated_session.flush()
+    # 가드가 모든 퇴역을 막는 것이 아니다 — 다른 primary가 없는 부재 Feature는 내린다.
+    assert retired == 1
+    assert "bakeries::guard-sole" not in await _active_entity_ids(migrated_session)
     state = (
         await migrated_session.execute(
             text(

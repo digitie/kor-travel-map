@@ -169,7 +169,7 @@ async def _attributes(session: AsyncSession, feature_id: str) -> set[str]:
                 "FROM provider_sync.source_links sl "
                 "JOIN provider_sync.source_entities se "
                 "  ON se.source_entity_key = sl.source_entity_key "
-                "JOIN provider_sync.dataset_place_attributes dpa "
+                "JOIN feature.dataset_place_attributes dpa "
                 "  ON dpa.provider_dataset_id = se.provider_dataset_id "
                 " AND dpa.source_entity_type = se.source_entity_type "
                 "WHERE sl.feature_id = CAST(:feature_id AS uuid) "
@@ -357,3 +357,57 @@ async def test_retired_claim_redirects_to_merge_survivor(
         )
     ).scalar_one()
     assert state == "retired"
+
+
+async def test_empty_snapshot_cannot_wipe_dataset_attributes(
+    migrated_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.infra import theme_attach_repo
+    from kortravelmap.infra.theme_attach_repo import ThemeAttachLossGuardError
+
+    monkeypatch.setattr(theme_attach_repo, "_MIN_GUARDED_LINKS", 1)
+    session = migrated_session
+    await feature_repo.load_bundles(
+        session, [_master_bundle("손실가드테스트관", _offset(4000), "ta-master-guard")]
+    )
+    [row] = await _mcst_bundles("barrier_free_places_csv", ("손실가드테스트관", _offset(4003)))
+    assert (await _attach(session, "barrier_free_places_csv", [row], "apply")).counts == {
+        "matched": 1
+    }
+    with pytest.raises(ThemeAttachLossGuardError):
+        await _attach(session, "barrier_free_places_csv", [], "apply")
+    master = await _master_id(session, "ta-master-guard")
+    assert await _attributes(session, master) == {"barrier_free"}
+
+
+async def test_non_merge_retired_claim_goes_back_to_owner_path(
+    migrated_session: AsyncSession,
+) -> None:
+    """provider 퇴역(병합 아님)은 기존 적재의 재활성 규칙으로 넘긴다 — unresolved로 묻지 않는다."""
+
+    session = migrated_session
+    [row] = await _mcst_bundles("barrier_free_places_csv", ("퇴역복귀테스트관", _offset(5000)))
+    natural_key = str(row.feature.provider_natural_key)
+    await feature_repo.load_bundles(session, [row])
+    [(feature_id, _)] = await _feature_of_entity(
+        session, natural_key, "mcst_barrier_free_places_csv"
+    )
+    retired = await feature_repo.retire_features_absent_from_snapshot(
+        session,
+        provider=MCST_PROVIDER_NAME,
+        dataset_key="mcst_barrier_free_places_csv",
+        source_entity_type="culture_place",
+        snapshot_source_entity_ids=set(),
+    )
+    assert retired >= 1
+
+    report = await _attach(session, "barrier_free_places_csv", [row], "apply")
+
+    assert report.counts == {"owner": 1}
+    state = (
+        await session.execute(
+            text("SELECT lifecycle_state FROM feature.features WHERE feature_id = :id"),
+            {"id": feature_id},
+        )
+    ).scalar_one()
+    assert state == "active"

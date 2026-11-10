@@ -13,9 +13,10 @@ Feature 표·link 표는 건드리지 않는다.
 
 - ``feature.place_attributes``: 공개 속성 catalog(코드·라벨·묶음·공개 범위·순서). 8개를 심는다.
   런타임 SELECT는 배포 조정기(``infra/runtime_privileges.py`` ``_FEATURE_TABLE_PRIVILEGES``)가 건다.
-- ``provider_sync.dataset_place_attributes``: (provider_dataset_id, source_entity_type) →
+- ``feature.dataset_place_attributes``: (provider_dataset_id, source_entity_type) →
   attribute_code. MCST 8개 dataset의 ``culture_place`` 유형을 심는다. dataset 행이 없는 환경이면
-  그 묶음은 조용히 빠진다(``INSERT … SELECT``).
+  그 묶음은 조용히 빠진다(``INSERT … SELECT``). 속성 소속을 정하는 표라 ``feature`` schema에 두고
+  런타임은 SELECT만 받는다(``provider_sync``는 런타임 DML이 기본이다 — 적대 리뷰).
 - ``provider_sync.theme_attach_decisions``: apply 모드 적재의 행별 판정(근거 보관용 — link가
   정본). dataset별 snapshot과 같이 움직인다.
 - receipt head CHECK에 이 revision을 더한다.
@@ -101,7 +102,7 @@ CREATE TABLE feature.place_attributes (
 """
 
 _CREATE_DATASET_ATTRIBUTES_SQL: Final[str] = """
-CREATE TABLE provider_sync.dataset_place_attributes (
+CREATE TABLE feature.dataset_place_attributes (
     provider_dataset_id bigint NOT NULL,
     source_entity_type text NOT NULL,
     attribute_code text NOT NULL,
@@ -141,7 +142,7 @@ CREATE TABLE provider_sync.theme_attach_decisions (
 
 _OWNER_SQL: Final[tuple[str, ...]] = (
     "ALTER TABLE feature.place_attributes OWNER TO " + _SCHEMA_OWNER,
-    "ALTER TABLE provider_sync.dataset_place_attributes OWNER TO " + _SCHEMA_OWNER,
+    "ALTER TABLE feature.dataset_place_attributes OWNER TO " + _SCHEMA_OWNER,
     "ALTER TABLE provider_sync.theme_attach_decisions OWNER TO " + _SCHEMA_OWNER,
 )
 
@@ -155,7 +156,7 @@ _SEED_PLACE_ATTRIBUTES_SQL: Final[str] = (
 )
 
 _SEED_DATASET_ATTRIBUTES_SQL: Final[str] = (
-    "INSERT INTO provider_sync.dataset_place_attributes "
+    "INSERT INTO feature.dataset_place_attributes "
     "(provider_dataset_id, source_entity_type, attribute_code)\n"
     "SELECT dataset.provider_dataset_id, seed.source_entity_type, seed.attribute_code\n"
     "FROM (VALUES\n"

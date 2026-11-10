@@ -892,6 +892,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             # ``idx_features_coord_5179_gist``의 partial 조건이기도 하다 — 즉
             # 필터가 사라진 게 아니라 인덱스 쪽으로 내려갔다.
             "providers": None,
+            "attributes": None,
             "limit_plus_one": 51,
             "cursor_distance_m": None,
             "cursor_name": None,
@@ -916,6 +917,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "kinds": ["place", "event"],
             "categories": None,
             "providers": None,
+            "attributes": None,
             "cursor_feature_id": None,
             "limit": 200,
             "price_stale_hide_days": 4,
@@ -941,6 +943,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "max_lat": None,
             "kinds": None,
             "categories": None,
+            "attributes": None,
             "cursor_rank": None,
             "cursor_score": None,
             "cursor_feature_id": None,
@@ -963,6 +966,7 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
         "kinds": ["place", "event"],
         "categories": None,
         "providers": None,
+        "attributes": None,
         "limit": 200,
     }
     for cluster_unit in ("sido", "sigungu", "eupmyeondong"):
@@ -1007,6 +1011,7 @@ async def test_t212d_geom_only_cluster_uses_subtype_gist_representatively(
             "kinds": ["route", "area"],
             "categories": None,
             "providers": None,
+            "attributes": None,
             "limit": 200,
         },
         force_index=False,
@@ -1035,6 +1040,7 @@ async def test_t212d_cluster_provider_filter_uses_spatial_index(
         "kinds": None,
         "categories": None,
         "providers": ["python-visitkorea-api"],
+        "attributes": None,
         "limit": 200,
     }
     for cluster_unit in ("sido", "sigungu", "eupmyeondong"):
@@ -1071,6 +1077,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
             "kinds": ["place", "event"],
             "categories": None,
             "providers": None,
+            "attributes": None,
             "cursor_feature_id": None,
             "limit": 200,
             "price_stale_hide_days": 4,
@@ -1105,6 +1112,7 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
             "q_like": None,
             "has_issue": None,
             "include_ended": False,
+            "attributes": None,
             "cursor_feature_id": None,
             "cursor_text": None,
             "cursor_dt": None,
@@ -1162,6 +1170,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "q_like": None,
             "has_issue": None,
             "include_ended": False,
+            "attributes": None,
             "cursor_feature_id": None,
             "cursor_text": None,
             "cursor_dt": None,
@@ -1202,6 +1211,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "q_exact": "f_1168010100_p_a1b2c3d4e5f6a7b8",
             "has_issue": None,
             "include_ended": True,
+            "attributes": None,
             "cursor_feature_id": None,
             "cursor_text": None,
             "cursor_dt": None,
@@ -1240,6 +1250,7 @@ async def test_t212d_ops_and_review_lists_use_expected_indexes(
             "q_exact_uuid": "00000000-0000-7000-8000-000000000001",
             "has_issue": None,
             "include_ended": True,
+            "attributes": None,
             "cursor_feature_id": None,
             "cursor_text": None,
             "cursor_dt": None,

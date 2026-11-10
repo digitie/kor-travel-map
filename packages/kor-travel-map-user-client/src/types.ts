@@ -275,6 +275,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/place-attributes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 공개 장소 속성 catalog (sort_order 순) */
+        get: operations["list_public_place_attributes_v1_place_attributes_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/providers": {
         parameters: {
             query?: never;
@@ -668,6 +685,18 @@ export interface components {
             /** Name */
             name: string;
         };
+        /**
+         * FeatureAttributeView
+         * @description Feature가 가진 공개 장소 속성 1건(ADR-121).
+         */
+        FeatureAttributeView: {
+            /** Code */
+            code: string;
+            /** Group */
+            group: string;
+            /** Label */
+            label: string;
+        };
         /** FeatureCurationGroupResponse */
         FeatureCurationGroupResponse: {
             data: components["schemas"]["FeatureCurationGroupView"];
@@ -713,6 +742,11 @@ export interface components {
              * @description kind=area이고 geometry가 있으면 면적(m²).
              */
             area_square_meters?: number | null;
+            /**
+             * Attributes
+             * @description 이 Feature의 공개 장소 속성(ADR-121, catalog sort_order 순).
+             */
+            attributes?: components["schemas"]["FeatureAttributeView"][];
             /** Category */
             category: string;
             /**
@@ -750,7 +784,7 @@ export interface components {
             name: string;
             /**
              * Row Revision
-             * @description server-owned feature revision. ETag과 같은 값이다.
+             * @description server-owned feature revision. 공개 장소 속성이 없으면 ETag과 같은 값이다(있으면 ETag에 속성 digest가 붙는다).
              */
             row_revision: number;
             /** Sido Code */
@@ -849,6 +883,11 @@ export interface components {
              * @description include_geometry=true이고 kind=area일 때 면적(m²).
              */
             area_square_meters?: number | null;
+            /**
+             * Attribute Codes
+             * @description 공개 장소 속성 코드(ADR-121, 코드 오름차순). source link에서 유도한다. 라벨은 `GET /v1/place-attributes` catalog를 쓴다.
+             */
+            attribute_codes?: string[];
             /** Category */
             category: string;
             /**
@@ -1057,6 +1096,11 @@ export interface components {
          * @description POI/cache target 주변 public feature summary.
          */
         NearbyFeatureSummary: {
+            /**
+             * Attribute Codes
+             * @description 공개 장소 속성 코드(ADR-121, 코드 오름차순). source link에서 유도한다. 라벨은 `GET /v1/place-attributes` catalog를 쓴다.
+             */
+            attribute_codes?: string[];
             /** Category */
             category: string;
             /** Distance M */
@@ -1116,6 +1160,36 @@ export interface components {
             page_size: number;
             /** Total */
             total?: number | null;
+        };
+        /**
+         * PlaceAttributeSummary
+         * @description 공개 장소 속성 catalog 1건.
+         */
+        PlaceAttributeSummary: {
+            /** Code */
+            code: string;
+            /** Group */
+            group: string;
+            /** Label */
+            label: string;
+            /** Sort Order */
+            sort_order: number;
+        };
+        /**
+         * PlaceAttributesData
+         * @description ``GET /place-attributes`` data payload.
+         */
+        PlaceAttributesData: {
+            /** Items */
+            items: components["schemas"]["PlaceAttributeSummary"][];
+        };
+        /**
+         * PlaceAttributesResponse
+         * @description ``GET /place-attributes`` 응답.
+         */
+        PlaceAttributesResponse: {
+            data: components["schemas"]["PlaceAttributesData"];
+            meta: components["schemas"]["Meta"];
         };
         /**
          * PriceCardData
@@ -1936,6 +2010,8 @@ export interface operations {
                 cursor?: string | null;
                 /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. */
                 include_geometry?: boolean;
+                /** @description 장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다. */
+                attribute?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -1995,6 +2071,8 @@ export interface operations {
                 max_items?: number;
                 /** @description route/area 지도 표시용 GeoJSON geometry 포함 여부. 개별 feature 응답(non-clustered)에만 적용되며, cluster_unit이 해석되면(zoom으로 유도 포함) 클러스터 응답에는 무시된다. */
                 include_geometry?: boolean;
+                /** @description 장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다. */
+                attribute?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -2049,6 +2127,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "distance" | "name" | "last_updated_at";
+                /** @description 장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다. */
+                attribute?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -2103,6 +2183,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 sort?: "distance" | "name" | "last_updated_at";
+                /** @description 장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다. */
+                attribute?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -2169,6 +2251,8 @@ export interface operations {
                 page_size?: number;
                 cursor?: string | null;
                 include_total?: boolean;
+                /** @description 장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다. */
+                attribute?: string[] | null;
             };
             header?: never;
             path?: never;
@@ -2219,7 +2303,7 @@ export interface operations {
             /** @description Successful Response */
             200: {
                 headers: {
-                    /** @description 현재 feature row_revision strong entity tag. */
+                    /** @description 현재 feature strong entity tag — row_revision에 공개 장소 속성 코드 집합 digest를 더한다(속성이 있을 때만 '<revision>-<digest>'). */
                     ETag?: string;
                     [name: string]: unknown;
                 };
@@ -2227,7 +2311,7 @@ export interface operations {
                     "application/json": components["schemas"]["FeatureDetailEnvelopeResponse"];
                 };
             };
-            /** @description If-None-Match row_revision 일치 (본문 없음) */
+            /** @description If-None-Match ETag 일치 (본문 없음) */
             304: {
                 headers: {
                     [name: string]: unknown;
@@ -2411,6 +2495,35 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    list_public_place_attributes_v1_place_attributes_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PlaceAttributesResponse"];
                 };
             };
             /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */

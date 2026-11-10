@@ -99,7 +99,7 @@ CREATE TABLE feature.place_attributes (
 );
 
 -- 어떤 dataset·원천 entity 유형의 link가 어떤 속성을 뜻하는가.
-CREATE TABLE provider_sync.dataset_place_attributes (
+CREATE TABLE feature.dataset_place_attributes (
   provider_dataset_id bigint NOT NULL REFERENCES provider_sync.provider_datasets,
   source_entity_type  text   NOT NULL,
   attribute_code      text   NOT NULL REFERENCES feature.place_attributes,
@@ -259,6 +259,29 @@ action으로 내린다.
   ETag에 속성 digest를 섞어 푼다.
 - `_CATEGORY_REPROJECTION_SCOPES`는 그대로다(D1-b라 MCST 장소 Feature를 계속 소유한다).
 
+### 6.7 구현 리뷰 반영과 알려진 한계 (2026-11-10)
+
+- **강등은 MCST link만이다.** `apply_feature_merge`가 옮겨 오는 primary를 enrichment로 낮추는 것은
+  그 link가 MCST 목록(`python-mcst-api`)이고 master에 이미 primary가 있을 때뿐이다. 다른
+  provider의 primary까지 낮추면 MOIS 승자 판정(`_ACTIVE_PRIMARY_ENTITIES_SQL`)·폐업 퇴역이 병합된
+  원천을 "지도에 없음"으로 본다(적대 리뷰 High).
+- **부재 퇴역 가드**는 "이번 부재 대상 밖의 primary"만 보호로 친다 — 같은 dataset의 다른 entity라도
+  snapshot에 있으면 남기고, 두 primary가 모두 빠지면 내린다(`_WITHDRAWN_SOLE_SOURCE_SQL`과 같은 꼴).
+- **병합이 아닌 퇴역**(provider·관리자)을 가리키는 claim은 `owner`로 넘겨 기존 재활성 규칙(override
+  fence 포함)이 판단한다. `unresolved`는 병합 이력이 있는데 생존자도 퇴역한 경우뿐이다.
+- **빈·잘린 snapshot 가드**: 지울 enrichment link가 20개 이상이고 snapshot이 비었거나 기존의 절반을
+  넘으면 그 dataset 적재를 실패시킨다(`ThemeAttachLossGuardError`).
+- **소유 순서는 한 run 안에서만** 장소 목록이 먼저다. feature-update worker는 slug 하나씩 돌므로 속성
+  목록이 먼저 장소 Feature를 만들고 장소 목록 행이 거기 붙을 수 있다 — 속성은 둘 다 정확하고, 표시
+  분류는 먼저 만든 목록의 것이다. 전환 계획(§8.1)은 장소 목록을 생존자로 고른다.
+- **MCST가 primary인 Feature의 부재**는 현행처럼 처리하지 않는다 — 그 목록에서 행이 빠져도 Feature와
+  그 목록의 속성이 남는다(현행의 낡은 Feature와 같다). 부재 퇴역·primary 승계를 도입할 때 함께 푼다.
+- **seal**: enrichment link가 걸린 master의 상태가 MCST seal 입력에 들어간다. 같은 적재
+  transaction 안에서는 흔들리지 않는다(§6.6). seal hash를 나중에 비교하는 소비자는 없다(확인 대상).
+- 계획기는 비MCST primary가 함께 있는 Feature(옛 병합 master)를 계획에서 뺀다. 반려 업종 판정은 그
+  Feature의 모든 MCST primary가 반려 업종일 때만이다. `collapse`는 생존자와 **직접** 채택된 구성원만
+  접고(사슬로만 이어진 것은 `ambiguous`), 이웃의 `attach`를 물려받을 때는 자기 분류 호환을 다시 본다.
+
 ## 7. API·검색·OpenAPI
 
 ### 7.1 필터
@@ -273,7 +296,7 @@ action으로 내린다.
   ```sql
   EXISTS (SELECT 1 FROM provider_sync.source_links sl
             JOIN provider_sync.source_entities se ON se.source_entity_key = sl.source_entity_key
-            JOIN provider_sync.dataset_place_attributes dpa
+            JOIN feature.dataset_place_attributes dpa
                  ON dpa.provider_dataset_id = se.provider_dataset_id
                 AND dpa.source_entity_type = se.source_entity_type
            WHERE sl.feature_id = f.feature_id
@@ -331,6 +354,36 @@ cluster·in-bounds의 EXPLAIN을 재고, ADR-073 예산을 넘으면 파생 mate
   속성 목록 Feature, 그다음 `created_at` 이른 것, 그다음 `feature_id` 작은 것. 생존자는 `keep`.
 - `attach`가 우선한다: tier 1이 채택된 Feature는 tier 2 묶음에 들지 않는다.
 - 보고서: 목록별 × action 개수, 목록별 정밀도 표본, PinVi 참조 수(§8.3).
+
+### 8.1.1 R2 운영 dry-run 결과 (2026-11-10, 읽기 전용)
+
+`ktmctl mcst-theme-plan`(브랜치 `feat/mcst-theme-attach` `c5bc9e13`)을 운영 Map DB에 읽기 전용
+transaction으로 돌렸다(2분). MCST active Feature 88,007개.
+
+| dataset | retire | attach | collapse | keep | ambiguous |
+|---|---:|---:|---:|---:|---:|
+| pet_friendly | 20,396 | 759 | 104 | 2,590 | 79 |
+| barrier_free | — | 851 | 943 | 10,627 | 108 |
+| family_infant | — | 831 | 7,060 | 569 | 106 |
+| media_famous(촬영지) | — | 1,192 | 172 | 7,339 | 100 |
+| world_restaurants | — | 840 | 39 | 8,597 | 18 |
+| cafe_bookstores | — | 56 | 101 | 902 | — |
+| independent_bookstores | — | 45 | 1 | 280 | 1 |
+| children_bookstores | — | 7 | 31 | 748 | — |
+| used_bookstores | — | 49 | 28 | 334 | — |
+| leisure_activity | — | 8 | 6 | 14,536 | 4 |
+| leisure_camping | — | 127 | 2 | 2,339 | 8 |
+| leisure_classes | — | — | — | 5,074 | — |
+| **합계** | **20,396** | **4,765** | **8,487** | **53,935** | **424** |
+
+- 전환 뒤 MCST가 소유하는 공개 Feature는 약 54,359개(keep + ambiguous)다. 퇴역 예정 33,648개.
+- 첫 실행은 ambiguous 1,948이었고 표본의 3/4이 tier 2(MCST끼리) 동점이었다 — 같은 장소가 여러
+  목록에 있는 것이라 다툼이 아니다. 규칙을 고쳐(§5.2) 424로 줄었다. 남은 것은 tier 1 동점(비MCST
+  master끼리 중복, 예: 같은 이름의 MOIS 두 행)이다.
+- **PinVi 참조**(운영 PinVi DB 읽기 전용): `trip_day_pois` 304행(서로 다른 Feature 95개) — `attach`
+  164행(59개)·`collapse` 140행(36개). `retire`(반려 업종) 참조 0, `curated_plan_pois`·
+  `feature_suggestions` 0. 전부 병합 대상이 있는 퇴역이라 M05 `rebind`로 옮길 수 있다.
+- 표본(목록·action마다 50개)은 보고서 JSON에 있다. 정밀도 판정(§5.4)은 R4 전 사람이 한다.
 
 ### 8.2 실행(R4)
 

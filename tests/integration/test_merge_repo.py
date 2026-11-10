@@ -2160,25 +2160,145 @@ async def test_merge_history_count_after_merge(seeded: str, migrated_engine: Asy
     assert count == 1
 
 
-async def test_merge_demotes_moved_primary_when_master_has_primary(
+async def test_merge_keeps_non_mcst_moved_primary(
     seeded: str, migrated_engine: AsyncEngine
 ) -> None:
-    """ADR-121 결정 4 — master에 primary가 있으면 옮겨 온 primary는 enrichment가 된다.
+    """ADR-121 결정 4 — 강등은 MCST 목록만이다. 다른 provider의 primary는 그대로 옮긴다.
 
-    seed: master는 SE1 primary, loser는 SE2 primary. 역할을 그대로 옮기면 master에 primary가
-    둘이 된다(표시 원천이 흔들리고 SE2 원천의 부재가 master를 내릴 수 있다).
+    seed: master는 SE1 primary, loser는 SE2(merge-test-visitkorea) primary. MOIS 승자 판정·폐업
+    퇴역이 primary link로 "지도에 있는 원천"을 세므로 강등하면 그 판정이 깨진다(적대 리뷰).
     """
 
     async with AsyncSession(migrated_engine) as session, session.begin():
         await merge_from_review(session, seeded, merged_by="op-1", reason="dup")
-    async with AsyncSession(migrated_engine) as session:
-        roles = dict(
-            (
+    assert await _link_roles(migrated_engine, _F_MASTER) == {"SE1": "primary", "SE2": "primary"}
+
+
+_F_MCST_LOSER = "00000000-0000-7000-8000-0000000c0011"
+_F_MCST_MASTER = "00000000-0000-7000-8000-0000000c0012"
+_F_MCST_BARE_MASTER = "00000000-0000-7000-8000-0000000c0013"
+_F_MCST_LOSER_2 = "00000000-0000-7000-8000-0000000c0014"
+
+
+async def _link_roles(engine: AsyncEngine, feature_id: str) -> dict[str, str]:
+    async with AsyncSession(engine) as session:
+        return {
+            str(key): str(role)
+            for key, role in (
                 await session.execute(
                     select(SourceLinkRow.source_entity_key, SourceLinkRow.source_role).where(
-                        SourceLinkRow.feature_id == _F_MASTER
+                        SourceLinkRow.feature_id == feature_id
                     )
                 )
             ).all()
+        }
+
+
+_MCST_IDS = {
+    "a": _F_MCST_LOSER,
+    "b": _F_MCST_MASTER,
+    "c": _F_MCST_BARE_MASTER,
+    "d": _F_MCST_LOSER_2,
+}
+
+
+@pytest.fixture
+async def mcst_pair_cleanup(migrated_engine: AsyncEngine) -> object:
+    """MCST 강등 시험이 심은 행을 지운다 — DB는 세션 내내 공유된다."""
+
+    yield None
+    ids = "(CAST(:a AS uuid), CAST(:b AS uuid), CAST(:c AS uuid), CAST(:d AS uuid))"
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        for statement in (
+            f"DELETE FROM ops.feature_merge_history WHERE master_feature_id IN {ids} "
+            f"OR loser_feature_id IN {ids}",
+            f"DELETE FROM provider_sync.source_links WHERE feature_id IN {ids}",
+            "DELETE FROM provider_sync.source_entity_heads WHERE source_entity_key LIKE 'SE-d_-_'",
+            "DELETE FROM provider_sync.source_records WHERE source_record_key LIKE 'SR-d_-_'",
+            "DELETE FROM provider_sync.source_entities WHERE source_entity_key LIKE 'SE-d_-_'",
+            f"DELETE FROM feature.features WHERE feature_id IN {ids}",
+            "DELETE FROM provider_sync.provider_datasets WHERE "
+            "(provider = 'merge-test-museum' AND dataset_key = 'd') OR "
+            "(provider = 'python-mcst-api' AND dataset_key = 'mcst_merge_test')",
+        ):
+            await session.execute(text(statement), _MCST_IDS)
+
+
+async def _seed_mcst_pair(
+    engine: AsyncEngine, *, master: str, loser: str, master_has_primary: bool, tag: str
+) -> None:
+    async with AsyncSession(engine) as session, session.begin():
+        session.add(_feature(master, with_coord=True))
+        session.add(_feature(loser, with_coord=False))
+        other_dataset = await _seed_provider_dataset(
+            session, provider="merge-test-museum", dataset_key="d"
         )
-    assert roles == {"SE1": "primary", "SE2": "enrichment"}
+        mcst_dataset = await _seed_provider_dataset(
+            session, provider="python-mcst-api", dataset_key="mcst_merge_test"
+        )
+        master_entity, loser_entity = f"SE-{tag}-M", f"SE-{tag}-L"
+        session.add(_source_entity(master_entity, other_dataset))
+        session.add(_source_entity(loser_entity, mcst_dataset))
+        await session.flush()
+        session.add(_source_record(f"SR-{tag}-M", source_entity_key=master_entity))
+        session.add(_source_record(f"SR-{tag}-L", source_entity_key=loser_entity))
+        await session.flush()
+        session.add_all(
+            (
+                SourceEntityHeadRow(
+                    source_entity_key=master_entity,
+                    current_source_record_key=f"SR-{tag}-M",
+                    observed_at=_FETCHED,
+                ),
+                SourceEntityHeadRow(
+                    source_entity_key=loser_entity,
+                    current_source_record_key=f"SR-{tag}-L",
+                    observed_at=_FETCHED,
+                ),
+            )
+        )
+        await session.flush()
+        session.add(_link(master, master_entity, primary=master_has_primary))
+        session.add(_link(loser, loser_entity))
+
+
+async def test_merge_demotes_moved_mcst_primary_when_master_has_primary(
+    pg_container: object, migrated_engine: AsyncEngine, mcst_pair_cleanup: object
+) -> None:
+    """ADR-121 결정 4 — master에 primary가 있으면 옮겨 온 MCST primary는 enrichment가 된다."""
+
+    await _seed_mcst_pair(
+        migrated_engine,
+        master=_F_MCST_MASTER,
+        loser=_F_MCST_LOSER,
+        master_has_primary=True,
+        tag="d1",
+    )
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await apply_feature_merge(session, master_id=_F_MCST_MASTER, loser_id=_F_MCST_LOSER)
+    assert await _link_roles(migrated_engine, _F_MCST_MASTER) == {
+        "SE-d1-M": "primary",
+        "SE-d1-L": "enrichment",
+    }
+
+
+async def test_merge_keeps_mcst_primary_when_master_has_none(
+    pg_container: object, migrated_engine: AsyncEngine, mcst_pair_cleanup: object
+) -> None:
+    """master에 primary가 없으면 옮겨 온 MCST primary가 master의 유일한 primary로 남는다."""
+
+    await _seed_mcst_pair(
+        migrated_engine,
+        master=_F_MCST_BARE_MASTER,
+        loser=_F_MCST_LOSER_2,
+        master_has_primary=False,
+        tag="d2",
+    )
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await apply_feature_merge(
+            session, master_id=_F_MCST_BARE_MASTER, loser_id=_F_MCST_LOSER_2
+        )
+    assert await _link_roles(migrated_engine, _F_MCST_BARE_MASTER) == {
+        "SE-d2-M": "enrichment",
+        "SE-d2-L": "primary",
+    }

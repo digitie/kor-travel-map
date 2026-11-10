@@ -2671,8 +2671,12 @@ class AsyncKorTravelMapClient:
         max_lat: float,
         kinds: list[str] | None = None,
         limit: int = 1000,
+        attributes: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """bbox(4326) 안의 feature 경량 표현 list (지도/목록용)."""
+        """bbox(4326) 안의 feature 경량 표현 list (지도/목록용).
+
+        ``attributes``는 장소 속성 코드 AND 필터(ADR-121)다. 코드 검증은 호출자(API) 몫이다.
+        """
         async with self._session_factory() as session:
             return await features_in_bbox(
                 session,
@@ -2682,6 +2686,7 @@ class AsyncKorTravelMapClient:
                 max_lat=max_lat,
                 kinds=kinds,
                 limit=limit,
+                attributes=attributes,
             )
 
     async def get_features(self, feature_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
@@ -2706,6 +2711,7 @@ class AsyncKorTravelMapClient:
         cursor: str | None = None,
         include_total: bool = False,
         cursor_signing_key: bytes,
+        attributes: Sequence[str] | None = None,
     ) -> FeatureSearchPage:
         """사용자 feature 검색(pg_trgm ``q`` 또는 ``bbox``) — keyset cursor.
 
@@ -2727,6 +2733,7 @@ class AsyncKorTravelMapClient:
                 cursor=cursor,
                 include_total=include_total,
                 cursor_signing_key=cursor_signing_key,
+                attributes=attributes,
             )
 
     async def features_nearby(
@@ -2741,6 +2748,7 @@ class AsyncKorTravelMapClient:
         sort: str = "distance",
         limit: int = 100,
         cursor: str | None = None,
+        attributes: Sequence[str] | None = None,
     ) -> NearbyFeaturePage:
         """일반 좌표(``lon``/``lat``) 중심 반경 ``radius_m`` 안 feature summary (T-213b).
 
@@ -2761,6 +2769,7 @@ class AsyncKorTravelMapClient:
                 sort=sort,
                 limit=limit,
                 cursor=cursor,
+                attributes=attributes,
             )
 
     async def features_nearby_poi_cache_target(
@@ -2774,6 +2783,7 @@ class AsyncKorTravelMapClient:
         sort: str = "distance",
         limit: int = 100,
         cursor: str | None = None,
+        attributes: Sequence[str] | None = None,
     ) -> NearbyFeaturePage:
         """POI/cache target(``target_id``) 주변 feature summary — keyset cursor.
 
@@ -2793,6 +2803,7 @@ class AsyncKorTravelMapClient:
                 sort=sort,
                 limit=limit,
                 cursor=cursor,
+                attributes=attributes,
             )
 
     async def pending_dedup_reviews(self, *, limit: int = 100) -> list[dict[str, Any]]:

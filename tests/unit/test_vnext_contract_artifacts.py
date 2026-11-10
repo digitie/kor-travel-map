@@ -75,8 +75,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 5 operation 추가, user 불변). service added 5건.
     # 2026-10-25 PR #1410 — 기존 취소 503 description 두 곳의 DB 정리 실패 문구만 반영.
     # 2026-11-04 #1444 리뷰 — #1445·#1448의 추가 operation·query·필드를 장부에 기록.
+    # 2026-11-10 ADR-121 R3 — user·admin baseline 재고정(장소 속성 catalog·판정 목록 추가,
+    # 공개 목록·검색·주변·상세 additive 필드·query, service 불변).
     "openapi-diff-v1.json": (
-        "99c5bb945daa363fa8017b81a5c0596d73c1999fffc7cc8d4601107fdd807aa4"
+        "e7548a4512471bac07d7b0a8c7e002b337ec26b72b9ecd9ee33827851e56d0ee"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -90,8 +92,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-24 T-STATE-01-T4 — 같은 receipt의 service·full-admin sha 재핀(price-history T4).
     # 2026-10-24 T-STATE-02(ADR-114 2단계) — 같은 receipt 재핀(weather 5 operation 추가).
     # 2026-10-25 PR #1410 — full-admin description SHA 재핀, pending/re-vendor 조건 유지.
+    # 2026-11-10 ADR-121 R3 — pending receipt의 user·full-admin sha 재핀(장소 속성).
     "consumer-rollout-v1.json": (
-        "367d4c6c8cd471326e5b0f9c9dd71038a90e3290659cdcc99e526089cb2afffc"
+        "c5163e8c59bd885231a3aede277306c35792d998569586c3791e37c29ccd298f"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

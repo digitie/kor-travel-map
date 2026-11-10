@@ -28,7 +28,7 @@ from __future__ import annotations
 import json
 from collections import Counter
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Final, Literal
 
@@ -62,6 +62,7 @@ if TYPE_CHECKING:
 __all__ = [
     "MCST_PROVIDER",
     "PlanDatasetConfig",
+    "ThemeAttachLossGuardError",
     "ThemeAttachMode",
     "ThemeAttachReport",
     "ThemeAttachSpec",
@@ -148,6 +149,7 @@ SELECT sl.source_entity_key, CAST(sl.feature_id AS text) AS feature_id, sl.sourc
   FROM provider_sync.source_links AS sl
   JOIN feature.features AS f ON f.feature_id = sl.feature_id
  WHERE sl.source_entity_key = ANY(CAST(:entity_keys AS text[]))
+ ORDER BY sl.created_at, sl.feature_id
 """
 ).bindparams(bindparam("entity_keys", type_=ARRAY(Text)))
 
@@ -241,6 +243,34 @@ DELETE FROM provider_sync.source_links
 """
 )
 
+_COUNT_ENRICHMENT_SQL = text(
+    """
+SELECT count(*) AS existing,
+       count(*) FILTER (WHERE NOT (se.source_entity_id = ANY(CAST(:entity_ids AS text[]))))
+           AS absent
+  FROM provider_sync.source_links AS sl
+  JOIN provider_sync.source_entities AS se ON se.source_entity_key = sl.source_entity_key
+ WHERE se.provider_dataset_id = :provider_dataset_id
+   AND sl.source_role = 'enrichment'
+"""
+).bindparams(bindparam("entity_ids", type_=ARRAY(Text)))
+
+#: 한 번에 지울 수 있는 enrichment link 비율 상한. 빈 파일·잘린 파일이 dataset의 속성을 통째로
+#: 지우는 것을 막는다(MCST asset은 0행 수집을 권위 있는 빈 snapshot으로 본다).
+_MAX_ABSENT_RATIO: Final[float] = 0.5
+_MIN_GUARDED_LINKS: Final[int] = 20
+
+
+class ThemeAttachLossGuardError(RuntimeError):
+    """snapshot 부재로 지울 enrichment link가 너무 많다 — 적재하지 않는다."""
+
+
+def _loses_too_much(*, existing: int, absent: int, observed: int) -> bool:
+    if absent < _MIN_GUARDED_LINKS:
+        return False
+    return observed == 0 or absent > existing * _MAX_ABSENT_RATIO
+
+
 _DELETE_ABSENT_ENRICHMENT_SQL = text(
     """
 DELETE FROM provider_sync.source_links AS sl
@@ -325,18 +355,20 @@ async def _candidates(
     return out
 
 
-async def _merge_survivor(session: AsyncSession, feature_id: str) -> str | None:
+async def _merge_survivor(session: AsyncSession, feature_id: str) -> tuple[bool, str | None]:
+    """``(병합 이력이 있는가, active 생존자)``. 이력이 없으면 ``(False, None)``."""
+
     current = feature_id
-    for _ in range(_MAX_REDIRECT_HOPS):
+    for hop in range(_MAX_REDIRECT_HOPS):
         row = (
             await session.execute(_MERGE_SURVIVOR_SQL, {"feature_id": current})
         ).mappings().one_or_none()
         if row is None:
-            return None
+            return hop > 0, None
         current = str(row["master_feature_id"])
         if row["lifecycle_state"] == "active":
-            return current
-    return None
+            return True, current
+    return True, None
 
 
 async def _decide_rows(
@@ -397,13 +429,18 @@ async def _decide_rows(
             row.state, row.target = "sticky", sticky
             continue
         if claim is not None:
-            survivor = await _merge_survivor(session, claim)
+            merged, survivor = await _merge_survivor(session, claim)
             if survivor is not None:
                 row.state, row.target = "redirected", survivor
                 row.evidence = {"retired_claim": claim}
-            else:
+            elif merged:
+                # 병합됐지만 생존자도 퇴역했다 — 되살리지 않는다.
                 row.state = "unresolved"
                 row.evidence = {"retired_claim": claim}
+            else:
+                # 병합이 아닌 퇴역(provider·관리자) 또는 행 없음 — 기존 적재가 재활성 규칙
+                # (override fence 포함)으로 판단한다.
+                row.state, row.target = "owner", claim
             continue
         needs_match.append(index)
 
@@ -506,6 +543,11 @@ async def load_theme_attach_bundles(
 
     for row in rows:
         if row.state in ("owner", "created"):
+            # 예전에 다른 Feature로 붙어 있던 enrichment link가 남지 않게 한다(entity당 link ≤ 1).
+            await session.execute(
+                _DELETE_OTHER_ENRICHMENT_SQL,
+                {"source_entity_key": row.entity_key, "keep_feature_id": None},
+            )
             continue
         state = await _upsert_source_record_state(session, row.bundle.source_record)
         entity_key = state.source_entity_key
@@ -533,6 +575,17 @@ async def load_theme_attach_bundles(
             )
 
     entity_ids = sorted({row.bundle.source_record.source_entity_id for row in rows})
+    existing, absent = (
+        await session.execute(
+            _COUNT_ENRICHMENT_SQL,
+            {"provider_dataset_id": provider_dataset_id, "entity_ids": entity_ids},
+        )
+    ).one()
+    if _loses_too_much(existing=int(existing), absent=int(absent), observed=len(rows)):
+        raise ThemeAttachLossGuardError(
+            f"{spec.dataset_key}: snapshot이 enrichment link {existing}개 중 {absent}개를 "
+            f"지우려 한다(관측 {len(rows)}행) — 수집 이상으로 보고 적재하지 않는다."
+        )
     removed_links = len(
         (
             await session.execute(
@@ -570,6 +623,7 @@ async def load_theme_attach_bundles(
                 "rows": json.dumps(list(payload.values()), ensure_ascii=False, default=str),
             },
         )
+    loaded = replace(loaded, bundles_total=len(rows))
     return loaded, ThemeAttachReport(
         mode="apply",
         dataset_key=spec.dataset_key,
@@ -581,11 +635,14 @@ async def load_theme_attach_bundles(
 
 # ── 전환 계획 입력(§8.1, 읽기 전용) ──────────────────────────────────────
 
+#: 계획 대상 — MCST primary link를 가진 active place. **비MCST primary가 함께 있는 Feature는
+#: 뺀다** — 그것은 다른 원천이 소유한 master다(옛 병합이 primary를 그대로 옮긴 경우). link마다
+#: 한 행을 내고 Python이 Feature 단위로 접는다(반려 업종 판정은 모든 MCST primary가 반려 업종일
+#: 때만).
 _PLAN_FEATURES_SQL = text(
     """
-SELECT DISTINCT ON (f.feature_id)
-       CAST(f.feature_id AS text) AS feature_id, pd.dataset_key, f.name, f.created_at,
-       se.source_entity_type, sr.raw_data ->> 'CATEGORY2' AS category2
+SELECT CAST(f.feature_id AS text) AS feature_id, pd.dataset_key, f.name, f.created_at,
+       sr.raw_data ->> 'CATEGORY2' AS category2
   FROM feature.features AS f
   JOIN provider_sync.source_links AS sl
     ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
@@ -597,6 +654,16 @@ SELECT DISTINCT ON (f.feature_id)
     ON sr.source_record_key = h.current_source_record_key
  WHERE f.kind = 'place' AND f.lifecycle_state = 'active'
    AND pd.provider = :mcst_provider
+   AND NOT EXISTS (
+       SELECT 1
+         FROM provider_sync.source_links AS other
+         JOIN provider_sync.source_entities AS ose
+           ON ose.source_entity_key = other.source_entity_key
+         JOIN provider_sync.provider_datasets AS opd
+           ON opd.provider_dataset_id = ose.provider_dataset_id
+        WHERE other.feature_id = f.feature_id AND other.source_role = 'primary'
+          AND opd.provider <> :mcst_provider
+   )
  ORDER BY f.feature_id, sl.created_at
 """
 )
@@ -618,6 +685,16 @@ WITH mcst AS MATERIALIZED (
         ON pd.provider_dataset_id = se.provider_dataset_id
      WHERE f.kind = 'place' AND f.lifecycle_state = 'active' AND f.coord_5179 IS NOT NULL
        AND pd.provider = :mcst_provider
+       AND NOT EXISTS (
+           SELECT 1
+             FROM provider_sync.source_links AS other
+             JOIN provider_sync.source_entities AS ose
+               ON ose.source_entity_key = other.source_entity_key
+             JOIN provider_sync.provider_datasets AS opd
+               ON opd.provider_dataset_id = ose.provider_dataset_id
+            WHERE other.feature_id = f.feature_id AND other.source_role = 'primary'
+              AND opd.provider <> :mcst_provider
+       )
 ), pairs AS (
     SELECT m.feature_id AS mcst_id, o.feature_id AS other_id, o.name, o.category,
            o.publication_state = 'published' AS published,
@@ -628,7 +705,7 @@ WITH mcst AS MATERIALIZED (
        AND o.feature_id <> m.feature_id
      WHERE o.kind = 'place' AND o.lifecycle_state = 'active'
        AND o.publication_state = 'published' AND o.quality_state = 'valid'
-       AND x_extension.similarity(o.name, m.name) >= 0.2
+       AND x_extension.similarity(o.name, m.name) >= 0.1
 )
 SELECT CAST(p.mcst_id AS text) AS mcst_id, CAST(p.other_id AS text) AS other_id, p.name,
        p.category, p.published, p.distance_m,
@@ -691,26 +768,34 @@ async def fetch_mcst_plan_features(
                 published=bool(record["published"]),
             )
         )
-    out: list[PlanFeature] = []
+    grouped: dict[str, list[Any]] = {}
     for record in features:
-        dataset_key = str(record["dataset_key"])
+        grouped.setdefault(str(record["feature_id"]), []).append(record)
+    out: list[PlanFeature] = []
+    for feature_id, links in grouped.items():
+        first = links[0]  # 가장 먼저 만든 MCST primary가 소속 dataset이다.
+        dataset_key = str(first["dataset_key"])
         config = datasets.get(dataset_key)
         if config is None:
             continue
-        category2 = re.sub(r"\s+", "", str(record["category2"] or ""))
-        created_at = record["created_at"]
+        pet_flags: list[bool] = []
+        for link in links:
+            link_config = datasets.get(str(link["dataset_key"]))
+            category2 = re.sub(r"\s+", "", str(link["category2"] or ""))
+            pet_flags.append(link_config is not None and category2 in link_config.pet_business)
+        created_at = first["created_at"]
         out.append(
             PlanFeature(
-                feature_id=str(record["feature_id"]),
+                feature_id=feature_id,
                 dataset_key=dataset_key,
-                name=str(record["name"]),
+                name=str(first["name"]),
                 created_at=(
                     created_at.isoformat() if isinstance(created_at, datetime) else str(created_at)
                 ),
                 place_list=not config.attribute_list,
-                pet_business=category2 in config.pet_business,
+                pet_business=all(pet_flags),
                 master_category_prefixes=config.master_category_prefixes,
-                candidates=tuple(pairs.get(str(record["feature_id"]), ())),
+                candidates=tuple(pairs.get(feature_id, ())),
             )
         )
     return out

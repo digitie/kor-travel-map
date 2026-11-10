@@ -2904,6 +2904,14 @@
             ],
             "title": "Area Square Meters"
           },
+          "attribute_codes": {
+            "description": "장소 속성 코드(ADR-121, admin_only 포함, 코드 오름차순).",
+            "items": {
+              "type": "string"
+            },
+            "title": "Attribute Codes",
+            "type": "array"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -14975,6 +14983,31 @@
         "title": "FeatureAliasMapRowOut",
         "type": "object"
       },
+      "FeatureAttributeView": {
+        "additionalProperties": false,
+        "description": "Feature가 가진 공개 장소 속성 1건(ADR-121).",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "group"
+        ],
+        "title": "FeatureAttributeView",
+        "type": "object"
+      },
       "FeatureBatchData": {
         "additionalProperties": false,
         "description": "feature batch 5-state data payload.",
@@ -15534,6 +15567,14 @@
             "description": "kind=area이고 geometry가 있으면 면적(m²).",
             "title": "Area Square Meters"
           },
+          "attributes": {
+            "description": "이 Feature의 공개 장소 속성(ADR-121, catalog sort_order 순).",
+            "items": {
+              "$ref": "#/components/schemas/FeatureAttributeView"
+            },
+            "title": "Attributes",
+            "type": "array"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -15632,7 +15673,7 @@
             "type": "string"
           },
           "row_revision": {
-            "description": "server-owned feature revision. ETag과 같은 값이다.",
+            "description": "server-owned feature revision. 공개 장소 속성이 없으면 ETag과 같은 값이다(있으면 ETag에 속성 digest가 붙는다).",
             "minimum": 1.0,
             "title": "Row Revision",
             "type": "integer"
@@ -16812,6 +16853,14 @@
             ],
             "description": "include_geometry=true이고 kind=area일 때 면적(m²).",
             "title": "Area Square Meters"
+          },
+          "attribute_codes": {
+            "description": "공개 장소 속성 코드(ADR-121, 코드 오름차순). source link에서 유도한다. 라벨은 `GET /v1/place-attributes` catalog를 쓴다.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Attribute Codes",
+            "type": "array"
           },
           "category": {
             "title": "Category",
@@ -20478,6 +20527,14 @@
         "additionalProperties": false,
         "description": "POI/cache target 주변 public feature summary.",
         "properties": {
+          "attribute_codes": {
+            "description": "공개 장소 속성 코드(ADR-121, 코드 오름차순). source link에서 유도한다. 라벨은 `GET /v1/place-attributes` catalog를 쓴다.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Attribute Codes",
+            "type": "array"
+          },
           "category": {
             "title": "Category",
             "type": "string"
@@ -25862,6 +25919,72 @@
         "title": "PipelineSchedulesResponse",
         "type": "object"
       },
+      "PlaceAttributeSummary": {
+        "additionalProperties": false,
+        "description": "공개 장소 속성 catalog 1건.",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "group": {
+            "title": "Group",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "sort_order": {
+            "title": "Sort Order",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "group",
+          "sort_order"
+        ],
+        "title": "PlaceAttributeSummary",
+        "type": "object"
+      },
+      "PlaceAttributesData": {
+        "additionalProperties": false,
+        "description": "``GET /place-attributes`` data payload.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PlaceAttributeSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "PlaceAttributesData",
+        "type": "object"
+      },
+      "PlaceAttributesResponse": {
+        "additionalProperties": false,
+        "description": "``GET /place-attributes`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/PlaceAttributesData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "PlaceAttributesResponse",
+        "type": "object"
+      },
       "PoiCacheTargetListData": {
         "additionalProperties": false,
         "description": "POI/cache target 목록 data.",
@@ -29586,6 +29709,111 @@
           "meta"
         ],
         "title": "SystemLogsResponse",
+        "type": "object"
+      },
+      "ThemeAttachDecisionListData": {
+        "additionalProperties": false,
+        "description": "판정 목록 data.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ThemeAttachDecisionRecord"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ThemeAttachDecisionListData",
+        "type": "object"
+      },
+      "ThemeAttachDecisionListResponse": {
+        "additionalProperties": false,
+        "description": "``GET /admin/theme-attach-decisions`` 응답.",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ThemeAttachDecisionListData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ThemeAttachDecisionListResponse",
+        "type": "object"
+      },
+      "ThemeAttachDecisionRecord": {
+        "additionalProperties": false,
+        "description": "MCST 행 하나의 붙임 판정.",
+        "properties": {
+          "dataset_key": {
+            "title": "Dataset Key",
+            "type": "string"
+          },
+          "decided_at": {
+            "format": "date-time",
+            "title": "Decided At",
+            "type": "string"
+          },
+          "evidence": {
+            "additionalProperties": true,
+            "description": "후보 상위 3개의 거리·이름 점수·tier.",
+            "title": "Evidence",
+            "type": "object"
+          },
+          "natural_key": {
+            "title": "Natural Key",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "rule_version": {
+            "title": "Rule Version",
+            "type": "string"
+          },
+          "state": {
+            "enum": [
+              "owner",
+              "matched",
+              "sticky",
+              "redirected",
+              "created",
+              "ambiguous",
+              "unresolved"
+            ],
+            "title": "State",
+            "type": "string"
+          },
+          "target_feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "link가 걸린 Feature(보류 상태 ambiguous·unresolved면 null).",
+            "title": "Target Feature Id"
+          }
+        },
+        "required": [
+          "provider",
+          "dataset_key",
+          "natural_key",
+          "state",
+          "rule_version",
+          "evidence",
+          "decided_at"
+        ],
+        "title": "ThemeAttachDecisionRecord",
         "type": "object"
       },
       "ThemeCandidateCommandData": {
@@ -37141,6 +37369,27 @@
               "title": "Include Geometry",
               "type": "boolean"
             }
+          },
+          {
+            "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+            "in": "query",
+            "name": "attribute",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+              "title": "Attribute"
+            }
           }
         ],
         "responses": {
@@ -41083,6 +41332,129 @@
         ]
       }
     },
+    "/v1/admin/theme-attach-decisions": {
+      "get": {
+        "operationId": "list_theme_attach_decisions_v1_admin_theme_attach_decisions_get",
+        "parameters": [
+          {
+            "description": "MCST dataset_key 필터.",
+            "in": "query",
+            "name": "dataset_key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 200,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "MCST dataset_key 필터.",
+              "title": "Dataset Key"
+            }
+          },
+          {
+            "description": "판정 상태 필터.",
+            "in": "query",
+            "name": "state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "owner",
+                    "matched",
+                    "sticky",
+                    "redirected",
+                    "created",
+                    "ambiguous",
+                    "unresolved"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "판정 상태 필터.",
+              "title": "State"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThemeAttachDecisionListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "cursor·필터 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "AdminBFF": []
+          }
+        ],
+        "summary": "MCST 테마 목록 붙임 판정 목록 (읽기 전용)",
+        "tags": [
+          "admin-theme-attach"
+        ]
+      }
+    },
     "/v1/admin/theme-feature-candidates": {
       "get": {
         "operationId": "list_admin_theme_candidates_v1_admin_theme_feature_candidates_get",
@@ -42335,6 +42707,27 @@
               "title": "Include Geometry",
               "type": "boolean"
             }
+          },
+          {
+            "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+            "in": "query",
+            "name": "attribute",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+              "title": "Attribute"
+            }
           }
         ],
         "responses": {
@@ -42624,6 +43017,27 @@
               "title": "Include Geometry",
               "type": "boolean"
             }
+          },
+          {
+            "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+            "in": "query",
+            "name": "attribute",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+              "title": "Attribute"
+            }
           }
         ],
         "responses": {
@@ -42819,6 +43233,27 @@
               ],
               "title": "Sort",
               "type": "string"
+            }
+          },
+          {
+            "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+            "in": "query",
+            "name": "attribute",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+              "title": "Attribute"
             }
           }
         ],
@@ -43020,6 +43455,27 @@
               ],
               "title": "Sort",
               "type": "string"
+            }
+          },
+          {
+            "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+            "in": "query",
+            "name": "attribute",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+              "title": "Attribute"
             }
           }
         ],
@@ -43254,6 +43710,27 @@
               "title": "Include Total",
               "type": "boolean"
             }
+          },
+          {
+            "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+            "in": "query",
+            "name": "attribute",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "장소 속성 코드 반복 필터(ADR-121). 지정한 코드를 **모두** 가진 feature만 남긴다(AND, 최대 5개). 코드는 `GET /v1/place-attributes` catalog를 따른다. 모르는 코드는 422다.",
+              "title": "Attribute"
+            }
           }
         ],
         "responses": {
@@ -43329,7 +43806,7 @@
             "description": "Successful Response",
             "headers": {
               "ETag": {
-                "description": "현재 feature row_revision strong entity tag.",
+                "description": "현재 feature strong entity tag — row_revision에 공개 장소 속성 코드 집합 digest를 더한다(속성이 있을 때만 '<revision>-<digest>').",
                 "schema": {
                   "type": "string"
                 }
@@ -43337,7 +43814,7 @@
             }
           },
           "304": {
-            "description": "If-None-Match row_revision 일치 (본문 없음)"
+            "description": "If-None-Match ETag 일치 (본문 없음)"
           },
           "404": {
             "content": {
@@ -48857,6 +49334,45 @@
         "summary": "Get System Logs",
         "tags": [
           "ops"
+        ]
+      }
+    },
+    "/v1/place-attributes": {
+      "get": {
+        "operationId": "list_public_place_attributes_v1_place_attributes_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PlaceAttributesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "공개 장소 속성 catalog (sort_order 순)",
+        "tags": [
+          "place-attributes"
         ]
       }
     },

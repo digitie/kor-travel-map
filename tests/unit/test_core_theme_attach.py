@@ -234,3 +234,43 @@ def test_plan_does_not_collapse_into_retiring_pet_business() -> None:
     ]
     plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
     assert plan["x"].action == "keep"
+
+
+def test_plan_chain_without_direct_match_is_not_collapsed() -> None:
+    # a~b, b~c는 직접 일치하지만 a~c는 아니다 — c는 생존자 a에 접히지 않는다.
+    features = [
+        _pf("a", name="가나다라마", created="1", candidates=(_c("b", "가나다라마", 5, tier=2),)),
+        _pf(
+            "b",
+            name="가나다라마",
+            created="2",
+            candidates=(_c("a", "가나다라마", 5, tier=2), _c("c", "가나다라마", 5, tier=2)),
+        ),
+        _pf("c", name="가나다라마", created="3", candidates=(_c("b", "가나다라마", 5, tier=2),)),
+    ]
+    plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
+    assert plan["a"].action == "keep"
+    assert (plan["b"].action, plan["b"].target_feature_id) == ("collapse", "a")
+    assert plan["c"].action == "ambiguous"
+    assert plan["c"].evidence["reason"] == "chained_only"
+
+
+def test_plan_inherited_attach_rechecks_own_category() -> None:
+    # 무장애(분류 제한 없음)가 식당 master에 붙어도 아동서점(0104만)은 물려받지 않는다.
+    features = [
+        _pf("barrier", name="책읽는식당", candidates=(_c("M", "책읽는식당", 10, category="02010000"),)),
+        PlanFeature(
+            feature_id="kids",
+            dataset_key="mcst_children_bookstores_csv",
+            name="책읽는식당",
+            created_at="2",
+            place_list=True,
+            pet_business=False,
+            master_category_prefixes=("0104",),
+            candidates=(_c("barrier", "책읽는식당", 3, tier=2),),
+        ),
+    ]
+    plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
+    assert (plan["barrier"].action, plan["barrier"].target_feature_id) == ("attach", "M")
+    assert plan["kids"].action == "ambiguous"
+    assert plan["kids"].evidence["reason"] == "inherited_master_category"

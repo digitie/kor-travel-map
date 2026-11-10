@@ -229,6 +229,8 @@ class AttachDecision:
     target_feature_id: str | None
     tier: int | None
     evidence: Mapping[str, object] = field(default_factory=dict)
+    accepted_tier2: frozenset[str] = frozenset()
+    """채택된 tier 2 후보 전부 — 전환 계획의 묶음이 직접 일치한 쌍만 접게 한다."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -279,13 +281,18 @@ def decide_attach(
         )[:3]
     ]
     evidence: dict[str, object] = {"name_core": own.core, "accepted": evidence_top}
+    tier2_ids = frozenset(
+        item.candidate.feature_id for item in accepted if item.candidate.tier == 2
+    )
 
     for tier in (1, 2):
         in_tier = [item for item in accepted if item.candidate.tier == tier]
         if not in_tier:
             continue
         if any(not item.candidate.published for item in in_tier):
-            return AttachDecision("ambiguous", None, tier, {**evidence, "reason": "suppressed"})
+            return AttachDecision(
+                "ambiguous", None, tier, {**evidence, "reason": "suppressed"}, tier2_ids
+            )
         ranked = sorted(
             in_tier,
             key=lambda s: (-s.score, s.candidate.distance_m, s.candidate.feature_id),
@@ -298,9 +305,11 @@ def decide_attach(
         # tier 2(MCST끼리)의 동점은 다툼이 아니다 — 같은 장소가 여러 목록에 있는 것이고 전환 계획이
         # 그 묶음을 하나로 접는다(2026-11-10 R2 dry-run: tier 2 동점이 ambiguous의 3/4이었다).
         if tier == 1 and runner is not None and best.score - runner.score < AMBIGUITY_MARGIN:
-            return AttachDecision("ambiguous", None, tier, {**evidence, "reason": "tie"})
-        return AttachDecision("matched", best.candidate.feature_id, tier, evidence)
-    return AttachDecision("none", None, None, evidence)
+            return AttachDecision(
+                "ambiguous", None, tier, {**evidence, "reason": "tie"}, tier2_ids
+            )
+        return AttachDecision("matched", best.candidate.feature_id, tier, evidence, tier2_ids)
+    return AttachDecision("none", None, None, evidence, tier2_ids)
 
 
 # ── 기존 MCST Feature 전환 계획(§8.1) ──────────────────────────────────────
@@ -348,6 +357,7 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
     entries: dict[str, PlanEntry] = {}
     edges: dict[str, str] = {}
     evidences: dict[str, Mapping[str, object]] = {}
+    direct: dict[str, frozenset[str]] = {}
     for feature in features:
         if feature.feature_id in retire:
             entries[feature.feature_id] = PlanEntry(
@@ -361,6 +371,7 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
             exclude_feature_ids=retire | {feature.feature_id},
         )
         evidences[feature.feature_id] = decision.evidence
+        direct[feature.feature_id] = decision.accepted_tier2
         if decision.state == "ambiguous":
             entries[feature.feature_id] = PlanEntry(
                 feature.feature_id, feature.dataset_key, "ambiguous", None, decision.evidence
@@ -375,8 +386,24 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
             )
         elif decision.state == "matched" and decision.target_feature_id in by_id:
             edges[feature.feature_id] = decision.target_feature_id
+        elif decision.state == "matched":
+            # 설정이 없는 dataset의 Feature를 가리킨다 — 이 계획이 다루지 않는 대상이다.
+            entries[feature.feature_id] = PlanEntry(
+                feature.feature_id,
+                feature.dataset_key,
+                "ambiguous",
+                None,
+                {**decision.evidence, "reason": "target_outside_plan"},
+            )
 
-    # tier 2 간선 — 상대가 이미 정해졌으면 그 결과를 따른다(연쇄는 고정점까지).
+    def _master_category(source: str, master: str) -> str | None:
+        for candidate in by_id[source].candidates:
+            if candidate.feature_id == master:
+                return candidate.category
+        return None
+
+    # tier 2 간선 — 상대가 이미 정해졌으면 그 결과를 따른다(연쇄는 고정점까지). 상대의 attach를
+    # 물려받을 때는 **자기** 분류 호환을 다시 본다(상대 목록이 분류를 보지 않았을 수 있다).
     changed = True
     while changed:
         changed = False
@@ -385,12 +412,21 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
             if settled is None or settled.action not in ("attach", "ambiguous"):
                 continue
             feature = by_id[source]
+            action: PlanAction = settled.action
+            evidence: dict[str, object] = {**evidences.get(source, {}), "via": target}
+            if action == "attach" and settled.target_feature_id is not None:
+                category = _master_category(target, settled.target_feature_id)
+                if category is None or not category_compatible(
+                    category, feature.master_category_prefixes
+                ):
+                    action = "ambiguous"
+                    evidence["reason"] = "inherited_master_category"
             entries[source] = PlanEntry(
                 source,
                 feature.dataset_key,
-                settled.action,
-                settled.target_feature_id,
-                {**evidences.get(source, {}), "via": target},
+                action,
+                settled.target_feature_id if action == "attach" else None,
+                evidence,
             )
             del edges[source]
             changed = True
@@ -425,13 +461,28 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
                 entries[member] = PlanEntry(
                     member, feature.dataset_key, "keep", None, evidences.get(member, {})
                 )
-            else:
+            elif survivor in direct.get(member, frozenset()) or member in direct.get(
+                survivor, frozenset()
+            ):
                 entries[member] = PlanEntry(
                     member,
                     feature.dataset_key,
                     "collapse",
                     survivor,
                     evidences.get(member, {}),
+                )
+            else:
+                # 사슬로만 이어진 구성원 — 생존자와 직접 일치하지 않으면 접지 않는다.
+                entries[member] = PlanEntry(
+                    member,
+                    feature.dataset_key,
+                    "ambiguous",
+                    None,
+                    {
+                        **evidences.get(member, {}),
+                        "reason": "chained_only",
+                        "survivor": survivor,
+                    },
                 )
     for feature in features:
         if feature.feature_id not in entries:

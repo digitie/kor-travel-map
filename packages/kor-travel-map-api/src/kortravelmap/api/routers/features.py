@@ -11,6 +11,11 @@ DTO 매핑만, SQL 미보유.
 - ``GET /features/{feature_id}`` — feature 단건 상세.
 - ``POST /features/batch`` — N+1 방지 batch 상세(service read, ServiceToken).
 
+목록·in-bounds·검색·주변 조회는 ``attribute``(장소 속성 코드, AND, 최대 5개) 반복 필터를
+받고 행마다 공개 ``attribute_codes``를 싣는다. 상세는 ``attributes``(코드·라벨·묶음)를 싣고
+ETag에 공개 속성 코드 digest를 더한다(ADR-121 §7). service batch(``FeatureTripCard``)는
+바꾸지 않는다.
+
 ADR 참조
 --------
 - ADR-004 — 쿼리는 raw SQL (``feature_repo``)
@@ -41,6 +46,7 @@ from kortravelmap.infra import (
     feature_identity,
     feature_repo,
     observation_repo,
+    place_attribute_repo,
     price_repo,
 )
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -60,8 +66,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
 from kortravelmap.api.db import get_read_snapshot_session, get_session
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
-from kortravelmap.api.http_revision import parse_revision_header, revision_etag
+from kortravelmap.api.http_revision import parse_revision_digest_header, revision_digest_etag
 from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
+from kortravelmap.api.place_attribute_params import AttributeQuery, resolve_attribute_filter
 from kortravelmap.api.response import ClusterUnit, Meta, ProblemDetail, make_meta
 from kortravelmap.api.routers.curations import (
     PublicCurationItemView,
@@ -74,6 +81,7 @@ __all__ = [
     "FeatureSummary",
     "FeaturesInBboxResponse",
     "FeaturesInBoundsResponse",
+    "FeatureAttributeView",
     "FeatureDetailResponse",
     "FeatureDetailEnvelopeResponse",
     "FeatureBatchRequest",
@@ -211,6 +219,13 @@ class FeatureSummary(_PublicDisplayName):
         default=None,
         description="kind=price일 때 provider/domain/product series별 최신 가격 요약.",
     )
+    attribute_codes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "공개 장소 속성 코드(ADR-121, 코드 오름차순). source link에서 유도한다. "
+            "라벨은 `GET /v1/place-attributes` catalog를 쓴다."
+        ),
+    )
 
 
 class FeaturesInBboxData(BaseModel):
@@ -257,6 +272,16 @@ class FeatureObservationView(BaseModel):
     is_current: bool
 
 
+class FeatureAttributeView(BaseModel):
+    """Feature가 가진 공개 장소 속성 1건(ADR-121)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    code: str
+    label: str
+    group: str
+
+
 class FeatureDetailResponse(_PublicDisplayName):
     """feature 단건 상세 data payload."""
 
@@ -294,12 +319,19 @@ class FeatureDetailResponse(_PublicDisplayName):
     marker_color: str | None = None
     row_revision: int = Field(
         ge=1,
-        description="server-owned feature revision. ETag과 같은 값이다.",
+        description=(
+            "server-owned feature revision. 공개 장소 속성이 없으면 ETag과 같은 값이다"
+            "(있으면 ETag에 속성 digest가 붙는다)."
+        ),
     )
     updated_at: datetime
     curations: list[PublicCurationItemView] = Field(
         default_factory=list,
         description="이 Feature가 속한 공개 큐레이션 membership 전부.",
+    )
+    attributes: list[FeatureAttributeView] = Field(
+        default_factory=list,
+        description="이 Feature의 공개 장소 속성(ADR-121, catalog sort_order 순).",
     )
     # T-VN-05: raw observation lineage는 공개 detail에서 제거하고 operator 표면
     # (``GET /features/{id}/sources``·observation history)으로 이동했다.
@@ -686,6 +718,13 @@ class NearbyFeatureSummary(_PublicDisplayName):
     lon: float
     lat: float
     distance_m: float
+    attribute_codes: list[str] = Field(
+        default_factory=list,
+        description=(
+            "공개 장소 속성 코드(ADR-121, 코드 오름차순). source link에서 유도한다. "
+            "라벨은 `GET /v1/place-attributes` catalog를 쓴다."
+        ),
+    )
 
 
 class FeaturesNearbyByTargetData(BaseModel):
@@ -989,6 +1028,7 @@ async def list_features_in_bbox(
         bool,
         Query(description="route/area 지도 표시용 GeoJSON geometry 포함 여부."),
     ] = False,
+    attribute: AttributeQuery = None,
 ) -> FeaturesInBboxResponse:
     started_at = perf_counter()
     if min_lon > max_lon or min_lat > max_lat:
@@ -997,6 +1037,7 @@ async def list_features_in_bbox(
             status_code=422,
             detail="bbox min 좌표가 max보다 큽니다 (min_lon≤max_lon, min_lat≤max_lat).",
         )
+    attributes = await resolve_attribute_filter(session, attribute, public=True)
     try:
         rows = await feature_repo.features_in_bbox(
             session,
@@ -1014,6 +1055,7 @@ async def list_features_in_bbox(
             # KST 날짜 기준으로 명확히 "과거" 표시한다. 값 은폐는 갱신 장애를
             # 다시 보이지 않게 만들므로 price card의 current 지평선과 분리한다.
             price_stale_hide_days=None,
+            attributes=attributes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1081,6 +1123,7 @@ async def list_public_features_in_bounds(
             )
         ),
     ] = False,
+    attribute: AttributeQuery = None,
 ) -> FeaturesInBoundsResponse:
     started_at = perf_counter()
     if min_lon > max_lon or min_lat > max_lat:
@@ -1088,6 +1131,8 @@ async def list_public_features_in_bounds(
             status_code=422,
             detail="bbox min 좌표가 max보다 큽니다 (min_lon≤max_lon, min_lat≤max_lat).",
         )
+    # 장소 속성 필터는 item·cluster 두 모드에 같이 걸린다(공간 후보 universe가 같다).
+    attributes = await resolve_attribute_filter(session, attribute, public=True)
     resolved_unit = _resolve_cluster_unit(cluster_unit, zoom)
     if resolved_unit is not None:
         # max_items+1을 요청해 상한 초과 여부(truncated)를 명시적으로 판정한다
@@ -1104,6 +1149,7 @@ async def list_public_features_in_bounds(
             categories=category,
             providers=provider,
             limit=max_items + 1,
+            attributes=attributes,
         )
         truncated = len(clusters_raw) > max_items
         clusters = [ClusterSummary(**c) for c in clusters_raw[:max_items]]
@@ -1136,6 +1182,7 @@ async def list_public_features_in_bounds(
         limit=max_items + 1,
         include_geometry=include_geometry,
         price_stale_hide_days=None,
+        attributes=attributes,
     )
     truncated = len(rows) > max_items
     items = [FeatureSummary(**uuid_substituted_row(row)) for row in rows[:max_items]]
@@ -1177,6 +1224,7 @@ async def search_public_features(
     page_size: Annotated[int, Query(ge=1, le=200, description="페이지 크기.")] = 50,
     cursor: Annotated[str | None, Query()] = None,
     include_total: Annotated[bool, Query()] = False,
+    attribute: AttributeQuery = None,
 ) -> FeatureSearchResponse:
     started_at = perf_counter()
     bbox_parts = (min_lon, min_lat, max_lon, max_lat)
@@ -1189,6 +1237,7 @@ async def search_public_features(
     bbox: tuple[float, float, float, float] | None = None
     if min_lon is not None and min_lat is not None and max_lon is not None and max_lat is not None:
         bbox = (min_lon, min_lat, max_lon, max_lat)
+    attributes = await resolve_attribute_filter(session, attribute, public=True)
     try:
         page = await feature_repo.search_features(
             session,
@@ -1200,6 +1249,7 @@ async def search_public_features(
             cursor=cursor,
             include_total=include_total,
             cursor_signing_key=_search_cursor_signing_key(request),
+            attributes=attributes,
         )
     except FeatureSearchCursorError as exc:
         raise _search_cursor_http_error(exc) from exc
@@ -1216,6 +1266,7 @@ async def search_public_features(
             lat=item.lat,
             marker_icon=item.marker_icon,
             marker_color=item.marker_color,
+            attribute_codes=list(item.attribute_codes),
         )
         for item in page.items
     ]
@@ -1260,8 +1311,10 @@ async def list_features_nearby(
     page_size: Annotated[int, Query(ge=1, le=500)] = 100,
     cursor: Annotated[str | None, Query()] = None,
     sort: Annotated[NearbySort, Query()] = "distance",
+    attribute: AttributeQuery = None,
 ) -> FeaturesNearbyResponse:
     started_at = perf_counter()
+    attributes = await resolve_attribute_filter(session, attribute, public=True)
     try:
         page = await feature_repo.features_nearby(
             session,
@@ -1274,6 +1327,7 @@ async def list_features_nearby(
             sort=sort,
             limit=page_size,
             cursor=cursor,
+            attributes=attributes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1287,6 +1341,7 @@ async def list_features_nearby(
             lon=item.lon,
             lat=item.lat,
             distance_m=item.distance_m,
+            attribute_codes=list(item.attribute_codes),
         )
         for item in page.items
     ]
@@ -1341,6 +1396,7 @@ async def list_features_nearby_by_target(
     page_size: Annotated[int, Query(ge=1, le=500)] = 100,
     cursor: Annotated[str | None, Query()] = None,
     sort: Annotated[NearbySort, Query()] = "distance",
+    attribute: AttributeQuery = None,
 ) -> FeaturesNearbyByTargetResponse:
     started_at = perf_counter()
     target = await get_poi_cache_target_by_key(
@@ -1353,6 +1409,7 @@ async def list_features_nearby_by_target(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"POI/cache target 없음: {external_system!r}/{target_key!r}",
         )
+    attributes = await resolve_attribute_filter(session, attribute, public=True)
     try:
         page = await feature_repo.features_nearby_poi_cache_target(
             session,
@@ -1364,6 +1421,7 @@ async def list_features_nearby_by_target(
             sort=sort,
             limit=page_size,
             cursor=cursor,
+            attributes=attributes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1377,6 +1435,7 @@ async def list_features_nearby_by_target(
             lon=item.lon,
             lat=item.lat,
             distance_m=item.distance_m,
+            attribute_codes=list(item.attribute_codes),
         )
         for item in page.items
     ]
@@ -1407,7 +1466,7 @@ async def list_features_nearby_by_target(
     ),
     responses={
         404: {"description": "feature 참조 해석 불가 또는 비공개"},
-        304: {"description": "If-None-Match row_revision 일치 (본문 없음)"},
+        304: {"description": "If-None-Match ETag 일치 (본문 없음)"},
         422: {
             "description": (
                 "feature 참조 형식 오류(빈 문자열/공백 패딩/길이 초과) 또는 "
@@ -1417,7 +1476,10 @@ async def list_features_nearby_by_target(
         200: {
             "headers": {
                 "ETag": {
-                    "description": "현재 feature row_revision strong entity tag.",
+                    "description": (
+                        "현재 feature strong entity tag — row_revision에 공개 장소 속성 "
+                        "코드 집합 digest를 더한다(속성이 있을 때만 '<revision>-<digest>')."
+                    ),
                     "schema": {"type": "string"},
                 }
             }
@@ -1439,13 +1501,16 @@ async def get_feature(
         session, canonical_id, display_ref=feature_id
     )
     revision = int(row["row_revision"])
-    expected = parse_revision_header(
-        request,
-        "If-None-Match",
-        required=False,
+    expected = parse_revision_digest_header(request, "If-None-Match")
+    # 장소 속성은 link에서 유도돼 row_revision 없이 바뀐다 — ETag에 공개 코드 digest를 더한다.
+    attributes = await place_attribute_repo.list_feature_place_attributes(
+        session, canonical_id, public_only=True
     )
-    etag = revision_etag(revision)
-    if expected == revision:
+    etag = revision_digest_etag(
+        revision,
+        place_attribute_repo.place_attribute_codes_digest([item.code for item in attributes]),
+    )
+    if expected == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
     curations = await curation_repo.list_curation_items_by_feature_ids(
         session, feature_ids=[canonical_id], public_only=True
@@ -1455,6 +1520,10 @@ async def get_feature(
             "feature_uuid": identity.feature_uuid,
             "curations": [
                 _curation_item_view(item) for item in curations.get(canonical_id, ())
+            ],
+            "attributes": [
+                FeatureAttributeView(code=item.code, label=item.label, group=item.group)
+                for item in attributes
             ],
         }
     )

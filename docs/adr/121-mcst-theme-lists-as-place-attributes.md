@@ -35,7 +35,7 @@ seed에 `source_type = "python-mcst-api:mcst_<slug>"`가 들어가고(`mcst.py:7
      운영 Feature는 R4 퇴역 계획에 들어간다.
 2. **속성은 별도 상태를 두지 않고 source link에서 유도한다.** 속성 = 그 Feature에 걸린
    `primary`/`enrichment` source link의 (dataset, entity 유형)이 속성 catalog에 묶여 있는가. 새
-   표는 catalog 두 개(`feature.place_attributes`, `provider_sync.dataset_place_attributes`)와
+   표는 catalog 두 개(`feature.place_attributes`, `feature.dataset_place_attributes`)와
    붙임 판정 기록뿐이다. Feature 행에 tags 배열을 복제하지 않는다 — merge·link 이동·퇴역이 이미
    link를 다루므로 속성은 따라온다.
 3. **붙임은 적재 시점의 결정적 규칙(`theme-attach-v1`)이다.** 거리(`coord_5179` 열끼리,

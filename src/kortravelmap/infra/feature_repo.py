@@ -1374,12 +1374,86 @@ def _bbox_candidate_predicate_sql(feature_alias: str) -> str:
   )"""
 
 
+# ─── 장소 속성 (ADR-121) ─────────────────────────────────────────────────────
+# Feature F가 속성 A를 가진다 ⇔ F의 ``primary``/``enrichment`` source link 중 하나의 원천
+# entity (dataset, entity 유형)이 ``feature.dataset_place_attributes``에서 A에 묶여 있다.
+# 속성은 저장된 상태가 아니라 link에서 유도한다 — 읽기 경로는 모두 아래 두 fragment만 쓴다
+# (공개 읽기 SQL 열거 테스트가 fragment가 빠진 경로를 잡는다).
+
+#: 속성을 만드는 link 역할(ADR-121 §4.3). ``secondary`` 등 다른 역할은 속성을 만들지 않는다.
+PLACE_ATTRIBUTE_LINK_ROLES: Final[tuple[str, ...]] = ("primary", "enrichment")
+_PLACE_ATTRIBUTE_ROLES_SQL: Final[str] = ", ".join(
+    f"'{role}'" for role in PLACE_ATTRIBUTE_LINK_ROLES
+)
+
+
+def place_attribute_filter_sql(feature_alias: str, param: str = "attributes") -> str:
+    """요청 속성 코드를 **모두**(AND) 가진 Feature만 남기는 술어(ADR-121 §7.1).
+
+    ``:{param}``은 ``text[]``다. NULL이면 술어가 단락돼 다른 조회 계획에 영향이 없다.
+    "원하는 코드 중 link로 유도되지 않는 코드가 하나도 없다"로 AND를 표현한다. 각 EXISTS는
+    ``source_links`` PK(feature_id 선두)·``source_entities`` PK·``dataset_place_attributes``
+    PK가 받는다. 앞에 ``AND``를 붙이지 않은 괄호 술어를 돌려준다.
+    """
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    if not param.isidentifier():
+        raise ValueError("bind parameter must be a SQL identifier")
+    return f"""(
+    CAST(:{param} AS text[]) IS NULL
+    OR NOT EXISTS (
+      SELECT 1
+      FROM unnest(CAST(:{param} AS text[])) AS wanted_attribute(code)
+      WHERE NOT EXISTS (
+        SELECT 1
+        FROM provider_sync.source_links AS attr_link
+        JOIN provider_sync.source_entities AS attr_entity
+          ON attr_entity.source_entity_key = attr_link.source_entity_key
+        JOIN feature.dataset_place_attributes AS attr_map
+          ON attr_map.provider_dataset_id = attr_entity.provider_dataset_id
+         AND attr_map.source_entity_type = attr_entity.source_entity_type
+        WHERE attr_link.feature_id = {feature_alias}.feature_id
+          AND attr_link.source_role IN ({_PLACE_ATTRIBUTE_ROLES_SQL})
+          AND attr_map.attribute_code = wanted_attribute.code
+      )
+    )
+  )"""
+
+
+def place_attribute_codes_sql(feature_alias: str, *, public_only: bool = True) -> str:
+    """Feature 하나의 속성 코드 ``text[]``(코드 오름차순, 중복 없음) — 상관 ``ARRAY`` 식.
+
+    ``public_only``면 ``feature.place_attributes.visibility = 'public'`` 코드만 싣는다(공개
+    경로). admin 경로는 ``admin_only`` 코드까지 싣는다. 속성이 없으면 빈 배열이다. 호출부는
+    ``ORDER BY … LIMIT``이 붙은 최종 SELECT 목록(또는 이미 잘린 MATERIALIZED 후보)에만 둔다 —
+    PostgreSQL은 비싼 target 식을 정렬·LIMIT 뒤로 미뤄 페이지 행에만 계산한다.
+    """
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    visibility = "\n        AND attr_catalog.visibility = 'public'" if public_only else ""
+    return f"""ARRAY(
+      SELECT DISTINCT attr_map.attribute_code
+      FROM provider_sync.source_links AS attr_link
+      JOIN provider_sync.source_entities AS attr_entity
+        ON attr_entity.source_entity_key = attr_link.source_entity_key
+      JOIN feature.dataset_place_attributes AS attr_map
+        ON attr_map.provider_dataset_id = attr_entity.provider_dataset_id
+       AND attr_map.source_entity_type = attr_entity.source_entity_type
+      JOIN feature.place_attributes AS attr_catalog
+        ON attr_catalog.attribute_code = attr_map.attribute_code
+      WHERE attr_link.feature_id = {feature_alias}.feature_id
+        AND attr_link.source_role IN ({_PLACE_ATTRIBUTE_ROLES_SQL}){visibility}
+      ORDER BY attr_map.attribute_code
+    )"""
+
+
 def _bbox_attribute_filter_sql(feature_alias: str) -> str:
-    """kind/category/provider 공통 속성 필터 (items 경량/geometry + cluster 공유).
+    """kind/category/provider/장소 속성 공통 필터 (items 경량/geometry + cluster 공유).
 
     세 변형이 같은 SQL을 재사용해 이중 복제를 제거한다(ADR-073 D-9-4). NULL 배열이면
     술어가 단락(short-circuit)돼 인덱스 기반 조회에 영향이 없다. provider 필터는
-    primary source(``source_role = 'primary'``) 기준 EXISTS다.
+    primary source(``source_role = 'primary'``) 기준 EXISTS다. 장소 속성 필터는
+    ``place_attribute_filter_sql``(ADR-121)이다.
     """
     if not feature_alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
@@ -1403,6 +1477,7 @@ def _bbox_attribute_filter_sql(feature_alias: str) -> str:
         AND pd.provider = ANY(CAST(:providers AS text[]))
     )
   )
+  AND {place_attribute_filter_sql(feature_alias)}
 """
 
 
@@ -1515,7 +1590,8 @@ SELECT
     candidate.kind, candidate.name, candidate.category,
     candidate.lon, candidate.lat,
     candidate.marker_icon, candidate.marker_color,
-    price_summaries.price_summary
+    price_summaries.price_summary,
+    {place_attribute_codes_sql("candidate")} AS attribute_codes
 FROM candidates AS candidate
 LEFT JOIN price_summaries USING (feature_id)
 ORDER BY candidate.feature_id ASC
@@ -1563,7 +1639,8 @@ SELECT
     candidate.marker_icon, candidate.marker_color,
     price_summaries.price_summary,
     candidate.geometry,
-    candidate.area_square_meters
+    candidate.area_square_meters,
+    {place_attribute_codes_sql("candidate")} AS attribute_codes
 FROM candidates AS candidate
 LEFT JOIN price_summaries USING (feature_id)
 ORDER BY candidate.feature_id ASC
@@ -1708,6 +1785,7 @@ async def cluster_features_in_bbox(
     categories: Sequence[str] | None = None,
     providers: Sequence[str] | None = None,
     limit: int = 2000,
+    attributes: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """bbox 내 feature를 행정구역(``cluster_unit``) 단위로 rollup한다 (T-213c).
 
@@ -1741,6 +1819,7 @@ async def cluster_features_in_bbox(
                     "kinds": normalized_kinds,
                     "categories": _normalized_filter(categories),
                     "providers": _normalized_filter(providers),
+                    "attributes": _normalized_attributes(attributes),
                     "limit": limit,
                 },
             )
@@ -1798,6 +1877,7 @@ WITH candidates AS (
         CAST(:categories AS text[]) IS NULL
         OR f.category = ANY(CAST(:categories AS text[]))
       )
+      AND {place_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 )
 """
@@ -2074,6 +2154,7 @@ filtered AS (
         CAST(:categories AS text[]) IS NULL
         OR category = ANY(CAST(:categories AS text[]))
       )
+      AND {place_attribute_filter_sql("name_candidates")}
 ),
 compacted AS (
     -- 비교 키는 보이는 이름(주차장 표시 이름 포함)에서 만든다. tail은 첫 공백까지(지역명 —
@@ -2163,8 +2244,9 @@ candidates AS (
 
 _FEATURE_SEARCH_SCORE_CTE_SQL: Final[str] = _feature_search_score_cte(region=False)
 
-_FEATURE_SEARCH_PAGE_TAIL_SQL: Final[str] = """
-SELECT candidates.*, score::text AS score_cursor
+_FEATURE_SEARCH_PAGE_TAIL_SQL: Final[str] = f"""
+SELECT candidates.*, score::text AS score_cursor,
+    {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_score AS text) IS NULL
@@ -2185,10 +2267,8 @@ LIMIT :limit_plus_one
 _FEATURE_SEARCH_BY_SCORE_SQL: Final[str] = (
     _FEATURE_SEARCH_SCORE_CTE_SQL + _FEATURE_SEARCH_PAGE_TAIL_SQL
 )
-_FEATURE_SEARCH_BY_ID_SQL: Final[str] = (
-    _FEATURE_SEARCH_CTE_SQL
-    + """
-SELECT *
+_FEATURE_SEARCH_BY_ID_SQL: Final[str] = _FEATURE_SEARCH_CTE_SQL + f"""
+SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_feature_id AS uuid) IS NULL
@@ -2197,7 +2277,6 @@ WHERE (
 ORDER BY feature_id ASC
 LIMIT :limit_plus_one
 """
-)
 
 _FEATURE_SEARCH_COUNT_SQL: Final[str] = (
     _FEATURE_SEARCH_CTE_SQL
@@ -2360,14 +2439,15 @@ candidates AS (
         CAST(:providers AS text[]) IS NULL
         OR ps.provider = ANY(CAST(:providers AS text[]))
       )
+      AND {place_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 )
 """
 
 _NEARBY_DISTANCE_SQL: Final[str] = (
     _NEARBY_TARGET_CTE_SQL
-    + """
-SELECT *
+    + f"""
+SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_distance_m AS double precision) IS NULL
@@ -2383,8 +2463,8 @@ LIMIT :limit_plus_one
 
 _NEARBY_NAME_SQL: Final[str] = (
     _NEARBY_TARGET_CTE_SQL
-    + """
-SELECT *
+    + f"""
+SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_name AS text) IS NULL
@@ -2400,8 +2480,8 @@ LIMIT :limit_plus_one
 
 _NEARBY_UPDATED_SQL: Final[str] = (
     _NEARBY_TARGET_CTE_SQL
-    + """
-SELECT *
+    + f"""
+SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_last_updated_at AS timestamptz) IS NULL
@@ -2477,14 +2557,15 @@ candidates AS (
         CAST(:providers AS text[]) IS NULL
         OR ps.provider = ANY(CAST(:providers AS text[]))
       )
+      AND {place_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
 )
 """
 
 _NEARBY_COORD_DISTANCE_SQL: Final[str] = (
     _NEARBY_COORD_CTE_SQL
-    + """
-SELECT *
+    + f"""
+SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_distance_m AS double precision) IS NULL
@@ -2500,8 +2581,8 @@ LIMIT :limit_plus_one
 
 _NEARBY_COORD_NAME_SQL: Final[str] = (
     _NEARBY_COORD_CTE_SQL
-    + """
-SELECT *
+    + f"""
+SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_name AS text) IS NULL
@@ -2517,8 +2598,8 @@ LIMIT :limit_plus_one
 
 _NEARBY_COORD_UPDATED_SQL: Final[str] = (
     _NEARBY_COORD_CTE_SQL
-    + """
-SELECT *
+    + f"""
+SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
 FROM candidates
 WHERE (
     CAST(:cursor_last_updated_at AS timestamptz) IS NULL
@@ -2557,8 +2638,9 @@ WHERE f.lifecycle_state = 'active'
   AND pd.dataset_key = :dataset_key
   AND se.source_entity_type = :source_entity_type
   AND NOT (se.source_entity_id = ANY(CAST(:keys AS text[])))
-  -- ADR-121 결정 4: 이 dataset 밖의 다른 primary가 남은 Feature는 이 원천의 부재로 내리지
-  -- 않는다(병합으로 primary가 둘이 된 기존 Feature 포함).
+  -- ADR-121 결정 4: 이번 부재 대상 밖의 primary source가 하나라도 남은 Feature는 이 원천의
+  -- 부재로 내리지 않는다(병합으로 primary가 둘이 된 기존 Feature 포함). 같은 dataset의 다른
+  -- entity라도 snapshot에 있으면 남기고, 둘 다 빠지면 내린다(_WITHDRAWN_SOLE_SOURCE_SQL과 같은 꼴).
   AND NOT EXISTS (
     SELECT 1
     FROM provider_sync.source_links AS other_link
@@ -2566,7 +2648,12 @@ WHERE f.lifecycle_state = 'active'
       ON other_entity.source_entity_key = other_link.source_entity_key
     WHERE other_link.feature_id = f.feature_id
       AND other_link.source_role = 'primary'
-      AND other_entity.provider_dataset_id <> pd.provider_dataset_id
+      AND other_link.source_entity_key <> sl.source_entity_key
+      AND NOT (
+          other_entity.provider_dataset_id = pd.provider_dataset_id
+          AND other_entity.source_entity_type = :source_entity_type
+          AND NOT (other_entity.source_entity_id = ANY(CAST(:keys AS text[])))
+      )
   )
 """
 
@@ -2799,6 +2886,8 @@ class NearbyFeatureRow:
     primary_dataset_key: str | None
     last_updated_at: datetime
     feature_uuid: str | None = None
+    attribute_codes: tuple[str, ...] = ()
+    """공개 장소 속성 코드(ADR-121, 코드 오름차순)."""
 
 
 @dataclass(frozen=True)
@@ -2821,6 +2910,8 @@ class FeatureSearchRow:
     feature_uuid: str | None = None
     rank: int | None = None
     """q 검색 순위(작을수록 앞). bbox만 쓴 검색은 ``None``."""
+    attribute_codes: tuple[str, ...] = ()
+    """공개 장소 속성 코드(ADR-121, 코드 오름차순)."""
 
 
 @dataclass(frozen=True)
@@ -6675,6 +6766,7 @@ async def features_in_bbox(
     cursor: str | None = None,
     include_geometry: bool = False,
     price_stale_hide_days: int | None = DEFAULT_PRICE_STALE_HIDE_DAYS,
+    attributes: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """bbox 안의 feature 경량 표현 list (지도/목록용). 좌표는 ``lon``/``lat`` (4326).
 
@@ -6693,6 +6785,8 @@ async def features_in_bbox(
     — ``None``이면 술어가 단락(short-circuit)돼 인덱스 기반 bbox 조회에 영향이 없다.
     ``price_stale_hide_days``보다 오래된 price 관측은 ``price_summary``에서 제외한다
     (로테이션 주기 밖 옛 가격이 현재가 마커로 보이지 않게, ``None``이면 끔).
+    ``attributes``는 장소 속성 코드 AND 필터다(ADR-121). 행마다 공개 속성 코드
+    ``attribute_codes``를 싣는다.
     """
     result = await session.execute(
         text(_FEATURES_IN_BBOX_WITH_GEOMETRY_SQL if include_geometry else _FEATURES_IN_BBOX_SQL),
@@ -6707,6 +6801,7 @@ async def features_in_bbox(
             "limit": limit,
             "cursor_feature_id": _bbox_cursor_feature_id(cursor),
             "price_stale_hide_days": price_stale_hide_days,
+            "attributes": _normalized_attributes(attributes),
         },
     )
     rows = result.mappings().all()
@@ -6730,7 +6825,8 @@ SELECT
     x_extension.ST_X(f.coord) AS lon,
     x_extension.ST_Y(f.coord) AS lat,
     f.marker_icon,
-    f.marker_color
+    f.marker_color,
+    {place_attribute_codes_sql("f")} AS attribute_codes
 FROM area_feature AS a
 JOIN feature.public_features AS f
   ON f.feature_id <> a.feature_id
@@ -6817,6 +6913,7 @@ class _FeatureSearchContract:
     categories: tuple[str, ...] | None
     page_size: int
     include_total: bool
+    attributes: tuple[str, ...] | None = None
 
     @property
     def q_enabled(self) -> bool:
@@ -6830,16 +6927,21 @@ class _FeatureSearchContract:
 
     @property
     def fingerprint(self) -> str:
+        query: dict[str, Any] = {
+            "q": self.q,
+            "bbox": self.bbox,
+            "kinds": self.kinds,
+            "categories": self.categories,
+            "sort": self.sort,
+            "page_size": self.page_size,
+            "include_total": self.include_total,
+        }
+        # 장소 속성 필터(ADR-121)는 있을 때만 넣는다 — 필터 없는 진행 중 cursor의
+        # fingerprint가 그대로라 version을 올리지 않아도 된다.
+        if self.attributes:
+            query["attributes"] = self.attributes
         canonical = json.dumps(
-            {
-                "q": self.q,
-                "bbox": self.bbox,
-                "kinds": self.kinds,
-                "categories": self.categories,
-                "sort": self.sort,
-                "page_size": self.page_size,
-                "include_total": self.include_total,
-            },
+            query,
             ensure_ascii=False,
             separators=(",", ":"),
             sort_keys=True,
@@ -6863,6 +6965,7 @@ def _feature_search_contract(
     categories: Sequence[str] | None,
     page_size: int,
     include_total: bool,
+    attributes: Sequence[str] | None = None,
 ) -> _FeatureSearchContract:
     normalized_q = q.strip() if q is not None else None
     if normalized_q == "":
@@ -6908,6 +7011,7 @@ def _feature_search_contract(
         categories=_normalize_search_filter(categories),
         page_size=min(page_size, 200),
         include_total=include_total,
+        attributes=_normalize_search_filter(attributes),
     )
 
 
@@ -7114,7 +7218,16 @@ def _search_row(row: Any) -> FeatureSearchRow:
         score_cursor=str(score_cursor) if score_cursor is not None else None,
         feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
         rank=int(search_rank) if search_rank is not None else None,
+        attribute_codes=_attribute_codes(row),
     )
+
+
+def _attribute_codes(row: Any) -> tuple[str, ...]:
+    """SQL ``attribute_codes``(text[]) 열 → 정렬된 tuple. 열이 없거나 NULL이면 빈 tuple."""
+    codes = row.get("attribute_codes")
+    if not codes:
+        return ()
+    return tuple(sorted(str(code) for code in codes))
 
 
 def search_alias_key(q: str) -> str:
@@ -7232,6 +7345,7 @@ async def search_features(
     cursor: str | None = None,
     include_total: bool = False,
     cursor_signing_key: bytes,
+    attributes: Sequence[str] | None = None,
 ) -> FeatureSearchPage:
     """사용자 feature 검색.
 
@@ -7250,6 +7364,7 @@ async def search_features(
     이름 기준) → 분류 구체성 →
     ``score`` 내림차순 → ``feature_id``. ``q``와 함께 온 ``bbox``는 **필터가 아니라 순위
     가중**이다. ``q`` 없이 ``bbox``만 오면 종전처럼 bbox 필터 + ``feature_id`` 순이다.
+    ``attributes``는 장소 속성 코드 AND 필터(ADR-121)이고 cursor fingerprint에 든다.
     """
     contract = _feature_search_contract(
         q=q,
@@ -7258,6 +7373,7 @@ async def search_features(
         categories=categories,
         page_size=page_size,
         include_total=include_total,
+        attributes=attributes,
     )
     cursor_params = _search_cursor_params(
         cursor,
@@ -7289,6 +7405,7 @@ async def search_features(
     arms = await _search_region_arms(session, region) if region is not None else None
     region_params = _search_region_params(region, arms)
     score_sql, score_count_sql = _search_score_sql(region, arms)
+    attribute_filter = list(contract.attributes) if contract.attributes is not None else None
     effective_limit = contract.page_size
     rows = (
         (
@@ -7311,6 +7428,7 @@ async def search_features(
                         if contract.categories is not None
                         else None
                     ),
+                    "attributes": attribute_filter,
                     "limit_plus_one": effective_limit + 1,
                     **cursor_params,
                 },
@@ -7340,6 +7458,7 @@ async def search_features(
                     if contract.categories is not None
                     else None
                 ),
+                "attributes": attribute_filter,
             },
         )
         total_count = int(count_result.scalar_one())
@@ -7444,6 +7563,7 @@ def _nearby_row(row: Any) -> NearbyFeatureRow:
         primary_dataset_key=row["primary_dataset_key"],
         last_updated_at=row["last_updated_at"],
         feature_uuid=str(feature_uuid) if feature_uuid is not None else None,
+        attribute_codes=_attribute_codes(row),
     )
 
 
@@ -7452,6 +7572,12 @@ def _normalized_filter(values: Sequence[str] | None) -> list[str] | None:
         return None
     normalized = [str(value) for value in values if str(value)]
     return normalized or None
+
+
+def _normalized_attributes(values: Sequence[str] | None) -> list[str] | None:
+    """장소 속성 코드 필터 bind 값 — 중복 제거·정렬. 비면 ``None``(술어 단락)."""
+    normalized = _normalize_search_filter(values)
+    return list(normalized) if normalized is not None else None
 
 
 async def features_nearby_poi_cache_target(
@@ -7465,6 +7591,7 @@ async def features_nearby_poi_cache_target(
     sort: str = "distance",
     limit: int = 100,
     cursor: str | None = None,
+    attributes: Sequence[str] | None = None,
 ) -> NearbyFeaturePage:
     """POI/cache target 주변 feature summary를 keyset cursor로 조회한다.
 
@@ -7491,6 +7618,7 @@ async def features_nearby_poi_cache_target(
                     "kinds": _normalized_filter(kinds),
                     "categories": _normalized_filter(categories),
                     "providers": _normalized_filter(providers),
+                    "attributes": _normalized_attributes(attributes),
                     "limit_plus_one": effective_limit + 1,
                     **_nearby_cursor_params(cursor, sort=sort),
                 },
@@ -7520,6 +7648,7 @@ async def features_nearby(
     sort: str = "distance",
     limit: int = 100,
     cursor: str | None = None,
+    attributes: Sequence[str] | None = None,
 ) -> NearbyFeaturePage:
     """일반 좌표(``lon``/``lat``, 4326) 중심 반경 ``radius_m`` 안 feature summary.
 
@@ -7549,6 +7678,7 @@ async def features_nearby(
                     "kinds": _normalized_filter(kinds),
                     "categories": _normalized_filter(categories),
                     "providers": _normalized_filter(providers),
+                    "attributes": _normalized_attributes(attributes),
                     "limit_plus_one": effective_limit + 1,
                     **_nearby_cursor_params(cursor, sort=sort),
                 },
