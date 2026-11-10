@@ -4,8 +4,9 @@
 ``retire``/``attach``/``collapse``/``keep``/``ambiguous`` 개수를 dataset별로 낸다. DB에는 아무것도
 쓰지 않는다 — ``SET TRANSACTION READ ONLY`` 안에서 읽고 끝난다.
 
-PinVi 참조 수는 다른 DB라 여기서 세지 않는다. ``--ids-out``이 퇴역 예정 feature_id(``retire``·
-``attach``·``collapse``)를 한 줄에 하나씩 쓰고, 운영자가 그 목록으로 PinVi DB를 읽기 전용으로 센다.
+PinVi 참조 수는 다른 DB라 여기서 세지 않는다. ``--ids-out``이 퇴역 예정 Feature
+(``retire``·``attach``·``collapse``)를 ``feature_id<TAB>action<TAB>target`` 한 줄씩
+쓰고, 운영자가 그 목록으로 PinVi DB를 읽기 전용으로 센다.
 """
 
 from __future__ import annotations
@@ -93,8 +94,8 @@ def plan_report(
 
 async def run_mcst_theme_plan(
     engine: AsyncEngine, *, samples: int
-) -> tuple[dict[str, Any], list[str]]:
-    """읽기 전용 transaction에서 계획을 만든다. ``(보고서, 퇴역 예정 feature_id)``."""
+) -> tuple[dict[str, Any], list[PlanEntry]]:
+    """읽기 전용 transaction에서 계획을 만든다. ``(보고서, 퇴역 예정 계획 행)``."""
 
     async with AsyncSession(engine) as session, session.begin():
         await session.execute(text("SET TRANSACTION READ ONLY"))
@@ -102,5 +103,8 @@ async def run_mcst_theme_plan(
             session, datasets=mcst_plan_dataset_configs()
         )
     entries = plan_existing_features(features)
-    retiring = sorted(entry.feature_id for entry in entries if entry.action in _RETIRING_ACTIONS)
+    retiring = sorted(
+        (entry for entry in entries if entry.action in _RETIRING_ACTIONS),
+        key=lambda entry: entry.feature_id,
+    )
     return plan_report(features, entries, samples=samples), retiring

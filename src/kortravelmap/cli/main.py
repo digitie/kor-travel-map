@@ -330,7 +330,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan_p.add_argument(
         "--ids-out",
         default=None,
-        help="퇴역 예정 feature_id(retire·attach·collapse)를 한 줄에 하나씩 쓸 파일.",
+        help="퇴역 예정 Feature를 feature_id<TAB>action<TAB>target 한 줄씩 쓸 파일.",
     )
     plan_p.set_defaults(func=_cmd_mcst_theme_plan)
 
@@ -773,7 +773,11 @@ async def _cmd_mcst_theme_plan(args: argparse.Namespace) -> int:
         await engine.dispose()
     if args.ids_out:
         Path(args.ids_out).write_text(  # noqa: ASYNC240  # CLI 종료 직전 1회 쓰기
-            "".join(f"{feature_id}\n" for feature_id in retiring), encoding="utf-8"
+            "".join(
+                f"{entry.feature_id}\t{entry.action}\t{entry.target_feature_id or ''}\n"
+                for entry in retiring
+            ),
+            encoding="utf-8",
         )
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     return 0
