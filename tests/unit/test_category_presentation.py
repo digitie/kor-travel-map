@@ -14,9 +14,11 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
     PLACE_CATEGORY_TIER2_NAMES_BY_TIER1,
     SEARCH_DESTINATION_GROUP_MAX,
+    SEARCH_NAMED_DESTINATION_EXACT_GROUP,
     PlaceCategoryCode,
     PlaceCategoryTier1Code,
     category_search_group,
+    destination_exact_search_group,
     get_category,
     is_parking_category_code,
     is_tier1_only_category_code,
@@ -61,6 +63,7 @@ def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> N
         PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY_EX,
         PlaceCategoryCode.TRANSPORT_AIRPORT,
         PlaceCategoryCode.TRANSPORT_FERRY_TERMINAL,
+        PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET,
     ):
         assert group(destination) == lodging, destination
         # 이름이 검색어와 같으면 분류 그룹보다 앞서는 목적지 그룹이다(ADR-120).
@@ -73,14 +76,44 @@ def test_search_groups_order_tourism_then_lodging_then_food_then_the_rest() -> N
         PlaceCategoryCode.MEDICAL_HOSPITAL_GENERAL,
     ):
         assert group(rest) == parking, rest
-    # 접두 예외 표의 키는 카탈로그 코드의 교통 접두(4·6·8자리 — SQL 빌더가 받는 길이)다.
+    # 접두 예외 표의 키는 카탈로그 코드의 교통 접두와 전통시장 접두(4·6·8자리 — SQL 빌더가 받는
+    # 길이)다.
+    market_prefix = PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET.value[:4]
     for prefix in PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES:
         assert len(prefix) in (4, 6, 8)
         assert prefix.ljust(8, "0") in PLACE_CATEGORY_CODES
-        assert prefix.startswith(PlaceCategoryTier1Code.TRANSPORT.value)
+        assert prefix.startswith(PlaceCategoryTier1Code.TRANSPORT.value) or prefix == market_prefix
     # 카탈로그 밖 코드(notice의 99000000)와 None은 맨 뒤 그룹이다.
     assert category_search_group("99000000") == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
     assert category_search_group(None) == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
+
+
+def test_named_destination_exact_match_joins_the_tourism_group() -> None:
+    """이름이 검색어와 같은 고유 이름 목적지(역·휴게소·공항·여객선터미널·전통시장)는 관광과 같은
+    그룹이다(2026-11-10 운영 점검). 숙박·식음·주차는 이름이 같아도 제 그룹 그대로다."""
+
+    tourism = category_search_group(PlaceCategoryCode.TOURISM.value)
+    assert SEARCH_NAMED_DESTINATION_EXACT_GROUP == tourism
+    for named in (
+        PlaceCategoryCode.TRANSPORT_STOP_TRAIN,
+        PlaceCategoryCode.TRANSPORT_STOP_SUBWAY,
+        PlaceCategoryCode.TRANSPORT_REST_AREA_HIGHWAY_EX,
+        PlaceCategoryCode.TRANSPORT_AIRPORT,
+        PlaceCategoryCode.TRANSPORT_FERRY_TERMINAL,
+        PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET,
+    ):
+        assert destination_exact_search_group(named.value) == tourism, named
+    for other in (
+        PlaceCategoryCode.TOURISM,
+        PlaceCategoryCode.LODGING_HOTEL,
+        PlaceCategoryCode.FOOD_RESTAURANT_KOREAN,
+        PlaceCategoryCode.TRANSPORT_PARKING,
+        PlaceCategoryCode.CONVENIENCE_MART,
+    ):
+        assert destination_exact_search_group(other.value) == category_search_group(
+            other.value
+        ), other
+    assert destination_exact_search_group(None) == PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
 
 
 def test_tier1_only_codes_match_catalog_depth_one() -> None:

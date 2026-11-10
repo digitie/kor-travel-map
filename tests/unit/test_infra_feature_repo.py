@@ -1496,6 +1496,28 @@ def test_search_category_group_sql_is_derived_from_the_taxonomy() -> None:
         feature_repo._search_category_group_sql("category); DROP TABLE x; --")
 
 
+def test_named_destination_exact_group_sql_is_derived_from_the_prefix_table() -> None:
+    """고유 이름 목적지 그룹 ``CASE``가 접두 예외 표에서 유도되고 검색 SQL에 박힌다(2026-11-10)."""
+    from kortravelmap.category import (
+        PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
+        SEARCH_NAMED_DESTINATION_EXACT_GROUP,
+    )
+
+    sql = feature_repo._search_destination_exact_group_sql("category")
+    assert sql.startswith("(CASE WHEN destination_exact AND (")
+    for prefix in PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES:
+        assert f"left(category, {len(prefix)}) = '{prefix}'" in sql
+    assert sql.count("left(category,") == len(PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES)
+    assert sql.endswith(f"THEN {SEARCH_NAMED_DESTINATION_EXACT_GROUP} ELSE search_group END)")
+    for statement in (
+        feature_repo._FEATURE_SEARCH_BY_SCORE_SQL,
+        *(pair[0] for pair in feature_repo._FEATURE_SEARCH_REGION_SQL.values()),
+    ):
+        assert sql in statement
+    with pytest.raises(ValueError, match="trusted SQL identifier"):
+        feature_repo._search_destination_exact_group_sql("category); DROP TABLE x; --")
+
+
 def test_search_whitespace_set_is_python_isspace_and_matches_migration_436() -> None:
     """검색 비교 키의 공백 집합이 세 곳(repo SQL·Python 키·436 CHECK·model)에서 같다."""
 

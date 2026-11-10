@@ -944,6 +944,17 @@ def _default_pair_calls() -> tuple[_Client, dict[_PairKey, dict[str, object]]]:
             1000.0,
             "same_name",
         ),
+        # 역·공항 등 transport ↔ concierge 영상 후보(2026-11-10 운영 점검: 부산역·강릉역 중복).
+        (
+            (
+                "kor-travel-transport",
+                None,
+                "kor-travel-concierge-youtube",
+                "youtube_place_candidates",
+            ),
+            1000.0,
+            "same_name",
+        ),
     ],
 )
 def test_default_pairs_include_1468_source_overlap_rules(
@@ -954,6 +965,23 @@ def test_default_pairs_include_1468_source_overlap_rules(
     call = by_key[key]
     assert call["max_distance_m"] == radius
     assert call["match"] == match
+
+
+def test_default_transport_youtube_pair_scopes_named_destination_codes() -> None:
+    _client, by_key = _default_pair_calls()
+    call = by_key[
+        (
+            "kor-travel-transport",
+            None,
+            "kor-travel-concierge-youtube",
+            "youtube_place_candidates",
+        )
+    ]
+    left = cast(DedupRefreshScope, call["left"])
+    assert left.categories
+    assert {"06030200", "06030300", "06050000", "06060000"} <= set(left.categories)
+    # 주유소·주차장은 영상 후보와 견주지 않는다.
+    assert not any(code.startswith(("0601", "0602")) for code in left.categories)
 
 
 def test_default_mois_knps_camping_pair_scopes_campground_codes() -> None:
@@ -978,7 +1006,7 @@ def test_existing_pairs_keep_their_call_shape() -> None:
     knps_heritage = by_key[("python-knps-api", None, "python-krheritage-api", None)]
     assert "max_distance_m" not in knps_heritage
     assert "match" not in knps_heritage
-    assert sum(1 for options in client.pair_options if options) == 2
+    assert sum(1 for options in client.pair_options if options) == 3
 
 
 def test_default_trail_rule_uses_route_overlap_with_knps_authoritative() -> None:
