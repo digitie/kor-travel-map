@@ -50,15 +50,23 @@ batch 안에서 Feature 하나라도 `error`면 그 batch를 **통째로 되감�
 전환되는 Feature를 가리키는 열린(`pending`) `ops.dedup_review_queue` 행은 `ignored`로 닫힌다(사유에 ADR-121).
 병합 대상(master·생존자)은 active·published·valid여야 한다 — 아니면 `stale_target`으로 건너뛴다.
 
-계획과 실행 사이에 Feature가 바뀌면 그 Feature는 `stale_revision`·`stale_target`으로 건너뛴다(아무것도
-쓰지 않는다). 동결 중에는 0이어야 한다.
+계획과 실행 사이에 Feature가 바뀌면 그 Feature는 `stale_revision`·`stale_target`으로, 병합 전제가 깨지면
+(다른 kind 등) `conflict`로 건너뛴다(아무것도 쓰지 않고 batch는 commit된다). 동결 중에는 0이어야 하고, 0이
+아니면 실행기가 종료 코드 1로 끝난다. 건너뛴 Feature는 같은 `(plan_sha256, batch_size)`로는 다시 시도되지
+않는다 — 원인을 본 뒤 **새 계획**을 뽑아 다시 승인받는다(이미 전환된 Feature는 새 계획에서 빠진다).
+
+리허설도 사건 sequence 번호를 소비한다(`nextval`은 되감기지 않는다). 사건 번호에 빈 칸이 생기는 것은
+정상이다 — PinVi 커서는 존재하는 사건만 따른다.
 
 ## 3. 되돌림
 
 - **전체**: 3의 백업으로 map DB를 복원한다(그 뒤의 쓰기는 잃는다 — 동결 중이므로 전환뿐이다). PinVi가
   그 사이 M05 사건을 ACK했다면 PinVi 참조도 함께 되돌려야 한다 — PinVi 소비자가 꺼져 있으면(기본) 없다.
 - **부분**: `ops.mcst_theme_transition_items.before_state`에 퇴역 전 상태·link(역할 포함)·curation item
-  행 전체·병합 대상의 병합 전 link가, `evidence`에 옮긴/버린 link 수·닫은 검토 행 수가 있다. 개별 Feature를 되살리려면 관리자 재활성화(lifecycle override 해제 → active)와 link 재지정을 손으로
+  행 전체·퇴역 전 active override, 병합 대상의 병합 전 link·curation item이, `evidence`에 옮긴/버린 link
+  수·닫은 검토 행 id가 있다. 순서가 중요하다: ① link를 패자에게 되돌리고 역할을 `before_state.links`·
+  `target_links`대로 복원 → ② 그 link를 근거로 관리자 재활성화(재활성화는 현재 원천 근거를 요구한다 —
+  link가 없으면 실패한다) → ③ curation item을 되돌린다 → ④ 닫은 검토 행을 필요하면 `pending`으로. 개별 Feature를 되살리려면 관리자 재활성화(lifecycle override 해제 → active)와 link 재지정을 손으로
   한다. 사건은 지우지 않는다 — 되살린 Feature를 가리키는 새 사건이 필요하면 별도 결정이다.
 
 ## 4. PinVi
@@ -70,6 +78,9 @@ batch 안에서 Feature 하나라도 `error`면 그 batch를 **통째로 되감�
   snapshot으로 보인다. 소비자를 켜면 쌓인 사건을 순서대로 `rebind`·`detach`한다. 소비자는 sign-off 전까지
   꺼 둔다.
 - 사건 writer는 장부 행을 원천과 대조한다 — batch의 domain command(actor·operation), 퇴역 전이 행(feature·
-  revision·principal·kind), 병합 이력(loser·master). 장부만 고쳐서는 사건을 만들 수 없다.
-- 증거 export: 사건 표의 기존 export는 `ops.mcst_theme_transition_batches`·`_items`를 담지 않는다. 사건의
-  `case_id`·`resolution_id`(= batch·item id)로 두 표를 함께 떠 둔다(§2-3 백업에 포함된다).
+  revision·principal·kind), 병합 이력(loser·master). 실제로 일어난 퇴역에만 사건을 낸다(장부만 고쳐 아무
+  Feature나 내리게 할 수는 없다). 다만 runtime 자격이 통째로 넘어가면 그 대조 원천도 runtime이 쓸 수 있다 —
+  manual M05와 같은 신뢰 수준이다.
+- 증거 export: 사건 표의 기존 evidence export(`evidence_export.py`·`docker-backup.sh` JSONL)는
+  `ops.mcst_theme_transition_batches`·`_items`를 담지 않는다(후속 과제). 사건의 `case_id`·`resolution_id`
+  (= batch·item id)는 §2-3 pg_dump 백업과 실행 뒤 두 표를 `COPY … TO STDOUT`으로 떠 둔 파일로 푼다.

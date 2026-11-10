@@ -8598,6 +8598,7 @@ BEGIN
      WHERE transition.transition_id = v_item.transition_id
        AND transition.feature_id = v_item.feature_id
        AND transition.row_revision = v_item.row_revision_after
+       AND v_item.old_row_revision < v_item.row_revision_after
        AND transition.to_lifecycle_state = 'retired'
        AND transition.principal = 'system:mcst-theme-transition'
        AND transition.transition_kind =

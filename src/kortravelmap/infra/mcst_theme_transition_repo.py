@@ -5,8 +5,10 @@ plan_existing_features``)의 ``attach``·``collapse``는 master/생존자로 **�
 업종, D2)는 **퇴역**시킨다. Feature마다 같은 transaction에서:
 
 1. 계획의 신선도를 다시 본다 — 퇴역 대상이 active이고 ``row_revision``이 계획과 같아야 하며,
-   병합 대상(master/생존자)은 active·published여야 한다. 아니면 그 Feature는 건너뛴다(``stale``).
-2. 되돌림 근거(``before_state``: 그 Feature의 link·상태·curation item)를 남긴다.
+   병합 대상(master/생존자)은 active·published·valid여야 한다. 아니면 그 Feature는 건너뛴다
+   (``stale_*``). 병합 전제가 깨지면(다른 kind 등) ``conflict``로 건너뛴다 — 둘 다 아무것도
+   쓰지 않는다.
+2. 되돌림 근거(``before_state``: 양쪽 link·상태·curation item·퇴역 전 override)를 남긴다.
 3. 병합은 :func:`~kortravelmap.infra.merge_repo.apply_feature_merge`(link 이동·MCST primary 강등·
    curation item 이동·퇴역·lifecycle override·병합 이력), 퇴역은
    ``feature.transition_admin_feature_state(..., 'retire')``(lifecycle override 포함).
@@ -14,8 +16,8 @@ plan_existing_features``)의 ``attach``·``collapse``는 master/생존자로 **�
    ``feature.record_mcst_theme_transition_event``로 PinVi M05 사건(``rebind``/``detach``) 한 건.
 
 batch 하나가 transaction 하나이고 domain command 하나다. 같은 계획의 같은 batch는 두 번 돌지
-않는다(``(plan_sha256, batch_index)`` UNIQUE, 이미 있으면 건너뜀). Feature 하나가 실패하면 그
-Feature만 savepoint로 되감고 다음으로 간다.
+않는다(``(plan_sha256, batch_size, batch_index)`` UNIQUE, 이미 있으면 건너뜀). Feature 하나가 DB
+오류로 실패하면(``error``) 그 Feature는 savepoint로 되감기고, CLI가 그 batch 전체를 되감고 멈춘다.
 
 이 모듈은 commit하지 않는다 — 호출자가 commit(실행) 또는 rollback(리허설)한다.
 """
@@ -40,7 +42,11 @@ from kortravelmap.infra.domain_command_repo import (
     lock_domain_command,
 )
 from kortravelmap.infra.feature_repo import lock_feature_curation_write
-from kortravelmap.infra.merge_repo import MergeError, apply_feature_merge
+from kortravelmap.infra.merge_repo import (
+    MergeConflictError,
+    MergeError,
+    apply_feature_merge,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -59,7 +65,13 @@ __all__ = [
 
 TransitionAction = Literal["retire", "attach", "collapse"]
 OutcomeStatus = Literal[
-    "done", "stale_feature", "stale_revision", "stale_target", "already_done", "error"
+    "done",
+    "stale_feature",
+    "stale_revision",
+    "stale_target",
+    "conflict",
+    "already_done",
+    "error",
 ]
 
 TRANSITION_ACTOR: Final[str] = "system:mcst-theme-transition"
@@ -197,10 +209,16 @@ RETURNING CAST(batch_id AS text)
 """
 )
 
-_LOCK_FEATURE_SQL = text(
+#: 패자와 대상을 한 문장에서 ``feature_id`` 순으로 잠근다 — ``apply_feature_merge``·manual M05와
+#: 같은 순서다.
+_LOCK_FEATURES_SQL = text(
     """
-SELECT lifecycle_state, publication_state, quality_state, row_revision
-  FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)
+SELECT CAST(feature_id AS text) AS feature_id, lifecycle_state, publication_state,
+       quality_state, row_revision
+  FROM feature.features
+ WHERE feature_id = CAST(:feature_id AS uuid)
+    OR feature_id = CAST(:target_feature_id AS uuid)
+ ORDER BY feature_id
  FOR UPDATE
 """
 )
@@ -230,6 +248,18 @@ SELECT jsonb_build_object(
     'curation_items', COALESCE((
         SELECT jsonb_agg(to_jsonb(item) ORDER BY item.curation_item_id)
           FROM feature.curation_items AS item WHERE item.feature_id = f.feature_id
+    ), '[]'::jsonb),
+    -- 퇴역이 덮어쓰는 lifecycle override(ON CONFLICT DO UPDATE)의 이전 값.
+    'prior_overrides', COALESCE((
+        SELECT jsonb_agg(to_jsonb(o) ORDER BY o.field_path)
+          FROM ops.feature_overrides AS o
+         WHERE o.feature_id = f.feature_id AND o.status = 'active'
+    ), '[]'::jsonb),
+    -- 병합이 대상의 curation item도 고칠 수 있다(중복 병합·provider winner 복구).
+    'target_curation_items', COALESCE((
+        SELECT jsonb_agg(to_jsonb(ti) ORDER BY ti.curation_item_id)
+          FROM feature.curation_items AS ti
+         WHERE ti.feature_id = CAST(:target_feature_id AS uuid)
     ), '[]'::jsonb),
     -- 병합 대상의 병합 전 link — 손 되돌림이 무엇이 옮겨 왔는지(역할 강등 포함) 가를 수 있게.
     'target_links', COALESCE((
@@ -320,9 +350,16 @@ async def _transition_one(
         await session.execute(_ALREADY_TRANSITIONED_SQL, {"feature_id": item.feature_id})
     ).first() is not None:
         return TransitionItemOutcome(item.feature_id, item.action, "already_done")
-    state = (
-        await session.execute(_LOCK_FEATURE_SQL, {"feature_id": item.feature_id})
-    ).mappings().one_or_none()
+    locked = {
+        str(row["feature_id"]): row
+        for row in (
+            await session.execute(
+                _LOCK_FEATURES_SQL,
+                {"feature_id": item.feature_id, "target_feature_id": item.target_feature_id},
+            )
+        ).mappings()
+    }
+    state = locked.get(item.feature_id)
     if state is None or state["lifecycle_state"] != "active":
         return TransitionItemOutcome(item.feature_id, item.action, "stale_feature")
     if int(state["row_revision"]) != item.row_revision:
@@ -333,9 +370,7 @@ async def _transition_one(
             f"plan {item.row_revision} != current {int(state['row_revision'])}",
         )
     if item.target_feature_id is not None:
-        target = (
-            await session.execute(_LOCK_FEATURE_SQL, {"feature_id": item.target_feature_id})
-        ).mappings().one_or_none()
+        target = locked.get(item.target_feature_id)
         if (
             target is None
             or target["lifecycle_state"] != "active"
@@ -389,8 +424,9 @@ async def _transition_one(
         transition_id = int(transition["transition_id"])
         row_revision_after = int(transition["row_revision"])
 
-    closed_reviews = len(
-        (
+    closed_reviews = sorted(
+        str(review_id)
+        for (review_id,) in (
             await session.execute(
                 _CLOSE_PENDING_REVIEWS_SQL,
                 {"feature_id": item.feature_id, "actor": TRANSITION_ACTOR},
@@ -416,7 +452,7 @@ async def _transition_one(
                         {
                             "rule_version": rule_version,
                             **merge_counts,
-                            "closed_reviews": closed_reviews,
+                            "closed_review_ids": closed_reviews,
                         }
                     ),
                 },
@@ -502,6 +538,12 @@ async def execute_transition_batch(
                         session, item=item, batch_id=batch_id, rule_version=plan.rule_version
                     )
                 )
+        except MergeConflictError as exc:
+            # 병합 전제가 깨진 것(다른 kind·다른 행사 회차·비활성 master) — 데이터 오류가 아니라
+            # 계획이 낡은 것이다. 아무것도 쓰지 않았고 batch는 commit해도 된다.
+            outcomes.append(
+                TransitionItemOutcome(item.feature_id, item.action, "conflict", str(exc)[:200])
+            )
         except (MergeError, DBAPIError) as exc:
             sqlstate = getattr(getattr(exc, "orig", None), "sqlstate", None)
             outcomes.append(

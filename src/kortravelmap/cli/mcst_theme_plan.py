@@ -233,8 +233,15 @@ async def run_mcst_theme_transition(
         errors.extend(
             asdict(outcome) for outcome in result.outcomes if outcome.status == "error"
         )
+    skipped_items = sum(
+        count
+        for key, count in totals.items()
+        if key.rsplit(":", 1)[1].startswith("stale_") or key.endswith(":conflict")
+    )
     return {
         "mode": "execute" if execute else "rehearsal",
+        # 건너뛴 Feature는 같은 (sha, 크기)로는 다시 시도되지 않는다 — 새 계획을 뽑아야 한다.
+        "skipped_items": skipped_items,
         "plan_sha256": plan.plan_sha256,
         "items": len(items),
         "batch_size": batch_size,

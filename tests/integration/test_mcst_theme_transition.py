@@ -289,6 +289,23 @@ async def test_retired_target_is_skipped(migrated_session: AsyncSession) -> None
     assert await _events_for(session, loser) == []
 
 
+async def test_merge_into_retired_master_is_refused(migrated_session: AsyncSession) -> None:
+    from kortravelmap.infra.merge_repo import MergeConflictError, apply_feature_merge
+
+    session = migrated_session
+    gone = await _mcst_feature(session, "pet_friendly_culture_facilities_csv", "퇴역마스터", 9900)
+    loser = await _mcst_feature(session, "barrier_free_places_csv", "퇴역마스터", 9903)
+    first = await _plan(
+        session, [PlanEntry(gone, "mcst_pet_friendly_culture_facilities_csv", "retire", None, {})]
+    )
+    assert (await _run(session, first)).counts() == {"retire:done": 1}
+
+    with pytest.raises(MergeConflictError, match="active"):
+        async with session.begin_nested():
+            await apply_feature_merge(session, master_id=gone, loser_id=loser)
+    assert await _state(session, loser) == ("active", "published")
+
+
 async def test_plan_file_tampering_is_rejected() -> None:
     plan = build_transition_plan(
         [PlanEntry("00000000-0000-7000-8000-000000000001", "d", "retire", None, {})],

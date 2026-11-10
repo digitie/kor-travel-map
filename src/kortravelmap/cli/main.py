@@ -854,7 +854,8 @@ async def _cmd_mcst_theme_transition(args: argparse.Namespace) -> int:
     finally:
         await engine.dispose()
     print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
-    return 1 if summary["errors"] else 0
+    # 건너뛴 Feature(stale·conflict)도 0이 아닌 종료 — 운영 창(동결 중)에서는 0이어야 한다.
+    return 1 if summary["errors"] or summary.get("skipped_items") else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
