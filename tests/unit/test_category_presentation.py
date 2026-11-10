@@ -93,7 +93,7 @@ def test_named_destination_exact_match_joins_the_tourism_group() -> None:
     그룹이다(2026-11-10 운영 점검). 숙박·식음·주차는 이름이 같아도 제 그룹 그대로다."""
 
     tourism = category_search_group(PlaceCategoryCode.TOURISM.value)
-    assert SEARCH_NAMED_DESTINATION_EXACT_GROUP == tourism
+    assert tourism == SEARCH_NAMED_DESTINATION_EXACT_GROUP
     for named in (
         PlaceCategoryCode.TRANSPORT_STOP_TRAIN,
         PlaceCategoryCode.TRANSPORT_STOP_SUBWAY,
