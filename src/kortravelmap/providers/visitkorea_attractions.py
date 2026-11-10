@@ -263,7 +263,7 @@ TOURAPI_LCLS1_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
 #: 끝의 괄호·"N코스/N구간"·"입구"는 떼고 본다. 자전거길은 레저스포츠로 둔다.
 _TRAIL_NAME_RE: Final = re.compile(r"(?:길|올레|트레킹|탐방로|산책로|코스)$")
 _TRAIL_SUFFIX_RE: Final = re.compile(
-    r"(?:\([^)]*\)|\d*[①-⑳]?(?:코스|구간)|입구|[\d①-⑳]+)$"
+    r"(?:\([^)]*\)|제?[\d①-⑳][\d①-⑳~-]*(?:코스|구간)|입구|[\d①-⑳]+)$"
 )
 _NOT_TRAIL_RE: Final = re.compile(r"자전거길$")
 

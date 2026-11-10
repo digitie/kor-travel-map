@@ -1,4 +1,4 @@
-"""``test_providers_visitkorea_attractions`` — TourAPI 관광지(contentTypeId 12) → place (#1459).
+"""``test_providers_visitkorea_attractions`` — TourAPI 관광지·문화시설·레포츠 → place (#1459).
 
 입력 행은 2026-11-09 운영 키로 받은 ``areaBasedList2``/``detailCommon2`` 실제 응답의 필드
 값이다(부산타워 1277679·광안대교 128164·수산항 2788875). KorService2 목록은 옛 ``cat1~3``을
@@ -208,6 +208,9 @@ def test_culture_and_leisure_rows_get_their_own_categories(
         ("제주올레 7코스", True),
         ("강화나들길 ①코스", True),
         ("어느 트레킹코스", True),
+        ("어느 산책코스", True),
+        ("제주올레 14-1코스", True),
+        ("어느둘레길 제1코스", True),
         ("어느산책로 입구", True),
         ("어느둘레길(1구간) 입구", True),
         ("한강 자전거길", False),

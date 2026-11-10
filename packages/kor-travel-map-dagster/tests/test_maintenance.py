@@ -286,8 +286,8 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         ("python-mois-api", None, ("05050000", "05030000")),
         ("data.go.kr-standard", "datagokr_tourist_attractions", ()),
     }
-    # TourAPI 관광지(#1459) — 기존 관광 원천 여덟과 비교한다. 양쪽 상한은 1만 2천 건 전체를
-    # 덮는다(기본 5,000이면 최근 갱신분만 비교된다).
+    # TourAPI 관광지·문화시설·레포츠(#1459) — 기존 원천과 13쌍으로 비교한다. 양쪽 상한 40,000은
+    # 1만 9천 건 전체를 덮는다(기본 5,000이면 최근 갱신분만 비교된다).
     tourapi = [
         (left, right)
         for left, right, _include_auto_merge in client.pairs
@@ -316,6 +316,9 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         ("python-mois-api", "", ["0306"]),
         ("python-mcst-api", "", ["0306"]),
         ("python-knps-api", "", ["0306"]),
+        ("data.go.kr-standard", "datagokr_museums", ["0100", "0101", "0104", "0105", "0107"]),
+        ("python-mcst-api", "", ["0100", "0101", "0104", "0105", "0107"]),
+        ("python-mois-api", "", ["0100", "0101", "0104", "0107", "0108"]),
     ]
     for provider, dataset, prefixes in expected:
         assert (provider, dataset, prefixes) in got, (provider, dataset, prefixes)
