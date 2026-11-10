@@ -587,14 +587,17 @@ async def test_published_source_taxonomy_is_not_a_thematic_cultural_facility_fal
 
 
 @pytest.mark.parametrize("name", ["롯데호텔 서울", "서울김포공항 우리들병원", "동작대교 주차장"])
-async def test_media_format_without_physical_type_remains_unclassified(name: str) -> None:
+async def test_media_format_without_physical_type_stays_tourism(name: str) -> None:
+    # 2026-11-11 운영 회귀: 공식 CSV의 TYPE은 전부 비어 있다(8,803/8,803). 미분류로 내리면 촬영지
+    # 전체가 관광 분류 필터·검색 그룹에서 빠진다 — 이 목록의 기본 분류(관광 01000000)를 지킨다.
+    # 이름으로 업종을 만들어 넣지는 않는다(호텔·병원·주차장 이름이어도 관광 Tier 1).
     row = {"PLACENAME": name, "FORMAT": "drama", "MEDIATITLE": "공식 원본 형식 회귀",
            "TYPE": "", "ADDRESS": "서울특별시 중구 을지로 30",
            "COORDINATES": "N37.565357, E126.980918"}
     [bundle] = await file_rows_to_bundles(
         [row], slug="media_famous_places_csv", fetched_at=_NOW,
     )
-    assert bundle.feature.category == "00000000"
+    assert bundle.feature.category == "01000000"
     assert bundle.source_record.raw_data == row
 
 
