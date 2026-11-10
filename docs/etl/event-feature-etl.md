@@ -99,9 +99,12 @@ data.go.kr 한도는 **오퍼레이션마다** 걸린다(`docs/etl/upstream-quot
 
 ## 5. dedup
 
-- 국가유산 행사(`heritage_event`, #1473)와의 쌍 규칙은 두지 않는다 — 2026-11-10 실측에서 TourAPI
-  축제 879건과 active 국가유산 행사 사이에 이름이 맞는 쌍이 실질적으로 없었다(§7 참조). 공개 축제
-  API는 `heritage_event`를 고르지 않으므로 한 화면에 겹쳐 보이지도 않는다.
+- 국가유산 행사(`heritage_event`, #1473)와 **겹친다** — 2026-11-10 실측: TourAPI "OO 국가유산야행" ↔
+  국가유산 행사 "OO 국가유산 야행"이 같은 기간·51~325 m로 4쌍(정선·함안·담양, 이름 유사 0.7 이상·기간 겹침
+  23쌍 중 이름이 실제로 같은 것). 그래서 기본 dedup 쌍을 하나 둔다(`maintenance._SOURCE_OVERLAP_PAIRS`):
+  `visitkorea_festivals` ↔ `krheritage_event_list`, kind `event`, 1 km, `score_or_same_name`. 행사장 표기가
+  달라 회차 비교가 `unknown`이라 자동 병합 없이 검토 큐에 오르고, master는 국가유산청(45 > TourAPI 30)이다.
+  공개 축제 API는 `heritage_event`를 고르지 않으므로 축제 목록에 두 번 나오지는 않는다.
 - 표준데이터 축제 전용 pair·우선순위 항목은 원래 없었다. `data.go.kr-standard` provider 우선순위(35)는
   박물관·관광지·주차장·전통시장이 계속 쓴다.
 

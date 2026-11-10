@@ -317,6 +317,25 @@ _SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
         "max_distance_m": 1000,
         "match": "same_name",
     },
+    # TourAPI 축제(유일한 축제 원천, 447) ↔ 국가유산 행사(#1473). 2026-11-10 실측: 같은 기간·
+    # 51~325 m의 "OO 국가유산야행" ↔ "OO 국가유산 야행" 4쌍(정선·함안·담양). 행사장 표기가 달라
+    # 회차 비교가 unknown이라 자동 병합 없이 검토 큐에 오른다. master는 국가유산청(45 > 30).
+    {
+        "left": {
+            "provider": "python-visitkorea-api",
+            "dataset_key": "visitkorea_festivals",
+            "kinds": ["event"],
+            "limit": _SCOPE_LIMIT,
+        },
+        "right": {
+            "provider": "python-krheritage-api",
+            "dataset_key": "krheritage_event_list",
+            "kinds": ["event"],
+            "limit": _SCOPE_LIMIT,
+        },
+        "max_distance_m": 1000,
+        "match": "score_or_same_name",
+    },
     # 국립공원 안 산림청 등산로 ↔ KNPS 탐방로 — 선형 겹침. 등산로 길이의 절반 이상이 탐방로
     # 30 m 버퍼 안이면 가장 많이 겹치는 탐방로와 짝이 된다. KNPS가 master(dataset 보정).
     # (374 — 그중 298이 겹침 0.9 이상. prod SQL 18 s.)

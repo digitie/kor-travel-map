@@ -993,6 +993,26 @@ def test_default_mois_knps_camping_pair_scopes_campground_codes() -> None:
     assert {"03060000", "03060100", "03060200"} <= set(left.categories)
 
 
+def test_default_pairs_compare_tourapi_festivals_with_heritage_events() -> None:
+    # 2026-11-10 실측: TourAPI "담양 국가유산야행" ↔ 국가유산 행사 "담양 국가유산 야행" 같은 기간·
+    # 325 m(정선·함안도 같다). 축제가 TourAPI 단독 원천이 되면서 두 event 원천이 겹친다.
+    _client, by_key = _default_pair_calls()
+    call = by_key[
+        (
+            "python-visitkorea-api",
+            "visitkorea_festivals",
+            "python-krheritage-api",
+            "krheritage_event_list",
+        )
+    ]
+    left = cast(DedupRefreshScope, call["left"])
+    right = cast(DedupRefreshScope, call["right"])
+    assert left.kinds == ("event",)
+    assert right.kinds == ("event",)
+    assert call["max_distance_m"] == 1000.0
+    assert call["match"] == "score_or_same_name"
+
+
 def test_default_pairs_leave_mcst_to_adr121_attach() -> None:
     # MCST 테마 목록은 ADR-121 attach 엔진이 기존 Feature에 붙인다 — #1468 C의 MCST 쌍은 없다.
     _client, by_key = _default_pair_calls()
