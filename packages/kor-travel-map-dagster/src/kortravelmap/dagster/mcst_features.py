@@ -15,10 +15,12 @@ slug별 ``DagsterFeatureLoadResult``는 dataset이 달라 ``merge``할 수 없�
 # ``context`` 어노테이션을 런타임 타입으로 검증한다(assets.py와 동일).
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
-from typing import Any, Final
+from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
-from kortravelmap.dto.geo_dataset import GeoApplied
+from kortravelmap.dto.geo_dataset import GeoApplied, GeoLoadContext
+from kortravelmap.infra.feature_repo import FeatureLoadResult
+from kortravelmap.infra.theme_attach_repo import ThemeAttachReport, ThemeAttachSpec
 from kortravelmap.providers.mcst import (
     MCST_FILE_DATASETS,
     MCST_PROVIDER_NAME,
@@ -30,6 +32,9 @@ from sqlalchemy.exc import DBAPIError
 
 from dagster import AssetExecutionContext, Failure, asset
 
+if TYPE_CHECKING:
+    from kortravelmap.client import AsyncKorTravelMapClient
+
 from .assets import (
     _COMMON_RESOURCE_KEYS,
     FEATURE_LOAD_RETRY_POLICY,
@@ -37,6 +42,8 @@ from .assets import (
     _fetched_at,
     _load,
     _record_list,
+    _resource_object,
+    _resource_value,
     _reverse_geocoder,
     _transform_reusing_geo,
 )
@@ -67,6 +74,8 @@ class McstLoadResult:
 
     provider: str
     results: tuple[DagsterFeatureLoadResult, ...]
+    theme_attach: tuple[ThemeAttachReport, ...] = ()
+    """ADR-121 붙임 모드가 ``off``가 아닐 때 dataset별 판정 개수."""
 
     @property
     def bundles_total(self) -> int:
@@ -82,6 +91,15 @@ class McstLoadResult:
             "bundles_by_dataset": {
                 result.dataset_key: result.load.bundles_total for result in self.results
             },
+            **(
+                {
+                    "theme_attach": {
+                        report.dataset_key: report.as_metadata() for report in self.theme_attach
+                    }
+                }
+                if self.theme_attach
+                else {}
+            ),
         }
 
 
@@ -132,6 +150,38 @@ class McstImportFailure(Failure):
             },
             allow_retries=retryable,
         )
+
+
+def _theme_attach_loader(
+    context: AssetExecutionContext,
+    *,
+    spec_slug: str,
+    mode: str,
+    reports: list[ThemeAttachReport],
+) -> Callable[[Sequence[Any], GeoLoadContext | None], Awaitable[FeatureLoadResult]]:
+    """ADR-121 붙임 적재를 ``_load``의 ``load_all`` 자리에 끼운다(한 dataset = 한 transaction)."""
+
+    spec = MCST_FILE_DATASETS[spec_slug]
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+
+    async def _load_all(
+        bundles: Sequence[Any], geo: GeoLoadContext | None
+    ) -> FeatureLoadResult:
+        loaded, report = await client.load_theme_attach_bundles(
+            bundles,
+            spec=ThemeAttachSpec(
+                provider=MCST_PROVIDER_NAME,
+                dataset_key=spec.dataset_key,
+                master_category_prefixes=spec.master_category_prefixes,
+            ),
+            mode="apply" if mode == "apply" else "dry_run",
+            geo=geo,
+        )
+        context.log.info("MCST %s 붙임(%s): %s", spec.dataset_key, mode, report.as_metadata())
+        reports.append(report)
+        return loaded
+
+    return _load_all
 
 
 def split_slug_markers(
@@ -204,6 +254,12 @@ async def run_feature_place_mcst_culture(
 
     fetched_at = await _fetched_at(context)
     geocoder = _reverse_geocoder(context)
+    attach_mode = str(
+        await _resource_value(context, "mcst_theme_attach_mode", default="off")
+    )
+    if attach_mode not in ("off", "dry_run", "apply"):
+        raise ValueError(f"알 수 없는 MCST 붙임 모드: {attach_mode!r}")
+    theme_reports: list[ThemeAttachReport] = []
     results: list[DagsterFeatureLoadResult] = []
     failures: dict[str, dict[str, object]] = {
         MCST_FILE_DATASETS[slug].dataset_key: {
@@ -220,7 +276,12 @@ async def run_feature_place_mcst_culture(
             or MCST_FILE_DATASETS[slug].dataset_key in selected_dataset_keys
         )
     }
-    for slug, spec in MCST_FILE_DATASETS.items():
+    ordered = list(MCST_FILE_DATASETS.items())
+    if attach_mode == "apply":
+        # 장소 목록이 먼저 Feature를 소유하고 속성 목록이 뒤에서 붙는다(ADR-121 §6.2) —
+        # 같은 장소가 두 갈래에 있으면 장소 목록 Feature가 primary가 된다.
+        ordered.sort(key=lambda item: item[1].attribute_list)
+    for slug, spec in ordered:
         if selected_dataset_keys is not None and spec.dataset_key not in selected_dataset_keys:
             continue
         if spec.dataset_key in completed_dataset_keys:
@@ -275,6 +336,16 @@ async def run_feature_place_mcst_culture(
                 bundles=bundles,
                 authoritative_snapshot_complete=True,
                 geo_applied=GeoApplied(reverse=True, geocode=False),
+                load_all=(
+                    None
+                    if attach_mode == "off"
+                    else _theme_attach_loader(
+                        context,
+                        spec_slug=slug,
+                        mode=attach_mode,
+                        reports=theme_reports,
+                    )
+                ),
             )
         except Exception as exc:
             if quota_exhaustion_cause(exc) is not None:
@@ -302,7 +373,11 @@ async def run_feature_place_mcst_culture(
             failures=failures,
             loaded_dataset_keys=tuple(result.dataset_key for result in results),
         )
-    result = McstLoadResult(provider=MCST_PROVIDER_NAME, results=tuple(results))
+    result = McstLoadResult(
+        provider=MCST_PROVIDER_NAME,
+        results=tuple(results),
+        theme_attach=tuple(theme_reports),
+    )
     _add_output_metadata(context, result.as_metadata())
     return result
 
@@ -337,7 +412,8 @@ async def _finalize_mcst_dataset(
 
 @asset(
     group_name="features_place",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"mcst_culture_records"},
+    required_resource_keys=_COMMON_RESOURCE_KEYS
+    | {"mcst_culture_records", "mcst_theme_attach_mode"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
     pool=GEO_HEAVY_POOL,
 )

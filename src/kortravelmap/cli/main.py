@@ -317,6 +317,23 @@ def build_parser() -> argparse.ArgumentParser:
     )
     abandon_p.set_defaults(func=_cmd_reconcile_abandon)
 
+    plan_p = sub.add_parser(
+        "mcst-theme-plan",
+        help=(
+            "기존 MCST Feature의 ADR-121 전환 dry-run 계획(read-only). dataset별 "
+            "retire/attach/collapse/keep/ambiguous 개수와 표본을 JSON으로 출력한다."
+        ),
+    )
+    plan_p.add_argument(
+        "--samples", type=int, default=50, help="dataset×action마다 뽑을 표본 수(기본 50)."
+    )
+    plan_p.add_argument(
+        "--ids-out",
+        default=None,
+        help="퇴역 예정 feature_id(retire·attach·collapse)를 한 줄에 하나씩 쓸 파일.",
+    )
+    plan_p.set_defaults(func=_cmd_mcst_theme_plan)
+
     return parser
 
 
@@ -741,6 +758,24 @@ async def _cmd_reconcile_abandon(args: argparse.Namespace) -> int:
         f"reconcile-abandon: outcome={result.outcome} "
         f"root_job_id={result.root_job_id or '-'}"
     )
+    return 0
+
+
+async def _cmd_mcst_theme_plan(args: argparse.Namespace) -> int:
+    import json
+
+    from kortravelmap.cli.mcst_theme_plan import run_mcst_theme_plan
+
+    engine = make_async_engine(_resolve_dsn(args))
+    try:
+        report, retiring = await run_mcst_theme_plan(engine, samples=max(0, int(args.samples)))
+    finally:
+        await engine.dispose()
+    if args.ids_out:
+        Path(args.ids_out).write_text(  # noqa: ASYNC240  # CLI 종료 직전 1회 쓰기
+            "".join(f"{feature_id}\n" for feature_id in retiring), encoding="utf-8"
+        )
+    print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     return 0
 
 

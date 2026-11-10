@@ -146,9 +146,23 @@ FOR UPDATE
 
 # loser source_link 중 master가 아직 안 가진 것만 master로 재지정.
 # (rowcount 대신 RETURNING + fetchall — Result 타입 폭 회피, 코드베이스 컨벤션.)
+#
+# **master에 이미 primary가 있으면 옮겨 오는 primary는 enrichment로 강등한다**(ADR-121
+# 결정 4). 역할을 그대로 옮기면 master에 primary가 둘이 되어 표시 원천이 흔들리고, 옮겨 온
+# 원천의 snapshot 부재가 master를 퇴역시킬 수 있다. 하위 질의는 UPDATE 이전 snapshot을 보므로
+# "master가 원래 가진 primary"만 센다.
 _MOVE_LINKS_SQL: Final[str] = """
 UPDATE provider_sync.source_links
-SET feature_id = CAST(CAST(:master AS text) AS uuid)
+SET feature_id = CAST(CAST(:master AS text) AS uuid),
+    source_role = CASE
+        WHEN source_role = 'primary' AND EXISTS (
+            SELECT 1
+            FROM provider_sync.source_links AS master_link
+            WHERE master_link.feature_id = CAST(CAST(:master AS text) AS uuid)
+              AND master_link.source_role = 'primary'
+        ) THEN 'enrichment'
+        ELSE source_role
+    END
 WHERE feature_id = CAST(CAST(:loser AS text) AS uuid)
   AND source_entity_key NOT IN (
       SELECT source_entity_key

@@ -2158,3 +2158,27 @@ async def test_merge_history_count_after_merge(seeded: str, migrated_engine: Asy
             )
         ).scalar_one()
     assert count == 1
+
+
+async def test_merge_demotes_moved_primary_when_master_has_primary(
+    seeded: str, migrated_engine: AsyncEngine
+) -> None:
+    """ADR-121 결정 4 — master에 primary가 있으면 옮겨 온 primary는 enrichment가 된다.
+
+    seed: master는 SE1 primary, loser는 SE2 primary. 역할을 그대로 옮기면 master에 primary가
+    둘이 된다(표시 원천이 흔들리고 SE2 원천의 부재가 master를 내릴 수 있다).
+    """
+
+    async with AsyncSession(migrated_engine) as session, session.begin():
+        await merge_from_review(session, seeded, merged_by="op-1", reason="dup")
+    async with AsyncSession(migrated_engine) as session:
+        roles = dict(
+            (
+                await session.execute(
+                    select(SourceLinkRow.source_entity_key, SourceLinkRow.source_role).where(
+                        SourceLinkRow.feature_id == _F_MASTER
+                    )
+                )
+            ).all()
+        )
+    assert roles == {"SE1": "primary", "SE2": "enrichment"}

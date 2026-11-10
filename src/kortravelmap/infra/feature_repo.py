@@ -2557,6 +2557,17 @@ WHERE f.lifecycle_state = 'active'
   AND pd.dataset_key = :dataset_key
   AND se.source_entity_type = :source_entity_type
   AND NOT (se.source_entity_id = ANY(CAST(:keys AS text[])))
+  -- ADR-121 결정 4: 이 dataset 밖의 다른 primary가 남은 Feature는 이 원천의 부재로 내리지
+  -- 않는다(병합으로 primary가 둘이 된 기존 Feature 포함).
+  AND NOT EXISTS (
+    SELECT 1
+    FROM provider_sync.source_links AS other_link
+    JOIN provider_sync.source_entities AS other_entity
+      ON other_entity.source_entity_key = other_link.source_entity_key
+    WHERE other_link.feature_id = f.feature_id
+      AND other_link.source_role = 'primary'
+      AND other_entity.provider_dataset_id <> pd.provider_dataset_id
+  )
 """
 
 

@@ -319,6 +319,12 @@ from kortravelmap.infra.sync_state_repo import (
 from kortravelmap.infra.sync_state_repo import (
     record_sync_success_for_operation_membership as repo_record_operation_success,
 )
+from kortravelmap.infra.theme_attach_repo import (
+    ThemeAttachMode,
+    ThemeAttachReport,
+    ThemeAttachSpec,
+    load_theme_attach_bundles,
+)
 from kortravelmap.infra.transaction_limits import apply_transaction_limits
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from kortravelmap.mois import (
@@ -1230,6 +1236,32 @@ class AsyncKorTravelMapClient:
                     )
                 )
             return result
+
+    async def load_theme_attach_bundles(
+        self,
+        bundles: Iterable[FeatureBundle],
+        *,
+        spec: ThemeAttachSpec,
+        mode: ThemeAttachMode,
+        geo: GeoLoadContext | None = None,
+    ) -> tuple[FeatureLoadResult, ThemeAttachReport]:
+        """MCST 한 dataset snapshot을 ADR-121 붙임 규칙으로 한 transaction에 적재한다.
+
+        ``mode="dry_run"``은 판정 개수만 계산하고 현행 적재를 한다. ``"apply"``는
+        :func:`~kortravelmap.infra.theme_attach_repo.load_theme_attach_bundles`의 경로다.
+        curation seal 입력은 같은 transaction에서 잡는다(:meth:`load_feature_bundles`와 같다).
+        """
+        materialized = list(bundles)
+        async with self._feature_load_transaction() as session:
+            loaded, report = await load_theme_attach_bundles(
+                session, materialized, spec=spec, mode=mode, geo=geo
+            )
+            loaded = loaded.merge(
+                await capture_provider_curation_input(
+                    session, provider=spec.provider, dataset_key=spec.dataset_key
+                )
+            )
+            return loaded, report
 
     async def find_unchanged_active_source_entities(
         self,

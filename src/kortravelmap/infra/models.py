@@ -1753,6 +1753,112 @@ class FeatureSearchAliasRow(Base):
     )
 
 
+class PlaceAttributeRow(Base):
+    """``feature.place_attributes`` — 공개 장소 속성 catalog(ADR-121, migration 446).
+
+    속성은 별도 상태가 아니다 — Feature에 걸린 ``primary``/``enrichment`` link의
+    (dataset, entity 유형)이 :class:`DatasetPlaceAttributeRow`로 이 코드에 묶여 있으면 그
+    Feature가 이 속성을 가진다.
+    """
+
+    __tablename__ = "place_attributes"
+    __table_args__ = (
+        CheckConstraint(
+            "attribute_code ~ '^[a-z][a-z0-9_]{1,47}$'",
+            name=conv("ck_place_attributes_code"),
+        ),
+        CheckConstraint(
+            "label_ko <> '' AND char_length(label_ko) <= 100",
+            name=conv("ck_place_attributes_label"),
+        ),
+        CheckConstraint(
+            "attribute_group IN ('companion', 'accessibility', 'bookstore', 'cuisine')",
+            name=conv("ck_place_attributes_group"),
+        ),
+        CheckConstraint(
+            "visibility IN ('public', 'admin_only')",
+            name=conv("ck_place_attributes_visibility"),
+        ),
+        {"schema": "feature"},
+    )
+
+    attribute_code: Mapped[str] = mapped_column(Text, primary_key=True)
+    label_ko: Mapped[str] = mapped_column(Text, nullable=False)
+    attribute_group: Mapped[str] = mapped_column(Text, nullable=False)
+    visibility: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'public'::text")
+    )
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default=text("0"))
+
+
+class DatasetPlaceAttributeRow(Base):
+    """``provider_sync.dataset_place_attributes`` — (dataset, entity 유형) → 속성(ADR-121)."""
+
+    __tablename__ = "dataset_place_attributes"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_dataset_place_attributes_provider_dataset_id_provider_datasets",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["attribute_code"],
+            ["feature.place_attributes.attribute_code"],
+            name="fk_dataset_place_attributes_attribute_code_place_attributes",
+            ondelete="CASCADE",
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    source_entity_type: Mapped[str] = mapped_column(Text, primary_key=True)
+    attribute_code: Mapped[str] = mapped_column(Text, primary_key=True)
+
+
+class ThemeAttachDecisionRow(Base):
+    """``provider_sync.theme_attach_decisions`` — apply 모드 MCST 적재의 행별 붙임 판정(ADR-121).
+
+    근거 보관용이다 — 속성의 정본은 source link다. dataset별 snapshot과 같이 움직인다.
+    """
+
+    __tablename__ = "theme_attach_decisions"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["provider_dataset_id"],
+            ["provider_sync.provider_datasets.provider_dataset_id"],
+            name="fk_theme_attach_decisions_provider_dataset_id_provider_datasets",
+            ondelete="CASCADE",
+        ),
+        CheckConstraint(
+            "state IN ('owner', 'matched', 'sticky', 'redirected', 'created', "
+            "'ambiguous', 'unresolved')",
+            name=conv("ck_theme_attach_decisions_state"),
+        ),
+        CheckConstraint(
+            "(state IN ('ambiguous', 'unresolved')) = (target_feature_id IS NULL)",
+            name=conv("ck_theme_attach_decisions_target"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(evidence) = 'object'",
+            name=conv("ck_theme_attach_decisions_evidence"),
+        ),
+        {"schema": "provider_sync"},
+    )
+
+    provider_dataset_id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    natural_key: Mapped[str] = mapped_column(Text, primary_key=True)
+    state: Mapped[str] = mapped_column(Text, nullable=False)
+    target_feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    rule_version: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    decided_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class FeatureAliasRow(Base):
     """``feature.feature_aliases`` — legacy ``f_*`` alias 보존 (T-VN-32A, ADR-068 결정 3).
 

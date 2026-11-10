@@ -639,3 +639,69 @@ async def test_run_closed_job_tracks_and_advances_cursor(
     assert state.cursor == {"last_modified_date": "2026-06-03"}
     assert await _active_entity_ids(migrated_session) == set()
 
+
+
+async def test_snapshot_absence_keeps_feature_with_other_dataset_primary(
+    migrated_session: AsyncSession,
+) -> None:
+    """ADR-121 결정 4 — 다른 dataset의 primary가 남은 Feature는 이 원천의 부재로 내리지 않는다."""
+
+    records = [
+        _Record(service_slug="general_restaurants", mng_no="guard-keep"),
+        _Record(service_slug="bakeries", mng_no="guard-gone"),
+    ]
+    await load_mois_license_features_bulk(migrated_session, records, fetched_at=_FETCHED)
+    await migrated_session.flush()
+    gone_feature_id = (
+        await migrated_session.execute(
+            text(
+                "SELECT CAST(sl.feature_id AS text) FROM provider_sync.source_links sl "
+                "JOIN provider_sync.source_entities se "
+                "  ON se.source_entity_key = sl.source_entity_key "
+                "WHERE se.source_entity_id = 'bakeries::guard-gone' "
+                "  AND sl.source_role = 'primary'"
+            )
+        )
+    ).scalar_one()
+    other_dataset_id = (
+        await migrated_session.execute(
+            text(
+                "INSERT INTO provider_sync.provider_datasets "
+                "(provider, dataset_key, display_name, source_kind) "
+                "VALUES ('guard-test', 'other', 'guard-test/other', 'manual') "
+                "ON CONFLICT (provider, dataset_key) DO UPDATE SET is_active = true "
+                "RETURNING provider_dataset_id"
+            )
+        )
+    ).scalar_one()
+    await migrated_session.execute(
+        text(
+            "INSERT INTO provider_sync.source_entities (source_entity_key, source_entity_type, "
+            " source_entity_id, first_seen_at, last_seen_at, provider_dataset_id) "
+            "VALUES ('guard-other-entity', 'other', 'guard-other', now(), now(), :dataset_id)"
+        ),
+        {"dataset_id": other_dataset_id},
+    )
+    await migrated_session.execute(
+        text(
+            "INSERT INTO provider_sync.source_links "
+            "(feature_id, source_entity_key, source_role, match_method, confidence) "
+            "VALUES (CAST(:feature_id AS uuid), 'guard-other-entity', 'primary', 'manual', 100)"
+        ),
+        {"feature_id": gone_feature_id},
+    )
+    await migrated_session.flush()
+
+    snapshot = await _active_entity_ids(migrated_session) - {"bakeries::guard-gone"}
+    await retire_mois_license_features_absent_from_snapshot(migrated_session, snapshot)
+    await migrated_session.flush()
+    state = (
+        await migrated_session.execute(
+            text(
+                "SELECT lifecycle_state FROM feature.features "
+                "WHERE feature_id = CAST(:feature_id AS uuid)"
+            ),
+            {"feature_id": gone_feature_id},
+        )
+    ).scalar_one()
+    assert state == "active"
