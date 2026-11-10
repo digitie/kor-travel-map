@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-10 — 주차장 공개 파일 원천
+
+- 전국주차장정보표준데이터를 서비스키 없이 포털 공개 파일로 받는다(운영 키는 Open API에서 403이다). 주차장 번호를 그대로 자연키로 쓰므로 기존 Feature는 바뀌지 않는다. 선언 건수보다 짧거나 빈 파일은 실패한다. 스키마·API 변경 없음.
+
 ## 2026-11-10 — 관리자 Feature 부분 검색 가속(#1475)
 
 - `GET /v1/admin/features?q=…`(및 `/v1/service/admin-features`)가 드문 검색어에서 수 초 걸리던 것을 trigram 인덱스(alembic 447)로 줄인다. parameter·기본값·응답은 그대로다.
@@ -19,6 +23,7 @@
 - 반려동물 목록의 반려 업종 행(동물약국·용품·병원·미용·위탁)은 더 적재하지 않는다(기존 Feature는 그대로 — 전환 때 퇴역).
 - MCST 테마 목록 붙임 적재(`KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE`, 기본 `off`)와 전환 계획 `ktmctl mcst-theme-plan`.
   alembic 446. service 계약 변경 없음.
+||||||| parent of b8c18de32 (feat(standard-data): 주차장을 포털 공개 파일로 서비스키 없이 적재)
 
 ## 2026-11-10 — 역·공항·시장 검색 순위와 일반철도 역 분류(#1476·#1477·#1478)
 

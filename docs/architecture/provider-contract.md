@@ -148,7 +148,7 @@ system
 | ~~`knps_fire_alerts`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — 소방청/산림청으로 이전 (별도 ADR) |
 | `standard_tourism_roads` | data.go.kr-standard | 관광길 표준데이터 |
 | `datagokr_museums` | data.go.kr-standard | 박물관·미술관 표준 (data.go.kr-standard provider는 짧은 이름과 달리 `datagokr_` prefix 사용) |
-| `datagokr_parking_lots` | data.go.kr-standard | 주차장 표준 |
+| `datagokr_parking_lots` | data.go.kr-standard | 전국주차장정보표준데이터(15012896) 포털 공개 파일(서비스키 불필요, 2026-11-10). 자연키 `prkplce_no` |
 | `datagokr_tourist_attractions` | data.go.kr-standard | 관광지 표준 |
 | `datagokr_cultural_festivals` | data.go.kr-standard | 문화축제 표준 |
 | `place_phone_enrichment` | kakao-local-api / naver-search-api / google-places-api-new | 전화번호 보강 |

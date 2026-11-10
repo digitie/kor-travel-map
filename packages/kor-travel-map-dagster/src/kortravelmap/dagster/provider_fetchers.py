@@ -1908,25 +1908,20 @@ _KHOA_BEACH_MAX_PAGES: Final = 30
 async def fetch_standard_parking_lots(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국주차장표준데이터 record를 datagokr public client로 stream한다.
+    """전국주차장정보표준데이터(15012896) 공개 파일을 서비스키 없이 stream한다.
 
-    ``client.parking`` record(``PublicParkingLot``, krtour
-    ``PublicParkingLotItem`` Protocol 충족)를 yield. async generator, finally aclose.
+    Open API(``tn_pubr_prkplce_info_api``)는 운영 키가 활용신청되지 않아 403
+    (``SERVICE_KEY_IS_NOT_REGISTERED_ERROR``)이다 — 마지막 성공 2026-11-03. 포털 공개
+    파일은 키를 받지 않는다(2026-11-10 실측 18,994행). 행은 같은 ``PublicParkingLot``
+    모델이고 자연키 ``prkplce_no``도 같은 값이라 feature identity가 바뀌지 않는다(prod
+    17,986 entity 중 17,875가 파일에 있다).
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard parking lots live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard(
-            client.parking, label="datagokr parking.list"
+        async for record in _iter_datagokr_standard_file(
+            client.parking, label="datagokr parking file"
         ):
             yield record
     finally:

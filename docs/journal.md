@@ -1,3 +1,7 @@
+## 2026-11-10 — 주차장 키 403 → 공개 파일
+
+- 운영 키가 주차장·박물관 Open API에서 403(관광지는 00). 주차장 파일 18,994행·고유 17,878, prod 키 17,986 중 17,875 일치(은퇴 경로 아님). 박물관·관광지는 다음 PR.
+
 ## 2026-11-10 — #1475 admin 부분 검색 3~12 s
 
 - 원인: lower(name) keyset을 36만 행 걸으며 행마다 ILIKE, all은 raw_data 505 MB 전 스캔. 447 비부분 trigram 6개로 후보 id를 먼저 모으고(≤2,000) 넘치면 종전 훑기. raw_data 검색 제거. D2 run_id 6~12 s→약 50 ms.
@@ -14,6 +18,7 @@
 - R2(운영 읽기 전용, 리뷰 반영 뒤 3분): MCST 88,007 → retire 20,396·attach 7,501·collapse 7,073·keep 51,064·ambiguous 1,973(대부분 비MCST master끼리 동점 — B dedup 뒤 줄어든다). PinVi 참조 1,020행(161 Feature, 전부 attach/collapse — rebind 가능).
 - 첫 계획 질의가 `publication_state IN (...)` 때문에 부분 GiST 색인을 못 써 30분 넘게 돌아 취소했다(색인 조건 그대로 쓰도록 고침). tier 2 동점을 ambiguous로 보던 규칙이 ambiguous의 3/4를 만들었다.
 - 적대 리뷰 반영: 강등은 MCST link만(MOIS 승자 판정 회귀), 부재 가드 강화, 비병합 퇴역은 owner로, 빈 snapshot 손실 가드, 계획기의 비MCST master 제외·사슬 collapse 차단·물려받은 attach 분류 재확인.
+||||||| parent of b8c18de32 (feat(standard-data): 주차장을 포털 공개 파일로 서비스키 없이 적재)
 
 ## 2026-11-10 — 운영 검색 점검(#1476~#1478)
 

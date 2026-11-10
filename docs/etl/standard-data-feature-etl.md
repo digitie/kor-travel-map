@@ -171,6 +171,16 @@ def _classify_route_type(road_name: str) -> str:
 `place_kind="parking_lot"`. category: `TRANSPORT_PARKING_LOT`. 시설 정보:
 주차면 수, 운영시간, 유료/무료.
 
+**원천은 포털 공개 파일이다(2026-11-10).** Open API `tn_pubr_prkplce_info_api`는 운영 키가
+HTTP 403 `SERVICE_KEY_IS_NOT_REGISTERED_ERROR`(마지막 성공 2026-11-03)라
+`client.parking.iter_file_pages()`(15012896, 서비스키 없음)로 옮겼다 — 실측 18,994행, 좌표 없음
+750. 행은 같은 `PublicParkingLot` 모델이고 자연키 `prkplce_no`도 같은 문자열이라 feature
+identity는 그대로다(prod 17,986 entity 중 17,875가 파일에 있다. 나머지 111은 다음 적재에서
+갱신되지 않을 뿐 은퇴하지 않는다 — 이 asset은 은퇴 경로가 아니다). 파일의 `PRKPLCE_NO`는
+18,994행 중 17,878개만 고유하다 — Open API 시절(18,989 bundle → 17,986 entity)과 같은 성질이고
+적재 동작도 같다. 선언 건수와 받은 행 수가 다르거나 0이면 `StandardFileSnapshotIncomplete`로
+실패한다.
+
 ### 7.4 tourist_sites (place)
 
 `place_kind="tourist_site"`. category: `TOURISM_*`. 경계가 있는 일부는 향후
