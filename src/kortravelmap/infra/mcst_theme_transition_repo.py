@@ -289,6 +289,9 @@ async def _transition_one(
     batch_id: str,
     rule_version: str,
 ) -> TransitionItemOutcome:
+    # P(protocol EX)는 batch 시작에 이미 쥐었다 — 여기서 다시 부르면 SQL 없이 돌아온다. 행 잠금보다
+    # 먼저 부르는 것은 잠금 순서(P → 행)를 이 함수 안에서도 드러내려는 것이다.
+    await lock_feature_curation_write(session)
     if (
         await session.execute(_ALREADY_TRANSITIONED_SQL, {"feature_id": item.feature_id})
     ).first() is not None:

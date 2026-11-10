@@ -352,6 +352,12 @@ def build_parser() -> argparse.ArgumentParser:
     transition_p.add_argument(
         "--max-batches", type=int, default=None, help="앞에서부터 이 수의 batch만(시험용)."
     )
+    transition_p.add_argument(
+        "--sample-per-action",
+        type=int,
+        default=None,
+        help="리허설 전용: action마다 앞 N개만 실행하고 되감는다.",
+    )
     transition_p.add_argument("--execute", action="store_true", help="commit한다(되돌릴 수 없다).")
     transition_p.add_argument(
         "--confirm-plan-sha256",
@@ -843,6 +849,7 @@ async def _cmd_mcst_theme_transition(args: argparse.Namespace) -> int:
             batch_size=int(args.batch_size),
             execute=bool(args.execute),
             max_batches=args.max_batches,
+            sample_per_action=args.sample_per_action,
         )
     finally:
         await engine.dispose()

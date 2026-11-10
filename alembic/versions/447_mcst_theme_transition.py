@@ -18,6 +18,10 @@ retire)시킨다. 퇴역한 Feature를 참조하는 PinVi 행은 M05 사건(``re
   출처별 **생성 열** 넷을 더해 출처마다 FK를 건다. ``case_id``·``resolution_id`` 열과 payload
   모양은 그대로다 — MCST 출처는 거기에 batch_id·item_id를 싣는다(PinVi는 불투명 UUID로 쓴다).
   기존 행은 고치지 않는다(생성 열은 표 재작성으로 채워지고 append-only 트리거는 돌지 않는다).
+  떨어뜨리는 FK 둘 — ``fk_feature_reference_reconciliation_events_case``와
+  ``fk_feature_reference_reconciliation_events_resolution`` — 은 같은 대상·같은 ``ON DELETE RESTRICT``로
+  생성 열(``manual_case_ref``·``manual_resolution_ref``) 위에 이름을 바꿔 다시 건다. manual 출처 행의
+  참조 무결성은 그대로이고, MCST 출처 행은 장부 FK가 받는다.
 - ``feature.record_mcst_theme_transition_event(uuid)``: 사건 writer. M05 procedure owner 소유,
   manual 경로와 같은 잠금·sequence·payload·hash 규칙.
 - receipt head CHECK에 447.

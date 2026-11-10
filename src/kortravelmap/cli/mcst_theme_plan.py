@@ -27,6 +27,7 @@ from kortravelmap.core.theme_attach import (
 )
 from kortravelmap.infra.mcst_theme_transition_repo import (
     TransitionPlan,
+    TransitionPlanItem,
     build_transition_plan,
     execute_transition_batch,
 )
@@ -135,6 +136,7 @@ async def run_mcst_theme_transition(
     batch_size: int,
     execute: bool,
     max_batches: int | None = None,
+    sample_per_action: int | None = None,
 ) -> dict[str, Any]:
     """계획을 batch로 실행한다. ``execute``가 아니면 batch마다 되감는 **리허설**이다.
 
@@ -149,6 +151,17 @@ async def run_mcst_theme_transition(
     batches_skipped = 0
     errors: list[dict[str, Any]] = []
     items = plan.items
+    if sample_per_action is not None:
+        if execute:
+            raise ValueError("표본 리허설은 실행(--execute)과 함께 쓸 수 없다")
+        # 리허설 전용: action마다 앞 N개만. 되감으므로 batch 번호가 실행과 달라도 남는 것이 없다.
+        seen: Counter[str] = Counter()
+        picked: list[TransitionPlanItem] = []
+        for item in items:
+            if seen[item.action] < sample_per_action:
+                seen[item.action] += 1
+                picked.append(item)
+        items = tuple(picked)
     for batch_index, start in enumerate(range(0, len(items), batch_size)):
         if max_batches is not None and batch_index >= max_batches:
             break
