@@ -1,6 +1,6 @@
 """관리자 Feature 부분 검색의 계획·범위를 검증한다(#1444, #1475).
 
-#1475: 부분 검색은 비부분 trigram 인덱스(rev 445)로 일치 후보를 먼저 모으고(드문 q),
+#1475: 부분 검색은 비부분 trigram 인덱스(rev 447)로 일치 후보를 먼저 모으고(드문 q),
 후보가 상한을 넘으면 종전처럼 keyset 인덱스를 훑는다(흔한 q). 두 경로는 같은 행을 골라야
 하고, 원천 JSON 본문(``raw_data::text``)은 어느 범위에서도 검색하지 않는다.
 """
@@ -29,7 +29,7 @@ from tests.integration.test_admin_feature_repo import (
 
 pytestmark = pytest.mark.integration
 
-#: rev 445가 만든 갈래별 trigram 인덱스. 후보 SQL의 술어 식이 인덱스 식과 어긋나면
+#: rev 447가 만든 갈래별 trigram 인덱스. 후보 SQL의 술어 식이 인덱스 식과 어긋나면
 #: (예: ``name`` 대 ``lower(name)``) 인덱스가 후보에서 빠지고 이 단언이 깨진다.
 _ARM_INDEXES = {
     "features": {

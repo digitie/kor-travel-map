@@ -62,8 +62,8 @@ MCST 행 하나가 Feature 하나다. 식별은 목록마다 갈린다.
 | barrier_free_places_csv | 속성 | `barrier_free` | 제한 없음 |
 | family_infant_culture_facilities_csv | 속성 | `family_friendly` | 제한 없음 |
 | media_famous_places_csv | 장소(촬영지는 큐레이션, D3) | — | 제한 없음 |
-| independent_bookstores_csv | 장소 + 속성 | `bookstore_independent` | `0104`·`0203` |
-| cafe_bookstores_csv | 장소 + 속성 | `bookstore_cafe` | `0104`·`0203` |
+| independent_bookstores_csv | 장소 + 속성 | `bookstore_independent` | `0104`·`0202` |
+| cafe_bookstores_csv | 장소 + 속성 | `bookstore_cafe` | `0104`·`0202` |
 | children_bookstores_csv | 장소 + 속성 | `bookstore_children` | `0104` |
 | used_bookstores_csv | 장소 + 속성 | `bookstore_used` | `0104` |
 | world_restaurants_csv | 장소 + 속성 | `world_cuisine` | `02` |
@@ -99,7 +99,7 @@ CREATE TABLE feature.place_attributes (
 );
 
 -- 어떤 dataset·원천 entity 유형의 link가 어떤 속성을 뜻하는가.
-CREATE TABLE provider_sync.dataset_place_attributes (
+CREATE TABLE feature.dataset_place_attributes (
   provider_dataset_id bigint NOT NULL REFERENCES provider_sync.provider_datasets,
   source_entity_type  text   NOT NULL,
   attribute_code      text   NOT NULL REFERENCES feature.place_attributes,
@@ -158,13 +158,16 @@ CREATE TABLE provider_sync.theme_attach_decisions (
 
 ### 5.1 후보
 
-- 후보 조회: `kind='place'`, `lifecycle_state='active'`, `quality_state='valid'`, 좌표 150m 이내.
+- 후보 조회: `kind='place'`, `lifecycle_state='active'`, `publication_state='published'`,
+  `quality_state='valid'`, 좌표 150m 이내. 술어가 부분 GiST 색인
+  `idx_features_coord_5179_gist`의 조건을 그대로 담아야 색인을 탄다.
   입력 점은 `MATERIALIZED` CTE에서 한 번 `ST_Transform`하고 술어는 `ST_DWithin(f.coord_5179,
   p.pt_5179, 150)` — 열끼리 비교라 색인을 탄다(ADR-012: 술어 안 `ST_Transform` 금지).
 - tier 1: primary link의 provider가 MCST가 **아닌** Feature. tier 2: MCST Feature. tier 1이
   하나라도 채택되면 tier 2는 보지 않는다.
-- publication이 `suppressed`인 후보가 채택 조건을 만족하면(운영자가 숨긴 장소) 붙이지도 새로
-  만들지도 않고 `ambiguous`다.
+- suppressed Feature는 후보가 아니다(공개 projection 밖, 색인도 없다). 2026-11-10 운영에 active·
+  valid·suppressed place는 0건이다. 운영자가 숨긴 장소 옆에 MCST 장소가 새로 생기면 dedup 리뷰가
+  다룬다.
 - 분류 호환(§3)이 맞지 않는 tier 1 후보는 버린다. tier 2는 분류를 보지 않는다(같은 원천 계열).
 
 ### 5.2 점수
@@ -178,7 +181,9 @@ CREATE TABLE provider_sync.theme_attach_decisions (
 - 채택(하나라도): `d ≤ 50m ∧ s ≥ 0.6` · `d ≤ 150m ∧ s ≥ 0.8`. 일반명(`공영주차장`·`관광안내소`·
   `화장실` 등 stop-name 목록)은 `d ≤ 30m ∧ s ≥ 0.9`에서만 채택한다. 거리 제한 없는 이름 일치나
   포함 보너스는 두지 않는다.
-- 동점: `(s, -d)`로 정렬. 1위와 2위가 **다른 Feature**이고 `s` 차 < 0.05이면 `ambiguous`.
+- 동점: `(s, -d)`로 정렬. **tier 1**의 1위와 2위가 다른 Feature이고 `s` 차 < 0.05이면 `ambiguous`.
+  tier 2(MCST끼리)의 동점은 같은 장소가 여러 목록에 있는 것이라 다툼이 아니다 — 1위를 고르고
+  전환 계획이 묶음을 하나로 접는다(R2 첫 dry-run에서 ambiguous의 3/4이 tier 2 동점이었다).
 
 ### 5.3 좌표 없는 행
 
@@ -254,13 +259,37 @@ action으로 내린다.
   ETag에 속성 digest를 섞어 푼다.
 - `_CATEGORY_REPROJECTION_SCOPES`는 그대로다(D1-b라 MCST 장소 Feature를 계속 소유한다).
 
+### 6.7 구현 리뷰 반영과 알려진 한계 (2026-11-10)
+
+- **강등은 MCST link만이다.** `apply_feature_merge`가 옮겨 오는 primary를 enrichment로 낮추는 것은
+  그 link가 MCST 목록(`python-mcst-api`)이고 master에 이미 primary가 있을 때뿐이다. 다른
+  provider의 primary까지 낮추면 MOIS 승자 판정(`_ACTIVE_PRIMARY_ENTITIES_SQL`)·폐업 퇴역이 병합된
+  원천을 "지도에 없음"으로 본다(적대 리뷰 High).
+- **부재 퇴역 가드**는 "이번 부재 대상 밖의 primary"만 보호로 친다 — 같은 dataset의 다른 entity라도
+  snapshot에 있으면 남기고, 두 primary가 모두 빠지면 내린다(`_WITHDRAWN_SOLE_SOURCE_SQL`과 같은 꼴).
+- **병합이 아닌 퇴역**(provider·관리자)을 가리키는 claim은 `owner`로 넘겨 기존 재활성 규칙(override
+  fence 포함)이 판단한다. `unresolved`는 병합 이력이 있는데 생존자도 퇴역한 경우뿐이다.
+- **빈·잘린 snapshot 가드**: 지울 enrichment link가 20개 이상이고 snapshot이 비었거나 기존의 절반을
+  넘으면 그 dataset 적재를 실패시킨다(`ThemeAttachLossGuardError`).
+- **소유 순서는 한 run 안에서만** 장소 목록이 먼저다. feature-update worker는 slug 하나씩 돌므로 속성
+  목록이 먼저 장소 Feature를 만들고 장소 목록 행이 거기 붙을 수 있다 — 속성은 둘 다 정확하고, 표시
+  분류는 먼저 만든 목록의 것이다. 전환 계획(§8.1)은 장소 목록을 생존자로 고른다.
+- **MCST가 primary인 Feature의 부재**는 현행처럼 처리하지 않는다 — 그 목록에서 행이 빠져도 Feature와
+  그 목록의 속성이 남는다(현행의 낡은 Feature와 같다). 부재 퇴역·primary 승계를 도입할 때 함께 푼다.
+- **seal**: enrichment link가 걸린 master의 상태가 MCST seal 입력에 들어간다. 같은 적재
+  transaction 안에서는 흔들리지 않는다(§6.6). seal hash를 나중에 비교하는 소비자는 없다(확인 대상).
+- 계획기는 비MCST primary가 함께 있는 Feature(옛 병합 master)를 계획에서 뺀다. 반려 업종 판정은 그
+  Feature의 모든 MCST primary가 반려 업종일 때만이다. `collapse`는 생존자와 **직접** 채택된 구성원만
+  접고(사슬로만 이어진 것은 `ambiguous`), 이웃의 `attach`를 물려받을 때는 자기 분류 호환을 다시 본다.
+
 ## 7. API·검색·OpenAPI
 
 ### 7.1 필터
 
 - `attribute`(반복, 최대 5개, **AND**)를 추가한다: `GET /v1/features/search`, `/v1/features`,
   `/v1/features/in-bounds`(item·cluster), `/v1/features/nearby`, `/v1/features/nearby/by-target`,
-  `GET /v1/admin/features`, `/v1/admin/features/in-bounds`. 모르는 코드·`admin_only` 코드(공개
+  `/v1/admin/features/in-bounds`. `GET /v1/admin/features`는 **보류** — `/v1/service/admin-features`가 같은
+  handler·응답형을 써서 service 계약이 바뀐다(repo는 이미 받는다, 라우터만 남았다). 모르는 코드·`admin_only` 코드(공개
   경로) → 422.
 - 술어는 **공용 fragment 하나**(`place_attribute_filter_sql`)로 두고 모든 읽기 경로가 쓴다.
   공개 읽기 SQL 목록을 열거해 fragment가 빠진 경로를 잡는 테스트를 둔다.
@@ -268,7 +297,7 @@ action으로 내린다.
   ```sql
   EXISTS (SELECT 1 FROM provider_sync.source_links sl
             JOIN provider_sync.source_entities se ON se.source_entity_key = sl.source_entity_key
-            JOIN provider_sync.dataset_place_attributes dpa
+            JOIN feature.dataset_place_attributes dpa
                  ON dpa.provider_dataset_id = se.provider_dataset_id
                 AND dpa.source_entity_type = se.source_entity_type
            WHERE sl.feature_id = f.feature_id
@@ -282,7 +311,7 @@ action으로 내린다.
 ### 7.2 응답
 
 - `FeatureDetailResponse.attributes: list[FeatureAttributeView]` — `{code, label, group}`.
-  상세 ETag는 `row_revision`과 공개 속성 코드 집합의 digest를 함께 쓴다.
+  상세 ETag는 공개 속성이 있으면 `"<rev>-<sha16>"`(속성의 코드·라벨·묶음·순서 digest), 없으면 종전 `"<rev>"`다.
 - `FeatureSummary.attribute_codes: list[str]`(정렬). 목록·in-bounds item·search·nearby에 실린다.
   공개 경로는 `admin_only` 코드를 뺀다.
 - `GET /v1/place-attributes`(공개): catalog(`code`, `label`, `group`, `sort_order`).
@@ -295,7 +324,8 @@ action으로 내린다.
 - `openapi.json`(admin 포함)과 `openapi.user.json`이 바뀐다. `openapi.service.json`은 바뀌지
   않는다.
 - 순서: **Map API PR 머지 → PinVi 재vendor PR(user + admin 핀, M05 pair contract 재생성) 머지 →
-  pair 회전**. PinVi feature 읽기는 plain dict라 추가 필드로 깨지지 않는다 — 코드 변경 없음.
+  pair 회전**. PinVi feature 읽기는 plain dict라 추가 필드로 깨지지 않는다 — 런타임 코드 변경은 없지만
+  user 계약 시험의 `_CLIENT_QUERY_PARAMETERS`(경로마다 query 집합 고정)에 `attribute`를 더해야 한다.
 - 큐레이션 `curation_relation`의 `pet_support`/`accessibility_support`/`family_support`는
   편집 membership 역할로 그대로 둔다. 속성과 이름이 비슷하지만 다른 축이다.
 
@@ -303,9 +333,9 @@ action으로 내린다.
 
 필터는 EXISTS 세 표 조인이고 `source_links`·`source_entities`·`dataset_place_attributes` PK가
 받친다. 공개 검색은 `q`나 bbox가 필수라(`feature_repo.py:6890`) 무bbox 경로는 없다.
-`attribute_codes`는 페이지 행마다 같은 조인의 집계다. 구현 PR에서 운영 크기 fixture로 전국 bbox
-cluster·in-bounds의 EXPLAIN을 재고, ADR-073 예산을 넘으면 파생 materialization을 별도 결정으로
-둔다(정확성·단일 정본이 성능보다 앞).
+`attribute_codes`는 페이지 행마다 같은 조인의 집계다. 필터가 있으면 술어는 **속성 쪽에서 출발하는 semi-join**이다(요청 코드의
+dataset → entity → link로 Feature 집합을 한 번 만든다) — 행마다 상관 anti-join을 돌면 전국 bbox에서 대부분의
+행을 훑는다(적대 리뷰 High). 운영 크기 EXPLAIN·p95 측정은 R4 전 perf gate에 필터 변형을 더해 잰다(열린 일).
 
 ## 8. 기존 MCST Feature 전환
 
@@ -320,12 +350,46 @@ cluster·in-bounds의 EXPLAIN을 재고, ADR-073 예산을 넘으면 파생 mate
 | `attach` | tier 1 master가 채택된 Feature | master로 병합(link 강등) + M05 `rebind` |
 | `collapse` | tier 2로 다른 MCST Feature와 같은 장소 | 생존자로 병합 + M05 `rebind` |
 | `keep` | 위에 해당 없음(생존자 포함) | 그대로(`feature_id`·앵커 불변) |
-| `ambiguous` | 후보 다툼·suppressed 후보 | 손대지 않음 → 관리자 판정 |
+| `ambiguous` | 후보 다툼 | 손대지 않음 → 관리자 판정 |
 
 - `collapse` 묶음 = tier 2 채택 관계로 이어진 MCST Feature(union-find). 생존자: 장소 목록 Feature >
   속성 목록 Feature, 그다음 `created_at` 이른 것, 그다음 `feature_id` 작은 것. 생존자는 `keep`.
 - `attach`가 우선한다: tier 1이 채택된 Feature는 tier 2 묶음에 들지 않는다.
 - 보고서: 목록별 × action 개수, 목록별 정밀도 표본, PinVi 참조 수(§8.3).
+
+### 8.1.1 R2 운영 dry-run 결과 (2026-11-10, 읽기 전용)
+
+`ktmctl mcst-theme-plan`(브랜치 `feat/mcst-theme-attach` `ada75bcf`, 리뷰 반영 뒤)을 운영 Map DB에 읽기
+전용 transaction으로 돌렸다(3분). MCST active Feature 88,007개.
+
+| dataset | retire | attach | collapse | keep | ambiguous |
+|---|---:|---:|---:|---:|---:|
+| pet_friendly | 20,396 | 821 | 51 | 2,169 | 491 |
+| barrier_free | — | 1,633 | 644 | 9,655 | 597 |
+| family_infant | — | 1,445 | 6,022 | 510 | 589 |
+| media_famous(촬영지) | — | 1,466 | 153 | 6,999 | 185 |
+| world_restaurants | — | 851 | 39 | 8,585 | 19 |
+| cafe_bookstores | — | 62 | 99 | 896 | 2 |
+| independent_bookstores | — | 52 | — | 270 | 5 |
+| children_bookstores | — | 7 | 31 | 748 | — |
+| used_bookstores | — | 51 | 26 | 334 | — |
+| leisure_activity | — | 220 | 6 | 14,308 | 20 |
+| leisure_camping | — | 893 | 2 | 1,516 | 65 |
+| leisure_classes | — | — | — | 5,074 | — |
+| **합계** | **20,396** | **7,501** | **7,073** | **51,064** | **1,973** |
+
+- 전환 뒤 MCST가 소유하는 공개 Feature는 약 53,037개(keep + ambiguous), 퇴역 예정 34,970개.
+- 같은 날 앞선 실행(리뷰 반영 전)은 attach 4,765였다. 차이는 계획기 변경(trigram 사전 거름 0.2→0.1,
+  옛 병합 master 제외, 사슬 collapse 차단, 물려받은 attach 분류 재확인)과 그 사이 운영에 적재된
+  master(관광공사 문화시설·레포츠 등 — 캠핑 attach 127→893, 레저 8→220)다. **R4 직전에 다시 돌린다.**
+- ambiguous 1,973의 대부분(표본 296개 중 260)은 **tier 1 동점** — 같은 이름의 비MCST master가 둘 이상
+  (예: 박물관 표준과 관광공사가 같은 박물관을 각각 가짐). master끼리의 중복은 #1468 B dedup이 병합하면
+  사라지고, 그 뒤 다시 돌리면 attach로 바뀐다(링크는 병합을 따라 생존자로 옮겨진다). 나머지는 물려받은
+  attach의 분류 불일치(22)·사슬(14).
+- **PinVi 참조**(운영 PinVi DB 읽기 전용): `trip_day_pois` 1,020행(서로 다른 Feature 161개) — `attach`
+  956행(142개)·`collapse` 64행(19개). `retire`(반려 업종) 참조 0, `curated_plan_pois`·
+  `feature_suggestions` 0. 전부 병합 대상이 있는 퇴역이라 M05 `rebind`로 옮길 수 있다.
+- 표본(목록·action마다 50개)은 보고서 JSON에 있다. 정밀도 판정(§5.4)은 R4 전 사람이 한다.
 
 ### 8.2 실행(R4)
 
@@ -416,7 +480,7 @@ R1과 R3은 한 Map PR로 묶어도 된다(둘 다 `off` 기본이라 동작이 
 ## 12. 검증 계획
 
 - 붙임 규칙: 채택·거절 경계값(50/150m, 0.6/0.8), 지점 토큰 불일치 거절, `서점`·`반점` 보존, 일반명
-  30m 제한, 분류 호환, ambiguous, suppressed 후보, tier 1 우선.
+  30m 제한, 분류 호환, ambiguous, tier 1 우선.
 - 적재(apply): 두 목록에 같은 장소 → Feature 하나·속성 둘. master가 있으면 MCST Feature 없음.
   owner·sticky·redirect·created·ambiguous 각 경로. 목록에서 행이 빠지면 enrichment link만 사라지고
   master는 남음. 수집 실패 slug는 link를 지우지 않음. entity당 link ≤ 1.

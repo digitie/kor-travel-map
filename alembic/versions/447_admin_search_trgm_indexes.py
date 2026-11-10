@@ -1,7 +1,7 @@
 """관리자 Feature 부분 검색용 비부분 trigram 인덱스 — #1475.
 
-Revision ID: 445_admin_search_trgm_indexes
-Revises: 444_trip_search_aliases
+Revision ID: 447_admin_search_trgm_indexes
+Revises: 446_mcst_place_attributes
 
 왜 필요한가. ``GET /v1/admin/features?q=…``가 유휴에 가까운 prod에서도 3~12 s 걸렸다(#1475,
 D2 live acceptance cleanup이 이 호출을 쓴다). 계획은 ``lower(name)`` keyset 인덱스로 Feature
@@ -40,6 +40,9 @@ transaction 안에서 돈다. 여섯 인덱스의 ``SHARE``는 commit까지 이�
 ``lower(name)`` 3.4 s, ``feature_id`` 3.2 s, ``address`` 12.6 s, alias 1.7 s, entity id 2.8 s,
 record key 1.7 s — 합 25 s, 크기 합 272 MB. 디스크 위 prod는 2~3배(50~75 s)로 잡는다.
 
+번호. 445는 TourAPI 문화시설·레포츠(#1467) 몫으로 조율됐고 446은 MCST 장소 속성(ADR-121)이 먼저
+머지됐다 — 이 revision은 447이고 446에 잇는다.
+
 forward-only. downgrade는 두지 않는다(``alembic/env.py``가 모든 downgrade를 거부한다).
 """
 
@@ -52,8 +55,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "445_admin_search_trgm_indexes"
-down_revision: str | Sequence[str] | None = "444_trip_search_aliases"
+revision: str = "447_admin_search_trgm_indexes"
+down_revision: str | Sequence[str] | None = "446_mcst_place_attributes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -139,7 +142,8 @@ ALTER TABLE ops.application_schema_operation_receipts
         '441_tourapi_attraction_dataset',
         '442_mois_brand_search_aliases',
         '444_trip_search_aliases',
-        '445_admin_search_trgm_indexes'
+        '446_mcst_place_attributes',
+        '447_admin_search_trgm_indexes'
     ))
 """
 
@@ -161,7 +165,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
 
 
 def upgrade() -> None:
-    """admin 검색 trigram 인덱스를 만들고 receipt head CHECK에 445를 더한다."""
+    """admin 검색 trigram 인덱스를 만들고 receipt head CHECK에 447을 더한다."""
     bind = op.get_bind()
     settings = {
         str(name): str(value)
@@ -188,5 +192,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     """되돌리지 않는다 — 인덱스는 forward revision으로만 걷는다."""
     raise RuntimeError(
-        "445_admin_search_trgm_indexes is forward-only: 인덱스는 forward revision으로만 걷는다."
+        "447_admin_search_trgm_indexes is forward-only: 인덱스는 forward revision으로만 걷는다."
     )

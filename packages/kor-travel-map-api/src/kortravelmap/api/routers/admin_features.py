@@ -83,6 +83,7 @@ from kortravelmap.api.domain_command_service import (
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_header, revision_etag
 from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
+from kortravelmap.api.place_attribute_params import AttributeQuery, resolve_attribute_filter
 from kortravelmap.api.response import ClusterUnit, Meta, make_meta
 from kortravelmap.api.routers.curations import (
     AdminCurationItemView,
@@ -229,6 +230,10 @@ class AdminFeatureMapItem(BaseModel):
     geometry: dict[str, Any] | None = None
     area_square_meters: float | None = None
     price_summary: list[PricePointOut] | None = None
+    attribute_codes: list[str] = Field(
+        default_factory=list,
+        description="장소 속성 코드(ADR-121, admin_only 포함, 코드 오름차순).",
+    )
 
 
 class AdminFeatureCluster(BaseModel):
@@ -1374,6 +1379,7 @@ async def list_admin_features_in_bounds(
         bool,
         Query(description="item mode에서 route/area GeoJSON을 포함한다."),
     ] = False,
+    attribute: AttributeQuery = None,
 ) -> AdminFeaturesInBoundsResponse:
     started_at = perf_counter()
     if min_lon > max_lon or min_lat > max_lat:
@@ -1381,6 +1387,8 @@ async def list_admin_features_in_bounds(
             status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
             detail="bbox min 좌표가 max보다 큽니다.",
         )
+    # admin은 admin_only 속성 코드도 필터로 받는다(ADR-121 §7.1).
+    attributes = await resolve_attribute_filter(session, attribute, public=False)
     resolved_unit = _resolve_admin_cluster_unit(cluster_unit, zoom)
     try:
         if resolved_unit is not None:
@@ -1398,6 +1406,7 @@ async def list_admin_features_in_bounds(
                 categories=category,
                 providers=provider,
                 limit=max_items + 1,
+                attributes=attributes,
             )
             truncated = len(raw_clusters) > max_items
             # cluster row에는 feature_id가 없어 T-VN-32C 치환 대상이 아니다.
@@ -1436,6 +1445,7 @@ async def list_admin_features_in_bounds(
             providers=provider,
             include_geometry=include_geometry,
             limit=max_items + 1,
+            attributes=attributes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
@@ -1539,6 +1549,9 @@ async def list_features(
     sort: Annotated[AdminFeatureSort, Query()] = "name",
     order: Annotated[SortOrder | None, Query()] = None,
 ) -> AdminFeaturesListResponse:
+    # 장소 속성 필터(ADR-121)는 이 목록에 아직 없다 — 같은 handler·DTO를 PinVi service
+    # 표면(``/v1/service/admin-features``)이 공유하고 openapi.service.json은 바뀌지 않아야
+    # 한다(§7.3). repo(``list_admin_features(attributes=...)``)는 이미 받는다.
     started_at = perf_counter()
     effective_order: SortOrder = (
         "desc" if order is None and sort == "issue_count" else order or "asc"

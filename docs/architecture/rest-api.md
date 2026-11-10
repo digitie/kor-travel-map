@@ -31,7 +31,8 @@ PinVi가 소비하는 변경은 [`integration-map.md`](../integration-map.md)의
 
 | 표면 | 목표 resource | 핵심 계약 |
 |---|---|---|
-| public-keyed | `GET /v1/features/{feature_id}` | kind-discriminated typed detail, `ETag(row_revision)` |
+| public-keyed | `GET /v1/features/{feature_id}` | kind-discriminated typed detail, `ETag(row_revision)` — 공개 장소 속성이 있으면 `"<rev>-<sha16>"`(ADR-121, 속성의 코드·라벨·묶음·순서 digest) |
+| public-keyed | `GET /v1/place-attributes` | 공개 장소 속성 catalog(ADR-121) |
 | public-keyed | `GET /v1/features/{search,nearby,in-bounds}` | fingerprint cursor, total opt-in, 지도 mode/truncated/coverage/cluster key |
 | public-keyed | `GET /v1/categories` | catalog revision ETag |
 | public-keyed | `GET /v1/collections`, `GET /v1/collections/{id}` | collection/item 단일 curation read 정본 |
@@ -1342,3 +1343,16 @@ abandoned는 같은 actor/op/key의 실행 기록이 없는 것을 잠금 아래
 PATCH는437 이후 필드 존재를 보존하는 지문v2를 쓴다. 기존v1 PATCH는 생략/명시NULL을 증명할 수 없어 원래 PATCH 재시도와 조정 모두 LEGACY_FINGERPRINT_UNVERIFIABLE409다. 원장을 재표기하거나 자동 해제하지 않는다. DELETE와 다른 operation의v1은 유지한다. 다른 입력은 IDEMPOTENCY_KEY_REUSED409, actor assertion 불일치는403, 검증 불가능한 저장 receipt는 COMMAND_RECEIPT_UNVERIFIABLE503이다. 오류·pending·legacy불확정은 소비자의 해제 증거가 아니다.
 
 새 승인에는 새로운 attempt 키를 쓰되 전송 전에 영속화하고 재시도에는 같은 키/입력/actor를 사용해야 한다. 단순 부재 GET·키 재사용·임의 actor·직접 DB 조회로 이 계약을 대체하지 않는다.
+
+
+## ADR-121 장소 속성 (2026-11-10)
+
+- `attribute` 반복 query(최대 5개, 중복은 하나로 셈, **AND**): `GET /v1/features`·`/search`·`/in-bounds`
+  (item·cluster)·`/nearby`·`/nearby/by-target`, `GET /v1/admin/features/in-bounds`. 모르는 코드, 공개 경로의
+  `admin_only` 코드, 48자 초과는 422 `VALIDATION_ERROR`. `GET /v1/admin/features`에는 아직 없다 —
+  `/v1/service/admin-features`가 같은 handler를 써서 service 계약이 바뀌기 때문이다(repo는 이미 받는다).
+- 응답: 목록·검색·in-bounds item·nearby·contained-features 행의 `attribute_codes: string[]`(정렬, 공개 코드),
+  상세 `attributes: [{code, label, group}]`. 늘 실리지만 스키마상 optional이다 — 없으면 `[]`로 읽는다.
+- 검색 cursor는 version을 올리지 않고 필터가 있을 때만 fingerprint에 넣는다.
+- `GET /v1/admin/theme-attach-decisions`(operator, 읽기 전용): `dataset_key`·`state`·`page_size`(≤200)·`cursor`.
+- service batch(trip card)와 `openapi.service.json`은 바뀌지 않는다.

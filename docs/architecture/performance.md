@@ -1050,7 +1050,7 @@ autovacuum cadence를 측정해 조정한다. final receipt/material schema의 h
 
 ## 관리자 Feature 텍스트 검색 범위 (PinVi #648)
 
-아래 두 문단은 #1444 당시 기록이다. #1475(alembic 445)부터 원천 JSON 본문은 어느 범위에서도
+아래 두 문단은 #1444 당시 기록이다. #1475(alembic 447)부터 원천 JSON 본문은 어느 범위에서도
 검색하지 않는다 — 다음 절.
 
 전체 원천 JSON의 ILIKE 검색은 현재 원천 수·payload 크기에 비례한다.
@@ -1063,14 +1063,14 @@ WSL PG18의 희소 한국어 질의에서 기존 planner는 원천 검색을 한
 일치 결과의 현재 provider metadata 조회는 유지한다. 정렬·cursor·필터와 원천 head
 선택은 두 범위에서 동일하다.
 
-### 후보 경로와 훑기 경로 (#1475, alembic 445)
+### 후보 경로와 훑기 경로 (#1475, alembic 447)
 
 종전 계획은 `idx_features_admin_lower_name_keyset`으로 Feature 전부를 이름순으로 걸으며
 행마다 ILIKE와 상관 서브쿼리를 평가했다. 일치가 101행에 못 미치는 q는 끝까지 간다.
 공개 `idx_features_name_trgm`은 공개 3축 부분 인덱스라 상태 무필터인 admin이 못 쓴다.
 `all`의 원천 갈래는 `source_records.raw_data::text`(505 MB) 전 스캔이었다.
 
-- 445가 갈래별 **비부분** trigram GIN 6개를 둔다: `features`의 `lower(name)`·
+- 447이 갈래별 **비부분** trigram GIN 6개를 둔다: `features`의 `lower(name)`·
   `(feature_id)::text`·`(address)::text`, `feature_aliases.alias`,
   `source_entities.source_entity_id`, `source_entity_heads.current_source_record_key`.
   이름을 `lower(name)`으로 두는 것은 공개 부분 인덱스(`name`)와 planner 선택을 겨루지
@@ -1091,7 +1091,7 @@ prod n150 실측(2026-11-10, 읽기 전용, I/O PSI some 3~45로 변동):
 | `서울`(14.9만, 훑기) | 4.2 s | 0.11 s | 1.0 s | 0.18 s |
 
 probe 시간은 prod 열을 n150 임시 PG18(tmpfs)에 복사해 같은 인덱스로 잰 값이고, 본 질의
-시간은 prod에서 id 배열을 넣어 잰 값이다(본 질의는 445 인덱스를 쓰지 않는다).
+시간은 prod에서 id 배열을 넣어 잰 값이다(본 질의는 447 인덱스를 쓰지 않는다).
 
 빌드(같은 복사본, 38만 행, maintenance_work_mem 256 MB, 병렬 2): `lower(name)` 3.4 s,
 `feature_id` 3.2 s, `address` 12.6 s, alias 1.7 s, entity id 2.8 s, record key 1.7 s —

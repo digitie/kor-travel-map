@@ -31,6 +31,10 @@ from kortravelmap.infra.feature_projection import (
     TYPED_FEATURE_DETAIL_COLUMNS_SQL,
     typed_feature_detail_joins_sql,
 )
+from kortravelmap.infra.feature_repo import (
+    place_attribute_codes_sql,
+    place_attribute_filter_sql,
+)
 from kortravelmap.infra.feature_subtype import (
     SubtypeDetailError,
     subtype_params,
@@ -680,7 +684,7 @@ def _admin_bbox_filters_sql(alias: str) -> str:
 
     Admin은 공개 predicate를 재사용하지 않는다. 세 축 filter는 각각 같은 축 안에서는
     OR, 축 사이는 AND로 결합하므로 draft/suppressed/quarantined 검토 대상을 빠뜨리지
-    않는다.
+    않는다. 장소 속성 필터(ADR-121)는 공개 경로와 같은 ``place_attribute_filter_sql``이다.
     """
 
     if not alias.isidentifier():
@@ -720,6 +724,7 @@ def _admin_bbox_filters_sql(alias: str) -> str:
         AND pd.provider = ANY(CAST(:providers AS text[]))
     )
   )
+  AND {place_attribute_filter_sql(alias)}
 """
 
 
@@ -880,7 +885,8 @@ SELECT
     c.quality_state,
     c.geometry,
     c.area_square_meters,
-    price_summaries.price_summary
+    price_summaries.price_summary,
+    {place_attribute_codes_sql("c", public_only=False)} AS attribute_codes
 FROM candidates AS c
 LEFT JOIN price_summaries USING (feature_id)
 ORDER BY c.feature_id
@@ -940,6 +946,14 @@ def _normalize_values(values: Sequence[str] | None) -> list[str] | None:
     if values is None:
         return None
     normalized = [str(value) for value in values if str(value)]
+    return normalized or None
+
+
+def _normalize_attributes(values: Sequence[str] | None) -> list[str] | None:
+    """장소 속성 코드 필터 bind 값(ADR-121) — 중복 제거·정렬. 비면 ``None``(술어 단락)."""
+    if values is None:
+        return None
+    normalized = sorted({str(value).strip() for value in values if str(value).strip()})
     return normalized or None
 
 
@@ -1268,7 +1282,7 @@ AdminFeatureQueryPath: TypeAlias = Literal["none", "scan", "candidates"]
 # #1475 — 조각 검색은 **두 가지 계획 중 하나**로 간다. 둘은 같은 행 집합을 고르고(술어의
 # 뜻이 같다) 비용만 다르다. 그래서 어느 쪽을 고르든 결과는 같다.
 #
-# - **후보 경로(드문 q).** 먼저 비부분 trigram 인덱스(rev 445)로 일치 Feature id를 최대
+# - **후보 경로(드문 q).** 먼저 비부분 trigram 인덱스(rev 447)로 일치 Feature id를 최대
 #   ``_ADMIN_FEATURES_Q_CANDIDATE_CAP``개까지 모은다(``_admin_feature_candidates_sql``). 그 안에
 #   들면 바깥 질의는 그 id 배열(``pk_features``)에서 시작한다. 종전에는 이 경우에도
 #   ``lower(name)`` keyset 인덱스로 36만 행을 끝까지 걸으며 행마다 ILIKE와 상관 서브쿼리를
@@ -1298,7 +1312,7 @@ AdminFeatureQueryPath: TypeAlias = Literal["none", "scan", "candidates"]
 # ``source_record_key``. 원천 JSON 본문(``raw_data::text``, prod 505 MB)은 인덱스로 받을 수
 # 없어 매 검색이 그 전 스캔이었고(prod 단독 2.3 s), 검색 비용의 대부분이었다(#1475).
 #
-# 후보 SQL의 각 술어 식은 rev 445 인덱스 식과 **글자 그대로 같아야** 한다
+# 후보 SQL의 각 술어 식은 rev 447 인덱스 식과 **글자 그대로 같아야** 한다
 # (``lower(name)``·``CAST(feature_id AS text)``·``address::text``). 이름은 공개 부분 인덱스
 # ``idx_features_name_trgm``(``name``)과 겨루지 않도록 ``lower(name)``으로 둔다 — ILIKE는
 # 대소문자를 보지 않으므로 뜻은 같다.
@@ -1516,6 +1530,7 @@ WITH base AS {materialized}(
         CAST(:updated_to AS timestamptz) IS NULL
         OR f.updated_at <= CAST(:updated_to AS timestamptz)
       )
+      AND {place_attribute_filter_sql("f")}
       {q_clause}
 )
 SELECT *
@@ -2060,6 +2075,7 @@ async def admin_features_in_bbox(
     providers: Sequence[str] | None = None,
     include_geometry: bool = False,
     limit: int = 2000,
+    attributes: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Admin-any base Feature를 bbox에서 조회한다.
 
@@ -2084,6 +2100,7 @@ async def admin_features_in_bbox(
                 "kinds": _normalize_values(kinds),
                 "categories": _normalize_values(categories),
                 "providers": _normalize_values(providers),
+                "attributes": _normalize_attributes(attributes),
                 "include_geometry": include_geometry,
                 "limit": max(1, limit),
             },
@@ -2107,6 +2124,7 @@ async def cluster_admin_features_in_bbox(
     categories: Sequence[str] | None = None,
     providers: Sequence[str] | None = None,
     limit: int = 2000,
+    attributes: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Admin base Feature를 canonical 행정코드 단위로 bbox rollup한다."""
 
@@ -2128,6 +2146,7 @@ async def cluster_admin_features_in_bbox(
                 "kinds": _normalize_values(kinds),
                 "categories": _normalize_values(categories),
                 "providers": _normalize_values(providers),
+                "attributes": _normalize_attributes(attributes),
                 "limit": max(1, limit),
             },
         )
@@ -2164,6 +2183,7 @@ async def list_admin_features(
     cursor: str | None = None,
     sort: AdminFeatureSort = "name",
     order: SortOrder = "asc",
+    attributes: Sequence[str] | None = None,
 ) -> AdminFeaturePage:
     """Admin feature 목록을 keyset cursor로 조회한다.
 
@@ -2200,6 +2220,7 @@ async def list_admin_features(
         "updated_from": updated_from,
         "updated_to": updated_to,
         "include_ended": include_ended,
+        "attributes": _normalize_attributes(attributes),
         "limit_plus_one": effective_limit + 1,
         **_cursor_params(cursor, sort=sort, order=order),
     }

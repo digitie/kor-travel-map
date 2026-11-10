@@ -212,6 +212,7 @@ async def test_features_nearby_predicate_uses_stored_coord_5179(
                 "kinds": None,
                 "categories": None,
                 "providers": None,
+                "attributes": None,
                 "limit_plus_one": 11,
                 "cursor_distance_m": None,
                 "cursor_name": None,

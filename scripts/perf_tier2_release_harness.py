@@ -66,6 +66,7 @@ _SEOUL_DENSE_BBOX = {
     "kinds": ["place", "event"],
     "categories": None,
     "providers": None,
+    "attributes": None,
     "cursor_feature_id": None,
     "limit": 200,
     "price_stale_hide_days": 4,
@@ -78,6 +79,7 @@ _NATIONWIDE_LOWZOOM_BBOX = {
     "kinds": ["place", "event"],
     "categories": None,
     "providers": None,
+    "attributes": None,
     "limit": 200,
 }
 _NEARBY_100KM = {
@@ -88,6 +90,7 @@ _NEARBY_100KM = {
     "categories": None,
     "statuses": ["active"],
     "providers": None,
+    "attributes": None,
     "limit_plus_one": 51,
     "cursor_distance_m": None,
     "cursor_name": None,
@@ -107,6 +110,7 @@ _COMMON_SEARCH = {
     "max_lat": None,
     "kinds": None,
     "categories": None,
+    "attributes": None,
     "cursor_rank": None,
     "cursor_score": None,
     "cursor_feature_id": None,

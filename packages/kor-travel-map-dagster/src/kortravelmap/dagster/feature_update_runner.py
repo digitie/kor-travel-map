@@ -713,7 +713,10 @@ def _mcst_resources(
             f"provider_dataset_id={scope.provider_dataset_id!r}"
         )
     return RunnerResources(
-        {"mcst_culture_records": fetch_mcst_culture_records(settings, slugs=matched_slugs)}
+        {
+            "mcst_culture_records": fetch_mcst_culture_records(settings, slugs=matched_slugs),
+            "mcst_theme_attach_mode": settings.mcst_theme_attach_mode,
+        }
     )
 
 

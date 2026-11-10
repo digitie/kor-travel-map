@@ -306,6 +306,7 @@ async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
             "max_lat": None,
             "kinds": None,
             "categories": None,
+            "attributes": None,
             "cursor_rank": None,
             "cursor_score": None,
             "cursor_feature_id": None,

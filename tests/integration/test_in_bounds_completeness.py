@@ -437,6 +437,7 @@ async def test_cluster_point_only_kinds_skip_geometry_candidates(
                 "kinds": ["place", "event"],
                 "categories": None,
                 "providers": None,
+                "attributes": None,
                 "limit": 2001,
             },
         )

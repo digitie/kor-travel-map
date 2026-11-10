@@ -96,6 +96,7 @@ REQUIRED_RESOURCE_KEYS: Final[tuple[str, ...]] = (
     "provider_upstream_retry_budget_minimum",
     "provider_upstream_retry_budget_percent",
     "mcst_culture_records",
+    "mcst_theme_attach_mode",
 )
 """Feature 적재 asset이 요구하는 Dagster resource key."""
 
@@ -115,6 +116,7 @@ SETTINGS_VALUE_RESOURCES: Final[dict[str, str]] = {
     "provider_upstream_retry_budget_minimum": "provider_upstream_retry_budget_minimum",
     "provider_upstream_retry_budget_percent": "provider_upstream_retry_budget_percent",
     "strict_address": "dagster_address_validation",
+    "mcst_theme_attach_mode": "mcst_theme_attach_mode",
 }
 """resource key → 같은 값을 제공하는 ``KorTravelMapSettings`` 속성명."""
 

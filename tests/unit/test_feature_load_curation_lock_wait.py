@@ -364,6 +364,8 @@ _ARMED: frozenset[str] = frozenset(
         "load_festival_enrichment",
         "refresh_festival_enrichment_reviews",
         "load_price_features",
+        # ADR-121 MCST 붙임 적재 — load_feature_bundles와 같은 provider 적재 transaction이다.
+        "load_theme_attach_bundles",
     }
 )
 """provider 적재 쓰기 — 다른 적재 뒤에서 길게 기다린다."""

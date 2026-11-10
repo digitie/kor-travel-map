@@ -87,7 +87,9 @@ __all__ = [
     "McstDialect",
     "McstSlugAttempt",
     "McstSlugFailure",
+    "MCST_PET_BUSINESS_CATEGORIES",
     "file_rows_to_bundles",
+    "is_mcst_pet_business_row",
     "parse_kcisa_coordinates",
 ]
 
@@ -128,6 +130,15 @@ class McstDatasetSpec:
     dialect: McstDialect
     """CSV 컬럼 방언 — 변환 함수의 컬럼 추출 분기."""
 
+    attribute_code: str | None = None
+    """이 목록의 link가 내는 장소 속성 코드(ADR-121). ``None``이면 속성 없음."""
+
+    master_category_prefixes: tuple[str, ...] | None = None
+    """붙임 tier 1 master의 분류 호환 접두(ADR-121 §3). ``None``이면 제한 없음."""
+
+    attribute_list: bool = False
+    """속성 목록(반려동물 동반·무장애·가족)이면 참 — 전환 계획의 생존자 우선순위가 낮다."""
+
 
 def _spec(
     slug: str,
@@ -137,6 +148,9 @@ def _spec(
     dialect: McstDialect,
     *,
     entity_type: str = "culture_place",
+    attribute_code: str | None = None,
+    master_category_prefixes: tuple[str, ...] | None = None,
+    attribute_list: bool = False,
 ) -> McstDatasetSpec:
     return McstDatasetSpec(
         slug=slug,
@@ -146,6 +160,9 @@ def _spec(
         entity_type=entity_type,
         label=label,
         dialect=dialect,
+        attribute_code=attribute_code,
+        master_category_prefixes=master_category_prefixes,
+        attribute_list=attribute_list,
     )
 
 
@@ -159,6 +176,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "world_restaurant",
             "세계음식 음식점",
             "kcisa_common",
+            attribute_code="world_cuisine",
+            master_category_prefixes=("02",),
         ),
         _spec(
             "pet_friendly_culture_facilities_csv",
@@ -166,6 +185,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "pet_friendly_culture_facility",
             "반려동물 동반 가능 문화시설",
             "kcisa_common",
+            attribute_code="pet_friendly",
+            attribute_list=True,
         ),
         _spec(
             "barrier_free_places_csv",
@@ -173,6 +194,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "barrier_free_place",
             "무장애 관광지",
             "kcisa_common",
+            attribute_code="barrier_free",
+            attribute_list=True,
         ),
         _spec(
             "leisure_activity_facilities_csv",
@@ -180,6 +203,7 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "leisure_activity_facility",
             "레저활동 시설",
             "kcisa_common",
+            master_category_prefixes=("0108",),
         ),
         _spec(
             "family_infant_culture_facilities_csv",
@@ -187,6 +211,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "family_culture_facility",
             "가족/영유아 동반 문화시설",
             "kcisa_common",
+            attribute_code="family_friendly",
+            attribute_list=True,
         ),
         _spec(
             "leisure_camping_facilities_csv",
@@ -194,6 +220,7 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "leisure_camping_facility",
             "레저 캠핑 시설",
             "kcisa_common",
+            master_category_prefixes=("0306",),
         ),
         # 좌표 컬럼 없음(실측) — 주소 단서 경로.
         _spec(
@@ -202,6 +229,7 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "leisure_class",
             "레저 클래스/강습",
             "kcisa_common",
+            master_category_prefixes=("0108",),
         ),
         # TITLE 대신 PLACENAME, MEDIATITLE 보조(실측).
         _spec(
@@ -218,6 +246,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "independent_bookstore",
             "독립서점",
             "cntc_resrce",
+            attribute_code="bookstore_independent",
+            master_category_prefixes=("0104", "0202"),
         ),
         _spec(
             "cafe_bookstores_csv",
@@ -225,6 +255,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "cafe_bookstore",
             "북카페",
             "cntc_resrce",
+            attribute_code="bookstore_cafe",
+            master_category_prefixes=("0104", "0202"),
         ),
         # 아동서점은 2026-08-15 재등록(fileDataNo 282 -> 484)에서 컬럼이 전면
         # 교체됐다. 실측 795행: TITLE/LOCAL_ID/STATE/COORDINATES/TYPE/
@@ -237,6 +269,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "children_bookstore",
             "아동서점",
             "cntc_resrce",
+            attribute_code="bookstore_children",
+            master_category_prefixes=("0104",),
         ),
         # ── 분리좌표 방언 — 중고서점 ────────────────────────────────────
         _spec(
@@ -245,6 +279,8 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "used_bookstore",
             "중고서점",
             "split_coord",
+            attribute_code="bookstore_used",
+            master_category_prefixes=("0104",),
         ),
         # ── 한국어 주소-only (1종) — 좌표 없음, 지역+소재지 합성 주소 ─────
         _spec(
@@ -254,6 +290,7 @@ MCST_FILE_DATASETS: Final[dict[str, McstDatasetSpec]] = {
             "전국 골프장 현황",
             "korean_address",
             entity_type="sports_facility",
+            master_category_prefixes=("010801",),
         ),
     )
 }
@@ -274,6 +311,27 @@ MCST_EXCLUDED_FILE_DATASETS: Final[dict[str, str]] = {
     ),
 }
 """적재 제외 3 dataset과 사유 (#395 — 문서 `docs/etl/mcst-feature-etl.md` §3)."""
+
+
+MCST_PET_BUSINESS_CATEGORIES: Final[frozenset[str]] = frozenset(
+    {"동물약국", "반려동물용품", "동물병원", "미용", "위탁관리"}
+)
+"""반려동물 목록에서 **적재하지 않는** ``CATEGORY2`` 값(ADR-121 D2, 2026-11-10 소유자 결정).
+
+이 행들은 "반려동물 동반 가능 장소"가 아니라 반려 업종 장소 자체다(2026-11-10 운영 실측
+20,396행). 장소로도 속성으로도 적재하지 않는다. 이미 만들어진 운영 Feature는 MCST가 부재
+퇴역을 하지 않으므로 남아 있고, ADR-121 전환 계획의 ``retire``가 내린다."""
+
+_PET_SLUG: Final[str] = "pet_friendly_culture_facilities_csv"
+
+
+def is_mcst_pet_business_row(slug: str, row: Mapping[str, Any]) -> bool:
+    """반려동물 목록의 반려 업종 행인가(ADR-121 D2)."""
+
+    if slug != _PET_SLUG:
+        return False
+    value = _row_text(row, ("CATEGORY2",))
+    return value is not None and re.sub(r"\s+", "", value) in MCST_PET_BUSINESS_CATEGORIES
 
 
 # ── slug 수집 실패 표식 ──────────────────────────────────────────────────
@@ -767,12 +825,15 @@ async def file_rows_to_bundles(
     ``slug``는 ``MCST_FILE_DATASETS`` 키여야 한다(아니면 ``KeyError`` — 호출
     오타가 조용히 빈 dataset이 되지 않게). 컬럼 추출은 spec의 방언으로 분기하고,
     이름이 없거나 좌표·주소가 모두 없는 row는 식별/위치 단서가 없어 건너뛴다.
+    반려동물 목록의 반려 업종 행(:data:`MCST_PET_BUSINESS_CATEGORIES`)도 건너뛴다(ADR-121 D2).
     """
     spec = MCST_FILE_DATASETS[slug]
     extractor = _DIALECT_EXTRACTORS[spec.dialect]
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     bundles: list[FeatureBundle] = []
     for row in rows:
+        if is_mcst_pet_business_row(slug, row):
+            continue
         extracted = extractor(row)
         name = normalize_korean_text(extracted.name)
         raw_address = normalize_korean_text(extracted.raw_address)

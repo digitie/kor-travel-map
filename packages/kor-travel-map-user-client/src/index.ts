@@ -37,6 +37,10 @@ export type FeaturesNearbyByTargetResponse =
 export type NearbyFeatureSummary = Schemas["NearbyFeatureSummary"];
 export type CategoriesResponse = Schemas["CategoriesResponse"];
 export type CategorySummary = Schemas["CategorySummary"];
+// 장소 속성(ADR-121) — catalog와 상세의 속성 view. 목록 item은 `attribute_codes`만 싣는다.
+export type PlaceAttributesResponse = Schemas["PlaceAttributesResponse"];
+export type PlaceAttributeSummary = Schemas["PlaceAttributeSummary"];
+export type FeatureAttributeView = Schemas["FeatureAttributeView"];
 export type ProviderLastSyncResponse = Schemas["ProviderLastSyncResponse"];
 export type ProvidersFreshnessResponse = Schemas["ProvidersFreshnessResponse"];
 export type BeachPublicView = Schemas["BeachPublicView"];
@@ -64,6 +68,13 @@ type _PageHasNextCursor = _Assert<
 >;
 // 좌표는 평면 lon/lat (중첩 coord{} 아님, ADR-048 #10).
 type _SummaryHasFlatLonLat = _Assert<_Has<FeatureSummary, "lon" | "lat">>;
+// 장소 속성 코드는 목록·검색·주변 item에 평면 배열로 실린다(ADR-121 §7.2).
+type _SummaryHasAttributeCodes = _Assert<
+  _Has<FeatureSummary, "attribute_codes">
+>;
+type _NearbyHasAttributeCodes = _Assert<
+  _Has<NearbyFeatureSummary, "attribute_codes">
+>;
 // in-bounds payload = clusters/items만, granularity는 meta.cluster(#12).
 type _InBoundsPayload = _Assert<
   _Has<FeaturesInBoundsResponse["data"], "clusters" | "items">
@@ -86,6 +97,7 @@ type _PathsStable = _Assert<
     | "/v1/public/festivals/map-markers"
     | "/v1/public/festivals/{feature_id}"
     | "/v1/categories"
+    | "/v1/place-attributes"
     | "/v1/providers"
     | "/v1/providers/{provider}/last-sync"
     | "/health"
@@ -106,6 +118,8 @@ export type _SurfaceAssertions = [
   _MetaHasPage,
   _PageHasNextCursor,
   _SummaryHasFlatLonLat,
+  _SummaryHasAttributeCodes,
+  _NearbyHasAttributeCodes,
   _InBoundsPayload,
   _MetaHasCluster,
   _PathsStable,
