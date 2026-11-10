@@ -223,3 +223,38 @@ async def test_master_candidate_carries_primary_dataset_key(
     candidate = await merge_repo._master_candidate(migrated_session, feature_id)
     assert (candidate.provider, candidate.dataset_key) == _LEFT
     assert candidate.has_coord is True
+
+
+async def test_master_candidate_picks_highest_priority_primary_link(
+    migrated_session: AsyncSession,
+) -> None:
+    # 병합을 흡수한 master는 primary link가 여럿이다. 낮은 원천(MCST)이 먼저 와도 높은
+    # 원천(MOIS)으로 판정한다 — 그래야 원천 우선 선정이 link 순서에 흔들리지 않는다.
+    feature_id = _fid(31)
+    await _seed(migrated_session, feature_id=feature_id, source=("python-mcst-api", "overlap_mcst"),
+                name="흡수한 master", lon=127.0, lat=37.5)
+    dataset_id = await _dataset_id(migrated_session, "python-mois-api", "overlap_mois")
+    migrated_session.add(
+        SourceEntityRow(
+            source_entity_key="se-overlap-absorbed-mois",
+            provider_dataset_id=dataset_id,
+            source_entity_type="place",
+            source_entity_id="absorbed-mois",
+            first_seen_at=_T,
+            last_seen_at=_T,
+        )
+    )
+    await migrated_session.flush()
+    migrated_session.add(
+        SourceLinkRow(
+            feature_id=feature_id,
+            source_entity_key="se-overlap-absorbed-mois",
+            source_role="primary",
+            match_method="natural_key",
+            confidence=90,
+            created_at=_T,
+        )
+    )
+    await migrated_session.flush()
+    candidate = await merge_repo._master_candidate(migrated_session, feature_id)
+    assert (candidate.provider, candidate.dataset_key) == ("python-mois-api", "overlap_mois")

@@ -1038,6 +1038,9 @@ def test_configured_pair_dispatches_match_radius_and_route_overlap() -> None:
         {"max_distance_m": 0},
         {"max_distance_m": True},
         {"match": "route_overlap", "buffer_m": 30},  # min_overlap_ratio 없음
+        {"buffer_m": 30},  # 점 쌍에 선형 옵션
+        {"match": "route_overlap", "buffer_m": 30, "min_overlap_ratio": 0.5, "max_distance_m": 9},
+        {"match": "same_name"},  # 반경 없음
     ],
 )
 def test_configured_pair_rejects_invalid_rule(pair_extra: dict[str, object]) -> None:

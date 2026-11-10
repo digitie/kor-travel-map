@@ -507,3 +507,22 @@ def test_select_master_full_tie_lexicographic() -> None:
     assert select_master(a, b) == ("f_a", "f_b")
     # 인자 순서 무관.
     assert select_master(b, a) == ("f_a", "f_b")
+
+
+@pytest.mark.unit
+def test_master_source_prefers_highest_priority_primary_link() -> None:
+    # 병합을 흡수한 Feature는 primary link가 여럿이다 — 순서가 아니라 원천 순위로 고른다.
+    from kortravelmap.infra.merge_repo import _best_source
+
+    assert _best_source(
+        ["python-mcst-api", "python-mois-api", "python-visitkorea-api"],
+        ["mcst_x", "mois_license_features_bulk", "visitkorea_tourist_attractions"],
+        [True, True, False],
+    ) == ("python-mois-api", "mois_license_features_bulk")
+    # primary가 없으면 전체에서, 아무것도 없으면 사용자 등록(None).
+    assert _best_source(["python-mcst-api"], ["mcst_x"], [False]) == ("python-mcst-api", "mcst_x")
+    assert _best_source([], [], []) == (None, None)
+    # 동률은 SQL이 준 순서의 앞쪽.
+    assert _best_source(
+        ["python-knps-api", "python-krheritage-api"], ["knps_trails", "h"], [True, True]
+    ) == ("python-knps-api", "knps_trails")

@@ -264,6 +264,10 @@ def _tourapi_pair(
 
 
 _PAIR_MATCH_MODES: Final[frozenset[str]] = DEDUP_MATCH_MODES | {"route_overlap"}
+_POINT_PAIR_KEYS: Final[frozenset[str]] = frozenset({"left", "right", "match", "max_distance_m"})
+_ROUTE_PAIR_KEYS: Final[frozenset[str]] = frozenset(
+    {"left", "right", "match", "buffer_m", "min_overlap_ratio"}
+)
 
 _PLACE_RADIUS_M: Final = 300
 """점 원천 겹침 쌍의 기본 반경. 같은 시설을 서로 다른 지오코딩으로 찍은 거리(2026-11-10 prod
@@ -942,6 +946,11 @@ def _pair_rule(pair: Mapping[str, object]) -> tuple[str, dict[str, Any]]:
     match = pair.get("match", "score")
     if not isinstance(match, str) or match not in _PAIR_MATCH_MODES:
         raise ValueError(f"pair.match 값이 아님: {match!r}")
+    allowed = _ROUTE_PAIR_KEYS if match == "route_overlap" else _POINT_PAIR_KEYS
+    unknown = sorted(set(pair) - allowed)
+    if unknown:
+        # 다른 방식의 옵션(오타 포함)을 조용히 버리지 않는다.
+        raise ValueError(f"pair.match={match!r}에 쓰지 않는 키: {unknown}")
     if match == "route_overlap":
         ratio = _positive_float(pair.get("min_overlap_ratio"), "min_overlap_ratio")
         if ratio > 1:

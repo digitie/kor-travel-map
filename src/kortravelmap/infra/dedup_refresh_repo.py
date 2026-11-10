@@ -95,7 +95,7 @@ class DedupRefreshFeature:
         )
 
 
-_LIST_DEDUP_FEATURES_SQL: Final[str] = """
+_LIST_DEDUP_FEATURES_TEMPLATE: Final[str] = """
 WITH ranked AS (
   SELECT
     f.feature_id,
@@ -154,25 +154,7 @@ WITH ranked AS (
         CAST(:cursor_feature_id AS uuid)
       )
     )
-    -- #1468: 반경 blocking 쌍은 큰 쪽(예: MOIS 음식점 12만 건)을 다른 쪽 feature 반경 안만
-    -- 읽는다. 저장된 `coord_5179`와 그 부분 GiST 인덱스를 쓴다(ADR-012 — 술어에
-    -- ST_Transform 없음).
-    AND (
-      CAST(:near_ids AS uuid[]) IS NULL
-      OR f.feature_id IN (
-        SELECT near_r.feature_id
-        FROM feature.features AS near_l
-        JOIN feature.features AS near_r
-          ON x_extension.ST_DWithin(
-               near_r.coord_5179, near_l.coord_5179,
-               CAST(:near_radius_m AS double precision)
-             )
-         AND near_r.lifecycle_state = 'active'
-         AND near_r.publication_state = 'published'
-         AND near_r.quality_state = 'valid'
-        WHERE near_l.feature_id = ANY(CAST(:near_ids AS uuid[]))
-      )
-    )
+{near_clause}
 )
 SELECT
     feature_id,
@@ -190,6 +172,32 @@ WHERE rn = 1
 ORDER BY updated_at DESC, feature_id DESC
 LIMIT CAST(:limit AS integer)
 """
+
+_LIST_DEDUP_FEATURES_SQL: Final[str] = _LIST_DEDUP_FEATURES_TEMPLATE.format(near_clause="")
+"""scope 전체를 읽는 기본 조회."""
+
+_NEAR_CLAUSE: Final[str] = """
+    -- #1468: 반경 blocking 쌍은 큰 쪽(예: MOIS 0306)을 다른 쪽 feature 반경 안만 읽는다.
+    -- 저장된 `coord_5179`와 그 부분 GiST 인덱스를 쓴다(ADR-012 — 술어에 ST_Transform 없음).
+    -- OR 없는 EXISTS라 planner가 semi-join으로 바꿀 수 있다.
+    AND EXISTS (
+      SELECT 1
+      FROM feature.features AS near_l
+      WHERE near_l.feature_id = ANY(CAST(:near_ids AS uuid[]))
+        AND x_extension.ST_DWithin(
+              f.coord_5179, near_l.coord_5179,
+              CAST(:near_radius_m AS double precision)
+            )
+    )"""
+
+_LIST_DEDUP_FEATURES_NEAR_SQL: Final[str] = _LIST_DEDUP_FEATURES_TEMPLATE.format(
+    near_clause=_NEAR_CLAUSE
+)
+"""``near_feature_ids`` 반경 안만 읽는 조회(#1468)."""
+
+_NEAR_SQL_SLACK: Final[float] = 1.01
+"""SQL 반경 여유. `coord_5179`(평면) 거리와 Python haversine(구면)은 0.3 % 안에서 다르다 —
+SQL은 조금 넓게 읽고 정확한 반경은 ``core.dedup``이 다시 거른다."""
 
 
 async def list_dedup_refresh_features(
@@ -223,7 +231,8 @@ async def list_dedup_refresh_features(
     )
     rows = (
         await session.execute(
-            text(_LIST_DEDUP_FEATURES_SQL),
+            text(_LIST_DEDUP_FEATURES_SQL if near_radius_m is None
+                 else _LIST_DEDUP_FEATURES_NEAR_SQL),
             {
                 "provider": scope.provider,
                 "dataset_key": scope.dataset_key,
@@ -232,8 +241,14 @@ async def list_dedup_refresh_features(
                 "limit": scope.limit,
                 "cursor_updated_at": scope.cursor_updated_at,
                 "cursor_feature_id": cursor_feature_id,
-                "near_ids": list(near_feature_ids) if near_feature_ids is not None else None,
-                "near_radius_m": near_radius_m,
+                **(
+                    {}
+                    if near_feature_ids is None or near_radius_m is None
+                    else {
+                        "near_ids": list(near_feature_ids),
+                        "near_radius_m": near_radius_m * _NEAR_SQL_SLACK,
+                    }
+                ),
             },
         )
     ).mappings().all()

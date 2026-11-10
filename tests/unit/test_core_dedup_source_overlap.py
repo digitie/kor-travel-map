@@ -175,3 +175,22 @@ def test_route_overlap_ratio_bounds(ratio: float) -> None:
     point = DedupPoint("a", "x", None, "01080500", "route")
     with pytest.raises(ValueError, match="overlap_ratio"):
         route_overlap_candidate(point, point, overlap_ratio=ratio)
+
+
+def test_grid_blocking_keeps_pair_straddling_cell_edge() -> None:
+    # 반경 바로 안쪽 쌍이 격자 칸 경계를 넘을 때도 비교된다(칸이 반경보다 좁으면 두 칸 밖으로
+    # 밀린다 — 리뷰 지적). 칸 경계 바로 아래 점과 반경 99.9 % 북쪽 점.
+    radius = 300.0
+    step = math.degrees(radius * 1.01 / 6_371_000.0)
+    edge_lat = (math.floor(37.5 / step) + 1) * step - 1e-9
+    a_coord = Coordinate(lon=Decimal("127.0000000"), lat=Decimal(f"{edge_lat:.9f}"))
+    north = radius * 0.999 / 6_371_000.0
+    b_coord = Coordinate(
+        lon=Decimal("127.0000000"), lat=Decimal(f"{edge_lat + math.degrees(north):.9f}")
+    )
+    assert haversine_meters(a_coord, b_coord) <= radius
+    left = [_Stub("a", "같은캠핑장", a_coord, _CAMP)]
+    right = [_Stub("b", "같은캠핑장", b_coord, _CAMP)]
+    assert [c.feature_id_b for c in find_dedup_candidates(left, right, max_distance_m=radius)] == [
+        "b"
+    ]

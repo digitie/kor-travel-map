@@ -64,7 +64,10 @@ DEDUP_MATCH_MODES: Final[frozenset[str]] = frozenset(
     {"score", "same_name", "score_or_same_name"}
 )
 
-_METERS_PER_DEGREE_LAT: Final[float] = 111_320.0
+_EARTH_RADIUS_M: Final[float] = 6_371_000.0
+"""``core.scoring.haversine_meters``와 같은 반지름 — 격자 칸 크기는 같은 거리 정의에서 낸다."""
+_GRID_SLACK: Final[float] = 1.01
+"""칸을 반경보다 1 % 넓힌다 — 부동소수 경계에서 반경 안 쌍이 두 칸 밖으로 밀리지 않게."""
 #: 경도 1도 길이의 하한을 잡는 위도 — 한반도(33~39°N)보다 북쪽으로 잡아 격자 칸이 반경보다
 #: 좁아지지 않게 한다(칸이 반경 이상이면 이웃 3×3 칸이 반경 원을 다 덮는다).
 _GRID_LAT_BOUND_DEG: Final[float] = 45.0
@@ -241,10 +244,10 @@ class _CoordGrid:
 
     def __init__(self, items: Iterable[DedupInput], radius_m: float) -> None:
         self._radius_m = radius_m
-        self._lat_step = radius_m / _METERS_PER_DEGREE_LAT
-        self._lon_step = radius_m / (
-            _METERS_PER_DEGREE_LAT * math.cos(math.radians(_GRID_LAT_BOUND_DEG))
-        )
+        # 위도 1칸 = 반경(+여유)에 해당하는 중심각. 경도 칸은 45°N에서의 같은 거리라 그보다
+        # 남쪽(한반도)에서는 반경보다 넓다.
+        self._lat_step = math.degrees(radius_m * _GRID_SLACK / _EARTH_RADIUS_M)
+        self._lon_step = self._lat_step / math.cos(math.radians(_GRID_LAT_BOUND_DEG))
         self._cells: dict[tuple[int, int], list[DedupInput]] = defaultdict(list)
         for item in items:
             if item.coord is not None:
