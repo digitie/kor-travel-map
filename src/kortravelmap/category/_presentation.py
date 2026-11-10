@@ -6,8 +6,13 @@
   편의·교통·의료·미분류 3(소유자 결정 2026-11-02). 기본은 Tier 1 코드(앞 2자리)마다 하나다.
   예외는 교통 가운데 **이름으로 찾아가는 목적지** — 기차역·지하철역(Tier 3), 휴게소·공항·
   여객선터미널(Tier 2)
-  — 만 숙박과 같은 1이다. "서울역"·"김포공항"을 찾을 때 그 시설이 "…서울역점" 음식점보다 뒤로
-  밀리지 않게 한다(적대 리뷰 2026-11-02). 버스 정류장·택시 승강장·주차·주유는 3 그대로다.
+  — 과 전통시장(편의 Tier 2)만 숙박과 같은 1이다. "서울역"·"김포공항"·"남대문시장"을 찾을 때 그
+  시설이 "…서울역점" 음식점이나 시장 안 점포보다 뒤로 밀리지 않게 한다(적대 리뷰 2026-11-02,
+  2026-11-10 운영 검색 점검). 버스 정류장·택시 승강장·주차·주유는 3 그대로다.
+  이 접두 예외(**고유 이름 목적지**)는 이름이 검색어와 정확히 같으면 관광과 같은 그룹 0으로 본다
+  (``destination_exact_search_group``) — "서울역"·"자갈치시장"을 찾으면 역·시장 자체가 같은 이름의
+  Tier 1만 있는 관광 행(촬영지 목록·영상 후보의 ``01000000``)보다 앞이다. 숙박은 그대로 1이다 —
+  관광지 이름을 상호로 쓴 숙소가 그 관광지를 넘지 않는다.
   Tier 1만 있는 코드(예: ``01000000``)는 같은 그룹 안에서 하위 분류가 있는 코드보다 덜
   구체적인 것으로 본다. ``feature_repo``의 검색 SQL이 이 표로 ``CASE``를 만든다.
 - 표시 이름: 주차장(``06.01``) Feature는 공공 주차장 데이터셋이 관광지 이름만 싣는 경우가 많다
@@ -35,7 +40,9 @@ __all__ = [
     "PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES",
     "PLACE_CATEGORY_SEARCH_GROUP_FALLBACK",
     "SEARCH_DESTINATION_GROUP_MAX",
+    "SEARCH_NAMED_DESTINATION_EXACT_GROUP",
     "category_search_group",
+    "destination_exact_search_group",
     "is_tier1_only_category_code",
     "is_parking_category_code",
     "public_feature_display_name",
@@ -67,7 +74,8 @@ def _category_prefix(code: PlaceCategoryCode) -> str:
 
 
 #: 분류 접두(4·6자리) → 그룹 예외. Tier 1 표보다 먼저, **긴 접두부터** 본다. 교통 가운데 이름으로
-#: 찾아가는 목적지만 숙박과 같은 1로 올린다. 키는 카탈로그 코드에서 유도한다.
+#: 찾아가는 목적지와 전통시장만 숙박과 같은 1로 올린다. 키는 카탈로그 코드에서 유도한다. 이 표의
+#: 분류가 **고유 이름 목적지**다(``destination_exact_search_group``).
 PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES: Final[Mapping[str, int]] = MappingProxyType(
     {
         _category_prefix(PlaceCategoryCode.TRANSPORT_STOP_SUBWAY): 1,
@@ -75,6 +83,7 @@ PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES: Final[Mapping[str, int]] = Mapping
         _category_prefix(PlaceCategoryCode.TRANSPORT_REST_AREA): 1,
         _category_prefix(PlaceCategoryCode.TRANSPORT_AIRPORT): 1,
         _category_prefix(PlaceCategoryCode.TRANSPORT_FERRY_TERMINAL): 1,
+        _category_prefix(PlaceCategoryCode.CONVENIENCE_TRADITIONAL_MARKET): 1,
     }
 )
 
@@ -87,6 +96,10 @@ PLACE_CATEGORY_SEARCH_GROUP_FALLBACK: Final[int] = max(
 #: 검색에서 이름이 검색어와 정확히 같은 목적지는 분류 그룹보다 앞이다(ADR-120) — 식음·편의·주차는
 #: 이름이 같아도 그룹 뒤에서만 가른다.
 SEARCH_DESTINATION_GROUP_MAX: Final[int] = 1
+
+#: 고유 이름 목적지(접두 예외 표의 분류 — 역·휴게소·공항·여객선터미널·전통시장)의 이름이 검색어와
+#: 정확히 같을 때의 그룹. 관광(0)과 같다 — 같은 이름의 관광 행과는 분류 구체성으로 가른다.
+SEARCH_NAMED_DESTINATION_EXACT_GROUP: Final[int] = 0
 
 _TIER1_ONLY_SUFFIX: Final[str] = "000000"
 _PARKING_CODE: Final[str] = PlaceCategoryCode.TRANSPORT_PARKING.value
@@ -112,6 +125,25 @@ def category_search_group(code: str | None) -> int:
     return PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.get(
         text_code[:2], PLACE_CATEGORY_SEARCH_GROUP_FALLBACK
     )
+
+
+def _named_destination_prefix(code: str) -> str | None:
+    for prefix in sorted(PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES, key=len, reverse=True):
+        if code.startswith(prefix):
+            return prefix
+    return None
+
+
+def destination_exact_search_group(code: str | None) -> int:
+    """이름이 검색어와 정확히 같은 목적지 행의 검색 그룹.
+
+    고유 이름 목적지(접두 예외 표의 분류)는 ``SEARCH_NAMED_DESTINATION_EXACT_GROUP``, 그 밖은
+    ``category_search_group``과 같다. 검색 SQL의 ``_search_destination_exact_group_sql``이 짝이다.
+    """
+
+    if code is not None and _named_destination_prefix(str(code)) is not None:
+        return SEARCH_NAMED_DESTINATION_EXACT_GROUP
+    return category_search_group(code)
 
 
 def is_tier1_only_category_code(code: str | None) -> bool:
