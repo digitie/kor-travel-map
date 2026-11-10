@@ -1512,8 +1512,8 @@ CREATE INDEX idx_merge_history_master ON ops.feature_merge_history (master_featu
 
 > 설계 메모: master/loser **둘 다** FK(CASCADE) — loser는 하드 삭제가 아니라
 > soft-delete(ADR-017)라 행이 남으므로 FK 유효. `review_id` FK는 큐 행 삭제 시
-> SET NULL(이력 보존). master 자동 선정은 `select_master`(좌표 보유 → updated_at →
-> source 우선순위 행안부>TourAPI>사용자, 동률은 feature_id 사전순).
+> SET NULL(이력 보존). master 자동 선정은 `select_master`(좌표 보유 → source 우선순위
+> 행안부>TourAPI>사용자(dataset 보정 포함) → updated_at, 동률은 feature_id 사전순, #1468).
 
 ### 9.5 `ops.data_integrity_violations` (ADR-045 T-205c, alembic 0009)
 
@@ -2982,9 +2982,16 @@ ADR에서 빼고 본 문서로 이관한 provider/ETL·도메인·알고리즘·
   `exp(-haversine_m / 50.0)`, category_sim은 category tag set Jaccard.
 - **임계값**: `THRESHOLD_AUTO=0.85`(자동 병합), `THRESHOLD_MANUAL=0.65`(이 이상 ~ AUTO
   미만은 `ops.dedup_review_queue` 수동 검토). 점수는 DB에 0~100 스케일로 저장한다.
-- **마스터 선정**(`core.scoring.select_master`): (1) 좌표 정밀도 → (2) `updated_at`
-  최신 → (3) `source_type` 우선순위(행안부 > TourAPI > 사용자 등록) → 동률은 `feature_id`
-  사전순. 병합 이력은 `ops.feature_merge_history`(§9.4)에 1행으로 남긴다.
+- **마스터 선정**(`core.scoring.select_master`): (1) 좌표 정밀도 → (2) 원천 우선순위
+  (`SOURCE_PRIORITY` — 행안부 > 국가유산·KNPS·산림청 > 표준데이터 > TourAPI > 문체부 테마
+  목록 > YouTube 후보 > 사용자 등록, `DATASET_SOURCE_PRIORITY`로 dataset 보정) → (3)
+  `updated_at` 최신 → 동률은 `feature_id` 사전순. 병합 이력은 `ops.feature_merge_history`
+  (§9.4)에 1행으로 남긴다. 2026-11-10(#1468)에 (2)·(3)을 바꿨다 — `updated_at`은 적재
+  시각이라 거의 항상 달라서 원천 순위가 한 번도 쓰이지 않았다.
+- **쌍 규칙**(Dagster `DEFAULT_DEDUP_SCOPE_PAIRS`): 쌍마다 `max_distance_m`(격자 blocking +
+  반경 컷, 큰 쪽은 DB에서 반경 안만 읽는다), `match: same_name`(정규화 이름이 같으면 점수와
+  무관하게 검토 큐), `match: route_overlap`(선형 겹침 — 왼쪽 선 길이 중 오른쪽 선 버퍼 안
+  비율)을 둘 수 있다. 모든 쌍은 큐에 올릴 뿐이고 병합은 관리자가 한다.
 
 ### 보관 정책 per-kind (구 ADR-017)
 

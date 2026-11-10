@@ -1,11 +1,13 @@
 """Dagster consistency/dedup refresh 운영 job."""
 
+import math
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Final, cast
 
 from kortravelmap.category import PlaceCategoryCode
+from kortravelmap.core.dedup import DEDUP_MATCH_MODES
 from kortravelmap.infra.consistency import DEDUP_PENDING_WARN_THRESHOLD
 from kortravelmap.infra.dedup_refresh_repo import (
     DEDUP_REFRESH_DEFAULT_LIMIT,
@@ -85,7 +87,9 @@ _DEDUP_REFRESH_CONFIG_SCHEMA: Final[dict[str, object]] = {
         default_value=[],
         description=(
             "cross-provider dedup scope pair 목록. 각 항목은 "
-            "{left:{provider,dataset_key?}, right:{provider,dataset_key?}}."
+            "{left:{provider,dataset_key?}, right:{provider,dataset_key?}, max_distance_m?, "
+            "match?: score|same_name|score_or_same_name|route_overlap, buffer_m?, "
+            "min_overlap_ratio?}."
         ),
     ),
     "sibling_scopes": Field(
@@ -259,6 +263,117 @@ def _tourapi_pair(
     return {"left": left, "right": {**right, "limit": _TOURAPI_SCOPE_LIMIT}}
 
 
+_PAIR_MATCH_MODES: Final[frozenset[str]] = DEDUP_MATCH_MODES | {"route_overlap"}
+
+_CAMPGROUND: Final = _category_codes("0306")
+_FOOD: Final = _category_codes("0201")
+_MOIS_CAMPGROUND: Final[Mapping[str, object]] = {
+    "provider": "python-mois-api",
+    "categories": _CAMPGROUND,
+}
+_MCST_CAMPGROUND: Final[Mapping[str, object]] = {
+    "provider": "python-mcst-api",
+    "dataset_key": "mcst_leisure_camping_facilities_csv",
+}
+_KNPS_CAMPGROUND: Final[Mapping[str, object]] = {
+    "provider": "python-knps-api",
+    "dataset_key": "knps_campgrounds",
+}
+_PLACE_RADIUS_M: Final = 300
+"""원천 겹침 쌍의 기본 반경. 같은 시설을 서로 다른 지오코딩으로 찍은 거리(2026-11-10 prod
+실측: 캠핑장 100 m→300 m에서 후보 122→136, 1 km에서 151 — 1 km 쪽은 다른 시설이 섞인다)."""
+_SCOPE_LIMIT: Final = 50_000
+"""원천 겹침 쌍의 scope 상한 — 반경 blocking 쌍은 오른쪽을 왼쪽 반경 안만 읽으므로 이것은
+왼쪽 전체·오른쪽 반경 안 전체를 덮는 안전 상한이다."""
+
+#: 2026-11-10 원천 겹침 조사(#1468 C)에서 규칙이 없던 쌍. 모두 **검토 큐에 올릴 뿐**이고
+#: 병합은 관리자가 한다. master 자동 선정은 원천 우선순위(``core.scoring.SOURCE_PRIORITY``·
+#: ``DATASET_SOURCE_PRIORITY``)가 정한다 — MOIS > 표준데이터 > MCST, 휴양림 > 수목원,
+#: KNPS 탐방로 > 산림청 등산로. 괄호 안 수는 2026-11-10 prod 기준 예상 후보 수다.
+_SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
+    # 캠핑장(0306): MOIS 야영장업 ↔ MCST 캠핑장 목록(136). 같은 범주라 이름만 같으면 거리와
+    # 무관하게 0.65가 되므로 반경으로 끊고, 이름이 같은데 점수가 모자란 쌍도 올린다.
+    {
+        "left": {**_MOIS_CAMPGROUND, "limit": _SCOPE_LIMIT},
+        "right": {**_MCST_CAMPGROUND, "limit": _SCOPE_LIMIT},
+        "max_distance_m": _PLACE_RADIUS_M,
+        "match": "score_or_same_name",
+    },
+    # MOIS 야영장업 ↔ KNPS 국립공원 야영장(1).
+    {
+        "left": {**_MOIS_CAMPGROUND, "limit": _SCOPE_LIMIT},
+        "right": {**_KNPS_CAMPGROUND, "limit": _SCOPE_LIMIT},
+        "max_distance_m": _PLACE_RADIUS_M,
+        "match": "score_or_same_name",
+    },
+    # KNPS 국립공원 야영장 ↔ MCST 캠핑장 목록(7) — 조사에서 4쌍이 100 m 안에 있었다.
+    {
+        "left": {**_KNPS_CAMPGROUND, "limit": _SCOPE_LIMIT},
+        "right": {**_MCST_CAMPGROUND, "limit": _SCOPE_LIMIT},
+        "max_distance_m": _PLACE_RADIUS_M,
+        "match": "score_or_same_name",
+    },
+    # MCST 세계음식 ↔ MOIS 음식점(0201, 12만 건)(1,103). 도심 밀집이라 반경을 100 m로 좁힌다.
+    # 오른쪽은 왼쪽 9천 건 반경 안만 DB에서 읽는다 — 전체를 읽으면 n150에서 3분이 넘었다.
+    {
+        "left": {
+            "provider": "python-mcst-api",
+            "dataset_key": "mcst_world_restaurants_csv",
+            "limit": _SCOPE_LIMIT,
+        },
+        "right": {"provider": "python-mois-api", "categories": _FOOD, "limit": 200_000},
+        "max_distance_m": 100,
+        "match": "score_or_same_name",
+    },
+    # 박물관·미술관 표준데이터 ↔ MCST 문화시설(01040000)(≈3,100). MCST는 같은 박물관을 무장애·
+    # 영유아·반려동물 목록에 따로 싣고 있어 박물관 하나가 여러 MCST 행과 짝이 된다(#1468 A가
+    # 테마를 속성으로 바꾸면 줄어든다).
+    {
+        "left": {
+            "provider": "data.go.kr-standard",
+            "dataset_key": "datagokr_museums",
+            "limit": _SCOPE_LIMIT,
+        },
+        "right": {
+            "provider": "python-mcst-api",
+            "categories": [PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value],
+            "limit": 100_000,
+        },
+        "max_distance_m": _PLACE_RADIUS_M,
+        "match": "score_or_same_name",
+    },
+    # 같은 이름의 자연휴양림 ↔ 수목원(산림청 안)(≈115). 범주가 달라 점수 상한이 0.80이고 28 m
+    # 밖이면 0.65에 못 미친다 — 이름이 같을 때만 올린다. 휴양림이 master(dataset 보정).
+    {
+        "left": {
+            "provider": "python-krforest-api",
+            "dataset_key": "krforest_recreation_forests",
+            "limit": _SCOPE_LIMIT,
+        },
+        "right": {
+            "provider": "python-krforest-api",
+            "dataset_key": "krforest_arboretums",
+            "limit": _SCOPE_LIMIT,
+        },
+        "max_distance_m": 1000,
+        "match": "same_name",
+    },
+    # 국립공원 안 산림청 등산로 ↔ KNPS 탐방로 — 선형 겹침. 등산로 길이의 절반 이상이 탐방로
+    # 30 m 버퍼 안이면 가장 많이 겹치는 탐방로와 짝이 된다. KNPS가 master(dataset 보정).
+    {
+        "left": {
+            "provider": "python-krforest-api",
+            "dataset_key": "krforest_mountain_trails",
+            "limit": _SCOPE_LIMIT,
+        },
+        "right": {"provider": "python-knps-api", "dataset_key": "knps_trails"},
+        "match": "route_overlap",
+        "buffer_m": 30,
+        "min_overlap_ratio": 0.5,
+    },
+)
+
+
 DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     # KNPS 문화시설/사찰(cultural_resources) ↔ 국가유산(krheritage) — 동일 사찰·문화재가
     # 양 provider에 중복 적재될 수 있다(ADR-034 6단계 메모). 실제 중복만 threshold(0.65)
@@ -384,6 +499,7 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
             "categories": ["03010000", "03010100", "03020100", "03020200"],
         },
     },
+    *_SOURCE_OVERLAP_PAIRS,
 )
 """op_config가 비었을 때 적용하는 기본 cross-provider dedup scope pair.
 
@@ -422,13 +538,29 @@ async def refresh_dedup_candidates_op(
         pairs = list(DEFAULT_DEDUP_SCOPE_PAIRS)
         sibling_scopes = list(DEFAULT_DEDUP_SIBLING_SCOPES)
 
+    # 쌍 규칙(#1468)은 실행 전에 전부 검증한다 — 잘못된 config는 재시도해도 같으므로 한 쌍도
+    # 돌리지 않고 재시도 없이 멈춘다.
+    try:
+        rules = [_pair_rule(pair) for pair in pairs]
+    except (TypeError, ValueError) as exc:
+        raise Failure(
+            description=f"dedup refresh pair 규칙 config가 잘못됐습니다: {exc}",
+            allow_retries=False,
+        ) from exc
+
     pair_results: list[DedupRefreshResult] = []
-    for pair in pairs:
+    for pair, (match, options) in zip(pairs, rules, strict=True):
         left = _scope_from_config(pair.get("left"), default_limit=default_limit)
         right = _scope_from_config(pair.get("right"), default_limit=default_limit)
+        if match == "route_overlap":
+            pair_results.append(
+                await client.refresh_route_overlap_dedup_candidates(left, right, **options)
+            )
+            continue
+        # 기존 쌍은 예전과 같은 호출이다 — 반경·판정 방식은 쌍이 적었을 때만 넘긴다.
         pair_results.append(
             await client.refresh_dedup_candidates_for_scope_pair(
-                left, right, include_auto_merge=include_auto_merge
+                left, right, include_auto_merge=include_auto_merge, **options
             )
         )
 
@@ -782,7 +914,11 @@ CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
             "45 5 * * *",
         ),
         execution_timezone=KST_TIMEZONE,
-        default_status=DefaultScheduleStatus.STOPPED,
+        # #1468: 기본 RUNNING. 이 job은 provider 적재가 아니라 큐(`feature_update_request_queue_
+        # sensor`)가 대신 돌려 주지 않는다 — 이 시계가 꺼져 있으면 dedup 후보는 아무도 갱신하지
+        # 않는다(2026-11 prod: 큐 367건이 11-06 이후 그대로). 기본값은 저장된 인스턴스 상태가
+        # 없을 때만 적용되므로, UI에서 한 번 멈춘 적이 있으면 배포 뒤 직접 start해야 한다.
+        default_status=DefaultScheduleStatus.RUNNING,
         tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
         description=(
             "dedup 후보 큐·consistency report 갱신과 notice/finding 보존 정리를 "
@@ -790,7 +926,7 @@ CONSISTENCY_DEDUP_REFRESH_SCHEDULES: Final = [
         ),
     )
 ]
-"""consistency/dedup maintenance schedule 목록. 운영 enable 전까지 STOPPED."""
+"""consistency/dedup maintenance schedule 목록. 기본 RUNNING(#1468)."""
 
 CACHE_TARGET_SNAPSHOT_GC_SCHEDULES: Final = [
     ScheduleDefinition(
@@ -839,6 +975,42 @@ def _mapping_list(value: object) -> list[Mapping[str, object]]:
             raise TypeError("dedup refresh config item은 mapping이어야 함")
         result.append(cast(Mapping[str, object], item))
     return result
+
+
+def _pair_rule(pair: Mapping[str, object]) -> tuple[str, dict[str, Any]]:
+    """쌍 config → ``(match, client 키워드 인자)``(#1468).
+
+    ``route_overlap``은 ``buffer_m``·``min_overlap_ratio``가 필수다. 점 쌍은 적힌 것만
+    넘긴다(``max_distance_m``, ``score``가 아닌 ``match``).
+    """
+    match = pair.get("match", "score")
+    if not isinstance(match, str) or match not in _PAIR_MATCH_MODES:
+        raise ValueError(f"pair.match 값이 아님: {match!r}")
+    if match == "route_overlap":
+        ratio = _positive_float(pair.get("min_overlap_ratio"), "min_overlap_ratio")
+        if ratio > 1:
+            raise ValueError("pair.min_overlap_ratio는 1 이하여야 함")
+        return match, {
+            "buffer_m": _positive_float(pair.get("buffer_m"), "buffer_m"),
+            "min_overlap_ratio": ratio,
+        }
+    options: dict[str, Any] = {}
+    if pair.get("max_distance_m") is not None:
+        options["max_distance_m"] = _positive_float(pair.get("max_distance_m"), "max_distance_m")
+    if match != "score":
+        if "max_distance_m" not in options:
+            raise ValueError(f"pair.match={match!r}에는 max_distance_m이 필요함")
+        options["match"] = match
+    return match, options
+
+
+def _positive_float(value: object, name: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, int | float | str):
+        raise TypeError(f"pair.{name}는 숫자여야 함")
+    number = float(value)
+    if not number > 0 or math.isinf(number):
+        raise ValueError(f"pair.{name}는 0보다 큰 유한한 수여야 함")
+    return number
 
 
 def _scope_from_config(

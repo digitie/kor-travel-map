@@ -60,6 +60,7 @@ __all__ = [
     # master 선정 (병합 시)
     "MasterCandidate",
     "SOURCE_PRIORITY",
+    "DATASET_SOURCE_PRIORITY",
     "DEFAULT_SOURCE_PRIORITY",
     "source_priority",
     "select_master",
@@ -315,6 +316,7 @@ def classify_decision(score: float) -> str:
 
 # provider별 원천 신뢰 우선순위 (높을수록 master 우선). ADR-016: 행안부(정부
 # 원천) > TourAPI(한국관광공사) > 사용자 등록. 운영 데이터로 재조정 가능(후속).
+# 기준: 그 시설의 **원장**(인허가·지정·관리 주체)일수록 위, 다른 목록을 모은 것일수록 아래.
 SOURCE_PRIORITY: Final[dict[str, int]] = {
     # 정부 원천(행안부/소관 부처) — 최우선
     "python-mois-api": 50,  # 행정안전부 인허가
@@ -323,25 +325,51 @@ SOURCE_PRIORITY: Final[dict[str, int]] = {
     "python-krforest-api": 45,  # 산림청
     # 공공 표준데이터 게이트(data.go.kr)
     "python-datagokr-api": 35,
+    # 전국 표준데이터(박물관·관광지·축제·주차장) — 지자체가 표준 스키마로 등록한 시설 목록이라
+    # 같은 게이트의 python-datagokr-api와 같은 층이다(#1468).
+    "data.go.kr-standard": 35,
     # 한국관광공사 TourAPI
     "python-visitkorea-api": 30,
     # 기타 공공 provider(도메인 한정 원천)
     "kor-travel-transport": 25,  # OpiNet·KREX·공항 원천을 중계(ADR-106)
     "python-khoa-api": 25,
+    # 문체부 파일데이터 — 무장애·반려동물·세계음식 같은 **테마 목록**을 모은 것이다. 시설의 원장이
+    # 아니어서 원장(MOIS·표준데이터)과 TourAPI보다 아래, 미등록 기본보다 위(#1468).
+    "python-mcst-api": 20,
+    # concierge가 영상에서 뽑은 후보 — 기계 추출이라 미등록 기본(10)보다 아래, 사용자 등록(0)보다
+    # 위다(#1468).
+    "kor-travel-concierge-youtube": 5,
 }
+
+DATASET_SOURCE_PRIORITY: Final[dict[tuple[str, str], int]] = {
+    # 같은 층 provider끼리, 또는 같은 provider 안에서 원장이 정해진 dataset(#1468). 키는
+    # ``(provider, dataset_key)``이고 값이 provider 값을 대신한다.
+    # 문화유산은 국가유산청이 원장이다 — KNPS 문화자원은 공원 안 유산을 다시 적은 것.
+    ("python-knps-api", "knps_cultural_resources"): 40,
+    # 같은 이름의 휴양림·수목원은 휴양림이 master다(산림청 같은 provider 안).
+    ("python-krforest-api", "krforest_arboretums"): 40,
+    # 국립공원 안 탐방로는 KNPS가 원장이다 — 산림청 등산로는 그 구간을 다시 적은 것.
+    ("python-krforest-api", "krforest_mountain_trails"): 40,
+}
+"""dataset 단위 우선순위 보정. ``source_priority``가 provider 값보다 먼저 본다."""
 
 DEFAULT_SOURCE_PRIORITY: Final[int] = 10
 """미등록 provider 기본 우선순위. 사용자 등록(provider 부재)은 ``0``."""
 
 
-def source_priority(provider: str | None) -> int:
-    """provider 원천 우선순위(높을수록 master 우선). ADR-016 master 선정 3순위.
+def source_priority(provider: str | None, dataset_key: str | None = None) -> int:
+    """원천 우선순위(높을수록 master 우선). ADR-016 master 선정 2순위.
 
-    미등록 provider는 ``DEFAULT_SOURCE_PRIORITY``, 사용자 등록(provider ``None``)은
-    ``0``.
+    ``(provider, dataset_key)``가 ``DATASET_SOURCE_PRIORITY``에 있으면 그 값, 아니면
+    provider 값. 미등록 provider는 ``DEFAULT_SOURCE_PRIORITY``, 사용자 등록(provider
+    ``None``)은 ``0``.
     """
     if not provider:
         return 0
+    if dataset_key:
+        override = DATASET_SOURCE_PRIORITY.get((provider, dataset_key))
+        if override is not None:
+            return override
     return SOURCE_PRIORITY.get(provider, DEFAULT_SOURCE_PRIORITY)
 
 
@@ -351,21 +379,26 @@ class MasterCandidate:
 
     - ``has_coord`` — 좌표 보유 여부. 좌표 있는 쪽이 "좌표 정밀도" 1순위에서 우선
       (좌표 없는 feature보다 신뢰).
-    - ``updated_at`` — 최신 갱신(2순위, ADR-019 aware).
-    - ``provider`` — 원천 provider(3순위, ``source_priority``).
+    - ``provider``/``dataset_key`` — 원천(2순위, ``source_priority``).
+    - ``updated_at`` — 최신 갱신(3순위, ADR-019 aware).
     """
 
     feature_id: str
     has_coord: bool
     updated_at: datetime
     provider: str | None
+    dataset_key: str | None = None
 
 
 def select_master(a: MasterCandidate, b: MasterCandidate) -> tuple[str, str]:
     """병합 후보 1쌍 → ``(master_feature_id, loser_feature_id)`` (ADR-016).
 
-    우선순위: (1) 좌표 보유 → (2) ``updated_at`` 최신 → (3) provider 원천 우선순위.
-    모두 동률이면 ``feature_id`` 사전순 작은 쪽을 master로(결정적 tie-break).
+    우선순위: (1) 좌표 보유 → (2) 원천 우선순위(``source_priority``) → (3) ``updated_at``
+    최신. 모두 동률이면 ``feature_id`` 사전순 작은 쪽을 master로(결정적 tie-break).
+
+    원천이 ``updated_at``보다 먼저다(#1468). ``updated_at``은 적재 시각이라 거의 항상 둘이
+    달라서, 그것이 2순위이면 원천 우선순위는 사실상 한 번도 쓰이지 않는다 — 나중에 적재된
+    테마 목록이 원장을 이긴다.
 
     >>> from datetime import UTC, datetime
     >>> t = datetime(2026, 1, 1, tzinfo=UTC)
@@ -374,8 +407,8 @@ def select_master(a: MasterCandidate, b: MasterCandidate) -> tuple[str, str]:
     >>> select_master(a, b)  # b가 좌표 보유 → master
     ('f_b', 'f_a')
     """
-    a_key = (a.has_coord, a.updated_at, source_priority(a.provider))
-    b_key = (b.has_coord, b.updated_at, source_priority(b.provider))
+    a_key = (a.has_coord, source_priority(a.provider, a.dataset_key), a.updated_at)
+    b_key = (b.has_coord, source_priority(b.provider, b.dataset_key), b.updated_at)
     if a_key > b_key:
         return (a.feature_id, b.feature_id)
     if b_key > a_key:

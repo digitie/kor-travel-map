@@ -679,7 +679,8 @@ def test_consistency_dedup_refresh_schedule_registered() -> None:
     assert schedule.name == "consistency_dedup_refresh_daily_schedule"
     assert schedule.cron_schedule == "45 5 * * *"
     assert schedule.execution_timezone == KST_TIMEZONE
-    assert schedule.default_status == DefaultScheduleStatus.STOPPED
+    # #1468: 큐가 대신 돌려 주지 않는 maintenance job이라 기본 RUNNING이다.
+    assert schedule.default_status == DefaultScheduleStatus.RUNNING
     assert schedule.job_name == "consistency_dedup_refresh"
     assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
     assert schedule.tags["kor_travel_map.job_kind"] == "consistency_dedup_refresh"

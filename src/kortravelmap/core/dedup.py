@@ -14,9 +14,11 @@ ADR 참조
 
 from __future__ import annotations
 
+import math
+from collections import defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Final, Literal, Protocol, runtime_checkable
 
 from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.scoring import (
@@ -27,7 +29,9 @@ from kortravelmap.core.scoring import (
     DedupDecision,
     category_similarity,
     classify_decision,
+    haversine_meters,
     name_similarity,
+    normalize_kr_place_name,
     score_pair,
     spatial_similarity,
 )
@@ -36,11 +40,34 @@ if TYPE_CHECKING:
     from kortravelmap.dto.coordinate import Coordinate
 
 __all__ = [
+    "DEDUP_MATCH_MODES",
     "DedupInput",
     "DedupCandidate",
+    "DedupMatch",
+    "DedupPoint",
     "find_dedup_candidates",
     "find_sibling_candidates",
+    "route_overlap_candidate",
 ]
+
+DedupMatch = Literal["score", "same_name", "score_or_same_name"]
+"""점 후보의 판정 방식(#1468).
+
+- ``score`` — ADR-016 점수가 ``THRESHOLD_MANUAL`` 이상인 쌍(기존 동작).
+- ``same_name`` — 정규화 이름(``normalize_kr_place_name``)이 같은 쌍만. 점수와 무관하게
+  최소 ``manual_review``로 올린다(예: 같은 이름의 휴양림·수목원 — 범주가 달라 점수 상한이
+  0.80이고 28 m 밖이면 0.65에 못 미친다).
+- ``score_or_same_name`` — 둘 중 하나라도 맞으면.
+"""
+
+DEDUP_MATCH_MODES: Final[frozenset[str]] = frozenset(
+    {"score", "same_name", "score_or_same_name"}
+)
+
+_METERS_PER_DEGREE_LAT: Final[float] = 111_320.0
+#: 경도 1도 길이의 하한을 잡는 위도 — 한반도(33~39°N)보다 북쪽으로 잡아 격자 칸이 반경보다
+#: 좁아지지 않게 한다(칸이 반경 이상이면 이웃 3×3 칸이 반경 원을 다 덮는다).
+_GRID_LAT_BOUND_DEG: Final[float] = 45.0
 
 
 @runtime_checkable
@@ -87,6 +114,56 @@ class DedupCandidate:
     name_score: float
     spatial_score: float
     category_score: float
+    reason: str | None = None
+    """큐 ``decision_reason``에 남길 설명. ``None``이면 ``decision``을 그대로 쓴다.
+
+    점수 밖 규칙으로 올린 후보는 그 규칙을 적는다(``manual_review:same_name``,
+    ``manual_review:route_overlap=0.87``) — 검토자가 왜 올랐는지 본다(#1468)."""
+
+
+@dataclass(frozen=True)
+class DedupPoint:
+    """``DedupInput``을 만족하는 최소 값 객체 — 선형 겹침 후보처럼 repo가 쌍을 직접 찾을 때."""
+
+    feature_id: str
+    name: str
+    coord: Coordinate | None
+    category: str
+    kind: str
+    detail: object = None
+
+
+def route_overlap_candidate(
+    a: DedupInput, b: DedupInput, *, overlap_ratio: float
+) -> DedupCandidate:
+    """선형 겹침으로 찾은 쌍 → ``manual_review`` 후보(#1468).
+
+    점수 성분은 점 후보와 같은 식(``score_pair``)으로 둔다 — 큐의 ``total_score``를 F7
+    (점수 회귀 감시)이 같은 식으로 다시 계산하기 때문이다. 겹침 비율은 ``reason``에 적는다.
+    자동 병합하지 않는다: 같은 산의 다른 갈래도 버퍼 안에서 겹칠 수 있다.
+    """
+    if not 0.0 <= overlap_ratio <= 1.0:
+        raise ValueError(f"overlap_ratio는 0~1이어야 한다: {overlap_ratio!r}")
+    score = score_pair(
+        name_a=a.name,
+        name_b=b.name,
+        coord_a=a.coord,
+        coord_b=b.coord,
+        cat_a={a.category},
+        cat_b={b.category},
+    )
+    return DedupCandidate(
+        feature_id_a=a.feature_id,
+        feature_id_b=b.feature_id,
+        name_a=a.name,
+        name_b=b.name,
+        score=round(score, 4),
+        decision=DedupDecision.MANUAL_REVIEW,
+        name_score=round(name_similarity(a.name, b.name), 4),
+        spatial_score=round(spatial_similarity(a.coord, b.coord), 4),
+        category_score=round(category_similarity({a.category}, {b.category}), 4),
+        reason=f"{DedupDecision.MANUAL_REVIEW}:route_overlap={overlap_ratio:.2f}",
+    )
 
 
 def find_dedup_candidates(
@@ -94,6 +171,8 @@ def find_dedup_candidates(
     right: Iterable[DedupInput],
     *,
     include_auto_merge: bool = True,
+    max_distance_m: float | None = None,
+    match: DedupMatch = "score",
 ) -> list[DedupCandidate]:
     """``left`` × ``right`` cross-score → 중복 후보 리스트 (점수 내림차순).
 
@@ -108,6 +187,12 @@ def find_dedup_candidates(
         temple). 호출 측에서 종류(사찰/temple)로 미리 필터링해 넘긴다.
     include_auto_merge
         ``auto_merge``(>= THRESHOLD_AUTO) 후보 포함 여부. 기본 True.
+    max_distance_m
+        주어지면 두 좌표가 이 거리(m) 안인 쌍만 본다 — 좌표 격자로 blocking해 비교 수를
+        줄이고, 같은 범주·같은 이름이면 거리와 무관하게 0.65가 되는 전국 동명 쌍(체인점 등)을
+        끊는다. 좌표가 없는 feature는 이때 비교하지 않는다(#1468).
+    match
+        ``DedupMatch`` — ``score``(기본)·``same_name``·``score_or_same_name``.
 
     Returns
     -------
@@ -117,40 +202,106 @@ def find_dedup_candidates(
 
     Notes
     -----
-    O(len(left) × len(right)) — SPRINT-3 §2.5의 사찰/temple은 수십~수백 건이라
-    충분. 대규모 dataset은 후속에 blocking(시군구/grid)으로 후보 축소.
+    ``max_distance_m``가 없으면 O(len(left) × len(right)). 있으면 격자 3×3 이웃 칸만 본다.
     """
+    if match not in DEDUP_MATCH_MODES:
+        raise ValueError(f"dedup match 방식 아님: {match!r}")
+    if max_distance_m is not None and not max_distance_m > 0:
+        raise ValueError("max_distance_m은 0보다 커야 한다")
+    if match != "score" and max_distance_m is None:
+        # 이름만 같으면 올리는 방식에 거리 상한이 없으면 전국 동명 시설이 전부 쌍이 된다.
+        raise ValueError(f"match={match!r}에는 max_distance_m이 필요하다")
     candidates: list[DedupCandidate] = []
-    right_list = list(right)
-    for a in left:
-        for b in right_list:
-            cand = _score_candidate(a, b, include_auto_merge=include_auto_merge)
-            if cand is not None:
-                candidates.append(cand)
+    if max_distance_m is None:
+        right_list = list(right)
+        for a in left:
+            for b in right_list:
+                cand = _score_candidate(
+                    a, b, include_auto_merge=include_auto_merge, match=match
+                )
+                if cand is not None:
+                    candidates.append(cand)
+    else:
+        grid = _CoordGrid(right, max_distance_m)
+        for a in left:
+            if a.coord is None:
+                continue
+            for b in grid.near(a.coord):
+                cand = _score_candidate(
+                    a, b, include_auto_merge=include_auto_merge, match=match
+                )
+                if cand is not None:
+                    candidates.append(cand)
     candidates.sort(key=lambda c: c.score, reverse=True)
     return candidates
 
 
+class _CoordGrid:
+    """반경 ``radius_m`` 이웃 조회용 위경도 격자. 칸 한 변이 반경 이상이라 3×3 칸이 원을 덮는다."""
+
+    def __init__(self, items: Iterable[DedupInput], radius_m: float) -> None:
+        self._radius_m = radius_m
+        self._lat_step = radius_m / _METERS_PER_DEGREE_LAT
+        self._lon_step = radius_m / (
+            _METERS_PER_DEGREE_LAT * math.cos(math.radians(_GRID_LAT_BOUND_DEG))
+        )
+        self._cells: dict[tuple[int, int], list[DedupInput]] = defaultdict(list)
+        for item in items:
+            if item.coord is not None:
+                self._cells[self._key(item.coord)].append(item)
+
+    def _key(self, coord: Coordinate) -> tuple[int, int]:
+        return (
+            math.floor(float(coord.lat) / self._lat_step),
+            math.floor(float(coord.lon) / self._lon_step),
+        )
+
+    def near(self, coord: Coordinate) -> Iterable[DedupInput]:
+        lat_key, lon_key = self._key(coord)
+        for d_lat in (-1, 0, 1):
+            for d_lon in (-1, 0, 1):
+                for item in self._cells.get((lat_key + d_lat, lon_key + d_lon), ()):
+                    if item.coord is not None and (
+                        haversine_meters(coord, item.coord) <= self._radius_m
+                    ):
+                        yield item
+
+
+def _same_name(a: DedupInput, b: DedupInput) -> bool:
+    norm_a = normalize_kr_place_name(a.name)
+    return bool(norm_a) and norm_a == normalize_kr_place_name(b.name)
+
+
 def _score_candidate(
-    a: DedupInput, b: DedupInput, *, include_auto_merge: bool
+    a: DedupInput,
+    b: DedupInput,
+    *,
+    include_auto_merge: bool,
+    match: DedupMatch = "score",
 ) -> DedupCandidate | None:
     """한 쌍(a, b)을 score → ``DedupCandidate`` 또는 제외 시 ``None``.
 
-    ``KEEP_SEPARATE``(< THRESHOLD_MANUAL)는 ``None``. ``include_auto_merge=False``면
-    ``auto_merge`` 밴드도 ``None``.
+    ``match="score"``면 ``KEEP_SEPARATE``(< THRESHOLD_MANUAL)는 ``None``.
+    ``same_name``류는 정규화 이름이 같은 쌍을 점수와 무관하게 최소 ``manual_review``로
+    올린다. ``include_auto_merge=False``면 ``auto_merge`` 밴드도 ``None``.
     """
     if a.kind != b.kind:
         return None
     occurrence = compare_event_occurrences(a.detail, b.detail) if a.kind == "event" else "same"
     if occurrence == "different":
         return None
-    # 이름 유사도(가장 비싼 성분)를 부르기 전에 상한으로 거른다 — 이름이 완전히 같다고 쳐도
-    # 수동 검토 임계값에 못 미치면 결과는 KEEP_SEPARATE다(가지치기일 뿐 판정은 같다, #1459).
-    # 식은 ``score_pair``와 같은 순서·같은 가중치라 부동소수 결과도 같다.
-    spatial = spatial_similarity(a.coord, b.coord)
-    category = category_similarity({a.category}, {b.category})
-    if WEIGHT_NAME * 1.0 + WEIGHT_SPATIAL * spatial + WEIGHT_CATEGORY * category < THRESHOLD_MANUAL:
+    same_name = match != "score" and _same_name(a, b)
+    if match == "same_name" and not same_name:
         return None
+    if not same_name:
+        # 이름 유사도(가장 비싼 성분)를 부르기 전에 상한으로 거른다 — 이름이 완전히 같다고
+        # 쳐도 수동 검토 임계값에 못 미치면 결과는 KEEP_SEPARATE다(가지치기일 뿐 판정은 같다,
+        # #1459). 식은 ``score_pair``와 같은 순서·같은 가중치라 부동소수 결과도 같다.
+        spatial = spatial_similarity(a.coord, b.coord)
+        category = category_similarity({a.category}, {b.category})
+        bound = WEIGHT_NAME * 1.0 + WEIGHT_SPATIAL * spatial + WEIGHT_CATEGORY * category
+        if bound < THRESHOLD_MANUAL:
+            return None
     score = score_pair(
         name_a=a.name,
         name_b=b.name,
@@ -160,8 +311,12 @@ def _score_candidate(
         cat_b={b.category},
     )
     decision = classify_decision(score)
+    reason: str | None = None
     if decision == DedupDecision.KEEP_SEPARATE:
-        return None
+        if not same_name:
+            return None
+        decision = DedupDecision.MANUAL_REVIEW
+        reason = f"{DedupDecision.MANUAL_REVIEW}:same_name"
     if decision == DedupDecision.AUTO_MERGE and occurrence == "unknown":
         decision = DedupDecision.MANUAL_REVIEW
     if decision == DedupDecision.AUTO_MERGE and not include_auto_merge:
@@ -176,6 +331,7 @@ def _score_candidate(
         name_score=round(name_similarity(a.name, b.name), 4),
         spatial_score=round(spatial_similarity(a.coord, b.coord), 4),
         category_score=round(category_similarity({a.category}, {b.category}), 4),
+        reason=reason,
     )
 
 

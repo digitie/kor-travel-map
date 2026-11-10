@@ -95,18 +95,21 @@ SELECT
     CAST(f.feature_id AS text) AS feature_id,
     (f.coord IS NOT NULL) AS has_coord,
     f.updated_at AS updated_at,
-    (
-        SELECT pd.provider
-        FROM provider_sync.source_links sl
-        JOIN provider_sync.source_entities se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        WHERE sl.feature_id = f.feature_id
-        ORDER BY (sl.source_role = 'primary') DESC, sl.confidence DESC
-        LIMIT 1
-    ) AS provider
+    src.provider AS provider,
+    -- #1468: 원천 우선순위는 dataset 단위 보정(`DATASET_SOURCE_PRIORITY`)도 본다.
+    src.dataset_key AS dataset_key
 FROM feature.features f
+LEFT JOIN LATERAL (
+    SELECT pd.provider, pd.dataset_key
+    FROM provider_sync.source_links sl
+    JOIN provider_sync.source_entities se
+      ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    WHERE sl.feature_id = f.feature_id
+    ORDER BY (sl.source_role = 'primary') DESC, sl.confidence DESC
+    LIMIT 1
+) AS src ON true
 WHERE f.feature_id = :feature_id
 """
 
@@ -787,6 +790,7 @@ async def _master_candidate(session: AsyncSession, feature_id: str) -> MasterCan
         has_coord=bool(row.has_coord),
         updated_at=row.updated_at,
         provider=row.provider,
+        dataset_key=row.dataset_key,
     )
 
 
@@ -1042,7 +1046,7 @@ async def merge_from_review(
     """검토 큐 후보(``review_id``) 1쌍을 master 자동 선정 후 병합한다.
 
     큐 행이 없거나 이미 검토(``status != 'pending'``)됐으면 ``MergeError``.
-    master는 ``core.scoring.select_master``(좌표 → updated_at → source 우선순위)로
+    master는 ``core.scoring.select_master``(좌표 → source 우선순위 → updated_at)로
     결정한다. commit은 호출자 책임.
     """
     row = (await session.execute(text(_SELECT_REVIEW_SQL), {"review_id": review_id})).one_or_none()
