@@ -359,31 +359,35 @@ dataset → entity → link로 Feature 집합을 한 번 만든다) — 행마�
 
 ### 8.1.1 R2 운영 dry-run 결과 (2026-11-10, 읽기 전용)
 
-`ktmctl mcst-theme-plan`(브랜치 `feat/mcst-theme-attach` `c5bc9e13`)을 운영 Map DB에 읽기 전용
-transaction으로 돌렸다(2분). MCST active Feature 88,007개.
+`ktmctl mcst-theme-plan`(브랜치 `feat/mcst-theme-attach` `ada75bcf`, 리뷰 반영 뒤)을 운영 Map DB에 읽기
+전용 transaction으로 돌렸다(3분). MCST active Feature 88,007개.
 
 | dataset | retire | attach | collapse | keep | ambiguous |
 |---|---:|---:|---:|---:|---:|
-| pet_friendly | 20,396 | 759 | 104 | 2,590 | 79 |
-| barrier_free | — | 851 | 943 | 10,627 | 108 |
-| family_infant | — | 831 | 7,060 | 569 | 106 |
-| media_famous(촬영지) | — | 1,192 | 172 | 7,339 | 100 |
-| world_restaurants | — | 840 | 39 | 8,597 | 18 |
-| cafe_bookstores | — | 56 | 101 | 902 | — |
-| independent_bookstores | — | 45 | 1 | 280 | 1 |
+| pet_friendly | 20,396 | 821 | 51 | 2,169 | 491 |
+| barrier_free | — | 1,633 | 644 | 9,655 | 597 |
+| family_infant | — | 1,445 | 6,022 | 510 | 589 |
+| media_famous(촬영지) | — | 1,466 | 153 | 6,999 | 185 |
+| world_restaurants | — | 851 | 39 | 8,585 | 19 |
+| cafe_bookstores | — | 62 | 99 | 896 | 2 |
+| independent_bookstores | — | 52 | — | 270 | 5 |
 | children_bookstores | — | 7 | 31 | 748 | — |
-| used_bookstores | — | 49 | 28 | 334 | — |
-| leisure_activity | — | 8 | 6 | 14,536 | 4 |
-| leisure_camping | — | 127 | 2 | 2,339 | 8 |
+| used_bookstores | — | 51 | 26 | 334 | — |
+| leisure_activity | — | 220 | 6 | 14,308 | 20 |
+| leisure_camping | — | 893 | 2 | 1,516 | 65 |
 | leisure_classes | — | — | — | 5,074 | — |
-| **합계** | **20,396** | **4,765** | **8,487** | **53,935** | **424** |
+| **합계** | **20,396** | **7,501** | **7,073** | **51,064** | **1,973** |
 
-- 전환 뒤 MCST가 소유하는 공개 Feature는 약 54,359개(keep + ambiguous)다. 퇴역 예정 33,648개.
-- 첫 실행은 ambiguous 1,948이었고 표본의 3/4이 tier 2(MCST끼리) 동점이었다 — 같은 장소가 여러
-  목록에 있는 것이라 다툼이 아니다. 규칙을 고쳐(§5.2) 424로 줄었다. 남은 것은 tier 1 동점(비MCST
-  master끼리 중복, 예: 같은 이름의 MOIS 두 행)이다.
-- **PinVi 참조**(운영 PinVi DB 읽기 전용): `trip_day_pois` 304행(서로 다른 Feature 95개) — `attach`
-  164행(59개)·`collapse` 140행(36개). `retire`(반려 업종) 참조 0, `curated_plan_pois`·
+- 전환 뒤 MCST가 소유하는 공개 Feature는 약 53,037개(keep + ambiguous), 퇴역 예정 34,970개.
+- 같은 날 앞선 실행(리뷰 반영 전)은 attach 4,765였다. 차이는 계획기 변경(trigram 사전 거름 0.2→0.1,
+  옛 병합 master 제외, 사슬 collapse 차단, 물려받은 attach 분류 재확인)과 그 사이 운영에 적재된
+  master(관광공사 문화시설·레포츠 등 — 캠핑 attach 127→893, 레저 8→220)다. **R4 직전에 다시 돌린다.**
+- ambiguous 1,973의 대부분(표본 296개 중 260)은 **tier 1 동점** — 같은 이름의 비MCST master가 둘 이상
+  (예: 박물관 표준과 관광공사가 같은 박물관을 각각 가짐). master끼리의 중복은 #1468 B dedup이 병합하면
+  사라지고, 그 뒤 다시 돌리면 attach로 바뀐다(링크는 병합을 따라 생존자로 옮겨진다). 나머지는 물려받은
+  attach의 분류 불일치(22)·사슬(14).
+- **PinVi 참조**(운영 PinVi DB 읽기 전용): `trip_day_pois` 1,020행(서로 다른 Feature 161개) — `attach`
+  956행(142개)·`collapse` 64행(19개). `retire`(반려 업종) 참조 0, `curated_plan_pois`·
   `feature_suggestions` 0. 전부 병합 대상이 있는 퇴역이라 M05 `rebind`로 옮길 수 있다.
 - 표본(목록·action마다 50개)은 보고서 JSON에 있다. 정밀도 판정(§5.4)은 R4 전 사람이 한다.
 

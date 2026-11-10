@@ -296,9 +296,8 @@ def place_attribute_digest(attributes: Sequence[PlaceAttribute]) -> str | None:
     """
     if not attributes:
         return None
-    rows = "
-".join(
-        f"{item.code}	{item.label}	{item.group}	{item.sort_order}"
+    rows = "\n".join(
+        f"{item.code}\t{item.label}\t{item.group}\t{item.sort_order}"
         for item in sorted(attributes, key=lambda item: (item.sort_order, item.code))
     )
     return hashlib.sha256(rows.encode("utf-8")).hexdigest()[:16]
