@@ -14,12 +14,18 @@ admin field-override는 재적재에도 남는다(`feature.apply_provider_featur
 
 ## 절차 (Feature마다)
 
-1. 현재 `row_revision`을 읽는다 — `GET /v1/admin/features/{feature_id}`의 `ETag`.
+1. 현재 `row_revision`을 읽는다 — **`GET /v1/admin/features/{feature_id}/revision`**의 `ETag`(strong, 예: `"76"`).
+   상세 `GET /v1/admin/features/{feature_id}`에는 `ETag` 헤더가 없다 — 그 값을 쓰면 `If-Match`가 비어
+   428 `PRECONDITION_REQUIRED`다(2026-11-11 운영 적용에서 실측, admin acceptance spec도 `/revision`을 쓴다).
 2. `POST /v1/admin/features/{feature_id}/field-overrides`
    - 헤더: `If-Match: <ETag>`, `Idempotency-Key: <새 UUID>`, admin proxy 헤더(`X-Kor-Travel-Map-Admin-Proxy-Secret`, `X-Kor-Travel-Map-Actor`) — admin UI 컨테이너 안에서 보낸다.
    - 본문: `{"reason_code": "source_data_error", "values": {"core.category": "<바꿀 값>"}}`
 3. 응답 200과 새 `ETag`를 확인하고, `GET`으로 `category`가 바뀐 것을 본다.
 
-412면 `row_revision`이 바뀐 것이다 — 1부터 다시. 되돌리기는 `POST …/field-overrides/revoke`
+412면 `row_revision`이 바뀐 것이다 — 1부터 다시. 428이면 `If-Match`가 빠졌다(1의 경로 확인).
+
+**적용 기록(2026-11-11, Map 4bd3059d):** MCST 재적재(run `3dd49343`) 뒤 세 행 모두 `00000000`이었다(#1447의 `TYPE=""` →
+미분류가 첫 성공 재투영에서 반영). `/revision` ETag `"3"`·`"76"`·`"3"`로 셋 다 200, 재조회 category
+`02011000`·`03010100`·`02010100` 확인. 되돌리기는 `POST …/field-overrides/revoke`
 `{"reason_code": "…", "field_paths": ["core.category"]}`(같은 `If-Match`·`Idempotency-Key`·proxy 헤더가
 필요하다. 최신 provider 값으로 돌아간다).
