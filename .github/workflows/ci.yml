@@ -98,7 +98,7 @@ jobs:
         # 한다 — tests/unit/test_ci_workflows.py가 고정한다.
         # unit/lint·api 단계 뒤라 그 세션은 종전처럼 provider 없이 돈다.
         run: |
-          pip install -c docker/constraints-dagster.txt "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@9922dd27d5208d68abb3c8c019abedd12097b2d8"
+          pip install -c docker/constraints-dagster.txt "python-datagokr-api @ git+https://github.com/digitie/python-datagokr-api.git@615093261b4964eac4f522af174f8450b9b7c59d"
           # 실제 MCST 기본 factory와 native 승인형 다운로드를 MockTransport로 검사한다.
           pip install -c docker/constraints-dagster.txt "python-mcst-api @ git+https://github.com/digitie/python-mcst-api.git@00a78dfdba5a1a87d87c5238ef1566621989b1ae"
           # TourAPI 관광지 replay golden(`TourItem` 실모델, #1459).

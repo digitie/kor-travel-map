@@ -202,7 +202,7 @@ class _FakeDataGoKrClient:
         self.festival = _FakeFestivalService([object(), object()])
         self.museum_art = _FakeMuseumArtService([object(), object(), object()])
         self.tourist_attraction = _FakeMuseumArtService([object(), object()])
-        self.parking = _FakeMuseumArtService([object(), object(), object(), object()])
+        self.parking = _FakeStandardFileService([object(), object(), object(), object()])
         self.special_street = _FakeStandardFileService([object(), object()])
         self.traditional_market = _FakeStandardFileService([object(), object(), object()])
         _FakeDataGoKrClient.instances.append(self)
@@ -1305,31 +1305,13 @@ def test_standard_tourist_attractions_fetch_yields_and_closes(
     assert fake.instances[0].closed is True
 
 
-def test_standard_parking_lots_raises_when_credential_missing() -> None:
-    settings = KorTravelMapSettings(data_go_kr_service_key=None)
-
-    agen = fetch_standard_parking_lots(settings)
-    with pytest.raises(ProviderCredentialMissing):
-        asyncio.run(agen.__anext__())
-
-
-def test_standard_parking_lots_fetch_yields_and_closes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _install_fake_datagokr(monkeypatch)
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
-
-    records = asyncio.run(_acollect(fetch_standard_parking_lots(settings)))
-
-    assert len(records) == 4
-    assert fake.instances[0].closed is True
-
-
 @pytest.mark.parametrize(
     ("fetch", "attr", "expected"),
     [
         (fetch_standard_traditional_markets, "traditional_market", 3),
         (fetch_standard_special_streets, "special_street", 2),
+        # 주차장 Open API는 운영 키가 403(활용신청 없음, 2026-11-10)이다 — 공개 파일 15012896.
+        (fetch_standard_parking_lots, "parking", 4),
     ],
 )
 def test_standard_files_are_keyless_and_close(
@@ -1349,19 +1331,55 @@ def test_standard_files_are_keyless_and_close(
     assert client.closed is True
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_standard_parking_file_duplicate_numbers_pick_one_row_deterministically(
+    monkeypatch: pytest.MonkeyPatch, reverse: bool
+) -> None:
+    # 공개 파일의 PRKPLCE_NO는 18,994행 중 17,878개만 고유하고 같은 번호의 행 내용이 다르다
+    # (2026-11-10 실측 1,030개 번호). 적재는 같은 번호를 한 entity로 덮으므로 어느 행이 남는지가
+    # 파일 순서에 달리면 안 된다 — 순서와 무관하게 같은 행 하나만 내준다. 번호 없는 행은 그대로다.
+    from types import SimpleNamespace
+
+    rows = [
+        SimpleNamespace(prkplce_no="100-1-000001", raw={"PRKPLCE_NM": "B"}),
+        SimpleNamespace(prkplce_no="100-1-000002", raw={"PRKPLCE_NM": "only"}),
+        SimpleNamespace(prkplce_no="100-1-000001", raw={"PRKPLCE_NM": "A"}),
+        SimpleNamespace(prkplce_no=None, raw={"PRKPLCE_NM": "no number"}),
+    ]
+    if reverse:
+        rows.reverse()
+    fake = _install_fake_datagokr(monkeypatch)
+    original_init = fake.__init__
+
+    def _init(self: Any, **kwargs: Any) -> None:
+        original_init(self, **kwargs)
+        self.parking = _FakeStandardFileService(list(rows))
+
+    monkeypatch.setattr(fake, "__init__", _init)
+
+    records = asyncio.run(
+        _acollect(fetch_standard_parking_lots(KorTravelMapSettings(data_go_kr_service_key=None)))
+    )
+
+    names = sorted(r.raw["PRKPLCE_NM"] for r in records)
+    assert names == ["A", "no number", "only"]
+
+
 @pytest.mark.parametrize(
     ("fetch", "attr"),
     [
         (fetch_standard_traditional_markets, "traditional_market"),
         (fetch_standard_special_streets, "special_street"),
+        (fetch_standard_parking_lots, "parking"),
     ],
 )
 @pytest.mark.parametrize(("rows", "declared"), [(3, 1393), (0, 0), (0, 274)])
 def test_standard_files_fail_on_short_or_empty_snapshot(
     monkeypatch: pytest.MonkeyPatch, fetch: Any, attr: str, rows: int, declared: int
 ) -> None:
-    # 이 두 dataset은 snapshot에 없는 장소를 은퇴시킨다 — 선언보다 짧거나 빈 파일을 성공으로
-    # 넘기면 실제 장소가 내려간다.
+    # 전통시장·특화거리는 snapshot에 없는 장소를 은퇴시킨다 — 선언보다 짧거나 빈 파일을 성공으로
+    # 넘기면 실제 장소가 내려간다. 주차장은 은퇴하지 않지만 snapshot을 authoritative 완료로
+    # 봉인하므로 짧은 파일을 완료로 기록하지 않는다.
     fake = _install_fake_datagokr(monkeypatch)
     settings = KorTravelMapSettings(data_go_kr_service_key=None)
     original_init = fake.__init__

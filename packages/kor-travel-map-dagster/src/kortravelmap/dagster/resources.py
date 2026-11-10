@@ -300,8 +300,7 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         resource_key="standard_parking_lots",
         provider_package="python-datagokr-api",
         dataset_key="datagokr_parking_lots",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="전국주차장정보표준데이터(15012896) 포털 공개 파일 — 서비스키 불필요.",
     ),
     ProviderRecordResourceSpec(
         resource_key="standard_special_streets",
