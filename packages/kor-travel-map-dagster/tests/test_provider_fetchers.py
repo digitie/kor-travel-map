@@ -1341,6 +1341,42 @@ def test_standard_files_are_keyless_and_close(
     assert client.closed is True
 
 
+@pytest.mark.parametrize(
+    ("fetch", "attr"),
+    [
+        (fetch_standard_museums, "museum_art"),
+        (fetch_standard_tourist_attractions, "tourist_attraction"),
+    ],
+)
+def test_standard_museum_tourist_files_yield_in_canonical_order(
+    monkeypatch: pytest.MonkeyPatch, fetch: Any, attr: str
+) -> None:
+    # 자연키 ``이름::도로명``이 같은 행이 박물관 26·관광지 18개 키에 있고 내용이 다르다(2026-11-10).
+    # 적재는 같은 키를 나중 행으로 덮으므로, 파일 순서가 바뀌어도 같은 행이 남게 원문 정렬 JSON
+    # 순서로 내준다.
+    from types import SimpleNamespace
+
+    rows = [SimpleNamespace(raw={"NM": name}) for name in ("b", "c", "a")]
+    outputs = []
+    for ordering in (rows, list(reversed(rows))):
+        fake = _install_fake_datagokr(monkeypatch)
+        original_init = fake.__init__
+
+        def _init(
+            self: Any, _rows: list[Any] = ordering, _orig: Any = original_init, **kwargs: Any
+        ) -> None:
+            _orig(self, **kwargs)
+            setattr(self, attr, _FakeStandardFileService(list(_rows)))
+
+        monkeypatch.setattr(fake, "__init__", _init)
+        records = asyncio.run(
+            _acollect(fetch(KorTravelMapSettings(data_go_kr_service_key=None)))
+        )
+        outputs.append([r.raw["NM"] for r in records])
+
+    assert outputs[0] == outputs[1] == ["a", "b", "c"]
+
+
 @pytest.mark.parametrize("reverse", [False, True])
 def test_standard_parking_file_duplicate_numbers_pick_one_row_deterministically(
     monkeypatch: pytest.MonkeyPatch, reverse: bool
