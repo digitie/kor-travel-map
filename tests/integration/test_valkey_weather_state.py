@@ -703,6 +703,12 @@ async def test_forecast_delta_generation_is_byte_equal_to_a_full_pull(
     assert meta.full_synced_at is not None
     assert (await store.recent_counts(delta_ds.name)) == [2]  # 증분은 거부 기준 창에 넣지 않는다
 
+    # REST 묶음은 위치 roster가 있어야 위치를 찾는다.
+    _serve(
+        pytest.MonkeyPatch(),
+        {"/v1/service/exports/locations": _pages([_location("b", 127.0, 37.5)])},
+    )
+    await _load(store, DATASET_LOCATIONS)
     response = await api.get(
         f"/v1/service/weather/locations/{weather_location_feature_id('b')}",
         params={"sections": "forecasts", "forecast_styles": "short"},
