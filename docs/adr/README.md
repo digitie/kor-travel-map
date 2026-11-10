@@ -1,6 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-121.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-122.**
+
+- [ADR-121 — MCST 테마 목록은 독립 Feature가 아니라 장소 속성이다](121-mcst-theme-lists-as-place-attributes.md) — proposed, 2026-11-10 (#1468 A; 설계 `docs/architecture/place-theme-attributes.md`, 소유자 결정 D1~D3 대기).
 
 - [ADR-120 — transport 기준정보(휴게소·철도역·항구·공항)는 검색되는 Map place로 둔다](120-transport-reference-places-in-search.md) — proposed, 2026-11-09 (#1459; alembic 438, 검색 cursor v4; ADR-114 결정 7 ② 휴게소·공항 퇴역 취소).
 
