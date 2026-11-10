@@ -134,9 +134,6 @@ from kortravelmap.infra.dedup_repo import (
 )
 from kortravelmap.infra.enrichment_review_repo import (
     EnrichmentDecisionResult,
-    EnrichmentQueueResult,
-    EnrichmentReviewInput,
-    enqueue_review_candidates,
 )
 from kortravelmap.infra.enrichment_review_repo import (
     decide_enrichment_review as repo_decide_enrichment_review,
@@ -362,19 +359,6 @@ from kortravelmap.offline_upload import (
 from kortravelmap.providers.mois import DATASET_KEY_BULK as MOIS_DATASET_KEY_BULK
 from kortravelmap.providers.mois import DATASET_KEY_HISTORY as MOIS_DATASET_KEY_HISTORY
 from kortravelmap.providers.mois import PROVIDER_NAME as MOIS_PROVIDER_NAME
-from kortravelmap.providers.standard_data import (
-    DATASET_KEY_CULTURAL_FESTIVALS,
-    STANDARD_DATA_PROVIDER_NAME,
-)
-from kortravelmap.providers.visitkorea import (
-    DEFAULT_ACCEPT_THRESHOLD,
-    DEFAULT_REVIEW_FLOOR,
-    FestivalCandidate,
-    FestivalEnrichment,
-    ScoringFestivalMatcher,
-    festival_to_enrichment_links,
-    festival_to_review_candidates,
-)
 from kortravelmap.settings import FEATURE_LOAD_CURATION_LOCK_WAIT_SECONDS_DEFAULT
 
 if TYPE_CHECKING:
@@ -392,14 +376,13 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
     from kortravelmap.core.dedup import DedupCandidate, DedupInput, DedupMatch
-    from kortravelmap.dto import Address, FeatureBundle, SourceRecord
+    from kortravelmap.dto import Address, FeatureBundle, SourceLink, SourceRecord
     from kortravelmap.dto.geo_dataset import DatasetRef, GeoLoadContext
     from kortravelmap.dto.price import PriceValue
     from kortravelmap.geocoding import AddressResolver, ReverseGeocoder
     from kortravelmap.infra.feature_geocode_stamp_repo import GeoCoverage
     from kortravelmap.infra.scope_repo import SigunguByRadiusResolver
     from kortravelmap.providers.mois import MoisLicensePlaceRecord
-    from kortravelmap.providers.visitkorea import VisitKoreaFestivalItem
     from kortravelmap.settings import KorTravelMapSettings
 
 _LOG = logging.getLogger(__name__)
@@ -414,7 +397,6 @@ __all__ = [
     "DagsterFeatureOperationMutation",
     "DagsterFeatureOperationPage",
     "FeatureOperationInvariantConflict",
-    "FestivalEnrichmentReviewRefreshResult",
     "IntegrityFindingSyncResult",
     "OfflineUploadColumnMapping",
     "OfflineUploadLoadResult",
@@ -466,32 +448,6 @@ class DedupRefreshResult:
             "queue_skipped": self.queue.skipped,
         }
         return metadata
-
-
-@dataclass(frozen=True)
-class FestivalEnrichmentReviewRefreshResult:
-    """``refresh_festival_enrichment_reviews`` 결과 — 자동 적재 + 검토 큐 적재.
-
-    - ``auto`` — ≥ accept_threshold라 즉시 적재된 enrichment 카운트.
-    - ``review_queue`` — review-band를 ``ops.enrichment_review_queue``에 upsert한
-      카운트(inserted/updated/skipped).
-    """
-
-    auto: EnrichmentLoadResult
-    review_queue: EnrichmentQueueResult
-
-    def as_metadata(self) -> dict[str, object]:
-        """Dagster metadata로 바로 기록할 수 있는 summary."""
-        return {
-            "auto_enrichments_total": self.auto.enrichments_total,
-            "auto_source_records_inserted": self.auto.source_records_inserted,
-            "auto_source_links_inserted": self.auto.source_links_inserted,
-            "auto_source_links_updated": self.auto.source_links_updated,
-            "review_candidates_total": self.review_queue.candidates_total,
-            "review_inserted": self.review_queue.inserted,
-            "review_updated": self.review_queue.updated,
-            "review_skipped": self.review_queue.skipped,
-        }
 
 
 @dataclass(frozen=True, slots=True)
@@ -1815,113 +1771,19 @@ class AsyncKorTravelMapClient:
             return await purge_resolved_integrity_findings(session, retention=retention)
 
     async def load_enrichment_links(
-        self, enrichments: Iterable[FestivalEnrichment]
+        self, enrichments: Iterable[tuple[SourceRecord, SourceLink]]
     ) -> EnrichmentLoadResult:
-        """visitkorea 등 2차 enrichment(``FestivalEnrichment``)를 한 transaction으로 적재.
+        """2차 enrichment(``SourceRecord`` + ``SourceLink``)를 한 transaction으로 적재.
 
-        각 enrichment의 ``source_record`` → ``source_link``(enrichment role) 순
-        idempotent upsert (``infra.load_source_record_links``). **새 Feature는 만들지
-        않으며**, ``source_link.feature_id``가 가리키는 1차 feature(datagokr 축제)가
-        이미 적재돼 있어야 한다(FK). 하나라도 실패하면 전체 rollback.
+        각 쌍의 ``source_record`` → ``source_link``(enrichment role) 순 idempotent upsert
+        (``infra.load_source_record_links``). **새 Feature는 만들지 않으며**,
+        ``source_link.feature_id``가 가리키는 1차 feature가 이미 적재돼 있어야 한다(FK). 하나라도
+        실패하면 전체 rollback. (TourAPI 축제를 표준데이터 축제에 이름으로 잇던 호출자는
+        2026-11-10 축제 원천 전환으로 사라졌다.)
         """
-        pairs = [(e.source_record, e.source_link) for e in enrichments]
+        pairs = list(enrichments)
         async with self._feature_load_transaction() as session:
             return await load_source_record_links(session, pairs)
-
-    async def load_festival_enrichment(
-        self,
-        items: Iterable[VisitKoreaFestivalItem],
-        *,
-        fetched_at: datetime,
-        name_threshold: float = 0.90,
-    ) -> EnrichmentLoadResult:
-        """visitkorea 축제 items를 적재된 datagokr 축제(1차)에 매칭해 enrichment 적재.
-
-        한 transaction에서 (1) 적재된 datagokr 축제(``data.go.kr-standard`` /
-        ``datagokr_cultural_festivals`` / kind ``event``)를 candidate로 읽고
-        (2) ``ScoringFestivalMatcher``(이름 Jaro-Winkler 유사도, ADR-016)로 각
-        visitkorea item을 매칭, (3) ``festival_to_enrichment_links``로 enrichment
-        link를 만들고 (4) ``load_source_record_links``로 적재한다(ADR-042). 매칭
-        실패 item은 제외. 1차 festival이 아직 없으면 candidate가 비어 enrichment도 0.
-        """
-        items_list = list(items)
-        async with self._feature_load_transaction() as session:
-            candidate_rows = await list_dedup_refresh_features(
-                session,
-                DedupRefreshScope(
-                    provider=STANDARD_DATA_PROVIDER_NAME,
-                    dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
-                    kinds=("event",),
-                    limit=50_000,
-                ),
-            )
-            matcher = ScoringFestivalMatcher(
-                [
-                    FestivalCandidate(feature_id=row.feature_id, name=row.name)
-                    for row in candidate_rows
-                ],
-                name_threshold=name_threshold,
-            )
-            links = festival_to_enrichment_links(items_list, matcher=matcher, fetched_at=fetched_at)
-            pairs = [(link.source_record, link.source_link) for link in links]
-            return await load_source_record_links(session, pairs)
-
-    async def refresh_festival_enrichment_reviews(
-        self,
-        items: Iterable[VisitKoreaFestivalItem],
-        *,
-        fetched_at: datetime,
-        accept_threshold: float = DEFAULT_ACCEPT_THRESHOLD,
-        review_floor: float = DEFAULT_REVIEW_FLOOR,
-    ) -> FestivalEnrichmentReviewRefreshResult:
-        """visitkorea 축제 items를 점수 밴드로 자동 적재 + 수동 검토 큐로 분류한다(T-RV-52c).
-
-        한 transaction에서 (1) 적재된 datagokr 축제(1차)를 candidate로 읽고 (2)
-        ``festival_to_review_candidates``로 ``accept_threshold`` 이상은 즉시 enrichment
-        적재, ``[review_floor, accept_threshold)`` 모호 밴드는 ``ops.enrichment_review_queue``
-        로 upsert한다. ``review_floor`` 미만은 버린다. 자동 적재 동작은 기존
-        ``load_festival_enrichment``과 동치(임계값만 명시적). commit/rollback 소유.
-        """
-        items_list = list(items)
-        async with self._feature_load_transaction() as session:
-            candidate_rows = await list_dedup_refresh_features(
-                session,
-                DedupRefreshScope(
-                    provider=STANDARD_DATA_PROVIDER_NAME,
-                    dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
-                    kinds=("event",),
-                    limit=50_000,
-                ),
-            )
-            matcher = ScoringFestivalMatcher(
-                [
-                    FestivalCandidate(feature_id=row.feature_id, name=row.name)
-                    for row in candidate_rows
-                ],
-            )
-            plan = festival_to_review_candidates(
-                items_list,
-                matcher=matcher,
-                fetched_at=fetched_at,
-                accept_threshold=accept_threshold,
-                review_floor=review_floor,
-            )
-            auto = await load_source_record_links(
-                session,
-                [(e.source_record, e.source_link) for e in plan.auto],
-            )
-            review_inputs = [
-                EnrichmentReviewInput(
-                    target_feature_id=candidate.target_feature_id,
-                    target_name=candidate.target_name,
-                    source_name=candidate.source_name,
-                    name_score=candidate.name_score,
-                    source_record=candidate.enrichment.source_record,
-                )
-                for candidate in plan.review
-            ]
-            review_queue = await enqueue_review_candidates(session, review_inputs)
-            return FestivalEnrichmentReviewRefreshResult(auto=auto, review_queue=review_queue)
 
     async def list_pending_enrichment_reviews(self, *, limit: int = 100) -> list[dict[str, object]]:
         """검토 대기(``status='pending'``) 축제 enrichment 후보 list (name_score 내림차순).

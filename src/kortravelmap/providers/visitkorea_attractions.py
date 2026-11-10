@@ -2,8 +2,9 @@
 
 한국관광공사 국문 관광정보 서비스(KorService2) ``areaBasedList2``의 관광지 목록을
 **1차 source** place Feature로 만든다(#1459 — 산막이옛길·고군산군도·부산타워 같은 대표
-관광지가 운영 Map에 없었다). 축제(:mod:`kortravelmap.providers.visitkorea`)는 enrichment지만
-본 dataset은 Feature를 직접 만든다.
+관광지가 운영 Map에 없었다). 축제(:mod:`kortravelmap.providers.visitkorea`, 같은 서비스의
+``searchFestival2``)도 2026-11-10부터 1차 event source다 — 둘이 ``detailCommon2`` 일일 한도를
+나눠 쓴다.
 
 | dataset_key | kind | 함수 |
 |-------------|------|------|
@@ -465,8 +466,12 @@ def _file_sources(
     thumbnail: str | None,
     alt_text: str,
     license_code: str | None,
+    dataset_key: str = DATASET_KEY_VISITKOREA_ATTRACTIONS,
 ) -> list[FeatureFileSource]:
-    """대표·썸네일 이미지 URL → ``FeatureFileSource``(원본 참조, 가공 없음 — 공공누리 유형 준수)."""
+    """대표·썸네일 이미지 URL → ``FeatureFileSource``(원본 참조, 가공 없음 — 공공누리 유형 준수).
+
+    TourAPI 축제(:mod:`kortravelmap.providers.visitkorea`)도 같은 규칙으로 쓴다(``dataset_key``).
+    """
     sources: list[FeatureFileSource] = []
     for role, url, order in (("primary", primary, 0), ("thumbnail", thumbnail, 1)):
         if not url or (role == "thumbnail" and url == primary):
@@ -480,7 +485,7 @@ def _file_sources(
                 file_type="image",
                 alt_text=alt_text,
                 provider=normalize_provider_name(_PROVIDER_NAME),
-                dataset_key=DATASET_KEY_VISITKOREA_ATTRACTIONS,
+                dataset_key=dataset_key,
                 source_record_key=source_record_key,
                 # 파일이 객체 저장소로 옮겨져도 이용 조건이 함께 간다(Type3은 변경 금지).
                 payload={

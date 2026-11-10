@@ -9,7 +9,6 @@
 
 | dataset_key | Feature.kind | 함수 | Sprint |
 |-------------|-------------|------|--------|
-| ``datagokr_cultural_festivals`` | ``event`` | ``cultural_festivals_to_bundles`` | 2 (본 PR) |
 | ``datagokr_tourism_points`` | ``place`` | ``tourism_points_to_bundles`` | 5 |
 | ``standard_special_streets`` | ``place`` | ``special_streets_to_bundles`` | T-223b |
 | ``datagokr_traditional_markets`` | ``place`` | ``traditional_markets_to_bundles`` | #1459 |
@@ -18,17 +17,16 @@ ADR 참조
 --------
 - ADR-006 — provider wrapper 금지 (public client 직접 사용)
 - ADR-009 — ``make_feature_id`` / ``make_source_record_key`` / ``make_payload_hash``
-- ADR-018 — ``Feature.detail``은 ``EventDetail`` 인스턴스로
 - ADR-019 — 모든 datetime aware (KST, ``Asia/Seoul``)
 - ADR-024 — canonical provider name ``data.go.kr-standard``
-- ADR-042 — datagokr 표준데이터 축제 1차 source (visitkorea TourAPI는
-  enrichment 2차)
+- 전국문화축제표준데이터(구 ADR-042 축제 1차 source)는 2026-11-10 소유자 결정으로 쓰지 않는다 —
+  축제는 TourAPI(``providers.visitkorea``)가 유일한 원천이다(``docs/etl/event-feature-etl.md``).
 
 설계 메모
 --------
 ``python-datagokr-api``의 typed model은 본 라이브러리가 import해서 인스턴스로
 받지 않는다 (ADR-006 — public client 직접 사용, 본 모듈은 변환 순수 함수).
-대신 본 모듈은 ``CulturalFestivalItem`` ``Protocol``로 입력 shape만 정의한다.
+대신 본 모듈은 dataset마다 ``Protocol``로 입력 shape만 정의한다.
 ``python-datagokr-api``는 자기 dataclass/Pydantic 모델이 본 Protocol을 만족
 하도록 필드 이름을 맞추거나, 호출자가 가벼운 dict→model adapter를 자기
 영역에서 만든다.
@@ -59,7 +57,6 @@ from kortravelmap.core.address import (
     normalize_korean_text,
     normalize_phone_number,
 )
-from kortravelmap.core.events import has_required_event_details
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -69,11 +66,9 @@ from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.dto import (
     Address,
     Coordinate,
-    EventDetail,
     Feature,
     FeatureBundle,
     FeatureKind,
-    FeatureQualityState,
     PlaceDetail,
     SourceLink,
     SourceRecord,
@@ -89,13 +84,11 @@ from kortravelmap.geocoding import (
 )
 
 __all__ = [
-    "CulturalFestivalItem",
     "PublicMuseumArtItem",
     "PublicParkingLotItem",
     "PublicSpecialStreetItem",
     "PublicTouristAttractionItem",
     "PublicTraditionalMarketItem",
-    "cultural_festivals_to_bundles",
     "museums_to_bundles",
     "parking_lots_to_bundles",
     "special_streets_to_bundles",
@@ -103,11 +96,7 @@ __all__ = [
     "traditional_market_natural_key",
     "traditional_markets_to_bundles",
     # 상수 (호출자가 source_role/marker 등 변경하고 싶을 때 참조)
-    "DATASET_KEY_CULTURAL_FESTIVALS",
     "DATASET_KEY_MUSEUMS",
-    "FESTIVAL_CATEGORY",
-    "FESTIVAL_MARKER_ICON",
-    "FESTIVAL_MARKER_COLOR",
     "MUSEUM_CATEGORY",
     "MUSEUM_MARKER_COLOR",
     "STANDARD_DATA_PROVIDER_NAME",
@@ -128,26 +117,8 @@ __all__ = [
 
 # -- 상수 -----------------------------------------------------------------
 
-DATASET_KEY_CULTURAL_FESTIVALS: Final[str] = "datagokr_cultural_festivals"
-"""``provider_sync.source_records.dataset_key`` 값 — 전국문화축제표준데이터."""
-
 _PROVIDER_NAME: Final[str] = "data.go.kr-standard"
 """canonical provider name (``ADR-024`` ``CANONICAL_PROVIDER_NAMES``)."""
-
-_SOURCE_ENTITY_TYPE: Final[str] = "cultural_festival"
-"""provider 내 entity 종류 — ``source_records.source_entity_type``."""
-
-FESTIVAL_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM_EVENT.value
-"""``Feature.category`` — ``PlaceCategoryCode.TOURISM`` 8자리 (ADR-042).
-
-festival은 축제·행사 category와 ``EventDetail.event_kind='festival'``에서 분기.
-"""
-
-FESTIVAL_MARKER_ICON: Final[str] = "star"
-"""Maki icon name. ``docs/etl/event-feature-etl.md §4`` 표 참조."""
-
-FESTIVAL_MARKER_COLOR: Final[str] = "P-11"
-"""축제 marker color palette (자홍 계열). ``docs/etl/event-feature-etl.md §4`` 표."""
 
 STANDARD_DATA_PROVIDER_NAME: Final[str] = _PROVIDER_NAME
 """``data.go.kr-standard`` canonical provider name 공개 alias(asset/fetcher 참조용)."""
@@ -172,86 +143,7 @@ _DEFAULT_MUSEUM_ICON: Final[str] = "museum"
 """category maki 매핑이 없을 때 fallback Maki icon."""
 
 
-# -- 입력 Protocol --------------------------------------------------------
-
-
-@runtime_checkable
-class CulturalFestivalItem(Protocol):
-    """전국문화축제표준데이터 1 row 입력 shape (``PublicCulturalFestival``).
-
-    ``python-datagokr-api``의 ``festival.iter_all()`` 결과 model이 본 Protocol을
-    **필드명 그대로** 만족한다 (ADR-044 재정렬, #374 — 종전 Protocol은
-    ``management_no``/``road_address`` 등 provider에 없는 필드를 발명했었다).
-    좌표는 WGS84 ``float``.
-
-    본 dataset에는 안정 관리번호 컬럼이 없다 — 자연키는 ``name::address``
-    파생 (ADR-009 ``::``, ``_museum_to_bundle`` fallback과 동일 패턴).
-
-    원천 한국어 컬럼 → 본 Protocol 필드 매핑은 ``docs/etl/event-feature-etl.md
-    §4`` 표 참조.
-
-    Notes
-    -----
-    ``runtime_checkable``로 두지만 isinstance 검사는 비싸므로 본 모듈은 사용
-    하지 않는다 — 함수 호출 시점에 attribute 접근으로 자연 검증.
-    """
-
-    fstvl_nm: str | None
-    """축제명 (``Feature.name``). 없으면 해당 row skip."""
-
-    opar: str | None
-    """개최장소 (``EventDetail.venue_name``)."""
-
-    fstvl_start_date: date | None
-    """축제시작일자 (``EventDetail.starts_on``)."""
-
-    fstvl_end_date: date | None
-    """축제종료일자 (``EventDetail.ends_on``)."""
-
-    fstvl_co: str | None
-    """축제내용 (``SourceRecord.raw_data``에만 저장, Feature 본체는 미반영)."""
-
-    mnnst_nm: str | None
-    """주관기관명 (``EventDetail.payload['organizer_name']``)."""
-
-    auspc_instt_nm: str | None
-    """주최기관명 (``SourceRecord.raw_data``)."""
-
-    suprt_instt_nm: str | None
-    """후원기관명 (``SourceRecord.raw_data``)."""
-
-    phone_number: str | None
-    """전화번호 (``EventDetail.tel``)."""
-
-    homepage_url: str | None
-    """홈페이지주소 (``SourceRecord.raw_data``)."""
-
-    relate_info: str | None
-    """관련정보 (``SourceRecord.raw_data``)."""
-
-    rdnmadr: str | None
-    """도로명주소 (``Feature.address.road`` + ``SourceRecord.raw_data``)."""
-
-    lnmadr: str | None
-    """지번주소 (``Feature.address.legal``)."""
-
-    latitude: float | None
-    """위도 (WGS84). ``None`` 가능."""
-
-    longitude: float | None
-    """경도 (WGS84). ``None`` 가능."""
-
-    reference_date: date | None
-    """데이터기준일자 (``SourceRecord.raw_data``에 저장)."""
-
-    instt_code: str | None
-    """제공기관코드 (``SourceRecord.raw_data``)."""
-
-    instt_nm: str | None
-    """제공기관명 (``EventDetail.payload['provider_org_name']``)."""
-
-
-# -- 단일 변환 ------------------------------------------------------------
+# -- 공용 변환 helper -----------------------------------------------------
 
 
 def _coordinate_or_none(longitude: float | None, latitude: float | None) -> Coordinate | None:
@@ -269,279 +161,6 @@ def _coordinate_or_none(longitude: float | None, latitude: float | None) -> Coor
         return Coordinate(lon=Decimal(str(longitude)), lat=Decimal(str(latitude)))
     except ValidationError:
         return None
-
-
-async def _item_to_bundle(
-    item: CulturalFestivalItem,
-    *,
-    fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None,
-    address_resolver: AddressResolver | None,
-    address_geocoder: AddressGeocoder | None = None,
-) -> FeatureBundle | None:
-    """한 row → 한 ``FeatureBundle``. 본 함수는 모듈 private.
-
-    축제명(``fstvl_nm``)이 정규화 후에도 비면 Feature를 만들 수 없으므로
-    ``None`` 반환 — ``cultural_festivals_to_bundles``가 filter (#374).
-
-    한국어 텍스트/전화번호/법정동코드는 ``kortravelmap.core.address``의 정규화
-    helper를 적극 활용해 provider raw 변형(전각 공백 / dash 변형 / 9자리
-    bjd_code 등)을 흡수한다 (ADR-041).
-    """
-
-    # 0) 축제명 없는 row는 skip (자연키/Feature.name 모두 이름 의존).
-    name = normalize_korean_text(item.fstvl_nm)
-    if not name:
-        return None
-
-    road_text = normalize_korean_text(item.rdnmadr)
-    legal_text = normalize_korean_text(item.lnmadr)
-
-    # 1) Coordinate (결측/검증 실패면 좌표 미상 — `_coordinate_or_none`). 원천 좌표가 없고
-    #    주소가 번지까지 있으면 주소 정지오코딩으로 메운다(#1459 §4, raw_data는 원천 그대로).
-    coord = await geocode_missing_coordinate(
-        _coordinate_or_none(item.longitude, item.latitude),
-        Address(road=road_text, legal=legal_text),
-        address_geocoder,
-    )
-
-    # 2) Geocoding 보강. 좌표 reverse를 먼저 쓰고, bjd_code가 없으면 주소
-    #    geocode 결과의 structured legal_dong_code를 사용한다.
-    geo: Address | None = None
-    if coord is not None and reverse_geocoder is not None:
-        geo = await reverse_geocoder(coord)
-    if (geo is None or geo.bjd_code is None) and address_resolver is not None:
-        resolved = await address_resolver(Address(road=road_text, legal=legal_text))
-        if resolved is not None and resolved.bjd_code is not None:
-            geo = resolved
-    bjd_code = geo.bjd_code if geo is not None else None
-    sigungu_code = (geo.sigungu_code if geo is not None else None) or extract_sigungu_code(bjd_code)
-    sido_code = (geo.sido_code if geo is not None else None) or extract_sido_code(bjd_code)
-
-    # 3) Address — 표시 텍스트는 item 원천(도로명/지번)을 정규화해 유지하고,
-    #    행정코드/행정동명/우편번호 등은 reverse lookup 결과(geo)에서 채운다.
-    #    nullable 필드는 None 유지 — Address(extra='forbid') validator 통과.
-    address = Address(
-        road=road_text,
-        legal=legal_text,
-        admin=geo.admin if geo is not None else None,
-        bjd_code=bjd_code,
-        admin_dong_code=geo.admin_dong_code if geo is not None else None,
-        sigungu_code=sigungu_code,
-        sido_code=sido_code,
-        road_name_code=geo.road_name_code if geo is not None else None,
-        zipcode=geo.zipcode if geo is not None else None,
-        sido_name=geo.sido_name if geo is not None else None,
-        sigungu_name=geo.sigungu_name if geo is not None else None,
-    )
-
-    # 4) 자연키 — 본 dataset에 안정 관리번호 컬럼이 없어 ``name::address``
-    #    파생 (ADR-009 ``::``, museum/mcst fallback 패턴과 동일, #374).
-    natural_key = "::".join([name, road_text or legal_text or ""])
-
-    # 5) Raw payload (canonical JSON 직렬화 가능한 dict, provider 필드명 그대로).
-    raw_data: dict[str, Any] = {
-        "fstvl_nm": item.fstvl_nm,
-        "opar": item.opar,
-        "fstvl_start_date": (item.fstvl_start_date.isoformat() if item.fstvl_start_date else None),
-        "fstvl_end_date": (item.fstvl_end_date.isoformat() if item.fstvl_end_date else None),
-        "fstvl_co": item.fstvl_co,
-        "mnnst_nm": item.mnnst_nm,
-        "auspc_instt_nm": item.auspc_instt_nm,
-        "suprt_instt_nm": item.suprt_instt_nm,
-        "phone_number": item.phone_number,
-        "homepage_url": item.homepage_url,
-        "relate_info": item.relate_info,
-        "rdnmadr": item.rdnmadr,
-        "lnmadr": item.lnmadr,
-        "latitude": str(item.latitude) if item.latitude is not None else None,
-        "longitude": str(item.longitude) if item.longitude is not None else None,
-        "reference_date": (item.reference_date.isoformat() if item.reference_date else None),
-        "instt_code": item.instt_code,
-        "instt_nm": item.instt_nm,
-    }
-    payload_hash = make_payload_hash(raw_data)
-
-    # 6) source_record_key (ADR-009).
-    source_record_key = make_source_record_key(
-        provider=_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
-        source_entity_type=_SOURCE_ENTITY_TYPE,
-        source_entity_id=natural_key,
-        raw_payload_hash=payload_hash,
-    )
-
-    # 7) feature_id (ADR-009). bjd_code 미상 시 'global' fallback은 make_feature_id 내부.
-    feature_id = make_feature_id(
-        bjd_code=bjd_code,
-        kind=FeatureKind.EVENT.value,
-        category=PlaceCategoryCode.TOURISM.value,
-        source_type=f"{_PROVIDER_NAME}:{DATASET_KEY_CULTURAL_FESTIVALS}",
-        source_natural_key=natural_key,
-    )
-
-    # 8) Feature 본체. 한국어 텍스트는 normalize, 전화번호는 dash 표준 표기로.
-    #    실데이터에 시작/종료 역전 row(원천 오타, 예: 시작 2025-10-25/종료
-    #    2024-10-01)가 존재한다(#386) — 어느 쪽이 오타인지 추정할 수 없으므로
-    #    둘 다 격리(None)하고 raw_data에만 원본을 보존한다. EventDetail의
-    #    ends_on >= starts_on 도메인 검증이 dataset 전체를 죽이지 않게 한다.
-    starts_on = item.fstvl_start_date
-    ends_on = item.fstvl_end_date
-    if starts_on is not None and ends_on is not None and ends_on < starts_on:
-        starts_on = None
-        ends_on = None
-    feature = Feature(
-        feature_id=feature_id,
-        provider_natural_key=natural_key,
-        kind=FeatureKind.EVENT,
-        name=name,
-        coord=coord,
-        address=address,
-        category=FESTIVAL_CATEGORY,
-        marker_icon=FESTIVAL_MARKER_ICON,
-        marker_color=FESTIVAL_MARKER_COLOR,
-        detail=EventDetail(
-            feature_id=feature_id,
-            event_kind="festival",
-            starts_on=starts_on,
-            ends_on=ends_on,
-            venue_name=normalize_korean_text(item.opar),
-            tel=normalize_phone_number(item.phone_number),
-            # area_code / sigungu_code 등 TourAPI 식별자는 visitkorea enrichment
-            # 단계에서 채움 (ADR-042). 표준데이터는 영문 행정코드만.
-            # key 이름 organizer_name/provider_org_name은 downstream(visitkorea
-            # enrichment) 소비 계약 — 유지 (#374).
-            payload={
-                "organizer_name": normalize_korean_text(item.mnnst_nm),
-                "provider_org_name": normalize_korean_text(item.instt_nm),
-            },
-        ),
-    )
-
-    if not has_required_event_details(feature.detail):
-        feature = feature.model_copy(update={"quality_state": FeatureQualityState.QUARANTINED})
-
-    # 9) SourceRecord (raw 보존).
-    source_record = SourceRecord(
-        provider=normalize_provider_name(_PROVIDER_NAME),
-        dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
-        source_entity_type=_SOURCE_ENTITY_TYPE,
-        source_entity_id=natural_key,
-        raw_payload_hash=payload_hash,
-        raw_data=raw_data,
-        fetched_at=fetched_at,
-        source_record_key=source_record_key,
-    )
-
-    # 10) SourceLink — primary (ADR-042 datagokr 1차 source).
-    source_link = SourceLink(
-        feature_id=feature_id,
-        source_record_key=source_record_key,
-        source_role=SourceRole.PRIMARY,
-        match_method="natural_key",  # name::address 파생키 직접 매핑
-        confidence=100,  # 1차 source는 항상 100
-    )
-
-    return FeatureBundle(
-        feature=feature,
-        source_record=source_record,
-        source_link=source_link,
-    )
-
-
-# -- 공개 API -----------------------------------------------------------
-
-
-async def cultural_festivals_to_bundles(
-    items: Iterable[CulturalFestivalItem],
-    *,
-    fetched_at: datetime,
-    reverse_geocoder: ReverseGeocoder | None = None,
-    address_resolver: AddressResolver | None = None,
-    address_geocoder: AddressGeocoder | None = None,
-) -> list[FeatureBundle]:
-    """전국문화축제표준데이터 items → ``list[FeatureBundle]`` (ADR-042 1차 source).
-
-    Parameters
-    ----------
-    items
-        ``python-datagokr-api``의 cultural festival typed model iterable.
-        본 모듈의 ``CulturalFestivalItem`` Protocol을 만족해야 한다.
-    fetched_at
-        provider 호출 시각 (KST aware, ADR-019). 모든 bundle의 ``SourceRecord
-        .fetched_at``에 같은 값 사용 — 호출자가 page batch 단위로 1회 결정.
-    reverse_geocoder
-        좌표 → ``Address`` async 역지오코더 (``kortravelmap.geocoding.
-        ReverseGeocoder``, 예: ``kor_travel_geo_reverse_geocoder(client)``).
-        feature_id가 bjd_code에 의존하므로(ADR-009) feature_id 계산 전에 await해
-        채운다. 중복 좌표는 내부에서 ``cached_reverse_geocoder``로 1회만 호출.
-    address_resolver
-        주소 → ``Address`` async 보강 geocoder. 좌표가 없거나 reverse 결과에
-        bjd_code가 없을 때 road/jibun 주소로 ``/v2/geocode``를 호출해
-        ``legal_dong_code``를 채운다. 중복 주소는 ``cached_address_resolver``로
-        1회만 호출.
-    address_geocoder
-        주소 → 좌표 async 정지오코더. 원천 좌표가 없고 주소가 번지까지 있는 row만 부른다
-        (#1459 §4 — 운영 축제 240건이 좌표 없이 적재돼 지도·동선에 쓸 수 없었다). 같은 입력으로
-        여러 번 부르는 호출자(저장값 재사용)는 ``cached_address_geocoder``로 감싸 넘긴다.
-
-    Returns
-    -------
-    list[FeatureBundle]
-        입력 순서 유지. 각 bundle은 ``Feature`` + ``SourceRecord`` +
-        ``SourceLink``로 구성. ``feature_id`` / ``source_record_key``는
-        결정적(ADR-009)이라 같은 입력은 항상 같은 ID. 축제명(``fstvl_nm``)이
-        정규화 후 빈 row는 skip — 결과 길이가 입력보다 짧을 수 있다 (#374).
-
-    Raises
-    ------
-    ValueError
-        ``fetched_at``이 naive datetime (ADR-019 enforce — ``SourceRecord``의
-        validator에서 raise).
-    pydantic.ValidationError
-        ``EventDetail.ends_on < starts_on`` 같은 도메인 룰 위반.
-
-    Examples
-    --------
-    호출자(external apps 또는 Dagster asset) 측 사용 예시:
-
-    >>> from datetime import datetime, timezone, timedelta
-    >>> from kortravelmap.providers.standard_data import (
-    ...     cultural_festivals_to_bundles,
-    ... )
-    >>> # client = AsyncDataGoKrClient(...)
-    >>> # items = [item async for item in client.aiter_cultural_festivals()]
-    >>> # bundles = cultural_festivals_to_bundles(
-    >>> #     items,
-    >>> #     fetched_at=datetime.now(timezone(timedelta(hours=9))),
-    >>> #     reverse_geocoder=kraddr_reverse,
-    >>> # )
-    >>> # await client_app.load_feature_bundles(bundles)
-
-    Notes
-    -----
-    - 좌표 nullable: 본 표준데이터는 좌표 없는 row가 종종 있음. 좌표 없으면
-      ``Feature.coord=None``으로 적재되고 ``features_in_bounds`` 쿼리에서
-      자연히 제외된다 (ADR-012).
-    - reverse_geocoder/address_resolver가 모두 ``None``이면 ``bjd_code``는 채워지지
-      않는다 — 호출자가 kor-travel-geo resolver를 주입하면 batch 보강된다.
-    - visitkorea enrichment(이미지 / 상세설명 / contentId)는 Sprint 2 끝물
-      별도 PR — `festival_to_enrichment_links`에서 처리.
-    """
-    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
-    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
-    bundles: list[FeatureBundle] = []
-    for item in items:
-        bundle = await _item_to_bundle(
-            item,
-            fetched_at=fetched_at,
-            reverse_geocoder=geocoder,
-            address_resolver=resolver,
-            address_geocoder=address_geocoder,
-        )
-        if bundle is not None:
-            bundles.append(bundle)
-    return bundles
 
 
 # -- 박물관/미술관 (place, ADR-034 9단계) ---------------------------------

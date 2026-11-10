@@ -54,10 +54,6 @@ def _handler(job_name: str, asset_key: str) -> FeatureOperationHandlerBinding:
 
 _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
     _handler(
-        "feature_event_datagokr_cultural_festivals_job",
-        "feature_event_datagokr_cultural_festivals",
-    ),
-    _handler(
         "feature_place_transport_fuel_stations_job",
         "feature_place_transport_fuel_stations",
     ),
@@ -124,8 +120,8 @@ _HANDLER_BINDINGS: Final[tuple[FeatureOperationHandlerBinding, ...]] = (
         "feature_place_kor_travel_concierge_youtube",
     ),
     _handler(
-        "feature_event_visitkorea_enrichment_job",
-        "feature_event_visitkorea_enrichment",
+        "feature_event_visitkorea_festivals_job",
+        "feature_event_visitkorea_festivals",
     ),
     _handler(
         "feature_place_datagokr_seoul_bookstores_job",

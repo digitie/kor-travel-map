@@ -1,234 +1,227 @@
-"""``test_providers_visitkorea`` — VisitKorea TourAPI enrichment (PR#51, ADR-042).
+"""``test_providers_visitkorea`` — TourAPI 축제(``searchFestival2``) → 1차 event Feature.
 
-본 PR 테스트 범위:
-- ``festival_to_enrichment_links`` happy path (매칭된 item만 enrichment).
-- ``FestivalMatcher.match() -> None``인 item은 결과에서 제외.
-- ``SourceLink``는 enrichment role + 1차 feature_id 매핑.
-- ``SourceRecord``는 새 Feature 없이 visitkorea raw 보존 (provider/dataset_key).
-- 결정성 — 같은 입력은 항상 같은 ``source_record_key``.
-- ``FestivalEnrichment`` consistency validator (role/key/primary).
-- naive ``fetched_at``은 ADR-019 reject.
+2026-11-10 소유자 결정으로 data.go.kr 전국문화축제표준데이터를 쓰지 않는다. TourAPI 축제가
+유일한 축제 원천이고 이름으로 다른 축제에 붙는 enrichment가 아니라 Feature를 직접 만든다.
+
+입력 행은 2026-11-10 운영 키로 받은 ``searchFestival2`` 실제 응답의 필드 값이다
+(포항국제불빛축제 588175 — ``lclsSystm3`` EV010200, 좌표·법정동 코드 보유).
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+import asyncio
+from collections.abc import Iterable
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta, timezone
+from decimal import Decimal
+from typing import Any
 
 import pytest
-from pydantic import ValidationError
 
-from kortravelmap.dto import SourceRole
-from kortravelmap.providers.visitkorea import (
-    DATASET_KEY_FESTIVAL_EVENTS,
-    VISITKOREA_PROVIDER_NAME,
-    FestivalEnrichment,
-    festival_to_enrichment_links,
+from kortravelmap.category import PlaceCategoryCode
+from kortravelmap.core.events import has_required_event_details
+from kortravelmap.dto import (
+    Address,
+    Coordinate,
+    EventDetail,
+    FeatureBundle,
+    FeatureKind,
+    FeatureQualityState,
+    SourceRole,
 )
+from kortravelmap.providers import visitkorea as vk
+
+pytestmark = pytest.mark.unit
 
 KST = timezone(timedelta(hours=9))
-
-
-# -- fixtures (Protocol 만족 frozen dataclass) ----------------------------
+_FETCHED = datetime(2026, 11, 10, 4, 35, tzinfo=KST)
 
 
 @dataclass(frozen=True)
 class _Item:
-    """``VisitKoreaFestivalItem`` Protocol 만족 테스트 dataclass."""
-
-    content_id: str
+    content_id: str | None
     title: str | None
-    overview: str | None
-    first_image: str | None
-    first_image2: str | None
-    addr1: str | None
-    area_code: str | None
-    sigungu_code: str | None
-    map_x: float | None
-    map_y: float | None
-    event_start_date: str | None
-    event_end_date: str | None
-    tel: str | None
-    homepage: str | None
-    modified_time: datetime | str | None
+    content_type_id: str | None = "15"
+    addr1: str | None = None
+    addr2: str | None = None
+    zipcode: str | None = None
+    tel: str | None = None
+    first_image: str | None = None
+    first_image2: str | None = None
+    map_x: float | None = None
+    map_y: float | None = None
+    lcls_systm1: str | None = None
+    lcls_systm2: str | None = None
+    lcls_systm3: str | None = None
+    l_dong_regn_cd: str | None = None
+    l_dong_signgu_cd: str | None = None
+    created_time: datetime | None = None
+    modified_time: datetime | None = None
+    copyright_division_code: str | None = None
+    event_start_date: str | None = None
+    event_end_date: str | None = None
+    overview: str | None = None
+    homepage: str | None = None
 
 
-@dataclass(frozen=True)
-class _Match:
-    """``FestivalMatch`` Protocol 만족."""
-
-    feature_id: str
-    confidence: int
-    match_method: str
-
-
-class _DictMatcher:
-    """``FestivalMatcher`` — content_id → (feature_id, confidence) dict 기반.
-
-    매핑에 없는 content_id는 ``None`` 반환 (enrichment 생략 검증용).
-    """
-
-    def __init__(self, mapping: dict[str, _Match]) -> None:
-        self._mapping = mapping
-
-    def match(self, item: object) -> _Match | None:
-        return self._mapping.get(item.content_id)  # type: ignore[attr-defined]
-
-
-_ITEM1 = _Item(
-    content_id="2747929",
-    title="서울 봄꽃 축제",
-    overview="여의도 일대 봄꽃 축제 상세 설명.",
-    first_image="http://tong.visitkorea.or.kr/img1.jpg",
-    first_image2="http://tong.visitkorea.or.kr/img1_thumb.jpg",
-    addr1="서울특별시 영등포구 여의공원로 120",
-    area_code="1",
-    sigungu_code="19",
-    map_x=126.9245,
-    map_y=37.526,
-    event_start_date="20260405",
-    event_end_date="20260412",
-    tel="02-2670-3114",
-    homepage='<a href="http://spring.example.kr">바로가기</a>',
-    # provider 실모델(TourItem.modified_time)은 datetime으로 파싱해 보존한다
-    # (ADR-044 재정렬 — T-212e live 실측). 변환이 원시 TourAPI 표기로
-    # 문자열화하는지 본 fake로 검증한다.
-    modified_time=datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone(timedelta(hours=9))),
-)
-_ITEM2 = _Item(
-    content_id="2747930",
-    title="부산 바다 축제",
-    overview=None,
-    first_image=None,
-    first_image2=None,
-    addr1="부산광역시 해운대구 해운대해변로 264",
-    area_code="6",
-    sigungu_code="16",
-    map_x=129.1603,
-    map_y=35.1587,
-    event_start_date="20260801",
-    event_end_date="20260805",
-    tel=None,
-    homepage=None,
-    modified_time="20260601090000",
-)
-
-# ITEM1은 매칭, ITEM2는 매칭 실패(미등록) → 결과에서 제외.
-_FEATURE_ID_1 = "f_1156000000_e_abcdef0123456789abcd"
-_MATCHER = _DictMatcher(
-    {
-        "2747929": _Match(
-            feature_id=_FEATURE_ID_1,
-            confidence=88,
-            match_method="name_region_match",
-        ),
-    }
+_POHANG = _Item(
+    content_id="588175",
+    title="포항국제불빛축제",
+    addr1="경상북도 포항시 북구 두호동 685-1",
+    addr2="영일대해수욕장 일원",
+    tel="054-270-5114",
+    first_image="http://tong.visitkorea.or.kr/cms/resource/75/588175_image2_1.jpg",
+    first_image2="http://tong.visitkorea.or.kr/cms/resource/75/588175_image3_1.jpg",
+    map_x=129.3655,
+    map_y=36.0567,
+    lcls_systm1="EV",
+    lcls_systm2="EV01",
+    lcls_systm3="EV010200",
+    l_dong_regn_cd="47",
+    l_dong_signgu_cd="113",
+    modified_time=datetime(2026, 10, 30, 11, 2, 3, tzinfo=KST),
+    copyright_division_code="Type3",
+    event_start_date="20261119",
+    event_end_date="20261121",
 )
 
 
-# -- happy path -----------------------------------------------------------
-
-
-@pytest.mark.unit
-def test_enrichment_only_matched_items() -> None:
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=KST)
-    links = festival_to_enrichment_links(
-        [_ITEM1, _ITEM2], matcher=_MATCHER, fetched_at=fetched
+async def _reverse(coord: Coordinate) -> Address:
+    return Address(
+        bjd_code="4711310100",
+        sigungu_code="47113",
+        sido_code="47",
+        admin="두호동",
+        zipcode="37707",
     )
-    # ITEM2는 매칭 실패 → 1건만.
-    assert len(links) == 1
-    assert isinstance(links[0], FestivalEnrichment)
 
 
-@pytest.mark.unit
-def test_enrichment_source_link_shape() -> None:
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=KST)
-    [link] = festival_to_enrichment_links(
-        [_ITEM1], matcher=_MATCHER, fetched_at=fetched
+def _bundles(items: Iterable[Any], **kwargs: Any) -> list[FeatureBundle]:
+    return asyncio.run(vk.tourapi_festivals_to_bundles(items, fetched_at=_FETCHED, **kwargs))
+
+
+def _detail(bundle: FeatureBundle) -> EventDetail:
+    assert isinstance(bundle.feature.detail, EventDetail)
+    return bundle.feature.detail
+
+
+# -- 정체성 ---------------------------------------------------------------
+
+
+def test_a_tourapi_festival_becomes_a_primary_event_feature() -> None:
+    (bundle,) = _bundles([_POHANG], reverse_geocoder=_reverse)
+    feature = bundle.feature
+    assert feature.kind is FeatureKind.EVENT
+    assert feature.name == "포항국제불빛축제"
+    assert feature.category == PlaceCategoryCode.TOURISM_EVENT.value
+    assert (feature.marker_icon, feature.marker_color) == ("star", "P-11")
+    assert feature.coord == Coordinate(lon=Decimal("129.3655"), lat=Decimal("36.0567"))
+    assert feature.address.bjd_code == "4711310100"
+    assert feature.quality_state is FeatureQualityState.VALID
+
+    record = bundle.source_record
+    assert record.provider == "python-visitkorea-api"
+    assert record.dataset_key == vk.DATASET_KEY_VISITKOREA_FESTIVALS == "visitkorea_festivals"
+    assert record.source_entity_id == "588175"
+    # 1차 source다 — 다른 원천의 축제에 이름으로 붙는 enrichment가 아니다.
+    assert bundle.source_link.source_role is SourceRole.PRIMARY
+    assert bundle.source_link.feature_id == feature.feature_id
+
+
+def test_festival_dates_venue_and_tourapi_ids_land_in_the_event_detail() -> None:
+    (bundle,) = _bundles([_POHANG], reverse_geocoder=_reverse)
+    detail = _detail(bundle)
+    # 공개 축제 API(``event_kind IN ('festival', …)``)가 이 행을 그대로 고른다.
+    assert detail.event_kind == "festival"
+    assert (detail.starts_on, detail.ends_on) == (date(2026, 11, 19), date(2026, 11, 21))
+    # 장소는 원천이 준 개최지 주소다(행정구역으로 추정하지 않는다).
+    assert detail.venue_name == "경상북도 포항시 북구 두호동 685-1 영일대해수욕장 일원"
+    assert detail.tel == "054-270-5114"
+    assert (detail.content_id, detail.content_type_id) == ("588175", "15")
+    assert detail.payload["lcls_systm3"] == "EV010200"
+    assert has_required_event_details(detail)
+
+
+def test_overview_and_homepage_from_the_detail_call_are_exposed() -> None:
+    item = replace(
+        _POHANG,
+        overview="포항의 밤바다를 수놓는 불빛축제.<br>불꽃쇼&nbsp;공연",
+        homepage='<a href="https://phfireworks.ipohang.org" target="_blank">홈페이지</a>',
     )
-    sl = link.source_link
-    assert sl.feature_id == _FEATURE_ID_1
-    assert sl.source_role is SourceRole.ENRICHMENT
-    assert sl.match_method == "name_region_match"
-    assert sl.confidence == 88
-    # link가 record를 가리킴.
-    assert sl.source_record_key == link.source_record.source_record_key
+    (bundle,) = _bundles([item])
+    detail = _detail(bundle)
+    # 공개 축제 view의 ``festival_content``는 ``payload['content']``를 읽는다.
+    assert detail.payload["content"] == "포항의 밤바다를 수놓는 불빛축제.\n불꽃쇼 공연"
+    assert str(bundle.feature.urls.homepage) == "https://phfireworks.ipohang.org/"
+    # replay가 ``TourItem``으로 되살릴 수 있게 상세 원문을 raw_data에 남긴다.
+    assert bundle.source_record.raw_data["overview"] == item.overview
+    assert bundle.source_record.raw_data["event_start_date"] == "20261119"
 
 
-@pytest.mark.unit
-def test_enrichment_source_record_no_feature() -> None:
-    """enrichment는 Feature를 만들지 않고 visitkorea raw만 보존."""
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=KST)
-    [link] = festival_to_enrichment_links(
-        [_ITEM1], matcher=_MATCHER, fetched_at=fetched
-    )
-    sr = link.source_record
-    assert sr.provider == VISITKOREA_PROVIDER_NAME
-    assert sr.dataset_key == DATASET_KEY_FESTIVAL_EVENTS
-    assert sr.source_entity_id == "2747929"
-    # 이미지/overview는 raw_data에 보존 (FeatureFileSource는 후속 PR).
-    assert sr.raw_data["first_image"] == "http://tong.visitkorea.or.kr/img1.jpg"
-    assert sr.raw_data["overview"] == "여의도 일대 봄꽃 축제 상세 설명."
-    assert sr.raw_data["content_id"] == "2747929"
-    assert sr.raw_data["map_x"] == 126.9245
-    assert sr.raw_data["map_y"] == 37.526
-    # datetime modified_time은 원시 TourAPI 표기(YYYYMMDDHHMMSS) 문자열로
-    # JSON 직렬화 가능한 raw payload에만 보존한다.
-    assert sr.raw_data["modified_time"] == "20260301120000"
+def test_images_are_referenced_with_the_kogl_license() -> None:
+    (bundle,) = _bundles([_POHANG])
+    roles = [(source.role, source.dataset_key) for source in bundle.file_sources]
+    assert roles == [
+        ("primary", "visitkorea_festivals"),
+        ("thumbnail", "visitkorea_festivals"),
+    ]
+    assert {source.payload["kogl_type"] for source in bundle.file_sources} == {"Type3"}
 
 
-@pytest.mark.unit
-def test_enrichment_deterministic_key() -> None:
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=KST)
-    [a] = festival_to_enrichment_links([_ITEM1], matcher=_MATCHER, fetched_at=fetched)
-    [b] = festival_to_enrichment_links([_ITEM1], matcher=_MATCHER, fetched_at=fetched)
-    assert a.source_record.source_record_key == b.source_record.source_record_key
+# -- 품질 경계 ------------------------------------------------------------
 
 
-@pytest.mark.unit
-def test_enrichment_empty_when_no_match() -> None:
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=KST)
-    empty = _DictMatcher({})
-    links = festival_to_enrichment_links(
-        [_ITEM1, _ITEM2], matcher=empty, fetched_at=fetched
-    )
-    assert links == []
+def test_inverted_dates_are_dropped_and_the_row_is_quarantined() -> None:
+    (bundle,) = _bundles([replace(_POHANG, event_start_date="20261121", event_end_date="20261119")])
+    detail = _detail(bundle)
+    assert (detail.starts_on, detail.ends_on) == (None, None)
+    assert bundle.feature.quality_state is FeatureQualityState.QUARANTINED
 
 
-@pytest.mark.unit
-def test_enrichment_naive_fetched_at_rejected() -> None:
-    """ADR-019 — naive datetime은 SourceRecord validator에서 reject."""
-    naive = datetime(2026, 5, 28, 10, 0)  # tzinfo 없음
-    with pytest.raises(ValidationError):
-        festival_to_enrichment_links([_ITEM1], matcher=_MATCHER, fetched_at=naive)
+@pytest.mark.parametrize("value", ["", "2026111", "20261340", "abc"])
+def test_malformed_dates_are_not_guessed(value: str) -> None:
+    (bundle,) = _bundles([replace(_POHANG, event_start_date=value)])
+    assert _detail(bundle).starts_on is None
+    assert bundle.feature.quality_state is FeatureQualityState.QUARANTINED
 
 
-# -- FestivalEnrichment consistency validator -----------------------------
+def test_a_row_without_an_address_has_no_venue_and_is_quarantined() -> None:
+    (bundle,) = _bundles([replace(_POHANG, addr1=None, addr2=None)])
+    assert _detail(bundle).venue_name is None
+    assert bundle.feature.quality_state is FeatureQualityState.QUARANTINED
 
 
-@pytest.mark.unit
-def test_festival_enrichment_rejects_primary_role() -> None:
-    """직접 구성 시 role이 enrichment가 아니면 reject."""
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=KST)
-    [link] = festival_to_enrichment_links(
-        [_ITEM1], matcher=_MATCHER, fetched_at=fetched
-    )
-    sr = link.source_record
-    bad_link = link.source_link.model_copy(
-        update={"source_role": SourceRole.PRIMARY}
-    )
-    with pytest.raises(ValidationError):
-        FestivalEnrichment(source_record=sr, source_link=bad_link)
+def test_rows_without_content_id_or_title_are_skipped() -> None:
+    assert _bundles([replace(_POHANG, content_id=" "), replace(_POHANG, title=None)]) == []
 
 
-@pytest.mark.unit
-def test_festival_enrichment_rejects_key_mismatch() -> None:
-    fetched = datetime(2026, 5, 28, 10, 0, tzinfo=KST)
-    [link] = festival_to_enrichment_links(
-        [_ITEM1], matcher=_MATCHER, fetched_at=fetched
-    )
-    bad_link = link.source_link.model_copy(
-        update={"source_record_key": "sr_does_not_match"}
-    )
-    with pytest.raises(ValidationError):
-        FestivalEnrichment(source_record=link.source_record, source_link=bad_link)
+def test_a_repeated_content_id_keeps_one_bundle_deterministically() -> None:
+    edited = replace(_POHANG, title="제23회 포항국제불빛축제")
+    forward = _bundles([_POHANG, edited])
+    backward = _bundles([edited, _POHANG])
+    assert len(forward) == len(backward) == 1
+    assert forward[0].source_record == backward[0].source_record
+
+
+def test_the_feature_id_does_not_move_when_the_detail_arrives() -> None:
+    (plain,) = _bundles([_POHANG], reverse_geocoder=_reverse)
+    (detailed,) = _bundles([replace(_POHANG, overview="본문", homepage="")], reverse_geocoder=_reverse)
+    assert plain.feature.feature_id == detailed.feature.feature_id
+
+
+# -- 수집 창 --------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("today", "start"),
+    [
+        (date(2026, 11, 10), date(2025, 11, 1)),
+        (date(2026, 1, 31), date(2025, 1, 1)),
+        (date(2026, 12, 1), date(2025, 12, 1)),
+    ],
+)
+def test_the_window_starts_on_the_first_of_the_month_a_year_back(today: date, start: date) -> None:
+    # ``searchFestival2``의 ``eventStartDate``는 그날 이후에 **끝나는** 행사를 준다(2026-11-10
+    # 실측: 20251101로 879건, 그 전에 시작해 진행 중인 2건 포함). 공개 축제 API는 앞뒤 한 달을
+    # 함께 세므로 한 해 전 그달 1일부터 받는다.
+    assert vk.festival_window_start(today) == start

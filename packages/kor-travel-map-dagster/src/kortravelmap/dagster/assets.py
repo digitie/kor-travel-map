@@ -13,7 +13,6 @@ from collections.abc import (
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
-from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
 from kortravelmap.core.venue_match import (
     VenueCandidate,
@@ -130,14 +129,12 @@ from kortravelmap.providers.opinet import (
     stations_to_bundles,
 )
 from kortravelmap.providers.standard_data import (
-    DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
     DATASET_KEY_PARKING_LOTS,
     DATASET_KEY_SPECIAL_STREETS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
     DATASET_KEY_TRADITIONAL_MARKETS,
     STANDARD_DATA_PROVIDER_NAME,
-    cultural_festivals_to_bundles,
     museums_to_bundles,
     parking_lots_to_bundles,
     special_streets_to_bundles,
@@ -148,7 +145,12 @@ from kortravelmap.providers.transport_reference_places import (
     ferry_ports_to_bundles,
     rail_stations_to_bundles,
 )
-from kortravelmap.providers.visitkorea import VISITKOREA_PROVIDER_NAME
+from kortravelmap.providers.visitkorea import (
+    DATASET_KEY_VISITKOREA_FESTIVALS,
+    FESTIVAL_SOURCE_ENTITY_TYPE,
+    VISITKOREA_PROVIDER_NAME,
+    tourapi_festivals_to_bundles,
+)
 from kortravelmap.providers.visitkorea_attractions import (
     DATASET_KEY_VISITKOREA_ATTRACTIONS,
     plan_attraction_details,
@@ -186,9 +188,6 @@ if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
 
     from .resources import GeoDatasetHandle
-
-DATAGOKR_STANDARD_PROVIDER_NAME: Final[str] = "data.go.kr-standard"
-"""전국 표준데이터 provider canonical name."""
 
 FEATURE_LOAD_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     max_retries=3,
@@ -265,47 +264,6 @@ _COMMON_RESOURCE_KEYS: Final[set[str]] = {
     "fetched_at",
     "strict_address",
 }
-
-
-async def run_feature_event_datagokr_cultural_festivals(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    """전국문화축제표준데이터 record를 event Feature로 적재한다."""
-    source = await _resource_value(context, "datagokr_cultural_festivals")
-    records = await _record_list(context, "datagokr_cultural_festivals")
-    fetched_at = await _fetched_at(context)
-    bundles = await _transform_reusing_geo(
-        context,
-        cultural_festivals_to_bundles,
-        records,
-        fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
-        address_geocoder=_address_geocoder(context),
-    )
-    return await _load(
-        context,
-        provider=DATAGOKR_STANDARD_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
-        bundles=_replayed(source, bundles),
-        # replay는 provider를 관측하지 않았다 — seal(관측 시각 영수증)·sync state를 쓰지 않는다.
-        authoritative_snapshot_complete=not is_replay(source),
-        record_sync_state=not is_replay(source),
-        geo_applied=GeoApplied(reverse=True, geocode=False),
-    )
-
-
-@asset(
-    group_name="features_event",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"datagokr_cultural_festivals"},
-    retry_policy=FEATURE_LOAD_RETRY_POLICY,
-    pool=GEO_HEAVY_POOL,
-)
-async def feature_event_datagokr_cultural_festivals(
-    context: AssetExecutionContext,
-) -> DagsterFeatureLoadResult:
-    return await run_tracked_feature_asset(
-        context, run_feature_event_datagokr_cultural_festivals
-    )
 
 
 async def run_feature_place_transport_fuel_stations(
@@ -1292,12 +1250,21 @@ async def feature_place_standard_traditional_markets(
     )
 
 
-#: TourAPI ``detailCommon2`` run 예산 — 오퍼레이션 일일 한도 1,000의 60%(다른 data.go.kr
-#: dataset의 최악 sweep과 같은 비율, ``docs/etl/upstream-quota.md`` §2). 첫 적재는 상세 없이
-#: 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다(12·14·28 19,030건 ≈ 32 run).
-#: **step 재시도는 상세를 받지 않는다** — 받은 상세는 적재가 커밋돼야 남으므로, 재시도마다
-#: 받으면 한 run이 한도를 넘긴다.
+#: TourAPI ``detailCommon2``의 하루 예산 — data.go.kr 한도는 **오퍼레이션마다** 걸리고 이
+#: 오퍼레이션의 일일 한도는 1,000이다(``docs/etl/upstream-quota.md``). 관광지(매일)와 축제(매일)
+#: 두 dataset이 같은 오퍼레이션을 쓰므로 두 run 예산의 합이 이 값 아래여야 한다(테스트가 고정한다).
+#: 100은 수동 실행·재현 조회 몫으로 남긴다.
+VISITKOREA_DETAIL_DAILY_BUDGET: Final = 900
+
+#: 관광지 run 예산. 첫 적재는 상세 없이 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다
+#: (12·14·28 19,030건 ≈ 32 run). **step 재시도는 상세를 받지 않는다** — 받은 상세는 적재가
+#: 커밋돼야 남으므로, 재시도마다 받으면 한 run이 한도를 넘긴다.
 VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
+
+#: 축제 run 예산(2026-11-10 TourAPI 축제 1차 전환). 창 안의 축제는 900건 안팎이라(실측 879) 첫
+#: 사흘이면 상세가 다 차고, 그 뒤로는 수정된 행만 다시 받는다. 축제 schedule이 관광지보다 먼저
+#: 돌아 시기에 민감한 축제 본문이 먼저 찬다.
+VISITKOREA_FESTIVAL_DETAIL_BUDGET: Final = 300
 
 #: 역지오코딩이 법정동을 못 낸 행의 허용 상한 — ``max(이 수, 전체의 1%)``. 해상 등대·무인도처럼
 #: 늘 비는 행만 버리고(주소 검증 ``drop``), 그보다 많으면 geo 장애로 보고 은퇴 적재 전에 멈춘다.
@@ -1313,9 +1280,16 @@ def _retry_number(context: AssetExecutionContext) -> int:
 
 
 async def _attach_attraction_details(
-    context: AssetExecutionContext, records: Sequence[Any]
+    context: AssetExecutionContext,
+    records: Sequence[Any],
+    *,
+    dataset_key: str = DATASET_KEY_VISITKOREA_ATTRACTIONS,
+    budget: int = VISITKOREA_ATTRACTION_DETAIL_BUDGET,
+    label: str = "TourAPI 관광지",
 ) -> list[Any]:
     """저장 상세를 이어 쓰고, 예산 안에서 새·수정 항목의 상세를 받아 record에 얹는다.
+
+    관광지와 축제가 같은 규칙을 쓴다(``dataset_key``·``budget``만 다르다).
 
     저장값은 dataset의 current 원본(``raw_data``)이다 — 목록 ``modified_time``이 같으면 상세를
     다시 받지 않는다. 상세 받기가 한도·장애로 멈추면 남은 항목은 상세 없이(``None``) 적재되고
@@ -1327,10 +1301,10 @@ async def _attach_attraction_details(
     read = getattr(client, "read_current_source_records", None)
     if callable(read):
         current, _expected = await read(
-            provider=VISITKOREA_PROVIDER_NAME, dataset_key=DATASET_KEY_VISITKOREA_ATTRACTIONS
+            provider=VISITKOREA_PROVIDER_NAME, dataset_key=dataset_key
         )
         stored = {record.source_entity_id: record.raw_data for record in current}
-    budget = VISITKOREA_ATTRACTION_DETAIL_BUDGET if _retry_number(context) == 0 else 0
+    budget = budget if _retry_number(context) == 0 else 0
     plan = plan_attraction_details(records, stored, budget=budget)
     fetched: Mapping[str, tuple[str, str]] = (
         await fetch_visitkorea_attraction_details(KorTravelMapSettings(), plan.fetch)
@@ -1338,7 +1312,7 @@ async def _attach_attraction_details(
         else {}
     )
     context.log.info(
-        f"TourAPI 관광지 상세: 재사용 {len(plan.reuse)} · 요청 {len(plan.fetch)} · "
+        f"{label} 상세: 재사용 {len(plan.reuse)} · 요청 {len(plan.fetch)} · "
         f"수신 {len(fetched)} · 예산 밖 {plan.deferred} · 예산 {budget}"
     )
     attached: list[Any] = []
@@ -1354,7 +1328,7 @@ async def _attach_attraction_details(
     return attached
 
 
-def _ensure_geo_resolved_enough(bundles: Sequence[Any]) -> None:
+def _ensure_geo_resolved_enough(bundles: Sequence[Any], *, label: str = "TourAPI 관광지") -> None:
     """좌표가 있는데 법정동이 비는 행이 상한을 넘으면 은퇴 적재 전에 멈춘다(geo 장애 방어)."""
     unresolved = sum(
         1
@@ -1365,7 +1339,7 @@ def _ensure_geo_resolved_enough(bundles: Sequence[Any]) -> None:
     if unresolved > limit:
         raise Failure(
             description=(
-                f"TourAPI 관광지 {len(bundles)}건 중 {unresolved}건이 법정동을 못 받았다"
+                f"{label} {len(bundles)}건 중 {unresolved}건이 법정동을 못 받았다"
                 f"(상한 {limit}) — geo 장애로 보고 은퇴 적재를 멈춘다."
             )
         )
@@ -1654,50 +1628,82 @@ async def feature_place_kor_travel_concierge_youtube(
     )
 
 
-async def run_feature_event_visitkorea_enrichment(
+async def run_feature_event_visitkorea_festivals(
     context: AssetExecutionContext,
-) -> "FestivalEnrichmentReviewRefreshResult":
-    """VisitKorea 축제 record를 적재된 datagokr 축제에 매칭해 enrichment를 적재한다.
+) -> DagsterFeatureLoadResult:
+    """TourAPI 축제·공연·행사(``searchFestival2``)를 1차 event Feature로 적재한다.
 
-    feature를 만들지 않는 2차 enrichment(ADR-042) — ``client.load_festival_enrichment``
-    가 한 transaction에서 candidate 로드 → 이름 매칭 → enrichment link 적재를 수행.
+    2026-11-10 소유자 결정으로 표준데이터 축제를 쓰지 않는다 — 이것이 유일한 축제 원천이다
+    (``docs/etl/event-feature-etl.md``). 수집 창(한 해 전 그달 1일 이후에 끝나는 행사) 전체를 한
+    snapshot으로 받아 ``retire_absent_from_snapshot``으로 적재한다 — 창에서 밀려나거나 원천에서
+    빠진 행사는 은퇴한다. 0행 목록은 "못 받았음"이라 은퇴 전에 실패시킨다. 상세(overview·
+    homepage)는 :data:`VISITKOREA_FESTIVAL_DETAIL_BUDGET` 안에서 얹는다(관광지와 같은 오퍼레이션
+    한도를 나눠 쓴다). replay는 저장 원본(상세 포함)을 그대로 쓰고 은퇴·sync 성공을 기록하지 않는다.
     """
-    records = await _record_list(context, "visitkorea_festival_events")
+    source = await _resource_value(context, "visitkorea_festivals")
+    await prefetch_replay(source)
+    replay = is_replay(source)
     fetched_at = await _fetched_at(context)
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    result = await client.refresh_festival_enrichment_reviews(
-        records,
-        fetched_at=fetched_at,
+    records = await _record_list(context, "visitkorea_festivals")
+    if not records and not replay:
+        raise Failure(
+            description=(
+                "TourAPI 축제 목록이 0행이다 — 기존 축제를 전부 은퇴시키지 않도록 적재를 멈춘다"
+                "(서비스키 활용신청·원천 상태를 확인할 것)."
+            )
+        )
+    if not replay:
+        records = await _attach_attraction_details(
+            context,
+            records,
+            dataset_key=DATASET_KEY_VISITKOREA_FESTIVALS,
+            budget=VISITKOREA_FESTIVAL_DETAIL_BUDGET,
+            label="TourAPI 축제",
+        )
+    bundles = apply_replay_provenance(
+        source,
+        await _transform_reusing_geo(
+            context,
+            tourapi_festivals_to_bundles,
+            records,
+            fetched_at=fetched_at,
+            reverse_geocoder=_reverse_geocoder(context),
+        ),
     )
-    # 초크포인트를 지나야 분자가 함께 실린다. 이 asset은 visitkorea fetcher가
-    # 센 수를 들고 있으면서 종전에는 `context.add_output_metadata`를 직접 불러
-    # 그 값을 버렸다(2026-09-13 3차 적대 리뷰).
-    _add_output_metadata(context, result.as_metadata())
-    await _record_feature_sync_success(
+    ensure_replay_complete(source)
+    if not replay:  # replay는 은퇴시키지 않는다
+        _ensure_geo_resolved_enough(bundles, label="TourAPI 축제")
+    return await _load(
         context,
-        client,
-        provider="python-visitkorea-api",
-        dataset_key="visitkorea_festival_events",
-        cursor_extra=result.as_metadata(),
+        provider=VISITKOREA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_VISITKOREA_FESTIVALS,
+        bundles=bundles,
+        authoritative_snapshot_complete=not replay,
+        source_entity_type=FESTIVAL_SOURCE_ENTITY_TYPE,
+        retire_absent_from_snapshot=not replay,
+        record_sync_state=not replay,
+        geo_applied=GeoApplied(reverse=True, geocode=False),
+        # 역지오코딩이 법정동을 못 내는 행 하나가 run 전체를 되감지 않게 그 행만 버린다(관광지와
+        # 같은 선택). 버린 행은 은퇴하므로 그 수는 위 `_ensure_geo_resolved_enough`가 묶는다.
+        address_failure_mode="drop",
     )
-    return result
 
 
 @asset(
     group_name="features_event",
-    required_resource_keys=_COMMON_RESOURCE_KEYS | {"visitkorea_festival_events"},
+    required_resource_keys=_COMMON_RESOURCE_KEYS | {"visitkorea_festivals"},
     retry_policy=FEATURE_LOAD_RETRY_POLICY,
+    pool=GEO_HEAVY_POOL,
 )
-async def feature_event_visitkorea_enrichment(
+async def feature_event_visitkorea_festivals(
     context: AssetExecutionContext,
-) -> "FestivalEnrichmentReviewRefreshResult":
+) -> DagsterFeatureLoadResult:
     return await run_tracked_feature_asset(
-        context, run_feature_event_visitkorea_enrichment
+        context, run_feature_event_visitkorea_festivals
     )
 
 
 FEATURE_LOAD_ASSETS: Final = [
-    feature_event_datagokr_cultural_festivals,
     feature_place_transport_fuel_stations,
     feature_place_transport_rest_areas,
     feature_place_transport_rail_stations,
@@ -1722,7 +1728,7 @@ FEATURE_LOAD_ASSETS: Final = [
     feature_place_khoa_beaches,
     feature_place_transport_airports,
     feature_place_kor_travel_concierge_youtube,
-    feature_event_visitkorea_enrichment,
+    feature_event_visitkorea_festivals,
 ]
 """현재 구현 완료된 Feature provider 적재 asset 목록."""
 

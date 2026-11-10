@@ -1,74 +1,96 @@
-"""``kortravelmap.providers.visitkorea`` — VisitKorea TourAPI → enrichment links.
+"""``kortravelmap.providers.visitkorea`` — TourAPI 축제·공연·행사(``searchFestival2``) → event.
 
-datagokr 전국문화축제표준데이터(``standard_data.cultural_festivals_to_bundles``)
-가 **1차 source**로 Feature를 만든다 (ADR-042). 본 모듈은 VisitKorea TourAPI를
-**2차 enrichment**로 쓴다 — 이미지 / 상세설명(overview) / contentId 매핑을
-``source_links(source_role='enrichment')``로 **이미 적재된 festival
-feature_id**에 잇는다.
+2026-11-10 소유자 결정("datagokr 축제 소스는 아예 쓰지마")으로 **TourAPI 축제가 유일한 축제
+원천**이다. 종전에는 data.go.kr 전국문화축제표준데이터가 1차 source였고 본 모듈은 그 Feature에
+이름으로 붙는 2차 enrichment였다(구 ADR-042). 표준데이터 키가 403(SERVICE_KEY_IS_NOT_REGISTERED,
+마지막 성공 2026-10-31)이 됐고, 소유자는 표준데이터를 되살리지 않고 원천을 바꾸기로 했다.
+본 모듈은 이제 Feature를 직접 만든다(``docs/etl/event-feature-etl.md``).
 
-즉 본 모듈은 **새 Feature를 만들지 않는다**. 1차로 적재된 festival의
-``feature_id``에 visitkorea ``SourceRecord`` + ``SourceLink``(enrichment)만
-추가한다. 어떤 datagokr festival이 어떤 visitkorea festival인지 매칭하는 일은
-이름/지역 fuzzy match (ADR-016 Record Linkage scoring)라 본 모듈 밖에서
-결정한다 — ``FestivalMatcher`` plug-in으로 주입 (``standard_data``의
-``ReverseGeocoder`` 패턴과 동일).
-
-지원 dataset:
-
-| dataset_key | 역할 | 함수 |
+| dataset_key | kind | 함수 |
 |-------------|------|------|
-| ``visitkorea_festival_events`` | enrichment | ``festival_to_enrichment_links`` |
+| ``visitkorea_festivals`` | ``event`` | ``tourapi_festivals_to_bundles`` |
 
-ADR 참조
---------
-- ADR-006 — provider wrapper 금지 (public client 직접 사용, 본 모듈은 변환만)
-- ADR-009 — ``make_source_record_key`` / ``make_payload_hash``
-- ADR-016 — Record Linkage (festival ↔ visitkorea 매칭은 ``FestivalMatcher``
-  주입; scoring 자체는 ``core/scoring.py``)
-- ADR-019 — datetime aware (KST)
-- ADR-024 — canonical provider name ``python-visitkorea-api``
-- ADR-042 — datagokr 1차 + visitkorea enrichment 2차
+입력·자연키·분류
+---------------
 
-설계 메모
---------
-``python-visitkorea-api``의 typed model(``SearchFestivalItem`` 등)은 본
-라이브러리가 import하지 않는다 (ADR-006). 입력 shape는
-``VisitKoreaFestivalItem`` ``Protocol``로만 정의. ``FeatureFileSource`` DTO는
-아직 없으므로(Sprint 2-3 예정) 이미지 URL은 ``SourceRecord.raw_data``에
-보존만 한다 — RustFS 업로드/파일 row는 후속 PR.
+- 입력 shape는 :class:`VisitKoreaFestivalItem` ``Protocol``이다. ``python-visitkorea-api``의
+  ``TourItem``이 그대로 만족한다(ADR-006 — wrapper 없음).
+- 자연키는 TourAPI ``contentid``다.
+- 분류는 모두 축제·행사(``01090000``)이고 ``EventDetail.event_kind='festival'``이다 — TourAPI는
+  축제(EV01)·공연(EV02)·행사(EV03)를 한 목록("행사정보")으로 주고, 공개 축제 API가 그 목록 전체를
+  축제로 보여 준다. 세부 분류(``lclsSystm3``)는 ``payload``에 남긴다.
+- 개최 기간은 원천 ``eventstartdate``/``eventenddate``(YYYYMMDD)다. 읽을 수 없거나 거꾸로 된
+  날짜는 추정하지 않고 비우며, 그 행은 격리(``quarantined``)된다(#1439 행사 품질 경계).
+- 개최 장소(``venue_name``)는 원천이 준 개최지 주소(``addr1`` + ``addr2``)다. 목록 응답에는
+  ``eventplace``가 없다(``detailIntro2``에만 있다) — 행정구역에서 장소를 만들지 않는다.
+
+상세(overview·homepage)
+----------------------
+
+관광지 dataset과 같은 ``detailCommon2``를 예산 안에서 채운다(``plan_attraction_details`` 재사용).
+그 오퍼레이션의 일일 한도(1,000)는 두 dataset이 **나눠 쓴다** — 예산 합은 Dagster
+``assets.VISITKOREA_DETAIL_DAILY_BUDGET`` 아래로 묶인다.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable
-from dataclasses import dataclass
-from datetime import datetime
-from decimal import Decimal, InvalidOperation
-from typing import Any, Final, Protocol, Self, runtime_checkable
+from datetime import date, datetime
+from typing import Any, Final, Protocol, runtime_checkable
 
-from pydantic import BaseModel, ConfigDict, model_validator
+from pydantic import ValidationError
 
-from kortravelmap.core.address import normalize_korean_text
-from kortravelmap.core.ids import make_payload_hash, make_source_record_key
+from kortravelmap.category import PlaceCategoryCode
+from kortravelmap.core.address import (
+    extract_sido_code,
+    extract_sigungu_code,
+    normalize_korean_text,
+    normalize_phone_number,
+)
+from kortravelmap.core.events import has_required_event_details
+from kortravelmap.core.ids import make_feature_id, make_payload_hash, make_source_record_key
 from kortravelmap.core.providers import normalize_provider_name
-from kortravelmap.core.scoring import name_similarity
-from kortravelmap.dto import SourceLink, SourceRecord, SourceRole
+from kortravelmap.dto import (
+    Address,
+    EventDetail,
+    Feature,
+    FeatureBundle,
+    FeatureKind,
+    FeatureQualityState,
+    FeatureUrls,
+    SourceLink,
+    SourceRecord,
+    SourceRole,
+)
+from kortravelmap.geocoding import (
+    AddressResolver,
+    ReverseGeocoder,
+    cached_address_resolver,
+    cached_reverse_geocoder,
+)
+from kortravelmap.providers.visitkorea_attractions import (
+    _coordinate,
+    _file_sources,
+    _homepage_url,
+    _iso,
+    _plain_text,
+    _sigungu_from_ldong,
+    _split_address,
+    _zipcode,
+)
 
 __all__ = [
     "VisitKoreaFestivalItem",
-    "FestivalMatch",
-    "FestivalMatcher",
-    "FestivalCandidate",
-    "ScoringFestivalMatcher",
-    "FestivalEnrichment",
-    "FestivalReviewCandidate",
-    "FestivalMatchPlan",
-    "festival_to_enrichment_links",
-    "festival_to_review_candidates",
+    "festival_window_start",
+    "tourapi_festivals_to_bundles",
     "VISITKOREA_PROVIDER_NAME",
-    "DATASET_KEY_FESTIVAL_EVENTS",
-    "DEFAULT_ACCEPT_THRESHOLD",
-    "DEFAULT_REVIEW_FLOOR",
+    "DATASET_KEY_VISITKOREA_FESTIVALS",
+    "FESTIVAL_SOURCE_ENTITY_TYPE",
+    "FESTIVAL_CATEGORY",
+    "FESTIVAL_EVENT_KIND",
+    "FESTIVAL_MARKER_ICON",
+    "FESTIVAL_MARKER_COLOR",
+    "TOURAPI_FESTIVAL_CONTENT_TYPE_ID",
 ]
 
 
@@ -77,11 +99,27 @@ __all__ = [
 VISITKOREA_PROVIDER_NAME: Final[str] = "python-visitkorea-api"
 """canonical provider name (ADR-024). ``normalize_provider_name``으로 정규화."""
 
-DATASET_KEY_FESTIVAL_EVENTS: Final[str] = "visitkorea_festival_events"
-"""``provider_sync.source_records.dataset_key`` 값 — VisitKorea 축제 enrichment."""
+DATASET_KEY_VISITKOREA_FESTIVALS: Final[str] = "visitkorea_festivals"
+"""``provider_sync.source_records.dataset_key`` — TourAPI 축제·공연·행사(contentTypeId 15)."""
 
-_SOURCE_ENTITY_TYPE: Final[str] = "festival_enrichment"
+FESTIVAL_SOURCE_ENTITY_TYPE: Final[str] = "festival"
 """provider 내 entity 종류 — ``source_records.source_entity_type``."""
+
+TOURAPI_FESTIVAL_CONTENT_TYPE_ID: Final[str] = "15"
+
+FESTIVAL_CATEGORY: Final[str] = PlaceCategoryCode.TOURISM_EVENT.value
+FESTIVAL_EVENT_KIND: Final[str] = "festival"
+"""공개 축제 API(``public_views_repo``)가 고르는 ``event_kind``."""
+
+FESTIVAL_MARKER_ICON: Final[str] = "star"
+FESTIVAL_MARKER_COLOR: Final[str] = "P-11"
+"""축제 marker — 종전 표준데이터 축제와 같은 모양이다(PinVi·관리자 지도가 같은 표시를 본다)."""
+
+_ATTRIBUTION: Final[str] = "한국관광공사"
+_KOGL_LICENSE: Final[dict[str, str]] = {
+    "Type1": "공공누리 제1유형(출처표시)",
+    "Type3": "공공누리 제3유형(출처표시·변경금지)",
+}
 
 
 # -- 입력 Protocol --------------------------------------------------------
@@ -89,495 +127,268 @@ _SOURCE_ENTITY_TYPE: Final[str] = "festival_enrichment"
 
 @runtime_checkable
 class VisitKoreaFestivalItem(Protocol):
-    """VisitKorea TourAPI ``searchFestival`` 한 item의 입력 shape.
+    """TourAPI ``searchFestival2`` 한 item (``visitkorea.models.TourItem``이 만족)."""
 
-    ``python-visitkorea-api``의 typed model(``SearchFestivalItem``)이 본
-    Protocol을 만족해야 한다. 필드 이름이 다르면 호출자가 가벼운 dataclass
-    adapter를 자기 영역에서 만들어 전달.
-    """
-
-    content_id: str
-    """TourAPI contentId — provider 내 자연키 (``source_entity_id``로 매핑)."""
-
+    content_id: str | None
+    content_type_id: str | None
     title: str | None
-    """축제명 (raw_data 보존 — 1차 datagokr이 이미 ``Feature.name``을 가짐)."""
-
-    overview: str | None
-    """상세설명 (enrichment 핵심 — raw_data에 보존)."""
-
-    first_image: str | None
-    """대표 이미지 URL. ``FeatureFileSource``는 후속 — 지금은 raw_data만."""
-
-    first_image2: str | None
-    """썸네일 이미지 URL."""
-
     addr1: str | None
-    """주소 (raw_data 보존용)."""
-
-    area_code: str | None
-    """TourAPI 지역코드 (법정동코드 아님 — raw_data만)."""
-
-    sigungu_code: str | None
-    """TourAPI 시군구코드 (법정동코드 아님 — raw_data만)."""
-
-    map_x: float | None
-    """WGS84 경도 (TourAPI ``mapx`` / python-visitkorea-api ``map_x``)."""
-
-    map_y: float | None
-    """WGS84 위도 (TourAPI ``mapy`` / python-visitkorea-api ``map_y``)."""
-
-    event_start_date: str | None
-    """축제 시작일 (YYYYMMDD 문자열, raw_data 보존)."""
-
-    event_end_date: str | None
-    """축제 종료일 (YYYYMMDD 문자열, raw_data 보존)."""
-
+    addr2: str | None
+    zipcode: str | None
     tel: str | None
-    """문의 전화 (raw_data 보존)."""
-
+    first_image: str | None
+    first_image2: str | None
+    map_x: float | None
+    map_y: float | None
+    lcls_systm1: str | None
+    lcls_systm2: str | None
+    lcls_systm3: str | None
+    l_dong_regn_cd: str | None
+    l_dong_signgu_cd: str | None
+    created_time: datetime | None
+    modified_time: datetime | None
+    copyright_division_code: str | None
+    event_start_date: str | None
+    """축제 시작일(YYYYMMDD)."""
+    event_end_date: str | None
+    """축제 종료일(YYYYMMDD)."""
+    overview: str | None
+    """``detailCommon2`` 상세 설명. ``None``=상세 미수신, ``""``=받았으나 비어 있음."""
     homepage: str | None
-    """홈페이지 (HTML anchor 포함 가능 — raw_data 보존)."""
 
-    modified_time: datetime | str | None
-    """TourAPI 최종 수정시각 (raw_data 보존).
 
-    provider 실모델(``visitkorea.TourItem.modified_time``)은 ``datetime``으로
-    파싱해 보존한다. 변환은
-    ``_modified_time_str``로 원시 TourAPI 표기(``YYYYMMDDHHMMSS``)에 맞춰
-    문자열화한다.
+# -- 수집 창 --------------------------------------------------------------
+
+
+def festival_window_start(today: date) -> date:
+    """``searchFestival2`` ``eventStartDate`` — 한 해 전 그달 1일.
+
+    원천은 그날 이후에 **끝나는** 행사를 준다(2026-11-10 실측). 공개 축제 API는 요청 달과 앞뒤 한
+    달을 세므로 지난 한 해를 덮는다. 창 밖으로 밀려난 행사는 다음 적재에서 부재 퇴역한다.
     """
+    year, month = (today.year - 1, today.month)
+    return date(year, month, 1)
 
 
-# -- 매칭 Protocol (festival ↔ visitkorea) --------------------------------
+# -- 변환 -----------------------------------------------------------------
 
 
-class FestivalMatch(Protocol):
-    """``FestivalMatcher.match(item)`` 결과 — 1차 festival과의 매칭 정보.
-
-    매칭 자체(이름/지역 fuzzy)는 본 모듈 밖 책임 (ADR-016 ``core/scoring.py``).
-    본 모듈은 결과만 받아 ``SourceLink``로 옮긴다.
-    """
-
-    feature_id: str
-    """매칭된 datagokr festival의 ``make_feature_id(...)`` 결과."""
-
-    confidence: int
-    """매칭 신뢰도 0~100 (ADR-016 scoring × 100). ``SourceLink.confidence``로."""
-
-    match_method: str
-    """매칭 방법 (예: ``'name_region_match'`` / ``'manual'``)."""
-
-
-class FestivalMatcher(Protocol):
-    """visitkorea item → 1차 festival ``FestivalMatch`` resolver (plug-in).
-
-    ``standard_data.ReverseGeocoder``와 동일한 plug-in 패턴. 구현체는 호출자
-    (Dagster asset)가 ``core/scoring.py``로 적재된 festival과 비교해
-    제공. 매칭 실패 시 ``None`` → 해당 visitkorea item은 enrichment 생략.
-    """
-
-    def match(self, item: VisitKoreaFestivalItem) -> FestivalMatch | None: ...
-
-
-# -- 기본 매칭 구현 (이름 유사도, ADR-016) --------------------------------
-
-
-@dataclass(frozen=True, slots=True)
-class FestivalCandidate:
-    """``ScoringFestivalMatcher`` 후보 — 이미 적재된 datagokr 축제 1건.
-
-    ``feature_id``는 ``make_feature_id(...)`` 결과(1차 datagokr festival),
-    ``name``은 ``Feature.name``. 호출자(Dagster asset)가 DB에서 적재된 festival을
-    읽어 candidate list를 만든다.
-    """
-
-    feature_id: str
-    name: str
-
-
-@dataclass(slots=True)
-class _FestivalMatch:
-    """``FestivalMatch`` Protocol 구현.
-
-    ``FestivalMatch`` Protocol이 mutable 속성을 선언하므로 frozen이 아니다(frozen이면
-    read-only라 mypy structural 매칭 실패). 내부 사용은 read-only로만 한다.
-    """
-
-    feature_id: str
-    confidence: int
-    match_method: str
-
-
-class ScoringFestivalMatcher:
-    """``FestivalMatcher`` 기본 구현 — 이름 Jaro-Winkler 유사도(ADR-016)로 매칭.
-
-    ``VisitKoreaFestivalItem`` Protocol의 ``area_code``/``sigungu_code``는 TourAPI 자체
-    코드라 datagokr bjd와 직접 비교하지 않고, 매칭 자체는 **이름 유사도만** 쓴다.
-    ``name_threshold`` 이상이면서 최고점인 후보를 매칭한다(동점이면 먼저 등장한 후보).
-    매칭 실패 시 ``None``.
-
-    축제명은 보통 변별력이 높아 이름-only 매칭으로도 정밀도가 충분하다. 기본 임계값은
-    보수적으로 0.90(false positive 회피). 좌표는 수동 검토 UI의 거리/지도 비교용으로
-    ``SourceRecord``에 보존한다.
-    """
-
-    def __init__(
-        self,
-        candidates: Iterable[FestivalCandidate],
-        *,
-        name_threshold: float = 0.90,
-        match_method: str = "name_match",
-    ) -> None:
-        if not 0.0 <= name_threshold <= 1.0:
-            raise ValueError("name_threshold must be in [0, 1]")
-        self._candidates = [c for c in candidates if c.name and c.name.strip()]
-        self._threshold = name_threshold
-        self._match_method = match_method
-
-    def best_match(
-        self, item: VisitKoreaFestivalItem
-    ) -> tuple[FestivalCandidate, float] | None:
-        """임계값과 무관하게 최고 이름 유사도 후보 + 점수(0.0~1.0)를 반환.
-
-        ``match()``(임계 적용)와 review-band 분류(``festival_to_review_candidates``)가
-        공유하는 raw 매칭. title이 비었거나 후보가 없으면 ``None``.
-        """
-        title = item.title or ""
-        if not title.strip():
-            return None
-        best: FestivalCandidate | None = None
-        best_score = 0.0
-        for candidate in self._candidates:
-            score = name_similarity(title, candidate.name)
-            if score > best_score:
-                best_score = score
-                best = candidate
-        if best is None:
-            return None
-        return best, best_score
-
-    def match(self, item: VisitKoreaFestivalItem) -> FestivalMatch | None:
-        found = self.best_match(item)
-        if found is None:
-            return None
-        best, best_score = found
-        if best_score < self._threshold:
-            return None
-        return _FestivalMatch(
-            feature_id=best.feature_id,
-            confidence=round(best_score * 100),
-            match_method=self._match_method,
-        )
-
-
-# -- 결과 DTO -------------------------------------------------------------
-
-
-class FestivalEnrichment(BaseModel):
-    """visitkorea enrichment 한 건 — ``SourceRecord`` + ``SourceLink``(enrichment).
-
-    ``FeatureBundle``과 달리 ``Feature``를 포함하지 않는다 (enrichment는 기존
-    feature에 source만 추가). 적재 시 호출자는 ``source_record`` → ``source_link``
-    순으로 insert (feature는 1차에서 이미 존재).
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    source_record: SourceRecord
-    source_link: SourceLink
-
-    @model_validator(mode="after")
-    def _check_consistency(self) -> Self:
-        """source_link가 source_record를 가리키고, enrichment 규약을 지키는지."""
-        if self.source_link.source_record_key != self.source_record.source_record_key:
-            raise ValueError(
-                "source_link.source_record_key가 source_record와 불일치"
-            )
-        if self.source_link.source_role is not SourceRole.ENRICHMENT:
-            raise ValueError("enrichment link의 source_role은 ENRICHMENT여야 함")
-        return self
-
-
-# -- 단일 변환 ------------------------------------------------------------
-
-
-def _modified_time_str(value: datetime | str | None) -> str | None:
-    """provider ``modified_time``을 원시 TourAPI 표기 문자열로 정규화한다.
-
-    provider 실모델은 ``datetime``(tz 포함 가능)으로 파싱해 두므로 raw
-    ``modifiedtime``(``YYYYMMDDHHMMSS``) 형태로 되돌린다. str이 오면(과거
-    Protocol 가정/테스트 fake) strip만 하고, 빈 문자열은 None으로 둔다.
-    """
-
-    if value is None:
-        return None
-    if isinstance(value, datetime):
-        return value.strftime("%Y%m%d%H%M%S")
-    text = value.strip()
-    return text or None
-
-
-def _decimal_or_none(value: object) -> Decimal | None:
-    """provider 좌표값을 ``SourceRecord``용 Decimal로 보존한다."""
-    if value is None:
-        return None
-    if isinstance(value, str) and not value.strip():
+def _event_date(value: str | None) -> date | None:
+    text = (value or "").strip()
+    if len(text) != 8 or not text.isdigit():
         return None
     try:
-        return Decimal(str(value))
-    except (InvalidOperation, ValueError):
+        return date(int(text[:4]), int(text[4:6]), int(text[6:]))
+    except ValueError:
         return None
 
 
-def _item_to_enrichment(
+def _venue(addr1: str | None, addr2: str | None) -> str | None:
+    parts = [part for part in (normalize_korean_text(addr1), normalize_korean_text(addr2)) if part]
+    return " ".join(parts) or None
+
+
+def _urls(homepage: str | None) -> FeatureUrls:
+    url = _homepage_url(homepage)
+    if url is None:
+        return FeatureUrls()
+    try:
+        return FeatureUrls.model_validate({"homepage": url})
+    except ValidationError:
+        return FeatureUrls()
+
+
+async def _festival_to_bundle(
     item: VisitKoreaFestivalItem,
-    match: FestivalMatch,
     *,
     fetched_at: datetime,
-) -> FestivalEnrichment:
-    """한 visitkorea item + 매칭 결과 → 한 ``FestivalEnrichment``. 모듈 private."""
-
-    modified_time = _modified_time_str(item.modified_time)
-    map_x = getattr(item, "map_x", None)
-    map_y = getattr(item, "map_y", None)
-
-    # 1) Raw payload (canonical JSON 직렬화 가능한 dict). 이미지/overview 등
-    #    enrichment 콘텐츠는 여기에 보존 — FeatureFileSource DTO는 후속 PR.
+    reverse_geocoder: ReverseGeocoder | None,
+    address_resolver: AddressResolver | None,
+) -> FeatureBundle | None:
+    content_id = (item.content_id or "").strip()
+    name = normalize_korean_text(item.title)
+    if not content_id or name is None:
+        return None
+    # raw_data 키는 TourItem 필드 이름 그대로다 — replay가 ``TourItem.model_validate``로 되살린다.
     raw_data: dict[str, Any] = {
         "content_id": item.content_id,
+        "content_type_id": item.content_type_id,
         "title": item.title,
-        "overview": item.overview,
+        "addr1": item.addr1,
+        "addr2": item.addr2,
+        "zipcode": item.zipcode,
+        "tel": item.tel,
         "first_image": item.first_image,
         "first_image2": item.first_image2,
-        "addr1": item.addr1,
-        "area_code": item.area_code,
-        "sigungu_code": item.sigungu_code,
-        "map_x": map_x,
-        "map_y": map_y,
+        "map_x": str(item.map_x) if item.map_x is not None else None,
+        "map_y": str(item.map_y) if item.map_y is not None else None,
+        "lcls_systm1": item.lcls_systm1,
+        "lcls_systm2": item.lcls_systm2,
+        "lcls_systm3": item.lcls_systm3,
+        "l_dong_regn_cd": item.l_dong_regn_cd,
+        "l_dong_signgu_cd": item.l_dong_signgu_cd,
+        "created_time": _iso(item.created_time),
+        "modified_time": _iso(item.modified_time),
+        "copyright_division_code": item.copyright_division_code,
         "event_start_date": item.event_start_date,
         "event_end_date": item.event_end_date,
-        "tel": item.tel,
+        "overview": item.overview,
         "homepage": item.homepage,
-        "modified_time": modified_time,
     }
-    payload_hash = make_payload_hash(raw_data)
+    coord = _coordinate(item.map_x, item.map_y)
+    road_text, legal_text = _split_address(item.addr1)
 
-    # 2) source_record_key (ADR-009) — contentId 자연키.
-    source_record_key = make_source_record_key(
-        provider=VISITKOREA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_FESTIVAL_EVENTS,
-        source_entity_type=_SOURCE_ENTITY_TYPE,
-        source_entity_id=item.content_id,
-        raw_payload_hash=payload_hash,
+    geo: Address | None = None
+    if coord is not None and reverse_geocoder is not None:
+        geo = await reverse_geocoder(coord)
+    if (geo is None or geo.bjd_code is None) and address_resolver is not None:
+        resolved = await address_resolver(Address(road=road_text, legal=legal_text))
+        if resolved is not None and resolved.bjd_code is not None:
+            geo = resolved
+    bjd_code = geo.bjd_code if geo is not None else None
+    sigungu_code = (
+        (geo.sigungu_code if geo is not None else None)
+        or extract_sigungu_code(bjd_code)
+        or _sigungu_from_ldong(item.l_dong_regn_cd, item.l_dong_signgu_cd)
+    )
+    sido_code = (
+        (geo.sido_code if geo is not None else None)
+        or extract_sido_code(bjd_code)
+        or (sigungu_code[:2] if sigungu_code else None)
+    )
+    address = Address(
+        road=road_text or (geo.road if geo is not None else None),
+        legal=legal_text or (geo.legal if geo is not None else None),
+        admin=geo.admin if geo is not None else None,
+        bjd_code=bjd_code,
+        admin_dong_code=geo.admin_dong_code if geo is not None else None,
+        sigungu_code=sigungu_code,
+        sido_code=sido_code,
+        road_name_code=geo.road_name_code if geo is not None else None,
+        zipcode=(geo.zipcode if geo is not None else None) or _zipcode(item.zipcode),
+        sido_name=geo.sido_name if geo is not None else None,
+        sigungu_name=geo.sigungu_name if geo is not None else None,
     )
 
-    # 3) SourceRecord (visitkorea raw 보존). Feature/feature_id는 만들지 않음.
+    starts_on = _event_date(item.event_start_date)
+    ends_on = _event_date(item.event_end_date)
+    if starts_on is not None and ends_on is not None and ends_on < starts_on:
+        # 어느 쪽이 오타인지 모른다 — 둘 다 비우고 원문은 raw_data에 둔다(#386과 같은 격리).
+        starts_on = ends_on = None
+
+    payload_hash = make_payload_hash(raw_data)
+    source_record_key = make_source_record_key(
+        provider=VISITKOREA_PROVIDER_NAME,
+        dataset_key=DATASET_KEY_VISITKOREA_FESTIVALS,
+        source_entity_type=FESTIVAL_SOURCE_ENTITY_TYPE,
+        source_entity_id=content_id,
+        raw_payload_hash=payload_hash,
+    )
+    feature_id = make_feature_id(
+        bjd_code=bjd_code,
+        kind=FeatureKind.EVENT.value,
+        category=FESTIVAL_CATEGORY,
+        source_type=f"{VISITKOREA_PROVIDER_NAME}:{DATASET_KEY_VISITKOREA_FESTIVALS}",
+        source_natural_key=content_id,
+    )
+    license_code = (item.copyright_division_code or "").strip() or None
+    payload: dict[str, Any] = {
+        "content": _plain_text(item.overview),
+        "lcls_systm2": item.lcls_systm2,
+        "lcls_systm3": item.lcls_systm3,
+        "image_url": item.first_image or None,
+        "thumbnail_url": item.first_image2 or None,
+        "attribution": _ATTRIBUTION,
+        "license": _KOGL_LICENSE.get(license_code or "", license_code),
+        "modified_time": _iso(item.modified_time),
+    }
+    feature = Feature(
+        feature_id=feature_id,
+        provider_natural_key=content_id,
+        kind=FeatureKind.EVENT,
+        name=name,
+        coord=coord,
+        address=address,
+        category=FESTIVAL_CATEGORY,
+        marker_icon=FESTIVAL_MARKER_ICON,
+        marker_color=FESTIVAL_MARKER_COLOR,
+        urls=_urls(item.homepage),
+        detail=EventDetail(
+            feature_id=feature_id,
+            event_kind=FESTIVAL_EVENT_KIND,
+            starts_on=starts_on,
+            ends_on=ends_on,
+            venue_name=_venue(item.addr1, item.addr2),
+            tel=normalize_phone_number(item.tel),
+            content_id=content_id,
+            content_type_id=(item.content_type_id or "").strip() or None,
+            payload={key: value for key, value in payload.items() if value is not None},
+        ),
+    )
+    if not has_required_event_details(feature.detail):
+        feature = feature.model_copy(update={"quality_state": FeatureQualityState.QUARANTINED})
     source_record = SourceRecord(
         provider=normalize_provider_name(VISITKOREA_PROVIDER_NAME),
-        dataset_key=DATASET_KEY_FESTIVAL_EVENTS,
-        source_entity_type=_SOURCE_ENTITY_TYPE,
-        source_entity_id=item.content_id,
+        dataset_key=DATASET_KEY_VISITKOREA_FESTIVALS,
+        source_entity_type=FESTIVAL_SOURCE_ENTITY_TYPE,
+        source_entity_id=content_id,
         raw_payload_hash=payload_hash,
         raw_data=raw_data,
         fetched_at=fetched_at,
         source_record_key=source_record_key,
     )
-
-    # 4) SourceLink — enrichment (ADR-042). 1차 festival feature_id에 매핑.
     source_link = SourceLink(
-        feature_id=match.feature_id,
+        feature_id=feature_id,
         source_record_key=source_record_key,
-        source_role=SourceRole.ENRICHMENT,
-        match_method=match.match_method,
-        confidence=match.confidence,
+        source_role=SourceRole.PRIMARY,
+        match_method="natural_key",
+        confidence=100,
+    )
+    return FeatureBundle(
+        feature=feature,
+        source_record=source_record,
+        source_link=source_link,
+        file_sources=_file_sources(
+            feature_id=feature_id,
+            source_record_key=source_record_key,
+            primary=item.first_image,
+            thumbnail=item.first_image2,
+            alt_text=name,
+            license_code=license_code,
+            dataset_key=DATASET_KEY_VISITKOREA_FESTIVALS,
+        ),
     )
 
-    return FestivalEnrichment(source_record=source_record, source_link=source_link)
 
-
-# -- 공개 API -----------------------------------------------------------
-
-
-def festival_to_enrichment_links(
+async def tourapi_festivals_to_bundles(
     items: Iterable[VisitKoreaFestivalItem],
     *,
-    matcher: FestivalMatcher,
     fetched_at: datetime,
-) -> list[FestivalEnrichment]:
-    """VisitKorea 축제 items → ``list[FestivalEnrichment]`` (ADR-042 2차 enrichment).
+    reverse_geocoder: ReverseGeocoder | None = None,
+    address_resolver: AddressResolver | None = None,
+) -> list[FeatureBundle]:
+    """TourAPI 축제 items → event ``FeatureBundle`` (자연키 contentid, 1차 source).
 
-    1차(datagokr)로 이미 적재된 festival ``feature_id``에 visitkorea
-    ``SourceRecord`` + ``SourceLink``(``source_role='enrichment'``)만 잇는다.
-    **새 Feature를 만들지 않는다.**
-
-    Parameters
-    ----------
-    items
-        ``python-visitkorea-api`` searchFestival typed model iterable. 본 모듈의
-        ``VisitKoreaFestivalItem`` Protocol을 만족해야 한다.
-    matcher
-        visitkorea item → 1차 festival 매칭 resolver (``FestivalMatcher``).
-        ``match()``가 ``None``을 반환하는 item은 enrichment 생략 (출력 제외).
-        매칭 로직(이름/지역 fuzzy, ADR-016)은 호출자 책임.
-    fetched_at
-        provider 호출 시각 (KST aware, ADR-019). 모든 record가 동일 값 사용.
-
-    Returns
-    -------
-    list[FestivalEnrichment]
-        매칭된 item 순서 유지. 각 원소는 ``SourceRecord`` + ``SourceLink``
-        (enrichment). 매칭 실패 item은 제외되므로 ``len(result) <= len(items)``.
-
-    Raises
-    ------
-    ValueError
-        ``fetched_at``이 naive datetime (ADR-019, ``SourceRecord`` validator).
-
-    Examples
-    --------
-    >>> # client = AsyncVisitKoreaClient(...)        # python-visitkorea-api
-    >>> # items = [i async for i in client.aiter_festivals(...)]
-    >>> # matcher = ScoringFestivalMatcher(loaded_festivals)   # core/scoring 활용
-    >>> # links = festival_to_enrichment_links(
-    >>> #     items, matcher=matcher, fetched_at=datetime.now(KST),
-    >>> # )
-    >>> # await kor_travel_map_client.load_enrichment_links(links)
-
-    Notes
-    -----
-    - ``FeatureFileSource`` DTO 도입(Sprint 2-3) 전까지 이미지 URL은
-      ``SourceRecord.raw_data['first_image' / 'first_image2']``에만 보존.
-    - ``area_code`` / ``sigungu_code``는 TourAPI 자체 코드라 법정동코드로 저장
-      하지 않는다 (raw_data만) — ADR-042.
+    - 좌표는 원천 ``mapx``/``mapy``(WGS84, 2026-11-10 실측 879건 모두 보유)이고 역지오코딩으로
+      법정동 코드를 채운다. 실패하면 주소 해석, 그래도 없으면 TourAPI 법정동 시도·시군구 코드다.
+    - contentid나 이름이 없는 행은 건너뛴다. 같은 contentid가 두 번 오면 payload hash가 작은 쪽
+      하나만 남긴다(결정적).
     """
-    results: list[FestivalEnrichment] = []
+    geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
+    chosen: dict[str, FeatureBundle] = {}
+    order: list[str] = []
     for item in items:
-        match = matcher.match(item)
-        if match is None:
-            continue
-        results.append(
-            _item_to_enrichment(item, match, fetched_at=fetched_at)
+        bundle = await _festival_to_bundle(
+            item, fetched_at=fetched_at, reverse_geocoder=geocoder, address_resolver=resolver
         )
-    return results
-
-
-# -- review-band 분류 (T-RV-52c 수동 검토 큐) ------------------------------
-
-DEFAULT_ACCEPT_THRESHOLD: Final[float] = 0.90
-"""이름 유사도 ≥ 이 값이면 자동 enrichment(현행 동작 유지, ADR-042)."""
-
-DEFAULT_REVIEW_FLOOR: Final[float] = 0.70
-"""``[REVIEW_FLOOR, ACCEPT_THRESHOLD)`` 밴드는 자동 확정이 모호 → 수동 검토 큐로.
-
-이 값 미만은 매칭 후보로 보지 않고 버린다(false positive 회피).
-"""
-
-
-@dataclass(frozen=True, slots=True)
-class FestivalReviewCandidate:
-    """수동 검토가 필요한 visitkorea↔datagokr 축제 매칭 후보 1건.
-
-    ``[REVIEW_FLOOR, ACCEPT_THRESHOLD)`` 밴드(자동 확정하기엔 모호)에 든 매칭을
-    운영자가 accept/reject 하도록 큐에 넣기 위한 DTO. ``enrichment``는 accept 시
-    그대로 적재할 ``SourceRecord`` + ``SourceLink``(ENRICHMENT, 제안 1차 feature_id)다.
-    """
-
-    target_feature_id: str
-    """제안된 1차(datagokr) festival ``feature_id``."""
-
-    target_name: str
-    """1차 festival 이름 (검토 표시용)."""
-
-    source_name: str
-    """visitkorea 축제명 (검토 표시용)."""
-
-    name_score: float
-    """이름 Jaro-Winkler 유사도(0.0~1.0)."""
-
-    enrichment: FestivalEnrichment
-    """accept 시 적재할 enrichment(SourceRecord+SourceLink)."""
-
-
-@dataclass(frozen=True, slots=True)
-class FestivalMatchPlan:
-    """``festival_to_review_candidates`` 결과 — 자동/검토 분류.
-
-    - ``auto`` — ≥ accept_threshold, 현행대로 즉시 적재 대상.
-    - ``review`` — review-band, 운영자 수동 검토 큐 대상.
-    """
-
-    auto: list[FestivalEnrichment]
-    review: list[FestivalReviewCandidate]
-
-
-def festival_to_review_candidates(
-    items: Iterable[VisitKoreaFestivalItem],
-    *,
-    matcher: ScoringFestivalMatcher,
-    fetched_at: datetime,
-    accept_threshold: float = DEFAULT_ACCEPT_THRESHOLD,
-    review_floor: float = DEFAULT_REVIEW_FLOOR,
-    match_method: str = "name_match",
-) -> FestivalMatchPlan:
-    """visitkorea 축제 items를 이름 유사도 점수 밴드로 자동/검토 분류한다.
-
-    각 item의 최고 유사도 후보(``matcher.best_match``)를 찾아:
-
-    - ``score >= accept_threshold`` → ``auto`` (즉시 적재, 현행 동작 유지)
-    - ``review_floor <= score < accept_threshold`` → ``review`` (수동 검토 큐)
-    - ``score < review_floor`` → 제외 (매칭 없음)
-
-    Parameters
-    ----------
-    items
-        ``VisitKoreaFestivalItem`` Protocol iterable.
-    matcher
-        ``ScoringFestivalMatcher`` (1차 festival 후보로 구성). ``best_match``로 임계와
-        무관한 최고점 후보를 얻는다.
-    fetched_at
-        provider 호출 시각(KST aware, ADR-019).
-    accept_threshold, review_floor
-        밴드 경계(0.0~1.0). ``review_floor <= accept_threshold`` 이어야 한다.
-
-    Returns
-    -------
-    FestivalMatchPlan
-        ``auto`` + ``review`` 분류 결과. item 순서 유지.
-
-    Raises
-    ------
-    ValueError
-        밴드 경계가 부적절(범위 밖 또는 ``review_floor > accept_threshold``)할 때.
-    """
-    if not 0.0 <= review_floor <= accept_threshold <= 1.0:
-        raise ValueError(
-            "0 <= review_floor <= accept_threshold <= 1 이어야 함"
-        )
-    auto: list[FestivalEnrichment] = []
-    review: list[FestivalReviewCandidate] = []
-    for item in items:
-        found = matcher.best_match(item)
-        if found is None:
+        if bundle is None:
             continue
-        candidate, score = found
-        if score < review_floor:
-            continue
-        match = _FestivalMatch(
-            feature_id=candidate.feature_id,
-            confidence=round(score * 100),
-            match_method=match_method,
-        )
-        enrichment = _item_to_enrichment(item, match, fetched_at=fetched_at)
-        if score >= accept_threshold:
-            auto.append(enrichment)
-        else:
-            review.append(
-                FestivalReviewCandidate(
-                    target_feature_id=candidate.feature_id,
-                    target_name=candidate.name,
-                    source_name=normalize_korean_text(item.title) or item.title or "",
-                    name_score=score,
-                    enrichment=enrichment,
-                )
-            )
-    return FestivalMatchPlan(auto=auto, review=review)
+        key = bundle.source_record.source_entity_id
+        kept = chosen.get(key)
+        if kept is None:
+            order.append(key)
+            chosen[key] = bundle
+        elif bundle.source_record.raw_payload_hash < kept.source_record.raw_payload_hash:
+            chosen[key] = bundle
+    return [chosen[key] for key in order]

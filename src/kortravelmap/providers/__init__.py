@@ -28,7 +28,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``opinet`` | kor-travel-transport | 주유소·유가 |
 | ``standard_data`` | data.go.kr 표준데이터 | 표준데이터 5종 |
 | ``transport_reference_places`` | kor-travel-transport | 철도역·여객선 항구 place(ADR-120) |
-| ``visitkorea`` | python-visitkorea-api | TourAPI enrichment |
+| ``visitkorea`` | python-visitkorea-api | TourAPI 축제·행사 event(유일한 축제 원천) |
 | ``visitkorea_attractions`` | python-visitkorea-api | TourAPI 관광지 place(#1459) |
 
 **표에 없는 모듈** — 변환 모듈이 아니라서 위 표에 넣지 않는다:
@@ -215,15 +215,11 @@ from kortravelmap.providers.opinet import (
     stations_to_bundles,
 )
 from kortravelmap.providers.standard_data import (
-    DATASET_KEY_CULTURAL_FESTIVALS,
     DATASET_KEY_MUSEUMS,
     DATASET_KEY_PARKING_LOTS,
     DATASET_KEY_SPECIAL_STREETS,
     DATASET_KEY_TOURIST_ATTRACTIONS,
     DATASET_KEY_TRADITIONAL_MARKETS,
-    FESTIVAL_CATEGORY,
-    FESTIVAL_MARKER_COLOR,
-    FESTIVAL_MARKER_ICON,
     MUSEUM_CATEGORY,
     MUSEUM_MARKER_COLOR,
     PARKING_CATEGORY,
@@ -235,13 +231,11 @@ from kortravelmap.providers.standard_data import (
     TOURIST_MARKER_COLOR,
     TRADITIONAL_MARKET_CATEGORY,
     TRADITIONAL_MARKET_MARKER_COLOR,
-    CulturalFestivalItem,
     PublicMuseumArtItem,
     PublicParkingLotItem,
     PublicSpecialStreetItem,
     PublicTouristAttractionItem,
     PublicTraditionalMarketItem,
-    cultural_festivals_to_bundles,
     museums_to_bundles,
     parking_lots_to_bundles,
     special_streets_to_bundles,
@@ -249,15 +243,14 @@ from kortravelmap.providers.standard_data import (
     traditional_markets_to_bundles,
 )
 from kortravelmap.providers.visitkorea import (
-    DATASET_KEY_FESTIVAL_EVENTS,
+    DATASET_KEY_VISITKOREA_FESTIVALS,
+    FESTIVAL_CATEGORY,
+    FESTIVAL_MARKER_COLOR,
+    FESTIVAL_MARKER_ICON,
     VISITKOREA_PROVIDER_NAME,
-    FestivalCandidate,
-    FestivalEnrichment,
-    FestivalMatch,
-    FestivalMatcher,
-    ScoringFestivalMatcher,
     VisitKoreaFestivalItem,
-    festival_to_enrichment_links,
+    festival_window_start,
+    tourapi_festivals_to_bundles,
 )
 from kortravelmap.providers.visitkorea_attractions import (
     DATASET_KEY_VISITKOREA_ATTRACTIONS,
@@ -267,13 +260,6 @@ from kortravelmap.providers.visitkorea_attractions import (
 )
 
 __all__ = [
-    # standard_data (PR#34, ADR-042 — datagokr 표준데이터)
-    "CulturalFestivalItem",
-    "cultural_festivals_to_bundles",
-    "DATASET_KEY_CULTURAL_FESTIVALS",
-    "FESTIVAL_CATEGORY",
-    "FESTIVAL_MARKER_ICON",
-    "FESTIVAL_MARKER_COLOR",
     # standard_data 박물관/미술관 (T-RV-54, ADR-034 9단계 — MOIS-sibling)
     "PublicMuseumArtItem",
     "museums_to_bundles",
@@ -334,16 +320,15 @@ __all__ = [
     "airports_to_bundles",
     "AIRPORT_CATEGORY",
     "AIRPORT_MARKER_COLOR",
-    # visitkorea (PR#51, ADR-042 — TourAPI enrichment 2차)
+    # visitkorea 축제·행사 (2026-11-10 — TourAPI contentTypeId 15 → event 1차, 유일한 축제 원천)
     "VisitKoreaFestivalItem",
-    "FestivalMatch",
-    "FestivalMatcher",
-    "FestivalCandidate",
-    "ScoringFestivalMatcher",
-    "FestivalEnrichment",
-    "festival_to_enrichment_links",
+    "tourapi_festivals_to_bundles",
+    "festival_window_start",
     "VISITKOREA_PROVIDER_NAME",
-    "DATASET_KEY_FESTIVAL_EVENTS",
+    "DATASET_KEY_VISITKOREA_FESTIVALS",
+    "FESTIVAL_CATEGORY",
+    "FESTIVAL_MARKER_ICON",
+    "FESTIVAL_MARKER_COLOR",
     # visitkorea 관광지·문화시설·레포츠 (#1459 — TourAPI contentTypeId 12·14·28 → place 1차)
     "VisitKoreaAttractionItem",
     "attraction_category",
