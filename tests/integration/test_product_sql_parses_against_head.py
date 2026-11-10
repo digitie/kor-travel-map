@@ -40,7 +40,7 @@ import itertools
 import pkgutil
 import re
 from datetime import UTC, datetime
-from typing import Any, Final
+from typing import Any, Final, get_args
 
 import pytest
 from sqlalchemy import text
@@ -121,12 +121,22 @@ def _statement(value: object) -> str | None:
 
 
 def _admin_feature_sort_arguments(module: Any, _builder: Any) -> list[dict[str, Any]]:
-    """정렬 축은 모듈이 들고 있는 도메인에서 뽑는다 — 축이 늘면 검사도 는다."""
+    """정렬 축은 모듈이 들고 있는 도메인에서 뽑는다 — 축이 늘면 검사도 는다.
+
+    조각 검색 경로(#1475)와 범위도 도메인 전부를 곱한다 — 훑기·후보 절이 각각 다른
+    문장을 만든다.
+    """
     return [
-        {"sort": sort, "order": order}
+        {"sort": sort, "order": order, "search_scope": scope, "q_path": path}
         for sort in sorted(module._ADMIN_FEATURE_SORT_COLUMNS)
         for order in ("asc", "desc")
+        for scope in get_args(module.AdminFeatureSearchScope)
+        for path in get_args(module.AdminFeatureQueryPath)
     ]
+
+
+def _admin_feature_candidate_arguments(module: Any, _builder: Any) -> list[dict[str, Any]]:
+    return [{"search_scope": scope} for scope in get_args(module.AdminFeatureSearchScope)]
 
 
 def _subtype_upsert_arguments(module: Any, _builder: Any) -> list[dict[str, Any]]:
@@ -240,6 +250,9 @@ def _optional_filter_arguments(_module: Any, builder: Any) -> list[dict[str, Any
 _BUILDER_ARGUMENTS: Final[dict[str, Any]] = {
     "kortravelmap.infra.admin_feature_repo._admin_features_sql": (
         _admin_feature_sort_arguments
+    ),
+    "kortravelmap.infra.admin_feature_repo._admin_feature_candidates_sql": (
+        _admin_feature_candidate_arguments
     ),
     "kortravelmap.infra.admin_feature_repo._dedup_review_count_sql": (
         _dedup_review_count_arguments

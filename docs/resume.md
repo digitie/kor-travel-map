@@ -1,3 +1,7 @@
+## 2026-11-10 — #1475 admin 검색 trigram(447)
+
+- 회전에 묶는다(직접 회전 금지). 447은 SHARE 잠금으로 인덱스 6개 빌드(prod 추정 50~75 s, 쓰기만 대기) — 배포 동안 Feature 적재 큐를 멈춘다. OpenAPI 바이트 동일, PinVi 재vendor 불필요.
+
 ## 2026-11-10 — #1468 A MCST 테마 속성(ADR-121) R1·R3
 
 - 회전에 묶는다(alembic 446 — catalog `feature.place_attributes`·`feature.dataset_place_attributes`·판정 `provider_sync.theme_attach_decisions`). 붙임 모드 `KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE` 기본 `off` — 배포만으로는 적재가 바뀌지 않는다. 반려 업종 행(약 20,396) 미적재만 즉시 적용(기존 Feature는 그대로).

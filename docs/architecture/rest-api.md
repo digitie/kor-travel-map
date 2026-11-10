@@ -567,8 +567,10 @@ POST   /v1/admin/curations/import?dry_run=true|false    # CSV preview/원자적 
 #### 관리자 Feature 검색 범위와 중복 검토 읽기
 
 `GET /v1/admin/features`와 전용 service 읽기 `GET /v1/service/admin-features`는
-`search_scope=all|feature`를 받는다. 기본 all은 기존 원천 내용 검색을 보존한다.
-feature는 이름·주소·UUID/legacy alias만 검색하며 비일치 후보의 원천 JSON을 읽지 않는다.
+`search_scope=all|feature`를 받는다. feature는 이름·주소·UUID/legacy alias만 검색한다.
+기본 all은 거기에 원천 식별자(`source_entity_id`, 현재 record의 `source_record_key`)를 더한다.
+원천 JSON 본문(`raw_data`)은 어느 범위에서도 검색하지 않는다(#1475 — 인덱스로 받을 수 없는
+505 MB 전 스캔이 검색 시간의 대부분이었다). parameter·기본값은 그대로다.
 PinVi 후속 소비자 PR은 기본 관리자 장소 검색에 feature 범위를 명시적으로 선택한다.
 두 범위 모두 기존 필터·정렬·cursor와 현재 원천 head의 provenance를 유지한다.
 

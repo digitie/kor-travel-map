@@ -1050,6 +1050,9 @@ autovacuum cadence를 측정해 조정한다. final receipt/material schema의 h
 
 ## 관리자 Feature 텍스트 검색 범위 (PinVi #648)
 
+아래 두 문단은 #1444 당시 기록이다. #1475(alembic 447)부터 원천 JSON 본문은 어느 범위에서도
+검색하지 않는다 — 다음 절.
+
 전체 원천 JSON의 ILIKE 검색은 현재 원천 수·payload 크기에 비례한다.
 WSL PG18의 희소 한국어 질의에서 기존 planner는 원천 검색을 한 번으로 접었으나
 비일치 Feature 48건의 원천 record 48건을 여전히 읽었다. 반복 서브쿼리 제거를
@@ -1057,5 +1060,40 @@ WSL PG18의 희소 한국어 질의에서 기존 planner는 원천 검색을 한
 
 `search_scope=feature`는 이름·주소·UUID/legacy alias만 검사한다.
 비일치 후보의 source_records 접근이 실제 실행계획에서 0인지 통합 테스트로 검증한다.
-일치 결과의 현재 provider metadata 조회는 유지한다. 원천 내용을 찾으려는 호출자는
-기존 기본값인 all을 사용한다. 정렬·cursor·필터와 원천 head 선택은 두 범위에서 동일하다.
+일치 결과의 현재 provider metadata 조회는 유지한다. 정렬·cursor·필터와 원천 head
+선택은 두 범위에서 동일하다.
+
+### 후보 경로와 훑기 경로 (#1475, alembic 447)
+
+종전 계획은 `idx_features_admin_lower_name_keyset`으로 Feature 전부를 이름순으로 걸으며
+행마다 ILIKE와 상관 서브쿼리를 평가했다. 일치가 101행에 못 미치는 q는 끝까지 간다.
+공개 `idx_features_name_trgm`은 공개 3축 부분 인덱스라 상태 무필터인 admin이 못 쓴다.
+`all`의 원천 갈래는 `source_records.raw_data::text`(505 MB) 전 스캔이었다.
+
+- 447이 갈래별 **비부분** trigram GIN 6개를 둔다: `features`의 `lower(name)`·
+  `(feature_id)::text`·`(address)::text`, `feature_aliases.alias`,
+  `source_entities.source_entity_id`, `source_entity_heads.current_source_record_key`.
+  이름을 `lower(name)`으로 두는 것은 공개 부분 인덱스(`name`)와 planner 선택을 겨루지
+  않게 하려는 것이다(0098 선례).
+- 세 글자 이상 q는 먼저 그 인덱스들로 일치 id를 모은다(UNION ALL, 원시 행 8,001 한도).
+  중복을 걸러 2,000개 이하이고 잘리지 않았으면 본 질의는 그 id 배열에서 시작한다
+  (`base`를 MATERIALIZED로 둬 LIMIT 함정을 막는다). 넘으면 종전처럼 keyset을 훑는다 —
+  흔한 q는 101행을 금방 채운다. 두 경로는 같은 행을 고른다(통합 테스트가 대조한다).
+- 원천 JSON 본문 검색은 뺐다. `all`은 원천 식별자만 더 본다.
+
+prod n150 실측(2026-11-10, 읽기 전용, I/O PSI some 3~45로 변동):
+
+| q | 종전 all | 종전 feature | 새 all | 새 feature |
+|---|---|---|---|---|
+| D2 run_id(일치 0) | 6.0~11.7 s | 3.0~3.2 s | probe ~20 ms + 본 질의 25 ms | probe ~20 ms + 0 ms |
+| `광화문`(415건) | — | — | probe ~8 ms + 163 ms | probe ~8 ms + 67 ms |
+| `해수욕장`(1,348건) | 3.8 s | 0.95 s | probe ~42 ms + ~50 ms | probe ~42 ms + 49 ms |
+| `서울`(14.9만, 훑기) | 4.2 s | 0.11 s | 1.0 s | 0.18 s |
+
+probe 시간은 prod 열을 n150 임시 PG18(tmpfs)에 복사해 같은 인덱스로 잰 값이고, 본 질의
+시간은 prod에서 id 배열을 넣어 잰 값이다(본 질의는 447 인덱스를 쓰지 않는다).
+
+빌드(같은 복사본, 38만 행, maintenance_work_mem 256 MB, 병렬 2): `lower(name)` 3.4 s,
+`feature_id` 3.2 s, `address` 12.6 s, alias 1.7 s, entity id 2.8 s, record key 1.7 s —
+합 25 s, 크기 합 272 MB. 디스크 위 prod는 2~3배로 잡는다(합 50~75 s, `features` 세 개가
+그중 40~60 s). `CREATE INDEX`는 `SHARE`라 그동안 읽기는 되고 쓰기만 기다린다.

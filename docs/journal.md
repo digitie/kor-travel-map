@@ -1,3 +1,7 @@
+## 2026-11-10 — #1475 admin 부분 검색 3~12 s
+
+- 원인: lower(name) keyset을 36만 행 걸으며 행마다 ILIKE, all은 raw_data 505 MB 전 스캔. 447 비부분 trigram 6개로 후보 id를 먼저 모으고(≤2,000) 넘치면 종전 훑기. raw_data 검색 제거. D2 run_id 6~12 s→약 50 ms.
+
 ## 2026-11-10 — #1468 A R1·R3 구현·R2 운영 dry-run
 
 - 붙임 엔진(owner·sticky·redirected·matched·created·ambiguous·unresolved), 전환 계획기 `ktmctl mcst-theme-plan`, migration 446, 속성 필터·응답·catalog·판정 조회 API.

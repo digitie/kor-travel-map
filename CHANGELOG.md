@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-11-10 — 관리자 Feature 부분 검색 가속(#1475)
+
+- `GET /v1/admin/features?q=…`(및 `/v1/service/admin-features`)가 드문 검색어에서 수 초 걸리던 것을 trigram 인덱스(alembic 447)로 줄인다. parameter·기본값·응답은 그대로다.
+- 기본 `search_scope=all`은 이름·주소·ID에 원천 식별자(`source_entity_id`·현재 `source_record_key`)를 더해 찾는다. 원천 JSON 본문은 더 이상 검색하지 않는다.
+
 ## 2026-11-10 — 장소 속성(ADR-121, #1468 A)
 
 - 공개 API에 장소 속성이 생긴다: `attribute` 필터(반려동물 동반·무장애·영유아 동반·서점 유형·세계음식, AND·최대 5개),
