@@ -249,6 +249,12 @@
         "441_tourapi_attraction_dataset"
       ],
       "revision": "442_mois_brand_search_aliases"
+    },
+    {
+      "down_revision": [
+        "442_mois_brand_search_aliases"
+      ],
+      "revision": "444_trip_search_aliases"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

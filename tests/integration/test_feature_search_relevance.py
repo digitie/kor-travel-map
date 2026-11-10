@@ -688,3 +688,76 @@ async def test_alias_normalization_uses_raw_parking_name_before_display_suffix(
     assert page.items[0].rank < 10000
     assert page.total_count is not None
     assert page.total_count >= 1
+
+
+#: 444 별칭 — (검색어, 정본 이름, 정본 분류, 미끼(이름·분류)). 정본·미끼 이름은
+#: prod(2026-11-10)·TourAPI
+#: 실측이다. 미끼는 별칭이 없을 때 같은 검색어로 앞에 서던(또는 서는) 행이다.
+_TRIP_ALIAS_CASES: tuple[tuple[str, str, str, tuple[str, str]], ...] = (
+    ("리움", "삼성미술관 Leeum", "01040000", ("LEEUM리움삼성아동교육문화센터", "01040000")),
+    ("리움미술관", "삼성미술관 Leeum", "01040000", ("LEEUM리움삼성아동교육문화센터", "01040000")),
+    ("수성못", "수성유원지", "01040000", ("수성못주유소", "06020000")),
+    ("김포공항", "김포국제공항", "06050000", ("미소야김포공항점", "02010100")),
+    ("퍼플섬", "반월도·박지도", "01020300", ("퍼플키즈카페", "01010400")),
+    ("사천케이블카", "사천바다 케이블카", "01080200", ("사천케이블카자연휴양림", "03030000")),
+    ("사천 바다케이블카", "사천바다 케이블카", "01080200", ("사천케이블카자연휴양림", "03030000")),
+)
+
+
+@pytest.mark.parametrize(("q", "canonical", "category", "decoy"), _TRIP_ALIAS_CASES)
+async def test_trip_aliases_put_the_canonical_place_first(
+    migrated_session: AsyncSession,
+    q: str,
+    canonical: str,
+    category: str,
+    decoy: tuple[str, str],
+) -> None:
+    """#1459 후속(444): 통칭 검색어가 정본 이름의 장소를 맨 앞에 둔다."""
+    target = await _place(
+        migrated_session, f"trip444:{q}", name=canonical, category=category,
+        lon=127.0, lat=36.0,
+    )
+    decoy_id = await _place(
+        migrated_session, f"trip444-decoy:{q}", name=decoy[0], category=decoy[1],
+        lon=127.1, lat=36.1,
+    )
+    await migrated_session.flush()
+    page = await feature_repo.search_features(
+        migrated_session,
+        q=q,
+        kinds=["place"],
+        page_size=200,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
+    )
+    ids = [item.feature_id for item in page.items]
+    assert target in ids, (q, canonical)
+    if decoy_id in ids:
+        assert ids.index(target) < ids.index(decoy_id), (q, ids)
+    rank = page.items[ids.index(target)].rank
+    # 별칭 일치 단계(0)다 — 이름 포함(1)·유사도(2)로 우연히 앞선 것이 아니다.
+    assert rank is not None
+    assert rank < feature_repo._SEARCH_RANK_MATCH_WEIGHT, (q, rank)
+
+
+async def test_migration_444_seeds_trip_aliases_in_normalized_form(
+    migrated_session: AsyncSession,
+) -> None:
+    rows = dict(
+        (
+            await migrated_session.execute(
+                text("SELECT alias, canonical_name FROM feature.feature_search_aliases")
+            )
+        ).all()
+    )
+    expected = {
+        "리움": "삼성미술관 Leeum",
+        "리움미술관": "삼성미술관 Leeum",
+        "수성못": "수성유원지",
+        "김포공항": "김포국제공항",
+        "퍼플섬": "반월도·박지도",
+        "사천바다케이블카": "사천바다 케이블카",
+        "사천케이블카": "사천바다 케이블카",
+    }
+    assert expected.items() <= rows.items()
+    for alias in expected:
+        assert feature_repo.search_alias_key(alias) == alias
