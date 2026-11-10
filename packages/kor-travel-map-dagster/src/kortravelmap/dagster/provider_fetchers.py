@@ -967,8 +967,11 @@ def fetch_mois_license_records(
     (``mois.db.PlaceRecord``, krtour ``MoisLicensePlaceRecord`` Protocol 충족)를
     lazily yield한다. scope는 krtour ``PROMOTED_SERVICE_SLUGS``(42 업종)로 좁힌다.
     ``service_slugs``를 주면 그 업종만 읽는다(재개형 적재의 업종 선택, ADR-108) — PROMOTED
-    밖의 이름은 조용히 비우지 않고 ``ValueError``로 거부한다. 순서는 provider가 정한
-    ``(service_slug, mng_no)``이므로 업종은 한 번에 하나씩 연속으로 나온다.
+    밖의 이름은 조용히 비우지 않고 ``ValueError``로 거부한다. 업종은 적재 순서
+    (``providers.mois.MOIS_SLUG_LOAD_ORDER`` — 숙박·관광 먼저, 대량 식음 마지막)로 한 번에
+    하나씩 연속으로 나오고, 업종 안은 ``mng_no`` 순이다. 숙박 계열(``LICENSE_DEDUP_FAMILY``)·
+    호텔 안 시설(``IN_BUILDING_FACILITY_SLUGS``)에서 앞 업종의 같은 시설에 가려진 record는
+    ``ShadowedLicenseRecord``로 감싸 낸다(적재기가 철회 대상으로 본다).
     generator가 살아 있는 동안 session은 열려 있고, 소비 종료(또는 close)시
     ``finally``에서 ``session.close()`` + ``engine.dispose()``로 정리한다.
     """
@@ -985,17 +988,24 @@ def fetch_mois_license_records(
     # 호출 시점에 ``importlib`` + ``cast(Any, ...)``로 lazy resolve한다.
     mois_db = cast(Any, importlib.import_module("mois.db"))
     # PROMOTED_SERVICE_SLUGS는 krtour(본 repo)이므로 top-level import으로 충분.
-    from kortravelmap.providers.mois import PROMOTED_SERVICE_SLUGS
+    from kortravelmap.providers.mois import (
+        IN_BUILDING_FACILITY_SLUGS,
+        LICENSE_DEDUP_FAMILY,
+        PROMOTED_SERVICE_SLUGS,
+        LicenseShadowIndex,
+        ShadowedLicenseRecord,
+        order_service_slugs,
+    )
 
     if service_slugs is None:
-        selected = tuple(sorted(PROMOTED_SERVICE_SLUGS))
+        selected = order_service_slugs(PROMOTED_SERVICE_SLUGS)
     else:
         unknown = sorted(set(service_slugs) - PROMOTED_SERVICE_SLUGS)
         if unknown or not service_slugs:
             raise ValueError(
                 f"MOIS 적재 업종 선택이 PROMOTED 업종이 아니다: {unknown or '(빈 선택)'}"
             )
-        selected = tuple(sorted(set(service_slugs)))
+        selected = order_service_slugs(service_slugs)
 
     # 파일 registry hook (H9) — Phase B가 소스 DB 소비를 시작했음을 기록.
     # consumer가 run당 generator를 한 번 생성하는 경로라 memo 불필요, 내부에서
@@ -1007,7 +1017,21 @@ def fetch_mois_license_records(
     engine = create_engine(f"sqlite:///{db_path}")
     session = Session(engine)
     try:
-        yield from mois_db.iter_open_place_records(session, service_slugs=selected)
+        # 숙박 계열 중복 색인은 선택과 무관하게 원천 전체 family로 만든다 — 관광숙박업만 고른
+        # run도 lodgings의 같은 시설을 알아야 가린다(docs/etl/mois-feature-etl.md §6.3).
+        shadow = (
+            LicenseShadowIndex.build(
+                mois_db.iter_open_place_records(session, service_slugs=LICENSE_DEDUP_FAMILY)
+            )
+            if set(selected) & {*LICENSE_DEDUP_FAMILY, *IN_BUILDING_FACILITY_SLUGS}
+            else None
+        )
+        # 업종을 적재 순서(MOIS_SLUG_LOAD_ORDER)로 하나씩 읽는다 — provider 질의는 업종을
+        # 이름순으로 섞으므로 업종마다 따로 묻는다. 업종 안 순서는 provider의 mng_no 순이다.
+        for slug in selected:
+            for record in mois_db.iter_open_place_records(session, service_slugs=(slug,)):
+                winner = shadow.winner_for(record) if shadow is not None else None
+                yield record if winner is None else ShadowedLicenseRecord(record, winner)
     finally:
         session.close()
         engine.dispose()

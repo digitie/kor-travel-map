@@ -1,8 +1,10 @@
-"""합성 중첩 SHP의 public provider → Map 계약 회귀 (#1450, knps-api#17).
+"""대피소 SHP의 public provider → Map 계약 회귀 (#1450, knps-api#17).
 
 HTTP bytes만 대체한다. typed record와 Map 변환기는 실제 public 구현을 쓴다.
-ID_CD/KOR_NM·CP949·EPSG:5179/4326은 명시한 합성 계약이며 공식 원천 검증이 아니다.
-실제 원천의 필드/CRS/시설 식별·중복 정책은 Claude의 공식 fixture 검증에 남긴다.
+합성 archive(ID_CD/KOR_NM·CP949·EPSG:5179/4326)는 중첩·Polygon 제외·identity 계약을,
+``fixtures/knps_shelters_20230928_FILE_000000003681543.zip``은 data.go.kr 2982556의 현재
+공식 배포본(2026-11-09 수신, 평면 SHP 22 Point, UTF-8, EPSG:5186, 잘린 순한글 DBF
+필드명)을 그대로 고정한다.
 """
 
 from __future__ import annotations
@@ -10,6 +12,7 @@ from __future__ import annotations
 import io
 import zipfile
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -292,3 +295,44 @@ async def test_public_shelter_geometry_only_update_keeps_identity_but_versions_s
     # A second, stationary facility must not be versioned by ZIP-wide changes.
     unchanged_id = original_points[1][0]
     assert _semantic_bundle(before[unchanged_id]) == _semantic_bundle(after[unchanged_id])
+
+
+OFFICIAL_ARCHIVE = Path(__file__).parent / "fixtures" / (
+    "knps_shelters_20230928_FILE_000000003681543.zip"
+)
+
+
+@pytest.mark.asyncio
+async def test_official_current_shelter_archive_becomes_22_map_places() -> None:
+    records = await _public_records(OFFICIAL_ARCHIVE.read_bytes())
+    assert len(records) == 22
+    bundles = await knps_point_records_to_bundles(
+        records,
+        dataset_key=SHELTER_DATASET,
+        fetched_at=FETCHED_AT,
+        reverse_geocoder=fixture_address,
+    )
+    # 이름 없는 행 skip 없이 공식 22건이 모두 Map place가 된다.
+    assert len(bundles) == 22
+    assert len({bundle.feature.feature_id for bundle in bundles}) == 22
+    # 현재 배포본에는 전역 ID가 없다: 순번을 멤버 범위로 hash한 source_id가 시설 identity다.
+    source_ids = [bundle.source_record.source_entity_id for bundle in bundles]
+    assert len(set(source_ids)) == 22
+    assert all(source_id.startswith("shp:") for source_id in source_ids)
+    replay = await _public_records(OFFICIAL_ARCHIVE.read_bytes())
+    assert sorted(record.source_id for record in replay) == sorted(source_ids)
+    by_name = {bundle.feature.name: bundle for bundle in bundles}
+    assert {"중청대피소", "장터목대피소", "세석대피소", "희운각대피소"} <= set(by_name)
+    for bundle in bundles:
+        feature = bundle.feature
+        assert feature.category == "03080100"
+        assert feature.detail.place_kind == "mountain_shelter"
+        assert feature.marker_icon == "shelter"
+        assert feature.coord is not None
+        assert 33.0 < float(feature.coord.lat) < 38.7
+        assert 124.5 < float(feature.coord.lon) < 132.0
+        assert bundle.source_record.raw_data["시설물_"] == "대피소"
+    jungcheong = by_name["중청대피소"].feature
+    assert jungcheong.coord is not None
+    assert float(jungcheong.coord.lon) == pytest.approx(128.4604, abs=1e-6)
+    assert float(jungcheong.coord.lat) == pytest.approx(38.120567, abs=1e-6)

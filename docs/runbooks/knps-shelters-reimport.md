@@ -6,7 +6,16 @@ Codex는 WSL 수정·검증·머지를, Claude Code는 공식 원천 확인과 �
 
 이미 머지된 Map1452/1453과 운영 결과를 보존한다. 화장실325·야영장36·문화자원554·국립공원 경계21건은 Claude Code의 Map1450 댓글 기록이며 이번 Codex 운영 재확인 수치가 아니다. 보호지역은 여행 지정 allowlist·해상 역지오 실패 drop 정책을 유지한다. 위험지역 POINT와 일반명 선형시설은 미적재이며 새 적재 대상으로 되돌리지 않는다.
 
-## 공식 원천 검증
+## 공식 원천 검증 결과 (2026-11-09, Claude Code)
+
+아래 1~4 절차를 끝냈다. 결과는 python-knps-api `docs/knps-api.md` "공식 원천 확인" 절과 PR19가 정본이다.
+
+- 기존 카탈로그 URL `FILE_000000000377005`는 2013년 중첩 SHP 8건(한라산 7·오대산 1)이었다. PR18이 정상 처리하지만 중청·장터목·세석이 없다.
+- 포털 현재 배포본 `FILE_000000003681543`(_20230928, SHA256 `3c73d523…cdfc9`): 평면 SHP 22 Point, CPG UTF-8, PRJ EPSG:5186, 전역 ID 없음(로컬 `순번`). PR18은 DBF 필드명 10 bytes 잘림으로 이 파일을 거부했고 PR19(`3b89895`)가 고쳤다. 카탈로그는 verified.
+- source_id는 `shp:<sha256>`(멤버 경로+순번)이다. KNPS point loader는 snapshot에서 빠진 행을 retire하지 않는다. 운영 provider_dataset 57에는 기존 행이 없었다(identity 0).
+- Map 핀은 PR19 병합 SHA로 올렸고 공식 fixture가 public client→Map 변환 22 place를 고정한다.
+
+## 공식 원천 검증 (원래 절차)
 
 1. 제공자가 현재 배포하는 knps_shelters artifact의 SHA256·다운로드 시각·바깥/중첩 ZIP 멤버명을 기록한다. 테스트의 합성 DBF 필드나 EPSG:5179를 공식 사실로 쓰지 않는다.
 2. 실제 Point/PointZ/PointM 레이어의 ID_CD·이름 필드·중복 ID·활성/삭제 행·NULL geometry·PRJ·CPG를 확인한다. Polygon 부지는 place로 변환하지 않는다. 전역 ID는 보존하고 로컬 ID만 멤버 범위를 쓴다.

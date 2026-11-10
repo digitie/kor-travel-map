@@ -605,6 +605,8 @@ async def run_feature_place_mois_licenses(
         reverse_geocoder=_reverse_geocoder(context),
         # 첫 지오코딩·"그대로" 판정 **전에** 읽는다(ADR-109 결정 2·4).
         current_dataset=await _current_geo_dataset(context),
+        # 원천 좌표가 없는 행(2026-11-09 숙박·민박 영업중 4,170행)의 점 보강 — 같은 geo client.
+        address_geocoder=_address_geocoder(context),
     )
     # 봉인과 같은 조건이다 — 본 record가 0건인 "완료"는 sync 성공이 아니다.
     if outcome.authoritative:

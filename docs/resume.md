@@ -2,6 +2,15 @@
 
 - 관광지 job 하나가 12·14·28을 함께 적재한다(19,030건). 배포 뒤 산막이옛길·태권도원·국립세종도서관 검색을 T-TOURAPI-LOAD에서 함께 확인한다.
 
+## 2026-11-09 — KNPS 대피소 공식 원본 핀 상향
+
+- python-knps-api PR19(`3b89895`) 핀. 현재 공식 배포본 22건(중청·장터목·세석 포함)이 Map place 22건이 된다. 배포 뒤 knps_shelters provider_dataset만 preview→실행(runbook `docs/runbooks/knps-shelters-reimport.md`). 성공 뒤 대피소 schedule만 켠다.
+- 주의: KNPS point loader는 snapshot에서 빠진 행을 retire하지 않는다(`retire_absent_from_snapshot` 미사용). 운영에는 2013 ID 행이 없어서(2026-11-09 identity 0·03080100 feature 0) 이번엔 무관하다. 원천 파일명·순번이 바뀌면 source_id가 바뀌어 옛 행이 남는다.
+
+## 2026-11-09 — MOIS 숙박 우선 적재
+
+- 머지·배포 뒤: 숙박 업종만 수동 적재 → 예시 호텔 검색 확인 → MCST 중복은 검토 큐에서 MOIS master로 병합 → 이어 달리기 sensor 켜기. alembic 442(별칭만).
+
 ## 2026-11-09 — #1459 TourAPI 관광지
 
 - 다음: 회전에 Map SHA를 묶는다(alembic 441) → 관광지 job 1회(preview 먼저) → #1459 목록 검색 확인 → daily schedule 켜기 → #1459 댓글. 판정은 acceptance `T-TOURAPI-LOAD`.

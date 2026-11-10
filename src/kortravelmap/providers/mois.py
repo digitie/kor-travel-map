@@ -36,7 +36,10 @@ ADR 참조
 from __future__ import annotations
 
 import hashlib
-from collections.abc import Iterable, Mapping
+import math
+import re
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
@@ -49,6 +52,7 @@ from kortravelmap.core.address import (
     normalize_korean_text,
     normalize_phone_number,
 )
+from kortravelmap.core.business_name import BusinessName, normalize_business_name
 from kortravelmap.core.ids import (
     make_feature_id,
     make_payload_hash,
@@ -69,14 +73,30 @@ from kortravelmap.dto import (
 )
 from kortravelmap.dto.geo_dataset import GeoAttemptEvidence
 from kortravelmap.geocoding import (
+    AddressGeocoder,
     AddressResolver,
     ReverseGeocoder,
+    address_has_location_number,
+    cached_address_geocoder,
     cached_address_resolver,
     cached_reverse_geocoder,
+    geocode_missing_coordinate,
 )
 
 __all__ = [
+    "COORD_SOURCE_GEOCODE",
+    "LICENSE_DEDUP_FAMILY",
+    "LicenseShadowIndex",
+    "MOIS_COORD_RULE",
+    "IN_BUILDING_FACILITY_SLUGS",
+    "license_business_name",
+    "license_needs_forward_geocode",
+    "MOIS_SLUG_LOAD_GROUPS",
+    "MOIS_SLUG_LOAD_ORDER",
     "MoisLicensePlaceRecord",
+    "ShadowedLicenseRecord",
+    "license_record_is_promotable",
+    "order_service_slugs",
     "license_record_to_bundle",
     "license_records_to_bundles",
     "resolve_license_category",
@@ -322,6 +342,66 @@ PROMOTED_PLACE_KIND_BY_SLUG: Final[Mapping[str, str]] = {
 """PROMOTED 슬러그 → ``PlaceDetail.place_kind`` (docs §6.1)."""
 
 
+# -- 적재 순서 (docs §10.1) ---------------------------------------------------
+
+MOIS_SLUG_LOAD_GROUPS: Final[tuple[tuple[str, tuple[str, ...]], ...]] = (
+    # 여행 지도에서 먼저 보여야 할 것부터. 재개형 적재(ADR-108)는 run마다 이 순서로 업종을
+    # 걷고 상한에 닿으면 다음 run이 잇는다 — sorted() 순서에서는 숙박이 일반음식점(67만 행)
+    # 뒤라 4시간 run 몇 번으로는 닿지 못했다(2026-11-09 감사: 42종 중 12종만 적재).
+    ("lodging", (
+        "lodgings", "tourist_accommodations", "tourist_pensions", "rural_homestays",
+        "foreigner_city_homestays", "hanok_experience", "general_campgrounds",
+        "auto_campgrounds",
+    )),
+    ("resort_theme", (
+        "special_resorts", "comprehensive_resorts", "comprehensive_amusement_facilities",
+        "general_amusement_facilities", "amusement_facilities_other",
+    )),
+    ("tourism_culture", (
+        "tourism_businesses", "tourist_cruises", "city_tour_businesses", "tourist_railways",
+        "museums_and_art_galleries", "performance_halls", "tourist_performance_halls",
+        "tourist_theater_entertainment", "traditional_temples",
+    )),
+    ("leisure_sports", (
+        "golf_courses", "ski_resorts", "yacht_marinas", "horse_riding", "sledding",
+        "swimming_pools", "ice_rinks", "comprehensive_sports_facilities",
+        "registered_sports_facilities",
+    )),
+    ("mice", ("international_convention_facilities", "international_convention_planners")),
+    ("shopping_urban", ("large_scale_retail_stores", "movie_theaters", "public_baths")),
+    ("tourist_food", (
+        "tourist_restaurants", "tourist_entertainment_restaurants",
+        "foreigners_entertainment_restaurants",
+    )),
+    # 대량 식음은 마지막 — 일반음식점이 전체의 약 70%다.
+    ("mass_food", ("bakeries", "rest_cafes", "general_restaurants")),
+)  # fmt: skip
+"""적재 우선순위 그룹(정본). 모든 PROMOTED 업종이 정확히 한 번 나와야 한다(import 시 검사)."""
+
+MOIS_SLUG_LOAD_ORDER: Final[tuple[str, ...]] = tuple(
+    slug for _group, slugs in MOIS_SLUG_LOAD_GROUPS for slug in slugs
+)
+"""업종 적재 순서 — :data:`MOIS_SLUG_LOAD_GROUPS`에서 유도한다."""
+
+if len(MOIS_SLUG_LOAD_ORDER) != len(set(MOIS_SLUG_LOAD_ORDER)) or set(
+    MOIS_SLUG_LOAD_ORDER
+) != set(PROMOTED_SERVICE_SLUGS):  # pragma: no cover — 정의 오류는 import에서 바로 드러난다
+    raise RuntimeError("MOIS_SLUG_LOAD_GROUPS가 PROMOTED 업종을 정확히 한 번씩 덮지 않는다")
+
+_SLUG_LOAD_RANK: Final[Mapping[str, int]] = {
+    slug: rank for rank, slug in enumerate(MOIS_SLUG_LOAD_ORDER)
+}
+
+
+def order_service_slugs(slugs: Iterable[str]) -> tuple[str, ...]:
+    """업종 이름들을 적재 순서로 정렬한다(중복 제거). PROMOTED 밖의 이름은 ``ValueError``."""
+    unique = set(slugs)
+    unknown = sorted(unique - PROMOTED_SERVICE_SLUGS)
+    if unknown:
+        raise ValueError(f"PROMOTED 업종이 아니다: {unknown}")
+    return tuple(sorted(unique, key=_SLUG_LOAD_RANK.__getitem__))
+
+
 # -- 입력 Protocol ------------------------------------------------------------
 
 
@@ -519,21 +599,63 @@ _LICENSE_SUBTYPE_CATEGORIES: Final[Mapping[str, Mapping[str, str]]] = {
         "비즈니스호텔": "03010200", "한옥호텔": "03010300",
     },
     "large_scale_retail_stores": {"대형마트": "05030000", "백화점": "05050000"},
+    # 공중위생 숙박업(2026-11-09 원천 실측 업태 7종). 여관·여인숙·기타는 슬러그 기본값(일반 모텔).
+    "lodgings": {
+        "관광호텔": "03010100", "일반호텔": "03010000", "휴양콘도미니엄업": "03020100",
+        "숙박업(생활)": "03000000", "여관업": "03040100", "여인숙업": "03040100",
+    },
+    # 관광사업체 중 관광숙박업은 숙박이다(관광 01000000이 아니다). 여행업은 승격하지 않는다.
+    "tourism_businesses": {"관광숙박업": "03010100"},
 }
+
+_NON_PROMOTED_SUBTYPES: Final[Mapping[str, frozenset[str]]] = {
+    # 여행업 사무소(예: ㈜호텔신라의 여행업 등록)는 지도 장소가 아니다 — 호텔 이름 검색을 가린다.
+    "tourism_businesses": frozenset({"여행업"}),
+}
+
+_LICENSE_SUBTYPE_PLACE_KINDS: Final[Mapping[str, Mapping[str, str]]] = {
+    "lodgings": {
+        "관광호텔": "lodging_tourist_hotel", "일반호텔": "lodging_hotel",
+        "휴양콘도미니엄업": "lodging_resort_condo", "숙박업(생활)": "lodging_residence",
+    },
+    "tourism_businesses": {"관광숙박업": "lodging_tourist_hotel"},
+}
+
+
+def _subtype_labels(record: MoisLicensePlaceRecord) -> set[str]:
+    return {
+        label.strip()
+        for label in (
+            record.subtype_name, record.business_type_name,
+            record.culture_sports_business_type_name,
+        )
+        if label is not None and label.strip()
+    }
 
 
 def _record_category(record: MoisLicensePlaceRecord) -> str | None:
     fallback = resolve_license_category(record.service_slug)
     mapping = _LICENSE_SUBTYPE_CATEGORIES.get(record.service_slug, {})
-    categories = {
-        mapping[label.strip()]
-        for label in (
-            record.subtype_name, record.business_type_name,
-            record.culture_sports_business_type_name,
-        )
-        if label is not None and label.strip() in mapping
-    }
+    categories = {mapping[label] for label in _subtype_labels(record) if label in mapping}
     return next(iter(categories)) if len(categories) == 1 else fallback
+
+
+def license_record_is_promotable(record: MoisLicensePlaceRecord) -> bool:
+    """이 record가 place Feature가 되는가 — PROMOTED·영업중이고 승격 제외 업태가 아니다.
+
+    승격 제외 업태(``tourism_businesses``의 ``여행업``)는 EXCLUDED 슬러그처럼 변환하지 않는다.
+    업태 라벨이 여럿이면 하나라도 제외 업태일 때 제외한다(사무소 등록을 장소로 올리지 않는다).
+    """
+    if record.service_slug not in PROMOTED_SERVICE_SLUGS or record.is_open is not True:
+        return False
+    excluded = _NON_PROMOTED_SUBTYPES.get(record.service_slug)
+    return not (excluded and _subtype_labels(record) & excluded)
+
+
+def _record_place_kind(record: MoisLicensePlaceRecord) -> str:
+    mapping = _LICENSE_SUBTYPE_PLACE_KINDS.get(record.service_slug, {})
+    kinds = {mapping[label] for label in _subtype_labels(record) if label in mapping}
+    return next(iter(kinds)) if len(kinds) == 1 else resolve_license_place_kind(record.service_slug)
 
 
 def resolve_license_place_kind(slug: str) -> str:
@@ -577,6 +699,239 @@ def license_reverse_geocode_coordinate(record: MoisLicensePlaceRecord) -> Coordi
     if normalize_bjd_code(record.legal_dong_code) is not None:
         return None
     return _coord_from(record.lon, record.lat)
+
+
+# -- 숙박 계열 업종 사이 중복 흡수 (docs §6.3) ------------------------------------
+
+LICENSE_DEDUP_FAMILY: Final[tuple[str, ...]] = (
+    "lodgings",
+    "tourist_accommodations",
+    "tourism_businesses",
+)
+"""같은 숙박시설이 여러 인허가로 등록되는 업종 — **앞이 이긴다**.
+
+관광호텔 하나가 공중위생 숙박업(``lodgings``, 업태로 호텔·콘도를 가른다)·관광숙박업 등록
+(``tourist_accommodations``, 업태가 ``관광숙박업`` 하나뿐)·관광사업체(``tourism_businesses``의
+``관광숙박업``)에 함께 있다. 업태가 가장 구체적인 ``lodgings``가 Feature가 되고, 뒤 업종의 같은
+시설 행은 Feature가 되지 않는다(이미 있었다면 적재기가 은퇴시킨다 — 이긴 쪽 Feature가 실제로
+있을 때만, ``mois_chunked_load``).
+"""
+
+IN_BUILDING_FACILITY_SLUGS: Final[tuple[str, ...]] = ("public_baths", "performance_halls")
+"""호텔 안 시설이 호텔 법인 상호 그대로 등록되는 업종 — 가려지기만 하고 이기지 않는다.
+
+2026-11-09 원천: "(주)라한호텔목포"·"주식회사라한호텔전주"의 사우나(목욕장업), "호텔신라"의 공연장이
+호텔과 같은 상호·같은 건물로 있다. 표시 이름이 호텔과 똑같아 검색에 같은 이름이 둘 셋 뜬다. 이름
+키가 **정확히** 같고 도로명 주소의 건물번호까지가 같을 때만 가린다("조선팰리스강남 사우나"처럼
+이름이 다른 시설은 남는다).
+"""
+
+SHADOW_MAX_DISTANCE_M: Final[float] = 100.0
+"""도로명 주소가 다르거나 없을 때 같은 시설로 보는 좌표 거리 상한(m). 이름 키는 같아야 한다."""
+
+SHADOW_MIN_CONTAINED_KEY: Final[int] = 4
+"""같은 건물에서 한 이름 키가 다른 키의 **앞부분**이면 같은 시설로 보는 최소 키 길이.
+
+예: "호텔신라제주"가 "호텔신라제주신라"의 앞부분. 숙박 계열끼리만, 같은 건물이고 분류의 앞 네
+자리(호텔 0301·리조트 0302 …)가 같을 때만 쓴다 — 생활숙박 "OO호텔레지던스"가 관광호텔 "OO호텔"을
+가리지 않게(적대 리뷰 LOW).
+"""
+
+COORD_SOURCE_GEOCODE: Final[str] = "kor_travel_geo_geocode"
+"""원천 좌표 없이 주소 정지오코딩으로 얻은 점의 출처 표식(``detail.payload["coord_source"]``)."""
+
+MOIS_COORD_RULE: Final[str] = "mois-address-geocode-v1"
+"""원천 좌표가 없는 행만 ``raw_data["coord_rule"]``에 싣는 판.
+
+이미 점 없이 적재된 행이 "그대로"로 건너뛰지 않고 한 번 다시 변환되어 정지오코딩을 받는다.
+"""
+
+_EXPAND_BRACKET_SLUGS: Final[frozenset[str]] = frozenset(LICENSE_DEDUP_FAMILY)
+"""맨 끝 한글 괄호(``(경주)``)를 공백 낱말로 펴는 업종 — 숙박 계열 세 업종만(아직 미적재).
+
+모든 업종에 켜면 괄호 상호 6만 행이, 적재된 캠핑장·민박에 켜도 그만큼이 다시 변환된다.
+"""
+
+
+def license_needs_forward_geocode(record: MoisLicensePlaceRecord) -> bool:
+    """원천 좌표가 없고(또는 한국 경계 밖) 점으로 찍을 만한 주소가 있는 record.
+
+    주소에 건물번호·지번이 있어야 한다(``geocoding.address_has_location_number`` — 행정구역까지인
+    주소는 대표점이라 쓰지 않는다, #1463). 변환이 공용 정지오코딩을 부르는 조건과 같다.
+    """
+    return _coord_from(record.lon, record.lat) is None and address_has_location_number(
+        Address(
+            road=normalize_korean_text(record.road_address),
+            legal=normalize_korean_text(record.lot_address),
+        )
+    )
+
+
+def license_business_name(record: MoisLicensePlaceRecord) -> BusinessName | None:
+    """record의 표시 이름(업종별 괄호 규칙 포함). 변환·해시·중복 키가 모두 이것을 쓴다."""
+    return normalize_business_name(
+        record.place_name,
+        expand_trailing_bracket=record.service_slug in _EXPAND_BRACKET_SLUGS,
+    )
+
+
+def _name_key(record: MoisLicensePlaceRecord) -> str | None:
+    business = license_business_name(record)
+    if business is None:
+        return None
+    return re.sub(r"[\s()]+", "", business.display).lower() or None
+
+
+def _road_base(road: str | None) -> str | None:
+    """도로명 주소의 건물번호까지(쉼표·괄호 뒤 상세 제외), 공백 없이."""
+    text = normalize_korean_text(road)
+    if text is None:
+        return None
+    head = re.split(r"[,(]", text, maxsplit=1)[0]
+    return re.sub(r"\s+", "", head) or None
+
+
+def _distance_m(a: tuple[float, float], b: tuple[float, float]) -> float:
+    lon1, lat1 = map(math.radians, a)
+    lon2, lat2 = map(math.radians, b)
+    h = math.sin((lat2 - lat1) / 2) ** 2 + (
+        math.cos(lat1) * math.cos(lat2) * math.sin((lon2 - lon1) / 2) ** 2
+    )
+    return 2 * 6_371_000.0 * math.asin(math.sqrt(min(1.0, h)))
+
+
+@dataclass(frozen=True)
+class _ShadowEntry:
+    rank: int
+    key: str
+    source_entity_id: str
+    road_base: str | None
+    point: tuple[float, float] | None
+    facility: bool
+    category: str
+
+
+@dataclass(frozen=True)
+class ShadowedLicenseRecord:
+    """앞 업종의 같은 시설에 가려 Feature가 되지 않는 record(적재기가 은퇴 대상으로 본다)."""
+
+    record: MoisLicensePlaceRecord
+    winner_source_entity_id: str
+
+    @property
+    def service_slug(self) -> str:
+        return self.record.service_slug
+
+
+class LicenseShadowIndex:
+    """:data:`LICENSE_DEDUP_FAMILY` 업종의 승격 record로 만든 "같은 시설" 색인.
+
+    숙박 계열끼리 같은 시설 = 이름 키(표시 이름의 공백·괄호 제거, 소문자)가 같고 도로명 주소의
+    건물번호까지가 같거나 좌표가 :data:`SHADOW_MAX_DISTANCE_M` 안이다. 또는 같은 건물에서 한 키가
+    다른 키를 품는다(:data:`SHADOW_MIN_CONTAINED_KEY`). :data:`IN_BUILDING_FACILITY_SLUGS`는 같은
+    건물·정확히 같은 키일 때만 가려진다. 업종 선택과 무관하게 원천 snapshot 전체로 만든다.
+    """
+
+    def __init__(self, entries: Sequence[_ShadowEntry]) -> None:
+        self._by_name: dict[str, list[_ShadowEntry]] = {}
+        self._by_road: dict[str, list[_ShadowEntry]] = {}
+        for entry in sorted(entries, key=lambda e: (e.rank, e.source_entity_id)):
+            self._by_name.setdefault(entry.key, []).append(entry)
+            if entry.road_base is not None:
+                self._by_road.setdefault(entry.road_base, []).append(entry)
+
+    @classmethod
+    def build(cls, records: Iterable[MoisLicensePlaceRecord]) -> LicenseShadowIndex:
+        """승격되는 숙박 계열 record로 색인을 만든다(시설 업종·그 밖의 record는 이기지 않는다)."""
+        return cls(
+            [
+                entry
+                for record in records
+                if (entry := _shadow_entry(record)) is not None and not entry.facility
+            ]
+        )
+
+    def __len__(self) -> int:
+        return sum(len(rows) for rows in self._by_name.values())
+
+    def winner_for(self, record: MoisLicensePlaceRecord) -> str | None:
+        """``record``를 가리는 **맨 앞** 업종 record의 ``source_entity_id``. 없으면 ``None``.
+
+        사슬을 끝까지 따라간다 — 관광사업체 B가 관광숙박업 T에, T가 lodgings L에 가려지면 B의 답은
+        L이다. T를 답으로 주면 T가 철회돼 지도에 없으므로 적재기가 B를 다시 싣는다(적대 리뷰 MED).
+        """
+        mine = _shadow_entry(record)
+        if mine is None:
+            return None
+        winner = self._winner_entry(mine)
+        if winner is None:
+            return None
+        seen = {winner.source_entity_id}
+        while (higher := self._winner_entry(winner)) is not None:
+            if higher.source_entity_id in seen:  # pragma: no cover — rank가 줄어들므로 없다
+                break
+            seen.add(higher.source_entity_id)
+            winner = higher
+        return winner.source_entity_id
+
+    def _winner_entry(self, mine: _ShadowEntry) -> _ShadowEntry | None:
+        """``mine``을 직접 가리는 entry 중 rank가 가장 작은 것."""
+        found: list[_ShadowEntry] = []
+        for other in self._by_name.get(mine.key, ()):
+            if other.rank >= mine.rank:
+                break
+            same_road = mine.road_base is not None and mine.road_base == other.road_base
+            near = (
+                not mine.facility
+                and mine.point is not None
+                and other.point is not None
+                and _distance_m(mine.point, other.point) <= SHADOW_MAX_DISTANCE_M
+            )
+            if same_road or near:
+                found.append(other)
+        if not mine.facility and mine.road_base is not None:
+            for other in self._by_road.get(mine.road_base, ()):
+                if other.rank >= mine.rank:
+                    break
+                shorter, longer = sorted((mine.key, other.key), key=len)
+                if (
+                    len(shorter) >= SHADOW_MIN_CONTAINED_KEY
+                    and longer.startswith(shorter)
+                    and other.category[:4] == mine.category[:4]
+                ):
+                    found.append(other)
+        return min(found, key=lambda e: (e.rank, e.source_entity_id), default=None)
+
+
+def _shadow_entry(record: MoisLicensePlaceRecord) -> _ShadowEntry | None:
+    slug = record.service_slug
+    facility = slug in IN_BUILDING_FACILITY_SLUGS
+    if slug not in LICENSE_DEDUP_FAMILY and not facility:
+        return None
+    if not license_record_is_promotable(record):
+        return None
+    category = _record_category(record) or ""
+    if not facility and not category.startswith("03"):
+        # 관광사업체 중 숙박이 아닌 업태(관광객이용시설업 등)는 숙박시설과 같은 시설일 수 없다.
+        return None
+    key = _name_key(record)
+    if key is None:
+        return None
+    coord = _coord_from(record.lon, record.lat)
+    rank = (
+        len(LICENSE_DEDUP_FAMILY) + IN_BUILDING_FACILITY_SLUGS.index(slug)
+        if facility
+        else LICENSE_DEDUP_FAMILY.index(slug)
+    )
+    return _ShadowEntry(
+        rank=rank,
+        key=key,
+        source_entity_id=license_source_entity_id(record),
+        road_base=_road_base(record.road_address),
+        point=(float(coord.lon), float(coord.lat)) if coord is not None else None,
+        facility=facility,
+        category=category,
+    )
 
 
 def _maki_for(category: str) -> str:
@@ -708,6 +1063,13 @@ def _raw_data(record: MoisLicensePlaceRecord, *, category: str) -> dict[str, Any
         "source_y": record.source_y,
         "krtour_category": category,
     }
+    business = license_business_name(record)
+    if business is not None and business.changed:
+        # 규칙 판이 아니라 **결과**를 해시한다 — 결과가 바뀐 행만 다시 변환된다(리뷰 MED).
+        raw["display_name"] = business.display
+    if license_needs_forward_geocode(record):
+        # 원천 좌표가 없고 주소가 있는 행만 — 이미 점 없이 적재된 행도 한 번 다시 변환된다.
+        raw["coord_rule"] = MOIS_COORD_RULE
     if record.service_slug in _LICENSE_SUBTYPE_CATEGORIES:
         # 분류를 세분화하는 슬러그만 업태를 담는다 — 복원 되먹임이 같은 분류를 다시 내고,
         # 다른 슬러그의 해시(재개형 적재 키)는 바뀌지 않는다(#1444 리뷰).
@@ -729,20 +1091,26 @@ async def license_record_to_bundle(
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> FeatureBundle:
     """단일 PROMOTED 인허가 ``PlaceRecord`` → place ``FeatureBundle``.
 
     호출 측은 필터(EXCLUDED/non-PROMOTED/non-open)를 통과한 record만 넘기는 것을
     권장하나, 본 함수는 category 미상(PROMOTED 외) record에 ``ValueError``를 낸다.
+
+    ``address_geocoder``(공용 원천 좌표 결측 fallback, #1463)가 있고 원천 좌표(EPSG:5174
+    변환값)가 없으면 건물번호·지번이 있는 주소로 점을 얻는다 — ``detail.payload["coord_source"]``가
+    ``kor_travel_geo_geocode``가 된다. 그 점으로 평소처럼 역지오코딩한다(원천 법정동이 없을 때).
     """
     slug = record.service_slug
     category = _record_category(record)
     if category is None:
         raise ValueError(f"service_slug={slug!r}는 PROMOTED 슬러그가 아님 — 변환 불가.")
-    place_kind = resolve_license_place_kind(slug)
+    place_kind = _record_place_kind(record)
     natural_key = license_source_entity_id(record)
 
     coord = _coord_from(record.lon, record.lat)
+    coord_source: str | None = None
 
     # bjd_code는 feature_id 전에 확정 (ADR-009). legal_dong_code 1차, 없으면 역지오코딩.
     bjd_code = normalize_bjd_code(record.legal_dong_code)
@@ -756,18 +1124,23 @@ async def license_record_to_bundle(
     # ADR-109 결정 3 ②: geocode로 법정동코드를 **받았는가**(시도만 하고 못 받은 행은 geo 유도 값
     # 0개).
     geocode_obtained_code = False
+    source_address = Address(
+        road=normalize_korean_text(record.road_address),
+        legal=normalize_korean_text(record.lot_address),
+    )
+    if coord is None and address_geocoder is not None:
+        located = await geocode_missing_coordinate(None, source_address, address_geocoder)
+        if located is not None:
+            # 공용 fallback(#1463)과 같다 — 아래 역지오코딩이 법정동을 채우고 스탬프는 called다.
+            coord = located
+            coord_source = COORD_SOURCE_GEOCODE
     if bjd_code is None and coord is not None and reverse_geocoder is not None:
         reverse_called = True
         geo = await reverse_geocoder(coord)
         reverse_geo = geo
         bjd_code = geo.bjd_code if geo is not None else None
     if bjd_code is None and address_resolver is not None:
-        resolved = await address_resolver(
-            Address(
-                road=normalize_korean_text(record.road_address),
-                legal=normalize_korean_text(record.lot_address),
-            )
-        )
+        resolved = await address_resolver(source_address)
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
             bjd_code = resolved.bjd_code
@@ -792,7 +1165,8 @@ async def license_record_to_bundle(
         source_natural_key=natural_key,
     )
 
-    name = normalize_korean_text(record.place_name) or record.place_name or natural_key
+    business = license_business_name(record)
+    name = business.display if business is not None else (record.place_name or natural_key)
     phones = [p for p in (normalize_phone_number(record.telno),) if p]
     detail = PlaceDetail(
         feature_id=feature_id,
@@ -813,6 +1187,13 @@ async def license_record_to_bundle(
                 if record.source_x is not None and record.source_y is not None
                 else None
             ),
+            # 법인 표기는 상세에 남긴다 — 표시 이름은 그것을 걷은 것이다(docs §6.4).
+            **(
+                {"legal_name": business.legal}
+                if business is not None and business.changed
+                else {}
+            ),
+            **({"coord_source": coord_source} if coord_source is not None else {}),
         },
     )
 
@@ -880,6 +1261,7 @@ async def license_records_to_bundles(
     dataset_key: str = DATASET_KEY_BULK,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
 ) -> list[FeatureBundle]:
     """인허가 ``PlaceRecord`` iterable → place ``FeatureBundle`` 리스트.
 
@@ -903,17 +1285,20 @@ async def license_records_to_bundles(
         주소 → ``Address`` async 보강 geocoder. ``legal_dong_code``와 좌표 reverse
         결과가 모두 없을 때 road/lot 주소로 ``/v2/geocode``를 호출한다. 중복 주소는
         ``cached_address_resolver``로 1회만 호출.
+    address_geocoder
+        원천 좌표가 없는 행의 주소 → 점(공용 fallback, #1463). 중복 주소는
+        ``cached_address_geocoder``로 1회만 호출(호출은 행 순서대로 하나씩 — 동시성 1).
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
+    geocoder_fwd = (
+        cached_address_geocoder(address_geocoder) if address_geocoder is not None else None
+    )
     bundles: list[FeatureBundle] = []
     for record in records:
-        slug = record.service_slug
-        if slug in EXCLUDED_SERVICE_SLUGS:
+        if record.service_slug in EXCLUDED_SERVICE_SLUGS:
             continue
-        if slug not in PROMOTED_SERVICE_SLUGS:
-            continue
-        if record.is_open is not True:
+        if not license_record_is_promotable(record):
             continue
         bundles.append(
             await license_record_to_bundle(
@@ -922,6 +1307,7 @@ async def license_records_to_bundles(
                 dataset_key=dataset_key,
                 reverse_geocoder=geocoder,
                 address_resolver=resolver,
+                address_geocoder=geocoder_fwd,
             )
         )
     return bundles

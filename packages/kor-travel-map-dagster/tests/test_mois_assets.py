@@ -127,3 +127,4 @@ async def test_mois_asset_delegates_and_records_success_only_for_a_full_finished
 
 async def _async(value: Any) -> Any:
     return value
+
