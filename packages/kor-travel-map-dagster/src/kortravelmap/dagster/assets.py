@@ -1240,7 +1240,8 @@ async def feature_place_standard_traditional_markets(
 #: TourAPI ``detailCommon2`` run 예산 — 오퍼레이션 일일 한도 1,000의 60%(다른 data.go.kr
 #: dataset의 최악 sweep과 같은 비율, ``docs/etl/upstream-quota.md`` §2). 첫 적재는 상세 없이
 #: 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다(12·14·28 19,030건 ≈ 32 run).
-#: **step 재시도는 상세를 받지 않는다** — 받은 상세는 적재가 커밋돼야 남으므로, 재시도마다 받으면 한 run이 한도를 넘긴다.
+#: **step 재시도는 상세를 받지 않는다** — 받은 상세는 적재가 커밋돼야 남으므로, 재시도마다
+#: 받으면 한 run이 한도를 넘긴다.
 VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 
 #: 역지오코딩이 법정동을 못 낸 행의 허용 상한 — ``max(이 수, 전체의 1%)``. 해상 등대·무인도처럼
