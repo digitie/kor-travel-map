@@ -267,6 +267,12 @@
         "446_mcst_place_attributes"
       ],
       "revision": "447_admin_search_trgm_indexes"
+    },
+    {
+      "down_revision": [
+        "447_admin_search_trgm_indexes"
+      ],
+      "revision": "448_mcst_theme_transition"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -8547,6 +8547,152 @@ $_$;
 ALTER PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) OWNER TO ktm_manual_provider_dedup_procedure_owner;
 
 --
+-- Name: record_mcst_theme_transition_event(uuid); Type: PROCEDURE; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+CREATE PROCEDURE feature.record_mcst_theme_transition_event(IN p_item_id uuid, OUT o_event_id uuid, OUT o_event_sequence bigint)
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog', 'feature', 'ops', 'x_extension'
+    AS $$
+-- ADR-121 R4: MCST 전환 executor가 퇴역시킨 Feature 하나의 PinVi 참조 정리 사건(M05)을 남긴다.
+-- 사건 payload 모양·hash·sequence 규칙은 resolve_manual_provider_dedup_case와 같다 — PinVi
+-- 소비자는 case_id/resolution_id를 불투명 UUID로만 쓰므로 여기서는 batch_id/item_id를 싣는다.
+DECLARE
+    v_item ops.mcst_theme_transition_items%ROWTYPE;
+    v_command_id bigint;
+    v_old_lifecycle text;
+    v_old_revision bigint;
+    v_target_lifecycle text;
+    v_target_revision bigint;
+    v_action text;
+    v_occurred_at timestamptz;
+    v_payload jsonb;
+    v_event_sha256 text;
+BEGIN
+    IF session_user <> 'ktm_feature_service'
+       OR NOT pg_has_role(session_user, 'ktm_manual_provider_dedup_admin_executor', 'MEMBER') THEN
+        RAISE EXCEPTION 'MCST theme transition event requires the feature service executor'
+            USING ERRCODE = '42501', CONSTRAINT = 'ck_mcst_theme_transition_event_executor';
+    END IF;
+    PERFORM ops.lock_scoped_feature_write_protocol(true);
+
+    SELECT * INTO v_item FROM ops.mcst_theme_transition_items WHERE item_id = p_item_id;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'MCST theme transition item does not exist'
+            USING ERRCODE = 'P0002', CONSTRAINT = 'ck_mcst_theme_transition_event_item';
+    END IF;
+    -- 장부 행이 정말로 이 실행기의 전환을 기록하는지 원천과 대조한다 — 런타임이 장부에 직접 쓸 수
+    -- 있으므로 장부만 믿으면 아무 퇴역 Feature의 PinVi 참조를 아무 곳으로나 옮길 수 있다.
+    SELECT batch.command_id INTO v_command_id
+      FROM ops.mcst_theme_transition_batches AS batch
+      JOIN ops.domain_commands AS command ON command.command_id = batch.command_id
+     WHERE batch.batch_id = v_item.batch_id
+       AND command.actor = 'system:mcst-theme-transition'
+       AND command.operation = 'system.mcst-theme-transition.batch.v1';
+    IF v_command_id IS NULL THEN
+        RAISE EXCEPTION 'MCST theme transition batch is not an executor command'
+            USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_command';
+    END IF;
+    PERFORM 1
+      FROM feature.feature_state_transitions AS transition
+     WHERE transition.transition_id = v_item.transition_id
+       AND transition.feature_id = v_item.feature_id
+       AND transition.row_revision = v_item.row_revision_after
+       AND transition.to_lifecycle_state = 'retired'
+       AND transition.principal = 'system:mcst-theme-transition'
+       AND transition.transition_kind =
+           CASE WHEN v_item.action = 'retire' THEN 'admin' ELSE 'merge' END;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'MCST theme transition item does not match its retirement transition'
+            USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_transition';
+    END IF;
+    IF v_item.action <> 'retire' THEN
+        PERFORM 1
+          FROM ops.feature_merge_history AS merge
+         WHERE merge.merge_id = v_item.merge_id
+           AND merge.loser_feature_id = v_item.feature_id
+           AND merge.master_feature_id = v_item.target_feature_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'MCST theme transition item does not match its merge history'
+                USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_merge';
+        END IF;
+    END IF;
+
+    -- 사건은 이미 일어난 퇴역을 증언한다 — 퇴역 뒤 revision이 item과 같아야 한다.
+    SELECT lifecycle_state, row_revision INTO v_old_lifecycle, v_old_revision
+      FROM feature.features WHERE feature_id = v_item.feature_id;
+    IF v_old_lifecycle IS DISTINCT FROM 'retired'
+       OR v_old_revision IS DISTINCT FROM v_item.row_revision_after THEN
+        RAISE EXCEPTION 'MCST theme transition event does not match the retired feature'
+            USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_retired';
+    END IF;
+
+    v_action := CASE WHEN v_item.target_feature_id IS NULL THEN 'detach' ELSE 'rebind' END;
+    IF v_action = 'rebind' THEN
+        SELECT lifecycle_state, row_revision INTO v_target_lifecycle, v_target_revision
+          FROM feature.features WHERE feature_id = v_item.target_feature_id;
+        IF v_target_lifecycle IS DISTINCT FROM 'active' THEN
+            RAISE EXCEPTION 'MCST theme transition replacement feature is not active'
+                USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_replacement';
+        END IF;
+    END IF;
+
+    -- sequence는 이 잠금 아래에서만 배정한다 — commit 순서 = sequence 순서(M05와 같은 잠금).
+    PERFORM pg_advisory_xact_lock(hashtextextended('feature-curation-m05', 0));
+    o_event_id := x_extension.gen_random_uuid();
+    SELECT nextval(pg_get_serial_sequence(
+        'ops.feature_reference_reconciliation_events', 'event_sequence'
+    )) INTO o_event_sequence;
+    v_occurred_at := clock_timestamp();
+    v_payload := jsonb_build_object(
+        'payload_schema_version', 1,
+        'event_id', o_event_id,
+        'event_sequence', o_event_sequence,
+        'occurred_at', to_char(
+            v_occurred_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.US"Z"'
+        ),
+        'case_id', v_item.batch_id,
+        'resolution_id', v_item.item_id,
+        'action', v_action,
+        'old_feature', jsonb_build_object(
+            'feature_id', v_item.feature_id,
+            'feature_uuid', CAST(v_item.feature_id AS text),
+            'row_revision', v_item.old_row_revision
+        ),
+        'replacement_feature', CASE WHEN v_action = 'rebind' THEN jsonb_build_object(
+            'feature_id', v_item.target_feature_id,
+            'feature_uuid', CAST(v_item.target_feature_id AS text),
+            'row_revision', v_target_revision
+        ) ELSE NULL END,
+        'manual_retire_transition_id', v_item.transition_id,
+        'manual_retire_row_revision_after_transition', v_item.row_revision_after,
+        'command_id', v_command_id
+    );
+    v_event_sha256 := encode(
+        x_extension.digest(convert_to(v_payload::text, 'UTF8'), 'sha256'), 'hex'
+    );
+    INSERT INTO ops.feature_reference_reconciliation_events (
+        event_id, event_sequence, origin_kind, case_id, resolution_id, action,
+        old_feature_id, old_feature_row_revision_before_transition,
+        replacement_feature_id, replacement_feature_row_revision,
+        manual_retire_transition_id, manual_retire_row_revision_after_transition,
+        command_id, payload_schema_version, event_payload, event_sha256, occurred_at
+    ) OVERRIDING SYSTEM VALUE VALUES (
+        o_event_id, o_event_sequence, 'mcst_theme_transition', v_item.batch_id,
+        v_item.item_id, v_action,
+        v_item.feature_id, v_item.old_row_revision,
+        CASE WHEN v_action = 'rebind' THEN v_item.target_feature_id END,
+        CASE WHEN v_action = 'rebind' THEN v_target_revision END,
+        v_item.transition_id, v_item.row_revision_after, v_command_id,
+        1, v_payload, v_event_sha256, v_occurred_at
+    );
+END
+$$;
+
+
+ALTER PROCEDURE feature.record_mcst_theme_transition_event(IN p_item_id uuid, OUT o_event_id uuid, OUT o_event_sequence bigint) OWNER TO ktm_manual_provider_dedup_procedure_owner;
+
+--
 -- Name: record_provider_field_candidates(uuid, bigint, text, text, bigint, text, boolean, jsonb, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -16686,7 +16832,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -17523,7 +17669,29 @@ CREATE TABLE ops.feature_reference_reconciliation_events (
     event_payload jsonb NOT NULL,
     event_sha256 text NOT NULL,
     occurred_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    origin_kind text DEFAULT 'manual_provider_dedup'::text NOT NULL,
+    manual_case_ref uuid GENERATED ALWAYS AS (
+CASE
+    WHEN (origin_kind = 'manual_provider_dedup'::text) THEN case_id
+    ELSE NULL::uuid
+END) STORED,
+    manual_resolution_ref uuid GENERATED ALWAYS AS (
+CASE
+    WHEN (origin_kind = 'manual_provider_dedup'::text) THEN resolution_id
+    ELSE NULL::uuid
+END) STORED,
+    mcst_batch_ref uuid GENERATED ALWAYS AS (
+CASE
+    WHEN (origin_kind = 'mcst_theme_transition'::text) THEN case_id
+    ELSE NULL::uuid
+END) STORED,
+    mcst_item_ref uuid GENERATED ALWAYS AS (
+CASE
+    WHEN (origin_kind = 'mcst_theme_transition'::text) THEN resolution_id
+    ELSE NULL::uuid
+END) STORED,
     CONSTRAINT ck_feature_reference_reconciliation_events_action CHECK ((action = ANY (ARRAY['rebind'::text, 'detach'::text]))),
+    CONSTRAINT ck_feature_reference_reconciliation_events_origin CHECK ((origin_kind = ANY (ARRAY['manual_provider_dedup'::text, 'mcst_theme_transition'::text]))),
     CONSTRAINT ck_feature_reference_reconciliation_events_payload CHECK (((payload_schema_version = 1) AND (event_sha256 ~ '^[0-9a-f]{64}$'::text) AND (jsonb_typeof(event_payload) = 'object'::text))),
     CONSTRAINT ck_feature_reference_reconciliation_events_replacement CHECK ((((action = 'rebind'::text) AND (replacement_feature_id IS NOT NULL) AND (replacement_feature_row_revision IS NOT NULL)) OR ((action = 'detach'::text) AND (replacement_feature_id IS NULL) AND (replacement_feature_row_revision IS NULL)))),
     CONSTRAINT ck_feature_reference_reconciliation_events_revisions CHECK (((old_feature_row_revision_before_transition >= 1) AND (manual_retire_row_revision_after_transition >= 2)))
@@ -18104,6 +18272,51 @@ CREATE TABLE ops.manual_provider_dedup_resolutions (
 
 
 ALTER TABLE ops.manual_provider_dedup_resolutions OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: mcst_theme_transition_batches; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.mcst_theme_transition_batches (
+    batch_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    command_id bigint NOT NULL,
+    plan_sha256 text NOT NULL,
+    rule_version text NOT NULL,
+    batch_size integer NOT NULL,
+    batch_index integer NOT NULL,
+    created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_mcst_theme_transition_batches_plan CHECK (((plan_sha256 ~ '^[0-9a-f]{64}$'::text) AND (batch_size > 0) AND (batch_index >= 0) AND (rule_version <> ''::text)))
+);
+
+
+ALTER TABLE ops.mcst_theme_transition_batches OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: mcst_theme_transition_items; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.mcst_theme_transition_items (
+    item_id uuid DEFAULT x_extension.gen_random_uuid() NOT NULL,
+    batch_id uuid NOT NULL,
+    feature_id uuid NOT NULL,
+    dataset_key text NOT NULL,
+    action text NOT NULL,
+    target_feature_id uuid,
+    old_row_revision bigint NOT NULL,
+    transition_id bigint NOT NULL,
+    row_revision_after bigint NOT NULL,
+    merge_id uuid,
+    before_state jsonb NOT NULL,
+    evidence jsonb DEFAULT '{}'::jsonb NOT NULL,
+    executed_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
+    CONSTRAINT ck_mcst_theme_transition_items_action CHECK ((action = ANY (ARRAY['retire'::text, 'attach'::text, 'collapse'::text]))),
+    CONSTRAINT ck_mcst_theme_transition_items_json CHECK (((jsonb_typeof(before_state) = 'object'::text) AND (jsonb_typeof(evidence) = 'object'::text))),
+    CONSTRAINT ck_mcst_theme_transition_items_revisions CHECK (((old_row_revision >= 1) AND (row_revision_after > old_row_revision))),
+    CONSTRAINT ck_mcst_theme_transition_items_target CHECK ((((action = 'retire'::text) = (target_feature_id IS NULL)) AND ((action = 'retire'::text) = (merge_id IS NULL)) AND ((target_feature_id IS NULL) OR (target_feature_id <> feature_id))))
+);
+
+
+ALTER TABLE ops.mcst_theme_transition_items OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: offline_upload_command_executions; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -20069,6 +20282,22 @@ ALTER TABLE ONLY ops.managed_files
 
 
 --
+-- Name: mcst_theme_transition_batches pk_mcst_theme_transition_batches; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_batches
+    ADD CONSTRAINT pk_mcst_theme_transition_batches PRIMARY KEY (batch_id);
+
+
+--
+-- Name: mcst_theme_transition_items pk_mcst_theme_transition_items; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT pk_mcst_theme_transition_items PRIMARY KEY (item_id);
+
+
+--
 -- Name: offline_upload_command_executions pk_offline_upload_command_executions; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -20634,6 +20863,38 @@ ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
 
 ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
     ADD CONSTRAINT uq_manual_provider_dedup_resolutions_command UNIQUE (command_id);
+
+
+--
+-- Name: mcst_theme_transition_batches uq_mcst_theme_transition_batches_command; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_batches
+    ADD CONSTRAINT uq_mcst_theme_transition_batches_command UNIQUE (command_id);
+
+
+--
+-- Name: mcst_theme_transition_batches uq_mcst_theme_transition_batches_plan_index; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_batches
+    ADD CONSTRAINT uq_mcst_theme_transition_batches_plan_index UNIQUE (plan_sha256, batch_size, batch_index);
+
+
+--
+-- Name: mcst_theme_transition_items uq_mcst_theme_transition_items_batch_item; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT uq_mcst_theme_transition_items_batch_item UNIQUE (batch_id, item_id);
+
+
+--
+-- Name: mcst_theme_transition_items uq_mcst_theme_transition_items_feature; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT uq_mcst_theme_transition_items_feature UNIQUE (feature_id);
 
 
 --
@@ -24828,19 +25089,35 @@ ALTER TABLE ONLY ops.feature_reference_reconciliation_acks
 
 
 --
--- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_case; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY ops.feature_reference_reconciliation_events
-    ADD CONSTRAINT fk_feature_reference_reconciliation_events_case FOREIGN KEY (case_id) REFERENCES ops.manual_provider_dedup_cases(case_id) ON DELETE RESTRICT;
-
-
---
 -- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_command; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
 ALTER TABLE ONLY ops.feature_reference_reconciliation_events
     ADD CONSTRAINT fk_feature_reference_reconciliation_events_command FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_manual_case; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_manual_case FOREIGN KEY (manual_case_ref) REFERENCES ops.manual_provider_dedup_cases(case_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_manual_resolution; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_manual_resolution FOREIGN KEY (manual_resolution_ref) REFERENCES ops.manual_provider_dedup_resolutions(resolution_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_mcst_item; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.feature_reference_reconciliation_events
+    ADD CONSTRAINT fk_feature_reference_reconciliation_events_mcst_item FOREIGN KEY (mcst_batch_ref, mcst_item_ref) REFERENCES ops.mcst_theme_transition_items(batch_id, item_id) ON DELETE RESTRICT;
 
 
 --
@@ -24857,14 +25134,6 @@ ALTER TABLE ONLY ops.feature_reference_reconciliation_events
 
 ALTER TABLE ONLY ops.feature_reference_reconciliation_events
     ADD CONSTRAINT fk_feature_reference_reconciliation_events_replacement_identity FOREIGN KEY (replacement_feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
-
-
---
--- Name: feature_reference_reconciliation_events fk_feature_reference_reconciliation_events_resolution; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY ops.feature_reference_reconciliation_events
-    ADD CONSTRAINT fk_feature_reference_reconciliation_events_resolution FOREIGN KEY (resolution_id) REFERENCES ops.manual_provider_dedup_resolutions(resolution_id) ON DELETE RESTRICT;
 
 
 --
@@ -25097,6 +25366,54 @@ ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
 
 ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
     ADD CONSTRAINT fk_manual_provider_dedup_resolutions_superseded_case FOREIGN KEY (superseded_by_case_id) REFERENCES ops.manual_provider_dedup_cases(case_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: mcst_theme_transition_batches fk_mcst_theme_transition_batches_command; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_batches
+    ADD CONSTRAINT fk_mcst_theme_transition_batches_command FOREIGN KEY (command_id) REFERENCES ops.domain_commands(command_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: mcst_theme_transition_items fk_mcst_theme_transition_items_batch; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT fk_mcst_theme_transition_items_batch FOREIGN KEY (batch_id) REFERENCES ops.mcst_theme_transition_batches(batch_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: mcst_theme_transition_items fk_mcst_theme_transition_items_feature; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT fk_mcst_theme_transition_items_feature FOREIGN KEY (feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: mcst_theme_transition_items fk_mcst_theme_transition_items_merge; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT fk_mcst_theme_transition_items_merge FOREIGN KEY (merge_id) REFERENCES ops.feature_merge_history(merge_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: mcst_theme_transition_items fk_mcst_theme_transition_items_target; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT fk_mcst_theme_transition_items_target FOREIGN KEY (target_feature_id) REFERENCES feature.features(feature_id) ON DELETE RESTRICT;
+
+
+--
+-- Name: mcst_theme_transition_items fk_mcst_theme_transition_items_transition; Type: FK CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.mcst_theme_transition_items
+    ADD CONSTRAINT fk_mcst_theme_transition_items_transition FOREIGN KEY (transition_id) REFERENCES feature.feature_state_transitions(transition_id) ON DELETE RESTRICT;
 
 
 --
@@ -25845,6 +26162,14 @@ GRANT ALL ON PROCEDURE feature.reclassify_curation_quarantine_command(IN p_quara
 
 REVOKE ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.record_manual_provider_dedup_candidate(IN p_manual_feature_id uuid, IN p_provider_feature_id uuid, IN p_scores jsonb, IN p_detector_causation jsonb, OUT o_case_id uuid, OUT o_outcome text) TO ktm_manual_provider_dedup_detector_executor;
+
+
+--
+-- Name: PROCEDURE record_mcst_theme_transition_event(IN p_item_id uuid, OUT o_event_id uuid, OUT o_event_sequence bigint); Type: ACL; Schema: feature; Owner: ktm_manual_provider_dedup_procedure_owner
+--
+
+REVOKE ALL ON PROCEDURE feature.record_mcst_theme_transition_event(IN p_item_id uuid, OUT o_event_id uuid, OUT o_event_sequence bigint) FROM PUBLIC;
+GRANT ALL ON PROCEDURE feature.record_mcst_theme_transition_event(IN p_item_id uuid, OUT o_event_id uuid, OUT o_event_sequence bigint) TO ktm_manual_provider_dedup_admin_executor;
 
 
 --
@@ -27214,6 +27539,7 @@ GRANT SELECT(public_ready),UPDATE(public_ready) ON TABLE feature.feature_routes 
 GRANT SELECT ON TABLE feature.feature_state_transitions TO ktm_feature_state_procedure_owner;
 GRANT INSERT ON TABLE feature.feature_state_transitions TO ktm_feature_audit_writer;
 GRANT SELECT ON TABLE feature.feature_state_transitions TO ktm_feature_runtime;
+GRANT SELECT ON TABLE feature.feature_state_transitions TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --
@@ -27613,6 +27939,13 @@ GRANT UPDATE(command_id) ON TABLE ops.domain_commands TO ktm_manual_feature_proc
 
 
 --
+-- Name: TABLE feature_merge_history; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE ops.feature_merge_history TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
 -- Name: TABLE feature_override_field_paths; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -27900,6 +28233,20 @@ GRANT SELECT,INSERT,UPDATE ON TABLE ops.manual_provider_dedup_cases TO ktm_manua
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE ops.manual_provider_dedup_resolutions TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE mcst_theme_transition_batches; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE ops.mcst_theme_transition_batches TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE mcst_theme_transition_items; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE ops.mcst_theme_transition_items TO ktm_manual_provider_dedup_procedure_owner;
 
 
 --

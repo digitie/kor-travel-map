@@ -46,7 +46,7 @@ __all__ = [
 
 _RETIRING_ACTIONS = frozenset({"retire", "attach", "collapse"})
 TRANSITION_LOGIN = "ktm_feature_service"
-"""전환 실행 DSN의 로그인 — 사건 writer(447)가 이 session_user만 받는다."""
+"""전환 실행 DSN의 로그인 — 사건 writer(448)가 이 session_user만 받는다."""
 
 
 def mcst_plan_dataset_configs() -> dict[str, PlanDatasetConfig]:

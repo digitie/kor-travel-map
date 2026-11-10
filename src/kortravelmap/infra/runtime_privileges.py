@@ -255,7 +255,7 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "enrichment_review_queue": _ORDINARY_OPS,
     "feature_consistency_reports": _ORDINARY_OPS,
     "feature_merge_history": _ORDINARY_OPS,
-    # 447(ADR-121 R4): MCST 전환 장부. 실행기가 쓰고 사건 writer가 읽는다 — 고치거나 지우지 않는다.
+    # 448(ADR-121 R4): MCST 전환 장부. 실행기가 쓰고 사건 writer가 읽는다 — 고치거나 지우지 않는다.
     "mcst_theme_transition_batches": ("SELECT", "INSERT"),
     "mcst_theme_transition_items": ("SELECT", "INSERT"),
     "feature_update_request_datasets": _ORDINARY_OPS,
@@ -583,7 +583,7 @@ _M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
     "TO ktm_manual_provider_dedup_procedure_owner",
     "GRANT USAGE ON SEQUENCE ops.feature_reference_reconciliation_events_event_sequence_seq "
     "TO ktm_manual_provider_dedup_procedure_owner",
-    # 447(ADR-121 R4): MCST 전환 사건 writer가 장부를 읽는다. baseline에는 없는 표다.
+    # 448(ADR-121 R4): MCST 전환 사건 writer가 장부를 읽는다. baseline에는 없는 표다.
     """DO $mcst_transition_acl$ BEGIN
     IF to_regclass('ops.mcst_theme_transition_items') IS NOT NULL THEN
         GRANT SELECT ON TABLE ops.mcst_theme_transition_batches,
@@ -671,7 +671,7 @@ _M05_WRITER_ACL = (
     "GRANT EXECUTE ON PROCEDURE feature.lease_feature_reference_reconciliation_event_v2(...), "
     "feature.ack_feature_reference_reconciliation_event_v2(...) "
     "TO ktm_feature_reference_reconciliation_service_executor",
-    # 447(ADR-121 R4): MCST 전환 실행기의 사건 writer.
+    # 448(ADR-121 R4): MCST 전환 실행기의 사건 writer.
     "REVOKE ALL ON PROCEDURE feature.record_mcst_theme_transition_event(...) FROM PUBLIC, "
     "ktm_feature_runtime, ktm_feature_service, "
     "ktm_manual_provider_dedup_detector_executor, "
@@ -944,7 +944,7 @@ _OPTIONAL_ROUTINES: Mapping[str, str] = {
     # baseline400에는 아직 없으며410이 같은 전역 fence 아래 shadow 전용으로 추가한다.
     "feature.record_provider_field_candidates": "410_provider_field_shadow",
     "ops.lock_scoped_feature_write_protocol": "411_scoped_feature_write_kernel",
-    "feature.record_mcst_theme_transition_event": "447_mcst_theme_transition",
+    "feature.record_mcst_theme_transition_event": "448_mcst_theme_transition",
 }
 
 #: 인벤토리가 지목하는 루틴 전부. `db.py`의 head 전용 preflight 목록과 달리 이것은

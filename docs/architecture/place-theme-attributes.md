@@ -403,7 +403,7 @@ dataset → entity → link로 Feature 집합을 한 번 만든다) — 행마�
 - 앵커는 옮기지 않는다. 퇴역 패자의 목록 앵커는 그대로 남고, apply 모드 적재가 그 앵커를 만나면
   병합 이력을 따라 생존자로 간다(§6.2 redirect).
 
-### 8.2.1 구현(R4, alembic 447)
+### 8.2.1 구현(R4, alembic 448)
 
 - 실행기 `ktmctl mcst-theme-transition <plan.json>` — 계획은 `ktmctl mcst-theme-plan --plan-out`이 쓴다
   (항목마다 계획 시점 `row_revision`, 내용 sha `plan_sha256`). 기본은 **리허설**(batch마다 되감음),

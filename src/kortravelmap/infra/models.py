@@ -1208,7 +1208,7 @@ class FeatureReferenceReconciliationEventRow(Base):
             "event_sequence",
             name=conv("uq_feature_reference_reconciliation_events_sequence"),
         ),
-        # 447(ADR-121 R4): 사건 출처가 둘이다. 출처마다 생성 열에 FK를 건다 — case_id·
+        # 448(ADR-121 R4): 사건 출처가 둘이다. 출처마다 생성 열에 FK를 건다 — case_id·
         # resolution_id 열과 payload 모양은 그대로다(MCST 출처는 batch_id·item_id를 싣는다).
         CheckConstraint(
             "origin_kind IN ('manual_provider_dedup', 'mcst_theme_transition')",
@@ -1325,7 +1325,7 @@ class FeatureReferenceReconciliationEventRow(Base):
 
 
 class McstThemeTransitionBatchRow(Base):
-    """``ops.mcst_theme_transition_batches`` — ADR-121 R4 전환 실행 batch(447)."""
+    """``ops.mcst_theme_transition_batches`` — ADR-121 R4 전환 실행 batch(448)."""
 
     __tablename__ = "mcst_theme_transition_batches"
     __table_args__ = (
@@ -1366,7 +1366,7 @@ class McstThemeTransitionBatchRow(Base):
 
 
 class McstThemeTransitionItemRow(Base):
-    """``ops.mcst_theme_transition_items`` — 전환된 MCST Feature 하나(447). 되돌림 근거를 담는다."""
+    """``ops.mcst_theme_transition_items`` — 전환된 MCST Feature 하나(448). 되돌림 근거를 담는다."""
 
     __tablename__ = "mcst_theme_transition_items"
     __table_args__ = (

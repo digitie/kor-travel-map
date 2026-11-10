@@ -1,7 +1,7 @@
 """MCST 테마 목록 전환 장부와 M05 사건의 두 번째 출처(ADR-121 R4).
 
-Revision ID: 447_mcst_theme_transition
-Revises: 446_mcst_place_attributes
+Revision ID: 448_mcst_theme_transition
+Revises: 447_admin_search_trgm_indexes
 
 왜 필요한가. ADR-121 R4는 기존 MCST Feature를 master로 병합(attach·collapse)하거나 퇴역(반려 업종,
 retire)시킨다. 퇴역한 Feature를 참조하는 PinVi 행은 M05 사건(``rebind``/``detach``)으로 옮겨야
@@ -24,7 +24,7 @@ retire)시킨다. 퇴역한 Feature를 참조하는 PinVi 행은 M05 사건(``re
   바꿔 다시 건다. manual 출처 행의 참조 무결성은 그대로이고, MCST 출처 행은 장부 FK가 받는다.
 - ``feature.record_mcst_theme_transition_event(uuid)``: 사건 writer. M05 procedure owner 소유,
   manual 경로와 같은 잠금·sequence·payload·hash 규칙.
-- receipt head CHECK에 447.
+- receipt head CHECK에 448.
 
 잠금. 사건 표 재작성(``ACCESS EXCLUSIVE``, 행 수 작음)과 receipt CHECK. protocol EX를 잡고
 ``lock_timeout`` 1초·``statement_timeout`` 30초로 묶는다.
@@ -41,8 +41,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "447_mcst_theme_transition"
-down_revision: str | None = "446_mcst_place_attributes"
+revision: str = "448_mcst_theme_transition"
+down_revision: str | None = "447_admin_search_trgm_indexes"
 branch_labels: str | None = None
 depends_on: str | None = None
 
@@ -232,7 +232,8 @@ ALTER TABLE ops.application_schema_operation_receipts
         '442_mois_brand_search_aliases',
         '444_trip_search_aliases',
         '446_mcst_place_attributes',
-        '447_mcst_theme_transition'
+        '447_admin_search_trgm_indexes',
+        '448_mcst_theme_transition'
     ))
 """
 _EVENT_PROCEDURE_SIGNATURE: Final[str] = (
@@ -248,7 +249,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _EVENT_ORIGIN_SQL,
     _EVENT_FK_SQL,
     "SET ROLE " + _M05_OWNER,
-    _sidecar("_447_record_mcst_theme_transition_event.sql"),
+    _sidecar("_448_record_mcst_theme_transition_event.sql"),
     "REVOKE ALL ON PROCEDURE " + _EVENT_PROCEDURE_SIGNATURE + " FROM PUBLIC",
     "GRANT EXECUTE ON PROCEDURE " + _EVENT_PROCEDURE_SIGNATURE
     + " TO ktm_manual_provider_dedup_admin_executor",
@@ -259,7 +260,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
 
 
 def upgrade() -> None:
-    """전환 장부·사건 출처·사건 writer를 만들고 receipt head CHECK에 447을 더한다."""
+    """전환 장부·사건 출처·사건 writer를 만들고 receipt head CHECK에 448을 더한다."""
     bind = op.get_bind()
     prior: dict[str, str] = {
         str(name): str(value)
@@ -300,4 +301,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     """되돌리지 않는다."""
-    raise RuntimeError("447_mcst_theme_transition is forward-only")
+    raise RuntimeError("448_mcst_theme_transition is forward-only")

@@ -5,6 +5,12 @@
 - `GET /v1/admin/features?q=…`(및 `/v1/service/admin-features`)가 드문 검색어에서 수 초 걸리던 것을 trigram 인덱스(alembic 447)로 줄인다. parameter·기본값·응답은 그대로다.
 - 기본 `search_scope=all`은 이름·주소·ID에 원천 식별자(`source_entity_id`·현재 `source_record_key`)를 더해 찾는다. 원천 JSON 본문은 더 이상 검색하지 않는다.
 
+## 2026-11-11 — MCST 테마 전환 실행기(ADR-121 R4, #1468 A)
+
+- `ktmctl mcst-theme-transition`: 승인된 계획 파일로 기존 MCST Feature를 master에 병합하거나(attach·collapse) 반려 업종을 퇴역시키고, Feature마다 PinVi 참조 정리 사건(`rebind`·`detach`)을 남긴다. 기본은 되감는 리허설이고 `--execute --confirm-plan-sha256`일 때만 쓴다.
+- 사건 표에 `origin_kind`가 생긴다(`manual_provider_dedup`·`mcst_theme_transition`). 사건 payload 모양은 그대로다.
+- 퇴역한 Feature로는 병합할 수 없다(`MergeConflictError`). 붙임 규칙이 부속 시설·번호 다른 동/호·멀리 떨어진 한쪽 지점을 같은 장소로 보지 않는다. alembic 448.
+
 ## 2026-11-10 — 장소 속성(ADR-121, #1468 A)
 
 - 공개 API에 장소 속성이 생긴다: `attribute` 필터(반려동물 동반·무장애·영유아 동반·서점 유형·세계음식, AND·최대 5개),

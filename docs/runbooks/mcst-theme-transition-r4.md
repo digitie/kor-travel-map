@@ -16,11 +16,11 @@
 
 ## 1. 전제
 
-- Map에 alembic 447(`447_mcst_theme_transition`)까지 배포. 붙임 모드는 아직 `off`.
-- PinVi 재vendor 불필요 — 447은 OpenAPI·사건 payload 모양을 바꾸지 않는다(사건 표에 열·FK만 더한다).
+- Map에 alembic 448(`448_mcst_theme_transition`)까지 배포. 붙임 모드는 아직 `off`.
+- PinVi 재vendor 불필요 — 448은 OpenAPI·사건 payload 모양을 바꾸지 않는다(사건 표에 열·FK만 더한다).
 - 국가유산 367쌍 큐 적용과 **겹치지 않는다**(같은 병합 경로·protocol EX를 쓴다).
-- **이미지 롤백 = DB 복원.** 447 뒤에는 사건 표에 `origin_kind`·생성 열·FK가 바뀌어 447 이전 이미지가
-  manual M05 사건을 쓰지 못할 수 있다. 447 이전 이미지로 되돌리려면 §3 전체 되돌림(백업 복원)과 함께 한다.
+- **이미지 롤백 = DB 복원.** 448 뒤에는 사건 표에 `origin_kind`·생성 열·FK가 바뀌어 448 이전 이미지가
+  manual M05 사건을 쓰지 못할 수 있다. 448 이전 이미지로 되돌리려면 §3 전체 되돌림(백업 복원)과 함께 한다.
 - PinVi M05 소비자는 **꺼져 있고** 살아 있는 lease가 없어야 한다(`ops.feature_reference_reconciliation_leases`에
   만료 전 lease 0). 실행 중 소비자가 사건을 ACK하면 §3 전체 되돌림이 PinVi까지 번진다.
 
@@ -28,7 +28,7 @@
 
 | # | 누가 | 무엇 | 되돌림 |
 |---|---|---|---|
-| 1 | deploy | Map 447 포함 SHA로 회전(attach mode `off`) | 회전 규칙대로 |
+| 1 | deploy | Map 448 포함 SHA로 회전(attach mode `off`) | 회전 규칙대로 |
 | 2 | deploy | **동결**: 모든 feature 적재 operation·queue(`DISABLED_FEATURE_LOAD_SCHEDULES`)와 `consistency_dedup_refresh_daily_schedule` 정지, STARTED run 0 확인. 관리자 쓰기(M05 manual dedup 결정·feature PATCH·병합 큐 적용)도 창 동안 멈춘다. 국가유산 367쌍 큐가 돌고 있지 않음을 확인 | 해제 |
 | 3 | deploy | map DB 백업(pg_dump) — 되돌림 기준점 | — |
 | 4 | R4 | 새 계획 `ktmctl mcst-theme-plan --samples 50 --ids-out … --plan-out plan.json`(읽기 전용) → 목록별 action 수·정밀도 표본·PinVi 참조 수 보고 | 없음(읽기) |

@@ -119,7 +119,7 @@ _M05_DECISION_PROCEDURE = (
     "uuid,text,text,bigint,bigint,uuid,text,text,bigint)"
 )
 _M05_LEASE_PROCEDURE = "feature.lease_feature_reference_reconciliation_event_v2(text,uuid)"
-#: 447(ADR-121 R4) MCST 전환 실행기의 M05 사건 writer.
+#: 448(ADR-121 R4) MCST 전환 실행기의 M05 사건 writer.
 _MCST_TRANSITION_EVENT_PROCEDURE = "feature.record_mcst_theme_transition_event(uuid)"
 #: T-VN-39/ADR-098 claim 축 해석기. 파이썬 repo가 직접 부르므로 EXECUTE가 공유 그룹
 #: `ktm_feature_runtime`에 있고, 따라서 두 런타임 로그인 모두 이것을 갖는다.
