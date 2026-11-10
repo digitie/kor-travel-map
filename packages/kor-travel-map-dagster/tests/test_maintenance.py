@@ -38,6 +38,10 @@ pytestmark = pytest.mark.filterwarnings(
 class _Client:
     def __init__(self) -> None:
         self.pairs: list[tuple[DedupRefreshScope, DedupRefreshScope, bool]] = []
+        self.pair_options: list[dict[str, object]] = []
+        self.route_overlaps: list[
+            tuple[DedupRefreshScope, DedupRefreshScope, float, float]
+        ] = []
         self.siblings: list[tuple[DedupRefreshScope, bool]] = []
         self.consistency_calls: list[dict[str, Any]] = []
         self.notice_purge_calls: list[str] = []
@@ -99,9 +103,22 @@ class _Client:
         right_scope: DedupRefreshScope,
         *,
         include_auto_merge: bool = True,
+        **options: object,
     ) -> DedupRefreshResult:
         self.pairs.append((left_scope, right_scope, include_auto_merge))
+        self.pair_options.append(options)
         return _refresh_result("pair", left_scope, right_scope)
+
+    async def refresh_route_overlap_dedup_candidates(
+        self,
+        left_scope: DedupRefreshScope,
+        right_scope: DedupRefreshScope,
+        *,
+        buffer_m: float,
+        min_overlap_ratio: float,
+    ) -> DedupRefreshResult:
+        self.route_overlaps.append((left_scope, right_scope, buffer_m, min_overlap_ratio))
+        return _refresh_result("route_overlap", left_scope, right_scope)
 
     async def refresh_sibling_dedup_candidates(
         self,
@@ -258,7 +275,8 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
     )
 
     assert result.success
-    assert len(client.pairs) == len(DEFAULT_DEDUP_SCOPE_PAIRS)
+    # 선형 겹침 쌍(#1468)은 점 비교가 아니라 별도 client 메서드로 간다.
+    assert len(client.pairs) + len(client.route_overlaps) == len(DEFAULT_DEDUP_SCOPE_PAIRS)
     # 기본 cross-provider pair: KNPS 문화시설/사찰 ↔ 국가유산(canonical provider name).
     assert client.pairs[0][0].provider == "python-knps-api"
     assert client.pairs[0][1].provider == "python-krheritage-api"
@@ -881,3 +899,167 @@ def _refresh_result(
         ],
         queue=DedupQueueResult(candidates_total=1, inserted=1),
     )
+
+
+# ── #1468 원천 겹침 쌍 ────────────────────────────────────────────────────────
+
+
+_PairKey = tuple[str, str | None, str, str | None]
+
+
+def _default_pair_calls() -> tuple[_Client, dict[_PairKey, dict[str, object]]]:
+    client = _Client()
+    result = consistency_dedup_refresh_job.execute_in_process(
+        resources={"kor_travel_map_client": client},
+    )
+    assert result.success
+    by_key = {
+        (left.provider, left.dataset_key, right.provider, right.dataset_key): {
+            "left": left,
+            "right": right,
+            **options,
+        }
+        for (left, right, _auto), options in zip(client.pairs, client.pair_options, strict=True)
+    }
+    return client, by_key
+
+
+@pytest.mark.parametrize(
+    ("key", "radius", "match"),
+    [
+        # 캠핑장: MOIS ↔ KNPS 국립공원 야영장.
+        (
+            ("python-mois-api", None, "python-knps-api", "knps_campgrounds"),
+            300.0,
+            "score_or_same_name",
+        ),
+        # 같은 이름의 휴양림 ↔ 수목원.
+        (
+            (
+                "python-krforest-api",
+                "krforest_recreation_forests",
+                "python-krforest-api",
+                "krforest_arboretums",
+            ),
+            1000.0,
+            "same_name",
+        ),
+    ],
+)
+def test_default_pairs_include_1468_source_overlap_rules(
+    key: _PairKey, radius: float, match: str
+) -> None:
+    _client, by_key = _default_pair_calls()
+    assert key in by_key, key
+    call = by_key[key]
+    assert call["max_distance_m"] == radius
+    assert call["match"] == match
+
+
+def test_default_mois_knps_camping_pair_scopes_campground_codes() -> None:
+    _client, by_key = _default_pair_calls()
+    call = by_key[("python-mois-api", None, "python-knps-api", "knps_campgrounds")]
+    left = cast(DedupRefreshScope, call["left"])
+    assert left.categories
+    assert all(code.startswith("0306") for code in left.categories)
+    assert {"03060000", "03060100", "03060200"} <= set(left.categories)
+
+
+def test_default_pairs_leave_mcst_to_adr121_attach() -> None:
+    # MCST 테마 목록은 ADR-121 attach 엔진이 기존 Feature에 붙인다 — #1468 C의 MCST 쌍은 없다.
+    _client, by_key = _default_pair_calls()
+    radius_pairs = {key for key, call in by_key.items() if "max_distance_m" in call}
+    assert all("python-mcst-api" not in (key[0], key[2]) for key in radius_pairs)
+
+
+def test_existing_pairs_keep_their_call_shape() -> None:
+    # 반경·판정 방식은 그것을 적은 쌍에만 간다 — 기존 쌍은 예전과 같은 호출이다.
+    client, by_key = _default_pair_calls()
+    knps_heritage = by_key[("python-knps-api", None, "python-krheritage-api", None)]
+    assert "max_distance_m" not in knps_heritage
+    assert "match" not in knps_heritage
+    assert sum(1 for options in client.pair_options if options) == 2
+
+
+def test_default_trail_rule_uses_route_overlap_with_knps_authoritative() -> None:
+    client, _by_key = _default_pair_calls()
+    [(left, right, buffer_m, min_ratio)] = client.route_overlaps
+    assert (left.provider, left.dataset_key) == (
+        "python-krforest-api",
+        "krforest_mountain_trails",
+    )
+    assert (right.provider, right.dataset_key) == ("python-knps-api", "knps_trails")
+    assert buffer_m == 30.0
+    assert min_ratio == 0.5
+    # 왼쪽 상한이 국립공원 안 등산로(약 5천 건)를 덮는다.
+    assert left.limit >= 10_000
+
+
+def test_configured_pair_dispatches_match_radius_and_route_overlap() -> None:
+    client = _Client()
+    result = consistency_dedup_refresh_job.execute_in_process(
+        run_config={
+            "ops": {
+                "refresh_dedup_candidates": {
+                    "config": {
+                        "pairs": [
+                            {
+                                "left": {"provider": "a"},
+                                "right": {"provider": "b"},
+                                "max_distance_m": 250,
+                                "match": "same_name",
+                            },
+                            {
+                                "left": {"provider": "c"},
+                                "right": {"provider": "d"},
+                                "match": "route_overlap",
+                                "buffer_m": "20",
+                                "min_overlap_ratio": 0.7,
+                            },
+                        ]
+                    }
+                }
+            }
+        },
+        resources={"kor_travel_map_client": client},
+    )
+    assert result.success
+    assert client.pair_options == [{"max_distance_m": 250.0, "match": "same_name"}]
+    assert [
+        (lft.provider, rgt.provider, buf, ratio)
+        for lft, rgt, buf, ratio in client.route_overlaps
+    ] == [("c", "d", 20.0, 0.7)]
+
+
+@pytest.mark.parametrize(
+    "pair_extra",
+    [
+        {"match": "fuzzy"},
+        {"max_distance_m": 0},
+        {"max_distance_m": True},
+        {"match": "route_overlap", "buffer_m": 30},  # min_overlap_ratio 없음
+        {"buffer_m": 30},  # 점 쌍에 선형 옵션
+        {"match": "route_overlap", "buffer_m": 30, "min_overlap_ratio": 0.5, "max_distance_m": 9},
+        {"match": "same_name"},  # 반경 없음
+    ],
+)
+def test_configured_pair_rejects_invalid_rule(pair_extra: dict[str, object]) -> None:
+    client = _Client()
+    result = consistency_dedup_refresh_job.execute_in_process(
+        run_config={
+            "ops": {
+                "refresh_dedup_candidates": {
+                    "config": {
+                        "pairs": [
+                            {"left": {"provider": "a"}, "right": {"provider": "b"}, **pair_extra}
+                        ]
+                    }
+                }
+            }
+        },
+        resources={"kor_travel_map_client": client},
+        raise_on_error=False,
+    )
+    assert not result.success
+    assert client.pairs == []
+    assert client.route_overlaps == []

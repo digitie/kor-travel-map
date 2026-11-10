@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING, Any, Final
 
 from sqlalchemy import text
 
+from kortravelmap.core.dedup import DedupPoint
 from kortravelmap.core.scoring import MasterCandidate
 from kortravelmap.dto import Coordinate, EventDetail
 from kortravelmap.infra import feature_identity
@@ -28,6 +29,7 @@ __all__ = [
     "DedupRefreshFeature",
     "DedupRefreshScope",
     "list_dedup_refresh_features",
+    "list_route_overlap_pairs",
 ]
 
 DEDUP_REFRESH_DEFAULT_LIMIT: Final[int] = 5000
@@ -89,10 +91,11 @@ class DedupRefreshFeature:
             has_coord=self.has_coord,
             updated_at=self.updated_at,
             provider=self.provider,
+            dataset_key=self.dataset_key,
         )
 
 
-_LIST_DEDUP_FEATURES_SQL: Final[str] = """
+_LIST_DEDUP_FEATURES_TEMPLATE: Final[str] = """
 WITH ranked AS (
   SELECT
     f.feature_id,
@@ -151,6 +154,7 @@ WITH ranked AS (
         CAST(:cursor_feature_id AS uuid)
       )
     )
+{near_clause}
 )
 SELECT
     feature_id,
@@ -169,13 +173,53 @@ ORDER BY updated_at DESC, feature_id DESC
 LIMIT CAST(:limit AS integer)
 """
 
+_LIST_DEDUP_FEATURES_SQL: Final[str] = _LIST_DEDUP_FEATURES_TEMPLATE.format(near_clause="")
+"""scope 전체를 읽는 기본 조회."""
+
+_NEAR_CLAUSE: Final[str] = """
+    -- #1468: 반경 blocking 쌍은 큰 쪽(예: MOIS 0306)을 다른 쪽 feature 반경 안만 읽는다.
+    -- 저장된 `coord_5179`와 그 부분 GiST 인덱스를 쓴다(ADR-012 — 술어에 ST_Transform 없음).
+    -- OR 없는 EXISTS라 planner가 semi-join으로 바꿀 수 있다.
+    AND EXISTS (
+      SELECT 1
+      FROM feature.features AS near_l
+      WHERE near_l.feature_id = ANY(CAST(:near_ids AS uuid[]))
+        AND x_extension.ST_DWithin(
+              f.coord_5179, near_l.coord_5179,
+              CAST(:near_radius_m AS double precision)
+            )
+    )"""
+
+_LIST_DEDUP_FEATURES_NEAR_SQL: Final[str] = _LIST_DEDUP_FEATURES_TEMPLATE.format(
+    near_clause=_NEAR_CLAUSE
+)
+"""``near_feature_ids`` 반경 안만 읽는 조회(#1468)."""
+
+_NEAR_SQL_SLACK: Final[float] = 1.01
+"""SQL 반경 여유. `coord_5179`(평면) 거리와 Python haversine(구면)은 0.3 % 안에서 다르다 —
+SQL은 조금 넓게 읽고 정확한 반경은 ``core.dedup``이 다시 거른다."""
+
 
 async def list_dedup_refresh_features(
     session: AsyncSession,
     scope: DedupRefreshScope,
+    *,
+    near_feature_ids: Sequence[str] | None = None,
+    near_radius_m: float | None = None,
 ) -> list[DedupRefreshFeature]:
-    """provider/dataset scope의 활성 feature를 dedup 입력으로 조회한다."""
+    """provider/dataset scope의 활성 feature를 dedup 입력으로 조회한다.
+
+    ``near_feature_ids``/``near_radius_m``가 함께 주어지면 그 feature 중 하나와
+    ``near_radius_m`` 안에 있는 feature만 읽는다(#1468 반경 blocking). ``limit``은 그
+    거름 뒤에 걸린다.
+    """
     _validate_scope(scope)
+    if (near_feature_ids is None) != (near_radius_m is None):
+        raise ValueError("near_feature_ids and near_radius_m must be provided together")
+    if near_radius_m is not None and not near_radius_m > 0:
+        raise ValueError("near_radius_m must be greater than 0")
+    if near_feature_ids is not None and not near_feature_ids:
+        return []
     # T-VN-32C PR-2 — 운영자가 응답 UUID를 run config cursor에 붙여넣는 경로.
     # T-VN-39: keyset 축이 uuid가 됐으므로 cursor도 uuid 표기여야 한다.
     # canonical uuid인데 해석 miss면 원문 유지 — 기존 "범위 밖 cursor"
@@ -187,7 +231,8 @@ async def list_dedup_refresh_features(
     )
     rows = (
         await session.execute(
-            text(_LIST_DEDUP_FEATURES_SQL),
+            text(_LIST_DEDUP_FEATURES_SQL if near_radius_m is None
+                 else _LIST_DEDUP_FEATURES_NEAR_SQL),
             {
                 "provider": scope.provider,
                 "dataset_key": scope.dataset_key,
@@ -196,10 +241,153 @@ async def list_dedup_refresh_features(
                 "limit": scope.limit,
                 "cursor_updated_at": scope.cursor_updated_at,
                 "cursor_feature_id": cursor_feature_id,
+                **(
+                    {}
+                    if near_feature_ids is None or near_radius_m is None
+                    else {
+                        "near_ids": list(near_feature_ids),
+                        "near_radius_m": near_radius_m * _NEAR_SQL_SLACK,
+                    }
+                ),
             },
         )
     ).mappings().all()
     return [_row_to_feature(row) for row in rows]
+
+
+_ROUTE_OVERLAP_SQL: Final[str] = """
+WITH left_lines AS MATERIALIZED (
+  -- 왼쪽은 id·표시값만 모은다. 선 자체는 아래에서 route geometry GiST 인덱스(`&&`)로 찾는다.
+  SELECT f.feature_id, f.name, f.category, f.kind,
+         x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat
+  FROM feature.features AS f
+  JOIN provider_sync.source_links AS sl
+    ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
+  JOIN provider_sync.source_entities AS se
+    ON se.source_entity_key = sl.source_entity_key
+  JOIN provider_sync.provider_datasets AS pd
+    ON pd.provider_dataset_id = se.provider_dataset_id
+  WHERE f.lifecycle_state = 'active'
+    AND f.publication_state = 'published'
+    AND f.quality_state = 'valid'
+    AND pd.provider = :left_provider
+    AND (CAST(:left_dataset_key AS text) IS NULL
+         OR pd.dataset_key = CAST(:left_dataset_key AS text))
+    AND (CAST(:left_categories AS text[]) IS NULL
+         OR f.category = ANY(CAST(:left_categories AS text[])))
+),
+right_zones AS MATERIALIZED (
+  -- 오른쪽(원장) 선을 미터 버퍼로 감싼다. 버퍼는 geography로 만들어 4326으로 되돌린다 —
+  -- 이 식은 술어가 아니라 한 번 만드는 값이다(ADR-012). 아래 `&&`가 인덱스 술어다.
+  SELECT f.feature_id, f.name, f.category, f.kind,
+         x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
+         x_extension.ST_Buffer(
+           g.geom::x_extension.geography, CAST(:buffer_m AS double precision)
+         )::x_extension.geometry AS zone
+  FROM feature.features AS f
+  JOIN feature.feature_route_geometries AS g
+    ON g.feature_id = f.feature_id AND g.public_ready
+  JOIN provider_sync.source_links AS sl
+    ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
+  JOIN provider_sync.source_entities AS se
+    ON se.source_entity_key = sl.source_entity_key
+  JOIN provider_sync.provider_datasets AS pd
+    ON pd.provider_dataset_id = se.provider_dataset_id
+  WHERE f.lifecycle_state = 'active'
+    AND f.publication_state = 'published'
+    AND f.quality_state = 'valid'
+    AND pd.provider = :right_provider
+    AND (CAST(:right_dataset_key AS text) IS NULL
+         OR pd.dataset_key = CAST(:right_dataset_key AS text))
+    AND (CAST(:right_categories AS text[]) IS NULL
+         OR f.category = ANY(CAST(:right_categories AS text[])))
+),
+line_overlaps AS (
+  SELECT l.feature_id AS left_id, l.name AS left_name, l.category AS left_category,
+         l.kind AS left_kind, l.lon AS left_lon, l.lat AS left_lat,
+         r.feature_id AS right_id, r.name AS right_name, r.category AS right_category,
+         r.kind AS right_kind, r.lon AS right_lon, r.lat AS right_lat,
+         x_extension.ST_Length(
+           x_extension.ST_Intersection(lg.geom, r.zone)::x_extension.geography
+         ) / NULLIF(x_extension.ST_Length(lg.geom::x_extension.geography), 0) AS ratio
+  FROM right_zones AS r
+  JOIN feature.feature_route_geometries AS lg
+    ON lg.public_ready
+   AND lg.geom OPERATOR(x_extension.&&) r.zone
+  JOIN left_lines AS l
+    ON l.feature_id = lg.feature_id
+  WHERE l.feature_id <> r.feature_id
+)
+SELECT DISTINCT ON (left_id)
+  left_id, left_name, left_category, left_kind, left_lon, left_lat,
+  right_id, right_name, right_category, right_kind, right_lon, right_lat,
+  LEAST(ratio, 1.0) AS ratio
+FROM line_overlaps
+WHERE ratio >= CAST(:min_ratio AS double precision)
+ORDER BY left_id, ratio DESC, right_id
+LIMIT CAST(:limit AS integer)
+"""
+
+
+async def list_route_overlap_pairs(
+    session: AsyncSession,
+    left: DedupRefreshScope,
+    right: DedupRefreshScope,
+    *,
+    buffer_m: float,
+    min_overlap_ratio: float,
+) -> list[tuple[DedupPoint, DedupPoint, float]]:
+    """왼쪽 선 길이 중 오른쪽 선 ``buffer_m`` 버퍼 안 비율이 ``min_overlap_ratio`` 이상인 쌍.
+
+    왼쪽 선마다 가장 많이 겹치는 오른쪽 선 하나만 낸다(#1468 — 국립공원 안 산림청 등산로 ↔
+    KNPS 탐방로). 반환은 ``(left, right, overlap_ratio)``. ``left.limit``이 쌍 수 상한이다.
+    """
+    _validate_scope(left)
+    _validate_scope(right)
+    if not buffer_m > 0:
+        raise ValueError("buffer_m must be greater than 0")
+    if not 0 < min_overlap_ratio <= 1:
+        raise ValueError("min_overlap_ratio must be in (0, 1]")
+    rows = (
+        await session.execute(
+            text(_ROUTE_OVERLAP_SQL),
+            {
+                "left_provider": left.provider,
+                "left_dataset_key": left.dataset_key,
+                "left_categories": _array_or_none(left.categories),
+                "right_provider": right.provider,
+                "right_dataset_key": right.dataset_key,
+                "right_categories": _array_or_none(right.categories),
+                "buffer_m": buffer_m,
+                "min_ratio": min_overlap_ratio,
+                "limit": left.limit,
+            },
+        )
+    ).mappings().all()
+    return [
+        (
+            _route_point(row, "left"),
+            _route_point(row, "right"),
+            float(row["ratio"]),
+        )
+        for row in rows
+    ]
+
+
+def _route_point(row: Any, side: str) -> DedupPoint:
+    lon = row[f"{side}_lon"]
+    lat = row[f"{side}_lat"]
+    return DedupPoint(
+        feature_id=str(row[f"{side}_id"]),
+        name=str(row[f"{side}_name"]),
+        coord=(
+            Coordinate(lon=Decimal(str(lon)), lat=Decimal(str(lat)))
+            if lon is not None and lat is not None
+            else None
+        ),
+        category=str(row[f"{side}_category"]),
+        kind=str(row[f"{side}_kind"]),
+    )
 
 
 def _validate_scope(scope: DedupRefreshScope) -> None:

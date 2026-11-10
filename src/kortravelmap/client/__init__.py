@@ -50,7 +50,11 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.client._bundle_spool import BundleSpool
-from kortravelmap.core.dedup import find_dedup_candidates, find_sibling_candidates
+from kortravelmap.core.dedup import (
+    find_dedup_candidates,
+    find_sibling_candidates,
+    route_overlap_candidate,
+)
 from kortravelmap.core.exceptions import IntegrityFindingPersistenceError
 from kortravelmap.core.feature_operation import (
     DagsterFeatureOperationCursor,
@@ -120,6 +124,7 @@ from kortravelmap.infra.db import (
 from kortravelmap.infra.dedup_refresh_repo import (
     DedupRefreshScope,
     list_dedup_refresh_features,
+    list_route_overlap_pairs,
 )
 from kortravelmap.infra.dedup_repo import (
     DedupQueueResult,
@@ -376,7 +381,7 @@ if TYPE_CHECKING:
 
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-    from kortravelmap.core.dedup import DedupCandidate, DedupInput
+    from kortravelmap.core.dedup import DedupCandidate, DedupInput, DedupMatch
     from kortravelmap.dto import Address, FeatureBundle, SourceRecord
     from kortravelmap.dto.geo_dataset import DatasetRef, GeoLoadContext
     from kortravelmap.dto.price import PriceValue
@@ -2370,12 +2375,32 @@ class AsyncKorTravelMapClient:
         right_scope: DedupRefreshScope,
         *,
         include_auto_merge: bool = True,
+        max_distance_m: float | None = None,
+        match: DedupMatch = "score",
     ) -> DedupRefreshResult:
-        """DB에 적재된 두 provider/dataset scope를 다시 score해 큐를 갱신한다."""
+        """DB에 적재된 두 provider/dataset scope를 다시 score해 큐를 갱신한다.
+
+        ``max_distance_m``가 있으면 오른쪽은 왼쪽 feature 반경 안만 DB에서 읽고, 비교도 그
+        반경 안 쌍만 한다(#1468). ``match``는 ``core.dedup.DedupMatch``.
+        """
         async with self._session_factory() as session, session.begin():
             left = await list_dedup_refresh_features(session, left_scope)
-            right = await list_dedup_refresh_features(session, right_scope)
-            candidates = find_dedup_candidates(left, right, include_auto_merge=include_auto_merge)
+            if max_distance_m is None:
+                right = await list_dedup_refresh_features(session, right_scope)
+            else:
+                right = await list_dedup_refresh_features(
+                    session,
+                    right_scope,
+                    near_feature_ids=[feature.feature_id for feature in left],
+                    near_radius_m=max_distance_m,
+                )
+            candidates = find_dedup_candidates(
+                left,
+                right,
+                include_auto_merge=include_auto_merge,
+                max_distance_m=max_distance_m,
+                match=match,
+            )
             queue = (
                 await enqueue_dedup_candidates(session, candidates)
                 if candidates
@@ -2387,6 +2412,48 @@ class AsyncKorTravelMapClient:
             right_scope=right_scope,
             left_count=len(left),
             right_count=len(right),
+            candidates=candidates,
+            queue=queue,
+        )
+
+    async def refresh_route_overlap_dedup_candidates(
+        self,
+        left_scope: DedupRefreshScope,
+        right_scope: DedupRefreshScope,
+        *,
+        buffer_m: float,
+        min_overlap_ratio: float,
+    ) -> DedupRefreshResult:
+        """선형 feature 쌍을 겹침 비율로 찾아 검토 큐에 올린다(#1468).
+
+        왼쪽 선 길이 중 오른쪽 선 ``buffer_m`` 버퍼 안 비율이 ``min_overlap_ratio`` 이상이면
+        왼쪽 선마다 가장 많이 겹치는 오른쪽 선 하나와 ``manual_review`` 쌍이 된다. 자동 병합
+        밴드는 없다(``core.dedup.route_overlap_candidate``).
+        """
+        async with self._session_factory() as session, session.begin():
+            pairs = await list_route_overlap_pairs(
+                session,
+                left_scope,
+                right_scope,
+                buffer_m=buffer_m,
+                min_overlap_ratio=min_overlap_ratio,
+            )
+            candidates = [
+                route_overlap_candidate(left, right, overlap_ratio=ratio)
+                for left, right, ratio in pairs
+            ]
+            candidates.sort(key=lambda c: c.score, reverse=True)
+            queue = (
+                await enqueue_dedup_candidates(session, candidates)
+                if candidates
+                else DedupQueueResult()
+            )
+        return DedupRefreshResult(
+            mode="route_overlap",
+            left_scope=left_scope,
+            right_scope=right_scope,
+            left_count=len({left.feature_id for left, _right, _ratio in pairs}),
+            right_count=len({right.feature_id for _left, right, _ratio in pairs}),
             candidates=candidates,
             queue=queue,
         )
@@ -2614,8 +2681,8 @@ class AsyncKorTravelMapClient:
 
         ``infra.merge_repo.merge_from_review``를 한 transaction에서 실행: loser의
         source_link를 master로 재지정, loser feature soft-delete, ``feature_merge_history``
-        기록, 큐 행 ``merged`` 전이. master는 ``select_master``(좌표 → updated_at →
-        source 우선순위)로 결정. 큐 행이 없거나 이미 검토됐으면 ``MergeError``.
+        기록, 큐 행 ``merged`` 전이. master는 ``select_master``(좌표 → source 우선순위 →
+        updated_at)로 결정. 큐 행이 없거나 이미 검토됐으면 ``MergeError``.
 
         **중복 실행 직렬화(ADR-039)는 호출 측 책임** — CLI ``dedup-merge``가
         ``dedup-merge:{review_id}`` advisory lock으로 감싼다(본 메서드는 lock 미적용).

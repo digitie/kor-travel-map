@@ -414,15 +414,85 @@ def test_select_master_coord_beats_no_coord() -> None:
 
 
 @pytest.mark.unit
-def test_select_master_recency_second() -> None:
-    a = MasterCandidate("f_a", has_coord=True, updated_at=_T1, provider=None)
+def test_select_master_source_priority_beats_recency() -> None:
+    # #1468: 원천 우선순위가 updated_at보다 앞이다. updated_at은 적재 시각이라 거의 항상
+    # 달라서, 그것이 앞이면 나중에 적재된 테마 목록(MCST)이 원장(MOIS)을 이긴다.
+    a = MasterCandidate("f_a", has_coord=True, updated_at=_T1, provider="python-mcst-api")
     b = MasterCandidate("f_b", has_coord=True, updated_at=_T0, provider="python-mois-api")
-    # 둘 다 좌표 — 최신(updated_at) a가 master (provider 우선순위보다 앞).
+    assert select_master(a, b) == ("f_b", "f_a")
+    user = MasterCandidate("f_u", has_coord=True, updated_at=_T1, provider=None)
+    assert select_master(user, b) == ("f_b", "f_u")
+
+
+@pytest.mark.unit
+def test_select_master_recency_breaks_priority_tie() -> None:
+    a = MasterCandidate("f_a", has_coord=True, updated_at=_T1, provider="python-mois-api")
+    b = MasterCandidate("f_b", has_coord=True, updated_at=_T0, provider="python-mois-api")
+    # 좌표·원천 동률 — 최신(updated_at) a가 master.
     assert select_master(a, b) == ("f_a", "f_b")
 
 
 @pytest.mark.unit
-def test_select_master_source_priority_third() -> None:
+def test_source_priority_ranks_sources_added_in_1468() -> None:
+    # 셋 다 표에 없어 미등록 기본(10)으로 떨어지던 원천이다.
+    standard = source_priority("data.go.kr-standard")
+    mcst = source_priority("python-mcst-api")
+    youtube = source_priority("kor-travel-concierge-youtube")
+    assert standard == source_priority("python-datagokr-api")
+    assert source_priority("python-mois-api") > standard > source_priority("python-visitkorea-api")
+    assert source_priority("python-visitkorea-api") > mcst > DEFAULT_SOURCE_PRIORITY
+    assert DEFAULT_SOURCE_PRIORITY > youtube > source_priority(None)
+
+
+@pytest.mark.unit
+@pytest.mark.parametrize(
+    ("master", "loser"),
+    [
+        # 문화유산은 국가유산청이 원장(KNPS 문화자원보다 위, 둘 다 provider 값은 45).
+        (
+            ("python-krheritage-api", "krheritage_heritage_features"),
+            ("python-knps-api", "knps_cultural_resources"),
+        ),
+        # 같은 이름의 휴양림·수목원은 휴양림(같은 산림청 provider 안).
+        (
+            ("python-krforest-api", "krforest_recreation_forests"),
+            ("python-krforest-api", "krforest_arboretums"),
+        ),
+        # 국립공원 안 탐방로는 KNPS가 원장.
+        (
+            ("python-knps-api", "knps_trails"),
+            ("python-krforest-api", "krforest_mountain_trails"),
+        ),
+        # 캠핑장·음식점: MOIS가 MCST 테마 목록보다 위. 박물관: 표준데이터가 MCST보다 위.
+        (("python-mois-api", "mois_license_features_bulk"), ("python-mcst-api", "x")),
+        (("data.go.kr-standard", "datagokr_museums"), ("python-mcst-api", "x")),
+        # KNPS 야영장 ↔ MCST 캠핑장 목록.
+        (("python-knps-api", "knps_campgrounds"), ("python-mcst-api", "x")),
+    ],
+)
+def test_select_master_dataset_rules_for_1468_pairs(
+    master: tuple[str, str], loser: tuple[str, str]
+) -> None:
+    # 패배 쪽이 더 최근에 적재돼도(_T1) 원천이 정한다.
+    m = MasterCandidate("f_z", has_coord=True, updated_at=_T0, provider=master[0],
+                        dataset_key=master[1])
+    lo = MasterCandidate("f_a", has_coord=True, updated_at=_T1, provider=loser[0],
+                         dataset_key=loser[1])
+    assert select_master(m, lo) == ("f_z", "f_a")
+    assert select_master(lo, m) == ("f_z", "f_a")
+
+
+@pytest.mark.unit
+def test_dataset_priority_falls_back_to_provider() -> None:
+    assert source_priority("python-knps-api", "knps_trails") == source_priority("python-knps-api")
+    assert source_priority("python-knps-api", None) == source_priority("python-knps-api")
+    assert source_priority("python-knps-api", "knps_cultural_resources") < source_priority(
+        "python-krheritage-api", "krheritage_heritage_features"
+    )
+
+
+@pytest.mark.unit
+def test_select_master_source_priority_with_equal_recency() -> None:
     a = MasterCandidate("f_a", has_coord=True, updated_at=_T0, provider="python-visitkorea-api")
     b = MasterCandidate("f_b", has_coord=True, updated_at=_T0, provider="python-mois-api")
     # 좌표·updated_at 동률 — 원천 우선순위 높은 mois(b)가 master.
@@ -437,3 +507,22 @@ def test_select_master_full_tie_lexicographic() -> None:
     assert select_master(a, b) == ("f_a", "f_b")
     # 인자 순서 무관.
     assert select_master(b, a) == ("f_a", "f_b")
+
+
+@pytest.mark.unit
+def test_master_source_prefers_highest_priority_primary_link() -> None:
+    # 병합을 흡수한 Feature는 primary link가 여럿이다 — 순서가 아니라 원천 순위로 고른다.
+    from kortravelmap.infra.merge_repo import _best_source
+
+    assert _best_source(
+        ["python-mcst-api", "python-mois-api", "python-visitkorea-api"],
+        ["mcst_x", "mois_license_features_bulk", "visitkorea_tourist_attractions"],
+        [True, True, False],
+    ) == ("python-mois-api", "mois_license_features_bulk")
+    # primary가 없으면 전체에서, 아무것도 없으면 사용자 등록(None).
+    assert _best_source(["python-mcst-api"], ["mcst_x"], [False]) == ("python-mcst-api", "mcst_x")
+    assert _best_source([], [], []) == (None, None)
+    # 동률은 SQL이 준 순서의 앞쪽.
+    assert _best_source(
+        ["python-knps-api", "python-krheritage-api"], ["knps_trails", "h"], [True, True]
+    ) == ("python-knps-api", "knps_trails")
