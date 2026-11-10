@@ -33,6 +33,8 @@ ADR 참조
 
 from __future__ import annotations
 
+import hashlib
+import json
 from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from decimal import Decimal
@@ -55,6 +57,13 @@ from kortravelmap.core.ids import (
     make_source_record_key,
 )
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.venue_match import (
+    VenueMatch,
+    VenueResolver,
+    sido_family,
+    sigungu_root,
+    split_venue_names,
+)
 from kortravelmap.dto import (
     Address,
     AreaDetail,
@@ -86,11 +95,16 @@ __all__ = [
     "KrHeritageEvent",
     "heritage_items_to_bundles",
     "heritage_events_to_bundles",
+    "heritage_event_program_key",
+    "is_legacy_heritage_event_key",
+    "cached_venue_resolver",
+    "HERITAGE_EVENT_PROGRAM_KEY_PREFIX",
     "classify_heritage_kind",
     "resolve_heritage_category",
     "PROVIDER_NAME",
     "DATASET_KEY_HERITAGE",
     "DATASET_KEY_EVENT",
+    "EVENT_SOURCE_ENTITY_TYPE",
     "HERITAGE_MARKER_COLOR",
     "HERITAGE_NAME_NORMALIZER_REVISION",
 ]
@@ -104,6 +118,8 @@ DATASET_KEY_EVENT: Final[str] = "krheritage_event_list"
 
 _HERITAGE_ENTITY_TYPE: Final[str] = "heritage"
 _EVENT_ENTITY_TYPE: Final[str] = "heritage_event"
+EVENT_SOURCE_ENTITY_TYPE: Final[str] = _EVENT_ENTITY_TYPE
+"""행사 ``SourceRecord.source_entity_type`` — 적재 asset의 retire 범위 지정에 쓴다."""
 
 HERITAGE_NAME_NORMALIZER_REVISION: Final[str] = "krheritage-name-v1"
 _HERITAGE_NAME_PRESENCE: Final[ProviderFieldPresence] = ProviderFieldPresence(
@@ -882,69 +898,219 @@ def _event_address_text(event: KrHeritageEvent) -> str | None:
     return " ".join(parts) or None
 
 
-def _event_natural_key(event: KrHeritageEvent) -> str | None:
-    """event 자연키 — provider ``HeritageEvent.occurrence_key``와 같은 ``sn::시작일::종료일``.
+def _event_title(event: KrHeritageEvent) -> str | None:
+    """행사명 — ``title``, 비면 원 응답 ``subTitle``."""
+    return normalize_korean_text(_event_text(event, ("title",), ("subTitle", "title")))
 
-    날짜가 비면 그 자리는 빈 문자열이다(``sn::::``) — provider 0.1.1(``e1b346f7``)의 정의 그대로다.
 
-    ``sn``이 비면 ``title::starts_on::place``다.
+def _event_group(event: KrHeritageEvent) -> str | None:
+    """주관 단체 — 원 응답 ``groupName``."""
+    return normalize_korean_text(_event_text(event, ("group_name",), ("groupName",)))
 
-    ``sn``(원 응답 ``seqNo``)은 **회차 id가 아니다** — 같은 응답 안에서 같은 ``seqNo``가
-    날짜가 다른 행으로 반복된다(2026-10 실 응답 2,006행 중 1,378행이 중복 ``seqNo``,
-    ``(seqNo, sDate, eDate)``는 유일 — 상류 보장은 아니다). provider 수정본의
-    ``occurrence_key``와 같은 모양으로 날짜 둘을 붙인다. 같은 회차가 여러 달 응답에 다시
-    나오는 것은 같은 키로 접히는 것이 맞다.
 
-    live 일부 행사 row는 ``sn``이 빈 값이라(run ``bd92b726``, #380) ADR-009
-    검증(빈 source_entity_id 금지)에 걸린다. 그 경우 행사명+시작일+장소(없으면
-    주소)로 결정적 fallback 키를 파생한다 (ADR-009 ``::`` 구분자, #374 패턴).
-    ``sn``도 행사명도 없으면 ``None`` — 호출측이 해당 row를 skip한다.
-    """
-    starts_on = _event_starts_on(event)
-    ends_on = _event_ends_on(event)
-    starts = starts_on.isoformat() if starts_on is not None else ""
-    ends = ends_on.isoformat() if ends_on is not None else ""
-    sn = _event_sn(event)
-    if sn:
-        # provider ``occurrence_key``와 **글자 그대로** 같아야 한다 — 핀 전후 키가 갈리지 않도록
-        # 속성/원 키에서 직접 계산한다(raw만 있는 수정 전 shape에서도 같은 값).
-        return f"{sn}::{starts}::{ends}"
-    title = normalize_korean_text(event.title)
-    if not title:
-        return None
-    place = (
-        normalize_korean_text(_event_place(event))
-        or _event_address_text(event)
-        or ""
+def _event_region(event: KrHeritageEvent) -> tuple[str | None, str | None]:
+    """원 응답의 시도·시군구 이름(``sido``/``gugun``)."""
+    return (
+        normalize_korean_text(_event_text(event, ("sido",), ("sido",))),
+        normalize_korean_text(_event_text(event, ("gugun",), ("gugun",))),
     )
-    return "::".join((title, starts, place))
 
 
-async def _event_to_bundle(
-    event: KrHeritageEvent,
+def _event_schedule_text(event: KrHeritageEvent) -> str | None:
+    """회차 일정 문구 — 원 응답 ``subDate``("10월 22일 ~ 24일(총3회)/ 10시 ~ 17시")."""
+    return normalize_korean_text(_event_text(event, ("schedule_text",), ("subDate",)))
+
+
+_DERIVED_COORDINATE_SOURCES: Final[frozenset[str]] = frozenset(
+    {"venue_feature", "address_geocode"}
+)
+
+HERITAGE_EVENT_PROGRAM_KEY_PREFIX: Final[str] = "program::"
+"""묶은 행사(프로그램) 자연키 접두. 이 접두가 없는 현재 자연키는 회차별 옛 키다(#1468 D)."""
+
+
+def _program_key_fields(event: KrHeritageEvent) -> tuple[str, ...] | None:
+    """한 행사(프로그램)를 가르는 값 — 행사명·주관 단체·지역·장소.
+
+    원천은 **회차마다 한 행**이고(``sDate``/``eDate``가 회차), 같은 행사가 ``seqNo``를 바꿔 여러
+    번 등록되기도 한다(2026-11-10 prod: 5,286행 = 행사 1,316개, 한 행사·한 날짜에 최대 23행).
+    그래서 날짜와 ``seqNo``는 키에 넣지 않는다. 행사명이 없으면 ``seqNo``로 가른다 — 이름 없는
+    행끼리 장소가 같다고 한 행사로 접지 않는다. 둘 다 없으면 None(skip).
+    """
+    title = _event_title(event)
+    sn = _event_sn(event)
+    if not title and not sn:
+        return None
+    fields: tuple[str, ...] = (
+        title or "",
+        _event_group(event) or "",
+        _event_address_text(event) or "",
+        normalize_korean_text(_event_place(event)) or "",
+    )
+    if not title:
+        fields = (*fields, f"sn:{sn}")
+    return fields
+
+
+def heritage_event_program_key(event: KrHeritageEvent) -> str | None:
+    """행사 한 행 → 묶은 행사의 결정적 자연키(``program::<sha256 앞 32자>``).
+
+    입력 값(정규화한 행사명·단체·지역·장소)이 같으면 언제나 같은 키다. 이 키가
+    ``provider_feature_identities``에 묶여 같은 ``feature_id``(uuid)를 낸다(ADR-098).
+    """
+    fields = _program_key_fields(event)
+    if fields is None:
+        return None
+    material = "\x1f".join(fields).encode("utf-8")
+    return HERITAGE_EVENT_PROGRAM_KEY_PREFIX + hashlib.sha256(material).hexdigest()[:32]
+
+
+def is_legacy_heritage_event_key(source_entity_id: str) -> bool:
+    """회차별 옛 자연키(``seqNo::시작일::종료일`` 또는 ``행사명::시작일::장소``)인가."""
+    return not source_entity_id.startswith(HERITAGE_EVENT_PROGRAM_KEY_PREFIX)
+
+
+def _canonical_json(value: object) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, default=str)
+
+
+def _sn_sort_key(sn: str) -> tuple[int, int, str]:
+    return (0, int(sn), sn) if sn.isdecimal() and sn.isascii() else (1, 0, sn)
+
+
+def _session_sort_key(event: KrHeritageEvent) -> tuple[str, str, tuple[int, int, str], str]:
+    starts = _event_starts_on(event)
+    ends = _event_ends_on(event)
+    return (
+        starts.isoformat() if starts is not None else "",
+        ends.isoformat() if ends is not None else "",
+        _sn_sort_key(_event_sn(event) or ""),
+        _canonical_json(dict(getattr(event, "raw", {}) or {})),
+    )
+
+
+def _venue_address_text(piece: str, sido: str | None, gugun: str | None) -> str:
+    """장소 조각 → 정지오코딩할 주소 문장. 조각이 이미 시도·시군구로 시작하면 겹쳐 붙이지 않는다."""
+    words = piece.split()
+    first = words[0] if words else ""
+    if first and sido and first in {sido, sido_family(sido)}:
+        return piece
+    if first and sido and sigungu_root(first) == sigungu_root(gugun):
+        return f"{sido} {piece}"
+    return " ".join(part for part in (sido, gugun, piece) if part and part != "-")
+
+
+async def _program_coordinate(
+    events: list[KrHeritageEvent],
+    *,
+    venue: str | None,
+    venue_resolver: VenueResolver | None,
+    address_geocoder: AddressGeocoder | None,
+) -> tuple[Coordinate | None, dict[str, Any]]:
+    """행사 좌표 — 원천 좌표, 장소 이름이 가리키는 장소 Feature, 장소 주소 정지오코딩 순.
+
+    두 번째 값은 ``EventDetail.payload``에 남길 출처 표시다.
+    """
+    for event in events:
+        coord = _coord_from(event.longitude, event.latitude)
+        if coord is not None:
+            return coord, {"coordinate_source": "provider"}
+    sido, gugun = _event_region(events[0])
+    pieces = split_venue_names(venue)
+    if venue_resolver is not None:
+        for piece in pieces:
+            match = await venue_resolver(piece, sido, gugun)
+            if match is not None:
+                return match.coord, {
+                    "coordinate_source": "venue_feature",
+                    "venue_feature_id": match.feature_id,
+                    "venue_feature_name": match.matched_name,
+                }
+    if address_geocoder is not None:
+        for piece in pieces:
+            text_value = _venue_address_text(piece, sido, gugun)
+            coord = await geocode_missing_coordinate(
+                None, Address(road=text_value, legal=text_value), address_geocoder
+            )
+            if coord is not None:
+                return coord, {"coordinate_source": "address_geocode"}
+    return None, {}
+
+
+def _session_payload(events: list[KrHeritageEvent]) -> dict[str, Any]:
+    """회차·일정 상세 — 회차 기간(중복 제거, 시간순), ``seqNo``들, 일정 문구들."""
+    sessions: list[dict[str, str | None]] = []
+    seen: set[tuple[str | None, str | None]] = set()
+    seq_nos: set[str] = set()
+    schedules: set[str] = set()
+    for event in events:
+        starts = _event_starts_on(event)
+        ends = _event_detail_ends_on(event)
+        pair = (
+            starts.isoformat() if starts is not None else None,
+            ends.isoformat() if ends is not None else None,
+        )
+        if pair not in seen:
+            seen.add(pair)
+            sessions.append({"starts_on": pair[0], "ends_on": pair[1]})
+        sn = _event_sn(event)
+        if sn:
+            seq_nos.add(sn)
+        schedule = _event_schedule_text(event)
+        if schedule:
+            schedules.add(schedule)
+    return {
+        "sessions": sessions,
+        "seq_nos": sorted(seq_nos, key=_sn_sort_key),
+        "schedule_texts": sorted(schedules),
+    }
+
+
+async def _program_to_bundle(
+    natural_key: str,
+    events: list[KrHeritageEvent],
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
-) -> FeatureBundle | None:
-    # sn도 행사명도 없는 row는 자연키/Feature.name 모두 만들 수 없어 skip.
-    natural_key = _event_natural_key(event)
-    if natural_key is None:
-        return None
-
-    raw_data = dict(event.raw)
-    coord = _coord_from(event.longitude, event.latitude)
+    address_geocoder: AddressGeocoder | None,
+    venue_resolver: VenueResolver | None,
+) -> FeatureBundle:
+    events = sorted(events, key=_session_sort_key)
+    first = events[0]
+    venue = normalize_korean_text(_event_place(first))
+    coord, coord_payload = await _program_coordinate(
+        events,
+        venue=venue,
+        venue_resolver=venue_resolver,
+        address_geocoder=address_geocoder,
+    )
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
-    address_text = _event_address_text(event)
+    if coord_payload.get("coordinate_source") in _DERIVED_COORDINATE_SOURCES and (
+        geo is None or geo.bjd_code is None
+    ):
+        # 원천이 준 점이 아니라 이름·주소로 빌린 점이다. reverse가 법정동을 확인하지 못하면
+        # 버린다 — 확인 못 한 빌린 점 하나가 strict 주소 검증으로 적재 전체를 멈추게 하지
+        # 않도록(좌표 없는 행사는 종전처럼 지역 텍스트로 적재된다). 다음 적재가 다시 시도한다.
+        coord, coord_payload, geo = None, {}, None
+    address_text = _event_address_text(first)
     if (geo is None or geo.bjd_code is None) and address_resolver is not None:
         resolved = await address_resolver(Address(legal=address_text))
         if resolved is not None and resolved.bjd_code is not None:
             geo = resolved
     address = _merge_address(geo, address_text)
-    bjd_code = address.bjd_code
 
+    raw_rows: list[dict[str, Any]] = []
+    seen_rows: set[str] = set()
+    for event in events:
+        raw = dict(getattr(event, "raw", {}) or {})
+        encoded = _canonical_json(raw)
+        if raw and encoded not in seen_rows:
+            seen_rows.add(encoded)
+            raw_rows.append(raw)
+    raw_data: dict[str, Any] = {"sessions": raw_rows}
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=PROVIDER_NAME,
@@ -954,15 +1120,25 @@ async def _event_to_bundle(
         raw_payload_hash=payload_hash,
     )
     feature_id = make_feature_id(
-        bjd_code=bjd_code,
+        bjd_code=address.bjd_code,
         kind=FeatureKind.EVENT.value,
         category=_HERITAGE_CATEGORY,
         source_type=f"{PROVIDER_NAME}:{DATASET_KEY_EVENT}",
         source_natural_key=natural_key,
     )
 
-    # title이 비고 sn만 있는 row는 sn(=natural_key)을 표시명으로 강등.
-    name = normalize_korean_text(event.title) or _event_sn(event) or natural_key
+    starts = [s for s in (_event_starts_on(e) for e in events) if s is not None]
+    ends = [d for d in (_event_detail_ends_on(e) for e in events) if d is not None]
+    starts_on = min(starts) if starts else None
+    ends_on = max(ends) if ends else None
+    if starts_on is not None and ends_on is not None and ends_on < starts_on:
+        ends_on = None  # 시작일 없는 행의 종료일만 남은 경우 — EventDetail은 역순을 거부한다.
+    name = _event_title(first) or _event_sn(first) or natural_key
+    tel = next((t for t in (normalize_phone_number(_event_tel(e)) for e in events) if t), None)
+    payload: dict[str, Any] = {**_session_payload(events), **coord_payload}
+    group = _event_group(first)
+    if group:
+        payload["group_name"] = group
     feature = Feature(
         feature_id=feature_id,
         provider_natural_key=natural_key,
@@ -976,15 +1152,12 @@ async def _event_to_bundle(
         detail=EventDetail(
             feature_id=feature_id,
             event_kind="heritage_event",
-            starts_on=_event_starts_on(event),
-            ends_on=_event_detail_ends_on(event),
-            venue_name=normalize_korean_text(_event_place(event)),
-            tel=normalize_phone_number(_event_tel(event)),
+            starts_on=starts_on,
+            ends_on=ends_on,
+            venue_name=venue,
+            tel=tel,
             content_id=natural_key,
-            payload=(
-                {"occurrence_key_basis": "title_start_venue"}
-                if not _event_sn(event) else {}
-            ),
+            payload=payload,
         ),
     )
     if not has_required_event_details(feature.detail):
@@ -1010,7 +1183,7 @@ async def _event_to_bundle(
         feature_id=feature_id,
         source_record_key=source_record_key,
         dataset_key=DATASET_KEY_EVENT,
-        image_url=_event_main_image(event),
+        image_url=next((u for u in (_event_main_image(e) for e in events) if u), None),
         alt_text=name,
     )
     return FeatureBundle(
@@ -1021,23 +1194,46 @@ async def _event_to_bundle(
     )
 
 
+def cached_venue_resolver(resolver: VenueResolver) -> VenueResolver:
+    """``VenueResolver``를 ``(조각, 시도, 시군구)``로 메모이즈한다(``None`` 결과 포함).
+
+    적재 변환은 저장값 재사용(ADR-116) 때문에 같은 입력으로 여러 번 돈다 — 변환 **밖에서** 한 번
+    감싸 넘기면 pass마다 DB를 다시 읽지 않는다.
+    """
+    cache: dict[tuple[str, str | None, str | None], VenueMatch | None] = {}
+
+    async def _cached(piece: str, sido: str | None, gugun: str | None) -> VenueMatch | None:
+        key = (piece, sido, gugun)
+        if key not in cache:
+            cache[key] = await resolver(piece, sido, gugun)
+        return cache[key]
+
+    return _cached
+
+
 async def heritage_events_to_bundles(
     events: Iterable[KrHeritageEvent],
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    address_geocoder: AddressGeocoder | None = None,
+    venue_resolver: VenueResolver | None = None,
 ) -> list[FeatureBundle]:
-    """무형유산/행사 events → event ``FeatureBundle`` 리스트.
+    """국가유산 행사 회차 행들 → 행사(프로그램)마다 event ``FeatureBundle`` 하나(#1468 D).
 
-    ``EventDetail.event_kind='heritage_event'``. 자연키는 provider 행사 번호
-    (`sn`/원 응답 ``seqNo``)와 날짜의 ``sn::starts_on::ends_on``(provider ``occurrence_key``와
-    동일)이며(``seqNo``는 회차마다 반복된다), live 일부 row처럼 ``sn``이 빈 값이면
-    ``title::starts_on::place`` fallback을 파생한다 (#380, ADR-009 ``::``).
-    주소는 ``address``, 비면 원 응답의 ``sido``/``gugun``으로 ``Address.legal``을 채운다.
-    ``sn``도 행사명도 없는 row는 skip — 결과 길이가 입력보다 짧을 수 있다.
-    좌표가 있으면 reverse_geocoder로 bjd_code 보강하고, 없거나 실패하면
-    address_resolver로 소재지 기반 보강을 시도한다 (ADR-009).
+    원천은 회차마다 한 행이다. 같은 행사명·주관 단체·지역·장소의 행을 하나로 묶고
+    (:func:`heritage_event_program_key`), 회차 기간·``seqNo``·일정 문구는
+    ``EventDetail.payload``(``sessions``·``seq_nos``·``schedule_texts``)에 남긴다. 행사 기간은
+    회차 시작일의 최소~종료일의 최대다. ``SourceRecord.raw_data``는 ``{"sessions": [원 행…]}``
+    (같은 행이 여러 달 응답에 다시 와도 한 번).
+
+    좌표는 원천 좌표 → ``venue_resolver``(장소 이름이 같은 시군구의 좌표 있는 장소 Feature,
+    :func:`kortravelmap.core.venue_match.match_venue`) → ``address_geocoder``(장소 조각에 번지가
+    있을 때만, :func:`~kortravelmap.geocoding.geocode_missing_coordinate`) 순이다. 어디서 왔는지는
+    ``payload.coordinate_source``(연결한 장소는 ``venue_feature_id``)에 남는다.
+
+    ``sn``도 행사명도 없는 행은 skip. 출력 순서는 각 행사가 처음 나온 순서다.
     """
     geocoder = (
         cached_reverse_geocoder(reverse_geocoder)
@@ -1049,14 +1245,23 @@ async def heritage_events_to_bundles(
         if address_resolver is not None
         else None
     )
-    bundles: list[FeatureBundle] = []
+    groups: dict[str, list[KrHeritageEvent]] = {}
     for event in events:
-        bundle = await _event_to_bundle(
-            event,
-            fetched_at=fetched_at,
-            reverse_geocoder=geocoder,
-            address_resolver=resolver,
+        key = heritage_event_program_key(event)
+        if key is None:
+            continue
+        groups.setdefault(key, []).append(event)
+    bundles: list[FeatureBundle] = []
+    for key, members in groups.items():
+        bundles.append(
+            await _program_to_bundle(
+                key,
+                members,
+                fetched_at=fetched_at,
+                reverse_geocoder=geocoder,
+                address_resolver=resolver,
+                address_geocoder=address_geocoder,
+                venue_resolver=venue_resolver,
+            )
         )
-        if bundle is not None:
-            bundles.append(bundle)
     return bundles

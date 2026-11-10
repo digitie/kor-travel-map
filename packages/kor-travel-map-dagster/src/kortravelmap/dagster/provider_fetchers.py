@@ -68,6 +68,7 @@ from kortravelmap.providers.kor_travel_transport import (
     require_current_collection,
     require_fresh_incident_set,
 )
+from kortravelmap.providers.visitkorea_attractions import TOURAPI_PLACE_CONTENT_TYPE_IDS
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -2007,7 +2008,8 @@ async def fetch_visitkorea_festival_events(
 #: (2026-11-09 운영 키 실측: 12,560건 = 13페이지). 한 sweep이 오퍼레이션 일일 한도
 #: 1,000의 1.3%다.
 _VISITKOREA_ATTRACTION_PAGE_SIZE: Final = 1000
-#: 목록 순회의 **절대** 페이지 상한 — 1,000행 × 40 = 40,000건이면 현재의 세 배다.
+#: 타입마다 목록 순회의 **절대** 페이지 상한 — 1,000행 × 40 = 40,000건이면 가장 큰 관광지(12)의
+#: 세 배다.
 _VISITKOREA_ATTRACTION_MAX_PAGES: Final = 40
 #: ``detailCommon2``가 연속으로 이만큼 실패하면 이번 적재의 상세 받기를 멈춘다(원천 장애).
 _VISITKOREA_DETAIL_MAX_CONSECUTIVE_FAILURES: Final = 20
@@ -2030,16 +2032,19 @@ def _visitkorea_service_key(settings: KorTravelMapSettings, what: str) -> str:
     return secret.get_secret_value()
 
 
+
+
 async def fetch_visitkorea_tourist_attractions(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """TourAPI 관광지(contentTypeId 12) ``areaBasedList2`` 전 페이지의 ``TourItem``(#1459).
+    """TourAPI ``areaBasedList2`` 관광지(12)·문화시설(14)·레포츠(28)의 ``TourItem``(#1459).
 
     data.go.kr 서비스키에 "한국관광공사_국문 관광정보 서비스_GW"(15101578)가 활용신청돼 있어야
-    한다 — 축제(``searchFestival2``)와 같은 서비스다.
+    한다 — 축제(``searchFestival2``)와 같은 서비스다. 2026-11-09 운영 키 기준 12,560·2,753·3,717건,
+    1,000행 페이지로 13·3·4호출.
 
-    이 dataset은 목록에 없는 관광지를 **은퇴**시키므로 목록이 완전해야 한다. 다음이면
-    :class:`VisitKoreaAttractionSnapshotIncomplete`로 실패한다(재시도는 목록 13호출뿐이다).
+    이 dataset은 목록에 없는 장소를 **은퇴**시키므로 세 목록이 모두 완전해야 한다. 타입마다
+    다음이면 :class:`VisitKoreaAttractionSnapshotIncomplete`로 실패한다(재시도는 목록 20호출뿐이다).
 
     - 페이지마다 받은 ``totalCount``가 한 번이라도 다르다 — 순회 중 등록·삭제로 목록이 밀렸다.
       밀린 목록은 경계 행 하나를 빠뜨릴 수 있고 그 행이 은퇴한다.
@@ -2048,48 +2053,65 @@ async def fetch_visitkorea_tourist_attractions(
     api_key = _visitkorea_service_key(settings, "tourist attractions")
     visitkorea = cast(Any, importlib.import_module("visitkorea"))
     client = visitkorea.KrTourApiClient(service_key=api_key)
-    declared: list[int] = []
-    seen: set[str] = set()
-
-    async def _page(page_no: int) -> ProviderPage:
-        page = await client.area_based_list(
-            content_type_id="12",
-            arrange="D",
-            page_no=page_no,
-            num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
-        )
-        declared.append(int(page.total_count))
-        return ProviderPage(
-            items=page.items,
-            total_count=page.total_count,
-            fingerprint=getattr(page, "raw", None),
-        )
-
     try:
-        async for record in aiter_paginated_items(
-            _page,
-            num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
-            label="visitkorea area_based_list(12)",
-            absolute_max_pages=_VISITKOREA_ATTRACTION_MAX_PAGES,
-            warn=_LOGGER.warning,
-        ):
-            content_id = str(getattr(record, "content_id", "") or "").strip()
-            if content_id:
-                seen.add(content_id)
-            yield record
+        for content_type_id in TOURAPI_PLACE_CONTENT_TYPE_IDS:
+            declared: list[int] = []
+            seen: set[str] = set()
+
+            async def _page(
+                page_no: int, content_type_id: str = content_type_id, declared: list[int] = declared
+            ) -> ProviderPage:
+                page = await client.area_based_list(
+                    content_type_id=content_type_id,
+                    arrange="D",
+                    page_no=page_no,
+                    num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
+                )
+                raw = getattr(page, "raw", None)
+                if isinstance(raw, Mapping) and raw.get("totalCount") in (None, ""):
+                    # provider는 totalCount가 없으면 받은 행 수로 채운다 — 그러면 "1,000건 중
+                    # 1,000건"이 되어 나머지가 은퇴한다. 선언이 없으면 완전성을 말할 수 없다.
+                    raise VisitKoreaAttractionSnapshotIncomplete(
+                        f"TourAPI contentTypeId {content_type_id}: 응답에 totalCount가 없다."
+                    )
+                declared.append(int(page.total_count))
+                return ProviderPage(
+                    items=page.items,
+                    total_count=page.total_count,
+                    fingerprint=getattr(page, "raw", None),
+                )
+
+            async for record in aiter_paginated_items(
+                _page,
+                num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
+                label=f"visitkorea area_based_list({content_type_id})",
+                absolute_max_pages=_VISITKOREA_ATTRACTION_MAX_PAGES,
+                warn=_LOGGER.warning,
+            ):
+                content_id = str(getattr(record, "content_id", "") or "").strip()
+                if content_id:
+                    seen.add(content_id)
+                yield record
+            if len(set(declared)) > 1:
+                raise VisitKoreaAttractionSnapshotIncomplete(
+                    f"TourAPI contentTypeId {content_type_id}: 순회 중 선언 건수가 바뀌었다"
+                    f"({min(declared)}~{max(declared)}) — 밀린 목록으로 은퇴시키지 않는다."
+                )
+            expected = max(declared, default=0)
+            if expected == 0 or not seen:
+                # 원천은 "없음"(resultCode 03)을 빈 페이지로 준다 — 세 타입 모두 수천 건이라
+                # 0은 "못 받았음"이다. 받아들이면 그 타입 전체가 은퇴한다.
+                raise VisitKoreaAttractionSnapshotIncomplete(
+                    f"TourAPI contentTypeId {content_type_id}: 목록이 비었다 — 그 타입 전체를 "
+                    "은퇴시키지 않는다."
+                )
+            if len(seen) < expected:
+                raise VisitKoreaAttractionSnapshotIncomplete(
+                    f"TourAPI contentTypeId {content_type_id}: 선언 {expected}건 중 고유 "
+                    f"{len(seen)}건만 받았다 — 부분 snapshot으로 은퇴시키지 않는다."
+                )
     finally:
         await client.aclose()
-    if len(set(declared)) > 1:
-        raise VisitKoreaAttractionSnapshotIncomplete(
-            f"TourAPI 관광지: 순회 중 선언 건수가 바뀌었다({min(declared)}~{max(declared)}) — "
-            "밀린 목록으로 은퇴시키지 않는다."
-        )
-    expected = max(declared, default=0)
-    if len(seen) < expected:
-        raise VisitKoreaAttractionSnapshotIncomplete(
-            f"TourAPI 관광지: 선언 {expected}건 중 고유 {len(seen)}건만 받았다 — "
-            "부분 snapshot으로 은퇴시키지 않는다."
-        )
 
 
 async def fetch_visitkorea_attraction_details(

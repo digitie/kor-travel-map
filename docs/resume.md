@@ -1,3 +1,15 @@
+## 2026-11-10 — #1468 D 국가유산 행사 회차 묶음·장소 좌표
+
+- 배포 뒤 `feature_event_krheritage_events_job` 1회(preview 먼저). 회차별 옛 Feature 5,286건은 그 run이 retired로 내리고 행사 약 1,316건이 선다. 좌표는 약 23.6%(같은 시군구 동명 장소 Feature). migration·OpenAPI 없음.
+
+## 2026-11-10 — #1468 B·C dedup 쌍 규칙
+
+- 회전에 묶는다(직접 회전 금지). 배포 뒤 Dagster에서 `consistency_dedup_refresh_daily_schedule` 상태 확인 — 멈춘 기록이 있으면 start. 첫 실행 뒤 쌍별 큐 수를 예상치와 비교. 기존 367건은 dry-run(병합 77·거절 272·불확실 18), 적용은 소유자 승인 뒤.
+
+## 2026-11-10 — #1459 TourAPI 14·28
+
+- 관광지 job 하나가 12·14·28을 함께 적재한다(19,030건). 배포 뒤 산막이옛길·태권도원·국립세종도서관 검색을 T-TOURAPI-LOAD에서 함께 확인한다.
+
 ## 2026-11-10 — #1459 검색 별칭·override
 
 - 배포(444) 뒤 별칭은 즉시 효과. MCST 재적재 뒤 runbooks/1459-category-overrides.md의 3건을 admin API로 적용한다.

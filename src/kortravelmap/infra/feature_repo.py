@@ -77,7 +77,6 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
     SEARCH_DESTINATION_GROUP_MAX,
 )
-from kortravelmap.core.events import compare_event_occurrences
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
     FeatureSearchCursorQueryMismatchError,
@@ -92,7 +91,7 @@ from kortravelmap.core.search_region import (
     search_query_tokens,
     split_region_query,
 )
-from kortravelmap.dto import Address, EventDetail
+from kortravelmap.dto import Address
 from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
@@ -3931,6 +3930,8 @@ _COORDINATE_BACKFILL_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
     ("data.go.kr-standard", "datagokr_cultural_festivals"),
     ("data.go.kr-standard", "datagokr_parking_lots"),
     ("python-krheritage-api", "krheritage_heritage_features"),
+    # 행사 좌표는 장소 Feature·주소에서 온다(#1468 D) — 장소가 나중에 적재되면 같은 원본에 채운다.
+    ("python-krheritage-api", "krheritage_event_list"),
 })
 
 _STORED_COORD_IS_NULL_SQL: Final[str] = """
@@ -4055,50 +4056,6 @@ async def _repair_current_provider_projection(
     return bool(changed) or quarantined
 
 
-async def _reject_legacy_event_occurrence_conflict(
-    session: AsyncSession, bundle: FeatureBundle, *, feature_id: str,
-    record_state: _SourceRecordUpsertState,
-) -> None:
-    """종료일 없는 기존 KHA fallback 키로 다른 회차가 같은 Feature를 덮는 것을 거부한다.
-
-    날짜가 다른 회차를 **증명할 때만** 거부한다. 키가 같으면 시작일·장소가 같으므로
-    종료일만 바뀐 행은 같은 회차의 연장·정정으로 적재한다 — 거부하면 KHA 적재 전체가
-    rollback되고 재실행도 같은 행에서 영구히 실패한다(#1444 리뷰).
-    """
-    detail = bundle.feature.detail
-    if (
-        (bundle.source_record.provider, bundle.source_record.dataset_key)
-        != ("python-krheritage-api", "krheritage_event_list")
-        or not isinstance(detail, EventDetail)
-        or detail.payload.get("occurrence_key_basis") != "title_start_venue"
-    ):
-        return
-    if not await _source_record_is_current_head(session, record_state):
-        return
-    # 부모 잠금 뒤 별도 문장으로 최신 기간을 읽는다. 거부 시 호출자의 load transaction이
-    # rollback되어 기존 raw/head/base/표시값이 함께 유지된다. 자동 identity 이행은 하지 않는다.
-    await session.execute(text(
-        "SELECT feature_id FROM feature.features WHERE feature_id=CAST(:id AS uuid) FOR UPDATE"
-    ), {"id": feature_id})
-    # 관리자 effective 보완값은 원천 회차의 변경이 아니다. 해당 원천이 소유한
-    # provider base만 비교하며, 날짜·장소 누락은 기존 unknown 정책을 유지한다.
-    rows = (await session.execute(text("""
-        SELECT field_path, value_json FROM feature.feature_base_field_values
-        WHERE feature_id=CAST(:id AS uuid)
-          AND provider_dataset_id=:dataset AND source_entity_key=:entity
-          AND field_path IN ('event.starts_on', 'event.ends_on', 'event.venue_name')
-        ORDER BY field_path
-    """), {"id": feature_id, "dataset": record_state.provider_dataset_id,
-           "entity": record_state.source_entity_key})).mappings().all()
-    values = {str(row["field_path"]).removeprefix("event."): row["value_json"] for row in rows}
-    current = EventDetail(feature_id=feature_id, **values)
-    if compare_event_occurrences(current, detail) == "different":
-        raise FeatureIdentityAnchorError(
-            "KHA fallback 자연키의 행사 기간·장소 충돌: 다른 회차를 기존 Feature에 "
-            "덮어쓸 수 없습니다. 원천 회차 식별자를 확인한 뒤 별도로 처리하십시오."
-        )
-
-
 async def load_bundle(
     session: AsyncSession,
     bundle: FeatureBundle,
@@ -4153,11 +4110,6 @@ async def load_bundle(
         else await _feature_load_state(session, resolved_feature_id)
     )
     feature_missing = not feature_state.exists
-    if not feature_missing:
-        assert resolved_feature_id is not None
-        await _reject_legacy_event_occurrence_conflict(
-            session, bundle, feature_id=resolved_feature_id, record_state=record_state,
-        )
     link_inserted = False
     # Existing Feature refresh must prove the same primary link inside the
     # provider field-patch procedure. New Feature has no FK target until the

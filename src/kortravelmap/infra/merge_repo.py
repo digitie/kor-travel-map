@@ -35,7 +35,7 @@ from typing import TYPE_CHECKING, Final
 from sqlalchemy import text
 
 from kortravelmap.core.events import compare_event_occurrences
-from kortravelmap.core.scoring import MasterCandidate, select_master
+from kortravelmap.core.scoring import MasterCandidate, select_master, source_priority
 from kortravelmap.dto import EventDetail
 from kortravelmap.infra.curation_link_basis import trusted_basis_sql
 from kortravelmap.infra.feature_repo import lock_feature_curation_write
@@ -95,18 +95,30 @@ SELECT
     CAST(f.feature_id AS text) AS feature_id,
     (f.coord IS NOT NULL) AS has_coord,
     f.updated_at AS updated_at,
-    (
-        SELECT pd.provider
-        FROM provider_sync.source_links sl
-        JOIN provider_sync.source_entities se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        WHERE sl.feature_id = f.feature_id
-        ORDER BY (sl.source_role = 'primary') DESC, sl.confidence DESC
-        LIMIT 1
-    ) AS provider
+    -- #1468: 원천 후보 전부(primary 먼저, 결정적 순서). 병합을 한 번 흡수한 Feature는
+    -- primary link가 여럿이다 — 그중 원천 우선순위가 가장 높은 것을 Python이 고른다.
+    COALESCE(src.providers, ARRAY[]::text[]) AS providers,
+    COALESCE(src.dataset_keys, ARRAY[]::text[]) AS dataset_keys,
+    COALESCE(src.primaries, ARRAY[]::boolean[]) AS primaries
 FROM feature.features f
+LEFT JOIN LATERAL (
+    SELECT
+        array_agg(CAST(pd.provider AS text) ORDER BY
+                  (sl.source_role = 'primary') DESC, sl.confidence DESC,
+                  sl.source_entity_key) AS providers,
+        array_agg(CAST(pd.dataset_key AS text) ORDER BY
+                  (sl.source_role = 'primary') DESC, sl.confidence DESC,
+                  sl.source_entity_key) AS dataset_keys,
+        array_agg(sl.source_role = 'primary' ORDER BY
+                  (sl.source_role = 'primary') DESC, sl.confidence DESC,
+                  sl.source_entity_key) AS primaries
+    FROM provider_sync.source_links sl
+    JOIN provider_sync.source_entities se
+      ON se.source_entity_key = sl.source_entity_key
+    JOIN provider_sync.provider_datasets pd
+      ON pd.provider_dataset_id = se.provider_dataset_id
+    WHERE sl.feature_id = f.feature_id
+) AS src ON true
 WHERE f.feature_id = :feature_id
 """
 
@@ -807,12 +819,38 @@ async def _master_candidate(session: AsyncSession, feature_id: str) -> MasterCan
     ).one_or_none()
     if row is None:
         raise MergeConflictError(f"feature 없음 — {feature_id!r}")
+    provider, dataset_key = _best_source(
+        list(row.providers), list(row.dataset_keys), list(row.primaries)
+    )
     return MasterCandidate(
         feature_id=row.feature_id,
         has_coord=bool(row.has_coord),
         updated_at=row.updated_at,
-        provider=row.provider,
+        provider=provider,
+        dataset_key=dataset_key,
     )
+
+
+def _best_source(
+    providers: list[str], dataset_keys: list[str], primaries: list[bool]
+) -> tuple[str | None, str | None]:
+    """원천 후보 중 master 선정에 쓸 하나(#1468).
+
+    primary link가 있으면 그중에서, 없으면 전체에서 ``source_priority``가 가장 높은 것.
+    동률은 SQL이 준 결정적 순서(confidence → source_entity_key)의 앞쪽이다.
+    """
+    pool = [
+        (provider, dataset_key)
+        for provider, dataset_key, primary in zip(providers, dataset_keys, primaries, strict=True)
+        if primary
+    ] or list(zip(providers, dataset_keys, strict=True))
+    if not pool:
+        return None, None
+    best = pool[0]
+    for candidate in pool[1:]:
+        if source_priority(*candidate) > source_priority(*best):
+            best = candidate
+    return best
 
 
 def _reject_cross_kind_merge(
@@ -1067,7 +1105,7 @@ async def merge_from_review(
     """검토 큐 후보(``review_id``) 1쌍을 master 자동 선정 후 병합한다.
 
     큐 행이 없거나 이미 검토(``status != 'pending'``)됐으면 ``MergeError``.
-    master는 ``core.scoring.select_master``(좌표 → updated_at → source 우선순위)로
+    master는 ``core.scoring.select_master``(좌표 → source 우선순위 → updated_at)로
     결정한다. commit은 호출자 책임.
     """
     row = (await session.execute(text(_SELECT_REVIEW_SQL), {"review_id": review_id})).one_or_none()

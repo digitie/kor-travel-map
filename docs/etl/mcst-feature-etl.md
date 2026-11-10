@@ -143,6 +143,11 @@ MOIS PROMOTED 슬러그와 교차 가능성이 있는 dataset: `world_restaurant
 관리번호 체계와 달라 실데이터의 이름/좌표 근접 매칭 품질을 본 뒤(T-212e full
 reload 이후) `DEFAULT_DEDUP_SCOPE_PAIRS` 후보로 재검토한다.
 
+2026-11-10(#1468 C) prod 실측(300 m 반경): 캠핑 MOIS 0306↔MCST 136쌍·KNPS 야영장↔MCST
+7쌍, 세계음식↔MOIS 0201(100 m) 1,103쌍, 박물관 표준데이터↔MCST 01040000 3,136쌍. 이 겹침은
+dedup 쌍으로 두지 않고 ADR-121 attach 엔진(MCST 테마를 기존 Feature 속성으로)이 맡는다.
+원천 우선순위는 MCST(20)를 MOIS(50)·표준데이터(35) 아래에 둔다.
+
 ## 8. 백로그
 
 - 도서관 **디렉토리**(위치/운영) 재적재 — 구 ODCloud 경로 소멸로 보류. 국가

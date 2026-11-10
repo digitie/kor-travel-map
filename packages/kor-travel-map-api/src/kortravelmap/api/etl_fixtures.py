@@ -1045,7 +1045,7 @@ FIXTURE_REGISTRY: Final[tuple[EtlFixtureEntry, ...]] = (
         provider="python-visitkorea-api",
         dataset="visitkorea_tourist_attractions",
         variant="FeatureBundle",
-        description="TourAPI 관광지(contentTypeId 12) → 관광지 place Feature (#1459).",
+        description="TourAPI 관광지·문화시설·레포츠(12·14·28) → place Feature (#1459).",
         build_fixture=_tourapi_attraction_fixture,
         convert=_convert_tourapi_attractions,
     ),

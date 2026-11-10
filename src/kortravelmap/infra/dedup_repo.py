@@ -186,7 +186,7 @@ def _candidate_params(
         "name_score": round(candidate.name_score * 100, 2),
         "spatial_score": round(candidate.spatial_score * 100, 2),
         "category_score": round(candidate.category_score * 100, 2),
-        "decision_reason": candidate.decision,
+        "decision_reason": candidate.reason or candidate.decision,
     }
 
 

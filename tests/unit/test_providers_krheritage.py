@@ -21,15 +21,19 @@ from typing import Any
 
 import pytest
 
+from kortravelmap.core.venue_match import VenueMatch
 from kortravelmap.dto import Address, Coordinate, FeatureKind, SourceRole
 from kortravelmap.providers.krheritage import (
     DATASET_KEY_EVENT,
     DATASET_KEY_HERITAGE,
+    HERITAGE_EVENT_PROGRAM_KEY_PREFIX,
     HERITAGE_MARKER_COLOR,
     PROVIDER_NAME,
     classify_heritage_kind,
+    heritage_event_program_key,
     heritage_events_to_bundles,
     heritage_items_to_bundles,
+    is_legacy_heritage_event_key,
     resolve_heritage_category,
 )
 
@@ -345,10 +349,13 @@ async def test_event_bundle_mapping() -> None:
     assert feat.detail.starts_on == date(2026, 5, 1)
     assert feat.detail.ends_on == date(2026, 5, 3)
     assert feat.detail.venue_name == "종묘"
-    # sn은 회차 id가 아니다 — 시작일을 붙인다.
-    assert feat.detail.content_id == "EVT-2026-001::2026-05-01::2026-05-03"
+    # 자연키는 행사(프로그램) 키다 — 회차 날짜·seqNo가 들지 않는다(#1468 D).
+    assert feat.detail.content_id == heritage_event_program_key(event)
+    assert feat.detail.content_id.startswith(HERITAGE_EVENT_PROGRAM_KEY_PREFIX)
     assert bundle.source_record.dataset_key == DATASET_KEY_EVENT
-    assert bundle.source_record.source_entity_id == "EVT-2026-001::2026-05-01::2026-05-03"
+    assert bundle.source_record.source_entity_id == feat.detail.content_id
+    assert feat.coord == Coordinate(lon=Decimal("126.994"), lat=Decimal("37.574"))
+    assert feat.detail.payload["coordinate_source"] == "provider"
     assert feat.feature_id.startswith("f_global_e_")
 
 
@@ -365,8 +372,9 @@ async def test_event_inverted_dates_drop_end_but_keep_row() -> None:
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.detail.starts_on == date(2026, 9, 28)
     assert bundle.feature.detail.ends_on is None
-    # 자연키는 provider occurrence_key와 같아야 하므로 원 값을 그대로 쓴다.
-    assert bundle.source_record.source_entity_id == "EVT-INV::2026-09-28::2026-09-08"
+    assert bundle.feature.detail.payload["sessions"] == [
+        {"starts_on": "2026-09-28", "ends_on": None}
+    ]
 
 
 async def test_event_empty_sn_derives_fallback_natural_key() -> None:
@@ -377,22 +385,19 @@ async def test_event_empty_sn_derives_fallback_natural_key() -> None:
         place="경복궁",
     )
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
-    expected_key = "무형유산 야간 공연::2026-07-10::경복궁"
+    expected_key = heritage_event_program_key(event)
+    assert expected_key is not None
     assert bundle.source_record.source_entity_id == expected_key
     assert bundle.feature.detail.content_id == expected_key
     assert bundle.feature.name == "무형유산 야간 공연"
 
 
-async def test_event_none_sn_falls_back_to_address_when_no_place() -> None:
-    event = _Event(
-        sn=None,
-        title="행사",
-        starts_on=None,
-        place=None,
-        address="서울특별시 종로구",
-    )
-    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
-    assert bundle.source_record.source_entity_id == "행사::::서울특별시 종로구"
+async def test_event_program_key_separates_regions_when_no_place() -> None:
+    """장소가 없어도 지역이 다르면 다른 행사다."""
+    a = _Event(sn=None, title="행사", address="서울특별시 종로구")
+    b = _Event(sn=None, title="행사", address="부산광역시 중구")
+    bundles = await heritage_events_to_bundles([a, b], fetched_at=_FETCHED)
+    assert len({x.source_record.source_entity_id for x in bundles}) == 2
 
 
 async def test_event_fallback_key_is_deterministic() -> None:
@@ -418,8 +423,15 @@ async def test_event_sn_without_title_uses_sn_as_name() -> None:
     event = _Event(sn="EVT-NO-TITLE", title=None)
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.name == "EVT-NO-TITLE"
-    # provider ``occurrence_key`` 정의: 날짜가 비면 빈 자리.
-    assert bundle.source_record.source_entity_id == "EVT-NO-TITLE::::"
+    assert bundle.feature.detail.payload["seq_nos"] == ["EVT-NO-TITLE"]
+
+
+async def test_untitled_rows_with_different_seq_no_stay_distinct() -> None:
+    """행사명이 없으면 seqNo로 가른다 — 장소가 같다고 이름 없는 행끼리 접지 않는다."""
+    a = _Event(sn="1", title=None, place="종묘")
+    b = _Event(sn="2", title=None, place="종묘")
+    bundles = await heritage_events_to_bundles([a, b], fetched_at=_FETCHED)
+    assert len(bundles) == 2
 
 
 # 2026-10 실 응답(``selectEventListOpenapi``) 한 행 — provider가 이 철자를 파싱하지 못해
@@ -455,7 +467,8 @@ async def test_event_pre_fix_shape_uses_raw_region_and_seq_no() -> None:
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.coord is None  # 좌표는 만들지 않는다.
     assert bundle.feature.address.legal == "경상남도 진주시"
-    assert bundle.source_record.source_entity_id == "15720::2026-10-17::2026-10-17"
+    assert bundle.source_record.source_entity_id.startswith(HERITAGE_EVENT_PROGRAM_KEY_PREFIX)
+    assert bundle.source_record.raw_data == {"sessions": [_REAL_EVENT_RAW]}
     # 상세도 원 응답에서 채운다 — provider bump 뒤에도 raw(→ payload hash)가 같아 feature가
     # 다시 쓰이지 않으므로, 지금 비워 두면 그대로 남는다.
     detail = bundle.feature.detail
@@ -503,8 +516,8 @@ async def test_event_without_any_region_has_no_legal() -> None:
     assert bundle.feature.address.legal is None
 
 
-async def test_event_same_seq_no_different_sessions_stay_distinct() -> None:
-    """``seqNo``는 회차마다 반복된다(실 응답 15720: 08-29~, 10-17) — 접히면 안 된다."""
+async def test_event_sessions_of_one_program_collapse_into_one_feature() -> None:
+    """원천은 회차마다 한 행이다(실 응답 15720: 08-29~ 기간 행과 10-17 회차) — 한 행사로 묶는다."""
     span = _Event(
         sn=None,
         title="허선구 고가에서 나누는 특별한 하루",
@@ -513,52 +526,183 @@ async def test_event_same_seq_no_different_sessions_stay_distinct() -> None:
     session = _Event(
         sn=None, title="허선구 고가에서 나누는 특별한 하루", raw=dict(_REAL_EVENT_RAW)
     )
-    bundles = await heritage_events_to_bundles([span, session], fetched_at=_FETCHED)
-    assert len({b.feature.feature_id for b in bundles}) == 2
-    # 같은 회차가 다른 달 응답에 다시 나오면 같은 키로 접힌다.
-    again = await heritage_events_to_bundles([session], fetched_at=_FETCHED)
-    assert again[0].feature.feature_id == bundles[1].feature.feature_id
-
-
-async def test_event_empty_sn_titles_no_longer_collide_when_seq_no_present() -> None:
-    """종전 fallback ``title::"":""``은 같은 제목의 다른 행사를 한 키로 접었다."""
-    a = _Event(sn=None, title="정기 공연", raw={"seqNo": "100", "sDate": "20261001"})
-    b = _Event(sn=None, title="정기 공연", raw={"seqNo": "200", "sDate": "20261001"})
-    bundles = await heritage_events_to_bundles([a, b], fetched_at=_FETCHED)
-    assert [x.source_record.source_entity_id for x in bundles] == [
-        "100::2026-10-01::",
-        "200::2026-10-01::",
+    [bundle] = await heritage_events_to_bundles([span, session], fetched_at=_FETCHED)
+    detail = bundle.feature.detail
+    assert detail.starts_on == date(2026, 8, 29)
+    assert detail.ends_on == date(2029, 8, 29)
+    assert detail.payload["sessions"] == [
+        {"starts_on": "2026-08-29", "ends_on": "2029-08-29"},
+        {"starts_on": "2026-10-17", "ends_on": "2026-10-17"},
     ]
+    assert detail.payload["seq_nos"] == ["15720"]
+    # 같은 회차가 다른 달 응답에 다시 와도 같은 행사·같은 원 행 하나다.
+    again = await heritage_events_to_bundles([session, span, session], fetched_at=_FETCHED)
+    assert again[0].feature.feature_id == bundle.feature.feature_id
+    assert again[0].source_record.source_record_key == bundle.source_record.source_record_key
+    assert again[0].source_record.raw_data == bundle.source_record.raw_data
 
 
-@dataclass(frozen=True)
-class _EventWithOccurrenceKey(_EventWithRegion):
-    """provider 0.1.1(``e1b346f7``) ``HeritageEvent`` shape — ``occurrence_key`` 속성 포함."""
-
-    occurrence_key: str | None = None
-
-
-@pytest.mark.parametrize(
-    ("sn", "starts_on", "ends_on", "expected"),
-    [
-        ("15720", date(2026, 10, 17), date(2026, 10, 17), "15720::2026-10-17::2026-10-17"),
-        ("15720", date(2026, 8, 29), None, "15720::2026-08-29::"),
-        ("15720", None, None, "15720::::"),
-    ],
-)
-async def test_event_natural_key_equals_provider_occurrence_key(
-    sn: str, starts_on: date | None, ends_on: date | None, expected: str
-) -> None:
-    """자연키는 provider ``occurrence_key``(``{sn}::{starts_on}::{ends_on}``)와 글자 그대로 같다."""
-    event = _EventWithOccurrenceKey(
-        sn=sn,
-        title="행사",
-        starts_on=starts_on,
-        ends_on=ends_on,
-        occurrence_key=expected,
+def _jeju_row(seq: str, s_date: str, schedule: str) -> _Event:
+    """prod 2026-11-10: 같은 행사가 seqNo를 바꿔 23행까지 반복된다(제주옹기)."""
+    return _Event(
+        sn=None,
+        title=None,
+        raw={
+            "seqNo": seq,
+            "subTitle": "다시 이어지는 제주옹기, 그리고 사람들",
+            "sDate": s_date,
+            "eDate": s_date,
+            "subDate": schedule,
+            "subDesc": "제주옹기박물관",
+            "groupName": "(사)제주전통옹기전승보존회",
+            "contact": "064-000-0000",
+            "sido": "제주특별자치도",
+            "gugun": "서귀포시",
+        },
     )
-    [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
-    assert bundle.source_record.source_entity_id == event.occurrence_key
+
+
+async def test_event_rows_with_different_seq_no_collapse_by_program() -> None:
+    three = "10월 22일 ~ 24일 목요일~토요일(총3회)/ 10시 ~ 17시"
+    four = "10월 22일 ~ 25일 목요일~일요일(총4회)/ 10시 ~ 17시"
+    rows = [
+        _jeju_row("18702", "20261023", three),
+        _jeju_row("17629", "20261022", four),
+        _jeju_row("16173", "20261025", four),
+        _jeju_row("17629", "20261023", four),
+    ]
+    [bundle] = await heritage_events_to_bundles(rows, fetched_at=_FETCHED)
+    detail = bundle.feature.detail
+    assert bundle.feature.name == "다시 이어지는 제주옹기, 그리고 사람들"
+    assert (detail.starts_on, detail.ends_on) == (date(2026, 10, 22), date(2026, 10, 25))
+    assert [s["starts_on"] for s in detail.payload["sessions"]] == [
+        "2026-10-22",
+        "2026-10-23",
+        "2026-10-25",
+    ]
+    assert detail.payload["seq_nos"] == ["16173", "17629", "18702"]
+    assert detail.payload["schedule_texts"] == sorted([three, four])
+    assert detail.payload["group_name"] == "(사)제주전통옹기전승보존회"
+    assert len(bundle.source_record.raw_data["sessions"]) == 4
+    # 입력 순서가 바뀌어도 같은 행사·같은 원본이다(결정적).
+    [shuffled] = await heritage_events_to_bundles(rows[::-1], fetched_at=_FETCHED)
+    assert shuffled.feature.feature_id == bundle.feature.feature_id
+    assert shuffled.feature.detail == bundle.feature.detail
+    assert shuffled.source_record.source_record_key == bundle.source_record.source_record_key
+
+
+async def test_event_different_venue_or_title_stays_distinct() -> None:
+    base = _jeju_row("1", "20261022", "x")
+    other_venue = _Event(sn=None, title=None, raw={**base.raw, "subDesc": "성읍민속마을"})
+    other_title = _Event(sn=None, title=None, raw={**base.raw, "subTitle": "다른 행사"})
+    bundles = await heritage_events_to_bundles(
+        [base, other_venue, other_title], fetched_at=_FETCHED
+    )
+    assert len({b.feature.feature_id for b in bundles}) == 3
+
+
+def test_legacy_key_detection() -> None:
+    assert is_legacy_heritage_event_key("15720::2026-10-17::2026-10-17")
+    assert is_legacy_heritage_event_key("행사::2026-07-10::경복궁")
+    assert not is_legacy_heritage_event_key(
+        HERITAGE_EVENT_PROGRAM_KEY_PREFIX + "0123456789abcdef0123456789abcdef"
+    )
+
+
+async def _confirming_reverse(coord: Coordinate) -> Address:
+    return Address(legal="경상남도 진주시 본성동", bjd_code="4817010100", sigungu_code="48170")
+
+
+async def test_venue_resolver_fills_coordinate_from_first_matching_piece() -> None:
+    seen: list[tuple[str, str | None, str | None]] = []
+    jinju = Coordinate(lon=Decimal("128.0817"), lat=Decimal("35.1887"))
+
+    async def resolver(piece: str, sido: str | None, gugun: str | None) -> VenueMatch | None:
+        seen.append((piece, sido, gugun))
+        if piece == "진주성":
+            return VenueMatch(feature_id="fid-jinju", coord=jinju, matched_name="진주성")
+        return None
+
+    event = _Event(
+        sn=None,
+        title=None,
+        raw={**_REAL_EVENT_RAW, "subDesc": "중앙상권 빈점포, 진주성 일원"},
+    )
+    [bundle] = await heritage_events_to_bundles(
+        [event], fetched_at=_FETCHED, venue_resolver=resolver,
+        reverse_geocoder=_confirming_reverse,
+    )
+    assert seen == [
+        ("중앙상권 빈점포", "경상남도", "진주시"),
+        ("진주성", "경상남도", "진주시"),
+    ]
+    assert bundle.feature.coord == jinju
+    assert bundle.feature.detail.payload["coordinate_source"] == "venue_feature"
+    assert bundle.feature.detail.payload["venue_feature_id"] == "fid-jinju"
+    # 장소 원문은 그대로 둔다.
+    assert bundle.feature.detail.venue_name == "중앙상권 빈점포, 진주성 일원"
+    assert bundle.feature.address.bjd_code == "4817010100"
+
+
+async def test_borrowed_coordinate_is_dropped_when_reverse_cannot_confirm_it() -> None:
+    """빌린 점(장소·주소)은 reverse가 법정동을 못 주면 버린다 — strict 검증이 run을 멈추지 않게."""
+    jinju = Coordinate(lon=Decimal("128.0817"), lat=Decimal("35.1887"))
+
+    async def resolver(piece: str, sido: str | None, gugun: str | None) -> VenueMatch | None:
+        return VenueMatch(feature_id="fid-jinju", coord=jinju, matched_name="진주성")
+
+    async def empty_reverse(coord: Coordinate) -> Address | None:
+        return None
+
+    event = _Event(sn=None, title=None, raw={**_REAL_EVENT_RAW, "subDesc": "진주성"})
+    for reverse in (empty_reverse, None):
+        [bundle] = await heritage_events_to_bundles(
+            [event], fetched_at=_FETCHED, venue_resolver=resolver, reverse_geocoder=reverse
+        )
+        assert bundle.feature.coord is None
+        assert "coordinate_source" not in bundle.feature.detail.payload
+        assert bundle.feature.address.legal == "경상남도 진주시"
+
+
+async def test_address_geocoder_only_for_pieces_with_a_lot_number() -> None:
+    asked: list[Address] = []
+    pin = Coordinate(lon=Decimal("126.8000"), lat=Decimal("33.3900"))
+
+    async def geocoder(address: Address) -> Coordinate | None:
+        asked.append(address)
+        return pin
+
+    numbered = _Event(
+        sn=None,
+        title=None,
+        raw={
+            **_REAL_EVENT_RAW,
+            "sido": "제주특별자치도",
+            "gugun": "서귀포시",
+            "subDesc": "성읍리 845-1",
+        },
+    )
+    vague = _Event(sn=None, title=None, raw={**_REAL_EVENT_RAW, "subDesc": "행사장 전역"})
+    a, b = await heritage_events_to_bundles(
+        [numbered, vague], fetched_at=_FETCHED, address_geocoder=geocoder,
+        reverse_geocoder=_confirming_reverse,
+    )
+    assert [x.road for x in asked] == ["제주특별자치도 서귀포시 성읍리 845-1"]
+    assert a.feature.coord == pin
+    assert a.feature.detail.payload["coordinate_source"] == "address_geocode"
+    assert b.feature.coord is None
+    assert "coordinate_source" not in b.feature.detail.payload
+
+
+async def test_provider_coordinate_wins_over_resolvers() -> None:
+    async def resolver(piece: str, sido: str | None, gugun: str | None) -> VenueMatch | None:
+        raise AssertionError("원천 좌표가 있으면 장소 해석기를 부르지 않는다")
+
+    event = _Event(sn="1", title="행사", place="종묘", longitude=126.994, latitude=37.574)
+    [bundle] = await heritage_events_to_bundles(
+        [event], fetched_at=_FETCHED, venue_resolver=resolver
+    )
+    assert bundle.feature.coord == Coordinate(lon=Decimal("126.994"), lat=Decimal("37.574"))
 
 
 async def test_deterministic_ids() -> None:
@@ -633,6 +777,6 @@ async def test_event_requires_period_and_venue_without_losing_raw_or_identity(
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.quality_state.value == quality
     assert bundle.feature.category == "01090000"
-    assert bundle.source_record.raw_data == raw
+    assert bundle.source_record.raw_data == {"sessions": [raw]}
     assert bundle.feature.lifecycle_state.value == "active"
     assert bundle.feature.marker_color == HERITAGE_MARKER_COLOR

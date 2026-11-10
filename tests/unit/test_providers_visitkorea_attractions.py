@@ -1,4 +1,4 @@
-"""``test_providers_visitkorea_attractions`` — TourAPI 관광지(contentTypeId 12) → place (#1459).
+"""``test_providers_visitkorea_attractions`` — TourAPI 관광지·문화시설·레포츠 → place (#1459).
 
 입력 행은 2026-11-09 운영 키로 받은 ``areaBasedList2``/``detailCommon2`` 실제 응답의 필드
 값이다(부산타워 1277679·광안대교 128164·수산항 2788875). KorService2 목록은 옛 ``cat1~3``을
@@ -143,6 +143,99 @@ def test_attraction_category_maps_the_new_classification(
     lcls: tuple[str | None, str | None, str | None], expected: PlaceCategoryCode
 ) -> None:
     assert attraction_category(*lcls) == expected.value
+
+
+@pytest.mark.parametrize(
+    ("content_type", "lcls3", "title", "expected"),
+    [
+        # #1459 수용 예시 — 산막이옛길(28)·태권도원·국립세종도서관(14)
+        ("28", "LS011900", "산막이옛길", PlaceCategoryCode.TOURISM_ACTIVITY_TREKKING),
+        ("14", "VE090400", "태권도원", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY),
+        (
+            "14",
+            "VE090300",
+            "국립세종도서관",
+            PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_LIBRARY,
+        ),
+        # 문화시설(14) 대표 코드
+        ("14", "VE070100", "국립중앙박물관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_MUSEUM),
+        ("14", "VE070600", "리움미술관", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_ART),
+        (
+            "14",
+            "VE060100",
+            "세종문화회관",
+            PlaceCategoryCode.TOURISM_CULTURAL_FACILITY_PERFORMANCE_HALL,
+        ),
+        ("14", "VE120300", "어느 문화공간", PlaceCategoryCode.TOURISM_CULTURAL_FACILITY),
+        # 레포츠(28) 대표 코드
+        ("28", "LS010400", "어느 컨트리클럽", PlaceCategoryCode.TOURISM_ACTIVITY_GOLF),
+        ("28", "LS010800", "어느 스키장", PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS),
+        ("28", "LS011900", "어느 서바이벌장", PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS),
+        ("28", "LS020600", "어느 바다낚시터", PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS),
+        ("28", "AC050100", "어느 야영장", PlaceCategoryCode.LODGING_CAMPGROUND),
+        ("28", "AC050200", "어느 오토캠핑장", PlaceCategoryCode.LODGING_CAMPGROUND_AUTO),
+        ("28", "AC050300", "어느 카라반", PlaceCategoryCode.LODGING_CAMPGROUND_CARAVAN_RENTAL),
+        ("28", "AC050400", "어느 글램핑장", PlaceCategoryCode.LODGING_CAMPGROUND_GLAMPING),
+        ("28", "AC030100", "어느 펜션", PlaceCategoryCode.LODGING_PENSION),
+    ],
+)
+def test_culture_and_leisure_rows_get_their_own_categories(
+    content_type: str, lcls3: str, title: str, expected: PlaceCategoryCode
+) -> None:
+    item = replace(
+        _GWANGAN,
+        content_id="77",
+        content_type_id=content_type,
+        title=title,
+        lcls_systm1=lcls3[:2],
+        lcls_systm2=lcls3[:4],
+        lcls_systm3=lcls3,
+    )
+    (bundle,) = _bundles([item])
+    assert bundle.feature.category == expected.value
+    assert bundle.feature.detail.place_kind == {  # type: ignore[union-attr]
+        "12": "tourapi_attraction",
+        "14": "tourapi_culture_facility",
+        "28": "tourapi_leisure",
+    }[content_type]
+
+
+@pytest.mark.parametrize(
+    ("title", "trail"),
+    [
+        ("산막이옛길", True),
+        ("산막이옛길(괴산)", True),
+        ("제주올레 7코스", True),
+        ("강화나들길 ①코스", True),
+        ("어느 트레킹코스", True),
+        ("어느 산책코스", True),
+        ("제주올레 14-1코스", True),
+        ("어느둘레길 제1코스", True),
+        ("어느산책로 입구", True),
+        ("어느둘레길(1구간) 입구", True),
+        ("한강 자전거길", False),
+        ("어느 서바이벌장", False),
+        ("어느 짚라인", False),
+    ],
+)
+def test_other_land_leisure_is_trekking_only_when_the_name_is_a_trail(
+    title: str, trail: bool
+) -> None:
+    expected = (
+        PlaceCategoryCode.TOURISM_ACTIVITY_TREKKING
+        if trail
+        else PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS
+    )
+    assert attraction_category("LS", "LS01", "LS011900", title) == expected.value
+    # 다른 코드는 이름이 길이어도 그 코드의 분류다.
+    assert attraction_category("LS", "LS01", "LS010200", title) == (
+        PlaceCategoryCode.TOURISM_ACTIVITY_LEISURE_SPORTS.value
+    )
+
+
+def test_the_fetcher_and_converter_share_one_content_type_list() -> None:
+    assert va.TOURAPI_PLACE_CONTENT_TYPE_IDS == ("12", "14", "28")
+    assert set(va._PLACE_KIND_BY_CONTENT_TYPE) == set(va.TOURAPI_PLACE_CONTENT_TYPE_IDS)
 
 
 def test_every_mapped_category_exists_in_the_catalog() -> None:

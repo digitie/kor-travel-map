@@ -344,7 +344,7 @@ __all__ = [
     "festival_to_enrichment_links",
     "VISITKOREA_PROVIDER_NAME",
     "DATASET_KEY_FESTIVAL_EVENTS",
-    # visitkorea 관광지 (#1459 — TourAPI contentTypeId 12 → place 1차)
+    # visitkorea 관광지·문화시설·레포츠 (#1459 — TourAPI contentTypeId 12·14·28 → place 1차)
     "VisitKoreaAttractionItem",
     "attraction_category",
     "tourapi_attractions_to_bundles",

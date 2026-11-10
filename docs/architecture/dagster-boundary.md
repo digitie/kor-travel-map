@@ -543,9 +543,14 @@ MOIS 적재 run은 시간 상한(기본 4시간)에서 멈추고 `kor_travel_map
 (`dedicated_job_only`). 운영 절차는 [mois-license-feature-etl.md §13](../etl/mois-license-feature-etl.md).
 
 운영 임계값은 SPEC V8 v8_0 + 실제 부하 기반으로 kor-travel-map 운영자가 조정한다.
-T-208f 기준 maintenance schedule도 기본 `STOPPED`다. 로컬 개발에서 자동으로 큐와
-리포트를 갱신하지 않고, 운영자가 Dagster UI/API에서 scope config와 함께 수동 실행하거나
-배포 환경에서 schedule을 enable한다.
+maintenance schedule 중 `cache_target_snapshot_gc_hourly_schedule`은 기본 `STOPPED`다.
+`consistency_dedup_refresh_daily_schedule`은 2026-11-10(#1468)부터 기본 `RUNNING`이다 —
+provider 적재와 달리 `feature_update_request_queue_sensor`가 이 job을 대신 돌려 주지 않아서,
+시계가 꺼져 있으면 dedup 후보를 아무도 갱신하지 않았다(prod 큐 367건이 그대로 남았다).
+Dagster `default_status`는 **저장된 인스턴스 상태가 없을 때만** 적용된다. UI/API에서 한 번이라도
+멈춘 적이 있으면 배포 뒤에도 멈춰 있으므로, 배포 뒤 상태를 보고 필요하면 start한다(admin UI
+`POST /v1/ops/pipeline/schedules/consistency_dedup_refresh_daily_schedule/commands`
+`{command: start}`, `Idempotency-Key` 필수). 끄는 것도 같은 경로(`stop`)다.
 
 purge job/schedule은 현재 구현되어 있지 않다. RustFS/offline-upload 원본은 ADR-045
 D-14 기준 만료 없이 보존하므로, TTL·삭제 정책과 실제 job이 함께 구현되기 전까지

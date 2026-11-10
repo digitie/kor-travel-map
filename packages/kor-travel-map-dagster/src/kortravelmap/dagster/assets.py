@@ -15,6 +15,12 @@ from typing import TYPE_CHECKING, Any, Final, TypedDict, cast
 
 from kortravelmap.client import FestivalEnrichmentReviewRefreshResult
 from kortravelmap.core.feature_operation import ProviderDatasetOperationMembership
+from kortravelmap.core.venue_match import (
+    VenueCandidate,
+    VenueMatch,
+    VenueResolver,
+    match_venue,
+)
 from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
 from kortravelmap.geocoding import (
     AddressGeocoder,
@@ -103,11 +109,16 @@ from kortravelmap.providers.krheritage import (
     DATASET_KEY_HERITAGE as KRHERITAGE_DATASET_KEY,
 )
 from kortravelmap.providers.krheritage import (
+    EVENT_SOURCE_ENTITY_TYPE as KRHERITAGE_EVENT_ENTITY_TYPE,
+)
+from kortravelmap.providers.krheritage import (
     PROVIDER_NAME as KRHERITAGE_PROVIDER_NAME,
 )
 from kortravelmap.providers.krheritage import (
+    cached_venue_resolver,
     heritage_events_to_bundles,
     heritage_items_to_bundles,
+    is_legacy_heritage_event_key,
 )
 from kortravelmap.providers.mois import (
     DATASET_KEY_BULK as MOIS_BULK_DATASET_KEY,
@@ -534,7 +545,16 @@ async def feature_place_krheritage_items(
 async def run_feature_event_krheritage_events(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """국가유산 행사 record를 event Feature로 적재한다."""
+    """국가유산 행사 회차 record를 행사(프로그램)마다 event Feature 하나로 적재한다(#1468 D).
+
+    좌표는 장소 이름이 같은 시군구의 좌표 있는 장소 Feature(``_venue_resolver``), 그다음 장소
+    조각의 번지 주소 정지오코딩(``_address_geocoder``)으로 채운다.
+
+    회차별 옛 자연키(``program::`` 접두가 없는 것)로 남은 행사 Feature는 이번 snapshot이 비지
+    않았을 때만 retired로 내린다 — 같은 행사는 이번 적재가 묶은 Feature로 다시 선다. 창 밖으로
+    지난 회차만 있던 옛 행사는 대체 없이 내려간다(지난 행사다). 빈 snapshot은 아무것도 내리지
+    않는다(받기 실패를 "행사 없음"으로 읽지 않는다).
+    """
     records = await _record_list(context, "krheritage_events")
     fetched_at = await _fetched_at(context)
     bundles = await _transform_reusing_geo(
@@ -543,15 +563,50 @@ async def run_feature_event_krheritage_events(
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
+        address_geocoder=_address_geocoder(context),
+        venue_resolver=_venue_resolver(context),
     )
-    return await _load(
+    legacy = (
+        {
+            entity_id
+            for entity_id in await _current_source_entity_ids(
+                context, KRHERITAGE_PROVIDER_NAME, KRHERITAGE_EVENT_DATASET_KEY
+            )
+            if is_legacy_heritage_event_key(entity_id)
+        }
+        if bundles
+        else set()
+    )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    retired = 0
+
+    async def _load_and_retire_legacy(
+        snapshot_bundles: Sequence[Any],
+        geo: GeoLoadContext | None,
+    ) -> FeatureLoadResult:
+        nonlocal retired
+        load, retired = await client.load_authoritative_feature_snapshot(
+            snapshot_bundles,
+            provider=KRHERITAGE_PROVIDER_NAME,
+            dataset_key=KRHERITAGE_EVENT_DATASET_KEY,
+            source_entity_type=KRHERITAGE_EVENT_ENTITY_TYPE,
+            retired_source_entity_ids=legacy,
+            geo=geo,
+        )
+        return load
+
+    result = await _load(
         context,
         provider=KRHERITAGE_PROVIDER_NAME,
         dataset_key=KRHERITAGE_EVENT_DATASET_KEY,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        load_all=_load_and_retire_legacy,
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
+    if retired:
+        context.log.info("국가유산 행사 회차별 옛 Feature %d건 retired 전이", retired)
+    return result
 
 
 @asset(
@@ -1239,8 +1294,9 @@ async def feature_place_standard_traditional_markets(
 
 #: TourAPI ``detailCommon2`` run 예산 — 오퍼레이션 일일 한도 1,000의 60%(다른 data.go.kr
 #: dataset의 최악 sweep과 같은 비율, ``docs/etl/upstream-quota.md`` §2). 첫 적재는 상세 없이
-#: 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다(12,560건 ≈ 21 run). **step 재시도는 상세를
-#: 받지 않는다** — 받은 상세는 적재가 커밋돼야 남으므로, 재시도마다 받으면 한 run이 한도를 넘긴다.
+#: 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다(12·14·28 19,030건 ≈ 32 run).
+#: **step 재시도는 상세를 받지 않는다** — 받은 상세는 적재가 커밋돼야 남으므로, 재시도마다
+#: 받으면 한 run이 한도를 넘긴다.
 VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 
 #: 역지오코딩이 법정동을 못 낸 행의 허용 상한 — ``max(이 수, 전체의 1%)``. 해상 등대·무인도처럼
@@ -1318,9 +1374,9 @@ def _ensure_geo_resolved_enough(bundles: Sequence[Any]) -> None:
 async def run_feature_place_visitkorea_tourist_attractions(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """TourAPI 관광지(contentTypeId 12) 목록을 place Feature로 적재한다(#1459).
+    """TourAPI 관광지(12)·문화시설(14)·레포츠(28) 목록을 place Feature로 적재한다(#1459).
 
-    전국 1만 2천여 건을 한 snapshot으로 받아 ``retire_absent_from_snapshot``으로 적재한다 —
+    전국 1만 9천여 건을 한 snapshot으로 받아 ``retire_absent_from_snapshot``으로 적재한다 —
     목록에서 빠진 관광지는 은퇴한다. 0행 목록은 "없음"이 아니라 "못 받았음"이라 은퇴 전에
     실패시킨다. 상세(overview·homepage)는 :func:`_attach_attraction_details`가 예산 안에서 얹는다.
     replay는 저장 원본(상세 포함)을 그대로 쓰고 은퇴·봉인·sync 성공을 기록하지 않는다.
@@ -1362,7 +1418,7 @@ async def run_feature_place_visitkorea_tourist_attractions(
         retire_absent_from_snapshot=not replay,
         record_sync_state=not replay,
         geo_applied=GeoApplied(reverse=True, geocode=False),
-        # 1만 2천 건 중 역지오코딩이 법정동을 못 내는 행(해상 등대·무인도 등)이 하나만 있어도
+        # 1만 9천 건 중 역지오코딩이 법정동을 못 내는 행(해상 등대·무인도 등)이 하나만 있어도
         # strict는 run 전체를 되감는다. 그 행만 버리고 기록한다(#1450과 같은 선택). 버린 행은
         # 은퇴하므로 그 수는 위 `_ensure_geo_resolved_enough`가 먼저 묶는다.
         address_failure_mode="drop",
@@ -2116,6 +2172,27 @@ def _address_geocoder(context: AssetExecutionContext) -> AddressGeocoder | None:
         return await geocode(address)
 
     return cached_address_geocoder(cast("AddressGeocoder", _geocode))
+
+
+def _venue_resolver(context: AssetExecutionContext) -> VenueResolver | None:
+    """행사 장소 이름 → 같은 시군구의 좌표 있는 장소 Feature(#1468 D).
+
+    후보는 ``kor_travel_map_client.find_venue_candidates``(이름 trigram 읽기)로 읽고, 고르는
+    규칙은 :func:`kortravelmap.core.venue_match.match_venue`다(국가유산 본체 우선). 답은 run 동안
+    ``(조각, 시도, 시군구)``로 기억한다. client가 이 읽기를 모르면(테스트 대역 등) None이다.
+    """
+    client = _resource_object(context, "kor_travel_map_client", default=None)
+    find = getattr(client, "find_venue_candidates", None)
+    if not callable(find):
+        return None
+
+    async def _resolve(piece: str, sido: str | None, gugun: str | None) -> VenueMatch | None:
+        candidates = cast(list[VenueCandidate], await find(piece))
+        return match_venue(
+            piece, sido, gugun, candidates, prefer_dataset_key=KRHERITAGE_DATASET_KEY
+        )
+
+    return cached_venue_resolver(_resolve)
 
 
 async def _transform_reusing_geo(

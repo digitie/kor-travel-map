@@ -1,3 +1,20 @@
+## 2026-11-10 — 휴양림 ↔ MOIS 숙박은 휴양림 master
+
+- 소유자 결정: 산림청 자연휴양림 dataset 보정 55(MOIS 50 위). #1472 뒤 이 쌍은 MOIS가 이겼다. 수목원 115쌍도 그대로 휴양림 master.
+
+## 2026-11-10 — #1468 D 국가유산 행사 회차 묶음
+
+- prod 5,286행=행사 1,316개(같은 행사가 seqNo를 바꿔 반복, 좌표 0). 행사명·단체·지역·장소로 묶고 회차는 payload에. 좌표는 같은 시군구 동명 장소 Feature(310개, 23.6%)→번지 정지오코딩. 옛 키는 retire, PinVi 참조 0.
+
+## 2026-11-10 — #1468 B·C dedup 재가동·원천 겹침 쌍
+
+- prod 병합 0건: master 선정이 좌표→updated_at→원천이라 원천 순위가 사실상 안 쓰였다. 원천을 updated_at 앞으로, 표준데이터 35·MCST 20·YouTube 5, dataset 보정(KNPS 문화자원·수목원·산림청 등산로 40).
+- 쌍 3개: 캠핑 MOIS↔KNPS·휴양림=수목원(이름 일치)·등산로↔KNPS 탐방로(선형 겹침). MCST 쌍 4개는 ADR-121 attach로 넘김. 반경 blocking·DB 반경 읽기. 기본 schedule RUNNING. migration 없음.
+
+## 2026-11-10 — #1459 TourAPI 문화시설(14)·레포츠(28)
+
+- 같은 dataset·snapshot에 14(2,753)·28(3,717)을 더했다. 레포츠 52%가 캠핑장(AC05)이라 0306으로, LS011900 중 '…길'은 트레킹. 상세 예산 600 유지 → 전량 약 32일. migration 없음.
+
 ## 2026-11-10 — ADR-121 accepted (소유자 결정)
 
 - D1=b(master 없는 속성 행은 목록 무관 MCST 장소 하나, master 생기면 병합), D2(반려 업종 약 20,396 미적재·기존 Feature는 R4 퇴역), D3(촬영지는 큐레이션 `media-places` 후보→운영자 승격·공개).
