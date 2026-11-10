@@ -352,7 +352,7 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         dataset_key="visitkorea_tourist_attractions",
         setting_names=("data_go_kr_service_key",),
         source_env_names=("DATA_GO_KR_SERVICE_KEY",),
-        note="TourAPI 관광지(contentTypeId 12) 1차 place — 상세는 asset이 예산 안에서 받는다.",
+        note="TourAPI 관광지·문화시설·레포츠(12·14·28) 1차 place — 상세는 예산 안에서 받는다.",
     ),
     ProviderRecordResourceSpec(
         resource_key="kor_travel_concierge_youtube_features",

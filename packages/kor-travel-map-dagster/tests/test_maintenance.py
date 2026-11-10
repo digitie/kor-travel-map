@@ -286,34 +286,56 @@ def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
         ("python-mois-api", None, ("05050000", "05030000")),
         ("data.go.kr-standard", "datagokr_tourist_attractions", ()),
     }
-    # TourAPI 관광지(#1459) — 기존 관광 원천 여덟과 비교한다. 양쪽 상한은 1만 2천 건 전체를
-    # 덮는다(기본 5,000이면 최근 갱신분만 비교된다).
+    # TourAPI 관광지·문화시설·레포츠(#1459) — 기존 원천과 13쌍으로 비교한다. 양쪽 상한 40,000은
+    # 1만 9천 건 전체를 덮는다(기본 5,000이면 최근 갱신분만 비교된다).
     tourapi = [
         (left, right)
         for left, right, _include_auto_merge in client.pairs
         if left.provider == "python-visitkorea-api"
     ]
-    assert {(right.provider, right.dataset_key) for _left, right in tourapi} == {
-        ("python-krheritage-api", None),
-        ("python-knps-api", None),
-        ("python-krforest-api", None),
-        ("python-khoa-api", None),
-        ("data.go.kr-standard", "datagokr_tourist_attractions"),
-        ("data.go.kr-standard", "datagokr_museums"),
-        ("python-mcst-api", None),
-        ("python-mois-api", None),
-    }
     assert {left.dataset_key for left, _right in tourapi} == {"visitkorea_tourist_attractions"}
-    assert {left.limit for left, _right in tourapi} == {20000}
-    assert {right.limit for _left, right in tourapi} == {20000}
-    by_right = {right.provider: (left, right) for left, right in tourapi if not right.dataset_key}
-    assert by_right["python-khoa-api"][0].categories == ("01050100",)
-    heritage_left = by_right["python-krheritage-api"][0].categories
-    assert heritage_left
-    assert all(code.startswith("0107") for code in heritage_left)
-    mois_left, mois_right = by_right["python-mois-api"]
-    assert mois_left.categories == mois_right.categories
-    assert "01080400" not in mois_right.categories  # 체육시설은 TourAPI 관광지가 아니다
+    assert {left.limit for left, _right in tourapi} == {40000}
+    assert {right.limit for _left, right in tourapi} == {40000}
+    # (오른쪽 provider, dataset, 왼쪽 범주 접두사 집합) — 쌍 하나하나를 고정한다(13쌍).
+
+    def _prefixes(categories: tuple[str, ...]) -> frozenset[str]:
+        return frozenset(code[:4] for code in categories)
+
+    got = sorted(
+        (right.provider, right.dataset_key or "", sorted(_prefixes(left.categories)))
+        for left, right in tourapi
+    )
+    assert len(tourapi) == 13
+    expected = [
+        ("python-krheritage-api", "", ["0107"]),
+        ("python-knps-api", "", ["0102"]),
+        ("python-krforest-api", "", ["0103", "0303"]),
+        ("python-khoa-api", "", ["0105"]),
+        ("python-mois-api", "", ["0108"]),  # 골프장
+        ("python-mcst-api", "", ["0108"]),  # 골프장
+        ("python-mois-api", "", ["0306"]),
+        ("python-mcst-api", "", ["0306"]),
+        ("python-knps-api", "", ["0306"]),
+        ("data.go.kr-standard", "datagokr_museums", ["0100", "0101", "0104", "0105", "0107"]),
+        ("python-mcst-api", "", ["0100", "0101", "0104", "0105", "0107"]),
+        ("python-mois-api", "", ["0100", "0101", "0104", "0107", "0108"]),
+    ]
+    for provider, dataset, prefixes in expected:
+        assert (provider, dataset, prefixes) in got, (provider, dataset, prefixes)
+    standard = [
+        left for left, right in tourapi if right.dataset_key == "datagokr_tourist_attractions"
+    ]
+    assert len(standard) == 1
+    assert not any(code.startswith(("03", "0108")) for code in standard[0].categories)
+    for left, right in tourapi:
+        if right.provider in {"python-mois-api", "python-mcst-api"} and right.categories:
+            assert left.categories == right.categories
+    # 체육시설(01080400)은 MOIS 쪽 수가 너무 많아 비교하지 않는다.
+    assert all(
+        "01080400" not in right.categories
+        for _left, right in tourapi
+        if right.provider == "python-mois-api"
+    )
     # MCST가 관광 일반으로 싣는 호텔 ↔ MOIS 숙박(2026-11-09 감사) — 위치가 아니라 내용으로 찾는다.
     lodging_pairs = {
         (right.provider, right.categories)

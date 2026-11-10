@@ -212,7 +212,7 @@ _TOURAPI_ATTRACTIONS: Final[Mapping[str, object]] = {
     "dataset_key": "visitkorea_tourist_attractions",
 }
 #: TourAPI 관광지 dedup은 **범주로 묶어** 비교한다(#1459). 비교가 O(left×right) 순수 Python이라
-#: 1만 2천 건 전체를 큰 provider와 곱하면 n150에서 refresh 한 번이 수십 분이 된다. 같은 실세계
+#: 1만 9천 건 전체를 큰 provider와 곱하면 n150에서 refresh 한 번이 수십 분이 된다. 같은 실세계
 #: 관광지는 범주도 같은 묶음에 들어간다(이름 0.45 + 거리 0.35 + 범주 0.20 — 범주가 다르면
 #: 0.80이 상한이라 어차피 자동 병합되지 않는다).
 _TOURAPI_HERITAGE: Final = _category_codes("0107")
@@ -225,7 +225,8 @@ _TOURAPI_MCST_OVERLAP: Final = sorted(
 )
 _TOURAPI_BEACH: Final = [PlaceCategoryCode.TOURISM_NATURE_BEACH.value]
 #: MOIS 관광 슬러그 중 TourAPI 관광지와 겹칠 수 있는 범주(관광사업체·박물관·전통사찰·유람선·
-#: 관광궤도·유원시설). 체육시설(01080400)·골프장은 수가 많고 TourAPI 관광지가 아니라 뺀다.
+#: 관광궤도·유원시설). 체육시설(01080400)은 MOIS 쪽 수가 너무 많아 뺀다. 골프장·캠핑장은
+#: 레포츠(28) 전용 쌍이 따로 본다.
 _TOURAPI_MOIS_OVERLAP: Final = sorted(
     {
         PlaceCategoryCode.TOURISM.value,
@@ -235,7 +236,15 @@ _TOURAPI_MOIS_OVERLAP: Final = sorted(
         PlaceCategoryCode.TOURISM_ACTIVITY_CRUISE.value,
     }
 )
-_TOURAPI_SCOPE_LIMIT: Final = 20000
+_TOURAPI_CAMPGROUND: Final = _category_codes("0306")
+_TOURAPI_GOLF: Final = [PlaceCategoryCode.TOURISM_ACTIVITY_GOLF.value]
+#: 관광지 표준데이터와 견줄 TourAPI 범주 — 숙박(03)·레포츠 액티비티(0108)는 그 표준데이터에 없다.
+_TOURAPI_STANDARD_ATTRACTION_OVERLAP: Final = sorted(
+    code.value
+    for code in PlaceCategoryCode
+    if code.value.startswith(("01", "04")) and not code.value.startswith("0108")
+)
+_TOURAPI_SCOPE_LIMIT: Final = 40000
 """TourAPI 쌍의 양쪽 scope 상한 — 기본 5,000이면 최근 갱신분만 비교된다(국가유산·MOIS 관광도
 5,000을 넘을 수 있다). 비교 비용은 ``core.dedup``의 상한 가지치기(범주가 다르면 28 m 밖은
 이름을 보지 않는다)와 이름 정규화 캐시가 묶는다."""
@@ -329,12 +338,12 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     _tourapi_pair(_TOURAPI_FOREST, {"provider": "python-krforest-api"}),
     _tourapi_pair(_TOURAPI_BEACH, {"provider": "python-khoa-api"}),
     _tourapi_pair(
-        None,
+        _TOURAPI_STANDARD_ATTRACTION_OVERLAP,
         {"provider": "data.go.kr-standard", "dataset_key": "datagokr_tourist_attractions"},
     ),
-    # 관광지(12)에는 문화시설(0104) 코드가 거의 없다 — 박물관·전시관은 TourAPI에서 건물·기념물
-    # 등으로 온다. 그래서 왼쪽을 0104로만 좁히지 않고 관광·문화·자연명소·국가유산 묶음으로 둔다
-    # (범주가 다르면 자동 병합은 없고 28 m 안만 검토). 자연경관·숙박·온천 행은 비교하지 않는다.
+    # 박물관·전시관은 문화시설(14)의 0104로 오고, 관광지(12)에서는 건물·기념물 등으로도 온다.
+    # 그래서 왼쪽을 0104로만 좁히지 않고 관광·문화·자연명소·국가유산 묶음으로 둔다(범주가 다르면
+    # 자동 병합은 없고 28 m 안만 검토). 자연경관·숙박·온천·레포츠 행은 비교하지 않는다.
     _tourapi_pair(
         _TOURAPI_MCST_OVERLAP,
         {"provider": "data.go.kr-standard", "dataset_key": "datagokr_museums"},
@@ -346,6 +355,22 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     _tourapi_pair(
         _TOURAPI_MOIS_OVERLAP,
         {"provider": "python-mois-api", "categories": _TOURAPI_MOIS_OVERLAP},
+    ),
+    # 레포츠(28)의 골프장·캠핑장 ↔ 같은 범주를 적재하는 MOIS·MCST·KNPS(국립공원 야영장).
+    # 체육시설(01080400)은 MOIS 쪽 수가 너무 많아(같은 범주 쌍은 가지치기되지 않는다) 보지 않는다.
+    _tourapi_pair(_TOURAPI_GOLF, {"provider": "python-mois-api", "categories": _TOURAPI_GOLF}),
+    _tourapi_pair(_TOURAPI_GOLF, {"provider": "python-mcst-api", "categories": _TOURAPI_GOLF}),
+    _tourapi_pair(
+        _TOURAPI_CAMPGROUND,
+        {"provider": "python-mois-api", "categories": _TOURAPI_CAMPGROUND},
+    ),
+    _tourapi_pair(
+        _TOURAPI_CAMPGROUND,
+        {"provider": "python-mcst-api", "categories": _TOURAPI_CAMPGROUND},
+    ),
+    _tourapi_pair(
+        _TOURAPI_CAMPGROUND,
+        {"provider": "python-knps-api", "categories": _TOURAPI_CAMPGROUND},
     ),
     # 문체부 파일데이터(MCST)가 관광 일반(01000000)으로 싣는 호텔·리조트 ↔ MOIS 숙박 인허가
     # (2026-11-09 감사: "JW 메리어트 호텔 서울"·"켄싱턴호텔 설악"이 MCST 01000000으로 따로 있다).

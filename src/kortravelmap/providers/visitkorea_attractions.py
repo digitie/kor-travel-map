@@ -1,4 +1,4 @@
-"""``kortravelmap.providers.visitkorea_attractions`` — TourAPI 관광지(contentTypeId 12) → place.
+"""``kortravelmap.providers.visitkorea_attractions`` — TourAPI 관광지·문화시설·레포츠 → place.
 
 한국관광공사 국문 관광정보 서비스(KorService2) ``areaBasedList2``의 관광지 목록을
 **1차 source** place Feature로 만든다(#1459 — 산막이옛길·고군산군도·부산타워 같은 대표
@@ -84,6 +84,7 @@ __all__ = [
     "tourapi_attractions_to_bundles",
     "DATASET_KEY_VISITKOREA_ATTRACTIONS",
     "TOURAPI_ATTRACTION_CONTENT_TYPE_ID",
+    "TOURAPI_PLACE_CONTENT_TYPE_IDS",
     "TOURAPI_LCLS1_CATEGORY",
     "TOURAPI_LCLS2_CATEGORY",
     "TOURAPI_LCLS3_CATEGORY",
@@ -95,10 +96,22 @@ _PROVIDER_NAME: Final[str] = "python-visitkorea-api"
 """canonical provider name (ADR-024) — :mod:`visitkorea`의 ``VISITKOREA_PROVIDER_NAME``과 같다."""
 
 DATASET_KEY_VISITKOREA_ATTRACTIONS: Final[str] = "visitkorea_tourist_attractions"
-"""``provider_sync.source_records.dataset_key`` — TourAPI 관광지(contentTypeId 12)."""
+"""``provider_sync.source_records.dataset_key`` — TourAPI 관광지(12)·문화시설(14)·레포츠(28)."""
 
 TOURAPI_ATTRACTION_CONTENT_TYPE_ID: Final[str] = "12"
 """TourAPI 관광타입 — 관광지."""
+
+TOURAPI_PLACE_CONTENT_TYPE_IDS: Final[tuple[str, ...]] = ("12", "14", "28")
+"""이 dataset이 적재하는 TourAPI 관광타입 — 관광지(12)·문화시설(14)·레포츠(28)(#1459).
+
+숙박(32)·음식점(39)·쇼핑(38)은 MOIS 인허가가 정본이고, 축제(15)는 event·여행코스(25)는 route라
+넣지 않는다."""
+
+_PLACE_KIND_BY_CONTENT_TYPE: Final[dict[str, str]] = {
+    "12": "tourapi_attraction",
+    "14": "tourapi_culture_facility",
+    "28": "tourapi_leisure",
+}
 
 _ENTITY_TYPE: Final[str] = "tourist_attraction"
 ATTRACTION_PLACE_KIND: Final[str] = "tourapi_attraction"
@@ -167,6 +180,18 @@ TOURAPI_LCLS3_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "EX050100": _P.HOT_SPRING_SPA_HOT_SPRING,  # 온천 / 사우나 / 스파
     "EX050200": _P.HOT_SPRING_SPA_SAUNA,  # 찜질방
     "EX070100": _P.TOURISM_ACTIVITY_CRUISE,  # 유람선/잠수함관광
+    # 문화시설(14) — 2026-11-09 운영 키 2,753건의 3단계 분포 기준
+    "VE120100": _P.TOURISM_CULTURAL_FACILITY,  # 서점(MCST 서점과 같은 자리)
+    "VE120300": _P.TOURISM_CULTURAL_FACILITY,  # 기타문화시설(14에서 154건)
+    # 레포츠(28) — 3,717건. 레저스포츠(LS)는 대부분 2단계 표의 레저스포츠로 간다.
+    "LS010400": _P.TOURISM_ACTIVITY_GOLF,  # 골프
+    # 숙박 분류(AC)가 레포츠에 섞여 온다 — 캠핑장 1,948건(52%)·펜션
+    "AC050100": _P.LODGING_CAMPGROUND,  # 일반야영장
+    "AC050200": _P.LODGING_CAMPGROUND_AUTO,  # 오토캠핑장
+    "AC050300": _P.LODGING_CAMPGROUND_CARAVAN_RENTAL,  # 카라반
+    "AC050400": _P.LODGING_CAMPGROUND_GLAMPING,  # 글램핑장
+    "AC030100": _P.LODGING_PENSION,  # 펜션
+    "AC030300": _P.LODGING_PENSION_RURAL,  # 농어촌민박
 }
 """TourAPI 신 분류 3단계(``lclsSystm3``) → Map category. 여기 없는 코드는 2단계 표로 내려간다."""
 
@@ -198,12 +223,18 @@ TOURAPI_LCLS2_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "EX04": _P.TOURISM_HERITAGE_TEMPLE,  # 산사체험
     "EX06": _P.TOURISM,  # 산업관광
     "EX07": _P.TOURISM_ACTIVITY,  # 기타체험
+    "LS01": _P.TOURISM_ACTIVITY_LEISURE_SPORTS,  # 육상레저스포츠
+    "LS02": _P.TOURISM_ACTIVITY_LEISURE_SPORTS,  # 수상레저스포츠
+    "LS03": _P.TOURISM_ACTIVITY_LEISURE_SPORTS,  # 항공레저스포츠
+    "LS04": _P.TOURISM_ACTIVITY_LEISURE_SPORTS,  # 복합레저스포츠
+    "AC05": _P.LODGING_CAMPGROUND,  # 캠핑
+    "AC03": _P.LODGING_PENSION,  # 펜션/민박
 }
 """``lclsSystm2`` → Map category(3단계 표에 없을 때).
 
-관광지(12) 목록에 실제로 오는 것은 NA·HS·EX 전부와 VE01~VE05·VE020500이다(공식 신분류체계
-연계 정의서). VE06~VE10·VE12·VE050200은 문화시설(14)·레포츠(28)·숙박(32)의 코드로, 같은 변환기로
-그 dataset을 더할 때를 위해 둔다(``docs/etl/visitkorea-tourist-attraction-etl.md`` §8)."""
+관광지(12) 목록에 오는 것은 NA·HS·EX 전부와 VE01~VE05·VE020500이고(공식 신분류체계 연계
+정의서), VE06~VE10·VE12는 문화시설(14), LS·AC·VE10은 레포츠(28)에서 온다
+(``docs/etl/visitkorea-tourist-attraction-etl.md`` §3.1)."""
 
 #: 적재하지 않는 2단계 — 교통시설(VE11: 공항·기차역·여객선·휴게소·지하철)은 transport 원천
 #: (``kor-travel-transport``)이 정본이라, TourAPI 행을 더하면 dedup 쌍 없이 중복 place가 된다.
@@ -222,15 +253,44 @@ TOURAPI_LCLS1_CATEGORY: Final[Mapping[str, PlaceCategoryCode]] = {
     "HS": _P.TOURISM_HERITAGE,
     "VE": _P.TOURISM,
     "EX": _P.TOURISM_ACTIVITY,
+    "LS": _P.TOURISM_ACTIVITY_LEISURE_SPORTS,
+    "AC": _P.LODGING,
 }
 """``lclsSystm1`` → Map category(2단계 표에도 없을 때)."""
 
 
+#: "기타육상레저스포츠"(LS011900)에는 길·둘레길이 섞여 온다(산막이옛길) — 이름이 길이면 트레킹.
+#: 끝의 괄호·"N코스/N구간"·"입구"는 떼고 본다. 자전거길은 레저스포츠로 둔다.
+_TRAIL_NAME_RE: Final = re.compile(r"(?:길|올레|트레킹|탐방로|산책로|코스)$")
+_TRAIL_SUFFIX_RE: Final = re.compile(
+    r"(?:\([^)]*\)|제?[\d①-⑳][\d①-⑳~-]*(?:코스|구간)|입구|[\d①-⑳]+)$"
+)
+_NOT_TRAIL_RE: Final = re.compile(r"자전거길$")
+
+
+def _is_trail_name(title: str | None) -> bool:
+    name = "".join((title or "").split())
+    for _ in range(3):  # "OO둘레길(1구간) 입구" 꼴의 겹친 꼬리
+        stripped = _TRAIL_SUFFIX_RE.sub("", name)
+        if stripped == name or not stripped:
+            break
+        name = stripped
+    return bool(_TRAIL_NAME_RE.search(name)) and not _NOT_TRAIL_RE.search(name)
+
+
 def attraction_category(
-    lcls_systm1: str | None, lcls_systm2: str | None, lcls_systm3: str | None
+    lcls_systm1: str | None,
+    lcls_systm2: str | None,
+    lcls_systm3: str | None,
+    title: str | None = None,
 ) -> str:
-    """TourAPI 신 분류 → Map category code(8자리). 모르는 코드는 상위 단계로 내려간다."""
+    """TourAPI 신 분류 → Map category code(8자리). 모르는 코드는 상위 단계로 내려간다.
+
+    ``title``은 기타육상레저스포츠(LS011900)를 트레킹·둘레길과 그 밖으로 가르는 데만 쓴다.
+    """
     lcls3 = (lcls_systm3 or "").strip()
+    if lcls3 == "LS011900" and _is_trail_name(title):
+        return _P.TOURISM_ACTIVITY_TREKKING.value
     lcls2 = (lcls_systm2 or "").strip() or lcls3[:4]
     lcls1 = (lcls_systm1 or "").strip() or lcls2[:2]
     if lcls3 in TOURAPI_LCLS3_CATEGORY:
@@ -506,7 +566,9 @@ async def _attraction_to_bundle(
         sigungu_name=geo.sigungu_name if geo is not None else None,
     )
 
-    category = attraction_category(item.lcls_systm1, item.lcls_systm2, item.lcls_systm3)
+    category = attraction_category(
+        item.lcls_systm1, item.lcls_systm2, item.lcls_systm3, item.title
+    )
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=_PROVIDER_NAME,
@@ -549,7 +611,9 @@ async def _attraction_to_bundle(
         marker_color=ATTRACTION_MARKER_COLOR,
         detail=PlaceDetail(
             feature_id=feature_id,
-            place_kind=ATTRACTION_PLACE_KIND,
+            place_kind=_PLACE_KIND_BY_CONTENT_TYPE.get(
+                (item.content_type_id or "").strip(), ATTRACTION_PLACE_KIND
+            ),
             phones=[phone] if phone else [],
             facility_info={k: v for k, v in facility_info.items() if v is not None},
         ),
