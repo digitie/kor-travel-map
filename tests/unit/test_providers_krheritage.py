@@ -607,6 +607,10 @@ def test_legacy_key_detection() -> None:
     )
 
 
+async def _confirming_reverse(coord: Coordinate) -> Address:
+    return Address(legal="경상남도 진주시 본성동", bjd_code="4817010100", sigungu_code="48170")
+
+
 async def test_venue_resolver_fills_coordinate_from_first_matching_piece() -> None:
     seen: list[tuple[str, str | None, str | None]] = []
     jinju = Coordinate(lon=Decimal("128.0817"), lat=Decimal("35.1887"))
@@ -623,7 +627,8 @@ async def test_venue_resolver_fills_coordinate_from_first_matching_piece() -> No
         raw={**_REAL_EVENT_RAW, "subDesc": "중앙상권 빈점포, 진주성 일원"},
     )
     [bundle] = await heritage_events_to_bundles(
-        [event], fetched_at=_FETCHED, venue_resolver=resolver
+        [event], fetched_at=_FETCHED, venue_resolver=resolver,
+        reverse_geocoder=_confirming_reverse,
     )
     assert seen == [
         ("중앙상권 빈점포", "경상남도", "진주시"),
@@ -634,6 +639,27 @@ async def test_venue_resolver_fills_coordinate_from_first_matching_piece() -> No
     assert bundle.feature.detail.payload["venue_feature_id"] == "fid-jinju"
     # 장소 원문은 그대로 둔다.
     assert bundle.feature.detail.venue_name == "중앙상권 빈점포, 진주성 일원"
+    assert bundle.feature.address.bjd_code == "4817010100"
+
+
+async def test_borrowed_coordinate_is_dropped_when_reverse_cannot_confirm_it() -> None:
+    """빌린 점(장소·주소)은 reverse가 법정동을 못 주면 버린다 — strict 검증이 run을 멈추지 않게."""
+    jinju = Coordinate(lon=Decimal("128.0817"), lat=Decimal("35.1887"))
+
+    async def resolver(piece: str, sido: str | None, gugun: str | None) -> VenueMatch | None:
+        return VenueMatch(feature_id="fid-jinju", coord=jinju, matched_name="진주성")
+
+    async def empty_reverse(coord: Coordinate) -> Address | None:
+        return None
+
+    event = _Event(sn=None, title=None, raw={**_REAL_EVENT_RAW, "subDesc": "진주성"})
+    for reverse in (empty_reverse, None):
+        [bundle] = await heritage_events_to_bundles(
+            [event], fetched_at=_FETCHED, venue_resolver=resolver, reverse_geocoder=reverse
+        )
+        assert bundle.feature.coord is None
+        assert "coordinate_source" not in bundle.feature.detail.payload
+        assert bundle.feature.address.legal == "경상남도 진주시"
 
 
 async def test_address_geocoder_only_for_pieces_with_a_lot_number() -> None:
@@ -656,7 +682,8 @@ async def test_address_geocoder_only_for_pieces_with_a_lot_number() -> None:
     )
     vague = _Event(sn=None, title=None, raw={**_REAL_EVENT_RAW, "subDesc": "행사장 전역"})
     a, b = await heritage_events_to_bundles(
-        [numbered, vague], fetched_at=_FETCHED, address_geocoder=geocoder
+        [numbered, vague], fetched_at=_FETCHED, address_geocoder=geocoder,
+        reverse_geocoder=_confirming_reverse,
     )
     assert [x.road for x in asked] == ["제주특별자치도 서귀포시 성읍리 845-1"]
     assert a.feature.coord == pin

@@ -6,9 +6,9 @@
 
 규칙은 일부러 좁다 — 틀린 핀은 핀이 없는 것보다 나쁘다.
 
-- 장소 문자열은 ``,``·``/``·줄바꿈·" 및 "·" 또는 "로 나누고, 괄호 안과 끝의 "일원·일대·주변·내·
-  앞·등·외"를 뗀다. 글자(한글·영숫자)가 3자 미만인 조각은 버린다. **앞 조각부터** 본다 — 원천은
-  주 장소를 먼저 적는다.
+- 장소 문자열은 ``,``·``/``·줄바꿈·" 및 "·" 또는 "로 나누고, 괄호 안과 끝의 "일원·일대·주변"(띄어 쓴
+  "내·앞·등·외"도)을 뗀다. 글자(한글·영숫자)가 3자 미만이거나 일반 시설 낱말("기념관"·"행사장")뿐인
+  조각은 버린다. **앞 조각부터** 본다 — 원천은 주 장소를 먼저 적는다.
 - 이름은 글자만 남겨 **같아야** 한다. 앞 낱말이 그 행의 시도·시군구 이름이면 떼고도 비교한다
   ("고양 행주산성" = "행주산성"). 접두·포함 일치는 쓰지 않는다("정선향교" ≠ "정선향교 앞
   공영주차장").
@@ -51,8 +51,19 @@ _MIN_NAME_CHARS: Final[int] = 3
 
 _SPLIT: Final[re.Pattern[str]] = re.compile(r"[,，/\n;]| 및 | 또는 ")
 _PAREN: Final[re.Pattern[str]] = re.compile(r"[(（\[][^)）\]]*[)）\]]")
+#: 끝의 범위 수식어. 한 글자짜리는 띄어 쓴 것만 뗀다("광한루 앞") — 이름 끝 글자("성내")는 둔다.
 _TRAILING_QUALIFIER: Final[re.Pattern[str]] = re.compile(
-    r"\s*(?:일원|일대|주변|내|앞|등|외)$"
+    r"(?:\s*(?:일원|일대|주변)|\s+(?:내|앞|등|외))$"
+)
+#: 그 자체로는 장소 이름이 아닌 일반 시설 낱말. 이것만 남은 조각("기념관", "행사장")은 시군구에
+#: 같은 이름이 하나뿐이어도 핀을 꽂지 않는다(적대 리뷰 — 조각 분해가 만드는 거짓 일치).
+_GENERIC_VENUE_KEYS: Final[frozenset[str]] = frozenset(
+    {
+        "기념관", "체육관", "행사장", "주차장", "박물관", "미술관", "전시관", "문화원", "공연장",
+        "운동장", "교육관", "전수관", "전수교육관", "도서관", "복지관", "회관", "마을회관",
+        "주민센터", "행정복지센터", "시청", "군청", "구청", "광장", "강당", "공원", "시장",
+        "지역상권", "행사장전역", "전역", "추후공지예정", "추후공지",
+    }
 )
 _NON_NAME: Final[re.Pattern[str]] = re.compile(r"[^0-9A-Za-z가-힣]")
 
@@ -132,7 +143,8 @@ def split_venue_names(value: str | None) -> list[str]:
         piece = _PAREN.sub("", part).strip()
         piece = _TRAILING_QUALIFIER.sub("", piece).strip()
         piece = " ".join(piece.split())
-        if len(venue_name_key(piece)) < _MIN_NAME_CHARS or piece in out:
+        key = venue_name_key(piece)
+        if len(key) < _MIN_NAME_CHARS or key in _GENERIC_VENUE_KEYS or piece in out:
             continue
         out.append(piece)
     return out

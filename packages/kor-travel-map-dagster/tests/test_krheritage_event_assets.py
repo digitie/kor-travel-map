@@ -1,4 +1,4 @@
-"""``test_krheritage_event_assets`` — 국가유산 행사 asset의 회차 묶음·장소 좌표·옛 키 은퇴 배선(#1468 D).
+"""국가유산 행사 asset — 회차 묶음·장소 좌표·옛 키 은퇴 배선(#1468 D).
 
 변환 규칙은 ``tests/unit/test_providers_krheritage.py``가 갖는다. 여기서는 asset이 (1) 장소 해석기를
 client 후보 읽기에 잇고, (2) 회차별 옛 자연키만 retired로 내리며, (3) 빈 snapshot에서는 아무것도
@@ -14,7 +14,7 @@ from typing import Any
 from dagster import build_asset_context
 from kortravelmap.client import IntegrityFindingSyncResult
 from kortravelmap.core.venue_match import VenueCandidate
-from kortravelmap.dto import Coordinate
+from kortravelmap.dto import Address, Coordinate
 from kortravelmap.infra.feature_repo import FeatureLoadResult
 
 from kortravelmap.dagster.assets import run_feature_event_krheritage_events
@@ -119,11 +119,22 @@ class _FakeClient:
         return IntegrityFindingSyncResult(len(recorded), len(recorded), len(recorded))
 
 
+async def _reverse(coord: Coordinate) -> Address:
+    return Address(
+        legal="경상남도 진주시 본성동",
+        bjd_code="4817010100",
+        sigungu_code="48170",
+        sido_code="48",
+        sido_name="경상남도",
+        sigungu_name="진주시",
+    )
+
+
 def _context(client: _FakeClient, records: list[_Row]) -> Any:
     return build_asset_context(
         resources={
             "kor_travel_map_client": client,
-            "reverse_geocoder": None,
+            "reverse_geocoder": _reverse,
             "fetched_at": None,
             "strict_address": True,
             "krheritage_events": records,

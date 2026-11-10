@@ -921,6 +921,10 @@ def _event_schedule_text(event: KrHeritageEvent) -> str | None:
     return normalize_korean_text(_event_text(event, ("schedule_text",), ("subDate",)))
 
 
+_DERIVED_COORDINATE_SOURCES: Final[frozenset[str]] = frozenset(
+    {"venue_feature", "address_geocode"}
+)
+
 HERITAGE_EVENT_PROGRAM_KEY_PREFIX: Final[str] = "program::"
 """묶은 행사(프로그램) 자연키 접두. 이 접두가 없는 현재 자연키는 회차별 옛 키다(#1468 D)."""
 
@@ -971,7 +975,7 @@ def _canonical_json(value: object) -> str:
 
 
 def _sn_sort_key(sn: str) -> tuple[int, int, str]:
-    return (0, int(sn), sn) if sn.isdigit() else (1, 0, sn)
+    return (0, int(sn), sn) if sn.isdecimal() and sn.isascii() else (1, 0, sn)
 
 
 def _session_sort_key(event: KrHeritageEvent) -> tuple[str, str, tuple[int, int, str], str]:
@@ -1084,6 +1088,13 @@ async def _program_to_bundle(
     geo: Address | None = None
     if coord is not None and reverse_geocoder is not None:
         geo = await reverse_geocoder(coord)
+    if coord_payload.get("coordinate_source") in _DERIVED_COORDINATE_SOURCES and (
+        geo is None or geo.bjd_code is None
+    ):
+        # 원천이 준 점이 아니라 이름·주소로 빌린 점이다. reverse가 법정동을 확인하지 못하면
+        # 버린다 — 확인 못 한 빌린 점 하나가 strict 주소 검증으로 적재 전체를 멈추게 하지
+        # 않도록(좌표 없는 행사는 종전처럼 지역 텍스트로 적재된다). 다음 적재가 다시 시도한다.
+        coord, coord_payload, geo = None, {}, None
     address_text = _event_address_text(first)
     if (geo is None or geo.bjd_code is None) and address_resolver is not None:
         resolved = await address_resolver(Address(legal=address_text))

@@ -5,9 +5,12 @@
 모듈은 이름으로 넓게 읽기만 한다.
 
 술어는 ``idx_features_name_trgm``(활성·공개·유효 부분 GIN trigram)을 타도록 같은 상태 술어를
-쓰고 ``name ILIKE``로 거른다. 지역 비교는 표기가 섞여 있어(``전라남도``/``전남광주통합특별시``)
-SQL이 아니라 호출자가 한다. 좌표는 ``coord``(4326)를 그대로 읽는다 — 술어에 좌표 변환이 없다
-(ADR-012). raw SQL은 이 모듈의 상수다(ADR-004). 읽기 전용이다.
+쓰고 ``name ILIKE``로 거른다. 거른 집합은 ``MATERIALIZED`` CTE로 먼저 확정한다 — 일반 plan이
+``feature_id`` 순서로 걸으며 ILIKE를 거르는 쪽으로 가지 않게. 상한을 넘으면 글자만 남긴 이름이
+조각과 같은 행, 짧은 이름 순으로 남긴다(같은 이름이 넓은 패턴에 밀려 잘리지 않게).
+지역 비교는 표기가 섞여 있어(``전라남도``/``전남광주통합특별시``) SQL이 아니라 호출자가 한다.
+좌표는 ``coord``(4326)를 그대로 읽는다 — 술어에 좌표 변환이 없다(ADR-012).
+raw SQL은 이 모듈의 상수다(ADR-004). 읽기 전용이다.
 """
 
 from __future__ import annotations
@@ -29,13 +32,23 @@ VENUE_CANDIDATE_LIMIT: Final[int] = 200
 """이름 하나당 읽는 후보 상한 — 지역 비교 전이라 넉넉히 읽는다."""
 
 _FIND_SQL: Final = """
+WITH hits AS MATERIALIZED (
+    SELECT f.feature_id, f.name, f.coord, f.address
+    FROM feature.features AS f
+    WHERE f.lifecycle_state = 'active'
+      AND f.publication_state = 'published'
+      AND f.quality_state = 'valid'
+      AND f.kind IN ('place', 'area')
+      AND f.coord IS NOT NULL
+      AND f.name ILIKE :pattern ESCAPE '\'
+)
 SELECT
-    CAST(f.feature_id AS text) AS feature_id,
-    f.name,
-    x_extension.ST_X(f.coord) AS lon,
-    x_extension.ST_Y(f.coord) AS lat,
-    f.address ->> 'sido_name' AS sido_name,
-    f.address ->> 'sigungu_name' AS sigungu_name,
+    CAST(h.feature_id AS text) AS feature_id,
+    h.name,
+    x_extension.ST_X(h.coord) AS lon,
+    x_extension.ST_Y(h.coord) AS lat,
+    h.address ->> 'sido_name' AS sido_name,
+    h.address ->> 'sigungu_name' AS sigungu_name,
     (
         SELECT dataset.dataset_key
         FROM provider_sync.source_links AS link
@@ -43,19 +56,16 @@ SELECT
           ON entity.source_entity_key = link.source_entity_key
         JOIN provider_sync.provider_datasets AS dataset
           ON dataset.provider_dataset_id = entity.provider_dataset_id
-        WHERE link.feature_id = f.feature_id
+        WHERE link.feature_id = h.feature_id
           AND link.source_role = 'primary'
         ORDER BY dataset.dataset_key
         LIMIT 1
     ) AS dataset_key
-FROM feature.features AS f
-WHERE f.lifecycle_state = 'active'
-  AND f.publication_state = 'published'
-  AND f.quality_state = 'valid'
-  AND f.kind IN ('place', 'area')
-  AND f.coord IS NOT NULL
-  AND f.name ILIKE :pattern ESCAPE '\\'
-ORDER BY f.feature_id
+FROM hits AS h
+ORDER BY
+    regexp_replace(h.name, '[^0-9A-Za-z가-힣]', '', 'g') = :name_key DESC,
+    length(h.name),
+    h.feature_id
 LIMIT :limit
 """
 
@@ -82,7 +92,10 @@ async def find_venue_candidates(
     if pattern is None:
         return []
     rows = (
-        await session.execute(text(_FIND_SQL), {"pattern": pattern, "limit": limit})
+        await session.execute(
+            text(_FIND_SQL),
+            {"pattern": pattern, "name_key": venue_name_key(name), "limit": limit},
+        )
     ).mappings()
     candidates: list[VenueCandidate] = []
     for row in rows:
