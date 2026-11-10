@@ -489,9 +489,9 @@ DEFAULT_DEDUP_SCOPE_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     ),
     # 문체부 파일데이터(MCST)가 관광 일반(01000000)으로 싣는 호텔·리조트 ↔ MOIS 숙박 인허가
     # (2026-11-09 감사: "JW 메리어트 호텔 서울"·"켄싱턴호텔 설악"이 MCST 01000000으로 따로 있다).
-    # 이 pair는 **검토 큐에 올릴 뿐이다** — 병합은 관리자가 한다. 숙박 분류가 남도록 master를
-    # MOIS 쪽으로 지정한다(``PATCH /v1/admin/features/dedup-reviews/{id}``의 ``master_feature_id``
-    # — 자동 선정은 좌표 → updated_at → 원천 순이라 MCST가 이길 수 있다).
+    # 이 pair는 **검토 큐에 올릴 뿐이다** — 병합은 관리자가 한다. 숙박 분류가 남도록 master는
+    # MOIS 쪽이다. 자동 선정이 좌표 → 원천 → updated_at 순이라(#1468) MOIS(50)가 MCST(20)를
+    # 이긴다. 다르게 하려면 ``PATCH /v1/admin/features/dedup-reviews/{id}``의 ``master_feature_id``.
     {
         "left": {"provider": "python-mcst-api", "categories": ["01000000"]},
         "right": {
