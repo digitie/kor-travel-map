@@ -81,7 +81,11 @@ class _FakeReverse:
 
 
 async def _festival(
-    seed: str, reverse: _FakeReverse, *, description: str = "축제"
+    seed: str,
+    reverse: _FakeReverse,
+    *,
+    description: str = "축제",
+    addr1: str = "서울특별시 영등포구 여의도동 8",
 ) -> FeatureBundle:
     # 자연키는 TourAPI contentid(seed). 개최지 주소는 지번 꼴이라 원천 legal로 남는다 —
     # geo 빈 답에도 남는 provider 원문 legal이다.
@@ -90,7 +94,7 @@ async def _festival(
         "geo 릴리스 축제",
         starts_on=date(2026, 10, 1),
         ends_on=date(2026, 10, 9),
-        addr1="서울특별시 영등포구 여의도동 8",
+        addr1=addr1,
         overview=description,
     )
     return (await festival_bundles([item], fetched_at=_FETCHED, reverse_geocoder=reverse))[0]
@@ -136,8 +140,10 @@ async def _stamp_row(session: AsyncSession, feature_id: str) -> tuple[Any, ...] 
     return None if row is None else tuple(row)
 
 
-async def _load_a(session: AsyncSession, seed: str) -> tuple[FeatureBundle, str]:
-    bundle = await _festival(seed, _FakeReverse(_geo()))
+async def _load_a(
+    session: AsyncSession, seed: str, *, addr1: str = "서울특별시 영등포구 여의도동 8"
+) -> tuple[FeatureBundle, str]:
+    bundle = await _festival(seed, _FakeReverse(_geo()), addr1=addr1)
     result = await load_bundles(session, [bundle], geo=_ctx(REF_A))
     assert result.geo_stamps_written == 1
     feature_id = await _feature_id(session, bundle)
@@ -693,12 +699,15 @@ async def test_partial_regression_keeps_stored_geo_only_fields(
     migrated_session: AsyncSession,
 ) -> None:
     """같은 법정동인데 새 답이 도로명코드·행정동코드·우편번호를 잃었다 — 저장값을 지킨다."""
-    _, feature_id = await _load_a(migrated_session, "partial-regression")
+    # 도로명 원문이 같아야 road_name_code를 낱개로 지킨다 — 도로명 개최지 주소로 심는다.
+    road = "서울특별시 영등포구 여의공원로 120"
+    _, feature_id = await _load_a(migrated_session, "partial-regression", addr1=road)
     before = await _row(migrated_session, feature_id)
 
     again = await _festival(
         "partial-regression",
         _FakeReverse(_geo_without("road_name_code", "admin_dong_code", "zipcode")),
+        addr1=road,
     )
     result = await load_bundles(migrated_session, [again], geo=_ctx(REF_B))
 
