@@ -200,7 +200,9 @@ def test_a_repeated_content_id_keeps_one_bundle_deterministically() -> None:
     forward = _bundles([_POHANG, edited])
     backward = _bundles([edited, _POHANG])
     assert len(forward) == len(backward) == 1
-    assert forward[0].source_record == backward[0].source_record
+    # imported_at은 생성 시각이라 비교하지 않는다 — 어느 원본이 남았는지는 key가 말한다.
+    assert forward[0].source_record.source_record_key == backward[0].source_record.source_record_key
+    assert forward[0].source_record.raw_data == backward[0].source_record.raw_data
 
 
 def test_without_coordinates_the_address_resolver_fills_the_legal_dong() -> None:

@@ -403,6 +403,26 @@ SELECT 'active_feature', target.feature_id::text
 """
 
 
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    _SET_OWNER_ROLE_SQL,
+    _LOCK_WRITE_PROTOCOL_SQL,
+    _LOCK_MEMBER_TABLES_SQL,
+    _DISABLE_RETIRED_OPERATIONS_SQL,
+    _SET_STATE_PROCEDURE_OWNER_ROLE_SQL,
+    _RETIRE_TARGET_FEATURES_SQL,
+    _SET_OWNER_ROLE_SQL,
+    _CLEAR_STATE_CONTEXT_SQL,
+    _CLOSE_PENDING_REVIEWS_SQL,
+    _INSERT_FESTIVAL_DATASET_SQL,
+    _INSERT_FESTIVAL_OPERATIONS_SQL,
+    _INSERT_FESTIVAL_OPERATION_SCOPES_SQL,
+    _DEACTIVATE_RETIRED_DATASETS_SQL,
+    _RECEIPT_HEAD_CHECK_SQL,
+)
+"""실행 순서대로의 upgrade 문장(사이의 검사·timeout 조정은 :func:`upgrade`). 소유자 롤로 열고 같은 롤로
+끝난다 — 프로시저 소유자 창은 퇴역 루프 하나뿐이다(419와 같다)."""
+
+
 def _set_local(bind: object, name: str, value: str) -> None:
     bind.execute(text("SELECT set_config(:name, :value, true)"), {"name": name, "value": value})  # type: ignore[attr-defined]
 
@@ -418,7 +438,23 @@ def _count(bind: object, sql: str) -> int:
 def upgrade() -> None:
     """preflight를 통과하면 옛 축제 적재를 끄고, 그 Feature를 퇴역하고, TourAPI 축제를 넣는다."""
     bind = op.get_bind()
-    bind.execute(text(_SET_OWNER_ROLE_SQL))
+    (
+        set_owner,
+        lock_protocol,
+        lock_members,
+        disable_operations,
+        set_state_owner,
+        retire,
+        restore_owner,
+        clear_context,
+        close_reviews,
+        insert_dataset,
+        insert_operations,
+        insert_scopes,
+        deactivate_datasets,
+        receipt_check,
+    ) = _UPGRADE_STATEMENTS
+    bind.execute(text(set_owner))
     prior = dict(
         bind.execute(
             text("SELECT name, setting FROM pg_settings WHERE name IN ('lock_timeout', 'statement_timeout')")
@@ -438,9 +474,9 @@ def upgrade() -> None:
         )
 
     _set_local(bind, "lock_timeout", str(PROTOCOL_LOCK_TIMEOUT_MS))
-    bind.execute(text(_LOCK_WRITE_PROTOCOL_SQL))
+    bind.execute(text(lock_protocol))
     _set_local(bind, "lock_timeout", str(MEMBER_LOCK_TIMEOUT_MS))
-    bind.execute(text(_LOCK_MEMBER_TABLES_SQL))
+    bind.execute(text(lock_members))
 
     expected = _count(bind, _COUNT_TARGET_FEATURES_SQL)
     blockers: list[str] = []
@@ -459,21 +495,21 @@ def upgrade() -> None:
     if blockers:
         raise RuntimeError("447: 아무것도 바꾸지 않았다 — " + "; ".join(blockers))
 
-    bind.execute(text(_DISABLE_RETIRED_OPERATIONS_SQL))
+    bind.execute(text(disable_operations))
     _set_local(bind, "statement_timeout", "0")
     _set_local(bind, "lock_timeout", str(RETIRE_LOCK_TIMEOUT_MS))
-    bind.execute(text(_SET_STATE_PROCEDURE_OWNER_ROLE_SQL))
-    bind.execute(text(_RETIRE_TARGET_FEATURES_SQL))
-    bind.execute(text(_SET_OWNER_ROLE_SQL))
-    bind.execute(text(_CLEAR_STATE_CONTEXT_SQL))
-    bind.execute(text(_CLOSE_PENDING_REVIEWS_SQL))
-    bind.execute(text(_INSERT_FESTIVAL_DATASET_SQL))
-    bind.execute(text(_INSERT_FESTIVAL_OPERATIONS_SQL))
-    bind.execute(text(_INSERT_FESTIVAL_OPERATION_SCOPES_SQL))
-    bind.execute(text(_DEACTIVATE_RETIRED_DATASETS_SQL))
+    bind.execute(text(set_state_owner))
+    bind.execute(text(retire))
+    bind.execute(text(restore_owner))
+    bind.execute(text(clear_context))
+    bind.execute(text(close_reviews))
+    bind.execute(text(insert_dataset))
+    bind.execute(text(insert_operations))
+    bind.execute(text(insert_scopes))
+    bind.execute(text(deactivate_datasets))
     _set_local(bind, "statement_timeout", str(prior["statement_timeout"]))
     _set_local(bind, "lock_timeout", str(DDL_LOCK_TIMEOUT_MS))
-    bind.execute(text(_RECEIPT_HEAD_CHECK_SQL))
+    bind.execute(text(receipt_check))
     for name, value in prior.items():
         _set_local(bind, name, str(value))
 
@@ -486,7 +522,6 @@ def upgrade() -> None:
     late = _scalars(bind, _IN_FLIGHT_TARGET_JOBS_SQL)
     if late:
         raise RuntimeError(f"447: 끄는 동안 대상 operation job이 생겼다: {late!r}")
-    bind.execute(text(_SET_OWNER_ROLE_SQL))
 
 
 def downgrade() -> None:
