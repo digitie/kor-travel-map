@@ -1390,9 +1390,11 @@ def place_attribute_filter_sql(feature_alias: str, param: str = "attributes") ->
     """요청 속성 코드를 **모두**(AND) 가진 Feature만 남기는 술어(ADR-121 §7.1).
 
     ``:{param}``은 ``text[]``다. NULL이면 술어가 단락돼 다른 조회 계획에 영향이 없다.
-    "원하는 코드 중 link로 유도되지 않는 코드가 하나도 없다"로 AND를 표현한다. 각 EXISTS는
-    ``source_links`` PK(feature_id 선두)·``source_entities`` PK·``dataset_place_attributes``
-    PK가 받는다. 앞에 ``AND``를 붙이지 않은 괄호 술어를 돌려준다.
+    코드가 있으면 **속성 쪽에서 출발하는 semi-join**이다 — 속성 집합(MCST link)은 작고 bbox는
+    전국일 수 있으므로, 행마다 상관 anti-join을 도는 대신 요청 코드의 dataset → entity
+    (``idx_source_entities_provider_dataset``) → link(``idx_source_links_entity``)로 Feature 집합을
+    한 번 만들고(hashed SubPlan) 코드 수가 모두 맞는 Feature만 남긴다(적대 리뷰 High). 앞에
+    ``AND``를 붙이지 않은 괄호 술어를 돌려준다.
     """
     if not feature_alias.isidentifier():
         raise ValueError("feature alias must be a SQL identifier")
@@ -1400,20 +1402,20 @@ def place_attribute_filter_sql(feature_alias: str, param: str = "attributes") ->
         raise ValueError("bind parameter must be a SQL identifier")
     return f"""(
     CAST(:{param} AS text[]) IS NULL
-    OR NOT EXISTS (
-      SELECT 1
-      FROM unnest(CAST(:{param} AS text[])) AS wanted_attribute(code)
-      WHERE NOT EXISTS (
-        SELECT 1
-        FROM provider_sync.source_links AS attr_link
-        JOIN provider_sync.source_entities AS attr_entity
-          ON attr_entity.source_entity_key = attr_link.source_entity_key
-        JOIN feature.dataset_place_attributes AS attr_map
-          ON attr_map.provider_dataset_id = attr_entity.provider_dataset_id
-         AND attr_map.source_entity_type = attr_entity.source_entity_type
-        WHERE attr_link.feature_id = {feature_alias}.feature_id
-          AND attr_link.source_role IN ({_PLACE_ATTRIBUTE_ROLES_SQL})
-          AND attr_map.attribute_code = wanted_attribute.code
+    OR {feature_alias}.feature_id IN (
+      SELECT attr_link.feature_id
+      FROM feature.dataset_place_attributes AS attr_map
+      JOIN provider_sync.source_entities AS attr_entity
+        ON attr_entity.provider_dataset_id = attr_map.provider_dataset_id
+       AND attr_entity.source_entity_type = attr_map.source_entity_type
+      JOIN provider_sync.source_links AS attr_link
+        ON attr_link.source_entity_key = attr_entity.source_entity_key
+      WHERE attr_map.attribute_code = ANY(CAST(:{param} AS text[]))
+        AND attr_link.source_role IN ({_PLACE_ATTRIBUTE_ROLES_SQL})
+      GROUP BY attr_link.feature_id
+      HAVING count(DISTINCT attr_map.attribute_code) = (
+        SELECT count(DISTINCT wanted_attribute.code)
+        FROM unnest(CAST(:{param} AS text[])) AS wanted_attribute(code)
       )
     )
   )"""

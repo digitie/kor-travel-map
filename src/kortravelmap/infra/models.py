@@ -1799,7 +1799,7 @@ class DatasetPlaceAttributeRow(Base):
         ForeignKeyConstraint(
             ["provider_dataset_id"],
             ["provider_sync.provider_datasets.provider_dataset_id"],
-            name="fk_dataset_place_attributes_provider_dataset_id_provider_datasets",
+            name="fk_dataset_place_attributes_provider_dataset",
             ondelete="CASCADE",
         ),
         ForeignKeyConstraint(

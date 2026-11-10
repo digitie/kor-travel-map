@@ -108,7 +108,7 @@ CREATE TABLE feature.dataset_place_attributes (
     attribute_code text NOT NULL,
     CONSTRAINT pk_dataset_place_attributes
         PRIMARY KEY (provider_dataset_id, source_entity_type, attribute_code),
-    CONSTRAINT fk_dataset_place_attributes_provider_dataset_id_provider_datasets
+    CONSTRAINT fk_dataset_place_attributes_provider_dataset
         FOREIGN KEY (provider_dataset_id)
         REFERENCES provider_sync.provider_datasets (provider_dataset_id) ON DELETE CASCADE,
     CONSTRAINT fk_dataset_place_attributes_attribute_code_place_attributes

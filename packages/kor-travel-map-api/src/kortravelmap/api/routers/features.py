@@ -1508,7 +1508,7 @@ async def get_feature(
     )
     etag = revision_digest_etag(
         revision,
-        place_attribute_repo.place_attribute_codes_digest([item.code for item in attributes]),
+        place_attribute_repo.place_attribute_digest(attributes),
     )
     if expected == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})

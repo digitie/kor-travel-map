@@ -40,7 +40,7 @@ __all__ = [
     "list_feature_place_attributes",
     "list_place_attributes",
     "list_theme_attach_decisions",
-    "place_attribute_codes_digest",
+    "place_attribute_digest",
 ]
 
 ThemeAttachDecisionState = Literal[
@@ -197,6 +197,9 @@ class ThemeAttachDecisionCursorError(ValueError):
     """판정 목록 cursor 형식 오류."""
 
 
+_BIGINT_MAX: Final[int] = 2**63 - 1
+
+
 def _encode_decision_cursor(item: ThemeAttachDecision) -> str:
     raw = json.dumps(
         {
@@ -223,7 +226,11 @@ def _decision_cursor_params(cursor: str | None) -> dict[str, Any]:
         raise ThemeAttachDecisionCursorError("invalid theme attach decision cursor")
     dataset_id = payload.get("provider_dataset_id")
     natural_key = payload.get("natural_key")
-    if type(dataset_id) is not int or not isinstance(natural_key, str):
+    if (
+        type(dataset_id) is not int
+        or not 0 < dataset_id <= _BIGINT_MAX
+        or not isinstance(natural_key, str)
+    ):
         raise ThemeAttachDecisionCursorError("invalid theme attach decision cursor")
     return {"cursor_dataset_id": dataset_id, "cursor_natural_key": natural_key}
 
@@ -281,12 +288,17 @@ async def list_theme_attach_decisions(
     return ThemeAttachDecisionPage(items=items, next_cursor=next_cursor)
 
 
-def place_attribute_codes_digest(codes: Sequence[str]) -> str | None:
-    """공개 속성 코드 집합의 짧은 digest(상세 ETag용). 비면 ``None``.
+def place_attribute_digest(attributes: Sequence[PlaceAttribute]) -> str | None:
+    """상세 응답 ``attributes``의 짧은 digest(상세 ETag용). 비면 ``None``.
 
-    코드 집합만 본다 — 라벨·순서 변경은 ETag를 바꾸지 않는다(catalog는 migration이 고친다).
+    응답에 실리는 것 전부(코드·라벨·묶음·순서)를 접는다 — 라벨이나 순서만 바뀌어도 본문이
+    바뀌므로 strong ETag도 바뀌어야 한다(적대 리뷰).
     """
-    normalized = sorted({str(code) for code in codes})
-    if not normalized:
+    if not attributes:
         return None
-    return hashlib.sha256("\n".join(normalized).encode("utf-8")).hexdigest()[:16]
+    rows = "
+".join(
+        f"{item.code}	{item.label}	{item.group}	{item.sort_order}"
+        for item in sorted(attributes, key=lambda item: (item.sort_order, item.code))
+    )
+    return hashlib.sha256(rows.encode("utf-8")).hexdigest()[:16]

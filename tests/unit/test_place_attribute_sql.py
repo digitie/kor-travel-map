@@ -82,6 +82,18 @@ def test_every_attribute_filtered_read_embeds_the_shared_fragment() -> None:
         assert "attributes" in set(text(sql)._bindparams), name
     # fragment 자체도 다시 구현되지 않았는지 — 공개 bbox 경로는 정확히 그 문자열을 품는다.
     assert fragment in feature_repo._FEATURES_IN_BBOX_SQL
+    # UNION 두 갈래(point·geometry arm)를 가진 SQL은 **갈래마다** 필터가 있어야 한다 — 표식이
+    # 어딘가에 하나만 있어도 통과하던 검사는 한 갈래가 빠져도 초록이었다(적대 리뷰).
+    two_arm = {
+        **{f"cluster[{unit}]": sql for unit, sql in feature_repo._CLUSTER_BBOX_SQL_BY_UNIT.items()},
+        **{
+            f"admin_cluster[{unit}]": sql
+            for unit, sql in admin_feature_repo._ADMIN_CLUSTER_BBOX_SQL_BY_UNIT.items()
+        },
+        "_ADMIN_FEATURES_IN_BBOX_SQL": admin_feature_repo._ADMIN_FEATURES_IN_BBOX_SQL,
+    }
+    for name, sql in two_arm.items():
+        assert sql.count(_FILTER_MARKERS[0]) >= 2, f"{name}: 갈래 하나에 필터가 없다"
 
 
 def test_every_page_read_carries_attribute_codes() -> None:
@@ -100,9 +112,10 @@ def test_every_page_read_carries_attribute_codes() -> None:
 def test_attribute_filter_uses_primary_and_enrichment_links_only() -> None:
     fragment = feature_repo.place_attribute_filter_sql("f")
     assert "attr_link.source_role IN ('primary', 'enrichment')" in fragment
-    assert "attr_link.feature_id = f.feature_id" in fragment
-    # AND 의미: "원하는 코드 중 유도되지 않는 코드가 없다".
-    assert "NOT EXISTS" in fragment
+    # 속성 쪽에서 출발하는 semi-join — 행마다 상관 anti-join을 돌지 않는다(적대 리뷰 High).
+    assert "f.feature_id IN (" in fragment
+    # AND 의미: 요청한 서로 다른 코드 수와 Feature가 가진 요청 코드 수가 같다.
+    assert "HAVING count(DISTINCT attr_map.attribute_code)" in fragment
     assert "unnest(CAST(:attributes AS text[]))" in fragment
 
 

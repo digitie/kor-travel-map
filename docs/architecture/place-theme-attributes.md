@@ -288,7 +288,8 @@ action으로 내린다.
 
 - `attribute`(반복, 최대 5개, **AND**)를 추가한다: `GET /v1/features/search`, `/v1/features`,
   `/v1/features/in-bounds`(item·cluster), `/v1/features/nearby`, `/v1/features/nearby/by-target`,
-  `GET /v1/admin/features`, `/v1/admin/features/in-bounds`. 모르는 코드·`admin_only` 코드(공개
+  `/v1/admin/features/in-bounds`. `GET /v1/admin/features`는 **보류** — `/v1/service/admin-features`가 같은
+  handler·응답형을 써서 service 계약이 바뀐다(repo는 이미 받는다, 라우터만 남았다). 모르는 코드·`admin_only` 코드(공개
   경로) → 422.
 - 술어는 **공용 fragment 하나**(`place_attribute_filter_sql`)로 두고 모든 읽기 경로가 쓴다.
   공개 읽기 SQL 목록을 열거해 fragment가 빠진 경로를 잡는 테스트를 둔다.
@@ -310,7 +311,7 @@ action으로 내린다.
 ### 7.2 응답
 
 - `FeatureDetailResponse.attributes: list[FeatureAttributeView]` — `{code, label, group}`.
-  상세 ETag는 `row_revision`과 공개 속성 코드 집합의 digest를 함께 쓴다.
+  상세 ETag는 공개 속성이 있으면 `"<rev>-<sha16>"`(속성의 코드·라벨·묶음·순서 digest), 없으면 종전 `"<rev>"`다.
 - `FeatureSummary.attribute_codes: list[str]`(정렬). 목록·in-bounds item·search·nearby에 실린다.
   공개 경로는 `admin_only` 코드를 뺀다.
 - `GET /v1/place-attributes`(공개): catalog(`code`, `label`, `group`, `sort_order`).
@@ -323,7 +324,8 @@ action으로 내린다.
 - `openapi.json`(admin 포함)과 `openapi.user.json`이 바뀐다. `openapi.service.json`은 바뀌지
   않는다.
 - 순서: **Map API PR 머지 → PinVi 재vendor PR(user + admin 핀, M05 pair contract 재생성) 머지 →
-  pair 회전**. PinVi feature 읽기는 plain dict라 추가 필드로 깨지지 않는다 — 코드 변경 없음.
+  pair 회전**. PinVi feature 읽기는 plain dict라 추가 필드로 깨지지 않는다 — 런타임 코드 변경은 없지만
+  user 계약 시험의 `_CLIENT_QUERY_PARAMETERS`(경로마다 query 집합 고정)에 `attribute`를 더해야 한다.
 - 큐레이션 `curation_relation`의 `pet_support`/`accessibility_support`/`family_support`는
   편집 membership 역할로 그대로 둔다. 속성과 이름이 비슷하지만 다른 축이다.
 
@@ -331,9 +333,9 @@ action으로 내린다.
 
 필터는 EXISTS 세 표 조인이고 `source_links`·`source_entities`·`dataset_place_attributes` PK가
 받친다. 공개 검색은 `q`나 bbox가 필수라(`feature_repo.py:6890`) 무bbox 경로는 없다.
-`attribute_codes`는 페이지 행마다 같은 조인의 집계다. 구현 PR에서 운영 크기 fixture로 전국 bbox
-cluster·in-bounds의 EXPLAIN을 재고, ADR-073 예산을 넘으면 파생 materialization을 별도 결정으로
-둔다(정확성·단일 정본이 성능보다 앞).
+`attribute_codes`는 페이지 행마다 같은 조인의 집계다. 필터가 있으면 술어는 **속성 쪽에서 출발하는 semi-join**이다(요청 코드의
+dataset → entity → link로 Feature 집합을 한 번 만든다) — 행마다 상관 anti-join을 돌면 전국 bbox에서 대부분의
+행을 훑는다(적대 리뷰 High). 운영 크기 EXPLAIN·p95 측정은 R4 전 perf gate에 필터 변형을 더해 잰다(열린 일).
 
 ## 8. 기존 MCST Feature 전환
 

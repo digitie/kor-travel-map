@@ -146,6 +146,8 @@ list 성공 예:
 | Tag | Prefix | 용도 |
 |-----|--------|------|
 | `features` | `/features` | 지도/상세 공통 read |
+| `place-attributes` | `/place-attributes` | 공개 장소 속성 catalog(ADR-121) |
+| `admin-theme-attach` | `/admin/theme-attach-decisions` | MCST 테마 목록 붙임 판정 조회(ADR-121, 읽기 전용) |
 | `admin-features` | `/admin/features` | feature 검색/비활성화/override, place/event 사용자 요청 추가·수정·soft delete와 검토 queue |
 | `admin-poi-cache-targets` | `/admin/poi-cache-targets` | 외부 POI/cache target 등록, 삭제, 주변 조회 |
 | `admin-dedup` | `/admin/features/dedup-reviews` | 중복 검토 |

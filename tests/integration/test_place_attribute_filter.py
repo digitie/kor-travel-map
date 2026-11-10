@@ -221,7 +221,7 @@ async def test_catalog_and_feature_attributes_follow_links(
     assert codes.index("pet_friendly") < codes.index("barrier_free")
     assert [item.code for item in both] == ["pet_friendly", "barrier_free"]
     assert none == ()
-    digest = place_attribute_repo.place_attribute_codes_digest([item.code for item in both])
+    digest = place_attribute_repo.place_attribute_digest(both)
     assert digest is not None
     assert len(digest) == 16
 
@@ -367,3 +367,39 @@ async def test_admin_reads_apply_the_same_filter(
     codes = {str(row["feature_id"]): list(row["attribute_codes"]) for row in items}
     assert codes[ids[_BOTH]] == ["barrier_free", "pet_friendly"]
     assert _ours(ids, [item.feature_id for item in listed.items]) == {_BOTH, _BARRIER_ONLY}
+
+
+async def test_admin_only_codes_never_reach_public_reads(
+    migrated_session: AsyncSession,
+) -> None:
+    """``visibility='admin_only'`` 코드는 공개 코드·상세·digest에 없고 admin 읽기에는 있다."""
+
+    session = migrated_session
+    ids = await _seed(session)
+    await session.execute(
+        text(
+            "INSERT INTO feature.place_attributes "
+            "(attribute_code, label_ko, attribute_group, visibility, sort_order) "
+            "VALUES ('test_admin_only', '운영 전용 시험', 'companion', 'admin_only', 999)"
+        )
+    )
+    hidden = await _map_dataset(session, "mcst_test_admin_only", "test_admin_only")
+    await _link(
+        session, feature_id=ids[_BOTH], dataset_id=hidden, entity_id="ao-1", role="enrichment"
+    )
+    await session.flush()
+    min_lon, min_lat, max_lon, max_lat = _BBOX
+    bbox = {"min_lon": min_lon, "min_lat": min_lat, "max_lon": max_lon, "max_lat": max_lat}
+    async with session.begin_nested(), as_api_runtime(session):
+        public_rows = await feature_repo.features_in_bbox(session, **bbox, limit=500)
+        public_detail = await place_attribute_repo.list_feature_place_attributes(
+            session, ids[_BOTH], public_only=True
+        )
+        admin_rows = await admin_feature_repo.admin_features_in_bbox(session, **bbox)
+    public_codes = {
+        str(row["feature_id"]): list(row["attribute_codes"]) for row in public_rows
+    }
+    assert public_codes[ids[_BOTH]] == ["barrier_free", "pet_friendly"]
+    assert "test_admin_only" not in [item.code for item in public_detail]
+    admin_codes = {str(row["feature_id"]): list(row["attribute_codes"]) for row in admin_rows}
+    assert "test_admin_only" in admin_codes[ids[_BOTH]]

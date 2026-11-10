@@ -1,3 +1,9 @@
+## 2026-11-10 — #1468 A MCST 테마 속성(ADR-121) R1·R3
+
+- 회전에 묶는다(alembic 446 — catalog `feature.place_attributes`·`feature.dataset_place_attributes`·판정 `provider_sync.theme_attach_decisions`). 붙임 모드 `KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE` 기본 `off` — 배포만으로는 적재가 바뀌지 않는다. 반려 업종 행(약 20,396) 미적재만 즉시 적용(기존 Feature는 그대로).
+- 순서: Map PR 머지 → PinVi 재vendor PR(user·admin 핀, M05 pair contract) 머지 → 회전.
+- 다음(R4, 소유자 확인 뒤): 전환 executor(+M05 사건 출처 일반화) → 운영 창(적재·dedup 동결) → 계획 실행 → `apply` 켬 → 촬영지 rule `c09e1efd…` place_kind PATCH. R2 dry-run 수치는 설계 §8.1.1.
+
 ## 2026-11-10 — #1468 D 국가유산 행사 회차 묶음·장소 좌표
 
 - 배포 뒤 `feature_event_krheritage_events_job` 1회(preview 먼저). 회차별 옛 Feature 5,286건은 그 run이 retired로 내리고 행사 약 1,316건이 선다. 좌표는 약 23.6%(같은 시군구 동명 장소 Feature). migration·OpenAPI 없음.

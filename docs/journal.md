@@ -1,3 +1,10 @@
+## 2026-11-10 — #1468 A R1·R3 구현·R2 운영 dry-run
+
+- 붙임 엔진(owner·sticky·redirected·matched·created·ambiguous·unresolved), 전환 계획기 `ktmctl mcst-theme-plan`, migration 446, 속성 필터·응답·catalog·판정 조회 API.
+- R2(운영 읽기 전용, 2분): MCST 88,007 → retire 20,396·attach 4,765·collapse 8,487·keep 53,935·ambiguous 424. PinVi 참조 304행(95 Feature, 전부 attach/collapse — rebind 가능).
+- 첫 계획 질의가 `publication_state IN (...)` 때문에 부분 GiST 색인을 못 써 30분 넘게 돌아 취소했다(색인 조건 그대로 쓰도록 고침). tier 2 동점을 ambiguous로 보던 규칙이 ambiguous의 3/4를 만들었다.
+- 적대 리뷰 반영: 강등은 MCST link만(MOIS 승자 판정 회귀), 부재 가드 강화, 비병합 퇴역은 owner로, 빈 snapshot 손실 가드, 계획기의 비MCST master 제외·사슬 collapse 차단·물려받은 attach 분류 재확인.
+
 ## 2026-11-10 — 휴양림 ↔ MOIS 숙박은 휴양림 master
 
 - 소유자 결정: 산림청 자연휴양림 dataset 보정 55(MOIS 50 위). #1472 뒤 이 쌍은 MOIS가 이겼다. 수목원 115쌍도 그대로 휴양림 master.

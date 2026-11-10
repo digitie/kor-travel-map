@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-11-10 — 장소 속성(ADR-121, #1468 A)
+
+- 공개 API에 장소 속성이 생긴다: `attribute` 필터(반려동물 동반·무장애·영유아 동반·서점 유형·세계음식, AND·최대 5개),
+  목록·검색·지도·주변 행의 `attribute_codes`, 상세 `attributes`, catalog `GET /v1/place-attributes`. 상세 ETag는 속성이
+  있으면 `"<rev>-<sha16>"`.
+- 반려동물 목록의 반려 업종 행(동물약국·용품·병원·미용·위탁)은 더 적재하지 않는다(기존 Feature는 그대로 — 전환 때 퇴역).
+- MCST 테마 목록 붙임 적재(`KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE`, 기본 `off`)와 전환 계획 `ktmctl mcst-theme-plan`.
+  alembic 446. service 계약 변경 없음.
+
 ## 2026-11-10 — 자연휴양림 ↔ MOIS 숙박 병합 master(#1468)
 
 - 같은 시설이 산림청 자연휴양림과 MOIS 숙박 인허가에 함께 있으면 병합 master는 휴양림이다.

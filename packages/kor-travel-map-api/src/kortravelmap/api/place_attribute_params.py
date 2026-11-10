@@ -26,6 +26,8 @@ __all__ = [
 ]
 
 MAX_ATTRIBUTE_FILTERS: Final[int] = 5
+#: catalog CHECK(``^[a-z][a-z0-9_]{1,47}$``)의 최대 길이. 그보다 긴 값은 조회하지 않고 거절한다.
+_MAX_CODE_LENGTH: Final[int] = 48
 
 AttributeQuery = Annotated[
     list[str] | None,
@@ -59,12 +61,18 @@ async def resolve_attribute_filter(
     """
     if not attribute:
         return None
-    if len(attribute) > MAX_ATTRIBUTE_FILTERS:
+    # 같은 코드의 반복은 하나로 센다 — 나머지 경로가 모두 중복을 제거한다(적대 리뷰).
+    codes = sorted({value.strip() for value in attribute})
+    if len(codes) > MAX_ATTRIBUTE_FILTERS:
         raise _validation_error(
             f"attribute는 최대 {MAX_ATTRIBUTE_FILTERS}개까지 지정할 수 있습니다.",
-            details={"max_items": MAX_ATTRIBUTE_FILTERS, "received": len(attribute)},
+            details={"max_items": MAX_ATTRIBUTE_FILTERS, "received": len(codes)},
         )
-    codes = sorted({value.strip() for value in attribute})
+    if any(len(code) > _MAX_CODE_LENGTH for code in codes):
+        raise _validation_error(
+            "attribute 코드가 너무 깁니다.",
+            details={"max_length": _MAX_CODE_LENGTH},
+        )
     if "" in codes:
         raise _validation_error(
             "attribute에 빈 값이 있습니다.",

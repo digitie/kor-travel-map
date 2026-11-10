@@ -258,7 +258,11 @@ def test_plan_chain_without_direct_match_is_not_collapsed() -> None:
 def test_plan_inherited_attach_rechecks_own_category() -> None:
     # 무장애(분류 제한 없음)가 식당 master에 붙어도 아동서점(0104만)은 물려받지 않는다.
     features = [
-        _pf("barrier", name="책읽는식당", candidates=(_c("M", "책읽는식당", 10, category="02010000"),)),
+        _pf(
+            "barrier",
+            name="책읽는식당",
+            candidates=(_c("M", "책읽는식당", 10, category="02010000"),),
+        ),
         PlanFeature(
             feature_id="kids",
             dataset_key="mcst_children_bookstores_csv",
