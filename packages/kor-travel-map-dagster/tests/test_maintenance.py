@@ -904,7 +904,10 @@ def _refresh_result(
 # ── #1468 원천 겹침 쌍 ────────────────────────────────────────────────────────
 
 
-def _default_pair_calls() -> tuple[_Client, dict[tuple[str, str | None, str, str | None], dict[str, object]]]:
+_PairKey = tuple[str, str | None, str, str | None]
+
+
+def _default_pair_calls() -> tuple[_Client, dict[_PairKey, dict[str, object]]]:
     client = _Client()
     result = consistency_dedup_refresh_job.execute_in_process(
         resources={"kor_travel_map_client": client},
@@ -939,7 +942,12 @@ _CAMP_CODES = ("03060000", "03060100", "03060200")
             "score_or_same_name",
         ),
         (
-            ("python-knps-api", "knps_campgrounds", "python-mcst-api", "mcst_leisure_camping_facilities_csv"),
+            (
+                "python-knps-api",
+                "knps_campgrounds",
+                "python-mcst-api",
+                "mcst_leisure_camping_facilities_csv",
+            ),
             300.0,
             "score_or_same_name",
         ),
@@ -957,14 +965,19 @@ _CAMP_CODES = ("03060000", "03060100", "03060200")
         ),
         # 같은 이름의 휴양림 ↔ 수목원.
         (
-            ("python-krforest-api", "krforest_recreation_forests", "python-krforest-api", "krforest_arboretums"),
+            (
+                "python-krforest-api",
+                "krforest_recreation_forests",
+                "python-krforest-api",
+                "krforest_arboretums",
+            ),
             1000.0,
             "same_name",
         ),
     ],
 )
 def test_default_pairs_include_1468_source_overlap_rules(
-    key: tuple[str, str | None, str, str | None], radius: float, match: str
+    key: _PairKey, radius: float, match: str
 ) -> None:
     _client, by_key = _default_pair_calls()
     assert key in by_key, key
@@ -979,11 +992,13 @@ def test_default_camping_and_food_pairs_scope_categories() -> None:
         ("python-mois-api", None, "python-mcst-api", "mcst_leisure_camping_facilities_csv")
     ]
     left = cast(DedupRefreshScope, mois_mcst["left"])
-    assert left.categories and all(code.startswith("0306") for code in left.categories)
+    assert left.categories
+    assert all(code.startswith("0306") for code in left.categories)
     assert set(_CAMP_CODES) <= set(left.categories)
     food = by_key[("python-mcst-api", "mcst_world_restaurants_csv", "python-mois-api", None)]
     right = cast(DedupRefreshScope, food["right"])
-    assert right.categories and all(code.startswith("0201") for code in right.categories)
+    assert right.categories
+    assert all(code.startswith("0201") for code in right.categories)
     # 12만 건 MOIS 음식점은 반경 안만 읽지만 상한이 그것을 자르지 않게 넉넉하다.
     assert right.limit >= 130_000
     museum = by_key[("data.go.kr-standard", "datagokr_museums", "python-mcst-api", None)]
@@ -1043,9 +1058,10 @@ def test_configured_pair_dispatches_match_radius_and_route_overlap() -> None:
     )
     assert result.success
     assert client.pair_options == [{"max_distance_m": 250.0, "match": "same_name"}]
-    assert [(lft.provider, rgt.provider, buf, ratio) for lft, rgt, buf, ratio in client.route_overlaps] == [
-        ("c", "d", 20.0, 0.7)
-    ]
+    assert [
+        (lft.provider, rgt.provider, buf, ratio)
+        for lft, rgt, buf, ratio in client.route_overlaps
+    ] == [("c", "d", 20.0, 0.7)]
 
 
 @pytest.mark.parametrize(

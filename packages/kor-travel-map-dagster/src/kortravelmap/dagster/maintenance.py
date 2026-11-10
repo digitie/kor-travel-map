@@ -325,7 +325,7 @@ _SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
         "max_distance_m": 100,
         "match": "score_or_same_name",
     },
-    # 박물관·미술관 표준데이터 ↔ MCST 문화시설(01040000)(≈3,100). MCST는 같은 박물관을 무장애·
+    # 박물관·미술관 표준데이터 ↔ MCST 문화시설(01040000)(3,136). MCST는 같은 박물관을 무장애·
     # 영유아·반려동물 목록에 따로 싣고 있어 박물관 하나가 여러 MCST 행과 짝이 된다(#1468 A가
     # 테마를 속성으로 바꾸면 줄어든다).
     {
@@ -342,7 +342,7 @@ _SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
         "max_distance_m": _PLACE_RADIUS_M,
         "match": "score_or_same_name",
     },
-    # 같은 이름의 자연휴양림 ↔ 수목원(산림청 안)(≈115). 범주가 달라 점수 상한이 0.80이고 28 m
+    # 같은 이름의 자연휴양림 ↔ 수목원(산림청 안)(115). 범주가 달라 점수 상한이 0.80이고 28 m
     # 밖이면 0.65에 못 미친다 — 이름이 같을 때만 올린다. 휴양림이 master(dataset 보정).
     {
         "left": {
@@ -360,6 +360,7 @@ _SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     },
     # 국립공원 안 산림청 등산로 ↔ KNPS 탐방로 — 선형 겹침. 등산로 길이의 절반 이상이 탐방로
     # 30 m 버퍼 안이면 가장 많이 겹치는 탐방로와 짝이 된다. KNPS가 master(dataset 보정).
+    # (374 — 그중 298이 겹침 0.9 이상. prod SQL 18 s.)
     {
         "left": {
             "provider": "python-krforest-api",
