@@ -67,6 +67,7 @@ from kortravelmap.core.feature_operation import (
 )
 from kortravelmap.core.providers import normalize_provider_name
 from kortravelmap.core.sync_scope import DATASET_WIDE_SYNC_SCOPE
+from kortravelmap.core.venue_match import VenueCandidate
 from kortravelmap.enrichment import (
     PhoneEnrichmentCandidate,
     PhoneEnrichmentResult,
@@ -325,6 +326,9 @@ from kortravelmap.infra.sync_state_repo import (
     record_sync_success_for_operation_membership as repo_record_operation_success,
 )
 from kortravelmap.infra.transaction_limits import apply_transaction_limits
+from kortravelmap.infra.venue_candidates_repo import (
+    find_venue_candidates as repo_find_venue_candidates,
+)
 from kortravelmap.mois import DEFAULT_BATCH_SIZE as MOIS_DEFAULT_BATCH_SIZE
 from kortravelmap.mois import (
     MoisBulkJobResult,
@@ -1345,6 +1349,15 @@ class AsyncKorTravelMapClient:
             if len(page) < batch_size:
                 return records, expected
             after = page[-1].source_entity_key
+
+    async def find_venue_candidates(self, name: str) -> list[VenueCandidate]:
+        """장소 이름 조각으로 좌표가 있는 공개 장소 Feature 후보를 읽는다(#1468 D, 읽기 전용).
+
+        고르는 규칙은 :func:`kortravelmap.core.venue_match.match_venue`다 — 호출자가 지역과 함께
+        적용한다. 이름마다 짧은 읽기 transaction 하나다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await repo_find_venue_candidates(session, name=name)
 
     # -- geo 릴리스 재지오코딩 계획(ADR-109 결정 5, T-GR-04) -----------------------------------
 
