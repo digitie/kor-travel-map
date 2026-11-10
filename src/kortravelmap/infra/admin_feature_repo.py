@@ -1262,6 +1262,8 @@ _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE: Final = (
 )
 
 AdminFeatureSearchScope: TypeAlias = Literal["all", "feature"]
+#: 조각 검색이 바깥 질의에 붙는 방식 — 없음·훑기·후보 id 배열(아래 #1475 설명).
+AdminFeatureQueryPath: TypeAlias = Literal["none", "scan", "candidates"]
 
 # #1475 — 조각 검색은 **두 가지 계획 중 하나**로 간다. 둘은 같은 행 집합을 고르고(술어의
 # 뜻이 같다) 비용만 다르다. 그래서 어느 쪽을 고르든 결과는 같다.
@@ -1374,8 +1376,7 @@ def _admin_feature_candidates_sql(search_scope: AdminFeatureSearchScope) -> str:
 
 def _admin_features_sql(
     *, sort: str, order: str, exact_id: bool = False, exact_uuid: bool = False,
-    search_scope: AdminFeatureSearchScope = "all", text_search: bool = False,
-    candidates: bool = False,
+    search_scope: AdminFeatureSearchScope = "all", q_path: AdminFeatureQueryPath = "none",
 ) -> str:
     column = _ADMIN_FEATURE_SORT_COLUMNS[sort]
     order_sql = "ASC" if order == "asc" else "DESC"
@@ -1383,9 +1384,9 @@ def _admin_features_sql(
         q_clause = _ADMIN_FEATURES_Q_EXACT_CLAUSE
     elif exact_uuid:
         q_clause = _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE
-    elif candidates:
+    elif q_path == "candidates":
         q_clause = _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE
-    elif not text_search:
+    elif q_path == "none":
         q_clause = ""
     elif search_scope == "feature":
         q_clause = _ADMIN_FEATURES_Q_FEATURE_SCAN_CLAUSE
@@ -2193,7 +2194,7 @@ async def list_admin_features(
         "limit_plus_one": effective_limit + 1,
         **_cursor_params(cursor, sort=sort, order=order),
     }
-    candidates = False
+    q_path: AdminFeatureQueryPath = "none" if q_like is None else "scan"
     if (
         q_like is not None
         and normalized_q is not None
@@ -2206,7 +2207,7 @@ async def list_admin_features(
             )
         ).scalars().all()
         if len(probed) <= _ADMIN_FEATURES_Q_CANDIDATE_CAP:
-            candidates = True
+            q_path = "candidates"
             params["q_candidate_ids"] = sorted({str(value) for value in probed})
     rows = (
         await session.execute(
@@ -2217,8 +2218,7 @@ async def list_admin_features(
                     order=order,
                     exact_id=q_exact is not None,
                     exact_uuid=q_exact_uuid is not None,
-                    text_search=q_like is not None,
-                    candidates=candidates,
+                    q_path=q_path,
                 )
             ),
             params,

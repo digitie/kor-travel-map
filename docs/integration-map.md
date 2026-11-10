@@ -206,7 +206,8 @@ PinVi admin Feature 목록·단건의 별도 service read 계약은
 | PinVi 자체 API (`:9021`) | 쿠키 세션/OAuth | PinVi 자체 `Envelope` | PinVi 자체 |
 
 PinVi 기본 관리자 Feature 검색을 연결할 때는 `search_scope=feature`로 이름·주소·ID를 검색한다.
-기본 all은 원천 내용 검색을 보존한다. 중복 검토 목록은 `GET /v1/ops/dedup-reviews`에
+기본 all은 원천 식별자(`source_entity_id`·현재 `source_record_key`)까지 본다. 원천 JSON 본문은
+2026-11-10(#1475)부터 어느 범위에서도 검색하지 않는다. 중복 검토 목록은 `GET /v1/ops/dedup-reviews`에
 기존 ops read 자격을 보내며, admin 쓰기나 public/service principal로 fallback하지 않는다.
 Map 변경 머지 뒤 PinVi 소비자 PR에서 경로·parameter를 연결한다.
 
