@@ -690,7 +690,8 @@ async def test_alias_normalization_uses_raw_parking_name_before_display_suffix(
     assert page.total_count >= 1
 
 
-#: 444 별칭 — (검색어, 정본 이름, 정본 분류, 미끼(이름·분류)). 정본·미끼 이름은 prod(2026-11-10)·TourAPI
+#: 444 별칭 — (검색어, 정본 이름, 정본 분류, 미끼(이름·분류)). 정본·미끼 이름은
+#: prod(2026-11-10)·TourAPI
 #: 실측이다. 미끼는 별칭이 없을 때 같은 검색어로 앞에 서던(또는 서는) 행이다.
 _TRIP_ALIAS_CASES: tuple[tuple[str, str, str, tuple[str, str]], ...] = (
     ("리움", "삼성미술관 Leeum", "01040000", ("LEEUM리움삼성아동교육문화센터", "01040000")),
@@ -730,7 +731,10 @@ async def test_trip_aliases_put_the_canonical_place_first(
     assert target in ids, (q, canonical)
     if decoy_id in ids:
         assert ids.index(target) < ids.index(decoy_id), (q, ids)
-    assert page.items[ids.index(target)].rank is not None
+    rank = page.items[ids.index(target)].rank
+    # 별칭 일치 단계(0)다 — 이름 포함(1)·유사도(2)로 우연히 앞선 것이 아니다.
+    assert rank is not None
+    assert rank < feature_repo._SEARCH_RANK_MATCH_WEIGHT, (q, rank)
 
 
 async def test_migration_444_seeds_trip_aliases_in_normalized_form(

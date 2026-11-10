@@ -3,8 +3,9 @@
 Revision ID: 444_trip_search_aliases
 Revises: 442_mois_brand_search_aliases
 
-왜 필요한가. 사람들이 부르는 이름과 원천의 이름이 다르다(2026-11-08 PinVi 여행 시나리오 검증, #1459).
-436이 만든 ``feature.feature_search_aliases``에 그 통칭을 더한다. 별칭은 Feature id가 아니라 **이름**을
+왜 필요한가. 사람들이 부르는 이름과 원천의 이름이 다르다(2026-11-08 PinVi 여행 시나리오
+검증, #1459). 436이 만든 ``feature.feature_search_aliases``에 그 통칭을 더한다. 별칭은 Feature id가
+아니라 **이름**을
 가리키므로(436) 대상이 아직 적재되지 않았거나 이름이 바뀌면 조용히 아무것도 더하지 않는다.
 
 정본 이름의 근거(2026-11-10 실측 — prod Map 읽기 전용, TourAPI KorService2 ``searchKeyword2``):
@@ -22,7 +23,8 @@ Revises: 442_mois_brand_search_aliases
 **덧붙이기만 한다.** ``ON CONFLICT (alias) DO NOTHING`` — 다른 revision이 같은 검색어를 이미 다른
 이름에 묶었으면 그쪽을 존중한다.
 
-번호. 443은 TourAPI 문화시설·레포츠 적재가 잡는다(2026-11-10 조율) — 이 revision은 444이고 머지 시점의
+번호. 443은 TourAPI 문화시설·레포츠 적재가 잡는다(2026-11-10 조율) — 이 revision은 444이고 머지
+시점의
 main head에 잇는다.
 
 잠금. 별칭 표 INSERT(행 잠금)와 receipt 표 CHECK 교체(``ACCESS EXCLUSIVE``)뿐이다 — 436·442와 같이
@@ -47,7 +49,8 @@ depends_on: str | Sequence[str] | None = None
 
 _SCHEMA_OWNER: Final[str] = "ktm_feature_schema_owner"
 
-#: (정규화한 검색어, 정식 이름, 메모). 검색어는 ``feature_repo.search_alias_key`` 형식이다(436 CHECK).
+#: (정규화한 검색어, 정식 이름, 메모). 검색어는 ``feature_repo.search_alias_key`` 형식이다
+#: (436 CHECK).
 TRIP_ALIASES: Final[tuple[tuple[str, str, str], ...]] = (
     ("리움", "삼성미술관 Leeum", "통칭. 서울 용산 이태원로55길 60-16"),
     ("리움미술관", "삼성미술관 Leeum", "통칭. TourAPI 제목은 리움미술관"),
