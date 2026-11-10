@@ -1,3 +1,7 @@
+## 2026-11-10 — #1459 검색 별칭·override
+
+- 배포(444) 뒤 별칭은 즉시 효과. MCST 재적재 뒤 runbooks/1459-category-overrides.md의 3건을 admin API로 적용한다.
+
 ## 2026-11-09 — KNPS 대피소 공식 원본 핀 상향
 
 - python-knps-api PR19(`3b89895`) 핀. 현재 공식 배포본 22건(중청·장터목·세석 포함)이 Map place 22건이 된다. 배포 뒤 knps_shelters provider_dataset만 preview→실행(runbook `docs/runbooks/knps-shelters-reimport.md`). 성공 뒤 대피소 schedule만 켠다.
