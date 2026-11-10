@@ -164,9 +164,9 @@ SELECT CAST(h.master_feature_id AS text) AS master_feature_id, f.lifecycle_state
 )
 
 #: 후보 조회 — 입력 점은 MATERIALIZED CTE에서 한 번만 5179로 바꾼다. 술어는
-#: ``ST_DWithin(f.coord_5179, input.pt, r)``로 열끼리 비교라 색인을 탄다(ADR-012).
-#: published 후보는 부분 GiST 색인(``idx_features_coord_5179_gist``)을, suppressed 후보는
-#: 작은 집합이라 별도 가지로 읽는다.
+#: ``ST_DWithin(f.coord_5179, input.pt, r)``로 열끼리 비교라 색인을 탄다(ADR-012). 술어가
+#: 부분 GiST 색인(``idx_features_coord_5179_gist`` — active·published·valid)의 조건을 그대로
+#: 담아야 색인을 쓴다. suppressed Feature는 후보가 아니다(공개 projection 밖, 설계 §5.1).
 _CANDIDATES_SQL = text(
     """
 WITH input AS MATERIALIZED (
@@ -187,14 +187,6 @@ WITH input AS MATERIALIZED (
         ON x_extension.ST_DWithin(f.coord_5179, input.pt, :radius)
      WHERE f.kind = 'place' AND f.lifecycle_state = 'active'
        AND f.publication_state = 'published' AND f.quality_state = 'valid'
-    UNION ALL
-    SELECT input.ordinal, f.feature_id, f.name, f.category, false AS published,
-           x_extension.ST_Distance(f.coord_5179, input.pt) AS distance_m
-      FROM input
-      JOIN feature.features AS f
-        ON x_extension.ST_DWithin(f.coord_5179, input.pt, :radius)
-     WHERE f.kind = 'place' AND f.lifecycle_state = 'active'
-       AND f.publication_state = 'suppressed' AND f.quality_state = 'valid'
 )
 SELECT near.ordinal, CAST(near.feature_id AS text) AS feature_id, near.name, near.category,
        near.published, near.distance_m,
@@ -609,8 +601,10 @@ SELECT DISTINCT ON (f.feature_id)
 """
 )
 
-#: 계획 후보쌍 — MCST Feature마다 150m 안의 active·valid place. 두 열 모두 ``coord_5179``라
-#: 변환이 없다. 원문 이름 trigram 0.2 미만은 정규화 뒤에도 채택 문턱(0.6)에 못 미치므로
+#: 계획 후보쌍 — MCST Feature마다 150m 안의 공개 place. 두 열 모두 ``coord_5179``라 변환이
+#: 없고, 상대 쪽 술어가 부분 GiST 색인 조건(active·published·valid)을 그대로 담아 색인을 탄다
+#: (2026-11-10: ``publication_state IN (...)``로 넓혔더니 색인을 못 써 88k×270k 비교로 30분 넘게
+#: 돌았다). 원문 이름 trigram 0.2 미만은 정규화 뒤에도 채택 문턱(0.6)에 못 미치므로
 #: 쌍 수를 줄이려고 미리 거른다.
 _PLAN_PAIRS_SQL = text(
     """
@@ -632,8 +626,8 @@ WITH mcst AS MATERIALIZED (
       JOIN feature.features AS o
         ON x_extension.ST_DWithin(o.coord_5179, m.coord_5179, :radius)
        AND o.feature_id <> m.feature_id
-     WHERE o.kind = 'place' AND o.lifecycle_state = 'active' AND o.quality_state = 'valid'
-       AND o.publication_state IN ('published', 'suppressed')
+     WHERE o.kind = 'place' AND o.lifecycle_state = 'active'
+       AND o.publication_state = 'published' AND o.quality_state = 'valid'
        AND x_extension.similarity(o.name, m.name) >= 0.2
 )
 SELECT CAST(p.mcst_id AS text) AS mcst_id, CAST(p.other_id AS text) AS other_id, p.name,

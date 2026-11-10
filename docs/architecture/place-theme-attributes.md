@@ -62,8 +62,8 @@ MCST 행 하나가 Feature 하나다. 식별은 목록마다 갈린다.
 | barrier_free_places_csv | 속성 | `barrier_free` | 제한 없음 |
 | family_infant_culture_facilities_csv | 속성 | `family_friendly` | 제한 없음 |
 | media_famous_places_csv | 장소(촬영지는 큐레이션, D3) | — | 제한 없음 |
-| independent_bookstores_csv | 장소 + 속성 | `bookstore_independent` | `0104`·`0203` |
-| cafe_bookstores_csv | 장소 + 속성 | `bookstore_cafe` | `0104`·`0203` |
+| independent_bookstores_csv | 장소 + 속성 | `bookstore_independent` | `0104`·`0202` |
+| cafe_bookstores_csv | 장소 + 속성 | `bookstore_cafe` | `0104`·`0202` |
 | children_bookstores_csv | 장소 + 속성 | `bookstore_children` | `0104` |
 | used_bookstores_csv | 장소 + 속성 | `bookstore_used` | `0104` |
 | world_restaurants_csv | 장소 + 속성 | `world_cuisine` | `02` |
@@ -158,13 +158,16 @@ CREATE TABLE provider_sync.theme_attach_decisions (
 
 ### 5.1 후보
 
-- 후보 조회: `kind='place'`, `lifecycle_state='active'`, `quality_state='valid'`, 좌표 150m 이내.
+- 후보 조회: `kind='place'`, `lifecycle_state='active'`, `publication_state='published'`,
+  `quality_state='valid'`, 좌표 150m 이내. 술어가 부분 GiST 색인
+  `idx_features_coord_5179_gist`의 조건을 그대로 담아야 색인을 탄다.
   입력 점은 `MATERIALIZED` CTE에서 한 번 `ST_Transform`하고 술어는 `ST_DWithin(f.coord_5179,
   p.pt_5179, 150)` — 열끼리 비교라 색인을 탄다(ADR-012: 술어 안 `ST_Transform` 금지).
 - tier 1: primary link의 provider가 MCST가 **아닌** Feature. tier 2: MCST Feature. tier 1이
   하나라도 채택되면 tier 2는 보지 않는다.
-- publication이 `suppressed`인 후보가 채택 조건을 만족하면(운영자가 숨긴 장소) 붙이지도 새로
-  만들지도 않고 `ambiguous`다.
+- suppressed Feature는 후보가 아니다(공개 projection 밖, 색인도 없다). 2026-11-10 운영에 active·
+  valid·suppressed place는 0건이다. 운영자가 숨긴 장소 옆에 MCST 장소가 새로 생기면 dedup 리뷰가
+  다룬다.
 - 분류 호환(§3)이 맞지 않는 tier 1 후보는 버린다. tier 2는 분류를 보지 않는다(같은 원천 계열).
 
 ### 5.2 점수
@@ -320,7 +323,7 @@ cluster·in-bounds의 EXPLAIN을 재고, ADR-073 예산을 넘으면 파생 mate
 | `attach` | tier 1 master가 채택된 Feature | master로 병합(link 강등) + M05 `rebind` |
 | `collapse` | tier 2로 다른 MCST Feature와 같은 장소 | 생존자로 병합 + M05 `rebind` |
 | `keep` | 위에 해당 없음(생존자 포함) | 그대로(`feature_id`·앵커 불변) |
-| `ambiguous` | 후보 다툼·suppressed 후보 | 손대지 않음 → 관리자 판정 |
+| `ambiguous` | 후보 다툼 | 손대지 않음 → 관리자 판정 |
 
 - `collapse` 묶음 = tier 2 채택 관계로 이어진 MCST Feature(union-find). 생존자: 장소 목록 Feature >
   속성 목록 Feature, 그다음 `created_at` 이른 것, 그다음 `feature_id` 작은 것. 생존자는 `keep`.
@@ -416,7 +419,7 @@ R1과 R3은 한 Map PR로 묶어도 된다(둘 다 `off` 기본이라 동작이 
 ## 12. 검증 계획
 
 - 붙임 규칙: 채택·거절 경계값(50/150m, 0.6/0.8), 지점 토큰 불일치 거절, `서점`·`반점` 보존, 일반명
-  30m 제한, 분류 호환, ambiguous, suppressed 후보, tier 1 우선.
+  30m 제한, 분류 호환, ambiguous, tier 1 우선.
 - 적재(apply): 두 목록에 같은 장소 → Feature 하나·속성 둘. master가 있으면 MCST Feature 없음.
   owner·sticky·redirect·created·ambiguous 각 경로. 목록에서 행이 빠지면 enrichment link만 사라지고
   master는 남음. 수집 실패 slug는 link를 지우지 않음. entity당 link ≤ 1.

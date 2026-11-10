@@ -885,3 +885,97 @@ async def test_retryable_finalize_abort_keeps_unreached_datasets_retryable(
     assert len(attempts) == len(specs)
     assert attempts[0]["error"]["phase"] == "finalize"
     assert {a["outcome"] for a in attempts} == {"retryable_failure"}
+
+
+class _FakeThemeAttachClient(_FakeBundleLoadClient):
+    """ADR-121 붙임 적재 double — 호출 순서와 모드만 기록한다."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.attach_calls: list[tuple[str, str, tuple[str, ...] | None]] = []
+
+    async def load_theme_attach_bundles(
+        self, bundles: Any, *, spec: Any, mode: str, geo: Any = None
+    ) -> tuple[FeatureLoadResult, Any]:
+        from kortravelmap.infra.theme_attach_repo import ThemeAttachReport
+
+        materialized = list(bundles)
+        self.attach_calls.append((spec.dataset_key, mode, spec.master_category_prefixes))
+        return (
+            FeatureLoadResult(
+                bundles_total=len(materialized),
+                curation_input_member_count=len(materialized),
+                curation_input_set_hash="0" * 64,
+            ),
+            ThemeAttachReport(
+                mode=mode,  # type: ignore[arg-type]
+                dataset_key=spec.dataset_key,
+                counts={"created": len(materialized)},
+            ),
+        )
+
+
+def _attach_context(records: list[Any], mode: str) -> tuple[Any, _FakeThemeAttachClient]:
+    client = _FakeThemeAttachClient()
+    return (
+        build_asset_context(
+            resources={
+                "kor_travel_map_client": client,
+                "reverse_geocoder": _fake_reverse,
+                "fetched_at": None,
+                "strict_address": True,
+                "mcst_culture_records": records,
+                "mcst_theme_attach_mode": mode,
+            }
+        ),
+        client,
+    )
+
+
+async def test_theme_attach_off_mode_keeps_legacy_load() -> None:
+    context, client = _attach_context(
+        [McstSlugAttempt(slug="barrier_free_places_csv"),
+         ("barrier_free_places_csv", _common_row("무장애 1"))],
+        "off",
+    )
+    result = await run_feature_place_mcst_culture(context)
+    assert client.attach_calls == []
+    assert len(client.loaded) == 1
+    assert "theme_attach" not in result.as_metadata()
+
+
+async def test_theme_attach_dry_run_goes_through_attach_loader() -> None:
+    context, client = _attach_context(
+        [McstSlugAttempt(slug="world_restaurants_csv"),
+         ("world_restaurants_csv", _common_row("식당 1"))],
+        "dry_run",
+    )
+    result = await run_feature_place_mcst_culture(context)
+    assert client.attach_calls == [("mcst_world_restaurants_csv", "dry_run", ("02",))]
+    meta = result.as_metadata()["theme_attach"]
+    assert meta["mcst_world_restaurants_csv"]["theme_attach_counts"] == {"created": 1}
+
+
+async def test_theme_attach_apply_loads_place_lists_before_attribute_lists() -> None:
+    slugs = [
+        "barrier_free_places_csv",
+        "independent_bookstores_csv",
+        "pet_friendly_culture_facilities_csv",
+    ]
+    records: list[Any] = [McstSlugAttempt(slug=slug) for slug in slugs]
+    records += [(slug, _common_row(f"{slug} 1")) for slug in slugs]
+    context, client = _attach_context(records, "apply")
+    await run_feature_place_mcst_culture(context)
+    order = [dataset_key for dataset_key, _mode, _prefixes in client.attach_calls]
+    assert order[0] == "mcst_independent_bookstores_csv"
+    assert set(order[1:]) == {
+        "mcst_barrier_free_places_csv",
+        "mcst_pet_friendly_culture_facilities_csv",
+    }
+    assert {mode for _key, mode, _prefixes in client.attach_calls} == {"apply"}
+
+
+async def test_theme_attach_unknown_mode_fails_closed() -> None:
+    context, _client = _attach_context([McstSlugAttempt(slug="world_restaurants_csv")], "enforce")
+    with pytest.raises(ValueError, match="알 수 없는 MCST 붙임 모드"):
+        await run_feature_place_mcst_culture(context)

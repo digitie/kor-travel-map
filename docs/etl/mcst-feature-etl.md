@@ -171,3 +171,18 @@ base만 비교한다. 같은 원천이 소유한 base의 실제 변경만 기존
 다른 provider의 base·주소·상세·팔레트는 건드리지 않는다. 관리자 override는 표시값으로
 유지되고 해제하면 새 base가 드러난다. 같은 입력의 두 번째 실행은 Feature revision을
 올리지 않는다. 오래된 artifact와 퇴역 상태는 이 재투영에서 제외한다.
+
+## ADR-121 — 테마 목록 붙임 적재 (2026-11-10)
+
+정본은 [ADR-121](../adr/121-mcst-theme-lists-as-place-attributes.md)과
+[`docs/architecture/place-theme-attributes.md`](../architecture/place-theme-attributes.md)다.
+
+- **반려 업종 행 미적재(D2)**: `pet_friendly_culture_facilities_csv`에서 `CATEGORY2`가 동물약국·
+  반려동물용품·동물병원·미용·위탁관리인 행은 변환에서 건너뛴다(`is_mcst_pet_business_row`). 모드와
+  무관하게 즉시 적용되며 이미 있는 운영 Feature는 지우지 않는다(R4 퇴역 계획).
+- **붙임 모드** `KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE`(기본 `off`): `off`는 위 §5 그대로,
+  `dry_run`은 현행 적재 + 판정 개수(asset metadata `theme_attach`), `apply`는 master에 `enrichment`
+  link로 붙이고 master가 없을 때만 그 목록이 primary인 장소 Feature를 만든다(장소 목록을 먼저 적재).
+  `apply`는 R4 전환 창에서만 켠다.
+- slug별 붙임 설정은 `McstDatasetSpec.attribute_code`·`master_category_prefixes`·`attribute_list`다.
+- 전환 계획: `ktmctl mcst-theme-plan --ids-out <file>`(읽기 전용).

@@ -282,7 +282,9 @@ async def test_duplicate_rows_in_one_list_collapse_to_one_feature(
         feature
         for bundle in rows
         for feature, _ in await _feature_of_entity(
-            session, str(bundle.feature.provider_natural_key), "mcst_leisure_activity_facilities_csv"
+            session,
+            str(bundle.feature.provider_natural_key),
+            "mcst_leisure_activity_facilities_csv",
         )
     }
     assert len(targets) == 1
@@ -334,7 +336,8 @@ async def test_retired_claim_redirects_to_merge_survivor(
     sticky = await _attach(session, "barrier_free_places_csv", [row], "apply")
     assert sticky.counts == {"sticky": 1}
 
-    # link가 없어도(퇴역 claim만 남음) 병합 이력을 따라 생존자로 간다 — 퇴역 Feature를 되살리지 않는다.
+    # link가 없어도(퇴역 claim만 남음) 병합 이력을 따라 생존자로 간다.
+    # 퇴역 Feature를 되살리지 않는다.
     await session.execute(
         text(
             "DELETE FROM provider_sync.source_links sl USING provider_sync.source_entities se "
