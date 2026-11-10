@@ -373,6 +373,26 @@ class FeatureRow(Base):
                 "AND quality_state = 'valid'"
             ),
         ),
+        # 445(#1475) — admin 부분 검색용 **비부분** trigram. 식은
+        # ``admin_feature_repo._ADMIN_FEATURES_Q_FEATURE_ARMS``의 술어와 같다. 이름은
+        # 공개 부분 인덱스(``name``)와 겨루지 않도록 ``lower(name)``이다. opclass는
+        # ``x_extension.gin_trgm_ops``이고 migration이 소유한다(식 인덱스의 opclass는
+        # 비교 대상이 아니다).
+        Index(
+            "idx_features_admin_lower_name_trgm",
+            text("lower(name)"),
+            postgresql_using="gin",
+        ),
+        Index(
+            "idx_features_admin_feature_id_trgm",
+            text("(feature_id)::text"),
+            postgresql_using="gin",
+        ),
+        Index(
+            "idx_features_admin_address_trgm",
+            text("(address)::text"),
+            postgresql_using="gin",
+        ),
         # T-VN-35A(0084) — typed subtype의 배타 arc 참조 대상. subtype 행이
         # (feature_id, kind) 복합 FK로 이 UNIQUE를 참조하고 각자 kind 상수
         # CHECK를 가지므로 ① 한 feature는 최대 한 subtype에만 존재하고
@@ -1834,6 +1854,13 @@ class FeatureAliasRow(Base):
         # 영구 삭제했다 — ``feature_id``가 uuid가 되어 text ``alias``와 비교할
         # 연산자가 없고, legacy 키가 업무키가 아니라는 것이 재키의 요지다.
         Index("idx_feature_aliases_feature", "feature_id"),
+        # 445(#1475) — admin 부분 검색의 legacy ``f_*`` 조각 갈래.
+        Index(
+            "idx_feature_aliases_alias_trgm",
+            "alias",
+            postgresql_using="gin",
+            postgresql_ops={"alias": "x_extension.gin_trgm_ops"},
+        ),
         # T-VN-32C alias-map 이관 표면의 keyset scan index (alembic 0081).
         # 실제 DDL은 `(alias COLLATE "C")`지만 PG 반영(reflection)은 index
         # collation을 노출하지 않아 metadata에 COLLATE 식을 쓰면 alembic
@@ -2144,6 +2171,13 @@ class SourceEntityRow(Base):
             "idx_source_entities_provider_dataset",
             "provider_dataset_id",
         ),
+        # 445(#1475) — admin 부분 검색의 원천 식별자 갈래.
+        Index(
+            "idx_source_entities_source_entity_id_trgm",
+            "source_entity_id",
+            postgresql_using="gin",
+            postgresql_ops={"source_entity_id": "x_extension.gin_trgm_ops"},
+        ),
         {"schema": "provider_sync"},
     )
 
@@ -2312,6 +2346,13 @@ class SourceEntityHeadRow(Base):
             "lineage_key",
             text("observed_at DESC"),
             text("current_source_record_key DESC"),
+        ),
+        # 445(#1475) — admin 부분 검색의 현재 record key 갈래.
+        Index(
+            "idx_source_entity_heads_record_key_trgm",
+            "current_source_record_key",
+            postgresql_using="gin",
+            postgresql_ops={"current_source_record_key": "x_extension.gin_trgm_ops"},
         ),
         {"schema": "provider_sync"},
     )

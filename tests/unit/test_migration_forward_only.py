@@ -42,6 +42,7 @@ FORWARD_ONLY_REVISIONS = (
     "441_tourapi_attraction_dataset",
     "442_mois_brand_search_aliases",
     "444_trip_search_aliases",
+    "445_admin_search_trgm_indexes",
 )
 
 
