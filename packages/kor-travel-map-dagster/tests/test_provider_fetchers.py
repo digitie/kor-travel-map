@@ -200,8 +200,8 @@ class _FakeDataGoKrClient:
     def __init__(self, *, api_key: str | None = None, **_kwargs: Any) -> None:
         self.api_key = api_key
         self.closed = False
-        self.museum_art = _FakeMuseumArtService([object(), object(), object()])
-        self.tourist_attraction = _FakeMuseumArtService([object(), object()])
+        self.museum_art = _FakeStandardFileService([object(), object(), object()])
+        self.tourist_attraction = _FakeStandardFileService([object(), object()])
         self.parking = _FakeStandardFileService([object(), object(), object(), object()])
         self.special_street = _FakeStandardFileService([object(), object()])
         self.traditional_market = _FakeStandardFileService([object(), object(), object()])
@@ -966,28 +966,6 @@ def test_standard_museums_fetch_closes_client_on_partial_consumption(
     assert fake.instances[0].closed is True
 
 
-def test_standard_museums_raises_when_credential_missing() -> None:
-    settings = KorTravelMapSettings(data_go_kr_service_key=None)
-
-    agen = fetch_standard_museums(settings)
-    with pytest.raises(ProviderCredentialMissing):
-        asyncio.run(agen.__anext__())
-
-
-def test_standard_museums_fetch_yields_and_closes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _install_fake_datagokr(monkeypatch)
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
-
-    records = asyncio.run(_acollect(fetch_standard_museums(settings)))
-
-    assert len(records) == 3
-    client = fake.instances[0]
-    assert client.api_key == "service-key"
-    assert client.closed is True
-
-
 class _FakeFestivalPage:
     """실물 ``visitkorea.models.Page``의 필드 계약(``items`` + ``total_count`` + ``raw``)."""
 
@@ -1333,26 +1311,6 @@ def test_khoa_real_exception_contract_matches_default_retry_predicate() -> None:
     assert provider_fetchers.upstream_retry.default_upstream_retryable(quota) is False
 
 
-def test_standard_tourist_attractions_raises_when_credential_missing() -> None:
-    settings = KorTravelMapSettings(data_go_kr_service_key=None)
-
-    agen = fetch_standard_tourist_attractions(settings)
-    with pytest.raises(ProviderCredentialMissing):
-        asyncio.run(agen.__anext__())
-
-
-def test_standard_tourist_attractions_fetch_yields_and_closes(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    fake = _install_fake_datagokr(monkeypatch)
-    settings = KorTravelMapSettings(data_go_kr_service_key=SecretStr("service-key"))
-
-    records = asyncio.run(_acollect(fetch_standard_tourist_attractions(settings)))
-
-    assert len(records) == 2
-    assert fake.instances[0].closed is True
-
-
 @pytest.mark.parametrize(
     ("fetch", "attr", "expected"),
     [
@@ -1360,6 +1318,10 @@ def test_standard_tourist_attractions_fetch_yields_and_closes(
         (fetch_standard_special_streets, "special_street", 2),
         # 주차장 Open API는 운영 키가 403(활용신청 없음, 2026-11-10)이다 — 공개 파일 15012896.
         (fetch_standard_parking_lots, "parking", 4),
+        # 박물관미술관 Open API도 운영 키 403(2026-11-10). 관광지는 아직 00이지만 같은 키·같은
+        # 원천이라 함께 옮긴다 — 공개 파일 15017323·15021141.
+        (fetch_standard_museums, "museum_art", 3),
+        (fetch_standard_tourist_attractions, "tourist_attraction", 2),
     ],
 )
 def test_standard_files_are_keyless_and_close(
@@ -1419,6 +1381,8 @@ def test_standard_parking_file_duplicate_numbers_pick_one_row_deterministically(
         (fetch_standard_traditional_markets, "traditional_market"),
         (fetch_standard_special_streets, "special_street"),
         (fetch_standard_parking_lots, "parking"),
+        (fetch_standard_museums, "museum_art"),
+        (fetch_standard_tourist_attractions, "tourist_attraction"),
     ],
 )
 @pytest.mark.parametrize(("rows", "declared"), [(3, 1393), (0, 0), (0, 274)])
