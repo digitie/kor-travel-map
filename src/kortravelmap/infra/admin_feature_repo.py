@@ -1368,13 +1368,8 @@ def _admin_feature_candidates_sql(search_scope: AdminFeatureSearchScope) -> str:
     arms = _ADMIN_FEATURES_Q_FEATURE_ARMS
     if search_scope == "all":
         arms = (*arms, *_ADMIN_FEATURES_Q_SOURCE_ARMS)
-    union = "
-    UNION ALL".join(arms)
-    return f"SELECT cand.feature_id
-FROM ({union}
-) AS cand
-LIMIT :q_candidate_limit
-"
+    union = "\n    UNION ALL".join(arms)
+    return f"SELECT cand.feature_id\nFROM ({union}\n) AS cand\nLIMIT :q_candidate_limit\n"
 
 
 def _admin_features_sql(
