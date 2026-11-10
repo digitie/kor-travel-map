@@ -1331,6 +1331,40 @@ def test_standard_files_are_keyless_and_close(
     assert client.closed is True
 
 
+@pytest.mark.parametrize("reverse", [False, True])
+def test_standard_parking_file_duplicate_numbers_pick_one_row_deterministically(
+    monkeypatch: pytest.MonkeyPatch, reverse: bool
+) -> None:
+    # 공개 파일의 PRKPLCE_NO는 18,994행 중 17,878개만 고유하고 같은 번호의 행 내용이 다르다
+    # (2026-11-10 실측 1,030개 번호). 적재는 같은 번호를 한 entity로 덮으므로 어느 행이 남는지가
+    # 파일 순서에 달리면 안 된다 — 순서와 무관하게 같은 행 하나만 내준다. 번호 없는 행은 그대로다.
+    from types import SimpleNamespace
+
+    rows = [
+        SimpleNamespace(prkplce_no="100-1-000001", raw={"PRKPLCE_NM": "B"}),
+        SimpleNamespace(prkplce_no="100-1-000002", raw={"PRKPLCE_NM": "only"}),
+        SimpleNamespace(prkplce_no="100-1-000001", raw={"PRKPLCE_NM": "A"}),
+        SimpleNamespace(prkplce_no=None, raw={"PRKPLCE_NM": "no number"}),
+    ]
+    if reverse:
+        rows.reverse()
+    fake = _install_fake_datagokr(monkeypatch)
+    original_init = fake.__init__
+
+    def _init(self: Any, **kwargs: Any) -> None:
+        original_init(self, **kwargs)
+        self.parking = _FakeStandardFileService(list(rows))
+
+    monkeypatch.setattr(fake, "__init__", _init)
+
+    records = asyncio.run(
+        _acollect(fetch_standard_parking_lots(KorTravelMapSettings(data_go_kr_service_key=None)))
+    )
+
+    names = sorted(r.raw["PRKPLCE_NM"] for r in records)
+    assert names == ["A", "no number", "only"]
+
+
 @pytest.mark.parametrize(
     ("fetch", "attr"),
     [
