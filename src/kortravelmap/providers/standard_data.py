@@ -249,9 +249,10 @@ async def _museum_to_bundle(
         sigungu_name=geo.sigungu_name if geo is not None else None,
     )
 
-    natural_key = item.instt_code or "::".join(
-        [normalize_korean_text(name) or name, road_text or ""]
-    )
+    # ``instt_code``는 제공 기관(지자체) 코드라 시설마다 다르지 않다 — 공개 파일에 박물관 1,070행
+    # 215개·관광지 897행 164개. Open API는 이 값을 싣지 않아(provider alias 없음) prod 키는 전부
+    # ``이름::도로명``이다. 공개 파일은 싣는다 — identity로 쓰면 지자체마다 한 Feature로 합쳐진다.
+    natural_key = "::".join([normalize_korean_text(name) or name, road_text or ""])
     category = _resolve_museum_category(item.fclty_type)
     raw_data: dict[str, Any] = {
         "fclty_nm": item.fclty_nm,
@@ -338,7 +339,8 @@ async def museums_to_bundles(
     """전국박물관미술관표준데이터 items → ``list[FeatureBundle]`` (place, ADR-034 9단계).
 
     각 bundle은 박물관/미술관 place Feature(category 0104xxxx) + SourceRecord + PRIMARY
-    SourceLink. ``instt_code``가 없으면 ``name::road`` 파생키(ADR-009 ``::``).
+    SourceLink. 키는 ``name::road`` 파생키(ADR-009 ``::``) — ``instt_code``는 기관 코드라
+    쓰지 않는다.
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
@@ -506,9 +508,10 @@ async def _tourist_to_bundle(
     name = item.trrsrt_nm or ""
     road_text = normalize_korean_text(item.rdnmadr)
     legal_text = normalize_korean_text(item.lnmadr)
-    natural_key = item.instt_code or "::".join(
-        [normalize_korean_text(name) or name, road_text or ""]
-    )
+    # ``instt_code``는 제공 기관(지자체) 코드라 시설마다 다르지 않다 — 공개 파일에 박물관 1,070행
+    # 215개·관광지 897행 164개. Open API는 이 값을 싣지 않아(provider alias 없음) prod 키는 전부
+    # ``이름::도로명``이다. 공개 파일은 싣는다 — identity로 쓰면 지자체마다 한 Feature로 합쳐진다.
+    natural_key = "::".join([normalize_korean_text(name) or name, road_text or ""])
     raw_data: dict[str, Any] = {
         "trrsrt_nm": item.trrsrt_nm,
         "trrsrt_se": item.trrsrt_se,
@@ -551,7 +554,8 @@ async def tourist_attractions_to_bundles(
     """전국관광지표준데이터 items → ``list[FeatureBundle]`` (place, ADR-034 보조).
 
     각 bundle은 관광지 place Feature(category 01000000) + SourceRecord + PRIMARY
-    SourceLink. ``instt_code``가 없으면 ``name::road`` 파생키(ADR-009 ``::``).
+    SourceLink. 키는 ``name::road`` 파생키(ADR-009 ``::``) — ``instt_code``는 기관 코드라
+    쓰지 않는다.
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
     resolver = cached_address_resolver(address_resolver) if address_resolver is not None else None
@@ -608,10 +612,9 @@ async def _parking_to_bundle(
     name = item.prkplce_nm or ""
     road_text = normalize_korean_text(item.rdnmadr)
     legal_text = normalize_korean_text(item.lnmadr)
-    natural_key = (
-        item.prkplce_no
-        or item.instt_code
-        or "::".join([normalize_korean_text(name) or name, road_text or ""])
+    # 번호가 없을 때 ``instt_code``(제공 기관 코드)로 대신하지 않는다 — 시설마다 다르지 않다.
+    natural_key = item.prkplce_no or "::".join(
+        [normalize_korean_text(name) or name, road_text or ""]
     )
     raw_data: dict[str, Any] = {
         "prkplce_no": item.prkplce_no,
@@ -663,7 +666,7 @@ async def parking_lots_to_bundles(
 ) -> list[FeatureBundle]:
     """전국주차장표준데이터 items → ``list[FeatureBundle]`` (place, category 06010000).
 
-    안정키 ``prkplce_no``(없으면 ``instt_code``, 그것도 없으면 ``name::road`` 파생).
+    안정키 ``prkplce_no``(없으면 ``name::road`` 파생 — 기관 코드 ``instt_code``는 쓰지 않는다).
     원천 좌표가 없는 row는 ``address_geocoder``로 주소 좌표를 찾는다(#1459 §4 — 운영 735건).
     """
     geocoder = cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None

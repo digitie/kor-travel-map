@@ -1275,8 +1275,9 @@ async def fetch_standard_museums(
 
     Open API(``tn_pubr_public_museum_artgr_info_api``)는 운영 키가 403
     (``SERVICE_KEY_IS_NOT_REGISTERED_ERROR``, 2026-11-10)이다. 파일 행은 같은
-    ``PublicMuseumArtGallery`` 모델이고 파일에 ``INSTT_CODE``가 없어 자연키는 Open API 때와
-    같은 ``이름::도로명``이다(2026-11-10 실측 1,070행, 파일 키 전부가 prod에 있다).
+    ``PublicMuseumArtGallery`` 모델이다. 파일 행은 ``INSTT_CODE``(제공 기관 코드)를 싣지만 변환은
+    그것을 키로 쓰지 않으므로 자연키는 Open API 때와 같은 ``이름::도로명``이다(2026-11-10 실측
+    1,070행, 파일 키 전부가 prod에 있다).
     """
     del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
@@ -1301,7 +1302,8 @@ async def fetch_standard_tourist_attractions(
 
     Open API(``tn_pubr_public_trrsrt_api``)는 2026-11-10 운영 키로 아직 ``00``이지만 같은 키가
     다른 표준데이터 오퍼레이션에서 403이 됐다 — 키 상태에 묶이지 않게 공개 파일로 옮긴다.
-    자연키는 Open API 때와 같은 ``이름::도로명``이다(실측 897행, 파일 키 전부가 prod에 있다).
+    자연키는 Open API 때와 같은 ``이름::도로명``이다(실측 897행, 파일 키 전부가 prod에 있다 —
+    파일이 싣는 ``INSTT_CODE``는 기관 코드라 키로 쓰지 않는다).
     """
     del settings
     datagokr = cast(Any, importlib.import_module("datagokr"))

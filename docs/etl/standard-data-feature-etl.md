@@ -181,19 +181,22 @@ identity는 그대로다(prod 17,986 entity 중 17,875가 파일에 있다. 나�
 행이 덮었다(순서 의존). 이제 fetcher가 번호마다 원문 정렬 JSON이 가장 작은 행 하나만 내준다 —
 순서와 무관하게 같은 행이 남는다(첫 적재에서 이 번호들의 내용이 한 번 바뀔 수 있다). 페이지 크기
 1만·5천·단일 페이지 다운로드 결과가 같음을 확인했다. 행에는 `colNmList`에 없는 `INSTT_CODE`도
-실려 `instt_code`가 Open API 때처럼 채워진다. 선언 건수와 받은 행 수가 다르거나 0이면 `StandardFileSnapshotIncomplete`로
+실린다 — Open API 때는 null이었으므로(provider alias 없음) 첫 적재에서 source record가 한 번 새로 쓰인다. 선언 건수와 받은 행 수가 다르거나 0이면 `StandardFileSnapshotIncomplete`로
 실패한다.
 
 ### 7.3a museums·tourist_sites 원천 (공개 파일 — 2026-11-10)
 
 박물관미술관(15017323)·관광지(15021141)도 `client.museum_art`·`client.tourist_attraction`의
 `iter_file_pages()`(서비스키 없음)로 받는다 — 실측 1,070행·897행. 박물관 Open API는 운영 키 403,
-관광지는 아직 `00`이지만 같은 키라 함께 옮겼다. 파일에 `INSTT_CODE`가 없고 Open API 경로에서도
-`instt_code`는 비어 있었으므로(provider 모델에 `insttCode` alias가 없다) 자연키는 두 경로 모두
-`이름::도로명`이다 — 파일에서 만든 키 1,043·879개가 전부 prod에 있다(prod에만 있는 10·2개는 옛
-적재분). 은퇴 경로가 아니므로 내려가는 Feature는 없다. 같은 자연키 행(박물관 26·관광지 18개 키,
+관광지는 아직 `00`이지만 같은 키라 함께 옮겼다. 파일 행은 `colNmList`에 없는 `INSTT_CODE`(제공
+기관 코드)를 싣는다 — Open API는 싣지 않아(provider alias 없음) prod `raw_data.instt_code`는 전부 null이었다.
+이 코드는 시설마다 다르지 않으므로(박물관 1,070행에 215개·관광지 897행에 164개) **identity로 쓰지 않는다** —
+박물관·관광지·주차장 변환 모두 `instt_code`를 키 후보에서 뺐다(2026-11-11). 자연키는 두 경로 모두
+`이름::도로명`(주차장은 `prkplce_no`)이고, 파일에서 만든 키 1,043·879개가 전부 prod에 있다(prod에만 있는
+10·2개는 옛 적재분). 은퇴 경로가 아니므로 내려가는 Feature는 없다. 같은 자연키 행(박물관 26·관광지 18개 키,
 내용이 다르다)은 적재가 나중 행으로 덮으므로 fetcher가 원문 정렬 JSON 순서로 내준다 — 파일 순서와
-무관하게 같은 행이 남는다(첫 적재에서 이 키들의 내용이 한 번 바뀔 수 있다).
+무관하게 같은 행이 남는다(첫 적재에서 이 키들의 내용이 한 번 바뀔 수 있다). `raw_data.instt_code`가
+null에서 값으로 바뀌므로 첫 적재는 세 dataset의 source record를 한 번 새로 쓴다(identity는 그대로).
 
 ### 7.4 tourist_sites (place)
 
