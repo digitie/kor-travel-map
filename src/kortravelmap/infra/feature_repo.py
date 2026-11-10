@@ -85,6 +85,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorVersionUnsupportedError,
 )
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.search_name import LATIN_BRACKET_NAME_PATTERN
 from kortravelmap.core.search_region import (
     RegionSearch,
     SearchRegionEntry,
@@ -2034,6 +2035,21 @@ def _search_compact_sql(expression: str) -> str:
     return f"normalize(lower({stripped}), NFC)"
 
 
+def _search_bracket_part_sql(expression: str, group: int) -> str:
+    """``core.search_name.latin_bracket_name_parts``의 SQL 짝 — 한 group의 비교 키(없으면 NULL).
+
+    group 1은 괄호 앞 한글 이름, 2는 끝 괄호 안 라틴 이름이다. 패턴은 코드 상수라 literal로 넣는다
+    (작은따옴표가 없다 — 모듈 로드 때 확인한다).
+    """
+    trimmed = f"btrim({expression}, {_SEARCH_WHITESPACE_SQL})"
+    part = f"(regexp_match({trimmed}, '{LATIN_BRACKET_NAME_PATTERN}'))[{group}]"
+    return _search_compact_sql(part)
+
+
+if "'" in LATIN_BRACKET_NAME_PATTERN or ":" in LATIN_BRACKET_NAME_PATTERN:
+    raise RuntimeError("LATIN_BRACKET_NAME_PATTERN must be a plain SQL literal")
+
+
 def _search_tail_sql(expression: str) -> str:
     """앞뒤 공백을 걷은 뒤 첫 공백(``SEARCH_WHITESPACE_CODEPOINTS`` 어느 것이든)까지 뗀 나머지.
 
@@ -2188,6 +2204,10 @@ compacted AS (
         CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
              THEN {_search_compact_sql("name")} END AS compact_raw_name,
         {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail,
+        -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott
+        -- Hotel Seoul)"의 한글 이름과 영문 이름. 저장하지 않고 원래 이름에서 뗀다(없으면 NULL).
+        {_search_bracket_part_sql("name", 1)} AS compact_base_name,
+        {_search_bracket_part_sql("name", 2)} AS compact_bracket_name,
         {_search_category_group_sql("category")} AS search_group
     FROM filtered
 ),
@@ -2200,16 +2220,21 @@ ranked AS (
     -- 검색어와 같다(공백 무시). 지역 검색이면 지역 일치 행은 나머지 검색어로도 본다.
     -- 목적지 이름 일치(ADR-120): 이름 전체가 검색어와 같은 목적지. 첫 낱말을 뗀 나머지는 관광
     -- (그룹 0)에만 쓴다 — "신라스테이 해운대"(숙박)가 "해운대"로 관광지 앞에 서지 않게 한다.
+    -- 이름 끝 라틴 괄호의 한글 이름·영문 이름도 이름 전체와 같은 자격이다(core.search_name).
     SELECT
         hits.*,
         (
           compact_name = CAST(:q_compact AS text)
+          OR compact_base_name = CAST(:q_compact AS text)
+          OR compact_bracket_name = CAST(:q_compact AS text)
           OR compact_tail = CAST(:q_compact AS text){region_exact}
         ) IS TRUE AS name_exact,
         (
           search_group <= {_search_destination_group_max()}
           AND (
             compact_name = CAST(:q_compact AS text)
+            OR compact_base_name = CAST(:q_compact AS text)
+            OR compact_bracket_name = CAST(:q_compact AS text)
             OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
           )
         ) IS TRUE AS destination_exact
