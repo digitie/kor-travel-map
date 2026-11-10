@@ -1182,6 +1182,8 @@ async def load_weather_state(
                 allow_shrink=allow_shrink,
                 source_status=collected.fetch.source_status,
                 source_etag=collected.fetch.etag,
+                apply_guard=True,  # 전량은 언제나 거부 기준(D4)을 받는다
+                require_base=None,
                 # 예보 전량은 증분 사슬의 시작이다 — cursor와 전량 시각(run 시작)을
                 # 세대와 함께 둔다.
                 sync_mode="full" if forecast else None,
