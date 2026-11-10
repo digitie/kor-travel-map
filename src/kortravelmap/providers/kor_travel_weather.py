@@ -131,6 +131,9 @@ class WeatherExportMeta(_Lenient):
     snapshot_id: str | None = None
     next_cursor: str | None = None
     has_more: bool = False
+    next_since: AwareDatetime | None = None
+    """W3 예보의 publication watermark. 모든 페이지를 받은 뒤 다음 적재의 ``since``로 보낸다
+    (ADR-122). 다른 export는 null이다."""
 
 
 class WeatherExportLocation(_Lenient):

@@ -1,6 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-122.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-123.**
+
+- [ADR-122 — weather 예보는 `since` 증분을 지금 Valkey 세대에 병합하고, 하루 한 번 전량으로 다시 맞춘다](122-weather-forecast-incremental-ingest.md) — proposed, 2026-11-10 (ADR-114 W3 "전량" 대체; migration 없음; weather since 응답에 tombstone 없음 → 주기 전량).
 
 - [ADR-121 — MCST 테마 목록은 독립 Feature가 아니라 장소 속성이다](121-mcst-theme-lists-as-place-attributes.md) — **accepted**, 2026-11-10 (#1468 A; 소유자 결정 D1=b·D2 반려 업종 미적재·D3 촬영지 큐레이션; 설계 `docs/architecture/place-theme-attributes.md`).
 
@@ -151,6 +153,7 @@
 | ADR-116 | 바뀌지 않은 비-MOIS 행은 저장 geo를 재사용한다 (accepted) | [116-reuse-stored-geo-for-unchanged-rows.md](116-reuse-stored-geo-for-unchanged-rows.md) |
 | ADR-117 | SH 스냅샷·스칼라 정책 경로(411~433) 퇴역, P는 배타 전용 (proposed; alembic 435) | [117-retire-sh-snapshot-scalar-policy-path.md](117-retire-sh-snapshot-scalar-policy-path.md) |
 | ADR-118 | DB 기준 PostgreSQL 18 + PostGIS 3.6, CI는 공용 instance digest 한 lane (proposed; ADR-007 DB major·ADR-103 CI lane 대체) | [118-postgres-18-ci-target.md](118-postgres-18-ci-target.md) |
+| ADR-122 | weather 예보 `since` 증분을 지금 Valkey 세대에 병합, 하루 한 번 전량 (proposed; ADR-114 W3 전량 대체) | [122-weather-forecast-incremental-ingest.md](122-weather-forecast-incremental-ingest.md) |
 
 ## 새 ADR 작성 규약
 

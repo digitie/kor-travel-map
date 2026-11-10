@@ -12,6 +12,8 @@
 - 같은 위치 안에서 같은 관측(provider, metric)·예보 묶음(provider)·요약(date, slot)이 두 번 오면
   원천 순서의 첫 행을 남기고 버린 수를 센다(적재 op metadata ``row_duplicates``).
 - geo를 부르지 않는다. 법정동 코드는 weather W1 값을 그대로 쓴다(결정 6).
+- 예보는 증분(``since``)을 지금 세대에 병합할 수 있다(:func:`merge_forecast_delta`, ADR-122). 병합
+  결과는 같은 시각의 전량과 같은 값이어야 한다 — 그래서 위치 안 묶음은 provider 순으로 둔다.
 """
 
 from __future__ import annotations
@@ -59,11 +61,15 @@ __all__ = [
     "WEATHER_STATE_DATASETS",
     "DailySummaryGrouper",
     "CurrentGrouper",
+    "ForecastDeltaRefused",
     "ForecastGrouper",
+    "ForecastMerge",
     "WeatherStateDataset",
     "earliest_or_none",
     "location_state",
     "location_state_items",
+    "merge_forecast_delta",
+    "trim_forecast_group",
     "weather_location_feature_id",
 ]
 
@@ -250,26 +256,205 @@ class ForecastGrouper:
         if group.provider in bucket:
             self.duplicates += 1
             return
-        bucket[group.provider] = WeatherForecastGroupState(
-            provider=group.provider,
-            known_at=group.known_at,
-            published_at=group.published_at,
-            target_at=list(group.target_at),
-            metrics={name: list(values) for name, values in group.metrics.items()},
-        )
+        bucket[group.provider] = _group_state(group)
 
     def items(self) -> list[StateItem]:
         return [
-            to_state_item(
-                WeatherForecastState(
-                    feature_id=weather_location_feature_id(location_id),
-                    location_id=location_id,
-                    forecast_style=self.style,
-                    groups=list(groups.values()),
-                )
-            )
+            _forecast_item(self.style, location_id, groups)
             for location_id, groups in self._groups.items()
         ]
+
+
+def _group_state(group: WeatherExportForecastGroup) -> WeatherForecastGroupState:
+    return WeatherForecastGroupState(
+        provider=group.provider,
+        known_at=group.known_at,
+        published_at=group.published_at,
+        target_at=list(group.target_at),
+        metrics={name: list(values) for name, values in group.metrics.items()},
+    )
+
+
+def _forecast_item(
+    style: WeatherForecastStyle, location_id: str, groups: dict[str, WeatherForecastGroupState]
+) -> StateItem:
+    """위치 하나의 값. 묶음은 **provider 순**이다 — 원천 페이지 순서(weather scope namespace 순)에
+    기대지 않아야 증분 병합(:func:`merge_forecast_delta`)과 전량이 같은 바이트가 된다(ADR-122)."""
+    return to_state_item(
+        WeatherForecastState(
+            feature_id=weather_location_feature_id(location_id),
+            location_id=location_id,
+            forecast_style=style,
+            groups=[groups[provider] for provider in sorted(groups)],
+        )
+    )
+
+
+# -- 예보 증분 병합 (ADR-122) ------------------------------------------------------------
+
+
+class ForecastDeltaRefused(ValueError):
+    """이 증분은 지금 세대에 병합해도 전량과 같아진다고 보장할 수 없다 — 전량으로 다시 받는다.
+
+    ``reason``은 op metadata ``resync_reason``에 그대로 남는 짧은 code다.
+    """
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastMerge:
+    """증분 병합 결과와 그 내역(op metadata)."""
+
+    items: list[StateItem]
+    delta_rows: int
+    """증분 응답의 묶음 수."""
+    replaced: int
+    """지금 세대의 묶음을 증분이 바꾼 수."""
+    added: int
+    """증분으로 새로 생긴 (위치, provider) 묶음 수."""
+    carried: int
+    """증분에 없어 지금 세대에서 이어 온 묶음 수(잘린 것 포함, 빠진 것 제외)."""
+    trimmed: int
+    """이어 온 묶음 중 지난 ``target_at``을 뗀 수."""
+    expired: int
+    """이어 온 묶음 중 남는 시각이 없어 뺀 수(weather 전량도 그 묶음을 내지 않는다)."""
+
+
+def trim_forecast_group(
+    group: WeatherForecastGroupState, now: datetime
+) -> WeatherForecastGroupState | None:
+    """weather가 ``now``에 같은 승인 묶음을 다시 낸다면 낼 값. 남는 시각이 없으면 ``None``.
+
+    weather W3는 ``target_at > now``인 point만 내고, metric은 그 미래 point가 있을 때만 싣는다
+    (``export_forecasts._page_items``). 그래서 시각을 뗀 뒤 값이 모두 null인 metric은 뺀다 — 원래
+    값 배열의 null은 "point 없음"이기 때문이다. 시각을 하나도 떼지 않았으면 묶음을 그대로 둔다.
+    ``known_at``은 지난 point까지 포함한 최댓값이라 바뀌지 않는다.
+    """
+    keep = [index for index, target in enumerate(group.target_at) if target > now]
+    if len(keep) == len(group.target_at):
+        return group
+    if not keep:
+        return None
+    metrics: dict[str, list[float | str | None]] = {}
+    for name, values in group.metrics.items():
+        kept = [values[i] for i in keep]
+        if any(value is not None for value in kept):
+            metrics[name] = kept
+    return group.model_copy(
+        update={"target_at": [group.target_at[i] for i in keep], "metrics": metrics}
+    )
+
+
+def merge_forecast_delta(
+    base: Iterable[WeatherForecastState],
+    delta: Iterable[WeatherExportForecastGroup],
+    *,
+    style: WeatherForecastStyle,
+    since: datetime,
+    now: datetime,
+) -> ForecastMerge:
+    """지금 세대(``base``) + weather ``since`` 증분 → 새 세대 값(ADR-122).
+
+    weather 계약: ``since`` 응답은 ``published_at > since``인 승인 scope의 (위치, provider) 묶음을
+    **통째로** 다시 낸다. 그래서 증분에 온 묶음은 지금 세대의 같은 (위치, provider) 묶음을 그대로
+    바꾸고, 오지 않은 묶음은 weather가 ``now``에 낼 모양으로 지난 시각을 뗀다
+    (:func:`trim_forecast_group`). 다음 경우는 전량과 같아진다고 보장할 수 없어
+    :class:`ForecastDeltaRefused`로 거절한다(호출자는 전량으로 다시 받는다):
+
+    - 증분 안에 같은 (위치, provider)가 두 번 온다(전량의 "첫 행" 선택을 재현할 수 없다).
+    - 증분 묶음의 ``published_at``이 ``since`` 이하다(계약 위반).
+    - 증분 묶음이 지금 세대의 같은 묶음보다 오래됐다(publication clock 역행).
+    - 지금 세대 값이 다른 style이거나 ``feature_id``가 위치 id와 맞지 않는다.
+
+    weather가 since 응답에 싣지 않는 제거(위치가 scope에서 빠짐·승인 만료·provider 퇴역)는 여기서
+    볼 수 없다 — 주기 전량 재동기화가 고친다.
+    """
+    incoming: dict[str, dict[str, WeatherExportForecastGroup]] = {}
+    rows = 0
+    for group in delta:
+        rows += 1
+        if group.forecast_style != style:
+            raise ForecastDeltaRefused(
+                "delta_style_mismatch", f"증분 묶음 style {group.forecast_style!r} ≠ {style!r}."
+            )
+        if group.published_at <= since:
+            raise ForecastDeltaRefused(
+                "delta_not_after_since",
+                f"증분 묶음 {group.location_id}/{group.provider}의 published_at"
+                f"({group.published_at.isoformat()})이 since({since.isoformat()}) 이하다.",
+            )
+        bucket = incoming.setdefault(group.location_id, {})
+        if group.provider in bucket:
+            raise ForecastDeltaRefused(
+                "delta_duplicates",
+                f"증분에 {group.location_id}/{group.provider} 묶음이 두 번 왔다.",
+            )
+        bucket[group.provider] = group
+
+    merged: dict[str, dict[str, WeatherForecastGroupState]] = {}
+    replaced = carried = trimmed = expired = 0
+    for state in base:
+        if state.forecast_style != style or state.feature_id != weather_location_feature_id(
+            state.location_id
+        ):
+            raise ForecastDeltaRefused(
+                "base_mismatch",
+                f"지금 세대 값 {state.feature_id}가 style {style!r}·위치 id와 맞지 않는다.",
+            )
+        if state.location_id in merged:
+            raise ForecastDeltaRefused(
+                "base_mismatch", f"지금 세대에 위치 {state.location_id}가 두 번 있다."
+            )
+        fresh = incoming.get(state.location_id, {})
+        kept_groups = merged[state.location_id] = {}
+        for stored in state.groups:
+            if stored.provider in kept_groups:
+                raise ForecastDeltaRefused(
+                    "base_mismatch",
+                    f"지금 세대 위치 {state.location_id}에 {stored.provider} 묶음이 두 번 있다.",
+                )
+            update = fresh.get(stored.provider)
+            if update is not None:
+                if update.published_at < stored.published_at:
+                    raise ForecastDeltaRefused(
+                        "published_at_regressed",
+                        f"증분 {state.location_id}/{stored.provider}이 지금 세대보다 오래됐다"
+                        f"({update.published_at.isoformat()} < "
+                        f"{stored.published_at.isoformat()}).",
+                    )
+                replaced += 1
+                continue
+            kept = trim_forecast_group(stored, now)
+            if kept is None:
+                expired += 1
+                continue
+            carried += 1
+            if kept is not stored:
+                trimmed += 1
+            kept_groups[stored.provider] = kept
+
+    for location_id, rows_by_provider in incoming.items():
+        target = merged.setdefault(location_id, {})
+        for provider, row in rows_by_provider.items():
+            target[provider] = _group_state(row)
+    added = sum(len(groups) for groups in incoming.values()) - replaced
+
+    return ForecastMerge(
+        items=[
+            _forecast_item(style, location_id, groups)
+            for location_id, groups in sorted(merged.items())
+            if groups
+        ],
+        delta_rows=rows,
+        replaced=replaced,
+        added=added,
+        carried=carried,
+        trimmed=trimmed,
+        expired=expired,
+    )
 
 
 _SLOT_ORDER: Final[dict[str, int]] = {"morning": 0, "noon": 1, "evening": 2}

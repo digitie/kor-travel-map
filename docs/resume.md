@@ -1,3 +1,8 @@
+## 2026-11-10 — ADR-122 weather 예보 증분
+
+- 회전에 묶는다. 배포 뒤 예보 job 첫 run은 cursor가 없어 전량(resync_reason=no_cursor), 다음부터 sync_mode=delta. op metadata의 resync_reason·delta_rows·expired_groups와 run 시간을 본다. 되돌리기는 env FULL_RESYNC_HOURS=0. weather DB 복원·provider 설정 변경 뒤에는 예보 job 넷을 run config `full_resync: true`로 한 번씩.
+- weather 요청: since 응답의 멤버십 digest(제거 신호)·null point·중복 (위치, provider) 질문(ADR-122 끝 절).
+
 ## 2026-11-11 — 영문 괄호 이름 검색·KNPS 대피소 이름 표식(6차 회전)
 
 - 회전에 묶는다(직접 회전 금지). migration·OpenAPI 없음. 검색 변경은 배포 즉시 효과 — MOIS 별칭 backfill 불필요.

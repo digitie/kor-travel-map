@@ -612,3 +612,150 @@ async def test_empty_daily_candidate_does_not_hide_five_day_history(
     by_location = {item["location"]["location_id"]: item for item in batch.json()["data"]["items"]}
     assert by_location["history-empty"]["daily_summaries"]["status"] == "no_data"
     assert by_location["history-valid"]["daily_summaries"]["status"] == "ok"
+
+
+# -- ADR-122 예보 증분 ------------------------------------------------------------------------
+
+
+def _delta_group(location_id: str, published_at: datetime, value: float) -> dict[str, Any]:
+    now = datetime.now(UTC)
+    return {
+        "location_id": location_id,
+        "provider": "python-kma-api",
+        "forecast_style": "short",
+        "known_at": published_at.isoformat(),
+        "published_at": published_at.isoformat(),
+        "target_at": [(now + timedelta(hours=h)).isoformat() for h in (2, 5)],
+        "metrics": {"TMP": [value, value + 1]},
+    }
+
+
+async def _load_forecasts(
+    store: ValkeyStateStore,
+    dataset: Any,
+    full: list[dict[str, Any]],
+    delta: list[dict[str, Any]],
+    watermark: datetime,
+) -> dict[str, Any]:
+    """since가 있으면 ``delta``, 없으면 ``full`` 한 페이지를 내는 가짜 weather로 적재한다."""
+    import kortravelmap.dagster.weather_state as weather_state
+
+    seen: list[str | None] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        since = request.url.params.get("since")
+        seen.append(since)
+        rows = delta if since else full
+        return httpx.Response(200, json={
+            "items": rows, "meta": _meta(len(rows), next_since=watermark.isoformat()),
+        })
+
+    def client(**kwargs: Any) -> httpx.AsyncClient:
+        return _REAL_ASYNC_CLIENT(transport=httpx.MockTransport(handler), **kwargs)
+
+    spec = next(s for s in weather_state.WEATHER_STATE_SPECS if s.dataset.style == "short")
+    spec = replace(spec, dataset=replace(dataset, guard=LENIENT))
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(weather_state.httpx, "AsyncClient", client)
+        metadata = await weather_state.load_weather_state(
+            spec, settings=_weather_settings(), run_id="run-delta", allow_shrink=False,
+            store=store,
+        )
+    metadata["_seen_since"] = seen
+    return metadata
+
+
+async def _generation_values(store: ValkeyStateStore, dataset: str) -> dict[str, bytes]:
+    meta = await store.current_meta(dataset)
+    return await store.generation_items(dataset, meta.generation)
+
+
+async def test_forecast_delta_generation_is_byte_equal_to_a_full_pull(
+    store: ValkeyStateStore, api: httpx.AsyncClient
+) -> None:
+    """전량 → 증분 병합 세대가, 같은 시점의 전량 세대와 값이 바이트까지 같다(ADR-122)."""
+    w0 = datetime.now(UTC) - timedelta(hours=1)
+    w1 = w0 + timedelta(minutes=30)
+    a0 = _delta_group("a", w0 - timedelta(minutes=5), 1.0)
+    b0 = _delta_group("b", w0 - timedelta(minutes=5), 2.0)
+    b1 = _delta_group("b", w0 + timedelta(minutes=10), 9.0)  # since 뒤 재공개
+    c1 = _delta_group("c", w0 + timedelta(minutes=10), 4.0)  # since 뒤 새 위치
+    delta_ds = replace(DATASET_FORECAST_SHORT, name="weather.forecast_short")
+    check_ds = replace(DATASET_FORECAST_SHORT, name="weather.forecast_short_fullcheck")
+
+    first = await _load_forecasts(store, delta_ds, [a0, b0], [], w0)
+    assert first["sync_mode"] == "full"
+    assert first["_seen_since"] == [None]
+    second = await _load_forecasts(store, delta_ds, [a0, b1, c1], [b1, c1], w1)
+    assert second["sync_mode"] == "delta"
+    assert [datetime.fromisoformat(s) for s in second["_seen_since"] if s] == [w0]
+    assert second["previous_generation"] == first["generation"]
+    await _load_forecasts(store, check_ds, [a0, b1, c1], [], w1)
+
+    merged = await _generation_values(store, delta_ds.name)
+    full = await _generation_values(store, check_ds.name)
+    assert merged == full
+    assert len(merged) == 3
+
+    meta = await store.current_meta(delta_ds.name)
+    assert meta.sync_mode == "delta"
+    assert meta.sync_cursor == w1
+    assert meta.full_synced_at is not None
+    assert (await store.recent_counts(delta_ds.name)) == [2]  # 증분은 거부 기준 창에 넣지 않는다
+
+    response = await api.get(
+        f"/v1/service/weather/locations/{weather_location_feature_id('b')}",
+        params={"sections": "forecasts", "forecast_styles": "short"},
+    )
+    assert response.status_code == 200, response.text
+    (group,) = response.json()["data"]["forecasts"]["short"]["groups"]
+    assert group["metrics"]["TMP"] == [9.0, 10.0]
+
+
+async def test_delta_swap_refuses_when_its_base_generation_is_no_longer_current(
+    store: ValkeyStateStore,
+) -> None:
+    from kortravelmap.infra.valkey_state import StateItem, StateSwapConflict
+
+    now = datetime.now(UTC)
+    first = await store.swap(
+        "t.delta", [StateItem(id="x", value="1")], guard=LENIENT,
+        source_collected_at=None, loaded_at=now,
+    )
+    moved = await store.swap(
+        "t.delta", [StateItem(id="x", value="2")], guard=LENIENT,
+        source_collected_at=None, loaded_at=now,
+    )
+    with pytest.raises(StateSwapConflict):
+        await store.swap(
+            "t.delta", [StateItem(id="x", value="3")], guard=LENIENT,
+            source_collected_at=None, loaded_at=now, apply_guard=False,
+            require_base=first.meta.generation,
+        )
+    assert await store.current_generation("t.delta") == moved.meta.generation
+    keys = [key async for key in store.client.scan_iter(match="ktm:state:v1:t.delta:*:meta")]
+    assert len(keys) == 2  # 거부된 증분은 세대 키를 남기지 않는다
+
+
+async def test_unguarded_swap_neither_checks_nor_records_the_shrink_baseline(
+    store: ValkeyStateStore,
+) -> None:
+    from kortravelmap.infra.valkey_state import StateItem
+
+    now = datetime.now(UTC)
+    strict = ShrinkGuard(min_ratio=0.9, baseline_min=2, min_count=3)
+    items = [StateItem(id=f"x{i}", value="1") for i in range(5)]
+    base = await store.swap(
+        "t.unguarded", items, guard=strict, source_collected_at=None, loaded_at=now,
+    )
+    result = await store.swap(
+        "t.unguarded", items[:1], guard=strict, source_collected_at=None, loaded_at=now,
+        apply_guard=False, require_base=base.meta.generation, sync_mode="delta",
+        sync_cursor=now, full_synced_at=now - timedelta(hours=1), row_duplicates=0,
+    )
+    assert result.meta.count == 1
+    assert await store.recent_counts("t.unguarded") == [5]
+    meta = await store.current_meta("t.unguarded")
+    assert (meta.sync_mode, meta.row_duplicates) == ("delta", 0)
+    assert meta.sync_cursor == now.astimezone(UTC)
+    assert await store.generation_items("t.unguarded", meta.generation) == {"x0": b"1"}

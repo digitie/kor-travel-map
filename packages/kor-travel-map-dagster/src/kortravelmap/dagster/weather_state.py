@@ -20,6 +20,11 @@ D3·D4와 "2단계" W3·W4가 정본이다.
   재시도 대상이고, 401·404·계약 위반·JSON 아님·교체 거부·동시 교체·Valkey OOM·미설정은 step
   재시도를 끈다.
 - 다른 적재가 같은 데이터셋을 잡고 있으면(잠금) 이번 run은 아무것도 하지 않고 성공으로 끝난다.
+- **예보(W3)는 증분이다(ADR-122).** 지금 세대 meta의 cursor(직전 ``next_since``)로 ``since``를
+  보내 바뀐 묶음만 받고, 지금 세대에 병합한 새 세대를 같은 CAS 교체로 올린다(그 세대가 아직
+  current일 때만). cursor가 없거나·전량 주기가 됐거나·운영자가 요청했거나·증분을 믿을 수 없으면
+  (422·cursor 역행·계약 위반·기준 세대 불일치) 같은 run에서 전량을 받는다. 거부 기준(D4)은 전량에만
+  건다.
 """
 
 # ``from __future__ import annotations``를 쓰지 않는다 — Dagster가 op의 ``context`` 주석을
@@ -33,11 +38,12 @@ import time
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextvars import ContextVar
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Final, TypeVar
 
 import httpx
+from kortravelmap.dto.weather_state import WeatherForecastState
 from kortravelmap.infra.valkey_state import (
     GenerationMeta,
     StateItem,
@@ -80,13 +86,16 @@ from kortravelmap.providers.kor_travel_weather_state import (
     DATASET_LOCATIONS,
     CurrentGrouper,
     DailySummaryGrouper,
+    ForecastDeltaRefused,
     ForecastGrouper,
+    ForecastMerge,
     WeatherStateDataset,
     earliest_or_none,
     location_state_items,
+    merge_forecast_delta,
 )
 from kortravelmap.settings import KorTravelMapSettings
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 from dagster import (
     MAX_RUNTIME_SECONDS_TAG,
@@ -119,6 +128,7 @@ __all__ = [
     "WEATHER_STATE_RETRY_POLICY",
     "WEATHER_STATE_SCHEDULES",
     "WEATHER_STATE_SPECS",
+    "ForecastSyncPlan",
     "WeatherCollected",
     "WeatherExportNotConfigured",
     "WeatherFetch",
@@ -127,6 +137,7 @@ __all__ = [
     "fetch_weather_daily_summaries",
     "fetch_weather_forecasts",
     "fetch_weather_locations",
+    "forecast_sync_plan",
     "load_weather_state",
     "weather_http_timeout",
     "weather_lock_ttl_seconds",
@@ -459,6 +470,8 @@ class WeatherFetch:
     """첫 페이지 ETag(다음 적재의 ``If-None-Match``)."""
     not_modified: bool = False
     """첫 페이지가 304였다 — ``rows``는 비었고 지금 세대가 그대로 맞다."""
+    next_since: datetime | None = None
+    """W3 publication watermark(모든 페이지가 같아야 한다). 다음 증분의 ``since``(ADR-122)."""
 
 
 async def _read_all_pages(
@@ -524,6 +537,7 @@ async def _walk_pages(
     collected: list[datetime | None] = []
     statuses: set[str] = set()
     snapshot_id: str | None = None
+    next_since: datetime | None = None
     etag: str | None = None
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -553,9 +567,15 @@ async def _walk_pages(
         page = parse(_weather_json(response, path))
         if page_number == 1:
             snapshot_id = page.meta.snapshot_id
+            next_since = page.meta.next_since
         elif page.meta.snapshot_id != snapshot_id:
             raise WeatherExportContractError(
                 f"{path}: 페이지 {page_number}의 snapshot_id가 첫 페이지와 다르다."
+            )
+        elif page.meta.next_since != next_since:
+            # watermark는 snapshot manifest 하나의 값이다 — 페이지마다 다르면 cursor를 믿을 수 없다.
+            raise WeatherExportContractError(
+                f"{path}: 페이지 {page_number}의 next_since가 첫 페이지와 다르다."
             )
         rows.extend(page.items)
         collected.append(page.meta.source_collected_at)
@@ -568,6 +588,7 @@ async def _walk_pages(
                 pages=page_number,
                 snapshot_id=snapshot_id,
                 etag=etag,
+                next_since=next_since,
             )
         next_cursor = page.meta.next_cursor
         assert next_cursor is not None  # 파서가 보장한다.
@@ -605,13 +626,21 @@ async def fetch_weather_current(
 
 
 async def fetch_weather_forecasts(
-    settings: KorTravelMapSettings, style: str, *, if_none_match: str | None = None
+    settings: KorTravelMapSettings,
+    style: str,
+    *,
+    if_none_match: str | None = None,
+    since: datetime | None = None,
 ) -> WeatherFetch:
-    """W3 한 style의 예보 묶음 전체(증분 ``since`` 없이 전량 — ADR-114 W3)."""
+    """W3 한 style의 예보 묶음. ``since``가 없으면 전량, 있으면 그 watermark 뒤에 공개된 승인
+    scope의 묶음만이다(ADR-122). 페이지마다 같은 ``since``를 보낸다(cursor가 그 질의에 묶인다)."""
+    params: dict[str, Any] = {"style": style, "limit": settings.kor_travel_weather_page_size}
+    if since is not None:
+        params["since"] = since.isoformat()
     return await _read_all_pages(
         settings,
         EXPORT_PATH_FORECASTS,
-        {"style": style, "limit": settings.kor_travel_weather_page_size},
+        params,
         lambda payload: parse_forecast_page(payload, style=style),
         if_none_match,
     )
@@ -684,6 +713,20 @@ def _forecast_collector(dataset: WeatherStateDataset) -> Collector:
     return _collect
 
 
+DeltaFetcher = Callable[[KorTravelMapSettings, datetime], Awaitable[WeatherFetch]]
+"""``(settings, since)`` → 그 watermark 뒤의 예보 묶음(ADR-122)."""
+
+
+def _forecast_delta_fetcher(dataset: WeatherStateDataset) -> DeltaFetcher:
+    style = dataset.style
+    assert style is not None
+
+    async def _fetch(settings: KorTravelMapSettings, since: datetime) -> WeatherFetch:
+        return await fetch_weather_forecasts(settings, style, since=since)
+
+    return _fetch
+
+
 async def _collect_daily_summaries(
     settings: KorTravelMapSettings, if_none_match: str | None
 ) -> WeatherCollected:
@@ -706,6 +749,8 @@ class WeatherStateJobSpec:
     max_runtime_seconds: int
     collect: Collector
     description: str
+    delta: DeltaFetcher | None = None
+    """있으면 ``since`` 증분을 지금 세대에 병합할 수 있다(W3 예보, ADR-122). ``collect``는 전량."""
 
 
 def _spec(
@@ -724,6 +769,7 @@ def _spec(
         max_runtime_seconds=max_runtime_seconds,
         collect=collect,
         description=description,
+        delta=_forecast_delta_fetcher(dataset) if dataset.style is not None else None,
     )
 
 
@@ -741,8 +787,12 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
         _forecast_collector(DATASET_FORECAST_ULTRA_SHORT),
         "weather 초단기예보(W3 ultra_short) → Valkey 세대 교체(매시 :48).",
     ),
+    # 단기·외부 상한은 증분이 아니라 **전량 재동기화**(첫 적재·하루 한 번·증분 거절 뒤)에 맞춘다.
+    # odroid eMMC cold 전량은 단기 약 1,174초·외부 약 674초인데, 1,500·1,200초 상한에서 run이
+    # 1,514·1,201초에 ReadTimeout으로 죽었다(2026-11-10). 증분 거절 뒤 같은 run의 전량까지 들게
+    # 늘리되, lock TTL(상한 + 660초)은 3시간 발화 간격 안이다(ADR-122).
     _spec(
-        DATASET_FORECAST_SHORT, "forecast_short", "30 2-23/3 * * *", 1_500,
+        DATASET_FORECAST_SHORT, "forecast_short", "30 2-23/3 * * *", 3_600,
         _forecast_collector(DATASET_FORECAST_SHORT),
         "weather 단기예보(W3 short) → Valkey 세대 교체(하루 8회, 발표 02·05…23시 뒤 :30).",
     ),
@@ -752,7 +802,7 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
         "weather 중기예보(W3 mid) → Valkey 세대 교체(발표 06·18시 뒤, 한 시간 뒤 한 번 더).",
     ),
     _spec(
-        DATASET_FORECAST_EXTERNAL, "forecast_external", "55 */3 * * *", 1_200,
+        DATASET_FORECAST_EXTERNAL, "forecast_external", "55 */3 * * *", 2_400,
         _forecast_collector(DATASET_FORECAST_EXTERNAL),
         "weather 외부 provider 예보(W3 external) → Valkey 세대 교체(3시간마다).",
     ),
@@ -821,6 +871,196 @@ async def _current_meta_or_none(store: ValkeyStateStore, dataset: str) -> Genera
         return None
 
 
+_FULL_RESYNC_SLACK: Final[timedelta] = timedelta(minutes=15)
+"""전량 주기 판정의 여유. 전량 시각은 run 시작 시각이라, 하루 뒤 같은 cron tick이 몇 초 일찍
+시작해도 그 tick이 전량이 되게 한다(늦어지는 쪽으로 3시간씩 밀리지 않게)."""
+
+
+@dataclass(frozen=True, slots=True)
+class ForecastSyncPlan:
+    """이번 예보 적재의 방식. ``since``가 있으면 증분, 없으면 전량이고 ``reason``이 그 이유다."""
+
+    since: datetime | None
+    reason: str
+
+
+def forecast_sync_plan(
+    current: GenerationMeta | None,
+    *,
+    now: datetime,
+    full_resync_hours: float,
+    allow_shrink: bool,
+    full_resync: bool,
+) -> ForecastSyncPlan:
+    """증분을 쓸 수 있는가(ADR-122). 증분은 **전량에서 시작한 사슬**의 다음 고리일 때만이다."""
+    if full_resync_hours <= 0:
+        return ForecastSyncPlan(None, "delta_disabled")
+    if allow_shrink:
+        return ForecastSyncPlan(None, "allow_shrink")
+    if full_resync:
+        return ForecastSyncPlan(None, "requested")
+    if current is None:
+        return ForecastSyncPlan(None, "not_loaded")
+    if (
+        current.sync_cursor is None
+        or current.full_synced_at is None
+        or current.row_duplicates is None
+    ):
+        # 증분 이전 코드가 쓴 세대(cursor 없음)거나 meta가 덜 찼다.
+        return ForecastSyncPlan(None, "no_cursor")
+    if current.row_duplicates > 0:
+        # 전량의 "같은 (위치, provider) 첫 행" 선택을 증분이 재현할 수 없다.
+        return ForecastSyncPlan(None, "base_row_duplicates")
+    due = current.full_synced_at + timedelta(hours=full_resync_hours) - _FULL_RESYNC_SLACK
+    if now >= due or current.full_synced_at > now + _FULL_RESYNC_SLACK:
+        # 미래의 전량 시각은 시계 이상이다 — 믿지 않고 전량으로 다시 시작한다.
+        return ForecastSyncPlan(None, "periodic")
+    return ForecastSyncPlan(current.sync_cursor, "delta")
+
+
+class _FullResyncNeeded(Exception):
+    """증분을 이번 run에서 믿을 수 없다 — 같은 run에서 전량으로 다시 받는다."""
+
+    def __init__(self, reason: str, message: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+
+class _DeltaUnavailable(Exception):
+    """증분 요청이 503(재시도 소진)이다 — 지금 세대가 weather 전량 fallback 이상이라 그대로 둔다."""
+
+
+@dataclass(frozen=True, slots=True)
+class _DeltaReady:
+    fetch: WeatherFetch
+    merge: ForecastMerge
+    since: datetime
+    next_since: datetime
+
+
+async def _prepare_forecast_delta(
+    spec: WeatherStateJobSpec,
+    store: ValkeyStateStore,
+    current: GenerationMeta,
+    since: datetime,
+    settings: KorTravelMapSettings,
+) -> _DeltaReady:
+    """증분을 받아 지금 세대에 병합한다(아직 쓰지 않는다).
+
+    믿을 수 없으면 :class:`_FullResyncNeeded`, 503이면 :class:`_DeltaUnavailable`.
+    """
+    assert spec.delta is not None
+    assert spec.dataset.style is not None
+    try:
+        fetch = await spec.delta(settings, since)
+    except WeatherExportNotReady as exc:
+        # weather는 얼리지 못하면 같은 선택(since 포함)의 직전 snapshot을 낸다.
+        # 새 since에는 그것이 없어 503이다. 전량이었다면 직전 전량 snapshot
+        # (이미 병합한 것 이하)을 받았을 것이라 바꿀 것이 없다. 세대·cursor를
+        # 그대로 두고 run은 성공한다(다음 tick이 같은 since로 다시 묻는다).
+        raise _DeltaUnavailable(str(exc)) from exc
+    except _WeatherCursorRejected as exc:
+        # 첫 페이지 422 — weather가 이 watermark를 발급한 적이 없거나
+        # (DB 복원·재설치) 질의가 틀렸다.
+        raise _FullResyncNeeded("cursor_rejected", str(exc)) from exc
+    if fetch.next_since is None:
+        raise _FullResyncNeeded("no_next_since", "증분 응답에 next_since가 없다.")
+    if fetch.next_since < since:
+        raise _FullResyncNeeded(
+            "cursor_regressed",
+            f"next_since {fetch.next_since.isoformat()}가 since {since.isoformat()}보다 이르다.",
+        )
+    raw = await store.generation_items(spec.dataset.name, current.generation)
+    if len(raw) != current.count:
+        # 기준 세대가 meta와 다르다(부분 유실·grace 만료 중 읽기) — 병합하면 빠진 위치가 사라진다.
+        raise _FullResyncNeeded(
+            "base_count_mismatch",
+            f"기준 세대 {current.generation} 값 {len(raw)}건 ≠ meta {current.count}건.",
+        )
+    try:
+        base = [WeatherForecastState.model_validate_json(value) for value in raw.values()]
+    except ValidationError as exc:
+        raise _FullResyncNeeded("base_unreadable", "기준 세대 값이 모델과 맞지 않는다.") from exc
+    try:
+        merge = merge_forecast_delta(
+            base, fetch.rows, style=spec.dataset.style, since=since, now=datetime.now(UTC)
+        )
+    except ForecastDeltaRefused as exc:
+        raise _FullResyncNeeded(exc.reason, str(exc)) from exc
+    return _DeltaReady(fetch=fetch, merge=merge, since=since, next_since=fetch.next_since)
+
+
+async def _swap_forecast_delta(
+    spec: WeatherStateJobSpec,
+    store: ValkeyStateStore,
+    current: GenerationMeta,
+    ready: _DeltaReady,
+    *,
+    run_id: str | None,
+    upstream: Any,
+) -> dict[str, Any]:
+    """병합한 세대를 **읽은 기준 세대가 아직 current일 때만** 올린다(ADR-122)."""
+    result = await store.swap(
+        spec.dataset.name,
+        ready.merge.items,
+        guard=spec.dataset.guard,
+        source_collected_at=ready.fetch.source_collected_at,
+        loaded_at=datetime.now(UTC),
+        run_id=run_id,
+        allow_shrink=False,
+        source_status=ready.fetch.source_status,
+        source_etag=None,
+        apply_guard=False,
+        require_base=current.generation,
+        sync_mode="delta",
+        sync_cursor=ready.next_since,
+        full_synced_at=current.full_synced_at,
+        row_duplicates=0,
+    )
+    try:
+        retired = await store.retire_other_versions(spec.dataset.name)
+    except StateStoreError:
+        retired = -1
+    merge = ready.merge
+    _LOGGER.info(
+        "weather %s 증분: since=%s next_since=%s 묶음 %d(교체 %d·추가 %d) 이어 옴 %d(잘림 %d) "
+        "만료 %d → %d곳",
+        spec.dataset.name, ready.since.isoformat(), ready.next_since.isoformat(),
+        merge.delta_rows, merge.replaced, merge.added, merge.carried, merge.trimmed,
+        merge.expired, result.meta.count,
+    )
+    metadata: dict[str, Any] = {
+        "dataset": spec.dataset.name,
+        "sync_mode": "delta",
+        "resync_reason": "",
+        "generation": result.meta.generation,
+        "previous_generation": result.previous_generation or "",
+        "count": result.meta.count,
+        "since": ready.since.isoformat(),
+        "next_since": ready.next_since.isoformat(),
+        "full_synced_at": (
+            current.full_synced_at.isoformat() if current.full_synced_at is not None else ""
+        ),
+        "delta_rows": merge.delta_rows,
+        "delta_replaced": merge.replaced,
+        "delta_added": merge.added,
+        "carried": merge.carried,
+        "trimmed_groups": merge.trimmed,
+        "expired_groups": merge.expired,
+        "pages": ready.fetch.pages,
+        "source_collected_at": (
+            result.meta.source_collected_at.isoformat()
+            if result.meta.source_collected_at is not None
+            else ""
+        ),
+        "source_status": ready.fetch.source_status,
+        "retired_other_version_keys": retired,
+    }
+    if upstream is not None:
+        metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
+    return metadata
+
+
 async def load_weather_state(
     spec: WeatherStateJobSpec,
     *,
@@ -829,11 +1069,14 @@ async def load_weather_state(
     allow_shrink: bool,
     store: ValkeyStateStore | None = None,
     deadline: float | None = None,
+    full_resync: bool = False,
 ) -> dict[str, Any]:
     """한 데이터셋을 받아 Valkey 세대를 교체한다. 반환값은 op metadata다.
 
     ``store``를 넘기지 않으면 settings로 client를 만들고 끝나면 닫는다. ``deadline``
     (monotonic)을 넘기면 그 뒤로는 503 페이지 재시도를 시작하지 않는다(:func:`_run_deadline`).
+    예보(``spec.delta``)는 :func:`forecast_sync_plan`이 증분을 고르면 증분을 병합하고, 그 증분을
+    믿을 수 없으면 같은 run에서 전량으로 다시 받는다(ADR-122). ``full_resync``는 운영자 요청이다.
     """
     owned = store is None
     try:
@@ -847,12 +1090,67 @@ async def load_weather_state(
             if not acquired:
                 return {"dataset": spec.dataset.name, "skipped": "locked"}
             current = await _current_meta_or_none(active, spec.dataset.name)
-            etag = current.source_etag if current is not None and not allow_shrink else None
+            started = datetime.now(UTC)
+            plan: ForecastSyncPlan | None = None
+            if spec.delta is not None:
+                plan = forecast_sync_plan(
+                    current,
+                    now=started,
+                    full_resync_hours=settings.weather_forecast_full_resync_hours,
+                    allow_shrink=allow_shrink,
+                    full_resync=full_resync,
+                )
+            resync_reason = plan.reason if plan is not None else ""
+            # 예보 전량은 If-None-Match를 보내지 않는다 — 304는 cursor·전량 시각을
+            # 다시 잡지 못해, 증분을 거절한 뒤의 전량이 304로 끝나면 run마다
+            # 거절 → 304가 되풀이된다(ADR-122 리뷰).
+            etag = (
+                current.source_etag
+                if current is not None and not allow_shrink and spec.delta is None
+                else None
+            )
             with (
                 counting_upstream_requests(),
                 sharing_run_retry_budget(),
                 _paging_deadline(deadline),
             ):
+                ready: _DeltaReady | None = None
+                if plan is not None and plan.since is not None and current is not None:
+                    try:
+                        ready = await _prepare_forecast_delta(
+                            spec, active, current, plan.since, settings
+                        )
+                    except _DeltaUnavailable as exc:
+                        _LOGGER.warning(
+                            "weather %s 증분이 503이다 — 세대·cursor를 그대로 둔다: %s",
+                            spec.dataset.name, exc,
+                        )
+                        unavailable: dict[str, Any] = {
+                            "dataset": spec.dataset.name,
+                            "unchanged": "delta_unavailable",
+                            "sync_mode": "delta",
+                            "generation": current.generation,
+                            "since": plan.since.isoformat(),
+                        }
+                        observed = observed_upstream_requests()
+                        if observed is not None:
+                            unavailable[UPSTREAM_REQUESTS_METADATA_KEY] = observed
+                        return unavailable
+                    except _FullResyncNeeded as exc:
+                        resync_reason = exc.reason
+                        _LOGGER.warning(
+                            "weather %s 증분을 버리고 전량으로 다시 받는다(%s): %s",
+                            spec.dataset.name, exc.reason, exc,
+                        )
+                    except Exception as exc:
+                        _raise_terminal_if_weather_unrecoverable(exc)
+                        raise
+                if ready is not None:
+                    upstream = observed_upstream_requests()
+                    assert current is not None
+                    return await _swap_forecast_delta(
+                        spec, active, current, ready, run_id=run_id, upstream=upstream
+                    )
                 try:
                     collected = await spec.collect(settings, etag)
                 except Exception as exc:
@@ -873,6 +1171,7 @@ async def load_weather_state(
                 if upstream is not None:
                     unchanged[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
                 return unchanged
+            forecast = spec.delta is not None
             result = await active.swap(
                 spec.dataset.name,
                 collected.items,
@@ -883,6 +1182,12 @@ async def load_weather_state(
                 allow_shrink=allow_shrink,
                 source_status=collected.fetch.source_status,
                 source_etag=collected.fetch.etag,
+                # 예보 전량은 증분 사슬의 시작이다 — cursor와 전량 시각(run 시작)을
+                # 세대와 함께 둔다.
+                sync_mode="full" if forecast else None,
+                sync_cursor=collected.fetch.next_since if forecast else None,
+                full_synced_at=started if forecast else None,
+                row_duplicates=collected.row_duplicates if forecast else None,
             )
             try:
                 retired = await active.retire_other_versions(spec.dataset.name)
@@ -908,6 +1213,19 @@ async def load_weather_state(
             "guard_override": result.meta.guard_override,
             "retired_other_version_keys": retired,
         }
+        if forecast:
+            metadata["sync_mode"] = "full"
+            metadata["resync_reason"] = resync_reason
+            metadata["next_since"] = (
+                collected.fetch.next_since.isoformat()
+                if collected.fetch.next_since is not None
+                else ""
+            )
+            metadata["full_synced_at"] = started.isoformat()
+            _LOGGER.info(
+                "weather %s 전량(%s): %d곳, next_since=%s",
+                spec.dataset.name, resync_reason, result.meta.count, metadata["next_since"],
+            )
         if upstream is not None:
             metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
         return metadata
@@ -941,6 +1259,15 @@ _OP_CONFIG: Final[dict[str, Field]] = {
         description=(
             "true면 비정상 집합 거부(ADR-114 D4)를 이번 한 번 넘긴다. 원천이 진짜로 줄었을 때만 "
             "쓴다 — 세대 meta에 guard_override=1로 남는다."
+        ),
+    ),
+    "full_resync": Field(
+        bool,
+        default_value=False,
+        is_required=False,
+        description=(
+            "true면 예보(W3) 증분 대신 이번 한 번 전량을 받는다(ADR-122). 거부 기준은 그대로 건다. "
+            "예보가 아닌 데이터셋은 언제나 전량이라 영향이 없다."
         ),
     ),
 }
@@ -987,6 +1314,7 @@ def _build_job(spec: WeatherStateJobSpec) -> JobDefinition:
             run_id=context.run_id,
             allow_shrink=bool(context.op_config.get("allow_shrink", False)),
             deadline=_run_deadline(context, spec),
+            full_resync=bool(context.op_config.get("full_resync", False)),
         )
         if metadata.get("skipped"):
             context.log.info("%s: 다른 적재가 잠금을 쥐고 있어 건너뛴다.", spec.dataset.name)
