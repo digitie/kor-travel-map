@@ -10,6 +10,7 @@ from kortravelmap.core.theme_attach import (
     decide_attach,
     haversine_m,
     normalize_place_name,
+    pair_rejection,
     plan_existing_features,
     trigram_similarity,
 )
@@ -175,6 +176,7 @@ def _pf(
     place_list: bool = False,
     pet_business: bool = False,
     candidates: tuple[AttachCandidate, ...] = (),
+    public: bool = True,
 ) -> PlanFeature:
     return PlanFeature(
         feature_id=fid,
@@ -185,6 +187,7 @@ def _pf(
         pet_business=pet_business,
         master_category_prefixes=None,
         candidates=candidates,
+        public=public,
     )
 
 
@@ -221,10 +224,80 @@ def test_plan_retire_attach_collapse_keep() -> None:
 def test_plan_tier2_edge_to_attaching_feature_follows_master() -> None:
     features = [
         _pf("a", candidates=(_c("M", "수성유원지", 20),)),
-        _pf("b", candidates=(_c("a", "수성유원지", 5, tier=2),)),
+        _pf("b", candidates=(_c("a", "수성유원지", 5, tier=2), _c("M", "수성유원지", 25))),
     ]
     plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
     assert (plan["b"].action, plan["b"].target_feature_id) == ("attach", "M")
+
+
+def test_plan_inherited_attach_requires_own_acceptance() -> None:
+    # b는 a에만 가깝고 master M은 자기 규칙으로 받지 못한다(후보에 없다) — 물려받지 않는다.
+    features = [
+        _pf("a", candidates=(_c("M", "수성유원지", 20),)),
+        _pf("b", candidates=(_c("a", "수성유원지", 5, tier=2),)),
+    ]
+    plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
+    assert plan["b"].action == "ambiguous"
+    assert plan["b"].evidence["reason"] == "inherited_unaccepted"
+
+
+def test_plan_collapse_survivor_must_be_public() -> None:
+    features = [
+        _pf(
+            "hidden",
+            name="대구미술관",
+            created="1",
+            place_list=True,
+            public=False,
+            candidates=(_c("shown", "대구미술관", 5, tier=2),),
+        ),
+        _pf(
+            "shown",
+            name="대구미술관",
+            created="2",
+            candidates=(_c("hidden", "대구미술관", 5, tier=2),),
+        ),
+    ]
+    plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
+    assert (plan["shown"].action, plan["shown"].target_feature_id) == ("keep", None)
+    assert (plan["hidden"].action, plan["hidden"].target_feature_id) == ("collapse", "shown")
+
+
+def test_plan_collapse_without_public_member_is_ambiguous() -> None:
+    features = [
+        _pf("x", name="대구미술관", public=False, candidates=(_c("y", "대구미술관", 5, tier=2),)),
+        _pf("y", name="대구미술관", public=False, candidates=(_c("x", "대구미술관", 5, tier=2),)),
+    ]
+    plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
+    assert {plan["x"].action, plan["y"].action} == {"ambiguous"}
+    assert plan["x"].evidence["reason"] == "no_public_survivor"
+
+
+@pytest.mark.parametrize(
+    ("own", "other", "distance", "reason"),
+    [
+        ("JTN아트홀3관", "JTN아트홀", 0.0, "subfacility"),
+        ("국립공원 야영장", "국립공원", 10.0, "subfacility"),
+        ("숲의공원A", "숲의공원B", 5.0, "numbered_unit"),
+        ("맨션 489-8", "맨션 489-10", 5.0, "numbered_unit"),
+        ("레전드야구존 2호점", "레전드야구존", 139.0, "one_sided_branch"),
+        ("스타벅스(강남점)", "스타벅스(역삼점)", 5.0, "branch_mismatch"),
+        ("QED 광진점", "QED", 0.0, None),
+        ("국립중앙박물관", "국립중앙박물관", 40.0, None),
+    ],
+)
+def test_pair_rejection(own: str, other: str, distance: float, reason: str | None) -> None:
+    assert (
+        pair_rejection(normalize_place_name(own), normalize_place_name(other), distance)
+        == reason
+    )
+
+
+def test_subfacility_is_not_attached() -> None:
+    decision = decide_attach(
+        "JTN아트홀3관", [_c("m1", "JTN아트홀", 0)], master_category_prefixes=None
+    )
+    assert decision.state == "none"
 
 
 def test_plan_does_not_collapse_into_retiring_pet_business() -> None:
@@ -271,10 +344,13 @@ def test_plan_inherited_attach_rechecks_own_category() -> None:
             place_list=True,
             pet_business=False,
             master_category_prefixes=("0104",),
-            candidates=(_c("barrier", "책읽는식당", 3, tier=2),),
+            candidates=(
+                _c("barrier", "책읽는식당", 3, tier=2),
+                _c("M", "책읽는식당", 12, category="02010000"),
+            ),
         ),
     ]
     plan = {entry.feature_id: entry for entry in plan_existing_features(features)}
     assert (plan["barrier"].action, plan["barrier"].target_feature_id) == ("attach", "M")
     assert plan["kids"].action == "ambiguous"
-    assert plan["kids"].evidence["reason"] == "inherited_master_category"
+    assert plan["kids"].evidence["reason"] == "inherited_unaccepted"

@@ -332,7 +332,39 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="퇴역 예정 Feature를 feature_id<TAB>action<TAB>target 한 줄씩 쓸 파일.",
     )
+    plan_p.add_argument(
+        "--plan-out",
+        default=None,
+        help="전환 실행 계획(JSON, plan_sha256 포함)을 쓸 파일 — mcst-theme-transition 입력.",
+    )
     plan_p.set_defaults(func=_cmd_mcst_theme_plan)
+
+    transition_p = sub.add_parser(
+        "mcst-theme-transition",
+        help=(
+            "ADR-121 전환 계획을 batch로 실행한다. 기본은 리허설(batch마다 되감음). "
+            "--execute는 되돌릴 수 없다 — --confirm-plan-sha256이 계획과 같아야 한다. "
+            "DSN은 API runtime 로그인(ktm_feature_service)이어야 한다."
+        ),
+    )
+    transition_p.add_argument("plan_file", help="mcst-theme-plan --plan-out이 쓴 계획 JSON.")
+    transition_p.add_argument("--batch-size", type=int, default=500)
+    transition_p.add_argument(
+        "--max-batches", type=int, default=None, help="앞에서부터 이 수의 batch만(시험용)."
+    )
+    transition_p.add_argument(
+        "--sample-per-action",
+        type=int,
+        default=None,
+        help="리허설 전용: action마다 앞 N개만 실행하고 되감는다.",
+    )
+    transition_p.add_argument("--execute", action="store_true", help="commit한다(되돌릴 수 없다).")
+    transition_p.add_argument(
+        "--confirm-plan-sha256",
+        default=None,
+        help="--execute일 때 필수. 계획 파일의 plan_sha256과 정확히 같아야 한다.",
+    )
+    transition_p.set_defaults(func=_cmd_mcst_theme_transition)
 
     return parser
 
@@ -768,9 +800,15 @@ async def _cmd_mcst_theme_plan(args: argparse.Namespace) -> int:
 
     engine = make_async_engine(_resolve_dsn(args))
     try:
-        report, retiring = await run_mcst_theme_plan(engine, samples=max(0, int(args.samples)))
+        report, retiring, transition = await run_mcst_theme_plan(
+            engine, samples=max(0, int(args.samples))
+        )
     finally:
         await engine.dispose()
+    if args.plan_out:
+        Path(args.plan_out).write_text(  # noqa: ASYNC240  # CLI 종료 직전 1회 쓰기
+            json.dumps(transition.as_json(), ensure_ascii=False, indent=1), encoding="utf-8"
+        )
     if args.ids_out:
         Path(args.ids_out).write_text(  # noqa: ASYNC240  # CLI 종료 직전 1회 쓰기
             "".join(
@@ -781,6 +819,43 @@ async def _cmd_mcst_theme_plan(args: argparse.Namespace) -> int:
         )
     print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
     return 0
+
+
+async def _cmd_mcst_theme_transition(args: argparse.Namespace) -> int:
+    import json
+
+    from kortravelmap.cli.mcst_theme_plan import run_mcst_theme_transition
+    from kortravelmap.infra.mcst_theme_transition_repo import load_transition_plan
+
+    try:
+        plan = load_transition_plan(
+            json.loads(Path(args.plan_file).read_text(encoding="utf-8"))  # noqa: ASYNC240
+        )
+    except (OSError, ValueError, KeyError) as exc:
+        print(f"mcst-theme-transition: 계획 파일을 읽지 못했다 — {exc}", file=sys.stderr)
+        return _EXIT_INVALID
+    if args.execute and args.confirm_plan_sha256 != plan.plan_sha256:
+        print(
+            "mcst-theme-transition: --execute에는 --confirm-plan-sha256 "
+            f"{plan.plan_sha256} 가 필요하다.",
+            file=sys.stderr,
+        )
+        return _EXIT_INVALID
+    engine = make_async_engine(_resolve_dsn(args))
+    try:
+        summary = await run_mcst_theme_transition(
+            engine,
+            plan=plan,
+            batch_size=int(args.batch_size),
+            execute=bool(args.execute),
+            max_batches=args.max_batches,
+            sample_per_action=args.sample_per_action,
+        )
+    finally:
+        await engine.dispose()
+    print(json.dumps(summary, ensure_ascii=False, indent=2, default=str))
+    # 건너뛴 Feature(stale·conflict)도 0이 아닌 종료 — 운영 창(동결 중)에서는 0이어야 한다.
+    return 1 if summary["errors"] or summary.get("skipped_items") else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:

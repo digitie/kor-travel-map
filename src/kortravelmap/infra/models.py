@@ -1208,16 +1208,31 @@ class FeatureReferenceReconciliationEventRow(Base):
             "event_sequence",
             name=conv("uq_feature_reference_reconciliation_events_sequence"),
         ),
+        # 448(ADR-121 R4): 사건 출처가 둘이다. 출처마다 생성 열에 FK를 건다 — case_id·
+        # resolution_id 열과 payload 모양은 그대로다(MCST 출처는 batch_id·item_id를 싣는다).
+        CheckConstraint(
+            "origin_kind IN ('manual_provider_dedup', 'mcst_theme_transition')",
+            name=conv("ck_feature_reference_reconciliation_events_origin"),
+        ),
         ForeignKeyConstraint(
-            ["resolution_id"],
+            ["manual_resolution_ref"],
             ["ops.manual_provider_dedup_resolutions.resolution_id"],
-            name=conv("fk_feature_reference_reconciliation_events_resolution"),
+            name=conv("fk_feature_reference_reconciliation_events_manual_resolution"),
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
-            ["case_id"],
+            ["manual_case_ref"],
             ["ops.manual_provider_dedup_cases.case_id"],
-            name=conv("fk_feature_reference_reconciliation_events_case"),
+            name=conv("fk_feature_reference_reconciliation_events_manual_case"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["mcst_batch_ref", "mcst_item_ref"],
+            [
+                "ops.mcst_theme_transition_items.batch_id",
+                "ops.mcst_theme_transition_items.item_id",
+            ],
+            name=conv("fk_feature_reference_reconciliation_events_mcst_item"),
             ondelete="RESTRICT",
         ),
         ForeignKeyConstraint(
@@ -1277,6 +1292,159 @@ class FeatureReferenceReconciliationEventRow(Base):
         DateTime(timezone=True),
         nullable=False,
         server_default=text("clock_timestamp()"),
+    )
+    origin_kind: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default=text("'manual_provider_dedup'::text")
+    )
+    manual_case_ref: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        Computed(
+            "CASE WHEN origin_kind = 'manual_provider_dedup' THEN case_id END", persisted=True
+        ),
+    )
+    manual_resolution_ref: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        Computed(
+            "CASE WHEN origin_kind = 'manual_provider_dedup' THEN resolution_id END",
+            persisted=True,
+        ),
+    )
+    mcst_batch_ref: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        Computed(
+            "CASE WHEN origin_kind = 'mcst_theme_transition' THEN case_id END", persisted=True
+        ),
+    )
+    mcst_item_ref: Mapped[str | None] = mapped_column(
+        UUID(as_uuid=False),
+        Computed(
+            "CASE WHEN origin_kind = 'mcst_theme_transition' THEN resolution_id END",
+            persisted=True,
+        ),
+    )
+
+
+class McstThemeTransitionBatchRow(Base):
+    """``ops.mcst_theme_transition_batches`` — ADR-121 R4 전환 실행 batch(448)."""
+
+    __tablename__ = "mcst_theme_transition_batches"
+    __table_args__ = (
+        UniqueConstraint("command_id", name=conv("uq_mcst_theme_transition_batches_command")),
+        UniqueConstraint(
+            "plan_sha256",
+            "batch_size",
+            "batch_index",
+            name=conv("uq_mcst_theme_transition_batches_plan_index"),
+        ),
+        CheckConstraint(
+            "plan_sha256 ~ '^[0-9a-f]{64}$' AND batch_size > 0 AND batch_index >= 0 "
+            "AND rule_version <> ''",
+            name=conv("ck_mcst_theme_transition_batches_plan"),
+        ),
+        ForeignKeyConstraint(
+            ["command_id"],
+            ["ops.domain_commands.command_id"],
+            name=conv("fk_mcst_theme_transition_batches_command"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "ops"},
+    )
+
+    batch_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    plan_sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    rule_version: Mapped[str] = mapped_column(Text, nullable=False)
+    batch_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    batch_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
+    )
+
+
+class McstThemeTransitionItemRow(Base):
+    """``ops.mcst_theme_transition_items`` — 전환된 MCST Feature 하나(448). 되돌림 근거를 담는다."""
+
+    __tablename__ = "mcst_theme_transition_items"
+    __table_args__ = (
+        UniqueConstraint("feature_id", name=conv("uq_mcst_theme_transition_items_feature")),
+        UniqueConstraint(
+            "batch_id", "item_id", name=conv("uq_mcst_theme_transition_items_batch_item")
+        ),
+        CheckConstraint(
+            "action IN ('retire', 'attach', 'collapse')",
+            name=conv("ck_mcst_theme_transition_items_action"),
+        ),
+        CheckConstraint(
+            "(action = 'retire') = (target_feature_id IS NULL) "
+            "AND (action = 'retire') = (merge_id IS NULL) "
+            "AND (target_feature_id IS NULL OR target_feature_id <> feature_id)",
+            name=conv("ck_mcst_theme_transition_items_target"),
+        ),
+        CheckConstraint(
+            "old_row_revision >= 1 AND row_revision_after > old_row_revision",
+            name=conv("ck_mcst_theme_transition_items_revisions"),
+        ),
+        CheckConstraint(
+            "jsonb_typeof(before_state) = 'object' AND jsonb_typeof(evidence) = 'object'",
+            name=conv("ck_mcst_theme_transition_items_json"),
+        ),
+        ForeignKeyConstraint(
+            ["batch_id"],
+            ["ops.mcst_theme_transition_batches.batch_id"],
+            name=conv("fk_mcst_theme_transition_items_batch"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["feature_id"],
+            ["feature.features.feature_id"],
+            name=conv("fk_mcst_theme_transition_items_feature"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["target_feature_id"],
+            ["feature.features.feature_id"],
+            name=conv("fk_mcst_theme_transition_items_target"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["transition_id"],
+            ["feature.feature_state_transitions.transition_id"],
+            name=conv("fk_mcst_theme_transition_items_transition"),
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["merge_id"],
+            ["ops.feature_merge_history.merge_id"],
+            name=conv("fk_mcst_theme_transition_items_merge"),
+            ondelete="RESTRICT",
+        ),
+        {"schema": "ops"},
+    )
+
+    item_id: Mapped[str] = mapped_column(
+        UUID(as_uuid=False),
+        primary_key=True,
+        server_default=text("x_extension.gen_random_uuid()"),
+    )
+    batch_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
+    dataset_key: Mapped[str] = mapped_column(Text, nullable=False)
+    action: Mapped[str] = mapped_column(Text, nullable=False)
+    target_feature_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    old_row_revision: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    transition_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    row_revision_after: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    merge_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False))
+    before_state: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
+    evidence: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb")
+    )
+    executed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")
     )
 
 

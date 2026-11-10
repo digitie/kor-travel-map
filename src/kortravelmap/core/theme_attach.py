@@ -47,6 +47,7 @@ __all__ = [
     "decide_attach",
     "haversine_m",
     "normalize_place_name",
+    "pair_rejection",
     "plan_existing_features",
     "trigram_similarity",
 ]
@@ -94,6 +95,31 @@ GENERIC_PLACE_NAMES: Final[frozenset[str]] = frozenset(
     }
 )
 """정규화 이름이 이 집합에 들면 일반명이다(§5.2). 값은 정규화된 형태(공백 없음)다."""
+
+SUBFACILITY_SUFFIXES: Final[tuple[str, ...]] = (
+    "농구장",
+    "테니스장",
+    "야영장",
+    "캠핑장",
+    "눈썰매장",
+    "수영장",
+    "축구장",
+    "야구장",
+    "풋살장",
+    "주차장",
+    "전시관",
+    "공연장",
+    "체육관",
+    "골프장",
+    "식당",
+    "레스토랑",
+    "카페",
+)
+"""한 이름이 다른 이름 뒤에 이 낱말을 붙인 꼴이면 부속 시설이다 — 같은 장소로 보지 않는다
+(2026-11-11 R4 표본: ``공원``↔``공원 농구장``, ``휴양림``↔``휴양림 야영장``)."""
+
+_NUMBERED_TAIL: Final[re.Pattern[str]] = re.compile(r"[0-9a-z\-]+$")
+_HALL_TAIL: Final[re.Pattern[str]] = re.compile(r"^\d+관$")
 
 _CORPORATE_MARKERS: Final[re.Pattern[str]] = re.compile(
     r"\(\s*(?:주|유|재|사|합)\s*\)|주식회사|유한회사|유한책임회사|재단법인|사단법인|합자회사|합명회사"
@@ -201,6 +227,36 @@ def accepts(distance_m: float, score: float, *, generic: bool) -> bool:
     return any(distance_m <= max_d and score >= min_s for max_d, min_s in ACCEPT_RULES)
 
 
+def pair_rejection(own: NormalizedName, other: NormalizedName, distance_m: float) -> str | None:
+    """이름 쌍을 이름 규칙만으로 거절하는 사유(없으면 ``None``). 점수 계산 전에 본다.
+
+    - 양쪽 지점 토큰이 다르면 다른 지점이다(``강남점``↔``역삼점``).
+    - 한쪽만 지점 토큰이 있으면 30m 안에서만 같은 장소로 본다(``X 2호점``↔``X``가 100m 넘게
+      떨어진 체인 지점이었다).
+    - 끝의 번호·영문 하나만 다르면 다른 동·호다(``숲의공원A``↔``B``, ``맨션 489-8``↔``489-10``,
+      ``농구장1``↔``농구장``).
+    - 한 이름이 다른 이름에 부속 시설 낱말(:data:`SUBFACILITY_SUFFIXES`)이나 ``N관``을 붙인
+      꼴이면 부속 시설이다(``JTN아트홀3관``↔``JTN아트홀``).
+    """
+
+    if own.branch is not None and other.branch is not None and own.branch != other.branch:
+        return "branch_mismatch"
+    if (own.branch is None) != (other.branch is None) and distance_m > GENERIC_ACCEPT[0]:
+        return "one_sided_branch"
+    a, b = own.core, other.core
+    if a == b:
+        return None
+    stem_a, stem_b = _NUMBERED_TAIL.sub("", a), _NUMBERED_TAIL.sub("", b)
+    if stem_a and stem_a == stem_b:
+        return "numbered_unit"
+    shorter, longer = (a, b) if len(a) <= len(b) else (b, a)
+    if shorter and longer.startswith(shorter):
+        tail = longer[len(shorter):]
+        if _HALL_TAIL.match(tail) or tail.endswith(SUBFACILITY_SUFFIXES):
+            return "subfacility"
+    return None
+
+
 def category_compatible(category: str, prefixes: Sequence[str] | None) -> bool:
     """tier 1 master 분류 호환. ``None``이면 제한 없음."""
 
@@ -262,7 +318,7 @@ def decide_attach(
         ):
             continue
         other = normalize_place_name(candidate.name)
-        if own.branch is not None and other.branch is not None and own.branch != other.branch:
+        if pair_rejection(own, other, candidate.distance_m) is not None:
             continue
         score = trigram_similarity(own.core, other.core)
         if accepts(candidate.distance_m, score, generic=generic):
@@ -271,6 +327,9 @@ def decide_attach(
     evidence_top = [
         {
             "feature_id": item.candidate.feature_id,
+            # 정밀도 표본(R4)을 사람이 읽을 수 있게 상대 이름·분류를 싣는다.
+            "name": item.candidate.name,
+            "category": item.candidate.category,
             "tier": item.candidate.tier,
             "distance_m": round(item.candidate.distance_m, 1),
             "score": round(item.score, 4),
@@ -330,6 +389,10 @@ class PlanFeature:
     pet_business: bool
     master_category_prefixes: tuple[str, ...] | None
     candidates: tuple[AttachCandidate, ...]
+    row_revision: int = 0
+    """계획 시점 ``row_revision`` — 전환 실행기가 낡은 계획을 거른다(0이면 모름)."""
+    public: bool = True
+    """published·valid인가 — 아니면 collapse 생존자가 될 수 없다(공개 색인 밖이다)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -396,11 +459,22 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
                 {**decision.evidence, "reason": "target_outside_plan"},
             )
 
-    def _master_category(source: str, master: str) -> str | None:
-        for candidate in by_id[source].candidates:
-            if candidate.feature_id == master:
-                return candidate.category
-        return None
+    def _accepts_master(source: str, master: str) -> bool:
+        """물려받는 attach는 **자기** 규칙으로도 그 master를 받아야 한다(이름·거리·분류)."""
+        feature = by_id[source]
+        own = normalize_place_name(feature.name)
+        generic = own.core in GENERIC_PLACE_NAMES
+        for candidate in feature.candidates:
+            if candidate.feature_id != master:
+                continue
+            if not category_compatible(candidate.category, feature.master_category_prefixes):
+                return False
+            other = normalize_place_name(candidate.name)
+            if pair_rejection(own, other, candidate.distance_m) is not None:
+                return False
+            score = trigram_similarity(own.core, other.core)
+            return accepts(candidate.distance_m, score, generic=generic)
+        return False
 
     # tier 2 간선 — 상대가 이미 정해졌으면 그 결과를 따른다(연쇄는 고정점까지). 상대의 attach를
     # 물려받을 때는 **자기** 분류 호환을 다시 본다(상대 목록이 분류를 보지 않았을 수 있다).
@@ -414,13 +488,13 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
             feature = by_id[source]
             action: PlanAction = settled.action
             evidence: dict[str, object] = {**evidences.get(source, {}), "via": target}
-            if action == "attach" and settled.target_feature_id is not None:
-                category = _master_category(target, settled.target_feature_id)
-                if category is None or not category_compatible(
-                    category, feature.master_category_prefixes
-                ):
-                    action = "ambiguous"
-                    evidence["reason"] = "inherited_master_category"
+            if (
+                action == "attach"
+                and settled.target_feature_id is not None
+                and not _accepts_master(source, settled.target_feature_id)
+            ):
+                action = "ambiguous"
+                evidence["reason"] = "inherited_unaccepted"
             entries[source] = PlanEntry(
                 source,
                 feature.dataset_key,
@@ -449,8 +523,20 @@ def plan_existing_features(features: Sequence[PlanFeature]) -> list[PlanEntry]:
     for node in list(parent):
         groups.setdefault(find(node), []).append(node)
     for members in groups.values():
+        public_members = [fid for fid in members if by_id[fid].public]
+        if not public_members:
+            for member in members:
+                if member not in entries:
+                    entries[member] = PlanEntry(
+                        member,
+                        by_id[member].dataset_key,
+                        "ambiguous",
+                        None,
+                        {**evidences.get(member, {}), "reason": "no_public_survivor"},
+                    )
+            continue
         survivor = min(
-            members,
+            public_members,
             key=lambda fid: (not by_id[fid].place_list, by_id[fid].created_at, fid),
         )
         for member in members:

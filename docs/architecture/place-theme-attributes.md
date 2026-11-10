@@ -403,6 +403,25 @@ dataset → entity → link로 Feature 집합을 한 번 만든다) — 행마�
 - 앵커는 옮기지 않는다. 퇴역 패자의 목록 앵커는 그대로 남고, apply 모드 적재가 그 앵커를 만나면
   병합 이력을 따라 생존자로 간다(§6.2 redirect).
 
+### 8.2.1 구현(R4, alembic 448)
+
+- 실행기 `ktmctl mcst-theme-transition <plan.json>` — 계획은 `ktmctl mcst-theme-plan --plan-out`이 쓴다
+  (항목마다 계획 시점 `row_revision`, 내용 sha `plan_sha256`). 기본은 **리허설**(batch마다 되감음),
+  `--sample-per-action N`은 action마다 앞 N개만 리허설한다. `--execute`는 `--confirm-plan-sha256`이
+  계획과 같아야 돈다.
+- batch(기본 500) 하나 = transaction 하나 = domain command 하나(`system.mcst-theme-transition.batch.v1`).
+  `(plan_sha256, batch_index)` UNIQUE라 다시 돌리면 commit된 batch는 건너뛴다. Feature마다 savepoint —
+  실패한 Feature만 되감고 다음으로 간다.
+- 신선도: 퇴역 대상이 active이고 `row_revision`이 계획과 같아야 하며(`stale_revision`), 병합 대상은
+  active·published여야 한다(`stale_target`). 아니면 아무것도 쓰지 않고 건너뛴다.
+- 장부 `ops.mcst_theme_transition_batches`·`_items`(런타임 SELECT·INSERT만): item마다 퇴역 transition,
+  병합 이력, **되돌림 근거 `before_state`**(상태·link 역할·curation item).
+- M05 사건: 사건 표에 `origin_kind`와 출처별 생성 열 FK를 더해 두 번째 출처를 받는다. writer
+  `feature.record_mcst_theme_transition_event(uuid)`(M05 procedure owner 소유)는 manual 경로와 같은 잠금
+  (`feature-curation-m05`)·sequence·payload·hash를 쓰고 `case_id`·`resolution_id`에 batch·item id를 싣는다.
+  PinVi 소비자는 두 값을 불투명 UUID로만 쓰므로 계약·OpenAPI는 그대로다(재vendor 불필요).
+- 운영 순서·되돌림은 [`docs/runbooks/mcst-theme-transition-r4.md`](../runbooks/mcst-theme-transition-r4.md).
+
 ### 8.3 PinVi 참조
 
 - PinVi는 `trip_day_pois`·`curated_plan_pois`·`feature_suggestions`에 `feature_id`/

@@ -44,6 +44,7 @@ FORWARD_ONLY_REVISIONS = (
     "444_trip_search_aliases",
     "446_mcst_place_attributes",
     "447_admin_search_trgm_indexes",
+    "448_mcst_theme_transition",
 )
 
 

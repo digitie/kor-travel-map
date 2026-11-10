@@ -2,6 +2,12 @@
 
 - 원인: lower(name) keyset을 36만 행 걸으며 행마다 ILIKE, all은 raw_data 505 MB 전 스캔. 447 비부분 trigram 6개로 후보 id를 먼저 모으고(≤2,000) 넘치면 종전 훑기. raw_data 검색 제거. D2 run_id 6~12 s→약 50 ms.
 
+## 2026-11-11 — #1468 A R4 전환 실행기
+
+- 실행기 `ktmctl mcst-theme-transition`(계획 파일 sha 확인, batch = transaction 하나, protocol EX), 장부 `ops.mcst_theme_transition_batches`·`_items`, M05 사건 출처 일반화(`origin_kind` + 출처별 생성 열 FK, payload 모양 그대로 — PinVi 재vendor 불필요).
+- 적대 리뷰 반영: batch 정체에 크기 포함, error 하나면 batch 되감고 멈춤, 사건 writer가 장부를 command·전이·병합 이력과 대조, 퇴역 master 병합 거부, 대상 quality 확인, 패자의 열린 dedup 검토 행 닫기, before_state에 대상 link·curation 행 전체.
+- 표본(규칙 고치기 전): 대부분 목록 ≈100%, 레저활동·촬영지·반려 collapse가 낮았다(부속 시설 `…3관`·`…야영장`, 번호 동, 100m 넘는 한쪽 지점). 이름 쌍 거절 규칙을 더하고 표본은 회전 뒤 다시 뽑는다.
+
 ## 2026-11-10 — #1468 A R1·R3 구현·R2 운영 dry-run
 
 - 붙임 엔진(owner·sticky·redirected·matched·created·ambiguous·unresolved), 전환 계획기 `ktmctl mcst-theme-plan`, migration 446, 속성 필터·응답·catalog·판정 조회 API.
