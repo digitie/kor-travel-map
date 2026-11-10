@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-10 — 자연휴양림 ↔ MOIS 숙박 병합 master(#1468)
+
+- 같은 시설이 산림청 자연휴양림과 MOIS 숙박 인허가에 함께 있으면 병합 master는 휴양림이다.
+
 ## 2026-11-10 — 국가유산 행사 회차 묶음과 장소 좌표(#1468 D)
 
 - 국가유산 행사는 회차마다 따로 서던 Feature를 행사 하나로 묶는다(prod 5,286건 → 약 1,316건). 회차 기간·일정 문구·`seqNo`는 행사 상세 `payload.sessions`·`schedule_texts`·`seq_nos`에 남는다. 회차별 옛 Feature는 다음 적재에서 retired로 내려간다.

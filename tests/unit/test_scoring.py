@@ -526,3 +526,18 @@ def test_master_source_prefers_highest_priority_primary_link() -> None:
     assert _best_source(
         ["python-knps-api", "python-krheritage-api"], ["knps_trails", "h"], [True, True]
     ) == ("python-knps-api", "knps_trails")
+
+@pytest.mark.unit
+def test_select_master_recreation_forest_beats_mois_lodging() -> None:
+    # 소유자 결정(2026-11-10): 휴양림 ↔ MOIS 숙박 쌍은 휴양림이 master다. MOIS가 더 최근이어도.
+    forest = MasterCandidate("f_z", has_coord=True, updated_at=_T0,
+                             provider="python-krforest-api",
+                             dataset_key="krforest_recreation_forests")
+    mois = MasterCandidate("f_a", has_coord=True, updated_at=_T1, provider="python-mois-api",
+                           dataset_key="mois_license_features_bulk")
+    assert select_master(forest, mois) == ("f_z", "f_a")
+    assert select_master(mois, forest) == ("f_z", "f_a")
+    # 같은 이름의 수목원 쌍도 여전히 휴양림이 master다.
+    arboretum = MasterCandidate("f_b", has_coord=True, updated_at=_T1,
+                                provider="python-krforest-api", dataset_key="krforest_arboretums")
+    assert select_master(arboretum, forest) == ("f_z", "f_b")
