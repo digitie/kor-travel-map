@@ -92,7 +92,7 @@ async def test_candidate_arms_use_admin_trigram_indexes(
     assert all(node.get("Relation Name") != "source_records" for node in nodes), plan
 
 
-async def test_sparse_search_reads_no_raw_source_json(
+async def test_unmatched_search_takes_candidate_path_without_source_records(
     migrated_session: AsyncSession,
 ) -> None:
     for index in range(48):
@@ -102,7 +102,9 @@ async def test_sparse_search_reads_no_raw_source_json(
         # 후보 SQL + 본 질의. 일치가 없으니 후보 경로다(본 질의가 id 배열로 시작한다).
         assert len(statements) == 2, statements
         main_sql, main_params = statements[1]
-        assert "ANY(" in main_sql, main_sql
+        # driver 문장이라 bind 이름은 없다 — 후보 절의 모양으로 가린다.
+        assert "AS uuid[]" in main_sql, main_sql
+        assert "WITH base AS MATERIALIZED (" in main_sql, main_sql
         connection = await migrated_session.connection()
         result = await connection.exec_driver_sql(
             "EXPLAIN (ANALYZE, BUFFERS, FORMAT JSON) " + main_sql, main_params
@@ -242,23 +244,55 @@ async def test_candidate_and_scan_paths_return_the_same_rows(
     monkeypatch: pytest.MonkeyPatch,
     scope: AdminFeatureSearchScope,
 ) -> None:
-    """후보 경로와 훑기 경로는 비용만 다르고 고르는 행은 같다."""
-    ids = {feature_uuid(f"admin-path-parity-{index}") for index in range(5)}
-    for index, feature_id in enumerate(sorted(ids)):
-        await _seed_feature(
-            migrated_session,
-            feature_id,
-            name=f"관리자경로동등장소 {index % 2}",
-            road_address=f"관리자경로동등도로 {index}",
+    """후보 경로와 훑기 경로는 비용만 다르고 고르는 행은 같다 — 갈래마다 하나씩."""
+    token = "pathparity7"
+
+    def fid(label: str) -> str:
+        return feature_uuid(f"admin-path-parity-{scope}-{label}")
+
+    async def seed(label: str, **kwargs: Any) -> str:
+        feature_id = fid(label)
+        defaults: dict[str, Any] = {
+            "name": f"무관한이름 {label}",
+            "entity_id": f"ext-{scope}-{label}",
+            "record_key": f"rec-{scope}-{label}",
+        }
+        await _seed_with_source_identifiers(
+            migrated_session, feature_id, **{**defaults, **kwargs}
         )
-    other = feature_uuid("admin-path-parity-source")
-    await _seed_with_source_identifiers(
-        migrated_session,
-        other,
-        name="무관한이름",
-        entity_id="ext-관리자경로동등",
-        record_key="rec-admin-path-parity-1",
+        return feature_id
+
+    by_name = await seed("name", name=f"{token} 이름")
+    by_address = await seed("address", road_address=f"{token} 도로 1")
+    by_entity = await seed("entity", entity_id=f"ext-{scope}-{token}-entity")
+    by_record = await seed("record", record_key=f"rec-{scope}-{token}-key")
+    by_many = await seed("many", name=f"{token} 여러갈래", road_address=f"{token} 도로 2")
+    by_alias = await seed("alias")
+    await migrated_session.execute(
+        text(
+            "INSERT INTO feature.feature_aliases (alias, feature_id, alias_kind) "
+            "VALUES (:alias, CAST(:feature_id AS uuid), 'legacy_feature_id')"
+        ),
+        {"alias": f"f_{token}{scope}_p_0123456789abcdef", "feature_id": by_alias},
     )
+    # head 없는 원천 entity는 종전 계획(head join)에서도 찾히지 않았다 — 두 경로 모두 뺀다.
+    headless = fid("headless")
+    migrated_session.add(_feature_row(headless, name="무관한이름 headless"))
+    await migrated_session.flush()
+    await seed_feature_subtype(migrated_session, feature_id=headless, kind="place")
+    migrated_session.add(
+        SourceEntityRow(
+            source_entity_key=f"se-headless-{scope}",
+            provider_dataset_id=await _provider_dataset_id(migrated_session),
+            source_entity_type="license_place",
+            source_entity_id=f"ext-{scope}-{token}-headless",
+            first_seen_at=_NOW,
+            last_seen_at=_NOW,
+        )
+    )
+    await migrated_session.flush()
+    migrated_session.add(_source_link(headless, f"headless-{scope}"))
+    await migrated_session.flush()
 
     async def pages(cap: int) -> list[str]:
         monkeypatch.setattr(admin_feature_repo, "_ADMIN_FEATURES_Q_CANDIDATE_CAP", cap)
@@ -267,7 +301,7 @@ async def test_candidate_and_scan_paths_return_the_same_rows(
         while True:
             page = await list_admin_features(
                 migrated_session,
-                q="관리자경로동등",
+                q=token,
                 search_scope=scope,
                 page_size=2,
                 cursor=cursor,
@@ -280,9 +314,13 @@ async def test_candidate_and_scan_paths_return_the_same_rows(
     via_candidates = await pages(2000)
     via_scan = await pages(0)
     assert via_candidates == via_scan
-    expected = ids | ({other} if scope == "all" else set())
-    assert len(via_candidates) == len(set(via_candidates)) == len(expected)
-    assert set(via_candidates) == expected
+    expected = {by_name, by_address, by_many, by_alias}
+    if scope == "all":
+        expected |= {by_entity, by_record}
+    assert len(via_candidates) == len(set(via_candidates))
+    # 같은 세션 DB에 앞선 테스트의 행이 남으므로 "내 것" 범위로 본다.
+    mine = {by_name, by_address, by_entity, by_record, by_many, by_alias, headless}
+    assert set(via_candidates) & mine == expected
 
 
 async def test_short_query_skips_candidate_probe(

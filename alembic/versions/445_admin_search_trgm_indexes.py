@@ -28,9 +28,17 @@ D2 live acceptance cleanup이 이 호출을 쓴다). 계획은 ``lower(name)`` k
 잠금. ``CREATE INDEX``는 대상 표에 ``SHARE``를 잡는다 — 읽기는 막지 않고 쓰기만 빌드 동안
 막는다. ``CONCURRENTLY``는 쓰지 않는다: 이 저장소 migration은 한 transaction이고(0083·0085
 선례 — autocommit_block 중간 커밋은 재시도 불가한 반쪽 상태를 남긴다), 통합 fixture가 바깥
-transaction 안에서 돈다. ``lock_timeout``은 1초로 묶어 쓰기 transaction 뒤에 줄을 서며 읽기까지
-막는 일을 피하고, ``statement_timeout``은 빌드를 감당하도록 300초로 묶는다.
-빌드 시간 실측은 PR(#1475) 본문에 둔다.
+transaction 안에서 돈다. 여섯 인덱스의 ``SHARE``는 commit까지 이어지므로 네 표
+(``features``·``feature_aliases``·``source_entities``·``source_entity_heads``)의 쓰기는 빌드
+내내 기다린다 — 배포 동안 Feature 적재(큐)를 멈춰 두는 것이 안전하다.
+
+``lock_timeout``은 60초다. ``SHARE``는 읽기(``ACCESS SHARE``)와 충돌하지 않으므로 줄을 서는
+동안 막히는 것은 뒤따르는 쓰기뿐이다. 1초(444)로 묶으면 진행 중인 적재 transaction 하나에
+배포가 실패한다. ``statement_timeout``은 빌드를 감당하도록 300초로 묶는다.
+
+빌드 실측(prod 열 복사본 38만 행, n150 PG18 tmpfs, maintenance_work_mem 256 MB, 병렬 2):
+``lower(name)`` 3.4 s, ``feature_id`` 3.2 s, ``address`` 12.6 s, alias 1.7 s, entity id 2.8 s,
+record key 1.7 s — 합 25 s, 크기 합 272 MB. 디스크 위 prod는 2~3배(50~75 s)로 잡는다.
 
 forward-only. downgrade는 두지 않는다(``alembic/env.py``가 모든 downgrade를 거부한다).
 """
@@ -164,7 +172,7 @@ def upgrade() -> None:
             )
         ).all()
     }
-    for name, cap in (("lock_timeout", 1000), ("statement_timeout", 300000)):
+    for name, cap in (("lock_timeout", 60000), ("statement_timeout", 300000)):
         prior = int(settings[name])
         bind.execute(
             text("SELECT set_config(:name,:value,true)"),

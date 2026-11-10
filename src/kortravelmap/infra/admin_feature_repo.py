@@ -3501,7 +3501,7 @@ FROM expanded
 WHERE (
     CAST(:q_like AS text) IS NULL
     -- T-VN-39: 두 컬럼이 uuid가 됐다(``uuid ILIKE text``는 42883). 식별자 조각
-    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로 보존한다 —
+    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로 보존한다 —
     -- uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽을 본다.
     OR CAST(feature_id_a AS text) ILIKE CAST(:q_like AS text)
     OR CAST(feature_id_b AS text) ILIKE CAST(:q_like AS text)
@@ -3612,7 +3612,7 @@ FROM expanded
 WHERE (
     CAST(:q_like AS text) IS NULL
     -- T-VN-39: 두 컬럼이 uuid가 됐다(``uuid ILIKE text``는 42883). 식별자 조각
-    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로 보존한다 —
+    -- 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로 보존한다 —
     -- uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽을 본다.
     OR CAST(feature_id_a AS text) ILIKE CAST(:q_like AS text)
     OR CAST(feature_id_b AS text) ILIKE CAST(:q_like AS text)
@@ -4106,7 +4106,7 @@ WITH reviews AS MATERIALIZED (
       AND (
         CAST(:q_like AS text) IS NULL
         -- T-VN-39: ``target_feature_id``가 uuid가 됐다(``uuid ILIKE text``는 42883).
-        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로
+        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로
         -- 보존한다 — uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽.
         OR CAST(q.target_feature_id AS text) ILIKE CAST(:q_like AS text)
         OR EXISTS (
@@ -4251,7 +4251,7 @@ JOIN provider_sync.provider_datasets AS pd
       AND (
         CAST(:q_like AS text) IS NULL
         -- T-VN-39: ``target_feature_id``가 uuid가 됐다(``uuid ILIKE text``는 42883).
-        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_LIKE_CLAUSE``와 같은 기준으로
+        -- 식별자 조각 검색의 뜻은 ``_ADMIN_FEATURES_Q_SCAN_CLAUSE``와 같은 기준으로
         -- 보존한다 — uuid 텍스트 표기와 legacy ``f_*``(feature_aliases.alias) 양쪽.
         OR CAST(q.target_feature_id AS text) ILIKE CAST(:q_like AS text)
         OR EXISTS (
