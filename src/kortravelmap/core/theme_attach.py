@@ -271,6 +271,9 @@ def decide_attach(
     evidence_top = [
         {
             "feature_id": item.candidate.feature_id,
+            # 정밀도 표본(R4)을 사람이 읽을 수 있게 상대 이름·분류를 싣는다.
+            "name": item.candidate.name,
+            "category": item.candidate.category,
             "tier": item.candidate.tier,
             "distance_m": round(item.candidate.distance_m, 1),
             "score": round(item.score, 4),
@@ -330,6 +333,8 @@ class PlanFeature:
     pet_business: bool
     master_category_prefixes: tuple[str, ...] | None
     candidates: tuple[AttachCandidate, ...]
+    row_revision: int = 0
+    """계획 시점 ``row_revision`` — 전환 실행기가 낡은 계획을 거른다(0이면 모름)."""
 
 
 @dataclass(frozen=True, slots=True)

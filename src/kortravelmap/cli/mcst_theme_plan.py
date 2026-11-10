@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import random
 from collections import Counter, defaultdict
+from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
 from sqlalchemy import text
@@ -24,13 +25,23 @@ from kortravelmap.core.theme_attach import (
     PlanFeature,
     plan_existing_features,
 )
+from kortravelmap.infra.mcst_theme_transition_repo import (
+    TransitionPlan,
+    build_transition_plan,
+    execute_transition_batch,
+)
 from kortravelmap.infra.theme_attach_repo import PlanDatasetConfig, fetch_mcst_plan_features
 from kortravelmap.providers.mcst import MCST_FILE_DATASETS, MCST_PET_BUSINESS_CATEGORIES
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
 
-__all__ = ["mcst_plan_dataset_configs", "plan_report", "run_mcst_theme_plan"]
+__all__ = [
+    "mcst_plan_dataset_configs",
+    "plan_report",
+    "run_mcst_theme_plan",
+    "run_mcst_theme_transition",
+]
 
 _RETIRING_ACTIONS = frozenset({"retire", "attach", "collapse"})
 
@@ -94,8 +105,8 @@ def plan_report(
 
 async def run_mcst_theme_plan(
     engine: AsyncEngine, *, samples: int
-) -> tuple[dict[str, Any], list[PlanEntry]]:
-    """읽기 전용 transaction에서 계획을 만든다. ``(보고서, 퇴역 예정 계획 행)``."""
+) -> tuple[dict[str, Any], list[PlanEntry], TransitionPlan]:
+    """읽기 전용 transaction에서 계획을 만든다. ``(보고서, 퇴역 예정 계획 행, 실행 계획)``."""
 
     async with AsyncSession(engine) as session, session.begin():
         await session.execute(text("SET TRANSACTION READ ONLY"))
@@ -107,4 +118,69 @@ async def run_mcst_theme_plan(
         (entry for entry in entries if entry.action in _RETIRING_ACTIONS),
         key=lambda entry: entry.feature_id,
     )
-    return plan_report(features, entries, samples=samples), retiring
+    transition = build_transition_plan(
+        entries,
+        revisions={feature.feature_id: feature.row_revision for feature in features},
+        rule_version=THEME_ATTACH_RULE_VERSION,
+    )
+    report = plan_report(features, entries, samples=samples)
+    report["plan_sha256"] = transition.plan_sha256
+    return report, retiring, transition
+
+
+async def run_mcst_theme_transition(
+    engine: AsyncEngine,
+    *,
+    plan: TransitionPlan,
+    batch_size: int,
+    execute: bool,
+    max_batches: int | None = None,
+) -> dict[str, Any]:
+    """계획을 batch로 실행한다. ``execute``가 아니면 batch마다 되감는 **리허설**이다.
+
+    batch 하나가 transaction 하나다. 실행 중 실패하면 그 batch만 되감기고 앞 batch는 남는다 —
+    다시 돌리면 이미 commit된 batch는 건너뛴다(``(plan_sha256, batch_index)``).
+    """
+
+    if batch_size <= 0:
+        raise ValueError("batch_size must be positive")
+    totals: Counter[str] = Counter()
+    batches_done = 0
+    batches_skipped = 0
+    errors: list[dict[str, Any]] = []
+    items = plan.items
+    for batch_index, start in enumerate(range(0, len(items), batch_size)):
+        if max_batches is not None and batch_index >= max_batches:
+            break
+        chunk = items[start : start + batch_size]
+        async with AsyncSession(engine) as session:
+            transaction = await session.begin()
+            try:
+                result = await execute_transition_batch(
+                    session, plan=plan, batch_index=batch_index, items=chunk
+                )
+            except BaseException:
+                await transaction.rollback()
+                raise
+            if execute:
+                await transaction.commit()
+            else:
+                await transaction.rollback()
+        if result.skipped_batch:
+            batches_skipped += 1
+            continue
+        batches_done += 1
+        totals.update(result.counts())
+        errors.extend(
+            asdict(outcome) for outcome in result.outcomes if outcome.status == "error"
+        )
+    return {
+        "mode": "execute" if execute else "rehearsal",
+        "plan_sha256": plan.plan_sha256,
+        "items": len(items),
+        "batch_size": batch_size,
+        "batches_run": batches_done,
+        "batches_already_committed": batches_skipped,
+        "counts": dict(sorted(totals.items())),
+        "errors": errors[:200],
+    }
