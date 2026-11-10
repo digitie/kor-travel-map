@@ -5,6 +5,10 @@
 - 다음(R4, 소유자 확인 뒤): 전환 executor(+M05 사건 출처 일반화) → 운영 창(적재·dedup 동결) → 계획 실행 → `apply` 켬 → 촬영지 rule `c09e1efd…` place_kind PATCH. R2 dry-run 수치는 설계 §8.1.1.
 - resume 220KiB 상한: 2026-09-19 (3) 절(5,767B)을 `archive/resume-2026-09d.md`로 원문 그대로 옮겼다.
 
+## 2026-11-10 — 운영 검색 점검 수정(#1476~#1478)
+
+- 배포 뒤 transport rail-stations 적재를 한 번 더 돌린다(분류 06030200→06030300, feature_id는 그대로). 그다음 dedup refresh를 돌려 영상 후보 쌍을 큐에 올린다. 여수엑스포역은 transport#179가 해결되면 들어온다.
+
 ## 2026-11-10 — #1468 D 국가유산 행사 회차 묶음·장소 좌표
 
 - 배포 뒤 `feature_event_krheritage_events_job` 1회(preview 먼저). 회차별 옛 Feature 5,286건은 그 run이 retired로 내리고 행사 약 1,316건이 선다. 좌표는 약 23.6%(같은 시군구 동명 장소 Feature). migration·OpenAPI 없음.
@@ -233,7 +237,7 @@ ebb92ca9의 새 Python CI는 문서 크기 한 항목에서 실패했다(resume 
 
 | 파일 | 기간 | 엔트리 수 | 크기 |
 | --- | --- | --- | --- |
-| [resume-2026-09d.md](archive/resume-2026-09d.md) | 2026-09-19 | 1 | 5965B |
+| [resume-2026-09d.md](archive/resume-2026-09d.md) | 2026-09-19 | 1 | 5867B |
 | [resume-2026-09c.md](archive/resume-2026-09c.md) | 2026-09-15 ~ 2026-09-16 | 6 | 9544B |
 | [resume-2026-09b.md](archive/resume-2026-09b.md) | 2026-09-08 ~ 2026-09-14 | 4 | 14899B |
 | [resume-2026-09a.md](archive/resume-2026-09a.md) | 2026-09-05 ~ 2026-09-08 | 4 | 15316B |
@@ -2356,7 +2360,7 @@ route는 `to_jsonb(route)`라서 geometry가 통째로 들어간다.
 - **배포 창이 지금 깨끗하다**: snapshot receipt 5건, 진행 중 curation root **0건**.
   봉인 해시 정의를 바꿔도 `stale_input`으로 빠질 in-flight root가 없다.
 
-## 2026-09-19 (3) — 산사태 0행의 이유를 확정했다. 다음은 대량 역지오코딩이다
+## 2026-09-19 (3) — 산사태 0행의 이유를 확정했다. 다음은 대량 역지오코딩이다
 
 [완전한 원문](archive/resume-2026-09d.md)은 읽기 크기 상한에 따라 분리했다.
 

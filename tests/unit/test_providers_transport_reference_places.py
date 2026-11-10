@@ -247,6 +247,39 @@ async def test_same_name_stations_far_apart_stay_separate() -> None:
     }
 
 
+async def test_general_rail_portal_rows_are_train_stations_without_an_operator_name() -> None:
+    """KRIC 일반철도 목록(``kric_general_portal``)은 운영기관을 비워 낸다(2026-11-10 prod 실측:
+    부산역·강릉역·대전역 등 198역이 지하철역 06030200이었다). 원천이 국가철도 목록이면 기차역이다
+    — 그 역에 도시철도 노선이 함께 묶여도 마찬가지다."""
+    busan = _rail(
+        natural_key="kric_general_portal:korail:10279506", source="kric_general_portal",
+        name="부산", operator_name=None, line_name="경부선", operator_code=None,
+        latitude=35.1150906, longitude=129.0415717,
+    )
+    daejeon_portal = _rail(
+        natural_key="kric_general_portal:korail:10279354", source="kric_general_portal",
+        name="대전", operator_name=None, line_name="경부선", operator_code=None,
+        latitude=36.3319718, longitude=127.4340044,
+    )
+    daejeon_metro = _rail(
+        natural_key="대전교통공사|1호선|103|대전역", source="kric_public_file",
+        name="대전역", operator_name="대전교통공사", latitude=36.3321, longitude=127.4342,
+    )
+    city_metro = _rail(
+        natural_key="부산교통공사|1호선|113|중앙", source="kric_public_file",
+        name="중앙", operator_name="부산교통공사", latitude=35.1036, longitude=129.0363,
+    )
+    bundles = await rail_stations_to_bundles(
+        [busan, daejeon_portal, daejeon_metro, city_metro], fetched_at=FETCHED_AT
+    )
+    by_name = {bundle.feature.name: bundle.feature.category for bundle in bundles}
+    assert by_name == {
+        "부산역": RAIL_STATION_TRAIN_CATEGORY,
+        "대전역": RAIL_STATION_TRAIN_CATEGORY,
+        "중앙역": RAIL_STATION_SUBWAY_CATEGORY,
+    }
+
+
 async def test_coordless_station_rows_make_no_feature() -> None:
     coordless = _rail(natural_key="운영사|1호선|1|좌표없음", name="좌표없음", latitude=None,
                       longitude=None)

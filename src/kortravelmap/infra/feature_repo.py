@@ -76,6 +76,7 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
     SEARCH_DESTINATION_GROUP_MAX,
+    SEARCH_NAMED_DESTINATION_EXACT_GROUP,
 )
 from kortravelmap.core.exceptions import (
     FeatureSearchCursorInvalidError,
@@ -1974,6 +1975,27 @@ def _search_category_group_sql(column: str) -> str:
     return f"(CASE {' '.join(whens)} ELSE {fallback} END)"
 
 
+def _search_destination_exact_group_sql(category: str) -> str:
+    """``destination_exact_search_group``의 SQL 짝 — ``ranked``를 읽는 ``candidates`` CTE에서 쓴다.
+
+    목적지 이름 일치(``destination_exact``)이고 분류가 고유 이름 목적지(접두 예외 표 — 역·휴게소·
+    공항·여객선터미널·전통시장)면 ``SEARCH_NAMED_DESTINATION_EXACT_GROUP``(관광과 같은 0), 아니면
+    ``search_group`` 그대로다. 같은 이름의 Tier 1만 있는 관광 행(``01000000``)과는 분류 구체성
+    자리가 가른다 — "서울역"·"자갈치시장"은 역·시장 자체가 먼저다(2026-11-10 운영 점검).
+    """
+    category = _trusted_sql_identifier(category)
+    group = SEARCH_NAMED_DESTINATION_EXACT_GROUP
+    if type(group) is not int or not 0 <= group <= _SEARCH_RANK_DIGIT_MAX:
+        raise ValueError(f"named destination exact group must be a single digit: {group!r}")
+    conditions: list[str] = []
+    for prefix in sorted(PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES):
+        if not (prefix.isdigit() and len(prefix) in (4, 6, 8)):
+            raise ValueError(f"category prefix must be 4, 6 or 8 digits: {prefix!r}")
+        conditions.append(f"left({category}, {len(prefix)}) = '{prefix}'")
+    named = " OR ".join(conditions) if conditions else "FALSE"
+    return f"(CASE WHEN destination_exact AND ({named}) THEN {group} ELSE search_group END)"
+
+
 def _search_destination_group_max() -> int:
     """목적지 그룹 상한(``SEARCH_DESTINATION_GROUP_MAX``) — SQL에 박는 한 자리 정수."""
     value = SEARCH_DESTINATION_GROUP_MAX
@@ -2230,9 +2252,10 @@ candidates AS (
               WHEN destination_exact THEN 0
               ELSE 1
             END * {_SEARCH_RANK_DESTINATION_EXACT_WEIGHT}
-          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널 → 식음 → 그 밖
-          -- (분류 체계에서 유도, 접두 예외 먼저).
-          + search_group * {_SEARCH_RANK_GROUP_WEIGHT}
+          -- 분류 그룹: 관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널·전통시장 → 식음 →
+          -- 그 밖(분류 체계에서 유도, 접두 예외 먼저). 이름이 검색어와 같은 고유 이름 목적지
+          -- (역·휴게소·공항·여객선터미널·전통시장)는 관광과 같은 그룹이다.
+          + {_search_destination_exact_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
           -- 이름 일치(분류 불문): 같은 그룹 안에서 이름이 같은 행이 앞.
           + CASE WHEN name_exact THEN 0 ELSE 1 END * {_SEARCH_RANK_EXACT_WEIGHT}
           -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
@@ -7313,8 +7336,9 @@ async def search_features(
     지역은 필터가 아니라 순위다. ``q`` 검색은 좌표 없는 place·event를 내지 않는다(#1459 §4).
 
     ``q`` 검색의 순서(436, ADR-120): 별칭이 가리키는 이름 → 이름이 검색어를 품음 → 유사도만,
-    그 안에서 bbox 안 → 목적지(관광·숙박·역·휴게소·공항·여객선터미널)의 이름 일치 → 분류 그룹
-    (관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널 → 식음 → 그 밖) → 이름 일치(보이는
+    그 안에서 bbox 안 → 목적지(관광·숙박·역·휴게소·공항·여객선터미널·전통시장)의 이름 일치 → 분류
+    그룹(관광 → 숙박·온천·기차역·지하철역·휴게소·공항·여객선터미널·전통시장 → 식음 → 그 밖; 이름이
+    검색어와 같은 역·휴게소·공항·여객선터미널·전통시장은 관광과 같은 그룹) → 이름 일치(보이는
     이름 기준) → 분류 구체성 →
     ``score`` 내림차순 → ``feature_id``. ``q``와 함께 온 ``bbox``는 **필터가 아니라 순위
     가중**이다. ``q`` 없이 ``bbox``만 오면 종전처럼 bbox 필터 + ``feature_id`` 순이다.

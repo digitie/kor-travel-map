@@ -25,8 +25,10 @@
 4. 이름이 같아도 반경 밖이면 다른 역이다(예: 2호선 신촌과 경의중앙선 신촌은 약 700 m 떨어진
    별개 역이다).
 
-분류: 묶음의 어느 행이든 운영기관이 국가철도 운영사(:data:`NATIONAL_RAIL_OPERATOR_MARKERS`)면
-기차역(``06030300``), 아니면 지하철역(``06030200``). 둘 다 검색 그룹 1이다.
+분류: 묶음의 어느 행이든 국가철도 행이면 기차역(``06030300``), 아니면 지하철역(``06030200``).
+국가철도 행은 운영기관이 국가철도 운영사(:data:`NATIONAL_RAIL_OPERATOR_MARKERS`)이거나 원천이
+일반철도 목록(:data:`NATIONAL_RAIL_SOURCES`)인 행이다 — 일반철도 목록은 운영기관을 비워 낸다
+(2026-11-10 prod: 부산역·강릉역·대전역 등 174역이 지하철역으로 분류됐다). 둘 다 검색 그룹 1이다.
 
 표시 이름: 역은 끝에 "역"이 없으면 붙인다("중앙" → "중앙역"). 항구는 이름이 이미 항구·터미널을
 말하지 않으면 " 여객선터미널"을 붙인다("백령도" → "백령도 여객선터미널"). 원천 이름은 raw에
@@ -72,6 +74,7 @@ __all__ = [
     "FERRY_PORT_CATEGORY",
     "FERRY_PORT_DISPLAY_SUFFIX",
     "NATIONAL_RAIL_OPERATOR_MARKERS",
+    "NATIONAL_RAIL_SOURCES",
     "RAIL_STATION_CLUSTER_RADIUS_M",
     "RAIL_STATION_TRAIN_CATEGORY",
     "RAIL_STATION_SUBWAY_CATEGORY",
@@ -95,6 +98,10 @@ RAIL_STATION_CLUSTER_RADIUS_M: Final[float] = 500.0
 
 NATIONAL_RAIL_OPERATOR_MARKERS: Final[tuple[str, ...]] = ("한국철도공사", "코레일", "에스알")
 """운영기관 이름에 이것이 들어 있으면 국가철도 운영사다 — 그 역은 기차역으로 분류한다."""
+
+NATIONAL_RAIL_SOURCES: Final[frozenset[str]] = frozenset({"kric_general_portal"})
+"""transport ``source``가 이것이면 국가철도 행이다. KRIC 일반철도 역 목록(코레일 경부·호남·전라선
+등)으로, ``operator_name``을 비워 낸다(자연키 ``kric_general_portal:korail:…``)."""
 
 FERRY_PORT_DISPLAY_SUFFIX: Final[str] = "여객선터미널"
 """항구 표시 이름에 덧붙이는 말."""
@@ -188,7 +195,10 @@ class _RailCluster:
         return self.members[0]
 
 
-def _is_national_rail(operator_name: str | None) -> bool:
+def _is_national_rail(item: TransportRailStation) -> bool:
+    if item.source in NATIONAL_RAIL_SOURCES:
+        return True
+    operator_name = item.operator_name
     return operator_name is not None and any(
         marker in operator_name for marker in NATIONAL_RAIL_OPERATOR_MARKERS
     )
@@ -349,7 +359,7 @@ async def rail_stations_to_bundles(
     for cluster in _cluster_rail_stations(items):
         anchor, anchor_coord = cluster.anchor(existing)
         members = [member for member, _ in cluster.members]
-        national = any(_is_national_rail(member.operator_name) for member in members)
+        national = any(_is_national_rail(member) for member in members)
         category = RAIL_STATION_TRAIN_CATEGORY if national else RAIL_STATION_SUBWAY_CATEGORY
         lines = [_rail_line(member) for member in members]
         operators = sorted({m.operator_name for m in members if m.operator_name})

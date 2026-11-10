@@ -331,6 +331,24 @@ _SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
         "buffer_m": 30,
         "min_overlap_ratio": 0.5,
     },
+    # 역·휴게소·공항·여객선터미널(transport, ADR-120) ↔ concierge 영상 후보 — 영상 후보는 같은
+    # 역을 관광 일반(01000000)으로 수백 m 어긋나게 찍는다(2026-11-10 운영: 부산역 약 700 m,
+    # 강릉역 약 350 m). 범주가 달라 점수로는 28 m 밖에서 0.65에 못 미치므로 이름이 같을 때만 올린다.
+    # master는 transport(25 > 5).
+    {
+        "left": {
+            "provider": "kor-travel-transport",
+            "categories": _category_codes("060302", "060303", "0604", "0605", "0606"),
+            "limit": _SCOPE_LIMIT,
+        },
+        "right": {
+            "provider": "kor-travel-concierge-youtube",
+            "dataset_key": "youtube_place_candidates",
+            "limit": _SCOPE_LIMIT,
+        },
+        "max_distance_m": 1000,
+        "match": "same_name",
+    },
 )
 
 

@@ -5,6 +5,10 @@
 - 첫 계획 질의가 `publication_state IN (...)` 때문에 부분 GiST 색인을 못 써 30분 넘게 돌아 취소했다(색인 조건 그대로 쓰도록 고침). tier 2 동점을 ambiguous로 보던 규칙이 ambiguous의 3/4를 만들었다.
 - 적대 리뷰 반영: 강등은 MCST link만(MOIS 승자 판정 회귀), 부재 가드 강화, 비병합 퇴역은 owner로, 빈 snapshot 손실 가드, 계획기의 비MCST master 제외·사슬 collapse 차단·물려받은 attach 분류 재확인.
 
+## 2026-11-10 — 운영 검색 점검(#1476~#1478)
+
+- 역·공항 1위가 MCST 촬영지·영상 후보 01000000이었다(그룹 0 < 1). 고유 이름 목적지의 이름 일치를 그룹 0으로, 시장도 목적지 그룹으로. 일반철도 행은 operator가 비어 지하철역(174). 여수엑스포는 transport 좌표 null(transport#179). 504는 PinVi 도달 전.
+
 ## 2026-11-10 — 휴양림 ↔ MOIS 숙박은 휴양림 master
 
 - 소유자 결정: 산림청 자연휴양림 dataset 보정 55(MOIS 50 위). #1472 뒤 이 쌍은 MOIS가 이겼다. 수목원 115쌍도 그대로 휴양림 master.
