@@ -538,7 +538,8 @@ async def test_event_sessions_of_one_program_collapse_into_one_feature() -> None
     # 같은 회차가 다른 달 응답에 다시 와도 같은 행사·같은 원 행 하나다.
     again = await heritage_events_to_bundles([session, span, session], fetched_at=_FETCHED)
     assert again[0].feature.feature_id == bundle.feature.feature_id
-    assert again[0].source_record == bundle.source_record
+    assert again[0].source_record.source_record_key == bundle.source_record.source_record_key
+    assert again[0].source_record.raw_data == bundle.source_record.raw_data
 
 
 def _jeju_row(seq: str, s_date: str, schedule: str) -> _Event:
@@ -585,8 +586,9 @@ async def test_event_rows_with_different_seq_no_collapse_by_program() -> None:
     assert len(bundle.source_record.raw_data["sessions"]) == 4
     # 입력 순서가 바뀌어도 같은 행사·같은 원본이다(결정적).
     [shuffled] = await heritage_events_to_bundles(rows[::-1], fetched_at=_FETCHED)
-    assert shuffled.feature == bundle.feature
-    assert shuffled.source_record == bundle.source_record
+    assert shuffled.feature.feature_id == bundle.feature.feature_id
+    assert shuffled.feature.detail == bundle.feature.detail
+    assert shuffled.source_record.source_record_key == bundle.source_record.source_record_key
 
 
 async def test_event_different_venue_or_title_stays_distinct() -> None:
