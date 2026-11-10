@@ -775,6 +775,6 @@ async def test_event_requires_period_and_venue_without_losing_raw_or_identity(
     [bundle] = await heritage_events_to_bundles([event], fetched_at=_FETCHED)
     assert bundle.feature.quality_state.value == quality
     assert bundle.feature.category == "01090000"
-    assert bundle.source_record.raw_data == raw
+    assert bundle.source_record.raw_data == {"sessions": [raw]}
     assert bundle.feature.lifecycle_state.value == "active"
     assert bundle.feature.marker_color == HERITAGE_MARKER_COLOR

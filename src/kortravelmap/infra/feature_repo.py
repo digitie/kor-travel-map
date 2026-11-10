@@ -91,7 +91,7 @@ from kortravelmap.core.search_region import (
     search_query_tokens,
     split_region_query,
 )
-from kortravelmap.dto import Address, EventDetail
+from kortravelmap.dto import Address
 from kortravelmap.infra.canonical_feature_ids import resolve_canonical_feature_ids
 from kortravelmap.infra.domain_command_repo import (
     canonical_domain_command_fingerprint,
