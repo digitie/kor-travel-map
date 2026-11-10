@@ -924,42 +924,12 @@ def _default_pair_calls() -> tuple[_Client, dict[_PairKey, dict[str, object]]]:
     return client, by_key
 
 
-_CAMP_CODES = ("03060000", "03060100", "03060200")
-
-
 @pytest.mark.parametrize(
     ("key", "radius", "match"),
     [
-        # 캠핑장: MOIS ↔ MCST, MOIS ↔ KNPS, KNPS ↔ MCST.
-        (
-            ("python-mois-api", None, "python-mcst-api", "mcst_leisure_camping_facilities_csv"),
-            300.0,
-            "score_or_same_name",
-        ),
+        # 캠핑장: MOIS ↔ KNPS 국립공원 야영장.
         (
             ("python-mois-api", None, "python-knps-api", "knps_campgrounds"),
-            300.0,
-            "score_or_same_name",
-        ),
-        (
-            (
-                "python-knps-api",
-                "knps_campgrounds",
-                "python-mcst-api",
-                "mcst_leisure_camping_facilities_csv",
-            ),
-            300.0,
-            "score_or_same_name",
-        ),
-        # MCST 세계음식 ↔ MOIS 음식점(0201).
-        (
-            ("python-mcst-api", "mcst_world_restaurants_csv", "python-mois-api", None),
-            100.0,
-            "score_or_same_name",
-        ),
-        # 박물관 표준데이터 ↔ MCST 문화시설(01040000).
-        (
-            ("data.go.kr-standard", "datagokr_museums", "python-mcst-api", None),
             300.0,
             "score_or_same_name",
         ),
@@ -986,23 +956,20 @@ def test_default_pairs_include_1468_source_overlap_rules(
     assert call["match"] == match
 
 
-def test_default_camping_and_food_pairs_scope_categories() -> None:
+def test_default_mois_knps_camping_pair_scopes_campground_codes() -> None:
     _client, by_key = _default_pair_calls()
-    mois_mcst = by_key[
-        ("python-mois-api", None, "python-mcst-api", "mcst_leisure_camping_facilities_csv")
-    ]
-    left = cast(DedupRefreshScope, mois_mcst["left"])
+    call = by_key[("python-mois-api", None, "python-knps-api", "knps_campgrounds")]
+    left = cast(DedupRefreshScope, call["left"])
     assert left.categories
     assert all(code.startswith("0306") for code in left.categories)
-    assert set(_CAMP_CODES) <= set(left.categories)
-    food = by_key[("python-mcst-api", "mcst_world_restaurants_csv", "python-mois-api", None)]
-    right = cast(DedupRefreshScope, food["right"])
-    assert right.categories
-    assert all(code.startswith("0201") for code in right.categories)
-    # 12만 건 MOIS 음식점은 반경 안만 읽지만 상한이 그것을 자르지 않게 넉넉하다.
-    assert right.limit >= 130_000
-    museum = by_key[("data.go.kr-standard", "datagokr_museums", "python-mcst-api", None)]
-    assert cast(DedupRefreshScope, museum["right"]).categories == ("01040000",)
+    assert {"03060000", "03060100", "03060200"} <= set(left.categories)
+
+
+def test_default_pairs_leave_mcst_to_adr121_attach() -> None:
+    # MCST 테마 목록은 ADR-121 attach 엔진이 기존 Feature에 붙인다 — #1468 C의 MCST 쌍은 없다.
+    _client, by_key = _default_pair_calls()
+    radius_pairs = {key for key, call in by_key.items() if "max_distance_m" in call}
+    assert all("python-mcst-api" not in (key[0], key[2]) for key in radius_pairs)
 
 
 def test_existing_pairs_keep_their_call_shape() -> None:
@@ -1011,7 +978,7 @@ def test_existing_pairs_keep_their_call_shape() -> None:
     knps_heritage = by_key[("python-knps-api", None, "python-krheritage-api", None)]
     assert "max_distance_m" not in knps_heritage
     assert "match" not in knps_heritage
-    assert sum(1 for options in client.pair_options if options) == 6
+    assert sum(1 for options in client.pair_options if options) == 2
 
 
 def test_default_trail_rule_uses_route_overlap_with_knps_authoritative() -> None:

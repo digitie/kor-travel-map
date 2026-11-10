@@ -265,22 +265,8 @@ def _tourapi_pair(
 
 _PAIR_MATCH_MODES: Final[frozenset[str]] = DEDUP_MATCH_MODES | {"route_overlap"}
 
-_CAMPGROUND: Final = _category_codes("0306")
-_FOOD: Final = _category_codes("0201")
-_MOIS_CAMPGROUND: Final[Mapping[str, object]] = {
-    "provider": "python-mois-api",
-    "categories": _CAMPGROUND,
-}
-_MCST_CAMPGROUND: Final[Mapping[str, object]] = {
-    "provider": "python-mcst-api",
-    "dataset_key": "mcst_leisure_camping_facilities_csv",
-}
-_KNPS_CAMPGROUND: Final[Mapping[str, object]] = {
-    "provider": "python-knps-api",
-    "dataset_key": "knps_campgrounds",
-}
 _PLACE_RADIUS_M: Final = 300
-"""원천 겹침 쌍의 기본 반경. 같은 시설을 서로 다른 지오코딩으로 찍은 거리(2026-11-10 prod
+"""점 원천 겹침 쌍의 기본 반경. 같은 시설을 서로 다른 지오코딩으로 찍은 거리(2026-11-10 prod
 실측: 캠핑장 100 m→300 m에서 후보 122→136, 1 km에서 151 — 1 km 쪽은 다른 시설이 섞인다)."""
 _SCOPE_LIMIT: Final = 50_000
 """원천 겹침 쌍의 scope 상한 — 반경 blocking 쌍은 오른쪽을 왼쪽 반경 안만 읽으므로 이것은
@@ -288,56 +274,25 @@ _SCOPE_LIMIT: Final = 50_000
 
 #: 2026-11-10 원천 겹침 조사(#1468 C)에서 규칙이 없던 쌍. 모두 **검토 큐에 올릴 뿐**이고
 #: 병합은 관리자가 한다. master 자동 선정은 원천 우선순위(``core.scoring.SOURCE_PRIORITY``·
-#: ``DATASET_SOURCE_PRIORITY``)가 정한다 — MOIS > 표준데이터 > MCST, 휴양림 > 수목원,
-#: KNPS 탐방로 > 산림청 등산로. 괄호 안 수는 2026-11-10 prod 기준 예상 후보 수다.
+#: ``DATASET_SOURCE_PRIORITY``)가 정한다 — 휴양림 > 수목원, KNPS 탐방로 > 산림청 등산로.
+#: 괄호 안 수는 2026-11-10 prod 기준 예상 후보 수다.
+#:
+#: MCST가 낀 쌍(캠핑장 MOIS·KNPS↔MCST, 세계음식↔MOIS, 박물관 표준데이터↔MCST)은 여기 두지
+#: 않는다 — ADR-121이 MCST 테마 목록을 기존 Feature의 속성으로 붙이는 attach 엔진으로
+#: 처리한다(#1468 A).
 _SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
-    # 캠핑장(0306): MOIS 야영장업 ↔ MCST 캠핑장 목록(136). 같은 범주라 이름만 같으면 거리와
+    # 캠핑장(0306): MOIS 야영장업 ↔ KNPS 국립공원 야영장(1). 같은 범주라 이름만 같으면 거리와
     # 무관하게 0.65가 되므로 반경으로 끊고, 이름이 같은데 점수가 모자란 쌍도 올린다.
     {
-        "left": {**_MOIS_CAMPGROUND, "limit": _SCOPE_LIMIT},
-        "right": {**_MCST_CAMPGROUND, "limit": _SCOPE_LIMIT},
-        "max_distance_m": _PLACE_RADIUS_M,
-        "match": "score_or_same_name",
-    },
-    # MOIS 야영장업 ↔ KNPS 국립공원 야영장(1).
-    {
-        "left": {**_MOIS_CAMPGROUND, "limit": _SCOPE_LIMIT},
-        "right": {**_KNPS_CAMPGROUND, "limit": _SCOPE_LIMIT},
-        "max_distance_m": _PLACE_RADIUS_M,
-        "match": "score_or_same_name",
-    },
-    # KNPS 국립공원 야영장 ↔ MCST 캠핑장 목록(7) — 조사에서 4쌍이 100 m 안에 있었다.
-    {
-        "left": {**_KNPS_CAMPGROUND, "limit": _SCOPE_LIMIT},
-        "right": {**_MCST_CAMPGROUND, "limit": _SCOPE_LIMIT},
-        "max_distance_m": _PLACE_RADIUS_M,
-        "match": "score_or_same_name",
-    },
-    # MCST 세계음식 ↔ MOIS 음식점(0201, 12만 건)(1,103). 도심 밀집이라 반경을 100 m로 좁힌다.
-    # 오른쪽은 왼쪽 9천 건 반경 안만 DB에서 읽는다 — 전체를 읽으면 n150에서 3분이 넘었다.
-    {
         "left": {
-            "provider": "python-mcst-api",
-            "dataset_key": "mcst_world_restaurants_csv",
-            "limit": _SCOPE_LIMIT,
-        },
-        "right": {"provider": "python-mois-api", "categories": _FOOD, "limit": 200_000},
-        "max_distance_m": 100,
-        "match": "score_or_same_name",
-    },
-    # 박물관·미술관 표준데이터 ↔ MCST 문화시설(01040000)(3,136). MCST는 같은 박물관을 무장애·
-    # 영유아·반려동물 목록에 따로 싣고 있어 박물관 하나가 여러 MCST 행과 짝이 된다(#1468 A가
-    # 테마를 속성으로 바꾸면 줄어든다).
-    {
-        "left": {
-            "provider": "data.go.kr-standard",
-            "dataset_key": "datagokr_museums",
+            "provider": "python-mois-api",
+            "categories": _category_codes("0306"),
             "limit": _SCOPE_LIMIT,
         },
         "right": {
-            "provider": "python-mcst-api",
-            "categories": [PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value],
-            "limit": 100_000,
+            "provider": "python-knps-api",
+            "dataset_key": "knps_campgrounds",
+            "limit": _SCOPE_LIMIT,
         },
         "max_distance_m": _PLACE_RADIUS_M,
         "match": "score_or_same_name",

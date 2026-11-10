@@ -1,7 +1,7 @@
 ## 2026-11-10 — #1468 B·C dedup 재가동·원천 겹침 쌍
 
 - prod 병합 0건: master 선정이 좌표→updated_at→원천이라 원천 순위가 사실상 안 쓰였다. 원천을 updated_at 앞으로, 표준데이터 35·MCST 20·YouTube 5, dataset 보정(KNPS 문화자원·수목원·산림청 등산로 40).
-- 쌍 7개: 캠핑 3·세계음식·박물관·휴양림=수목원(이름 일치)·등산로↔KNPS 탐방로(선형 겹침). 반경 blocking·DB 반경 읽기로 MOIS 12만 건을 3분→반경 안만. 기본 schedule RUNNING. migration 없음.
+- 쌍 3개: 캠핑 MOIS↔KNPS·휴양림=수목원(이름 일치)·등산로↔KNPS 탐방로(선형 겹침). MCST 쌍 4개는 ADR-121 attach로 넘김. 반경 blocking·DB 반경 읽기. 기본 schedule RUNNING. migration 없음.
 
 ## 2026-11-10 — #1459 TourAPI 문화시설(14)·레포츠(28)
 

@@ -3,7 +3,7 @@
 ## 2026-11-10 — dedup 재가동·원천 겹침 쌍 규칙(#1468 B·C)
 
 - 병합 master 자동 선정이 좌표 → **원천 우선순위** → 갱신 시각 순이 된다(전에는 갱신 시각이 원천보다 앞이라 나중에 적재된 쪽이 이겼다). 원천 표에 data.go.kr 표준데이터·문체부 파일데이터·concierge YouTube 후보를 더하고, KNPS 문화자원·산림청 수목원·산림청 등산로는 dataset 단위로 한 단계 내린다.
-- 기본 dedup 쌍 7개: 캠핑장(MOIS↔MCST·MOIS↔KNPS·KNPS↔MCST), MCST 세계음식↔MOIS 음식점, 박물관 표준데이터↔MCST 문화시설, 같은 이름의 휴양림↔수목원, 국립공원 안 산림청 등산로↔KNPS 탐방로(선형 겹침). 모두 검토 큐에 올릴 뿐이다.
+- 기본 dedup 쌍 3개: 캠핑장 MOIS↔KNPS 국립공원 야영장, 같은 이름의 휴양림↔수목원, 국립공원 안 산림청 등산로↔KNPS 탐방로(선형 겹침). 모두 검토 큐에 올릴 뿐이다. MCST가 낀 겹침은 ADR-121 attach 엔진이 맡는다.
 - `consistency_dedup_refresh_daily_schedule` 기본 RUNNING. 스키마·API 계약 변경 없음.
 
 ## 2026-11-10 — TourAPI 문화시설·레포츠(#1459)
