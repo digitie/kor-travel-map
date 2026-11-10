@@ -790,9 +790,9 @@ async def test_bracket_name_variants_sql_matches_core_function(
             await migrated_session.execute(
                 text(
                     "SELECT "
-                    + feature_repo._search_bracket_part_sql("CAST(:n AS text)", 1)
+                    + feature_repo._search_bracket_base_sql("CAST(:n AS text)")
                     + ", "
-                    + feature_repo._search_bracket_part_sql("CAST(:n AS text)", 2)
+                    + feature_repo._search_bracket_latin_sql("CAST(:n AS text)")
                 ),
                 {"n": name},
             )

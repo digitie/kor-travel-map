@@ -2035,7 +2035,17 @@ def _search_compact_sql(expression: str) -> str:
     return f"normalize(lower({stripped}), NFC)"
 
 
-def _search_bracket_part_sql(expression: str, group: int) -> str:
+def _search_bracket_base_sql(expression: str) -> str:
+    """끝 라틴 괄호 앞 한글 이름의 비교 키(없으면 NULL) — :func:`_search_bracket_part`."""
+    return _search_bracket_part(expression, 1)
+
+
+def _search_bracket_latin_sql(expression: str) -> str:
+    """끝 괄호 안 라틴 이름의 비교 키(없으면 NULL) — :func:`_search_bracket_part`."""
+    return _search_bracket_part(expression, 2)
+
+
+def _search_bracket_part(expression: str, group: int) -> str:
     """``core.search_name.latin_bracket_name_parts``의 SQL 짝 — 한 group의 비교 키(없으면 NULL).
 
     group 1은 괄호 앞 한글 이름, 2는 끝 괄호 안 라틴 이름이다. 패턴은 코드 상수라 ``E''`` literal로
@@ -2236,8 +2246,8 @@ compacted AS (
         {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail,
         -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott
         -- Hotel Seoul)"의 한글 이름과 영문 이름. 저장하지 않고 원래 이름에서 뗀다(없으면 NULL).
-        {_search_bracket_part_sql("name", 1)} AS compact_base_name,
-        {_search_bracket_part_sql("name", 2)} AS compact_bracket_name,
+        {_search_bracket_base_sql("name")} AS compact_base_name,
+        {_search_bracket_latin_sql("name")} AS compact_bracket_name,
         {_search_category_group_sql("category")} AS search_group
     FROM filtered
 ),
