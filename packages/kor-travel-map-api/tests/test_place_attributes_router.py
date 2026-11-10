@@ -29,6 +29,7 @@ from kortravelmap.infra.place_attribute_repo import (
     PlaceAttribute,
     ThemeAttachDecision,
     ThemeAttachDecisionPage,
+    place_attribute_digest,
 )
 
 from kortravelmap.api.app import create_app
@@ -496,9 +497,7 @@ def test_detail_carries_attributes_and_digest_etag(
     etag = f'"7-{digest}"'
     assert response.headers["ETag"] == etag
     relabeled = replace(_CATALOG[0], label="반려동물 동반")
-    assert features_mod.place_attribute_repo.place_attribute_digest(
-        (relabeled, _CATALOG[1])
-    ) != digest
+    assert place_attribute_digest((relabeled, _CATALOG[1])) != digest
 
     cached = client.get("/v1/features/f1", headers={"If-None-Match": etag})
     assert cached.status_code == 304
