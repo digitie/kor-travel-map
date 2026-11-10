@@ -15872,6 +15872,19 @@ CREATE TABLE feature.current_price_summary (
 ALTER TABLE feature.current_price_summary OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: dataset_place_attributes; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.dataset_place_attributes (
+    provider_dataset_id bigint NOT NULL,
+    source_entity_type text NOT NULL,
+    attribute_code text NOT NULL
+);
+
+
+ALTER TABLE feature.dataset_place_attributes OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_aliases; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -18824,19 +18837,6 @@ CREATE TABLE ops.tvn36_legacy_freeze_preflight_manifest (
 ALTER TABLE ops.tvn36_legacy_freeze_preflight_manifest OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: dataset_place_attributes; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE provider_sync.dataset_place_attributes (
-    provider_dataset_id bigint NOT NULL,
-    source_entity_type text NOT NULL,
-    attribute_code text NOT NULL
-);
-
-
-ALTER TABLE provider_sync.dataset_place_attributes OWNER TO ktm_feature_schema_owner;
-
---
 -- Name: notice_lifecycle_scopes; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
@@ -19218,6 +19218,14 @@ ALTER TABLE ONLY feature.curation_link_decisions
 
 ALTER TABLE ONLY feature.current_price_summary
     ADD CONSTRAINT pk_current_price_summary PRIMARY KEY (feature_id, provider_dataset_id, price_domain, product_key);
+
+
+--
+-- Name: dataset_place_attributes pk_dataset_place_attributes; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.dataset_place_attributes
+    ADD CONSTRAINT pk_dataset_place_attributes PRIMARY KEY (provider_dataset_id, source_entity_type, attribute_code);
 
 
 --
@@ -20634,14 +20642,6 @@ ALTER TABLE ONLY ops.manual_provider_dedup_resolutions
 
 ALTER TABLE ONLY ops.offline_uploads
     ADD CONSTRAINT uq_offline_uploads_dataset_scope_checksum UNIQUE (provider_dataset_id, sync_scope, operation_key, checksum_sha256);
-
-
---
--- Name: dataset_place_attributes pk_dataset_place_attributes; Type: CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY provider_sync.dataset_place_attributes
-    ADD CONSTRAINT pk_dataset_place_attributes PRIMARY KEY (provider_dataset_id, source_entity_type, attribute_code);
 
 
 --
@@ -23714,6 +23714,22 @@ ALTER TABLE ONLY feature.current_price_summary
 
 
 --
+-- Name: dataset_place_attributes fk_dataset_place_attributes_attribute_code_place_attributes; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.dataset_place_attributes
+    ADD CONSTRAINT fk_dataset_place_attributes_attribute_code_place_attributes FOREIGN KEY (attribute_code) REFERENCES feature.place_attributes(attribute_code) ON DELETE CASCADE;
+
+
+--
+-- Name: dataset_place_attributes fk_dataset_place_attributes_provider_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.dataset_place_attributes
+    ADD CONSTRAINT fk_dataset_place_attributes_provider_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE CASCADE;
+
+
+--
 -- Name: feature_aliases fk_feature_aliases_feature; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -25159,22 +25175,6 @@ ALTER TABLE ONLY ops.provider_refresh_policies
 
 ALTER TABLE ONLY ops.import_job_events
     ADD CONSTRAINT import_job_events_job_id_fkey FOREIGN KEY (job_id) REFERENCES ops.import_jobs(job_id) ON DELETE CASCADE;
-
-
---
--- Name: dataset_place_attributes fk_dataset_place_attributes_attribute_code_place_attributes; Type: FK CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY provider_sync.dataset_place_attributes
-    ADD CONSTRAINT fk_dataset_place_attributes_attribute_code_place_attributes FOREIGN KEY (attribute_code) REFERENCES feature.place_attributes(attribute_code) ON DELETE CASCADE;
-
-
---
--- Name: dataset_place_attributes fk_dataset_place_attributes_provider_dataset_id_provider_datase; Type: FK CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-ALTER TABLE ONLY provider_sync.dataset_place_attributes
-    ADD CONSTRAINT fk_dataset_place_attributes_provider_dataset_id_provider_datase FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE CASCADE;
 
 
 --
