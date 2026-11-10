@@ -1,3 +1,7 @@
+## 2026-11-10 — 운영 검색 점검 수정(#1476~#1478)
+
+- 배포 뒤 transport rail-stations 적재를 한 번 더 돌린다(분류 06030200→06030300, feature_id는 그대로). 그다음 dedup refresh를 돌려 영상 후보 쌍을 큐에 올린다. 여수엑스포역은 transport#179가 해결되면 들어온다.
+
 ## 2026-11-10 — #1468 D 국가유산 행사 회차 묶음·장소 좌표
 
 - 배포 뒤 `feature_event_krheritage_events_job` 1회(preview 먼저). 회차별 옛 Feature 5,286건은 그 run이 retired로 내리고 행사 약 1,316건이 선다. 좌표는 약 23.6%(같은 시군구 동명 장소 Feature). migration·OpenAPI 없음.
