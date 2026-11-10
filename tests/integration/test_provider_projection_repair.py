@@ -66,9 +66,11 @@ async def test_same_raw_head_reprojects_once_and_preserves_effective_override(
     migrated_session: AsyncSession, override: bool, source_shape: str,
 ) -> None:
     bundle = await (_mcst_bundle() if source_shape == "hotel" else _media_bundle())
-    expected = "03010100" if source_shape == "hotel" else "00000000"
+    # media: 2026-11-10 운영에서 미분류로 내려간 촬영지가 같은 원천 head 재적재로 관광 분류를
+    # 되찾는다(손 SQL 없이 복구되는 경로).
+    expected = "03010100" if source_shape == "hotel" else "01000000"
     old = bundle.model_copy(update={"feature": bundle.feature.model_copy(update={
-        "category": "01040000" if source_shape == "hotel" else "01000000",
+        "category": "01040000" if source_shape == "hotel" else "00000000",
         "marker_icon": "museum" if source_shape == "hotel" else "attraction",
     })})
     async with as_dagster_runtime(migrated_session):

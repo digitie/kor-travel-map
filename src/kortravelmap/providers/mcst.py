@@ -709,8 +709,12 @@ def _structured_category(row: Mapping[str, Any], spec: McstDatasetSpec) -> str:
         "leisure_camping_facilities_csv",
     }:
         return spec.category
+    # 캠핑·촬영지 목록은 목록 자체가 업종을 말한다(촬영지 = 관광 Tier 1). 촬영지의 공식 CSV는 TYPE이
+    # 전부 비어 있어서 미분류로 내리면 목록 전체가 관광 필터·검색 그룹에서 빠진다(2026-11-10 운영
+    # 회귀, 8,799/8,803). 업종을 이름으로 만들어 넣지는 않는다 — Tier 1에서 멈춘다.
     fallback = (
-        spec.category if spec.slug == "leisure_camping_facilities_csv"
+        spec.category
+        if spec.slug in {"leisure_camping_facilities_csv", "media_famous_places_csv"}
         else PlaceCategoryCode.UNCLASSIFIED.value
     )
     labels = [
