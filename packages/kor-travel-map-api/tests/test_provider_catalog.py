@@ -242,7 +242,7 @@ def test_handler_registry_is_key_to_handler_only() -> None:
     # 2026-11-09 26 → 28: transport 철도역·항구 place(ADR-120, migration 438).
     # 2026-11-09 28 → 29: 전통시장 표준데이터(#1459, migration 439).
     # 2026-11-09 29 → 30: TourAPI 관광지(#1459, migration 441).
-    # 2026-11-10 30 → 29: 표준데이터 축제·TourAPI 축제 보강 두 handler를 TourAPI 축제 1차 하나로(447).
+    # 2026-11-10 30 → 29: 표준데이터 축제·TourAPI 축제 보강 handler 둘을 TourAPI 축제 하나로(447).
     assert len(FEATURE_OPERATION_HANDLERS) == 29
     assert feature_operation_handler_keys() == frozenset(FEATURE_OPERATION_HANDLERS)
     binding = resolve_feature_operation_handler("feature_place_knps_points_job")
