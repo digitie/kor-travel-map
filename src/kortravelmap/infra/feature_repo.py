@@ -1894,7 +1894,7 @@ def _search_category_group_sql(column: str) -> str:
 
 
 def _search_destination_exact_group_sql(category: str) -> str:
-    """``destination_exact_search_group``의 SQL 짝 — ``ranked`` CTE 안에서만 쓴다.
+    """``destination_exact_search_group``의 SQL 짝 — ``ranked``를 읽는 ``candidates`` CTE에서 쓴다.
 
     목적지 이름 일치(``destination_exact``)이고 분류가 고유 이름 목적지(접두 예외 표 — 역·휴게소·
     공항·여객선터미널·전통시장)면 ``SEARCH_NAMED_DESTINATION_EXACT_GROUP``(관광과 같은 0), 아니면
