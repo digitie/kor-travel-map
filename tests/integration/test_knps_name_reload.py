@@ -1,8 +1,10 @@
 """KNPS 이름 정규화가 바뀐 뒤 같은 원천 행을 다시 적재하면 Feature 이름이 따라오는가.
 
 python-knps-api a472a37(#17 후속)은 ``現노고단대피소``의 이름에서 ``現``을 걷고 원문은 ``raw``에
-남긴다 — 원천 행(raw)과 그 해시는 **그대로**다. 운영에서 이미 ``現노고단대피소``로 적재된 행을
-다음 적재가 고치는지(원천 해시가 같아도 이름 갱신이 일어나는지)를 실제 적재 경로로 고정한다.
+남긴다 — 원천 행(raw)은 **그대로**다. 원천 행만 해시하면 다음 적재가 그 행을 "바뀌지 않음"으로
+보고 이름을 고치지 않는다(이 테스트가 처음 빨갛게 보인 것). Map 변환기가 고친 이름을 해시에
+넣으므로(``providers.knps._point_raw_data``) 운영의 ``現노고단대피소``가 다음 적재에서 고쳐지는지를
+실제 적재 경로로 고정한다.
 """
 
 from __future__ import annotations
@@ -55,8 +57,9 @@ async def test_stripped_shelter_name_replaces_loaded_name_with_same_raw(
     second_key = await _load(
         migrated_session, "이름재적재대피소", datetime(2026, 11, 12, 9, 0, tzinfo=_KST)
     )
-    # 원천 행이 같으니 source record identity도 같다 — 이름만 바뀌었다.
-    assert first_key == second_key
+    # 원천 행은 같지만 고친 이름이 해시에 들어가(__map_display_name__) 새 source record가 된다 —
+    # 그래야 적재가 "바뀌지 않음"으로 건너뛰지 않는다(이 덧붙임 전에는 이름이 現…로 남았다).
+    assert first_key != second_key
     names = (
         await migrated_session.execute(
             text(

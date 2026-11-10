@@ -326,7 +326,14 @@ async def test_official_current_shelter_archive_becomes_22_map_places() -> None:
     # knps-api a472a37(#17 후속): 원천의 '現' 표식은 이름에서 걷히고 원문은 raw에 남는다.
     assert "노고단대피소" in by_name
     assert not any("現" in name or "舊" in name for name in by_name)
-    assert by_name["노고단대피소"].source_record.raw_data["시설물"] == "現노고단대피소"
+    nogodan_raw = by_name["노고단대피소"].source_record.raw_data
+    assert nogodan_raw["시설물"] == "現노고단대피소"
+    # 고친 이름은 해시에 들어가야 이미 現…로 적재된 운영 행이 다음 적재에서 고쳐진다.
+    assert nogodan_raw["__map_display_name__"] == "노고단대피소"
+    # 이름이 원천 값 그대로인 나머지 21건은 원천 행 그대로다(해시 불변 — 재변환 없음).
+    plain = [bundle for bundle in bundles if bundle.feature.name != "노고단대피소"]
+    assert len(plain) == 21
+    assert all("__map_display_name__" not in b.source_record.raw_data for b in plain)
     for bundle in bundles:
         feature = bundle.feature
         assert feature.category == "03080100"
