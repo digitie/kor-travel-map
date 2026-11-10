@@ -1282,12 +1282,16 @@ async def fetch_standard_museums(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard_file(
-            client.museum_art, label="datagokr museum_art file"
-        ):
-            yield record
+        records = [
+            record
+            async for record in _iter_datagokr_standard_file(
+                client.museum_art, label="datagokr museum_art file"
+            )
+        ]
     finally:
         await client.aclose()
+    for record in _in_canonical_order(records):
+        yield record
 
 
 async def fetch_standard_tourist_attractions(
@@ -1303,12 +1307,16 @@ async def fetch_standard_tourist_attractions(
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard_file(
-            client.tourist_attraction, label="datagokr tourist_attraction file"
-        ):
-            yield record
+        records = [
+            record
+            async for record in _iter_datagokr_standard_file(
+                client.tourist_attraction, label="datagokr tourist_attraction file"
+            )
+        ]
     finally:
         await client.aclose()
+    for record in _in_canonical_order(records):
+        yield record
 
 
 class StandardFileSnapshotIncomplete(RuntimeError):
@@ -1883,6 +1891,24 @@ async def fetch_standard_parking_lots(
         yield record
 
 
+def _canonical_raw(record: Any) -> str:
+    """원문(``raw``)의 정렬 JSON — 같은 자연키 행 중 무엇이 남는지를 파일 순서와 떼어 놓는다."""
+    return json.dumps(
+        getattr(record, "raw", None), sort_keys=True, ensure_ascii=False, default=str
+    )
+
+
+def _in_canonical_order(records: Sequence[Any]) -> list[Any]:
+    """원문 정렬 JSON 순서로 되돌려 준다(박물관미술관·관광지).
+
+    자연키 ``이름::도로명``이 같은 행이 박물관 26·관광지 18개 키에 있고 내용이 다르다
+    (2026-11-10 실측). 적재는 같은 키를 나중 행으로 덮으므로 파일 순서가 바뀌면 남는 행이
+    바뀐다 — 순서를 원문으로 고정하면 같은 행이 남는다. 키는 변환이 만들므로 여기서 거르지
+    않는다(주차장은 번호가 원천 필드라 거른다).
+    """
+    return sorted(records, key=_canonical_raw)
+
+
 def _one_row_per_parking_number(records: Sequence[Any]) -> list[Any]:
     """같은 ``prkplce_no``의 행 중 하나만 남긴다 — 파일 순서와 무관하게 같은 행을.
 
@@ -1896,8 +1922,7 @@ def _one_row_per_parking_number(records: Sequence[Any]) -> list[Any]:
         number = getattr(record, "prkplce_no", None)
         if not number:
             continue
-        digest = json.dumps(getattr(record, "raw", None), sort_keys=True, ensure_ascii=False,
-                            default=str)
+        digest = _canonical_raw(record)
         kept = chosen.get(number)
         if kept is None or digest < kept[0]:
             chosen[number] = (digest, index)
