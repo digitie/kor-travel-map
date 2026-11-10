@@ -203,9 +203,43 @@ def test_a_repeated_content_id_keeps_one_bundle_deterministically() -> None:
     assert forward[0].source_record == backward[0].source_record
 
 
+def test_without_coordinates_the_address_resolver_fills_the_legal_dong() -> None:
+    calls: list[Address] = []
+
+    async def _resolve(address: Address) -> Address:
+        calls.append(address)
+        return Address(bjd_code="4711310100", sigungu_code="47113", sido_code="47")
+
+    async def _never(coord: Coordinate) -> Address:  # pragma: no cover — 좌표가 없다
+        raise AssertionError("좌표 없는 행에 역지오코딩을 부르지 않는다")
+
+    (bundle,) = _bundles(
+        [replace(_POHANG, map_x=None, map_y=None)],
+        reverse_geocoder=_never,
+        address_resolver=_resolve,
+    )
+    assert bundle.feature.coord is None
+    assert bundle.feature.address.bjd_code == "4711310100"
+    assert calls[0].legal == "경상북도 포항시 북구 두호동 685-1"
+
+
+def test_without_geo_the_tourapi_legal_dong_codes_give_the_sigungu() -> None:
+    (bundle,) = _bundles([_POHANG])
+    assert (bundle.feature.address.sigungu_code, bundle.feature.address.sido_code) == (
+        "47113",
+        "47",
+    )
+
+
+def test_a_naive_fetched_at_is_rejected() -> None:
+    with pytest.raises(ValueError, match="timezone|aware|naive"):
+        asyncio.run(vk.tourapi_festivals_to_bundles([_POHANG], fetched_at=datetime(2026, 11, 10)))
+
+
 def test_the_feature_id_does_not_move_when_the_detail_arrives() -> None:
     (plain,) = _bundles([_POHANG], reverse_geocoder=_reverse)
-    (detailed,) = _bundles([replace(_POHANG, overview="본문", homepage="")], reverse_geocoder=_reverse)
+    detailed_item = replace(_POHANG, overview="본문", homepage="")
+    (detailed,) = _bundles([detailed_item], reverse_geocoder=_reverse)
     assert plain.feature.feature_id == detailed.feature.feature_id
 
 

@@ -11,8 +11,7 @@ source_links)으로 적재한 뒤 재조회해 DB 계약을 검증한다 (사용
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
 import pytest
@@ -26,9 +25,9 @@ from kortravelmap.infra.models import (
     SourceLinkRow,
     SourceRecordRow,
 )
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
 from tests.integration._feature_ids import feature_uuid
 from tests.integration._subtype_seed import seed_feature_subtype
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -76,48 +75,7 @@ async def _provider_dataset_id(
     )
 
 
-@dataclass(frozen=True)
-class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 (좌표 있는 케이스).
-
-    provider 실모델 ``PublicCulturalFestival`` 필드명 (ADR-044 재정렬, #374).
-    """
-
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
-
-
-_ITEM = _Festival(
-    fstvl_nm="서울 봄꽃 축제",
-    opar="여의도공원",
-    fstvl_start_date=date(2026, 4, 5),
-    fstvl_end_date=date(2026, 4, 12),
-    fstvl_co="봄꽃 축제 상세.",
-    mnnst_nm="영등포구청",
-    phone_number="02-2670-3114",
-    rdnmadr="서울특별시 영등포구 여의공원로 120",
-    lnmadr="서울특별시 영등포구 여의도동 8",
-    latitude=37.5263,
-    longitude=126.9239,
-    reference_date=date(2026, 3, 1),
-    instt_nm="서울특별시 영등포구",
-)
+_ITEM = festival_item("FEST-BUNDLE-ROUNDTRIP", "서울 봄꽃 축제", overview="봄꽃 축제 상세.")
 
 
 async def test_feature_bundle_persists_and_roundtrips(
@@ -126,8 +84,8 @@ async def test_feature_bundle_persists_and_roundtrips(
     from geoalchemy2 import WKTElement
 
     bundle = (
-        await cultural_festivals_to_bundles(
-            [_ITEM],  # type: ignore[list-item]
+        await festival_bundles(
+            [_ITEM],
             fetched_at=datetime(2026, 5, 28, 12, 0, tzinfo=_KST),
         )
     )[0]

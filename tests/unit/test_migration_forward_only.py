@@ -43,6 +43,7 @@ FORWARD_ONLY_REVISIONS = (
     "442_mois_brand_search_aliases",
     "444_trip_search_aliases",
     "446_mcst_place_attributes",
+    "447_tourapi_festivals_primary",
 )
 
 

@@ -71,8 +71,9 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 8, 4, 12, 0, tzinfo=_KST)
 
-_PROVIDER = "data.go.kr-standard"
-_DATASET = "datagokr_cultural_festivals"
+# head 카탈로그의 **활성** dataset이어야 한다 — 표준데이터 축제는 447에서 비활성이다.
+_PROVIDER = "python-visitkorea-api"
+_DATASET = "visitkorea_festivals"
 _ENTITY_TYPE = "festival"
 
 #: 어떤 Feature도 갖지 않는 canonical uuid. 309 뒤 read 표면의 조회 키는 전부

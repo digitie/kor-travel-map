@@ -30,7 +30,7 @@ async def test_tvn33_fixture_preview_is_an_enabled_operation(
                 JOIN provider_sync.provider_dataset_operations AS operation
                   ON operation.provider_dataset_id = dataset.provider_dataset_id
                 WHERE (dataset.provider, dataset.dataset_key) IN (
-                    ('data.go.kr-standard', 'datagokr_cultural_festivals')
+                    ('python-visitkorea-api', 'visitkorea_festivals')
                 )
                   AND operation.operation_kind = 'preview'
                 ORDER BY dataset.provider, dataset.dataset_key
@@ -40,9 +40,10 @@ async def test_tvn33_fixture_preview_is_an_enabled_operation(
     ).mappings().all()
 
     # 옛 preview 전용 dataset ``airkorea_stations``는 402(ADR-105)가 weather dataset의
-    # operation을 종류 불문 끄면서 이 대조에서 빠졌다.
+    # operation을 종류 불문 끄면서 이 대조에서 빠졌다. 표준데이터 축제 preview는 447(축제 원천
+    # TourAPI 전환)이 끄고 같은 모양의 TourAPI 축제 preview를 넣었다.
     assert [(row["provider"], row["dataset_key"]) for row in rows] == [
-        ("data.go.kr-standard", "datagokr_cultural_festivals"),
+        ("python-visitkorea-api", "visitkorea_festivals"),
     ]
     assert all(row["is_enabled"] is True for row in rows)
     assert all(row["config"] == {"handler": "fixture"} for row in rows)

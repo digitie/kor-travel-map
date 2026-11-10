@@ -56,7 +56,6 @@ def test_feature_load_asset_keys_registered() -> None:
         key.to_user_string() for key in defs.resolve_asset_graph().get_all_asset_keys()
     }
     assert {
-        "feature_event_datagokr_cultural_festivals",
         "feature_place_transport_fuel_stations",
         "feature_place_transport_rest_areas",
         "feature_place_krheritage_items",
@@ -80,7 +79,7 @@ def test_feature_load_asset_keys_registered() -> None:
         "feature_place_kor_travel_concierge_youtube",
         "feature_notice_krforest_landslide_forecast_issues",
         "feature_place_mcst_culture",
-        "feature_event_visitkorea_enrichment",
+        "feature_event_visitkorea_festivals",
     } <= asset_keys
 
 
@@ -212,7 +211,6 @@ def test_offline_upload_load_default_resources_registered() -> None:
 
 # T-RV-04b: provider별 live fetcher가 연결된 resource key. 나머지는 guard.
 _LIVE_PROVIDER_RESOURCE_KEYS = {
-    "datagokr_cultural_festivals",
     "transport_fuel_stations",
     "transport_rest_areas",
     "transport_rail_stations",
@@ -235,7 +233,7 @@ _LIVE_PROVIDER_RESOURCE_KEYS = {
     "datagokr_file_data_records",
     "khoa_beaches",
     "transport_airports",
-    "visitkorea_festival_events",
+    "visitkorea_festivals",
     "visitkorea_tourist_attractions",
     "kor_travel_concierge_youtube_features",
     "mcst_culture_records",

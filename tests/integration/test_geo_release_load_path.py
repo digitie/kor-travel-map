@@ -1,7 +1,8 @@
 """적재 경로의 geo 재해석 — stale·무쓰기·빈 답 가드·override·토큰 조건(ADR-109, T-GR-03).
 
-실제 provider 변환기(``standard_data`` 축제, ``kor_travel_concierge``)에 가짜 역지오코더를 꽂아 "geo
-릴리스 A → B"를 흉내 낸다. 같은 payload를 두 번 적재하되 두 번째에는 run 토큰과 geo 답만 바꾼다.
+실제 provider 변환기(TourAPI 축제 ``visitkorea``, ``kor_travel_concierge``)에 가짜
+역지오코더를 꽂아 "geo 릴리스 A → B"를 흉내 낸다. 같은 payload를 두 번 적재하되 두 번째에는
+run 토큰과 geo 답만 바꾼다.
 
 세션은 테스트마다 롤백된다(``migrated_session``).
 """
@@ -33,7 +34,7 @@ from kortravelmap.providers.kor_travel_concierge import (
     KOR_TRAVEL_CONCIERGE_SOURCE_ENTITY_TYPE,
     kor_travel_concierge_items_to_bundles,
 )
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from tests.integration._tourapi_festival import festival_bundles, festival_item
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -79,51 +80,20 @@ class _FakeReverse:
         return self.answer
 
 
-@dataclass(frozen=True)
-class _Festival:
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
-
-
 async def _festival(
     seed: str, reverse: _FakeReverse, *, description: str = "축제"
 ) -> FeatureBundle:
-    item = _Festival(
-        fstvl_nm="geo 릴리스 축제",
-        opar="여의도공원",
-        fstvl_start_date=date(2026, 10, 1),
-        fstvl_end_date=date(2026, 10, 9),
-        fstvl_co=description,
-        rdnmadr=f"서울특별시 영등포구 여의공원로 120 ({seed})",
-        lnmadr="서울특별시 영등포구 여의도동 8",  # provider 원문 legal — 빈 답에도 남는다
-        latitude=37.5263,
-        longitude=126.9239,
-        reference_date=date(2026, 9, 1),
-        instt_nm="서울특별시 영등포구",
+    # 자연키는 TourAPI contentid(seed). 개최지 주소는 지번 꼴이라 원천 legal로 남는다 —
+    # geo 빈 답에도 남는 provider 원문 legal이다.
+    item = festival_item(
+        seed,
+        "geo 릴리스 축제",
+        starts_on=date(2026, 10, 1),
+        ends_on=date(2026, 10, 9),
+        addr1="서울특별시 영등포구 여의도동 8",
+        overview=description,
     )
-    return (
-        await cultural_festivals_to_bundles(
-            [item],  # type: ignore[list-item]
-            fetched_at=_FETCHED,
-            reverse_geocoder=reverse,
-        )
-    )[0]
+    return (await festival_bundles([item], fetched_at=_FETCHED, reverse_geocoder=reverse))[0]
 
 
 def _ctx(ref: DatasetRef | None, *, observed: frozenset[str] = frozenset()) -> GeoLoadContext:
@@ -259,7 +229,7 @@ async def test_mid_run_dataset_switch_never_produces_fresh_looking_stamps(
 
 
 async def test_empty_answer_guard_keeps_stored_columns(migrated_session: AsyncSession) -> None:
-    """geo 빈 답 + provider 원문 legal 있음(standard_data) — 덮지도 스탬프도 하지 않는다."""
+    """geo 빈 답 + provider 원문 legal 있음(TourAPI 축제) — 덮지도 스탬프도 하지 않는다."""
     _, feature_id = await _load_a(migrated_session, "empty-guard")
     before_row = await _row(migrated_session, feature_id)
     before_stamp = await _stamp_row(migrated_session, feature_id)

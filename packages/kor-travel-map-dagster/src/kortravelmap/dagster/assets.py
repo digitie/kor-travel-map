@@ -1262,9 +1262,12 @@ VISITKOREA_DETAIL_DAILY_BUDGET: Final = 900
 VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 
 #: 축제 run 예산(2026-11-10 TourAPI 축제 1차 전환). 창 안의 축제는 900건 안팎이라(실측 879) 첫
-#: 사흘이면 상세가 다 차고, 그 뒤로는 수정된 행만 다시 받는다. 축제 schedule이 관광지보다 먼저
-#: 돌아 시기에 민감한 축제 본문이 먼저 찬다.
+#: 사흘이면 상세가 다 차고, 그 뒤로는 수정된 행만 다시 받는다.
 VISITKOREA_FESTIVAL_DETAIL_BUDGET: Final = 300
+
+#: 축제의 법정동 미해석 허용 상한 — 축제는 900건 안팎이고 원천 좌표가 모두 육지 행사장이라 관광지(30)보다
+#: 좁게 둔다. 버린 행은 은퇴하므로 geo 장애가 한 run에 축제 수십 건을 지우지 않게 한다.
+VISITKOREA_FESTIVAL_UNRESOLVED_FLOOR: Final = 5
 
 #: 역지오코딩이 법정동을 못 낸 행의 허용 상한 — ``max(이 수, 전체의 1%)``. 해상 등대·무인도처럼
 #: 늘 비는 행만 버리고(주소 검증 ``drop``), 그보다 많으면 geo 장애로 보고 은퇴 적재 전에 멈춘다.
@@ -1284,7 +1287,7 @@ async def _attach_attraction_details(
     records: Sequence[Any],
     *,
     dataset_key: str = DATASET_KEY_VISITKOREA_ATTRACTIONS,
-    budget: int = VISITKOREA_ATTRACTION_DETAIL_BUDGET,
+    budget: int | None = None,
     label: str = "TourAPI 관광지",
 ) -> list[Any]:
     """저장 상세를 이어 쓰고, 예산 안에서 새·수정 항목의 상세를 받아 record에 얹는다.
@@ -1304,6 +1307,9 @@ async def _attach_attraction_details(
             provider=VISITKOREA_PROVIDER_NAME, dataset_key=dataset_key
         )
         stored = {record.source_entity_id: record.raw_data for record in current}
+    # 기본값은 호출 시점의 모듈 값이다(def 시점에 묶으면 예산을 바꾼 테스트·운영 보정이 안 닿는다).
+    if budget is None:
+        budget = VISITKOREA_ATTRACTION_DETAIL_BUDGET
     budget = budget if _retry_number(context) == 0 else 0
     plan = plan_attraction_details(records, stored, budget=budget)
     fetched: Mapping[str, tuple[str, str]] = (
@@ -1328,14 +1334,20 @@ async def _attach_attraction_details(
     return attached
 
 
-def _ensure_geo_resolved_enough(bundles: Sequence[Any], *, label: str = "TourAPI 관광지") -> None:
+def _ensure_geo_resolved_enough(
+    bundles: Sequence[Any],
+    *,
+    label: str = "TourAPI 관광지",
+    floor: int | None = None,
+) -> None:
     """좌표가 있는데 법정동이 비는 행이 상한을 넘으면 은퇴 적재 전에 멈춘다(geo 장애 방어)."""
     unresolved = sum(
         1
         for bundle in bundles
         if bundle.feature.coord is not None and bundle.feature.address.bjd_code is None
     )
-    limit = max(VISITKOREA_ATTRACTION_UNRESOLVED_FLOOR, len(bundles) // 100)
+    floor = VISITKOREA_ATTRACTION_UNRESOLVED_FLOOR if floor is None else floor
+    limit = max(floor, len(bundles) // 100)
     if unresolved > limit:
         raise Failure(
             description=(
@@ -1672,7 +1684,9 @@ async def run_feature_event_visitkorea_festivals(
     )
     ensure_replay_complete(source)
     if not replay:  # replay는 은퇴시키지 않는다
-        _ensure_geo_resolved_enough(bundles, label="TourAPI 축제")
+        _ensure_geo_resolved_enough(
+            bundles, label="TourAPI 축제", floor=VISITKOREA_FESTIVAL_UNRESOLVED_FLOOR
+        )
     return await _load(
         context,
         provider=VISITKOREA_PROVIDER_NAME,

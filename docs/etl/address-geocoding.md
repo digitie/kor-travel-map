@@ -42,7 +42,7 @@ datagokr_file_data·krforest·krheritage·opinet·krex)이고 그중 krex는 받
 | krex `rest_areas_to_bundles`(`krex.py:472-513`) | 항상(place만) | 받지만 **미사용**(`:496`) | 코드 중심 자기 `Address` 조립; 같은 모듈 price·notice 변환기는 geo 없음 |
 | khoa(`khoa.py:128-145`) · krairport(`krairport.py:113-135`) · mcst(`mcst.py:570-585`) | 항상 | 받지 않음 | 코드 + `admin`(없으면 provider 텍스트)·`admin_dong_code/zipcode/sido_name/sigungu_name` — 자기 `Address` 조립 |
 
-**원천 좌표 결측 fallback(`address_geocoder=`, #1459 §4, 2026-11-09).** 축제(`cultural_festivals_to_bundles`)·
+**원천 좌표 결측 fallback(`address_geocoder=`, #1459 §4, 2026-11-09).** 축제(당시 `cultural_festivals_to_bundles` — 2026-11-10 퇴역, TourAPI 축제는 원천 좌표가 있다)·
 주차장(`parking_lots_to_bundles`, 공용 `_standard_place_to_bundle`)·국가유산 place(`heritage_items_to_bundles`)는
 `address_geocoder`(`Address → Coordinate`)를 받는다. 원천 좌표가 없고(`0.0` 포함) 주소에 건물번호·지번이 있을
 때만(`geocoding.address_has_location_number` — "경상남도 밀양시"·"화곡6동"처럼 행정구역까지인 주소는 대표점이라

@@ -93,7 +93,7 @@ system
 
 | dataset_key | provider | 의미 |
 |------------|----------|------|
-| `visitkorea_festival_events` | python-visitkorea-api | 축제/행사 검색 |
+| `visitkorea_festivals` | python-visitkorea-api | 축제/행사 1차 event(유일한 축제 원천, 2026-11-10) |
 | `visitkorea_tourist_attractions` | python-visitkorea-api | 관광지·문화시설·레포츠(contentTypeId 12·14·28) 1차 place, 자연키 contentid, 상세는 run 예산 600(#1459, `docs/etl/visitkorea-tourist-attraction-etl.md`) |
 | `mois_license_features_bulk` | python-mois-api | 인허가 영업중 snapshot (place 승격) |
 | `mois_license_features_history` | python-mois-api | 이력조회 기반 incremental |
@@ -150,7 +150,7 @@ system
 | `datagokr_museums` | data.go.kr-standard | 박물관·미술관 표준 (data.go.kr-standard provider는 짧은 이름과 달리 `datagokr_` prefix 사용) |
 | `datagokr_parking_lots` | data.go.kr-standard | 주차장 표준 |
 | `datagokr_tourist_attractions` | data.go.kr-standard | 관광지 표준 |
-| `datagokr_cultural_festivals` | data.go.kr-standard | 문화축제 표준 |
+| ~~`datagokr_cultural_festivals`~~ | data.go.kr-standard | 문화축제 표준 — **퇴역 2026-11-10**(migration 447) |
 | `place_phone_enrichment` | kakao-local-api / naver-search-api / google-places-api-new | 전화번호 보강 |
 
 신규 추가는 ADR + `docs/<provider>-feature-etl.md`.

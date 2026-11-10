@@ -81,8 +81,9 @@ pytestmark = pytest.mark.integration
 _KST = timezone(timedelta(hours=9))
 _FETCHED = datetime(2026, 8, 5, 12, 0, tzinfo=_KST)
 
-_PROVIDER = "data.go.kr-standard"
-_DATASET = "datagokr_cultural_festivals"
+# head 카탈로그의 **활성** dataset이어야 한다 — 표준데이터 축제는 447에서 비활성이다.
+_PROVIDER = "python-visitkorea-api"
+_DATASET = "visitkorea_festivals"
 _ENTITY_TYPE = "festival"
 
 # 다른 테스트의 잔존 commit과 절대 겹치지 않을 외해 bbox (제주 남서 해상).

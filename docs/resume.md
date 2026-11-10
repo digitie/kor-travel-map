@@ -1,3 +1,7 @@
+## 2026-11-10 — 축제 원천 TourAPI 단독(alembic 447)
+
+- 회전에 묶는다(직접 회전 금지). 447이 표준데이터 축제 1,296건을 퇴역시키므로 배포 직후 `visitkorea_festivals` preview → `feature_event_visitkorea_festivals_job` 1회(약 880건 생성, 상세 ≤300) → `/v1/public/festivals/monthly` 확인 → daily schedule 켜기. Manager env 변경 없음.
+
 ## 2026-11-10 — #1468 A MCST 테마 속성(ADR-121) R1·R3
 
 - 회전에 묶는다(alembic 446 — catalog `feature.place_attributes`·`feature.dataset_place_attributes`·판정 `provider_sync.theme_attach_decisions`). 붙임 모드 `KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE` 기본 `off` — 배포만으로는 적재가 바뀌지 않는다. 반려 업종 행(약 20,396) 미적재만 즉시 적용(기존 Feature는 그대로).
@@ -932,6 +936,7 @@ journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하�
 ## 2026-10-25 — 공개 provider patch P-first(426)
 
 실제25·공식 oracle1 PASS와 정리를 확인했다. 원실패를 보존한다. [근거·미완](reports/2026-10-25-provider-patch-protocol-entry.md). CI·운영·실제 SH는 미완이다.
+
 ## 2026-10-25 — Provider base UPDATE-first 후보(425, 미수용)
 
 - 실제15·oracle1·EX18·제한 A/B를 정산했다. 원 실패를 보존하며 최종 CI·운영은 미완이다. [범위·한계](reports/2026-10-25-provider-base-update-first.md).
@@ -939,6 +944,7 @@ journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하�
 ## 2026-10-25 — tracking P→L prefix(424, 부분)
 
 - 기존 SER/capture/kernel/SH OFF를 보존했다. 직접25·정본oracle1·기존 client4와 별도 ASGI1(503→새요청200→재요청200)·fresh triple7을 검증했다. 공유 cutover DB의 통합11 원실패(9 PASS/2 FAIL)는 보존·합산하지 않는다. 정확 CI 양 PostGIS lane의28 FAIL/1 ERROR를 보존·분석 중이며 운영·whole snapshot은 미완이다. [범위·근거](reports/2026-10-25-tracking-protocol-prefix.md).
+
 ## 2026-10-25 — Place projection 예산 검사 추출
 
 - Heritage 사전 검사를 core로 이동하고 기존 wrapper·9DTO·본문을 보존했다. 순수 회귀114 PASS이며 DB/수집 연결은 없다. [범위·미완](reports/2026-10-25-place-projection-budget-extraction.md).
@@ -1002,6 +1008,7 @@ journal의 10월1~12일28절을 [10c](archive/journal-2026-10c.md)로 보존하�
 - **다음 한 작업: CI green → 머지 판단 → A: head 416 pair 배포 → B: 세 dataset 갱신 정책 `enabled=false` 필수·schedule 확인·진행 중
   job 0·큐 sensor 정지 → 417 pair 배포 → 전이 수·in-bounds 확인(ADR-114 "①의 운영 runbook"). 그 뒤 ②의 해제 조건(PinVi in-bounds 기본 kind·장소 검색 대체, C7
   안전 대상 이동)을 PinVi·C7 쪽에 건다.**
+
 ## 2026-10-24 — 한 sealed attempt의 scalar 원자 batch(A2)
 
 - 같은 dataset의 기존 primary place 여러 개를 한 TX/finish1회로 적용하는 별도 entry를 추가했다. snapshot seal·실제 collector 배선·same-dataset 병렬 수용은 아니다.
@@ -1245,6 +1252,7 @@ main `0b2dc53d0`을 추가 통합하고 두 작업 기록을 양쪽 보존했다
   migration·OpenAPI 변화 없음(PinVi 재vendor 불필요). 배포 영향: Map Dagster code location 재배포.
 - 한계: 스트리밍 snapshot 적재는 fence를 1시간 넘게 쥔다(실측) — 그 뒤의 적재는 15분 뒤 실패한다. 근본은 2안.
 - **다음 한 작업: PR CI green → 소유자 머지·배포 판단 → 2안(fetch·지오코딩을 쓰기 transaction 밖으로) 설계.**
+
 ## 2026-10-22 — prod 첫 적재 실패 2건: 브랜치 `fix/highway-evidence-krheritage-address`
 
 - 고속도로 돌발 10분 경로에 `AdminEvidence`를 실어 미시도 reverse가 drop이 아니라 warning이 되게 했고, 국가유산 행사는

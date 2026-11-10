@@ -90,7 +90,6 @@ _PARTIALLY_COUNTED: dict[str, str] = {
 #: 전부 이 파일의 편집으로 나타나 리뷰에 보인다.
 _EXPECTED_FETCHERS: frozenset[str] = frozenset(
     {
-        "fetch_datagokr_cultural_festivals",
         "fetch_datagokr_file_data_records",
         "fetch_khoa_beaches",
         "fetch_knps_geometry_records",
@@ -119,7 +118,7 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_standard_tourist_attractions",
         "fetch_standard_traditional_markets",
         "fetch_visitkorea_attraction_details",
-        "fetch_visitkorea_festival_events",
+        "fetch_visitkorea_festivals",
         "fetch_visitkorea_tourist_attractions",
         # ADR-114 2단계 — weather Map export(W1·W2·W3·W5)를 Valkey 상태로 받는 fetcher. 시도마다
         # `_weather_request_once`가 센다.

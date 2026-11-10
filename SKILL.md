@@ -146,7 +146,7 @@ baseline은 role/schema/extension을 만들지 않고 전제로 검증만 한다
 | SourceRecord | provider 원천 row (raw_data + payload_hash 보존) |
 | SourceLink | Feature ↔ SourceRecord 연결 + source_role |
 | source_role | base_address / base_coordinate / primary / enrichment / correction / duplicate_candidate / media / weather_context |
-| dataset_key | provider 내 데이터셋 식별자 (예: `search_list`, `gis_spca`, `visitkorea_festival_events`) |
+| dataset_key | provider 내 데이터셋 식별자 (예: `search_list`, `gis_spca`, `visitkorea_festivals`) |
 | ProviderSyncState | provider별 증분 sync cursor 상태 (PK provider+dataset_key+sync_scope) |
 | dedup_review_queue | Record Linkage 임계값 0.65~0.85 수동 검토 큐 |
 | import_jobs | 적재 작업 상태 영속 테이블 (lifespan recovery 대상) |

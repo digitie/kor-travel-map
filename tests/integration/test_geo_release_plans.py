@@ -2,7 +2,7 @@
 
 DB는 head(408)까지 올린 통합 DB이고, provider dataset·operation은 baseline seed 그대로다(KNPS
 두 job에 dataset 다섯씩, MCST 열셋, 자동 적재를 끈 넷, 큐 전용 MOIS 갱신 셋). Feature는 실제
-변환기(``standard_data`` 축제·``krheritage``)에 가짜 역지오코더를 꽂아 적재한다.
+변환기(TourAPI 축제·``krheritage``)에 가짜 역지오코더를 꽂아 적재한다.
 
 세션은 테스트마다 롤백된다(``migrated_session``) — 계획 표는 테스트마다 비어서 시작한다.
 """
@@ -47,7 +47,7 @@ pytestmark = pytest.mark.integration
 
 _KNPS_POINTS = "feature_place_knps_points_job"
 _KNPS_GEOMETRY = "feature_geometry_knps_records_job"
-_FESTIVALS = "feature_event_datagokr_cultural_festivals_job"
+_FESTIVALS = "feature_event_visitkorea_festivals_job"
 
 
 async def _dataset_id(session: AsyncSession, bundle: FeatureBundle) -> int:
@@ -286,7 +286,15 @@ async def test_items_follow_the_db_operations_and_the_core_policy(
     # 지역특화거리는 2026-11-09 공개 파일 원천으로 되살아나 disabled가 아니다.
     assert reasons["feature_place_standard_special_streets_job"][0] == "pending"
     assert reasons["feature_place_datagokr_jeju_local_restaurants_job"] == ("skipped", "disabled")
-    assert reasons["feature_event_visitkorea_enrichment_job"] == ("skipped", "no_geo_dependency")
+    # 축제 보강(enrichment) job은 2026-11-10 축제 원천 전환(447)으로 꺼졌다 — 계획에 나오지 않는다.
+    assert "feature_event_visitkorea_enrichment_job" not in reasons
+    assert "feature_event_datagokr_cultural_festivals_job" not in reasons
+    # TourAPI 축제는 역지오코딩하는 replay 적재다(관광지와 같다).
+    festivals = by_op["feature_event_visitkorea_festivals_job"][0]
+    assert festivals.run_config == {
+        "resources": {"visitkorea_festivals": {"config": {"source_mode": "replay"}}}
+    }
+    assert festivals.launch_blocked_reason is None
     # ADR-114 결정 7(migration 419): 유가·돌발 PG operation은 꺼져 계획에 나오지 않는다.
     assert "feature_notice_transport_highway_incidents_job" not in reasons
     assert "feature_price_transport_fuel_stations_job" not in reasons

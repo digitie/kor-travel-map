@@ -411,8 +411,8 @@ FEATURE_LOAD_SCHEDULE_SPECS: Final[tuple[FeatureLoadScheduleSpec, ...]] = (
         asset=feature_event_visitkorea_festivals,
         job_name="feature_event_visitkorea_festivals_job",
         schedule_name="feature_event_visitkorea_festivals_daily_schedule",
-        # 유일한 축제 원천(2026-11-10). 축제는 시기에 민감해 매일 받고, 관광지(04:45)보다 먼저
-        # 돌아 같은 ``detailCommon2`` 한도에서 축제 상세가 먼저 찬다.
+        # 유일한 축제 원천(2026-11-10). 축제는 시기에 민감해 매일 받는다. 같은 ``detailCommon2``
+        # 한도는 run 예산의 합(관광지 600 + 축제 300 ≤ 900)이 지킨다 — 실행 순서와는 무관하다.
         cron_schedule="35 4 * * *",
         description="TourAPI 축제·공연·행사(15) event Feature 매일 적재.",
     ),

@@ -48,9 +48,9 @@ _KNPS_CONFIG = {
     }
 }
 _MOIS_CONFIG: dict[str, Any] | None = None  # MOIS는 replay가 없다(T-GR-08) — 센서가 내지 않는다
-_FESTIVALS = "feature_event_datagokr_cultural_festivals_job"
+_FESTIVALS = "feature_event_visitkorea_festivals_job"
 _FESTIVALS_REPLAY = {
-    "resources": {"datagokr_cultural_festivals": {"config": {"source_mode": "replay"}}}
+    "resources": {"visitkorea_festivals": {"config": {"source_mode": "replay"}}}
 }
 # 게이트에 막힌 replay 항목의 예 — launchable 집합에 없는 operation이 replay config를 가진 경우.
 _UNLISTED = "feature_place_unlisted_quota_job"

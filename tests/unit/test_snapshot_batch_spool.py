@@ -12,7 +12,7 @@ from __future__ import annotations
 import gc
 import weakref
 from collections.abc import AsyncIterator, Sequence
-from datetime import date, datetime, timedelta, timezone
+from datetime import datetime, timedelta, timezone
 from types import SimpleNamespace, TracebackType
 from typing import Any
 
@@ -22,7 +22,7 @@ from kortravelmap.client import AsyncKorTravelMapClient
 from kortravelmap.client._bundle_spool import BundleSpool
 from kortravelmap.dto.geo_dataset import DatasetRef, GeoApplied, GeoLoadContext
 from kortravelmap.infra.feature_repo import FeatureLoadResult
-from kortravelmap.providers.standard_data import cultural_festivals_to_bundles
+from kortravelmap.providers.visitkorea import tourapi_festivals_to_bundles
 
 
 class _Bundle:
@@ -257,27 +257,32 @@ async def test_received_batches_are_not_kept_in_memory(
 @pytest.mark.asyncio
 async def test_real_feature_bundles_round_trip_through_the_spool() -> None:
     """실제 provider 변환 결과가 spool을 거쳐 값·설정 필드까지 그대로 돌아온다."""
-    bundles = await cultural_festivals_to_bundles(
+    bundles = await tourapi_festivals_to_bundles(
         [
             SimpleNamespace(
-                fstvl_nm="스풀 왕복 축제",
-                opar="여의도공원",
-                fstvl_start_date=date(2026, 4, 5),
-                fstvl_end_date=date(2026, 4, 12),
-                fstvl_co="상세",
-                mnnst_nm="영등포구청",
-                auspc_instt_nm=None,
-                suprt_instt_nm=None,
-                phone_number="02-2670-3114",
-                homepage_url=None,
-                relate_info=None,
-                rdnmadr="서울특별시 영등포구 여의공원로 120",
-                lnmadr="서울특별시 영등포구 여의도동 8",
-                latitude=37.5263,
-                longitude=126.9239,
-                reference_date=date(2026, 3, 1),
-                instt_code=None,
-                instt_nm="서울특별시 영등포구",
+                content_id="900001",
+                content_type_id="15",
+                title="스풀 왕복 축제",
+                addr1="서울특별시 영등포구 여의공원로 120",
+                addr2="여의도공원",
+                zipcode=None,
+                tel="02-2670-3114",
+                first_image="http://tong.visitkorea.or.kr/cms/resource/00/900001_image2_1.jpg",
+                first_image2=None,
+                map_x=126.9239,
+                map_y=37.5263,
+                lcls_systm1="EV",
+                lcls_systm2="EV01",
+                lcls_systm3="EV010200",
+                l_dong_regn_cd="11",
+                l_dong_signgu_cd="560",
+                created_time=None,
+                modified_time=None,
+                copyright_division_code="Type1",
+                event_start_date="20260405",
+                event_end_date="20260412",
+                overview="상세",
+                homepage='<a href="https://example.com/fest">홈페이지</a>',
             )
         ],  # type: ignore[list-item]
         fetched_at=datetime(2026, 10, 22, 12, 0, tzinfo=timezone(timedelta(hours=9))),

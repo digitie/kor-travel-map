@@ -261,6 +261,12 @@
         "444_trip_search_aliases"
       ],
       "revision": "446_mcst_place_attributes"
+    },
+    {
+      "down_revision": [
+        "446_mcst_place_attributes"
+      ],
+      "revision": "447_tourapi_festivals_primary"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

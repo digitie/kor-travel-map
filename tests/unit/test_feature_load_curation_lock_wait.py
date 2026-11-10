@@ -361,8 +361,6 @@ _ARMED: frozenset[str] = frozenset(
         "retire_features_by_source",
         "retire_geometryless_area_features_by_source",
         "load_enrichment_links",
-        "load_festival_enrichment",
-        "refresh_festival_enrichment_reviews",
         "load_price_features",
         # ADR-121 MCST 붙임 적재 — load_feature_bundles와 같은 provider 적재 transaction이다.
         "load_theme_attach_bundles",

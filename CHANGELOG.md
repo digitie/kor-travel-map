@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-11-10 — 축제 원천을 TourAPI로 바꾼다
+
+- 축제·공연·행사는 한국관광공사 TourAPI(`searchFestival2`)가 유일한 원천이다. 매일 적재하며 새 dataset `visitkorea_festivals`(event)가 Feature를 직접 만든다.
+- data.go.kr 전국문화축제표준데이터 적재와, TourAPI 축제를 그 축제에 이름으로 잇던 보강을 없앴다. migration 447이 두 dataset의 operation을 끄고 비활성으로 내리며 기존 표준데이터 축제 Feature를 퇴역시킨다.
+- 공개 축제 API(`/v1/public/festivals/*`) 계약은 그대로다. 표준데이터에만 있던 응답 필드(주최·후원 기관, 데이터기준일자 등)는 null이 된다.
+
 ## 2026-11-10 — 장소 속성(ADR-121, #1468 A)
 
 - 공개 API에 장소 속성이 생긴다: `attribute` 필터(반려동물 동반·무장애·영유아 동반·서점 유형·세계음식, AND·최대 5개),

@@ -1,7 +1,7 @@
 """축제 원천을 TourAPI로 바꾼다 — 표준데이터 축제·TourAPI 축제 보강을 퇴역하고 TourAPI 축제를 넣는다.
 
 Revision ID: 447_tourapi_festivals_primary
-Revises: 444_trip_search_aliases
+Revises: 446_mcst_place_attributes
 
 왜 필요한가. 2026-11-10 소유자 결정: "datagokr 축제데이터는 로드 끄고 다른 소스 쓰자", 이어
 "datagokr 축제 소스는 아예 쓰지마". data.go.kr 전국문화축제표준데이터(``tn_pubr_public_cltur_fstvl_api``)
@@ -23,7 +23,8 @@ schedule·큐 runner spec·handler binding·preview fixture·변환기와, TourA
 1. ADR-115 scoped write 프로토콜 gate(배타, ``lock_timeout`` 30초)를 **먼저**, 그다음 member 표 둘
    (``ops.import_job_datasets``·``ops.feature_update_request_datasets``)을 ``SHARE``로 잠근다(5초) —
    419와 같은 순서·같은 이유(gate → member 표, member INSERT가 꺼진 operation을 보고 거부되게).
-   그 잠금을 쥔 **뒤에** preflight를 잰다.
+   카탈로그 모양 검사(퇴역 dataset 둘·새 dataset 부재)는 잠금 전에, job·link·override preflight는
+   잠금을 쥔 **뒤에** 잰다.
 2. 퇴역 dataset 둘의 operation을 **종류 불문**(``refresh``·``preview``) 끈다. 행은 지우지 않는다(이력 FK).
 3. 표준데이터 축제 dataset에 ``primary`` link로 묶인 ``active`` Feature를 **퇴역**한다 —
    ``feature.transition_feature_state``를 ``transition_kind = 'system'``으로(419와 같다: 결과는
@@ -39,6 +40,8 @@ schedule·큐 runner spec·handler binding·preview fixture·변환기와, TourA
    ``produces: ["event"]``)과 ``refresh`` operation ``feature_event_visitkorea_festivals_job``·fixture
    ``preview``·``dataset_wide`` scope를 넣는다(441과 같은 모양).
 6. 퇴역 dataset 둘을 ``is_active = false``로 내린다(402·404와 같다 — 카탈로그 행은 이력 FK라 남긴다).
+   **물리 삭제 revision은 먼저 두 dataset을 그 트랜잭션 안에서 다시 켜야 한다**(402 0단계와 같다) —
+   활성 가드가 lineage DELETE도 막는다.
    **3·4가 먼저다** — 퇴역 전이의 근거 잠금(``lock_current_provider_source_evidence``)과 검토 큐 쓰기
    가드가 활성 dataset을 요구한다. 이 뒤로는 그 lineage에 쓰기가 막힌다(되살리는 것은 새 결정이다).
 7. receipt head CHECK에 이 revision을 더한다(``lock_timeout`` 1초).
@@ -56,8 +59,9 @@ schedule·큐 runner spec·handler binding·preview fixture·변환기와, TourA
 퇴역 dataset 둘 밖의 link(역할 무관)가 있으면 멈춘다(2026-11-10 prod 0건 — link는 표준데이터
 ``primary`` 1,296과 TourAPI 보강 ``enrichment`` 212뿐이다). 퇴역 dataset은 다시 적재되지 않는다.
 
-**트랜잭션**: 419와 달리 앞선 revision과 같은 트랜잭션을 거부하지 않는다 — 전이는 약 1,300 호출
-(수 초)이라 앞선 revision의 표 잠금을 오래 쥐지 않는다.
+**트랜잭션**: 419와 달리 앞선 revision(prod는 446과 함께 오른다)과 같은 트랜잭션을 거부하지 않는다 —
+전이는 약 1,300 호출이다. 419는 약 1.4만 호출을 수 분에 돌았으므로 이것은 수십 초 안쪽으로 본다
+(실측 아님 — 배포 로그로 확인한다).
 
 막는 것(preflight, 하나라도 있으면 아무것도 바꾸지 않고 중단)
 --------------------------------------------------------------
@@ -84,7 +88,7 @@ from alembic import op
 # ruff: noqa: E501
 
 revision: str = "447_tourapi_festivals_primary"
-down_revision: str | Sequence[str] | None = "444_trip_search_aliases"
+down_revision: str | Sequence[str] | None = "446_mcst_place_attributes"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -314,6 +318,7 @@ ALTER TABLE ops.application_schema_operation_receipts
         '441_tourapi_attraction_dataset',
         '442_mois_brand_search_aliases',
         '444_trip_search_aliases',
+        '446_mcst_place_attributes',
         '447_tourapi_festivals_primary'
     ))
 """

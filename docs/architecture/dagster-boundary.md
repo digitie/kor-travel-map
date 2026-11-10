@@ -105,7 +105,6 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 
 | asset 이름 | resource key | dataset_key | group |
 |-----------|--------------|-------------|-------|
-| `feature_event_datagokr_cultural_festivals` | `datagokr_cultural_festivals` | `datagokr_cultural_festivals` | `features_event` |
 | `feature_place_transport_fuel_stations` | `transport_fuel_stations` | `transport_fuel_stations` | `features_place` |
 | `feature_place_transport_rest_areas` | `transport_rest_areas` | `transport_rest_areas` | `features_place` |
 | `feature_place_krheritage_items` | `krheritage_items` | `krheritage_heritage_features` | `features_place` |
@@ -125,7 +124,7 @@ Dagster asset으로 연결한다. provider API 호출은 resource가 record iter
 | `feature_place_visitkorea_tourist_attractions` | `visitkorea_tourist_attractions` | `visitkorea_tourist_attractions` | `features_place` |
 | `feature_place_khoa_beaches` | `khoa_beaches` | `khoa_beaches` | `features_place` |
 | `feature_place_transport_airports` | `transport_airports` | `transport_airports` | `features_place` |
-| `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `visitkorea_festival_events` | `features_event` |
+| `feature_event_visitkorea_festivals` | `visitkorea_festivals` | `visitkorea_festivals` | `features_event` |
 | `feature_place_kor_travel_concierge_youtube` | `kor_travel_concierge_youtube_features` | `youtube_place_candidates` | `features_place` |
 | `feature_place_datagokr_file_data` | `datagokr_file_data_records` + `datagokr_file_data_dataset_key` | `datagokr_*` fileData 4종 (`DATAGOKR_FILEDATA_DATASETS`) | `features_place` |
 | `feature_place_mcst_culture` | `mcst_culture_records` (파일데이터 13) | `mcst_<slug>` 13종 (`MCST_FILE_DATASETS`) | `features_place` |
@@ -270,7 +269,7 @@ kor-travel-map Dagster의 asset/job 이름 **명명 가이드라인**이다. 실
 
 | asset 이름 | dataset_key | group |
 |-----------|-------------|-------|
-| `feature_event_visitkorea_enrichment` | `visitkorea_festival_events` | `features_event` |
+| `feature_event_visitkorea_festivals` | `visitkorea_festivals` | `features_event` |
 | `feature_place_mois_licenses` | `mois_license_features_bulk` | `features_place` |
 | `feature_place_transport_fuel_stations` | `transport_fuel_stations` | `features_place` |
 | `feature_place_khoa_beaches` | `khoa_beaches` | `features_place` |
@@ -519,7 +518,7 @@ offline upload load job은 T-208h 이후 다음 흐름을 따른다.
 
 | schedule | asset job | cron | 비고 |
 |----------|-----------|------|------|
-| `feature_event_datagokr_cultural_festivals_monthly_schedule` | `feature_event_datagokr_cultural_festivals_job` | `10 3 1 * *` | 전국문화축제 월 1회 |
+| `feature_event_visitkorea_festivals_daily_schedule` | `feature_event_visitkorea_festivals_job` | `35 4 * * *` | TourAPI 축제·행사 매일(유일한 축제 원천, 2026-11-10 — 표준데이터 축제·보강 job 퇴역) |
 | `feature_place_transport_fuel_stations_weekly_schedule` | `feature_place_transport_fuel_stations_job` | `5 3 * * 1` | 주유소 place 주 1회(geo-heavy pool, transport export) |
 | `feature_place_transport_rest_areas_weekly_schedule` | `feature_place_transport_rest_areas_job` | `20 4 * * 1` | 휴게소 place 주 1회(transport export) |
 | `feature_route_krforest_mountain_trails_monthly_schedule` | `feature_route_krforest_mountain_trails_job` | `25 4 4 * *` | 산림청 등산로 월 1회(C05A) |

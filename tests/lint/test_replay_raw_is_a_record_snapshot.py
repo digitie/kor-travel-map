@@ -47,9 +47,6 @@ class _Converter:
 #: 표준데이터 replay resource → 변환기(record 한 건을 bundle로)와 핀된 provider 모델.
 #: fileData(``datagokr_file_data_records``)는 ``raw_data`` = 원본 row 전체라 이 검사가 필요 없다.
 _CONVERTERS: dict[str, _Converter] = {
-    "datagokr_cultural_festivals": _Converter(
-        "standard_data", "_item_to_bundle", "item", "datagokr.models.PublicCulturalFestival"
-    ),
     "standard_museums": _Converter(
         "standard_data", "_museum_to_bundle", "item", "datagokr.models.PublicMuseumArtGallery"
     ),
@@ -70,6 +67,9 @@ _CONVERTERS: dict[str, _Converter] = {
     ),
     "visitkorea_tourist_attractions": _Converter(
         "visitkorea_attractions", "_attraction_to_bundle", "item", "visitkorea.models.TourItem"
+    ),
+    "visitkorea_festivals": _Converter(
+        "visitkorea", "_festival_to_bundle", "item", "visitkorea.models.TourItem"
     ),
 }
 _RAW_ROW_RESOURCES = frozenset({"datagokr_file_data_records"})

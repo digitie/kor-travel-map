@@ -534,7 +534,7 @@ def test_mois_load_plan_resource_reads_the_slug_selection_from_run_config() -> N
 def test_provider_record_resource_env_mapping() -> None:
     specs = {spec.resource_key: spec for spec in PROVIDER_RECORD_RESOURCE_SPECS}
 
-    assert specs["datagokr_cultural_festivals"].kor_travel_map_env_names == (
+    assert specs["visitkorea_festivals"].kor_travel_map_env_names == (
         "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY",
     )
     # ADR-106: transport export resource 셋은 같은 연결 설정(base URL + token)을 쓴다
@@ -570,7 +570,7 @@ def test_provider_record_guard_message_hides_secret(
     monkeypatch.setenv("KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY", "super-secret-value")
     spec = {
         item.resource_key: item for item in PROVIDER_RECORD_RESOURCE_SPECS
-    }["datagokr_cultural_festivals"]
+    }["visitkorea_festivals"]
     resource_def = build_provider_record_guard_resource(spec)
     resource_fn = cast("Callable[[object], object]", resource_def.resource_fn)
 

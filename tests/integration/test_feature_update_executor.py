@@ -5,12 +5,12 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import AsyncIterator, Mapping
-from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Any
 
 import pytest
-from kortravelmap.dagster.assets import run_feature_event_datagokr_cultural_festivals
+from kortravelmap.dagster import assets as dagster_assets
+from kortravelmap.dagster.assets import run_feature_event_visitkorea_festivals
 from kortravelmap.dagster.feature_update_runner import (
     FeatureUpdateAssetRunner,
     FeatureUpdateRunnerSpec,
@@ -59,13 +59,15 @@ from kortravelmap.infra.provider_refresh_policy_repo import (
     upsert_provider_refresh_policy,
 )
 from kortravelmap.infra.scope_repo import ScopeResolution
-from kortravelmap.providers.standard_data import (
-    DATASET_KEY_CULTURAL_FESTIVALS,
-    STANDARD_DATA_PROVIDER_NAME,
-    cultural_festivals_to_bundles,
-)
 from kortravelmap.settings import KorTravelMapSettings
 from tests.integration._db_cleanup import truncate_committed_test_rows
+from tests.integration._tourapi_festival import (
+    FESTIVAL_DATASET_KEY,
+    FESTIVAL_PROVIDER,
+    TourApiFestival,
+    festival_bundles,
+    festival_item,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncEngine
@@ -227,51 +229,24 @@ async def execution_session(
             await session.rollback()
 
 
-@dataclass(frozen=True)
-class _Festival:
-    """`CulturalFestivalItem` Protocol 만족 — provider 실모델 필드명 (#374)."""
-
-    fstvl_nm: str | None
-    opar: str | None = None
-    fstvl_start_date: date | None = None
-    fstvl_end_date: date | None = None
-    fstvl_co: str | None = None
-    mnnst_nm: str | None = None
-    auspc_instt_nm: str | None = None
-    suprt_instt_nm: str | None = None
-    phone_number: str | None = None
-    homepage_url: str | None = None
-    relate_info: str | None = None
-    rdnmadr: str | None = None
-    lnmadr: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    reference_date: date | None = None
-    instt_code: str | None = None
-    instt_nm: str | None = None
-
-
 def _festival(
     seed: str,
     *,
     lon: str = "126.9780",
     lat: str = "37.5665",
-) -> _Festival:
-    # 자연키는 name::address 파생(#374) — seed를 이름에 넣어 feature 구분.
-    return _Festival(
-        fstvl_nm=f"executor 테스트 축제 {seed}",
-        opar="테스트 광장",
-        fstvl_start_date=date(2026, 6, 1),
-        fstvl_end_date=date(2026, 6, 7),
-        fstvl_co="feature update executor 테스트용 fixture.",
-        mnnst_nm="중구청",
-        phone_number="02-3396-4114",
-        rdnmadr="서울특별시 중구 세종대로 110",
-        lnmadr="서울특별시 중구 태평로1가 31",
-        latitude=float(lat),
-        longitude=float(lon),
-        reference_date=date(2026, 6, 1),
-        instt_nm="서울특별시 중구",
+) -> TourApiFestival:
+    # 자연키는 TourAPI contentid — seed를 contentid와 이름에 넣어 feature 구분.
+    return festival_item(
+        f"EXEC-{seed}",
+        f"executor 테스트 축제 {seed}",
+        starts_on=date(2026, 6, 1),
+        ends_on=date(2026, 6, 7),
+        addr1="서울특별시 중구 세종대로 110",
+        addr2="테스트 광장",
+        lon=float(lon),
+        lat=float(lat),
+        tel="02-3396-4114",
+        overview="feature update executor 테스트용 fixture.",
     )
 
 
@@ -282,12 +257,12 @@ async def _bundle(
     lat: str = "37.5665",
 ):
     item = _festival(seed, lon=lon, lat=lat)
-    return (
-        await cultural_festivals_to_bundles(
-            [item],  # type: ignore[list-item]
-            fetched_at=_FETCHED,
-        )
-    )[0]
+    return (await festival_bundles([item], fetched_at=_FETCHED))[0]
+
+
+async def _no_tourapi_details(_settings: object, _content_ids: object) -> dict[str, Any]:
+    """TourAPI 상세(``detailCommon2``) 대역 — 통합 테스트는 원천을 부르지 않는다."""
+    return {}
 
 
 async def _stored_feature_id(session: AsyncSession, legacy_ref: str) -> str | None:
@@ -1008,16 +983,14 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     record = _festival("PRODUCTION-RUNNER-CHECKPOINT")
-    expected_bundle = (
-        await cultural_festivals_to_bundles(
-            [record],  # type: ignore[list-item]
-            fetched_at=_FETCHED,
-        )
-    )[0]
+    monkeypatch.setattr(
+        dagster_assets, "fetch_visitkorea_attraction_details", _no_tourapi_details
+    )
+    expected_bundle = (await festival_bundles([record], fetched_at=_FETCHED))[0]
     membership = await _membership(
         execution_session,
-        provider=STANDARD_DATA_PROVIDER_NAME,
-        dataset_key=DATASET_KEY_CULTURAL_FESTIVALS,
+        provider=FESTIVAL_PROVIDER,
+        dataset_key=FESTIVAL_DATASET_KEY,
     )
     request = await enqueue_feature_update_request(
         execution_session,
@@ -1031,7 +1004,7 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
         _settings: KorTravelMapSettings,
         _scope: ProviderDatasetRefreshScope,
     ) -> RunnerResources:
-        return RunnerResources({"datagokr_cultural_festivals": [record]})
+        return RunnerResources({"visitkorea_festivals": [record]})
 
     runner = FeatureUpdateAssetRunner(
         common_resources={
@@ -1045,9 +1018,9 @@ async def test_production_asset_runner_rolls_back_load_when_checkpoint_fails(
         specs=(
             FeatureUpdateRunnerSpec(
                 operation_key=membership.operation_key,
-                run=run_feature_event_datagokr_cultural_festivals,
+                run=run_feature_event_visitkorea_festivals,
                 resources=resources,
-                asset_key="feature_event_datagokr_cultural_festivals",
+                asset_key="feature_event_visitkorea_festivals",
             ),
         ),
     )
