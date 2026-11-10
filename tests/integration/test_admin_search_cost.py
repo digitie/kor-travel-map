@@ -15,8 +15,17 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.infra import admin_feature_repo
 from kortravelmap.infra.admin_feature_repo import AdminFeatureSearchScope, list_admin_features
+from kortravelmap.infra.models import SourceEntityHeadRow, SourceEntityRow
 from tests.integration._feature_ids import feature_uuid
-from tests.integration.test_admin_feature_repo import _seed_feature
+from tests.integration._subtype_seed import seed_feature_subtype
+from tests.integration.test_admin_feature_repo import (
+    _NOW,
+    _feature_row,
+    _provider_dataset_id,
+    _seed_feature,
+    _source_link,
+    _source_record,
+)
 
 pytestmark = pytest.mark.integration
 
@@ -138,55 +147,69 @@ async def _captured_statements(
     return statements
 
 
-async def _seed_source_identifiers(
-    session: AsyncSession, feature_id: str, *, entity_id: str, record_key: str
+async def _seed_with_source_identifiers(
+    session: AsyncSession,
+    feature_id: str,
+    *,
+    name: str,
+    entity_id: str,
+    record_key: str,
+    road_address: str | None = None,
+    raw_data: dict[str, Any] | None = None,
 ) -> None:
-    """seed 원천의 entity id와 **현재** record key를 이름·주소·id와 겹치지 않게 바꾼다."""
-    entity_key = f"se-sr-{feature_id}"
-    await session.execute(
-        text(
-            "UPDATE provider_sync.source_entities SET source_entity_id = :entity_id "
-            "WHERE source_entity_key = :entity_key"
-        ),
-        {"entity_id": entity_id, "entity_key": entity_key},
+    """원천 entity id와 현재 record key가 이름·주소·id와 겹치지 않는 Feature 1건.
+
+    ``_seed_feature``는 셋을 모두 ``sr-{feature_id}``로 둬서 원천 식별자 갈래만으로
+    찾히는지를 가를 수 없다. entity identity는 갱신이 막혀 있으므로(트리거) 처음부터
+    따로 심는다.
+    """
+    row = _feature_row(feature_id, name=name)
+    if road_address is not None:
+        row.address = {"road": road_address}
+    session.add(row)
+    await session.flush()
+    await seed_feature_subtype(session, feature_id=feature_id, kind="place")
+    entity_key = f"se-{record_key}"
+    session.add(
+        SourceEntityRow(
+            source_entity_key=entity_key,
+            provider_dataset_id=await _provider_dataset_id(session),
+            source_entity_type="license_place",
+            source_entity_id=entity_id,
+            first_seen_at=_NOW,
+            last_seen_at=_NOW,
+        )
     )
-    await session.execute(
-        text(
-            "INSERT INTO provider_sync.source_records "
-            "(source_record_key, source_entity_key, raw_payload_hash, raw_data, "
-            " fetched_at, imported_at) "
-            "SELECT :record_key, source_entity_key, md5(:record_key), raw_data, "
-            "       fetched_at, imported_at "
-            "FROM provider_sync.source_records WHERE source_entity_key = :entity_key"
-        ),
-        {"record_key": record_key, "entity_key": entity_key},
+    await session.flush()
+    record = _source_record(record_key)
+    if raw_data is not None:
+        record.raw_data = raw_data
+    session.add(record)
+    await session.flush()
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=entity_key,
+            current_source_record_key=record_key,
+            observed_at=_NOW,
+        )
     )
-    await session.execute(
-        text(
-            "UPDATE provider_sync.source_entity_heads "
-            "SET current_source_record_key = :record_key "
-            "WHERE source_entity_key = :entity_key"
-        ),
-        {"record_key": record_key, "entity_key": entity_key},
-    )
+    await session.flush()
+    session.add(_source_link(feature_id, record_key))
+    await session.flush()
 
 
 async def test_scopes_search_identifiers_but_not_raw_source_json(
     migrated_session: AsyncSession,
 ) -> None:
     feature_id = feature_uuid("admin-source-scope")
-    await _seed_feature(
+    await _seed_with_source_identifiers(
         migrated_session,
         feature_id,
-        source_payload={"operator_note": "원천전용명칭"},
         name="관리자범위검색전용장소",
         road_address="관리자범위검색전용도로 43",
-    )
-    await _seed_source_identifiers(
-        migrated_session,
-        feature_id,
         entity_id="ext-entity-관리자원천식별자",
         record_key="rec-관리자현재레코드키",
+        raw_data={"operator_note": "원천전용명칭"},
     )
     # 원천 JSON 본문만 가진 말은 어느 범위·기본값에서도 찾히지 않는다(#1475).
     for scope in ("all", "feature", None):
@@ -229,9 +252,12 @@ async def test_candidate_and_scan_paths_return_the_same_rows(
             road_address=f"관리자경로동등도로 {index}",
         )
     other = feature_uuid("admin-path-parity-source")
-    await _seed_feature(migrated_session, other, name="무관한이름")
-    await _seed_source_identifiers(
-        migrated_session, other, entity_id="ext-관리자경로동등", record_key="rec-x-1"
+    await _seed_with_source_identifiers(
+        migrated_session,
+        other,
+        name="무관한이름",
+        entity_id="ext-관리자경로동등",
+        record_key="rec-admin-path-parity-1",
     )
 
     async def pages(cap: int) -> list[str]:

@@ -167,7 +167,13 @@ function writeSafeFailure(stage: string): void {
 }
 
 async function listOwnedFeatures(page: Page): Promise<string[]> {
-  const query = new URLSearchParams({ page_size: "100", q: RUN_ID });
+  // 소유 판정은 이름(FIXTURE_NAME에 RUN_ID가 든다)이다. 원천 식별자까지 보는 기본 all은
+  // 필요 없다 — feature 범위가 더 좁고 싸다(#1475: 이 cleanup 조회가 부하 중 UI 예산을 넘겼다).
+  const query = new URLSearchParams({
+    page_size: "100",
+    q: RUN_ID,
+    search_scope: "feature",
+  });
   const response = requireBody(
     await browserFetch<AdminFeaturesListResponse>(
       page,
