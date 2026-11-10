@@ -323,6 +323,10 @@ async def test_official_current_shelter_archive_becomes_22_map_places() -> None:
     assert sorted(record.source_id for record in replay) == sorted(source_ids)
     by_name = {bundle.feature.name: bundle for bundle in bundles}
     assert {"중청대피소", "장터목대피소", "세석대피소", "희운각대피소"} <= set(by_name)
+    # knps-api a472a37(#17 후속): 원천의 '現' 표식은 이름에서 걷히고 원문은 raw에 남는다.
+    assert "노고단대피소" in by_name
+    assert not any("現" in name or "舊" in name for name in by_name)
+    assert by_name["노고단대피소"].source_record.raw_data["시설물"] == "現노고단대피소"
     for bundle in bundles:
         feature = bundle.feature
         assert feature.category == "03080100"
