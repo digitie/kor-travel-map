@@ -1,3 +1,8 @@
+## 2026-11-10 — ADR-121 accepted (소유자 결정)
+
+- D1=b(master 없는 속성 행은 목록 무관 MCST 장소 하나, master 생기면 병합), D2(반려 업종 약 20,396 미적재·기존 Feature는 R4 퇴역), D3(촬영지는 큐레이션 `media-places` 후보→운영자 승격·공개).
+- 설계 단순화: 공용 식별 namespace를 버리고 tier 2 붙임 + 기존 목록 앵커 + 병합 이력 redirect로 같은 효과. 부재 처리는 enrichment link만(primary 부재 퇴역은 현행 유지). 수렴 병합은 적재 밖 계획·executor.
+
 ## 2026-11-10 — #1459 여행지 검색 별칭(444)·분류 override 준비
 
 - 별칭 7행(리움·리움미술관·수성못·김포공항·퍼플섬·사천바다케이블카·사천케이블카). 정본 이름은 prod 읽기 전용과 TourAPI searchKeyword2로 확인했다. 퍼플섬·케이블카는 #1465 적재 뒤에 닿는다.
