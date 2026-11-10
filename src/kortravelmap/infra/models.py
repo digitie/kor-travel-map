@@ -1332,11 +1332,13 @@ class McstThemeTransitionBatchRow(Base):
         UniqueConstraint("command_id", name=conv("uq_mcst_theme_transition_batches_command")),
         UniqueConstraint(
             "plan_sha256",
+            "batch_size",
             "batch_index",
             name=conv("uq_mcst_theme_transition_batches_plan_index"),
         ),
         CheckConstraint(
-            "plan_sha256 ~ '^[0-9a-f]{64}$' AND batch_index >= 0 AND rule_version <> ''",
+            "plan_sha256 ~ '^[0-9a-f]{64}$' AND batch_size > 0 AND batch_index >= 0 "
+            "AND rule_version <> ''",
             name=conv("ck_mcst_theme_transition_batches_plan"),
         ),
         ForeignKeyConstraint(
@@ -1356,6 +1358,7 @@ class McstThemeTransitionBatchRow(Base):
     command_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     plan_sha256: Mapped[str] = mapped_column(Text, nullable=False)
     rule_version: Mapped[str] = mapped_column(Text, nullable=False)
+    batch_size: Mapped[int] = mapped_column(Integer, nullable=False)
     batch_index: Mapped[int] = mapped_column(Integer, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=text("clock_timestamp()")

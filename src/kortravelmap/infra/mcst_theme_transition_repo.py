@@ -184,22 +184,22 @@ class TransitionBatchResult:
 _BATCH_EXISTS_SQL = text(
     """
 SELECT batch_id FROM ops.mcst_theme_transition_batches
- WHERE plan_sha256 = :plan_sha256 AND batch_index = :batch_index
+ WHERE plan_sha256 = :plan_sha256 AND batch_size = :batch_size AND batch_index = :batch_index
 """
 )
 
 _INSERT_BATCH_SQL = text(
     """
 INSERT INTO ops.mcst_theme_transition_batches (
-    command_id, plan_sha256, rule_version, batch_index
-) VALUES (:command_id, :plan_sha256, :rule_version, :batch_index)
+    command_id, plan_sha256, rule_version, batch_size, batch_index
+) VALUES (:command_id, :plan_sha256, :rule_version, :batch_size, :batch_index)
 RETURNING CAST(batch_id AS text)
 """
 )
 
 _LOCK_FEATURE_SQL = text(
     """
-SELECT lifecycle_state, publication_state, row_revision
+SELECT lifecycle_state, publication_state, quality_state, row_revision
   FROM feature.features WHERE feature_id = CAST(:feature_id AS uuid)
  FOR UPDATE
 """
@@ -227,9 +227,18 @@ SELECT jsonb_build_object(
                ORDER BY sl.source_entity_key)
           FROM provider_sync.source_links AS sl WHERE sl.feature_id = f.feature_id
     ), '[]'::jsonb),
-    'curation_item_ids', COALESCE((
-        SELECT jsonb_agg(CAST(item.curation_item_id AS text) ORDER BY item.curation_item_id)
+    'curation_items', COALESCE((
+        SELECT jsonb_agg(to_jsonb(item) ORDER BY item.curation_item_id)
           FROM feature.curation_items AS item WHERE item.feature_id = f.feature_id
+    ), '[]'::jsonb),
+    -- 병합 대상의 병합 전 link — 손 되돌림이 무엇이 옮겨 왔는지(역할 강등 포함) 가를 수 있게.
+    'target_links', COALESCE((
+        SELECT jsonb_agg(jsonb_build_object(
+                   'source_entity_key', tl.source_entity_key,
+                   'source_role', tl.source_role)
+               ORDER BY tl.source_entity_key)
+          FROM provider_sync.source_links AS tl
+         WHERE tl.feature_id = CAST(:target_feature_id AS uuid)
     ), '[]'::jsonb)
 ) AS state
   FROM feature.features AS f WHERE f.feature_id = CAST(:feature_id AS uuid)
@@ -271,6 +280,19 @@ RETURNING CAST(item_id AS text)
 """
 )
 
+#: 퇴역한 Feature를 가리키는 열린 dedup 검토 행은 더 판단할 것이 없다. 남겨 두면 나중의
+#: ``merge_from_review``가 퇴역 Feature를 master로 고를 수 있다(R4 적대 리뷰).
+_CLOSE_PENDING_REVIEWS_SQL = text(
+    """
+UPDATE ops.dedup_review_queue
+   SET status = 'ignored', reviewed_at = now(), reviewed_by = :actor,
+       decision_reason = 'ADR-121 transition retired ' || CAST(:feature_id AS text)
+ WHERE status = 'pending'
+   AND (feature_id_a = CAST(:feature_id AS uuid) OR feature_id_b = CAST(:feature_id AS uuid))
+RETURNING review_id
+"""
+)
+
 _RECORD_EVENT_SQL = text(
     """
 CALL feature.record_mcst_theme_transition_event(CAST(:item_id AS uuid), NULL, NULL)
@@ -278,8 +300,10 @@ CALL feature.record_mcst_theme_transition_event(CAST(:item_id AS uuid), NULL, NU
 )
 
 
-def _batch_idempotency_key(plan_sha256: str, batch_index: int) -> str:
-    return str(uuid.uuid5(_IDEMPOTENCY_NAMESPACE, f"{plan_sha256}:{batch_index}"))
+def _batch_idempotency_key(plan_sha256: str, batch_size: int, batch_index: int) -> str:
+    return str(
+        uuid.uuid5(_IDEMPOTENCY_NAMESPACE, f"{plan_sha256}:{batch_size}:{batch_index}")
+    )
 
 
 async def _transition_one(
@@ -316,13 +340,18 @@ async def _transition_one(
             target is None
             or target["lifecycle_state"] != "active"
             or target["publication_state"] != "published"
+            or target["quality_state"] != "valid"
         ):
             return TransitionItemOutcome(item.feature_id, item.action, "stale_target")
     before_state = (
-        await session.execute(_BEFORE_STATE_SQL, {"feature_id": item.feature_id})
+        await session.execute(
+            _BEFORE_STATE_SQL,
+            {"feature_id": item.feature_id, "target_feature_id": item.target_feature_id},
+        )
     ).scalar_one()
 
     merge_id: str | None = None
+    merge_counts: dict[str, int] = {}
     if item.action == "retire":
         retired = (
             await session.execute(
@@ -347,6 +376,10 @@ async def _transition_one(
             reason=f"ADR-121 {item.action} ({rule_version})",
         )
         merge_id = outcome.merge_id
+        merge_counts = {
+            "source_links_moved": outcome.source_links_moved,
+            "source_links_dropped": outcome.source_links_dropped,
+        }
         transition = (
             await session.execute(
                 _MERGE_TRANSITION_SQL,
@@ -356,6 +389,14 @@ async def _transition_one(
         transition_id = int(transition["transition_id"])
         row_revision_after = int(transition["row_revision"])
 
+    closed_reviews = len(
+        (
+            await session.execute(
+                _CLOSE_PENDING_REVIEWS_SQL,
+                {"feature_id": item.feature_id, "actor": TRANSITION_ACTOR},
+            )
+        ).all()
+    )
     item_id = str(
         (
             await session.execute(
@@ -371,7 +412,13 @@ async def _transition_one(
                     "row_revision_after": row_revision_after,
                     "merge_id": merge_id,
                     "before_state": json.dumps(before_state, ensure_ascii=False, default=str),
-                    "evidence": json.dumps({"rule_version": rule_version}),
+                    "evidence": json.dumps(
+                        {
+                            "rule_version": rule_version,
+                            **merge_counts,
+                            "closed_reviews": closed_reviews,
+                        }
+                    ),
                 },
             )
         ).scalar_one()
@@ -388,21 +435,30 @@ async def execute_transition_batch(
     session: AsyncSession,
     *,
     plan: TransitionPlan,
+    batch_size: int,
     batch_index: int,
     items: Sequence[TransitionPlanItem],
 ) -> TransitionBatchResult:
-    """계획의 한 batch를 현재 transaction에서 실행한다. commit은 호출자 몫이다."""
+    """계획의 한 batch를 현재 transaction에서 실행한다. commit은 호출자 몫이다.
+
+    batch의 정체는 ``(plan_sha256, batch_size, batch_index)``다 — 다른 크기로 다시 돌리면 batch는
+    새로 잡히고, 이미 전환된 Feature는 ``already_done``으로 건너뛴다.
+    """
 
     await lock_feature_curation_write(session)
     if (
         await session.execute(
             _BATCH_EXISTS_SQL,
-            {"plan_sha256": plan.plan_sha256, "batch_index": batch_index},
+            {
+                "plan_sha256": plan.plan_sha256,
+                "batch_size": batch_size,
+                "batch_index": batch_index,
+            },
         )
     ).first() is not None:
         return TransitionBatchResult(batch_index=batch_index, skipped_batch=True)
 
-    idempotency_key = _batch_idempotency_key(plan.plan_sha256, batch_index)
+    idempotency_key = _batch_idempotency_key(plan.plan_sha256, batch_size, batch_index)
     await lock_domain_command(
         session,
         actor=TRANSITION_ACTOR,
@@ -417,6 +473,7 @@ async def execute_transition_batch(
         request_fingerprint=canonical_domain_command_fingerprint(
             {
                 "plan_sha256": plan.plan_sha256,
+                "batch_size": batch_size,
                 "batch_index": batch_index,
                 "feature_ids": [item.feature_id for item in items],
             }
@@ -430,6 +487,7 @@ async def execute_transition_batch(
                     "command_id": claim.command_id,
                     "plan_sha256": plan.plan_sha256,
                     "rule_version": plan.rule_version,
+                    "batch_size": batch_size,
                     "batch_index": batch_index,
                 },
             )

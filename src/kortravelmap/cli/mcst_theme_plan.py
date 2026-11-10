@@ -45,6 +45,8 @@ __all__ = [
 ]
 
 _RETIRING_ACTIONS = frozenset({"retire", "attach", "collapse"})
+TRANSITION_LOGIN = "ktm_feature_service"
+"""전환 실행 DSN의 로그인 — 사건 writer(447)가 이 session_user만 받는다."""
 
 
 def mcst_plan_dataset_configs() -> dict[str, PlanDatasetConfig]:
@@ -62,6 +64,23 @@ def mcst_plan_dataset_configs() -> dict[str, PlanDatasetConfig]:
         )
         for spec in MCST_FILE_DATASETS.values()
     }
+
+
+def _target_view(by_id: dict[str, PlanFeature], entry: PlanEntry) -> dict[str, Any]:
+    """표본 행에 **실제 대상**의 이름·거리를 싣는다 — 물려받은 attach·collapse 생존자는
+    근거(evidence)의 후보와 다를 수 있어, 대상 id로 후보를 다시 찾는다."""
+
+    target = entry.target_feature_id
+    if target is None:
+        return {"target_name": None, "target_distance_m": None}
+    for candidate in by_id[entry.feature_id].candidates:
+        if candidate.feature_id == target:
+            return {
+                "target_name": candidate.name,
+                "target_distance_m": round(candidate.distance_m, 1),
+            }
+    survivor = by_id.get(target)
+    return {"target_name": survivor.name if survivor else None, "target_distance_m": None}
 
 
 def plan_report(
@@ -88,6 +107,7 @@ def plan_report(
                 "feature_id": entry.feature_id,
                 "name": by_id[entry.feature_id].name,
                 "target_feature_id": entry.target_feature_id,
+                **_target_view(by_id, entry),
                 "evidence": dict(entry.evidence),
             }
             for entry in picked
@@ -140,12 +160,18 @@ async def run_mcst_theme_transition(
 ) -> dict[str, Any]:
     """계획을 batch로 실행한다. ``execute``가 아니면 batch마다 되감는 **리허설**이다.
 
-    batch 하나가 transaction 하나다. 실행 중 실패하면 그 batch만 되감기고 앞 batch는 남는다 —
-    다시 돌리면 이미 commit된 batch는 건너뛴다(``(plan_sha256, batch_index)``).
+    batch 하나가 transaction 하나다. 실행 중 Feature 하나라도 ``error``면 그 batch를 통째로
+    되감고 멈춘다 — 앞 batch는 남고, 다시 돌리면 이미 commit된 batch는 건너뛴다
+    (``(plan_sha256, batch_size, batch_index)``). DSN 로그인은 ``ktm_feature_service``여야 한다.
     """
 
     if batch_size <= 0:
         raise ValueError("batch_size must be positive")
+    async with AsyncSession(engine) as probe:
+        login = await probe.scalar(text("SELECT session_user::text"))
+    if login != TRANSITION_LOGIN:
+        # 사건 writer가 이 로그인만 받는다 — 다른 로그인이면 모든 Feature가 실패한다.
+        raise ValueError(f"DSN 로그인이 {TRANSITION_LOGIN}가 아니다: {login!r}")
     totals: Counter[str] = Counter()
     batches_done = 0
     batches_skipped = 0
@@ -170,18 +196,38 @@ async def run_mcst_theme_transition(
             transaction = await session.begin()
             try:
                 result = await execute_transition_batch(
-                    session, plan=plan, batch_index=batch_index, items=chunk
+                    session,
+                    plan=plan,
+                    batch_size=batch_size,
+                    batch_index=batch_index,
+                    items=chunk,
                 )
             except BaseException:
                 await transaction.rollback()
                 raise
-            if execute:
+            failed = [outcome for outcome in result.outcomes if outcome.status == "error"]
+            if execute and not failed:
                 await transaction.commit()
             else:
+                # 실행 중 실패가 하나라도 있으면 그 batch를 통째로 되감고 멈춘다 — 전부 실패한
+                # batch가 commit돼 재실행을 막는 일을 없앤다(R4 적대 리뷰).
                 await transaction.rollback()
         if result.skipped_batch:
             batches_skipped += 1
             continue
+        if execute and failed:
+            errors.extend(asdict(outcome) for outcome in failed)
+            return {
+                "mode": "execute",
+                "aborted_at_batch": batch_index,
+                "plan_sha256": plan.plan_sha256,
+                "items": len(items),
+                "batch_size": batch_size,
+                "batches_run": batches_done,
+                "batches_already_committed": batches_skipped,
+                "counts": dict(sorted(totals.items())),
+                "errors": errors[:200],
+            }
         batches_done += 1
         totals.update(result.counts())
         errors.extend(

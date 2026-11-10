@@ -587,7 +587,8 @@ _M05_SCHEMA_OWNER_DEPENDENCY_ACL = (
     """DO $mcst_transition_acl$ BEGIN
     IF to_regclass('ops.mcst_theme_transition_items') IS NOT NULL THEN
         GRANT SELECT ON TABLE ops.mcst_theme_transition_batches,
-            ops.mcst_theme_transition_items TO ktm_manual_provider_dedup_procedure_owner;
+            ops.mcst_theme_transition_items, feature.feature_state_transitions,
+            ops.feature_merge_history TO ktm_manual_provider_dedup_procedure_owner;
     END IF;
     END $mcst_transition_acl$""",
 )

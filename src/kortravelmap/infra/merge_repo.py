@@ -935,6 +935,12 @@ async def apply_feature_merge(
     )
     if loser_state is None:
         raise MergeConflictError(f"loser feature 없음 — {loser_id!r}")
+    master_state = next(
+        (row for row in locked_rows if str(row["feature_id"]) == master_id), None
+    )
+    if master_state is None or str(master_state["lifecycle_state"]) != "active":
+        # 퇴역한 master로 link·큐레이션을 옮기면 둘 다 공개 색인 밖으로 사라진다(ADR-121 R4 리뷰).
+        raise MergeConflictError(f"master feature가 active가 아님 — {master_id!r}")
     await session.execute(
         text(_LOCK_CURATION_COLLECTIONS_SQL),
         {"master": master_id, "loser": loser_id},

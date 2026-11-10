@@ -19,9 +19,9 @@ retire)시킨다. 퇴역한 Feature를 참조하는 PinVi 행은 M05 사건(``re
   모양은 그대로다 — MCST 출처는 거기에 batch_id·item_id를 싣는다(PinVi는 불투명 UUID로 쓴다).
   기존 행은 고치지 않는다(생성 열은 표 재작성으로 채워지고 append-only 트리거는 돌지 않는다).
   떨어뜨리는 FK 둘 — ``fk_feature_reference_reconciliation_events_case``와
-  ``fk_feature_reference_reconciliation_events_resolution`` — 은 같은 대상·같은 ``ON DELETE RESTRICT``로
-  생성 열(``manual_case_ref``·``manual_resolution_ref``) 위에 이름을 바꿔 다시 건다. manual 출처 행의
-  참조 무결성은 그대로이고, MCST 출처 행은 장부 FK가 받는다.
+  ``fk_feature_reference_reconciliation_events_resolution`` — 은 같은 대상·같은
+  ``ON DELETE RESTRICT``로 생성 열(``manual_case_ref``·``manual_resolution_ref``) 위에 이름을
+  바꿔 다시 건다. manual 출처 행의 참조 무결성은 그대로이고, MCST 출처 행은 장부 FK가 받는다.
 - ``feature.record_mcst_theme_transition_event(uuid)``: 사건 writer. M05 procedure owner 소유,
   manual 경로와 같은 잠금·sequence·payload·hash 규칙.
 - receipt head CHECK에 447.
@@ -60,13 +60,16 @@ CREATE TABLE ops.mcst_theme_transition_batches (
     command_id bigint NOT NULL,
     plan_sha256 text NOT NULL,
     rule_version text NOT NULL,
+    batch_size integer NOT NULL,
     batch_index integer NOT NULL,
     created_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
     CONSTRAINT pk_mcst_theme_transition_batches PRIMARY KEY (batch_id),
     CONSTRAINT uq_mcst_theme_transition_batches_command UNIQUE (command_id),
-    CONSTRAINT uq_mcst_theme_transition_batches_plan_index UNIQUE (plan_sha256, batch_index),
+    CONSTRAINT uq_mcst_theme_transition_batches_plan_index
+        UNIQUE (plan_sha256, batch_size, batch_index),
     CONSTRAINT ck_mcst_theme_transition_batches_plan CHECK (
-        plan_sha256 ~ '^[0-9a-f]{64}$' AND batch_index >= 0 AND rule_version <> ''
+        plan_sha256 ~ '^[0-9a-f]{64}$' AND batch_size > 0 AND batch_index >= 0
+        AND rule_version <> ''
     ),
     CONSTRAINT fk_mcst_theme_transition_batches_command
         FOREIGN KEY (command_id) REFERENCES ops.domain_commands (command_id) ON DELETE RESTRICT
@@ -163,8 +166,8 @@ _OWNER_SQL: Final[tuple[str, ...]] = (
     "ALTER TABLE ops.mcst_theme_transition_batches OWNER TO " + _SCHEMA_OWNER,
     "ALTER TABLE ops.mcst_theme_transition_items OWNER TO " + _SCHEMA_OWNER,
     # 사건 writer(M05 owner)가 장부를 읽는다. 배포 조정기도 같은 grant를 다시 건다.
-    "GRANT SELECT ON TABLE ops.mcst_theme_transition_batches, ops.mcst_theme_transition_items "
-    "TO " + _M05_OWNER,
+    "GRANT SELECT ON TABLE ops.mcst_theme_transition_batches, ops.mcst_theme_transition_items, "
+    "feature.feature_state_transitions, ops.feature_merge_history TO " + _M05_OWNER,
 )
 
 _RECEIPT_HEAD_CHECK_SQL: Final[str] = """

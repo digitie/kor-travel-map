@@ -77,10 +77,12 @@ async def _plan(session: AsyncSession, entries: list[PlanEntry]) -> TransitionPl
     return plan
 
 
-async def _run(session: AsyncSession, plan: TransitionPlan) -> TransitionBatchResult:
+async def _run(
+    session: AsyncSession, plan: TransitionPlan, *, batch_size: int = 500
+) -> TransitionBatchResult:
     async with session.begin_nested(), as_api_runtime(session):
         return await execute_transition_batch(
-            session, plan=plan, batch_index=0, items=plan.items
+            session, plan=plan, batch_size=batch_size, batch_index=0, items=plan.items
         )
 
 
@@ -116,6 +118,16 @@ async def test_attach_collapse_and_retire_emit_m05_events(
     )
     retire = await _mcst_feature(
         session, "pet_friendly_culture_facilities_csv", "전환테스트동물병원", 7800
+    )
+    # 패자를 가리키는 열린 dedup 검토 행은 전환과 함께 닫힌다.
+    await session.execute(
+        text(
+            "INSERT INTO ops.dedup_review_queue (feature_id_a, feature_id_b, total_score, "
+            "name_score, spatial_score, category_score) VALUES ("
+            "LEAST(CAST(:a AS uuid), CAST(:b AS uuid)), GREATEST(CAST(:a AS uuid), "
+            "CAST(:b AS uuid)), 90, 90, 90, 90)"
+        ),
+        {"a": collapse, "b": survivor},
     )
     plan = await _plan(
         session,
@@ -195,10 +207,44 @@ async def test_attach_collapse_and_retire_emit_m05_events(
     ).scalar_one()
     assert before["lifecycle_state"] == "active"
     assert [link["source_role"] for link in before["links"]] == ["primary"]
+    assert [link["source_role"] for link in before["target_links"]] == ["primary"]
+
+    # 단독 퇴역은 lifecycle override를 남긴다 — provider 재적재가 되살리지 않는다.
+    override = (
+        await session.execute(
+            text(
+                "SELECT override_value FROM ops.feature_overrides "
+                "WHERE feature_id = CAST(:id AS uuid) AND field_path = 'lifecycle_state' "
+                "AND status = 'active'"
+            ),
+            {"id": retire},
+        )
+    ).scalar_one()
+    assert override == "retired"
+
+    review_status = (
+        await session.execute(
+            text(
+                "SELECT status FROM ops.dedup_review_queue "
+                "WHERE CAST(:id AS uuid) IN (feature_id_a, feature_id_b)"
+            ),
+            {"id": collapse},
+        )
+    ).scalar_one()
+    assert review_status == "ignored"
 
     # 같은 계획의 같은 batch는 다시 돌지 않는다.
     again = await _run(session, plan)
     assert again.skipped_batch
+    # 다른 batch 크기로 다시 돌리면 batch는 새로 잡히지만 Feature는 하나도 다시 바뀌지 않는다.
+    resized = await _run(session, plan, batch_size=1)
+    assert not resized.skipped_batch
+    assert resized.counts() == {
+        "attach:already_done": 1,
+        "collapse:already_done": 1,
+        "retire:already_done": 1,
+    }
+    assert len(await _events_for(session, attach)) == 1
 
 
 async def test_stale_plan_rows_are_skipped_without_changes(
@@ -220,6 +266,25 @@ async def test_stale_plan_rows_are_skipped_without_changes(
     result = await _run(session, plan)
 
     assert result.counts() == {"attach:stale_revision": 1}
+    assert await _state(session, loser) == ("active", "published")
+    assert await _events_for(session, loser) == []
+
+
+async def test_retired_target_is_skipped(migrated_session: AsyncSession) -> None:
+    session = migrated_session
+    gone = await _mcst_feature(session, "pet_friendly_culture_facilities_csv", "사라질곳", 9600)
+    loser = await _mcst_feature(session, "barrier_free_places_csv", "사라질곳", 9603)
+    first = await _plan(
+        session, [PlanEntry(gone, "mcst_pet_friendly_culture_facilities_csv", "retire", None, {})]
+    )
+    assert (await _run(session, first)).counts() == {"retire:done": 1}
+    second = await _plan(
+        session, [PlanEntry(loser, "mcst_barrier_free_places_csv", "collapse", gone, {})]
+    )
+
+    result = await _run(session, second)
+
+    assert result.counts() == {"collapse:stale_target": 1}
     assert await _state(session, loser) == ("active", "published")
     assert await _events_for(session, loser) == []
 

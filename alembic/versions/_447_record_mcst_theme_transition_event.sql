@@ -34,8 +34,42 @@ BEGIN
         RAISE EXCEPTION 'MCST theme transition item does not exist'
             USING ERRCODE = 'P0002', CONSTRAINT = 'ck_mcst_theme_transition_event_item';
     END IF;
-    SELECT command_id INTO STRICT v_command_id
-      FROM ops.mcst_theme_transition_batches WHERE batch_id = v_item.batch_id;
+    -- 장부 행이 정말로 이 실행기의 전환을 기록하는지 원천과 대조한다 — 런타임이 장부에 직접 쓸 수
+    -- 있으므로 장부만 믿으면 아무 퇴역 Feature의 PinVi 참조를 아무 곳으로나 옮길 수 있다.
+    SELECT batch.command_id INTO v_command_id
+      FROM ops.mcst_theme_transition_batches AS batch
+      JOIN ops.domain_commands AS command ON command.command_id = batch.command_id
+     WHERE batch.batch_id = v_item.batch_id
+       AND command.actor = 'system:mcst-theme-transition'
+       AND command.operation = 'system.mcst-theme-transition.batch.v1';
+    IF v_command_id IS NULL THEN
+        RAISE EXCEPTION 'MCST theme transition batch is not an executor command'
+            USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_command';
+    END IF;
+    PERFORM 1
+      FROM feature.feature_state_transitions AS transition
+     WHERE transition.transition_id = v_item.transition_id
+       AND transition.feature_id = v_item.feature_id
+       AND transition.row_revision = v_item.row_revision_after
+       AND transition.to_lifecycle_state = 'retired'
+       AND transition.principal = 'system:mcst-theme-transition'
+       AND transition.transition_kind =
+           CASE WHEN v_item.action = 'retire' THEN 'admin' ELSE 'merge' END;
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'MCST theme transition item does not match its retirement transition'
+            USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_transition';
+    END IF;
+    IF v_item.action <> 'retire' THEN
+        PERFORM 1
+          FROM ops.feature_merge_history AS merge
+         WHERE merge.merge_id = v_item.merge_id
+           AND merge.loser_feature_id = v_item.feature_id
+           AND merge.master_feature_id = v_item.target_feature_id;
+        IF NOT FOUND THEN
+            RAISE EXCEPTION 'MCST theme transition item does not match its merge history'
+                USING ERRCODE = '55000', CONSTRAINT = 'ck_mcst_theme_transition_event_merge';
+        END IF;
+    END IF;
 
     -- 사건은 이미 일어난 퇴역을 증언한다 — 퇴역 뒤 revision이 item과 같아야 한다.
     SELECT lifecycle_state, row_revision INTO v_old_lifecycle, v_old_revision

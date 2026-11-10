@@ -642,7 +642,9 @@ async def load_theme_attach_bundles(
 _PLAN_FEATURES_SQL = text(
     """
 SELECT CAST(f.feature_id AS text) AS feature_id, pd.dataset_key, f.name, f.created_at,
-       f.row_revision, sr.raw_data ->> 'CATEGORY2' AS category2
+       f.row_revision,
+       (f.publication_state = 'published' AND f.quality_state = 'valid') AS is_public,
+       sr.raw_data ->> 'CATEGORY2' AS category2
   FROM feature.features AS f
   JOIN provider_sync.source_links AS sl
     ON sl.feature_id = f.feature_id AND sl.source_role = 'primary'
@@ -797,6 +799,7 @@ async def fetch_mcst_plan_features(
                 master_category_prefixes=config.master_category_prefixes,
                 candidates=tuple(pairs.get(feature_id, ())),
                 row_revision=int(first["row_revision"]),
+                public=bool(first["is_public"]),
             )
         )
     return out
