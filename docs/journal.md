@@ -1,3 +1,7 @@
+## 2026-11-10 — #1475 admin 부분 검색 3~12 s
+
+- 원인: lower(name) keyset을 36만 행 걸으며 행마다 ILIKE, all은 raw_data 505 MB 전 스캔. 445 비부분 trigram 6개로 후보 id를 먼저 모으고(≤2,000) 넘치면 종전 훑기. raw_data 검색 제거. D2 run_id 6~12 s→약 50 ms.
+
 ## 2026-11-10 — 휴양림 ↔ MOIS 숙박은 휴양림 master
 
 - 소유자 결정: 산림청 자연휴양림 dataset 보정 55(MOIS 50 위). #1472 뒤 이 쌍은 MOIS가 이겼다. 수목원 115쌍도 그대로 휴양림 master.

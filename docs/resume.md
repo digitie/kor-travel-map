@@ -1,3 +1,7 @@
+## 2026-11-10 — #1475 admin 검색 trigram(445)
+
+- 회전에 묶는다(직접 회전 금지). 445는 SHARE 잠금으로 인덱스 6개 빌드(prod 추정 50~75 s, 쓰기만 대기) — 배포 동안 Feature 적재 큐를 멈춘다. OpenAPI 바이트 동일, PinVi 재vendor 불필요.
+
 ## 2026-11-10 — #1468 D 국가유산 행사 회차 묶음·장소 좌표
 
 - 배포 뒤 `feature_event_krheritage_events_job` 1회(preview 먼저). 회차별 옛 Feature 5,286건은 그 run이 retired로 내리고 행사 약 1,316건이 선다. 좌표는 약 23.6%(같은 시군구 동명 장소 Feature). migration·OpenAPI 없음.
