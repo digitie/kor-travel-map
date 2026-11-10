@@ -724,41 +724,6 @@ async def fetch_transport_airports(
         yield airport
 
 
-#: datagokr 표준데이터 요청 페이지 크기. provider의 ``DEFAULT_MAX_PAGE_SIZE``와 같다.
-_DATAGOKR_STANDARD_PAGE_SIZE: Final[int] = 1000
-
-
-def _iter_datagokr_standard(service: Any, *, label: str) -> AsyncIterator[Any]:
-    """datagokr 표준데이터 service를 **Map의 페이지네이터로** 소진한다.
-
-    provider의 ``iter_all()``을 쓰지 않는다. 그 구현은 짧은 페이지를 무조건
-    마지막 페이지로 읽는데(`services/pagination.py`), 같은 릴리스에서 행 단위
-    ``except ValidationError: continue``가 들어와 **기형 행 하나가 페이지를 짧게
-    만든다.** 둘이 겹치면 18,000건짜리 데이터셋이 999건에서 조용히 끝난다 —
-    예외도 로그도 없이. 그리고 Map은 그 결과를
-    ``authoritative_snapshot_complete=True``로 봉인한다.
-
-    이 저장소는 같은 부류를 이미 한 번 겪었다. ``provider_pagination`` 모듈이
-    존재하는 이유가 ``python-krex-api``의 똑같은 변화이고, 그 규칙은
-    **``total_count``가 권위이고 짧은 페이지는 total을 모를 때만 쓰는 대체
-    휴리스틱**이다. datagokr도 그 규칙 아래로 옮긴다.
-    """
-
-    async def _page(page_no: int) -> ProviderPage:
-        page = await service.list(
-            page_no=page_no, num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE
-        )
-        return ProviderPage(items=list(page.items), total_count=page.total_count)
-
-    return aiter_paginated_items(
-        _page,
-        num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE,
-        label=label,
-        warn=_LOGGER.warning,
-    )
-
-
-
 #: 국가유산 행사 rolling window. provider ``iter_months`` 기본값과 같은 창이지만
 #: **Map이 소유한다** — 요청 수를 셀 수 있어야 쿼터 비율을 말할 수 있다.
 _KRHERITAGE_EVENT_MONTHS_BACK: Final[int] = 1
