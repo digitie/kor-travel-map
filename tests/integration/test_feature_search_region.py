@@ -199,6 +199,23 @@ async def test_region_query_keeps_a_destination_whose_full_name_is_the_query(
     assert labels.index("gimpo_airport") < labels.index("gimpo_noodle"), labels
 
 
+async def test_region_query_treats_bracket_name_variants_as_exact(
+    migrated_session: AsyncSession,
+) -> None:
+    """지역 검색의 나머지 검색어도 끝 괄호 이름의 한글 이름과 이름 일치다(#1466 후속, 적대 리뷰)."""
+    ids = await _seed(migrated_session)
+    for label, name in (
+        ("gn_bracket", "세인트존스 호텔 (St. John's Hotel Gangneung)"),
+        ("gn_bracket_annex", "세인트존스 호텔 별관"),
+    ):
+        ids[label] = await _feature(
+            migrated_session, label, name=name, category="03010100",
+            region=_GANGNEUNG, lon=128.9220, lat=37.7900,
+        )
+    labels = await _search_labels(migrated_session, "강릉 세인트존스 호텔", ids, kinds=["place"])
+    assert labels.index("gn_bracket") < labels.index("gn_bracket_annex"), labels
+
+
 async def test_single_token_query_keeps_exact_name_behaviour(
     migrated_session: AsyncSession,
 ) -> None:
@@ -299,6 +316,7 @@ async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
             "q_compact": "강릉호텔",
             "alias_name": None,
             "alias_compact": None,
+            "bracket_like": "%강릉 호텔%",
             "bbox_enabled": False,
             "min_lon": None,
             "min_lat": None,

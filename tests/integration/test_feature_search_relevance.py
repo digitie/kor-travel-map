@@ -723,26 +723,37 @@ async def test_mois_hotels_are_found_by_common_name_with_lodging_category(
 
 
 @pytest.mark.parametrize(
-    ("query", "decoy_name"),
+    ("query", "name", "decoy_name"),
     [
         # 한글 이름만 — 괄호 없는 한글 이름이 이름 일치다.
-        ("JW 메리어트 호텔 서울", "JW 메리어트 호텔 서울 레지던스"),
-        ("jw메리어트호텔서울", "JW 메리어트 호텔 서울 레지던스"),
+        (
+            "JW 메리어트 호텔 서울", "JW 메리어트 호텔 서울 (JW Marriott Hotel Seoul)",
+            "JW 메리어트 호텔 서울 레지던스",
+        ),
         # 영문 이름만 — 끝 괄호 안 라틴 이름이 이름 일치다.
-        ("JW Marriott Hotel Seoul", "JW Marriott Hotel Seoul Residence"),
+        (
+            "JW Marriott Hotel Seoul", "JW 메리어트 호텔 서울 (JW Marriott Hotel Seoul)",
+            "JW Marriott Hotel Seoul Residence",
+        ),
+        # 짧은 한글 이름 + 긴 영문 괄호: 이름 전체와의 유사도가 문턱(0.2) 밑이라 종전 후보 팔로는
+        # 후보조차 못 됐다(적대 리뷰). 끝 괄호 후보 팔(:bracket_like)이 올린다.
+        (
+            "롯데호텔", "롯데호텔 (Lotte Hotel Seoul Myeongdong Main Tower)",
+            "롯데호텔모텔",
+        ),
     ],
 )
 async def test_bracketed_english_and_bare_korean_names_are_exact_names(
-    migrated_session: AsyncSession, query: str, decoy_name: str,
+    migrated_session: AsyncSession, query: str, name: str, decoy_name: str,
 ) -> None:
     """#1466 후속: MOIS 숙박 이름 끝의 영문 괄호를 지키면서 두 이름 모두 이름 일치로 찾힌다.
 
     미끼는 검색어를 품고 이름이 더 짧아 유사도가 높은 같은 분류 그룹(숙박) 행이다 — 변형이 없을
-    때는 미끼가 앞섰다.
+    때는 미끼가 앞섰다(또는 대상이 후보가 아니었다). 공백을 지운 검색어("jw메리어트호텔서울")와
+    공백 있는 이름은 이 변경 전후 모두 trigram이 달라 다루지 않는다.
     """
     target = await _mois_lodging(
-        migrated_session, f"jw-bracket-{query}",
-        name="JW 메리어트 호텔 서울 (JW Marriott Hotel Seoul)", lon=127.0010, lat=37.5050,
+        migrated_session, f"jw-bracket-{query}", name=name, lon=127.0010, lat=37.5050,
     )
     decoy = await _place(
         migrated_session, f"jw-bracket-decoy:{query}", name=decoy_name, category="03040100",
@@ -770,6 +781,9 @@ async def test_bracket_name_variants_sql_matches_core_function(
         "호텔 (現 Hotel)",
         "호텔 (Hotel) 본관",
         "(Hotel)",
+        "호텔\n본관 (Hotel Annex)",  # Python ``.``도 줄바꿈을 맞춘다(DOTALL)
+        "호텔 본관　(Hotel Annex)　",
+        "호텔 (Hotel)\n",
     ]
     for name in names:
         row = (

@@ -32,7 +32,8 @@ LATIN_BRACKET_NAME_PATTERN: Final[str] = (
 )
 """(한글 이름, 괄호 안 라틴 이름) 두 group. 검색 SQL이 ``regexp_match``에 그대로 넣는다."""
 
-_PATTERN: Final[re.Pattern[str]] = re.compile(LATIN_BRACKET_NAME_PATTERN)
+# DOTALL: PostgreSQL ARE의 ``.``는 줄바꿈도 맞춘다 — 두 쪽이 같은 뜻이어야 한다.
+_PATTERN: Final[re.Pattern[str]] = re.compile(LATIN_BRACKET_NAME_PATTERN, re.DOTALL)
 
 
 def latin_bracket_name_parts(name: str) -> tuple[str, str] | None:

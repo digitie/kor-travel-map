@@ -22,6 +22,8 @@ from kortravelmap.core.search_name import latin_bracket_name_parts
         # 앞쪽 괄호는 한글 이름의 일부다 — 끝 괄호 하나만 뗀다.
         ("A(1) 호텔 (B&B Hotel)", ("A(1) 호텔", "B&B Hotel")),
         ("호텔신라 ( The Shilla )", ("호텔신라", "The Shilla")),
+        # PostgreSQL ARE의 ``.``처럼 줄바꿈도 맞춘다(SQL 짝과 같은 뜻).
+        ("호텔\n본관 (Hotel Annex)", ("호텔\n본관", "Hotel Annex")),
     ],
 )
 def test_trailing_latin_bracket_splits_korean_and_english_names(
@@ -46,6 +48,15 @@ def test_trailing_latin_bracket_splits_korean_and_english_names(
 )
 def test_names_without_a_safe_trailing_latin_bracket_have_no_variants(name: str) -> None:
     assert latin_bracket_name_parts(name) is None
+
+
+def test_bracket_candidate_like_pattern_needs_three_compact_chars_and_escapes() -> None:
+    from kortravelmap.infra.feature_repo import search_bracket_like_pattern
+
+    assert search_bracket_like_pattern("롯데호텔") == "%롯데호텔%"
+    assert search_bracket_like_pattern(" 50%_off ") == "%50\\%\\_off%"
+    # 공백을 지우면 2글자 — trigram이 거르지 못하므로 팔이 없다.
+    assert search_bracket_like_pattern("카 페") is None
 
 
 def test_doctests() -> None:

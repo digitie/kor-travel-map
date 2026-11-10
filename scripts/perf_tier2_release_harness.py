@@ -103,6 +103,8 @@ _COMMON_SEARCH = {
     "q_compact": "카페",
     "alias_name": None,
     "alias_compact": None,
+    # 끝 괄호 이름 팔: 공백 뺀 검색어가 3글자 미만이면 없다(``search_bracket_like_pattern``).
+    "bracket_like": None,
     "bbox_enabled": False,
     "min_lon": None,
     "min_lat": None,

@@ -936,6 +936,7 @@ async def test_t212d_feature_hot_reads_use_spatial_and_search_indexes(
             "q_compact": "광화문실측카페37",
             "alias_name": "광화문 실측 카페 1",
             "alias_compact": "광화문실측카페1",
+            "bracket_like": "%광화문 실측 카페 37%",
             "bbox_enabled": False,
             "min_lon": None,
             "min_lat": None,
