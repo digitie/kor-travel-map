@@ -325,6 +325,12 @@ from kortravelmap.infra.sync_state_repo import (
 from kortravelmap.infra.sync_state_repo import (
     record_sync_success_for_operation_membership as repo_record_operation_success,
 )
+from kortravelmap.infra.theme_attach_repo import (
+    ThemeAttachMode,
+    ThemeAttachReport,
+    ThemeAttachSpec,
+    load_theme_attach_bundles,
+)
 from kortravelmap.infra.transaction_limits import apply_transaction_limits
 from kortravelmap.infra.venue_candidates_repo import (
     find_venue_candidates as repo_find_venue_candidates,
@@ -1239,6 +1245,32 @@ class AsyncKorTravelMapClient:
                     )
                 )
             return result
+
+    async def load_theme_attach_bundles(
+        self,
+        bundles: Iterable[FeatureBundle],
+        *,
+        spec: ThemeAttachSpec,
+        mode: ThemeAttachMode,
+        geo: GeoLoadContext | None = None,
+    ) -> tuple[FeatureLoadResult, ThemeAttachReport]:
+        """MCST 한 dataset snapshot을 ADR-121 붙임 규칙으로 한 transaction에 적재한다.
+
+        ``mode="dry_run"``은 판정 개수만 계산하고 현행 적재를 한다. ``"apply"``는
+        :func:`~kortravelmap.infra.theme_attach_repo.load_theme_attach_bundles`의 경로다.
+        curation seal 입력은 같은 transaction에서 잡는다(:meth:`load_feature_bundles`와 같다).
+        """
+        materialized = list(bundles)
+        async with self._feature_load_transaction() as session:
+            loaded, report = await load_theme_attach_bundles(
+                session, materialized, spec=spec, mode=mode, geo=geo
+            )
+            loaded = loaded.merge(
+                await capture_provider_curation_input(
+                    session, provider=spec.provider, dataset_key=spec.dataset_key
+                )
+            )
+            return loaded, report
 
     async def find_unchanged_active_source_entities(
         self,
@@ -2719,8 +2751,12 @@ class AsyncKorTravelMapClient:
         max_lat: float,
         kinds: list[str] | None = None,
         limit: int = 1000,
+        attributes: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """bbox(4326) 안의 feature 경량 표현 list (지도/목록용)."""
+        """bbox(4326) 안의 feature 경량 표현 list (지도/목록용).
+
+        ``attributes``는 장소 속성 코드 AND 필터(ADR-121)다. 코드 검증은 호출자(API) 몫이다.
+        """
         async with self._session_factory() as session:
             return await features_in_bbox(
                 session,
@@ -2730,6 +2766,7 @@ class AsyncKorTravelMapClient:
                 max_lat=max_lat,
                 kinds=kinds,
                 limit=limit,
+                attributes=attributes,
             )
 
     async def get_features(self, feature_ids: Sequence[str]) -> dict[str, dict[str, Any]]:
@@ -2754,6 +2791,7 @@ class AsyncKorTravelMapClient:
         cursor: str | None = None,
         include_total: bool = False,
         cursor_signing_key: bytes,
+        attributes: Sequence[str] | None = None,
     ) -> FeatureSearchPage:
         """사용자 feature 검색(pg_trgm ``q`` 또는 ``bbox``) — keyset cursor.
 
@@ -2775,6 +2813,7 @@ class AsyncKorTravelMapClient:
                 cursor=cursor,
                 include_total=include_total,
                 cursor_signing_key=cursor_signing_key,
+                attributes=attributes,
             )
 
     async def features_nearby(
@@ -2789,6 +2828,7 @@ class AsyncKorTravelMapClient:
         sort: str = "distance",
         limit: int = 100,
         cursor: str | None = None,
+        attributes: Sequence[str] | None = None,
     ) -> NearbyFeaturePage:
         """일반 좌표(``lon``/``lat``) 중심 반경 ``radius_m`` 안 feature summary (T-213b).
 
@@ -2809,6 +2849,7 @@ class AsyncKorTravelMapClient:
                 sort=sort,
                 limit=limit,
                 cursor=cursor,
+                attributes=attributes,
             )
 
     async def features_nearby_poi_cache_target(
@@ -2822,6 +2863,7 @@ class AsyncKorTravelMapClient:
         sort: str = "distance",
         limit: int = 100,
         cursor: str | None = None,
+        attributes: Sequence[str] | None = None,
     ) -> NearbyFeaturePage:
         """POI/cache target(``target_id``) 주변 feature summary — keyset cursor.
 
@@ -2841,6 +2883,7 @@ class AsyncKorTravelMapClient:
                 sort=sort,
                 limit=limit,
                 cursor=cursor,
+                attributes=attributes,
             )
 
     async def pending_dedup_reviews(self, *, limit: int = 100) -> list[dict[str, Any]]:

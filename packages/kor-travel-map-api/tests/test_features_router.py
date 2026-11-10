@@ -84,6 +84,30 @@ def _patch_resolved_identity(
     monkeypatch.setattr(feature_identity, "resolve_feature_identity", _resolve)
 
 
+def _patch_feature_attributes(
+    monkeypatch: pytest.MonkeyPatch,
+    attributes: tuple[Any, ...] = (),
+) -> None:
+    """공개 상세의 장소 속성 조회(ADR-121)를 stub한다 — DB 없는 단위 테스트용.
+
+    상세는 ETag digest 때문에 304 판정 전에 속성을 읽는다. ``attributes``는
+    ``place_attribute_repo.PlaceAttribute`` tuple이다.
+    """
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _attributes(
+        _session: Any, _feature_id: str, *, public_only: bool
+    ) -> tuple[Any, ...]:
+        assert public_only is True
+        return attributes
+
+    monkeypatch.setattr(
+        features_mod.place_attribute_repo,
+        "list_feature_place_attributes",
+        _attributes,
+    )
+
+
 @pytest.mark.unit
 def test_features_routes_mounted_in_openapi(client: TestClient) -> None:
     spec = client.get("/openapi.json").json()
@@ -680,6 +704,7 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         return {}
 
     _patch_resolved_identity(monkeypatch)
+    _patch_feature_attributes(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.curation_repo,
@@ -786,6 +811,7 @@ def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
         return {}
 
     _patch_resolved_identity(monkeypatch, feature_id="f1")
+    _patch_feature_attributes(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.curation_repo,
@@ -897,6 +923,7 @@ def test_mois_place_detail_strips_raw_provider_payload(
         return {}
 
     _patch_resolved_identity(monkeypatch)
+    _patch_feature_attributes(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
     monkeypatch.setattr(
         features_mod.curation_repo,

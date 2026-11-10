@@ -72,6 +72,9 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "feature_price_values": ("SELECT", "INSERT"),
     # 436: 검색 별칭은 migration이 심고 공개 검색은 읽기만 한다.
     "feature_search_aliases": ("SELECT",),
+    # 446(ADR-121): 장소 속성 catalog는 migration이 심고 공개 API는 읽기만 한다.
+    "place_attributes": ("SELECT",),
+    "dataset_place_attributes": ("SELECT",),
     # `feature_weather_values`·`current_weather_summary`는 migration 402가 지웠다(ADR-105).
     # 표에서도 뺀다 — 남겨 두면 아래 phantom 검사가 잡는다.
     # `weather_metric_series`(legacy 0069)는 vNext baseline에 없다 — phantom 항목이라 지웠다.

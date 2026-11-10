@@ -15872,6 +15872,19 @@ CREATE TABLE feature.current_price_summary (
 ALTER TABLE feature.current_price_summary OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: dataset_place_attributes; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.dataset_place_attributes (
+    provider_dataset_id bigint NOT NULL,
+    source_entity_type text NOT NULL,
+    attribute_code text NOT NULL
+);
+
+
+ALTER TABLE feature.dataset_place_attributes OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_aliases; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -16291,6 +16304,25 @@ CREATE TABLE feature.manual_feature_purge_records (
 ALTER TABLE feature.manual_feature_purge_records OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: place_attributes; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.place_attributes (
+    attribute_code text NOT NULL,
+    label_ko text NOT NULL,
+    attribute_group text NOT NULL,
+    visibility text DEFAULT 'public'::text NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    CONSTRAINT ck_place_attributes_code CHECK ((attribute_code ~ '^[a-z][a-z0-9_]{1,47}$'::text)),
+    CONSTRAINT ck_place_attributes_group CHECK ((attribute_group = ANY (ARRAY['companion'::text, 'accessibility'::text, 'bookstore'::text, 'cuisine'::text]))),
+    CONSTRAINT ck_place_attributes_label CHECK (((label_ko <> ''::text) AND (char_length(label_ko) <= 100))),
+    CONSTRAINT ck_place_attributes_visibility CHECK ((visibility = ANY (ARRAY['public'::text, 'admin_only'::text])))
+);
+
+
+ALTER TABLE feature.place_attributes OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: provider_field_shadow_candidates; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -16654,7 +16686,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -19018,6 +19050,26 @@ CREATE TABLE provider_sync.source_records (
 ALTER TABLE provider_sync.source_records OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: theme_attach_decisions; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE provider_sync.theme_attach_decisions (
+    provider_dataset_id bigint NOT NULL,
+    natural_key text NOT NULL,
+    state text NOT NULL,
+    target_feature_id uuid,
+    rule_version text NOT NULL,
+    evidence jsonb DEFAULT '{}'::jsonb NOT NULL,
+    decided_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_theme_attach_decisions_evidence CHECK ((jsonb_typeof(evidence) = 'object'::text)),
+    CONSTRAINT ck_theme_attach_decisions_state CHECK ((state = ANY (ARRAY['owner'::text, 'matched'::text, 'sticky'::text, 'redirected'::text, 'created'::text, 'ambiguous'::text, 'unresolved'::text]))),
+    CONSTRAINT ck_theme_attach_decisions_target CHECK (((state = ANY (ARRAY['ambiguous'::text, 'unresolved'::text])) = (target_feature_id IS NULL)))
+);
+
+
+ALTER TABLE provider_sync.theme_attach_decisions OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: import_jobs queue_sequence; Type: DEFAULT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -19169,6 +19221,14 @@ ALTER TABLE ONLY feature.current_price_summary
 
 
 --
+-- Name: dataset_place_attributes pk_dataset_place_attributes; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.dataset_place_attributes
+    ADD CONSTRAINT pk_dataset_place_attributes PRIMARY KEY (provider_dataset_id, source_entity_type, attribute_code);
+
+
+--
 -- Name: feature_aliases pk_feature_aliases; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -19270,6 +19330,14 @@ ALTER TABLE ONLY feature.features
 
 ALTER TABLE ONLY feature.manual_feature_identity_claims
     ADD CONSTRAINT pk_manual_feature_identity_claims PRIMARY KEY (feature_id);
+
+
+--
+-- Name: place_attributes pk_place_attributes; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.place_attributes
+    ADD CONSTRAINT pk_place_attributes PRIMARY KEY (attribute_code);
 
 
 --
@@ -20654,6 +20722,14 @@ ALTER TABLE ONLY provider_sync.source_links
 
 ALTER TABLE ONLY provider_sync.source_records
     ADD CONSTRAINT pk_source_records PRIMARY KEY (source_record_key);
+
+
+--
+-- Name: theme_attach_decisions pk_theme_attach_decisions; Type: CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY provider_sync.theme_attach_decisions
+    ADD CONSTRAINT pk_theme_attach_decisions PRIMARY KEY (provider_dataset_id, natural_key);
 
 
 --
@@ -23638,6 +23714,22 @@ ALTER TABLE ONLY feature.current_price_summary
 
 
 --
+-- Name: dataset_place_attributes fk_dataset_place_attributes_attribute_code_place_attributes; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.dataset_place_attributes
+    ADD CONSTRAINT fk_dataset_place_attributes_attribute_code_place_attributes FOREIGN KEY (attribute_code) REFERENCES feature.place_attributes(attribute_code) ON DELETE CASCADE;
+
+
+--
+-- Name: dataset_place_attributes fk_dataset_place_attributes_provider_dataset; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.dataset_place_attributes
+    ADD CONSTRAINT fk_dataset_place_attributes_provider_dataset FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE CASCADE;
+
+
+--
 -- Name: feature_aliases fk_feature_aliases_feature; Type: FK CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -25179,6 +25271,14 @@ ALTER TABLE ONLY provider_sync.source_links
 
 ALTER TABLE ONLY provider_sync.source_records
     ADD CONSTRAINT fk_source_records_source_entity_key_source_entities FOREIGN KEY (source_entity_key) REFERENCES provider_sync.source_entities(source_entity_key) ON DELETE RESTRICT;
+
+
+--
+-- Name: theme_attach_decisions fk_theme_attach_decisions_provider_dataset_id_provider_datasets; Type: FK CONSTRAINT; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY provider_sync.theme_attach_decisions
+    ADD CONSTRAINT fk_theme_attach_decisions_provider_dataset_id_provider_datasets FOREIGN KEY (provider_dataset_id) REFERENCES provider_sync.provider_datasets(provider_dataset_id) ON DELETE CASCADE;
 
 
 --

@@ -403,6 +403,16 @@ class KorTravelMapSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_MCST_MAX_ITEMS_PER_DATASET``."
         ),
     )
+    mcst_theme_attach_mode: Literal["off", "dry_run", "apply"] = Field(
+        default="off",
+        description=(
+            "MCST 테마 목록 붙임 적재 모드(ADR-121). ``off``(현행 목록별 Feature) / "
+            "``dry_run``(현행 적재 + 판정 개수만 보고) / ``apply``(master에 enrichment link로 "
+            "붙이고 master가 없을 때만 MCST 장소 Feature). ``apply``는 기존 MCST Feature 전환과 "
+            "같은 운영 창에서만 켠다 — 전환 뒤 ``off``로 되돌리는 것은 롤백이 아니다. "
+            "env ``KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE``."
+        ),
+    )
     krheritage_kind_codes: str = Field(
         default="11,12,13,15,16",
         description=(

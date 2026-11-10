@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from types import SimpleNamespace
 from typing import Any, cast
 
 import pytest
@@ -622,7 +623,8 @@ def test_mcst_runner_scopes_fetch_to_the_claimed_exact_member(
     monkeypatch.setattr(runner_mod, "fetch_mcst_culture_records", _fetch)
 
     resources = runner_mod._mcst_resources(  # noqa: SLF001 - worker source boundary
-        cast(KorTravelMapSettings, object()),
+        # ADR-121: worker도 붙임 모드를 settings에서 읽어 asset resource로 넘긴다.
+        cast(KorTravelMapSettings, SimpleNamespace(mcst_theme_attach_mode="dry_run")),
         _scope(
             provider="arbitrary-display-label",
             dataset_key=selected_spec.dataset_key,
@@ -632,6 +634,7 @@ def test_mcst_runner_scopes_fetch_to_the_claimed_exact_member(
 
     assert captured == [(selected_slug,)]
     assert resources.values["mcst_culture_records"] == ()
+    assert resources.values["mcst_theme_attach_mode"] == "dry_run"
 
 
 def test_mois_runner_resources_sync_source_db_before_fetch(

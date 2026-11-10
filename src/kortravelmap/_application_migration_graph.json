@@ -255,6 +255,12 @@
         "442_mois_brand_search_aliases"
       ],
       "revision": "444_trip_search_aliases"
+    },
+    {
+      "down_revision": [
+        "444_trip_search_aliases"
+      ],
+      "revision": "446_mcst_place_attributes"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

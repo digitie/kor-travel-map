@@ -604,6 +604,10 @@ Map UI의 server-only `KOR_TRAVEL_GEO_API_KEY`로만 별칭 결선한다. Next.j
 geo의 credential rejection은 `503 GEO_API_KEY_REJECTED`로 fail-close한다. 이 credential은
 frontend Docker build arg/source digest나 `NEXT_PUBLIC_*` runtime에 포함하지 않는다.
 
+**ADR-121(2026-11-10)은 user·admin 스펙을 바꾸고 service 스펙은 그대로다** — `attribute` query·`attribute_codes`·
+`attributes`·`/v1/place-attributes`·`/v1/admin/theme-attach-decisions`. 순서: Map 머지 → PinVi user+admin 재vendor
+(`_CLIENT_QUERY_PARAMETERS`에 `attribute` 추가 포함) → pair 회전.
+
 **Map admin OpenAPI(`packages/kor-travel-map-api/openapi.json`)가 바뀌면 PinVi의 vendored admin 스냅샷을 재vendor해야
 한다** — 단일 핀 `apps/api/tests/unit/_kor_travel_map_snapshot_pin.py`(`UPSTREAM_COMMIT`·`SNAPSHOT_SHA256`) +
 `test_kor_travel_map_admin_contract.py` 이중 핀 + `scripts/generate_m05_pair_contract.py` 재실행, Map API 배포 **전**

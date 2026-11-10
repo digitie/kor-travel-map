@@ -91,6 +91,7 @@ from kortravelmap.api.routers import (
     admin_issues_router,
     admin_manual_provider_dedup_cases_router,
     admin_restore_router,
+    admin_theme_attach_router,
     categories_router,
     curations_router,
     dedup_review_router,
@@ -108,6 +109,7 @@ from kortravelmap.api.routers import (
     ops_logs_router,
     ops_pipeline_router,
     ops_router,
+    place_attributes_router,
     poi_cache_targets_router,
     public_providers_router,
     public_status_router,
@@ -1198,6 +1200,12 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             prefix="/v1",
             dependencies=public_dependencies,
         )
+        # ADR-121 — 공개 장소 속성 catalog. ``/v1/categories``와 같은 공개 catalog read다.
+        application.include_router(
+            place_attributes_router,
+            prefix="/v1",
+            dependencies=public_dependencies,
+        )
         application.include_router(
             public_providers_router,
             prefix="/v1",
@@ -1322,6 +1330,12 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.include_router(
             admin_issues_router,
+            prefix="/v1",
+            dependencies=admin_dependencies,
+        )
+        # ADR-121 — MCST 테마 목록 붙임 판정 읽기 전용 조회.
+        application.include_router(
+            admin_theme_attach_router,
             prefix="/v1",
             dependencies=admin_dependencies,
         )

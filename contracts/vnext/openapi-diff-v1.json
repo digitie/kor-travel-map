@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "0027b8e8a6c1c88250ae562bb4ac04fa1b10fd17e278177a4089871dda87a072"
+      "sha256": "a7b3804948ccafdd6e1367fccda1160d526d5edf0931f868b6e8f837f05f58e5"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "3a847c8a53f36044080839855d634fbfa2c5b18fa769bcf95bcbbaa614f72da4"
+      "sha256": "84a539c2637037c08d5b0f85f23d6e2cea327588d240c7070f0f12069c137a22"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -216,21 +216,32 @@
       "date": "2026-10-24",
       "task": "T-STATE-02",
       "change": "baseline sha256 재고정(service·admin). ADR-114 2단계 `/v1/service/weather/*` 5 operation을 추가했다(기존 경로·스키마 불변, user spec 무변경). ADR-105의 유일한 예외 표면이다. full/admin spec도 같은 operation이 더해져 PinVi admin 재vendor 대상이다."
+    },
+    {
+      "date": "2026-11-10",
+      "task": "ADR-121 R3",
+      "change": "baseline sha256 재고정(user·admin, service 불변). 장소 속성(ADR-121 §7): 공개 `GET /v1/place-attributes` catalog와 admin `GET /v1/admin/theme-attach-decisions`를 추가했다. 공개 목록·in-bounds·검색·주변(좌표·target)과 admin in-bounds에 선택 query `attribute`(반복, AND, 최대 5)를, item에 `attribute_codes`를, 공개 상세에 `attributes`와 속성 digest ETag를 더했다. service batch·`/v1/service/admin-features`는 무변경이다. PinVi user·admin 재vendor 대상이다."
     }
   ],
   "surfaces": {
     "user": {
       "counts": {
-        "added": 0,
+        "added": 1,
         "removed": 15,
         "renamed": 2,
         "enum_changes": 8,
         "status_changes": 1,
         "error_changes": 0,
-        "schema_changes": 0,
+        "schema_changes": 6,
         "deferred": 2
       },
-      "added": [],
+      "added": [
+        {
+          "target_operation": "GET /v1/place-attributes",
+          "basis": "ADR-121 §7.2: 공개 장소 속성 catalog(public-keyed, /v1/categories와 같은 정책)",
+          "applied": true
+        }
+      ],
       "removed": [
         {
           "operation": "GET /v1/curated-features",
@@ -376,7 +387,38 @@
         }
       ],
       "error_changes": [],
-      "schema_changes": [],
+      "schema_changes": [
+        {
+          "operation": "GET /v1/features",
+          "detail": "query attribute(반복, AND, 최대 5) + FeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/in-bounds",
+          "detail": "query attribute(item·cluster 공통) + FeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/search",
+          "detail": "query attribute + FeatureSummary.attribute_codes(필터는 비었을 때 cursor fingerprint 불변)",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/nearby",
+          "detail": "query attribute + NearbyFeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/nearby/by-target",
+          "detail": "query attribute + NearbyFeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "FeatureDetailResponse.attributes({code,label,group}) + ETag에 공개 속성 digest(속성 없으면 종전 \"<revision>\")",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        }
+      ],
       "deferred": [
         {
           "topic": "kind-discriminated typed detail의 subtype 분해 반영(응답 필드 재배치)",
@@ -575,13 +617,13 @@
     },
     "admin": {
       "counts": {
-        "added": 19,
+        "added": 21,
         "removed": 12,
         "renamed": 0,
         "enum_changes": 4,
         "status_changes": 6,
         "error_changes": 7,
-        "schema_changes": 9,
+        "schema_changes": 16,
         "deferred": 2
       },
       "added": [
@@ -706,6 +748,16 @@
           "operation": "GET /v1/ops/dedup-reviews",
           "detail": "ops 운영자 read 전용 중복 검토 목록(require_ops_operator, page_size 1~500, 기본 status=pending)",
           "basis": "PR #1445/#1448: PinVi #643 관리자 읽기 — 기본값 유지, 기존 caller 불변"
+        },
+        {
+          "target_operation": "GET /v1/place-attributes",
+          "basis": "ADR-121 §7.2: 공개 장소 속성 catalog(public-keyed, /v1/categories와 같은 정책)",
+          "applied": true
+        },
+        {
+          "target_operation": "GET /v1/admin/theme-attach-decisions",
+          "basis": "ADR-121 §7.2: MCST 붙임 판정 읽기 전용 목록(operator)",
+          "applied": true
         }
       ],
       "removed": [
@@ -918,6 +970,41 @@
           "operation": "GET /v1/ops/datasets/{provider_dataset_id}",
           "detail": "OpsDatasetEventRecord에 선택 payload(MCST dataset 시도 결과 — 허용 목록 code·phase·reason·retryable) 추가",
           "basis": "PR #1445/#1448: PinVi #643 관리자 읽기 — 기본값 유지, 기존 caller 불변"
+        },
+        {
+          "operation": "GET /v1/features",
+          "detail": "query attribute(반복, AND, 최대 5) + FeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/in-bounds",
+          "detail": "query attribute(item·cluster 공통) + FeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/search",
+          "detail": "query attribute + FeatureSummary.attribute_codes(필터는 비었을 때 cursor fingerprint 불변)",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/nearby",
+          "detail": "query attribute + NearbyFeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/nearby/by-target",
+          "detail": "query attribute + NearbyFeatureSummary.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "FeatureDetailResponse.attributes({code,label,group}) + ETag에 공개 속성 digest(속성 없으면 종전 \"<revision>\")",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/admin/features/in-bounds",
+          "detail": "query attribute(admin_only 코드 허용) + AdminFeatureMapItem.attribute_codes",
+          "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
         }
       ],
       "deferred": [

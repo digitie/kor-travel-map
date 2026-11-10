@@ -571,10 +571,6 @@ async def test_structured_cafe_taxonomy_is_not_overridden_by_hotel_or_camp_in_na
          "반려동반여행", "미술관", "01040201"),
         ("pet_friendly_culture_facilities_csv", "공개 원본 박물관",
          "반려동반여행", "박물관", "01040100"),
-        ("pet_friendly_culture_facilities_csv", "롯데마트 서울역점",
-         "반려동물 서비스", "반려동물용품", "00000000"),
-        ("pet_friendly_culture_facilities_csv", "동물병원은 사람 병원으로 추정하지 않음",
-         "반려의료", "동물병원", "00000000"),
         ("barrier_free_places_csv", "공개 원본 공원",
          "레저/체육/공원", "공원", "01050200"),
         ("family_infant_culture_facilities_csv", "공개 원본 관광지",
@@ -600,3 +596,60 @@ async def test_media_format_without_physical_type_remains_unclassified(name: str
     )
     assert bundle.feature.category == "00000000"
     assert bundle.source_record.raw_data == row
+
+
+# -- ADR-121 D2: 반려 업종 행은 적재하지 않는다 --------------------------------
+
+
+@pytest.mark.parametrize(
+    "category2", ["동물약국", "반려동물용품", "동물병원", "미용", "위탁관리", " 동물 병원 "]
+)
+async def test_pet_business_rows_are_not_loaded(category2: str) -> None:
+    row = _world_restaurant_row(
+        TITLE="행복 반려 업종", CATEGORY1="반려동물 서비스", CATEGORY2=category2, CATEGORY3=""
+    )
+    bundles = await file_rows_to_bundles(
+        [row], slug="pet_friendly_culture_facilities_csv", fetched_at=_NOW
+    )
+    assert bundles == []
+
+
+async def test_pet_companion_rows_and_other_slugs_are_still_loaded() -> None:
+    companion = _world_restaurant_row(
+        TITLE="동반 가능 미술관", CATEGORY1="반려동반여행", CATEGORY2="미술관", CATEGORY3=""
+    )
+    [bundle] = await file_rows_to_bundles(
+        [companion], slug="pet_friendly_culture_facilities_csv", fetched_at=_NOW
+    )
+    assert bundle.feature.name == "동반 가능 미술관"
+    # 같은 CATEGORY2라도 반려동물 목록이 아니면 제외하지 않는다.
+    other = _world_restaurant_row(TITLE="미용 체험관", CATEGORY2="미용")
+    assert len(
+        await file_rows_to_bundles([other], slug="barrier_free_places_csv", fetched_at=_NOW)
+    ) == 1
+
+
+def test_theme_attach_config_per_slug() -> None:
+    attribute_codes = {
+        slug: spec.attribute_code for slug, spec in MCST_FILE_DATASETS.items()
+        if spec.attribute_code is not None
+    }
+    assert attribute_codes == {
+        "pet_friendly_culture_facilities_csv": "pet_friendly",
+        "barrier_free_places_csv": "barrier_free",
+        "family_infant_culture_facilities_csv": "family_friendly",
+        "independent_bookstores_csv": "bookstore_independent",
+        "cafe_bookstores_csv": "bookstore_cafe",
+        "children_bookstores_csv": "bookstore_children",
+        "used_bookstores_csv": "bookstore_used",
+        "world_restaurants_csv": "world_cuisine",
+    }
+    # 촬영지는 속성이 아니라 큐레이션이다(D3).
+    assert MCST_FILE_DATASETS["media_famous_places_csv"].attribute_code is None
+    assert {
+        slug for slug, spec in MCST_FILE_DATASETS.items() if spec.attribute_list
+    } == {
+        "pet_friendly_culture_facilities_csv",
+        "barrier_free_places_csv",
+        "family_infant_culture_facilities_csv",
+    }

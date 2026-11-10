@@ -158,9 +158,34 @@ FOR UPDATE
 
 # loser source_link 중 master가 아직 안 가진 것만 master로 재지정.
 # (rowcount 대신 RETURNING + fetchall — Result 타입 폭 회피, 코드베이스 컨벤션.)
+#
+# **MCST 테마 목록의 primary는 master에 이미 primary가 있으면 enrichment로 강등한다**(ADR-121
+# 결정 4). 그대로 옮기면 master에 MCST primary가 하나 더 생겨 표시 원천이 흔들리고, 그 목록의
+# 부재가 master를 내릴 수 있다. **다른 provider의 primary는 그대로 옮긴다** — MOIS 승자 판정
+# (``_ACTIVE_PRIMARY_ENTITIES_SQL``)·폐업 퇴역(``_INACTIVATE_BY_ENTITY_IDS_SQL``)이 primary link로
+# "지도에 있는 원천"을 세므로 강등하면 병합된 MOIS 원천이 지도에서 사라진 것으로 보인다(2026-11-10
+# 적대 리뷰). 하위 질의는 UPDATE 이전 snapshot을 보므로 "master가 원래 가진 primary"만 센다.
 _MOVE_LINKS_SQL: Final[str] = """
-UPDATE provider_sync.source_links
-SET feature_id = CAST(CAST(:master AS text) AS uuid)
+UPDATE provider_sync.source_links AS moving
+SET feature_id = CAST(CAST(:master AS text) AS uuid),
+    source_role = CASE
+        WHEN moving.source_role = 'primary'
+         AND EXISTS (
+            SELECT 1
+            FROM provider_sync.source_entities AS se
+            JOIN provider_sync.provider_datasets AS pd
+              ON pd.provider_dataset_id = se.provider_dataset_id
+            WHERE se.source_entity_key = moving.source_entity_key
+              AND pd.provider = 'python-mcst-api'
+         )
+         AND EXISTS (
+            SELECT 1
+            FROM provider_sync.source_links AS master_link
+            WHERE master_link.feature_id = CAST(CAST(:master AS text) AS uuid)
+              AND master_link.source_role = 'primary'
+         ) THEN 'enrichment'
+        ELSE moving.source_role
+    END
 WHERE feature_id = CAST(CAST(:loser AS text) AS uuid)
   AND source_entity_key NOT IN (
       SELECT source_entity_key

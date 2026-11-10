@@ -175,6 +175,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/redoc": RoutePolicy.DEBUG,
     # -- public-keyed — 공개 REST read (VWorld 호환 public API key).
     "/v1/categories": RoutePolicy.PUBLIC_KEYED,
+    "/v1/place-attributes": RoutePolicy.PUBLIC_KEYED,
     "/v1/curations": RoutePolicy.PUBLIC_KEYED,
     "/v1/curations/collections": RoutePolicy.PUBLIC_KEYED,
     "/v1/curations/collections/{collection_id}": RoutePolicy.PUBLIC_KEYED,
@@ -276,6 +277,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/admin/curations/{collection_id}/items": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items/manual-feature": RoutePolicy.OPERATOR,
     "/v1/admin/curations/{collection_id}/items/{curation_item_id}": (RoutePolicy.OPERATOR),
+    "/v1/admin/theme-attach-decisions": RoutePolicy.OPERATOR,
     "/v1/admin/theme-feature-candidates": RoutePolicy.OPERATOR,
     "/v1/admin/theme-feature-candidates/{candidate_id}": RoutePolicy.OPERATOR,
     "/v1/admin/theme-feature-candidates/{candidate_id}/transitions": (RoutePolicy.OPERATOR),
