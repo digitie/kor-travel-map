@@ -1955,3 +1955,31 @@ def test_search_region_tokens_drop_one_char_words_and_pick_an_alnum_anchor() -> 
         feature_repo._SearchRegionArms(name_mode="strpos", categories=False),
     )
     assert params["rem_token_likes"] is None
+
+
+def test_search_rank_digits_end_with_specificity_then_prominence() -> None:
+    """검색 인지도(P6)는 순위의 마지막 자리 — 각 자리는 다음 자리의 10배다."""
+    from kortravelmap.infra.search_prominence_repo import (
+        SEARCH_PROMINENCE_DEFAULT,
+        SEARCH_PROMINENCE_MAX,
+    )
+
+    weights = [
+        feature_repo._SEARCH_RANK_MATCH_WEIGHT,
+        feature_repo._SEARCH_RANK_BBOX_WEIGHT,
+        feature_repo._SEARCH_RANK_DESTINATION_EXACT_WEIGHT,
+        feature_repo._SEARCH_RANK_GROUP_WEIGHT,
+        feature_repo._SEARCH_RANK_EXACT_WEIGHT,
+        feature_repo._SEARCH_RANK_SPECIFICITY_WEIGHT,
+        feature_repo._SEARCH_RANK_PROMINENCE_WEIGHT,
+    ]
+    assert weights[-1] == 1
+    assert all(high == 10 * low for high, low in zip(weights, weights[1:], strict=False))
+    assert 0 <= SEARCH_PROMINENCE_DEFAULT <= SEARCH_PROMINENCE_MAX <= 9
+    assert feature_repo._SEARCH_RANK_MAX < 2**31 - 1
+    for statement in (
+        feature_repo._FEATURE_SEARCH_BY_SCORE_SQL,
+        *(pair[0] for pair in feature_repo._FEATURE_SEARCH_REGION_SQL.values()),
+    ):
+        assert "feature.feature_search_prominence" in statement
+        assert "compact_paren_base_name" in statement

@@ -282,3 +282,29 @@ async def test_rows_without_prominence_use_the_default(
     assert yeoju_rank is not None
     digit = (yeoju_rank // feature_repo._SEARCH_RANK_PROMINENCE_WEIGHT) % 10
     assert digit == feature_repo.SEARCH_PROMINENCE_MAX - SEARCH_PROMINENCE_DEFAULT, yeoju_rank
+
+
+@pytest.mark.parametrize(
+    ("name", "expected"),
+    [
+        ("신륵사(여주)", "신륵사"),
+        ("신륵사（여주）", "신륵사"),
+        ("설해원 (양양국제공항)", "설해원"),
+        ("JW 메리어트 호텔 서울 (JW Marriott Hotel Seoul)", "jw메리어트호텔서울"),
+        ("호미곶 해안단구 (경북 동해안 국가지질공원)", "호미곶해안단구"),
+        ("경복궁", None),
+        ("(주)", None),
+        ("회현(남대문시장)역", None),
+    ],
+)
+async def test_paren_base_name_strips_one_trailing_bracket(
+    migrated_session: AsyncSession, name: str, expected: str | None
+) -> None:
+    sql = feature_repo._search_paren_base_sql("v.name")
+    got = (
+        await migrated_session.execute(
+            text(f"SELECT {sql} FROM (SELECT CAST(:name AS text) AS name) AS v"),
+            {"name": name},
+        )
+    ).scalar_one()
+    assert got == expected
