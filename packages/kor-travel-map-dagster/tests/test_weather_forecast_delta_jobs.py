@@ -753,8 +753,8 @@ async def test_forecast_pages_use_the_forecast_page_size(monkeypatch: pytest.Mon
 
 
 def test_ultra_short_ceiling_fits_a_contended_delta() -> None:
-    # 2026-11-11 운영: 초단기 증분이 weather 경합(artifact turnstile) 아래 580초, 한 번은 600초 상한에서
-    # 잘렸다(506901ae). 매시 발화 간격 안에서 lock TTL이 풀리는 한 늘린다.
+    # 2026-11-11 운영: 초단기 증분이 weather 경합(artifact turnstile) 아래 580초,
+    # 한 번은 600초 상한에서 잘렸다(506901ae). 매시 발화 간격 안에서 lock TTL이 풀리는 한 늘린다.
     spec = _spec(DATASET_FORECAST_ULTRA_SHORT)
     assert spec.max_runtime_seconds >= 1_800
     assert weather_lock_ttl_seconds(spec) < 3_600

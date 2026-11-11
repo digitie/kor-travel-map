@@ -662,7 +662,11 @@ async def fetch_weather_forecasts(
 ) -> WeatherFetch:
     """W3 한 style의 예보 묶음. ``since``가 없으면 전량, 있으면 그 watermark 뒤에 공개된 승인
     scope의 묶음만이다(ADR-122). 페이지마다 같은 ``since``를 보낸다(cursor가 그 질의에 묶인다)."""
-    params: dict[str, Any] = {"style": style, "limit": settings.kor_travel_weather_page_size}
+    # 예보는 페이지마다 그 위치들의 artifact를 읽는다 — 작은 페이지로 요청마다 timeout 안에 든다.
+    params: dict[str, Any] = {
+        "style": style,
+        "limit": settings.kor_travel_weather_forecast_page_size,
+    }
     if since is not None:
         params["since"] = since.isoformat()
     return await _read_all_pages(
@@ -822,7 +826,7 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
         "weather 최신 관측·실황(W2) → Valkey 세대 교체(매시 :25·:40 — weather 공개 :20·:35 뒤).",
     ),
     _spec(
-        DATASET_FORECAST_ULTRA_SHORT, "forecast_ultra_short", "48 * * * *", 600,
+        DATASET_FORECAST_ULTRA_SHORT, "forecast_ultra_short", "48 * * * *", 1_800,
         _forecast_collector(DATASET_FORECAST_ULTRA_SHORT),
         "weather 초단기예보(W3 ultra_short) → Valkey 세대 교체(매시 :48).",
     ),

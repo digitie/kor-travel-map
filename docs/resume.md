@@ -1,3 +1,7 @@
+## 2026-11-11 — 예보 page size(#1493)
+
+- 회전 뒤 단기 첫 전량이 끝까지 가는지(pages ≈ 8, run 시간) 본다. 410(snapshot 15분 만료) 뒤 한 번 재시작이 나면 weather에 cursor 페이지 sliding TTL을 요청. 초단기 run 시간이 1,800초에 가까워지면 weather 경합 조사.
+
 ## 2026-11-12 — 검색 3단계 main 병합과 C11 검증 보존
 
 - 검토된720과 upstream5742b45의 이력을 merge로 보존했다. incoming 코드·검사16개는 main 원문 그대로다.
