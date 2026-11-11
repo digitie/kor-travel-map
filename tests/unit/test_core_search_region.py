@@ -182,7 +182,8 @@ def test_region_search_carries_category_codes(index: dict[str, frozenset[str]]) 
     assert region.category_codes == ()
 
 
-#: prod 2026-11-11 공개 Feature의 시군구 표본 — ``[코드, 시도 이름, 시군구 이름(최빈), 공개 행 수]``.
+#: prod 2026-11-11 공개 Feature의 시군구 표본 —
+#: ``[코드, 시도 이름, 시군구 이름(최빈), 공개 행 수]``.
 #: ``feature_repo._SEARCH_REGION_ENTRIES_SQL``과 같은 표본을 코드마다 한 줄로 줄였다.
 _PROD_ENTRIES_PATH = Path(__file__).parent / "fixtures" / "search_region_entries_prod_20261111.json"
 
