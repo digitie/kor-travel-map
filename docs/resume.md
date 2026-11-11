@@ -1,3 +1,7 @@
+## 2026-11-12 — 검색 순위 1단계(alembic 450)
+
+- 회전에 묶는다(직접 회전 금지). 450은 별칭 한 행 INSERT와 receipt CHECK 교체뿐(lock_timeout 1 s). OpenAPI 변경 없음, PinVi 재vendor 불필요. 2·3단계(실효 그룹·중복 접기, 검색 인지도 451)가 뒤따른다.
+
 ## 2026-11-11 — ADR-122 개정(멤버십 digest·clock epoch)
 
 - weather #907b7c26 배포 다음 회전에 묶는다. 배포 뒤 첫 예보 run은 meta에 member_count가 없어 전량(no_cursor). 이후 op metadata `membership_verified`(1/0/빈값)·`resync_reason`(membership_mismatch·clock_epoch_changed 빈도)를 본다. 0이 오래 이어지면 weather에 시간 필터로 뺀 행 노출을 다시 요청.
