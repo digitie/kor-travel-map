@@ -1,3 +1,21 @@
+## 2026-11-12 — A 검토의 공통 Button variant/size 전달 수정
+
+- 원A의 A-CONS-P2-02를 같은 SSR 대조로 재현했다. ghost/link/outline·icon-xs metadata가
+  default로 남고 ghost/link에 primary 채움이 남았다. Common 직접 호출은 정상이다.
+- variant/size를 공통 primitive로 전달하고 로컬 전체 CVA 색상/크기 recipe는 공통 정본에 위임했다.
+  Map에는 focus outline·disabled 설명 도달성 정책만 남겼다. loading root/라벨/포커스·접근성 이름과
+  활성화 차단은 유지한다. Link용 buttonVariants도 같은 공통 크기를 사용한다.
+- 새 회귀8개는 수정 전6FAIL/2PASS, 수정 후8PASS. 기존adapter21개를 포함해29PASS,
+  세 파일 타입·scoped lint PASS, 실제 Map source 전체 Doctor325files 진단0이다.
+  기존 Geo 도구/동일 c9 Common Button 원문을 읽기 재사용한 경량 fixture임을 구분한다.
+- b102의 GitHub Python3.11/3.12/3.13 unit+lint 단계는 모두 PASS를 확인했다.
+  전체 API/Dagster job 완료 및 중앙 정책 PASS와 혼동하지 않는다.
+- C10은 metadata/hash checkpoint만 유지한다. disabled fieldset Scope fix2의 C11과 부모 n150 슬롯 전까지
+  Map/Weather heavy 설치/build/browser는 보류한다. C11에서 실제 Map 기존432+새8 전체·Doctor/build/
+  D286 strict+cleanup을 확인하며, 현재29개를 전체440개 성공으로 집계하지 않는다.
+- taskroot validation/map-A-button-closure-20261112/에 before/after SSR·8개·21개·type/lint/Doctor를 보존한다.
+  원A/B raw와925/e4/b102 이력은 그대로 두고 원 reviewer closure용 별도 delta를 제공한다.
+
 ## 2026-11-12 — B 검토의 CI 계약·문서 크기 실패 수정
 
 - e4 CI와 같은7개 실패를 원 단언 그대로 재현했다. 원시 job 로그와 before7FAIL을

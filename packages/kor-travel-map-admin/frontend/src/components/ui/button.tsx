@@ -1,10 +1,9 @@
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import { Button as ButtonPrimitive } from "@kor-travel/ui/button";
 import type { ComponentProps } from "react";
-import type { VariantProps } from "class-variance-authority";
 import { Loader2Icon } from "lucide-react";
 
-import { buttonVariants } from "@/components/ui/button-variants";
+import { buttonInteractionClasses } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
 
 /**
@@ -34,7 +33,7 @@ const blockBusyActivation: ButtonClickHandler = (event) => {
 };
 
 type ButtonProps = ComponentProps<typeof ButtonPrimitive> &
-  VariantProps<typeof buttonVariants> & {
+  {
     /**
      * 비동기 진행 중(design.md §Microinteractions — row action은 page spinner 대신 trigger의
      * loading). `aria-disabled` + `aria-busy` + inline spinner이며 native `disabled`는 걸지
@@ -71,6 +70,8 @@ function Button({
   const reason = disabled && !loading ? disabledReason : undefined;
   return (
     <ButtonPrimitive
+      variant={variant}
+      size={size}
       data-slot="button"
       data-loading={loading ? "true" : undefined}
       aria-busy={loading || undefined}
@@ -79,8 +80,7 @@ function Button({
       disabled={nativeDisabled}
       onClick={loading ? blockBusyActivation : onClick}
       className={cn(
-        buttonVariants({ variant, size }),
-        "outline-solid focus-visible:ring-0 disabled:opacity-100 disabled:pointer-events-auto",
+        buttonInteractionClasses,
         loading && "relative",
         className,
       )}
