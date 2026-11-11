@@ -29,6 +29,7 @@ export function Alert({
   const resolvedRole = role ?? (variant === "destructive" ? "alert" : "status");
   return (
     <CommonAlert
+      data-variant={variant ?? "default"}
       variant={variant}
       role={resolvedRole}
       aria-live={live ?? (resolvedRole === "alert" ? "assertive" : "polite")}

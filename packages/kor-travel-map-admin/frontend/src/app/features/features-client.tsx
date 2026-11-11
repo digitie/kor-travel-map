@@ -843,7 +843,9 @@ function FeatureMapWorkspace({
 >) {
   return (
     <div className="flex flex-col gap-4">
+      {/* 지도 탭은 Enter/Space로 확정한다. 포커스 이동만으로 지도를 열어 상세 포커스를 빼앗지 않는다. */}
       <Tabs
+        activationMode="manual"
         className="min-h-0"
         value={featureViewMode}
         onValueChange={(value) => setFeatureViewMode(value as FeatureViewMode)}

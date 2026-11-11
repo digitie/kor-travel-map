@@ -2031,6 +2031,7 @@ function DatasetDrawer({
   function renderDatasetDrawerState() {
     return canRenderPanels ? (
       <Tabs
+        activationMode="manual"
         value={activePanel}
         onValueChange={(value) => onPanelChange(panelValue(String(value)))}
       >
@@ -2389,6 +2390,8 @@ function useDatasetsClientController({
       // 전환에도 RSC가 다시 내려와 focused grid DOM이 뒤늦게 교체된다.
       // Next가 useSearchParams와 연동하는 native History API로 history만 쌓아
       // 뒤로/앞으로 복원과 DOM identity를 함께 보존한다.
+      // Radix pointer/focus 이벤트가 같은 목적지를 다시 알리더라도 history는 한 번만 쌓는다.
+      if (window.location.pathname + window.location.search === target) return;
       window.history.pushState(null, "", target);
     },
     [pathname, searchParams],

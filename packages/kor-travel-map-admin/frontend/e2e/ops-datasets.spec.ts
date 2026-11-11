@@ -1213,7 +1213,8 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
     // 우연히 같은 문자열은 이 계약을 만족할 수 없다.
     const summary = page.getByRole("region", { name: "데이터셋 상태 요약" });
     for (const text of [
-      "제공자 3",
+      // 유가·휴게소는 같은 kor-travel-transport 제공자다.
+      "제공자 2",
       "행 3",
       "실패 1",
       "오래됨(SLA 초과) 1",
@@ -1302,7 +1303,7 @@ test.describe("/ops/datasets 페이지 ② (T-ADM-C4)", () => {
       grid.getByRole("row", { name: /transport_fuel_prices/ }),
     ).toBeVisible();
 
-    await page.getByLabel("검색").fill("krex");
+    await page.getByLabel("검색").fill(KREX_DATASET);
     await expect(
       grid.getByRole("row", { name: /transport_rest_areas/ }),
     ).toBeVisible();

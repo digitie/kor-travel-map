@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-11-11 — 후보6 브라우저 회귀와 fixture 보완
+
+- 첫 checkpoint230통과/56실패를 보존했다. 지도 public mapStyle 복구는 브라우저에서 확인됐다.
+- 지도/URL 탭을 Enter·Space 확정으로 지정하고 중복 History 기록을 막았다.
+  Alert data-variant와 Radix data-state 검사, canonical transport/Dagster 조회 fixture를 보완했다.
+- unit427/427·lint/type/Doctor0/guard 재통과. exact 후속 checkpoint 결과를 별도로 기록한다.
+
+
 ## 2026-11-11 — common 후보6와 키 없는 지도 public mapStyle 복구
 
 - common `a14301c` / upstream `9a7a348`의 동일 tgz·원장을 설치했다. core는 1.0.1로

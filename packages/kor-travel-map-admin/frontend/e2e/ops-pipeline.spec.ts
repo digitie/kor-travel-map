@@ -992,6 +992,31 @@ async function installPipelineMocks(
       await fulfillJson(route, makeMoisPrecheckResponse());
       return;
     }
+    if (pathname.endsWith("/v1/ops/pipeline/dagster-summary")) {
+      // 공통 DagsterPanel의 독립 조회다. 큐 실행 허용 여부는 overview 센서 fixture가 소유한다.
+      const overview = options.overview ?? makeOverview({});
+      const dagster = overview.data.dagster;
+      await fulfillJson(route, {
+        data: {
+          status: dagster.status,
+          checked_at: overview.data.checked_at,
+          dagster_url: dagster.dagster_url,
+          graphql_url: dagster.graphql_url,
+          version: dagster.version,
+          errors: dagster.errors,
+          repository_count: 0,
+          job_count: 0,
+          asset_count: 0,
+          schedule_count: 0,
+          sensor_count: 0,
+          repositories: [],
+          recent_runs: [],
+          run_counts: {},
+        },
+        meta: META,
+      } satisfies Schemas["DagsterSummaryResponse"]);
+      return;
+    }
     if (pathname.endsWith("/v1/ops/pipeline/overview")) {
       await fulfillJson(route, options.overview ?? makeOverview({}));
       return;

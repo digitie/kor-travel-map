@@ -33,5 +33,8 @@ it("일반 작업 결과는 status, 오류는 alert이며 호출부 역할을 �
     "backup command planned",
   );
   expect(screen.getByRole("alert").getAttribute("aria-live")).toBe("assertive");
+  expect(screen.getByRole("alert").getAttribute("data-variant")).toBe(
+    "destructive",
+  );
   expect(screen.getByText("직접 제어").getAttribute("aria-live")).toBe("off");
 });

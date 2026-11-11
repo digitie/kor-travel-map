@@ -142,3 +142,27 @@ n150 exact bcf2a3745 checkpoint A(286 mock tests)는 첫 Chromium revision1254 �
 구후보 n150 checkpoint는 81개 통과 관측 후 실제 회귀(재시도 포함29실패 항목)를 수집하고
 freshpack 재검증을 위해 본인 runner만 SIGTERM 종료했다. 완료 통과 합계가 아니다.
 own container/network/image 잔존0 확인. 원시 회귀 요약은 작업 루트 map-c5-e2e-failures.json에 보존.
+
+
+## 후보6 첫 checkpoint와 후속 수정
+
+exact517071481의 286개 checkpoint는230통과/56실패/flake0으로 완료했다.
+로그와 실패 trace/screenshot은 n150 taskroot validation/map의 commit별 경로에 보존했으며
+전체 실행 로그도 WSL validation/map/c6-first-n150-checkpoint.log로 복사했다.
+
+- 지도 초기화·geometry·bbox와 기존 Dialog/heading/status 회귀는 실제 브라우저에서 통과했다.
+- 도움말의 옛 Base UI data-open 검사를 Radix 공개 data-state=open 검사로 갱신했다.
+- 지도와 URL 기반 데이터셋 탭은 수동 활성화를 명시했다. Radix 포커스 자동 활성화가
+  지도 탭의 상세 진입 포커스를 다시 가져가거나, 같은 URL history를 두 번 쌓는 것을 막는다.
+  데이터셋 선택은 동일 목적지에 History push를 반복하지 않는다.
+- Map Alert wrapper의 기존 data-variant 계약을 복구했다.
+- 기존 e2e fixture의 transport 제공자 수를 현재 canonical provider2개에 맞추고
+  검색은 퇴역한 krex 이름 대신 실제 dataset key를 쓴다. 두 transport dataset의 데이터와 행 수3은 유지한다.
+- pipeline fixture에서 누락됐던 기존 공개 GET /v1/ops/pipeline/dagster-summary를
+  OpenAPI 타입에 맞게 명시 mock했다. 큐 센서 fail-closed 판정은 기존 overview fixture를 유지한다.
+  임의 route fallback이나 실패 예외 허용을 추가하지 않았다.
+- 수정 후 unit427/427, lint/type/Doctor0/guard 재통과. exact 후속 commit checkpoint 재검증이 필요하다.
+
+공유 WSL ENOSPC 때문에 일부 검사가 실행되지 못했다. 삭제한 것은 Map 소유 .next와
+본인이 만든 validation/map/c6-source-517071481d9d.pack 전송 파일뿐이다.
+다른 agent 파일이나 공유 /tmp 경로는 삭제하지 않았다. 공간 확보 뒤 검사 재실행은 통과했다.
