@@ -47,6 +47,9 @@ exact policy 및 vendor/원장/lock integrity를 확인한다. Doctor는 full/wa
 - production audit 취약점 0, dev high gate 통과(최신 lint 체인의 moderate 10건은 강제 하향하지 않음).
 - 변경된 frontend 의존성/Playwright 이미지 Python 계약 검사 7개 통과.
 - 공통 VirtualTable 전용 테스트 12개 통과(가상 스크롤·정렬·선택·Geo SSE 셀 수명·접근성 포함).
+- 공통 font.css 경유 후 production build도 통과. 첫 재빌드는 standalone 복사에서 ENOSPC였으나
+  Map 소유 .next/전송 pack만 정리한 뒤 재검증 통과했다. WSL 여유 약 11MB로 추가 대형 작업 제약이 있다.
+- OpenAPI 생성 타입 검사와 Playwright 로딩 검사(격리 mock 286개 / live 1143개 / stream live 1개) 통과.
 - 격리 n150 mocked e2e와 독립 리뷰 2개는 후속 gate다. 운영 live 쓰기 검증은 실행하지 않았다.
 
 ## 추가 공통화 후보
@@ -64,7 +67,8 @@ Map 도메인 API와 상태는 common으로 이동하지 않는다. 공통 소�
 실제 container의 compose working_dir는 `/opt/kor-travel-docker-manager`, config_files label은
 `-`(stdin으로 전달된 frozen render)다. 일반 checkout compose를 정본으로 간주할 수 없다.
 Manager의 pin/revision 계약과 실제 frozen render에서 UI 단독 교체 경로를 부모가 확정해야 한다.
-현재 UI image revision은 `fd1d770162e8253020a936ec552a4395500f444e`로 확인했다.
+현재 UI image ID는 `sha256:0ec4e9bf0ec31ecf43926ba00680afa133e5ae2e5d15392b1a7a4741d40eb317`,
+revision은 `fd1d770162e8253020a936ec552a4395500f444e`로 확인했다.
 
 1. 부모 final freeze의 공통/upstream immutable SHA·tgz·원장을 동일하게 다시 설치하고 모든 gate를 통과한다.
 2. 독립 리뷰 2개·CI·PR merge 뒤 부모 go를 확인한다. merge exact SHA를 빌드 revision으로 기록한다.
