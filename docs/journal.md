@@ -1,3 +1,7 @@
+## 2026-11-11 — ADR-122 개정: weather 멤버십 digest·clock epoch
+
+- 세대마다 멤버십 장부(만료 묶음 유지)를 두고 증분 뒤 weather digest와 비교, 다르면 전량. 전량도 못 보는 미래 시각 없는 행이 있으면 검증 불가 사슬로 표시해 하루 주기에 맡긴다. epoch 바뀌면 전량.
+
 ## 2026-11-10 — ADR-122 weather 예보 증분 적재
 
 - 단기·외부 전량이 odroid eMMC cold 1,174·674초라 run이 ReadTimeout. since 증분을 지금 Valkey 세대에 병합(기준 세대 CAS), cursor는 세대 meta. since엔 tombstone이 없어 24시간마다 전량. migration 없음.

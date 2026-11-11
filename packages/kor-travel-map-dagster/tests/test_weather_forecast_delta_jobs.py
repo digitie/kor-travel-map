@@ -26,6 +26,7 @@ from kortravelmap.providers.kor_travel_weather_state import (
     DATASET_FORECAST_EXTERNAL,
     DATASET_FORECAST_SHORT,
     DATASET_FORECAST_ULTRA_SHORT,
+    forecast_membership_digest,
     weather_location_feature_id,
 )
 from kortravelmap.settings import KorTravelMapSettings
@@ -150,15 +151,33 @@ def _current(**overrides: Any) -> GenerationMeta:
         "sync_cursor": W0,
         "full_synced_at": NOW - timedelta(hours=2),
         "row_duplicates": 0,
+        "member_count": 1,
+        "membership_verified": None,
+        "clock_epoch": None,
     }
     values.update(overrides)
     return GenerationMeta(**values)
 
 
 class _Store:
-    def __init__(self, current: GenerationMeta | None, items: list[StateItem]) -> None:
+    def __init__(
+        self,
+        current: GenerationMeta | None,
+        items: list[StateItem],
+        members: dict[tuple[str, str], datetime] | None = None,
+    ) -> None:
         self.current = current
         self.items = {item.id: item.value.encode() for item in items}
+        if members is None:
+            members = {}
+            for item in items:
+                try:
+                    state = WeatherForecastState.model_validate_json(item.value)
+                except ValueError:
+                    continue
+                for group in state.groups:
+                    members[(state.location_id, group.provider)] = group.published_at
+        self.members = members
         self.swapped: list[dict[str, Any]] = []
         self.read_generations: list[str] = []
 
@@ -168,6 +187,11 @@ class _Store:
         if self.current is None:
             raise StateNotLoaded(dataset)
         return self.current
+
+    async def generation_members(
+        self, _dataset: str, _generation: str
+    ) -> dict[tuple[str, str], datetime]:
+        return dict(self.members)
 
     async def generation_items(self, _dataset: str, generation: str) -> dict[str, bytes]:
         self.read_generations.append(generation)
@@ -485,3 +509,230 @@ async def test_full_after_a_refused_delta_sends_no_etag(monkeypatch: pytest.Monk
     await _run(store)
     assert "if-none-match" not in seen[1].headers
     assert store.swapped[0]["sync_mode"] == "full"
+
+# -- ADR-122 개정: weather membership digest·clock epoch ---------------------------------
+
+EPOCH = "pg:" + "a" * 32
+OTHER_EPOCH = "pg:" + "b" * 32
+
+
+def _digest_of(*rows: tuple[str, str, datetime]) -> str:
+    return forecast_membership_digest({(loc, prov): at for loc, prov, at in rows})
+
+
+async def test_full_records_membership_verification_and_epoch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = _digest_of(("a", "p", W0))
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [_group("a", "p", W0)], membership_digest=digest, clock_epoch=EPOCH,
+    )))
+    store = _Store(None, [])
+    metadata = await _run(store)
+    (swap,) = store.swapped
+    assert swap["members"] == {("a", "p"): W0}
+    assert swap["membership_verified"] is True
+    assert swap["clock_epoch"] == EPOCH
+    assert metadata["membership_verified"] == "1"
+
+
+async def test_full_with_unseen_manifest_rows_is_unverifiable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # omitted_expired를 내지 않는 weather가 미래 시각이 없는 (b, p)를 뺐다(stale 페이지)
+    # — 재현할 수 없다.
+    digest = _digest_of(("a", "p", W0), ("b", "p", W0))
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [_group("a", "p", W0)], membership_digest=digest, source_status="stale",
+    )))
+    store = _Store(None, [])
+    await _run(store)
+    assert store.swapped[0]["membership_verified"] is False
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"source_status": "ok"},  # 뺀 행이 없는데 다르다
+        {"source_status": "stale", "omitted_expired": []},  # 뺀 행을 알렸는데도 다르다
+    ],
+)
+async def test_full_mismatch_that_cannot_be_omissions_stays_unknown(
+    monkeypatch: pytest.MonkeyPatch, meta: dict[str, Any]
+) -> None:
+    # 정의·계약 어긋남을 "검증 불가"로 두면 검사가 조용히 꺼진다 — 모름(None)으로 둔다(리뷰 M1).
+    digest = _digest_of(("a", "p", W0), ("b", "p", W0))
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [_group("a", "p", W0)], membership_digest=digest, **meta,
+    )))
+    store = _Store(None, [])
+    await _run(store)
+    assert store.swapped[0]["membership_verified"] is None
+
+
+async def test_unknown_digest_or_epoch_format_is_treated_as_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [_group("a", "p", W0)], membership_digest="blake3:zz", clock_epoch="mysql:1",
+    )))
+    store = _Store(None, [])
+    await _run(store)
+    (swap,) = store.swapped
+    assert swap["membership_verified"] is None
+    assert swap["clock_epoch"] is None
+
+
+async def test_delta_whose_membership_matches_is_verified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    later = W0 + timedelta(minutes=30)
+    old = W0 - timedelta(hours=1)
+    digest = _digest_of(("a", "p", old), ("b", "p", later))
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [_group("b", "p", later)], membership_digest=digest, clock_epoch=EPOCH,
+    )))
+    store = _Store(
+        _current(membership_verified=True, clock_epoch=EPOCH), [_stored("a", "p", old)]
+    )
+    metadata = await _run(store)
+    (swap,) = store.swapped
+    assert swap["sync_mode"] == "delta"
+    assert swap["membership_verified"] is True
+    assert swap["members"] == {("a", "p"): old, ("b", "p"): later}
+    assert metadata["membership_verified"] == "1"
+
+
+def _delta_then_full(
+    delta_meta: dict[str, Any],
+) -> Callable[[httpx.Request], httpx.Response]:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if "since" in request.url.params:
+            return httpx.Response(200, json=_page([], **delta_meta))
+        return httpx.Response(200, json=_page([_group("a", "p", W1)], **delta_meta))
+
+    return handler
+
+
+async def test_membership_mismatch_on_a_verified_chain_is_a_full_resync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # weather manifest에서 (a, p)가 빠졌다(만료·비활성화) — 증분에는 흔적이 없다.
+    gone = _digest_of(("z", "p", W1))
+    seen = _install(monkeypatch, _delta_then_full({"membership_digest": gone}))
+    store = _Store(_current(membership_verified=True), [_stored("a", "p", W0)])
+    metadata = await _run(store)
+    assert ["since" in r.url.params for r in seen] == [True, False]
+    assert metadata["resync_reason"] == "membership_mismatch"
+    assert store.swapped[0]["sync_mode"] == "full"
+
+
+async def test_membership_mismatch_on_an_unknown_chain_is_a_full_resync(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _install(monkeypatch, _delta_then_full({"membership_digest": _digest_of()}))
+    store = _Store(_current(membership_verified=None), [_stored("a", "p", W0)])
+    metadata = await _run(store)
+    assert len(seen) == 2
+    assert metadata["resync_reason"] == "membership_mismatch"
+
+
+async def test_unverifiable_chain_keeps_taking_deltas(monkeypatch: pytest.MonkeyPatch) -> None:
+    seen = _install(monkeypatch, _delta_then_full({"membership_digest": _digest_of()}))
+    store = _Store(_current(membership_verified=False), [_stored("a", "p", W0)])
+    metadata = await _run(store)
+    assert len(seen) == 1
+    assert metadata["sync_mode"] == "delta"
+    assert store.swapped[0]["membership_verified"] is False
+
+
+@pytest.mark.parametrize("stored", [OTHER_EPOCH, None])
+async def test_changed_or_unknown_clock_epoch_is_a_full_resync(
+    monkeypatch: pytest.MonkeyPatch, stored: str | None
+) -> None:
+    seen = _install(monkeypatch, _delta_then_full({"clock_epoch": EPOCH}))
+    store = _Store(_current(clock_epoch=stored), [_stored("a", "p", W0)])
+    metadata = await _run(store)
+    assert len(seen) == 2
+    assert metadata["resync_reason"] == "clock_epoch_changed"
+    assert store.swapped[0]["clock_epoch"] == EPOCH
+
+
+async def test_absent_membership_fields_keep_the_previous_behavior(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page([])))
+    store = _Store(_current(clock_epoch=EPOCH, membership_verified=True), [_stored("a", "p", W0)])
+    metadata = await _run(store)
+    (swap,) = store.swapped
+    assert swap["sync_mode"] == "delta"
+    assert swap["membership_verified"] is None
+    assert swap["clock_epoch"] == EPOCH  # 응답에 없으면 저장된 epoch를 잇는다
+    assert metadata["membership_verified"] == ""
+
+
+async def test_base_members_that_do_not_match_meta_force_a_full_pull(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, _delta_then_full({}))
+    store = _Store(_current(member_count=3), [_stored("a", "p", W0)])
+    metadata = await _run(store)
+    assert metadata["resync_reason"] == "base_count_mismatch"
+
+
+def test_plan_needs_a_membership_ledger() -> None:
+    plan = forecast_sync_plan(
+        _current(member_count=None), now=NOW, full_resync_hours=24.0,
+        allow_shrink=False, full_resync=False,
+    )
+    assert (plan.since, plan.reason) == (None, "no_cursor")
+
+
+def _member(location_id: str, provider: str, at: datetime) -> dict[str, Any]:
+    return {"location_id": location_id, "provider": provider, "published_at": at.isoformat()}
+
+
+async def test_full_counts_omitted_expired_as_value_less_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = _digest_of(("a", "p", W0), ("b", "p", W0))
+    pages = {
+        None: _page([_group("a", "p", W0)], has_more=True, next_cursor="c2",
+                    membership_digest=digest, omitted_expired=[]),
+        "c2": _page([], membership_digest=digest, omitted_expired=[_member("b", "p", W0)]),
+    }
+    _install(monkeypatch, lambda r: httpx.Response(200, json=pages[r.url.params.get("cursor")]))
+    store = _Store(None, [])
+    await _run(store)
+    (swap,) = store.swapped
+    assert swap["members"] == {("a", "p"): W0, ("b", "p"): W0}
+    assert swap["membership_verified"] is True
+    assert len(swap["items"]) == 1
+
+
+async def test_delta_omitted_expired_drops_the_stale_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    later = W0 + timedelta(minutes=30)
+    digest = _digest_of(("a", "p", later))
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [], membership_digest=digest, omitted_expired=[_member("a", "p", later)],
+    )))
+    store = _Store(_current(membership_verified=True), [_stored("a", "p", W0 - timedelta(hours=1))])
+    metadata = await _run(store)
+    (swap,) = store.swapped
+    assert swap["sync_mode"] == "delta"
+    assert swap["items"] == []
+    assert swap["members"] == {("a", "p"): later}
+    assert swap["membership_verified"] is True
+    assert metadata["expired_groups"] == 1
+
+
+async def test_pages_that_disagree_on_omitted_expired_presence_are_a_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = {
+        None: _page([_group("a", "p", W1)], has_more=True, next_cursor="c2", omitted_expired=[]),
+        "c2": _page([_group("b", "p", W1)]),
+    }
+    _install(monkeypatch, lambda r: httpx.Response(200, json=pages[r.url.params.get("cursor")]))
+    with pytest.raises(WeatherExportContractError, match="omitted_expired"):
+        await fetch_weather_forecasts(_settings(), "short", since=W0)

@@ -1,7 +1,7 @@
 # ADR-122 — weather 예보는 `since` 증분을 지금 Valkey 세대에 병합하고, 하루 한 번 전량으로 다시 맞춘다
 
 - 상태: proposed (2026-11-10, 구현 PR과 함께. 배포 뒤 단기·외부 증분 run 시간과 전량/증분 값 대조를 실측하면 accepted)
-- 날짜: 2026-11-10
+- 날짜: 2026-11-10 (2026-11-11 개정 — weather `membership_digest`·`clock_epoch`를 쓴다, 결정 8·9)
 - 결정자: Claude(설계·구현), 소유자 지시("Map 예보 적재를 증분으로, 정확성이 속도보다 먼저")
 - 관계: **ADR-114 W3의 "받을 때는 전량 — `since` 증분은 쓰지 않는다"를 대체**한다(나머지 W3 — ETag·410·422·503
   재시도·요청 계수 — 는 그대로). ADR-114 D3(세대 교체 CAS)·D4(거부 기준)를 그대로 쓰되 D4는 전량에만 건다.
@@ -73,12 +73,42 @@
    다시 잡지 못한다).
 5. **거부 기준(D4)은 전량에만.** 증분 교체는 거부 기준을 보지 않고 `recent_counts`에도 넣지 않는다 — 증분이 줄일 수 있는
    것은 시각 경과뿐이고, 기준 창은 원천 전량의 크기만 담아야 한다. 전량 재동기화는 지금처럼 80%(단기 65%) 기준을 받는다.
-6. **주기 전량.** `KOR_TRAVEL_MAP_WEATHER_FORECAST_FULL_RESYNC_HOURS`(기본 24, 0이면 증분 끔 — 되돌리기). 위 원천 계약 5·7의
-   차이는 이 주기 안에서만 남는다: **증분 사이에 생긴 제거·놓친 추가·DB 복원으로 잃은 공개는 최대 하루 동안 Map에 남거나
-   빠질 수 있다**(제거된 묶음은 시각이 지나면 더 일찍 사라진다). 이것이 받아들인 차이이고, weather가 아래 "weather에
-   요청"을 내면 없앤다. 주기 전량이 실패하는 동안은 증분도 멈춘다(전량이 성공할 때까지 매 run 전량) — run 실패가 경보다.
+6. **주기 전량.** `KOR_TRAVEL_MAP_WEATHER_FORECAST_FULL_RESYNC_HOURS`(기본 24, 0이면 증분 끔 — 되돌리기). 결정 8·9가
+   원천 계약 5·7의 차이를 run마다 잡으므로 주기 전량은 안전망이다. 남는 차이는 결정 8의 **검증할 수 없는 사슬**뿐이고(그
+   동안은 최대 하루) — `omitted_expired`를 내는 weather에서는 생기지 않는다. 주기 전량이 실패하는 동안은 증분도 멈춘다
+   (전량이 성공할 때까지 매 run 전량) — run 실패가 경보다.
 7. **run 상한.** 단기 3,600초·외부 2,400초로 올린다 — 증분 run은 짧지만 첫 적재·주기·증분 거절 뒤 전량이 같은 run에
    들어야 한다. lock TTL(상한 + 660초)은 3시간 발화 간격 안이다.
+8. **멤버십 장부와 weather `membership_digest`(2026-11-11).** weather W3 `meta.membership_digest`는 얼린 manifest 전체의
+   `(location_id, provider, published_at)` digest다(시간 필터 전·`since` 무관, 중기는 위치마다 육상·기온 중 늦은 시각 —
+   weather `export_forecasts.membership_digest`). Map은 세대마다 **멤버십 장부**(세대 키 `…:{gen}:members`, HASH
+   `["location_id","provider"]` → `published_at`)를 둔다. 전량은 받은 묶음으로 장부를 만들고, 증분은 기준 장부에 증분 묶음의
+   `published_at`을 덮어쓴다. **시각이 다 지나 값에서 빠진 묶음도 장부에는 남는다**(weather digest가 시간 필터 전이라서).
+   weather가 미래 시각이 없어 항목에서 뺀 멤버는 페이지마다 `meta.omitted_expired`(`{location_id, provider, published_at}`)로
+   온다 — 전량은 그 행을 **값 없는 멤버**로 장부에 더하고, 증분은 지금 세대의 같은 묶음을 값에서 빼고 장부에 새 시각을 남긴다
+   (원천 계약 5(e)가 이것으로 전량과 정확히 같아진다). 교체 CAS가 `HLEN members = meta.member_count`를 함께 본다.
+   - 증분 뒤 장부 digest가 weather digest와 같으면 `membership_verified=1`로 교체한다.
+   - 다르면 같은 run에서 전량(`resync_reason=membership_mismatch`) — 만료·비활성화·provider 퇴역·미래 시각 없는 재공개
+     (원천 계약 5 (a)~(e))와 놓친 추가(계약 7)가 여기서 잡힌다.
+   - **예외 — 검증할 수 없는 사슬**(`omitted_expired`를 내지 않는 weather에서만). 그 weather에서는 전량도 미래 시각이 없는
+     묶음을 받지 못하므로, manifest에 그런 행이 있으면 전량 장부의 digest부터 weather와 다르다. 그 전량은 `membership_verified=0`으로 둔다. 그 사슬의 증분은 digest가 달라도 전량으로
+     되돌리지 않는다(되돌리면 매 run 전량이 되어 증분의 목적이 사라지고, 다음 전량도 같은 이유로 검증할 수 없다). 그 동안은
+     결정 6의 하루 지연이 남는다. 증분 digest가 같아지면(그 행이 미래 시각과 함께 재공개되거나 manifest에서 빠지면) 다시
+     `1`이 된다. 검증해 본 적 없는 사슬(`membership_verified` 없음)에서 다르면 전량이다.
+   - weather가 digest를 주지 않으면(그 필드 전 weather) 이 검사 없이 결정 6만 쓴다(`membership_verified` 없음).
+9. **clock epoch(2026-11-11).** weather `meta.clock_epoch`(`pg:` + 32 hex — DB 복원·PITR·재설치·PG 재시작에 바뀐다)를 세대
+   meta에 둔다. 증분 응답의 epoch가 저장된 것과 다르거나 저장된 것이 없으면 같은 run에서 전량
+   (`resync_reason=clock_epoch_changed`) — 벽시계 clock이라 복원 뒤 cursor가 422로 드러나지 않는 원천 계약 7을 닫는다. PG
+   재시작에도 바뀌므로 그때 전량이 한 번 더 난다(보수적). 응답에 없으면 저장된 epoch를 잇는다. 운영자 수동 `full_resync`는
+   이제 provider 설정 변경 같은 예외에만 필요하다.
+   epoch는 그 snapshot을 **얼린 때**의 값이다 — 복원 직후 weather가 옛 snapshot으로 fallback하면 한동안 옛 epoch가 올 수
+   있고, 다음 새 freeze에서 바뀌어 전량이 난다.
+10. **리뷰 반영(2026-11-11).** (a) 전량 장부가 weather digest와 달라도 `omitted_expired`가 있거나 `stale` 페이지가 없으면
+   "검증 불가"(0)로 두지 않고 모름(빈값)으로 두고 오류 로그를 남긴다 — 정의 어긋남이 검사를 조용히 끄지 않게. (b) 두 필드는
+   형식을 모르면 없는 것으로 본다(적재를 막지 않는다). (c) 큰 제거는 이제 그 run의 전량에서 거부 기준(D4)에 걸릴 수 있다 —
+   전에는 하루 주기 전량에서 걸렸다. 진짜 축소면 운영자 `allow_shrink`. (d) 이 개정 이전 코드로 되돌리면 그 코드는
+   `members` 키를 모른다 — 물러난 세대의 `…:{gen}:members`가 데이터셋마다 하나씩 만료 없이 남으므로, meta 없는
+   `ktm:state:v1:weather.forecast_*:*:members` 키를 `UNLINK`한다.
 
 ## 정확성 검사(drift 방지)
 
@@ -87,32 +117,31 @@
   경과(`target == now` 경계, 모든 시각이 지난 묶음·위치)·증분 사슬 5단·무작위 40 seed. 같은 파일이 tombstone 없는 제거와
   계약 5(e)는 증분이 고치지 못함을 고정한다. `tests/integration/test_valkey_weather_state.py`가 실제 Valkey에서 증분 세대와 같은 시점
   전량 세대의 값이 같고, 기준 세대가 바뀌면 교체가 거절되고, 증분이 거부 기준 창을 건드리지 않음을 본다.
-- **run마다.** 기준 세대 값 수 = meta `count`, 값이 모델과 맞음, 증분 묶음 `published_at > since`, 지금 묶음보다 새롭거나
-  같음, (위치, provider) 중복 없음, 모든 페이지 `next_since` 같음, `next_since >= since` — 하나라도 어긋나면 전량.
-- **주기 전량**이 남은 차이(계약 5)를 하루 안에 지운다.
+- **run마다.** 기준 세대 값 수 = meta `count`, 장부 수 = meta `member_count`, 값이 모델과 맞음, 증분 묶음
+  `published_at > since`, 지금 묶음보다 새롭거나 같음, (위치, provider) 중복 없음, 모든 페이지 `next_since`·
+  `membership_digest`·`clock_epoch` 같음, `next_since >= since`, epoch 같음, 장부 digest = weather digest(결정 8 예외 제외) —
+  하나라도 어긋나면 전량.
+- **멤버십 등가 시험.** 같은 단위 시험이 무작위 사슬마다 병합 장부 digest = weather 모형의 manifest digest임을, 제거와
+  계약 5(e)는 digest가 드러냄을, 미래 시각 없는 행이 있는 전량은 검증할 수 없음을 고정한다.
+- **주기 전량**이 검증할 수 없는 사슬의 차이를 하루 안에 지운다.
 
 ## 결과
 
 - 정상 run은 바뀐 scope의 artifact만 weather가 읽는다(단기 3시간 주기면 대개 그 회차 격자). 하루 한 번은 지금처럼 전량이다.
 - Valkey 쓰기량은 같다(증분도 세대 전체를 새로 쓴다 — 단기 약 15 MB). 증분 run은 지금 세대를 한 번 더 읽는다.
-- 잃는 것: 위 결정 6의 최대 하루 지연. 증분 교체는 거부 기준이 없어, weather가 예보 지평선보다 오래 공개를 멈추면 시각
+- 잃는 것: 검증할 수 없는 사슬(결정 8 예외)에서만 결정 6의 최대 하루 지연. 증분 교체는 거부 기준이 없어, weather가 예보 지평선보다 오래 공개를 멈추면 시각
   경과로 세대가 비어 간다(전량이었어도 weather가 미래 시각 없는 위치를 빼거나 503을 낸다 — 같은 결과). 거부 기준 창
   (`recent_counts` 6개)은 이제 전량만 담아 약 6일 치 최대값이다. 세대 meta `source_status`는 증분 페이지의 값이라, 전량이었으면 "미래 시각 없는
   위치를 뺐다"로 `stale`이 됐을 run이 `ok`일 수 있다(값은 같다 — Map이 그 묶음을 스스로 뺀다).
 
-## weather에 요청(이 PR 밖)
+## weather와의 계약 진행
 
-1. **since 응답의 제거 신호.** 가장 단순한 형태: 모든 W3 응답 `meta`에 **전량 기준 멤버십 digest**(얼린 manifest의
-   `(location_id, provider, published_at)` 정렬 집합의 digest — 시간 필터 전, `since`와 무관). artifact를 읽지 않고 manifest만으로
-   계산된다. Map은 병합 결과의 같은 digest와 비교해 다르면 그 run에서 전량을 받는다 — 그러면 결정 6의 지연이 없어진다.
-   시간 필터 **전** 집합이어야 계약 5(e)(재공개됐지만 미래 시각이 없어 빠진 위치)도 잡힌다 — Map 쪽 값에는 그 위치의 새
-   `published_at`이 없어 digest가 달라진다. 대안은 명시 tombstone 목록(W-MAP-08)과, 시간 필터로 뺀 (위치, provider)를 meta에
-   싣는 것이다.
-2. **clock epoch.** `meta`에 publication clock의 출처 식별자(DB 복원·재설치마다 바뀌는 epoch)를 실어 주면 Map은 cursor 옆에
-   두고 바뀌면 전량을 받는다(원천 계약 7 — 지금은 운영자 수동 `full_resync`).
-3. **확인 질문.** (a) `value_number`·`value_text`가 둘 다 null인 point가 W3에 나올 수 있는가(나오면 결정 3의 "모두 null인
-   metric 빼기"가 그 metric을 잘못 뺀다). (b) 한 style에서 같은 (위치, provider)가 두 scope에 들 수 있는가(들면 전량의 첫 행
-   선택을 증분이 재현할 수 없다 — Map은 그 경우 전량만 쓴다).
+- 2026-11-11 weather 답(branch `claude/forecast-membership-digest-20261111` @`907b7c26`): `membership_digest`·`clock_epoch`
+  추가(선택·가산 필드). 확인 질문 답 — (a) `weather_values` CHECK(`value_number IS NOT NULL OR value_text IS NOT NULL`)라 metric
+  배열의 null은 언제나 "point 없음"이다(결정 3의 null metric 빼기가 안전, `value_text=""`는 null이 아니다). (b) 한 style에서
+  (위치, provider)는 많아야 하나다(inventory 키·중기 쌍 병합·외부 cohort 중복 거부).
+- 2026-11-11 weather head `e84485f0`: 페이지마다 `meta.omitted_expired` — 결정 8의 예외를 없앤다. 같은 (위치, provider)가 두
+  번이면 weather가 503을 낸다(Map은 그래도 증분 안 중복을 거절한다). 예보가 아닌 export는 세 필드가 null이다.
 
 ## 기각한 대안
 

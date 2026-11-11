@@ -18,9 +18,11 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+import hashlib
+import json
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
 from kortravelmap.core.ids import make_feature_id
@@ -43,6 +45,7 @@ from kortravelmap.providers.kor_travel_weather import (
     WeatherExportCurrentValue,
     WeatherExportDailySummary,
     WeatherExportForecastGroup,
+    WeatherExportForecastMember,
     WeatherExportLocation,
 )
 
@@ -66,6 +69,7 @@ __all__ = [
     "ForecastMerge",
     "WeatherStateDataset",
     "earliest_or_none",
+    "forecast_membership_digest",
     "location_state",
     "location_state_items",
     "merge_forecast_delta",
@@ -264,6 +268,34 @@ class ForecastGrouper:
             for location_id, groups in self._groups.items()
         ]
 
+    def members(self) -> dict[tuple[str, str], datetime]:
+        """받은 묶음의 멤버십 ``(location_id, provider) → published_at``(ADR-122)."""
+        return {
+            (location_id, provider): group.published_at
+            for location_id, groups in self._groups.items()
+            for provider, group in groups.items()
+        }
+
+
+ForecastMembers = dict[tuple[str, str], datetime]
+"""예보 멤버십 장부 ``(location_id, provider) → published_at``(ADR-122). 값에서 시각이 다 지나
+빠진 묶음도 남는다 — weather ``meta.membership_digest``가 시간 필터 전 manifest 전체라서다."""
+
+
+def forecast_membership_digest(members: Mapping[tuple[str, str], datetime]) -> str:
+    """weather W3 ``meta.membership_digest``와 같은 정의의 digest.
+
+    ``[[location_id, provider, "YYYY-MM-DDTHH:MM:SS.ffffffZ"], ...]``를 code point 순으로 정렬해
+    구분자 ``,``·``:``와 ``ensure_ascii=False``로 JSON 직렬화한 UTF-8 바이트의 SHA-256(``sha256:``
+    접두)이다(weather ``export_forecasts.membership_digest``).
+    """
+    rows = sorted(
+        [location_id, provider, at.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%fZ")]
+        for (location_id, provider), at in members.items()
+    )
+    body = json.dumps(rows, ensure_ascii=False, separators=(",", ":"))
+    return "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+
 
 def _group_state(group: WeatherExportForecastGroup) -> WeatherForecastGroupState:
     return WeatherForecastGroupState(
@@ -321,6 +353,9 @@ class ForecastMerge:
     """이어 온 묶음 중 지난 ``target_at``을 뗀 수."""
     expired: int
     """이어 온 묶음 중 남는 시각이 없어 뺀 수(weather 전량도 그 묶음을 내지 않는다)."""
+    members: ForecastMembers = field(default_factory=dict)
+    """병합 뒤 멤버십 장부 — 기준 장부에 증분 묶음의 ``published_at``을 덮어쓴 것.
+    시각 경과로 값에서 빠진 묶음도 남는다(weather digest가 시간 필터 전이다)."""
 
 
 def trim_forecast_group(
@@ -355,6 +390,8 @@ def merge_forecast_delta(
     style: WeatherForecastStyle,
     since: datetime,
     now: datetime,
+    base_members: Mapping[tuple[str, str], datetime] | None = None,
+    omitted: Iterable[WeatherExportForecastMember] = (),
 ) -> ForecastMerge:
     """지금 세대(``base``) + weather ``since`` 증분 → 새 세대 값(ADR-122).
 
@@ -370,7 +407,13 @@ def merge_forecast_delta(
     - 지금 세대 값이 다른 style이거나 ``feature_id``가 위치 id와 맞지 않는다.
 
     weather가 since 응답에 싣지 않는 제거(위치가 scope에서 빠짐·승인 만료·provider 퇴역)는 여기서
-    볼 수 없다 — 주기 전량 재동기화가 고친다.
+    볼 수 없다 — weather ``meta.membership_digest``와 병합 장부(``ForecastMerge.members``)를 견주는
+    호출자나 주기 전량 재동기화가 고친다. ``base_members``(기준 세대 장부)가 없으면 기준 값의
+    묶음으로 만든다(시각이 다 지난 묶음은 그때 이미 없다).
+
+    ``omitted``는 weather ``meta.omitted_expired``다 — 재공개됐지만 미래 시각이 없어 항목에서 뺀
+    (위치, provider)다. 전량도 그 묶음을 내지 않으므로 지금 세대의 같은 묶음을 값에서 빼고 장부에는
+    새 ``published_at``으로 남긴다.
     """
     incoming: dict[str, dict[str, WeatherExportForecastGroup]] = {}
     rows = 0
@@ -394,6 +437,20 @@ def merge_forecast_delta(
             )
         bucket[group.provider] = group
 
+    dropped: dict[tuple[str, str], datetime] = {}
+    for member in omitted:
+        key = (member.location_id, member.provider)
+        if member.published_at <= since:
+            raise ForecastDeltaRefused(
+                "delta_not_after_since",
+                f"omitted_expired {key}의 published_at이 since 이하다.",
+            )
+        if key in dropped or member.provider in incoming.get(member.location_id, {}):
+            raise ForecastDeltaRefused(
+                "delta_duplicates", f"증분에 {key}가 항목과 omitted_expired에 겹쳐 왔다."
+            )
+        dropped[key] = member.published_at
+
     merged: dict[str, dict[str, WeatherForecastGroupState]] = {}
     replaced = carried = trimmed = expired = 0
     for state in base:
@@ -416,6 +473,16 @@ def merge_forecast_delta(
                     "base_mismatch",
                     f"지금 세대 위치 {state.location_id}에 {stored.provider} 묶음이 두 번 있다.",
                 )
+            gone_at = dropped.get((state.location_id, stored.provider))
+            if gone_at is not None:
+                if gone_at < stored.published_at:
+                    raise ForecastDeltaRefused(
+                        "published_at_regressed",
+                        f"omitted_expired {state.location_id}/{stored.provider}이 지금 세대보다 "
+                        "오래됐다.",
+                    )
+                expired += 1
+                continue
             update = fresh.get(stored.provider)
             if update is not None:
                 if update.published_at < stored.published_at:
@@ -436,10 +503,21 @@ def merge_forecast_delta(
                 trimmed += 1
             kept_groups[stored.provider] = kept
 
+    members: ForecastMembers = (
+        dict(base_members)
+        if base_members is not None
+        else {
+            (location_id, provider): group.published_at
+            for location_id, groups in merged.items()
+            for provider, group in groups.items()
+        }
+    )
     for location_id, rows_by_provider in incoming.items():
         target = merged.setdefault(location_id, {})
         for provider, row in rows_by_provider.items():
             target[provider] = _group_state(row)
+            members[(location_id, provider)] = row.published_at
+    members.update(dropped)
     added = sum(len(groups) for groups in incoming.values()) - replaced
 
     return ForecastMerge(
@@ -454,6 +532,7 @@ def merge_forecast_delta(
         carried=carried,
         trimmed=trimmed,
         expired=expired,
+        members=members,
     )
 
 

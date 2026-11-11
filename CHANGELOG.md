@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-11 — weather 예보 증분의 제거·복원 감지(ADR-122 개정)
+
+- 예보 증분 적재가 weather의 멤버십 digest로 놓친 제거·추가를 감지하면 그 run에서 전량으로 다시 맞추고, weather DB 복원(clock epoch 변경)도 전량으로 처리한다. weather가 두 필드를 내지 않으면 지금 동작 그대로다. 스키마·API 변경 없음.
+
 ## 2026-11-10 — weather 예보 증분 적재(ADR-122)
 
 - Map의 weather 예보(단기·초단기·중기·외부) 적재가 매번 전량 대신 weather `since` 증분을 받아 지금 상태에 합친다. 하루 한 번은 전량으로 다시 맞춘다(`KOR_TRAVEL_MAP_WEATHER_FORECAST_FULL_RESYNC_HOURS`, 기본 24, 0이면 매번 전량). 위치 안 예보 묶음은 provider 이름 순이다. 스키마·API 변경 없음.

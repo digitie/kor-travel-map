@@ -31,11 +31,12 @@ from __future__ import annotations
 import asyncio
 import functools
 import inspect
+import json
 import logging
 import math
 import secrets
 import time
-from collections.abc import AsyncIterator, Awaitable, Callable, Sequence
+from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -125,7 +126,9 @@ _retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 GEO_LAT_LIMIT: Final[float] = 85.05112878
 """Valkey GEO가 받는 위도 절댓값 상한. 넘는 좌표는 GEO에 넣지 않는다(값에는 남는다)."""
 
-_GEN_KEY_NAMES: Final[tuple[str, ...]] = ("meta", "items", "ids", "geo", "lookup")
+_GEN_KEY_NAMES: Final[tuple[str, ...]] = ("meta", "items", "ids", "geo", "lookup", "members")
+"""세대 키. ``members``는 예보 멤버십 장부(ADR-122) — 다른 데이터셋에는 없다
+(0건 세대의 빈 키처럼)."""
 
 
 _T = TypeVar("_T")
@@ -305,6 +308,14 @@ class GenerationMeta:
     row_duplicates: int | None = None
     """원천 집합에서 같은 위치 안 같은 묶음이 두 번 와 버린 행 수(weather 예보). 0이 아니면 증분이
     전량의 "첫 행" 선택을 재현할 수 없다(ADR-122)."""
+    member_count: int | None = None
+    """멤버십 장부(``members`` 키) 크기. 장부 이전 코드가 쓴 세대는 ``None``(ADR-122)."""
+    membership_verified: bool | None = None
+    """장부 digest가 원천 ``membership_digest``와 같았는가. ``False``면 원천 manifest에 Map이 볼 수
+    없는 행(미래 시각이 없는 묶음)이 있어 검증할 수 없는 사슬이다. 원천이 digest를 주지 않으면
+    ``None``(ADR-122)."""
+    clock_epoch: str | None = None
+    """원천 publication clock epoch(weather ``meta.clock_epoch``). 바뀌면 cursor를 믿지 않는다."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -382,6 +393,8 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
         full = fields.get("full_synced_at") or ""
         full_synced_at = datetime.fromisoformat(full) if full else None
         row_dups = fields.get("row_duplicates") or ""
+        member_count = fields.get("member_count") or ""
+        verified = fields.get("membership_verified") or ""
         if any(
             value is not None and value.utcoffset() is None
             for value in (loaded_at, source_at, checked_at, sync_cursor, full_synced_at)
@@ -405,6 +418,9 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
             sync_cursor=sync_cursor,
             full_synced_at=full_synced_at,
             row_duplicates=int(row_dups) if row_dups else None,
+            member_count=int(member_count) if member_count else None,
+            membership_verified={"1": True, "0": False}.get(verified),
+            clock_epoch=fields.get("clock_epoch") or None,
         )
     except (KeyError, ValueError) as exc:
         raise StateStoreUnavailable(
@@ -413,7 +429,7 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
 
 
 # KEYS[1]=current KEYS[2]=previous KEYS[3]=recent_counts
-# KEYS[4..8]=새 세대 meta·items·ids·geo·lookup, KEYS[9..]=물러날 직전 세대 키.
+# KEYS[4..9]=새 세대 meta·items·ids·geo·lookup·members, KEYS[10..]=물러날 직전 세대 키.
 # ARGV[1]=기대하는 지금 세대(''=없음) ARGV[2]=새 세대 ARGV[3]=grace 초 ARGV[4]=recent 창 크기
 # ARGV[5]='1'이면 recent_counts를 비우고 새 개수 하나로 시작한다
 #   (운영자 allow_shrink — 한 번이면 충분해야 한다).
@@ -434,7 +450,9 @@ if redis.call('HLEN', KEYS[5]) ~= count then return {-1, 'items'} end
 if redis.call('ZCARD', KEYS[6]) ~= count then return {-1, 'ids'} end
 if redis.call('ZCARD', KEYS[7]) ~= geo then return {-1, 'geo'} end
 if redis.call('HLEN', KEYS[8]) ~= lookup then return {-1, 'lookup'} end
-for i = 4, 8 do redis.call('PERSIST', KEYS[i]) end
+local members = tonumber(redis.call('HGET', KEYS[4], 'member_count')) or 0
+if redis.call('HLEN', KEYS[9]) ~= members then return {-1, 'members'} end
+for i = 4, 9 do redis.call('PERSIST', KEYS[i]) end
 redis.call('SET', KEYS[1], ARGV[2])
 if current ~= '' then redis.call('SET', KEYS[2], current) else redis.call('DEL', KEYS[2]) end
 if ARGV[6] ~= '0' then
@@ -442,7 +460,7 @@ if ARGV[6] ~= '0' then
   redis.call('LPUSH', KEYS[3], count)
   redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1)
 end
-for i = 9, #KEYS do redis.call('EXPIRE', KEYS[i], tonumber(ARGV[3])) end
+for i = 10, #KEYS do redis.call('EXPIRE', KEYS[i], tonumber(ARGV[3])) end
 return {1, current}
 """
 
@@ -635,6 +653,29 @@ class ValkeyStateStore:
             ):
                 values[_text(key)] = value if isinstance(value, bytes) else str(value).encode()
         return values
+
+    async def generation_members(
+        self, dataset: str, generation: str
+    ) -> dict[tuple[str, str], datetime]:
+        """세대의 멤버십 장부(ADR-122). 개수는 호출자가 ``meta.member_count``와 맞춘다."""
+        members: dict[tuple[str, str], datetime] = {}
+        async with _unavailable_on_error("멤버십 읽기"):
+            async for key, value in self._client.hscan_iter(
+                state_key(dataset, generation, "members"), count=500
+            ):
+                try:
+                    location_id, provider = json.loads(_text(key))
+                    at = datetime.fromisoformat(_text(value))
+                except (ValueError, TypeError) as exc:
+                    raise StateStoreUnavailable(
+                        f"{dataset}/{generation} 멤버십 장부가 깨졌다."
+                    ) from exc
+                if at.utcoffset() is None:
+                    raise StateStoreUnavailable(
+                        f"{dataset}/{generation} 멤버십 시각에 timezone이 없다."
+                    )
+                members[(str(location_id), str(provider))] = at
+        return members
 
     async def page_ids(
         self, dataset: str, generation: str, *, after: str | None, limit: int
@@ -883,6 +924,9 @@ class ValkeyStateStore:
         sync_cursor: datetime | None = None,
         full_synced_at: datetime | None = None,
         row_duplicates: int | None = None,
+        members: Mapping[tuple[str, str], datetime] | None = None,
+        membership_verified: bool | None = None,
+        clock_epoch: str | None = None,
     ) -> SwapResult:
         """새 세대를 쓰고 포인터를 원자적으로 바꾼다(ADR-114 D3).
 
@@ -894,8 +938,9 @@ class ValkeyStateStore:
         세대가 아니면 아무것도 쓰지 않고 :class:`StateSwapConflict`이고, 교체 스크립트의
         compare-and-set도 그 세대와 비교한다. ``apply_guard=False``면 거부 기준(D4)을 보지 않고
         ``recent_counts``에도 개수를 넣지 않는다(거부 기준은 원천 전량에만 건다).
-        ``sync_*``·``full_synced_at``·``row_duplicates``는 세대 meta에 함께 적힌다 — cursor는 그
-        세대와 같은 교체로만 전진한다.
+        ``sync_*``·``full_synced_at``·``row_duplicates``·``membership_verified``·
+        ``clock_epoch``는 세대 meta에, ``members``(멤버십 장부)는 세대 ``members`` 키에 함께
+        적힌다 — cursor·장부는 그 세대와 같은 교체로만 바뀐다.
         """
         unique: dict[str, StateItem] = {}
         for item in items:
@@ -929,6 +974,11 @@ class ValkeyStateStore:
             geo_count, lookup_count = await self._write_generation(
                 keys, list(unique.values()), budget
             )
+            member_fields = {
+                json.dumps([location_id, provider], ensure_ascii=False): _iso(at)
+                for (location_id, provider), at in (members or {}).items()
+            }
+            await self._write_members(keys["members"], member_fields, budget)
             meta_fields = {
                 "count": str(len(unique)),
                 "geo_count": str(geo_count),
@@ -946,6 +996,11 @@ class ValkeyStateStore:
                 "sync_cursor": _iso(sync_cursor) if sync_cursor is not None else "",
                 "full_synced_at": _iso(full_synced_at) if full_synced_at is not None else "",
                 "row_duplicates": str(row_duplicates) if row_duplicates is not None else "",
+                "member_count": str(len(member_fields)),
+                "membership_verified": (
+                    "" if membership_verified is None else "1" if membership_verified else "0"
+                ),
+                "clock_epoch": clock_epoch or "",
             }
 
             async def _write_meta() -> None:
@@ -1113,6 +1168,25 @@ class ValkeyStateStore:
                 budget,
             )
         return geo_count, len(lookup_seen)
+
+    async def _write_members(
+        self, key: str, fields: dict[str, str], budget: _RetryBudget
+    ) -> None:
+        """멤버십 장부를 묶음으로 쓴다(build TTL). 같은 값을 다시 쓰므로 재시도해도 같다."""
+        names = list(fields)
+        for offset in range(0, len(names), self._batch):
+            chunk = {name: fields[name] for name in names[offset : offset + self._batch]}
+
+            async def _write(chunk: dict[str, str] = chunk) -> None:
+                async with (
+                    _unavailable_on_error("멤버십 쓰기"),
+                    self._client.pipeline(transaction=False) as pipe,
+                ):
+                    pipe.hset(key, mapping=chunk)
+                    pipe.expire(key, self._build_ttl)
+                    await pipe.execute()
+
+            await self._retrying("멤버십 쓰기", _write, budget)
 
     async def _write_chunk(
         self,

@@ -20,16 +20,20 @@ from __future__ import annotations
 import random
 from collections import defaultdict
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 
 import pytest
 
 from kortravelmap.dto.weather_state import WeatherForecastGroupState, WeatherForecastState
 from kortravelmap.infra.valkey_state import StateItem
-from kortravelmap.providers.kor_travel_weather import WeatherExportForecastGroup
+from kortravelmap.providers.kor_travel_weather import (
+    WeatherExportForecastGroup,
+    WeatherExportForecastMember,
+)
 from kortravelmap.providers.kor_travel_weather_state import (
     ForecastDeltaRefused,
     ForecastGrouper,
+    forecast_membership_digest,
     merge_forecast_delta,
     trim_forecast_group,
 )
@@ -96,11 +100,56 @@ def _export(
     return out
 
 
+def _omitted(
+    scopes: list[_Scope], now: datetime, since: datetime | None = None
+) -> list[WeatherExportForecastMember]:
+    """weather ``meta.omitted_expired`` — 걸은 scope에서 미래 point가 없어 뺀 (위치, provider)."""
+    return [
+        WeatherExportForecastMember(
+            location_id=location_id, provider=scope.provider, published_at=scope.published_at
+        )
+        for scope in scopes
+        if since is None or scope.published_at > since
+        for location_id in sorted(scope.locations)
+        if not any(p.target > now for p in scope.points if p.location_id == location_id)
+    ]
+
+
 def _full(scopes: list[_Scope], now: datetime) -> list[StateItem]:
     grouper = ForecastGrouper(style="short")
     for group in _export(scopes, now):
         grouper.add(group)
     return grouper.items()
+
+
+Members = dict[tuple[str, str], datetime]
+
+
+def _manifest_digest(scopes: list[_Scope]) -> str:
+    """weather ``meta.membership_digest`` — 얼린 manifest 전체(시간 필터 전, since 무관)."""
+    return forecast_membership_digest(
+        {(loc, s.provider): s.published_at for s in scopes for loc in s.locations}
+    )
+
+
+def _full_ledger(scopes: list[_Scope], now: datetime) -> tuple[list[StateItem], Members]:
+    grouper = ForecastGrouper(style="short")
+    for group in _export(scopes, now):
+        grouper.add(group)
+    members = grouper.members()
+    for member in _omitted(scopes, now):  # 값 없는 멤버(Dagster 수집기와 같은 규칙)
+        members[(member.location_id, member.provider)] = member.published_at
+    return grouper.items(), members
+
+
+def _merge_ledger(
+    base: list[StateItem], ledger: Members, scopes: list[_Scope], since: datetime, now: datetime
+) -> tuple[list[StateItem], Members]:
+    merge = merge_forecast_delta(
+        _states(base), _export(scopes, now, since), style="short", since=since, now=now,
+        base_members=ledger, omitted=_omitted(scopes, now, since),
+    )
+    return merge.items, merge.members
 
 
 def _states(items: list[StateItem]) -> list[WeatherForecastState]:
@@ -118,7 +167,8 @@ def _merge(
     base: list[StateItem], scopes: list[_Scope], since: datetime, now: datetime
 ) -> list[StateItem]:
     return merge_forecast_delta(
-        _states(base), _export(scopes, now, since), style="short", since=since, now=now
+        _states(base), _export(scopes, now, since), style="short", since=since, now=now,
+        omitted=_omitted(scopes, now, since),
     ).items
 
 
@@ -208,7 +258,7 @@ def test_a_chain_of_deltas_equals_a_full_pull() -> None:
         _Scope("q", T0, _points("L2", range(48), at=T0, known=T0)),
     ]
     now = T0 + timedelta(minutes=10)
-    state = _full(scopes, now)
+    state, ledger = _full_ledger(scopes, now)
     since = T0
     for step in range(1, 6):
         clock = T0 + timedelta(hours=3 * step)
@@ -219,9 +269,11 @@ def test_a_chain_of_deltas_equals_a_full_pull() -> None:
                     metrics={"TMP": float(step)}),
         )
         now = clock + timedelta(minutes=20)
-        state = _merge(state, scopes, since=since, now=now)
+        state, ledger = _merge_ledger(state, ledger, scopes, since=since, now=now)
         since = clock
-        assert _canonical(state) == _canonical(_full(scopes, now)), step
+        assert _canonical(state) == _canonical(_full(scopes, now))
+        # 시각이 지나 값에서 빠진 묶음도 멤버십에는 남는다 — weather digest(시간 필터 전)와 같다.
+        assert forecast_membership_digest(ledger) == _manifest_digest(scopes), step
 
 
 # -- 무작위 시나리오(계약이 표현하는 변화만) ---------------------------------------------
@@ -247,10 +299,10 @@ def _random_points(
                         "맑음" if metric == "SKY" else round(rng.uniform(-10, 40), 1)
                     )
                     points.append(_Point(location_id, metric, target, value, clock))
-        # 재공개된 위치에는 미래 point가 하나는 있다 — 없으면 weather가 그 위치를 증분에서 빼서
-        # (페이지 stale 표시뿐) 재공개를 알 수 없다. 그 경우는 아래 계약 밖 시험이 따로 고정한다.
-        future = now + timedelta(minutes=30 * rng.randint(1, 8))
-        points.append(_Point(location_id, "TMP", future, round(rng.uniform(-10, 40), 1), clock))
+        # 위치마다 point가 하나는 있다(scope에서 빠지는 제거는 계약 밖 시험이 따로 본다). 그 시각이
+        # 지났으면 weather가 omitted_expired로 알린다(재공개됐지만 미래 시각 없음 — 계약 5(e)).
+        at = now + timedelta(minutes=30 * rng.randint(-6, 8))
+        points.append(_Point(location_id, "TMP", at, round(rng.uniform(-10, 40), 1), clock))
     return points
 
 
@@ -271,7 +323,8 @@ def test_random_republish_growth_and_time_keep_delta_equal_to_full(seed: int) ->
             locations = set(rng.sample(free, rng.randint(1, min(4, len(free)))))
             owned[provider] |= locations
             scopes.append(_Scope(provider, clock, _random_points(rng, locations, clock, now)))
-    state = _full(scopes, now)
+    state, ledger = _full_ledger(scopes, now)
+    assert forecast_membership_digest(ledger) == _manifest_digest(scopes)
     since = clock
     for _ in range(8):
         clock += timedelta(minutes=rng.randint(1, 240))
@@ -295,9 +348,10 @@ def test_random_republish_growth_and_time_keep_delta_equal_to_full(seed: int) ->
             locations = {rng.choice(free)}
             owned[provider] |= locations
             scopes.append(_Scope(provider, clock, _random_points(rng, locations, clock, now)))
-        state = _merge(state, scopes, since=since, now=now)
+        state, ledger = _merge_ledger(state, ledger, scopes, since=since, now=now)
         since = clock
         assert _canonical(state) == _canonical(_full(scopes, now))
+        assert forecast_membership_digest(ledger) == _manifest_digest(scopes)
 
 
 # -- 계약 밖: 알리지 않는 제거 ---------------------------------------------------------
@@ -315,22 +369,75 @@ def test_removal_is_invisible_to_a_delta_and_only_a_full_resync_heals_it() -> No
     assert _canonical(merged) != _canonical(full)
     assert {s.location_id for s in _states(merged)} == {"L1", "L2"}
     assert {s.location_id for s in _states(full)} == {"L1"}
+    # weather membership digest가 그 제거를 드러낸다(ADR-122 — membership_mismatch → 전량).
+    _, ledger = _merge_ledger(*_full_ledger([keep, gone], T0), [keep], since=T0, now=now)
+    assert forecast_membership_digest(ledger) != _manifest_digest([keep])
 
 
-def test_republish_without_future_points_is_invisible_to_a_delta() -> None:
-    """재공개된 scope에서 미래 시각이 하나도 없는 위치는 weather가 증분에서 뺀다(페이지 ``stale``
-    표시뿐 — 어느 위치인지 알리지 않는다). 전량에서는 그 (위치, provider)가 사라지지만 증분 병합은
-    옛 묶음을 이어 온다. 이것도 주기 전량이 고친다(ADR-122 원천 계약 5(e))."""
+def test_republish_without_future_points_is_reported_as_omitted_expired() -> None:
+    """재공개된 scope에서 미래 시각이 하나도 없는 위치는 항목에서 빠지고 ``omitted_expired``로 온다.
+    병합은 지금 세대의 옛 묶음을 빼고 장부에 새 ``published_at``을 남긴다 — 전량과 같다
+    (계약 5(e))."""
     old = _Scope("p", T0, _points("L1", range(1, 24), at=T0, known=T0))
-    base = _full([old], T0)
+    base, ledger = _full_ledger([old], T0)
     now = T0 + timedelta(minutes=30)
     republished = _Scope(
         "p", T0 + timedelta(minutes=10), _points("L1", range(-3, 0), at=T0, known=now)
     )
     assert _export([republished], now, since=T0) == []
-    merged = _merge(base, [republished], since=T0, now=now)
-    assert _canonical(merged) != _canonical(_full([republished], now))
-    assert _full([republished], now) == []
+    items, merged = _merge_ledger(base, ledger, [republished], since=T0, now=now)
+    assert _canonical(items) == _canonical(_full([republished], now)) == {}
+    assert merged == {("L1", "p"): T0 + timedelta(minutes=10)}
+    assert forecast_membership_digest(merged) == _manifest_digest([republished])
+
+
+def test_full_pull_counts_omitted_rows_as_value_less_members() -> None:
+    live = _Scope("p", T0, _points("L1", range(1, 24), at=T0, known=T0))
+    stale = _Scope("q", T0, _points("L2", range(-5, -1), at=T0, known=T0))
+    items, ledger = _full_ledger([live, stale], T0)
+    assert {s.location_id for s in _states(items)} == {"L1"}
+    assert ledger == {("L1", "p"): T0, ("L2", "q"): T0}
+    assert forecast_membership_digest(ledger) == _manifest_digest([live, stale])
+
+
+def test_omitted_member_overlapping_an_item_is_refused() -> None:
+    later = T0 + timedelta(hours=1)
+    member = WeatherExportForecastMember(location_id="L1", provider="p", published_at=later)
+    with pytest.raises(ForecastDeltaRefused) as excinfo:
+        merge_forecast_delta(
+            [], [_group("L1", "p", later)], style="short", since=T0, now=T0, omitted=[member]
+        )
+    assert excinfo.value.reason == "delta_duplicates"
+
+
+def test_expired_carried_group_stays_in_the_membership() -> None:
+    scope = _Scope("p", T0, _points("L1", range(1, 3), at=T0, known=T0))
+    base, ledger = _full_ledger([scope], T0)
+    now = T0 + timedelta(hours=5)
+    items, merged = _merge_ledger(base, ledger, [scope], since=T0, now=now)
+    assert items == []
+    assert merged == {("L1", "p"): T0}
+
+
+def test_membership_digest_follows_the_weather_definition() -> None:
+    import hashlib
+    import json
+
+    kst = timezone(timedelta(hours=9))
+    members = {
+        ("서울-1", "python-kma-api"): datetime(2026, 11, 11, 1, 2, 3, 45, tzinfo=UTC),
+        ("A", "open_meteo"): datetime(2026, 11, 11, 19, 0, tzinfo=kst),  # UTC로 바꿔 적는다
+    }
+    body = json.dumps(
+        [
+            ["A", "open_meteo", "2026-11-11T10:00:00.000000Z"],
+            ["서울-1", "python-kma-api", "2026-11-11T01:02:03.000045Z"],
+        ],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    expected = "sha256:" + hashlib.sha256(body.encode("utf-8")).hexdigest()
+    assert forecast_membership_digest(members) == expected
 
 
 # -- 거부(증분을 버리고 전량으로) -----------------------------------------------------------
