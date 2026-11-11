@@ -164,6 +164,58 @@ async def test_parking_rows_are_never_collapsed(migrated_session: AsyncSession) 
     assert {ids["parking_a"], ids["parking_b"]} <= seen
 
 
+async def test_rest_area_directions_are_never_collapsed(migrated_session: AsyncSession) -> None:
+    """휴게소 상·하행은 끝 괄호만 다른 같은 이름이고 가깝다 — 교통 분류는 접지 않는다."""
+    up = await _feature(
+        migrated_session, "rest_up", name="덕평접기휴게소(서울방향)", category="06040101",
+        region=_YEOJU, lon=127.4000, lat=37.2400,
+    )
+    down = await _feature(
+        migrated_session, "rest_down", name="덕평접기휴게소(부산방향)", category="06040101",
+        region=_YEOJU, lon=127.4000 + 100 * _M, lat=37.2400,
+    )
+    await migrated_session.flush()
+    page = await _page(migrated_session, "덕평접기휴게소", page_size=200)
+    assert {up, down} <= {item.feature_id for item in page.items}
+
+
+async def test_duplicates_chain_into_one_cluster_and_far_cities_keep_their_own(
+    migrated_session: AsyncSession,
+) -> None:
+    """이웃의 이웃도 같은 무리다(A–B 250 m, B–C 200 m → 하나). 대표와 먼 다른 도시의 같은 이름
+    무리도 그 안에서 하나로 접힌다."""
+    lon, lat = 127.0500, 37.5000
+    ids = {
+        "a": await _feature(
+            migrated_session, "chain_a", name="이음접기공원", category="01050200",
+            region=_YEOJU, lon=lon, lat=lat,
+        ),
+        "b": await _feature(
+            migrated_session, "chain_b", name="이음접기공원", category="01000000",
+            region=_YEOJU, lon=lon, lat=lat + 250 * _M,
+        ),
+        "c": await _feature(
+            migrated_session, "chain_c", name="이음접기공원", category="01000000",
+            region=_YEOJU, lon=lon, lat=lat + 450 * _M,
+        ),
+        # 다른 도시(약 50 km)의 같은 이름 둘 — 서로 50 m.
+        "far_1": await _feature(
+            migrated_session, "chain_far_1", name="이음접기공원", category="01000000",
+            region=_SOKCHO, lon=lon + 0.5, lat=lat,
+        ),
+        "far_2": await _feature(
+            migrated_session, "chain_far_2", name="이음접기 공원", category="01000000",
+            region=_SOKCHO, lon=lon + 0.5 + 50 * _M, lat=lat,
+        ),
+    }
+    await migrated_session.flush()
+    page = await _page(migrated_session, "이음접기공원", page_size=200)
+    seen = {item.feature_id for item in page.items}
+    assert ids["a"] in seen
+    assert not {ids["b"], ids["c"]} & seen
+    assert len({ids["far_1"], ids["far_2"]} & seen) == 1
+
+
 async def test_collapse_keeps_keyset_pages_and_total_consistent(
     migrated_session: AsyncSession,
 ) -> None:
@@ -284,17 +336,22 @@ async def test_effective_group_sql_matches_core_function(
         "category_search_group", "category", "compact_name"
     )
     base = feature_repo._search_category_group_sql("v.category")
+    # 비교 키는 검색 SQL과 같은 ``_search_compact_sql``로 원래 이름에서 만든다(Python
+    # ``str.isspace``와 SQL 공백 집합의 대조 — NBSP·전각 공백 포함).
+    compact = feature_repo._search_compact_sql("v.name")
     statement = text(
         f"SELECT {effective} FROM ("
-        f"SELECT v.category, v.compact_name, {base} AS category_search_group FROM ("
-        "SELECT CAST(:category AS text) AS category, CAST(:compact AS text) AS compact_name"
+        f"SELECT v.category, {compact} AS compact_name, {base} AS category_search_group FROM ("
+        "SELECT CAST(:category AS text) AS category, CAST(:name AS text) AS name"
         ") AS v) AS w"
     )
+    cases += [
+        ("01000000", "저어새" + chr(0xA0) + "펜션"),
+        ("01000000", "남대문" + chr(0x3000) + "전주식당"),
+        ("01000000", "신선지 펜션（강화）"),
+    ]
     for category, name in cases:
         got = (
-            await migrated_session.execute(
-                statement,
-                {"category": category, "compact": feature_repo.search_alias_key(name)},
-            )
+            await migrated_session.execute(statement, {"category": category, "name": name})
         ).scalar_one()
         assert got == search_effective_group(category, name), (category, name, got)

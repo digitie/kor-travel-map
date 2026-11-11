@@ -2129,12 +2129,14 @@ def _search_tail_sql(expression: str) -> str:
 #: 중복 접기 반경(m, 5179 거리). 같은 장소를 여러 원천이 따로 적재한 행(MCST CSV 4종·TourAPI·
 #: 표준데이터)의 좌표 차이는 대개 수십~수백 m다(prod 2026-11-11: 이름 같고 약 100 m 안 13,776묶음).
 _SEARCH_DEDUP_RADIUS_M: Final[int] = 300
-#: 중복 접기에서 빼는 분류 접두 — 주차장(0601)·주유소(0602)는 같은 이름의 다른 시설이 가까이 흔하다.
-_SEARCH_DEDUP_EXCLUDED_PREFIXES: Final[tuple[str, ...]] = ("0601", "0602")
-if not all(p.isdigit() and len(p) == 4 for p in _SEARCH_DEDUP_EXCLUDED_PREFIXES):
-    raise RuntimeError("dedup excluded prefixes must be 4-digit category prefixes")
-_SEARCH_DEDUP_EXCLUDED_PREFIXES_SQL: Final[str] = ", ".join(
-    f"'{prefix}'" for prefix in _SEARCH_DEDUP_EXCLUDED_PREFIXES
+#: 중복 접기 대상 분류(Tier 1) — 관광·식음·숙박·온천·미분류. 편의(05)·교통(06)·의료(07)는 같은
+#: 이름의 다른 시설이 가까이 흔하다: 휴게소 상·하행("덕평휴게소(서울방향)"·"(부산방향)", 50~200 m),
+#: 같은 이름의 기차역·지하철역, 주차장·주유소(적대 리뷰 2026-11-12).
+_SEARCH_DEDUP_TIER1_CODES: Final[tuple[str, ...]] = ("00", "01", "02", "03", "04")
+if not all(code.isdigit() and len(code) == 2 for code in _SEARCH_DEDUP_TIER1_CODES):
+    raise RuntimeError("dedup tier1 codes must be two digits")
+_SEARCH_DEDUP_TIER1_CODES_SQL: Final[str] = ", ".join(
+    f"'{code}'" for code in _SEARCH_DEDUP_TIER1_CODES
 )
 #: 접기 키에서 떼는 끝 괄호(반각·전각) — "신륵사(여주)"와 "신륵사"는 같은 키다(거리로 가른다).
 _SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
@@ -2369,12 +2371,17 @@ scored AS (
         marker_color,
         score,
         coord_5179,
-        -- 중복 접기 키(검색 전용): 같은 이름(공백·대소문자·끝 괄호 무시)의 place. 주차장·주유소는
-        -- 같은 이름의 다른 시설이 가까이 흔해 접지 않는다. 좌표가 없으면 접지 않는다.
+        -- 중복 접기 키(검색 전용): 같은 이름(공백·대소문자·끝 괄호 무시)의 관광·식음·숙박·미분류
+        -- place(``_SEARCH_DEDUP_TIER1_CODES``). 좌표가 없으면 접지 않는다. 정규식은 이름이 닫는
+        -- 괄호로 끝날 때만 돈다.
         CASE
           WHEN kind = 'place' AND coord_5179 IS NOT NULL
-            AND left(category, 4) NOT IN ({_SEARCH_DEDUP_EXCLUDED_PREFIXES_SQL})
-          THEN regexp_replace(compact_name, '{_SEARCH_DEDUP_TRAILING_BRACKET}', '')
+            AND left(category, 2) IN ({_SEARCH_DEDUP_TIER1_CODES_SQL})
+          THEN CASE
+            WHEN right(compact_name, 1) IN (')', '）')
+            THEN regexp_replace(compact_name, '{_SEARCH_DEDUP_TRAILING_BRACKET}', '')
+            ELSE compact_name
+          END
         END AS dedup_key,
         ({region_rank}
           -- 일치 단계: 0 별칭이 가리키는 이름, 1 이름이 검색어를 품음(공백 무시), 2 유사도만.
@@ -2412,32 +2419,43 @@ scored AS (
         ) AS search_rank
     FROM ranked
 ),
-candidates AS (
-    -- 중복 접기(P5, 2026-11-11): 같은 접기 키 무리에서 정렬 순서((search_rank, -score,
-    -- feature_id))가 가장 앞인 행(대표)과 ``_SEARCH_DEDUP_RADIUS_M`` 안에 있는 나머지를 숨긴다.
-    -- 숨김은 페이지가 아니라 **후보 전체**에서 정하므로 cursor 위치와 무관하다 — keyset 정렬 키·
-    -- 개수 질의가 그대로 맞는다. 대표가 정렬 순서의 첫 행이라 접어도 그 무리의 자리는 내려가지
-    -- 않는다. 창 함수 한 번(정렬 한 번)이다 — 행 쌍을 비교하는 반조인은 후보 수의 제곱이라
-    -- "강화 펜션"(후보 2천여 행)에서 수십 초였다. 대표와 멀리 떨어진 같은 이름 행끼리는 접지 않는다
-    -- (다른 도시의 같은 이름은 그대로 둔다).
+-- 중복 접기(P5, 2026-11-11): 같은 접기 키 행을 ``_SEARCH_DEDUP_RADIUS_M`` 이웃으로 이어 묶고
+-- (DBSCAN, minpoints 1 — 이웃의 이웃도 같은 무리), 무리마다 정렬 순서((search_rank, -score,
+-- feature_id))가 가장 앞인 행 하나만 남긴다. 숨김은 페이지가 아니라 **후보 전체**에서 정하므로
+-- cursor 위치와 무관하다 — keyset 정렬 키·개수 질의가 그대로 맞는다. 대표가 정렬 순서의 첫 행이라
+-- 접어도 그 무리의 자리는 내려가지 않는다. 다른 도시의 같은 이름은 다른 무리다. 접기 키가 있는
+-- 행만 좁은 열로 창 함수를 돌리고(행 쌍 반조인은 후보 수의 제곱이었다), 숨길 행은 feature_id
+-- 해시 반조인으로 뺀다.
+dedup_clusters AS (
     SELECT
-        d.feature_id, d.feature_uuid, d.kind, d.name, d.category, d.lon, d.lat,
-        d.marker_icon, d.marker_color, d.score, d.search_rank
+        feature_id,
+        dedup_key,
+        search_rank,
+        score,
+        x_extension.ST_ClusterDBSCAN(coord_5179, {_SEARCH_DEDUP_RADIUS_M}, 1)
+          OVER (PARTITION BY dedup_key) AS dedup_cluster
+    FROM scored
+    WHERE dedup_key IS NOT NULL
+),
+dedup_hidden AS (
+    SELECT feature_id
     FROM (
         SELECT
-            scored.*,
-            row_number() OVER dedup AS dedup_position,
-            first_value(coord_5179) OVER dedup AS dedup_leader_coord
-        FROM scored
-        WINDOW dedup AS (
-            PARTITION BY dedup_key ORDER BY search_rank ASC, score DESC, feature_id ASC
-        )
-    ) AS d
-    WHERE d.dedup_key IS NULL
-       OR d.dedup_position = 1
-       OR NOT x_extension.ST_DWithin(
-            d.dedup_leader_coord, d.coord_5179, {_SEARCH_DEDUP_RADIUS_M}
-          )
+            feature_id,
+            row_number() OVER (
+                PARTITION BY dedup_key, dedup_cluster
+                ORDER BY search_rank ASC, score DESC, feature_id ASC
+            ) AS dedup_position
+        FROM dedup_clusters
+    ) AS ordered
+    WHERE dedup_position > 1
+),
+candidates AS (
+    SELECT
+        s.feature_id, s.feature_uuid, s.kind, s.name, s.category, s.lon, s.lat,
+        s.marker_icon, s.marker_color, s.score, s.search_rank
+    FROM scored AS s
+    WHERE NOT EXISTS (SELECT 1 FROM dedup_hidden AS h WHERE h.feature_id = s.feature_id)
 )
 """
 
