@@ -250,9 +250,10 @@ def test_groupers_keep_the_first_row_and_count_duplicates() -> None:
         state.location_id: state
         for state in (WeatherForecastState.model_validate_json(i.value) for i in grouper.items())
     }
-    assert [g.provider for g in values["a"].groups] == ["python-kma-api", "open_meteo"]
-    assert values["a"].groups[0].metrics["TMP"] == [12.0, 13.5, None]
-    assert values["a"].groups[0].metrics["SKY"] == ["맑음", "구름많음", "흐림"]
+    # 묶음은 provider 순이다(원천 순서와 무관 — 증분 병합과 전량이 같은 바이트, ADR-122).
+    assert [g.provider for g in values["a"].groups] == ["open_meteo", "python-kma-api"]
+    assert values["a"].groups[1].metrics["TMP"] == [12.0, 13.5, None]
+    assert values["a"].groups[1].metrics["SKY"] == ["맑음", "구름많음", "흐림"]
 
 
 def test_daily_grouper_sorts_by_date_then_slot() -> None:

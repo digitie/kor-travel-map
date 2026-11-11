@@ -1,3 +1,7 @@
+## 2026-11-10 — ADR-122 weather 예보 증분 적재
+
+- 단기·외부 전량이 odroid eMMC cold 1,174·674초라 run이 ReadTimeout. since 증분을 지금 Valkey 세대에 병합(기준 세대 CAS), cursor는 세대 meta. since엔 tombstone이 없어 24시간마다 전량. migration 없음.
+
 ## 2026-11-10 — 박물관·관광지도 공개 파일
 
 - 박물관 403·관광지 00, 둘 다 파일로. 파일 행에 INSTT_CODE(기관 코드, 박물관 215·관광지 164개)가 실려 키가 지자체로 뭉칠 뻔했다(리뷰 HIGH) — 세 표준 dataset 키에서 instt_code 제외.

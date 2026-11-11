@@ -777,6 +777,17 @@ class KorTravelMapSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_WEATHER_DAILY_SUMMARY_DAYS``."
         ),
     )
+    weather_forecast_full_resync_hours: float = Field(
+        default=24.0,
+        ge=0.0,
+        le=168.0,
+        description=(
+            "weather 예보(W3) 적재가 증분(``since``) 대신 전량을 다시 받는 주기(시간, ADR-122). "
+            "weather since 응답에는 제거 tombstone이 없어 주기 전량이 그 사이 생긴 제거를 고친다. "
+            "0이면 증분을 끄고 매번 전량을 받는다(되돌리기). "
+            "env ``KOR_TRAVEL_MAP_WEATHER_FORECAST_FULL_RESYNC_HOURS``."
+        ),
+    )
 
     # ── 로깅 ─────────────────────────────────────────────────────────────
     log_level: str = Field(

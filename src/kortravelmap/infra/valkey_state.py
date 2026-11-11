@@ -294,6 +294,17 @@ class GenerationMeta:
     """원천 첫 페이지의 ETag(weather, ADR-114 W3). 다음 적재가 ``If-None-Match``로 보낸다."""
     checked_at: datetime | None = None
     """원천이 304(바뀌지 않음)로 답해 교체 없이 다시 확인한 마지막 시각(ADR-114 W3)."""
+    sync_mode: str | None = None
+    """이 세대를 만든 방식 — ``full``(원천 전량)·``delta``(직전 세대 + 원천 증분, ADR-122).
+    증분을 쓰지 않는 데이터셋과 옛 세대는 ``None``."""
+    sync_cursor: datetime | None = None
+    """이 세대까지 반영한 원천 증분 cursor(weather W3 ``next_since``). 다음 적재의 ``since``다 —
+    세대와 같은 meta에 있어 포인터 교체와 함께만 전진한다(ADR-122)."""
+    full_synced_at: datetime | None = None
+    """이 세대가 이어 온 마지막 **전량** 적재의 시작 시각. 주기 재동기화의 기준(ADR-122)."""
+    row_duplicates: int | None = None
+    """원천 집합에서 같은 위치 안 같은 묶음이 두 번 와 버린 행 수(weather 예보). 0이 아니면 증분이
+    전량의 "첫 행" 선택을 재현할 수 없다(ADR-122)."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -366,9 +377,14 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
         source_at = datetime.fromisoformat(source) if source else None
         checked = fields.get("checked_at") or ""
         checked_at = datetime.fromisoformat(checked) if checked else None
+        cursor = fields.get("sync_cursor") or ""
+        sync_cursor = datetime.fromisoformat(cursor) if cursor else None
+        full = fields.get("full_synced_at") or ""
+        full_synced_at = datetime.fromisoformat(full) if full else None
+        row_dups = fields.get("row_duplicates") or ""
         if any(
             value is not None and value.utcoffset() is None
-            for value in (loaded_at, source_at, checked_at)
+            for value in (loaded_at, source_at, checked_at, sync_cursor, full_synced_at)
         ):
             raise ValueError("timezone이 없는 시각")
         return GenerationMeta(
@@ -385,6 +401,10 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
             source_status=fields.get("source_status") or None,
             source_etag=fields.get("source_etag") or None,
             checked_at=checked_at,
+            sync_mode=fields.get("sync_mode") or None,
+            sync_cursor=sync_cursor,
+            full_synced_at=full_synced_at,
+            row_duplicates=int(row_dups) if row_dups else None,
         )
     except (KeyError, ValueError) as exc:
         raise StateStoreUnavailable(
@@ -397,6 +417,8 @@ def _parse_meta(dataset: str, generation: str, raw: dict[Any, Any]) -> Generatio
 # ARGV[1]=기대하는 지금 세대(''=없음) ARGV[2]=새 세대 ARGV[3]=grace 초 ARGV[4]=recent 창 크기
 # ARGV[5]='1'이면 recent_counts를 비우고 새 개수 하나로 시작한다
 #   (운영자 allow_shrink — 한 번이면 충분해야 한다).
+# ARGV[6]='0'이면 recent_counts를 건드리지 않는다(거부 기준을 적용하지 않은 증분 교체, ADR-122 —
+#   거부 기준 창은 원천 전량의 개수만 담는다).
 # 반환: {1, 직전} 교체됨 · {0, 지금 포인터} 포인터가 바뀌었다 ·
 #   {-1, 어긋난 키 이름} 새 세대 검사 실패.
 _FLIP_SCRIPT: Final[str] = """
@@ -415,9 +437,11 @@ if redis.call('HLEN', KEYS[8]) ~= lookup then return {-1, 'lookup'} end
 for i = 4, 8 do redis.call('PERSIST', KEYS[i]) end
 redis.call('SET', KEYS[1], ARGV[2])
 if current ~= '' then redis.call('SET', KEYS[2], current) else redis.call('DEL', KEYS[2]) end
-if ARGV[5] == '1' then redis.call('DEL', KEYS[3]) end
-redis.call('LPUSH', KEYS[3], count)
-redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1)
+if ARGV[6] ~= '0' then
+  if ARGV[5] == '1' then redis.call('DEL', KEYS[3]) end
+  redis.call('LPUSH', KEYS[3], count)
+  redis.call('LTRIM', KEYS[3], 0, tonumber(ARGV[4]) - 1)
+end
 for i = 9, #KEYS do redis.call('EXPIRE', KEYS[i], tonumber(ARGV[3])) end
 return {1, current}
 """
@@ -596,6 +620,21 @@ class ValkeyStateStore:
                     self._client.hmget(state_key(dataset, generation, "items"), list(ids))
                 ),
             )
+
+    async def generation_items(self, dataset: str, generation: str) -> dict[str, bytes]:
+        """세대의 모든 값(``id`` → 값 bytes). 증분 병합의 기준을 읽는다(ADR-122).
+
+        ``HSCAN``으로 나눠 읽는다(한 응답에 수십 MB를 싣지 않는다). 세대 키는 쓰고 나면 바뀌지
+        않으므로 나눠 읽어도 한 세대의 값이다. 읽는 사이 세대가 grace 만료로 사라지면 덜 읽힌
+        결과가 나올 수 있어, 호출자는 개수를 ``meta.count``와 맞춰 본다.
+        """
+        values: dict[str, bytes] = {}
+        async with _unavailable_on_error("세대 값 읽기"):
+            async for key, value in self._client.hscan_iter(
+                state_key(dataset, generation, "items"), count=500
+            ):
+                values[_text(key)] = value if isinstance(value, bytes) else str(value).encode()
+        return values
 
     async def page_ids(
         self, dataset: str, generation: str, *, after: str | None, limit: int
@@ -838,12 +877,25 @@ class ValkeyStateStore:
         allow_shrink: bool = False,
         source_status: str | None = None,
         source_etag: str | None = None,
+        apply_guard: bool = True,
+        require_base: str | None = None,
+        sync_mode: str | None = None,
+        sync_cursor: datetime | None = None,
+        full_synced_at: datetime | None = None,
+        row_duplicates: int | None = None,
     ) -> SwapResult:
         """새 세대를 쓰고 포인터를 원자적으로 바꾼다(ADR-114 D3).
 
         거부(:class:`StateSwapRefused`)·충돌(:class:`StateSwapConflict`)·Valkey 실패 어느 경우에도
         포인터는 그대로다. 같은 id는 원천 순서의 첫 엔티티만 남기고 나머지 수를
         ``meta.duplicates``에 적는다.
+
+        증분 교체(ADR-122)는 ``require_base``에 병합의 기준으로 읽은 세대를 넘긴다 — 포인터가 그
+        세대가 아니면 아무것도 쓰지 않고 :class:`StateSwapConflict`이고, 교체 스크립트의
+        compare-and-set도 그 세대와 비교한다. ``apply_guard=False``면 거부 기준(D4)을 보지 않고
+        ``recent_counts``에도 개수를 넣지 않는다(거부 기준은 원천 전량에만 건다).
+        ``sync_*``·``full_synced_at``·``row_duplicates``는 세대 meta에 함께 적힌다 — cursor는 그
+        세대와 같은 교체로만 전진한다.
         """
         unique: dict[str, StateItem] = {}
         for item in items:
@@ -856,13 +908,19 @@ class ValkeyStateStore:
         if previous_generation is not None:
             # 포인터가 있는데 메타가 없으면 저장소가 깨진 것이다 — 첫 적재로 취급하지 않는다.
             await self.current_meta(dataset)
+        if require_base is not None and previous_generation != require_base:
+            raise StateSwapConflict(
+                f"{dataset} 증분의 기준 세대 {require_base!r}가 더 이상 current가 아니다"
+                f"(지금 {previous_generation!r})."
+            )
         recent = await self.recent_counts(dataset)
         baseline = max(recent) if recent else None
-        reason = evaluate_shrink_guard(recent, len(unique), guard, allow_shrink=allow_shrink)
-        if reason is not None:
-            raise StateSwapRefused(
-                f"{dataset} 교체 거부: {reason}", baseline=baseline, new_count=len(unique)
-            )
+        if apply_guard:
+            reason = evaluate_shrink_guard(recent, len(unique), guard, allow_shrink=allow_shrink)
+            if reason is not None:
+                raise StateSwapRefused(
+                    f"{dataset} 교체 거부: {reason}", baseline=baseline, new_count=len(unique)
+                )
 
         generation = f"{loaded_at.astimezone(UTC):%Y%m%dT%H%M%SZ}-{secrets.token_hex(4)}"
         keys = _gen_keys(dataset, generation)
@@ -884,6 +942,10 @@ class ValkeyStateStore:
                 "guard_override": "1" if allow_shrink else "0",
                 "source_status": source_status or "",
                 "source_etag": source_etag or "",
+                "sync_mode": sync_mode or "",
+                "sync_cursor": _iso(sync_cursor) if sync_cursor is not None else "",
+                "full_synced_at": _iso(full_synced_at) if full_synced_at is not None else "",
+                "row_duplicates": str(row_duplicates) if row_duplicates is not None else "",
             }
 
             async def _write_meta() -> None:
@@ -897,7 +959,12 @@ class ValkeyStateStore:
 
             async def _flip_once() -> None:
                 await self._flip(
-                    dataset, keys, previous_generation, generation, reset_recent=allow_shrink
+                    dataset,
+                    keys,
+                    previous_generation,
+                    generation,
+                    reset_recent=allow_shrink,
+                    record_count=apply_guard,
                 )
 
             await self._retrying("메타 쓰기", _write_meta, budget)
@@ -927,6 +994,7 @@ class ValkeyStateStore:
         generation: str,
         *,
         reset_recent: bool = False,
+        record_count: bool = True,
     ) -> None:
         retiring = (
             list(_gen_keys(dataset, previous_generation).values())
@@ -953,6 +1021,7 @@ class ValkeyStateStore:
                         self._grace,
                         RECENT_COUNTS_WINDOW,
                         "1" if reset_recent else "0",
+                        "1" if record_count else "0",
                     )
                 ),
             )
