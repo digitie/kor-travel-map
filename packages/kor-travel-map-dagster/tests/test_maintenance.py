@@ -19,6 +19,7 @@ from kortravelmap.core.dedup import DedupCandidate
 from kortravelmap.infra.consistency import CaseResult, ConsistencyReport
 from kortravelmap.infra.dedup_refresh_repo import DedupRefreshScope
 from kortravelmap.infra.dedup_repo import DedupQueueResult
+from kortravelmap.infra.search_prominence_repo import SearchProminenceRefreshResult
 
 import kortravelmap.dagster.maintenance as maintenance_mod
 from kortravelmap.dagster.maintenance import (
@@ -96,6 +97,10 @@ class _Client:
     ) -> int:
         self.finding_purge_calls.append(retention)
         return 11
+
+    async def refresh_search_prominence(self) -> SearchProminenceRefreshResult:
+        self.prominence_calls = getattr(self, "prominence_calls", 0) + 1
+        return SearchProminenceRefreshResult(computed=340_000, changed=12, deleted=3)
 
     async def refresh_dedup_candidates_for_scope_pair(
         self,
@@ -264,6 +269,13 @@ def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:
         "purged": 11,
         "retention": "120 days",
     }
+    # 검색 인지도(P6)는 dedup 갱신 뒤 한 번 다시 계산한다.
+    assert client.prominence_calls == 1
+    assert result.output_for_node("refresh_search_prominence") == {
+        "computed": 340_000,
+        "changed": 12,
+        "deleted": 3,
+    }
 
 
 def test_refresh_dedup_uses_default_scopes_when_config_empty() -> None:
@@ -389,6 +401,7 @@ def test_consistency_dedup_refresh_ops_have_retry_policy() -> None:
 
     assert retry_by_name["refresh_dedup_candidates"] == MAINTENANCE_RETRY_POLICY
     assert retry_by_name["run_consistency_check"] == MAINTENANCE_RETRY_POLICY
+    assert retry_by_name["refresh_search_prominence"] == MAINTENANCE_RETRY_POLICY
     assert retry_by_name["purge_expired_notices"] == MAINTENANCE_RETRY_POLICY
     assert (
         retry_by_name["purge_resolved_integrity_findings"]

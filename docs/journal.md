@@ -1,3 +1,9 @@
+## 2026-11-12 — 검색 3단계 main 병합과 C11 검증 보존
+
+- 검토된720과 upstream5742b45의 이력을 merge로 보존했다. incoming 코드·검사16개는 main 원문 그대로다.
+- frontend/root package·lock·vendor·C11 Scope2 payload는720과 동일하여 D286/286·unit440·Doctor0 증거를 재사용한다.
+- backend 검색·SQL·migration·archive 단위104PASS. Dagster 대상은 로컬 redis 의존성 누락으로 수집불가 원시를 보존했고 새 정확 HEAD CI로 확인한다. 실제 DB/Dagster 작업은 실행하지 않았다.
+
 ## 2026-11-12 — C11 D의 정렬 버튼 회귀 검사 보강
 
 - C11 새 이미지 D에서 정렬1건이 원 실행/재시도 모두 옛 로컬 bg-brand 클래스 단언으로 실패했다.
@@ -17,6 +23,10 @@
 - C11의 전체440·Doctor0·lint/type·local/external canonical guard·npm peer0을 n150 f569 source로 확인했고,
   새 production 이미지의 정식D286 strict/전체runner cleanup과 Weather20+5는 같은 슬롯2에서 진행 중이다.
   이 merge에서 UI를 바꾸지 않았으므로 frontend 전체를 다시 설치/빌드하지 않는다. 원 리뷰/CI delta는 별도 재확인한다.
+
+## 2026-11-12 — 검색 순위 3단계(검색 인지도, alembic 451)
+
+- 1차 설계(이웃 300 m 안 이름 포함 행의 원천)는 prod 여주 846행에 59 s — 쌍마다 정규화. 같은 이름 해시 결합 + 국가유산 이름 낱말 해시 결합으로 바꿔 전체 34만 행 5.3 s(읽기 전용 실측). 분포: 0(MOIS 단독) 195,651 · 1 95,401 · 2~6 약 5만 · 7~9 94. 신륵사(여주) 6, (제천) 4.
 
 ## 2026-11-12 — 검색 순위 2단계(실효 그룹·중복 접기)
 

@@ -72,6 +72,8 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "feature_price_values": ("SELECT", "INSERT"),
     # 436: 검색 별칭은 migration이 심고 공개 검색은 읽기만 한다.
     "feature_search_aliases": ("SELECT",),
+    # 451: 검색 인지도는 maintenance job(런타임)이 다시 계산해 쓰고 공개 검색이 읽는다.
+    "feature_search_prominence": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     # 446(ADR-121): 장소 속성 catalog는 migration이 심고 공개 API는 읽기만 한다.
     "place_attributes": ("SELECT",),
     "dataset_place_attributes": ("SELECT",),

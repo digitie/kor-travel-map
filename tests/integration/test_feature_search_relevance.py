@@ -618,7 +618,7 @@ async def test_alias_rows_drive_search_and_reject_unnormalized_keys(
     # trigram으로는 전혀 닮지 않았지만 별칭이 대상 이름을 맨 앞에 더한다.
     assert page.items[0].feature_id == target
     assert page.items[0].rank is not None
-    assert page.items[0].rank < 10_000
+    assert page.items[0].rank < feature_repo._SEARCH_RANK_BBOX_WEIGHT
 
     for alias, canonical in (
         ("하회 마을", "안동하회마을"),  # 공백
@@ -873,7 +873,7 @@ async def test_alias_normalization_uses_raw_parking_name_before_display_suffix(
     )
     assert page.items[0].feature_id == target
     assert page.items[0].rank is not None
-    assert page.items[0].rank < 10000
+    assert page.items[0].rank < feature_repo._SEARCH_RANK_BBOX_WEIGHT
     assert page.total_count is not None
     assert page.total_count >= 1
 
