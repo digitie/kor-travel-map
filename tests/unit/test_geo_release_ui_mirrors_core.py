@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import ast
+import json
 import re
 from pathlib import Path
 
@@ -47,9 +48,17 @@ def _ts_string_set(text: str, name: str) -> frozenset[str]:
 
 
 def _ts_string_const(path: Path, name: str) -> str:
-    match = re.search(rf'^const {name} = "([^"\\]*)";$', path.read_text(encoding="utf-8"), re.M)
-    assert match is not None, f"{path.name}: const {name} = \"...\"를 찾지 못했다"
-    return match[1]
+    # 포매터의 줄바꿈은 허용하되 식/연결/다른 상수로 대체하면 실패한다.
+    match = re.search(
+        rf'^\s*(?:export\s+)?const\s+{re.escape(name)}\s*=\s*'
+        r'(?P<literal>"(?:[^"\\]|\\.)*")\s*;\s*$',
+        path.read_text(encoding="utf-8"),
+        re.M,
+    )
+    assert match is not None, f"{path.name}: {name}의 문자열 literal을 찾지 못했다"
+    value = json.loads(match["literal"])
+    assert isinstance(value, str)
+    return value
 
 
 def _python_constant(path: Path, name: str) -> object:
@@ -90,3 +99,14 @@ def test_the_parser_sees_a_drift() -> None:
     assert _ts_string_set(two, "MANUAL_OPERATION_KEYS") == frozenset({"a_job", "b_job"})
     with pytest.raises(AssertionError, match="literal이 아닌"):
         _ts_string_set(_SAMPLE.replace('"a_job"', "...OTHER"), "MANUAL_OPERATION_KEYS")
+
+
+def test_message_parser_preserves_multiline_literals_and_observes_drift(tmp_path: Path) -> None:
+    source = tmp_path / "message.ts"
+    source.write_text('const MESSAGE =\n  "sensor message";\n', encoding="utf-8")
+    assert _ts_string_const(source, "MESSAGE") == "sensor message"
+    source.write_text('const MESSAGE = "changed";\n', encoding="utf-8")
+    assert _ts_string_const(source, "MESSAGE") != "sensor message"
+    source.write_text('const MESSAGE = "sensor message" + OTHER;\n', encoding="utf-8")
+    with pytest.raises(AssertionError, match="문자열 literal"):
+        _ts_string_const(source, "MESSAGE")
