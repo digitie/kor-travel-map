@@ -1,3 +1,13 @@
+## 2026-11-12 — integration-8-review 채택
+
+부모 단일pack의 common670a753bc17f956f71bdc28385d6241a6e4ee017과
+동일 upstream9a7a348b02d61969b394c681b024d5851eef836b를 채택한다.
+정확 버전·파일·SHA512는 frontend common-artifacts.json이 정본이다.
+UI0.2.0/tokens0.1.1/core1.0.1/web1.0.3에 더해 Lightning CSS1.33.0+nativecss.fix.4를
+직접 개발 의존성으로 사용한다. CSS원천748651cbd845971e65c411166ddee101745dab21,
+serde-content18e53fcf6f8ace093a292891b34fa3411192617d의 source/NOTICE/MIT 고지 동봉파일을 보존한다.
+이전 후보 정보는 아래 이력이다.
+
 # Common 의존성 출처
 
 현재 frontend 산출물은 **integration-6-review 통합 검증 후보**이며 정식 릴리스가 아니다.

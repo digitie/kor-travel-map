@@ -70,6 +70,7 @@
     "eslint-plugin-react-hooks": "7.1.1",
     "eslint-plugin-react-x": "5.30.1",
     "jsdom": "31.0.0",
+    "lightningcss": "file:vendor/lightningcss-1.33.0+nativecss.fix.4.tgz",
     "openapi-typescript": "7.13.0",
     "react-doctor": "0.9.22",
     "tailwindcss": "4.3.5",

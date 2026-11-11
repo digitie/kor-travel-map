@@ -1,3 +1,13 @@
+## 2026-11-12 — c8 동일 산출물 채택과 정식 D 정리 gate 재검증
+
+- 공통670a753의 integration-8-review UI/tokens와 동일 core/web, Lightning CSS fix.4를
+  원장 SHA512 대조 후 채택했다. root/frontend 직접 dev 의존성과 root $lightningcss override를 연결했다.
+- 같은 파일명의 이전 UI/tokens integrity가 npm 기본 lock-only에 남아 명시 package install로 갱신했다.
+  WSL Map node_modules는 만들지 않고 실제 설치/검증은 n150 기존 전용 checkout을 재사용한다.
+- Docker 지연 삭제는 최대5분의 제한된 부재 재조회로 확인한다. 소유 label/ID 검사는 유지하고
+  성공한 빈 조회만 인정한다. CLI close 뒤 stdout을 판정하며 남은 예산을 각 조회 timeout에 전달한다.
+- 정식 D 전체286개와 모든 gate는 후속 결과를 원시 로그와 함께 기록한다. 부모 workflow는 제외·보존한다.
+
 ## 2026-11-11 — Map 정식D 브라우저286통과·Docker 후행 정리 인계
 
 - exact9d187a61d에서 D 브라우저286/286·flake0·manifest일치, Playwright child exit0.

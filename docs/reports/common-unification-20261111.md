@@ -233,3 +233,18 @@ cleanup 명령의 대기를30초로 늘렸고 소유권·ID 일치·잔존 검�
 인계 파일은 taskroot AGENT-HANDOFF-codex-map-weather.md와 MAP-REVIEW-PACKET.md다.
 WSL Map node_modules는 종료된 본인 생성물 정리로 없으며, n150 검증 checkout 의존성은 보존했다.
 종료된 경로 외 공유 /tmp glob·타 agent·기존 사용자 cache는 정리하지 않았다.
+
+
+## c8 채택과 Docker 지연 삭제 후조건
+
+부모 단일 후보 integration-8-review의 common670a753, upstream9a7a348 및 CSSfix.4 원장을 채택했다.
+UI0.2.0/tokens0.1.1/core1.0.1/web1.0.3/LightningCSS1.33.0+nativecss.fix.4의 동일파일을 사용한다.
+CSS는 frontend와root 직접 개발 의존성이고 root override는 $lightningcss를 참조한다.
+이전 공통 Dialog 수정 인계는 taskroot COMMON-DIALOG-HANDOFF-codex-map.md에 보존했다.
+
+기존 정리 확인은 rm의30초 제한 뒤 약2초만 재조회했다. 실제 removing/PID0 지연보다 짧았다.
+최대5분의 wall-time 예산 안에서 반복 조회하고, 성공한 빈 stdout만 부재로 인정하도록 보완했다.
+각 CLI 조회도 남은 시간으로 제한한다. stdout이 모두 닫힌 close 이후 결과를 판정하며,
+기존 소유 label·정확 ID·이름 확인과 영구 잔존 실패 분류는 유지한다.
+지연 삭제/영구 잔존/조회 실패/예산 초과의 회귀 단위5개를 추가했다.
+실제 c8 설치와 정식286D의 종료코드·정리 gate를 n150에서 재검증한다.
