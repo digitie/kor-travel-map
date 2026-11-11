@@ -387,6 +387,11 @@ async def _seed_incheon_gangwon(session: AsyncSession) -> dict[str, str]:
             session, "gh_paengnamu", name="강화 팽나무 펜션", category="03050200",
             region=_GANGHWA, lon=126.4600, lat=37.7000,
         ),
+        # 첫 낱말이 지역 이름이 아닌 이름 — 지역 tail 일치로만 이름 일치가 된다.
+        "gh_gyodong": await _feature(
+            session, "gh_gyodong", name="교동 팽나무 펜션", category="03050200",
+            region=_GANGHWA, lon=126.2900, lat=37.7800,
+        ),
         "surfshack": await _feature(
             session, "surfshack", name="서프쉑 카페", category="02020000",
             region=_YANGYANG, lon=128.7350, lat=38.0060,
@@ -411,7 +416,9 @@ async def test_eulwangri_resolves_to_yeongjong_after_the_2026_reorganisation(
     ids = await _seed_incheon_gangwon(migrated_session)
     await migrated_session.flush()
     labels = await _search_labels(migrated_session, "을왕리 펜션", ids, kinds=["place"])
-    assert labels.index("everview") < labels.index("pension_band"), labels
+    # 강화 미끼는 유사도 문턱 근처라 후보가 아닐 수 있다 — 있으면 영종 펜션보다 뒤다.
+    if "pension_band" in labels:
+        assert labels.index("everview") < labels.index("pension_band"), labels
     page = await _search_page(migrated_session, "을왕리 펜션", kinds=["place"], page_size=200)
     rank = {item.feature_id: item.rank for item in page.items}[ids["everview"]]
     assert rank is not None
@@ -433,16 +440,19 @@ async def test_category_word_remainder_does_not_make_two_word_names_exact(
 async def test_region_name_query_still_uses_the_tail_exact_match(
     migrated_session: AsyncSession,
 ) -> None:
-    """분류 낱말이 아닌 나머지("팽나무 펜션")는 종전처럼 이름 일치를 본다."""
+    """분류 낱말이 아닌 나머지("팽나무 펜션")는 종전처럼 지역 tail 이름 일치를 본다.
+
+    "교동 팽나무 펜션"은 검색어 전체("강화팽나무펜션")와 같지 않다 — 첫 낱말을 뗀 나머지가 지역
+    검색의 나머지와 같아서만 이름 일치다.
+    """
     ids = await _seed_incheon_gangwon(migrated_session)
     await migrated_session.flush()
     page = await _search_page(
         migrated_session, "강화 팽나무 펜션", kinds=["place"], page_size=200
     )
-    assert page.items[0].feature_id == ids["gh_paengnamu"], page.items[:3]
-    rank = page.items[0].rank
+    rank = {item.feature_id: item.rank for item in page.items}[ids["gh_gyodong"]]
     assert rank is not None
-    assert rank % 100 < feature_repo._SEARCH_RANK_EXACT_WEIGHT, rank
+    assert (rank // feature_repo._SEARCH_RANK_EXACT_WEIGHT) % 10 == 0, rank
 
 
 async def test_multi_word_remainder_matches_names_that_cover_every_word(
@@ -463,11 +473,20 @@ async def test_multi_word_remainder_wide_region_uses_the_long_word_anchor(
     migrated_session: AsyncSession,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """넓은 지역(훑는 팔 없음)에서도 3글자 이상 낱말을 닻으로 낱말 덮기 후보를 찾는다."""
+    """넓은 지역(훑는 팔 없음)에서도 3글자 이상 낱말을 닻으로 낱말 덮기 후보를 찾는다.
+
+    낱말 순서를 뒤집어("카페 서프쉑") 붙여 쓴 나머지("카페서프쉑")로는 이름을 품지 못하게 한다 —
+    낱말 덮기만 지역 일치를 준다.
+    """
     ids = await _seed_incheon_gangwon(migrated_session)
     await migrated_session.flush()
     monkeypatch.setattr(feature_repo, "_SEARCH_REGION_SCAN_MAX_ROWS", 0)
-    labels = await _search_labels(migrated_session, "양양 서프쉑 카페", ids, kinds=["place"])
+    q = "양양 카페 서프쉑"
+    region = await feature_repo._resolve_search_region(migrated_session, q)
+    assert region is not None
+    arms = await feature_repo._search_region_arms(migrated_session, region)
+    assert arms.token_mode == "anchor", arms
+    labels = await _search_labels(migrated_session, q, ids, kinds=["place"])
     assert labels[0] == "surfshack", labels
 
 

@@ -6983,7 +6983,8 @@ _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v3: 별칭의 공백 정규화로 순위 의미가 달라져 이전 cursor를 재사용하지 않는다.
 #: v4: 이름 일치를 분류 그룹 앞으로 옮겨(ADR-120) ``rank`` 값의 뜻이 바뀌었다.
 #: v5: 지역 검색(#1459 §7)이 순위 맨 앞 자리(지역 일치)를 더해 ``rank`` 값의 뜻이 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 5
+#: v6: 분류 낱말 나머지의 tail 일치 제거·낱말 덮기(2026-11-11)로 지역 검색 ``rank``가 바뀌었다.
+_SEARCH_CURSOR_VERSION: Final[int] = 6
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -7354,12 +7355,30 @@ async def _resolve_search_region(session: AsyncSession, q: str) -> RegionSearch 
 _SEARCH_REGION_TRIGRAM_MIN_CHARS: Final[int] = 3
 
 
+#: 낱말 덮기에 쓰는 낱말의 최소 길이 — 한 글자("부산 국밥 1"의 "1")는 거의 모든 이름이 품는다.
+_SEARCH_REGION_TOKEN_MIN_CHARS: Final[int] = 2
+
+
+def _trigram_chars(value: str) -> int:
+    """pg_trgm이 trigram을 만드는 글자(문자·숫자) 수 — 구두점만인 낱말("...")은 0이다."""
+    return sum(1 for ch in value if ch.isalnum())
+
+
 def _search_region_tokens(region: RegionSearch) -> tuple[str, ...]:
-    """나머지 검색어의 낱말 비교 키(``search_alias_key``) — 빈 키를 뺀 순서대로."""
+    """나머지 검색어의 낱말 비교 키(``search_alias_key``) — 두 글자 미만 낱말을 뺀 순서대로."""
     return tuple(
-        key for key in (search_alias_key(token) for token in search_query_tokens(region.remainder))
-        if key
+        key
+        for key in (search_alias_key(token) for token in search_query_tokens(region.remainder))
+        if len(key) >= _SEARCH_REGION_TOKEN_MIN_CHARS
     )
+
+
+def _search_region_token_anchor(tokens: Sequence[str]) -> str | None:
+    """GIN이 받을 닻 낱말 — 문자·숫자가 가장 많은 낱말(3글자 이상일 때만, 아니면 ``None``)."""
+    if not tokens:
+        return None
+    anchor = max(tokens, key=_trigram_chars)
+    return anchor if _trigram_chars(anchor) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS else None
 
 
 @dataclass(frozen=True, slots=True)
@@ -7375,8 +7394,9 @@ async def _search_region_arms(session: AsyncSession, region: RegionSearch) -> _S
     """지역이 넓으면(``_SEARCH_REGION_SCAN_MAX_ROWS`` 초과) 지역을 훑는 팔을 뺀다.
 
     3글자 이상 나머지의 이름 팔은 trigram GIN이 받으므로 넓어도 둔다(``ilike``). 낱말 덮기 팔은
-    나머지가 두 낱말 이상일 때만 둔다 — 3글자 이상 낱말이 있으면 그 낱말을 GIN 닻으로(``anchor``),
-    없으면 좁은 지역에서만 지역 색인으로 훑는다(``scan``).
+    나머지가 두 낱말(두 글자 이상) 이상일 때만 둔다 — 문자·숫자 3글자 이상 낱말이 있으면 그 낱말을
+    GIN 닻으로(``anchor``), 없으면 좁은 지역에서만 지역 색인으로 훑는다(``scan``). 구두점만인
+    나머지("...")는 trigram이 없어 GIN이 색인 전체를 읽으므로 짧은 나머지로 본다.
     """
     region_rows = (
         await session.execute(
@@ -7386,7 +7406,7 @@ async def _search_region_arms(session: AsyncSession, region: RegionSearch) -> _S
     ).scalar_one()
     narrow = int(region_rows) <= _SEARCH_REGION_SCAN_MAX_ROWS
     long_remainder = (
-        len(search_alias_key(region.remainder)) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS
+        _trigram_chars(search_alias_key(region.remainder)) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS
     )
     name_mode: _SearchRegionName = (
         "ilike" if long_remainder else ("strpos" if narrow else None)
@@ -7394,7 +7414,7 @@ async def _search_region_arms(session: AsyncSession, region: RegionSearch) -> _S
     tokens = _search_region_tokens(region)
     token_mode: _SearchRegionTokens = None
     if len(tokens) >= 2:
-        if max(len(token) for token in tokens) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS:
+        if _search_region_token_anchor(tokens) is not None:
             token_mode = "anchor"
         elif narrow:
             token_mode = "scan"
@@ -7430,7 +7450,8 @@ def _search_region_params(
     params: dict[str, Any] = {
         "region_codes": list(region.sigungu_codes),
         "rem_compact": rem_compact,
-        # 나머지가 분류 낱말이면 tail 이름 일치를 끈다(``_feature_search_score_cte``).
+        # 나머지가 분류 낱말이면 tail 이름 일치를 끈다(``_feature_search_score_cte``). 분류 낱말은
+        # 분류 이름의 앞부분 일치다("캠핑" → 캠핑장, "한옥" → 한옥체험업 — ``core.search_region``).
         "rem_is_category": bool(region.category_codes),
     }
     if arms.name_mode == "ilike":
@@ -7442,8 +7463,9 @@ def _search_region_params(
     params["rem_token_likes"] = (
         [_like_contains_pattern(token) for token in tokens] if len(tokens) >= 2 else None
     )
-    if arms.token_mode == "anchor":
-        params["rem_token_anchor"] = _like_contains_pattern(max(tokens, key=len))
+    anchor = _search_region_token_anchor(tokens)
+    if arms.token_mode == "anchor" and anchor is not None:
+        params["rem_token_anchor"] = _like_contains_pattern(anchor)
     return params
 
 

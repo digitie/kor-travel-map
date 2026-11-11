@@ -1325,7 +1325,7 @@ def test_feature_search_cursor_v1_is_rejected_as_unsupported_version() -> None:
         page_size=10,
         include_total=False,
     )
-    assert feature_repo._SEARCH_CURSOR_VERSION == 5
+    assert feature_repo._SEARCH_CURSOR_VERSION == 6
     v1_cursor = feature_repo._encode_search_cursor_payload(
         {
             "v": 1,
@@ -1410,7 +1410,7 @@ def test_feature_search_region_sql_variants_bind_only_what_they_use() -> None:
         )
         variant = region if categories else replace(region, category_codes=())
         if token_mode is not None:
-            variant = replace(variant, remainder="서프 카페")
+            variant = replace(variant, remainder="서프쉑 카페")
         params = feature_repo._search_region_params(variant, arms)
         key = (name_mode, categories, token_mode)
         assert used & region_binds == set(params), key
@@ -1934,3 +1934,24 @@ def test_alias_rank_revision_rejects_signed_v2_cursor() -> None:
         feature_repo._search_cursor_params(
             cursor, contract=contract, signing_key=_SEARCH_CURSOR_KEY,
         )
+
+
+def test_search_region_tokens_drop_one_char_words_and_pick_an_alnum_anchor() -> None:
+    from kortravelmap.core.search_region import RegionSearch
+
+    def _region(remainder: str) -> RegionSearch:
+        return RegionSearch(
+            region_label="부산", sigungu_codes=("26110",), remainder=remainder, category_codes=()
+        )
+
+    # 한 글자 낱말은 낱말 덮기에서 뺀다 — "국밥 1"은 낱말 하나("국밥")라 덮기가 없다.
+    assert feature_repo._search_region_tokens(_region("국밥 1")) == ("국밥",)
+    assert feature_repo._search_region_tokens(_region("서프 카페")) == ("서프", "카페")
+    # 구두점만인 낱말은 닻이 될 수 없다(trigram이 없다).
+    assert feature_repo._search_region_token_anchor(("카페", "...")) is None
+    assert feature_repo._search_region_token_anchor(("카페", "서프쉑")) == "서프쉑"
+    params = feature_repo._search_region_params(
+        _region("국밥 1"),
+        feature_repo._SearchRegionArms(name_mode="strpos", categories=False),
+    )
+    assert params["rem_token_likes"] is None
