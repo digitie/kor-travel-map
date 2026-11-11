@@ -1971,6 +1971,7 @@ def test_search_rank_digits_end_with_specificity_then_prominence() -> None:
         feature_repo._SEARCH_RANK_GROUP_WEIGHT,
         feature_repo._SEARCH_RANK_EXACT_WEIGHT,
         feature_repo._SEARCH_RANK_SPECIFICITY_WEIGHT,
+        feature_repo._SEARCH_RANK_FULLNESS_WEIGHT,
         feature_repo._SEARCH_RANK_PROMINENCE_WEIGHT,
     ]
     assert weights[-1] == 1

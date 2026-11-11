@@ -1906,12 +1906,15 @@ WITH candidates AS (
 #: "설해원(양양국제공항)"보다, "서울역"을 찾으면 역이 "서울역사박물관"보다 앞이다. 식음·주차처럼
 #: 목적지가 아닌 분류의 이름 일치는 종전대로 그룹 **뒤**에서만 가른다 — "하회마을"이라는 서울
 #: 음식점이 이름에 "하회마을"을 품은 관광지보다 앞서지 않는다(436의 결정 그대로).
-_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 1_000_000
-_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 100_000
-_SEARCH_RANK_DESTINATION_EXACT_WEIGHT: Final[int] = 10_000
-_SEARCH_RANK_GROUP_WEIGHT: Final[int] = 1_000
-_SEARCH_RANK_EXACT_WEIGHT: Final[int] = 100
-_SEARCH_RANK_SPECIFICITY_WEIGHT: Final[int] = 10
+_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 10_000_000
+_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 1_000_000
+_SEARCH_RANK_DESTINATION_EXACT_WEIGHT: Final[int] = 100_000
+_SEARCH_RANK_GROUP_WEIGHT: Final[int] = 10_000
+_SEARCH_RANK_EXACT_WEIGHT: Final[int] = 1_000
+_SEARCH_RANK_SPECIFICITY_WEIGHT: Final[int] = 100
+#: 이름 전체 일치(0) vs tail·끝 한글 괄호 일치(1) — 인지도가 유사도보다 먼저 가르게 되며 유사도가
+#: 대신 가르던 순서("광안리" > "아크앤북 광안리")를 자리로 고정한다(2026-11-12 평가).
+_SEARCH_RANK_FULLNESS_WEIGHT: Final[int] = 10
 _SEARCH_RANK_PROMINENCE_WEIGHT: Final[int] = 1
 _SEARCH_RANK_DIGIT_MAX: Final[int] = 9
 if SEARCH_PROMINENCE_MAX > _SEARCH_RANK_DIGIT_MAX:  # pragma: no cover — 상수 검사
@@ -1923,8 +1926,9 @@ _SEARCH_RANK_BASE_MAX: Final[int] = (
     + _SEARCH_RANK_BBOX_WEIGHT
     + _SEARCH_RANK_DESTINATION_EXACT_WEIGHT
     + _SEARCH_RANK_DIGIT_MAX * _SEARCH_RANK_GROUP_WEIGHT
-    + 2 * _SEARCH_RANK_EXACT_WEIGHT
+    + _SEARCH_RANK_EXACT_WEIGHT
     + _SEARCH_RANK_SPECIFICITY_WEIGHT
+    + _SEARCH_RANK_FULLNESS_WEIGHT
     + SEARCH_PROMINENCE_MAX * _SEARCH_RANK_PROMINENCE_WEIGHT
 )
 #: 지역 일치 자리(#1459 §7). 검색어에서 지역 토큰을 떼어 낸 지역 검색("강릉 호텔")에서만 쓴다 —
@@ -2470,12 +2474,14 @@ scored AS (
           -- (역·휴게소·공항·여객선터미널·전통시장)는 관광과 같은 그룹이다.
           + {_search_destination_exact_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
           -- 이름 일치(분류 불문): 같은 그룹 안에서 이름이 같은 행이 앞.
-          -- 0 이름 전체 일치, 1 첫 낱말을 뗀 나머지만 일치(tail), 2 불일치.
-          + CASE WHEN name_exact_full THEN 0 WHEN name_exact THEN 1 ELSE 2 END
-            * {_SEARCH_RANK_EXACT_WEIGHT}
+          + CASE WHEN name_exact THEN 0 ELSE 1 END * {_SEARCH_RANK_EXACT_WEIGHT}
           -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
             * {_SEARCH_RANK_SPECIFICITY_WEIGHT}
+          -- 이름 전체 일치: 이름 전체가 같은 행이 첫 낱말을 뗀 나머지(tail)·끝 한글 괄호를 뗀
+          -- 이름만 같은 행보다 앞. 분류 구체성 다음이다("안동 도산서원"은 Tier 1만인
+          -- "도산서원"보다 앞).
+          + CASE WHEN name_exact_full THEN 0 ELSE 1 END * {_SEARCH_RANK_FULLNESS_WEIGHT}
           -- 검색 인지도(P6): 나머지 자리가 같으면 인지도가 높은 행이 앞(유사도보다 먼저).
           + ({SEARCH_PROMINENCE_MAX} - COALESCE(search_prominence, {SEARCH_PROMINENCE_DEFAULT}))
             * {_SEARCH_RANK_PROMINENCE_WEIGHT}
