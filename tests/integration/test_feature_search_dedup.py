@@ -358,7 +358,10 @@ async def test_effective_group_sql_matches_core_function(
 
 
 async def test_search_turns_jit_off_for_its_transaction(migrated_session: AsyncSession) -> None:
-    """검색은 JIT 컴파일이 실행보다 비싸다(prod "부산 맛집" 7.6 s 중 7.2 s) — 이 transaction만 끈다."""
+    """검색은 JIT 컴파일이 실행보다 비싸다(prod "부산 맛집" 7.6 s 중 7.2 s).
+
+    이 transaction에서만 끈다.
+    """
     await migrated_session.execute(text("SET LOCAL jit = on"))
     await _page(migrated_session, "신륵사접기관광지", page_size=8)
     assert (await migrated_session.execute(text("SHOW jit"))).scalar_one() == "off"
