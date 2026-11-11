@@ -60,22 +60,36 @@ Map 도메인 API와 상태는 common으로 이동하지 않는다. 공통 소�
 
 로컬 비밀 런북을 읽고 gitignore 경로에만 보존했다. n150의 실제 배포 project는
 `kor-travel-docker-manager`, 대상 service는 `kor-travel-map-ui`,
-현재 container는 `kor-travel-map-ui-latest`다. 이번 변경은 UI만 재생성한다.
+현재 container는 `kor-travel-map-ui-latest`다. 이번 변경의 배포 범위는 UI다.
+실제 container의 compose working_dir는 `/opt/kor-travel-docker-manager`, config_files label은
+`-`(stdin으로 전달된 frozen render)다. 일반 checkout compose를 정본으로 간주할 수 없다.
+Manager의 pin/revision 계약과 실제 frozen render에서 UI 단독 교체 경로를 부모가 확정해야 한다.
 현재 UI image revision은 `fd1d770162e8253020a936ec552a4395500f444e`로 확인했다.
 
 1. 부모 final freeze의 공통/upstream immutable SHA·tgz·원장을 동일하게 다시 설치하고 모든 gate를 통과한다.
 2. 독립 리뷰 2개·CI·PR merge 뒤 부모 go를 확인한다. merge exact SHA를 빌드 revision으로 기록한다.
 3. n150에 merge SHA의 clean 소스를 준비한다. 기존 .env*·override·런타임 비밀은 보존하며
    node_modules/.next/.venv/.git을 소스 동기화에 섞지 않는다.
-4. Docker Manager 실제 compose 컨텍스트에서 `kor-travel-map-ui`만 로컬 빌드한다.
+4. 부모가 Manager의 배포 lock·현재 pin/receipt·frozen render와 UI 단독 교체 허용 여부를 확인한다.
+   로컬 런북의 옛 `ktdctl map --build`나 일반 checkout compose로 우회하지 않는다.
+   확정된 render의 `kor-travel-map-ui` build context에서 exact source를 로컬 빌드한다.
    최종 이미지에 exact revision label을 확인하고 이전 image ID를 복구용으로 기록한다.
    이미지 태그는 Manager compose의 실제 image 이름을 확인해 merge SHA 12자로 추가 추적한다.
-5. 같은 컨텍스트에서 `docker compose up -d --no-deps kor-travel-map-ui`로 UI만 재생성한다.
+5. 부모가 확정한 Manager 배포 경로에서 `--no-deps`에 해당하는 UI 단독 재생성을 실행한다.
+   전체 `rebuild-pinned`는 DB/API/Dagster까지 범위가 확장될 수 있어 이번 변경만으로 실행하지 않는다.
    DB/RustFS/API/Dagster 수명주기와 migration을 건드리지 않는다.
 6. container healthy, revision, frontend 응답 및 기존 API health를 확인한다.
    비밀값 출력 없이 auth hash 존재 여부를 검사하고 로그인 POST의 200/Set-Cookie를 확인한다.
    브라우저에서 로그인·운영 요약·대형 목록 정렬/선택/스크롤·Dialog 포커스·지도 초기화 화면을 확인한다.
-7. 실패하면 이전 image ID로 UI만 복구하고 동일 로그인/health 검증을 반복한다.
+7. 실패하면 배포를 중단하고 부모가 승인한 Manager 복구 경로에서 UI를 복구한 뒤 동일 로그인/health를 검증한다.
 
 후보 배포는 실행하지 않았다. 남은 실제 blocker는 common LoginForm 수정·최종 산출물 freeze와
 격리 e2e/독립 리뷰/CI/merge/부모 go다.
+
+
+## 추가 지도 호환성 확인
+
+최신 upstream은 키가 비면 MapLibre를 생성하지 않는다. 기존 Map과 격리 e2e는 빈 배경 위에
+도메인 마커/geometry를 렌더링한다. 부모에게 explicit mapStyle public API와 명시 style의
+missing-key gate 예외를 요청했다. 앱에서 가짜 키나 자체 Map 생성자로 우회하지 않는다.
+n150의 exact commit checkpoint로 영향 범위를 재현 중이다.

@@ -1,7 +1,9 @@
 # 2026-11-11 Common UI 검토
 
+이 목록은 구현 전 검색 결과다. 현재 이관 결과와 잔여 gate는 [통합 기록](common-unification-20261111.md)을 참조한다.
 
-## table
+
+## 표 초기 조사
 
 ```text
 packages/kor-travel-map-admin/frontend/e2e/home-nav.spec.ts:778:    // pipeline executions 테이블은 즉시 resolve되므로 DataTable skeleton과
@@ -174,7 +176,7 @@ packages/kor-travel-map-admin/frontend/src/app/admin/features/curated/curation-c
 packages/kor-travel-map-admin/frontend/src/app/admin/features/curated/curation-quarantine-panel.tsx:581:    <Table data-testid="quarantine-items-table">
 ```
 
-## overlay
+## 오버레이 초기 조사
 
 ```text
 packages/kor-travel-map-admin/frontend/src/components/help-tip.tsx:55:    <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
@@ -245,7 +247,7 @@ packages/kor-travel-map-admin/frontend/src/app/admin/enrichment-reviews/enrichme
 packages/kor-travel-map-admin/frontend/src/app/admin/enrichment-reviews/enrichment-review-client.tsx:265:            <DialogDescription>
 ```
 
-## map
+## 지도 초기 조사
 
 ```text
 packages/map-marker-react/vite.config.ts:17:      external: ["react", "react-dom", "maplibre-gl"],

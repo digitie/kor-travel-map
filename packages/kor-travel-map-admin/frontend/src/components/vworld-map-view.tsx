@@ -51,8 +51,8 @@ import {
 //:
 //: 파일은 `scripts/copy-maplibre-worker.mjs`가 `predev`/`prebuild`에서
 //: `public/maplibre/`로 복사한다(상류 문서의 Turbopack 절). 이 호출은 지도를
-//: 만들기 전에 한 번만 돌면 되므로 모듈 스코프에 둔다 — 이 파일이 저장소에서
-//: `new maplibregl.Map`을 부르는 **유일한** 자리다.
+//: 만들기 전에 한 번만 돌면 되므로 모듈 스코프에 둔다. 지도 생성 자체는
+//: upstream VWorldMapView가 맡는다.
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
 
 const CLUSTER_SOURCE_ID = "kor-feature-clusters";
@@ -73,9 +73,7 @@ interface VWorldMapViewProps {
   layerType?: VWorldLayerType;
   maxZoom?: number;
   minZoom?: number;
-  // navigation/scale은 mount-time 전용이다: map 생성 effect(deps=[]) 안에서만
-  // 읽으므로 mount 이후 값 변경은 무시된다. 동적 토글이 필요해지면 [map,
-  // navigation, scale] 의존 별도 effect로 addControl/removeControl을 옮길 것.
+  // navigation/scale 제어는 upstream public props로 전달한다.
   navigation?: boolean;
   scale?: boolean;
   className?: string;
