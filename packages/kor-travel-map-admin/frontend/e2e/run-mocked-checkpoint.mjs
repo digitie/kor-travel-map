@@ -251,7 +251,7 @@ function runCleanupCommand(args) {
     const forceTimer = setTimeout(() => {
       terminateChildGroup(child, "SIGKILL");
       finish(1);
-    }, 1_000);
+    }, 10_000);
     child.once("error", () => finish(1));
     child.once("exit", (status) => finish(status ?? 1));
   });

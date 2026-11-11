@@ -1,3 +1,12 @@
+## 2026-11-11 — Map 전체 브라우저 통과와 checkpoint gate 정렬
+
+- exact1ce5a1148에서 286/286 통과·flake0을 확인했다. A는 과거 실패 재현 단계이므로
+  성공 상태를 거부했다. 기존 manifest도 284개에 머물러 실제286개 inventory와 달랐다.
+- 실패·skip 허용 목록은 빈 상태로 유지하고 관측한286개 identity hash만 재고정했다.
+  정식 성공 checkpoint D로 다시 검증한다.
+- Docker 정리 CLI 1초 제한 때문에 제거 확인이 실패했다. 소유권·ID·잔존 검사는 유지하고
+  명령 제한을10초로 늘려 지연된 daemon 응답을 기다린다. 운영 자원은 수정하지 않는다.
+
 ## 2026-11-11 — Map 두 번째 checkpoint285/286와 마지막 fixture 정렬
 
 - 지도/탭 포커스/History/초안 복원은 통과했다. 남은1개는 orphan run의 summary fixture누락이다.
