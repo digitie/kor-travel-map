@@ -1,5 +1,25 @@
 # 2026-11-11 관리자 공통 UI 통합 기록
 
+
+## 현재 상태 — integration-6-review
+
+common source a14301c01a87d7d56e8da5bcf24c0a7f145d05a1,
+지도 source 9a7a348b02d61969b394c681b024d5851eef836b의 검증 후보를 설치했다.
+최종 릴리스 freeze 전이며 아래 candidate5의 실패 기록은 이력이다.
+
+- UI0.2.0/tokens0.1.1/web1.0.3/core1.0.1과 원장은 부모와 byte-exact다. RN 미사용.
+- Map wrapper는 설정되지 않은 키에 module const background style을 public mapStyle로 전달한다.
+  style 참조를 재사용해 불필요한 setStyle/도메인 source 재생성을 막는다.
+- 기존 LoginForm 자동완성2건을 포함한 전체 unit427개와 mapStyle 형태6개가 통과했다.
+  lint/type/build33routes/Doctor322files0/AST 원장 guard/npm tree/NextSharp 통과.
+- 별도 marker unit/typecheck, user-client 생성타입·컴파일도 통과했다.
+- npm이 기존 hoisted core1.0.0을 유지해 core1.0.1 registry404가 났다. Map의 해당
+  core/web 설치 디렉터리와 두 lock 항목만 갱신해 명시 file 재설치를 통과했다.
+  force/legacy peer 옵션이나 다른 의존성의 전면 lock 재생성은 사용하지 않았다.
+- 모든 신규 검증 로그는 작업 루트 validation/map에 보존한다. 공유 /tmp 정리는 하지 않는다.
+- n150 exact 최종 checkpoint, 최종 후보 freeze, 독립 리뷰/CI/merge/부모 go는 후속 gate다.
+  기능 diff가 있는 후보6이므로 286 mock checkpoint 전체로 실제 회귀 복구를 검증한다.
+
 ## 범위와 결과
 
 Map 전용 ext4 clone의 `agent/codex-common-unification-20261111`에서 작업했다.

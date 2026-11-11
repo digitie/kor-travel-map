@@ -29,6 +29,7 @@ import {
   type ClusterPriceSummaryPoint,
 } from "@/lib/price-marker-label";
 import { scheduleKstMidnightTicks } from "@/lib/price-freshness";
+import { buildVWorldStyle, isVWorldApiKeyConfigured } from "@/lib/vworld-style";
 import {
   VWorldMapView as SharedVWorldMapView,
   useMap,
@@ -54,6 +55,9 @@ import {
 //: 만들기 전에 한 번만 돌면 되므로 모듈 스코프에 둔다. 지도 생성 자체는
 //: upstream VWorldMapView가 맡는다.
 maplibregl.setWorkerUrl("/maplibre/maplibre-gl-worker.mjs");
+
+// 같은 style 참조를 유지해 무관한 재렌더가 upstream setStyle/소스 재생성을 일으키지 않는다.
+const UNCONFIGURED_MAP_STYLE = buildVWorldStyle(undefined);
 
 const CLUSTER_SOURCE_ID = "kor-feature-clusters";
 const GEOMETRY_SOURCE_ID = "kor-feature-geometries";
@@ -113,6 +117,7 @@ export function VWorldMapView({
   onError,
 }: VWorldMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const configuredKey = isVWorldApiKeyConfigured(apiKey) ? apiKey.trim() : "";
   return (
     <div
       ref={containerRef}
@@ -124,7 +129,8 @@ export function VWorldMapView({
       }}
     >
       <SharedVWorldMapView
-        apiKey={apiKey ?? ""}
+        apiKey={configuredKey}
+        mapStyle={configuredKey ? undefined : UNCONFIGURED_MAP_STYLE}
         center={center}
         zoom={zoom}
         layerType={layerType}

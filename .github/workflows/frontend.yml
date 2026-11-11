@@ -33,8 +33,8 @@ jobs:
 
       - name: npx --yes npm@12.0.1 ci (workspace 루트 — map-marker-react + frontend)
         # 루트 package.json의 npm workspaces 로 두 패키지 한 번에 설치.
-        # admin frontend는 maplibre-gl + in-repo VWorld 스타일 빌더 사용 — 외부 git
-        # dep 없음 (maplibre-vworld git dep는 #476에서 제거).
+        # admin frontend는 부모가 준비한 동일 vworld-map-web/core tgz의 public API를 사용한다.
+        # 외부 모노레포를 직접 설치하지 않고 vendor·원장·lock 무결성을 검사한다.
         run: npx --yes npm@12.0.1 ci --workspaces --include=optional --no-audit --no-fund
 
       # 배포 의존성(`--omit=dev`)과 dev 포함 전체 트리를 둘 다 막는다. dev 전체 게이트는

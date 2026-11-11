@@ -1,5 +1,16 @@
 # CHANGELOG
 
+## 2026-11-11 — common 후보6와 키 없는 지도 public mapStyle 복구
+
+- common `a14301c` / upstream `9a7a348`의 동일 tgz·원장을 설치했다. core는 1.0.1로
+  갱신하고 1.0.0 활성 참조·vendor를 제거했다. 라이선스/NOTICE/src 동봉 원본 bytes를 보존했다.
+- Map wrapper는 빈 키·공백·CHANGE_ME에 모듈 상수 style을 전달하고 실제 키는 upstream 기본 style을 쓴다.
+  자체 지도 생성자·가짜 키·비공개 소스 import는 추가하지 않았다.
+- 자동완성 기존 2건과 형태 회귀 6건을 포함한 unit427/427, lint/type/build33routes/Doctor0/
+  AST·원장 guard/npm tree/NextSharp 통과. n150 exact checkpoint와 최종 freeze/review/CI는 후속 gate다.
+- [후보6 검증 기록](docs/reports/common-unification-20261111.md), [산출물 출처](docs/third-party-common.md).
+
+
 ## 2026-11-11 — 관리자 common Radix/VirtualTable·지도 public API 통합 후보
 
 - 모든 admin 표를 common VirtualTable로 연결하고 Radix primitive/검색 Popover를 채택했다.
