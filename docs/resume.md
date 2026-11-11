@@ -1,3 +1,13 @@
+## 2026-11-11 — Map 정식D 브라우저286통과·Docker 후행 정리 인계
+
+- exact9d187a61d에서 D 브라우저286/286·flake0·manifest일치, Playwright child exit0.
+  runner는 n150 Docker removing 지연으로 cleanup_container_remaining exit2였다.
+  후행 exact 조회에서 소유 container/network/image 잔존0과 worker/runner 종료를 확인했다.
+- unit427·reporter32·lint/type/build33routes·Doctor322files0·최신 localcanonical 통과.
+  원시exit2는 보존하고 인프라 gate 재확인은 부모 CI에 인계한다.
+- 부모소유 workflow는 커밋에서 제외·보존. 최종pack/foundation CI/독립2리뷰/merge/부모go 뒤 배포한다.
+  [검증·실제배포계획](reports/common-unification-20261111.md), taskroot의 전용handoff/리뷰패킷 참조.
+
 ## 2026-11-11 — Map 두 번째 checkpoint285/286와 마지막 fixture 정렬
 
 - 지도/탭 포커스/History/초안 복원은 통과했다. 남은1개는 orphan run의 summary fixture누락이다.

@@ -17,8 +17,14 @@ common source a14301c01a87d7d56e8da5bcf24c0a7f145d05a1,
   core/web 설치 디렉터리와 두 lock 항목만 갱신해 명시 file 재설치를 통과했다.
   force/legacy peer 옵션이나 다른 의존성의 전면 lock 재생성은 사용하지 않았다.
 - 모든 신규 검증 로그는 작업 루트 validation/map에 보존한다. 공유 /tmp 정리는 하지 않는다.
-- n150 exact 최종 checkpoint, 최종 후보 freeze, 독립 리뷰/CI/merge/부모 go는 후속 gate다.
-  기능 diff가 있는 후보6이므로 286 mock checkpoint 전체로 실제 회귀 복구를 검증한다.
+- exact9d187a61d에서 정식 checkpoint D 브라우저286/286, flake0, manifest 일치를 확인했다.
+  Playwright child exit0이다. runner는 Docker 삭제 지연 때문에 cleanup_container_remaining exit2였다.
+  소유 label·image·revision이 일치하는 container는 removing/PID0이었고,
+  후행 조회에서 해당 container/network/image 잔존0과 worker/runner 종료를 확인했다.
+  원래 runner exit2는 수정하지 않는다. 인프라 gate는 최종 CI에서 재확인해야 한다.
+- 부모 소유 common-frontend-policy.yml은 보존·커밋 제외한다. code5e064808fabd3a54968dd20910eaccd04eba9f38
+  + 최신 main data의 원격 CI는 foundation 병합 뒤 부모가 확인한다. local canonical 검사는 통과했다.
+- 최종 후보 freeze·독립 리뷰 재확인·CI/merge/부모 go 뒤 실제 UI 이미지를 교체한다.
 
 ## 범위와 결과
 
@@ -40,7 +46,7 @@ HelpTip도 인스턴스별 Zustand를 사용한다. Pretendard font와 Radix bri
 
 ## 의존성과 CI
 
-현재 산출물은 `integration-5-review` 후보이며 최종 freeze 전이다.
+현재 산출물은 `integration-6-review` 후보이며 최종 freeze 전이다.
 [출처와 SHA512](../third-party-common.md), [원장](../../packages/kor-travel-map-admin/frontend/common-artifacts.json)에
 부모와 동일한 4개 tgz의 정보를 기록했다. 이전 vendor는 제거했다.
 ESLint 10.14.0 / Doctor 0.9.22 / exact 최신 targets를 적용했다.
@@ -54,7 +60,7 @@ exact policy 및 vendor/원장/lock integrity를 확인한다. Doctor는 full/wa
 기존 local Table v8 compiler 예외 검사는 common v9 reexport 경계 검사로 바꿨다.
 공식 Playwright 1.65.0 noble 이미지 digest는 4개 runner/build 파일에 동일하게 고정했다.
 
-## 현재 검증
+## candidate5 검증 이력
 
 - install script를 허용한 npm 12.0.1 clean ci 통과(candidate4), candidate5 명시 재설치 통과.
 - candidate5 lint/type-check/production build(33 routes)/AST artifact guard 통과.
@@ -89,6 +95,11 @@ Map 도메인 API와 상태는 common으로 이동하지 않는다. 공통 소�
 Manager의 pin/revision 계약과 실제 frozen render에서 UI 단독 교체 경로를 부모가 확정해야 한다.
 현재 UI image ID는 `sha256:0ec4e9bf0ec31ecf43926ba00680afa133e5ae2e5d15392b1a7a4741d40eb317`,
 revision은 `fd1d770162e8253020a936ec552a4395500f444e`로 확인했다.
+현재 container의 Config.Image도 위 sha256 ID 자체다. 운영 컨테이너가 mutable 태그를
+직접 참조한다고 가정하지 않는다. 배포 시 Manager가 선언한 image repository에
+merge SHA 앞12자 태그를 추가하고, 실제 교체·복구 판단은 resolved image ID와 receipt로 기록한다.
+이 읽기 전용 확인에서 compose 경로와 stdin render도 다시 일치했다.
+
 
 1. 부모 final freeze의 공통/upstream immutable SHA·tgz·원장을 동일하게 다시 설치하고 모든 gate를 통과한다.
 2. 독립 리뷰 2개·CI·PR merge 뒤 부모 go를 확인한다. merge exact SHA를 빌드 revision으로 기록한다.
@@ -107,11 +118,11 @@ revision은 `fd1d770162e8253020a936ec552a4395500f444e`로 확인했다.
    브라우저에서 로그인·운영 요약·대형 목록 정렬/선택/스크롤·Dialog 포커스·지도 초기화 화면을 확인한다.
 7. 실패하면 배포를 중단하고 부모가 승인한 Manager 복구 경로에서 UI를 복구한 뒤 동일 로그인/health를 검증한다.
 
-후보 배포는 실행하지 않았다. 남은 실제 blocker는 common LoginForm 수정·최종 산출물 freeze와
-격리 e2e/독립 리뷰/CI/merge/부모 go다.
+후보 배포는 실행하지 않았다. common LoginForm과 키 없는 지도 회귀는 후보6에서 해결했다.
+최종 산출물 freeze·Docker 정리 gate 재확인·독립 리뷰/CI/merge/부모 go가 남아 있다.
 
 
-## 추가 지도 호환성 확인
+## candidate5 지도 호환성 이력
 
 최신 upstream은 키가 비면 MapLibre를 생성하지 않는다. 기존 Map과 격리 e2e는 빈 배경 위에
 도메인 마커/geometry를 렌더링한다. 부모에게 explicit mapStyle public API와 명시 style의
@@ -182,3 +193,43 @@ WSL공간확보를위해 종료된 Map .next210MB/rootnode_modules906MB/frontend
 기존사용자cache·타agent파일·공유/tmp는건드리지않았고 n150의진행검증은보존했다.
 이후로컬재설치는시작하지않았다. 현재중앙checker는 --policy 최신생성policy + --canonical 원장으로통과한다.
 부모소유신규common-frontend-policy.yml은보존하며본인commit에포함하지않는다.
+
+
+## 성공 checkpoint와 inventory 정산
+
+exact1ce5a1148에서 브라우저286개가 모두 통과했지만 runner exit는2였다.
+회귀 재현용 A 단계는 과거 실패 상태를 기대하고, 기존 manifest는284개/옛 identity hash에 머물러 있었다.
+실패·skip 허용 목록은 빈 상태로 유지하면서 관측286개 identity의
+SHA256 dc85a2c127f1ddb68fef6ae55dc71a04ddb2005bfeb784c94249aaf535d939a5를 재고정했다.
+성공 검증은 D 단계로 실행한다. A 결과를 runner 전체 통과로 보고하지 않는다.
+
+Docker 정리 CLI의1초 제한으로 container 제거 잔존/이미지 확인 오류도 분류됐다.
+사후 exact 소유 자원 검사에서 container/network 잔존0을 확인하고,
+해당 실행 image tag와 ID가 기록과 일치함을 검증한 뒤 그것만 제거했다.
+cleanup 명령의 대기를30초로 늘렸고 소유권·ID 일치·잔존 검사는 유지했다.
+이에 따라9d187a61d에서 lint/기존 reporter 단위32개/Doctor322files0이 재통과했다.
+정식D 전체286개와 manifest도 통과했지만, 위와 같이 실제 Docker 삭제 지연은 인프라 실패로 보존했다.
+애플리케이션 src·의존성·lock·vendor는7fbfd3cac와 동일하다.
+
+
+## 최종 소스 검증 및 인계
+
+- 소스 검증 기준:9d187a61d464c55713f91979ed0c5f07eea33d2a.
+  앱 runtime source/의존성/lock/vendor는 전체unit427개 통과본7fbfd3cac와 동일하다.
+- 정식D:286/286 PASS, flake0, skip0, manifest inventory 일치, Playwright child exit0.
+  전체 runner exit2의 유일 사유는 cleanup_container_remaining이다.
+  n150 부하 중 Docker가 removing/PID0 상태를 유지한 실제 인프라 지연이었다.
+  후행 exact 조회는 container/network/image 잔존0, worker2055942/runner2059958 종료를 확인했다.
+- 최신 lint/type/build33routes/Doctor full warning gate 진단0, reporter 단위32개,
+  local canonical source·원장 검사 통과. 검사별 raw log는 taskroot validation/map에 보존했다.
+- 원시D 로그 c6-final-D-checkpoint.log, 상태 c6-final-D-state.json,
+  후행 정리 증거 c6-final-cleanup-postcondition.json, 요약 c6-validation-summary.json.
+- 마지막 문서 commit은 이 결과·배포 컨텍스트·재개 위치만 기록한다. 테스트 입력 변경은 없다.
+- 부모 소유 신규 .github/workflows/common-frontend-policy.yml은 보존하며 본인 commit에서 제외했다.
+  원격 canonical CI는 foundation main 정책 병합 뒤에 통과할 수 있다.
+- 남은 gate: 최종 공통 pack/policy 동기화, Docker 정리 포함 CI 재확인,
+  독립2리뷰 recheck, PR merge, 부모 go. 후보 이미지는 운영에 배포하지 않았다.
+
+인계 파일은 taskroot AGENT-HANDOFF-codex-map-weather.md와 MAP-REVIEW-PACKET.md다.
+WSL Map node_modules는 종료된 본인 생성물 정리로 없으며, n150 검증 checkout 의존성은 보존했다.
+종료된 경로 외 공유 /tmp glob·타 agent·기존 사용자 cache는 정리하지 않았다.
