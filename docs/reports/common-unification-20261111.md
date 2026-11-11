@@ -166,3 +166,19 @@ exact517071481의 286개 checkpoint는230통과/56실패/flake0으로 완료했�
 공유 WSL ENOSPC 때문에 일부 검사가 실행되지 못했다. 삭제한 것은 Map 소유 .next와
 본인이 만든 validation/map/c6-source-517071481d9d.pack 전송 파일뿐이다.
 다른 agent 파일이나 공유 /tmp 경로는 삭제하지 않았다. 공간 확보 뒤 검사 재실행은 통과했다.
+
+
+## 두 번째 checkpoint와 orphan fixture 정합성
+
+exact7fbfd3cac 전체286개는285통과/1실패/flake0으로 완료했다.
+지도·도움말·탭 포커스/History·정책 초안 복원 회귀는 모두 통과했다.
+남은1개는 새 summary mock을 빈 목록으로 둬 기존 run-orphan 실패 가시성 기대가 깨진 경우다.
+Dagster summary/list/detail fixture에서 같은 OpenAPI형식 ORPHAN_DAGSTER_RUN을 공유하도록 고쳤고
+상세 열기는 공통의 현재 접근성 이름을 사용한다. 실패 원인 본문 검사는 그대로 유지한다.
+n150의 기존 의존성에서 수정된 e2e 타입·lint·전체 spec로딩이 통과했다.
+애플리케이션 runtime source는7fbfd3cac와 동일하다.
+
+WSL공간확보를위해 종료된 Map .next210MB/rootnode_modules906MB/frontendnode_modules23MB를 정리했다.
+기존사용자cache·타agent파일·공유/tmp는건드리지않았고 n150의진행검증은보존했다.
+이후로컬재설치는시작하지않았다. 현재중앙checker는 --policy 최신생성policy + --canonical 원장으로통과한다.
+부모소유신규common-frontend-policy.yml은보존하며본인commit에포함하지않는다.

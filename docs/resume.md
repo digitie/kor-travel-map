@@ -1,3 +1,10 @@
+## 2026-11-11 — Map 두 번째 checkpoint285/286와 마지막 fixture 정렬
+
+- 지도/탭 포커스/History/초안 복원은 통과했다. 남은1개는 orphan run의 summary fixture누락이다.
+- summary/list/detail에 같은 실패 run을 넣고 공통 상세 버튼 이름으로 검사한다.
+  e2e 타입/lint/spec로딩 통과. 앱runtime source변경은없다.
+- 부모소유 common-frontend-policy.yml은제외·보존, localcanonical은최신외부policy와원장으로통과.
+
 ## 2026-11-11 — 후보6 브라우저 회귀와 fixture 보완
 
 - 첫 checkpoint230통과/56실패를 보존했다. 지도 public mapStyle 복구는 브라우저에서 확인됐다.
