@@ -1,3 +1,13 @@
+## 2026-11-12 — c9 정책 검사기와 동일 runtime 산출물 동기화
+
+- integration-9-review의 사용5개 vendor/원장/lock SHA512를 대조했다.
+  UI·tokens의 이전 c8과 다른 archive member는 check-dependencies.mjs 하나씩뿐이다.
+  runtime·CSS bytes와 core/web/Lightning CSS fix.4는 그대로다.
+- explicit npm12 lock-only 설치로 같은 파일명 UI/tokens의 integrity를 갱신했다.
+  실제 설치·guard·Doctor·fresh286 D와 cleanup exit0는 n150 전용 cached checkout에서 확인한다.
+- c8 단위검사431통과/1실패 원시 로그를 보존했다. 수동중복판정의 실패 안내 대기를 재검증하며
+  실패/skip 허용이나 타임아웃 완화 없이 원인을 확인한다. 부모 중앙 workflow는 제외·보존한다.
+
 ## 2026-11-12 — c8 동일 산출물 채택과 정식 D 정리 gate 재검증
 
 - 공통670a753의 integration-8-review UI/tokens와 동일 core/web, Lightning CSS fix.4를
