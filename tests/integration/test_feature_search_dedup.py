@@ -244,9 +244,14 @@ async def test_collapse_is_stable_when_the_representative_moves_pages(
     """두 페이지에 걸친 경계에서도(cursor가 대표 행 바로 뒤) 숨긴 행이 다시 나오지 않는다."""
     ids = await _seed(migrated_session)
     q = "신륵사접기관광지"
-    first = await _page(migrated_session, q, page_size=2)
-    rest = await _page(migrated_session, q, page_size=200, cursor=first.next_cursor)
-    seen = [item.feature_id for item in (*first.items, *rest.items)]
+    seen: list[str] = []
+    cursor: str | None = None
+    for _ in range(100):
+        page = await _page(migrated_session, q, page_size=2, cursor=cursor)
+        seen.extend(item.feature_id for item in page.items)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
     assert len(seen) == len(set(seen))
     assert ids["silleuk_bracket"] not in seen
 
