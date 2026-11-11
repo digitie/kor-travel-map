@@ -51,14 +51,7 @@ import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
 import { FormTextArea } from "@/components/ui/form-textarea";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { DataTable } from "@/components/ui/data-table";
 import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { withOccurrenceKeys } from "@/lib/occurrence-key";
 
@@ -126,7 +119,6 @@ function addressLabel(address: Record<string, unknown>): string {
 }
 
 function errorMessage(error: unknown): string {
-
   return error instanceof Error ? error.message : String(error);
 }
 
@@ -149,9 +141,9 @@ function useCurationCollectionsClientController() {
   const submitCollectionInFlightRef = useRef(false);
   const submitItemInFlightRef = useRef(false);
 
-  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(
-    null,
-  );
+  const [selectedCollectionId, setSelectedCollectionId] = useState<
+    string | null
+  >(null);
   const [collectionForm, setCollectionForm] = useState<CollectionFormState>(
     INITIAL_COLLECTION_FORM,
   );
@@ -471,235 +463,279 @@ function CurationCollectionCommands({
   sourcesQuery,
   submitCollection,
   themesQuery,
-}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "collectionForm" | "commitCsv" | "createCollection" | "csvFile" | "importCsv" | "importReport" | "localError" | "message" | "mutationError" | "previewCsv" | "provenanceFile" | "setCollectionForm" | "setCsvFile" | "setImportReport" | "setLocalError" | "setMessage" | "setProvenanceFile" | "sourcesQuery" | "submitCollection" | "themesQuery">) {
+}: Pick<
+  ReturnType<typeof useCurationCollectionsClientController>,
+  | "collectionForm"
+  | "commitCsv"
+  | "createCollection"
+  | "csvFile"
+  | "importCsv"
+  | "importReport"
+  | "localError"
+  | "message"
+  | "mutationError"
+  | "previewCsv"
+  | "provenanceFile"
+  | "setCollectionForm"
+  | "setCsvFile"
+  | "setImportReport"
+  | "setLocalError"
+  | "setMessage"
+  | "setProvenanceFile"
+  | "sourcesQuery"
+  | "submitCollection"
+  | "themesQuery"
+>) {
   const previewImportCsvPending = importCsv.previewPending;
   const commitImportPending = importCsv.commitPending;
   // 전체 반영이 잠긴 이유를 버튼 아래 한 줄로 보여 준다(M35 — 색만으로 알리지 않는다).
-  const commitDisabledReason = !csvFile
-    ? "CSV 파일을 선택하고 매칭 미리보기를 먼저 실행하세요"
-    : !importReport?.data.dry_run
-      ? "매칭 미리보기를 먼저 실행하세요"
-      : importReport.data.invalid_rows > 0
-        ? `오류 ${formatCount(importReport.data.invalid_rows)}행을 먼저 해결하세요`
-        : importReport.data.issues.length > 0
-          ? `파일 오류 ${formatCount(importReport.data.issues.length)}건을 먼저 해결하세요`
-          : importCsv.isPending
-            ? "처리 중입니다"
-            : undefined;
+  const commitDisabledReason = resolveCommitDisabledReason();
+  function renderCurationCollectionCommandsState() {
+    return (
+      !csvFile ||
+      !importReport?.data.dry_run ||
+      importReport.data.invalid_rows > 0 ||
+      importReport.data.issues.length > 0 ||
+      importCsv.isPending
+    );
+  }
+  function renderCurationCollectionCommandsSectionCard1() {
+    return (
+      <SectionCard
+        description="먼저 전체 행의 Feature 매칭을 확인한 뒤 오류가 없을 때만 원자적으로 반영합니다."
+        title="CSV 업로드"
+      >
+        <FormField
+          accept=".csv,text/csv"
+          label="CSV 파일"
+          type="file"
+          onChange={(event) => {
+            setCsvFile(event.target.files?.[0] ?? null);
+            setImportReport(null);
+            setMessage(null);
+            setLocalError(null);
+          }}
+        />
+        <FormField
+          accept=".json,application/json"
+          label="Provenance JSON 파일 (공식 등대)"
+          type="file"
+          onChange={(event) => {
+            setProvenanceFile(event.target.files?.[0] ?? null);
+            setImportReport(null);
+            setMessage(null);
+            setLocalError(null);
+          }}
+        />
+        {provenanceFile ? (
+          <p className="text-xs text-text-secondary">
+            선택한 provenance:{" "}
+            <span className="font-mono">{provenanceFile.name}</span>
+          </p>
+        ) : null}
+        <div className="flex flex-col gap-1">
+          <div className="flex flex-wrap gap-2">
+            <Button
+              disabled={!csvFile || importCsv.isPending}
+              disabledReason={
+                !csvFile ? "CSV 파일을 먼저 선택하세요" : "처리 중입니다"
+              }
+              loading={previewImportCsvPending}
+              type="button"
+              variant="outline"
+              onClick={() => void previewCsv()}
+            >
+              <FileSearchIcon data-icon="inline-start" />
+              매칭 미리보기
+            </Button>
+            <Button
+              disabled={renderCurationCollectionCommandsState()}
+              disabledReason={commitDisabledReason}
+              loading={commitImportPending}
+              type="button"
+              onClick={() => void commitCsv()}
+            >
+              <UploadCloudIcon data-icon="inline-start" />
+              전체 반영
+            </Button>
+          </div>
+          <p className="min-h-[1lh] text-2xs text-text-secondary">
+            {commitDisabledReason ??
+              "미리보기 결과에 오류가 없어 전체 반영할 수 있습니다."}
+          </p>
+        </div>
+        {importReport ? <ImportReport report={importReport} /> : null}
+      </SectionCard>
+    );
+  }
+  function resolveCommitDisabledReason() {
+    return !csvFile
+      ? "CSV 파일을 선택하고 매칭 미리보기를 먼저 실행하세요"
+      : !importReport?.data.dry_run
+        ? "매칭 미리보기를 먼저 실행하세요"
+        : importReport.data.invalid_rows > 0
+          ? `오류 ${formatCount(importReport.data.invalid_rows)}행을 먼저 해결하세요`
+          : importReport.data.issues.length > 0
+            ? `파일 오류 ${formatCount(importReport.data.issues.length)}건을 먼저 해결하세요`
+            : importCsv.isPending
+              ? "처리 중입니다"
+              : undefined;
+  }
   return (
     <>
       {localError || mutationError ? (
-          <Alert variant="destructive">
-            <AlertTitle>작업 실패</AlertTitle>
-            <AlertDescription>
-              {localError ?? errorMessage(mutationError)} — 입력값을 확인한 뒤 다시 시도하세요.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {/* 조용한 결과 줄(role=status) — 축하 배너 대신 한 줄(M15). CSV 반영처럼 보이지 않는 bulk 결과도 여기. */}
-        <p
-          aria-live="polite"
-          className="min-h-[1lh] text-xs text-text-secondary"
-          role="status"
+        <Alert variant="destructive">
+          <AlertTitle>작업 실패</AlertTitle>
+          <AlertDescription>
+            {localError ?? errorMessage(mutationError)} — 입력값을 확인한 뒤
+            다시 시도하세요.
+          </AlertDescription>
+        </Alert>
+      ) : null}
+      {/* 조용한 결과 줄(role=status) — 축하 배너 대신 한 줄(M15). CSV 반영처럼 보이지 않는 bulk 결과도 여기. */}
+      <p
+        aria-live="polite"
+        className="min-h-[1lh] text-xs text-text-secondary"
+        role="status"
+      >
+        {message}
+      </p>
+
+      <div className="grid gap-6 xl:grid-cols-2">
+        <SectionCard
+          description="typed catalog에서 만든 기존 테마와 출처를 선택합니다."
+          title="컬렉션 수동 생성"
         >
-          {message}
-        </p>
-
-        <div className="grid gap-6 xl:grid-cols-2">
-          <SectionCard
-            description="typed catalog에서 만든 기존 테마와 출처를 선택합니다."
-            title="컬렉션 수동 생성"
-          >
-            <form className="grid gap-4 md:grid-cols-2" onSubmit={submitCollection}>
-              <FormField
-                required
-                label="컬렉션 키"
-                placeholder="tourism-100-2025-2026"
-                value={collectionForm.collectionKey}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    collectionKey: event.target.value,
-                  }))
-                }
-              />
-              <FormField
-                required
-                label="테마"
-                list="curation-theme-options"
-                placeholder="테마 ID"
-                value={collectionForm.themeId}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    themeId: event.target.value,
-                  }))
-                }
-              />
-              <datalist id="curation-theme-options">
-                {(themesQuery.data?.data.items ?? []).map((theme) => (
-                  <option key={theme.theme_id} value={theme.theme_id}>
-                    {theme.theme_name} · {theme.theme_slug}
-                  </option>
-                ))}
-              </datalist>
-              <FormField
-                required
-                className="md:col-span-2"
-                label="제목"
-                placeholder="2025~2026 한국관광 100선"
-                value={collectionForm.title}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    title: event.target.value,
-                  }))
-                }
-              />
-              <FormField
-                label="회차/년도"
-                placeholder="2025-2026"
-                value={collectionForm.editionKey}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    editionKey: event.target.value,
-                  }))
-                }
-              />
-              <FormField
-                label="출처"
-                list="curation-source-options"
-                placeholder="출처 ID (선택)"
-                value={collectionForm.sourceId}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    sourceId: event.target.value,
-                  }))
-                }
-              />
-              <datalist id="curation-source-options">
-                {(sourcesQuery.data?.data.items ?? []).map((source) => (
-                  <option key={source.source_id} value={source.source_id}>
-                    {source.source_name} · {source.provider}/{source.dataset_key}
-                  </option>
-                ))}
-              </datalist>
-              <FormSelect
-                label="상태"
-                value={collectionForm.status}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    status: event.target.value as ActiveCurationCollectionStatus,
-                  }))
-                }
-              >
-                <NativeSelectOption value="draft">초안</NativeSelectOption>
-                <NativeSelectOption value="published">게시</NativeSelectOption>
-              </FormSelect>
-              <FormSelect
-                label="공개 범위"
-                value={collectionForm.visibility}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    visibility: event.target.value as CurationCollectionVisibility,
-                  }))
-                }
-              >
-                <NativeSelectOption value="admin_only">관리자 전용</NativeSelectOption>
-                <NativeSelectOption value="public">공개</NativeSelectOption>
-              </FormSelect>
-              <FormTextArea
-                className="md:col-span-2"
-                label="설명"
-                value={collectionForm.description}
-                onChange={(event) =>
-                  setCollectionForm((current) => ({
-                    ...current,
-                    description: event.target.value,
-                  }))
-                }
-              />
-              <div className="md:col-span-2">
-                <Button loading={createCollection.isPending} type="submit">
-                  <PlusIcon data-icon="inline-start" />
-                  컬렉션 생성
-                </Button>
-              </div>
-            </form>
-          </SectionCard>
-
-          <SectionCard
-            description="먼저 전체 행의 Feature 매칭을 확인한 뒤 오류가 없을 때만 원자적으로 반영합니다."
-            title="CSV 업로드"
+          <form
+            className="grid gap-4 md:grid-cols-2"
+            onSubmit={submitCollection}
           >
             <FormField
-              accept=".csv,text/csv"
-              label="CSV 파일"
-              type="file"
-              onChange={(event) => {
-                setCsvFile(event.target.files?.[0] ?? null);
-                setImportReport(null);
-                setMessage(null);
-                setLocalError(null);
-              }}
+              required
+              label="컬렉션 키"
+              placeholder="tourism-100-2025-2026"
+              value={collectionForm.collectionKey}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  collectionKey: event.target.value,
+                }))
+              }
             />
             <FormField
-              accept=".json,application/json"
-              label="Provenance JSON 파일 (공식 등대)"
-              type="file"
-              onChange={(event) => {
-                setProvenanceFile(event.target.files?.[0] ?? null);
-                setImportReport(null);
-                setMessage(null);
-                setLocalError(null);
-              }}
+              required
+              label="테마"
+              list="curation-theme-options"
+              placeholder="테마 ID"
+              value={collectionForm.themeId}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  themeId: event.target.value,
+                }))
+              }
             />
-            {provenanceFile ? (
-              <p className="text-xs text-text-secondary">
-                선택한 provenance: <span className="font-mono">{provenanceFile.name}</span>
-              </p>
-            ) : null}
-            <div className="flex flex-col gap-1">
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  disabled={!csvFile || importCsv.isPending}
-                  disabledReason={!csvFile ? "CSV 파일을 먼저 선택하세요" : "처리 중입니다"}
-                  loading={previewImportCsvPending}
-                  type="button"
-                  variant="outline"
-                  onClick={() => void previewCsv()}
-                >
-                  <FileSearchIcon data-icon="inline-start" />
-                  매칭 미리보기
-                </Button>
-                <Button
-                  disabled={
-                    !csvFile ||
-                    !importReport?.data.dry_run ||
-                    importReport.data.invalid_rows > 0 ||
-                    importReport.data.issues.length > 0 ||
-                    importCsv.isPending
-                  }
-                  disabledReason={commitDisabledReason}
-                  loading={commitImportPending}
-                  type="button"
-                  onClick={() => void commitCsv()}
-                >
-                  <UploadCloudIcon data-icon="inline-start" />
-                  전체 반영
-                </Button>
-              </div>
-              <p className="min-h-[1lh] text-2xs text-text-secondary">
-                {commitDisabledReason ?? "미리보기 결과에 오류가 없어 전체 반영할 수 있습니다."}
-              </p>
+            <datalist id="curation-theme-options">
+              {(themesQuery.data?.data.items ?? []).map((theme) => (
+                <option key={theme.theme_id} value={theme.theme_id}>
+                  {theme.theme_name} · {theme.theme_slug}
+                </option>
+              ))}
+            </datalist>
+            <FormField
+              required
+              className="md:col-span-2"
+              label="제목"
+              placeholder="2025~2026 한국관광 100선"
+              value={collectionForm.title}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  title: event.target.value,
+                }))
+              }
+            />
+            <FormField
+              label="회차/년도"
+              placeholder="2025-2026"
+              value={collectionForm.editionKey}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  editionKey: event.target.value,
+                }))
+              }
+            />
+            <FormField
+              label="출처"
+              list="curation-source-options"
+              placeholder="출처 ID (선택)"
+              value={collectionForm.sourceId}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  sourceId: event.target.value,
+                }))
+              }
+            />
+            <datalist id="curation-source-options">
+              {(sourcesQuery.data?.data.items ?? []).map((source) => (
+                <option key={source.source_id} value={source.source_id}>
+                  {source.source_name} · {source.provider}/{source.dataset_key}
+                </option>
+              ))}
+            </datalist>
+            <FormSelect
+              label="상태"
+              value={collectionForm.status}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  status: event.target.value as ActiveCurationCollectionStatus,
+                }))
+              }
+            >
+              <NativeSelectOption value="draft">초안</NativeSelectOption>
+              <NativeSelectOption value="published">게시</NativeSelectOption>
+            </FormSelect>
+            <FormSelect
+              label="공개 범위"
+              value={collectionForm.visibility}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  visibility: event.target
+                    .value as CurationCollectionVisibility,
+                }))
+              }
+            >
+              <NativeSelectOption value="admin_only">
+                관리자 전용
+              </NativeSelectOption>
+              <NativeSelectOption value="public">공개</NativeSelectOption>
+            </FormSelect>
+            <FormTextArea
+              className="md:col-span-2"
+              label="설명"
+              value={collectionForm.description}
+              onChange={(event) =>
+                setCollectionForm((current) => ({
+                  ...current,
+                  description: event.target.value,
+                }))
+              }
+            />
+            <div className="md:col-span-2">
+              <Button loading={createCollection.isPending} type="submit">
+                <PlusIcon data-icon="inline-start" />
+                컬렉션 생성
+              </Button>
             </div>
-            {importReport ? <ImportReport report={importReport} /> : null}
-          </SectionCard>
-        </div>
+          </form>
+        </SectionCard>
+
+        {renderCurationCollectionCommandsSectionCard1()}
+      </div>
     </>
   );
 }
@@ -709,62 +745,74 @@ function CurationSourceCatalog({
   collections,
   collectionsQuery,
   setSelectedCollectionId,
-}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "activeCollectionId" | "collections" | "collectionsQuery" | "setSelectedCollectionId">) {
+}: Pick<
+  ReturnType<typeof useCurationCollectionsClientController>,
+  | "activeCollectionId"
+  | "collections"
+  | "collectionsQuery"
+  | "setSelectedCollectionId"
+>) {
   return (
     <>
-<SectionCard
-            actions={
-              <Button
-                aria-label="컬렉션 목록 새로고침"
-                loading={collectionsQuery.isFetching}
-                size="icon-sm"
-                type="button"
-                variant="ghost"
-                onClick={() => void collectionsQuery.refetch()}
-              >
-                <RefreshCwIcon />
-              </Button>
-            }
-            description={`최대 500개 · 현재 ${collections.length}개`}
-            title="컬렉션"
+      <SectionCard
+        actions={
+          <Button
+            aria-label="컬렉션 목록 새로고침"
+            loading={collectionsQuery.isFetching}
+            size="icon-sm"
+            type="button"
+            variant="ghost"
+            onClick={() => void collectionsQuery.refetch()}
           >
-            {collectionsQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>목록 조회 실패</AlertTitle>
-                <AlertDescription>{collectionsQuery.error.message}</AlertDescription>
-              </Alert>
-            ) : collections.length === 0 ? (
-              <EmptyState
-                description="위 폼이나 CSV 업로드로 첫 컬렉션을 만드세요."
-                icon={<DatabaseIcon />}
-                title="컬렉션이 없습니다"
-              />
-            ) : (
-              <SelectableRowGroup
-                aria-label="컬렉션"
-                className="-mx-3"
-                data-testid="curation-collection-list"
-                divided
+            <RefreshCwIcon />
+          </Button>
+        }
+        description={`최대 500개 · 현재 ${collections.length}개`}
+        title="컬렉션"
+      >
+        {collectionsQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>목록 조회 실패</AlertTitle>
+            <AlertDescription>
+              {collectionsQuery.error.message}
+            </AlertDescription>
+          </Alert>
+        ) : collections.length === 0 ? (
+          <EmptyState
+            description="위 폼이나 CSV 업로드로 첫 컬렉션을 만드세요."
+            icon={<DatabaseIcon />}
+            title="컬렉션이 없습니다"
+          />
+        ) : (
+          <SelectableRowGroup
+            aria-label="컬렉션"
+            className="-mx-3"
+            data-testid="curation-collection-list"
+            divided
+          >
+            {collections.map((collection) => (
+              <SelectableRow
+                key={collection.collection_id}
+                selected={activeCollectionId === collection.collection_id}
+                trailing={<StatusBadge status={collection.status} />}
+                onSelect={() =>
+                  setSelectedCollectionId(collection.collection_id)
+                }
               >
-                {collections.map((collection) => (
-                  <SelectableRow
-                    key={collection.collection_id}
-                    selected={activeCollectionId === collection.collection_id}
-                    trailing={<StatusBadge status={collection.status} />}
-                    onSelect={() => setSelectedCollectionId(collection.collection_id)}
-                  >
-                    <SelectableRowTitle>{collection.title}</SelectableRowTitle>
-                    <SelectableRowDescription>
-                      {collection.theme_name} · {collection.edition_key || "회차 없음"}
-                    </SelectableRowDescription>
-                    <SelectableRowDescription className="font-mono tabular-nums">
-                      {formatCount(collection.item_count)}개 · {collection.collection_key}
-                    </SelectableRowDescription>
-                  </SelectableRow>
-                ))}
-              </SelectableRowGroup>
-            )}
-          </SectionCard>
+                <SelectableRowTitle>{collection.title}</SelectableRowTitle>
+                <SelectableRowDescription>
+                  {collection.theme_name} ·{" "}
+                  {collection.edition_key || "회차 없음"}
+                </SelectableRowDescription>
+                <SelectableRowDescription className="font-mono tabular-nums">
+                  {formatCount(collection.item_count)}개 ·{" "}
+                  {collection.collection_key}
+                </SelectableRowDescription>
+              </SelectableRow>
+            ))}
+          </SelectableRowGroup>
+        )}
+      </SectionCard>
     </>
   );
 }
@@ -783,75 +831,87 @@ function CurationCollectionSummary({
 }) {
   return (
     <>
-<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                  <StatusBadge status={detail.collection.status} />
-                  <span className="text-xs text-text-secondary">
-                    {detail.collection.visibility === "public" ? "공개 범위: 공개" : "공개 범위: 관리자 전용"}
-                  </span>
-                  <span className="text-xs text-text-secondary">· {detail.collection.theme_name}</span>
-                  {detail.collection.edition_key ? (
-                    <span className="text-xs text-text-secondary tabular-nums">
-                      · {detail.collection.edition_key}
-                    </span>
-                  ) : null}
-                  {detail.collection.source_name ? (
-                    <span className="text-xs text-text-secondary">· {detail.collection.source_name}</span>
-                  ) : null}
-                </div>
-                {detail.collection.description ? (
-                  <p className="text-sm text-text-secondary">
-                    {detail.collection.description}
-                  </p>
-                ) : null}
-                <DetailList
-                  columns={2}
-                  items={[
-                    {
-                      label: "테마",
-                      value: `${detail.collection.theme_slug} · ${detail.collection.theme_group}`,
-                    },
-                    {
-                      label: "출처 dataset",
-                      value: `${detail.collection.provider ?? NULL_GLYPH}/${detail.collection.dataset_key ?? NULL_GLYPH}`,
-                      mono: true,
-                    },
-                    {
-                      label: "항목",
-                      value: `전체 ${formatCount(detail.collection.item_count)} · 공개 가능 ${formatCount(detail.collection.public_item_count)}`,
-                    },
-                    {
-                      label: "감사",
-                      value: `생성 ${detail.collection.created_by ?? NULL_GLYPH} · 갱신 ${detail.collection.updated_by ?? NULL_GLYPH}`,
-                    },
-                    {
-                      label: "공식 출처",
-                      value: detail.collection.source_url ? (
-                        <a
-                          className="rounded-control break-all text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                          href={detail.collection.source_url}
-                          rel="noreferrer"
-                          target="_blank"
-                        >
-                          {detail.collection.source_url}
-                        </a>
-                      ) : null,
-                    },
-                  ]}
-                />
-                <details className="group/details">
-                  <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
-                    <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
-                      +
-                    </span>
-                    <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
-                      −
-                    </span>
-                    metadata
-                  </summary>
-                  <div className="pt-1">
-                    <JsonViewer maxHeight="sm" value={detail.collection.metadata} />
-                  </div>
-                </details>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+        <StatusBadge status={detail.collection.status} />
+        <span className="text-xs text-text-secondary">
+          {detail.collection.visibility === "public"
+            ? "공개 범위: 공개"
+            : "공개 범위: 관리자 전용"}
+        </span>
+        <span className="text-xs text-text-secondary">
+          · {detail.collection.theme_name}
+        </span>
+        {detail.collection.edition_key ? (
+          <span className="text-xs text-text-secondary tabular-nums">
+            · {detail.collection.edition_key}
+          </span>
+        ) : null}
+        {detail.collection.source_name ? (
+          <span className="text-xs text-text-secondary">
+            · {detail.collection.source_name}
+          </span>
+        ) : null}
+      </div>
+      {detail.collection.description ? (
+        <p className="text-sm text-text-secondary">
+          {detail.collection.description}
+        </p>
+      ) : null}
+      <DetailList
+        columns={2}
+        items={[
+          {
+            label: "테마",
+            value: `${detail.collection.theme_slug} · ${detail.collection.theme_group}`,
+          },
+          {
+            label: "출처 dataset",
+            value: `${detail.collection.provider ?? NULL_GLYPH}/${detail.collection.dataset_key ?? NULL_GLYPH}`,
+            mono: true,
+          },
+          {
+            label: "항목",
+            value: `전체 ${formatCount(detail.collection.item_count)} · 공개 가능 ${formatCount(detail.collection.public_item_count)}`,
+          },
+          {
+            label: "감사",
+            value: `생성 ${detail.collection.created_by ?? NULL_GLYPH} · 갱신 ${detail.collection.updated_by ?? NULL_GLYPH}`,
+          },
+          {
+            label: "공식 출처",
+            value: detail.collection.source_url ? (
+              <a
+                className="rounded-control break-all text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                href={detail.collection.source_url}
+                rel="noreferrer"
+                target="_blank"
+              >
+                {detail.collection.source_url}
+              </a>
+            ) : null,
+          },
+        ]}
+      />
+      <details className="group/details">
+        <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+          <span
+            aria-hidden="true"
+            className="w-3 text-text-tertiary group-open/details:hidden"
+          >
+            +
+          </span>
+          <span
+            aria-hidden="true"
+            className="hidden w-3 text-text-tertiary group-open/details:inline"
+          >
+            −
+          </span>
+          metadata
+        </summary>
+        <div className="pt-1">
+          <JsonViewer maxHeight="sm" value={detail.collection.metadata} />
+        </div>
+      </details>
     </>
   );
 }
@@ -861,116 +921,121 @@ function CurationCollectionEditor({
   itemForm,
   setItemForm,
   submitItem,
-}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "addItem" | "itemForm" | "setItemForm" | "submitItem">) {
+}: Pick<
+  ReturnType<typeof useCurationCollectionsClientController>,
+  "addItem" | "itemForm" | "setItemForm" | "submitItem"
+>) {
   return (
     <>
-<form
-                  className="grid gap-x-4 gap-y-1 border-t border-border pt-4 md:grid-cols-2"
-                  onSubmit={submitItem}
-                >
-                  <div className="mb-2 md:col-span-2">
-                    <h3 className="text-sm font-semibold text-text-primary">큐레이션 항목 추가</h3>
-                    <p className="text-xs text-text-secondary">
-                      기존 Feature ID를 연결하거나, 아직 위치가 없는 공식 장소를
-                      미연결 항목으로 보존합니다.
-                    </p>
-                  </div>
-                  <FormField
-                    label="Feature ID (선택)"
-                    value={itemForm.featureId}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        featureId: event.target.value,
-                      }))
-                    }
-                  />
-                  <FormField
-                    label="장소명 (Feature ID가 없으면 필수)"
-                    value={itemForm.placeName}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        placeName: event.target.value,
-                      }))
-                    }
-                  />
-                  <FormField
-                    className="md:col-span-2"
-                    label="주소 힌트"
-                    value={itemForm.addressHint}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        addressHint: event.target.value,
-                      }))
-                    }
-                  />
-                  <FormField
-                    required
-                    label="외부 항목 ID"
-                    placeholder="공식 목록 내 식별자"
-                    value={itemForm.externalItemId}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        externalItemId: event.target.value,
-                      }))
-                    }
-                  />
-                  <FormField
-                    required
-                    label="외부 구성요소 ID"
-                    placeholder="primary 또는 component-01"
-                    value={itemForm.externalComponentId}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        externalComponentId: event.target.value,
-                      }))
-                    }
-                  />
-                  <FormField
-                    label="표시 제목"
-                    value={itemForm.itemTitle}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        itemTitle: event.target.value,
-                      }))
-                    }
-                  />
-                  <FormField
-                    label="정렬 순서"
-                    min="0"
-                    step="1"
-                    type="number"
-                    value={itemForm.sortOrder}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        sortOrder: event.target.value,
-                      }))
-                    }
-                  />
-                  <FormTextArea
-                    className="md:col-span-2"
-                    label="요약"
-                    value={itemForm.itemSummary}
-                    onChange={(event) =>
-                      setItemForm((current) => ({
-                        ...current,
-                        itemSummary: event.target.value,
-                      }))
-                    }
-                  />
-                  <div className="md:col-span-2">
-                    <Button loading={addItem.isPending} type="submit">
-                      <PlusIcon data-icon="inline-start" />
-                      항목 추가
-                    </Button>
-                  </div>
-                </form>
+      <form
+        className="grid gap-x-4 gap-y-1 border-t border-border pt-4 md:grid-cols-2"
+        onSubmit={submitItem}
+      >
+        <div className="mb-2 md:col-span-2">
+          <h3 className="text-sm font-semibold text-text-primary">
+            큐레이션 항목 추가
+          </h3>
+          <p className="text-xs text-text-secondary">
+            기존 Feature ID를 연결하거나, 아직 위치가 없는 공식 장소를 미연결
+            항목으로 보존합니다.
+          </p>
+        </div>
+        <FormField
+          label="Feature ID (선택)"
+          value={itemForm.featureId}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              featureId: event.target.value,
+            }))
+          }
+        />
+        <FormField
+          label="장소명 (Feature ID가 없으면 필수)"
+          value={itemForm.placeName}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              placeName: event.target.value,
+            }))
+          }
+        />
+        <FormField
+          className="md:col-span-2"
+          label="주소 힌트"
+          value={itemForm.addressHint}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              addressHint: event.target.value,
+            }))
+          }
+        />
+        <FormField
+          required
+          label="외부 항목 ID"
+          placeholder="공식 목록 내 식별자"
+          value={itemForm.externalItemId}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              externalItemId: event.target.value,
+            }))
+          }
+        />
+        <FormField
+          required
+          label="외부 구성요소 ID"
+          placeholder="primary 또는 component-01"
+          value={itemForm.externalComponentId}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              externalComponentId: event.target.value,
+            }))
+          }
+        />
+        <FormField
+          label="표시 제목"
+          value={itemForm.itemTitle}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              itemTitle: event.target.value,
+            }))
+          }
+        />
+        <FormField
+          label="정렬 순서"
+          min="0"
+          step="1"
+          type="number"
+          value={itemForm.sortOrder}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              sortOrder: event.target.value,
+            }))
+          }
+        />
+        <FormTextArea
+          className="md:col-span-2"
+          label="요약"
+          value={itemForm.itemSummary}
+          onChange={(event) =>
+            setItemForm((current) => ({
+              ...current,
+              itemSummary: event.target.value,
+            }))
+          }
+        />
+        <div className="md:col-span-2">
+          <Button loading={addItem.isPending} type="submit">
+            <PlusIcon data-icon="inline-start" />
+            항목 추가
+          </Button>
+        </div>
+      </form>
     </>
   );
 }
@@ -1000,203 +1065,270 @@ function CurationCollectionTable({
 }) {
   return (
     <>
-{detail.items.length === 0 ? (
-                  <EmptyState
-                    description="위 폼이나 CSV 업로드로 기존 Feature를 연결하세요."
-                    title="항목이 없습니다"
-                  />
-                ) : (
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>순서</TableHead>
-                        <TableHead>Feature</TableHead>
-                        <TableHead>큐레이션 정보</TableHead>
-                        <TableHead>출처 항목</TableHead>
-                        <TableHead>상태/관계</TableHead>
-                        <TableHead>작업</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {detail.items.map((item) => (
-                        <TableRow key={item.curation_item_id}>
-                          <TableCell className="text-right tabular-nums">{item.sort_order}</TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex max-w-64 flex-col gap-0.5">
-                              <span className="font-medium">
-                                {item.feature_name ?? item.place_name}
-                              </span>
-                              {item.feature_name && item.feature_name !== item.place_name ? (
-                                <span className="text-2xs text-text-secondary">
-                                  공식 명칭 {item.place_name}
-                                </span>
-                              ) : null}
-                              <span className="font-mono text-2xs text-text-secondary slashed-zero">
-                                {item.feature_id
-                                  ? shortId(item.feature_id, 20)
-                                  : "Feature 미연결"}
-                              </span>
-                              <span className="text-2xs text-text-secondary">
-                                {addressLabel(item.address)}
-                              </span>
-                              {item.address_hint ? (
-                                <span className="text-2xs text-text-secondary">
-                                  주소 힌트 {item.address_hint}
-                                </span>
-                              ) : null}
-                              {item.feature_kind || item.feature_category ? (
-                                <span className="font-mono text-2xs text-text-secondary">
-                                  {item.feature_kind ?? NULL_GLYPH} · {item.feature_category ?? NULL_GLYPH}
-                                </span>
-                              ) : null}
-                              {item.lon !== null && item.lat !== null ? (
-                                <span className="font-mono text-2xs text-text-secondary tabular-nums slashed-zero">
-                                  {item.lon.toFixed(6)}, {item.lat.toFixed(6)}
-                                </span>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex max-w-72 flex-col gap-0.5">
-                              <span>{item.item_title || NULL_GLYPH}</span>
-                              <span className="text-2xs text-text-secondary">
-                                {item.item_summary || "요약 없음"}
-                              </span>
-                              <details className="group/details">
-                                <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control font-mono text-2xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
-                                  <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
-                                    +
-                                  </span>
-                                  <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
-                                    −
-                                  </span>
-                                  metadata
-                                </summary>
-                                <div className="mt-1 max-w-72">
-                                  <JsonViewer maxHeight="sm" value={item.metadata} />
-                                </div>
-                              </details>
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex max-w-64 flex-col gap-0.5 text-2xs">
-                              <span className="font-mono text-xs slashed-zero">
-                                {item.external_item_id}/{item.external_component_id}
-                              </span>
-                              <span className="text-text-secondary">
-                                {item.source_name ?? "수동 입력"} · {item.provider ?? NULL_GLYPH}/
-                                {item.dataset_key ?? NULL_GLYPH}
-                              </span>
-                              {item.source_record_key ? (
-                                <span className="font-mono break-all text-text-secondary slashed-zero">
-                                  {item.source_record_key}
-                                </span>
-                              ) : null}
-                              {item.source_url ? (
-                                <a
-                                  className="w-fit rounded-control break-all text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
-                                  href={item.source_url}
-                                  rel="noreferrer"
-                                  target="_blank"
-                                >
-                                  공식 출처
-                                </a>
-                              ) : null}
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex flex-col items-start gap-1">
-                              <span className="flex flex-wrap items-center gap-1">
-                                <StatusBadge status={item.status} />
-                                {item.source_present ? null : (
-                                  <StatusBadge label="원천 누락" status="missing" />
-                                )}
-                              </span>
-                              <span className="font-mono text-2xs text-text-secondary">
-                                {item.curation_relation} · 재사용 {item.reuse_policy}
-                              </span>
-                              <span className="text-2xs text-text-secondary">
-                                생성 {formatDateTime(item.created_at)} · {item.created_by ?? NULL_GLYPH}
-                              </span>
-                              <span className="text-2xs text-text-secondary">
-                                갱신 {formatDateTime(item.updated_at)} · {item.updated_by ?? NULL_GLYPH}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="whitespace-normal">
-                            <div className="flex min-w-56 flex-col gap-2">
-                              {item.feature_id ? null : (
-                                <div className="flex flex-col gap-1">
-                                  <FormField
-                                    aria-label={`${item.place_name} Feature 연결`}
-                                    label="연결할 Feature ID"
-                                    labelClassName="sr-only"
-                                    placeholder="Feature ID"
-                                    reserveMessage={false}
-                                    size="sm"
-                                    value={resolveFeatureIds[item.curation_item_id] ?? ""}
-                                    onChange={(event) =>
-                                      setResolveFeatureIds((current) => ({
-                                        ...current,
-                                        [item.curation_item_id]: event.target.value,
-                                      }))
-                                    }
-                                  />
-                                  <div>
-                                    <Button
-                                      disabled={patchItem.isPending}
-                                      disabledReason="다른 연결이 진행 중입니다"
-                                      loading={
-                                        patchItem.isPending &&
-                                        patchItem.variables?.curationItemId === item.curation_item_id
-                                      }
-                                      size="sm"
-                                      type="button"
-                                      variant="outline"
-                                      onClick={() =>
-                                        void resolveItem(
-                                          item.curation_item_id,
-                                          item.place_name,
-                                          item.command_etag,
-                                        )
-                                      }
-                                    >
-                                      <LinkIcon data-icon="inline-start" />
-                                      Feature 연결
-                                    </Button>
-                                  </div>
-                                </div>
-                              )}
-                              <div>
-                                <Button
-                                  disabled={archiveItem.isPending}
-                                  disabledReason="다른 보관 처리가 진행 중입니다"
-                                  loading={
-                                    archiveItem.isPending &&
-                                    archiveItem.variables?.curationItemId === item.curation_item_id
-                                  }
-                                  size="sm"
-                                  type="button"
-                                  variant="destructive"
-                                  onClick={() =>
-                                    void removeItem(
-                                      item.curation_item_id,
-                                      item.place_name,
-                                      item.command_etag,
-                                    )
-                                  }
-                                >
-                                  <Trash2Icon data-icon="inline-start" />
-                                  항목 보관
-                                </Button>
-                              </div>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                )}
+      {detail.items.length === 0 ? (
+        <EmptyState
+          description="위 폼이나 CSV 업로드로 기존 Feature를 연결하세요."
+          title="항목이 없습니다"
+        />
+      ) : (
+        <DataTable
+          data={detail.items}
+          getRowId={(item) => String(item.curation_item_id)}
+          columns={[
+            {
+              id: "column0",
+              header: "순서",
+              enableSorting: false,
+              meta: { cellClassName: "text-right tabular-nums" },
+              cell: ({ row: tableRow }) => {
+                const item = tableRow.original;
+                return <> {item.sort_order} </>;
+              },
+            },
+            {
+              id: "column1",
+              header: "Feature",
+              enableSorting: false,
+              meta: { cellClassName: "whitespace-normal" },
+              cell: ({ row: tableRow }) => {
+                const item = tableRow.original;
+                return (
+                  <>
+                    <div className="flex max-w-64 flex-col gap-0.5">
+                      <span className="font-medium">
+                        {item.feature_name ?? item.place_name}
+                      </span>
+                      {item.feature_name &&
+                      item.feature_name !== item.place_name ? (
+                        <span className="text-2xs text-text-secondary">
+                          공식 명칭 {item.place_name}
+                        </span>
+                      ) : null}
+                      <span className="font-mono text-2xs text-text-secondary slashed-zero">
+                        {item.feature_id
+                          ? shortId(item.feature_id, 20)
+                          : "Feature 미연결"}
+                      </span>
+                      <span className="text-2xs text-text-secondary">
+                        {addressLabel(item.address)}
+                      </span>
+                      {item.address_hint ? (
+                        <span className="text-2xs text-text-secondary">
+                          주소 힌트 {item.address_hint}
+                        </span>
+                      ) : null}
+                      {item.feature_kind || item.feature_category ? (
+                        <span className="font-mono text-2xs text-text-secondary">
+                          {item.feature_kind ?? NULL_GLYPH} ·{" "}
+                          {item.feature_category ?? NULL_GLYPH}
+                        </span>
+                      ) : null}
+                      {item.lon !== null && item.lat !== null ? (
+                        <span className="font-mono text-2xs text-text-secondary tabular-nums slashed-zero">
+                          {item.lon.toFixed(6)}, {item.lat.toFixed(6)}
+                        </span>
+                      ) : null}
+                    </div>
+                  </>
+                );
+              },
+            },
+            {
+              id: "column2",
+              header: "큐레이션 정보",
+              enableSorting: false,
+              meta: { cellClassName: "whitespace-normal" },
+              cell: ({ row: tableRow }) => {
+                const item = tableRow.original;
+                return (
+                  <>
+                    <div className="flex max-w-72 flex-col gap-0.5">
+                      <span>{item.item_title || NULL_GLYPH}</span>
+                      <span className="text-2xs text-text-secondary">
+                        {item.item_summary || "요약 없음"}
+                      </span>
+                      <details className="group/details">
+                        <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control font-mono text-2xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
+                          <span
+                            aria-hidden="true"
+                            className="w-3 text-text-tertiary group-open/details:hidden"
+                          >
+                            +
+                          </span>
+                          <span
+                            aria-hidden="true"
+                            className="hidden w-3 text-text-tertiary group-open/details:inline"
+                          >
+                            −
+                          </span>
+                          metadata
+                        </summary>
+                        <div className="mt-1 max-w-72">
+                          <JsonViewer maxHeight="sm" value={item.metadata} />
+                        </div>
+                      </details>
+                    </div>
+                  </>
+                );
+              },
+            },
+            {
+              id: "column3",
+              header: "출처 항목",
+              enableSorting: false,
+              meta: { cellClassName: "whitespace-normal" },
+              cell: ({ row: tableRow }) => {
+                const item = tableRow.original;
+                return (
+                  <>
+                    <div className="flex max-w-64 flex-col gap-0.5 text-2xs">
+                      <span className="font-mono text-xs slashed-zero">
+                        {item.external_item_id}/{item.external_component_id}
+                      </span>
+                      <span className="text-text-secondary">
+                        {item.source_name ?? "수동 입력"} ·{" "}
+                        {item.provider ?? NULL_GLYPH}/
+                        {item.dataset_key ?? NULL_GLYPH}
+                      </span>
+                      {item.source_record_key ? (
+                        <span className="font-mono break-all text-text-secondary slashed-zero">
+                          {item.source_record_key}
+                        </span>
+                      ) : null}
+                      {item.source_url ? (
+                        <a
+                          className="w-fit rounded-control break-all text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
+                          href={item.source_url}
+                          rel="noreferrer"
+                          target="_blank"
+                        >
+                          공식 출처
+                        </a>
+                      ) : null}
+                    </div>
+                  </>
+                );
+              },
+            },
+            {
+              id: "column4",
+              header: "상태/관계",
+              enableSorting: false,
+              meta: { cellClassName: "whitespace-normal" },
+              cell: ({ row: tableRow }) => {
+                const item = tableRow.original;
+                return (
+                  <>
+                    <div className="flex flex-col items-start gap-1">
+                      <span className="flex flex-wrap items-center gap-1">
+                        <StatusBadge status={item.status} />
+                        {item.source_present ? null : (
+                          <StatusBadge label="원천 누락" status="missing" />
+                        )}
+                      </span>
+                      <span className="font-mono text-2xs text-text-secondary">
+                        {item.curation_relation} · 재사용 {item.reuse_policy}
+                      </span>
+                      <span className="text-2xs text-text-secondary">
+                        생성 {formatDateTime(item.created_at)} ·{" "}
+                        {item.created_by ?? NULL_GLYPH}
+                      </span>
+                      <span className="text-2xs text-text-secondary">
+                        갱신 {formatDateTime(item.updated_at)} ·{" "}
+                        {item.updated_by ?? NULL_GLYPH}
+                      </span>
+                    </div>
+                  </>
+                );
+              },
+            },
+            {
+              id: "column5",
+              header: "작업",
+              enableSorting: false,
+              meta: { cellClassName: "whitespace-normal" },
+              cell: ({ row: tableRow }) => {
+                const item = tableRow.original;
+                return (
+                  <>
+                    <div className="flex min-w-56 flex-col gap-2">
+                      {item.feature_id ? null : (
+                        <div className="flex flex-col gap-1">
+                          <FormField
+                            aria-label={`${item.place_name} Feature 연결`}
+                            label="연결할 Feature ID"
+                            labelClassName="sr-only"
+                            placeholder="Feature ID"
+                            reserveMessage={false}
+                            size="sm"
+                            value={
+                              resolveFeatureIds[item.curation_item_id] ?? ""
+                            }
+                            onChange={(event) =>
+                              setResolveFeatureIds((current) => ({
+                                ...current,
+                                [item.curation_item_id]: event.target.value,
+                              }))
+                            }
+                          />
+                          <div>
+                            <Button
+                              disabled={patchItem.isPending}
+                              disabledReason="다른 연결이 진행 중입니다"
+                              loading={
+                                patchItem.isPending &&
+                                patchItem.variables?.curationItemId ===
+                                  item.curation_item_id
+                              }
+                              size="sm"
+                              type="button"
+                              variant="outline"
+                              onClick={() =>
+                                void resolveItem(
+                                  item.curation_item_id,
+                                  item.place_name,
+                                  item.command_etag,
+                                )
+                              }
+                            >
+                              <LinkIcon data-icon="inline-start" />
+                              Feature 연결
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <Button
+                          disabled={archiveItem.isPending}
+                          disabledReason="다른 보관 처리가 진행 중입니다"
+                          loading={
+                            archiveItem.isPending &&
+                            archiveItem.variables?.curationItemId ===
+                              item.curation_item_id
+                          }
+                          size="sm"
+                          type="button"
+                          variant="destructive"
+                          onClick={() =>
+                            void removeItem(
+                              item.curation_item_id,
+                              item.place_name,
+                              item.command_etag,
+                            )
+                          }
+                        >
+                          <Trash2Icon data-icon="inline-start" />
+                          항목 보관
+                        </Button>
+                      </div>
+                    </div>
+                  </>
+                );
+              },
+            },
+          ]}
+        />
+      )}
     </>
   );
 }
@@ -1214,33 +1346,60 @@ function CurationCollectionWorkspace({
   setItemForm,
   setResolveFeatureIds,
   submitItem,
-}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "addItem" | "archiveItem" | "collectionQuery" | "detail" | "itemForm" | "patchItem" | "removeItem" | "resolveFeatureIds" | "resolveItem" | "setItemForm" | "setResolveFeatureIds" | "submitItem">) {
+}: Pick<
+  ReturnType<typeof useCurationCollectionsClientController>,
+  | "addItem"
+  | "archiveItem"
+  | "collectionQuery"
+  | "detail"
+  | "itemForm"
+  | "patchItem"
+  | "removeItem"
+  | "resolveFeatureIds"
+  | "resolveItem"
+  | "setItemForm"
+  | "setResolveFeatureIds"
+  | "submitItem"
+>) {
   return (
     <>
-<SectionCard
-            description={
-              detail
-                ? `${detail.collection.collection_key} · 갱신 ${formatDateTime(detail.collection.updated_at)}`
-                : "왼쪽에서 컬렉션을 선택하세요."
-            }
-            title={detail?.collection.title ?? "컬렉션 상세"}
-          >
-            {collectionQuery.isError ? (
-              <Alert variant="destructive">
-                <AlertTitle>상세 조회 실패</AlertTitle>
-                <AlertDescription>{collectionQuery.error.message}</AlertDescription>
-              </Alert>
-            ) : detail ? (
-              <div className="space-y-6" data-testid="curation-collection-detail">
-                <CurationCollectionSummary detail={detail} />
-                <CurationCollectionEditor addItem={addItem} itemForm={itemForm} setItemForm={setItemForm} submitItem={submitItem} />
+      <SectionCard
+        description={
+          detail
+            ? `${detail.collection.collection_key} · 갱신 ${formatDateTime(detail.collection.updated_at)}`
+            : "왼쪽에서 컬렉션을 선택하세요."
+        }
+        title={detail?.collection.title ?? "컬렉션 상세"}
+      >
+        {collectionQuery.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>상세 조회 실패</AlertTitle>
+            <AlertDescription>{collectionQuery.error.message}</AlertDescription>
+          </Alert>
+        ) : detail ? (
+          <div className="space-y-6" data-testid="curation-collection-detail">
+            <CurationCollectionSummary detail={detail} />
+            <CurationCollectionEditor
+              addItem={addItem}
+              itemForm={itemForm}
+              setItemForm={setItemForm}
+              submitItem={submitItem}
+            />
 
-                <CurationCollectionTable archiveItem={archiveItem} detail={detail} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setResolveFeatureIds={setResolveFeatureIds} />
-              </div>
-            ) : (
-              <EmptyState title="컬렉션을 선택하세요" />
-            )}
-          </SectionCard>
+            <CurationCollectionTable
+              archiveItem={archiveItem}
+              detail={detail}
+              patchItem={patchItem}
+              removeItem={removeItem}
+              resolveFeatureIds={resolveFeatureIds}
+              resolveItem={resolveItem}
+              setResolveFeatureIds={setResolveFeatureIds}
+            />
+          </div>
+        ) : (
+          <EmptyState title="컬렉션을 선택하세요" />
+        )}
+      </SectionCard>
     </>
   );
 }
@@ -1262,14 +1421,50 @@ function CurationCollectionCatalog({
   setResolveFeatureIds,
   setSelectedCollectionId,
   submitItem,
-}: Pick<ReturnType<typeof useCurationCollectionsClientController>, "activeCollectionId" | "addItem" | "archiveItem" | "collectionQuery" | "collections" | "collectionsQuery" | "detail" | "itemForm" | "patchItem" | "removeItem" | "resolveFeatureIds" | "resolveItem" | "setItemForm" | "setResolveFeatureIds" | "setSelectedCollectionId" | "submitItem">) {
+}: Pick<
+  ReturnType<typeof useCurationCollectionsClientController>,
+  | "activeCollectionId"
+  | "addItem"
+  | "archiveItem"
+  | "collectionQuery"
+  | "collections"
+  | "collectionsQuery"
+  | "detail"
+  | "itemForm"
+  | "patchItem"
+  | "removeItem"
+  | "resolveFeatureIds"
+  | "resolveItem"
+  | "setItemForm"
+  | "setResolveFeatureIds"
+  | "setSelectedCollectionId"
+  | "submitItem"
+>) {
   return (
     <>
-<div className="grid gap-6 xl:grid-cols-[var(--rail)_minmax(0,1fr)]">
-          <CurationSourceCatalog activeCollectionId={activeCollectionId} collections={collections} collectionsQuery={collectionsQuery} setSelectedCollectionId={setSelectedCollectionId} />
+      <div className="grid gap-6 xl:grid-cols-[var(--rail)_minmax(0,1fr)]">
+        <CurationSourceCatalog
+          activeCollectionId={activeCollectionId}
+          collections={collections}
+          collectionsQuery={collectionsQuery}
+          setSelectedCollectionId={setSelectedCollectionId}
+        />
 
-          <CurationCollectionWorkspace addItem={addItem} archiveItem={archiveItem} collectionQuery={collectionQuery} detail={detail} itemForm={itemForm} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setItemForm={setItemForm} setResolveFeatureIds={setResolveFeatureIds} submitItem={submitItem} />
-        </div>
+        <CurationCollectionWorkspace
+          addItem={addItem}
+          archiveItem={archiveItem}
+          collectionQuery={collectionQuery}
+          detail={detail}
+          itemForm={itemForm}
+          patchItem={patchItem}
+          removeItem={removeItem}
+          resolveFeatureIds={resolveFeatureIds}
+          resolveItem={resolveItem}
+          setItemForm={setItemForm}
+          setResolveFeatureIds={setResolveFeatureIds}
+          submitItem={submitItem}
+        />
+      </div>
     </>
   );
 }
@@ -1330,9 +1525,47 @@ function CurationCollectionsClientView({
       title="큐레이션 관리"
     >
       <div className="space-y-6">
-        <CurationCollectionCommands collectionForm={collectionForm} commitCsv={commitCsv} createCollection={createCollection} csvFile={csvFile} importCsv={importCsv} importReport={importReport} localError={localError} message={message} mutationError={mutationError} previewCsv={previewCsv} provenanceFile={provenanceFile} setCollectionForm={setCollectionForm} setCsvFile={setCsvFile} setImportReport={setImportReport} setLocalError={setLocalError} setMessage={setMessage} setProvenanceFile={setProvenanceFile} sourcesQuery={sourcesQuery} submitCollection={submitCollection} themesQuery={themesQuery} />
+        <CurationCollectionCommands
+          collectionForm={collectionForm}
+          commitCsv={commitCsv}
+          createCollection={createCollection}
+          csvFile={csvFile}
+          importCsv={importCsv}
+          importReport={importReport}
+          localError={localError}
+          message={message}
+          mutationError={mutationError}
+          previewCsv={previewCsv}
+          provenanceFile={provenanceFile}
+          setCollectionForm={setCollectionForm}
+          setCsvFile={setCsvFile}
+          setImportReport={setImportReport}
+          setLocalError={setLocalError}
+          setMessage={setMessage}
+          setProvenanceFile={setProvenanceFile}
+          sourcesQuery={sourcesQuery}
+          submitCollection={submitCollection}
+          themesQuery={themesQuery}
+        />
 
-        <CurationCollectionCatalog activeCollectionId={activeCollectionId} addItem={addItem} archiveItem={archiveItem} collectionQuery={collectionQuery} collections={collections} collectionsQuery={collectionsQuery} detail={detail} itemForm={itemForm} patchItem={patchItem} removeItem={removeItem} resolveFeatureIds={resolveFeatureIds} resolveItem={resolveItem} setItemForm={setItemForm} setResolveFeatureIds={setResolveFeatureIds} setSelectedCollectionId={setSelectedCollectionId} submitItem={submitItem} />
+        <CurationCollectionCatalog
+          activeCollectionId={activeCollectionId}
+          addItem={addItem}
+          archiveItem={archiveItem}
+          collectionQuery={collectionQuery}
+          collections={collections}
+          collectionsQuery={collectionsQuery}
+          detail={detail}
+          itemForm={itemForm}
+          patchItem={patchItem}
+          removeItem={removeItem}
+          resolveFeatureIds={resolveFeatureIds}
+          resolveItem={resolveItem}
+          setItemForm={setItemForm}
+          setResolveFeatureIds={setResolveFeatureIds}
+          setSelectedCollectionId={setSelectedCollectionId}
+          submitItem={submitItem}
+        />
 
         <CurationQuarantinePanel />
       </div>
@@ -1356,10 +1589,18 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
         />
         <span>전체 {data.rows_total}</span>
         <span className="text-success">유효 {data.valid_rows}</span>
-        <span className={data.invalid_rows > 0 ? "font-medium text-destructive" : undefined}>
+        <span
+          className={
+            data.invalid_rows > 0 ? "font-medium text-destructive" : undefined
+          }
+        >
           오류 {data.invalid_rows}
         </span>
-        <span className={data.unresolved_rows > 0 ? "font-medium text-warning" : undefined}>
+        <span
+          className={
+            data.unresolved_rows > 0 ? "font-medium text-warning" : undefined
+          }
+        >
           미연결 {data.unresolved_rows}
         </span>
         <span>
@@ -1368,7 +1609,11 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
         <span>
           {data.dry_run ? "갱신 예정" : "갱신"} {data.updated}
         </span>
-        <span className={data.removed > 0 ? "font-medium text-destructive" : undefined}>
+        <span
+          className={
+            data.removed > 0 ? "font-medium text-destructive" : undefined
+          }
+        >
           {data.dry_run ? "제거 예정" : "제거"} {data.removed}
         </span>
       </div>
@@ -1381,14 +1626,20 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
             <ul className="mt-2 max-h-64 list-disc space-y-1 overflow-auto pl-4">
               {data.removals.map((item) => (
                 <li key={item.curation_item_id}>
-                  <span className="font-medium">{item.title}</span> · {item.place_name}
+                  <span className="font-medium">{item.title}</span> ·{" "}
+                  {item.place_name}
                   {" · "}
-                  <span className="font-mono text-xs">{item.external_item_id}</span>
+                  <span className="font-mono text-xs">
+                    {item.external_item_id}
+                  </span>
                   <span className="font-mono text-xs">
                     /{item.external_component_id}
                   </span>
                   {item.feature_id ? (
-                    <span className="font-mono text-xs"> · {item.feature_id}</span>
+                    <span className="font-mono text-xs">
+                      {" "}
+                      · {item.feature_id}
+                    </span>
                   ) : (
                     " · Feature 미연결"
                   )}
@@ -1421,81 +1672,135 @@ function ImportReport({ report }: { report: CurationImportResponse }) {
           </AlertDescription>
         </Alert>
       ) : null}
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>행</TableHead>
-            <TableHead>상태</TableHead>
-            <TableHead>컬렉션/장소</TableHead>
-            <TableHead>Feature 매칭</TableHead>
-            <TableHead>문제</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.items.map((row) => (
-            <TableRow
-              key={`${row.row_number}-${row.source_item_key}-${row.source_component_key}`}
-            >
-              <TableCell className="text-right tabular-nums">{row.row_number}</TableCell>
-              <TableCell>
-                <StatusBadge label={importStatusLabel(row.status)} status={row.status} />
-              </TableCell>
-              <TableCell className="whitespace-normal">
-                <div className="flex max-w-64 flex-col gap-0.5">
-                  <span className="font-medium">{row.title}</span>
-                  <span className="text-2xs text-text-secondary">
-                    {row.collection_key} · {row.place_name || row.source_item_key}
-                  </span>
-                  <span className="font-mono text-2xs text-text-secondary slashed-zero">
-                    {row.source_item_key}/{row.source_component_key}
-                  </span>
-                </div>
-              </TableCell>
-              <TableCell className="whitespace-normal">
-                <div className="flex max-w-72 flex-col gap-1">
-                  {row.resolved_feature_id ? (
-                    <span className="font-mono text-xs slashed-zero">
-                      {row.resolved_feature_id}
+      <DataTable
+        data={data.items}
+        getRowId={(row) =>
+          JSON.stringify([
+            row.row_number,
+            row.source_item_key,
+            row.source_component_key,
+          ])
+        }
+        columns={[
+          {
+            id: "column0",
+            header: "행",
+            enableSorting: false,
+            meta: { cellClassName: "text-right tabular-nums" },
+            cell: ({ row: tableRow }) => {
+              const row = tableRow.original;
+              return <> {row.row_number} </>;
+            },
+          },
+          {
+            id: "column1",
+            header: "상태",
+            enableSorting: false,
+            cell: ({ row: tableRow }) => {
+              const row = tableRow.original;
+              return (
+                <>
+                  <StatusBadge
+                    label={importStatusLabel(row.status)}
+                    status={row.status}
+                  />
+                </>
+              );
+            },
+          },
+          {
+            id: "column2",
+            header: "컬렉션/장소",
+            enableSorting: false,
+            meta: { cellClassName: "whitespace-normal" },
+            cell: ({ row: tableRow }) => {
+              const row = tableRow.original;
+              return (
+                <>
+                  <div className="flex max-w-64 flex-col gap-0.5">
+                    <span className="font-medium">{row.title}</span>
+                    <span className="text-2xs text-text-secondary">
+                      {row.collection_key} ·{" "}
+                      {row.place_name || row.source_item_key}
                     </span>
-                  ) : null}
-                  {row.candidates.map((candidate) => (
-                    <div className="flex flex-col text-2xs" key={candidate.feature_id}>
-                      <span className="font-medium text-text-primary">{candidate.name}</span>
-                      <span className="flex items-start gap-1">
-                        <code className="font-mono break-all slashed-zero">
-                          {candidate.feature_id}
-                        </code>
-                        <CopyButton
-                          label={`${candidate.name} 후보 Feature ID`}
-                          value={candidate.feature_id}
-                        />
+                    <span className="font-mono text-2xs text-text-secondary slashed-zero">
+                      {row.source_item_key}/{row.source_component_key}
+                    </span>
+                  </div>
+                </>
+              );
+            },
+          },
+          {
+            id: "column3",
+            header: "Feature 매칭",
+            enableSorting: false,
+            meta: { cellClassName: "whitespace-normal" },
+            cell: ({ row: tableRow }) => {
+              const row = tableRow.original;
+              return (
+                <>
+                  <div className="flex max-w-72 flex-col gap-1">
+                    {row.resolved_feature_id ? (
+                      <span className="font-mono text-xs slashed-zero">
+                        {row.resolved_feature_id}
                       </span>
-                      <span className="text-text-secondary">
-                        {addressLabel(candidate.address)}
-                      </span>
-                    </div>
-                  ))}
-                  {!row.resolved_feature_id && row.candidates.length === 0 ? (
-                    <span className="text-text-tertiary">{NULL_GLYPH}</span>
-                  ) : null}
-                </div>
-              </TableCell>
-              <TableCell className="whitespace-normal">
-                <ul className="flex max-w-72 flex-col gap-1 text-2xs text-destructive">
-                  {withOccurrenceKeys(row.issues, (issue) =>
-                    JSON.stringify([issue.code, issue.column, issue.message]),
-                  ).map(({ key, value: issue }) => (
-                    <li key={key}>
-                      {issue.column ? `${issue.column}: ` : ""}
-                      {issue.message}
-                    </li>
-                  ))}
-                </ul>
-              </TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+                    ) : null}
+                    {row.candidates.map((candidate) => (
+                      <div
+                        className="flex flex-col text-2xs"
+                        key={candidate.feature_id}
+                      >
+                        <span className="font-medium text-text-primary">
+                          {candidate.name}
+                        </span>
+                        <span className="flex items-start gap-1">
+                          <code className="font-mono break-all slashed-zero">
+                            {candidate.feature_id}
+                          </code>
+                          <CopyButton
+                            label={`${candidate.name} 후보 Feature ID`}
+                            value={candidate.feature_id}
+                          />
+                        </span>
+                        <span className="text-text-secondary">
+                          {addressLabel(candidate.address)}
+                        </span>
+                      </div>
+                    ))}
+                    {!row.resolved_feature_id && row.candidates.length === 0 ? (
+                      <span className="text-text-tertiary">{NULL_GLYPH}</span>
+                    ) : null}
+                  </div>
+                </>
+              );
+            },
+          },
+          {
+            id: "column4",
+            header: "문제",
+            enableSorting: false,
+            meta: { cellClassName: "whitespace-normal" },
+            cell: ({ row: tableRow }) => {
+              const row = tableRow.original;
+              return (
+                <>
+                  <ul className="flex max-w-72 flex-col gap-1 text-2xs text-destructive">
+                    {withOccurrenceKeys(row.issues, (issue) =>
+                      JSON.stringify([issue.code, issue.column, issue.message]),
+                    ).map(({ key, value: issue }) => (
+                      <li key={key}>
+                        {issue.column ? `${issue.column}: ` : ""}
+                        {issue.message}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              );
+            },
+          },
+        ]}
+      />
     </div>
   );
 }

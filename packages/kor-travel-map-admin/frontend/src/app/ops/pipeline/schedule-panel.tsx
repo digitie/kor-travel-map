@@ -289,53 +289,78 @@ function useSchedulePanelController({
       window.cancelAnimationFrame(animationFrame);
     };
   }, [refreshFrozenState, scheduleScanKey]);
-  const frozenScheduleMutation = frozenState.mutation;
-  const storedClaimResolutionSubmission = frozenState.claimResolutionSubmission;
-  const effectiveClaimResolutionSubmission =
-    claimResolutionSubmission ?? storedClaimResolutionSubmission;
-  const sensors = data?.sensors ?? [];
-  const scheduleMutationPending =
-    patchSchedule.isPending ||
-    commandSchedule.isPending ||
-    resolveClaim.isPending;
-  // 진행 중인 명령의 트리거만 loading으로 표시한다(design.md — row action은 트리거의 loading, page spinner 금지).
-  const pendingCommand =
-    commandSchedule.isPending && commandSchedule.variables
-      ? {
-          scheduleName: commandSchedule.variables.scheduleName,
-          command: commandSchedule.variables.body.command,
-        }
-      : null;
-  const failedResult =
-    commandResultFromError(patchSchedule.error) ??
-    commandResultFromError(commandSchedule.error);
-  const recoveryClaim =
-    claimRecoveryFromResult(lastResult) ??
-    claimRecoveryFromResult(failedResult) ??
-    claimRecoveryFromConflict(
-      patchSchedule.error,
-      patchSchedule.variables?.scheduleName,
-    ) ??
-    claimRecoveryFromConflict(
-      commandSchedule.error,
-      commandSchedule.variables?.scheduleName,
-    ) ??
-    (effectiveClaimResolutionSubmission
-      ? {
-          scheduleName: effectiveClaimResolutionSubmission.scheduleName,
-          commandId: effectiveClaimResolutionSubmission.commandId,
-        }
-      : null);
-  const frozenClaimResolution =
-    recoveryClaim &&
-    effectiveClaimResolutionSubmission?.scheduleName ===
-      recoveryClaim.scheduleName &&
-    effectiveClaimResolutionSubmission.commandId === recoveryClaim.commandId
-      ? effectiveClaimResolutionSubmission
-      : null;
-  const scheduleStateScanned =
-    scheduleScanKey !== null &&
-    frozenState.scannedScheduleKey === scheduleScanKey;
+  function deriveSchedulePanelControllerState1() {
+    const frozenScheduleMutation = frozenState.mutation;
+    const storedClaimResolutionSubmission =
+      frozenState.claimResolutionSubmission;
+    const effectiveClaimResolutionSubmission =
+      claimResolutionSubmission ?? storedClaimResolutionSubmission;
+    const sensors = data?.sensors ?? [];
+    const scheduleMutationPending =
+      patchSchedule.isPending ||
+      commandSchedule.isPending ||
+      resolveClaim.isPending;
+    // 진행 중인 명령의 트리거만 loading으로 표시한다(design.md — row action은 트리거의 loading, page spinner 금지).
+    const pendingCommand =
+      commandSchedule.isPending && commandSchedule.variables
+        ? {
+            scheduleName: commandSchedule.variables.scheduleName,
+            command: commandSchedule.variables.body.command,
+          }
+        : null;
+    const failedResult =
+      commandResultFromError(patchSchedule.error) ??
+      commandResultFromError(commandSchedule.error);
+    const recoveryClaim =
+      claimRecoveryFromResult(lastResult) ??
+      claimRecoveryFromResult(failedResult) ??
+      claimRecoveryFromConflict(
+        patchSchedule.error,
+        patchSchedule.variables?.scheduleName,
+      ) ??
+      claimRecoveryFromConflict(
+        commandSchedule.error,
+        commandSchedule.variables?.scheduleName,
+      ) ??
+      (effectiveClaimResolutionSubmission
+        ? {
+            scheduleName: effectiveClaimResolutionSubmission.scheduleName,
+            commandId: effectiveClaimResolutionSubmission.commandId,
+          }
+        : null);
+    const frozenClaimResolution =
+      recoveryClaim &&
+      effectiveClaimResolutionSubmission?.scheduleName ===
+        recoveryClaim.scheduleName &&
+      effectiveClaimResolutionSubmission.commandId === recoveryClaim.commandId
+        ? effectiveClaimResolutionSubmission
+        : null;
+    const scheduleStateScanned =
+      scheduleScanKey !== null &&
+      frozenState.scannedScheduleKey === scheduleScanKey;
+    return {
+      frozenScheduleMutation,
+      effectiveClaimResolutionSubmission,
+      sensors,
+      scheduleMutationPending,
+      pendingCommand,
+      failedResult,
+      recoveryClaim,
+      frozenClaimResolution,
+      scheduleStateScanned,
+    };
+  }
+  const {
+    frozenScheduleMutation,
+    effectiveClaimResolutionSubmission,
+    sensors,
+    scheduleMutationPending,
+    pendingCommand,
+    failedResult,
+    recoveryClaim,
+    frozenClaimResolution,
+    scheduleStateScanned,
+  } = deriveSchedulePanelControllerState1();
   const scheduleStateScannedRef = useRef(false);
   const recoveryClaimScheduleName = recoveryClaim?.scheduleName ?? null;
   const recoveryClaimCommandId = recoveryClaim?.commandId ?? null;
@@ -356,9 +381,9 @@ function useSchedulePanelController({
 
   const scheduleRecoveryLocked = Boolean(
     !scheduleStateScanned ||
-    recoveryClaim ||
-    effectiveClaimResolutionSubmission ||
-    frozenScheduleMutation,
+      recoveryClaim ||
+      effectiveClaimResolutionSubmission ||
+      frozenScheduleMutation,
   );
   const scheduleControlsDisabled =
     scheduleMutationPending || scheduleRecoveryLocked;
@@ -637,27 +662,133 @@ function ScheduleEditor({
   setClaimResolution,
   setClaimResolutionReason,
   submitClaimResolution,
-}: Pick<ReturnType<typeof useSchedulePanelController>, "claimResolution" | "claimResolutionReason" | "commandSchedule" | "data" | "failedResult" | "frozenClaimResolution" | "frozenScheduleMutation" | "lastResult" | "patchSchedule" | "recoveryClaim" | "resolveClaim" | "retryFrozenScheduleMutation" | "scheduleStateScanned" | "schedules" | "setClaimResolution" | "setClaimResolutionReason" | "submitClaimResolution">) {
+}: Pick<
+  ReturnType<typeof useSchedulePanelController>,
+  | "claimResolution"
+  | "claimResolutionReason"
+  | "commandSchedule"
+  | "data"
+  | "failedResult"
+  | "frozenClaimResolution"
+  | "frozenScheduleMutation"
+  | "lastResult"
+  | "patchSchedule"
+  | "recoveryClaim"
+  | "resolveClaim"
+  | "retryFrozenScheduleMutation"
+  | "scheduleStateScanned"
+  | "schedules"
+  | "setClaimResolution"
+  | "setClaimResolutionReason"
+  | "submitClaimResolution"
+>) {
+  function renderScheduleEditorState() {
+    return data && data.status !== "ok" ? (
+      <Alert
+        variant={data.status === "unavailable" ? "destructive" : "warning"}
+      >
+        <AlertTitle>스케줄 상태 확인 필요</AlertTitle>
+        <AlertDescription>
+          {(data.errors ?? []).length > 0
+            ? (data.errors ?? []).join(" / ")
+            : "Dagster 응답을 확인하세요."}
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
+  function renderScheduleEditorButton1() {
+    return (
+      <Button
+        className="md:mt-5"
+        disabled={
+          !scheduleStateScanned ||
+          !(
+            frozenClaimResolution?.body.reason ?? claimResolutionReason.trim()
+          ) ||
+          (frozenClaimResolution?.body.reason ?? claimResolutionReason.trim())
+            .length > MAX_CLAIM_RESOLUTION_REASON_LENGTH
+        }
+        disabledReason={
+          !scheduleStateScanned
+            ? "schedule 상태 확인이 끝나면 활성화됩니다."
+            : "확인 근거·해제 사유를 입력하면 활성화됩니다."
+        }
+        loading={resolveClaim.isPending}
+        type="button"
+        variant="outline"
+        onClick={() => void submitClaimResolution()}
+      >
+        claim 해제
+      </Button>
+    );
+  }
+  function renderScheduleEditorState2() {
+    return recoveryClaim ? (
+      <Alert data-testid="schedule-claim-recovery" variant="destructive">
+        <AlertTitle>Dagster 실제 결과 확인 필요</AlertTitle>
+        <AlertDescription className="space-y-3">
+          <p>
+            응답 유실 또는 terminal 감사 기록 실패로 명령 반영 여부를 자동
+            확정할 수 없습니다. Dagster 실행 목록과 스케줄 상태를 직접 확인하기
+            전에는 같은 schedule 명령을 다시 보내지 마세요.
+          </p>
+          <p>
+            schedule{" "}
+            <span className="font-mono">{recoveryClaim.scheduleName}</span>
+            {" · claim "}
+            <span className="font-mono">{recoveryClaim.commandId}</span>
+          </p>
+          <div className="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)_auto] md:items-start">
+            <FormSelect
+              aria-label="schedule claim 실제 반영 확인 결과"
+              disabled={
+                resolveClaim.isPending || frozenClaimResolution !== null
+              }
+              label="실제 반영 확인 결과"
+              reserveMessage={false}
+              value={frozenClaimResolution?.body.resolution ?? claimResolution}
+              onChange={(event) =>
+                setClaimResolution(
+                  event.target
+                    .value as PipelineScheduleClaimResolutionRequest["resolution"],
+                )
+              }
+            >
+              <NativeSelectOption value="confirmed_not_applied">
+                미반영 확인
+              </NativeSelectOption>
+              <NativeSelectOption value="confirmed_applied">
+                반영 확인
+              </NativeSelectOption>
+            </FormSelect>
+            <FormField
+              disabled={
+                resolveClaim.isPending || frozenClaimResolution !== null
+              }
+              hint="사유를 입력하면 claim 해제가 활성화됩니다."
+              label="확인 근거·해제 사유 (필수)"
+              maxLength={MAX_CLAIM_RESOLUTION_REASON_LENGTH}
+              placeholder="예: Dagster run 목록에서 해당 run이 없음을 확인"
+              value={
+                frozenClaimResolution?.body.reason ?? claimResolutionReason
+              }
+              onChange={(event) => setClaimResolutionReason(event.target.value)}
+            />
+            {renderScheduleEditorButton1()}
+          </div>
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
   return (
     <>
-{schedules.isError ? (
+      {schedules.isError ? (
         <Alert variant="destructive">
           <AlertTitle>스케줄 목록 호출 실패</AlertTitle>
           <AlertDescription>{schedules.error.message}</AlertDescription>
         </Alert>
       ) : null}
-      {data && data.status !== "ok" ? (
-        <Alert
-          variant={data.status === "unavailable" ? "destructive" : "warning"}
-        >
-          <AlertTitle>스케줄 상태 확인 필요</AlertTitle>
-          <AlertDescription>
-            {(data.errors ?? []).length > 0
-              ? (data.errors ?? []).join(" / ")
-              : "Dagster 응답을 확인하세요."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      {renderScheduleEditorState()}
       {lastResult ? <ScheduleCommandResultAlert result={lastResult} /> : null}
       {failedResult ? (
         <ScheduleCommandResultAlert result={failedResult} />
@@ -715,90 +846,7 @@ function ScheduleEditor({
           </AlertDescription>
         </Alert>
       ) : null}
-      {recoveryClaim ? (
-        <Alert data-testid="schedule-claim-recovery" variant="destructive">
-          <AlertTitle>Dagster 실제 결과 확인 필요</AlertTitle>
-          <AlertDescription className="space-y-3">
-            <p>
-              응답 유실 또는 terminal 감사 기록 실패로 명령 반영 여부를 자동
-              확정할 수 없습니다. Dagster 실행 목록과 스케줄 상태를 직접
-              확인하기 전에는 같은 schedule 명령을 다시 보내지 마세요.
-            </p>
-            <p>
-              schedule{" "}
-              <span className="font-mono">{recoveryClaim.scheduleName}</span>
-              {" · claim "}
-              <span className="font-mono">{recoveryClaim.commandId}</span>
-            </p>
-            <div className="grid gap-3 md:grid-cols-[14rem_minmax(0,1fr)_auto] md:items-start">
-              <FormSelect
-                aria-label="schedule claim 실제 반영 확인 결과"
-                disabled={
-                  resolveClaim.isPending || frozenClaimResolution !== null
-                }
-                label="실제 반영 확인 결과"
-                reserveMessage={false}
-                value={
-                  frozenClaimResolution?.body.resolution ?? claimResolution
-                }
-                onChange={(event) =>
-                  setClaimResolution(
-                    event.target
-                      .value as PipelineScheduleClaimResolutionRequest["resolution"],
-                  )
-                }
-              >
-                <NativeSelectOption value="confirmed_not_applied">
-                  미반영 확인
-                </NativeSelectOption>
-                <NativeSelectOption value="confirmed_applied">
-                  반영 확인
-                </NativeSelectOption>
-              </FormSelect>
-              <FormField
-                disabled={
-                  resolveClaim.isPending || frozenClaimResolution !== null
-                }
-                hint="사유를 입력하면 claim 해제가 활성화됩니다."
-                label="확인 근거·해제 사유 (필수)"
-                maxLength={MAX_CLAIM_RESOLUTION_REASON_LENGTH}
-                placeholder="예: Dagster run 목록에서 해당 run이 없음을 확인"
-                value={
-                  frozenClaimResolution?.body.reason ?? claimResolutionReason
-                }
-                onChange={(event) =>
-                  setClaimResolutionReason(event.target.value)
-                }
-              />
-              <Button
-                className="md:mt-5"
-                disabled={
-                  !scheduleStateScanned ||
-                  !(
-                    frozenClaimResolution?.body.reason ??
-                    claimResolutionReason.trim()
-                  ) ||
-                  (
-                    frozenClaimResolution?.body.reason ??
-                    claimResolutionReason.trim()
-                  ).length > MAX_CLAIM_RESOLUTION_REASON_LENGTH
-                }
-                disabledReason={
-                  !scheduleStateScanned
-                    ? "schedule 상태 확인이 끝나면 활성화됩니다."
-                    : "확인 근거·해제 사유를 입력하면 활성화됩니다."
-                }
-                loading={resolveClaim.isPending}
-                type="button"
-                variant="outline"
-                onClick={() => void submitClaimResolution()}
-              >
-                claim 해제
-              </Button>
-            </div>
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      {renderScheduleEditorState2()}
       {resolveClaim.isSuccess ? (
         <Alert data-testid="schedule-claim-resolution-result">
           <AlertTitle>claim 해제 완료</AlertTitle>
@@ -826,7 +874,10 @@ function ScheduleEditor({
 function ScheduleSummary({
   schedules,
   sensors,
-}: Pick<ReturnType<typeof useSchedulePanelController>, "schedules" | "sensors">) {
+}: Pick<
+  ReturnType<typeof useSchedulePanelController>,
+  "schedules" | "sensors"
+>) {
   return (
     <SectionCard
       description="큐 sensor가 꺼지면 갱신 요청 큐가 조용히 멈춥니다 — 상태를 항상 확인하세요."
@@ -857,7 +908,8 @@ function ScheduleSummary({
                 <span className="text-xs text-destructive">
                   최근 tick 오류: {sensor.recent_ticks[0].error.message}
                 </span>
-              ) : sensor.status === "RUNNING" && !sensor.recent_ticks?.length ? (
+              ) : sensor.status === "RUNNING" &&
+                !sensor.recent_ticks?.length ? (
                 <span className="text-xs text-muted-foreground">
                   {SENSOR_TICK_WINDOW_LABEL}
                 </span>
@@ -881,7 +933,19 @@ function ScheduleTable({
   schedules,
   setCommandReasons,
   submitCommand,
-}: Pick<ReturnType<typeof useSchedulePanelController>, "commandReasons" | "highlightRef" | "highlightSchedule" | "openEdit" | "pendingCommand" | "scheduleControlsDisabled" | "scheduleItems" | "schedules" | "setCommandReasons" | "submitCommand">) {
+}: Pick<
+  ReturnType<typeof useSchedulePanelController>,
+  | "commandReasons"
+  | "highlightRef"
+  | "highlightSchedule"
+  | "openEdit"
+  | "pendingCommand"
+  | "scheduleControlsDisabled"
+  | "scheduleItems"
+  | "schedules"
+  | "setCommandReasons"
+  | "submitCommand"
+>) {
   const isPending = (name: string, command: PipelineScheduleCommand) =>
     pendingCommand?.scheduleName === name && pendingCommand.command === command;
   return (
@@ -925,7 +989,9 @@ function ScheduleTable({
                   {schedule.name}
                 </p>
                 <p className="text-xs text-text-secondary">
-                  <span className="font-mono">{effectiveCron ?? NULL_GLYPH}</span>
+                  <span className="font-mono">
+                    {effectiveCron ?? NULL_GLYPH}
+                  </span>
                   {describeCron(effectiveCron)
                     ? ` — ${describeCron(effectiveCron)}`
                     : ""}
@@ -934,7 +1000,11 @@ function ScheduleTable({
               <div className="flex flex-wrap items-center gap-1.5">
                 <StatusBadge status={schedule.status ?? "unknown"} />
                 {schedule.override_saved ? (
-                  <StatusBadge label="override 저장됨" status="saved" tone="info" />
+                  <StatusBadge
+                    label="override 저장됨"
+                    status="saved"
+                    tone="info"
+                  />
                 ) : null}
                 {schedule.override_effective === true ? (
                   <StatusBadge label="실제 반영됨" status="applied" />
@@ -945,7 +1015,9 @@ function ScheduleTable({
               </div>
             </div>
             {schedule.schedule_note ? (
-              <p className="text-xs text-text-secondary">{schedule.schedule_note}</p>
+              <p className="text-xs text-text-secondary">
+                {schedule.schedule_note}
+              </p>
             ) : null}
             {schedule.disabled_reason ? (
               <p className="text-xs text-destructive">
@@ -1047,10 +1119,21 @@ function ScheduleDeleteDialog({
   setEditReason,
   setEditing,
   submitCronPatch,
-}: Pick<ReturnType<typeof useSchedulePanelController>, "cronDraft" | "editReason" | "editing" | "patchSchedule" | "scheduleControlsDisabled" | "setCronDraft" | "setEditReason" | "setEditing" | "submitCronPatch">) {
+}: Pick<
+  ReturnType<typeof useSchedulePanelController>,
+  | "cronDraft"
+  | "editReason"
+  | "editing"
+  | "patchSchedule"
+  | "scheduleControlsDisabled"
+  | "setCronDraft"
+  | "setEditReason"
+  | "setEditing"
+  | "submitCronPatch"
+>) {
   return (
     <>
-<Dialog
+      <Dialog
         open={editing !== null}
         onOpenChange={(next) => {
           if (!next) {
@@ -1124,7 +1207,9 @@ function ScheduleDeleteDialog({
             <Button
               disabled={scheduleControlsDisabled || !cronDraft.trim()}
               disabledReason={
-                !cronDraft.trim() ? "cron을 입력하면 저장할 수 있습니다." : undefined
+                !cronDraft.trim()
+                  ? "cron을 입력하면 저장할 수 있습니다."
+                  : undefined
               }
               loading={
                 patchSchedule.isPending &&
@@ -1184,13 +1269,52 @@ function SchedulePanelView({
       data-schedule-state-scanned={scheduleStateScanned ? "true" : "false"}
       data-testid="pipeline-schedule-panel"
     >
-      <ScheduleEditor claimResolution={claimResolution} claimResolutionReason={claimResolutionReason} commandSchedule={commandSchedule} data={data} failedResult={failedResult} frozenClaimResolution={frozenClaimResolution} frozenScheduleMutation={frozenScheduleMutation} lastResult={lastResult} patchSchedule={patchSchedule} recoveryClaim={recoveryClaim} resolveClaim={resolveClaim} retryFrozenScheduleMutation={retryFrozenScheduleMutation} scheduleStateScanned={scheduleStateScanned} schedules={schedules} setClaimResolution={setClaimResolution} setClaimResolutionReason={setClaimResolutionReason} submitClaimResolution={submitClaimResolution} />
+      <ScheduleEditor
+        claimResolution={claimResolution}
+        claimResolutionReason={claimResolutionReason}
+        commandSchedule={commandSchedule}
+        data={data}
+        failedResult={failedResult}
+        frozenClaimResolution={frozenClaimResolution}
+        frozenScheduleMutation={frozenScheduleMutation}
+        lastResult={lastResult}
+        patchSchedule={patchSchedule}
+        recoveryClaim={recoveryClaim}
+        resolveClaim={resolveClaim}
+        retryFrozenScheduleMutation={retryFrozenScheduleMutation}
+        scheduleStateScanned={scheduleStateScanned}
+        schedules={schedules}
+        setClaimResolution={setClaimResolution}
+        setClaimResolutionReason={setClaimResolutionReason}
+        submitClaimResolution={submitClaimResolution}
+      />
 
       <ScheduleSummary schedules={schedules} sensors={sensors} />
 
-      <ScheduleTable commandReasons={commandReasons} highlightRef={highlightRef} highlightSchedule={highlightSchedule} openEdit={openEdit} pendingCommand={pendingCommand} scheduleControlsDisabled={scheduleControlsDisabled} scheduleItems={scheduleItems} schedules={schedules} setCommandReasons={setCommandReasons} submitCommand={submitCommand} />
+      <ScheduleTable
+        commandReasons={commandReasons}
+        highlightRef={highlightRef}
+        highlightSchedule={highlightSchedule}
+        openEdit={openEdit}
+        pendingCommand={pendingCommand}
+        scheduleControlsDisabled={scheduleControlsDisabled}
+        scheduleItems={scheduleItems}
+        schedules={schedules}
+        setCommandReasons={setCommandReasons}
+        submitCommand={submitCommand}
+      />
 
-      <ScheduleDeleteDialog cronDraft={cronDraft} editReason={editReason} editing={editing} patchSchedule={patchSchedule} scheduleControlsDisabled={scheduleControlsDisabled} setCronDraft={setCronDraft} setEditReason={setEditReason} setEditing={setEditing} submitCronPatch={submitCronPatch} />
+      <ScheduleDeleteDialog
+        cronDraft={cronDraft}
+        editReason={editReason}
+        editing={editing}
+        patchSchedule={patchSchedule}
+        scheduleControlsDisabled={scheduleControlsDisabled}
+        setCronDraft={setCronDraft}
+        setEditReason={setEditReason}
+        setEditing={setEditing}
+        submitCronPatch={submitCronPatch}
+      />
     </div>
   );
 }
@@ -1202,6 +1326,9 @@ export function SchedulePanel({
   highlightSchedule?: string;
   onHighlightSchedule: (scheduleName: string) => void;
 }) {
-  const controller = useSchedulePanelController({ highlightSchedule, onHighlightSchedule });
+  const controller = useSchedulePanelController({
+    highlightSchedule,
+    onHighlightSchedule,
+  });
   return <SchedulePanelView {...controller} />;
 }

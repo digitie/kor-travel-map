@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list + inspector rail) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -25,7 +25,10 @@ import { StatStrip } from "@/components/stat-strip";
 import { StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { FormField } from "@/components/ui/form-field";
 import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { statusLabel } from "@/lib/status-label";
@@ -42,7 +45,8 @@ type CacheTargetStreamsViewModel = {
 };
 
 const REPLAY_REASON_HINT = "사유를 입력하면 replay 요청이 활성화됩니다.";
-const RECONCILE_REASON_HINT = "사유를 입력하면 reconciliation 요청이 활성화됩니다.";
+const RECONCILE_REASON_HINT =
+  "사유를 입력하면 reconciliation 요청이 활성화됩니다.";
 
 function selectedOrFirst<T extends { externalSystem: string }>(
   items: T[],
@@ -71,9 +75,9 @@ function useCacheTargetStreamsController() {
   const deadLetters = useCacheTargetDeadLetters();
   const replay = useReplayCacheTargetDeadLetterMutation();
   const reconcile = useRequestCacheTargetReconciliationMutation();
-  const [selectedExternalSystem, setSelectedExternalSystem] = useState<string | null>(
-    null,
-  );
+  const [selectedExternalSystem, setSelectedExternalSystem] = useState<
+    string | null
+  >(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [replayReason, setReplayReason] = useState("");
   const [reconcileReason, setReconcileReason] = useState("");
@@ -83,96 +87,118 @@ function useCacheTargetStreamsController() {
   const streamItems = streams.data?.data.items ?? [];
   const deadLetterItems = deadLetters.data?.data.items ?? [];
   const selectedStream = selectedOrFirst(streamItems, selectedExternalSystem);
-  const defaultEventId = selectedStream?.blockedEventId ?? deadLetterItems[0]?.eventId ?? null;
-  const effectiveSelectedEventId =
-    deadLetterItems.some((item) => item.eventId === selectedEventId)
-      ? selectedEventId
-      : defaultEventId;
+  const defaultEventId =
+    selectedStream?.blockedEventId ?? deadLetterItems[0]?.eventId ?? null;
+  const effectiveSelectedEventId = deadLetterItems.some(
+    (item) => item.eventId === selectedEventId,
+  )
+    ? selectedEventId
+    : defaultEventId;
   const deadLetterDetail = useCacheTargetDeadLetter(effectiveSelectedEventId);
-  const selectedDeadLetter =
-    deadLetterDetail.data?.data ??
-    deadLetterItems.find((item) => item.eventId === effectiveSelectedEventId) ??
-    null;
-  const replayResult = replay.data?.data ?? null;
-  const reconcileResult = reconcile.data?.data ?? null;
-  const mutationError =
-    errorMessage(replay.error) ?? errorMessage(reconcile.error) ?? reasonError;
-  const model: CacheTargetStreamsViewModel = {
-    deadLetters: deadLetterItems,
-    isLoading: streams.isLoading || deadLetters.isLoading,
-    isRefreshing:
-      streams.isFetching ||
-      deadLetters.isFetching ||
-      deadLetterDetail.isFetching,
-    mutationError,
-    reconcileResult,
-    replayResult,
-    statusError:
-      errorMessage(streams.error) ??
-      errorMessage(deadLetters.error) ??
-      errorMessage(deadLetterDetail.error),
-    streams: streamItems,
-  };
+  function deriveCacheTargetStreamsControllerState() {
+    const selectedDeadLetter =
+      deadLetterDetail.data?.data ??
+      deadLetterItems.find(
+        (item) => item.eventId === effectiveSelectedEventId,
+      ) ??
+      null;
+    const replayResult = replay.data?.data ?? null;
+    const reconcileResult = reconcile.data?.data ?? null;
+    const mutationError =
+      errorMessage(replay.error) ??
+      errorMessage(reconcile.error) ??
+      reasonError;
+    const model: CacheTargetStreamsViewModel = {
+      deadLetters: deadLetterItems,
+      isLoading: streams.isLoading || deadLetters.isLoading,
+      isRefreshing:
+        streams.isFetching ||
+        deadLetters.isFetching ||
+        deadLetterDetail.isFetching,
+      mutationError,
+      reconcileResult,
+      replayResult,
+      statusError:
+        errorMessage(streams.error) ??
+        errorMessage(deadLetters.error) ??
+        errorMessage(deadLetterDetail.error),
+      streams: streamItems,
+    };
 
-  const refresh = () => {
-    void streams.refetch();
-    void deadLetters.refetch();
-    if (effectiveSelectedEventId) {
-      void deadLetterDetail.refetch();
-    }
-  };
+    const refresh = () => {
+      void streams.refetch();
+      void deadLetters.refetch();
+      if (effectiveSelectedEventId) {
+        void deadLetterDetail.refetch();
+      }
+    };
 
-  const requestReplay = async () => {
-    setReasonError(null);
-    const reason = replayReason.trim();
-    if (!selectedDeadLetter) {
-      setReasonError("replay할 dead letter를 선택하세요.");
-      return;
-    }
-    if (reason.length === 0) {
-      setReasonError("replay 사유를 입력하세요.");
-      return;
-    }
-    // replay는 되돌릴 수 있는 재시도(동일 identity만 pending으로 복귀)라 destructive 톤을 쓰지 않는다(m11).
-    const ok = await confirm({
-      title: `${shortId(selectedDeadLetter.eventId, 18)} event를 replay할까요?`,
-      description:
-        "동일 event identity와 delivery fingerprint만 pending으로 되돌립니다. 412 응답은 최신 ETag로 자동 재시도하지 않습니다.",
-      confirmLabel: "replay 요청",
-    });
-    if (!ok) return;
-    reconcile.reset();
-    replay.mutate({
-      entityTag: selectedDeadLetter.entityTag,
-      eventId: selectedDeadLetter.eventId,
-      reason,
-    });
-  };
+    const requestReplay = async () => {
+      setReasonError(null);
+      const reason = replayReason.trim();
+      if (!selectedDeadLetter) {
+        setReasonError("replay할 dead letter를 선택하세요.");
+        return;
+      }
+      if (reason.length === 0) {
+        setReasonError("replay 사유를 입력하세요.");
+        return;
+      }
+      // replay는 되돌릴 수 있는 재시도(동일 identity만 pending으로 복귀)라 destructive 톤을 쓰지 않는다(m11).
+      const ok = await confirm({
+        title: `${shortId(selectedDeadLetter.eventId, 18)} event를 replay할까요?`,
+        description:
+          "동일 event identity와 delivery fingerprint만 pending으로 되돌립니다. 412 응답은 최신 ETag로 자동 재시도하지 않습니다.",
+        confirmLabel: "replay 요청",
+      });
+      if (!ok) return;
+      reconcile.reset();
+      replay.mutate({
+        entityTag: selectedDeadLetter.entityTag,
+        eventId: selectedDeadLetter.eventId,
+        reason,
+      });
+    };
 
-  const requestReconciliation = async () => {
-    setReasonError(null);
-    const reason = reconcileReason.trim();
-    if (!selectedStream) {
-      setReasonError("reconciliation을 요청할 stream을 선택하세요.");
-      return;
-    }
-    if (reason.length === 0) {
-      setReasonError("reconciliation 사유를 입력하세요.");
-      return;
-    }
-    const ok = await confirm({
-      title: `${selectedStream.externalSystem} stream reconciliation을 요청할까요?`,
-      description:
-        "full snapshot checksum을 다시 맞추기 위한 operator 작업을 생성합니다.",
-      confirmLabel: "reconciliation 요청",
-    });
-    if (!ok) return;
-    replay.reset();
-    reconcile.mutate({
-      externalSystem: selectedStream.externalSystem,
-      reason,
-    });
-  };
+    const requestReconciliation = async () => {
+      setReasonError(null);
+      const reason = reconcileReason.trim();
+      if (!selectedStream) {
+        setReasonError("reconciliation을 요청할 stream을 선택하세요.");
+        return;
+      }
+      if (reason.length === 0) {
+        setReasonError("reconciliation 사유를 입력하세요.");
+        return;
+      }
+      const ok = await confirm({
+        title: `${selectedStream.externalSystem} stream reconciliation을 요청할까요?`,
+        description:
+          "full snapshot checksum을 다시 맞추기 위한 operator 작업을 생성합니다.",
+        confirmLabel: "reconciliation 요청",
+      });
+      if (!ok) return;
+      replay.reset();
+      reconcile.mutate({
+        externalSystem: selectedStream.externalSystem,
+        reason,
+      });
+    };
+    return {
+      selectedDeadLetter,
+      model,
+      refresh,
+      requestReplay,
+      requestReconciliation,
+    };
+  }
+  const {
+    selectedDeadLetter,
+    model,
+    refresh,
+    requestReplay,
+    requestReconciliation,
+  } = deriveCacheTargetStreamsControllerState();
 
   return {
     model,
@@ -394,7 +420,8 @@ function StreamStatusSection({
           data={streams}
           emptyState={{
             title: "stream 상태가 없습니다.",
-            description: "cache target source stream이 등록되면 여기에 표시됩니다.",
+            description:
+              "cache target source stream이 등록되면 여기에 표시됩니다.",
           }}
           getRowId={(row) => row.externalSystem}
           isLoading={isLoading}
@@ -422,7 +449,9 @@ function StreamStatusSection({
                 label: "consumer",
                 value: (
                   <StatusBadge
-                    status={selectedStream.consumerEnabled ? "active" : "disabled"}
+                    status={
+                      selectedStream.consumerEnabled ? "active" : "disabled"
+                    }
                   />
                 ),
               },
@@ -558,7 +587,10 @@ function DeadLetterRecoverySection({
         headingLevel={3}
         title="복구 작업"
       >
-        <section aria-labelledby="cache-recovery-replay" className="space-y-3 pb-4">
+        <section
+          aria-labelledby="cache-recovery-replay"
+          className="space-y-3 pb-4"
+        >
           <h4
             className="text-xs font-semibold text-text-primary"
             id="cache-recovery-replay"

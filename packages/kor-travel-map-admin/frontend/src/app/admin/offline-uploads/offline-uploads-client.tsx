@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import {
   CheckCircle2Icon,
   FileUpIcon,
@@ -25,10 +25,7 @@ import {
   useOfflineUploadValidation,
   useValidateOfflineUploadMutation,
 } from "@/api/offlineUploads";
-import {
-  type OpsDatasetGridRow,
-  useOpsDatasetCatalog,
-} from "@/api/datasets";
+import { type OpsDatasetGridRow, useOpsDatasetCatalog } from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
@@ -44,7 +41,10 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -67,7 +67,12 @@ const statuses: Array<OfflineUploadStatus | "all"> = [
   "all",
 ];
 
-const loadableStates = new Set(["uploaded", "validated", "loaded", "load_failed"]);
+const loadableStates = new Set([
+  "uploaded",
+  "validated",
+  "loaded",
+  "load_failed",
+]);
 const inProgressStates = new Set([
   "uploading",
   "validating",
@@ -110,7 +115,8 @@ const optionalMappingFields: Array<keyof OfflineUploadColumnMapping> = [
 
 const LOAD_BLOCKED_REASON = "CSV/TSV는 validation 완료 후 load 가능";
 const DELETE_BLOCKED_REASON = "validation/load 진행 중에는 삭제 불가";
-const MAPPING_INCOMPLETE_REASON = "필수 매핑(name · lon · lat)을 채우면 활성화됩니다.";
+const MAPPING_INCOMPLETE_REASON =
+  "필수 매핑(name · lon · lat)을 채우면 활성화됩니다.";
 
 function formatBytes(value: number): string {
   if (value < 1024) {
@@ -159,7 +165,10 @@ function mappingPayload(
   const optional = Object.fromEntries(
     optionalMappingFields.map((field) => {
       const value = mapping[field];
-      return [field, typeof value === "string" && value.trim() ? value.trim() : null];
+      return [
+        field,
+        typeof value === "string" && value.trim() ? value.trim() : null,
+      ];
     }),
   );
   return {
@@ -197,7 +206,11 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
     );
   }
   const items: DetailItem[] = [
-    { label: "provider dataset ID", value: upload.provider_dataset_id, numeric: true },
+    {
+      label: "provider dataset ID",
+      value: upload.provider_dataset_id,
+      numeric: true,
+    },
     { label: "스코프", value: upload.sync_scope, mono: true },
     {
       label: "storage",
@@ -206,7 +219,12 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
       copyable: true,
     },
     { label: "size", value: formatBytes(upload.byte_size), numeric: true },
-    { label: "sha256", value: upload.checksum_sha256, mono: true, copyable: true },
+    {
+      label: "sha256",
+      value: upload.checksum_sha256,
+      mono: true,
+      copyable: true,
+    },
     { label: "형식", value: upload.detected_format ?? null, mono: true },
     {
       label: "validation job",
@@ -220,12 +238,18 @@ function UploadDetail({ upload }: { upload: OfflineUploadRecord | null }) {
         <EntityLink id={upload.load_job_id} kind="importJob" />
       ) : null,
     },
-    { label: "updated", value: formatDateTime(upload.updated_at), numeric: true },
+    {
+      label: "updated",
+      value: formatDateTime(upload.updated_at),
+      numeric: true,
+    },
   ];
   return (
     <SectionCard
       actions={<StatusBadge status={upload.status} />}
-      description={<span className="font-mono">{shortId(upload.upload_id, 18)}</span>}
+      description={
+        <span className="font-mono">{shortId(upload.upload_id, 18)}</span>
+      }
       headingLevel={2}
       title={<span className="truncate">{upload.original_filename}</span>}
     >
@@ -338,9 +362,7 @@ function PreviewTable({
       containerClassName="max-h-80 overflow-auto"
       data={rows}
       emptyState={{ title: "preview 행이 없습니다." }}
-      getRowId={(row) =>
-        headers.map((header) => row[header] ?? "").join("")
-      }
+      getRowId={(row) => headers.map((header) => row[header] ?? "").join("")}
     />
   );
 }
@@ -364,14 +386,18 @@ const validationIssueColumns: ColumnDef<ValidationIssueRow, unknown>[] = [
     header: "행",
     meta: { align: "right" } satisfies DataTableColumnMeta,
     cell: ({ row }) => (
-      <span className="font-mono text-xs">{row.original.row_number ?? NULL_GLYPH}</span>
+      <span className="font-mono text-xs">
+        {row.original.row_number ?? NULL_GLYPH}
+      </span>
     ),
   },
   {
     accessorKey: "column",
     header: "컬럼",
     cell: ({ row }) => (
-      <span className="font-mono text-xs">{row.original.column ?? NULL_GLYPH}</span>
+      <span className="font-mono text-xs">
+        {row.original.column ?? NULL_GLYPH}
+      </span>
     ),
   },
   {
@@ -402,17 +428,18 @@ function ValidationPanel({
   setMapping: (mapping: OfflineUploadColumnMapping) => void;
 }) {
   const isTabular = isTabularUpload(selected);
-  const preview = useOfflineUploadPreview(selected?.upload_id ?? null, 20, isTabular);
+  const preview = useOfflineUploadPreview(
+    selected?.upload_id ?? null,
+    20,
+    isTabular,
+  );
   const validation = useOfflineUploadValidation(
     selected?.upload_id ?? null,
     isTabular && selected?.validation_job_id !== null,
   );
   const validateUpload = useValidateOfflineUploadMutation();
-  const validationResult =
-    validateUpload.data?.data.upload_id === selected?.upload_id
-      ? validateUpload.data
-      : validation.data;
-  const issues = validationResult?.meta.issues ?? [];
+  const validationResult = resolveValidationResult();
+  const issues = resolveIssues();
 
   if (selected === null) {
     return (
@@ -440,171 +467,212 @@ function ValidationPanel({
   }
 
   const mappingReady = mappingComplete(mapping);
-  const validationErrorLines = [
-    preview.error ? `preview: ${preview.error.message}` : null,
-    validation.error ? `validation 조회: ${validation.error.message}` : null,
-    validateUpload.error ? `검증 실행: ${validateUpload.error.message}` : null,
-  ].filter((line): line is string => line !== null);
+  const validationErrorLines = resolveValidationErrorLines();
   const previewMeta = preview.data?.meta;
 
-  return (
-    <SectionCard
-      actions={
-        validationResult ? (
+  function renderValidationPanelState() {
+    if (!selected) return null;
+    return validationResult ? (
+      <div className="flex flex-col gap-2 border-t border-border pt-4">
+        <p className="text-2xs text-text-secondary tabular-nums">
+          <span className="font-medium">검증 결과</span> ·{" "}
+          {validationResult.meta.valid_rows} valid ·{" "}
           <span
-            className={cn(
-              "text-xs font-medium tabular-nums",
-              validationResult.meta.error_rows > 0 ? "text-destructive" : "text-success",
-            )}
-          >
-            {validationResult.meta.valid_rows} valid / {validationResult.meta.error_rows} error
-          </span>
-        ) : (
-          <span className="text-xs text-text-tertiary">검증 전</span>
-        )
-      }
-      description={
-        <span className="tabular-nums">
-          {uploadFormat(selected).toUpperCase()} · 총{" "}
-          {formatCount(previewMeta?.rows_total ?? null, { loading: preview.isLoading })}행
-        </span>
-      }
-      headingLevel={2}
-      title="CSV/TSV validation"
-    >
-      <div className="flex flex-col gap-3">
-        <span className="text-2xs font-medium text-text-secondary">필수 매핑</span>
-        <div className="grid gap-3 md:grid-cols-3">
-          {requiredMappingFields.map((field) => (
-            <MappingInput
-              field={field}
-              headers={previewMeta?.headers ?? []}
-              key={field}
-              label={field}
-              mapping={mapping}
-              setMapping={setMapping}
-            />
-          ))}
-        </div>
-        <span className="text-2xs font-medium text-text-secondary">선택 매핑 · 기본값</span>
-        <div className="grid gap-3 md:grid-cols-4">
-          {optionalMappingFields.map((field) => (
-            <MappingInput
-              field={field}
-              key={field}
-              label={field}
-              mapping={mapping}
-              setMapping={setMapping}
-            />
-          ))}
-        </div>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
-        <Button
-          data-testid="offline-upload-validate"
-          disabled={!mappingReady}
-          disabledReason={MAPPING_INCOMPLETE_REASON}
-          loading={validateUpload.isPending}
-          type="button"
-          onClick={() =>
-            validateUpload.mutate({
-              uploadId: selected.upload_id,
-              columnMapping: mappingPayload(mapping),
-              sampleSize: 1000,
-            })
-          }
-        >
-          <CheckCircle2Icon data-icon="inline-start" />
-          검증 실행
-        </Button>
-        {!mappingReady ? (
-          <span className="text-2xs text-text-secondary">{MAPPING_INCOMPLETE_REASON}</span>
-        ) : null}
-        {selected.validation_job_id ? (
-          <span className="text-xs text-text-secondary">
-            job{" "}
-            <EntityLink id={selected.validation_job_id} kind="importJob">
-              {shortId(selected.validation_job_id)}
-            </EntityLink>
-          </span>
-        ) : null}
-      </div>
-
-      {validationErrorLines.length > 0 ? (
-        <Alert variant="destructive">
-          <AlertTitle>validation 처리 실패</AlertTitle>
-          <AlertDescription>
-            {validationErrorLines.map((line) => (
-              <p key={line}>{line}</p>
-            ))}
-          </AlertDescription>
-          <AlertActions>
-            <Button
-              loading={preview.isFetching || validation.isFetching}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={() => {
-                validateUpload.reset();
-                void preview.refetch();
-                void validation.refetch();
-              }}
-            >
-              다시 시도
-            </Button>
-          </AlertActions>
-        </Alert>
-      ) : null}
-
-      {preview.isLoading ? (
-        <div className="flex flex-col gap-2" aria-busy="true">
-          <Skeleton className="h-4 w-1/3" />
-          <Skeleton className="h-40 w-full" />
-        </div>
-      ) : null}
-      {previewMeta ? (
-        <div className="flex flex-col gap-2 border-t border-border pt-4">
-          <p className="text-2xs text-text-secondary tabular-nums">
-            <span className="font-medium">미리보기</span> · {previewMeta.headers.length} columns ·{" "}
-            {previewMeta.rows_sampled} sampled · sha256{" "}
-            <span className="font-mono">
-              {shortId(previewMeta.checksum_sha256_actual, 12)}
-            </span>
-          </p>
-          <PreviewTable
-            headers={previewMeta.headers}
-            rows={previewMeta.sample_rows}
-          />
-        </div>
-      ) : null}
-
-      {validationResult ? (
-        <div className="flex flex-col gap-2 border-t border-border pt-4">
-          <p className="text-2xs text-text-secondary tabular-nums">
-            <span className="font-medium">검증 결과</span> · {validationResult.meta.valid_rows} valid ·{" "}
-            <span className={validationResult.meta.error_rows > 0 ? "text-destructive" : undefined}>
-              {validationResult.meta.error_rows} error
-            </span>{" "}
-            · <span>{issues.length} issues</span>
-          </p>
-          <DataTable
-            columns={validationIssueColumns}
-            containerClassName="max-h-72 overflow-auto"
-            data={issues}
-            emptyState={{
-              title: "validation issue가 없습니다.",
-              description: "표본 행이 모두 통과했습니다.",
-            }}
-            getRowId={(issue, index) =>
-              `${issue.code}-${issue.row_number ?? index}`
+            className={
+              validationResult.meta.error_rows > 0
+                ? "text-destructive"
+                : undefined
             }
-            manualSorting={false}
-          />
+          >
+            {validationResult.meta.error_rows} error
+          </span>{" "}
+          · <span>{issues.length} issues</span>
+        </p>
+        <DataTable
+          columns={validationIssueColumns}
+          containerClassName="max-h-72 overflow-auto"
+          data={issues}
+          emptyState={{
+            title: "validation issue가 없습니다.",
+            description: "표본 행이 모두 통과했습니다.",
+          }}
+          getRowId={(issue, index) =>
+            `${issue.code}-${issue.row_number ?? index}`
+          }
+          manualSorting={false}
+        />
+      </div>
+    ) : null;
+  }
+  function resolveValidationResult() {
+    return validateUpload.data?.data.upload_id === selected?.upload_id
+      ? validateUpload.data
+      : validation.data;
+  }
+  function resolveIssues() {
+    return validationResult?.meta.issues ?? [];
+  }
+  function resolveValidationErrorLines() {
+    return [
+      preview.error ? `preview: ${preview.error.message}` : null,
+      validation.error ? `validation 조회: ${validation.error.message}` : null,
+      validateUpload.error
+        ? `검증 실행: ${validateUpload.error.message}`
+        : null,
+    ].filter((line): line is string => line !== null);
+  }
+  function renderValidationPanelSectionCard2() {
+    if (!selected) return null;
+    return (
+      <SectionCard
+        actions={
+          validationResult ? (
+            <span
+              className={cn(
+                "text-xs font-medium tabular-nums",
+                validationResult.meta.error_rows > 0
+                  ? "text-destructive"
+                  : "text-success",
+              )}
+            >
+              {validationResult.meta.valid_rows} valid /{" "}
+              {validationResult.meta.error_rows} error
+            </span>
+          ) : (
+            <span className="text-xs text-text-tertiary">검증 전</span>
+          )
+        }
+        description={
+          <span className="tabular-nums">
+            {uploadFormat(selected).toUpperCase()} · 총{" "}
+            {formatCount(previewMeta?.rows_total ?? null, {
+              loading: preview.isLoading,
+            })}
+            행
+          </span>
+        }
+        headingLevel={2}
+        title="CSV/TSV validation"
+      >
+        <div className="flex flex-col gap-3">
+          <span className="text-2xs font-medium text-text-secondary">
+            필수 매핑
+          </span>
+          <div className="grid gap-3 md:grid-cols-3">
+            {requiredMappingFields.map((field) => (
+              <MappingInput
+                field={field}
+                headers={previewMeta?.headers ?? []}
+                key={field}
+                label={field}
+                mapping={mapping}
+                setMapping={setMapping}
+              />
+            ))}
+          </div>
+          <span className="text-2xs font-medium text-text-secondary">
+            선택 매핑 · 기본값
+          </span>
+          <div className="grid gap-3 md:grid-cols-4">
+            {optionalMappingFields.map((field) => (
+              <MappingInput
+                field={field}
+                key={field}
+                label={field}
+                mapping={mapping}
+                setMapping={setMapping}
+              />
+            ))}
+          </div>
         </div>
-      ) : null}
-    </SectionCard>
-  );
+
+        <div className="flex flex-wrap items-center gap-3 border-t border-border pt-4">
+          <Button
+            data-testid="offline-upload-validate"
+            disabled={!mappingReady}
+            disabledReason={MAPPING_INCOMPLETE_REASON}
+            loading={validateUpload.isPending}
+            type="button"
+            onClick={() =>
+              validateUpload.mutate({
+                uploadId: selected.upload_id,
+                columnMapping: mappingPayload(mapping),
+                sampleSize: 1000,
+              })
+            }
+          >
+            <CheckCircle2Icon data-icon="inline-start" />
+            검증 실행
+          </Button>
+          {!mappingReady ? (
+            <span className="text-2xs text-text-secondary">
+              {MAPPING_INCOMPLETE_REASON}
+            </span>
+          ) : null}
+          {selected.validation_job_id ? (
+            <span className="text-xs text-text-secondary">
+              job{" "}
+              <EntityLink id={selected.validation_job_id} kind="importJob">
+                {shortId(selected.validation_job_id)}
+              </EntityLink>
+            </span>
+          ) : null}
+        </div>
+
+        {validationErrorLines.length > 0 ? (
+          <Alert variant="destructive">
+            <AlertTitle>validation 처리 실패</AlertTitle>
+            <AlertDescription>
+              {validationErrorLines.map((line) => (
+                <p key={line}>{line}</p>
+              ))}
+            </AlertDescription>
+            <AlertActions>
+              <Button
+                loading={preview.isFetching || validation.isFetching}
+                size="sm"
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  validateUpload.reset();
+                  void preview.refetch();
+                  void validation.refetch();
+                }}
+              >
+                다시 시도
+              </Button>
+            </AlertActions>
+          </Alert>
+        ) : null}
+
+        {preview.isLoading ? (
+          <div className="flex flex-col gap-2" aria-busy="true">
+            <Skeleton className="h-4 w-1/3" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        ) : null}
+        {previewMeta ? (
+          <div className="flex flex-col gap-2 border-t border-border pt-4">
+            <p className="text-2xs text-text-secondary tabular-nums">
+              <span className="font-medium">미리보기</span> ·{" "}
+              {previewMeta.headers.length} columns · {previewMeta.rows_sampled}{" "}
+              sampled · sha256{" "}
+              <span className="font-mono">
+                {shortId(previewMeta.checksum_sha256_actual, 12)}
+              </span>
+            </p>
+            <PreviewTable
+              headers={previewMeta.headers}
+              rows={previewMeta.sample_rows}
+            />
+          </div>
+        ) : null}
+
+        {renderValidationPanelState()}
+      </SectionCard>
+    );
+  }
+  return renderValidationPanelSectionCard2();
 }
 
 function UploadFormPanel({
@@ -658,7 +726,9 @@ function UploadFormPanel({
       : null,
   ].filter((item): item is string => item !== null);
   const missingReason =
-    uploadMissingFields.length > 0 ? `입력 필요: ${uploadMissingFields.join(", ")}` : null;
+    uploadMissingFields.length > 0
+      ? `입력 필요: ${uploadMissingFields.join(", ")}`
+      : null;
 
   const submitUpload = () => {
     if (file === null || parsedProviderDatasetId === undefined) return;
@@ -672,94 +742,101 @@ function UploadFormPanel({
     );
   };
 
-  return (
-    <SectionCard
-      description="JSON/JSONL FeatureBundle, CSV/TSV tabular 원본"
-      headingLevel={2}
-      title="파일 업로드"
-    >
-      <div className="flex flex-col gap-1">
-        <FormField
-          data-testid="offline-upload-file-input"
-          label="파일"
-          type="file"
-          accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
-          onChange={(event) => setFile(event.target.files?.[0] ?? null)}
-        />
-        <FormField
-          label="provider dataset ID"
-          list="offline-upload-provider-dataset-options"
-          min="1"
-          placeholder="401"
-          type="number"
-          value={providerDatasetId}
-          onChange={(event) => setProviderDatasetId(event.target.value)}
-        />
-        <datalist id="offline-upload-provider-dataset-options">
-          {providerDatasetOptions.map((item) => (
-            <option
-              key={item.provider_dataset_id}
-              label={`${item.provider}/${item.dataset_key}`}
-              value={item.provider_dataset_id}
-            />
-          ))}
-        </datalist>
-        <FormField
-          hint={
-            scopeOptions.length > 1
-              ? `이 dataset은 canonical scope가 여러 개입니다 — 직접 고르세요: ${scopeOptions.join(", ")}`
-              : scopeOptions.length === 1
-                ? `이 dataset의 canonical scope: ${scopeOptions[0]}`
-                : "provider dataset을 먼저 고르면 canonical scope가 채워집니다."
-          }
-          label="sync scope"
-          list="offline-upload-sync-scope-options"
-          placeholder={effectiveSyncScope || "default"}
-          value={syncScope}
-          onChange={(event) => setSyncScope(event.target.value)}
-        />
-        <datalist id="offline-upload-sync-scope-options">
-          {scopeOptions.map((scope) => (
-            <option key={scope} value={scope} />
-          ))}
-        </datalist>
-        <div className="flex flex-col items-start gap-1 border-t border-border pt-4">
-          <Button
-            data-testid="offline-upload-submit"
-            disabled={missingReason !== null}
-            disabledReason={missingReason ?? undefined}
-            loading={createUpload.isPending}
-            type="button"
-            onClick={submitUpload}
-          >
-            <UploadCloudIcon data-icon="inline-start" />
-            업로드
-          </Button>
-          {missingReason ? (
-            <span className="text-2xs text-text-secondary">{missingReason}</span>
+  function renderUploadFormPanelSectionCard1() {
+    return (
+      <SectionCard
+        description="JSON/JSONL FeatureBundle, CSV/TSV tabular 원본"
+        headingLevel={2}
+        title="파일 업로드"
+      >
+        <div className="flex flex-col gap-1">
+          <FormField
+            data-testid="offline-upload-file-input"
+            label="파일"
+            type="file"
+            accept=".json,.jsonl,.ndjson,.csv,.tsv,application/json,application/x-ndjson,text/csv,text/tab-separated-values"
+            onChange={(event) => setFile(event.target.files?.[0] ?? null)}
+          />
+          <FormField
+            label="provider dataset ID"
+            list="offline-upload-provider-dataset-options"
+            min="1"
+            placeholder="401"
+            type="number"
+            value={providerDatasetId}
+            onChange={(event) => setProviderDatasetId(event.target.value)}
+          />
+          <datalist id="offline-upload-provider-dataset-options">
+            {providerDatasetOptions.map((item) => (
+              <option
+                key={item.provider_dataset_id}
+                label={`${item.provider}/${item.dataset_key}`}
+                value={item.provider_dataset_id}
+              />
+            ))}
+          </datalist>
+          <FormField
+            hint={
+              scopeOptions.length > 1
+                ? `이 dataset은 canonical scope가 여러 개입니다 — 직접 고르세요: ${scopeOptions.join(", ")}`
+                : scopeOptions.length === 1
+                  ? `이 dataset의 canonical scope: ${scopeOptions[0]}`
+                  : "provider dataset을 먼저 고르면 canonical scope가 채워집니다."
+            }
+            label="sync scope"
+            list="offline-upload-sync-scope-options"
+            placeholder={effectiveSyncScope || "default"}
+            value={syncScope}
+            onChange={(event) => setSyncScope(event.target.value)}
+          />
+          <datalist id="offline-upload-sync-scope-options">
+            {scopeOptions.map((scope) => (
+              <option key={scope} value={scope} />
+            ))}
+          </datalist>
+          <div className="flex flex-col items-start gap-1 border-t border-border pt-4">
+            <Button
+              data-testid="offline-upload-submit"
+              disabled={missingReason !== null}
+              disabledReason={missingReason ?? undefined}
+              loading={createUpload.isPending}
+              type="button"
+              onClick={submitUpload}
+            >
+              <UploadCloudIcon data-icon="inline-start" />
+              업로드
+            </Button>
+            {missingReason ? (
+              <span className="text-2xs text-text-secondary">
+                {missingReason}
+              </span>
+            ) : null}
+          </div>
+          {createUpload.data ? (
+            <p
+              aria-live="polite"
+              className="text-xs text-text-secondary tabular-nums"
+              role="status"
+            >
+              업로드 완료 ·{" "}
+              <span className="font-mono">
+                {shortId(createUpload.data.data.upload_id, 18)}
+              </span>{" "}
+              · {statusLabel(createUpload.data.data.status)} ·{" "}
+              {formatBytes(createUpload.data.data.byte_size)}
+            </p>
+          ) : null}
+          {createUpload.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>업로드 실패</AlertTitle>
+              <AlertDescription>{createUpload.error.message}</AlertDescription>
+            </Alert>
           ) : null}
         </div>
-        {createUpload.data ? (
-          <p
-            aria-live="polite"
-            className="text-xs text-text-secondary tabular-nums"
-            role="status"
-          >
-            업로드 완료 ·{" "}
-            <span className="font-mono">{shortId(createUpload.data.data.upload_id, 18)}</span> ·{" "}
-            {statusLabel(createUpload.data.data.status)} ·{" "}
-            {formatBytes(createUpload.data.data.byte_size)}
-          </p>
-        ) : null}
-        {createUpload.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>업로드 실패</AlertTitle>
-            <AlertDescription>{createUpload.error.message}</AlertDescription>
-          </Alert>
-        ) : null}
-      </div>
-    </SectionCard>
-  );
+      </SectionCard>
+    );
+  }
+  return renderUploadFormPanelSectionCard1();
 }
 
 function useOfflineUploadListController() {
@@ -784,7 +861,9 @@ function useOfflineUploadListController() {
 
   const selected =
     selectedUpload.data?.data ??
-    uploads.data?.data.items.find((item) => item.upload_id === selectedUploadId) ??
+    uploads.data?.data.items.find(
+      (item) => item.upload_id === selectedUploadId,
+    ) ??
     null;
 
   const uploadItems = uploads.data?.data.items ?? [];
@@ -813,7 +892,9 @@ function useOfflineUploadListController() {
         header: "형식",
         accessorFn: (row) => uploadFormat(row),
         cell: ({ row }) => (
-          <span className="font-mono text-xs">{uploadFormat(row.original) || NULL_GLYPH}</span>
+          <span className="font-mono text-xs">
+            {uploadFormat(row.original) || NULL_GLYPH}
+          </span>
         ),
       },
       {
@@ -865,16 +946,20 @@ function useOfflineUploadListController() {
           const upload = row.original;
           const loadEnabled = canLoad(upload);
           const inProgress = inProgressStates.has(upload.status);
-          const loading = launchLoad.isPending && launchLoad.variables === upload.upload_id;
+          const loading =
+            launchLoad.isPending && launchLoad.variables === upload.upload_id;
           const deleting =
-            deleteUpload.isPending && deleteUpload.variables === upload.upload_id;
+            deleteUpload.isPending &&
+            deleteUpload.variables === upload.upload_id;
           return (
             <div className="flex items-center gap-1">
               <Button
                 data-testid="offline-upload-load"
                 disabled={launchLoad.isPending || !loadEnabled}
                 disabledReason={
-                  launchLoad.isPending ? "다른 load를 실행하는 중입니다" : LOAD_BLOCKED_REASON
+                  launchLoad.isPending
+                    ? "다른 load를 실행하는 중입니다"
+                    : LOAD_BLOCKED_REASON
                 }
                 loading={loading}
                 size="sm"
@@ -893,7 +978,9 @@ function useOfflineUploadListController() {
                 data-testid="offline-upload-delete"
                 disabled={deleteUpload.isPending || inProgress}
                 disabledReason={
-                  inProgress ? DELETE_BLOCKED_REASON : "다른 업로드를 삭제하는 중입니다"
+                  inProgress
+                    ? DELETE_BLOCKED_REASON
+                    : "다른 업로드를 삭제하는 중입니다"
                 }
                 loading={deleting}
                 size="sm"
@@ -1034,23 +1121,37 @@ export function OfflineUploadsClient() {
                 placeholder="401"
                 type="number"
                 value={providerDatasetIdFilter}
-                onChange={(event) => setProviderDatasetIdFilter(event.target.value)}
+                onChange={(event) =>
+                  setProviderDatasetIdFilter(event.target.value)
+                }
               />
             </FilterField>
           </FilterBar>
 
           {deleteUpload.data ? (
-            <p aria-live="polite" className="text-xs text-text-secondary" role="status">
+            <p
+              aria-live="polite"
+              className="text-xs text-text-secondary"
+              role="status"
+            >
               업로드 삭제됨 ·{" "}
-              <span className="font-mono">{shortId(deleteUpload.data.data.upload_id, 18)}</span> ·{" "}
-              {deleteUpload.data.data.original_filename}
+              <span className="font-mono">
+                {shortId(deleteUpload.data.data.upload_id, 18)}
+              </span>{" "}
+              · {deleteUpload.data.data.original_filename}
             </p>
           ) : null}
           {launchLoad.data ? (
-            <p aria-live="polite" className="text-xs text-text-secondary" role="status">
+            <p
+              aria-live="polite"
+              className="text-xs text-text-secondary"
+              role="status"
+            >
               Dagster load 실행됨 ·{" "}
-              <span className="font-mono">{shortId(launchLoad.data.meta.dagster_run_id, 18)}</span> ·{" "}
-              {statusLabel(launchLoad.data.meta.dagster_status)}
+              <span className="font-mono">
+                {shortId(launchLoad.data.meta.dagster_run_id, 18)}
+              </span>{" "}
+              · {statusLabel(launchLoad.data.meta.dagster_status)}
             </p>
           ) : null}
 
@@ -1070,7 +1171,8 @@ export function OfflineUploadsClient() {
               data={uploadItems}
               emptyState={{
                 title: "offline upload가 없습니다.",
-                description: "상태 필터를 전체로 바꾸거나 우측 폼에서 파일을 올려 보세요.",
+                description:
+                  "상태 필터를 전체로 바꾸거나 우측 폼에서 파일을 올려 보세요.",
               }}
               getRowId={(row) => row.upload_id}
               isLoading={uploads.isLoading}

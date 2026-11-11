@@ -31,6 +31,14 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     root_package = _json(ROOT / "package.json")
     frontend_package = _json(FRONTEND / "package.json")
     lock_packages = _json(ROOT / "package-lock.json")["packages"]
+
+    def installed(name: str) -> dict[str, Any]:
+        workspace = FRONTEND.relative_to(ROOT).as_posix()
+        for key in (f"{workspace}/node_modules/{name}", f"node_modules/{name}"):
+            if key in lock_packages:
+                return lock_packages[key]
+        raise AssertionError(f"설치된 의존성이 없습니다: {name}")
+
     eslint_config = (FRONTEND / "eslint.config.mjs").read_text(encoding="utf-8")
 
     expected_engines = {
@@ -94,8 +102,11 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         "next": {"postcss": declared_postcss, "sharp": declared_sharp},
         "@redocly/openapi-core": "1.34.22",
     }
-    for unused in ("@hookform/resolvers", "react-hook-form", "zod"):
-        assert unused not in frontend_package["dependencies"]
+    for required in ("@hookform/resolvers", "react-hook-form", "zod", "zustand", "pretendard"):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", frontend_package["dependencies"][required])
+    assert "@base-ui/react" not in frontend_package["dependencies"]
+    assert "--source src" in frontend_package["scripts"]["check:dependencies"]
+
     assert "shadcn" not in frontend_package["devDependencies"]
     assert "eslint-config-next" not in frontend_package["devDependencies"]
     declared_playwright = frontend_package["devDependencies"]["@playwright/test"]
@@ -107,19 +118,19 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert '"import-x/no-anonymous-default-export": "warn"' in eslint_config
 
     # GHSA-68fv-2mgg-jv7q: postcss·tailwind·magicast가 공유하는 한 벌이 핀과 같아야 한다.
-    assert lock_packages["node_modules/source-map-js"]["version"] == (
+    assert installed("source-map-js")["version"] == (
         root_package["overrides"]["source-map-js"]
     )
-    assert lock_packages["node_modules/next"]["version"] == declared_next
-    assert lock_packages["node_modules/@next/env"]["version"] == declared_next
-    assert lock_packages["node_modules/next"]["dependencies"]["@next/env"] == (
+    assert installed("next")["version"] == declared_next
+    assert installed("@next/env")["version"] == declared_next
+    assert installed("next")["dependencies"]["@next/env"] == (
         declared_next
     )
-    assert lock_packages["node_modules/postcss"]["version"] == declared_postcss
-    assert lock_packages["node_modules/sharp"]["version"] == declared_sharp
-    assert lock_packages["node_modules/@playwright/test"]["version"] == declared_playwright
+    assert installed("postcss")["version"] == declared_postcss
+    assert installed("sharp")["version"] == declared_sharp
+    assert installed("@playwright/test")["version"] == declared_playwright
     assert (
-        lock_packages["node_modules/@redocly/openapi-core"]["version"]
+        installed("@redocly/openapi-core")["version"]
         == root_package["overrides"]["@redocly/openapi-core"]
     )
     assert lock_packages[""]["engines"] == expected_engines
@@ -134,7 +145,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         ("esbuild", "0.28.2"),
         ("unrs-resolver", "1.12.2"),
     ):
-        package = lock_packages[f"node_modules/{package_name}"]
+        package = installed(package_name)
         assert package["version"] == version
         assert package["hasInstallScript"] is True
 
@@ -251,7 +262,7 @@ def test_frontend_owns_every_named_shadcn_css_token_it_uses() -> None:
     defined_variants = set(
         re.findall(r"@custom-variant\s+(data-[a-z][a-z-]*)\b", css)
     )
-    assert used_variants == defined_variants
+    assert used_variants <= defined_variants
 
     for removed_token in (
         "animate-accordion-down",

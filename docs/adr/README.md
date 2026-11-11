@@ -1,6 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-123.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-124.**
+
+- [ADR-123 — 관리자 UI와 지도 공용 구현 채택](123-common-admin-ui.md) — accepted, 2026-11-11(산출물 후보 통합 검증 중).
 
 - [ADR-122 — weather 예보는 `since` 증분을 지금 Valkey 세대에 병합하고, 하루 한 번 전량으로 다시 맞춘다](122-weather-forecast-incremental-ingest.md) — proposed, 2026-11-10 (ADR-114 W3 "전량" 대체; migration 없음; weather since 응답에 tombstone 없음 → 주기 전량).
 

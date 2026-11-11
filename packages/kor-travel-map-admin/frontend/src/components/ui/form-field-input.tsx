@@ -54,6 +54,17 @@ function FormField({
   const unavailable = inputProps.disabled || inputProps.readOnly;
   const showHint = !error && Boolean(hint);
   const showMessage = reserveMessage || Boolean(error) || showHint;
+  function renderFormFieldState() {
+    return showMessage ? (
+      <FieldMessage>
+        {error ? (
+          <FieldError id={errorId}>{error}</FieldError>
+        ) : showHint ? (
+          <FieldDescription id={hintId}>{hint}</FieldDescription>
+        ) : null}
+      </FieldMessage>
+    ) : null;
+  }
   return (
     <Field
       className={className}
@@ -82,15 +93,7 @@ function FormField({
         ref={ref}
         {...inputProps}
       />
-      {showMessage ? (
-        <FieldMessage>
-          {error ? (
-            <FieldError id={errorId}>{error}</FieldError>
-          ) : showHint ? (
-            <FieldDescription id={hintId}>{hint}</FieldDescription>
-          ) : null}
-        </FieldMessage>
-      ) : null}
+      {renderFormFieldState()}
     </Field>
   );
 }

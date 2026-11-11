@@ -26,7 +26,7 @@ readonly SAFE_UPDATE_OPERATION="feature_place_transport_airports_job"
 # 자격증명 파일은 executor 안의 이 경로에 read-only로만 보인다(env에는 경로만 싣는다).
 readonly DAGSTER_BASIC_AUTH_CONTAINER_PATH="/run/secrets/c7-dagster-basic-auth"
 readonly FIXED_STATE_ROOT="/var/lib/kor-travel-map/c7-prod-live-e2e"
-readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
+readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d"
 STATE_ROOT=""
 EVIDENCE_ROOT=""
 EVIDENCE_RUN_DIR=""

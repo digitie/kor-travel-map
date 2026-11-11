@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { RadarIcon, RefreshCwIcon, RotateCcwIcon, XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -36,17 +36,25 @@ import {
 } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { hrefFor } from "@/lib/entity-href";
 import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { statusLabel } from "@/lib/status-label";
 
 /** 센서 Skip 사유 `NO_DATA_TOKEN_SKIP_REASON`(`dagster/geo_release_sensor.py`)과 같은 문장 — 운영자가 같은 말을
  * 본다. `tests/unit/test_geo_release_ui_mirrors_core.py`가 고정한다. */
-const MISSING_FINGERPRINT_TEXT = "geo data_token 없음 — 지문 backfill/복구 필요";
-const UNAVAILABLE_REASON = "kor-travel-geo가 현재 데이터셋을 답하지 않았다 — 감지할 수 없다";
+const MISSING_FINGERPRINT_TEXT =
+  "geo data_token 없음 — 지문 backfill/복구 필요";
+const UNAVAILABLE_REASON =
+  "kor-travel-geo가 현재 데이터셋을 답하지 않았다 — 감지할 수 없다";
 
-const DETECT_OUTCOME_TEXT: Record<GeoReleaseDetectResponse["data"]["outcome"], string> = {
+const DETECT_OUTCOME_TEXT: Record<
+  GeoReleaseDetectResponse["data"]["outcome"],
+  string
+> = {
   no_token: "geo가 data_token을 내지 않았다 — 계획을 만들 수 없다.",
   baseline_recorded: "처음 관측한 토큰을 기준선으로 기록했다(계획 없음).",
   baseline: "이미 기준선인 토큰이다(계획 없음).",
@@ -84,17 +92,33 @@ function itemStatus(state: GeoReleaseItemRecord["state"]) {
   );
 }
 
-function CurrentDatasetCard({ data }: { data: GeoReleaseListResponse["data"] | undefined }) {
+function CurrentDatasetCard({
+  data,
+}: {
+  data: GeoReleaseListResponse["data"] | undefined;
+}) {
   if (!data) {
     return null;
   }
   const { current, current_status: status } = data;
   const items: DetailItem[] = [
-    { label: "version_token", value: current?.version_token ?? null, mono: true, copyable: true },
-    { label: "data_token", value: current?.data_token ?? null, mono: true, copyable: true },
+    {
+      label: "version_token",
+      value: current?.version_token ?? null,
+      mono: true,
+      copyable: true,
+    },
+    {
+      label: "data_token",
+      value: current?.data_token ?? null,
+      mono: true,
+      copyable: true,
+    },
     {
       label: "활성화",
-      value: current?.activated_at ? formatDateTime(current.activated_at) : null,
+      value: current?.activated_at
+        ? formatDateTime(current.activated_at)
+        : null,
       numeric: true,
     },
     {
@@ -124,7 +148,9 @@ function CurrentDatasetCard({ data }: { data: GeoReleaseListResponse["data"] | u
         <Alert variant="destructive">
           <AlertTitle>계획을 만들 수 없음</AlertTitle>
           <AlertDescription>
-            <p data-testid="geo-release-skip-reason">센서 Skip 사유: {MISSING_FINGERPRINT_TEXT}</p>
+            <p data-testid="geo-release-skip-reason">
+              센서 Skip 사유: {MISSING_FINGERPRINT_TEXT}
+            </p>
           </AlertDescription>
         </Alert>
       ) : null}
@@ -151,13 +177,19 @@ function CoverageGauge({ coverage }: { coverage: GeoCoverageRecord }) {
       <div className="flex flex-col gap-1.5">
         <div className="flex items-baseline justify-between gap-2 text-xs text-text-secondary">
           <span>계획 토큰 스탬프</span>
-          <span className="font-mono tabular-nums text-text-primary" data-testid="geo-coverage-ratio">
-            {formatCount(coverage.stamped_current)} / {formatCount(coverage.total_provider_with_coord)}
+          <span
+            className="font-mono tabular-nums text-text-primary"
+            data-testid="geo-coverage-ratio"
+          >
+            {formatCount(coverage.stamped_current)} /{" "}
+            {formatCount(coverage.total_provider_with_coord)}
             {percent === null ? "" : ` (${percent}%)`}
           </span>
         </div>
         {percent === null ? (
-          <p className="text-2xs text-text-tertiary">분모 없음 — 이 계획 dataset에 좌표 보유 Feature가 없다.</p>
+          <p className="text-2xs text-text-tertiary">
+            분모 없음 — 이 계획 dataset에 좌표 보유 Feature가 없다.
+          </p>
         ) : (
           <>
             <meter
@@ -169,8 +201,14 @@ function CoverageGauge({ coverage }: { coverage: GeoCoverageRecord }) {
             >
               {`${percent}%`}
             </meter>
-            <div aria-hidden="true" className="h-2 w-full overflow-hidden rounded-full bg-surface-muted">
-              <div className="h-full rounded-full bg-success" style={{ width: `${percent}%` }} />
+            <div
+              aria-hidden="true"
+              className="h-2 w-full overflow-hidden rounded-full bg-surface-muted"
+            >
+              <div
+                className="h-full rounded-full bg-success"
+                style={{ width: `${percent}%` }}
+              />
             </div>
           </>
         )}
@@ -238,9 +276,13 @@ function useItemColumns(
           const note = launchNote(row.original);
           return (
             <div className="flex min-w-0 flex-col gap-1">
-              <span className="font-mono text-xs break-all">{row.original.operation_key}</span>
+              <span className="font-mono text-xs break-all">
+                {row.original.operation_key}
+              </span>
               <span className="text-2xs text-text-secondary">
-                {row.original.datasets.map((dataset) => dataset.dataset_key).join(", ")}
+                {row.original.datasets
+                  .map((dataset) => dataset.dataset_key)
+                  .join(", ")}
               </span>
               {note ? (
                 <>
@@ -271,7 +313,8 @@ function useItemColumns(
             {itemStatus(row.original.state)}
             {row.original.state_reason ? (
               <span className="text-2xs text-text-secondary">
-                {REASON_TEXT[row.original.state_reason] ?? statusLabel(row.original.state_reason)}
+                {REASON_TEXT[row.original.state_reason] ??
+                  statusLabel(row.original.state_reason)}
               </span>
             ) : null}
           </div>
@@ -363,8 +406,13 @@ function PlanDetail({
 
   if (planId === null) {
     return (
-      <SectionCard description="계획 행을 선택하면 항목과 커버리지를 봅니다." title="계획 상세">
-        <p className="text-xs text-text-tertiary">계획이 없거나 선택되지 않았습니다.</p>
+      <SectionCard
+        description="계획 행을 선택하면 항목과 커버리지를 봅니다."
+        title="계획 상세"
+      >
+        <p className="text-xs text-text-tertiary">
+          계획이 없거나 선택되지 않았습니다.
+        </p>
       </SectionCard>
     );
   }
@@ -407,7 +455,8 @@ function PlanDetail({
       description={
         plan ? (
           <span className="font-mono">
-            #{plan.plan_id} · seq {plan.plan_seq} · {shortId(plan.geo_data_token, 16)}
+            #{plan.plan_id} · seq {plan.plan_seq} ·{" "}
+            {shortId(plan.geo_data_token, 16)}
           </span>
         ) : (
           NULL_GLYPH
@@ -435,12 +484,17 @@ function PlanDetail({
               </span>
             ) : null}
           </div>
-          {detail.data ? <CoverageGauge coverage={detail.data.data.coverage} /> : null}
+          {detail.data ? (
+            <CoverageGauge coverage={detail.data.data.coverage} />
+          ) : null}
           <DataTable
             ariaLabel="계획 항목"
             columns={columns}
             data={plan.items}
-            emptyState={{ title: "항목이 없습니다.", description: "기준선 계획은 항목을 만들지 않는다." }}
+            emptyState={{
+              title: "항목이 없습니다.",
+              description: "기준선 계획은 항목을 만들지 않는다.",
+            }}
             getRowId={(row) => String(row.position)}
             manualSorting={false}
             rowTestId={(row) => `geo-release-item-${row.position}`}
@@ -489,7 +543,9 @@ export function GeoReleasesClient() {
   const list = useGeoReleases();
   const detect = useDetectGeoReleaseMutation();
   const [selectedId, setSelectedId] = useState<number | null>(null);
-  const [lastDetect, setLastDetect] = useState<GeoReleaseDetectResponse | null>(null);
+  const [lastDetect, setLastDetect] = useState<GeoReleaseDetectResponse | null>(
+    null,
+  );
   const plans = useMemo(() => list.data?.data.plans ?? [], [list.data]);
   const selected =
     plans.find((plan) => plan.plan_id === selectedId) ?? plans[0] ?? null;
@@ -542,7 +598,9 @@ export function GeoReleasesClient() {
             <AlertDescription>
               <p data-testid="geo-release-detect-outcome">
                 {DETECT_OUTCOME_TEXT[lastDetect.data.outcome]}
-                {lastDetect.data.plan ? ` 계획 #${lastDetect.data.plan.plan_id}.` : ""}
+                {lastDetect.data.plan
+                  ? ` 계획 #${lastDetect.data.plan.plan_id}.`
+                  : ""}
               </p>
             </AlertDescription>
             <AlertAction>
@@ -580,7 +638,8 @@ export function GeoReleasesClient() {
                 data={plans}
                 emptyState={{
                   title: "계획이 없습니다.",
-                  description: "첫 토큰은 기준선으로만 기록된다 — 토큰이 바뀌면 계획이 생긴다.",
+                  description:
+                    "첫 토큰은 기준선으로만 기록된다 — 토큰이 바뀌면 계획이 생긴다.",
                 }}
                 getRowId={(row) => String(row.plan_id)}
                 isLoading={list.isLoading}

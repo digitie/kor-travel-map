@@ -2,9 +2,15 @@
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
 import * as React from "react";
+import { useStore } from "zustand";
+import { createStore } from "zustand/vanilla";
 import { CircleHelpIcon, InfoIcon } from "lucide-react";
 
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import {
   Tooltip,
   TooltipContent,
@@ -30,9 +36,18 @@ type HelpTipProps = {
  * (design.md §Microinteractions ≥ 24px) without changing the 14px glyph or inline layout.
  * States: rest ink-2 · hover/open ink on paper-2 · active paper-3 · focus = one outline recipe.
  */
-function HelpTip({ label, children, className, variant = "help" }: HelpTipProps) {
+function HelpTip({
+  label,
+  children,
+  className,
+  variant = "help",
+}: HelpTipProps) {
   const Icon = variant === "info" ? InfoIcon : CircleHelpIcon;
-  const [popoverOpen, setPopoverOpen] = React.useState(false);
+  const [store] = React.useState(() =>
+    createStore<{ open: boolean }>(() => ({ open: false })),
+  );
+  const popoverOpen = useStore(store, (state) => state.open);
+  const setPopoverOpen = (open: boolean) => store.setState({ open });
 
   const trigger = (
     <button
@@ -55,9 +70,9 @@ function HelpTip({ label, children, className, variant = "help" }: HelpTipProps)
     <Popover open={popoverOpen} onOpenChange={setPopoverOpen}>
       <TooltipProvider>
         <Tooltip>
-          <TooltipTrigger
-            render={<PopoverTrigger render={trigger} />}
-          />
+          <TooltipTrigger asChild>
+            <PopoverTrigger asChild>{trigger}</PopoverTrigger>
+          </TooltipTrigger>
           {popoverOpen ? null : <TooltipContent>{children}</TooltipContent>}
         </Tooltip>
       </TooltipProvider>

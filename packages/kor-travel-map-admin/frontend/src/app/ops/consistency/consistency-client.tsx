@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (dashboard) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { RefreshCwIcon } from "lucide-react";
 import { useState } from "react";
 
@@ -71,7 +71,11 @@ const reportColumns: ColumnDef<OpsConsistencyReportRecord, unknown>[] = [
     header: "배치",
     enableSorting: false,
     cell: ({ row }) => (
-      <EntityLink className="text-xs" id={row.original.batch_id} kind="loadBatch">
+      <EntityLink
+        className="text-xs"
+        id={row.original.batch_id}
+        kind="loadBatch"
+      >
         {shortId(row.original.batch_id)}
       </EntityLink>
     ),
@@ -108,7 +112,9 @@ const issueColumns: ColumnDef<OpsIntegrityIssueRecord, unknown>[] = [
   {
     accessorKey: "severity",
     header: "심각도",
-    cell: ({ row }) => <LevelBadge level={severityStatus(row.original.severity)} />,
+    cell: ({ row }) => (
+      <LevelBadge level={severityStatus(row.original.severity)} />
+    ),
   },
   {
     id: "provider_dataset",
@@ -297,7 +303,9 @@ export function ConsistencyClient() {
                   size="sm"
                   value={status}
                   onChange={(event) =>
-                    setStatus(event.target.value as IntegrityIssueStatus | "all")
+                    setStatus(
+                      event.target.value as IntegrityIssueStatus | "all",
+                    )
                   }
                 >
                   {issueStatuses.map((item) => (

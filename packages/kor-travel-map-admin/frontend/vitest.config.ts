@@ -8,6 +8,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   plugins: [react(), tsconfigPaths()],
   test: {
+    setupFiles: ["./tests/browser-apis.ts"],
+    server: { deps: { inline: ["vworld-map-web"] } },
     exclude: ["e2e/**", "node_modules/**", "dist/**", ".next/**"],
   },
 });

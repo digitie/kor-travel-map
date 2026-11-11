@@ -49,6 +49,9 @@ jobs:
       - name: npm dependency tree integrity
         run: npx --yes npm@12.0.1 run verify:npm-tree
 
+      - name: Common dependency guard
+        run: npm -w packages/kor-travel-map-admin/frontend run check:dependencies
+
       - name: frontend ESLint effective config
         run: npx --yes npm@12.0.1 run verify:frontend-eslint
 

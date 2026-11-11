@@ -167,15 +167,17 @@ Admin UI는 `packages/kor-travel-map-admin/frontend/`의 별도 Next.js 패키�
 - Next.js 16 App Router + React 19 + TypeScript.
 - 서버 상태와 mutation은 TanStack Query가 source of truth다. 원격 응답을
   Zustand에 복제하지 않는다.
-- 클라이언트 UI 상태는 Zustand가 맡고, form은 controlled React state와 framework-independent
-  `src/lib/form-validation.ts`로 제출 경계에서 검증한다.
-- 운영 목록/검토 화면의 데이터 테이블은 공용 `DataTable`을 쓴다.
-  `DataTable`은 `@tanstack/react-table` v8 + `@tanstack/react-virtual` v3
-  기반이며, shadcn `Table` primitive는 의미론적/시각적 table 렌더링에만 쓴다.
-- 지도는 MapLibre GL + VWorld style builder다. `maplibre-vworld-js`/
-  `maplibre-vworld` npm dependency는 사용하지 않는다. T-MAP-VWORLD-04 이후
-  `digitie/maplibre-vworld-react`의 `vworld-map-core`/`vworld-map-web` 경계를
-  기준으로 필요한 `VWorldMapView`와 style builder만 admin 내부에 포팅했다.
+- 클라이언트 UI 상태는 Zustand가 맡고 원격 응답은 TanStack Query에 둔다.
+  로그인은 common LoginForm의 React Hook Form + Zod 검증과 인스턴스별 Zustand 상태를 쓴다.
+  복잡한 도메인 편집기는 기존 제출 검증을 유지하며 개별 RHF 이관 후보로 관리한다.
+- 모든 운영 목록/검토 테이블은 `@kor-travel/ui/virtual-table`의 VirtualTable을 사용한다.
+  로컬 DataTable은 public props/type 호환 reexport다. Common이 TanStack Table 9.3.1의
+  기능 제네릭을 숨기고 Table 2인수 타입과 Virtual 3.14.26 기반 가상화를 제공한다.
+- UI primitive는 common의 shadcn Radix를 사용한다. 폰트와 선택형 Radix CSS bridge는
+  common tokens에서 받고 앱의 기존 semantic 색상·크기·상태 variant를 보존한다.
+- 지도 생명주기·style builder는 `vworld-map-web`/`vworld-map-core` public API를 사용한다.
+  부모가 제공한 동일 GitHub 최신 소스 tgz를 file vendor로 설치하며 Map 도메인
+  마커·클러스터·geometry·long press 정책만 로컬에서 조합한다.
 - 공통 마커와 category→maki 매핑은 `@kor-travel-map/map-marker-react`를 쓴다
   (모노레포 내부 private package).
 

@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 
@@ -25,7 +25,10 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { FormField } from "@/components/ui/form-field";
 import { NULL_GLYPH, formatDateTime, shortId } from "@/lib/format";
 
@@ -77,7 +80,8 @@ const AUTH_EVENT_COLUMNS: ColumnDef<AdminAuthEventRecord, unknown>[] = [
         className="block max-w-72 truncate text-xs text-text-secondary"
         title={`${row.original.client_ip ?? NULL_GLYPH} · ${row.original.user_agent ?? NULL_GLYPH}`}
       >
-        {row.original.client_ip ?? NULL_GLYPH} · {row.original.user_agent ?? NULL_GLYPH}
+        {row.original.client_ip ?? NULL_GLYPH} ·{" "}
+        {row.original.user_agent ?? NULL_GLYPH}
       </span>
     ),
   },
@@ -86,7 +90,9 @@ const AUTH_EVENT_COLUMNS: ColumnDef<AdminAuthEventRecord, unknown>[] = [
     header: "요청",
     enableSorting: false,
     cell: ({ row }) => (
-      <span className="font-mono text-xs">{shortId(row.original.request_id)}</span>
+      <span className="font-mono text-xs">
+        {shortId(row.original.request_id)}
+      </span>
     ),
   },
 ];
@@ -110,7 +116,9 @@ export function AdminSettingsClient() {
         enableSorting: false,
         cell: ({ row }) => (
           <>
-            <div className="font-medium">{row.original.label ?? "이름 없음"}</div>
+            <div className="font-medium">
+              {row.original.label ?? "이름 없음"}
+            </div>
             <div className="font-mono text-xs text-text-secondary">
               {shortId(row.original.public_api_key_id)}
             </div>
@@ -217,7 +225,12 @@ export function AdminSettingsClient() {
       title="설정"
       description="관리자 로그인 감사 기록과 VWorld 호환 public API key를 관리합니다."
       actions={
-        <Button loading={refreshing} type="button" variant="outline" onClick={refresh}>
+        <Button
+          loading={refreshing}
+          type="button"
+          variant="outline"
+          onClick={refresh}
+        >
           <RefreshCwIcon data-icon="inline-start" />
           새로고침
         </Button>
@@ -242,7 +255,10 @@ export function AdminSettingsClient() {
             />
             {/* 라벨 높이만큼 비운 자리 — 버튼을 입력 컨트롤과 같은 baseline에 맞춘다. */}
             <div className="flex flex-col gap-1.5">
-              <span aria-hidden="true" className="invisible text-xs leading-snug font-medium">
+              <span
+                aria-hidden="true"
+                className="invisible text-xs leading-snug font-medium"
+              >
                 &nbsp;
               </span>
               {/* 라벨 정본: e2e(live/settings-write)가 "랜덤 생성"을 클릭한다 — 키가 서버에서
@@ -300,7 +316,8 @@ export function AdminSettingsClient() {
             data={keyItems}
             emptyState={{
               title: "저장된 API 키가 없습니다.",
-              description: "위에서 라벨을 입력하고 키를 생성하면 목록에 나타납니다.",
+              description:
+                "위에서 라벨을 입력하고 키를 생성하면 목록에 나타납니다.",
             }}
             error={apiKeys.error}
             errorTitle="API 키 목록을 불러오지 못했습니다"

@@ -17,13 +17,10 @@ import type {
   Popup as MapLibrePopup,
 } from "maplibre-gl";
 import {
-  createContext,
-  use,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
-  useState,
   type CSSProperties,
   type ReactNode,
 } from "react";
@@ -33,13 +30,10 @@ import {
 } from "@/lib/price-marker-label";
 import { scheduleKstMidnightTicks } from "@/lib/price-freshness";
 import {
-  buildVWorldStyle,
-  getVWorldMaxZoom,
-  redactVWorldUrl,
+  VWorldMapView as SharedVWorldMapView,
+  useMap,
   type VWorldLayerType,
-} from "@/lib/vworld-style";
-
-const VWorldMapContext = createContext<MapLibreMap | null>(null);
+} from "vworld-map-web";
 
 //: **worker를 정적 파일에서 띄운다.** Next 16 production 빌드는 Turbopack이고,
 //: Turbopack은 URL import를 해시된 단일 asset으로 내보내며 형제 파일을 함께
@@ -99,6 +93,7 @@ interface VWorldMapViewProps {
   onError?: (event: maplibregl.ErrorEvent) => void;
 }
 
+/** 지도 생명주기와 스타일은 검증된 upstream 산출물에 위임한다. */
 export function VWorldMapView({
   apiKey,
   center,
@@ -120,259 +115,123 @@ export function VWorldMapView({
   onError,
 }: VWorldMapViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<MapLibreMap | null>(null);
-  const initialMapOptionsRef = useRef({
-    apiKey,
-    center,
-    zoom,
-    layerType,
-    maxZoom,
-    minZoom,
-    navigation,
-    scale,
-  });
-  const appliedStyleRef = useRef({ apiKey, layerType });
-  const onClickRef = useRef(onClick);
-  const onContextMenuRef = useRef(onContextMenu);
-  const onLongPressRef = useRef(onLongPress);
-  const onLoadRef = useRef(onLoad);
-  const onMoveEndRef = useRef(onMoveEnd);
-  const onErrorRef = useRef(onError);
-  const [map, setMap] = useState<MapLibreMap | null>(null);
-  const [loaded, setLoaded] = useState(false);
+  return (
+    <div
+      ref={containerRef}
+      className={className}
+      data-testid={testId}
+      style={{
+        ...style,
+        touchAction: onLongPress ? "none" : style?.touchAction,
+      }}
+    >
+      <SharedVWorldMapView
+        apiKey={apiKey ?? ""}
+        center={center}
+        zoom={zoom}
+        layerType={layerType}
+        minZoom={minZoom}
+        maxZoom={maxZoom}
+        navigation={navigation}
+        scale={scale}
+        geolocate={false}
+        animateCameraChanges={false}
+        onClick={onClick}
+        onContextMenu={onContextMenu}
+        onLoad={(map) => {
+          const node = containerRef.current as
+            | (HTMLDivElement & { _maplibreMap?: MapLibreMap })
+            | null;
+          if (node) node._maplibreMap = map;
+          onLoad?.(map);
+        }}
+        onMoveEnd={(event) => onMoveEnd?.(event.target)}
+        onError={onError}
+        fallback={
+          <p role="status">
+            지도를 표시할 수 없습니다. 지도 키와 브라우저 설정을 확인하세요.
+          </p>
+        }
+      >
+        <MapLongPress onLongPress={onLongPress} />
+        {children}
+      </SharedVWorldMapView>
+    </div>
+  );
+}
 
+/** 장소 입력의 길게 누르기 정책만 앱에 남긴다. */
+function MapLongPress({
+  onLongPress,
+}: Pick<VWorldMapViewProps, "onLongPress">) {
+  const map = useMap();
+  const callback = useRef(onLongPress);
   useLayoutEffect(() => {
-    onClickRef.current = onClick;
-    onContextMenuRef.current = onContextMenu;
-    onLongPressRef.current = onLongPress;
-    onLoadRef.current = onLoad;
-    onMoveEndRef.current = onMoveEnd;
-    onErrorRef.current = onError;
-  });
-
+    callback.current = onLongPress;
+  }, [onLongPress]);
   useEffect(() => {
-    if (containerRef.current === null) return;
-    const initial = initialMapOptionsRef.current;
-
-    const nextMap = new maplibregl.Map({
-      container: containerRef.current,
-      style: buildVWorldStyle(initial.apiKey, initial.layerType),
-      center: initial.center,
-      zoom: initial.zoom,
-      minZoom: initial.minZoom,
-      maxZoom: Math.min(
-        initial.maxZoom,
-        getVWorldMaxZoom(initial.layerType),
-      ),
-      attributionControl: { compact: true },
-    });
-    mapRef.current = nextMap;
-    appliedStyleRef.current = {
-      apiKey: initial.apiKey,
-      layerType: initial.layerType,
+    if (!map) return;
+    const node = map.getContainer();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let pointer: {
+      id: number;
+      x: number;
+      y: number;
+      event: PointerEvent;
+    } | null = null;
+    const clear = () => {
+      clearTimeout(timer);
+      pointer = null;
     };
-    setMap(nextMap);
-
-    // e2e 훅: 컨테이너 DOM 노드에 map 인스턴스를 매달아 Playwright가
-    // page.evaluate로 getLayer/querySourceFeatures 같은 GL 렌더 상태를 단언할 수
-    // 있게 한다(전역 오염 없이 testId로 스코프됨). teardown 시 해제.
-    const containerNode = containerRef.current as
-      | (HTMLDivElement & { _maplibreMap?: MapLibreMap })
-      | null;
-    if (containerNode) containerNode._maplibreMap = nextMap;
-
-    let didNotifyLoad = false;
-    let loadFrame = 0;
-    const notifyLoad = () => {
-      if (didNotifyLoad) return;
-      didNotifyLoad = true;
-      setLoaded(true);
-      onLoadRef.current?.(nextMap);
-    };
-    const handleLoad = () => {
-      notifyLoad();
-    };
-    const handleMoveEnd = () => {
-      onMoveEndRef.current?.(nextMap);
-    };
-    const handleClick = (event: maplibregl.MapMouseEvent) => {
-      onClickRef.current?.(event);
-    };
-    const handleContextMenu = (event: maplibregl.MapMouseEvent) => {
-      onContextMenuRef.current?.(event);
-    };
-    const handleError = (event: maplibregl.ErrorEvent) => {
-      if (onErrorRef.current) {
-        onErrorRef.current(event);
-        return;
-      }
-      const error = event.error as { message?: string; url?: string } | undefined;
-      const url =
-        error?.url ?? (event as { url?: string | undefined }).url;
-      console.warn(
-        "[VWorldMapView]",
-        error?.message ?? "unknown map error",
-        redactVWorldUrl(url) ?? "",
-      );
-    };
-
-    nextMap.on("load", handleLoad);
-    nextMap.on("idle", handleLoad);
-    nextMap.on("click", handleClick);
-    nextMap.on("contextmenu", handleContextMenu);
-    nextMap.on("moveend", handleMoveEnd);
-    nextMap.on("error", handleError);
-    loadFrame = requestAnimationFrame(() => {
-      notifyLoad();
-    });
-
-    let resizeFrame = 0;
-    let longPressTimer = 0;
-    let longPressPointer:
-      | { id: number; startX: number; startY: number; currentEvent: PointerEvent }
-      | null = null;
-    const clearLongPress = () => {
-      if (longPressTimer !== 0) {
-        window.clearTimeout(longPressTimer);
-        longPressTimer = 0;
-      }
-      longPressPointer = null;
-    };
-    const handlePointerDown = (event: PointerEvent) => {
-      if (event.pointerType === "mouse" || !onLongPressRef.current) return;
-      clearLongPress();
-      longPressPointer = {
+    const down = (event: PointerEvent) => {
+      if (event.pointerType === "mouse" || !callback.current) return;
+      clear();
+      pointer = {
         id: event.pointerId,
-        startX: event.clientX,
-        startY: event.clientY,
-        currentEvent: event,
+        x: event.clientX,
+        y: event.clientY,
+        event,
       };
-      longPressTimer = window.setTimeout(() => {
-        const pointer = longPressPointer;
-        const node = containerRef.current;
-        if (!pointer || !node || pointer.id !== event.pointerId) return;
+      timer = setTimeout(() => {
+        if (!pointer) return;
         const rect = node.getBoundingClientRect();
-        const lngLat = nextMap.unproject([
-          pointer.currentEvent.clientX - rect.left,
-          pointer.currentEvent.clientY - rect.top,
-        ]);
-        onLongPressRef.current?.({
-          lngLat,
-          originalEvent: pointer.currentEvent,
+        callback.current?.({
+          lngLat: map.unproject([
+            pointer.event.clientX - rect.left,
+            pointer.event.clientY - rect.top,
+          ]),
+          originalEvent: pointer.event,
         });
-        clearLongPress();
+        clear();
       }, 600);
     };
-    const handlePointerMove = (event: PointerEvent) => {
-      if (!longPressPointer || event.pointerId !== longPressPointer.id) return;
-      const moveX = Math.abs(event.clientX - longPressPointer.startX);
-      const moveY = Math.abs(event.clientY - longPressPointer.startY);
-      if (moveX > 12 || moveY > 12) {
-        clearLongPress();
-        return;
-      }
-      longPressPointer.currentEvent = event;
+    const move = (event: PointerEvent) => {
+      if (!pointer || event.pointerId !== pointer.id) return;
+      if (
+        Math.abs(event.clientX - pointer.x) > 12 ||
+        Math.abs(event.clientY - pointer.y) > 12
+      )
+        clear();
+      else pointer.event = event;
     };
-    const handlePointerEnd = (event: PointerEvent) => {
-      if (longPressPointer && event.pointerId === longPressPointer.id) {
-        clearLongPress();
-      }
+    const end = (event: PointerEvent) => {
+      if (pointer?.id === event.pointerId) clear();
     };
-    containerNode?.addEventListener("pointerdown", handlePointerDown);
-    containerNode?.addEventListener("pointermove", handlePointerMove);
-    containerNode?.addEventListener("pointerup", handlePointerEnd);
-    containerNode?.addEventListener("pointercancel", handlePointerEnd);
-    containerNode?.addEventListener("pointerleave", handlePointerEnd);
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => {
-            if (resizeFrame !== 0) return;
-            resizeFrame = requestAnimationFrame(() => {
-              resizeFrame = 0;
-              nextMap.resize();
-            });
-          });
-    if (resizeObserver && containerRef.current) {
-      resizeObserver.observe(containerRef.current);
-    }
-
-    const controls: Array<maplibregl.IControl> = [];
-    if (initial.navigation) {
-      const control = new maplibregl.NavigationControl({
-        showCompass: false,
-      });
-      nextMap.addControl(control, "top-right");
-      controls.push(control);
-    }
-    if (initial.scale) {
-      const control = new maplibregl.ScaleControl({
-        maxWidth: 150,
-        unit: "metric",
-      });
-      nextMap.addControl(control, "bottom-right");
-      controls.push(control);
-    }
-
+    node.addEventListener("pointerdown", down);
+    node.addEventListener("pointermove", move);
+    node.addEventListener("pointerup", end);
+    node.addEventListener("pointercancel", end);
+    node.addEventListener("pointerleave", end);
     return () => {
-      if (loadFrame !== 0) cancelAnimationFrame(loadFrame);
-      if (resizeFrame !== 0) cancelAnimationFrame(resizeFrame);
-      clearLongPress();
-      containerNode?.removeEventListener("pointerdown", handlePointerDown);
-      containerNode?.removeEventListener("pointermove", handlePointerMove);
-      containerNode?.removeEventListener("pointerup", handlePointerEnd);
-      containerNode?.removeEventListener("pointercancel", handlePointerEnd);
-      containerNode?.removeEventListener("pointerleave", handlePointerEnd);
-      resizeObserver?.disconnect();
-      nextMap.off("load", handleLoad);
-      nextMap.off("idle", handleLoad);
-      nextMap.off("click", handleClick);
-      nextMap.off("contextmenu", handleContextMenu);
-      nextMap.off("moveend", handleMoveEnd);
-      nextMap.off("error", handleError);
-      for (const control of controls) {
-        try {
-          nextMap.removeControl(control);
-        } catch {
-          // MapLibre may already be tearing down the control while removing the map.
-        }
-      }
-      if (containerNode) delete containerNode._maplibreMap;
-      nextMap.remove();
-      mapRef.current = null;
-      setLoaded(false);
-      setMap(null);
+      clear();
+      node.removeEventListener("pointerdown", down);
+      node.removeEventListener("pointermove", move);
+      node.removeEventListener("pointerup", end);
+      node.removeEventListener("pointercancel", end);
+      node.removeEventListener("pointerleave", end);
     };
-    // 지도 인스턴스는 mount 1회만 만들고, 이후 camera는 사용자 조작 결과를 store에 동기화한다.
-  }, []);
-
-  useEffect(() => {
-    const currentMap = mapRef.current;
-    if (currentMap === null) return;
-    if (
-      appliedStyleRef.current.apiKey === apiKey &&
-      appliedStyleRef.current.layerType === layerType
-    ) {
-      return;
-    }
-    currentMap.setStyle(buildVWorldStyle(apiKey, layerType));
-    appliedStyleRef.current = { apiKey, layerType };
-  }, [apiKey, layerType]);
-
-  return (
-    <VWorldMapContext value={map}>
-      <div
-        ref={containerRef}
-        className={className}
-        data-testid={testId}
-        style={{
-          ...style,
-          touchAction: onLongPress ? "none" : style?.touchAction,
-        }}
-      />
-      {loaded ? children : null}
-    </VWorldMapContext>
-  );
+  }, [map]);
+  return null;
 }
 
 /**
@@ -391,7 +250,10 @@ function markerColorValue(markerColor: string | null | undefined): string {
 }
 
 /** createMarkerElement가 var() 색을 기본색으로 떨어뜨린 경우 배경을 토큰 참조로 되돌린다. */
-function applyTokenMarkerColor(element: HTMLElement, markerColor: string | null | undefined): void {
+function applyTokenMarkerColor(
+  element: HTMLElement,
+  markerColor: string | null | undefined,
+): void {
   if (isCssVariableColor(markerColor)) {
     element.style.background = markerColor.trim();
   }
@@ -452,9 +314,11 @@ export function VWorldMarker({
   title,
   onClick,
 }: VWorldMarkerProps) {
-  const map = use(VWorldMapContext);
+  const map = useMap();
   const markerRef = useRef<MapLibreMarker | null>(null);
-  const elementRef = useRef<ReturnType<typeof createMarkerElement> | null>(null);
+  const elementRef = useRef<ReturnType<typeof createMarkerElement> | null>(
+    null,
+  );
   const onClickRef = useRef(onClick);
   const clickable = onClick !== undefined;
   const [lng, lat] = lngLat;
@@ -529,7 +393,10 @@ function setSelectedOutline(element: HTMLElement, selected: boolean): void {
   }
 }
 
-function createClusterElement(pointCount: number, label: string): HTMLDivElement {
+function createClusterElement(
+  pointCount: number,
+  label: string,
+): HTMLDivElement {
   const el = document.createElement("div");
   const size = pointCount < 100 ? 36 : pointCount < 1000 ? 46 : 58;
   el.style.width = `${size}px`;
@@ -566,7 +433,6 @@ export interface ClusterFeatureInput {
   area_square_meters?: number | null;
   price_summary?: readonly ClusterPriceSummaryPoint[] | null;
 }
-
 
 type GeometryFeatureKind = "route" | "area";
 type FeatureMapGeometry =
@@ -787,7 +653,10 @@ function createFeatureMarkerElement({
 }
 
 function areaLabel(areaSquareMeters: number | null | undefined): string | null {
-  if (typeof areaSquareMeters !== "number" || !Number.isFinite(areaSquareMeters)) {
+  if (
+    typeof areaSquareMeters !== "number" ||
+    !Number.isFinite(areaSquareMeters)
+  ) {
     return null;
   }
   if (areaSquareMeters >= 1_000_000) {
@@ -873,15 +742,7 @@ function installGeometryLayerLifecycle(
         paint: {
           "line-color": ["get", "color"],
           "line-opacity": 0.9,
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            8,
-            1.2,
-            14,
-            2.8,
-          ],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 1.2, 14, 2.8],
         },
       });
     }
@@ -898,15 +759,7 @@ function installGeometryLayerLifecycle(
         paint: {
           "line-color": ["get", "color"],
           "line-opacity": 0.92,
-          "line-width": [
-            "interpolate",
-            ["linear"],
-            ["zoom"],
-            8,
-            2,
-            14,
-            4.5,
-          ],
+          "line-width": ["interpolate", ["linear"], ["zoom"], 8, 2, 14, 4.5],
         },
       });
     }
@@ -976,7 +829,9 @@ function createGeometryLabelElement(
   element.style.userSelect = "none";
   if (onSelectFeature) {
     element.setAttribute("aria-label", element.title);
-    bindSelection(element, () => onSelectFeature(feature.properties.feature_id));
+    bindSelection(element, () =>
+      onSelectFeature(feature.properties.feature_id),
+    );
   } else {
     element.setAttribute("role", "img");
     element.setAttribute("aria-label", element.title);
@@ -1024,7 +879,8 @@ function createServerClusterMarker(
       center: target,
       zoom: Math.min(
         map.getMaxZoom(),
-        map.getZoom() + (Number.isFinite(currentZoomStep) ? currentZoomStep : 3),
+        map.getZoom() +
+          (Number.isFinite(currentZoomStep) ? currentZoomStep : 3),
       ),
     });
   });
@@ -1053,7 +909,7 @@ export function VWorldServerClusters({
   clusters: ReadonlyArray<ServerClusterInput>;
   zoomStep?: number;
 }) {
-  const map = use(VWorldMapContext);
+  const map = useMap();
   const markersRef = useRef(new Map<string, ServerClusterMarkerEntry>());
 
   useEffect(() => {
@@ -1129,7 +985,7 @@ export function VWorldFeatureClusters({
   clusterRadius?: number;
   clusterMaxZoom?: number;
 }) {
-  const map = use(VWorldMapContext);
+  const map = useMap();
   const onSelectRef = useRef(onSelectFeature);
   const selectedFeatureIdRef = useRef<string | null>(selectedFeatureId);
   const priceSummariesRef = useRef(
@@ -1158,8 +1014,8 @@ export function VWorldFeatureClusters({
   }, [features]);
   const hasPriceSummary = useMemo(
     () =>
-      dedupedFeatures.some((feature) =>
-        (feature.price_summary?.length ?? 0) > 0,
+      dedupedFeatures.some(
+        (feature) => (feature.price_summary?.length ?? 0) > 0,
       ),
     [dedupedFeatures],
   );
@@ -1226,9 +1082,7 @@ export function VWorldFeatureClusters({
       clusterMaxZoom,
     };
   }, [data, clusterRadius, clusterMaxZoom]);
-  const geometryData = useMemo<
-    FeatureGeometryCollection
-  >(
+  const geometryData = useMemo<FeatureGeometryCollection>(
     () => ({
       type: "FeatureCollection",
       features: dedupedFeatures.flatMap((feature) => {
@@ -1288,7 +1142,10 @@ export function VWorldFeatureClusters({
       next.add(id);
       let marker = pool.get(id);
       if (marker === undefined) {
-        const element = createGeometryLabelElement(feature, onSelectRef.current);
+        const element = createGeometryLabelElement(
+          feature,
+          onSelectRef.current,
+        );
         marker = new maplibregl.Marker({ anchor: "center", element })
           .setLngLat([lon, lat])
           .addTo(map);
@@ -1424,7 +1281,8 @@ export function VWorldFeatureClusters({
         row.style.textAlign = "left";
         row.style.font = "inherit";
         row.style.color = "inherit";
-        row.style.transition = "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease";
+        row.style.transition =
+          "background 120ms ease, border-color 120ms ease, box-shadow 120ms ease";
         row.setAttribute("aria-label", `${featureKindLabel(f.kind)} ${f.name}`);
         row.addEventListener("mouseenter", () => {
           row.style.background = "#f8fafc";
@@ -1642,7 +1500,8 @@ export function VWorldFeatureClusters({
           const id = `pt-${featureId}`;
           const title = `${String(props.name)} (${String(props.kind)})`;
           const markerIcon = (props.marker_icon as string | null) ?? undefined;
-          const markerColor = (props.marker_color as string | null) ?? undefined;
+          const markerColor =
+            (props.marker_color as string | null) ?? undefined;
           const priceLabel = priceMarkerLabel(
             priceSummariesRef.current.get(featureId),
           );
@@ -1678,9 +1537,7 @@ export function VWorldFeatureClusters({
             element.setAttribute("role", "button");
             element.setAttribute(
               "aria-label",
-              priceLabel
-                ? `${title} ${priceLabel.replace(/\n/g, " ")}`
-                : title,
+              priceLabel ? `${title} ${priceLabel.replace(/\n/g, " ")}` : title,
             );
             marker = new maplibregl.Marker({ element }).setLngLat(coords);
             markers.set(id, marker);

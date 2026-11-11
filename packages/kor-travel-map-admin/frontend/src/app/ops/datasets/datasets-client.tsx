@@ -2,7 +2,7 @@
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list + detail pane) · design-system: design.md · designed-as-app
 
 import { useQueryClient } from "@tanstack/react-query";
-import { type CellContext, type ColumnDef } from "@tanstack/react-table";
+import { type CellContext, type ColumnDef } from "@kor-travel/ui/virtual-table";
 import {
   ExternalLinkIcon,
   FlaskConicalIcon,
@@ -70,7 +70,10 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
@@ -180,7 +183,11 @@ function tupleKey(parts: (string | number)[]): string {
 }
 
 function rowKey(row: OpsDatasetGridRow): string {
-  return tupleKey([row.provider_dataset_id, row.sync_scope, operationKeyOf(row)]);
+  return tupleKey([
+    row.provider_dataset_id,
+    row.sync_scope,
+    operationKeyOf(row),
+  ]);
 }
 
 function selectionFromRow(row: OpsDatasetGridRow): DatasetSelection {
@@ -892,7 +899,9 @@ function PolicyScopeFields({
     <>
       {latestObservedPolicy ? (
         <section className="mt-4 space-y-2 border-t border-border pt-4">
-          <h4 className={SUBHEADING_CLASS}>출처(provenance) — 서버 기록, 편집 불가</h4>
+          <h4 className={SUBHEADING_CLASS}>
+            출처(provenance) — 서버 기록, 편집 불가
+          </h4>
           <DetailList
             items={[
               {
@@ -1037,7 +1046,10 @@ function PolicyEditorActions({
           저장
         </Button>
         {lastSavedAt ? (
-          <span aria-live="polite" className="text-xs text-text-secondary tabular-nums">
+          <span
+            aria-live="polite"
+            className="text-xs text-text-secondary tabular-nums"
+          >
             저장됨 {formatDateTime(lastSavedAt)}
           </span>
         ) : null}
@@ -1248,7 +1260,8 @@ function refreshDisabledReason({
   scopeDecision: DatasetRefreshScopeDecision;
 }): string | null {
   if (detailLoading) return "상세를 불러오는 중입니다 — 확인 후 활성화됩니다.";
-  if (detailError) return "상세 조회에 실패해 조작을 차단했습니다(fail-closed).";
+  if (detailError)
+    return "상세 조회에 실패해 조작을 차단했습니다(fail-closed).";
   if (!detail) return "상세 정보가 없어 조작을 차단했습니다.";
   if (!detail.scopes.some((scope) => scopeMatchesSelection(scope, selection))) {
     return "선택한 exact operation membership이 상세 응답에 없어 조작을 차단했습니다.";
@@ -1272,7 +1285,8 @@ function refreshDisabledReason({
   const scopeRefresh = catalog.scope_refresh;
   if (!catalog.is_refreshable) {
     return (
-      scopeRefresh?.reason ?? "이 데이터셋은 실행 가능한 refresh runner가 없습니다."
+      scopeRefresh?.reason ??
+      "이 데이터셋은 실행 가능한 refresh runner가 없습니다."
     );
   }
   if (scopeDecision.allowed) return null;
@@ -1305,7 +1319,7 @@ function RefreshNowSection({
   detailLoading: boolean;
   detailError: boolean;
 }) {
-  const catalog = detail?.catalog ?? null;
+  const catalog = resolveCatalog();
   const queryClient = useQueryClient();
   const refreshNow = useOpsDatasetRefreshNowMutation();
   const [requestId, setRequestId] = useState<string | null>(null);
@@ -1320,20 +1334,14 @@ function RefreshNowSection({
   );
   useOpsLiveInvalidation({ topics: liveTopics, enabled: Boolean(requestId) });
 
-  const currentStatus =
-    statusQuery.data?.data.execution.status ??
-    refreshNow.data?.data.status ??
-    null;
-  const localRequestActive = Boolean(
-    requestId &&
-      (!currentStatus || !TERMINAL_REQUEST_STATUSES.includes(currentStatus)),
-  );
-  const scopeRefresh = catalog?.scope_refresh ?? null;
+  const currentStatus = resolveCurrentStatus();
+  const localRequestActive = resolveLocalRequestActive();
+  const scopeRefresh = resolveScopeRefresh();
   const scopeDecision = resolveDatasetRefreshScope(
     scopeRefresh,
     selection.syncScope,
   );
-  const activeExecution = detail?.active_execution ?? null;
+  const activeExecution = resolveActiveExecution();
 
   // 완료(terminal) 전이 시 그리드/상세 신선도를 즉시 refetch — 인라인 폐루프.
   const notifiedStatus = useRef<string | null>(null);
@@ -1387,84 +1395,148 @@ function RefreshNowSection({
     );
   };
 
+  function renderRefreshNowSectionState() {
+    return activeExecution ? (
+      <span
+        className="flex flex-wrap items-center gap-2 text-xs"
+        data-testid="active-execution"
+      >
+        <span>이미 진행 중인 canonical 실행</span>
+        <StatusBadge status={activeExecution.status} />
+        <span className="text-text-secondary">
+          pair · {statusLabel(activeExecution.pair_status)}
+        </span>
+        <Link
+          className={INLINE_LINK_CLASS}
+          data-api-detail-url={activeExecution.detail_url}
+          href={pipelineExecutionHref(activeExecution.kind, activeExecution.id)}
+        >
+          실행 {shortId(activeExecution.id)} 보기
+        </Link>
+      </span>
+    ) : localRequestActive && requestId ? (
+      <span
+        className="flex flex-wrap items-center gap-2 text-xs"
+        data-testid="active-local-request"
+      >
+        <span>terminal 확인 전인 갱신 요청</span>
+        <StatusBadge
+          status={
+            statusQuery.isError ? "unknown" : (currentStatus ?? "unknown")
+          }
+        />
+        {statusQuery.isError ? (
+          <StatusBadge label="상태 재확인 필요" status="pending_verification" />
+        ) : null}
+        <Link
+          className={INLINE_LINK_CLASS}
+          href={pipelineExecutionHref("update_request", requestId)}
+        >
+          실행 {shortId(requestId)} 보기
+        </Link>
+      </span>
+    ) : (
+      <Button
+        disabled={disabledReason !== null}
+        disabledReason={disabledReason ?? undefined}
+        loading={refreshNow.isPending}
+        type="button"
+        onClick={submit}
+      >
+        <PlayIcon data-icon="inline-start" />
+        지금 갱신
+      </Button>
+    );
+  }
+  function renderRefreshNowSectionState3() {
+    return refreshNow.isError ? (
+      <Alert variant="destructive">
+        <AlertTitle>
+          {conflict ? "동일 범위 갱신이 이미 진행 중" : "갱신 요청 실패"}
+        </AlertTitle>
+        <AlertDescription>
+          {existingConflict ? (
+            <span className="flex flex-wrap items-center gap-2">
+              <span>
+                다른 실행 계획의 활성 요청이 이 범위를 점유하고 있습니다.
+              </span>
+              {existingConflict.status ? (
+                <StatusBadge status={existingConflict.status} />
+              ) : null}
+              <Link
+                className={INLINE_LINK_CLASS}
+                data-api-detail-url={existingConflict.detailUrl ?? undefined}
+                href={pipelineExecutionHref(
+                  "update_request",
+                  existingConflict.requestId,
+                )}
+              >
+                기존 요청 {shortId(existingConflict.requestId)} 보기
+              </Link>
+            </span>
+          ) : conflict ? (
+            retryAfterSeconds !== null ? (
+              `요청 경합 중입니다. 약 ${retryAfterSeconds}초 후 다시 시도하세요.`
+            ) : (
+              "요청 경합 중입니다. 잠시 후 다시 시도하세요."
+            )
+          ) : (
+            refreshNow.error.message
+          )}
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
+  function renderRefreshNowSectionState6() {
+    return refreshNow.data ? (
+      <StatusBadge
+        data-testid="refresh-create-result"
+        hideDot
+        label={
+          refreshNow.data.idempotent_replay
+            ? "동일 요청 결과 재생(200)"
+            : refreshNow.data.reused_active_request
+              ? "활성 요청 재사용(200)"
+              : "새 요청 생성(201)"
+        }
+        status={null}
+        tone={
+          refreshNow.data.reused_active_request
+            ? "warning"
+            : refreshNow.data.idempotent_replay
+              ? "neutral"
+              : "success"
+        }
+      />
+    ) : null;
+  }
+  function resolveCatalog() {
+    return detail?.catalog ?? null;
+  }
+  function resolveCurrentStatus() {
+    return (
+      statusQuery.data?.data.execution.status ??
+      refreshNow.data?.data.status ??
+      null
+    );
+  }
+  function resolveLocalRequestActive() {
+    return Boolean(
+      requestId &&
+        (!currentStatus || !TERMINAL_REQUEST_STATUSES.includes(currentStatus)),
+    );
+  }
+  function resolveScopeRefresh() {
+    return catalog?.scope_refresh ?? null;
+  }
+  function resolveActiveExecution() {
+    return detail?.active_execution ?? null;
+  }
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {activeExecution ? (
-          <span
-            className="flex flex-wrap items-center gap-2 text-xs"
-            data-testid="active-execution"
-          >
-            <span>이미 진행 중인 canonical 실행</span>
-            <StatusBadge status={activeExecution.status} />
-            <span className="text-text-secondary">
-              pair · {statusLabel(activeExecution.pair_status)}
-            </span>
-            <Link
-              className={INLINE_LINK_CLASS}
-              data-api-detail-url={activeExecution.detail_url}
-              href={pipelineExecutionHref(
-                activeExecution.kind,
-                activeExecution.id,
-              )}
-            >
-              실행 {shortId(activeExecution.id)} 보기
-            </Link>
-          </span>
-        ) : localRequestActive && requestId ? (
-          <span
-            className="flex flex-wrap items-center gap-2 text-xs"
-            data-testid="active-local-request"
-          >
-            <span>terminal 확인 전인 갱신 요청</span>
-            <StatusBadge
-              status={
-                statusQuery.isError ? "unknown" : (currentStatus ?? "unknown")
-              }
-            />
-            {statusQuery.isError ? (
-              <StatusBadge label="상태 재확인 필요" status="pending_verification" />
-            ) : null}
-            <Link
-              className={INLINE_LINK_CLASS}
-              href={pipelineExecutionHref("update_request", requestId)}
-            >
-              실행 {shortId(requestId)} 보기
-            </Link>
-          </span>
-        ) : (
-          <Button
-            disabled={disabledReason !== null}
-            disabledReason={disabledReason ?? undefined}
-            loading={refreshNow.isPending}
-            type="button"
-            onClick={submit}
-          >
-            <PlayIcon data-icon="inline-start" />
-            지금 갱신
-          </Button>
-        )}
-        {refreshNow.data ? (
-          <StatusBadge
-            data-testid="refresh-create-result"
-            hideDot
-            label={
-              refreshNow.data.idempotent_replay
-                ? "동일 요청 결과 재생(200)"
-                : refreshNow.data.reused_active_request
-                  ? "활성 요청 재사용(200)"
-                  : "새 요청 생성(201)"
-            }
-            status={null}
-            tone={
-              refreshNow.data.reused_active_request
-                ? "warning"
-                : refreshNow.data.idempotent_replay
-                  ? "neutral"
-                  : "success"
-            }
-          />
-        ) : null}
+        {renderRefreshNowSectionState()}
+        {renderRefreshNowSectionState6()}
         {requestId && currentStatus && !statusQuery.isError ? (
           <span className="flex items-center gap-2 text-xs">
             <StatusBadge status={currentStatus} />
@@ -1493,43 +1565,7 @@ function RefreshNowSection({
       {disabledReason ? (
         <p className="text-xs text-text-secondary">{disabledReason}</p>
       ) : null}
-      {refreshNow.isError ? (
-        <Alert variant="destructive">
-          <AlertTitle>
-            {conflict ? "동일 범위 갱신이 이미 진행 중" : "갱신 요청 실패"}
-          </AlertTitle>
-          <AlertDescription>
-            {existingConflict ? (
-              <span className="flex flex-wrap items-center gap-2">
-                <span>
-                  다른 실행 계획의 활성 요청이 이 범위를 점유하고 있습니다.
-                </span>
-                {existingConflict.status ? (
-                  <StatusBadge status={existingConflict.status} />
-                ) : null}
-                <Link
-                  className={INLINE_LINK_CLASS}
-                  data-api-detail-url={existingConflict.detailUrl ?? undefined}
-                  href={pipelineExecutionHref(
-                    "update_request",
-                    existingConflict.requestId,
-                  )}
-                >
-                  기존 요청 {shortId(existingConflict.requestId)} 보기
-                </Link>
-              </span>
-            ) : conflict ? (
-              retryAfterSeconds !== null ? (
-                `요청 경합 중입니다. 약 ${retryAfterSeconds}초 후 다시 시도하세요.`
-              ) : (
-                "요청 경합 중입니다. 잠시 후 다시 시도하세요."
-              )
-            ) : (
-              refreshNow.error.message
-            )}
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      {renderRefreshNowSectionState3()}
       {requestId && statusQuery.isError ? (
         <Alert data-testid="refresh-status-error" variant="destructive">
           <AlertTitle>갱신 상태 확인 실패</AlertTitle>
@@ -1767,14 +1803,49 @@ function HistoryPanel({
   detail: OpsDatasetDetailData | null;
 }) {
   const selectedScope =
-    detail?.scopes.find((scope) =>
-      scopeMatchesSelection(scope, selection),
-    ) ?? null;
+    detail?.scopes.find((scope) => scopeMatchesSelection(scope, selection)) ??
+    null;
   // C7B 서버가 exact tuple을 cursor/LIMIT 전에 적용한다. 이 페이지에서 다시
   // scope를 거르면 page가 비거나 다음 cursor 의미가 깨지므로 응답을 그대로 쓴다.
   const activeExecution = detail?.active_execution ?? null;
   const latestExecution = detail?.latest_execution ?? null;
   const recentRuns = detail?.run_history.items ?? [];
+  function renderHistoryPanelSection3() {
+    return (
+      <section className="space-y-2 py-4">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h4 className={SUBHEADING_CLASS}>최근 이벤트</h4>
+          {detail ? (
+            <Link
+              className={cn(INLINE_LINK_CLASS, "text-xs")}
+              data-api-history-url={detail.event_history.canonical_url}
+              href={pipelineEventHistoryHref(
+                detail.event_history.canonical_url,
+              )}
+            >
+              선택 범위 이벤트 전체 보기
+            </Link>
+          ) : null}
+        </div>
+        <p className="text-2xs text-text-secondary">
+          canonical job/request의 effective sync scope가 선택 범위와 정확히 같은
+          이벤트만 표시합니다.
+          {detail?.event_history.next_cursor
+            ? " 더 오래된 이벤트가 있습니다."
+            : ""}
+        </p>
+        {detail && detail.event_history.items.length > 0 ? (
+          <ul className="divide-y divide-border">
+            {detail.event_history.items.map((event) => (
+              <EventRow event={event} key={event.event_id} />
+            ))}
+          </ul>
+        ) : (
+          <p className="text-xs text-text-secondary">최근 이벤트가 없습니다.</p>
+        )}
+      </section>
+    );
+  }
   return (
     <div className="flex flex-col divide-y divide-border [&>*:last-child]:pb-0">
       <div className="pb-4">
@@ -1797,8 +1868,10 @@ function HistoryPanel({
           <Alert variant="destructive">
             <AlertTitle>선택 범위 상태 확인 불가</AlertTitle>
             <AlertDescription>
-              상세 응답에 <span className="font-mono">{selection.syncScope}</span>
-              범위가 없어 다른 scope로 대체하지 않았습니다(degrade, fail-closed).
+              상세 응답에{" "}
+              <span className="font-mono">{selection.syncScope}</span>
+              범위가 없어 다른 scope로 대체하지 않았습니다(degrade,
+              fail-closed).
             </AlertDescription>
           </Alert>
         </div>
@@ -1916,38 +1989,7 @@ function HistoryPanel({
           manualSorting={false}
         />
       </section>
-      <section className="space-y-2 py-4">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <h4 className={SUBHEADING_CLASS}>최근 이벤트</h4>
-          {detail ? (
-            <Link
-              className={cn(INLINE_LINK_CLASS, "text-xs")}
-              data-api-history-url={detail.event_history.canonical_url}
-              href={pipelineEventHistoryHref(
-                detail.event_history.canonical_url,
-              )}
-            >
-              선택 범위 이벤트 전체 보기
-            </Link>
-          ) : null}
-        </div>
-        <p className="text-2xs text-text-secondary">
-          canonical job/request의 effective sync scope가 선택 범위와 정확히 같은
-          이벤트만 표시합니다.
-          {detail?.event_history.next_cursor
-            ? " 더 오래된 이벤트가 있습니다."
-            : ""}
-        </p>
-        {detail && detail.event_history.items.length > 0 ? (
-          <ul className="divide-y divide-border">
-            {detail.event_history.items.map((event) => (
-              <EventRow event={event} key={event.event_id} />
-            ))}
-          </ul>
-        ) : (
-          <p className="text-xs text-text-secondary">최근 이벤트가 없습니다.</p>
-        )}
-      </section>
+      {renderHistoryPanelSection3()}
     </div>
   );
 }
@@ -1984,24 +2026,118 @@ function DatasetDrawer({
   }
   const effectivePolicyDetail = verifiedDetail ?? policyDetail;
   const catalog = effectivePolicyDetail?.catalog ?? null;
-  const policyMutationBlockedReason = isLoading
-      ? "선택 scope 상세를 확인하는 동안 정책 저장을 차단했습니다. 입력 중인 초안은 유지됩니다."
-    : isError
-      ? "선택 scope 상세 조회에 실패해 정책 저장을 차단했습니다. 입력 중인 초안은 유지됩니다."
-      : detail && !detailMatchesSelection
-        ? "상세 응답에 선택한 sync scope가 없어 정책 저장을 차단했습니다."
-        : !verifiedDetail
-          ? "상세 계약을 확인할 수 없어 정책 저장을 차단했습니다."
-          : verifiedDetail.catalog_state !== "canonical"
-            ? `카탈로그 정본이 아닌 잔존 행이라 정책을 변경할 수 없습니다${
-                verifiedDetail.orphan_reason
-                  ? ` (${verifiedDetail.orphan_reason})`
-                  : ""
-              }.`
-            : !verifiedDetail.mutable
-              ? "서버가 mutable=false로 표시한 행이라 정책 변경을 차단했습니다."
-              : null;
+  const policyMutationBlockedReason = resolvePolicyMutationBlockedReason();
   const canRenderPanels = effectivePolicyDetail !== null;
+  function renderDatasetDrawerState() {
+    return canRenderPanels ? (
+      <Tabs
+        value={activePanel}
+        onValueChange={(value) => onPanelChange(panelValue(String(value)))}
+      >
+        <TabsList className="w-full" variant="line">
+          <TabsTrigger value="history">상태·이력</TabsTrigger>
+          <TabsTrigger value="policy">갱신 정책</TabsTrigger>
+          <TabsTrigger value="preview">ETL 미리보기</TabsTrigger>
+        </TabsList>
+        <TabsContent className="pt-2" value="history">
+          {verifiedDetail ? (
+            <HistoryPanel
+              detail={verifiedDetail}
+              key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
+              selection={selection}
+            />
+          ) : (
+            <p className="text-xs text-text-secondary">
+              선택 scope의 상태·이력을 불러오는 중입니다.
+            </p>
+          )}
+        </TabsContent>
+        <TabsContent
+          className="pt-2 data-[state=inactive]:hidden"
+          forceMount
+          value="policy"
+        >
+          {effectivePolicyDetail ? (
+            <PolicyEditor
+              datasetKey={selection.datasetKey}
+              key={String(selection.providerDatasetId)}
+              mutationBlockedReason={policyMutationBlockedReason}
+              policy={effectivePolicyDetail.refresh_policy ?? null}
+              provider={selection.provider}
+              providerDatasetId={selection.providerDatasetId}
+            />
+          ) : null}
+        </TabsContent>
+        <TabsContent className="pt-2" value="preview">
+          {verifiedDetail ? (
+            <PreviewPanel
+              catalog={catalog}
+              key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
+              selection={selection}
+            />
+          ) : (
+            <p className="text-xs text-text-secondary">
+              선택 scope의 미리보기 capability를 확인하는 중입니다.
+            </p>
+          )}
+        </TabsContent>
+      </Tabs>
+    ) : null;
+  }
+  function renderDatasetDrawerCardContent3() {
+    return (
+      <CardContent className="space-y-4">
+        {verifiedDetail && verifiedDetail.schedule_source_status !== "ok" ? (
+          <Alert variant="destructive">
+            <AlertTitle>Dagster 스케줄 소스 이상</AlertTitle>
+            <AlertDescription>
+              {(verifiedDetail.schedule_source_errors ?? []).length > 0
+                ? (verifiedDetail.schedule_source_errors ?? []).join(" / ")
+                : "스케줄 상태를 확인할 수 없습니다(degrade)."}
+            </AlertDescription>
+          </Alert>
+        ) : null}
+        <RefreshNowSection
+          detail={detail}
+          detailError={isError}
+          detailLoading={isLoading}
+          key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
+          selection={selection}
+        />
+        {isLoading ? (
+          <div aria-busy="true" className="space-y-2">
+            <Skeleton className="h-control w-full" />
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-40 w-full" />
+          </div>
+        ) : null}
+        {/* 정책은 provider/dataset 리소스다. 같은 pair의 exact scope 전환 동안
+          마지막 authoritative snapshot으로 editor mount만 유지하되, history와
+          action에는 이전 scope 상세를 절대 재사용하지 않는다. */}
+        {renderDatasetDrawerState()}
+      </CardContent>
+    );
+  }
+  function resolvePolicyMutationBlockedReason() {
+    return isLoading
+      ? "선택 scope 상세를 확인하는 동안 정책 저장을 차단했습니다. 입력 중인 초안은 유지됩니다."
+      : isError
+        ? "선택 scope 상세 조회에 실패해 정책 저장을 차단했습니다. 입력 중인 초안은 유지됩니다."
+        : detail && !detailMatchesSelection
+          ? "상세 응답에 선택한 sync scope가 없어 정책 저장을 차단했습니다."
+          : !verifiedDetail
+            ? "상세 계약을 확인할 수 없어 정책 저장을 차단했습니다."
+            : verifiedDetail.catalog_state !== "canonical"
+              ? `카탈로그 정본이 아닌 잔존 행이라 정책을 변경할 수 없습니다${
+                  verifiedDetail.orphan_reason
+                    ? ` (${verifiedDetail.orphan_reason})`
+                    : ""
+                }.`
+              : !verifiedDetail.mutable
+                ? "서버가 mutable=false로 표시한 행이라 정책 변경을 차단했습니다."
+                : null;
+  }
   return (
     <Card
       aria-label={`${selection.provider}/${selection.datasetKey} 상세`}
@@ -2019,7 +2155,8 @@ function DatasetDrawer({
         <CardTitle>데이터셋 상세</CardTitle>
         <CardDescription className="space-y-1">
           <span className="block break-all font-mono text-text-secondary">
-            #{selection.providerDatasetId} · {selection.provider}/{selection.datasetKey}
+            #{selection.providerDatasetId} · {selection.provider}/
+            {selection.datasetKey}
           </span>
           <span className="block break-all font-mono text-2xs">
             sync_scope={selection.syncScope} · operation_key=
@@ -2043,9 +2180,7 @@ function DatasetDrawer({
             {detail && detail.dataset_issues.open_count > 0 ? (
               <Link
                 className={INLINE_LINK_CLASS}
-                href={
-                  `/admin/issues?provider_dataset_id=${selection.providerDatasetId}`
-                }
+                href={`/admin/issues?provider_dataset_id=${selection.providerDatasetId}`}
               >
                 데이터셋 이슈 {formatCount(detail.dataset_issues.open_count)}건
                 {datasetIssueSeveritySummary(
@@ -2067,86 +2202,7 @@ function DatasetDrawer({
           </Button>
         </CardAction>
       </CardHeader>
-      <CardContent className="space-y-4">
-      {verifiedDetail && verifiedDetail.schedule_source_status !== "ok" ? (
-        <Alert variant="destructive">
-          <AlertTitle>Dagster 스케줄 소스 이상</AlertTitle>
-          <AlertDescription>
-            {(verifiedDetail.schedule_source_errors ?? []).length > 0
-              ? (verifiedDetail.schedule_source_errors ?? []).join(" / ")
-              : "스케줄 상태를 확인할 수 없습니다(degrade)."}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      <RefreshNowSection
-        detail={detail}
-        detailError={isError}
-        detailLoading={isLoading}
-        key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
-        selection={selection}
-      />
-      {isLoading ? (
-        <div aria-busy="true" className="space-y-2">
-          <Skeleton className="h-control w-full" />
-          <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-4 w-1/2" />
-          <Skeleton className="h-40 w-full" />
-        </div>
-      ) : null}
-      {/* 정책은 provider/dataset 리소스다. 같은 pair의 exact scope 전환 동안
-          마지막 authoritative snapshot으로 editor mount만 유지하되, history와
-          action에는 이전 scope 상세를 절대 재사용하지 않는다. */}
-      {canRenderPanels ? (
-        <Tabs
-          value={activePanel}
-          onValueChange={(value) => onPanelChange(panelValue(String(value)))}
-        >
-          <TabsList className="w-full" variant="line">
-            <TabsTrigger value="history">상태·이력</TabsTrigger>
-            <TabsTrigger value="policy">갱신 정책</TabsTrigger>
-            <TabsTrigger value="preview">ETL 미리보기</TabsTrigger>
-          </TabsList>
-          <TabsContent className="pt-2" value="history">
-            {verifiedDetail ? (
-              <HistoryPanel
-                detail={verifiedDetail}
-                key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
-                selection={selection}
-              />
-            ) : (
-              <p className="text-xs text-text-secondary">
-                선택 scope의 상태·이력을 불러오는 중입니다.
-              </p>
-            )}
-          </TabsContent>
-          <TabsContent className="pt-2" keepMounted value="policy">
-            {effectivePolicyDetail ? (
-              <PolicyEditor
-                datasetKey={selection.datasetKey}
-                key={String(selection.providerDatasetId)}
-                mutationBlockedReason={policyMutationBlockedReason}
-                policy={effectivePolicyDetail.refresh_policy ?? null}
-                provider={selection.provider}
-                providerDatasetId={selection.providerDatasetId}
-              />
-            ) : null}
-          </TabsContent>
-          <TabsContent className="pt-2" value="preview">
-            {verifiedDetail ? (
-              <PreviewPanel
-                catalog={catalog}
-                key={`${selection.providerDatasetId}/${selection.syncScope}/${selection.operationKey}`}
-                selection={selection}
-              />
-            ) : (
-              <p className="text-xs text-text-secondary">
-                선택 scope의 미리보기 capability를 확인하는 중입니다.
-              </p>
-            )}
-          </TabsContent>
-        </Tabs>
-      ) : null}
-      </CardContent>
+      {renderDatasetDrawerCardContent3()}
     </Card>
   );
 }
@@ -2523,7 +2579,8 @@ function useDatasetsClientController({
             <span
               className={cn(
                 "font-mono text-xs",
-                !row.original.refresh_policy.enabled && "text-text-secondary line-through",
+                !row.original.refresh_policy.enabled &&
+                  "text-text-secondary line-through",
               )}
               title={
                 row.original.refresh_policy.enabled ? undefined : "정책 비활성"
@@ -2678,6 +2735,23 @@ function DatasetsClientView({
   statusFilter,
   summary,
 }: ReturnType<typeof useDatasetsClientController>) {
+  function renderDatasetsClientViewState() {
+    return datasets.data &&
+      datasets.data.data.schedule_source_status !== "ok" ? (
+      <Alert data-testid="schedule-degrade-banner" variant="destructive">
+        <AlertTitle>
+          {datasets.data.data.schedule_source_status === "unavailable"
+            ? "Dagster 스케줄 소스 연결 불가"
+            : "Dagster 스케줄 소스 오류"}
+        </AlertTitle>
+        <AlertDescription>
+          {(datasets.data.data.schedule_source_errors ?? []).length > 0
+            ? (datasets.data.data.schedule_source_errors ?? []).join(" / ")
+            : "다음 스케줄 시각을 확인할 수 없습니다 — '확인 불가'로 표시됩니다."}
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
   return (
     <AdminShell
       actions={
@@ -2721,7 +2795,9 @@ function DatasetsClientView({
             <span
               className={cn(
                 "text-xs",
-                attention ? "font-medium text-text-primary" : "text-text-secondary",
+                attention
+                  ? "font-medium text-text-primary"
+                  : "text-text-secondary",
               )}
               key={label}
             >
@@ -2753,20 +2829,7 @@ function DatasetsClientView({
           </Alert>
         ) : null}
 
-        {datasets.data && datasets.data.data.schedule_source_status !== "ok" ? (
-          <Alert data-testid="schedule-degrade-banner" variant="destructive">
-            <AlertTitle>
-              {datasets.data.data.schedule_source_status === "unavailable"
-                ? "Dagster 스케줄 소스 연결 불가"
-                : "Dagster 스케줄 소스 오류"}
-            </AlertTitle>
-            <AlertDescription>
-              {(datasets.data.data.schedule_source_errors ?? []).length > 0
-                ? (datasets.data.data.schedule_source_errors ?? []).join(" / ")
-                : "다음 스케줄 시각을 확인할 수 없습니다 — '확인 불가'로 표시됩니다."}
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        {renderDatasetsClientViewState()}
 
         <FilterBar>
           <FilterField className="w-64" htmlFor="datasets-q" label="검색">
@@ -2805,7 +2868,8 @@ function DatasetsClientView({
               isLoading={datasets.isLoading}
               emptyState={{
                 title: "조건에 맞는 데이터셋 행이 없습니다.",
-                description: "검색어를 지우거나 상태 필터를 전체로 바꿔 보세요.",
+                description:
+                  "검색어를 지우거나 상태 필터를 전체로 바꿔 보세요.",
               }}
               onRowClick={(row) => applySelection(selectionFromRow(row))}
               isRowActive={(row) =>

@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (dashboard) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import {
   AlertTriangleIcon,
   ExternalLinkIcon,
@@ -77,7 +77,10 @@ function StatusLine({
         tone === "neutral" && "text-text-secondary",
       )}
     >
-      <span className="size-1.5 shrink-0 rounded-full bg-current" aria-hidden="true" />
+      <span
+        className="size-1.5 shrink-0 rounded-full bg-current"
+        aria-hidden="true"
+      />
       {children}
     </span>
   );
@@ -96,7 +99,9 @@ function MetricItemSkeleton() {
   );
 }
 
-function sumValues(record: Record<string, number> | null | undefined): number | null {
+function sumValues(
+  record: Record<string, number> | null | undefined,
+): number | null {
   if (!record) return null;
   return Object.values(record).reduce((sum, count) => sum + count, 0);
 }
@@ -139,9 +144,7 @@ function useHomePageClientController() {
             className="text-xs"
             id={row.original.id}
             kind={
-              row.original.kind === "import_job"
-                ? "importJob"
-                : "updateRequest"
+              row.original.kind === "import_job" ? "importJob" : "updateRequest"
             }
           >
             {shortId(row.original.id)}
@@ -171,7 +174,11 @@ function useHomePageClientController() {
         meta: { align: "right" } satisfies DataTableColumnMeta,
         // progress 없음은 e2e(home-nav.spec)가 "-" 텍스트로 단언하므로 그대로 둔다(스펙 갱신 시 NULL_GLYPH로).
         cell: ({ row }) => (
-          <span className={cn(row.original.progress === null && "text-text-tertiary")}>
+          <span
+            className={cn(
+              row.original.progress === null && "text-text-tertiary",
+            )}
+          >
             {row.original.progress === null ? "-" : `${row.original.progress}%`}
           </span>
         ),
@@ -196,32 +203,45 @@ function useHomePageClientController() {
     [],
   );
 
-  const refreshAll = () => {
-    void health.refetch();
-    void version.refetch();
-    void metrics.refetch();
-    void pipeline.refetch();
-    void pipelineExecutions.refetch();
-    void dedup.refetch();
-  };
+  function deriveHomePageClientControllerState() {
+    const refreshAll = () => {
+      void health.refetch();
+      void version.refetch();
+      void metrics.refetch();
+      void pipeline.refetch();
+      void pipelineExecutions.refetch();
+      void dedup.refetch();
+    };
 
-  const isRefreshing =
-    health.isFetching ||
-    version.isFetching ||
-    metrics.isFetching ||
-    pipeline.isFetching ||
-    pipelineExecutions.isFetching ||
-    dedup.isFetching;
+    const isRefreshing =
+      health.isFetching ||
+      version.isFetching ||
+      metrics.isFetching ||
+      pipeline.isFetching ||
+      pipelineExecutions.isFetching ||
+      dedup.isFetching;
 
-  const failureCandidates: Array<FailureItem | null> = [
-    health.isError ? { source: "health", message: health.error?.message } : null,
-    metrics.isError ? { source: "운영 metric", message: metrics.error?.message } : null,
-    pipeline.isError ? { source: "파이프라인 요약", message: pipeline.error?.message } : null,
-    pipelineExecutions.isError
-      ? { source: "최근 실행", message: pipelineExecutions.error?.message }
-      : null,
-  ];
-  const failures = failureCandidates.filter((item): item is FailureItem => item !== null);
+    const failureCandidates: Array<FailureItem | null> = [
+      health.isError
+        ? { source: "health", message: health.error?.message }
+        : null,
+      metrics.isError
+        ? { source: "운영 metric", message: metrics.error?.message }
+        : null,
+      pipeline.isError
+        ? { source: "파이프라인 요약", message: pipeline.error?.message }
+        : null,
+      pipelineExecutions.isError
+        ? { source: "최근 실행", message: pipelineExecutions.error?.message }
+        : null,
+    ];
+    const failures = failureCandidates.filter(
+      (item): item is FailureItem => item !== null,
+    );
+    return { refreshAll, isRefreshing, failures };
+  }
+  const { refreshAll, isRefreshing, failures } =
+    deriveHomePageClientControllerState();
 
   return {
     activeFeatures,
@@ -247,6 +267,130 @@ function useHomePageClientController() {
   };
 }
 
+function HomeLoadedStats({
+  activeFeatures,
+  activeOperations,
+  inactiveFeatures,
+  totalFeatures,
+  operationTotal,
+  dedupQueueTotal,
+  pendingDedupCount,
+  openIssueCount,
+}: Omit<Parameters<typeof HomeOperationalStats>[0], "metricsLoading">) {
+  return (
+    <StatStrip
+      ariaLabel="운영 요약"
+      className={HOME_STAT_COLUMNS}
+      items={[
+        {
+          key: "features",
+          label: "Feature",
+          href: "/admin/features",
+          unit: "개",
+          value: totalFeatures,
+          caption: (
+            <>
+              활성 {formatCount(activeFeatures)} / 비활성{" "}
+              {formatCount(inactiveFeatures)}
+            </>
+          ),
+          testId: HOME_STAT_TEST_ID.features,
+        },
+        {
+          key: "pipeline",
+          label: "파이프라인 작업",
+          href: "/ops/pipeline",
+          unit: "건",
+          value: operationTotal,
+          caption:
+            activeOperations === null ? (
+              "진행 상태 확인 불가"
+            ) : (
+              <StatusLine tone={activeOperations > 0 ? "warning" : "success"}>
+                {activeOperations > 0
+                  ? `${formatCount(activeOperations)}건 진행 중`
+                  : "대기 중인 작업 없음"}
+              </StatusLine>
+            ),
+          testId: HOME_STAT_TEST_ID.pipeline,
+        },
+        {
+          key: "dedup",
+          label: "중복 검수",
+          href: "/admin/features/dedup-reviews",
+          unit: "건",
+          value: dedupQueueTotal,
+          caption: <>대기 {formatCount(pendingDedupCount)}건</>,
+          testId: HOME_STAT_TEST_ID.dedup,
+        },
+        {
+          key: "issues",
+          label: "이슈",
+          href: "/admin/issues",
+          unit: "건",
+          value: openIssueCount,
+          caption:
+            openIssueCount === null ? (
+              "이슈 상태 확인 불가"
+            ) : (
+              <StatusLine tone={openIssueCount > 0 ? "destructive" : "success"}>
+                {openIssueCount > 0 ? "조치 필요" : "열린 이슈 없음"}
+              </StatusLine>
+            ),
+          testId: HOME_STAT_TEST_ID.issues,
+        },
+      ]}
+      size="lg"
+    />
+  );
+}
+function HomeOperationalStats({
+  metricsLoading,
+  activeFeatures,
+  activeOperations,
+  inactiveFeatures,
+  totalFeatures,
+  operationTotal,
+  dedupQueueTotal,
+  pendingDedupCount,
+  openIssueCount,
+}: Pick<
+  ReturnType<typeof useHomePageClientController>,
+  | "activeFeatures"
+  | "activeOperations"
+  | "inactiveFeatures"
+  | "totalFeatures"
+  | "operationTotal"
+  | "dedupQueueTotal"
+  | "pendingDedupCount"
+  | "openIssueCount"
+> & { metricsLoading: boolean }) {
+  return metricsLoading ? (
+    <div
+      aria-label="운영 요약"
+      className={cn("grid gap-y-6", HOME_STAT_COLUMNS)}
+      role="group"
+    >
+      <MetricItemSkeleton />
+      <MetricItemSkeleton />
+      <MetricItemSkeleton />
+      <MetricItemSkeleton />
+    </div>
+  ) : (
+    <HomeLoadedStats
+      {...{
+        activeFeatures,
+        activeOperations,
+        inactiveFeatures,
+        totalFeatures,
+        operationTotal,
+        dedupQueueTotal,
+        pendingDedupCount,
+        openIssueCount,
+      }}
+    />
+  );
+}
 function HomePageClientView({
   activeFeatures,
   activeOperations,
@@ -275,6 +419,7 @@ function HomePageClientView({
     health.data?.data?.status ?? (health.isError ? "error" : "loading");
   const dagsterStatus =
     dagsterData?.status ?? (pipeline.isError ? "error" : "loading");
+
   return (
     <AdminShell
       actions={
@@ -309,8 +454,8 @@ function HomePageClientView({
             <AlertTitle>운영 summary 확인 필요</AlertTitle>
             <AlertDescription>
               <p>
-                {failures.map((item) => item.source).join(" · ")} 조회가 실패했습니다.
-                실패한 항목의 값은 —로 표시됩니다.
+                {failures.map((item) => item.source).join(" · ")} 조회가
+                실패했습니다. 실패한 항목의 값은 —로 표시됩니다.
               </p>
               <ul className="list-disc space-y-0.5 pl-4">
                 {failures.map((item) => (
@@ -336,83 +481,21 @@ function HomePageClientView({
         ) : null}
 
         <Card aria-busy={metricsLoading || undefined} size="sm">
-          {metricsLoading ? (
-            <div
-              aria-label="운영 요약"
-              className={cn("grid gap-y-6", HOME_STAT_COLUMNS)}
-              role="group"
-            >
-              <MetricItemSkeleton />
-              <MetricItemSkeleton />
-              <MetricItemSkeleton />
-              <MetricItemSkeleton />
-            </div>
-          ) : (
-            <StatStrip
-              ariaLabel="운영 요약"
-              className={HOME_STAT_COLUMNS}
-              items={[
-                {
-                  key: "features",
-                  label: "Feature",
-                  href: "/admin/features",
-                  unit: "개",
-                  value: totalFeatures,
-                  caption: (
-                    <>
-                      활성 {formatCount(activeFeatures)} / 비활성{" "}
-                      {formatCount(inactiveFeatures)}
-                    </>
-                  ),
-                  testId: HOME_STAT_TEST_ID.features,
-                },
-                {
-                  key: "pipeline",
-                  label: "파이프라인 작업",
-                  href: "/ops/pipeline",
-                  unit: "건",
-                  value: operationTotal,
-                  caption:
-                    activeOperations === null ? (
-                      "진행 상태 확인 불가"
-                    ) : (
-                      <StatusLine tone={activeOperations > 0 ? "warning" : "success"}>
-                        {activeOperations > 0
-                          ? `${formatCount(activeOperations)}건 진행 중`
-                          : "대기 중인 작업 없음"}
-                      </StatusLine>
-                    ),
-                  testId: HOME_STAT_TEST_ID.pipeline,
-                },
-                {
-                  key: "dedup",
-                  label: "중복 검수",
-                  href: "/admin/features/dedup-reviews",
-                  unit: "건",
-                  value: dedupQueueTotal,
-                  caption: <>대기 {formatCount(pendingDedupCount)}건</>,
-                  testId: HOME_STAT_TEST_ID.dedup,
-                },
-                {
-                  key: "issues",
-                  label: "이슈",
-                  href: "/admin/issues",
-                  unit: "건",
-                  value: openIssueCount,
-                  caption:
-                    openIssueCount === null ? (
-                      "이슈 상태 확인 불가"
-                    ) : (
-                      <StatusLine tone={openIssueCount > 0 ? "destructive" : "success"}>
-                        {openIssueCount > 0 ? "조치 필요" : "열린 이슈 없음"}
-                      </StatusLine>
-                    ),
-                  testId: HOME_STAT_TEST_ID.issues,
-                },
-              ]}
-              size="lg"
+          {
+            <HomeOperationalStats
+              {...{
+                metricsLoading,
+                activeFeatures,
+                activeOperations,
+                inactiveFeatures,
+                totalFeatures,
+                operationTotal,
+                dedupQueueTotal,
+                pendingDedupCount,
+                openIssueCount,
+              }}
             />
-          )}
+          }
         </Card>
 
         <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
@@ -429,7 +512,8 @@ function HomePageClientView({
           >
             {pipelineExecutions.isError ? (
               <p className="text-xs text-destructive">
-                최근 실행을 불러오지 못했습니다 — {pipelineExecutions.error.message}
+                최근 실행을 불러오지 못했습니다 —{" "}
+                {pipelineExecutions.error.message}
               </p>
             ) : null}
             <DataTable
@@ -437,7 +521,8 @@ function HomePageClientView({
               data={pipelineExecutionItems}
               emptyState={{
                 title: "파이프라인 실행이 없습니다.",
-                description: "적재·갱신이 시작되면 최근 8건이 여기에 표시됩니다.",
+                description:
+                  "적재·갱신이 시작되면 최근 8건이 여기에 표시됩니다.",
               }}
               getRowId={canonicalPipelineRootRowId}
               isLoading={pipelineExecutions.isLoading}
@@ -446,10 +531,18 @@ function HomePageClientView({
           </SectionCard>
 
           <div className="flex min-w-0 flex-col gap-6">
-            <SectionCard contentClassName="space-y-0 divide-y divide-border" title="서비스 상태">
-              <div className="flex flex-col gap-2 py-3 first:pt-0" data-testid="service-backend">
+            <SectionCard
+              contentClassName="space-y-0 divide-y divide-border"
+              title="서비스 상태"
+            >
+              <div
+                className="flex flex-col gap-2 py-3 first:pt-0"
+                data-testid="service-backend"
+              >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-medium text-text-primary">Backend</span>
+                  <span className="text-xs font-medium text-text-primary">
+                    Backend
+                  </span>
                   <StatusBadge status={backendStatus} />
                 </div>
                 <p className="font-mono text-2xs text-text-secondary tabular-nums">
@@ -457,26 +550,39 @@ function HomePageClientView({
                     <>
                       <span>admin {version.data.data.version}</span>
                       {" · "}
-                      <span>map {version.data.data.kor_travel_map_version}</span>
+                      <span>
+                        map {version.data.data.kor_travel_map_version}
+                      </span>
                     </>
                   ) : (
                     <span>버전 —</span>
                   )}
                 </p>
               </div>
-              <div className="flex flex-col gap-2 py-3 last:pb-0" data-testid="service-dagster">
+              <div
+                className="flex flex-col gap-2 py-3 last:pb-0"
+                data-testid="service-dagster"
+              >
                 <div className="flex items-center justify-between gap-3">
-                  <span className="text-xs font-medium text-text-primary">Dagster</span>
+                  <span className="text-xs font-medium text-text-primary">
+                    Dagster
+                  </span>
                   <StatusBadge status={dagsterStatus} />
                 </div>
                 <p className="text-2xs text-text-secondary tabular-nums">
-                  <span>{formatCount(dagsterData?.recent_runs?.length)} recent runs</span>
+                  <span>
+                    {formatCount(dagsterData?.recent_runs?.length)} recent runs
+                  </span>
                   {" · "}
-                  <span>{formatCount(dagsterData?.schedule_count)} schedules</span>
+                  <span>
+                    {formatCount(dagsterData?.schedule_count)} schedules
+                  </span>
                 </p>
                 <div>
                   <Link
-                    className={cn(buttonVariants({ variant: "outline", size: "sm" }))}
+                    className={cn(
+                      buttonVariants({ variant: "outline", size: "sm" }),
+                    )}
                     href="/ops/pipeline?tab=schedules"
                   >
                     작업 자동화
@@ -516,7 +622,9 @@ function HomePageClientView({
                         </span>
                         <span className="text-xs text-text-secondary tabular-nums">
                           점수 {item.total_score.toFixed(1)} ·{" "}
-                          <span className="font-mono">{shortId(item.review_id)}</span>
+                          <span className="font-mono">
+                            {shortId(item.review_id)}
+                          </span>
                         </span>
                       </Link>
                     </li>

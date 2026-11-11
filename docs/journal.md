@@ -1,3 +1,11 @@
+## 2026-11-11 — 관리자 common Radix/VirtualTable·지도 public API 통합 후보
+
+- 모든 admin 표를 common VirtualTable로 연결하고 Radix primitive/검색 Popover를 채택했다.
+  최신 exact 의존성, Zod/RHF/Zustand/Pretendard 실제 사용과 CI AST/무결성·Doctor gate를 적용했다.
+- candidate5 lint/type/build/guard/Doctor 진단 0. unit 417/419 통과, common LoginForm 자동완성
+  2건은 부모 수정 요청. 최종 freeze·n150 격리 e2e·독립 리뷰·CI/merge/부모 go 전 배포하지 않는다.
+- [구현·검증·배포 계획](reports/common-unification-20261111.md), [ADR-123](adr/123-common-admin-ui.md).
+
 ## 2026-11-11 — ADR-122 개정: weather 멤버십 digest·clock epoch
 
 - 세대마다 멤버십 장부(만료 묶음 유지)를 두고 증분 뒤 weather digest와 비교, 다르면 전량. 전량도 못 보는 미래 시각 없는 행이 있으면 검증 불가 사슬로 표시해 하루 주기에 맡긴다. epoch 바뀌면 전량.

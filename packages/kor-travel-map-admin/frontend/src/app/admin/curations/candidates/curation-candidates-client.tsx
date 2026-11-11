@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import {
   CheckIcon,
   ExternalLinkIcon,
@@ -45,8 +45,15 @@ import {
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
-import { FormField, FormSelect, FormTextArea } from "@/components/ui/form-field";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
+import {
+  FormField,
+  FormSelect,
+  FormTextArea,
+} from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
@@ -67,7 +74,10 @@ const RELATIONS: ThemeCandidatePromoteRequest["curation_relation"][] = [
   "theme_area_anchor",
 ];
 // enum → 한글 라벨(design.md §Copy — 옵션도 raw enum 금지). 값 정본은 API 스키마.
-const RELATION_LABELS: Record<ThemeCandidatePromoteRequest["curation_relation"], string> = {
+const RELATION_LABELS: Record<
+  ThemeCandidatePromoteRequest["curation_relation"],
+  string
+> = {
   primary_stop: "주요 방문지",
   food_stop: "식사",
   cafe_stop: "카페",
@@ -151,14 +161,19 @@ function candidateParams(
 }
 
 function displayError(error: unknown): string {
-  if (error instanceof ApiClientError && [409, 412, 428].includes(error.status)) {
+  if (
+    error instanceof ApiClientError &&
+    [409, 412, 428].includes(error.status)
+  ) {
     return "후보 또는 컬렉션이 다른 작업으로 변경되었습니다. 현재 상태를 다시 불러온 뒤 판단하세요.";
   }
   return error instanceof Error ? error.message : String(error);
 }
 
 function isStaleCommandError(error: unknown): boolean {
-  return error instanceof ApiClientError && [409, 412, 428].includes(error.status);
+  return (
+    error instanceof ApiClientError && [409, 412, 428].includes(error.status)
+  );
 }
 
 function eligibilityLabel(present: boolean): string {
@@ -309,7 +324,9 @@ function CandidateList({
         cell: ({ row }) => (
           <>
             <div>{row.original.theme_name}</div>
-            <div className="text-xs text-text-secondary">{row.original.source_name}</div>
+            <div className="text-xs text-text-secondary">
+              {row.original.source_name}
+            </div>
           </>
         ),
       },
@@ -350,7 +367,8 @@ function CandidateList({
         data={candidates}
         emptyState={{
           title: "조건에 맞는 후보가 없습니다.",
-          description: "검토 상태를 전체로 바꾸거나 rule/theme 필터를 비워 보세요.",
+          description:
+            "검토 상태를 전체로 바꾸거나 rule/theme 필터를 비워 보세요.",
         }}
         getRowId={(row) => row.candidate_id}
         isLoading={isLoading}
@@ -404,16 +422,32 @@ function CandidateDetail({ candidate }: { candidate: ThemeCandidate }) {
       </div>
       <DetailList items={items} layout="inline" />
       {candidate.proposal_summary ? (
-        <p className="text-sm text-text-primary">{candidate.proposal_summary}</p>
+        <p className="text-sm text-text-primary">
+          {candidate.proposal_summary}
+        </p>
       ) : null}
       <div className="flex flex-col gap-3 border-t border-border pt-4">
         <div className="flex flex-col gap-1">
-          <h3 className="text-2xs font-medium text-text-secondary">match evidence</h3>
-          <JsonViewer aria-label="match evidence" copyable maxHeight="sm" value={candidate.match_evidence ?? {}} />
+          <h3 className="text-2xs font-medium text-text-secondary">
+            match evidence
+          </h3>
+          <JsonViewer
+            aria-label="match evidence"
+            copyable
+            maxHeight="sm"
+            value={candidate.match_evidence ?? {}}
+          />
         </div>
         <div className="flex flex-col gap-1">
-          <h3 className="text-2xs font-medium text-text-secondary">effective Feature detail</h3>
-          <JsonViewer aria-label="effective feature detail" copyable maxHeight="sm" value={candidate.feature_detail ?? {}} />
+          <h3 className="text-2xs font-medium text-text-secondary">
+            effective Feature detail
+          </h3>
+          <JsonViewer
+            aria-label="effective feature detail"
+            copyable
+            maxHeight="sm"
+            value={candidate.feature_detail ?? {}}
+          />
         </div>
       </div>
     </SectionCard>
@@ -465,159 +499,179 @@ function CandidateCommands({
         : !collectionReady
           ? "컬렉션 revision을 불러오는 중입니다."
           : null);
-  return (
-    <>
-      <SectionCard
-        description="거절 사유는 immutable transition에 기록됩니다."
-        headingLevel={3}
-        title="후보 거절"
-      >
-        <form className="flex flex-col gap-1" onSubmit={submitReject}>
-          <FormField
-            hint="예: operator_reject"
-            label="사유 코드"
-            required
-            value={rejectReason}
-            onChange={(event) => setRejectReason(event.target.value)}
-          />
-          <div className="flex flex-col items-start gap-1">
-            <Button
-              disabled={rejectBlockedReason !== null || isPending}
-              disabledReason={rejectBlockedReason ?? "다른 명령을 처리하는 중입니다"}
-              loading={isRejecting}
-              type="submit"
-              variant="destructive"
-            >
-              <XIcon data-icon="inline-start" />
-              거절 확정
-            </Button>
-            {rejectBlockedReason ? (
-              <span className="text-2xs text-text-secondary">{rejectBlockedReason}</span>
-            ) : null}
-          </div>
-        </form>
-      </SectionCard>
-      <SectionCard
-        description="선택한 collection revision과 후보 CAS를 한 요청에 고정합니다."
-        headingLevel={3}
-        title="canonical item으로 승격"
-      >
-        <form className="flex flex-col gap-1" onSubmit={submitPromote}>
-          <FormSelect
-            label="컬렉션"
-            required
-            value={form.collectionId}
-            onChange={(event) =>
-              setForm({ ...form, collectionId: event.target.value })
-            }
-          >
-            <NativeSelectOption value="">선택</NativeSelectOption>
-            {collections.map((collection) => (
-              <NativeSelectOption
-                key={collection.collection_id}
-                value={collection.collection_id}
-              >
-                {collection.title} · rev {collection.row_revision}
-              </NativeSelectOption>
-            ))}
-          </FormSelect>
-          {(
-            [
-              ["externalItemId", "외부 item ID"],
-              ["externalComponentId", "외부 component ID"],
-              ["placeName", "장소명"],
-              ["sortOrder", "정렬 순서"],
-              ["itemTitle", "표시 제목"],
-              ["addressHint", "주소 힌트"],
-              ["reasonCode", "사유 코드"],
-            ] as const
-          ).map(([key, label]) => (
+  function renderCandidateCommandsState() {
+    return (
+      [
+        ["externalItemId", "외부 item ID"],
+        ["externalComponentId", "외부 component ID"],
+        ["placeName", "장소명"],
+        ["sortOrder", "정렬 순서"],
+        ["itemTitle", "표시 제목"],
+        ["addressHint", "주소 힌트"],
+        ["reasonCode", "사유 코드"],
+      ] as const
+    ).map(([key, label]) => (
+      <FormField
+        key={key}
+        label={label}
+        required={
+          key === "externalItemId" ||
+          key === "externalComponentId" ||
+          key === "placeName" ||
+          key === "reasonCode"
+        }
+        type={key === "sortOrder" ? "number" : "text"}
+        value={form[key]}
+        onChange={(event) => setForm({ ...form, [key]: event.target.value })}
+      />
+    ));
+  }
+  function renderCandidateCommandsState2() {
+    return (
+      <>
+        <SectionCard
+          description="거절 사유는 immutable transition에 기록됩니다."
+          headingLevel={3}
+          title="후보 거절"
+        >
+          <form className="flex flex-col gap-1" onSubmit={submitReject}>
             <FormField
-              key={key}
-              label={label}
-              required={
-                key === "externalItemId" ||
-                key === "externalComponentId" ||
-                key === "placeName" ||
-                key === "reasonCode"
-              }
-              type={key === "sortOrder" ? "number" : "text"}
-              value={form[key]}
+              hint="예: operator_reject"
+              label="사유 코드"
+              required
+              value={rejectReason}
+              onChange={(event) => setRejectReason(event.target.value)}
+            />
+            <div className="flex flex-col items-start gap-1">
+              <Button
+                disabled={rejectBlockedReason !== null || isPending}
+                disabledReason={
+                  rejectBlockedReason ?? "다른 명령을 처리하는 중입니다"
+                }
+                loading={isRejecting}
+                type="submit"
+                variant="destructive"
+              >
+                <XIcon data-icon="inline-start" />
+                거절 확정
+              </Button>
+              {rejectBlockedReason ? (
+                <span className="text-2xs text-text-secondary">
+                  {rejectBlockedReason}
+                </span>
+              ) : null}
+            </div>
+          </form>
+        </SectionCard>
+        <SectionCard
+          description="선택한 collection revision과 후보 CAS를 한 요청에 고정합니다."
+          headingLevel={3}
+          title="canonical item으로 승격"
+        >
+          <form className="flex flex-col gap-1" onSubmit={submitPromote}>
+            <FormSelect
+              label="컬렉션"
+              required
+              value={form.collectionId}
               onChange={(event) =>
-                setForm({ ...form, [key]: event.target.value })
+                setForm({ ...form, collectionId: event.target.value })
+              }
+            >
+              <NativeSelectOption value="">선택</NativeSelectOption>
+              {collections.map((collection) => (
+                <NativeSelectOption
+                  key={collection.collection_id}
+                  value={collection.collection_id}
+                >
+                  {collection.title} · rev {collection.row_revision}
+                </NativeSelectOption>
+              ))}
+            </FormSelect>
+            {renderCandidateCommandsState()}
+            <FormSelect
+              label="관계"
+              value={form.relation}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  relation: event.target.value as PromoteForm["relation"],
+                })
+              }
+            >
+              {RELATIONS.map((relation) => (
+                <NativeSelectOption key={relation} value={relation}>
+                  {RELATION_LABELS[relation]}
+                </NativeSelectOption>
+              ))}
+            </FormSelect>
+            <FormSelect
+              label="항목 상태"
+              value={form.itemStatus}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  itemStatus: event.target.value as PromoteForm["itemStatus"],
+                })
+              }
+            >
+              <NativeSelectOption value="included">
+                {statusLabel("included")}
+              </NativeSelectOption>
+              <NativeSelectOption value="candidate">
+                {statusLabel("candidate")}
+              </NativeSelectOption>
+            </FormSelect>
+            <FormSelect
+              label="재사용 정책"
+              value={form.reusePolicy}
+              onChange={(event) =>
+                setForm({
+                  ...form,
+                  reusePolicy: event.target.value as PromoteForm["reusePolicy"],
+                })
+              }
+            >
+              <NativeSelectOption value="allowed">
+                {statusLabel("allowed")}
+              </NativeSelectOption>
+              <NativeSelectOption value="manual_review">
+                {statusLabel("manual_review")}
+              </NativeSelectOption>
+              <NativeSelectOption value="blocked">
+                {statusLabel("blocked")}
+              </NativeSelectOption>
+            </FormSelect>
+            <FormTextArea
+              label="항목 요약"
+              value={form.itemSummary}
+              onChange={(event) =>
+                setForm({ ...form, itemSummary: event.target.value })
               }
             />
-          ))}
-          <FormSelect
-            label="관계"
-            value={form.relation}
-            onChange={(event) =>
-              setForm({
-                ...form,
-                relation: event.target.value as PromoteForm["relation"],
-              })
-            }
-          >
-            {RELATIONS.map((relation) => (
-              <NativeSelectOption key={relation} value={relation}>
-                {RELATION_LABELS[relation]}
-              </NativeSelectOption>
-            ))}
-          </FormSelect>
-          <FormSelect
-            label="항목 상태"
-            value={form.itemStatus}
-            onChange={(event) =>
-              setForm({
-                ...form,
-                itemStatus: event.target.value as PromoteForm["itemStatus"],
-              })
-            }
-          >
-            <NativeSelectOption value="included">{statusLabel("included")}</NativeSelectOption>
-            <NativeSelectOption value="candidate">{statusLabel("candidate")}</NativeSelectOption>
-          </FormSelect>
-          <FormSelect
-            label="재사용 정책"
-            value={form.reusePolicy}
-            onChange={(event) =>
-              setForm({
-                ...form,
-                reusePolicy: event.target.value as PromoteForm["reusePolicy"],
-              })
-            }
-          >
-            <NativeSelectOption value="allowed">{statusLabel("allowed")}</NativeSelectOption>
-            <NativeSelectOption value="manual_review">
-              {statusLabel("manual_review")}
-            </NativeSelectOption>
-            <NativeSelectOption value="blocked">{statusLabel("blocked")}</NativeSelectOption>
-          </FormSelect>
-          <FormTextArea
-            label="항목 요약"
-            value={form.itemSummary}
-            onChange={(event) =>
-              setForm({ ...form, itemSummary: event.target.value })
-            }
-          />
-          <div className="flex flex-col items-start gap-1 border-t border-border pt-4">
-            <Button
-              disabled={promoteBlockedReason !== null || isPending}
-              disabledReason={promoteBlockedReason ?? "다른 명령을 처리하는 중입니다"}
-              loading={isPromoting}
-              type="submit"
-            >
-              <CheckIcon data-icon="inline-start" />
-              승격 확정
-            </Button>
-            {promoteBlockedReason ? (
-              <span className="text-2xs text-text-secondary">{promoteBlockedReason}</span>
-            ) : null}
-          </div>
-        </form>
-      </SectionCard>
-    </>
-  );
+            <div className="flex flex-col items-start gap-1 border-t border-border pt-4">
+              <Button
+                disabled={promoteBlockedReason !== null || isPending}
+                disabledReason={
+                  promoteBlockedReason ?? "다른 명령을 처리하는 중입니다"
+                }
+                loading={isPromoting}
+                type="submit"
+              >
+                <CheckIcon data-icon="inline-start" />
+                승격 확정
+              </Button>
+              {promoteBlockedReason ? (
+                <span className="text-2xs text-text-secondary">
+                  {promoteBlockedReason}
+                </span>
+              ) : null}
+            </div>
+          </form>
+        </SectionCard>
+      </>
+    );
+  }
+  return renderCandidateCommandsState2();
 }
 
 function boolLabel(value: boolean | null | undefined): string {
@@ -648,7 +702,10 @@ function TransitionTimeline({
       ) : (
         <ol className="flex flex-col divide-y divide-border">
           {transitions.map((transition) => (
-            <li className="flex flex-col gap-1 py-2" key={transition.transition_id}>
+            <li
+              className="flex flex-col gap-1 py-2"
+              key={transition.transition_id}
+            >
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={transition.transition_kind} />
                 <span className="text-sm font-medium">{transition.actor}</span>
@@ -664,7 +721,8 @@ function TransitionTimeline({
                 {boolLabel(transition.to_eligibility_present)}
               </p>
               <p className="text-xs text-text-secondary">
-                {transition.reason_code} · candidate rev {transition.candidate_revision}
+                {transition.reason_code} · candidate rev{" "}
+                {transition.candidate_revision}
               </p>
             </li>
           ))}
@@ -793,6 +851,45 @@ export function CurationCandidatesClient() {
     }));
   };
 
+  function renderCurationCandidatesClientState() {
+    return candidate ? (
+      <>
+        <CandidateDetail candidate={candidate} />
+        <CandidateCommands
+          candidate={candidate}
+          collectionReady={collectionDetailQuery.data !== undefined}
+          collections={collections}
+          form={promoteForm}
+          isPromoting={promoteMutation.isPending}
+          isRejecting={rejectMutation.isPending}
+          rejectReason={rejectReason}
+          setForm={setPromoteForm}
+          setRejectReason={setRejectReason}
+          submitPromote={submitPromote}
+          submitReject={submitReject}
+        />
+        <TransitionTimeline
+          isLoading={transitionsQuery.isLoading}
+          transitions={transitionsQuery.data?.data.items ?? []}
+        />
+      </>
+    ) : selectedId && detailQuery.isLoading ? (
+      <SectionCard title="후보 상세">
+        <div className="flex flex-col gap-2" aria-busy="true">
+          <Skeleton className="h-4 w-1/2" />
+          <Skeleton className="h-4 w-3/4" />
+          <Skeleton className="h-4 w-2/3" />
+        </div>
+      </SectionCard>
+    ) : (
+      <SectionCard title="후보 상세">
+        <EmptyState
+          title="선택된 후보가 없습니다"
+          description="목록에서 행을 선택하면 증거·명령·감사 전이가 열립니다."
+        />
+      </SectionCard>
+    );
+  }
   return (
     <AdminShell
       breadcrumbs={[
@@ -880,43 +977,7 @@ export function CurationCandidatesClient() {
           />
 
           <div className="flex flex-col gap-6">
-            {candidate ? (
-              <>
-                <CandidateDetail candidate={candidate} />
-                <CandidateCommands
-                  candidate={candidate}
-                  collectionReady={collectionDetailQuery.data !== undefined}
-                  collections={collections}
-                  form={promoteForm}
-                  isPromoting={promoteMutation.isPending}
-                  isRejecting={rejectMutation.isPending}
-                  rejectReason={rejectReason}
-                  setForm={setPromoteForm}
-                  setRejectReason={setRejectReason}
-                  submitPromote={submitPromote}
-                  submitReject={submitReject}
-                />
-                <TransitionTimeline
-                  isLoading={transitionsQuery.isLoading}
-                  transitions={transitionsQuery.data?.data.items ?? []}
-                />
-              </>
-            ) : selectedId && detailQuery.isLoading ? (
-              <SectionCard title="후보 상세">
-                <div className="flex flex-col gap-2" aria-busy="true">
-                  <Skeleton className="h-4 w-1/2" />
-                  <Skeleton className="h-4 w-3/4" />
-                  <Skeleton className="h-4 w-2/3" />
-                </div>
-              </SectionCard>
-            ) : (
-              <SectionCard title="후보 상세">
-                <EmptyState
-                  title="선택된 후보가 없습니다"
-                  description="목록에서 행을 선택하면 증거·명령·감사 전이가 열립니다."
-                />
-              </SectionCard>
-            )}
+            {renderCurationCandidatesClientState()}
           </div>
         </div>
       </div>

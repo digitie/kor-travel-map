@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { RefreshCwIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useRef, useState, type FormEvent } from "react";
 
@@ -24,7 +24,10 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { FormField, FormSelect } from "@/components/ui/form-field";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
 import { formatCount, formatDateTime, shortId } from "@/lib/format";
@@ -61,13 +64,18 @@ function usePoiCacheTargetsClientController() {
   const [lon, setLon] = useState("126.9780");
   const [lat, setLat] = useState("37.5665");
   const [radiusKm, setRadiusKm] = useState("5");
-  const [scopeMode, setScopeMode] = useState<"center_radius" | "sigungu_by_radius">(
-    "center_radius",
-  );
+  const [scopeMode, setScopeMode] = useState<
+    "center_radius" | "sigungu_by_radius"
+  >("center_radius");
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const [errors, setErrors] = useState<
-    Partial<Record<"externalSystem" | "targetKey" | "lon" | "lat" | "radiusKm", string>>
+    Partial<
+      Record<
+        "externalSystem" | "targetKey" | "lon" | "lat" | "radiusKm",
+        string
+      >
+    >
   >({});
   const externalSystemRef = useRef<HTMLInputElement>(null);
   const targetKeyRef = useRef<HTMLInputElement>(null);
@@ -95,9 +103,7 @@ function usePoiCacheTargetsClientController() {
   );
 
   const nearbyItems = nearby.data?.data.items ?? [];
-  type TargetRow = NonNullable<
-    typeof targets.data
-  >["data"]["items"][number];
+  type TargetRow = NonNullable<typeof targets.data>["data"]["items"][number];
   type NearbyRow = NonNullable<typeof nearby.data>["data"]["items"][number];
 
   const targetColumns = useMemo<ColumnDef<TargetRow, unknown>[]>(
@@ -176,12 +182,15 @@ function usePoiCacheTargetsClientController() {
         cell: ({ row }) => {
           const target = row.original;
           const removing =
-            remove.isPending && remove.variables?.targetKey === target.target_key;
+            remove.isPending &&
+            remove.variables?.targetKey === target.target_key;
           return (
             <Button
               disabled={remove.isPending || targets.isFetching}
               disabledReason={
-                remove.isPending ? "다른 대상을 삭제하는 중입니다" : "목록을 불러오는 중입니다"
+                remove.isPending
+                  ? "다른 대상을 삭제하는 중입니다"
+                  : "목록을 불러오는 중입니다"
               }
               loading={removing}
               size="sm"
@@ -250,7 +259,8 @@ function usePoiCacheTargetsClientController() {
         accessorKey: "kind",
         header: "종류",
         enableSorting: false,
-        cell: ({ row }) => FEATURE_KIND_LABELS[row.original.kind] ?? row.original.kind,
+        cell: ({ row }) =>
+          FEATURE_KIND_LABELS[row.original.kind] ?? row.original.kind,
       },
       {
         accessorKey: "distance_m",
@@ -266,21 +276,18 @@ function usePoiCacheTargetsClientController() {
   const submit = () => {
     const values = { externalSystem, targetKey, lon, lat, radiusKm };
     const result = validateForm(values, [
-      { field: "externalSystem", validate: required("외부 시스템을 입력하세요.") },
+      {
+        field: "externalSystem",
+        validate: required("외부 시스템을 입력하세요."),
+      },
       { field: "targetKey", validate: required("대상 키를 입력하세요.") },
       {
         field: "lon",
-        validate: combine(
-          required("경도를 입력하세요."),
-          koreaLongitude(),
-        ),
+        validate: combine(required("경도를 입력하세요."), koreaLongitude()),
       },
       {
         field: "lat",
-        validate: combine(
-          required("위도를 입력하세요."),
-          koreaLatitude(),
-        ),
+        validate: combine(required("위도를 입력하세요."), koreaLatitude()),
       },
       {
         field: "radiusKm",
@@ -501,7 +508,10 @@ function PoiCacheTargetsClientView({
               summary={
                 <>
                   page {cursorStack.length + 1} ·{" "}
-                  {formatCount(targets.data ? targets.data.data.items.length : null)} rows
+                  {formatCount(
+                    targets.data ? targets.data.data.items.length : null,
+                  )}{" "}
+                  rows
                 </>
               }
               onFirst={goToFirstPage}
@@ -574,7 +584,11 @@ function PoiCacheTargetsClientView({
                   label="대상 범위"
                   value={scopeMode}
                   onChange={(event) =>
-                    setScopeMode(event.target.value as "center_radius" | "sigungu_by_radius")
+                    setScopeMode(
+                      event.target.value as
+                        | "center_radius"
+                        | "sigungu_by_radius",
+                    )
                   }
                 >
                   <NativeSelectOption value="center_radius">

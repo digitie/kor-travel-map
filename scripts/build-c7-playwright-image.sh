@@ -8,7 +8,7 @@ umask 077
 readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd -P)"
 readonly REPO_ROOT="$(cd -- "$SCRIPT_DIR/.." && pwd -P)"
 readonly IMAGE_TAG="kor-travel-map-c7-playwright:local"
-readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
+readonly PLAYWRIGHT_BASE_IMAGE="mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d"
 
 die() {
   printf 'C7 executor build failed: %s (values redacted)\n' "$1" >&2

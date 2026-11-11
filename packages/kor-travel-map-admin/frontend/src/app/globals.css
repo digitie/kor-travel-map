@@ -30,6 +30,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@kor-travel/tokens/theme.css";
+@import "@kor-travel/tokens/radix.css";
 @import "@kor-travel/ui/dagster.css";
 @import "@kor-travel/ui/map-controls.css";
 @source "../../../../../node_modules/@kor-travel/ui/dist";

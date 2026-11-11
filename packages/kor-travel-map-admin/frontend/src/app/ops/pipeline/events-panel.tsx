@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { useMemo, useState } from "react";
 
 import {
@@ -161,7 +161,9 @@ export function PipelineEventsPanel({
         header: "메시지",
         meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <DataTableClampCell lines={2}>{row.original.message}</DataTableClampCell>
+          <DataTableClampCell lines={2}>
+            {row.original.message}
+          </DataTableClampCell>
         ),
       },
       {
@@ -198,117 +200,115 @@ export function PipelineEventsPanel({
       description="어느 작업인지 모르는 상태에서 최근 error를 훑는 전역 스트림입니다."
       title="전역 job 이벤트"
     >
-        <FilterBar>
-          <FilterField label="레벨">
-            <NativeSelect
-              aria-label="이벤트 레벨 필터"
-              value={level}
-              onChange={(event) => {
-                setLevel(event.target.value as JobEventLevel | "all");
-                resetPage();
-              }}
-            >
-              {LEVEL_OPTIONS.map((value) => (
-                <NativeSelectOption key={value} value={value}>
-                  {value === "all" ? "전체" : statusLabel(value)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </FilterField>
-          <FilterField label="provider dataset ID">
-            <Input
-              aria-label="이벤트 provider dataset ID 필터"
-              inputMode="numeric"
-              min="1"
-              type="number"
-              value={providerDatasetId}
-              onChange={(event) => {
-                resetPage();
-                onUrlChange(
-                  { provider_dataset_id: event.target.value.trim() || null },
-                  "replace",
-                );
-              }}
-            />
-          </FilterField>
-          <FilterField label="sync scope">
-            <Input
-              aria-label="이벤트 sync scope 필터"
-              disabled={!providerDatasetIdFilter}
-              value={syncScope}
-              onChange={(event) => {
-                resetPage();
-                onUrlChange(
-                  { sync_scope: event.target.value.trim() || null },
-                  "replace",
-                );
-              }}
-            />
-          </FilterField>
-          <FilterField label="operation">
-            {/* 이 값은 URL에서 읽어 **쿼리에 그대로 적용**되는데 보여 주거나 지울
+      <FilterBar>
+        <FilterField label="레벨">
+          <NativeSelect
+            aria-label="이벤트 레벨 필터"
+            value={level}
+            onChange={(event) => {
+              setLevel(event.target.value as JobEventLevel | "all");
+              resetPage();
+            }}
+          >
+            {LEVEL_OPTIONS.map((value) => (
+              <NativeSelectOption key={value} value={value}>
+                {value === "all" ? "전체" : statusLabel(value)}
+              </NativeSelectOption>
+            ))}
+          </NativeSelect>
+        </FilterField>
+        <FilterField label="provider dataset ID">
+          <Input
+            aria-label="이벤트 provider dataset ID 필터"
+            inputMode="numeric"
+            min="1"
+            type="number"
+            value={providerDatasetId}
+            onChange={(event) => {
+              resetPage();
+              onUrlChange(
+                { provider_dataset_id: event.target.value.trim() || null },
+                "replace",
+              );
+            }}
+          />
+        </FilterField>
+        <FilterField label="sync scope">
+          <Input
+            aria-label="이벤트 sync scope 필터"
+            disabled={!providerDatasetIdFilter}
+            value={syncScope}
+            onChange={(event) => {
+              resetPage();
+              onUrlChange(
+                { sync_scope: event.target.value.trim() || null },
+                "replace",
+              );
+            }}
+          />
+        </FilterField>
+        <FilterField label="operation">
+          {/* 이 값은 URL에서 읽어 **쿼리에 그대로 적용**되는데 보여 주거나 지울
                 컨트롤이 없었다. 딥링크로 들어온 운영자는 목록이 특정 operation으로
                 좁혀져 있다는 사실을 모른 채 빈 목록을 "이벤트 없음"으로 오독한다.
                 적용되는 필터는 화면에 있어야 한다. */}
-            <Input
-              aria-label="이벤트 operation 필터"
-              disabled={!providerDatasetIdFilter}
-              placeholder="예: refresh_targeted"
-              value={operationKey}
-              onChange={(event) => {
-                resetPage();
-                onUrlChange(
-                  { operation_key: event.target.value.trim() || null },
-                  "replace",
-                );
-              }}
-            />
-          </FilterField>
-          <FilterField label="작업 ID">
-            <Input
-              aria-label="이벤트 작업 ID 필터"
-              placeholder="UUID"
-              value={jobId}
-              onChange={(event) => {
-                setJobId(event.target.value);
-                resetPage();
-              }}
-            />
-          </FilterField>
-        </FilterBar>
+          <Input
+            aria-label="이벤트 operation 필터"
+            disabled={!providerDatasetIdFilter}
+            placeholder="예: refresh_targeted"
+            value={operationKey}
+            onChange={(event) => {
+              resetPage();
+              onUrlChange(
+                { operation_key: event.target.value.trim() || null },
+                "replace",
+              );
+            }}
+          />
+        </FilterField>
+        <FilterField label="작업 ID">
+          <Input
+            aria-label="이벤트 작업 ID 필터"
+            placeholder="UUID"
+            value={jobId}
+            onChange={(event) => {
+              setJobId(event.target.value);
+              resetPage();
+            }}
+          />
+        </FilterField>
+      </FilterBar>
 
-        <DataTable
-          ariaLabel="전역 job 이벤트"
-          columns={columns}
-          data={items}
-          emptyState={{
-            title: "조건에 맞는 이벤트가 없습니다.",
-            description: "레벨·dataset·작업 ID 필터를 넓혀 보세요.",
-          }}
-          error={events.error}
-          errorTitle="이벤트 목록을 불러오지 못했습니다"
-          getRowId={(row) => row.event_id}
-          isError={events.isError}
-          isLoading={events.isLoading}
-          rowIdentity={(row) =>
-            JSON.stringify([row.occurred_at, row.event_id])
-          }
-          onRetry={() => events.refetch()}
-        />
+      <DataTable
+        ariaLabel="전역 job 이벤트"
+        columns={columns}
+        data={items}
+        emptyState={{
+          title: "조건에 맞는 이벤트가 없습니다.",
+          description: "레벨·dataset·작업 ID 필터를 넓혀 보세요.",
+        }}
+        error={events.error}
+        errorTitle="이벤트 목록을 불러오지 못했습니다"
+        getRowId={(row) => row.event_id}
+        isError={events.isError}
+        isLoading={events.isLoading}
+        rowIdentity={(row) => JSON.stringify([row.occurred_at, row.event_id])}
+        onRetry={() => events.refetch()}
+      />
 
-        <CursorPager
-          ariaPrefix="job 이벤트"
-          hasNext={Boolean(nextCursor)}
-          isFetching={events.isFetching}
-          isFirst={activeCursorStack.length === 0}
-          summary={`page ${activeCursorStack.length + 1} · 이 페이지 ${items.length}건`}
-          onFirst={resetPage}
-          onNext={() =>
-            nextCursor
-              ? setCursorStack((stack) => [...stack, nextCursor])
-              : undefined
-          }
-        />
+      <CursorPager
+        ariaPrefix="job 이벤트"
+        hasNext={Boolean(nextCursor)}
+        isFetching={events.isFetching}
+        isFirst={activeCursorStack.length === 0}
+        summary={`page ${activeCursorStack.length + 1} · 이 페이지 ${items.length}건`}
+        onFirst={resetPage}
+        onNext={() =>
+          nextCursor
+            ? setCursorStack((stack) => [...stack, nextCursor])
+            : undefined
+        }
+      />
     </SectionCard>
   );
 }
@@ -379,7 +379,10 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
               variant="outline"
               onClick={() =>
                 data.event_cursor
-                  ? setCursorStack((stack) => [...stack, data.event_cursor as string])
+                  ? setCursorStack((stack) => [
+                      ...stack,
+                      data.event_cursor as string,
+                    ])
                   : undefined
               }
             >
@@ -407,6 +410,66 @@ export function DagsterRunsPanel() {
   const data = runs.data?.data;
   const [expandedRunId, setExpandedRunId] = useState<string | null>(null);
 
+  function renderDagsterRunsPanelState() {
+    return (data?.runs ?? []).map((run) => {
+      const expanded = expandedRunId === run.run_id;
+      const detailId = `pipeline-dagster-run-detail-${run.run_id}`;
+      return (
+        <li className="py-2 text-sm" key={run.run_id}>
+          <div className="flex flex-wrap items-center gap-2">
+            <StatusBadge status={run.status} />
+            <span className="truncate font-medium">
+              {run.job_name ?? NULL_GLYPH}
+            </span>
+            <EntityLink id={run.run_id} kind="dagsterRun" newTab>
+              {shortId(run.run_id, 8)}
+            </EntityLink>
+            <span className="text-xs text-text-secondary">
+              {run.start_time
+                ? formatDateTime(new Date(run.start_time * 1000).toISOString())
+                : NULL_GLYPH}
+            </span>
+            <Button
+              aria-controls={expanded ? detailId : undefined}
+              aria-expanded={expanded}
+              aria-label={`run ${shortId(run.run_id, 8)} 상세 ${
+                expanded ? "닫기" : "열기"
+              }`}
+              size="sm"
+              type="button"
+              variant="ghost"
+              onClick={() =>
+                setExpandedRunId((current) =>
+                  current === run.run_id ? null : run.run_id,
+                )
+              }
+            >
+              {expanded ? "상세 닫기" : "상세"}
+            </Button>
+          </div>
+          {expanded ? <DagsterRunDetail runId={run.run_id} /> : null}
+        </li>
+      );
+    });
+  }
+  function renderDagsterRunsPanelState1() {
+    return data && data.status !== "ok" ? (
+      <Alert
+        variant={data.status === "unavailable" ? "destructive" : "warning"}
+      >
+        <AlertTitle>
+          {data.status === "unavailable"
+            ? "Dagster 연결 불가"
+            : "Dagster 상태 확인 필요"}
+        </AlertTitle>
+        <AlertDescription>
+          {(data.errors ?? []).length > 0
+            ? (data.errors ?? []).join(" / ")
+            : "Dagster webserver 상태를 확인하세요."}
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
   return (
     <div data-testid="pipeline-dagster-runs-panel">
       <SectionCard
@@ -427,22 +490,7 @@ export function DagsterRunsPanel() {
             <Skeleton className="h-4 w-2/3" />
           </div>
         ) : null}
-        {data && data.status !== "ok" ? (
-          <Alert
-            variant={data.status === "unavailable" ? "destructive" : "warning"}
-          >
-            <AlertTitle>
-              {data.status === "unavailable"
-                ? "Dagster 연결 불가"
-                : "Dagster 상태 확인 필요"}
-            </AlertTitle>
-            <AlertDescription>
-              {(data.errors ?? []).length > 0
-                ? (data.errors ?? []).join(" / ")
-                : "Dagster webserver 상태를 확인하세요."}
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        {renderDagsterRunsPanelState1()}
         {data && (data.runs ?? []).length === 0 && data.status === "ok" ? (
           <EmptyState
             description="Dagster에서 실행이 시작되면 최근 20건이 여기에 표시됩니다."
@@ -452,48 +500,7 @@ export function DagsterRunsPanel() {
         ) : null}
         {data && (data.runs ?? []).length > 0 ? (
           <ul className="divide-y divide-border">
-            {(data.runs ?? []).map((run) => {
-              const expanded = expandedRunId === run.run_id;
-              const detailId = `pipeline-dagster-run-detail-${run.run_id}`;
-              return (
-                <li className="py-2 text-sm" key={run.run_id}>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <StatusBadge status={run.status} />
-                    <span className="truncate font-medium">
-                      {run.job_name ?? NULL_GLYPH}
-                    </span>
-                    <EntityLink id={run.run_id} kind="dagsterRun" newTab>
-                      {shortId(run.run_id, 8)}
-                    </EntityLink>
-                    <span className="text-xs text-text-secondary">
-                      {run.start_time
-                        ? formatDateTime(
-                            new Date(run.start_time * 1000).toISOString(),
-                          )
-                        : NULL_GLYPH}
-                    </span>
-                    <Button
-                      aria-controls={expanded ? detailId : undefined}
-                      aria-expanded={expanded}
-                      aria-label={`run ${shortId(run.run_id, 8)} 상세 ${
-                        expanded ? "닫기" : "열기"
-                      }`}
-                      size="sm"
-                      type="button"
-                      variant="ghost"
-                      onClick={() =>
-                        setExpandedRunId((current) =>
-                          current === run.run_id ? null : run.run_id,
-                        )
-                      }
-                    >
-                      {expanded ? "상세 닫기" : "상세"}
-                    </Button>
-                  </div>
-                  {expanded ? <DagsterRunDetail runId={run.run_id} /> : null}
-                </li>
-              );
-            })}
+            {renderDagsterRunsPanelState()}
           </ul>
         ) : null}
       </SectionCard>

@@ -15,7 +15,7 @@ import {
   type ColumnDef,
   type OnChangeFn,
   type SortingState,
-} from "@tanstack/react-table";
+} from "@kor-travel/ui/virtual-table";
 import Link from "next/link";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
@@ -115,14 +115,26 @@ function featureDetailHref(featureId: string): string {
 }
 
 /** inspector 안 접이식 payload(address/detail) — summary 12px/500 + JsonViewer. */
-function PayloadDisclosure({ label, value }: { label: string; value: unknown }) {
+function PayloadDisclosure({
+  label,
+  value,
+}: {
+  label: string;
+  value: unknown;
+}) {
   return (
     <details className="group/details">
       <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control font-mono text-xs text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
-        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+        <span
+          aria-hidden="true"
+          className="w-3 text-text-tertiary group-open/details:hidden"
+        >
           +
         </span>
-        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+        <span
+          aria-hidden="true"
+          className="hidden w-3 text-text-tertiary group-open/details:inline"
+        >
           −
         </span>
         {label}
@@ -204,7 +216,9 @@ function FeatureDetailInspector({
               {feature.name}
             </h2>
           ) : (
-            <span className="text-xs font-medium text-text-secondary">선택 Feature</span>
+            <span className="text-xs font-medium text-text-secondary">
+              선택 Feature
+            </span>
           )}
           <span className="font-mono text-xs break-all text-text-secondary slashed-zero">
             {featureId}
@@ -272,7 +286,11 @@ function FeatureDetailInspector({
             <DetailList
               items={[
                 { label: "coord", value: coordLabel(feature), mono: true },
-                { label: "sigungu", value: feature.sigungu_code ?? null, mono: true },
+                {
+                  label: "sigungu",
+                  value: feature.sigungu_code ?? null,
+                  mono: true,
+                },
               ]}
               layout="inline"
             />
@@ -285,7 +303,11 @@ function FeatureDetailInspector({
               curations={data.curations}
               observations={data.sources}
             />
-            <FeatureKindDetailPanel compact feature={feature} featureId={featureId} />
+            <FeatureKindDetailPanel
+              compact
+              feature={feature}
+              featureId={featureId}
+            />
           </>
         ) : null}
       </div>
@@ -519,7 +541,12 @@ function useAdminFeaturesClientController({
           const feature = row.original;
           return (
             <div className="flex min-w-0 flex-col gap-0.5">
-              <span className={cn("truncate", !feature.primary_provider && "text-text-tertiary")}>
+              <span
+                className={cn(
+                  "truncate",
+                  !feature.primary_provider && "text-text-tertiary",
+                )}
+              >
                 {feature.primary_provider ?? NULL_GLYPH}
               </span>
               <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
@@ -546,14 +573,17 @@ function useAdminFeaturesClientController({
                   {feature.issue_count}
                 </EntityLink>
               ) : (
-                <span className="text-text-tertiary tabular-nums">{feature.issue_count}</span>
+                <span className="text-text-tertiary tabular-nums">
+                  {feature.issue_count}
+                </span>
               )}
               {feature.issues.slice(0, 2).map((issue) => (
                 <span
                   className="max-w-48 truncate text-2xs text-text-secondary"
                   key={issue.issue_id ?? issue.message}
                 >
-                  {issue.violation_type ?? "issue"} · {issue.message ?? NULL_GLYPH}
+                  {issue.violation_type ?? "issue"} ·{" "}
+                  {issue.message ?? NULL_GLYPH}
                 </span>
               ))}
             </div>
@@ -630,7 +660,9 @@ function useAdminFeaturesClientController({
                 className="text-destructive hover:text-destructive"
                 disabled={stateMutation.isPending || retired}
                 disabledReason={
-                  retired ? "이미 종료된 feature입니다" : "다른 상태 변경이 진행 중입니다"
+                  retired
+                    ? "이미 종료된 feature입니다"
+                    : "다른 상태 변경이 진행 중입니다"
                 }
                 loading={retiringFeatureId === feature.feature_id}
                 size="sm"
@@ -836,7 +868,9 @@ function AdminFeatureFilterBar({
           size="sm"
           value={qualityState}
           onChange={(event) => {
-            setQualityState(event.target.value as AxisFilter<FeatureQualityState>);
+            setQualityState(
+              event.target.value as AxisFilter<FeatureQualityState>,
+            );
             resetCursor();
           }}
         >
@@ -888,7 +922,10 @@ function AdminFeatureFilterBar({
       </FilterField>
       <Link
         aria-label="데이터셋에서 선택"
-        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "shrink-0 self-end")}
+        className={cn(
+          buttonVariants({ variant: "ghost", size: "sm" }),
+          "shrink-0 self-end",
+        )}
         href="/ops/datasets"
       >
         데이터셋에서 선택
@@ -913,10 +950,17 @@ function AdminFeatureFilterBar({
         </NativeSelect>
       </FilterField>
       <div className="flex min-w-0 flex-col gap-1">
-        <span aria-hidden="true" className="text-2xs leading-none font-medium text-text-secondary">
+        <span
+          aria-hidden="true"
+          className="text-2xs leading-none font-medium text-text-secondary"
+        >
           방향
         </span>
-        <div aria-label="정렬 방향" className="flex items-center gap-1" role="group">
+        <div
+          aria-label="정렬 방향"
+          className="flex items-center gap-1"
+          role="group"
+        >
           <Button
             aria-pressed={order === "asc"}
             size="sm"
@@ -990,13 +1034,17 @@ function AdminFeaturesClientView({
   ...filters
 }: ReturnType<typeof useAdminFeaturesClientController>) {
   const failureCandidates: Array<FailureItem | null> = [
-    features.isError ? { source: "목록 조회", message: features.error?.message } : null,
+    features.isError
+      ? { source: "목록 조회", message: features.error?.message }
+      : null,
     stateMutation.isError
       ? { source: "상태 변경", message: stateMutation.error?.message }
       : null,
     retireError !== null ? { source: "종료 준비", message: retireError } : null,
   ];
-  const failures = failureCandidates.filter((item): item is FailureItem => item !== null);
+  const failures = failureCandidates.filter(
+    (item): item is FailureItem => item !== null,
+  );
   return (
     <AdminShell
       actions={
@@ -1066,8 +1114,8 @@ function AdminFeaturesClientView({
               placement="top"
               summary={
                 <>
-                  {formatCount(items.length)} rows · page {formatCount(pageIndex)} · page
-                  size {formatCount(pageSize)}
+                  {formatCount(items.length)} rows · page{" "}
+                  {formatCount(pageIndex)} · page size {formatCount(pageSize)}
                 </>
               }
               onFirst={goFirstPage}

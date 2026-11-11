@@ -35,14 +35,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { FormField } from "@/components/ui/form-field-input";
 import { FormSelect } from "@/components/ui/form-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
+import { DataTable } from "@/components/ui/data-table";
 import { NULL_GLYPH, formatCount, shortId } from "@/lib/format";
 import { type StatusTone } from "@/lib/status-label";
 
@@ -319,15 +312,18 @@ function QuarantineStatusMessages({
   message,
   moveConflicts,
   mutationError,
-}: Pick<ReturnType<typeof useCurationQuarantineController>, "localError" | "message" | "moveConflicts" | "mutationError">) {
+}: Pick<
+  ReturnType<typeof useCurationQuarantineController>,
+  "localError" | "message" | "moveConflicts" | "mutationError"
+>) {
   return (
     <>
       {localError || mutationError ? (
         <Alert variant="destructive">
           <AlertTitle>재분류 실패</AlertTitle>
           <AlertDescription>
-            {localError ?? quarantineErrorMessage(mutationError)} — 대상과 선택 항목을 확인한 뒤 다시
-            시도하세요.
+            {localError ?? quarantineErrorMessage(mutationError)} — 대상과 선택
+            항목을 확인한 뒤 다시 시도하세요.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -372,7 +368,13 @@ function QuarantineCollectionList({
   quarantineCollections,
   quarantineQuery,
   selectQuarantine,
-}: Pick<ReturnType<typeof useCurationQuarantineController>, "activeQuarantineId" | "quarantineCollections" | "quarantineQuery" | "selectQuarantine">) {
+}: Pick<
+  ReturnType<typeof useCurationQuarantineController>,
+  | "activeQuarantineId"
+  | "quarantineCollections"
+  | "quarantineQuery"
+  | "selectQuarantine"
+>) {
   return (
     <SectionCard
       actions={
@@ -412,7 +414,8 @@ function QuarantineCollectionList({
             >
               <SelectableRowTitle>{collection.title}</SelectableRowTitle>
               <SelectableRowDescription className="font-mono">
-                {collection.collection_key} · {collection.edition_key || "회차 없음"}
+                {collection.collection_key} ·{" "}
+                {collection.edition_key || "회차 없음"}
               </SelectableRowDescription>
               <SelectableRowDescription className="tabular-nums">
                 {formatCount(collection.item_count)}개 ·{" "}
@@ -461,7 +464,10 @@ function QuarantineThemeSourceColumn({
 
 function QuarantineComparison({
   activeQuarantine,
-}: Pick<ReturnType<typeof useCurationQuarantineController>, "activeQuarantine">) {
+}: Pick<
+  ReturnType<typeof useCurationQuarantineController>,
+  "activeQuarantine"
+>) {
   if (!activeQuarantine) return null;
   const original = activeQuarantine.original_collection;
   return (
@@ -509,7 +515,10 @@ function QuarantineTargetPicker({
   selectTarget,
   targetOptions,
   targetOverrideId,
-}: Pick<ReturnType<typeof useCurationQuarantineController>, "preview" | "selectTarget" | "targetOptions" | "targetOverrideId">) {
+}: Pick<
+  ReturnType<typeof useCurationQuarantineController>,
+  "preview" | "selectTarget" | "targetOptions" | "targetOverrideId"
+>) {
   return (
     <div className="space-y-2">
       <FormSelect
@@ -552,7 +561,10 @@ function QuarantineItemsTable({
   itemsQuery,
   preview,
   toggleItem,
-}: Pick<ReturnType<typeof useCurationQuarantineController>, "itemSelection" | "itemsQuery" | "preview" | "toggleItem">) {
+}: Pick<
+  ReturnType<typeof useCurationQuarantineController>,
+  "itemSelection" | "itemsQuery" | "preview" | "toggleItem"
+>) {
   if (itemsQuery.isError) {
     return (
       <Alert variant="destructive">
@@ -578,74 +590,117 @@ function QuarantineItemsTable({
     );
   }
   return (
-    <Table data-testid="quarantine-items-table">
-      <TableHeader>
-        <TableRow>
-          <TableHead>선택</TableHead>
-          <TableHead>장소</TableHead>
-          <TableHead>출처 항목</TableHead>
-          <TableHead>상태</TableHead>
-          <TableHead>conflict preview</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {preview.items.map((item) => (
-          <TableRow key={item.curation_item_id}>
-            <TableCell>
-              <Checkbox
-                aria-label={`${item.place_name} 이동 선택`}
-                checked={itemSelection[item.curation_item_id] ?? false}
-                onCheckedChange={(checked) =>
-                  toggleItem(item.curation_item_id, checked === true)
-                }
-              />
-            </TableCell>
-            <TableCell className="whitespace-normal">
-              <div className="flex max-w-64 flex-col gap-0.5">
-                <span className="font-medium">{item.place_name}</span>
-                <span className="font-mono text-2xs text-text-secondary slashed-zero">
-                  {item.feature_id
-                    ? shortId(item.feature_id, 20)
-                    : "Feature 미연결"}
-                </span>
-              </div>
-            </TableCell>
-            <TableCell className="whitespace-normal">
-              <div className="flex max-w-64 flex-col gap-1">
-                <span className="font-mono text-xs slashed-zero">
-                  {item.external_item_id}/{item.external_component_id}
-                </span>
-                {item.source_present ? null : (
-                  <StatusBadge label="원천 누락" status="missing" />
-                )}
-              </div>
-            </TableCell>
-            <TableCell>
-              <div className="flex flex-col items-start gap-1">
-                <StatusBadge status={item.status} />
-                {item.archived_at ? (
-                  <span className="text-2xs text-text-secondary">보관됨</span>
-                ) : null}
-              </div>
-            </TableCell>
-            <TableCell className="whitespace-normal">
-              <div className="flex flex-col items-start gap-1">
-                <StatusBadge
-                  label={conflictKindLabel(item.conflict_kind)}
-                  status={item.conflict_kind}
-                  tone={conflictTone(item.conflict_kind)}
+    <DataTable
+      tableTestId="quarantine-items-table"
+      data={preview.items}
+      getRowId={(item) => String(item.curation_item_id)}
+      columns={[
+        {
+          id: "column0",
+          header: "선택",
+          enableSorting: false,
+          cell: ({ row: tableRow }) => {
+            const item = tableRow.original;
+            return (
+              <>
+                <Checkbox
+                  aria-label={`${item.place_name} 이동 선택`}
+                  checked={itemSelection[item.curation_item_id] ?? false}
+                  onCheckedChange={(checked) =>
+                    toggleItem(item.curation_item_id, checked === true)
+                  }
                 />
-                {item.conflict_item_id ? (
+              </>
+            );
+          },
+        },
+        {
+          id: "column1",
+          header: "장소",
+          enableSorting: false,
+          meta: { cellClassName: "whitespace-normal" },
+          cell: ({ row: tableRow }) => {
+            const item = tableRow.original;
+            return (
+              <>
+                <div className="flex max-w-64 flex-col gap-0.5">
+                  <span className="font-medium">{item.place_name}</span>
                   <span className="font-mono text-2xs text-text-secondary slashed-zero">
-                    기존 {shortId(item.conflict_item_id, 20)}
+                    {item.feature_id
+                      ? shortId(item.feature_id, 20)
+                      : "Feature 미연결"}
                   </span>
-                ) : null}
-              </div>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+                </div>
+              </>
+            );
+          },
+        },
+        {
+          id: "column2",
+          header: "출처 항목",
+          enableSorting: false,
+          meta: { cellClassName: "whitespace-normal" },
+          cell: ({ row: tableRow }) => {
+            const item = tableRow.original;
+            return (
+              <>
+                <div className="flex max-w-64 flex-col gap-1">
+                  <span className="font-mono text-xs slashed-zero">
+                    {item.external_item_id}/{item.external_component_id}
+                  </span>
+                  {item.source_present ? null : (
+                    <StatusBadge label="원천 누락" status="missing" />
+                  )}
+                </div>
+              </>
+            );
+          },
+        },
+        {
+          id: "column3",
+          header: "상태",
+          enableSorting: false,
+          cell: ({ row: tableRow }) => {
+            const item = tableRow.original;
+            return (
+              <>
+                <div className="flex flex-col items-start gap-1">
+                  <StatusBadge status={item.status} />
+                  {item.archived_at ? (
+                    <span className="text-2xs text-text-secondary">보관됨</span>
+                  ) : null}
+                </div>
+              </>
+            );
+          },
+        },
+        {
+          id: "column4",
+          header: "conflict preview",
+          enableSorting: false,
+          meta: { cellClassName: "whitespace-normal" },
+          cell: ({ row: tableRow }) => {
+            const item = tableRow.original;
+            return (
+              <>
+                <div className="flex flex-col items-start gap-1">
+                  <StatusBadge
+                    label={conflictKindLabel(item.conflict_kind)}
+                    status={item.conflict_kind}
+                    tone={conflictTone(item.conflict_kind)}
+                  />
+                  {item.conflict_item_id ? (
+                    <span className="font-mono text-2xs text-text-secondary slashed-zero">
+                      기존 {shortId(item.conflict_item_id, 20)}
+                    </span>
+                  ) : null}
+                </div>
+              </>
+            );
+          },
+        },
+      ]}
+    />
   );
 }
 
@@ -657,7 +712,16 @@ function QuarantineActions({
   selectedItemIds,
   setStandaloneForm,
   standaloneForm,
-}: Pick<ReturnType<typeof useCurationQuarantineController>, "confirmStandalone" | "moveItems" | "preview" | "reclassify" | "selectedItemIds" | "setStandaloneForm" | "standaloneForm">) {
+}: Pick<
+  ReturnType<typeof useCurationQuarantineController>,
+  | "confirmStandalone"
+  | "moveItems"
+  | "preview"
+  | "reclassify"
+  | "selectedItemIds"
+  | "setStandaloneForm"
+  | "standaloneForm"
+>) {
   const moveDisabled =
     reclassify.isPending ||
     !preview ||
@@ -666,26 +730,32 @@ function QuarantineActions({
     preview.target_archived ||
     preview.items.length === 0;
   // 이동이 잠긴 이유를 버튼 아래 한 줄로 보여 준다(M35).
-  const moveDisabledReason = reclassify.isPending
-    ? "재분류가 진행 중입니다"
-    : !preview
-      ? "conflict preview를 불러온 뒤 이동할 수 있습니다"
-      : preview.target_collection_id === null
-        ? "이동 target collection을 선택하세요"
-        : preview.target_missing
-          ? "target collection이 존재하지 않습니다"
-          : preview.target_archived
-            ? "target collection이 archive 상태입니다"
-            : preview.items.length === 0
-              ? "이동할 격리 item이 없습니다"
-              : undefined;
-  const isMovePending = reclassify.isPending && reclassify.variables?.body.action === "move";
+  const moveDisabledReason = resolveMoveDisabledReason();
+  const isMovePending =
+    reclassify.isPending && reclassify.variables?.body.action === "move";
   const isStandalonePending =
     reclassify.isPending && reclassify.variables?.body.action !== "move";
+  function resolveMoveDisabledReason() {
+    return reclassify.isPending
+      ? "재분류가 진행 중입니다"
+      : !preview
+        ? "conflict preview를 불러온 뒤 이동할 수 있습니다"
+        : preview.target_collection_id === null
+          ? "이동 target collection을 선택하세요"
+          : preview.target_missing
+            ? "target collection이 존재하지 않습니다"
+            : preview.target_archived
+              ? "target collection이 archive 상태입니다"
+              : preview.items.length === 0
+                ? "이동할 격리 item이 없습니다"
+                : undefined;
+  }
   return (
     <div className="grid gap-6 border-t border-border pt-4 md:grid-cols-2 md:[&>*:not(:first-child)]:border-l md:[&>*:not(:first-child)]:border-border md:[&>*:not(:first-child)]:pl-6">
       <div className="flex flex-col gap-2">
-        <h4 className="text-xs font-semibold text-text-primary">target으로 이동</h4>
+        <h4 className="text-xs font-semibold text-text-primary">
+          target으로 이동
+        </h4>
         <p className="text-xs text-text-secondary">
           {selectedItemIds.length > 0
             ? `선택한 ${formatCount(selectedItemIds.length)}개 항목만 이동합니다.`
@@ -704,11 +774,14 @@ function QuarantineActions({
           </Button>
         </div>
         <p className="min-h-[1lh] text-2xs text-text-secondary">
-          {moveDisabledReason ?? "이동 전 확인 대화상자에서 대상과 건수를 다시 보여 줍니다."}
+          {moveDisabledReason ??
+            "이동 전 확인 대화상자에서 대상과 건수를 다시 보여 줍니다."}
         </p>
       </div>
       <div className="flex flex-col gap-2">
-        <h4 className="text-xs font-semibold text-text-primary">별도 collection 확정</h4>
+        <h4 className="text-xs font-semibold text-text-primary">
+          별도 collection 확정
+        </h4>
         <p className="text-xs text-text-secondary">
           0065 격리 marker를 제거하고 확정된 key/제목의 독립 collection으로
           유지합니다.
@@ -770,7 +843,23 @@ function QuarantineWorkspace({
   targetOptions,
   targetOverrideId,
   toggleItem,
-}: Pick<ReturnType<typeof useCurationQuarantineController>, "activeQuarantine" | "confirmStandalone" | "itemSelection" | "itemsQuery" | "moveItems" | "preview" | "reclassify" | "selectTarget" | "selectedItemIds" | "setStandaloneForm" | "standaloneForm" | "targetOptions" | "targetOverrideId" | "toggleItem">) {
+}: Pick<
+  ReturnType<typeof useCurationQuarantineController>,
+  | "activeQuarantine"
+  | "confirmStandalone"
+  | "itemSelection"
+  | "itemsQuery"
+  | "moveItems"
+  | "preview"
+  | "reclassify"
+  | "selectTarget"
+  | "selectedItemIds"
+  | "setStandaloneForm"
+  | "standaloneForm"
+  | "targetOptions"
+  | "targetOverrideId"
+  | "toggleItem"
+>) {
   return (
     <SectionCard
       description={
@@ -850,8 +939,8 @@ function CurationQuarantinePanelView({
           격리 collection 재분류
         </h2>
         <p className="text-xs text-text-secondary">
-          0065 마이그레이션이 격리한 collection을 원본 이동 또는 별도 collection 확정으로 명시
-          재분류합니다.
+          0065 마이그레이션이 격리한 collection을 원본 이동 또는 별도 collection
+          확정으로 명시 재분류합니다.
         </p>
       </div>
       <div className="space-y-4">

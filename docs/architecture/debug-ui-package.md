@@ -350,12 +350,12 @@ type drift 부채 0).
 | 항목 | 값 |
 |------|----|
 | Framework | **Next.js 16 (App Router)** — `kor-travel-geo-ui` / PinVi `apps/web`와 동일 stack (ADR-025 2차 보강 2026-05-25, 2026-05-31 최신화) |
-| 지도 모델 | `digitie/maplibre-vworld-react`의 `vworld-map-core`/`vworld-map-web` 경계 기반. 외부 모노레포 전체를 dependency로 설치하지 않고 admin에 필요한 `VWorldMapView`/style builder만 내부 포팅(T-MAP-VWORLD-04). |
-| 의존 | `maplibre-gl` ^5.24.0 (BSD-3), React 19, `@tanstack/react-query`, `@tanstack/react-table` v8, `@tanstack/react-virtual` v3 |
+| 지도 모델 | `digitie/maplibre-vworld-react`의 `vworld-map-core`/`vworld-map-web` 경계 기반. 부모가 생성한 동일 web/core tgz를 직접 file 의존성으로 설치한다. 지도 생성·style은 public API를 사용한다(ADR-123). |
+| 의존 | `maplibre-gl` 6.17.0 (BSD-3), React 19.3.1, TanStack Query 5.107.1, common VirtualTable(Table 9.3.1 / Virtual 3.14.26) |
 | 공통 마커 | `@kor-travel-map/map-marker-react` (workspace, ADR-029) |
-| Form | controlled React state + framework-independent `src/lib/form-validation.ts` |
-| Data table | 공용 `DataTable` 기반. TanStack React Table이 정렬/선택/row model을 맡고, TanStack React Virtual이 큰 목록 가상화를 맡는다. shadcn `Table` primitive는 의미론적/시각적 렌더링에만 쓴다. |
-| UI primitive | shadcn/ui generated source / Base UI. shadcn CLI·MCP npm package는 설치하지 않고, 사용 variant를 project CSS가 소유한다. |
+| Form | 로그인: common LoginForm의 RHF + Zod + Zustand. 도메인 편집기는 기존 검증 유지, 개별 이관 후보 |
+| Data table | common `@kor-travel/ui/virtual-table` 단일 구현. 로컬 DataTable과 ColumnDef/Row/Cell 타입은 common reexport. semantic table과 가상 스크롤·정렬·선택을 함께 제공한다. |
+| UI primitive | common의 shadcn/ui Radix registry 부품. Base UI는 제거했으며 앱 variant와 semantic theme는 로컬이 소유한다. |
 | 언어 | TypeScript |
 | 라이선스 | MIT (`next`) + BSD-3 (`maplibre-gl`) + GPL-3.0 (본 저장소) — 호환 |
 | 디렉토리 | `packages/kor-travel-map-admin/frontend/` |
@@ -552,8 +552,8 @@ frontend workspace는 npm 12.0.1이 지원하는 Node
 
 이 분리는 ADR-020에 박혀 있고, `import-linter` 계약(`pyproject.toml`)이 메인
 패키지의 FastAPI import를 차단한다. 지도 frontend는 ADR-025 이후 VWorld/MapLibre
-계열로 고정됐고, T-MAP-VWORLD-04 이후 `maplibre-vworld-react`의 web/core 모델을
-admin 내부에 포팅한다. `maplibre-vworld-js` npm dependency는 사용하지 않는다.
+계열로 고정됐고, ADR-123 이후 `maplibre-vworld-react`의 web/core public API를
+동일한 후보 tgz로 설치한다. `maplibre-vworld-js` npm dependency는 사용하지 않는다.
 VWorld API key는
 `KOR_TRAVEL_GEO_VWORLD_API_KEY` 공유 정책으로 일원화되며 (ADR-025 사용자 보강
 2026-05-25), PinVi 사용자 UI 측 지도 stack도 동일하게 통일된다 (ADR-026).
@@ -592,8 +592,8 @@ upstream 저장소(`digitie/maplibre-vworld-react`) 기준으로 정렬한다.
 - **공통 frontend 지도 모델은 `maplibre-vworld-react`를 기준으로 정렬** — VWorld
   basemap 설정·marker/layer primitive·tile URL/style helper 같은 cross-cutting 자산은
   상류 라이브러리(`digitie/maplibre-vworld-react`)의 `vworld-map-core`/`vworld-map-web`
-  경계를 따른다. 본 저장소 admin은 외부 모노레포 전체를 dependency로 설치하지 않고
-  필요한 web map view와 style builder 경계만 내부 포팅한다. `maplibre-vworld-js` git
+  경계를 따른다. 본 저장소 admin은 부모가 준비한 동일 web/core tgz를 직접 설치하고
+  생성·style builder는 public API를 호출한다. `maplibre-vworld-js` git
   dependency는 T-MAP-VWORLD-04에서 제거됐다. (구 ADR-036의 분리 의도는 유지하되,
   현행 기준은 본문 §14.1 참조.)
 

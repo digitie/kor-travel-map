@@ -5,6 +5,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 
 import { XIcon } from "lucide-react";
 
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { uniqueSorted } from "@/lib/string-list";
 import { cn } from "@/lib/utils";
@@ -128,6 +129,8 @@ function MultiFilterCombobox({
   };
 
   return (
+    <Popover open={popupOpen} onOpenChange={setPopupOpen}>
+    <PopoverAnchor asChild>
     <div
       className={cn("relative flex min-w-0 flex-col gap-1", className)}
       onBlur={(event) => {
@@ -227,6 +230,8 @@ function MultiFilterCombobox({
           }}
         />
       </div>
+    </div>
+    </PopoverAnchor>
       {/* 팝업은 필드가 포커스를 가지는 동안 열려 있고, 비어 있으면 "선택지가 없습니다."를 보여 준다.
           예전에는 그 조건에서 팝업 자체가 닫혀 있어 이 문구에 도달할 수 없었다(P2-8).
           listbox 에는 접근성 이름을 주지 않는다 — ARIA 1.2 combobox 패턴에서 팝업은 입력의
@@ -235,7 +240,10 @@ function MultiFilterCombobox({
           같은 e2e 계약이 입력과 listbox 둘 다에 걸려 strict mode 위반이 된다(부분 일치라
           `"… 후보 목록"` 처럼 접미사를 붙여도 마찬가지다). */}
       {popupOpen ? (
-        <div className="absolute top-full right-0 left-0 z-20 mt-1 max-h-56 overflow-auto rounded-panel border border-border bg-card p-1 shadow-elevated">
+        <PopoverContent role="presentation" align="start" sideOffset={4}
+          onOpenAutoFocus={(event) => event.preventDefault()}
+          onCloseAutoFocus={(event) => event.preventDefault()}
+          className="w-[var(--radix-popover-trigger-width)] max-h-56 overflow-auto rounded-panel border border-border bg-card p-1 shadow-elevated">
           {items.length > 0 ? (
             <div id={listId} ref={listRef} role="listbox">
               {items.map((item, index) => (
@@ -259,9 +267,9 @@ function MultiFilterCombobox({
               선택지가 없습니다.
             </p>
           )}
-        </div>
+        </PopoverContent>
       ) : null}
-    </div>
+    </Popover>
   );
 }
 

@@ -46,6 +46,17 @@ function FormSelect({
   const { fieldId, hintId, errorId } = useFieldIds(id);
   const showHint = !error && Boolean(hint);
   const showMessage = reserveMessage || Boolean(error) || showHint;
+  function renderFormSelectState() {
+    return showMessage ? (
+      <FieldMessage>
+        {error ? (
+          <FieldError id={errorId}>{error}</FieldError>
+        ) : showHint ? (
+          <FieldDescription id={hintId}>{hint}</FieldDescription>
+        ) : null}
+      </FieldMessage>
+    ) : null;
+  }
   return (
     <Field
       className={className}
@@ -77,15 +88,7 @@ function FormSelect({
       >
         {children}
       </NativeSelect>
-      {showMessage ? (
-        <FieldMessage>
-          {error ? (
-            <FieldError id={errorId}>{error}</FieldError>
-          ) : showHint ? (
-            <FieldDescription id={hintId}>{hint}</FieldDescription>
-          ) : null}
-        </FieldMessage>
-      ) : null}
+      {renderFormSelectState()}
     </Field>
   );
 }
