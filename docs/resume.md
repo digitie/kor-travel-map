@@ -1,3 +1,7 @@
+## 2026-11-12 — 검색 순위 3단계(alembic 451)
+
+- 회전에 묶는다. 451은 빈 표만 만든다(receipt CHECK lock_timeout 1 s). **채우기**: 회전 뒤 Dagster `consistency_dedup_refresh` job을 한 번 수동 실행(아니면 매일 05:45 KST 스케줄). 계산은 읽기 전용 집계 약 5 s(prod 2026-11-12) + 첫 실행 약 34만 행 INSERT(이 표만, Feature 표는 ACCESS SHARE 읽기). 채우기 전에는 모든 행이 인지도 1이라 순위가 2단계와 같다.
+
 ## 2026-11-12 — 검색 순위 2단계
 
 - 회전에 묶는다. migration·OpenAPI 없음. R4(MCST 중복 퇴역) 전후 모두 같은 규칙으로 맞다 — 퇴역하면 접힐 무리가 줄 뿐이다.
