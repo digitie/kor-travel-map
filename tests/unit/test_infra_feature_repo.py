@@ -1391,19 +1391,31 @@ def test_feature_search_region_sql_variants_bind_only_what_they_use() -> None:
         remainder="호텔",
         category_codes=("03010000",),
     )
-    for name_mode in feature_repo._SEARCH_REGION_NAME_MODES:
-        for categories in (False, True):
-            sql, count_sql = feature_repo._FEATURE_SEARCH_REGION_SQL[(name_mode, categories)]
-            used = set(_text(sql)._bindparams)
-            arms = feature_repo._SearchRegionArms(name_mode=name_mode, categories=categories)
-            params = feature_repo._search_region_params(
-                region if categories else replace(region, category_codes=()),
-                arms,
-            )
-            region_binds = {"region_codes", "rem_compact", "rem_like", "rem_categories"}
-            assert used & region_binds == set(params), (name_mode, categories)
-            assert set(_text(count_sql)._bindparams) & region_binds <= set(params)
-            assert "ST_Transform" not in sql
+    region_binds = {
+        "region_codes",
+        "rem_compact",
+        "rem_like",
+        "rem_categories",
+        "rem_is_category",
+        "rem_token_likes",
+        "rem_token_anchor",
+    }
+    for name_mode, categories, token_mode in feature_repo._FEATURE_SEARCH_REGION_SQL:
+        sql, count_sql = feature_repo._FEATURE_SEARCH_REGION_SQL[
+            (name_mode, categories, token_mode)
+        ]
+        used = set(_text(sql)._bindparams)
+        arms = feature_repo._SearchRegionArms(
+            name_mode=name_mode, categories=categories, token_mode=token_mode
+        )
+        variant = region if categories else replace(region, category_codes=())
+        if token_mode is not None:
+            variant = replace(variant, remainder="서프 카페")
+        params = feature_repo._search_region_params(variant, arms)
+        key = (name_mode, categories, token_mode)
+        assert used & region_binds == set(params), key
+        assert set(_text(count_sql)._bindparams) & region_binds <= set(params), key
+        assert "ST_Transform" not in sql
     assert "region_codes" not in set(_text(feature_repo._FEATURE_SEARCH_BY_SCORE_SQL)._bindparams)
 
 

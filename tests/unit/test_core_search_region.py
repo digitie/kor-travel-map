@@ -6,6 +6,9 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import pytest
 
 from kortravelmap.core.search_region import (
@@ -177,3 +180,45 @@ def test_region_search_carries_category_codes(index: dict[str, frozenset[str]]) 
     region = split_region_query("춘천 닭갈비", index)
     assert region is not None
     assert region.category_codes == ()
+
+
+#: prod 2026-11-11 공개 Feature의 시군구 표본 — ``[코드, 시도 이름, 시군구 이름(최빈), 공개 행 수]``.
+#: ``feature_repo._SEARCH_REGION_ENTRIES_SQL``과 같은 표본을 코드마다 한 줄로 줄였다.
+_PROD_ENTRIES_PATH = Path(__file__).parent / "fixtures" / "search_region_entries_prod_20261111.json"
+
+#: 하위 지역이 가리키는 시군구가 가져야 할 공개 행의 하한. 개편 뒤 남은 옛 코드(인천 중구 28110,
+#: 107행)를 실제 지역으로 읽지 않게 한다 — 가장 작은 실제 대상(울릉군)은 511행이다.
+_SUBAREA_MIN_ROWS = 200
+
+
+def _prod_entries() -> list[tuple[str, str | None, str | None, int]]:
+    rows = json.loads(_PROD_ENTRIES_PATH.read_text(encoding="utf-8"))
+    return [(str(code), sido, sigungu, int(count)) for code, sido, sigungu, count in rows]
+
+
+@pytest.mark.parametrize("alias", sorted(SUBAREA_ALIASES))
+def test_every_subarea_alias_resolves_to_a_populated_region(alias: str) -> None:
+    """하위 지역은 prod 표본에서 해석되고, 그 시군구는 행이 있는 실제 지역이다(개편 잔재 금지)."""
+    entries = _prod_entries()
+    rows = {code: count for code, _sido, _sigungu, count in entries}
+    index = build_region_token_index(
+        _E(code, sido, sigungu) for code, sido, sigungu, _count in entries
+    )
+    codes = index.get(alias)
+    assert codes, f"{alias}: {SUBAREA_ALIASES[alias]} does not resolve"
+    assert all(rows[code] >= _SUBAREA_MIN_ROWS for code in codes), (
+        alias,
+        {code: rows[code] for code in codes},
+    )
+
+
+def test_yeongjong_subareas_follow_the_2026_incheon_reorganisation() -> None:
+    entries = _prod_entries()
+    index = build_region_token_index(
+        _E(code, sido, sigungu) for code, sido, sigungu, _count in entries
+    )
+    assert index["을왕리"] == frozenset({"28155"})
+    assert index["영종도"] == frozenset({"28155"})
+    region = split_region_query("을왕리 펜션", index)
+    assert region is not None
+    assert region.sigungu_codes == ("28155",)

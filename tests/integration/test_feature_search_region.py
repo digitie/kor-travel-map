@@ -36,6 +36,12 @@ _SEOUL_JONGNO = ("11110", "서울특별시", "종로구")
 _PYEONGCHANG = ("51760", "강원특별자치도", "평창군")
 _SEOUL_GANGSEO = ("11500", "서울특별시", "강서구")
 _GIMPO = ("41570", "경기도", "김포시")
+# 2026 인천 개편 뒤 코드(prod 2026-11-11 실측) — 영종도·을왕리는 영종구다. 옛 중구는 잔재다.
+_YEONGJONG = ("28155", "인천광역시", "영종구")
+_INCHEON_JUNG = ("28110", "인천광역시", "중구")
+_GANGHWA = ("28710", "인천광역시", "강화군")
+_YANGYANG = ("51830", "강원특별자치도", "양양군")
+_SEOUL_GANGNAM = ("11680", "서울특별시", "강남구")
 
 
 def _uuid(label: str) -> str:
@@ -308,8 +314,9 @@ async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
     await _seed(migrated_session)
     await migrated_session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
     await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
-    for (name_mode, categories), (sql, _count) in feature_repo._FEATURE_SEARCH_REGION_SQL.items():
-        if name_mode != "strpos" and not categories:
+    for key, (sql, _count) in feature_repo._FEATURE_SEARCH_REGION_SQL.items():
+        name_mode, categories, token_mode = key
+        if name_mode != "strpos" and not categories and token_mode != "scan":
             continue  # 지역 팔이 sigungu 색인을 반드시 거치는 변형만(ilike는 trigram도 가능).
         params: dict[str, Any] = {
             "q": "강릉 호텔",
@@ -332,9 +339,13 @@ async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
             "region_codes": ["51150"],
             "rem_compact": "호텔",
             "rem_categories": ["03010000", "03010100"],
+            "rem_is_category": True,
+            "rem_token_likes": ["%호%", "%텔%"] if token_mode is not None else None,
         }
         if name_mode == "ilike":
             params["rem_like"] = "%호텔%"
+        if token_mode == "anchor":
+            params["rem_token_anchor"] = "%호텔%"
         explained = (
             await migrated_session.execute(text("EXPLAIN (FORMAT JSON) " + sql), params)
         ).scalar_one()
@@ -348,9 +359,140 @@ async def test_region_search_sql_reads_the_region_arm_through_sigungu_index(
         ]
         # 작은 표에서는 planner가 sigungu 대신 다른 전체 색인을 고를 수 있다 — 실제 계획은
         # prod 크기에서 잰다(PR 본문). 여기서는 Seq Scan이 없고 색인을 읽는다는 것만 본다.
-        assert indexes - {None}, (name_mode, categories, indexes)
-        assert not seq_on_features, (name_mode, categories, seq_on_features)
+        assert indexes - {None}, (key, indexes)
+        assert not seq_on_features, (key, seq_on_features)
         assert "ST_Transform" not in sql
+
+
+async def _seed_incheon_gangwon(session: AsyncSession) -> dict[str, str]:
+    """2026-11-11 검색 순위 점검 사례(prod 이름·분류·시군구 그대로)."""
+    return {
+        "everview": await _feature(
+            session, "everview", name="을왕리 에버뷰 펜션", category="03050000",
+            region=_YEONGJONG, lon=126.3720, lat=37.4470,
+        ),
+        "jung_remnant": await _feature(
+            session, "jung_remnant", name="인천 중구청", category="01000000",
+            region=_INCHEON_JUNG, lon=126.6210, lat=37.4740,
+        ),
+        "pension_band": await _feature(
+            session, "pension_band", name="펜션밴드", category="01080400",
+            region=_GANGHWA, lon=126.4880, lat=37.7460,
+        ),
+        "gh_ter": await _feature(
+            session, "gh_ter", name="터 펜션", category="03050200",
+            region=_GANGHWA, lon=126.4500, lat=37.6900,
+        ),
+        "gh_paengnamu": await _feature(
+            session, "gh_paengnamu", name="강화 팽나무 펜션", category="03050200",
+            region=_GANGHWA, lon=126.4600, lat=37.7000,
+        ),
+        "surfshack": await _feature(
+            session, "surfshack", name="서프쉑 카페", category="02020000",
+            region=_YANGYANG, lon=128.7350, lat=38.0060,
+        ),
+        "seoul_cafe": await _feature(
+            session, "seoul_cafe", name="카페 쉼", category="01040000",
+            region=_SEOUL_GANGNAM, lon=127.0470, lat=37.5170,
+        ),
+    }
+
+
+async def _search_page(session: AsyncSession, q: str, **kwargs: Any) -> Any:
+    return await feature_repo.search_features(
+        session, q=q, cursor_signing_key=_SEARCH_CURSOR_KEY, **kwargs
+    )
+
+
+async def test_eulwangri_resolves_to_yeongjong_after_the_2026_reorganisation(
+    migrated_session: AsyncSession,
+) -> None:
+    """을왕리·영종도는 영종구다 — 옛 중구로 읽으면 영종의 펜션이 지역 밖이 되어 강화 행에 밀렸다."""
+    ids = await _seed_incheon_gangwon(migrated_session)
+    await migrated_session.flush()
+    labels = await _search_labels(migrated_session, "을왕리 펜션", ids, kinds=["place"])
+    assert labels.index("everview") < labels.index("pension_band"), labels
+    page = await _search_page(migrated_session, "을왕리 펜션", kinds=["place"], page_size=200)
+    rank = {item.feature_id: item.rank for item in page.items}[ids["everview"]]
+    assert rank is not None
+    assert rank < feature_repo._SEARCH_RANK_REGION_WEIGHT, rank
+
+
+async def test_category_word_remainder_does_not_make_two_word_names_exact(
+    migrated_session: AsyncSession,
+) -> None:
+    """나머지가 분류 낱말("펜션")이면 "터 펜션"의 tail이 이름 일치가 되지 않는다(같은 rank)."""
+    ids = await _seed_incheon_gangwon(migrated_session)
+    await migrated_session.flush()
+    page = await _search_page(migrated_session, "강화 펜션", kinds=["place"], page_size=200)
+    rank = {item.feature_id: item.rank for item in page.items}
+    assert rank[ids["gh_ter"]] is not None
+    assert rank[ids["gh_ter"]] == rank[ids["gh_paengnamu"]], rank
+
+
+async def test_region_name_query_still_uses_the_tail_exact_match(
+    migrated_session: AsyncSession,
+) -> None:
+    """분류 낱말이 아닌 나머지("팽나무 펜션")는 종전처럼 이름 일치를 본다."""
+    ids = await _seed_incheon_gangwon(migrated_session)
+    await migrated_session.flush()
+    page = await _search_page(
+        migrated_session, "강화 팽나무 펜션", kinds=["place"], page_size=200
+    )
+    assert page.items[0].feature_id == ids["gh_paengnamu"], page.items[:3]
+    rank = page.items[0].rank
+    assert rank is not None
+    assert rank % 100 < feature_repo._SEARCH_RANK_EXACT_WEIGHT, rank
+
+
+async def test_multi_word_remainder_matches_names_that_cover_every_word(
+    migrated_session: AsyncSession,
+) -> None:
+    """"양양 서프 카페"는 양양에서 이름이 "서프"와 "카페"를 모두 품는 행이 지역 일치다."""
+    ids = await _seed_incheon_gangwon(migrated_session)
+    await migrated_session.flush()
+    labels = await _search_labels(migrated_session, "양양 서프 카페", ids, kinds=["place"])
+    assert labels.index("surfshack") < labels.index("seoul_cafe"), labels
+    page = await _search_page(migrated_session, "양양 서프 카페", kinds=["place"], page_size=200)
+    rank = {item.feature_id: item.rank for item in page.items}[ids["surfshack"]]
+    assert rank is not None
+    assert rank < feature_repo._SEARCH_RANK_REGION_WEIGHT, rank
+
+
+async def test_multi_word_remainder_wide_region_uses_the_long_word_anchor(
+    migrated_session: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """넓은 지역(훑는 팔 없음)에서도 3글자 이상 낱말을 닻으로 낱말 덮기 후보를 찾는다."""
+    ids = await _seed_incheon_gangwon(migrated_session)
+    await migrated_session.flush()
+    monkeypatch.setattr(feature_repo, "_SEARCH_REGION_SCAN_MAX_ROWS", 0)
+    labels = await _search_labels(migrated_session, "양양 서프쉑 카페", ids, kinds=["place"])
+    assert labels[0] == "surfshack", labels
+
+
+async def test_multi_word_region_query_keyset_pagination_matches_single_page(
+    migrated_session: AsyncSession,
+) -> None:
+    await _seed_incheon_gangwon(migrated_session)
+    await migrated_session.flush()
+    expected = [
+        item.feature_id
+        for item in (await _search_page(migrated_session, "양양 서프 카페", page_size=200)).items
+    ]
+    walked: list[str] = []
+    cursor: str | None = None
+    for _ in range(len(expected) + 1):
+        page = await _search_page(migrated_session, "양양 서프 카페", page_size=3, cursor=cursor)
+        walked.extend(item.feature_id for item in page.items)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert walked == expected
+    total = await _search_page(
+        migrated_session, "양양 서프 카페", page_size=1, include_total=True
+    )
+    assert total.total_count == len(expected)
 
 
 def _plan_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
