@@ -134,6 +134,11 @@ class WeatherExportMeta(_Lenient):
     next_since: AwareDatetime | None = None
     """W3 예보의 publication watermark. 모든 페이지를 받은 뒤 다음 적재의 ``since``로 보낸다
     (ADR-122). 다른 export는 null이다."""
+    membership_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    """W3: 얼린 manifest 전체의 ``(location_id, provider, published_at)`` digest(시간 필터 전,
+    ``since`` 무관). 없을 수 있다(그 필드 전 weather). ADR-122."""
+    clock_epoch: str | None = Field(default=None, pattern=r"^pg:[0-9a-f]{32}$")
+    """W3: publication clock 출처 epoch — DB 복원·PITR·재설치·재시작에 바뀐다. ADR-122."""
 
 
 class WeatherExportLocation(_Lenient):

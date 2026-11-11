@@ -765,3 +765,33 @@ async def test_unguarded_swap_neither_checks_nor_records_the_shrink_baseline(
     assert (meta.sync_mode, meta.row_duplicates) == ("delta", 0)
     assert meta.sync_cursor == now.astimezone(UTC)
     assert await store.generation_items("t.unguarded", meta.generation) == {"x0": b"1"}
+
+async def test_generation_members_round_trip_and_retire_with_their_generation(
+    store: ValkeyStateStore,
+) -> None:
+    """멤버십 장부(ADR-122)는 세대 키 하나다 — 교체 CAS가 개수를 보고, 물러날 때 함께
+    grace를 받는다."""
+    from kortravelmap.infra.valkey_state import StateItem, state_key
+
+    now = datetime.now(UTC)
+    members = {("서울-1", "python-kma-api"): now, ("b", "open_meteo"): now - timedelta(hours=1)}
+    first = await store.swap(
+        "t.members", [StateItem(id="x", value="1")], guard=LENIENT,
+        source_collected_at=None, loaded_at=now, members=members,
+        membership_verified=True, clock_epoch="pg:" + "c" * 32,
+    )
+    meta = await store.current_meta("t.members")
+    assert (meta.member_count, meta.membership_verified, meta.clock_epoch) == (
+        2, True, "pg:" + "c" * 32,
+    )
+    assert await store.generation_members("t.members", meta.generation) == {
+        key: value.astimezone(UTC) for key, value in members.items()
+    }
+    await store.swap(
+        "t.members", [StateItem(id="x", value="2")], guard=LENIENT,
+        source_collected_at=None, loaded_at=now,
+    )
+    old_members = state_key("t.members", first.meta.generation, "members")
+    assert 0 < int(await store.client.ttl(old_members)) <= 60
+    after = await store.current_meta("t.members")
+    assert (after.member_count, after.membership_verified) == (0, None)

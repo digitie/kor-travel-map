@@ -91,6 +91,7 @@ from kortravelmap.providers.kor_travel_weather_state import (
     ForecastMerge,
     WeatherStateDataset,
     earliest_or_none,
+    forecast_membership_digest,
     location_state_items,
     merge_forecast_delta,
 )
@@ -472,6 +473,10 @@ class WeatherFetch:
     """첫 페이지가 304였다 — ``rows``는 비었고 지금 세대가 그대로 맞다."""
     next_since: datetime | None = None
     """W3 publication watermark(모든 페이지가 같아야 한다). 다음 증분의 ``since``(ADR-122)."""
+    membership_digest: str | None = None
+    """W3 manifest 멤버십 digest(모든 페이지가 같아야 한다). 없으면 ``None``(ADR-122)."""
+    clock_epoch: str | None = None
+    """W3 publication clock epoch(모든 페이지가 같아야 한다). 없으면 ``None``(ADR-122)."""
 
 
 async def _read_all_pages(
@@ -538,6 +543,8 @@ async def _walk_pages(
     statuses: set[str] = set()
     snapshot_id: str | None = None
     next_since: datetime | None = None
+    membership: str | None = None
+    epoch: str | None = None
     etag: str | None = None
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -568,6 +575,8 @@ async def _walk_pages(
         if page_number == 1:
             snapshot_id = page.meta.snapshot_id
             next_since = page.meta.next_since
+            membership = page.meta.membership_digest
+            epoch = page.meta.clock_epoch
         elif page.meta.snapshot_id != snapshot_id:
             raise WeatherExportContractError(
                 f"{path}: 페이지 {page_number}의 snapshot_id가 첫 페이지와 다르다."
@@ -576,6 +585,11 @@ async def _walk_pages(
             # watermark는 snapshot manifest 하나의 값이다 — 페이지마다 다르면 cursor를 믿을 수 없다.
             raise WeatherExportContractError(
                 f"{path}: 페이지 {page_number}의 next_since가 첫 페이지와 다르다."
+            )
+        elif (page.meta.membership_digest, page.meta.clock_epoch) != (membership, epoch):
+            raise WeatherExportContractError(
+                f"{path}: 페이지 {page_number}의 membership_digest·clock_epoch가 "
+                "첫 페이지와 다르다."
             )
         rows.extend(page.items)
         collected.append(page.meta.source_collected_at)
@@ -589,6 +603,8 @@ async def _walk_pages(
                 snapshot_id=snapshot_id,
                 etag=etag,
                 next_since=next_since,
+                membership_digest=membership,
+                clock_epoch=epoch,
             )
         next_cursor = page.meta.next_cursor
         assert next_cursor is not None  # 파서가 보장한다.
@@ -671,6 +687,8 @@ class WeatherCollected:
     row_duplicates: int
     """위치 안에서 같은 관측·묶음·(날짜, 구간)이 두 번 와서 버린 행 수(ADR-114 W1)."""
     fetch: WeatherFetch
+    members: dict[tuple[str, str], datetime] | None = None
+    """예보 전량의 멤버십 장부(ADR-122). 예보가 아니면 ``None``."""
 
 
 Collector = Callable[[KorTravelMapSettings, str | None], Awaitable[WeatherCollected]]
@@ -708,7 +726,9 @@ def _forecast_collector(dataset: WeatherStateDataset) -> Collector:
         group: WeatherExportForecastGroup
         for group in fetch.rows:
             grouper.add(group)
-        return WeatherCollected(grouper.items(), grouper.duplicates, fetch)
+        return WeatherCollected(
+            grouper.items(), grouper.duplicates, fetch, members=grouper.members()
+        )
 
     return _collect
 
@@ -905,8 +925,9 @@ def forecast_sync_plan(
         current.sync_cursor is None
         or current.full_synced_at is None
         or current.row_duplicates is None
+        or current.member_count is None
     ):
-        # 증분 이전 코드가 쓴 세대(cursor 없음)거나 meta가 덜 찼다.
+        # 증분·멤버십 장부 이전 코드가 쓴 세대거나 meta가 덜 찼다.
         return ForecastSyncPlan(None, "no_cursor")
     if current.row_duplicates > 0:
         # 전량의 "같은 (위치, provider) 첫 행" 선택을 증분이 재현할 수 없다.
@@ -936,6 +957,8 @@ class _DeltaReady:
     merge: ForecastMerge
     since: datetime
     next_since: datetime
+    membership_verified: bool | None
+    clock_epoch: str | None
 
 
 async def _prepare_forecast_delta(
@@ -970,6 +993,13 @@ async def _prepare_forecast_delta(
             "cursor_regressed",
             f"next_since {fetch.next_since.isoformat()}가 since {since.isoformat()}보다 이르다.",
         )
+    if fetch.clock_epoch is not None and fetch.clock_epoch != current.clock_epoch:
+        # weather DB가 복원·재설치·재시작됐다(또는 이 사슬이 epoch를 모른다) — 벽시계 clock이라
+        # 복원 뒤 공개가 cursor를 곧바로 넘어서 422로는 드러나지 않는다(ADR-122 원천 계약 7).
+        raise _FullResyncNeeded(
+            "clock_epoch_changed",
+            f"clock_epoch {current.clock_epoch!r} → {fetch.clock_epoch!r}.",
+        )
     raw = await store.generation_items(spec.dataset.name, current.generation)
     if len(raw) != current.count:
         # 기준 세대가 meta와 다르다(부분 유실·grace 만료 중 읽기) — 병합하면 빠진 위치가 사라진다.
@@ -981,13 +1011,42 @@ async def _prepare_forecast_delta(
         base = [WeatherForecastState.model_validate_json(value) for value in raw.values()]
     except ValidationError as exc:
         raise _FullResyncNeeded("base_unreadable", "기준 세대 값이 모델과 맞지 않는다.") from exc
+    base_members = await store.generation_members(spec.dataset.name, current.generation)
+    if len(base_members) != current.member_count:
+        raise _FullResyncNeeded(
+            "base_count_mismatch",
+            f"기준 세대 {current.generation} 멤버십 {len(base_members)}건 ≠ meta "
+            f"{current.member_count}건.",
+        )
     try:
         merge = merge_forecast_delta(
-            base, fetch.rows, style=spec.dataset.style, since=since, now=datetime.now(UTC)
+            base,
+            fetch.rows,
+            style=spec.dataset.style,
+            since=since,
+            now=datetime.now(UTC),
+            base_members=base_members,
         )
     except ForecastDeltaRefused as exc:
         raise _FullResyncNeeded(exc.reason, str(exc)) from exc
-    return _DeltaReady(fetch=fetch, merge=merge, since=since, next_since=fetch.next_since)
+    verified: bool | None = None
+    if fetch.membership_digest is not None:
+        verified = forecast_membership_digest(merge.members) == fetch.membership_digest
+        if not verified and current.membership_verified is not False:
+            # 검증된(또는 검증해 본 적 없는) 사슬에서 다르다 — weather manifest에서 빠지거나 바뀐
+            # 것을 증분이 놓쳤다(만료·비활성화·provider 퇴역·미래 시각 없는 재공개).
+            raise _FullResyncNeeded(
+                "membership_mismatch",
+                "병합 멤버십 digest가 weather membership_digest와 다르다.",
+            )
+    return _DeltaReady(
+        fetch=fetch,
+        merge=merge,
+        since=since,
+        next_since=fetch.next_since,
+        membership_verified=verified,
+        clock_epoch=fetch.clock_epoch or current.clock_epoch,
+    )
 
 
 async def _swap_forecast_delta(
@@ -1016,6 +1075,9 @@ async def _swap_forecast_delta(
         sync_cursor=ready.next_since,
         full_synced_at=current.full_synced_at,
         row_duplicates=0,
+        members=ready.merge.members,
+        membership_verified=ready.membership_verified,
+        clock_epoch=ready.clock_epoch,
     )
     try:
         retired = await store.retire_other_versions(spec.dataset.name)
@@ -1055,10 +1117,17 @@ async def _swap_forecast_delta(
         ),
         "source_status": ready.fetch.source_status,
         "retired_other_version_keys": retired,
+        "membership_verified": _verified_text(ready.membership_verified),
+        "member_count": len(merge.members),
+        "clock_epoch": ready.clock_epoch or "",
     }
     if upstream is not None:
         metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
     return metadata
+
+
+def _verified_text(value: bool | None) -> str:
+    return "" if value is None else "1" if value else "0"
 
 
 async def load_weather_state(
@@ -1172,6 +1241,14 @@ async def load_weather_state(
                     unchanged[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
                 return unchanged
             forecast = spec.delta is not None
+            # 전량 장부가 weather digest와 다르면 manifest에 Map이 받지 못한 행(미래 시각이 없는
+            # 묶음)이 있다 — 이 사슬은 digest로 검증할 수 없다(ADR-122).
+            full_verified: bool | None = None
+            if forecast and collected.fetch.membership_digest is not None:
+                full_verified = (
+                    forecast_membership_digest(collected.members or {})
+                    == collected.fetch.membership_digest
+                )
             result = await active.swap(
                 spec.dataset.name,
                 collected.items,
@@ -1190,6 +1267,9 @@ async def load_weather_state(
                 sync_cursor=collected.fetch.next_since if forecast else None,
                 full_synced_at=started if forecast else None,
                 row_duplicates=collected.row_duplicates if forecast else None,
+                members=collected.members,
+                membership_verified=full_verified,
+                clock_epoch=collected.fetch.clock_epoch,
             )
             try:
                 retired = await active.retire_other_versions(spec.dataset.name)
@@ -1224,6 +1304,9 @@ async def load_weather_state(
                 else ""
             )
             metadata["full_synced_at"] = started.isoformat()
+            metadata["membership_verified"] = _verified_text(full_verified)
+            metadata["member_count"] = len(collected.members or {})
+            metadata["clock_epoch"] = collected.fetch.clock_epoch or ""
             _LOGGER.info(
                 "weather %s 전량(%s): %d곳, next_since=%s",
                 spec.dataset.name, resync_reason, result.meta.count, metadata["next_since"],

@@ -1,3 +1,7 @@
+## 2026-11-11 — ADR-122 개정(멤버십 digest·clock epoch)
+
+- weather #907b7c26 배포 다음 회전에 묶는다. 배포 뒤 첫 예보 run은 meta에 member_count가 없어 전량(no_cursor). 이후 op metadata `membership_verified`(1/0/빈값)·`resync_reason`(membership_mismatch·clock_epoch_changed 빈도)를 본다. 0이 오래 이어지면 weather에 시간 필터로 뺀 행 노출을 다시 요청.
+
 ## 2026-11-10 — ADR-122 weather 예보 증분
 
 - 회전에 묶는다. 배포 뒤 예보 job 첫 run은 cursor가 없어 전량(resync_reason=no_cursor), 다음부터 sync_mode=delta. op metadata의 resync_reason·delta_rows·expired_groups와 run 시간을 본다. 되돌리기는 env FULL_RESYNC_HOURS=0. weather DB 복원·provider 설정 변경 뒤에는 예보 job 넷을 run config `full_resync: true`로 한 번씩.
