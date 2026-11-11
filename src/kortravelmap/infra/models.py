@@ -1941,6 +1941,40 @@ class FeatureSearchAliasRow(Base):
     )
 
 
+class FeatureSearchProminenceRow(Base):
+    """``feature.feature_search_prominence`` — 검색 인지도(migration 451, 2026-11-11 P6).
+
+    공개 place마다 0~9. 검색 순위의 마지막 자리(유사도보다 앞)다. 계산은
+    ``infra.search_prominence_repo.refresh_search_prominence``가 하고 maintenance job이 부른다.
+    ``feature.features`` FK는 두지 않는다(Feature 쓰기 경로와 잠금을 엮지 않는다).
+    """
+
+    __tablename__ = "feature_search_prominence"
+    __table_args__ = (
+        CheckConstraint(
+            "prominence BETWEEN 0 AND 9",
+            name=conv("ck_feature_search_prominence_range"),
+        ),
+        CheckConstraint(
+            "dataset_count >= 0 AND heritage_items >= 0",
+            name=conv("ck_feature_search_prominence_counts"),
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    prominence: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    dataset_count: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("0")
+    )
+    heritage_items: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, server_default=text("0")
+    )
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class PlaceAttributeRow(Base):
     """``feature.place_attributes`` — 공개 장소 속성 catalog(ADR-121, migration 446).
 

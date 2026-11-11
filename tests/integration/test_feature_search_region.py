@@ -453,6 +453,8 @@ async def test_region_name_query_still_uses_the_tail_exact_match(
     rank = {item.feature_id: item.rank for item in page.items}[ids["gh_gyodong"]]
     assert rank is not None
     assert (rank // feature_repo._SEARCH_RANK_EXACT_WEIGHT) % 10 == 0, rank
+    # 이름 전체 일치는 아니다(tail만 같다) — 이름 전체 자리는 1.
+    assert (rank // feature_repo._SEARCH_RANK_FULLNESS_WEIGHT) % 10 == 1, rank
 
 
 async def test_multi_word_remainder_matches_names_that_cover_every_word(

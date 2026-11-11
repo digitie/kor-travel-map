@@ -135,6 +135,10 @@ from kortravelmap.infra.provider_field_candidates import (
     capture_provider_field_candidates,
     provider_field_shadow_enabled,
 )
+from kortravelmap.infra.search_prominence_repo import (
+    SEARCH_PROMINENCE_DEFAULT,
+    SEARCH_PROMINENCE_MAX,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Collection, Iterable, Mapping, Sequence
@@ -1888,9 +1892,13 @@ WITH candidates AS (
 """
 
 #: 검색 순위(``rank``)의 자리. 큰 자리가 먼저 갈린다 — (지역 검색만) 지역 일치 → 일치 단계 →
-#: bbox 안 → 목적지 이름 일치 → 분류 그룹 → 이름 일치 → 분류 구체성. 같은 ``rank`` 안에서는
-#: trigram ``score`` 내림차순, ``feature_id`` 오름차순이다. 각 자리 값은 한 자리 수다
-#: (``_SEARCH_RANK_DIGIT_MAX``).
+#: bbox 안 → 목적지 이름 일치 → 분류 그룹 → 이름 일치 → 분류 구체성 → 검색 인지도(P6). 같은
+#: ``rank`` 안에서는 trigram ``score`` 내림차순, ``feature_id`` 오름차순이다. 각 자리 값은 한 자리
+#: 수다(``_SEARCH_RANK_DIGIT_MAX``).
+#:
+#: **검색 인지도**(2026-11-11 P6, ``infra.search_prominence_repo``): 다른 자리가 모두 같을 때
+#: 유사도보다 먼저 가른다 — 여러 원천이 싣고 국가유산·TourAPI가 소개한 곳이 앞, MOIS 인허가
+#: 대장에만 있는 곳이 뒤다. 자리 값은 ``SEARCH_PROMINENCE_MAX - 인지도``다(높을수록 앞).
 #:
 #: **목적지 이름 일치**(ADR-120, #1459 §2): 이름이 검색어와 같고 분류가 목적지 그룹
 #: (``SEARCH_DESTINATION_GROUP_MAX`` 이하 — 관광·숙박·역·휴게소·공항·여객선터미널)이면 분류 그룹보다
@@ -1898,20 +1906,30 @@ WITH candidates AS (
 #: "설해원(양양국제공항)"보다, "서울역"을 찾으면 역이 "서울역사박물관"보다 앞이다. 식음·주차처럼
 #: 목적지가 아닌 분류의 이름 일치는 종전대로 그룹 **뒤**에서만 가른다 — "하회마을"이라는 서울
 #: 음식점이 이름에 "하회마을"을 품은 관광지보다 앞서지 않는다(436의 결정 그대로).
-_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 100_000
-_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 10_000
-_SEARCH_RANK_DESTINATION_EXACT_WEIGHT: Final[int] = 1_000
-_SEARCH_RANK_GROUP_WEIGHT: Final[int] = 100
-_SEARCH_RANK_EXACT_WEIGHT: Final[int] = 10
+_SEARCH_RANK_MATCH_WEIGHT: Final[int] = 10_000_000
+_SEARCH_RANK_BBOX_WEIGHT: Final[int] = 1_000_000
+_SEARCH_RANK_DESTINATION_EXACT_WEIGHT: Final[int] = 100_000
+_SEARCH_RANK_GROUP_WEIGHT: Final[int] = 10_000
+_SEARCH_RANK_EXACT_WEIGHT: Final[int] = 1_000
+_SEARCH_RANK_SPECIFICITY_WEIGHT: Final[int] = 100
+#: 이름 전체 일치(0) vs tail·끝 한글 괄호 일치(1) — 인지도가 유사도보다 먼저 가르게 되며 유사도가
+#: 대신 가르던 순서("광안리" > "아크앤북 광안리")를 자리로 고정한다(2026-11-12 평가).
+_SEARCH_RANK_FULLNESS_WEIGHT: Final[int] = 10
+_SEARCH_RANK_PROMINENCE_WEIGHT: Final[int] = 1
 _SEARCH_RANK_DIGIT_MAX: Final[int] = 9
-#: 지역 자리를 뺀 순위의 가장 큰 값(유사도만·bbox 밖·목적지 불일치·가장 큰 그룹·불일치·Tier 1만).
+if SEARCH_PROMINENCE_MAX > _SEARCH_RANK_DIGIT_MAX:  # pragma: no cover — 상수 검사
+    raise RuntimeError("search prominence must fit one rank digit")
+#: 지역 자리를 뺀 순위의 가장 큰 값(유사도만·bbox 밖·목적지 불일치·가장 큰 그룹·불일치·Tier 1만·
+#: 인지도 0).
 _SEARCH_RANK_BASE_MAX: Final[int] = (
     2 * _SEARCH_RANK_MATCH_WEIGHT
     + _SEARCH_RANK_BBOX_WEIGHT
     + _SEARCH_RANK_DESTINATION_EXACT_WEIGHT
     + _SEARCH_RANK_DIGIT_MAX * _SEARCH_RANK_GROUP_WEIGHT
     + _SEARCH_RANK_EXACT_WEIGHT
-    + 1
+    + _SEARCH_RANK_SPECIFICITY_WEIGHT
+    + _SEARCH_RANK_FULLNESS_WEIGHT
+    + SEARCH_PROMINENCE_MAX * _SEARCH_RANK_PROMINENCE_WEIGHT
 )
 #: 지역 일치 자리(#1459 §7). 검색어에서 지역 토큰을 떼어 낸 지역 검색("강릉 호텔")에서만 쓴다 —
 #: 그 지역(시군구 코드)에 있고 나머지 검색어("호텔")를 이름에 품거나 그 분류인 행이 0, 아니면 1.
@@ -2097,6 +2115,20 @@ _LATIN_BRACKET_NAME_SQL_LITERAL: Final[str] = (
 )
 
 
+def _search_paren_base_sql(expression: str) -> str:
+    """끝 괄호 한 쌍(반각·전각, 안의 글자 무관)을 뗀 이름의 비교 키. 괄호로 끝나지 않으면 NULL.
+
+    ``_search_bracket_part``는 라틴 괄호만 본다 — 이 키는 "신륵사(여주)"·"설해원(양양국제공항)"처럼
+    한글 괄호도 뗀다. 괄호 앞이 비면 NULL이다(이름 전체가 괄호인 행).
+    """
+    trimmed = f"btrim({expression}, {_SEARCH_WHITESPACE_SQL})"
+    stripped = f"regexp_replace({trimmed}, '{_SEARCH_DEDUP_TRAILING_BRACKET}', '')"
+    return (
+        f"CASE WHEN right({trimmed}, 1) IN (')', '）') THEN"
+        f" nullif({_search_compact_sql(stripped)}, '') END"
+    )
+
+
 def search_bracket_like_pattern(q: str) -> str | None:
     """끝 괄호 이름 후보 팔(``:bracket_like``)의 ``ILIKE`` 패턴 — 검색어를 품는 이름.
 
@@ -2256,9 +2288,22 @@ def _feature_search_score_cte(
     region_exact = (
         "\n                OR (region_hit AND (compact_name = CAST(:rem_compact AS text)"
         "\n                  OR compact_base_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_paren_base_name = CAST(:rem_compact AS text)"
         "\n                  OR compact_bracket_name = CAST(:rem_compact AS text)"
         "\n                  OR (NOT CAST(:rem_is_category AS boolean)"
         "\n                    AND compact_tail = CAST(:rem_compact AS text))))"
+        if region
+        else ""
+    )
+    # 이름 전체 일치(tail·끝 한글 괄호 제외) — 같은 이름 일치 안에서 이름 전체가 같은 행이 첫 낱말을
+    # 뗀 나머지만 같거나 끝 괄호 표식을 뗀 이름만 같은 행보다 앞이다("광안리"가 "아크앤북 광안리"
+    # 보다, 경주의 "불국사"가 "불국사(서울)"보다). 인지도(P6)가 유사도보다 먼저 가르게 되며
+    # 유사도가 대신 가르던 이 순서를 자리로 고정한다(2026-11-12 평가). 라틴 괄호의 한글·영문
+    # 이름은 전체 일치다.
+    region_exact_full = (
+        "\n                OR (region_hit AND (compact_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_base_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_bracket_name = CAST(:rem_compact AS text)))"
         if region
         else ""
     )
@@ -2321,6 +2366,9 @@ compacted AS (
         -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott
         -- Hotel Seoul)"의 한글 이름과 영문 이름. 저장하지 않고 원래 이름에서 뗀다(없으면 NULL).
         {_search_bracket_base_sql("name")} AS compact_base_name,
+        -- 끝 괄호(한글 표식 포함 — "신륵사(여주)")를 뗀 이름. 괄호 안은 같은 이름을 가르는 표식이라
+        -- 괄호 앞 이름이 검색어와 같으면 이름 일치다(2026-11-11 P6).
+        {_search_paren_base_sql("name")} AS compact_paren_base_name,
         {_search_bracket_latin_sql("name")} AS compact_bracket_name,
         {_search_category_group_sql("category")} AS category_search_group
     FROM filtered
@@ -2344,19 +2392,32 @@ ranked AS (
         (
           compact_name = CAST(:q_compact AS text)
           OR compact_base_name = CAST(:q_compact AS text)
+          OR compact_paren_base_name = CAST(:q_compact AS text)
           OR compact_bracket_name = CAST(:q_compact AS text)
           OR compact_tail = CAST(:q_compact AS text){region_exact}
         ) IS TRUE AS name_exact,
+        (
+          compact_name = CAST(:q_compact AS text)
+          OR compact_base_name = CAST(:q_compact AS text)
+          OR compact_bracket_name = CAST(:q_compact AS text){region_exact_full}
+        ) IS TRUE AS name_exact_full,
         (
           search_group <= {_search_destination_group_max()}
           AND (
             compact_name = CAST(:q_compact AS text)
             OR compact_base_name = CAST(:q_compact AS text)
             OR compact_bracket_name = CAST(:q_compact AS text)
+            -- 끝 괄호(한글 표식)를 뗀 이름은 관광(그룹 0)에만 목적지 일치다 — "하회마을(민박)"
+            -- 같은 숙소가 관광지 앞에 서지 않게(tail과 같은 규칙, 적대 리뷰 2026-11-12).
+            OR (search_group = 0 AND compact_paren_base_name = CAST(:q_compact AS text))
             OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
           )
-        ) IS TRUE AS destination_exact
+        ) IS TRUE AS destination_exact,
+        prominence.prominence AS search_prominence
     FROM hits
+    -- 검색 인지도(P6): 후보와 해시 결합한다(후보마다 PK 탐색을 두지 않는다).
+    LEFT JOIN feature.feature_search_prominence AS prominence
+      ON prominence.feature_id = hits.feature_id
 ),
 scored AS (
     SELECT
@@ -2416,6 +2477,14 @@ scored AS (
           + CASE WHEN name_exact THEN 0 ELSE 1 END * {_SEARCH_RANK_EXACT_WEIGHT}
           -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
+            * {_SEARCH_RANK_SPECIFICITY_WEIGHT}
+          -- 이름 전체 일치: 이름 전체가 같은 행이 첫 낱말을 뗀 나머지(tail)·끝 한글 괄호를 뗀
+          -- 이름만 같은 행보다 앞. 분류 구체성 다음이다("안동 도산서원"은 Tier 1만인
+          -- "도산서원"보다 앞).
+          + CASE WHEN name_exact_full THEN 0 ELSE 1 END * {_SEARCH_RANK_FULLNESS_WEIGHT}
+          -- 검색 인지도(P6): 나머지 자리가 같으면 인지도가 높은 행이 앞(유사도보다 먼저).
+          + ({SEARCH_PROMINENCE_MAX} - COALESCE(search_prominence, {SEARCH_PROMINENCE_DEFAULT}))
+            * {_SEARCH_RANK_PROMINENCE_WEIGHT}
         ) AS search_rank
     FROM ranked
 ),
@@ -7086,7 +7155,8 @@ _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v5: 지역 검색(#1459 §7)이 순위 맨 앞 자리(지역 일치)를 더해 ``rank`` 값의 뜻이 바뀌었다.
 #: v6: 분류 낱말 나머지의 tail 일치 제거·낱말 덮기(2026-11-11)로 지역 검색 ``rank``가 바뀌었다.
 #: v7: 실효 검색 그룹(이름 끝말)·중복 접기(2026-11-11)로 ``rank``와 보이는 행 집합이 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 7
+#: v8: 검색 인지도(P6)가 순위 마지막 자리로 들어와 ``rank`` 값의 자리 배치가 바뀌었다.
+_SEARCH_CURSOR_VERSION: Final[int] = 8
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 

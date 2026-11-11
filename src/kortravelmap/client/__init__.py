@@ -290,6 +290,10 @@ from kortravelmap.infra.price_repo import (
     load_price_values as repo_load_price_values,
 )
 from kortravelmap.infra.provider_field_candidates import arm_provider_field_shadow
+from kortravelmap.infra.search_prominence_repo import (
+    SearchProminenceRefreshResult,
+    refresh_search_prominence,
+)
 from kortravelmap.infra.source_replay_repo import CurrentSourceRecord
 from kortravelmap.infra.source_replay_repo import (
     count_active_source_entities as repo_count_active_source_entities,
@@ -1769,6 +1773,15 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session, session.begin():
             return await purge_resolved_integrity_findings(session, retention=retention)
+
+    async def refresh_search_prominence(self) -> SearchProminenceRefreshResult:
+        """공개 place 전부의 검색 인지도(0~9)를 다시 계산해 바뀐 행만 쓴다. 한 transaction.
+
+        ``feature.feature_search_prominence``만 쓴다(Feature 표는 읽기만). maintenance job
+        ``consistency_dedup_refresh``가 dedup 후보 갱신 뒤에 부른다(2026-11-11 P6).
+        """
+        async with self._session_factory() as session, session.begin():
+            return await refresh_search_prominence(session)
 
     async def load_enrichment_links(
         self, enrichments: Iterable[tuple[SourceRecord, SourceLink]]
