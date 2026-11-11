@@ -1,3 +1,7 @@
+## 2026-11-11 — 예보 단기 전량 ReadTimeout 원인·page size
+
+- 단기 위치 약 1,450곳이 limit 2,000 페이지 하나에 들어 요청 하나가 artifact 전부(cold 약 1,174초)를 읽다 300초 timeout. 예보 page size 200으로 나눔. 초단기 상한 600→1,800초. 초단기 808건 거부는 weather 원천 coverage였다.
+
 ## 2026-11-12 — 검색 3단계 main 병합과 C11 검증 보존
 
 - 검토된720과 upstream5742b45의 이력을 merge로 보존했다. incoming 코드·검사16개는 main 원문 그대로다.

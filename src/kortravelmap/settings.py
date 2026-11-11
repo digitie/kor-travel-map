@@ -746,6 +746,18 @@ class KorTravelMapSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_PAGE_SIZE``."
         ),
     )
+    kor_travel_weather_forecast_page_size: int = Field(
+        default=200,
+        ge=1,
+        le=5_000,
+        description=(
+            "weather 예보(W3) export page size. weather는 페이지마다 그 위치들의 artifact를 "
+            "읽으므로, 위치가 한 페이지에 다 들면 요청 하나가 전량을 읽는다(2026-11-11 단기 약 "
+            "1,450곳·odroid eMMC cold 약 1,174초 → read timeout). 작게 나눠 요청마다 timeout "
+            "안에 들게 한다(ADR-122). "
+            "env ``KOR_TRAVEL_MAP_KOR_TRAVEL_WEATHER_FORECAST_PAGE_SIZE``."
+        ),
+    )
     kor_travel_weather_timeout_seconds: float = Field(
         default=60.0,
         ge=0.2,

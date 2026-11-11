@@ -736,3 +736,25 @@ async def test_pages_that_disagree_on_omitted_expired_presence_are_a_contract_er
     _install(monkeypatch, lambda r: httpx.Response(200, json=pages[r.url.params.get("cursor")]))
     with pytest.raises(WeatherExportContractError, match="omitted_expired"):
         await fetch_weather_forecasts(_settings(), "short", since=W0)
+
+async def test_forecast_pages_use_the_forecast_page_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    # 2026-11-11 운영: 단기 전량은 위치 약 1,450곳이 limit 2,000 페이지 하나에 들어, 그 요청 하나가
+    # odroid eMMC에서 artifact 전부(약 1,174초)를 읽다가 read timeout(300초)에 끊겼다. 예보는 작은
+    # 페이지로 나눠 요청마다 timeout 안에 들게 한다.
+    seen = _install(monkeypatch, lambda _r: httpx.Response(200, json=_page([])))
+    await fetch_weather_forecasts(
+        _settings(kor_travel_weather_page_size=2_000), "short", since=W0
+    )
+    await fetch_weather_forecasts(
+        _settings(kor_travel_weather_forecast_page_size=50), "short"
+    )
+    assert seen[0].url.params["limit"] == "200"
+    assert seen[1].url.params["limit"] == "50"
+
+
+def test_ultra_short_ceiling_fits_a_contended_delta() -> None:
+    # 2026-11-11 운영: 초단기 증분이 weather 경합(artifact turnstile) 아래 580초,
+    # 한 번은 600초 상한에서 잘렸다(506901ae). 매시 발화 간격 안에서 lock TTL이 풀리는 한 늘린다.
+    spec = _spec(DATASET_FORECAST_ULTRA_SHORT)
+    assert spec.max_runtime_seconds >= 1_800
+    assert weather_lock_ttl_seconds(spec) < 3_600
