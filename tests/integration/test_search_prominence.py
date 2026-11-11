@@ -331,3 +331,30 @@ async def test_paren_base_exact_does_not_lift_lodging_over_tourism(
     page = await _page(migrated_session, "하회접검", kinds=["place"], page_size=200)
     order = [item.feature_id for item in page.items]
     assert order.index(tour) < order.index(lodging), order
+
+
+async def test_full_name_exact_beats_tail_exact_even_when_less_prominent(
+    migrated_session: AsyncSession,
+) -> None:
+    """"광안리" — 이름 전체가 같은 해변이 첫 낱말을 뗀 나머지만 같은 "아크앤북 광안리"보다 앞이다.
+
+    서점은 TourAPI가 소개해 인지도가 더 높다. 인지도는 이름 일치 단계 다음 자리다.
+    """
+    beach = await _place(
+        migrated_session, "gwangan_beach", name="광안접검", category="01050100",
+        region=_GANGHWA, lon=129.1180, lat=35.1530, sources=(_MCST,),
+    )
+    bookstore = await _place(
+        migrated_session, "gwangan_book", name="아크앤북 광안접검", category="01040000",
+        region=_GANGHWA, lon=129.1190, lat=35.1550, sources=(_TOUR, _MCST),
+    )
+    await migrated_session.flush()
+    await refresh_search_prominence(migrated_session)
+    beach_p = await _prominence(migrated_session, beach)
+    book_p = await _prominence(migrated_session, bookstore)
+    assert beach_p is not None
+    assert book_p is not None
+    assert book_p > beach_p
+    page = await _page(migrated_session, "광안접검", kinds=["place"], page_size=200)
+    order = [item.feature_id for item in page.items]
+    assert order.index(beach) < order.index(bookstore), order

@@ -1923,7 +1923,7 @@ _SEARCH_RANK_BASE_MAX: Final[int] = (
     + _SEARCH_RANK_BBOX_WEIGHT
     + _SEARCH_RANK_DESTINATION_EXACT_WEIGHT
     + _SEARCH_RANK_DIGIT_MAX * _SEARCH_RANK_GROUP_WEIGHT
-    + _SEARCH_RANK_EXACT_WEIGHT
+    + 2 * _SEARCH_RANK_EXACT_WEIGHT
     + _SEARCH_RANK_SPECIFICITY_WEIGHT
     + SEARCH_PROMINENCE_MAX * _SEARCH_RANK_PROMINENCE_WEIGHT
 )
@@ -2291,6 +2291,17 @@ def _feature_search_score_cte(
         if region
         else ""
     )
+    # 이름 전체 일치(tail 제외) — 같은 이름 일치 안에서 이름 전체가 같은 행이 첫 낱말을 뗀 나머지만
+    # 같은 행보다 앞이다("광안리"가 "아크앤북 광안리"보다). 인지도(P6)가 유사도보다 먼저 가르게 되며
+    # 유사도가 대신 가르던 이 순서를 자리로 고정한다(2026-11-12 평가).
+    region_exact_full = (
+        "\n                OR (region_hit AND (compact_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_base_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_paren_base_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_bracket_name = CAST(:rem_compact AS text)))"
+        if region
+        else ""
+    )
     return f"""
 WITH name_candidates AS MATERIALIZED (
     SELECT
@@ -2381,6 +2392,12 @@ ranked AS (
           OR compact_tail = CAST(:q_compact AS text){region_exact}
         ) IS TRUE AS name_exact,
         (
+          compact_name = CAST(:q_compact AS text)
+          OR compact_base_name = CAST(:q_compact AS text)
+          OR compact_paren_base_name = CAST(:q_compact AS text)
+          OR compact_bracket_name = CAST(:q_compact AS text){region_exact_full}
+        ) IS TRUE AS name_exact_full,
+        (
           search_group <= {_search_destination_group_max()}
           AND (
             compact_name = CAST(:q_compact AS text)
@@ -2453,7 +2470,9 @@ scored AS (
           -- (역·휴게소·공항·여객선터미널·전통시장)는 관광과 같은 그룹이다.
           + {_search_destination_exact_group_sql("category")} * {_SEARCH_RANK_GROUP_WEIGHT}
           -- 이름 일치(분류 불문): 같은 그룹 안에서 이름이 같은 행이 앞.
-          + CASE WHEN name_exact THEN 0 ELSE 1 END * {_SEARCH_RANK_EXACT_WEIGHT}
+          -- 0 이름 전체 일치, 1 첫 낱말을 뗀 나머지만 일치(tail), 2 불일치.
+          + CASE WHEN name_exact_full THEN 0 WHEN name_exact THEN 1 ELSE 2 END
+            * {_SEARCH_RANK_EXACT_WEIGHT}
           -- 분류 구체성: Tier 1만 있는 코드(XX000000)는 하위 분류가 있는 코드보다 뒤.
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
             * {_SEARCH_RANK_SPECIFICITY_WEIGHT}
