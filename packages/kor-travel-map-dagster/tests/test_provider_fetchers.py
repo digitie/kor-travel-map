@@ -79,9 +79,11 @@ def _guarded_init_resource_context() -> Any:
     )
 
 
+#: data.go.kr 서비스키를 요구하는 resource의 대표. 표준데이터는 2026-11-10부터
+#: 공개 파일(키 없음)이라 국가유산 행사를 쓴다.
 _DATAGOKR_SPEC = {
     spec.resource_key: spec for spec in PROVIDER_RECORD_RESOURCE_SPECS
-}["standard_museums"]
+}["krheritage_events"]
 
 
 class _FakeKrtourAiAgentResponse:
