@@ -269,6 +269,8 @@ async def test_rows_without_prominence_use_the_default(
 ) -> None:
     """갱신 전(표에 행이 없는) Feature는 기본 인지도로 순위를 받는다 — 검색은 그대로 돈다."""
     ids = await _seed(migrated_session)
+    await refresh_search_prominence(migrated_session)
+    assert await _prominence(migrated_session, ids["yeoju"]) is not None
     await migrated_session.execute(
         text(
             "DELETE FROM feature.feature_search_prominence "
@@ -308,3 +310,24 @@ async def test_paren_base_name_strips_one_trailing_bracket(
         )
     ).scalar_one()
     assert got == expected
+
+
+async def test_paren_base_exact_does_not_lift_lodging_over_tourism(
+    migrated_session: AsyncSession,
+) -> None:
+    """끝 괄호를 뗀 이름 일치는 관광에만 목적지 일치다.
+
+    "하회접검(민박)"이 관광지 앞에 서지 않는다.
+    """
+    tour = await _place(
+        migrated_session, "hahoe_tour", name="안동하회접검", category="01020100",
+        region=_YEOJU, lon=128.5180, lat=36.5390, sources=(_TOUR,),
+    )
+    lodging = await _place(
+        migrated_session, "hahoe_lodging", name="하회접검(민박)", category="03050200",
+        region=_YEOJU, lon=128.5200, lat=36.5400, sources=(_MOIS,),
+    )
+    await migrated_session.flush()
+    page = await _page(migrated_session, "하회접검", kinds=["place"], page_size=200)
+    order = [item.feature_id for item in page.items]
+    assert order.index(tour) < order.index(lodging), order

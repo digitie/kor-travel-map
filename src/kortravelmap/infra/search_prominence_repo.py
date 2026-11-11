@@ -59,6 +59,7 @@ _HERITAGE_PROVIDER: Final[str] = "python-krheritage-api"
 _LICENSE_PROVIDER: Final[str] = "python-mois-api"
 #: 이 refresh 한 번의 문장 시간 상한(prod 2026-11-11 실측은 ``docs`` 참조).
 _REFRESH_STATEMENT_TIMEOUT: Final[str] = "15min"
+_REFRESH_LOCK_KEY: Final[str] = "kortravelmap.search_prominence_refresh"
 
 if not (
     0 <= SEARCH_PROMINENCE_DEFAULT <= SEARCH_PROMINENCE_MAX
@@ -93,7 +94,7 @@ def _prominence_select_sql() -> str:
     """Feature마다 ``(feature_id, prominence, dataset_count, heritage_items)`` — 읽기 전용."""
     return f"""
 WITH places AS MATERIALIZED (
-    SELECT f.feature_id, f.coord_5179, {_name_key_sql("f.name")} AS name_key
+    SELECT f.feature_id, f.name, f.coord_5179, {_name_key_sql("f.name")} AS name_key
     FROM feature.public_features AS f
     WHERE f.kind = 'place' AND f.coord_5179 IS NOT NULL
 ),
@@ -125,9 +126,8 @@ heritage_tokens AS (
     SELECT DISTINCT h.feature_id, h.coord_5179, token
     FROM places AS h
     JOIN links AS l ON l.feature_id = h.feature_id AND l.provider = '{_HERITAGE_PROVIDER}'
-    JOIN feature.features AS hf ON hf.feature_id = h.feature_id
     CROSS JOIN LATERAL regexp_split_to_table(
-        lower(normalize(btrim(hf.name), NFC)), '[[:space:]]+'
+        lower(normalize(btrim(h.name), NFC)), '[[:space:]]+'
     ) AS token
     WHERE char_length(token) >= 2
 ),
@@ -136,6 +136,7 @@ heritage AS (
     FROM places AS a
     JOIN heritage_tokens AS t
       ON t.token = a.name_key
+     AND t.feature_id <> a.feature_id
      AND x_extension.ST_DWithin(a.coord_5179, t.coord_5179, {_PROMINENCE_HERITAGE_RADIUS_M})
     WHERE char_length(a.name_key) >= 2
     GROUP BY a.feature_id
@@ -212,6 +213,11 @@ async def refresh_search_prominence(session: AsyncSession) -> SearchProminenceRe
     await session.execute(
         text("SELECT set_config('statement_timeout', :value, true)"),
         {"value": _REFRESH_STATEMENT_TIMEOUT},
+    )
+    # 수동 실행과 스케줄 실행이 겹치면 같은 키를 다른 순서로 upsert해 교착할 수 있다 — 직렬화한다.
+    await session.execute(
+        text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": _REFRESH_LOCK_KEY},
     )
     row = (await session.execute(text(_refresh_sql()))).one()
     return SearchProminenceRefreshResult(

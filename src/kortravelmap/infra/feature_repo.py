@@ -2385,12 +2385,18 @@ ranked AS (
           AND (
             compact_name = CAST(:q_compact AS text)
             OR compact_base_name = CAST(:q_compact AS text)
-            OR compact_paren_base_name = CAST(:q_compact AS text)
             OR compact_bracket_name = CAST(:q_compact AS text)
+            -- 끝 괄호(한글 표식)를 뗀 이름은 관광(그룹 0)에만 목적지 일치다 — "하회마을(민박)"
+            -- 같은 숙소가 관광지 앞에 서지 않게(tail과 같은 규칙, 적대 리뷰 2026-11-12).
+            OR (search_group = 0 AND compact_paren_base_name = CAST(:q_compact AS text))
             OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
           )
-        ) IS TRUE AS destination_exact
+        ) IS TRUE AS destination_exact,
+        prominence.prominence AS search_prominence
     FROM hits
+    -- 검색 인지도(P6): 후보와 해시 결합한다(후보마다 PK 탐색을 두지 않는다).
+    LEFT JOIN feature.feature_search_prominence AS prominence
+      ON prominence.feature_id = hits.feature_id
 ),
 scored AS (
     SELECT
@@ -2452,14 +2458,8 @@ scored AS (
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
             * {_SEARCH_RANK_SPECIFICITY_WEIGHT}
           -- 검색 인지도(P6): 나머지 자리가 같으면 인지도가 높은 행이 앞(유사도보다 먼저).
-          + ({SEARCH_PROMINENCE_MAX} - COALESCE(
-              (
-                SELECT sp.prominence
-                FROM feature.feature_search_prominence AS sp
-                WHERE sp.feature_id = ranked.feature_id
-              ),
-              {SEARCH_PROMINENCE_DEFAULT}
-            )) * {_SEARCH_RANK_PROMINENCE_WEIGHT}
+          + ({SEARCH_PROMINENCE_MAX} - COALESCE(search_prominence, {SEARCH_PROMINENCE_DEFAULT}))
+            * {_SEARCH_RANK_PROMINENCE_WEIGHT}
         ) AS search_rank
     FROM ranked
 ),
