@@ -45,6 +45,7 @@ from kortravelmap.providers.kor_travel_weather import (
     WeatherExportCurrentValue,
     WeatherExportDailySummary,
     WeatherExportForecastGroup,
+    WeatherExportForecastMember,
     WeatherExportLocation,
 )
 
@@ -390,6 +391,7 @@ def merge_forecast_delta(
     since: datetime,
     now: datetime,
     base_members: Mapping[tuple[str, str], datetime] | None = None,
+    omitted: Iterable[WeatherExportForecastMember] = (),
 ) -> ForecastMerge:
     """지금 세대(``base``) + weather ``since`` 증분 → 새 세대 값(ADR-122).
 
@@ -408,6 +410,10 @@ def merge_forecast_delta(
     볼 수 없다 — weather ``meta.membership_digest``와 병합 장부(``ForecastMerge.members``)를 견주는
     호출자나 주기 전량 재동기화가 고친다. ``base_members``(기준 세대 장부)가 없으면 기준 값의
     묶음으로 만든다(시각이 다 지난 묶음은 그때 이미 없다).
+
+    ``omitted``는 weather ``meta.omitted_expired``다 — 재공개됐지만 미래 시각이 없어 항목에서 뺀
+    (위치, provider)다. 전량도 그 묶음을 내지 않으므로 지금 세대의 같은 묶음을 값에서 빼고 장부에는
+    새 ``published_at``으로 남긴다.
     """
     incoming: dict[str, dict[str, WeatherExportForecastGroup]] = {}
     rows = 0
@@ -431,6 +437,20 @@ def merge_forecast_delta(
             )
         bucket[group.provider] = group
 
+    dropped: dict[tuple[str, str], datetime] = {}
+    for member in omitted:
+        key = (member.location_id, member.provider)
+        if member.published_at <= since:
+            raise ForecastDeltaRefused(
+                "delta_not_after_since",
+                f"omitted_expired {key}의 published_at이 since 이하다.",
+            )
+        if key in dropped or member.provider in incoming.get(member.location_id, {}):
+            raise ForecastDeltaRefused(
+                "delta_duplicates", f"증분에 {key}가 항목과 omitted_expired에 겹쳐 왔다."
+            )
+        dropped[key] = member.published_at
+
     merged: dict[str, dict[str, WeatherForecastGroupState]] = {}
     replaced = carried = trimmed = expired = 0
     for state in base:
@@ -453,6 +473,16 @@ def merge_forecast_delta(
                     "base_mismatch",
                     f"지금 세대 위치 {state.location_id}에 {stored.provider} 묶음이 두 번 있다.",
                 )
+            gone_at = dropped.get((state.location_id, stored.provider))
+            if gone_at is not None:
+                if gone_at < stored.published_at:
+                    raise ForecastDeltaRefused(
+                        "published_at_regressed",
+                        f"omitted_expired {state.location_id}/{stored.provider}이 지금 세대보다 "
+                        "오래됐다.",
+                    )
+                expired += 1
+                continue
             update = fresh.get(stored.provider)
             if update is not None:
                 if update.published_at < stored.published_at:
@@ -487,6 +517,7 @@ def merge_forecast_delta(
         for provider, row in rows_by_provider.items():
             target[provider] = _group_state(row)
             members[(location_id, provider)] = row.published_at
+    members.update(dropped)
     added = sum(len(groups) for groups in incoming.values()) - replaced
 
     return ForecastMerge(

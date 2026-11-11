@@ -40,6 +40,7 @@ __all__ = [
     "WeatherExportCurrentValue",
     "WeatherExportDailySummary",
     "WeatherExportForecastGroup",
+    "WeatherExportForecastMember",
     "WeatherExportLocation",
     "WeatherExportMeta",
     "WeatherExportPage",
@@ -123,6 +124,15 @@ class _Lenient(BaseModel):
     model_config = ConfigDict(extra="ignore", frozen=True)
 
 
+class WeatherExportForecastMember(_Lenient):
+    """W3 ``meta.omitted_expired`` 한 행 — 미래 시각이 없어 항목에서 뺐지만
+    manifest(digest)에는 있는 (위치, provider) 멤버(ADR-122)."""
+
+    location_id: str = Field(min_length=1, pattern=_LOCATION_ID_PATTERN)
+    provider: str = Field(min_length=1)
+    published_at: AwareDatetime
+
+
 class WeatherExportMeta(_Lenient):
     generated_at: AwareDatetime
     source_collected_at: AwareDatetime | None
@@ -139,6 +149,8 @@ class WeatherExportMeta(_Lenient):
     ``since`` 무관). 없을 수 있다(그 필드 전 weather). ADR-122."""
     clock_epoch: str | None = Field(default=None, pattern=r"^pg:[0-9a-f]{32}$")
     """W3: publication clock 출처 epoch — DB 복원·PITR·재설치·재시작에 바뀐다. ADR-122."""
+    omitted_expired: list[WeatherExportForecastMember] | None = None
+    """W3: 이 페이지에서 미래 시각이 없어 뺀 멤버. Map은 값 없는 멤버로 장부에 더한다. ADR-122."""
 
 
 class WeatherExportLocation(_Lenient):

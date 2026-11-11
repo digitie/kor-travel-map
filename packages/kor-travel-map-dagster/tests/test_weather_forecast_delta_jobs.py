@@ -652,3 +652,53 @@ def test_plan_needs_a_membership_ledger() -> None:
         allow_shrink=False, full_resync=False,
     )
     assert (plan.since, plan.reason) == (None, "no_cursor")
+
+
+def _member(location_id: str, provider: str, at: datetime) -> dict[str, Any]:
+    return {"location_id": location_id, "provider": provider, "published_at": at.isoformat()}
+
+
+async def test_full_counts_omitted_expired_as_value_less_members(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    digest = _digest_of(("a", "p", W0), ("b", "p", W0))
+    pages = {
+        None: _page([_group("a", "p", W0)], has_more=True, next_cursor="c2",
+                    membership_digest=digest, omitted_expired=[]),
+        "c2": _page([], membership_digest=digest, omitted_expired=[_member("b", "p", W0)]),
+    }
+    _install(monkeypatch, lambda r: httpx.Response(200, json=pages[r.url.params.get("cursor")]))
+    store = _Store(None, [])
+    await _run(store)
+    (swap,) = store.swapped
+    assert swap["members"] == {("a", "p"): W0, ("b", "p"): W0}
+    assert swap["membership_verified"] is True
+    assert len(swap["items"]) == 1
+
+
+async def test_delta_omitted_expired_drops_the_stale_group(monkeypatch: pytest.MonkeyPatch) -> None:
+    later = W0 + timedelta(minutes=30)
+    digest = _digest_of(("a", "p", later))
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [], membership_digest=digest, omitted_expired=[_member("a", "p", later)],
+    )))
+    store = _Store(_current(membership_verified=True), [_stored("a", "p", W0 - timedelta(hours=1))])
+    metadata = await _run(store)
+    (swap,) = store.swapped
+    assert swap["sync_mode"] == "delta"
+    assert swap["items"] == []
+    assert swap["members"] == {("a", "p"): later}
+    assert swap["membership_verified"] is True
+    assert metadata["expired_groups"] == 1
+
+
+async def test_pages_that_disagree_on_omitted_expired_presence_are_a_contract_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = {
+        None: _page([_group("a", "p", W1)], has_more=True, next_cursor="c2", omitted_expired=[]),
+        "c2": _page([_group("b", "p", W1)]),
+    }
+    _install(monkeypatch, lambda r: httpx.Response(200, json=pages[r.url.params.get("cursor")]))
+    with pytest.raises(WeatherExportContractError, match="omitted_expired"):
+        await fetch_weather_forecasts(_settings(), "short", since=W0)

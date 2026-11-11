@@ -477,6 +477,9 @@ class WeatherFetch:
     """W3 manifest 멤버십 digest(모든 페이지가 같아야 한다). 없으면 ``None``(ADR-122)."""
     clock_epoch: str | None = None
     """W3 publication clock epoch(모든 페이지가 같아야 한다). 없으면 ``None``(ADR-122)."""
+    omitted_expired: list[Any] | None = None
+    """W3 페이지들의 ``omitted_expired``를 이은 것(미래 시각이 없어 항목에서 뺀 멤버). weather가 그
+    필드를 내지 않으면 ``None``(ADR-122)."""
 
 
 async def _read_all_pages(
@@ -545,6 +548,7 @@ async def _walk_pages(
     next_since: datetime | None = None
     membership: str | None = None
     epoch: str | None = None
+    omitted: list[Any] | None = None
     etag: str | None = None
     cursor: str | None = None
     seen_cursors: set[str] = set()
@@ -577,6 +581,7 @@ async def _walk_pages(
             next_since = page.meta.next_since
             membership = page.meta.membership_digest
             epoch = page.meta.clock_epoch
+            omitted = None if page.meta.omitted_expired is None else []
         elif page.meta.snapshot_id != snapshot_id:
             raise WeatherExportContractError(
                 f"{path}: 페이지 {page_number}의 snapshot_id가 첫 페이지와 다르다."
@@ -591,6 +596,12 @@ async def _walk_pages(
                 f"{path}: 페이지 {page_number}의 membership_digest·clock_epoch가 "
                 "첫 페이지와 다르다."
             )
+        if (page.meta.omitted_expired is None) != (omitted is None):
+            raise WeatherExportContractError(
+                f"{path}: 페이지 {page_number}의 omitted_expired 유무가 첫 페이지와 다르다."
+            )
+        if omitted is not None and page.meta.omitted_expired is not None:
+            omitted.extend(page.meta.omitted_expired)
         rows.extend(page.items)
         collected.append(page.meta.source_collected_at)
         statuses.add(page.meta.source_status)
@@ -605,6 +616,7 @@ async def _walk_pages(
                 next_since=next_since,
                 membership_digest=membership,
                 clock_epoch=epoch,
+                omitted_expired=omitted,
             )
         next_cursor = page.meta.next_cursor
         assert next_cursor is not None  # 파서가 보장한다.
@@ -726,9 +738,16 @@ def _forecast_collector(dataset: WeatherStateDataset) -> Collector:
         group: WeatherExportForecastGroup
         for group in fetch.rows:
             grouper.add(group)
-        return WeatherCollected(
-            grouper.items(), grouper.duplicates, fetch, members=grouper.members()
-        )
+        members = grouper.members()
+        for member in fetch.omitted_expired or ():
+            key = (member.location_id, member.provider)
+            if key in members:
+                raise WeatherExportContractError(
+                    f"{EXPORT_PATH_FORECASTS}?style={style}: {key}가 항목과 "
+                    "omitted_expired에 함께 왔다."
+                )
+            members[key] = member.published_at  # 값 없는 멤버(digest에는 있다)
+        return WeatherCollected(grouper.items(), grouper.duplicates, fetch, members=members)
 
     return _collect
 
@@ -1026,6 +1045,7 @@ async def _prepare_forecast_delta(
             since=since,
             now=datetime.now(UTC),
             base_members=base_members,
+            omitted=fetch.omitted_expired or (),
         )
     except ForecastDeltaRefused as exc:
         raise _FullResyncNeeded(exc.reason, str(exc)) from exc

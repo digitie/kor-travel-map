@@ -26,7 +26,10 @@ import pytest
 
 from kortravelmap.dto.weather_state import WeatherForecastGroupState, WeatherForecastState
 from kortravelmap.infra.valkey_state import StateItem
-from kortravelmap.providers.kor_travel_weather import WeatherExportForecastGroup
+from kortravelmap.providers.kor_travel_weather import (
+    WeatherExportForecastGroup,
+    WeatherExportForecastMember,
+)
 from kortravelmap.providers.kor_travel_weather_state import (
     ForecastDeltaRefused,
     ForecastGrouper,
@@ -97,6 +100,21 @@ def _export(
     return out
 
 
+def _omitted(
+    scopes: list[_Scope], now: datetime, since: datetime | None = None
+) -> list[WeatherExportForecastMember]:
+    """weather ``meta.omitted_expired`` — 걸은 scope에서 미래 point가 없어 뺀 (위치, provider)."""
+    return [
+        WeatherExportForecastMember(
+            location_id=location_id, provider=scope.provider, published_at=scope.published_at
+        )
+        for scope in scopes
+        if since is None or scope.published_at > since
+        for location_id in sorted(scope.locations)
+        if not any(p.target > now for p in scope.points if p.location_id == location_id)
+    ]
+
+
 def _full(scopes: list[_Scope], now: datetime) -> list[StateItem]:
     grouper = ForecastGrouper(style="short")
     for group in _export(scopes, now):
@@ -118,7 +136,10 @@ def _full_ledger(scopes: list[_Scope], now: datetime) -> tuple[list[StateItem], 
     grouper = ForecastGrouper(style="short")
     for group in _export(scopes, now):
         grouper.add(group)
-    return grouper.items(), grouper.members()
+    members = grouper.members()
+    for member in _omitted(scopes, now):  # 값 없는 멤버(Dagster 수집기와 같은 규칙)
+        members[(member.location_id, member.provider)] = member.published_at
+    return grouper.items(), members
 
 
 def _merge_ledger(
@@ -126,7 +147,7 @@ def _merge_ledger(
 ) -> tuple[list[StateItem], Members]:
     merge = merge_forecast_delta(
         _states(base), _export(scopes, now, since), style="short", since=since, now=now,
-        base_members=ledger,
+        base_members=ledger, omitted=_omitted(scopes, now, since),
     )
     return merge.items, merge.members
 
@@ -146,7 +167,8 @@ def _merge(
     base: list[StateItem], scopes: list[_Scope], since: datetime, now: datetime
 ) -> list[StateItem]:
     return merge_forecast_delta(
-        _states(base), _export(scopes, now, since), style="short", since=since, now=now
+        _states(base), _export(scopes, now, since), style="short", since=since, now=now,
+        omitted=_omitted(scopes, now, since),
     ).items
 
 
@@ -277,10 +299,10 @@ def _random_points(
                         "맑음" if metric == "SKY" else round(rng.uniform(-10, 40), 1)
                     )
                     points.append(_Point(location_id, metric, target, value, clock))
-        # 재공개된 위치에는 미래 point가 하나는 있다 — 없으면 weather가 그 위치를 증분에서 빼서
-        # (페이지 stale 표시뿐) 재공개를 알 수 없다. 그 경우는 아래 계약 밖 시험이 따로 고정한다.
-        future = now + timedelta(minutes=30 * rng.randint(1, 8))
-        points.append(_Point(location_id, "TMP", future, round(rng.uniform(-10, 40), 1), clock))
+        # 위치마다 point가 하나는 있다(scope에서 빠지는 제거는 계약 밖 시험이 따로 본다). 그 시각이
+        # 지났으면 weather가 omitted_expired로 알린다(재공개됐지만 미래 시각 없음 — 계약 5(e)).
+        at = now + timedelta(minutes=30 * rng.randint(-6, 8))
+        points.append(_Point(location_id, "TMP", at, round(rng.uniform(-10, 40), 1), clock))
     return points
 
 
@@ -352,34 +374,40 @@ def test_removal_is_invisible_to_a_delta_and_only_a_full_resync_heals_it() -> No
     assert forecast_membership_digest(ledger) != _manifest_digest([keep])
 
 
-def test_republish_without_future_points_is_invisible_to_a_delta() -> None:
-    """재공개된 scope에서 미래 시각이 하나도 없는 위치는 weather가 증분에서 뺀다(페이지 ``stale``
-    표시뿐 — 어느 위치인지 알리지 않는다). 전량에서는 그 (위치, provider)가 사라지지만 증분 병합은
-    옛 묶음을 이어 온다. 이것도 주기 전량이 고친다(ADR-122 원천 계약 5(e))."""
+def test_republish_without_future_points_is_reported_as_omitted_expired() -> None:
+    """재공개된 scope에서 미래 시각이 하나도 없는 위치는 항목에서 빠지고 ``omitted_expired``로 온다.
+    병합은 지금 세대의 옛 묶음을 빼고 장부에 새 ``published_at``을 남긴다 — 전량과 같다
+    (계약 5(e))."""
     old = _Scope("p", T0, _points("L1", range(1, 24), at=T0, known=T0))
-    base = _full([old], T0)
+    base, ledger = _full_ledger([old], T0)
     now = T0 + timedelta(minutes=30)
     republished = _Scope(
         "p", T0 + timedelta(minutes=10), _points("L1", range(-3, 0), at=T0, known=now)
     )
     assert _export([republished], now, since=T0) == []
-    merged = _merge(base, [republished], since=T0, now=now)
-    assert _canonical(merged) != _canonical(_full([republished], now))
-    assert _full([republished], now) == []
-    # 멤버십에는 옛 published_at이 남아 weather digest와 다르다 — 재공개가 드러난다.
-    _, ledger = _merge_ledger(*_full_ledger([old], T0), [republished], since=T0, now=now)
-    assert ledger == {("L1", "p"): T0}
-    assert forecast_membership_digest(ledger) != _manifest_digest([republished])
+    items, merged = _merge_ledger(base, ledger, [republished], since=T0, now=now)
+    assert _canonical(items) == _canonical(_full([republished], now)) == {}
+    assert merged == {("L1", "p"): T0 + timedelta(minutes=10)}
+    assert forecast_membership_digest(merged) == _manifest_digest([republished])
 
 
-def test_full_pull_cannot_see_manifest_rows_without_future_points() -> None:
-    """전량도 미래 시각이 없는 (위치, provider)를 내지 않는다. 그 행은 weather digest에는 있고 Map
-    멤버십에는 없다 — 그 사슬은 digest로 검증할 수 없다(ADR-122 "검증 불가" 상태)."""
+def test_full_pull_counts_omitted_rows_as_value_less_members() -> None:
     live = _Scope("p", T0, _points("L1", range(1, 24), at=T0, known=T0))
     stale = _Scope("q", T0, _points("L2", range(-5, -1), at=T0, known=T0))
-    _, ledger = _full_ledger([live, stale], T0)
-    assert ledger == {("L1", "p"): T0}
-    assert forecast_membership_digest(ledger) != _manifest_digest([live, stale])
+    items, ledger = _full_ledger([live, stale], T0)
+    assert {s.location_id for s in _states(items)} == {"L1"}
+    assert ledger == {("L1", "p"): T0, ("L2", "q"): T0}
+    assert forecast_membership_digest(ledger) == _manifest_digest([live, stale])
+
+
+def test_omitted_member_overlapping_an_item_is_refused() -> None:
+    later = T0 + timedelta(hours=1)
+    member = WeatherExportForecastMember(location_id="L1", provider="p", published_at=later)
+    with pytest.raises(ForecastDeltaRefused) as excinfo:
+        merge_forecast_delta(
+            [], [_group("L1", "p", later)], style="short", since=T0, now=T0, omitted=[member]
+        )
+    assert excinfo.value.reason == "delta_duplicates"
 
 
 def test_expired_carried_group_stays_in_the_membership() -> None:

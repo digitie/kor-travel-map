@@ -75,7 +75,7 @@
    것은 시각 경과뿐이고, 기준 창은 원천 전량의 크기만 담아야 한다. 전량 재동기화는 지금처럼 80%(단기 65%) 기준을 받는다.
 6. **주기 전량.** `KOR_TRAVEL_MAP_WEATHER_FORECAST_FULL_RESYNC_HOURS`(기본 24, 0이면 증분 끔 — 되돌리기). 결정 8·9가
    원천 계약 5·7의 차이를 run마다 잡으므로 주기 전량은 안전망이다. 남는 차이는 결정 8의 **검증할 수 없는 사슬**뿐이고(그
-   동안은 최대 하루), weather가 시간 필터로 뺀 행을 알려 주지 않는 한 그렇다. 주기 전량이 실패하는 동안은 증분도 멈춘다
+   동안은 최대 하루) — `omitted_expired`를 내는 weather에서는 생기지 않는다. 주기 전량이 실패하는 동안은 증분도 멈춘다
    (전량이 성공할 때까지 매 run 전량) — run 실패가 경보다.
 7. **run 상한.** 단기 3,600초·외부 2,400초로 올린다 — 증분 run은 짧지만 첫 적재·주기·증분 거절 뒤 전량이 같은 run에
    들어야 한다. lock TTL(상한 + 660초)은 3시간 발화 간격 안이다.
@@ -84,12 +84,14 @@
    weather `export_forecasts.membership_digest`). Map은 세대마다 **멤버십 장부**(세대 키 `…:{gen}:members`, HASH
    `["location_id","provider"]` → `published_at`)를 둔다. 전량은 받은 묶음으로 장부를 만들고, 증분은 기준 장부에 증분 묶음의
    `published_at`을 덮어쓴다. **시각이 다 지나 값에서 빠진 묶음도 장부에는 남는다**(weather digest가 시간 필터 전이라서).
-   교체 CAS가 `HLEN members = meta.member_count`를 함께 본다.
+   weather가 미래 시각이 없어 항목에서 뺀 멤버는 페이지마다 `meta.omitted_expired`(`{location_id, provider, published_at}`)로
+   온다 — 전량은 그 행을 **값 없는 멤버**로 장부에 더하고, 증분은 지금 세대의 같은 묶음을 값에서 빼고 장부에 새 시각을 남긴다
+   (원천 계약 5(e)가 이것으로 전량과 정확히 같아진다). 교체 CAS가 `HLEN members = meta.member_count`를 함께 본다.
    - 증분 뒤 장부 digest가 weather digest와 같으면 `membership_verified=1`로 교체한다.
    - 다르면 같은 run에서 전량(`resync_reason=membership_mismatch`) — 만료·비활성화·provider 퇴역·미래 시각 없는 재공개
      (원천 계약 5 (a)~(e))와 놓친 추가(계약 7)가 여기서 잡힌다.
-   - **예외 — 검증할 수 없는 사슬.** 전량도 미래 시각이 없는 묶음은 받지 못하므로, manifest에 그런 행이 있으면 전량 장부의
-     digest부터 weather와 다르다. 그 전량은 `membership_verified=0`으로 둔다. 그 사슬의 증분은 digest가 달라도 전량으로
+   - **예외 — 검증할 수 없는 사슬**(`omitted_expired`를 내지 않는 weather에서만). 그 weather에서는 전량도 미래 시각이 없는
+     묶음을 받지 못하므로, manifest에 그런 행이 있으면 전량 장부의 digest부터 weather와 다르다. 그 전량은 `membership_verified=0`으로 둔다. 그 사슬의 증분은 digest가 달라도 전량으로
      되돌리지 않는다(되돌리면 매 run 전량이 되어 증분의 목적이 사라지고, 다음 전량도 같은 이유로 검증할 수 없다). 그 동안은
      결정 6의 하루 지연이 남는다. 증분 digest가 같아지면(그 행이 미래 시각과 함께 재공개되거나 manifest에서 빠지면) 다시
      `1`이 된다. 검증해 본 적 없는 사슬(`membership_verified` 없음)에서 다르면 전량이다.
@@ -130,8 +132,8 @@
   추가(선택·가산 필드). 확인 질문 답 — (a) `weather_values` CHECK(`value_number IS NOT NULL OR value_text IS NOT NULL`)라 metric
   배열의 null은 언제나 "point 없음"이다(결정 3의 null metric 빼기가 안전, `value_text=""`는 null이 아니다). (b) 한 style에서
   (위치, provider)는 많아야 하나다(inventory 키·중기 쌍 병합·외부 cohort 중복 거부).
-- **남은 요청:** 시간 필터로 뺀 (위치, provider, published_at)을 `meta`에(페이지마다 그 페이지 몫으로) 실어 주면 Map 장부가 언제나
-  manifest와 같아져 결정 8의 예외(검증할 수 없는 사슬)가 없어진다.
+- 2026-11-11 weather head `e84485f0`: 페이지마다 `meta.omitted_expired` — 결정 8의 예외를 없앤다. 같은 (위치, provider)가 두
+  번이면 weather가 503을 낸다(Map은 그래도 증분 안 중복을 거절한다). 예보가 아닌 export는 세 필드가 null이다.
 
 ## 기각한 대안
 
