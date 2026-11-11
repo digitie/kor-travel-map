@@ -47,6 +47,7 @@ FORWARD_ONLY_REVISIONS = (
     "448_mcst_theme_transition",
     "449_tourapi_festivals_primary",
     "450_incheon_airport_search_alias",
+    "451_feature_search_prominence",
 )
 
 

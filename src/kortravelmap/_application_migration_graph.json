@@ -285,6 +285,12 @@
         "449_tourapi_festivals_primary"
       ],
       "revision": "450_incheon_airport_search_alias"
+    },
+    {
+      "down_revision": [
+        "450_incheon_airport_search_alias"
+      ],
+      "revision": "451_feature_search_prominence"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
