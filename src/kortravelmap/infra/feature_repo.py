@@ -7067,7 +7067,8 @@ _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v4: 이름 일치를 분류 그룹 앞으로 옮겨(ADR-120) ``rank`` 값의 뜻이 바뀌었다.
 #: v5: 지역 검색(#1459 §7)이 순위 맨 앞 자리(지역 일치)를 더해 ``rank`` 값의 뜻이 바뀌었다.
 #: v6: 분류 낱말 나머지의 tail 일치 제거·낱말 덮기(2026-11-11)로 지역 검색 ``rank``가 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 6
+#: v7: 실효 검색 그룹(이름 끝말)·중복 접기(2026-11-11)로 ``rank``와 보이는 행 집합이 바뀌었다.
+_SEARCH_CURSOR_VERSION: Final[int] = 7
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
