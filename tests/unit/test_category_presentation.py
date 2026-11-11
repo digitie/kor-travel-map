@@ -14,6 +14,8 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
     PLACE_CATEGORY_TIER2_NAMES_BY_TIER1,
     SEARCH_DESTINATION_GROUP_MAX,
+    SEARCH_NAME_SUFFIX_GROUPS,
+    SEARCH_NAME_SUFFIX_PATTERNS,
     SEARCH_NAMED_DESTINATION_EXACT_GROUP,
     PlaceCategoryCode,
     PlaceCategoryTier1Code,
@@ -23,6 +25,7 @@ from kortravelmap.category import (
     is_parking_category_code,
     is_tier1_only_category_code,
     public_feature_display_name,
+    search_effective_group,
 )
 
 pytestmark = pytest.mark.unit
@@ -175,3 +178,53 @@ def test_display_name_is_idempotent_and_leaves_other_categories_alone() -> None:
         None,
     ):
         assert public_feature_display_name("도산서원", code) == "도산서원"
+
+
+@pytest.mark.parametrize(
+    ("code", "name", "expected"),
+    [
+        # prod 2026-11-11 실측 — MCST가 관광으로 넣은 숙박·식당·지점.
+        ("01000000", "저어새펜션", 1),
+        ("01080400", "신선지어깨동무펜션", 1),
+        ("01000000", "씨마크 호텔", 1),
+        # 끝말만 본다 — 이름 가운데의 "호텔"은 그대로 관광이다.
+        ("01000000", "롯데호텔 서울", 0),
+        ("01000000", "강화 펜션 (강화)", 1),
+        ("01000000", "호야막창", 2),
+        ("01000000", "남대문시장 전주식당", 2),
+        ("01000000", "을왕리빵판다카페", 2),
+        ("01000000", "만석닭강정 중앙시장점", 3),
+        ("01040000", "롯데마트 김포공항점", 3),
+        ("00000000", "하늘 민박", 1),
+        # 관광지 이름 — 그대로 관광.
+        ("01000000", "춘천 명동 닭갈비 골목", 0),
+        ("01000000", "안목해변 커피거리", 0),
+        ("01070300", "경복궁", 0),
+        ("01000000", "올레 1코스 시작점", 0),
+        ("01000000", "펜션밴드", 0),
+        # 관광·미분류가 아닌 저장 분류는 그대로다(이름이 무엇이든).
+        ("02010100", "호미곶 펜션", 2),
+        ("03050200", "호미곶민박", 1),
+        ("06050000", "양양국제공항호텔", 1),
+        ("05070000", "자갈치 회센터 본점", 1),  # 전통시장(고유 이름 목적지) 그룹 그대로
+        (None, "저어새펜션", PLACE_CATEGORY_SEARCH_GROUP_FALLBACK),
+    ],
+)
+def test_search_effective_group_reads_lodging_food_branch_suffixes(
+    code: str | None, name: str, expected: int
+) -> None:
+    assert search_effective_group(code, name) == expected
+
+
+def test_search_effective_group_without_a_name_is_the_category_group() -> None:
+    for code in ("01000000", "00000000", "03010000"):
+        assert search_effective_group(code, None) == category_search_group(code)
+
+
+def test_search_name_suffix_groups_are_known_groups_and_patterns_derive_from_them() -> None:
+    groups = set(PLACE_CATEGORY_SEARCH_GROUP_BY_TIER1.values())
+    assert set(SEARCH_NAME_SUFFIX_GROUPS) <= groups
+    assert set(SEARCH_NAME_SUFFIX_PATTERNS) == set(SEARCH_NAME_SUFFIX_GROUPS)
+    for group, suffixes in SEARCH_NAME_SUFFIX_GROUPS.items():
+        for suffix in suffixes:
+            assert suffix in SEARCH_NAME_SUFFIX_PATTERNS[group]

@@ -1615,7 +1615,7 @@ def test_feature_search_score_sql_keeps_bbox_out_of_predicates() -> None:
     assert "ST_MakeEnvelope" not in name_candidates
     # bbox 식은 정확히 한 번, search_rank 정렬식 안에만 있다(filtered·최종 WHERE에 술어로 없다).
     assert sql.count("ST_MakeEnvelope") == 1
-    rank_block = sql.split("\ncandidates AS (", 1)[1].split(") AS search_rank", 1)[0]
+    rank_block = sql.split("\nscored AS (", 1)[1].split(") AS search_rank", 1)[0]
     assert "ST_MakeEnvelope" in rank_block
     assert "ST_Transform" not in sql
     assert "ORDER BY search_rank ASC, score DESC, feature_id ASC" in sql
