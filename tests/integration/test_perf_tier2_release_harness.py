@@ -52,7 +52,8 @@ INSERT INTO feature.features (
 SELECT
     CAST(:uuid_namespace || lpad(to_hex(g), 12, '0') AS uuid),
     'place',
-    '카페',
+    -- 이름마다 번호를 붙인다 — 같은 이름이 가까이 모이면 검색이 중복으로 접는다(2026-11-12 P5).
+    '카페 ' || g::text,
     '01070300',
     x_extension.ST_SetSRID(
         x_extension.ST_MakePoint(

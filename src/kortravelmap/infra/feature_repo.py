@@ -76,6 +76,8 @@ from kortravelmap.category import (
     PLACE_CATEGORY_SEARCH_GROUP_FALLBACK,
     PLACE_CATEGORY_SEARCH_GROUP_PREFIX_OVERRIDES,
     SEARCH_DESTINATION_GROUP_MAX,
+    SEARCH_NAME_SUFFIX_PATTERNS,
+    SEARCH_NAME_SUFFIX_TIER1_CODES,
     SEARCH_NAMED_DESTINATION_EXACT_GROUP,
 )
 from kortravelmap.core.exceptions import (
@@ -1997,6 +1999,34 @@ def _search_destination_exact_group_sql(category: str) -> str:
     return f"(CASE WHEN destination_exact AND ({named}) THEN {group} ELSE search_group END)"
 
 
+def _search_effective_group_sql(group: str, category: str, compact_name: str) -> str:
+    """``search_effective_group``의 SQL 짝 — 관광·미분류 행의 이름 끝말이 그룹을 정한다(검색 전용).
+
+    ``group``은 저장 분류의 그룹(``_search_category_group_sql``), ``compact_name``은 공백을 지운
+    소문자 보이는 이름이다. 끝말 정규식은 ``SEARCH_NAME_SUFFIX_PATTERNS``에서 그대로 온다(작은
+    그룹 번호 먼저). 저장 분류는 바꾸지 않는다.
+    """
+    group = _trusted_sql_identifier(group)
+    category = _trusted_sql_identifier(category)
+    compact_name = _trusted_sql_identifier(compact_name)
+    whens: list[str] = []
+    for value in sorted(SEARCH_NAME_SUFFIX_PATTERNS):
+        pattern = SEARCH_NAME_SUFFIX_PATTERNS[value]
+        if not 0 <= value <= _SEARCH_RANK_DIGIT_MAX:
+            raise ValueError(f"search group must be a single digit: {value!r}")
+        if "'" in pattern or "\\" in pattern or ":" in pattern:
+            raise ValueError(f"search name suffix pattern is not SQL-literal safe: {pattern!r}")
+        whens.append(f"WHEN {compact_name} ~ '{pattern}' THEN {value}")
+    tiers = sorted(SEARCH_NAME_SUFFIX_TIER1_CODES)
+    if not all(len(tier) == 2 and tier.isdigit() for tier in tiers):
+        raise ValueError(f"tier1 codes must be two digits: {tiers!r}")
+    tier_list = ", ".join(f"'{tier}'" for tier in tiers)
+    return (
+        f"(CASE WHEN left({category}, 2) IN ({tier_list}) THEN"
+        f" (CASE {' '.join(whens)} ELSE {group} END) ELSE {group} END)"
+    )
+
+
 def _search_destination_group_max() -> int:
     """목적지 그룹 상한(``SEARCH_DESTINATION_GROUP_MAX``) — SQL에 박는 한 자리 정수."""
     value = SEARCH_DESTINATION_GROUP_MAX
@@ -2095,6 +2125,21 @@ def _search_tail_sql(expression: str) -> str:
         " ' ') + 1)"
     )
 
+
+#: 중복 접기 반경(m, 5179 거리). 같은 장소를 여러 원천이 따로 적재한 행(MCST CSV 4종·TourAPI·
+#: 표준데이터)의 좌표 차이는 대개 수십~수백 m다(prod 2026-11-11: 이름 같고 약 100 m 안 13,776묶음).
+_SEARCH_DEDUP_RADIUS_M: Final[int] = 300
+#: 중복 접기 대상 분류(Tier 1) — 관광·식음·숙박·온천·미분류. 편의(05)·교통(06)·의료(07)는 같은
+#: 이름의 다른 시설이 가까이 흔하다: 휴게소 상·하행("덕평휴게소(서울방향)"·"(부산방향)", 50~200 m),
+#: 같은 이름의 기차역·지하철역, 주차장·주유소(적대 리뷰 2026-11-12).
+_SEARCH_DEDUP_TIER1_CODES: Final[tuple[str, ...]] = ("00", "01", "02", "03", "04")
+if not all(code.isdigit() and len(code) == 2 for code in _SEARCH_DEDUP_TIER1_CODES):
+    raise RuntimeError("dedup tier1 codes must be two digits")
+_SEARCH_DEDUP_TIER1_CODES_SQL: Final[str] = ", ".join(
+    f"'{code}'" for code in _SEARCH_DEDUP_TIER1_CODES
+)
+#: 접기 키에서 떼는 끝 괄호(반각·전각) — "신륵사(여주)"와 "신륵사"는 같은 키다(거리로 가른다).
+_SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
 
 # 별칭의 정확 이름 및 trigram 후보는 기존 idx_features_name_trgm을 사용한다.
 # 별칭 trigram 팔은 원래 이름의 공백 정규화 일치로 좁힌다. 임의의 글자 사이 공백까지
@@ -2226,6 +2271,7 @@ WITH name_candidates AS MATERIALIZED (
         f.name,
         f.category,
         f.coord,
+        f.coord_5179,
         f.sigungu_code,
         f.marker_icon,
         f.marker_color,
@@ -2276,11 +2322,15 @@ compacted AS (
         -- Hotel Seoul)"의 한글 이름과 영문 이름. 저장하지 않고 원래 이름에서 뗀다(없으면 NULL).
         {_search_bracket_base_sql("name")} AS compact_base_name,
         {_search_bracket_latin_sql("name")} AS compact_bracket_name,
-        {_search_category_group_sql("category")} AS search_group
+        {_search_category_group_sql("category")} AS category_search_group
     FROM filtered
 ),
 hits AS (
-    SELECT compacted.*{region_hit_column}
+    -- 실효 검색 그룹(검색 전용): 관광·미분류로 저장됐어도 이름 끝말이 숙박·식음·지점이면 그 그룹.
+    SELECT
+        compacted.*,
+        {_search_effective_group_sql("category_search_group", "category", "compact_name")}
+          AS search_group{region_hit_column}
     FROM compacted
 ),
 ranked AS (
@@ -2308,7 +2358,7 @@ ranked AS (
         ) IS TRUE AS destination_exact
     FROM hits
 ),
-candidates AS (
+scored AS (
     SELECT
         feature_id,
         feature_uuid,
@@ -2320,6 +2370,19 @@ candidates AS (
         marker_icon,
         marker_color,
         score,
+        coord_5179,
+        -- 중복 접기 키(검색 전용): 같은 이름(공백·대소문자·끝 괄호 무시)의 관광·식음·숙박·미분류
+        -- place(``_SEARCH_DEDUP_TIER1_CODES``). 좌표가 없으면 접지 않는다. 정규식은 이름이 닫는
+        -- 괄호로 끝날 때만 돈다.
+        CASE
+          WHEN kind = 'place' AND coord_5179 IS NOT NULL
+            AND left(category, 2) IN ({_SEARCH_DEDUP_TIER1_CODES_SQL})
+          THEN CASE
+            WHEN right(compact_name, 1) IN (')', '）')
+            THEN regexp_replace(compact_name, '{_SEARCH_DEDUP_TRAILING_BRACKET}', '')
+            ELSE compact_name
+          END
+        END AS dedup_key,
         ({region_rank}
           -- 일치 단계: 0 별칭이 가리키는 이름, 1 이름이 검색어를 품음(공백 무시), 2 유사도만.
           CASE
@@ -2355,6 +2418,44 @@ candidates AS (
           + CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END
         ) AS search_rank
     FROM ranked
+),
+-- 중복 접기(P5, 2026-11-11): 같은 접기 키 행을 ``_SEARCH_DEDUP_RADIUS_M`` 이웃으로 이어 묶고
+-- (DBSCAN, minpoints 1 — 이웃의 이웃도 같은 무리), 무리마다 정렬 순서((search_rank, -score,
+-- feature_id))가 가장 앞인 행 하나만 남긴다. 숨김은 페이지가 아니라 **후보 전체**에서 정하므로
+-- cursor 위치와 무관하다 — keyset 정렬 키·개수 질의가 그대로 맞는다. 대표가 정렬 순서의 첫 행이라
+-- 접어도 그 무리의 자리는 내려가지 않는다. 다른 도시의 같은 이름은 다른 무리다. 접기 키가 있는
+-- 행만 좁은 열로 창 함수를 돌리고(행 쌍 반조인은 후보 수의 제곱이었다), 숨길 행은 feature_id
+-- 해시 반조인으로 뺀다.
+dedup_clusters AS (
+    SELECT
+        feature_id,
+        dedup_key,
+        search_rank,
+        score,
+        x_extension.ST_ClusterDBSCAN(coord_5179, {_SEARCH_DEDUP_RADIUS_M}, 1)
+          OVER (PARTITION BY dedup_key) AS dedup_cluster
+    FROM scored
+    WHERE dedup_key IS NOT NULL
+),
+dedup_hidden AS (
+    SELECT feature_id
+    FROM (
+        SELECT
+            feature_id,
+            row_number() OVER (
+                PARTITION BY dedup_key, dedup_cluster
+                ORDER BY search_rank ASC, score DESC, feature_id ASC
+            ) AS dedup_position
+        FROM dedup_clusters
+    ) AS ordered
+    WHERE dedup_position > 1
+),
+candidates AS (
+    SELECT
+        s.feature_id, s.feature_uuid, s.kind, s.name, s.category, s.lon, s.lat,
+        s.marker_icon, s.marker_color, s.score, s.search_rank
+    FROM scored AS s
+    WHERE NOT EXISTS (SELECT 1 FROM dedup_hidden AS h WHERE h.feature_id = s.feature_id)
 )
 """
 
@@ -6984,7 +7085,8 @@ _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v4: 이름 일치를 분류 그룹 앞으로 옮겨(ADR-120) ``rank`` 값의 뜻이 바뀌었다.
 #: v5: 지역 검색(#1459 §7)이 순위 맨 앞 자리(지역 일치)를 더해 ``rank`` 값의 뜻이 바뀌었다.
 #: v6: 분류 낱말 나머지의 tail 일치 제거·낱말 덮기(2026-11-11)로 지역 검색 ``rank``가 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 6
+#: v7: 실효 검색 그룹(이름 끝말)·중복 접기(2026-11-11)로 ``rank``와 보이는 행 집합이 바뀌었다.
+_SEARCH_CURSOR_VERSION: Final[int] = 7
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -7534,6 +7636,10 @@ async def search_features(
         q_compact = search_alias_key(contract.q)
         bracket_like = search_bracket_like_pattern(contract.q)
         await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
+        # 검색 SQL은 식이 많아(순위 CASE·정규식·창 함수) 추정 비용이 ``jit_above_cost``를 넘는다.
+        # 후보는 수천 행이라 JIT가 벌 것이 없는데 컴파일(최적화·방출)이 실행 시간의 대부분이었다 —
+        # prod 2026-11-12 "부산 맛집" 7.6 s 중 JIT 7.2 s. 이 transaction에서만 끈다.
+        await session.execute(text("SET LOCAL jit = off"))
         # 별칭은 PK 조회 한 번이다. 이름을 bind 값으로 넘겨야 본 질의의 별칭 팔이 trigram
         # GIN ``=``로 계획된다(하위 질의로 두면 계획 시점에 값을 모른다).
         alias_name = (

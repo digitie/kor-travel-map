@@ -340,7 +340,10 @@ async def test_market_exact_name_ranks_before_shops_and_station_named_after_it(
     await migrated_session.flush()
     labels = await _search_ids(migrated_session, "남대문시장", ids)
     assert labels[0] == "namdaemun_market", labels
-    assert labels.index("namdaemun_food_media") < labels.index("namdaemun_cafe"), labels
+    # 관광으로 적재된 시장 안 식당("…식당")은 이름 끝말로 식음 그룹이다(2026-11-12 P4) — 역 뒤,
+    # 같은 식음 그룹의 카페와는 분류 구체성으로 갈린다.
+    assert labels.index("hoehyeon_station") < labels.index("namdaemun_food_media"), labels
+    assert labels.index("hoehyeon_station") < labels.index("namdaemun_cafe"), labels
 
 
 async def test_lodging_named_like_a_tourism_spot_stays_behind_it(
@@ -827,9 +830,11 @@ async def test_alias_space_variants_do_not_hide_typed_source_behind_unclassified
             lon=128.5, lat=36.5,
         )
     labels = await _search_ids(migrated_session, query, ids)
-    # 별칭 대상(분류 있음) → 별칭 대상(미분류) → 이름이 비슷한 식음 순이다(#1443).
-    assert labels[:2] == ["typed", "theme"], labels
-    assert labels[2:] in ([], ["food"]), labels
+    # 별칭 대상(분류 있음)이 맨 앞이다(#1443). 같은 자리의 미분류 별칭 대상은 같은 이름(공백 무시)의
+    # 중복이라 분류 있는 행으로 접힌다(2026-11-12 P5). 이름이 비슷한 식음은 그 뒤다.
+    assert labels[0] == "typed", labels
+    assert "theme" not in labels, labels
+    assert labels[1:] in ([], ["food"]), labels
     full = await feature_repo.search_features(
         migrated_session, q=query, kinds=["place"], page_size=200,
         include_total=True, cursor_signing_key=_SEARCH_CURSOR_KEY,

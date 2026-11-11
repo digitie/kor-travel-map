@@ -1,4 +1,16 @@
-## 2026-11-12 — A 검토의 공통 Button variant/size 전달 수정
+## 2026-11-12 — main 검색 2단계 병합과 C11 runtime 기준 보존
+
+- origin/main cb38c33b40d3b041a0b6df3fb50f340d1c98839a의 검색 순위2단계 변경을 merge한다.
+  기존925/e4/f55/C11 f569 commit은 재작성하지 않는다. 문서 충돌2개는 incoming 새 절과 기존 이력/보관 인덱스를 함께 보존했다.
+- 비문서9개는 incoming 원문과 동일하고 frontend 전체·root package/lock/vendor는 f56976ec9adf7482e66299195aea0cd381eca667와 같다.
+  유입 category/feature repository/속성 SQL 및 archive 링크 단위123PASS. DB/수집기 lifecycle·실제 migration은 실행하지 않았다.
+- C11의 전체440·Doctor0·lint/type·local/external canonical guard·npm peer0을 n150 f569 source로 확인했고,
+  새 production 이미지의 정식D286 strict/전체runner cleanup과 Weather20+5는 같은 슬롯2에서 진행 중이다.
+  이 merge에서 UI를 바꾸지 않았으므로 frontend 전체를 다시 설치/빌드하지 않는다. 원 리뷰/CI delta는 별도 재확인한다.
+
+## 2026-11-12 — 검색 순위 2단계
+
+- 회전에 묶는다. migration·OpenAPI 없음. R4(MCST 중복 퇴역) 전후 모두 같은 규칙으로 맞다 — 퇴역하면 접힐 무리가 줄 뿐이다.
 
 ## 2026-11-12 — C11 정본과 FocusScope fix2 채택
 
@@ -12,6 +24,8 @@ C10 checkpoint·원925/e4·원 A/B와 전후 실패 로그를 보존한다.
 n150 슬롯2에서 기존 cache를 재사용해 명시 file 설치/실제 UI94+tokens25+Scope15 bytes,
 외부 C11 canonical guard 및 최종 frontend gate를 검증 중이다.
 검증 완료·독립2리뷰·CI·merge·부모 go 전까지 배포하지 않는다. DB/API/RustFS/Dagster lifecycle 변경 없음.
+
+## 2026-11-12 — A 검토의 공통 Button variant/size 전달 수정
 
 - 원A의 A-CONS-P2-02를 같은 SSR 대조로 재현했다. ghost/link/outline·icon-xs metadata가
   default로 남고 ghost/link에 primary 채움이 남았다. Common 직접 호출은 정상이다.
