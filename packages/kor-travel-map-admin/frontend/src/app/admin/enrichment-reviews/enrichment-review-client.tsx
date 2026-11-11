@@ -437,7 +437,7 @@ function EnrichmentDetailDialog({
     >
       <DialogContent
         aria-label="enrichment review detail"
-        className="max-w-6xl"
+        className="max-w-6xl sm:max-w-6xl"
       >
         <ReviewDialogHeading
           title={<>보강 상세 비교</>}

@@ -1239,7 +1239,7 @@ export function RequestCreateDialog({
         갱신 요청 생성
       </Button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>갱신 요청 생성</DialogTitle>
             <DialogDescription>

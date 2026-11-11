@@ -406,7 +406,7 @@ function DedupDetailDialog({
         if (!open) onClose();
       }}
     >
-      <DialogContent aria-label="dedup review detail" className="max-w-6xl">
+      <DialogContent aria-label="dedup review detail" className="max-w-6xl sm:max-w-6xl">
         <ReviewDialogHeading
           title={<>중복 상세 비교</>}
           description={

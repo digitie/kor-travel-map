@@ -4,7 +4,7 @@
 
 - 모든 admin 표를 common VirtualTable로 연결하고 Radix primitive/검색 Popover를 채택했다.
   최신 exact 의존성, Zod/RHF/Zustand/Pretendard 실제 사용과 CI AST/무결성·Doctor gate를 적용했다.
-- candidate5 lint/type/build/guard/Doctor 진단 0. unit 417/419 통과, common LoginForm 자동완성
+- candidate5 lint/type/build/guard/Doctor 진단 0. unit 419/421 통과, common LoginForm 자동완성
   2건은 부모 수정 요청. 최종 freeze·n150 격리 e2e·독립 리뷰·CI/merge/부모 go 전 배포하지 않는다.
 - [구현·검증·배포 계획](docs/reports/common-unification-20261111.md), [ADR-123](docs/adr/123-common-admin-ui.md).
 

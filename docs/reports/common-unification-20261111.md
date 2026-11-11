@@ -38,8 +38,8 @@ exact policy 및 vendor/원장/lock integrity를 확인한다. Doctor는 full/wa
 
 - install script를 허용한 npm 12.0.1 clean ci 통과(candidate4), candidate5 명시 재설치 통과.
 - candidate5 lint/type-check/production build(33 routes)/AST artifact guard 통과.
-- Doctor full / blocking warning: 320 files, 진단 0.
-- 전체 unit: 419개 중 417 통과, common LoginForm 자동완성 계약 2개 실패.
+- Doctor full / blocking warning: 321 files, 진단 0.
+- 전체 unit: 421개 중 419 통과, common LoginForm 자동완성 계약 2개 실패.
   change 이벤트 없이 DOM password.value가 채워진 뒤 submit하면 최신 FormData 대신
   RHF 내부 빈 값이 검증되어 fetch가 호출되지 않는다. 기존 회귀 테스트는 유지했고 부모 수정 요청.
 - candidate5 Dagster 실행 선택 toggle/DOM 포커스 보존 회귀 통과.
@@ -97,3 +97,28 @@ revision은 `fd1d770162e8253020a936ec552a4395500f444e`로 확인했다.
 도메인 마커/geometry를 렌더링한다. 부모에게 explicit mapStyle public API와 명시 style의
 missing-key gate 예외를 요청했다. 앱에서 가짜 키나 자체 Map 생성자로 우회하지 않는다.
 n150의 exact commit checkpoint로 영향 범위를 재현 중이다.
+
+
+## candidate5 격리 브라우저 재현 및 Map 호환 복구
+
+n150 exact bcf2a3745 checkpoint A(286 mock tests)는 첫 Chromium revision1254 누락을
+정확 1.65.0 브라우저 설치로 해결한 뒤 실행했다. 실행 중 확인한 실제 회귀:
+
+- CardTitle의 heading 누락, 일반 Alert의 status→alert 변경으로 backups e2e가 실패했다.
+  Map wrapper에서 기존 heading level2와 기본 polite/status·destructive assertive/alert를 복구했다.
+  관련 회귀 unit2개 통과.
+- Enrichment dialog의 accept 클릭이 element outside viewport로 시간 초과했다.
+  긴 내용이 viewport 안에서 스크롤하도록 Map DialogContent를 제한하고 넓은 비교 창의
+  sm breakpoint 폭을 명시했다. 자동 닫기 버튼 중복도 기존 Map 계약에 맞춰 기본 비표시로 조정했다.
+- 키 없는 upstream 지도는 _maplibreMap을 생성하지 않아 features-map-interactions의
+  초기화 predicate true 기대가 false로 시간 초과했고 큐레이션 bbox 요청도 0이었다.
+  이는 source 분석만이 아니라 브라우저에서 재현됐다. 부모 mapStyle public API 수정이 필요하다.
+
+이 브라우저 실행은 후속 Map wrapper/common 리뷰수정을 포함하지 않아 최종 통과 근거가 아니다.
+부모 freshpack/freeze 뒤 exact 최종 SHA로 checkpoint를 다시 실행해야 한다.
+
+후속 Map 호환 복구 소스 기준 lint/type/build33routes/Doctor321files0 재통과.
+전체 unit421개 중419통과, 남은 LoginForm2개는 부모 공통 수정/후보 재설치를 기다린다.
+구후보 n150 checkpoint는 81개 통과 관측 후 실제 회귀(재시도 포함29실패 항목)를 수집하고
+freshpack 재검증을 위해 본인 runner만 SIGTERM 종료했다. 완료 통과 합계가 아니다.
+own container/network/image 잔존0 확인. 원시 회귀 요약은 작업 루트 map-c5-e2e-failures.json에 보존.
