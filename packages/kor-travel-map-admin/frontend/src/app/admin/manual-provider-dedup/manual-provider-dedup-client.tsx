@@ -93,79 +93,79 @@ export function ManualProviderDedupClient() {
   // 관심사이고, 이 컴포넌트의 관심사는 "무엇을 막는가"다.
   return (
     <div>
-        <label>
-          상태
-          <select
-            value={status}
-            onChange={(event) => {
-              setStatus(event.target.value as ManualProviderDedupStatus);
-              resetPaging();
-            }}
-          >
-            <option value="pending">미해결</option>
-            <option value="terminal">판정 완료</option>
-          </select>
-        </label>
+      <label>
+        상태
+        <select
+          value={status}
+          onChange={(event) => {
+            setStatus(event.target.value as ManualProviderDedupStatus);
+            resetPaging();
+          }}
+        >
+          <option value="pending">미해결</option>
+          <option value="terminal">판정 완료</option>
+        </select>
+      </label>
 
-        {cases.isPending ? <p>불러오는 중…</p> : null}
-        {cases.isError ? <p role="alert">목록을 불러오지 못했다.</p> : null}
-        {!cases.isPending && items.length === 0 ? (
-          <p>이 상태의 후보가 없다.</p>
-        ) : null}
+      {cases.isPending ? <p>불러오는 중…</p> : null}
+      {cases.isError ? <p role="alert">목록을 불러오지 못했다.</p> : null}
+      {!cases.isPending && items.length === 0 ? (
+        <p>이 상태의 후보가 없다.</p>
+      ) : null}
 
-        <ul aria-label="중복 후보">
-          {items.map((item) => (
-            <li key={item.case_id}>
-              <button
-                type="button"
-                aria-pressed={selectedCaseId === item.case_id}
-                onClick={() => setSelectedCaseId(item.case_id)}
-              >
-                <CaseSummary item={item} />
-              </button>
-            </li>
-          ))}
-        </ul>
+      <ul aria-label="중복 후보">
+        {items.map((item) => (
+          <li key={item.case_id}>
+            <button
+              type="button"
+              aria-pressed={selectedCaseId === item.case_id}
+              onClick={() => setSelectedCaseId(item.case_id)}
+            >
+              <CaseSummary item={item} />
+            </button>
+          </li>
+        ))}
+      </ul>
 
-        <nav aria-label="페이지">
-          <button
-            type="button"
-            disabled={cursors.length <= 1}
-            onClick={() => {
-              setCursors((previous) => previous.slice(0, -1));
-              setSelectedCaseId(null);
-            }}
-          >
-            이전
-          </button>
-          <button
-            type="button"
-            disabled={!hasNext}
-            onClick={() => {
-              setCursors((previous) => [
-                ...previous,
-                {
-                  after_created_at: page?.next_after_created_at ?? null,
-                  after_case_id: page?.next_after_case_id ?? null,
-                },
-              ]);
-              setSelectedCaseId(null);
-            }}
-          >
-            다음
-          </button>
-        </nav>
+      <nav aria-label="페이지">
+        <button
+          type="button"
+          disabled={cursors.length <= 1}
+          onClick={() => {
+            setCursors((previous) => previous.slice(0, -1));
+            setSelectedCaseId(null);
+          }}
+        >
+          이전
+        </button>
+        <button
+          type="button"
+          disabled={!hasNext}
+          onClick={() => {
+            setCursors((previous) => [
+              ...previous,
+              {
+                after_created_at: page?.next_after_created_at ?? null,
+                after_case_id: page?.next_after_case_id ?? null,
+              },
+            ]);
+            setSelectedCaseId(null);
+          }}
+        >
+          다음
+        </button>
+      </nav>
 
-        {selectedCaseId ? (
-          // **`key`로 remount한다.** 없으면 case를 바꿔도 decision·reason·확인 문구와
-          // mutation 상태가 남아, 앞 case에서 입력한 확인 문구로 다음 case의 파괴적
-          // 판정이 무장된다 — M05-5의 안전장치 셋이 두 번째 case부터 전부 무력화된다
-          // (적대 리뷰 BLOCKER).
-          <CaseDecisionPanel
-            key={selectedCaseId}
-            caseId={selectedCaseId}
-            onResolved={() => setSelectedCaseId(null)}
-          />
+      {selectedCaseId ? (
+        // **`key`로 remount한다.** 없으면 case를 바꿔도 decision·reason·확인 문구와
+        // mutation 상태가 남아, 앞 case에서 입력한 확인 문구로 다음 case의 파괴적
+        // 판정이 무장된다 — M05-5의 안전장치 셋이 두 번째 case부터 전부 무력화된다
+        // (적대 리뷰 BLOCKER).
+        <CaseDecisionPanel
+          key={selectedCaseId}
+          caseId={selectedCaseId}
+          onResolved={() => setSelectedCaseId(null)}
+        />
       ) : null}
     </div>
   );
@@ -234,61 +234,28 @@ function CaseDecisionPanel({
 
   const resolved = submit.data?.data;
 
-  return (
-    <section aria-label="판정">
-      <h2>판정</h2>
-
-      <dl>
-        <dt>수동 Feature</dt>
-        <dd>{readFeatureId(data.manual_feature)}</dd>
-        <dt>provider Feature (병합 시 survivor)</dt>
-        <dd>{survivorFeatureId}</dd>
-        <dt>evidence 지문</dt>
-        <dd>
-          <code>{data.evidence_fingerprint}</code>
-        </dd>
-      </dl>
-
-      <section aria-label="미확인 consumer">
-        <h3>미확인 consumer</h3>
-        <p>
-          이 case가 아니라 <strong>그 principal의 구독 전체</strong>가 밀린 시간이다 —
-          판정 결과가 전파되기까지 얼마나 걸릴지의 지표다.
-        </p>
-        {now === 0 ? (
-          <p>계산 중…</p>
-        ) : unacked.length === 0 ? (
-          <p>밀린 consumer가 없다.</p>
-        ) : (
-          <ul>
-            {unacked.map((entry) => (
-              <li key={entry.principalId}>
-                {entry.principalId} — {formatUnackedAge(entry.ageMs)} 밀림
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
+  function renderCaseDecisionPanelFieldset0() {
+    if (!data) return null;
+    return (
       <fieldset disabled={alreadyResolved}>
         <legend>결정</legend>
-        {(
-          Object.keys(DECISION_LABELS) as ManualProviderDedupDecision[]
-        ).map((value) => (
-          <label key={value}>
-            <input
-              type="radio"
-              name="decision"
-              value={value}
-              checked={decision === value}
-              onChange={() => {
-                setDecision(value);
-                setConfirmation("");
-              }}
-            />
-            {DECISION_LABELS[value]}
-          </label>
-        ))}
+        {(Object.keys(DECISION_LABELS) as ManualProviderDedupDecision[]).map(
+          (value) => (
+            <label key={value}>
+              <input
+                type="radio"
+                name="decision"
+                value={value}
+                checked={decision === value}
+                onChange={() => {
+                  setDecision(value);
+                  setConfirmation("");
+                }}
+              />
+              {DECISION_LABELS[value]}
+            </label>
+          ),
+        )}
 
         <label>
           사유 (필수)
@@ -320,7 +287,9 @@ function CaseDecisionPanel({
               decision,
               reason: trimmedReason,
               expected_case_fingerprint: data.evidence_fingerprint,
-              expected_manual_row_revision: readRowRevision(data.manual_feature),
+              expected_manual_row_revision: readRowRevision(
+                data.manual_feature,
+              ),
               expected_provider_row_revision: readRowRevision(
                 data.provider_feature,
               ),
@@ -331,6 +300,45 @@ function CaseDecisionPanel({
           판정 제출
         </button>
       </fieldset>
+    );
+  }
+  return (
+    <section aria-label="판정">
+      <h2>판정</h2>
+
+      <dl>
+        <dt>수동 Feature</dt>
+        <dd>{readFeatureId(data.manual_feature)}</dd>
+        <dt>provider Feature (병합 시 survivor)</dt>
+        <dd>{survivorFeatureId}</dd>
+        <dt>evidence 지문</dt>
+        <dd>
+          <code>{data.evidence_fingerprint}</code>
+        </dd>
+      </dl>
+
+      <section aria-label="미확인 consumer">
+        <h3>미확인 consumer</h3>
+        <p>
+          이 case가 아니라 <strong>그 principal의 구독 전체</strong>가 밀린
+          시간이다 — 판정 결과가 전파되기까지 얼마나 걸릴지의 지표다.
+        </p>
+        {now === 0 ? (
+          <p>계산 중…</p>
+        ) : unacked.length === 0 ? (
+          <p>밀린 consumer가 없다.</p>
+        ) : (
+          <ul>
+            {unacked.map((entry) => (
+              <li key={entry.principalId}>
+                {entry.principalId} — {formatUnackedAge(entry.ageMs)} 밀림
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {renderCaseDecisionPanelFieldset0()}
 
       {alreadyResolved ? <p>이미 판정된 후보다.</p> : null}
       {submit.isError ? (

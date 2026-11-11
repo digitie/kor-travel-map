@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (form) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import type { Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
 import {
@@ -629,7 +629,9 @@ function useFeatureCreateClientController() {
         header: "거리",
         meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className="tabular-nums">{row.original.distance_m.toFixed(1)}m</span>
+          <span className="tabular-nums">
+            {row.original.distance_m.toFixed(1)}m
+          </span>
         ),
       },
     ],
@@ -797,7 +799,10 @@ function useFeatureCreateClientController() {
       if (fieldErrors !== null) {
         dispatch({ type: "validation-errors", errors: fieldErrors });
       }
-      dispatch({ type: "create-error", message: manualCreateErrorMessage(error) });
+      dispatch({
+        type: "create-error",
+        message: manualCreateErrorMessage(error),
+      });
     } finally {
       submitCreateInFlightRef.current = false;
     }
@@ -847,12 +852,16 @@ function FeatureCreateFeedback({
 >) {
   const failureCandidates: Array<FailureItem | null> = [
     formError ? { source: "입력 검증", message: formError } : null,
-    korTravelGeoError ? { source: "kor-travel-geo", message: korTravelGeoError } : null,
+    korTravelGeoError
+      ? { source: "kor-travel-geo", message: korTravelGeoError }
+      : null,
     createFeature.isError
       ? { source: "생성 요청", message: createFeature.error?.message }
       : null,
   ];
-  const failures = failureCandidates.filter((item): item is FailureItem => item !== null);
+  const failures = failureCandidates.filter(
+    (item): item is FailureItem => item !== null,
+  );
   return (
     // CTA 바로 위의 예약 슬롯 — 오류가 나타나도 저장 행이 밀리지 않는다(M13).
     <div aria-live="polite" className="flex min-h-[1lh] flex-col gap-3">
@@ -959,7 +968,12 @@ function FeatureCreateLocationWorkspace({
         title={form.name || "new feature"}
         actions={
           <>
-            <Button size="sm" type="button" variant="outline" onClick={applyMapCenter}>
+            <Button
+              size="sm"
+              type="button"
+              variant="outline"
+              onClick={applyMapCenter}
+            >
               <LocateFixedIcon data-icon="inline-start" />
               중심 사용
             </Button>
@@ -987,7 +1001,9 @@ function FeatureCreateLocationWorkspace({
         <SectionCard
           actions={
             <span className="text-xs text-text-secondary tabular-nums">
-              {korTravelGeoPending ? "조회 중" : `${korTravelGeoCandidates.length}건`}
+              {korTravelGeoPending
+                ? "조회 중"
+                : `${korTravelGeoCandidates.length}건`}
             </span>
           }
           contentClassName="space-y-3"
@@ -999,9 +1015,7 @@ function FeatureCreateLocationWorkspace({
             label="주소 검색"
             size="sm"
             value={form.geocodeQuery}
-            onChange={(event) =>
-              updateForm("geocodeQuery", event.target.value)
-            }
+            onChange={(event) => updateForm("geocodeQuery", event.target.value)}
           />
           <div className="grid gap-x-2 gap-y-1 sm:grid-cols-[9rem_1fr]">
             <FormSelect
@@ -1012,17 +1026,21 @@ function FeatureCreateLocationWorkspace({
               onChange={(event) =>
                 updateForm(
                   "geocodeType",
-                  event.target
-                    .value as FeatureCreateFormState["geocodeType"],
+                  event.target.value as FeatureCreateFormState["geocodeType"],
                 )
               }
             >
               <NativeSelectOption value="road">도로명(road)</NativeSelectOption>
-              <NativeSelectOption value="parcel">지번(parcel)</NativeSelectOption>
+              <NativeSelectOption value="parcel">
+                지번(parcel)
+              </NativeSelectOption>
             </FormSelect>
             <div className="flex flex-col gap-1">
               {/* 라벨 높이 스페이서 — 버튼을 왼쪽 select의 컨트롤 baseline에 맞춘다. */}
-              <span aria-hidden="true" className="invisible text-xs leading-snug font-medium">
+              <span
+                aria-hidden="true"
+                className="invisible text-xs leading-snug font-medium"
+              >
                 조회
               </span>
               <Button
@@ -1044,8 +1062,7 @@ function FeatureCreateLocationWorkspace({
               role="group"
             >
               {korTravelGeoCandidates.slice(0, 4).map((candidate) => {
-                const candidateCoord =
-                  korTravelGeoCandidateToCoord(candidate);
+                const candidateCoord = korTravelGeoCandidateToCoord(candidate);
                 const address = candidate.address;
                 const candidateKey = korTravelGeoCandidateKey(candidate);
                 const selected = candidateKey === selectedKorTravelGeoKey;
@@ -1186,7 +1203,8 @@ function FeatureCreateIdentityFields({
         <Alert variant="destructive">
           <AlertTitle>카테고리 목록을 불러오지 못했습니다</AlertTitle>
           <AlertDescription>
-            {categories.error.message} — 카테고리 코드를 직접 입력해도 제출할 수 있습니다.
+            {categories.error.message} — 카테고리 코드를 직접 입력해도 제출할 수
+            있습니다.
           </AlertDescription>
         </Alert>
       ) : null}

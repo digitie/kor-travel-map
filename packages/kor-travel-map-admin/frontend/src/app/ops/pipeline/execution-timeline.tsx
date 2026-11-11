@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { XIcon } from "lucide-react";
 import { useMemo, useState } from "react";
 
@@ -147,34 +147,60 @@ function useExecutionTimelineController({
       urlSignature: urlDraftSignature,
     });
   }
-  const providerDatasetId =
-    drafts.providerDatasetId ??
-    (initialFilters.providerDatasetId
-      ? String(initialFilters.providerDatasetId)
-      : "");
-  const syncScope = drafts.syncScope ?? initialFilters.syncScope ?? "";
-  const operationKey = drafts.operationKey ?? initialFilters.operationKey ?? "";
-  const createdFrom = datetimeLocalValue(initialFilters.createdFrom);
-  const createdTo = datetimeLocalValue(initialFilters.createdTo);
-  const loadBatchId = initialLoadBatchId ?? "";
-  const parentJobId = initialParentJobId ?? "";
-  const providerDatasetIdFilter = positiveInteger(providerDatasetId);
-  // 세 축을 **전부** 요구하면 안 된다. 서버 `_canonical_dataset_filter`는
-  // provider_dataset_id 단독, +sync_scope, +operation_key를 모두 받는다. 예전
-  // 판은 셋이 다 차지 않으면 `provider_dataset_id`까지 버려서, 화면에는 ID가
-  // 적혀 있는데 목록은 **전 시스템의 모든 실행**이었다 — 좁히는 실패가 아니라
-  // 넓히는 실패(fail-open)라 운영자가 남의 실행을 열고 취소할 수 있었다.
-  // 형제 패널 `events-panel.tsx`는 처음부터 이 규칙이었다.
-  const exactProviderDatasetIdFilter = providerDatasetIdFilter;
-  const syncScopeFilter = providerDatasetIdFilter
-    ? syncScope.trim() || undefined
-    : undefined;
-  const operationKeyFilter = providerDatasetIdFilter
-    ? operationKey.trim() || undefined
-    : undefined;
-  const filterSignature = JSON.stringify([
-    kind,
-    status,
+  function deriveExecutionTimelineControllerState() {
+    const providerDatasetId =
+      drafts.providerDatasetId ??
+      (initialFilters.providerDatasetId
+        ? String(initialFilters.providerDatasetId)
+        : "");
+    const syncScope = drafts.syncScope ?? initialFilters.syncScope ?? "";
+    const operationKey =
+      drafts.operationKey ?? initialFilters.operationKey ?? "";
+    const createdFrom = datetimeLocalValue(initialFilters.createdFrom);
+    const createdTo = datetimeLocalValue(initialFilters.createdTo);
+    const loadBatchId = initialLoadBatchId ?? "";
+    const parentJobId = initialParentJobId ?? "";
+    const providerDatasetIdFilter = positiveInteger(providerDatasetId);
+    // 세 축을 **전부** 요구하면 안 된다. 서버 `_canonical_dataset_filter`는
+    // provider_dataset_id 단독, +sync_scope, +operation_key를 모두 받는다. 예전
+    // 판은 셋이 다 차지 않으면 `provider_dataset_id`까지 버려서, 화면에는 ID가
+    // 적혀 있는데 목록은 **전 시스템의 모든 실행**이었다 — 좁히는 실패가 아니라
+    // 넓히는 실패(fail-open)라 운영자가 남의 실행을 열고 취소할 수 있었다.
+    // 형제 패널 `events-panel.tsx`는 처음부터 이 규칙이었다.
+    const exactProviderDatasetIdFilter = providerDatasetIdFilter;
+    const syncScopeFilter = providerDatasetIdFilter
+      ? syncScope.trim() || undefined
+      : undefined;
+    const operationKeyFilter = providerDatasetIdFilter
+      ? operationKey.trim() || undefined
+      : undefined;
+    const filterSignature = JSON.stringify([
+      kind,
+      status,
+      providerDatasetId,
+      syncScope,
+      operationKey,
+      createdFrom,
+      createdTo,
+      loadBatchId,
+      parentJobId,
+    ]);
+    return {
+      providerDatasetId,
+      syncScope,
+      operationKey,
+      createdFrom,
+      createdTo,
+      loadBatchId,
+      parentJobId,
+      providerDatasetIdFilter,
+      exactProviderDatasetIdFilter,
+      syncScopeFilter,
+      operationKeyFilter,
+      filterSignature,
+    };
+  }
+  const {
     providerDatasetId,
     syncScope,
     operationKey,
@@ -182,7 +208,12 @@ function useExecutionTimelineController({
     createdTo,
     loadBatchId,
     parentJobId,
-  ]);
+    providerDatasetIdFilter,
+    exactProviderDatasetIdFilter,
+    syncScopeFilter,
+    operationKeyFilter,
+    filterSignature,
+  } = deriveExecutionTimelineControllerState();
   const [paginationSignature, setPaginationSignature] =
     useState(filterSignature);
   const [storedCursorStack, setStoredCursorStack] = useState<string[]>([]);
@@ -493,174 +524,164 @@ function ExecutionTimelineFilters({
   | "syncScope"
 >) {
   return (
-        <FilterBar>
-          <FilterField label="종류">
-            <NativeSelect
-              aria-label="실행 종류"
-              value={kind}
-              onChange={(event) => {
-                const value = event.target.value as ExecutionKind | "all";
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange({ kind: value === "all" ? null : value });
-              }}
-            >
-              {KIND_OPTIONS.map((value) => (
-                <NativeSelectOption key={value} value={value}>
-                  {value === "all" ? "전체" : executionKindLabel(value)}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </FilterField>
-          <FilterField label="상태">
-            <NativeSelect
-              aria-label="실행 상태"
-              value={status}
-              onChange={(event) => {
-                const value = event.target.value as ExecutionStatus | "all";
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange({ status: value === "all" ? null : value });
-              }}
-            >
-              {STATUS_OPTIONS.map((value) => (
-                <NativeSelectOption key={value} value={value}>
-                  {value === "all" ? "전체" : value}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
-          </FilterField>
-          <FilterField label="provider dataset ID">
-            <Input
-              aria-label="provider dataset ID 필터"
-              inputMode="numeric"
-              min="1"
-              placeholder="예: 42"
-              type="number"
-              value={providerDatasetId}
-              onBlur={() =>
-                setDrafts((current) => ({
-                  ...current,
-                  providerDatasetId: null,
-                }))
-              }
-              onChange={(event) => {
-                const value = event.target.value;
-                setDrafts((current) => ({
-                  ...current,
-                  providerDatasetId: value,
-                }));
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange(
-                  { provider_dataset_id: value.trim() || null },
-                  "replace",
-                );
-              }}
-              onFocus={() =>
-                setDrafts((current) => ({
-                  ...current,
-                  providerDatasetId,
-                }))
-              }
-            />
-          </FilterField>
-          <FilterField
-            hint={
-              <span id="timeline-scope-prerequisite">
-                {providerDatasetIdFilter
-                  ? "선택한 provider dataset 안의 scope로 좁힙니다."
-                  : "provider dataset ID를 먼저 입력하세요."}
-              </span>
-            }
-            label="sync scope"
-          >
-            <Input
-              aria-describedby="timeline-scope-prerequisite"
-              aria-label="sync scope 필터"
-              disabled={!providerDatasetIdFilter}
-              placeholder="예: target_grids"
-              value={syncScope}
-              onBlur={() =>
-                setDrafts((current) => ({ ...current, syncScope: null }))
-              }
-              onChange={(event) => {
-                const value = event.target.value;
-                setDrafts((current) => ({ ...current, syncScope: value }));
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange({ sync_scope: value.trim() || null }, "replace");
-              }}
-              onFocus={() =>
-                setDrafts((current) => ({ ...current, syncScope }))
-              }
-            />
-          </FilterField>
-          <FilterField
-            hint={
-              <span id="timeline-operation-prerequisite">
-                {!providerDatasetIdFilter || !syncScope.trim()
-                  ? "provider dataset ID와 sync scope를 먼저 입력하세요."
-                  : "같은 dataset/scope의 operation으로 좁힙니다."}
-              </span>
-            }
-            label="operation key"
-          >
-            <Input
-              aria-describedby="timeline-operation-prerequisite"
-              aria-label="operation key 필터"
-              disabled={!providerDatasetIdFilter || !syncScope.trim()}
-              placeholder="예: refresh_targeted"
-              value={operationKey}
-              onBlur={() =>
-                setDrafts((current) => ({ ...current, operationKey: null }))
-              }
-              onChange={(event) => {
-                const value = event.target.value;
-                setDrafts((current) => ({ ...current, operationKey: value }));
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange(
-                  { operation_key: value.trim() || null },
-                  "replace",
-                );
-              }}
-              onFocus={() =>
-                setDrafts((current) => ({ ...current, operationKey }))
-              }
-            />
-          </FilterField>
-          <FilterField label="시작일">
-            <Input
-              aria-label="생성 시작일"
-              type="datetime-local"
-              value={createdFrom}
-              onChange={(event) => {
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange(
-                  { created_from: event.target.value || null },
-                  "replace",
-                );
-              }}
-            />
-          </FilterField>
-          <FilterField label="종료일">
-            <Input
-              aria-label="생성 종료일"
-              type="datetime-local"
-              value={createdTo}
-              onChange={(event) => {
-                setStoredCursorStack([]);
-                setStoredBaselineTop(null);
-                onUrlChange(
-                  { created_to: event.target.value || null },
-                  "replace",
-                );
-              }}
-            />
-          </FilterField>
-        </FilterBar>
+    <FilterBar>
+      <FilterField label="종류">
+        <NativeSelect
+          aria-label="실행 종류"
+          value={kind}
+          onChange={(event) => {
+            const value = event.target.value as ExecutionKind | "all";
+            setStoredCursorStack([]);
+            setStoredBaselineTop(null);
+            onUrlChange({ kind: value === "all" ? null : value });
+          }}
+        >
+          {KIND_OPTIONS.map((value) => (
+            <NativeSelectOption key={value} value={value}>
+              {value === "all" ? "전체" : executionKindLabel(value)}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </FilterField>
+      <FilterField label="상태">
+        <NativeSelect
+          aria-label="실행 상태"
+          value={status}
+          onChange={(event) => {
+            const value = event.target.value as ExecutionStatus | "all";
+            setStoredCursorStack([]);
+            setStoredBaselineTop(null);
+            onUrlChange({ status: value === "all" ? null : value });
+          }}
+        >
+          {STATUS_OPTIONS.map((value) => (
+            <NativeSelectOption key={value} value={value}>
+              {value === "all" ? "전체" : value}
+            </NativeSelectOption>
+          ))}
+        </NativeSelect>
+      </FilterField>
+      <FilterField label="provider dataset ID">
+        <Input
+          aria-label="provider dataset ID 필터"
+          inputMode="numeric"
+          min="1"
+          placeholder="예: 42"
+          type="number"
+          value={providerDatasetId}
+          onBlur={() =>
+            setDrafts((current) => ({
+              ...current,
+              providerDatasetId: null,
+            }))
+          }
+          onChange={(event) => {
+            const value = event.target.value;
+            setDrafts((current) => ({
+              ...current,
+              providerDatasetId: value,
+            }));
+            setStoredCursorStack([]);
+            setStoredBaselineTop(null);
+            onUrlChange(
+              { provider_dataset_id: value.trim() || null },
+              "replace",
+            );
+          }}
+          onFocus={() =>
+            setDrafts((current) => ({
+              ...current,
+              providerDatasetId,
+            }))
+          }
+        />
+      </FilterField>
+      <FilterField
+        hint={
+          <span id="timeline-scope-prerequisite">
+            {providerDatasetIdFilter
+              ? "선택한 provider dataset 안의 scope로 좁힙니다."
+              : "provider dataset ID를 먼저 입력하세요."}
+          </span>
+        }
+        label="sync scope"
+      >
+        <Input
+          aria-describedby="timeline-scope-prerequisite"
+          aria-label="sync scope 필터"
+          disabled={!providerDatasetIdFilter}
+          placeholder="예: target_grids"
+          value={syncScope}
+          onBlur={() =>
+            setDrafts((current) => ({ ...current, syncScope: null }))
+          }
+          onChange={(event) => {
+            const value = event.target.value;
+            setDrafts((current) => ({ ...current, syncScope: value }));
+            setStoredCursorStack([]);
+            setStoredBaselineTop(null);
+            onUrlChange({ sync_scope: value.trim() || null }, "replace");
+          }}
+          onFocus={() => setDrafts((current) => ({ ...current, syncScope }))}
+        />
+      </FilterField>
+      <FilterField
+        hint={
+          <span id="timeline-operation-prerequisite">
+            {!providerDatasetIdFilter || !syncScope.trim()
+              ? "provider dataset ID와 sync scope를 먼저 입력하세요."
+              : "같은 dataset/scope의 operation으로 좁힙니다."}
+          </span>
+        }
+        label="operation key"
+      >
+        <Input
+          aria-describedby="timeline-operation-prerequisite"
+          aria-label="operation key 필터"
+          disabled={!providerDatasetIdFilter || !syncScope.trim()}
+          placeholder="예: refresh_targeted"
+          value={operationKey}
+          onBlur={() =>
+            setDrafts((current) => ({ ...current, operationKey: null }))
+          }
+          onChange={(event) => {
+            const value = event.target.value;
+            setDrafts((current) => ({ ...current, operationKey: value }));
+            setStoredCursorStack([]);
+            setStoredBaselineTop(null);
+            onUrlChange({ operation_key: value.trim() || null }, "replace");
+          }}
+          onFocus={() => setDrafts((current) => ({ ...current, operationKey }))}
+        />
+      </FilterField>
+      <FilterField label="시작일">
+        <Input
+          aria-label="생성 시작일"
+          type="datetime-local"
+          value={createdFrom}
+          onChange={(event) => {
+            setStoredCursorStack([]);
+            setStoredBaselineTop(null);
+            onUrlChange(
+              { created_from: event.target.value || null },
+              "replace",
+            );
+          }}
+        />
+      </FilterField>
+      <FilterField label="종료일">
+        <Input
+          aria-label="생성 종료일"
+          type="datetime-local"
+          value={createdTo}
+          onChange={(event) => {
+            setStoredCursorStack([]);
+            setStoredBaselineTop(null);
+            onUrlChange({ created_to: event.target.value || null }, "replace");
+          }}
+        />
+      </FilterField>
+    </FilterBar>
   );
 }
 
@@ -744,7 +765,8 @@ function ExecutionTimelineView({
           ) : null}
           {parentJobId.trim() ? (
             <span className={ACTIVE_FILTER_CHIP_CLASS}>
-              상위 작업 <span className="font-mono">{shortId(parentJobId)}</span>
+              상위 작업{" "}
+              <span className="font-mono">{shortId(parentJobId)}</span>
               <Button
                 aria-label="상위 작업 필터 지우기"
                 size="icon-sm"
@@ -823,6 +845,13 @@ export function ExecutionTimeline({
   ) => void;
   onUrlChange: (updates: TimelineUrlUpdates, mode?: "push" | "replace") => void;
 }) {
-  const controller = useExecutionTimelineController({ initialFilters, initialLoadBatchId, initialParentJobId, selectedExecutionId, onSelectExecution, onUrlChange });
+  const controller = useExecutionTimelineController({
+    initialFilters,
+    initialLoadBatchId,
+    initialParentJobId,
+    selectedExecutionId,
+    onSelectExecution,
+    onUrlChange,
+  });
   return <ExecutionTimelineView {...controller} />;
 }

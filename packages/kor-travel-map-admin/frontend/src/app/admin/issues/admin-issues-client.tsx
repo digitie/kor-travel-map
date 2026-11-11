@@ -1,7 +1,8 @@
 "use client";
+import { ReviewErrorAlert } from "@/components/review-feedback";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import {
   CheckIcon,
   MapIcon,
@@ -308,7 +309,9 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
       body: buildActionBody(actionName, patch),
     });
   };
-  const pendingAction = action.isPending ? action.variables?.body.action : undefined;
+  const pendingAction = action.isPending
+    ? action.variables?.body.action
+    : undefined;
   const actionButton = (
     label: string,
     actionName: AdminIssueAction,
@@ -345,10 +348,122 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
           ) : null,
         },
         { label: "source", value: issue.source_record_key ?? null, mono: true },
-        { label: "detected", value: formatDateTime(issue.detected_at), numeric: true },
+        {
+          label: "detected",
+          value: formatDateTime(issue.detected_at),
+          numeric: true,
+        },
       ]
     : null;
 
+  function renderIssueDetailPanelState() {
+    return issue && items ? (
+      <>
+        <div className="flex flex-wrap items-center gap-1.5">
+          <StatusBadge status={issue.status} />
+          <LevelBadge level={issue.severity} />
+          <span className="font-mono text-xs text-text-secondary">
+            {issue.violation_type}
+          </span>
+        </div>
+        <p className="text-sm text-text-primary">{issue.message}</p>
+        <DetailList items={items} layout="inline" />
+        <div className="flex flex-col gap-2 border-t border-border pt-4">
+          <span className="text-2xs font-medium text-text-secondary">조치</span>
+          <div className="flex flex-wrap gap-1.5">
+            {actionButton(
+              "해결",
+              "resolve",
+              "outline",
+              <CheckIcon data-icon="inline-start" />,
+            )}
+            {actionButton(
+              "무시",
+              "ignore",
+              "ghost",
+              <XIcon data-icon="inline-start" />,
+            )}
+            {actionButton(
+              "다시 열기",
+              "reopen",
+              "ghost",
+              <RotateCcwIcon data-icon="inline-start" />,
+            )}
+          </div>
+          <span className="mt-1 text-2xs font-medium text-text-secondary">
+            주소·좌표
+          </span>
+          <div className="flex flex-wrap gap-1.5">
+            {actionButton("주소로 좌표 재검색", "retry_geocode", "ghost")}
+            {actionButton(
+              "좌표로 주소 재검색",
+              "retry_reverse_geocode",
+              "ghost",
+            )}
+            {actionButton(
+              "추천 주소 적용",
+              "apply_kor_travel_geo_address",
+              "ghost",
+            )}
+          </div>
+        </div>
+
+        {feature ? (
+          <details className="group/details border-t border-border pt-4" open>
+            <summary className="cursor-pointer text-sm font-medium text-text-primary select-none">
+              Feature 스냅샷
+            </summary>
+            <div className="mt-3 flex flex-col gap-3">
+              <DetailList
+                items={[
+                  {
+                    label: "상태 축",
+                    value: `${featureStateLabel("lifecycle", feature.lifecycle_state)} · ${featureStateLabel(
+                      "publication",
+                      feature.publication_state,
+                    )} · ${featureStateLabel("quality", feature.quality_state)}`,
+                  },
+                  {
+                    label: "coord",
+                    value:
+                      typeof feature.lon === "number" &&
+                      typeof feature.lat === "number"
+                        ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
+                        : "없음",
+                    mono: true,
+                  },
+                  {
+                    label: "sigungu",
+                    value: feature.sigungu_code ?? null,
+                    mono: true,
+                  },
+                ]}
+                layout="inline"
+              />
+              <JsonViewer
+                aria-label="feature address"
+                maxHeight="sm"
+                value={feature.address}
+              />
+            </div>
+          </details>
+        ) : null}
+
+        <details className="border-t border-border pt-4">
+          <summary className="cursor-pointer text-sm font-medium text-text-primary select-none">
+            payload
+          </summary>
+          <div className="mt-3">
+            <JsonViewer
+              aria-label="issue payload"
+              copyable
+              value={issue.payload}
+            />
+          </div>
+        </details>
+      </>
+    ) : null;
+  }
   return (
     <div className="flex flex-col gap-6">
       <SectionCard
@@ -384,80 +499,7 @@ function IssueDetailPanel({ issueId }: { issueId: string | null }) {
             </AlertActions>
           </Alert>
         ) : null}
-        {issue && items ? (
-          <>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <StatusBadge status={issue.status} />
-              <LevelBadge level={issue.severity} />
-              <span className="font-mono text-xs text-text-secondary">
-                {issue.violation_type}
-              </span>
-            </div>
-            <p className="text-sm text-text-primary">{issue.message}</p>
-            <DetailList items={items} layout="inline" />
-            <div className="flex flex-col gap-2 border-t border-border pt-4">
-              <span className="text-2xs font-medium text-text-secondary">조치</span>
-              <div className="flex flex-wrap gap-1.5">
-                {actionButton("해결", "resolve", "outline", <CheckIcon data-icon="inline-start" />)}
-                {actionButton("무시", "ignore", "ghost", <XIcon data-icon="inline-start" />)}
-                {actionButton(
-                  "다시 열기",
-                  "reopen",
-                  "ghost",
-                  <RotateCcwIcon data-icon="inline-start" />,
-                )}
-              </div>
-              <span className="mt-1 text-2xs font-medium text-text-secondary">주소·좌표</span>
-              <div className="flex flex-wrap gap-1.5">
-                {actionButton("주소로 좌표 재검색", "retry_geocode", "ghost")}
-                {actionButton("좌표로 주소 재검색", "retry_reverse_geocode", "ghost")}
-                {actionButton("추천 주소 적용", "apply_kor_travel_geo_address", "ghost")}
-              </div>
-            </div>
-
-            {feature ? (
-              <details className="group/details border-t border-border pt-4" open>
-                <summary className="cursor-pointer text-sm font-medium text-text-primary select-none">
-                  Feature 스냅샷
-                </summary>
-                <div className="mt-3 flex flex-col gap-3">
-                  <DetailList
-                    items={[
-                      {
-                        label: "상태 축",
-                        value: `${featureStateLabel("lifecycle", feature.lifecycle_state)} · ${featureStateLabel(
-                          "publication",
-                          feature.publication_state,
-                        )} · ${featureStateLabel("quality", feature.quality_state)}`,
-                      },
-                      {
-                        label: "coord",
-                        value:
-                          typeof feature.lon === "number" &&
-                          typeof feature.lat === "number"
-                            ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
-                            : "없음",
-                        mono: true,
-                      },
-                      { label: "sigungu", value: feature.sigungu_code ?? null, mono: true },
-                    ]}
-                    layout="inline"
-                  />
-                  <JsonViewer aria-label="feature address" maxHeight="sm" value={feature.address} />
-                </div>
-              </details>
-            ) : null}
-
-            <details className="border-t border-border pt-4">
-              <summary className="cursor-pointer text-sm font-medium text-text-primary select-none">
-                payload
-              </summary>
-              <div className="mt-3">
-                <JsonViewer aria-label="issue payload" copyable value={issue.payload} />
-              </div>
-            </details>
-          </>
-        ) : null}
+        {renderIssueDetailPanelState()}
       </SectionCard>
 
       <IssueManualOverridePanel action={action} runAction={runAction} />
@@ -632,8 +674,12 @@ function useAdminIssuesClientController({
     [action],
   );
   const actionPending = action.isPending;
-  const pendingIssueId = actionPending ? (action.variables?.issueId ?? null) : null;
-  const pendingActionKind = actionPending ? (action.variables?.body.action ?? null) : null;
+  const pendingIssueId = actionPending
+    ? (action.variables?.issueId ?? null)
+    : null;
+  const pendingActionKind = actionPending
+    ? (action.variables?.body.action ?? null)
+    : null;
 
   const columns = useMemo<ColumnDef<AdminIssueRecord, unknown>[]>(
     () => [
@@ -736,7 +782,9 @@ function useAdminIssuesClientController({
           const issue = row.original;
           const busy = pendingIssueId === issue.issue_id;
           const reason =
-            actionPending && !busy ? "다른 조치를 처리하는 중입니다" : undefined;
+            actionPending && !busy
+              ? "다른 조치를 처리하는 중입니다"
+              : undefined;
           return (
             <div className="flex flex-wrap gap-1">
               <Button
@@ -846,29 +894,15 @@ function AdminIssuesClientView({
     >
       <div className="flex flex-col gap-6">
         {errorLines.length > 0 ? (
-          <Alert variant="destructive">
-            <AlertTitle>admin issue 처리 실패</AlertTitle>
-            <AlertDescription>
-              {errorLines.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-              <p>잠시 후 다시 시도하세요.</p>
-            </AlertDescription>
-            <AlertActions>
-              <Button
-                loading={issues.isFetching}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  action.reset();
-                  void issues.refetch();
-                }}
-              >
-                다시 시도
-              </Button>
-            </AlertActions>
-          </Alert>
+          <ReviewErrorAlert
+            title={<>admin issue 처리 실패</>}
+            lines={errorLines}
+            pending={issues.isFetching}
+            onRetry={() => {
+              action.reset();
+              void issues.refetch();
+            }}
+          />
         ) : null}
 
         <FilterBar>
@@ -992,7 +1026,8 @@ function AdminIssuesClientView({
               data={items}
               emptyState={{
                 title: "issue가 없습니다.",
-                description: "상태 필터를 전체로 바꾸거나 검색어·bbox를 비워 보세요.",
+                description:
+                  "상태 필터를 전체로 바꾸거나 검색어·bbox를 비워 보세요.",
               }}
               getRowId={(row) => row.issue_id}
               isLoading={issues.isLoading}

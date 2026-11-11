@@ -18,7 +18,10 @@ import {
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { type ColumnDef, type SortingState } from "@tanstack/react-table";
+import {
+  type ColumnDef,
+  type SortingState,
+} from "@kor-travel/ui/virtual-table";
 
 import { opsDatasetCatalogOptions, useOpsDatasetCatalog } from "@/api/datasets";
 import {
@@ -45,7 +48,15 @@ import { EmptyState } from "@/components/empty-state";
 import { FeatureAssociations } from "@/components/feature-associations";
 import { FeatureKindDetailPanel } from "@/components/feature-kind-detail-panel";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
-import { MapDetailOverlay, MapFilterBar as FilterBar, MapFilterField as FilterField, MapKindFilter, MapTabs as Tabs, MapTabPanel as TabsContent, MapViewTabs } from "@kor-travel/ui/map-controls";
+import {
+  MapDetailOverlay,
+  MapFilterBar as FilterBar,
+  MapFilterField as FilterField,
+  MapKindFilter,
+  MapTabs as Tabs,
+  MapTabPanel as TabsContent,
+  MapViewTabs,
+} from "@kor-travel/ui/map-controls";
 import { JsonViewer } from "@/components/json-viewer";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +68,11 @@ import {
 } from "@/components/ui/data-table";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   VWorldFeatureClusters,
@@ -111,10 +126,16 @@ function PayloadDisclosure({
   return (
     <details className="group/details">
       <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
-        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+        <span
+          aria-hidden="true"
+          className="w-3 text-text-tertiary group-open/details:hidden"
+        >
           +
         </span>
-        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+        <span
+          aria-hidden="true"
+          className="hidden w-3 text-text-tertiary group-open/details:inline"
+        >
           −
         </span>
         {label}
@@ -142,7 +163,9 @@ export function FeatureDetailPanel({
     if (active instanceof HTMLElement && !panelRef.current?.contains(active)) {
       openerRef.current = active;
     }
-    const frame = requestAnimationFrame(() => panelRef.current?.focus({ preventScroll: true }));
+    const frame = requestAnimationFrame(() =>
+      panelRef.current?.focus({ preventScroll: true }),
+    );
     entryFrameRef.current = frame;
     return () => {
       cancelAnimationFrame(frame);
@@ -151,11 +174,15 @@ export function FeatureDetailPanel({
   }, [featureId]);
 
   function dismiss() {
-    if (entryFrameRef.current !== null) cancelAnimationFrame(entryFrameRef.current);
+    if (entryFrameRef.current !== null)
+      cancelAnimationFrame(entryFrameRef.current);
     const opener = openerRef.current;
-    const target = opener?.isConnected && opener !== document.body
-      ? opener
-      : panelRef.current?.closest(".kt-map-stage")?.querySelector<HTMLElement>(".maplibregl-canvas");
+    const target =
+      opener?.isConnected && opener !== document.body
+        ? opener
+        : panelRef.current
+            ?.closest(".kt-map-stage")
+            ?.querySelector<HTMLElement>(".maplibregl-canvas");
     // 닫기 버튼이 사라지기 전에 원래 마커/지도 탭으로 돌아가 body 포커스 이탈을 막는다.
     target?.focus({ preventScroll: true });
     onClose();
@@ -169,7 +196,9 @@ export function FeatureDetailPanel({
   }, [adminDetailQuery.data]);
 
   const coordinate =
-    feature && typeof feature.lon === "number" && typeof feature.lat === "number"
+    feature &&
+    typeof feature.lon === "number" &&
+    typeof feature.lat === "number"
       ? `${feature.lon.toFixed(5)}, ${feature.lat.toFixed(5)}`
       : null;
 
@@ -183,7 +212,9 @@ export function FeatureDetailPanel({
     >
       <div className="flex items-start justify-between gap-2 border-b border-border pb-3">
         <div className="flex min-w-0 flex-col gap-0.5">
-          <span className="text-2xs font-medium text-text-secondary">선택 Feature</span>
+          <span className="text-2xs font-medium text-text-secondary">
+            선택 Feature
+          </span>
           <span className="font-mono text-xs break-all text-text-primary slashed-zero">
             {featureId}
           </span>
@@ -191,7 +222,9 @@ export function FeatureDetailPanel({
         <div className="flex shrink-0 items-center gap-1">
           <Link
             aria-label="상세 열기"
-            className={cn(buttonVariants({ variant: "ghost", size: "icon-sm" }))}
+            className={cn(
+              buttonVariants({ variant: "ghost", size: "icon-sm" }),
+            )}
             href={featureDetailHref(featureId)}
           >
             <ExternalLinkIcon />
@@ -243,7 +276,11 @@ export function FeatureDetailPanel({
             <DetailList
               items={[
                 { label: "좌표", value: coordinate, mono: true },
-                { label: "시군구", value: feature.sigungu_code ?? null, mono: true },
+                {
+                  label: "시군구",
+                  value: feature.sigungu_code ?? null,
+                  mono: true,
+                },
                 {
                   label: "소스",
                   value: adminDetailQuery.isError ? (
@@ -332,31 +369,41 @@ function useFeaturesClientController() {
 
   // 선택이 바뀌어 저장된 값이 현재 옵션에 없으면, effect로 setState하지 않고
   // 렌더 시점에 "모두 보기"(빈 값)로 환원한다 (react-hooks/set-state-in-effect 회피).
-  const effectiveProvider =
-    providerFilter && providerOptions.includes(providerFilter)
-      ? providerFilter
-      : "";
-  const includeFeatureGeometry =
-    kindFilter.length === 0 ||
-    kindFilter.includes("route") ||
-    (kindFilter.includes("area") && viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM);
-  const showAreaGeometry = viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
+  function deriveFeaturesClientControllerState() {
+    const effectiveProvider =
+      providerFilter && providerOptions.includes(providerFilter)
+        ? providerFilter
+        : "";
+    const includeFeatureGeometry =
+      kindFilter.length === 0 ||
+      kindFilter.includes("route") ||
+      (kindFilter.includes("area") && viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM);
+    const showAreaGeometry = viewport.zoom >= AREA_GEOMETRY_MIN_ZOOM;
 
-  // 저zoom(≤13)에선 개별 feature를 tile로 대량 조회하지 않고 서버측 region 클러스터를
-  // 쓴다(#649). 개별 fetch와 클러스터 fetch는 zoom에 따라 상호 배타적으로 enable된다.
-  const clusterMode = isAdminFeatureClusterZoom(viewport.zoom);
+    // 저zoom(≤13)에선 개별 feature를 tile로 대량 조회하지 않고 서버측 region 클러스터를
+    // 쓴다(#649). 개별 fetch와 클러스터 fetch는 zoom에 따라 상호 배타적으로 enable된다.
+    const clusterMode = isAdminFeatureClusterZoom(viewport.zoom);
+    return {
+      effectiveProvider,
+      includeFeatureGeometry,
+      showAreaGeometry,
+      clusterMode,
+    };
+  }
+  const {
+    effectiveProvider,
+    includeFeatureGeometry,
+    showAreaGeometry,
+    clusterMode,
+  } = deriveFeaturesClientControllerState();
   const featuresQuery = useAdminFeaturesInBbox(
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
-      provider: effectiveProvider ? [effectiveProvider] : undefined,
-      lifecycleStates: lifecycleStateFilter
-        ? [lifecycleStateFilter]
-        : undefined,
-      publicationStates: publicationStateFilter
-        ? [publicationStateFilter]
-        : undefined,
-      qualityStates: qualityStateFilter ? [qualityStateFilter] : undefined,
+      provider: selectedFilterValues(effectiveProvider),
+      lifecycleStates: selectedFilterValues(lifecycleStateFilter),
+      publicationStates: selectedFilterValues(publicationStateFilter),
+      qualityStates: selectedFilterValues(qualityStateFilter),
       includeGeometry: includeFeatureGeometry,
       zoom: viewport.zoom,
     },
@@ -366,14 +413,10 @@ function useFeaturesClientController() {
     {
       ...(bbox ?? { min_lon: 0, min_lat: 0, max_lon: 0, max_lat: 0 }),
       kinds: kindFilter.length > 0 ? kindFilter : undefined,
-      provider: effectiveProvider ? [effectiveProvider] : undefined,
-      lifecycleStates: lifecycleStateFilter
-        ? [lifecycleStateFilter]
-        : undefined,
-      publicationStates: publicationStateFilter
-        ? [publicationStateFilter]
-        : undefined,
-      qualityStates: qualityStateFilter ? [qualityStateFilter] : undefined,
+      provider: selectedFilterValues(effectiveProvider),
+      lifecycleStates: selectedFilterValues(lifecycleStateFilter),
+      publicationStates: selectedFilterValues(publicationStateFilter),
+      qualityStates: selectedFilterValues(qualityStateFilter),
       zoom: viewport.zoom,
     },
     { enabled: bbox !== null && clusterMode },
@@ -404,7 +447,7 @@ function useFeaturesClientController() {
         header: "이름",
         // 빈 viewport에서도 기본 오름차순 정렬의 다음 클릭은 내림차순이어야 한다.
         sortDescFirst: false,
-        sortingFn: (rowA, rowB) =>
+        sortFn: (rowA, rowB) =>
           rowA.original.name.localeCompare(rowB.original.name, "ko"),
         cell: ({ row }) => (
           <Link
@@ -452,7 +495,9 @@ function useFeaturesClientController() {
             <span
               className={cn(
                 "font-mono text-xs slashed-zero",
-                coordinate !== null ? "text-text-secondary" : "text-text-tertiary",
+                coordinate !== null
+                  ? "text-text-secondary"
+                  : "text-text-tertiary",
               )}
             >
               {coordinate ?? NULL_GLYPH}
@@ -525,7 +570,14 @@ function useFeaturesClientController() {
   };
 }
 
-const FEATURE_KIND_ICONS = { place: MapPinnedIcon, event: CalendarDaysIcon, notice: BellIcon, price: FuelIcon, route: RouteIcon, area: MountainIcon };
+const FEATURE_KIND_ICONS = {
+  place: MapPinnedIcon,
+  event: CalendarDaysIcon,
+  notice: BellIcon,
+  price: FuelIcon,
+  route: RouteIcon,
+  area: MountainIcon,
+};
 
 function FeatureMapToolbar({
   activeFeatureKinds,
@@ -576,7 +628,14 @@ function FeatureMapToolbar({
         <MapKindFilter
           ariaLabel="kind 필터"
           testId="kind-filter"
-          options={FEATURE_KINDS.map((kind) => { const Icon = FEATURE_KIND_ICONS[kind]; return { value: kind, label: kind, icon: <Icon aria-hidden="true" /> }; })}
+          options={FEATURE_KINDS.map((kind) => {
+            const Icon = FEATURE_KIND_ICONS[kind];
+            return {
+              value: kind,
+              label: kind,
+              icon: <Icon aria-hidden="true" />,
+            };
+          })}
           value={Array.from(activeFeatureKinds)}
           onToggle={(kind) => toggleFeatureKind(kind as FeatureKind)}
           onReset={resetFeatureKinds}
@@ -601,82 +660,113 @@ function FeatureMapToolbar({
           </NativeSelect>
         </FilterField>
         <Popover>
-          <PopoverTrigger render={<Button size="sm" variant="outline" />}>
-            <SlidersHorizontalIcon data-icon="inline-start" />
-            추가 필터{selectedStateCount > 0 ? ` (${selectedStateCount})` : ""}
+          <PopoverTrigger asChild>
+            <Button size="sm" variant="outline">
+              <SlidersHorizontalIcon data-icon="inline-start" />
+              추가 필터
+              {selectedStateCount > 0 ? ` (${selectedStateCount})` : ""}
+            </Button>
           </PopoverTrigger>
-          <PopoverContent align="end" className="w-auto" aria-label="Feature 상태 필터">
+          <PopoverContent
+            align="end"
+            className="w-auto"
+            aria-label="Feature 상태 필터"
+          >
             <FilterBar className="max-w-44">
-                <FilterField htmlFor="feature-lifecycle-filter" label="수명주기">
-                  <NativeSelect
-                    aria-label="수명주기 필터"
-                    className="w-44"
-                    id="feature-lifecycle-filter"
-                    size="sm"
-                    value={lifecycleStateFilter}
-                    onChange={(event) =>
-                      setLifecycleStateFilter(
-                        event.target.value as AxisFilter<FeatureLifecycleState>,
-                      )
-                    }
-                  >
-                    <NativeSelectOption value="">모든 수명주기</NativeSelectOption>
-                    {FEATURE_LIFECYCLE_STATES.map((value) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {featureStateLabel("lifecycle", value)}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </FilterField>
-                <FilterField htmlFor="feature-publication-filter" label="공개 상태">
-                  <NativeSelect
-                    aria-label="공개 상태 필터"
-                    className="w-44"
-                    id="feature-publication-filter"
-                    size="sm"
-                    value={publicationStateFilter}
-                    onChange={(event) =>
-                      setPublicationStateFilter(
-                        event.target.value as AxisFilter<FeaturePublicationState>,
-                      )
-                    }
-                  >
-                    <NativeSelectOption value="">모든 공개 상태</NativeSelectOption>
-                    {FEATURE_PUBLICATION_STATES.map((value) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {featureStateLabel("publication", value)}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </FilterField>
-                <FilterField htmlFor="feature-quality-filter" label="품질 상태">
-                  <NativeSelect
-                    aria-label="품질 상태 필터"
-                    className="w-44"
-                    id="feature-quality-filter"
-                    size="sm"
-                    value={qualityStateFilter}
-                    onChange={(event) =>
-                      setQualityStateFilter(
-                        event.target.value as AxisFilter<FeatureQualityState>,
-                      )
-                    }
-                  >
-                    <NativeSelectOption value="">모든 품질 상태</NativeSelectOption>
-                    {FEATURE_QUALITY_STATES.map((value) => (
-                      <NativeSelectOption key={value} value={value}>
-                        {featureStateLabel("quality", value)}
-                      </NativeSelectOption>
-                    ))}
-                  </NativeSelect>
-                </FilterField>
+              <FilterField htmlFor="feature-lifecycle-filter" label="수명주기">
+                <NativeSelect
+                  aria-label="수명주기 필터"
+                  className="w-44"
+                  id="feature-lifecycle-filter"
+                  size="sm"
+                  value={lifecycleStateFilter}
+                  onChange={(event) =>
+                    setLifecycleStateFilter(
+                      event.target.value as AxisFilter<FeatureLifecycleState>,
+                    )
+                  }
+                >
+                  <NativeSelectOption value="">
+                    모든 수명주기
+                  </NativeSelectOption>
+                  {FEATURE_LIFECYCLE_STATES.map((value) => (
+                    <NativeSelectOption key={value} value={value}>
+                      {featureStateLabel("lifecycle", value)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </FilterField>
+              <FilterField
+                htmlFor="feature-publication-filter"
+                label="공개 상태"
+              >
+                <NativeSelect
+                  aria-label="공개 상태 필터"
+                  className="w-44"
+                  id="feature-publication-filter"
+                  size="sm"
+                  value={publicationStateFilter}
+                  onChange={(event) =>
+                    setPublicationStateFilter(
+                      event.target.value as AxisFilter<FeaturePublicationState>,
+                    )
+                  }
+                >
+                  <NativeSelectOption value="">
+                    모든 공개 상태
+                  </NativeSelectOption>
+                  {FEATURE_PUBLICATION_STATES.map((value) => (
+                    <NativeSelectOption key={value} value={value}>
+                      {featureStateLabel("publication", value)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </FilterField>
+              <FilterField htmlFor="feature-quality-filter" label="품질 상태">
+                <NativeSelect
+                  aria-label="품질 상태 필터"
+                  className="w-44"
+                  id="feature-quality-filter"
+                  size="sm"
+                  value={qualityStateFilter}
+                  onChange={(event) =>
+                    setQualityStateFilter(
+                      event.target.value as AxisFilter<FeatureQualityState>,
+                    )
+                  }
+                >
+                  <NativeSelectOption value="">
+                    모든 품질 상태
+                  </NativeSelectOption>
+                  {FEATURE_QUALITY_STATES.map((value) => (
+                    <NativeSelectOption key={value} value={value}>
+                      {featureStateLabel("quality", value)}
+                    </NativeSelectOption>
+                  ))}
+                </NativeSelect>
+              </FilterField>
             </FilterBar>
-            <nav aria-label="관련 지도 작업" className="mt-3 flex flex-col gap-2 border-t border-border pt-3">
-              <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/curated-features">
-                <MapPinnedIcon data-icon="inline-start" />큐레이션 지도
+            <nav
+              aria-label="관련 지도 작업"
+              className="mt-3 flex flex-col gap-2 border-t border-border pt-3"
+            >
+              <Link
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                )}
+                href="/curated-features"
+              >
+                <MapPinnedIcon data-icon="inline-start" />
+                큐레이션 지도
               </Link>
-              <Link className={cn(buttonVariants({ variant: "outline", size: "sm" }))} href="/admin/features/dedup-reviews">
-                <GitCompareArrowsIcon data-icon="inline-start" />중복 검토
+              <Link
+                className={cn(
+                  buttonVariants({ variant: "outline", size: "sm" }),
+                )}
+                href="/admin/features/dedup-reviews"
+              >
+                <GitCompareArrowsIcon data-icon="inline-start" />
+                중복 검토
               </Link>
             </nav>
           </PopoverContent>
@@ -687,8 +777,8 @@ function FeatureMapToolbar({
         <Alert variant="destructive">
           <AlertTitle>feature 호출 실패</AlertTitle>
           <AlertDescription>
-            {featuresQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면 다시
-            조회합니다.
+            {featuresQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면
+            다시 조회합니다.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -696,8 +786,8 @@ function FeatureMapToolbar({
         <Alert variant="destructive">
           <AlertTitle>클러스터 호출 실패</AlertTitle>
           <AlertDescription>
-            {clustersQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면 다시
-            조회합니다.
+            {clustersQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면
+            다시 조회합니다.
           </AlertDescription>
         </Alert>
       ) : null}
@@ -753,7 +843,9 @@ function FeatureMapWorkspace({
 >) {
   return (
     <div className="flex flex-col gap-4">
+      {/* 지도 탭은 Enter/Space로 확정한다. 포커스 이동만으로 지도를 열어 상세 포커스를 빼앗지 않는다. */}
       <Tabs
+        activationMode="manual"
         className="min-h-0"
         value={featureViewMode}
         onValueChange={(value) => setFeatureViewMode(value as FeatureViewMode)}
@@ -766,8 +858,22 @@ function FeatureMapWorkspace({
         <MapViewTabs
           listValue="table"
           listLabel="테이블"
-          viewport={{ longitude: viewport.lon, latitude: viewport.lat, zoom: viewport.zoom }}
-          status={<Badge variant={(clusterMode ? clustersQuery.isError : featuresQuery.isError) ? "destructive" : "neutral"}>{status}</Badge>}
+          viewport={{
+            longitude: viewport.lon,
+            latitude: viewport.lat,
+            zoom: viewport.zoom,
+          }}
+          status={
+            <Badge
+              variant={
+                (clusterMode ? clustersQuery.isError : featuresQuery.isError)
+                  ? "destructive"
+                  : "neutral"
+              }
+            >
+              {status}
+            </Badge>
+          }
         />
 
         <TabsContent className="min-h-0" value="map">
@@ -841,9 +947,7 @@ function FeatureMapWorkspace({
                 feature.feature_id === selectedFeatureId
               }
               manualSorting={false}
-              onRowClick={(feature) =>
-                setSelectedFeatureId(feature.feature_id)
-              }
+              onRowClick={(feature) => setSelectedFeatureId(feature.feature_id)}
               onSortingChange={setTableSorting}
               sorting={tableSorting}
               virtualized
@@ -952,4 +1056,11 @@ function FeaturesClientView({
 export function FeaturesClient() {
   const controller = useFeaturesClientController();
   return <FeaturesClientView {...controller} />;
+}
+
+/** 선택되지 않은 필터를 요청 필드에서 빼고 선택된 축만 API 배열로 변환한다. */
+function selectedFilterValues<T extends string>(
+  value: T | "",
+): T[] | undefined {
+  return value ? [value] : undefined;
 }

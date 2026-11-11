@@ -758,6 +758,84 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
       ? [selectedScopeCapability.default_sync_scope]
       : []),
   ].filter((value, index, values) => values.indexOf(value) === index);
+  function renderRequestIdentityFieldsState0() {
+    return scopeType === "provider_dataset" ? (
+      <>
+        <FormSelect
+          label="대상 데이터셋"
+          value={scopeProviderDatasetId}
+          onChange={(event) => {
+            setScopeProviderDatasetId(event.target.value);
+            setScopeSyncScope("");
+            setScopeOperationKey("");
+          }}
+        >
+          <NativeSelectOption value="">
+            canonical 데이터셋 선택
+          </NativeSelectOption>
+          {datasetOptions.map((row) => (
+            <NativeSelectOption
+              key={row.provider_dataset_id}
+              value={String(row.provider_dataset_id)}
+            >
+              {row.catalog?.label ?? `데이터셋 #${row.provider_dataset_id}`}
+            </NativeSelectOption>
+          ))}
+        </FormSelect>
+        <FormSelect
+          disabled={availableSyncScopes.length <= 1}
+          hint={
+            selectedScopeCapability?.effect === "dataset_wide"
+              ? "dataset-wide 정본 scope로 고정됩니다."
+              : "catalog가 허용한 canonical sync scope만 선택할 수 있습니다."
+          }
+          label="sync_scope"
+          value={scopeSyncScope}
+          onChange={(event) => {
+            setScopeSyncScope(event.target.value);
+            setScopeOperationKey("");
+          }}
+        >
+          {availableSyncScopes.length === 0 ? (
+            <NativeSelectOption value="">
+              데이터셋을 먼저 선택하세요.
+            </NativeSelectOption>
+          ) : (
+            availableSyncScopes.map((syncScope) => (
+              <NativeSelectOption key={syncScope} value={syncScope}>
+                {syncScope}
+              </NativeSelectOption>
+            ))
+          )}
+        </FormSelect>
+        {membershipCandidates.length > 1 ? (
+          // 형제 operation이 있을 때만 뜬다. 평소에는 축이 하나로 결정되므로
+          // 화면을 늘리지 않고, 갈릴 때는 **운영자가 고르게** 한다.
+          <FormSelect
+            hint="이 dataset/scope에 refresh operation이 둘 이상입니다. 어느 operation에 요청할지 고르세요."
+            label="operation_key"
+            value={scopeOperationKey}
+            onChange={(event) => setScopeOperationKey(event.target.value)}
+          >
+            <NativeSelectOption value="">operation 선택</NativeSelectOption>
+            {membershipCandidates.map((row) => (
+              <NativeSelectOption
+                key={row.operation_key ?? ""}
+                value={row.operation_key ?? ""}
+              >
+                {row.operation_key}
+              </NativeSelectOption>
+            ))}
+          </FormSelect>
+        ) : null}
+        {selectedCatalogRow ? (
+          <p className="text-xs text-text-secondary tabular-nums">
+            canonical membership: {selectedCatalogRow.provider_dataset_id}
+          </p>
+        ) : null}
+      </>
+    ) : null;
+  }
   return (
     <>
       <FormSelect
@@ -775,82 +853,7 @@ const RequestIdentityFields = memo(function RequestIdentityFields({
         ))}
       </FormSelect>
 
-      {scopeType === "provider_dataset" ? (
-        <>
-          <FormSelect
-            label="대상 데이터셋"
-            value={scopeProviderDatasetId}
-            onChange={(event) => {
-              setScopeProviderDatasetId(event.target.value);
-              setScopeSyncScope("");
-              setScopeOperationKey("");
-            }}
-          >
-            <NativeSelectOption value="">
-              canonical 데이터셋 선택
-            </NativeSelectOption>
-            {datasetOptions.map((row) => (
-              <NativeSelectOption
-                key={row.provider_dataset_id}
-                value={String(row.provider_dataset_id)}
-              >
-                {row.catalog?.label ?? `데이터셋 #${row.provider_dataset_id}`}
-              </NativeSelectOption>
-            ))}
-          </FormSelect>
-          <FormSelect
-            disabled={availableSyncScopes.length <= 1}
-            hint={
-              selectedScopeCapability?.effect === "dataset_wide"
-                ? "dataset-wide 정본 scope로 고정됩니다."
-                : "catalog가 허용한 canonical sync scope만 선택할 수 있습니다."
-            }
-            label="sync_scope"
-            value={scopeSyncScope}
-            onChange={(event) => {
-              setScopeSyncScope(event.target.value);
-              setScopeOperationKey("");
-            }}
-          >
-            {availableSyncScopes.length === 0 ? (
-              <NativeSelectOption value="">
-                데이터셋을 먼저 선택하세요.
-              </NativeSelectOption>
-            ) : (
-              availableSyncScopes.map((syncScope) => (
-                <NativeSelectOption key={syncScope} value={syncScope}>
-                  {syncScope}
-                </NativeSelectOption>
-              ))
-            )}
-          </FormSelect>
-          {membershipCandidates.length > 1 ? (
-            // 형제 operation이 있을 때만 뜬다. 평소에는 축이 하나로 결정되므로
-            // 화면을 늘리지 않고, 갈릴 때는 **운영자가 고르게** 한다.
-            <FormSelect
-              hint="이 dataset/scope에 refresh operation이 둘 이상입니다. 어느 operation에 요청할지 고르세요."
-              label="operation_key"
-              value={scopeOperationKey}
-              onChange={(event) => setScopeOperationKey(event.target.value)}
-            >
-              <NativeSelectOption value="">operation 선택</NativeSelectOption>
-              {membershipCandidates.map((row) => (
-                <NativeSelectOption
-                  key={row.operation_key ?? ""}
-                  value={row.operation_key ?? ""}
-                >
-                  {row.operation_key}
-                </NativeSelectOption>
-              ))}
-            </FormSelect>
-          ) : null}
-          {selectedCatalogRow ? (
-            <p className="text-xs text-text-secondary tabular-nums">
-              canonical membership: {selectedCatalogRow.provider_dataset_id}
-            </p>
-          ) : null}
-        </>
-      ) : null}
+      {renderRequestIdentityFieldsState0()}
 
       {scopeType === "center_radius" || scopeType === "sigungu_by_radius" ? (
         <>
@@ -1236,7 +1239,7 @@ export function RequestCreateDialog({
         갱신 요청 생성
       </Button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
-        <DialogContent className="max-w-xl">
+        <DialogContent className="max-w-xl sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>갱신 요청 생성</DialogTitle>
             <DialogDescription>

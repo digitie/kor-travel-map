@@ -1,6 +1,7 @@
 """C7 prod live runner의 fail-closed 정적 계약 회귀 테스트."""
 
 import ast
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -347,7 +348,15 @@ def test_runner_uses_attested_immutable_playwright_executor_and_redacted_evidenc
         / "_ops-c7-admin-api.ts"
     )
 
-    assert "mcr.microsoft.com/playwright:v1.64.1-noble@sha256:" in dockerfile
+    declared_playwright = json.loads(
+        _read(ROOT / "packages/kor-travel-map-admin/frontend/package.json")
+    )["devDependencies"]["@playwright/test"]
+    assert re.search(
+        rf"^FROM mcr\.microsoft\.com/playwright:v{re.escape(declared_playwright)}"
+        r"-noble@sha256:[0-9a-f]{64}$",
+        dockerfile,
+        re.M,
+    )
     assert 'git -C "$REPO_ROOT" archive --format=tar "$commit"' in build_script
     assert "--pull=false" in build_script
     assert "**/*.tsbuildinfo" in dockerignore

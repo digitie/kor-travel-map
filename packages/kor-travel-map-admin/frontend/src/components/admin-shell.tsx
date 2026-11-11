@@ -27,7 +27,14 @@ import {
 import Link from "next/link";
 import { AppMenu, type AppMenuLinkProps } from "@kor-travel/ui/app-menu";
 import { usePathname } from "next/navigation";
-import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment,
+  useEffect,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
 import { withOccurrenceKeys } from "@/lib/occurrence-key";
 import {
@@ -89,7 +96,11 @@ const NAV_GROUPS = [
         label: "큐레이션 후보",
         icon: ListChecksIcon,
       },
-      { href: "/curated-features", label: "큐레이션 지도", icon: MapPinnedIcon },
+      {
+        href: "/curated-features",
+        label: "큐레이션 지도",
+        icon: MapPinnedIcon,
+      },
     ],
   },
   {
@@ -143,10 +154,14 @@ function MapMenuLink(props: AppMenuLinkProps) {
   return <Link {...props} />;
 }
 
-const COMMON_MENU_GROUPS = NAV_GROUPS.map(group => ({
-  id: group.group ?? "root", label: group.group ?? undefined,
+const COMMON_MENU_GROUPS = NAV_GROUPS.map((group) => ({
+  id: group.group ?? "root",
+  label: group.group ?? undefined,
   items: group.items.map(({ href, label, icon: Icon }) => ({
-    id: href, href, label, icon: <Icon aria-hidden="true" className="size-4" />,
+    id: href,
+    href,
+    label,
+    icon: <Icon aria-hidden="true" className="size-4" />,
   })),
 }));
 
@@ -172,7 +187,8 @@ function isActive(pathname: string, href: string) {
 const railRowClass =
   "relative flex h-control-sm shrink-0 items-center gap-2.5 rounded-control px-3 text-xs font-medium whitespace-nowrap text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted";
 
-const railRowCollapsedClass = "lg:size-control lg:justify-center lg:gap-0 lg:px-0";
+const railRowCollapsedClass =
+  "lg:size-control lg:justify-center lg:gap-0 lg:px-0";
 
 export type AdminBreadcrumb = { label: string; href?: string };
 
@@ -196,6 +212,18 @@ export type AdminShellProps = {
   children: ReactNode;
 };
 
+function subscribeSidebar(listener: () => void) {
+  window.addEventListener("storage", listener);
+  window.addEventListener("map-sidebar-preference", listener);
+  return () => {
+    window.removeEventListener("storage", listener);
+    window.removeEventListener("map-sidebar-preference", listener);
+  };
+}
+const readSidebar = () =>
+  window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+const serverSidebar = () => false;
+
 export function AdminShell({
   title,
   description,
@@ -210,10 +238,11 @@ export function AdminShell({
 }: AdminShellProps) {
   const pathname = usePathname();
   const menuContainerRef = useRef<HTMLDivElement | null>(null);
-  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
-  });
+  const sidebarCollapsed = useSyncExternalStore(
+    subscribeSidebar,
+    readSidebar,
+    serverSidebar,
+  );
   const activeItem = navItems
     .filter((item) => isActive(pathname, item.href))
     .toSorted((a, b) => b.href.length - a.href.length)[0];
@@ -227,24 +256,116 @@ export function AdminShell({
     const reduceMotion = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     ).matches;
-    menuContainerRef.current?.querySelector("[aria-current=page]")?.scrollIntoView({
-      behavior: reduceMotion ? "auto" : "smooth",
-      block: "nearest",
-      inline: "center",
-    });
+    menuContainerRef.current
+      ?.querySelector("[aria-current=page]")
+      ?.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "nearest",
+        inline: "center",
+      });
   }, [activeHref]);
 
-  useEffect(() => {
+  const toggleSidebar = () => {
     window.localStorage.setItem(
       SIDEBAR_COLLAPSED_KEY,
-      sidebarCollapsed ? "1" : "0",
+      sidebarCollapsed ? "0" : "1",
     );
-  }, [sidebarCollapsed]);
-
-  const toggleSidebar = () => {
-    setSidebarCollapsed((current) => !current);
+    window.dispatchEvent(new Event("map-sidebar-preference"));
   };
 
+  function renderAdminShellState() {
+    return hasBreadcrumbs && breadcrumbs ? (
+      <Breadcrumb>
+        <BreadcrumbList className="text-xs">
+          {withOccurrenceKeys(breadcrumbs, (crumb) =>
+            JSON.stringify([crumb.href ?? null, crumb.label]),
+          ).map(({ key, value: crumb }, index) => (
+            <Fragment key={key}>
+              {index > 0 ? <BreadcrumbSeparator /> : null}
+              <BreadcrumbItem>
+                {crumb.href ? (
+                  <BreadcrumbLink href={crumb.href}>
+                    {crumb.label}
+                  </BreadcrumbLink>
+                ) : index === breadcrumbs.length - 1 ? (
+                  <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                ) : (
+                  <span>{crumb.label}</span>
+                )}
+              </BreadcrumbItem>
+            </Fragment>
+          ))}
+        </BreadcrumbList>
+      </Breadcrumb>
+    ) : sectionLabel ? (
+      <p className="text-2xs font-medium text-text-secondary">{sectionLabel}</p>
+    ) : null;
+  }
+  function renderAdminShellDiv1() {
+    return (
+      <div className="flex min-w-0 flex-col">
+        {/* Flush header band: breadcrumb/section → h1(+help) + actions 한 baseline → meta → description, 아래 hairline(M9/M30/m1). */}
+        <header
+          className={cn(
+            "border-b border-border px-6",
+            compact ? "py-3" : "pt-5 pb-4",
+          )}
+          data-slot="admin-shell-header"
+        >
+          <div className="flex min-w-0 flex-col gap-1">
+            {renderAdminShellState()}
+            <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-6">
+              <div className="flex min-w-0 items-center gap-2">
+                <h1 className="text-xl leading-tight font-bold tracking-tight text-text-primary">
+                  {title}
+                </h1>
+                {help ? (
+                  <HelpTip label={title} variant={helpVariant}>
+                    {help}
+                  </HelpTip>
+                ) : null}
+              </div>
+              {actions ? (
+                <div className="flex shrink-0 flex-wrap items-center gap-2">
+                  {actions}
+                </div>
+              ) : null}
+            </div>
+            {meta ? (
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
+                {meta}
+              </div>
+            ) : null}
+            {description ? (
+              <p className="max-w-3xl text-xs text-text-secondary">
+                {description}
+              </p>
+            ) : null}
+          </div>
+        </header>
+        {/*
+            M11: <main> 은 children 만 감싼다(aside/header 밖). skip link 대상.
+            `focus-visible:outline-0` — design.md §Focus 닫힌 목록 4번. skip link(Enter)로
+            프로그램 포커스를 받으면 마지막 입력이 키보드라 `:focus-visible`이 매칭돼 **페이지 폭
+            2px 링**이 본문 전체에 그려진다. 사용자가 키로 이동한 요소가 아니라 링이 "어디로
+            갔는지"를 알리지 못하고, 도착 사실은 스크롤 점프와 본문 첫 heading 이 알린다.
+            `outline-none` 은 금지(§금지 패턴 6 — v4에서 `--tw-outline-style: none` 이 안쪽 컨트롤
+            까지 오염) — 폭만 0으로 끄는 `outline-0` 이라야 자식 컨트롤 링이 살아 있다.
+          */}
+        <main
+          className={cn(
+            "min-w-0 flex-1 px-6 focus-visible:outline-0",
+            compact ? "py-3" : "py-6",
+          )}
+          data-slot="admin-shell-main"
+          id={MAIN_CONTENT_ID}
+          tabIndex={-1}
+        >
+          {children}
+        </main>
+      </div>
+    );
+  }
   return (
     <div className="min-h-dvh bg-surface-page text-text-primary">
       {/* M11: skip link — rail 19개 항목을 건너뛰어 <main> 으로. nav 밖(링크 수 보존). */}
@@ -320,7 +441,9 @@ export function AdminShell({
                     buttonVariants({ variant: "ghost", size: "icon-sm" }),
                     "hidden lg:inline-flex",
                   )}
-                  title={sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"}
+                  title={
+                    sidebarCollapsed ? "좌측 메뉴 펼치기" : "좌측 메뉴 접기"
+                  }
                   type="button"
                   onClick={toggleSidebar}
                 >
@@ -332,10 +455,19 @@ export function AdminShell({
                 </button>
               </div>
             </div>
-            <div ref={menuContainerRef} data-collapsed={sidebarCollapsed}
-              className="map-common-menu map-common-surface min-h-0 max-w-full overflow-x-auto px-2 py-2 lg:flex-1 lg:overflow-x-hidden lg:overflow-y-auto">
-              <AppMenu groups={COMMON_MENU_GROUPS} activeItemId={activeHref ?? null}
-                pathname={pathname} label="주요 메뉴" linkComponent={MapMenuLink} testId="map-common-menu" />
+            <div
+              ref={menuContainerRef}
+              data-collapsed={sidebarCollapsed}
+              className="map-common-menu map-common-surface min-h-0 max-w-full overflow-x-auto px-2 py-2 lg:flex-1 lg:overflow-x-hidden lg:overflow-y-auto"
+            >
+              <AppMenu
+                groups={COMMON_MENU_GROUPS}
+                activeItemId={activeHref ?? null}
+                pathname={pathname}
+                label="주요 메뉴"
+                linkComponent={MapMenuLink}
+                testId="map-common-menu"
+              />
             </div>
             {/* 로그아웃 = rail footer 의 plain row(M9). <lg 에서는 상단 워드마크 행의 아이콘 버튼이 대신한다. */}
             <div
@@ -348,84 +480,7 @@ export function AdminShell({
             </div>
           </div>
         </aside>
-        <div className="flex min-w-0 flex-col">
-          {/* Flush header band: breadcrumb/section → h1(+help) + actions 한 baseline → meta → description, 아래 hairline(M9/M30/m1). */}
-          <header
-            className={cn("border-b border-border px-6", compact ? "py-3" : "pt-5 pb-4")}
-            data-slot="admin-shell-header"
-          >
-            <div className="flex min-w-0 flex-col gap-1">
-              {hasBreadcrumbs && breadcrumbs ? (
-                <Breadcrumb>
-                  <BreadcrumbList className="text-xs">
-                    {withOccurrenceKeys(breadcrumbs, (crumb) =>
-                      JSON.stringify([crumb.href ?? null, crumb.label]),
-                    ).map(({ key, value: crumb }, index) => (
-                      <Fragment key={key}>
-                        {index > 0 ? <BreadcrumbSeparator /> : null}
-                        <BreadcrumbItem>
-                          {crumb.href ? (
-                            <BreadcrumbLink href={crumb.href}>
-                              {crumb.label}
-                            </BreadcrumbLink>
-                          ) : index === breadcrumbs.length - 1 ? (
-                            <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
-                          ) : (
-                            <span>{crumb.label}</span>
-                          )}
-                        </BreadcrumbItem>
-                      </Fragment>
-                    ))}
-                  </BreadcrumbList>
-                </Breadcrumb>
-              ) : sectionLabel ? (
-                <p className="text-2xs font-medium text-text-secondary">
-                  {sectionLabel}
-                </p>
-              ) : null}
-              <div className="flex min-w-0 flex-col gap-3 md:flex-row md:items-center md:justify-between md:gap-6">
-                <div className="flex min-w-0 items-center gap-2">
-                  <h1 className="text-xl leading-tight font-bold tracking-tight text-text-primary">
-                    {title}
-                  </h1>
-                  {help ? <HelpTip label={title} variant={helpVariant}>{help}</HelpTip> : null}
-                </div>
-                {actions ? (
-                  <div className="flex shrink-0 flex-wrap items-center gap-2">
-                    {actions}
-                  </div>
-                ) : null}
-              </div>
-              {meta ? (
-                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-text-secondary">
-                  {meta}
-                </div>
-              ) : null}
-              {description ? (
-                <p className="max-w-3xl text-xs text-text-secondary">
-                  {description}
-                </p>
-              ) : null}
-            </div>
-          </header>
-          {/*
-            M11: <main> 은 children 만 감싼다(aside/header 밖). skip link 대상.
-            `focus-visible:outline-0` — design.md §Focus 닫힌 목록 4번. skip link(Enter)로
-            프로그램 포커스를 받으면 마지막 입력이 키보드라 `:focus-visible`이 매칭돼 **페이지 폭
-            2px 링**이 본문 전체에 그려진다. 사용자가 키로 이동한 요소가 아니라 링이 "어디로
-            갔는지"를 알리지 못하고, 도착 사실은 스크롤 점프와 본문 첫 heading 이 알린다.
-            `outline-none` 은 금지(§금지 패턴 6 — v4에서 `--tw-outline-style: none` 이 안쪽 컨트롤
-            까지 오염) — 폭만 0으로 끄는 `outline-0` 이라야 자식 컨트롤 링이 살아 있다.
-          */}
-          <main
-            className={cn("min-w-0 flex-1 px-6 focus-visible:outline-0", compact ? "py-3" : "py-6")}
-            data-slot="admin-shell-main"
-            id={MAIN_CONTENT_ID}
-            tabIndex={-1}
-          >
-            {children}
-          </main>
-        </div>
+        {renderAdminShellDiv1()}
       </div>
     </div>
   );
@@ -452,7 +507,10 @@ function ButtonLogout({
     setBusy(true);
     setError(null);
     try {
-      const response = await fetch("/api/auth/logout", { method: "POST", signal: AbortSignal.timeout(5000) });
+      const response = await fetch("/api/auth/logout", {
+        method: "POST",
+        signal: AbortSignal.timeout(5000),
+      });
       if (!response.ok) throw new Error("logout failed");
       publishAdminLogout();
       window.location.assign("/login");
@@ -466,24 +524,33 @@ function ButtonLogout({
   }
   return (
     <div>
-    <button aria-busy={busy} aria-disabled={busy}
-      aria-label={labelHidden ? "로그아웃" : undefined}
-      className={cn(
-        railRowClass,
-        iconOnly ? "size-control-sm justify-center gap-0 px-0" : "w-full",
-        !iconOnly && collapsed && railRowCollapsedClass,
-        className,
-      )}
-      title={labelHidden ? "로그아웃" : undefined}
-      type="button"
-      onClick={() => void logout()}
-    >
-      <LogOutIcon aria-hidden="true" className="size-4 shrink-0 text-icon-default" />
-      <span className={cn(iconOnly ? "sr-only" : collapsed && "lg:hidden")}>
-        로그아웃
-      </span>
-    </button>
-    {error ? <p role="alert" className="px-2 text-xs text-destructive">{error}</p> : null}
+      <button
+        aria-busy={busy}
+        aria-disabled={busy}
+        aria-label={labelHidden ? "로그아웃" : undefined}
+        className={cn(
+          railRowClass,
+          iconOnly ? "size-control-sm justify-center gap-0 px-0" : "w-full",
+          !iconOnly && collapsed && railRowCollapsedClass,
+          className,
+        )}
+        title={labelHidden ? "로그아웃" : undefined}
+        type="button"
+        onClick={() => void logout()}
+      >
+        <LogOutIcon
+          aria-hidden="true"
+          className="size-4 shrink-0 text-icon-default"
+        />
+        <span className={cn(iconOnly ? "sr-only" : collapsed && "lg:hidden")}>
+          로그아웃
+        </span>
+      </button>
+      {error ? (
+        <p role="alert" className="px-2 text-xs text-destructive">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

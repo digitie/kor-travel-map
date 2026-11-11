@@ -1,4 +1,4 @@
-FROM mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea
+FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
 
 ARG C7_REPOSITORY_COMMIT
 
@@ -26,7 +26,7 @@ COPY packages/kor-travel-map-admin/frontend ./packages/kor-travel-map-admin/fron
 COPY packages/kor-travel-map-user-client ./packages/kor-travel-map-user-client
 
 LABEL io.kortravelmap.c7.repository-commit="$C7_REPOSITORY_COMMIT" \
-      io.kortravelmap.c7.playwright-base="mcr.microsoft.com/playwright:v1.64.1-noble@sha256:47b510dd9230bf0b9bfc9b20102241e577ea7a99334ab4c3ca19f19770e9b8ea"
+      io.kortravelmap.c7.playwright-base="mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d"
 
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 

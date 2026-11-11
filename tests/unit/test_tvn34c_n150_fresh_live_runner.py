@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import subprocess
 from pathlib import Path
@@ -81,8 +82,14 @@ def test_runner_uses_receipt_pinned_archives_not_its_checkout() -> None:
     assert 'compose_ui_password_hash="${ui_password_hash//\\$/\\$\\$}"' in runner
     assert "KOR_TRAVEL_MAP_API_OPS_FIXTURE_TOKEN=$ops_fixture" in runner
     assert "docker image inspect --format '{{.Id}}' \"$dagster_image_reference\"" in runner
-    assert "mcr.microsoft.com/playwright:v1.64.1-noble" in _text(
-        _ROOT / "docker" / "c7-playwright.Dockerfile"
+    declared_playwright = json.loads(
+        _text(_ROOT / "packages/kor-travel-map-admin/frontend/package.json")
+    )["devDependencies"]["@playwright/test"]
+    assert re.search(
+        rf"^FROM mcr\.microsoft\.com/playwright:v{re.escape(declared_playwright)}"
+        r"-noble@sha256:[0-9a-f]{64}$",
+        _text(_ROOT / "docker/c7-playwright.Dockerfile"),
+        re.M,
     )
 
 

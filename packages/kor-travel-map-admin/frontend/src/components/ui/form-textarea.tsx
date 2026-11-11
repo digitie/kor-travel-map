@@ -48,6 +48,17 @@ function FormTextArea({
   const unavailable = textareaProps.disabled || textareaProps.readOnly;
   const showHint = !error && Boolean(hint);
   const showMessage = reserveMessage || Boolean(error) || showHint;
+  function renderFormTextAreaState() {
+    return showMessage ? (
+      <FieldMessage>
+        {error ? (
+          <FieldError id={errorId}>{error}</FieldError>
+        ) : showHint ? (
+          <FieldDescription id={hintId}>{hint}</FieldDescription>
+        ) : null}
+      </FieldMessage>
+    ) : null;
+  }
   return (
     <Field
       className={className}
@@ -76,15 +87,7 @@ function FormTextArea({
         ref={ref}
         {...textareaProps}
       />
-      {showMessage ? (
-        <FieldMessage>
-          {error ? (
-            <FieldError id={errorId}>{error}</FieldError>
-          ) : showHint ? (
-            <FieldDescription id={hintId}>{hint}</FieldDescription>
-          ) : null}
-        </FieldMessage>
-      ) : null}
+      {renderFormTextAreaState()}
     </Field>
   );
 }

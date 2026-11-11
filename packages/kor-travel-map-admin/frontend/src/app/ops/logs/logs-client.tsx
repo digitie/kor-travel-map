@@ -1,15 +1,11 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { RefreshCwIcon, SearchIcon } from "lucide-react";
 import { useDeferredValue, useMemo, useState } from "react";
 
-import {
-  useApiCallLogs,
-  useSystemLogs,
-  type SystemLogLevel,
-} from "@/api/ops";
+import { useApiCallLogs, useSystemLogs, type SystemLogLevel } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
 import { FilterBar, FilterField } from "@/components/filter-bar";
 import { CursorPager } from "@/components/pagination-bar";
@@ -46,15 +42,12 @@ function useLogsClientController({
   initialLevel?: string;
 } = {}) {
   const [activeLogTab, setActiveLogTab] = useState<LogTab>(() =>
-    initialTab === "system" || initialTab === "api"
-      ? initialTab
-      : "system",
+    initialTab === "system" || initialTab === "api" ? initialTab : "system",
   );
   const [systemQ, setSystemQ] = useState("");
   const deferredSystemQ = useDeferredValue(systemQ.trim());
   const [systemLevel, setSystemLevel] = useState<SystemLogLevel | "all">(() =>
-    initialLevel &&
-    (LEVELS as readonly string[]).includes(initialLevel)
+    initialLevel && (LEVELS as readonly string[]).includes(initialLevel)
       ? (initialLevel as SystemLogLevel)
       : "all",
   );
@@ -68,7 +61,8 @@ function useLogsClientController({
   const [apiCursor, setApiCursor] = useState<string | null>(null);
   const [apiPageIndex, setApiPageIndex] = useState(1);
 
-  const [pageSize, setPageSize] = useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
+  const [pageSize, setPageSize] =
+    useState<(typeof PAGE_SIZE_OPTIONS)[number]>(100);
 
   const systemParams = useMemo(
     () => ({
@@ -82,12 +76,15 @@ function useLogsClientController({
   );
   const apiParams = useMemo(
     () => ({
-      method: apiMethod.trim().length > 0 ? apiMethod.trim().toUpperCase() : undefined,
+      method:
+        apiMethod.trim().length > 0
+          ? apiMethod.trim().toUpperCase()
+          : undefined,
       path: apiPath.trim().length > 0 ? apiPath.trim() : undefined,
       min_status:
         apiMinStatus.trim().length > 0 && Number.isFinite(Number(apiMinStatus))
-        ? Number(apiMinStatus)
-        : undefined,
+          ? Number(apiMinStatus)
+          : undefined,
       page_size: pageSize,
       cursor: apiCursor ?? undefined,
     }),
@@ -153,7 +150,9 @@ function useLogsClientController({
         enableSorting: false,
         meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <DataTableClampCell lines={2}>{row.original.message}</DataTableClampCell>
+          <DataTableClampCell lines={2}>
+            {row.original.message}
+          </DataTableClampCell>
         ),
       },
       {

@@ -21,6 +21,7 @@
 from __future__ import annotations
 
 import re
+import shlex
 from pathlib import Path
 
 import pytest
@@ -212,16 +213,31 @@ def _is_exempt(command: str) -> bool:
 def _identifying_fragments(command: str) -> list[str] | None:
     """스텝을 유일하게 식별하는 조각들. 하나라도 스크립트에 없으면 누락이다."""
 
-    if "npm@" in command:
-        npm_run = re.search(r"run ([a-z0-9:-]+)", command)
-        if npm_run is None:
+    try:
+        tokens = shlex.split(command)
+    except ValueError:
+        return None
+    npm_index = next(
+        (i for i, token in enumerate(tokens) if re.fullmatch(r"npm(?:@[0-9][^ ]*)?", token)),
+        None,
+    )
+    if npm_index is not None:
+        rest = tokens[npm_index + 1 :]
+        if "run" not in rest or rest.index("run") + 1 >= len(rest):
             return None
-        # workspace를 함께 봐야 admin과 user-client의 동명 script를 구분한다.
-        # 안 그러면 스크립트가 둘 중 하나를 지워도 감사가 침묵한다(변이 J·K).
-        workspace = re.search(r"-w (\S+)", command)
-        fragments = [f"run {npm_run.group(1)}"]
-        if workspace is not None:
-            fragments.append(workspace.group(1).rsplit("/", 1)[-1])
+        script = rest[rest.index("run") + 1]
+        if not re.fullmatch(r"[a-z0-9:-]+", script):
+            return None
+        # native-fs 사본도 frontend 디렉터리 이름을 유지한다. 기존 CI/local
+        # workspace 구분을 보존하며 pinned npm과 기본 npm을 같은 명령으로 읽는다.
+        fragments = [f"run {script}"]
+        for i, token in enumerate(rest):
+            if token in {"-w", "--workspace"} and i + 1 < len(rest):
+                fragments.append(rest[i + 1].rsplit("/", 1)[-1])
+                break
+            if token.startswith(("-w=", "--workspace=")):
+                fragments.append(token.split("=", 1)[1].rsplit("/", 1)[-1])
+                break
         return fragments
     if command.startswith("uses "):
         return [command.split(maxsplit=1)[1]]
@@ -741,3 +757,21 @@ def test_exempt_entries_state_a_reason() -> None:
 
     assert all(reason.strip() for reason in _EXEMPT.values())
     assert all(len(reason) > 20 for reason in _EXEMPT.values())
+
+
+@pytest.mark.parametrize("npm", ["npm", "npx --yes npm@12.0.1"])
+@pytest.mark.parametrize("selector", ["-w", "--workspace", "--workspace="])
+def test_dependency_gate_identifies_native_and_pinned_npm(npm: str, selector: str) -> None:
+    workspace = "packages/kor-travel-map-admin/frontend"
+    separator = "" if selector.endswith("=") else " "
+    command = f"{npm} {selector}{separator}{workspace} run check:dependencies"
+    assert _identifying_fragments(command) == ["run check:dependencies", "frontend"]
+
+
+def test_dependency_gate_does_not_borrow_another_workspaces_command() -> None:
+    fragments = _identifying_fragments(
+        "npm -w packages/kor-travel-map-admin/frontend run check:dependencies"
+    )
+    assert fragments is not None
+    other = "npm -w packages/kor-travel-map-user-client run check:dependencies"
+    assert not all(_contains_token(other, fragment) for fragment in fragments)

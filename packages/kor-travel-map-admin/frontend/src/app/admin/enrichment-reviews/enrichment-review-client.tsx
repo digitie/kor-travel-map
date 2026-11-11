@@ -1,7 +1,13 @@
 "use client";
+import {
+  ReviewDialogHeading,
+  ReviewDetailLoading,
+  ReviewMapLegend,
+  ReviewErrorAlert,
+} from "@/components/review-feedback";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { CheckIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import { type Map as MapLibreMap } from "maplibre-gl";
 import {
@@ -39,18 +45,14 @@ import {
   AlertTitle,
 } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
 import { NativeSelectOption } from "@/components/ui/native-select-option";
-import { Skeleton } from "@/components/ui/skeleton";
 import { VWorldMapView, VWorldMarker } from "@/components/vworld-map-view";
 import { NULL_GLYPH, formatDateTime, shortId } from "@/lib/format";
 import { statusLabel } from "@/lib/status-label";
@@ -115,7 +117,9 @@ function fitMapToPoints(map: MapLibreMap, points: readonly MapPoint[]) {
  */
 function resolveCssColorHex(variable: string): string | null {
   if (typeof document === "undefined") return null;
-  const raw = getComputedStyle(document.documentElement).getPropertyValue(variable).trim();
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue(variable)
+    .trim();
   if (!raw) return null;
   if (/^#[0-9a-f]{6}$/i.test(raw)) return raw;
   const context = document.createElement("canvas").getContext("2d");
@@ -209,9 +213,15 @@ function CompareColumn({
   return (
     <section className="flex min-w-0 flex-col gap-4">
       <div className="flex flex-col gap-0.5">
-        <div className={`text-2xs font-medium ${eyebrowClassName}`}>{eyebrow}</div>
-        <h3 className="text-md font-semibold break-words text-text-primary">{heading}</h3>
-        <div className="font-mono text-xs break-all text-text-secondary">{identity}</div>
+        <div className={`text-2xs font-medium ${eyebrowClassName}`}>
+          {eyebrow}
+        </div>
+        <h3 className="text-md font-semibold break-words text-text-primary">
+          {heading}
+        </h3>
+        <div className="font-mono text-xs break-all text-text-secondary">
+          {identity}
+        </div>
       </div>
       <DetailList items={items} layout="inline" />
       {children}
@@ -219,6 +229,72 @@ function CompareColumn({
   );
 }
 
+function EnrichmentTargetComparison({
+  detail,
+}: {
+  detail: EnrichmentReviewDetail | undefined;
+}) {
+  const target = detail?.target;
+  if (!target || !detail) return null;
+  return (
+    <CompareColumn
+      eyebrow="1차 datagokr"
+      eyebrowClassName="text-compare-a"
+      heading={target.name}
+      identity={
+        <EntityLink
+          className="text-xs"
+          id={target.feature_id}
+          kind="feature"
+          newTab
+        />
+      }
+      items={[
+        { label: "종류", value: target.kind },
+        { label: "카테고리", value: target.category },
+        {
+          label: "기간",
+          value: formatPeriod(detail.target_start_date, detail.target_end_date),
+        },
+        {
+          label: "상태 축",
+          value: (
+            <FeatureStateBadges
+              lifecycleState={target.lifecycle_state}
+              publicationState={target.publication_state}
+              qualityState={target.quality_state}
+            />
+          ),
+        },
+        { label: "경도", value: target.lon?.toFixed(6) ?? null, mono: true },
+        { label: "위도", value: target.lat?.toFixed(6) ?? null, mono: true },
+      ]}
+    >
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-col gap-1">
+          <span className="text-2xs font-medium text-text-secondary">
+            detail
+          </span>
+          <JsonViewer
+            aria-label="target detail"
+            copyable
+            value={target.detail ?? {}}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <span className="text-2xs font-medium text-text-secondary">
+            address
+          </span>
+          <JsonViewer
+            aria-label="target address"
+            copyable
+            value={target.address ?? {}}
+          />
+        </div>
+      </div>
+    </CompareColumn>
+  );
+}
 function EnrichmentDetailDialog({
   detail,
   error,
@@ -241,13 +317,117 @@ function EnrichmentDetailDialog({
   const target = detail?.target;
   const source = detail?.source;
   const markerColors = useCompareMarkerColors();
-  const hasMap =
-    typeof target?.lon === "number" &&
-    typeof target.lat === "number" &&
-    typeof detail?.source_lon === "number" &&
-    typeof detail.source_lat === "number";
-  const acceptBlockedReason =
-    detail && detail.status !== "pending" ? "이미 결정된 리뷰입니다." : null;
+  const hasMap = resolveHasMap();
+  const acceptBlockedReason = resolveAcceptBlockedReason();
+  function renderEnrichmentDetailDialogState() {
+    return (map: Parameters<typeof fitMapToPoints>[0]) => {
+      if (!target || !detail) return;
+      return fitMapToPoints(map, [
+        [target.lon ?? 0, target.lat ?? 0],
+        [detail.source_lon ?? 0, detail.source_lat ?? 0],
+      ]);
+    };
+  }
+
+  function renderEnrichmentDetailDialogDiv2() {
+    if (!detail || !source || !target) return null;
+    return (
+      <div className="grid gap-6 border-t border-border pt-4 lg:grid-cols-2 lg:gap-8 lg:divide-x lg:divide-border lg:[&>*:last-child]:pl-8">
+        {<EnrichmentTargetComparison {...{ detail }} />}
+        <CompareColumn
+          eyebrow="2차 visitkorea"
+          eyebrowClassName="text-compare-b"
+          heading={detail.source_name}
+          identity={
+            <>
+              {source.provider} · {source.source_entity_id}
+            </>
+          }
+          items={[
+            { label: "데이터셋", value: source.dataset_key, mono: true },
+            {
+              label: "기간",
+              value: formatPeriod(
+                detail.source_start_date,
+                detail.source_end_date,
+              ),
+            },
+            {
+              label: "경도",
+              value: detail.source_lon?.toFixed(6) ?? null,
+              mono: true,
+            },
+            {
+              label: "위도",
+              value: detail.source_lat?.toFixed(6) ?? null,
+              mono: true,
+            },
+            { label: "레코드", value: source.source_record_key, mono: true },
+          ]}
+        >
+          <div className="flex flex-col gap-1">
+            <span className="text-2xs font-medium text-text-secondary">
+              raw_data
+            </span>
+            <JsonViewer
+              aria-label="source raw data"
+              copyable
+              value={source.raw_data ?? {}}
+            />
+          </div>
+        </CompareColumn>
+      </div>
+    );
+  }
+  function resolveHasMap() {
+    return (
+      typeof target?.lon === "number" &&
+      typeof target.lat === "number" &&
+      typeof detail?.source_lon === "number" &&
+      typeof detail.source_lat === "number"
+    );
+  }
+  function resolveAcceptBlockedReason() {
+    return detail && detail.status !== "pending"
+      ? "이미 결정된 리뷰입니다."
+      : null;
+  }
+  function renderEnrichmentDetailDialogState3() {
+    if (!detail || !target || !source) return null;
+    return hasMap ? (
+      <section className="flex flex-col gap-2 border-t border-border pt-4">
+        <ReviewMapLegend />
+        <div className="relative h-80 min-h-72 overflow-hidden rounded-control border border-border">
+          <VWorldMapView
+            apiKey={VWORLD_KEY}
+            center={[
+              ((target.lon ?? 0) + (detail.source_lon ?? 0)) / 2,
+              ((target.lat ?? 0) + (detail.source_lat ?? 0)) / 2,
+            ]}
+            className="absolute inset-0 h-full w-full"
+            key={detail.review_id}
+            navigation
+            onLoad={renderEnrichmentDetailDialogState()}
+            scale
+            testId="enrichment-detail-map"
+            zoom={14}
+          >
+            <VWorldMarker
+              lngLat={[target.lon ?? 0, target.lat ?? 0]}
+              markerColor={markerColors.a}
+              selected
+              title={`datagokr: ${target.name}`}
+            />
+            <VWorldMarker
+              lngLat={[detail.source_lon ?? 0, detail.source_lat ?? 0]}
+              markerColor={markerColors.b}
+              title={`visitkorea: ${detail.source_name}`}
+            />
+          </VWorldMapView>
+        </div>
+      </section>
+    ) : null;
+  }
   return (
     <Dialog
       open
@@ -257,42 +437,38 @@ function EnrichmentDetailDialog({
     >
       <DialogContent
         aria-label="enrichment review detail"
-        className="max-w-6xl"
+        className="max-w-6xl sm:max-w-6xl"
       >
-        <DialogHeader>
-          <div className="flex min-w-0 flex-col gap-0.5">
-            <DialogTitle>보강 상세 비교</DialogTitle>
-            <DialogDescription>
+        <ReviewDialogHeading
+          title={<>보강 상세 비교</>}
+          description={
+            <>
               {detail ? (
                 <span className="tabular-nums">
-                  <span className="font-mono">{shortId(detail.review_id)}</span> ·{" "}
-                  {formatDistance(detail.distance_m)}
+                  <span className="font-mono">{shortId(detail.review_id)}</span>{" "}
+                  · {formatDistance(detail.distance_m)}
                 </span>
               ) : (
                 NULL_GLYPH
               )}
-            </DialogDescription>
-          </div>
-          <Button size="sm" type="button" variant="ghost" onClick={onClose}>
-            닫기
-          </Button>
-        </DialogHeader>
+            </>
+          }
+          onClose={onClose}
+        />
         <div className="flex flex-col gap-6 p-4">
           {isLoading ? (
-            <div className="flex flex-col gap-3" aria-busy="true">
-              <Skeleton className="h-control w-full" />
-              <Skeleton className="h-80 w-full" />
-              <div className="grid gap-4 lg:grid-cols-2">
-                <Skeleton className="h-40 w-full" />
-                <Skeleton className="h-40 w-full" />
-              </div>
-            </div>
+            <ReviewDetailLoading />
           ) : error ? (
             <Alert variant="destructive">
               <AlertTitle>상세를 불러오지 못했습니다</AlertTitle>
               <AlertDescription>{error.message}</AlertDescription>
               <AlertActions>
-                <Button size="sm" type="button" variant="outline" onClick={onClose}>
+                <Button
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={onClose}
+                >
                   닫기
                 </Button>
               </AlertActions>
@@ -304,8 +480,14 @@ function EnrichmentDetailDialog({
                   ariaLabel="보강 점수"
                   className="flex-1"
                   items={[
-                    { label: "이름 점수", value: formatScore(detail.name_score) },
-                    { label: "거리 점수", value: formatScore(detail.spatial_score) },
+                    {
+                      label: "이름 점수",
+                      value: formatScore(detail.name_score),
+                    },
+                    {
+                      label: "거리 점수",
+                      value: formatScore(detail.spatial_score),
+                    },
                     { label: "거리", value: formatDistance(detail.distance_m) },
                     {
                       label: "감사 기본 소스",
@@ -317,7 +499,8 @@ function EnrichmentDetailDialog({
                   <FilterField
                     hint={
                       <span id="enrichment-detail-source-note">
-                        선택값은 accept 적용 데이터 변경 없이 decision reason에 기록됩니다.
+                        선택값은 accept 적용 데이터 변경 없이 decision reason에
+                        기록됩니다.
                       </span>
                     }
                     label="기록 소스"
@@ -325,7 +508,9 @@ function EnrichmentDetailDialog({
                     <NativeSelect
                       aria-describedby="enrichment-detail-source-note"
                       aria-label="enrichment detail source audit note"
-                      value={selectedDetailSource ?? detail.default_detail_source}
+                      value={
+                        selectedDetailSource ?? detail.default_detail_source
+                      }
                       onChange={(event) =>
                         onSelectDetailSource(
                           event.target.value as EnrichmentDetailSource,
@@ -346,7 +531,9 @@ function EnrichmentDetailDialog({
                   <div className="flex flex-col gap-1 pb-5.5">
                     <Button
                       disabled={acceptBlockedReason !== null || isPending}
-                      disabledReason={acceptBlockedReason ?? "다른 결정을 처리하는 중입니다"}
+                      disabledReason={
+                        acceptBlockedReason ?? "다른 결정을 처리하는 중입니다"
+                      }
                       loading={isPending}
                       type="button"
                       variant="default"
@@ -358,128 +545,8 @@ function EnrichmentDetailDialog({
                   </div>
                 </div>
               </div>
-              {hasMap ? (
-                <section className="flex flex-col gap-2 border-t border-border pt-4">
-                  <div className="flex flex-wrap items-center gap-3 text-2xs font-medium text-text-secondary">
-                    <span>위치 비교</span>
-                    <span className="flex items-center gap-1">
-                      <span aria-hidden="true" className="size-2 rounded-full bg-compare-a" />
-                      datagokr
-                    </span>
-                    <span className="flex items-center gap-1">
-                      <span aria-hidden="true" className="size-2 rounded-full bg-compare-b" />
-                      visitkorea
-                    </span>
-                  </div>
-                  <div className="relative h-80 min-h-72 overflow-hidden rounded-control border border-border">
-                    <VWorldMapView
-                      apiKey={VWORLD_KEY}
-                      center={[
-                        ((target.lon ?? 0) + (detail.source_lon ?? 0)) / 2,
-                        ((target.lat ?? 0) + (detail.source_lat ?? 0)) / 2,
-                      ]}
-                      className="absolute inset-0 h-full w-full"
-                      key={detail.review_id}
-                      navigation
-                      onLoad={(map) =>
-                        fitMapToPoints(map, [
-                          [target.lon ?? 0, target.lat ?? 0],
-                          [detail.source_lon ?? 0, detail.source_lat ?? 0],
-                        ])
-                      }
-                      scale
-                      testId="enrichment-detail-map"
-                      zoom={14}
-                    >
-                      <VWorldMarker
-                        lngLat={[target.lon ?? 0, target.lat ?? 0]}
-                        markerColor={markerColors.a}
-                        selected
-                        title={`datagokr: ${target.name}`}
-                      />
-                      <VWorldMarker
-                        lngLat={[
-                          detail.source_lon ?? 0,
-                          detail.source_lat ?? 0,
-                        ]}
-                        markerColor={markerColors.b}
-                        title={`visitkorea: ${detail.source_name}`}
-                      />
-                    </VWorldMapView>
-                  </div>
-                </section>
-              ) : null}
-              <div className="grid gap-6 border-t border-border pt-4 lg:grid-cols-2 lg:gap-8 lg:divide-x lg:divide-border lg:[&>*:last-child]:pl-8">
-                <CompareColumn
-                  eyebrow="1차 datagokr"
-                  eyebrowClassName="text-compare-a"
-                  heading={target.name}
-                  identity={
-                    <EntityLink
-                      className="text-xs"
-                      id={target.feature_id}
-                      kind="feature"
-                      newTab
-                    />
-                  }
-                  items={[
-                    { label: "종류", value: target.kind },
-                    { label: "카테고리", value: target.category },
-                    {
-                      label: "기간",
-                      value: formatPeriod(detail.target_start_date, detail.target_end_date),
-                    },
-                    {
-                      label: "상태 축",
-                      value: (
-                        <FeatureStateBadges
-                          lifecycleState={target.lifecycle_state}
-                          publicationState={target.publication_state}
-                          qualityState={target.quality_state}
-                        />
-                      ),
-                    },
-                    { label: "경도", value: target.lon?.toFixed(6) ?? null, mono: true },
-                    { label: "위도", value: target.lat?.toFixed(6) ?? null, mono: true },
-                  ]}
-                >
-                  <div className="flex flex-col gap-3">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-2xs font-medium text-text-secondary">detail</span>
-                      <JsonViewer aria-label="target detail" copyable value={target.detail ?? {}} />
-                    </div>
-                    <div className="flex flex-col gap-1">
-                      <span className="text-2xs font-medium text-text-secondary">address</span>
-                      <JsonViewer aria-label="target address" copyable value={target.address ?? {}} />
-                    </div>
-                  </div>
-                </CompareColumn>
-                <CompareColumn
-                  eyebrow="2차 visitkorea"
-                  eyebrowClassName="text-compare-b"
-                  heading={detail.source_name}
-                  identity={
-                    <>
-                      {source.provider} · {source.source_entity_id}
-                    </>
-                  }
-                  items={[
-                    { label: "데이터셋", value: source.dataset_key, mono: true },
-                    {
-                      label: "기간",
-                      value: formatPeriod(detail.source_start_date, detail.source_end_date),
-                    },
-                    { label: "경도", value: detail.source_lon?.toFixed(6) ?? null, mono: true },
-                    { label: "위도", value: detail.source_lat?.toFixed(6) ?? null, mono: true },
-                    { label: "레코드", value: source.source_record_key, mono: true },
-                  ]}
-                >
-                  <div className="flex flex-col gap-1">
-                    <span className="text-2xs font-medium text-text-secondary">raw_data</span>
-                    <JsonViewer aria-label="source raw data" copyable value={source.raw_data ?? {}} />
-                  </div>
-                </CompareColumn>
-              </div>
+              {renderEnrichmentDetailDialogState3()}
+              {renderEnrichmentDetailDialogDiv2()}
             </>
           ) : null}
         </div>
@@ -613,7 +680,9 @@ function EnrichmentReviewTable({
           }
           const busy = isPending && pendingReviewId === item.review_id;
           const otherBusy = isPending && !busy;
-          const reason = otherBusy ? "다른 결정을 처리하는 중입니다" : undefined;
+          const reason = otherBusy
+            ? "다른 결정을 처리하는 중입니다"
+            : undefined;
           // P1-5: 진행 표면은 **누른 버튼**에 붙는다(dedup과 같은 규약). 그룹 첫 버튼에 고정하면
           // 방금 누른 버튼이 native disabled가 되어 포커스를 잃고 spinner는 엉뚱한 곳에서 돈다.
           const busyWith = (value: EnrichmentDecision) =>
@@ -674,7 +743,8 @@ function EnrichmentReviewTable({
       isLoading={isLoading}
       emptyState={{
         title: "enrichment review가 없습니다.",
-        description: "상태 필터를 전체로 바꾸거나 점수·provider 조건을 넓혀 보세요.",
+        description:
+          "상태 필터를 전체로 바꾸거나 점수·provider 조건을 넓혀 보세요.",
       }}
       onRowClick={(row) => onOpenDetail(row.review_id)}
       isRowActive={(row) => row.review_id === detailReviewId}
@@ -822,29 +892,15 @@ export function EnrichmentReviewClient() {
     >
       <div className="flex flex-col gap-4">
         {errorLines.length > 0 ? (
-          <Alert variant="destructive">
-            <AlertTitle>enrichment review 처리 실패</AlertTitle>
-            <AlertDescription>
-              {errorLines.map((line) => (
-                <p key={line}>{line}</p>
-              ))}
-              <p>잠시 후 다시 시도하세요.</p>
-            </AlertDescription>
-            <AlertActions>
-              <Button
-                loading={reviews.isFetching}
-                size="sm"
-                type="button"
-                variant="outline"
-                onClick={() => {
-                  decision.reset();
-                  void reviews.refetch();
-                }}
-              >
-                다시 시도
-              </Button>
-            </AlertActions>
-          </Alert>
+          <ReviewErrorAlert
+            title={<>enrichment review 처리 실패</>}
+            lines={errorLines}
+            pending={reviews.isFetching}
+            onRetry={() => {
+              decision.reset();
+              void reviews.refetch();
+            }}
+          />
         ) : null}
 
         {detailReviewId ? (
@@ -898,7 +954,10 @@ export function EnrichmentReviewClient() {
               ))}
             </NativeSelect>
           </FilterField>
-          <div className="flex w-56 min-w-0 flex-col gap-1" data-slot="filter-field">
+          <div
+            className="flex w-56 min-w-0 flex-col gap-1"
+            data-slot="filter-field"
+          >
             <span className="text-2xs leading-none font-medium text-text-secondary">
               소스 provider
             </span>
@@ -956,9 +1015,13 @@ export function EnrichmentReviewClient() {
           isPending={decision.isPending}
           items={items}
           pendingDecision={
-            decision.isPending ? (decision.variables?.body.decision ?? null) : null
+            decision.isPending
+              ? (decision.variables?.body.decision ?? null)
+              : null
           }
-          pendingReviewId={decision.isPending ? (decision.variables?.reviewKey ?? null) : null}
+          pendingReviewId={
+            decision.isPending ? (decision.variables?.reviewKey ?? null) : null
+          }
           onDecide={decide}
           onOpenDetail={openDetail}
         />

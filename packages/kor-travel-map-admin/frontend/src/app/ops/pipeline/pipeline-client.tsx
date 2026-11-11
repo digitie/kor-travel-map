@@ -4,7 +4,7 @@
 import { RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { opsLiveConnectionLabel, useOpsLiveInvalidation } from "@/api/live";
 import {
@@ -162,6 +162,25 @@ function OverviewStrip({
   const runCounts = Object.entries(dagster?.run_counts ?? {});
   const sensors = dagster?.sensors ?? [];
 
+  function renderOverviewStripState() {
+    return dagster && dagster.status !== "ok" ? (
+      <Alert
+        variant={dagster.status === "unavailable" ? "destructive" : "warning"}
+      >
+        <AlertTitle>
+          {dagster.status === "unavailable"
+            ? "Dagster 연결 불가"
+            : "Dagster 상태 확인 필요"}
+        </AlertTitle>
+        <AlertDescription>
+          {(dagster.errors ?? []).length > 0
+            ? (dagster.errors ?? []).join(" / ")
+            : "Dagster webserver 상태를 확인하세요."}{" "}
+          타임라인(DB)은 계속 동작합니다.
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
   return (
     <section aria-label="파이프라인 상태 스트립" className="space-y-4">
       {overview.isError ? (
@@ -170,23 +189,7 @@ function OverviewStrip({
           <AlertDescription>{overview.error.message}</AlertDescription>
         </Alert>
       ) : null}
-      {dagster && dagster.status !== "ok" ? (
-        <Alert
-          variant={dagster.status === "unavailable" ? "destructive" : "warning"}
-        >
-          <AlertTitle>
-            {dagster.status === "unavailable"
-              ? "Dagster 연결 불가"
-              : "Dagster 상태 확인 필요"}
-          </AlertTitle>
-          <AlertDescription>
-            {(dagster.errors ?? []).length > 0
-              ? (dagster.errors ?? []).join(" / ")
-              : "Dagster webserver 상태를 확인하세요."}{" "}
-            타임라인(DB)은 계속 동작합니다.
-          </AlertDescription>
-        </Alert>
-      ) : null}
+      {renderOverviewStripState()}
       {queueState && !queueState.operational ? (
         <Alert data-testid="queue-sensor-alert" variant="destructive">
           <AlertTitle>
@@ -261,10 +264,15 @@ function OverviewStrip({
                   </span>
                 ))}
                 {sensors.map((sensor) => (
-                  <span className="inline-flex items-center gap-1" key={sensor.name}>
+                  <span
+                    className="inline-flex items-center gap-1"
+                    key={sensor.name}
+                  >
                     {sensorDisplayName(sensor.name)}
                     <StatusBadge
-                      label={sensor.status ? statusLabel(sensor.status) : undefined}
+                      label={
+                        sensor.status ? statusLabel(sensor.status) : undefined
+                      }
                       status={sensor.status?.toLowerCase() ?? null}
                     />
                   </span>
@@ -354,7 +362,9 @@ function useTimelineFilters({
         kind: searchParams.get("kind") ?? undefined,
         status: searchParams.get("status") ?? undefined,
         providerDatasetId: urlProviderDatasetIdValue,
-        syncScope: hasProviderDatasetFilter ? urlSyncScope || undefined : undefined,
+        syncScope: hasProviderDatasetFilter
+          ? urlSyncScope || undefined
+          : undefined,
         operationKey: hasProviderDatasetFilter
           ? urlOperationKey || undefined
           : undefined,
@@ -375,10 +385,8 @@ export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const urlStateRef = useRef<string | null>(null);
-  if (urlStateRef.current === null) {
-    urlStateRef.current = searchParams.toString();
-  }
+  const [initialUrlState] = useState(() => searchParams.toString());
+  const urlStateRef = useRef(initialUrlState);
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");

@@ -59,6 +59,16 @@ const TWIN_JOB_ID = "11111111-1111-1111-1111-111111111111";
 const SOLO_JOB_ID = "99999999-9999-4999-8999-999999999999";
 const NEW_REQUEST_ID = "33333333-3333-4333-8333-333333333333";
 const SCHEDULE_NAME = "feature_notice_transport_highway_incidents_hourly_schedule";
+const ORPHAN_DAGSTER_RUN: Schemas["DagsterRunSummary"] = {
+  run_id: "run-orphan",
+  job_name: "transport_highway_incidents_job",
+  status: "FAILURE",
+  start_time: 1789344000,
+  end_time: null,
+  update_time: null,
+  tags: {},
+};
+
 const PROVIDER_DATASET_IDS = {
   "kor-travel-transport/transport_highway_incidents": 101,
   "python-mois-api/mois_licenses": 102,
@@ -992,6 +1002,31 @@ async function installPipelineMocks(
       await fulfillJson(route, makeMoisPrecheckResponse());
       return;
     }
+    if (pathname.endsWith("/v1/ops/pipeline/dagster-summary")) {
+      // 공통 DagsterPanel의 독립 조회다. 큐 실행 허용 여부는 overview 센서 fixture가 소유한다.
+      const overview = options.overview ?? makeOverview({});
+      const dagster = overview.data.dagster;
+      await fulfillJson(route, {
+        data: {
+          status: dagster.status,
+          checked_at: overview.data.checked_at,
+          dagster_url: dagster.dagster_url,
+          graphql_url: dagster.graphql_url,
+          version: dagster.version,
+          errors: dagster.errors,
+          repository_count: 0,
+          job_count: 0,
+          asset_count: 0,
+          schedule_count: 0,
+          sensor_count: 0,
+          repositories: [],
+          recent_runs: [ORPHAN_DAGSTER_RUN],
+          run_counts: { FAILURE: 1 },
+        },
+        meta: META,
+      } satisfies Schemas["DagsterSummaryResponse"]);
+      return;
+    }
     if (pathname.endsWith("/v1/ops/pipeline/overview")) {
       await fulfillJson(route, options.overview ?? makeOverview({}));
       return;
@@ -1113,15 +1148,7 @@ async function installPipelineMocks(
           dagster_url: "http://dagster.example:12702",
           graphql_url: "http://dagster.example:12702/graphql",
           checked_at: "2026-07-14T10:00:00.000Z",
-          run: {
-            run_id: "run-orphan",
-            job_name: "transport_highway_incidents_job",
-            status: "FAILURE",
-            start_time: 1789344000,
-            end_time: null,
-            update_time: null,
-            tags: {},
-          },
+          run: ORPHAN_DAGSTER_RUN,
           events: [
             {
               event_type: "MessageEvent",
@@ -1152,17 +1179,7 @@ async function installPipelineMocks(
           graphql_url: "http://dagster.example:12702/graphql",
           checked_at: "2026-07-14T10:00:00.000Z",
           run_counts: { FAILURE: 1 },
-          runs: [
-            {
-              run_id: "run-orphan",
-              job_name: "transport_highway_incidents_job",
-              status: "FAILURE",
-              start_time: 1789344000,
-              end_time: null,
-              update_time: null,
-              tags: {},
-            },
-          ],
+          runs: [ORPHAN_DAGSTER_RUN],
           errors: [],
         },
         meta: META,
@@ -1796,7 +1813,7 @@ test.describe("/ops/pipeline", () => {
     const panel = page.getByTestId("pipeline-dagster-runs-panel");
     await expect(panel.getByText("run-orph")).toBeVisible();
     await panel
-      .getByRole("button", { name: "run run-orph... 상세 열기" })
+      .getByRole("button", { name: "실행 상세: transport_highway_incidents_job, run-orphan" })
       .click();
     const runDetail = page.getByTestId(
       "pipeline-dagster-run-detail-run-orphan",

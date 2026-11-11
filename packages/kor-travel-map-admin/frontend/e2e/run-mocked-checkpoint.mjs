@@ -9,6 +9,7 @@ import path from "node:path";
 
 import { frontendBuildInputs } from "../../../../scripts/frontend-build-inputs.mjs";
 import { classifyMockedCheckpointOutcome } from "./mocked-checkpoint-outcome.mjs";
+import { pollForResourceAbsence } from "./mocked-checkpoint-cleanup.mjs";
 
 const checkpoints = new Set(["A", "B", "C", "D"]);
 const [checkpoint, ...playwrightArgs] = process.argv.slice(2);
@@ -227,7 +228,7 @@ function cleanupFilesystem() {
   }
 }
 
-function runCleanupCommand(args) {
+function runCleanupCommand(args, timeoutMs = 30_000) {
   return new Promise((resolve) => {
     const child = spawn("docker", args, {
       detached: process.platform !== "win32",
@@ -251,19 +252,16 @@ function runCleanupCommand(args) {
     const forceTimer = setTimeout(() => {
       terminateChildGroup(child, "SIGKILL");
       finish(1);
-    }, 1_000);
+    }, timeoutMs);
     child.once("error", () => finish(1));
-    child.once("exit", (status) => finish(status ?? 1));
+    child.once("close", (status) => finish(status ?? 1));
   });
 }
 
 async function waitForResourceAbsence(listArgs) {
-  for (let attempt = 0; attempt < 20; attempt += 1) {
-    const listed = await runCleanupCommand(listArgs);
-    if (listed.status === 0 && listed.stdout.trim() === "") return true;
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  return false;
+  return pollForResourceAbsence((remainingMs) =>
+    runCleanupCommand(listArgs, Math.min(30_000, remainingMs)),
+  );
 }
 
 async function cleanupOwnedNetwork() {

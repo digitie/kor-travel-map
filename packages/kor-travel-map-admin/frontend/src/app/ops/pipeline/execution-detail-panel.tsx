@@ -84,78 +84,117 @@ function useExecutionDetailPanelController({
     cursor,
   });
 
-  const data = detail.data?.data;
-  const execution = data?.execution;
-  const root = data?.root;
-  const importJob = data?.import_job ?? null;
-  const updateRequest = data?.update_request ?? null;
-  const cancellation = data?.cancellation ?? cancelExecution.data?.data ?? null;
-  const events = data?.events ?? [];
-  const eventsNextCursor = data?.events_next_cursor ?? null;
-  const cancellationInProgress = cancellation?.status === "in_progress";
+  function deriveExecutionDetailPanelControllerState() {
+    const data = detail.data?.data;
+    const execution = data?.execution;
+    const root = data?.root;
+    const importJob = data?.import_job ?? null;
+    const updateRequest = data?.update_request ?? null;
+    const cancellation =
+      data?.cancellation ?? cancelExecution.data?.data ?? null;
+    const events = data?.events ?? [];
+    const eventsNextCursor = data?.events_next_cursor ?? null;
+    const cancellationInProgress = cancellation?.status === "in_progress";
 
-  const canCancel =
-    execution !== undefined &&
-    ["queued", "running"].includes(execution.status) &&
-    (cancellation === null || cancellation.retryable);
-  const canRunNow =
-    execution !== undefined &&
-    execution.kind === "update_request" &&
-    cancellation === null &&
-    (execution.status === "running" ||
-      (execution.status === "queued" && queueOperational));
-  const cancelProblem =
-    cancelExecution.error instanceof ApiClientError
-      ? cancelExecution.error.problem
+    const canCancel =
+      execution !== undefined &&
+      ["queued", "running"].includes(execution.status) &&
+      (cancellation === null || cancellation.retryable);
+    const canRunNow =
+      execution !== undefined &&
+      execution.kind === "update_request" &&
+      cancellation === null &&
+      (execution.status === "running" ||
+        (execution.status === "queued" && queueOperational));
+    const cancelProblem =
+      cancelExecution.error instanceof ApiClientError
+        ? cancelExecution.error.problem
+        : null;
+    const cancelProblemDetails = cancelProblem?.details;
+    const cancellationFailures = cancellation
+      ? {
+          members: cancellation.members.filter(
+            (member) => member.result === "cancel_failed" || member.error,
+          ),
+          dagster_runs: cancellation.dagster_runs.filter(
+            (run) => run.result === "cancel_failed" || run.error,
+          ),
+        }
       : null;
-  const cancelProblemDetails = cancelProblem?.details;
-  const cancellationFailures = cancellation
-    ? {
-        members: cancellation.members.filter(
-          (member) => member.result === "cancel_failed" || member.error,
-        ),
-        dagster_runs: cancellation.dagster_runs.filter(
-          (run) => run.result === "cancel_failed" || run.error,
-        ),
+    const hasCancellationFailures = Boolean(
+      cancellationFailures &&
+        (cancellationFailures.members.length > 0 ||
+          cancellationFailures.dagster_runs.length > 0),
+    );
+
+    const submitCancel = async () => {
+      if (!execution) {
+        return;
       }
-    : null;
-  const hasCancellationFailures = Boolean(
-    cancellationFailures &&
-      (cancellationFailures.members.length > 0 ||
-        cancellationFailures.dagster_runs.length > 0),
-  );
+      const confirmed = await confirm({
+        title: `${executionKindLabel(execution.kind)} 취소`,
+        description:
+          "실행 중인 외부 프로세스는 즉시 종료되지 않을 수 있습니다(best-effort).",
+        confirmLabel: "취소 요청",
+        destructive: true,
+      });
+      if (!confirmed) {
+        return;
+      }
+      cancelExecution.mutate({
+        kind: execution.kind,
+        executionId: execution.id,
+        body: {
+          reason: cancelReason.trim() ? cancelReason.trim() : null,
+        },
+      });
+    };
 
-  const submitCancel = async () => {
-    if (!execution) {
-      return;
-    }
-    const confirmed = await confirm({
-      title: `${executionKindLabel(execution.kind)} 취소`,
-      description:
-        "실행 중인 외부 프로세스는 즉시 종료되지 않을 수 있습니다(best-effort).",
-      confirmLabel: "취소 요청",
-      destructive: true,
-    });
-    if (!confirmed) {
-      return;
-    }
-    cancelExecution.mutate({
-      kind: execution.kind,
-      executionId: execution.id,
-      body: {
-        reason: cancelReason.trim() ? cancelReason.trim() : null,
-      },
-    });
-  };
-
-  const submitRunNow = () => {
-    if (!execution) {
-      return;
-    }
-    runNow.mutate({
-      requestId: execution.id,
-    });
-  };
+    const submitRunNow = () => {
+      if (!execution) {
+        return;
+      }
+      runNow.mutate({
+        requestId: execution.id,
+      });
+    };
+    return {
+      execution,
+      root,
+      importJob,
+      updateRequest,
+      cancellation,
+      events,
+      eventsNextCursor,
+      cancellationInProgress,
+      canCancel,
+      canRunNow,
+      cancelProblem,
+      cancelProblemDetails,
+      cancellationFailures,
+      hasCancellationFailures,
+      submitCancel,
+      submitRunNow,
+    };
+  }
+  const {
+    execution,
+    root,
+    importJob,
+    updateRequest,
+    cancellation,
+    events,
+    eventsNextCursor,
+    cancellationInProgress,
+    canCancel,
+    canRunNow,
+    cancelProblem,
+    cancelProblemDetails,
+    cancellationFailures,
+    hasCancellationFailures,
+    submitCancel,
+    submitRunNow,
+  } = deriveExecutionDetailPanelControllerState();
 
   return {
     canCancel,
@@ -191,6 +230,59 @@ function useExecutionDetailPanelController({
   };
 }
 
+function ExecutionCancellationSummary({
+  cancellation,
+  cancellationFailures,
+  hasCancellationFailures,
+}: Pick<
+  ReturnType<typeof useExecutionDetailPanelController>,
+  "cancellation" | "cancellationFailures" | "hasCancellationFailures"
+>) {
+  function renderExecutionRunSummaryState() {
+    if (!cancellation) return null;
+    return (cancellation.warnings ?? []).length > 0 ? (
+      <ul className="list-disc pl-5">
+        {(cancellation.warnings ?? []).map((warning) => (
+          <li key={warning}>{warning}</li>
+        ))}
+      </ul>
+    ) : null;
+  }
+
+  return cancellation ? (
+    <Alert
+      variant={
+        cancellation.status === "failed" || cancellation.status === "retryable"
+          ? "destructive"
+          : "info"
+      }
+    >
+      <AlertTitle>취소 작업 {cancellation.status}</AlertTitle>
+      <AlertDescription className="space-y-2">
+        <p>
+          {cancellation.reason ?? "취소 사유 없음"} · 미해결 member{" "}
+          {cancellation.unresolved_member_count}개
+          {cancellation.retryable ? " · 재시도 가능" : ""}
+        </p>
+        {cancellation.error ? (
+          <JsonViewer
+            aria-label="영속 취소 오류 근거"
+            maxHeight="sm"
+            value={cancellation.error}
+          />
+        ) : null}
+        {hasCancellationFailures ? (
+          <JsonViewer
+            aria-label="영속 취소 member 실패 근거"
+            maxHeight="sm"
+            value={cancellationFailures}
+          />
+        ) : null}
+        {renderExecutionRunSummaryState()}
+      </AlertDescription>
+    </Alert>
+  ) : null;
+}
 function ExecutionRunSummary({
   cancellation,
   cancellationFailures,
@@ -213,268 +305,262 @@ function ExecutionRunSummary({
   | "root"
   | "updateRequest"
 >) {
-  return (
-    <>
-      {detail.isLoading ? (
-        <div aria-busy="true" className="space-y-2">
-          <Skeleton className="h-4 w-1/2" />
-          <Skeleton className="h-4 w-3/4" />
-          <Skeleton className="h-4 w-2/3" />
-          <Skeleton className="h-4 w-1/3" />
-        </div>
-      ) : null}
-      {detail.isError ? (
-        <Alert variant="destructive">
-          <AlertTitle>실행 상세를 불러오지 못했습니다</AlertTitle>
-          <AlertDescription>{detail.error.message}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {execution?.error_message ? (
-        <Alert variant="destructive">
-          <AlertTitle>실패 원인</AlertTitle>
-          <AlertDescription className="break-all">
-            {execution.error_message}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {cancellation ? (
-        <Alert
-          variant={
-            cancellation.status === "failed" ||
-            cancellation.status === "retryable"
-              ? "destructive"
-              : "info"
-          }
-        >
-          <AlertTitle>취소 작업 {cancellation.status}</AlertTitle>
-          <AlertDescription className="space-y-2">
-            <p>
-              {cancellation.reason ?? "취소 사유 없음"} · 미해결 member{" "}
-              {cancellation.unresolved_member_count}개
-              {cancellation.retryable ? " · 재시도 가능" : ""}
-            </p>
-            {cancellation.error ? (
-              <JsonViewer
-                aria-label="영속 취소 오류 근거"
-                maxHeight="sm"
-                value={cancellation.error}
+  function renderExecutionRunSummaryState3() {
+    return root?.operation_key === "feature_place_mcst_culture_job" ? (
+      <section aria-label="MCST 데이터셋별 결과" className="space-y-2">
+        <h3 className={SUBHEADING_CLASS}>데이터셋별 결과</h3>
+        <p className="text-sm">
+          완료{" "}
+          {
+            root.provider_datasets.filter((item) => item.status === "done")
+              .length
+          }{" "}
+          · 실패{" "}
+          {
+            root.provider_datasets.filter((item) => item.status === "failed")
+              .length
+          }{" "}
+          · 전체 {root.provider_datasets.length}
+        </p>
+        <ul className="space-y-1 text-sm">
+          {root.provider_datasets.map((item) => (
+            <li
+              className="flex flex-wrap items-center gap-2"
+              key={item.operation_member_id}
+            >
+              <StatusBadge status={item.status} />
+              <span className="break-all font-mono text-xs">
+                {item.dataset_key}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </section>
+    ) : null;
+  }
+  function renderExecutionRunSummaryState4() {
+    return execution ? (
+      <section aria-label="연결 개체" className="space-y-2">
+        <h3 className={SUBHEADING_CLASS}>연결 개체</h3>
+        <ul className="space-y-1 text-xs text-text-secondary [&_li]:flex [&_li]:flex-wrap [&_li]:items-center [&_li]:gap-1">
+          {root ? (
+            <li>
+              대표 작업:{" "}
+              <Button
+                data-detail-url={root.projected_job.detail_url}
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  onSelectExecution("import_job", root.projected_job.id)
+                }
+              >
+                <span className="font-mono">
+                  {shortId(root.projected_job.id)}
+                </span>
+                <StatusBadge status={root.projected_job.status} />
+              </Button>
+            </li>
+          ) : null}
+          {execution.kind === "update_request" && execution.job_id ? (
+            <li>
+              요청 연결 작업:{" "}
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  onSelectExecution("import_job", execution.job_id as string)
+                }
+              >
+                <span className="font-mono">{shortId(execution.job_id)}</span>
+              </Button>
+            </li>
+          ) : null}
+          {execution.kind === "import_job" && execution.request_id ? (
+            <li>
+              갱신 요청:{" "}
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  onSelectExecution(
+                    "update_request",
+                    execution.request_id as string,
+                  )
+                }
+              >
+                <span className="font-mono">
+                  {shortId(execution.request_id)}
+                </span>
+              </Button>
+            </li>
+          ) : null}
+          {execution.parent_job_id ? (
+            <li>
+              상위 작업:{" "}
+              <Button
+                size="sm"
+                type="button"
+                variant="ghost"
+                onClick={() =>
+                  onSelectExecution(
+                    "import_job",
+                    execution.parent_job_id as string,
+                  )
+                }
+              >
+                <span className="font-mono">
+                  {shortId(execution.parent_job_id)}
+                </span>
+              </Button>
+            </li>
+          ) : null}
+          {execution.load_batch_id ? (
+            <li>
+              배치:{" "}
+              <Link
+                className={INLINE_LINK_CLASS}
+                href={`/ops/pipeline?load_batch_id=${encodeURIComponent(execution.load_batch_id)}`}
+              >
+                {shortId(execution.load_batch_id)}
+              </Link>
+            </li>
+          ) : null}
+          {execution.dagster_run_id ? (
+            <li>
+              Dagster run:{" "}
+              <EntityLink
+                id={execution.dagster_run_id}
+                kind="dagsterRun"
+                newTab
               />
-            ) : null}
-            {hasCancellationFailures ? (
-              <JsonViewer
-                aria-label="영속 취소 member 실패 근거"
-                maxHeight="sm"
-                value={cancellationFailures}
-              />
-            ) : null}
-            {(cancellation.warnings ?? []).length > 0 ? (
-              <ul className="list-disc pl-5">
-                {(cancellation.warnings ?? []).map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {root?.operation_key === "feature_place_mcst_culture_job" ? (
-        <section aria-label="MCST 데이터셋별 결과" className="space-y-2">
-          <h3 className={SUBHEADING_CLASS}>데이터셋별 결과</h3>
-          <p className="text-sm">
-            완료 {root.provider_datasets.filter((item) => item.status === "done").length} ·{" "}
-            실패 {root.provider_datasets.filter((item) => item.status === "failed").length} ·{" "}
-            전체 {root.provider_datasets.length}
-          </p>
-          <ul className="space-y-1 text-sm">
-            {root.provider_datasets.map((item) => (
-              <li className="flex flex-wrap items-center gap-2" key={item.operation_member_id}>
-                <StatusBadge status={item.status} />
-                <span className="break-all font-mono text-xs">{item.dataset_key}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      ) : null}
-
-      {execution ? (
-        <DetailList
-          items={[
-            { label: "상태", value: statusLabel(execution.status) },
-            {
-              label: "진행",
-              value:
-                execution.kind === "update_request" && root
-                  ? `${root.projected_job.progress}% · ${root.projected_job.current_stage ?? NULL_GLYPH}`
-                  : `${execution.progress ?? 0}% · ${execution.current_stage ?? NULL_GLYPH}`,
-            },
-            {
-              label: "provider datasets",
-              value:
-                execution.provider_datasets
-                  .map(providerDatasetIdentityLabel)
-                  .join(", ") || null,
-              mono: true,
-            },
-            {
-              label: "scope",
-              value: execution.scope_type ?? execution.job_kind ?? null,
-              mono: true,
-            },
-            {
-              label: "우선순위/모드",
-              value:
-                execution.kind === "update_request"
-                  ? `${execution.priority ?? NULL_GLYPH} / ${execution.run_mode ?? NULL_GLYPH}`
-                  : null,
-            },
-            { label: "operator", value: execution.operator ?? null },
-            { label: "생성", value: formatDateTime(execution.created_at) },
-            {
-              label: "시작/완료",
-              value: `${formatDateTime(execution.started_at)} → ${formatDateTime(
-                execution.finished_at,
-              )}`,
-            },
-          ]}
-          layout="inline"
+            </li>
+          ) : null}
+        </ul>
+      </section>
+    ) : null;
+  }
+  function renderExecutionRunSummaryState5() {
+    return !updateRequest && importJob ? (
+      <section aria-label="작업 payload" className="space-y-2">
+        <h3 className={SUBHEADING_CLASS}>작업 payload</h3>
+        <JsonViewer
+          aria-label="작업 payload"
+          copyable
+          maxHeight="sm"
+          value={importJob.payload}
         />
-      ) : null}
+      </section>
+    ) : null;
+  }
+  function renderExecutionRunSummaryState6() {
+    return execution?.error_message ? (
+      <Alert variant="destructive">
+        <AlertTitle>실패 원인</AlertTitle>
+        <AlertDescription className="break-all">
+          {execution.error_message}
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
+  function executionSummaryItems(): Parameters<typeof DetailList>[0]["items"] {
+    if (!execution) return [];
+    return [
+      { label: "상태", value: statusLabel(execution.status) },
+      {
+        label: "진행",
+        value:
+          execution.kind === "update_request" && root
+            ? `${root.projected_job.progress}% · ${root.projected_job.current_stage ?? NULL_GLYPH}`
+            : `${execution.progress ?? 0}% · ${execution.current_stage ?? NULL_GLYPH}`,
+      },
+      {
+        label: "provider datasets",
+        value:
+          execution.provider_datasets
+            .map(providerDatasetIdentityLabel)
+            .join(", ") || null,
+        mono: true,
+      },
+      {
+        label: "scope",
+        value: execution.scope_type ?? execution.job_kind ?? null,
+        mono: true,
+      },
+      {
+        label: "우선순위/모드",
+        value:
+          execution.kind === "update_request"
+            ? `${execution.priority ?? NULL_GLYPH} / ${execution.run_mode ?? NULL_GLYPH}`
+            : null,
+      },
+      { label: "operator", value: execution.operator ?? null },
+      { label: "생성", value: formatDateTime(execution.created_at) },
+      {
+        label: "시작/완료",
+        value: `${formatDateTime(execution.started_at)} → ${formatDateTime(
+          execution.finished_at,
+        )}`,
+      },
+    ];
+  }
+  function renderExecutionRunSummaryState7() {
+    return (
+      <>
+        {detail.isLoading ? (
+          <div aria-busy="true" className="space-y-2">
+            <Skeleton className="h-4 w-1/2" />
+            <Skeleton className="h-4 w-3/4" />
+            <Skeleton className="h-4 w-2/3" />
+            <Skeleton className="h-4 w-1/3" />
+          </div>
+        ) : null}
+        {detail.isError ? (
+          <Alert variant="destructive">
+            <AlertTitle>실행 상세를 불러오지 못했습니다</AlertTitle>
+            <AlertDescription>{detail.error.message}</AlertDescription>
+          </Alert>
+        ) : null}
 
-      {execution ? (
-        <section aria-label="연결 개체" className="space-y-2">
-          <h3 className={SUBHEADING_CLASS}>연결 개체</h3>
-          <ul className="space-y-1 text-xs text-text-secondary [&_li]:flex [&_li]:flex-wrap [&_li]:items-center [&_li]:gap-1">
-            {root ? (
-              <li>
-                대표 작업:{" "}
-                <Button
-                  data-detail-url={root.projected_job.detail_url}
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    onSelectExecution("import_job", root.projected_job.id)
-                  }
-                >
-                  <span className="font-mono">
-                    {shortId(root.projected_job.id)}
-                  </span>
-                  <StatusBadge status={root.projected_job.status} />
-                </Button>
-              </li>
-            ) : null}
-            {execution.kind === "update_request" && execution.job_id ? (
-              <li>
-                요청 연결 작업:{" "}
-                <Button
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    onSelectExecution("import_job", execution.job_id as string)
-                  }
-                >
-                  <span className="font-mono">{shortId(execution.job_id)}</span>
-                </Button>
-              </li>
-            ) : null}
-            {execution.kind === "import_job" && execution.request_id ? (
-              <li>
-                갱신 요청:{" "}
-                <Button
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    onSelectExecution(
-                      "update_request",
-                      execution.request_id as string,
-                    )
-                  }
-                >
-                  <span className="font-mono">
-                    {shortId(execution.request_id)}
-                  </span>
-                </Button>
-              </li>
-            ) : null}
-            {execution.parent_job_id ? (
-              <li>
-                상위 작업:{" "}
-                <Button
-                  size="sm"
-                  type="button"
-                  variant="ghost"
-                  onClick={() =>
-                    onSelectExecution(
-                      "import_job",
-                      execution.parent_job_id as string,
-                    )
-                  }
-                >
-                  <span className="font-mono">
-                    {shortId(execution.parent_job_id)}
-                  </span>
-                </Button>
-              </li>
-            ) : null}
-            {execution.load_batch_id ? (
-              <li>
-                배치:{" "}
-                <Link
-                  className={INLINE_LINK_CLASS}
-                  href={`/ops/pipeline?load_batch_id=${encodeURIComponent(execution.load_batch_id)}`}
-                >
-                  {shortId(execution.load_batch_id)}
-                </Link>
-              </li>
-            ) : null}
-            {execution.dagster_run_id ? (
-              <li>
-                Dagster run:{" "}
-                <EntityLink
-                  id={execution.dagster_run_id}
-                  kind="dagsterRun"
-                  newTab
-                />
-              </li>
-            ) : null}
-          </ul>
-        </section>
-      ) : null}
+        {renderExecutionRunSummaryState6()}
 
-      {updateRequest ? (
-        <section aria-label="요청 payload" className="space-y-2">
-          <h3 className={SUBHEADING_CLASS}>요청 payload</h3>
-          <JsonViewer
-            aria-label="요청 scope payload"
-            copyable
-            maxHeight="sm"
-            value={{
-              scope: updateRequest.scope,
-              dataset_memberships: updateRequest.dataset_memberships,
-              update_policy: updateRequest.update_policy,
-              matched_scope: updateRequest.matched_scope,
-            }}
+        {
+          <ExecutionCancellationSummary
+            {...{ cancellation, cancellationFailures, hasCancellationFailures }}
           />
-        </section>
-      ) : null}
-      {!updateRequest && importJob ? (
-        <section aria-label="작업 payload" className="space-y-2">
-          <h3 className={SUBHEADING_CLASS}>작업 payload</h3>
-          <JsonViewer
-            aria-label="작업 payload"
-            copyable
-            maxHeight="sm"
-            value={importJob.payload}
-          />
-        </section>
-      ) : null}
-    </>
-  );
+        }
+
+        {renderExecutionRunSummaryState3()}
+
+        {execution ? (
+          <DetailList items={executionSummaryItems()} layout="inline" />
+        ) : null}
+
+        {renderExecutionRunSummaryState4()}
+
+        {updateRequest ? (
+          <section aria-label="요청 payload" className="space-y-2">
+            <h3 className={SUBHEADING_CLASS}>요청 payload</h3>
+            <JsonViewer
+              aria-label="요청 scope payload"
+              copyable
+              maxHeight="sm"
+              value={{
+                scope: updateRequest.scope,
+                dataset_memberships: updateRequest.dataset_memberships,
+                update_policy: updateRequest.update_policy,
+                matched_scope: updateRequest.matched_scope,
+              }}
+            />
+          </section>
+        ) : null}
+        {renderExecutionRunSummaryState5()}
+      </>
+    );
+  }
+  return renderExecutionRunSummaryState7();
 }
 
 function ExecutionClaimResolution({
@@ -546,7 +632,9 @@ function ExecutionClaimResolution({
                 {event.code === "feature_operation.attempt" ? (
                   <McstAttemptError
                     error={event.payload.error}
-                    onSelectJob={() => onSelectExecution("import_job", event.job_id)}
+                    onSelectJob={() =>
+                      onSelectExecution("import_job", event.job_id)
+                    }
                   />
                 ) : null}
               </li>
@@ -623,6 +711,31 @@ function ExecutionRunLogs({
   | "submitCancel"
   | "submitRunNow"
 >) {
+  function renderExecutionRunLogsState() {
+    return cancelExecution.isError ? (
+      <Alert variant="destructive">
+        <AlertTitle>취소 실패</AlertTitle>
+        <AlertDescription className="space-y-2">
+          <p>{cancelExecution.error.message}</p>
+          {cancelProblem ? (
+            <p>
+              오류 코드 <span className="font-mono">{cancelProblem.code}</span>
+              {cancelExecution.error.retryAfterSeconds !== null
+                ? ` · ${cancelExecution.error.retryAfterSeconds}초 후 재시도 가능`
+                : ""}
+            </p>
+          ) : null}
+          {cancelProblemDetails !== undefined ? (
+            <JsonViewer
+              aria-label="취소 실패 상세 근거"
+              maxHeight="sm"
+              value={cancelProblemDetails}
+            />
+          ) : null}
+        </AlertDescription>
+      </Alert>
+    ) : null;
+  }
   return (
     <>
       <section aria-label="실행 조작" className="space-y-2">
@@ -695,30 +808,7 @@ function ExecutionRunLogs({
             terminal 상태 실행은 조작할 수 없습니다.
           </p>
         ) : null}
-        {cancelExecution.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>취소 실패</AlertTitle>
-            <AlertDescription className="space-y-2">
-              <p>{cancelExecution.error.message}</p>
-              {cancelProblem ? (
-                <p>
-                  오류 코드{" "}
-                  <span className="font-mono">{cancelProblem.code}</span>
-                  {cancelExecution.error.retryAfterSeconds !== null
-                    ? ` · ${cancelExecution.error.retryAfterSeconds}초 후 재시도 가능`
-                    : ""}
-                </p>
-              ) : null}
-              {cancelProblemDetails !== undefined ? (
-                <JsonViewer
-                  aria-label="취소 실패 상세 근거"
-                  maxHeight="sm"
-                  value={cancelProblemDetails}
-                />
-              ) : null}
-            </AlertDescription>
-          </Alert>
-        ) : null}
+        {renderExecutionRunLogsState()}
         {runNow.isError ? (
           <Alert variant="destructive">
             <AlertTitle>run-now 실패</AlertTitle>
@@ -786,7 +876,11 @@ function ExecutionDetailPanelView({
   updateRequest,
 }: ReturnType<typeof useExecutionDetailPanelController>) {
   return (
-    <Card aria-label="실행 상세" data-testid="pipeline-execution-detail" size="sm">
+    <Card
+      aria-label="실행 상세"
+      data-testid="pipeline-execution-detail"
+      size="sm"
+    >
       <CardHeader className="border-b">
         <CardTitle className="flex flex-wrap items-center gap-2">
           <span>

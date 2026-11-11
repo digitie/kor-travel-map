@@ -19,6 +19,33 @@
 - alembic 450: 검색 별칭 `인천공항` → `인천국제공항`.
 - 검색 cursor v6(이전 cursor는 VERSION_UNSUPPORTED). parameter·응답 모양은 그대로다(OpenAPI 변경 없음).
 
+## 2026-11-11 — 후보6 브라우저 회귀와 fixture 보완
+
+- 첫 checkpoint230통과/56실패를 보존했다. 지도 public mapStyle 복구는 브라우저에서 확인됐다.
+- 지도/URL 탭을 Enter·Space 확정으로 지정하고 중복 History 기록을 막았다.
+  Alert data-variant와 Radix data-state 검사, canonical transport/Dagster 조회 fixture를 보완했다.
+- unit427/427·lint/type/Doctor0/guard 재통과. exact 후속 checkpoint 결과를 별도로 기록한다.
+
+
+## 2026-11-11 — common 후보6와 키 없는 지도 public mapStyle 복구
+
+- common `a14301c` / upstream `9a7a348`의 동일 tgz·원장을 설치했다. core는 1.0.1로
+  갱신하고 1.0.0 활성 참조·vendor를 제거했다. 라이선스/NOTICE/src 동봉 원본 bytes를 보존했다.
+- Map wrapper는 빈 키·공백·CHANGE_ME에 모듈 상수 style을 전달하고 실제 키는 upstream 기본 style을 쓴다.
+  자체 지도 생성자·가짜 키·비공개 소스 import는 추가하지 않았다.
+- 자동완성 기존 2건과 형태 회귀 6건을 포함한 unit427/427, lint/type/build33routes/Doctor0/
+  AST·원장 guard/npm tree/NextSharp 통과. n150 exact checkpoint와 최종 freeze/review/CI는 후속 gate다.
+- [후보6 검증 기록](docs/reports/common-unification-20261111.md), [산출물 출처](docs/third-party-common.md).
+
+
+## 2026-11-11 — 관리자 common Radix/VirtualTable·지도 public API 통합 후보
+
+- 모든 admin 표를 common VirtualTable로 연결하고 Radix primitive/검색 Popover를 채택했다.
+  최신 exact 의존성, Zod/RHF/Zustand/Pretendard 실제 사용과 CI AST/무결성·Doctor gate를 적용했다.
+- candidate5 lint/type/build/guard/Doctor 진단 0. unit 419/421 통과, common LoginForm 자동완성
+  2건은 부모 수정 요청. 최종 freeze·n150 격리 e2e·독립 리뷰·CI/merge/부모 go 전 배포하지 않는다.
+- [구현·검증·배포 계획](docs/reports/common-unification-20261111.md), [ADR-123](docs/adr/123-common-admin-ui.md).
+
 ## 2026-11-11 — weather 예보 증분의 제거·복원 감지(ADR-122 개정)
 
 - 예보 증분 적재가 weather의 멤버십 digest로 놓친 제거·추가를 감지하면 그 run에서 전량으로 다시 맞추고, weather DB 복원(clock epoch 변경)도 전량으로 처리한다. weather가 두 필드를 내지 않으면 지금 동작 그대로다. 스키마·API 변경 없음.

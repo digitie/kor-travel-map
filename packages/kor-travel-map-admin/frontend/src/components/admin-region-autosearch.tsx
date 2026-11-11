@@ -15,10 +15,12 @@ import {
   FieldError,
   FieldLabel,
 } from "@/components/ui/field";
+import { describedBy, useFieldIds } from "@/components/ui/form-field-shared";
 import {
-  describedBy,
-  useFieldIds,
-} from "@/components/ui/form-field-shared";
+  Popover,
+  PopoverAnchor,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 
@@ -197,6 +199,129 @@ interface VisibleRegionCandidate {
   label: string;
 }
 
+function filterRegionCandidates(
+  candidates: KorTravelGeoCandidate[],
+  kind: RegionCodeKind,
+  query: string,
+): VisibleRegionCandidate[] {
+  if (query.length === 0) return [];
+  const seen = new Set<string>();
+  const next: VisibleRegionCandidate[] = [];
+  for (const candidate of candidates) {
+    const code = codeFromCandidate(candidate, kind);
+    if (!code || !matchesNumericQuery(query, code)) continue;
+    const labelText = regionLabel(candidate, kind);
+    const key = `${kind}:${code}:${labelText}:${candidateKey(candidate)}`;
+    const dedupeKey = `${code}:${labelText}`;
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    next.push({ candidate, code, key, label: labelText });
+    if (next.length >= 8) break;
+  }
+  return next;
+}
+
+function RegionSearchResults({
+  fieldId,
+  visibleCandidates,
+  value,
+  kind,
+  visiblePending,
+  onSelect,
+}: {
+  fieldId: string;
+  visibleCandidates: VisibleRegionCandidate[];
+  value: string;
+  kind: RegionCodeKind;
+  visiblePending: boolean;
+  onSelect: (item: VisibleRegionCandidate) => void;
+}) {
+  return (
+    <PopoverContent
+      role="presentation"
+      align="start"
+      sideOffset={4}
+      onOpenAutoFocus={(event) => {
+        if (document.activeElement?.id === fieldId) event.preventDefault();
+      }}
+      onEscapeKeyDown={() => document.getElementById(fieldId)?.focus()}
+      onCloseAutoFocus={(event) => event.preventDefault()}
+      className="w-[var(--radix-popover-trigger-width)] rounded-panel border border-border bg-card p-1 shadow-elevated"
+      id={`${fieldId}-region-results-popup`}
+    >
+      {visibleCandidates.length > 0 ? (
+        <div className="flex max-h-48 flex-col overflow-auto">
+          {visibleCandidates.map((item) => {
+            const selected = item.code === value.trim();
+            return (
+              <button
+                aria-current={selected ? "true" : undefined}
+                className={cn(
+                  "flex flex-col items-start rounded-control px-2 py-1.5 text-left text-xs transition-[color,background-color] duration-fast ease-out",
+                  "hover:bg-surface-subtle focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted",
+                  selected
+                    ? "bg-brand-tint text-brand hover:bg-brand-tint"
+                    : "text-text-primary",
+                )}
+                key={item.key}
+                type="button"
+                onClick={() => {
+                  onSelect(item);
+                }}
+              >
+                <span className="block font-medium">{item.label}</span>
+                <span
+                  className={cn(
+                    "block text-2xs tabular-nums",
+                    selected ? "text-brand" : "text-text-secondary",
+                  )}
+                >
+                  {resultDescription(item.candidate, kind, item.code)}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      ) : (
+        <FieldDescription className="px-2 py-2 text-2xs">
+          {visiblePending ? "검색 중입니다." : "검색 결과가 없습니다."}
+        </FieldDescription>
+      )}
+    </PopoverContent>
+  );
+}
+function regionFieldState(
+  query: string,
+  error: string | null,
+  pending: boolean,
+  value: string,
+  kind: RegionCodeKind,
+  candidateCount: number,
+) {
+  const visibleError = query.length > 0 ? error : null;
+  const visiblePending = query.length > 0 && pending;
+  const validationError = codeValidationMessage(value, kind);
+  const invalid = Boolean(visibleError || validationError);
+  // P2-1: describedby 는 FormField 규약대로 hint/error 만 가리킨다. 예전에는 결과 팝업 **전체**를
+  // 가리켜 스크린리더가 입력 설명 자리에서 후보 목록을 통째로 읽었고, 정작 FieldError 는 어디에도
+  // 연결돼 있지 않았다.
+  const hintVisible = query.length === 0;
+  const resultButtonLabel =
+    query.length === 0
+      ? "검색 결과"
+      : visiblePending
+        ? "검색 중"
+        : `검색 결과 ${candidateCount}건`;
+  return {
+    visibleError,
+    visiblePending,
+    validationError,
+    invalid,
+    hintVisible,
+    resultButtonLabel,
+  };
+}
+
 function AdminRegionAutoSearch({
   ariaLabel,
   className,
@@ -259,37 +384,34 @@ function AdminRegionAutoSearch({
   }, [query]);
 
   const visibleCandidates = useMemo<VisibleRegionCandidate[]>(() => {
-    if (query.length === 0) return [];
-    const seen = new Set<string>();
-    const next: VisibleRegionCandidate[] = [];
-    for (const candidate of candidates) {
-      const code = codeFromCandidate(candidate, kind);
-      if (!code || !matchesNumericQuery(query, code)) continue;
-      const labelText = regionLabel(candidate, kind);
-      const key = `${kind}:${code}:${labelText}:${candidateKey(candidate)}`;
-      const dedupeKey = `${code}:${labelText}`;
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-      next.push({ candidate, code, key, label: labelText });
-      if (next.length >= 8) break;
-    }
-    return next;
+    return filterRegionCandidates(candidates, kind, query);
   }, [candidates, kind, query]);
-  const visibleError = query.length > 0 ? error : null;
-  const visiblePending = query.length > 0 && pending;
-  const validationError = codeValidationMessage(value, kind);
-  const invalid = Boolean(visibleError || validationError);
-  // P2-1: describedby 는 FormField 규약대로 hint/error 만 가리킨다. 예전에는 결과 팝업 **전체**를
-  // 가리켜 스크린리더가 입력 설명 자리에서 후보 목록을 통째로 읽었고, 정작 FieldError 는 어디에도
-  // 연결돼 있지 않았다.
-  const hintVisible = query.length === 0;
-  const resultButtonLabel =
-    query.length === 0
-      ? "검색 결과"
-      : visiblePending
-        ? "검색 중"
-        : `검색 결과 ${visibleCandidates.length}건`;
+  const {
+    visibleError,
+    visiblePending,
+    validationError,
+    invalid,
+    hintVisible,
+    resultButtonLabel,
+  } = regionFieldState(
+    query,
+    error,
+    pending,
+    value,
+    kind,
+    visibleCandidates.length,
+  );
 
+  function renderAdminRegionAutoSearchState1() {
+    return invalid ? (
+      <FieldError id={errorId}>
+        {validationError ? (
+          <span className="block">{validationError}</span>
+        ) : null}
+        {visibleError ? <span className="block">{visibleError}</span> : null}
+      </FieldError>
+    ) : null;
+  }
   return (
     <Field className={className} data-invalid={invalid ? true : undefined}>
       <div className="flex items-center justify-between gap-2">
@@ -312,7 +434,9 @@ function AdminRegionAutoSearch({
         value={value}
         inputMode="search"
         className={cn(
-          /^\d+$/.test(value.trim()) ? "font-mono tracking-widest tabular-nums" : null,
+          /^\d+$/.test(value.trim())
+            ? "font-mono tracking-widest tabular-nums"
+            : null,
         )}
         onChange={(event) => {
           const nextValue = event.target.value;
@@ -320,82 +444,50 @@ function AdminRegionAutoSearch({
           setResultsOpen(nextValue.trim().length > 0);
         }}
       />
-      <div className="relative">
-        {query.length > 0 ? (
-          <button
-            aria-controls={`${fieldId}-region-results-popup`}
-            aria-expanded={resultsOpen}
-            className="flex h-control-sm w-full items-center justify-between gap-2 rounded-control border border-border bg-card px-2.5 text-left text-2xs text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
-            type="button"
-            onClick={() => setResultsOpen((current) => !current)}
-          >
-            <span>{resultButtonLabel}</span>
-            <ChevronDownIcon
-              aria-hidden="true"
-              className={cn(
-                "size-3.5 shrink-0 transition-transform duration-fast ease-out",
-                resultsOpen ? "rotate-180" : null,
-              )}
-            />
-          </button>
-        ) : (
-          <FieldDescription className="text-2xs" id={hintId}>
-            검색어를 입력하면 같은 계층의 행정구역만 표시됩니다.
-          </FieldDescription>
-        )}
-        {query.length > 0 && resultsOpen ? (
-          <div
-            className="absolute z-30 mt-1 w-full rounded-panel border border-border bg-card p-1 shadow-elevated"
-            id={`${fieldId}-region-results-popup`}
-          >
-            {visibleCandidates.length > 0 ? (
-              <div className="flex max-h-48 flex-col overflow-auto">
-                {visibleCandidates.map((item) => {
-                  const selected = item.code === value.trim();
-                  return (
-                    <button
-                      aria-current={selected ? "true" : undefined}
-                      className={cn(
-                        "flex flex-col items-start rounded-control px-2 py-1.5 text-left text-xs transition-[color,background-color] duration-fast ease-out",
-                        "hover:bg-surface-subtle focus-visible:bg-surface-subtle focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted",
-                        selected ? "bg-brand-tint text-brand hover:bg-brand-tint" : "text-text-primary",
-                      )}
-                      key={item.key}
-                      type="button"
-                      onClick={() => {
-                        suppressOpenForQueryRef.current = item.code;
-                        onChange(item.code);
-                        onSelectCandidate?.(item.candidate);
-                        setResultsOpen(false);
-                      }}
-                    >
-                      <span className="block font-medium">{item.label}</span>
-                      <span
-                        className={cn(
-                          "block text-2xs tabular-nums",
-                          selected ? "text-brand" : "text-text-secondary",
-                        )}
-                      >
-                        {resultDescription(item.candidate, kind, item.code)}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
+      <Popover
+        open={query.length > 0 && resultsOpen}
+        onOpenChange={setResultsOpen}
+      >
+        <PopoverAnchor asChild>
+          <div className="relative">
+            {query.length > 0 ? (
+              <button
+                aria-controls={`${fieldId}-region-results-popup`}
+                aria-expanded={resultsOpen}
+                className="flex h-control-sm w-full items-center justify-between gap-2 rounded-control border border-border bg-card px-2.5 text-left text-2xs text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus active:bg-surface-muted"
+                type="button"
+                onClick={() => setResultsOpen((current) => !current)}
+              >
+                <span>{resultButtonLabel}</span>
+                <ChevronDownIcon
+                  aria-hidden="true"
+                  className={cn(
+                    "size-3.5 shrink-0 transition-transform duration-fast ease-out",
+                    resultsOpen ? "rotate-180" : null,
+                  )}
+                />
+              </button>
             ) : (
-              <FieldDescription className="px-2 py-2 text-2xs">
-                {visiblePending ? "검색 중입니다." : "검색 결과가 없습니다."}
+              <FieldDescription className="text-2xs" id={hintId}>
+                검색어를 입력하면 같은 계층의 행정구역만 표시됩니다.
               </FieldDescription>
             )}
           </div>
+        </PopoverAnchor>
+        {query.length > 0 && resultsOpen ? (
+          <RegionSearchResults
+            {...{ fieldId, visibleCandidates, value, kind, visiblePending }}
+            onSelect={(item) => {
+              suppressOpenForQueryRef.current = item.code;
+              document.getElementById(fieldId)?.focus();
+              onChange(item.code);
+              onSelectCandidate?.(item.candidate);
+              setResultsOpen(false);
+            }}
+          />
         ) : null}
-      </div>
-      {invalid ? (
-        <FieldError id={errorId}>
-          {validationError ? <span className="block">{validationError}</span> : null}
-          {visibleError ? <span className="block">{visibleError}</span> : null}
-        </FieldError>
-      ) : null}
+      </Popover>
+      {renderAdminRegionAutoSearchState1()}
     </Field>
   );
 }

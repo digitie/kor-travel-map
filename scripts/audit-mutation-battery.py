@@ -122,6 +122,20 @@ def _append_to_gate_line(marker: str, suffix: str) -> Callable[[str], str]:
 
 
 MUTATIONS: dict[str, tuple[str, Callable[[str], str] | None]] = {
+    "N7 common dependency gate 삭제": (
+        "__script__",
+        lambda text: re.sub(
+            r'^run_gate "admin common dependencies"[^\n]*\n', "", text, flags=re.M
+        ),
+    ),
+    "N8 common dependency gate workspace 바꿔치기": (
+        "__script__",
+        lambda text: text.replace(
+            'run_gate "admin common dependencies" repo "$NPM -w $ADMIN run check:dependencies"',
+            'run_gate "admin common dependencies" repo "$NPM -w '
+            'packages/kor-travel-map-user-client run check:dependencies"',
+        ),
+    ),
     "A 이름있는 새 스텝": (
         "frontend.yml",
         _insert_before_node_step(

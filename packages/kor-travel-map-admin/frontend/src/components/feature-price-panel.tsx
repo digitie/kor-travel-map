@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (detail) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { useMemo } from "react";
 
 import { useAdminFeaturePrice, type PricePoint } from "@/api/features";
@@ -214,7 +214,9 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
               <polyline
                 fill="none"
                 points={item.points
-                  .map((point) => `${x(point.timestamp)},${y(point.value_number)}`)
+                  .map(
+                    (point) => `${x(point.timestamp)},${y(point.value_number)}`,
+                  )
                   .join(" ")}
                 stroke={item.color}
                 strokeLinecap="round"
@@ -223,25 +225,25 @@ export function PriceHistoryChart({ history }: { history: PricePoint[] }) {
                 style={{ stroke: item.color }}
               />
             ) : null}
-            {withOccurrenceKeys(
-              item.points,
-              pricePointIdentity,
-            ).map(({ key, value: point }) => (
-              <circle
-                cx={x(point.timestamp)}
-                cy={y(point.value_number)}
-                fill={item.color}
-                key={key}
-                r="3"
-                stroke={pointOutline}
-                strokeWidth="1"
-                style={{ fill: item.color, stroke: pointOutline }}
-              >
-                <title>
-                  {item.label} {priceLabel(point)} {formatDateTime(point.observed_at)}
-                </title>
-              </circle>
-            ))}
+            {withOccurrenceKeys(item.points, pricePointIdentity).map(
+              ({ key, value: point }) => (
+                <circle
+                  cx={x(point.timestamp)}
+                  cy={y(point.value_number)}
+                  fill={item.color}
+                  key={key}
+                  r="3"
+                  stroke={pointOutline}
+                  strokeWidth="1"
+                  style={{ fill: item.color, stroke: pointOutline }}
+                >
+                  <title>
+                    {item.label} {priceLabel(point)}{" "}
+                    {formatDateTime(point.observed_at)}
+                  </title>
+                </circle>
+              ),
+            )}
           </g>
         ))}
       </svg>
@@ -284,7 +286,9 @@ export function FeaturePricePanel({
           const point = row.original;
           return (
             <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="truncate font-medium">{productLabel(point)}</span>
+              <span className="truncate font-medium">
+                {productLabel(point)}
+              </span>
               <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
                 {point.product_key}
               </span>
@@ -297,7 +301,9 @@ export function FeaturePricePanel({
         header: "price",
         accessorFn: (point) => point.value_number,
         meta: { align: "right" } satisfies DataTableColumnMeta,
-        cell: ({ row }) => <span className="tabular-nums">{priceLabel(row.original)}</span>,
+        cell: ({ row }) => (
+          <span className="tabular-nums">{priceLabel(row.original)}</span>
+        ),
       },
     ];
 
@@ -320,7 +326,9 @@ export function FeaturePricePanel({
           const canonical = canonicalPricePoint(row.original);
           return (
             <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="truncate font-medium">{canonical.dataset_display_name}</span>
+              <span className="truncate font-medium">
+                {canonical.dataset_display_name}
+              </span>
               <span className="truncate font-mono text-2xs text-text-secondary slashed-zero">
                 {canonical.dataset_key} · #{canonical.provider_dataset_id}
               </span>
@@ -333,7 +341,9 @@ export function FeaturePricePanel({
         header: "provider",
         accessorKey: "provider",
         cell: ({ row }) => (
-          <span className="font-mono text-xs text-text-secondary">{row.original.provider}</span>
+          <span className="font-mono text-xs text-text-secondary">
+            {row.original.provider}
+          </span>
         ),
       });
       cols.push({
@@ -362,10 +372,15 @@ export function FeaturePricePanel({
   }, [compact]);
 
   return (
-    <section className="flex min-w-0 flex-col gap-3" data-testid="feature-price-panel">
+    <section
+      className="flex min-w-0 flex-col gap-3"
+      data-testid="feature-price-panel"
+    >
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-0.5">
         <div className="flex min-w-0 items-baseline gap-2">
-          <h3 className="text-sm leading-snug font-semibold text-text-primary">Price</h3>
+          <h3 className="text-sm leading-snug font-semibold text-text-primary">
+            Price
+          </h3>
           {data ? (
             <span
               aria-label={`현재 가격 series ${formatCount(current.length)}건`}
@@ -423,8 +438,9 @@ export function FeaturePricePanel({
                       {withOccurrenceKeys(current, priceSeriesIdentity).map(
                         ({ key, value: point }) => (
                           <li className="text-xs tabular-nums" key={key}>
-                            {productLabel(point)} · {datasetLabel(point)} · {point.provider}/
-                            {point.price_domain} {priceFormatter.format(point.value_number)}
+                            {productLabel(point)} · {datasetLabel(point)} ·{" "}
+                            {point.provider}/{point.price_domain}{" "}
+                            {priceFormatter.format(point.value_number)}
                           </li>
                         ),
                       )}
@@ -447,7 +463,8 @@ export function FeaturePricePanel({
               data={history}
               emptyState={{
                 title: "price history가 없습니다.",
-                description: "가격 관측이 적재되면 series별로 최근 이력이 표시됩니다.",
+                description:
+                  "가격 관측이 적재되면 series별로 최근 이력이 표시됩니다.",
               }}
               getRowId={(point) => pricePointIdentity(point)}
               isLoading={price.isLoading}

@@ -1,12 +1,8 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
-import {
-  ArchiveIcon,
-  RefreshCwIcon,
-  XIcon,
-} from "lucide-react";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
+import { ArchiveIcon, RefreshCwIcon, XIcon } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useId, useMemo, useState, type ReactNode } from "react";
 
@@ -32,7 +28,10 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { Checkbox } from "@/components/ui/checkbox";
-import { DataTable, type DataTableColumnMeta } from "@/components/ui/data-table";
+import {
+  DataTable,
+  type DataTableColumnMeta,
+} from "@/components/ui/data-table";
 import { FormField } from "@/components/ui/form-field";
 import { NULL_GLYPH, formatCount, formatDateTime, shortId } from "@/lib/format";
 import { statusLabel } from "@/lib/status-label";
@@ -49,7 +48,9 @@ function formatBytes(value: number): string {
   return `${byteFormatter.format(Math.round(value / 1024 / 1024))} MB`;
 }
 
-function commandLine(command: BackupOperationResponse["data"]["command"]): string {
+function commandLine(
+  command: BackupOperationResponse["data"]["command"],
+): string {
   if (!command) {
     return NULL_GLYPH;
   }
@@ -88,8 +89,6 @@ function OptionToggle({
         checked={checked}
         className="mt-0.5"
         id={checkboxId}
-        nativeButton
-        render={<button type="button" />}
         onCheckedChange={(next) => onCheckedChange(next === true)}
       />
       <div className="flex min-w-0 flex-col gap-0.5">
@@ -125,10 +124,18 @@ function BackupDetail({ backup }: { backup: BackupRecord | null }) {
     );
   }
   const items: DetailItem[] = [
-    { label: "생성", value: formatDateTime(backup.created_at_utc), numeric: true },
+    {
+      label: "생성",
+      value: formatDateTime(backup.created_at_utc),
+      numeric: true,
+    },
     { label: "모드", value: backup.mode ?? null },
     { label: "크기", value: formatBytes(backup.byte_size), numeric: true },
-    { label: "체크섬", value: `${formatCount(backup.checksum_count)}개`, numeric: true },
+    {
+      label: "체크섬",
+      value: `${formatCount(backup.checksum_count)}개`,
+      numeric: true,
+    },
     { label: "경로", value: backup.path, mono: true, copyable: true },
   ];
   return (
@@ -141,12 +148,24 @@ function BackupDetail({ backup }: { backup: BackupRecord | null }) {
       <DetailList items={items} layout="inline" />
       <div className="flex flex-col gap-3">
         <div className="flex flex-col gap-1">
-          <span className="text-2xs font-medium text-text-secondary">데이터베이스</span>
-          <JsonViewer aria-label="backup databases" maxHeight="sm" value={backup.databases} />
+          <span className="text-2xs font-medium text-text-secondary">
+            데이터베이스
+          </span>
+          <JsonViewer
+            aria-label="backup databases"
+            maxHeight="sm"
+            value={backup.databases}
+          />
         </div>
         <div className="flex flex-col gap-1">
-          <span className="text-2xs font-medium text-text-secondary">구성 요소</span>
-          <JsonViewer aria-label="backup components" maxHeight="sm" value={backup.components} />
+          <span className="text-2xs font-medium text-text-secondary">
+            구성 요소
+          </span>
+          <JsonViewer
+            aria-label="backup components"
+            maxHeight="sm"
+            value={backup.components}
+          />
         </div>
       </div>
     </SectionCard>
@@ -266,7 +285,9 @@ function useBackupColumns(): ColumnDef<BackupRecord, unknown>[] {
         accessorKey: "manifest_status",
         header: "상태",
         enableSorting: true,
-        cell: ({ row }) => <StatusBadge status={row.original.manifest_status} />,
+        cell: ({ row }) => (
+          <StatusBadge status={row.original.manifest_status} />
+        ),
       },
       {
         accessorKey: "byte_size",
@@ -284,16 +305,24 @@ export function BackupsClient() {
   const backups = useBackups();
   const createBackup = useCreateBackupMutation();
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [options, setOptions] = useState<BackupExecutionOptions>(DEFAULT_EXECUTION_OPTIONS);
+  const [options, setOptions] = useState<BackupExecutionOptions>(
+    DEFAULT_EXECUTION_OPTIONS,
+  );
   const { backupId, executeBackup } = options;
-  const updateOptions = useCallback((patch: Partial<BackupExecutionOptions>) => {
-    setOptions((prev) => ({ ...prev, ...patch }));
-  }, []);
-  const [lastResult, setLastResult] = useState<BackupOperationResponse | null>(null);
+  const updateOptions = useCallback(
+    (patch: Partial<BackupExecutionOptions>) => {
+      setOptions((prev) => ({ ...prev, ...patch }));
+    },
+    [],
+  );
+  const [lastResult, setLastResult] = useState<BackupOperationResponse | null>(
+    null,
+  );
 
   const items = useMemo(() => backups.data?.data.items ?? [], [backups.data]);
   const selected = useMemo(
-    () => items.find((item) => item.backup_id === selectedId) ?? items[0] ?? null,
+    () =>
+      items.find((item) => item.backup_id === selectedId) ?? items[0] ?? null,
     [items, selectedId],
   );
 
@@ -324,11 +353,20 @@ export function BackupsClient() {
     <AdminShell
       actions={
         <>
-          <Button loading={backups.isFetching} type="button" variant="outline" onClick={refresh}>
+          <Button
+            loading={backups.isFetching}
+            type="button"
+            variant="outline"
+            onClick={refresh}
+          >
             <RefreshCwIcon data-icon="inline-start" />
             새로고침
           </Button>
-          <Button loading={createBackup.isPending} type="button" onClick={submitBackup}>
+          <Button
+            loading={createBackup.isPending}
+            type="button"
+            onClick={submitBackup}
+          >
             <ArchiveIcon data-icon="inline-start" />
             백업
           </Button>
@@ -338,7 +376,8 @@ export function BackupsClient() {
       meta={
         backups.data ? (
           <>
-            저장소 <span className="font-mono">{backups.data.data.backup_root}</span>
+            저장소{" "}
+            <span className="font-mono">{backups.data.data.backup_root}</span>
           </>
         ) : undefined
       }
@@ -367,7 +406,10 @@ export function BackupsClient() {
             </AlertActions>
           </Alert>
         ) : null}
-        <OperationResult result={lastResult} onDismiss={() => setLastResult(null)} />
+        <OperationResult
+          result={lastResult}
+          onDismiss={() => setLastResult(null)}
+        />
 
         <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_var(--rail)]">
           <SectionCard
@@ -390,7 +432,8 @@ export function BackupsClient() {
               data={items}
               emptyState={{
                 title: "백업이 없습니다.",
-                description: "상단 백업 버튼으로 첫 artifact를 만들 수 있습니다.",
+                description:
+                  "상단 백업 버튼으로 첫 artifact를 만들 수 있습니다.",
               }}
               getRowId={(row) => row.backup_id}
               isLoading={backups.isLoading}

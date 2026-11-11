@@ -1,6 +1,12 @@
 // @vitest-environment jsdom
-import { type ColumnDef } from "@tanstack/react-table";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
+import {
+  cleanup,
+  fireEvent,
+  render,
+  screen,
+  within,
+} from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { DataTable } from "./data-table";
@@ -18,9 +24,7 @@ const columns: ColumnDef<Row, unknown>[] = [
     id: "actions",
     header: "actions",
     enableSorting: false,
-    cell: () => (
-      <button type="button">행 동작</button>
-    ),
+    cell: () => <button type="button">행 동작</button>,
   },
 ];
 

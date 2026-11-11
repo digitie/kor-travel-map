@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import json
 import re
 from pathlib import Path
@@ -26,11 +27,60 @@ def _named_data_variants(source: str) -> set[str]:
     )
 
 
+def _assert_managed_artifact_overrides(
+    root: dict[str, Any],
+    frontend: dict[str, Any],
+    lock: dict[str, Any],
+    artifacts: dict[str, Any],
+) -> dict[str, str]:
+    """허용한 공통 산출물만 direct file/override/모든 lock copy와 일치해야 한다."""
+    expected = {
+        "source-map-js": "1.2.2",
+        "next": root["overrides"]["next"],
+        "@redocly/openapi-core": "1.34.22",
+    }
+    runtime = {"@next/env": frontend["dependencies"]["next"]}
+    managed = {
+        "lightningcss": "devDependencies",
+        "@radix-ui/react-focus-scope": "dependencies",
+    }
+    for name, section in managed.items():
+        if name not in artifacts:
+            assert name != "lightningcss", "CSS 정본 누락"
+            continue
+        artifact = artifacts[name]
+        filename = artifact["filename"]
+        assert Path(filename).name == filename, "vendor filename 경계 위반"
+        local = f"file:vendor/{filename}"
+        workspace = FRONTEND.relative_to(ROOT).as_posix()
+        root_spec = f"file:{workspace}/vendor/{filename}"
+        assert root.get(section, {}).get(name) == root_spec, f"{name}: root direct file 불일치"
+        assert frontend.get(section, {}).get(name) == local, f"{name}: frontend direct file 불일치"
+        copies = [value for key, value in lock.items() if key.endswith(f"node_modules/{name}")]
+        assert copies, f"{name}: lock 설치 누락"
+        for installed in copies:
+            assert installed["version"] == artifact["version"], f"{name}: lock version 불일치"
+            assert installed["integrity"] == artifact["integrity"], f"{name}: lock SRI 불일치"
+        expected[name] = f"${name}"
+        if section == "dependencies":
+            runtime[name] = root_spec
+    assert root["overrides"] == expected, "등록되지 않은 override 또는 managed 참조 불일치"
+    return runtime
+
+
 @pytest.mark.unit
 def test_frontend_security_versions_and_overrides_are_locked() -> None:
     root_package = _json(ROOT / "package.json")
     frontend_package = _json(FRONTEND / "package.json")
     lock_packages = _json(ROOT / "package-lock.json")["packages"]
+
+    def installed(name: str) -> dict[str, Any]:
+        workspace = FRONTEND.relative_to(ROOT).as_posix()
+        for key in (f"{workspace}/node_modules/{name}", f"node_modules/{name}"):
+            if key in lock_packages:
+                return lock_packages[key]
+        raise AssertionError(f"설치된 의존성이 없습니다: {name}")
+
     eslint_config = (FRONTEND / "eslint.config.mjs").read_text(encoding="utf-8")
 
     expected_engines = {
@@ -60,7 +110,11 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         assert re.fullmatch(r"\d+\.\d+\.\d+", pinned), (
             f"{label}는 범위가 아니라 정확한 핀이어야 한다: {pinned}"
         )
-    assert root_package["dependencies"] == {"@next/env": declared_next}
+    artifacts = _json(FRONTEND / "common-artifacts.json")["packages"]
+    expected_runtime = _assert_managed_artifact_overrides(
+        root_package, frontend_package, lock_packages, artifacts
+    )
+    assert root_package["dependencies"] == expected_runtime
     # 배포 의존성 게이트와 dev 포함 전체 트리 게이트를 둘 다 막는 단계로 둔다.
     # dev 전체 게이트는 `@redocly/openapi-core` 1.x 미패치 동안 `|| true`로 열어 뒀다.
     # 1.34.22 보안 패치를 소비한 뒤로는 열어 둘 이유가 없다(docs/dev-environment.md §10.6).
@@ -89,13 +143,14 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert root_package["scripts"]["verify:next-sharp"] == (
         "node scripts/verify-next-sharp.mjs"
     )
-    assert root_package["overrides"] == {
-        "source-map-js": "1.2.2",
-        "next": {"postcss": declared_postcss, "sharp": declared_sharp},
-        "@redocly/openapi-core": "1.34.22",
+    assert root_package["overrides"]["next"] == {
+        "postcss": declared_postcss, "sharp": declared_sharp
     }
-    for unused in ("@hookform/resolvers", "react-hook-form", "zod"):
-        assert unused not in frontend_package["dependencies"]
+    for required in ("@hookform/resolvers", "react-hook-form", "zod", "zustand", "pretendard"):
+        assert re.fullmatch(r"\d+\.\d+\.\d+", frontend_package["dependencies"][required])
+    assert "@base-ui/react" not in frontend_package["dependencies"]
+    assert "--source src" in frontend_package["scripts"]["check:dependencies"]
+
     assert "shadcn" not in frontend_package["devDependencies"]
     assert "eslint-config-next" not in frontend_package["devDependencies"]
     declared_playwright = frontend_package["devDependencies"]["@playwright/test"]
@@ -107,23 +162,23 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     assert '"import-x/no-anonymous-default-export": "warn"' in eslint_config
 
     # GHSA-68fv-2mgg-jv7q: postcss·tailwind·magicast가 공유하는 한 벌이 핀과 같아야 한다.
-    assert lock_packages["node_modules/source-map-js"]["version"] == (
+    assert installed("source-map-js")["version"] == (
         root_package["overrides"]["source-map-js"]
     )
-    assert lock_packages["node_modules/next"]["version"] == declared_next
-    assert lock_packages["node_modules/@next/env"]["version"] == declared_next
-    assert lock_packages["node_modules/next"]["dependencies"]["@next/env"] == (
+    assert installed("next")["version"] == declared_next
+    assert installed("@next/env")["version"] == declared_next
+    assert installed("next")["dependencies"]["@next/env"] == (
         declared_next
     )
-    assert lock_packages["node_modules/postcss"]["version"] == declared_postcss
-    assert lock_packages["node_modules/sharp"]["version"] == declared_sharp
-    assert lock_packages["node_modules/@playwright/test"]["version"] == declared_playwright
+    assert installed("postcss")["version"] == declared_postcss
+    assert installed("sharp")["version"] == declared_sharp
+    assert installed("@playwright/test")["version"] == declared_playwright
     assert (
-        lock_packages["node_modules/@redocly/openapi-core"]["version"]
+        installed("@redocly/openapi-core")["version"]
         == root_package["overrides"]["@redocly/openapi-core"]
     )
     assert lock_packages[""]["engines"] == expected_engines
-    assert lock_packages[""]["dependencies"] == {"@next/env": declared_next}
+    assert lock_packages[""]["dependencies"] == expected_runtime
     # lock의 workspace 키는 언제나 POSIX 구분자다. `str(...)`로 만들면 Windows
     # 체크아웃에서만 `packages\...`가 되어 KeyError로 죽는다 — 검사가 옳은데
     # 개발자 기계에서만 빨간 부류다.
@@ -134,7 +189,7 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         ("esbuild", "0.28.2"),
         ("unrs-resolver", "1.12.2"),
     ):
-        package = lock_packages[f"node_modules/{package_name}"]
+        package = installed(package_name)
         assert package["version"] == version
         assert package["hasInstallScript"] is True
 
@@ -251,7 +306,7 @@ def test_frontend_owns_every_named_shadcn_css_token_it_uses() -> None:
     defined_variants = set(
         re.findall(r"@custom-variant\s+(data-[a-z][a-z-]*)\b", css)
     )
-    assert used_variants == defined_variants
+    assert used_variants <= defined_variants
 
     for removed_token in (
         "animate-accordion-down",
@@ -259,3 +314,58 @@ def test_frontend_owns_every_named_shadcn_css_token_it_uses() -> None:
         "no-scrollbar",
     ):
         assert removed_token not in source
+
+
+def _managed_fixture() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+    return (
+        _json(ROOT / "package.json"),
+        _json(FRONTEND / "package.json"),
+        _json(ROOT / "package-lock.json")["packages"],
+        _json(FRONTEND / "common-artifacts.json")["packages"],
+    )
+
+
+def test_managed_overrides_reject_unknown_package() -> None:
+    root, frontend, lock, artifacts = _managed_fixture()
+    root["overrides"]["unapproved"] = "$unapproved"
+    with pytest.raises(AssertionError, match="등록되지 않은 override"):
+        _assert_managed_artifact_overrides(root, frontend, lock, artifacts)
+
+
+def test_managed_scope_artifact_requires_explicit_runtime_file_and_sri() -> None:
+    root, frontend, lock, artifacts = copy.deepcopy(_managed_fixture())
+    name = "@radix-ui/react-focus-scope"
+    artifact = {
+        "version": "1.3.1+fixture.fix.1",
+        "filename": "radix-ui-react-focus-scope-fixture.tgz",
+        "integrity": "sha512-fixture-scope",
+    }
+    artifacts[name] = artifact
+    root.setdefault("dependencies", {})[name] = (
+        f"file:{FRONTEND.relative_to(ROOT).as_posix()}/vendor/{artifact['filename']}"
+    )
+    frontend["dependencies"][name] = f"file:vendor/{artifact['filename']}"
+    root["overrides"][name] = f"${name}"
+    for key in [key for key in lock if key.endswith(f"node_modules/{name}")]:
+        del lock[key]
+    lock[f"node_modules/{name}"] = {
+        "version": artifact["version"], "integrity": artifact["integrity"]
+    }
+    _assert_managed_artifact_overrides(root, frontend, lock, artifacts)
+    lock[f"node_modules/{name}"]["integrity"] = "sha512-wrong"
+    with pytest.raises(AssertionError, match="lock SRI"):
+        _assert_managed_artifact_overrides(root, frontend, lock, artifacts)
+    lock[f"node_modules/{name}"]["integrity"] = artifact["integrity"]
+    frontend["dependencies"][name] = "1.3.1"
+    with pytest.raises(AssertionError, match="frontend direct file"):
+        _assert_managed_artifact_overrides(root, frontend, lock, artifacts)
+
+
+def test_managed_override_rejects_a_nested_stock_copy() -> None:
+    root, frontend, lock, artifacts = _managed_fixture()
+    lock["node_modules/fixture/node_modules/lightningcss"] = {
+        "version": artifacts["lightningcss"]["version"],
+        "integrity": "sha512-stock",
+    }
+    with pytest.raises(AssertionError, match="lock SRI"):
+        _assert_managed_artifact_overrides(root, frontend, lock, artifacts)

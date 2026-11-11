@@ -3,21 +3,14 @@
 
 import type { LngLatBounds, Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import {
-  ExternalLinkIcon,
-  ListIcon,
-  MapIcon,
-  XIcon,
-} from "lucide-react";
+import { ExternalLinkIcon, ListIcon, MapIcon, XIcon } from "lucide-react";
 import Link from "next/link";
-import {
-  useCallback,
-  useDeferredValue,
-  useMemo,
-  useState,
-} from "react";
+import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
-import { type ColumnDef, type SortingState } from "@tanstack/react-table";
+import {
+  type ColumnDef,
+  type SortingState,
+} from "@kor-travel/ui/virtual-table";
 
 import {
   usePublicCurationCollections,
@@ -50,7 +43,11 @@ import {
 import { NULL_GLYPH, formatCount, shortId } from "@/lib/format";
 import { cn } from "@/lib/utils";
 import { isVWorldApiKeyConfigured } from "@/lib/vworld-style";
-import { DEFAULT_VIEWPORT, type FeatureViewMode, type MapViewport } from "@/state/map";
+import {
+  DEFAULT_VIEWPORT,
+  type FeatureViewMode,
+  type MapViewport,
+} from "@/state/map";
 
 const VWORLD_KEY = process.env.NEXT_PUBLIC_VWORLD_API_KEY;
 /** 지도/테이블 작업면 높이 — 뷰포트 비율(고정 rem 오프셋 금지, m6). */
@@ -96,7 +93,8 @@ function addressLabel(address: Record<string, unknown>): string | null {
     if (typeof value === "string" && value.trim()) return value;
   }
   const strings = Object.values(address).filter(
-    (value): value is string => typeof value === "string" && value.trim().length > 0,
+    (value): value is string =>
+      typeof value === "string" && value.trim().length > 0,
   );
   return strings.join(" ") || null;
 }
@@ -134,14 +132,20 @@ function MembershipRow({ item }: { item: PublicCurationItem }) {
       data-testid="curation-membership"
     >
       <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-        <span className="text-xs font-medium text-text-primary">{item.theme_name}</span>
+        <span className="text-xs font-medium text-text-primary">
+          {item.theme_name}
+        </span>
         {item.edition_key ? (
-          <span className="text-xs text-text-secondary tabular-nums">{item.edition_key}</span>
+          <span className="text-xs text-text-secondary tabular-nums">
+            {item.edition_key}
+          </span>
         ) : null}
         <StatusBadge status={item.status} />
       </div>
       <div className="flex flex-col gap-0.5">
-        <p className="text-sm font-medium text-text-primary">{itemTitle(item)}</p>
+        <p className="text-sm font-medium text-text-primary">
+          {itemTitle(item)}
+        </p>
         {item.item_title && item.item_title !== item.title ? (
           <p className="text-xs text-text-secondary">컬렉션: {item.title}</p>
         ) : null}
@@ -171,14 +175,22 @@ function MembershipRow({ item }: { item: PublicCurationItem }) {
         layout="inline"
       />
       {item.item_summary ? (
-        <p className="text-xs whitespace-pre-wrap text-text-secondary">{item.item_summary}</p>
+        <p className="text-xs whitespace-pre-wrap text-text-secondary">
+          {item.item_summary}
+        </p>
       ) : null}
       <details className="group/details">
         <summary className="inline-flex cursor-pointer list-none items-center gap-1 rounded-control py-1 text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
-          <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+          <span
+            aria-hidden="true"
+            className="w-3 text-text-tertiary group-open/details:hidden"
+          >
             +
           </span>
-          <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+          <span
+            aria-hidden="true"
+            className="hidden w-3 text-text-tertiary group-open/details:inline"
+          >
             −
           </span>
           membership 전체 정보
@@ -186,10 +198,21 @@ function MembershipRow({ item }: { item: PublicCurationItem }) {
         <div className="pt-1">
           <DetailList
             items={[
-              { label: "collection_key", value: item.collection_key, mono: true },
+              {
+                label: "collection_key",
+                value: item.collection_key,
+                mono: true,
+              },
               { label: "collection_id", value: item.collection_id, mono: true },
-              { label: "curation_item_id", value: item.curation_item_id, mono: true },
-              { label: "theme", value: `${item.theme_group} · ${item.theme_slug}` },
+              {
+                label: "curation_item_id",
+                value: item.curation_item_id,
+                mono: true,
+              },
+              {
+                label: "theme",
+                value: `${item.theme_group} · ${item.theme_slug}`,
+              },
               { label: "place_name", value: item.place_name || null },
               { label: "address_hint", value: item.address_hint ?? null },
               { label: "relation", value: item.curation_relation, mono: true },
@@ -197,7 +220,11 @@ function MembershipRow({ item }: { item: PublicCurationItem }) {
               { label: "sort_order", value: item.sort_order, numeric: true },
               { label: "created_at", value: item.created_at, mono: true },
               { label: "updated_at", value: item.updated_at, mono: true },
-              { label: "archived_at", value: item.archived_at ?? null, mono: true },
+              {
+                label: "archived_at",
+                value: item.archived_at ?? null,
+                mono: true,
+              },
             ]}
             layout="inline"
           />
@@ -292,7 +319,9 @@ function useCuratedFeatureMapClientController() {
   const [viewport, setViewport] = useState<MapViewport>(DEFAULT_VIEWPORT);
   const [bbox, setBbox] = useState<Bbox | null>(null);
   const [viewMode, setViewMode] = useState<FeatureViewMode>("map");
-  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null);
+  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(
+    null,
+  );
   const [search, setSearch] = useState("");
   const [themeSlug, setThemeSlug] = useState("");
   const [editionKey, setEditionKey] = useState("");
@@ -318,10 +347,14 @@ function useCuratedFeatureMapClientController() {
     setBbox(boundsToBbox(map.getBounds()));
   }, []);
 
-  const groups = useMemo(() => groupsQuery.data?.data.items ?? [], [groupsQuery.data]);
+  const groups = useMemo(
+    () => groupsQuery.data?.data.items ?? [],
+    [groupsQuery.data],
+  );
   const clusterItems = useMemo(() => groups.map(toClusterFeature), [groups]);
   const selectedGroup =
-    groups.find((group) => group.feature.feature_id === selectedFeatureId) ?? null;
+    groups.find((group) => group.feature.feature_id === selectedFeatureId) ??
+    null;
 
   const filterOptions = useMemo(() => {
     const collections = collectionsQuery.data?.data.items ?? [];
@@ -334,8 +367,8 @@ function useCuratedFeatureMapClientController() {
       if (collection.provider) providers.add(collection.provider);
     }
     return {
-      themes: Array.from(themes, ([value, label]) => ({ value, label })).sort((a, b) =>
-        a.label.localeCompare(b.label, "ko"),
+      themes: Array.from(themes, ([value, label]) => ({ value, label })).sort(
+        (a, b) => a.label.localeCompare(b.label, "ko"),
       ),
       editions: Array.from(editions).sort((a, b) => b.localeCompare(a, "ko")),
       providers: Array.from(providers).sort((a, b) => a.localeCompare(b, "ko")),
@@ -351,8 +384,11 @@ function useCuratedFeatureMapClientController() {
         id: "feature_name",
         accessorFn: (group) => group.feature.name,
         header: "POI명",
-        sortingFn: (rowA, rowB) =>
-          rowA.original.feature.name.localeCompare(rowB.original.feature.name, "ko"),
+        sortFn: (rowA, rowB) =>
+          rowA.original.feature.name.localeCompare(
+            rowB.original.feature.name,
+            "ko",
+          ),
         meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
           <div className="flex max-w-[22rem] min-w-0 flex-col gap-0.5">
@@ -383,11 +419,11 @@ function useCuratedFeatureMapClientController() {
         meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
           <div className="flex max-w-64 flex-col gap-0.5 text-xs">
-            {Array.from(new Set(row.original.curations.map((item) => item.theme_name))).map(
-              (theme) => (
-                <span key={theme}>{theme}</span>
-              ),
-            )}
+            {Array.from(
+              new Set(row.original.curations.map((item) => item.theme_name)),
+            ).map((theme) => (
+              <span key={theme}>{theme}</span>
+            ))}
           </div>
         ),
       },
@@ -400,7 +436,8 @@ function useCuratedFeatureMapClientController() {
           <div className="flex max-w-72 flex-col gap-0.5 text-sm">
             {row.original.curations.map((item) => (
               <span key={item.curation_item_id}>
-                {item.title}{item.edition_key ? ` · ${item.edition_key}` : ""}
+                {item.title}
+                {item.edition_key ? ` · ${item.edition_key}` : ""}
               </span>
             ))}
           </div>
@@ -413,9 +450,11 @@ function useCuratedFeatureMapClientController() {
         meta: { wrap: true } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
           <div className="flex max-w-64 flex-col gap-0.5 text-xs text-text-secondary">
-            {Array.from(new Set(row.original.curations.map(sourceLabel))).map((source) => (
-              <span key={source}>{source}</span>
-            ))}
+            {Array.from(new Set(row.original.curations.map(sourceLabel))).map(
+              (source) => (
+                <span key={source}>{source}</span>
+              ),
+            )}
           </div>
         ),
       },
@@ -511,7 +550,10 @@ function CuratedFeatureMapClientView({
     <AdminShell
       actions={
         <>
-          <Link className={buttonVariants({ variant: "outline" })} href="/features">
+          <Link
+            className={buttonVariants({ variant: "outline" })}
+            href="/features"
+          >
             Feature 지도
           </Link>
           <Link
@@ -576,7 +618,9 @@ function CuratedFeatureMapClientView({
               >
                 <NativeSelectOption value="">연도 전체</NativeSelectOption>
                 {filterOptions.editions.map((edition) => (
-                  <NativeSelectOption key={edition} value={edition}>{edition}</NativeSelectOption>
+                  <NativeSelectOption key={edition} value={edition}>
+                    {edition}
+                  </NativeSelectOption>
                 ))}
               </NativeSelect>
             </FilterField>
@@ -594,7 +638,9 @@ function CuratedFeatureMapClientView({
               >
                 <NativeSelectOption value="">제공자 전체</NativeSelectOption>
                 {filterOptions.providers.map((value) => (
-                  <NativeSelectOption key={value} value={value}>{value}</NativeSelectOption>
+                  <NativeSelectOption key={value} value={value}>
+                    {value}
+                  </NativeSelectOption>
                 ))}
               </NativeSelect>
             </FilterField>
@@ -604,8 +650,8 @@ function CuratedFeatureMapClientView({
             <Alert variant="destructive">
               <AlertTitle>큐레이션 그룹 호출 실패</AlertTitle>
               <AlertDescription>
-                {groupsQuery.error.message} — 지도를 조금 움직이거나 필터를 바꾸면 다시
-                조회합니다.
+                {groupsQuery.error.message} — 지도를 조금 움직이거나 필터를
+                바꾸면 다시 조회합니다.
               </AlertDescription>
             </Alert>
           ) : null}
@@ -613,13 +659,15 @@ function CuratedFeatureMapClientView({
             <Alert variant="destructive">
               <AlertTitle>큐레이션 필터 조회 실패</AlertTitle>
               <AlertDescription>
-                {collectionsQuery.error.message} — 테마·연도·제공자 옵션이 비어 있을 수
-                있습니다.
+                {collectionsQuery.error.message} — 테마·연도·제공자 옵션이 비어
+                있을 수 있습니다.
               </AlertDescription>
             </Alert>
           ) : null}
           <div className="flex flex-wrap items-center gap-2">
-            <Badge variant={groupsQuery.isError ? "destructive" : "neutral"}>{status}</Badge>
+            <Badge variant={groupsQuery.isError ? "destructive" : "neutral"}>
+              {status}
+            </Badge>
           </div>
         </div>
 
@@ -704,7 +752,9 @@ function CuratedFeatureMapClientView({
                   group.feature.feature_id === selectedFeatureId
                 }
                 manualSorting={false}
-                onRowClick={(group) => setSelectedFeatureId(group.feature.feature_id)}
+                onRowClick={(group) =>
+                  setSelectedFeatureId(group.feature.feature_id)
+                }
                 onSortingChange={setTableSorting}
                 sorting={tableSorting}
                 virtualized

@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (detail) · design-system: design.md · designed-as-app
 
-import { type ColumnDef } from "@tanstack/react-table";
+import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import Link from "next/link";
 import { useMemo, useState, type ReactNode } from "react";
 
@@ -124,10 +124,16 @@ function CellDisclosure({
           mono && "font-mono font-normal slashed-zero",
         )}
       >
-        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+        <span
+          aria-hidden="true"
+          className="w-3 text-text-tertiary group-open/details:hidden"
+        >
           +
         </span>
-        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+        <span
+          aria-hidden="true"
+          className="hidden w-3 text-text-tertiary group-open/details:inline"
+        >
           −
         </span>
         {summary}
@@ -160,7 +166,9 @@ function Section({
     <section className="flex min-w-0 flex-col gap-3">
       <div className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1">
         <div className="flex min-w-0 items-baseline gap-2">
-          <h3 className="text-sm leading-snug font-semibold text-text-primary">{title}</h3>
+          <h3 className="text-sm leading-snug font-semibold text-text-primary">
+            {title}
+          </h3>
           {typeof count === "number" ? (
             <span
               aria-label={`${title} ${formatCount(count)}건`}
@@ -170,9 +178,13 @@ function Section({
             </span>
           ) : null}
         </div>
-        {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+        {actions ? (
+          <div className="flex items-center gap-2">{actions}</div>
+        ) : null}
         {description ? (
-          <p className="basis-full text-xs text-text-secondary">{description}</p>
+          <p className="basis-full text-xs text-text-secondary">
+            {description}
+          </p>
         ) : null}
       </div>
       <div className="min-w-0">{children}</div>
@@ -188,7 +200,9 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
         header: "provider",
         cell: ({ row }) => (
           <CellStack
-            primary={<span className="font-medium">{row.original.provider}</span>}
+            primary={
+              <span className="font-medium">{row.original.provider}</span>
+            }
             secondary={row.original.dataset_key}
           />
         ),
@@ -204,7 +218,11 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
               mono={false}
               primary={
                 <span className="inline-flex flex-wrap items-center gap-1">
-                  <Badge variant={source.source_role === "primary" ? "secondary" : "outline"}>
+                  <Badge
+                    variant={
+                      source.source_role === "primary" ? "secondary" : "outline"
+                    }
+                  >
                     {source.source_role}
                   </Badge>
                 </span>
@@ -262,7 +280,8 @@ function SourcesTable({ data }: { data: AdminFeatureDetailData }) {
         data={data.sources}
         emptyState={{
           title: "연결된 source가 없습니다.",
-          description: "provider 적재 결과가 이 feature에 연결되면 여기에 표시됩니다.",
+          description:
+            "provider 적재 결과가 이 feature에 연결되면 여기에 표시됩니다.",
         }}
         getRowId={(row) => row.source_record_key}
         manualSorting={false}
@@ -282,7 +301,9 @@ function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
             <span className="font-medium">{row.original.title}</span>
             <span className="text-2xs text-text-secondary">
               {row.original.theme_name}
-              {row.original.edition_key ? <> · {row.original.edition_key}</> : null}
+              {row.original.edition_key ? (
+                <> · {row.original.edition_key}</>
+              ) : null}
             </span>
           </div>
         ),
@@ -326,13 +347,17 @@ function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
           <div className="flex min-w-0 flex-col gap-1">
             <span>{row.original.item_title ?? row.original.feature_name}</span>
             {row.original.item_summary ? (
-              <span className="text-2xs text-text-secondary">{row.original.item_summary}</span>
+              <span className="text-2xs text-text-secondary">
+                {row.original.item_summary}
+              </span>
             ) : null}
             <span className="font-mono text-2xs break-all text-text-secondary slashed-zero">
               {row.original.external_item_id}
             </span>
             {row.original.address_hint ? (
-              <span className="text-2xs text-text-secondary">{row.original.address_hint}</span>
+              <span className="text-2xs text-text-secondary">
+                {row.original.address_hint}
+              </span>
             ) : null}
             <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
               <StatusBadge status={row.original.status} />
@@ -353,7 +378,9 @@ function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
         id: "detail",
         header: "상세",
         enableSorting: false,
-        cell: ({ row }) => <CellDisclosure summary="전체 정보" value={row.original} />,
+        cell: ({ row }) => (
+          <CellDisclosure summary="전체 정보" value={row.original} />
+        ),
       },
     ],
     [],
@@ -366,7 +393,8 @@ function CurationsTable({ data }: { data: AdminFeatureDetailData }) {
         data={data.curations}
         emptyState={{
           title: "연결된 큐레이션 항목이 없습니다.",
-          description: "큐레이션 collection에서 이 feature를 연결하면 여기에 표시됩니다.",
+          description:
+            "큐레이션 collection에서 이 feature를 연결하면 여기에 표시됩니다.",
         }}
         getRowId={(row) => row.curation_item_id}
         manualSorting={false}
@@ -452,7 +480,12 @@ function NoticeHistoryPanel({ data }: { data: AdminFeatureDetailData }) {
         cell: ({ row }) => {
           const state = noticeHistoryState(row.original);
           return (
-            <span className={cn("text-text-secondary", state === null && "text-text-tertiary")}>
+            <span
+              className={cn(
+                "text-text-secondary",
+                state === null && "text-text-tertiary",
+              )}
+            >
               {state ?? NULL_GLYPH}
             </span>
           );
@@ -577,7 +610,9 @@ function OverridesTable({ data }: { data: AdminFeatureDetailData }) {
         accessorKey: "field_path",
         header: "field",
         cell: ({ row }) => (
-          <span className="font-mono text-xs slashed-zero">{row.original.field_path}</span>
+          <span className="font-mono text-xs slashed-zero">
+            {row.original.field_path}
+          </span>
         ),
       },
       {
@@ -660,7 +695,9 @@ function FilesTable({ data }: { data: AdminFeatureDetailData }) {
           const file = row.original;
           return (
             <div className="flex min-w-0 flex-col gap-0.5">
-              <span className="font-mono text-xs break-all slashed-zero">{file.object_key}</span>
+              <span className="font-mono text-xs break-all slashed-zero">
+                {file.object_key}
+              </span>
               {file.public_url ? (
                 <Link
                   className="inline-flex w-fit rounded-control text-xs text-brand underline-offset-4 hover:text-brand-hover hover:underline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus"
@@ -691,8 +728,15 @@ function FilesTable({ data }: { data: AdminFeatureDetailData }) {
         header: "size",
         meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className={cn("tabular-nums", row.original.byte_size == null && "text-text-tertiary")}>
-            {row.original.byte_size == null ? NULL_GLYPH : formatCount(row.original.byte_size)}
+          <span
+            className={cn(
+              "tabular-nums",
+              row.original.byte_size == null && "text-text-tertiary",
+            )}
+          >
+            {row.original.byte_size == null
+              ? NULL_GLYPH
+              : formatCount(row.original.byte_size)}
           </span>
         ),
       },
@@ -773,7 +817,9 @@ function NearbyPanel({
         header: "distance",
         meta: { align: "right" } satisfies DataTableColumnMeta,
         cell: ({ row }) => (
-          <span className="tabular-nums">{distanceLabel(row.original.distance_m)}</span>
+          <span className="tabular-nums">
+            {distanceLabel(row.original.distance_m)}
+          </span>
         ),
       },
     ],
@@ -874,10 +920,16 @@ function RawDisclosure({
   return (
     <details className="group/details" open={defaultOpen}>
       <summary className="inline-flex h-control-sm cursor-pointer list-none items-center gap-1 rounded-control text-xs font-medium text-text-secondary select-none hover:text-text-primary focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus [&::-webkit-details-marker]:hidden">
-        <span aria-hidden="true" className="w-3 text-text-tertiary group-open/details:hidden">
+        <span
+          aria-hidden="true"
+          className="w-3 text-text-tertiary group-open/details:hidden"
+        >
           +
         </span>
-        <span aria-hidden="true" className="hidden w-3 text-text-tertiary group-open/details:inline">
+        <span
+          aria-hidden="true"
+          className="hidden w-3 text-text-tertiary group-open/details:inline"
+        >
           −
         </span>
         <span className="font-mono font-normal slashed-zero">{label}</span>
@@ -926,8 +978,7 @@ const TRANSITION_COLUMNS: ColumnDef<StateTransitionRow, unknown>[] = [
         </span>
         <span>
           → {row.original.to_lifecycle_state} /{" "}
-          {row.original.to_publication_state} /{" "}
-          {row.original.to_quality_state}
+          {row.original.to_publication_state} / {row.original.to_quality_state}
         </span>
       </div>
     ),
@@ -937,7 +988,9 @@ const TRANSITION_COLUMNS: ColumnDef<StateTransitionRow, unknown>[] = [
     header: "감사",
     cell: ({ row }) => (
       <div className="flex flex-col gap-0.5 text-xs">
-        <span className="font-mono slashed-zero">{row.original.reason_code}</span>
+        <span className="font-mono slashed-zero">
+          {row.original.reason_code}
+        </span>
         <span className="text-text-secondary">
           {row.original.principal} · r{row.original.row_revision}
         </span>
@@ -999,7 +1052,9 @@ function ReactivateSection({
 
   return (
     <div className="flex flex-col gap-2 border-t border-border pt-4">
-      <p className="text-xs font-medium text-text-primary">현재 source로 재활성화</p>
+      <p className="text-xs font-medium text-text-primary">
+        현재 source로 재활성화
+      </p>
       <div className="grid gap-x-3 gap-y-1 md:grid-cols-3">
         <FormField
           aria-label="재활성 provider dataset ID"
@@ -1046,7 +1101,8 @@ function ReactivateSection({
           </Button>
         </div>
         <p className="min-h-[1lh] text-2xs text-text-secondary">
-          {reactivateDisabledReason ?? "입력한 source 기준으로 수명 상태를 운영으로 되돌립니다."}
+          {reactivateDisabledReason ??
+            "입력한 source 기준으로 수명 상태를 운영으로 되돌립니다."}
         </p>
       </div>
     </div>
@@ -1136,7 +1192,9 @@ function FeatureStatePanel({
   const transitionRows = transitions.data?.data.items ?? [];
 
   const commandError =
-    basis.error?.message ?? patchState.error?.message ?? reactivate.error?.message;
+    basis.error?.message ??
+    patchState.error?.message ??
+    reactivate.error?.message;
   const applyDisabledReason = basis.isLoading
     ? "상태 기준(entity tag)을 불러오는 중입니다"
     : !hasStateChange
@@ -1148,135 +1206,147 @@ function FeatureStatePanel({
       ? "이미 종료된 feature입니다"
       : undefined;
 
-  return (
-    <Section count={transitionRows.length} title="상태 축과 감사 이력">
-      <div className="flex flex-col gap-4">
-        <div className="flex flex-wrap gap-1">
-          <FeatureStateBadges
-            lifecycleState={feature.lifecycle_state}
-            publicationState={feature.publication_state}
-            qualityState={feature.quality_state}
-          />
-        </div>
-        <div className="grid gap-x-3 gap-y-1 md:grid-cols-3">
-          <FormSelect
-            aria-label="공개 상태 변경"
-            label="공개 상태"
-            reserveMessage={false}
-            size="sm"
-            value={publicationState}
-            onChange={(event) =>
-              setPublicationState(
-                event.target.value as typeof feature.publication_state,
-              )
-            }
-          >
-            {allowedPublicationStates(feature.lifecycle_state).map((state) => (
-              <NativeSelectOption key={state} value={state}>
-                {featureStateLabel("publication", state)}
-              </NativeSelectOption>
-            ))}
-          </FormSelect>
-          <FormSelect
-            aria-label="품질 상태 변경"
-            label="품질 상태"
-            reserveMessage={false}
-            size="sm"
-            value={qualityState}
-            onChange={(event) =>
-              setQualityState(
-                event.target.value as typeof feature.quality_state,
-              )
-            }
-          >
-            {FEATURE_QUALITY_STATES.map((state) => (
-              <NativeSelectOption key={state} value={state}>
-                {featureStateLabel("quality", state)}
-              </NativeSelectOption>
-            ))}
-          </FormSelect>
-          <FormField
-            aria-label="상태 변경 사유 코드"
-            label="사유 코드"
-            reserveMessage={false}
-            size="sm"
-            value={reasonCode}
-            onChange={(event) => setReasonCode(event.target.value)}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              disabled={basis.isLoading || !hasStateChange}
-              disabledReason={applyDisabledReason}
-              loading={patchState.isPending}
-              size="sm"
-              type="button"
-              variant="outline"
-              onClick={submitPatch}
-            >
-              공개·품질 적용
-            </Button>
-            <Button
-              disabled={basis.isLoading || isRetired}
-              disabledReason={retireDisabledReason}
-              loading={patchState.isPending}
-              size="sm"
-              type="button"
-              variant="destructive"
-              onClick={() => void retire()}
-            >
-              종료
-            </Button>
+  function renderFeatureStatePanelSection0() {
+    return (
+      <Section count={transitionRows.length} title="상태 축과 감사 이력">
+        <div className="flex flex-col gap-4">
+          <div className="flex flex-wrap gap-1">
+            <FeatureStateBadges
+              lifecycleState={feature.lifecycle_state}
+              publicationState={feature.publication_state}
+              qualityState={feature.quality_state}
+            />
           </div>
-          <p className="min-h-[1lh] text-2xs text-text-secondary">
-            {applyDisabledReason ?? retireDisabledReason ?? "종료는 확인 후 실행됩니다."}
-          </p>
-        </div>
-        {isRetired ? (
-          <ReactivateSection basis={basis} reactivate={reactivate} reasonCode={reasonCode} />
-        ) : null}
-        {commandError ? (
-          <Alert variant="destructive">
-            <AlertTitle>상태 명령을 적용하지 못했습니다</AlertTitle>
-            <AlertDescription>
-              {commandError} — 값을 확인한 뒤 다시 시도하세요.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        {transitions.isError ? (
-          <Alert variant="destructive">
-            <AlertTitle>상태 감사 이력을 불러오지 못했습니다</AlertTitle>
-            <AlertDescription>{transitions.error.message}</AlertDescription>
-            <AlertActions>
+          <div className="grid gap-x-3 gap-y-1 md:grid-cols-3">
+            <FormSelect
+              aria-label="공개 상태 변경"
+              label="공개 상태"
+              reserveMessage={false}
+              size="sm"
+              value={publicationState}
+              onChange={(event) =>
+                setPublicationState(
+                  event.target.value as typeof feature.publication_state,
+                )
+              }
+            >
+              {allowedPublicationStates(feature.lifecycle_state).map(
+                (state) => (
+                  <NativeSelectOption key={state} value={state}>
+                    {featureStateLabel("publication", state)}
+                  </NativeSelectOption>
+                ),
+              )}
+            </FormSelect>
+            <FormSelect
+              aria-label="품질 상태 변경"
+              label="품질 상태"
+              reserveMessage={false}
+              size="sm"
+              value={qualityState}
+              onChange={(event) =>
+                setQualityState(
+                  event.target.value as typeof feature.quality_state,
+                )
+              }
+            >
+              {FEATURE_QUALITY_STATES.map((state) => (
+                <NativeSelectOption key={state} value={state}>
+                  {featureStateLabel("quality", state)}
+                </NativeSelectOption>
+              ))}
+            </FormSelect>
+            <FormField
+              aria-label="상태 변경 사유 코드"
+              label="사유 코드"
+              reserveMessage={false}
+              size="sm"
+              value={reasonCode}
+              onChange={(event) => setReasonCode(event.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <div className="flex flex-wrap gap-2">
               <Button
-                loading={transitions.isFetching}
+                disabled={basis.isLoading || !hasStateChange}
+                disabledReason={applyDisabledReason}
+                loading={patchState.isPending}
                 size="sm"
                 type="button"
                 variant="outline"
-                onClick={() => void transitions.refetch()}
+                onClick={submitPatch}
               >
-                다시 시도
+                공개·품질 적용
               </Button>
-            </AlertActions>
-          </Alert>
-        ) : (
-          <DataTable
-            columns={TRANSITION_COLUMNS}
-            data={transitionRows}
-            emptyState={{
-              title: "상태 전이 이력이 없습니다.",
-              description: "공개·품질·수명 상태를 바꾸면 감사 이력이 여기에 남습니다.",
-            }}
-            getRowId={(row) => String(row.transition_id)}
-            isLoading={transitions.isLoading}
-            manualSorting={false}
-            skeletonRowCount={3}
-          />
-        )}
-      </div>
-    </Section>
-  );
+              <Button
+                disabled={basis.isLoading || isRetired}
+                disabledReason={retireDisabledReason}
+                loading={patchState.isPending}
+                size="sm"
+                type="button"
+                variant="destructive"
+                onClick={() => void retire()}
+              >
+                종료
+              </Button>
+            </div>
+            <p className="min-h-[1lh] text-2xs text-text-secondary">
+              {applyDisabledReason ??
+                retireDisabledReason ??
+                "종료는 확인 후 실행됩니다."}
+            </p>
+          </div>
+          {isRetired ? (
+            <ReactivateSection
+              basis={basis}
+              reactivate={reactivate}
+              reasonCode={reasonCode}
+            />
+          ) : null}
+          {commandError ? (
+            <Alert variant="destructive">
+              <AlertTitle>상태 명령을 적용하지 못했습니다</AlertTitle>
+              <AlertDescription>
+                {commandError} — 값을 확인한 뒤 다시 시도하세요.
+              </AlertDescription>
+            </Alert>
+          ) : null}
+          {transitions.isError ? (
+            <Alert variant="destructive">
+              <AlertTitle>상태 감사 이력을 불러오지 못했습니다</AlertTitle>
+              <AlertDescription>{transitions.error.message}</AlertDescription>
+              <AlertActions>
+                <Button
+                  loading={transitions.isFetching}
+                  size="sm"
+                  type="button"
+                  variant="outline"
+                  onClick={() => void transitions.refetch()}
+                >
+                  다시 시도
+                </Button>
+              </AlertActions>
+            </Alert>
+          ) : (
+            <DataTable
+              columns={TRANSITION_COLUMNS}
+              data={transitionRows}
+              emptyState={{
+                title: "상태 전이 이력이 없습니다.",
+                description:
+                  "공개·품질·수명 상태를 바꾸면 감사 이력이 여기에 남습니다.",
+              }}
+              getRowId={(row) => String(row.transition_id)}
+              isLoading={transitions.isLoading}
+              manualSorting={false}
+              skeletonRowCount={3}
+            />
+          )}
+        </div>
+      </Section>
+    );
+  }
+  return renderFeatureStatePanelSection0();
 }
 
 function FeatureDetailSkeleton() {
@@ -1320,7 +1390,8 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
       <Alert variant="destructive">
         <AlertTitle>feature 상세 조회 실패</AlertTitle>
         <AlertDescription>
-          {detail.error.message} — feature ID를 확인하거나 잠시 후 다시 시도하세요.
+          {detail.error.message} — feature ID를 확인하거나 잠시 후 다시
+          시도하세요.
         </AlertDescription>
         <AlertActions>
           <Button
@@ -1388,9 +1459,21 @@ export function FeatureDetailView({ featureId }: { featureId: string }) {
         <aside className="flex min-w-0 flex-col divide-y divide-border [&>*]:py-6 [&>*:first-child]:pt-0 [&>*:last-child]:pb-0">
           <DetailList
             items={[
-              { label: "coord", value: coordLabel(feature.lon, feature.lat), mono: true },
-              { label: "sigungu", value: feature.sigungu_code ?? null, mono: true },
-              { label: "updated", value: formatDateTime(feature.updated_at), numeric: true },
+              {
+                label: "coord",
+                value: coordLabel(feature.lon, feature.lat),
+                mono: true,
+              },
+              {
+                label: "sigungu",
+                value: feature.sigungu_code ?? null,
+                mono: true,
+              },
+              {
+                label: "updated",
+                value: formatDateTime(feature.updated_at),
+                numeric: true,
+              },
               { label: "provider", value: primarySource?.provider ?? null },
             ]}
             layout="inline"
