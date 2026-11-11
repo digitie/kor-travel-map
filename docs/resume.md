@@ -1,3 +1,19 @@
+## 2026-11-12 — origin/main 병합·925c 리뷰 기준 보존
+
+- 기존 리뷰 commit925c48c74는 재작성하지 않고 origin/main41de16d을 merge한다.
+  충돌한 CHANGELOG/journal/resume3개는 양쪽 기록을 모두 남겼다.
+- main의 검색 지역 별칭·낱말 덮기 SQL/cursor v6·alembic450과 관련 테스트12개 제품/검사 파일은
+  incoming 원문과 일치한다. frontend 전체·root package/lock·vendor는925c와 동일하다.
+- 검색/SQL/forward-only 마이그레이션/속성 SQL 단위4개 파일171개 통과,
+  유입 Python 파일 ruff와 application migration graph --check 통과.
+  DB/API/Dagster lifecycle이나 실제 migration은 실행하지 않았다.
+- 부모 workflow는925c에서 이미 커밋·push했다. 원A/B는925c immutable 기준으로 계속하고
+  이번 merge-only delta는 별도 재검토한다. common49와 후속 C10/FocusScope 산출물 정책은
+  부모/Harvey 소유이며 이번 병합에서 common/산출물은 수정하지 않는다.
+- 남은 gate는 정확 merge HEAD CI·delta recheck·최종 release freeze·main merge/부모 go다.
+  Map UI-only 배포는 공식 Manager pin/receipt 승격 경로 확정 후에만 진행한다.
+  증거는 taskroot validation/map-merge-20261112/에 보존한다.
+
 ## 2026-11-12 — c9 정식 D 전체 runner·cleanup exit0 확정
 
 - exact e3ea216c128c3e7ef5346b17db6d4ec3fd5272a0의 새 production 이미지로
@@ -73,6 +89,10 @@
 - candidate5 lint/type/build/guard/Doctor 진단 0. unit 419/421 통과, common LoginForm 자동완성
   2건은 부모 수정 요청. 최종 freeze·n150 격리 e2e·독립 리뷰·CI/merge/부모 go 전 배포하지 않는다.
 - [구현·검증·배포 계획](reports/common-unification-20261111.md), [ADR-123](adr/123-common-admin-ui.md).
+
+## 2026-11-12 — 검색 순위 1단계(alembic 450)
+
+- 회전에 묶는다(직접 회전 금지). 450은 별칭 한 행 INSERT와 receipt CHECK 교체뿐(lock_timeout 1 s). OpenAPI 변경 없음, PinVi 재vendor 불필요. 2·3단계(실효 그룹·중복 접기, 검색 인지도 451)가 뒤따른다.
 
 ## 2026-11-11 — ADR-122 개정(멤버십 digest·clock epoch)
 

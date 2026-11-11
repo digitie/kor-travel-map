@@ -1,5 +1,11 @@
 # CHANGELOG
 
+## 2026-11-12 — 검색 순위 1단계: 영종구·분류 낱말·낱말 덮기·인천공항(alembic 450)
+
+- 지역 검색: `을왕리`·`영종도`가 2026 인천 개편 뒤의 영종구(28155)를 가리킨다(옛 중구 28110은 107행 잔재). 나머지 검색어가 분류 낱말("펜션"·"캠핑장")이면 "터 펜션"처럼 첫 낱말을 뗀 이름이 이름 일치가 되지 않는다. 나머지가 두 낱말 이상이면("양양 서프 카페") 그 지역에서 이름이 낱말을 모두 품는 행이 지역 일치다.
+- alembic 450: 검색 별칭 `인천공항` → `인천국제공항`.
+- 검색 cursor v6(이전 cursor는 VERSION_UNSUPPORTED). parameter·응답 모양은 그대로다(OpenAPI 변경 없음).
+
 ## 2026-11-11 — 후보6 브라우저 회귀와 fixture 보완
 
 - 첫 checkpoint230통과/56실패를 보존했다. 지도 public mapStyle 복구는 브라우저에서 확인됐다.
@@ -26,7 +32,6 @@
 - candidate5 lint/type/build/guard/Doctor 진단 0. unit 419/421 통과, common LoginForm 자동완성
   2건은 부모 수정 요청. 최종 freeze·n150 격리 e2e·독립 리뷰·CI/merge/부모 go 전 배포하지 않는다.
 - [구현·검증·배포 계획](docs/reports/common-unification-20261111.md), [ADR-123](docs/adr/123-common-admin-ui.md).
-
 
 ## 2026-11-11 — weather 예보 증분의 제거·복원 감지(ADR-122 개정)
 

@@ -2122,8 +2122,9 @@ def _feature_search_score_cte(
     region: bool,
     region_categories: bool = False,
     region_name: Literal["ilike", "strpos"] | None = "ilike",
+    region_tokens: Literal["anchor", "scan"] | None = None,
 ) -> str:
-    # ``region``이 거짓이면 다른 두 인자는 아무 조각도 만들지 않는다(종전 SQL 그대로).
+    # ``region``이 거짓이면 다른 인자는 아무 조각도 만들지 않는다(종전 SQL 그대로).
     name_predicate = {
         "ilike": "f.name ILIKE CAST(:rem_like AS text)",
         "strpos": "strpos(lower(f.name), CAST(:rem_compact AS text)) > 0",
@@ -2146,16 +2147,39 @@ def _feature_search_score_cte(
         if region and region_name is not None
         else ""
     )
-    region_arm = name_arm + category_arm if region else ""
+    # 낱말 덮기 팔(나머지가 두 낱말 이상 — "양양 서프 카페"): 지역 안에서 이름이 나머지의 낱말을
+    # **모두** 품는 행. 붙여 쓴 나머지("서프카페")로는 "서프쉑 카페"를 못 찾는다(2026-11-11).
+    # ``ILIKE ALL``은 trigram GIN이 받지 못하는 배열 술어라 ``"scan"``은 지역 색인으로만 읽힌다
+    # (좁은 지역). ``"anchor"``는 3글자 이상 가장 긴 낱말(``:rem_token_anchor``)을 함께 걸어 GIN이
+    # 받게 한다(넓은 지역에서도 지역 전체를 훑지 않는다).
+    token_predicate = {
+        "anchor": (
+            "f.name ILIKE CAST(:rem_token_anchor AS text)\n"
+            "            AND f.name ILIKE ALL(CAST(:rem_token_likes AS text[]))"
+        ),
+        "scan": "f.name ILIKE ALL(CAST(:rem_token_likes AS text[]))",
+    }
+    token_arm = (
+        f"""
+        OR (
+            f.sigungu_code = ANY(CAST(:region_codes AS text[]))
+            AND {token_predicate[region_tokens]}
+        )"""
+        if region and region_tokens is not None
+        else ""
+    )
+    region_arm = name_arm + category_arm + token_arm if region else ""
     # 분류 일치는 후보 팔과 무관하게 언제나 지역 일치다 — 넓은 지역에서 분류 팔을 빼도 trigram
-    # 팔이 찾은 그 분류 행은 같은 자리를 얻는다(지역 크기가 순위를 바꾸지 않게).
+    # 팔이 찾은 그 분류 행은 같은 자리를 얻는다(지역 크기가 순위를 바꾸지 않게). 낱말 덮기도 같다.
+    # 낱말이 하나뿐이면 ``:rem_token_likes``는 NULL이다(``LIKE ALL('{}')``은 참이라 빈 배열 금지).
     category_hit = "\n            OR category = ANY(CAST(:rem_categories AS text[]))"
+    token_hit = "\n            OR compact_name LIKE ALL(CAST(:rem_token_likes AS text[]))"
     region_hit_column = (
         f""",
         (
           sigungu_code = ANY(CAST(:region_codes AS text[]))
           AND (
-            strpos(compact_name, CAST(:rem_compact AS text)) > 0{category_hit}
+            strpos(compact_name, CAST(:rem_compact AS text)) > 0{category_hit}{token_hit}
           )
         ) IS TRUE AS region_hit"""
         if region
@@ -2177,15 +2201,19 @@ def _feature_search_score_cte(
     )
     # 지역 일치 행은 나머지 검색어로도 "이름이 품음"·"이름 일치"를 본다("강릉 중앙시장"의 tail).
     region_contains = (
-        "\n              OR (region_hit AND strpos(compact_name, CAST(:rem_compact AS text)) > 0)"
+        "\n              OR (region_hit AND (strpos(compact_name, CAST(:rem_compact AS text)) > 0"
+        "\n                OR compact_name LIKE ALL(CAST(:rem_token_likes AS text[]))))"
         if region
         else ""
     )
+    # 나머지가 분류 낱말("펜션"·"캠핑장")이면 첫 낱말을 뗀 이름 일치(tail)를 보지 않는다 — "터 펜션"
+    # 같은 두 낱말 이름만 이름 일치가 되어 지역 안 순서가 임의로 갈렸다(2026-11-11 "강화 펜션").
     region_exact = (
         "\n                OR (region_hit AND (compact_name = CAST(:rem_compact AS text)"
         "\n                  OR compact_base_name = CAST(:rem_compact AS text)"
         "\n                  OR compact_bracket_name = CAST(:rem_compact AS text)"
-        "\n                  OR compact_tail = CAST(:rem_compact AS text)))"
+        "\n                  OR (NOT CAST(:rem_is_category AS boolean)"
+        "\n                    AND compact_tail = CAST(:rem_compact AS text))))"
         if region
         else ""
     )
@@ -2390,26 +2418,42 @@ FROM candidates
 
 _SearchRegionName = Literal["ilike", "strpos"] | None
 _SEARCH_REGION_NAME_MODES: Final[tuple[_SearchRegionName, ...]] = ("ilike", "strpos", None)
+_SearchRegionTokens = Literal["anchor", "scan"] | None
+_SEARCH_REGION_TOKEN_MODES: Final[tuple[_SearchRegionTokens, ...]] = ("anchor", "scan", None)
+_SearchRegionKey = tuple[_SearchRegionName, bool, _SearchRegionTokens]
 
 
 def _feature_search_region_sql(
-    *, categories: bool, count: bool, name_mode: _SearchRegionName = "ilike"
+    *,
+    categories: bool,
+    count: bool,
+    name_mode: _SearchRegionName = "ilike",
+    token_mode: _SearchRegionTokens = None,
 ) -> str:
-    """지역 검색 문장 — 본 질의(``count=False``) 또는 개수 질의. ``categories``는 분류 팔."""
+    """지역 검색 문장 — 본 질의(``count=False``) 또는 개수 질의. ``categories``는 분류 팔,
+    ``token_mode``는 낱말 덮기 팔."""
     cte = _feature_search_score_cte(
-        region=True, region_categories=categories, region_name=name_mode
+        region=True,
+        region_categories=categories,
+        region_name=name_mode,
+        region_tokens=token_mode,
     )
     return cte + (_SEARCH_COUNT_TAIL_SQL if count else _FEATURE_SEARCH_PAGE_TAIL_SQL)
 
 
-#: 지역 검색 SQL — ``(이름 팔, 분류 팔 여부)`` → (본 질의, 개수 질의).
-_FEATURE_SEARCH_REGION_SQL: Final[dict[tuple[_SearchRegionName, bool], tuple[str, str]]] = {
-    (name_mode, categories): (
-        _feature_search_region_sql(categories=categories, count=False, name_mode=name_mode),
-        _feature_search_region_sql(categories=categories, count=True, name_mode=name_mode),
+#: 지역 검색 SQL — ``(이름 팔, 분류 팔 여부, 낱말 덮기 팔)`` → (본 질의, 개수 질의).
+_FEATURE_SEARCH_REGION_SQL: Final[dict[_SearchRegionKey, tuple[str, str]]] = {
+    (name_mode, categories, token_mode): (
+        _feature_search_region_sql(
+            categories=categories, count=False, name_mode=name_mode, token_mode=token_mode
+        ),
+        _feature_search_region_sql(
+            categories=categories, count=True, name_mode=name_mode, token_mode=token_mode
+        ),
     )
     for name_mode in _SEARCH_REGION_NAME_MODES
     for categories in (False, True)
+    for token_mode in _SEARCH_REGION_TOKEN_MODES
 }
 
 #: 지역을 훑는 팔(2글자 이하 이름 팔·분류 팔)을 두는 상한(지역 공개 행 수). 넘으면 두 팔을 빼고
@@ -6939,7 +6983,8 @@ _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v3: 별칭의 공백 정규화로 순위 의미가 달라져 이전 cursor를 재사용하지 않는다.
 #: v4: 이름 일치를 분류 그룹 앞으로 옮겨(ADR-120) ``rank`` 값의 뜻이 바뀌었다.
 #: v5: 지역 검색(#1459 §7)이 순위 맨 앞 자리(지역 일치)를 더해 ``rank`` 값의 뜻이 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 5
+#: v6: 분류 낱말 나머지의 tail 일치 제거·낱말 덮기(2026-11-11)로 지역 검색 ``rank``가 바뀌었다.
+_SEARCH_CURSOR_VERSION: Final[int] = 6
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
@@ -7310,18 +7355,48 @@ async def _resolve_search_region(session: AsyncSession, q: str) -> RegionSearch 
 _SEARCH_REGION_TRIGRAM_MIN_CHARS: Final[int] = 3
 
 
+#: 낱말 덮기에 쓰는 낱말의 최소 길이 — 한 글자("부산 국밥 1"의 "1")는 거의 모든 이름이 품는다.
+_SEARCH_REGION_TOKEN_MIN_CHARS: Final[int] = 2
+
+
+def _trigram_chars(value: str) -> int:
+    """pg_trgm이 trigram을 만드는 글자(문자·숫자) 수 — 구두점만인 낱말("...")은 0이다."""
+    return sum(1 for ch in value if ch.isalnum())
+
+
+def _search_region_tokens(region: RegionSearch) -> tuple[str, ...]:
+    """나머지 검색어의 낱말 비교 키(``search_alias_key``) — 두 글자 미만 낱말을 뺀 순서대로."""
+    return tuple(
+        key
+        for key in (search_alias_key(token) for token in search_query_tokens(region.remainder))
+        if len(key) >= _SEARCH_REGION_TOKEN_MIN_CHARS
+    )
+
+
+def _search_region_token_anchor(tokens: Sequence[str]) -> str | None:
+    """GIN이 받을 닻 낱말 — 문자·숫자가 가장 많은 낱말(3글자 이상일 때만, 아니면 ``None``)."""
+    if not tokens:
+        return None
+    anchor = max(tokens, key=_trigram_chars)
+    return anchor if _trigram_chars(anchor) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS else None
+
+
 @dataclass(frozen=True, slots=True)
 class _SearchRegionArms:
-    """지역 검색의 후보 팔 — 이름 팔 모양과 분류 팔 여부."""
+    """지역 검색의 후보 팔 — 이름 팔 모양, 분류 팔 여부, 낱말 덮기 팔 모양."""
 
     name_mode: _SearchRegionName
     categories: bool
+    token_mode: _SearchRegionTokens = None
 
 
 async def _search_region_arms(session: AsyncSession, region: RegionSearch) -> _SearchRegionArms:
     """지역이 넓으면(``_SEARCH_REGION_SCAN_MAX_ROWS`` 초과) 지역을 훑는 팔을 뺀다.
 
-    3글자 이상 나머지의 이름 팔은 trigram GIN이 받으므로 넓어도 둔다(``ilike``).
+    3글자 이상 나머지의 이름 팔은 trigram GIN이 받으므로 넓어도 둔다(``ilike``). 낱말 덮기 팔은
+    나머지가 두 낱말(두 글자 이상) 이상일 때만 둔다 — 문자·숫자 3글자 이상 낱말이 있으면 그 낱말을
+    GIN 닻으로(``anchor``), 없으면 좁은 지역에서만 지역 색인으로 훑는다(``scan``). 구두점만인
+    나머지("...")는 trigram이 없어 GIN이 색인 전체를 읽으므로 짧은 나머지로 본다.
     """
     region_rows = (
         await session.execute(
@@ -7331,13 +7406,22 @@ async def _search_region_arms(session: AsyncSession, region: RegionSearch) -> _S
     ).scalar_one()
     narrow = int(region_rows) <= _SEARCH_REGION_SCAN_MAX_ROWS
     long_remainder = (
-        len(search_alias_key(region.remainder)) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS
+        _trigram_chars(search_alias_key(region.remainder)) >= _SEARCH_REGION_TRIGRAM_MIN_CHARS
     )
     name_mode: _SearchRegionName = (
         "ilike" if long_remainder else ("strpos" if narrow else None)
     )
+    tokens = _search_region_tokens(region)
+    token_mode: _SearchRegionTokens = None
+    if len(tokens) >= 2:
+        if _search_region_token_anchor(tokens) is not None:
+            token_mode = "anchor"
+        elif narrow:
+            token_mode = "scan"
     return _SearchRegionArms(
-        name_mode=name_mode, categories=narrow and bool(region.category_codes)
+        name_mode=name_mode,
+        categories=narrow and bool(region.category_codes),
+        token_mode=token_mode,
     )
 
 
@@ -7347,7 +7431,7 @@ def _search_score_sql(
     """(본 질의, 개수 질의) — 지역 검색이면 지역 팔이 있는 변형, 분류 팔은 ``arms``대로."""
     if region is None or arms is None:
         return _FEATURE_SEARCH_BY_SCORE_SQL, _FEATURE_SEARCH_SCORE_COUNT_SQL
-    return _FEATURE_SEARCH_REGION_SQL[(arms.name_mode, arms.categories)]
+    return _FEATURE_SEARCH_REGION_SQL[(arms.name_mode, arms.categories, arms.token_mode)]
 
 
 def _like_contains_pattern(value: str) -> str:
@@ -7366,10 +7450,22 @@ def _search_region_params(
     params: dict[str, Any] = {
         "region_codes": list(region.sigungu_codes),
         "rem_compact": rem_compact,
+        # 나머지가 분류 낱말이면 tail 이름 일치를 끈다(``_feature_search_score_cte``). 분류 낱말은
+        # 분류 이름의 앞부분 일치다("캠핑" → 캠핑장, "한옥" → 한옥체험업 — ``core.search_region``).
+        "rem_is_category": bool(region.category_codes),
     }
     if arms.name_mode == "ilike":
         params["rem_like"] = _like_contains_pattern(rem_compact)
     params["rem_categories"] = list(region.category_codes)
+    # 낱말 덮기(지역 일치·품음 판정): 두 낱말 이상일 때만 배열, 아니면 NULL — 후보 팔 유무와
+    # 무관하게 같은 값이다(넓은 지역에서 팔을 빼도 trigram 후보의 자리는 같다).
+    tokens = _search_region_tokens(region)
+    params["rem_token_likes"] = (
+        [_like_contains_pattern(token) for token in tokens] if len(tokens) >= 2 else None
+    )
+    anchor = _search_region_token_anchor(tokens)
+    if arms.token_mode == "anchor" and anchor is not None:
+        params["rem_token_anchor"] = _like_contains_pattern(anchor)
     return params
 
 

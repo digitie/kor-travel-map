@@ -151,7 +151,7 @@ def test_search_cursor_fingerprint_ignores_absent_attributes() -> None:
     # 순서·중복은 fingerprint를 바꾸지 않는다(정렬된 집합).
     reordered = _contract(["barrier_free", "pet_friendly", "barrier_free"])
     assert reordered.fingerprint == filtered.fingerprint
-    assert feature_repo._SEARCH_CURSOR_VERSION == 5
+    assert feature_repo._SEARCH_CURSOR_VERSION == 6
 
 
 def test_normalized_attributes_sorts_dedupes_and_short_circuits() -> None:
