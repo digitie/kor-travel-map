@@ -2291,13 +2291,13 @@ def _feature_search_score_cte(
         if region
         else ""
     )
-    # 이름 전체 일치(tail 제외) — 같은 이름 일치 안에서 이름 전체가 같은 행이 첫 낱말을 뗀 나머지만
-    # 같은 행보다 앞이다("광안리"가 "아크앤북 광안리"보다). 인지도(P6)가 유사도보다 먼저 가르게 되며
-    # 유사도가 대신 가르던 이 순서를 자리로 고정한다(2026-11-12 평가).
+    # 이름 전체 일치(tail·끝 한글 괄호 제외) — 같은 이름 일치 안에서 이름 전체가 같은 행이 첫 낱말을
+    # 뗀 나머지만 같거나 끝 괄호 표식을 뗀 이름만 같은 행보다 앞이다("광안리"가 "아크앤북 광안리"보다,
+    # 경주의 "불국사"가 "불국사(서울)"보다). 인지도(P6)가 유사도보다 먼저 가르게 되며 유사도가 대신
+    # 가르던 이 순서를 자리로 고정한다(2026-11-12 평가). 라틴 괄호의 한글·영문 이름은 전체 일치다.
     region_exact_full = (
         "\n                OR (region_hit AND (compact_name = CAST(:rem_compact AS text)"
         "\n                  OR compact_base_name = CAST(:rem_compact AS text)"
-        "\n                  OR compact_paren_base_name = CAST(:rem_compact AS text)"
         "\n                  OR compact_bracket_name = CAST(:rem_compact AS text)))"
         if region
         else ""
@@ -2394,7 +2394,6 @@ ranked AS (
         (
           compact_name = CAST(:q_compact AS text)
           OR compact_base_name = CAST(:q_compact AS text)
-          OR compact_paren_base_name = CAST(:q_compact AS text)
           OR compact_bracket_name = CAST(:q_compact AS text){region_exact_full}
         ) IS TRUE AS name_exact_full,
         (

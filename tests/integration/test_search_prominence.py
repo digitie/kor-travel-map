@@ -251,7 +251,8 @@ async def test_prominence_breaks_ties_before_similarity(
     # 인지도 자리만 다르다 — 나머지 자리(이름 일치 포함)는 같다.
     weight = feature_repo._SEARCH_RANK_SPECIFICITY_WEIGHT
     assert yeoju_rank // weight == jecheon_rank // weight, (yeoju_rank, jecheon_rank)
-    assert (yeoju_rank // feature_repo._SEARCH_RANK_EXACT_WEIGHT) % 10 == 0, yeoju_rank
+    # 끝 괄호를 뗀 이름 일치는 이름 일치의 둘째 단계다(1 — 이름 전체 0, 불일치 2).
+    assert (yeoju_rank // feature_repo._SEARCH_RANK_EXACT_WEIGHT) % 10 == 1, yeoju_rank
 
 
 async def test_license_only_pension_ranks_after_a_curated_one(
