@@ -264,7 +264,8 @@ async def test_route_overlap_drops_short_segment_on_long_trail(
     migrated_session: AsyncSession,
 ) -> None:
     # #1468 소유자 결정: 긴 탐방로 위의 짧은 등산로 조각은 한쪽 방향으로는 완전히 겹치지만
-    # (비율 1.0) 같은 선이 아니다 — 길이 비율·양방향 겹침 조건으로 빠진다. 길이가 비슷한 쌍은 남는다.
+    # (비율 1.0) 같은 선이 아니다 — 길이 비율·양방향 겹침 조건으로 빠진다.
+    # 길이가 비슷한 쌍은 남는다.
     long_trail, twin_trail = _fid(40), _fid(41)
     short_piece, twin = _fid(50), _fid(51)
     lat, lat2 = 37.6, 37.7
