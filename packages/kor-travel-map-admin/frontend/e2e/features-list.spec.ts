@@ -396,15 +396,33 @@ test.describe("admin/features list depth", () => {
 
     // 정렬 표면은 NativeSelect("feature sort") + asc/desc Button이다. table 컬럼은
     // 전부 display 컬럼(accessorKey 없음)이라 manualSorting 하에서 getCanSort()가
-    // false → 헤더에 sort 버튼/aria-sort가 렌더되지 않는다(react-table v8). 따라서
+    // false → 헤더에 sort 버튼/aria-sort가 렌더되지 않는다. 따라서
     // 정렬 동기화는 dropdown + order 버튼 ↔ list query param으로만 검증한다.
     const sortSelect = page.getByLabel("feature sort");
     const ascButton = page.getByRole("button", { name: "asc" });
     const descButton = page.getByRole("button", { name: "desc" });
 
-    // 기본 상태: sort=name, order=asc. asc 버튼이 default variant(bg-brand).
+    // 공통 recipe의 클래스명과 무관하게 선택 상태와 기존 브랜드 채움을 검증한다.
+    const brandBackground = await ascButton.evaluate((element) => {
+      const brand = getComputedStyle(element).getPropertyValue("--brand").trim();
+      const probe = document.createElement("span");
+      probe.style.backgroundColor = "var(--brand)";
+      element.append(probe);
+      const color = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return { brand, color };
+    });
+    // hover 색상 대신 선택 상태의 기본 채움을 대조한다.
+    await sortSelect.hover();
+    expect(brandBackground.brand).not.toBe("");
+    expect(brandBackground.color).not.toBe("rgba(0, 0, 0, 0)");
     await expect(sortSelect).toHaveValue("name");
-    await expect(ascButton).toHaveClass(/bg-brand/);
+    await expect(ascButton).toHaveAttribute("aria-pressed", "true");
+    await expect(ascButton).toHaveAttribute("data-variant", "default");
+    await expect(ascButton).toHaveCSS("background-color", brandBackground.color);
+    await expect(descButton).toHaveAttribute("aria-pressed", "false");
+    await expect(descButton).toHaveAttribute("data-variant", "outline");
+    await expect(descButton).not.toHaveCSS("background-color", brandBackground.color);
     await expect.poll(() => mocks.lastSearch()?.get("sort")).toBe("name");
     expect(mocks.lastSearch()?.get("order")).toBe("asc");
 
@@ -418,7 +436,13 @@ test.describe("admin/features list depth", () => {
 
     // desc 버튼 클릭 → setOrder("desc") + resetCursor(). sort(updated_at) 보존.
     await descButton.click();
-    await expect(descButton).toHaveClass(/bg-brand/);
+    await sortSelect.hover();
+    await expect(descButton).toHaveAttribute("aria-pressed", "true");
+    await expect(descButton).toHaveAttribute("data-variant", "default");
+    await expect(descButton).toHaveCSS("background-color", brandBackground.color);
+    await expect(ascButton).toHaveAttribute("aria-pressed", "false");
+    await expect(ascButton).toHaveAttribute("data-variant", "outline");
+    await expect(ascButton).not.toHaveCSS("background-color", brandBackground.color);
     await expect.poll(() => mocks.lastSearch()?.get("order")).toBe("desc");
     expect(mocks.lastSearch()?.get("sort")).toBe("updated_at");
 

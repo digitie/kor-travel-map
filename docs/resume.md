@@ -1,3 +1,13 @@
+## 2026-11-12 — C11 D의 정렬 버튼 회귀 검사 보강
+
+- C11 새 이미지 D에서 정렬1건이 원 실행/재시도 모두 옛 로컬 bg-brand 클래스 단언으로 실패했다.
+  원286검사·실패/trace/report를 taskroot validation/c11-map-weather-20261112/에 보존한다.
+- 공통 Button은 bg-primary를 쓰고 Map의 primary는 기존 brand 토큰에 연결된다.
+  해당 검사만 aria-pressed·공통 variant·실제 brand 배경색과 비선택 대비를 함께 확인하도록 보강한다.
+  정렬 GET/cursor 단언·286 inventory·retry/timeout·앱 runtime·lock/vendor는 유지한다.
+- 부모 batch1 frozen6b 이후 테스트1파일/이 기록만 별도 delta다. 수정 후 전체 D를 새 source로 재검증한다.
+  첫 D285PASS/1FAIL을 최종 성공으로 집계하지 않는다. Weather 새 build/20+5도 같은 슬롯2에서 이어 실행한다.
+
 ## 2026-11-12 — main 검색 2단계 병합과 C11 runtime 기준 보존
 
 - origin/main cb38c33b40d3b041a0b6df3fb50f340d1c98839a의 검색 순위2단계 변경을 merge한다.
