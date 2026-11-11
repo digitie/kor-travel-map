@@ -7636,6 +7636,10 @@ async def search_features(
         q_compact = search_alias_key(contract.q)
         bracket_like = search_bracket_like_pattern(contract.q)
         await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
+        # 검색 SQL은 식이 많아(순위 CASE·정규식·창 함수) 추정 비용이 ``jit_above_cost``를 넘는다.
+        # 후보는 수천 행이라 JIT가 벌 것이 없는데 컴파일(최적화·방출)이 실행 시간의 대부분이었다 —
+        # prod 2026-11-12 "부산 맛집" 7.6 s 중 JIT 7.2 s. 이 transaction에서만 끈다.
+        await session.execute(text("SET LOCAL jit = off"))
         # 별칭은 PK 조회 한 번이다. 이름을 bind 값으로 넘겨야 본 질의의 별칭 팔이 trigram
         # GIN ``=``로 계획된다(하위 질의로 두면 계획 시점에 값을 모른다).
         alias_name = (
