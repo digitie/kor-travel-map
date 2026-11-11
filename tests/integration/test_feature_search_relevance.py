@@ -944,3 +944,40 @@ async def test_migration_444_seeds_trip_aliases_in_normalized_form(
     assert expected.items() <= rows.items()
     for alias in expected:
         assert feature_repo.search_alias_key(alias) == alias
+
+
+async def test_migration_450_incheon_airport_alias_puts_the_airport_first(
+    migrated_session: AsyncSession,
+) -> None:
+    """450: "인천공항"은 공항 자체(인천국제공항)를 이름에 그 낱말을 품는 전망대보다 앞에 둔다."""
+    alias = (
+        await migrated_session.execute(
+            text(
+                "SELECT canonical_name FROM feature.feature_search_aliases "
+                "WHERE alias = '인천공항'"
+            )
+        )
+    ).scalar_one_or_none()
+    assert alias == "인천국제공항"
+    assert feature_repo.search_alias_key("인천공항") == "인천공항"
+    target = await _place(
+        migrated_session, "alias450:airport", name="인천국제공항", category="06050000",
+        lon=126.4407, lat=37.4602,
+    )
+    decoy = await _place(
+        migrated_session, "alias450:deck", name="인천공항전망대", category="01080400",
+        lon=126.4500, lat=37.4700,
+    )
+    await migrated_session.flush()
+    page = await feature_repo.search_features(
+        migrated_session,
+        q="인천공항",
+        kinds=["place"],
+        page_size=200,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
+    )
+    ids = [item.feature_id for item in page.items]
+    assert ids.index(target) < ids.index(decoy), ids
+    rank = page.items[ids.index(target)].rank
+    assert rank is not None
+    assert rank < feature_repo._SEARCH_RANK_MATCH_WEIGHT, rank
