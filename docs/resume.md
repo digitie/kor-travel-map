@@ -1,3 +1,8 @@
+## 2026-11-11 — 영문 괄호 이름 검색·KNPS 대피소 이름 표식(6차 회전)
+
+- 회전에 묶는다(직접 회전 금지). migration·OpenAPI 없음. 검색 변경은 배포 즉시 효과 — MOIS 별칭 backfill 불필요.
+- 배포 뒤 `knps_shelters` provider_dataset만 preview→실행 1회(runbook `docs/runbooks/knps-shelters-reimport.md`): `現노고단대피소` 1건만 해시가 바뀌어 `노고단대피소`로 갱신, 나머지 21건 불변.
+
 ## 2026-11-10 — 축제 원천 TourAPI 단독(alembic 449)
 
 - 회전에 묶는다(직접 회전 금지). 449가 표준데이터 축제 1,296건을 퇴역시키므로 배포 직후 `visitkorea_festivals` preview → `feature_event_visitkorea_festivals_job` 1회(약 880건 생성, 상세 ≤300) → `/v1/public/festivals/monthly` 확인 → daily schedule 켜기. Manager env 변경 없음.

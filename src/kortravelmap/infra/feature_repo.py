@@ -85,6 +85,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorVersionUnsupportedError,
 )
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.search_name import LATIN_BRACKET_NAME_PATTERN
 from kortravelmap.core.search_region import (
     RegionSearch,
     SearchRegionEntry,
@@ -2034,6 +2035,53 @@ def _search_compact_sql(expression: str) -> str:
     return f"normalize(lower({stripped}), NFC)"
 
 
+def _search_bracket_base_sql(expression: str) -> str:
+    """끝 라틴 괄호 앞 한글 이름의 비교 키(없으면 NULL) — :func:`_search_bracket_part`."""
+    return _search_bracket_part(expression, 1)
+
+
+def _search_bracket_latin_sql(expression: str) -> str:
+    """끝 괄호 안 라틴 이름의 비교 키(없으면 NULL) — :func:`_search_bracket_part`."""
+    return _search_bracket_part(expression, 2)
+
+
+def _search_bracket_part(expression: str, group: int) -> str:
+    """``core.search_name.latin_bracket_name_parts``의 SQL 짝 — 한 group의 비교 키(없으면 NULL).
+
+    group 1은 괄호 앞 한글 이름, 2는 끝 괄호 안 라틴 이름이다. 패턴은 코드 상수라 ``E''`` literal로
+    넣는다(역슬래시를 겹쳐 ``standard_conforming_strings``와 무관하게; 작은따옴표·``:``가 없음은
+    모듈 로드 때 확인한다). 이름이 닫는 괄호로 끝나지 않으면 정규식을 돌리지 않는다(행마다 비용).
+    """
+    trimmed = f"btrim({expression}, {_SEARCH_WHITESPACE_SQL})"
+    part = (
+        f"CASE WHEN right({trimmed}, 1) IN (')', '）') THEN"
+        f" (regexp_match({trimmed}, {_LATIN_BRACKET_NAME_SQL_LITERAL}))[{group}] END"
+    )
+    return _search_compact_sql(part)
+
+
+if "'" in LATIN_BRACKET_NAME_PATTERN or ":" in LATIN_BRACKET_NAME_PATTERN:
+    raise RuntimeError("LATIN_BRACKET_NAME_PATTERN must be a plain SQL literal")
+_LATIN_BRACKET_NAME_SQL_LITERAL: Final[str] = (
+    "E'" + LATIN_BRACKET_NAME_PATTERN.replace("\\", "\\\\") + "'"
+)
+
+
+def search_bracket_like_pattern(q: str) -> str | None:
+    """끝 괄호 이름 후보 팔(``:bracket_like``)의 ``ILIKE`` 패턴 — 검색어를 품는 이름.
+
+    후보는 다른 팔처럼 ``f.name % :q``(이름 **전체**와의 유사도)로 고르므로, 짧은 한글 이름
+    뒤에 긴 영문 괄호가 붙으면("롯데호텔 (Lotte Hotel Seoul Myeongdong)") 한글 이름만으로는
+    문턱을 못 넘는다. 이 팔은 이름이 검색어를 품고 닫는 괄호로 끝나는 행을 더한다 — trigram
+    GIN이 받으므로 공백을 지운 검색어가 3글자 미만이면 ``None``(팔 없음; 조건이 trigram을 못
+    만들면 공개 행 전부를 recheck한다).
+    """
+    stripped = q.strip()
+    if len(search_alias_key(stripped)) < _SEARCH_REGION_TRIGRAM_MIN_CHARS:
+        return None
+    return _like_contains_pattern(stripped)
+
+
 def _search_tail_sql(expression: str) -> str:
     """앞뒤 공백을 걷은 뒤 첫 공백(``SEARCH_WHITESPACE_CODEPOINTS`` 어느 것이든)까지 뗀 나머지.
 
@@ -2135,6 +2183,8 @@ def _feature_search_score_cte(
     )
     region_exact = (
         "\n                OR (region_hit AND (compact_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_base_name = CAST(:rem_compact AS text)"
+        "\n                  OR compact_bracket_name = CAST(:rem_compact AS text)"
         "\n                  OR compact_tail = CAST(:rem_compact AS text)))"
         if region
         else ""
@@ -2159,6 +2209,12 @@ WITH name_candidates AS MATERIALIZED (
         OR (
             f.name OPERATOR(x_extension.%) CAST(:alias_name AS text)
             AND {_search_compact_sql("f.name")} = CAST(:alias_compact AS text)
+        )
+        -- 끝 괄호 이름(core.search_name): 검색어를 품고 닫는 괄호로 끝나는 이름. 순위는 아래
+        -- compact_base_name/compact_bracket_name이 정한다(품기만 하면 종전처럼 "품음" 단계).
+        OR (
+            f.name ILIKE CAST(:bracket_like AS text)
+            AND right(f.name, 1) IN (')', '）')
         ){region_arm}
       )
       -- 점이 없는 place·event는 검색에 내지 않는다(#1459 §4 — 좌표 없는 축제·주차장이 이름 일치
@@ -2188,6 +2244,10 @@ compacted AS (
         CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
              THEN {_search_compact_sql("name")} END AS compact_raw_name,
         {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail,
+        -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott
+        -- Hotel Seoul)"의 한글 이름과 영문 이름. 저장하지 않고 원래 이름에서 뗀다(없으면 NULL).
+        {_search_bracket_base_sql("name")} AS compact_base_name,
+        {_search_bracket_latin_sql("name")} AS compact_bracket_name,
         {_search_category_group_sql("category")} AS search_group
     FROM filtered
 ),
@@ -2200,16 +2260,21 @@ ranked AS (
     -- 검색어와 같다(공백 무시). 지역 검색이면 지역 일치 행은 나머지 검색어로도 본다.
     -- 목적지 이름 일치(ADR-120): 이름 전체가 검색어와 같은 목적지. 첫 낱말을 뗀 나머지는 관광
     -- (그룹 0)에만 쓴다 — "신라스테이 해운대"(숙박)가 "해운대"로 관광지 앞에 서지 않게 한다.
+    -- 이름 끝 라틴 괄호의 한글 이름·영문 이름도 이름 전체와 같은 자격이다(core.search_name).
     SELECT
         hits.*,
         (
           compact_name = CAST(:q_compact AS text)
+          OR compact_base_name = CAST(:q_compact AS text)
+          OR compact_bracket_name = CAST(:q_compact AS text)
           OR compact_tail = CAST(:q_compact AS text){region_exact}
         ) IS TRUE AS name_exact,
         (
           search_group <= {_search_destination_group_max()}
           AND (
             compact_name = CAST(:q_compact AS text)
+            OR compact_base_name = CAST(:q_compact AS text)
+            OR compact_bracket_name = CAST(:q_compact AS text)
             OR (search_group = 0 AND compact_tail = CAST(:q_compact AS text))
           )
         ) IS TRUE AS destination_exact
@@ -7367,9 +7432,11 @@ async def search_features(
     q_enabled = contract.q_enabled
     q_compact: str | None = None
     alias_name: str | None = None
+    bracket_like: str | None = None
     region: RegionSearch | None = None
     if contract.q is not None:
         q_compact = search_alias_key(contract.q)
+        bracket_like = search_bracket_like_pattern(contract.q)
         await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
         # 별칭은 PK 조회 한 번이다. 이름을 bind 값으로 넘겨야 본 질의의 별칭 팔이 trigram
         # GIN ``=``로 계획된다(하위 질의로 두면 계획 시점에 값을 모른다).
@@ -7392,6 +7459,7 @@ async def search_features(
                     "q_compact": q_compact,
                     "alias_name": alias_name,
                     "alias_compact": search_alias_key(alias_name) if alias_name else None,
+                    "bracket_like": bracket_like,
                     "bbox_enabled": contract.bbox is not None,
                     "min_lon": min_lon,
                     "min_lat": min_lat,
@@ -7422,6 +7490,7 @@ async def search_features(
                 "q_compact": q_compact,
                 "alias_name": alias_name,
                 "alias_compact": search_alias_key(alias_name) if alias_name else None,
+                "bracket_like": bracket_like,
                 "bbox_enabled": contract.bbox is not None,
                 "min_lon": min_lon,
                 "min_lat": min_lat,

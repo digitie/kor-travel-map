@@ -18,7 +18,7 @@ provider 등록) + Amendment 2026-05-25 (keyless + file-only)** 기준.
 
 | 항목 | 값 |
 |------|----|
-| provider | `python-knps-api` (`digitie/python-knps-api`, commit `3b8989550a2a5aacf8bb48065a6d433572f19d62`) |
+| provider | `python-knps-api` (`digitie/python-knps-api`, commit `a472a379c10c5b963faea4ca83ac56d98d9e2fc4`) |
 | import | `from knps import KnpsClient, FileDataset, FileArtifact, ...` (아래 §5) |
 | Python | `>=3.11` |
 | 인증 | **없음 (keyless)** — knps-api PR#4. data.go.kr 직접 다운로드 URL 사용. `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함 (ADR-028 amendment) |

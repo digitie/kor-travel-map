@@ -248,6 +248,32 @@ def _maki_for(category: str) -> str:
     return "marker"
 
 
+#: provider가 원천 값을 **고친** 이름(예: python-knps-api a472a37의 ``現노고단대피소`` →
+#: ``노고단대피소``)을 원천 행에 덧붙이는 예약 키. 원천 필드와 겹치지 않게 ``__`` 접두를 쓴다
+#: (provider의 ``__knps_point_wgs84__``와 같은 관례).
+_DISPLAY_NAME_RAW_KEY: Final[str] = "__map_display_name__"
+
+
+def _point_raw_data(record: KnpsPointRecord) -> dict[str, Any]:
+    """원천 행 + (이름이 원천 값 그대로가 아닐 때만) 표시 이름.
+
+    원천 행이 같으면 해시도 같아서 적재가 그 행을 "바뀌지 않음"으로 보고 Feature 이름을 고치지
+    않는다 — provider의 이름 정규화가 바뀌어도 운영 이름이 옛 값으로 남는다. 그래서 MOIS
+    ``display_name``처럼 **결과**를 해시에 넣는다. 이름이 원천 값 중 하나와 같은 평범한 행은
+    해시가 그대로다(재변환 없음). point 경로만 — geometry 경로는 이름을 조립하는 dataset이 있어
+    전 행 해시가 바뀐다.
+    """
+    raw_data = dict(record.raw)
+    name = record.name
+    if (
+        name is not None
+        and name.strip()
+        and name not in {value for value in raw_data.values() if isinstance(value, str)}
+    ):
+        raw_data[_DISPLAY_NAME_RAW_KEY] = name
+    return raw_data
+
+
 async def _point_record_to_bundle(
     record: KnpsPointRecord,
     spec: KnpsPlaceDatasetSpec,
@@ -270,7 +296,7 @@ async def _point_record_to_bundle(
         assert spec.category is not None  # 비-dynamic spec은 category 필수
         category, place_kind = spec.category, spec.place_kind
 
-    raw_data = dict(record.raw)
+    raw_data = _point_raw_data(record)
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=PROVIDER_NAME,

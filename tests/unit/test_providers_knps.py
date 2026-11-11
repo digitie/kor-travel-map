@@ -91,12 +91,14 @@ class _Rec:
 
 
 def _one(dataset_key: str, **over: Any):
+    name = over.get("name", "북한산 시설")
     rec = _Rec(
         source_id=over.get("source_id", "KN-001"),
-        name=over.get("name", "북한산 시설"),
+        name=name,
         longitude=over.get("longitude", Decimal("126.9876")),
         latitude=over.get("latitude", Decimal("37.6584")),
-        raw=over.get("raw", {"MNG_NO": "KN-001"}),
+        # 실제 record처럼 이름은 원천 행의 한 값이다.
+        raw=over.get("raw", {"MNG_NO": "KN-001", "KOR_NM": name}),
     )
     return knps_point_records_to_bundles(
         [rec], dataset_key=dataset_key, fetched_at=_FETCHED
@@ -171,7 +173,21 @@ def test_cultural_resource_bundle_dynamic_category() -> None:
 def test_missing_coord_yields_none() -> None:
     b = _one("knps_restrooms", longitude=None, latitude=None)
     assert b.feature.coord is None
-    assert b.source_record.raw_data == {"MNG_NO": "KN-001"}
+    assert b.source_record.raw_data == {"MNG_NO": "KN-001", "KOR_NM": "북한산 시설"}
+
+
+def test_provider_corrected_name_enters_raw_hash_only_when_it_differs_from_source() -> None:
+    """knps-api a472a37: 現… 표식을 걷은 이름은 원천 값과 다르다 — 해시에 넣어 재적재가 고친다."""
+    plain = _one("knps_shelters", name="노고단대피소", raw={"시설물": "노고단대피소"})
+    fixed = _one("knps_shelters", name="노고단대피소", raw={"시설물": "現노고단대피소"})
+    assert plain.source_record.raw_data == {"시설물": "노고단대피소"}
+    assert fixed.source_record.raw_data == {
+        "시설물": "現노고단대피소",
+        "__map_display_name__": "노고단대피소",
+    }
+    assert fixed.source_record.raw_payload_hash != _one(
+        "knps_shelters", name="現노고단대피소", raw={"시설물": "現노고단대피소"}
+    ).source_record.raw_payload_hash
 
 
 def test_out_of_korea_coord_is_dropped() -> None:
