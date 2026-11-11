@@ -1,7 +1,22 @@
 # 2026-11-11 관리자 공통 UI 통합 기록
 
+## 현재 상태 — integration-11-review 검증 중
 
-## 현재 상태 — integration-9-review
+최종 단일pack producer a35481349d6747b4f13b958ae64d9c0bbd0b5413를 채택한다.
+지도9a·CSS fix.4 bytes를 유지하고 FocusScope1.3.1+kortravel.fix.2를 root/frontend runtime file 직접 의존성 및 override로 연결한다.
+원장과 vendor7개를 함께 보존하되 RN은 웹 runtime에 설치하지 않는다.
+실제 UI94+tokens25+Scope15 파일, 모든 도달 lock copy의 SRI와 외부 최신 policy/C11 canonical을 대조한다.
+중앙 workflow 코드는55a921b55d248106cbe320e7f5305f3d3cdb60fe로 고정한다.
+
+A 버튼 수정 f55c4c0은 SSR beforeFAIL→afterPASS, 신규8개6FAIL/2PASS→8PASS,
+기존21+신규8=29PASS, 실제 source Doctor0으로 확인했다.
+B 수정 b102c659는 원7FAIL→관련90PASS, 정상 대조군 및50mutation 검출,
+문서 원문 절 보관/크기 상한 유지로 확인했다. 원 A/B의 독립 closure는 부모가 진행한다.
+이 경량 증거와 아래 과거c9 runtime 증거는 C11의 전체440·fresh build·D286 strict/전체runner cleanup을 대신하지 않는다.
+현재 n150 슬롯2에서 순서대로 최종 gate를 검증 중이며 결과는 후속 검증 기록으로 정산한다.
+운영 배포·merge는 하지 않았다.
+
+## 과거 상태 — integration-9-review
 
 검증 source는 e3ea216c128c3e7ef5346b17db6d4ec3fd5272a0이다.
 공통 원천2c1182e765bb2bc53e01e0962cf2a73683891e1d의 c9 원장을 사용하고,

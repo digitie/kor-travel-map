@@ -1,5 +1,18 @@
 ## 2026-11-12 — A 검토의 공통 Button variant/size 전달 수정
 
+## 2026-11-12 — C11 정본과 FocusScope fix2 채택
+
+integration-11-review 단일pack의 원장7개·vendor7개를 동일 bytes로 동기화한다.
+공통 producer a35481349d6747b4f13b958ae64d9c0bbd0b5413,
+FocusScope source1752a539c8d5ae57961a0fa2702d2573d48fefe7의
+1.3.1+kortravel.fix.2를 runtime file 직접 의존성과 root override로 연결한다.
+Lightning CSS fix.4는 dev 필수이며 지도9a bytes를 유지한다. RN은 vendor/원장에만 두고 웹에 설치하지 않는다.
+중앙 workflow 실행 코드는55a921b55d248106cbe320e7f5305f3d3cdb60fe를 유지한다.
+C10 checkpoint·원925/e4·원 A/B와 전후 실패 로그를 보존한다.
+n150 슬롯2에서 기존 cache를 재사용해 명시 file 설치/실제 UI94+tokens25+Scope15 bytes,
+외부 C11 canonical guard 및 최종 frontend gate를 검증 중이다.
+검증 완료·독립2리뷰·CI·merge·부모 go 전까지 배포하지 않는다. DB/API/RustFS/Dagster lifecycle 변경 없음.
+
 - 원A의 A-CONS-P2-02를 같은 SSR 대조로 재현했다. ghost/link/outline·icon-xs metadata가
   default로 남고 ghost/link에 primary 채움이 남았다. Common 직접 호출은 정상이다.
 - variant/size를 공통 primitive로 전달하고 로컬 전체 CVA 색상/크기 recipe는 공통 정본에 위임했다.
