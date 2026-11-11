@@ -338,7 +338,8 @@ _SOURCE_OVERLAP_PAIRS: Final[tuple[Mapping[str, object], ...]] = (
     },
     # 국립공원 안 산림청 등산로 ↔ KNPS 탐방로 — 선형 겹침. 등산로 길이의 절반 이상이 탐방로
     # 30 m 버퍼 안이면 가장 많이 겹치는 탐방로와 짝이 된다. KNPS가 master(dataset 보정).
-    # (374 — 그중 298이 겹침 0.9 이상. prod SQL 18 s.)
+    # 길이 비율 0.8~1.25이거나 양방향 겹침이 모두 0.8 이상일 때만 — 긴 탐방로 위의 짧은 조각은
+    # 같은 선이 아니다(소유자 결정 2026-11-11, 첫 실행 374쌍 중 약 147쌍이 남는다).
     {
         "left": {
             "provider": "python-krforest-api",

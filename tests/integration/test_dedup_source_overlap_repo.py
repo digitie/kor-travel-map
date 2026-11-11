@@ -258,3 +258,48 @@ async def test_master_candidate_picks_highest_priority_primary_link(
     await migrated_session.flush()
     candidate = await merge_repo._master_candidate(migrated_session, feature_id)
     assert (candidate.provider, candidate.dataset_key) == ("python-mois-api", "overlap_mois")
+
+
+async def test_route_overlap_drops_short_segment_on_long_trail(
+    migrated_session: AsyncSession,
+) -> None:
+    # #1468 소유자 결정: 긴 탐방로 위의 짧은 등산로 조각은 한쪽 방향으로는 완전히 겹치지만
+    # (비율 1.0) 같은 선이 아니다 — 길이 비율·양방향 겹침 조건으로 빠진다. 길이가 비슷한 쌍은 남는다.
+    long_trail, twin_trail = _fid(40), _fid(41)
+    short_piece, twin = _fid(50), _fid(51)
+    lat, lat2 = 37.6, 37.7
+    await _seed(migrated_session, feature_id=long_trail, source=_RIGHT, name="긴 탐방로",
+                lon=127.000, lat=lat, category="01020103", kind="route",
+                geom_wkt=f"LINESTRING(127.000 {lat}, 127.050 {lat})")  # 약 4.4 km
+    await _seed(migrated_session, feature_id=twin_trail, source=_RIGHT, name="짝 탐방로",
+                lon=127.000, lat=lat2, category="01020103", kind="route",
+                geom_wkt=f"LINESTRING(127.000 {lat2}, 127.010 {lat2})")
+    off = lat + 5 * _M
+    await _seed(migrated_session, feature_id=short_piece, source=_LEFT, name="짧은 조각",
+                lon=127.020, lat=off, category="01080500", kind="route",
+                geom_wkt=f"LINESTRING(127.020 {off}, 127.022 {off})")  # 약 180 m, 비율 1.0
+    off2 = lat2 + 5 * _M
+    await _seed(migrated_session, feature_id=twin, source=_LEFT, name="짝 등산로",
+                lon=127.000, lat=off2, category="01080500", kind="route",
+                geom_wkt=f"LINESTRING(127.000 {off2}, 127.0095 {off2})")  # 길이 0.95배
+
+    pairs = await list_route_overlap_pairs(
+        migrated_session,
+        DedupRefreshScope(provider=_LEFT[0], dataset_key=_LEFT[1]),
+        DedupRefreshScope(provider=_RIGHT[0], dataset_key=_RIGHT[1]),
+        buffer_m=30,
+        min_overlap_ratio=0.5,
+    )
+
+    assert [(a.feature_id, b.feature_id) for a, b, _ratio in pairs] == [(twin, twin_trail)]
+
+
+async def test_route_overlap_rejects_invalid_length_ratio(
+    migrated_session: AsyncSession,
+) -> None:
+    scope = DedupRefreshScope(provider=_LEFT[0], dataset_key=_LEFT[1])
+    with pytest.raises(ValueError, match="length_ratio"):
+        await list_route_overlap_pairs(
+            migrated_session, scope, scope, buffer_m=30, min_overlap_ratio=0.5,
+            length_ratio=(1.2, 1.5),
+        )

@@ -30,6 +30,8 @@ __all__ = [
     "DedupRefreshScope",
     "list_dedup_refresh_features",
     "list_route_overlap_pairs",
+    "ROUTE_OVERLAP_LENGTH_RATIO",
+    "ROUTE_OVERLAP_MIN_MUTUAL_RATIO",
 ]
 
 DEDUP_REFRESH_DEFAULT_LIMIT: Final[int] = 5000
@@ -281,6 +283,7 @@ right_zones AS MATERIALIZED (
   -- 이 식은 술어가 아니라 한 번 만드는 값이다(ADR-012). 아래 `&&`가 인덱스 술어다.
   SELECT f.feature_id, f.name, f.category, f.kind,
          x_extension.ST_X(f.coord) AS lon, x_extension.ST_Y(f.coord) AS lat,
+         g.geom,
          x_extension.ST_Buffer(
            g.geom::x_extension.geography, CAST(:buffer_m AS double precision)
          )::x_extension.geometry AS zone
@@ -307,6 +310,9 @@ line_overlaps AS (
          l.kind AS left_kind, l.lon AS left_lon, l.lat AS left_lat,
          r.feature_id AS right_id, r.name AS right_name, r.category AS right_category,
          r.kind AS right_kind, r.lon AS right_lon, r.lat AS right_lat,
+         lg.geom AS left_geom, r.geom AS right_geom,
+         x_extension.ST_Length(lg.geom::x_extension.geography) AS left_len,
+         x_extension.ST_Length(r.geom::x_extension.geography) AS right_len,
          x_extension.ST_Length(
            x_extension.ST_Intersection(lg.geom, r.zone)::x_extension.geography
          ) / NULLIF(x_extension.ST_Length(lg.geom::x_extension.geography), 0) AS ratio
@@ -318,15 +324,47 @@ line_overlaps AS (
     ON l.feature_id = lg.feature_id
   WHERE l.feature_id <> r.feature_id
 )
+forward_hits AS (
+  SELECT * FROM line_overlaps
+  WHERE ratio >= CAST(:min_ratio AS double precision)
+),
+qualified AS (
+  -- #1468 소유자 결정: 한쪽 방향 겹침만으로는 긴 탐방로 위의 짧은 등산로 조각(부분 구간)도
+  -- 잡힌다. 길이가 비슷하거나(비율 범위) 양방향 모두 많이 겹칠 때만 같은 선으로 본다.
+  -- 반대 방향 비율은 앞 거름을 통과한 쌍에만 계산한다(버퍼는 값, 술어 아님 — ADR-012).
+  SELECT h.*,
+         x_extension.ST_Length(
+           x_extension.ST_Intersection(
+             h.right_geom,
+             x_extension.ST_Buffer(
+               h.left_geom::x_extension.geography, CAST(:buffer_m AS double precision)
+             )::x_extension.geometry
+           )::x_extension.geography
+         ) / NULLIF(h.right_len, 0) AS reverse_ratio
+  FROM forward_hits AS h
+)
 SELECT DISTINCT ON (left_id)
   left_id, left_name, left_category, left_kind, left_lon, left_lat,
   right_id, right_name, right_category, right_kind, right_lon, right_lat,
   LEAST(ratio, 1.0) AS ratio
-FROM line_overlaps
-WHERE ratio >= CAST(:min_ratio AS double precision)
+FROM qualified
+WHERE (
+    left_len / NULLIF(right_len, 0)
+      BETWEEN CAST(:min_length_ratio AS double precision)
+          AND CAST(:max_length_ratio AS double precision)
+  )
+  OR (
+    ratio >= CAST(:min_mutual_ratio AS double precision)
+    AND reverse_ratio >= CAST(:min_mutual_ratio AS double precision)
+  )
 ORDER BY left_id, ratio DESC, right_id
 LIMIT CAST(:limit AS integer)
 """
+
+ROUTE_OVERLAP_LENGTH_RATIO: Final[tuple[float, float]] = (0.8, 1.25)
+"""선형 겹침 쌍의 길이 비율 기본 범위(왼쪽 ÷ 오른쪽, #1468 소유자 결정)."""
+ROUTE_OVERLAP_MIN_MUTUAL_RATIO: Final[float] = 0.8
+"""길이가 범위 밖이어도 양방향 겹침이 모두 이 이상이면 같은 선으로 본다."""
 
 
 async def list_route_overlap_pairs(
@@ -336,11 +374,17 @@ async def list_route_overlap_pairs(
     *,
     buffer_m: float,
     min_overlap_ratio: float,
+    length_ratio: tuple[float, float] = ROUTE_OVERLAP_LENGTH_RATIO,
+    min_mutual_ratio: float = ROUTE_OVERLAP_MIN_MUTUAL_RATIO,
 ) -> list[tuple[DedupPoint, DedupPoint, float]]:
-    """왼쪽 선 길이 중 오른쪽 선 ``buffer_m`` 버퍼 안 비율이 ``min_overlap_ratio`` 이상인 쌍.
+    """같은 선으로 보이는 선형 feature 쌍(#1468 — 국립공원 안 산림청 등산로 ↔ KNPS 탐방로).
 
-    왼쪽 선마다 가장 많이 겹치는 오른쪽 선 하나만 낸다(#1468 — 국립공원 안 산림청 등산로 ↔
-    KNPS 탐방로). 반환은 ``(left, right, overlap_ratio)``. ``left.limit``이 쌍 수 상한이다.
+    1. 왼쪽 선 길이 중 오른쪽 선 ``buffer_m`` 버퍼 안 비율이 ``min_overlap_ratio`` 이상이고,
+    2. 길이 비율(왼쪽 ÷ 오른쪽)이 ``length_ratio`` 범위 안이거나, 양방향 겹침이 모두
+       ``min_mutual_ratio`` 이상일 때만 후보다 — 긴 선 위의 짧은 조각(부분 구간)은 빠진다.
+
+    왼쪽 선마다 가장 많이 겹치는 오른쪽 선 하나만 낸다. 반환은
+    ``(left, right, overlap_ratio)``. ``left.limit``이 쌍 수 상한이다.
     """
     _validate_scope(left)
     _validate_scope(right)
@@ -348,6 +392,11 @@ async def list_route_overlap_pairs(
         raise ValueError("buffer_m must be greater than 0")
     if not 0 < min_overlap_ratio <= 1:
         raise ValueError("min_overlap_ratio must be in (0, 1]")
+    low, high = length_ratio
+    if not 0 < low <= 1 <= high:
+        raise ValueError("length_ratio must satisfy 0 < low <= 1 <= high")
+    if not 0 < min_mutual_ratio <= 1:
+        raise ValueError("min_mutual_ratio must be in (0, 1]")
     rows = (
         await session.execute(
             text(_ROUTE_OVERLAP_SQL),
@@ -360,6 +409,9 @@ async def list_route_overlap_pairs(
                 "right_categories": _array_or_none(right.categories),
                 "buffer_m": buffer_m,
                 "min_ratio": min_overlap_ratio,
+                "min_length_ratio": low,
+                "max_length_ratio": high,
+                "min_mutual_ratio": min_mutual_ratio,
                 "limit": left.limit,
             },
         )
