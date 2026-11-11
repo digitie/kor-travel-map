@@ -101,6 +101,14 @@
    (`resync_reason=clock_epoch_changed`) — 벽시계 clock이라 복원 뒤 cursor가 422로 드러나지 않는 원천 계약 7을 닫는다. PG
    재시작에도 바뀌므로 그때 전량이 한 번 더 난다(보수적). 응답에 없으면 저장된 epoch를 잇는다. 운영자 수동 `full_resync`는
    이제 provider 설정 변경 같은 예외에만 필요하다.
+   epoch는 그 snapshot을 **얼린 때**의 값이다 — 복원 직후 weather가 옛 snapshot으로 fallback하면 한동안 옛 epoch가 올 수
+   있고, 다음 새 freeze에서 바뀌어 전량이 난다.
+10. **리뷰 반영(2026-11-11).** (a) 전량 장부가 weather digest와 달라도 `omitted_expired`가 있거나 `stale` 페이지가 없으면
+   "검증 불가"(0)로 두지 않고 모름(빈값)으로 두고 오류 로그를 남긴다 — 정의 어긋남이 검사를 조용히 끄지 않게. (b) 두 필드는
+   형식을 모르면 없는 것으로 본다(적재를 막지 않는다). (c) 큰 제거는 이제 그 run의 전량에서 거부 기준(D4)에 걸릴 수 있다 —
+   전에는 하루 주기 전량에서 걸렸다. 진짜 축소면 운영자 `allow_shrink`. (d) 이 개정 이전 코드로 되돌리면 그 코드는
+   `members` 키를 모른다 — 물러난 세대의 `…:{gen}:members`가 데이터셋마다 하나씩 만료 없이 남으므로, meta 없는
+   `ktm:state:v1:weather.forecast_*:*:members` 키를 `UNLINK`한다.
 
 ## 정확성 검사(drift 방지)
 

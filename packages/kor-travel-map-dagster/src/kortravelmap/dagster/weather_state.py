@@ -1269,6 +1269,22 @@ async def load_weather_state(
                     forecast_membership_digest(collected.members or {})
                     == collected.fetch.membership_digest
                 )
+                # "검증할 수 없다"(False)는 weather가 시간 필터로 뺀 행을 알리지 않고
+                # (omitted_expired 없음) 실제로 뺐을 때(stale 페이지)만이다. 그 밖의 불일치는
+                # 정의·계약 어긋남이라 False로 두면 검사가 조용히 꺼진다 — 모름(None)으로
+                # 두어 다음 증분이 다시 전량을 받게 하고 오류로 남긴다(ADR-122 리뷰 M1).
+                if not full_verified and (
+                    collected.fetch.omitted_expired is not None
+                    or collected.fetch.source_status != "stale"
+                ):
+                    _LOGGER.error(
+                        "weather %s 전량 멤버십 digest가 weather와 다르다(omitted_expired=%s, "
+                        "source_status=%s) — 정의·계약 어긋남 의심.",
+                        spec.dataset.name,
+                        collected.fetch.omitted_expired is not None,
+                        collected.fetch.source_status,
+                    )
+                    full_verified = None
             result = await active.swap(
                 spec.dataset.name,
                 collected.items,

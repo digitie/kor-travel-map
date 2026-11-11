@@ -539,14 +539,48 @@ async def test_full_records_membership_verification_and_epoch(
 async def test_full_with_unseen_manifest_rows_is_unverifiable(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    # weather manifest에 미래 시각이 없는 (b, p)가 있다 — 전량에도 오지 않아 Map은 재현할 수 없다.
+    # omitted_expired를 내지 않는 weather가 미래 시각이 없는 (b, p)를 뺐다(stale 페이지)
+    # — 재현할 수 없다.
     digest = _digest_of(("a", "p", W0), ("b", "p", W0))
     _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
-        [_group("a", "p", W0)], membership_digest=digest,
+        [_group("a", "p", W0)], membership_digest=digest, source_status="stale",
     )))
     store = _Store(None, [])
     await _run(store)
     assert store.swapped[0]["membership_verified"] is False
+
+
+@pytest.mark.parametrize(
+    "meta",
+    [
+        {"source_status": "ok"},  # 뺀 행이 없는데 다르다
+        {"source_status": "stale", "omitted_expired": []},  # 뺀 행을 알렸는데도 다르다
+    ],
+)
+async def test_full_mismatch_that_cannot_be_omissions_stays_unknown(
+    monkeypatch: pytest.MonkeyPatch, meta: dict[str, Any]
+) -> None:
+    # 정의·계약 어긋남을 "검증 불가"로 두면 검사가 조용히 꺼진다 — 모름(None)으로 둔다(리뷰 M1).
+    digest = _digest_of(("a", "p", W0), ("b", "p", W0))
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [_group("a", "p", W0)], membership_digest=digest, **meta,
+    )))
+    store = _Store(None, [])
+    await _run(store)
+    assert store.swapped[0]["membership_verified"] is None
+
+
+async def test_unknown_digest_or_epoch_format_is_treated_as_absent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install(monkeypatch, lambda _r: httpx.Response(200, json=_page(
+        [_group("a", "p", W0)], membership_digest="blake3:zz", clock_epoch="mysql:1",
+    )))
+    store = _Store(None, [])
+    await _run(store)
+    (swap,) = store.swapped
+    assert swap["membership_verified"] is None
+    assert swap["clock_epoch"] is None
 
 
 async def test_delta_whose_membership_matches_is_verified(

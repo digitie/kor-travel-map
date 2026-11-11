@@ -18,10 +18,12 @@ Map 쪽 정본이다 — 이미 받은 JSON 페이지를 **엄격히** 읽어 Ma
 from __future__ import annotations
 
 import datetime as dt
+import logging
+import re
 from collections.abc import Mapping
 from typing import Any, Final, Generic, Literal, TypeVar
 
-from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
+from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 __all__ = [
     "ADMIN_TOKEN_HEADER",
@@ -49,6 +51,8 @@ __all__ = [
     "parse_forecast_page",
     "parse_location_page",
 ]
+
+_LOGGER = logging.getLogger(__name__)
 
 KOR_TRAVEL_WEATHER_PROVIDER_NAME: Final[str] = "kor-travel-weather"
 """Map이 weather 위치 id의 ``source_type`` 접두사로 쓰는 provider 정체성."""
@@ -144,13 +148,25 @@ class WeatherExportMeta(_Lenient):
     next_since: AwareDatetime | None = None
     """W3 예보의 publication watermark. 모든 페이지를 받은 뒤 다음 적재의 ``since``로 보낸다
     (ADR-122). 다른 export는 null이다."""
-    membership_digest: str | None = Field(default=None, pattern=r"^sha256:[0-9a-f]{64}$")
+    membership_digest: str | None = None
     """W3: 얼린 manifest 전체의 ``(location_id, provider, published_at)`` digest(시간 필터 전,
     ``since`` 무관). 없을 수 있다(그 필드 전 weather). ADR-122."""
-    clock_epoch: str | None = Field(default=None, pattern=r"^pg:[0-9a-f]{32}$")
+    clock_epoch: str | None = None
     """W3: publication clock 출처 epoch — DB 복원·PITR·재설치·재시작에 바뀐다. ADR-122."""
     omitted_expired: list[WeatherExportForecastMember] | None = None
     """W3: 이 페이지에서 미래 시각이 없어 뺀 멤버. Map은 값 없는 멤버로 장부에 더한다. ADR-122."""
+
+    @field_validator("membership_digest", "clock_epoch", mode="before")
+    @classmethod
+    def _known_format_or_none(cls, value: Any, info: Any) -> Any:
+        # 선택 가산 필드다 — 모르는 형식이면 없는 것으로 본다(적재 전체를 막지 않고, 검사만 꺼진다).
+        pattern = (
+            r"sha256:[0-9a-f]{64}" if info.field_name == "membership_digest" else r"pg:[0-9a-f]{32}"
+        )
+        if value is None or (isinstance(value, str) and re.fullmatch(pattern, value)):
+            return value
+        _LOGGER.warning("weather meta.%s 형식을 모른다 — 없는 것으로 본다.", info.field_name)
+        return None
 
 
 class WeatherExportLocation(_Lenient):
