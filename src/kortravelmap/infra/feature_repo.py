@@ -2413,22 +2413,31 @@ scored AS (
     FROM ranked
 ),
 candidates AS (
-    -- 중복 접기(P5, 2026-11-11): 같은 이름의 place가 ``_SEARCH_DEDUP_RADIUS_M`` 안에 여럿이면
-    -- 정렬 순서((search_rank, -score, feature_id))가 가장 앞인 행 하나만 남긴다. 숨김은 페이지가
-    -- 아니라 **후보 전체**에서 정하므로 cursor 위치와 무관하다 — keyset 정렬 키·개수 질의가 그대로
-    -- 맞는다. 대표가 정렬 순서의 첫 행이라 접어도 그 무리의 자리는 내려가지 않는다.
+    -- 중복 접기(P5, 2026-11-11): 같은 접기 키 무리에서 정렬 순서((search_rank, -score,
+    -- feature_id))가 가장 앞인 행(대표)과 ``_SEARCH_DEDUP_RADIUS_M`` 안에 있는 나머지를 숨긴다.
+    -- 숨김은 페이지가 아니라 **후보 전체**에서 정하므로 cursor 위치와 무관하다 — keyset 정렬 키·
+    -- 개수 질의가 그대로 맞는다. 대표가 정렬 순서의 첫 행이라 접어도 그 무리의 자리는 내려가지
+    -- 않는다. 창 함수 한 번(정렬 한 번)이다 — 행 쌍을 비교하는 반조인은 후보 수의 제곱이라
+    -- "강화 펜션"(후보 2천여 행)에서 수십 초였다. 대표와 멀리 떨어진 같은 이름 행끼리는 접지 않는다
+    -- (다른 도시의 같은 이름은 그대로 둔다).
     SELECT
-        a.feature_id, a.feature_uuid, a.kind, a.name, a.category, a.lon, a.lat,
-        a.marker_icon, a.marker_color, a.score, a.search_rank
-    FROM scored AS a
-    WHERE a.dedup_key IS NULL
-       OR NOT EXISTS (
-        SELECT 1
-        FROM scored AS b
-        WHERE b.dedup_key = a.dedup_key
-          AND (b.search_rank, -b.score, b.feature_id) < (a.search_rank, -a.score, a.feature_id)
-          AND x_extension.ST_DWithin(b.coord_5179, a.coord_5179, {_SEARCH_DEDUP_RADIUS_M})
-      )
+        d.feature_id, d.feature_uuid, d.kind, d.name, d.category, d.lon, d.lat,
+        d.marker_icon, d.marker_color, d.score, d.search_rank
+    FROM (
+        SELECT
+            scored.*,
+            row_number() OVER dedup AS dedup_position,
+            first_value(coord_5179) OVER dedup AS dedup_leader_coord
+        FROM scored
+        WINDOW dedup AS (
+            PARTITION BY dedup_key ORDER BY search_rank ASC, score DESC, feature_id ASC
+        )
+    ) AS d
+    WHERE d.dedup_key IS NULL
+       OR d.dedup_position = 1
+       OR NOT x_extension.ST_DWithin(
+            d.dedup_leader_coord, d.coord_5179, {_SEARCH_DEDUP_RADIUS_M}
+          )
 )
 """
 
