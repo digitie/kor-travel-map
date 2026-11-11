@@ -127,7 +127,9 @@ def test_source_record_provider_and_link_primary() -> None:
     bundle = museums_to_bundles([_MUSEUM], fetched_at=_now())[0]
     assert bundle.source_record.provider == "data.go.kr-standard"
     assert bundle.source_record.source_entity_type == "museum_art_gallery"
-    assert bundle.source_record.source_entity_id == "MUS-0001"
+    # instt_code는 제공 기관(지자체) 코드라 시설마다 다르지 않다 — 공개 파일 1,070행에 215개.
+    # 있어도 identity로 쓰지 않는다(2026-11-11 적대 리뷰 HIGH).
+    assert bundle.source_record.source_entity_id == f"{_MUSEUM.fclty_nm}::{_MUSEUM.rdnmadr}"
     link = bundle.source_link
     assert link.source_role == SourceRole.PRIMARY
     assert link.confidence == 100

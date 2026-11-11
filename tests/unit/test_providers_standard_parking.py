@@ -131,7 +131,7 @@ def test_parking_out_of_korea_coordinate_isolated() -> None:
 
 
 @pytest.mark.unit
-def test_parking_prefers_instt_code_over_derived() -> None:
+def test_parking_ignores_institution_code_for_identity() -> None:
     item = _Parking(
         prkplce_no=None,
         prkplce_nm="주차장A",
@@ -146,5 +146,6 @@ def test_parking_prefers_instt_code_over_derived() -> None:
         instt_code="INSTT-9",
     )
     bundle = parking_lots_to_bundles([item], fetched_at=_now())[0]
-    assert bundle.source_record.source_entity_id == "INSTT-9"
+    # 번호가 없으면 기관 코드가 아니라 이름::도로명이다 — 기관 코드는 시설마다 다르지 않다.
+    assert bundle.source_record.source_entity_id == f"{item.prkplce_nm}::{item.rdnmadr}"
     assert bundle.source_link.source_role == SourceRole.PRIMARY

@@ -76,6 +76,13 @@ def test_tourist_feature_fields() -> None:
 
 
 @pytest.mark.unit
+def test_tourist_key_ignores_institution_code() -> None:
+    # instt_code는 제공 기관 코드다 — 공개 파일 897행에 164개뿐이라 identity가 될 수 없다.
+    bundle = tourist_attractions_to_bundles([_T1], fetched_at=_now())[0]
+    assert bundle.source_record.source_entity_id == f"{_T1.trrsrt_nm}::{_T1.rdnmadr}"
+
+
+@pytest.mark.unit
 def test_tourist_derived_key_when_no_instt_code() -> None:
     item = _Tourist(
         trrsrt_nm="남이섬",

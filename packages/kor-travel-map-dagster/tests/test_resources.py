@@ -564,6 +564,8 @@ def test_provider_record_resource_env_mapping() -> None:
         "standard_traditional_markets",
         "standard_special_streets",
         "standard_parking_lots",
+        "standard_museums",
+        "standard_tourist_attractions",
     ):
         assert specs[key].kor_travel_map_env_names == ()
 

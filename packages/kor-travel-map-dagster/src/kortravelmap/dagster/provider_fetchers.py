@@ -724,41 +724,6 @@ async def fetch_transport_airports(
         yield airport
 
 
-#: datagokr 표준데이터 요청 페이지 크기. provider의 ``DEFAULT_MAX_PAGE_SIZE``와 같다.
-_DATAGOKR_STANDARD_PAGE_SIZE: Final[int] = 1000
-
-
-def _iter_datagokr_standard(service: Any, *, label: str) -> AsyncIterator[Any]:
-    """datagokr 표준데이터 service를 **Map의 페이지네이터로** 소진한다.
-
-    provider의 ``iter_all()``을 쓰지 않는다. 그 구현은 짧은 페이지를 무조건
-    마지막 페이지로 읽는데(`services/pagination.py`), 같은 릴리스에서 행 단위
-    ``except ValidationError: continue``가 들어와 **기형 행 하나가 페이지를 짧게
-    만든다.** 둘이 겹치면 18,000건짜리 데이터셋이 999건에서 조용히 끝난다 —
-    예외도 로그도 없이. 그리고 Map은 그 결과를
-    ``authoritative_snapshot_complete=True``로 봉인한다.
-
-    이 저장소는 같은 부류를 이미 한 번 겪었다. ``provider_pagination`` 모듈이
-    존재하는 이유가 ``python-krex-api``의 똑같은 변화이고, 그 규칙은
-    **``total_count``가 권위이고 짧은 페이지는 total을 모를 때만 쓰는 대체
-    휴리스틱**이다. datagokr도 그 규칙 아래로 옮긴다.
-    """
-
-    async def _page(page_no: int) -> ProviderPage:
-        page = await service.list(
-            page_no=page_no, num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE
-        )
-        return ProviderPage(items=list(page.items), total_count=page.total_count)
-
-    return aiter_paginated_items(
-        _page,
-        num_of_rows=_DATAGOKR_STANDARD_PAGE_SIZE,
-        label=label,
-        warn=_LOGGER.warning,
-    )
-
-
-
 #: 국가유산 행사 rolling window. provider ``iter_months`` 기본값과 같은 창이지만
 #: **Map이 소유한다** — 요청 수를 셀 수 있어야 쿼터 비율을 말할 수 있다.
 _KRHERITAGE_EVENT_MONTHS_BACK: Final[int] = 1
@@ -1271,61 +1236,54 @@ async def fetch_krforest_landslide_forecast_issues(
 async def fetch_standard_museums(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국박물관미술관표준데이터 record를 datagokr public client로 stream한다.
+    """전국박물관미술관정보표준데이터(15017323) 공개 파일을 서비스키 없이 stream한다.
 
-    ``settings.data_go_kr_service_key``로 ``DataGoKrClient(api_key=...)``를 열고
-    ``client.museum_art`` record(``PublicMuseumArtGallery``, krtour
-    ``PublicMuseumArtItem`` Protocol 충족)를 lazily yield한다. datagokr client는
-    async이므로 async generator다. 소비 종료/aclose 시 ``finally``에서 ``aclose()``.
+    Open API(``tn_pubr_public_museum_artgr_info_api``)는 운영 키가 403
+    (``SERVICE_KEY_IS_NOT_REGISTERED_ERROR``, 2026-11-10)이다. 파일 행은 같은
+    ``PublicMuseumArtGallery`` 모델이다. 파일 행은 ``INSTT_CODE``(제공 기관 코드)를 싣지만 변환은
+    그것을 키로 쓰지 않으므로 자연키는 Open API 때와 같은 ``이름::도로명``이다(2026-11-10 실측
+    1,070행, 파일 키 전부가 prod에 있다).
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard museums live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard(
-            client.museum_art, label="datagokr museum_art.list"
-        ):
-            yield record
+        records = [
+            record
+            async for record in _iter_datagokr_standard_file(
+                client.museum_art, label="datagokr museum_art file"
+            )
+        ]
     finally:
         await client.aclose()
+    for record in _in_canonical_order(records):
+        yield record
 
 
 async def fetch_standard_tourist_attractions(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
-    """전국관광지표준데이터 record를 datagokr public client로 stream한다.
+    """전국관광지정보표준데이터(15021141) 공개 파일을 서비스키 없이 stream한다.
 
-    ``settings.data_go_kr_service_key``로 ``DataGoKrClient``를 열고
-    ``client.tourist_attraction`` record(``PublicTouristAttraction``,
-    krtour ``PublicTouristAttractionItem`` Protocol 충족)를 lazily yield한다.
-    async client → async generator, ``finally``에서 ``aclose()``.
+    Open API(``tn_pubr_public_trrsrt_api``)는 2026-11-10 운영 키로 아직 ``00``이지만 같은 키가
+    다른 표준데이터 오퍼레이션에서 403이 됐다 — 키 상태에 묶이지 않게 공개 파일로 옮긴다.
+    자연키는 Open API 때와 같은 ``이름::도로명``이다(실측 897행, 파일 키 전부가 prod에 있다 —
+    파일이 싣는 ``INSTT_CODE``는 기관 코드라 키로 쓰지 않는다).
     """
-    secret = settings.data_go_kr_service_key
-    if secret is None:
-        raise ProviderCredentialMissing(
-            "standard tourist attractions live fetch에는 "
-            "KOR_TRAVEL_MAP_DATA_GO_KR_SERVICE_KEY (source DATA_GO_KR_SERVICE_KEY)가 "
-            "필요하다."
-        )
-    api_key = secret.get_secret_value()
-
+    del settings
     datagokr = cast(Any, importlib.import_module("datagokr"))
-    client = datagokr.DataGoKrClient(api_key=api_key)
+    client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard(
-            client.tourist_attraction, label="datagokr tourist_attraction.list"
-        ):
-            yield record
+        records = [
+            record
+            async for record in _iter_datagokr_standard_file(
+                client.tourist_attraction, label="datagokr tourist_attraction file"
+            )
+        ]
     finally:
         await client.aclose()
+    for record in _in_canonical_order(records):
+        yield record
 
 
 class StandardFileSnapshotIncomplete(RuntimeError):
@@ -1900,6 +1858,24 @@ async def fetch_standard_parking_lots(
         yield record
 
 
+def _canonical_raw(record: Any) -> str:
+    """원문(``raw``)의 정렬 JSON — 같은 자연키 행 중 무엇이 남는지를 파일 순서와 떼어 놓는다."""
+    return json.dumps(
+        getattr(record, "raw", None), sort_keys=True, ensure_ascii=False, default=str
+    )
+
+
+def _in_canonical_order(records: Sequence[Any]) -> list[Any]:
+    """원문 정렬 JSON 순서로 되돌려 준다(박물관미술관·관광지).
+
+    자연키 ``이름::도로명``이 같은 행이 박물관 26·관광지 18개 키에 있고 내용이 다르다
+    (2026-11-10 실측). 적재는 같은 키를 나중 행으로 덮으므로 파일 순서가 바뀌면 남는 행이
+    바뀐다 — 순서를 원문으로 고정하면 같은 행이 남는다. 키는 변환이 만들므로 여기서 거르지
+    않는다(주차장은 번호가 원천 필드라 거른다).
+    """
+    return sorted(records, key=_canonical_raw)
+
+
 def _one_row_per_parking_number(records: Sequence[Any]) -> list[Any]:
     """같은 ``prkplce_no``의 행 중 하나만 남긴다 — 파일 순서와 무관하게 같은 행을.
 
@@ -1913,8 +1889,7 @@ def _one_row_per_parking_number(records: Sequence[Any]) -> list[Any]:
         number = getattr(record, "prkplce_no", None)
         if not number:
             continue
-        digest = json.dumps(getattr(record, "raw", None), sort_keys=True, ensure_ascii=False,
-                            default=str)
+        digest = _canonical_raw(record)
         kept = chosen.get(number)
         if kept is None or digest < kept[0]:
             chosen[number] = (digest, index)

@@ -147,9 +147,9 @@ system
 | ~~`knps_access_restrictions`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — `python-krforest-api`/scrape로 이전 (별도 ADR) |
 | ~~`knps_fire_alerts`~~ | ~~python-knps-api~~ | knps-api PR#3 source 삭제 — 소방청/산림청으로 이전 (별도 ADR) |
 | `standard_tourism_roads` | data.go.kr-standard | 관광길 표준데이터 |
-| `datagokr_museums` | data.go.kr-standard | 박물관·미술관 표준 (data.go.kr-standard provider는 짧은 이름과 달리 `datagokr_` prefix 사용) |
+| `datagokr_museums` | data.go.kr-standard | 전국박물관미술관정보표준데이터(15017323) 포털 공개 파일(서비스키 불필요, 2026-11-10). 자연키 `이름::도로명` |
 | `datagokr_parking_lots` | data.go.kr-standard | 전국주차장정보표준데이터(15012896) 포털 공개 파일(서비스키 불필요, 2026-11-10). 자연키 `prkplce_no` |
-| `datagokr_tourist_attractions` | data.go.kr-standard | 관광지 표준 |
+| `datagokr_tourist_attractions` | data.go.kr-standard | 전국관광지정보표준데이터(15021141) 포털 공개 파일(서비스키 불필요, 2026-11-10). 자연키 `이름::도로명` |
 | ~~`datagokr_cultural_festivals`~~ | data.go.kr-standard | 문화축제 표준 — **퇴역 2026-11-10**(migration 449) |
 | `place_phone_enrichment` | kakao-local-api / naver-search-api / google-places-api-new | 전화번호 보강 |
 
@@ -477,7 +477,7 @@ def test_no_provider_wrapper_classes():
 | python-datagokr-api | `services/standard.py`가 pydantic 검증 실패 행을 `except ValidationError: continue`로 **조용히 건너뛰고**, `services/pagination.py`가 종료 조건에서 `reached_known_end`(`total_count <= page_no * num_of_rows`) 논리곱을 지워 `len(items) < num_of_rows`만으로 멈췄다. 두 성질이 겹치면 만재 페이지에서 1행만 실패해도 나머지 데이터셋을 조용히 버린다. | `fd099b2`(PR#16) — 짧은 페이지 종료를 declared total로 조건화했다. total이 없으면 멈추지 않고 빈 페이지를 기다린다(tail에 요청 한 번이 더 붙는 대신 절단이 없다). 기존 `total_pages` 가드는 그대로다. |
 | python-krheritage-api | `services/search.py:iter_pages`가 `page * result.size >= result.total`(권위) → `len(result.items) < page_size`(짧은 페이지 휴리스틱)로 바뀌었다. 결측 key row skip(PR#6)과 겹치면 같은 절단이 된다. | `545a016`(PR#10) — declared total로 끝내되 **행이 아니라 페이지 수**로 센다(`page >= ceil(total/page_size)`). 걸러진 행이 있어도 정확히 끝나므로 행을 세는 것보다 엄밀히 낫다. |
 
-**Map 쪽 우회는 걷지 않는다.** `_iter_datagokr_standard`와 `fetch_krheritage_items`의
+**Map 쪽 우회는 걷지 않는다.** `_iter_datagokr_standard`와 `fetch_krheritage_items`의 (2026-11-11: 표준데이터가 전부 공개 파일·퇴역으로 옮겨 `_iter_datagokr_standard`는 제거했다.)
 `iter_paginated_items` 소진은 그대로 둔다 — 같은 성질을 두 층이 각각 보장하는 것은
 중복이지 모순이 아니고, upstream이 다시 퇴화해도 Map은 서지 않는다.
 

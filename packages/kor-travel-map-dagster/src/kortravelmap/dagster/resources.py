@@ -280,15 +280,13 @@ PROVIDER_RECORD_RESOURCE_SPECS: tuple[ProviderRecordResourceSpec, ...] = (
         resource_key="standard_museums",
         provider_package="python-datagokr-api",
         dataset_key="datagokr_museums",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="전국박물관미술관정보표준데이터(15017323) 포털 공개 파일 — 서비스키 불필요.",
     ),
     ProviderRecordResourceSpec(
         resource_key="standard_tourist_attractions",
         provider_package="python-datagokr-api",
         dataset_key="datagokr_tourist_attractions",
-        setting_names=("data_go_kr_service_key",),
-        source_env_names=("DATA_GO_KR_SERVICE_KEY",),
+        note="전국관광지정보표준데이터(15021141) 포털 공개 파일 — 서비스키 불필요.",
     ),
     ProviderRecordResourceSpec(
         resource_key="standard_parking_lots",
