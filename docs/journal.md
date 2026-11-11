@@ -1,3 +1,17 @@
+## 2026-11-12 — c9 정식 D 전체 runner·cleanup exit0 확정
+
+- exact e3ea216c128c3e7ef5346b17db6d4ec3fd5272a0의 새 production 이미지로
+  정식 D286/286·flake0·skip0·strict inventory 일치를 확인했다.
+- 전체 runner passed/exit0/issues[]이며 독립 exact 조회도 소유 container/network/image 잔존0이다.
+  과거 후보6 cleanup exit2와 c8 unit431/1 원시 로그는 그대로 보존했다.
+- c9 전체 unit432, reporter/cleanup37, lint/type, Doctor324files 진단0, guard/canonical,
+  npm tree/NextSharp/CSS 공개 API 모두 통과했다. 전체 unit은 worker2로 실행했다.
+- 사용5개 artifact·원장·lock은 최신 integration-9-review와 일치한다.
+  UI/tokens installed checker byte 일치도 확인했다. 후속 commit은 문서만 갱신한다.
+- 원시 증거와 프로세스·정리 증거는 taskroot validation/map,
+  최종 인계는 AGENT-HANDOFF-codex-map-weather.md다.
+  부모 중앙 workflow는 보존·제외하고 독립2리뷰/CI/merge/부모 go 뒤 UI 배포한다.
+
 ## 2026-11-12 — c9 정책 검사기와 동일 runtime 산출물 동기화
 
 - integration-9-review의 사용5개 vendor/원장/lock SHA512를 대조했다.

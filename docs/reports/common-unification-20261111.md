@@ -1,30 +1,28 @@
 # 2026-11-11 관리자 공통 UI 통합 기록
 
 
-## 현재 상태 — integration-6-review
+## 현재 상태 — integration-9-review
 
-common source a14301c01a87d7d56e8da5bcf24c0a7f145d05a1,
-지도 source 9a7a348b02d61969b394c681b024d5851eef836b의 검증 후보를 설치했다.
-최종 릴리스 freeze 전이며 아래 candidate5의 실패 기록은 이력이다.
+검증 source는 e3ea216c128c3e7ef5346b17db6d4ec3fd5272a0이다.
+공통 원천2c1182e765bb2bc53e01e0962cf2a73683891e1d의 c9 원장을 사용하고,
+지도9a7a348b02d61969b394c681b024d5851eef836b와 Lightning CSS fix.4 bytes를 유지한다.
+원천·정확 버전·SHA512는 [출처](../third-party-common.md)와 frontend 원장이 정본이다.
 
-- UI0.2.0/tokens0.1.1/web1.0.3/core1.0.1과 원장은 부모와 byte-exact다. RN 미사용.
-- Map wrapper는 설정되지 않은 키에 module const background style을 public mapStyle로 전달한다.
-  style 참조를 재사용해 불필요한 setStyle/도메인 source 재생성을 막는다.
-- 기존 LoginForm 자동완성2건을 포함한 전체 unit427개와 mapStyle 형태6개가 통과했다.
-  lint/type/build33routes/Doctor322files0/AST 원장 guard/npm tree/NextSharp 통과.
-- 별도 marker unit/typecheck, user-client 생성타입·컴파일도 통과했다.
-- npm이 기존 hoisted core1.0.0을 유지해 core1.0.1 registry404가 났다. Map의 해당
-  core/web 설치 디렉터리와 두 lock 항목만 갱신해 명시 file 재설치를 통과했다.
-  force/legacy peer 옵션이나 다른 의존성의 전면 lock 재생성은 사용하지 않았다.
-- 모든 신규 검증 로그는 작업 루트 validation/map에 보존한다. 공유 /tmp 정리는 하지 않는다.
-- exact9d187a61d에서 정식 checkpoint D 브라우저286/286, flake0, manifest 일치를 확인했다.
-  Playwright child exit0이다. runner는 Docker 삭제 지연 때문에 cleanup_container_remaining exit2였다.
-  소유 label·image·revision이 일치하는 container는 removing/PID0이었고,
-  후행 조회에서 해당 container/network/image 잔존0과 worker/runner 종료를 확인했다.
-  원래 runner exit2는 수정하지 않는다. 인프라 gate는 최종 CI에서 재확인해야 한다.
-- 부모 소유 common-frontend-policy.yml은 보존·커밋 제외한다. code5e064808fabd3a54968dd20910eaccd04eba9f38
-  + 최신 main data의 원격 CI는 foundation 병합 뒤 부모가 확인한다. local canonical 검사는 통과했다.
-- 최종 후보 freeze·독립 리뷰 재확인·CI/merge/부모 go 뒤 실제 UI 이미지를 교체한다.
+- UI/tokens/core/web/CSS 사용5개 vendor와 lock·중앙 원장을 대조했다. RN은 미사용이다.
+  c8과 다른 UI/tokens member는 검사기 하나씩뿐이며 runtime/CSS는 동일하다.
+- 명시 npm install exit0 뒤에도 설치된 검사기가 이전 bytes인 사실을 발견했다.
+  본인 preflight/D supervisor만 중단하고 전용 checkout의 해당 두 생성 package만 제거했다.
+  재설치 뒤 실제 installed checker/vendor byte 일치 gate까지 통과했다.
+- n150 c9 전체 unit432/432, reporter/cleanup37/37, lint/type,
+  Doctor full blocking warning324files 진단0, guard/canonical, npm tree/NextSharp/CSS 공개 API 통과.
+- c8 기본 병렬 unit431통과/1실패 로그는 보존했다. 같은 문제 파일11개가 재통과했고,
+  c9 전체는 worker2로 통과했다. 단언·시간 제한·실패/skip 허용은 완화하지 않았다.
+- 정식 D 새 production 이미지 빌드와286/286 PASS, flake0/skip0, strict manifest 일치.
+  전체 runner는 cleanup·사후 조건을 포함해 classification passed/exit0/issues[]다.
+  별도 exact 조회도 소유 container/network/image 잔존0이다. 아래 후보6 exit2는 원시 이력으로 보존한다.
+- 부모 소유 중앙 workflow는 보존·커밋 제외한다. exact 재사용 코드2c1182e765bb2bc53e01e0962cf2a73683891e1d와
+  최신 main data의 원격 CI는 부모가 확인한다.
+- 운영 배포는 독립 리뷰2개·CI·merge·부모 go 뒤 진행한다. 후보는 배포하지 않았다.
 
 ## 범위와 결과
 
@@ -46,9 +44,9 @@ HelpTip도 인스턴스별 Zustand를 사용한다. Pretendard font와 Radix bri
 
 ## 의존성과 CI
 
-현재 산출물은 `integration-6-review` 후보이며 최종 freeze 전이다.
+현재 산출물은 `integration-9-review` 검증 후보이며 최종 통합 상태는 부모 원장이 정본이다.
 [출처와 SHA512](../third-party-common.md), [원장](../../packages/kor-travel-map-admin/frontend/common-artifacts.json)에
-부모와 동일한 4개 tgz의 정보를 기록했다. 이전 vendor는 제거했다.
+부모와 동일한 5개 tgz의 정보를 기록했다. 이전 vendor는 제거했다.
 ESLint 10.14.0 / Doctor 0.9.22 / exact 최신 targets를 적용했다.
 TypeScript 5.9.3은 최신 major의 openapi-typescript/ts-eslint peer 호환 예외이며,
 Node 타입은 runtime 22에 맞춘 22.20.5다. root ajv 8.20.0 직접 개발 의존성은
@@ -212,7 +210,7 @@ cleanup 명령의 대기를30초로 늘렸고 소유권·ID 일치·잔존 검�
 애플리케이션 src·의존성·lock·vendor는7fbfd3cac와 동일하다.
 
 
-## 최종 소스 검증 및 인계
+## 후보6 소스 검증 및 인계 이력
 
 - 소스 검증 기준:9d187a61d464c55713f91979ed0c5f07eea33d2a.
   앱 runtime source/의존성/lock/vendor는 전체unit427개 통과본7fbfd3cac와 동일하다.
@@ -248,3 +246,20 @@ CSS는 frontend와root 직접 개발 의존성이고 root override는 $lightning
 기존 소유 label·정확 ID·이름 확인과 영구 잔존 실패 분류는 유지한다.
 지연 삭제/영구 잔존/조회 실패/예산 초과의 회귀 단위5개를 추가했다.
 실제 c8 설치와 정식286D의 종료코드·정리 gate를 n150에서 재검증한다.
+
+
+## c9 최종 D와 정리 gate
+
+검증 source e3ea216c128c3e7ef5346b17db6d4ec3fd5272a0의 새 production 이미지를 빌드했다.
+n150 정식 D --workers=2에서286개가6.4분에 모두 통과했다.
+strict inventory dc85a2c127f1ddb68fef6ae55dc71a04ddb2005bfeb784c94249aaf535d939a5가 일치하며
+expected/actual failure0, flake0, skip0, global error0이다.
+전체 runner outcome은 passed/exit0/issues[]이고 Playwright child도exit0이다.
+cleanup 뒤 독립 조회에서 정확한 소유 container/network/image가 모두 부재였다.
+
+원시 증거는 작업 루트 validation/map/c9b-e3ea216c128c-checkpoint.log,
+-state.json, -preserved-reporter.json, -owned-runtime-identity.json,
+-independent-postconditions.json과 c9-validation-summary.json에 보존했다.
+본인 worker/runner/observer 종료와 runtime 내부 파일 제거도 별도로 확인한다.
+후속 문서 commit은 출처·검증·인계만 바꾸며 제품/lock/vendor 입력은 검증 source와 동일하게 유지한다.
+부모 중앙 workflow·CI/독립 리뷰·merge·배포 go는 부모가 처리한다.
