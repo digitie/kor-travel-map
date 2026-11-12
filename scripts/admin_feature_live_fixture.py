@@ -39,6 +39,7 @@ from kortravelmap.dto.price import PriceValue
 from kortravelmap.infra import feature_repo, price_repo
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.feature_identity import candidate_feature_uuid
+from kortravelmap.infra.lock_wait import execute_with_lock_wait
 from kortravelmap.infra.manual_feature_purge_repo import (
     PURGE_OPERATION,
     purge_manual_feature,
@@ -51,6 +52,15 @@ _LAT: Final[float] = 36.5
 _E2E_PROVIDER: Final[str] = "e2e-live-acceptance"
 _FIXTURE_SCHEMA_OWNER: Final[str] = "ktm_feature_schema_owner"
 _FIXTURE_PROCEDURE_EXECUTOR: Final[str] = "ktm_manual_feature_procedure_owner"
+#: 쓰기 action이 전역 Feature 쓰기 gate(P EX)를 **처음** 잡을 때 기다리는 상한(ms).
+#: gate 함수는 세션 ``lock_timeout``이 0이면 1초로 바꿔 잡는다 — 큐 적재가 쓰기 단계에서
+#: gate를 쥔 동안이면 helper가 55P03으로 죽는다(2026-11-12 t1112b D2 ``purge-failed``).
+#: provider 적재와 같은 ``execute_with_lock_wait``로 그 한 문장만 늘린다. 무한은 아니다 —
+#: 이보다 오래 쥐는 적재 뒤에서는 종전처럼 실패하고 lane이 BLOCKED로 남는다.
+_FEATURE_WRITE_GATE_WAIT_MS: Final[int] = 600_000
+_ACQUIRE_FEATURE_WRITE_GATE_SQL: Final[str] = (
+    "SELECT ops.lock_scoped_feature_write_protocol(true)"
+)
 _FIXTURE_CONFIRM_DATABASE_ENV: Final[str] = (
     "E2E_ADMIN_FEATURE_FIXTURE_CONFIRM_DATABASE"
 )
@@ -681,10 +691,22 @@ async def _assert_owned_state(
     return counts, foreign_keys
 
 
+async def _acquire_feature_write_gate(session: AsyncSession, action: str) -> None:
+    """이 transaction의 첫 gate 획득을 긴 대기로 한다. 뒤의 procedure 획득은 재진입이다."""
+
+    await execute_with_lock_wait(
+        session,
+        _ACQUIRE_FEATURE_WRITE_GATE_SQL,
+        _FEATURE_WRITE_GATE_WAIT_MS,
+        label=f"D2 fixture {action}의 Feature 쓰기 gate",
+    )
+
+
 async def _seed(
     session: AsyncSession,
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int], tuple[int]]:
+    await _acquire_feature_write_gate(session, "seed")
     before = await _counts(session, await _owned_feature_ids(session, run_id))
     if before != {"features": 0, "price_values": 0}:
         raise RuntimeError("owned fixture ID가 이미 존재합니다; recovery를 먼저 실행하세요")
@@ -871,6 +893,7 @@ async def _cleanup(
     session: AsyncSession,
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int]]:
+    await _acquire_feature_write_gate(session, "cleanup")
     feature_ids = await _owned_feature_ids(session, run_id)
     # Parent FOR UPDATE는 concurrent FK insert의 KEY SHARE와 충돌한다. 기존 child도
     # FOR UPDATE한 같은 transaction 안에서 fingerprint/FK audit/delete를 끝낸다.
@@ -1329,6 +1352,7 @@ async def _purge_api_owned(
     session: AsyncSession,
     run_id: str,
 ) -> tuple[dict[str, int], dict[str, int], dict[str, int], int]:
+    await _acquire_feature_write_gate(session, "purge")
     inspection = await _inspect_api_owned(session, run_id)
     # ``ops.feature_overrides``/``feature.feature_aliases``/subtype은 모두
     # ON DELETE CASCADE라 Feature 삭제 한 번으로 사라진다. 0104 이전에 필요했던
