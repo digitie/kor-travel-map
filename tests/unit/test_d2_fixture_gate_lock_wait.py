@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib.util
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable, Coroutine
 from pathlib import Path
 from types import ModuleType
 from typing import Any
@@ -62,7 +62,7 @@ class _NoDbBeforeGate:
         raise AssertionError("gate를 잡기 전에 DB 문장을 실행했다")
 
 
-_ACTIONS: dict[str, Callable[[Any, str], Awaitable[Any]]] = {
+_ACTIONS: dict[str, Callable[[Any, str], Coroutine[Any, Any, Any]]] = {
     "seed": fixture._seed,
     "cleanup": fixture._cleanup,
     "purge": fixture._purge_api_owned,
