@@ -482,7 +482,9 @@ async def test_fold_prefers_non_mcst_when_both_rows_are_specific(
 ) -> None:
     """둘 다 하위 분류가 있어도 MCST 목록 행(레저 01080400)보다 MOIS 숙박 행이 대표다."""
     mois_id = await _feature(
-        migrated_session, "leisure_mois", name="한강접기리조트", category="03020000",
+        # 끝 괄호만 다른 같은 접기 키 — 순위로는 MCST 행(이름 전체 일치)이 앞이라 원천 규칙만이
+        # MOIS 행을 대표로 만든다.
+        migrated_session, "leisure_mois", name="한강접기리조트(본관)", category="03020000",
         region=_YONGSAN, lon=126.9900, lat=37.5300, provider=_MOIS,
     )
     mcst_id = await _feature(
