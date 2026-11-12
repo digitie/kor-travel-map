@@ -2179,6 +2179,8 @@ if not all(p.isdigit() and len(p) == 4 for p in _SEARCH_DEDUP_EXTRA_PREFIXES):
 _SEARCH_DEDUP_EXTRA_PREFIXES_SQL: Final[str] = ", ".join(
     f"'{prefix}'" for prefix in _SEARCH_DEDUP_EXTRA_PREFIXES
 )
+#: 공항 무리 반경(m) — 같은 이름 공항 행에서 이 안의 같은 이름 행을 한 무리로 본다.
+_SEARCH_DEDUP_AIRPORT_RADIUS_M: Final[int] = 5_000
 #: 접기 키에서 떼는 끝 괄호(반각·전각) — "신륵사(여주)"와 "신륵사"는 같은 키다(거리로 가른다).
 _SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
 #: 접기 대표에서 뒤로 미는 원천 — MCST 목록(촬영지·반려동물·무장애 …)은 분류를 Tier 1만 주거나
@@ -2517,16 +2519,36 @@ dedup_clusters AS (
         category,
         search_rank,
         score,
+        coord_5179,
         x_extension.ST_ClusterDBSCAN(coord_5179, {_SEARCH_DEDUP_RADIUS_M}, 1)
-          OVER (PARTITION BY dedup_key) AS dedup_cluster
+          OVER (PARTITION BY dedup_key) AS dbscan_cluster,
+        -- 공항(``_SEARCH_DEDUP_EXTRA_PREFIXES``)은 부지가 넓다 — 같은 이름 촬영지 행이 2 km 넘게
+        -- 떨어진다(prod 인천 2,209 m·제주 613 m). 같은 이름의 공항 행이 있으면 그 공항
+        -- ``_SEARCH_DEDUP_AIRPORT_RADIUS_M`` 안의 행을 한 무리로 본다.
+        max(CASE WHEN left(category, 4) IN ({_SEARCH_DEDUP_EXTRA_PREFIXES_SQL})
+                 THEN x_extension.ST_X(coord_5179) END) OVER (PARTITION BY dedup_key) AS airport_x,
+        max(CASE WHEN left(category, 4) IN ({_SEARCH_DEDUP_EXTRA_PREFIXES_SQL})
+                 THEN x_extension.ST_Y(coord_5179) END) OVER (PARTITION BY dedup_key) AS airport_y
     FROM scored
     WHERE dedup_key IS NOT NULL
 ),
 dedup_sized AS (
     SELECT
-        dedup_clusters.*,
+        clustered.*,
         count(*) OVER (PARTITION BY dedup_key, dedup_cluster) AS dedup_size
-    FROM dedup_clusters
+    FROM (
+        SELECT
+            feature_id, dedup_key, category, search_rank, score,
+            CASE
+              WHEN airport_x IS NOT NULL AND x_extension.ST_DWithin(
+                coord_5179,
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(airport_x, airport_y), 5179),
+                {_SEARCH_DEDUP_AIRPORT_RADIUS_M}
+              ) THEN -1
+              ELSE dbscan_cluster
+            END AS dedup_cluster
+        FROM dedup_clusters
+    ) AS clustered
 ),
 -- 대표 선택(2026-11-12 회귀 수정): 무리 안에서 **MCST 목록이 primary 원천이 아닌 행**이 대표다.
 -- 그 뒤로는 정렬 순서다(같은 그룹 안에서는 rank의 분류 구체성 자리가 하위 분류 행을 앞에 둔다).

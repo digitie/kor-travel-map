@@ -624,11 +624,18 @@ async def test_mcst_airport_duplicate_folds_into_the_airport(
     )
     famous = await _feature(
         migrated_session, "air_famous", name="접기국제공항", category="01000000",
-        region=_YONGSAN, lon=126.4410, lat=37.4605, provider=_MCST_FAMOUS,
+        region=_YONGSAN, lon=126.4410, lat=37.4605 + 2200 * _M, provider=_MCST_FAMOUS,
+    )
+    # 공항 부지는 넓다 — prod 인천국제공항의 촬영지 행은 2,209 m 떨어져 있다. 6 km 밖의 같은 이름은
+    # 다른 곳이다.
+    far = await _feature(
+        migrated_session, "air_far", name="접기국제공항", category="01000000",
+        region=_YONGSAN, lon=126.4410, lat=37.4605 + 6000 * _M, provider=_MCST_FAMOUS,
     )
     await migrated_session.flush()
     page = await _page(migrated_session, "접기국제공항", kinds=["place"], page_size=200)
     seen = {item.feature_id for item in page.items}
     assert airport in seen
     assert famous not in seen
+    assert far in seen
 
