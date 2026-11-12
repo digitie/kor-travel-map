@@ -611,3 +611,24 @@ async def test_migration_452_lotte_hotel_alias_finds_the_licensed_hotel(
     rank = page.items[ids.index(lodging)].rank
     assert rank is not None
     assert rank < feature_repo._SEARCH_RANK_MATCH_WEIGHT, rank
+
+
+async def test_mcst_airport_duplicate_folds_into_the_airport(
+    migrated_session: AsyncSession,
+) -> None:
+    """MCST 촬영지의 "인천국제공항"(관광 01000000)은 공항(06050000)으로 접힌다 — 공항이 대표다."""
+    airport = await _feature(
+        migrated_session, "air_airport", name="접기국제공항", category="06050000",
+        region=_YONGSAN, lon=126.4407, lat=37.4602,
+        provider=("kor-travel-transport", "transport_airports"),
+    )
+    famous = await _feature(
+        migrated_session, "air_famous", name="접기국제공항", category="01000000",
+        region=_YONGSAN, lon=126.4410, lat=37.4605, provider=_MCST_FAMOUS,
+    )
+    await migrated_session.flush()
+    page = await _page(migrated_session, "접기국제공항", kinds=["place"], page_size=200)
+    seen = {item.feature_id for item in page.items}
+    assert airport in seen
+    assert famous not in seen
+

@@ -2170,6 +2170,15 @@ if not all(code.isdigit() and len(code) == 2 for code in _SEARCH_DEDUP_TIER1_COD
 _SEARCH_DEDUP_TIER1_CODES_SQL: Final[str] = ", ".join(
     f"'{code}'" for code in _SEARCH_DEDUP_TIER1_CODES
 )
+#: 교통 가운데 접는 분류 접두 — 공항(0605)은 이름이 유일한 시설이라 같은 이름 가까이의 다른
+#: 시설이 없다. MCST 촬영지가 "김포국제공항"·"인천국제공항"을 관광(01000000)으로 따로 실어
+#: 공항 자체보다 앞섰다(2026-11-12 평가). 역(같은 이름 지하철·기차역)·휴게소(상·하행)는 접지 않는다.
+_SEARCH_DEDUP_EXTRA_PREFIXES: Final[tuple[str, ...]] = ("0605",)
+if not all(p.isdigit() and len(p) == 4 for p in _SEARCH_DEDUP_EXTRA_PREFIXES):
+    raise RuntimeError("dedup extra prefixes must be 4-digit category prefixes")
+_SEARCH_DEDUP_EXTRA_PREFIXES_SQL: Final[str] = ", ".join(
+    f"'{prefix}'" for prefix in _SEARCH_DEDUP_EXTRA_PREFIXES
+)
 #: 접기 키에서 떼는 끝 괄호(반각·전각) — "신륵사(여주)"와 "신륵사"는 같은 키다(거리로 가른다).
 _SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
 #: 접기 대표에서 뒤로 미는 원천 — MCST 목록(촬영지·반려동물·무장애 …)은 분류를 Tier 1만 주거나
@@ -2442,7 +2451,8 @@ scored AS (
         -- 괄호로 끝날 때만 돈다.
         CASE
           WHEN kind = 'place' AND coord_5179 IS NOT NULL
-            AND left(category, 2) IN ({_SEARCH_DEDUP_TIER1_CODES_SQL})
+            AND (left(category, 2) IN ({_SEARCH_DEDUP_TIER1_CODES_SQL})
+              OR left(category, 4) IN ({_SEARCH_DEDUP_EXTRA_PREFIXES_SQL}))
           THEN CASE
             WHEN right(compact_name, 1) IN (')', '）')
             THEN regexp_replace(compact_name, '{_SEARCH_DEDUP_TRAILING_BRACKET}', '')
