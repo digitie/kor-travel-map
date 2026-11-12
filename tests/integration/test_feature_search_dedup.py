@@ -52,6 +52,7 @@ async def _feature(
     lon: float,
     lat: float,
     kind: str = "place",
+    provider: tuple[str, str] | None = None,
 ) -> str:
     feature_id = _uuid(label)
     sigungu_code, sido_name, sigungu_name = region
@@ -90,7 +91,65 @@ async def _feature(
         },
     )
     await seed_feature_subtype(session, feature_id=feature_id, kind=kind)
+    if provider is not None:
+        await _primary_link(session, feature_id, label, provider)
     return feature_id
+
+
+async def _primary_link(
+    session: AsyncSession, feature_id: str, label: str, provider: tuple[str, str]
+) -> None:
+    """Feature에 ``primary`` source link 하나 — 접기 대표의 원천 판정용."""
+    dataset_id = (
+        await session.execute(
+            text(
+                """
+                INSERT INTO provider_sync.provider_datasets (
+                    provider, dataset_key, display_name, source_kind, is_active, capabilities
+                )
+                SELECT :provider, :dataset_key, :provider, 'system', true,
+                       jsonb_build_object('schema_version', 1,
+                                          'produces', '[]'::jsonb,
+                                          'extensions', '{}'::jsonb)
+                ON CONFLICT (provider, dataset_key) DO UPDATE
+                    SET display_name = EXCLUDED.display_name
+                RETURNING provider_dataset_id
+                """
+            ),
+            {"provider": provider[0], "dataset_key": provider[1]},
+        )
+    ).scalar_one()
+    entity_key = f"search-dedup-{label}"
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_entities (
+                source_entity_key, provider_dataset_id, source_entity_type,
+                source_entity_id, first_seen_at, last_seen_at
+            )
+            VALUES (:key, :dataset_id, 'place', :key, now(), now())
+            """
+        ),
+        {"key": entity_key, "dataset_id": dataset_id},
+    )
+    await session.execute(
+        text(
+            """
+            INSERT INTO provider_sync.source_links (
+                feature_id, source_entity_key, source_role, match_method, confidence
+            )
+            VALUES (CAST(:feature_id AS uuid), :key, 'primary', 'exact', 100)
+            """
+        ),
+        {"feature_id": feature_id, "key": entity_key},
+    )
+
+
+_MOIS = ("python-mois-api", "mois_license_features_bulk")
+_MCST_FAMOUS = ("python-mcst-api", "mcst_media_famous_places_csv")
+_MCST_LEISURE = ("python-mcst-api", "mcst_leisure_activity_facilities_csv")
+_SEOCHO = ("11650", "서울특별시", "서초구")
+_YONGSAN = ("11170", "서울특별시", "용산구")
 
 
 async def _seed(session: AsyncSession) -> dict[str, str]:
@@ -370,3 +429,125 @@ async def test_search_turns_jit_off_for_its_transaction(migrated_session: AsyncS
     await migrated_session.execute(text("SET LOCAL jit = on"))
     await _page(migrated_session, "신륵사접기관광지", page_size=8)
     assert (await migrated_session.execute(text("SHOW jit"))).scalar_one() == "off"
+
+
+async def test_fold_representative_is_the_specific_non_mcst_row(
+    migrated_session: AsyncSession,
+) -> None:
+    """prod 2026-11-12 회귀: MOIS 숙박 행(03010100)이 같은 자리 MCST 촬영지 행(01000000)에 접혀
+    "JW 메리어트 서울"·"그랜드 하얏트 서울"이 관광지로 보였다. 대표는 구체 분류·비MCST
+    행이고, 무리의 가장 좋은 자리를 물려받는다."""
+    pairs = {
+        "jw": (
+            ("JW메리어트호텔접기서울", "03010100", _MOIS, 127.00362, 37.50436, _SEOCHO),
+            ("JW 메리어트 호텔접기 서울", "01000000", _MCST_FAMOUS, 127.00360, 37.50434, _SEOCHO),
+        ),
+        "hyatt": (
+            ("그랜드하얏트접기서울", "03010100", _MOIS, 126.99781, 37.53954, _YONGSAN),
+            ("그랜드하얏트접기 서울", "01000000", _MCST_FAMOUS, 126.99715, 37.53935, _YONGSAN),
+        ),
+    }
+    for key, (mois, mcst) in pairs.items():
+        mois_id = await _feature(
+            migrated_session, f"{key}_mois", name=mois[0], category=mois[1],
+            region=mois[5], lon=mois[3], lat=mois[4], provider=mois[2],
+        )
+        mcst_id = await _feature(
+            migrated_session, f"{key}_mcst", name=mcst[0], category=mcst[1],
+            region=mcst[5], lon=mcst[3], lat=mcst[4], provider=mcst[2],
+        )
+        await migrated_session.flush()
+        q = mcst[0]
+        page = await _page(migrated_session, q, kinds=["place"], page_size=200)
+        by_id = {item.feature_id: item for item in page.items}
+        assert mois_id in by_id, (key, [i.name for i in page.items])
+        assert mcst_id not in by_id, key
+        assert by_id[mois_id].category == "03010100"
+        # 대표는 무리의 가장 좋은 자리를 받는다 — MCST 행 혼자일 때(관광 그룹 0)와 같은 자리다.
+        hidden_alone = await _page(
+            migrated_session, q, kinds=["place"], categories=["01000000"], page_size=200
+        )
+        alone_rank = {item.feature_id: item.rank for item in hidden_alone.items}[mcst_id]
+        assert by_id[mois_id].rank == alone_rank, (key, by_id[mois_id].rank, alone_rank)
+
+
+async def test_fold_prefers_non_mcst_when_both_rows_are_specific(
+    migrated_session: AsyncSession,
+) -> None:
+    """둘 다 하위 분류가 있어도 MCST 목록 행(레저 01080400)보다 MOIS 숙박 행이 대표다."""
+    mois_id = await _feature(
+        migrated_session, "leisure_mois", name="한강접기리조트", category="03020000",
+        region=_YONGSAN, lon=126.9900, lat=37.5300, provider=_MOIS,
+    )
+    mcst_id = await _feature(
+        migrated_session, "leisure_mcst", name="한강접기 리조트", category="01080400",
+        region=_YONGSAN, lon=126.9901, lat=37.5300, provider=_MCST_LEISURE,
+    )
+    await migrated_session.flush()
+    page = await _page(migrated_session, "한강접기리조트", kinds=["place"], page_size=200)
+    seen = {item.feature_id for item in page.items}
+    assert mois_id in seen
+    assert mcst_id not in seen
+
+
+async def test_fold_with_representative_override_keeps_keyset_and_total(
+    migrated_session: AsyncSession,
+) -> None:
+    """대표가 물려받은 자리로도 page_size 1 걷기 = 한 페이지, 개수 일치."""
+    for key, name, category, provider, lon in (
+        ("ks_mois", "키셋접기호텔서울", "03010100", _MOIS, 127.0100),
+        ("ks_mcst", "키셋접기호텔 서울", "01000000", _MCST_FAMOUS, 127.0101),
+        ("ks_other", "키셋접기호텔서울 별관", "03010100", _MOIS, 127.0300),
+    ):
+        await _feature(
+            migrated_session, key, name=name, category=category, region=_SEOCHO,
+            lon=lon, lat=37.5000, provider=provider,
+        )
+    await migrated_session.flush()
+    q = "키셋접기호텔서울"
+    expected = [item.feature_id for item in (await _page(migrated_session, q, page_size=200)).items]
+    walked: list[str] = []
+    cursor: str | None = None
+    for _ in range(len(expected) + 1):
+        page = await _page(migrated_session, q, page_size=1, cursor=cursor)
+        walked.extend(item.feature_id for item in page.items)
+        cursor = page.next_cursor
+        if cursor is None:
+            break
+    assert walked == expected
+    total = await _page(migrated_session, q, page_size=1, include_total=True)
+    assert total.total_count == len(expected)
+
+
+async def test_migration_452_lotte_hotel_alias_finds_the_licensed_hotel(
+    migrated_session: AsyncSession,
+) -> None:
+    """452: "롯데호텔 서울" → MOIS 상호 "호텔롯데".
+
+    같은 자리의 숙박·식음 두 행은 숙박 하나로 접힌다.
+    """
+    alias = (
+        await migrated_session.execute(
+            text(
+                "SELECT canonical_name FROM feature.feature_search_aliases "
+                "WHERE alias = '롯데호텔서울'"
+            )
+        )
+    ).scalar_one_or_none()
+    assert alias == "호텔롯데"
+    lodging = await _feature(
+        migrated_session, "lotte_lodging", name="호텔롯데", category="03010100",
+        region=_SEOCHO, lon=126.98109, lat=37.56481, provider=_MOIS,
+    )
+    food = await _feature(
+        migrated_session, "lotte_food", name="호텔롯데", category="02010100",
+        region=_SEOCHO, lon=126.98109, lat=37.56481, provider=_MOIS,
+    )
+    await migrated_session.flush()
+    page = await _page(migrated_session, "롯데호텔 서울", kinds=["place"], page_size=200)
+    ids = [item.feature_id for item in page.items]
+    assert lodging in ids
+    assert food not in ids
+    rank = page.items[ids.index(lodging)].rank
+    assert rank is not None
+    assert rank < feature_repo._SEARCH_RANK_MATCH_WEIGHT, rank

@@ -2172,6 +2172,11 @@ _SEARCH_DEDUP_TIER1_CODES_SQL: Final[str] = ", ".join(
 )
 #: 접기 키에서 떼는 끝 괄호(반각·전각) — "신륵사(여주)"와 "신륵사"는 같은 키다(거리로 가른다).
 _SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
+#: 접기 대표에서 뒤로 미는 원천 — MCST 목록(촬영지·반려동물·무장애 …)은 분류를 Tier 1만 주거나
+#: 장소 유형과 다른 분류로 싣는다. 같은 장소의 다른 원천 행이 대표다.
+_SEARCH_DEDUP_DEMOTED_PROVIDER: Final[str] = "python-mcst-api"
+if not _SEARCH_DEDUP_DEMOTED_PROVIDER.replace("-", "").isalnum():  # pragma: no cover
+    raise RuntimeError("demoted provider must be a plain SQL literal")
 
 # 별칭의 정확 이름 및 trigram 후보는 기존 idx_features_name_trgm을 사용한다.
 # 별칭 trigram 팔은 원래 이름의 공백 정규화 일치로 좁힌다. 임의의 글자 사이 공백까지
@@ -2499,6 +2504,7 @@ dedup_clusters AS (
     SELECT
         feature_id,
         dedup_key,
+        category,
         search_rank,
         score,
         x_extension.ST_ClusterDBSCAN(coord_5179, {_SEARCH_DEDUP_RADIUS_M}, 1)
@@ -2506,25 +2512,56 @@ dedup_clusters AS (
     FROM scored
     WHERE dedup_key IS NOT NULL
 ),
-dedup_hidden AS (
-    SELECT feature_id
-    FROM (
-        SELECT
-            feature_id,
-            row_number() OVER (
-                PARTITION BY dedup_key, dedup_cluster
-                ORDER BY search_rank ASC, score DESC, feature_id ASC
-            ) AS dedup_position
-        FROM dedup_clusters
-    ) AS ordered
-    WHERE dedup_position > 1
+dedup_sized AS (
+    SELECT
+        dedup_clusters.*,
+        count(*) OVER (PARTITION BY dedup_key, dedup_cluster) AS dedup_size
+    FROM dedup_clusters
+),
+-- 대표 선택(2026-11-12 회귀 수정): 무리 안에서 **분류가 구체적인 행**(하위 분류가 있는 코드가
+-- Tier 1만인 ``XX000000``보다), 그다음 **MCST 목록이 아닌 원천**이 대표다. 그 뒤로 정렬 순서다.
+-- "JW 메리어트 서울"의 MOIS 숙박 행(03010100)이 MCST 촬영지 행(01000000, 관광 그룹)에 접혀 호텔이
+-- 관광지로 보이던 것을 막는다. 대표는 무리에서 가장 좋은 자리(최소 rank·최대 score)를 물려받는다
+-- — 접어도 그 장소의 자리는 내려가지 않는다. 원천 조회는 둘 이상인 무리의 행에만 한다. R4(MCST
+-- 행이 MOIS 마스터에 붙어 퇴역) 뒤에는 무리가 줄 뿐 규칙은 같다.
+dedup_ordered AS (
+    SELECT
+        feature_id,
+        dedup_size,
+        min(search_rank) OVER cluster AS cluster_rank,
+        max(score) OVER cluster AS cluster_score,
+        row_number() OVER (
+            PARTITION BY dedup_key, dedup_cluster
+            ORDER BY
+                CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END ASC,
+                CASE
+                  WHEN dedup_size > 1 AND EXISTS (
+                    SELECT 1
+                    FROM provider_sync.source_links AS sl
+                    JOIN provider_sync.source_entities AS se
+                      ON se.source_entity_key = sl.source_entity_key
+                    JOIN provider_sync.provider_datasets AS pd
+                      ON pd.provider_dataset_id = se.provider_dataset_id
+                    WHERE sl.feature_id = dedup_sized.feature_id
+                      AND sl.source_role = 'primary'
+                      AND pd.provider = '{_SEARCH_DEDUP_DEMOTED_PROVIDER}'
+                  ) THEN 1
+                  ELSE 0
+                END ASC,
+                search_rank ASC, score DESC, feature_id ASC
+        ) AS dedup_position
+    FROM dedup_sized
+    WINDOW cluster AS (PARTITION BY dedup_key, dedup_cluster)
 ),
 candidates AS (
     SELECT
         s.feature_id, s.feature_uuid, s.kind, s.name, s.category, s.lon, s.lat,
-        s.marker_icon, s.marker_color, s.score, s.search_rank
+        s.marker_icon, s.marker_color,
+        COALESCE(d.cluster_score, s.score) AS score,
+        COALESCE(d.cluster_rank, s.search_rank) AS search_rank
     FROM scored AS s
-    WHERE NOT EXISTS (SELECT 1 FROM dedup_hidden AS h WHERE h.feature_id = s.feature_id)
+    LEFT JOIN dedup_ordered AS d ON d.feature_id = s.feature_id
+    WHERE d.feature_id IS NULL OR d.dedup_position = 1
 )
 """
 
@@ -7156,7 +7193,8 @@ _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v6: 분류 낱말 나머지의 tail 일치 제거·낱말 덮기(2026-11-11)로 지역 검색 ``rank``가 바뀌었다.
 #: v7: 실효 검색 그룹(이름 끝말)·중복 접기(2026-11-11)로 ``rank``와 보이는 행 집합이 바뀌었다.
 #: v8: 검색 인지도(P6)가 순위 마지막 자리로 들어와 ``rank`` 값의 자리 배치가 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 8
+#: v9: 접기 대표가 무리의 가장 좋은 자리를 물려받아 보이는 행의 ``rank``가 바뀌었다(2026-11-12).
+_SEARCH_CURSOR_VERSION: Final[int] = 9
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 

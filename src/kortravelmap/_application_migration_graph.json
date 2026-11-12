@@ -291,6 +291,12 @@
         "450_incheon_airport_search_alias"
       ],
       "revision": "451_feature_search_prominence"
+    },
+    {
+      "down_revision": [
+        "451_feature_search_prominence"
+      ],
+      "revision": "452_lotte_hotel_search_alias"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"
