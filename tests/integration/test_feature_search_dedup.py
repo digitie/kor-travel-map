@@ -97,9 +97,14 @@ async def _feature(
 
 
 async def _primary_link(
-    session: AsyncSession, feature_id: str, label: str, provider: tuple[str, str]
+    session: AsyncSession,
+    feature_id: str,
+    label: str,
+    provider: tuple[str, str],
+    *,
+    role: str = "primary",
 ) -> None:
-    """Feature에 ``primary`` source link 하나 — 접기 대표의 원천 판정용."""
+    """Feature에 source link 하나(기본 ``primary``) — 접기 대표의 원천 판정용."""
     dataset_id = (
         await session.execute(
             text(
@@ -119,7 +124,7 @@ async def _primary_link(
             {"provider": provider[0], "dataset_key": provider[1]},
         )
     ).scalar_one()
-    entity_key = f"search-dedup-{label}"
+    entity_key = f"search-dedup-{label}-{role}"
     await session.execute(
         text(
             """
@@ -138,10 +143,10 @@ async def _primary_link(
             INSERT INTO provider_sync.source_links (
                 feature_id, source_entity_key, source_role, match_method, confidence
             )
-            VALUES (CAST(:feature_id AS uuid), :key, 'primary', 'exact', 100)
+            VALUES (CAST(:feature_id AS uuid), :key, :role, 'exact', 100)
             """
         ),
-        {"feature_id": feature_id, "key": entity_key},
+        {"feature_id": feature_id, "key": entity_key, "role": role},
     )
 
 
@@ -150,6 +155,7 @@ _MCST_FAMOUS = ("python-mcst-api", "mcst_media_famous_places_csv")
 _MCST_LEISURE = ("python-mcst-api", "mcst_leisure_activity_facilities_csv")
 _SEOCHO = ("11650", "서울특별시", "서초구")
 _YONGSAN = ("11170", "서울특별시", "용산구")
+_SEOUL_JUNG = ("11140", "서울특별시", "중구")
 
 
 async def _seed(session: AsyncSession) -> dict[str, str]:
@@ -517,6 +523,60 @@ async def test_fold_with_representative_override_keeps_keyset_and_total(
     assert walked == expected
     total = await _page(migrated_session, q, page_size=1, include_total=True)
     assert total.total_count == len(expected)
+    # 대표(MOIS 숙박)는 숨긴 MCST 행의 더 좋은 자리(관광 그룹)를 물려받아 별관보다 앞이다.
+    full = await _page(migrated_session, q, page_size=200)
+    by_id = {item.feature_id: item for item in full.items}
+    mois, annex = _uuid("ks_mois"), _uuid("ks_other")
+    assert _uuid("ks_mcst") not in by_id
+    rank_mois, rank_annex = by_id[mois].rank, by_id[annex].rank
+    assert rank_mois is not None
+    assert rank_annex is not None
+    assert rank_mois < rank_annex, (rank_mois, rank_annex)
+    assert expected.index(mois) < expected.index(annex)
+
+
+async def test_fold_keeps_a_non_mcst_tourism_row_over_a_same_name_restaurant(
+    migrated_session: AsyncSession,
+) -> None:
+    """비MCST 관광 행(Tier 1만)과 같은 이름 MOIS 식당이 접히면 관광 행이 대표다(분류 구체성이
+    그룹보다 앞서지 않는다)."""
+    tour = await _feature(
+        migrated_session, "tour_gen", name="접기관광명소", category="01000000",
+        region=_YONGSAN, lon=126.9800, lat=37.5300,
+        provider=("data.go.kr-standard", "datagokr_tourist_attractions"),
+    )
+    food = await _feature(
+        migrated_session, "tour_food", name="접기관광명소", category="02010100",
+        region=_YONGSAN, lon=126.9801, lat=37.5300, provider=_MOIS,
+    )
+    await migrated_session.flush()
+    page = await _page(migrated_session, "접기관광명소", kinds=["place"], page_size=200)
+    seen = {item.feature_id for item in page.items}
+    assert tour in seen
+    assert food not in seen
+
+
+async def test_mcst_enrichment_link_does_not_demote_the_master(
+    migrated_session: AsyncSession,
+) -> None:
+    """R4 뒤 모양: MCST가 MOIS 마스터의 enrichment로 붙어 있어도 마스터가 대표다.
+
+    남은 MCST primary 행은 접힌다.
+    """
+    master = await _feature(
+        migrated_session, "r4_master", name="R4접기호텔", category="03010100",
+        region=_SEOCHO, lon=127.0200, lat=37.4900, provider=_MOIS,
+    )
+    await _primary_link(migrated_session, master, "r4_master", _MCST_FAMOUS, role="enrichment")
+    leftover = await _feature(
+        migrated_session, "r4_leftover", name="R4접기 호텔", category="01000000",
+        region=_SEOCHO, lon=127.0201, lat=37.4900, provider=_MCST_FAMOUS,
+    )
+    await migrated_session.flush()
+    page = await _page(migrated_session, "R4접기호텔", kinds=["place"], page_size=200)
+    seen = {item.feature_id for item in page.items}
+    assert master in seen
+    assert leftover not in seen
 
 
 async def test_migration_452_lotte_hotel_alias_finds_the_licensed_hotel(
@@ -537,11 +597,11 @@ async def test_migration_452_lotte_hotel_alias_finds_the_licensed_hotel(
     assert alias == "호텔롯데"
     lodging = await _feature(
         migrated_session, "lotte_lodging", name="호텔롯데", category="03010100",
-        region=_SEOCHO, lon=126.98109, lat=37.56481, provider=_MOIS,
+        region=_SEOUL_JUNG, lon=126.98109, lat=37.56481, provider=_MOIS,
     )
     food = await _feature(
         migrated_session, "lotte_food", name="호텔롯데", category="02010100",
-        region=_SEOCHO, lon=126.98109, lat=37.56481, provider=_MOIS,
+        region=_SEOUL_JUNG, lon=126.98109, lat=37.56481, provider=_MOIS,
     )
     await migrated_session.flush()
     page = await _page(migrated_session, "롯데호텔 서울", kinds=["place"], page_size=200)

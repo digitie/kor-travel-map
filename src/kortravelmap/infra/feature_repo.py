@@ -2518,12 +2518,14 @@ dedup_sized AS (
         count(*) OVER (PARTITION BY dedup_key, dedup_cluster) AS dedup_size
     FROM dedup_clusters
 ),
--- 대표 선택(2026-11-12 회귀 수정): 무리 안에서 **분류가 구체적인 행**(하위 분류가 있는 코드가
--- Tier 1만인 ``XX000000``보다), 그다음 **MCST 목록이 아닌 원천**이 대표다. 그 뒤로 정렬 순서다.
--- "JW 메리어트 서울"의 MOIS 숙박 행(03010100)이 MCST 촬영지 행(01000000, 관광 그룹)에 접혀 호텔이
--- 관광지로 보이던 것을 막는다. 대표는 무리에서 가장 좋은 자리(최소 rank·최대 score)를 물려받는다
--- — 접어도 그 장소의 자리는 내려가지 않는다. 원천 조회는 둘 이상인 무리의 행에만 한다. R4(MCST
--- 행이 MOIS 마스터에 붙어 퇴역) 뒤에는 무리가 줄 뿐 규칙은 같다.
+-- 대표 선택(2026-11-12 회귀 수정): 무리 안에서 **MCST 목록이 primary 원천이 아닌 행**이 대표다.
+-- 그 뒤로는 정렬 순서다(같은 그룹 안에서는 rank의 분류 구체성 자리가 하위 분류 행을 앞에 둔다).
+-- "JW 메리어트 서울"의 MOIS 숙박 행(03010100)이 MCST 촬영지 행(01000000, 관광 그룹 0)에 접혀 호텔이
+-- 관광지로 보이던 것을 막는다. 분류 구체성을 그룹보다 앞에 두지 않는 이유: 비MCST 관광 행
+-- (01000000)이 같은 이름의 MOIS 식당과 접히면 관광지가 식당으로 보인다(적대 리뷰). 대표는 무리의
+-- 가장 좋은 자리(최소 rank·최대 score)를 물려받는다 — 접어도 그 장소의 자리는 내려가지 않는다.
+-- 원천 조회는 둘 이상인 무리의 행에만 한다. R4 뒤 MCST가 MOIS 마스터의 enrichment로 붙으면 그
+-- 마스터는 primary가 MOIS라 뒤로 밀리지 않는다.
 dedup_ordered AS (
     SELECT
         feature_id,
@@ -2533,7 +2535,6 @@ dedup_ordered AS (
         row_number() OVER (
             PARTITION BY dedup_key, dedup_cluster
             ORDER BY
-                CASE WHEN substr(category, 3) = '000000' THEN 1 ELSE 0 END ASC,
                 CASE
                   WHEN dedup_size > 1 AND EXISTS (
                     SELECT 1
