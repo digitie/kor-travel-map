@@ -1,3 +1,11 @@
+## 2026-11-12 — D2 fixture가 Feature 쓰기 gate를 긴 대기로 먼저 잡는다
+
+- t1112b(Map aa38c30a) D2는 spec 2/2 통과 뒤 helper `purge`가 55P03(lock timeout)으로 죽어 `purge-failed` BLOCKED.
+  gate 함수가 세션 `lock_timeout` 0을 1초로 바꿔 잡는데, 같은 시각 큐 적재(krforest 산사태 notice)가 쓰기 단계에서 gate를 쥐고 있었다.
+  UI(#1496)·검색(#1481) 회귀 아님. lane은 runbook §6 `recover`(identity 일치)로 정리(잔여 TVN36 1건 purge), D2 재실행 GREEN.
+- 고침: fixture `seed`·`cleanup`·`purge`가 DB를 건드리기 전에 `execute_with_lock_wait`로 gate를 600초 상한으로 먼저 잡는다.
+  뒤의 procedure 획득은 같은 transaction 재진입이다. 회귀 검사 `tests/unit/test_d2_fixture_gate_lock_wait.py`(수정 전 red 확인). 다음 회전에 실린다.
+
 ## 2026-11-11 — 예보 단기 전량 ReadTimeout 원인·page size
 
 - 단기 위치 약 1,450곳이 limit 2,000 페이지 하나에 들어 요청 하나가 artifact 전부(cold 약 1,174초)를 읽다 300초 timeout. 예보 page size 200으로 나눔. 초단기 상한 600→1,800초. 초단기 808건 거부는 weather 원천 coverage였다.
