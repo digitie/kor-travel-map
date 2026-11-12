@@ -1,3 +1,7 @@
+## 2026-11-12 — 접기 대표 회귀(#1495 후속)
+
+- 배포 뒤 rankprobe: 접기 대표를 순위로만 골라 관광 그룹 0의 MCST 촬영지 행(01000000)이 MOIS 호텔 행을 숨겼다. 대표 = (구체 분류, 비MCST, 순위), 자리는 무리 최솟값. 원천 조회는 둘 이상 무리에만.
+
 ## 2026-11-12 — D2 fixture가 Feature 쓰기 gate를 긴 대기로 먼저 잡는다
 
 - t1112b(Map aa38c30a) D2는 spec 2/2 통과 뒤 helper `purge`가 55P03(lock timeout)으로 죽어 `purge-failed` BLOCKED.

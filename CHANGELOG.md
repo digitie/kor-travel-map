@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-11-12 — 검색 접기 대표 수정·롯데호텔 별칭(alembic 452)
+
+- `/v1/features/search` 중복 접기: 같은 장소 무리의 대표는 MCST 목록이 primary 원천이 아닌 행이다(그다음 순위). 대표는 무리의 가장 좋은 자리를 물려받는다 — 응답의 순위 자리는 숨긴 행의 값일 수 있다. MOIS 호텔 행(03010100)이 MCST 촬영지 행(01000000)에 접혀 "JW 메리어트 서울"·"그랜드 하얏트 서울"이 관광지로 보이던 회귀(#1495)를 고친다. 검색 cursor v9.
+- alembic 452: 검색 별칭 `롯데호텔서울` → `호텔롯데`(MOIS 숙박 상호). OpenAPI 변경 없음.
+
 ## 2026-11-12 — 검색 순위 3단계: 검색 인지도(alembic 451)·끝 한글 괄호 이름 일치
 
 - alembic 451: `feature.feature_search_prominence`(Feature마다 0~9). 같은 이름 무리(300 m)의 서로 다른 원천 수, 국가유산·TourAPI 원천, 1 km 안 국가유산의 이름 낱말 일치 수로 올리고, MOIS 인허가 대장에만 있는 행은 0이다. Dagster `consistency_dedup_refresh` job이 dedup 갱신 뒤 `refresh_search_prominence` op로 다시 계산한다(바뀐 행만 쓴다).

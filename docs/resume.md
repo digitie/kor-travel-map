@@ -1,3 +1,7 @@
+## 2026-11-12 — 접기 대표 수정(alembic 452)
+
+- 회전에 묶는다. 452는 별칭 1행 + receipt CHECK(lock_timeout 1 s). R4 뒤에도 같은 규칙(무리가 줄 뿐).
+
 ## 2026-11-11 — 예보 page size(#1493)
 
 - 회전 뒤 단기 첫 전량이 끝까지 가는지(pages ≈ 8, run 시간) 본다. 410(snapshot 15분 만료) 뒤 한 번 재시작이 나면 weather에 cursor 페이지 sliding TTL을 요청. 초단기 run 시간이 1,800초에 가까워지면 weather 경합 조사.

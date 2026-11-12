@@ -48,6 +48,7 @@ FORWARD_ONLY_REVISIONS = (
     "449_tourapi_festivals_primary",
     "450_incheon_airport_search_alias",
     "451_feature_search_prominence",
+    "452_lotte_hotel_search_alias",
 )
 
 

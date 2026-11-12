@@ -2170,8 +2170,24 @@ if not all(code.isdigit() and len(code) == 2 for code in _SEARCH_DEDUP_TIER1_COD
 _SEARCH_DEDUP_TIER1_CODES_SQL: Final[str] = ", ".join(
     f"'{code}'" for code in _SEARCH_DEDUP_TIER1_CODES
 )
+#: 교통 가운데 접는 분류 접두 — 공항(0605)은 이름이 유일한 시설이라 같은 이름 가까이의 다른
+#: 시설이 없다. MCST 촬영지가 "김포국제공항"·"인천국제공항"을 관광(01000000)으로 따로 실어
+#: 공항 자체보다 앞섰다(2026-11-12 평가). 역(같은 이름 지하철·기차역)·휴게소(상·하행)는 접지 않는다.
+_SEARCH_DEDUP_EXTRA_PREFIXES: Final[tuple[str, ...]] = ("0605",)
+if not all(p.isdigit() and len(p) == 4 for p in _SEARCH_DEDUP_EXTRA_PREFIXES):
+    raise RuntimeError("dedup extra prefixes must be 4-digit category prefixes")
+_SEARCH_DEDUP_EXTRA_PREFIXES_SQL: Final[str] = ", ".join(
+    f"'{prefix}'" for prefix in _SEARCH_DEDUP_EXTRA_PREFIXES
+)
+#: 공항 무리 반경(m) — 같은 이름 공항 행에서 이 안의 같은 이름 행을 한 무리로 본다.
+_SEARCH_DEDUP_AIRPORT_RADIUS_M: Final[int] = 5_000
 #: 접기 키에서 떼는 끝 괄호(반각·전각) — "신륵사(여주)"와 "신륵사"는 같은 키다(거리로 가른다).
 _SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
+#: 접기 대표에서 뒤로 미는 원천 — MCST 목록(촬영지·반려동물·무장애 …)은 분류를 Tier 1만 주거나
+#: 장소 유형과 다른 분류로 싣는다. 같은 장소의 다른 원천 행이 대표다.
+_SEARCH_DEDUP_DEMOTED_PROVIDER: Final[str] = "python-mcst-api"
+if not _SEARCH_DEDUP_DEMOTED_PROVIDER.replace("-", "").isalnum():  # pragma: no cover
+    raise RuntimeError("demoted provider must be a plain SQL literal")
 
 # 별칭의 정확 이름 및 trigram 후보는 기존 idx_features_name_trgm을 사용한다.
 # 별칭 trigram 팔은 원래 이름의 공백 정규화 일치로 좁힌다. 임의의 글자 사이 공백까지
@@ -2437,7 +2453,8 @@ scored AS (
         -- 괄호로 끝날 때만 돈다.
         CASE
           WHEN kind = 'place' AND coord_5179 IS NOT NULL
-            AND left(category, 2) IN ({_SEARCH_DEDUP_TIER1_CODES_SQL})
+            AND (left(category, 2) IN ({_SEARCH_DEDUP_TIER1_CODES_SQL})
+              OR left(category, 4) IN ({_SEARCH_DEDUP_EXTRA_PREFIXES_SQL}))
           THEN CASE
             WHEN right(compact_name, 1) IN (')', '）')
             THEN regexp_replace(compact_name, '{_SEARCH_DEDUP_TRAILING_BRACKET}', '')
@@ -2499,32 +2516,85 @@ dedup_clusters AS (
     SELECT
         feature_id,
         dedup_key,
+        category,
         search_rank,
         score,
+        coord_5179,
         x_extension.ST_ClusterDBSCAN(coord_5179, {_SEARCH_DEDUP_RADIUS_M}, 1)
-          OVER (PARTITION BY dedup_key) AS dedup_cluster
+          OVER (PARTITION BY dedup_key) AS dbscan_cluster,
+        -- 공항(``_SEARCH_DEDUP_EXTRA_PREFIXES``)은 부지가 넓다 — 같은 이름 촬영지 행이 2 km 넘게
+        -- 떨어진다(prod 인천 2,209 m·제주 613 m). 같은 이름의 공항 행이 있으면 그 공항
+        -- ``_SEARCH_DEDUP_AIRPORT_RADIUS_M`` 안의 행을 한 무리로 본다.
+        max(CASE WHEN left(category, 4) IN ({_SEARCH_DEDUP_EXTRA_PREFIXES_SQL})
+                 THEN x_extension.ST_X(coord_5179) END) OVER (PARTITION BY dedup_key) AS airport_x,
+        max(CASE WHEN left(category, 4) IN ({_SEARCH_DEDUP_EXTRA_PREFIXES_SQL})
+                 THEN x_extension.ST_Y(coord_5179) END) OVER (PARTITION BY dedup_key) AS airport_y
     FROM scored
     WHERE dedup_key IS NOT NULL
 ),
-dedup_hidden AS (
-    SELECT feature_id
+dedup_sized AS (
+    SELECT
+        clustered.*,
+        count(*) OVER (PARTITION BY dedup_key, dedup_cluster) AS dedup_size
     FROM (
         SELECT
-            feature_id,
-            row_number() OVER (
-                PARTITION BY dedup_key, dedup_cluster
-                ORDER BY search_rank ASC, score DESC, feature_id ASC
-            ) AS dedup_position
+            feature_id, dedup_key, category, search_rank, score,
+            CASE
+              WHEN airport_x IS NOT NULL AND x_extension.ST_DWithin(
+                coord_5179,
+                x_extension.ST_SetSRID(x_extension.ST_MakePoint(airport_x, airport_y), 5179),
+                {_SEARCH_DEDUP_AIRPORT_RADIUS_M}
+              ) THEN -1
+              ELSE dbscan_cluster
+            END AS dedup_cluster
         FROM dedup_clusters
-    ) AS ordered
-    WHERE dedup_position > 1
+    ) AS clustered
+),
+-- 대표 선택(2026-11-12 회귀 수정): 무리 안에서 **MCST 목록이 primary 원천이 아닌 행**이 대표다.
+-- 그 뒤로는 정렬 순서다(같은 그룹 안에서는 rank의 분류 구체성 자리가 하위 분류 행을 앞에 둔다).
+-- "JW 메리어트 서울"의 MOIS 숙박 행(03010100)이 MCST 촬영지 행(01000000, 관광 그룹 0)에 접혀 호텔이
+-- 관광지로 보이던 것을 막는다. 분류 구체성을 그룹보다 앞에 두지 않는 이유: 비MCST 관광 행
+-- (01000000)이 같은 이름의 MOIS 식당과 접히면 관광지가 식당으로 보인다(적대 리뷰). 대표는 무리의
+-- 가장 좋은 자리(최소 rank·최대 score)를 물려받는다 — 접어도 그 장소의 자리는 내려가지 않는다.
+-- 원천 조회는 둘 이상인 무리의 행에만 한다. R4 뒤 MCST가 MOIS 마스터의 enrichment로 붙으면 그
+-- 마스터는 primary가 MOIS라 뒤로 밀리지 않는다.
+dedup_ordered AS (
+    SELECT
+        feature_id,
+        dedup_size,
+        min(search_rank) OVER cluster AS cluster_rank,
+        max(score) OVER cluster AS cluster_score,
+        row_number() OVER (
+            PARTITION BY dedup_key, dedup_cluster
+            ORDER BY
+                CASE
+                  WHEN dedup_size > 1 AND EXISTS (
+                    SELECT 1
+                    FROM provider_sync.source_links AS sl
+                    JOIN provider_sync.source_entities AS se
+                      ON se.source_entity_key = sl.source_entity_key
+                    JOIN provider_sync.provider_datasets AS pd
+                      ON pd.provider_dataset_id = se.provider_dataset_id
+                    WHERE sl.feature_id = dedup_sized.feature_id
+                      AND sl.source_role = 'primary'
+                      AND pd.provider = '{_SEARCH_DEDUP_DEMOTED_PROVIDER}'
+                  ) THEN 1
+                  ELSE 0
+                END ASC,
+                search_rank ASC, score DESC, feature_id ASC
+        ) AS dedup_position
+    FROM dedup_sized
+    WINDOW cluster AS (PARTITION BY dedup_key, dedup_cluster)
 ),
 candidates AS (
     SELECT
         s.feature_id, s.feature_uuid, s.kind, s.name, s.category, s.lon, s.lat,
-        s.marker_icon, s.marker_color, s.score, s.search_rank
+        s.marker_icon, s.marker_color,
+        COALESCE(d.cluster_score, s.score) AS score,
+        COALESCE(d.cluster_rank, s.search_rank) AS search_rank
     FROM scored AS s
-    WHERE NOT EXISTS (SELECT 1 FROM dedup_hidden AS h WHERE h.feature_id = s.feature_id)
+    LEFT JOIN dedup_ordered AS d ON d.feature_id = s.feature_id
+    WHERE d.feature_id IS NULL OR d.dedup_position = 1
 )
 """
 
@@ -7156,7 +7226,8 @@ _SEARCH_CURSOR_KIND: Final[str] = "feature_search"
 #: v6: 분류 낱말 나머지의 tail 일치 제거·낱말 덮기(2026-11-11)로 지역 검색 ``rank``가 바뀌었다.
 #: v7: 실효 검색 그룹(이름 끝말)·중복 접기(2026-11-11)로 ``rank``와 보이는 행 집합이 바뀌었다.
 #: v8: 검색 인지도(P6)가 순위 마지막 자리로 들어와 ``rank`` 값의 자리 배치가 바뀌었다.
-_SEARCH_CURSOR_VERSION: Final[int] = 8
+#: v9: 접기 대표가 무리의 가장 좋은 자리를 물려받아 보이는 행의 ``rank``가 바뀌었다(2026-11-12).
+_SEARCH_CURSOR_VERSION: Final[int] = 9
 _SEARCH_CURSOR_MAX_LENGTH: Final[int] = 2048
 _SEARCH_CURSOR_DOMAIN: Final[bytes] = b"kor-travel-map:feature-search-cursor:v1\0"
 
