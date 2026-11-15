@@ -557,12 +557,13 @@ async def test_bbox_never_lifts_a_similarity_only_row_over_a_name_match(
 ) -> None:
     """bbox는 **일치 단계 안에서만** 가른다 — 화면 안의 유사도만 행이 화면 밖 이름 일치를 못 넘는다.
 
-    PinVi live e2e SRCH-002(2026-11-12): 서울 화면에서 "안동하회마을"을 찾으면 "안동장"(서울
-    중식당)이 첫 행이었다. Map은 이 순서를 지킨다(prod 451 실측: 안동하회마을 1위, 안동장은 trigram만 0.22로
-    24위) — 첫 행을 바꾼 것은 PinVi가 bbox 없이 받은 전국 40건에서 화면 안 행을 앞으로 당긴
-    클라이언트 정렬(``region_biased_items``)이다. 이 테스트는 소비자가 bbox를 Map에 넘기면 되는
-    계약을 고정한다: 이름 일치(단계 1)는 화면 밖이어도 화면 안의 유사도만 행(단계 2)보다 앞이고,
-    bbox는 같은 단계 안에서만 화면 안을 앞에 둔다.
+    PinVi live e2e SRCH-002(2026-11-12): 서울 화면에서 "안동하회마을"을 찾으면
+    "안동장"(서울 중식당)이 첫 행이었다. Map은 이 순서를 지킨다(prod 451 실측:
+    안동하회마을 1위, 안동장은 trigram만 0.22로 24위). 첫 행을 바꾼 것은 PinVi가 bbox
+    없이 받은 전국 40건에서 화면 안 행을 앞으로 당긴 클라이언트 정렬
+    (``region_biased_items``)이다. 이 테스트는 소비자가 bbox를 Map에 넘기면 되는 계약을
+    고정한다: 이름 일치(단계 1)는 화면 밖이어도 화면 안의 유사도만 행(단계 2)보다
+    앞이고, bbox는 같은 단계 안에서만 화면 안을 앞에 둔다.
     """
     village = await _place(
         migrated_session, "srch002:village", name="안동하회마을", category="01000000",
