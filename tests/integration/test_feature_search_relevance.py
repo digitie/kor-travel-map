@@ -552,6 +552,52 @@ async def test_bbox_is_a_relevance_bias_not_a_filter(
     assert with_total.total_count >= 4
 
 
+async def test_bbox_never_lifts_a_similarity_only_row_over_a_name_match(
+    migrated_session: AsyncSession,
+) -> None:
+    """bbox는 **일치 단계 안에서만** 가른다 — 화면 안의 유사도만 행이 화면 밖 이름 일치를 못 넘는다.
+
+    PinVi live e2e SRCH-002(2026-11-12): 서울 화면에서 "안동하회마을"을 찾으면 "안동장"(서울
+    중식당)이 첫 행이었다. Map은 이 순서를 지킨다(prod 451 실측: 안동하회마을 1위, 안동장은 trigram만 0.22로
+    24위) — 첫 행을 바꾼 것은 PinVi가 bbox 없이 받은 전국 40건에서 화면 안 행을 앞으로 당긴
+    클라이언트 정렬(``region_biased_items``)이다. 이 테스트는 소비자가 bbox를 Map에 넘기면 되는
+    계약을 고정한다: 이름 일치(단계 1)는 화면 밖이어도 화면 안의 유사도만 행(단계 2)보다 앞이고,
+    bbox는 같은 단계 안에서만 화면 안을 앞에 둔다.
+    """
+    village = await _place(
+        migrated_session, "srch002:village", name="안동하회마을", category="01000000",
+        lon=128.5289, lat=36.5503,
+    )
+    seoul_food = await _place(
+        migrated_session, "srch002:seoul-food", name="안동장", category="02010400",
+        lon=126.9916, lat=37.5661, place_kind="restaurant",
+    )
+    jeongseon_inn = await _place(
+        migrated_session, "srch002:jeongseon-inn", name="안동장", category="03000000",
+        lon=128.8535, lat=37.2012, place_kind="lodging",
+    )
+    await migrated_session.flush()
+    page = await feature_repo.search_features(
+        migrated_session,
+        q="안동하회마을",
+        bbox=_SEOUL_BBOX,
+        kinds=["place"],
+        page_size=200,
+        cursor_signing_key=_SEARCH_CURSOR_KEY,
+    )
+    ids = [item.feature_id for item in page.items]
+    assert {village, seoul_food, jeongseon_inn} <= set(ids), ids
+    # 단계가 bbox보다 크다 — 화면 밖 이름 일치가 화면 안 유사도만 행보다 앞.
+    assert ids.index(village) < ids.index(seoul_food), ids
+    village_rank = page.items[ids.index(village)].rank
+    food_rank = page.items[ids.index(seoul_food)].rank
+    assert village_rank is not None and food_rank is not None
+    assert village_rank // feature_repo._SEARCH_RANK_MATCH_WEIGHT == 1, village_rank
+    assert food_rank // feature_repo._SEARCH_RANK_MATCH_WEIGHT == 2, food_rank
+    # 같은 단계(유사도만) 안에서는 bbox가 가른다 — 서울 식당이 그룹이 앞선 정선 숙소보다 앞.
+    assert ids.index(seoul_food) < ids.index(jeongseon_inn), ids
+
+
 async def test_rank_keyset_pagination_matches_single_page_order(
     migrated_session: AsyncSession,
 ) -> None:

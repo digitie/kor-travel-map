@@ -1,3 +1,7 @@
+## 2026-11-16 — SRCH-002 원인은 PinVi 화면 편향
+
+- Map 순위 정상(prod 실측). 다음: PinVi `/search`가 bias bbox를 Map `/features/search`에 넘기고 `region_biased_items` 재정렬을 걷는다(PinVi 작업). Map은 회귀 검사만 더했다.
+
 ## 2026-11-12 — 접기 대표 수정(alembic 452)
 
 - 회전에 묶는다. 452는 별칭 1행 + receipt CHECK(lock_timeout 1 s). R4 뒤에도 같은 규칙(무리가 줄 뿐).
