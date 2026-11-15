@@ -592,7 +592,8 @@ async def test_bbox_never_lifts_a_similarity_only_row_over_a_name_match(
     assert ids.index(village) < ids.index(seoul_food), ids
     village_rank = page.items[ids.index(village)].rank
     food_rank = page.items[ids.index(seoul_food)].rank
-    assert village_rank is not None and food_rank is not None
+    assert village_rank is not None
+    assert food_rank is not None
     assert village_rank // feature_repo._SEARCH_RANK_MATCH_WEIGHT == 1, village_rank
     assert food_rank // feature_repo._SEARCH_RANK_MATCH_WEIGHT == 2, food_rank
     # 같은 단계(유사도만) 안에서는 bbox가 가른다 — 서울 식당이 그룹이 앞선 정선 숙소보다 앞.
