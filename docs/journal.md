@@ -1,3 +1,10 @@
+## 2026-11-16 — MCST 북카페를 카페로 표시
+
+- 소유자 결정: `cafe_bookstores_csv`(북카페) 행의 표시 분류를 01040000 문화시설 → 02020000 카페.
+- 목록 분류 `spec.category`는 feature_id seed라 그대로 두고 `_structured_category`의 고정 표시 분류로만 바꾼다.
+  ID를 바꾸면 재적재가 새 행을 만들고 기존 행이 고아로 남는다. 회귀 검사 `test_cafe_bookstore_is_cafe_but_keeps_list_seeded_feature_id`.
+- prod 반영은 배포 뒤 MCST `cafe_bookstores_csv` 재적재가 필요하다.
+
 ## 2026-11-16 — SRCH-002 "안동장" 첫 행은 Map 순위가 아니다
 
 - PinVi live e2e(20261112-125734) SRCH-002: 서울 화면에서 "안동하회마을" 첫 행이 "안동장". prod Map(451) 직접 실측은 안동하회마을 1위(rank 10000108, 품음 단계 1·목적지 일치), 서울 중식당 안동장은 trigram만(0.22, 단계 2) 24위였다.
