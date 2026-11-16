@@ -1,3 +1,14 @@
+## 2026-11-16 — 북카페 재적재가 기존 행을 바꾸지 못한 원인: 재투영 scope 누락
+
+- 증상: #1501 배포(t1116d) 뒤 `feature_place_mcst_culture_job` run `78380ace` SUCCESS인데 '카페 에무' 등이
+  `01040000`/`museum` 그대로.
+- 운영 실측(읽기 전용): dataset 50 `mcst_cafe_bookstores_csv` head 1,059건 전부 11:14Z에 관측 전진(run이 처리함),
+  현재 record hash는 10-23 것 그대로 → `became_current` 거짓 → 본문 미기록. 활성 1,054건 `01040000`, 원본이 바뀐
+  5건만 `02020000`. base 소유자는 dataset 50 자신이고 override 없음.
+- 원인: 같은 원본 재투영은 `_CATEGORY_REPROJECTION_SCOPES`에 든 dataset만 한다. #1501이 그 scope를 빠뜨렸다.
+- 수정: scope에 `mcst_cafe_bookstores_csv` 추가 + `_FIXED_FEATURE_CATEGORIES` ⊂ scope 단위 검사 + 통합 재투영
+  검사에 북카페 형태 추가. prod 반영은 배포 뒤 북카페 dataset 재적재 한 번.
+
 ## 2026-11-16 — MCST 북카페를 카페로 표시
 
 - 소유자 결정: `cafe_bookstores_csv`(북카페) 행의 표시 분류를 01040000 문화시설 → 02020000 카페.

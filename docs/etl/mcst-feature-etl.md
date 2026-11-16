@@ -177,6 +177,13 @@ base만 비교한다. 같은 원천이 소유한 base의 실제 변경만 기존
 유지되고 해제하면 새 base가 드러난다. 같은 입력의 두 번째 실행은 Feature revision을
 올리지 않는다. 오래된 artifact와 퇴역 상태는 이 재투영에서 제외한다.
 
+**분류 규칙을 바꾸면 그 dataset을 `feature_repo._CATEGORY_REPROJECTION_SCOPES`에 넣어야
+기존 행에 닿는다.** 별도의 정규화 revision이나 강제 재투영 옵션은 없다 — 원본 hash가 같은 행은
+이 scope 안에서만 category·marker base를 다시 비교한다. #1501(북카페 → 카페 `02020000`)은
+scope를 빠뜨려 2026-11-16 재적재가 성공했는데도 1,054건이 `01040000`에 남았다(원본이 바뀐 5건만
+전환). `_FIXED_FEATURE_CATEGORIES`의 dataset은 단위 검사
+`test_fixed_display_categories_reach_existing_rows_through_reprojection`이 scope 포함을 강제한다.
+
 ## ADR-121 — 테마 목록 붙임 적재 (2026-11-10)
 
 정본은 [ADR-121](../adr/121-mcst-theme-lists-as-place-attributes.md)과

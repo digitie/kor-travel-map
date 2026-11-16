@@ -573,6 +573,25 @@ async def test_cafe_bookstore_is_cafe_but_keeps_list_seeded_feature_id() -> None
     )
 
 
+def test_fixed_display_categories_reach_existing_rows_through_reprojection() -> None:
+    """표시 분류를 고정한 목록은 같은 원본 재적재에서도 기존 행에 닿아야 한다.
+
+    원본 hash가 같으면 ``load_bundle``은 본문을 다시 쓰지 않는다. 분류 재투영 scope에
+    없으면 코드만 바뀌고 운영 행은 옛 분류에 머문다(#1501 배포 후 실측 1,054건).
+    """
+    from kortravelmap.infra.feature_repo import _CATEGORY_REPROJECTION_SCOPES
+    from kortravelmap.providers.mcst import _FIXED_FEATURE_CATEGORIES
+
+    assert _FIXED_FEATURE_CATEGORIES
+    missing = sorted(
+        MCST_FILE_DATASETS[slug].dataset_key
+        for slug in _FIXED_FEATURE_CATEGORIES
+        if (MCST_PROVIDER_NAME, MCST_FILE_DATASETS[slug].dataset_key)
+        not in _CATEGORY_REPROJECTION_SCOPES
+    )
+    assert missing == []
+
+
 async def test_structured_cafe_taxonomy_is_not_overridden_by_hotel_or_camp_in_name() -> None:
     row = _world_restaurant_row(
         TITLE="호텔 캠핑장 앞 카페",
