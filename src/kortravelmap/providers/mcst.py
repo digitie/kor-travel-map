@@ -699,8 +699,18 @@ _MCST_CATEGORY_ROOTS: Final[Mapping[str, PlaceCategoryCode]] = {
 }
 
 
+_FIXED_FEATURE_CATEGORIES: Final[dict[str, str]] = {
+    # 북카페는 카페다(소유자 결정 2026-11-16). 목록 분류(spec.category)는 feature_id seed라
+    # 그대로 두고 표시 분류만 바꾼다 — 재적재가 같은 행을 같은 ID로 갱신한다.
+    "cafe_bookstores_csv": PlaceCategoryCode.FOOD_CAFE.value,
+}
+
+
 def _structured_category(row: Mapping[str, Any], spec: McstDatasetSpec) -> str:
     """물리 업종이 없는 테마 원천을 관광/문화시설로 단정하지 않는다."""
+    fixed = _FIXED_FEATURE_CATEGORIES.get(spec.slug)
+    if fixed is not None:
+        return fixed
     if spec.slug not in {
         "pet_friendly_culture_facilities_csv",
         "barrier_free_places_csv",

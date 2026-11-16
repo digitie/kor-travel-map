@@ -545,6 +545,34 @@ async def test_mixed_facility_taxonomy_uses_structured_category_and_keeps_identi
     assert bundle.source_record.raw_data == row
 
 
+async def test_cafe_bookstore_is_cafe_but_keeps_list_seeded_feature_id() -> None:
+    from kortravelmap.core.ids import make_feature_id
+
+    row = {
+        "CNTC_RESRCE_ID": "B553457-05-001",
+        "CNTC_RESRCE_NO": "1",
+        "TITLE": "카페 에무",
+        "SUBJECT_KEYWORD": "북카페",
+        "ADDRESS": "(03992) 서울특별시 마포구 성미산로 1",
+        "CONTACT_POINT": "0200000000",
+        "COORDINATES": "37.5600 , 126.9200",
+        "RNUM": "1",
+    }
+    slug = "cafe_bookstores_csv"
+    [bundle] = await file_rows_to_bundles([row], slug=slug, fetched_at=_NOW)
+    assert bundle.feature.category == PlaceCategoryCode.FOOD_CAFE.value
+    spec = MCST_FILE_DATASETS[slug]
+    # 목록 분류는 ID seed로 남는다 — 바꾸면 재적재가 기존 행을 고아로 만든다.
+    assert spec.category == PlaceCategoryCode.TOURISM_CULTURAL_FACILITY.value
+    assert bundle.feature.feature_id == make_feature_id(
+        bjd_code=bundle.feature.address.bjd_code,
+        kind="place",
+        category=spec.category,
+        source_type=f"{MCST_PROVIDER_NAME}:{spec.dataset_key}",
+        source_natural_key=bundle.feature.provider_natural_key,
+    )
+
+
 async def test_structured_cafe_taxonomy_is_not_overridden_by_hotel_or_camp_in_name() -> None:
     row = _world_restaurant_row(
         TITLE="호텔 캠핑장 앞 카페",

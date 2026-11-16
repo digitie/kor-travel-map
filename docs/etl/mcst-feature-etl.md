@@ -38,7 +38,7 @@ dataset_key는 `mcst_<slug>` **클린 컷** — 구 키(`mcst_independent_bookst
 | leisure_classes_csv | kcisa_common (좌표 컬럼 없음) | 01080000 | leisure_class |
 | media_famous_places_csv | kcisa_common (`PLACENAME`/`MEDIATITLE`) | 01000000 | media_famous_place |
 | independent_bookstores_csv | cntc_resrce | 01040000 | independent_bookstore |
-| cafe_bookstores_csv | cntc_resrce | 01040000 | cafe_bookstore |
+| cafe_bookstores_csv | cntc_resrce | 01040000 (ID seed) → 표시 02020000 카페 | cafe_bookstore |
 | children_bookstores_csv | split_coord | 01040000 | children_bookstore |
 | used_bookstores_csv | split_coord | 01040000 | used_bookstore |
 | golf_courses_status | korean_address | 01080100 | golf_course |
