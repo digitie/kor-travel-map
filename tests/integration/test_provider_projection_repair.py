@@ -41,6 +41,27 @@ async def _media_bundle():
     return bundle
 
 
+async def _cafe_bookstore_bundle():
+    [bundle] = await file_rows_to_bundles(
+        [{"CNTC_RESRCE_ID": "B553457-05-001", "CNTC_RESRCE_NO": "1", "TITLE": "카페 에무",
+          "SUBJECT_KEYWORD": "북카페", "ADDRESS": "(03992) 서울특별시 마포구 성미산로 1",
+          "CONTACT_POINT": "0200000000", "COORDINATES": "37.5600 , 126.9200", "RNUM": "1"}],
+        slug="cafe_bookstores_csv", fetched_at=_FETCHED,
+    )
+    return bundle
+
+
+# source_shape: (bundle 생성기, 옛 category, 옛 marker_icon, 기대 category)
+_SHAPES = {
+    "hotel": (_mcst_bundle, "01040000", "museum", "03010100"),
+    # media: 2026-11-10 운영에서 미분류로 내려간 촬영지가 같은 원천 head 재적재로 관광 분류를
+    # 되찾는다(손 SQL 없이 복구되는 경로).
+    "media": (_media_bundle, "00000000", "attraction", "01000000"),
+    # cafe: #1501 이전에 문화시설로 적재된 북카페가 같은 원천 재적재로 카페가 된다.
+    "cafe": (_cafe_bookstore_bundle, "01040000", "museum", "02020000"),
+}
+
+
 async def _revision(session: AsyncSession, feature_id: str) -> int:
     return int(await session.scalar(text(
         "SELECT row_revision FROM feature.features WHERE feature_id=CAST(:id AS uuid)"
@@ -61,17 +82,14 @@ async def _snapshot(session: AsyncSession, feature_id: str):
 
 
 @pytest.mark.parametrize("override", [False, True])
-@pytest.mark.parametrize("source_shape", ["hotel", "media"])
+@pytest.mark.parametrize("source_shape", sorted(_SHAPES))
 async def test_same_raw_head_reprojects_once_and_preserves_effective_override(
     migrated_session: AsyncSession, override: bool, source_shape: str,
 ) -> None:
-    bundle = await (_mcst_bundle() if source_shape == "hotel" else _media_bundle())
-    # media: 2026-11-10 운영에서 미분류로 내려간 촬영지가 같은 원천 head 재적재로 관광 분류를
-    # 되찾는다(손 SQL 없이 복구되는 경로).
-    expected = "03010100" if source_shape == "hotel" else "01000000"
+    make_bundle, old_category, old_icon, expected = _SHAPES[source_shape]
+    bundle = await make_bundle()
     old = bundle.model_copy(update={"feature": bundle.feature.model_copy(update={
-        "category": "01040000" if source_shape == "hotel" else "00000000",
-        "marker_icon": "museum" if source_shape == "hotel" else "attraction",
+        "category": old_category, "marker_icon": old_icon,
     })})
     async with as_dagster_runtime(migrated_session):
         await feature_repo.load_bundle(migrated_session, old)

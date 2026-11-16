@@ -4284,6 +4284,9 @@ _CATEGORY_REPROJECTION_SCOPES: Final[frozenset[tuple[str, str]]] = frozenset({
     ("python-mcst-api", "mcst_family_infant_culture_facilities_csv"),
     ("python-mcst-api", "mcst_media_famous_places_csv"),
     ("python-mcst-api", "mcst_leisure_camping_facilities_csv"),
+    # #1501: 북카페 목록의 표시 분류를 카페(02020000)로 바꿨다. 원본이 그대로면 이 scope에
+    # 없을 때 기존 행이 옛 분류에 머문다(2026-11-16 재적재 실측: 1,054건 01040000 잔류).
+    ("python-mcst-api", "mcst_cafe_bookstores_csv"),
     ("python-krheritage-api", "krheritage_event_list"),
     # #1459 §6: 근거 없는 해수욕장 제안을 거르는 규칙이 같은 원본의 기존 행에도 닿게 한다.
     ("kor-travel-concierge-youtube", "youtube_place_candidates"),
