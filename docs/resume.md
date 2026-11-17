@@ -6,6 +6,16 @@
   `T-415`(`@kor-travel/ui` 0.3.0 재vendor와 관리자 부품 채택, Common `T-221` 뒤).
 - `docs/tasks.md`에 `T-COMMON-PLAN-20261117` 한 줄, `docs/tasks-acceptance.md`에 같은 이름의 절을 뒀다. 수용 기준 본문은 Common이 소유한다.
 - 코드 변경 없음. Common 계획은 독립 리뷰 전 초안이라 범위가 바뀔 수 있다. 진행 중인 작업과 다음 한 작업은 바뀌지 않는다.
+## 2026-11-17 — 읽기 성능 계획
+
+- [계획](reports/2026-11-17-read-performance-plan.md) 적대 리뷰 2회 반영. 구현은 아직 없다. 작업 30개, 계획 §8이 단계 순이다.
+- 다음(0단계, 병렬): `T-READ-01`(기준선 — 소유자가 승인한 조용한 창, `jit=off`), `T-READ-02`(느린 요청 로그·지표),
+  `T-READ-08`(autovacuum). PinVi 쪽 0단계(`T-READ-PIN-06` 호출 기록 집계·`05` 요청당 비용·`04`·`01`)가 가장 싸고
+  답을 많이 준다.
+- 순서 제약: `T-READ-03`은 `T-READ-02` 머지와 PinVi `T-READ-PIN-04` 운영 반영 뒤. `T-READ-04`는 PinVi 재vendor와 한
+  pair 회전. `T-READ-05`~`07`은 `T-READ-01` 보고서 뒤.
+- 소유자 확인이 필요한 것: odroid NVMe 남은 공간 1.9 GB(`T-READ-MGR-05`, 전달됨), 조용한 창과 공용 PG 재생성 창,
+  `T-READ-06`의 묵은 순위 키 허용 여부.
 ## 2026-11-17 — 관리자 프런트 공통 후보12 채택
 
 ui 0.2.1·tokens 0.1.2·vworld-map-web 1.0.4 vendor(PR agent/common-candidate-12, guard ref는 `55a921b` 유지). 다음: 배포 뒤 관리자 지도 바탕 타일 Firefox 확인. 소유자 결정 대기 — 공통 정확 Node/npm 규칙(`.nvmrc`·`engines.node` 22.23.1) 채택 여부(채택해야 guard ref를 올릴 수 있다).

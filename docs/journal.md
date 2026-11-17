@@ -6,6 +6,27 @@
   `T-415`(`@kor-travel/ui` 0.3.0 재vendor와 관리자 부품 채택, Common `T-221` 뒤).
 - `docs/tasks.md`에 `T-COMMON-PLAN-20261117` 한 줄, `docs/tasks-acceptance.md`에 같은 이름의 절을 뒀다. 수용 기준 본문은 Common이 소유한다.
 - 코드 변경 없음. Common 계획은 독립 리뷰 전 초안이라 범위가 바뀔 수 있다. 진행 중인 작업과 다음 한 작업은 바뀌지 않는다.
+## 2026-11-17 — 읽기 성능 계획(Map·weather·transport)
+
+- 소유자 요청으로 세 서비스의 읽기 경로를 코드와 운영 관측으로 검토해 [계획](reports/2026-11-17-read-performance-plan.md)을 썼다. 코드·설정·운영 변경
+  없음. 기준 commit은 Map `f1788da9`·weather `e68f16a7`·transport `60095379`·PinVi `b1605949`·Manager `31d56e4e`.
+- 측정 창(03:31~05:14Z, 배포·e2e 중, 읽기 전용): n150 PSI io `full` avg10 63%, Map API 프로세스 VmSwap 154 MB(RSS
+  14 MB), 운영 Map 지표 꺼짐·PG 느린 질의 로그와 `pg_stat_statements` 없음. PinVi `/metrics`로 `/features/in-bounds`
+  38건 중 503이 15건, 상류를 부르지 않는 PinVi route 둘이 평균 1.63초·6.53초. bbox 색인 탐색당 평균 11.7만 색인 행.
+  checkpointer write 시간이 버퍼당 약 48 ms. e2e가 끝나지 않아 조용한 호스트의 기준선과 PinVi `app.api_call_log`
+  전수 집계는 하지 않았다 — `T-READ-01`·`T-READ-PIN-06`의 일이다.
+- odroid(읽기 전용): CPU idle 0%(Dagster run 작업), PG 데이터가 있는 NVMe 남은 공간 1.9 GB — 소유자에게 전달됐다.
+- 적대 리뷰 2회 반영. 1회차: `T-READ-03`을 요청 마감 예산·공개 전용 의존성으로 다시 쓰고 PinVi의 재시도 금지
+  (`T-READ-PIN-04`)를 선행으로 뒀다. 2회차: Map과 PinVi는 OpenAPI hash가 같아야 회전하므로 spec을 바꾸는
+  `T-READ-04`를 "Map 머지 → PinVi 재vendor 머지 → 한 pair 회전"으로 고쳤고 `T-READ-03`은 spec 불변을 요구 사항으로
+  했다. PinVi의 요청당 비용·동시 호출 상한(교통·날씨)을 0단계로 올렸고, autovacuum(`T-READ-08`)과 디스크 쓰기 주체
+  (`T-READ-MGR-06`)를 더했다. 작업은 30개(Map 8·PinVi 7·Manager 7·weather 4·transport 4)이고 계획 §8이 단계 순이다.
+- 원장: `T-READ-01`~`08`. **해제 조건은 acceptance의 같은 ID 절이 소유한다.** 자리를 내려고 닫힌 절 둘
+  (`T-VN-M02-TRUNCATE-FENCE`·`T-VN-M05-VERIFY-RECEIPT`, 둘 다 tasks-done에 완료 기록)을
+  `scripts/archive_task_ledger_section.py --apply`로 `docs/archive/`에 옮겼다. 도구 검산 통과 — 체크박스 176건·175건이
+  두 파일에 그대로, 원장 223,003 → 211,173 bytes. 본문은 도구가 옮긴 그대로다.
+- weather·transport·PinVi·Manager `docs/tasks.md`에는 이 계획을 가리키는 한 줄을 둔다(각 저장소 브랜치
+  `docs/read-performance-plan-20261117`).
 ## 2026-11-17 — 관리자 프런트 공통 후보12 채택(ui 0.2.1·tokens 0.1.2·vworld-map-web 1.0.4)
 
 - kor-travel-common #57·#58(동결 `97f8ed98`)이 정책 정본을 올렸다. 공통 guard는 고정 ref와 무관하게 common **main**의 정책·정본을 읽으므로, 옛 산출물로는 guard가 실패한다.
