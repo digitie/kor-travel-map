@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import uuid
 from pathlib import Path
 
@@ -304,8 +305,13 @@ def test_region_search_params_and_constant_variant_cover_every_bind(
         assert f"AS {alias}" in compacted, alias
     if region is not None:
         assert "AS region_hit" in compacted
+    # 원래 두 CTE가 내던 열은 변형도 모두 낸다(뒤 단계가 읽는다).
+    original = score_sql[score_sql.index("\ncompacted AS (") : score_sql.index("\nranked AS (")]
+    column_alias = re.compile(r"AS (\w+)\s*(?:,|\n\s*FROM)")
+    assert set(column_alias.findall(original)) <= set(column_alias.findall(compacted))
     # 나머지(순위·접기·page)는 글자까지 같다.
-    assert variant[variant.index("\nranked AS (") :] == score_sql[score_sql.index("\nranked AS (") :]
+    ranked = "\nranked AS ("
+    assert variant[variant.index(ranked) :] == score_sql[score_sql.index(ranked) :]
     _count_matching_rows_sql(variant, "limit_plus_one")
 
 
