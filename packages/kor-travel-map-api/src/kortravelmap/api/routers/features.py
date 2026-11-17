@@ -53,6 +53,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
 )
+from kortravelmap.infra.sqlstate import sqlstate_of
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -64,7 +65,12 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from kortravelmap.api.auth import require_admin_frontend, require_service_token
-from kortravelmap.api.db import get_read_snapshot_session, get_session
+from kortravelmap.api.db import (
+    PUBLIC_READ_BUDGET_STATE,
+    get_public_read_session,
+    get_public_read_snapshot_session,
+    get_read_snapshot_session,
+)
 from kortravelmap.api.feature_ref import resolve_feature_ref_or_error
 from kortravelmap.api.http_revision import parse_revision_digest_header, revision_digest_etag
 from kortravelmap.api.identity_projection import response_feature_id, uuid_substituted_row
@@ -1000,7 +1006,7 @@ def _price_point_out(point: price_repo.PricePoint) -> PricePointOut:
 )
 async def list_features_in_bbox(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
     min_lon: Annotated[float, Query(description="bbox 최소 경도 (WGS84).")],
     min_lat: Annotated[float, Query(description="bbox 최소 위도.")],
     max_lon: Annotated[float, Query(description="bbox 최대 경도.")],
@@ -1087,7 +1093,7 @@ async def list_features_in_bbox(
 )
 async def list_public_features_in_bounds(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
     min_lon: Annotated[float, Query(description="bbox 최소 경도 (WGS84).")],
     min_lat: Annotated[float, Query(description="bbox 최소 위도.")],
     max_lon: Annotated[float, Query(description="bbox 최대 경도.")],
@@ -1210,7 +1216,7 @@ async def list_public_features_in_bounds(
 )
 async def search_public_features(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
     q: Annotated[str | None, Query(description="name pg_trgm 검색어.")] = None,
     kind: Annotated[list[str] | None, Query(description="feature kind 반복 필터.")] = None,
     category: Annotated[
@@ -1292,7 +1298,7 @@ async def search_public_features(
 )
 async def list_features_nearby(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
     lon: Annotated[float, Query(ge=-180, le=180, description="중심 경도(4326).")],
     lat: Annotated[float, Query(ge=-90, le=90, description="중심 위도(4326).")],
     radius_m: Annotated[
@@ -1370,7 +1376,7 @@ async def list_features_nearby(
 )
 async def list_features_nearby_by_target(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
     external_system: Annotated[
         str,
         Query(
@@ -1490,7 +1496,7 @@ async def get_feature(
     request: Request,
     response: Response,
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
 ) -> FeatureDetailEnvelopeResponse | Response:
     started_at = perf_counter()
     # T-VN-32B 경계 alias 해석 — legacy/UUID 참조를 정본 키 쌍으로 해석하고,
@@ -1619,7 +1625,7 @@ async def get_feature_observation_history(
 )
 async def get_area_contained_features(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
     feature_id: str,
     kind: Annotated[
         list[str] | None,
@@ -1662,7 +1668,7 @@ async def get_area_contained_features(
 )
 async def get_feature_price(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
     feature_id: str,
     history_limit: Annotated[
         int,
@@ -1701,7 +1707,7 @@ async def get_feature_price(
 )
 async def get_feature_price_snapshot(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
     feature_id: str,
     observed_at: Annotated[datetime, Query(description="재현할 price 관측 cutoff.")],
     known_at: Annotated[datetime, Query(description="그 시점에 알려진 response cutoff.")],
@@ -1757,7 +1763,7 @@ async def get_feature_price_snapshot(
 async def get_features_batch(
     request: Request,
     body: FeatureBatchRequest,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
 ) -> FeatureBatchResponse:
     started_at = perf_counter()
     # T-VN-32C PR-2 — 값 전환 후 소비자(PinVi)가 UUID 참조를 보낸다. 경계
@@ -1793,6 +1799,10 @@ async def get_features_batch(
             ),
         )
     except SQLAlchemyError as exc:
+        # 공개 읽기 마감(T-READ-03)의 문장 취소(57014)는 앱의 ``READ_TIMEOUT``으로 보낸다 —
+        # PinVi는 그 code를 다시 보내지 않는다. 다른 저장소 오류는 종전대로 503이다.
+        if sqlstate_of(exc) == "57014" and hasattr(request.state, PUBLIC_READ_BUDGET_STATE):
+            raise
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail={

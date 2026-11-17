@@ -78,6 +78,13 @@ pool_waits=… pool_wait_ms=… request_id=…`. query string·header 값·좌�
 끈다. 운영에서 `/metrics`를 켜는 것(token 포함)은 Manager `T-READ-MGR-03`, 긁는 것은
 `T-READ-MGR-02`다.
 
+**공개 읽기 요청 마감**(T-READ-03). 공개 읽기 route(계획 §8.4 T-READ-03 변경 9)는 요청 도착에서 센
+`KOR_TRAVEL_MAP_API_PUBLIC_READ_BUDGET_MS`(기본 `4500`) 안에 끝나지 않으면 503 `READ_TIMEOUT`, pool
+체크아웃을 `KOR_TRAVEL_MAP_API_PUBLIC_READ_POOL_WAIT_MS`(기본 `2000`) 안에 못 하면 503 `POOL_BUSY`다.
+`GET /v1/public/festivals/monthly`만 `…_SLOW_BUDGET_MS`(기본 `14000`)다. **PinVi가 이 두 code를 다시
+보내지 않는 판(PinVi `T-READ-PIN-04`)이 운영에 있기 전에는 이 판을 배포하지 않는다** — 그 전에는 멈춘
+요청 하나가 무거운 질의 세 번이 된다. 되돌림은 세 값 `0`(종전 동작).
+
 `kor-travel-docker-manager` 관측 스택은 Grafana `12205`, cAdvisor Exporter
 `12301`, Prometheus `12401`을 사용한다. 앱은 Prometheus로 능동 연결하지 않고
 pull scrape 대상이 된다.

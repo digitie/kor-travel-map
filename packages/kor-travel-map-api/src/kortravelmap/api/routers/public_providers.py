@@ -16,7 +16,7 @@ from kortravelmap.infra.sync_state_repo import SyncState
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_public_read_session
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["router"]
@@ -95,7 +95,7 @@ def _provider_summary(state: SyncState) -> ProviderSyncStateSummary:
     summary="전 provider 데이터 신선도 목록",
 )
 async def list_providers_freshness(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
 ) -> ProvidersFreshnessResponse:
     """bounded provider×dataset×scope 신선도 목록을 반환한다."""
     started_at = perf_counter()
@@ -114,7 +114,7 @@ async def list_providers_freshness(
 )
 async def get_provider_last_sync(
     provider: str,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
     dataset_key: Annotated[str | None, Query(description="dataset_key 필터")] = None,
     sync_scope: Annotated[str | None, Query(description="sync_scope 필터")] = None,
     operation_key: Annotated[str | None, Query(description="operation_key 필터")] = None,

@@ -135,6 +135,10 @@ from kortravelmap.infra.provider_field_candidates import (
     capture_provider_field_candidates,
     provider_field_shadow_enabled,
 )
+from kortravelmap.infra.public_read_budget import (
+    apply_public_read_budget,
+    public_read_statement_timeout_ms,
+)
 from kortravelmap.infra.search_prominence_repo import (
     SEARCH_PROMINENCE_DEFAULT,
     SEARCH_PROMINENCE_MAX,
@@ -7779,11 +7783,24 @@ async def search_features(
     if contract.q is not None:
         q_compact = search_alias_key(contract.q)
         bracket_like = search_bracket_like_pattern(contract.q)
-        await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
         # 검색 SQL은 식이 많아(순위 CASE·정규식·창 함수) 추정 비용이 ``jit_above_cost``를 넘는다.
         # 후보는 수천 행이라 JIT가 벌 것이 없는데 컴파일(최적화·방출)이 실행 시간의 대부분이었다 —
         # prod 2026-11-12 "부산 맛집" 7.6 s 중 JIT 7.2 s. 이 transaction에서만 끈다.
-        await session.execute(text("SET LOCAL jit = off"))
+        search_timeout_ms = public_read_statement_timeout_ms(session)
+        if search_timeout_ms is None:
+            await session.execute(text("SET LOCAL pg_trgm.similarity_threshold = 0.2"))
+            await session.execute(text("SET LOCAL jit = off"))
+        else:
+            # 공개 읽기 마감(T-READ-03): 세 설정을 한 문장으로 보낸다(왕복이 늘지 않는다). ``;``로
+            # 이은 문자열은 asyncpg prepared statement에서 실패하므로 ``set_config``를 쓴다.
+            await session.execute(
+                text(
+                    "SELECT set_config('pg_trgm.similarity_threshold', '0.2', true), "
+                    "set_config('jit', 'off', true), "
+                    "set_config('statement_timeout', :timeout, true)"
+                ),
+                {"timeout": f"{search_timeout_ms}ms"},
+            )
         # 별칭은 PK 조회 한 번이다. 이름을 bind 값으로 넘겨야 본 질의의 별칭 팔이 trigram
         # GIN ``=``로 계획된다(하위 질의로 두면 계획 시점에 값을 모른다).
         alias_name = (
@@ -7795,6 +7812,8 @@ async def search_features(
     score_sql, score_count_sql = _search_score_sql(region, arms)
     attribute_filter = list(contract.attributes) if contract.attributes is not None else None
     effective_limit = contract.page_size
+    # 공개 읽기 마감(T-READ-03): 별칭·지역 전처리가 쓴 시간을 빼고 본 질의 상한을 다시 건다.
+    await apply_public_read_budget(session)
     rows = (
         (
             await session.execute(
@@ -7828,6 +7847,7 @@ async def search_features(
     )
     total_count: int | None = None
     if contract.include_total:
+        await apply_public_read_budget(session)
         count_result = await session.execute(
             text(score_count_sql if q_enabled else _FEATURE_SEARCH_COUNT_SQL),
             {

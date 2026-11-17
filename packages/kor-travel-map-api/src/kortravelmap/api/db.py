@@ -16,12 +16,21 @@ engine은 lazy singleton (모듈 레벨) — ADR-030의 in-memory **데이터** 
 
 from __future__ import annotations
 
-from time import perf_counter
-from typing import TYPE_CHECKING
+import asyncio
+from contextlib import asynccontextmanager
+from time import monotonic, perf_counter
+from typing import TYPE_CHECKING, Annotated
 
+from fastapi import Depends, Request
 from kortravelmap.infra.db import make_async_engine
+from kortravelmap.infra.public_read_budget import (
+    PUBLIC_READ_DEADLINE_INFO_KEY,
+    ReadBudgetExceeded,
+    apply_public_read_budget,
+)
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy import event
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
 from kortravelmap.api.request_timing import current_request_db_timing
@@ -30,7 +39,7 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from typing import Any
 
-    from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
+    from sqlalchemy.ext.asyncio import AsyncEngine
     from sqlalchemy.pool import ConnectionPoolEntry
 
     from kortravelmap.api.prometheus import PrometheusMetrics
@@ -46,7 +55,19 @@ __all__ = [
     "reset_engine",
     "TimedAsyncQueuePool",
     "pool_status",
+    "PoolBusy",
+    "PUBLIC_READ_BUDGET_STATE",
+    "get_public_read_session",
+    "get_public_read_snapshot_session",
+    "get_public_read_slow_snapshot_session",
 ]
+
+PUBLIC_READ_BUDGET_STATE = "public_read_budget_ms"
+"""``request.state``의 표시. 공개 읽기 예산 아래의 요청만 57014를 503 ``READ_TIMEOUT``으로 바꾼다."""
+
+
+class PoolBusy(Exception):
+    """공개 읽기가 pool 대기 상한 안에 연결을 얻지 못했다(503 ``POOL_BUSY``)."""
 
 
 _engine: AsyncEngine | None = None
@@ -139,8 +160,6 @@ async def get_session() -> AsyncIterator[AsyncSession]:
     이 의존성 자체는 commit하지 않는다. handler가 쓰기 transaction을 소유하며,
     단일 image가 필요한 순수 조회는 ``get_read_snapshot_session``을 쓴다.
     """
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     async with AsyncSession(_get_engine(), expire_on_commit=False) as session:
         yield session
 
@@ -151,8 +170,6 @@ async def get_public_api_key_session() -> AsyncIterator[AsyncSession]:
     ``require_public_api_key``가 조회 직후 context를 닫아 snapshot reader가 같은
     pool의 유일한 connection도 이어 쓸 수 있게 한다. 의존성 종료의 close는 멱등이다.
     """
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     async with AsyncSession(_get_engine(), expire_on_commit=False) as session:
         yield session
 
@@ -164,8 +181,6 @@ async def get_read_snapshot_session() -> AsyncIterator[AsyncSession]:
     transaction의 isolation을 바꾸지 않으며, 성공/예외 모두 context 종료 시
     connection을 pool에 반환한다. 여러 HTTP page 사이의 snapshot은 약속하지 않는다.
     """
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     engine = _get_engine().execution_options(
         isolation_level="REPEATABLE READ", postgresql_readonly=True
     )
@@ -180,13 +195,91 @@ async def get_locking_read_snapshot_session() -> AsyncIterator[AsyncSession]:
     기존 ``get_read_snapshot_session``을 유지하며, 이 dependency는 행 잠금 guard를
     제거하거나 mutation에 쓰기 권한을 새로 주기 위한 경로가 아니다.
     """
-    from sqlalchemy.ext.asyncio import AsyncSession
-
     engine = _get_engine().execution_options(
         isolation_level="REPEATABLE READ", postgresql_readonly=False
     )
     async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
         yield session
+
+
+# ── 공개 읽기 요청 마감 (T-READ-03) ─────────────────────────────────────────
+#
+# 새 의존성은 기존 의존성을 **감싼다** — 격리 수준·세션 수명은 ``get_session``·
+# ``get_read_snapshot_session``이 지금처럼 정하고, 여기서는 (1) 첫 연결 획득을 pool 대기 상한
+# 안에서 하고 (2) 요청 도착에서 센 마감을 ``session.info``에 싣고 (3) 남은 시간을 그
+# transaction의 ``statement_timeout``으로 건다. 엔진의 ``pool_timeout``은 바꾸지 않는다(엔진이
+# 하나라 admin·ops·쓰기까지 걸린다). 예산이 0이면 감싸기만 하고 아무것도 하지 않는다.
+
+
+async def get_public_read_session(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> AsyncIterator[AsyncSession]:
+    """공개 읽기 — ``get_session``과 같은 격리에 요청 마감(기본 4.5초)을 건다."""
+    async with _public_read_budget(request, session, slow=False):
+        yield session
+
+
+async def get_public_read_snapshot_session(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+) -> AsyncIterator[AsyncSession]:
+    """공개 읽기 — ``get_read_snapshot_session``과 같은 격리에 요청 마감(기본 4.5초)을 건다."""
+    async with _public_read_budget(request, session, slow=False):
+        yield session
+
+
+async def get_public_read_slow_snapshot_session(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+) -> AsyncIterator[AsyncSession]:
+    """``GET /v1/public/festivals/monthly`` 전용 — PinVi가 이 route만 15초 기다린다(기본 14초)."""
+    async with _public_read_budget(request, session, slow=True):
+        yield session
+
+
+@asynccontextmanager
+async def _public_read_budget(
+    request: Request, session: AsyncSession, *, slow: bool
+) -> AsyncIterator[None]:
+    settings = getattr(request.app.state, "settings", None)
+    budget_ms = 0
+    pool_wait_ms = 0
+    if settings is not None:
+        budget_ms = settings.public_read_slow_budget_ms if slow else settings.public_read_budget_ms
+        pool_wait_ms = settings.public_read_pool_wait_ms
+    # 시험 대역(가짜 세션)에는 걸 곳이 없다 — 진짜 AsyncSession에만 건다.
+    if budget_ms <= 0 or not isinstance(session, AsyncSession):
+        yield
+        return
+    started = getattr(request.state, "started_monotonic", None)
+    if not isinstance(started, float):
+        started = monotonic()
+    deadline = started + budget_ms / 1000.0
+    setattr(request.state, PUBLIC_READ_BUDGET_STATE, budget_ms)
+    session.info[PUBLIC_READ_DEADLINE_INFO_KEY] = deadline
+    try:
+        await _checkout_within(session, deadline=deadline, pool_wait_ms=pool_wait_ms)
+        await apply_public_read_budget(session)
+        yield
+    finally:
+        session.info.pop(PUBLIC_READ_DEADLINE_INFO_KEY, None)
+
+
+async def _checkout_within(session: AsyncSession, *, deadline: float, pool_wait_ms: int) -> None:
+    """첫 연결을 min(pool 대기 상한, 남은 예산) 안에 얻는다. 대기 시간은 예산에서 빠진다."""
+    remaining = deadline - monotonic()
+    if remaining <= 0:
+        raise ReadBudgetExceeded
+    pool_wait = pool_wait_ms / 1000.0 if pool_wait_ms > 0 else remaining
+    wait = min(pool_wait, remaining)
+    try:
+        async with asyncio.timeout(wait):
+            await session.connection()
+    except TimeoutError as exc:
+        if pool_wait < remaining:
+            raise PoolBusy from exc
+        raise ReadBudgetExceeded from exc
 
 
 def _instrument_engine_if_needed(engine: AsyncEngine) -> None:

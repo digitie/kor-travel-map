@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-18 — 공개 읽기 요청 마감(T-READ-03, PinVi T-READ-PIN-04 뒤 배포)
+
+- 공개 읽기 route는 요청 도착에서 4.5초(`KOR_TRAVEL_MAP_API_PUBLIC_READ_BUDGET_MS`) 안에 끝나지 않으면 503 `READ_TIMEOUT`, pool 대기 2초(`…_POOL_WAIT_MS`)를 넘으면 503 `POOL_BUSY`. 축제 월별만 14초(`…_SLOW_BUDGET_MS`). 0이면 끈다. 응답 모양·OpenAPI 변경 없음(공통 problem 응답).
+
 ## 2026-11-18 — API 느린 요청 로그·pool 대기 지표(T-READ-02)
 
 - 새 설정 `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS`(기본 1000, 0이면 끔): 그 이상 걸린 요청을 route template·status·시간·DB 문장 수·DB 시간·pool 대기·request id와 함께 WARNING 한 줄로 남긴다. 지표 flag와 무관하다.
