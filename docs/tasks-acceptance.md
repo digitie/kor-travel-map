@@ -2710,8 +2710,9 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 - [ ] Common `T-418`(`components/ui/*`의 순수 재수출 shim 13개와 `lib/utils.ts`를 공통 경로 직접 import로)이 머지됐다 — 선행 없음, 릴리스 불필요.
 - [ ] Common `T-416`(정확 Node/npm 핀 `.nvmrc` + `engines.node` 22.23.1 채택 여부)의 소유자 결정이 기록됐다 — 2026-11-17 질의, 답 대기.
 - [ ] Common `T-417`(guard 호출 SHA를 Common이 지정한 채택 커밋으로, 도구 규칙 이관)이 머지됐다 — `T-416`이 채택이고 Common `T-024`가 끝난 뒤. 미채택이면 그 결정으로 닫는다.
-- [ ] Common `T-415`(`@kor-travel/admin-kit` 채택)가 머지됐거나, Common 쪽 묶음(`T-221`)이 철회돼 대상이 없어졌다 — guard 호출 SHA와 `T-416` 결정을 기다리지 않는다.
-- 다섯 항목이 닫히거나 Common 계획이 철회되면 이 포인터를 `tasks-done.md`로 옮긴다.
+- [ ] Common `T-419`(Common `T-025`의 ui·tokens patch 릴리스 당일 재vendor)가 머지됐다 — Map이 그날 옛 guard(`55a921b`)에 남아 있을 때만. `T-417`이 먼저 끝났으면 대상 없음으로 닫는다.
+- [ ] Common `T-415`(`@kor-travel/admin-kit` 채택)가 머지됐거나, Common 쪽 묶음(`T-221`)이 철회돼 대상이 없어졌다 — `T-416` 결정을 기다리지 않는다. 옛 guard에 남아 있으면 `T-419` 뒤, 새 guard면 호출 SHA를 admin-kit 채택 커밋으로 올리는 것이 첫 단계다.
+- 여섯 항목이 닫히거나 Common 계획이 철회되면 이 포인터를 `tasks-done.md`로 옮긴다.
 - 이 포인터가 다루지 않는 것: `/features`의 지도 작업면 채택은 `T-UI-MAPWORKSPACE`(보류)가 그대로 소유한다.
   계획이 Map 코드에 대해 "공유하지 않음"으로 적은 것(Valkey 상태 저장소 K-22, 회수 sensor K-42, provider 호출 K-32, coalescing 이외의 Dagster 결선 K-47)은 대상이 아니다.
 
