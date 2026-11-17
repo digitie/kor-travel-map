@@ -616,9 +616,11 @@ wsl -e bash -lc 'cd /mnt/f/dev/<worktree>/packages/kor-travel-map-admin/frontend
 `tests/unit/test_vnext_contract_artifacts.py`의 아티팩트 핀도 함께 갱신해야 한다.
 **핀 파일은 LF로 써야 한다** — CRLF로 쓰면 git 정규화 후 CI가 다른 sha를 본다.
 
-## 10.9 WSL의 node는 22 이상이어야 한다
+## 10.9 WSL의 node는 루트 `.nvmrc`(26.13.1)와 같아야 한다
 
-저장소 `package.json`의 engines는 `^22.22.2 || ^24.15.0 || >=26.0.0`이다. WSL 기본
+2026-11-17부터 저장소 `package.json`의 `engines.node`는 정확 `26.13.1`이고 정본은 루트 `.nvmrc`다(ADR-124).
+`.npmrc`가 `engine-strict=true`라 다른 Node로는 `npm ci`가 거절된다. `nvm install && nvm use`로 맞춘다.
+아래는 그 전(범위 engines) 기록이다. WSL 기본
 node가 v20이면 **`npm audit fix` 같은 쓰기 명령이 engine 검사로 거부된다**
 (`npm error notsup`). 읽기 명령(`npm audit`, `npm run …`)은 통과해서 한동안
 드러나지 않는다 — 2026-08-09에 그 상태로 lockfile 취약점을 "환경이 없어 못 고친다"고
@@ -629,8 +631,8 @@ node가 v20이면 **`npm audit fix` 같은 쓰기 명령이 engine 검사로 거
 wsl -e bash -lc 'cd /tmp   && curl -fsSL -o node.tar.xz https://nodejs.org/dist/v22.22.2/node-v22.22.2-linux-x64.tar.xz   && rm -rf node22 && mkdir node22 && tar -xJf node.tar.xz -C node22 --strip-components=1   && sudo rm -rf /opt/node22 && sudo mv node22 /opt/node22   && sudo ln -sf /opt/node22/bin/node /usr/local/bin/node   && sudo ln -sf /opt/node22/bin/npm  /usr/local/bin/npm   && sudo ln -sf /opt/node22/bin/npx  /usr/local/bin/npx   && node --version'
 ```
 
-프론트 게이트를 돌리기 전에 `node --version`이 22 이상인지 확인한다. Node 20에서
-"통과"한 프론트 결과는 CI(Node 22.23.1)와 다를 수 있다.
+프론트 게이트를 돌리기 전에 `node --version`이 `.nvmrc`와 같은지 확인한다. 다른 Node에서
+"통과"한 프론트 결과는 CI(Node 26.13.1)와 다를 수 있다. 위 설치 예시의 버전도 `.nvmrc` 값으로 바꿔 쓴다.
 
 ## 11. 운영 환경 정보 (참고)
 

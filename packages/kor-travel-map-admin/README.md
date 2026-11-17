@@ -8,7 +8,7 @@
 
 ```bash
 # 저장소 루트의 Linux/WSL 셸에서
-source ~/.nvm/nvm.sh && nvm use 22.23.1
+source ~/.nvm/nvm.sh && nvm install && nvm use   # 루트 .nvmrc(26.13.1)
 npx --yes npm@12.0.1 ci --workspaces --include=optional
 npx --yes npm@12.0.1 run verify:npm-tree
 npx --yes npm@12.0.1 -w packages/kor-travel-map-admin/frontend run dev

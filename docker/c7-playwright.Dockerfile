@@ -1,4 +1,11 @@
+# Playwright 이미지의 Node는 major만 고정된 apt 판이다. 루트 engines가 정확 Node(.nvmrc,
+# ADR-124)이고 .npmrc가 engine-strict이므로, 같은 정확 Node 바이너리를 공식 이미지에서
+# 가져와 PATH 앞(/usr/local/bin)에 둔다. 브라우저·Playwright 의존성은 base 그대로다.
+FROM node:26.13.1-bookworm-slim@sha256:5df79989ed685e09f0a98019db4cebfb22fb9df1a53c0161664a011f7ff6b0f1 AS exact-node
+
 FROM mcr.microsoft.com/playwright:v1.65.0-noble@sha256:6e3fb709361521eb27161606e6da6d2674e5e89fa16516cb37d6fdd91372273d
+
+COPY --from=exact-node /usr/local/bin/node /usr/local/bin/node
 
 ARG C7_REPOSITORY_COMMIT
 

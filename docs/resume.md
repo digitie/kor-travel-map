@@ -1,3 +1,8 @@
+## 2026-11-17 — 정확 Node 26.13.1 핀(ADR-124)
+
+- Common T-416이 소유자 결정으로 채택됐다(Node 26.13.1 최신 LTS, npm 12.0.1). 이 PR이 `.nvmrc`·정확 `engines`·CI·frontend/live e2e 이미지의 Node를 맞춘다. 로컬은 `nvm install && nvm use`.
+- guard 호출은 `55a921b` 그대로. 다음 Map 몫은 Common `T-029`(공통 축 26.13.1) 뒤의 `T-417`, 그 전에 Common `T-025` 릴리스 날이면 `T-419`.
+
 ## 2026-11-17 — Common 공통화 재조사 계획의 Map 포인터(문서 전용)
 
 - 소유자 요청으로 kor-travel-common이 다섯 저장소를 다시 조사해 계획을 냈다(Common `docs/plan/commonization-plan-2026-11-17.md`, 적대 리뷰 2회 반영). Map 조사 기준은 `f1788da9`.

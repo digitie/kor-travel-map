@@ -84,11 +84,13 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
     eslint_config = (FRONTEND / "eslint.config.mjs").read_text(encoding="utf-8")
 
     expected_engines = {
-        "node": "^22.22.2 || ^24.15.0 || >=26.0.0",
+        "node": "26.13.1",
         "npm": "12.0.1",
     }
     assert root_package["packageManager"] == "npm@12.0.1"
     assert root_package["engines"] == expected_engines
+    # 정확 Node의 정본은 루트 .nvmrc다(ADR-124). 선언·CI·이미지가 그 한 값을 따른다.
+    assert (ROOT / ".nvmrc").read_text(encoding="utf-8") == expected_engines["node"] + "\n"
     assert frontend_package["engines"] == expected_engines
 
     # 버전 **숫자**는 매니페스트가 정본이다. 예전에는 이 파일이 `16.2.12` /
@@ -266,7 +268,18 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
         assert dockerfile.index(install_token) < dockerfile.index(tree_token)
         assert dockerfile.index(tree_token) < dockerfile.index(verify_token)
 
-    assert 'node-version: "22.23.1"' in workflow
+    assert 'node-version: "26.13.1"' in workflow
+    # live e2e 실행 이미지도 engine-strict 설치 전에 같은 정확 Node를 PATH 앞에 둔다.
+    c7 = dockerfiles["c7-playwright.Dockerfile"]
+    exact_node = re.search(
+        r"^FROM (node:26\.13\.1-bookworm-slim@sha256:[0-9a-f]{64}) AS exact-node$",
+        c7,
+        re.MULTILINE,
+    )
+    assert exact_node is not None
+    assert f"FROM {exact_node.group(1)} AS deps" in dockerfiles["frontend.Dockerfile"]
+    copy_node = "COPY --from=exact-node /usr/local/bin/node /usr/local/bin/node"
+    assert c7.index(copy_node) < c7.index(install_token)
     assert install_token in workflow
     assert tree_token in workflow
     assert "npx --yes npm@12.0.1 run verify:frontend-eslint" in workflow

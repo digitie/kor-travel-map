@@ -1,3 +1,11 @@
+## 2026-11-17 — 정확 Node 26.13.1 핀(ADR-124, Common T-416 채택)
+
+- 소유자 결정(2026-11-17): Common T-416 "추천안 대로 node는 최신버전으로". 질의 당시 값 22.23.1 대신 nodejs.org 색인의 최신 LTS 줄(26 Lithium) 최신 patch **26.13.1**로 고정했다. 가장 새 항목 `v27.0.0-alpha`는 alpha라 제외. npm은 공통 축 12.0.1 유지(26.13.1 동봉 npm은 11.20.0).
+- 루트 `.nvmrc` 신설, 루트·관리자 frontend `engines.node` 정확 `26.13.1`(lock의 두 항목 포함), CI `node-version`, `docker/frontend.Dockerfile`의 `node:26.13.1-bookworm-slim` digest.
+- live e2e 실행 이미지(`docker/c7-playwright.Dockerfile`): Playwright base의 Node는 apt major 판이라 정확 `engines` + `engine-strict`에서 `npm ci`가 거절된다. 같은 digest의 공식 이미지에서 `node`만 `/usr/local/bin`으로 복사했다.
+- guard 호출(`55a921b`)은 그대로다. 그 판은 `engines`를 읽지 않는다. 공통 축이 26.13.1이 되는 Common T-029 뒤에 T-417로 옮긴다.
+- 검증: 관련 단위 테스트 6개 파일 96건 로컬 통과(`test_frontend_dependency_security`·`test_ci_workflows`·`test_c7_prod_live_runner_contract`·`test_dockerfile_workspace_manifest_coverage`·`test_ci_builds_production_dockerfiles`·`test_tvn34c_n150_fresh_live_runner`). frontend build·docker-images는 PR CI. n150 게이트·live e2e는 `NOT_RUN`(prod 배포·e2e 진행 중이라 n150 변경 금지).
+
 ## 2026-11-17 — Common 공통화 재조사 계획의 Map 포인터(문서 전용)
 
 - 소유자 요청으로 kor-travel-common이 다섯 저장소를 다시 조사해 계획을 냈다(Common `docs/plan/commonization-plan-2026-11-17.md`, 적대 리뷰 2회 반영). Map 조사 기준은 `f1788da9`.

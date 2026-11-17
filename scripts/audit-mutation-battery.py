@@ -65,7 +65,7 @@ SRC = Path(__file__).resolve().parents[1]
 WORK = Path(tempfile.mkdtemp(prefix="ktm-audit-mutation-"))
 atexit.register(shutil.rmtree, WORK, True)
 
-_NODE_STEP = "      - name: Set up Node 22.23.1"
+_NODE_STEP = "      - name: Set up Node 26.13.1"
 _FIXTURE_BLOCK = (
     "          if [ -d tests/fixtures ]; then\n"
     "            pytest tests/fixtures -q --no-cov\n"

@@ -38,10 +38,10 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     assert unit["name"] == "pytest (Python ${{ matrix.python-version }})"
     assert unit["strategy"]["matrix"]["python-version"] == ["3.11", "3.12", "3.13"]
     unit_steps = _steps_by_name(unit)
-    node_setup = unit_steps["Set up Node 22.23.1"]
+    node_setup = unit_steps["Set up Node 26.13.1"]
     assert node_setup["uses"] == "actions/setup-node@v4"
     assert node_setup["with"] == {
-        "node-version": "22.23.1",
+        "node-version": "26.13.1",
         "cache": "npm",
         "cache-dependency-path": "package-lock.json",
     }
