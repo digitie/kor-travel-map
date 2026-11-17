@@ -78,8 +78,10 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-11-10 ADR-121 R3 — user·admin baseline 재고정(장소 속성 catalog·판정 목록 추가,
     # 공개 목록·검색·주변·상세 additive 필드·query, service 불변).
     # 2026-11-17 — 공개 월별 축제 bbox query(user·admin baseline 재고정).
+    # 2026-11-18 T-READ-04 — service·admin baseline 재고정(near-batch 2 operation 추가,
+    # user 불변). service added 2건.
     "openapi-diff-v1.json": (
-        "86fa1d7d0cfd32cf416f11bc33de23eb1807a012fb4222217dc3f3670aed20e5"
+        "0a9470252303ce06de99f77d4930760779e307c04abde0bf4474bfc402090c3b"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -95,8 +97,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-10-25 PR #1410 — full-admin description SHA 재핀, pending/re-vendor 조건 유지.
     # 2026-11-10 ADR-121 R3 — pending receipt의 user·full-admin sha 재핀(장소 속성).
     # 2026-11-17 — 축제 bbox로 user·full 지문 갱신(pending 유지).
+    # 2026-11-18 T-READ-04 — pending receipt의 service·full-admin sha 재핀(near-batch).
     "consumer-rollout-v1.json": (
-        "a96f67f2953df4571f90ad25d9eca542e980d41dbd893ed03a836684d9447983"
+        "e9d75b8bfc8b6deba1e0e3d88b96f4ab6b75d44027957b7e8402345f45e05ae0"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

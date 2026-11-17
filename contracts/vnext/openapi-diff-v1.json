@@ -5,7 +5,7 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "26c4e1c667f61536e773db1290cfd318640339a64226674ea41d266e384eb6cc"
+      "sha256": "a370f2c9a1abf76dc722560bfd37ee32701fe390d3ab2dad86c44aa7cdf70e46"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
@@ -13,7 +13,7 @@
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "fd2aaa9e8c38e8a7f1a54550233b1b5af5a7aea1089c5432100d7464e5e4aaff"
+      "sha256": "ed380047bc420e4469bd6f4f88740cfd54c23a50d1a88ccb97215737d76df275"
     }
   },
   "revisions": [
@@ -226,6 +226,11 @@
       "date": "2026-11-17",
       "task": "PinVi 추천 여행 축제 bbox",
       "change": "baseline sha256 재고정(user·admin, service 불변). 공개 `GET /v1/public/festivals/monthly`에 선택 bbox query(`min_lon`/`min_lat`/`max_lon`/`max_lat`, 4값 함께)를 더했다 — 목록과 months count 모두에 적용, 미지정 시 기존 동작 불변. PinVi user 재vendor 대상이다."
+    },
+    {
+      "date": "2026-11-18",
+      "task": "T-READ-04",
+      "change": "baseline sha256 재고정(service·admin, user 불변). `POST /v1/service/transport/fuel-stations/near-batch`·`POST /v1/service/transport/highway-incidents/near-batch` 2 operation과 `NearBatchRequest`·`NearBatchPoint` 스키마를 추가했다(기존 경로·스키마 불변). PinVi service·admin 재vendor 대상이다(T-READ-PIN-01 ③과 한 pair 회전)."
     }
   ],
   "surfaces": {
@@ -446,7 +451,7 @@
     },
     "service": {
       "counts": {
-        "added": 20,
+        "added": 22,
         "removed": 0,
         "renamed": 0,
         "enum_changes": 1,
@@ -590,6 +595,16 @@
         {
           "target_operation": "GET /v1/service/admin-features/{feature_id}",
           "basis": "PR #1414: 기존 admin DTO/query를 공유하는 별도 digest read principal; write/legacy 권한 확대 없음",
+          "applied": true
+        },
+        {
+          "target_operation": "POST /v1/service/transport/fuel-stations/near-batch",
+          "basis": "T-READ-04: 여행 교통 반경 조회를 중심 최대 60곳 한 요청으로 — additive, 기존 route 불변",
+          "applied": true
+        },
+        {
+          "target_operation": "POST /v1/service/transport/highway-incidents/near-batch",
+          "basis": "T-READ-04: 여행 교통 반경 조회를 중심 최대 60곳 한 요청으로 — additive, 기존 route 불변",
           "applied": true
         }
       ],

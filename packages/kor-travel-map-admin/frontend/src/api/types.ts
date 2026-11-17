@@ -3182,6 +3182,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/service/transport/fuel-stations/near-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 주유소 묶음 근처 검색 (중심 최대 60곳, 한 세대) */
+        post: operations["near_batch_fuel_stations_v1_service_transport_fuel_stations_near_batch_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/service/transport/fuel-stations/{feature_id}": {
         parameters: {
             query?: never;
@@ -3227,6 +3244,23 @@ export interface paths {
         get: operations["list_highway_incidents_v1_service_transport_highway_incidents_get"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/service/transport/highway-incidents/near-batch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** 고속도로 활성 돌발 묶음 근처 검색 (중심 최대 60곳, 한 세대) */
+        post: operations["near_batch_highway_incidents_v1_service_transport_highway_incidents_near_batch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -11082,6 +11116,44 @@ export interface components {
              * @default
              */
             request_id: string;
+        };
+        /**
+         * NearBatchPoint
+         * @description 묶음 근처 검색의 중심 하나.
+         */
+        NearBatchPoint: {
+            /**
+             * Lat
+             * @description 중심 위도.
+             */
+            lat: number;
+            /**
+             * Lon
+             * @description 중심 경도.
+             */
+            lon: number;
+        };
+        /**
+         * NearBatchRequest
+         * @description ``POST /{dataset}/near-batch`` 본문(T-READ-04).
+         */
+        NearBatchRequest: {
+            /**
+             * Limit
+             * @description 중심 전체를 합쳐 가장 가까운 순으로 이 건수까지.
+             * @default 100
+             */
+            limit: number;
+            /**
+             * Points
+             * @description 근처 검색 중심(최대 60곳). 같은 반경을 모든 중심에 쓴다.
+             */
+            points: components["schemas"]["NearBatchPoint"][];
+            /**
+             * Radius M
+             * @description 근처 검색 반경(m, 최대 50 km).
+             */
+            radius_m: number;
         };
         /**
          * NearbyFeatureSummary
@@ -26608,6 +26680,57 @@ export interface operations {
             };
         };
     };
+    near_batch_fuel_stations_v1_service_transport_fuel_stations_near_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NearBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["FuelStationListResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     get_fuel_station_v1_service_transport_fuel_stations__feature_id__get: {
         parameters: {
             query?: never;
@@ -26783,6 +26906,57 @@ export interface operations {
                 };
                 content: {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 TRANSPORT_STATE_NOT_LOADED(아직 적재 전). */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    near_batch_highway_incidents_v1_service_transport_highway_incidents_near_batch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["NearBatchRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HighwayIncidentListResponse"];
                 };
             };
             /** @description Validation Error */
