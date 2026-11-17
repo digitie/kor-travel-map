@@ -1,3 +1,13 @@
+## 2026-11-17 — Common 공통화 재조사 계획의 Map 포인터(문서 전용)
+
+- 소유자 요청으로 kor-travel-common이 다섯 저장소를 다시 조사해 계획을 냈다(Common `docs/plan/commonization-plan-2026-11-17.md`, 적대 리뷰 2회 반영). Map 조사 기준은 `f1788da9`.
+- Map 몫은 여섯이다: Common `T-480b`(API compose healthcheck를 `kortravelcommon.http_health` exec 형식으로, 선행 없음),
+  `T-418`(`components/ui/*` 순수 재수출 shim 제거, 선행 없음), `T-416`(정확 Node/npm 핀 채택 여부 결정 — 소유자에게 질의됐고 답 대기),
+  `T-417`(guard 호출 SHA·도구 규칙 이관, `T-416`이 채택일 때), `T-419`(Common `T-025`의 ui·tokens patch 릴리스 당일 재vendor — 그날 옛 guard에 남아 있을 때만),
+  `T-415`(선택형 패키지 `@kor-travel/admin-kit` 채택, Common `T-221` 뒤. `T-416` 결정을 기다리지 않는다. 옛 guard면 `T-419` 뒤).
+- `docs/tasks.md`에 `T-COMMON-PLAN-20261117` 한 줄, `docs/tasks-acceptance.md`에 같은 이름의 절을 뒀다. 수용 기준 본문은 Common이 소유한다.
+- 코드 변경 없음. 진행 중인 작업과 다음 한 작업은 바뀌지 않는다.
+
 ## 2026-11-17 — 읽기 성능 계획(Map·weather·transport)
 
 - 소유자 요청으로 세 서비스의 읽기 경로를 코드와 운영 관측으로 검토해 [계획](reports/2026-11-17-read-performance-plan.md)을 썼다. 코드·설정·운영 변경
