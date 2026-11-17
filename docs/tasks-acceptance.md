@@ -2703,15 +2703,15 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 
 ## T-COMMON-PLAN-20261117
 
-kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17 초안, `docs/plan/commonization-plan-2026-11-17.md`) 가운데 Map이 실행하는 task를 가리키는 포인터다.
+kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan/commonization-plan-2026-11-17.md`) 가운데 Map이 실행하는 task를 가리키는 포인터다.
 판정 근거와 수용 기준 본문은 Common `docs/tasks/`의 상세 파일이 소유하고 여기 복제하지 않는다. 조사 기준은 Map `f1788da9`.
 
-- [ ] Common `T-480b`(Map API compose healthcheck를 `kortravelcommon.http_health` exec 형식으로)가 Map PR로 머지됐다 — 선행 없음.
+- [ ] Common `T-480b`(Map API compose healthcheck를 `kortravelcommon.http_health` exec 형식으로, 모듈 확인은 `docker-images` workflow에서)가 머지됐다 — 선행 없음.
+- [ ] Common `T-418`(`components/ui/*`의 순수 재수출 shim 13개와 `lib/utils.ts`를 공통 경로 직접 import로)이 머지됐다 — 선행 없음, 릴리스 불필요.
 - [ ] Common `T-416`(정확 Node/npm 핀 `.nvmrc` + `engines.node` 22.23.1 채택 여부)의 소유자 결정이 기록됐다 — 2026-11-17 질의, 답 대기.
-- [ ] Common `T-417`(guard 호출 SHA 갱신과 도구 규칙 이관)이 머지됐다 — `T-416`이 채택일 때만. 미채택이면 그 결정으로 닫는다.
-- [ ] Common `T-415`(`@kor-travel/ui` 0.3.0 재vendor와 관리자 부품 채택)가 머지됐거나, Common 쪽 묶음(`T-221`)이 철회돼 대상이 없어졌다.
-  `T-416`이 미채택이면 이 PR은 Common `T-222`(현재 값 전환) 직후에 머지한다.
-- 네 항목이 닫히거나 Common 계획이 리뷰에서 철회되면 이 포인터를 `tasks-done.md`로 옮긴다.
+- [ ] Common `T-417`(guard 호출 SHA를 Common이 지정한 채택 커밋으로, 도구 규칙 이관)이 머지됐다 — `T-416`이 채택이고 Common `T-024`가 끝난 뒤. 미채택이면 그 결정으로 닫는다.
+- [ ] Common `T-415`(`@kor-travel/admin-kit` 채택)가 머지됐거나, Common 쪽 묶음(`T-221`)이 철회돼 대상이 없어졌다 — guard 호출 SHA와 `T-416` 결정을 기다리지 않는다.
+- 다섯 항목이 닫히거나 Common 계획이 철회되면 이 포인터를 `tasks-done.md`로 옮긴다.
 - 이 포인터가 다루지 않는 것: `/features`의 지도 작업면 채택은 `T-UI-MAPWORKSPACE`(보류)가 그대로 소유한다.
   계획이 Map 코드에 대해 "공유하지 않음"으로 적은 것(Valkey 상태 저장소 K-22, 회수 sensor K-42, provider 호출 K-32, coalescing 이외의 Dagster 결선 K-47)은 대상이 아니다.
 
