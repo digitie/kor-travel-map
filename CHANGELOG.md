@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-17 — 공개 월별 축제 bbox 필터
+
+- `GET /v1/public/festivals/monthly`: 선택 query `min_lon`/`min_lat`/`max_lon`/`max_lat`(4값 함께, 일부만이면 422). 목록과 `months` count를 그 범위 안 좌표의 축제로 좁힌다(`coord &&` envelope, GiST). 미지정 시 기존 동작. OpenAPI user·full additive 변경(service 불변).
+
 ## 2026-11-12 — 검색 접기 대표 수정·롯데호텔 별칭(alembic 452)
 
 - `/v1/features/search` 중복 접기: 같은 장소 무리의 대표는 MCST 목록이 primary 원천이 아닌 행이다(그다음 순위). 대표는 무리의 가장 좋은 자리를 물려받는다 — 응답의 순위 자리는 숨긴 행의 값일 수 있다. MOIS 호텔 행(03010100)이 MCST 촬영지 행(01000000)에 접혀 "JW 메리어트 서울"·"그랜드 하얏트 서울"이 관광지로 보이던 회귀(#1495)를 고친다. 검색 cursor v9.

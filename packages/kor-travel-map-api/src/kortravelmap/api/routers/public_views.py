@@ -521,13 +521,24 @@ async def list_public_festivals_monthly(
     month: Annotated[int | None, Query(ge=1, le=12)] = None,
     sido_code: Annotated[str | None, Query(min_length=2, max_length=2)] = None,
     sigungu_code: Annotated[str | None, Query(min_length=5, max_length=5)] = None,
+    min_lon: Annotated[float | None, Query(ge=-180, le=180)] = None,
+    min_lat: Annotated[float | None, Query(ge=-90, le=90)] = None,
+    max_lon: Annotated[float | None, Query(ge=-180, le=180)] = None,
+    max_lat: Annotated[float | None, Query(ge=-90, le=90)] = None,
     page_size: Annotated[int, Query(ge=1, le=50)] = 12,
     cursor: str | None = None,
     include_months: bool = True,
 ) -> PublicFestivalMonthlyResponse:
-    """월별 활성 축제 공개 view."""
+    """월별 활성 축제 공개 view.
+
+    bbox(``min_lon``/``min_lat``/``max_lon``/``max_lat``, 4값 함께)를 주면 그 범위 안
+    좌표의 축제만 — 목록과 ``months`` count 모두 — 돌려준다. 시도·시군구 필터와 AND다.
+    """
 
     started = perf_counter()
+    _validate_bbox(
+        min_lon=min_lon, min_lat=min_lat, max_lon=max_lon, max_lat=max_lat
+    )
     month_start, month_end, _, _ = _month_range(year, month)
     try:
         page = await public_views_repo.list_public_festivals_monthly(
@@ -536,6 +547,10 @@ async def list_public_festivals_monthly(
             month_end=month_end,
             sido_code=sido_code,
             sigungu_code=sigungu_code,
+            min_lon=min_lon,
+            min_lat=min_lat,
+            max_lon=max_lon,
+            max_lat=max_lat,
             page_size=page_size,
             cursor=cursor,
             include_months=include_months,

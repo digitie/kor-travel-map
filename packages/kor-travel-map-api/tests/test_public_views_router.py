@@ -264,3 +264,60 @@ def test_get_public_festival_404(
         assert r.status_code == 404
     finally:
         client.app.dependency_overrides.clear()
+
+
+def test_public_festival_monthly_rejects_partial_bbox(client: TestClient) -> None:
+    r = client.get(
+        "/v1/public/festivals/monthly",
+        params={"year": 2099, "month": 5, "min_lon": 128.8, "min_lat": 37.7},
+    )
+    assert r.status_code == 422
+    assert "bbox" in r.json()["detail"]
+
+
+def test_public_festival_monthly_passes_bbox_to_repo(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
+    from kortravelmap.api.routers import public_views as public_views_mod
+
+    seen: dict[str, Any] = {}
+
+    async def _monthly(
+        _session: Any,
+        **kwargs: Any,
+    ) -> public_views_repo.PublicFestivalPage:
+        seen.update(kwargs)
+        return public_views_repo.PublicFestivalPage(items=(), months=(), next_cursor=None)
+
+    monkeypatch.setattr(
+        public_views_mod.public_views_repo,
+        "list_public_festivals_monthly",
+        _monthly,
+    )
+    client.app.dependency_overrides[get_session] = _fake_session
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
+    try:
+        r = client.get(
+            "/v1/public/festivals/monthly",
+            params={
+                "year": 2099,
+                "month": 12,
+                "sido_code": "51",
+                "min_lon": 128.8,
+                "min_lat": 37.7,
+                "max_lon": 129.0,
+                "max_lat": 37.9,
+            },
+        )
+        assert r.status_code == 200
+        assert (seen["min_lon"], seen["min_lat"], seen["max_lon"], seen["max_lat"]) == (
+            128.8,
+            37.7,
+            129.0,
+            37.9,
+        )
+        assert seen["sido_code"] == "51"
+    finally:
+        client.app.dependency_overrides.clear()

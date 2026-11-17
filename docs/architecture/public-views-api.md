@@ -86,8 +86,9 @@
 | `year` | int | 현재 KST | 기준 연도 |
 | `month` | int | 현재 KST | 기준 월 |
 | `sido_code`, `sigungu_code` | string | 없음 | 행정구역 제한 |
+| `min_lon`, `min_lat`, `max_lon`, `max_lat` | number | 없음 | bbox 제한(4값 함께, 일부만이면 422). 목록과 `months` count 모두에 적용, 행정구역과 AND (2026-11-17) |
 | `page_size` | int | 12 | 최대 50 |
-| `cursor` | string | 없음 | keyset cursor |
+| `cursor` | string | 없음 | keyset cursor — 바쁜 달은 `meta.page.next_cursor`로 이어 받는다 |
 | `include_months` | bool | true | 전후 월 count summary 포함 |
 
 기간 판정:
@@ -95,6 +96,8 @@
 - `EventDetail.starts_on <= month_end`
 - `EventDetail.ends_on IS NULL OR EventDetail.ends_on >= month_start`
 - `status='active'`
+- bbox가 있으면 `coord && ST_MakeEnvelope(..., 4326)` — `coord` GiST 인덱스, 변환 없음(ADR-012).
+  좌표 없는 축제는 bbox 조회에서 빠진다.
 
 응답 `data.months[]`는 기준 월의 전월/당월/익월 summary이고, `data.items[]`는
 `FestivalPublicView`다.

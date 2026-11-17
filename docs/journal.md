@@ -1,3 +1,11 @@
+## 2026-11-17 — 공개 월별 축제 bbox 필터(PinVi 추천 여행 주변 축제)
+
+- `GET /v1/public/festivals/monthly`에 선택 bbox(`min_lon`/`min_lat`/`max_lon`/`max_lat`, 4값 함께·일부만이면 422).
+  목록과 `months` count 모두 `coord && ST_MakeEnvelope(…, 4326)`(GiST, 변환 없음 — ADR-012)로 좁히고 시도·시군구와 AND.
+  map-markers와 같은 술어 조각(`_PUBLIC_FESTIVAL_BBOX_WHERE_SQL`)을 공유한다. 페이징은 기존 keyset cursor 그대로.
+- 동기: PinVi `/notice-plans/{id}/highlights`가 시도 첫 50건만 읽어 바쁜 달에 근처 축제를 놓쳤다. user·full OpenAPI
+  additive 변경(service 불변) — PinVi user 재vendor. 배포는 PinVi와 함께(PinVi는 옛 Map에서도 응답 좌표로 다시 거른다).
+
 ## 2026-11-16 — 북카페 재적재가 기존 행을 바꾸지 못한 원인: 재투영 scope 누락
 
 - 증상: #1501 배포(t1116d) 뒤 `feature_place_mcst_culture_job` run `78380ace` SUCCESS인데 '카페 에무' 등이

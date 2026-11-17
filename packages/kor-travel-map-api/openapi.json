@@ -50080,7 +50080,7 @@
     },
     "/v1/public/festivals/monthly": {
       "get": {
-        "description": "월별 활성 축제 공개 view.",
+        "description": "월별 활성 축제 공개 view.\n\nbbox(``min_lon``/``min_lat``/``max_lon``/``max_lat``, 4값 함께)를 주면 그 범위 안\n좌표의 축제만 — 목록과 ``months`` count 모두 — 돌려준다. 시도·시군구 필터와 AND다.",
         "operationId": "list_public_festivals_monthly_v1_public_festivals_monthly_get",
         "parameters": [
           {
@@ -50153,6 +50153,78 @@
                 }
               ],
               "title": "Sigungu Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "min_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Min Lat"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lon",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 180,
+                  "minimum": -180,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lon"
+            }
+          },
+          {
+            "in": "query",
+            "name": "max_lat",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 90,
+                  "minimum": -90,
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Max Lat"
             }
           },
           {
