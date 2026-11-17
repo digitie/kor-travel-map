@@ -83,7 +83,8 @@ async def test_slow_request_line_counts_exactly_the_handler_statements(
     assert "db_statements=2" in line
     assert "pool_waits=1" in line
     assert int(line.split("db_ms=")[1].split()[0]) >= 80
-    assert "37.5665" not in line and "lat=" not in line
+    assert "37.5665" not in line
+    assert "lat=" not in line
     assert timed_engine.sync_engine.pool.checkedout() == 0  # type: ignore[attr-defined]
 
 
