@@ -297,6 +297,12 @@
         "451_feature_search_prominence"
       ],
       "revision": "452_lotte_hotel_search_alias"
+    },
+    {
+      "down_revision": [
+        "452_lotte_hotel_search_alias"
+      ],
+      "revision": "453_features_autovacuum"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

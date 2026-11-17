@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-18 — `feature.features` autovacuum 문턱(alembic 453)
+
+- alembic 453: `feature.features`에 표 단위 `autovacuum_vacuum_scale_factor=0.02`·`autovacuum_vacuum_insert_scale_factor=0.05`·`autovacuum_analyze_scale_factor=0.02`. 표를 다시 쓰지 않는다(`SHARE UPDATE EXCLUSIVE`, catalog만). 배포 직후 그 표의 autovacuum이 한 번 돈다. REST·OpenAPI 변경 없음.
+
 ## 2026-11-17 — 프론트 workspace 정확 Node 26.13.1(ADR-124)
 
 - 루트 `.nvmrc` 26.13.1, `engines.node` 정확 26.13.1(npm 12.0.1 그대로). CI·frontend 이미지(`node:26.13.1-bookworm-slim`)·live e2e 실행 이미지가 같은 Node를 쓴다. 다른 Node로는 `npm ci`가 `engine-strict`로 거절된다. REST·OpenAPI·DB 변경 없음.

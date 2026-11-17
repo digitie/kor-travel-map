@@ -2838,7 +2838,11 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 
 - [ ] 설정 전의 적재 전·직후·24시간 뒤 `relallvisible/relpages`·dead 행·마지막 autovacuum과, 지역 행 수 질의의
   `Heap Fetches`를 적었다.
-- [ ] migration이 `feature.features`에 표 단위 autovacuum 설정을 넣는다(값과 근거를 PR에). 표를 다시 쓰지 않는다.
+  — 2026-11-18: 소유자 결정(측정이 필요 없는 개선은 먼저)으로 migration이 이 측정보다 먼저 들어갔다. 설정 전 수치는
+  계획 §4.1의 한 시점(2026-11-17)뿐이다. 이 항목은 그 사실로 닫을지 소유자가 정한다.
+- [x] migration이 `feature.features`에 표 단위 autovacuum 설정을 넣는다(값과 근거를 PR에). 표를 다시 쓰지 않는다.
+  — alembic `453_features_autovacuum`(0.02·0.05·0.02, 계획 제안값). 설정값은 통합 시험
+  `tests/integration/test_features_autovacuum_options.py`.
 - [ ] 적재 한 번의 24시간 뒤 `relallvisible/relpages`가 0.95 이상이고 지역 행 수 질의의 `Heap Fetches`가 반환 행의 1%
   미만이다. 못 미치면 적재 job 끝의 VACUUM을 더하거나, 그 수치로 닫을지를 소유자가 정한다. 언제·어느 배포
   generation에서 쟀는지 적는다.

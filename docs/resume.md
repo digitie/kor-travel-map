@@ -1,3 +1,8 @@
+## 2026-11-18 — T-READ-08 autovacuum 문턱(alembic 453) 머지
+
+- 다음 Map 회전에 453이 실린다(spec 불변). 배포 직후 `feature.features` autovacuum이 한 번 돈다(I/O 증가, 읽기·쓰기 차단
+  없음). 남은 해제 조건은 측정 창의 적재 24시간 뒤 all-visible·`Heap Fetches`다(acceptance `T-READ-08` ③).
+
 ## 2026-11-17 — 정확 Node 26.13.1 핀(ADR-124)
 
 - Common T-416이 소유자 결정으로 채택됐다(Node 26.13.1 최신 LTS, npm 12.0.1). 이 PR이 `.nvmrc`·정확 `engines`·CI·frontend/live e2e 이미지의 Node를 맞춘다. 로컬은 `nvm install && nvm use`.
