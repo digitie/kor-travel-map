@@ -2643,6 +2643,9 @@ export interface paths {
         /**
          * List Public Festivals Monthly
          * @description 월별 활성 축제 공개 view.
+         *
+         *     bbox(``min_lon``/``min_lat``/``max_lon``/``max_lat``, 4값 함께)를 주면 그 범위 안
+         *     좌표의 축제만 — 목록과 ``months`` count 모두 — 돌려준다. 시도·시군구 필터와 AND다.
          */
         get: operations["list_public_festivals_monthly_v1_public_festivals_monthly_get"];
         put?: never;
@@ -24642,6 +24645,10 @@ export interface operations {
                 month?: number | null;
                 sido_code?: string | null;
                 sigungu_code?: string | null;
+                min_lon?: number | null;
+                min_lat?: number | null;
+                max_lon?: number | null;
+                max_lat?: number | null;
                 page_size?: number;
                 cursor?: string | null;
                 include_months?: boolean;

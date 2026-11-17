@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "a7b3804948ccafdd6e1367fccda1160d526d5edf0931f868b6e8f837f05f58e5"
+      "sha256": "26c4e1c667f61536e773db1290cfd318640339a64226674ea41d266e384eb6cc"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "84a539c2637037c08d5b0f85f23d6e2cea327588d240c7070f0f12069c137a22"
+      "sha256": "8c8a6f7ad4b949a6e0af6d8d79a6d6defeba225354094eb6f1d4374d50a2e644"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -221,6 +221,11 @@
       "date": "2026-11-10",
       "task": "ADR-121 R3",
       "change": "baseline sha256 재고정(user·admin, service 불변). 장소 속성(ADR-121 §7): 공개 `GET /v1/place-attributes` catalog와 admin `GET /v1/admin/theme-attach-decisions`를 추가했다. 공개 목록·in-bounds·검색·주변(좌표·target)과 admin in-bounds에 선택 query `attribute`(반복, AND, 최대 5)를, item에 `attribute_codes`를, 공개 상세에 `attributes`와 속성 digest ETag를 더했다. service batch·`/v1/service/admin-features`는 무변경이다. PinVi user·admin 재vendor 대상이다."
+    },
+    {
+      "date": "2026-11-17",
+      "task": "PinVi 추천 여행 축제 bbox",
+      "change": "baseline sha256 재고정(user·admin, service 불변). 공개 `GET /v1/public/festivals/monthly`에 선택 bbox query(`min_lon`/`min_lat`/`max_lon`/`max_lat`, 4값 함께)를 더했다 — 목록과 months count 모두에 적용, 미지정 시 기존 동작 불변. PinVi user 재vendor 대상이다."
     }
   ],
   "surfaces": {
@@ -232,7 +237,7 @@
         "enum_changes": 8,
         "status_changes": 1,
         "error_changes": 0,
-        "schema_changes": 6,
+        "schema_changes": 7,
         "deferred": 2
       },
       "added": [
@@ -417,6 +422,11 @@
           "operation": "GET /v1/features/{feature_id}",
           "detail": "FeatureDetailResponse.attributes({code,label,group}) + ETag에 공개 속성 digest(속성 없으면 종전 \"<revision>\")",
           "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/public/festivals/monthly",
+          "detail": "query min_lon/min_lat/max_lon/max_lat(선택 bbox, 4값 함께·일부만이면 422) — 목록·months count에 coord && envelope",
+          "basis": "PinVi 추천 여행 주변 축제: 바쁜 달 시도 첫 페이지 밖 근처 축제 누락 해소 — additive, 미지정 시 기존 동작·caller 불변"
         }
       ],
       "deferred": [
@@ -623,7 +633,7 @@
         "enum_changes": 4,
         "status_changes": 6,
         "error_changes": 7,
-        "schema_changes": 16,
+        "schema_changes": 17,
         "deferred": 2
       },
       "added": [
@@ -1005,6 +1015,11 @@
           "operation": "GET /v1/admin/features/in-bounds",
           "detail": "query attribute(admin_only 코드 허용) + AdminFeatureMapItem.attribute_codes",
           "basis": "ADR-121 R3: 장소 속성 필터·코드 additive — 미지정 시 기존 동작·caller 불변"
+        },
+        {
+          "operation": "GET /v1/public/festivals/monthly",
+          "detail": "query min_lon/min_lat/max_lon/max_lat(선택 bbox, 4값 함께·일부만이면 422) — 목록·months count에 coord && envelope",
+          "basis": "PinVi 추천 여행 주변 축제: 바쁜 달 시도 첫 페이지 밖 근처 축제 누락 해소 — additive, 미지정 시 기존 동작·caller 불변"
         }
       ],
       "deferred": [

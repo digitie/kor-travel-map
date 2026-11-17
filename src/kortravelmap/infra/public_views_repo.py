@@ -302,8 +302,24 @@ fe.event_kind IN ('festival', 'cultural_festival')
 # ``NULLIF(f.detail ->> 'starts_on', '')::date``는 오염된 한 행이 22007로 공개
 # API를 통째로 500 시킬 수 있는 형태였고(admin 쪽 pg_input_is_valid 가드와 같은
 # 문제), subtype이 date 타입을 강제하면서 그 실패 모드가 사라진다.
+# 선택 bbox — `&&`는 `feature.features.coord`(geometry 4326) GiST 인덱스를 그대로 탄다.
+# 좌표를 변환하지 않는다(ADR-012). bbox가 꺼져 있으면 좌표 없는 행도 남는다.
+_PUBLIC_FESTIVAL_BBOX_WHERE_SQL: Final[str] = """
+(
+    NOT CAST(:bbox_enabled AS boolean)
+    OR f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
+        CAST(:min_lon AS double precision),
+        CAST(:min_lat AS double precision),
+        CAST(:max_lon AS double precision),
+        CAST(:max_lat AS double precision),
+        4326
+    )
+)
+"""
+
 _PUBLIC_FESTIVAL_BASE_WHERE_SQL: Final[str] = f"""
 {_PUBLIC_FESTIVAL_KIND_WHERE_SQL}
+  AND {_PUBLIC_FESTIVAL_BBOX_WHERE_SQL}
   AND (CAST(:sido_code AS text) IS NULL OR f.sido_code = CAST(:sido_code AS text))
   AND (
     CAST(:sigungu_code AS text) IS NULL
@@ -390,16 +406,6 @@ FROM feature.public_features AS f
 {_PUBLIC_FESTIVAL_JOIN_SQL}
 WHERE {_PUBLIC_FESTIVAL_BASE_WHERE_SQL}
   AND f.coord IS NOT NULL
-  AND (
-    NOT CAST(:bbox_enabled AS boolean)
-    OR f.coord OPERATOR(x_extension.&&) x_extension.ST_MakeEnvelope(
-        CAST(:min_lon AS double precision),
-        CAST(:min_lat AS double precision),
-        CAST(:max_lon AS double precision),
-        CAST(:max_lat AS double precision),
-        4326
-    )
-  )
 ORDER BY fe.starts_on ASC, f.name, f.feature_id
 LIMIT :limit
 """
@@ -426,6 +432,7 @@ LEFT JOIN (
    CAST(:sigungu_code AS text) IS NULL
    OR f.sigungu_code = CAST(:sigungu_code AS text)
  )
+ AND {_PUBLIC_FESTIVAL_BBOX_WHERE_SQL}
  AND fe.starts_on <= (m.month_start + interval '1 month' - interval '1 day')::date
  AND (fe.ends_on IS NULL OR fe.ends_on >= m.month_start)
 GROUP BY m.month_start
@@ -714,14 +721,24 @@ async def list_public_festivals_monthly(
     month_end: date,
     sido_code: str | None = None,
     sigungu_code: str | None = None,
+    min_lon: float | None = None,
+    min_lat: float | None = None,
+    max_lon: float | None = None,
+    max_lat: float | None = None,
     page_size: int = 12,
     cursor: str | None = None,
     include_months: bool = True,
 ) -> PublicFestivalPage:
-    """공개 월별 축제 목록과 선택적 전후 월 count summary를 조회한다."""
+    """공개 월별 축제 목록과 선택적 전후 월 count summary를 조회한다.
+
+    bbox(4값 모두)를 주면 목록과 월 count 모두 그 범위 안 좌표의 축제로 좁힌다.
+    """
 
     base = {
         **_base_params(sido_code=sido_code, sigungu_code=sigungu_code),
+        **_bbox_params(
+            min_lon=min_lon, min_lat=min_lat, max_lon=max_lon, max_lat=max_lat
+        ),
         "month_start": month_start,
         "month_end": month_end,
     }

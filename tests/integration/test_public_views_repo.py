@@ -144,3 +144,96 @@ async def test_public_festivals_monthly_uses_date_overlap(migrated_session: Any)
         month.year == 2026 and month.month == 5 and month.count >= 1
         for month in page.months
     )
+
+
+async def test_public_festivals_monthly_bbox_filters_items_and_months(
+    migrated_session: Any,
+) -> None:
+    """bbox는 목록과 월 count 모두를 좁히고, 넘친 페이지는 cursor로 이어진다."""
+    bundles = await festival_bundles(
+        [
+            festival_item(
+                "FEST-BBOX-GANGNEUNG-1",
+                "통합테스트 강릉 겨울 축제",
+                starts_on=date(2031, 12, 1),
+                ends_on=date(2031, 12, 3),
+                addr1="강원특별자치도 강릉시 창해로 514",
+                lon=128.9085,
+                lat=37.8055,
+            ),
+            festival_item(
+                "FEST-BBOX-GANGNEUNG-2",
+                "통합테스트 강릉 불꽃 축제",
+                starts_on=date(2031, 12, 2),
+                ends_on=date(2031, 12, 4),
+                addr1="강원특별자치도 강릉시 경포로 365",
+                lon=128.8961,
+                lat=37.7954,
+            ),
+            festival_item(
+                "FEST-BBOX-SEOUL",
+                "통합테스트 서울 겨울 축제",
+                starts_on=date(2031, 12, 1),
+                ends_on=date(2031, 12, 5),
+            ),
+        ],
+        fetched_at=_FETCHED,
+    )
+    for bundle in bundles:
+        await feature_repo.load_bundle(migrated_session, bundle)
+    await migrated_session.flush()
+    gangneung = {
+        await _canonical_uuid_for_alias(migrated_session, bundle.feature.feature_id)
+        for bundle in bundles[:2]
+    }
+    seoul = await _canonical_uuid_for_alias(migrated_session, bundles[2].feature.feature_id)
+
+    bbox = {"min_lon": 128.8, "min_lat": 37.7, "max_lon": 129.0, "max_lat": 37.9}
+    first = await public_views_repo.list_public_festivals_monthly(
+        migrated_session,
+        month_start=date(2031, 12, 1),
+        month_end=date(2031, 12, 31),
+        page_size=1,
+        include_months=True,
+        **bbox,
+    )
+    assert len(first.items) == 1
+    assert first.next_cursor is not None
+    second = await public_views_repo.list_public_festivals_monthly(
+        migrated_session,
+        month_start=date(2031, 12, 1),
+        month_end=date(2031, 12, 31),
+        page_size=10,
+        cursor=first.next_cursor,
+        include_months=False,
+        **bbox,
+    )
+    seen = {row.feature_id for row in (*first.items, *second.items)}
+    assert seen == gangneung
+    assert seoul not in seen
+    december = next(m for m in first.months if (m.year, m.month) == (2031, 12))
+    assert december.count == 2
+
+    unfiltered = await public_views_repo.list_public_festivals_monthly(
+        migrated_session,
+        month_start=date(2031, 12, 1),
+        month_end=date(2031, 12, 31),
+        page_size=50,
+        include_months=False,
+    )
+    assert {seoul, *gangneung} <= {row.feature_id for row in unfiltered.items}
+
+
+async def test_public_festivals_monthly_rejects_partial_or_inverted_bbox(
+    migrated_session: Any,
+) -> None:
+    with pytest.raises(ValueError, match="bbox"):
+        await public_views_repo.list_public_festivals_monthly(
+            migrated_session,
+            month_start=date(2031, 12, 1),
+            month_end=date(2031, 12, 31),
+            min_lon=129.0,
+            min_lat=37.7,
+            max_lon=128.8,
+            max_lat=37.9,
+        )
