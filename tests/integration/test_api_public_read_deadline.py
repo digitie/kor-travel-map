@@ -187,6 +187,8 @@ async def test_legacy_session_route_has_no_statement_timeout(
         expected = (await connection.execute(text("SHOW statement_timeout"))).scalar_one()
     app = _app(public_read_budget_ms=1000)
     async with _client(app) as client:
+        # 연결이 하나뿐이다 — 공개 읽기가 건 statement_timeout이 그 연결에 남지 않아야 한다.
+        assert (await client.get("/v1/features/__t03/plain")).status_code == 200
         response = await client.get("/v1/features/__t03/legacy-session")
     assert response.status_code == 200
     assert response.json()["statement_timeout"] == str(expected)
@@ -239,3 +241,34 @@ async def test_search_features_without_deadline_keeps_statement_timeout(
     )
     after = (await migrated_session.execute(text("SHOW statement_timeout"))).scalar_one()
     assert after == before
+
+
+async def test_batch_deadline_spans_resolve_and_items(
+    one_conn_engine: AsyncEngine, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """참조 해석이 쓴 시간이 본 질의 상한에서 빠진다 — 요청 전체가 예산 + 0.5초 안이다."""
+    from kortravelmap.api.routers import features as features_router
+
+    async def _slow_resolve(session: AsyncSession, _refs: object) -> dict[str, object]:
+        await session.execute(text("SELECT pg_sleep(0.5)"))
+        return {}
+
+    async def _slow_batch(session: AsyncSession, _items: object) -> list[object]:
+        await session.execute(text("SELECT pg_sleep(0.6)"))
+        return []
+
+    monkeypatch.setattr(
+        features_router.feature_identity, "resolve_feature_identities_bulk", _slow_resolve
+    )
+    monkeypatch.setattr(features_router.feature_repo, "get_service_feature_batch_items", _slow_batch)
+    app = _app(public_read_budget_ms=1000)
+    async with _client(app) as client:
+        started = monotonic()
+        response = await client.post(
+            "/v1/features/batch",
+            json={"items": [{"feature_id": "00000000-0000-0000-0000-000000000001"}]},
+        )
+        elapsed = monotonic() - started
+    assert response.status_code == 503, response.text
+    assert response.json()["code"] == "READ_TIMEOUT"
+    assert elapsed < 1.0 + 0.5

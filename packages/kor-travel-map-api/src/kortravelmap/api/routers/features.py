@@ -53,6 +53,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
 )
+from kortravelmap.infra.public_read_budget import apply_public_read_budget
 from kortravelmap.infra.sqlstate import sqlstate_of
 from pydantic import (
     BaseModel,
@@ -1788,6 +1789,8 @@ async def get_features_batch(
         session, _wellformed_refs(refs)
     )
     try:
+        # 공개 읽기 마감(T-READ-03): 참조 해석이 쓴 시간을 빼고 본 질의 상한을 다시 건다.
+        await apply_public_read_budget(session)
         rows = await feature_repo.get_service_feature_batch_items(
             session,
             tuple(
