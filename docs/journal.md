@@ -1,15 +1,21 @@
 ## 2026-11-17 — 읽기 성능 계획(Map·weather·transport)
 
-- 소유자 요청으로 세 서비스의 읽기 경로를 코드와 운영 관측으로 검토해 [계획](reports/2026-11-17-read-performance-plan.md)을 썼다(1차 초안, 적대
-  리뷰 전). 코드·설정·운영 변경 없음. 기준 commit은 Map `f1788da9`·weather `e68f16a7`·transport `60095379`·PinVi `b1605949`.
+- 소유자 요청으로 세 서비스의 읽기 경로를 코드와 운영 관측으로 검토해 [계획](reports/2026-11-17-read-performance-plan.md)을 썼다. 코드·설정·운영 변경
+  없음. 기준 commit은 Map `f1788da9`·weather `e68f16a7`·transport `60095379`·PinVi `b1605949`.
 - 측정 창(03:31~03:46Z, 배포·e2e 중, 읽기 전용): n150 PSI io `full` avg10 63%, Map API 프로세스 VmSwap 154 MB(RSS
   14 MB), 운영 Map 지표 꺼짐·PG 느린 질의 로그와 `pg_stat_statements` 없음. PinVi `/metrics`로 `/features/in-bounds`
-  38건 중 503이 15건, bbox 색인 탐색당 평균 11.7만 색인 행.
-- odroid(읽기 전용): CPU idle 0%(Dagster run 작업), PG 데이터가 있는 NVMe 남은 공간 1.9 GB — 소유자에게 따로 알린다.
-- 원장: `T-READ-01`~`07`(해제 조건 본문은 계획 §8.2, acceptance는 판정 한 줄씩). `tasks-acceptance.md`가 한도
-  225,280 bytes까지 약 2 KB 남았다 — 다음 추가 전에 `scripts/archive_task_ledger_section.py`로 닫힌 절을 옮겨야 한다.
-- weather·transport `docs/tasks.md`에는 이 계획을 가리키는 한 줄을 둔다(각 저장소 브랜치
-  `docs/read-performance-plan-20261117`). PinVi·Manager 작업은 계획 §8.3·§8.4에만 있다.
+  38건 중 503이 15건, bbox 색인 탐색당 평균 11.7만 색인 행. 04:32Z에도 e2e가 끝나지 않아(PSI io `some` avg300 85%)
+  조용한 호스트의 기준선은 재지 못했다 — `T-READ-01`의 일이다.
+- odroid(읽기 전용): CPU idle 0%(Dagster run 작업), PG 데이터가 있는 NVMe 남은 공간 1.9 GB — 소유자에게 전달됐다.
+- 적대 리뷰 1회차(BLOCKER 3·MAJOR 7·MINOR 11) 반영: `T-READ-03`을 요청 마감 예산·공개 전용 의존성·의존성 안의 pool
+  대기로 다시 썼고 PinVi가 그 503을 다시 보내지 않게 하는 `T-READ-PIN-04`를 선행으로 뒀다. PinVi가 요청마다 하는
+  rate-limit COMMIT을 발견(F-13)과 후보 작업(`T-READ-PIN-05`)으로 더했다. 기준선 harness는 운영처럼 `jit=off`다.
+- 원장: `T-READ-01`~`07`. **해제 조건은 acceptance의 같은 ID 절이 소유한다**(계획 §8.2는 변경·의존·검증·위험).
+  자리를 내려고 닫힌 절 둘(`T-VN-M02-TRUNCATE-FENCE`·`T-VN-M05-VERIFY-RECEIPT`, 둘 다 tasks-done에 완료 기록)을
+  `scripts/archive_task_ledger_section.py --apply`로 `docs/archive/`에 옮겼다. 도구 검산 통과 — 체크박스 176건·175건이
+  두 파일에 그대로, 원장 223,003 → 211,173 bytes. 본문은 도구가 옮긴 그대로다.
+- weather·transport·PinVi·Manager `docs/tasks.md`에는 이 계획을 가리키는 한 줄을 둔다(각 저장소 브랜치
+  `docs/read-performance-plan-20261117`).
 
 ## 2026-11-17 — 공개 월별 축제 bbox 필터(PinVi 추천 여행 주변 축제)
 

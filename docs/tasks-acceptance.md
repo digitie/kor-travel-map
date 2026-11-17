@@ -44,6 +44,8 @@
 > | `T-GR-01` (완료) | [archive/tasks-acceptance-gr-01.md](archive/tasks-acceptance-gr-01.md) | 약 5 KB |
 > | `T-GR-02` (완료) | [archive/tasks-acceptance-gr-02.md](archive/tasks-acceptance-gr-02.md) | 약 5 KB |
 > | `T-VN-D2-API-AUDIT` (완료) | [archive/tasks-acceptance-d2-api-audit.md](archive/tasks-acceptance-d2-api-audit.md) | 약 5 KB |
+> | `T-VN-M02-TRUNCATE-FENCE` (완료) | [archive/tasks-acceptance-m02-truncate-fence.md](archive/tasks-acceptance-m02-truncate-fence.md) | 약 7 KB |
+> | `T-VN-M05-VERIFY-RECEIPT` (완료) | [archive/tasks-acceptance-m05-verify-receipt.md](archive/tasks-acceptance-m05-verify-receipt.md) | 약 6 KB |
 
 ## T-CWRITE-01 — 현재 writer·trigger·성능 기준선
 
@@ -2123,96 +2125,7 @@ Map CI가 프로덕션 Dockerfile을 한 번도 빌드하지 않았다(`.github/
 
 ## T-VN-M02-TRUNCATE-FENCE
 
-- [x] **T-VN-M02-TRUNCATE-FENCE — hard-purge fence의 TRUNCATE 우회를 닫거나, 닫지 않는 이유를 박는다** (2026-09-08 충족, migration 307)
-
-**2026-09-07 실측으로 드러난 구멍이다.** manual Feature hard-purge fence는
-`feature.features`의 **BEFORE DELETE row trigger**다. 그런데 같은 표에 BEFORE TRUNCATE
-문 트리거가 없다. claim·origin·`ops.domain_commands`에는 no_truncate 트리거가 있다.
-
-**2026-09-08 재실측 — 위 서술의 두 문장이 틀렸다.**
-
-1. ~~`TRUNCATE feature.features CASCADE`가 fence를 통째로 우회한다~~ — **실제로는
-   중단된다.** `feature.features`만 TRUNCATE하는 것은 FK 때문에 불가능하고, `CASCADE`가
-   끌어오는 30-table 폐포 중 **10개에 켜진 BEFORE TRUNCATE 가드**가 있다
-   (`feature_aliases`·`curation_import_rows`·`curation_link_decisions`·
-   `theme_feature_candidates`·`curation_cutover_identity_mappings`·
-   `curation_import_manual_feature_children`·M05 evidence 넷). **진짜 결함은 다른 것이다** —
-   fence는 그 거부에 아무 기여도 하지 않고, 호출자가 받는 진단은
-   `T-VN-32C legacy write fence: feature_aliases TRUNCATE 금지`라 manual Feature와 무관한
-   이유를 댄다.
-2. ~~통합 테스트 24곳이 그 경로에 의존해 무비용이 아니다~~ — **14곳이고, 비용은 0이다.**
-   전부 `tests/integration/_db_cleanup.py`를 지나고 그 헬퍼가
-   `SET LOCAL session_replication_role = replica`(`:49`)로 돌아 origin 트리거를 전부
-   억제한다. 저장소 안에 증거가 있다 — `test_db_cleanup.py`가 위 가드 7개를 포함한
-   CASCADE를 **성공으로** 단언하고 CI에서 초록이다.
-
-**원장이 놓친 더 큰 구멍.** `ops.feature_requests`(M04 외부 제출)는 TRUNCATE 가드도
-append-only row 가드도 **아예 없다**. `ops.feature_update_requests`·`_datasets`는 DELETE
-가드만 있고 TRUNCATE 가드가 없다.
-
-**실제 노출은 훨씬 작다.** 121개 테이블에서 TRUNCATE 권한을 가진 로그인 롤은 컨테이너
-superuser 하나뿐이고(`schema.sql`에 `GRANT ... TRUNCATE`가 0건), 그 행위자는
-`SET session_replication_role`이나 `ALTER TABLE ... DISABLE TRIGGER`로 **기존 DELETE
-fence도 똑같이** 무력화한다. 따라서 origin-enabled 트리거는 보안 바닥을 0만큼 올린다 —
-정직한 위협 모델은 적대자가 아니라 **실수**다. 바닥을 실제로 올리는 것은 `ENABLE ALWAYS`
-뿐이고, 그것은 `_db_cleanup.py`에 명시 `DISABLE TRIGGER` 네 줄을 요구한다.
-
-**변이 검증의 함정.** "트리거 제거 → red"는 **공허하다** — 이웃 가드가 먼저 raise하므로
-지금도 red다. 새 트리거의 **고유 제약 이름/메시지**를 단언해야 한다.
-
-**해제 조건.**
-
-1. 다음 중 하나를 택하고 그 근거를 이 절에 적는다 — (a) BEFORE TRUNCATE 문 트리거를
-   더하고 통합 테스트의 정리 경로를 다른 수단으로 바꾼다, (b) 트리거를 더하지 않기로
-   하고 "fence는 DELETE 경로만 막는다"를 계약으로 명시한다.
-2. (a)를 택하면 우회가 실제로 막히는지 **변이 검증**으로 보인다 — 트리거를 되돌리면
-   red가 되어야 한다.
-3. 어느 쪽이든 `docs/adr/`의 관련 결정문에 fence의 적용 범위를 한 문장으로 박는다.
-4. `ops.feature_requests`를 함께 판정한다 — 위 재실측이 드러낸, 원장이 몰랐던 구멍이다.
-
-**2026-09-08 충족 — (a)를 택했다(migration 307).**
-
-**(a)를 택한 이유는 진단이다.** 재실측이 보인 대로 TRUNCATE는 이미 중단됐고, 결함은
-fence가 그 거부에 기여하지 않고 진단이 엉뚱한 이유를 댄다는 것이었다. (b)를 택하면
-그 오진이 계약으로 굳는다.
-
-**`ENABLE ALWAYS`다.** origin-enabled 트리거는 보안 바닥을 0만큼 올린다 — TRUNCATE
-가능한 로그인 롤은 superuser 하나뿐이고 그 행위자는 `SET session_replication_role` 한
-줄로 기존 DELETE fence까지 무력화한다. 정직한 위협 모델은 적대자가 아니라 **실수**이고,
-실수를 막는 유일한 변형이 ALWAYS다.
-
-대가인 `_db_cleanup.py`의 명시 DISABLE은 **비용이 아니라 개선**이다. 종전에는 `replica`
-한 줄이 무엇을 우회하는지 말하지 않은 채 전부 껐다. 되돌릴 때 `ENABLE ALWAYS`를 써야
-한다는 것까지 게이트가 결박한다 — 그냥 `ENABLE`이면 origin으로 내려앉아 남은 세션 내내
-우회 가능해지고, 그 상태는 겉보기에 정상이라 아무 테스트도 실패하지 않는다.
-
-**306이 열린 뒤라 이 선택이 가능해졌다.** 이전이라면 더 강한 fence는 "지울 방법이 아예
-없다"를 굳히는 것이었다. 이제는 감사되는 삭제 경로가 있으므로 **감사되지 않는 경로만**
-막는 것이 된다. 그래서 이 항목과 §T-VN-H49의 purge 판정은 함께 읽어야 한다.
-
-**4항 — `ops.feature_requests`.** TRUNCATE와 DELETE를 막는다. `UPDATE`는 막지 **않는다**
-— 라우터가 `status`/`resolved_at`/`resolved_by_actor`를 정당하게 갱신하고
-(`_FEATURE_REQUEST_TABLE_ACL`이 그 컬럼만 GRANT한다), 여기서 막으면 M04 해결 경로가
-통째로 죽는다. 그 과잉을 막는 축을 따로 뒀다. `feature_update_requests`·`_datasets`는
-TRUNCATE만 더한다(DELETE 가드는 이미 있다).
-
-**2항의 함정을 피했다.** "트리거 제거 → red"는 공허하다 — 이웃 가드가 먼저 raise하므로
-지금도 red다. 그래서 모든 단언이 **고유 제약 이름**을 본다. 변이 8축 전부 RED
-(features_trigger · features_origin_only · requests_truncate · requests_delete ·
-update_requests_truncate · delete_guard_overreaches · cleanup_downgrades ·
-preflight_rejects_always).
-
-**실측이 잡은 것 셋.** 새 SECURITY DEFINER 함수는 `db.py` startup preflight가 배포를
-막았고, 회수는 **소유자만** 할 수 있어 audit writer 소유로 만들어야 했다(기존 guard
-주석이 같은 함정을 적어 뒀다). `ENABLE ALWAYS`는 `tgenabled='A'`인데 M05-2 D단계
-preflight가 그것을 "꺼짐"으로 읽고 있었다 — `'A'`는 origin보다 **강한** 상태다. 그리고
-`test_mois_loader`의 다섯 번째 전역 조회를 찾았다.
-
-3항의 ADR 기재는 ADR-093 개정문(2026-09-08)이 purge 경계를 적으면서 함께 담는다.
-
-**T-VN-M02와 같은 fence다.** `T-VN-M02`의 "지워지지 않는 write"는 바로 이 fence가 유일한
-삭제 경로를 거부하기 때문에 생긴다(admin API의 `DELETE`는 soft retire다). (a)를 `ENABLE
-ALWAYS`로 택하면 그 되돌릴 수 없음이 **더 강해진다** — 두 항목을 따로 판정하면 안 된다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-m02-truncate-fence.md](archive/tasks-acceptance-m02-truncate-fence.md)로 옮겼다(2026-11-17, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-M05-ONESHOT-CONSUME
 
@@ -2327,82 +2240,7 @@ R5로 탐지 job에 일간 스케줄(04:20 KST, 기본 `STOPPED`)을 붙였고, 
 
 ## T-VN-M05-VERIFY-RECEIPT
 
-**2026-09-07 신설.** 3차 적대 리뷰가 잡았다 — `--verify-leaf`는 **아무것도 쓰지 않는다.**
-print만 하고 return하므로, 승격 근거가 원장에 붙인 출력 텍스트로만 남는다. 조문이
-"승격은 문서 행위가 아니다"라며 배격한 상태 — 기계 증적 없이 사람이 옮긴 문장 — 가
-정확히 검증 **결과**에 남아 있다.
-
-그리고 그 근거는 셋 중 무엇이 먼저 와도 재현 불가가 된다: `pin rotate-pair`(의도된
-성질), execution history 500칸 링에서 binding이 밀려남, leaf identity 소각.
-
-- [x] **V1 — 검증이 root-owned receipt를 남긴다.** (2026-09-08, Manager #335)
-  `--verify-leaf`가 통과·실패 모두에 대해 검증 시각·검증기 revision·leaf 경로·읽은
-  registry 파일 경로·정의표의 **모든 축**(현재 15줄) 각각의 결과와 detail을 root-owned 0600 파일로 남긴다 — 축이 늘면 receipt도 함께 는다.
-  **실패도 남긴다** — 통과만 남기면 "검증한 적 없다"와 "검증했는데 떨어졌다"가 같아 보인다.
-- [x] **V2 — receipt가 그 시점의 대조 입력을 함께 싣는다.** (2026-09-08, Manager #335)
-  pinset·Map/PinVi revision·binding의 Manager revision·claim 이름을 값으로 싣는다.
-  나중에 pin이 움직여 재현이 불가능해져도 **무엇과 대조해 통과했는지**는 남는다.
-- [x] **V3 — receipt가 원장 인용을 대체한다.** (2026-09-08 충족)
-  조문이 출력 텍스트를 옮겨 적는 대신 receipt 경로와 그 sha256을 인용한다. 옮겨 적기가
-  사라져야 이 항목의 요지가 달성된다.
-
-  **2026-09-08 — 승격 정의를 개정하고(소유자 승인) 배포된 빌드로 실측했다.**
-
-  `install-ktdm-trusted-release`로 `ee281b5`(#335)를 n150에 설치하고
-  `pin rebind-execution`으로 재결박한 뒤(`execution_binding: manager_drift → current`)
-  두 승격 후보를 검증했다. **둘 다 15축 전부 PASS, exit 0.**
-
-  | leaf | receipt | sha256 |
-  |---|---|---|
-  | `/root/pairv2-e2e-02` | `/var/lib/kor-travel-docker-manager/m05-verify-receipts/pairv2-e2e-02-20260908T045824773930Z.json` | `b65b1d79ccca2c30fe989625bba8c23b9e49f69cbc7ffd3a8ae93220e5ba027c` |
-  | `/root/pairv2-e2e-03` | `…/m05-verify-receipts/pairv2-e2e-03-20260908T045803209001Z.json` | `06f8383d54afd157b1923f170cec7bf323ab74603b3a287d423b07228e9a6365` |
-
-  디렉터리와 파일 모두 `root:root`, 각각 `0700`/`0600`.
-
-  **재배포가 과거 증적을 무효화하지 않았다** — 설치본은 `ee281b5`인데 두 leaf의 binding
-  Manager revision은 `d36847e2`/`0406b14d`다(`is_installed=False`). L4·L5가 설치 revision이
-  아니라 **registry binding**에서 파생하도록 만든 설계가 정확히 이 경우를 위한 것이었고,
-  이번 배포가 그것을 처음으로 실증했다.
-
-  receipt가 싣는 것: `pinned_pair`(pinset·Map·PinVi revision), `leaf_binding`(execution
-  identity·binding Manager revision·`is_current_execution`), `ledger_claim_name`,
-  `registry_paths` 셋, `verifier`(설치 revision + **검증기 스크립트 자신의 sha256**
-  `8ef83e0a…`), `coverage`, 축 15개 각각의 결과와 detail.
-
-  **이 표가 종전의 30줄 전사를 대체한다.** 해시는 옮겨 적을 수 없다 — 위조하려면
-  root-owned 0600 파일을 만들어야 하고, V4가 receipt를 통과 조건에서 배제하므로 그렇게
-  만들어 둬도 승격되지 않는다.
-- [x] **V4 — receipt 자체가 위조 문턱을 낮추지 않는다.** (2026-09-08, Manager #335)
-  receipt는 검증의 **기록**이지 근거가 아니다. `--verify-leaf`가 receipt의 존재를
-  통과 조건으로 삼지 않는다(그러면 receipt를 만들어 두는 것으로 통과할 수 있다).
-
-**2026-09-08 — V1·V2·V4 충족, V3는 열려 있다(Manager #335).**
-
-`--verify-leaf`는 정말로 아무것도 쓰지 않았다. **V2가 요구하는 값은 전부 이미
-지역변수로 살아 있었고** print 문자열에만 들어갔다 버려지고 있었다 — 모아서 receipt로
-내는 것이 대부분의 일이었다.
-
-**가장 날카로운 지점은 신뢰 경계 거부였다.** 그 경로는 한 문장만 인쇄하고 `return 1`이라
-`checks`가 빈 채로 끝났다. receipt를 붙였어도 내용이 비었을 것이고, "실패도 남긴다"가
-가장 필요한 실패 종류가 바로 그것(leaf가 가짜라는 판정)이다.
-
-**조문 문구 하나를 정정한다.** V1이 "정의표의 **모든 축**(현재 15줄)"이라 적었는데,
-15줄은 **full-pass 경로에서만** 맞다. 조기 종료 경로는 16번째 식별자를 내고 L3~L8을
-억제해 4~8줄이 된다. receipt는 잰 축을 그대로 싣고 `coverage`로 **어디서 멈췄는지**를
-말한다 — 그것이 "모든 축"의 실현 가능한 형태다.
-
-**V3가 남은 이유.** 이 조문은 receipt **경로와 sha256을 원장이 인용**할 것을 요구하는데,
-그러려면 배포된 빌드로 실제 검증을 한 번 돌려야 한다. #335가 머지되고
-`install-ktdm-trusted-release`로 배포한 뒤(그 자체가 execution identity를 바꿔 rebind를
-부른다) 실행할 일이다.
-
-**그리고 V3는 조문끼리 충돌한다.** §T-VN-M05-ACTIVATION의 승격 정의가 "**그 출력을 이
-절에 기록한다**"고 **명령**한다. V3를 채우려면 그 문장도 함께 고쳐야 하며, 그것은 승격
-정의의 개정이므로 소유자 판정이다.
-
-**변이 검증**(초기 9축 + 적대 리뷰 후속 5축 = 14축 전부 RED). 넷은 처음에 공허했다 —
-소비·marker 배선이 `finally` 안에 인라인이라 직접 잴 수 없었다. 이 파일이 이미 같은
-이유로 `driver_exit_code`를 꺼낸 전례가 있어 같은 방식으로 추출했다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-m05-verify-receipt.md](archive/tasks-acceptance-m05-verify-receipt.md)로 옮겼다(2026-11-17, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-COMMON-DAGSTER
 
@@ -2878,15 +2716,89 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 - [ ] `standard_special_streets`도 첫 적재가 성공하고 feature 수가 274(원천)와 맞는다.
 - [ ] `feature_place_standard_traditional_markets_monthly_schedule`·`feature_place_standard_special_streets_monthly_schedule`을 켠다.
 
-## T-READ — 읽기 성능 계획 (2026-11-17)
+## T-READ-01
 
-정본은 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2다. 이 원장이 220 KiB 한도에 가까워 작업마다 판정 한 줄만 둔다 — 세부
-조건(①②…)은 그 절의 "해제 조건"이 소유한다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] T-READ-01 — viewport 9개의 p50·p95와 지역 검색 CTE별 시간을 조용할 때·적재 중 두 번 잰 보고서가 머지됐다.
-- [ ] T-READ-02 — 지표가 꺼져 있어도 1초 넘는 요청 줄이 남는다(시험). 배포 뒤 운영 로그에서 확인해 journal에 generation과 함께 적었다.
-- [ ] T-READ-03 — 상한을 넘긴 읽기가 503 `READ_TIMEOUT`이고 연결이 풀에 돌아온다(통합 시험). admin·ops 세션에는 걸리지 않는다.
-- [ ] T-READ-04 — 점 60개 요청이 Valkey 왕복 3번 이하이고 결과가 점별 조회의 합집합과 같다(시험). service spec 재vendor PR이 열렸다.
-- [ ] T-READ-05 — 표 경로와 종전 경로의 지역 해석이 같고(시험) 전후 수치를 적었다. 또는 비중 5% 미만으로 닫은 근거를 적었다.
-- [ ] T-READ-06 — 결과 순서가 같고 p50이 40% 이상 줄었다. 또는 채택하지 않은 근거(단계별 시간)를 적었다.
-- [ ] T-READ-07 — 색인별 판정 표와 tier-3 전후 측정이 PR에 있다. 또는 지울 것이 없다는 근거를 적었다.
+- [ ] harness와 probe의 DB 연결이 운영 API처럼 `jit=off`다(설정을 확인하는 시험이 있다).
+- [ ] harness가 `--skip-seed`로 운영 DB에서 viewport 11개(기존 6 + 지역 검색 2·시군구 집계·개별 행 500건·상세 1건)의
+  p50·p95·shared read blocks p95·응답 bytes를 낸다.
+- [ ] 지역 검색 둘은 전처리 질의 셋의 시간과 본 질의의 CTE별 시간(`EXPLAIN (ANALYZE, BUFFERS)` 노드 시간)을 표로 적는다.
+- [ ] HTTP probe가 같은 요청을 30회씩 재고 묶음마다 PSI io `some` avg60을 함께 적는다.
+- [ ] 조용할 때(PSI io `some` avg60 < 5%)와 적재 중 두 번 잰 보고서(`docs/reports/<날짜>-read-baseline.md`와 `.safe.json`)가
+  머지됐다. 언제·어느 배포 generation에서 쟀는지 적는다.
+- [ ] 보고서가 계획 F-04·F-07·F-08·F-12의 "모른다"를 수치로 바꾸고 `T-READ-05`(5%)·`T-READ-06`(30%)의 채택 판정을 적는다.
+
+## T-READ-02
+
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+
+- [ ] 지표 flag가 꺼져 있어도 요청 시간이 문턱(기본 1초) 이상이면 route template·status·시간·DB 문장 수·DB 시간 합·
+  request id가 한 줄로 남는다(주입한 느린 질의로 시험).
+- [ ] 그 줄에 query string·header 값·좌표가 없다(시험).
+- [ ] `/metrics`에 pool 체크아웃 대기 histogram과 사용 중 연결 gauge가 나온다.
+- [ ] 기본 설정에서 요청당 추가 DB 왕복이 0이다(문장 수 시험).
+- [ ] 배포 뒤 운영 로그에서 1초 넘는 요청 줄을 확인해 journal에 배포 generation과 함께 적었다.
+
+## T-READ-03
+
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다. 운영 배포는 PinVi `T-READ-PIN-04`(같은 계획 §8.3) 뒤다.
+
+- [ ] `get_read_snapshot_session`·`get_session`과 엔진의 `pool_timeout`이 바뀌지 않았다. 그 의존성을 쓰는 admin·ops·service
+  route의 transaction에는 `statement_timeout`이 걸리지 않고(`SHOW statement_timeout` 시험) 57014는 종전처럼 처리된다.
+- [ ] 문장 둘이 각각 예산 가까이 걸리는 주입 시험에서 요청 전체가 예산 + 0.5초 안에 503 `READ_TIMEOUT`으로 끝난다
+  (문장마다가 아니라 요청 마감이다).
+- [ ] 503 뒤 그 연결이 풀에 돌아와 다음 질의가 성공한다.
+- [ ] pool을 다 쓴 상태의 공개 읽기가 대기 상한 + 0.5초 안에 503 `POOL_BUSY`이고, 그 뒤 pool의 체크아웃 수가 원래대로
+  돌아온다(연결 누수 없음). 같은 상태의 admin route는 종전 대기 동작 그대로다.
+- [ ] `GET /v1/public/festivals/monthly`는 긴 예산(기본 14초)을 쓴다 — 5초 걸리는 주입 질의가 200이다.
+- [ ] batch route의 57014는 `READ_TIMEOUT`으로 나온다(`FEATURE_BATCH_UNAVAILABLE`가 가로채지 않는다).
+- [ ] 예산 0이면 종전 동작과 같다.
+- [ ] 새 503 코드를 OpenAPI에 적으면 user·service spec 변경으로 PinVi 재vendor를 같은 회전에 묶는다. 기존 공통 503
+  problem으로 충분하면 그 근거를 PR에 적는다.
+- [ ] 운영 배포 전에 PinVi `T-READ-PIN-04`가 운영에 있음을 확인하고 두 배포 generation을 journal에 적었다.
+
+## T-READ-04
+
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+
+- [ ] 점 60개 요청의 Valkey 왕복이 3번 이하다(계수 시험).
+- [ ] 결과 집합이 점마다 기존 `?lon&lat&radius_m` 조회를 부른 합집합과 같다(거리 포함, 통합 시험).
+- [ ] 세대 교체 중에도 한 세대만 읽는다.
+- [ ] 상한(점 60·반경 50 km·limit 500)을 넘으면 422다.
+- [ ] Valkey 장애는 기존 route와 같은 503이다.
+- [ ] service OpenAPI drift gate가 통과하고 PinVi 재vendor PR이 열렸다.
+
+## T-READ-05
+
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+
+- [ ] `T-READ-01` 보고서에서 전처리 두 질의의 합이 검색 시간의 5% 이상이다. 미만이면 그 근거를 적고 닫는다(아래는 해당 없음).
+- [ ] 표의 시군구 이름이 그 코드 공개 행 전체의 최빈값과 같다(통합 시험 — 결정적 기준).
+- [ ] 코드마다 이름이 하나뿐인 fixture에서 표 경로와 종전 경로의 `split_region_query` 결과와 선택되는 팔
+  (`_SearchRegionArms`)이 같다. 이름이 섞인 코드에서 두 경로가 다를 수 있는 경우를 PR에 적는다.
+- [ ] 표 경로의 낱말 둘 검색은 전처리에서 `feature.features`를 읽지 않는다(EXPLAIN 시험).
+- [ ] 표가 비었을 때 종전과 같다. refresh를 두 번 돌려도 결과가 같다.
+- [ ] 공개 행 수가 문턱 3만의 ±10% 안인 지역 수를 PR에 적고, 행 수를 표에서 읽을지 요청 때 셀지 정한 근거를 적었다.
+- [ ] harness(`jit=off`)의 지역 검색 수치를 전후로 보고서에 적었다.
+
+## T-READ-06
+
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+
+- [ ] `T-READ-01` 보고서에서 이름 정규화 단계가 지역 검색 시간의 30% 이상이다. 미만이면 단계별 시간을 적고 닫는다.
+- [ ] 검색 평가 묶음(2026-11-12 평가의 검색어)에서 표 경로와 종전 경로의 `feature_id` 순서가 첫 3페이지까지 같다.
+  표에 없는 행(새 Feature)이 섞여도 같다.
+- [ ] 이름·분류가 바뀐 행이 refresh 전까지 옛 키로 순위가 매겨지는 것을 허용할지 소유자가 정했고 그 결정을 여기 적었다
+  (허용하지 않으면 키를 `row_revision`과 함께 저장해 다르면 식으로 떨어지고, 그 시험이 있다).
+- [ ] harness(`jit=off`)의 "부산 맛집" p50이 기준선보다 40% 이상 줄었다. 못 미치면 revert하고 닫는다.
+
+## T-READ-07
+
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+
+- [ ] 색인별 "읽는 경로 / 14일 탐색 수 / 판정" 표가 보고서에 있다(통계가 중간에 지워졌으면 그 구간을 적는다).
+- [ ] 지운 뒤 관리자 Feature 목록·검색 e2e(D2)와 tier-1 gate가 통과한다.
+- [ ] tier-3 측정 — 같은 provider 재적재의 쓰기 시간·WAL·색인 크기·`n_tup_hot_upd` 전후를 PR에 붙였다.
+- [ ] 지운 색인 이름이 `infra/prewarm.py`의 `DEFAULT_HOT_RELATIONS`에 남아 있지 않다.
+- [ ] 지울 것이 없으면 그 근거로 닫는다.

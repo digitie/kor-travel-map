@@ -4,37 +4,43 @@
 읽기 경로를 코드와 운영 관측으로 검토하고 개선안을 정리한다. 다른 에이전트가 이 문서만 읽고 구현을
 시작하므로 마지막 절(§8)이 작업 목록이다.
 
-- 상태: **1차 초안**(적대 리뷰 2회 뒤 고친다). 이 문서를 쓰는 동안 코드·설정·운영을 바꾸지 않았다.
-- Map 작업의 원장은 [`docs/tasks.md`](../tasks.md)(`T-READ-01`~`07`)와
-  [`docs/tasks-acceptance.md`](../tasks-acceptance.md) §T-READ다. 다른 저장소 작업은 이 문서가 정본이고
-  각 저장소 `docs/tasks.md`에는 이 문서를 가리키는 한 줄만 둔다.
+- 상태: **2차 초안**(적대 리뷰 1회차 반영, 2회차 예정). 이 문서를 쓰는 동안 코드·설정·운영을 바꾸지 않았다.
+- Map 작업(`T-READ-01`~`07`)의 **해제 조건은 [`docs/tasks-acceptance.md`](../tasks-acceptance.md)의 같은 ID
+  절이 소유한다**(저장소 규약). 이 문서는 변경 내용·의존·검증·위험을 적는다. 목록은
+  [`docs/tasks.md`](../tasks.md)다.
+- 다른 저장소 작업(PinVi·Manager·weather·transport)은 이 문서가 해제 조건까지 소유하고, 각 저장소
+  `docs/tasks.md`에는 이 문서를 가리키는 한 줄만 둔다.
 
 ## 1. 결론 먼저
 
-1. **측정 창에서 지연의 가장 큰 몫은 SQL 모양이 아니라 호스트 정지였다.** n150의 디스크 압력(PSI io
-   `some` avg60 29~76%)이 높았고, 상류 호출도 DB 조회도 없는 PinVi 핸들러가 평균 1.63초였다. Map API
-   프로세스는 메모리의 약 92%가 swap에 있었다(§4.1, F-01·F-02).
+1. **측정 창에서는 호스트의 디스크 대기가 모든 요청에 깔려 있었다.** n150의 디스크 압력(PSI io `some`)은
+   03:31Z에 avg60 29~76%, 한 시간 뒤 04:32Z에 avg300 85%였다. Map API 프로세스는 메모리의 약 92%가
+   swap에 있었다. 요청마다 작은 COMMIT 하나를 하는 PinVi route가 평균 1.63초였다(§4.2, F-01·F-02·F-13).
+   조용할 때의 SQL 수치(§4.4)와 10배 넘게 벌어진다.
 2. **운영에서 읽기 지연을 볼 방법이 없다.** Map API 지표는 꺼져 있고, 요청 시간이 남는 로그가 없고,
    PostgreSQL 느린 질의 로그와 `pg_stat_statements`도 없다. 그래서 아래 발견 대부분이 "어느 질의가
    얼마나"를 말하지 못한다(F-03).
 3. **PinVi `GET /features/in-bounds`의 39%(38건 중 15건)가 503이었다**(측정 창, PinVi 지표). 같은 기간
-   bbox 색인 탐색 한 번이 평균 11.7만 색인 행을 읽었다 — 저배율 전국 집계가 읽기 부하의 대부분이다
-   (F-04).
-4. **읽기 요청에 시간 상한이 없다.** PinVi가 5초에 포기해도 Map의 SQL은 끝까지 돌고 연결을 쥔다.
-   연결 풀은 15개이고 대기 상한은 30초(SQLAlchemy 기본값)다(F-05).
-5. **PinVi의 여행 지도 교통 조회는 호출 수가 동시 호출 상한을 넘는다**(코드 추론). 기준 장소가 3곳
-   이상이면 레이어가 통째로 `unavailable`이 될 수 있다. 한 번에 여러 점을 받는 Map 조회가 없어서다
-   (F-06).
+   bbox 색인 탐색 한 번이 평균 11.7만 색인 행을 읽었다. [추론] 그 대부분은 저배율 집계로 보인다 — 같은
+   색인을 관리·ops·공개 뷰 질의도 타고 통계 창에 e2e가 들어 있어 몫을 가르지는 못했다(F-04).
+4. **읽기 요청에 시간 상한이 없고, PinVi는 Map의 5xx를 세 번까지 다시 보낸다.** PinVi가 5초에 포기해도
+   Map의 SQL은 끝까지 돌고 연결을 쥔다. 연결 풀은 15개이고 대기 상한은 30초(SQLAlchemy 기본값)다.
+   그래서 Map에 시간 상한을 넣으려면 PinVi의 재시도 규칙을 **먼저** 고쳐야 한다(F-05).
+5. **PinVi의 여행 지도 교통 조회는 호출 수가 동시 호출 상한을 넘는다**(코드 추론). 레이어 둘을 켠
+   여행에서 2 km 넘게 떨어진 장소가 2곳 이상이면(레이어 하나면 3곳 이상) 레이어가 통째로
+   `unavailable`이 될 수 있다. 한 번에 여러 점을 받는 Map 조회가 없어서다(F-06).
 6. **검색의 지역 경로("부산 맛집")가 가장 느린 정상 경로다**(소유자 실측 0.6~1.1초). 후보 전부가
    정규식·창 함수 단계를 지나고, 낱말이 둘 이상인 검색마다 전처리 질의 두 개가 더 붙는다(F-07·F-08).
-7. **odroid는 측정 시점에 CPU가 포화였고(실행 대기 11~27, idle 0%), PG 데이터가 있는 NVMe에 남은
-   공간이 1.9 GB였다.** 뒤쪽은 읽기 속도 이전에 가용성 문제다(F-09·F-10).
-8. weather·transport 자체 REST는 **PinVi 사용자 경로에 거의 없다.** 운영 PinVi는 날씨·교통을 Map의
+7. **PinVi는 요청마다 rate-limit 행을 쓰고 COMMIT한다.** 모든 읽기 앞에 공용 PG 쓰기 하나가 붙어 있고,
+   디스크가 밀리면 그것이 먼저 느려진다(F-13).
+8. **odroid는 측정 시점에 CPU가 포화였고(실행 대기 11~27, idle 0%), PG 데이터가 있는 NVMe에 남은
+   공간이 1.9 GB였다.** 뒤쪽은 읽기 속도 이전에 가용성 문제다(F-09·F-10, 소유자에게 전달됨).
+9. weather·transport 자체 REST는 **PinVi 사용자 경로에 거의 없다.** 운영 PinVi는 날씨·교통을 Map의
    Valkey 표면으로 읽는다. 두 서비스의 읽기 비용은 Map 적재의 신선도와 odroid 부하, 그리고 각자의
    관리 화면에 걸린다(§3.1). weather는 자체 개선 설계가 이미 있어 그것을 따른다(§3.4).
 
-순서는 **보이게 만들기 → 호스트·프로세스 보호 → 시간 상한 → 호출 수 줄이기 → 측정으로 정하는 SQL
-개선**이다(§6).
+순서는 **보이게 만들기 → 호스트·프로세스 보호 → 시간 상한(PinVi 재시도 규칙 먼저) → 호출 수 줄이기 →
+측정으로 정하는 SQL 개선**이다(§6).
 
 ## 2. 범위·방법·증거 등급
 
@@ -75,7 +81,9 @@ PinVi: `app/` = `apps/api/app/`.
 
 2026-11-17 03:31~03:46Z(KST 12:31~12:46)에 쟀다. n150에서는 배포와 전체 e2e가 진행 중이었다
 (`/root/cat10.log`에 `CAT10_ALL_DONE` 0건). 그래서 n150에는 카탈로그 조회·`/proc` 읽기·PinVi의
-공개 `/metrics` 한 번·`/health` curl만 했다. `EXPLAIN ANALYZE`와 부하 시험은 하지 않았다.
+공개 `/metrics` 한 번·`/health` curl만 했다. `EXPLAIN ANALYZE`와 부하 시험은 하지 않았다. 04:32Z에 다시 봤을 때도 e2e는 끝나지 않았고 디스크 압력은
+더 높았다(PSI io `some` avg60 90%·avg300 85%, load 10) — 그래서 **조용한 호스트의 기준선은 리뷰 1회차
+뒤에도 재지 못했다**(`T-READ-01`).
 
 DB는 Map API 컨테이너의 DSN을 그 자리에서 유도해 읽기 전용 transaction(`statement_timeout` 8초)으로 붙었고
 DSN·key·token은 출력하지 않았다. n150 `/tmp`에 둔 조사용 임시 파일은 지웠다.
@@ -133,9 +141,9 @@ Map Dagster(n150) ──▶ weather·transport /v1/service/exports/* (odroid) �
 | `GET /v1/features/in-bounds` | PinVi 지도(이동마다), Map 관리 화면 | zoom ≤7 시도·≤10 시군구·≤13 읍면동 집계(`repo:1683-1766`, `api/routers/features.py:785-799`), zoom ≥14 개별 행(`repo:1578-1607`) | `max_items` 기본 1000·최대 2000 (`features.py:1115`) |
 | `GET /v1/features/search` | PinVi 통합 검색(입력마다), MCP | 별칭 조회 → 지역 표본 → 지역 행 수 → 순위 CTE(`repo:7718-7860`, `repo:2213-2602`) | `page_size` 기본 50·최대 200 |
 | `GET /v1/features/{id}` | PinVi 상세 카드·날씨·장소 상세 | 참조 해석 → 공개 행 → 속성 → curation, 문장 4개 안팎(`features.py:1489-1535`) | ETag·304 |
-| `POST /v1/features/batch` | PinVi 여행 보기 | `unnest(ids)` 한 문장(`repo:1265-1300`) | 200건 |
+| `POST /v1/features/batch` | PinVi 여행 보기 | 참조 해석 + `unnest(ids)` 두 문장(`features.py:1780-1795`, `repo:1265-1300`). route가 `SQLAlchemyError`를 잡아 503 `FEATURE_BATCH_UNAVAILABLE`로 바꾼다 | 200건 |
 | `GET /v1/features/nearby` | PinVi 주변 | `coord_5179` GiST `ST_DWithin`(`repo:8029` 이하) | 500건 |
-| `GET /v1/service/transport/{dataset}` | PinVi 교통 레이어·여행 반경 | Valkey 포인터 → `GEOSEARCH` → `HMGET`(`MAP:src/kortravelmap/infra/valkey_state.py:697-760`) | 500건, 반경 50 km |
+| `GET /v1/service/transport/{dataset}` | PinVi 교통 레이어·여행 반경 | Valkey 왕복 4번 — 포인터 `GET` → meta `HGETALL` → `GEOSEARCH` → `HMGET`(`api/routers/service_transport.py:589-616`, `MAP:src/kortravelmap/infra/valkey_state.py:575-640,697-760`) | 500건, 반경 50 km |
 | `/v1/service/weather/*` | PinVi 날씨 카드·마커 | Valkey `read_many`(왕복 2번, `valkey_state.py:785-830`) | batch 50곳 |
 
 Map의 SQL은 이미 여러 번 고쳐졌다 — bbox 술어는 변환 없이 GiST를 타고(ADR-012), 저배율 집계는 #1455로
@@ -146,20 +154,28 @@ Map의 SQL은 이미 여러 번 고쳐졌다 — bbox 술어는 변환 없이 Gi
 
 [추론] 전부 `PIN:` 코드에서 읽었다.
 
-- Map client는 프로세스당 `httpx.AsyncClient` 하나, 전체 timeout 5초
-  (`app/clients/kor_travel_map.py:1245-1256`, `app/core/config.py:810`). 재시도는 연결 실패·5xx에만
-  3번이고 `ReadTimeout`은 다시 보내지 않는다(`kor_travel_map.py:64-73` — 주석이 "#702 운영 기록: 같은
-  전국 bbox가 5초 timeout ×3"을 적는다).
+- Map client는 프로세스당 `httpx.AsyncClient` 하나다. timeout 5초는 **단계별**(연결·읽기·쓰기·pool 각각)
+  이고 요청 전체의 상한이 아니다(`app/clients/kor_travel_map.py:1245-1256`, `app/core/config.py:810`).
+  공개 월별 축제만 읽기 15초다(`kor_travel_map.py:58,1096-1105` — 주석이 "#714: 처음 조회하는 월은
+  5.9~6.2초"를 적는다).
+- 재시도는 3번이다(`config.py:815`). **연결 실패와 5xx는 다시 보내고**(`kor_travel_map.py:590-599`),
+  `ReadTimeout`은 다시 보내지 않는다(`kor_travel_map.py:64-73` — 주석이 "#702 운영 기록: 같은 전국
+  bbox가 5초 timeout ×3"을 적는다). in-bounds·검색·상세·batch가 모두 이 기본값을 쓴다. `Retry-After`는
+  429·409에서만 읽는다(`kor_travel_map.py:631-634`). 교통·날씨 wrapper는 `retry=False`다.
 - 범위별 동시 호출 상한(대기열 없음, 차면 바로 거부): features 10·viewport 4·transport 2·weather 2·
   festivals 4(`app/core/config.py:825-828`, `kor_travel_map.py:481-488`). [실측] 운영 env에 이 값을
   바꾸는 변수는 없다.
 - 회로: 범위마다 연속 3번 실패하면 120초 열린다(`app/clients/_resilience.py:22,52`).
+- **요청마다 rate-limit 쓰기**: 우회 경로가 아닌 모든 요청이 handler 앞에서 `app.rate_limit_buckets`에
+  upsert하고 COMMIT한다(`app/middleware/rate_limit.py:203-237,270-317`). backend는 운영·staging에서
+  PostgreSQL이다(`rate_limit.py:392-397`; [실측] `PINVI_ENVIRONMENT=production`).
 - 지도 이동 한 번(웹, 250 ms debounce)이 PinVi 요청을 최대 4개 낸다 — in-bounds(기본 500건),
   날씨 마커(zoom ≥8), geometry용 in-bounds 한 번 더, 교통 레이어. Map 읽기로는 최대 5번이다
   (`apps/web/components/map/FeatureMapView.tsx:79`, 나머지 재확인 안 함).
 - 여행 지도의 교통 반경 조회는 기준 장소(최대 60곳)를 2 km로 묶은 중심마다 Map을 부른다 — 레이어
   2개 × 중심 수, 레이어당 동시 6개(`app/services/transport_layers.py:204-220,249-264`).
 - 여행 보기는 Feature batch를 받은 **뒤에** 날씨를 받는다(`app/services/trip_view_builder.py:213,278`).
+  두 가지가 같은 요청 세션(`db`)을 쓴다.
 - 서버 쪽 캐시: Feature batch 60초(`config.py:1024-1026`), 축제 월별 300초, 특보 90초. viewport·검색·
   상세에는 없다.
 
@@ -209,10 +225,10 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 
 | 항목 | 값 | 방법 |
 | --- | --- | --- |
-| 디스크 압력 | PSI io `some` avg10 66~90%·avg60 29~76%, `full` avg10 63% | `/proc/pressure/io` 3회 |
+| 디스크 압력 | 03:31~03:36Z: PSI io `some` avg10 66~90%·avg60 29~76%, `full` avg10 63%. 04:32Z: `some` avg10 84%·avg60 90%·avg300 85%, load 10 | `/proc/pressure/io` 4회, `uptime` |
 | CPU·메모리 압력 | cpu `some` avg10 약 5%, memory 0% | `/proc/pressure/*` |
 | 메모리 | 15,256 MB 중 used 5,131·buff/cache 7,674, swap 3,493 MB 사용, `swappiness` 10 | `free -m`, `/proc/sys/vm/swappiness` |
-| Map API 프로세스 | VmRSS 14 MB, **VmSwap 154 MB**, uvicorn 1개 | `/proc/<pid>/status` |
+| Map API 프로세스 | VmRSS 14 MB, **VmSwap 154 MB**, uvicorn 1개, CPU 0.15% | `/proc/<pid>/status`, `docker stats` 한 번 |
 | PinVi API 프로세스 | VmRSS 149 MB, VmSwap 15 MB, `--workers 1` | 같음, `docker top` |
 | Map API 지표 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED=false` | 컨테이너 env(값이 비밀이 아닌 항목만) |
 | Map API 로그 | `"GET /health HTTP/1.1" 200 OK` 꼴(시간 없음), 최근 20,000줄에 5xx 0건 | `docker logs --tail` |
@@ -241,8 +257,10 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 | `idx_features_admin_lower_name_keyset` | 38 MB | 12 | 159,453 | — |
 | `idx_features_lower_name_keyset` | 37 MB | 0 | 0 | — |
 
-탐색 12회 이하인 색인이 574 MB, 0회인 색인이 222 MB다. 통계 창이 3.6일 이하이고 관리 화면 사용이
-적었을 수 있으므로 "쓰이지 않는다"의 증거로는 약하다(`T-READ-07`이 창을 늘려 다시 센다).
+탐색 12회 이하인 색인이 574 MB다 — 위 표의 여덟 개 547 MB에 `idx_features_coord_5179_gist`(27 MB, 탐색
+5회 — 반경 검색용이라 정리 대상이 아니다)를 더한 값이다. 0회인 색인은 222 MB다. 통계 창이 3.6일
+이하이고 관리 화면 사용이 적었을 수 있으므로 "쓰이지 않는다"의 증거로는 약하다(`T-READ-07`이 창을
+늘려 다시 센다).
 
 ### 4.2 PinVi가 본 지연 (PinVi `/metrics`, 프로세스 기동 2026-11-16 13:06Z → 2026-11-17 03:44Z)
 
@@ -258,8 +276,9 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 | `GET /auth/oauth/providers` (200) | 25 | 1.63초 | 중앙값 ≤0.5초, 상위 10%는 ≤5초 |
 
 - 건수가 적고 e2e·배포 창이다. 정상 상태의 분포로 읽으면 안 된다. histogram 상한이 10초라 그 위는 구분되지 않는다.
-- `/auth/oauth/providers` 핸들러는 설정만 읽는다(`PIN:app/api/v1/oauth.py:142-150`). 미들웨어가 하는
-  일은 확인하지 않았다.
+- `/auth/oauth/providers` 핸들러 본문은 설정만 읽는다(`PIN:app/api/v1/oauth.py:142-150`). 다만 이 route는
+  rate-limit 대상이라(`PIN:app/middleware/rate_limit.py:76-78`) 요청마다 PostgreSQL upsert와 COMMIT을
+  한다. 지표 미들웨어가 그 바깥이므로(`PIN:app/main.py:97-101`) 1.63초에는 그 COMMIT이 들어 있다(F-13).
 - `/search`·`/transport/markers-near`는 이 창에 호출이 없었다. 동시 호출 상한 거부 counter
   (`pinvi_api_outbound_bulkhead_rejections_total`)에도 표본이 없었다.
 - PinVi DB pool 대기는 84,758회 합계 5.7초다 — PinVi 쪽 pool은 원인이 아니다.
@@ -283,7 +302,8 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 - Map 저배율 집계(#1455, 2026-11-07): zoom 7 PinVi 기본 kind 2.9→0.25초, route·area 12~15→1.0~1.3초.
   "22초짜리 느린 요청 중에도 작은 요청은 0.010초"(`MAP:docs/journal.md:441-445`).
 - Map 지역 검색(2026-11-09, 순위 2·3단계 이전): "부산 맛집" 0.16초, "경기 관광" 1.3초, "서울 맛집"
-  5~6초(`repo:2700-2703`).
+  5~6초(`repo:2700-2703`). 뒤의 두 값은 **지역 행 수 문턱 3만(`repo:2703`)을 넣게 만든 측정**이다 — 문턱이
+  생긴 뒤의 수치가 아니다.
 - weather export: current 첫 페이지 52.4초·304 재사용 173 ms
   (`WEA:docs/design/weather-performance-use-cases-20261109.md:51-55`).
 - PinVi 주석: weather `/markers` p50 2.2초·p95 3.7초(`PIN:app/services/weather_markers_cache.py:3`,
@@ -293,15 +313,19 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 
 각 항목: 근거 → 영향 → 확신도.
 
-### F-01 측정 창의 지연은 호스트 정지가 지배했다
+### F-01 측정 창에서는 디스크 대기가 모든 요청에 깔려 있었다
 
-- [실측] PSI io `full` avg10 63%(§4.1) — 10초 중 6초 넘게 **모든** 작업이 디스크를 기다렸다.
-- [실측] 상류도 DB도 부르지 않는 PinVi 핸들러가 평균 1.63초(§4.2).
+- [실측] PSI io `full` avg10 63%(03:31Z) — 10초 중 6초 넘게 **모든** 작업이 디스크를 기다렸다. 한 시간 뒤
+  (04:32Z)에는 `some` avg300이 85%였다(§4.1).
 - [실측] 공용 PG는 `shared_buffers` 1 GB로 Map DB 9.5 GB와 다른 tenant를 받고, 3.6일 동안 버퍼를
   1,060만 번 내보냈다. 같은 기간 컨테이너가 166 GB를 썼다(하루 약 46 GB).
+- [실측] PinVi `/auth/oauth/providers`가 평균 1.63초였다(25건, 중앙값은 0.5초 이하). 이 요청이 하는 I/O는
+  rate-limit upsert와 COMMIT 하나뿐이다(§4.2). [추론] 작은 COMMIT 하나가 초 단위로 걸렸다는 것은 공용
+  PG의 WAL flush가 밀렸다는 것과 맞는다 — "I/O 없는 요청도 느렸다"의 증거는 아니다.
 - 영향: 이 조건에서는 어떤 SQL 개선도 묻힌다. 조용할 때의 수치(§4.4)와 측정 창의 수치(§4.2)가
   10배 이상 벌어진다.
-- 확신도: "측정 창에 정지가 있었다"는 높다. "평소에도 그렇다"는 모른다 — 2026-11-16 e2e 때도 같은
+- 확신도: "측정 창에 디스크 압력이 높았다"는 높다(실측). "그것이 PinVi 지연의 주원인이다"는 중간이다
+  (rate-limit 구간만 따로 잰 지표가 없다). "평소에도 그렇다"는 모른다 — 2026-11-16 e2e 때도 같은
   현상이 보고됐다는 것이 전부다.
 
 ### F-02 Map API 프로세스가 swap에 나가 있다
@@ -346,16 +370,28 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
   최근 20,000줄에 5xx는 없었다. [추론] PinVi가 timeout으로 끊은 요청은 Map 쪽에 200으로 남는다).
 - 사전 집계(T-101)는 소유자가 2026-09-07에 제외했다. 이 계획은 그것을 다시 열지 않는다(§7).
 
-### F-05 읽기 요청에 시간 상한이 없다
+### F-05 읽기 요청에 시간 상한이 없고 PinVi는 5xx를 세 번 다시 보낸다
 
-- [추론] API 엔진은 `jit=off`만 걸고 `statement_timeout`을 걸지 않는다(`MAP:api/db.py:57-62`). 저장소
-  전체에서 읽기 경로의 `statement_timeout` 설정은 없다(검색 결과는 삭제 배치와 lock 대기뿐이다).
-- [추론] PinVi는 5초에 끊는다. 핸들러는 연결이 끊겨도 취소되지 않으므로(코드에 disconnect 확인이
-  없다 — 실행해 확인하지는 않았고 `T-READ-03`의 시험이 확인한다) SQL은 끝까지 돈다. PinVi 주석이 같은 현상을 기록한다("재시도는 같은 무거운 질의를 겹쳐 쌓을 뿐",
-  `PIN:app/clients/kor_travel_map.py:66-69`).
-- [추론] Map pool은 15개, 대기 상한은 SQLAlchemy 기본 30초다. PinVi의 PG를 쓰는 범위 상한 합은
-  features 10 + viewport 4 + festivals 4 = 18이다. 느린 질의가 15개를 쥐면 다음 요청은 PinVi가 이미
-  떠난 뒤까지 줄을 선다.
+- [추론] API 엔진은 `jit=off`만 걸고 `statement_timeout`을 걸지 않는다(`MAP:api/db.py:57-62`). 저장소에
+  `statement_timeout`을 거는 곳은 여럿 있다 — ADR-112의 마감 예산(`MAP:src/kortravelmap/infra/
+  transaction_limits.py`: 남은 시간 − 3초를 transaction마다 `set_config`), 삭제 배치
+  (`src/kortravelmap/client/__init__.py:754-814`), lock 대기(`infra/lock_wait.py`), 검색 인지도 refresh
+  (`infra/search_prominence_repo.py:214`), cache-target reconciliation
+  (`infra/cache_target_reconciliation_repo.py:319`). **공개 읽기 handler에 걸리는 것은 없다** —
+  `apply_transaction_limits`는 마감이 없으면 아무것도 보내지 않고(`transaction_limits.py:120-146`)
+  호출자는 client 계층뿐이다.
+- [추론] 문장 상한은 **문장마다** 따로 센다. 검색 한 번은 문장이 7~8개다(`SET LOCAL` 둘, 별칭, 지역
+  표본, 지역 행 수, 본 질의, 선택 개수 — `repo:7782-7849`). 문장당 4.5초로는 요청이 5초 안에 끝난다는
+  보장이 없다. 요청 마감에서 남은 시간을 문장에 넘겨야 한다.
+- [추론] PinVi는 단계별 5초에 끊는다. 핸들러는 연결이 끊겨도 취소되지 않으므로(코드에 disconnect 확인이
+  없다 — 실행해 확인하지는 않았고 `T-READ-03`의 시험이 확인한다) SQL은 끝까지 돈다.
+- [추론] PinVi는 `ReadTimeout`은 다시 보내지 않지만 **5xx는 세 번까지 다시 보낸다**(§3.3). 지금도 Map의
+  503 `LOCK_TIMEOUT`(`MAP:api/app.py:1066-1085`)·`FEATURE_BATCH_UNAVAILABLE`은 그렇게 재시도된다. Map이
+  느린 읽기를 503으로 바꾸기만 하면 멈춘 요청 하나가 무거운 질의 세 번(약 4.5+0.2+4.5+0.4+4.5초)이 된다.
+- [추론] Map pool은 15개, 대기 상한은 SQLAlchemy 기본 30초다. API 엔진은 하나라(`MAP:api/db.py:46-71`)
+  `pool_timeout`을 줄이면 admin·ops·쓰기까지 같이 걸린다. PinVi의 PG를 쓰는 범위 상한 합은 features 10 +
+  viewport 4 + festivals 4 = 18이다. 느린 질의가 15개를 쥐면 다음 요청은 PinVi가 이미 떠난 뒤까지
+  줄을 선다.
 - 영향: 정지 구간에서 버려진 작업이 쌓여 회복을 늦춘다.
 - 확신도: 설정은 높다. 운영에서 실제로 쌓였는지는 지표가 없어 모른다.
 
@@ -366,8 +402,9 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
   (`PIN:app/clients/kor_travel_map_transport.py:116`).
 - [추론] 반경 조회는 레이어마다 중심들을 동시 6개까지 보낸다(`transport_layers.py:216,249-263`).
   하나라도 실패하면 레이어 전체가 `unavailable`이다(`transport_layers.py:306-312`).
-- 따라서 두 레이어를 켠 여행에서 2 km 넘게 떨어진 장소가 둘 이상이면 동시 호출이 4개 이상이 되어
-  상한 2를 넘는다. 시험은 한 점 또는 가짜 client만 쓴다(`PIN:apps/api/tests/integration/
+- 따라서 두 레이어를 켠 여행(웹은 `fuel_station`·`highway_incident`를 함께 보낸다)에서 2 km 넘게 떨어진
+  장소가 2곳 이상이면 동시 호출이 4개 이상이 되어 상한 2를 넘는다. 레이어가 하나면 3곳 이상부터다.
+  이 상한은 PinVi 프로세스 전체가 나눠 쓰므로 다른 사용자의 교통 요청과 겹쳐도 같은 일이 난다. 시험은 한 점 또는 가짜 client만 쓴다(`PIN:apps/api/tests/integration/
   test_transport_api.py:228-282`, `tests/unit/test_transport_layers.py:304-393`).
 - [실측] 이 route는 측정 창에 호출이 없어 운영에서 확인하지 못했다.
 - 영향: 여행 지도의 주유소·돌발 레이어가 비거나, 장소가 많으면 Map 호출이 최대 120번이다.
@@ -382,7 +419,8 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
   두 배쯤 탐색하므로 검색 약 500번이면 이 수가 된다. 본 질의의 지역 팔과 행 수 세기도 이 색인을 타지만
   요청당 한두 번이다.
 - [추론] 주소 JSON은 heap에 있어 검색 한 번에 heap 행을 최대 2,280개 읽는다. all-visible이 58%라 행 수
-  세기도 heap을 본다.
+  세기도 heap을 본다. 표본은 `ORDER BY` 없는 `LIMIT 8`이라(`repo:2752` 부근) 같은 DB에서도 계획이
+  바뀌면 다른 행을 고를 수 있다.
 - 영향: 따뜻할 때는 작다(추정 수 ms). 디스크가 밀릴 때는 무작위 읽기 수천 번이 된다. 실제 시간은
   재지 못했다.
 - 확신도: 구조는 높다, 이득 크기는 낮다(`T-READ-01`이 잰다).
@@ -411,13 +449,15 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 - [실측] §4.3. 공용 PG의 데이터 디렉터리가 그 파일시스템에 있다.
 - 영향: WAL·임시 파일·테이블 증가로 가득 차면 PG가 멎는다 — weather·transport·geo의 모든 읽기가
   함께 멎는다. 읽기 속도 문제가 아니라 그 전제다.
-- 확신도: 높다. 무엇이 공간을 쓰는지는 보지 않았다(다른 팀 호스트).
+- 확신도: 높다. 무엇이 공간을 쓰는지는 보지 않았다(다른 팀 호스트). 2026-11-17에 소유자에게 전달됐다.
+  운영 작업은 `T-READ-MGR-05`다.
 
 ### F-11 `feature.features`의 색인이 heap의 두 배이고 HOT 갱신이 0이다
 
 - [실측] heap 379 MB, 색인 720 MB. 갱신 58,813건 중 HOT 0건. 거의 안 쓰인 색인 574 MB(§4.1).
 - [추론] `updated_at`이 색인 두 개의 키라서 갱신이 `updated_at`을 바꾸는 한 HOT가 될 수 없다. 갱신마다
-  색인 18개에 새 항목이 생긴다.
+  색인 18개에 새 항목이 생긴다. 그중 `idx_features_updated_keyset`(72 MB, 탐색 0회)은 prewarm 목록에도
+  들어 있다(`MAP:src/kortravelmap/infra/prewarm.py:33-41`).
 - 영향: 적재가 쓰는 I/O와 버퍼 압력이 읽기와 같은 1 GB를 다툰다(F-01). 직접 지연이 아니라 간접이다.
 - 확신도: 수치는 실측, "지워도 된다"는 낮다(통계 창이 짧다).
 
@@ -431,6 +471,19 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 - Map Valkey 읽기는 µs 단위다. 교통·날씨 표면의 지연은 Valkey가 아니라 호출 수(F-06)와 호스트(F-01)다.
 - Map API는 gzip을 하지 않는다. PinVi와 같은 호스트(loopback)라 지금은 이득이 작다.
 
+### F-13 PinVi는 요청마다 rate-limit 행을 쓰고 COMMIT한다
+
+- [추론] 우회 경로와 `OPTIONS`가 아닌 모든 요청이 handler보다 먼저 `app.rate_limit_buckets`에 upsert하고
+  COMMIT한다(`PIN:app/middleware/rate_limit.py:203-237,270-317`). 별도 세션이라 pool 연결도 한 번 더 쓴다.
+  표는 일반(logged) 표다(`PIN:apps/api/alembic/baselines/20260824_0100_app_schema.sql:1574`).
+- [실측] 운영은 `PINVI_ENVIRONMENT=production`이고 backend 설정을 바꾸는 env가 없다 — `auto`는 운영에서
+  PostgreSQL이다(`rate_limit.py:392-397`).
+- [실측] 이 COMMIT 말고 I/O가 없는 route가 측정 창에 평균 1.63초였다(F-01).
+- 영향: in-bounds·검색·여행 보기를 포함한 모든 PinVi 읽기가 동기 COMMIT(WAL flush) 하나를 먼저 기다린다.
+  n150처럼 디스크가 밀리는 호스트에서는 읽기 지연의 바닥이 된다.
+- 확신도: 구조는 높다. 요청당 얼마를 쓰는지는 재지 못했다(rate-limit 구간 지표가 없다) — `T-READ-PIN-05`가
+  먼저 잰다.
+
 ## 6. 개선안과 순위
 
 이득·노력·위험은 상대값이다. "이득"은 근거가 실측인 것을 위에 둔다.
@@ -441,23 +494,26 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 | 2 | 조용한 호스트의 기준선과 재측정 도구 | 전제 | 작음 | 낮음(읽기 전용) | `T-READ-01` |
 | 3 | odroid NVMe 공간 확보 | 장애 예방 | 운영 | 낮음 | `T-READ-MGR-05` |
 | 4 | API 프로세스를 swap에서 지키기 | 꼬리 지연(크기 미측정) | 작음 | 중간(한도가 작으면 OOM) | `T-READ-MGR-03` |
-| 5 | 공개 읽기 시간 상한(문장 timeout·pool 대기 상한) | 정지 구간의 누적 방지 | 작음 | 낮음~중간 | `T-READ-03` |
+| 5 | PinVi가 Map의 시간 초과 503을 다시 보내지 않게 하고, 그 뒤 Map 공개 읽기에 요청 마감을 건다 | 정지 구간의 누적 방지 | 중간 | 중간(순서를 어기면 부하가 3배) | `T-READ-PIN-04` → `T-READ-03` |
 | 6 | 교통 근처 조회를 한 번에(여러 점) + PinVi 팬아웃 수정 | Map 호출 최대 120 → 2, 레이어 실패 제거 | 중간 | 중간(service 계약 추가) | `T-READ-04`, `T-READ-PIN-01` |
-| 7 | PinVi 저배율 집계 응답의 짧은 캐시·동일 요청 합치기 | 전국 집계 반복 제거(F-04) | 작음 | 낮음(60초 묵은 개수) | `T-READ-PIN-02` |
-| 8 | PinVi 여행 보기에서 Feature와 날씨를 함께 기다리기 | 여행 보기 지연(평균 9초 중 몫은 미측정) | 작음 | 낮음 | `T-READ-PIN-03` |
-| 9 | 공용 PG 메모리·I/O 설정 재산정(n150) | 버퍼 교체 감소(F-01) | 중간(전 tenant 재시작) | 중간 | `T-READ-MGR-04` |
-| 10 | 지역 검색 전처리를 작은 표 조회로 | 검색당 색인 탐색 약 570회·heap 최대 2,280행 제거 | 중간(migration) | 낮음 | `T-READ-05` |
-| 11 | 검색 비교 키 사전 계산 | 지역 경로 0.6~1.1초의 일부(측정 뒤 확정) | 큼 | 중간 | `T-READ-06` |
-| 12 | `features` 색인 정리·HOT 회복 | 적재 I/O 감소 → 간접 | 중간 | 중간 | `T-READ-07` |
-| 13 | weather·transport 내부 개선 | odroid 부하·Map 적재 신선도 | 저장소별 | 저장소별 | §8.5·§8.6 |
+| 7 | PinVi 집계 응답의 짧은 캐시·동일 요청 합치기 | 전국 집계 반복 제거(F-04) | 작음 | 낮음(60초 묵은 개수) | `T-READ-PIN-02` |
+| 8 | PinVi rate-limit COMMIT을 요청 경로에서 가볍게 | 모든 PinVi 읽기의 바닥(크기 미측정) | 작음 | 낮음~중간 | `T-READ-PIN-05` |
+| 9 | PinVi 여행 보기에서 Feature와 날씨를 함께 기다리기 | 여행 보기 지연(평균 9초 중 몫은 미측정) | 중간 | 중간(세션 분리) | `T-READ-PIN-03` |
+| 10 | 공용 PG 메모리·I/O 설정 재산정(n150) | 버퍼 교체 감소(F-01) | 중간(전 tenant 재시작) | 중간 | `T-READ-MGR-04` |
+| 11 | 지역 검색 전처리를 작은 표 조회로 | 검색당 색인 탐색 약 570회·heap 최대 2,280행 제거 | 중간(migration) | 낮음 | `T-READ-05` |
+| 12 | 검색 비교 키 사전 계산 | 지역 경로 0.6~1.1초의 일부(측정 뒤 확정) | 큼 | 중간 | `T-READ-06` |
+| 13 | `features` 색인 정리·HOT 회복 | 적재 I/O 감소 → 간접 | 중간 | 중간 | `T-READ-07` |
+| 14 | weather·transport 내부 개선 | odroid 부하·Map 적재 신선도 | 저장소별 | 저장소별 | §8.5·§8.6 |
 
 서비스 사이에 걸친 것.
 
-- **timeout 맞추기**: Map 문장 상한(4.5초)은 PinVi의 5초보다 짧아야 한다. PinVi가 값을 바꾸면 Map
-  설정도 따라 바꾼다(`T-READ-03` 본문에 적는다).
+- **시간 상한과 재시도는 한 묶음이다.** Map의 요청 마감(기본 4.5초)은 PinVi의 읽기 timeout 5초보다 짧아야
+  하고, PinVi는 그 503(`READ_TIMEOUT`·`POOL_BUSY`)을 다시 보내지 않아야 한다. 순서는 PinVi가 먼저다
+  (`T-READ-PIN-04` 운영 배포 → `T-READ-03` 배포). 공개 월별 축제는 PinVi가 15초를 기다리므로 Map 쪽도
+  따로 14초를 준다. PinVi가 값을 바꾸면 Map 설정도 따라 바꾼다.
 - **묶음 조회**: 교통 근처(`T-READ-04`). 날씨는 이미 묶음이다(`/locations/batch`).
 - **캐시 헤더**: Map은 데이터 캐시를 두지 않는다(ADR-030). 호출자 캐시는 허용된다
-  (`MAP:docs/architecture/performance.md:544-545`) — 그래서 저배율 캐시는 PinVi에 둔다. Map이 집계
+  (`MAP:docs/architecture/performance.md:544-545`) — 그래서 집계 캐시는 PinVi에 둔다. Map이 집계
   응답에 ETag를 달려면 값싼 데이터 버전이 필요한데 지금은 없다(§7).
 - **관측**: 세 서비스 모두 `route·status·시간`을 같은 Prometheus에 모은다(`T-READ-MGR-02`).
 
@@ -466,9 +522,11 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 | 안 | 판단 | 이유 |
 | --- | --- | --- |
 | 저배율 집계 materialized view(T-101) | 다시 열지 않는다 | 소유자가 2026-09-07 제외했다. 재개 조건은 목표 SLO와 exact-viewport vs region-total 택일이다(`MAP:docs/tasks.md:126-130`). 이 계획은 그 판단에 쓸 실측(F-04)과 기준선(`T-READ-01`)만 낸다. |
-| Map 안의 응답 캐시(프로세스·Valkey) | 기각 | ADR-030과 ADR-114가 금한다(Valkey는 PG 앞의 캐시가 아니다). 바꾸려면 ADR 개정이 먼저다. 같은 효과를 호출자 캐시(`T-READ-PIN-02`)로 얻는다. |
-| Map uvicorn worker 늘리기 | 지금은 하지 않는다 | [실측] API CPU 0.15%, [문서 주장] 느린 요청 중에도 작은 요청은 0.010초다. 병목이 이벤트 루프가 아니다. worker를 늘리면 연결 수(15 → 30+)와 프로세스별 지표·key 캐시가 갈린다. `T-READ-02` 뒤 루프 지연이 보이면 다시 본다. |
-| Map pool 늘리기 | 기각 | 느린 질의가 더 많이 동시에 돌 뿐이다. 디스크가 병목일 때 역효과다. 대기 상한을 줄이는 쪽을 택한다(`T-READ-03`). |
+| Map 안의 응답 캐시(프로세스·Valkey) | 기각 | ADR-030이 프로세스 안 데이터 캐시를 금한다. ADR-114는 Valkey를 "이 데이터의 저장소이지 PG 앞의 캐시가 아니다"라고 정의할 뿐 금지 조항은 아니다 — 그래도 PG 결과를 Valkey에 캐시하면 그 정의를 벗어나므로 ADR 개정이 먼저다. 같은 효과를 호출자 캐시(`T-READ-PIN-02`)로 얻는다. |
+| Map uvicorn worker 늘리기 | 지금은 하지 않는다 | [실측] API CPU 0.15%(§4.1, 한 시점), [문서 주장] 느린 요청 중에도 작은 요청은 0.010초다. 병목이 이벤트 루프가 아니다. worker를 늘리면 연결 수(15 → 30+)와 프로세스별 지표·key 캐시가 갈린다. `T-READ-02` 뒤 루프 지연이 보이면 다시 본다. |
+| Map pool 늘리기 | 기각 | 느린 질의가 더 많이 동시에 돌 뿐이다. 디스크가 병목일 때 역효과다. 공개 읽기의 대기 상한을 줄이는 쪽을 택한다(`T-READ-03`). |
+| 엔진 `pool_timeout`을 2초로 | 기각 | API 엔진이 하나라 admin·ops·쓰기까지 같이 걸린다(F-05). 공개 읽기 의존성 안에서만 체크아웃 대기를 자른다(`T-READ-03`). |
+| 문장마다 고정 `statement_timeout` | 기각 | 문장마다 따로 세므로 요청을 묶지 못한다(F-05). 요청 마감에서 남은 시간을 넘긴다. |
 | PinVi timeout 늘리기 | 기각 | 실패를 늦출 뿐이고 버려진 질의가 더 오래 돈다. |
 | 집계 응답 ETag(Map) | 보류 | 값싼 데이터 버전이 없어 304를 내려면 집계를 다시 해야 한다. 적재가 올리는 세대 번호가 생기면 다시 본다. |
 | MVT 타일·범용 batch | 그대로 유예 | `MAP:docs/architecture/performance.md` §8.4의 판정과 조건을 그대로 둔다. |
@@ -483,41 +541,52 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 ### 8.1 순서와 병렬
 
 ```
-0단계 (서로 독립, 동시에)   T-READ-01  T-READ-02  T-READ-MGR-01  T-READ-MGR-05  T-READ-PIN-01(재현)  T-READ-TRN-01  T-READ-WEA-01
-1단계 (동시에)             T-READ-MGR-02(← T-READ-02)  T-READ-MGR-03  T-READ-03  T-READ-04  T-READ-PIN-03
-2단계                      T-READ-PIN-01(전환, ← T-READ-04)  T-READ-PIN-02  T-READ-MGR-04(← T-READ-MGR-01)
-3단계 (← T-READ-01의 수치)  T-READ-05  T-READ-06  T-READ-07   ·  T-READ-WEA-02~04  ·  T-READ-TRN-02~04
+0단계 (서로 독립)        T-READ-01 · T-READ-02 · T-READ-PIN-01(①②) · T-READ-PIN-04 · T-READ-MGR-01 · T-READ-MGR-05
+                         T-READ-WEA-01 · T-READ-WEA-03 · T-READ-TRN-01 · T-READ-TRN-03
+1단계                    T-READ-03 (← T-READ-02 머지, T-READ-PIN-04 운영 배포)
+                         T-READ-04 · T-READ-PIN-02 · T-READ-PIN-03 · T-READ-MGR-02+03 (한 PR, ← T-READ-02)
+2단계                    T-READ-PIN-01(③ ← T-READ-04 배포) · T-READ-PIN-05 (← T-READ-MGR-02)
+                         T-READ-MGR-04 (← T-READ-MGR-01, T-READ-01)
+                         T-READ-WEA-02 · T-READ-WEA-04 (← WEA-01) · T-READ-TRN-02 · T-READ-TRN-04 (둘 다 ← TRN-01)
+3단계 (← T-READ-01 보고서) T-READ-05 → T-READ-06 · T-READ-07
 ```
 
-- 같은 줄의 작업은 서로 파일이 겹치지 않는다. 예외: `T-READ-02`와 `T-READ-03`은 둘 다
-  `api/db.py`를 고친다 — 늦게 여는 PR이 리베이스한다.
+- 같은 단계의 작업은 서로 파일이 겹치지 않는다. 겹치는 것은 순서를 정했다 —
+  - `T-READ-02` → `T-READ-03`: 둘 다 `api/db.py`·`api/app.py`·`api/settings.py`를 고친다. 03은 02의 느린 요청
+    로그로 효과를 확인하므로 02가 먼저다.
+  - `T-READ-05` → `T-READ-06`: 둘 다 `feature_repo.py`의 검색 경로와 검색 인지도 refresh 옆을 고친다.
+  - `T-READ-MGR-02`·`T-READ-MGR-03`: 둘 다 Manager `docker-compose.yml`의 Map API 블록을 고친다(지표
+    env는 `MGR:docker-compose.yml:1689`). 한 PR로 묶는다.
+- `T-READ-03`은 **PinVi `T-READ-PIN-04`가 운영에 배포된 뒤에만** 배포한다(F-05).
 - 3단계는 `T-READ-01` 보고서가 머지된 뒤 시작한다. 수치가 기준에 못 미치면 **채택하지 않고 닫는
-  것**도 완료다(각 작업의 해제 조건에 적었다).
+  것**도 완료다.
 - 운영 변경(설정·재시작·배포)은 소유자·배포 담당의 일이다. n150은 `~/preflight.sh` PASS 뒤에만,
   odroid는 Codex 담당이다.
-- 해제 조건의 문턱(5%·30%·40%·4.5초·2초·한도 512 MB 등)은 **제안값**이다. 리뷰나 `T-READ-01`의 수치로
+- 문턱(5%·30%·40%·4.5초·14초·2초·한도 512 MB 등)은 **제안값**이다. 리뷰나 `T-READ-01`의 수치로
   바꿀 수 있고, 바꾸면 이 문서와 acceptance를 함께 고친다.
 
-각 작업의 형식: **변경**(파일·함수) / **의존** / **해제 조건**(시험할 수 있는 것) / **검증** / **위험·되돌림**.
+각 작업의 형식: **변경**(파일·함수) / **의존** / **해제 조건** / **검증** / **위험·되돌림**. Map 작업의
+해제 조건은 acceptance가 소유하므로 여기에는 그 절을 가리키는 줄만 둔다.
 
-### 8.2 Map (`digitie/kor-travel-map`) — 원장 `docs/tasks.md`, 해제 조건 원장 `docs/tasks-acceptance.md` §T-READ
+### 8.2 Map (`digitie/kor-travel-map`) — 목록 `docs/tasks.md`, 해제 조건 `docs/tasks-acceptance.md`
 
 #### T-READ-01 — 조용한 호스트의 읽기 기준선과 재측정 도구
 
-- **변경**: `scripts/perf_tier2_release_harness.py`의 대표 viewport에 (a) 지역 검색 두 개("부산 맛집"
-  좁은 지역, "서울 맛집" 넓은 지역 — 전처리 질의 `_SEARCH_ALIAS_LOOKUP_SQL`·`_SEARCH_REGION_ENTRIES_SQL`·
-  `_SEARCH_REGION_ROW_COUNT_SQL`을 각각 따로 잰다), (b) 시군구 집계(zoom 10), (c) 개별 행 500건(zoom 14
-  서울), (d) 상세 1건을 더한다. 새 스크립트 `scripts/read_path_probe.py`가 운영 Map API에 PinVi와 같은
-  모양의 HTTP 요청을 순서대로 보내 `meta.duration_ms`와 전체 시간을 모으고, 묶음마다
-  `/proc/pressure/io`를 함께 적는다(스크립트는 호스트에서 돈다). 결과는
-  `docs/reports/<날짜>-read-baseline.md`와 `.safe.json`.
-- **의존**: 없음. 실행은 `CAT10_ALL_DONE` 뒤, `~/preflight.sh` PASS, 배포·적재가 없는 때.
-- **해제 조건**: ① harness가 `--skip-seed`로 운영 DB에서 9개 viewport의 p50·p95·shared read blocks
-  p95·응답 bytes를 낸다. ② 지역 검색은 CTE별 시간(`EXPLAIN (ANALYZE, BUFFERS)`의 노드 시간)을 표로
-  적는다. ③ HTTP probe가 같은 9개를 30회씩 재고 PSI io `some` avg60을 함께 적는다. ④ 조용할 때
-  (PSI io `some` avg60 < 5%)와 적재 중일 때 두 번 잰다. ⑤ 보고서가 F-04·F-07·F-08·F-12의 "모른다"를
-  수치로 바꾼다.
-- **검증**: 새 viewport의 단위·통합 시험(기존 harness 시험 형식), 보고서의 JSON이 `--check`로 재현된다.
+- **변경**: ① `scripts/perf_tier2_release_harness.py`의 엔진을 운영 API와 같게 `jit=off`로 만든다
+  (`make_async_engine(..., server_settings={"jit": "off"})` — 지금은 `:337`에서 설정 없이 만든다.
+  운영 API는 `api/db.py:61`에서 끈다). JIT를 켠 수치는 운영이 보지 않는 수치다(2026-11-12 "부산 맛집"
+  7.6초 중 7.2초가 JIT였다 — `repo:7783-7785`). ② 대표 viewport를 지금의 6개(`:196-262`)에서 11개로
+  늘린다 — 지역 검색 둘("부산 맛집" 좁은 지역, "서울 맛집" 넓은 지역; 전처리 질의
+  `_SEARCH_ALIAS_LOOKUP_SQL`·`_SEARCH_REGION_ENTRIES_SQL`·`_SEARCH_REGION_ROW_COUNT_SQL`을 각각 따로
+  잰다), 시군구 집계(zoom 10), 개별 행 500건(zoom 14 서울), 상세 1건. ③ 새 스크립트
+  `scripts/read_path_probe.py`가 운영 Map API에 PinVi와 같은 모양의 HTTP 요청을 순서대로 보내
+  `meta.duration_ms`와 전체 시간을 모으고, 묶음마다 `/proc/pressure/io`를 함께 적는다(호스트에서 돈다).
+  ④ 결과는 `docs/reports/<날짜>-read-baseline.md`와 `.safe.json`.
+- **의존**: 없음. 실행은 `CAT10_ALL_DONE` 뒤, `~/preflight.sh`·`~/io-guard.sh` PASS, 배포·적재가 없는 때.
+- **해제 조건**: `docs/tasks-acceptance.md`의 `T-READ-01` 절(원장이 소유한다).
+- **검증**: 새 viewport와 `jit=off` 설정의 단위 시험, harness를 두 번 돌려 같은 schema의 JSON이 나오는지
+  확인(harness에는 `--check` 같은 재현 flag가 없다 — 인자는 `--rows`·`--iterations`·`--skip-seed`·출력
+  경로뿐이다).
 - **위험·되돌림**: 읽기 전용이다. 문장마다 `statement_timeout` 30초를 건다. 전국 집계 30회가 수십 초
   CPU를 쓰므로 적재와 겹치지 않게 한다.
 
@@ -530,72 +599,98 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
   좌표는 남기지 않는다). DB 합계는 `api/db.py`의 cursor 이벤트에 요청별 contextvar 누산기를 달아 얻는다.
   ③ `api/settings.py`에 설정 추가, `docs/deploy.md`에 운영 값 안내.
 - **의존**: 없음. 운영에서 지표를 켜고 긁는 것은 `T-READ-MGR-02`.
-- **해제 조건**: ① 지표가 꺼져 있어도 느린 요청 로그가 남는다(시험: `pg_sleep`을 부르는 시험 전용
-  route 또는 주입한 느린 질의). ② 로그 줄에 query string과 header 값이 없다(시험). ③ `/metrics`에 pool
-  대기 histogram과 gauge가 나온다. ④ 기본 설정에서 요청당 추가 DB 왕복이 0이다(문장 수 시험).
-  ⑤ 배포 뒤 운영 로그에서 1초 넘는 요청 줄을 확인해 journal에 적는다(배포 generation과 함께).
+- **해제 조건**: `docs/tasks-acceptance.md`의 `T-READ-02` 절(원장이 소유한다).
 - **검증**: `packages/kor-travel-map-api/tests/`의 단위·통합 시험, OpenAPI drift 없음.
 - **위험·되돌림**: 로그 양 — 문턱을 올리거나 0으로 끈다. label은 route template만 써 cardinality가
   늘지 않게 한다.
 
-#### T-READ-03 — 공개 읽기에 시간 상한을 건다
+#### T-READ-03 — 공개 읽기에 요청 마감을 건다
 
-- **변경**: ① `api/db.py`에 공개 읽기용 세션 의존성을 정리한다 — `get_read_snapshot_session`과
-  새 `get_public_read_session`(in-bounds·bbox·nearby가 쓰던 `get_session` 자리)이 transaction 첫 문장으로
-  `SET LOCAL statement_timeout`을 건다. 값은 `api/settings.py`의
-  `public_read_statement_timeout_ms`(기본 4500, 0이면 끔). ② `make_async_engine`
-  (`src/kortravelmap/infra/db.py:884`)에 `pool_timeout` 인자를 더하고 API 엔진은 2초를 준다. ③ `api/app.py`
-  예외 처리: SQLSTATE `57014`(문장 취소)와 pool 대기 초과를 503 problem(`READ_TIMEOUT`·`POOL_BUSY`,
-  `Retry-After: 1`)으로 바꾼다. ④ 적용 범위는 `/v1/features*`·`/v1/public/*`·`/v1/categories` 읽기다.
-  admin·ops·쓰기 경로는 건드리지 않는다.
-- **의존**: 없음(`T-READ-02`와 `api/db.py` 충돌만 조정).
-- **해제 조건**: ① 상한 200 ms에서 `pg_sleep(1)`을 품은 읽기가 503 `READ_TIMEOUT`이고, 그 연결이 풀에
-  돌아와 다음 질의가 성공한다(통합 시험). ② pool을 다 쓴 상태의 다음 요청이 약 2초 뒤 503
-  `POOL_BUSY`다. ③ admin·ops route의 세션에는 상한이 걸리지 않는다(시험). ④ 상한 0이면 종전 동작과
-  같다. ⑤ OpenAPI에 새 응답을 적어야 하면 user spec 변경으로 PinVi 재vendor를 같은 회전에 묶는다 —
-  이미 있는 공통 503 problem을 쓰면 계약 변경이 없다(구현 PR이 어느 쪽인지 적는다).
-- **검증**: 통합 시험(PostGIS), n150 CI-parity 4세션. 배포 뒤 `T-READ-02`의 로그로 503 `READ_TIMEOUT`
-  건수를 일주일 본다.
-- **위험·되돌림**: 조용할 때 1.0~1.3초인 route·area 전국 집계가 정지 구간에 4.5초를 넘으면 지금은
-  "늦게 성공"하던 것이 "빨리 실패"가 된다 — PinVi는 어차피 5초에 버린다. Map 관리 화면처럼 더 오래
-  기다리는 호출자가 있으면 그 경로를 범위에서 뺀다. 되돌림은 env 0.
+리뷰 1회차에서 이 작업의 첫 설계(문장당 4.5초 + 엔진 `pool_timeout` 2초 + `get_read_snapshot_session`
+수정)가 세 군데서 틀렸음이 확인됐다(F-05). 아래가 고친 설계다.
+
+- **변경**:
+  1. **새 의존성만 만든다.** `api/db.py`에 `get_public_read_snapshot_session`(read-only REPEATABLE READ —
+     검색·상세·batch·contained·price·공개 뷰용)과 `get_public_read_session`(지금의 `get_session`과 같은
+     격리 — in-bounds·bbox·nearby용)을 더한다. **`get_read_snapshot_session`과 `get_session`은 건드리지
+     않는다** — 앞의 것은 admin·ops·`/service` cache-target 스트림 등 13개 router가 함께 쓴다.
+  2. **요청 마감을 예산으로 쓴다.** 새 의존성은 요청 시작 시각 + 예산을 마감으로 잡고(ADR-112의
+     `transaction_deadline`과 같은 방식 — `src/kortravelmap/infra/transaction_limits.py`), transaction 첫
+     문장으로 남은 시간을 `statement_timeout`에 건다. ADR-112의 `TransactionBudget.from_remaining`은
+     여유 3초·바닥 1초라 4.5초 예산에는 맞지 않으므로, 같은 모듈에 읽기용 함수
+     `apply_public_read_budget(session)`을 더한다 — `statement_timeout` = 남은 시간 − 0.3초(바닥 250 ms),
+     남은 시간이 여유 이하면 SQL을 보내지 않고 `ReadBudgetExceeded`를 올린다. 마감이 없으면 아무것도 하지
+     않는다(Dagster·CLI 호출자는 그대로다). 기존 `apply_transaction_limits`와 그 상수는 바꾸지 않는다.
+  3. **문장이 여럿인 경로는 무거운 문장 앞에서 다시 건다.** `repo`의 `search_features`는 본 질의와 개수
+     질의 직전에 `apply_public_read_budget`을 다시 부른다(기존 `SET LOCAL` 두 줄과 합쳐 한 문장으로 보내면
+     왕복이 늘지 않는다). 다른 공개 경로는 무거운 문장이 하나라 transaction 시작 때 한 번으로 충분하다.
+  4. **예산 값**: `api/settings.py`에 `public_read_budget_ms`(기본 4500 — PinVi의 읽기 timeout 5초보다
+     짧게)와 `public_read_slow_budget_ms`(기본 14000)를 둔다. 뒤의 것은
+     `GET /v1/public/festivals/monthly`에만 쓴다 — PinVi가 이 route만 15초를 기다린다(§3.3). 0이면 끈다.
+  5. **pool 대기는 의존성 안에서만 자른다.** 엔진의 `pool_timeout`은 바꾸지 않는다(엔진이 하나라 전
+     경로에 걸린다). 새 의존성이 첫 연결 획득(`await session.connection()`)을
+     `asyncio.timeout(public_read_pool_wait_ms, 기본 2000)`으로 감싸고, 넘으면 `PoolBusy`를 올린다. 대기
+     시간은 요청 예산에서 빠진다. 취소된 체크아웃이 연결을 흘리지 않는지 시험으로 확인하고, 흘리면 공개
+     읽기 전용 엔진(같은 DSN, 작은 pool, `pool_timeout` 2초)으로 바꾼다 — 어느 쪽을 택했는지 PR에 적는다.
+  6. **오류 변환은 기존 handler를 넓힌다.** `api/app.py:1066-1085`의 `DBAPIError` handler(55P03 → 503
+     `LOCK_TIMEOUT`)에 "요청이 공개 읽기 예산 아래였고 SQLSTATE가 57014면 503 `READ_TIMEOUT`"을 더한다.
+     예산 표시는 의존성이 `request.state`에 남긴다 — 표시가 없는 요청(admin·ops·쓰기)의 57014는 지금처럼
+     500으로 간다. `ReadBudgetExceeded`도 503 `READ_TIMEOUT`, `PoolBusy`는 503 `POOL_BUSY`다. batch route의
+     `except SQLAlchemyError`(`features.py:1786-1795`)는 57014를 다시 던져 `FEATURE_BATCH_UNAVAILABLE`가
+     가로채지 않게 한다.
+  7. **적용 범위**: `routers/features.py`의 공개 route(in-bounds·bbox·search·nearby·nearby/by-target·상세·
+     contained-features·price·price/snapshot·batch), `routers/categories.py`, `routers/public_providers.py`,
+     `routers/public_views.py`. `features.py` 안의 `require_admin_frontend` route(sources·observation
+     history)와 그 밖의 모든 router는 범위 밖이다.
+- **의존**: `T-READ-02` 머지(같은 파일, 느린 요청 로그로 확인). **운영 배포는 `T-READ-PIN-04`가 운영에
+  나간 뒤** — 그 전에는 PinVi가 이 503을 세 번 다시 보낸다.
+- **해제 조건**: `docs/tasks-acceptance.md`의 `T-READ-03` 절(원장이 소유한다).
+- **검증**: 통합 시험(PostGIS), n150 CI-parity 4세션. 배포 뒤 `T-READ-02`의 로그로 503 `READ_TIMEOUT`·
+  `POOL_BUSY` 건수를 일주일 본다.
+- **위험·되돌림**: ① PinVi가 먼저 고쳐지지 않으면 멈춘 요청 하나가 무거운 질의 세 번(약 14초)이 된다 —
+  의존 순서가 막는다. ② 조용할 때 1.0~1.3초인 route·area 전국 집계가 정지 구간에 예산을 넘으면 "늦게
+  성공"하던 것이 "빨리 실패"가 된다. ③ Map 관리 화면이 공개 route를 더 긴 timeout으로 부르면 그
+  호출자도 4.5초에 끊긴다 — 구현 PR이 관리 화면의 timeout을 확인해 적는다. ④ 취소된 pool 체크아웃의
+  연결 누수(변경 5의 시험). 되돌림은 예산 env 0.
 
 #### T-READ-04 — 교통 근처 조회를 한 요청으로 받는다
 
 - **변경**: `api/routers/service_transport.py`에 `POST /v1/service/transport/{dataset}/near-batch`
   (dataset은 `fuel-stations`·`highway-incidents`)를 더한다. 본문은 `points[]`(lon·lat, 최대 60)와
-  `radius_m`(≤ 50,000)·`limit`(≤ 500)이다. 구현은 현재 세대를 한 번 읽고, 점마다 `GEOSEARCH`를 pipeline
-  하나로 보내고(`src/kortravelmap/infra/valkey_state.py`에 `nearby_many` 추가), id 합집합을 `HMGET` 한
-  번으로 읽는다. 응답 item은 기존 목록과 같은 모양에 가장 가까운 점까지의 거리를 붙인다. service
-  OpenAPI와 ADR-114 "구현 설계 — 1단계" 표에 route를 더한다.
-- **의존**: 없음. PinVi 전환은 `T-READ-PIN-01`.
-- **해제 조건**: ① 점 60개 요청의 Valkey 왕복이 3번 이하다(가짜 client 계수 시험). ② 결과 집합이 점마다
-  기존 `?lon&lat&radius_m` 조회를 부른 합집합과 같다(거리 포함, 통합 시험). ③ 세대 교체 중에도 한
-  세대만 읽는다. ④ 상한(점 60·반경 50 km·limit 500)을 넘으면 422다. ⑤ Valkey 장애는 기존 route와 같은
-  503이다. ⑥ service OpenAPI drift gate가 통과하고 PinVi 재vendor PR이 열린다.
+  `radius_m`(≤ 50,000)·`limit`(≤ 500)이다. 지금의 목록 조회는 Valkey 왕복이 4번이다(포인터 → meta →
+  `GEOSEARCH` → `HMGET`, `service_transport.py:589-616`). 새 route는 포인터를 읽고, meta와 점마다의
+  `GEOSEARCH`를 pipeline 하나로 보내고(`src/kortravelmap/infra/valkey_state.py`에 `nearby_many` 추가),
+  id 합집합을 `HMGET` 한 번으로 읽는다 — 점 수와 무관하게 3번이다. 응답 item은 기존 목록과 같은 모양에
+  가장 가까운 점까지의 거리를 붙인다. service OpenAPI와 ADR-114 "구현 설계 — 1단계" 표에 route를 더한다.
+- **의존**: 없음. PinVi 전환은 `T-READ-PIN-01` ③.
+- **해제 조건**: `docs/tasks-acceptance.md`의 `T-READ-04` 절(원장이 소유한다).
 - **검증**: 단위·통합 시험(Valkey), `scripts/read_path_probe.py`에 점 20개 요청을 더해 시간을 적는다.
-- **위험·되돌림**: 추가 route라 기존 소비자에 영향이 없다. 큰 합집합의 응답 크기 — `limit`과
-  `truncated`로 막는다. 되돌림은 route 제거(PinVi가 옛 경로로 돌아간 뒤).
+- **위험·되돌림**: 추가 route라 기존 소비자에 영향이 없다. 이 route가 없는 옛 Map은 같은 경로의
+  `POST`에 **405**를 낸다(`GET /{dataset}/{feature_id}`가 경로를 잡는다 — `service_transport.py:727`
+  부근). 큰 합집합의 응답 크기는 `limit`과 `truncated`로 막는다. 되돌림은 route 제거(PinVi가 옛 경로로
+  돌아간 뒤).
 
 #### T-READ-05 — 지역 검색 전처리를 작은 표 조회로 바꾼다
 
 - **변경**: 다음 빈 번호의 migration으로 `feature.search_region_index`(`sigungu_code` PK, `sido_name`,
-  `sigungu_name`, `public_rows`, `refreshed_at`)를 만든다. 채우기는 검색 인지도와 같은 자리다 —
-  `src/kortravelmap/infra/search_prominence_repo.py`의 refresh 옆에 함수를 두고 Dagster
-  `consistency_dedup_refresh` job(`packages/kor-travel-map-dagster/…/maintenance.py`)이 부른다.
-  `repo`의 `_resolve_search_region`과 `_search_region_arms`는 표가 채워져 있으면 표를 읽고, 비어 있으면
-  지금의 두 질의로 떨어진다. `tests/integration/perf_gate.py`의 `HOT_QUERIES`에 새 조회를 더한다.
+  `sigungu_name`, `public_rows`, `refreshed_at`)를 만든다. 이름은 **표본 8행이 아니라 그 시군구 공개 행
+  전체의 최빈값**으로 정한다(지금의 표본은 `ORDER BY` 없는 `LIMIT 8`이라 결정적이지 않다 — F-07).
+  채우기는 검색 인지도와 같은 층을 따른다 — infra 함수는 `src/kortravelmap/infra/search_prominence_repo.py`
+  옆에, client 메서드는 `refresh_search_prominence` 옆에(`src/kortravelmap/client/__init__.py:1777-1784`),
+  Dagster `consistency_dedup_refresh` job이 그 client 메서드를 부른다
+  (`packages/kor-travel-map-dagster/…/maintenance.py:624`). `repo`의 `_resolve_search_region`과
+  `_search_region_arms`는 표가 채워져 있으면 표를 읽고, 비어 있으면 지금의 두 질의로 떨어진다.
+  `tests/integration/perf_gate.py`의 `HOT_QUERIES`에 새 조회를 더한다.
 - **의존**: `T-READ-01`(전처리 두 질의의 시간). 조용할 때와 적재 중 어느 쪽에서도 두 질의의 합이 검색
   시간의 5% 미만이면 **채택하지 않고 닫는다**.
-- **해제 조건**: ① 같은 DB에서 표 경로와 종전 경로의 `split_region_query` 결과·선택되는 팔
-  (`_SearchRegionArms`)이 검색어 묶음 전체에서 같다(통합 시험 — 묶음은 `tests/`의 지역 검색 사례를
-  쓴다). ② 표 경로의 낱말 둘 검색은 `feature.features`를 전처리에서 읽지 않는다(EXPLAIN 시험).
-  ③ 표가 비었을 때 종전과 같다. ④ refresh가 같은 run에서 두 번 돌아도 결과가 같다. ⑤ harness의
-  지역 검색 수치를 전후로 보고서에 적는다.
+- **해제 조건**: `docs/tasks-acceptance.md`의 `T-READ-05` 절(원장이 소유한다).
 - **검증**: 통합 시험, tier-1 gate, 배포 뒤 `consistency_dedup_refresh` 한 번 뒤 표 행 수(시군구 수)를
   journal에 적는다.
-- **위험·되돌림**: 새 시군구 코드는 다음 refresh까지 지역으로 해석되지 않는다(일반 검색으로 동작).
-  `public_rows`는 문턱 3만 판정에만 쓰여 하루 묵어도 순위는 같다. 되돌림은 코드 revert(표는 무해).
+- **위험·되돌림**: ① 새 시군구 코드는 다음 refresh까지 지역으로 해석되지 않는다(일반 검색으로 동작).
+  ② `public_rows`가 하루 묵으면 **문턱 3만 근처의 지역은 좁음/넓음 판정이 달라져 후보 팔이 바뀔 수 있다**
+  (`repo:7653-7670`) — 순위가 달라질 수 있는 경우다. 문턱에서 ±10% 안의 지역 수를 PR에 적고, 많으면
+  행 수만은 지금처럼 요청 때 센다. ③ 이름을 최빈값으로 바꾸면 표본 8행이 고르던 이름과 다를 수 있다 —
+  해제 조건의 비교 시험이 그 차이를 드러낸다. 되돌림은 코드 revert(표는 무해).
 
 #### T-READ-06 — 검색 순위의 비교 키를 미리 계산한다 (측정으로 채택 여부를 정한다)
 
@@ -604,16 +699,14 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
   비교 키·tail·끝 괄호 변형 셋·분류 그룹·접기 키)를 두고 같은 refresh가 채운다. `repo`의
   `_feature_search_score_cte`는 표를 LEFT JOIN해 값이 있으면 쓰고 없으면 지금의 식으로 계산한다
   (`COALESCE`). 순위 식·자리·cursor는 바꾸지 않는다.
-- **의존**: `T-READ-01`. 30% 미만이면 **채택하지 않고 닫고**, 시간을 쓰는 단계를 보고서에 적어 새
-  작업으로 연다(후보: 유사도만 단계의 후보 줄이기 — cursor 계약이 걸려 별도 설계가 필요하다).
-- **해제 조건**: ① 검색 평가 묶음(2026-11-12 평가에 쓴 검색어)에서 표 경로와 종전 경로의 결과
-  `feature_id` 순서가 첫 3페이지까지 같다. ② 표에 없는 행(새 Feature)이 섞여도 같다. ③ 이름·분류가
-  바뀐 행은 refresh 전까지 **옛 키로 순위가 매겨진다** — 이 묵은 값의 허용 여부를 소유자가 정하고
-  acceptance에 적는다(허용하지 않으면 키를 `row_revision`과 함께 저장해 다르면 식으로 떨어진다).
-  ④ harness의 "부산 맛집" p50이 기준선보다 40% 이상 준다. 못 미치면 revert하고 닫는다.
-- **검증**: 통합 시험, tier-1 gate, tier-2 harness 전후.
-- **위험·되돌림**: 순위가 조용히 달라지는 것 — ①②가 막는다. 표 하나(약 40만 행)의 쓰기 비용은
-  tier-3 측정(`performance.md` §8.3)으로 PR에 붙인다. 되돌림은 코드 revert.
+- **의존**: `T-READ-01`, `T-READ-05`(같은 파일). 30% 미만이면 **채택하지 않고 닫고**, 시간을 쓰는 단계를
+  보고서에 적어 새 작업으로 연다(후보: 유사도만 단계의 후보 줄이기 — cursor 계약이 걸려 별도 설계가
+  필요하다).
+- **해제 조건**: `docs/tasks-acceptance.md`의 `T-READ-06` 절(원장이 소유한다).
+- **검증**: 통합 시험, tier-1 gate, tier-2 harness 전후(`jit=off`).
+- **위험·되돌림**: 순위가 조용히 달라지는 것 — 해제 조건의 순서 비교가 막는다. 이름·분류가 바뀐 행은
+  refresh 전까지 옛 키로 순위가 매겨진다(소유자 결정 사항). 표 하나(약 40만 행)의 쓰기 비용은 tier-3
+  측정(`performance.md` §8.3)으로 PR에 붙인다. 되돌림은 코드 revert.
 
 #### T-READ-07 — `feature.features`의 쓰지 않는 색인을 정리하고 HOT 갱신을 되살린다 (측정으로 정한다)
 
@@ -622,11 +715,10 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
   코드 경로를 찾아 적는다(관리자 목록 정렬·검색 `#1475`, 공개 목록 keyset). ③ 14일 동안 탐색 0이고
   읽는 경로가 없거나 다른 색인으로 대체되는 것만 다음 빈 번호의 migration으로 지운다. `updated_at`
   색인 두 개가 대상이 되면 HOT 갱신이 가능해진다 — 지운 뒤 적재 한 번의 `n_tup_hot_upd`를 잰다.
-  `infra/prewarm.py`의 `DEFAULT_HOT_RELATIONS`에서 지운 이름을 뺀다.
+  `idx_features_updated_keyset`은 `infra/prewarm.py:33-41`의 `DEFAULT_HOT_RELATIONS`에 들어 있으므로 지우면
+  그 목록에서도 뺀다. `idx_features_coord_5179_gist`(탐색 5회)는 반경 검색용이라 대상이 아니다.
 - **의존**: `T-READ-01`, 관측 14일.
-- **해제 조건**: ① 색인별 "읽는 경로 / 14일 탐색 수 / 판정" 표가 보고서에 있다. ② 지운 뒤 관리자
-  Feature 목록·검색 e2e(D2)와 tier-1 gate가 통과한다. ③ tier-3 측정 — 같은 provider 재적재의 쓰기
-  시간·WAL·색인 크기 전후를 PR에 붙인다. ④ 지울 것이 없으면 그 근거로 닫는다.
+- **해제 조건**: `docs/tasks-acceptance.md`의 `T-READ-07` 절(원장이 소유한다).
 - **검증**: 통합 시험, n150 일회용 DB에서 재적재 전후 측정.
 - **위험·되돌림**: 드물게 쓰는 관리자 질의가 느려진다 — downgrade가 색인을 다시 만든다(운영에서는
   `CREATE INDEX CONCURRENTLY`, `docs/runbooks/invalid-index-recovery.md`).
@@ -635,43 +727,96 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 
 #### T-READ-PIN-01 — 여행 교통 반경 조회가 동시 호출 상한에 걸리지 않게 한다
 
-- **변경**: ① 재현 시험 — 진짜 `KorTravelMapClient`(상한 2)에 가짜 transport를 붙이고 2 km 넘게 떨어진
-  점 3개로 `fetch_near_layer`를 부르면 레이어가 `unavailable`이 되는지 확인한다
-  (`apps/api/tests/unit/test_transport_layers.py`). ② 당장의 수정: `NEAR_CONCURRENCY`
-  (`app/services/transport_layers.py:216`)를 범위 상한 이하로 묶고 두 레이어가 같은 상한을 나눠 쓰게 한다
-  (거부가 아니라 기다린다). ③ `T-READ-04`가 배포되면 중심 묶음을 `near-batch` 한 번으로 바꾼다
-  (`app/clients/kor_travel_map_transport.py`에 메서드 추가, service spec 재vendor).
+- **변경**: ① 재현 시험 — 진짜 `KorTravelMapClient`(transport 상한 2)에 가짜 HTTP transport를 붙이고
+  레이어 2개·2 km 넘게 떨어진 점 2개(또는 레이어 1개·점 3개)로 반경 조회를 부르면 레이어가
+  `unavailable`이 되는지 확인한다(`apps/api/tests/unit/test_transport_layers.py`). ② 당장의 수정:
+  한 요청의 중심 조회를 **요청 안에서 줄 세운다** — `NEAR_CONCURRENCY`(`app/services/transport_layers.py:216`)
+  를 두 레이어가 함께 쓰는 값으로 바꾸고 transport 상한 이하로 둔다. 이것은 한 요청이 스스로 상한을
+  넘는 것만 막는다. 상한은 프로세스 전체가 나눠 쓰므로 **다른 사용자의 교통 요청과 겹칠 때의 거부는
+  남는다** — 그것은 ③으로 호출 수를 줄여야 없어진다. ③ `T-READ-04`가 배포되면 중심 묶음을
+  `near-batch` 한 번으로 바꾼다(`app/clients/kor_travel_map_transport.py`에 메서드 추가, service spec
+  재vendor). 옛 Map은 이 `POST`에 **405**를 내고 PinVi는 그것을 `KorTravelMapBadRequest`로 바꾸므로
+  (`kor_travel_map_transport.py:105-106`), 405를 "route 없음"으로 보고 옛 경로(②)로 떨어지게 한다.
 - **의존**: ①②는 없음. ③은 `T-READ-04` 배포.
-- **해제 조건**: ① 재현 시험이 수정 전 빨강, 수정 뒤 초록이다. ② 점 60개·레이어 2개 요청이 Map을
-  레이어당 한 번(③ 뒤) 부른다(계수 시험). ③ 결과 집합이 종전과 같다(기존 반경 시험 유지).
-  ④ 운영에서 `pinvi_api_outbound_bulkhead_rejections_total{scope="transport"}`가 늘지 않는다.
-- **검증**: 단위·통합 시험, live e2e의 여행 지도 교통 레이어.
-- **위험·되돌림**: ②는 기다리는 만큼 느려진다(레이어 상한 5초 안). ③은 Map이 옛 버전이면 404 →
-  옛 경로로 떨어지게 한다.
+- **해제 조건**: ① 재현 시험이 수정 전 빨강, 수정 뒤 초록이다. ② 한 요청만 있을 때 점 60개·레이어 2개
+  조회에서 `BULKHEAD_FULL`이 0건이다(진짜 client로 시험). ③ `near-batch` 전환 뒤 같은 요청이 Map을
+  레이어당 한 번 부른다(계수 시험). ④ Map이 405를 내면 옛 경로로 같은 결과를 낸다(시험). ⑤ 결과
+  집합이 종전과 같다(기존 반경 시험 유지).
+- **검증**: 단위·통합 시험, live e2e의 여행 지도 교통 레이어. 운영의
+  `pinvi_api_outbound_bulkhead_rejections_total{scope="transport"}`는 관찰용이다(다른 요청과 겹친 거부가
+  섞이므로 해제 조건으로 쓰지 않는다).
+- **위험·되돌림**: ②는 기다리는 만큼 느려진다(레이어 상한 5초 안에 못 끝나면 `unavailable`). ③은 옛
+  Map에서 405 fallback이 빠지면 레이어가 통째로 실패한다 — 해제 조건 ④가 막는다.
 
-#### T-READ-PIN-02 — 저배율 in-bounds 응답을 짧게 캐시하고 같은 요청을 합친다
+#### T-READ-PIN-02 — in-bounds 집계 응답을 짧게 캐시하고 같은 요청을 합친다
 
-- **변경**: `app/api/v1/features.py`의 in-bounds에서 Map이 집계 모드로 답한 응답(zoom ≤ 10 — 웹이 bbox를
-  소수 2~3자리로 맞추는 구간, `apps/web/lib/featureBounds.ts:51-56`)을 `zoom·맞춘 bbox·kind·category·
-  provider·attribute` 키로 60초 둔다. 같은 키의 진행 중 요청은 하나로 합친다(축제 월별 캐시와 같은
-  방식, `app/clients/kor_travel_map.py:1022-1049`). 서버가 bbox를 같은 규칙으로 맞춘다.
+- **변경**: `app/api/v1/features.py:401-470`의 in-bounds에서 Map이 **집계 모드로 답한 응답**
+  (`mode == "clusters"` — Map은 zoom ≤ 13이거나 `cluster_unit`이 오면 집계한다,
+  `MAP:api/routers/features.py:785-799`)만 60초 둔다. 캐시 여부를 zoom 숫자로 정하지 않는다. 키는 이
+  endpoint가 받는 **모든** 인자다 — 맞춘 bbox, `zoom`, `kinds`, `category`, `cluster_unit`, `limit`,
+  `include_geometry`(이 endpoint에는 `provider`·`attribute` 인자가 없다). bbox는 웹과 같은 규칙으로 서버가
+  맞춘다(`apps/web/lib/featureBounds.ts:51-56` — zoom ≤7 소수 2자리, ≤10 3자리, 그 위 5자리). 같은 키의
+  진행 중 요청은 하나로 합친다(축제 월별 캐시와 같은 방식, `app/clients/kor_travel_map.py:1022-1049`).
 - **의존**: 없음.
-- **해제 조건**: ① 같은 키 두 요청이 Map을 한 번 부른다(동시·연속 모두). ② 60초 뒤 다시 부른다.
-  ③ Map 실패는 캐시하지 않는다. ④ 개별 행 모드(zoom ≥ 14)와 geometry 요청은 캐시하지 않는다.
-  ⑤ 항목 수·바이트 상한이 있다.
+- **해제 조건**: ① 같은 키 두 요청이 Map을 한 번 부른다(동시·연속 모두). ② 인자 일곱 가지 중 하나라도
+  다르면 다른 키다(인자마다 시험). ③ 60초 뒤 다시 부른다. ④ Map 실패와 `mode == "items"` 응답은
+  캐시하지 않는다(zoom 11~13이라도 집계 응답이면 캐시하고, zoom ≤ 10이라도 개별 행 응답이면 하지
+  않는다). ⑤ 항목 수·바이트 상한이 있다. ⑥ bbox를 맞춘 요청의 응답이 맞추기 전 bbox의 응답과 다를 수
+  있음을(가장자리 개수) 응답 계약 문서에 적는다.
 - **검증**: 단위 시험, 운영 Map 로그(`T-READ-02`)에서 전국 집계 건수가 주는지 본다.
-- **위험·되돌림**: 적재 직후 60초 동안 묵은 개수. 웹이 이미 60초 캐시를 둔다. 되돌림은 TTL 0.
+- **위험·되돌림**: 적재 직후 60초 동안 묵은 개수. bbox를 서버가 맞추면 가장자리 군집의 개수가 요청한
+  bbox와 조금 달라진다(zoom 11~13은 5자리라 사실상 그대로이고 재사용도 거의 없다). 되돌림은 TTL 0.
 
 #### T-READ-PIN-03 — 여행 보기에서 Feature batch와 날씨를 함께 기다린다
 
-- **변경**: `app/services/trip_view_builder.py:213`(Feature batch)과 `:278`(날씨)을 `asyncio.gather`로
-  묶는다. 날씨가 Feature 결과에 기대는 값이 있으면(좌표) 저장된 POI 좌표를 먼저 쓴다.
+- **변경**: 지금 두 가지는 순서대로 돌고 **같은 `AsyncSession`(`db`)을 쓴다** — Feature 쪽은
+  `cache_generation_observer.observe(db, …)`(`app/services/trip_view_builder.py:192`)와
+  `release_read_connection(db)`(`:211`), 날씨 쪽은 `db`를 받아(`:278`) 안에서 조회·commit·link 저장을 한다
+  (`app/services/weather_map_resolver.py:265,270,299`). `AsyncSession`은 동시에 쓸 수 없으므로 **그냥
+  `asyncio.gather`로 묶으면 안 된다.** 둘 중 하나로 한다(구현 PR이 고른 쪽과 이유를 적는다) —
+  (가) 날씨 쪽에 `async_session_factory()`로 만든 **자기 세션**을 준다. link 저장의 commit이 요청
+  세션과 분리되므로, 여행 보기가 나중에 실패해도 저장된 link가 남는 것이 괜찮은지 확인한다(link는
+  7일짜리 조회 캐시다 — `weather_map_resolver.py:68`).
+  (나) 두 쪽의 **DB 읽기를 먼저 순서대로** 끝내고(Feature 캐시 세대 확인, 날씨 link 조회) HTTP 호출만
+  함께 기다린 뒤, 쓰기(link 저장)는 다시 순서대로 한다.
 - **의존**: 없음.
-- **해제 조건**: ① 두 상류에 각각 지연 1초를 넣은 시험에서 전체가 약 1초다(지금은 약 2초). ② 한쪽이
-  실패해도 다른 쪽 결과는 그대로다. ③ 응답 본문이 종전과 같다.
-- **검증**: 단위 시험, PinVi `/metrics`의 `/trips/{trip_id}` 분포 전후.
-- **위험·되돌림**: 낮다. 평균 9초의 원인이 이것인지는 재지 못했다 — 호스트 정지(F-01)의 몫이 클 수
-  있다.
+- **해제 조건**: ① 진짜 `AsyncSession`(PostgreSQL)으로 두 쪽이 모두 DB를 건드리는 통합 시험에서 세션
+  동시 사용 오류가 없다. ② 두 상류에 각각 지연 1초를 넣은 시험에서 전체가 약 1초다(지금은 약 2초).
+  ③ 한쪽이 실패해도 다른 쪽 결과는 그대로다. ④ 응답 본문이 종전과 같다. ⑤ (가)를 택했으면 요청당 쓰는
+  pool 연결 수의 최댓값을 적는다.
+- **검증**: 통합 시험, PinVi `/metrics`의 `/trips/{trip_id}` 분포와 `pinvi_api_db_pool_wait_seconds` 전후.
+- **위험·되돌림**: **중간**이다. 세션을 잘못 나누면 간헐적인 `InvalidRequestError`나 반쯤 저장된 link가
+  생긴다. (가)는 요청당 pool 연결을 하나 더 쓴다. 평균 9초의 원인이 순차 대기인지는 재지 못했다 —
+  디스크 대기(F-01)와 rate-limit COMMIT(F-13)의 몫이 클 수 있으므로, 이득이 작으면 되돌린다.
+
+#### T-READ-PIN-04 — Map의 시간 초과 503을 다시 보내지 않는다 (`T-READ-03`보다 먼저)
+
+- **변경**: `app/clients/kor_travel_map.py`의 `_send`가 5xx를 다시 보내기 전에(`:590-599`) 응답의
+  problem `code`를 읽는다(`_error_code`, `:1227-1241`). `READ_TIMEOUT`·`POOL_BUSY`면 다시 보내지 않고
+  바로 `KorTravelMapUnavailable`(그 `code`를 실어)을 올린다. 회로에는 실패로 센다(`ReadTimeout`과 같은
+  취급). 다른 5xx(`LOCK_TIMEOUT` 포함)의 재시도는 그대로 둔다.
+- **의존**: 없음. Map에 이 코드가 아직 없어도 해가 없다(그 코드가 올 때만 동작이 달라진다).
+- **해제 조건**: ① 가짜 Map이 503 `READ_TIMEOUT`을 내면 요청이 한 번만 나간다(계수 시험). `POOL_BUSY`도
+  같다. ② 503 `LOCK_TIMEOUT`과 code 없는 500은 종전처럼 세 번이다. ③ 그 실패가 회로 실패 수에 한 번
+  잡힌다. ④ 운영 배포 뒤 배포 generation을 Map `T-READ-03`의 acceptance에 적는다(03의 배포 조건).
+- **검증**: `apps/api/tests/unit/`의 client 시험.
+- **위험·되돌림**: 낮다. 재시도로 우연히 성공하던 요청이 한 번에 실패로 끝난다 — 그 코드는 Map이 "이미
+  예산을 다 썼다"고 말한 경우뿐이다.
+
+#### T-READ-PIN-05 — 요청마다 하는 rate-limit COMMIT을 가볍게 한다 (측정 먼저)
+
+- **변경**: ① 먼저 잰다 — `app/middleware/rate_limit.py`의 저장소 호출 구간(`:300-320`)에 시간
+  histogram을 더한다. ② 측정에서 그 구간의 p95가 요청 시간의 눈에 띄는 몫(제안: 조용할 때 20 ms 초과
+  또는 디스크 압력 중 200 ms 초과)이면, rate-limit transaction에만 `SET LOCAL synchronous_commit = off`를
+  건다(`_POSTGRES_BACKEND.check`, `:203-237`). 정전·crash 때 마지막 수백 ms의 개수가 사라질 수 있을 뿐
+  한도 판정의 정확성은 그대로다. 저장소를 메모리나 Valkey로 바꾸는 것은 이 작업의 범위가 아니다.
+- **의존**: `T-READ-MGR-02`(지표를 긁어야 ①의 분포가 보인다).
+- **해제 조건**: ① rate-limit 구간 histogram이 `/metrics`에 나온다. ② 조용할 때와 적재 중의 p50·p95를
+  적었다. ③ 문턱을 넘어 ②를 적용했으면 전후 p95를 적고, 한도 초과 요청이 여전히 429인지 시험한다.
+  문턱 아래면 적용하지 않고 근거로 닫는다.
+- **검증**: 단위 시험(429 판정 불변), 운영 지표 전후.
+- **위험·되돌림**: `synchronous_commit = off`는 crash 직전 commit을 잃을 수 있다 — rate-limit 개수에만
+  걸리게 transaction 범위(`SET LOCAL`)로 둔다. 되돌림은 그 한 줄 제거.
 
 ### 8.4 Manager (`digitie/kor-travel-docker-manager`) — 외부 추적
 
@@ -684,16 +829,19 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 - **의존**: 없음.
 - **해제 조건**: ① `SHOW`로 네 값이 보인다(두 호스트). ② Map DB 역할이 `pg_stat_statements`를 읽거나,
   읽는 관리 역할과 절차가 문서에 있다. ③ 1초 넘는 문장이 PG 로그에 남는다(시험 문장 `pg_sleep(1.1)`).
+  ④ 켠 뒤 24시간의 느린 질의 로그 줄 수와 크기를 적었다.
 - **검증**: 반영 전후 `pg_settings`, 로그 한 줄.
-- **위험·되돌림**: 로그 양(1초 문턱이면 작다), `track_io_timing`의 시계 비용(`pg_test_timing`으로 확인).
-  되돌림은 값 원복 + reload.
+- **위험·되돌림**: 로그 양은 모른다 — 문턱이 클러스터 전체라 모든 tenant의 Dagster 배치 문장도 잡힌다.
+  켠 뒤 24시간의 로그 줄 수·크기를 재서 적고, 많으면 문턱을 3초로 올린다(해제 조건 ④).
+  `track_io_timing`의 시계 비용은 `pg_test_timing`으로 확인한다. 되돌림은 값 원복 + reload.
 
 #### T-READ-MGR-02 — 세 서비스의 지표를 긁는다
 
 - **변경**: Map API에 `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED=true`와 metrics token을 주고,
   Prometheus scrape job을 Map API·PinVi API(`/metrics` 공개)·weather API(bearer)에 건다. route별 p95와
   5xx 비율 패널 하나, in-bounds 503 비율 경보 하나.
-- **의존**: `T-READ-02`(pool 지표). 지표 켜기 자체는 지금 코드로도 된다.
+- **의존**: `T-READ-02`(pool 지표). 지표 켜기 자체는 지금 코드로도 된다. `T-READ-MGR-03`과 같은 compose
+  블록(`docker-compose.yml`의 Map API, 지표 env는 `:1689`)을 고치므로 **한 PR로 묶는다**.
 - **해제 조건**: ① Prometheus에서 세 서비스의 route별 시간 histogram이 조회된다. ② Map `/metrics`가
   token 없이는 401이다. ③ 패널 주소가 `docs/`에 있다.
 - **검증**: scrape target `up`, 질의 한 번.
@@ -704,7 +852,7 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 - **변경**: Map API·PinVi API(그리고 두 UI) 컨테이너에 `mem_limit`와 같은 값의 `memswap_limit`를 준다
   (transport와 같은 방식). 한도는 실측 RSS + swap의 3배 이상에서 시작한다(Map API 약 170 MB → 512 MB,
   PinVi API 약 165 MB → 512 MB).
-- **의존**: 없음.
+- **의존**: 없음(같은 compose 블록이라 `T-READ-MGR-02`와 한 PR).
 - **해제 조건**: ① 재생성 뒤 두 프로세스의 `VmSwap`이 0이다. ② 전체 e2e 한 번 동안 OOM kill이 없다
   (`docker inspect`의 `OOMKilled`, `dmesg`). ③ 한가한 12시간 뒤에도 `VmSwap` 0.
 - **검증**: `/proc/<pid>/status`, e2e 결과.
@@ -723,6 +871,8 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
   준다 — 한 번에 한 값만 바꾼다.
 
 #### T-READ-MGR-05 — odroid NVMe의 남은 공간을 확보한다 (급함, 소유자·Codex)
+
+F-10의 운영 작업이다. 2026-11-17에 소유자에게 전달됐다.
 
 - **변경**: `/mnt/media`(PG 데이터가 있는 파일시스템)의 사용처를 확인하고 PG가 쓸 여유를 만든다.
   남은 공간 경보를 건다. weather artifact volume(eMMC)의 위치도 함께 정한다.
@@ -767,15 +917,20 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 - **검증**: 시험. Map 쪽 `weather_state_forecast_short` 전량 run의 재시작 횟수.
 - **위험·되돌림**: 오래 사는 snapshot이 artifact GC를 붙잡는다 — 연장 상한을 둔다.
 
-#### T-READ-WEA-04 — 특보 최신성 조회의 색인
+#### T-READ-WEA-04 — 특보 최신성 조회가 표 크기와 함께 느려지지 않게 한다
 
-- **변경**: `weather_sync_runs(provider, dataset_key, status, finished_at DESC)` 색인(재확인 안 함:
-  `alert_event_store.py:159-187`이 이 조건으로 최신 run을 찾고 맞는 색인이 없다).
-- **의존**: `T-READ-WEA-01`의 지표로 이 질의가 실제로 느린지 먼저 본다.
-- **해제 조건**: EXPLAIN이 새 색인을 타고, 표가 10배 커져도 같은 계획이다(시험).
-- **검증**: 계획 시험(`tests/test_location_catalog_index.py`와 같은 형식), 배포 뒤 `/v1/weather/alert-events`의
-  지표 전후.
-- **위험·되돌림**: 쓰기 비용이 작게 는다. 되돌림은 색인 삭제.
+- **변경**: `read_alert_events`는 `weather_sync_runs`에 문장 세 개를 보낸다
+  (`src/kortravelweather/alert_event_store.py:160-187`) — 최신 run(`started_at DESC`), 최신 성공
+  (`finished_at DESC`), 성공들의 `min(started_at)`. 지금 있는 색인은 `ix_weather_sync_runs_started`뿐이다.
+  색인 하나(`(provider, dataset_key, status, finished_at DESC)`)는 둘째 문장만 받는다. 세 문장을 모두
+  받으려면 `(provider, dataset_key, started_at DESC)`와 `(provider, dataset_key, status, started_at)`도
+  필요하다 — 색인 셋을 더할지, 세 값을 run 종료 때 작은 상태 행에 적어 두고 읽을지를 측정으로 정한다.
+- **의존**: `T-READ-WEA-01`의 지표로 이 조회가 실제로 느린지 먼저 본다. 느리지 않으면 닫는다.
+- **해제 조건**: 세 문장 모두 EXPLAIN에서 표 전체를 훑지 않고, 표가 10배 커져도 같은 계획이다(시험).
+  또는 느리지 않다는 측정으로 닫는다.
+- **검증**: 계획 시험(`tests/test_location_catalog_index.py`와 같은 형식), 배포 뒤
+  `/v1/weather/alert-events`의 지표 전후.
+- **위험·되돌림**: 색인 셋은 run마다의 쓰기 비용을 늘린다. 되돌림은 색인 삭제.
 
 ### 8.6 transport (`digitie/kor-travel-transport`) — 외부 추적
 
@@ -792,8 +947,10 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 #### T-READ-TRN-02 — `features/places`의 왕복을 줄인다
 
 - **변경**: 종류별 `COUNT(*)`를 `limit+1` 또는 창 함수로 바꾸고(`main.py:1655-1660` 계열),
-  `include_sources` 기본을 거짓으로 하거나 source 목록을 프로세스에 둔다(`main.py:1787-1791`),
-  `raw_item_json`을 뺀 열만 읽는다.
+  `include_sources` 기본을 거짓으로 하거나 source 목록을 프로세스에 둔다(`main.py:1787-1791`).
+  `raw_item_json` 전체를 ORM 행으로 읽는 대신 **응답이 쓰는 JSON 키만 SQL에서 뽑는다** — 철도역
+  `facilities`가 읽는 키(`main.py:1667`), 항구·버스터미널의 `_manual_location.revision`
+  (`main.py:1691,1763`). 열을 통째로 빼면 이 필드들이 사라진다.
 - **의존**: `T-READ-TRN-01`(전후 문장 수).
 - **해제 조건**: ① 전 종류 요청의 문장 수가 10개 이하다. ② `kind_totals`·`truncated`의 의미가 같다
   (또는 계약 변경을 관리 화면과 함께 고친다). ③ 응답 본문의 항목이 같다.
@@ -823,6 +980,8 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 ## 9. 확인하지 못한 것
 
 1. 조용한 호스트에서의 모든 지연 수치(§2.5). 이 문서의 시간 수치는 측정 창의 것이거나 문서 주장이다.
+   리뷰 1회차 뒤 04:32Z에도 e2e가 끝나지 않아(`CAT10_ALL_DONE` 0, PSI io `some` avg300 85%) 기준선을
+   재지 않았다.
 2. in-bounds 503 15건의 원인(Map 지연 / 배포 중 재기동 / PinVi 회로).
 3. `GET /trips/{trip_id}` 평균 9초와 `/weather/markers-in-bounds` 평균 6.5초의 구성.
 4. F-06이 운영에서 실제로 일어나는지(route 호출이 없었다).
@@ -833,4 +992,7 @@ PostgreSQL이다. 앱 지표·요청 시간 로그가 없다(`backend/app`에서
 7. odroid의 PG 설정과 통계(접속하지 않았다), odroid 부하의 지속성, NVMe를 채운 것이 무엇인지.
 8. subtype PK 탐색 89만~174만 회와 `features` seq scan 140회(2,380만 행)를 내는 질의가 무엇인지.
 9. weather·transport·PinVi 인용 중 "(재확인 안 함)"으로 적은 줄.
-10. PinVi 미들웨어(rate limit·geofence)가 요청마다 하는 일.
+10. PinVi rate-limit COMMIT이 요청당 쓰는 시간(구조는 F-13에서 확인했다), geofence·위치 감사
+    미들웨어가 요청마다 하는 일.
+11. 취소된 pool 체크아웃이 연결을 흘리는지(`T-READ-03` 변경 5), 의존성에서 건 마감이 handler의 SQL까지
+    전달되는지 — 둘 다 그 작업의 시험이 확인한다.

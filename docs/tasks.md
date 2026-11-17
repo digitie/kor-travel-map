@@ -27,8 +27,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 `T-VN-41C`·`T-VN-H43`·`T-101`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
 **읽기 성능 계획(2026-11-17)** — `T-READ-01`~`07`(목록 끝). 정본은
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2, 해제 조건은 acceptance §T-READ다.
-`T-READ-01`·`02`는 병렬 착수, `T-READ-05`~`07`은 `T-READ-01`의 수치로 채택 여부를 정한다(채택하지 않고 닫는 것도 완료다).
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2, 해제 조건은 acceptance의 같은 ID 절이다.
+`T-READ-01`·`02`는 병렬 착수, `T-READ-03`의 운영 배포는 PinVi `T-READ-PIN-04` 뒤, `T-READ-05`~`07`은 `T-READ-01`의
+수치로 채택 여부를 정한다(채택하지 않고 닫는 것도 완료다).
 
 **reconcile sensor 재시도(ADR-111 후속)** — `T-RECONCILE-RETRY`는 ADR-112(accepted) 결정 0-1(#1345)과 1~7 구현으로
 2026-10-21 `tasks-done.md`로 이관했다.
@@ -195,18 +196,18 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-READ-01 — **조용한 호스트의 읽기 기준선과 재측정 도구**
 
-  tier-2 harness에 지역 검색·시군구 집계·개별 행·상세 viewport를 더하고 HTTP probe를 새로 둔다. 조용할 때와
-  적재 중 두 번 재서 보고서로 남긴다.
+  tier-2 harness를 운영처럼 `jit=off`로 돌리고 지역 검색·시군구 집계·개별 행·상세 viewport를 더한다. HTTP probe를
+  새로 두고 조용할 때와 적재 중 두 번 재서 보고서로 남긴다.
 
 - [ ] T-READ-02 — **요청·DB 지표와 느린 요청 로그**
 
   연결 풀 대기 지표와, 지표 flag와 무관한 1초 이상 요청 로그(route·시간·DB 문장 수)를 더한다. 운영에서 켜고
   긁는 것은 Manager `T-READ-MGR-02`다.
 
-- [ ] T-READ-03 — **공개 읽기 시간 상한(문장 timeout·pool 대기)**
+- [ ] T-READ-03 — **공개 읽기에 요청 마감을 건다(PinVi `T-READ-PIN-04` 배포 뒤)**
 
-  공개 읽기 transaction에 `statement_timeout` 4.5초, API 엔진 pool 대기 2초를 걸고 503 problem으로 바꾼다.
-  admin·ops 경로는 제외한다.
+  공개 읽기 전용 의존성이 요청 마감(기본 4.5초, 축제 월별 14초)에서 남은 시간을 문장에 넘기고 pool 대기를
+  2초에 자른다. 기존 세션 의존성과 엔진 설정은 건드리지 않는다.
 
 - [ ] T-READ-04 — **교통 근처 조회를 한 요청으로(near-batch)**
 
