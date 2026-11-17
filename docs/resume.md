@@ -1,3 +1,7 @@
+## 2026-11-17 — 관리자 프런트 공통 후보12 채택
+
+ui 0.2.1·tokens 0.1.2·vworld-map-web 1.0.4 vendor와 공통 guard `97f8ed98`(PR agent/common-candidate-12). 다음: 배포 뒤 관리자 지도 바탕 타일 Firefox 확인.
+
 ## 2026-11-17 — 공개 월별 축제 bbox 필터(PinVi 추천 여행 주변 축제)
 
 - `GET /v1/public/festivals/monthly`에 선택 bbox(`min_lon`/`min_lat`/`max_lon`/`max_lat`, 4값 함께·일부만이면 422).
