@@ -142,14 +142,17 @@ ALTER TABLE ops.application_schema_operation_receipts
 
 
 #: 실행 순서대로의 upgrade 문장. 창은 소유자 롤로 열고 같은 롤로 끝난다(452와 같다).
-#: (문장, 그 문장 앞에 걸 lock_timeout 상한 ms). ALTER만 5초 — autovacuum 취소
-#: (deadlock_timeout 1초)를 기다린다. CHECK 교체(ACCESS EXCLUSIVE)는 452와 같은 1초.
-_UPGRADE_STATEMENTS: Final[tuple[tuple[str, int], ...]] = (
-    ("SET ROLE " + _SCHEMA_OWNER, 1000),
-    (_SET_FEATURES_AUTOVACUUM_SQL, 5000),
-    (_RECEIPT_HEAD_CHECK_SQL, 1000),
-    ("SET ROLE " + _SCHEMA_OWNER, 1000),
+#: 실행 순서대로의 upgrade 문장. 창은 소유자 롤로 열고 같은 롤로 끝난다(452와 같다).
+_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
+    "SET ROLE " + _SCHEMA_OWNER,
+    _SET_FEATURES_AUTOVACUUM_SQL,
+    _RECEIPT_HEAD_CHECK_SQL,
+    "SET ROLE " + _SCHEMA_OWNER,
 )
+#: lock_timeout 상한(ms). ``ALTER``만 5초 — autovacuum 취소(deadlock_timeout 1초)를 기다린다.
+#: 나머지(CHECK 교체는 ACCESS EXCLUSIVE)는 452와 같은 1초.
+_ALTER_LOCK_TIMEOUT_MS: Final[int] = 5000
+_LOCK_TIMEOUT_MS: Final[int] = 1000
 _STATEMENT_TIMEOUT_CAP_MS: Final[int] = 30000
 
 
@@ -174,7 +177,12 @@ def upgrade() -> None:
         )
 
     cap("statement_timeout", _STATEMENT_TIMEOUT_CAP_MS)
-    for statement, lock_limit in _UPGRADE_STATEMENTS:
+    for statement in _UPGRADE_STATEMENTS:
+        lock_limit = (
+            _ALTER_LOCK_TIMEOUT_MS
+            if statement == _SET_FEATURES_AUTOVACUUM_SQL
+            else _LOCK_TIMEOUT_MS
+        )
         cap("lock_timeout", lock_limit)
         bind.execute(text(statement))
     for name, value in settings.items():
