@@ -2,9 +2,21 @@
 
 from __future__ import annotations
 
+import asyncio
+import json
+import uuid
+from pathlib import Path
+
 import pytest
+from sqlalchemy import text
 
 import scripts.perf_tier2_release_harness as harness
+from kortravelmap.core.search_region import RegionSearch
+from kortravelmap.infra.feature_repo import (
+    _FEATURE_SEARCH_BY_SCORE_SQL,
+    _search_score_sql,
+    _SearchRegionArms,
+)
 from scripts.perf_tier2_release_harness import (
     BenchmarkCardinalityError,
     _build_viewports,
@@ -135,9 +147,9 @@ def test_count_matching_rows_sql_rejects_drifted_terminal_limit() -> None:
 
 
 def test_batch_viewport_uses_selected_database_ids() -> None:
-    selected = [f"existing:f:{index:06d}" for index in range(200)]
+    selected = [str(uuid.UUID(int=index + 1)) for index in range(200)]
 
-    batch = _build_viewports(selected)[-1]
+    batch = next(v for v in _build_viewports(selected) if v.name == "200건 batch")
 
     assert batch.params == {"feature_ids": selected}
     assert batch.min_returned_rows == 200
@@ -179,3 +191,157 @@ def test_search_viewport_params_cover_every_search_bind_parameter() -> None:
 
     required = set(text(_FEATURE_SEARCH_BY_SCORE_SQL)._bindparams)
     assert required <= set(harness._COMMON_SEARCH)
+
+
+# ── 읽기 기준선(T-READ-01) ────────────────────────────────────────────────────
+
+_DETAIL_AND_BATCH_IDS = [str(uuid.UUID(int=index + 1)) for index in range(200)]
+
+
+def _region(category_codes: tuple[str, ...] = ()) -> RegionSearch:
+    return RegionSearch(
+        region_label="부산",
+        sigungu_codes=("26110", "26140"),
+        remainder="맛집 국밥",
+        category_codes=category_codes,
+    )
+
+
+def _all_region_variants() -> list[tuple[RegionSearch | None, _SearchRegionArms | None]]:
+    variants: list[tuple[RegionSearch | None, _SearchRegionArms | None]] = [(None, None)]
+    for name_mode in ("ilike", "strpos", None):
+        for categories in (False, True):
+            for token_mode in ("anchor", "scan", None):
+                arms = _SearchRegionArms(
+                    name_mode=name_mode,  # type: ignore[arg-type]
+                    categories=categories,
+                    token_mode=token_mode,  # type: ignore[arg-type]
+                )
+                variants.append((_region(("05010000",) if categories else ()), arms))
+    return variants
+
+
+def test_harness_connection_matches_api_jit_off_and_statement_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    assert harness.HARNESS_SERVER_SETTINGS == {"jit": "off", "statement_timeout": "30000"}
+    captured: dict[str, object] = {}
+
+    class _Stop(Exception):
+        pass
+
+    def fake_engine(dsn: object, **kwargs: object) -> object:
+        captured.update(kwargs)
+        raise _Stop
+
+    monkeypatch.setattr(harness, "make_async_engine", fake_engine)
+    with pytest.raises(_Stop):
+        asyncio.run(harness._run("postgresql+asyncpg://unused/db", 1, 1, True))
+    assert captured["server_settings"] == harness.HARNESS_SERVER_SETTINGS
+
+
+def test_read_baseline_has_thirteen_named_viewports() -> None:
+    region_viewports = [
+        harness.Viewport(
+            name=case.name,
+            sql=_FEATURE_SEARCH_BY_SCORE_SQL,
+            params=harness._search_viewport_params(
+                case.q, alias_name=None, region=None, arms=None
+            ),
+            min_returned_rows=0,
+            terminal_limit_parameter="limit_plus_one",
+        )
+        for case in harness.REGION_SEARCH_CASES
+    ]
+
+    viewports = _build_viewports(_DETAIL_AND_BATCH_IDS, region_viewports)
+
+    names = [viewport.name for viewport in viewports]
+    assert len(names) == 13
+    assert len(set(names)) == 13
+    assert "서울시청 읍면동 집계(zoom 12, PinVi 기본 화면)" in names
+    assert "서울시청 읍면동 집계(zoom 13)" in names
+    assert "수도권 시군구 집계(zoom 10)" in names
+    assert "서울 개별 행 500건(zoom 14)" in names
+    assert "상세 1건" in names
+    assert [case.q for case in harness.REGION_SEARCH_CASES] == ["부산 맛집", "서울 맛집"]
+    for viewport in viewports:
+        required = set(text(viewport.sql)._bindparams)
+        assert required <= set(viewport.params), viewport.name
+        # 모든 viewport가 LIMIT 전 개수를 셀 수 있어야 한다.
+        assert viewport.matched_rows_sql.startswith("SELECT count(*)")
+    z12 = next(v for v in viewports if v.name.startswith("서울시청 읍면동 집계(zoom 12"))
+    assert z12.params["kinds"] == ["place", "event", "notice", "price"]
+    assert z12.params["limit"] == 500
+    assert (z12.params["min_lon"], z12.params["max_lat"]) == (126.758, 37.677)
+
+
+@pytest.mark.parametrize(("region", "arms"), _all_region_variants())
+def test_region_search_params_and_constant_variant_cover_every_bind(
+    region: RegionSearch | None, arms: _SearchRegionArms | None
+) -> None:
+    score_sql, _count_sql = _search_score_sql(region, arms)
+    params = harness._search_viewport_params(
+        "부산 맛집 국밥", alias_name="별칭", region=region, arms=arms
+    )
+    assert set(text(score_sql)._bindparams) <= set(params)
+
+    variant = harness._constant_normalization_variant(score_sql)
+
+    assert set(text(variant)._bindparams) <= set(params)
+    compacted = variant[variant.index("\ncompacted AS (") : variant.index("\nranked AS (")]
+    assert "normalize(" not in compacted
+    for alias in (
+        "compact_name",
+        "compact_raw_name",
+        "compact_tail",
+        "compact_base_name",
+        "compact_paren_base_name",
+        "compact_bracket_name",
+        "category_search_group",
+        "search_group",
+    ):
+        assert f"AS {alias}" in compacted, alias
+    if region is not None:
+        assert "AS region_hit" in compacted
+    # 나머지(순위·접기·page)는 글자까지 같다.
+    assert variant[variant.index("\nranked AS (") :] == score_sql[score_sql.index("\nranked AS (") :]
+    _count_matching_rows_sql(variant, "limit_plus_one")
+
+
+def test_constant_variant_fails_closed_on_drifted_sql() -> None:
+    with pytest.raises(ValueError, match="compacted"):
+        harness._constant_normalization_variant("SELECT 1")
+
+
+def test_subtract_share() -> None:
+    assert harness._subtract_share(100.0, 60.0) == 0.4
+    assert harness._subtract_share(0.0, 0.0) is None
+
+
+def test_output_file_has_same_schema_across_runs_and_no_dsn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    async def fake_run(*_args: object, **_kwargs: object) -> dict[str, object]:
+        return {
+            "mode": "existing",
+            "requested_seed_rows": None,
+            "iterations": 1,
+            "viewports": [{"name": "v", "p50_ms": 1.0}],
+            "region_search": [],
+        }
+
+    monkeypatch.setattr(harness, "_run", fake_run)
+    dsn = "postgresql+asyncpg://user:hunter2@db.invalid/map"
+    keys = []
+    for index in range(2):
+        output = tmp_path / f"run{index}.safe.json"
+        assert harness.main(["--dsn", dsn, "--skip-seed", "--output", str(output)]) == 0
+        written = output.read_text(encoding="utf-8")
+        assert "hunter2" not in written
+        assert "db.invalid" not in written
+        report = json.loads(written)
+        assert report["server_settings"] == harness.HARNESS_SERVER_SETTINGS
+        keys.append(sorted(report))
+    assert keys[0] == keys[1]
+    assert "hunter2" not in capsys.readouterr().out

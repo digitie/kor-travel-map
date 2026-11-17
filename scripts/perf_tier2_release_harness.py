@@ -21,7 +21,24 @@ p95 실행시간·shared read blocks·응답 bytes budget을 기록한다. CI에
 public projection의 실제 non-notice ID를 정렬해 사용한다. notice 전용 추가 감산
 predicate와 batch 후보 의미가 어긋나지 않도록 notice는 선택하지 않는다. fixture
 생성은 수 분~수십 분이 걸릴 수 있다. 각 viewport가 최소 반환 행 계약을 만족할
-때만 JSON을 stdout에 출력하여 release 리포트에 첨부한다.
+때만 JSON을 stdout에 출력하여 release 리포트에 첨부한다. ``--output <파일>``이면 같은
+JSON을 그 파일에도 쓴다(``.safe.json`` — DSN·key를 담지 않는다).
+
+읽기 기준선(읽기 성능 계획 T-READ-01)
+-------------------------------------
+
+- 연결은 운영 API처럼 ``jit=off``이고 문장 상한 30초다(``HARNESS_SERVER_SETTINGS``). JIT를
+  켠 수치는 운영이 보지 않는 수치다(2026-11-12 "부산 맛집" 7.6초 중 7.2초가 JIT).
+- viewport 13개 — 위 6개 + 지역 검색 2개("부산 맛집" 좁은 지역, "서울 맛집" 넓은 지역)·시군구
+  집계(zoom 10)·서울시청 읍면동 집계(zoom 12·13, PinVi 기본 화면)·개별 행 500건(zoom 14)·상세 1건.
+- 지역 검색 SQL은 고정 문자열이 아니다. 요청 때와 같이 ``_resolve_search_region`` →
+  ``_search_region_arms`` → ``_search_region_params`` → ``_search_score_sql``로 만든다. 전처리
+  질의 셋(별칭·지역 표본·지역 행 수)은 따로 잰다.
+- 이름 정규화 비중은 EXPLAIN 노드로 잴 수 없다(``compacted``·``hits``는 inline되는 CTE).
+  **빼고 잰다** — 본 질의(i)와, 같은 질의에서 두 CTE의 식을 상수·원래 열로 바꾼 변형(ii)의
+  p50으로 (i − ii) / i. 변형은 이 harness 안에만 있고 운영 SQL은 바꾸지 않는다.
+
+운영 DB에서 돌리는 것은 소유자가 승인한 조용한 창에서만 한다(계획 §8.1).
 """
 
 from __future__ import annotations
@@ -33,10 +50,11 @@ import math
 import os
 import sys
 import time
+import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Final, TypeVar
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO_ROOT / "src"))
@@ -45,16 +63,34 @@ sys.path.insert(0, str(_REPO_ROOT))
 from sqlalchemy import event, text  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
 
+from kortravelmap.core.search_region import RegionSearch  # noqa: E402
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn  # noqa: E402
 from kortravelmap.infra.feature_repo import (  # noqa: E402
     _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT,
     _CLUSTER_BBOX_SQL_BY_UNIT,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
+    _GET_PUBLIC_FEATURE_SQL,
     _GET_PUBLIC_FEATURES_BY_IDS_SQL,
     _NEARBY_COORD_DISTANCE_SQL,
+    _SEARCH_ALIAS_LOOKUP_SQL,
+    _SEARCH_REGION_ENTRIES_SQL,
+    _SEARCH_REGION_ROW_COUNT_SQL,
+    _resolve_search_region,
+    _search_region_arms,
+    _search_region_params,
+    _search_score_sql,
+    _SearchRegionArms,
+    search_alias_key,
+    search_bracket_like_pattern,
 )
 from tests.integration.perf_gate import seed_hot_query_features  # noqa: E402
+
+#: 운영 API engine과 같은 연결 설정(``api/db.py``의 ``jit=off``) + 문장 상한 30초.
+HARNESS_SERVER_SETTINGS: Final[dict[str, str]] = {
+    "jit": "off",
+    "statement_timeout": "30000",
+}
 
 # ── 대표 viewport 정의 (§8.3) ────────────────────────────────────────────────
 
@@ -118,6 +154,251 @@ _COMMON_SEARCH = {
     "cursor_feature_id": None,
     "limit_plus_one": 51,
 }
+
+# ── 읽기 기준선 viewport (T-READ-01) ─────────────────────────────────────────
+
+#: PinVi 지도 기본 kind(``place``·``event``·``notice``·``price``)와 PinVi in-bounds 기본 500건.
+_PINVI_DEFAULT_KINDS: Final[list[str]] = ["place", "event", "notice", "price"]
+_PINVI_MAX_ITEMS: Final[int] = 500
+
+#: 서울시청 중심 zoom 12 화면(PinVi 기본 화면 — 계획 F-04). zoom 13·14는 같은 중심의 절반·4분의 1.
+_SEOUL_CITY_HALL_Z12: Final[tuple[float, float, float, float]] = (
+    126.758,
+    37.456,
+    127.198,
+    37.677,
+)
+
+
+def _zoomed_bbox(
+    bbox: tuple[float, float, float, float], factor: float
+) -> tuple[float, float, float, float]:
+    """같은 중심에서 가로·세로를 ``factor``배로 줄인 bbox(소수 5자리)."""
+
+    min_lon, min_lat, max_lon, max_lat = bbox
+    center_lon = (min_lon + max_lon) / 2
+    center_lat = (min_lat + max_lat) / 2
+    half_lon = (max_lon - min_lon) * factor / 2
+    half_lat = (max_lat - min_lat) * factor / 2
+    return (
+        round(center_lon - half_lon, 5),
+        round(center_lat - half_lat, 5),
+        round(center_lon + half_lon, 5),
+        round(center_lat + half_lat, 5),
+    )
+
+
+_SEOUL_CITY_HALL_Z13 = _zoomed_bbox(_SEOUL_CITY_HALL_Z12, 0.5)
+_SEOUL_CITY_HALL_Z14 = _zoomed_bbox(_SEOUL_CITY_HALL_Z12, 0.25)
+#: 수도권 zoom 10 화면(시군구 집계).
+_CAPITAL_AREA_Z10: Final[tuple[float, float, float, float]] = (126.6, 37.3, 127.4, 37.8)
+
+
+def _cluster_params(bbox: tuple[float, float, float, float]) -> dict[str, Any]:
+    min_lon, min_lat, max_lon, max_lat = bbox
+    return {
+        "min_lon": min_lon,
+        "min_lat": min_lat,
+        "max_lon": max_lon,
+        "max_lat": max_lat,
+        "kinds": list(_PINVI_DEFAULT_KINDS),
+        "categories": None,
+        "providers": None,
+        "attributes": None,
+        "limit": _PINVI_MAX_ITEMS,
+    }
+
+
+def _rows_params(bbox: tuple[float, float, float, float]) -> dict[str, Any]:
+    return {
+        **_cluster_params(bbox),
+        "cursor_feature_id": None,
+        "price_stale_hide_days": 4,
+    }
+
+
+@dataclass(frozen=True, slots=True)
+class RegionSearchCase:
+    """지역 검색 viewport 하나 — 이름과 검색어."""
+
+    name: str
+    q: str
+
+
+REGION_SEARCH_CASES: Final[tuple[RegionSearchCase, ...]] = (
+    RegionSearchCase(name="지역 검색(좁은 지역) 부산 맛집", q="부산 맛집"),
+    RegionSearchCase(name="지역 검색(넓은 지역) 서울 맛집", q="서울 맛집"),
+)
+
+#: 운영 ``search_features``가 본 질의 앞에 거는 두 줄(같은 transaction).
+_SEARCH_PRE: Final[tuple[str, ...]] = (
+    "SET LOCAL pg_trgm.similarity_threshold = 0.2",
+    "SET LOCAL jit = off",
+)
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedRegionSearch:
+    """요청 때와 같은 함수로 만든 지역 검색 본 질의·변형·전처리 질의."""
+
+    case: RegionSearchCase
+    viewport: Viewport
+    constant_variant: Viewport
+    preprocessing: tuple[Viewport, ...]
+    region: RegionSearch | None
+    arms: _SearchRegionArms | None
+
+
+def _search_viewport_params(
+    q: str,
+    *,
+    alias_name: str | None,
+    region: RegionSearch | None,
+    arms: _SearchRegionArms | None,
+) -> dict[str, Any]:
+    """``search_features``가 본 질의에 넘기는 bind 값과 같은 dict(첫 페이지, 50건, bbox 없음)."""
+
+    return {
+        **_search_region_params(region, arms),
+        "q": q,
+        "q_compact": search_alias_key(q),
+        "alias_name": alias_name,
+        "alias_compact": search_alias_key(alias_name) if alias_name else None,
+        "bracket_like": search_bracket_like_pattern(q),
+        "bbox_enabled": False,
+        "min_lon": None,
+        "min_lat": None,
+        "max_lon": None,
+        "max_lat": None,
+        "kinds": None,
+        "categories": None,
+        "attributes": None,
+        "limit_plus_one": 51,
+        "cursor_rank": None,
+        "cursor_score": None,
+        "cursor_feature_id": None,
+    }
+
+
+_COMPACTED_START: Final[str] = "\ncompacted AS ("
+_HITS_START: Final[str] = "\nhits AS ("
+_RANKED_START: Final[str] = "\nranked AS ("
+_SEARCH_GROUP_ALIAS: Final[str] = "AS search_group"
+_HITS_FROM: Final[str] = "\n    FROM compacted\n"
+
+
+def _constant_normalization_variant(sql: str) -> str:
+    """``compacted``·``hits``의 정규화 식을 값싼 식으로 바꾼 검색 SQL(harness 전용).
+
+    비교 키(``compact_*``)는 정규화하지 않은 원래 열(괄호 변형은 NULL), 분류 그룹은 상수 0이다.
+    원래 열을 쓰는 이유: 키가 모두 같은 상수면 뒤의 접기(``ST_ClusterDBSCAN`` partition)가 후보
+    전부를 한 무리로 묶어 비용이 오히려 바뀐다. ``hits``의 지역 일치 열(``region_hit``)은 그대로
+    둔다. 모양이 예상과 다르면(운영 SQL이 바뀌면) 추측하지 않고 실패한다.
+    """
+
+    for marker in (_COMPACTED_START, _HITS_START, _RANKED_START):
+        if sql.count(marker) != 1:
+            raise ValueError(f"search SQL must contain exactly one {marker.strip()!r}")
+    compacted_at = sql.index(_COMPACTED_START)
+    hits_at = sql.index(_HITS_START)
+    ranked_at = sql.index(_RANKED_START)
+    if not compacted_at < hits_at < ranked_at:
+        raise ValueError("search SQL CTE order drifted: compacted → hits → ranked expected")
+    hits_block = sql[hits_at:ranked_at]
+    if hits_block.count(_SEARCH_GROUP_ALIAS) != 1 or hits_block.count(_HITS_FROM) != 1:
+        raise ValueError("hits CTE shape drifted")
+    group_end = hits_block.index(_SEARCH_GROUP_ALIAS) + len(_SEARCH_GROUP_ALIAS)
+    region_hit_columns = hits_block[group_end : hits_block.index(_HITS_FROM)]
+    replacement = f"""
+compacted AS (
+    SELECT
+        filtered.*,
+        CAST(display_name AS text) AS compact_name,
+        CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
+             THEN CAST(name AS text) END AS compact_raw_name,
+        CAST(display_name AS text) AS compact_tail,
+        CAST(NULL AS text) AS compact_base_name,
+        CAST(NULL AS text) AS compact_paren_base_name,
+        CAST(NULL AS text) AS compact_bracket_name,
+        0 AS category_search_group
+    FROM filtered
+),
+hits AS (
+    SELECT
+        compacted.*,
+        0 AS search_group{region_hit_columns}
+    FROM compacted
+),"""
+    return sql[:compacted_at] + replacement + sql[ranked_at:]
+
+
+async def _prepare_region_search(
+    session: AsyncSession, case: RegionSearchCase
+) -> PreparedRegionSearch:
+    """운영 ``search_features``의 전처리를 그대로 돌려 본 질의 SQL·인자를 만든다."""
+
+    q_compact = search_alias_key(case.q)
+    alias_name = (
+        await session.execute(text(_SEARCH_ALIAS_LOOKUP_SQL), {"alias_key": q_compact})
+    ).scalar_one_or_none()
+    region = await _resolve_search_region(session, case.q)
+    arms = await _search_region_arms(session, region) if region is not None else None
+    score_sql, _count_sql = _search_score_sql(region, arms)
+    params = _search_viewport_params(
+        case.q,
+        alias_name=str(alias_name) if alias_name is not None else None,
+        region=region,
+        arms=arms,
+    )
+    preprocessing: list[Viewport] = [
+        Viewport(
+            name=f"{case.name} 전처리: 별칭 조회",
+            sql=_SEARCH_ALIAS_LOOKUP_SQL,
+            params={"alias_key": q_compact},
+            min_returned_rows=0,
+        ),
+        Viewport(
+            name=f"{case.name} 전처리: 지역 표본",
+            sql=_SEARCH_REGION_ENTRIES_SQL,
+            params={},
+            min_returned_rows=0,
+        ),
+    ]
+    if region is not None:
+        preprocessing.append(
+            Viewport(
+                name=f"{case.name} 전처리: 지역 행 수",
+                sql=_SEARCH_REGION_ROW_COUNT_SQL,
+                params={"region_codes": list(region.sigungu_codes)},
+                min_returned_rows=1,
+            )
+        )
+    # 데이터가 그 지역을 모르면(fixture) 빈 결과도 기록한다 — 보고서의 returned_rows가 보여 준다.
+    viewport = Viewport(
+        name=case.name,
+        sql=score_sql,
+        params=params,
+        min_returned_rows=0,
+        terminal_limit_parameter="limit_plus_one",
+        pre=_SEARCH_PRE,
+    )
+    constant_variant = Viewport(
+        name=f"{case.name} (정규화 식 상수화 변형)",
+        sql=_constant_normalization_variant(score_sql),
+        params=params,
+        min_returned_rows=0,
+        terminal_limit_parameter="limit_plus_one",
+        pre=_SEARCH_PRE,
+    )
+    return PreparedRegionSearch(
+        case=case,
+        viewport=viewport,
+        constant_variant=constant_variant,
+        preprocessing=tuple(preprocessing),
+        region=region,
+        arms=arms,
+    )
+
 
 _BATCH_CARDINALITY = 200
 _PUBLIC_BATCH_CANDIDATE_PREDICATE_SQL = "kind <> 'notice'"
@@ -193,14 +474,72 @@ def _count_matching_rows_sql(sql: str, terminal_limit_parameter: str | None) -> 
     return f"SELECT count(*) AS matched_rows FROM ({matched_sql}) AS matched"
 
 
-def _build_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
-    """DB에서 실제 선택한 public ID로 batch viewport를 구성한다."""
+def _build_viewports(
+    batch_feature_ids: list[str],
+    region_searches: Sequence[Viewport] = (),
+) -> tuple[Viewport, ...]:
+    """DB에서 실제 선택한 public ID로 batch·상세 viewport를 구성한다.
+
+    ``region_searches``는 ``_prepare_region_search``가 DB에서 만든 지역 검색 본 질의다(요청 때와
+    같은 전처리를 거쳐야 SQL이 정해진다). 운영 기준선은 13개 전부를 잰다.
+    """
 
     if len(batch_feature_ids) != _BATCH_CARDINALITY:
         raise BenchmarkCardinalityError(
             f"200건 batch에 non-notice public feature {_BATCH_CARDINALITY}건이 필요하지만 "
             f"{len(batch_feature_ids)}건만 선택됨"
         )
+    return (
+        *_release_viewports(batch_feature_ids),
+        *region_searches,
+        *_read_baseline_viewports(batch_feature_ids[0]),
+    )
+
+
+def _read_baseline_viewports(detail_feature_id: str) -> tuple[Viewport, ...]:
+    """T-READ-01이 더한 PinVi 모양 viewport(지역 검색 제외 5개)."""
+
+    return (
+        Viewport(
+            name="수도권 시군구 집계(zoom 10)",
+            sql=_CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
+            params=_cluster_params(_CAPITAL_AREA_Z10),
+            min_returned_rows=1,
+            terminal_limit_parameter="limit",
+        ),
+        Viewport(
+            name="서울시청 읍면동 집계(zoom 12, PinVi 기본 화면)",
+            sql=_CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["eupmyeondong"],
+            params=_cluster_params(_SEOUL_CITY_HALL_Z12),
+            min_returned_rows=1,
+            terminal_limit_parameter="limit",
+        ),
+        Viewport(
+            name="서울시청 읍면동 집계(zoom 13)",
+            sql=_CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["eupmyeondong"],
+            params=_cluster_params(_SEOUL_CITY_HALL_Z13),
+            min_returned_rows=1,
+            terminal_limit_parameter="limit",
+        ),
+        Viewport(
+            name="서울 개별 행 500건(zoom 14)",
+            sql=_FEATURES_IN_BBOX_SQL,
+            params=_rows_params(_SEOUL_CITY_HALL_Z14),
+            min_returned_rows=1,
+            terminal_limit_parameter="limit",
+        ),
+        Viewport(
+            name="상세 1건",
+            sql=_GET_PUBLIC_FEATURE_SQL,
+            params={"feature_id": uuid.UUID(detail_feature_id)},
+            min_returned_rows=1,
+        ),
+    )
+
+
+def _release_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
+    """§8.3 release viewport 6개(종전)."""
+
     return (
         Viewport(
             name="서울 밀집 in-bounds",
@@ -336,7 +675,9 @@ async def _explain_analyze(
 
 
 async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[str, Any]:
-    engine = make_async_engine(normalize_async_dsn(dsn))
+    engine = make_async_engine(
+        normalize_async_dsn(dsn), server_settings=HARNESS_SERVER_SETTINGS
+    )
 
     @event.listens_for(engine.sync_engine, "connect")
     def _sp(dbapi_conn: Any, _rec: Any) -> None:
@@ -380,57 +721,123 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
                 batch_feature_ids = await _select_public_batch_feature_ids(session)
             report["public_feature_rows"] = public_feature_rows
             report["batch_candidate_rows"] = batch_candidate_rows
-            viewports = _build_viewports(batch_feature_ids)
+            prepared: list[PreparedRegionSearch] = []
+            for case in REGION_SEARCH_CASES:
+                async with session.begin():
+                    prepared.append(await _prepare_region_search(session, case))
+            viewports = _build_viewports(
+                batch_feature_ids, [search.viewport for search in prepared]
+            )
 
             for viewport in viewports:
-                durations_ms: list[float] = []
-                shared_reads: list[int] = []
-                plan_returned_rows: list[int] = []
-                plan_json: dict[str, Any] = {}
-                async with session.begin():
-                    matched_rows, returned_rows, response_bytes = (
-                        await _measure_cardinality_and_response(session, viewport)
-                    )
-
-                for _ in range(iterations):
-                    async with session.begin():
-                        explained = await _explain_analyze(
-                            session,
-                            viewport.sql,
-                            viewport.params,
-                            viewport.pre,
-                        )
-                    plan = explained["Plan"]
-                    durations_ms.append(float(explained.get("Execution Time", 0.0)))
-                    shared_reads.append(_shared_read_blocks(plan))
-                    plan_returned_rows.append(_plan_returned_rows(plan))
-                    plan_json = plan
-
-                if any(count != returned_rows for count in plan_returned_rows):
-                    raise BenchmarkCardinalityError(
-                        f"{viewport.name}: EXPLAIN returned_rows={plan_returned_rows}와 "
-                        f"response returned_rows={returned_rows}가 다름"
-                    )
-
                 report["viewports"].append(
+                    await _measure_viewport(session, viewport, iterations)
+                )
+
+            measured = {entry["name"]: entry for entry in report["viewports"]}
+            region_reports: list[dict[str, Any]] = []
+            for search in prepared:
+                preprocessing = [
+                    await _measure_viewport(session, viewport, iterations)
+                    for viewport in search.preprocessing
+                ]
+                variant = await _measure_viewport(
+                    session, search.constant_variant, iterations
+                )
+                full_p50 = float(measured[search.viewport.name]["p50_ms"])
+                region_reports.append(
                     {
-                        "name": viewport.name,
-                        "matched_rows": matched_rows,
-                        "returned_rows": returned_rows,
-                        "minimum_returned_rows": viewport.min_returned_rows,
-                        "p50_ms": round(_nearest_rank_percentile(durations_ms, 0.5), 2),
-                        "p95_ms": round(_nearest_rank_percentile(durations_ms, 0.95), 2),
-                        "max_ms": round(max(durations_ms), 2),
-                        "shared_read_blocks_p95": _nearest_rank_percentile(
-                            shared_reads, 0.95
+                        "name": search.case.name,
+                        "q": search.case.q,
+                        "region_resolved": search.region is not None,
+                        "region_code_count": (
+                            len(search.region.sigungu_codes)
+                            if search.region is not None
+                            else 0
                         ),
-                        "response_bytes": response_bytes,
-                        "top_node": plan_json.get("Node Type"),
+                        "arms": _arms_report(search.arms),
+                        "preprocessing": preprocessing,
+                        "preprocessing_p50_sum_ms": round(
+                            sum(float(entry["p50_ms"]) for entry in preprocessing), 2
+                        ),
+                        "name_normalization": {
+                            "full_p50_ms": full_p50,
+                            "constant_variant_p50_ms": variant["p50_ms"],
+                            "share": _subtract_share(full_p50, float(variant["p50_ms"])),
+                            "constant_variant": variant,
+                        },
                     }
                 )
+            report["region_search"] = region_reports
         return report
     finally:
         await engine.dispose()
+
+
+def _arms_report(arms: _SearchRegionArms | None) -> dict[str, Any] | None:
+    if arms is None:
+        return None
+    return {
+        "name_mode": arms.name_mode,
+        "categories": arms.categories,
+        "token_mode": arms.token_mode,
+    }
+
+
+def _subtract_share(full_ms: float, variant_ms: float) -> float | None:
+    """빼고 재는 비중 (i − ii) / i. 본 질의가 0 ms면 정의하지 않는다(``None``)."""
+
+    if full_ms <= 0:
+        return None
+    return round((full_ms - variant_ms) / full_ms, 4)
+
+
+async def _measure_viewport(
+    session: AsyncSession, viewport: Viewport, iterations: int
+) -> dict[str, Any]:
+    """viewport 하나를 ``iterations``번 EXPLAIN ANALYZE로 재 report 항목을 만든다."""
+
+    durations_ms: list[float] = []
+    shared_reads: list[int] = []
+    plan_returned_rows: list[int] = []
+    plan_json: dict[str, Any] = {}
+    async with session.begin():
+        matched_rows, returned_rows, response_bytes = (
+            await _measure_cardinality_and_response(session, viewport)
+        )
+
+    for _ in range(iterations):
+        async with session.begin():
+            explained = await _explain_analyze(
+                session,
+                viewport.sql,
+                viewport.params,
+                viewport.pre,
+            )
+        plan = explained["Plan"]
+        durations_ms.append(float(explained.get("Execution Time", 0.0)))
+        shared_reads.append(_shared_read_blocks(plan))
+        plan_returned_rows.append(_plan_returned_rows(plan))
+        plan_json = plan
+
+    if any(count != returned_rows for count in plan_returned_rows):
+        raise BenchmarkCardinalityError(
+            f"{viewport.name}: EXPLAIN returned_rows={plan_returned_rows}와 "
+            f"response returned_rows={returned_rows}가 다름"
+        )
+
+    return {
+        "name": viewport.name,
+        "matched_rows": matched_rows,
+        "returned_rows": returned_rows,
+        "minimum_returned_rows": viewport.min_returned_rows,
+        "p50_ms": round(_nearest_rank_percentile(durations_ms, 0.5), 2),
+        "p95_ms": round(_nearest_rank_percentile(durations_ms, 0.95), 2),
+        "max_ms": round(max(durations_ms), 2),
+        "shared_read_blocks_p95": _nearest_rank_percentile(shared_reads, 0.95),
+        "response_bytes": response_bytes,
+        "top_node": plan_json.get("Node Type"),
+    }
 
 
 def _positive_int(value: str) -> int:
@@ -450,6 +857,12 @@ def main(argv: list[str] | None = None) -> int:
         default=os.environ.get("KOR_TRAVEL_MAP_PG_DSN"),
         help="asyncpg DSN. 기본은 KOR_TRAVEL_MAP_PG_DSN env.",
     )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="report JSON을 stdout과 함께 이 파일(.safe.json)에도 쓴다. DSN은 담지 않는다.",
+    )
     args = parser.parse_args(argv)
     if not args.dsn:
         parser.error("--dsn 또는 KOR_TRAVEL_MAP_PG_DSN이 필요합니다.")
@@ -460,7 +873,11 @@ def main(argv: list[str] | None = None) -> int:
     except BenchmarkCardinalityError as exc:
         print(f"benchmark cardinality 검증 실패: {exc}", file=sys.stderr)
         return 2
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    report = {**report, "server_settings": dict(HARNESS_SERVER_SETTINGS)}
+    rendered = json.dumps(report, ensure_ascii=False, indent=2)
+    print(rendered)
+    if args.output is not None:
+        args.output.write_text(rendered + "\n", encoding="utf-8")
     return 0
 
 
