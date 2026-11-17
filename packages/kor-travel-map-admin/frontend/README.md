@@ -87,7 +87,7 @@ fallback 용도로만 사용한다. `which node`/`which npm`이 `/mnt/c/Program 
 가리키면 Windows Node가 섞인 상태이므로 WSL nvm Node를 먼저 활성화한다.
 
 ```bash
-# 저장소 루트의 Linux/WSL 셸에서 실행(Node 22.22.2+/24.15.0+/26+, npm 12.0.1)
+# 저장소 루트의 Linux/WSL 셸에서 실행(Node 26.13.1 — 루트 .nvmrc, npm 12.0.1)
 which node npm              # /home/.../.nvm/... 등 Linux 경로여야 함
 npx --yes npm@12.0.1 ci --workspaces --include=optional
 npx --yes npm@12.0.1 run audit:high

@@ -7,7 +7,7 @@ name: frontend
 #
 # T-203 이후 모든 PR에서 check를 생성한다. required check의 legacy identity인
 # `type-check + next build (Node 20)` 이름은 branch protection 전환 전까지 유지하지만,
-# 실제 toolchain 계약과 실행은 Node 22.23.1이다.
+# 실제 toolchain 계약과 실행은 Node 26.13.1이다(루트 `.nvmrc`, ADR-124).
 
 on:
   push:
@@ -26,10 +26,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Node 22.23.1
+      - name: Set up Node 26.13.1
         uses: actions/setup-node@v4
         with:
-          node-version: "22.23.1"
+          node-version: "26.13.1"
 
       - name: npx --yes npm@12.0.1 ci (workspace 루트 — map-marker-react + frontend)
         # 루트 package.json의 npm workspaces 로 두 패키지 한 번에 설치.

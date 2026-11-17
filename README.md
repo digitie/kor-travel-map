@@ -102,7 +102,7 @@ Admin frontend는 WSL Node/npm으로 실행한다. Windows Node/npm은 사용하
 
 ```bash
 cd /mnt/f/dev/kor-travel-map-codex
-source ~/.nvm/nvm.sh && nvm use 22.23.1
+source ~/.nvm/nvm.sh && nvm install && nvm use   # 루트 .nvmrc(26.13.1)
 which node npm              # /home/.../.nvm/... 경로여야 함
 npx --yes npm@12.0.1 ci --workspaces --include=optional
 npx --yes npm@12.0.1 run verify:npm-tree

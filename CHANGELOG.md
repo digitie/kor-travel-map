@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-17 — 프론트 workspace 정확 Node 26.13.1(ADR-124)
+
+- 루트 `.nvmrc` 26.13.1, `engines.node` 정확 26.13.1(npm 12.0.1 그대로). CI·frontend 이미지(`node:26.13.1-bookworm-slim`)·live e2e 실행 이미지가 같은 Node를 쓴다. 다른 Node로는 `npm ci`가 `engine-strict`로 거절된다. REST·OpenAPI·DB 변경 없음.
+
 ## 2026-11-17 — 공개 월별 축제 bbox 필터
 
 - `GET /v1/public/festivals/monthly`: 선택 query `min_lon`/`min_lat`/`max_lon`/`max_lat`(4값 함께, 일부만이면 422). 목록과 `months` count를 그 범위 안 좌표의 축제로 좁힌다(`coord &&` envelope, GiST). 미지정 시 기존 동작. OpenAPI user·full additive 변경(service 불변).

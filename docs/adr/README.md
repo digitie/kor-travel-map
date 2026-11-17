@@ -1,6 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-124.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-125.**
+
+- [ADR-124 — 프론트 workspace는 정확한 Node 26.13.1(최신 LTS)과 npm 12.0.1로 고정한다](124-exact-node-26-pin.md) — accepted, 2026-11-17 (소유자 결정; Common T-416; guard 호출 갱신은 Common T-029 뒤 T-417).
 
 - [ADR-123 — 관리자 UI와 지도 공용 구현 채택](123-common-admin-ui.md) — accepted, 2026-11-11(산출물 후보 통합 검증 중).
 

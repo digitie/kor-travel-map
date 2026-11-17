@@ -55,7 +55,7 @@ Frontend 서버는 **항상 WSL 셸에서 실행**한다. Windows 호스트는 P
 
 ```bash
 # 저장소 루트의 Linux/WSL 셸에서
-source ~/.nvm/nvm.sh && nvm use 22.23.1
+source ~/.nvm/nvm.sh && nvm install && nvm use   # 루트 .nvmrc(26.13.1)
 which node npm              # /home/.../.nvm/... 등 Linux 경로여야 함 (/mnt/c/... 금지)
 npx --yes npm@12.0.1 ci --workspaces --include=optional
 npx --yes npm@12.0.1 run verify:npm-tree

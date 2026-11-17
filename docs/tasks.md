@@ -196,7 +196,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-COMMON-PLAN-20261117 — **Common 공통화 재조사 계획의 Map 소유 task 추적** (문서 포인터)
 
-  kor-travel-common `docs/plan/commonization-plan-2026-11-17.md`의 Map 몫은 Common `T-480b`·`T-418`·`T-416`(정확 Node/npm 핀 결정)·`T-417`·`T-419`·`T-415`다.
+  kor-travel-common `docs/plan/commonization-plan-2026-11-17.md`의 Map 몫은 Common `T-480b`·`T-418`·`T-416`(정확 Node/npm 핀 — 2026-11-17 채택, Node 26.13.1, ADR-124)·`T-417`(Common `T-029` 뒤)·`T-419`·`T-415`다.
   범위와 수용 기준은 Common 상세 task가 소유한다. 해제 조건은 acceptance.
 
 - [ ] T-READ-01 — **조용한 호스트의 읽기 기준선과 재측정 도구**
