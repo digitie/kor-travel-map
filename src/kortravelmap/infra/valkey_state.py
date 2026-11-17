@@ -731,11 +731,12 @@ class ValkeyStateStore:
     ) -> tuple[GenerationMeta, list[tuple[str, float]]]:
         """여러 중심의 근처를 한 세대에서 읽는다 — ``(meta, [(id, 가장 가까운 중심까지 m)])``.
 
-        왕복은 점 수와 무관하게 두 번이다(T-READ-04): 포인터 ``GET`` 한 번 → meta ``HGETALL``과 점마다
-        ``GEOSEARCH … WITHDIST COUNT count``를 pipeline 하나로. 같은 id는 가장 가까운 거리만 남기고
-        ``(거리, id)``순으로 정렬해 ``count``건까지 준다. 점마다 상위 ``count``건이면 합집합의 상위
-        ``count``건이 정확하다 — 전체 상위에 드는 id는 자기에게 가장 가까운 점의 상위 ``count``에도
-        든다. 값(``HMGET``)은 호출자가 줄인 id로 한 번 더 읽는다.
+        이 메서드의 왕복은 점 수와 무관하게 두 번이다(T-READ-04): 포인터 ``GET`` 한 번 →
+        meta ``HGETALL``과 점마다 ``GEOSEARCH … WITHDIST COUNT count``를 pipeline 하나로.
+        같은 id는 가장 가까운 거리만 남기고 ``(거리, id)``순으로 정렬해 ``count``건까지
+        준다. 점마다 상위 ``count``건이면 합집합의 상위 ``count``건이 정확하다 — 전체
+        상위에 드는 id는 자기에게 가장 가까운 점의 상위 ``count``에도 든다. 값(``HMGET``)은
+        호출자가 줄인 id로 한 번 더 읽는다.
 
         포인터가 없으면 :class:`StateNotLoaded`, 포인터가 없는 세대를 가리키면
         :class:`StateStoreUnavailable`(``current_meta``와 같다).
