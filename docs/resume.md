@@ -1,3 +1,8 @@
+## 2026-11-18 — 공통 guard ref `0dec954`(Common T-417)
+
+- guard 호출 SHA·`common-ref` = `0dec9543c8c8730ce7b05837f2fbe6c31d4ede65`, 도구 규칙 입력(`toolchain-manifests`·`node-dockerfiles`)을 채웠다. frontend 이미지는 이제 내장 `node` 사용자로 돈다 — 다음 배포에서 frontend 이미지가 다시 빌드된다.
+- 남은 Map 몫(Common 계획): `T-480b`·`T-418`·`T-415`. `T-419`는 이미 새 guard라 해당 없음(공통 릴리스는 일반 재vendor로 받는다).
+
 ## 2026-11-18 — T-READ-08 autovacuum 문턱(alembic 453) 머지
 
 - 다음 Map 회전에 453이 실린다(spec 불변). 배포 직후 `feature.features` autovacuum이 한 번 돈다(I/O 증가, 읽기·쓰기 차단

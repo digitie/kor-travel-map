@@ -1,3 +1,12 @@
+## 2026-11-18 — 공통 guard 호출을 T-029 커밋으로(Common T-417)
+
+- `.github/workflows/common-frontend-policy.yml`의 호출 SHA와 `common-ref`를 `55a921b` → `0dec9543c8c8730ce7b05837f2fbe6c31d4ede65`(Common T-029 병합, 공통 Node 축 26.13.1)로 같이 올렸다. 새 guard는 정책 세 파일과 Node/npm 축을 이 ref에서 읽고, 도구 규칙(`check_node_toolchain`)을 더 돌린다.
+- 도구 규칙 입력을 채웠다: `toolchain-manifests`(루트·`map-marker-react`·`kor-travel-map-user-client`), `node-dockerfiles`(`docker/frontend.Dockerfile`). C7 live e2e 이미지는 생산 이미지가 아니라 넣지 않았다.
+- 새 검사기가 frontend 이미지에서 걸어 고친 것: `apt-get`(ca-certificates·git) RUN 삭제 — lock에 git 의존성이 없고 Node가 CA를 내장한다; `npm ci --workspaces --include=optional` → `--engine-strict`(optional은 기본 포함이라 설치 트리는 같다); runner의 `groupadd`/`useradd`(`nextjs`) 대신 이미지 내장 비root `node` 사용자(uid 1000). compose에 frontend 볼륨·`user:` 지정이 없어 영향 없음.
+- `.nvmrc`·`engines`는 ADR-124(#1507)로 이미 26.13.1이라 이번 축에서 그대로 통과한다(T-024 읽기 전용 실행의 FAIL 두 줄 해소). 의존성·산출물 대조도 같은 ref로 통과(로컬 재현, Node 26.13.1).
+- 기존 검증 스크립트와의 겹침: `verify-npm-tree.mjs`(설치 트리 `npm ls` problems 0)·`verify-next-sharp.mjs`(Sharp ABI 실변환)는 설치 결과를 보고, 공통 도구 규칙은 선언·이미지·npm 명령 형식만 정적으로 본다. 겹치지 않으므로 둘 다 남긴다.
+- 검증: 공통 검사기 로컬 PASS, 관련 단위 테스트 5개 파일(실패 13건은 node_modules 없는 체크아웃의 dotenv validator 등 환경 — main 기준선과 같은 13건). frontend·docker-images·공통 정책은 PR CI. n150 게이트 `NOT_RUN`(CI 우선).
+
 ## 2026-11-18 — T-READ-08: `feature.features` autovacuum 문턱(alembic 453)
 
 - 소유자 결정(2026-11-18, 계획 "소유자 결정" 절)에 따라 측정 없이 개선이 분명한 작업으로 진행했다. 근거는 이미 실측이다
