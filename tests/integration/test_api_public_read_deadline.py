@@ -218,7 +218,9 @@ async def test_batch_statement_cancel_is_read_timeout(
     monkeypatch.setattr(
         features_router.feature_identity, "resolve_feature_identities_bulk", _resolve
     )
-    monkeypatch.setattr(features_router.feature_repo, "get_service_feature_batch_items", _slow_batch)
+    monkeypatch.setattr(
+        features_router.feature_repo, "get_service_feature_batch_items", _slow_batch
+    )
     app = _app(public_read_budget_ms=600)
     async with _client(app) as client:
         response = await client.post(
@@ -260,7 +262,9 @@ async def test_batch_deadline_spans_resolve_and_items(
     monkeypatch.setattr(
         features_router.feature_identity, "resolve_feature_identities_bulk", _slow_resolve
     )
-    monkeypatch.setattr(features_router.feature_repo, "get_service_feature_batch_items", _slow_batch)
+    monkeypatch.setattr(
+        features_router.feature_repo, "get_service_feature_batch_items", _slow_batch
+    )
     app = _app(public_read_budget_ms=1000)
     async with _client(app) as client:
         started = monotonic()

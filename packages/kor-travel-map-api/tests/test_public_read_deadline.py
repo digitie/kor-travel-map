@@ -14,11 +14,12 @@ from types import SimpleNamespace
 from typing import Any
 
 import pytest
+from kortravelmap.infra import public_read_budget
+
 from kortravelmap.api import db as api_db
 from kortravelmap.api.app import create_app
 from kortravelmap.api.route_policy import _iter_flattened_routes, _resolve_route
 from kortravelmap.api.settings import ApiSettings
-from kortravelmap.infra import public_read_budget
 
 pytestmark = pytest.mark.unit
 

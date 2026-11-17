@@ -63,7 +63,10 @@ __all__ = [
 ]
 
 PUBLIC_READ_BUDGET_STATE = "public_read_budget_ms"
-"""``request.state``의 표시. 공개 읽기 예산 아래의 요청만 57014를 503 ``READ_TIMEOUT``으로 바꾼다."""
+"""``request.state``의 표시.
+
+공개 읽기 예산 아래의 요청만 57014를 503 ``READ_TIMEOUT``으로 바꾼다.
+"""
 
 
 class PoolBusy(Exception):
