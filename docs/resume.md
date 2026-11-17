@@ -1,10 +1,13 @@
 ## 2026-11-17 — 읽기 성능 계획
 
-- [계획](reports/2026-11-17-read-performance-plan.md) 2차 초안(적대 리뷰 1회차 반영, 2회차 예정). 구현은 아직 없다.
-- 다음: `T-READ-01`(기준선 — `CAT10_ALL_DONE` 뒤 조용한 때, `jit=off`)과 `T-READ-02`(지표·느린 요청 로그)를 병렬로
-  시작한다. `T-READ-03`은 `T-READ-02` 머지와 PinVi `T-READ-PIN-04` 운영 배포 뒤, `T-READ-05`~`07`은 `T-READ-01`
-  보고서 뒤다.
-- 소유자 확인이 필요한 것: odroid NVMe 남은 공간 1.9 GB(`T-READ-MGR-05`, 전달됨), `T-READ-06`의 묵은 순위 키 허용 여부.
+- [계획](reports/2026-11-17-read-performance-plan.md) 적대 리뷰 2회 반영. 구현은 아직 없다. 작업 30개, 계획 §8이 단계 순이다.
+- 다음(0단계, 병렬): `T-READ-01`(기준선 — 소유자가 승인한 조용한 창, `jit=off`), `T-READ-02`(느린 요청 로그·지표),
+  `T-READ-08`(autovacuum). PinVi 쪽 0단계(`T-READ-PIN-06` 호출 기록 집계·`05` 요청당 비용·`04`·`01`)가 가장 싸고
+  답을 많이 준다.
+- 순서 제약: `T-READ-03`은 `T-READ-02` 머지와 PinVi `T-READ-PIN-04` 운영 반영 뒤. `T-READ-04`는 PinVi 재vendor와 한
+  pair 회전. `T-READ-05`~`07`은 `T-READ-01` 보고서 뒤.
+- 소유자 확인이 필요한 것: odroid NVMe 남은 공간 1.9 GB(`T-READ-MGR-05`, 전달됨), 조용한 창과 공용 PG 재생성 창,
+  `T-READ-06`의 묵은 순위 키 허용 여부.
 
 ## 2026-11-17 — 공개 월별 축제 bbox 필터(PinVi 추천 여행 주변 축제)
 

@@ -2718,87 +2718,111 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 
 ## T-READ-01
 
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] harness와 probe의 DB 연결이 운영 API처럼 `jit=off`다(설정을 확인하는 시험이 있다).
-- [ ] harness가 `--skip-seed`로 운영 DB에서 viewport 11개(기존 6 + 지역 검색 2·시군구 집계·개별 행 500건·상세 1건)의
-  p50·p95·shared read blocks p95·응답 bytes를 낸다.
-- [ ] 지역 검색 둘은 전처리 질의 셋의 시간과 본 질의의 CTE별 시간(`EXPLAIN (ANALYZE, BUFFERS)` 노드 시간)을 표로 적는다.
+- [ ] harness의 DB 연결이 운영 API처럼 `jit=off`이고 문장 상한 30초가 걸려 있다(설정을 확인하는 시험). probe는 DB
+  연결이 없고 service token을 출력·파일에 남기지 않는다(시험).
+- [ ] harness가 `--skip-seed`로 운영 DB에서 viewport 13개(기존 6 + 지역 검색 2·시군구 집계·서울시청 zoom 12와 13의
+  읍면동 집계·개별 행 500건·상세 1건)의 p50·p95·shared read blocks p95·응답 bytes를 `--output` 파일로 낸다.
+- [ ] 지역 검색 SQL은 `_resolve_search_region`·`_search_region_arms`·`_search_region_params`·`_search_score_sql`로 만든
+  것이다. 전처리 질의 셋의 시간과, 빼고 재는 방식의 이름 정규화 비중((전체 − `compacted`·`hits` 식을 상수로 바꾼
+  변형) / 전체, 30회 p50)을 적는다.
 - [ ] HTTP probe가 같은 요청을 30회씩 재고 묶음마다 PSI io `some` avg60을 함께 적는다.
-- [ ] 조용할 때(PSI io `some` avg60 < 5%)와 적재 중 두 번 잰 보고서(`docs/reports/<날짜>-read-baseline.md`와 `.safe.json`)가
-  머지됐다. 언제·어느 배포 generation에서 쟀는지 적는다.
-- [ ] 보고서가 계획 F-04·F-07·F-08·F-12의 "모른다"를 수치로 바꾸고 `T-READ-05`(5%)·`T-READ-06`(30%)의 채택 판정을 적는다.
+- [ ] 계획 §8.1의 조용한 창 절차로 잰 수치와 적재 중 수치가 보고서(`docs/reports/<날짜>-read-baseline.md`와
+  `.safe.json`)에 있다. 7일 안에 조용한 창을 얻지 못했으면 가장 낮은 PSI에서 잰 값과 그 PSI를 적고, 뒤 작업을
+  진행할지에 대한 소유자 결정을 journal에 적었다. 언제·어느 배포 generation에서 쟀는지 적는다.
+- [ ] 보고서가 `T-READ-05`(5%)·`T-READ-06`(30%)의 채택 판정을 적는다. 조용할 때와 적재 중의 판정이 갈리면 소유자가 정한다.
 
 ## T-READ-02
 
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
+- [ ] 미들웨어가 요청 도착 시각을 `request.state.started_monotonic`에 적는다(시험).
 - [ ] 지표 flag가 꺼져 있어도 요청 시간이 문턱(기본 1초) 이상이면 route template·status·시간·DB 문장 수·DB 시간 합·
-  request id가 한 줄로 남는다(주입한 느린 질의로 시험).
-- [ ] 그 줄에 query string·header 값·좌표가 없다(시험).
-- [ ] `/metrics`에 pool 체크아웃 대기 histogram과 사용 중 연결 gauge가 나온다.
-- [ ] 기본 설정에서 요청당 추가 DB 왕복이 0이다(문장 수 시험).
+  request id가 한 줄로 남는다(주입한 느린 질의로 시험). 그 줄에 query string·header 값·좌표가 없다.
+- [ ] `/metrics`에 pool 대기 histogram(pool의 `_do_get` 시간)과 사용 중 연결 gauge가 나온다. 세션 의존성은 연결을 미리
+  꺼내지 않는다 — pool 크기 1에서 인증 세션과 읽기 세션이 차례로 동작하는 시험이 통과한다.
+- [ ] 기본 설정에서 요청당 추가 DB 왕복이 0이다(문장 수 시험). OpenAPI 세 파일이 바뀌지 않았다.
 - [ ] 배포 뒤 운영 로그에서 1초 넘는 요청 줄을 확인해 journal에 배포 generation과 함께 적었다.
 
 ## T-READ-03
 
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다. 운영 배포는 PinVi `T-READ-PIN-04`(같은 계획 §8.3) 뒤다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다. 운영 반영은 PinVi `T-READ-PIN-04` 뒤다.
 
+- [ ] OpenAPI 세 파일이 바뀌지 않았다(`export_openapi.py --check`). 바꿔야만 한다면 이 작업을 멈추고 계획 §8.1의
+  "Map+PinVi 한 회전"으로 다시 계획한다.
 - [ ] `get_read_snapshot_session`·`get_session`과 엔진의 `pool_timeout`이 바뀌지 않았다. 그 의존성을 쓰는 admin·ops·service
   route의 transaction에는 `statement_timeout`이 걸리지 않고(`SHOW statement_timeout` 시험) 57014는 종전처럼 처리된다.
+- [ ] 범위 안 route의 격리 수준이 바뀌지 않았다(route별 옛 의존성 → 새 의존성 대응 표를 PR에 붙였다).
 - [ ] 문장 둘이 각각 예산 가까이 걸리는 주입 시험에서 요청 전체가 예산 + 0.5초 안에 503 `READ_TIMEOUT`으로 끝난다
-  (문장마다가 아니라 요청 마감이다).
-- [ ] 503 뒤 그 연결이 풀에 돌아와 다음 질의가 성공한다.
+  (문장마다가 아니라 요청 마감이다). 503 뒤 그 연결이 풀에 돌아와 다음 질의가 성공한다.
 - [ ] pool을 다 쓴 상태의 공개 읽기가 대기 상한 + 0.5초 안에 503 `POOL_BUSY`이고, 그 뒤 pool의 체크아웃 수가 원래대로
-  돌아온다(연결 누수 없음). 같은 상태의 admin route는 종전 대기 동작 그대로다.
+  돌아온다(연결 누수 없음). 같은 상태의 admin route는 종전 대기 동작 그대로다. 공개 읽기 전용 엔진으로 갔다면 Map
+  API의 최대 연결 수가 15를 넘지 않는다.
 - [ ] `GET /v1/public/festivals/monthly`는 긴 예산(기본 14초)을 쓴다 — 5초 걸리는 주입 질의가 200이다.
 - [ ] batch route의 57014는 `READ_TIMEOUT`으로 나온다(`FEATURE_BATCH_UNAVAILABLE`가 가로채지 않는다).
-- [ ] 예산 0이면 종전 동작과 같다.
-- [ ] 새 503 코드를 OpenAPI에 적으면 user·service spec 변경으로 PinVi 재vendor를 같은 회전에 묶는다. 기존 공통 503
-  problem으로 충분하면 그 근거를 PR에 적는다.
-- [ ] 운영 배포 전에 PinVi `T-READ-PIN-04`가 운영에 있음을 확인하고 두 배포 generation을 journal에 적었다.
+- [ ] 마감이 없는 호출자(Dagster·CLI)가 부른 `search_features`는 `statement_timeout`을 바꾸지 않는다(시험). 예산 0이면
+  종전 동작과 같다.
+- [ ] 운영 반영 전에, 운영 PinVi 이미지의 commit이 `T-READ-PIN-04`의 머지 commit을 포함하는지 확인했다. 두 배포
+  generation을 이 저장소 journal 한 곳에 적었다.
 
 ## T-READ-04
 
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] 점 60개 요청의 Valkey 왕복이 3번 이하다(계수 시험).
-- [ ] 결과 집합이 점마다 기존 `?lon&lat&radius_m` 조회를 부른 합집합과 같다(거리 포함, 통합 시험).
-- [ ] 세대 교체 중에도 한 세대만 읽는다.
-- [ ] 상한(점 60·반경 50 km·limit 500)을 넘으면 422다.
-- [ ] Valkey 장애는 기존 route와 같은 503이다.
-- [ ] service OpenAPI drift gate가 통과하고 PinVi 재vendor PR이 열렸다.
+- [ ] 점 60개 요청의 Valkey 왕복이 3번 이하이고 `HMGET`이 읽는 id가 limit+1개 이하다(계수 시험).
+- [ ] 결과 집합이 점마다 기존 `?lon&lat&radius_m` 조회를 부른 합집합을 거리순으로 자른 것과 같다(거리 포함, 통합 시험).
+- [ ] 세대 교체 중에도 한 세대만 읽는다. 상한(점 60·반경 50 km·limit 500)을 넘으면 422다. Valkey 장애는 기존 route와
+  같은 503이다.
+- [ ] service OpenAPI drift gate가 통과했다. PinVi의 재vendor PR(`T-READ-PIN-01` ③)이 **머지됐고**, 운영 반영은 Map과
+  PinVi를 함께 내는 한 번의 pair 회전으로 했다(회전 generation을 journal에 적는다).
 
 ## T-READ-05
 
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] `T-READ-01` 보고서에서 전처리 두 질의의 합이 검색 시간의 5% 이상이다. 미만이면 그 근거를 적고 닫는다(아래는 해당 없음).
+- [ ] 판정: `T-READ-01` 보고서(`T-READ-08` 반영 뒤 수치)에서 전처리 두 질의의 합이 검색 시간의 5% 이상이다(30회 p50,
+  `jit=off`. 조용할 때와 적재 중의 판정이 갈리면 소유자가 정한다). 미만이면 그 수치를 적고 닫는다(아래는 해당 없음).
 - [ ] 표의 시군구 이름이 그 코드 공개 행 전체의 최빈값과 같다(통합 시험 — 결정적 기준).
 - [ ] 코드마다 이름이 하나뿐인 fixture에서 표 경로와 종전 경로의 `split_region_query` 결과와 선택되는 팔
   (`_SearchRegionArms`)이 같다. 이름이 섞인 코드에서 두 경로가 다를 수 있는 경우를 PR에 적는다.
 - [ ] 표 경로의 낱말 둘 검색은 전처리에서 `feature.features`를 읽지 않는다(EXPLAIN 시험).
-- [ ] 표가 비었을 때 종전과 같다. refresh를 두 번 돌려도 결과가 같다.
+- [ ] 표가 비었거나 `refreshed_at`이 7일보다 오래면 종전 질의로 떨어진다(시험). refresh를 두 번 돌려도 결과가 같다.
+- [ ] 운영에서 `consistency_dedup_refresh`의 마지막 성공 run이 48시간 안임을(또는 Map 큐가 그 job을 넣음을) 확인해
+  journal에 적었다.
 - [ ] 공개 행 수가 문턱 3만의 ±10% 안인 지역 수를 PR에 적고, 행 수를 표에서 읽을지 요청 때 셀지 정한 근거를 적었다.
 - [ ] harness(`jit=off`)의 지역 검색 수치를 전후로 보고서에 적었다.
 
 ## T-READ-06
 
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] `T-READ-01` 보고서에서 이름 정규화 단계가 지역 검색 시간의 30% 이상이다. 미만이면 단계별 시간을 적고 닫는다.
-- [ ] 검색 평가 묶음(2026-11-12 평가의 검색어)에서 표 경로와 종전 경로의 `feature_id` 순서가 첫 3페이지까지 같다.
-  표에 없는 행(새 Feature)이 섞여도 같다.
+- [ ] 판정: `T-READ-01` 보고서의 빼고 재는 측정에서 이름 정규화 식이 지역 검색 본 질의 시간의 30% 이상이다(30회 p50,
+  `jit=off`. 두 조건의 판정이 갈리면 소유자가 정한다). 미만이면 그 수치를 적고 닫는다.
+- [ ] 검색 평가 묶음 파일(`tests/integration/data/search_eval_queries.txt`, 40개 이상 — 지역 검색 10개 이상)이 있고, 그
+  묶음에서 표 경로와 종전 경로의 `feature_id` 순서가 첫 3페이지까지 같다. 표에 없는 행(새 Feature)이 섞여도 같다.
 - [ ] 이름·분류가 바뀐 행이 refresh 전까지 옛 키로 순위가 매겨지는 것을 허용할지 소유자가 정했고 그 결정을 여기 적었다
   (허용하지 않으면 키를 `row_revision`과 함께 저장해 다르면 식으로 떨어지고, 그 시험이 있다).
 - [ ] harness(`jit=off`)의 "부산 맛집" p50이 기준선보다 40% 이상 줄었다. 못 미치면 revert하고 닫는다.
 
 ## T-READ-07
 
-[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2가 변경 내용·의존·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] 색인별 "읽는 경로 / 14일 탐색 수 / 판정" 표가 보고서에 있다(통계가 중간에 지워졌으면 그 구간을 적는다).
+- [ ] `scripts/index_usage_snapshot.py`로 찍은 두 스냅샷(14일 이상 간격, 사이에 PG 기동 시각과 stats reset이 바뀌지
+  않음)으로 만든 색인별 "읽는 경로 / 탐색 수 차이 / 판정" 표가 보고서에 있다.
 - [ ] 지운 뒤 관리자 Feature 목록·검색 e2e(D2)와 tier-1 gate가 통과한다.
-- [ ] tier-3 측정 — 같은 provider 재적재의 쓰기 시간·WAL·색인 크기·`n_tup_hot_upd` 전후를 PR에 붙였다.
+- [ ] tier-3 측정 — 같은 provider 재적재의 쓰기 시간·WAL·색인 크기·`n_tup_hot_upd` 전후를 PR에 붙였다(fillfactor 90 포함).
 - [ ] 지운 색인 이름이 `infra/prewarm.py`의 `DEFAULT_HOT_RELATIONS`에 남아 있지 않다.
 - [ ] 지울 것이 없으면 그 근거로 닫는다.
+
+## T-READ-08
+
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
+
+- [ ] 설정 전의 적재 전·직후·24시간 뒤 `relallvisible/relpages`·dead 행·마지막 autovacuum과, 지역 행 수 질의의
+  `Heap Fetches`를 적었다.
+- [ ] migration이 `feature.features`에 표 단위 autovacuum 설정을 넣는다(값과 근거를 PR에). 표를 다시 쓰지 않는다.
+- [ ] 적재 한 번의 24시간 뒤 `relallvisible/relpages`가 0.95 이상이고 지역 행 수 질의의 `Heap Fetches`가 반환 행의 1%
+  미만이다. 못 미치면 적재 job 끝의 VACUUM을 더하거나, 그 수치로 닫을지를 소유자가 정한다. 언제·어느 배포
+  generation에서 쟀는지 적는다.
