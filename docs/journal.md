@@ -1,3 +1,11 @@
+## 2026-11-17 — Common 공통화 재조사 계획의 Map 포인터(문서 전용)
+
+- 소유자 요청으로 kor-travel-common이 다섯 저장소를 다시 조사해 계획 초안을 냈다(Common `docs/plan/commonization-plan-2026-11-17.md`). Map 조사 기준은 `f1788da9`.
+- Map 몫은 셋이다: Common `T-480a`(API compose healthcheck를 `kortravelcommon.http_health` exec 형식으로, 선행 없음),
+  `T-414`(guard 검사 코드 ref·정확 Node/npm 도구 규칙 이관, Common `T-023` 결정 뒤), `T-415`(관리자 공통 부품 묶음 채택, Common `T-221` 뒤).
+- `docs/tasks.md`에 `T-COMMON-PLAN-20261117` 한 줄, `docs/tasks-acceptance.md`에 같은 이름의 절을 뒀다. 수용 기준 본문은 Common이 소유한다.
+- 코드 변경 없음. Common 계획은 독립 리뷰 전 초안이라 범위가 바뀔 수 있다. 진행 중인 작업과 다음 한 작업은 바뀌지 않는다.
+
 ## 2026-11-17 — 공개 월별 축제 bbox 필터(PinVi 추천 여행 주변 축제)
 
 - `GET /v1/public/festivals/monthly`에 선택 bbox(`min_lon`/`min_lat`/`max_lon`/`max_lat`, 4값 함께·일부만이면 422).

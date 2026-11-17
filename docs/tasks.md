@@ -187,3 +187,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   ADR-118(proposed): CI 통합 suite를 공용 instance digest(PG18 + PostGIS 3.6) 한 lane으로 바꾸고 PG16 catalog 가정을
   major 무관하게 고친다. PR #1431. 해제 조건은 acceptance §T-PG18-CI.
+
+- [ ] T-COMMON-PLAN-20261117 — **Common 공통화 재조사 계획의 Map 소유 task 추적** (문서 포인터)
+
+  kor-travel-common `docs/plan/commonization-plan-2026-11-17.md`(초안)의 Map 몫은 Common `T-480a`(API healthcheck를 공통 probe로)·`T-414`·`T-415`다.
+  범위와 수용 기준은 Common 상세 task가 소유한다. 해제 조건은 acceptance.
