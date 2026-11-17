@@ -2878,3 +2878,15 @@ ADR-120(2026-11-09, #1459). Map은 transport 휴게소·공항(기존)과 철도
 - [ ] `standard_special_streets`도 첫 적재가 성공하고 feature 수가 274(원천)와 맞는다.
 - [ ] `feature_place_standard_traditional_markets_monthly_schedule`·`feature_place_standard_special_streets_monthly_schedule`을 켠다.
 
+## T-READ — 읽기 성능 계획 (2026-11-17)
+
+정본은 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2다. 이 원장이 220 KiB 한도에 가까워 작업마다 판정 한 줄만 둔다 — 세부
+조건(①②…)은 그 절의 "해제 조건"이 소유한다.
+
+- [ ] T-READ-01 — viewport 9개의 p50·p95와 지역 검색 CTE별 시간을 조용할 때·적재 중 두 번 잰 보고서가 머지됐다.
+- [ ] T-READ-02 — 지표가 꺼져 있어도 1초 넘는 요청 줄이 남는다(시험). 배포 뒤 운영 로그에서 확인해 journal에 generation과 함께 적었다.
+- [ ] T-READ-03 — 상한을 넘긴 읽기가 503 `READ_TIMEOUT`이고 연결이 풀에 돌아온다(통합 시험). admin·ops 세션에는 걸리지 않는다.
+- [ ] T-READ-04 — 점 60개 요청이 Valkey 왕복 3번 이하이고 결과가 점별 조회의 합집합과 같다(시험). service spec 재vendor PR이 열렸다.
+- [ ] T-READ-05 — 표 경로와 종전 경로의 지역 해석이 같고(시험) 전후 수치를 적었다. 또는 비중 5% 미만으로 닫은 근거를 적었다.
+- [ ] T-READ-06 — 결과 순서가 같고 p50이 40% 이상 줄었다. 또는 채택하지 않은 근거(단계별 시간)를 적었다.
+- [ ] T-READ-07 — 색인별 판정 표와 tier-3 전후 측정이 PR에 있다. 또는 지울 것이 없다는 근거를 적었다.

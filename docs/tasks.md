@@ -16,7 +16,8 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 `tests/lint/test_task_ledger_conventions.py`가 길이를 강제한다.
 
 **외부 저장소 항목**은 규약 §6에 따라 여기 세지 않고 "외부 추적"으로만 둔다.
-현재 둘이다 — Manager compose의 `KOR_TRAVEL_MAP_KMA_*` env 제거(ADR-104/105 뒤 Map이 읽지
+읽기 성능 계획의 PinVi·Manager·weather·transport 작업(`T-READ-PIN-*`·`T-READ-MGR-*`·`T-READ-WEA-*`·`T-READ-TRN-*`)은
+[계획](reports/2026-11-17-read-performance-plan.md) §8.3~§8.6이 정본이다. 그 밖에는 둘이다 — Manager compose의 `KOR_TRAVEL_MAP_KMA_*` env 제거(ADR-104/105 뒤 Map이 읽지
 않는 키다. 2026-10-13 Manager 저장소에서 진행 중이며 정본은 그 저장소의 PR이다)와
 `GM-17`(Manager production compose required-set 완화). 소유자 지시로
 **열린 항목 중 가장 마지막**이고, 착수 전 오너와 범위 재확인이 조건이다. 정본은
@@ -24,6 +25,10 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 
 **보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 넷이다 —
 `T-VN-41C`·`T-VN-H43`·`T-101`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다.
+
+**읽기 성능 계획(2026-11-17)** — `T-READ-01`~`07`(목록 끝). 정본은
+[읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8.2, 해제 조건은 acceptance §T-READ다.
+`T-READ-01`·`02`는 병렬 착수, `T-READ-05`~`07`은 `T-READ-01`의 수치로 채택 여부를 정한다(채택하지 않고 닫는 것도 완료다).
 
 **reconcile sensor 재시도(ADR-111 후속)** — `T-RECONCILE-RETRY`는 ADR-112(accepted) 결정 0-1(#1345)과 1~7 구현으로
 2026-10-21 `tasks-done.md`로 이관했다.
@@ -187,3 +192,38 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   ADR-118(proposed): CI 통합 suite를 공용 instance digest(PG18 + PostGIS 3.6) 한 lane으로 바꾸고 PG16 catalog 가정을
   major 무관하게 고친다. PR #1431. 해제 조건은 acceptance §T-PG18-CI.
+
+- [ ] T-READ-01 — **조용한 호스트의 읽기 기준선과 재측정 도구**
+
+  tier-2 harness에 지역 검색·시군구 집계·개별 행·상세 viewport를 더하고 HTTP probe를 새로 둔다. 조용할 때와
+  적재 중 두 번 재서 보고서로 남긴다.
+
+- [ ] T-READ-02 — **요청·DB 지표와 느린 요청 로그**
+
+  연결 풀 대기 지표와, 지표 flag와 무관한 1초 이상 요청 로그(route·시간·DB 문장 수)를 더한다. 운영에서 켜고
+  긁는 것은 Manager `T-READ-MGR-02`다.
+
+- [ ] T-READ-03 — **공개 읽기 시간 상한(문장 timeout·pool 대기)**
+
+  공개 읽기 transaction에 `statement_timeout` 4.5초, API 엔진 pool 대기 2초를 걸고 503 problem으로 바꾼다.
+  admin·ops 경로는 제외한다.
+
+- [ ] T-READ-04 — **교통 근처 조회를 한 요청으로(near-batch)**
+
+  `POST /v1/service/transport/{dataset}/near-batch`가 점 최대 60개를 Valkey 왕복 3번 이하로 읽는다. PinVi
+  전환은 `T-READ-PIN-01`이다.
+
+- [ ] T-READ-05 — **지역 검색 전처리를 작은 표 조회로**
+
+  시군구 이름·공개 행 수를 `feature.search_region_index`에 두고 검색이 그 표를 읽는다. `T-READ-01`에서 전처리
+  비중이 5% 미만이면 채택하지 않고 닫는다.
+
+- [ ] T-READ-06 — **검색 순위 비교 키 사전 계산(측정 뒤 채택 여부)**
+
+  이름 정규화 단계가 지역 검색 시간의 30% 이상일 때만 `feature.feature_search_keys`를 둔다. 결과 순서가 같아야
+  하고 p50이 40% 이상 줄지 않으면 revert한다.
+
+- [ ] T-READ-07 — **`features` 색인 정리와 HOT 갱신 회복(측정 뒤)**
+
+  14일 관측과 읽는 경로 확인 뒤 쓰지 않는 색인만 지운다. `updated_at` 색인이 빠지면 HOT 갱신을 잰다. 지울
+  것이 없으면 근거로 닫는다.

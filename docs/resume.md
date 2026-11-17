@@ -1,3 +1,10 @@
+## 2026-11-17 — 읽기 성능 계획
+
+- [계획](reports/2026-11-17-read-performance-plan.md) 1차 초안. 적대 리뷰 2회 뒤 고쳐 머지한다. 구현은 아직 없다.
+- 다음: `T-READ-01`(기준선 — `CAT10_ALL_DONE` 뒤 조용한 때)과 `T-READ-02`(지표·느린 요청 로그)를 병렬로 시작한다.
+  `T-READ-05`~`07`은 `T-READ-01` 보고서가 나온 뒤다.
+- 소유자 확인이 필요한 것: odroid NVMe 남은 공간 1.9 GB(`T-READ-MGR-05`), `T-READ-06`의 묵은 순위 키 허용 여부.
+
 ## 2026-11-17 — 공개 월별 축제 bbox 필터(PinVi 추천 여행 주변 축제)
 
 - `GET /v1/public/festivals/monthly`에 선택 bbox(`min_lon`/`min_lat`/`max_lon`/`max_lat`, 4값 함께·일부만이면 422).
