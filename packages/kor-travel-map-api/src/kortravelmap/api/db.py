@@ -19,11 +19,12 @@ from __future__ import annotations
 from time import perf_counter
 from typing import TYPE_CHECKING
 
-from kortravelmap.api.request_timing import current_request_db_timing
 from kortravelmap.infra.db import make_async_engine
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy import event
 from sqlalchemy.pool import AsyncAdaptedQueuePool
+
+from kortravelmap.api.request_timing import current_request_db_timing
 
 if TYPE_CHECKING:
     from collections.abc import AsyncIterator
