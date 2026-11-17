@@ -112,9 +112,13 @@ def test_fast_request_and_zero_threshold_do_not_log(caplog: pytest.LogCaptureFix
 
 def test_db_events_outside_a_request_are_not_accumulated() -> None:
     # 요청 밖(Dagster·lifespan)의 문장은 누산기가 없으므로 아무 데도 더하지 않는다.
+    from kortravelmap.api.request_timing import current_request_db_timing
+
+    assert current_request_db_timing() is None
     context = SimpleNamespace()
     api_db._before_cursor_execute(None, None, "SELECT 1", None, context, False)
     api_db._after_cursor_execute(None, None, "SELECT 1", None, context, False)
+    assert not getattr(context, "_kor_travel_map_counted", False)
 
 
 def test_error_and_success_hooks_count_one_execution_once() -> None:

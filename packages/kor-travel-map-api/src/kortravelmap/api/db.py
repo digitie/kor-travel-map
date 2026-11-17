@@ -50,7 +50,6 @@ __all__ = [
 
 _engine: AsyncEngine | None = None
 _prometheus_metrics: PrometheusMetrics | None = None
-_instrumented_sync_engine_ids: set[int] = set()
 
 
 class TimedAsyncQueuePool(AsyncAdaptedQueuePool):
@@ -193,13 +192,12 @@ def _instrument_engine_if_needed(engine: AsyncEngine) -> None:
     # 지표 flag와 무관하게 건다 — 느린 요청 로그의 문장 수·DB 시간이 이 이벤트에서 온다.
     # 지표가 꺼져 있으면 ``_record_query_metric``이 요청 누산기에만 더한다.
     sync_engine = engine.sync_engine
-    sync_engine_id = id(sync_engine)
-    if sync_engine_id in _instrumented_sync_engine_ids:
+    # id() 집합은 해제된 engine의 id를 새 engine이 물려받으면 건너뛴다 — engine 자신에게 묻는다.
+    if event.contains(sync_engine, "before_cursor_execute", _before_cursor_execute):
         return
     event.listen(sync_engine, "before_cursor_execute", _before_cursor_execute)
     event.listen(sync_engine, "after_cursor_execute", _after_cursor_execute)
     event.listen(sync_engine, "handle_error", _handle_error)
-    _instrumented_sync_engine_ids.add(sync_engine_id)
 
 
 def _before_cursor_execute(
@@ -244,11 +242,12 @@ def _record_query_metric(*, statement: str, context: Any, status: str) -> None:
     started_at = getattr(context, "_kor_travel_map_started_at", None)
     if not isinstance(started_at, float):
         return
-    # 같은 실행이 after_cursor_execute와 handle_error를 둘 다 지나지 않게 한 번만 센다.
-    context._kor_travel_map_started_at = None
     duration_seconds = perf_counter() - started_at
+    # 요청 누산기는 한 실행을 한 번만 센다(실행 뒤 fetch 오류가 handle_error로 다시 올 수 있다).
+    # 지표는 종전처럼 두 이벤트를 다 기록한다.
     timing = current_request_db_timing()
-    if timing is not None:
+    if timing is not None and not getattr(context, "_kor_travel_map_counted", False):
+        context._kor_travel_map_counted = True
         timing.add_statement(duration_seconds)
     metrics = _prometheus_metrics
     if metrics is None:
