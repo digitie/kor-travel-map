@@ -16,6 +16,7 @@
   `T-READ-MGR-03`, 긁는 것은 `T-READ-MGR-02`, PG 쪽 관측(`pg_stat_statements`·느린 질의 로그)은 공용 PG 재생성 창이
   필요한 `T-READ-MGR-01`이다 — Map 코드로 할 수 있는 몫은 이 PR이 전부다.
 - 배포는 이 PR에서 하지 않았다. acceptance 마지막 항목(운영 로그의 1초 넘는 요청 줄)은 배포 뒤다.
+
 ## 2026-11-18 — T-READ-08: `feature.features` autovacuum 문턱(alembic 453)
 
 - 소유자 결정(2026-11-18, 계획 "소유자 결정" 절)에 따라 측정 없이 개선이 분명한 작업으로 진행했다. 근거는 이미 실측이다
@@ -78,6 +79,7 @@
   두 파일에 그대로, 원장 223,003 → 211,173 bytes. 본문은 도구가 옮긴 그대로다.
 - weather·transport·PinVi·Manager `docs/tasks.md`에는 이 계획을 가리키는 한 줄을 둔다(각 저장소 브랜치
   `docs/read-performance-plan-20261117`).
+
 ## 2026-11-17 — 관리자 프런트 공통 후보12 채택(ui 0.2.1·tokens 0.1.2·vworld-map-web 1.0.4)
 
 - kor-travel-common #57·#58(동결 `97f8ed98`)이 정책 정본을 올렸다. 공통 guard는 고정 ref와 무관하게 common **main**의 정책·정본을 읽으므로, 옛 산출물로는 guard가 실패한다.
@@ -294,6 +296,7 @@ n150 슬롯2에서 기존 cache를 재사용해 명시 file 설치/실제 UI94+t
 - additive admin payload 변경에 맞춰 OpenAPI baseline과 기존 pending consumer receipt의 SHA만 재핀했다. pending 상태·배포 차단 사유는 보존하며 운영 검증을 완료로 바꾸지 않았다.
 - provider 원본은 immutable pin SHA를 읽어 표면 manifest --check를 통과했다. 기존 형제 checkout은 읽기만 했고 수정하지 않았다. 계약·표면 검사 43건 통과.
 - 최종 head의 두 독립 재리뷰와 CI 후에만 머지한다. 운영 접근·배포·테스트 없음.
+
 ## 2026-11-12 — origin/main 병합·925c 리뷰 기준 보존
 
 - 기존 리뷰 commit925c48c74는 재작성하지 않고 origin/main41de16d을 merge한다.
