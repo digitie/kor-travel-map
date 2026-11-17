@@ -1,3 +1,15 @@
+## 2026-11-18 — T-READ-04: 교통 묶음 근처 조회(`near-batch`) — 브랜치만, 머지 대기
+
+- `POST /v1/service/transport/{fuel-stations,highway-incidents}/near-batch`(service 표면, 같은
+  `require_service_token`). 본문 `points[]`(1~60)·`radius_m`(≤ 50 km)·`limit`(≤ 500, 기본 100), 넘으면 422.
+  `ValkeyStateStore.nearby_many`가 포인터 `GET` → meta `HGETALL`+점마다 `GEOSEARCH … WITHDIST COUNT limit+1`
+  pipeline 하나 → 라우터의 `HMGET` 한 번. 점 수와 무관하게 왕복 셋, 한 세대. id마다 가장 가까운 거리만 남겨
+  (거리, id)순으로 자르고 `truncated`는 기존 근처 조회와 같은 뜻이다. Valkey 장애·적재 전은 기존 route와 같은 503.
+- **spec이 바뀐다** — service·full OpenAPI(admin `openapi.json`·`openapi.service.json`)에 route 둘과
+  `NearBatchRequest`·`NearBatchPoint`가 더해진다(user 불변). 그래서 **머지하지 않았다**: 머지하면 다음 Map 회전부터
+  PinVi 재vendor가 먼저 있어야 해서 `T-READ-02`·`08`의 Map 단독 회전이 막힌다. 순서는 계획 §8.1 그대로 — 이 PR 머지
+  → PinVi `T-READ-PIN-01` ③(재vendor + `near-batch` client + 405 fallback) 머지 → Map+PinVi 한 pair 회전.
+
 ## 2026-11-18 — 읽기 성능 계획: 소유자 결정 기록(문서 전용)
 
 - 소유자 결정 셋을 [계획](reports/2026-11-17-read-performance-plan.md) "소유자 결정 (2026-11-18)" 절에 적었다 — ① 코드만 보고도

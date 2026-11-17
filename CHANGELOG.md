@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-18 — 교통 묶음 근처 조회(T-READ-04)
+
+- `POST /v1/service/transport/fuel-stations/near-batch`·`POST /v1/service/transport/highway-incidents/near-batch`: 중심 최대 60곳의 근처를 한 요청·한 세대로 읽는다(Valkey 왕복 셋). 응답은 목록 route와 같은 모양이고 `distance_m`은 가장 가까운 중심까지다. service·full OpenAPI additive — PinVi service 재vendor 필요(Map+PinVi 한 회전).
+
 ## 2026-11-17 — 프론트 workspace 정확 Node 26.13.1(ADR-124)
 
 - 루트 `.nvmrc` 26.13.1, `engines.node` 정확 26.13.1(npm 12.0.1 그대로). CI·frontend 이미지(`node:26.13.1-bookworm-slim`)·live e2e 실행 이미지가 같은 Node를 쓴다. 다른 Node로는 `npm ci`가 `engine-strict`로 거절된다. REST·OpenAPI·DB 변경 없음.
