@@ -1,3 +1,21 @@
+## 2026-11-18 — T-READ-02: 요청 도착 시각·느린 요청 로그·pool 대기 지표
+
+- 소유자 결정(2026-11-18)에 따라 측정 없이 가치가 분명한 관측 코드로 진행했다(계획 F-03 — 운영 Map에는 읽기 지연을 볼
+  수단이 없다).
+- 미들웨어(http 미들웨어 중 가장 바깥)가 `request.state.started_monotonic`을 적고(`T-READ-03`의 요청 마감 기준),
+  요청별 DB 누산기(`api/request_timing.py`)를 ContextVar로 건다. cursor 이벤트는 이제 **지표 flag와 무관하게** engine에
+  걸려 문장 수·DB 시간을 그 누산기에 더한다. 추가 DB 왕복은 없다(통합 시험 — handler가 보낸 2문장이 그대로 2).
+- 느린 요청 로그: `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS`(기본 1000, 0이면 끔) 이상이면 WARNING 한 줄 —
+  route template·status·`duration_ms`·`db_statements`·`db_ms`·`pool_waits`·`pool_wait_ms`·request id. query string·
+  header·좌표는 쓰지 않고, client가 보낸 request id는 `[A-Za-z0-9._:-]{1,64}`가 아니면 `-`로 쓴다.
+- pool: `make_async_engine`에 `poolclass` 인자(기본 None = 종전). API engine은 `TimedAsyncQueuePool`(`_do_get`만 감싸
+  시간을 잰다 — 크기·overflow·timeout 판정은 부모 그대로). `/metrics`에 `kor_travel_map_db_pool_wait_seconds`
+  histogram과 `kor_travel_map_db_pool_checked_out`·`_overflow` gauge(scrape 때 `pool.checkedout()`·`overflow()`).
+  세션 의존성은 바꾸지 않았다 — pool 크기 1에서 공개 key 인증 세션 → 읽기 snapshot 세션이 차례로 동작한다(통합 시험).
+- OpenAPI 불변(미들웨어·`include_in_schema=False`). Map 회전(spec 불변)으로 나간다. 운영에서 지표를 켜는 것은 Manager
+  `T-READ-MGR-03`, 긁는 것은 `T-READ-MGR-02`, PG 쪽 관측(`pg_stat_statements`·느린 질의 로그)은 공용 PG 재생성 창이
+  필요한 `T-READ-MGR-01`이다 — Map 코드로 할 수 있는 몫은 이 PR이 전부다.
+- 배포는 이 PR에서 하지 않았다. acceptance 마지막 항목(운영 로그의 1초 넘는 요청 줄)은 배포 뒤다.
 ## 2026-11-18 — T-READ-08: `feature.features` autovacuum 문턱(alembic 453)
 
 - 소유자 결정(2026-11-18, 계획 "소유자 결정" 절)에 따라 측정 없이 개선이 분명한 작업으로 진행했다. 근거는 이미 실측이다

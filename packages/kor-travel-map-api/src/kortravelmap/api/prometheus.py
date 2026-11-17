@@ -26,7 +26,12 @@ from prometheus_client import (
 from starlette.responses import Response
 from starlette.routing import Match
 
-__all__ = ["PrometheusMetrics", "RequestMetricLabels", "current_request_metric_labels"]
+__all__ = [
+    "PrometheusMetrics",
+    "RequestMetricLabels",
+    "current_request_metric_labels",
+    "route_template",
+]
 
 _HTTP_DURATION_BUCKETS: tuple[float, ...] = (
     0.005,
@@ -64,6 +69,22 @@ _DB_DURATION_BUCKETS: tuple[float, ...] = (
     1.0,
     2.5,
     5.0,
+)
+#: pool 체크아웃 대기(T-READ-02). 0이 대부분이고 꼬리는 ``pool_timeout``(30초)까지 간다.
+_DB_POOL_WAIT_BUCKETS: tuple[float, ...] = (
+    0.0005,
+    0.001,
+    0.005,
+    0.01,
+    0.05,
+    0.1,
+    0.25,
+    0.5,
+    1.0,
+    2.0,
+    5.0,
+    10.0,
+    30.0,
 )
 _UNMATCHED_ROUTE = "__unmatched__"
 _UNKNOWN_ROUTE = "__unknown__"
@@ -142,6 +163,25 @@ class PrometheusMetrics:
             buckets=_DB_DURATION_BUCKETS,
             registry=self.registry,
         )
+        self.db_pool_wait_seconds = Histogram(
+            "kor_travel_map_db_pool_wait_seconds",
+            "Time spent getting a connection from the API engine pool (wait or connect).",
+            buckets=_DB_POOL_WAIT_BUCKETS,
+            registry=self.registry,
+        )
+        self._db_pool_status_source: Callable[[], tuple[int, int] | None] | None = None
+        self.db_pool_checked_out = Gauge(
+            "kor_travel_map_db_pool_checked_out",
+            "API engine pool connections currently checked out (read at scrape).",
+            registry=self.registry,
+        )
+        self.db_pool_checked_out.set_function(lambda: self._db_pool_status_value(0))
+        self.db_pool_overflow = Gauge(
+            "kor_travel_map_db_pool_overflow",
+            "API engine pool overflow (negative while below pool_size; read at scrape).",
+            registry=self.registry,
+        )
+        self.db_pool_overflow.set_function(lambda: self._db_pool_status_value(1))
         self.app_info = Gauge(
             "kor_travel_map_app_info",
             "kor-travel-map application metadata.",
@@ -244,6 +284,23 @@ class PrometheusMetrics:
             status=status,
         ).observe(max(0.0, duration_seconds))
 
+    def observe_db_pool_wait(self, duration_seconds: float) -> None:
+        """Record one pool checkout wait (``TimedAsyncQueuePool._do_get``)."""
+        self.db_pool_wait_seconds.observe(max(0.0, duration_seconds))
+
+    def bind_db_pool_status(
+        self, source: Callable[[], tuple[int, int] | None] | None
+    ) -> None:
+        """Read ``(checked_out, overflow)`` from ``source`` at scrape time."""
+        self._db_pool_status_source = source
+
+    def _db_pool_status_value(self, index: int) -> float:
+        source = self._db_pool_status_source
+        status = source() if source is not None else None
+        if status is None:
+            return 0.0
+        return float(status[index])
+
     def response(self) -> Response:
         """Return the current registry in Prometheus exposition format."""
         return Response(
@@ -260,6 +317,11 @@ def _set_request_metric_labels(
 
 def _reset_request_metric_labels(token: Token[RequestMetricLabels | None]) -> None:
     _REQUEST_LABELS.reset(token)
+
+
+def route_template(request: Request) -> str:
+    """매칭된 route template(``/v1/features/{feature_id}``). 실제 URL·query는 내지 않는다."""
+    return _route_path(request)
 
 
 def _route_path(request: Request) -> str:

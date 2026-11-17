@@ -1,3 +1,7 @@
+## 2026-11-18 — T-READ-02 느린 요청 로그·pool 지표 머지
+
+- 다음 Map 회전(spec 불변)에 실린다. 배포 뒤 `docker logs`에서 `slow_request` 줄을 확인해 journal에 배포 generation과
+  함께 적으면 acceptance `T-READ-02`가 닫힌다. 운영 `/metrics` 켜기는 Manager `T-READ-MGR-03`.
 ## 2026-11-18 — T-READ-08 autovacuum 문턱(alembic 453) 머지
 
 - 다음 Map 회전에 453이 실린다(spec 불변). 배포 직후 `feature.features` autovacuum이 한 번 돈다(I/O 증가, 읽기·쓰기 차단

@@ -94,6 +94,7 @@ shadcn/ui generated source + `@kor-travel-map/map-marker-react` (ADR-029). 자�
 | `KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED` | unset | `/ops/*` 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | `true` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화 |
+| `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS` | `1000` | 요청 시간이 이 값(ms) 이상이면 route template·status·시간·DB 문장 수·DB 시간·pool 대기·request id를 WARNING 한 줄로 남긴다(지표 flag와 무관, query string·header·좌표 없음). `0`이면 끈다 |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | `/metrics` | Prometheus exposition path. API 포트 `12701`에서 노출되며 OpenAPI에는 포함하지 않음 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KOR_TRAVEL_MAP_API_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_NAME` | `__repository__` | offline upload load GraphQL launch selector의 repositoryName |

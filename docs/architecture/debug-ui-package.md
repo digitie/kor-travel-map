@@ -376,6 +376,7 @@ type drift 부채 0).
 | `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` | backend Dagster GraphQL 호출 host allowlist. 기본은 `["127.0.0.1","localhost","::1","dagster"]`이며, 운영 Dagster host를 별도로 쓰면 URL과 함께 명시한다 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_NAME` | offline upload load GraphQL launch selector의 repositoryName. 기본 `__repository__` |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_LOCATION_NAME` | offline upload load GraphQL launch selector의 repositoryLocationName. 기본 `kortravelmap.dagster.definitions` |
+| `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS` | 요청 시간이 이 값(ms) 이상이면 route template·status·시간·DB 문장 수·DB 시간·pool 대기·request id를 WARNING 한 줄로 남긴다(지표 flag와 무관, query string·header·좌표 없음). `0`이면 끈다. 기본 `1000` |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화. 기본 `true` |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | Prometheus exposition path. 기본 `/metrics`, API 포트 `12701`에서 노출하며 OpenAPI에는 포함하지 않는다 |
 | `KOR_TRAVEL_MAP_API_BACKUP_ROOT` | backup artifact root. 기본 `data/backups` |
