@@ -82,7 +82,7 @@ PinVi: `app/` = `apps/api/app/`.
 ### 2.4 측정 조건 — 이 수치는 조용한 호스트의 수치가 아니다
 
 2026-11-17 03:31~03:46Z(KST 12:31~12:46)에 쟀다. n150에서는 배포와 전체 e2e가 진행 중이었다
-(`/root/cat10.log`에 `CAT10_ALL_DONE` 0건). 그래서 n150에는 카탈로그 조회·`/proc` 읽기·PinVi의
+(그 e2e 묶음의 완료 표식이 아직 없었다). 그래서 n150에는 카탈로그 조회·`/proc` 읽기·PinVi의
 공개 `/metrics` 한 번·`/health` curl만 했다. `EXPLAIN ANALYZE`와 부하 시험은 하지 않았다. 04:32Z에 다시 봤을 때도 e2e는 끝나지 않았고 디스크 압력은
 더 높았다(PSI io `some` avg60 90%·avg300 85%, load 10) — 그래서 **조용한 호스트의 기준선은 리뷰 1회차
 뒤에도 재지 못했다**(`T-READ-01`).
@@ -119,7 +119,7 @@ Map Dagster(n150) ──▶ weather·transport /v1/service/exports/* (odroid) �
 
 - [실측] 운영 PinVi는 `PINVI_KOR_TRAVEL_MAP_TRANSPORT_ENABLED=true`,
   `PINVI_KOR_TRAVEL_MAP_WEATHER_ENABLED=true`다. Map 주소는 `http://127.0.0.1:12701`, weather 직접
-  주소는 `http://192.168.1.13:12201`이다.
+  주소는 `http://<prod-host-ip>:12201`이다.
 - [추론] PinVi에는 transport 직접 client가 없다 — 교통은 Map `/v1/service/transport/*`로만 읽는다
   (`PIN:app/api/v1/transport.py:3`). transport 저장소에는 Valkey도 `markers-near`도
   없다(`TRN:backend/pyproject.toml`에 redis·valkey 의존성 없음). "Valkey 반경 검색
@@ -333,8 +333,8 @@ PinVi `app.api_call_log`의 planner 통계(읽기 전용 카탈로그 조회, 20
 | 부하 | load 11.2·11.6·12.8(4코어), `vmstat` 4초: 실행 대기 11~27, user 85~88%·sys 12~15%, **idle 0%, iowait 0%** | `uptime`, `vmstat 1 4` |
 | CPU를 쓰는 쪽 | Dagster run 작업 프로세스(`multiprocessing.spawn`) 4개가 29~55%씩, daemon liveness-check, code server | `ps --sort=-pcpu` 한 번 |
 | 메모리 | 7,675 MB 중 free 70 MB·buff/cache 3,226 MB, swap 1,843 MB 사용 | `free -m` |
-| 저장소 | NVMe `/mnt/media` 938 GB 중 889 GB 사용, **남은 공간 1.9 GB**. PG 데이터가 여기 있다(`/mnt/media/kor-travel/pg/pgdata`). eMMC `/` 58 GB 중 11 GB 사용 | `df -h`, `docker inspect`(mount) |
-| weather artifact | docker volume → eMMC(`/var/lib/docker/volumes/…weather-export-artifacts`) | `docker inspect` |
+| 저장소 | NVMe 데이터 파일시스템 938 GB 중 889 GB 사용, **남은 공간 1.9 GB**. 공용 PG의 데이터 디렉터리가 여기 있다. 루트 eMMC는 58 GB 중 11 GB 사용 | `df -h`, `docker inspect`(mount) |
+| weather artifact | docker named volume — 루트 eMMC 위에 있다 | `docker inspect` |
 | 프로세스 | weather API uvicorn 1개 RSS 726 MB, transport backend uvicorn 1개 RSS 405 MB(compose 한도 512 MB — `TRN:docker-compose.shared.yml:216`) | `docker top` |
 | n150 → weather `/health` | 336 ms·133 ms·9 ms(TCP 연결 187·114·1.6 ms) | curl 3회 |
 | n150 → weather `/v1/weather/locations?limit=1` | 371 ms(`x-duration-ms` 176) | curl 1회 |
@@ -999,7 +999,7 @@ Map 적재는 schedule이 멈춰 있어도 큐에서 돈다. 절차는 Manager T
 
 F-10의 운영 작업이다. 2026-11-17에 소유자에게 전달됐다.
 
-- **변경**: `/mnt/media`(PG 데이터가 있는 파일시스템)의 사용처를 확인하고 PG가 쓸 여유를 만든다. 남은
+- **변경**: 공용 PG의 데이터 디렉터리가 있는 NVMe 파일시스템의 사용처를 확인하고 PG가 쓸 여유를 만든다. 남은
   공간 경보를 건다. weather artifact volume(eMMC)의 위치도 함께 정한다.
 - **의존**: 없음.
 - **배포 단위**: 운영(odroid, 소유자·Codex).
