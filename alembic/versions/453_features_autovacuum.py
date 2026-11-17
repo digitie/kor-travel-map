@@ -20,10 +20,11 @@ index-only scan이 heap을 다시 읽는다 — 지역 검색의 공개 행 수 
 잠금·시간. ``ALTER TABLE … SET (autovacuum_…)``은 catalog만 바꾸고 표를 다시 쓰지 않는다
 (relfilenode 불변). 잡는 잠금은 ``SHARE UPDATE EXCLUSIVE``라 읽기·쓰기(적재 포함)를 막지 않고
 VACUUM·ANALYZE·``CREATE INDEX CONCURRENTLY``와만 충돌한다. 그 표에 autovacuum이 돌고 있으면
-PostgreSQL이 ``deadlock_timeout``(기본 1초) 뒤 그 worker를 취소하므로 이 revision만
+PostgreSQL이 ``deadlock_timeout``(기본 1초) 뒤 그 worker를 취소하므로 이 ``ALTER``만
 ``lock_timeout``을 5초로 둔다(다른 revision의 1초로는 취소 전에 먼저 포기할 수 있다).
-수동 VACUUM·ANALYZE가 그 표에 돌고 있으면 5초 뒤 실패하고 배포가 멈춘다 — 다시 돌리면 된다.
-receipt 표 CHECK 교체는 ``ACCESS EXCLUSIVE``(작은 표)다. ``statement_timeout`` 30초.
+수동 VACUUM·ANALYZE나 **취소되지 않는 anti-wraparound autovacuum**이 그 표에 돌고 있으면 5초 뒤
+실패하고 배포가 멈춘다 — 그것이 끝난 뒤 다시 돌리면 된다. receipt 표 CHECK 교체는
+``ACCESS EXCLUSIVE``(작은 표)라 452와 같은 1초로 되돌린 뒤에 한다. ``statement_timeout`` 30초.
 
 배포 직후의 효과. 새 문턱으로는 dead가 이미 넘쳐 있을 가능성이 크므로 다음 autovacuum
 naptime(기본 1분) 안에 그 표의 VACUUM이 한 번 돈다 — heap 약 379 MB와 색인 18개 약 720 MB를
@@ -141,19 +142,15 @@ ALTER TABLE ops.application_schema_operation_receipts
 
 
 #: 실행 순서대로의 upgrade 문장. 창은 소유자 롤로 열고 같은 롤로 끝난다(452와 같다).
-_UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
-    "SET ROLE " + _SCHEMA_OWNER,
-    _SET_FEATURES_AUTOVACUUM_SQL,
-    _RECEIPT_HEAD_CHECK_SQL,
-    "SET ROLE " + _SCHEMA_OWNER,
+#: (문장, 그 문장 앞에 걸 lock_timeout 상한 ms). ALTER만 5초 — autovacuum 취소
+#: (deadlock_timeout 1초)를 기다린다. CHECK 교체(ACCESS EXCLUSIVE)는 452와 같은 1초.
+_UPGRADE_STATEMENTS: Final[tuple[tuple[str, int], ...]] = (
+    ("SET ROLE " + _SCHEMA_OWNER, 1000),
+    (_SET_FEATURES_AUTOVACUUM_SQL, 5000),
+    (_RECEIPT_HEAD_CHECK_SQL, 1000),
+    ("SET ROLE " + _SCHEMA_OWNER, 1000),
 )
-
-#: 이 revision의 잠금·문장 상한(ms). lock_timeout은 autovacuum 취소(deadlock_timeout 1초)를
-#: 기다릴 수 있게 5초다 — module docstring.
-_TIMEOUT_CAPS: Final[tuple[tuple[str, int], ...]] = (
-    ("lock_timeout", 5000),
-    ("statement_timeout", 30000),
-)
+_STATEMENT_TIMEOUT_CAP_MS: Final[int] = 30000
 
 
 def upgrade() -> None:
@@ -168,13 +165,17 @@ def upgrade() -> None:
             )
         ).all()
     }
-    for name, cap in _TIMEOUT_CAPS:
+
+    def cap(name: str, limit: int) -> None:
         prior = int(settings[name])
         bind.execute(
             text("SELECT set_config(:name,:value,true)"),
-            {"name": name, "value": str(min(prior, cap) if prior else cap)},
+            {"name": name, "value": str(min(prior, limit) if prior else limit)},
         )
-    for statement in _UPGRADE_STATEMENTS:
+
+    cap("statement_timeout", _STATEMENT_TIMEOUT_CAP_MS)
+    for statement, lock_limit in _UPGRADE_STATEMENTS:
+        cap("lock_timeout", lock_limit)
         bind.execute(text(statement))
     for name, value in settings.items():
         bind.execute(text("SELECT set_config(:name,:value,true)"), {"name": name, "value": value})

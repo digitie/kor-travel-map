@@ -7,8 +7,8 @@
 - alembic `453_features_autovacuum`: `ALTER TABLE feature.features SET (autovacuum_vacuum_scale_factor = 0.02,
   autovacuum_vacuum_insert_scale_factor = 0.05, autovacuum_analyze_scale_factor = 0.02)`(계획 제안값) + receipt head CHECK.
   forward-only, 마지막 문장 `SET ROLE ktm_feature_schema_owner`.
-- 배포 영향: catalog만 바꾼다(표 재작성 없음, relfilenode 불변 — 통합 시험). 잠금은 `SHARE UPDATE EXCLUSIVE`라 읽기·적재
-  쓰기를 막지 않는다. 그 표에 autovacuum이 돌고 있으면 PG가 `deadlock_timeout` 뒤 취소하므로 이 revision만 `lock_timeout`
+- 배포 영향: catalog만 바꾼다(표 재작성 없음 — autovacuum storage parameter는 PostgreSQL이 다시 쓰지 않는다). 잠금은 `SHARE UPDATE EXCLUSIVE`라 읽기·적재
+  쓰기를 막지 않는다. 그 표에 autovacuum이 돌고 있으면 PG가 `deadlock_timeout` 뒤 취소하므로 그 ALTER만 `lock_timeout`
   5초다(수동 VACUUM·ANALYZE 중이면 5초 뒤 실패 — 재시도). 배포 직후 새 문턱(dead 약 8.9천)을 넘어 있으므로 그 표의
   autovacuum이 한 번 돈다 — heap 약 379 MB·색인 약 720 MB를 비용 상한으로 천천히 훑는다. 그 동안 n150 디스크 I/O가 는다.
 - 배포는 이 PR에서 하지 않았다(Map 회전, spec 불변).
