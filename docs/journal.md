@@ -19,6 +19,12 @@
   두 파일에 그대로, 원장 223,003 → 211,173 bytes. 본문은 도구가 옮긴 그대로다.
 - weather·transport·PinVi·Manager `docs/tasks.md`에는 이 계획을 가리키는 한 줄을 둔다(각 저장소 브랜치
   `docs/read-performance-plan-20261117`).
+## 2026-11-17 — 관리자 프런트 공통 후보12 채택(ui 0.2.1·tokens 0.1.2·vworld-map-web 1.0.4)
+
+- kor-travel-common #57·#58(동결 `97f8ed98`)이 정책 정본을 올렸다. 공통 guard는 고정 ref와 무관하게 common **main**의 정책·정본을 읽으므로, 옛 산출물로는 guard가 실패한다.
+- `packages/kor-travel-map-admin/frontend/vendor`의 ui 0.2.0→0.2.1·tokens 0.1.1→0.1.2·vworld-map-web 1.0.3→1.0.4(Firefox·Safari 바탕지도 누락 수정, maplibre-vworld-react #33)·vworld-map-rn 1.0.1→1.0.2(사용하지 않는 원장 항목, 정본과 맞춤)를 바꿨다. `common-artifacts.json`은 중앙 원장 값으로 맞췄고, lock은 npm 12.0.1 lock-only로 해당 3항목만 갱신했다.
+- guard·common-ref는 `55a921b` 그대로 둔다. `97f8ed98`의 guard는 정확 Node/npm 도구 규칙(root `.nvmrc`=22.23.1, `engines.node` 정확값, common ADR-018)도 검사하는데 Map root는 범위(`^22.22.2 || ^24.15.0 || >=26.0.0`)를 선언하고 `.nvmrc`가 없어 실패한다(CI 실측). 그 이관은 engine-strict 아래 개발 Node를 22.23.1로 고정하는 별도 결정이다.
+- ui·tokens는 내장 정책만 바뀌어 화면·CSS 변화가 없다. `VWorldMapHandle` 구현이 없어 rn 1.0.2의 `paddingPx` 확장은 해당 없다.
 
 ## 2026-11-17 — 공개 월별 축제 bbox 필터(PinVi 추천 여행 주변 축제)
 
