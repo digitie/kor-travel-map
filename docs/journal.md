@@ -1,3 +1,18 @@
+## 2026-11-18 — T-READ-08: `feature.features` autovacuum 문턱(alembic 453)
+
+- 소유자 결정(2026-11-18, 계획 "소유자 결정" 절)에 따라 측정 없이 개선이 분명한 작업으로 진행했다. 근거는 이미 실측이다
+  (2026-11-17 §4.1·F-14 — 통계 창 동안 autovacuum 0회, dead 약 6.3만, all-visible 58%, reloptions 없음).
+  acceptance ①의 "설정 전" 수치는 그 실측으로 대신하고, ③(적재 24시간 뒤 all-visible 0.95·`Heap Fetches` 1% 미만)은
+  소유자가 잡을 측정 창에서 잰다 — 그때까지 이 작업은 열린 채다.
+- alembic `453_features_autovacuum`: `ALTER TABLE feature.features SET (autovacuum_vacuum_scale_factor = 0.02,
+  autovacuum_vacuum_insert_scale_factor = 0.05, autovacuum_analyze_scale_factor = 0.02)`(계획 제안값) + receipt head CHECK.
+  forward-only, 마지막 문장 `SET ROLE ktm_feature_schema_owner`.
+- 배포 영향: catalog만 바꾼다(표 재작성 없음, relfilenode 불변 — 통합 시험). 잠금은 `SHARE UPDATE EXCLUSIVE`라 읽기·적재
+  쓰기를 막지 않는다. 그 표에 autovacuum이 돌고 있으면 PG가 `deadlock_timeout` 뒤 취소하므로 이 revision만 `lock_timeout`
+  5초다(수동 VACUUM·ANALYZE 중이면 5초 뒤 실패 — 재시도). 배포 직후 새 문턱(dead 약 8.9천)을 넘어 있으므로 그 표의
+  autovacuum이 한 번 돈다 — heap 약 379 MB·색인 약 720 MB를 비용 상한으로 천천히 훑는다. 그 동안 n150 디스크 I/O가 는다.
+- 배포는 이 PR에서 하지 않았다(Map 회전, spec 불변).
+
 ## 2026-11-18 — 읽기 성능 계획: 소유자 결정 기록(문서 전용)
 
 - 소유자 결정 셋을 [계획](reports/2026-11-17-read-performance-plan.md) "소유자 결정 (2026-11-18)" 절에 적었다 — ① 코드만 보고도
