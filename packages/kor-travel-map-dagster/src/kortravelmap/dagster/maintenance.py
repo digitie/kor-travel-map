@@ -631,6 +631,31 @@ async def refresh_search_prominence_op(
     return metadata
 
 
+@op(
+    name="refresh_search_keys",
+    required_resource_keys={"kor_travel_map_client"},
+    retry_policy=MAINTENANCE_RETRY_POLICY,
+)
+async def refresh_search_keys_op(
+    context: OpExecutionContext,
+    prominence_refresh: dict[str, object],
+) -> dict[str, object]:
+    """검색 인지도 갱신 뒤 검색 비교 키(``feature.feature_search_keys``)를 채운다(T-READ-06).
+
+    키가 없거나 맞지 않는(새·이름이 바뀐·키 식이 바뀐) 공개 Feature만 계산해 쓰고, 공개가 아닌
+    Feature의 키는 지운다. 표가 묵어도 검색 순위는 같다(느릴 뿐이다). 앞 op 결과는 순서만 잇는다.
+    """
+    del prominence_refresh
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    result = await client.refresh_search_keys()
+    metadata: dict[str, object] = {
+        "written": result.written,
+        "deleted": result.deleted,
+    }
+    context.add_output_metadata(metadata)
+    return metadata
+
+
 NOTICE_PURGE_DEFAULT_RETENTION: Final[str] = "1 year"
 """만료 notice 보존 기간 — 종료일(없으면 발표일) + 본 기간 경과 시 soft-delete(§9)."""
 
@@ -905,15 +930,17 @@ async def drain_expired_cache_target_snapshots_op(
     name="consistency_dedup_refresh",
     tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
     description=(
-        "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고 검색 인지도를 "
-        "다시 계산하며, 보존 기간이 지난 notice와 resolved integrity finding을 정리한다."
+        "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고 검색 인지도와 "
+        "검색 비교 키를 다시 계산하며, 보존 기간이 지난 notice와 resolved integrity finding을 "
+        "정리한다."
     ),
 )
 def consistency_dedup_refresh_job() -> None:
     """운영자가 Dagster UI/API에서 실행하는 consistency/dedup refresh job."""
     dedup_refresh = refresh_dedup_candidates_op()
     run_consistency_check_op(dedup_refresh)
-    refresh_search_prominence_op(dedup_refresh)
+    prominence_refresh = refresh_search_prominence_op(dedup_refresh)
+    refresh_search_keys_op(prominence_refresh)
     purge_expired_notices_op()
     purge_resolved_integrity_findings_op()
 

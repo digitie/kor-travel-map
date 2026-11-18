@@ -2194,9 +2194,9 @@ if not _SEARCH_DEDUP_DEMOTED_PROVIDER.replace("-", "").isalnum():  # pragma: no 
     raise RuntimeError("demoted provider must be a plain SQL literal")
 
 #: 미리 계산하는 검색 비교 키(T-READ-06) — ``feature.feature_search_keys``의 열과 그 식. 식은 검색
-#: 질의가 키가 없을 때 쓰는 식과 **같은 문자열**이다(아래 ``_feature_search_score_cte``가 같은 함수로
-#: 만든다). 입력은 Feature의 ``name``·``category``뿐이다 — 보이는 이름(``display_name``)과 분류
-#: 그룹(``category_search_group``)도 그 둘에서 나온다.
+#: 질의가 키가 없을 때 쓰는 식과 **같은 문자열**이다(아래 ``_feature_search_score_cte``가 같은
+#: 함수로 만든다). 입력은 Feature의 ``name``·``category``뿐이다 — 보이는 이름
+#: (``display_name``)과 분류 그룹(``category_search_group``)도 그 둘에서 나온다.
 def _search_key_column_sqls() -> tuple[tuple[str, str], ...]:
     """``(열 이름, 식)`` — 식은 ``name``·``category``·``display_name``·``compact_name``·
     ``category_search_group`` 열을 읽는다(``search_group``만 ``compact_name``을 읽는다)."""
@@ -2215,7 +2215,7 @@ def _search_key_column_sqls() -> tuple[tuple[str, str], ...]:
 
 
 def _search_keys_select_sql(source: str) -> str:
-    """``source``(``feature_id``·``name``·``category``가 있는 관계) 행마다 비교 키를 계산하는 SELECT.
+    """``source``(``feature_id``·``name``·``category``가 있는 관계)의 행마다 비교 키를 계산한다.
 
     ``feature.feature_search_keys``를 채우는 refresh(``infra.search_keys_repo``)가 쓴다. 단계는
     검색 질의와 같다 — 보이는 이름 → 비교 키 → 실효 검색 그룹.

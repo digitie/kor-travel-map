@@ -290,6 +290,10 @@ from kortravelmap.infra.price_repo import (
     load_price_values as repo_load_price_values,
 )
 from kortravelmap.infra.provider_field_candidates import arm_provider_field_shadow
+from kortravelmap.infra.search_keys_repo import (
+    SearchKeysRefreshResult,
+    refresh_search_keys,
+)
 from kortravelmap.infra.search_prominence_repo import (
     SearchProminenceRefreshResult,
     refresh_search_prominence,
@@ -1782,6 +1786,16 @@ class AsyncKorTravelMapClient:
         """
         async with self._session_factory() as session, session.begin():
             return await refresh_search_prominence(session)
+
+    async def refresh_search_keys(self) -> SearchKeysRefreshResult:
+        """키가 없거나 맞지 않는 공개 Feature의 검색 비교 키를 계산해 쓴다. 한 transaction.
+
+        ``feature.feature_search_keys``만 쓴다(Feature 표는 읽기만). maintenance job
+        ``consistency_dedup_refresh``가 검색 인지도 갱신 뒤에 부른다(T-READ-06). 표가 묵어도 검색
+        순위는 같다 — 맞지 않는 행은 검색이 식으로 계산한다.
+        """
+        async with self._session_factory() as session, session.begin():
+            return await refresh_search_keys(session)
 
     async def load_enrichment_links(
         self, enrichments: Iterable[tuple[SourceRecord, SourceLink]]

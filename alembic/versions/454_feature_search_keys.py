@@ -11,16 +11,17 @@ Revises: 453_features_autovacuum
 무엇을 하는가.
 
 - ``feature.feature_search_keys(feature_id PK, keys_version, name, category, compact_* 여섯,
-  search_group, computed_at)``. 소유자 ``ktm_feature_schema_owner``. 런타임 권한(SELECT·INSERT·UPDATE·
-  DELETE)은 배포 조정기(``infra/runtime_privileges.py``)가 건다. ``feature.features`` FK·트리거는
-  두지 않는다 — Feature 쓰기 경로(적재·관리 편집)와 잠금·쓰기 비용을 엮지 않는다. 색인은 PK 하나다.
-- 검색은 ``keys_version``(키 식의 지문)·``name``·``category``가 지금 행과 **모두 같을 때만** 저장 키를
-  쓰고, 아니면 종전 식으로 계산한다. 그래서 표가 비었거나 묵어도(새 행·이름이 바뀐 행·키 식이 바뀐
-  배포) 순위는 이 revision 전과 같다 — 빨라지지 않을 뿐이다.
+  search_group, computed_at)``. 소유자 ``ktm_feature_schema_owner``. 런타임 권한
+  (SELECT·INSERT·UPDATE·DELETE)은 배포 조정기(``infra/runtime_privileges.py``)가 건다.
+  ``feature.features`` FK·트리거는 두지 않는다 — Feature 쓰기 경로(적재·관리 편집)와
+  잠금·쓰기 비용을 엮지 않는다. 색인은 PK 하나다.
+- 검색은 ``keys_version``(키 식의 지문)·``name``·``category``가 지금 행과 **모두 같을 때만**
+  저장 키를 쓰고, 아니면 종전 식으로 계산한다. 그래서 표가 비었거나 묵어도(새 행·이름이
+  바뀐 행·키 식이 바뀐 배포) 순위는 이 revision 전과 같다 — 빨라지지 않을 뿐이다.
 - receipt head CHECK에 이 revision을 더한다.
 
-기존 행 채우기(backfill) — **이 migration은 표만 만든다.** 계산은 공개 Feature 전부(prod 약 42만 행)의
-정규화라 migration ``statement_timeout``(30초) 안에 끝난다고 보장할 수 없다.
+기존 행 채우기(backfill) — **이 migration은 표만 만든다.** 계산은 공개 Feature 전부(prod 약 42만
+행)의 정규화라 migration ``statement_timeout``(30초) 안에 끝난다고 보장할 수 없다.
 
 1. 배포 직후: 표가 비어 있으므로 검색은 종전 식으로 계산한다(안전한 퇴화, 속도도 종전과 같다).
 2. 채우기: Dagster ``consistency_dedup_refresh`` job(매일 05:45 KST)의 ``refresh_search_keys`` op가

@@ -1975,6 +1975,40 @@ class FeatureSearchProminenceRow(Base):
     )
 
 
+class FeatureSearchKeysRow(Base):
+    """``feature.feature_search_keys`` — 미리 계산한 검색 비교 키(migration 454, T-READ-06).
+
+    공개 Feature마다 보이는 이름의 비교 키 여섯과 실효 검색 그룹. 검색은 ``keys_version``(키 식의
+    지문)·``name``·``category``가 지금 행·지금 코드와 같을 때만 이 값을 쓰고 아니면 식으로 계산한다.
+    채우기는 ``infra.search_keys_repo.refresh_search_keys``(maintenance job). ``feature.features``
+    FK는 두지 않는다(Feature 쓰기 경로와 잠금을 엮지 않는다).
+    """
+
+    __tablename__ = "feature_search_keys"
+    __table_args__ = (
+        CheckConstraint(
+            "search_group BETWEEN 0 AND 9",
+            name=conv("ck_feature_search_keys_group"),
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    keys_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    category: Mapped[str] = mapped_column(Text, nullable=False)
+    compact_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compact_raw_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compact_tail: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compact_base_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compact_paren_base_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    compact_bracket_name: Mapped[str | None] = mapped_column(Text, nullable=True)
+    search_group: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=text("now()")
+    )
+
+
 class PlaceAttributeRow(Base):
     """``feature.place_attributes`` — 공개 장소 속성 catalog(ADR-121, migration 446).
 

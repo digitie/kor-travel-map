@@ -291,6 +291,7 @@ def _constant_normalization_variant(sql: str) -> str:
     """``compacted``·``hits``의 정규화 식을 값싼 식으로 바꾼 검색 SQL(harness 전용).
 
     비교 키(``compact_*``)는 정규화하지 않은 원래 열(괄호 변형은 NULL), 분류 그룹은 상수 0이다.
+    미리 계산한 키 표(T-READ-06)의 결합도 뺀다 — 변형은 "키 비용 0"의 하한이다.
     원래 열을 쓰는 이유: 키가 모두 같은 상수면 뒤의 접기(``ST_ClusterDBSCAN`` partition)가 후보
     전부를 한 무리로 묶어 비용이 오히려 바뀐다. ``hits``의 지역 일치 열(``region_hit``)은 그대로
     둔다. 모양이 예상과 다르면(운영 SQL이 바뀌면) 추측하지 않고 실패한다.
@@ -320,7 +321,8 @@ compacted AS (
         CAST(NULL AS text) AS compact_base_name,
         CAST(NULL AS text) AS compact_paren_base_name,
         CAST(NULL AS text) AS compact_bracket_name,
-        0 AS category_search_group
+        0 AS category_search_group,
+        CAST(NULL AS smallint) AS stored_search_group
     FROM filtered
 ),
 hits AS (
