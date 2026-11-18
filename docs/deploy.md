@@ -67,6 +67,17 @@ Prometheus 성능 메트릭은 별도 포트를 열지 않고 `api`의 같은 ho
 `GET /metrics`로 노출한다. 이 endpoint는 공개 REST(`/v1/features`·`/v1/categories`·
 `/v1/providers`·`/v1/public`), `/admin`, `/ops`, `/debug`, system route의 HTTP 요청
 수/지연 시간/응답 크기/예외와 DB query 수/지연 시간을 함께 제공한다.
+pool 체크아웃 대기 histogram(`kor_travel_map_db_pool_wait_seconds`)과 사용 중 연결·overflow
+gauge(`kor_travel_map_db_pool_checked_out`·`_overflow`, scrape 때 읽는다)도 같은 endpoint다(T-READ-02).
+
+**느린 요청 로그는 지표와 별개다**(T-READ-02). `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS`(기본 `1000`)
+이상 걸린 요청마다 logger `kortravelmap.api.slow_request`가 WARNING 한 줄을 남긴다 —
+`slow_request method=… route=<route template> status=… duration_ms=… db_statements=… db_ms=…
+pool_waits=… pool_wait_ms=… request_id=…`. query string·header 값·좌표는 쓰지 않는다. 운영 값은
+기본 `1000`을 그대로 쓴다(compose에 따로 둘 필요가 없다). 로그가 너무 많으면 문턱을 올리고, `0`은
+끈다. 운영에서 `/metrics`를 켜는 것(token 포함)은 Manager `T-READ-MGR-03`, 긁는 것은
+`T-READ-MGR-02`다.
+
 `kor-travel-docker-manager` 관측 스택은 Grafana `12205`, cAdvisor Exporter
 `12301`, Prometheus `12401`을 사용한다. 앱은 Prometheus로 능동 연결하지 않고
 pull scrape 대상이 된다.

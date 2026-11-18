@@ -1,3 +1,8 @@
+## 2026-11-18 — T-READ-02 느린 요청 로그·pool 지표 머지
+
+- 다음 Map 회전(spec 불변)에 실린다. 배포 뒤 `docker logs`에서 `slow_request` 줄을 확인해 journal에 배포 generation과
+  함께 적으면 acceptance `T-READ-02`가 닫힌다. 운영 `/metrics` 켜기는 Manager `T-READ-MGR-03`.
+
 ## 2026-11-18 — T-READ-08 autovacuum 문턱(alembic 453) 머지
 
 - 다음 Map 회전에 453이 실린다(spec 불변). 배포 직후 `feature.features` autovacuum이 한 번 돈다(I/O 증가, 읽기·쓰기 차단
@@ -28,6 +33,7 @@
   pair 회전. `T-READ-05`~`07`은 `T-READ-01` 보고서 뒤.
 - 소유자 확인이 필요한 것: odroid NVMe 남은 공간 1.9 GB(`T-READ-MGR-05`, 전달됨), 조용한 창과 공용 PG 재생성 창,
   `T-READ-06`의 묵은 순위 키 허용 여부.
+
 ## 2026-11-17 — 관리자 프런트 공통 후보12 채택
 
 ui 0.2.1·tokens 0.1.2·vworld-map-web 1.0.4 vendor(PR agent/common-candidate-12, guard ref는 `55a921b` 유지). 다음: 배포 뒤 관리자 지도 바탕 타일 Firefox 확인. 소유자 결정 대기 — 공통 정확 Node/npm 규칙(`.nvmrc`·`engines.node` 22.23.1) 채택 여부(채택해야 guard ref를 올릴 수 있다).

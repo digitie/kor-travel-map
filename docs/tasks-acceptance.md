@@ -2752,12 +2752,13 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] 미들웨어가 요청 도착 시각을 `request.state.started_monotonic`에 적는다(시험).
-- [ ] 지표 flag가 꺼져 있어도 요청 시간이 문턱(기본 1초) 이상이면 route template·status·시간·DB 문장 수·DB 시간 합·
+- [x] 미들웨어가 요청 도착 시각을 `request.state.started_monotonic`에 적는다(시험).
+- [x] 지표 flag가 꺼져 있어도 요청 시간이 문턱(기본 1초) 이상이면 route template·status·시간·DB 문장 수·DB 시간 합·
   request id가 한 줄로 남는다(주입한 느린 질의로 시험). 그 줄에 query string·header 값·좌표가 없다.
-- [ ] `/metrics`에 pool 대기 histogram(pool의 `_do_get` 시간)과 사용 중 연결 gauge가 나온다. 세션 의존성은 연결을 미리
+- [x] `/metrics`에 pool 대기 histogram(pool의 `_do_get` 시간)과 사용 중 연결 gauge가 나온다. 세션 의존성은 연결을 미리
   꺼내지 않는다 — pool 크기 1에서 인증 세션과 읽기 세션이 차례로 동작하는 시험이 통과한다.
-- [ ] 기본 설정에서 요청당 추가 DB 왕복이 0이다(문장 수 시험). OpenAPI 세 파일이 바뀌지 않았다.
+- [x] 기본 설정에서 요청당 추가 DB 왕복이 0이다(문장 수 시험). OpenAPI 세 파일이 바뀌지 않았다.
+  — 2026-11-18: `packages/kor-travel-map-api/tests/test_request_timing.py`, `tests/integration/test_api_request_timing.py`.
 - [ ] 배포 뒤 운영 로그에서 1초 넘는 요청 줄을 확인해 journal에 배포 generation과 함께 적었다.
 
 ## T-READ-03

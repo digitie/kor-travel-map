@@ -474,6 +474,15 @@ class ApiSettings(BaseSettings):
             "True면 모든 API 호출을 ops.api_call_log에 best-effort 기록(opt-in, 기본 off)."
         ),
     )
+    slow_request_log_ms: int = Field(
+        default=1000,
+        ge=0,
+        description=(
+            "요청 시간이 이 값(ms) 이상이면 route template·status·시간·DB 문장 수·DB 시간·"
+            "pool 대기·request id를 WARNING 한 줄로 남긴다(T-READ-02). 지표 flag와 무관하다. "
+            "0이면 끈다. env ``KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS``."
+        ),
+    )
     prometheus_metrics_enabled: bool = Field(
         default=True,
         description=(
