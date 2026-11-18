@@ -1684,6 +1684,28 @@ ORDER BY candidate.feature_id ASC
 # 대표점이 bbox 밖에 찍힐 수 있고, ``ST_CoveredBy``는 같은 판정에 GEOS relate를 불러
 # 전국 5.4만 건에서 0.4 s를 더 썼다(prod 실측). 요청 kind에 route/area가 없으면
 # geometry arm 자체를 싣지 않고, 한쪽만 있으면 다른 subtype 표는 kind 가드로 건너뛴다.
+#
+# T-READ-10 — route geometry의 포함 판정 범위와 대표점은 요청마다 계산하지 않는다.
+# ``feature_route_geometries``의 STORED 생성 컬럼(alembic 454: ``geom_xmin``…``geom_ymax`` =
+# ``ST_XMin(geom)``…, ``marker_point`` = ``ST_PointOnSurface(geom)``)이 종전 식과 같은 값을
+# 들고 있다. 그래서 bbox 안에 완전히 든 route는 geometry를 풀지 않는다 — 포함이면 교차가
+# 자명하므로(비어 있지 않은 geometry의 모든 점이 범위 안이고, 범위가 bbox 안이다)
+# ``ST_Intersects``도 건너뛴다. 빈 geometry는 범위가 NULL이라 포함이 아니고, 종전처럼
+# ``ST_Intersects``(거짓)로 간다. bbox를 가로지르는 route만 종전 식(교차·교차 부분 위의 점)을
+# 계산한다. area는 생성 컬럼이 없다(prod 422행 — 요청 때 계산해도 작고, area 행은 큐레이션
+# 입력 해시가 ``to_jsonb``로 통째 읽어 열을 더하면 해시가 바뀐다). area 갈래는 같은 식을
+# 그 자리에서 계산해 같은 열 모양으로 낸다. 결과(개수·대표점)는 종전 SQL과 같다 —
+# ``tests/integration/test_cluster_rollup_equivalence.py``가 종전 SQL 사본과 비교한다.
+def _geometry_inside_bbox_sql(alias: str) -> str:
+    """``alias``의 정확 범위 열(``geom_xmin``…)이 요청 bbox 안에 있는가(T-READ-10)."""
+    if not alias.isidentifier():
+        raise ValueError("alias must be a SQL identifier")
+    return f"""{alias}.geom_xmin >= CAST(:min_lon AS double precision)
+          AND {alias}.geom_xmax <= CAST(:max_lon AS double precision)
+          AND {alias}.geom_ymin >= CAST(:min_lat AS double precision)
+          AND {alias}.geom_ymax <= CAST(:max_lat AS double precision)"""
+
+
 def _cluster_bbox_sql(code_col: str, *, include_geometry_arm: bool = True) -> str:
     env = _bbox_envelope_sql()
     point_arm = f"""
@@ -1717,24 +1739,38 @@ WITH geometry_candidates AS MATERIALIZED (
   SELECT
       f.{code_col} AS cluster_key,
       CASE
-        WHEN x_extension.ST_XMin(bbox_hit.geom) >= CAST(:min_lon AS double precision)
-          AND x_extension.ST_XMax(bbox_hit.geom) <= CAST(:max_lon AS double precision)
-          AND x_extension.ST_YMin(bbox_hit.geom) >= CAST(:min_lat AS double precision)
-          AND x_extension.ST_YMax(bbox_hit.geom) <= CAST(:max_lat AS double precision)
-          THEN x_extension.ST_PointOnSurface(bbox_hit.geom)
+        WHEN {_geometry_inside_bbox_sql("bbox_hit")}
+          THEN COALESCE(bbox_hit.marker_point, x_extension.ST_PointOnSurface(bbox_hit.geom))
         ELSE x_extension.ST_PointOnSurface(
           x_extension.ST_Intersection(bbox_hit.geom, {env})
         )
       END AS marker_coord
   FROM (
-    SELECT bbox_hit_route.feature_id, bbox_hit_route.geom
+    SELECT
+        bbox_hit_route.feature_id,
+        bbox_hit_route.geom,
+        bbox_hit_route.marker_point,
+        bbox_hit_route.geom_xmin,
+        bbox_hit_route.geom_xmax,
+        bbox_hit_route.geom_ymin,
+        bbox_hit_route.geom_ymax
     FROM feature.feature_route_geometries AS bbox_hit_route
     WHERE (CAST(:kinds AS text[]) IS NULL OR 'route' = ANY(CAST(:kinds AS text[])))
       AND bbox_hit_route.public_ready
       AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
-      AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})
+      AND (
+        ({_geometry_inside_bbox_sql("bbox_hit_route")})
+        OR x_extension.ST_Intersects(bbox_hit_route.geom, {env})
+      )
     UNION ALL
-    SELECT bbox_hit_area.feature_id, bbox_hit_area.geom
+    SELECT
+        bbox_hit_area.feature_id,
+        bbox_hit_area.geom,
+        NULL,
+        x_extension.ST_XMin(bbox_hit_area.geom),
+        x_extension.ST_XMax(bbox_hit_area.geom),
+        x_extension.ST_YMin(bbox_hit_area.geom),
+        x_extension.ST_YMax(bbox_hit_area.geom)
     FROM feature.feature_areas AS bbox_hit_area
     WHERE (CAST(:kinds AS text[]) IS NULL OR 'area' = ANY(CAST(:kinds AS text[])))
       AND bbox_hit_area.public_ready
