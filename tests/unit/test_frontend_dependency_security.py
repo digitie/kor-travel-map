@@ -5,6 +5,8 @@ from __future__ import annotations
 import copy
 import json
 import re
+import shutil
+import subprocess
 from pathlib import Path
 from typing import Any
 
@@ -132,6 +134,15 @@ def test_frontend_security_versions_and_overrides_are_locked() -> None:
         for name, command in root_package["scripts"].items()
         if name.startswith("audit:")
     )
+    # 2026-11-18 한시 예외(docs/dev-environment.md §10.6): CI의 dev 포함 스텝은
+    # `audit:dev:known`으로 돈다. 그 예외는 advisory 하나(GHSA-fc5q-39xc-vjpf, picomatch
+    # ReDoS, 패치 없음, dev 도구 전용)에만 묶인다. 목록이 늘거나 이 단언을 지우는 것은
+    # 같은 절에 원인·범위·다시 조일 조건을 적은 리뷰를 거친다. 패치된 picomatch를
+    # 소비하면 스텝을 `audit:dev`로 되돌리고 이 예외 블록 전체를 지운다.
+    assert root_package["scripts"]["audit:dev:known"] == (
+        "node scripts/audit-dev-known-advisories.mjs"
+    )
+    assert _known_dev_advisories() == {"GHSA-fc5q-39xc-vjpf"}
     assert root_package["allowScripts"] == {
         "esbuild@0.28.2": True,
         "unrs-resolver@1.12.2": True,
@@ -327,6 +338,55 @@ def test_frontend_owns_every_named_shadcn_css_token_it_uses() -> None:
         "no-scrollbar",
     ):
         assert removed_token not in source
+
+
+def _known_dev_advisories() -> set[str]:
+    source = (ROOT / "scripts" / "audit-dev-known-advisories.mjs").read_text(
+        encoding="utf-8"
+    )
+    block = re.search(
+        r"KNOWN_DEV_ONLY_ADVISORIES = \{(.*?)\n\};", source, re.DOTALL
+    )
+    assert block is not None, "완화 목록을 찾지 못했다"
+    return set(re.findall(r'"(GHSA-[0-9a-z-]+)":', block.group(1)))
+
+
+def _run_known_dev_gate(tmp_path: Path, report: dict[str, Any]) -> int:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("node가 없다")
+    target = tmp_path / "audit.json"
+    target.write_text(json.dumps(report), encoding="utf-8")
+    return subprocess.run(
+        [node, str(ROOT / "scripts" / "audit-dev-known-advisories.mjs"), "--input", str(target)],
+        check=False,
+        capture_output=True,
+    ).returncode
+
+
+def _advisory(ghsa: str, severity: str) -> dict[str, Any]:
+    return {"source": 1, "url": f"https://github.com/advisories/{ghsa}", "severity": severity}
+
+
+@pytest.mark.unit
+def test_known_dev_gate_passes_only_the_listed_advisory(tmp_path: Path) -> None:
+    known = {
+        "vulnerabilities": {
+            "picomatch": {"via": [_advisory("GHSA-fc5q-39xc-vjpf", "high")]},
+            "vite": {"via": ["picomatch"]},
+            "minimatch": {"via": [_advisory("GHSA-g3hv-75wg-m249", "moderate")]},
+        }
+    }
+    assert _run_known_dev_gate(tmp_path, known) == 0
+    # 일부러 빨갛게: 목록 밖 high·critical advisory는 지금도 막는다.
+    for severity in ("high", "critical"):
+        other = copy.deepcopy(known)
+        other["vulnerabilities"]["vite"]["via"].append(
+            _advisory("GHSA-aaaa-bbbb-cccc", severity)
+        )
+        assert _run_known_dev_gate(tmp_path, other) == 1
+    # 읽을 수 없는 결과(npm 오류)는 통과가 아니다.
+    assert _run_known_dev_gate(tmp_path, {"error": {"code": "ENOAUDIT"}}) == 1
 
 
 def _managed_fixture() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
