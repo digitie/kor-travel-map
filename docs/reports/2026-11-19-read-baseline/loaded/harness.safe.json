@@ -1,0 +1,307 @@
+{
+  "mode": "existing",
+  "requested_seed_rows": null,
+  "iterations": 30,
+  "viewports": [
+    {
+      "name": "서울 밀집 in-bounds",
+      "matched_rows": 39685,
+      "returned_rows": 200,
+      "minimum_returned_rows": 1,
+      "p50_ms": 39.73,
+      "p95_ms": 58.73,
+      "max_ms": 72.57,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 61163,
+      "top_node": "Merge Join"
+    },
+    {
+      "name": "전국 low-zoom cluster(sido)",
+      "matched_rows": 18,
+      "returned_rows": 18,
+      "minimum_returned_rows": 1,
+      "p50_ms": 372.79,
+      "p95_ms": 448.07,
+      "max_ms": 515.22,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 1627,
+      "top_node": "Limit"
+    },
+    {
+      "name": "전국 low-zoom cluster(sido, 전 kind)",
+      "matched_rows": 18,
+      "returned_rows": 18,
+      "minimum_returned_rows": 1,
+      "p50_ms": 1258.03,
+      "p95_ms": 1369.95,
+      "max_ms": 1397.19,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 1636,
+      "top_node": "Limit"
+    },
+    {
+      "name": "100km nearby",
+      "matched_rows": 201401,
+      "returned_rows": 51,
+      "minimum_returned_rows": 1,
+      "p50_ms": 5515.63,
+      "p95_ms": 7572.05,
+      "max_ms": 8638.74,
+      "shared_read_blocks_p95": 52999,
+      "response_bytes": 21128,
+      "top_node": "Limit"
+    },
+    {
+      "name": "상용 검색어 search",
+      "matched_rows": 1448,
+      "returned_rows": 51,
+      "minimum_returned_rows": 1,
+      "p50_ms": 129.7,
+      "p95_ms": 155.83,
+      "max_ms": 163.86,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 17122,
+      "top_node": "Limit"
+    },
+    {
+      "name": "200건 batch",
+      "matched_rows": 200,
+      "returned_rows": 200,
+      "minimum_returned_rows": 200,
+      "p50_ms": 2.86,
+      "p95_ms": 3.61,
+      "max_ms": 3.81,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 282261,
+      "top_node": "Nested Loop"
+    },
+    {
+      "name": "지역 검색(좁은 지역) 부산 맛집",
+      "matched_rows": 2188,
+      "returned_rows": 51,
+      "minimum_returned_rows": 0,
+      "p50_ms": 424.3,
+      "p95_ms": 537.42,
+      "max_ms": 553.24,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 18310,
+      "top_node": "Limit"
+    },
+    {
+      "name": "지역 검색(넓은 지역) 서울 맛집",
+      "matched_rows": 810,
+      "returned_rows": 51,
+      "minimum_returned_rows": 0,
+      "p50_ms": 156.44,
+      "p95_ms": 240.79,
+      "max_ms": 322.1,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 17772,
+      "top_node": "Limit"
+    },
+    {
+      "name": "수도권 시군구 집계(zoom 10)",
+      "matched_rows": 71,
+      "returned_rows": 71,
+      "minimum_returned_rows": 1,
+      "p50_ms": 260.67,
+      "p95_ms": 326.99,
+      "max_ms": 471.37,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 6564,
+      "top_node": "Limit"
+    },
+    {
+      "name": "서울시청 읍면동 집계(zoom 12, PinVi 기본 화면)",
+      "matched_rows": 593,
+      "returned_rows": 500,
+      "minimum_returned_rows": 1,
+      "p50_ms": 318.86,
+      "p95_ms": 367.78,
+      "max_ms": 368.07,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 48342,
+      "top_node": "Limit"
+    },
+    {
+      "name": "서울시청 읍면동 집계(zoom 13)",
+      "matched_rows": 384,
+      "returned_rows": 384,
+      "minimum_returned_rows": 1,
+      "p50_ms": 217.6,
+      "p95_ms": 248.98,
+      "max_ms": 318.6,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 37034,
+      "top_node": "Limit"
+    },
+    {
+      "name": "서울 개별 행 500건(zoom 14)",
+      "matched_rows": 31721,
+      "returned_rows": 500,
+      "minimum_returned_rows": 1,
+      "p50_ms": 161.82,
+      "p95_ms": 194.84,
+      "max_ms": 210.1,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 152927,
+      "top_node": "Merge Join"
+    },
+    {
+      "name": "상세 1건",
+      "matched_rows": 1,
+      "returned_rows": 1,
+      "minimum_returned_rows": 1,
+      "p50_ms": 0.15,
+      "p95_ms": 0.22,
+      "max_ms": 0.3,
+      "shared_read_blocks_p95": 0,
+      "response_bytes": 1289,
+      "top_node": "Nested Loop"
+    }
+  ],
+  "public_feature_rows": 419526,
+  "batch_candidate_rows": 409294,
+  "region_search": [
+    {
+      "name": "지역 검색(좁은 지역) 부산 맛집",
+      "q": "부산 맛집",
+      "region_resolved": true,
+      "region_code_count": 16,
+      "arms": {
+        "name_mode": "strpos",
+        "categories": true,
+        "token_mode": null
+      },
+      "preprocessing": [
+        {
+          "name": "지역 검색(좁은 지역) 부산 맛집 전처리: 별칭 조회",
+          "matched_rows": 0,
+          "returned_rows": 0,
+          "minimum_returned_rows": 0,
+          "p50_ms": 0.03,
+          "p95_ms": 0.04,
+          "max_ms": 0.04,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 0,
+          "top_node": "Index Scan"
+        },
+        {
+          "name": "지역 검색(좁은 지역) 부산 맛집 전처리: 지역 표본",
+          "matched_rows": 2284,
+          "returned_rows": 2284,
+          "minimum_returned_rows": 0,
+          "p50_ms": 8.97,
+          "p95_ms": 10.31,
+          "max_ms": 14.21,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 187480,
+          "top_node": "Nested Loop"
+        },
+        {
+          "name": "지역 검색(좁은 지역) 부산 맛집 전처리: 지역 행 수",
+          "matched_rows": 1,
+          "returned_rows": 1,
+          "minimum_returned_rows": 1,
+          "p50_ms": 1.87,
+          "p95_ms": 2.15,
+          "max_ms": 3.37,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 21,
+          "top_node": "Aggregate"
+        }
+      ],
+      "preprocessing_p50_sum_ms": 10.87,
+      "name_normalization": {
+        "same_row_counts": false,
+        "full_p50_ms": 424.3,
+        "constant_variant_p50_ms": 265.96,
+        "share": 0.3732,
+        "constant_variant": {
+          "name": "지역 검색(좁은 지역) 부산 맛집 (정규화 식 상수화 변형)",
+          "matched_rows": 2193,
+          "returned_rows": 51,
+          "minimum_returned_rows": 0,
+          "p50_ms": 265.96,
+          "p95_ms": 334.25,
+          "max_ms": 346.24,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 18310,
+          "top_node": "Limit"
+        }
+      }
+    },
+    {
+      "name": "지역 검색(넓은 지역) 서울 맛집",
+      "q": "서울 맛집",
+      "region_resolved": true,
+      "region_code_count": 25,
+      "arms": {
+        "name_mode": null,
+        "categories": false,
+        "token_mode": null
+      },
+      "preprocessing": [
+        {
+          "name": "지역 검색(넓은 지역) 서울 맛집 전처리: 별칭 조회",
+          "matched_rows": 0,
+          "returned_rows": 0,
+          "minimum_returned_rows": 0,
+          "p50_ms": 0.03,
+          "p95_ms": 0.05,
+          "max_ms": 0.05,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 0,
+          "top_node": "Index Scan"
+        },
+        {
+          "name": "지역 검색(넓은 지역) 서울 맛집 전처리: 지역 표본",
+          "matched_rows": 2284,
+          "returned_rows": 2284,
+          "minimum_returned_rows": 0,
+          "p50_ms": 9.36,
+          "p95_ms": 13.58,
+          "max_ms": 15.07,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 187480,
+          "top_node": "Nested Loop"
+        },
+        {
+          "name": "지역 검색(넓은 지역) 서울 맛집 전처리: 지역 행 수",
+          "matched_rows": 1,
+          "returned_rows": 1,
+          "minimum_returned_rows": 1,
+          "p50_ms": 14.92,
+          "p95_ms": 17.04,
+          "max_ms": 17.32,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 22,
+          "top_node": "Aggregate"
+        }
+      ],
+      "preprocessing_p50_sum_ms": 24.31,
+      "name_normalization": {
+        "same_row_counts": false,
+        "full_p50_ms": 156.44,
+        "constant_variant_p50_ms": 78.61,
+        "share": 0.4975,
+        "constant_variant": {
+          "name": "지역 검색(넓은 지역) 서울 맛집 (정규화 식 상수화 변형)",
+          "matched_rows": 811,
+          "returned_rows": 51,
+          "minimum_returned_rows": 0,
+          "p50_ms": 78.61,
+          "p95_ms": 85.11,
+          "max_ms": 88.89,
+          "shared_read_blocks_p95": 0,
+          "response_bytes": 17772,
+          "top_node": "Limit"
+        }
+      }
+    }
+  ],
+  "server_settings": {
+    "jit": "off",
+    "statement_timeout": "30000"
+  }
+}

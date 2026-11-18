@@ -1,5 +1,14 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-11-19 — 읽기 기준선(T-READ-01)과 그 판정
+
+- [x] T-READ-01 — **조용한 호스트의 읽기 기준선과 재측정 도구.** 2026-11-18 22:37~22:54Z(t1118e) 조용한 창·적재 중 두
+  run을 harness 13 viewport·probe 9 case로 쟀다. [보고서](reports/2026-11-19-read-baseline.md), journal 2026-11-19.
+- [x] T-READ-02 — **요청·DB 지표와 느린 요청 로그.** 운영 `map-api` 로그에서 `slow_request` 줄(2026-11-18,
+  `/v1/features/in-bounds` 6,996 ms)을 확인했다. journal 2026-11-19.
+- [x] T-READ-05 — **지역 검색 전처리를 작은 표 조회로 — 채택하지 않고 닫음.** 부산 맛집 전처리 2.5% < 5%(서울 맛집
+  16.5%·24 ms는 기록). [보고서](reports/2026-11-19-read-baseline.md) §5.1.
+
 ## 2026-11-09 — #1459 지역 검색·좌표 결측 fallback
 
 - [x] T-SEARCH-REGION — **지역+분류 질의가 다른 지역을 돌려줬다.** 지역 토큰을 시군구 코드로 풀어 순위 맨 앞 자리로 두고, 좌표 없는 행을 검색에서 빼고, 번지 주소 정지오코딩 fallback을 넣었다. 근거는 journal 2026-11-09.
