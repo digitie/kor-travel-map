@@ -1,3 +1,23 @@
+## 2026-11-19 — T-READ-01 읽기 기준선(조용한 창·적재 중)과 판정
+
+- 소유자 승인(2026-11-19 KST 아침, 예정 창 대신 지금)으로 운영 `map-api` 컨테이너 안에서 harness
+  (`--skip-seed --iterations 30`, `jit=off`·`statement_timeout` 30 s·읽기 전용)와 probe(`--iterations 30`)를 돌렸다.
+  generation **t1118e**(Map `8e90e56e`). 보고서 [`reports/2026-11-19-read-baseline.md`](reports/2026-11-19-read-baseline.md),
+  원자료 `reports/2026-11-19-read-baseline/{quiet,loaded}/`.
+  - 적재 중 run(22:37~22:45Z): harness 도중 공용 Dagster run 4개(PinVi telegram planner, transport highway incidents,
+    weather current, weather daily summaries)가 시작돼 probe-2와 겹쳤다. PSI io avg60 최대 1.70.
+  - 조용한 창 run(22:47~22:54Z): 공용 Dagster schedule·sensor 69개 정지, active run 0, PSI 0.00~0.17. 계획 §8.1의
+    30분 사전 관측은 하지 않았다(두 run 내내 PSI < 5%).
+- 판정(두 창 같음): `T-READ-05` **채택 안 함**(부산 맛집 전처리 9.53/382.54 ms = 2.5%. 서울 맛집 23.78/143.94 = 16.5%는
+  절대 24 ms라 기록만), `T-READ-06` **채택**(이름 정규화 비중 부산 37%·서울 56%, 상수화 변형 matched 1~5행 차이라
+  근사값). `T-READ-07`은 14일 간격 스냅샷이 필요하고 첫 스냅샷을 아직 찍지 않았다.
+- 새 발견: "100km nearby" 조용 p50 5,200 ms·p95 5,369 ms — 공개 `/v1/features/nearby`(반경 ≤ 100 km)는 `T-READ-03`
+  마감 4.5초에 걸려 503이 된다 → `T-READ-09`. "전국 low-zoom cluster(sido, 전 kind)" p50 1,231 ms·p95 1,311 ms →
+  `T-READ-10`. 소유자가 `T-READ-06`·`09`·`10` 구현을 승인했고 다른 에이전트가 병렬로 진행 중이다.
+- `T-READ-02` 마지막 항목: 2026-11-18 운영 `map-api` 로그(T-READ-02가 실린 t1118a 이후, 지금 t1118e)에
+  `slow_request route=/v1/features/in-bounds … duration_ms=6996` 줄들이 있었다 — 닫는다.
+- 이관: `T-READ-01`·`02`·`05` → `tasks-done.md`.
+
 ## 2026-11-18 — 운영 회전 t1118a·t1118e(T-READ-02·03·04·08 운영 반영)
 
 - **t1118a**(n150 prod, green): Map `7dc2af78` + PinVi `c21d9c5e`. Map 쪽에 `T-READ-08`(alembic 453, `feature.features`

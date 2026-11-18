@@ -26,10 +26,10 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 넷이다 —
 `T-VN-41C`·`T-VN-H43`·`T-101`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다.
 
-**읽기 성능 계획(2026-11-17)** — `T-READ-01`~`08`(목록 끝). 정본은
+**읽기 성능 계획(2026-11-17)** — `T-READ-03`·`04`·`06`~`10`(목록 끝). 정본은
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8(단계 순), 해제 조건은 acceptance의 같은 ID 절이다.
-`T-READ-01`·`02`·`08`은 0단계 병렬, `T-READ-03`의 운영 반영은 PinVi `T-READ-PIN-04` 뒤, `T-READ-04`는 PinVi 재vendor와
-한 pair 회전, `T-READ-05`~`07`은 `T-READ-01`의 수치로 채택 여부를 정한다(채택하지 않고 닫는 것도 완료다).
+`T-READ-01`(기준선 [보고서](reports/2026-11-19-read-baseline.md))·`02`·`05`(채택 안 함)는 2026-11-19 `tasks-done.md`로
+옮겼다. 기준선으로 `T-READ-06`을 채택했고 새 발견 `T-READ-09`·`10`을 열었다(셋 다 진행 중). `T-READ-07`은 14일 간격 스냅샷을 기다린다.
 
 **reconcile sensor 재시도(ADR-111 후속)** — `T-RECONCILE-RETRY`는 ADR-112(accepted) 결정 0-1(#1345)과 1~7 구현으로
 2026-10-21 `tasks-done.md`로 이관했다.
@@ -199,16 +199,6 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   kor-travel-common `docs/plan/commonization-plan-2026-11-17.md`의 Map 몫은 Common `T-480b`·`T-418`·`T-416`(정확 Node/npm 핀 — 2026-11-17 채택, Node 26.13.1, ADR-124)·`T-417`(2026-11-18 완료 — guard ref `0dec954`)·`T-419`·`T-415`다.
   범위와 수용 기준은 Common 상세 task가 소유한다. 해제 조건은 acceptance.
 
-- [ ] T-READ-01 — **조용한 호스트의 읽기 기준선과 재측정 도구**
-
-  tier-2 harness를 운영처럼 `jit=off`로 돌리고 지역 검색·서울 zoom 12·13 읍면동 집계 등 viewport를 13개로 늘린다.
-  HTTP probe를 새로 두고 조용한 창(소유자 승인)과 적재 중 두 번 재서 보고서로 남긴다.
-
-- [ ] T-READ-02 — **요청·DB 지표와 느린 요청 로그**
-
-  연결 풀 대기 지표와, 지표 flag와 무관한 1초 이상 요청 로그(route·시간·DB 문장 수)를 더한다. 운영에서 켜고
-  긁는 것은 Manager `T-READ-MGR-02`다.
-
 - [ ] T-READ-03 — **공개 읽기에 요청 마감을 건다(PinVi `T-READ-PIN-04` 배포 뒤)** — 2026-11-18 머지, 회전 t1118e로 운영 반영
 
   공개 읽기 전용 의존성이 요청 마감(기본 4.5초, 축제 월별 14초)에서 남은 시간을 문장에 넘기고 pool 대기를
@@ -219,22 +209,27 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   `POST /v1/service/transport/{dataset}/near-batch`가 점 최대 60개를 Valkey 왕복 3번 이하로 읽는다. spec이 바뀌므로
   Map 머지 → PinVi 재vendor(`T-READ-PIN-01` ③) 머지 → 한 pair 회전으로 낸다.
 
-- [ ] T-READ-05 — **지역 검색 전처리를 작은 표 조회로**
+- [ ] T-READ-06 — **검색 순위 비교 키 사전 계산** — 진행 중(2026-11-19 채택)
 
-  시군구 이름·공개 행 수를 `feature.search_region_index`에 두고 검색이 그 표를 읽는다. `T-READ-01`에서 전처리
-  비중이 5% 미만이면 채택하지 않고 닫는다.
-
-- [ ] T-READ-06 — **검색 순위 비교 키 사전 계산(측정 뒤 채택 여부)**
-
-  이름 정규화 단계가 지역 검색 시간의 30% 이상일 때만 `feature.feature_search_keys`를 둔다. 결과 순서가 같아야
-  하고 p50이 40% 이상 줄지 않으면 revert한다.
+  이름 정규화 비중이 부산 맛집 37%·서울 맛집 56%(30% 이상, [기준선](reports/2026-11-19-read-baseline.md))라 채택했다.
+  `feature.feature_search_keys`를 두고, 결과 순서가 같아야 하며 부산 맛집 p50 382.5 ms가 40% 이상 줄지 않으면 revert한다.
 
 - [ ] T-READ-07 — **`features` 색인 정리와 HOT 갱신 회복(측정 뒤)**
 
   14일 간격의 두 스냅샷과 읽는 경로 확인 뒤 쓰지 않는 색인만 지우고 fillfactor 90을 넣어 HOT 갱신을 잰다. 지울
-  것이 없으면 근거로 닫는다.
+  것이 없으면 근거로 닫는다. 첫 스냅샷은 아직 찍지 않았다(2026-11-19).
 
 - [ ] T-READ-08 — **`features` autovacuum 문턱을 표에 맞춘다(0단계)**
 
   autovacuum이 한 번도 돌지 않아 all-visible이 58%다. 먼저 재고, 표 단위 autovacuum 설정을 migration으로 넣어
   적재 24시간 뒤 all-visible 95% 이상을 확인한다.
+
+- [ ] T-READ-09 — **100 km 근처 조회를 공개 읽기 마감 안으로** — 진행 중
+
+  harness "100km nearby"(반경 안 201,401행)가 조용한 창 p50 5,200 ms·p95 5,369 ms로 `T-READ-03` 마감 4.5초를 넘는다
+  ([기준선](reports/2026-11-19-read-baseline.md) §6.1). 해제 조건은 acceptance.
+
+- [ ] T-READ-10 — **전국 저배율 집계(sido, 전 kind) 단축** — 진행 중
+
+  harness "전국 low-zoom cluster(sido, 전 kind)"가 조용한 창 p50 1,231 ms·p95 1,311 ms다(point-only 변형 365 ms,
+  [기준선](reports/2026-11-19-read-baseline.md) §6.2). 해제 조건은 acceptance.

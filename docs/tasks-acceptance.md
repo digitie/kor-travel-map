@@ -2738,19 +2738,26 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 - [x] harness의 DB 연결이 운영 API처럼 `jit=off`이고 문장 상한 30초가 걸려 있다(설정을 확인하는 시험). probe는 DB
   연결이 없고 service token을 출력·파일에 남기지 않는다(시험).
   — 2026-11-18: `tests/unit/test_perf_tier2_release_harness.py`·`tests/unit/test_read_path_probe.py`.
-- [ ] harness가 `--skip-seed`로 운영 DB에서 viewport 13개(기존 6 + 지역 검색 2·시군구 집계·서울시청 zoom 12와 13의
+- [x] harness가 `--skip-seed`로 운영 DB에서 viewport 13개(기존 6 + 지역 검색 2·시군구 집계·서울시청 zoom 12와 13의
   읍면동 집계·개별 행 500건·상세 1건)의 p50·p95·shared read blocks p95·응답 bytes를 `--output` 파일로 낸다.
-- [ ] 지역 검색 SQL은 `_resolve_search_region`·`_search_region_arms`·`_search_region_params`·`_search_score_sql`로 만든
+  — 2026-11-19: [읽기 기준선](reports/2026-11-19-read-baseline.md) §3, `reports/2026-11-19-read-baseline/{quiet,loaded}/harness.safe.json`.
+- [x] 지역 검색 SQL은 `_resolve_search_region`·`_search_region_arms`·`_search_region_params`·`_search_score_sql`로 만든
   것이다. 전처리 질의 셋의 시간과, 빼고 재는 방식의 이름 정규화 비중((전체 − `compacted`·`hits` 식을 상수로 바꾼
   변형) / 전체, 30회 p50)을 적는다.
   — 2026-11-18: 도구는 됐다(13개 viewport·`--output`·네 함수로 만든 지역 검색 SQL·전처리 셋·빼고 재는
   변형 — `scripts/perf_tier2_release_harness.py`). 운영 수치는 소유자가 잡을 조용한 창에서 잰다(계획 "소유자
   결정 (2026-11-18)" 절) — 그때 이 항목과 위 항목을 닫는다.
-- [ ] HTTP probe가 같은 요청을 30회씩 재고 묶음마다 PSI io `some` avg60을 함께 적는다.
-- [ ] 계획 §8.1의 조용한 창 절차로 잰 수치와 적재 중 수치가 보고서(`docs/reports/<날짜>-read-baseline.md`와
+  — 2026-11-19: 운영 수치는 보고서 §5(전처리 셋·이름 정규화 비중, 두 run).
+- [x] HTTP probe가 같은 요청을 30회씩 재고 묶음마다 PSI io `some` avg60을 함께 적는다.
+  — 2026-11-19: 보고서 §4, `probe-{1,2}.safe.json`(9 case × 30회, case마다 PSI 전후).
+- [x] 계획 §8.1의 조용한 창 절차로 잰 수치와 적재 중 수치가 보고서(`docs/reports/<날짜>-read-baseline.md`와
   `.safe.json`)에 있다. 7일 안에 조용한 창을 얻지 못했으면 가장 낮은 PSI에서 잰 값과 그 PSI를 적고, 뒤 작업을
   진행할지에 대한 소유자 결정을 journal에 적었다. 언제·어느 배포 generation에서 쟀는지 적는다.
-- [ ] 보고서가 `T-READ-05`(5%)·`T-READ-06`(30%)의 채택 판정을 적는다. 조용할 때와 적재 중의 판정이 갈리면 소유자가 정한다.
+  — 2026-11-19: 2026-11-18 22:37~22:54Z, generation t1118e(Map `8e90e56e`). 조용한 창은 소유자 승인 아래 공용 Dagster
+  schedule·sensor 69개 정지·active run 0·PSI avg60 0.00~0.17, 적재 중은 다른 tenant run 4개와 겹친 run(PSI 최대 1.70).
+  30분 사전 관측은 하지 않았다(보고서 §2).
+- [x] 보고서가 `T-READ-05`(5%)·`T-READ-06`(30%)의 채택 판정을 적는다. 조용할 때와 적재 중의 판정이 갈리면 소유자가 정한다.
+  — 2026-11-19: 보고서 §5·§7 — `T-READ-05` 채택 안 함, `T-READ-06` 채택. 두 창의 판정은 갈리지 않았다.
 
 ## T-READ-02
 
@@ -2763,7 +2770,9 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
   꺼내지 않는다 — pool 크기 1에서 인증 세션과 읽기 세션이 차례로 동작하는 시험이 통과한다.
 - [x] 기본 설정에서 요청당 추가 DB 왕복이 0이다(문장 수 시험). OpenAPI 세 파일이 바뀌지 않았다.
   — 2026-11-18: `packages/kor-travel-map-api/tests/test_request_timing.py`, `tests/integration/test_api_request_timing.py`.
-- [ ] 배포 뒤 운영 로그에서 1초 넘는 요청 줄을 확인해 journal에 배포 generation과 함께 적었다.
+- [x] 배포 뒤 운영 로그에서 1초 넘는 요청 줄을 확인해 journal에 배포 generation과 함께 적었다.
+  — 2026-11-19: 2026-11-18 운영 `map-api` 로그(t1118a 이후 generation, 지금 t1118e)에
+  `slow_request route=/v1/features/in-bounds … duration_ms=6996` 줄들. journal 2026-11-19 절.
 
 ## T-READ-03
 
@@ -2803,8 +2812,12 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] 판정: `T-READ-01` 보고서(`T-READ-08` 반영 뒤 수치)에서 전처리 두 질의의 합이 검색 시간의 5% 이상이다(30회 p50,
+- [x] 판정: `T-READ-01` 보고서(`T-READ-08` 반영 뒤 수치)에서 전처리 두 질의의 합이 검색 시간의 5% 이상이다(30회 p50,
   `jit=off`. 조용할 때와 적재 중의 판정이 갈리면 소유자가 정한다). 미만이면 그 수치를 적고 닫는다(아래는 해당 없음).
+  — 2026-11-19 **미만 — 채택하지 않고 닫는다**([읽기 기준선](reports/2026-11-19-read-baseline.md) §5.1, generation
+  t1118e, alembic 453 반영 뒤). "부산 맛집"(가장 느린 지역 검색) 9.53 / 382.54 ms = **2.5%**(적재 중 2.6%). 기록:
+  "서울 맛집"은 23.78 / 143.94 ms = 16.5%(적재 중 15.5%)로 비율은 넘지만 절대값 24 ms(그중 지역 행 수 15 ms)다.
+  두 창의 판정은 갈리지 않았다. 서울 수치로 다시 열지는 소유자가 정한다. 아래 항목은 해당 없음.
 - [ ] 표의 시군구 이름이 그 코드 공개 행 전체의 최빈값과 같다(통합 시험 — 결정적 기준).
 - [ ] 코드마다 이름이 하나뿐인 fixture에서 표 경로와 종전 경로의 `split_region_query` 결과와 선택되는 팔
   (`_SearchRegionArms`)이 같다. 이름이 섞인 코드에서 두 경로가 다를 수 있는 경우를 PR에 적는다.
@@ -2819,8 +2832,11 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] 판정: `T-READ-01` 보고서의 빼고 재는 측정에서 이름 정규화 식이 지역 검색 본 질의 시간의 30% 이상이다(30회 p50,
+- [x] 판정: `T-READ-01` 보고서의 빼고 재는 측정에서 이름 정규화 식이 지역 검색 본 질의 시간의 30% 이상이다(30회 p50,
   `jit=off`. 두 조건의 판정이 갈리면 소유자가 정한다). 미만이면 그 수치를 적고 닫는다.
+  — 2026-11-19 **30% 이상 — 채택**([읽기 기준선](reports/2026-11-19-read-baseline.md) §5.2). 조용: 부산 맛집 37.4%
+  (382.54 → 239.63 ms)·서울 맛집 55.6%(143.94 → 63.85 ms), 적재 중 37.3%·49.8%. 상수화 변형의 matched 행이 1~5행
+  달라(`same_row_counts=false`) 비중은 근사값이다. 마지막 항목의 기준선은 "부산 맛집" p50 382.5 ms(40% 감소 = 229.5 ms 이하).
 - [ ] 검색 평가 묶음 파일(`tests/integration/data/search_eval_queries.txt`, 40개 이상 — 지역 검색 10개 이상)이 있고, 그
   묶음에서 표 경로와 종전 경로의 `feature_id` 순서가 첫 3페이지까지 같다. 표에 없는 행(새 Feature)이 섞여도 같다.
 - [x] 이름·분류가 바뀐 행이 refresh 전까지 옛 키로 순위가 매겨지는 것을 허용할지 소유자가 정했고 그 결정을 여기 적었다
@@ -2834,6 +2850,7 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 
 - [ ] `scripts/index_usage_snapshot.py`로 찍은 두 스냅샷(14일 이상 간격, 사이에 PG 기동 시각과 stats reset이 바뀌지
   않음)으로 만든 색인별 "읽는 경로 / 탐색 수 차이 / 판정" 표가 보고서에 있다.
+  — 2026-11-19: `T-READ-01` 기준선은 이 판정에 쓰지 않는다. 첫 스냅샷도 아직 찍지 않았다.
 - [ ] 지운 뒤 관리자 Feature 목록·검색 e2e(D2)와 tier-1 gate가 통과한다.
 - [ ] tier-3 측정 — 같은 provider 재적재의 쓰기 시간·WAL·색인 크기·`n_tup_hot_upd` 전후를 PR에 붙였다(fillfactor 90 포함).
 - [ ] 지운 색인 이름이 `infra/prewarm.py`의 `DEFAULT_HOT_RELATIONS`에 남아 있지 않다.
@@ -2853,3 +2870,27 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 - [ ] 적재 한 번의 24시간 뒤 `relallvisible/relpages`가 0.95 이상이고 지역 행 수 질의의 `Heap Fetches`가 반환 행의 1%
   미만이다. 못 미치면 적재 job 끝의 VACUUM을 더하거나, 그 수치로 닫을지를 소유자가 정한다. 언제·어느 배포
   generation에서 쟀는지 적는다.
+
+## T-READ-09
+
+[읽기 기준선](reports/2026-11-19-read-baseline.md) §6.1의 발견이다. 해제 조건은 이 절이 소유한다(구현 PR이 세부를 더한다).
+기준선(2026-11-19, t1118e, harness `jit=off` 30회): "100km nearby"(서울시청 반경 100 km, `place`·`active`, 51행, 반경 안
+201,401행) 조용 p50 **5,199.5 ms** / p95 **5,369.3 ms**, 적재 중 5,515.6 / 7,572.1 ms. 공개 `GET /v1/features/nearby`는
+`radius_m` 100,000까지 받고 `T-READ-03`의 공개 읽기 마감은 4.5초다.
+
+- [ ] harness(`jit=off`) "100km nearby"의 조용한 창 p95가 공개 읽기 마감 4.5초보다 충분히 낮다(목표값은 구현 PR이 정해
+  여기 적는다). 전후 수치를 보고서에 적는다.
+- [ ] 결과(행·순서·거리·cursor)가 종전 경로와 같다(통합 시험). OpenAPI 세 파일이 바뀌지 않았거나, 바뀌면 계획 §8.1의
+  "Map+PinVi 한 회전"으로 낸다.
+- [ ] 운영 반영 뒤 언제·어느 배포 generation에서 쟀는지 journal에 적었다.
+
+## T-READ-10
+
+[읽기 기준선](reports/2026-11-19-read-baseline.md) §6.2의 발견이다. 해제 조건은 이 절이 소유한다(구현 PR이 세부를 더한다).
+기준선(2026-11-19, t1118e, harness `jit=off` 30회): "전국 low-zoom cluster(sido, 전 kind)"(geometry arm 포함) 조용 p50
+**1,230.8 ms** / p95 **1,311.4 ms**, 적재 중 1,258.0 / 1,370.0 ms. 같은 bbox의 point-only 변형은 p50 364.9 ms다.
+
+- [ ] harness(`jit=off`) "전국 low-zoom cluster(sido, 전 kind)"의 조용한 창 p50이 기준선보다 줄었다(목표값은 구현 PR이
+  정해 여기 적는다). 전후 수치를 보고서에 적는다.
+- [ ] 집계 결과(cluster별 개수·대표점)가 종전 경로와 같다(통합 시험). OpenAPI 세 파일이 바뀌지 않았다.
+- [ ] 운영 반영 뒤 언제·어느 배포 generation에서 쟀는지 journal에 적었다.

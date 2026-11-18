@@ -1,0 +1,153 @@
+{
+  "schema": "kor-travel-map.read-path-probe.v1",
+  "target": "http://127.0.0.1:12701",
+  "iterations": 30,
+  "started_at_unix": 1795041462,
+  "cases": [
+    {
+      "name": "in-bounds 전국 시도 집계(zoom 7)",
+      "path": "/v1/features/in-bounds",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.29,
+      "psi_io_some_avg60_after": 0.37,
+      "wall_p50_ms": 547.1,
+      "wall_p95_ms": 680.6,
+      "server_p50_ms": 544.0,
+      "server_p95_ms": 678.0,
+      "response_bytes": 1908
+    },
+    {
+      "name": "in-bounds 수도권 시군구 집계(zoom 10)",
+      "path": "/v1/features/in-bounds",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.37,
+      "psi_io_some_avg60_after": 0.32,
+      "wall_p50_ms": 283.6,
+      "wall_p95_ms": 412.1,
+      "server_p50_ms": 280.0,
+      "server_p95_ms": 407.0,
+      "response_bytes": 6908
+    },
+    {
+      "name": "in-bounds 서울시청 읍면동 집계(zoom 12, PinVi 기본 화면)",
+      "path": "/v1/features/in-bounds",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.32,
+      "psi_io_some_avg60_after": 0.27,
+      "wall_p50_ms": 289.1,
+      "wall_p95_ms": 345.6,
+      "server_p50_ms": 286.0,
+      "server_p95_ms": 341.0,
+      "response_bytes": 49078
+    },
+    {
+      "name": "in-bounds 서울시청 읍면동 집계(zoom 13)",
+      "path": "/v1/features/in-bounds",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.27,
+      "psi_io_some_avg60_after": 0.25,
+      "wall_p50_ms": 159.7,
+      "wall_p95_ms": 187.3,
+      "server_p50_ms": 156.0,
+      "server_p95_ms": 184.0,
+      "response_bytes": 37690
+    },
+    {
+      "name": "in-bounds 서울 개별 행(zoom 14)",
+      "path": "/v1/features/in-bounds",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.25,
+      "psi_io_some_avg60_after": 0.27,
+      "wall_p50_ms": 101.5,
+      "wall_p95_ms": 141.8,
+      "server_p50_ms": 98.0,
+      "server_p95_ms": 137.0,
+      "response_bytes": 174639
+    },
+    {
+      "name": "검색 상용어 카페",
+      "path": "/v1/features/search",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.27,
+      "psi_io_some_avg60_after": 0.31,
+      "wall_p50_ms": 153.3,
+      "wall_p95_ms": 201.4,
+      "server_p50_ms": 150.0,
+      "server_p95_ms": 198.0,
+      "response_bytes": 17389
+    },
+    {
+      "name": "지역 검색(좁은 지역) 부산 맛집",
+      "path": "/v1/features/search",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.31,
+      "psi_io_some_avg60_after": 0.27,
+      "wall_p50_ms": 453.9,
+      "wall_p95_ms": 559.1,
+      "server_p50_ms": 451.0,
+      "server_p95_ms": 555.0,
+      "response_bytes": 18472
+    },
+    {
+      "name": "지역 검색(넓은 지역) 서울 맛집",
+      "path": "/v1/features/search",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.27,
+      "psi_io_some_avg60_after": 0.24,
+      "wall_p50_ms": 209.8,
+      "wall_p95_ms": 317.0,
+      "server_p50_ms": 207.0,
+      "server_p95_ms": 314.0,
+      "response_bytes": 18089
+    },
+    {
+      "name": "상세 1건",
+      "path": "/v1/features/{feature_id}",
+      "iterations": 30,
+      "statuses": {
+        "200": 30
+      },
+      "errors": {},
+      "psi_io_some_avg60_before": 0.24,
+      "psi_io_some_avg60_after": 0.24,
+      "wall_p50_ms": 6.5,
+      "wall_p95_ms": 52.6,
+      "server_p50_ms": 4.0,
+      "server_p95_ms": 49.0,
+      "response_bytes": 1312
+    }
+  ],
+  "detail_measured": true
+}
