@@ -125,12 +125,20 @@ async def _seed_custom_public_features(
 def _assert_report_cardinality(report: dict[str, object]) -> None:
     viewports = report["viewports"]
     assert isinstance(viewports, list)
-    assert len(viewports) == 6
+    assert len(viewports) == 13
     for viewport in viewports:
         assert isinstance(viewport, dict)
         assert viewport["matched_rows"] >= viewport["returned_rows"]
         assert viewport["returned_rows"] >= viewport["minimum_returned_rows"]
-        assert viewport["response_bytes"] > 0
+        # 지역 검색(최소 0행)은 fixture에 그 지역이 없으면 빈 결과다 — 행이 있으면 bytes도 있다.
+        assert (viewport["response_bytes"] > 0) == (viewport["returned_rows"] > 0)
+    region_search = report["region_search"]
+    assert isinstance(region_search, list)
+    assert [entry["q"] for entry in region_search] == ["부산 맛집", "서울 맛집"]
+    for entry in region_search:
+        assert len(entry["preprocessing"]) >= 2
+        normalization = entry["name_normalization"]
+        assert normalization["constant_variant"]["returned_rows"] >= 0
     batch = next(viewport for viewport in viewports if viewport["name"] == "200건 batch")
     assert batch["matched_rows"] == batch["returned_rows"] == 200
 

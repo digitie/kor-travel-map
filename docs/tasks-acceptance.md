@@ -2735,13 +2735,17 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8이 변경 내용·의존·배포 단위·검증·위험을 적는다. 해제 조건은 이 절이 소유한다.
 
-- [ ] harness의 DB 연결이 운영 API처럼 `jit=off`이고 문장 상한 30초가 걸려 있다(설정을 확인하는 시험). probe는 DB
+- [x] harness의 DB 연결이 운영 API처럼 `jit=off`이고 문장 상한 30초가 걸려 있다(설정을 확인하는 시험). probe는 DB
   연결이 없고 service token을 출력·파일에 남기지 않는다(시험).
+  — 2026-11-18: `tests/unit/test_perf_tier2_release_harness.py`·`tests/unit/test_read_path_probe.py`.
 - [ ] harness가 `--skip-seed`로 운영 DB에서 viewport 13개(기존 6 + 지역 검색 2·시군구 집계·서울시청 zoom 12와 13의
   읍면동 집계·개별 행 500건·상세 1건)의 p50·p95·shared read blocks p95·응답 bytes를 `--output` 파일로 낸다.
 - [ ] 지역 검색 SQL은 `_resolve_search_region`·`_search_region_arms`·`_search_region_params`·`_search_score_sql`로 만든
   것이다. 전처리 질의 셋의 시간과, 빼고 재는 방식의 이름 정규화 비중((전체 − `compacted`·`hits` 식을 상수로 바꾼
   변형) / 전체, 30회 p50)을 적는다.
+  — 2026-11-18: 도구는 됐다(13개 viewport·`--output`·네 함수로 만든 지역 검색 SQL·전처리 셋·빼고 재는
+  변형 — `scripts/perf_tier2_release_harness.py`). 운영 수치는 소유자가 잡을 조용한 창에서 잰다(계획 "소유자
+  결정 (2026-11-18)" 절) — 그때 이 항목과 위 항목을 닫는다.
 - [ ] HTTP probe가 같은 요청을 30회씩 재고 묶음마다 PSI io `some` avg60을 함께 적는다.
 - [ ] 계획 §8.1의 조용한 창 절차로 잰 수치와 적재 중 수치가 보고서(`docs/reports/<날짜>-read-baseline.md`와
   `.safe.json`)에 있다. 7일 안에 조용한 창을 얻지 못했으면 가장 낮은 PSI에서 잰 값과 그 PSI를 적고, 뒤 작업을
