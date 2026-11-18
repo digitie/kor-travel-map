@@ -50,6 +50,7 @@ FORWARD_ONLY_REVISIONS = (
     "451_feature_search_prominence",
     "452_lotte_hotel_search_alias",
     "453_features_autovacuum",
+    "454_feature_search_keys",
 )
 
 

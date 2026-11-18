@@ -2193,6 +2193,103 @@ _SEARCH_DEDUP_DEMOTED_PROVIDER: Final[str] = "python-mcst-api"
 if not _SEARCH_DEDUP_DEMOTED_PROVIDER.replace("-", "").isalnum():  # pragma: no cover
     raise RuntimeError("demoted provider must be a plain SQL literal")
 
+#: 미리 계산하는 검색 비교 키(T-READ-06) — ``feature.feature_search_keys``의 열과 그 식. 식은 검색
+#: 질의가 키가 없을 때 쓰는 식과 **같은 문자열**이다(아래 ``_feature_search_score_cte``가 같은 함수로
+#: 만든다). 입력은 Feature의 ``name``·``category``뿐이다 — 보이는 이름(``display_name``)과 분류
+#: 그룹(``category_search_group``)도 그 둘에서 나온다.
+def _search_key_column_sqls() -> tuple[tuple[str, str], ...]:
+    """``(열 이름, 식)`` — 식은 ``name``·``category``·``display_name``·``compact_name``·
+    ``category_search_group`` 열을 읽는다(``search_group``만 ``compact_name``을 읽는다)."""
+    return (
+        ("compact_name", _search_compact_sql("display_name")),
+        ("compact_raw_name", _search_compact_sql("name")),
+        ("compact_tail", _search_compact_sql(_search_tail_sql("display_name"))),
+        ("compact_base_name", _search_bracket_base_sql("name")),
+        ("compact_paren_base_name", _search_paren_base_sql("name")),
+        ("compact_bracket_name", _search_bracket_latin_sql("name")),
+        (
+            "search_group",
+            _search_effective_group_sql("category_search_group", "category", "compact_name"),
+        ),
+    )
+
+
+def _search_keys_select_sql(source: str) -> str:
+    """``source``(``feature_id``·``name``·``category``가 있는 관계) 행마다 비교 키를 계산하는 SELECT.
+
+    ``feature.feature_search_keys``를 채우는 refresh(``infra.search_keys_repo``)가 쓴다. 단계는
+    검색 질의와 같다 — 보이는 이름 → 비교 키 → 실효 검색 그룹.
+    """
+    columns = dict(_search_key_column_sqls())
+    first = ",\n            ".join(
+        f"{expression} AS {column}"
+        for column, expression in columns.items()
+        if column != "search_group"
+    )
+    return f"""
+SELECT
+    keyed.feature_id,
+    keyed.name,
+    keyed.category,
+    keyed.compact_name,
+    keyed.compact_raw_name,
+    keyed.compact_tail,
+    keyed.compact_base_name,
+    keyed.compact_paren_base_name,
+    keyed.compact_bracket_name,
+    CAST({columns["search_group"]} AS smallint) AS search_group
+FROM (
+    SELECT
+        displayed.*,
+            {first},
+        {_search_category_group_sql("category")} AS category_search_group
+    FROM (
+        SELECT
+            src.feature_id,
+            CAST(src.name AS text) AS name,
+            CAST(src.category AS text) AS category,
+            {_search_display_name_sql("src.name", "src.category")} AS display_name
+        FROM {source} AS src
+    ) AS displayed
+) AS keyed
+"""
+
+
+def _search_keys_version() -> int:
+    """비교 키 식의 지문(signed bigint) — 식이 바뀌면 값이 바뀌어 옛 키를 쓰지 않는다.
+
+    키를 만드는 SQL 전체(보이는 이름·분류 그룹·공백 집합·끝말 정규식이 모두 들어 있다)의
+    sha256 앞 8바이트다. 표의 ``keys_version``이 이 값과 다른 행은 검색이 식으로 계산한다.
+    """
+    digest = hashlib.sha256(_search_keys_select_sql("src").encode("utf-8")).digest()
+    return int.from_bytes(digest[:8], "big", signed=True)
+
+
+#: 현재 코드의 비교 키 지문 — ``feature.feature_search_keys.keys_version``과 비교한다.
+SEARCH_KEYS_VERSION: Final[int] = _search_keys_version()
+
+
+def _search_stored_key_columns_sql() -> str:
+    """``compacted``의 비교 키 열 — 미리 계산한 키가 있으면 그 값, 없으면 같은 식.
+
+    ``search_keys.feature_id IS NOT NULL``은 지문·이름·분류가 맞은 행이다(LATERAL 조건). 식은
+    ``CASE``의 ELSE에만 있어 키가 있는 행에서는 계산하지 않는다. ``compact_raw_name``은 별칭
+    검색일 때만 쓰므로 종전처럼 별칭이 없으면 NULL이다. ``search_group``은 ``hits``가 고른다.
+    """
+    lines: list[str] = []
+    for column, expression in _search_key_column_sqls():
+        if column == "search_group":
+            continue
+        chosen = (
+            f"CASE WHEN search_keys.feature_id IS NOT NULL THEN search_keys.{column}"
+            f" ELSE {expression} END"
+        )
+        if column == "compact_raw_name":
+            chosen = f"CASE WHEN CAST(:alias_compact AS text) IS NOT NULL THEN {chosen} END"
+        lines.append(f"        {chosen} AS {column}")
+    return ",\n".join(lines)
+
+
 # 별칭의 정확 이름 및 trigram 후보는 기존 idx_features_name_trgm을 사용한다.
 # 별칭 trigram 팔은 원래 이름의 공백 정규화 일치로 좁힌다. 임의의 글자 사이 공백까지
 # 모두 찾는 보장은 없으며, 알려진 원천 이름 변형과 기본 planner의 GIN 사용을 검증한다.
@@ -2327,6 +2424,7 @@ def _feature_search_score_cte(
         if region
         else ""
     )
+    key_columns = _search_stored_key_columns_sql()
     return f"""
 WITH name_candidates AS MATERIALIZED (
     SELECT
@@ -2377,28 +2475,37 @@ filtered AS (
 compacted AS (
     -- 비교 키는 보이는 이름(주차장 표시 이름 포함)에서 만든다. tail은 첫 공백까지(지역명 —
     -- "안동 도산서원")를 뗀 나머지다. 공백이 없으면 이름 전체다.
+    -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott Hotel
+    -- Seoul)"의 한글 이름과 영문 이름(없으면 NULL). 끝 괄호(한글 표식 포함 — "신륵사(여주)")를 뗀
+    -- 이름: 괄호 안은 같은 이름을 가르는 표식이라 괄호 앞 이름이 검색어와 같으면 이름 일치다(P6).
+    -- 미리 계산한 키(T-READ-06, ``feature.feature_search_keys``): 지문(``SEARCH_KEYS_VERSION``)과
+    -- 이름·분류가 지금 행과 같을 때만 쓰고, 아니면(새 행·이름이 바뀐 행·식이 바뀐 배포) 같은 식으로
+    -- 계산한다 — 순위는 표가 있든 없든 같다. 후보마다 PK 탐색 한 번(LATERAL + LIMIT — 표 전체를
+    -- 해시하지 않는다).
     SELECT
         filtered.*,
-        {_search_compact_sql("display_name")} AS compact_name,
-        CASE WHEN CAST(:alias_compact AS text) IS NOT NULL
-             THEN {_search_compact_sql("name")} END AS compact_raw_name,
-        {_search_compact_sql(_search_tail_sql("display_name"))} AS compact_tail,
-        -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott
-        -- Hotel Seoul)"의 한글 이름과 영문 이름. 저장하지 않고 원래 이름에서 뗀다(없으면 NULL).
-        {_search_bracket_base_sql("name")} AS compact_base_name,
-        -- 끝 괄호(한글 표식 포함 — "신륵사(여주)")를 뗀 이름. 괄호 안은 같은 이름을 가르는 표식이라
-        -- 괄호 앞 이름이 검색어와 같으면 이름 일치다(2026-11-11 P6).
-        {_search_paren_base_sql("name")} AS compact_paren_base_name,
-        {_search_bracket_latin_sql("name")} AS compact_bracket_name,
-        {_search_category_group_sql("category")} AS category_search_group
+{key_columns},
+        {_search_category_group_sql("category")} AS category_search_group,
+        search_keys.search_group AS stored_search_group
     FROM filtered
+    LEFT JOIN LATERAL (
+        SELECT stored.*
+        FROM feature.feature_search_keys AS stored
+        WHERE stored.feature_id = filtered.feature_id
+          AND stored.keys_version = {SEARCH_KEYS_VERSION}
+          AND stored.name = filtered.name
+          AND stored.category = filtered.category
+        LIMIT 1
+    ) AS search_keys ON TRUE
 ),
 hits AS (
     -- 실효 검색 그룹(검색 전용): 관광·미분류로 저장됐어도 이름 끝말이 숙박·식음·지점이면 그 그룹.
     SELECT
         compacted.*,
-        {_search_effective_group_sql("category_search_group", "category", "compact_name")}
-          AS search_group{region_hit_column}
+        COALESCE(
+          stored_search_group,
+          {_search_effective_group_sql("category_search_group", "category", "compact_name")}
+        ) AS search_group{region_hit_column}
     FROM compacted
 ),
 ranked AS (
