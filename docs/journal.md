@@ -1,3 +1,24 @@
+## 2026-11-18 — 운영 회전 t1118a·t1118e(T-READ-02·03·04·08 운영 반영)
+
+- **t1118a**(n150 prod, green): Map `7dc2af78` + PinVi `c21d9c5e`. Map 쪽에 `T-READ-08`(alembic 453, `feature.features`
+  표 단위 autovacuum)·`T-READ-02`(느린 요청 로그·pool 지표)·frontend Node 26.13.1(#1511, guard ref `0dec954`)이 실렸다.
+  D1 40/40, D2 11/11, rankprobe hit@1 35/44·hit@8 41/44.
+- **t1118d**(실패, 운영 불변): 후보 빌드에서 pinvi-web BuildKit이 `frontend grpc server closed unexpectedly`로 죽었다.
+  활성화 전 단계라 런타임은 t1118a 그대로였다.
+- **t1118e**(n150 prod, green): Map `8e90e56e` + PinVi `0a1d90c7`. `T-READ-03` 공개 읽기 요청 마감 4.5초(#1515)와
+  `T-READ-04` 교통 `near-batch`(Map #1516 / PinVi #784 재vendor + client)를 한 pair 회전으로 냈고, PinVi #785도 함께
+  실렸다. D1 40/40, D2 11/11, rankprobe는 t1118a와 같다(hit@1 35/44·hit@8 41/44).
+  배포 뒤 live e2e — desktop 298/299(SRCH-043 flaky, 재실행 2/2 통과), mobile 164/167(CORE-014·015·016이
+  `ERR_NAME_NOT_RESOLVED` DNS 순간 장애로 실패, 재실행 통과), firefox core green.
+- acceptance: `T-READ-03` 마지막 항목(운영 PinVi가 `T-READ-PIN-04` 머지 commit `c0090296`을 포함 — t1118a의
+  `c21d9c5e`, 그 뒤 t1118e로 Map 반영; 두 generation을 여기 적음)과 `T-READ-04` 마지막 항목(PinVi #784 머지 뒤 한 pair
+  회전 t1118e)을 닫았다. `T-READ-02`의 "운영 로그에서 1초 넘는 요청 줄 확인"은 아직 적지 않았다(다음 확인 때).
+  `T-READ-05`·`06`·`07`은 그대로 조용한 창의 기준선(`T-READ-01`)을 기다린다. `T-READ-08` ③(적재 24시간 뒤 all-visible)도
+  측정 창 몫이다.
+- 알려진 문제(Map 원인 아님): 2026-11-17부터 `weather_state_forecast_short`가 3시간마다 실패한다. kor-travel-weather
+  `/v1/service/exports/forecasts`가 503 `EXPORT_TEMPORARILY_UNAVAILABLE`를 돌려준다. weather 쪽(Codex 담당) 문제이고,
+  Map은 실패 시 아무것도 쓰지 않는다(직전 상태 유지).
+
 ## 2026-11-18 — T-READ-04: 교통 묶음 근처 조회(`near-batch`) — PinVi 재vendor와 함께 머지
 
 - `POST /v1/service/transport/{fuel-stations,highway-incidents}/near-batch`(service 표면, 같은
