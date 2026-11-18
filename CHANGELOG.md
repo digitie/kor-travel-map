@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-18 — 공통 프론트엔드 guard ref 갱신(Common T-417)
+
+- 공통 guard 호출을 `0dec954`(공통 Node 축 26.13.1)로 올리고 도구 규칙 입력을 채웠다. frontend 이미지: apt 패키지 설치 제거, `npm ci --engine-strict`, 실행 사용자 `nextjs` → 이미지 내장 `node`(uid 1000). REST·OpenAPI·DB 변경 없음.
+
 ## 2026-11-18 — API 느린 요청 로그·pool 대기 지표(T-READ-02)
 
 - 새 설정 `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS`(기본 1000, 0이면 끔): 그 이상 걸린 요청을 route template·status·시간·DB 문장 수·DB 시간·pool 대기·request id와 함께 WARNING 한 줄로 남긴다. 지표 flag와 무관하다.

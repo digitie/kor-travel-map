@@ -6522,7 +6522,10 @@ def test_runtime_docker_images_are_multistage_and_non_root() -> None:
     assert f"FROM {node_base} AS builder" in frontend
     assert f"FROM {node_base} AS runner" in frontend
     assert "COPY --from=deps /app/package.json ./package.json" in frontend
-    assert "USER nextjs" in frontend
+    # 공통 guard 도구 규칙(T-417)이 받는 RUN 실행 파일만 쓰도록 이미지 내장
+    # 비root `node` 사용자로 실행한다(groupadd/useradd RUN 없음).
+    assert "USER node" in frontend
+    assert "useradd" not in frontend
 
 
 @pytest.mark.unit
@@ -6536,7 +6539,7 @@ def test_frontend_docker_image_uses_next_standalone_server() -> None:
     assert "outputFileTracingRoot: workspaceRoot" in next_config
     assert ".next/standalone" in dockerfile
     assert (
-        "COPY --from=builder --chown=nextjs:nodejs "
+        "COPY --from=builder --chown=node:node "
         "/app/packages/kor-travel-map-admin/frontend/public "
         "./packages/kor-travel-map-admin/frontend/public"
     ) in dockerfile

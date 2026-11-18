@@ -10,8 +10,12 @@ permissions:
   contents: read
 jobs:
   common-policy:
-    uses: digitie/kor-travel-common/.github/workflows/frontend-consumer-guard.yml@55a921b55d248106cbe320e7f5305f3d3cdb60fe
+    uses: digitie/kor-travel-common/.github/workflows/frontend-consumer-guard.yml@0dec9543c8c8730ce7b05837f2fbe6c31d4ede65
     with:
-      common-ref: 55a921b55d248106cbe320e7f5305f3d3cdb60fe
+      common-ref: 0dec9543c8c8730ce7b05837f2fbe6c31d4ede65
       frontends: >-
         [{"package":"packages/kor-travel-map-admin/frontend/package.json","lock":"package-lock.json","workspace":"packages/kor-travel-map-admin/frontend","profile":"web"}]
+      toolchain-manifests: >-
+        ["package.json","packages/map-marker-react/package.json","packages/kor-travel-map-user-client/package.json"]
+      node-dockerfiles: >-
+        ["docker/frontend.Dockerfile"]

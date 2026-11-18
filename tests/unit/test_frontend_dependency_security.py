@@ -263,7 +263,7 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
     )
     tree_copy = "COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs"
     npmrc_copy = "COPY .npmrc ./"
-    install_token = "npx --yes npm@12.0.1 ci --workspaces --include=optional"
+    install_token = "npx --yes npm@12.0.1 ci --workspaces"
     tree_token = "npx --yes npm@12.0.1 run verify:npm-tree"
     verify_token = "npx --yes npm@12.0.1 run verify:next-sharp"
     for dockerfile in dockerfiles.values():
@@ -278,6 +278,12 @@ def test_vendor_contracts_are_fail_closed_in_every_npm_docker_context() -> None:
         assert dockerfile.index(tree_copy) < dockerfile.index(install_token)
         assert dockerfile.index(install_token) < dockerfile.index(tree_token)
         assert dockerfile.index(tree_token) < dockerfile.index(verify_token)
+    # 공통 guard 도구 규칙(node-dockerfiles, T-417): 생산 이미지의 npm ci는
+    # 명시 --engine-strict를 요구하고 미지원 옵션(--include=optional 등)을 거부한다.
+    assert (
+        "npx --yes npm@12.0.1 ci --workspaces --engine-strict \\\n"
+        in dockerfiles["frontend.Dockerfile"]
+    )
 
     assert 'node-version: "26.13.1"' in workflow
     # live e2e 실행 이미지도 engine-strict 설치 전에 같은 정확 Node를 PATH 앞에 둔다.
