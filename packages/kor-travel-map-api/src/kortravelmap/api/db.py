@@ -16,8 +16,8 @@ engine은 lazy singleton (모듈 레벨) — ADR-030의 in-memory **데이터** 
 
 from __future__ import annotations
 
-import asyncio
 from contextlib import asynccontextmanager
+from contextvars import ContextVar
 from time import monotonic, perf_counter
 from typing import TYPE_CHECKING, Annotated
 
@@ -26,12 +26,14 @@ from kortravelmap.infra.db import make_async_engine
 from kortravelmap.infra.public_read_budget import (
     PUBLIC_READ_DEADLINE_INFO_KEY,
     ReadBudgetExceeded,
-    apply_public_read_budget,
+    public_read_statement_timeout_ms,
 )
 from kortravelmap.settings import KorTravelMapSettings
-from sqlalchemy import event
+from sqlalchemy import event, text
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.pool import AsyncAdaptedQueuePool
+from sqlalchemy.util import queue as sqla_queue
+from sqlalchemy.util import safe_reraise
 
 from kortravelmap.api.request_timing import current_request_db_timing
 
@@ -39,7 +41,9 @@ if TYPE_CHECKING:
     from collections.abc import AsyncIterator
     from typing import Any
 
+    from sqlalchemy.engine import Connection
     from sqlalchemy.ext.asyncio import AsyncEngine
+    from sqlalchemy.orm import Session, SessionTransaction
     from sqlalchemy.pool import ConnectionPoolEntry
 
     from kortravelmap.api.prometheus import PrometheusMetrics
@@ -73,6 +77,12 @@ class PoolBusy(Exception):
     """공개 읽기가 pool 대기 상한 안에 연결을 얻지 못했다(503 ``POOL_BUSY``)."""
 
 
+#: 공개 읽기 요청의 pool 체크아웃 상한(초)과 넘었을 때 올릴 예외. 공개 읽기 의존성이 걸고
+#: ``TimedAsyncQueuePool``이 읽는다. 다른 요청·Dagster·admin에는 ``None``이다.
+_CHECKOUT_LIMIT: ContextVar[tuple[float, type[Exception]] | None] = ContextVar(
+    "kor_travel_map_public_checkout_limit", default=None
+)
+
 _engine: AsyncEngine | None = None
 _prometheus_metrics: PrometheusMetrics | None = None
 
@@ -87,9 +97,38 @@ class TimedAsyncQueuePool(AsyncAdaptedQueuePool):
     def _do_get(self) -> ConnectionPoolEntry:
         started_at = perf_counter()
         try:
-            return super()._do_get()
+            limit = _CHECKOUT_LIMIT.get()
+            if limit is None:
+                return super()._do_get()
+            seconds, error = limit
+            return self._do_get_within(min(seconds, self._timeout), error)
         finally:
             _record_pool_wait(perf_counter() - started_at)
+
+    def _do_get_within(self, timeout: float, error: type[Exception]) -> ConnectionPoolEntry:
+        """``QueuePool._do_get``(SQLAlchemy 2.0.54)과 같은 판정을 짧은 대기 상한으로(T-READ-03).
+
+        대기만 짧다 — overflow·연결 생성 판정은 부모와 같다. 상한을 넘으면 ``error``(``PoolBusy``
+        또는 ``ReadBudgetExceeded``)를 올린다. 요청을 취소하지 않으므로 연결이 새지 않는다.
+        """
+        use_overflow = self._max_overflow > -1
+        wait = use_overflow and self._overflow >= self._max_overflow
+        try:
+            return self._pool.get(wait, timeout)
+        except sqla_queue.Empty:
+            pass
+        if use_overflow and self._overflow >= self._max_overflow:
+            if not wait:
+                return self._do_get_within(timeout, error)
+            raise error
+        if self._inc_overflow():
+            try:
+                return self._create_connection()
+            except:  # noqa: E722 — 부모와 같이 어떤 실패든 overflow를 되돌리고 다시 던진다
+                with safe_reraise():
+                    self._dec_overflow()
+                raise
+        return self._do_get_within(timeout, error)
 
 
 def pool_status() -> tuple[int, int] | None:
@@ -245,6 +284,10 @@ async def get_public_read_slow_snapshot_session(
 async def _public_read_budget(
     request: Request, session: AsyncSession, *, slow: bool
 ) -> AsyncIterator[None]:
+    """마감을 세션에 싣고, 연결·문장 상한은 **첫 문장 때** 건다.
+
+    의존성 안에서는 DB에 닿지 않는다 — 검증 오류(422)로 끝나는 요청은 연결을 꺼내지 않는다.
+    """
     settings = getattr(request.app.state, "settings", None)
     budget_ms = 0
     pool_wait_ms = 0
@@ -259,30 +302,39 @@ async def _public_read_budget(
     if not isinstance(started, float):
         started = monotonic()
     deadline = started + budget_ms / 1000.0
-    setattr(request.state, PUBLIC_READ_BUDGET_STATE, budget_ms)
-    session.info[PUBLIC_READ_DEADLINE_INFO_KEY] = deadline
-    try:
-        await _checkout_within(session, deadline=deadline, pool_wait_ms=pool_wait_ms)
-        await apply_public_read_budget(session)
-        yield
-    finally:
-        session.info.pop(PUBLIC_READ_DEADLINE_INFO_KEY, None)
-
-
-async def _checkout_within(session: AsyncSession, *, deadline: float, pool_wait_ms: int) -> None:
-    """첫 연결을 min(pool 대기 상한, 남은 예산) 안에 얻는다. 대기 시간은 예산에서 빠진다."""
     remaining = deadline - monotonic()
     if remaining <= 0:
         raise ReadBudgetExceeded
-    pool_wait = pool_wait_ms / 1000.0 if pool_wait_ms > 0 else remaining
-    wait = min(pool_wait, remaining)
+    setattr(request.state, PUBLIC_READ_BUDGET_STATE, budget_ms)
+    session.info[PUBLIC_READ_DEADLINE_INFO_KEY] = deadline
+    pool_wait = pool_wait_ms / 1000.0 if 0 < pool_wait_ms / 1000.0 < remaining else None
+    limit: tuple[float, type[Exception]] = (
+        (pool_wait, PoolBusy) if pool_wait is not None else (remaining, ReadBudgetExceeded)
+    )
+    token = _CHECKOUT_LIMIT.set(limit)
+    event.listen(session.sync_session, "after_begin", _apply_budget_on_begin)
     try:
-        async with asyncio.timeout(wait):
-            await session.connection()
-    except TimeoutError as exc:
-        if pool_wait < remaining:
-            raise PoolBusy from exc
-        raise ReadBudgetExceeded from exc
+        yield
+    finally:
+        event.remove(session.sync_session, "after_begin", _apply_budget_on_begin)
+        session.info.pop(PUBLIC_READ_DEADLINE_INFO_KEY, None)
+        try:
+            _CHECKOUT_LIMIT.reset(token)
+        except ValueError:  # 의존성 정리가 다른 context에서 돌면 되돌릴 token이 없다
+            _CHECKOUT_LIMIT.set(None)
+
+
+def _apply_budget_on_begin(
+    session: Session, _transaction: SessionTransaction, connection: Connection
+) -> None:
+    """transaction이 연결을 얻은 직후 남은 시간을 ``statement_timeout``으로 건다(왕복 1)."""
+    timeout_ms = public_read_statement_timeout_ms(session)  # type: ignore[arg-type]
+    if timeout_ms is None:
+        return
+    connection.execute(
+        text("SELECT set_config('statement_timeout', :timeout, true)"),
+        {"timeout": f"{timeout_ms}ms"},
+    )
 
 
 def _instrument_engine_if_needed(engine: AsyncEngine) -> None:

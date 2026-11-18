@@ -5,10 +5,12 @@
   뒤에 머지·배포한다(acceptance 마지막 항목, 기록은 이 journal).
 - 새 의존성 셋(`api/db.py`)이 옛 의존성을 **감싼다** — `get_public_read_session`(← `get_session`),
   `get_public_read_snapshot_session`·`get_public_read_slow_snapshot_session`(← `get_read_snapshot_session`). 격리 수준·세션
-  수명은 옛 의존성이 그대로 정하고, 감싸는 쪽은 첫 연결 획득을 min(pool 대기 상한, 남은 예산) 안에서 하고(넘으면 503
-  `POOL_BUSY`/`READ_TIMEOUT`), 마감을 `session.info`에 실어 남은 시간 − 0.3초(바닥 250 ms)를 그 transaction의
-  `statement_timeout`으로 건다. 시계는 T-READ-02의 `request.state.started_monotonic`. 옛 의존성·엔진 `pool_timeout`·
-  ADR-112 `transaction_limits`는 바꾸지 않았다.
+  수명은 옛 의존성이 그대로 정한다. 감싸는 쪽은 **DB에 닿지 않는다**(422로 끝나는 요청은 연결을 꺼내지 않는다) — 마감을
+  `session.info`에 싣고, 그 요청의 pool 체크아웃 상한(min(pool 대기 2초, 남은 예산))을 ContextVar로 걸고, 세션
+  `after_begin`에서 남은 시간 − 0.3초(바닥 250 ms)를 그 transaction의 `statement_timeout`으로 건다. 체크아웃 상한은
+  `TimedAsyncQueuePool`이 읽어 짧게 기다리고 넘으면 503 `POOL_BUSY`(예산이 먼저면 `READ_TIMEOUT`) — 요청을 취소하지
+  않으므로 연결이 새지 않는다(첫 판의 `asyncio.timeout` 방식은 의존성에서 연결을 미리 꺼내 422 시험 7건을 깼다). 시계는
+  T-READ-02의 `request.state.started_monotonic`. 옛 의존성·엔진 `pool_timeout`·ADR-112 `transaction_limits`는 그대로.
 - `infra/public_read_budget.py`: 마감이 없는 세션(Dagster·CLI·admin)에는 아무것도 보내지 않는다. `search_features`는
   마감이 있으면 `SET LOCAL` 둘을 `set_config` 한 문장(+ `statement_timeout`)으로 보내고 본 질의·개수 질의 앞에서 다시
   건다. 마감이 없으면 종전 그대로(문장 수 불변).
