@@ -1,3 +1,13 @@
+## 2026-11-18 — 운영 회전 t1118e(Map `8e90e56e` + PinVi `0a1d90c7`)
+
+- 운영(n150)은 t1118e다. 그 전 t1118a(Map `7dc2af78` + PinVi `c21d9c5e`)가 `T-READ-08`(alembic 453)·`T-READ-02`·Node 26
+  frontend(#1511)를, t1118e가 `T-READ-03`(#1515)·`T-READ-04`(#1516 / PinVi #784)·PinVi #785를 냈다. t1118d는 후보 빌드
+  (pinvi-web BuildKit) 실패로 운영 불변. 두 회전 모두 D1 40/40·D2 11/11, live e2e는 재실행 뒤 green — 상세는 journal.
+- 다음: `T-READ-02` 운영 로그의 `slow_request` 줄 확인(acceptance 마지막 항목), 측정 창(소유자) 뒤 `T-READ-01` 실행 →
+  `T-READ-05`·`06`·`07` 판정과 `T-READ-08` ③.
+- 관찰 중: `weather_state_forecast_short`가 2026-11-17부터 3시간마다 실패(weather export 503
+  `EXPORT_TEMPORARILY_UNAVAILABLE`, weather 쪽·Codex 담당). Map은 실패 시 쓰지 않는다.
+
 ## 2026-11-18 — 공통 guard ref `0dec954`(Common T-417)
 
 - guard 호출 SHA·`common-ref` = `0dec9543c8c8730ce7b05837f2fbe6c31d4ede65`, 도구 규칙 입력(`toolchain-manifests`·`node-dockerfiles`)을 채웠다. frontend 이미지는 이제 내장 `node` 사용자로 돈다 — 다음 배포에서 frontend 이미지가 다시 빌드된다.
@@ -5,11 +15,8 @@
 
 ## 2026-11-18 — 읽기 성능 Map 작업 상태
 
-- 머지됨(미배포): `T-READ-08`(#1509, alembic 453)·`T-READ-02`(#1510)·`T-READ-01` 도구(#1512). 다음 Map 회전(spec 불변)에 함께
-  실린다. 453은 배포 직후 `feature.features` autovacuum을 한 번 돌린다.
-- 머지됨(미배포): `T-READ-03`(공개 읽기 요청 마감) — PinVi `T-READ-PIN-04`(#777)는 회전 `t1118a`(PinVi `c21d9c5e`)로
-  운영에 있다. 다음 Map 회전(spec 불변)에 실린다. 배포 generation을 journal에 적으면 acceptance 마지막 항목이 닫힌다.
-- 머지 대기 브랜치: `perf/t-read-04-transport-near-batch`(PinVi `T-READ-PIN-01` ③ 재vendor와 한 pair 회전).
+- 운영 반영(2026-11-18): `T-READ-08`(#1509, alembic 453)·`T-READ-02`(#1510)·`T-READ-01` 도구(#1512)는 회전 t1118a,
+  `T-READ-03`(#1515)·`T-READ-04`(#1516, PinVi #784와 한 pair)는 회전 t1118e. 위 절과 journal 참조.
 - 측정 창(소유자가 잡는다) 뒤: `T-READ-01` 실행 → `T-READ-05`·`06`·`07` 판정, `T-READ-08` ③(적재 24시간 뒤 all-visible).
 
 ## 2026-11-18 — T-READ-02 느린 요청 로그·pool 지표 머지

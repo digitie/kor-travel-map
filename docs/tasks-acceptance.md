@@ -2783,8 +2783,9 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 - [ ] batch route의 57014는 `READ_TIMEOUT`으로 나온다(`FEATURE_BATCH_UNAVAILABLE`가 가로채지 않는다).
 - [ ] 마감이 없는 호출자(Dagster·CLI)가 부른 `search_features`는 `statement_timeout`을 바꾸지 않는다(시험). 예산 0이면
   종전 동작과 같다.
-- [ ] 운영 반영 전에, 운영 PinVi 이미지의 commit이 `T-READ-PIN-04`의 머지 commit을 포함하는지 확인했다. 두 배포
+- [x] 운영 반영 전에, 운영 PinVi 이미지의 commit이 `T-READ-PIN-04`의 머지 commit을 포함하는지 확인했다. 두 배포
   generation을 이 저장소 journal 한 곳에 적었다.
+  — 2026-11-18: PinVi `c21d9c5e`(t1118a)가 `c0090296`을 포함, Map 반영은 t1118e(Map `8e90e56e`). journal 같은 날 절.
 
 ## T-READ-04
 
@@ -2794,8 +2795,9 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 - [ ] 결과 집합이 점마다 기존 `?lon&lat&radius_m` 조회를 부른 합집합을 거리순으로 자른 것과 같다(거리 포함, 통합 시험).
 - [ ] 세대 교체 중에도 한 세대만 읽는다. 상한(점 60·반경 50 km·limit 500)을 넘으면 422다. Valkey 장애는 기존 route와
   같은 503이다.
-- [ ] service OpenAPI drift gate가 통과했다. PinVi의 재vendor PR(`T-READ-PIN-01` ③)이 **머지됐고**, 운영 반영은 Map과
+- [x] service OpenAPI drift gate가 통과했다. PinVi의 재vendor PR(`T-READ-PIN-01` ③)이 **머지됐고**, 운영 반영은 Map과
   PinVi를 함께 내는 한 번의 pair 회전으로 했다(회전 generation을 journal에 적는다).
+  — 2026-11-18: Map #1516 → PinVi #784 머지, 한 pair 회전 t1118e(Map `8e90e56e` + PinVi `0a1d90c7`). journal 같은 날 절.
 
 ## T-READ-05
 

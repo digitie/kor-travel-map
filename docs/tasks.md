@@ -209,12 +209,12 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   연결 풀 대기 지표와, 지표 flag와 무관한 1초 이상 요청 로그(route·시간·DB 문장 수)를 더한다. 운영에서 켜고
   긁는 것은 Manager `T-READ-MGR-02`다.
 
-- [ ] T-READ-03 — **공개 읽기에 요청 마감을 건다(PinVi `T-READ-PIN-04` 배포 뒤)** — 2026-11-18 머지(PinVi #777 운영 확인 뒤), Map 회전 대기
+- [ ] T-READ-03 — **공개 읽기에 요청 마감을 건다(PinVi `T-READ-PIN-04` 배포 뒤)** — 2026-11-18 머지, 회전 t1118e로 운영 반영
 
   공개 읽기 전용 의존성이 요청 마감(기본 4.5초, 축제 월별 14초)에서 남은 시간을 문장에 넘기고 pool 대기를
   2초에 자른다. 기존 세션 의존성과 엔진 설정은 건드리지 않는다.
 
-- [ ] T-READ-04 — **교통 근처 조회를 한 요청으로(near-batch, PinVi와 한 회전)**
+- [ ] T-READ-04 — **교통 근처 조회를 한 요청으로(near-batch, PinVi와 한 회전)** — 2026-11-18 회전 t1118e로 운영 반영
 
   `POST /v1/service/transport/{dataset}/near-batch`가 점 최대 60개를 Valkey 왕복 3번 이하로 읽는다. spec이 바뀌므로
   Map 머지 → PinVi 재vendor(`T-READ-PIN-01` ③) 머지 → 한 pair 회전으로 낸다.
