@@ -2491,10 +2491,10 @@ compacted AS (
     -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott Hotel
     -- Seoul)"의 한글 이름과 영문 이름(없으면 NULL). 끝 괄호(한글 표식 포함 — "신륵사(여주)")를 뗀
     -- 이름: 괄호 안은 같은 이름을 가르는 표식이라 괄호 앞 이름이 검색어와 같으면 이름 일치다(P6).
-    -- 미리 계산한 키(T-READ-06, ``feature.feature_search_keys``): 식 지문(``SEARCH_KEYS_VERSION``)·
-    -- 서버 지문·이름·분류가 지금과 같을 때만 쓰고, 아니면(새 행·이름이 바뀐 행·식이 바뀐
-    -- 배포·서버 판올림) 같은 식으로 계산한다 — 순위는 표가 있든 없든 같다. 후보마다 PK 탐색 한 번(LATERAL + LIMIT — 표 전체를
-    -- 해시하지 않는다).
+    -- 미리 계산한 키(T-READ-06, ``feature.feature_search_keys``): 식 지문
+    -- (``SEARCH_KEYS_VERSION``)·서버 지문·이름·분류가 지금과 같을 때만 쓰고, 아니면(새 행·
+    -- 이름이 바뀐 행·식이 바뀐 배포·서버 판올림) 같은 식으로 계산한다 — 순위는 표가 있든
+    -- 없든 같다. 후보마다 PK 탐색 한 번(LATERAL + LIMIT — 표 전체를 해시하지 않는다).
     SELECT
         filtered.*,
 {key_columns},
