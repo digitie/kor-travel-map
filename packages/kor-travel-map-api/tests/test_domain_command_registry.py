@@ -46,7 +46,8 @@ def test_every_openapi_write_operation_has_exact_static_policy() -> None:
     # 2026-10-16 76 → 79: T-GR-04 geo 릴리스 POST 셋(detect·item skip·replan, ADR-109 결정 8).
     # 2026-10-24 79 → 80: ADR-114 2단계 weather 상태 읽기 batch(POST, 쓰기 아님 — `_query`).
     # 2026-11-05 #668: 부재를 영구 중단하는 Feature 조정 1개를 추가했다.
-    assert len(writes) == 81
+    # 2026-11-18 81 → 83: T-READ-04 transport 묶음 근처 읽기 POST 둘(쓰기 아님 — `_query`).
+    assert len(writes) == 83
 
 
 def test_registered_domain_and_specialized_ledgers_have_stable_operation_names() -> None:

@@ -770,6 +770,146 @@ async def test_rest_price_history_falls_back_without_losing_current_prices(
     assert requests[0].headers["X-Kor-Travel-Transport-Service-Token"] == "t" * 40
 
 
+# -- 묶음 근처(T-READ-04) ---------------------------------------------------------
+
+_NEAR_BATCH = "/v1/service/transport/highway-incidents/near-batch"
+
+
+async def _swap_incidents(store: ValkeyStateStore, count: int, *, lat: float = 37.5) -> list[str]:
+    states = [highway_incident_state(_incident(i, lat=lat)) for i in range(count)]
+    await store.swap(
+        DATASET_HIGHWAY_INCIDENTS.name,
+        [to_state_item(s) for s in states],
+        guard=LENIENT,
+        source_collected_at=datetime.now(UTC) - timedelta(minutes=3),
+        loaded_at=datetime.now(UTC),
+        allow_shrink=True,
+    )
+    return [s.feature_id for s in states]
+
+
+async def test_near_batch_equals_the_union_of_single_point_queries(
+    store: ValkeyStateStore, api: httpx.AsyncClient
+) -> None:
+    await _swap_incidents(store, 40)
+    # 경도 0.01도 ≈ 880 m 간격 줄 위에 겹치는 중심 셋(가운데 둘은 반경이 겹친다)과 먼 중심 하나.
+    points = [
+        {"lon": 127.053, "lat": 37.5},
+        {"lon": 127.0712, "lat": 37.501},
+        {"lon": 127.3027, "lat": 37.5},
+        {"lon": 130.0, "lat": 37.5},
+    ]
+    radius = 3_000
+    for limit in (1, 5, 12, 500):
+        union: dict[str, float] = {}
+        for point in points:
+            single = await api.get(
+                "/v1/service/transport/highway-incidents",
+                params={**point, "radius_m": radius, "limit": 500},
+            )
+            assert single.status_code == 200, single.text
+            for item in single.json()["data"]["items"]:
+                previous = union.get(item["feature_id"])
+                if previous is None or item["distance_m"] < previous:
+                    union[item["feature_id"]] = item["distance_m"]
+        expected = sorted(union.items(), key=lambda pair: (pair[1], pair[0]))
+
+        batch = await api.post(
+            _NEAR_BATCH, json={"points": points, "radius_m": radius, "limit": limit}
+        )
+        assert batch.status_code == 200, batch.text
+        data = batch.json()["data"]
+        got = [(i["feature_id"], i["distance_m"]) for i in data["items"]]
+        assert [g[0] for g in got] == [e[0] for e in expected[:limit]], limit
+        for (_, got_distance), (_, want_distance) in zip(got, expected[:limit], strict=True):
+            assert got_distance == pytest.approx(want_distance, abs=0.11)
+        assert data["truncated"] is (len(expected) > limit)
+        assert data["freshness"]["dataset"] == DATASET_HIGHWAY_INCIDENTS.name
+
+
+async def test_near_batch_is_three_round_trips_and_reads_at_most_limit_plus_one_values(
+    store: ValkeyStateStore, api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    await _swap_incidents(store, 80)
+    client = store.client
+    calls: dict[str, int] = {"get": 0, "pipeline": 0, "hmget": 0, "other": 0}
+    hmget_sizes: list[int] = []
+    original_get, original_pipeline, original_hmget = client.get, client.pipeline, client.hmget
+
+    def _get(*args: Any, **kwargs: Any) -> Any:
+        calls["get"] += 1
+        return original_get(*args, **kwargs)
+
+    def _pipeline(*args: Any, **kwargs: Any) -> Any:
+        calls["pipeline"] += 1
+        return original_pipeline(*args, **kwargs)
+
+    def _hmget(name: Any, keys: Any, *args: Any, **kwargs: Any) -> Any:
+        calls["hmget"] += 1
+        hmget_sizes.append(len(keys))
+        return original_hmget(name, keys, *args, **kwargs)
+
+    def _other(*args: Any, **kwargs: Any) -> Any:
+        calls["other"] += 1
+        raise AssertionError("묶음 근처가 다른 Valkey 명령을 보냈다")
+
+    monkeypatch.setattr(client, "get", _get)
+    monkeypatch.setattr(client, "pipeline", _pipeline)
+    monkeypatch.setattr(client, "hmget", _hmget)
+    for name in ("mget", "hgetall", "geosearch", "zrangebylex"):
+        monkeypatch.setattr(client, name, _other)
+
+    limit = 3
+    points = [{"lon": 127.0 + i * 0.013, "lat": 37.5} for i in range(60)]
+    response = await api.post(
+        _NEAR_BATCH, json={"points": points, "radius_m": 5_000, "limit": limit}
+    )
+    assert response.status_code == 200, response.text
+    assert calls == {"get": 1, "pipeline": 1, "hmget": 1, "other": 0}
+    assert hmget_sizes == [limit]  # limit+1번째는 truncated 판정에만 쓰고 값은 읽지 않는다
+    assert len(response.json()["data"]["items"]) == limit
+    assert response.json()["data"]["truncated"] is True
+
+
+async def test_near_batch_reads_one_generation_across_a_concurrent_swap(
+    store: ValkeyStateStore, api: httpx.AsyncClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    old_ids = await _swap_incidents(store, 5)
+    old_generation = await store.current_generation(DATASET_HIGHWAY_INCIDENTS.name)
+    original = store.current_generation
+    swapped = False
+
+    async def _pointer_then_swap(dataset: str) -> str | None:
+        nonlocal swapped
+        generation = await original(dataset)
+        if not swapped:
+            swapped = True
+            # 포인터를 읽은 바로 뒤에 교체 — 새 세대는 다른 위도라 반경 안에 없다.
+            await _swap_incidents(store, 5, lat=36.0)
+        return generation
+
+    monkeypatch.setattr(store, "current_generation", _pointer_then_swap)
+    response = await api.post(
+        _NEAR_BATCH,
+        json={"points": [{"lon": 127.0, "lat": 37.5}], "radius_m": 50_000, "limit": 10},
+    )
+    assert response.status_code == 200, response.text
+    data = response.json()["data"]
+    assert swapped
+    assert data["freshness"]["generation"] == old_generation
+    assert {i["feature_id"] for i in data["items"]} == set(old_ids)
+
+
+async def test_near_batch_not_loaded_is_503(
+    store: ValkeyStateStore, api: httpx.AsyncClient
+) -> None:
+    response = await api.post(
+        _NEAR_BATCH, json={"points": [{"lon": 127.0, "lat": 37.5}], "radius_m": 1_000}
+    )
+    assert response.status_code == 503
+    assert response.json()["code"] == "TRANSPORT_STATE_NOT_LOADED"
+
+
 async def test_rest_valkey_down_is_503_only_for_this_surface() -> None:
     from kortravelmap.api.app import create_app
     from kortravelmap.api.settings import ApiSettings
@@ -791,6 +931,12 @@ async def test_rest_valkey_down_is_503_only_for_this_surface() -> None:
                 response = await http.get(path)
                 assert response.status_code == 503, path
                 assert response.json()["code"] == "TRANSPORT_STATE_UNAVAILABLE"
+            batch = await http.post(
+                "/v1/service/transport/fuel-stations/near-batch",
+                json={"points": [{"lon": 127.0, "lat": 37.5}], "radius_m": 1_000},
+            )
+            assert batch.status_code == 503
+            assert batch.json()["code"] == "TRANSPORT_STATE_UNAVAILABLE"
             assert (await http.get("/health")).status_code == 200
     finally:
         await client.aclose()

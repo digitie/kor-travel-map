@@ -217,11 +217,13 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/service/feature-alias-maps/checksum": RoutePolicy.SERVICE,
     # ADR-114 — Valkey transport 현재 상태 read (PinVi 등 service 소비자).
     "/v1/service/transport/fuel-stations": RoutePolicy.SERVICE,
+    "/v1/service/transport/fuel-stations/near-batch": RoutePolicy.SERVICE,
     "/v1/service/transport/fuel-stations/{feature_id}": RoutePolicy.SERVICE,
     "/v1/service/transport/fuel-stations/{feature_id}/price-history": RoutePolicy.SERVICE,
     "/v1/service/transport/rest-areas": RoutePolicy.SERVICE,
     "/v1/service/transport/rest-areas/{feature_id}": RoutePolicy.SERVICE,
     "/v1/service/transport/highway-incidents": RoutePolicy.SERVICE,
+    "/v1/service/transport/highway-incidents/near-batch": RoutePolicy.SERVICE,
     "/v1/service/transport/highway-incidents/{feature_id}": RoutePolicy.SERVICE,
     "/v1/service/transport/airports": RoutePolicy.SERVICE,
     "/v1/service/transport/airports/{feature_id}": RoutePolicy.SERVICE,

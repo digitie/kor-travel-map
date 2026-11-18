@@ -1,3 +1,21 @@
+## 2026-11-18 — T-READ-04: 교통 묶음 근처 조회(`near-batch`) — PinVi 재vendor와 함께 머지
+
+- `POST /v1/service/transport/{fuel-stations,highway-incidents}/near-batch`(service 표면, 같은
+  `require_service_token`). 본문 `points[]`(1~60)·`radius_m`(≤ 50 km)·`limit`(≤ 500, 기본 100), 넘으면 422.
+  `ValkeyStateStore.nearby_many`가 포인터 `GET` → meta `HGETALL`+점마다 `GEOSEARCH … WITHDIST COUNT limit+1`
+  pipeline 하나 → 라우터의 `HMGET` 한 번. 점 수와 무관하게 왕복 셋, 한 세대. id마다 가장 가까운 거리만 남겨
+  (거리, id)순으로 자르고 `truncated`는 기존 근처 조회와 같은 뜻이다. Valkey 장애·적재 전은 기존 route와 같은 503.
+- **spec이 바뀐다** — service·full OpenAPI(admin `openapi.json`·`openapi.service.json`)에 route 둘과
+  `NearBatchRequest`·`NearBatchPoint`가 더해진다(user 불변). 그래서 **머지하지 않았다**: 머지하면 다음 Map 회전부터
+  PinVi 재vendor가 먼저 있어야 해서 `T-READ-02`·`08`의 Map 단독 회전이 막힌다. 순서는 계획 §8.1 그대로 — 이 PR 머지
+  → PinVi `T-READ-PIN-01` ③(재vendor + `near-batch` client + 405 fallback) 머지 → Map+PinVi 한 pair 회전.
+- 머지 준비(같은 날): main(#1509~#1515)을 합쳤다. 빨갛던 `test_consumer_rollout_shape`는 T-VN-41 pending
+  receipt의 `map_service_openapi_sha256`이 현재 `openapi.service.json` sha와 같아야 한다는 단언이었다 —
+  첫 판은 T-VN-40만 재핀하고 41(service 전용 receipt)을 빠뜨렸다. 41의 Map service 지문을 새 spec으로 옮기고
+  blocking_reason에 한 문장을 더했다. PinVi vendor 지문과 pending 상태는 그대로다(격리 paired 검증 전 승격 없음).
+  PinVi `T-READ-PIN-01` ③ PR과 둘 다 CI green일 때 Map → PinVi 순으로 머지하고, 배포는 한 pair 회전이다.
+  이 회전에는 main에 먼저 머지된 `T-READ-02`·`03`·`08`(alembic 453)도 함께 실린다.
+
 ## 2026-11-18 — T-READ-03: 공개 읽기 요청 마감(머지, 다음 Map 회전에 실린다)
 
 - `perf/t-read-03-public-read-deadline`(T-READ-02 위). PinVi `T-READ-PIN-04`(Map의 503 `READ_TIMEOUT`·`POOL_BUSY`를

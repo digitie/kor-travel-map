@@ -721,6 +721,66 @@ class ValkeyStateStore:
             )
         return [(_text(member), float(distance)) for member, distance in raw]
 
+    async def nearby_many(
+        self,
+        dataset: str,
+        *,
+        points: Sequence[tuple[float, float]],
+        radius_m: float,
+        count: int,
+    ) -> tuple[GenerationMeta, list[tuple[str, float]]]:
+        """여러 중심의 근처를 한 세대에서 읽는다 — ``(meta, [(id, 가장 가까운 중심까지 m)])``.
+
+        이 메서드의 왕복은 점 수와 무관하게 두 번이다(T-READ-04): 포인터 ``GET`` 한 번 →
+        meta ``HGETALL``과 점마다 ``GEOSEARCH … WITHDIST COUNT count``를 pipeline 하나로.
+        같은 id는 가장 가까운 거리만 남기고 ``(거리, id)``순으로 정렬해 ``count``건까지
+        준다. 점마다 상위 ``count``건이면 합집합의 상위 ``count``건이 정확하다 — 전체
+        상위에 드는 id는 자기에게 가장 가까운 점의 상위 ``count``에도 든다. 값(``HMGET``)은
+        호출자가 줄인 id로 한 번 더 읽는다.
+
+        포인터가 없으면 :class:`StateNotLoaded`, 포인터가 없는 세대를 가리키면
+        :class:`StateStoreUnavailable`(``current_meta``와 같다).
+        """
+        if count < 1:
+            raise ValueError("count는 1 이상이어야 한다.")
+        if not points:
+            raise ValueError("points가 비었다.")
+        generation = await self.current_generation(dataset)
+        if generation is None:
+            raise StateNotLoaded(f"{dataset}는 아직 적재되지 않았다.")
+        geo_key = state_key(dataset, generation, "geo")
+        async with (
+            _unavailable_on_error("묶음 근처 검색"),
+            self._client.pipeline(transaction=False) as pipe,
+        ):
+            pipe.hgetall(state_key(dataset, generation, "meta"))
+            for lon, lat in points:
+                pipe.geosearch(
+                    geo_key,
+                    longitude=lon,
+                    latitude=lat,
+                    radius=radius_m,
+                    unit="m",
+                    sort="ASC",
+                    count=count,
+                    withdist=True,
+                )
+            replies = list(await pipe.execute())
+        raw_meta = cast("dict[Any, Any]", replies[0])
+        if not raw_meta:
+            raise StateStoreUnavailable(f"{dataset} 포인터가 없는 세대 {generation}를 가리킨다.")
+        meta = _parse_meta(dataset, generation, raw_meta)
+        nearest: dict[str, float] = {}
+        for reply in replies[1:]:
+            for member, distance in cast("list[list[Any]]", reply):
+                feature_id = _text(member)
+                value = float(distance)
+                previous = nearest.get(feature_id)
+                if previous is None or value < previous:
+                    nearest[feature_id] = value
+        ranked = sorted(nearest.items(), key=lambda pair: (pair[1], pair[0]))
+        return meta, ranked[:count]
+
     async def within_box(
         self,
         dataset: str,

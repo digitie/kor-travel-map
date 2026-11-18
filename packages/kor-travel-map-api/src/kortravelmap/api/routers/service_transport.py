@@ -8,6 +8,10 @@ PinVi 같은 service 소비자가 주유소(최신 유가)·휴게소(휴게소 
 - 목록: 조건이 없으면 ``feature_id`` 사전순 keyset(``cursor``). cursor는 세대를 품어 순회 도중
   교체돼도 같은 세대로 끝난다. 근처(``lon``·``lat``·``radius_m``)·영역(``min_lon``…``max_lat``)은
   가까운 순 ``limit``건이고 ``truncated``로 상한 도달을 알린다.
+- 묶음 근처(``POST /{dataset}/near-batch``, 주유소·돌발): 중심 최대 60곳을 한 요청으로 읽는다
+  (T-READ-04). 한 세대에서 Valkey 왕복 세 번(포인터 → meta·점마다 ``GEOSEARCH`` pipeline →
+  ``HMGET``)이고, 결과는 각 중심 근처 조회의 합집합을 가장 가까운 중심까지의 거리순으로 ``limit``건
+  자른 것이다.
 - 응답마다 ``freshness``(원천 수집 시각·Map 반영 시각·나이·``stale``)를 싣는다. stale이어도 값은
   준다.
 - Valkey 미설정·연결 실패는 이 표면만 503 ``TRANSPORT_STATE_UNAVAILABLE``, 아직 적재 전이면 503
@@ -86,6 +90,7 @@ service_router = APIRouter(
 MAX_LIMIT = 500
 DEFAULT_LIMIT = 100
 MAX_RADIUS_M = 50_000.0
+MAX_NEAR_BATCH_POINTS = 60
 MAX_BBOX_SIDE_M = 1_000_000.0
 _BOX_MARGIN = 1.02
 _EARTH_RADIUS_M = 6_372_797.560856
@@ -358,6 +363,45 @@ class TransportStatusResponse(BaseModel):
     model_config = ConfigDict(extra="forbid")
     data: TransportStatusData
     meta: Meta
+
+
+class NearBatchPoint(BaseModel):
+    """묶음 근처 검색의 중심 하나."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon: float = Field(ge=-180, le=180, description="중심 경도.")
+    lat: float = Field(ge=-GEO_LAT_LIMIT, le=GEO_LAT_LIMIT, description="중심 위도.")
+
+
+class NearBatchRequest(BaseModel):
+    """``POST /{dataset}/near-batch`` 본문(T-READ-04)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    points: list[NearBatchPoint] = Field(
+        min_length=1,
+        max_length=MAX_NEAR_BATCH_POINTS,
+        description="근처 검색 중심(최대 60곳). 같은 반경을 모든 중심에 쓴다.",
+    )
+    radius_m: float = Field(gt=0, le=MAX_RADIUS_M, description="근처 검색 반경(m, 최대 50 km).")
+    limit: int = Field(
+        default=DEFAULT_LIMIT,
+        ge=1,
+        le=MAX_LIMIT,
+        description="중심 전체를 합쳐 가장 가까운 순으로 이 건수까지.",
+    )
+
+
+_NEAR_BATCH_RESPONSES: dict[int | str, dict[str, Any]] = {
+    503: {
+        "model": ProblemDetail,
+        "description": (
+            "TRANSPORT_STATE_UNAVAILABLE(Valkey 미설정·연결 실패) 또는 "
+            "TRANSPORT_STATE_NOT_LOADED(아직 적재 전)."
+        ),
+    },
+}
 
 
 _ERROR_RESPONSES: dict[int | str, dict[str, Any]] = {
@@ -646,6 +690,32 @@ async def _list(
         return _Listing(items, False, next_cursor, meta)
 
 
+async def _near_batch(
+    store: ValkeyStateStore,
+    dataset: TransportStateDataset,
+    model: type[_OutT],
+    body: NearBatchRequest,
+) -> _Listing[_OutT]:
+    """중심 여러 곳의 근처를 한 세대에서 — 거리는 가장 가까운 중심까지(T-READ-04)."""
+    async with _state_errors():
+        meta, hits = await store.nearby_many(
+            dataset.name,
+            points=[(point.lon, point.lat) for point in body.points],
+            radius_m=body.radius_m,
+            count=body.limit + 1,
+        )
+        truncated = len(hits) > body.limit
+        hits = hits[: body.limit]
+        ids = [feature_id for feature_id, _ in hits]
+        raw = await store.get_values(dataset.name, meta.generation, ids)
+    items = _parse_values(model, ids, raw)
+    items = [
+        item.model_copy(update={"distance_m": round(distance, 1)})
+        for item, (_, distance) in zip(items, hits, strict=True)
+    ]
+    return _Listing(items, truncated, None, meta)
+
+
 async def _detail(
     store: ValkeyStateStore,
     dataset: TransportStateDataset,
@@ -721,6 +791,27 @@ async def list_fuel_stations(
         meta=make_meta(
             request, started_at=started_at, page_size=query.limit, next_cursor=listing.next_cursor
         ),
+    )
+
+
+@service_router.post(
+    "/fuel-stations/near-batch",
+    response_model=FuelStationListResponse,
+    summary="주유소 묶음 근처 검색 (중심 최대 60곳, 한 세대)",
+    responses=_NEAR_BATCH_RESPONSES,
+)
+async def near_batch_fuel_stations(
+    request: Request, body: NearBatchRequest, store: StoreDep
+) -> FuelStationListResponse:
+    started_at = perf_counter()
+    listing = await _near_batch(store, DATASET_FUEL_STATIONS, FuelStationOut, body)
+    return FuelStationListResponse(
+        data=FuelStationListData(
+            items=listing.items,
+            truncated=listing.truncated,
+            freshness=_freshness(DATASET_FUEL_STATIONS, listing.meta),
+        ),
+        meta=make_meta(request, started_at=started_at, page_size=body.limit),
     )
 
 
@@ -927,6 +1018,27 @@ async def list_highway_incidents(
         meta=make_meta(
             request, started_at=started_at, page_size=query.limit, next_cursor=listing.next_cursor
         ),
+    )
+
+
+@service_router.post(
+    "/highway-incidents/near-batch",
+    response_model=HighwayIncidentListResponse,
+    summary="고속도로 활성 돌발 묶음 근처 검색 (중심 최대 60곳, 한 세대)",
+    responses=_NEAR_BATCH_RESPONSES,
+)
+async def near_batch_highway_incidents(
+    request: Request, body: NearBatchRequest, store: StoreDep
+) -> HighwayIncidentListResponse:
+    started_at = perf_counter()
+    listing = await _near_batch(store, DATASET_HIGHWAY_INCIDENTS, HighwayIncidentOut, body)
+    return HighwayIncidentListResponse(
+        data=HighwayIncidentListData(
+            items=listing.items,
+            truncated=listing.truncated,
+            freshness=_freshness(DATASET_HIGHWAY_INCIDENTS, listing.meta),
+        ),
+        meta=make_meta(request, started_at=started_at, page_size=body.limit),
     )
 
 

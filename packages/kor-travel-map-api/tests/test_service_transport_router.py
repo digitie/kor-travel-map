@@ -108,6 +108,63 @@ def test_query_shape_is_validated_before_touching_the_store(
     assert response.status_code == 422, response.text
 
 
+_NEAR_BATCH_PATHS = (
+    "/v1/service/transport/fuel-stations/near-batch",
+    "/v1/service/transport/highway-incidents/near-batch",
+)
+
+
+def test_near_batch_routes_are_posts_on_the_service_surface(client: TestClient) -> None:
+    spec = client.get("/openapi.json").json()
+    for path in _NEAR_BATCH_PATHS:
+        assert set(spec["paths"][path]) == {"post"}, path
+        assert ROUTE_POLICIES[path] is RoutePolicy.SERVICE, path
+    # 휴게소·공항에는 묶음 근처가 없다(PinVi 여행 반경이 쓰는 두 레이어뿐).
+    assert "/v1/service/transport/rest-areas/near-batch" not in spec["paths"]
+    assert "/v1/service/transport/airports/near-batch" not in spec["paths"]
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"points": [], "radius_m": 1000},
+        {"points": [{"lon": 127.0, "lat": 37.5}] * 61, "radius_m": 1000},
+        {"points": [{"lon": 127.0, "lat": 37.5}], "radius_m": 50_001},
+        {"points": [{"lon": 127.0, "lat": 37.5}], "radius_m": 0},
+        {"points": [{"lon": 127.0, "lat": 37.5}], "radius_m": 1000, "limit": 501},
+        {"points": [{"lon": 127.0, "lat": 37.5}], "radius_m": 1000, "limit": 0},
+        {"points": [{"lon": 127.0, "lat": 89.0}], "radius_m": 1000},
+        {"points": [{"lon": 181.0, "lat": 37.5}], "radius_m": 1000},
+        {"points": [{"lon": 127.0}], "radius_m": 1000},
+        {"points": [{"lon": 127.0, "lat": 37.5, "x": 1}], "radius_m": 1000},
+        {"points": [{"lon": 127.0, "lat": 37.5}]},
+    ],
+)
+def test_near_batch_body_is_validated_before_touching_the_store(
+    client: TestClient, body: dict[str, Any]
+) -> None:
+    class _Untouchable:
+        def __getattr__(self, name: str) -> Any:
+            raise AssertionError(f"store를 건드렸다: {name}")
+
+    client.app.dependency_overrides[get_state_store] = _Untouchable  # type: ignore[attr-defined]
+    for path in _NEAR_BATCH_PATHS:
+        response = client.post(path, json=body)
+        assert response.status_code == 422, (path, response.text)
+
+
+def test_near_batch_missing_valkey_url_is_503(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("KOR_TRAVEL_MAP_VALKEY_URL", raising=False)
+    response = client.post(
+        _NEAR_BATCH_PATHS[0],
+        json={"points": [{"lon": 127.0, "lat": 37.5}] * 60, "radius_m": 1000, "limit": 500},
+    )
+    assert response.status_code == 503
+    assert response.json()["code"] == "TRANSPORT_STATE_UNAVAILABLE"
+
+
 def test_garbage_cursor_is_422(client: TestClient) -> None:
     class _Untouchable:
         def __getattr__(self, name: str) -> Any:

@@ -233,6 +233,11 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
   가장 가까운 bbox 위도에서 잰 동서 거리(그 위도에서 경도 1도가 가장 넓다) + 여유 2%, 높이는 위도 차 + 여유
   2%로 잡아 요청 bbox를 덮게 하고, 값의 좌표로 정확한 bbox를 다시 거른다. 중심에서 가까운 순으로 `limit`건까지라
   같은 요청은 같은 부분집합을 준다.
+- 묶음 근처(2026-11-18, 읽기 성능 계획 T-READ-04): `POST fuel-stations/near-batch`·`POST highway-incidents/near-batch`,
+  본문 `points[]`(lon·lat, 1~60곳)·`radius_m`(≤ 50 km)·`limit`(≤ 500, 기본 100). 포인터를 한 번 읽고, meta와
+  점마다의 `GEOSEARCH … WITHDIST`를 pipeline 하나로 보낸 뒤 id마다 가장 가까운 거리만 남겨 (거리, id)순
+  `limit`+1건을 `HMGET` 한 번으로 읽는다 — 점 수와 무관하게 왕복 세 번, 한 세대. 결과는 각 중심 근처 조회의
+  합집합을 거리순으로 자른 것이고 `distance_m`은 가장 가까운 중심까지다. 응답 모양은 목록과 같다.
 - 근처·bbox는 cursor 없이 `truncated`로 상한 도달을 알린다. 좌표 없는 돌발은 근처·bbox에 나오지 않는다(목록에는
   나온다).
 - 휴게소 응답은 `fuel_prices`(매칭된 휴게소 유가, 없으면 null)와 그 데이터셋의 신선도를 함께 싣는다. 휴게소 유가
