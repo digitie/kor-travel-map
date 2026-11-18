@@ -1,3 +1,24 @@
+## 2026-11-18 — T-READ-01: 읽기 기준선 도구(실행은 측정 창에서)
+
+- 소유자 결정(2026-11-18)에 따라 **도구만** 넣었다. 운영 DB·운영 API에서 돌리지 않았다 — 조용한 측정 창은 소유자가
+  따로 잡는다.
+- `scripts/perf_tier2_release_harness.py`: 연결을 운영 API처럼 `jit=off` + `statement_timeout` 30초로
+  (`HARNESS_SERVER_SETTINGS`), `--output <파일>`(`.safe.json`, DSN 없음, 사용한 연결 설정을 함께 적는다), viewport
+  6 → 13개(지역 검색 "부산 맛집"·"서울 맛집", 수도권 시군구 집계 zoom 10, 서울시청 읍면동 집계 zoom 12·13 — PinVi 기본
+  kind·500건, 서울 개별 행 500건 zoom 14, 상세 1건). 지역 검색은 운영과 같은 `_resolve_search_region` →
+  `_search_region_arms` → `_search_region_params` → `_search_score_sql`로 SQL과 인자를 만들고, 전처리 셋(별칭·지역
+  표본·지역 행 수)을 따로 잰다. 이름 정규화 비중은 **빼고 잰다** — `compacted`·`hits`의 식을 원래 열·상수로 바꾼
+  harness 전용 변형의 p50으로 (i − ii) / i(`region_search[].name_normalization.share`). 비교 키를 모두 같은 상수로
+  두면 뒤의 접기(`ST_ClusterDBSCAN` partition)가 후보 전부를 한 무리로 묶어 비용이 달라지므로 비교 키는 정규화하지
+  않은 원래 열로 뒀다. 운영 SQL 모양이 바뀌면 변형 생성이 추측하지 않고 실패한다.
+- 지역 검색 viewport의 최소 반환 행은 0이다(fixture가 그 지역을 모르면 빈 결과다 — 보고서의 `returned_rows`와
+  `region_resolved`가 보여 준다). 다른 새 viewport는 1행 이상이어야 성공 보고서를 낸다(종전 fail-closed 그대로).
+- 새 `scripts/read_path_probe.py`: HTTP만(표준 `urllib`, DB·`kortravelmap` import 없음 — 시험). PinVi 모양 요청
+  9종(in-bounds zoom 7·10·12·13·14, 검색 셋, 상세 1건)을 30회씩 보내 `meta.duration_ms`와 왕복 시간 p50·p95, status,
+  묶음 전후 PSI io `some avg60`을 적는다. service token은 `--token-file` 또는 `KOR_TRAVEL_MAP_PROBE_SERVICE_TOKEN`에서
+  읽어 헤더로만 보내고 출력·파일에 쓰지 않는다(시험). loopback이 아닌 대상은 보고서에 `<non-loopback>`으로만 적는다.
+- 남은 해제 조건(acceptance `T-READ-01` 둘째~여섯째)은 측정 창의 실행과 보고서다.
+
 ## 2026-11-18 — T-READ-02: 요청 도착 시각·느린 요청 로그·pool 대기 지표
 
 - 소유자 결정(2026-11-18)에 따라 측정 없이 가치가 분명한 관측 코드로 진행했다(계획 F-03 — 운영 Map에는 읽기 지연을 볼
