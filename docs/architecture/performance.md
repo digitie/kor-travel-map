@@ -586,7 +586,7 @@ read >> write 환경에서 실제로 반복 계산되는 비용은 아래 두 �
 | `/features/{id}`, `/features/batch` | PK / `ANY(ids)` + `features_detailed` subtype PK join 조립 | 없음 | ❌ 불필요 |
 | `/features/search` | trgm GIN + `similarity()` 동적 채점 | 쿼리마다 결과 변동 | ❌ 사전계산 불가 |
 | **클러스터 rollup** (`_cluster_bbox_sql`, sido/sigungu/eupmyeondong) | viewport bbox 내 **`GROUP BY {code_col}` 집계 매 pan/zoom 재계산** | **viewport 이동마다 전체 후보 재집계** | ✅ **1순위** |
-| `/features/nearby`, `/nearby/by-target` | GIST `ST_DWithin(coord_5179)` + **primary-source LATERAL** | per-row `source_links→source_records` lateral | ⚠️ 2순위(대안 有) |
+| `/features/nearby`, `/nearby/by-target` | GIST `ST_DWithin(coord_5179)`(거리순은 KNN `<->`) + page 행에만 primary-source LATERAL(T-READ-09) | page 행 수(≤ 501)만큼 | ❌ 불필요(T-READ-09) |
 | `/admin/features` | LEFT JOIN issues + source LATERAL | admin 전용, 저빈도 | ⚠️ 낮음 |
 
 #### 9.3.2 1순위 후보 — 클러스터 rollup MV (`mv_feature_cluster_counts`)
@@ -658,6 +658,10 @@ feature만** 세고 마커 위치는 그 부분집합의 `avg(coord)`다. MV 방
 LATERAL로 1건 조회해
 `primary_provider`/`primary_dataset_key`를 붙인다(`feature_repo.py`
 `features_nearby_*`). read >> write에서 이 lateral은 매 호출 반복된다.
+
+> **T-READ-09(2026-11-19)**: nearby는 이 LATERAL을 반경 안 전 행이 아니라 `LIMIT`로 잘린 page 행에만 붙인다
+> (provider 필터는 같은 선택 규칙의 상관 subquery). 100 km 반경 20만 행에서 LATERAL 201,401회가 5초를 쓰던
+> 것이 page 행 수로 줄었다 — nearby에 관해서는 유지 컬럼도 MV도 필요 없다. `/admin/features`는 그대로다.
 
 다만 이 비용은 **MV보다 적재/merge 시점에 `feature.features`에 유지하는
 denormalized 컬럼**(`primary_provider`, `primary_dataset_key`)으로 더 싸게 제거

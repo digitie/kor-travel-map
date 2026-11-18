@@ -2833,7 +2833,8 @@ WHERE codes.code IS NOT NULL
 # 행부터 읽어 ``LIMIT``에서 멈춘다. ``<->``(``geometry_distance_centroid``)는 PostGIS
 # 3.x에서 ``ST_Distance``와 **같은 C 함수**이고 KNN은 인덱스의 float4 box 거리를 정확
 # 거리로 recheck해 재정렬하므로, ``(distance_m, feature_id)`` 순서·cursor 경계가 종전과
-# 같다. 최종 SELECT가 같은 키로 다시 정렬해 응답 순서를 고정한다.
+# 같다(동률 ``feature_id``는 KNN 위의 Incremental Sort). 최종 SELECT가 같은 키로 다시
+# 정렬해 응답 순서를 고정한다.
 #
 # ADR-012: 술어·정렬은 STORED ``coord_5179``에 직접 건다. 입력 좌표 변환은 ``origin``에서
 # 1회뿐이고, ``origin``은 FROM 없는 1행 CTE라 상수(또는 InitPlan 값)로 끌어올려진다 —
@@ -2905,11 +2906,14 @@ def _nearby_primary_source_sql(
         LIMIT 1"""
 
 
-#: 정렬별 (page 안 cursor 술어, page 정렬, 최종 정렬). page 안에서는 ``f``의 원래 열로 쓴다.
-_NEARBY_DISTANCE_EXPR: Final[str] = (
-    "x_extension.ST_Distance(f.coord_5179, o.pt_5179)::double precision"
-)
-_NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str]]] = {
+#: 반경 거리(m). ``<->``는 ``ST_Distance``와 같은 C 함수(``geometry_distance_centroid`` →
+#: ``ST_Distance``)라 값이 종전 ``ST_Distance(...)``와 비트 단위로 같다 — 통합 시험
+#: ``test_knn_operator_is_st_distance``가 설치된 PostGIS에서 이를 확인한다. 연산자 형태로
+#: 써야 거리순 page가 GiST KNN 순서 scan을 탈 수 있다.
+_NEARBY_DISTANCE_EXPR: Final[str] = "f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179"
+
+#: 정렬별 (후보 안 cursor 술어, 후보 정렬, page 정렬, 최종 정렬).
+_NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str, str]]] = {
     "distance": (
         f"""(
         CAST(:cursor_distance_m AS double precision) IS NULL
@@ -2918,8 +2922,11 @@ _NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str]]] = {
             CAST(:cursor_feature_id AS uuid)
         )
       )""",
-        # KNN — ``<->``가 GiST 인덱스 순서로 가까운 행부터 내준다(동률은 Incremental Sort).
-        "f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 ASC, f.feature_id ASC",
+        # KNN — 정렬 키가 ``<->`` 하나여야 planner가 GiST 순서 scan을 고른다(PG18도 둘째
+        # 키가 있으면 KNN path를 만들지 않는다). 이 ORDER BY 때문에 subquery가 펼쳐지지 않고,
+        # 바깥 ``(distance_m, feature_id)`` 정렬은 그 위의 Incremental Sort가 되어 LIMIT에서 멈춘다.
+        "\n    ORDER BY distance_m ASC",
+        "candidate.distance_m ASC, candidate.feature_id ASC",
         "page.distance_m ASC, page.feature_id ASC",
     ),
     "name": (
@@ -2930,7 +2937,8 @@ _NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str]]] = {
             CAST(:cursor_feature_id AS uuid)
         )
       )""",
-        "f.name ASC, f.feature_id ASC",
+        "",
+        "candidate.name ASC, candidate.feature_id ASC",
         "page.name ASC, page.feature_id ASC",
     ),
     "last_updated_at": (
@@ -2941,7 +2949,8 @@ _NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str]]] = {
             CAST(:cursor_feature_id AS uuid)
         )
       )""",
-        "f.updated_at DESC, f.feature_id DESC",
+        "",
+        "candidate.last_updated_at DESC, candidate.feature_id DESC",
         "page.last_updated_at DESC, page.feature_id DESC",
     ),
 }
@@ -2949,11 +2958,13 @@ _NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str]]] = {
 
 def _nearby_sql(origin_sql: str, *, sort: str) -> str:
     """``origin`` CTE 하나와 정렬 하나로 nearby page SQL을 만든다(by-target·좌표 공용)."""
-    cursor_predicate, page_order, final_order = _NEARBY_SORT_PARTS[sort]
+    cursor_predicate, candidate_order, page_order, final_order = _NEARBY_SORT_PARTS[sort]
     return (
         origin_sql
         + f""",
 page AS (
+  SELECT candidate.*
+  FROM (
     SELECT
         f.feature_id,
         CAST(f.feature_uuid AS text) AS feature_uuid,
@@ -2980,9 +2991,10 @@ page AS (
       )
       AND {place_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-      AND {cursor_predicate}
-    ORDER BY {page_order}
-    LIMIT :limit_plus_one
+      AND {cursor_predicate}{candidate_order}
+  ) AS candidate
+  ORDER BY {page_order}
+  LIMIT :limit_plus_one
 )
 SELECT
     page.feature_id,

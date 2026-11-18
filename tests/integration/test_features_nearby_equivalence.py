@@ -523,6 +523,35 @@ async def test_target_nearby_matches_pre_t_read_09_sql(
     assert got == want == NearbyFeaturePage(items=(), next_cursor=None)
 
 
+async def test_knn_operator_is_st_distance(migrated_session: AsyncSession) -> None:
+    """``<->``가 ``ST_Distance``와 같은 C 함수여야 거리 값·순서·cursor가 종전과 같다.
+
+    새 nearby SQL은 ``distance_m``을 ``<->``로 계산한다(KNN을 타려면 정렬 식이 연산자여야
+    한다). PostGIS가 바뀌어 ``<->``가 다른 함수(예: centroid 거리)가 되면 여기서 빨개진다.
+    """
+    rows = (
+        await migrated_session.execute(
+            text(
+                """
+                SELECT knn.prosrc AS knn_src, dist.prosrc AS dist_src
+                FROM pg_operator AS op
+                JOIN pg_proc AS knn ON knn.oid = op.oprcode
+                CROSS JOIN pg_proc AS dist
+                WHERE op.oprname = '<->'
+                  AND op.oprleft = CAST('x_extension.geometry' AS regtype)
+                  AND op.oprright = CAST('x_extension.geometry' AS regtype)
+                  AND dist.oid = CAST(
+                    'x_extension.st_distance(x_extension.geometry, x_extension.geometry)'
+                    AS regprocedure
+                  )
+                """
+            )
+        )
+    ).all()
+    assert len(rows) == 1
+    assert rows[0].knn_src == rows[0].dist_src == "ST_Distance"
+
+
 def _plan_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
     nodes = [plan]
     for child in plan.get("Plans", []):

@@ -872,16 +872,18 @@ def test_nearby_sql_joins_primary_source_after_page_limit() -> None:
         for sort, sql in by_sort.items():
             page_limit = sql.index("LIMIT :limit_plus_one")
             assert sql.count("LIMIT :limit_plus_one") == 1, (label, sort)
-            assert sql.count("LEFT JOIN LATERAL") == 1, (label, sort)
-            assert sql.index("LEFT JOIN LATERAL") > page_limit, (label, sort)
+            # notice 감산 fragment에도 LATERAL이 있다 — primary source LATERAL(``ps``)만 본다.
+            assert sql.count(") AS ps ON TRUE") == 1, (label, sort)
+            assert sql.index(") AS ps ON TRUE") > page_limit, (label, sort)
             # provider 필터는 응답 열과 같은 선택 규칙(최근 관측 primary)이어야 한다.
             assert sql.count(
                 "ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key"
             ) == 2, (label, sort)
-        assert (
-            "ORDER BY f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 ASC, f.feature_id ASC"
-            in by_sort["distance"]
-        ), label
+        distance_sql = by_sort["distance"]
+        assert "f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 AS distance_m" in distance_sql
+        # KNN은 정렬 키가 ``<->`` 하나일 때만 — 동률 tiebreak는 바깥 page 정렬이 한다.
+        assert "ORDER BY distance_m ASC\n  ) AS candidate" in distance_sql, label
+        assert "ORDER BY candidate.distance_m ASC, candidate.feature_id ASC" in distance_sql
     # ADR-012: 술어·정렬에 feature 좌표 변환이 없다(입력 좌표만 origin에서 1회).
     for sql in feature_repo._NEARBY_COORD_SQL_BY_SORT.values():
         assert sql.count("x_extension.ST_Transform(") == 1
