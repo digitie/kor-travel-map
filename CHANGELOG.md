@@ -4,6 +4,11 @@
 
 - 공통 guard 호출을 `0dec954`(공통 Node 축 26.13.1)로 올리고 도구 규칙 입력을 채웠다. frontend 이미지: apt 패키지 설치 제거, `npm ci --engine-strict`, 실행 사용자 `nextjs` → 이미지 내장 `node`(uid 1000). REST·OpenAPI·DB 변경 없음.
 
+## 2026-11-18 — API 느린 요청 로그·pool 대기 지표(T-READ-02)
+
+- 새 설정 `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS`(기본 1000, 0이면 끔): 그 이상 걸린 요청을 route template·status·시간·DB 문장 수·DB 시간·pool 대기·request id와 함께 WARNING 한 줄로 남긴다. 지표 flag와 무관하다.
+- `/metrics`: `kor_travel_map_db_pool_wait_seconds`(histogram), `kor_travel_map_db_pool_checked_out`·`kor_travel_map_db_pool_overflow`(gauge). REST·OpenAPI 변경 없음.
+
 ## 2026-11-18 — `feature.features` autovacuum 문턱(alembic 453)
 
 - alembic 453: `feature.features`에 표 단위 `autovacuum_vacuum_scale_factor=0.02`·`autovacuum_vacuum_insert_scale_factor=0.05`·`autovacuum_analyze_scale_factor=0.02`. 표를 다시 쓰지 않는다(`SHARE UPDATE EXCLUSIVE`, catalog만). 배포 직후 그 표의 autovacuum이 한 번 돈다. REST·OpenAPI 변경 없음.

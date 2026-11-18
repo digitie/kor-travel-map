@@ -45,6 +45,7 @@ from kortravelmap.infra.application_schema_head import application_schema_head
 
 if TYPE_CHECKING:
     from pydantic import SecretStr
+    from sqlalchemy.pool import Pool
 
     from kortravelmap.settings import KorTravelMapSettings
 
@@ -889,6 +890,7 @@ def make_async_engine(
     max_overflow: int = 10,
     pool_pre_ping: bool = True,
     server_settings: Mapping[str, str] | None = None,
+    poolclass: type[Pool] | None = None,
 ) -> AsyncEngine:
     """``AsyncEngine`` 인스턴스를 만든다 (asyncpg driver).
 
@@ -908,6 +910,10 @@ def make_async_engine(
     server_settings
         asyncpg 신규 연결에 적용할 PostgreSQL session setting. 호출자가
         명시한 설정만 전달하며 기본값은 빈 맵이다.
+    poolclass
+        connection pool 클래스. ``None``(기본)이면 SQLAlchemy 기본
+        (``AsyncAdaptedQueuePool``)이다. API는 체크아웃 대기를 재는 하위 클래스를
+        넘긴다(T-READ-02) — 크기·overflow·timeout 의미는 같아야 한다.
 
     Returns
     -------
@@ -916,6 +922,7 @@ def make_async_engine(
     """
     raw_dsn = dsn.get_secret_value() if hasattr(dsn, "get_secret_value") else str(dsn)
     normalized = normalize_async_dsn(raw_dsn)
+    pool_options: dict[str, type[Pool]] = {} if poolclass is None else {"poolclass": poolclass}
     return create_async_engine(
         normalized,
         echo=echo,
@@ -925,6 +932,7 @@ def make_async_engine(
         connect_args=(
             {"server_settings": dict(server_settings)} if server_settings is not None else {}
         ),
+        **pool_options,
     )
 
 

@@ -29,6 +29,8 @@ def test_api_engine_disables_postgres_jit(
     )
     monkeypatch.setattr(api_db, "make_async_engine", fake_make_async_engine)
     monkeypatch.setattr(api_db, "_prometheus_metrics", None)
+    # cursor 이벤트는 지표 flag와 무관하게 걸린다(T-READ-02) — 가짜 engine에는 걸 곳이 없다.
+    monkeypatch.setattr(api_db, "_instrument_engine_if_needed", lambda _engine: None)
     api_db.reset_engine()
     try:
         first = api_db._get_engine()
@@ -39,3 +41,4 @@ def test_api_engine_disables_postgres_jit(
     assert first is sentinel
     assert second is sentinel
     assert captured["server_settings"] == {"jit": "off"}
+    assert captured["poolclass"] is api_db.TimedAsyncQueuePool
