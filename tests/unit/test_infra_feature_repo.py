@@ -849,12 +849,14 @@ def test_current_notice_filter_keeps_the_ordering_test_indexable() -> None:
 
 
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
-    sql = feature_repo._NEARBY_TARGET_CTE_SQL
-
-    assert "x_extension.ST_X(f.coord) AS lon" in sql
-    assert "x_extension.ST_Y(f.coord) AS lat" in sql
-    assert "f.coord IS NOT NULL" in sql
-    assert "f.coord_5179 IS NOT NULL" in sql
+    for sql in (
+        *feature_repo._NEARBY_SQL_BY_SORT.values(),
+        *feature_repo._NEARBY_COORD_SQL_BY_SORT.values(),
+    ):
+        assert "x_extension.ST_X(page.coord) AS lon" in sql
+        assert "x_extension.ST_Y(page.coord) AS lat" in sql
+        assert "f.coord IS NOT NULL" in sql
+        assert "f.coord_5179 IS NOT NULL" in sql
 
 
 #: T-VN-35(ADR-086) 이후의 종료 notice 감산 술어 — free-form jsonb 문자열
@@ -932,8 +934,14 @@ def test_every_composed_public_read_sql_embeds_typed_notice_filter() -> None:
         ),
         "_FEATURE_SEARCH_CTE_SQL": feature_repo._FEATURE_SEARCH_CTE_SQL,
         "_FEATURE_SEARCH_SCORE_CTE_SQL": feature_repo._FEATURE_SEARCH_SCORE_CTE_SQL,
-        "_NEARBY_TARGET_CTE_SQL": feature_repo._NEARBY_TARGET_CTE_SQL,
-        "_NEARBY_COORD_CTE_SQL": feature_repo._NEARBY_COORD_CTE_SQL,
+        **{
+            f"_NEARBY_SQL_BY_SORT[{sort}]": sql
+            for sort, sql in feature_repo._NEARBY_SQL_BY_SORT.items()
+        },
+        **{
+            f"_NEARBY_COORD_SQL_BY_SORT[{sort}]": sql
+            for sort, sql in feature_repo._NEARBY_COORD_SQL_BY_SORT.items()
+        },
         "_FEATURES_CONTAINED_IN_AREA_SQL": feature_repo._FEATURES_CONTAINED_IN_AREA_SQL,
         "_CATEGORY_FEATURE_COUNTS_SQL": feature_repo._CATEGORY_FEATURE_COUNTS_SQL,
     }
