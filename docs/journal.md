@@ -1,8 +1,9 @@
-## 2026-11-18 — T-READ-03: 공개 읽기 요청 마감(브랜치만, PinVi `T-READ-PIN-04` 운영 반영 대기)
+## 2026-11-18 — T-READ-03: 공개 읽기 요청 마감(머지, 다음 Map 회전에 실린다)
 
-- `perf/t-read-03-public-read-deadline`(T-READ-02 위). **머지하지 않는다** — PinVi `T-READ-PIN-04`(Map의 503
-  `READ_TIMEOUT`·`POOL_BUSY`를 다시 보내지 않음)가 머지·배포돼 운영 PinVi 이미지 commit이 그 머지를 포함한 것을 확인한
-  뒤에 머지·배포한다(acceptance 마지막 항목, 기록은 이 journal).
+- `perf/t-read-03-public-read-deadline`(T-READ-02 위). PinVi `T-READ-PIN-04`(Map의 503 `READ_TIMEOUT`·`POOL_BUSY`를
+  다시 보내지 않음, PinVi #777, 머지 commit `c0090296`)가 운영에 반영된 것을 확인하고 머지했다 — 운영 회전 `t1118a`
+  (Map `7dc2af78` + PinVi `c21d9c5e`, green). PinVi `c21d9c5e`는 `c0090296`을 포함한다(GitHub compare: ahead 4, behind 0).
+  T-READ-03 자체의 운영 반영 generation은 그 Map 회전 때 여기에 덧붙인다(acceptance 마지막 항목).
 - 새 의존성 셋(`api/db.py`)이 옛 의존성을 **감싼다** — `get_public_read_session`(← `get_session`),
   `get_public_read_snapshot_session`·`get_public_read_slow_snapshot_session`(← `get_read_snapshot_session`). 격리 수준·세션
   수명은 옛 의존성이 그대로 정한다. 감싸는 쪽은 **DB에 닿지 않는다**(422로 끝나는 요청은 연결을 꺼내지 않는다) — 마감을
@@ -25,6 +26,27 @@
   없이 부른다 — 그 둘도 4.5초에서 끊긴다(위험 ③).
 - 시험: 단위(배선 표·예산 계산), 통합(PostGIS — 문장 둘 요청 마감, pool 고갈 `POOL_BUSY`·누수 없음·`get_session` route는
   종전처럼 대기, 긴 예산, 예산 0, batch 57014, 마감 없는 `search_features`의 `statement_timeout` 불변, 실제 검색 route).
+
+## 2026-11-18 — 공통 guard 호출을 T-029 커밋으로(Common T-417)
+
+- `.github/workflows/common-frontend-policy.yml`의 호출 SHA와 `common-ref`를 `55a921b` → `0dec9543c8c8730ce7b05837f2fbe6c31d4ede65`(Common T-029 병합, 공통 Node 축 26.13.1)로 같이 올렸다. 새 guard는 정책 세 파일과 Node/npm 축을 이 ref에서 읽고, 도구 규칙(`check_node_toolchain`)을 더 돌린다.
+- 도구 규칙 입력을 채웠다: `toolchain-manifests`(루트·`map-marker-react`·`kor-travel-map-user-client`), `node-dockerfiles`(`docker/frontend.Dockerfile`). C7 live e2e 이미지는 생산 이미지가 아니라 넣지 않았다.
+- 새 검사기가 frontend 이미지에서 걸어 고친 것: `apt-get`(ca-certificates·git) RUN 삭제 — lock에 git 의존성이 없고 Node가 CA를 내장한다; `npm ci --workspaces --include=optional` → `--engine-strict`(optional은 기본 포함이라 설치 트리는 같다); runner의 `groupadd`/`useradd`(`nextjs`) 대신 이미지 내장 비root `node` 사용자(uid 1000). compose에 frontend 볼륨·`user:` 지정이 없어 영향 없음.
+- `.nvmrc`·`engines`는 ADR-124(#1507)로 이미 26.13.1이라 이번 축에서 그대로 통과한다(T-024 읽기 전용 실행의 FAIL 두 줄 해소). 의존성·산출물 대조도 같은 ref로 통과(로컬 재현, Node 26.13.1).
+- 기존 검증 스크립트와의 겹침: `verify-npm-tree.mjs`(설치 트리 `npm ls` problems 0)·`verify-next-sharp.mjs`(Sharp ABI 실변환)는 설치 결과를 보고, 공통 도구 규칙은 선언·이미지·npm 명령 형식만 정적으로 본다. 겹치지 않으므로 둘 다 남긴다.
+- 검증: 공통 검사기 로컬 PASS, 관련 단위 테스트 5개 파일(실패 13건은 node_modules 없는 체크아웃의 dotenv validator 등 환경 — main 기준선과 같은 13건). frontend·docker-images·공통 정책은 PR CI. n150 게이트 `NOT_RUN`(CI 우선).
+
+## 2026-11-18 — dev 포함 npm audit 게이트 한시 완화(GHSA-fc5q-39xc-vjpf)
+
+- 2026-11-17T15:56Z picomatch ReDoS advisory 범위가 `<= 4.0.7`(최신)로 넓어져 frontend 워크플로의
+  `npm high 취약점 gate (dev 포함)`이 main과 모든 PR에서 빨갰다. 패치가 없고 picomatch는 dev 도구
+  (vite·vitest·tinyglobby·fast-glob/micromatch·@typescript-eslint)로만 들어온다. `audit:high`(`--omit=dev`)는 0건.
+- §10.6 2번 절차대로 dev 단계만 완화했다. `audit:*` 스크립트는 그대로 두고, CI 스텝과
+  `verify-all-gates.sh`가 새 `audit:dev:known`(`scripts/audit-dev-known-advisories.mjs`)을 돈다 — high 이상 근원
+  advisory가 이 하나뿐일 때만 통과, 다른 advisory는 계속 막는다. 테스트가 목록을 이 하나로 고정하고
+  목록 밖 high·critical·읽기 실패를 빨갛게 확인한다. `|| true` 거부 단언은 유지.
+- 다시 조일 조건(패치된 picomatch를 lockfile·`overrides`로 소비)은 [§10.6](dev-environment.md)에 적었다.
+
 ## 2026-11-18 — 읽기 성능 Map 작업: 소유자 결정 적용 결과(문서 전용)
 
 - 머지: `T-READ-08` autovacuum 문턱(alembic 453, #1509), `T-READ-02` 느린 요청 로그·pool 지표(#1510), `T-READ-01` 기준선

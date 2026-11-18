@@ -196,7 +196,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-COMMON-PLAN-20261117 — **Common 공통화 재조사 계획의 Map 소유 task 추적** (문서 포인터)
 
-  kor-travel-common `docs/plan/commonization-plan-2026-11-17.md`의 Map 몫은 Common `T-480b`·`T-418`·`T-416`(정확 Node/npm 핀 — 2026-11-17 채택, Node 26.13.1, ADR-124)·`T-417`(Common `T-029` 뒤)·`T-419`·`T-415`다.
+  kor-travel-common `docs/plan/commonization-plan-2026-11-17.md`의 Map 몫은 Common `T-480b`·`T-418`·`T-416`(정확 Node/npm 핀 — 2026-11-17 채택, Node 26.13.1, ADR-124)·`T-417`(2026-11-18 완료 — guard ref `0dec954`)·`T-419`·`T-415`다.
   범위와 수용 기준은 Common 상세 task가 소유한다. 해제 조건은 acceptance.
 
 - [ ] T-READ-01 — **조용한 호스트의 읽기 기준선과 재측정 도구**
@@ -209,7 +209,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   연결 풀 대기 지표와, 지표 flag와 무관한 1초 이상 요청 로그(route·시간·DB 문장 수)를 더한다. 운영에서 켜고
   긁는 것은 Manager `T-READ-MGR-02`다.
 
-- [ ] T-READ-03 — **공개 읽기에 요청 마감을 건다(PinVi `T-READ-PIN-04` 배포 뒤)**
+- [ ] T-READ-03 — **공개 읽기에 요청 마감을 건다(PinVi `T-READ-PIN-04` 배포 뒤)** — 2026-11-18 머지(PinVi #777 운영 확인 뒤), Map 회전 대기
 
   공개 읽기 전용 의존성이 요청 마감(기본 4.5초, 축제 월별 14초)에서 남은 시간을 문장에 넘기고 pool 대기를
   2초에 자른다. 기존 세션 의존성과 엔진 설정은 건드리지 않는다.
