@@ -675,9 +675,12 @@ async def _explain_analyze(
 
 
 async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[str, Any]:
-    engine = make_async_engine(
-        normalize_async_dsn(dsn), server_settings=HARNESS_SERVER_SETTINGS
-    )
+    # 운영 DB에 ``--skip-seed``로 붙을 때는 연결을 읽기 전용으로 연다 — flag를 빠뜨려도 쓰지 못한다
+    # (빠뜨리면 아래 seed가 INSERT하다 25006으로 실패한다).
+    server_settings = dict(HARNESS_SERVER_SETTINGS)
+    if skip_seed:
+        server_settings["default_transaction_read_only"] = "on"
+    engine = make_async_engine(normalize_async_dsn(dsn), server_settings=server_settings)
 
     @event.listens_for(engine.sync_engine, "connect")
     def _sp(dbapi_conn: Any, _rec: Any) -> None:
@@ -698,6 +701,8 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
             if not skip_seed:
                 seed_started = time.perf_counter()
                 async with session.begin():
+                    # 대량 seed와 ANALYZE는 30초를 넘을 수 있다 — seed transaction만 끈다.
+                    await session.execute(text("SET LOCAL statement_timeout = 0"))
                     await seed_hot_query_features(
                         session,
                         n=rows,
@@ -761,6 +766,14 @@ async def _run(dsn: str, rows: int, iterations: int, skip_seed: bool) -> dict[st
                             sum(float(entry["p50_ms"]) for entry in preprocessing), 2
                         ),
                         "name_normalization": {
+                            # 변형은 비교 키가 상수라 지역 일치·이름 일치·접기가 달라질 수 있다 —
+                            # 두 질의가 같은 행 수를 냈는지 함께 적어 비중을 읽을 때 본다.
+                            "same_row_counts": (
+                                measured[search.viewport.name]["matched_rows"]
+                                == variant["matched_rows"]
+                                and measured[search.viewport.name]["returned_rows"]
+                                == variant["returned_rows"]
+                            ),
                             "full_p50_ms": full_p50,
                             "constant_variant_p50_ms": variant["p50_ms"],
                             "share": _subtract_share(full_p50, float(variant["p50_ms"])),

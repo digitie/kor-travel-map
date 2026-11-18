@@ -149,3 +149,28 @@ def test_transport_errors_are_counted_by_type_only() -> None:
     assert case["errors"] == {"TimeoutError": 2}
     assert case["wall_p50_ms"] is None
     assert "secret" not in json.dumps(report)
+
+
+def test_non_200_is_excluded_from_percentiles_and_fails_the_run(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def unauthorized(url: str, headers: Mapping[str, str], _timeout: float) -> probe.ProbeResponse:
+        return probe.ProbeResponse(status=401, body=b"{}")
+
+    monkeypatch.setattr(probe, "read_psi_io_some_avg60", lambda: None)
+    real_run = probe.run_probe
+
+    def run(**kwargs: object) -> dict[str, object]:
+        return real_run(fetch=unauthorized, psi=probe.read_psi_io_some_avg60, **kwargs)
+
+    monkeypatch.setattr(probe, "run_probe", run)
+    token_file = tmp_path / "token"
+    token_file.write_text(_SECRET + "\n", encoding="utf-8")
+    output = tmp_path / "probe.safe.json"
+
+    assert probe.main(
+        ["--token-file", str(token_file), "--iterations", "2", "--output", str(output)],
+        environ={},
+    ) == 1
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert all(case["wall_p50_ms"] is None for case in report["cases"])

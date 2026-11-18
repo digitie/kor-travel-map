@@ -217,9 +217,11 @@ def _measure_case(
             # 예외 문구에는 URL이 들어갈 수 있다 — 종류만 센다.
             errors[type(exc).__name__] = errors.get(type(exc).__name__, 0) + 1
             continue
-        wall_ms.append((time.perf_counter() - started) * 1000.0)
+        elapsed_ms = (time.perf_counter() - started) * 1000.0
         statuses[str(response.status)] = statuses.get(str(response.status), 0) + 1
         if response.status == 200:
+            # 200만 분위에 넣는다 — 401·5xx가 빠른 기준선처럼 보이지 않게.
+            wall_ms.append(elapsed_ms)
             last_ok_body = response.body
             duration = _server_duration_ms(response.body)
             if duration is not None:
@@ -331,7 +333,12 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
     print(rendered)
     if args.output is not None:
         args.output.write_text(rendered + "\n", encoding="utf-8")
-    return 0
+    # 200이 아닌 응답이나 전송 오류가 하나라도 있으면 실패로 끝난다(잘못된 token 등).
+    failed = any(
+        case.get("errors") or set(case.get("statuses", {})) - {"200"}
+        for case in report.get("cases", [])
+    )
+    return 1 if failed else 0
 
 
 if __name__ == "__main__":
