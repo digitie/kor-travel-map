@@ -1,3 +1,32 @@
+## 2026-11-18 — T-READ-03: 공개 읽기 요청 마감(머지, 다음 Map 회전에 실린다)
+
+- `perf/t-read-03-public-read-deadline`(T-READ-02 위). PinVi `T-READ-PIN-04`(Map의 503 `READ_TIMEOUT`·`POOL_BUSY`를
+  다시 보내지 않음, PinVi #777, 머지 commit `c0090296`)가 운영에 반영된 것을 확인하고 머지했다 — 운영 회전 `t1118a`
+  (Map `7dc2af78` + PinVi `c21d9c5e`, green). PinVi `c21d9c5e`는 `c0090296`을 포함한다(GitHub compare: ahead 4, behind 0).
+  T-READ-03 자체의 운영 반영 generation은 그 Map 회전 때 여기에 덧붙인다(acceptance 마지막 항목).
+- 새 의존성 셋(`api/db.py`)이 옛 의존성을 **감싼다** — `get_public_read_session`(← `get_session`),
+  `get_public_read_snapshot_session`·`get_public_read_slow_snapshot_session`(← `get_read_snapshot_session`). 격리 수준·세션
+  수명은 옛 의존성이 그대로 정한다. 감싸는 쪽은 **DB에 닿지 않는다**(422로 끝나는 요청은 연결을 꺼내지 않는다) — 마감을
+  `session.info`에 싣고, 그 요청의 pool 체크아웃 상한(min(pool 대기 2초, 남은 예산))을 ContextVar로 걸고, 세션
+  `after_begin`에서 남은 시간 − 0.3초(바닥 250 ms)를 그 transaction의 `statement_timeout`으로 건다. 체크아웃 상한은
+  `TimedAsyncQueuePool`이 읽어 짧게 기다리고 넘으면 503 `POOL_BUSY`(예산이 먼저면 `READ_TIMEOUT`) — 요청을 취소하지
+  않으므로 연결이 새지 않는다(첫 판의 `asyncio.timeout` 방식은 의존성에서 연결을 미리 꺼내 422 시험 7건을 깼다). 시계는
+  T-READ-02의 `request.state.started_monotonic`. 옛 의존성·엔진 `pool_timeout`·ADR-112 `transaction_limits`는 그대로.
+- `infra/public_read_budget.py`: 마감이 없는 세션(Dagster·CLI·admin)에는 아무것도 보내지 않는다. `search_features`는
+  마감이 있으면 `SET LOCAL` 둘을 `set_config` 한 문장(+ `statement_timeout`)으로 보내고 본 질의·개수 질의 앞에서 다시
+  건다. 마감이 없으면 종전 그대로(문장 수 불변).
+- 오류: 공개 예산 표시가 있는 요청의 57014 → 503 `READ_TIMEOUT`(표시 없는 57014는 종전처럼 500). batch route의
+  `except SQLAlchemyError`는 표시가 있는 57014를 다시 던진다. 새 응답 선언·schema·enum 없음 — OpenAPI 불변.
+- 적용 route(옛 → 새): bbox·in-bounds·nearby·categories·providers 둘·beaches 목록·beach markers·festival markers·
+  curations collections·place-attributes는 `get_session` → `get_public_read_session`. search·nearby/by-target·상세·
+  contained-features·price·price/snapshot·batch·beach 상세·festival 상세·curations(목록·collection 상세·feature)는
+  `get_read_snapshot_session` → `get_public_read_snapshot_session`. festivals/monthly는 → `…_slow_…`. 배선은 단위 시험이
+  표로 고정한다(범위 밖 route가 새 의존성을 쓰면 빨강).
+- 관리 화면: `/v1/admin/features/in-bounds`(범위 밖)를 쓰고, 공개 route 중 price·contained-features는 client timeout
+  없이 부른다 — 그 둘도 4.5초에서 끊긴다(위험 ③).
+- 시험: 단위(배선 표·예산 계산), 통합(PostGIS — 문장 둘 요청 마감, pool 고갈 `POOL_BUSY`·누수 없음·`get_session` route는
+  종전처럼 대기, 긴 예산, 예산 0, batch 57014, 마감 없는 `search_features`의 `statement_timeout` 불변, 실제 검색 route).
+
 ## 2026-11-18 — 공통 guard 호출을 T-029 커밋으로(Common T-417)
 
 - `.github/workflows/common-frontend-policy.yml`의 호출 SHA와 `common-ref`를 `55a921b` → `0dec9543c8c8730ce7b05837f2fbe6c31d4ede65`(Common T-029 병합, 공통 Node 축 26.13.1)로 같이 올렸다. 새 guard는 정책 세 파일과 Node/npm 축을 이 ref에서 읽고, 도구 규칙(`check_node_toolchain`)을 더 돌린다.

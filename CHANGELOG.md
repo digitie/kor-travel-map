@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-18 — 공개 읽기 요청 마감(T-READ-03, PinVi T-READ-PIN-04 운영 반영 뒤)
+
+- 공개 읽기 route는 요청 도착에서 4.5초(`KOR_TRAVEL_MAP_API_PUBLIC_READ_BUDGET_MS`) 안에 끝나지 않으면 503 `READ_TIMEOUT`, pool 대기 2초(`…_POOL_WAIT_MS`)를 넘으면 503 `POOL_BUSY`. 축제 월별만 14초(`…_SLOW_BUDGET_MS`). 0이면 끈다. 응답 모양·OpenAPI 변경 없음(공통 problem 응답).
+
 ## 2026-11-18 — 공통 프론트엔드 guard ref 갱신(Common T-417)
 
 - 공통 guard 호출을 `0dec954`(공통 Node 축 26.13.1)로 올리고 도구 규칙 입력을 채웠다. frontend 이미지: apt 패키지 설치 제거, `npm ci --engine-strict`, 실행 사용자 `nextjs` → 이미지 내장 `node`(uid 1000). REST·OpenAPI·DB 변경 없음.
