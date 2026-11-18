@@ -42,6 +42,8 @@ Thumbs.db
 
 # data / artifacts (kept on NTFS, not in git per AGENTS.md §dev-environment)
 data/
+# 시험 입력(검색 평가 묶음 — T-READ-06)은 저장소에 둔다.
+!tests/integration/data/
 artifacts/
 *.log
 

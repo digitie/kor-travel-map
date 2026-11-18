@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-19 — 검색 비교 키 사전 계산(T-READ-06, alembic 454)
+
+- alembic 454: `feature.feature_search_keys`(공개 Feature마다 보이는 이름의 비교 키 여섯·실효 검색 그룹, PK 하나). 검색은 키 식 지문·서버 지문·이름·분류가 지금과 같을 때만 저장 키를 쓰고 아니면 종전 식으로 계산한다 — 순위는 표가 비었거나 묵어도 같다. Dagster `consistency_dedup_refresh`의 새 op `refresh_search_keys`가 없거나 맞지 않는 행만 채운다(배포 뒤 한 번 수동 실행하면 바로 빨라진다). REST·OpenAPI 변경 없음.
+
 ## 2026-11-18 — 교통 묶음 근처 조회(T-READ-04)
 
 - `POST /v1/service/transport/fuel-stations/near-batch`·`POST /v1/service/transport/highway-incidents/near-batch`: 중심 최대 60곳의 근처를 한 요청·한 세대로 읽는다(Valkey 왕복 셋). 응답은 목록 route와 같은 모양이고 `distance_m`은 가장 가까운 중심까지다. service·full OpenAPI additive — PinVi service 재vendor 필요(Map+PinVi 한 회전).
