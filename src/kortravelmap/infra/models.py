@@ -1979,7 +1979,8 @@ class FeatureSearchKeysRow(Base):
     """``feature.feature_search_keys`` — 미리 계산한 검색 비교 키(migration 454, T-READ-06).
 
     공개 Feature마다 보이는 이름의 비교 키 여섯과 실효 검색 그룹. 검색은 ``keys_version``(키 식의
-    지문)·``name``·``category``가 지금 행·지금 코드와 같을 때만 이 값을 쓰고 아니면 식으로 계산한다.
+    지문)·``server_fingerprint``(서버 판·locale)·``name``·``category``가 지금과 같을 때만 이 값을
+    쓰고 아니면 식으로 계산한다.
     채우기는 ``infra.search_keys_repo.refresh_search_keys``(maintenance job). ``feature.features``
     FK는 두지 않는다(Feature 쓰기 경로와 잠금을 엮지 않는다).
     """
@@ -1995,6 +1996,7 @@ class FeatureSearchKeysRow(Base):
 
     feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
     keys_version: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    server_fingerprint: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     category: Mapped[str] = mapped_column(Text, nullable=False)
     compact_name: Mapped[str | None] = mapped_column(Text, nullable=True)

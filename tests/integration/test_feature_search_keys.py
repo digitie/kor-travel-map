@@ -173,7 +173,7 @@ async def test_table_path_keeps_the_order_of_the_expression_path(
             "DELETE FROM feature.feature_search_keys"
             " WHERE feature_id = ANY(CAST(:ids AS uuid[]))"
         ),
-        {"ids": seeded[0::3]},
+        {"ids": seeded[0::4]},
     )
     await migrated_session.execute(
         text(
@@ -182,7 +182,7 @@ async def test_table_path_keeps_the_order_of_the_expression_path(
             " compact_paren_base_name = 'zzz', search_group = 9"
             " WHERE feature_id = ANY(CAST(:ids AS uuid[]))"
         ),
-        {"ids": seeded[1::3]},
+        {"ids": seeded[1::4]},
     )
     await migrated_session.execute(
         text(
@@ -190,9 +190,47 @@ async def test_table_path_keeps_the_order_of_the_expression_path(
             " SET keys_version = keys_version + 1, compact_name = 'zzz', search_group = 9"
             " WHERE feature_id = ANY(CAST(:ids AS uuid[]))"
         ),
-        {"ids": seeded[2::3]},
+        {"ids": seeded[2::4]},
+    )
+    # 서버 지문이 다른 행(PostgreSQL 판·locale이 바뀐 뒤 남은 키).
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_search_keys"
+            " SET server_fingerprint = 'other-server', compact_name = 'zzz', search_group = 9"
+            " WHERE feature_id = ANY(CAST(:ids AS uuid[]))"
+        ),
+        {"ids": seeded[3::4]},
     )
     assert await _orders(migrated_session, queries) == expression_path
+
+
+async def test_search_reads_stored_keys_when_the_guard_matches(
+    migrated_session: AsyncSession,
+) -> None:
+    """지문·이름·분류가 맞는 저장 키는 실제로 쓰인다 — 틀린 값을 심으면 순위가 바뀐다.
+
+    위 동등 시험이 표를 전혀 읽지 않아도 초록이 되는 것을 막는다.
+    """
+    ids = await _seed(migrated_session)
+    await refresh_search_keys(migrated_session)
+
+    async def station_rank() -> int:
+        page = await feature_repo.search_features(
+            migrated_session, q="키검역", page_size=50, cursor_signing_key=_SEARCH_CURSOR_KEY
+        )
+        ranks = {item.feature_id: int(item.rank or 0) for item in page.items}
+        return ranks[ids["station"]]
+
+    honest = await station_rank()
+    await migrated_session.execute(
+        text(
+            "UPDATE feature.feature_search_keys"
+            " SET compact_name = 'zzz', compact_tail = 'zzz', search_group = 9"
+            " WHERE feature_id = CAST(:id AS uuid)"
+        ),
+        {"id": ids["station"]},
+    )
+    assert await station_rank() != honest
 
 
 async def test_refresh_writes_only_missing_or_stale_rows_and_drops_non_public(
@@ -217,8 +255,8 @@ async def test_refresh_writes_only_missing_or_stale_rows_and_drops_non_public(
     await migrated_session.execute(
         text(
             "INSERT INTO feature.feature_search_keys"
-            " (feature_id, keys_version, name, category, search_group)"
-            " VALUES (CAST(:id AS uuid), :version, '사라진키검', '01000000', 0)"
+            " (feature_id, keys_version, server_fingerprint, name, category, search_group)"
+            " VALUES (CAST(:id AS uuid), :version, 'x', '사라진키검', '01000000', 0)"
         ),
         {"id": orphan, "version": feature_repo.SEARCH_KEYS_VERSION},
     )

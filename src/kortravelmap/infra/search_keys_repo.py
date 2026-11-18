@@ -5,12 +5,14 @@
 지역 검색 본 질의 시간의 37~56%였다. 같은 키를 공개 Feature마다 미리 계산해 둔다.
 
 무엇이 정본인가. 키를 만드는 식은 ``feature_repo``의 검색 질의가 키가 없을 때 쓰는 식과 같은
-함수(``_search_keys_select_sql``)에서 나온다. 행마다 ``keys_version``(그 SQL의 지문)과 키를 만든
-``name``·``category``를 함께 저장하고, 검색은 셋이 모두 지금 행·지금 코드와 같을 때만 저장 키를
-쓴다. 그래서 이 표가 비었거나 묵어도 순위는 같다(느릴 뿐이다) — 이름이 바뀐 행은 다음 갱신 전까지
-식으로 계산된다.
+함수(``search_keys_select_sql``)에서 나온다. 행마다 ``keys_version``(그 SQL의 지문)·
+``server_fingerprint``(PostgreSQL 판과 DB의 ctype·collation 판 — 유니코드 정규화·소문자 변환이
+여기에 달려 있다)·키를 만든 ``name``·``category``를 함께 저장하고, 검색은 넷이 모두 지금과 같을
+때만 저장 키를 쓴다. 서버를 올리면(판·locale) 모든 행이 맞지 않게 되어 식으로 계산되고 다음
+갱신이 다시 쓴다. 그래서 이 표가 비었거나 묵어도 순위는 같다(느릴 뿐이다) — 이름이 바뀐 행은
+다음 갱신 전까지 식으로 계산된다.
 
-언제 도는가. maintenance job(``consistency_dedup_refresh``, 매일)이 검색 인지도 갱신 뒤에 부른다.
+언제 도는가. maintenance job(``consistency_dedup_refresh``, 매일)이 dedup 갱신 뒤에 부른다.
 키가 없거나 맞지 않는 공개 행만 계산해 쓰고(첫 실행 뒤로는 그날 새로 적재·변경된 행뿐이다), 공개가
 아닌(사라진·비공개) 행의 키는 지운다. ``feature.features``는 읽기만 한다.
 """
@@ -22,7 +24,11 @@ from typing import TYPE_CHECKING, Final
 
 from sqlalchemy import text
 
-from kortravelmap.infra.feature_repo import SEARCH_KEYS_VERSION, _search_keys_select_sql
+from kortravelmap.infra.feature_repo import (
+    SEARCH_KEYS_SERVER_FINGERPRINT_SQL,
+    SEARCH_KEYS_VERSION,
+    search_keys_select_sql,
+)
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +50,7 @@ _STALE_PUBLIC_FEATURES_SQL: Final[str] = f"""(
         FROM feature.feature_search_keys AS k
         WHERE k.feature_id = f.feature_id
           AND k.keys_version = {SEARCH_KEYS_VERSION}
+          AND k.server_fingerprint = {SEARCH_KEYS_SERVER_FINGERPRINT_SQL}
           AND k.name = f.name
           AND k.category = f.category
     )
@@ -53,23 +60,24 @@ _STALE_PUBLIC_FEATURES_SQL: Final[str] = f"""(
 def _refresh_sql() -> str:
     return f"""
 WITH computed AS MATERIALIZED (
-{_search_keys_select_sql(_STALE_PUBLIC_FEATURES_SQL)}
+{search_keys_select_sql(_STALE_PUBLIC_FEATURES_SQL)}
 ),
 upserted AS (
     INSERT INTO feature.feature_search_keys AS t (
-        feature_id, keys_version, name, category,
+        feature_id, keys_version, server_fingerprint, name, category,
         compact_name, compact_raw_name, compact_tail,
         compact_base_name, compact_paren_base_name, compact_bracket_name,
         search_group, computed_at
     )
     SELECT
-        feature_id, {SEARCH_KEYS_VERSION}, name, category,
+        feature_id, {SEARCH_KEYS_VERSION}, {SEARCH_KEYS_SERVER_FINGERPRINT_SQL}, name, category,
         compact_name, compact_raw_name, compact_tail,
         compact_base_name, compact_paren_base_name, compact_bracket_name,
         search_group, now()
     FROM computed
     ON CONFLICT (feature_id) DO UPDATE
        SET keys_version = EXCLUDED.keys_version,
+           server_fingerprint = EXCLUDED.server_fingerprint,
            name = EXCLUDED.name,
            category = EXCLUDED.category,
            compact_name = EXCLUDED.compact_name,

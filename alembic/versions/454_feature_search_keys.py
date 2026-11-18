@@ -10,12 +10,14 @@ Revises: 453_features_autovacuum
 
 무엇을 하는가.
 
-- ``feature.feature_search_keys(feature_id PK, keys_version, name, category, compact_* 여섯,
+- ``feature.feature_search_keys(feature_id PK, keys_version, server_fingerprint, name, category,
+  compact_* 여섯,
   search_group, computed_at)``. 소유자 ``ktm_feature_schema_owner``. 런타임 권한
   (SELECT·INSERT·UPDATE·DELETE)은 배포 조정기(``infra/runtime_privileges.py``)가 건다.
   ``feature.features`` FK·트리거는 두지 않는다 — Feature 쓰기 경로(적재·관리 편집)와
   잠금·쓰기 비용을 엮지 않는다. 색인은 PK 하나다.
-- 검색은 ``keys_version``(키 식의 지문)·``name``·``category``가 지금 행과 **모두 같을 때만**
+- 검색은 ``keys_version``(키 식의 지문)·``server_fingerprint``(PostgreSQL 판과 DB의 ctype·
+  collation 판)·``name``·``category``가 지금과 **모두 같을 때만**
   저장 키를 쓰고, 아니면 종전 식으로 계산한다. 그래서 표가 비었거나 묵어도(새 행·이름이
   바뀐 행·키 식이 바뀐 배포) 순위는 이 revision 전과 같다 — 빨라지지 않을 뿐이다.
 - receipt head CHECK에 이 revision을 더한다.
@@ -59,6 +61,7 @@ _CREATE_SEARCH_KEYS_SQL: Final[str] = """
 CREATE TABLE feature.feature_search_keys (
     feature_id uuid NOT NULL,
     keys_version bigint NOT NULL,
+    server_fingerprint text NOT NULL,
     name text NOT NULL,
     category text NOT NULL,
     compact_name text,

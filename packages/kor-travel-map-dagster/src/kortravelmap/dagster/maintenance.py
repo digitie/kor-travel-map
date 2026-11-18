@@ -638,14 +638,15 @@ async def refresh_search_prominence_op(
 )
 async def refresh_search_keys_op(
     context: OpExecutionContext,
-    prominence_refresh: dict[str, object],
+    dedup_refresh: dict[str, object],
 ) -> dict[str, object]:
-    """검색 인지도 갱신 뒤 검색 비교 키(``feature.feature_search_keys``)를 채운다(T-READ-06).
+    """dedup 후보 갱신 뒤 검색 비교 키(``feature.feature_search_keys``)를 채운다(T-READ-06).
 
     키가 없거나 맞지 않는(새·이름이 바뀐·키 식이 바뀐) 공개 Feature만 계산해 쓰고, 공개가 아닌
-    Feature의 키는 지운다. 표가 묵어도 검색 순위는 같다(느릴 뿐이다). 앞 op 결과는 순서만 잇는다.
+    Feature의 키는 지운다. 표가 묵어도 검색 순위는 같다(느릴 뿐이다). 검색 인지도 op와 따로 돈다
+    (한쪽이 실패해도 다른 쪽은 돈다). dedup 갱신 결과는 순서만 잇는다.
     """
-    del prominence_refresh
+    del dedup_refresh
     client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     result = await client.refresh_search_keys()
     metadata: dict[str, object] = {
@@ -939,8 +940,8 @@ def consistency_dedup_refresh_job() -> None:
     """운영자가 Dagster UI/API에서 실행하는 consistency/dedup refresh job."""
     dedup_refresh = refresh_dedup_candidates_op()
     run_consistency_check_op(dedup_refresh)
-    prominence_refresh = refresh_search_prominence_op(dedup_refresh)
-    refresh_search_keys_op(prominence_refresh)
+    refresh_search_prominence_op(dedup_refresh)
+    refresh_search_keys_op(dedup_refresh)
     purge_expired_notices_op()
     purge_resolved_integrity_findings_op()
 

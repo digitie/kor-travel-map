@@ -2214,7 +2214,7 @@ def _search_key_column_sqls() -> tuple[tuple[str, str], ...]:
     )
 
 
-def _search_keys_select_sql(source: str) -> str:
+def search_keys_select_sql(source: str) -> str:
     """``source``(``feature_id``·``name``·``category``가 있는 관계)의 행마다 비교 키를 계산한다.
 
     ``feature.feature_search_keys``를 채우는 refresh(``infra.search_keys_repo``)가 쓴다. 단계는
@@ -2261,12 +2261,25 @@ def _search_keys_version() -> int:
     키를 만드는 SQL 전체(보이는 이름·분류 그룹·공백 집합·끝말 정규식이 모두 들어 있다)의
     sha256 앞 8바이트다. 표의 ``keys_version``이 이 값과 다른 행은 검색이 식으로 계산한다.
     """
-    digest = hashlib.sha256(_search_keys_select_sql("src").encode("utf-8")).digest()
+    digest = hashlib.sha256(search_keys_select_sql("src").encode("utf-8")).digest()
     return int.from_bytes(digest[:8], "big", signed=True)
 
 
 #: 현재 코드의 비교 키 지문 — ``feature.feature_search_keys.keys_version``과 비교한다.
 SEARCH_KEYS_VERSION: Final[int] = _search_keys_version()
+
+#: 키 값은 SQL 문자열만이 아니라 서버에도 달려 있다 — ``normalize``의 유니코드 표는 PostgreSQL
+#: 판마다, ``lower``·정규식 문자 부류는 DB의 ctype·collation 라이브러리마다 다를 수 있다. 서버
+#: 판(``server_version_num``)과 DB의 ctype·collation 판(``pg_database``)을 함께 저장하고 같을 때만
+#: 쓴다. 상관 없는 하위 질의라 질의마다 한 번(InitPlan) 계산된다.
+SEARCH_KEYS_SERVER_FINGERPRINT_SQL: Final[str] = """(
+    SELECT current_setting('server_version_num')
+           || ':' || coalesce(db.datlocprovider::text, '')
+           || ':' || coalesce(db.datctype, '')
+           || ':' || coalesce(db.datcollversion, '')
+    FROM pg_catalog.pg_database AS db
+    WHERE db.datname = current_database()
+)"""
 
 
 def _search_stored_key_columns_sql() -> str:
@@ -2478,9 +2491,9 @@ compacted AS (
     -- 이름 끝 라틴 괄호의 두 변형(core.search_name): "JW 메리어트 호텔 서울 (JW Marriott Hotel
     -- Seoul)"의 한글 이름과 영문 이름(없으면 NULL). 끝 괄호(한글 표식 포함 — "신륵사(여주)")를 뗀
     -- 이름: 괄호 안은 같은 이름을 가르는 표식이라 괄호 앞 이름이 검색어와 같으면 이름 일치다(P6).
-    -- 미리 계산한 키(T-READ-06, ``feature.feature_search_keys``): 지문(``SEARCH_KEYS_VERSION``)과
-    -- 이름·분류가 지금 행과 같을 때만 쓰고, 아니면(새 행·이름이 바뀐 행·식이 바뀐 배포) 같은 식으로
-    -- 계산한다 — 순위는 표가 있든 없든 같다. 후보마다 PK 탐색 한 번(LATERAL + LIMIT — 표 전체를
+    -- 미리 계산한 키(T-READ-06, ``feature.feature_search_keys``): 식 지문(``SEARCH_KEYS_VERSION``)·
+    -- 서버 지문·이름·분류가 지금과 같을 때만 쓰고, 아니면(새 행·이름이 바뀐 행·식이 바뀐 배포·서버
+    -- 판올림) 같은 식으로 계산한다 — 순위는 표가 있든 없든 같다. 후보마다 PK 탐색 한 번(LATERAL + LIMIT — 표 전체를
     -- 해시하지 않는다).
     SELECT
         filtered.*,
@@ -2493,6 +2506,7 @@ compacted AS (
         FROM feature.feature_search_keys AS stored
         WHERE stored.feature_id = filtered.feature_id
           AND stored.keys_version = {SEARCH_KEYS_VERSION}
+          AND stored.server_fingerprint = {SEARCH_KEYS_SERVER_FINGERPRINT_SQL}
           AND stored.name = filtered.name
           AND stored.category = filtered.category
         LIMIT 1

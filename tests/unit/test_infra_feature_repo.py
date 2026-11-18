@@ -1988,7 +1988,7 @@ def test_search_rank_digits_end_with_specificity_then_prominence() -> None:
 
 def test_search_keys_table_and_fallback_share_one_expression_set() -> None:
     """T-READ-06: 키 표를 채우는 식과 검색의 대체 식은 같은 문자열이고 지문은 그 식에서 나온다."""
-    select = feature_repo._search_keys_select_sql("src")
+    select = feature_repo.search_keys_select_sql("src")
     columns = feature_repo._search_key_column_sqls()
     assert [column for column, _ in columns] == [
         "compact_name",
@@ -2011,6 +2011,10 @@ def test_search_keys_table_and_fallback_share_one_expression_set() -> None:
     ):
         assert statement.count("FROM feature.feature_search_keys AS stored") == 1
         assert guard in statement
+        assert (
+            "stored.server_fingerprint = " + feature_repo.SEARCH_KEYS_SERVER_FINGERPRINT_SQL
+            in statement
+        )
         assert "stored.name = filtered.name" in statement
         assert "stored.category = filtered.category" in statement
         # 키가 없을 때의 식은 종전 식 그대로다(검색 그룹은 COALESCE의 둘째 인자).

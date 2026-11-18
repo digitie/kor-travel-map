@@ -281,7 +281,7 @@ def test_consistency_dedup_refresh_job_executes_configured_scopes() -> None:
         "changed": 12,
         "deleted": 3,
     }
-    # 검색 비교 키(T-READ-06)는 인지도 갱신 뒤 한 번 채운다.
+    # 검색 비교 키(T-READ-06)는 dedup 갱신 뒤 한 번 채운다.
     assert client.search_keys_calls == 1
     assert result.output_for_node("refresh_search_keys") == {"written": 42, "deleted": 5}
 
