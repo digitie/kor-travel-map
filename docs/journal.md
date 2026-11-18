@@ -1,3 +1,25 @@
+## 2026-11-18 — 읽기 성능 Map 작업: 소유자 결정 적용 결과(문서 전용)
+
+- 머지: `T-READ-08` autovacuum 문턱(alembic 453, #1509), `T-READ-02` 느린 요청 로그·pool 지표(#1510), `T-READ-01` 기준선
+  도구(#1512, 실행은 측정 창). 셋 다 Map 회전(spec 불변)으로 나간다 — 배포는 하지 않았다.
+- 브랜치만(머지 안 함):
+  - `perf/t-read-03-public-read-deadline` — 공개 읽기 요청 마감. PinVi `T-READ-PIN-04`가 머지·**운영 반영**된 것을 확인한
+    뒤 머지·배포한다(그 전에는 PinVi가 503 `READ_TIMEOUT`을 세 번 다시 보낸다). 독립 적대 리뷰 1회 반영.
+  - `perf/t-read-04-transport-near-batch` — `POST /v1/service/transport/{dataset}/near-batch`. 덧붙이기만 하는 route라 기존
+    소비자와 호환되지만 **service·full OpenAPI가 바뀐다**. 머지하면 그 뒤 Map 회전은 PinVi 재vendor 없이 pair gate를 통과하지
+    못한다 — 위 둘(08·02)을 Map 단독 회전으로 낼 수 있게 PinVi `T-READ-PIN-01` ③(재vendor + near-batch client + 405 fallback)이
+    준비될 때 머지하고 한 pair 회전으로 낸다.
+- 대기(측정 뒤, 결정 1):
+  - `T-READ-05` — 채택 판정이 측정(전처리 두 질의가 검색 시간의 5% 이상)이다. 코드로 보이는 이득은 따뜻할 때 수 ms로
+    추정되고(F-07), 바꾸면 지역 이름 선택(표본 → 최빈값)과 문턱 3만 근처의 좁음/넓음 판정이 달라질 수 있으며 새 refresh에
+    기댄다. 측정 없이 이득이 분명하지 않다.
+  - `T-READ-06` — 묵은 키 허용은 정해졌지만(결정 3) 채택 판정(이름 정규화 비중 30%)과 되돌림 기준(p50 40%)이 측정이다.
+    40만 행 표·refresh·평가 묶음까지 큰 변경이라 측정 전에 하지 않는다.
+  - `T-READ-07` — 지울 색인은 14일 간격 두 스냅샷과 읽는 경로로 정한다. 3.6일 창의 "탐색 0"은 근거가 약하고(§4.1) 지운
+    색인은 되살리는 비용이 크다. fillfactor 90도 적재 전후 측정으로 정한다.
+- 운영 쪽 관측의 남은 몫(Map 코드 밖): 지표 켜기·token(Manager `T-READ-MGR-03`), scrape(`T-READ-MGR-02`), PG
+  `pg_stat_statements`·느린 질의 로그(`T-READ-MGR-01` — **공용 PG 재생성 창** 필요).
+
 ## 2026-11-18 — T-READ-01: 읽기 기준선 도구(실행은 측정 창에서)
 
 - 소유자 결정(2026-11-18)에 따라 **도구만** 넣었다. 운영 DB·운영 API에서 돌리지 않았다 — 조용한 측정 창은 소유자가
