@@ -548,6 +548,12 @@ _COMMAND_REGISTRY: Final[dict[OperationKey, CommandPolicy]] = {
     ("POST", "/v1/service/weather/locations/batch"): _query(
         "Valkey weather 상태 읽기 batch(최대 50곳)를 URL 길이 때문에 POST로 표현(ADR-114 W7)"
     ),
+    ("POST", "/v1/service/transport/fuel-stations/near-batch"): _query(
+        "Valkey transport 묶음 근처 읽기(중심 최대 60곳)를 URL 길이 때문에 POST로 표현(T-READ-04)"
+    ),
+    ("POST", "/v1/service/transport/highway-incidents/near-batch"): _query(
+        "Valkey transport 묶음 근처 읽기(중심 최대 60곳)를 URL 길이 때문에 POST로 표현(T-READ-04)"
+    ),
     (
         "PUT",
         "/v1/service/cache-targets/{external_system}/{target_key}",
