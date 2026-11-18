@@ -18,6 +18,7 @@
   묶음 전후 PSI io `some avg60`을 적는다. service token은 `--token-file` 또는 `KOR_TRAVEL_MAP_PROBE_SERVICE_TOKEN`에서
   읽어 헤더로만 보내고 출력·파일에 쓰지 않는다(시험). loopback이 아닌 대상은 보고서에 `<non-loopback>`으로만 적는다.
 - 남은 해제 조건(acceptance `T-READ-01` 둘째~여섯째)은 측정 창의 실행과 보고서다.
+
 ## 2026-11-18 — T-READ-02: 요청 도착 시각·느린 요청 로그·pool 대기 지표
 
 - 소유자 결정(2026-11-18)에 따라 측정 없이 가치가 분명한 관측 코드로 진행했다(계획 F-03 — 운영 Map에는 읽기 지연을 볼
