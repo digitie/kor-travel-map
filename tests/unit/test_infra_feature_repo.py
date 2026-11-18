@@ -859,6 +859,35 @@ def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
         assert "f.coord_5179 IS NOT NULL" in sql
 
 
+def test_nearby_sql_joins_primary_source_after_page_limit() -> None:
+    """T-READ-09: primary source LATERAL은 잘린 page 행에만 붙고, 거리순 page는 KNN이다.
+
+    종전 SQL은 반경 안 전 행(100 km에서 20만 행)에 LATERAL을 돌고 나서 잘라 5초가 걸렸다.
+    """
+    for label, by_sort in (
+        ("target", feature_repo._NEARBY_SQL_BY_SORT),
+        ("coord", feature_repo._NEARBY_COORD_SQL_BY_SORT),
+    ):
+        assert set(by_sort) == {"distance", "name", "last_updated_at"}
+        for sort, sql in by_sort.items():
+            page_limit = sql.index("LIMIT :limit_plus_one")
+            assert sql.count("LIMIT :limit_plus_one") == 1, (label, sort)
+            assert sql.count("LEFT JOIN LATERAL") == 1, (label, sort)
+            assert sql.index("LEFT JOIN LATERAL") > page_limit, (label, sort)
+            # provider 필터는 응답 열과 같은 선택 규칙(최근 관측 primary)이어야 한다.
+            assert sql.count(
+                "ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key"
+            ) == 2, (label, sort)
+        assert (
+            "ORDER BY f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 ASC, f.feature_id ASC"
+            in by_sort["distance"]
+        ), label
+    # ADR-012: 술어·정렬에 feature 좌표 변환이 없다(입력 좌표만 origin에서 1회).
+    for sql in feature_repo._NEARBY_COORD_SQL_BY_SORT.values():
+        assert sql.count("x_extension.ST_Transform(") == 1
+        assert "ST_Transform(f." not in sql
+
+
 #: T-VN-35(ADR-086) 이후의 종료 notice 감산 술어 — free-form jsonb 문자열
 #: 파싱이 아니라 ``feature_notices.valid_end_time`` typed 비교다.
 _TYPED_ENDED_NOTICE_FRAGMENTS: tuple[str, ...] = (
