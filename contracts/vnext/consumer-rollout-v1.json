@@ -190,9 +190,9 @@
       },
       "pinvi_snapshot_receipt": {
         "state": "pending",
-        "map_service_openapi_sha256": "fd2aaa9e8c38e8a7f1a54550233b1b5af5a7aea1089c5432100d7464e5e4aaff",
+        "map_service_openapi_sha256": "ed380047bc420e4469bd6f4f88740cfd54c23a50d1a88ccb97215737d76df275",
         "pinvi_service_vendor_sha256": "e1152a058e176f4f3aaeb4bb0965434f657601639786463f873ac82c6f3018eb",
-        "blocking_reason": "T-VN-41S added the reachable generic snapshot 410 and corrected the admission ceilings. PinVi #465 merged the exact service/full-admin vendor; Docker-manager v5 pinset and isolated paired acceptance remain before this pending receipt can be promoted. PR #1414의 전용 관리자 Feature GET 두 경로를 service/full-admin exact re-vendor 대상에 포함한다. 새 pair/UI·명시 provision 전에는 pending을 유지하며 원 PinVi vendor/후보 이력은 완료 증거로 재작성하지 않는다. PinVi #643 후속(2026-11-04, Map PR #1445)은 관리자 Feature search_scope와 ops 중복 검토 목록을 추가했다. 현재 Map 지문만 갱신하며 기존 PinVi vendor 지문·pending 상태를 보존한다. 후속 PinVi 재vendor·WSL 검증과 Claude Code의 최종 운영 검증 전에는 완료 receipt로 승격하지 않는다."
+        "blocking_reason": "T-VN-41S added the reachable generic snapshot 410 and corrected the admission ceilings. PinVi #465 merged the exact service/full-admin vendor; Docker-manager v5 pinset and isolated paired acceptance remain before this pending receipt can be promoted. PR #1414의 전용 관리자 Feature GET 두 경로를 service/full-admin exact re-vendor 대상에 포함한다. 새 pair/UI·명시 provision 전에는 pending을 유지하며 원 PinVi vendor/후보 이력은 완료 증거로 재작성하지 않는다. PinVi #643 후속(2026-11-04, Map PR #1445)은 관리자 Feature search_scope와 ops 중복 검토 목록을 추가했다. 현재 Map 지문만 갱신하며 기존 PinVi vendor 지문·pending 상태를 보존한다. 후속 PinVi 재vendor·WSL 검증과 Claude Code의 최종 운영 검증 전에는 완료 receipt로 승격하지 않는다. 2026-11-18 T-READ-04는 service에 `/v1/service/transport/{fuel-stations,highway-incidents}/near-batch` POST 2 operation을 추가했다(service·full-admin bytes 변경, user 불변). 현재 Map service 지문만 갱신하며 기존 PinVi vendor 지문·pending 상태를 보존한다 — PinVi T-READ-PIN-01 ③ service exact 재vendor와 Map+PinVi 한 pair 회전 뒤에도 격리 paired 검증 전에는 승격하지 않는다."
       }
     },
     "T-VN-39": {

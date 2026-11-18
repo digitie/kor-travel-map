@@ -17,7 +17,7 @@ from kortravelmap.infra import feature_repo
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_public_read_session
 from kortravelmap.api.response import Meta, make_meta
 
 router = APIRouter(tags=["categories"])
@@ -101,7 +101,7 @@ _STATIC_CATEGORIES: tuple[CategorySummary, ...] = tuple(
     summary="PlaceCategory 정적 카탈로그(145건, 선택적 DB 분포)",
 )
 async def list_categories(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
     include_counts: Annotated[
         bool, Query(description="현재 DB 공개 feature 분포(category별 수)를 포함")
     ] = False,

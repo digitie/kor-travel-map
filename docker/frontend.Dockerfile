@@ -5,10 +5,6 @@ ENV PUPPETEER_SKIP_DOWNLOAD=1 \
 
 WORKDIR /app
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates git \
-    && rm -rf /var/lib/apt/lists/*
-
 COPY package.json ./
 COPY package-lock.json ./
 COPY .npmrc ./
@@ -19,7 +15,7 @@ COPY packages/kor-travel-map-user-client/package.json ./packages/kor-travel-map-
 COPY scripts/verify-next-sharp.mjs ./scripts/verify-next-sharp.mjs
 COPY scripts/verify-npm-tree.mjs ./scripts/verify-npm-tree.mjs
 
-RUN npx --yes npm@12.0.1 ci --workspaces --include=optional \
+RUN npx --yes npm@12.0.1 ci --workspaces --engine-strict \
     && npx --yes npm@12.0.1 run verify:npm-tree \
     && npx --yes npm@12.0.1 run verify:next-sharp
 
@@ -79,14 +75,11 @@ ENV NODE_ENV=production \
 
 WORKDIR /app
 
-RUN groupadd --system nodejs \
-    && useradd --system --gid nodejs --home-dir /app --shell /usr/sbin/nologin nextjs
+COPY --from=builder --chown=node:node /app/packages/kor-travel-map-admin/frontend/.next/standalone ./
+COPY --from=builder --chown=node:node /app/packages/kor-travel-map-admin/frontend/public ./packages/kor-travel-map-admin/frontend/public
+COPY --from=builder --chown=node:node /app/packages/kor-travel-map-admin/frontend/.next/static ./packages/kor-travel-map-admin/frontend/.next/static
 
-COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/.next/standalone ./
-COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/public ./packages/kor-travel-map-admin/frontend/public
-COPY --from=builder --chown=nextjs:nodejs /app/packages/kor-travel-map-admin/frontend/.next/static ./packages/kor-travel-map-admin/frontend/.next/static
-
-USER nextjs
+USER node
 
 EXPOSE 12705
 

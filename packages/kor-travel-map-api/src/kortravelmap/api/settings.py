@@ -474,6 +474,41 @@ class ApiSettings(BaseSettings):
             "True면 모든 API 호출을 ops.api_call_log에 best-effort 기록(opt-in, 기본 off)."
         ),
     )
+    slow_request_log_ms: int = Field(
+        default=1000,
+        ge=0,
+        description=(
+            "요청 시간이 이 값(ms) 이상이면 route template·status·시간·DB 문장 수·DB 시간·"
+            "pool 대기·request id를 WARNING 한 줄로 남긴다(T-READ-02). 지표 flag와 무관하다. "
+            "0이면 끈다. env ``KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS``."
+        ),
+    )
+    public_read_budget_ms: int = Field(
+        default=4500,
+        ge=0,
+        description=(
+            "공개 읽기 요청 마감(ms, T-READ-03). 요청 도착에서 세고, 남은 시간을 SQL 문장 상한으로 "
+            "넘긴다. 넘으면 503 ``READ_TIMEOUT``. PinVi의 읽기 timeout(5초)보다 짧아야 한다. "
+            "0이면 끈다. env ``KOR_TRAVEL_MAP_API_PUBLIC_READ_BUDGET_MS``."
+        ),
+    )
+    public_read_slow_budget_ms: int = Field(
+        default=14000,
+        ge=0,
+        description=(
+            "``GET /v1/public/festivals/monthly`` 전용 마감(ms). PinVi가 이 route만 15초 기다린다. "
+            "0이면 끈다. env ``KOR_TRAVEL_MAP_API_PUBLIC_READ_SLOW_BUDGET_MS``."
+        ),
+    )
+    public_read_pool_wait_ms: int = Field(
+        default=2000,
+        ge=0,
+        description=(
+            "공개 읽기의 pool 체크아웃 대기 상한(ms). 넘으면 503 ``POOL_BUSY``. 엔진의 "
+            "``pool_timeout``(admin·ops·쓰기)은 바꾸지 않는다. 0이면 요청 마감만 쓴다. "
+            "env ``KOR_TRAVEL_MAP_API_PUBLIC_READ_POOL_WAIT_MS``."
+        ),
+    )
     prometheus_metrics_enabled: bool = Field(
         default=True,
         description=(

@@ -61,7 +61,7 @@ _NAME = r"[a-z_][a-z0-9_]*"
 _QUALIFIED = _NAME + r"\." + _NAME
 
 _CREATE_TABLE = re.compile(
-    r"^CREATE TABLE (?P<name>" + _QUALIFIED + r") \((?P<body>.*?)\n\);",
+    r"^CREATE TABLE (?P<name>" + _QUALIFIED + r") \((?P<body>.*?)\n\)(?:\nWITH \([^)]*\))?;",
     re.DOTALL | re.MULTILINE,
 )
 _CREATE_TABLE_HEADER = re.compile(r"^CREATE TABLE (?P<name>\S+)", re.MULTILINE)

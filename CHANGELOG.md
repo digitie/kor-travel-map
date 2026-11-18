@@ -4,6 +4,23 @@
 
 - `POST /v1/service/transport/fuel-stations/near-batch`·`POST /v1/service/transport/highway-incidents/near-batch`: 중심 최대 60곳의 근처를 한 요청·한 세대로 읽는다(Valkey 왕복 셋). 응답은 목록 route와 같은 모양이고 `distance_m`은 가장 가까운 중심까지다. service·full OpenAPI additive — PinVi service 재vendor 필요(Map+PinVi 한 회전).
 
+## 2026-11-18 — 공개 읽기 요청 마감(T-READ-03, PinVi T-READ-PIN-04 운영 반영 뒤)
+
+- 공개 읽기 route는 요청 도착에서 4.5초(`KOR_TRAVEL_MAP_API_PUBLIC_READ_BUDGET_MS`) 안에 끝나지 않으면 503 `READ_TIMEOUT`, pool 대기 2초(`…_POOL_WAIT_MS`)를 넘으면 503 `POOL_BUSY`. 축제 월별만 14초(`…_SLOW_BUDGET_MS`). 0이면 끈다. 응답 모양·OpenAPI 변경 없음(공통 problem 응답).
+
+## 2026-11-18 — 공통 프론트엔드 guard ref 갱신(Common T-417)
+
+- 공통 guard 호출을 `0dec954`(공통 Node 축 26.13.1)로 올리고 도구 규칙 입력을 채웠다. frontend 이미지: apt 패키지 설치 제거, `npm ci --engine-strict`, 실행 사용자 `nextjs` → 이미지 내장 `node`(uid 1000). REST·OpenAPI·DB 변경 없음.
+
+## 2026-11-18 — API 느린 요청 로그·pool 대기 지표(T-READ-02)
+
+- 새 설정 `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS`(기본 1000, 0이면 끔): 그 이상 걸린 요청을 route template·status·시간·DB 문장 수·DB 시간·pool 대기·request id와 함께 WARNING 한 줄로 남긴다. 지표 flag와 무관하다.
+- `/metrics`: `kor_travel_map_db_pool_wait_seconds`(histogram), `kor_travel_map_db_pool_checked_out`·`kor_travel_map_db_pool_overflow`(gauge). REST·OpenAPI 변경 없음.
+
+## 2026-11-18 — `feature.features` autovacuum 문턱(alembic 453)
+
+- alembic 453: `feature.features`에 표 단위 `autovacuum_vacuum_scale_factor=0.02`·`autovacuum_vacuum_insert_scale_factor=0.05`·`autovacuum_analyze_scale_factor=0.02`. 표를 다시 쓰지 않는다(`SHARE UPDATE EXCLUSIVE`, catalog만). 배포 직후 그 표의 autovacuum이 한 번 돈다. REST·OpenAPI 변경 없음.
+
 ## 2026-11-17 — 프론트 workspace 정확 Node 26.13.1(ADR-124)
 
 - 루트 `.nvmrc` 26.13.1, `engines.node` 정확 26.13.1(npm 12.0.1 그대로). CI·frontend 이미지(`node:26.13.1-bookworm-slim`)·live e2e 실행 이미지가 같은 Node를 쓴다. 다른 Node로는 `npm ci`가 `engine-strict`로 거절된다. REST·OpenAPI·DB 변경 없음.

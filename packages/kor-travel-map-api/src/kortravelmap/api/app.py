@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
 from contextlib import asynccontextmanager
-from time import perf_counter
+from time import monotonic, perf_counter
 from typing import Any
 
 import httpx
@@ -38,6 +38,7 @@ from kortravelmap.infra import (
 from kortravelmap.infra.db import assert_runtime_db_privilege_boundary
 from kortravelmap.infra.feature_subtype import SubtypeDetailError
 from kortravelmap.infra.log_repo import record_api_call
+from kortravelmap.infra.public_read_budget import ReadBudgetExceeded
 from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.exc import DBAPIError
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -58,7 +59,12 @@ from kortravelmap.api.cors import (
     build_cors_surface_patterns,
 )
 from kortravelmap.api.dagster_http import DagsterHttpClientMiddleware
-from kortravelmap.api.db import configure_prometheus_metrics
+from kortravelmap.api.db import (
+    PUBLIC_READ_BUDGET_STATE,
+    PoolBusy,
+    configure_prometheus_metrics,
+    pool_status,
+)
 from kortravelmap.api.domain_command_service import (
     DomainCommandFingerprintConflict,
     DomainCommandFingerprintVersionConflict,
@@ -66,7 +72,13 @@ from kortravelmap.api.domain_command_service import (
     DomainCommandReplay,
     sqlstate_of,
 )
-from kortravelmap.api.prometheus import PrometheusMetrics
+from kortravelmap.api.prometheus import PrometheusMetrics, route_template
+from kortravelmap.api.request_timing import (
+    RequestDbTiming,
+    bind_request_db_timing,
+    log_slow_request,
+    reset_request_db_timing,
+)
 from kortravelmap.api.response import ProblemDetail, bind_request_id, reset_request_id
 from kortravelmap.api.response import request_id as response_request_id
 from kortravelmap.api.route_policy import (
@@ -658,6 +670,23 @@ def _manual_feature_create_validation_errors(
     return sanitized
 
 
+def _under_public_read_budget(request: Request) -> bool:
+    return isinstance(getattr(request.state, PUBLIC_READ_BUDGET_STATE, None), int)
+
+
+def _read_timeout_response(request: Request) -> JSONResponse:
+    """공개 읽기 예산을 넘은 요청(T-READ-03). PinVi는 이 code를 다시 보내지 않는다(PIN-04)."""
+    request_id = _request_id(request)
+    _logger.warning("read_timeout (request_id=%s): %s", request_id, request.url.path)
+    return _error_response(
+        status_code=503,
+        code="READ_TIMEOUT",
+        message="조회가 시간 안에 끝나지 않았습니다. 범위를 줄이거나 잠시 뒤 다시 시도하세요.",
+        details={},
+        request_id=request_id,
+    )
+
+
 def _error_response(
     *,
     status_code: int,
@@ -853,6 +882,7 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         )
         application.state.prometheus_metrics = prometheus_metrics
         configure_prometheus_metrics(prometheus_metrics)
+        prometheus_metrics.bind_db_pool_status(pool_status)
         endpoint_metrics = prometheus_metrics
 
         # ADR-066 결정 4 (T-VN-02) — `/metrics`는 scrape identity(management
@@ -1071,6 +1101,8 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         ``lock_timeout``(5s) 안에 얻지 못한 경우다. 다른 DB 오류는 아래 일반 처리기(500,
         traceback 로깅)로 간다.
         """
+        if sqlstate_of(exc) == "57014" and _under_public_read_budget(request):
+            return _read_timeout_response(request)
         if sqlstate_of(exc) != "55P03":
             raise exc
         request_id = _request_id(request)
@@ -1082,6 +1114,26 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             details={},
             request_id=request_id,
             headers={"Retry-After": "5"},
+        )
+
+    @application.exception_handler(ReadBudgetExceeded)
+    async def read_budget_exceeded_handler(
+        request: Request, _exc: ReadBudgetExceeded
+    ) -> JSONResponse:
+        """공개 읽기 마감이 SQL을 보내기 전에 지났다(T-READ-03)."""
+        return _read_timeout_response(request)
+
+    @application.exception_handler(PoolBusy)
+    async def pool_busy_handler(request: Request, _exc: PoolBusy) -> JSONResponse:
+        """공개 읽기가 pool 대기 상한 안에 연결을 얻지 못했다(T-READ-03)."""
+        request_id = _request_id(request)
+        _logger.warning("pool_busy (request_id=%s): %s", request_id, request.url.path)
+        return _error_response(
+            status_code=503,
+            code="POOL_BUSY",
+            message="DB 연결이 모두 사용 중입니다. 잠시 뒤 다시 시도하세요.",
+            details={},
+            request_id=request_id,
         )
 
     @application.exception_handler(Exception)
@@ -1165,6 +1217,38 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             if request.url.path == settings.prometheus_metrics_path:
                 return await call_next(request)
             return await metrics.instrument_request(request, call_next)
+
+    # T-READ-02 — 요청 도착 시각과 요청별 DB 누산기, 느린 요청 로그. 지표 flag와 무관하게
+    # 항상 등록한다(운영은 지표를 꺼 둔 채로도 느린 요청을 봐야 한다). http 미들웨어 중
+    # 가장 바깥(마지막 등록)이라 도착 시각이 가장 이르다 — T-READ-03의 요청 마감이 이 값에서
+    # 센다. 로그는 route template만 쓰고 query string·header·좌표는 쓰지 않는다.
+    slow_request_log_ms = settings.slow_request_log_ms
+
+    @application.middleware("http")
+    async def record_request_timing(
+        request: Request,
+        call_next: Callable[[Request], Awaitable[Response]],
+    ) -> Response:
+        started = monotonic()
+        request.state.started_monotonic = started
+        timing = RequestDbTiming()
+        token = bind_request_db_timing(timing)
+        status_code = 500
+        try:
+            response = await call_next(request)
+            status_code = response.status_code
+            return response
+        finally:
+            reset_request_db_timing(token)
+            log_slow_request(
+                threshold_ms=slow_request_log_ms,
+                method=request.method,
+                route=route_template(request),
+                status_code=status_code,
+                duration_seconds=monotonic() - started,
+                timing=timing,
+                request_id=_request_id(request),
+            )
 
     # public liveness/version은 의존 없는 정적 응답 — 항상 mount (T-213h).
     # `/debug/health`·`/debug/version`은 이와 중복이라 제거(T-214h/ADR-048 clean cut) —

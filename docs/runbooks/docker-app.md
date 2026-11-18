@@ -496,7 +496,7 @@ npm run docker:build
 ```
 
 frontend 이미지는 루트 `package-lock.json`을 build context에 포함하고
-exact npm 12.0.1의 `npm ci --workspaces --include=optional`로 의존성을 설치한다. install 전에
+exact npm 12.0.1의 `npm ci --workspaces --engine-strict`로 의존성을 설치한다. install 전에
 .npmrc를 먼저 복사하고 자체 보안 패치를 포함한 Redocly 1.34.22를 설치한다.
 이전 minimatch override와 postinstall 보정 스크립트는 제거했다. dependency install script는 검토한
 `esbuild@0.28.1`과 `unrs-resolver@1.12.2`만 허용하고 새 package/version은
@@ -512,9 +512,15 @@ audit high, tree-integrity verifier, optimizer smoke, lockfile 갱신과 fronten
 
 runtime 이미지는 root로 실행하지 않는다. `api`와 `dagster` 이미지는 builder stage에서
 Python 패키지를 설치하고 runtime stage에서 `appuser`로 실행한다. `frontend` 이미지는
-Next.js `.next/standalone` 산출물만 runner stage로 복사하고 `nextjs` 사용자로
-`server.js`를 실행한다. Dockerfile을 바꾸는 PR은 multi-stage/non-root/standalone
+Next.js `.next/standalone` 산출물만 runner stage로 복사하고 Node 공식 이미지에 내장된
+비root `node` 사용자로 `server.js`를 실행한다. Dockerfile을 바꾸는 PR은 multi-stage/non-root/standalone
 회귀 테스트를 함께 갱신한다.
+
+`docker/frontend.Dockerfile`은 공통 프론트엔드 정책 guard의 `node-dockerfiles` 입력이다(Common T-417).
+guard는 모든 `FROM node`의 정확 버전·digest, stage마다 `npx --yes npm@12.0.1` 같은 npm 명시 선택,
+`npm ci`의 명시 `--engine-strict`를 정적으로 검사하고, RUN의 실행 파일을 npm·npx·node·mkdir·chown·echo·printf·rm
+(또는 `sh /절대경로.sh`)로 한정한다. 그래서 이 파일에는 `apt-get`·`useradd` 같은 RUN을 두지 않는다
+(lock에 git 의존성이 없어 git 설치가 필요 없고, Node가 CA 묶음을 내장한다).
 
 이미지는 다음 파일에서 만든다.
 

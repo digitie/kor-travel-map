@@ -17,7 +17,7 @@ from kortravelmap.infra import place_attribute_repo
 from pydantic import BaseModel, ConfigDict
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from kortravelmap.api.db import get_session
+from kortravelmap.api.db import get_public_read_session
 from kortravelmap.api.response import Meta, make_meta
 
 __all__ = ["PlaceAttributesResponse", "router"]
@@ -59,7 +59,7 @@ class PlaceAttributesResponse(BaseModel):
     summary="공개 장소 속성 catalog (sort_order 순)",
 )
 async def list_public_place_attributes(
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
 ) -> PlaceAttributesResponse:
     started_at = perf_counter()
     catalog = await place_attribute_repo.list_place_attributes(session, public_only=True)

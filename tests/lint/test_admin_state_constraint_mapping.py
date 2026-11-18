@@ -73,7 +73,7 @@ _WRITES = re.compile(
     r"\b(?:INSERT INTO|UPDATE)\s+((?:feature|ops|provider_sync)\.[a-z0-9_]+)"
 )
 _TABLE = re.compile(
-    r"^CREATE TABLE ((?:feature|ops|provider_sync)\.[a-z0-9_]+) \((.*?)^\);",
+    r"^CREATE TABLE ((?:feature|ops|provider_sync)\.[a-z0-9_]+) \((.*?)^\)(?:\nWITH \([^)]*\))?;",
     re.MULTILINE | re.DOTALL,
 )
 _TABLE_CHECK = re.compile(r"CONSTRAINT (ck_[a-z0-9_]+) CHECK")

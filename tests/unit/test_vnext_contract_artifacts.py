@@ -98,8 +98,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-11-10 ADR-121 R3 — pending receipt의 user·full-admin sha 재핀(장소 속성).
     # 2026-11-17 — 축제 bbox로 user·full 지문 갱신(pending 유지).
     # 2026-11-18 T-READ-04 — pending receipt의 service·full-admin sha 재핀(near-batch).
+    # T-VN-40·T-VN-41 둘 다 — 41의 map_service도 현재 service spec이어야 한다.
     "consumer-rollout-v1.json": (
-        "e9d75b8bfc8b6deba1e0e3d88b96f4ab6b75d44027957b7e8402345f45e05ae0"
+        "17bdfeb7bff695534863951e1c65cec53b6c220e6651f5e8820131cb6c8bd7f4"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

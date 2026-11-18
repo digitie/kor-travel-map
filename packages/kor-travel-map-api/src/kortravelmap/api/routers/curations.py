@@ -55,7 +55,12 @@ from kortravelmap.api.auth import (
     require_admin_frontend,
     require_admin_manual_feature_create,
 )
-from kortravelmap.api.db import get_read_snapshot_session, get_session
+from kortravelmap.api.db import (
+    get_public_read_session,
+    get_public_read_snapshot_session,
+    get_read_snapshot_session,
+    get_session,
+)
 from kortravelmap.api.domain_command_service import (
     domain_command_transaction,
     idempotent_domain_command,
@@ -2628,7 +2633,7 @@ async def promote_admin_theme_candidate(
 @router.get("", response_model=FeatureCurationGroupsResponse)
 async def list_public_curation_groups(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
     provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
@@ -2672,7 +2677,7 @@ async def list_public_curation_groups(
 @router.get("/collections", response_model=CurationCollectionsResponse)
 async def list_public_curation_collections(
     request: Request,
-    session: Annotated[AsyncSession, Depends(get_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
     theme_slug: Annotated[str | None, Query()] = None,
     edition_key: Annotated[str | None, Query()] = None,
     provider_dataset_id: Annotated[int | None, Query(gt=0)] = None,
@@ -2711,7 +2716,7 @@ async def list_public_curation_collections(
 async def get_public_curation_collection(
     request: Request,
     collection_id: UUID,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
 ) -> CurationCollectionResponse:
     started_at = perf_counter()
     result = await curation_repo.get_curation_collection(
@@ -2734,7 +2739,7 @@ async def get_public_curation_collection(
 async def get_public_feature_curations(
     request: Request,
     feature_id: str,
-    session: Annotated[AsyncSession, Depends(get_read_snapshot_session)],
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
 ) -> FeatureCurationGroupResponse:
     started_at = perf_counter()
     # T-VN-32C PR-2 (S11) — `/{feature_id}` 계열과 동일한 경계 해석: legacy·UUID

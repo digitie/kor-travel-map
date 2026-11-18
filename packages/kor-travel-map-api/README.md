@@ -94,6 +94,10 @@ shadcn/ui generated source + `@kor-travel-map/map-marker-react` (ADR-029). 자�
 | `KOR_TRAVEL_MAP_API_ADMIN_ROUTES_ENABLED` | unset | `/admin/*` 운영 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_API_OPS_ROUTES_ENABLED` | unset | `/ops/*` 라우터 활성화. unset이면 features flag를 따름 |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_ENABLED` | `true` | Prometheus pull scrape용 `/metrics` endpoint와 HTTP 요청 count/duration/진행 중 요청/응답 크기, DB query count/duration 계측 활성화 |
+| `KOR_TRAVEL_MAP_API_SLOW_REQUEST_LOG_MS` | `1000` | 요청 시간이 이 값(ms) 이상이면 route template·status·시간·DB 문장 수·DB 시간·pool 대기·request id를 WARNING 한 줄로 남긴다(지표 flag와 무관, query string·header·좌표 없음). `0`이면 끈다 |
+| `KOR_TRAVEL_MAP_API_PUBLIC_READ_BUDGET_MS` | `4500` | 공개 읽기 요청 마감(ms). 요청 도착에서 세고 남은 시간을 SQL 문장 상한으로 넘긴다. 넘으면 503 `READ_TIMEOUT`. PinVi 읽기 timeout(5초)보다 짧게. `0`이면 끈다 |
+| `KOR_TRAVEL_MAP_API_PUBLIC_READ_SLOW_BUDGET_MS` | `14000` | `GET /v1/public/festivals/monthly` 전용 마감(ms). `0`이면 끈다 |
+| `KOR_TRAVEL_MAP_API_PUBLIC_READ_POOL_WAIT_MS` | `2000` | 공개 읽기의 pool 체크아웃 대기 상한(ms). 넘으면 503 `POOL_BUSY`. 엔진 `pool_timeout`(admin·ops·쓰기)은 그대로 |
 | `KOR_TRAVEL_MAP_API_PROMETHEUS_METRICS_PATH` | `/metrics` | Prometheus exposition path. API 포트 `12701`에서 노출되며 OpenAPI에는 포함하지 않음 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_ALLOWED_HOSTS` | `["127.0.0.1","localhost","::1","dagster"]` | Dagster GraphQL 호출 host allowlist. `KOR_TRAVEL_MAP_API_DAGSTER_URL`/override host가 이 목록에 있어야 함 |
 | `KOR_TRAVEL_MAP_API_DAGSTER_REPOSITORY_NAME` | `__repository__` | offline upload load GraphQL launch selector의 repositoryName |
