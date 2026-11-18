@@ -1,3 +1,14 @@
+## 2026-11-18 — dev 포함 npm audit 게이트 한시 완화(GHSA-fc5q-39xc-vjpf)
+
+- 2026-11-17T15:56Z picomatch ReDoS advisory 범위가 `<= 4.0.7`(최신)로 넓어져 frontend 워크플로의
+  `npm high 취약점 gate (dev 포함)`이 main과 모든 PR에서 빨갰다. 패치가 없고 picomatch는 dev 도구
+  (vite·vitest·tinyglobby·fast-glob/micromatch·@typescript-eslint)로만 들어온다. `audit:high`(`--omit=dev`)는 0건.
+- §10.6 2번 절차대로 dev 단계만 완화했다. `audit:*` 스크립트는 그대로 두고, CI 스텝과
+  `verify-all-gates.sh`가 새 `audit:dev:known`(`scripts/audit-dev-known-advisories.mjs`)을 돈다 — high 이상 근원
+  advisory가 이 하나뿐일 때만 통과, 다른 advisory는 계속 막는다. 테스트가 목록을 이 하나로 고정하고
+  목록 밖 high·critical·읽기 실패를 빨갛게 확인한다. `|| true` 거부 단언은 유지.
+- 다시 조일 조건(패치된 picomatch를 lockfile·`overrides`로 소비)은 [§10.6](dev-environment.md)에 적었다.
+
 ## 2026-11-18 — 읽기 성능 Map 작업: 소유자 결정 적용 결과(문서 전용)
 
 - 머지: `T-READ-08` autovacuum 문턱(alembic 453, #1509), `T-READ-02` 느린 요청 로그·pool 지표(#1510), `T-READ-01` 기준선

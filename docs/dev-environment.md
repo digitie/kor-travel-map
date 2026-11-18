@@ -540,6 +540,26 @@ CVE-2026-59870)에 걸렸고, 1.x 패치가 없었으며 2.x override는 `openap
    `audit:dev`만 한시적으로 완화한다. 테스트(`tests/unit/test_frontend_dependency_security.py`)가
    `audit:*` 스크립트의 `|| true`를 거부하므로 완화는 그 단언과 함께 리뷰를 받는다.
 
+### 현재 한시 완화 — GHSA-fc5q-39xc-vjpf (2026-11-18부터)
+
+- **원인**: [GHSA-fc5q-39xc-vjpf](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)(picomatch ReDoS,
+  high)의 영향 범위가 2026-11-17T15:56Z에 `<= 4.0.7`로 넓어졌다. 4.0.7이 최신 릴리스라 패치가 없다.
+  그 시각부터 main과 모든 PR에서 dev 포함 단계가 빨갰다(위 2번에 해당).
+- **범위**: picomatch는 dev 도구로만 트리에 들어온다 — `vite`·`vitest`·`tinyglobby`(`fdir`)·
+  `@next/eslint-plugin-next`(`fast-glob`→`micromatch`)·`@typescript-eslint/typescript-estree`.
+  `npm audit --json`(2026-11-18)의 high 이상 근원 advisory는 이것 하나다(그 밖은 `minimatch`
+  GHSA-g3hv-75wg-m249 moderate — 문턱 아래). 배포 의존성 게이트 `audit:high`는 0건이고 **그대로 막는다**.
+- **방식**: `audit:dev`·`audit:high` 스크립트는 바꾸지 않았다(`|| true` 없음). CI 스텝
+  `npm high 취약점 gate (dev 포함)`과 `scripts/verify-all-gates.sh`만 `npm run audit:dev:known`
+  (`scripts/audit-dev-known-advisories.mjs`)으로 돈다. 같은 `npm audit --audit-level=high`를 `--json`으로
+  돌려 high·critical **근원 advisory**가 모두 완화 목록(지금은 이 하나)에 있을 때만 통과하고, 다른
+  advisory가 하나라도 high 이상이면 지금도 빨갛다. audit 결과를 읽지 못해도 실패다.
+  `tests/unit/test_frontend_dependency_security.py`가 목록이 정확히 이 advisory 하나인지와, 목록 밖
+  high·critical을 막는지(일부러 빨갛게 만든 입력)를 확인한다.
+- **다시 조일 조건**: 패치된 picomatch 릴리스가 나와 lockfile·`overrides`로 소비되면, 두 자리(CI 스텝·
+  `verify-all-gates.sh`)를 `npm run audit:dev`로 되돌리고 `audit:dev:known`·검사 스크립트·테스트의 예외
+  블록을 지운다. advisory가 철회돼도 같다.
+
 ## 10.7 geo live 테스트가 "public API key 거부"로 실패할 때
 
 `tests/integration/test_dedup_with_kraddr_geo_live.py`는 실제 kor-travel-geo를 호출한다.

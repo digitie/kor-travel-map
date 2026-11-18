@@ -266,7 +266,8 @@ fi
 
 echo "===== frontend.yml"
 run_gate "audit:high"              repo "$NPM run audit:high"
-run_gate "audit:dev"               repo "$NPM run audit:dev"
+# 2026-11-18 한시 완화(GHSA-fc5q-39xc-vjpf, docs/dev-environment.md §10.6) — CI와 같은 스텝.
+run_gate "audit:dev:known"         repo "$NPM run audit:dev:known"
 run_gate "verify:npm-tree"         repo "$NPM run verify:npm-tree"
 run_gate "admin common dependencies" repo "$NPM -w $ADMIN run check:dependencies"
 run_gate "verify:frontend-eslint"  repo "$NPM run verify:frontend-eslint"
