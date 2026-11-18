@@ -15,6 +15,8 @@ import scripts.perf_tier2_release_harness as harness
 from kortravelmap.core.search_region import RegionSearch
 from kortravelmap.infra.feature_repo import (
     _FEATURE_SEARCH_BY_SCORE_SQL,
+    _search_region_token_anchor,
+    _search_region_tokens,
     _search_score_sql,
     _SearchRegionArms,
 )
@@ -203,7 +205,7 @@ def _region(category_codes: tuple[str, ...] = ()) -> RegionSearch:
     return RegionSearch(
         region_label="부산",
         sigungu_codes=("26110", "26140"),
-        remainder="맛집 국밥",
+        remainder="맛집 돼지국밥",  # 3글자 이상 낱말이 있어야 anchor 팔이 생긴다
         category_codes=category_codes,
     )
 
@@ -213,12 +215,18 @@ def _all_region_variants() -> list[tuple[RegionSearch | None, _SearchRegionArms 
     for name_mode in ("ilike", "strpos", None):
         for categories in (False, True):
             for token_mode in ("anchor", "scan", None):
+                region = _region(("05010000",) if categories else ())
+                # 운영의 ``_search_region_arms``는 anchor 낱말이 있을 때만 "anchor"를 고른다.
+                if token_mode == "anchor" and (
+                    _search_region_token_anchor(_search_region_tokens(region)) is None
+                ):
+                    continue
                 arms = _SearchRegionArms(
                     name_mode=name_mode,  # type: ignore[arg-type]
                     categories=categories,
                     token_mode=token_mode,  # type: ignore[arg-type]
                 )
-                variants.append((_region(("05010000",) if categories else ()), arms))
+                variants.append((region, arms))
     return variants
 
 
@@ -226,6 +234,7 @@ def test_harness_connection_matches_api_jit_off_and_statement_timeout(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     assert harness.HARNESS_SERVER_SETTINGS == {"jit": "off", "statement_timeout": "30000"}
+    # --skip-seed(운영 DB)는 연결을 읽기 전용으로 연다.
     captured: dict[str, object] = {}
 
     class _Stop(Exception):
@@ -238,7 +247,10 @@ def test_harness_connection_matches_api_jit_off_and_statement_timeout(
     monkeypatch.setattr(harness, "make_async_engine", fake_engine)
     with pytest.raises(_Stop):
         asyncio.run(harness._run("postgresql+asyncpg://unused/db", 1, 1, True))
-    assert captured["server_settings"] == harness.HARNESS_SERVER_SETTINGS
+    assert captured["server_settings"] == {
+        **harness.HARNESS_SERVER_SETTINGS,
+        "default_transaction_read_only": "on",
+    }
 
 
 def test_read_baseline_has_thirteen_named_viewports() -> None:
