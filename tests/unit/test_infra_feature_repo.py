@@ -1984,3 +1984,50 @@ def test_search_rank_digits_end_with_specificity_then_prominence() -> None:
     ):
         assert "feature.feature_search_prominence" in statement
         assert "compact_paren_base_name" in statement
+
+
+def test_search_keys_table_and_fallback_share_one_expression_set() -> None:
+    """T-READ-06: 키 표를 채우는 식과 검색의 대체 식은 같은 문자열이고 지문은 그 식에서 나온다."""
+    select = feature_repo._search_keys_select_sql("src")
+    columns = feature_repo._search_key_column_sqls()
+    assert [column for column, _ in columns] == [
+        "compact_name",
+        "compact_raw_name",
+        "compact_tail",
+        "compact_base_name",
+        "compact_paren_base_name",
+        "compact_bracket_name",
+        "search_group",
+    ]
+    for column, expression in columns:
+        assert expression in select, column
+    assert feature_repo._search_keys_version() == feature_repo.SEARCH_KEYS_VERSION
+    assert -(2**63) <= feature_repo.SEARCH_KEYS_VERSION < 2**63
+    guard = f"stored.keys_version = {feature_repo.SEARCH_KEYS_VERSION}"
+    for statement in (
+        feature_repo._FEATURE_SEARCH_BY_SCORE_SQL,
+        *(pair[0] for pair in feature_repo._FEATURE_SEARCH_REGION_SQL.values()),
+        *(pair[1] for pair in feature_repo._FEATURE_SEARCH_REGION_SQL.values()),
+    ):
+        assert statement.count("FROM feature.feature_search_keys AS stored") == 1
+        assert guard in statement
+        assert "stored.name = filtered.name" in statement
+        assert "stored.category = filtered.category" in statement
+        # 키가 없을 때의 식은 종전 식 그대로다(검색 그룹은 COALESCE의 둘째 인자).
+        for column, expression in columns:
+            if column == "search_group":
+                assert "COALESCE(" in statement
+                assert expression in statement
+            else:
+                assert f"ELSE {expression} END" in statement, column
+
+
+def test_search_keys_version_changes_with_the_expressions(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """식이 바뀌면(예: 공백 집합) 지문이 바뀌어 옛 키를 쓰지 않는다."""
+    before = feature_repo._search_keys_version()
+    monkeypatch.setattr(
+        feature_repo, "_SEARCH_WHITESPACE_SQL", feature_repo._SEARCH_WHITESPACE_SQL + " || ''"
+    )
+    assert feature_repo._search_keys_version() != before
