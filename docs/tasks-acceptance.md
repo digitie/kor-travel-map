@@ -46,6 +46,9 @@
 > | `T-VN-D2-API-AUDIT` (완료) | [archive/tasks-acceptance-d2-api-audit.md](archive/tasks-acceptance-d2-api-audit.md) | 약 5 KB |
 > | `T-VN-M02-TRUNCATE-FENCE` (완료) | [archive/tasks-acceptance-m02-truncate-fence.md](archive/tasks-acceptance-m02-truncate-fence.md) | 약 7 KB |
 > | `T-VN-M05-VERIFY-RECEIPT` (완료) | [archive/tasks-acceptance-m05-verify-receipt.md](archive/tasks-acceptance-m05-verify-receipt.md) | 약 6 KB |
+> | `T-CI-DOCKERFILE-BUILD` (완료) | [archive/tasks-acceptance-t-ci-dockerfile-build.md](archive/tasks-acceptance-t-ci-dockerfile-build.md) | 약 5 KB |
+> | `T-VN-M05-RELITIGATION` (완료) | [archive/tasks-acceptance-t-vn-m05-relitigation.md](archive/tasks-acceptance-t-vn-m05-relitigation.md) | 약 5 KB |
+> | `T-VN-M05-ONESHOT-CONSUME` (완료) | [archive/tasks-acceptance-t-vn-m05-oneshot-consume.md](archive/tasks-acceptance-t-vn-m05-oneshot-consume.md) | 약 4 KB |
 
 ## T-CWRITE-01 — 현재 writer·trigger·성능 기준선
 
@@ -2080,48 +2083,7 @@ cron은 그 값을 명시하지만, **root로 실행한 `ktdctl db-backup list`�
 
 ## T-CI-DOCKERFILE-BUILD
 
-- [x] C1. Map CI가 `docker/*.Dockerfile`을 실제로 빌드한다 — 현재
-      `.github/workflows/`에 `docker build`가 **0건**이라 Dockerfile 결함이 n150
-      격리 e2e나 pinned rebuild에서야 드러나고 피드백 루프가 한 시간이다.
-- [x] C2. registry 없이 돈다(`KOR_TRAVEL_MAP_BUILDX_OUTPUT=oci` + 단일 platform).
-      arm64는 굽지 않는다 — 배포 대상이 amd64뿐이다.
-- [x] C3. `scripts/docker-buildx.sh`를 경유한다. 현재 그 스크립트를 **호출하는 곳이
-      저장소에 없어** 자체가 검증되지 않는다; CI에서 돌리면 Dockerfile과 빌드
-      스크립트가 함께 산다.
-- [x] C4. trigger 경로가 Dockerfile의 `COPY` 대상에서 **파생**된다. 손으로 나열하면
-      한쪽만 늘어나 조용히 빠진다(2026-09-03 `frontend.Dockerfile` 워크스페이스
-      매니페스트 누락과 같은 계열).
-      **구현 시 결정**: 파생 대신 **필터를 두지 않는 쪽**을 택했다. 필터가 없으면
-      파생할 것도 뒤처질 것도 없어 이 조건의 목적(누락 불가)이 더 강하게 달성된다.
-      비용은 PR당 job 하나이고 기존 20분짜리 unit job과 병렬로 돌아 전체 대기시간을
-      늘리지 않는다. `test_the_workflow_has_no_path_filter`가 필터가 다시 생기는 것을
-      막는다.
-- [x] C5. 새 Dockerfile이 생기면 이 job이 자동으로 그것을 포함하거나, 포함되지 않았을 때
-      깨진다. `test_every_production_dockerfile_is_built`가 `docker/*.Dockerfile`과
-      `build_one` 호출 집합을 대조한다(런타임 아닌 c7-playwright는 사유와 함께 면제).
-      탐침 Dockerfile을 넣어 실제로 깨지는 것을 확인했다.
-
-(근거: 2026-09-03 `frontend.Dockerfile`이 선언된 워크스페이스 셋 중 둘만 복사하는
-결함이 #1137까지 숨어 있었다. `frontend.yml`은 전체 체크아웃에서 같은 npm 명령을
-돌리므로 영원히 통과했고, Dockerfile 경로는 CI에서 한 번도 빌드되지 않았다.)
-
-- [x] C6. 이 job이 실제 PR에서 초록으로 도는 것을 한 번 확인한다. **충족**(2026-09-04):
-      #1142에서 `production Dockerfiles build`가 13분 55초에 pass했고 같은 커밋의
-      나머지 8개 job도 전부 초록이었다. 그 PR은 `cac35134`로 머지됐다.
-      (C1~C5가 모두 `[x]`인데 task는 `[~]`로 열려 있었다 — 그 이유인 잔여 요구가
-      `docs/tasks.md` 본문에만 있고 해제 조건 파일에는 없었다. 아래 이관 본문의
-      "**남은 것**: 이 job이 실제 PR에서 초록으로 도는 것을 한 번 확인한다."를
-      그대로 조건으로 세운 것이며, 새로 지어낸 조건이 아니다.)
-
-### `docs/tasks.md`에서 이관한 구현 근거 (2026-09-04)
-
-> `docs/tasks-rule.md` §5는 "task당 위치는 하나 — `docs/tasks.md`에 한 줄, 해제 조건은
-> `docs/tasks-acceptance.md`에 한 절. 본문을 중복하지 않는다"고 정한다. `docs/tasks.md`의
-> 이 항목은 한 줄 규약을 어긴 584자 산문이었고, 그 내용은 이 절이 소유해야 할
-> 판정 근거·재개 조건이었다. 아래는
-> 그 본문을 **원문 그대로** 옮긴 것이다 — 요약·축약·삭제 없음(2026-09-04 이관).
-
-Map CI가 프로덕션 Dockerfile을 한 번도 빌드하지 않았다(`.github/workflows/`에 `docker build` 0건). 그래서 Dockerfile 결함은 n150 격리 e2e나 pinned rebuild에서야 드러나고, 그 피드백 루프는 한 시간이다 — 2026-09-03 `frontend.Dockerfile`의 워크스페이스 매니페스트 누락(#1137)이 그렇게 숨어 있었다. `scripts/docker-buildx.sh`는 `KOR_TRAVEL_MAP_BUILDX_OUTPUT=oci` + 단일 platform으로 registry 없이 돌릴 수 있고, 현재 그 스크립트를 **호출하는 곳이 저장소에 없다** — CI에서 돌리면 Dockerfile과 빌드 스크립트를 함께 살린다. trigger 경로는 파생 대신 **필터를 두지 않는** 쪽으로 해결했다(필터가 없으면 뒤처질 것이 없다). `.github/workflows/docker-images.yml` 신설 + 게이트 6건. **남은 것**: 이 job이 실제 PR에서 초록으로 도는 것을 한 번 확인한다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-t-ci-dockerfile-build.md](archive/tasks-acceptance-t-ci-dockerfile-build.md)로 옮겼다(2026-11-19, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-M02-TRUNCATE-FENCE
 
@@ -2129,114 +2091,11 @@ Map CI가 프로덕션 Dockerfile을 한 번도 빌드하지 않았다(`.github/
 
 ## T-VN-M05-ONESHOT-CONSUME
 
-- [x] **T-VN-M05-ONESHOT-CONSUME — 격리 acceptance 성공이 execution identity를 소비하게 한다** (2026-09-08 충족, Manager #335)
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-t-vn-m05-oneshot-consume.md](archive/tasks-acceptance-t-vn-m05-oneshot-consume.md)로 옮겼다(2026-11-19, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
-**2026-09-07 실측으로 드러난 구멍이다.** 격리 M05 one-shot은 **본문 실패에만** 강제된다
-— `_block_terminal_m05_execution`이 본문 phase에 `phase=None`(무조건 차단)을 남기지만,
-`run-m05-isolated-e2e-once`의 **성공 분기**(`case 0)`)는 `exit "$driver_status"`뿐이고
-`pin block-execution`이 없다. 그래서 **같은 execution identity에서 acceptance 본문을 두
-번 돌릴 수 있다.**
-
-**단순히 성공에도 무조건 차단을 걸면 안 된다.** 지금 상태는 `phase=None` 하나뿐이라
-"소각(burned)"과 "소비(consumed)"가 구분되지 않고, 성공에 같은 것을 쓰면 방금 성공한
-leaf가 `--verify-leaf`의 L8("terminal 차단 아님")에서 실패한다. 승격 근거가 스스로를
-무효화하는 셈이다.
-
-**해제 조건.**
-
-1. 소비 상태를 소각과 **구분해서** 기록한다(예: scoped phase 또는 별도 필드).
-   `is_unconditionally_blocked_current()`가 소비를 소각으로 세지 않아야 한다.
-2. `_assert_current_m05_execution_is_runnable`이 **소비된 identity의 본문 재실행을
-   거부**한다. 복구 경로는 rebind 또는 회전이며 그 사실을 진단 메시지가 말한다.
-3. `--verify-leaf`의 L8이 소비된 identity의 leaf를 계속 통과시킨다.
-4. 변이 검증: 성공 시 소비 기록을 지우면 red, 소비를 소각으로 취급하면 L8 게이트가 red.
-
-**2026-09-08 충족 — 넷 다(Manager #335).**
-
-scoped phase `execution_identity_consumed`로 남긴다. 그러면 셋이 동시에 성립한다:
-`is_unconditionally_blocked_current()`가 소각으로 세지 않아 배포·회전이 안 막히고(소비는
-"승격됐다"이지 "오염됐다"가 아니다), L8이 `entry.phase is None`만 보므로 통과한 leaf가
-계속 검증되고, runnable assert가 이것만 따로 보고 재실행을 막는다.
-
-**`result.json`에 키를 더하지 않았다.** 런처가 키 집합을 정확히 강제해
-(`set(value) != expected_keys` → degraded → 무조건 소각) 그 계약을 건드리면 통과한
-1~2시간 실행이 타 버린다.
-
-**적대 리뷰가 내 변이 검증이 놓친 축을 잡았다(P1).** `has_block_for_current(phase=...)`
-에서 `phase=`를 떼면 그 술어가 **모든** 차단 기록을 잡아, 인프라 phase로 scoped 기록이
-남은 identity가 영구히 거부되고 진단은 엉뚱하게 `execution_identity_consumed`가 된다 —
-#330이 넣고 #331이 되돌린 회귀와 같은 부류다. **내 9축은 "지우기"만 쟀고 "약화"를 재지
-않았다.** 갈리는 유일한 상태(소비가 아닌 scoped 기록 하나)를 만드는 축을 더했다.
-
-그리고 리뷰가 내 테스트 하나를 공허하다고 잡았다 — "아무 문자열이나 phase면 scoped
-기록이 된다"를 재는 것이라 어떤 줄도 빨갛게 만들지 못했다. 지웠다.
-
-**2항의 진단**은 `_PAIR_DIAGNOSTICS`가 아니라 상위 집합에 넣는다. 그 집합은 pair 실패
-전용이고 "안의 모든 문자열이 발신된다"를 기존 테스트가 양방향으로 결박하므로, 다른
-phase의 진단을 섞으면 그 결박이 거짓이 된다.
 ## T-VN-M05-RELITIGATION
 
-**2026-09-07 신설.** #1189가 M05-3 탐지기를 붙이면서 드러난 것이다 — 계약 자체의
-성질이지 탐지기의 결함이 아니다.
-
-`feature.record_manual_provider_dedup_candidate`의 멱등성은 `evidence_fingerprint`가
-같고 **그 case가 아직 미해결일 때만** 성립한다(baseline `schema.sql` 8180~8186행:
-`LEFT JOIN ... resolutions` + `WHERE resolution.case_id IS NULL`). 그래서 admin이
-`kept`로 판정한 쌍을 탐지기가 다시 보면 지문이 같아도 **새 case가 만들어진다.**
-그 상태로 탐지를 주기화하면 admin 큐가 쳇바퀴가 되므로 #1189의 job에는 스케줄을
-달지 않았다.
-
-**어느 방향으로도 틀릴 수 있다는 것이 이 항목의 어려운 점이다.**
-너무 세게 막으면 증거가 **실제로 바뀌었는데도** 새 후보가 안 올라오는 영구 침묵이
-되고, 너무 약하게 막으면 무관한 필드 patch가 `row_revision`을 올릴 때마다 supersede
-폭풍이 난다. 둘 다 조용히 실패한다.
-
-- [x] **R1 — 판정된 쌍이 같은 증거로 다시 올라오지 않는다.**
-  admin이 `kept`/`merged`/`manual_retired`로 판정한 case와 **지문이 같은** 후보는
-  새 case를 만들지 않는다. 억눌렸다는 사실은 삼키지 않고 receipt나 실행 요약에 남는다.
-- [x] **R2 — 증거가 바뀌면 다시 올라온다.**
-  Feature의 score-facing 값(`kind`/`name`/`category`/`lon`/`lat`)이나 provider의
-  current source head가 바뀌면 지문이 달라져 새 후보가 된다. R1의 차단이 이것을
-  덮지 않는다. **두 방향 모두 게이트가 있어야 한다** — 한 방향만 재면 반대 방향
-  결함이 조용히 통과한다.
-- [x] **R3 — 무관한 변경이 재발행을 부르지 않는다.**
-  score와 무관한 필드 patch로 `row_revision`만 올라간 경우 새 case가 생기지 않는다.
-- [x] **R4 — 차단이 detector 권한을 넓히지 않는다.**
-  탐지 로그인은 `ops.manual_provider_dedup_cases`를 읽을 수 없다(`_OPS_TABLE_PRIVILEGES`가
-  빈 튜플). 그러므로 차단은 프로시저 안에서 일어나야 하고, detector에게 case 조회
-  권한을 주는 방식은 채택하지 않는다.
-- [x] **R5 — 차단이 켜진 뒤에야 스케줄을 단다.**
-  R1~R4가 충족되면 #1189의 `manual_provider_dedup_detection` job에 스케줄을 붙이고,
-  그때 job description의 "스케줄 없음" 문구를 함께 걷는다.
-**2026-09-08 — R1~R5 충족(migration 305).**
-
-차단 키를 `evidence_fingerprint`로 잡으면 안 됐다. 그 지문에는 두 Feature의
-`row_revision`과 `source_head_observed_at`이 들어 있어 **score와 무관한 필드 patch
-하나**로 달라진다. 판정을 실제로 좌우하는 것만 넣은 `decision_fingerprint`를 따로
-뒀다 — snapshot에서 `row_revision`을 뺀 것 + provider의 현재 source 내용
-(`raw_payload_hash`) + `scorer_id`.
-
-**변이 검증이 설계를 한 번 고쳤다.** 처음엔 `source_record_key`도 넣었는데, 그것을
-빼는 변이가 초록이어서 왜인지 보니 **같은 내용을 다시 fetch하면 record key만
-바뀐다** — 넣으면 그때마다 차단이 풀린다. 내용을 뜻하는 것은 `raw_payload_hash`
-하나다.
-
-`superseded`는 차단 근거가 아니다. 탐지기가 만든 resolution이므로 그것으로 차단하면
-탐지기가 자기 자신을 영구히 침묵시킨다.
-
-**두 방향 모두 게이트가 있다**(통합 6건, 변이 다섯 축 전부 RED):
-
-| 되돌린 것 | 어느 방향이 깨지나 | 결과 |
-|---|---|---|
-| 차단 자체 제거 | 과소차단(쳇바퀴) | RED ×2 |
-| 지문에 `row_revision` 복원 | 과소차단 | RED |
-| 지문을 `feature_uuid`만으로 축소 | **과잉차단(영구 침묵)** | RED |
-| provider `raw_payload_hash` 제거 | 과잉차단 | RED |
-| `superseded`도 차단 근거로 | 탐지기 자기 침묵 | RED |
-
-R5로 탐지 job에 일간 스케줄(04:20 KST, 기본 `STOPPED`)을 붙였고, job description의
-"스케줄 없음" 문구를 걷었다. 억눌린 수는 `suppressed_case_count`로 보고된다 —
-세지 않으면 "후보가 없다"와 "이미 판정됐다"가 같아 보인다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-t-vn-m05-relitigation.md](archive/tasks-acceptance-t-vn-m05-relitigation.md)로 옮겼다(2026-11-19, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-M05-VERIFY-RECEIPT
 
