@@ -204,7 +204,7 @@ export function AdminShell({
 function MapBrand({ collapsed }: { collapsed: boolean }) {
   return (
     <Link
-      aria-label="kor-travel-map 홈"
+      aria-label="kor-travel-map"
       className="flex min-w-0 items-baseline rounded-control text-text-primary no-underline hover:no-underline"
       href="/"
       title={collapsed ? "kor-travel-map" : undefined}
