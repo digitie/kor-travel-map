@@ -47,7 +47,9 @@
   역전으로 deadlock 가능 → `features` trigger 이름을 `trg_features_zz_cluster_point`로 두어 subtype 동기화 뒤에 돌게
   고쳤다. notice·분류 필터·backfill 결합 시험 부족 → 보강. 남긴 Low: SERIALIZABLE 도메인 명령과 같은 Feature의 동시
   geometry 갱신이 새 표 행에서 40001을 낼 수 있다(재시도 대상), area 대표점은 쓰기 때 저장되므로 GEOS 판올림 뒤 새로 계산한
-  값과 마지막 자리가 다를 수 있다(454의 route와 같다), subtype 표 TRUNCATE·trigger 끈 복원은 trigger를 거치지 않는다.
+  값과 마지막 자리가 다를 수 있다(454의 route와 같다). TRUNCATE는 문장 trigger로, 복제 역할(`session_replication_role =
+  replica`)은 trigger `ENABLE ALWAYS`로 덮었다(CI 통합 런에서 정리 도우미가 남긴 어긋남으로 드러났다). trigger 함수의 PUBLIC
+  실행권은 걷었다(런타임 SECURITY DEFINER preflight). `ALTER TABLE … DISABLE TRIGGER`로 이름을 지목해 끄는 경로만 남는다.
 - 배포하지 않았다(소유자 묶음 회전).
 
 ## 2026-11-19 — T-READ-09 100 km nearby: LATERAL을 page 뒤로, 거리순은 KNN
