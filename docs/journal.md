@@ -105,7 +105,6 @@
   6묶음 13 page가 전부 같았다. 회귀 가드: page 행 수 이하의 LATERAL loops, KNN 순서 scan 가능, `<->`=`ST_Distance` 함수
   동일성, 구조 unit 시험. harness `matched_rows`는 KNN 상한도 함께 뗀다.
 - 운영 배포는 하지 않았다(소유자의 Map 회전에 싣는다). OpenAPI 변화 없음.
-||||||| parent of a84e86142 (docs: 관리자 셸(ui 0.2.3) 채택 journal·resume·tasks-done)
 
 ## 2026-11-19 — T-READ-10 저배율 집계 단축(alembic 454 + HashAggregate)
 
