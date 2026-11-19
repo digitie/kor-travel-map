@@ -198,6 +198,43 @@ END;
 $$
 """
 
+#: TRUNCATE는 행 trigger를 부르지 않는다 — 문장 trigger로 같은 효과를 낸다.
+#: ``features``는 운영에서
+#: TRUNCATE fence가 막지만(307), fence를 끈 정리 경로(통합 시험)도 표를 어긋나게 두지 않는다.
+_TRUNCATE_SYNC_FUNCTION_SQL: Final[str] = """
+CREATE FUNCTION feature.truncate_feature_cluster_point_parts() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF TG_TABLE_NAME = 'features' THEN
+        TRUNCATE feature.feature_cluster_points;
+    ELSE
+        UPDATE feature.feature_cluster_points
+           SET marker_point = NULL,
+               geom_xmin = NULL,
+               geom_xmax = NULL,
+               geom_ymin = NULL,
+               geom_ymax = NULL
+         WHERE kind = CASE TG_TABLE_NAME
+                          WHEN 'feature_route_geometries' THEN 'route'
+                          ELSE 'area'
+                      END;
+    END IF;
+    RETURN NULL;
+END;
+$$
+"""
+
+#: trigger 함수는 실행 권한 없이도 발화한다 — 런타임 login이 직접 부를 수 없게
+#: PUBLIC 실행권을 걷는다
+#: (런타임 preflight가 예상 밖 SECURITY DEFINER 실행권을 거부한다).
+_REVOKE_FUNCTION_SQL: Final[tuple[str, ...]] = (
+    "REVOKE ALL ON FUNCTION feature.sync_feature_cluster_point_core() FROM PUBLIC",
+    "REVOKE ALL ON FUNCTION feature.sync_feature_cluster_point_geometry() FROM PUBLIC",
+    "REVOKE ALL ON FUNCTION feature.truncate_feature_cluster_point_parts() FROM PUBLIC",
+)
+
 _TRIGGER_SQL: Final[tuple[str, ...]] = (
     "CREATE TRIGGER trg_features_zz_cluster_point "
     "AFTER INSERT OR DELETE OR UPDATE OF kind, category, sido_code, sigungu_code, "
@@ -210,6 +247,29 @@ _TRIGGER_SQL: Final[tuple[str, ...]] = (
     "CREATE TRIGGER trg_feature_areas_cluster_point "
     "AFTER INSERT OR DELETE OR UPDATE OF geom ON feature.feature_areas "
     "FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_geometry()",
+    "CREATE TRIGGER trg_features_zz_cluster_point_truncate AFTER TRUNCATE ON feature.features "
+    "FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts()",
+    "CREATE TRIGGER trg_feature_route_geometries_cluster_point_truncate "
+    "AFTER TRUNCATE ON feature.feature_route_geometries "
+    "FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts()",
+    "CREATE TRIGGER trg_feature_areas_cluster_point_truncate "
+    "AFTER TRUNCATE ON feature.feature_areas "
+    "FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts()",
+)
+
+#: 파생 상태라 ``session_replication_role = replica``에서도 돌아야 한다(``ENABLE ALWAYS``) —
+#: 복제 역할로
+#: 쓰는 경로(정리·복구 도구)가 표를 어긋나게 두지 않는다. 307의 TRUNCATE fence와 같은 선택이다.
+_ENABLE_ALWAYS_SQL: Final[tuple[str, ...]] = (
+    "ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_cluster_point",
+    "ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_cluster_point_truncate",
+    "ALTER TABLE feature.feature_route_geometries "
+    "ENABLE ALWAYS TRIGGER trg_feature_route_geometries_cluster_point",
+    "ALTER TABLE feature.feature_route_geometries "
+    "ENABLE ALWAYS TRIGGER trg_feature_route_geometries_cluster_point_truncate",
+    "ALTER TABLE feature.feature_areas ENABLE ALWAYS TRIGGER trg_feature_areas_cluster_point",
+    "ALTER TABLE feature.feature_areas "
+    "ENABLE ALWAYS TRIGGER trg_feature_areas_cluster_point_truncate",
 )
 
 #: trigger가 잡은 잠금 아래에서 채운다 — 그 뒤 쓰기는 trigger가 맞춘다.
@@ -321,7 +381,10 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     _CREATE_TABLE_SQL,
     _CORE_SYNC_FUNCTION_SQL,
     _GEOMETRY_SYNC_FUNCTION_SQL,
+    _TRUNCATE_SYNC_FUNCTION_SQL,
+    *_REVOKE_FUNCTION_SQL,
     *_TRIGGER_SQL,
+    *_ENABLE_ALWAYS_SQL,
     _BACKFILL_SQL,
     *_INDEX_SQL,
     "ANALYZE feature.feature_cluster_points",
@@ -358,7 +421,9 @@ def upgrade() -> None:
     for statement in _UPGRADE_STATEMENTS:
         cap(
             "lock_timeout",
-            _TRIGGER_LOCK_TIMEOUT_MS if statement in _TRIGGER_SQL else _LOCK_TIMEOUT_MS,
+            _TRIGGER_LOCK_TIMEOUT_MS
+            if statement in _TRIGGER_SQL or statement in _ENABLE_ALWAYS_SQL
+            else _LOCK_TIMEOUT_MS,
         )
         bind.execute(text(statement))
     for name, value in settings.items():
