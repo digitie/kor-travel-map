@@ -2929,9 +2929,12 @@ _NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str, str]]] = {
         )
       )""",
         # KNN — 정렬 키가 ``<->`` 하나여야 planner가 GiST 순서 scan을 고른다(PG18도 둘째
-        # 키가 있으면 KNN path를 만들지 않는다). 이 ORDER BY 때문에 subquery가 펼쳐지지 않고,
-        # 바깥 ``(distance_m, feature_id)`` 정렬은 그 위의 Incremental Sort가 되어 LIMIT에서 멈춘다.
-        "\n    ORDER BY distance_m ASC",
+        # 키가 있으면 KNN path를 만들지 않는다). 후보 subquery에도 행 수 상한이 있어야 planner가
+        # "앞 몇 행만 읽는다"를 알고 KNN을 고른다 — 바깥 LIMIT은 바깥 정렬 너머로 전해지지 않는다
+        # (prod에서 상한 없이 두면 전 행 bitmap+정렬 377 ms, KNN이면 5 ms). ``WITH TIES``는 n번째
+        # 거리와 같은 거리의 행을 모두 남기므로 ``(distance_m, feature_id)`` 앞 n행이 빠짐없이
+        # 후보에 든다 — 바깥 정렬·LIMIT이 종전과 같은 page를 고른다.
+        "\n    ORDER BY distance_m ASC\n    FETCH FIRST (:limit_plus_one) ROWS WITH TIES",
         "candidate.distance_m ASC, candidate.feature_id ASC",
         "page.distance_m ASC, page.feature_id ASC",
     ),

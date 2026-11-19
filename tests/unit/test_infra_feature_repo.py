@@ -882,7 +882,11 @@ def test_nearby_sql_joins_primary_source_after_page_limit() -> None:
         distance_sql = by_sort["distance"]
         assert "f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 AS distance_m" in distance_sql
         # KNN은 정렬 키가 ``<->`` 하나일 때만 — 동률 tiebreak는 바깥 page 정렬이 한다.
-        assert "ORDER BY distance_m ASC\n  ) AS candidate" in distance_sql, label
+        # 후보에도 상한(WITH TIES)이 있어야 planner가 KNN을 고른다 — 동률은 빠짐없이 남는다.
+        assert (
+            "ORDER BY distance_m ASC\n    FETCH FIRST (:limit_plus_one) ROWS WITH TIES\n"
+            "  ) AS candidate"
+        ) in distance_sql, label
         assert "ORDER BY candidate.distance_m ASC, candidate.feature_id ASC" in distance_sql
     # ADR-012: 술어·정렬에 feature 좌표 변환이 없다(입력 좌표만 origin에서 1회).
     for sql in feature_repo._NEARBY_COORD_SQL_BY_SORT.values():

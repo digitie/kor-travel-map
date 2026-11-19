@@ -15,6 +15,7 @@ import scripts.perf_tier2_release_harness as harness
 from kortravelmap.core.search_region import RegionSearch
 from kortravelmap.infra.feature_repo import (
     _FEATURE_SEARCH_BY_SCORE_SQL,
+    _NEARBY_COORD_DISTANCE_SQL,
     _search_region_token_anchor,
     _search_region_tokens,
     _search_score_sql,
@@ -363,3 +364,12 @@ def test_output_file_has_same_schema_across_runs_and_no_dsn(
         keys.append(sorted(report))
     assert keys[0] == keys[1]
     assert "hunter2" not in capsys.readouterr().out
+
+
+def test_count_matching_rows_sql_removes_nearby_knn_candidate_cap() -> None:
+    """거리순 nearby는 KNN 후보에도 page 상한(``WITH TIES``)을 둔다 — 그것도 떼야 전체 수다."""
+
+    count_sql = _count_matching_rows_sql(_NEARBY_COORD_DISTANCE_SQL, "limit_plus_one")
+
+    assert ":limit_plus_one" not in count_sql
+    assert "WITH TIES" not in count_sql

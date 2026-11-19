@@ -472,6 +472,10 @@ def _count_matching_rows_sql(sql: str, terminal_limit_parameter: str | None) -> 
                 f"query must contain exactly one {terminal_limit} to count pre-limit rows"
             )
         matched_sql = matched_sql.replace(terminal_limit, "", 1)
+        # 거리순 nearby 후보의 KNN 상한(T-READ-09) — page 경계와 같은 placeholder라 함께 뗀다.
+        matched_sql = matched_sql.replace(
+            f"FETCH FIRST (:{terminal_limit_parameter}) ROWS WITH TIES", ""
+        )
     return f"SELECT count(*) AS matched_rows FROM ({matched_sql}) AS matched"
 
 
