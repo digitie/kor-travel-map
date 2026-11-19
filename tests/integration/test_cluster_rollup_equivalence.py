@@ -155,6 +155,18 @@ FROM (
 ) AS f
 """
 
+_SEED_NOTICES_SQL = """
+INSERT INTO feature.feature_notices (feature_id, kind, notice_type, valid_end_time)
+SELECT
+    f.feature_id, 'notice', 'safety',
+    CASE WHEN f.rn % 3 = 0 THEN now() - interval '1 day' ELSE now() + interval '1 day' END
+FROM (
+    SELECT feature_id, row_number() OVER (ORDER BY name) AS rn
+    FROM feature.features
+    WHERE kind = 'notice' AND name LIKE 'tread10 %'
+) AS f
+"""
+
 _SEED_AREAS_SQL = """
 INSERT INTO feature.feature_areas (feature_id, kind, geom, area_kind)
 SELECT
@@ -207,7 +219,7 @@ _KIND_FILTERS: tuple[list[str] | None, ...] = (
 
 async def _seed(session: AsyncSession) -> None:
     await session.execute(text("SELECT setseed(0.1010)"))
-    for kind, n in (("place", 600), ("route", 160), ("area", 24)):
+    for kind, n in (("place", 600), ("route", 160), ("area", 24), ("notice", 30)):
         await session.execute(text(_SEED_FEATURES_SQL), {"kind": kind, "n": n})
     # 지역 코드 없는 route 몇 개(집계에서 빠져야 한다).
     await session.execute(
@@ -219,6 +231,8 @@ async def _seed(session: AsyncSession) -> None:
     )
     await session.execute(text(_SEED_ROUTES_SQL))
     await session.execute(text(_SEED_AREAS_SQL))
+    # notice 몫은 공개 view와 감산 fragment로 읽는다 — 셋 중 하나는 종료됐다(감산되어야 한다).
+    await session.execute(text(_SEED_NOTICES_SQL))
     for label, kind, wkt in _EDGE_SHAPES:
         feature_id = (
             await session.execute(
@@ -267,7 +281,8 @@ async def _assert_same(session: AsyncSession, *, label: str) -> int:
                 params: dict[str, Any] = {
                     **bbox,
                     "kinds": kinds,
-                    "categories": None,
+                    # kind 필터 하나(place+route)에는 분류 필터도 건다(좁은 표 별칭의 분류 술어).
+                    "categories": ["06020000"] if kinds == ["place", "route"] else None,
                     "providers": None,
                     "attributes": None,
                     "limit": 2000,
@@ -290,7 +305,12 @@ async def _assert_same(session: AsyncSession, *, label: str) -> int:
                         float(row["lat"]),
                     )
                     for row in await feature_repo.cluster_features_in_bbox(
-                        session, **bbox, cluster_unit=unit, kinds=kinds, limit=2000
+                        session,
+                        **bbox,
+                        cluster_unit=unit,
+                        kinds=kinds,
+                        categories=params["categories"],
+                        limit=2000,
                     )
                 }
                 where = f"{label} unit={unit} bbox={bbox} kinds={kinds}"

@@ -10,6 +10,8 @@ subtype을 직접 읽는 사본)과 같다. 각 쓰기 뒤에 두 가지를 확�
 
 from __future__ import annotations
 
+import importlib.util
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pytest
@@ -22,23 +24,27 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-#: 원천 표에서 새로 유도한 좁은 표 — migration 455 backfill과 같은 식이다.
-_DERIVED_SQL = """
+#: 원천 표에서 새로 유도한 좁은 표 — migration 455의 backfill 문장 그 자체(SELECT 부분)다.
+#: trigger가 맞춘 표가 backfill이 처음부터 만든 표와 같아야 한다.
+_MIGRATION_PATH = (
+    Path(__file__).resolve().parents[2] / "alembic" / "versions" / "455_feature_cluster_points.py"
+)
+_SPEC = importlib.util.spec_from_file_location("migration_455", _MIGRATION_PATH)
+assert _SPEC is not None
+assert _SPEC.loader is not None
+_MIGRATION = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(_MIGRATION)
+_BACKFILL_SELECT = "SELECT" + _MIGRATION._BACKFILL_SQL.split("\nSELECT", 1)[1]
+_DERIVED_SQL = f"""
 SELECT
-    f.feature_id, f.kind, f.category, f.sido_code, f.sigungu_code, f.legal_dong_code,
-    x_extension.ST_AsEWKB(f.coord) AS coord,
-    f.lifecycle_state = 'active' AND f.publication_state = 'published'
-        AND f.quality_state = 'valid' AS public,
-    x_extension.ST_AsEWKB(
-        COALESCE(r.marker_point, x_extension.ST_PointOnSurface(a.geom))
-    ) AS marker_point,
-    COALESCE(r.geom_xmin, x_extension.ST_XMin(a.geom)) AS geom_xmin,
-    COALESCE(r.geom_xmax, x_extension.ST_XMax(a.geom)) AS geom_xmax,
-    COALESCE(r.geom_ymin, x_extension.ST_YMin(a.geom)) AS geom_ymin,
-    COALESCE(r.geom_ymax, x_extension.ST_YMax(a.geom)) AS geom_ymax
-FROM feature.features AS f
-LEFT JOIN feature.feature_route_geometries AS r ON r.feature_id = f.feature_id
-LEFT JOIN feature.feature_areas AS a ON a.feature_id = f.feature_id
+    feature_id, kind, category, sido_code, sigungu_code, legal_dong_code,
+    x_extension.ST_AsEWKB(coord) AS coord, public,
+    x_extension.ST_AsEWKB(marker_point) AS marker_point,
+    geom_xmin, geom_xmax, geom_ymin, geom_ymax
+FROM ({_BACKFILL_SELECT}) AS derived(
+    feature_id, kind, category, sido_code, sigungu_code, legal_dong_code, coord, public,
+    marker_point, geom_xmin, geom_xmax, geom_ymin, geom_ymax
+)
 """
 
 _STORED_SQL = """
@@ -115,6 +121,14 @@ async def test_cluster_points_follow_every_write_in_the_same_transaction(
          f"publication_state = 'suppressed' WHERE feature_id = '{route}'"),
         ("route state restored", f"UPDATE feature.features SET lifecycle_state = 'active', "
          f"publication_state = 'published' WHERE feature_id = '{route}'"),
+        ("place quality invalid", f"UPDATE feature.features SET quality_state = 'invalid' "
+         f"WHERE feature_id = '{place}'"),
+        ("place quality valid", f"UPDATE feature.features SET quality_state = 'valid' "
+         f"WHERE feature_id = '{place}'"),
+        ("place coord cleared", f"UPDATE feature.features SET coord = NULL "
+         f"WHERE feature_id = '{place}'"),
+        ("place coord restored", f"UPDATE feature.features SET coord = x_extension.ST_SetSRID("
+         f"x_extension.ST_MakePoint(127.03, 37.43), 4326) WHERE feature_id = '{place}'"),
         (
             "route geometry crosses the narrow bbox",
             "UPDATE feature.feature_route_geometries SET geom = x_extension.ST_Multi("
@@ -129,6 +143,21 @@ async def test_cluster_points_follow_every_write_in_the_same_transaction(
         ),
         ("area geometry row deleted", f"DELETE FROM feature.feature_areas "
          f"WHERE feature_id = '{area}'"),
+        (
+            "area geometry row inserted again",
+            "INSERT INTO feature.feature_areas (feature_id, kind, geom, area_kind) VALUES ("
+            f"'{area}', 'area', x_extension.ST_Multi(x_extension.ST_Buffer("
+            "x_extension.ST_SetSRID(x_extension.ST_MakePoint(127.04, 37.44), 4326), 0.02, 8)), "
+            "'park')",
+        ),
+        ("route geometry row deleted", f"DELETE FROM feature.feature_route_geometries "
+         f"WHERE feature_id = '{route}'"),
+        (
+            "route geometry row inserted again",
+            "INSERT INTO feature.feature_route_geometries (feature_id, kind, geom) VALUES ("
+            f"'{route}', 'route', x_extension.ST_Multi(x_extension.ST_GeomFromText("
+            "'LINESTRING(127.01 37.41, 127.02 37.42)', 4326)))",
+        ),
         ("route feature deleted (cascade)", f"DELETE FROM feature.features "
          f"WHERE feature_id = '{route}'"),
         ("unrelated column update is a no-op", f"UPDATE feature.features SET name = 'renamed' "

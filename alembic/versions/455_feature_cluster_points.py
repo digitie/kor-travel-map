@@ -21,8 +21,12 @@ trigger 셋.
 - trigger — ``features`` INSERT/관련 열 UPDATE/DELETE,
   ``feature_route_geometries``·``feature_areas`` INSERT/``geom`` UPDATE/DELETE. 각 trigger는
   **자기 몫의 열만** upsert한다. 한 Feature의 core와 geometry를 두 transaction이 동시에 바꿔도
-  같은 행의 서로 다른 열을 쓰므로 행 잠금 뒤 재평가 (READ COMMITTED)로 둘 다 남는다 — 부모
-  잠금을 새로 잡지 않는다(0086의 subtype→parent 잠금 간선 제거를 되돌리지 않는다).
+  같은 행의 서로 다른 열을 쓰므로 행 잠금 뒤 재평가(READ COMMITTED)로 둘 다 남는다. 새 표는 core
+  writer와 geometry writer가 함께 잡는 잠금 자리다 — 순서를 하나로 맞춘다: geometry 쓰기는
+  subtype 행 → 이 표 행, 상태 전이는 ``features`` 행 → subtype
+  행(``trg_features_sync_subtype_public_ready``) → 이 표 행. 그래서 ``features`` trigger 이름을
+  ``trg_features_zz_cluster_point``로 두어 같은 시점의 AFTER trigger 중 맨 뒤(이름순)에 돈다.
+  부모(``features``) 잠금은 새로 잡지 않는다.
 - FK는 두지 않는다. purge 증거 포획은 ``confrelid='feature.features'``인 자식을 훑는다 — 이
   표를 자식으로 만들면 포획 모양이 바뀐다. 삭제는 ``features`` DELETE trigger가 한다.
 
@@ -195,7 +199,7 @@ $$
 """
 
 _TRIGGER_SQL: Final[tuple[str, ...]] = (
-    "CREATE TRIGGER trg_features_cluster_point "
+    "CREATE TRIGGER trg_features_zz_cluster_point "
     "AFTER INSERT OR DELETE OR UPDATE OF kind, category, sido_code, sigungu_code, "
     "legal_dong_code, coord, lifecycle_state, publication_state, quality_state "
     "ON feature.features FOR EACH ROW "
