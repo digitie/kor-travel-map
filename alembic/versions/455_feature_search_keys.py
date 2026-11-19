@@ -1,7 +1,7 @@
 """검색 비교 키 표를 만든다 — 읽기 성능 계획 T-READ-06.
 
-Revision ID: 454_feature_search_keys
-Revises: 453_features_autovacuum
+Revision ID: 455_feature_search_keys
+Revises: 454_route_cluster_markers
 
 왜 필요한가. 검색 순위(``infra/feature_repo.py`` ``_feature_search_score_cte``)는 후보 행마다 보이는
 이름을 정규화해 비교 키 여섯 개(NFC·공백 제거·소문자·끝 괄호 변형)와 실효 검색 그룹(이름 끝말
@@ -50,8 +50,8 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "454_feature_search_keys"
-down_revision: str | Sequence[str] | None = "453_features_autovacuum"
+revision: str = "455_feature_search_keys"
+down_revision: str | Sequence[str] | None = "454_route_cluster_markers"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
@@ -150,7 +150,8 @@ ALTER TABLE ops.application_schema_operation_receipts
         '451_feature_search_prominence',
         '452_lotte_hotel_search_alias',
         '453_features_autovacuum',
-        '454_feature_search_keys'
+        '454_route_cluster_markers',
+        '455_feature_search_keys'
     ))
 """
 
@@ -166,7 +167,7 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
 
 
 def upgrade() -> None:
-    """검색 비교 키 표를 만들고 receipt head CHECK에 454를 더한다(채우기는 maintenance job)."""
+    """검색 비교 키 표를 만들고 receipt head CHECK에 455를 더한다(채우기는 maintenance job)."""
     bind = op.get_bind()
     settings = {
         str(name): str(value)
@@ -193,5 +194,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     """되돌리지 않는다 — 비교 키 표는 forward revision으로만 걷는다."""
     raise RuntimeError(
-        "454_feature_search_keys is forward-only: 비교 키 표는 forward revision으로만 걷는다."
+        "455_feature_search_keys is forward-only: 비교 키 표는 forward revision으로만 걷는다."
     )

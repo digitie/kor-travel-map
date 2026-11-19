@@ -74,7 +74,7 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "feature_search_aliases": ("SELECT",),
     # 451: 검색 인지도는 maintenance job(런타임)이 다시 계산해 쓰고 공개 검색이 읽는다.
     "feature_search_prominence": ("SELECT", "INSERT", "UPDATE", "DELETE"),
-    # 454(T-READ-06): 검색 비교 키도 maintenance job이 채우고 공개 검색이 읽는다.
+    # 455(T-READ-06): 검색 비교 키도 maintenance job이 채우고 공개 검색이 읽는다.
     "feature_search_keys": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     # 446(ADR-121): 장소 속성 catalog는 migration이 심고 공개 API는 읽기만 한다.
     "place_attributes": ("SELECT",),

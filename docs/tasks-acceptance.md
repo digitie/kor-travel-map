@@ -2749,7 +2749,16 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 기준선(2026-11-19, t1118e, harness `jit=off` 30회): "전국 low-zoom cluster(sido, 전 kind)"(geometry arm 포함) 조용 p50
 **1,230.8 ms** / p95 **1,311.4 ms**, 적재 중 1,258.0 / 1,370.0 ms. 같은 bbox의 point-only 변형은 p50 364.9 ms다.
 
-- [ ] harness(`jit=off`) "전국 low-zoom cluster(sido, 전 kind)"의 조용한 창 p50이 기준선보다 줄었다(목표값은 구현 PR이
-  정해 여기 적는다). 전후 수치를 보고서에 적는다.
-- [ ] 집계 결과(cluster별 개수·대표점)가 종전 경로와 같다(통합 시험). OpenAPI 세 파일이 바뀌지 않았다.
+구현(PR, alembic `454_route_cluster_markers`): ① route geometry에 STORED 생성 컬럼 다섯(`marker_point` =
+`ST_PointOnSurface(geom)`, `geom_xmin`…`geom_ymax` = `ST_XMin(geom)`…) — bbox 안에 완전히 든 route는 요청 때 geometry를
+풀지 않고 `ST_Intersects`도 건너뛴다. ② 집계 문장 동안만 `enable_sort = off`(HashAggregate — 40만 행 정렬 제거,
+point-only 변형에도 듣는다). 처음 목표로 잡은 "전 kind p50 < 300 ms"는 **이 방식으로는 닿지 않는다** — point-only
+변형조차 조용한 창 365 ms였고, 행마다 읽는 비용(전국 약 40만 행)이 남는다. 그보다 내리려면 사전 집계(T-101, 2026-09-07
+소유자 제외)를 다시 열어야 한다. 그래서 목표를 아래로 정한다(n150 합성 42만 행 실측 비율 −42%·−37%에서 여유를 둔 값).
+
+- [ ] harness(`jit=off`) "전국 low-zoom cluster(sido, 전 kind)"의 조용한 창 p50이 **800 ms 이하**다(기준선 1,230.8 ms).
+  같은 run의 "전국 low-zoom cluster(sido)"(point-only)는 **300 ms 이하**(기준선 364.9 ms). 전후 수치를 보고서에 적는다.
+- [x] 집계 결과(cluster별 개수·대표점)가 종전 경로와 같다(통합 시험 `tests/integration/test_cluster_rollup_equivalence.py`
+  — 종전 SQL 사본과 3단위 × bbox 3 × kind 필터 4, geom UPDATE 뒤 한 번 더. 개수는 정확히, 평균 좌표는 1e-9도). OpenAPI
+  세 파일이 바뀌지 않았다.
 - [ ] 운영 반영 뒤 언제·어느 배포 generation에서 쟀는지 journal에 적었다.

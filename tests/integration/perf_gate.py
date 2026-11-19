@@ -26,6 +26,7 @@ from kortravelmap.infra.feature_repo import (
     _CATEGORY_FEATURE_COUNTS_SQL,
     _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT,
     _CLUSTER_BBOX_SQL_BY_UNIT,
+    _CLUSTER_HASH_AGGREGATE_ON_SQL,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
     _GET_PUBLIC_FEATURE_SQL,
@@ -281,18 +282,21 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sido"],
         _CLUSTER_PARAMS,
         expected_indexes=_COORD_SPATIAL,
+        pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     HotQuery(
         "cluster rollup — sigungu",
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
         _CLUSTER_PARAMS,
         expected_indexes=_COORD_SPATIAL,
+        pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     HotQuery(
         "cluster rollup — eupmyeondong",
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["eupmyeondong"],
         _CLUSTER_PARAMS,
         expected_indexes=_COORD_SPATIAL,
+        pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     # route/area를 포함하는(kind 미지정) 요청은 geometry arm이 실린 SQL을 탄다(#1455).
     HotQuery(
@@ -300,6 +304,7 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
         {**_CLUSTER_PARAMS, "kinds": None},
         expected_indexes=_COORD_SPATIAL,
+        pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     # ADR-121 장소 속성 필터 — 필터가 있어도 bbox·근접·검색의 공간/trgm 색인을 그대로 타고
     # features를 통째로 훑지 않아야 한다(속성 쪽 semi-join, §7.4). 한 코드·두 코드(AND) 둘 다.
@@ -320,6 +325,7 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
         {**_CLUSTER_PARAMS, "attributes": ["barrier_free"]},
         expected_indexes=_COORD_SPATIAL,
+        pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     HotQuery(
         "nearby (5179 GiST) + attribute",

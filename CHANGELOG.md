@@ -1,8 +1,12 @@
 # CHANGELOG
 
-## 2026-11-19 — 검색 비교 키 사전 계산(T-READ-06, alembic 454)
+## 2026-11-19 — 검색 비교 키 사전 계산(T-READ-06, alembic 455)
 
-- alembic 454: `feature.feature_search_keys`(공개 Feature마다 보이는 이름의 비교 키 여섯·실효 검색 그룹, PK 하나). 검색은 키 식 지문·서버 지문·이름·분류가 지금과 같을 때만 저장 키를 쓰고 아니면 종전 식으로 계산한다 — 순위는 표가 비었거나 묵어도 같다. Dagster `consistency_dedup_refresh`의 새 op `refresh_search_keys`가 없거나 맞지 않는 행만 채운다(배포 뒤 한 번 수동 실행하면 바로 빨라진다). REST·OpenAPI 변경 없음.
+- alembic 455: `feature.feature_search_keys`(공개 Feature마다 보이는 이름의 비교 키 여섯·실효 검색 그룹, PK 하나). 검색은 키 식 지문·서버 지문·이름·분류가 지금과 같을 때만 저장 키를 쓰고 아니면 종전 식으로 계산한다 — 순위는 표가 비었거나 묵어도 같다. Dagster `consistency_dedup_refresh`의 새 op `refresh_search_keys`가 없거나 맞지 않는 행만 채운다(배포 뒤 한 번 수동 실행하면 바로 빨라진다). REST·OpenAPI 변경 없음.
+
+## 2026-11-19 — 저배율 집계 단축(T-READ-10, alembic 454)
+
+- `feature.feature_route_geometries`에 STORED 생성 컬럼 `marker_point`·`geom_xmin`·`geom_xmax`·`geom_ymin`·`geom_ymax`(alembic `454_route_cluster_markers`, 표 다시 쓰기). in-bounds 집계(zoom ≤ 13)는 bbox 안에 완전히 든 route의 대표점·범위를 이 열에서 읽고, 집계 문장 동안 `enable_sort = off`로 HashAggregate를 쓴다. 응답·OpenAPI 변경 없음(결과는 종전 SQL과 같다 — 통합 시험).
 
 ## 2026-11-18 — 교통 묶음 근처 조회(T-READ-04)
 

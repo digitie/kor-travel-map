@@ -1,4 +1,4 @@
-"""미리 계산한 검색 비교 키(T-READ-06, migration 454) 통합 시험.
+"""미리 계산한 검색 비교 키(T-READ-06, migration 455) 통합 시험.
 
 - 검색 평가 묶음(``tests/integration/data/search_eval_queries.txt``)과 이 파일이 심은 이름의
   검색어에서 표가 빈 경로(종전 식)와 표 경로의 ``(feature_id, rank)`` 순서가 첫 3페이지까지
