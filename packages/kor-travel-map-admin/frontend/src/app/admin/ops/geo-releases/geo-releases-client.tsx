@@ -23,6 +23,7 @@ import {
   useSkipGeoReleaseItemMutation,
 } from "@/api/geoReleases";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { useConfirm } from "@/components/confirm-dialog";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { SectionCard } from "@/components/section-card";
@@ -571,11 +572,11 @@ export function GeoReleasesClient() {
             onClick={() => void list.refetch()}
           >
             <RefreshCwIcon data-icon="inline-start" />
-            새로고침
+            <ShellActionLabel>새로고침</ShellActionLabel>
           </Button>
           <Button loading={detect.isPending} type="button" onClick={runDetect}>
             <RadarIcon data-icon="inline-start" />
-            지금 감지
+            <ShellActionLabel>지금 감지</ShellActionLabel>
           </Button>
         </>
       }

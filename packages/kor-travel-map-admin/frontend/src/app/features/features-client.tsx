@@ -1006,7 +1006,6 @@ function FeaturesClientView({
       help="현재 지도 범위의 Feature를 종류·소스·상태로 걸러 봅니다. 추가 필터에서 수명주기·공개·품질 상태를 선택할 수 있습니다."
       helpVariant="info"
       compact
-      section=""
       title="Feature 지도"
     >
       <div className="flex flex-col gap-2">

@@ -19,6 +19,7 @@ import {
 } from "@/api/pipeline";
 import { useHealth, useVersion } from "@/api/queries";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
 import { SectionCard } from "@/components/section-card";
@@ -431,7 +432,7 @@ function HomePageClientView({
             onClick={refreshAll}
           >
             <RefreshCwIcon data-icon="inline-start" />
-            새로고침
+            <ShellActionLabel>새로고침</ShellActionLabel>
           </Button>
           <a
             className={cn(buttonVariants({ variant: "outline" }))}
@@ -440,7 +441,7 @@ function HomePageClientView({
             target="_blank"
           >
             <ExternalLinkIcon data-icon="inline-start" />
-            Dagster
+            <ShellActionLabel>Dagster</ShellActionLabel>
           </a>
         </>
       }

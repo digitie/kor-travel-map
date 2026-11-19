@@ -33,6 +33,7 @@ import {
 } from "@/api/issues";
 import { featureStateLabel } from "@/api/features";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
@@ -886,7 +887,7 @@ function AdminIssuesClientView({
           onClick={() => void issues.refetch()}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="주소·정합성 이슈를 확인하고 처리합니다."

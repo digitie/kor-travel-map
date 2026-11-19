@@ -14,6 +14,7 @@ import {
   type PublicApiKeyRecord,
 } from "@/api/adminSettings";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { useConfirm } from "@/components/confirm-dialog";
 import { CopyButton } from "@/components/copy-button";
 import { SectionCard } from "@/components/section-card";
@@ -232,7 +233,7 @@ export function AdminSettingsClient() {
           onClick={refresh}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
     >

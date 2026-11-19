@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 
+import { adminDocumentTitle } from "@/lib/admin-nav";
+
 import { AdminIssuesClient } from "./admin-issues-client";
 
 export const metadata: Metadata = {
-  title: "이슈 | kor-travel-map",
+  title: adminDocumentTitle("/admin/issues", "이슈"),
   description: "주소와 정합성 이슈 검토 및 조치 화면",
 };
 

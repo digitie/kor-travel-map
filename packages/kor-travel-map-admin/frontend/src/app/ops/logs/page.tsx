@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 
+import { adminDocumentTitle } from "@/lib/admin-nav";
+
 import { LogsClient } from "./logs-client";
 
 export const metadata: Metadata = {
-  title: "운영 로그 | kor-travel-map",
+  title: adminDocumentTitle("/ops/logs", "운영 로그"),
   description: "system log와 API call log 조회 화면",
 };
 

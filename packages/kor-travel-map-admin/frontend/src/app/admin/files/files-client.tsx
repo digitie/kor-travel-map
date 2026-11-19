@@ -24,6 +24,7 @@ import {
   useRescanManagedFilesMutation,
 } from "@/api/adminFiles";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { useConfirm } from "@/components/confirm-dialog";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
@@ -628,7 +629,7 @@ function FilesClientView({
             onClick={refreshAll}
           >
             <RefreshCwIcon data-icon="inline-start" />
-            새로고침
+            <ShellActionLabel>새로고침</ShellActionLabel>
           </Button>
           <Button
             loading={rescan.isPending}
@@ -636,7 +637,7 @@ function FilesClientView({
             onClick={() => rescan.mutate(null, { onSuccess: refreshAll })}
           >
             <ScanSearchIcon data-icon="inline-start" />
-            재스캔
+            <ShellActionLabel>재스캔</ShellActionLabel>
           </Button>
         </>
       }

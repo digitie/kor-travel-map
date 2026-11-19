@@ -479,8 +479,7 @@
   --kt-brand-tint: var(--brand-tint);
   --kt-focus: var(--focus);
 }
-@media (min-width: 1024px) {
-  .map-common-menu[data-collapsed="true"] [data-slot="app-menu-group-label"],
-  .map-common-menu[data-collapsed="true"] [data-slot="app-menu-link"] > span:not([aria-hidden]) { display: none; }
-  .map-common-menu[data-collapsed="true"] [data-slot="app-menu-link"] { padding-inline: 0; justify-content: center; }
-}
+/* 관리자 셸(rail·drawer·한 줄 상단 바)과 접힘 rail의 아이콘 메뉴는 공통 `AdminShell`(@kor-travel/ui
+   0.2.3)이 소유한다 — 예전 `.map-common-menu[data-collapsed]` 접힘 규칙은 AppMenu `compact`로 대체됐다.
+   버튼 상태(hover/active/focus/disabled)는 여기서 전역으로 선언하지 않는다(FS-7.8): focus는 위
+   `@layer base`의 `:focus-visible` 하나와 공통 Button recipe의 같은 값 outline뿐이다. */

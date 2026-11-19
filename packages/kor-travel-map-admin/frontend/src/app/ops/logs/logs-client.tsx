@@ -7,6 +7,7 @@ import { useDeferredValue, useMemo, useState } from "react";
 
 import { useApiCallLogs, useSystemLogs, type SystemLogLevel } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { FilterBar, FilterField } from "@/components/filter-bar";
 import { CursorPager } from "@/components/pagination-bar";
 import { HttpStatusBadge, LevelBadge } from "@/components/status-badge";
@@ -318,7 +319,7 @@ function LogsClientView({
           onClick={refreshAll}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="시스템 로그와 API 호출 로그를 조회합니다."

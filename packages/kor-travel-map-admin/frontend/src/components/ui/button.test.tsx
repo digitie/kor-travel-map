@@ -73,3 +73,37 @@ it("실제 disabled와 설명은 loading 상태와 분리해 보존한다", () =
   expect(button.hasAttribute("disabled")).toBe(true);
   expect(button.getAttribute("title")).toBe("선택 필요");
 });
+
+const BUTTON_VARIANTS = [
+  "default",
+  "outline",
+  "secondary",
+  "ghost",
+  "destructive",
+  "destructive-solid",
+  "link",
+] as const;
+
+it.each(BUTTON_VARIANTS)(
+  "%s: focus outline은 공통 recipe의 한 벌뿐이고 상시 outline·ring 덧대기가 없다(FS-7.8)",
+  (variant) => {
+    for (const tokens of [
+      buttonVariants({ variant }).split(" "),
+      attributes(
+        renderToStaticMarkup(<Button variant={variant}>동작</Button>),
+      ).className.split(" "),
+    ]) {
+      // 조건 없는 outline-style은 모든 버튼에 medium(3px) 테두리를 상시로 그렸다.
+      expect(tokens.filter((token) => /^outline-(solid|dashed|double|dotted|\d)/.test(token)))
+        .toEqual([]);
+      expect(tokens.filter((token) => token.startsWith("focus-visible:outline")).toSorted())
+        .toEqual([
+          "focus-visible:outline-2",
+          "focus-visible:outline-kt-focus",
+          "focus-visible:outline-offset-2",
+        ]);
+      expect(tokens.some((token) => /^focus-visible:(ring|border)/.test(token))).toBe(false);
+      expect(tokens).not.toContain("outline-none");
+    }
+  },
+);

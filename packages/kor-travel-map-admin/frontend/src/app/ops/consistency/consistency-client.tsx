@@ -14,6 +14,7 @@ import {
   useOpsMetrics,
 } from "@/api/ops";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { EntityLink } from "@/components/entity-link";
 import { FilterField } from "@/components/filter-bar";
 import { SectionCard } from "@/components/section-card";
@@ -204,7 +205,7 @@ export function ConsistencyClient() {
           onClick={refreshAll}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="정합성 리포트와 이슈 큐를 조회합니다."

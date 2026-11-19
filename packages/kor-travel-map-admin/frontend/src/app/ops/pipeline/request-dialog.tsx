@@ -21,6 +21,7 @@ import {
   validateCatalogSelection,
 } from "./catalog-selection";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -1236,7 +1237,7 @@ export function RequestCreateDialog({
     <>
       <Button type="button" onClick={openDialog}>
         <PlayIcon data-icon="inline-start" />
-        갱신 요청 생성
+        <ShellActionLabel>갱신 요청 생성</ShellActionLabel>
       </Button>
       <Dialog open={open} onOpenChange={handleOpenChange}>
         <DialogContent className="max-w-xl sm:max-w-xl">

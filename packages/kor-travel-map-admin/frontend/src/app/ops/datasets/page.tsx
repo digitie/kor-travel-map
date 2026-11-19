@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
+import { adminDocumentTitle } from "@/lib/admin-nav";
+
 import { Suspense } from "react";
 
 import { DatasetsClient } from "./datasets-client";
 
 export const metadata: Metadata = {
-  title: "데이터셋 | kor-travel-map admin",
+  title: adminDocumentTitle("/ops/datasets", "데이터셋"),
 };
 
 function firstParam(value: string | string[] | undefined): string | null {

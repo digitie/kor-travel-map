@@ -28,6 +28,7 @@ import {
   useEnrichmentReviews,
 } from "@/api/enrichment";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
@@ -884,7 +885,7 @@ export function EnrichmentReviewClient() {
           onClick={() => void reviews.refetch()}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="축제 enrichment 후보를 검토해 연결하거나 거절합니다."

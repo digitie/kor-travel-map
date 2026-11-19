@@ -34,6 +34,7 @@ import {
   useDedupReviews,
 } from "@/api/dedup";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EntityLink } from "@/components/entity-link";
 import { FeatureStateBadges } from "@/components/feature-state-badges";
@@ -1246,7 +1247,7 @@ export function DedupReviewClient() {
           onClick={() => void reviews.refetch()}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="중복 후보를 검토해 채택·거절·무시하거나 병합합니다."

@@ -13,6 +13,7 @@ import {
   useCreateBackupMutation,
 } from "@/api/backups";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { JsonViewer } from "@/components/json-viewer";
 import { SectionCard } from "@/components/section-card";
@@ -360,7 +361,7 @@ export function BackupsClient() {
             onClick={refresh}
           >
             <RefreshCwIcon data-icon="inline-start" />
-            새로고침
+            <ShellActionLabel>새로고침</ShellActionLabel>
           </Button>
           <Button
             loading={createBackup.isPending}
@@ -368,7 +369,7 @@ export function BackupsClient() {
             onClick={submitBackup}
           >
             <ArchiveIcon data-icon="inline-start" />
-            백업
+            <ShellActionLabel>백업</ShellActionLabel>
           </Button>
         </>
       }
