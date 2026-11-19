@@ -58,9 +58,17 @@ _STALE_PUBLIC_FEATURES_SQL: Final[str] = f"""(
 
 
 def _refresh_sql() -> str:
+    # ``ORDER BY``가 맞지 않는 행 찾기(anti join)를 첫 INSERT 전에 끝낸다. 정렬이 없으면 CTE가
+    # INSERT와 번갈아 돌고, 표가 비어 보이는 첫 채우기에서 planner가 고른 nested loop가 행마다 이
+    # 표를 다시 훑으며 방금 넣은(보이지 않는) 행까지 지나 행 수의 제곱이 된다(n150 운영 사본
+    # 42만 행: 15분 초과). 정렬은 PK 순서 삽입도 된다.
     return f"""
 WITH computed AS MATERIALIZED (
+    SELECT keyed_rows.*
+    FROM (
 {search_keys_select_sql(_STALE_PUBLIC_FEATURES_SQL)}
+    ) AS keyed_rows
+    ORDER BY keyed_rows.feature_id
 ),
 upserted AS (
     INSERT INTO feature.feature_search_keys AS t (
@@ -94,9 +102,9 @@ SELECT count(*) AS written FROM upserted
 """
 
 
-#: 공개 Feature가 아닌(사라진·비공개) 행의 키를 지운다. upsert와 **다른 문장**이다 — 한 문장의
-#: data-modifying CTE로 묶으면 DELETE가 같은 문장이 방금 넣은(보이지 않는) 수십만 행을 지나며
-#: 계획이 무너졌다(n150 운영 사본 42만 행: 한 문장 15분 초과, 나누면 DELETE 0.9초 + upsert 14초).
+#: 공개 Feature가 아닌(사라진·비공개) 행의 키를 지운다. upsert와 **다른 문장**이다 — 같은 문장의
+#: data-modifying CTE로 묶으면 DELETE의 anti join이 같은 문장이 넣는(보이지 않는) 행을 함께
+#: 지난다. 먼저 지우고 upsert한다(n150 운영 사본 42만 행: DELETE 1초 안팎).
 _DELETE_NON_PUBLIC_SQL: Final[str] = """
 WITH deleted AS (
     DELETE FROM feature.feature_search_keys AS t
