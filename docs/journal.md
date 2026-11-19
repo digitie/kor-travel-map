@@ -1,3 +1,29 @@
+## 2026-11-19 — T-READ-09 100 km nearby: LATERAL을 page 뒤로, 거리순은 KNN
+
+- 진단(prod `map-api` 컨테이너 안 읽기 전용 트랜잭션, `jit=off`, 몇 회만): "100km nearby"(서울시청, place, 51행) 5.4초 중
+  **5.0초가 primary source LATERAL**이었다 — 반경 안 201,401행마다 `source_links→source_entities→provider_datasets→heads→
+  records` 5단 join + 정렬을 돌고 나서 51행을 잘랐다. 반경 scan 자체는 0.27초.
+- 고친 것(`feature_repo._nearby_sql`, 좌표·by-target 공용):
+  1. primary source LATERAL은 `LIMIT`로 잘린 page 행에만 붙인다. provider 필터는 같은 선택 규칙의 상관 subquery(필터가
+     있을 때만 돈다).
+  2. 거리순 page는 GiST KNN이다. `distance_m`을 `<->`로 계산한다 — PostGIS 3.6의 `<->`(`geometry_distance_centroid`)는
+     `ST_Distance`와 **같은 C 함수**(prosrc `ST_Distance`)라 값이 같다. KNN은 정렬 키가 하나일 때만 생기므로(PG18) 후보
+     subquery를 `ORDER BY distance_m FETCH FIRST (:limit_plus_one) ROWS WITH TIES`로 자르고 바깥에서 `(distance_m,
+     feature_id)`로 다시 정렬한다. WITH TIES가 n번째 거리와 같은 행을 모두 남겨 동률 tiebreak가 종전과 같다.
+  3. 반경 술어는 `ST_DWithin` 대신 그것이 펼쳐지는 `&& ST_Expand` + `<-> <= 반경`으로 쓴다. `ST_DWithin` filter 선택도가
+     0.0002로 잡혀(20만 행을 27행으로 추정) planner가 KNN을 버렸다. 두 술어가 갈리는 (행, 반경) 쌍은 prod 133만 쌍 중 0,
+     통합 시험(경계 반경 포함)도 0.
+  - 시행착오: 정렬 키 둘로는 KNN path가 안 생겼고, 후보에 상한이 없으면 바깥 LIMIT이 정렬 너머로 안 전해져 custom plan이
+    전 행 bitmap+정렬(377 ms)을 골랐다(generic plan만 KNN 5 ms).
+- prod 읽기 전용 EXPLAIN(t1118e, 다른 작업의 I/O가 겹친 창이라 종전 SQL은 기준선보다 느리게 나왔다): 새 SQL "100km nearby"
+  p50 **4.5 ms**(종전 기준선 5,200 ms), 100 km 전 kind 4.2, event 57.7, provider 필터 168, 속성 필터 143, route 37.7,
+  5 km 4.1(종전 1,107), 1 km 4.0(종전 189), 300 m 3.9(종전 16.6), 100 km 갱신순 3.8, **이름순 1,248**(종전 ≈ 9초 — 반경 안 전
+  행 정렬이라 남는다). prepared statement 10회(custom→generic) 14~16 ms(왕복 포함).
+- 동등성: `tests/integration/test_features_nearby_equivalence.py`(종전 SQL oracle, page walk 전체)와 prod 읽기 전용 대조
+  6묶음 13 page가 전부 같았다. 회귀 가드: page 행 수 이하의 LATERAL loops, KNN 순서 scan 가능, `<->`=`ST_Distance` 함수
+  동일성, 구조 unit 시험. harness `matched_rows`는 KNN 상한도 함께 뗀다.
+- 운영 배포는 하지 않았다(소유자의 Map 회전에 싣는다). OpenAPI 변화 없음.
+
 ## 2026-11-19 — T-READ-10 저배율 집계 단축(alembic 454 + HashAggregate)
 
 - 진단(운영 `map-api` 컨테이너 안, 읽기 전용 transaction·`jit=off`, `EXPLAIN (ANALYZE, BUFFERS)` 몇 번): 전국 sido 전 kind
