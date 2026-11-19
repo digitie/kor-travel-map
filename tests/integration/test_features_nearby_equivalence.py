@@ -694,16 +694,27 @@ async def test_nearby_primary_source_runs_only_for_page_rows(
         assert int(plan["Actual Rows"]) == limit_plus_one, sort
         # ``sl`` = primary source LATERAL, ``attr_link`` = 속성 코드. notice 감산 fragment의
         # 계보 조회(``cur_sl``·``other_sl``)는 종전과 같은 비용이라 여기서 세지 않는다.
-        link_loops = [
-            int(node.get("Actual Loops", 0))
+        link_nodes = [
+            node
             for node in _plan_nodes(plan)
             if node.get("Relation Name") == "source_links"
             and node.get("Alias") in {"sl", "attr_link"}
         ]
-        assert link_loops, f"{sort}: primary source·속성 코드 노드가 없다"
+        assert link_nodes, f"{sort}: primary source·속성 코드 노드가 없다"
         # LATERAL(page 행마다 1회) + 속성 코드(page 행마다 1회). 반경 안 행 수(~1,000)에
         # 비례하면 회귀다.
-        assert max(link_loops) <= limit_plus_one, (sort, link_loops)
+        too_many = [
+            (
+                node.get("Alias"),
+                node.get("Node Type"),
+                node.get("Actual Loops"),
+                node.get("Actual Rows"),
+                node.get("Index Name"),
+            )
+            for node in link_nodes
+            if int(node.get("Actual Loops", 0)) > limit_plus_one
+        ]
+        assert not too_many, (sort, too_many, json.dumps(plan)[:4000])
 
 
 async def test_nearby_distance_page_can_use_knn_index_order(
