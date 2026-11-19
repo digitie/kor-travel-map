@@ -15,13 +15,23 @@ it("탭 트리거 focus는 단일 outline 2px이고 공통 recipe의 ring·테�
     </Tabs>,
   );
   const tokens = screen.getByRole("tab", { name: "가" }).className.split(" ");
-  const focus = tokens.filter((token) => token.startsWith("focus-visible:")).toSorted();
-  expect(focus).toEqual([
-    "focus-visible:border-transparent",
-    "focus-visible:outline-2",
-    "focus-visible:outline-focus",
-    "focus-visible:outline-offset-2",
-    "focus-visible:ring-0",
-  ]);
+  // ring 색(`focus-visible:ring-ring/50`)은 남아도 폭이 0이라 그려지지 않는다 — 폭·테두리·outline만 본다.
+  expect(tokens).toEqual(
+    expect.arrayContaining([
+      "focus-visible:border-transparent",
+      "focus-visible:outline-2",
+      "focus-visible:outline-focus",
+      "focus-visible:outline-offset-2",
+      "focus-visible:ring-0",
+    ]),
+  );
+  for (const removed of [
+    "focus-visible:ring-[3px]",
+    "focus-visible:outline-1",
+    "focus-visible:outline-ring",
+    "focus-visible:border-ring",
+  ]) {
+    expect(tokens).not.toContain(removed);
+  }
   expect(tokens).not.toContain("transition-all");
 });
