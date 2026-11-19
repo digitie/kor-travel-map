@@ -229,7 +229,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   harness "100km nearby"(반경 안 201,401행)가 조용한 창 p50 5,200 ms·p95 5,369 ms로 `T-READ-03` 마감 4.5초를 넘는다
   ([기준선](reports/2026-11-19-read-baseline.md) §6.1). 해제 조건은 acceptance.
 
-- [ ] T-READ-10 — **전국 저배율 집계(sido, 전 kind) 단축** — 진행 중
+- [ ] T-READ-10 — **전국 저배율 집계(sido, 전 kind) 단축** — 구현 머지, 운영 반영 대기
 
-  harness "전국 low-zoom cluster(sido, 전 kind)"가 조용한 창 p50 1,231 ms·p95 1,311 ms다(point-only 변형 365 ms,
-  [기준선](reports/2026-11-19-read-baseline.md) §6.2). 해제 조건은 acceptance.
+  기준선 p50 1,231 ms(point-only 365 ms, [기준선](reports/2026-11-19-read-baseline.md) §6.2). route 대표점·범위 생성
+  컬럼(alembic 454)과 집계 HashAggregate로 n150 합성 −42%. 운영 회전 뒤 harness로 해제한다(acceptance).
