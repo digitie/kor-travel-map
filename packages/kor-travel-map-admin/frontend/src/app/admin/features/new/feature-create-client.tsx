@@ -39,6 +39,7 @@ import {
   type KorTravelGeoCandidate,
 } from "@/api/korTravelGeo";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { SectionCard } from "@/components/section-card";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -1369,7 +1370,7 @@ function FeatureCreateClientView({
             href="/admin/features"
           >
             <ArrowLeftIcon data-icon="inline-start" />
-            목록
+            <ShellActionLabel>목록</ShellActionLabel>
           </Link>
         </>
       }

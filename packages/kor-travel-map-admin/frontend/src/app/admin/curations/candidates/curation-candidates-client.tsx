@@ -4,9 +4,9 @@
 import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import {
   CheckIcon,
-  ExternalLinkIcon,
   RefreshCwIcon,
   SearchIcon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -29,6 +29,7 @@ import {
   useAdminCurationCollections,
 } from "@/api/curations";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
@@ -892,20 +893,15 @@ export function CurationCandidatesClient() {
   }
   return (
     <AdminShell
-      breadcrumbs={[
-        { href: "/admin/features/curated", label: "큐레이션 관리" },
-        { label: "후보 검토" },
-      ]}
       description="provider·rule이 만든 후보를 current evidence로 재검증해 거절하거나 canonical item으로 승격합니다."
-      section="Feature 관리"
       title="큐레이션 후보 검토"
       actions={
         <Link
           className={buttonVariants({ variant: "outline" })}
           href="/admin/features/curated"
         >
-          컬렉션 관리
-          <ExternalLinkIcon data-icon="inline-end" />
+          <SparklesIcon data-icon="inline-start" />
+          <ShellActionLabel>컬렉션 관리</ShellActionLabel>
         </Link>
       }
     >

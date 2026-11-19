@@ -53,6 +53,7 @@ import {
 } from "@/api/datasets";
 import { useOpsLiveInvalidation, type OpsLiveTopic } from "@/api/live";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { FilterBar, FilterField } from "@/components/filter-bar";
@@ -2768,7 +2769,7 @@ function DatasetsClientView({
           }}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="provider×dataset×범위의 신선도·갱신 정책·이슈를 한 화면에서 추적하고, 정책 편집·ETL 미리보기·지금 갱신을 실행합니다."

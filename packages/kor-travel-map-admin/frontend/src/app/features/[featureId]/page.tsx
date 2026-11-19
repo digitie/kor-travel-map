@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 
+import { adminDocumentTitle } from "@/lib/admin-nav";
+
 import { FeatureDetailPageClient } from "./feature-detail-page-client";
 
 type FeatureDetailPageProps = {
@@ -11,7 +13,7 @@ export async function generateMetadata({
 }: FeatureDetailPageProps): Promise<Metadata> {
   const { featureId } = await params;
   return {
-    title: `${featureId} | Feature 상세`,
+    title: adminDocumentTitle(`/features/${featureId}`, `Feature 상세 ${featureId}`),
   };
 }
 

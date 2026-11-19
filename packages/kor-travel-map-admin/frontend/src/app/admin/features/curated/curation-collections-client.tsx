@@ -32,6 +32,7 @@ import {
 } from "@/api/curations";
 import { CurationQuarantinePanel } from "@/app/admin/features/curated/curation-quarantine-panel";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { CopyButton } from "@/components/copy-button";
 import { DetailList } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
@@ -1518,7 +1519,7 @@ function CurationCollectionsClientView({
           onClick={(event) => void downloadTemplate(event)}
         >
           <DownloadIcon data-icon="inline-start" />
-          CSV 양식 다운로드
+          <ShellActionLabel>CSV 양식 다운로드</ShellActionLabel>
         </a>
       }
       description="테마·회차별 컬렉션을 만들고 기존 Feature에 여러 큐레이션 정보를 연결합니다."

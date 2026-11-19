@@ -469,9 +469,27 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       await page.goto("/");
 
       await expect(
-        page.getByRole("heading", { level: 1, name: "운영 홈" }),
+        page.getByRole("heading", { level: 1, name: "개요 - 운영 홈" }),
       ).toBeVisible();
-      const navigation = page.getByRole("navigation");
+      // 공통 AdminShell(@kor-travel/ui 0.2.3): lg(1024px) 이상은 좌측 rail, 그 미만은
+      // 상단 바 메뉴 버튼으로 여는 좌측 drawer다. 어느 쪽이든 메뉴는 세로 목록이다.
+      const isDesktop = viewport.columns === 4;
+      const sidebarToggle = page.getByRole("button", {
+        name: "좌측 메뉴 접기",
+      });
+      const menuButton = page.locator('[data-slot="admin-shell-menu-button"]');
+      if (isDesktop) {
+        await expect(sidebarToggle).toBeVisible();
+        await expect(menuButton).toBeHidden();
+      } else {
+        await expect(sidebarToggle).toBeHidden();
+        // 닫힌 drawer의 메뉴는 화면에 없다 — 화면 폭을 본문에 쓴다.
+        await expect(page.getByRole("navigation", { name: "주요 메뉴" })).toHaveCount(0);
+        await menuButton.click();
+      }
+      const navigation = isDesktop
+        ? page.getByRole("navigation", { name: "주요 메뉴" })
+        : page.getByRole("dialog").getByRole("navigation", { name: "주요 메뉴" });
       await expect(navigation.getByRole("link")).toHaveCount(21);
       await expect(
         navigation.getByRole("link", { name: "파이프라인", exact: true }),
@@ -483,14 +501,10 @@ test.describe("home page (/) — nav + metric/status depth", () => {
       const navDirection = await navigation.evaluate(
         (element) => window.getComputedStyle(element).flexDirection,
       );
-      expect(navDirection).toBe(viewport.columns === 4 ? "column" : "row");
-      const sidebarToggle = page.getByRole("button", {
-        name: "좌측 메뉴 접기",
-      });
-      if (viewport.columns === 4) {
-        await expect(sidebarToggle).toBeVisible();
-      } else {
-        await expect(sidebarToggle).toBeHidden();
+      expect(navDirection).toBe("column");
+      if (!isDesktop) {
+        await page.keyboard.press("Escape");
+        await expect(page.getByRole("dialog")).toHaveCount(0);
       }
 
       // 요약 KPI는 StatStrip의 4 stat — 각 stat testid로 잡아 밀도(컬럼 수)를 잰다

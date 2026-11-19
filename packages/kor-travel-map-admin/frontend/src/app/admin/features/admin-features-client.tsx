@@ -39,6 +39,7 @@ import {
   type SortOrder,
 } from "@/api/features";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { CursorPager } from "@/components/pagination-bar";
 import { useConfirm } from "@/components/confirm-dialog";
 import { DetailList } from "@/components/detail-list";
@@ -1056,13 +1057,14 @@ function AdminFeaturesClientView({
             onClick={refresh}
           >
             <RefreshCwIcon data-icon="inline-start" />
-            새로고침
+            <ShellActionLabel>새로고침</ShellActionLabel>
           </Button>
           <Link
             className={cn(buttonVariants({ variant: "default" }))}
             href="/admin/features/new"
           >
-            <PlusIcon data-icon="inline-start" />새 작성
+            <PlusIcon data-icon="inline-start" />
+            <ShellActionLabel>새 작성</ShellActionLabel>
           </Link>
         </>
       }

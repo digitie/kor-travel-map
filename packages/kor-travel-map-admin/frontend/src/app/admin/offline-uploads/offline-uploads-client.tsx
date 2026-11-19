@@ -27,6 +27,7 @@ import {
 } from "@/api/offlineUploads";
 import { type OpsDatasetGridRow, useOpsDatasetCatalog } from "@/api/datasets";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList, type DetailItem } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
@@ -1062,7 +1063,7 @@ export function OfflineUploadsClient() {
           onClick={() => void uploads.refetch()}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="저장된 FeatureBundle·CSV 원본을 검증하고 적재합니다."

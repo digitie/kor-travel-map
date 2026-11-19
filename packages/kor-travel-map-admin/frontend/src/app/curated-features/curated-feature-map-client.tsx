@@ -3,7 +3,13 @@
 
 import type { LngLatBounds, Map as MapLibreMap } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
-import { ExternalLinkIcon, ListIcon, MapIcon, XIcon } from "lucide-react";
+import {
+  ExternalLinkIcon,
+  ListIcon,
+  MapIcon,
+  SparklesIcon,
+  XIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useCallback, useDeferredValue, useMemo, useState } from "react";
 
@@ -19,6 +25,7 @@ import {
   type PublicCurationItem,
 } from "@/api/public-curations";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { DetailList } from "@/components/detail-list";
 import { FilterBar, FilterField } from "@/components/filter-bar";
 import { StatusBadge } from "@/components/status-badge";
@@ -554,13 +561,15 @@ function CuratedFeatureMapClientView({
             className={buttonVariants({ variant: "outline" })}
             href="/features"
           >
-            Feature 지도
+            <MapIcon data-icon="inline-start" />
+            <ShellActionLabel>Feature 지도</ShellActionLabel>
           </Link>
           <Link
             className={buttonVariants({ variant: "outline" })}
             href="/admin/features/curated"
           >
-            큐레이션 관리
+            <SparklesIcon data-icon="inline-start" />
+            <ShellActionLabel>큐레이션 관리</ShellActionLabel>
           </Link>
         </>
       }

@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 
+import { adminDocumentTitle } from "@/lib/admin-nav";
+
 import { AdminFeaturesClient } from "./admin-features-client";
 
 export const metadata: Metadata = {
-  title: "Feature 목록 | kor-travel-map",
+  title: adminDocumentTitle("/admin/features", "Feature 목록"),
   description: "운영자용 feature 목록과 상세 검토 화면",
 };
 

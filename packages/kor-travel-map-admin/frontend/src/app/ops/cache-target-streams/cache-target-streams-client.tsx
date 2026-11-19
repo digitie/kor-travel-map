@@ -17,6 +17,7 @@ import {
 } from "@/api/cacheTargetStreams";
 import { ApiClientError } from "@/api/client";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { useConfirm } from "@/components/confirm-dialog";
 import { DetailList } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
@@ -728,7 +729,7 @@ function CacheTargetStreamsClientView({
           onClick={onRefresh}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="cache target source stream, relay backlog, dead letter, reconciliation과 fixed snapshot checksum을 한 화면에서 확인합니다."

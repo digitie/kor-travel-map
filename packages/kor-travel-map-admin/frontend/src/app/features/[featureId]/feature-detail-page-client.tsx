@@ -5,6 +5,7 @@ import { ArrowLeftIcon, DatabaseIcon, PencilIcon } from "lucide-react";
 import Link from "next/link";
 
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { FeatureDetailView } from "@/components/feature-detail-view";
 import { buttonVariants } from "@/components/ui/button-variants";
 import { cn } from "@/lib/utils";
@@ -20,29 +21,25 @@ export function FeatureDetailPageClient({ featureId }: { featureId: string }) {
         <>
           <Link className={cn(buttonVariants({ variant: "outline" }))} href="/features">
             <ArrowLeftIcon data-icon="inline-start" />
-            지도
+            <ShellActionLabel>지도</ShellActionLabel>
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "outline" }))}
             href="/admin/features"
           >
             <DatabaseIcon data-icon="inline-start" />
-            Feature 목록
+            <ShellActionLabel>Feature 목록</ShellActionLabel>
           </Link>
           <Link
             className={cn(buttonVariants({ variant: "default" }))}
             href={`/admin/features?feature_id=${encodeURIComponent(featureId)}`}
           >
             <PencilIcon data-icon="inline-start" />
-            수정
+            <ShellActionLabel>수정</ShellActionLabel>
           </Link>
         </>
       }
-      breadcrumbs={[
-        { label: "Feature 관리" },
-        { label: "Feature 목록", href: "/admin/features" },
-        { label: featureId },
-      ]}
+      description={featureId}
       title="Feature 상세"
     >
       <FeatureDetailView featureId={featureId} />

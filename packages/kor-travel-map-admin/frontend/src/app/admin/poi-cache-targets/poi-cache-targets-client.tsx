@@ -12,6 +12,7 @@ import {
   useUpsertPoiCacheTargetMutation,
 } from "@/api/poiCacheTargets";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { useConfirm } from "@/components/confirm-dialog";
 import { EntityLink } from "@/components/entity-link";
 import { CursorPager } from "@/components/pagination-bar";
@@ -441,7 +442,7 @@ function PoiCacheTargetsClientView({
           onClick={() => void targets.refetch()}
         >
           <RefreshCwIcon data-icon="inline-start" />
-          새로고침
+          <ShellActionLabel>새로고침</ShellActionLabel>
         </Button>
       }
       description="외부 시스템 POI/cache target을 등록하고 target key 기준 주변 feature를 확인합니다."

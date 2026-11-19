@@ -1,5 +1,7 @@
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import type { Metadata } from "next";
+
+import { adminDocumentTitle } from "@/lib/admin-nav";
 import { Suspense } from "react";
 
 import { Skeleton } from "@/components/ui/skeleton";
@@ -7,7 +9,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { PipelineClient } from "./pipeline-client";
 
 export const metadata: Metadata = {
-  title: "파이프라인 | kor-travel-map admin",
+  title: adminDocumentTitle("/ops/pipeline", "파이프라인"),
   description:
     "실행 타임라인·스케줄·갱신 요청을 한 화면에서 관측/조작하는 파이프라인 운영 화면 (ADR-064).",
 };

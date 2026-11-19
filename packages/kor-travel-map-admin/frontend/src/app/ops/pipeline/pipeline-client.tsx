@@ -1,7 +1,7 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list + inspector rail) · design-system: design.md · designed-as-app
 
-import { RefreshCwIcon } from "lucide-react";
+import { PlayIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -14,6 +14,7 @@ import {
   usePipelineOverview,
 } from "@/api/pipeline";
 import { AdminShell } from "@/components/admin-shell";
+import { ShellActionLabel } from "@/components/shell-action-label";
 import { StatStrip } from "@/components/stat-strip";
 import { LiveBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -538,9 +539,13 @@ export function PipelineClient() {
   return (
     <AdminShell
       actions={
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex items-center gap-2">
           <LiveBadge
-            label={opsLiveConnectionLabel(live.state)}
+            label={
+              <ShellActionLabel>
+                {opsLiveConnectionLabel(live.state)}
+              </ShellActionLabel>
+            }
             state={live.state}
           />
           <Button
@@ -550,7 +555,7 @@ export function PipelineClient() {
             onClick={() => void overview.refetch()}
           >
             <RefreshCwIcon data-icon="inline-start" />
-            새로고침
+            <ShellActionLabel>새로고침</ShellActionLabel>
           </Button>
           {queueOperational ? (
             <RequestCreateDialog onCreated={selectExecution} />
@@ -561,13 +566,13 @@ export function PipelineClient() {
               disabledReason="큐 sensor가 RUNNING으로 확인될 때까지 새 갱신 요청을 만들지 않습니다."
               type="button"
             >
-              갱신 요청 생성
+              <PlayIcon data-icon="inline-start" />
+              <ShellActionLabel>갱신 요청 생성</ShellActionLabel>
             </Button>
           )}
         </div>
       }
       description="실행 타임라인·전역 이벤트·스케줄·갱신 요청을 한 화면에서 관측하고 조작합니다."
-      section="수집 파이프라인"
       title="파이프라인"
     >
       <div className="space-y-6">

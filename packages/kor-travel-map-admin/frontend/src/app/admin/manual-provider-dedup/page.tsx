@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 
+import { adminDocumentTitle } from "@/lib/admin-nav";
+
 import { AdminShell } from "@/components/admin-shell";
 
 import { ManualProviderDedupClient } from "./manual-provider-dedup-client";
 
 export const metadata: Metadata = {
-  title: "수동/provider 중복 판정 | kor-travel-map admin",
+  title: adminDocumentTitle("/admin/manual-provider-dedup", "수동/provider 중복 판정"),
 };
 
 export default function ManualProviderDedupPage() {
