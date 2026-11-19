@@ -1,3 +1,32 @@
+## 2026-11-19 — T-READ-10 저배율 집계 단축(alembic 454 + HashAggregate)
+
+- 진단(운영 `map-api` 컨테이너 안, 읽기 전용 transaction·`jit=off`, `EXPLAIN (ANALYZE, BUFFERS)` 몇 번): 전국 sido 전 kind
+  집계 1.6 s 중 geometry 후보 CTE 0.68 s — route geometry 5.8만 개(평균 118점, 표 232 MB)를 요청마다 풀어
+  `ST_Intersects`·`ST_XMin`…·`ST_PointOnSurface`를 계산하고, 그 5.8만 행을 `pk_features`로 하나씩 조인(0.17 s)한다.
+  point arm은 GiST 순서 heap 읽기 34만 행(0.4~0.7 s), 그 뒤 40만 행 **정렬**(GroupAggregate)이 0.1~0.2 s. 지역 코드는
+  이미 `features`에 저장돼 있다 — "질의 때 지역 배정"은 원인이 아니었다.
+- 수정: ① route geometry STORED 생성 컬럼 다섯(`marker_point`·`geom_xmin`…, 종전 요청 시 식과 같은 식). bbox 안에
+  완전히 든 route는 geometry를 풀지 않고 `ST_Intersects`도 건너뛴다(포함 ⇒ 교차). area는 열을 달지 않았다
+  (`to_jsonb(area_row)`가 큐레이션 입력 해시에 통째 들어가 해시가 바뀐다, 422행이라 요청 때 계산해도 작다).
+  ② 집계 문장 동안만 `enable_sort = off`(`set_config(..., true)` 후 직전 값 복원) — HashAggregate.
+- 기각한 것(같은 n150 합성 DB, 반복 교차 p50): `features (feature_id) INCLUDE (kind, category, 코드 셋, coord)` 덮개 색인
+  — 조인이 index-only가 되지만 이득 1~6%(911 → 903 ms)라 색인 하나(약 45 MB·쓰기 증폭)를 더할 값이 없다. 시도 키 덮개
+  색인 — planner가 고르지 않았다. 한 번에 훑는(single-pass LEFT JOIN) 변형 — 더 느렸다(1.6 s). 지역 묶음 `COLLATE "C"`
+  — 정렬은 빨라지지만 HashAggregate보다 작다. 사전 집계·rollup 표 — T-101(2026-09-07 소유자 제외).
+- 실측(n150, 합성 42만 행 = place 35만·route 5.77만(평균 129점)·area 422·event 1.5천, tmpfs PG18, 반복 10회 교차, p50):
+  전국 sido 전 kind **1,214 → 705 ms**(−42%), 같은 bbox point-only 397 → 250 ms(−37%), 수도권 시군구 전 kind
+  145 → 124 ms·point-only 100 → 85 ms, 서울 읍면동 전 kind 90 → 64 ms·point-only 119 → 91 ms. 처음 목표
+  "전 kind < 300 ms"는 닿지 않는다(point-only 기준선부터 365 ms) — acceptance 목표를 800 ms/300 ms로 적었다.
+- 동등성: `tests/integration/test_cluster_rollup_equivalence.py`가 종전 SQL 사본과 3단위 × bbox 3 × kind 필터 4를 비교한다
+  (변에 닿는 route·1e-7도 넘는 route·MBR만 겹치는 route·bbox를 가로지르는 route·구멍 난 area·비공개·코드 없음 포함, geom
+  UPDATE 뒤 한 번 더, 요청 경로 함수도). 개수는 정확히 같고 평균 좌표는 1e-9도 안(계획이 바뀌면 float 합 순서만 다르다).
+  bench DB에서도 시도·시군구·읍면동 개수 일치, 좌표 차 1e-12도 안팎.
+- 다시 쓰기 비용: 합성 route 5.77만 행·153 MB에서 `ALTER TABLE … ADD COLUMN … STORED` 5.1 s(tmpfs, 같은 표 `VACUUM FULL`
+  4.7 s). prod는 232 MB·디스크라 10~20 s `ACCESS EXCLUSIVE`로 본다 — 그 동안 route/area를 읽는 요청이 기다린다.
+  migration은 `lock_timeout` 5 s·`statement_timeout` 300 s, route 적재가 돌면 실패하고 다시 돌리면 된다. `features`(42만 행)는
+  건드리지 않는다(backfill 없음 — 생성 컬럼이 다시 쓰기 중에 채워진다).
+- 배포하지 않았다(소유자의 묶음 회전). 운영 반영 뒤 harness로 acceptance를 닫는다.
+
 ## 2026-11-19 — T-READ-01 읽기 기준선(조용한 창·적재 중)과 판정
 
 - 소유자 승인(2026-11-19 KST 아침, 예정 창 대신 지금)으로 운영 `map-api` 컨테이너 안에서 harness
