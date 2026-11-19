@@ -142,7 +142,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     test.setTimeout(COUNT_STATE_TEST_TIMEOUT_MS);
     await gotoDatasetsAndTraceOpsLiveUrl(page);
     await expect(
-      page.getByRole("heading", { level: 1, name: "데이터셋", exact: true }),
+      page.getByRole("heading", { level: 1, name: "수집 파이프라인 - 데이터셋", exact: true }),
     ).toBeVisible(READY);
     await expect(page.getByTestId("datasets-live-mode")).toHaveText(
       "실시간 갱신",
@@ -221,7 +221,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
 
     await page.goto("/ops/pipeline");
     await expect(
-      page.getByRole("heading", { level: 1, name: "파이프라인", exact: true }),
+      page.getByRole("heading", { level: 1, name: "수집 파이프라인 - 파이프라인", exact: true }),
     ).toBeVisible(READY);
     const pipelineRefresh = page.getByRole("button", {
       name: "새로고침",
@@ -306,7 +306,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     expect(datasetProjection?.data).toEqual({ live_revision: expect.any(Number) });
 
     await expect(
-      page.getByRole("heading", { level: 1, name: "데이터셋", exact: true }),
+      page.getByRole("heading", { level: 1, name: "수집 파이프라인 - 데이터셋", exact: true }),
     ).toBeVisible(READY);
     await expect(page.getByTestId("datasets-live-mode")).toHaveText(
       "실시간 갱신",

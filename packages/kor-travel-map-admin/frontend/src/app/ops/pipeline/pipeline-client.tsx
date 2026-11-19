@@ -541,7 +541,11 @@ export function PipelineClient() {
       actions={
         <div className="flex items-center gap-2">
           <LiveBadge
-            label={opsLiveConnectionLabel(live.state)}
+            label={
+              <ShellActionLabel>
+                {opsLiveConnectionLabel(live.state)}
+              </ShellActionLabel>
+            }
             state={live.state}
           />
           <Button

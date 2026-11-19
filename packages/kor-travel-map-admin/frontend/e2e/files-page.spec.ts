@@ -195,7 +195,11 @@ test.describe("/admin/files — 파일 관리 (mocked)", () => {
     await page.goto("/admin/files");
 
     await expect(
-      page.getByRole("heading", { name: "파일 관리", exact: true }),
+      page.getByRole("heading", {
+        level: 1,
+        name: "시스템 - 파일 관리",
+        exact: true,
+      }),
     ).toBeVisible();
 
     // 요약 카드

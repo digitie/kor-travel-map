@@ -4,9 +4,9 @@
 import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import {
   CheckIcon,
-  ExternalLinkIcon,
   RefreshCwIcon,
   SearchIcon,
+  SparklesIcon,
   XIcon,
 } from "lucide-react";
 import Link from "next/link";
@@ -900,8 +900,8 @@ export function CurationCandidatesClient() {
           className={buttonVariants({ variant: "outline" })}
           href="/admin/features/curated"
         >
+          <SparklesIcon data-icon="inline-start" />
           <ShellActionLabel>컬렉션 관리</ShellActionLabel>
-          <ExternalLinkIcon data-icon="inline-end" />
         </Link>
       }
     >

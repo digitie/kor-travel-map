@@ -170,7 +170,7 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
       // 쉴 때: 페이지의 모든 공통 Button에 상시 outline이 없다(예전 `outline-solid`가
       // 기본 폭 medium=3px outline을 모든 버튼에 그렸다).
       const restingOutlines = await page
-        .locator('[data-slot="button"]')
+        .locator('button, a[href], [role="tab"]')
         .evaluateAll((buttons) =>
           buttons
             .filter((button) => button.checkVisibility())
@@ -206,6 +206,23 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
       expect(pressed.boxShadow).toBe(rest.boxShadow);
       const pressedBox = await refresh.boundingBox();
       expect(Math.abs((pressedBox?.height ?? 0) - box.height)).toBeLessThanOrEqual(1);
+
+      // 탭 트리거도 버튼과 같은 단일 outline이다(공통 0.2.3 tabs recipe의 3px ring·1px outline·
+      // 테두리 색을 Map wrapper가 덮는다).
+      // Radix Tabs는 roving tabindex라 선택된 탭만 Tab으로 닿는다.
+      const tab = page.getByRole("tab", { selected: true }).first();
+      await expect(tab).toBeVisible();
+      const tabRest = await focusStyle(tab);
+      await tabUntilFocused(page, tab);
+      const tabFocused = await focusStyle(tab);
+      expect(tabFocused.focusVisible).toBe(true);
+      expect(tabFocused.outlineStyle).toBe("solid");
+      expect(tabFocused.outlineWidth).toBe("2px");
+      expect(tabFocused.outlineOffset).toBe("2px");
+      // ring-0은 box-shadow 합성 문자열을 바꿀 수 있어(폭 0 ring 항목) 문자열 동일 대신
+      // "spread가 양수인 그림자(= 보이는 ring)가 새로 생기지 않았다"를 본다.
+      expect(spreadRings(tabFocused.boxShadow)).toEqual(spreadRings(tabRest.boxShadow));
+      expect(tabFocused.borderWidth).toBe(tabRest.borderWidth);
     });
   }
 
@@ -247,4 +264,16 @@ function focusStyle(target: Locator) {
       borderColor: style.borderTopColor,
     };
   });
+}
+
+/** box-shadow 목록에서 spread(네 번째 길이)가 0보다 큰 항목만 — 포커스 ring의 흔적. */
+function spreadRings(boxShadow: string): string[] {
+  if (boxShadow === "none") return [];
+  return boxShadow
+    .split(/,(?![^(]*\))/)
+    .map((shadow) => shadow.trim())
+    .filter((shadow) => {
+      const lengths = shadow.match(/-?\d+(\.\d+)?px/g) ?? [];
+      return lengths.length >= 4 && Number.parseFloat(lengths[3] ?? "0") > 0;
+    });
 }
