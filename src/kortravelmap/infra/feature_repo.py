@@ -1821,6 +1821,23 @@ _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT: Final[dict[str, str]] = {
 }
 _GEOMETRY_FEATURE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
 
+# T-READ-10 — 집계는 bbox 안 후보 행(전국이면 약 40만)을 행정코드로 묶어 20개 안팎의 묶음을
+# 낸다. planner는 그 묶기를 "40만 행 정렬 → GroupAggregate"로 고른다 — 정렬 비용 추정이 text
+# 비교를 실제(libc 정렬, prod ``en_US.utf8``)보다 훨씬 싸게 보기 때문이다. n150 실측(합성
+# 42만 행, 반복을 교차해 잰 p50): 전국 point-only 397 → 250 ms, 전 kind 815 → 705 ms,
+# 읍면동(서울 zoom 12) 90 → 64 ms. 그래서 이 문장 동안만 ``enable_sort``를 꺼 HashAggregate를
+# 고르게 한다. 결과는 바뀌지 않는다(계획만 바뀐다 — 개수는 같고 평균 좌표는 float 합의
+# 순서만큼, 1e-12도 안팎에서 달라질 수 있다. 종전에도 계획이 바뀌면 그랬다). 맨 끝 묶음
+# 정렬(20행 남짓)은 대안이 없으므로 그대로 정렬한다. ``set_config(..., true)``라 transaction
+# 안에서만 살고, 집계가 끝나면 직전 값으로 되돌린다(같은 transaction의 다음 문장에 새지
+# 않게). harness(``scripts/perf_tier2_release_harness.py``)도 같은 문장을 앞에 둔다.
+_CLUSTER_HASH_AGGREGATE_ON_SQL: Final[str] = (
+    "SELECT current_setting('enable_sort') AS prior, set_config('enable_sort', 'off', true)"
+)
+_CLUSTER_HASH_AGGREGATE_OFF_SQL: Final[str] = (
+    "SELECT set_config('enable_sort', CAST(:prior AS text), true)"
+)
+
 
 async def cluster_features_in_bbox(
     session: AsyncSession,
@@ -1856,6 +1873,7 @@ async def cluster_features_in_bbox(
         if normalized_kinds is None or not _GEOMETRY_FEATURE_KINDS.isdisjoint(normalized_kinds)
         else _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT
     )
+    prior_enable_sort = await session.scalar(text(_CLUSTER_HASH_AGGREGATE_ON_SQL))
     rows = (
         (
             await session.execute(
@@ -1876,6 +1894,7 @@ async def cluster_features_in_bbox(
         .mappings()
         .all()
     )
+    await session.execute(text(_CLUSTER_HASH_AGGREGATE_OFF_SQL), {"prior": prior_enable_sort})
     return [
         {
             "cluster_key": str(row["cluster_key"]),

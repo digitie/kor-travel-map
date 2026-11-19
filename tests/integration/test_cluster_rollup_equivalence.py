@@ -109,7 +109,8 @@ _CODES = """
     || lpad((floor((LON - 126.0) / 0.1)::int * 20 + floor((LAT - 37.0) / 0.1)::int)::text, 3, '0'),
   lpad((10 + floor((LON - 126.0) / 0.5)::int * 3 + floor((LAT - 37.0) / 0.5)::int)::text, 2, '0')
     || lpad((floor((LON - 126.0) / 0.1)::int * 20 + floor((LAT - 37.0) / 0.1)::int)::text, 3, '0')
-    || lpad((floor((LON - 126.0) / 0.02)::int * 100 + floor((LAT - 37.0) / 0.02)::int)::text, 5, '0')
+    || lpad((floor((LON - 126.0) / 0.02)::int * 100
+             + floor((LAT - 37.0) / 0.02)::int)::text, 5, '0')
 """
 
 _SEED_FEATURES_SQL = f"""
@@ -271,13 +272,25 @@ async def _assert_same(session: AsyncSession, *, label: str) -> int:
                         )
                     ).all()
                 )
+                # 요청 경로(HashAggregate 설정·point-only 분기 포함)도 같은 답을 내야 한다.
+                served = {
+                    str(row["cluster_key"]): (
+                        int(row["feature_count"]),
+                        float(row["lon"]),
+                        float(row["lat"]),
+                    )
+                    for row in await feature_repo.cluster_features_in_bbox(
+                        session, **bbox, cluster_unit=unit, kinds=kinds, limit=2000
+                    )
+                }
                 where = f"{label} unit={unit} bbox={bbox} kinds={kinds}"
-                assert {k: v[0] for k, v in current.items()} == {
-                    k: v[0] for k, v in legacy.items()
-                }, where
-                for key, (_, lon, lat) in legacy.items():
-                    assert current[key][1] == pytest.approx(lon, abs=1e-9), where
-                    assert current[key][2] == pytest.approx(lat, abs=1e-9), where
+                for candidate in (current, served):
+                    assert {k: v[0] for k, v in candidate.items()} == {
+                        k: v[0] for k, v in legacy.items()
+                    }, where
+                    for key, (_, lon, lat) in legacy.items():
+                        assert candidate[key][1] == pytest.approx(lon, abs=1e-9), where
+                        assert candidate[key][2] == pytest.approx(lat, abs=1e-9), where
                 compared += len(legacy)
     return compared
 
@@ -331,3 +344,14 @@ async def test_route_marker_columns_follow_geom(migrated_session: AsyncSession) 
         )
     )
     assert mismatches == 0
+
+
+async def test_cluster_planner_setting_is_scoped(migrated_session: AsyncSession) -> None:
+    """집계가 끈 ``enable_sort``는 그 문장 뒤 직전 값으로 돌아온다(transaction에 새지 않는다)."""
+    before = await migrated_session.scalar(text("SELECT current_setting('enable_sort')"))
+    await feature_repo.cluster_features_in_bbox(
+        migrated_session, **_BBOXES[0], cluster_unit="sido"
+    )
+    after = await migrated_session.scalar(text("SELECT current_setting('enable_sort')"))
+    assert before == "on"
+    assert after == before

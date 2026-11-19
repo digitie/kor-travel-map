@@ -68,6 +68,7 @@ from kortravelmap.infra.db import make_async_engine, normalize_async_dsn  # noqa
 from kortravelmap.infra.feature_repo import (  # noqa: E402
     _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT,
     _CLUSTER_BBOX_SQL_BY_UNIT,
+    _CLUSTER_HASH_AGGREGATE_ON_SQL,
     _FEATURE_SEARCH_BY_SCORE_SQL,
     _FEATURES_IN_BBOX_SQL,
     _GET_PUBLIC_FEATURE_SQL,
@@ -506,6 +507,7 @@ def _read_baseline_viewports(detail_feature_id: str) -> tuple[Viewport, ...]:
             params=_cluster_params(_CAPITAL_AREA_Z10),
             min_returned_rows=1,
             terminal_limit_parameter="limit",
+            pre=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
         ),
         Viewport(
             name="서울시청 읍면동 집계(zoom 12, PinVi 기본 화면)",
@@ -513,6 +515,7 @@ def _read_baseline_viewports(detail_feature_id: str) -> tuple[Viewport, ...]:
             params=_cluster_params(_SEOUL_CITY_HALL_Z12),
             min_returned_rows=1,
             terminal_limit_parameter="limit",
+            pre=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
         ),
         Viewport(
             name="서울시청 읍면동 집계(zoom 13)",
@@ -520,6 +523,7 @@ def _read_baseline_viewports(detail_feature_id: str) -> tuple[Viewport, ...]:
             params=_cluster_params(_SEOUL_CITY_HALL_Z13),
             min_returned_rows=1,
             terminal_limit_parameter="limit",
+            pre=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
         ),
         Viewport(
             name="서울 개별 행 500건(zoom 14)",
@@ -554,6 +558,7 @@ def _release_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
             params=_NATIONWIDE_LOWZOOM_BBOX,
             min_returned_rows=1,
             terminal_limit_parameter="limit",
+            pre=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
         ),
         # #1455 — route/area를 포함하는 요청은 geometry arm이 실린 SQL을 탄다.
         Viewport(
@@ -562,6 +567,7 @@ def _release_viewports(batch_feature_ids: list[str]) -> tuple[Viewport, ...]:
             params={**_NATIONWIDE_LOWZOOM_BBOX, "kinds": None},
             min_returned_rows=1,
             terminal_limit_parameter="limit",
+            pre=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
         ),
         Viewport(
             name="100km nearby",
