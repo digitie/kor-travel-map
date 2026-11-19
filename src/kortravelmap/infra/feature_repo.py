@@ -2885,11 +2885,13 @@ WITH origin AS (
 )"""
 
 
-def _nearby_primary_source_sql(
+def _nearby_primary_source_subquery(
     feature_alias: str, *, columns: str = "pd.provider, pd.dataset_key"
 ) -> str:
     """Feature 하나의 primary source(provider·dataset) 1행 — nearby 응답·provider 필터 공용.
 
+    바깥 ``{feature_alias}``에 상관된 **조각**이라 홀로 Parse되지 않는다 — head parse
+    오라클은 이것을 품은 ``_nearby_sql`` 문장으로 검사한다(그래서 ``*_sql`` 이름이 아니다).
     같은 Feature에 primary link가 여럿이면 가장 최근 관측(head)·적재 record를 고른다.
     응답 열과 provider 필터가 **같은 규칙**을 써야 필터가 응답과 어긋나지 않는다.
     """
@@ -3004,7 +3006,7 @@ page AS (
       )
       AND (
         CAST(:providers AS text[]) IS NULL
-        OR ({_nearby_primary_source_sql("f", columns="pd.provider")}
+        OR ({_nearby_primary_source_subquery("f", columns="pd.provider")}
         ) = ANY(CAST(:providers AS text[]))
       )
       AND {place_attribute_filter_sql("f")}
@@ -3028,7 +3030,7 @@ SELECT
     page.last_updated_at,
     {place_attribute_codes_sql("page")} AS attribute_codes
 FROM page
-LEFT JOIN LATERAL ({_nearby_primary_source_sql("page")}
+LEFT JOIN LATERAL ({_nearby_primary_source_subquery("page")}
 ) AS ps ON TRUE
 ORDER BY {final_order}
 """

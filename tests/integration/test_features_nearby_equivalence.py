@@ -651,20 +651,17 @@ def _walk(plan: dict[str, Any], path: str) -> list[tuple[str, dict[str, Any]]]:
     return out
 
 
-def _nodes_above_page(plan: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
-    """page(LIMIT) 바깥 — 뿌리 Nested Loop의 inner 자식과 뿌리의 SubPlan 아래 노드."""
+def _page_consumers(plan: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """page(LIMIT) 위에서 행마다 도는 것 — 뿌리 Nested Loop의 inner 자식과 SubPlan."""
     node = plan
-    # 최종 ORDER BY의 Sort/Result가 뿌리에 있을 수 있다 — Nested Loop까지 내려간다.
-    while node.get("Node Type") != "Nested Loop" and len(node.get("Plans", [])) >= 1:
-        if any(child.get("Parent Relationship") == "SubPlan" for child in node["Plans"]):
-            break
+    # 최종 ORDER BY의 Sort가 뿌리에 있을 수 있다 — Nested Loop까지 내려간다.
+    while node.get("Node Type") != "Nested Loop" and node.get("Plans"):
         node = node["Plans"][0]
-    out: list[tuple[str, dict[str, Any]]] = []
-    for child in node.get("Plans", []):
-        relationship = child.get("Parent Relationship")
-        if relationship in {"Inner", "SubPlan"}:
-            out.extend(_walk(child, f"{child.get('Node Type')}[{relationship}]"))
-    return out
+    return [
+        (str(child.get("Parent Relationship")), child)
+        for child in node.get("Plans", [])
+        if child.get("Parent Relationship") in {"Inner", "SubPlan"}
+    ]
 
 
 def _outline(plan: dict[str, Any]) -> list[str]:
@@ -724,19 +721,15 @@ async def test_nearby_primary_source_runs_only_for_page_rows(
             {**_coord_params(100_000.0, limit_plus_one), "kinds": ["place"]},
         )
         assert int(plan["Actual Rows"]) == limit_plus_one, sort
-        # 잘린 page 위에서 도는 부분만 본다 — 뿌리의 page 쪽이 아닌 자식(primary source
-        # LATERAL)과 뿌리의 SubPlan(속성 코드). page 안 필터의 subplan(provider·속성·notice
-        # 필터)은 필터가 있을 때 후보 행마다 도는 것이 종전과 같은 의미라 여기서 세지 않는다.
-        above_page = _nodes_above_page(plan)
-        link_nodes = [
-            (path, node)
-            for path, node in above_page
-            if node.get("Relation Name") == "source_links"
-        ]
-        assert link_nodes, (sort, "primary source·속성 코드 노드가 없다", _outline(plan))
+        # 잘린 page 위에서 도는 부분 — 뿌리 Nested Loop의 inner(primary source LATERAL)와
+        # 뿌리의 SubPlan(속성 코드) — 이 **실행 횟수**가 page 행 수 이하여야 한다. 그 안쪽
+        # 노드의 loops는 subplan 안 join 순서에 따라 곱해지므로(종전과 같은 속성 코드 계획)
+        # 세지 않는다. page 안 필터 subplan도 종전과 같은 의미라 세지 않는다.
+        roots = _page_consumers(plan)
+        assert {kind for kind, _ in roots} >= {"Inner", "SubPlan"}, (sort, _outline(plan))
         too_many = [
-            (path, node.get("Alias"), node.get("Actual Loops"))
-            for path, node in link_nodes
+            (kind, node.get("Node Type"), node.get("Actual Loops"))
+            for kind, node in roots
             if int(node.get("Actual Loops", 0)) > limit_plus_one
         ]
         assert not too_many, (sort, too_many, _outline(plan))
