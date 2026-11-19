@@ -1,3 +1,11 @@
+## 2026-11-19 — T-READ-09 100 km nearby 구현(PR, 운영 회전 대기)
+
+- 원인: 반경 안 전 행(100 km에서 20만)에 primary source LATERAL을 돌고 나서 51행을 잘랐다(LATERAL 201,401회 ≈ 5초).
+  page 행에만 LATERAL을 붙이고 거리순을 GiST KNN(`<->`, 후보 `FETCH FIRST … WITH TIES`)으로 바꿨다. prod 읽기 전용 EXPLAIN
+  p50 5,200 ms → 4.5 ms. 결과는 종전 SQL과 같다(통합 oracle 시험 + prod 대조). OpenAPI 변화 없음.
+- 다음: 소유자의 Map 회전에 싣고, 회전 뒤 harness "100km nearby"를 다시 재 acceptance 첫·셋째 항목을 닫는다.
+- 남는 느린 경로(마감 안): 100 km **이름순**은 반경 안 전 행 정렬이라 p50 ≈ 1.2초(종전 ≈ 9초).
+
 ## 2026-11-19 — T-READ-10 구현(alembic 454), 운영 반영 대기
 
 - 전국 저배율 집계: route geometry 대표점·범위 STORED 생성 컬럼(alembic `454_route_cluster_markers`, route 표 다시 쓰기

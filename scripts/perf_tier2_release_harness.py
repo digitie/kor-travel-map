@@ -461,7 +461,9 @@ def _count_matching_rows_sql(sql: str, terminal_limit_parameter: str | None) -> 
     LATERAL/CTE 내부의 ``LIMIT 1``은 query 의미의 일부이므로 보존한다. 공개 bbox
     SQL처럼 page ``LIMIT``가 candidate CTE 안에 있을 수 있으므로, named terminal
     placeholder의 **유일한** 출현만 제거한다. 같은 placeholder가 여러 곳이면 어느
-    limit가 page 경계인지 추측하지 않고 fail-close한다.
+    limit가 page 경계인지 추측하지 않고 fail-close한다. 거리순 nearby의 KNN 후보 상한
+    ``FETCH FIRST (:placeholder) ROWS WITH TIES``(T-READ-09)는 page 경계와 같은 placeholder라
+    출현 수와 무관하게 함께 뗀다.
     """
 
     matched_sql = sql.rstrip()
@@ -472,6 +474,10 @@ def _count_matching_rows_sql(sql: str, terminal_limit_parameter: str | None) -> 
                 f"query must contain exactly one {terminal_limit} to count pre-limit rows"
             )
         matched_sql = matched_sql.replace(terminal_limit, "", 1)
+        # 거리순 nearby 후보의 KNN 상한(T-READ-09) — page 경계와 같은 placeholder라 함께 뗀다.
+        matched_sql = matched_sql.replace(
+            f"FETCH FIRST (:{terminal_limit_parameter}) ROWS WITH TIES", ""
+        )
     return f"SELECT count(*) AS matched_rows FROM ({matched_sql}) AS matched"
 
 

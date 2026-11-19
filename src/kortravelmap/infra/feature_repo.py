@@ -2821,121 +2821,55 @@ CROSS JOIN LATERAL (
 WHERE codes.code IS NOT NULL
 """
 
-_NEARBY_TARGET_CTE_SQL: Final[str] = f"""
-WITH target AS (
-    SELECT target_id, coord_5179,
-           COALESCE(CAST(:radius_km AS double precision), radius_km) * 1000.0
-             AS radius_m
-    FROM ops.poi_cache_targets
-    WHERE target_id::text = :target_id
-      AND deleted_at IS NULL
-      AND coord_5179 IS NOT NULL
-),
-candidates AS (
+# ── nearby (반경 주변) — T-READ-09 ─────────────────────────────────────────────
+# 요청 하나는 (1) ``origin`` CTE(중심점 5179·반경 m), (2) ``page`` — 반경 안 공개 Feature를
+# 정렬 키 순으로 잘라 ``:limit_plus_one``건만 남기는 CTE, (3) 잘린 행에만 primary source와
+# 속성 코드를 붙이는 최종 SELECT로 이뤄진다.
+#
+# 2026-11-19 prod(41.9만 공개 행) "100km nearby"가 5.2초였다. 반경 안 20만 행 **전부**에
+# primary source LATERAL(5단 join + 정렬)을 돌고 나서 51건을 잘랐기 때문이다(실측 LATERAL
+# 201,401회, 5.0초). 그래서 primary source는 잘린 page 행에만 붙이고, provider 필터가 있을
+# 때만 같은 선택 규칙의 상관 subquery로 거른다. 거리순은 GiST KNN(``<->``)으로 가까운
+# 행부터 읽어 ``LIMIT``에서 멈춘다. ``<->``(``geometry_distance_centroid``)는 PostGIS
+# 3.x에서 ``ST_Distance``와 **같은 C 함수**이고 KNN은 인덱스의 float4 box 거리를 정확
+# 거리로 recheck해 재정렬하므로, ``(distance_m, feature_id)`` 순서·cursor 경계가 종전과
+# 같다(동률 ``feature_id``는 KNN 위의 Incremental Sort). 최종 SELECT가 같은 키로 다시
+# 정렬해 응답 순서를 고정한다.
+#
+# 반경 술어는 ``ST_DWithin`` 대신 그것이 펼쳐지는 두 조각 — 색인 조건 ``&& ST_Expand``와 거리
+# ``<-> <= 반경`` — 으로 직접 쓴다. 점끼리 ``ST_DWithin``은 ``ST_Distance``와 같은 거리 계산을
+# ``<=`` 반경으로 비교하므로 결과가 같다(통합 시험이 두 술어가 갈리는 행이 없음을 확인한다). 이유는
+# 추정이다: prod에서 ``ST_DWithin`` filter의 선택도가 0.0002로 잡혀 반경 안 20만 행을 27행으로
+# 보고, planner가 KNN 대신 전 행 bitmap+정렬(377 ms)을 골랐다. KNN을 강제하면 5 ms였다.
+#
+# ADR-012: 술어·정렬은 STORED ``coord_5179``에 직접 건다. 입력 좌표 변환은 ``origin``에서
+# 1회뿐이고, ``origin``은 FROM 없는 1행 CTE라 상수(또는 InitPlan 값)로 끌어올려진다 —
+# KNN 정렬 인자는 행마다 바뀌지 않아야 인덱스를 탈 수 있다.
+
+#: by-target 중심 — target 행을 스칼라 subquery로 읽는다. target이 없거나 삭제됐으면
+#: ``pt_5179``가 NULL이라 반경 술어가 참이 되지 않아 빈 page다(종전 join과 같다).
+_NEARBY_TARGET_ORIGIN_SQL: Final[str] = """
+WITH origin AS (
     SELECT
-        f.feature_id,
-        CAST(f.feature_uuid AS text) AS feature_uuid,
-        f.kind,
-        f.name,
-        f.category,
-        x_extension.ST_X(f.coord) AS lon,
-        x_extension.ST_Y(f.coord) AS lat,
-        x_extension.ST_Distance(f.coord_5179, t.coord_5179)::double precision
-            AS distance_m,
-        ps.provider AS primary_provider,
-        ps.dataset_key AS primary_dataset_key,
-        f.updated_at AS last_updated_at
-    FROM target AS t
-    JOIN feature.public_features AS f
-      ON f.coord IS NOT NULL
-     AND f.coord_5179 IS NOT NULL
-     AND x_extension.ST_DWithin(f.coord_5179, t.coord_5179, t.radius_m)
-    LEFT JOIN LATERAL (
-        SELECT pd.provider, pd.dataset_key
-        FROM provider_sync.source_links AS sl
-        JOIN provider_sync.source_entities AS se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets AS pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = se.source_entity_key
-        JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = head.current_source_record_key
-        WHERE sl.feature_id = f.feature_id
-          AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
-        LIMIT 1
-    ) AS ps ON TRUE
-    WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
-      AND (
-        CAST(:categories AS text[]) IS NULL
-        OR f.category = ANY(CAST(:categories AS text[]))
-      )
-      AND (
-        CAST(:providers AS text[]) IS NULL
-        OR ps.provider = ANY(CAST(:providers AS text[]))
-      )
-      AND {place_attribute_filter_sql("f")}
-{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-)
-"""
+        (
+            SELECT target.coord_5179
+            FROM ops.poi_cache_targets AS target
+            WHERE target.target_id::text = :target_id
+              AND target.deleted_at IS NULL
+              AND target.coord_5179 IS NOT NULL
+        ) AS pt_5179,
+        (
+            SELECT COALESCE(CAST(:radius_km AS double precision), target.radius_km)
+                     * 1000.0
+            FROM ops.poi_cache_targets AS target
+            WHERE target.target_id::text = :target_id
+              AND target.deleted_at IS NULL
+              AND target.coord_5179 IS NOT NULL
+        ) AS radius_m
+)"""
 
-_NEARBY_DISTANCE_SQL: Final[str] = (
-    _NEARBY_TARGET_CTE_SQL
-    + f"""
-SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
-FROM candidates
-WHERE (
-    CAST(:cursor_distance_m AS double precision) IS NULL
-    OR (distance_m, feature_id) > (
-        CAST(:cursor_distance_m AS double precision),
-        CAST(:cursor_feature_id AS uuid)
-    )
-)
-ORDER BY distance_m ASC, feature_id ASC
-LIMIT :limit_plus_one
-"""
-)
-
-_NEARBY_NAME_SQL: Final[str] = (
-    _NEARBY_TARGET_CTE_SQL
-    + f"""
-SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
-FROM candidates
-WHERE (
-    CAST(:cursor_name AS text) IS NULL
-    OR (name, feature_id) > (
-        CAST(:cursor_name AS text),
-        CAST(:cursor_feature_id AS uuid)
-    )
-)
-ORDER BY name ASC, feature_id ASC
-LIMIT :limit_plus_one
-"""
-)
-
-_NEARBY_UPDATED_SQL: Final[str] = (
-    _NEARBY_TARGET_CTE_SQL
-    + f"""
-SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
-FROM candidates
-WHERE (
-    CAST(:cursor_last_updated_at AS timestamptz) IS NULL
-    OR (last_updated_at, feature_id) < (
-        CAST(:cursor_last_updated_at AS timestamptz),
-        CAST(:cursor_feature_id AS uuid)
-    )
-)
-ORDER BY last_updated_at DESC, feature_id DESC
-LIMIT :limit_plus_one
-"""
-)
-
-# 좌표 기준 nearby (T-213b) — target CTE 대신 입력 좌표(4326)를 5179로 **CTE에서
-# 1회만** 변환해 상수로 굳히고(ADR-012), 술어는 STORED ``coord_5179``에 직접
-# ``ST_DWithin``한다. candidates 컬럼/cursor/정렬은 by-target nearby와 동일하므로
-# ``_nearby_row``/``_nearby_cursor_params``/``_encode_nearby_cursor``를 그대로 재사용한다.
-_NEARBY_COORD_CTE_SQL: Final[str] = f"""
+#: 좌표 중심(T-213b) — 입력 좌표(4326)를 **여기서 1회만** 5179로 변환한다(ADR-012).
+_NEARBY_COORD_ORIGIN_SQL: Final[str] = """
 WITH origin AS (
     SELECT
         x_extension.ST_Transform(
@@ -2948,28 +2882,23 @@ WITH origin AS (
             5179
         ) AS pt_5179,
         CAST(:radius_m AS double precision) AS radius_m
-),
-candidates AS (
-    SELECT
-        f.feature_id,
-        CAST(f.feature_uuid AS text) AS feature_uuid,
-        f.kind,
-        f.name,
-        f.category,
-        x_extension.ST_X(f.coord) AS lon,
-        x_extension.ST_Y(f.coord) AS lat,
-        x_extension.ST_Distance(f.coord_5179, o.pt_5179)::double precision
-            AS distance_m,
-        ps.provider AS primary_provider,
-        ps.dataset_key AS primary_dataset_key,
-        f.updated_at AS last_updated_at
-    FROM origin AS o
-    JOIN feature.public_features AS f
-      ON f.coord IS NOT NULL
-     AND f.coord_5179 IS NOT NULL
-     AND x_extension.ST_DWithin(f.coord_5179, o.pt_5179, o.radius_m)
-    LEFT JOIN LATERAL (
-        SELECT pd.provider, pd.dataset_key
+)"""
+
+
+def _nearby_primary_source_subquery(
+    feature_alias: str, *, columns: str = "pd.provider, pd.dataset_key"
+) -> str:
+    """Feature 하나의 primary source(provider·dataset) 1행 — nearby 응답·provider 필터 공용.
+
+    바깥 ``{feature_alias}``에 상관된 **조각**이라 홀로 Parse되지 않는다 — head parse
+    오라클은 이것을 품은 ``_nearby_sql`` 문장으로 검사한다(그래서 ``*_sql`` 이름이 아니다).
+    같은 Feature에 primary link가 여럿이면 가장 최근 관측(head)·적재 record를 고른다.
+    응답 열과 provider 필터가 **같은 규칙**을 써야 필터가 응답과 어긋나지 않는다.
+    """
+    if not feature_alias.isidentifier():
+        raise ValueError("feature alias must be a SQL identifier")
+    return f"""
+        SELECT {columns}
         FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
@@ -2979,11 +2908,97 @@ candidates AS (
           ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
           ON sr.source_record_key = head.current_source_record_key
-        WHERE sl.feature_id = f.feature_id
+        WHERE sl.feature_id = {feature_alias}.feature_id
           AND sl.source_role = 'primary'
         ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
-        LIMIT 1
-    ) AS ps ON TRUE
+        LIMIT 1"""
+
+
+#: 반경 거리(m). ``<->``는 ``ST_Distance``와 같은 C 함수(``geometry_distance_centroid`` →
+#: ``ST_Distance``)라 값이 종전 ``ST_Distance(...)``와 비트 단위로 같다 — 통합 시험
+#: ``test_knn_operator_is_st_distance``가 설치된 PostGIS에서 이를 확인한다. 연산자 형태로
+#: 써야 거리순 page가 GiST KNN 순서 scan을 탈 수 있다.
+_NEARBY_DISTANCE_EXPR: Final[str] = "f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179"
+
+#: 정렬별 (후보 안 cursor 술어, 후보 정렬, page 정렬, 최종 정렬).
+_NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str, str]]] = {
+    "distance": (
+        f"""(
+        CAST(:cursor_distance_m AS double precision) IS NULL
+        OR ({_NEARBY_DISTANCE_EXPR}, f.feature_id) > (
+            CAST(:cursor_distance_m AS double precision),
+            CAST(:cursor_feature_id AS uuid)
+        )
+      )""",
+        # KNN — 정렬 키가 ``<->`` 하나여야 planner가 GiST 순서 scan을 고른다(PG18도 둘째
+        # 키가 있으면 KNN path를 만들지 않는다). 후보 subquery에도 행 수 상한이 있어야 planner가
+        # "앞 몇 행만 읽는다"를 알고 KNN을 고른다 — 바깥 LIMIT은 바깥 정렬 너머로 전해지지 않는다
+        # (prod에서 상한 없이 두면 전 행 bitmap+정렬 377 ms, KNN이면 5 ms). ``WITH TIES``는 n번째
+        # 거리와 같은 거리의 행을 모두 남기므로 ``(distance_m, feature_id)`` 앞 n행이 빠짐없이
+        # 후보에 든다 — 바깥 정렬·LIMIT이 종전과 같은 page를 고른다.
+        "\n    ORDER BY distance_m ASC\n    FETCH FIRST (:limit_plus_one) ROWS WITH TIES",
+        "candidate.distance_m ASC, candidate.feature_id ASC",
+        "page.distance_m ASC, page.feature_id ASC",
+    ),
+    "name": (
+        """(
+        CAST(:cursor_name AS text) IS NULL
+        OR (f.name, f.feature_id) > (
+            CAST(:cursor_name AS text),
+            CAST(:cursor_feature_id AS uuid)
+        )
+      )""",
+        "",
+        "candidate.name ASC, candidate.feature_id ASC",
+        "page.name ASC, page.feature_id ASC",
+    ),
+    "last_updated_at": (
+        """(
+        CAST(:cursor_last_updated_at AS timestamptz) IS NULL
+        OR (f.updated_at, f.feature_id) < (
+            CAST(:cursor_last_updated_at AS timestamptz),
+            CAST(:cursor_feature_id AS uuid)
+        )
+      )""",
+        "",
+        "candidate.last_updated_at DESC, candidate.feature_id DESC",
+        "page.last_updated_at DESC, page.feature_id DESC",
+    ),
+}
+
+
+#: nearby 중심 종류 → ``origin`` CTE.
+_NEARBY_ORIGINS: Final[dict[str, str]] = {
+    "target": _NEARBY_TARGET_ORIGIN_SQL,
+    "coord": _NEARBY_COORD_ORIGIN_SQL,
+}
+
+
+def _nearby_sql(origin: str, *, sort: str) -> str:
+    """중심 종류(``target``/``coord``)와 정렬 하나로 nearby page SQL을 만든다."""
+    cursor_predicate, candidate_order, page_order, final_order = _NEARBY_SORT_PARTS[sort]
+    return (
+        _NEARBY_ORIGINS[origin]
+        + f""",
+page AS (
+  SELECT candidate.*
+  FROM (
+    SELECT
+        f.feature_id,
+        CAST(f.feature_uuid AS text) AS feature_uuid,
+        f.kind,
+        f.name,
+        f.category,
+        f.coord,
+        {_NEARBY_DISTANCE_EXPR} AS distance_m,
+        f.updated_at AS last_updated_at
+    FROM origin AS o
+    JOIN feature.public_features AS f
+      ON f.coord IS NOT NULL
+     AND f.coord_5179 IS NOT NULL
+     AND f.coord_5179 OPERATOR(x_extension.&&)
+           x_extension.ST_Expand(o.pt_5179, o.radius_m)
+     AND {_NEARBY_DISTANCE_EXPR} <= o.radius_m
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
         CAST(:categories AS text[]) IS NULL
@@ -2991,69 +3006,44 @@ candidates AS (
       )
       AND (
         CAST(:providers AS text[]) IS NULL
-        OR ps.provider = ANY(CAST(:providers AS text[]))
+        OR ({_nearby_primary_source_subquery("f", columns="pd.provider")}
+        ) = ANY(CAST(:providers AS text[]))
       )
       AND {place_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+      AND {cursor_predicate}{candidate_order}
+  ) AS candidate
+  ORDER BY {page_order}
+  LIMIT :limit_plus_one
 )
+SELECT
+    page.feature_id,
+    page.feature_uuid,
+    page.kind,
+    page.name,
+    page.category,
+    x_extension.ST_X(page.coord) AS lon,
+    x_extension.ST_Y(page.coord) AS lat,
+    page.distance_m,
+    ps.provider AS primary_provider,
+    ps.dataset_key AS primary_dataset_key,
+    page.last_updated_at,
+    {place_attribute_codes_sql("page")} AS attribute_codes
+FROM page
+LEFT JOIN LATERAL ({_nearby_primary_source_subquery("page")}
+) AS ps ON TRUE
+ORDER BY {final_order}
 """
-
-_NEARBY_COORD_DISTANCE_SQL: Final[str] = (
-    _NEARBY_COORD_CTE_SQL
-    + f"""
-SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
-FROM candidates
-WHERE (
-    CAST(:cursor_distance_m AS double precision) IS NULL
-    OR (distance_m, feature_id) > (
-        CAST(:cursor_distance_m AS double precision),
-        CAST(:cursor_feature_id AS uuid)
     )
-)
-ORDER BY distance_m ASC, feature_id ASC
-LIMIT :limit_plus_one
-"""
-)
 
-_NEARBY_COORD_NAME_SQL: Final[str] = (
-    _NEARBY_COORD_CTE_SQL
-    + f"""
-SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
-FROM candidates
-WHERE (
-    CAST(:cursor_name AS text) IS NULL
-    OR (name, feature_id) > (
-        CAST(:cursor_name AS text),
-        CAST(:cursor_feature_id AS uuid)
-    )
-)
-ORDER BY name ASC, feature_id ASC
-LIMIT :limit_plus_one
-"""
-)
 
-_NEARBY_COORD_UPDATED_SQL: Final[str] = (
-    _NEARBY_COORD_CTE_SQL
-    + f"""
-SELECT candidates.*, {place_attribute_codes_sql("candidates")} AS attribute_codes
-FROM candidates
-WHERE (
-    CAST(:cursor_last_updated_at AS timestamptz) IS NULL
-    OR (last_updated_at, feature_id) < (
-        CAST(:cursor_last_updated_at AS timestamptz),
-        CAST(:cursor_feature_id AS uuid)
-    )
-)
-ORDER BY last_updated_at DESC, feature_id DESC
-LIMIT :limit_plus_one
-"""
-)
-
-_NEARBY_COORD_SQL_BY_SORT: Final[dict[str, str]] = {
-    "distance": _NEARBY_COORD_DISTANCE_SQL,
-    "name": _NEARBY_COORD_NAME_SQL,
-    "last_updated_at": _NEARBY_COORD_UPDATED_SQL,
+_NEARBY_SQL_BY_SORT: Final[dict[str, str]] = {
+    sort: _nearby_sql("target", sort=sort) for sort in _NEARBY_SORT_PARTS
 }
+_NEARBY_COORD_SQL_BY_SORT: Final[dict[str, str]] = {
+    sort: _nearby_sql("coord", sort=sort) for sort in _NEARBY_SORT_PARTS
+}
+_NEARBY_COORD_DISTANCE_SQL: Final[str] = _NEARBY_COORD_SQL_BY_SORT["distance"]
 
 # snapshot retirement — 주어진 (provider, dataset_key, source_entity_type)의
 # **primary source**로 적재된 feature 중, snapshot source_entity_id 집합에 없는
@@ -7948,13 +7938,6 @@ async def search_features(
     )
 
 
-_NEARBY_SQL_BY_SORT: Final[dict[str, str]] = {
-    "distance": _NEARBY_DISTANCE_SQL,
-    "name": _NEARBY_NAME_SQL,
-    "last_updated_at": _NEARBY_UPDATED_SQL,
-}
-
-
 def _nearby_cursor_payload(cursor: str | None, *, sort: str) -> dict[str, Any]:
     if cursor is None:
         return {}
@@ -8072,7 +8055,8 @@ async def features_nearby_poi_cache_target(
     """
     if sort not in _NEARBY_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
-    if radius_km is not None and radius_km <= 0:
+    # NaN은 ``<= 0``을 통과하고 ``<-> <= NaN``은 참이다 — 반경 술어가 전 행을 받지 않게 막는다.
+    if radius_km is not None and not (math.isfinite(radius_km) and radius_km > 0):
         raise ValueError("radius_km must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
@@ -8123,7 +8107,8 @@ async def features_nearby(
 
     사용자 현재 위치/추천 흐름용(T-213b). ADR-012: 입력 좌표는 ``origin`` CTE에서
     한 번만 5179로 변환해 상수로 굳히고, 술어는 STORED ``feature.features.coord_5179``에
-    직접 ``ST_DWithin``/``ST_Distance``를 적용한다(GiST ``idx_features_coord_5179_gist``).
+    직접 반경 술어(``&& ST_Expand`` + ``<->`` 거리)를 적용한다(GiST
+    ``idx_features_coord_5179_gist``, 거리순은 KNN — T-READ-09).
     cursor/정렬/응답 shape는 ``features_nearby_poi_cache_target``과 동일
     (``NearbyFeaturePage``). ``sort`` ∈ {distance, name, last_updated_at}.
     공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
@@ -8131,7 +8116,7 @@ async def features_nearby(
     """
     if sort not in _NEARBY_COORD_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
-    if radius_m <= 0:
+    if not (math.isfinite(radius_m) and radius_m > 0):
         raise ValueError("radius_m must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")

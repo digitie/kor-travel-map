@@ -2737,10 +2737,15 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 201,401행) 조용 p50 **5,199.5 ms** / p95 **5,369.3 ms**, 적재 중 5,515.6 / 7,572.1 ms. 공개 `GET /v1/features/nearby`는
 `radius_m` 100,000까지 받고 `T-READ-03`의 공개 읽기 마감은 4.5초다.
 
-- [ ] harness(`jit=off`) "100km nearby"의 조용한 창 p95가 공개 읽기 마감 4.5초보다 충분히 낮다(목표값은 구현 PR이 정해
-  여기 적는다). 전후 수치를 보고서에 적는다.
-- [ ] 결과(행·순서·거리·cursor)가 종전 경로와 같다(통합 시험). OpenAPI 세 파일이 바뀌지 않았거나, 바뀌면 계획 §8.1의
-  "Map+PinVi 한 회전"으로 낸다.
+- [ ] harness(`jit=off`) "100km nearby"의 조용한 창 p95가 공개 읽기 마감 4.5초보다 충분히 낮다 — **목표: p95 ≤ 100 ms**
+  (구현 PR이 정함). 전후 수치를 보고서에 적는다. 구현 전 prod 읽기 전용 EXPLAIN(2026-11-19, t1118e, `jit=off`, 다른
+  작업의 I/O가 있던 창): 새 SQL p50 **4.5 ms**(7회 4.2~6.2 ms) — KNN 순서 scan이 56행만 읽는다. 운영 회전 뒤 harness로
+  다시 잰다.
+- [x] 결과(행·순서·거리·cursor)가 종전 경로와 같다(통합 시험). 2026-11-19 구현 PR: `test_features_nearby_equivalence.py`가
+  종전 SQL을 그대로 옮긴 oracle과 새 경로를 좌표·by-target × 정렬 3종 × 필터(kind·category·provider·속성) × 반경 4종의
+  cursor page walk 전체로 비교한다(동률 좌표·이름·시각, primary link 2개, 끝난 notice, 없는/삭제된 target 포함). prod 읽기
+  전용 대조(100 km place 거리순 3 page·이름순·갱신순, 부산 30 km 200행 3 page, event, provider 필터)도 전부 같았다.
+  OpenAPI 세 파일은 바뀌지 않았다.
 - [ ] 운영 반영 뒤 언제·어느 배포 generation에서 쟀는지 journal에 적었다.
 
 ## T-READ-10

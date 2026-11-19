@@ -224,10 +224,11 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   autovacuum이 한 번도 돌지 않아 all-visible이 58%다. 먼저 재고, 표 단위 autovacuum 설정을 migration으로 넣어
   적재 24시간 뒤 all-visible 95% 이상을 확인한다.
 
-- [ ] T-READ-09 — **100 km 근처 조회를 공개 읽기 마감 안으로** — 진행 중
+- [ ] T-READ-09 — **100 km 근처 조회를 공개 읽기 마감 안으로** — 2026-11-19 구현(PR #1520, 운영 회전 대기)
 
-  harness "100km nearby"(반경 안 201,401행)가 조용한 창 p50 5,200 ms·p95 5,369 ms로 `T-READ-03` 마감 4.5초를 넘는다
-  ([기준선](reports/2026-11-19-read-baseline.md) §6.1). 해제 조건은 acceptance.
+  harness "100km nearby"가 p50 5,200 ms로 `T-READ-03` 마감 4.5초를 넘었다([기준선](reports/2026-11-19-read-baseline.md)
+  §6.1). primary source를 page 행에만 붙이고 거리순을 GiST KNN으로 바꿨다(prod EXPLAIN 4.5 ms, 결과 동일). 해제 조건은
+  acceptance.
 
 - [ ] T-READ-10 — **전국 저배율 집계(sido, 전 kind) 단축** — 구현 머지, 운영 반영 대기
 

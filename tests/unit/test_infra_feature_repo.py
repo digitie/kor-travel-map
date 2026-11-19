@@ -849,12 +849,49 @@ def test_current_notice_filter_keeps_the_ordering_test_indexable() -> None:
 
 
 def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
-    sql = feature_repo._NEARBY_TARGET_CTE_SQL
+    for sql in (
+        *feature_repo._NEARBY_SQL_BY_SORT.values(),
+        *feature_repo._NEARBY_COORD_SQL_BY_SORT.values(),
+    ):
+        assert "x_extension.ST_X(page.coord) AS lon" in sql
+        assert "x_extension.ST_Y(page.coord) AS lat" in sql
+        assert "f.coord IS NOT NULL" in sql
+        assert "f.coord_5179 IS NOT NULL" in sql
 
-    assert "x_extension.ST_X(f.coord) AS lon" in sql
-    assert "x_extension.ST_Y(f.coord) AS lat" in sql
-    assert "f.coord IS NOT NULL" in sql
-    assert "f.coord_5179 IS NOT NULL" in sql
+
+def test_nearby_sql_joins_primary_source_after_page_limit() -> None:
+    """T-READ-09: primary source LATERAL은 잘린 page 행에만 붙고, 거리순 page는 KNN이다.
+
+    종전 SQL은 반경 안 전 행(100 km에서 20만 행)에 LATERAL을 돌고 나서 잘라 5초가 걸렸다.
+    """
+    for label, by_sort in (
+        ("target", feature_repo._NEARBY_SQL_BY_SORT),
+        ("coord", feature_repo._NEARBY_COORD_SQL_BY_SORT),
+    ):
+        assert set(by_sort) == {"distance", "name", "last_updated_at"}
+        for sort, sql in by_sort.items():
+            page_limit = sql.index("LIMIT :limit_plus_one")
+            assert sql.count("LIMIT :limit_plus_one") == 1, (label, sort)
+            # notice 감산 fragment에도 LATERAL이 있다 — primary source LATERAL(``ps``)만 본다.
+            assert sql.count(") AS ps ON TRUE") == 1, (label, sort)
+            assert sql.index(") AS ps ON TRUE") > page_limit, (label, sort)
+            # provider 필터는 응답 열과 같은 선택 규칙(최근 관측 primary)이어야 한다.
+            assert sql.count(
+                "ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key"
+            ) == 2, (label, sort)
+        distance_sql = by_sort["distance"]
+        assert "f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 AS distance_m" in distance_sql
+        # KNN은 정렬 키가 ``<->`` 하나일 때만 — 동률 tiebreak는 바깥 page 정렬이 한다.
+        # 후보에도 상한(WITH TIES)이 있어야 planner가 KNN을 고른다 — 동률은 빠짐없이 남는다.
+        assert (
+            "ORDER BY distance_m ASC\n    FETCH FIRST (:limit_plus_one) ROWS WITH TIES\n"
+            "  ) AS candidate"
+        ) in distance_sql, label
+        assert "ORDER BY candidate.distance_m ASC, candidate.feature_id ASC" in distance_sql
+    # ADR-012: 술어·정렬에 feature 좌표 변환이 없다(입력 좌표만 origin에서 1회).
+    for sql in feature_repo._NEARBY_COORD_SQL_BY_SORT.values():
+        assert sql.count("x_extension.ST_Transform(") == 1
+        assert "ST_Transform(f." not in sql
 
 
 #: T-VN-35(ADR-086) 이후의 종료 notice 감산 술어 — free-form jsonb 문자열
@@ -932,8 +969,14 @@ def test_every_composed_public_read_sql_embeds_typed_notice_filter() -> None:
         ),
         "_FEATURE_SEARCH_CTE_SQL": feature_repo._FEATURE_SEARCH_CTE_SQL,
         "_FEATURE_SEARCH_SCORE_CTE_SQL": feature_repo._FEATURE_SEARCH_SCORE_CTE_SQL,
-        "_NEARBY_TARGET_CTE_SQL": feature_repo._NEARBY_TARGET_CTE_SQL,
-        "_NEARBY_COORD_CTE_SQL": feature_repo._NEARBY_COORD_CTE_SQL,
+        **{
+            f"_NEARBY_SQL_BY_SORT[{sort}]": sql
+            for sort, sql in feature_repo._NEARBY_SQL_BY_SORT.items()
+        },
+        **{
+            f"_NEARBY_COORD_SQL_BY_SORT[{sort}]": sql
+            for sort, sql in feature_repo._NEARBY_COORD_SQL_BY_SORT.items()
+        },
         "_FEATURES_CONTAINED_IN_AREA_SQL": feature_repo._FEATURES_CONTAINED_IN_AREA_SQL,
         "_CATEGORY_FEATURE_COUNTS_SQL": feature_repo._CATEGORY_FEATURE_COUNTS_SQL,
     }
@@ -1984,3 +2027,21 @@ def test_search_rank_digits_end_with_specificity_then_prominence() -> None:
     ):
         assert "feature.feature_search_prominence" in statement
         assert "compact_paren_base_name" in statement
+
+
+@pytest.mark.parametrize("radius", [float("nan"), float("inf"), 0.0, -1.0])
+async def test_nearby_rejects_non_finite_or_non_positive_radius(radius: float) -> None:
+    """NaN 반경은 ``<= 0`` 검사를 통과하고 ``<-> <= NaN``은 참이라 전 행을 받는다 — 막는다."""
+    with pytest.raises(ValueError, match="radius_m"):
+        await feature_repo.features_nearby(
+            None,  # type: ignore[arg-type]
+            lon=126.978,
+            lat=37.5665,
+            radius_m=radius,
+        )
+    with pytest.raises(ValueError, match="radius_km"):
+        await feature_repo.features_nearby_poi_cache_target(
+            None,  # type: ignore[arg-type]
+            target_id="00000000-0000-7000-8000-000000000000",
+            radius_km=radius,
+        )

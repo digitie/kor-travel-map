@@ -222,8 +222,11 @@ async def test_features_nearby_predicate_uses_stored_coord_5179(
         )
     ).scalars().all()
     plan = "\n".join(str(r) for r in rows).lower()
-    # 반경 술어가 STORED coord_5179를 대상으로 한다.
-    assert re.search(r"st_dwithin\(\w+\.coord_5179", plan)
+    # 반경 술어가 STORED coord_5179를 대상으로 한다 — 색인 조건 ``&& ST_Expand``와 거리
+    # ``<->``(T-READ-09: ``ST_DWithin``이 펼쳐지는 두 조각을 직접 쓴다).
+    # ``ST_Expand``는 immutable이라 상수로 접혀 다각형 literal로 찍힐 수 있다 — 열 쪽만 본다.
+    assert re.search(r"\w+\.coord_5179 && ", plan)
+    assert re.search(r"\w+\.coord_5179 <-> ", plan)
     # feature 좌표를 5179로 **매 행** 변환하는 패턴이 없어야 한다(ADR-012).
     #
     # 여기서 alias를 글자로 박지 않고 ``\w+``로 받는 이유: 이 SQL은 이제
