@@ -586,7 +586,7 @@ read >> write 환경에서 실제로 반복 계산되는 비용은 아래 두 �
 | `/features/{id}`, `/features/batch` | PK / `ANY(ids)` + `features_detailed` subtype PK join 조립 | 없음 | ❌ 불필요 |
 | `/features/search` | trgm GIN + `similarity()` 동적 채점 | 쿼리마다 결과 변동 | ❌ 사전계산 불가 |
 | **클러스터 rollup** (`_cluster_bbox_sql`, sido/sigungu/eupmyeondong) | viewport bbox 내 **`GROUP BY {code_col}` 집계 매 pan/zoom 재계산** | **viewport 이동마다 전체 후보 재집계** | ✅ **1순위** |
-| `/features/nearby`, `/nearby/by-target` | GIST `ST_DWithin(coord_5179)`(거리순은 KNN `<->`) + page 행에만 primary-source LATERAL(T-READ-09) | page 행 수(≤ 501)만큼 | ❌ 불필요(T-READ-09) |
+| `/features/nearby`, `/nearby/by-target` | GIST `coord_5179 && ST_Expand` + `<->` 반경(거리순은 KNN) + page 행에만 primary-source LATERAL(T-READ-09) | page 행 수(≤ 501)만큼 | ❌ 불필요(T-READ-09) |
 | `/admin/features` | LEFT JOIN issues + source LATERAL | admin 전용, 저빈도 | ⚠️ 낮음 |
 
 #### 9.3.2 1순위 후보 — 클러스터 rollup MV (`mv_feature_cluster_counts`)

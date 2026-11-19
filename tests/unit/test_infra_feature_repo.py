@@ -2027,3 +2027,21 @@ def test_search_rank_digits_end_with_specificity_then_prominence() -> None:
     ):
         assert "feature.feature_search_prominence" in statement
         assert "compact_paren_base_name" in statement
+
+
+@pytest.mark.parametrize("radius", [float("nan"), float("inf"), 0.0, -1.0])
+async def test_nearby_rejects_non_finite_or_non_positive_radius(radius: float) -> None:
+    """NaN 반경은 ``<= 0`` 검사를 통과하고 ``<-> <= NaN``은 참이라 전 행을 받는다 — 막는다."""
+    with pytest.raises(ValueError, match="radius_m"):
+        await feature_repo.features_nearby(
+            None,  # type: ignore[arg-type]
+            lon=126.978,
+            lat=37.5665,
+            radius_m=radius,
+        )
+    with pytest.raises(ValueError, match="radius_km"):
+        await feature_repo.features_nearby_poi_cache_target(
+            None,  # type: ignore[arg-type]
+            target_id="00000000-0000-7000-8000-000000000000",
+            radius_km=radius,
+        )

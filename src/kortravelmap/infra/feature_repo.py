@@ -8046,7 +8046,8 @@ async def features_nearby_poi_cache_target(
     """
     if sort not in _NEARBY_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
-    if radius_km is not None and radius_km <= 0:
+    # NaN은 ``<= 0``을 통과하고 ``<-> <= NaN``은 참이다 — 반경 술어가 전 행을 받지 않게 막는다.
+    if radius_km is not None and not (math.isfinite(radius_km) and radius_km > 0):
         raise ValueError("radius_km must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")
@@ -8106,7 +8107,7 @@ async def features_nearby(
     """
     if sort not in _NEARBY_COORD_SQL_BY_SORT:
         raise ValueError("sort must be one of distance, name, last_updated_at")
-    if radius_m <= 0:
+    if not (math.isfinite(radius_m) and radius_m > 0):
         raise ValueError("radius_m must be greater than 0")
     if limit <= 0:
         raise ValueError("limit must be greater than 0")

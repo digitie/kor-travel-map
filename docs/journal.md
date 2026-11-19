@@ -10,8 +10,9 @@
      `ST_Distance`와 **같은 C 함수**(prosrc `ST_Distance`)라 값이 같다. KNN은 정렬 키가 하나일 때만 생기므로(PG18) 후보
      subquery를 `ORDER BY distance_m FETCH FIRST (:limit_plus_one) ROWS WITH TIES`로 자르고 바깥에서 `(distance_m,
      feature_id)`로 다시 정렬한다. WITH TIES가 n번째 거리와 같은 행을 모두 남겨 동률 tiebreak가 종전과 같다.
-  3. 반경 술어는 `ST_DWithin` 대신 그것이 펼쳐지는 `&& ST_Expand` + `<-> <= 반경`으로 쓴다. `ST_DWithin` filter 선택도가
-     0.0002로 잡혀(20만 행을 27행으로 추정) planner가 KNN을 버렸다. 두 술어가 갈리는 (행, 반경) 쌍은 prod 133만 쌍 중 0,
+  3. 반경 술어는 `ST_DWithin` 대신 그것이 펼쳐지는 `&& ST_Expand` + `<-> <= 반경`으로 쓴다. 종전 계획은 `ST_DWithin`
+     filter 뒤 20만 행을 27행으로 추정했다(펼친 술어는 50,814행 — 실측 201,401에 훨씬 가깝다). 추정이 틀리면 planner가
+     KNN과 bitmap을 잘못 견준다. 두 술어가 갈리는 (행, 반경) 쌍은 prod 133만 쌍 중 0,
      통합 시험(경계 반경 포함)도 0.
   - 시행착오: 정렬 키 둘로는 KNN path가 안 생겼고, 후보에 상한이 없으면 바깥 LIMIT이 정렬 너머로 안 전해져 custom plan이
     전 행 bitmap+정렬(377 ms)을 골랐다(generic plan만 KNN 5 ms).
