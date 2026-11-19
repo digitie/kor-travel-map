@@ -1,3 +1,20 @@
+## 2026-11-19 — T-READ-06 비교 키 사전 계산 구현·측정(머지 보류, 40% 미달)
+
+- 브랜치 `feat/t-read-06-search-keys`(미머지). alembic `455_feature_search_keys`(`454_route_cluster_markers` 뒤): 표
+  `feature.feature_search_keys`(feature_id PK, keys_version·server_fingerprint·name·category·비교 키 여섯·search_group).
+  검색은 LATERAL PK 탐색으로 키를 읽되 식 지문·서버 지문(PG 판·ctype·collation 판)·이름·분류가 모두 같을 때만 쓰고
+  아니면 종전 식으로 계산한다 — 순위는 표 상태와 무관하다(소유자가 허용한 "묵은 키"보다 엄격). 채우기는 Dagster
+  `consistency_dedup_refresh`의 새 op `refresh_search_keys`(맞지 않는 행만, DELETE와 upsert 두 문장, JIT 끔). OpenAPI 불변.
+- 측정(n150 운영 사본, 공개 419,526행을 읽기 전용 COPY로 tmpfs PostGIS에 적재, `jit=off`, 30회 교차): 부산 맛집
+  −25.7%/−24.9%, 서울 맛집 −38.8%/−37.4%, 카페 −10.5%/−12.6%. 같은 DB의 상수화 변형 하한 −23.6%/−28.9%와 같거나 낫다.
+  순서: 평가 묶음 63개 × 3페이지 3,312건이 표 빔·전부·부분 상태에서 main과 같다. 첫 채우기 14.1초(42만 행, 88 MB),
+  두 번째 3.6초.
+- 함정 둘(고쳤다): ① 첫 채우기에서 표가 비어 보여 planner가 anti join을 nested loop + seq scan으로 골랐고 CTE가
+  INSERT와 번갈아 돌며 넣은 행을 다시 훑어 제곱 시간(15분 초과) — `ORDER BY`로 anti join을 먼저 끝낸다.
+  ② LATERAL 열 이름이 `filtered.name`과 겹쳐 모호성 오류 — `key_` 접두.
+- 판정: 40% 기준(부산 맛집) 미달이라 머지하지 않았다. MCST 강등 EXISTS에 `LIMIT 1`을 건 변형은 이득이 없었다(같은 순서).
+  같은 날 docs PR #1519로 journal·acceptance 220 KiB 경계를 분리했다(main CI 빨강 해소).
+
 ## 2026-11-19 — T-READ-10 저배율 집계 단축(alembic 454 + HashAggregate)
 
 - 진단(운영 `map-api` 컨테이너 안, 읽기 전용 transaction·`jit=off`, `EXPLAIN (ANALYZE, BUFFERS)` 몇 번): 전국 sido 전 kind

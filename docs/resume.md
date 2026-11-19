@@ -1,3 +1,8 @@
+## 2026-11-19 — T-READ-06 머지 보류
+
+- 구현·측정 완료, 브랜치 `feat/t-read-06-search-keys`(alembic 455)는 순서 동등을 증명했지만 부산 맛집 p50 감소가 25%로
+  40% 기준에 못 미쳐 머지하지 않았다. 소유자 결정: 닫기(revert 기준대로) 또는 기준 조정 뒤 머지. 상세는 journal.
+
 ## 2026-11-19 — T-READ-10 구현(alembic 454), 운영 반영 대기
 
 - 전국 저배율 집계: route geometry 대표점·범위 STORED 생성 컬럼(alembic `454_route_cluster_markers`, route 표 다시 쓰기
