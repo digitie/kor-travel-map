@@ -11227,6 +11227,36 @@ $$;
 ALTER PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
 
 --
+-- Name: truncate_feature_cluster_point_parts(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.truncate_feature_cluster_point_parts() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF TG_TABLE_NAME = 'features' THEN
+        TRUNCATE feature.feature_cluster_points;
+    ELSE
+        UPDATE feature.feature_cluster_points
+           SET marker_point = NULL,
+               geom_xmin = NULL,
+               geom_xmax = NULL,
+               geom_ymin = NULL,
+               geom_ymax = NULL
+         WHERE kind = CASE TG_TABLE_NAME
+                          WHEN 'feature_route_geometries' THEN 'route'
+                          ELSE 'area'
+                      END;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.truncate_feature_cluster_point_parts() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: upsert_provider_geocode_stamps_ex(uuid[], text[], text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -22742,6 +22772,17 @@ CREATE TRIGGER trg_feature_aliases_update_fence BEFORE UPDATE ON feature.feature
 
 CREATE TRIGGER trg_feature_areas_cluster_point AFTER INSERT OR DELETE OR UPDATE OF geom ON feature.feature_areas FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_geometry();
 
+ALTER TABLE feature.feature_areas ENABLE ALWAYS TRIGGER trg_feature_areas_cluster_point;
+
+
+--
+-- Name: feature_areas trg_feature_areas_cluster_point_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_areas_cluster_point_truncate AFTER TRUNCATE ON feature.feature_areas FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts();
+
+ALTER TABLE feature.feature_areas ENABLE ALWAYS TRIGGER trg_feature_areas_cluster_point_truncate;
+
 
 --
 -- Name: feature_areas trg_feature_areas_public_ready; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
@@ -22790,6 +22831,17 @@ CREATE TRIGGER trg_feature_price_values_immutable BEFORE DELETE OR UPDATE ON fea
 --
 
 CREATE TRIGGER trg_feature_route_geometries_cluster_point AFTER INSERT OR DELETE OR UPDATE OF geom ON feature.feature_route_geometries FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_geometry();
+
+ALTER TABLE feature.feature_route_geometries ENABLE ALWAYS TRIGGER trg_feature_route_geometries_cluster_point;
+
+
+--
+-- Name: feature_route_geometries trg_feature_route_geometries_cluster_point_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_route_geometries_cluster_point_truncate AFTER TRUNCATE ON feature.feature_route_geometries FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts();
+
+ALTER TABLE feature.feature_route_geometries ENABLE ALWAYS TRIGGER trg_feature_route_geometries_cluster_point_truncate;
 
 
 --
@@ -22876,6 +22928,17 @@ CREATE TRIGGER trg_features_sync_subtype_public_ready AFTER UPDATE OF lifecycle_
 --
 
 CREATE TRIGGER trg_features_zz_cluster_point AFTER INSERT OR DELETE OR UPDATE OF kind, category, sido_code, sigungu_code, legal_dong_code, coord, lifecycle_state, publication_state, quality_state ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_core();
+
+ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_cluster_point;
+
+
+--
+-- Name: features trg_features_zz_cluster_point_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_features_zz_cluster_point_truncate AFTER TRUNCATE ON feature.features FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts();
+
+ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_cluster_point_truncate;
 
 
 --
@@ -26548,6 +26611,20 @@ REVOKE ALL ON PROCEDURE feature.sync_concierge_theme_catalog(IN p_provider_datas
 
 
 --
+-- Name: FUNCTION sync_feature_cluster_point_core(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.sync_feature_cluster_point_core() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION sync_feature_cluster_point_geometry(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.sync_feature_cluster_point_geometry() FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
@@ -26570,6 +26647,13 @@ GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uu
 
 REVOKE ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION truncate_feature_cluster_point_parts(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.truncate_feature_cluster_point_parts() FROM PUBLIC;
 
 
 --
