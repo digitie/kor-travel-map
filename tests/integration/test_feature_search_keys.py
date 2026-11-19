@@ -40,8 +40,8 @@ _M = 0.000009  # 위도 1 m
 _SEEDS: tuple[tuple[str, str, str, tuple[str, str, str], float, float], ...] = (
     ("dosan", "도산키검서원", "01070100", _ANDONG, 128.8430, 36.7270),
     ("dosan_full", "안동 도산키검서원", "01000000", _ANDONG, 128.8440, 36.7280),
-    ("dosan_parking", "도산키검서원", "05030100", _ANDONG, 128.8450, 36.7290),
-    ("dosan_parking_named", "도산키검서원 주차장", "05030100", _ANDONG, 128.8460, 36.7300),
+    ("dosan_parking", "도산키검서원", "06010000", _ANDONG, 128.8450, 36.7290),
+    ("dosan_parking_named", "도산키검서원 주차장", "06010000", _ANDONG, 128.8460, 36.7300),
     ("hahoe", "하회키검(안동)", "01020100", _ANDONG, 128.5180, 36.5390),
     ("hahoe_dup", "하회키검", "01000000", _ANDONG, 128.5181, 36.5391),
     ("hahoe_lodging", "하회키검(민박)", "03050200", _ANDONG, 128.5200, 36.5400),
@@ -49,7 +49,7 @@ _SEEDS: tuple[tuple[str, str, str, tuple[str, str, str], float, float], ...] = (
     ("cafe", "해운대 키검카페", "01000000", _BUSAN, 129.1610, 35.1610),
     ("cafe_space", "해운대　키검 카페", "02000000", _BUSAN, 129.1620, 35.1620),
     ("pension", "키검 펜션", "01000000", _BUSAN, 129.1630, 35.1630),
-    ("station", "키검역", "06010100", _BUSAN, 129.1640, 35.1640),
+    ("station", "키검역", "06030300", _BUSAN, 129.1640, 35.1640),
 )
 _SEED_QUERIES: tuple[str, ...] = (
     "도산키검서원",
