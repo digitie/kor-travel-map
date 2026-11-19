@@ -1,3 +1,9 @@
+## 2026-11-19 — 관리자 프런트 공통 AdminShell(ui 0.2.3) 채택
+
+- ui 0.2.3·tokens 0.1.4 vendor, guard `d644632e`. 셸을 공통 `AdminShell`로(모바일 좌측 drawer, 한 줄 "영역 - 페이지" 상단
+  바, 설명은 상단 바에 작게), 버튼 상시 `outline-solid` 제거(FS-7.8). OpenAPI 변경 없음.
+- 다음: 통합 회전에서 frontend 이미지 재빌드·배포 뒤 PC·모바일 실화면 확인(브라우저 캐시의 옛 접힘 값은 그대로 읽힌다).
+
 ## 2026-11-19 — T-READ-10 후속(alembic 455) 구현, T-101 재개, 운영 반영 대기
 
 - 소유자가 T-101(사전 집계) 제외를 풀었다(2026-11-19). 좁은 집계 표 `feature.feature_cluster_points` + 동기 trigger +
@@ -13,6 +19,7 @@
   p50 5,200 ms → 4.5 ms. 결과는 종전 SQL과 같다(통합 oracle 시험 + prod 대조). OpenAPI 변화 없음.
 - 다음: 소유자의 Map 회전에 싣고, 회전 뒤 harness "100km nearby"를 다시 재 acceptance 첫·셋째 항목을 닫는다.
 - 남는 느린 경로(마감 안): 100 km **이름순**은 반경 안 전 행 정렬이라 p50 ≈ 1.2초(종전 ≈ 9초).
+||||||| parent of a84e86142 (docs: 관리자 셸(ui 0.2.3) 채택 journal·resume·tasks-done)
 
 ## 2026-11-19 — T-READ-10 구현(alembic 454), 운영 반영 대기
 

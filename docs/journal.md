@@ -1,3 +1,30 @@
+## 2026-11-19 — 관리자 프런트 공통 AdminShell(ui 0.2.3) 채택과 버튼 테두리(FS-7.8)
+
+- `@kor-travel/ui` 0.2.1→0.2.3·tokens 0.1.2→0.1.4(common #70·#71, main pack `0e2a3f5a`, SRI는 원장과 같음)를
+  vendor하고 guard·`common-ref`를 `d644632e`로 올렸다. toast는 Map이 쓰지 않아 받지 않았다. 0.2.2의 VirtualTable
+  변경은 바깥 `min-w-0` 한 줄이다.
+- 자체 rail·헤더 셸(`components/admin-shell.tsx`)을 공통 `AdminShell`+`AppMenu`로 바꿨다. lg 이상은 좌측 rail(접힘 키
+  `kor-travel-map:sidebar-collapsed`, 기존 "1"/"0" 유지), 그 아래는 상단 바 메뉴 버튼 → 좌측 drawer다(예전엔 메뉴가
+  상단 가로 띠로 펼쳐졌다). 맨 위는 한 줄(약 48px) 상단 바: h1 "영역 - 페이지"(영역 = nav 그룹, 홈은 "개요"), 페이지
+  설명은 같은 줄에 작게(말줄임, 전체 문장은 title), 동작은 오른쪽 — md 미만에서는 라벨을 숨긴 아이콘 버튼
+  (`ShellActionLabel`, 접근성 이름 유지). 워드마크 옆 "admin" 같은 앱 설명은 지웠고 breadcrumbs(2화면)는 상단 바에
+  들어가지 않아 없앴다(같은 목적지가 동작 버튼에 있다). 여러 값 요약(`meta`: 백업 저장소·데이터셋 상태)은 본문 맨 위 한 줄.
+- nav 정본을 `lib/admin-nav.ts`로 분리하고 페이지 metadata를 "영역 - 페이지 | kor-travel-map"으로 맞췄다. 공통
+  `formatAdminTitle`은 `"use client"` 모듈이라 서버 metadata에서 부를 수 없어 같은 규칙을 로컬에 두고 시험으로 둘을 묶었다.
+- 버튼 테두리 원인: Map `buttonInteractionClasses`의 **조건 없는 `outline-solid`**. 0.2.1 공통 recipe의
+  `outline-none`을 이기려고 붙였는데, twMerge가 `outline-none`을 지운 자리에서 `outline-style: solid`가 상시로 남아
+  모든 버튼에 기본 폭(medium = 3px) currentColor outline이 그려졌고, 포커스 때는 그 위에 `focus-visible:border-ring`
+  색 테두리까지 겹쳤다. 0.2.3 공통 recipe가 focus를 outline 2px·offset 2px(`--kt-focus`)로 직접 내므로 Map 덧대기
+  (`outline-solid`·`focus-visible:outline-*`·`ring-0`)를 모두 지우고 disabled 도달성(`disabled:opacity-100
+  disabled:pointer-events-auto`)만 남겼다. globals.css에는 unlayered 버튼 상태 규칙이 없었다(`@layer base`의
+  `:focus-visible` 하나와 `font: inherit`만). 옛 `.map-common-menu[data-collapsed]` 접힘 CSS는 AppMenu `compact`로 대체.
+- 시험: vitest `admin-shell.test.tsx`(제목 형식·설명·meta·help·nav 21·접힘 키 형식·drawer 열고 링크로 닫힘),
+  `admin-nav.test.ts`(공통 함수와 같은 문자열·영역 유도·문서 제목), `button.test.tsx`(7변형 모두 focus outline 한 벌·상시
+  outline·ring 없음). Playwright `e2e/admin-shell.spec.ts`(PC 1280·모바일 390: 상단 바 한 줄·작은 설명·문서 제목, 모바일
+  drawer 열기·닫기 버튼·메뉴 이동 뒤 닫힘·좌측 x=0·폭 ≤ 280, 쉴 때 outline 없음·Tab 2px 하나·누를 때 테두리 불변,
+  모바일 아이콘 동작), `home-nav.spec.ts` 뷰포트 시험을 rail/drawer 기준으로 갱신.
+- Map admin OpenAPI 변경 없음. 배포하지 않았다(부모 통합 회전).
+
 ## 2026-11-19 — T-READ-10 후속: 좁은 집계 표(alembic 455), T-101 재개
 
 - 소유자 지시(2026-11-19): "전국 시도·전 종류 1,214 → 705 ms, 추가 개선", 목표 p50 < 300 ms. 같은 날 "사전집계도 허용" —
@@ -78,6 +105,7 @@
   6묶음 13 page가 전부 같았다. 회귀 가드: page 행 수 이하의 LATERAL loops, KNN 순서 scan 가능, `<->`=`ST_Distance` 함수
   동일성, 구조 unit 시험. harness `matched_rows`는 KNN 상한도 함께 뗀다.
 - 운영 배포는 하지 않았다(소유자의 Map 회전에 싣는다). OpenAPI 변화 없음.
+||||||| parent of a84e86142 (docs: 관리자 셸(ui 0.2.3) 채택 journal·resume·tasks-done)
 
 ## 2026-11-19 — T-READ-10 저배율 집계 단축(alembic 454 + HashAggregate)
 
