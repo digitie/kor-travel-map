@@ -320,7 +320,9 @@ def test_region_search_params_and_constant_variant_cover_every_bind(
     # 원래 두 CTE가 내던 열은 변형도 모두 낸다(뒤 단계가 읽는다).
     original = score_sql[score_sql.index("\ncompacted AS (") : score_sql.index("\nranked AS (")]
     column_alias = re.compile(r"AS (\w+)\s*(?:,|\n\s*FROM)")
-    assert set(column_alias.findall(original)) <= set(column_alias.findall(compacted))
+    # ``key_*``는 미리 계산한 키 LATERAL(T-READ-06)의 안쪽 열이라 ``compacted``가 내는 열이 아니다.
+    produced = {alias for alias in column_alias.findall(original) if not alias.startswith("key_")}
+    assert produced <= set(column_alias.findall(compacted))
     # 나머지(순위·접기·page)는 글자까지 같다.
     ranked = "\nranked AS ("
     assert variant[variant.index(ranked) :] == score_sql[score_sql.index(ranked) :]

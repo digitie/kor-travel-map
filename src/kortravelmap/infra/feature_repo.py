@@ -2285,7 +2285,9 @@ SEARCH_KEYS_SERVER_FINGERPRINT_SQL: Final[str] = """(
 def _search_stored_key_columns_sql() -> str:
     """``compacted``의 비교 키 열 — 미리 계산한 키가 있으면 그 값, 없으면 같은 식.
 
-    ``search_keys.feature_id IS NOT NULL``은 지문·이름·분류가 맞은 행이다(LATERAL 조건). 식은
+    ``search_keys.key_feature_id IS NOT NULL``은 지문·이름·분류가 맞은 행이다(LATERAL 조건).
+    LATERAL은 열을 ``key_`` 접두로 낸다 — 식이 읽는 ``filtered``의 ``name``·``category``와 겹치지
+    않게. 식은
     ``CASE``의 ELSE에만 있어 키가 있는 행에서는 계산하지 않는다. ``compact_raw_name``은 별칭
     검색일 때만 쓰므로 종전처럼 별칭이 없으면 NULL이다. ``search_group``은 ``hits``가 고른다.
     """
@@ -2294,7 +2296,7 @@ def _search_stored_key_columns_sql() -> str:
         if column == "search_group":
             continue
         chosen = (
-            f"CASE WHEN search_keys.feature_id IS NOT NULL THEN search_keys.{column}"
+            f"CASE WHEN search_keys.key_feature_id IS NOT NULL THEN search_keys.key_{column}"
             f" ELSE {expression} END"
         )
         if column == "compact_raw_name":
@@ -2499,10 +2501,18 @@ compacted AS (
         filtered.*,
 {key_columns},
         {_search_category_group_sql("category")} AS category_search_group,
-        search_keys.search_group AS stored_search_group
+        search_keys.key_search_group AS stored_search_group
     FROM filtered
     LEFT JOIN LATERAL (
-        SELECT stored.*
+        SELECT
+            stored.feature_id AS key_feature_id,
+            stored.compact_name AS key_compact_name,
+            stored.compact_raw_name AS key_compact_raw_name,
+            stored.compact_tail AS key_compact_tail,
+            stored.compact_base_name AS key_compact_base_name,
+            stored.compact_paren_base_name AS key_compact_paren_base_name,
+            stored.compact_bracket_name AS key_compact_bracket_name,
+            stored.search_group AS key_search_group
         FROM feature.feature_search_keys AS stored
         WHERE stored.feature_id = filtered.feature_id
           AND stored.keys_version = {SEARCH_KEYS_VERSION}
