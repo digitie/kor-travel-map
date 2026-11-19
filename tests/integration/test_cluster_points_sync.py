@@ -190,3 +190,27 @@ async def test_unrelated_feature_update_does_not_touch_cluster_point(
         f"SELECT ctid::text FROM feature.feature_cluster_points WHERE feature_id = '{place}'",
     )
     assert after == before
+
+
+async def test_cluster_point_trigger_fires_after_subtype_sync(
+    migrated_session: AsyncSession,
+) -> None:
+    """잠금 순서 고정 — 상태 전이는 subtype 행(public_ready 동기화) 다음에 좁은 표 행을 잡아야 한다.
+
+    geometry 쓰기는 subtype 행 → 좁은 표 행 순서다. 같은 시점 AFTER trigger는 이름순(C)으로
+    도므로, 좁은 표 trigger가 ``trg_features_sync_subtype_public_ready``보다 뒤에 정렬돼야 두 경로의
+    잠금 순서가 같다(적대 리뷰 2026-11-19 — 앞서면 deadlock).
+    """
+    names = list(
+        (
+            await migrated_session.execute(
+                text(
+                    "SELECT tgname FROM pg_trigger "
+                    "WHERE tgrelid = 'feature.features'::regclass AND NOT tgisinternal "
+                    "AND tgname IN ('trg_features_sync_subtype_public_ready', "
+                    "'trg_features_zz_cluster_point') ORDER BY tgname COLLATE \"C\""
+                )
+            )
+        ).scalars()
+    )
+    assert names == ["trg_features_sync_subtype_public_ready", "trg_features_zz_cluster_point"]
