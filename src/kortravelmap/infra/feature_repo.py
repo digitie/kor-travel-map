@@ -2965,11 +2965,18 @@ _NEARBY_SORT_PARTS: Final[dict[str, tuple[str, str, str, str]]] = {
 }
 
 
-def _nearby_sql(origin_sql: str, *, sort: str) -> str:
-    """``origin`` CTE 하나와 정렬 하나로 nearby page SQL을 만든다(by-target·좌표 공용)."""
+#: nearby 중심 종류 → ``origin`` CTE.
+_NEARBY_ORIGINS: Final[dict[str, str]] = {
+    "target": _NEARBY_TARGET_ORIGIN_SQL,
+    "coord": _NEARBY_COORD_ORIGIN_SQL,
+}
+
+
+def _nearby_sql(origin: str, *, sort: str) -> str:
+    """중심 종류(``target``/``coord``)와 정렬 하나로 nearby page SQL을 만든다."""
     cursor_predicate, candidate_order, page_order, final_order = _NEARBY_SORT_PARTS[sort]
     return (
-        origin_sql
+        _NEARBY_ORIGINS[origin]
         + f""",
 page AS (
   SELECT candidate.*
@@ -3029,10 +3036,10 @@ ORDER BY {final_order}
 
 
 _NEARBY_SQL_BY_SORT: Final[dict[str, str]] = {
-    sort: _nearby_sql(_NEARBY_TARGET_ORIGIN_SQL, sort=sort) for sort in _NEARBY_SORT_PARTS
+    sort: _nearby_sql("target", sort=sort) for sort in _NEARBY_SORT_PARTS
 }
 _NEARBY_COORD_SQL_BY_SORT: Final[dict[str, str]] = {
-    sort: _nearby_sql(_NEARBY_COORD_ORIGIN_SQL, sort=sort) for sort in _NEARBY_SORT_PARTS
+    sort: _nearby_sql("coord", sort=sort) for sort in _NEARBY_SORT_PARTS
 }
 _NEARBY_COORD_DISTANCE_SQL: Final[str] = _NEARBY_COORD_SQL_BY_SORT["distance"]
 

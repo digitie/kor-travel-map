@@ -643,6 +643,38 @@ async def test_knn_operator_is_st_distance(migrated_session: AsyncSession) -> No
     assert rows[0].knn_src == rows[0].dist_src == "ST_Distance"
 
 
+def _walk(plan: dict[str, Any], path: str) -> list[tuple[str, dict[str, Any]]]:
+    out = [(path, plan)]
+    for child in plan.get("Plans", []):
+        tag = child.get("Subplan Name") or child.get("Parent Relationship") or "?"
+        out.extend(_walk(child, f"{path}/{child.get('Node Type')}[{tag}]"))
+    return out
+
+
+def _nodes_above_page(plan: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    """page(LIMIT) 바깥 — 뿌리 Nested Loop의 inner 자식과 뿌리의 SubPlan 아래 노드."""
+    node = plan
+    # 최종 ORDER BY의 Sort/Result가 뿌리에 있을 수 있다 — Nested Loop까지 내려간다.
+    while node.get("Node Type") != "Nested Loop" and len(node.get("Plans", [])) >= 1:
+        if any(child.get("Parent Relationship") == "SubPlan" for child in node["Plans"]):
+            break
+        node = node["Plans"][0]
+    out: list[tuple[str, dict[str, Any]]] = []
+    for child in node.get("Plans", []):
+        relationship = child.get("Parent Relationship")
+        if relationship in {"Inner", "SubPlan"}:
+            out.extend(_walk(child, f"{child.get('Node Type')}[{relationship}]"))
+    return out
+
+
+def _outline(plan: dict[str, Any]) -> list[str]:
+    return [
+        f"{path} loops={node.get('Actual Loops')} rel={node.get('Alias')}"
+        for path, node in _walk(plan, str(plan.get("Node Type")))
+        if node.get("Relation Name") or "Limit" in str(node.get("Node Type"))
+    ][:40]
+
+
 def _plan_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
     nodes = [plan]
     for child in plan.get("Plans", []):
@@ -692,29 +724,22 @@ async def test_nearby_primary_source_runs_only_for_page_rows(
             {**_coord_params(100_000.0, limit_plus_one), "kinds": ["place"]},
         )
         assert int(plan["Actual Rows"]) == limit_plus_one, sort
-        # ``sl`` = primary source LATERAL, ``attr_link`` = 속성 코드. notice 감산 fragment의
-        # 계보 조회(``cur_sl``·``other_sl``)는 종전과 같은 비용이라 여기서 세지 않는다.
+        # 잘린 page 위에서 도는 부분만 본다 — 뿌리의 page 쪽이 아닌 자식(primary source
+        # LATERAL)과 뿌리의 SubPlan(속성 코드). page 안 필터의 subplan(provider·속성·notice
+        # 필터)은 필터가 있을 때 후보 행마다 도는 것이 종전과 같은 의미라 여기서 세지 않는다.
+        above_page = _nodes_above_page(plan)
         link_nodes = [
-            node
-            for node in _plan_nodes(plan)
+            (path, node)
+            for path, node in above_page
             if node.get("Relation Name") == "source_links"
-            and node.get("Alias") in {"sl", "attr_link"}
         ]
-        assert link_nodes, f"{sort}: primary source·속성 코드 노드가 없다"
-        # LATERAL(page 행마다 1회) + 속성 코드(page 행마다 1회). 반경 안 행 수(~1,000)에
-        # 비례하면 회귀다.
+        assert link_nodes, (sort, "primary source·속성 코드 노드가 없다", _outline(plan))
         too_many = [
-            (
-                node.get("Alias"),
-                node.get("Node Type"),
-                node.get("Actual Loops"),
-                node.get("Actual Rows"),
-                node.get("Index Name"),
-            )
-            for node in link_nodes
+            (path, node.get("Alias"), node.get("Actual Loops"))
+            for path, node in link_nodes
             if int(node.get("Actual Loops", 0)) > limit_plus_one
         ]
-        assert not too_many, (sort, too_many, json.dumps(plan)[:4000])
+        assert not too_many, (sort, too_many, _outline(plan))
 
 
 async def test_nearby_distance_page_can_use_knn_index_order(

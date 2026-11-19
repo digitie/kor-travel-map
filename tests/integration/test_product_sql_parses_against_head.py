@@ -245,6 +245,15 @@ def _optional_filter_arguments(_module: Any, builder: Any) -> list[dict[str, Any
     ]
 
 
+def _nearby_arguments(module: Any, _builder: Any) -> list[dict[str, Any]]:
+    """nearby 중심 종류 × 정렬 — 둘 다 모듈의 표에서 뽑는다(T-READ-09)."""
+    return [
+        {"origin": origin, "sort": sort}
+        for origin in sorted(module._NEARBY_ORIGINS)
+        for sort in sorted(module._NEARBY_SORT_PARTS)
+    ]
+
+
 #: bool이 아닌 필수 인자를 가진 조립기에 넣을 값. 도메인이 모듈에 있으면
 #: 리터럴을 박지 말고 거기서 뽑는다 — 도메인이 늘 때 검사도 같이 늘어야 한다.
 _BUILDER_ARGUMENTS: Final[dict[str, Any]] = {
@@ -277,6 +286,7 @@ _BUILDER_ARGUMENTS: Final[dict[str, Any]] = {
     "kortravelmap.infra.ops_repo._scoped_import_job_events_sql": (
         _optional_filter_arguments
     ),
+    "kortravelmap.infra.feature_repo._nearby_sql": _nearby_arguments,
     "kortravelmap.infra.feature_repo._cluster_bbox_sql": (
         _cluster_code_column_arguments
     ),
