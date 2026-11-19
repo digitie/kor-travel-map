@@ -303,6 +303,12 @@
         "452_lotte_hotel_search_alias"
       ],
       "revision": "453_features_autovacuum"
+    },
+    {
+      "down_revision": [
+        "453_features_autovacuum"
+      ],
+      "revision": "454_route_cluster_markers"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-19 — 저배율 집계 단축(T-READ-10, alembic 454)
+
+- `feature.feature_route_geometries`에 STORED 생성 컬럼 `marker_point`·`geom_xmin`·`geom_xmax`·`geom_ymin`·`geom_ymax`(alembic `454_route_cluster_markers`, 표 다시 쓰기). in-bounds 집계(zoom ≤ 13)는 bbox 안에 완전히 든 route의 대표점·범위를 이 열에서 읽고, 집계 문장 동안 `enable_sort = off`로 HashAggregate를 쓴다. 응답·OpenAPI 변경 없음(결과는 종전 SQL과 같다 — 통합 시험).
+
 ## 2026-11-18 — 교통 묶음 근처 조회(T-READ-04)
 
 - `POST /v1/service/transport/fuel-stations/near-batch`·`POST /v1/service/transport/highway-incidents/near-batch`: 중심 최대 60곳의 근처를 한 요청·한 세대로 읽는다(Valkey 왕복 셋). 응답은 목록 route와 같은 모양이고 `distance_m`은 가장 가까운 중심까지다. service·full OpenAPI additive — PinVi service 재vendor 필요(Map+PinVi 한 회전).

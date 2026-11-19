@@ -1684,6 +1684,28 @@ ORDER BY candidate.feature_id ASC
 # 대표점이 bbox 밖에 찍힐 수 있고, ``ST_CoveredBy``는 같은 판정에 GEOS relate를 불러
 # 전국 5.4만 건에서 0.4 s를 더 썼다(prod 실측). 요청 kind에 route/area가 없으면
 # geometry arm 자체를 싣지 않고, 한쪽만 있으면 다른 subtype 표는 kind 가드로 건너뛴다.
+#
+# T-READ-10 — route geometry의 포함 판정 범위와 대표점은 요청마다 계산하지 않는다.
+# ``feature_route_geometries``의 STORED 생성 컬럼(alembic 454: ``geom_xmin``…``geom_ymax`` =
+# ``ST_XMin(geom)``…, ``marker_point`` = ``ST_PointOnSurface(geom)``)이 종전 식과 같은 값을
+# 들고 있다. 그래서 bbox 안에 완전히 든 route는 geometry를 풀지 않는다 — 포함이면 교차가
+# 자명하므로(비어 있지 않은 geometry의 모든 점이 범위 안이고, 범위가 bbox 안이다)
+# ``ST_Intersects``도 건너뛴다. 빈 geometry는 범위가 NULL이라 포함이 아니고, 종전처럼
+# ``ST_Intersects``(거짓)로 간다. bbox를 가로지르는 route만 종전 식(교차·교차 부분 위의 점)을
+# 계산한다. area는 생성 컬럼이 없다(prod 422행 — 요청 때 계산해도 작고, area 행은 큐레이션
+# 입력 해시가 ``to_jsonb``로 통째 읽어 열을 더하면 해시가 바뀐다). area 갈래는 같은 식을
+# 그 자리에서 계산해 같은 열 모양으로 낸다. 결과(개수·대표점)는 종전 SQL과 같다 —
+# ``tests/integration/test_cluster_rollup_equivalence.py``가 종전 SQL 사본과 비교한다.
+def _geometry_inside_bbox_sql(alias: str) -> str:
+    """``alias``의 정확 범위 열(``geom_xmin``…)이 요청 bbox 안에 있는가(T-READ-10)."""
+    if not alias.isidentifier():
+        raise ValueError("alias must be a SQL identifier")
+    return f"""{alias}.geom_xmin >= CAST(:min_lon AS double precision)
+          AND {alias}.geom_xmax <= CAST(:max_lon AS double precision)
+          AND {alias}.geom_ymin >= CAST(:min_lat AS double precision)
+          AND {alias}.geom_ymax <= CAST(:max_lat AS double precision)"""
+
+
 def _cluster_bbox_sql(code_col: str, *, include_geometry_arm: bool = True) -> str:
     env = _bbox_envelope_sql()
     point_arm = f"""
@@ -1717,24 +1739,38 @@ WITH geometry_candidates AS MATERIALIZED (
   SELECT
       f.{code_col} AS cluster_key,
       CASE
-        WHEN x_extension.ST_XMin(bbox_hit.geom) >= CAST(:min_lon AS double precision)
-          AND x_extension.ST_XMax(bbox_hit.geom) <= CAST(:max_lon AS double precision)
-          AND x_extension.ST_YMin(bbox_hit.geom) >= CAST(:min_lat AS double precision)
-          AND x_extension.ST_YMax(bbox_hit.geom) <= CAST(:max_lat AS double precision)
-          THEN x_extension.ST_PointOnSurface(bbox_hit.geom)
+        WHEN {_geometry_inside_bbox_sql("bbox_hit")}
+          THEN COALESCE(bbox_hit.marker_point, x_extension.ST_PointOnSurface(bbox_hit.geom))
         ELSE x_extension.ST_PointOnSurface(
           x_extension.ST_Intersection(bbox_hit.geom, {env})
         )
       END AS marker_coord
   FROM (
-    SELECT bbox_hit_route.feature_id, bbox_hit_route.geom
+    SELECT
+        bbox_hit_route.feature_id,
+        bbox_hit_route.geom,
+        bbox_hit_route.marker_point,
+        bbox_hit_route.geom_xmin,
+        bbox_hit_route.geom_xmax,
+        bbox_hit_route.geom_ymin,
+        bbox_hit_route.geom_ymax
     FROM feature.feature_route_geometries AS bbox_hit_route
     WHERE (CAST(:kinds AS text[]) IS NULL OR 'route' = ANY(CAST(:kinds AS text[])))
       AND bbox_hit_route.public_ready
       AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
-      AND x_extension.ST_Intersects(bbox_hit_route.geom, {env})
+      AND (
+        ({_geometry_inside_bbox_sql("bbox_hit_route")})
+        OR x_extension.ST_Intersects(bbox_hit_route.geom, {env})
+      )
     UNION ALL
-    SELECT bbox_hit_area.feature_id, bbox_hit_area.geom
+    SELECT
+        bbox_hit_area.feature_id,
+        bbox_hit_area.geom,
+        NULL,
+        x_extension.ST_XMin(bbox_hit_area.geom),
+        x_extension.ST_XMax(bbox_hit_area.geom),
+        x_extension.ST_YMin(bbox_hit_area.geom),
+        x_extension.ST_YMax(bbox_hit_area.geom)
     FROM feature.feature_areas AS bbox_hit_area
     WHERE (CAST(:kinds AS text[]) IS NULL OR 'area' = ANY(CAST(:kinds AS text[])))
       AND bbox_hit_area.public_ready
@@ -1785,6 +1821,27 @@ _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT: Final[dict[str, str]] = {
 }
 _GEOMETRY_FEATURE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
 
+# T-READ-10 — 집계는 bbox 안 후보 행(전국이면 약 40만)을 행정코드로 묶어 20개 안팎의 묶음을
+# 낸다. planner는 그 묶기를 "40만 행 정렬 → GroupAggregate"로 고른다 — 정렬 비용 추정이 text
+# 비교를 실제(libc 정렬, prod ``en_US.utf8``)보다 훨씬 싸게 보기 때문이다. n150 실측(합성
+# 42만 행, 반복을 교차해 잰 p50): 전국 point-only 397 → 250 ms, 전 kind 815 → 705 ms,
+# 읍면동(서울 zoom 12) 90 → 64 ms. 그래서 이 문장 동안만 ``enable_sort``를 꺼 HashAggregate를
+# 고르게 한다. 결과는 바뀌지 않는다(계획만 바뀐다 — 개수는 같고 평균 좌표는 float 합의
+# 순서만큼, 1e-12도 안팎에서 달라질 수 있다. 종전에도 계획이 바뀌면 그랬다). 맨 끝 묶음
+# 정렬(20행 남짓)은 대안이 없으므로 그대로 정렬한다. ``set_config(..., true)``라 transaction
+# 안에서만 살고, 집계가 끝나면 직전 값으로 되돌린다(같은 transaction의 다음 문장에 새지
+# 않게). 집계가 실패하면 되돌리지 않는다 — 그 transaction은 abort됐고 rollback(또는 그 뒤에 잡은
+# savepoint로의 rollback)이 설정도 되돌린다. ``finally``에서 되돌리면 abort된 transaction에서 실패해
+# 원래 오류를 가린다. 설정을 집계 문장 안(CTE의 ``set_config``)에 넣는 방법은 듣지 않는다 — 계획은
+# 실행 전에 세워진다. harness(``scripts/perf_tier2_release_harness.py``)·tier-1 perf gate도 같은
+# 문장을 앞에 둔다.
+_CLUSTER_HASH_AGGREGATE_ON_SQL: Final[str] = (
+    "SELECT current_setting('enable_sort') AS prior, set_config('enable_sort', 'off', true)"
+)
+_CLUSTER_HASH_AGGREGATE_OFF_SQL: Final[str] = (
+    "SELECT set_config('enable_sort', CAST(:prior AS text), true)"
+)
+
 
 async def cluster_features_in_bbox(
     session: AsyncSession,
@@ -1820,6 +1877,7 @@ async def cluster_features_in_bbox(
         if normalized_kinds is None or not _GEOMETRY_FEATURE_KINDS.isdisjoint(normalized_kinds)
         else _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT
     )
+    prior_enable_sort = await session.scalar(text(_CLUSTER_HASH_AGGREGATE_ON_SQL))
     rows = (
         (
             await session.execute(
@@ -1840,6 +1898,7 @@ async def cluster_features_in_bbox(
         .mappings()
         .all()
     )
+    await session.execute(text(_CLUSTER_HASH_AGGREGATE_OFF_SQL), {"prior": prior_enable_sort})
     return [
         {
             "cluster_key": str(row["cluster_key"]),

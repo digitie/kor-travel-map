@@ -50,6 +50,7 @@ from sqlalchemy import (
     Computed,
     Date,
     DateTime,
+    Double,
     ForeignKey,
     ForeignKeyConstraint,
     Identity,
@@ -1771,6 +1772,28 @@ class FeatureRouteGeometryRow(Base):
             " 'hex'::text)",
             persisted=True,
         ),
+    )
+    #: 저배율 집계(T-READ-10, migration 454)의 대표점·정확 범위. **생성 컬럼**이라 geom과
+    #: 같은 행·같은 transaction에서 DB가 계산한다(동기화 코드 없음). 집계 SQL은 geometry가
+    #: bbox 안에 완전히 들어 있으면 ``marker_point``(= ``ST_PointOnSurface(geom)``)를 그대로
+    #: 쓰고 ``ST_Intersects``를 건너뛴다 — 종전에 요청마다 5.8만 개 geometry를 풀어 계산하던
+    #: 값과 같은 식이다. 범위는 ``ST_XMin(geom)`` 등(좌표로 계산한 double, ``&&``의 float4
+    #: 캐시 bbox가 아니다).
+    marker_point: Mapped[Any | None] = mapped_column(
+        Geometry("POINT", srid=4326, spatial_index=False),
+        Computed("x_extension.st_pointonsurface(geom)", persisted=True),
+    )
+    geom_xmin: Mapped[float | None] = mapped_column(
+        Double, Computed("x_extension.st_xmin((geom)::x_extension.box3d)", persisted=True)
+    )
+    geom_xmax: Mapped[float | None] = mapped_column(
+        Double, Computed("x_extension.st_xmax((geom)::x_extension.box3d)", persisted=True)
+    )
+    geom_ymin: Mapped[float | None] = mapped_column(
+        Double, Computed("x_extension.st_ymin((geom)::x_extension.box3d)", persisted=True)
+    )
+    geom_ymax: Mapped[float | None] = mapped_column(
+        Double, Computed("x_extension.st_ymax((geom)::x_extension.box3d)", persisted=True)
     )
 
 
