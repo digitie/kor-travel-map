@@ -22821,13 +22821,6 @@ CREATE TRIGGER trg_feature_state_transitions_append_only_truncate BEFORE TRUNCAT
 
 
 --
--- Name: features trg_features_cluster_point; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
---
-
-CREATE TRIGGER trg_features_cluster_point AFTER INSERT OR DELETE OR UPDATE OF kind, category, sido_code, sigungu_code, legal_dong_code, coord, lifecycle_state, publication_state, quality_state ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_core();
-
-
---
 -- Name: features trg_features_coord_precision; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -22876,6 +22869,13 @@ CREATE TRIGGER trg_features_state_transition_audit AFTER INSERT OR UPDATE OF lif
 --
 
 CREATE TRIGGER trg_features_sync_subtype_public_ready AFTER UPDATE OF lifecycle_state, publication_state, quality_state ON feature.features FOR EACH ROW WHEN (((old.lifecycle_state IS DISTINCT FROM new.lifecycle_state) OR (old.publication_state IS DISTINCT FROM new.publication_state) OR (old.quality_state IS DISTINCT FROM new.quality_state))) EXECUTE FUNCTION feature.sync_subtype_public_ready();
+
+
+--
+-- Name: features trg_features_zz_cluster_point; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_features_zz_cluster_point AFTER INSERT OR DELETE OR UPDATE OF kind, category, sido_code, sigungu_code, legal_dong_code, coord, lifecycle_state, publication_state, quality_state ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_core();
 
 
 --

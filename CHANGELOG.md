@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-19 — 저배율 집계 좁은 표(T-READ-10 후속, alembic 455)
+
+- 새 표 `feature.feature_cluster_points`(Feature당 한 행, DB trigger가 같은 transaction에서 맞춘다)와 trigger 셋(`features`, `feature_route_geometries`, `feature_areas`). in-bounds 집계(zoom ≤ 13)는 이 표를 병렬로 읽는다. 런타임 권한은 SELECT만. 응답·OpenAPI 변경 없음(결과는 종전 SQL과 같다 — 통합 시험). migration은 backfill 동안 세 표의 쓰기를 막는다.
+
 ## 2026-11-19 — 저배율 집계 단축(T-READ-10, alembic 454)
 
 - `feature.feature_route_geometries`에 STORED 생성 컬럼 `marker_point`·`geom_xmin`·`geom_xmax`·`geom_ymin`·`geom_ymax`(alembic `454_route_cluster_markers`, 표 다시 쓰기). in-bounds 집계(zoom ≤ 13)는 bbox 안에 완전히 든 route의 대표점·범위를 이 열에서 읽고, 집계 문장 동안 `enable_sort = off`로 HashAggregate를 쓴다. 응답·OpenAPI 변경 없음(결과는 종전 SQL과 같다 — 통합 시험).

@@ -1771,6 +1771,9 @@ Map 핀 3자리를 올렸다(#1204 `7b2e9ecf`). 표면 manifest는 `pinned_sha` 
 ```markdown
 - [ ] T-101 — **클러스터 rollup Materialized View 검토**
 
+> 2026-11-19 소유자가 제외(2026-09-07)를 풀었다("사전집계도 허용"). region-total MV가 아니라 exact-viewport를 지키는 좁은
+> 집계 표(alembic 455, 동기 trigger)로 `T-READ-10` 후속이 구현했다. 해제는 `T-READ-10` acceptance와 함께다.
+
 `docs/architecture/performance.md §9.3` 기준. detail flatten MV는 제외한다. 1순위
 후보는 `mv_feature_cluster_counts`이며, exact-viewport와 region-total 의미 차이를
 시범 PR에서 먼저 결정해야 한다. 도입 시 `REFRESH MATERIALIZED VIEW CONCURRENTLY`용
@@ -2761,9 +2764,18 @@ point-only 변형에도 듣는다). 처음 목표로 잡은 "전 kind p50 < 300 
 변형조차 조용한 창 365 ms였고, 행마다 읽는 비용(전국 약 40만 행)이 남는다. 그보다 내리려면 사전 집계(T-101, 2026-09-07
 소유자 제외)를 다시 열어야 한다. 그래서 목표를 아래로 정한다(n150 합성 42만 행 실측 비율 −42%·−37%에서 여유를 둔 값).
 
-- [ ] harness(`jit=off`) "전국 low-zoom cluster(sido, 전 kind)"의 조용한 창 p50이 **800 ms 이하**다(기준선 1,230.8 ms).
-  같은 run의 "전국 low-zoom cluster(sido)"(point-only)는 **300 ms 이하**(기준선 364.9 ms). 전후 수치를 보고서에 적는다.
+후속(2026-11-19, 소유자가 "추가 개선"·사전 집계 허용 — T-101 재개, alembic `455_feature_cluster_points`): 좁은 집계 표
+`feature.feature_cluster_points`(Feature당 한 행, 집계가 쓰는 열만)를 `features`·route/area geometry trigger가 **같은
+transaction에서** 맞추고(지연 0), 집계는 그 표를 병렬(`Gather → Partial HashAggregate`)로 읽는다. exact-viewport 의미는
+그대로다(region-total이 아니다). n150 합성 42만 행: 전 kind 1,297 → 711(454) → **255 ms**, point-only 254 → 107 ms.
+목표를 다시 정한다.
+
+- [ ] harness(`jit=off`) "전국 low-zoom cluster(sido, 전 kind)"의 조용한 창 p50이 **300 ms 미만**이다(기준선 1,230.8 ms).
+  같은 run의 "전국 low-zoom cluster(sido)"(point-only)는 **150 ms 이하**(기준선 364.9 ms). 전후 수치를 보고서에 적는다.
+- [x] 반영 시점이 동기식임을 시험으로 고정했다(`tests/integration/test_cluster_points_sync.py` — 좌표·지역 코드·분류·공개
+  3축·geometry 갱신·삭제·재삽입 뒤 commit 전 같은 transaction에서 좁은 표가 migration backfill 식과 같고, 집계가 종전
+  SQL과 같다).
 - [x] 집계 결과(cluster별 개수·대표점)가 종전 경로와 같다(통합 시험 `tests/integration/test_cluster_rollup_equivalence.py`
-  — 종전 SQL 사본과 3단위 × bbox 3 × kind 필터 4, geom UPDATE 뒤 한 번 더. 개수는 정확히, 평균 좌표는 1e-9도). OpenAPI
-  세 파일이 바뀌지 않았다.
+  — 종전 SQL 사본과 3단위 × bbox 3 × kind 필터 5(분류 필터 포함), notice(종료 포함), geom UPDATE 뒤 한 번 더. 개수는
+  정확히, 평균 좌표는 1e-9도). OpenAPI 세 파일이 바뀌지 않았다.
 - [ ] 운영 반영 뒤 언제·어느 배포 generation에서 쟀는지 journal에 적었다.

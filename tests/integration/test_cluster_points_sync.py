@@ -121,7 +121,7 @@ async def test_cluster_points_follow_every_write_in_the_same_transaction(
          f"publication_state = 'suppressed' WHERE feature_id = '{route}'"),
         ("route state restored", f"UPDATE feature.features SET lifecycle_state = 'active', "
          f"publication_state = 'published' WHERE feature_id = '{route}'"),
-        ("place quality invalid", f"UPDATE feature.features SET quality_state = 'invalid' "
+        ("place quality quarantined", f"UPDATE feature.features SET quality_state = 'quarantined' "
          f"WHERE feature_id = '{place}'"),
         ("place quality valid", f"UPDATE feature.features SET quality_state = 'valid' "
          f"WHERE feature_id = '{place}'"),
