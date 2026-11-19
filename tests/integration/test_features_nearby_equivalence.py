@@ -551,6 +551,69 @@ async def test_target_nearby_matches_pre_t_read_09_sql(
         assert got == want == NearbyFeaturePage(items=(), next_cursor=None)
 
 
+_RADIUS_PREDICATE_DISAGREEMENT_SQL = """
+WITH origin AS (
+    SELECT x_extension.ST_Transform(
+        x_extension.ST_SetSRID(
+            x_extension.ST_MakePoint(
+                CAST(:lon AS double precision), CAST(:lat AS double precision)
+            ),
+            4326
+        ),
+        5179
+    ) AS pt_5179
+),
+radii AS (
+    SELECT CAST(r AS double precision) AS radius_m
+    FROM unnest(CAST(:radii AS double precision[])) AS r
+    UNION
+    -- 경계: 시드 행까지의 정확한 거리 자체를 반경으로 — 등호 쪽 판정이 갈리면 여기서 걸린다.
+    SELECT x_extension.ST_Distance(f.coord_5179, o.pt_5179)
+    FROM feature.features AS f CROSS JOIN origin AS o
+    WHERE CAST(f.feature_id AS text) IN (
+        SELECT CAST(CAST(md5('tread09:' || g) AS uuid) AS text)
+        FROM generate_series(1, 60) AS g
+    )
+)
+SELECT
+    count(*) FILTER (
+        WHERE x_extension.ST_DWithin(f.coord_5179, o.pt_5179, radii.radius_m)
+              IS DISTINCT FROM (
+                f.coord_5179 OPERATOR(x_extension.&&)
+                  x_extension.ST_Expand(o.pt_5179, radii.radius_m)
+                AND f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 <= radii.radius_m
+              )
+    ) AS disagreements,
+    count(*) FILTER (
+        WHERE x_extension.ST_Distance(f.coord_5179, o.pt_5179) = radii.radius_m
+    ) AS on_boundary,
+    count(*) AS compared
+FROM feature.features AS f
+CROSS JOIN origin AS o
+CROSS JOIN radii
+WHERE f.coord_5179 IS NOT NULL
+"""
+
+
+async def test_radius_predicate_matches_st_dwithin(migrated_session: AsyncSession) -> None:
+    """새 반경 술어(``&& ST_Expand`` + ``<-> <= r``)가 종전 ``ST_DWithin``과 모든 행에서 같다.
+
+    planner 추정 때문에 ``ST_DWithin``을 두 조각으로 펼쳐 썼다. 반경 경계(행까지의 정확한 거리)를
+    포함해 두 술어가 갈리는 (행, 반경) 쌍이 하나도 없어야 한다.
+    """
+    await _seed(migrated_session)
+    row = (
+        await migrated_session.execute(
+            text(_RADIUS_PREDICATE_DISAGREEMENT_SQL),
+            {"lon": _LON, "lat": _LAT, "radii": [0.5, 800.0, 5_000.0, 30_000.0, 100_000.0]},
+        )
+    ).one()
+    assert row.disagreements == 0
+    # 경계 반경이 실제로 행을 경계 위에 올렸다(동률 좌표 4건씩) — 검사가 공허하지 않다.
+    assert row.on_boundary >= 60
+    assert row.compared > 60 * 1_000
+
+
 async def test_knn_operator_is_st_distance(migrated_session: AsyncSession) -> None:
     """``<->``가 ``ST_Distance``와 같은 C 함수여야 거리 값·순서·cursor가 종전과 같다.
 
@@ -629,12 +692,15 @@ async def test_nearby_primary_source_runs_only_for_page_rows(
             {**_coord_params(100_000.0, limit_plus_one), "kinds": ["place"]},
         )
         assert int(plan["Actual Rows"]) == limit_plus_one, sort
+        # ``sl`` = primary source LATERAL, ``attr_link`` = 속성 코드. notice 감산 fragment의
+        # 계보 조회(``cur_sl``·``other_sl``)는 종전과 같은 비용이라 여기서 세지 않는다.
         link_loops = [
             int(node.get("Actual Loops", 0))
             for node in _plan_nodes(plan)
             if node.get("Relation Name") == "source_links"
+            and node.get("Alias") in {"sl", "attr_link"}
         ]
-        assert link_loops, f"{sort}: source_links를 읽는 노드가 없다"
+        assert link_loops, f"{sort}: primary source·속성 코드 노드가 없다"
         # LATERAL(page 행마다 1회) + 속성 코드(page 행마다 1회). 반경 안 행 수(~1,000)에
         # 비례하면 회귀다.
         assert max(link_loops) <= limit_plus_one, (sort, link_loops)

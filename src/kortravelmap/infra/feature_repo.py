@@ -2836,12 +2836,18 @@ WHERE codes.code IS NOT NULL
 # 같다(동률 ``feature_id``는 KNN 위의 Incremental Sort). 최종 SELECT가 같은 키로 다시
 # 정렬해 응답 순서를 고정한다.
 #
+# 반경 술어는 ``ST_DWithin`` 대신 그것이 펼쳐지는 두 조각 — 색인 조건 ``&& ST_Expand``와 거리
+# ``<-> <= 반경`` — 으로 직접 쓴다. 점끼리 ``ST_DWithin``은 ``ST_Distance``와 같은 거리 계산을
+# ``<=`` 반경으로 비교하므로 결과가 같다(통합 시험이 두 술어가 갈리는 행이 없음을 확인한다). 이유는
+# 추정이다: prod에서 ``ST_DWithin`` filter의 선택도가 0.0002로 잡혀 반경 안 20만 행을 27행으로
+# 보고, planner가 KNN 대신 전 행 bitmap+정렬(377 ms)을 골랐다. KNN을 강제하면 5 ms였다.
+#
 # ADR-012: 술어·정렬은 STORED ``coord_5179``에 직접 건다. 입력 좌표 변환은 ``origin``에서
 # 1회뿐이고, ``origin``은 FROM 없는 1행 CTE라 상수(또는 InitPlan 값)로 끌어올려진다 —
 # KNN 정렬 인자는 행마다 바뀌지 않아야 인덱스를 탈 수 있다.
 
 #: by-target 중심 — target 행을 스칼라 subquery로 읽는다. target이 없거나 삭제됐으면
-#: ``pt_5179``가 NULL이라 ``ST_DWithin``이 참이 되지 않아 빈 page다(종전 join과 같다).
+#: ``pt_5179``가 NULL이라 반경 술어가 참이 되지 않아 빈 page다(종전 join과 같다).
 _NEARBY_TARGET_ORIGIN_SQL: Final[str] = """
 WITH origin AS (
     SELECT
@@ -2978,7 +2984,9 @@ page AS (
     JOIN feature.public_features AS f
       ON f.coord IS NOT NULL
      AND f.coord_5179 IS NOT NULL
-     AND x_extension.ST_DWithin(f.coord_5179, o.pt_5179, o.radius_m)
+     AND f.coord_5179 OPERATOR(x_extension.&&)
+           x_extension.ST_Expand(o.pt_5179, o.radius_m)
+     AND {_NEARBY_DISTANCE_EXPR} <= o.radius_m
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
         CAST(:categories AS text[]) IS NULL
@@ -8086,7 +8094,8 @@ async def features_nearby(
 
     사용자 현재 위치/추천 흐름용(T-213b). ADR-012: 입력 좌표는 ``origin`` CTE에서
     한 번만 5179로 변환해 상수로 굳히고, 술어는 STORED ``feature.features.coord_5179``에
-    직접 ``ST_DWithin``/``ST_Distance``를 적용한다(GiST ``idx_features_coord_5179_gist``).
+    직접 반경 술어(``&& ST_Expand`` + ``<->`` 거리)를 적용한다(GiST
+    ``idx_features_coord_5179_gist``, 거리순은 KNN — T-READ-09).
     cursor/정렬/응답 shape는 ``features_nearby_poi_cache_target``과 동일
     (``NearbyFeaturePage``). ``sort`` ∈ {distance, name, last_updated_at}.
     공개 read이므로 ADR-067 ``feature.public_features`` projection 안에서만
