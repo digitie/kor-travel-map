@@ -193,6 +193,8 @@ _CLUSTER_PARAMS: dict[str, Any] = {
 }
 
 _COORD_SPATIAL = ("idx_features_coord_gist", "idx_features_coord")
+#: T-READ-10 후속(alembic 455): 저배율 집계는 좁은 집계 표의 GiST를 탄다.
+_CLUSTER_SPATIAL = ("idx_feature_cluster_points_coord_gist",)
 _COORD_5179_SPATIAL = ("idx_features_coord_5179_gist", "idx_features_coord_5179")
 
 # features의 ``feature_id`` 동등 조건이 탈 수 있는 **동치** 접근 경로.
@@ -281,21 +283,24 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         "cluster rollup — sido",
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sido"],
         _CLUSTER_PARAMS,
-        expected_indexes=_COORD_SPATIAL,
+        expected_indexes=_CLUSTER_SPATIAL,
+        no_seq_scan_on=("features", "feature_cluster_points"),
         pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     HotQuery(
         "cluster rollup — sigungu",
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
         _CLUSTER_PARAMS,
-        expected_indexes=_COORD_SPATIAL,
+        expected_indexes=_CLUSTER_SPATIAL,
+        no_seq_scan_on=("features", "feature_cluster_points"),
         pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     HotQuery(
         "cluster rollup — eupmyeondong",
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["eupmyeondong"],
         _CLUSTER_PARAMS,
-        expected_indexes=_COORD_SPATIAL,
+        expected_indexes=_CLUSTER_SPATIAL,
+        no_seq_scan_on=("features", "feature_cluster_points"),
         pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     # route/area를 포함하는(kind 미지정) 요청은 geometry arm이 실린 SQL을 탄다(#1455).
@@ -303,7 +308,8 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         "cluster rollup — sigungu (all kinds)",
         _CLUSTER_BBOX_SQL_BY_UNIT["sigungu"],
         {**_CLUSTER_PARAMS, "kinds": None},
-        expected_indexes=_COORD_SPATIAL,
+        expected_indexes=_CLUSTER_SPATIAL,
+        no_seq_scan_on=("features", "feature_cluster_points"),
         pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     # ADR-121 장소 속성 필터 — 필터가 있어도 bbox·근접·검색의 공간/trgm 색인을 그대로 타고
@@ -324,7 +330,8 @@ HOT_QUERIES: tuple[HotQuery, ...] = (
         "cluster rollup — sigungu + attribute",
         _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sigungu"],
         {**_CLUSTER_PARAMS, "attributes": ["barrier_free"]},
-        expected_indexes=_COORD_SPATIAL,
+        expected_indexes=_CLUSTER_SPATIAL,
+        no_seq_scan_on=("features", "feature_cluster_points"),
         pre_statements=(_CLUSTER_HASH_AGGREGATE_ON_SQL,),
     ),
     HotQuery(

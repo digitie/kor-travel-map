@@ -2043,7 +2043,7 @@ class FeatureClusterPointRow(Base):
     geom_ymax: Mapped[float | None] = mapped_column(Double)
     #: 정확 범위의 사각형 — bbox와 겹치는 route/area 후보를 GiST로 찾는다(생성 컬럼).
     geom_bounds: Mapped[Any | None] = mapped_column(
-        Geometry(srid=4326, spatial_index=False),
+        Geometry("POLYGON", srid=4326, spatial_index=False),
         Computed(
             "x_extension.st_makeenvelope(geom_xmin, geom_ymin, geom_xmax, geom_ymax, 4326)",
             persisted=True,

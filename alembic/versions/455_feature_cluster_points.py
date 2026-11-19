@@ -78,7 +78,7 @@ CREATE TABLE feature.feature_cluster_points (
     geom_xmax double precision,
     geom_ymin double precision,
     geom_ymax double precision,
-    geom_bounds x_extension.geometry GENERATED ALWAYS AS (
+    geom_bounds x_extension.geometry(Polygon,4326) GENERATED ALWAYS AS (
         x_extension.ST_MakeEnvelope(geom_xmin, geom_ymin, geom_xmax, geom_ymax, 4326)
     ) STORED,
     CONSTRAINT pk_feature_cluster_points PRIMARY KEY (feature_id)
