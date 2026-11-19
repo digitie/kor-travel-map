@@ -23,6 +23,7 @@ from sqlalchemy import text
 from kortravelmap.infra import feature_repo
 from kortravelmap.infra.feature_repo import (  # noqa: PLC2701 - oracle·plan 검사 대상
     _NEARBY_COORD_SQL_BY_SORT,
+    _NEARBY_SQL_BY_SORT,
     _PUBLIC_ACTIVE_NOTICE_FILTER_SQL,
     NearbyFeaturePage,
     _encode_nearby_cursor,
@@ -265,7 +266,7 @@ INSERT INTO feature.features (
 )
 SELECT
     CAST(md5('tread09:' || g) AS uuid),
-    CASE WHEN g % 5 = 0 THEN 'event' ELSE 'place' END,
+    CASE WHEN g % 9 = 0 THEN 'notice' WHEN g % 5 = 0 THEN 'event' ELSE 'place' END,
     'tread09-' || lpad(CAST(g % 53 AS text), 2, '0'),
     CASE WHEN g % 3 = 0 THEN '06020000' ELSE '01010000' END,
     x_extension.ST_SetSRID(
@@ -282,6 +283,20 @@ SELECT
     'valid',
     CAST(:base AS timestamptz) + make_interval(hours => g % 17)
 FROM generate_series(1, :rows) AS g
+"""
+
+# notice(g % 9 = 0)의 절반은 이미 끝났다 — 공개 notice 감산 fragment가 실제로 행을 거른다.
+_SEED_NOTICES_SQL = """
+INSERT INTO feature.feature_notices (
+    feature_id, kind, notice_type, valid_start_time, valid_end_time
+)
+SELECT
+    CAST(md5('tread09:' || g) AS uuid), 'notice', 'tread09',
+    CAST(:base AS timestamptz),
+    CASE WHEN g % 2 = 0 THEN CAST(:base AS timestamptz) + interval '1 day'
+         ELSE CAST(:base AS timestamptz) + interval '5 years' END
+FROM generate_series(1, :rows) AS g
+WHERE g % 9 = 0
 """
 
 # primary link: g % 4 = 0이면 없음. 나머지는 g % 3 = 1이면 B, 아니면 A. g % 7 = 0이면 **다른**
@@ -346,6 +361,7 @@ async def _seed(session: AsyncSession) -> None:
         text(_SEED_FEATURES_SQL),
         {"lon": _LON, "lat": _LAT, "base": _BASE, "rows": _ROWS},
     )
+    await session.execute(text(_SEED_NOTICES_SQL), {"base": _BASE, "rows": _ROWS})
     for statement in _SEED_SOURCES_SQL:
         await session.execute(
             text(statement),
@@ -473,7 +489,7 @@ async def test_target_nearby_matches_pre_t_read_09_sql(
     walked_total = 0
     for radius_km, limit in ((None, 13), (100.0, 50)):
         for sort in _SORTS:
-            for filters in _FILTERS[:3]:
+            for filters in _FILTERS:
 
                 async def new_page(
                     cursor: str | None,
@@ -507,20 +523,32 @@ async def test_target_nearby_matches_pre_t_read_09_sql(
                 )
     assert walked_total > 1_000
 
-    # 없는 target은 두 경로 모두 빈 page다.
-    missing = "00000000-0000-7000-8000-000000000000"
-    got = await feature_repo.features_nearby_poi_cache_target(
-        migrated_session, target_id=missing, limit=10
-    )
-    want = await _oracle_page(
+    # 없는 target과 삭제된 target은 두 경로 모두 빈 page다.
+    deleted = await upsert_poi_cache_target(
         migrated_session,
-        _oracle_sql(_ORACLE_TARGET_CTE, "distance"),
-        {"target_id": missing, "radius_km": None, **_filter_params({})},
-        sort="distance",
-        limit=10,
-        cursor=None,
+        external_system="tread09",
+        target_key="daejeon-deleted",
+        lon=_LON,
+        lat=_LAT,
+        radius_km=20.0,
     )
-    assert got == want == NearbyFeaturePage(items=(), next_cursor=None)
+    await migrated_session.execute(
+        text("UPDATE ops.poi_cache_targets SET deleted_at = now() WHERE target_id::text = :t"),
+        {"t": deleted.target_id},
+    )
+    for target_id in ("00000000-0000-7000-8000-000000000000", deleted.target_id):
+        got = await feature_repo.features_nearby_poi_cache_target(
+            migrated_session, target_id=target_id, limit=10
+        )
+        want = await _oracle_page(
+            migrated_session,
+            _oracle_sql(_ORACLE_TARGET_CTE, "distance"),
+            {"target_id": target_id, "radius_km": None, **_filter_params({})},
+            sort="distance",
+            limit=10,
+            cursor=None,
+        )
+        assert got == want == NearbyFeaturePage(items=(), next_cursor=None)
 
 
 async def test_knn_operator_is_st_distance(migrated_session: AsyncSession) -> None:
@@ -593,8 +621,12 @@ async def test_nearby_primary_source_runs_only_for_page_rows(
     await _seed(migrated_session)
     limit_plus_one = 6
     for sort, sql in _NEARBY_COORD_SQL_BY_SORT.items():
+        # ``place``만 — notice 행은 공개 notice 감산 fragment가 행마다 계보(source_links)를
+        # 따로 읽는다. 그건 종전과 같은 비용이고 여기서 재는 primary source와 무관하다.
         plan = await _explain_analyze(
-            migrated_session, sql, _coord_params(100_000.0, limit_plus_one)
+            migrated_session,
+            sql,
+            {**_coord_params(100_000.0, limit_plus_one), "kinds": ["place"]},
         )
         assert int(plan["Actual Rows"]) == limit_plus_one, sort
         link_loops = [
@@ -618,17 +650,37 @@ async def test_nearby_distance_page_can_use_knn_index_order(
     누가 page 정렬을 ``ST_Distance(...)`` 식으로 되돌리면 KNN이 불가능해져 여기서 빨개진다.
     """
     await _seed(migrated_session)
-    plan = await _explain_analyze(
+    target = await upsert_poi_cache_target(
         migrated_session,
-        _NEARBY_COORD_SQL_BY_SORT["distance"],
-        _coord_params(100_000.0, 11),
-        pre=("SET LOCAL enable_bitmapscan = off", "SET LOCAL enable_seqscan = off"),
+        external_system="tread09",
+        target_key="daejeon-knn",
+        lon=_LON,
+        lat=_LAT,
+        radius_km=100.0,
     )
-    knn = [
-        node
-        for node in _plan_nodes(plan)
-        if node.get("Index Name") == "idx_features_coord_5179_gist" and node.get("Order By")
-    ]
-    assert knn, "거리순 page가 GiST KNN 순서 scan으로 풀리지 않는다"
-    # KNN scan은 LIMIT에서 멈춘다 — 반경 안 전 행(~1,000)을 읽지 않는다.
-    assert int(knn[0]["Actual Rows"]) < 200, knn[0]["Actual Rows"]
+    target_params = {
+        "target_id": target.target_id,
+        "radius_km": None,
+        **_filter_params({}),
+        "limit_plus_one": 11,
+        **_nearby_cursor_params(None, sort="distance"),
+    }
+    for label, sql, params in (
+        ("coord", _NEARBY_COORD_SQL_BY_SORT["distance"], _coord_params(100_000.0, 11)),
+        ("target", _NEARBY_SQL_BY_SORT["distance"], target_params),
+    ):
+        plan = await _explain_analyze(
+            migrated_session,
+            sql,
+            params,
+            pre=("SET LOCAL enable_bitmapscan = off", "SET LOCAL enable_seqscan = off"),
+        )
+        knn = [
+            node
+            for node in _plan_nodes(plan)
+            if node.get("Index Name") == "idx_features_coord_5179_gist" and node.get("Order By")
+        ]
+        assert knn, f"{label}: 거리순 page가 GiST KNN 순서 scan으로 풀리지 않는다"
+        # KNN scan은 LIMIT에서 멈춘다 — 반경 안 전 행(~1,000)을 읽지 않는다.
+        assert int(knn[0]["Actual Rows"]) < 200, (label, knn[0]["Actual Rows"])
+        assert int(plan["Actual Rows"]) == 11, label
