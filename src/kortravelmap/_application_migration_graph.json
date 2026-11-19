@@ -309,6 +309,12 @@
         "453_features_autovacuum"
       ],
       "revision": "454_route_cluster_markers"
+    },
+    {
+      "down_revision": [
+        "454_route_cluster_markers"
+      ],
+      "revision": "455_feature_cluster_points"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

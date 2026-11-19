@@ -51,6 +51,7 @@ FORWARD_ONLY_REVISIONS = (
     "452_lotte_hotel_search_alias",
     "453_features_autovacuum",
     "454_route_cluster_markers",
+    "455_feature_cluster_points",
 )
 
 
