@@ -615,6 +615,9 @@ def _assert_uses_index(plan: dict[str, Any], *expected: str) -> None:
 
 
 _COORD_SPATIAL_INDEXES = ("idx_features_coord_gist", "idx_features_coord")
+#: T-READ-10 후속(alembic 455): 집계는 좁은 집계 표의 GiST를 탄다.
+_CLUSTER_SPATIAL_INDEXES = ("idx_feature_cluster_points_coord_gist",)
+_CLUSTER_GEOMETRY_INDEXES = ("idx_feature_cluster_points_bounds_gist",)
 
 # features의 ``feature_id`` 동등 조건이 탈 수 있는 **동치** 접근 경로.
 #
@@ -976,7 +979,7 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
             _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT[cluster_unit],
             params,
         )
-        _assert_uses_index(cluster, *_COORD_SPATIAL_INDEXES)
+        _assert_uses_index(cluster, *_CLUSTER_SPATIAL_INDEXES)
 
     representative = await _explain_json(
         migrated_session,
@@ -984,8 +987,9 @@ async def test_t212d_cluster_hot_reads_use_spatial_index_without_mv(
         params,
         force_index=False,
     )
-    _assert_uses_index(representative, *_COORD_SPATIAL_INDEXES)
+    _assert_uses_index(representative, *_CLUSTER_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(representative, "features")
+    _assert_no_seq_scan_on(representative, "feature_cluster_points")
 
 
 async def test_t212d_geom_only_cluster_uses_subtype_gist_representatively(
@@ -1018,10 +1022,11 @@ async def test_t212d_geom_only_cluster_uses_subtype_gist_representatively(
         force_index=False,
     )
 
-    _assert_uses_index(
-        plan, "idx_feature_route_geometries_geom_gist", "idx_feature_areas_geom_gist"
-    )
+    # T-READ-10 후속(alembic 455): route/area 후보는 좁은 집계 표의 정확 범위 GiST로 찾는다
+    # (bbox를 가로지르는 것만 subtype geometry를 PK로 읽는다).
+    _assert_uses_index(plan, *_CLUSTER_GEOMETRY_INDEXES)
     _assert_no_seq_scan_on(plan, "features")
+    _assert_no_seq_scan_on(plan, "feature_cluster_points")
 
 
 async def test_t212d_cluster_provider_filter_uses_spatial_index(
@@ -1050,7 +1055,7 @@ async def test_t212d_cluster_provider_filter_uses_spatial_index(
             _CLUSTER_BBOX_SQL_BY_UNIT[cluster_unit],
             filtered_params,
         )
-        _assert_uses_index(plan, *_COORD_SPATIAL_INDEXES)
+        _assert_uses_index(plan, *_CLUSTER_SPATIAL_INDEXES)
 
     representative = await _explain_json(
         migrated_session,
@@ -1058,8 +1063,9 @@ async def test_t212d_cluster_provider_filter_uses_spatial_index(
         filtered_params,
         force_index=False,
     )
-    _assert_uses_index(representative, *_COORD_SPATIAL_INDEXES)
+    _assert_uses_index(representative, *_CLUSTER_SPATIAL_INDEXES)
     _assert_no_seq_scan_on(representative, "features")
+    _assert_no_seq_scan_on(representative, "feature_cluster_points")
 
 
 async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint(

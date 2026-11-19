@@ -10840,6 +10840,122 @@ $$;
 ALTER PROCEDURE feature.sync_concierge_theme_catalog(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_themes_created bigint, OUT o_themes_updated bigint, OUT o_rules_created bigint, OUT o_rules_updated bigint, OUT o_rules_archived bigint) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: sync_feature_cluster_point_core(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.sync_feature_cluster_point_core() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM feature.feature_cluster_points WHERE feature_id = OLD.feature_id;
+        RETURN NULL;
+    END IF;
+    IF TG_OP = 'UPDATE'
+       AND NEW.kind IS NOT DISTINCT FROM OLD.kind
+       AND NEW.category IS NOT DISTINCT FROM OLD.category
+       AND NEW.sido_code IS NOT DISTINCT FROM OLD.sido_code
+       AND NEW.sigungu_code IS NOT DISTINCT FROM OLD.sigungu_code
+       AND NEW.legal_dong_code IS NOT DISTINCT FROM OLD.legal_dong_code
+       AND x_extension.ST_AsEWKB(NEW.coord) IS NOT DISTINCT FROM x_extension.ST_AsEWKB(OLD.coord)
+       AND NEW.lifecycle_state IS NOT DISTINCT FROM OLD.lifecycle_state
+       AND NEW.publication_state IS NOT DISTINCT FROM OLD.publication_state
+       AND NEW.quality_state IS NOT DISTINCT FROM OLD.quality_state THEN
+        RETURN NULL;
+    END IF;
+    INSERT INTO feature.feature_cluster_points AS cp (
+        feature_id, kind, category, sido_code, sigungu_code, legal_dong_code, coord, public
+    )
+    VALUES (
+        NEW.feature_id, NEW.kind, NEW.category, NEW.sido_code, NEW.sigungu_code,
+        NEW.legal_dong_code, NEW.coord,
+        NEW.lifecycle_state = 'active' AND NEW.publication_state = 'published'
+            AND NEW.quality_state = 'valid'
+    )
+    ON CONFLICT (feature_id) DO UPDATE SET
+        kind = EXCLUDED.kind,
+        category = EXCLUDED.category,
+        sido_code = EXCLUDED.sido_code,
+        sigungu_code = EXCLUDED.sigungu_code,
+        legal_dong_code = EXCLUDED.legal_dong_code,
+        coord = EXCLUDED.coord,
+        public = EXCLUDED.public;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.sync_feature_cluster_point_core() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: sync_feature_cluster_point_geometry(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.sync_feature_cluster_point_geometry() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_feature_id uuid;
+    v_marker x_extension.geometry;
+    v_xmin double precision;
+    v_xmax double precision;
+    v_ymin double precision;
+    v_ymax double precision;
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        v_feature_id := OLD.feature_id;
+    ELSE
+        v_feature_id := NEW.feature_id;
+        IF TG_TABLE_NAME = 'feature_route_geometries' THEN
+            v_marker := NEW.marker_point;
+            v_xmin := NEW.geom_xmin;
+            v_xmax := NEW.geom_xmax;
+            v_ymin := NEW.geom_ymin;
+            v_ymax := NEW.geom_ymax;
+        ELSE
+            v_marker := x_extension.ST_PointOnSurface(NEW.geom);
+            v_xmin := x_extension.ST_XMin(NEW.geom);
+            v_xmax := x_extension.ST_XMax(NEW.geom);
+            v_ymin := x_extension.ST_YMin(NEW.geom);
+            v_ymax := x_extension.ST_YMax(NEW.geom);
+        END IF;
+    END IF;
+    UPDATE feature.feature_cluster_points
+       SET marker_point = v_marker,
+           geom_xmin = v_xmin,
+           geom_xmax = v_xmax,
+           geom_ymin = v_ymin,
+           geom_ymax = v_ymax
+     WHERE feature_id = v_feature_id;
+    IF NOT FOUND AND TG_OP <> 'DELETE' THEN
+        INSERT INTO feature.feature_cluster_points AS cp (
+            feature_id, kind, category, sido_code, sigungu_code, legal_dong_code, coord, public,
+            marker_point, geom_xmin, geom_xmax, geom_ymin, geom_ymax
+        )
+        SELECT f.feature_id, f.kind, f.category, f.sido_code, f.sigungu_code, f.legal_dong_code,
+               f.coord,
+               f.lifecycle_state = 'active' AND f.publication_state = 'published'
+                   AND f.quality_state = 'valid',
+               v_marker, v_xmin, v_xmax, v_ymin, v_ymax
+          FROM feature.features AS f
+         WHERE f.feature_id = v_feature_id
+        ON CONFLICT (feature_id) DO UPDATE SET
+            marker_point = EXCLUDED.marker_point,
+            geom_xmin = EXCLUDED.geom_xmin,
+            geom_xmax = EXCLUDED.geom_xmax,
+            geom_ymin = EXCLUDED.geom_ymin,
+            geom_ymax = EXCLUDED.geom_ymax;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.sync_feature_cluster_point_geometry() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: sync_subtype_public_ready(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -11109,6 +11225,36 @@ $$;
 
 
 ALTER PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) OWNER TO ktm_feature_state_procedure_owner;
+
+--
+-- Name: truncate_feature_cluster_point_parts(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.truncate_feature_cluster_point_parts() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF TG_TABLE_NAME = 'features' THEN
+        TRUNCATE feature.feature_cluster_points;
+    ELSE
+        UPDATE feature.feature_cluster_points
+           SET marker_point = NULL,
+               geom_xmin = NULL,
+               geom_xmax = NULL,
+               geom_ymin = NULL,
+               geom_ymax = NULL
+         WHERE kind = CASE TG_TABLE_NAME
+                          WHEN 'feature_route_geometries' THEN 'route'
+                          ELSE 'area'
+                      END;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.truncate_feature_cluster_point_parts() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: upsert_provider_geocode_stamps_ex(uuid[], text[], text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -16096,6 +16242,30 @@ CREATE TABLE feature.feature_base_field_values (
 ALTER TABLE feature.feature_base_field_values OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: feature_cluster_points; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.feature_cluster_points (
+    feature_id uuid NOT NULL,
+    kind character varying NOT NULL,
+    category character varying NOT NULL,
+    sido_code character varying(2),
+    sigungu_code character varying(5),
+    legal_dong_code character varying(10),
+    coord x_extension.geometry(Point,4326),
+    public boolean NOT NULL,
+    marker_point x_extension.geometry(Point,4326),
+    geom_xmin double precision,
+    geom_xmax double precision,
+    geom_ymin double precision,
+    geom_ymax double precision,
+    geom_bounds x_extension.geometry(Polygon,4326) GENERATED ALWAYS AS (x_extension.st_makeenvelope(geom_xmin, geom_ymin, geom_xmax, geom_ymax, 4326)) STORED
+);
+
+
+ALTER TABLE feature.feature_cluster_points OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_creation_origins; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -16856,7 +17026,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text, '455_feature_cluster_points'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -19490,6 +19660,14 @@ ALTER TABLE ONLY feature.feature_base_field_values
 
 
 --
+-- Name: feature_cluster_points pk_feature_cluster_points; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_cluster_points
+    ADD CONSTRAINT pk_feature_cluster_points PRIMARY KEY (feature_id);
+
+
+--
 -- Name: feature_creation_origins pk_feature_creation_origins; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -21245,6 +21423,20 @@ CREATE INDEX idx_feature_base_field_values_source ON feature.feature_base_field_
 
 
 --
+-- Name: idx_feature_cluster_points_bounds_gist; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_cluster_points_bounds_gist ON feature.feature_cluster_points USING gist (geom_bounds) WHERE (public AND ((kind)::text = ANY ((ARRAY['route'::character varying, 'area'::character varying])::text[])));
+
+
+--
+-- Name: idx_feature_cluster_points_coord_gist; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_cluster_points_coord_gist ON feature.feature_cluster_points USING gist (coord) WHERE (public AND ((kind)::text <> ALL ((ARRAY['route'::character varying, 'area'::character varying, 'notice'::character varying])::text[])));
+
+
+--
 -- Name: idx_feature_events_opening_hours; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -22575,6 +22767,24 @@ CREATE TRIGGER trg_feature_aliases_update_fence BEFORE UPDATE ON feature.feature
 
 
 --
+-- Name: feature_areas trg_feature_areas_cluster_point; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_areas_cluster_point AFTER INSERT OR DELETE OR UPDATE OF geom ON feature.feature_areas FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_geometry();
+
+ALTER TABLE feature.feature_areas ENABLE ALWAYS TRIGGER trg_feature_areas_cluster_point;
+
+
+--
+-- Name: feature_areas trg_feature_areas_cluster_point_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_areas_cluster_point_truncate AFTER TRUNCATE ON feature.feature_areas FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts();
+
+ALTER TABLE feature.feature_areas ENABLE ALWAYS TRIGGER trg_feature_areas_cluster_point_truncate;
+
+
+--
 -- Name: feature_areas trg_feature_areas_public_ready; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -22614,6 +22824,24 @@ CREATE TRIGGER trg_feature_price_values_active_dataset_write BEFORE INSERT ON fe
 --
 
 CREATE TRIGGER trg_feature_price_values_immutable BEFORE DELETE OR UPDATE ON feature.feature_price_values FOR EACH ROW EXECUTE FUNCTION feature.reject_price_value_mutation();
+
+
+--
+-- Name: feature_route_geometries trg_feature_route_geometries_cluster_point; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_route_geometries_cluster_point AFTER INSERT OR DELETE OR UPDATE OF geom ON feature.feature_route_geometries FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_geometry();
+
+ALTER TABLE feature.feature_route_geometries ENABLE ALWAYS TRIGGER trg_feature_route_geometries_cluster_point;
+
+
+--
+-- Name: feature_route_geometries trg_feature_route_geometries_cluster_point_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_feature_route_geometries_cluster_point_truncate AFTER TRUNCATE ON feature.feature_route_geometries FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts();
+
+ALTER TABLE feature.feature_route_geometries ENABLE ALWAYS TRIGGER trg_feature_route_geometries_cluster_point_truncate;
 
 
 --
@@ -22693,6 +22921,24 @@ CREATE TRIGGER trg_features_state_transition_audit AFTER INSERT OR UPDATE OF lif
 --
 
 CREATE TRIGGER trg_features_sync_subtype_public_ready AFTER UPDATE OF lifecycle_state, publication_state, quality_state ON feature.features FOR EACH ROW WHEN (((old.lifecycle_state IS DISTINCT FROM new.lifecycle_state) OR (old.publication_state IS DISTINCT FROM new.publication_state) OR (old.quality_state IS DISTINCT FROM new.quality_state))) EXECUTE FUNCTION feature.sync_subtype_public_ready();
+
+
+--
+-- Name: features trg_features_zz_cluster_point; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_features_zz_cluster_point AFTER INSERT OR DELETE OR UPDATE OF kind, category, sido_code, sigungu_code, legal_dong_code, coord, lifecycle_state, publication_state, quality_state ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_cluster_point_core();
+
+ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_cluster_point;
+
+
+--
+-- Name: features trg_features_zz_cluster_point_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_features_zz_cluster_point_truncate AFTER TRUNCATE ON feature.features FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_cluster_point_parts();
+
+ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_cluster_point_truncate;
 
 
 --
@@ -26365,6 +26611,20 @@ REVOKE ALL ON PROCEDURE feature.sync_concierge_theme_catalog(IN p_provider_datas
 
 
 --
+-- Name: FUNCTION sync_feature_cluster_point_core(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.sync_feature_cluster_point_core() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION sync_feature_cluster_point_geometry(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.sync_feature_cluster_point_geometry() FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
@@ -26387,6 +26647,13 @@ GRANT ALL ON PROCEDURE feature.transition_admin_feature_state(IN p_feature_id uu
 
 REVOKE ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) FROM PUBLIC;
 GRANT ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN p_lifecycle_state text, IN p_publication_state text, IN p_quality_state text, IN p_expected_row_revision bigint, IN p_context jsonb, OUT o_feature_id uuid, OUT o_row_revision bigint) TO ktm_feature_runtime;
+
+
+--
+-- Name: FUNCTION truncate_feature_cluster_point_parts(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.truncate_feature_cluster_point_parts() FROM PUBLIC;
 
 
 --

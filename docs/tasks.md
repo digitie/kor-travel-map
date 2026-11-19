@@ -23,8 +23,9 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **열린 항목 중 가장 마지막**이고, 착수 전 오너와 범위 재확인이 조건이다. 정본은
 `kor-travel-docker-manager` 저장소의 `docs/general-mgmt-audit.md`와 `docs/tasks.md`다.
 
-**보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 넷이다 —
-`T-VN-41C`·`T-VN-H43`·`T-101`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다.
+**보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
+`T-VN-41C`·`T-VN-H43`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다. (`T-101`은 2026-11-19
+소유자가 제외를 풀었다 — 아래 줄.)
 
 **읽기 성능 계획(2026-11-17)** — `T-READ-03`·`04`·`06`~`10`(목록 끝). 정본은
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8(단계 순), 해제 조건은 acceptance의 같은 ID 절이다.
@@ -129,11 +130,10 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   dev.8 지도 작업면은 opt-in 선택 기능이다. 채택하려면 고정 70dvh 지도 영역과 698px e2e 기준을 다시 설계해야 해서 보류한다.
 
-- [ ] T-101 — **cluster rollup materialized view 도입 검토** — **보류/제외**(소유자 지시 2026-09-07)
+- [ ] T-101 — **cluster rollup 사전 집계** — 2026-11-19 재개(소유자), `T-READ-10` 후속이 다룬다
 
-  하지 않는다. 재개하려면 목표 SLO 정의와, exact-viewport(ADR-073 accepted 계약)
-  vs region-total 의미 택일이 선행한다 — 후자는 ADR 개정과 PinVi 소비자 계약
-  변경을 함께 부른다.
+  2026-09-07 제외 사유(SLO 미정, exact-viewport 계약 vs region-total 택일)는 풀렸다 — 목표 p50 < 300 ms가 정해졌고
+  exact-viewport를 유지하는 좁은 집계 표(alembic 455)로 구현했다. 운영 반영 뒤 `T-READ-10`과 함께 닫는다.
 
 - [ ] T-WX-SOURCEROLE — **`SourceRole.WEATHER_CONTEXT` 퇴역 migration(선택)**
 
@@ -230,7 +230,7 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   §6.1). primary source를 page 행에만 붙이고 거리순을 GiST KNN으로 바꿨다(prod EXPLAIN 4.5 ms, 결과 동일). 해제 조건은
   acceptance.
 
-- [ ] T-READ-10 — **전국 저배율 집계(sido, 전 kind) 단축** — 구현 머지, 운영 반영 대기
+- [ ] T-READ-10 — **전국 저배율 집계(sido, 전 kind) 단축** — 454·455 구현 머지, 운영 반영 대기
 
-  기준선 p50 1,231 ms(point-only 365 ms, [기준선](reports/2026-11-19-read-baseline.md) §6.2). route 대표점·범위 생성
-  컬럼(alembic 454)과 집계 HashAggregate로 n150 합성 −42%. 운영 회전 뒤 harness로 해제한다(acceptance).
+  기준선 p50 1,231 ms([기준선](reports/2026-11-19-read-baseline.md) §6.2). 454(route 대표점 생성 컬럼·HashAggregate)에
+  이어 455(좁은 집계 표·동기 trigger·병렬 집계)로 n150 합성 1,297 → 255 ms. 운영 회전 뒤 harness로 해제(acceptance).

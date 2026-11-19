@@ -1998,6 +1998,59 @@ class FeatureSearchProminenceRow(Base):
     )
 
 
+class FeatureClusterPointRow(Base):
+    """``feature.feature_cluster_points`` — 저배율 집계 전용 좁은 표(migration 455, T-READ-10).
+
+    Feature 하나에 한 행. ``features`` 몫(kind·category·지역 코드·coord·공개 3축 곱 ``public``)과
+    geometry 몫(``marker_point``·``geom_xmin``…)은 DB trigger가 **같은 transaction에서** 맞춘다 —
+    애플리케이션은 쓰지 않는다(런타임 권한은 SELECT뿐). FK는 두지 않는다(purge 증거 포획이
+    ``features`` 자식을 훑는다). 읽는 곳은 ``feature_repo._cluster_bbox_sql`` 하나다.
+    """
+
+    __tablename__ = "feature_cluster_points"
+    __table_args__ = (
+        Index(
+            "idx_feature_cluster_points_coord_gist",
+            "coord",
+            postgresql_using="gist",
+            postgresql_where=text("public AND kind NOT IN ('route', 'area', 'notice')"),
+        ),
+        Index(
+            "idx_feature_cluster_points_bounds_gist",
+            "geom_bounds",
+            postgresql_using="gist",
+            postgresql_where=text("public AND kind IN ('route', 'area')"),
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    kind: Mapped[str] = mapped_column(String, nullable=False)
+    category: Mapped[str] = mapped_column(String, nullable=False)
+    sido_code: Mapped[str | None] = mapped_column(String(2))
+    sigungu_code: Mapped[str | None] = mapped_column(String(5))
+    legal_dong_code: Mapped[str | None] = mapped_column(String(10))
+    coord: Mapped[Any | None] = mapped_column(
+        Geometry("POINT", srid=4326, spatial_index=False)
+    )
+    public: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    marker_point: Mapped[Any | None] = mapped_column(
+        Geometry("POINT", srid=4326, spatial_index=False)
+    )
+    geom_xmin: Mapped[float | None] = mapped_column(Double)
+    geom_xmax: Mapped[float | None] = mapped_column(Double)
+    geom_ymin: Mapped[float | None] = mapped_column(Double)
+    geom_ymax: Mapped[float | None] = mapped_column(Double)
+    #: 정확 범위의 사각형 — bbox와 겹치는 route/area 후보를 GiST로 찾는다(생성 컬럼).
+    geom_bounds: Mapped[Any | None] = mapped_column(
+        Geometry("POLYGON", srid=4326, spatial_index=False),
+        Computed(
+            "x_extension.st_makeenvelope(geom_xmin, geom_ymin, geom_xmax, geom_ymax, 4326)",
+            persisted=True,
+        ),
+    )
+
+
 class PlaceAttributeRow(Base):
     """``feature.place_attributes`` — 공개 장소 속성 catalog(ADR-121, migration 446).
 

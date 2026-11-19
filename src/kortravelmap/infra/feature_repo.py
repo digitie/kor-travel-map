@@ -1675,9 +1675,9 @@ ORDER BY candidate.feature_id ASC
 # arm을 UNION ALL로 나눈다. 전국 bbox에서 geometry 후보 배열이 5.8만 개가 되자
 # ``= ANY``가 행마다 배열을 선형 탐색해(5.8만×5.8만) route/area 집계가 15~30 s 걸렸다.
 # 두 arm은 서로소다 — point arm은 route/area kind를 배제하고, subtype 행은
-# ``(feature_id, kind)`` FK로 route/area만 가리킨다. geometry 대표점은 MATERIALIZED
-# CTE에서 한 번만 계산한다(조립 view의 COALESCE geom 산출식이 술어·ST_X·ST_Y에서
-# 세 번 평가되던 것을 없앤다). geometry가 bbox 안에 완전히 들어 있으면 교차 = 원
+# ``(feature_id, kind)`` FK로 route/area만 가리킨다. geometry 대표점은 subtype 표의
+# geometry로 계산한다(조립 view의 COALESCE geom 산출식을 쓰지 않는다). geometry가
+# bbox 안에 완전히 들어 있으면 교차 = 원
 # geometry이므로 비싼 ST_Intersection을 건너뛴다. 포함 판정은 좌표에서 다시 계산한
 # double 범위(ST_XMin 등 — box3d 변환은 좌표로 계산한다)를 bbox와 비교한다. ``@``는
 # float4로 바깥 반올림된 캐시 bbox라 bbox를 아주 조금 벗어난 geometry도 포함으로 보고
@@ -1696,6 +1696,25 @@ ORDER BY candidate.feature_id ASC
 # 입력 해시가 ``to_jsonb``로 통째 읽어 열을 더하면 해시가 바뀐다). area 갈래는 같은 식을
 # 그 자리에서 계산해 같은 열 모양으로 낸다. 결과(개수·대표점)는 종전 SQL과 같다 —
 # ``tests/integration/test_cluster_rollup_equivalence.py``가 종전 SQL 사본과 비교한다.
+#
+# T-READ-10 후속(2026-11-19, 소유자가 사전 집계 제외 T-101을 풀었다) — 집계는 좁은 표
+# ``feature.feature_cluster_points``(alembic 455)를 읽는다. Feature 하나에 한 행, 집계가 쓰는 열만
+# 있다(kind·category·지역 코드·coord·공개 3축 곱 ``public``, route/area 대표점·정확 범위).
+# DB trigger가
+# ``features``·route/area geometry 쓰기와 **같은 transaction에서** 맞춘다(지연 없음). 그래서
+# ① 넓은 ``features`` heap 대신 좁은 표를 훑고
+# ② route/area마다 ``features``를 PK로 찾던 조인이 없다.
+#
+# 모양은 병렬 집계가 가능하게 셋으로 나눈다. 공개 notice 감산 fragment
+# (``_PUBLIC_ACTIVE_NOTICE_FILTER_SQL``)는 행마다 상관 subquery라 그 술어를 가진 scan은 parallel
+# worker로 내려가지 못한다. fragment의 두 조건은 모두 ``kind <> 'notice' OR …``라 notice가 아닌
+# 행에서는 항상 참이다. (1) notice가 아닌 point + bbox 안에 완전히 든 route/area — 좁은 표에서
+# ``Gather → Partial HashAggregate``. (2) bbox를 가로지르는 route/area — 실제 geometry로 교차·교차
+# 부분 위의 점을 계산한다(MATERIALIZED, 한 번씩). (3) notice point — 종전처럼 공개 view와 fragment.
+# 각 몫을 지역별 (개수, 좌표 있는 개수, 경도 합, 위도 합)으로 묶어 합친다. 후보 집합은 종전과 같고
+# (notice/route/area/그 밖이 서로소, 공개 3축 곱 = 공개 view 술어), 평균은 float 합의 순서만 다르다.
+# point 후보의 ``coord && bbox``는 종전과 같은 연산자다(float4 bbox 판정을 바꾸지 않는다).
+# n150 합성 42만 행(번갈아 잰 p50)은 journal 2026-11-19 T-READ-10 후속 절.
 def _geometry_inside_bbox_sql(alias: str) -> str:
     """``alias``의 정확 범위 열(``geom_xmin``…)이 요청 bbox 안에 있는가(T-READ-10)."""
     if not alias.isidentifier():
@@ -1708,99 +1727,101 @@ def _geometry_inside_bbox_sql(alias: str) -> str:
 
 def _cluster_bbox_sql(code_col: str, *, include_geometry_arm: bool = True) -> str:
     env = _bbox_envelope_sql()
-    point_arm = f"""
+    bounds_box = "cluster_point.geom_bounds"
+    inside = _geometry_inside_bbox_sql("cluster_point")
+    point_rows = f"""
+    SELECT
+        cluster_point.{code_col} AS cluster_key,
+        x_extension.ST_X(cluster_point.coord) AS lon,
+        x_extension.ST_Y(cluster_point.coord) AS lat
+    FROM feature.feature_cluster_points AS cluster_point
+    WHERE cluster_point.public
+      AND cluster_point.kind NOT IN ('route', 'area', 'notice')
+      AND cluster_point.{code_col} IS NOT NULL
+      AND cluster_point.coord IS NOT NULL
+      AND cluster_point.coord OPERATOR(x_extension.&&) {env}
+{_bbox_attribute_filter_sql("cluster_point")}"""
+    notice_rows = f"""
   SELECT
-      f.{code_col} AS cluster_key,
-      x_extension.ST_X(f.coord) AS lon,
-      x_extension.ST_Y(f.coord) AS lat
+      f.{code_col},
+      count(*),
+      count(*),
+      sum(x_extension.ST_X(f.coord)),
+      sum(x_extension.ST_Y(f.coord))
   FROM feature.public_features AS f
   WHERE f.{code_col} IS NOT NULL
     AND f.coord IS NOT NULL
     AND f.coord OPERATOR(x_extension.&&) {env}
-    AND f.kind NOT IN ('route', 'area')
-{_bbox_attribute_filter_sql("f")}
-{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}"""
-    if not include_geometry_arm:
-        return f"""
-WITH bbox_candidates AS ({point_arm}
-)
+    AND f.kind = 'notice'
+{_bbox_attribute_filter_sql("f")}{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
+  GROUP BY f.{code_col}"""
+    final = """
 SELECT
     cluster_key,
-    count(*) AS feature_count,
-    avg(lon) AS lon,
-    avg(lat) AS lat
-FROM bbox_candidates
+    CAST(sum(n) AS bigint) AS feature_count,
+    sum(sum_lon) / CAST(NULLIF(sum(n_coord), 0) AS double precision) AS lon,
+    sum(sum_lat) / CAST(NULLIF(sum(n_coord), 0) AS double precision) AS lat
+FROM arm_totals
 GROUP BY cluster_key
 ORDER BY feature_count DESC, cluster_key
 LIMIT :limit
 """
+    if not include_geometry_arm:
+        return f"""
+WITH arm_totals AS (
+  SELECT cluster_key, count(*) AS n, count(lon) AS n_coord, sum(lon) AS sum_lon, sum(lat) AS sum_lat
+  FROM ({point_rows}
+  ) AS parallel_safe_rows
+  GROUP BY cluster_key
+  UNION ALL{notice_rows}
+)""" + final
+    geometry_filter = f"""
+      AND cluster_point.public
+      AND cluster_point.kind IN ('route', 'area')
+      AND cluster_point.{code_col} IS NOT NULL
+      AND {bounds_box} OPERATOR(x_extension.&&) {env}"""
     return f"""
-WITH geometry_candidates AS MATERIALIZED (
+WITH clipped AS MATERIALIZED (
   SELECT
-      f.{code_col} AS cluster_key,
-      CASE
-        WHEN {_geometry_inside_bbox_sql("bbox_hit")}
-          THEN COALESCE(bbox_hit.marker_point, x_extension.ST_PointOnSurface(bbox_hit.geom))
-        ELSE x_extension.ST_PointOnSurface(
-          x_extension.ST_Intersection(bbox_hit.geom, {env})
-        )
-      END AS marker_coord
-  FROM (
-    SELECT
-        bbox_hit_route.feature_id,
-        bbox_hit_route.geom,
-        bbox_hit_route.marker_point,
-        bbox_hit_route.geom_xmin,
-        bbox_hit_route.geom_xmax,
-        bbox_hit_route.geom_ymin,
-        bbox_hit_route.geom_ymax
-    FROM feature.feature_route_geometries AS bbox_hit_route
-    WHERE (CAST(:kinds AS text[]) IS NULL OR 'route' = ANY(CAST(:kinds AS text[])))
-      AND bbox_hit_route.public_ready
-      AND bbox_hit_route.geom OPERATOR(x_extension.&&) {env}
-      AND (
-        ({_geometry_inside_bbox_sql("bbox_hit_route")})
-        OR x_extension.ST_Intersects(bbox_hit_route.geom, {env})
-      )
+      cluster_point.{code_col} AS cluster_key,
+      x_extension.ST_PointOnSurface(
+        x_extension.ST_Intersection(COALESCE(clip_route.geom, clip_area.geom), {env})
+      ) AS marker_coord
+  FROM feature.feature_cluster_points AS cluster_point
+  LEFT JOIN feature.feature_route_geometries AS clip_route
+    ON cluster_point.kind = 'route' AND clip_route.feature_id = cluster_point.feature_id
+  LEFT JOIN feature.feature_areas AS clip_area
+    ON cluster_point.kind = 'area' AND clip_area.feature_id = cluster_point.feature_id
+  WHERE TRUE{geometry_filter}
+    AND NOT ({inside})
+    AND x_extension.ST_Intersects(COALESCE(clip_route.geom, clip_area.geom), {env})
+{_bbox_attribute_filter_sql("cluster_point")}
+),
+arm_totals AS (
+  SELECT cluster_key, count(*) AS n, count(lon) AS n_coord, sum(lon) AS sum_lon, sum(lat) AS sum_lat
+  FROM ({point_rows}
     UNION ALL
     SELECT
-        bbox_hit_area.feature_id,
-        bbox_hit_area.geom,
-        NULL,
-        x_extension.ST_XMin(bbox_hit_area.geom),
-        x_extension.ST_XMax(bbox_hit_area.geom),
-        x_extension.ST_YMin(bbox_hit_area.geom),
-        x_extension.ST_YMax(bbox_hit_area.geom)
-    FROM feature.feature_areas AS bbox_hit_area
-    WHERE (CAST(:kinds AS text[]) IS NULL OR 'area' = ANY(CAST(:kinds AS text[])))
-      AND bbox_hit_area.public_ready
-      AND bbox_hit_area.geom OPERATOR(x_extension.&&) {env}
-      AND x_extension.ST_Intersects(bbox_hit_area.geom, {env})
-  ) AS bbox_hit
-  JOIN feature.public_features AS f ON f.feature_id = bbox_hit.feature_id
-  WHERE f.{code_col} IS NOT NULL
-{_bbox_attribute_filter_sql("f")}
-{_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
-),
-bbox_candidates AS ({point_arm}
+        cluster_point.{code_col},
+        x_extension.ST_X(cluster_point.marker_point),
+        x_extension.ST_Y(cluster_point.marker_point)
+    FROM feature.feature_cluster_points AS cluster_point
+    WHERE {inside}{geometry_filter}
+{_bbox_attribute_filter_sql("cluster_point")}
+  ) AS parallel_safe_rows
+  GROUP BY cluster_key
   UNION ALL
   SELECT
       cluster_key,
-      x_extension.ST_X(marker_coord) AS lon,
-      x_extension.ST_Y(marker_coord) AS lat
-  FROM geometry_candidates
+      count(*),
+      count(x_extension.ST_X(marker_coord)),
+      sum(x_extension.ST_X(marker_coord)),
+      sum(x_extension.ST_Y(marker_coord))
+  FROM clipped
   WHERE marker_coord IS NOT NULL
-)
-SELECT
-    cluster_key,
-    count(*) AS feature_count,
-    avg(lon) AS lon,
-    avg(lat) AS lat
-FROM bbox_candidates
-GROUP BY cluster_key
-ORDER BY feature_count DESC, cluster_key
-LIMIT :limit
-"""
+  GROUP BY cluster_key
+  UNION ALL{notice_rows}
+)""" + final
 
 
 # cluster_unit → 행정코드 컬럼 (allowlist).

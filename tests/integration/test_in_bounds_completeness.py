@@ -473,7 +473,9 @@ async def test_cluster_geometry_marker_is_computed_once_and_only_when_clipped(
     )
     assert (
         await _xact_postgis_calls(migrated_session, "st_pointonsurface") - point_before
-        == 2
+        # T-READ-10 후속(alembic 455): bbox 안에 완전히 든 ``ib:area-in``의 대표점은 쓰기 때
+        # 좁은 집계 표에 저장돼 있어 읽기는 bbox를 가로지르는 ``ib:route-cross`` 하나만 계산한다.
+        == 1
     )
     assert [(c["cluster_key"], c["feature_count"]) for c in clusters] == [
         ("11", len(expected))

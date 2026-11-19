@@ -1,3 +1,57 @@
+## 2026-11-19 — T-READ-10 후속: 좁은 집계 표(alembic 455), T-101 재개
+
+- 소유자 지시(2026-11-19): "전국 시도·전 종류 1,214 → 705 ms, 추가 개선", 목표 p50 < 300 ms. 같은 날 "사전집계도 허용" —
+  **T-101 제외(2026-09-07)를 해제**했다. 제외 원문: "하지 않는다. 재개하려면 목표 SLO 정의와, exact-viewport(ADR-073
+  accepted 계약) vs region-total 의미 택일이 선행한다 — 후자는 ADR 개정과 PinVi 소비자 계약 변경을 함께 부른다."
+  이번 구현은 region-total이 아니라 exact-viewport를 그대로 지키므로 ADR-073·PinVi 계약을 건드리지 않는다.
+- 후보 실측(n150 합성 42만 행, 반복을 교차해 잰 p50, 454 기준 약 700 ms):
+  - 병렬 집계 — 공개 notice 감산 fragment(상관 subquery)가 scan을 parallel restricted로 묶는다. fragment는 notice가
+    아닌 행에서 항상 참이라 notice 몫을 떼면 `Gather → Partial HashAggregate`가 된다. 단독으로 716 → 476 ms, point-only
+    266 → 144 ms. 남은 비용은 route 5.8만 행의 `features` PK 조인과 넓은 route heap.
+  - (b) 좁은 집계 표 + 병렬 — **채택.** 255 ms(아래).
+  - single-pass(features 한 번 + geometry hash join) 611 ms, `parallel_*_cost` 조정·`max_parallel_workers_per_gather` 3 —
+    이득 없음(기본값으로 병렬 계획이 나온다). work_mem — 묶음 20~3,500개라 HashAggregate가 기본 64 MB 안에 든다.
+  - (a) 데이터 버전 캐시 — 버리지 않았지만 하지 않았다: 집계 결과는 `features`·subtype·`source_links`(provider 필터)·속성
+    표·notice(시각) 모두에 달려 값싼 무효화 버전이 없고, harness가 재는 SQL을 줄이지 못한다. 좁은 표로 목표에 닿았다.
+  - region rollup(지역별 사전 합계) — 좁은 표로 255 ms에 닿아 더 얹지 않았다(부분 포함 지역의 정확 계산·합계 drift 관리
+    비용이 크다).
+- 구현: `feature.feature_cluster_points`(Feature당 한 행: kind·category·지역 코드·coord·공개 3축 곱 `public`, route/area
+  대표점·정확 범위, 범위 사각형 생성 컬럼) + AFTER ROW trigger 셋(`features` INSERT/관련 열 UPDATE/DELETE,
+  route/area INSERT/`geom` UPDATE/DELETE). 각 trigger는 자기 몫 열만 upsert — core와 geometry를 두 transaction이 동시에
+  바꿔도 둘 다 남는다. 집계는 (1) notice 아닌 point + bbox 안 route/area(병렬) (2) bbox를 가로지르는 route/area(실제
+  geometry, MATERIALIZED) (3) notice(공개 view + fragment)로 묶어 (개수, 좌표 개수, 경도 합, 위도 합)을 합친다.
+- 반영 시점: **동기식(지연 0)** — 쓰기 transaction 안에서 이미 맞는다. `tests/integration/test_cluster_points_sync.py`가
+  좌표·지역 코드·분류·공개 3축·geometry 갱신/삭제/재삽입·Feature 삭제(cascade)마다 좁은 표 = migration backfill 식,
+  집계 = 종전 SQL을 확인한다.
+- 실측(n150 합성, 15회 교차 p50; 종전 → 454 → 455):
+
+  | 질의 | 종전 | 454 | 455 |
+  |---|---|---|---|
+  | 전국 sido 전 kind | 1,297 ms | 711 ms | **255 ms** |
+  | 전국 sido point-only | — | 254 ms | **107 ms** |
+  | 수도권 시군구 전 kind / point-only | 146 / — ms | 128 / 92 ms | 66 / 37 ms |
+  | 서울 읍면동 전 kind / point-only | 106 / — ms | 65 / 92 ms | 39 / 29 ms |
+
+  전국 255 ms 중 약 140 ms는 합성 데이터의 bbox를 가로지르는 route 32개(2만 점짜리 포함)의 실제 교차 계산이다 — prod는
+  전국 bbox를 가로지르는 route/area가 4개(2026-11-19 읽기 전용 조회)라 더 낮을 것으로 본다. 동등성: 개수 일치, 평균 좌표
+  차 최대 2e-12도.
+- 쓰기 영향(n150 합성, 같은 문장을 trigger 켜고/끄고, transaction rollback, 2회): 좌표를 바꾸는 50,000행 UPDATE 7.0~7.4 →
+  10.2~10.9 s(+약 40%), 집계와 무관한 열만 바꾸는 50,000행 UPDATE 7.4~7.8 → 7.1~8.1 s(차이 없음 — trigger가 바로 돌아간다),
+  INSERT 20,000행 2.2~2.6 → 2.7~2.9 s(+약 10~30%).
+- HOT(T-READ-07): `features`에 열·색인을 더하지 않았다. 위 UPDATE 모두 trigger 유무와 관계없이 HOT 0(종전에도 0 —
+  `updated_at` 색인). 큐레이션 해시: `features`·subtype 행이 바뀌지 않고 새 표는 어떤 `to_jsonb` 입력에도 없다.
+- migration 455(합성 42만 행, tmpfs): 표·함수·trigger 수 ms, backfill 2.1 s, GiST 두 개 0.8 s, ANALYZE 0.4 s. 크기 92 MB
+  (heap 58 MB). trigger 생성의 `SHARE ROW EXCLUSIVE`가 commit까지 세 표의 쓰기를 막는다 — prod(디스크)는 10~20 s로 본다.
+  적재를 멈춘 뒤 배포한다.
+- 적대 리뷰(1회): High 없음. Medium — 상태 전이(features → subtype → 새 표)와 geometry 갱신(subtype → 새 표)의 잠금 순서
+  역전으로 deadlock 가능 → `features` trigger 이름을 `trg_features_zz_cluster_point`로 두어 subtype 동기화 뒤에 돌게
+  고쳤다. notice·분류 필터·backfill 결합 시험 부족 → 보강. 남긴 Low: SERIALIZABLE 도메인 명령과 같은 Feature의 동시
+  geometry 갱신이 새 표 행에서 40001을 낼 수 있다(재시도 대상), area 대표점은 쓰기 때 저장되므로 GEOS 판올림 뒤 새로 계산한
+  값과 마지막 자리가 다를 수 있다(454의 route와 같다). TRUNCATE는 문장 trigger로, 복제 역할(`session_replication_role =
+  replica`)은 trigger `ENABLE ALWAYS`로 덮었다(CI 통합 런에서 정리 도우미가 남긴 어긋남으로 드러났다). trigger 함수의 PUBLIC
+  실행권은 걷었다(런타임 SECURITY DEFINER preflight). `ALTER TABLE … DISABLE TRIGGER`로 이름을 지목해 끄는 경로만 남는다.
+- 배포하지 않았다(소유자 묶음 회전).
+
 ## 2026-11-19 — T-READ-09 100 km nearby: LATERAL을 page 뒤로, 거리순은 KNN
 
 - 진단(prod `map-api` 컨테이너 안 읽기 전용 트랜잭션, `jit=off`, 몇 회만): "100km nearby"(서울시청, place, 51행) 5.4초 중

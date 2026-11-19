@@ -1,3 +1,11 @@
+## 2026-11-19 — T-READ-10 후속(alembic 455) 구현, T-101 재개, 운영 반영 대기
+
+- 소유자가 T-101(사전 집계) 제외를 풀었다(2026-11-19). 좁은 집계 표 `feature.feature_cluster_points` + 동기 trigger +
+  병렬 집계로 n150 합성 전국 sido 전 kind 711 → 255 ms(종전 1,297), point-only 254 → 107 ms. exact-viewport 그대로, OpenAPI
+  변경 없음. migration 455는 세 표 쓰기를 backfill 동안 막는다(prod 10~20 s 추정) — 적재 정지 뒤 배포.
+- 다음: 소유자 묶음 회전 → harness(`--skip-seed`, `jit=off`)로 acceptance(전 kind < 300 ms, point-only ≤ 150 ms)와 T-101을
+  닫는다. `T-READ-06` migration과 head가 겹치면 나중에 머지되는 쪽이 `down_revision`을 다시 잇는다.
+
 ## 2026-11-19 — T-READ-09 100 km nearby 구현(PR, 운영 회전 대기)
 
 - 원인: 반경 안 전 행(100 km에서 20만)에 primary source LATERAL을 돌고 나서 51행을 잘랐다(LATERAL 201,401회 ≈ 5초).
