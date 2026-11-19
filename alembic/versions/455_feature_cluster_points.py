@@ -78,6 +78,9 @@ CREATE TABLE feature.feature_cluster_points (
     geom_xmax double precision,
     geom_ymin double precision,
     geom_ymax double precision,
+    geom_bounds x_extension.geometry GENERATED ALWAYS AS (
+        x_extension.ST_MakeEnvelope(geom_xmin, geom_ymin, geom_xmax, geom_ymax, 4326)
+    ) STORED,
     CONSTRAINT pk_feature_cluster_points PRIMARY KEY (feature_id)
 )
 """
@@ -99,7 +102,7 @@ BEGIN
        AND NEW.sido_code IS NOT DISTINCT FROM OLD.sido_code
        AND NEW.sigungu_code IS NOT DISTINCT FROM OLD.sigungu_code
        AND NEW.legal_dong_code IS NOT DISTINCT FROM OLD.legal_dong_code
-       AND NEW.coord IS NOT DISTINCT FROM OLD.coord
+       AND x_extension.ST_AsEWKB(NEW.coord) IS NOT DISTINCT FROM x_extension.ST_AsEWKB(OLD.coord)
        AND NEW.lifecycle_state IS NOT DISTINCT FROM OLD.lifecycle_state
        AND NEW.publication_state IS NOT DISTINCT FROM OLD.publication_state
        AND NEW.quality_state IS NOT DISTINCT FROM OLD.quality_state THEN
@@ -230,7 +233,7 @@ _INDEX_SQL: Final[tuple[str, ...]] = (
     "CREATE INDEX idx_feature_cluster_points_coord_gist ON feature.feature_cluster_points "
     "USING gist (coord) WHERE public AND kind NOT IN ('route', 'area', 'notice')",
     "CREATE INDEX idx_feature_cluster_points_bounds_gist ON feature.feature_cluster_points "
-    "USING gist (x_extension.ST_MakeEnvelope(geom_xmin, geom_ymin, geom_xmax, geom_ymax, 4326)) "
+    "USING gist (geom_bounds) "
     "WHERE public AND kind IN ('route', 'area')",
 )
 

@@ -1727,11 +1727,7 @@ def _geometry_inside_bbox_sql(alias: str) -> str:
 
 def _cluster_bbox_sql(code_col: str, *, include_geometry_arm: bool = True) -> str:
     env = _bbox_envelope_sql()
-    bounds_box = (
-        "x_extension.ST_MakeEnvelope("
-        "cluster_point.geom_xmin, cluster_point.geom_ymin, "
-        "cluster_point.geom_xmax, cluster_point.geom_ymax, 4326)"
-    )
+    bounds_box = "cluster_point.geom_bounds"
     inside = _geometry_inside_bbox_sql("cluster_point")
     point_rows = f"""
     SELECT
