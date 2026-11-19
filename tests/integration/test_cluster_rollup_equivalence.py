@@ -16,6 +16,7 @@ bbox를 가로지르는 route(교차 부분 위의 점), MBR만 겹치고 실제
 
 from __future__ import annotations
 
+import json
 from typing import TYPE_CHECKING, Any
 
 import pytest
@@ -171,7 +172,7 @@ FROM (
 _EDGE_SHAPES: tuple[tuple[str, str, str], ...] = (
     # 좁은 bbox(127.0~127.05, 37.4~37.45)의 변에 정확히 닿는 route — 포함(>=, <=).
     ("edge-touch", "route", "LINESTRING(127.0 37.41, 127.05 37.44)"),
-    # 변을 1e-7도 넘는 route — 포함이 아니다(float4 캐시 bbox로는 포함으로 보일 수 있다).
+    # 변을 1e-7도 넘는 route — 정확 범위로는 포함이 아니다(교차 부분 위의 점으로 간다).
     ("edge-over", "route", "LINESTRING(127.0 37.41, 127.0500001 37.44)"),
     # MBR만 겹치는 route — bbox 위쪽을 대각선으로 비켜 간다(정확 교차 거짓).
     ("mbr-fp", "route", "LINESTRING(127.04 37.46, 127.06 37.44)"),
@@ -184,6 +185,8 @@ _EDGE_SHAPES: tuple[tuple[str, str, str], ...] = (
         "POLYGON((126.9 37.3,127.2 37.3,127.2 37.6,126.9 37.6,126.9 37.3),"
         "(126.95 37.35,126.95 37.55,127.15 37.55,127.15 37.35,126.95 37.35))",
     ),
+    # 빈 route — 범위가 NULL이라 포함이 아니고, 종전처럼 교차 판정(거짓)으로 빠진다.
+    ("empty", "route", "MULTILINESTRING EMPTY"),
 )
 
 _BBOXES: tuple[dict[str, float], ...] = (
@@ -192,7 +195,14 @@ _BBOXES: tuple[dict[str, float], ...] = (
     {"min_lon": 127.0, "min_lat": 37.4, "max_lon": 127.05, "max_lat": 37.45},
 )
 
-_KIND_FILTERS: tuple[list[str] | None, ...] = (None, ["route"], ["area"], ["place", "route"])
+# ``["place"]``는 route/area가 없어 point-only SQL을 탄다(요청 경로 비교가 그 분기도 지나게).
+_KIND_FILTERS: tuple[list[str] | None, ...] = (
+    None,
+    ["route"],
+    ["area"],
+    ["place", "route"],
+    ["place"],
+)
 
 
 async def _seed(session: AsyncSession) -> None:
@@ -355,3 +365,31 @@ async def test_cluster_planner_setting_is_scoped(migrated_session: AsyncSession)
     after = await migrated_session.scalar(text("SELECT current_setting('enable_sort')"))
     assert before == "on"
     assert after == before
+
+
+async def test_cluster_planner_setting_switches_to_hash_aggregate(
+    migrated_session: AsyncSession,
+) -> None:
+    """켜는 문장이 실제로 ``enable_sort``를 끄고, 그 상태의 집계 계획이 HashAggregate다."""
+    await _seed(migrated_session)
+    prior = await migrated_session.scalar(text(feature_repo._CLUSTER_HASH_AGGREGATE_ON_SQL))
+    assert prior == "on"
+    assert await migrated_session.scalar(text("SELECT current_setting('enable_sort')")) == "off"
+    plan = (
+        await migrated_session.execute(
+            text("EXPLAIN (FORMAT JSON) " + feature_repo._CLUSTER_BBOX_SQL_BY_UNIT["sido"]),
+            {
+                **_BBOXES[0],
+                "kinds": None,
+                "categories": None,
+                "providers": None,
+                "attributes": None,
+                "limit": 2000,
+            },
+        )
+    ).scalar_one()
+    assert '"Strategy": "Hashed"' in json.dumps(plan)
+    await migrated_session.execute(
+        text(feature_repo._CLUSTER_HASH_AGGREGATE_OFF_SQL), {"prior": prior}
+    )
+    assert await migrated_session.scalar(text("SELECT current_setting('enable_sort')")) == "on"

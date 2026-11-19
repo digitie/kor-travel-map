@@ -22,7 +22,9 @@
   UPDATE 뒤 한 번 더, 요청 경로 함수도). 개수는 정확히 같고 평균 좌표는 1e-9도 안(계획이 바뀌면 float 합 순서만 다르다).
   bench DB에서도 시도·시군구·읍면동 개수 일치, 좌표 차 1e-12도 안팎.
 - 다시 쓰기 비용: 합성 route 5.77만 행·153 MB에서 `ALTER TABLE … ADD COLUMN … STORED` 5.1 s(tmpfs, 같은 표 `VACUUM FULL`
-  4.7 s). prod는 232 MB·디스크라 10~20 s `ACCESS EXCLUSIVE`로 본다 — 그 동안 route/area를 읽는 요청이 기다린다.
+  4.7 s). prod에서 다섯 식만 계산하는 읽기 전용 dry run(운영 `map-api` 컨테이너, 병렬 3)이 7.6 s였다(단일 프로세스면
+  약 22 s, NULL 결과 0) — 다시 쓰기·색인 재구축을 더해 prod는 30~60 s `ACCESS EXCLUSIVE`로 본다. 그 동안 route/area를 읽는
+  요청이 기다린다.
   migration은 `lock_timeout` 5 s·`statement_timeout` 300 s, route 적재가 돌면 실패하고 다시 돌리면 된다. `features`(42만 행)는
   건드리지 않는다(backfill 없음 — 생성 컬럼이 다시 쓰기 중에 채워진다).
 - 배포하지 않았다(소유자의 묶음 회전). 운영 반영 뒤 harness로 acceptance를 닫는다.

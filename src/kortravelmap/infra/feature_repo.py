@@ -1830,7 +1830,11 @@ _GEOMETRY_FEATURE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
 # 순서만큼, 1e-12도 안팎에서 달라질 수 있다. 종전에도 계획이 바뀌면 그랬다). 맨 끝 묶음
 # 정렬(20행 남짓)은 대안이 없으므로 그대로 정렬한다. ``set_config(..., true)``라 transaction
 # 안에서만 살고, 집계가 끝나면 직전 값으로 되돌린다(같은 transaction의 다음 문장에 새지
-# 않게). harness(``scripts/perf_tier2_release_harness.py``)도 같은 문장을 앞에 둔다.
+# 않게). 집계가 실패하면 되돌리지 않는다 — 그 transaction은 abort됐고 rollback(또는 그 뒤에 잡은
+# savepoint로의 rollback)이 설정도 되돌린다. ``finally``에서 되돌리면 abort된 transaction에서 실패해
+# 원래 오류를 가린다. 설정을 집계 문장 안(CTE의 ``set_config``)에 넣는 방법은 듣지 않는다 — 계획은
+# 실행 전에 세워진다. harness(``scripts/perf_tier2_release_harness.py``)·tier-1 perf gate도 같은
+# 문장을 앞에 둔다.
 _CLUSTER_HASH_AGGREGATE_ON_SQL: Final[str] = (
     "SELECT current_setting('enable_sort') AS prior, set_config('enable_sort', 'off', true)"
 )

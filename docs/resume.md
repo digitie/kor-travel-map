@@ -1,7 +1,7 @@
 ## 2026-11-19 — T-READ-10 구현(alembic 454), 운영 반영 대기
 
 - 전국 저배율 집계: route geometry 대표점·범위 STORED 생성 컬럼(alembic `454_route_cluster_markers`, route 표 다시 쓰기
-  — prod 232 MB 10~20 s `ACCESS EXCLUSIVE` 추정, route 적재 정지 뒤 배포)과 집계 HashAggregate. n150 합성 42만 행에서
+  — prod 232 MB 30~60 s `ACCESS EXCLUSIVE` 추정, route 적재 정지 뒤 배포)과 집계 HashAggregate. n150 합성 42만 행에서
   전국 sido 전 kind 1,214 → 705 ms, point-only 397 → 250 ms. 결과는 종전 SQL과 같다(통합 시험). OpenAPI 변경 없음.
 - 다음: 소유자 묶음 회전에 실은 뒤 harness(`--skip-seed`, `jit=off`)로 acceptance(전 kind ≤ 800 ms, point-only ≤ 300 ms)를
   닫는다. `T-READ-06`도 migration을 더하므로 나중에 머지되는 쪽이 `down_revision`을 다시 잇는다.
