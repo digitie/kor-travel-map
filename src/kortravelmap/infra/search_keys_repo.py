@@ -89,17 +89,23 @@ upserted AS (
            search_group = EXCLUDED.search_group,
            computed_at = EXCLUDED.computed_at
     RETURNING 1
-),
-deleted AS (
+)
+SELECT count(*) AS written FROM upserted
+"""
+
+
+#: 공개 Feature가 아닌(사라진·비공개) 행의 키를 지운다. upsert와 **다른 문장**이다 — 한 문장의
+#: data-modifying CTE로 묶으면 DELETE가 같은 문장이 방금 넣은(보이지 않는) 수십만 행을 지나며
+#: 계획이 무너졌다(n150 운영 사본 42만 행: 한 문장 15분 초과, 나누면 DELETE 0.9초 + upsert 14초).
+_DELETE_NON_PUBLIC_SQL: Final[str] = """
+WITH deleted AS (
     DELETE FROM feature.feature_search_keys AS t
     WHERE NOT EXISTS (
         SELECT 1 FROM feature.public_features AS f WHERE f.feature_id = t.feature_id
     )
     RETURNING 1
 )
-SELECT
-    (SELECT count(*) FROM upserted) AS written,
-    (SELECT count(*) FROM deleted) AS deleted
+SELECT count(*) FROM deleted
 """
 
 
@@ -117,8 +123,13 @@ async def refresh_search_keys(session: AsyncSession) -> SearchKeysRefreshResult:
     ``feature.feature_search_keys``만 쓴다. ``statement_timeout``은 이 transaction에만
     ``_REFRESH_STATEMENT_TIMEOUT``으로 건다.
     """
+    # 식이 많아 추정 비용이 ``jit_above_cost``를 넘지만 행마다 식을 도는 일이라 JIT가 벌 것이 없다
+    # (검색 질의와 같은 이유로 이 transaction에서만 끈다).
     await session.execute(
-        text("SELECT set_config('statement_timeout', :value, true)"),
+        text(
+            "SELECT set_config('statement_timeout', :value, true), "
+            "set_config('jit', 'off', true)"
+        ),
         {"value": _REFRESH_STATEMENT_TIMEOUT},
     )
     # 수동 실행과 스케줄 실행이 겹치면 같은 키를 다른 순서로 upsert해 교착할 수 있다 — 직렬화한다.
@@ -126,5 +137,6 @@ async def refresh_search_keys(session: AsyncSession) -> SearchKeysRefreshResult:
         text("SELECT pg_advisory_xact_lock(hashtextextended(:key, 0))"),
         {"key": _REFRESH_LOCK_KEY},
     )
-    row = (await session.execute(text(_refresh_sql()))).one()
-    return SearchKeysRefreshResult(written=int(row.written), deleted=int(row.deleted))
+    deleted = (await session.execute(text(_DELETE_NON_PUBLIC_SQL))).scalar_one()
+    written = (await session.execute(text(_refresh_sql()))).scalar_one()
+    return SearchKeysRefreshResult(written=int(written), deleted=int(deleted))
