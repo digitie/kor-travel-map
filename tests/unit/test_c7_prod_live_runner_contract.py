@@ -227,13 +227,17 @@ def test_route_handlers_have_settlement_barriers() -> None:
         "waitForRouteHandlers()",
         ".unroute(routeMatcher, routeHandler)",
     )
+    # logout 시험은 logout 요청을 붙잡지 않는다 — 앱은 성공 응답 뒤에 socket을 닫으므로
+    # (acde3726) 응답을 붙잡으면 교착한다(2026-11-21 t1120c C7). 대신 /login 문서 이동을
+    # 붙잡아 close code를 읽고, 그 route도 unroute 전에 정착해야 한다.
     logout = read_auth[read_auth.index('test("LAST: 실제 로그아웃') :]
     _assert_in_order(
         logout,
-        "await route.fetch()",
-        "logoutRouteSettled",
-        '.unroute("**/api/auth/logout", logoutRoute)',
+        "await route.continue()",
+        "loginRouteSettled",
+        r".unroute(/\/login(?:\?.*)?$/, loginRoute)",
     )
+    assert 'page.route("**/api/auth/logout"' not in logout
     assert "OPS_LIVE_UNAUTHORIZED_CLOSE_CODE" in read_auth
     assert "OPS_LIVE_EXPIRED_CLOSE_CODE" in read_auth
 

@@ -1,3 +1,13 @@
+## 2026-11-21 — C7 t1120c: read-auth 6/7, 마지막 logout 시험은 spec의 순서 가정이 낡음
+
+- #1524 배포(t1120c, Map `db8497f2`) 뒤 C7 `ops-c7-read-auth` 7건 중 6건 통과(count/state·4401·4408 복구·rotation·
+  projection 복원 모두 GREEN), `LAST: 실제 로그아웃` 1건이 7.2초에 실패. 운영 쓰기는 target 하나가 `restored`로 끝났다.
+- 원인: `acde3726`(2026-10-05)이 로그아웃 순서를 "socket close → logout POST"에서 "logout POST **성공 뒤**
+  `publishAdminLogout`(close 1000) → /login"으로 바꿨다(실패한 logout은 live를 유지하고 재시도). spec은 logout
+  **응답을 붙잡고** close를 기다려 교착 → 5초 뒤 route handler throw. 마지막 C7 GREEN(`bafec797`, 10-03)은 그 이전이다.
+- 고침(spec만): logout 요청은 건드리지 않고 `/login` 문서 이동을 잠깐 붙잡아 옛 문서에서 close code 1000을 읽는다.
+  단언은 logout 응답 ok·redirect 전 close 1000·응답 뒤 close 지연 ≤ 2초·ticket/socket 재생성 없음.
+
 ## 2026-11-20 — C7 `ops-c7-read-auth` 첫 시험 5초 실패: 파이프라인 화면의 "새로고침" 둘
 
 - t1120b(Map `01b602e3`) C7 첫 시험이 5.06초에 실패했고 나머지는 serial이라 건너뛰었다(journal 모두 `*_pending`, 운영 쓰기 없음).
