@@ -2272,7 +2272,8 @@ _SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
 _SEARCH_DEDUP_DEMOTED_PROVIDER: Final[str] = "python-mcst-api"
 if not _SEARCH_DEDUP_DEMOTED_PROVIDER.replace("-", "").isalnum():  # pragma: no cover
     raise RuntimeError("demoted provider must be a plain SQL literal")
-#: 접기 대표 판정 — 이 행의 primary 원천이 ``_SEARCH_DEDUP_DEMOTED_PROVIDER``인가(``dedup_ordered``).
+#: 접기 대표 판정(``dedup_ordered``) — 이 행의 primary 원천이
+#: ``_SEARCH_DEDUP_DEMOTED_PROVIDER``인가.
 #:
 #: ``EXISTS (…)``가 아니라 상관 스칼라 부분질의 ``(SELECT true … LIMIT 1) IS NOT NULL``로 쓴다.
 #: Postgres는 식 안의 ``EXISTS``를 ``ANY``로 바꿔 hashed SubPlan 대안을 함께 만들고 비용으로
@@ -2281,7 +2282,8 @@ if not _SEARCH_DEDUP_DEMOTED_PROVIDER.replace("-", "").isalnum():  # pragma: no 
 #: "부산 맛집" 382→575 ms p50). 무리가 둘 이상인 행만 확인하면 되므로 행 수는 작다 — planner가
 #: MCST 집합을 해시하면 안 된다. ``LIMIT``이 붙은 스칼라 부분질의는 hashed SubPlan이 될 수 없어
 #: 행마다 ``source_links`` 인덱스로 한 번 찍는다(읽기 전용 실측: 부산 585→383 ms 같은 51행,
-#: 서울 맛집 144→157 ms). 결과는 ``EXISTS``와 같다(``tests/integration/test_feature_search_dedup.py``).
+#: 서울 맛집 144→157 ms). 결과는 ``EXISTS``와 같다
+#: (``tests/integration/test_feature_search_dedup.py``).
 _SEARCH_DEDUP_DEMOTED_PRIMARY_SQL: Final[str] = f"""(
                     SELECT true
                     FROM provider_sync.source_links AS sl
