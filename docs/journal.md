@@ -1,3 +1,15 @@
+## 2026-11-21 — C7 t1121a: logout 관측점을 `close()` 호출 기록으로(#1525 방식은 page 평가가 막힘)
+
+- #1525(t1121a, Map `9663598b`) 뒤에도 `LAST: 실제 로그아웃` 1건 실패(38.4초, 나머지 6건 GREEN, target `restored`).
+  #1525는 /login 문서 이동을 `page.route`로 붙잡고 그 사이 옛 문서에서 close code를 읽으려 했는데, **문서 이동을 붙잡은
+  동안에는 page 평가가 진행되지 않는다**(자체 세션 probe: close 대기 5초 timeout, redirect 미완).
+- 붙잡지 않으면: logout 응답 200 뒤 24 ms에 /login 문서가 commit되어 close handshake가 끝나기 전에 문서가 바뀐다 —
+  JS `close` 이벤트도 Playwright `close` 이벤트도 옛 문서에서 나지 않는다. 결정적인 사실은 앱이 redirect **전에 동기로**
+  `close(1000)`을 부른다는 것.
+- 고침: init script가 `WebSocket.prototype.close`의 ops live 호출을 같은 탭 sessionStorage에 남기고(click 전 비움),
+  /login 도착 뒤 읽는다. 단언은 logout 응답 ok·close 호출 code 1000·|호출−응답| ≤ 2초·ticket/socket 재생성 없음.
+  자체 세션 probe로 동일 기제 확인(close 호출 1000, 응답과 -2 ms, 31초 동안 재연결 0).
+
 ## 2026-11-21 — C7 t1120c: read-auth 6/7, 마지막 logout 시험은 spec의 순서 가정이 낡음
 
 - #1524 배포(t1120c, Map `db8497f2`) 뒤 C7 `ops-c7-read-auth` 7건 중 6건 통과(count/state·4401·4408 복구·rotation·
