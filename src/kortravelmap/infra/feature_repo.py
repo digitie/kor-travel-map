@@ -2272,6 +2272,28 @@ _SEARCH_DEDUP_TRAILING_BRACKET: Final[str] = "[(（][^()（）]*[)）]$"
 _SEARCH_DEDUP_DEMOTED_PROVIDER: Final[str] = "python-mcst-api"
 if not _SEARCH_DEDUP_DEMOTED_PROVIDER.replace("-", "").isalnum():  # pragma: no cover
     raise RuntimeError("demoted provider must be a plain SQL literal")
+#: 접기 대표 판정 — 이 행의 primary 원천이 ``_SEARCH_DEDUP_DEMOTED_PROVIDER``인가(``dedup_ordered``).
+#:
+#: ``EXISTS (…)``가 아니라 상관 스칼라 부분질의 ``(SELECT true … LIMIT 1) IS NOT NULL``로 쓴다.
+#: Postgres는 식 안의 ``EXISTS``를 ``ANY``로 바꿔 hashed SubPlan 대안을 함께 만들고 비용으로
+#: 고른다. prod(n150, 2026-11-21)에서 source_links/source_entities autoanalyze 뒤 planner가
+#: hashed 쪽으로 뒤집혀 **질의마다 MCST primary 88,526행 전부로 해시를 지었다**(~176 ms,
+#: "부산 맛집" 382→575 ms p50). 무리가 둘 이상인 행만 확인하면 되므로 행 수는 작다 — planner가
+#: MCST 집합을 해시하면 안 된다. ``LIMIT``이 붙은 스칼라 부분질의는 hashed SubPlan이 될 수 없어
+#: 행마다 ``source_links`` 인덱스로 한 번 찍는다(읽기 전용 실측: 부산 585→383 ms 같은 51행,
+#: 서울 맛집 144→157 ms). 결과는 ``EXISTS``와 같다(``tests/integration/test_feature_search_dedup.py``).
+_SEARCH_DEDUP_DEMOTED_PRIMARY_SQL: Final[str] = f"""(
+                    SELECT true
+                    FROM provider_sync.source_links AS sl
+                    JOIN provider_sync.source_entities AS se
+                      ON se.source_entity_key = sl.source_entity_key
+                    JOIN provider_sync.provider_datasets AS pd
+                      ON pd.provider_dataset_id = se.provider_dataset_id
+                    WHERE sl.feature_id = dedup_sized.feature_id
+                      AND sl.source_role = 'primary'
+                      AND pd.provider = '{_SEARCH_DEDUP_DEMOTED_PROVIDER}'
+                    LIMIT 1
+                  ) IS NOT NULL"""
 
 # 별칭의 정확 이름 및 trigram 후보는 기존 idx_features_name_trgm을 사용한다.
 # 별칭 trigram 팔은 원래 이름의 공백 정규화 일치로 좁힌다. 임의의 글자 사이 공백까지
@@ -2652,17 +2674,7 @@ dedup_ordered AS (
             PARTITION BY dedup_key, dedup_cluster
             ORDER BY
                 CASE
-                  WHEN dedup_size > 1 AND EXISTS (
-                    SELECT 1
-                    FROM provider_sync.source_links AS sl
-                    JOIN provider_sync.source_entities AS se
-                      ON se.source_entity_key = sl.source_entity_key
-                    JOIN provider_sync.provider_datasets AS pd
-                      ON pd.provider_dataset_id = se.provider_dataset_id
-                    WHERE sl.feature_id = dedup_sized.feature_id
-                      AND sl.source_role = 'primary'
-                      AND pd.provider = '{_SEARCH_DEDUP_DEMOTED_PROVIDER}'
-                  ) THEN 1
+                  WHEN dedup_size > 1 AND {_SEARCH_DEDUP_DEMOTED_PRIMARY_SQL} THEN 1
                   ELSE 0
                 END ASC,
                 search_rank ASC, score DESC, feature_id ASC
