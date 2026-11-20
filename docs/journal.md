@@ -1,3 +1,15 @@
+## 2026-11-20 — C7 `ops-c7-read-auth` 첫 시험 5초 실패: 파이프라인 화면의 "새로고침" 둘
+
+- t1120b(Map `01b602e3`) C7 첫 시험이 5.06초에 실패했고 나머지는 serial이라 건너뛰었다(journal 모두 `*_pending`, 운영 쓰기 없음).
+  기대 시간 상한(15초)보다 짧아 재시도 없는 실패, 즉 strict locator 위반이다.
+- 운영 UI에 읽기 전용 Playwright probe(C7 실행 이미지, 로그인·화면 이동·GET 새로고침만)로 재현: 데이터셋 요약·딥링크·
+  파이프라인 h1은 모두 통과, `/ops/pipeline`에서 `getByRole("button", { name: "새로고침", exact: true })`가 **2개** —
+  상단 바 동작과 실행 탭의 공통 Dagster 운영 패널(`@kor-travel/ui` DagsterOperations, `data-slot="dagster-operations-refresh"`).
+- 그 패널은 2026-10-05 `acde3726`에서 들어왔고 마지막 C7 GREEN은 그 전(`bafec797`, 10-03)이라 이번이 그 뒤 첫 C7이었다.
+  #1523(공통 AdminShell)의 원인이 아니다. 고침: spec의 새로고침 세 곳을 공통 셸 `data-slot="admin-shell-actions"` 안으로
+  한정(`shellRefreshButton`). probe로 두 화면 모두 1개·enabled 확인.
+- 남은 일: C7 lane은 BLOCKED 그대로(runbook §4 복구는 소유자), 다음 회전에서 C7 재실행.
+
 ## 2026-11-19 — 관리자 프런트 공통 AdminShell(ui 0.2.3) 채택과 버튼 테두리(FS-7.8)
 
 - `@kor-travel/ui` 0.2.1→0.2.3·tokens 0.1.2→0.1.4(common #70·#71, main pack `0e2a3f5a`, SRI는 원장과 같음)를

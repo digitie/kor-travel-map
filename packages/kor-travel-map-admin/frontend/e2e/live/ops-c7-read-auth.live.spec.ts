@@ -149,10 +149,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       READY,
     );
 
-    const datasetsRefresh = page.getByRole("button", {
-      name: "새로고침",
-      exact: true,
-    });
+    const datasetsRefresh = shellRefreshButton(page);
     await expect(datasetsRefresh).toBeEnabled(READY);
     const rows = await test.step("datasets grid 요약", async () => {
       const gridResponse = await refreshUntilResponse(
@@ -223,10 +220,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     await expect(
       page.getByRole("heading", { level: 1, name: "수집 파이프라인 - 파이프라인", exact: true }),
     ).toBeVisible(READY);
-    const pipelineRefresh = page.getByRole("button", {
-      name: "새로고침",
-      exact: true,
-    });
+    const pipelineRefresh = shellRefreshButton(page);
     await expect(pipelineRefresh).toBeEnabled(READY);
     await test.step("pipeline overview KPI", async () => {
       const overviewResponse = await refreshUntilResponse(
@@ -360,10 +354,7 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
       READY,
     );
 
-    const refreshButton = page.getByRole("button", {
-      name: "새로고침",
-      exact: true,
-    });
+    const refreshButton = shellRefreshButton(page);
     const baselineRows = await test.step(
       "dataset projection baseline 요약",
       async () => {
@@ -757,6 +748,20 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
     page.off("request", requestListener);
     page.off("websocket", socketListener);
   }
+}
+
+/**
+ * 페이지 상단 바의 "새로고침"(그 페이지의 read query refetch).
+ *
+ * 페이지 전체에서 이름만으로 찾으면 안 된다 — `/ops/pipeline`의 실행 탭에는 공통 Dagster 운영
+ * 패널(`@kor-travel/ui` DagsterOperations, 2026-10-05 acde3726)이 **자기** "새로고침"을 그려
+ * 같은 이름의 버튼이 둘이 된다. 그러면 strict locator가 첫 `toBeEnabled`에서 즉시 실패한다
+ * (2026-11-20 t1120b C7, 5초 실패). 상단 바 동작 영역은 공통 AdminShell의 `data-slot` 계약이다.
+ */
+function shellRefreshButton(page: Page): Locator {
+  return page
+    .locator('[data-slot="admin-shell-actions"]')
+    .getByRole("button", { name: "새로고침", exact: true });
 }
 
 function proxyPath(response: Response): string {
