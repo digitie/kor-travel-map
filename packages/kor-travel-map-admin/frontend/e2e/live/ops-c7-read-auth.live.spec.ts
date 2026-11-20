@@ -584,8 +584,8 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
     const probe = await exerciseActualUiLogout(page);
 
     assertExactAppSocketWireContract(probe.healthySocket);
-    expect(probe.closeCodeBeforeLogoutResponse).toBe(1000);
-    expect(probe.closeLatencyMs).toBeGreaterThanOrEqual(0);
+    expect(probe.logoutResponseOk).toBe(true);
+    expect(probe.closeCodeBeforeRedirect).toBe(1000);
     expect(probe.closeLatencyMs).toBeLessThanOrEqual(
       IMMEDIATE_ROTATION_MAX_MS,
     );
@@ -603,8 +603,9 @@ test.describe("C7 datasets read + ops live auth (actual browser, live)", () => {
 });
 
 type ActualUiLogoutProbe = {
-  closeCodeBeforeLogoutResponse: number;
+  closeCodeBeforeRedirect: number;
   closeLatencyMs: number;
+  logoutResponseOk: boolean;
   healthySocket: AppSocketObservation;
   redirectPath: string;
   socketsAfterSettle: number;
@@ -661,33 +662,52 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
         resolve();
       });
     });
-    let closeCodeBeforeLogoutResponse: number | null = null;
-    let logoutRouteSeen = false;
-    let resolveLogoutRouteSettled!: () => void;
-    const logoutRouteSettled = new Promise<void>((resolve) => {
-      resolveLogoutRouteSettled = resolve;
-    });
-    const logoutRoute = async (route: Route) => {
-      logoutRouteSeen = true;
+    // 순서 계약(acde3726, 2026-10-05~): 앱은 logout 응답이 **성공한 뒤에** socket을 닫고
+    // (`publishAdminLogout`) /login으로 이동한다 — 실패한 logout은 live 연결을 유지하고 다시
+    // 시도할 수 있어야 하기 때문이다. 옛 spec은 logout **응답을 붙잡고** close를 기다려 교착했다
+    // (t1121 C7: 5초 대기 뒤 handler throw). logout 요청은 건드리지 않고, 대신 /login 문서
+    // 이동을 잠깐 붙잡아 그 직전(옛 문서가 살아 있을 때) close code 1000을 읽는다 — "성공 응답 뒤,
+    // redirect 전에 닫는다"를 그대로 본다.
+    let logoutResponseAt: number | null = null;
+    let logoutResponseOk = false;
+    const logoutResponseListener = (response: Response) => {
       try {
-        const response = await route.fetch();
-        await waitForObservedAppSocketClose(page, 0, 1000, 5_000);
-        closeCodeBeforeLogoutResponse =
-          (await observedAppSockets(page))[0]?.closeCode ?? 0;
-        await route.fulfill({
-          body: await response.body(),
-          headers: response.headers(),
-          status: response.status(),
-        });
+        if (
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === "/api/auth/logout"
+        ) {
+          logoutResponseAt = Date.now();
+          logoutResponseOk = response.ok();
+        }
       } catch {
-        await route.abort("failed");
-        throw new Error("logout 응답 전 socket close 관측 실패 (values redacted)");
-      } finally {
-        resolveLogoutRouteSettled();
+        // URL 파싱 실패는 logout 응답이 아니다.
       }
     };
-    await page.route("**/api/auth/logout", logoutRoute);
-    const logoutStartedAt = Date.now();
+    let closeCodeBeforeRedirect: number | null = null;
+    let loginRouteSeen = false;
+    let resolveLoginRouteSettled!: () => void;
+    const loginRouteSettled = new Promise<void>((resolve) => {
+      resolveLoginRouteSettled = resolve;
+    });
+    const loginRoute = async (route: Route) => {
+      if (route.request().resourceType() !== "document" || loginRouteSeen) {
+        await route.continue();
+        return;
+      }
+      loginRouteSeen = true;
+      try {
+        await waitForObservedAppSocketClose(page, 0, 1000, 5_000);
+        closeCodeBeforeRedirect =
+          (await observedAppSockets(page))[0]?.closeCode ?? 0;
+      } catch {
+        closeCodeBeforeRedirect = 0;
+      } finally {
+        await route.continue();
+        resolveLoginRouteSettled();
+      }
+    };
+    page.on("response", logoutResponseListener);
+    await page.route(/\/login(?:\?.*)?$/, loginRoute);
     let logoutPrimaryError: unknown;
     try {
       await Promise.all([
@@ -704,20 +724,21 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
       throw new Error("실제 logout UI 종료/redirect 확인 실패 (values redacted)");
     } finally {
       const teardownErrors: unknown[] = [];
-      if (logoutRouteSeen) {
+      if (loginRouteSeen) {
         await Promise.race([
-          logoutRouteSettled,
+          loginRouteSettled,
           new Promise<never>((_, reject) =>
             setTimeout(
-              () => reject(new Error("logout route handler settlement timeout")),
+              () => reject(new Error("login route handler settlement timeout")),
               READY.timeout,
             ),
           ),
         ]).catch((error: unknown) => teardownErrors.push(error));
       }
       await page
-        .unroute("**/api/auth/logout", logoutRoute)
+        .unroute(/\/login(?:\?.*)?$/, loginRoute)
         .catch((error: unknown) => teardownErrors.push(error));
+      page.off("response", logoutResponseListener);
       if (teardownErrors.length > 0) {
         throw new AggregateError(
           logoutPrimaryError === undefined
@@ -730,12 +751,20 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
     const redirectPath = await page.evaluate(() => window.location.pathname);
     const ticketRequestsAtRedirect = ticketRequests;
     await page.waitForTimeout(LOGOUT_SETTLE_MS);
-    if (closeAt === null || closeCodeBeforeLogoutResponse === null) {
+    if (
+      closeAt === null ||
+      closeCodeBeforeRedirect === null ||
+      logoutResponseAt === null
+    ) {
       throw new Error("logout socket close timing 관측이 불완전합니다");
     }
     return {
-      closeCodeBeforeLogoutResponse,
-      closeLatencyMs: closeAt - logoutStartedAt,
+      closeCodeBeforeRedirect,
+      // 응답 이벤트와 close 이벤트는 같은 CDP 흐름의 node 쪽 시각이다. close는 성공 응답을
+      // 처리한 뒤에 나므로 음수가 아니어야 하지만, 이벤트 전달 순서의 작은 흔들림을 위해
+      // 하한은 단언하지 않고 상한(즉시성)만 본다.
+      closeLatencyMs: closeAt - logoutResponseAt,
+      logoutResponseOk,
       healthySocket,
       redirectPath,
       socketsAfterSettle: sockets.length,
