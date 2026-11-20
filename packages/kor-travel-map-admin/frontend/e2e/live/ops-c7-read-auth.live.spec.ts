@@ -7,7 +7,6 @@ import {
   type Page,
   type Request,
   type Response,
-  type Route,
   type WebSocket as PlaywrightWebSocket,
 } from "@playwright/test";
 
@@ -35,7 +34,6 @@ import {
   installAppSocketObserver,
   observedAppSockets,
   probeRejectedOpsLiveSockets,
-  waitForObservedAppSocketClose,
   waitForObservedAppSocketData,
   type AppSocketObservation,
   type ObservedAppServerFrame,
@@ -617,6 +615,7 @@ type ActualUiLogoutProbe = {
 
 async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> {
   await installAppSocketObserver(page);
+  await installLogoutCloseCallRecorder(page);
   let ticketRequests = 0;
   const sockets: PlaywrightWebSocket[] = [];
   const requestListener = (request: Request) => {
@@ -649,25 +648,21 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
       READY,
     );
     const healthySocket = (await observedAppSockets(page))[0];
-    const activeSocket = sockets[0];
-    if (!healthySocket || !activeSocket) {
+    if (!healthySocket || sockets.length === 0) {
       throw new Error("logout 전 actual app socket 관측이 불완전합니다");
     }
     const ticketRequestsBeforeLogout = ticketRequests;
     const socketsBeforeLogout = sockets.length;
-    let closeAt: number | null = null;
-    const closePromise = new Promise<void>((resolve) => {
-      activeSocket.once("close", () => {
-        closeAt = Date.now();
-        resolve();
-      });
-    });
-    // 순서 계약(acde3726, 2026-10-05~): 앱은 logout 응답이 **성공한 뒤에** socket을 닫고
-    // (`publishAdminLogout`) /login으로 이동한다 — 실패한 logout은 live 연결을 유지하고 다시
-    // 시도할 수 있어야 하기 때문이다. 옛 spec은 logout **응답을 붙잡고** close를 기다려 교착했다
-    // (t1121 C7: 5초 대기 뒤 handler throw). logout 요청은 건드리지 않고, 대신 /login 문서
-    // 이동을 잠깐 붙잡아 그 직전(옛 문서가 살아 있을 때) close code 1000을 읽는다 — "성공 응답 뒤,
-    // redirect 전에 닫는다"를 그대로 본다.
+    // 순서 계약(acde3726, 2026-10-05~): 앱은 logout 응답이 **성공한 뒤에** 현재 socket을
+    // `close(1000)`하고(`publishAdminLogout`) 곧바로 /login으로 이동한다 — 실패한 logout은 live를
+    // 유지하고 다시 시도할 수 있어야 하기 때문이다. 이 순서에서는 close handshake가 끝나기 전에
+    // 문서가 바뀌므로 JS `close` 이벤트도 Playwright `close` 이벤트도 옛 문서에서 나지 않는다
+    // (2026-11-21 n150 실측: 응답 뒤 24 ms에 /login 문서 commit). 그래서 "닫았다"의 관측점은
+    // 앱이 **redirect 전에 동기로 부른 `close(code)` 호출**이다 — init script가 그 호출을 같은 탭
+    // sessionStorage에 남기고, /login에 도착한 뒤 읽는다(redirect 뒤의 호출은 옛 문서에서 나지
+    // 않으므로 기록이 없다). 옛 시도(응답을 붙잡거나 /login 문서 이동을 붙잡기)는 각각 교착
+    // (t1120c)·page 평가 불가(t1121a)로 실패했다.
+    await page.evaluate((key) => sessionStorage.removeItem(key), LOGOUT_CLOSE_CALL_KEY);
     let logoutResponseAt: number | null = null;
     let logoutResponseOk = false;
     const logoutResponseListener = (response: Response) => {
@@ -683,87 +678,33 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
         // URL 파싱 실패는 logout 응답이 아니다.
       }
     };
-    let closeCodeBeforeRedirect: number | null = null;
-    let loginRouteSeen = false;
-    let resolveLoginRouteSettled!: () => void;
-    const loginRouteSettled = new Promise<void>((resolve) => {
-      resolveLoginRouteSettled = resolve;
-    });
-    const loginRoute = async (route: Route) => {
-      if (route.request().resourceType() !== "document" || loginRouteSeen) {
-        await route.continue();
-        return;
-      }
-      loginRouteSeen = true;
-      try {
-        await waitForObservedAppSocketClose(page, 0, 1000, 5_000);
-        closeCodeBeforeRedirect =
-          (await observedAppSockets(page))[0]?.closeCode ?? 0;
-      } catch {
-        closeCodeBeforeRedirect = 0;
-      } finally {
-        await route.continue();
-        resolveLoginRouteSettled();
-      }
-    };
     page.on("response", logoutResponseListener);
-    await page.route(/\/login(?:\?.*)?$/, loginRoute);
-    let logoutPrimaryError: unknown;
     try {
-      await Promise.all([
-        closePromise,
-        page.getByRole("button", { name: "로그아웃", exact: true }).click(),
-      ]);
+      await page.getByRole("button", { name: "로그아웃", exact: true }).click();
       await page.waitForFunction(
         () => window.location.pathname === "/login",
         undefined,
         { timeout: READY.timeout },
       );
-    } catch (error) {
-      logoutPrimaryError = error;
+    } catch {
       throw new Error("실제 logout UI 종료/redirect 확인 실패 (values redacted)");
     } finally {
-      const teardownErrors: unknown[] = [];
-      if (loginRouteSeen) {
-        await Promise.race([
-          loginRouteSettled,
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error("login route handler settlement timeout")),
-              READY.timeout,
-            ),
-          ),
-        ]).catch((error: unknown) => teardownErrors.push(error));
-      }
-      await page
-        .unroute(/\/login(?:\?.*)?$/, loginRoute)
-        .catch((error: unknown) => teardownErrors.push(error));
       page.off("response", logoutResponseListener);
-      if (teardownErrors.length > 0) {
-        throw new AggregateError(
-          logoutPrimaryError === undefined
-            ? teardownErrors
-            : [logoutPrimaryError, ...teardownErrors],
-          "logout primary/route cleanup 실패",
-        );
-      }
     }
     const redirectPath = await page.evaluate(() => window.location.pathname);
+    const closeCall = parseLogoutCloseCall(
+      await page.evaluate((key) => sessionStorage.getItem(key), LOGOUT_CLOSE_CALL_KEY),
+    );
     const ticketRequestsAtRedirect = ticketRequests;
     await page.waitForTimeout(LOGOUT_SETTLE_MS);
-    if (
-      closeAt === null ||
-      closeCodeBeforeRedirect === null ||
-      logoutResponseAt === null
-    ) {
-      throw new Error("logout socket close timing 관측이 불완전합니다");
+    if (closeCall === null || logoutResponseAt === null) {
+      throw new Error("logout socket close 호출 관측이 불완전합니다");
     }
     return {
-      closeCodeBeforeRedirect,
-      // 응답 이벤트와 close 이벤트는 같은 CDP 흐름의 node 쪽 시각이다. close는 성공 응답을
-      // 처리한 뒤에 나므로 음수가 아니어야 하지만, 이벤트 전달 순서의 작은 흔들림을 위해
-      // 하한은 단언하지 않고 상한(즉시성)만 본다.
-      closeLatencyMs: closeAt - logoutResponseAt,
+      closeCodeBeforeRedirect: closeCall.code,
+      // 페이지의 Date.now()와 node의 Date.now()는 같은 호스트 시계다. close 호출은 성공 응답을
+      // 처리한 직후라 응답 이벤트보다 몇 ms 앞서 기록될 수 있다(실측 -2 ms) — 절댓값으로 본다.
+      closeLatencyMs: Math.abs(closeCall.at - logoutResponseAt),
       logoutResponseOk,
       healthySocket,
       redirectPath,
@@ -777,6 +718,49 @@ async function exerciseActualUiLogout(page: Page): Promise<ActualUiLogoutProbe> 
     page.off("request", requestListener);
     page.off("websocket", socketListener);
   }
+}
+
+const LOGOUT_CLOSE_CALL_KEY = "__ktm_c7_logout_close_call";
+
+/** 앱이 ops live socket에 부른 `close(code)`를 같은 탭 sessionStorage에 남긴다(값·URL 원문 없음). */
+async function installLogoutCloseCallRecorder(page: Page): Promise<void> {
+  await page.addInitScript((key: string) => {
+    const originalClose = WebSocket.prototype.close;
+    WebSocket.prototype.close = function (
+      this: WebSocket,
+      code?: number,
+      reason?: string,
+    ): void {
+      try {
+        if (new URL(this.url).pathname === "/v1/ops/live") {
+          sessionStorage.setItem(
+            key,
+            JSON.stringify({ at: Date.now(), code: code ?? null }),
+          );
+        }
+      } catch {
+        // 기록 실패는 앱 동작을 바꾸지 않는다.
+      }
+      originalClose.call(this, code, reason);
+    };
+  }, LOGOUT_CLOSE_CALL_KEY);
+}
+
+function parseLogoutCloseCall(raw: string | null): { at: number; code: number } | null {
+  if (raw === null) return null;
+  try {
+    const value: unknown = JSON.parse(raw);
+    if (
+      isRecord(value) &&
+      typeof value.at === "number" &&
+      typeof value.code === "number"
+    ) {
+      return { at: value.at, code: value.code };
+    }
+  } catch {
+    // 형식이 틀리면 관측 불완전으로 처리한다.
+  }
+  return null;
 }
 
 /**
