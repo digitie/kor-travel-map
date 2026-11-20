@@ -1,3 +1,20 @@
+## 2026-11-21 — C7 prod GREEN(t1121b, Map `24ffd5a2`) — 네 spec 전부 통과
+
+- 결과: runner rc=0, lane 잔여 없음(audit rc=0), evidence `run-20261120T230130Z-3626497`. spec별 —
+  `ops-c7-read-auth` 7/7, `poi-cache-targets-write` @c7-causal 2/2, `ops-c7-update-request-write` 2/2,
+  `ops-c7-schedule-write` 2/2. 마지막 GREEN(`bafec797`, 10-03) 이후 첫 GREEN이다.
+- 이번 회차에서 고친 것: #1524(파이프라인 "새로고침" 둘 — 공통 Dagster 패널), #1525·#1526(logout 순서가
+  acde3726부터 "성공 응답 뒤 close(1000)" — 관측점을 close 호출 기록으로), 그리고 **운영 설정** 하나 — C7의
+  `/root/.d2-dagster-basic-auth`가 2026-10-01 값이라 gateway가 401을 냈다(소유자가 10-24 Dagster UI 비밀번호를
+  바꿈). 현재 `.env`의 `KOR_TRAVEL_DAGSTER_UI_PASSWORD`로 다시 썼다(root 0600 한 줄, 옛 파일은 `.bak-<UTC>`).
+  Dagster UI 비밀번호를 바꾸면 이 파일도 같이 바꿔야 한다.
+- 복구: BLOCKED 네 번(t1120b·t1120c·t1121a·t1121b) 모두 runbook §4로 — journal·sentinel을 root 전용
+  `/root/c7-recovery-<tag>-<UTC>/`로 복제·SHA-256 기록, 읽기 전용 검증(C7 소유 target 0, schedule RUNNING,
+  활성 실행 0) 뒤 runtime·BLOCKED를 그 디렉터리로 **이동**(삭제 없음). 운영 쓰기는 매번 target `restored`.
+- 회전: t1120c(`db8497f2`)·t1121a(`9663598b`)·t1121b(`24ffd5a2`), 모두 chain17 + freeze, D1·D2 GREEN, PinVi `716781d0` 그대로.
+- 남은 것: main CI의 `pytest integration (PostGIS, pg18)`이 `01b602e3`(#1523)부터 35% 지점에서 6시간 멈춘다
+  (#1522 `c5bae138`까지는 통과, #1523은 Python 변경 없음 — 간헐 hang 추정, 원인 미규명). #1524~#1526은 그 위에서 병합했다.
+
 ## 2026-11-21 — C7 t1121a: logout 관측점을 `close()` 호출 기록으로(#1525 방식은 page 평가가 막힘)
 
 - #1525(t1121a, Map `9663598b`) 뒤에도 `LAST: 실제 로그아웃` 1건 실패(38.4초, 나머지 6건 GREEN, target `restored`).
