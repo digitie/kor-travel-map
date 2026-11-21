@@ -1,6 +1,6 @@
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench · design-system: design.md · designed-as-app
 import { Button as ButtonPrimitive } from "@kor-travel/ui/button";
-import { useId, useState, type ComponentProps } from "react";
+import { useId, useState, type ComponentProps, type ReactElement } from "react";
 import { Loader2Icon } from "lucide-react";
 
 import {
@@ -69,6 +69,33 @@ type ButtonProps = ComponentProps<typeof ButtonPrimitive> &
     focusableWhenDisabled?: boolean;
   };
 
+/** 버튼 상태 판정 — 렌더 함수의 분기를 줄이려고 밖으로 뺐다. */
+function resolveButtonState({
+  disabled,
+  disabledReason,
+  focusableWhenDisabled,
+  loading,
+}: Pick<ButtonProps, "disabled" | "disabledReason" | "focusableWhenDisabled"> & {
+  loading: boolean;
+}) {
+  // native `disabled`는 "진짜 비활성"(호출부가 disabled를 준 경우)에만. 진행 중에는
+  // `aria-disabled`만 걸어 포커스를 유지한다(둘 다 참이면 진행 중 표면이 이긴다 —
+  // 방금 누른 버튼이 곧 진행 중인 버튼이라 포커스 보존이 가장 중요한 자리다).
+  const reason = disabled && !loading ? disabledReason : undefined;
+  // 사유를 말할 수 있는 비활성(opt-in)은 포커스 가능한 aria-disabled로 — tooltip·설명 참조.
+  const explained = Boolean(focusableWhenDisabled && reason);
+  return {
+    reason,
+    explained,
+    nativeDisabled: Boolean(disabled) && !loading && !explained,
+    blocked: loading || explained,
+  };
+}
+
+function joinIds(...ids: (string | undefined)[]): string | undefined {
+  return ids.filter(Boolean).join(" ") || undefined;
+}
+
 function Button({
   className,
   variant = "default",
@@ -83,19 +110,12 @@ function Button({
   ...props
 }: ButtonProps) {
   const reasonId = useId();
-  const [reasonTipOpen, setReasonTipOpen] = useState(false);
-  // native `disabled`는 "진짜 비활성"(호출부가 disabled를 준 경우)에만. 진행 중에는
-  // `aria-disabled`만 걸어 포커스를 유지한다(둘 다 참이면 진행 중 표면이 이긴다 —
-  // 방금 누른 버튼이 곧 진행 중인 버튼이라 포커스 보존이 가장 중요한 자리다).
-  const reason = disabled && !loading ? disabledReason : undefined;
-  // 사유를 말할 수 있는 비활성(opt-in)은 포커스 가능한 aria-disabled로 — 아래 tooltip·설명 참조.
-  const explained = focusableWhenDisabled && Boolean(reason);
-  const nativeDisabled = Boolean(disabled) && !loading && !explained;
-  const blocked = loading || explained;
-  const describedBy =
-    [props["aria-describedby"], explained ? reasonId : undefined]
-      .filter(Boolean)
-      .join(" ") || undefined;
+  const { reason, explained, nativeDisabled, blocked } = resolveButtonState({
+    disabled,
+    disabledReason,
+    focusableWhenDisabled,
+    loading,
+  });
   const button = (
     <ButtonPrimitive
       variant={variant}
@@ -115,17 +135,12 @@ function Button({
         className,
       )}
       {...props}
-      aria-describedby={describedBy}
+      aria-describedby={joinIds(
+        props["aria-describedby"],
+        explained ? reasonId : undefined,
+      )}
     >
-      {loading ? (
-        <span
-          aria-hidden="true"
-          data-slot="button-spinner"
-          className="absolute inset-0 flex items-center justify-center"
-        >
-          <Loader2Icon className="animate-spin" />
-        </span>
-      ) : null}
+      {loading ? <ButtonSpinner /> : null}
       <span
         data-slot="button-label"
         className={cn(
@@ -140,31 +155,55 @@ function Button({
     </ButtonPrimitive>
   );
   if (!focusableWhenDisabled) return button;
-  // opt-in 호출부는 disabled 토글과 무관하게 **같은 트리**를 렌더한다(트리 모양이 바뀌면 버튼이
-  // 다시 마운트돼 포커스를 잃는다). tooltip은 사유가 있을 때만 열린다(hover — 포인터 이벤트
-  // 유지 — 와 focus 둘 다). sr-only 설명은 버튼의 형제다(버튼 안이면 접근성 이름에 섞인다).
-  // absolute라 flex gap·레이아웃을 차지하지 않는다.
+  return (
+    <DisabledReasonTooltip reason={explained ? reason : undefined} reasonId={reasonId}>
+      {button}
+    </DisabledReasonTooltip>
+  );
+}
+
+function ButtonSpinner() {
+  return (
+    <span
+      aria-hidden="true"
+      data-slot="button-spinner"
+      className="absolute inset-0 flex items-center justify-center"
+    >
+      <Loader2Icon className="animate-spin" />
+    </span>
+  );
+}
+
+/**
+ * opt-in 호출부는 disabled 토글과 무관하게 **같은 트리**를 렌더한다(트리 모양이 바뀌면 버튼이
+ * 다시 마운트돼 포커스를 잃는다). tooltip은 사유가 있을 때만 열린다(hover — 포인터 이벤트
+ * 유지 — 와 focus 둘 다). sr-only 설명은 버튼의 형제다(버튼 안이면 접근성 이름에 섞인다).
+ * absolute라 flex gap·레이아웃을 차지하지 않는다.
+ */
+function DisabledReasonTooltip({
+  reason,
+  reasonId,
+  children,
+}: {
+  reason: string | undefined;
+  reasonId: string;
+  children: ReactElement;
+}) {
+  const [open, setOpen] = useState(false);
   return (
     <>
       <TooltipProvider>
-        <Tooltip
-          open={explained && reasonTipOpen}
-          onOpenChange={setReasonTipOpen}
-        >
-          <TooltipTrigger asChild>{button}</TooltipTrigger>
-          {explained ? (
+        <Tooltip open={Boolean(reason) && open} onOpenChange={setOpen}>
+          <TooltipTrigger asChild>{children}</TooltipTrigger>
+          {reason ? (
             <TooltipContent data-slot="button-disabled-reason-tooltip">
               {reason}
             </TooltipContent>
           ) : null}
         </Tooltip>
       </TooltipProvider>
-      {explained ? (
-        <span
-          className="sr-only"
-          data-slot="button-disabled-reason"
-          id={reasonId}
-        >
+      {reason ? (
+        <span className="sr-only" data-slot="button-disabled-reason" id={reasonId}>
           {reason}
         </span>
       ) : null}

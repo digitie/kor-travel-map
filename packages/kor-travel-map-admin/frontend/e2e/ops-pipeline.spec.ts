@@ -104,8 +104,9 @@ async function expectScheduleControls(
   for (const [index, control] of controls.entries()) {
     if (state === "disabled") {
       await expect(control).toBeDisabled();
-      // 버튼(첫 항목인 사유 입력칸 제외)은 왜 잠겼는지 접근성 설명으로 말한다.
-      if (index > 0) {
+      // 버튼(첫 항목인 사유 입력칸 제외)은 왜 잠겼는지 접근성 설명으로 말한다. 방금 눌러
+      // 진행 중(aria-busy)인 버튼은 사유 대신 spinner가 상태를 말한다.
+      if (index > 0 && (await control.getAttribute("aria-busy")) !== "true") {
         await expect(control).toHaveAccessibleDescription(/\S/);
       }
     } else {
@@ -1885,7 +1886,8 @@ test.describe("/ops/pipeline", () => {
     // hover로 tooltip이 사유를 보여 준다.
     await create.hover();
     await expect(page.getByRole("tooltip")).toHaveText(reason);
-    await page.mouse.move(0, 0);
+    // 여러 단계로 벗어나야 Radix의 hover grace 영역 밖 pointermove가 닫기를 판정한다.
+    await page.mouse.move(0, 0, { steps: 10 });
     await expect(page.getByRole("tooltip")).toHaveCount(0);
 
     // 키보드 포커스로도 닿고 같은 사유가 뜬다.

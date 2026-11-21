@@ -387,17 +387,12 @@ function useSchedulePanelController({
   );
   const scheduleControlsDisabled =
     scheduleMutationPending || scheduleRecoveryLocked;
-  // 잠금 사유(focusable disabled 버튼의 tooltip·aria-describedby). 잠금 조건과 같은 순서로
-  // 판정해 "왜 지금 못 누르는가"를 한 문장으로 말한다.
-  const scheduleControlsDisabledReason = !scheduleControlsDisabled
-    ? undefined
-    : scheduleMutationPending
-      ? "다른 스케줄 명령의 응답을 기다리는 중입니다."
-      : !scheduleStateScanned
-        ? "schedule 상태 확인이 끝나면 활성화됩니다."
-        : recoveryClaim || effectiveClaimResolutionSubmission
-          ? "결과 불명 schedule claim을 해제할 때까지 스케줄 조작을 잠급니다."
-          : "응답이 확인되지 않은 요청을 '동일 요청 재확인'으로 먼저 마무리하세요.";
+  const scheduleControlsDisabledReason = scheduleLockReason({
+    locked: scheduleControlsDisabled,
+    mutationPending: scheduleMutationPending,
+    stateScanned: scheduleStateScanned,
+    claimOpen: Boolean(recoveryClaim || effectiveClaimResolutionSubmission),
+  });
   const scheduleControlsGuardRef = useRef(true);
   useEffect(() => {
     scheduleControlsGuardRef.current = scheduleControlsDisabled;
@@ -654,6 +649,30 @@ function useSchedulePanelController({
     submitCommand,
     submitCronPatch,
   };
+}
+
+/**
+ * 스케줄 조작 잠금 사유(focusable disabled 버튼의 tooltip·aria-describedby). 잠금 조건과 같은
+ * 순서로 판정해 "왜 지금 못 누르는가"를 한 문장으로 말한다.
+ */
+function scheduleLockReason({
+  locked,
+  mutationPending,
+  stateScanned,
+  claimOpen,
+}: {
+  locked: boolean;
+  mutationPending: boolean;
+  stateScanned: boolean;
+  claimOpen: boolean;
+}): string | undefined {
+  if (!locked) return undefined;
+  if (mutationPending) return "다른 스케줄 명령의 응답을 기다리는 중입니다.";
+  if (!stateScanned) return "schedule 상태 확인이 끝나면 활성화됩니다.";
+  if (claimOpen) {
+    return "결과 불명 schedule claim을 해제할 때까지 스케줄 조작을 잠급니다.";
+  }
+  return "응답이 확인되지 않은 요청을 '동일 요청 재확인'으로 먼저 마무리하세요.";
 }
 
 function ScheduleEditor({
