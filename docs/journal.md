@@ -8,6 +8,9 @@
   LIMIT 스칼라 부분질의는 hashed SubPlan이 될 수 없어 행마다 `source_links` 인덱스로 찍는다. 읽기 전용 실측:
   부산 맛집 585 → 383 ms(같은 51행), 서울 맛집 144 → 157 ms(+13, 수용). OpenAPI·migration 변화 없음.
 - 시험: 종전 `EXISTS`로 되돌린 SQL과 같은 행·같은 순서(통합), 판정 SubPlan이 hashed가 아님(계획 모양, 통합).
+  함정: pg18 `EXPLAIN (FORMAT JSON)`의 `Subplan Name`에는 "hashed"가 없다 — hashed는 그 SubPlan을 참조하는 식에만
+  `(hashed SubPlan N)`으로 찍힌다. 이름만 보던 첫 판은 종전 `EXISTS`에도 초록이었다(n150에서 빨개지게 해 보고 발견).
+  고친 판은 VERBOSE 식 참조를 보며, 종전 `EXISTS`는 이 시드에서도 hashed로 계획되어 빨개진다.
 
 ## 2026-11-21 — CI 통합 job 35% 정체(6시간 취소)의 원인: nearby 동등성 시험의 통계 공백 + 강제 계획 실행
 

@@ -743,8 +743,12 @@ async def test_demoted_primary_predicate_is_never_a_hashed_subplan(
     """접기 대표 판정은 행마다 ``source_links``를 찍는다 — MCST 집합 전체를 해시하지 않는다.
 
     prod 2026-11-21: ``EXISTS``가 autoanalyze 뒤 hashed SubPlan으로 뒤집혀 질의마다 MCST primary
-    88,526행으로 해시를 지었다("부산 맛집" 382→575 ms). 판정 부분질의(``source_links``를 읽는
-    SubPlan)가 있고, 그것이 hashed가 아님을 본다.
+    88,526행으로 해시를 지었다("부산 맛집" 382→575 ms).
+
+    pg18의 JSON ``Subplan Name``에는 "hashed"가 없다 — hashed 여부는 그 SubPlan을 **참조하는 식**에만
+    ``(hashed SubPlan N)``으로 찍힌다. 그래서 VERBOSE 계획에서 판정 SubPlan(MCST provider 리터럴을
+    품은 것)의 이름을 찾고, 그 이름이 식에서 참조되며 ``hashed``로는 참조되지 않음을 본다. 종전
+    ``EXISTS``는 이 시드에서도 hashed로 계획되어 이 단언이 빨개진다(n150 실측).
     """
     await _seed_demotion_pairs(migrated_session)
     await migrated_session.execute(text("ANALYZE provider_sync.source_links"))
@@ -756,16 +760,18 @@ async def test_demoted_primary_predicate_is_never_a_hashed_subplan(
         )
     )[0]
     plan = (
-        await connection.exec_driver_sql("EXPLAIN (FORMAT JSON) " + statement, params)
+        await connection.exec_driver_sql("EXPLAIN (VERBOSE, FORMAT JSON) " + statement, params)
     ).scalar_one()[0]["Plan"]
-    demotion_subplans = [
-        node
+    provider_literal = f"'{feature_repo._SEARCH_DEDUP_DEMOTED_PROVIDER}'"
+    demotion_names = {
+        str(node["Subplan Name"])
         for node in _plan_nodes(plan)
         if node.get("Parent Relationship") == "SubPlan"
-        and any(
-            inner.get("Relation Name") == "source_links" for inner in _plan_nodes(node)
-        )
-    ]
-    assert demotion_subplans, plan
-    for node in demotion_subplans:
-        assert "hashed" not in str(node.get("Subplan Name", "")).lower(), node
+        and any(inner.get("Relation Name") == "source_links" for inner in _plan_nodes(node))
+        and provider_literal in json.dumps(node, ensure_ascii=False)
+    }
+    assert len(demotion_names) == 1, (demotion_names, plan)
+    name = demotion_names.pop()
+    rendered = json.dumps(plan, ensure_ascii=False)
+    assert f"({name})" in rendered, (name, plan)
+    assert f"hashed {name}" not in rendered, (name, plan)
