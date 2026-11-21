@@ -1,3 +1,15 @@
+## 2026-11-21 — 관리자 프런트 ui 0.2.4(TabsTrigger focus 정본화)와 Map 탭 override 제거
+
+- `@kor-travel/ui` 0.2.3→0.2.4·tokens 0.1.4→0.1.5(common #79, main pack `9691080c`, docs run 44882394234 artifact
+  14698374408; sha256·SRI가 catalog #80과 같음)를 vendor하고 guard·`common-ref`를 `c3f8e6a1`로 올렸다. toast 0.1.4는
+  Map이 쓰지 않아 받지 않았다(0.2.3 채택 때와 같음). ui·tokens 의존 목록은 그대로이고 ui peer만 tokens 0.1.5다.
+- 공통 0.2.4 TabsTrigger focus가 FS-7.8 단일 outline 2px·offset 2px(`outline-kt-focus`)가 되어 Map
+  `components/ui/tabs.tsx`의 0.2.3용 덧대기(`focus-visible:border-transparent`·`ring-0`·`outline-focus`·전환 좁히기)를
+  지우고 공통 Tabs를 그대로 다시 내보낸다.
+- 시험: vitest `tabs.test.tsx`는 트리거의 `focus-visible:` 변형이 정확히 `outline-2`·`outline-offset-2`·`outline-kt-focus`
+  셋이고 ring 유틸·`transition-all`이 없음을 본다. Playwright `admin-shell.spec.ts` 탭 포커스 검사에 테두리 색 불변을 더했다.
+- Map admin OpenAPI 변경 없음. 배포하지 않았다(부모 통합 회전).
+
 ## 2026-11-21 — T-READ-11 검색 접기 대표 판정이 hashed SubPlan으로 뒤집힌 회귀("부산 맛집" 382→575 ms)
 
 - 증상: n150 prod "부산 맛집" 서버 p50이 기준선(T-READ-01) 382 ms에서 575 ms로 올랐다. 코드 변경이 아니라 계획 변경이다.

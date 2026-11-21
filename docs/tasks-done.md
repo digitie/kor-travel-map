@@ -1,5 +1,9 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택
+
+- [x] T-UI-TABS-FOCUS — **공통 TabsTrigger focus(ui 0.2.4)와 Map override 제거.** 근거는 journal 2026-11-21.
+
 ## 2026-11-19 — 관리자 프런트 공통 AdminShell 채택
 
 - [x] T-UI-ADMINSHELL — **공통 관리자 셸(ui 0.2.3)과 버튼 테두리.** 모바일 좌측 drawer·한 줄 "영역 - 페이지" 상단 바로

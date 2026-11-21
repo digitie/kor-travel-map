@@ -207,8 +207,8 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
       const pressedBox = await refresh.boundingBox();
       expect(Math.abs((pressedBox?.height ?? 0) - box.height)).toBeLessThanOrEqual(1);
 
-      // 탭 트리거도 버튼과 같은 단일 outline이다(공통 0.2.3 tabs recipe의 3px ring·1px outline·
-      // 테두리 색을 Map wrapper가 덮는다).
+      // 탭 트리거도 버튼과 같은 단일 outline이다(공통 0.2.4 tabs recipe 그대로 — Map wrapper의
+      // 0.2.3용 focus 덧대기는 지웠다). ring·테두리 색 변화가 없어야 한다.
       // Radix Tabs는 roving tabindex라 선택된 탭만 Tab으로 닿는다.
       const tab = page.getByRole("tab", { selected: true }).first();
       await expect(tab).toBeVisible();
@@ -219,10 +219,10 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
       expect(tabFocused.outlineStyle).toBe("solid");
       expect(tabFocused.outlineWidth).toBe("2px");
       expect(tabFocused.outlineOffset).toBe("2px");
-      // ring-0은 box-shadow 합성 문자열을 바꿀 수 있어(폭 0 ring 항목) 문자열 동일 대신
       // "spread가 양수인 그림자(= 보이는 ring)가 새로 생기지 않았다"를 본다.
       expect(spreadRings(tabFocused.boxShadow)).toEqual(spreadRings(tabRest.boxShadow));
       expect(tabFocused.borderWidth).toBe(tabRest.borderWidth);
+      expect(tabFocused.borderColor).toBe(tabRest.borderColor);
     });
   }
 
