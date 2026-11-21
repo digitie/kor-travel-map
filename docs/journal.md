@@ -36,7 +36,6 @@
   statement를 두 화면이 나눠 쓰므로 강제하면 한쪽이 손해라 **고치지 않았다**. 100 km nearby(14/12/11)·카페(146/172/149)·
   부산 맛집(407/429/423)·서울 맛집(166/166/166)은 generic을 한 번도 고르지 않았다(custom 비용이 더 낮다).
 - OpenAPI·migration 변화 없음. 배포하지 않았다(부모 통합 회전).
-||||||| parent of c0dc42c07 (docs: journal·resume — 관리자 프런트 소수정 셋)
 
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4(TabsTrigger focus 정본화)와 Map 탭 override 제거
 

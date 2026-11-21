@@ -9,7 +9,6 @@
 - zoom 7 sido 집계가 연결의 prepared statement 6번째 실행부터 generic plan(GiST 직렬, 685–902 ms)으로 넘어가던 것을 집계
   문장 동안만 `plan_cache_mode=force_custom_plan`으로 막았다(custom 147–191 ms). probe에 case별 warm-up 추가.
 - 다음: 운영 회전 뒤 warm-up 포함 probe로 zoom 7 서버 p50을 다시 재 T-READ-12를 닫는다.
-||||||| parent of c0dc42c07 (docs: journal·resume — 관리자 프런트 소수정 셋)
 
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택(Map 탭 focus override 제거)
 
