@@ -745,10 +745,11 @@ async def test_demoted_primary_predicate_is_never_a_hashed_subplan(
     prod 2026-11-21: ``EXISTS``가 autoanalyze 뒤 hashed SubPlan으로 뒤집혀 질의마다 MCST primary
     88,526행으로 해시를 지었다("부산 맛집" 382→575 ms).
 
-    pg18의 JSON ``Subplan Name``에는 "hashed"가 없다 — hashed 여부는 그 SubPlan을 **참조하는 식**에만
-    ``(hashed SubPlan N)``으로 찍힌다. 그래서 VERBOSE 계획에서 판정 SubPlan(MCST provider 리터럴을
-    품은 것)의 이름을 찾고, 그 이름이 식에서 참조되며 ``hashed``로는 참조되지 않음을 본다. 종전
-    ``EXISTS``는 이 시드에서도 hashed로 계획되어 이 단언이 빨개진다(n150 실측).
+    pg18의 JSON ``Subplan Name``에는 "hashed"가 없다 — hashed 여부는 그 SubPlan을
+    **참조하는 식**에만 ``(hashed SubPlan N)``으로 찍힌다. 그래서 VERBOSE 계획에서 판정
+    SubPlan(MCST provider 리터럴을 품은 것)의 이름을 찾고, 그 이름이 식에서 참조되며
+    ``hashed``로는 참조되지 않음을 본다. 종전 ``EXISTS``는 이 시드에서도 hashed로 계획되어
+    이 단언이 빨개진다(n150 실측).
     """
     await _seed_demotion_pairs(migrated_session)
     await migrated_session.execute(text("ANALYZE provider_sync.source_links"))
