@@ -2779,3 +2779,23 @@ transaction에서** 맞추고(지연 0), 집계는 그 표를 병렬(`Gather →
   — 종전 SQL 사본과 3단위 × bbox 3 × kind 필터 5(분류 필터 포함), notice(종료 포함), geom UPDATE 뒤 한 번 더. 개수는
   정확히, 평균 좌표는 1e-9도). OpenAPI 세 파일이 바뀌지 않았다.
 - [ ] 운영 반영 뒤 언제·어느 배포 generation에서 쟀는지 journal에 적었다.
+
+## T-READ-12
+
+2026-11-21 운영 읽기 전용 조사의 발견이다. `/v1/features/in-bounds` zoom 7 sido 집계가 같은 연결의 asyncpg prepared
+statement **6번째 실행부터**(`plan_cache_mode=auto`) custom plan(Parallel Seq Scan on `feature_cluster_points` +
+HashAggregate, 147–191 ms)에서 generic plan(`idx_feature_cluster_points_coord_gist` 직렬 scan, 추정 rows=1,
+685–902 ms)으로 넘어갔다. 운영 정상상태 ~630 ms, 꼬리 1–4 s, read_timeout 503 하나. 세션에서
+`SET plan_cache_mode = force_custom_plan`이면 146–154 ms(계획 비용 약 7 ms). harness·tier-1 gate는 매번 `EXPLAIN`으로
+계획해 이 전환을 볼 수 없다.
+
+구현(PR): `_CLUSTER_HASH_AGGREGATE_ON_SQL`/`_OFF_SQL`이 `enable_sort`와 함께 `plan_cache_mode`를 `force_custom_plan`으로
+두고(transaction-local) 집계 뒤 직전 값으로 되돌린다. harness·tier-1 gate는 같은 상수를 import한다.
+`scripts/read_path_probe.py`는 case마다 warm-up(기본 6 × pool 15 = 90건)을 먼저 보낸다.
+
+- [x] 같은 연결에서 sido 집계를 8번 돌려도 prepared statement의 `generic_plans`가 늘지 않고, 그 문장의 EXPLAIN이
+  HashAggregate·좌표 GiST 없음이다(`tests/integration/test_cluster_rollup_equivalence.py`, 전 kind·point-only). 고침을
+  되돌리면(`force_custom_plan` → `auto`) 빨개진다.
+- [x] 설정 두 개가 집계 뒤 직전 값(`on`·`auto`)으로 돌아온다(같은 파일 scoping 시험).
+- [ ] 운영 회전 뒤 warm-up 포함 probe(`--warmup-per-case` 기본값)로 zoom 7 집계 서버 p50이 200 ms 안팎이고 연결 나이와
+  무관함을 journal에 적었다(언제·어느 배포 generation).
