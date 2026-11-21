@@ -753,6 +753,8 @@ function ExecutionRunLogs({
             />
             <Button
               disabled={runNow.isPending}
+              disabledReason="즉시 재큐잉(run-now) 요청의 응답을 기다리는 중입니다."
+              focusableWhenDisabled
               loading={cancelExecution.isPending}
               type="button"
               variant="destructive"
@@ -767,6 +769,8 @@ function ExecutionRunLogs({
           <div className="space-y-1">
             <Button
               disabled={cancelExecution.isPending}
+              disabledReason="취소 요청의 응답을 기다리는 중입니다."
+              focusableWhenDisabled
               loading={runNow.isPending}
               type="button"
               variant="outline"

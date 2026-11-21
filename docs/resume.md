@@ -1,3 +1,9 @@
+## 2026-11-21 — 관리자 프런트 소수정(drawer e2e flake·모바일 44px·파이프라인 비활성 사유)
+
+- drawer 폭 측정을 애니메이션 종료 뒤로, 모바일 아이콘 버튼 44px(데스크톱 불변), 파이프라인 비활성 버튼은 포커스 가능한
+  aria-disabled + tooltip/aria-describedby로 사유 노출(`Button focusableWhenDisabled`, opt-in). OpenAPI 변경 없음.
+- 다음: 통합 회전에서 frontend 재빌드·배포 뒤 모바일 실화면 확인. 다른 화면의 사유 있는 비활성 버튼도 필요하면 같은 opt-in으로.
+
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택(Map 탭 focus override 제거)
 
 - ui 0.2.4·tokens 0.1.5 vendor, guard `c3f8e6a1`. 공통 TabsTrigger가 FS-7.8 단일 outline이 되어 Map 덧대기를 지웠다.

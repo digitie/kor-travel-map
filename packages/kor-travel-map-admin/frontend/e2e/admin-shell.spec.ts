@@ -126,8 +126,18 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
 
     const drawer = page.getByRole("dialog", { name: "주요 메뉴" });
     await expect(drawer).toBeVisible();
+    // drawer는 slide-in-from-left 애니메이션으로 들어온다. 열린 직후 boundingBox는 이동 중인
+    // translateX를 재므로(x<0) 애니메이션이 끝나 자리를 잡을 때까지 기다린 뒤 잰다.
+    await expect(drawer).toHaveAttribute("data-state", "open");
+    await drawer.evaluate((element) =>
+      Promise.all(
+        element.getAnimations().map((animation) =>
+          animation.finished.catch(() => undefined),
+        ),
+      ),
+    );
+    await expect.poll(async () => (await drawer.boundingBox())?.x).toBe(0);
     const drawerBox = await drawer.boundingBox();
-    expect(drawerBox?.x).toBe(0);
     expect(drawerBox?.width).toBeLessThanOrEqual(280);
     const menu = drawer.getByRole("navigation", { name: "주요 메뉴" });
     await expect(menu.getByRole("link")).toHaveCount(21);
@@ -238,6 +248,44 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
     const box = await refresh.boundingBox();
     // 라벨이 시각적으로 숨어 아이콘 폭만 남는다(텍스트 버튼이면 64px를 넘는다).
     expect(box?.width).toBeLessThanOrEqual(44);
+  });
+
+  test("mobile: 상단 바 버튼은 터치 표적 44px 이상, 데스크톱 밀도는 그대로", async ({
+    page,
+  }) => {
+    await page.setViewportSize(MOBILE);
+    await page.goto("/ops/logs");
+    const header = page.locator('[data-slot="admin-shell-header"]');
+    const refresh = header
+      .locator('[data-slot="admin-shell-actions"]')
+      .getByRole("button", { name: "새로고침" });
+    await expect(refresh).toBeVisible();
+    // 상단 바의 모든 보이는 버튼(메뉴 버튼·도움말·동작)이 WCAG 2.5.5 44×44를 넘는다.
+    const mobileBoxes = await header.locator("button").evaluateAll((buttons) =>
+      buttons
+        .filter((button) => button.checkVisibility())
+        .map((button) => {
+          const rect = button.getBoundingClientRect();
+          return {
+            name: button.getAttribute("aria-label") ?? button.textContent ?? "",
+            width: rect.width,
+            height: rect.height,
+          };
+        }),
+    );
+    expect(mobileBoxes.length).toBeGreaterThanOrEqual(2);
+    for (const box of mobileBoxes) {
+      expect(box.width, `${box.name} width`).toBeGreaterThanOrEqual(44);
+      expect(box.height, `${box.name} height`).toBeGreaterThanOrEqual(44);
+    }
+    // 상단 바는 여전히 한 줄(48px 안팎)이다.
+    expect((await header.boundingBox())?.height).toBeLessThanOrEqual(56);
+
+    // 데스크톱은 기존 밀도(공통 Button 기본 h-8 = 32px)를 유지한다.
+    await page.setViewportSize(DESKTOP);
+    await expect
+      .poll(async () => (await refresh.boundingBox())?.height)
+      .toBe(32);
   });
 });
 
