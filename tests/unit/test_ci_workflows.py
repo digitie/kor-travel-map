@@ -97,6 +97,10 @@ def test_ci_workflow_splits_unit_integration_and_fixture_replay_jobs() -> None:
     assert "--cov-append" in integration_test
     assert "--cov-report=xml" in integration_test
     assert "--cov-fail-under=0" not in integration_test
+    # 멈춘 시험 하나가 6시간 job 취소까지 흔적 없이 runner를 잡지 않게 — 시험 단위 상한(이름과
+    # stack을 찍는 thread 방식)과 job 상한을 함께 둔다(2026-11-21).
+    assert "--timeout=600 --timeout-method=thread" in integration_test
+    assert 0 < int(integration["timeout-minutes"]) <= 120
     combined_upload = integration_steps["Upload combined coverage XML"]
     assert "!cancelled()" in combined_upload["if"]
     # upload-artifact@v4는 같은 이름의 두 번째 업로드를 거부한다 — leg마다 이름이 다르다.
