@@ -101,9 +101,14 @@ async function expectScheduleControls(
     page.getByRole("button", { name: `${SCHEDULE_NAME} 상태 기본값 복귀` }),
     page.getByRole("button", { name: `${SCHEDULE_NAME} cron 수정` }),
   ];
-  for (const control of controls) {
+  for (const [index, control] of controls.entries()) {
     if (state === "disabled") {
       await expect(control).toBeDisabled();
+      // 버튼(첫 항목인 사유 입력칸 제외)은 왜 잠겼는지 접근성 설명으로 말한다. 방금 눌러
+      // 진행 중(aria-busy)인 버튼은 사유 대신 spinner가 상태를 말한다.
+      if (index > 0 && (await control.getAttribute("aria-busy")) !== "true") {
+        await expect(control).toHaveAccessibleDescription(/\S/);
+      }
     } else {
       await expect(control).toBeEnabled();
     }
@@ -1860,6 +1865,40 @@ test.describe("/ops/pipeline", () => {
     ).toBeDisabled();
   });
 
+  test("비활성 동작 버튼은 포커스·hover로 사유를 tooltip과 접근성 설명에 노출", async ({
+    page,
+  }) => {
+    await installPipelineMocks(page, {
+      overview: makeOverview({ queueSensorStatus: "STOPPED" }),
+    });
+    await page.goto("/ops/pipeline");
+    const reason =
+      "큐 sensor가 RUNNING으로 확인될 때까지 새 갱신 요청을 만들지 않습니다.";
+    const create = page.getByRole("button", {
+      name: "갱신 요청 생성 (큐 sensor 확인 필요)",
+    });
+    await expect(create).toBeDisabled();
+    // native disabled가 아니라 aria-disabled — 포커스·hover 이벤트를 받는다.
+    await expect(create).toHaveAttribute("aria-disabled", "true");
+    await expect(create).not.toHaveAttribute("disabled", /.*/);
+    await expect(create).toHaveAccessibleDescription(reason);
+
+    // hover로 tooltip이 사유를 보여 준다.
+    await create.hover();
+    await expect(page.getByRole("tooltip")).toHaveText(reason);
+    // 여러 단계로 벗어나야 Radix의 hover grace 영역 밖 pointermove가 닫기를 판정한다.
+    await page.mouse.move(0, 0, { steps: 10 });
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+
+    // 키보드 포커스로도 닿고 같은 사유가 뜬다.
+    await create.focus();
+    await expect(create).toBeFocused();
+    await expect(page.getByRole("tooltip")).toHaveText(reason);
+    // 활성화는 막힌다(dialog가 열리지 않는다).
+    await page.keyboard.press("Enter");
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+  });
+
   for (const scenario of [
     {
       name: "unknown",
@@ -2883,9 +2922,17 @@ test.describe("/ops/pipeline", () => {
     await expect(
       page.getByText("즉시 실행 불가: schedule job 이름이 없습니다."),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: `${SCHEDULE_NAME} 즉시 실행` }),
-    ).toBeDisabled();
+    const runNow = page.getByRole("button", {
+      name: `${SCHEDULE_NAME} 즉시 실행`,
+    });
+    await expect(runNow).toBeDisabled();
+    await expect(runNow).toHaveAccessibleDescription(
+      "schedule job 이름이 없습니다.",
+    );
+    await runNow.focus();
+    await expect(page.getByRole("tooltip")).toHaveText(
+      "schedule job 이름이 없습니다.",
+    );
   });
 
   test("스케줄 cron 수정(PATCH)과 기본값 복귀(null) + 지연 반영 안내", async ({

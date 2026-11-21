@@ -107,3 +107,86 @@ it.each(BUTTON_VARIANTS)(
     }
   },
 );
+
+it.each(["icon", "icon-sm", "icon-xs", "icon-lg"] as const)(
+  "%s: 모바일(md 미만)에서만 터치 표적 하한 44px(min-size)을 건다",
+  (size) => {
+    for (const tokens of [
+      buttonVariants({ variant: "ghost", size }).split(" "),
+      attributes(
+        renderToStaticMarkup(
+          <Button aria-label="닫기" size={size} variant="ghost">
+            x
+          </Button>,
+        ),
+      ).className.split(" "),
+    ]) {
+      expect(tokens).toContain("max-md:min-h-11");
+      expect(tokens).toContain("max-md:min-w-11");
+      // 데스크톱 밀도(공통 recipe의 size-*)는 그대로 남는다.
+      expect(tokens.some((token) => /^size-\d+$/.test(token))).toBe(true);
+      expect(tokens.some((token) => /^(min-h|min-w)-/.test(token))).toBe(false);
+    }
+  },
+);
+
+it("텍스트 버튼에는 모바일 min-size를 덧대지 않는다", () => {
+  const tokens = attributes(
+    renderToStaticMarkup(<Button size="sm">저장</Button>),
+  ).className.split(" ");
+  expect(tokens).not.toContain("max-md:min-h-11");
+});
+
+it("focusableWhenDisabled: 사유가 있으면 포커스 가능한 aria-disabled + 설명 + tooltip", async () => {
+  const onClick = vi.fn();
+  render(
+    <Button
+      disabled
+      disabledReason="큐 sensor 확인 필요"
+      focusableWhenDisabled
+      onClick={onClick}
+    >
+      요청 생성
+    </Button>,
+  );
+  const button = screen.getByRole("button", { name: "요청 생성" });
+  expect(button.hasAttribute("disabled")).toBe(false);
+  expect(button.getAttribute("aria-disabled")).toBe("true");
+  // title(네이티브 tooltip)과 Radix tooltip이 겹치지 않는다.
+  expect(button.hasAttribute("title")).toBe(false);
+  // 접근성 설명은 상시(tooltip이 닫혀 있어도) 사유를 가리킨다.
+  const describedBy = button.getAttribute("aria-describedby");
+  expect(describedBy).toBeTruthy();
+  expect(document.getElementById(describedBy ?? "")?.textContent).toBe(
+    "큐 sensor 확인 필요",
+  );
+  // 활성화는 막힌다(클릭·폼 제출 모두 preventDefault).
+  expect(fireEvent.click(button)).toBe(false);
+  expect(onClick).not.toHaveBeenCalled();
+  // 키보드 포커스로 닿고, 포커스 때 tooltip이 사유를 보여 준다.
+  button.focus();
+  expect(document.activeElement).toBe(button);
+  expect(
+    await screen.findByRole("tooltip", { name: "큐 sensor 확인 필요" }),
+  ).toBeTruthy();
+});
+
+it("focusableWhenDisabled: 사유가 없거나 활성이면 기존 동작 그대로", () => {
+  const { rerender } = render(
+    <Button disabled focusableWhenDisabled>
+      적용
+    </Button>,
+  );
+  const button = screen.getByRole("button", { name: "적용" });
+  expect(button.hasAttribute("disabled")).toBe(true);
+  expect(button.hasAttribute("aria-describedby")).toBe(false);
+  rerender(
+    <Button disabledReason="선택 필요" focusableWhenDisabled>
+      적용
+    </Button>,
+  );
+  expect(button.hasAttribute("disabled")).toBe(false);
+  expect(button.hasAttribute("aria-disabled")).toBe(false);
+  expect(button.hasAttribute("aria-describedby")).toBe(false);
+  expect(document.querySelector('[data-slot="button-disabled-reason"]')).toBeNull();
+});

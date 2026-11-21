@@ -1283,6 +1283,7 @@ export function RequestCreateDialog({
             <Button
               disabled={createRequest.isPending}
               disabledReason="요청 응답을 확인할 때까지 dialog를 닫지 않습니다."
+              focusableWhenDisabled
               type="button"
               variant="outline"
               onClick={closeDialog}
@@ -1296,6 +1297,7 @@ export function RequestCreateDialog({
                   ? "canonical catalog를 확인할 수 없어 요청을 차단합니다."
                   : "canonical catalog를 불러오는 중입니다."
               }
+              focusableWhenDisabled
               loading={
                 createRequest.isPending ||
                 previewRequest.isPending ||
