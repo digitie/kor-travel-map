@@ -174,3 +174,59 @@ def test_non_200_is_excluded_from_percentiles_and_fails_the_run(
     ) == 1
     report = json.loads(output.read_text(encoding="utf-8"))
     assert all(case["wall_p50_ms"] is None for case in report["cases"])
+
+
+def test_warmup_requests_are_sent_first_and_kept_out_of_percentiles() -> None:
+    """T-READ-12 — warm-up은 재기 전에 보내고(연결마다 6번을 넘기게) 분위에 넣지 않는다."""
+
+    calls: list[int] = []
+
+    def fetch(_url: str, _headers: Mapping[str, str], _timeout: float) -> probe.ProbeResponse:
+        calls.append(1)
+        # 앞 warm-up 3건은 느리고(그중 1건은 503), 그 뒤 잰 2건은 빠르다.
+        status = 503 if len(calls) == 1 else 200
+        duration = 900 if len(calls) <= 3 else 12
+        body = json.dumps({"data": {"items": []}, "meta": {"duration_ms": duration}})
+        return probe.ProbeResponse(status=status, body=body.encode())
+
+    report = probe.run_probe(
+        base_url="http://127.0.0.1:12701",
+        token=None,
+        iterations=2,
+        fetch=fetch,
+        psi=lambda: None,
+        cases=probe.PROBE_CASES[:1],
+        warmup=3,
+    )
+    case = report["cases"][0]
+    assert len(calls) == 5
+    assert report["warmup_per_case"] == 3
+    assert case["warmup"] == {"requests": 3, "statuses": {"503": 1, "200": 2}, "errors": {}}
+    assert case["statuses"] == {"200": 2}
+    assert case["server_p95_ms"] == 12.0
+
+
+def test_warmup_default_covers_every_pooled_connection_past_generic_plan_threshold(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.infra import db
+
+    defaults = db.make_async_engine.__kwdefaults__ or {}
+    pool = int(defaults["pool_size"]) + int(defaults["max_overflow"])
+    assert pool * 6 <= probe.DEFAULT_WARMUP_PER_CASE
+
+    seen: list[tuple[str, dict[str, str]]] = []
+    monkeypatch.setattr(probe, "read_psi_io_some_avg60", lambda: None)
+    real_run = probe.run_probe
+
+    def run(**kwargs: object) -> dict[str, object]:
+        return real_run(fetch=_fake_fetch(seen), psi=probe.read_psi_io_some_avg60, **kwargs)
+
+    monkeypatch.setattr(probe, "run_probe", run)
+    output = tmp_path / "probe.safe.json"
+    assert probe.main(
+        ["--iterations", "1", "--warmup-per-case", "0", "--output", str(output)], environ={}
+    ) == 0
+    report = json.loads(output.read_text(encoding="utf-8"))
+    assert report["warmup_per_case"] == 0
+    assert len(seen) == len(report["cases"])

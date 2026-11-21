@@ -16,6 +16,13 @@ PinVi와 같은 모양의 HTTP 요청을 Map API에 보내 요청마다 ``meta.d
 
 운영에서 돌리는 것은 소유자가 승인한 조용한 창에서만 한다(계획 §8.1, 2026-11-18 결정).
 
+- **재기 전에 case마다 warm-up을 보낸다(T-READ-12).** asyncpg는 SQL을 연결마다 prepared
+  statement로 재사용하고, PostgreSQL ``plan_cache_mode=auto``는 한 연결에서 6번째 실행부터 generic
+  plan을 고를 수 있다. 그래서 연결이 막 열린 API와 오래 돈 API의 숫자가 다를 수 있다(zoom 7 집계가
+  150 → 630 ms로 바뀐 적이 있다). ``--warmup-per-case``(기본 6 × (pool_size 5 + max_overflow 10)
+  = 90)만큼 먼저 보내 버리고 결과를 분위에 넣지 않는다. 요청은 하나씩 가므로 pool(FIFO)이 쉬는
+  연결을 돌려 가며 내준다 — 각 연결이 6번을 넘긴 정상상태에서 잰다. ``0``이면 끈다.
+
 사용법::
 
     python scripts/read_path_probe.py --base-url http://127.0.0.1:12701 \\
@@ -53,6 +60,11 @@ _SEOUL_Z13: Final[tuple[float, float, float, float]] = (126.868, 37.51125, 127.0
 _SEOUL_Z14: Final[tuple[float, float, float, float]] = (126.923, 37.53888, 127.033, 37.59413)
 _NATION_Z7: Final[tuple[float, float, float, float]] = (124.5, 33.0, 131.0, 38.7)
 _CAPITAL_Z10: Final[tuple[float, float, float, float]] = (126.6, 37.3, 127.4, 37.8)
+#: API 엔진 pool 기본값(``kortravelmap.infra.db.make_async_engine``: pool_size 5, max_overflow 10)과
+#: PostgreSQL이 generic plan을 고려하기 시작하는 실행 횟수(``plan_cache_mode=auto``의 6번째).
+_API_POOL_CONNECTIONS: Final[int] = 5 + 10
+_GENERIC_PLAN_AFTER_EXECUTIONS: Final[int] = 6
+DEFAULT_WARMUP_PER_CASE: Final[int] = _GENERIC_PLAN_AFTER_EXECUTIONS * _API_POOL_CONNECTIONS
 
 
 @dataclass(frozen=True, slots=True)
@@ -199,16 +211,29 @@ def _measure_case(
     timeout: float,
     fetch: Fetch,
     psi: Callable[[], float | None],
+    warmup: int = 0,
 ) -> tuple[dict[str, Any], bytes | None]:
-    """case 하나를 ``iterations``번 보낸다. (보고서 항목, 마지막 200 응답 본문)."""
+    """case 하나를 ``warmup``번 버리고 ``iterations``번 잰다.
 
+    (보고서 항목, 마지막 200 응답 본문)을 돌려준다.
+    """
+
+    url = _url(base_url, case)
+    warmup_statuses: dict[str, int] = {}
+    warmup_errors: dict[str, int] = {}
+    for _ in range(warmup):
+        try:
+            warm = fetch(url, headers, timeout)
+        except (OSError, TimeoutError) as exc:
+            warmup_errors[type(exc).__name__] = warmup_errors.get(type(exc).__name__, 0) + 1
+            continue
+        warmup_statuses[str(warm.status)] = warmup_statuses.get(str(warm.status), 0) + 1
     psi_before = psi()
     wall_ms: list[float] = []
     server_ms: list[float] = []
     statuses: dict[str, int] = {}
     errors: dict[str, int] = {}
     last_ok_body: bytes | None = None
-    url = _url(base_url, case)
     for _ in range(iterations):
         started = time.perf_counter()
         try:
@@ -230,6 +255,7 @@ def _measure_case(
         "name": case.name,
         "path": case.path,
         "iterations": iterations,
+        "warmup": {"requests": warmup, "statuses": warmup_statuses, "errors": warmup_errors},
         "statuses": statuses,
         "errors": errors,
         "psi_io_some_avg60_before": psi_before,
@@ -252,8 +278,9 @@ def run_probe(
     fetch: Fetch = _urllib_fetch,
     psi: Callable[[], float | None] = read_psi_io_some_avg60,
     cases: Sequence[ProbeCase] = PROBE_CASES,
+    warmup: int = 0,
 ) -> dict[str, Any]:
-    """case마다 재고 보고서 dict를 돌려준다. token은 헤더로만 쓴다."""
+    """case마다 (warm-up 뒤) 재고 보고서 dict를 돌려준다. token은 헤더로만 쓴다."""
 
     headers = {"Accept": "application/json"}
     if token is not None:
@@ -269,6 +296,7 @@ def run_probe(
             timeout=timeout,
             fetch=fetch,
             psi=psi,
+            warmup=warmup,
         )
         entries.append(entry)
         if case.name == DETAIL_SOURCE_CASE_NAME and body is not None:
@@ -286,6 +314,7 @@ def run_probe(
             timeout=timeout,
             fetch=fetch,
             psi=psi,
+            warmup=warmup,
         )
         # 상세 경로의 feature id는 공개 값이지만 보고서는 경로 틀만 남긴다.
         entry["path"] = "/v1/features/{feature_id}"
@@ -294,6 +323,7 @@ def run_probe(
         "schema": "kor-travel-map.read-path-probe.v1",
         "target": _target_label(base_url),
         "iterations": iterations,
+        "warmup_per_case": warmup,
         "started_at_unix": None,
         "cases": entries,
         "detail_measured": detail_id is not None,
@@ -307,6 +337,13 @@ def _positive_int(value: str) -> int:
     return parsed
 
 
+def _non_negative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("0 이상의 정수여야 합니다.")
+    return parsed
+
+
 def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--base-url", default="http://127.0.0.1:12701")
@@ -317,6 +354,16 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
         help=f"service token 파일. 없으면 env {TOKEN_ENV}. 값은 출력하지 않는다.",
     )
     parser.add_argument("--iterations", type=_positive_int, default=30)
+    parser.add_argument(
+        "--warmup-per-case",
+        type=_non_negative_int,
+        default=DEFAULT_WARMUP_PER_CASE,
+        help=(
+            "case마다 재기 전에 버리는 요청 수(기본 6 × API pool 15 = 90). "
+            "연결 나이(prepared statement의 generic plan 전환)에 결과가 "
+            "흔들리지 않게 한다. 0이면 끈다."
+        ),
+    )
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--output", type=Path, default=None)
     args = parser.parse_args(argv)
@@ -327,6 +374,7 @@ def main(argv: list[str] | None = None, environ: Mapping[str, str] | None = None
         token=token,
         iterations=args.iterations,
         timeout=args.timeout,
+        warmup=args.warmup_per_case,
     )
     report["started_at_unix"] = int(started)
     rendered = json.dumps(report, ensure_ascii=False, indent=2)

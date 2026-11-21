@@ -1,3 +1,9 @@
+## 2026-11-21 — T-READ-12 저배율 집계 generic plan 전환 수정(배포 대기)
+
+- zoom 7 sido 집계가 연결의 prepared statement 6번째 실행부터 generic plan(GiST 직렬, 685–902 ms)으로 넘어가던 것을 집계
+  문장 동안만 `plan_cache_mode=force_custom_plan`으로 막았다(custom 147–191 ms). probe에 case별 warm-up 추가.
+- 다음: 운영 회전 뒤 warm-up 포함 probe로 zoom 7 서버 p50을 다시 재 T-READ-12를 닫는다.
+
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택(Map 탭 focus override 제거)
 
 - ui 0.2.4·tokens 0.1.5 vendor, guard `c3f8e6a1`. 공통 TabsTrigger가 FS-7.8 단일 outline이 되어 Map 덧대기를 지웠다.

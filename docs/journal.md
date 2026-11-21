@@ -1,3 +1,29 @@
+## 2026-11-21 — T-READ-12 저배율 집계가 연결 6번째 실행부터 generic plan으로 뒤집힘
+
+- 증상(운영 읽기 전용 조사): `/v1/features/in-bounds` zoom 7 sido 집계(pg_stat_statements queryid
+  -1199203723901693282, API mean 480 ms·stddev 370)가 정상상태 ~630 ms, 꼬리 1–4 s, read_timeout 503 하나.
+- 원인: asyncpg는 집계 SQL을 연결마다 prepared statement로 재사용하고 `plan_cache_mode=auto`는 6번째 실행부터
+  generic plan을 고려한다. generic plan은 bbox 선택도를 기본값으로 봐(rows=1) `idx_feature_cluster_points_coord_gist`
+  직렬 scan을 고른다(685–902 ms). custom plan은 Parallel Seq Scan + HashAggregate(147–191 ms). 세션에서
+  `force_custom_plan`이면 146–154 ms, 계획 비용 약 7 ms. harness·tier-1 gate는 매번 `EXPLAIN`으로 계획해 이 전환을
+  볼 수 없었다.
+- 고침: `_CLUSTER_HASH_AGGREGATE_ON_SQL`/`_OFF_SQL`이 `enable_sort`와 같은 문장에서 `plan_cache_mode`를
+  `force_custom_plan`으로 두고(transaction-local) 집계 뒤 직전 값으로 되돌린다. harness·tier-1 gate는 같은 상수를
+  import하므로 그대로 따라온다. `scripts/read_path_probe.py`에 case별 warm-up(`--warmup-per-case`, 기본 6 × pool 15 =
+  90, 분위에서 제외)을 더해 결과가 연결 나이에 흔들리지 않게 했다.
+- 시험(n150 gate-slot, testcontainers pg18): 같은 연결에서 sido 집계 8회 뒤 그 prepared statement의 `generic_plans`가
+  0이고 EXPLAIN이 HashAggregate·좌표 GiST 없음(전 kind·point-only 두 변형). 고침을 되돌리면(`force_custom_plan` →
+  `auto`) 두 변형 모두 `generic_plans` +3·`custom_plans` +5로 빨개진다 — 시드 840행에서도 운영과 같은 6번째 전환이
+  재현된다. 관련 통합·probe unit 19 passed.
+- 다른 hot 질의 점검(운영 읽기 전용, 2026-11-21 10:39Z, io-guard 0, pg 18.6, `SET LOCAL ROLE ktm_feature_service`,
+  harness viewport의 SQL·인자를 SQL `PREPARE` 뒤 같은 연결에서 auto 8회 + `force_custom_plan` 4회, 중앙값 ms):
+  sido point-only 108 → **953**(6~8회 1,519·953·620, 강제 custom 114), sido 전 kind 222 → **654**(강제 172) — 고친 대상.
+  items in-bounds(같은 `_FEATURES_IN_BBOX_SQL`)는 6번째부터 generic(Nested Loop, `idx_features_coord_gist`)을 고르지만
+  갈린다 — 서울 zoom 14 500건은 172 → 83(generic이 더 빠름), 서울 밀집 200건은 52 → 79(6번째 1회 536). 같은 prepared
+  statement를 두 화면이 나눠 쓰므로 강제하면 한쪽이 손해라 **고치지 않았다**. 100 km nearby(14/12/11)·카페(146/172/149)·
+  부산 맛집(407/429/423)·서울 맛집(166/166/166)은 generic을 한 번도 고르지 않았다(custom 비용이 더 낮다).
+- OpenAPI·migration 변화 없음. 배포하지 않았다(부모 통합 회전).
+
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4(TabsTrigger focus 정본화)와 Map 탭 override 제거
 
 - `@kor-travel/ui` 0.2.3→0.2.4·tokens 0.1.4→0.1.5(common #79, main pack `9691080c`, docs run 44882394234 artifact
