@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import event, text
 
 from kortravelmap.category import search_effective_group
 from kortravelmap.infra import feature_repo
@@ -641,3 +641,138 @@ async def test_mcst_airport_duplicate_folds_into_the_airport(
     assert famous not in seen
     assert far in seen
 
+
+
+#: 2026-11-21 이전의 접기 대표 판정(``EXISTS``). 등가 비교의 기준선으로만 쓴다.
+_LEGACY_DEMOTED_PRIMARY_EXISTS_SQL = f"""EXISTS (
+                    SELECT 1
+                    FROM provider_sync.source_links AS sl
+                    JOIN provider_sync.source_entities AS se
+                      ON se.source_entity_key = sl.source_entity_key
+                    JOIN provider_sync.provider_datasets AS pd
+                      ON pd.provider_dataset_id = se.provider_dataset_id
+                    WHERE sl.feature_id = dedup_sized.feature_id
+                      AND sl.source_role = 'primary'
+                      AND pd.provider = '{feature_repo._SEARCH_DEDUP_DEMOTED_PROVIDER}'
+                  )"""
+
+
+async def _captured_search_statements(
+    session: AsyncSession, q: str, **kwargs: Any
+) -> list[tuple[str, Any]]:
+    """검색이 driver로 보낸 문장 중 접기 대표 판정을 품은 것(SQL, 인자)."""
+    statements: list[tuple[str, Any]] = []
+
+    def record(
+        connection: Any,
+        cursor: Any,
+        statement: str,
+        parameters: Any,
+        context: Any,
+        executemany: bool,
+    ) -> None:
+        if feature_repo._SEARCH_DEDUP_DEMOTED_PRIMARY_SQL in statement:
+            statements.append((statement, parameters))
+
+    bind = session.get_bind()
+    event.listen(bind, "before_cursor_execute", record)
+    try:
+        await _page(session, q, **kwargs)
+    finally:
+        event.remove(bind, "before_cursor_execute", record)
+    assert statements, "검색 SQL에 접기 대표 판정이 없다"
+    return statements
+
+
+def _plan_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
+    nodes = [plan]
+    for child in plan.get("Plans", []):
+        nodes.extend(_plan_nodes(child))
+    return nodes
+
+
+async def _seed_demotion_pairs(session: AsyncSession) -> None:
+    """MCST primary·MOIS primary·enrichment·원천 없음이 섞인 접기 무리들."""
+    rows = (
+        ("eq_mois", "등가접기호텔", "03010100", _MOIS, 127.0300),
+        ("eq_mcst", "등가접기 호텔", "01000000", _MCST_FAMOUS, 127.03001),
+        ("eq_leisure", "등가접기호텔(별관)", "01080400", _MCST_LEISURE, 127.03002),
+        ("eq_bare", "등가접기호텔", "03010100", None, 127.03003),
+        ("eq_far", "등가접기호텔", "01000000", _MCST_FAMOUS, 127.0900),
+        ("eq_mcst_only_a", "등가접기호텔 서관", "01000000", _MCST_FAMOUS, 127.0500),
+        ("eq_mcst_only_b", "등가접기호텔서관", "01000000", _MCST_LEISURE, 127.05001),
+    )
+    for label, name, category, provider, lon in rows:
+        await _feature(
+            session, label, name=name, category=category, region=_SEOCHO,
+            lon=lon, lat=37.4800, provider=provider,
+        )
+    await _primary_link(session, _uuid("eq_mois"), "eq_mois", _MCST_FAMOUS, role="enrichment")
+    await session.flush()
+
+
+async def test_demoted_primary_predicate_matches_legacy_exists(
+    migrated_session: AsyncSession,
+) -> None:
+    """스칼라 부분질의 판정은 종전 ``EXISTS``와 같은 행·같은 순서를 낸다(2026-11-21 성능 수정)."""
+    await _seed_demotion_pairs(migrated_session)
+    connection = await migrated_session.connection()
+    for q in ("등가접기호텔", "등가접기호텔 서관"):
+        for statement, params in await _captured_search_statements(
+            migrated_session, q, kinds=["place"], page_size=200
+        ):
+            legacy = statement.replace(
+                feature_repo._SEARCH_DEDUP_DEMOTED_PRIMARY_SQL,
+                _LEGACY_DEMOTED_PRIMARY_EXISTS_SQL,
+            )
+            assert legacy != statement
+            current_rows = (await connection.exec_driver_sql(statement, params)).all()
+            legacy_rows = (await connection.exec_driver_sql(legacy, params)).all()
+            assert current_rows, q
+            assert current_rows == legacy_rows, q
+    page = await _page(migrated_session, "등가접기호텔", kinds=["place"], page_size=200)
+    seen = {item.feature_id for item in page.items}
+    assert _uuid("eq_mois") in seen
+    assert _uuid("eq_far") in seen
+    assert not {_uuid("eq_mcst"), _uuid("eq_leisure"), _uuid("eq_bare")} & seen
+
+
+async def test_demoted_primary_predicate_is_never_a_hashed_subplan(
+    migrated_session: AsyncSession,
+) -> None:
+    """접기 대표 판정은 행마다 ``source_links``를 찍는다 — MCST 집합 전체를 해시하지 않는다.
+
+    prod 2026-11-21: ``EXISTS``가 autoanalyze 뒤 hashed SubPlan으로 뒤집혀 질의마다 MCST primary
+    88,526행으로 해시를 지었다("부산 맛집" 382→575 ms).
+
+    pg18의 JSON ``Subplan Name``에는 "hashed"가 없다 — hashed 여부는 그 SubPlan을
+    **참조하는 식**에만 ``(hashed SubPlan N)``으로 찍힌다. 그래서 VERBOSE 계획에서 판정
+    SubPlan(MCST provider 리터럴을 품은 것)의 이름을 찾고, 그 이름이 식에서 참조되며
+    ``hashed``로는 참조되지 않음을 본다. 종전 ``EXISTS``는 이 시드에서도 hashed로 계획되어
+    이 단언이 빨개진다(n150 실측).
+    """
+    await _seed_demotion_pairs(migrated_session)
+    await migrated_session.execute(text("ANALYZE provider_sync.source_links"))
+    await migrated_session.execute(text("ANALYZE provider_sync.source_entities"))
+    connection = await migrated_session.connection()
+    statement, params = (
+        await _captured_search_statements(
+            migrated_session, "등가접기호텔", kinds=["place"], page_size=200
+        )
+    )[0]
+    plan = (
+        await connection.exec_driver_sql("EXPLAIN (VERBOSE, FORMAT JSON) " + statement, params)
+    ).scalar_one()[0]["Plan"]
+    provider_literal = f"'{feature_repo._SEARCH_DEDUP_DEMOTED_PROVIDER}'"
+    demotion_names = {
+        str(node["Subplan Name"])
+        for node in _plan_nodes(plan)
+        if node.get("Parent Relationship") == "SubPlan"
+        and any(inner.get("Relation Name") == "source_links" for inner in _plan_nodes(node))
+        and provider_literal in json.dumps(node, ensure_ascii=False)
+    }
+    assert len(demotion_names) == 1, (demotion_names, plan)
+    name = demotion_names.pop()
+    rendered = json.dumps(plan, ensure_ascii=False)
+    assert f"({name})" in rendered, (name, plan)
+    assert f"hashed {name}" not in rendered, (name, plan)

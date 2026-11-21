@@ -1,3 +1,10 @@
+## 2026-11-21 — T-READ-11 검색 MCST 판정 hashed SubPlan 회귀 수정(배포 대기)
+
+- "부산 맛집" p50 382 → 575 ms 회귀의 원인은 autoanalyze 뒤 `dedup_ordered`의 `EXISTS`가 hashed SubPlan(MCST primary
+  88,526행 해시, ~176 ms)으로 뒤집힌 것. 상관 스칼라 부분질의 `(SELECT true … LIMIT 1) IS NOT NULL`로 바꿨다(읽기 전용
+  실측 585 → 383 ms, 같은 51행; 서울 맛집 144 → 157 ms). OpenAPI·migration 없음.
+- 다음: 소유자의 다음 Map 회전에 싣고 harness로 "부산 맛집" p50을 다시 잰다(T-READ-06 목표 229.5 ms는 그와 별개).
+
 ## 2026-11-19 — 관리자 프런트 공통 AdminShell(ui 0.2.3) 채택
 
 - ui 0.2.3·tokens 0.1.4 vendor, guard `d644632e`. 셸을 공통 `AdminShell`로(모바일 좌측 drawer, 한 줄 "영역 - 페이지" 상단
