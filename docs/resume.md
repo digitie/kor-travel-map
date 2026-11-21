@@ -1,8 +1,15 @@
+## 2026-11-21 — 관리자 프런트 소수정(drawer e2e flake·모바일 44px·파이프라인 비활성 사유)
+
+- drawer 폭 측정을 애니메이션 종료 뒤로, 모바일 아이콘 버튼 44px(데스크톱 불변), 파이프라인 비활성 버튼은 포커스 가능한
+  aria-disabled + tooltip/aria-describedby로 사유 노출(`Button focusableWhenDisabled`, opt-in). OpenAPI 변경 없음.
+- 다음: 통합 회전에서 frontend 재빌드·배포 뒤 모바일 실화면 확인. 다른 화면의 사유 있는 비활성 버튼도 필요하면 같은 opt-in으로.
+
 ## 2026-11-21 — T-READ-12 저배율 집계 generic plan 전환 수정(배포 대기)
 
 - zoom 7 sido 집계가 연결의 prepared statement 6번째 실행부터 generic plan(GiST 직렬, 685–902 ms)으로 넘어가던 것을 집계
   문장 동안만 `plan_cache_mode=force_custom_plan`으로 막았다(custom 147–191 ms). probe에 case별 warm-up 추가.
 - 다음: 운영 회전 뒤 warm-up 포함 probe로 zoom 7 서버 p50을 다시 재 T-READ-12를 닫는다.
+||||||| parent of c0dc42c07 (docs: journal·resume — 관리자 프런트 소수정 셋)
 
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택(Map 탭 focus override 제거)
 
