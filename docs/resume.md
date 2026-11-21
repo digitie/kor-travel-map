@@ -1,3 +1,9 @@
+## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택(Map 탭 focus override 제거)
+
+- ui 0.2.4·tokens 0.1.5 vendor, guard `c3f8e6a1`. 공통 TabsTrigger가 FS-7.8 단일 outline이 되어 Map 덧대기를 지웠다.
+  OpenAPI 변경 없음.
+- 다음: 통합 회전에서 frontend 이미지 재빌드·배포 뒤 탭 Tab 포커스 실화면 확인.
+
 ## 2026-11-21 — T-READ-11 검색 MCST 판정 hashed SubPlan 회귀 수정(배포 대기)
 
 - "부산 맛집" p50 382 → 575 ms 회귀의 원인은 autoanalyze 뒤 `dedup_ordered`의 `EXISTS`가 hashed SubPlan(MCST primary

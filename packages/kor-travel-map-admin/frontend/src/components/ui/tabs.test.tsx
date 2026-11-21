@@ -6,7 +6,7 @@ import { Tabs, TabsList, TabsTrigger } from "./tabs";
 
 afterEach(cleanup);
 
-it("탭 트리거 focus는 단일 outline 2px이고 공통 recipe의 ring·테두리 색·1px outline이 남지 않는다(FS-7.8)", () => {
+it("탭 트리거 focus는 공통 0.2.4의 단일 outline 2px·offset 2px 한 벌뿐이다(FS-7.8)", () => {
   render(
     <Tabs defaultValue="a">
       <TabsList>
@@ -14,24 +14,13 @@ it("탭 트리거 focus는 단일 outline 2px이고 공통 recipe의 ring·테�
       </TabsList>
     </Tabs>,
   );
-  const tokens = screen.getByRole("tab", { name: "가" }).className.split(" ");
-  // ring 색(`focus-visible:ring-ring/50`)은 남아도 폭이 0이라 그려지지 않는다 — 폭·테두리·outline만 본다.
-  expect(tokens).toEqual(
-    expect.arrayContaining([
-      "focus-visible:border-transparent",
-      "focus-visible:outline-2",
-      "focus-visible:outline-focus",
-      "focus-visible:outline-offset-2",
-      "focus-visible:ring-0",
-    ]),
-  );
-  for (const removed of [
-    "focus-visible:ring-[3px]",
-    "focus-visible:outline-1",
-    "focus-visible:outline-ring",
-    "focus-visible:border-ring",
-  ]) {
-    expect(tokens).not.toContain(removed);
-  }
+  const tokens = screen.getByRole("tab", { name: "가" }).className.split(/\s+/);
+  // focus-visible 변형은 정확히 이 셋 — ring·테두리 색·1px outline이 다시 끼어들면 실패한다.
+  expect(tokens.filter((token) => token.startsWith("focus-visible:")).sort()).toEqual([
+    "focus-visible:outline-2",
+    "focus-visible:outline-kt-focus",
+    "focus-visible:outline-offset-2",
+  ]);
+  expect(tokens.filter((token) => /(^|:)ring(-|$)/.test(token))).toEqual([]);
   expect(tokens).not.toContain("transition-all");
 });
