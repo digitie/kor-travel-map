@@ -376,15 +376,21 @@ async def test_route_marker_columns_follow_geom(migrated_session: AsyncSession) 
     assert mismatches == 0
 
 
+_PLANNER_SETTINGS_SQL = (
+    "SELECT current_setting('enable_sort') AS enable_sort, "
+    "current_setting('plan_cache_mode') AS plan_cache_mode"
+)
+
+
 async def test_cluster_planner_setting_is_scoped(migrated_session: AsyncSession) -> None:
-    """집계가 끈 ``enable_sort``는 그 문장 뒤 직전 값으로 돌아온다(transaction에 새지 않는다)."""
-    before = await migrated_session.scalar(text("SELECT current_setting('enable_sort')"))
+    """집계가 바꾼 ``enable_sort``·``plan_cache_mode``는 그 문장 뒤 직전 값으로 돌아온다."""
+    before = (await migrated_session.execute(text(_PLANNER_SETTINGS_SQL))).one()
     await feature_repo.cluster_features_in_bbox(
         migrated_session, **_BBOXES[0], cluster_unit="sido"
     )
-    after = await migrated_session.scalar(text("SELECT current_setting('enable_sort')"))
-    assert before == "on"
-    assert after == before
+    after = (await migrated_session.execute(text(_PLANNER_SETTINGS_SQL))).one()
+    assert tuple(before) == ("on", "auto")
+    assert tuple(after) == tuple(before)
 
 
 async def test_cluster_planner_setting_switches_to_hash_aggregate(
@@ -392,9 +398,14 @@ async def test_cluster_planner_setting_switches_to_hash_aggregate(
 ) -> None:
     """켜는 문장이 실제로 ``enable_sort``를 끄고, 그 상태의 집계 계획이 HashAggregate다."""
     await _seed(migrated_session)
-    prior = await migrated_session.scalar(text(feature_repo._CLUSTER_HASH_AGGREGATE_ON_SQL))
-    assert prior == "on"
-    assert await migrated_session.scalar(text("SELECT current_setting('enable_sort')")) == "off"
+    prior = (
+        await migrated_session.execute(text(feature_repo._CLUSTER_HASH_AGGREGATE_ON_SQL))
+    ).one()
+    assert (prior.prior_enable_sort, prior.prior_plan_cache_mode) == ("on", "auto")
+    assert tuple((await migrated_session.execute(text(_PLANNER_SETTINGS_SQL))).one()) == (
+        "off",
+        "force_custom_plan",
+    )
     plan = (
         await migrated_session.execute(
             text("EXPLAIN (FORMAT JSON) " + feature_repo._CLUSTER_BBOX_SQL_BY_UNIT["sido"]),
@@ -410,6 +421,123 @@ async def test_cluster_planner_setting_switches_to_hash_aggregate(
     ).scalar_one()
     assert '"Strategy": "Hashed"' in json.dumps(plan)
     await migrated_session.execute(
-        text(feature_repo._CLUSTER_HASH_AGGREGATE_OFF_SQL), {"prior": prior}
+        text(feature_repo._CLUSTER_HASH_AGGREGATE_OFF_SQL),
+        {
+            "prior_enable_sort": prior.prior_enable_sort,
+            "prior_plan_cache_mode": prior.prior_plan_cache_mode,
+        },
     )
-    assert await migrated_session.scalar(text("SELECT current_setting('enable_sort')")) == "on"
+    assert tuple((await migrated_session.execute(text(_PLANNER_SETTINGS_SQL))).one()) == (
+        "on",
+        "auto",
+    )
+
+
+# T-READ-12 — asyncpg는 집계 SQL을 연결마다 prepared statement로 재사용한다.
+# ``plan_cache_mode=auto``면 6번째 실행부터 generic plan을 고려하는데, 전국 bbox에서 generic
+# plan은 bbox 선택도를 기본값으로 보고 좌표 GiST 직렬 scan을 골라 custom plan보다 4–5배
+# 느렸다(prod 실측). 같은 연결에서 6번을 넘겨 돌려도 계획이 custom으로 남는지를 **계획만** 본다(시간은 재지 않는다).
+_CLUSTER_PREPARED_STATS_SQL = """
+SELECT name, generic_plans, custom_plans
+FROM pg_prepared_statements
+WHERE statement LIKE '%feature.feature_cluster_points AS cluster_point%'
+  AND statement LIKE '%cluster_point.sido_code%'
+  AND statement NOT LIKE '%pg_prepared_statements%'
+  AND statement NOT LIKE 'EXPLAIN%'
+"""
+_CLUSTER_REUSE_RUNS = 8
+
+
+def _execute_literal(value: object) -> str:
+    if value is None:
+        return "NULL"
+    if isinstance(value, bool):
+        raise TypeError("bool bind is not expected here")
+    if isinstance(value, (int, float)):
+        return repr(value)
+    raise TypeError(f"unexpected bind value {value!r}")
+
+
+@pytest.mark.parametrize("kinds", [None, ["place"]], ids=["all-kinds", "point-only"])
+async def test_cluster_reused_prepared_statement_stays_custom_plan(
+    migrated_session: AsyncSession, kinds: list[str] | None
+) -> None:
+    """같은 연결에서 sido 집계를 6번 넘게 돌려도 generic plan으로 넘어가지 않는다."""
+    await _seed(migrated_session)
+    # 시드 뒤 통계가 없으면 planner가 빈 표로 보고 판단이 흔들린다(integration hang 교훈).
+    for table in (
+        "feature.features",
+        "feature.feature_cluster_points",
+        "feature.feature_notices",
+        "feature.feature_route_geometries",
+        "feature.feature_areas",
+    ):
+        await migrated_session.execute(text(f"ANALYZE {table}"))
+    sql = (
+        feature_repo._CLUSTER_BBOX_SQL_BY_UNIT["sido"]
+        if kinds is None
+        else feature_repo._CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT["sido"]
+    )
+    before = {
+        row.name: (int(row.generic_plans), int(row.custom_plans))
+        for row in (await migrated_session.execute(text(_CLUSTER_PREPARED_STATS_SQL))).all()
+    }
+    for _ in range(_CLUSTER_REUSE_RUNS):
+        await feature_repo.cluster_features_in_bbox(
+            migrated_session, **_BBOXES[0], cluster_unit="sido", kinds=kinds
+        )
+    rows = (await migrated_session.execute(text(_CLUSTER_PREPARED_STATS_SQL))).all()
+    statements = {
+        row.name: (int(row.generic_plans), int(row.custom_plans))
+        for row in rows
+    }
+    # 이번에 돈 문장은 custom을 _CLUSTER_REUSE_RUNS번 늘린 것 하나다(앞 테스트가 같은 연결에 남긴
+    # 문장이 있을 수 있어 차이로 본다).
+    grown = {
+        name: (generic - before.get(name, (0, 0))[0], custom - before.get(name, (0, 0))[1])
+        for name, (generic, custom) in statements.items()
+        if (generic, custom) != before.get(name, (0, 0))
+    }
+    assert len(grown) == 1, grown
+    ((name, (generic_delta, custom_delta)),) = grown.items()
+    assert generic_delta == 0, grown
+    assert custom_delta == _CLUSTER_REUSE_RUNS, grown
+
+    # 그 prepared statement를 코드가 두는 설정으로 한 번 더 EXPLAIN — 계획 모양이 custom 그대로다.
+    compiled = text(sql).compile(dialect=migrated_session.get_bind().dialect)
+    params: dict[str, object] = {
+        **_BBOXES[0],
+        "kinds": None if kinds is None else "__kinds__",
+        "categories": None,
+        "providers": None,
+        "attributes": None,
+        "limit": 2000,
+    }
+    order = compiled.positiontup or []
+    args = ", ".join(
+        "ARRAY['place']::text[]" if params[key] == "__kinds__" else _execute_literal(params[key])
+        for key in order
+    )
+    prior = (
+        await migrated_session.execute(text(feature_repo._CLUSTER_HASH_AGGREGATE_ON_SQL))
+    ).one()
+    plan = (
+        await migrated_session.execute(
+            text(f'EXPLAIN (FORMAT JSON) EXECUTE "{name}"({args})')
+        )
+    ).scalar_one()
+    await migrated_session.execute(
+        text(feature_repo._CLUSTER_HASH_AGGREGATE_OFF_SQL),
+        {
+            "prior_enable_sort": prior.prior_enable_sort,
+            "prior_plan_cache_mode": prior.prior_plan_cache_mode,
+        },
+    )
+    rendered = json.dumps(plan)
+    assert '"Strategy": "Hashed"' in rendered
+    assert "idx_feature_cluster_points_coord_gist" not in rendered, rendered
+    after = {
+        row.name: (int(row.generic_plans), int(row.custom_plans))
+        for row in (await migrated_session.execute(text(_CLUSTER_PREPARED_STATS_SQL))).all()
+    }
+    assert after[name][0] == statements[name][0]

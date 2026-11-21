@@ -1856,11 +1856,27 @@ _GEOMETRY_FEATURE_KINDS: Final[frozenset[str]] = frozenset({"route", "area"})
 # 원래 오류를 가린다. 설정을 집계 문장 안(CTE의 ``set_config``)에 넣는 방법은 듣지 않는다 — 계획은
 # 실행 전에 세워진다. harness(``scripts/perf_tier2_release_harness.py``)·tier-1 perf gate도 같은
 # 문장을 앞에 둔다.
+#
+# T-READ-12 — 같은 문장에서 ``plan_cache_mode``도 ``force_custom_plan``으로 둔다. asyncpg는 이
+# 집계를 연결마다 prepared statement로 재사용하는데, ``plan_cache_mode=auto``면 6번째 실행부터
+# generic plan(파라미터 값을 모르는 계획)을 고려한다. 전국 bbox(zoom 7 sido)에서 generic plan은
+# bbox 선택도를 기본값으로 보고(rows=1) ``idx_feature_cluster_points_coord_gist`` 직렬 GiST
+# scan을 고르는데, 실제로는 거의 전 행이 걸려 custom plan(Parallel Seq Scan + HashAggregate,
+# 147–191 ms)보다 4–5배 느렸다(685–902 ms, prod 2026-11-21 실측 — 정상상태 ~630 ms, 꼬리 1–4 s,
+# read_timeout 503). 매 실행 다시 계획하는 비용은 약 7 ms다. ``enable_sort``와 똑같이 transaction
+# 안에서만 살고 집계 뒤 직전 값으로 되돌린다. harness·tier-1 gate는 이 상수를 그대로 import해
+# 앞에 두므로 같은 설정을 탄다 — 다만 그 둘은 매번 ``EXPLAIN``으로 계획하므로(파라미터 값을 아는
+# 계획) generic 전환을 애초에 볼 수 없다. 그 전환은 같은 연결의 반복 요청으로만 드러난다
+# (``scripts/read_path_probe.py``의 warm-up이 그 상태를 만든다).
 _CLUSTER_HASH_AGGREGATE_ON_SQL: Final[str] = (
-    "SELECT current_setting('enable_sort') AS prior, set_config('enable_sort', 'off', true)"
+    "SELECT current_setting('enable_sort') AS prior_enable_sort, "
+    "current_setting('plan_cache_mode') AS prior_plan_cache_mode, "
+    "set_config('enable_sort', 'off', true), "
+    "set_config('plan_cache_mode', 'force_custom_plan', true)"
 )
 _CLUSTER_HASH_AGGREGATE_OFF_SQL: Final[str] = (
-    "SELECT set_config('enable_sort', CAST(:prior AS text), true)"
+    "SELECT set_config('enable_sort', CAST(:prior_enable_sort AS text), true), "
+    "set_config('plan_cache_mode', CAST(:prior_plan_cache_mode AS text), true)"
 )
 
 
@@ -1898,7 +1914,7 @@ async def cluster_features_in_bbox(
         if normalized_kinds is None or not _GEOMETRY_FEATURE_KINDS.isdisjoint(normalized_kinds)
         else _CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT
     )
-    prior_enable_sort = await session.scalar(text(_CLUSTER_HASH_AGGREGATE_ON_SQL))
+    prior = (await session.execute(text(_CLUSTER_HASH_AGGREGATE_ON_SQL))).one()
     rows = (
         (
             await session.execute(
@@ -1919,7 +1935,13 @@ async def cluster_features_in_bbox(
         .mappings()
         .all()
     )
-    await session.execute(text(_CLUSTER_HASH_AGGREGATE_OFF_SQL), {"prior": prior_enable_sort})
+    await session.execute(
+        text(_CLUSTER_HASH_AGGREGATE_OFF_SQL),
+        {
+            "prior_enable_sort": prior.prior_enable_sort,
+            "prior_plan_cache_mode": prior.prior_plan_cache_mode,
+        },
+    )
     return [
         {
             "cluster_key": str(row["cluster_key"]),
