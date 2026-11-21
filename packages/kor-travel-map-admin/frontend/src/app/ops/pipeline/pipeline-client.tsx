@@ -564,6 +564,7 @@ export function PipelineClient() {
               aria-label="갱신 요청 생성 (큐 sensor 확인 필요)"
               disabled
               disabledReason="큐 sensor가 RUNNING으로 확인될 때까지 새 갱신 요청을 만들지 않습니다."
+              focusableWhenDisabled
               type="button"
             >
               <PlayIcon data-icon="inline-start" />

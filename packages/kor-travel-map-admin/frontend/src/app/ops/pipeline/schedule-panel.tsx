@@ -387,6 +387,17 @@ function useSchedulePanelController({
   );
   const scheduleControlsDisabled =
     scheduleMutationPending || scheduleRecoveryLocked;
+  // 잠금 사유(focusable disabled 버튼의 tooltip·aria-describedby). 잠금 조건과 같은 순서로
+  // 판정해 "왜 지금 못 누르는가"를 한 문장으로 말한다.
+  const scheduleControlsDisabledReason = !scheduleControlsDisabled
+    ? undefined
+    : scheduleMutationPending
+      ? "다른 스케줄 명령의 응답을 기다리는 중입니다."
+      : !scheduleStateScanned
+        ? "schedule 상태 확인이 끝나면 활성화됩니다."
+        : recoveryClaim || effectiveClaimResolutionSubmission
+          ? "결과 불명 schedule claim을 해제할 때까지 스케줄 조작을 잠급니다."
+          : "응답이 확인되지 않은 요청을 '동일 요청 재확인'으로 먼저 마무리하세요.";
   const scheduleControlsGuardRef = useRef(true);
   useEffect(() => {
     scheduleControlsGuardRef.current = scheduleControlsDisabled;
@@ -628,6 +639,7 @@ function useSchedulePanelController({
     resolveClaim,
     retryFrozenScheduleMutation,
     scheduleControlsDisabled,
+    scheduleControlsDisabledReason,
     scheduleItems,
     scheduleStateScanned,
     schedules,
@@ -713,6 +725,7 @@ function ScheduleEditor({
             ? "schedule 상태 확인이 끝나면 활성화됩니다."
             : "확인 근거·해제 사유를 입력하면 활성화됩니다."
         }
+        focusableWhenDisabled
         loading={resolveClaim.isPending}
         type="button"
         variant="outline"
@@ -835,6 +848,8 @@ function ScheduleEditor({
             ) : (
               <Button
                 disabled={!scheduleStateScanned}
+                disabledReason="최신 schedule 상태를 다시 확인한 뒤 같은 요청을 재확인합니다."
+                focusableWhenDisabled
                 loading={patchSchedule.isPending || commandSchedule.isPending}
                 type="button"
                 variant="outline"
@@ -929,6 +944,7 @@ function ScheduleTable({
   openEdit,
   pendingCommand,
   scheduleControlsDisabled,
+  scheduleControlsDisabledReason,
   scheduleItems,
   schedules,
   setCommandReasons,
@@ -941,6 +957,7 @@ function ScheduleTable({
   | "openEdit"
   | "pendingCommand"
   | "scheduleControlsDisabled"
+  | "scheduleControlsDisabledReason"
   | "scheduleItems"
   | "schedules"
   | "setCommandReasons"
@@ -1041,7 +1058,12 @@ function ScheduleTable({
               <Button
                 aria-label={`${schedule.name} 즉시 실행`}
                 disabled={scheduleControlsDisabled || !schedule.can_run_now}
-                disabledReason={schedule.disabled_reason ?? undefined}
+                disabledReason={
+                  scheduleControlsDisabledReason ??
+                  schedule.disabled_reason ??
+                  "Dagster가 이 스케줄의 즉시 실행을 허용하지 않습니다."
+                }
+                focusableWhenDisabled
                 loading={isPending(schedule.name, "run")}
                 size="sm"
                 type="button"
@@ -1055,6 +1077,8 @@ function ScheduleTable({
                 <Button
                   aria-label={`${schedule.name} 스케줄 중지`}
                   disabled={scheduleControlsDisabled}
+                  disabledReason={scheduleControlsDisabledReason}
+                  focusableWhenDisabled
                   loading={isPending(schedule.name, "stop")}
                   size="sm"
                   type="button"
@@ -1068,6 +1092,8 @@ function ScheduleTable({
                 <Button
                   aria-label={`${schedule.name} 스케줄 시작`}
                   disabled={scheduleControlsDisabled}
+                  disabledReason={scheduleControlsDisabledReason}
+                  focusableWhenDisabled
                   loading={isPending(schedule.name, "start")}
                   size="sm"
                   type="button"
@@ -1081,6 +1107,11 @@ function ScheduleTable({
               <Button
                 aria-label={`${schedule.name} 상태 기본값 복귀`}
                 disabled={scheduleControlsDisabled || !schedule.can_reset}
+                disabledReason={
+                  scheduleControlsDisabledReason ??
+                  "스케줄 상태가 이미 코드 기본값이라 되돌릴 것이 없습니다."
+                }
+                focusableWhenDisabled
                 loading={isPending(schedule.name, "reset")}
                 size="sm"
                 type="button"
@@ -1093,6 +1124,8 @@ function ScheduleTable({
               <Button
                 aria-label={`${schedule.name} cron 수정`}
                 disabled={scheduleControlsDisabled}
+                disabledReason={scheduleControlsDisabledReason}
+                focusableWhenDisabled
                 size="sm"
                 type="button"
                 variant="ghost"
@@ -1115,6 +1148,7 @@ function ScheduleDeleteDialog({
   editing,
   patchSchedule,
   scheduleControlsDisabled,
+  scheduleControlsDisabledReason,
   setCronDraft,
   setEditReason,
   setEditing,
@@ -1126,6 +1160,7 @@ function ScheduleDeleteDialog({
   | "editing"
   | "patchSchedule"
   | "scheduleControlsDisabled"
+  | "scheduleControlsDisabledReason"
   | "setCronDraft"
   | "setEditReason"
   | "setEditing"
@@ -1193,6 +1228,8 @@ function ScheduleDeleteDialog({
             <Button
               aria-label="기본값으로 되돌리기"
               disabled={scheduleControlsDisabled}
+              disabledReason={scheduleControlsDisabledReason}
+              focusableWhenDisabled
               loading={
                 patchSchedule.isPending &&
                 patchSchedule.variables?.body.cron_schedule === null
@@ -1207,10 +1244,10 @@ function ScheduleDeleteDialog({
             <Button
               disabled={scheduleControlsDisabled || !cronDraft.trim()}
               disabledReason={
-                !cronDraft.trim()
-                  ? "cron을 입력하면 저장할 수 있습니다."
-                  : undefined
+                scheduleControlsDisabledReason ??
+                "cron을 입력하면 저장할 수 있습니다."
               }
+              focusableWhenDisabled
               loading={
                 patchSchedule.isPending &&
                 patchSchedule.variables?.body.cron_schedule !== null
@@ -1249,6 +1286,7 @@ function SchedulePanelView({
   resolveClaim,
   retryFrozenScheduleMutation,
   scheduleControlsDisabled,
+  scheduleControlsDisabledReason,
   scheduleItems,
   scheduleStateScanned,
   schedules,
@@ -1298,6 +1336,7 @@ function SchedulePanelView({
         openEdit={openEdit}
         pendingCommand={pendingCommand}
         scheduleControlsDisabled={scheduleControlsDisabled}
+        scheduleControlsDisabledReason={scheduleControlsDisabledReason}
         scheduleItems={scheduleItems}
         schedules={schedules}
         setCommandReasons={setCommandReasons}
@@ -1310,6 +1349,7 @@ function SchedulePanelView({
         editing={editing}
         patchSchedule={patchSchedule}
         scheduleControlsDisabled={scheduleControlsDisabled}
+        scheduleControlsDisabledReason={scheduleControlsDisabledReason}
         setCronDraft={setCronDraft}
         setEditReason={setEditReason}
         setEditing={setEditing}
