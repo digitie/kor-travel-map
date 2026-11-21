@@ -436,7 +436,8 @@ async def test_cluster_planner_setting_switches_to_hash_aggregate(
 # T-READ-12 — asyncpg는 집계 SQL을 연결마다 prepared statement로 재사용한다.
 # ``plan_cache_mode=auto``면 6번째 실행부터 generic plan을 고려하는데, 전국 bbox에서 generic
 # plan은 bbox 선택도를 기본값으로 보고 좌표 GiST 직렬 scan을 골라 custom plan보다 4–5배
-# 느렸다(prod 실측). 같은 연결에서 6번을 넘겨 돌려도 계획이 custom으로 남는지를 **계획만** 본다(시간은 재지 않는다).
+# 느렸다(prod 실측). 같은 연결에서 6번을 넘겨 돌려도 계획이 custom으로 남는지를 **계획만**
+# 본다(시간은 재지 않는다).
 _CLUSTER_PREPARED_STATS_SQL = """
 SELECT name, generic_plans, custom_plans
 FROM pg_prepared_statements
