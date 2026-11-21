@@ -354,6 +354,16 @@ FROM ({_SEED_LINKS_SELECT}) AS links
 )
 
 
+#: ``_seed``가 행을 쓰는 표 전부. transaction 안의 ANALYZE는 자기가 넣은(아직 commit 전) 행을
+#: 산 행으로 센다.
+_ANALYZE_SEEDED_TABLES_SQL = """
+ANALYZE feature.features, feature.feature_notices, feature.dataset_place_attributes,
+        provider_sync.provider_datasets, provider_sync.source_entities,
+        provider_sync.source_records, provider_sync.source_entity_heads,
+        provider_sync.source_links
+"""
+
+
 async def _seed(session: AsyncSession) -> None:
     ds_a = await _dataset_id(session, _PROVIDER_A)
     ds_b = await _dataset_id(session, _PROVIDER_B)
@@ -381,7 +391,11 @@ async def _seed(session: AsyncSession) -> None:
         {"ds_a": ds_a},
     )
     await session.flush()
-    await session.execute(text("ANALYZE feature.features"))
+    # 시드가 쓴 표를 **전부** 통계에 올린다. 세션 DB의 provider 계보 표·notice 표는 이 파일 전에
+    # 한 번도 ANALYZE되지 않아(``reltuples = -1``) planner가 행 수를 모른다 — 그 상태에서 oracle의
+    # 행마다 도는 primary source LATERAL·notice 감산이 잘못된 join을 골라 page 하나에 수 초씩
+    # 걸렸고, page walk 전체가 9분을 넘겼다(2026-11-21 n150 실측, CI 통합 job 정체의 일부).
+    await session.execute(text(_ANALYZE_SEEDED_TABLES_SQL))
 
 
 _FILTERS: tuple[dict[str, Any], ...] = (
@@ -672,13 +686,6 @@ def _outline(plan: dict[str, Any]) -> list[str]:
     ][:40]
 
 
-def _plan_nodes(plan: dict[str, Any]) -> list[dict[str, Any]]:
-    nodes = [plan]
-    for child in plan.get("Plans", []):
-        nodes.extend(_plan_nodes(child))
-    return nodes
-
-
 async def _explain_analyze(
     session: AsyncSession, sql: str, params: dict[str, Any], *, pre: Sequence[str] = ()
 ) -> dict[str, Any]:
@@ -689,6 +696,26 @@ async def _explain_analyze(
     ).scalar_one()
     doc = raw if isinstance(raw, list) else json.loads(raw)
     return dict(doc[0]["Plan"])
+
+
+async def _explain_plan_only(
+    session: AsyncSession, sql: str, params: dict[str, Any], *, pre: Sequence[str] = ()
+) -> dict[str, Any]:
+    """계획만 세운다(실행하지 않는다) — 강제 스위치 아래의 계획은 실행 시간이 보장되지 않는다."""
+    for statement in pre:
+        await session.execute(text(statement))
+    raw = (await session.execute(text("EXPLAIN (FORMAT JSON) " + sql), params)).scalar_one()
+    doc = raw if isinstance(raw, list) else json.loads(raw)
+    return dict(doc[0]["Plan"])
+
+
+def _plan_edges(
+    plan: dict[str, Any], parent: dict[str, Any] | None = None
+) -> list[tuple[dict[str, Any] | None, dict[str, Any]]]:
+    edges: list[tuple[dict[str, Any] | None, dict[str, Any]]] = [(parent, plan)]
+    for child in plan.get("Plans", []):
+        edges.extend(_plan_edges(child, plan))
+    return edges
 
 
 def _coord_params(radius_m: float, limit_plus_one: int) -> dict[str, Any]:
@@ -743,6 +770,13 @@ async def test_nearby_distance_page_can_use_knn_index_order(
     작은 시드에서 planner가 무엇을 고를지는 비용 문제라 강제하지 않는다. 대신 bitmap·seq
     scan을 끄면 **정렬 노드 없이** ``idx_features_coord_5179_gist`` 순서 scan으로 풀리는지 —
     누가 page 정렬을 ``ST_Distance(...)`` 식으로 되돌리면 KNN이 불가능해져 여기서 빨개진다.
+
+    **계획만 본다(ANALYZE 없음).** 두 스위치는 이 질의의 KNN scan만이 아니라 notice 감산·계보
+    subplan 등 **모든** 표의 접근 경로를 비튼다. 그렇게 강제된 계획을 실제로 실행하면 앞선 시험이
+    남긴 표 상태에 따라 한 문장이 수 분에서 끝없이까지 걸렸다 — 2026-11-19~20 CI 통합 job이
+    35%에서 6시간 멈춘 원인이다(n150 재현: 이 시험 581초, target 문장 하나 4분+). 이 시험이 묻는
+    것은 "KNN으로 **풀 수 있는가**"라는 계획의 모양이므로 실행하지 않는다. "LIMIT에서 멈춘다"는
+    KNN scan 바로 위가 ``Limit``인지로 본다 — 실행기는 Limit이 요구한 만큼만 순서 scan을 당긴다.
     """
     await _seed(migrated_session)
     target = await upsert_poi_cache_target(
@@ -764,18 +798,19 @@ async def test_nearby_distance_page_can_use_knn_index_order(
         ("coord", _NEARBY_COORD_SQL_BY_SORT["distance"], _coord_params(100_000.0, 11)),
         ("target", _NEARBY_SQL_BY_SORT["distance"], target_params),
     ):
-        plan = await _explain_analyze(
+        plan = await _explain_plan_only(
             migrated_session,
             sql,
             params,
             pre=("SET LOCAL enable_bitmapscan = off", "SET LOCAL enable_seqscan = off"),
         )
         knn = [
-            node
-            for node in _plan_nodes(plan)
+            (parent, node)
+            for parent, node in _plan_edges(plan)
             if node.get("Index Name") == "idx_features_coord_5179_gist" and node.get("Order By")
         ]
         assert knn, f"{label}: 거리순 page가 GiST KNN 순서 scan으로 풀리지 않는다"
         # KNN scan은 LIMIT에서 멈춘다 — 반경 안 전 행(~1,000)을 읽지 않는다.
-        assert int(knn[0]["Actual Rows"]) < 200, (label, knn[0]["Actual Rows"])
-        assert int(plan["Actual Rows"]) == 11, label
+        assert all(
+            parent is not None and parent.get("Node Type") == "Limit" for parent, _ in knn
+        ), (label, _outline(plan))

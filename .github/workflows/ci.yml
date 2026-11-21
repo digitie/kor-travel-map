@@ -135,6 +135,9 @@ jobs:
     name: pytest integration (PostGIS, ${{ matrix.lane }})
     needs: unit
     runs-on: ubuntu-latest
+    # 정상 런은 35분 안팎이다. 시험 하나가 멈춰도 GitHub 기본 상한(6시간)까지 runner를 잡지
+    # 않게 job 상한을 둔다 — 시험 단위 상한(아래 --timeout)이 먼저 걸리는 것이 정상 경로다.
+    timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
@@ -188,8 +191,13 @@ jobs:
         # EXPLAIN(no features Seq Scan)·query-count(N+1)·response-shape 회귀는
         # tests/integration/test_perf_gate_tier1.py 가 같은 job 에서 상시 실행한다.
         # tier-2(대용량 실분포)는 CI 아님 — scripts/perf_tier2_release_harness.py 수동.
+        #
+        # 시험 하나 상한 10분(pytest-timeout, thread 방식). 2026-11-19~20 한 시험이 강제 계획을
+        # 실행하다 6시간 멈춰 job이 취소될 때까지 흔적을 남기지 않았다 — thread 방식은 상한에
+        # 걸린 시험 이름과 모든 thread의 stack을 찍고 끝낸다.
         run: |
           pytest tests/integration -q \
+            --timeout=600 --timeout-method=thread \
             --cov=src/kortravelmap --cov-append \
             --cov-report=term-missing --cov-report=xml
 

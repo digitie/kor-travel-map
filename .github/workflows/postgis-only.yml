@@ -50,4 +50,4 @@ jobs:
         run: python -m pip install -c docker/constraints-dagster.txt -e packages/kor-travel-map-dagster
 
       - name: Run PostGIS integration tests
-        run: pytest tests/integration -q --no-cov
+        run: pytest tests/integration -q --no-cov --timeout=600 --timeout-method=thread
