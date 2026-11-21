@@ -27,7 +27,7 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 `T-VN-41C`·`T-VN-H43`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다. (`T-101`은 2026-11-19
 소유자가 제외를 풀었다 — 아래 줄.)
 
-**읽기 성능 계획(2026-11-17)** — `T-READ-03`·`04`·`06`~`10`(목록 끝). 정본은
+**읽기 성능 계획(2026-11-17)** — `T-READ-03`·`04`·`06`~`10`·`12`(목록 끝). 정본은
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8(단계 순), 해제 조건은 acceptance의 같은 ID 절이다.
 `T-READ-01`(기준선 [보고서](reports/2026-11-19-read-baseline.md))·`02`·`05`(채택 안 함)는 2026-11-19 `tasks-done.md`로
 옮겼다. 기준선으로 `T-READ-06`을 채택했고 새 발견 `T-READ-09`·`10`을 열었다(셋 다 진행 중). `T-READ-07`은 14일 간격 스냅샷을 기다린다.
@@ -234,3 +234,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   기준선 p50 1,231 ms([기준선](reports/2026-11-19-read-baseline.md) §6.2). 454(route 대표점 생성 컬럼·HashAggregate)에
   이어 455(좁은 집계 표·동기 trigger·병렬 집계)로 n150 합성 1,297 → 255 ms. 운영 회전 뒤 harness로 해제(acceptance).
+
+- [ ] T-READ-12 — **저배율 집계가 연결 6번째 실행부터 generic plan으로 뒤집힌다** — 구현 PR, 운영 회전 대기
+
+  prod zoom 7 sido 집계가 asyncpg prepared statement 6번째 실행부터 GiST 직렬 generic plan(685–902 ms)으로 넘어갔다(custom
+  147–191 ms). 집계 문장 동안만 `plan_cache_mode=force_custom_plan`. 해제 조건은 acceptance.
