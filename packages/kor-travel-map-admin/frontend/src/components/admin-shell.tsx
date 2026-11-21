@@ -105,6 +105,10 @@ const SHELL_LABELS = {
 const railRowClass =
   "relative flex h-control-sm shrink-0 items-center gap-2.5 rounded-control px-3 text-xs font-medium whitespace-nowrap text-text-secondary transition-[color,background-color] duration-fast ease-out hover:bg-surface-subtle hover:text-text-primary active:bg-surface-muted";
 
+/** 상단 바 동작의 모든 버튼에 모바일 터치 표적 하한(44px)을 건다. */
+const shellActionTouchTargetClasses =
+  "max-md:[&_button]:min-h-11 max-md:[&_button]:min-w-11";
+
 export type AdminShellProps = {
   /** 페이지 이름. 상단 바 h1은 "영역 - 페이지" 한 줄이다. */
   title: string;
@@ -143,16 +147,22 @@ export function AdminShell({
   const pathname = usePathname();
   const activeItem = activeAdminNavItem(pathname);
   const area = section ?? activeItem?.section;
+  // md 미만에서는 상단 바 동작 라벨이 숨어(`ShellActionLabel`) 32px 아이콘 버튼만 남는다.
+  // 터치 표적 하한 44px(WCAG 2.5.5)을 그 폭에서만 min-size로 보장한다 — 데스크톱 밀도는
+  // 그대로다. 상단 바는 min-h-12(48px)라 한 줄을 유지한다.
   const shellActions =
     help || actions ? (
-      <>
+      <div
+        className={cn("flex items-center gap-1", shellActionTouchTargetClasses)}
+        data-slot="map-shell-actions"
+      >
         {help ? (
           <HelpTip label={title} variant={helpVariant}>
             {help}
           </HelpTip>
         ) : null}
         {actions}
-      </>
+      </div>
     ) : undefined;
 
   return (
