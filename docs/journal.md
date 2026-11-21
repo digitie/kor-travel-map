@@ -1,3 +1,16 @@
+## 2026-11-21 — 관리자 프런트 소수정 셋: drawer e2e flake·모바일 44px 터치 표적·파이프라인 비활성 사유
+
+- `admin-shell.spec.ts` "mobile: 메뉴 버튼이 좌측 drawer를…"의 간헐 실패는 drawer `slide-in-from-left` 도중 `boundingBox().x`를
+  잰 것이다(x<0). `data-state=open` → `getAnimations()` finished → `expect.poll(x)==0`으로 바꿨다(임의 sleep 없음).
+- 모바일(md 미만) 상단 바 동작은 라벨이 숨어 32px 아이콘 버튼이었다. 셸 동작 래퍼(`map-shell-actions`)와 icon 크기 Button에
+  `max-md:min-h-11 max-md:min-w-11`(44px)을 걸었다 — 데스크톱은 h-8 그대로. 메뉴 버튼·drawer 닫기는 공통 셸이 이미 44px.
+- `Button`에 opt-in `focusableWhenDisabled`: 사유(`disabledReason`)가 있는 비활성을 native `disabled` 대신 `aria-disabled`로
+  두고(활성화는 onClick에서 막음) hover/focus tooltip + 상시 `aria-describedby`(sr-only 형제)로 사유를 노출한다. 파이프라인
+  페이지 동작 버튼(헤더 갱신 요청 생성·요청 dialog·스케줄 명령/cron/claim·실행 취소/run-now)에 적용하고 스케줄 잠금
+  사유(`scheduleControlsDisabledReason`)를 채웠다. 다른 화면은 그대로(native disabled + `title`).
+- 시험: vitest `button.test.tsx`(icon 크기 min-size·opt-in 의미), Playwright 모바일 44px·데스크톱 32px, 파이프라인 사유
+  tooltip/설명(`toHaveAccessibleDescription`). OpenAPI 변경 없음. 배포하지 않았다.
+
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4(TabsTrigger focus 정본화)와 Map 탭 override 제거
 
 - `@kor-travel/ui` 0.2.3→0.2.4·tokens 0.1.4→0.1.5(common #79, main pack `9691080c`, docs run 44882394234 artifact
