@@ -1,3 +1,29 @@
+## 2026-11-21 — CI 통합 job 35% 정체(6시간 취소)의 원인: nearby 동등성 시험의 통계 공백 + 강제 계획 실행
+
+- 증상: `pytest integration (PostGIS, pg18)`이 `01b602e3`(#1523)부터 35% 줄 뒤에 멈춰 6시간 뒤 취소(run
+  44632917554·44667945938, 그리고 다음 push로 취소된 44806776288도 같은 자리에서 1시간 45분 정체). 통과한
+  런도 같은 구간(전체 1,815건 중 649~720번)이 **17~23분** 걸렸다 — #1520(T-READ-09, `2e58b828`)부터. 그 전
+  (#1519·454)은 1.5분. 즉 #1522(455 trigger·병렬 집계)가 아니라 #1520이 들인
+  `tests/integration/test_features_nearby_equivalence.py`가 출처다. #1523은 우연히 겹쳤다.
+- 재현(n150, CI와 같은 한 세션 전량, `--durations`, 60초마다 `pg_stat_activity`·`pg_locks` 스냅숏): KNN 시험
+  581초, coord page walk 543초, target walk 166초 — 이 셋이 CI의 17~23분이다. 정체 동안 **대기 잠금은 0건**,
+  backend는 `active`로 CPU를 썼다 — lock wait·deadlock이 아니다.
+- 원인: 그 시험의 `_seed`가 provider 계보 표(`source_links`·`source_entities`·`source_entity_heads`·
+  `source_records`)와 `feature_notices`에 1천여 행씩 넣고 `features`만 ANALYZE했다. 세션 DB에서 그 표들은
+  한 번도 분석되지 않아(`reltuples = -1`) planner가 행 수를 1로 본다. 그래서 공개 notice 감산 subplan을 색인
+  조건 없는 중첩 루프(`pk_source_entity_heads`를 filter로 66만 번 훑기)로 풀었고, 같은 파일의 앞 시험들이
+  남긴 상태에서 **행 11개 page 한 문장이 130초**(2.9억 buffer hit)였다(기본 planner 설정, EXPLAIN ANALYZE 실측).
+  KNN 시험은 거기에 `enable_seqscan/bitmapscan = off`를 걸고 그 강제 계획을 **실행**했다 — 모든 표의 접근
+  경로가 비틀린 계획이라 n150에서 문장 하나 4분+, CI에서는 끝나지 않았다. 비용이 앞 시험이 남긴 표 상태에
+  따라 세제곱으로 커져 간헐적이었다.
+- 고침: ① `_seed`가 쓴 표 전부를 ANALYZE(transaction 안 ANALYZE는 자기 미commit 행을 센다). ② KNN 시험은
+  강제 스위치 아래 계획을 세우기만 하고(실행 안 함) "KNN scan 바로 위가 `Limit`"으로 조기 정지를 본다 —
+  후보의 `FETCH FIRST … WITH TIES`를 지우면 빨개지는 것을 확인했다. ③ CI 통합 job에 시험 하나 600초
+  (`pytest-timeout`, thread 방식 — 이름과 stack을 찍고 끝낸다)와 job 90분 상한, 수동 PostGIS workflow도 같은
+  시험 상한. 결과(n150): coord walk 543→4.3초, target 166→4.1초, KNN 581→0.7초.
+- 제품 SQL은 바꾸지 않았다 — 운영 DB는 통계가 있다. 같은 모양(행마다 도는 notice 감산)이 통계 없는 표에서
+  무너진다는 것은 시험 시드가 큰 표를 새로 채울 때 함께 ANALYZE해야 한다는 뜻이다.
+
 ## 2026-11-21 — C7 prod GREEN(t1121b, Map `24ffd5a2`) — 네 spec 전부 통과
 
 - 결과: runner rc=0, lane 잔여 없음(audit rc=0), evidence `run-20261120T230130Z-3626497`. spec별 —
