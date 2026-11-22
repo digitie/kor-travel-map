@@ -163,6 +163,58 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
     await expect(page.getByRole("dialog")).toHaveCount(0);
   });
 
+  // drawer 메뉴로 이동하면 포커스는 새 화면의 본문(#main-content)에 남아야 한다. 셸이 페이지마다
+  // 다시 마운트되면 공통 셸이 옛 본문에 포커스를 돌려준 직후 그 노드가 사라져 BODY로 떨어진다
+  // (n150 prod 390px 실측). 셸은 레이아웃에 한 번만 두고 navigationKey로 이동을 알린다.
+  for (const activation of ["click", "Enter"] as const) {
+    test(`mobile: drawer 메뉴 이동(${activation}) 뒤 포커스는 본문(#main-content)이다`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(MOBILE);
+      await page.goto("/ops/logs");
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "모니터링 - 운영 로그",
+      );
+      const shellBefore = await page
+        .locator('[data-slot="admin-shell"]')
+        .elementHandle();
+
+      await page.locator('[data-slot="admin-shell-menu-button"]').click();
+      const drawer = page.getByRole("dialog", { name: "주요 메뉴" });
+      await expect(drawer).toHaveAttribute("data-state", "open");
+      await waitForAnimations(page);
+
+      const link = drawer.getByRole("link", { name: "정합성 점검", exact: true });
+      if (activation === "click") {
+        await link.click();
+      } else {
+        await link.focus();
+        await page.keyboard.press("Enter");
+      }
+      await expect(page).toHaveURL(/\/ops\/consistency$/);
+      await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+        "모니터링 - 정합성 점검",
+      );
+      // drawer 닫힘 애니메이션과 그 뒤 포커스 복귀가 모두 끝난 다음에 본다.
+      await expect(page.getByRole("dialog")).toHaveCount(0);
+      await waitForAnimations(page);
+
+      await expect
+        .poll(() =>
+          page.evaluate(() => {
+            const active = document.activeElement;
+            return active?.isConnected ? active.id || active.tagName : null;
+          }),
+        )
+        .toBe("main-content");
+      await expect(page.locator("#main-content")).toBeFocused();
+      // 셸은 이동 사이에 같은 DOM 노드로 남는다(다시 마운트되지 않는다).
+      expect(
+        await shellBefore?.evaluate((element) => element.isConnected),
+      ).toBe(true);
+    });
+  }
+
   for (const viewport of [
     { name: "desktop", ...DESKTOP },
     { name: "mobile", ...MOBILE },
@@ -288,6 +340,17 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
       .toBe(32);
   });
 });
+
+/** 문서의 모든 CSS 애니메이션(drawer slide·overlay fade)이 끝날 때까지 기다린다. */
+async function waitForAnimations(page: Page) {
+  await page.evaluate(() =>
+    Promise.all(
+      document
+        .getAnimations()
+        .map((animation) => animation.finished.catch(() => undefined)),
+    ),
+  );
+}
 
 async function tabUntilFocused(page: Page, target: Locator) {
   for (let step = 0; step < 80; step += 1) {
