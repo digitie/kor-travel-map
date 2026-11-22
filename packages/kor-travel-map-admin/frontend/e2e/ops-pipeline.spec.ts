@@ -2150,18 +2150,38 @@ test.describe("/ops/pipeline", () => {
     await expect(
       page.getByText("page 1 · 이 페이지 6행", { exact: true }),
     ).toBeVisible();
-    await page
-      .getByRole("button", { name: "실행 타임라인 다음 페이지" })
-      .click();
+    // 경계 버튼은 native disabled가 아니라 사유를 말하는 aria-disabled다(포커스·hover 가능).
+    const timelineFirst = page.getByRole("button", {
+      name: "실행 타임라인 첫 페이지",
+    });
+    await expect(timelineFirst).toBeDisabled();
+    await expect(timelineFirst).toHaveAttribute("aria-disabled", "true");
+    await expect(timelineFirst).not.toHaveAttribute("disabled", /.*/);
+    await expect(timelineFirst).toHaveAccessibleDescription("첫 페이지입니다");
+    await timelineFirst.focus();
+    await expect(timelineFirst).toBeFocused();
+    await expect(page.getByRole("tooltip")).toHaveText("첫 페이지입니다");
+    await page.keyboard.press("Escape");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    const timelineNext = page.getByRole("button", {
+      name: "실행 타임라인 다음 페이지",
+    });
+    await expect(timelineNext).not.toHaveAttribute("aria-disabled", /.*/);
+    await timelineNext.click();
     await expect
       .poll(() => renderedIdentities("실행 타임라인"))
       .toEqual(secondExecutionIdentities);
     await expect(
       page.getByText("page 2 · 이 페이지 6행", { exact: true }),
     ).toBeVisible();
-    await expect(
-      page.getByRole("button", { name: "실행 타임라인 다음 페이지" }),
-    ).toBeDisabled();
+    await expect(timelineNext).toBeDisabled();
+    await expect(timelineNext).toHaveAttribute("aria-disabled", "true");
+    await expect(timelineNext).not.toHaveAttribute("disabled", /.*/);
+    await expect(timelineNext).toHaveAccessibleDescription("마지막 페이지입니다");
+    // 마지막 페이지에 닿아도 방금 누른 `다음`은 탭 순서에 남아 포커스를 잃지 않는다.
+    await expect(timelineNext).toBeFocused();
+    await expect(timelineFirst).toBeEnabled();
+    await expect(timelineFirst).not.toHaveAttribute("aria-disabled", /.*/);
     await expect
       .poll(() =>
         [

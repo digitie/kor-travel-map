@@ -16,6 +16,11 @@ import { cn } from "@/lib/utils";
  * 보이는 라벨은 항상 `첫 페이지/이전/다음/마지막 페이지`.
  */
 
+/** 경계 버튼의 비활성 사유 — tooltip·`aria-describedby`로 노출된다. */
+const FIRST_PAGE_REASON = "첫 페이지입니다";
+const LAST_PAGE_REASON = "마지막 페이지입니다";
+const UNKNOWN_LAST_PAGE_REASON = "전체 페이지 수를 알 수 없어 마지막 페이지로 갈 수 없습니다";
+
 function paginationAria(ariaPrefix: string | undefined, label: string): string {
   return ariaPrefix ? `${ariaPrefix} ${label}` : label;
 }
@@ -23,8 +28,14 @@ function paginationAria(ariaPrefix: string | undefined, label: string): string {
 type PagerButtonProps = {
   ariaLabel: string;
   children: React.ReactNode;
-  /** 페이지 경계 등 구조적으로 없는 이동 — native `disabled`(탭 순서에서 빠지는 게 맞다). */
+  /** 페이지 경계 등 구조적으로 없는 이동. */
   unavailable: boolean;
+  /**
+   * `unavailable`일 때 사용자에게 보일 사유(예: "첫 페이지입니다"). 경계 버튼은
+   * `focusableWhenDisabled`로 `aria-disabled` + tooltip + `aria-describedby`가 된다 —
+   * native disabled는 포커스·hover를 받지 못해 왜 눌리지 않는지 말할 자리가 없다.
+   */
+  unavailableReason: string;
   /** 전환이 진행 중 — `Button loading`(spinner + `aria-busy`, 포커스 유지)으로 넘긴다. */
   busy: boolean;
   onActivate: () => void;
@@ -35,8 +46,10 @@ type PagerButtonProps = {
  * 포커스가 body로 떨어지고, 응답이 오면 돌아갈 자리가 없다. 그래서 busy는 **`Button loading`**에
  * 맡긴다 — `aria-busy` + spinner가 "지금 넘기는 중"을 말하고(진행 신호 없이 흐리기만 하면 아무
  * 일도 일어나지 않은 것처럼 보인다), 활성화는 Button이 막고, 포커스는 누른 자리에 남는다.
- * 경계(첫/마지막 페이지)는 busy보다 우선해 native disabled를 유지한다 — 구조적으로 없는 이동에는
- * 진행 표면이 없어야 하고, e2e가 경계 버튼의 `toBeDisabled()`를 계약으로 잡고 있다.
+ * 경계(첫/마지막 페이지)는 busy보다 우선해 비활성이다 — 구조적으로 없는 이동에는 진행 표면이
+ * 없어야 한다. 경계 비활성은 사유를 말하는 `aria-disabled`(`focusableWhenDisabled`)라 탭 순서에
+ * 남고, 마지막 페이지에 닿는 순간 방금 누른 `다음`에서 포커스가 body로 떨어지지도 않는다.
+ * e2e의 경계 버튼 `toBeDisabled()` 계약은 Playwright가 `aria-disabled`도 비활성으로 읽어 유지된다.
  * 진행 표시는 **pager 단위**다(전환 중에는 어느 버튼도 응답하지 않는다). 누른 버튼 하나만
  * 돌리려면 "무엇을 눌렀는지"를 렌더 중에 되돌려야 하는데(`react-hooks/set-state-in-render`),
  * 그 상태 기계보다 nav `aria-busy`와 같은 축으로 읽히는 편이 정직하다.
@@ -46,12 +59,15 @@ function PagerButton({
   busy,
   children,
   unavailable,
+  unavailableReason,
   onActivate,
 }: PagerButtonProps) {
   return (
     <Button
       aria-label={ariaLabel}
       disabled={unavailable}
+      disabledReason={unavailableReason}
+      focusableWhenDisabled
       loading={busy && !unavailable}
       size="sm"
       type="button"
@@ -167,6 +183,7 @@ function OffsetPager({
         ariaLabel={paginationAria(ariaPrefix, "첫 페이지")}
         busy={isFetching}
         unavailable={!hasPrev}
+        unavailableReason={FIRST_PAGE_REASON}
         onActivate={() => onPageChange(1)}
       >
         첫 페이지
@@ -175,6 +192,7 @@ function OffsetPager({
         ariaLabel={paginationAria(ariaPrefix, "이전 페이지")}
         busy={isFetching}
         unavailable={!hasPrev}
+        unavailableReason={FIRST_PAGE_REASON}
         onActivate={() => onPageChange(page - 1)}
       >
         이전
@@ -183,6 +201,7 @@ function OffsetPager({
         ariaLabel={paginationAria(ariaPrefix, "다음 페이지")}
         busy={isFetching}
         unavailable={!hasNext}
+        unavailableReason={LAST_PAGE_REASON}
         onActivate={() => onPageChange(page + 1)}
       >
         다음
@@ -191,6 +210,7 @@ function OffsetPager({
         ariaLabel={paginationAria(ariaPrefix, "마지막 페이지")}
         busy={isFetching}
         unavailable={totalPages === null || !hasNext}
+        unavailableReason={hasNext ? UNKNOWN_LAST_PAGE_REASON : LAST_PAGE_REASON}
         onActivate={() => {
           if (totalPages !== null) onPageChange(totalPages);
         }}
@@ -260,6 +280,7 @@ function CursorPager({
         ariaLabel={paginationAria(ariaPrefix, "첫 페이지")}
         busy={isFetching}
         unavailable={isFirst}
+        unavailableReason={FIRST_PAGE_REASON}
         onActivate={onFirst}
       >
         첫 페이지
@@ -269,6 +290,7 @@ function CursorPager({
           ariaLabel={paginationAria(ariaPrefix, "이전 페이지")}
           busy={isFetching}
           unavailable={!previous.available}
+          unavailableReason={FIRST_PAGE_REASON}
           onActivate={previous.onActivate}
         >
           이전
@@ -278,6 +300,7 @@ function CursorPager({
         ariaLabel={paginationAria(ariaPrefix, "다음 페이지")}
         busy={isFetching}
         unavailable={!hasNext}
+        unavailableReason={LAST_PAGE_REASON}
         onActivate={onNext}
       >
         다음
