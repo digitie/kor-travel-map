@@ -4,7 +4,7 @@
 import { PlayIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { opsLiveConnectionLabel, useOpsLiveInvalidation } from "@/api/live";
 import {
@@ -386,8 +386,6 @@ export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
-  const [initialUrlState] = useState(() => searchParams.toString());
-  const urlStateRef = useRef(initialUrlState);
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");
@@ -424,7 +422,12 @@ export function PipelineClient() {
       updates: Record<string, string | null>,
       mode: "push" | "replace" = "push",
     ) => {
-      const previous = new URLSearchParams(urlStateRef.current ?? "");
+      // 기준은 `searchParams`가 아니라 브라우저의 현재 URL이다. Next는 same-route
+      // `history.replaceState/pushState`를 transition으로 router 상태에 옮기므로
+      // `searchParams`(와 예전의 그 사본 ref)는 방금 쓴 URL보다 늦을 수 있다. 빠르게
+      // 이어진 두 필터 입력에서 늦은 사본을 기준으로 삼으면 앞 입력(provider dataset
+      // ID)이 빠진 URL을 만들고, 그러면 아래 규칙이 뒤 입력(sync scope)까지 지운다.
+      const previous = new URLSearchParams(window.location.search);
       const next = new URLSearchParams(previous);
       for (const [key, value] of Object.entries(updates)) {
         if (value === null || value === "") {
@@ -464,12 +467,11 @@ export function PipelineClient() {
       next.delete("dataset_key");
       const query = next.toString();
       const href = query ? `${pathname}?${query}` : pathname;
-      const currentQuery = urlStateRef.current ?? "";
+      const currentQuery = previous.toString();
       const current = currentQuery ? `${pathname}?${currentQuery}` : pathname;
       if (href === current) {
         return;
       }
-      urlStateRef.current = query;
       window.history[mode === "push" ? "pushState" : "replaceState"](
         null,
         "",
@@ -478,10 +480,6 @@ export function PipelineClient() {
     },
     [pathname],
   );
-
-  useEffect(() => {
-    urlStateRef.current = searchParams.toString();
-  }, [searchParams]);
 
   const {
     hasProviderDatasetFilter,
