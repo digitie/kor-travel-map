@@ -24,7 +24,10 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import Link from "next/link";
-import { AdminShell as CommonAdminShell } from "@kor-travel/ui/admin-shell";
+import {
+  AdminPageTitle,
+  AdminShell as CommonAdminShell,
+} from "@kor-travel/ui/admin-shell";
 import { AppMenu, type AppMenuLinkProps } from "@kor-travel/ui/app-menu";
 import { usePathname } from "next/navigation";
 import { useRef, useState, type ReactNode } from "react";
@@ -133,6 +136,51 @@ export type AdminShellProps = {
   children: ReactNode;
 };
 
+/** 셸 없이 그리는 경로 — 로그인 화면은 인증 전이라 메뉴를 보이지 않는다. */
+const SHELL_FREE_PATHS: ReadonlySet<string> = new Set(["/login"]);
+
+/**
+ * 관리자 화면 공통 프레임. 루트 레이아웃에 **한 번만** 두어 페이지 이동 사이에도 같은 셸이
+ * 살아 있게 한다. 페이지마다 셸을 그리면 이동할 때 셸이 다시 마운트되어, 공통 셸의
+ * "drawer로 이동하면 본문에 포커스" 상태가 사라지고 포커스가 BODY로 떨어진다.
+ * 이동은 `navigationKey={pathname}`으로 알린다. 제목·설명·동작은 페이지의 `AdminShell`이
+ * `AdminPageTitle`로 채우고, 서버 렌더 첫 화면에는 nav 정본의 영역·라벨을 쓴다.
+ */
+export function AdminShellFrame({ children }: { children: ReactNode }) {
+  const pathname = usePathname();
+  if (SHELL_FREE_PATHS.has(pathname)) return children;
+  const activeItem = activeAdminNavItem(pathname);
+  return (
+    <CommonAdminShell
+      area={activeItem?.section}
+      brand={({ collapsed }) => <MapBrand collapsed={collapsed} />}
+      collapsedStorageKey={SIDEBAR_COLLAPSED_KEY}
+      labels={SHELL_LABELS}
+      mainId={MAIN_CONTENT_ID}
+      menu={
+        <AppMenu
+          groups={COMMON_MENU_GROUPS}
+          activeItemId={activeItem?.href ?? null}
+          pathname={pathname}
+          label="주요 메뉴"
+          linkComponent={MapMenuLink}
+          testId="map-common-menu"
+        />
+      }
+      navigationKey={pathname}
+      railFooter={({ collapsed }) => <ButtonLogout collapsed={collapsed} />}
+      testId="map-admin-shell"
+      title={activeItem?.label}
+    >
+      {children}
+    </CommonAdminShell>
+  );
+}
+
+/**
+ * 페이지 쪽 셸 내용. 상단 바(제목·설명·동작)는 레이아웃의 `AdminShellFrame`에 등록하고,
+ * 본문 여백·meta 줄은 여기서 그린다. 프레임 밖에서는 상단 바만 직접 그린다.
+ */
 export function AdminShell({
   title,
   description,
@@ -145,8 +193,7 @@ export function AdminShell({
   children,
 }: AdminShellProps) {
   const pathname = usePathname();
-  const activeItem = activeAdminNavItem(pathname);
-  const area = section ?? activeItem?.section;
+  const area = section ?? activeAdminNavItem(pathname)?.section;
   // md 미만에서는 상단 바 동작 라벨이 숨어(`ShellActionLabel`) 32px 아이콘 버튼만 남는다.
   // 터치 표적 하한 44px(WCAG 2.5.5)을 그 폭에서만 min-size로 보장한다 — 데스크톱 밀도는
   // 그대로다. 상단 바는 min-h-12(48px)라 한 줄을 유지한다.
@@ -166,29 +213,13 @@ export function AdminShell({
     ) : undefined;
 
   return (
-    <CommonAdminShell
-      actions={shellActions}
-      area={area}
-      brand={({ collapsed }) => <MapBrand collapsed={collapsed} />}
-      collapsedStorageKey={SIDEBAR_COLLAPSED_KEY}
-      description={description}
-      labels={SHELL_LABELS}
-      mainId={MAIN_CONTENT_ID}
-      menu={
-        <AppMenu
-          groups={COMMON_MENU_GROUPS}
-          activeItemId={activeItem?.href ?? null}
-          pathname={pathname}
-          label="주요 메뉴"
-          linkComponent={MapMenuLink}
-          testId="map-common-menu"
-        />
-      }
-      navigationKey={pathname}
-      railFooter={({ collapsed }) => <ButtonLogout collapsed={collapsed} />}
-      testId="map-admin-shell"
-      title={title}
-    >
+    <>
+      <AdminPageTitle
+        actions={shellActions}
+        area={area}
+        description={description}
+        title={title}
+      />
       <div
         className={cn(
           "min-w-0 px-4 md:px-6",
@@ -206,7 +237,7 @@ export function AdminShell({
         ) : null}
         {children}
       </div>
-    </CommonAdminShell>
+    </>
   );
 }
 
