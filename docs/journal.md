@@ -1,3 +1,18 @@
+## 2026-11-22 — 관리자 셸을 루트 레이아웃으로: drawer 이동 뒤 포커스가 BODY로 떨어지던 결함
+
+- 증상(n150 prod 390px 점검): drawer 메뉴를 클릭·Enter로 이동하면 포커스가 `#main-content`가 아니라 BODY. 클릭 때는 약
+  200 ms 동안 옛 화면의 main에 머물다 BODY로 떨어졌다.
+- 원인: 페이지 client 24곳이 각자 `<AdminShell>`(공통 `AdminShell` 래퍼)을 그렸고 루트 `layout.tsx`에는 셸이 없었다. 경로가
+  바뀌면 셸 트리 전체가 다시 마운트된다. 공통 0.2.4 `useDrawer`의 `returnToMain`은 셸 내부 state라, 옛 셸이 drawer 닫힘
+  애니메이션(~200 ms) 뒤 `onCloseAutoFocus`로 **옛** main에 포커스를 주고 곧 그 노드가 사라져 BODY가 된다. 공통 셸은
+  레이아웃 배치(`navigationKey` + `AdminPageTitle`)를 이미 지원하므로 공통 릴리스는 필요 없었다.
+- 고침: `AdminShellFrame`(공통 셸 + 메뉴·브랜드·로그아웃, `navigationKey={pathname}`, SSR 첫 제목은 nav 정본 영역·라벨)을
+  루트 레이아웃에 한 번 둔다. `/login`은 셸 없이. 페이지 `AdminShell`은 props 그대로 `AdminPageTitle`로 제목·설명·동작을
+  등록하고 본문 여백·meta 줄만 그린다 — 페이지 파일 24곳은 바꾸지 않았다. design.md에 배치 규칙을 적었다.
+- 시험: Playwright `admin-shell.spec.ts` 390px drawer 이동(클릭·Enter) 뒤 애니메이션 종료를 기다려 `expect.poll`로
+  `document.activeElement`가 `#main-content`이고 셸 노드가 그대로인지 본다(고치기 전 빨강 확인). vitest는 셸 노드·main이
+  경로 변경 사이에 같은 노드인지, `/login`은 셸이 없는지. OpenAPI 변경 없음. 배포하지 않았다.
+
 ## 2026-11-21 — 관리자 프런트 소수정 셋: drawer e2e flake·모바일 44px 터치 표적·파이프라인 비활성 사유
 
 - `admin-shell.spec.ts` "mobile: 메뉴 버튼이 좌측 drawer를…"의 간헐 실패는 drawer `slide-in-from-left` 도중 `boundingBox().x`를
