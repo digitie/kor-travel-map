@@ -14,6 +14,11 @@ hue at ≤ 5 % of any viewport, quiet motion, verbs over adjectives. Editorial r
 serif display, drop caps, asymmetric prose columns, enrichment of any tier.
 
 ## Macrostructure family (app pages only — there are no marketing/content pages)
+Shell placement: the common shell (`AdminShellFrame`) is mounted **once** in `src/app/layout.tsx` with
+`navigationKey={pathname}` and must never be rendered per page — a per-page shell remounts on navigation and
+drawer navigation drops focus to BODY. Pages render `AdminShell` only to register title/description/actions
+(`AdminPageTitle`) and their content padding/meta row.
+
 Base shape for every route: **Rail-Workbench** — `AdminShell` side rail (N3) → flush header band (h1 +
 breadcrumb + ≤ 1 primary / ≤ 2 secondary actions) → toolbar (FilterBar) → dense list (DataTable) → optional
 inspector rail (right, fixed `--rail`). Containment is at most ONE layer per region: a `SectionCard` or a
