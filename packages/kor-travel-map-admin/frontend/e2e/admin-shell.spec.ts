@@ -93,6 +93,49 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
     });
   }
 
+  // 서버 렌더 첫 화면의 상단 바는 nav 정본의 영역·라벨이고, hydration 뒤에는 페이지가
+  // `AdminPageTitle`로 등록한 제목이다. 둘이 다르면 첫 화면에서 제목이 한 번 바뀐다(깜빡임).
+  // nav 라벨 = 페이지 제목으로 맞춘 네 화면을 SSR HTML과 hydration 뒤 DOM 양쪽에서 고정한다.
+  for (const [route, title] of [
+    ["/", "개요 - 운영 홈"],
+    ["/admin/manual-provider-dedup", "Feature 관리 - 수동/provider 중복 판정"],
+    ["/admin/curations/candidates", "Feature 관리 - 큐레이션 후보 검토"],
+    ["/ops/cache-target-streams", "수집 파이프라인 - 캐시 전파 스트림"],
+  ] as const) {
+    test(`SSR 상단 바 제목 = hydration 뒤 제목: ${route}`, async ({ page }) => {
+      const response = await page.request.get(route);
+      expect(response.status()).toBe(200);
+      expect(ssrHeadings(await response.text())).toEqual([title]);
+
+      // 파서가 넣은 SSR h1부터 hydration 뒤 h1까지 상단 바 제목이 거친 모든 값을 기록한다.
+      await page.addInitScript(() => {
+        const seen: string[] = [];
+        (window as unknown as { __h1Titles: string[] }).__h1Titles = seen;
+        const record = () => {
+          for (const heading of document.querySelectorAll("h1")) {
+            const text = heading.textContent?.trim() ?? "";
+            if (text && seen.at(-1) !== text) seen.push(text);
+          }
+        };
+        new MutationObserver(record).observe(document, {
+          characterData: true,
+          childList: true,
+          subtree: true,
+        });
+      });
+      await page.goto(route);
+      const heading = page.getByRole("heading", { level: 1 });
+      await expect(heading).toHaveText(title);
+      await expect(page).toHaveTitle(`${title} | kor-travel-map`);
+      await waitForAnimations(page);
+      expect(
+        await page.evaluate(
+          () => (window as unknown as { __h1Titles: string[] }).__h1Titles,
+        ),
+      ).toEqual([title]);
+    });
+  }
+
   test("desktop: 좌측 rail이 보이고 모바일 메뉴 버튼은 숨는다", async ({ page }) => {
     await page.setViewportSize(DESKTOP);
     await page.goto("/ops/logs");
@@ -342,6 +385,21 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
 });
 
 /** 문서의 모든 CSS 애니메이션(drawer slide·overlay fade)이 끝날 때까지 기다린다. */
+/** SSR HTML의 h1 텍스트 목록(React 텍스트 경계 주석·태그 제거, 기본 엔티티 복원). */
+function ssrHeadings(html: string): string[] {
+  return [...html.matchAll(/<h1(?=[\s>])[^>]*>([\s\S]*?)<\/h1>/g)].map((match) =>
+    match[1]!
+      .replace(/<!--[\s\S]*?-->/g, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#x27;/g, "'")
+      .replace(/&amp;/g, "&")
+      .trim(),
+  );
+}
+
 async function waitForAnimations(page: Page) {
   await page.evaluate(() =>
     Promise.all(

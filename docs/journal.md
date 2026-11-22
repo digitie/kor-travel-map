@@ -1,3 +1,18 @@
+## 2026-11-22 — 관리자 nav 라벨 = 페이지 제목(SSR 제목 깜빡임)·페이지 경계 버튼 비활성 사유
+
+- 증상: #1533 뒤 서버 렌더 첫 화면의 상단 바 제목은 nav 정본 라벨이고, hydration 뒤에는 페이지가 `AdminPageTitle`로 등록한
+  제목이다. 네 화면이 달라 첫 화면에서 제목이 한 번 바뀌었다(`/` 홈→운영 홈, 수동/provider 판정→수동/provider 중복 판정,
+  큐레이션 후보→큐레이션 후보 검토, 캐시 전파→캐시 전파 스트림).
+- 고침: nav 라벨을 더 설명적인 페이지 제목에 맞췄다(390px drawer·rail에 한 줄로 들어간다). 단위 시험
+  `admin-nav-titles.test.ts`가 nav 21개 항목마다 `page.tsx` metadata 제목과 그 화면 `<AdminShell>`의 정적 `title`이 nav 라벨과
+  같은지 소스에서 확인한다(찾지 못하면 실패).
+- 페이지 경계 버튼(첫 페이지·이전·다음·마지막 페이지)은 native `disabled`라 왜 안 눌리는지 말하지 못했다. 공용 `PagerButton`을
+  `focusableWhenDisabled` + 사유("첫 페이지입니다"/"마지막 페이지입니다", 전체 페이지 수 미상)로 바꿔 모든 `OffsetPager`·
+  `CursorPager`에 적용했다. 경계에 닿아도 방금 누른 `다음`이 포커스를 잃지 않는다. Playwright `toBeDisabled()`는
+  `aria-disabled`도 비활성으로 읽어 기존 계약은 그대로다.
+- 시험: e2e `admin-shell.spec.ts` 네 화면의 SSR HTML h1 = hydration 뒤 h1(파서 삽입부터 MutationObserver로 기록한 제목이
+  하나뿐), `ops-pipeline.spec.ts` 타임라인 경계 버튼 `aria-disabled`·접근성 설명·tooltip·포커스 유지. OpenAPI·migration 없음.
+
 ## 2026-11-22 — 관리자 셸을 루트 레이아웃으로: drawer 이동 뒤 포커스가 BODY로 떨어지던 결함
 
 - 증상(n150 prod 390px 점검): drawer 메뉴를 클릭·Enter로 이동하면 포커스가 `#main-content`가 아니라 BODY. 클릭 때는 약

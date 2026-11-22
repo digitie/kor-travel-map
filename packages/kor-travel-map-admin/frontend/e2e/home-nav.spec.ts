@@ -417,23 +417,23 @@ async function mockHomeHappyPath(page: Page) {
 // 표는 17에 머물러 있었다(리디자인 이전 main에서도 같은 이유로 실패). 두 route 모두
 // 존치하는 canonical 화면이므로 정본은 source의 19개이고, 여기 표를 그쪽에 맞춘다.
 const NAV_ITEMS: ReadonlyArray<{ label: string; href: string }> = [
-  { label: "홈", href: "/" },
+  { label: "운영 홈", href: "/" },
   // [Feature 관리]
   { label: "Feature 지도", href: "/features" },
   { label: "Feature 목록", href: "/admin/features" },
   { label: "중복 검토", href: "/admin/features/dedup-reviews" },
-  { label: "수동/provider 판정", href: "/admin/manual-provider-dedup" },
+  { label: "수동/provider 중복 판정", href: "/admin/manual-provider-dedup" },
   { label: "보강 검토", href: "/admin/features/enrichment-reviews" },
   { label: "이슈", href: "/admin/issues" },
   { label: "큐레이션 관리", href: "/admin/features/curated" },
-  { label: "큐레이션 후보", href: "/admin/curations/candidates" },
+  { label: "큐레이션 후보 검토", href: "/admin/curations/candidates" },
   { label: "큐레이션 지도", href: "/curated-features" },
   // [수집 파이프라인]
   { label: "파이프라인", href: "/ops/pipeline" },
   { label: "데이터셋", href: "/ops/datasets" },
   { label: "오프라인 업로드", href: "/admin/offline-uploads" },
   { label: "POI 캐시 대상", href: "/admin/poi-cache-targets" },
-  { label: "캐시 전파", href: "/ops/cache-target-streams" },
+  { label: "캐시 전파 스트림", href: "/ops/cache-target-streams" },
   { label: "geo 릴리스", href: "/admin/ops/geo-releases" },
   // [모니터링]
   { label: "운영 로그", href: "/ops/logs" },
