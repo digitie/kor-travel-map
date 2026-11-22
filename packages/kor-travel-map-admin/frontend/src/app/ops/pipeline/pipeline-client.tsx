@@ -386,6 +386,18 @@ export function PipelineClient() {
   const pathname = usePathname();
   const queryClient = useQueryClient();
   const searchParams = useSearchParams();
+  // 필터 URL 갱신의 기준은 "마지막으로 쓴 query"다. `searchParams`도 `window.location`도
+  // 믿을 수 없다 — Next는 same-route `history.replaceState/pushState`를 transition으로
+  // router 상태에 옮기고, 늦게 commit된 transition은 그 시점의 canonical URL을 브라우저에
+  // 다시 써서 방금 쓴 URL을 잠깐 되돌린다. 빠르게 이어진 입력(상태 → provider dataset ID →
+  // sync scope)이 그 낡은 URL을 기준으로 삼으면 앞 입력이 빠진 URL을 만들고, 아래 규칙이
+  // provider 없는 scope를 지운다(실측: scope가 한 번도 요청에 실리지 않음).
+  const urlStateRef = useRef(searchParams.toString());
+  // 우리가 썼지만 아직 `searchParams`로 commit되지 않은 query들(쓴 순서). 그중 하나가
+  // commit되면 우리 쓰기의 중간 상태이므로 기준을 덮지 않는다. 목록에 없는 새 commit은
+  // 외부 이동(Link·다른 코드의 history 변경)이라 기준을 그것으로 바꾼다.
+  const unackedWritesRef = useRef<string[]>([]);
+  const lastCommittedRef = useRef(searchParams.toString());
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");
@@ -422,12 +434,7 @@ export function PipelineClient() {
       updates: Record<string, string | null>,
       mode: "push" | "replace" = "push",
     ) => {
-      // 기준은 `searchParams`가 아니라 브라우저의 현재 URL이다. Next는 same-route
-      // `history.replaceState/pushState`를 transition으로 router 상태에 옮기므로
-      // `searchParams`(와 예전의 그 사본 ref)는 방금 쓴 URL보다 늦을 수 있다. 빠르게
-      // 이어진 두 필터 입력에서 늦은 사본을 기준으로 삼으면 앞 입력(provider dataset
-      // ID)이 빠진 URL을 만들고, 그러면 아래 규칙이 뒤 입력(sync scope)까지 지운다.
-      const previous = new URLSearchParams(window.location.search);
+      const previous = new URLSearchParams(urlStateRef.current);
       const next = new URLSearchParams(previous);
       for (const [key, value] of Object.entries(updates)) {
         if (value === null || value === "") {
@@ -472,6 +479,8 @@ export function PipelineClient() {
       if (href === current) {
         return;
       }
+      urlStateRef.current = query;
+      unackedWritesRef.current.push(query);
       window.history[mode === "push" ? "pushState" : "replaceState"](
         null,
         "",
@@ -480,6 +489,33 @@ export function PipelineClient() {
     },
     [pathname],
   );
+
+  useEffect(() => {
+    const committed = searchParams.toString();
+    if (committed === lastCommittedRef.current) {
+      return;
+    }
+    lastCommittedRef.current = committed;
+    const writes = unackedWritesRef.current;
+    const index = writes.indexOf(committed);
+    if (index >= 0) {
+      unackedWritesRef.current = writes.slice(index + 1);
+      return;
+    }
+    unackedWritesRef.current = [];
+    urlStateRef.current = committed;
+  }, [searchParams]);
+
+  useEffect(() => {
+    // Back/Forward는 우리 쓰기와 무관한 외부 이동이다 — 대기 중인 쓰기를 버리고 브라우저
+    // URL을 기준으로 삼는다.
+    const onPopState = () => {
+      unackedWritesRef.current = [];
+      urlStateRef.current = new URLSearchParams(window.location.search).toString();
+    };
+    window.addEventListener("popstate", onPopState);
+    return () => window.removeEventListener("popstate", onPopState);
+  }, []);
 
   const {
     hasProviderDatasetFilter,
