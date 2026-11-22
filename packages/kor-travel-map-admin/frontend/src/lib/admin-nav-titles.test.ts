@@ -22,7 +22,11 @@ import { ADMIN_NAV_GROUPS } from "./admin-nav";
 
 const APP_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../app");
 
-const NAV_ITEMS = ADMIN_NAV_GROUPS.flatMap((group) => group.items);
+type NavItem = { href: string; label: string };
+
+const NAV_ITEMS: NavItem[] = ADMIN_NAV_GROUPS.flatMap((group): NavItem[] => [
+  ...group.items,
+]);
 
 function pageFileFor(href: string): string {
   return join(APP_DIR, href === "/" ? "" : href.slice(1), "page.tsx");
