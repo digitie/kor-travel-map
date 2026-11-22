@@ -23,14 +23,15 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 **열린 항목 중 가장 마지막**이고, 착수 전 오너와 범위 재확인이 조건이다. 정본은
 `kor-travel-docker-manager` 저장소의 `docs/general-mgmt-audit.md`와 `docs/tasks.md`다.
 
-**보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 셋이다 —
-`T-VN-41C`·`T-VN-H43`·`T-UI-MAPWORKSPACE`. 각각 사유와 재개 조건을 아래 줄에 적는다. (`T-101`은 2026-11-19
+**보류 항목**은 규약 §6에 따라 잔여로 계산하지 않는다. 현재 넷이다 —
+`T-VN-41C`·`T-VN-H43`·`T-UI-MAPWORKSPACE`·`T-READ-06`. 각각 사유와 재개 조건을 아래 줄에 적는다. (`T-101`은 2026-11-19
 소유자가 제외를 풀었다 — 아래 줄.)
 
-**읽기 성능 계획(2026-11-17)** — `T-READ-03`·`04`·`06`~`10`·`12`(목록 끝). 정본은
+**읽기 성능 계획(2026-11-17)** — `T-READ-03`·`04`·`06`~`10`(목록 끝). 정본은
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8(단계 순), 해제 조건은 acceptance의 같은 ID 절이다.
 `T-READ-01`(기준선 [보고서](reports/2026-11-19-read-baseline.md))·`02`·`05`(채택 안 함)는 2026-11-19 `tasks-done.md`로
-옮겼다. 기준선으로 `T-READ-06`을 채택했고 새 발견 `T-READ-09`·`10`을 열었다(셋 다 진행 중). `T-READ-07`은 14일 간격 스냅샷을 기다린다.
+옮겼다. 기준선으로 `T-READ-06`을 채택했으나 구현이 40% 기준에 못 미쳐 보류했다(브랜치 보존). 새 발견 `T-READ-09`·`10`은
+운영 반영 대기, `T-READ-07`은 둘째 스냅샷(2026-12-03 무렵)을 기다린다. `T-READ-12`는 2026-11-23 `tasks-done.md`로 옮겼다.
 
 **reconcile sensor 재시도(ADR-111 후속)** — `T-RECONCILE-RETRY`는 ADR-112(accepted) 결정 0-1(#1345)과 1~7 구현으로
 2026-10-21 `tasks-done.md`로 이관했다.
@@ -209,15 +210,15 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
   `POST /v1/service/transport/{dataset}/near-batch`가 점 최대 60개를 Valkey 왕복 3번 이하로 읽는다. spec이 바뀌므로
   Map 머지 → PinVi 재vendor(`T-READ-PIN-01` ③) 머지 → 한 pair 회전으로 낸다.
 
-- [ ] T-READ-06 — **검색 순위 비교 키 사전 계산** — 진행 중(2026-11-19 채택)
+- [ ] T-READ-06 — **검색 순위 비교 키 사전 계산** — **보류**(기준 미달 보류, 브랜치 보존 — 2026-11-23)
 
-  이름 정규화 비중이 부산 맛집 37%·서울 맛집 56%(30% 이상, [기준선](reports/2026-11-19-read-baseline.md))라 채택했다.
-  `feature.feature_search_keys`를 두고, 결과 순서가 같아야 하며 부산 맛집 p50 382.5 ms가 40% 이상 줄지 않으면 revert한다.
+  구현 브랜치 `feat/t-read-06-search-keys`(`8ecb449e`, 미머지)는 순서 동등을 보였지만 부산 맛집 p50 감소가 약 25%로 40%
+  기준에 못 미쳤다. 재개 조건: 소유자가 기준을 조정하거나 남은 비용(후보 팔·중복 접기)을 줄일 방법이 생길 때.
 
 - [ ] T-READ-07 — **`features` 색인 정리와 HOT 갱신 회복(측정 뒤)**
 
   14일 간격의 두 스냅샷과 읽는 경로 확인 뒤 쓰지 않는 색인만 지우고 fillfactor 90을 넣어 HOT 갱신을 잰다. 지울
-  것이 없으면 근거로 닫는다. 첫 스냅샷은 아직 찍지 않았다(2026-11-19).
+  것이 없으면 근거로 닫는다. 첫 스냅샷은 2026-11-18 23:02Z(t1118e)에 찍었고 둘째는 2026-12-03 무렵이다.
 
 - [ ] T-READ-08 — **`features` autovacuum 문턱을 표에 맞춘다(0단계)**
 
@@ -234,8 +235,3 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   기준선 p50 1,231 ms([기준선](reports/2026-11-19-read-baseline.md) §6.2). 454(route 대표점 생성 컬럼·HashAggregate)에
   이어 455(좁은 집계 표·동기 trigger·병렬 집계)로 n150 합성 1,297 → 255 ms. 운영 회전 뒤 harness로 해제(acceptance).
-
-- [ ] T-READ-12 — **저배율 집계가 연결 6번째 실행부터 generic plan으로 뒤집힌다** — 구현 PR, 운영 회전 대기
-
-  prod zoom 7 sido 집계가 asyncpg prepared statement 6번째 실행부터 GiST 직렬 generic plan(685–902 ms)으로 넘어갔다(custom
-  147–191 ms). 집계 문장 동안만 `plan_cache_mode=force_custom_plan`. 해제 조건은 acceptance.
