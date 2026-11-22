@@ -2705,6 +2705,9 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
   (허용하지 않으면 키를 `row_revision`과 함께 저장해 다르면 식으로 떨어지고, 그 시험이 있다).
   — **소유자 결정(2026-11-18): 허용한다.** refresh 전까지 옛 키로 순위를 매긴다(계획 "소유자 결정 (2026-11-18)" 절).
 - [ ] harness(`jit=off`)의 "부산 맛집" p50이 기준선보다 40% 이상 줄었다. 못 미치면 revert하고 닫는다.
+  — 2026-11-23 **기준 미달 보류, 브랜치 보존.** 구현 브랜치 `feat/t-read-06-search-keys`(`8ecb449e`, 미머지)의 운영 사본
+  측정(2026-11-19, 30회 p50 교차 두 번)이 부산 맛집 −25.7%·−24.9%로 40%에 못 미쳤다. main에는 들어가지 않았으므로
+  되돌릴 것이 없다. 브랜치는 지우지 않고 남기며, 기준을 조정해 머지할지는 소유자가 정한다.
 
 ## T-READ-07
 
@@ -2713,6 +2716,9 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 - [ ] `scripts/index_usage_snapshot.py`로 찍은 두 스냅샷(14일 이상 간격, 사이에 PG 기동 시각과 stats reset이 바뀌지
   않음)으로 만든 색인별 "읽는 경로 / 탐색 수 차이 / 판정" 표가 보고서에 있다.
   — 2026-11-19: `T-READ-01` 기준선은 이 판정에 쓰지 않는다. 첫 스냅샷도 아직 찍지 않았다.
+  — 2026-11-23 정정: 첫 스냅샷은 2026-11-18 23:02Z(generation t1118e)에 읽기 전용으로 찍었다(`feature` schema 색인
+  124·표 37, `stats_reset` 없음. `features`는 heap 397 MB·색인 756 MB, `n_tup_upd` 59,249 중 `n_tup_hot_upd` 0). 둘째
+  스냅샷은 14일 뒤인 2026-12-03 무렵이고, 그 사이 PG 재기동·stats reset이 없었는지 함께 확인한다.
 - [ ] 지운 뒤 관리자 Feature 목록·검색 e2e(D2)와 tier-1 gate가 통과한다.
 - [ ] tier-3 측정 — 같은 provider 재적재의 쓰기 시간·WAL·색인 크기·`n_tup_hot_upd` 전후를 PR에 붙였다(fillfactor 90 포함).
 - [ ] 지운 색인 이름이 `infra/prewarm.py`의 `DEFAULT_HOT_RELATIONS`에 남아 있지 않다.
@@ -2797,5 +2803,9 @@ HashAggregate, 147–191 ms)에서 generic plan(`idx_feature_cluster_points_coor
   HashAggregate·좌표 GiST 없음이다(`tests/integration/test_cluster_rollup_equivalence.py`, 전 kind·point-only). 고침을
   되돌리면(`force_custom_plan` → `auto`) 빨개진다.
 - [x] 설정 두 개가 집계 뒤 직전 값(`on`·`auto`)으로 돌아온다(같은 파일 scoping 시험).
-- [ ] 운영 회전 뒤 warm-up 포함 probe(`--warmup-per-case` 기본값)로 zoom 7 집계 서버 p50이 200 ms 안팎이고 연결 나이와
+- [x] 운영 회전 뒤 warm-up 포함 probe(`--warmup-per-case` 기본값)로 zoom 7 집계 서버 p50이 200 ms 안팎이고 연결 나이와
   무관함을 journal에 적었다(언제·어느 배포 generation).
+  — 2026-11-22 02:49Z(tread1122a), 회전 t1122a(Map `7a44cf94` — api·ui·dagster-code-server 이미지 revision 일치, 배포
+  코드에 `force_custom_plan` 확인). 조용한 창(공용 Dagster instigator 69개 정지, run 0)에서 probe `--warmup-per-case 90`·
+  30회: zoom 7 sido 집계 server p50/p95 **185/642 → 158/191 ms**(이전 tread1121c). warm-up 90건이 pool 15 연결마다 6번째
+  실행을 넘긴 뒤라 p95가 custom plan 범위에 머문 것이 연결 나이와 무관하다는 근거다. journal 2026-11-23 절.

@@ -1,5 +1,11 @@
 # tasks-done.md — 완료/아카이브 task 이력
 
+## 2026-11-23 — 저배율 집계 generic plan 전환(T-READ-12) 운영 확인
+
+- [x] T-READ-12 — **저배율 집계가 연결 6번째 실행부터 generic plan으로 뒤집힌다.** 회전 t1122a(Map `7a44cf94`) 뒤
+  2026-11-22 02:49Z 조용한 창 probe(warm-up 90, 30회)에서 zoom 7 sido 집계 server p50/p95가 185/642 → 158/191 ms.
+  acceptance §T-READ-12, journal 2026-11-23.
+
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택
 
 - [x] T-UI-TABS-FOCUS — **공통 TabsTrigger focus(ui 0.2.4)와 Map override 제거.** 근거는 journal 2026-11-21.
