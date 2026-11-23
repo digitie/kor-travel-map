@@ -1,3 +1,18 @@
+## 2026-11-23 — 관리자 프런트 ui 0.2.5(입력·선택 컨트롤 focus 정본화)와 Map 덧대기 제거
+
+- `@kor-travel/ui` 0.2.4→0.2.5·tokens 0.1.5→0.1.6(common #81 `fe141143`, main CI artifact 14782962353
+  ZIP `sha256:065bfbdf…`; sha256·SRI가 catalog #82 `ade7b3eb`와 같음)를 vendor하고 guard·`common-ref`를 `ade7b3eb`로
+  올렸다. toast 0.1.5는 Map이 쓰지 않아 받지 않았다. ui·tokens 의존 목록은 그대로이고 ui peer만 tokens 0.1.6이다.
+- 공통 0.2.5 Input·NativeSelect·SelectTrigger·Textarea·Checkbox·Switch·Badge 등이 FS-7.8 단일 outline 2px·offset 2px
+  (`outline-kt-focus`)를 직접 내고 체크박스 터치 영역이 md 미만 44px가 됐다. Map wrapper(`input`·`native-select`·
+  `checkbox`·`textarea`·`form-*`)에는 덧대기가 없었다. 중복이던 두 곳을 지웠다: `badge-variants.ts`의
+  `focus-visible:outline-2/offset-2/outline-focus`(공통 Badge가 같은 값), 파이프라인 요청 대화상자 dry-run 원시
+  `<input type="checkbox">`의 같은 세 클래스(`@layer base` `:focus-visible`이 같은 값을 그린다).
+- 시험: vitest `field-focus.test.tsx`는 Input·NativeSelect·Checkbox·링크 Badge의 focus 클래스가 정확히 세 개이고
+  체크박스에 `max-md:after:-inset-[15px]`가 있음을 본다. Playwright `admin-shell.spec.ts`에 `/ops/logs` 입력·선택의
+  Tab 포커스 2px outline 하나·ring·테두리 변화 없음 검사를 더했다.
+- Map admin OpenAPI 변경 없음, 마이그레이션 없음.
+
 ## 2026-11-23 — 파이프라인 필터 e2e 간헐 실패: 화면이 router의 늦은 `searchParams`를 읽었다
 
 - 증상: `ops-pipeline.spec.ts` "필터가 executions 쿼리 파라미터로 전달된다"가 가끔 `running|101|`(sync_scope 없음)로 실패.

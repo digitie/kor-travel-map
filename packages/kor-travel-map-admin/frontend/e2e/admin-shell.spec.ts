@@ -329,6 +329,32 @@ test.describe("admin shell (공통 AdminShell 0.2.3)", () => {
       expect(tabFocused.borderWidth).toBe(tabRest.borderWidth);
       expect(tabFocused.borderColor).toBe(tabRest.borderColor);
     });
+
+    // 입력·선택도 버튼·탭과 같은 단일 outline이다(공통 0.2.5 Input·NativeSelect recipe 그대로 —
+    // 예전 `outline-none` + 3px 반투명 ring + `border-ring` 테두리 색 변화가 없어야 한다).
+    test(`${viewport.name}: 입력·선택은 Tab 포커스 때 2px outline 하나, ring·테두리 변화 없음`, async ({
+      page,
+    }) => {
+      await page.setViewportSize(viewport);
+      await page.goto("/ops/logs");
+      for (const label of ["system log search", "system log level"]) {
+        const field = page.getByLabel(label, { exact: true });
+        await expect(field).toBeVisible();
+        const rest = await focusStyle(field);
+        expect(rest.outlineStyle, `${label} resting outline`).toBe("none");
+        await tabUntilFocused(page, field);
+        const focused = await focusStyle(field);
+        expect(focused.focusVisible, label).toBe(true);
+        expect(focused.outlineStyle, label).toBe("solid");
+        expect(focused.outlineWidth, label).toBe("2px");
+        expect(focused.outlineOffset, label).toBe("2px");
+        expect(spreadRings(focused.boxShadow), label).toEqual(
+          spreadRings(rest.boxShadow),
+        );
+        expect(focused.borderWidth, label).toBe(rest.borderWidth);
+        expect(focused.borderColor, label).toBe(rest.borderColor);
+      }
+    });
   }
 
   test("mobile: 상단 바 동작은 아이콘 버튼이고 접근성 이름은 유지한다", async ({
