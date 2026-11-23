@@ -100,7 +100,12 @@ def _install(
 
 def _settings(key: str | None = "seoul-key") -> Any:
     secret = None if key is None else SimpleNamespace(get_secret_value=lambda: key)
-    return SimpleNamespace(seoul_open_data_api_key=secret)
+    # 재시도 예산(감사 §4 #15)은 settings의 비율·하한으로 만든다 — 기본값과 같은 값을 준다.
+    return SimpleNamespace(
+        seoul_open_data_api_key=secret,
+        provider_upstream_retry_budget_percent=5,
+        provider_upstream_retry_budget_minimum=8,
+    )
 
 
 def _rows(start: int, count: int) -> list[dict[str, Any]]:
@@ -226,10 +231,25 @@ async def test_an_http_error_never_carries_the_key_that_sits_in_the_path() -> No
     ``python-datagokr-api``가 같은 이유로 키를 지우고 체인을 끊는다.
     """
 
+    sleeps: list[float] = []
+
+    async def _instant(delay: float) -> None:
+        sleeps.append(delay)
+
     with pytest.MonkeyPatch.context() as monkeypatch:
-        _install(monkeypatch, [_FakeResponse(None, status_code=502)])
+        # 502는 일시 오류라 그 페이지만 한 번 더 부른다(감사 §4 #15) — 두 번 다 502면 원 예외.
+        monkeypatch.setattr(
+            provider_fetchers.upstream_retry, "asyncio", SimpleNamespace(sleep=_instant)
+        )
+        client = _install(
+            monkeypatch,
+            [_FakeResponse(None, status_code=502), _FakeResponse(None, status_code=502)],
+        )
         with pytest.raises(SeoulOpenDataError) as excinfo:
             [row async for row in fetch_seoul_open_data_bookstores(_settings())]
+
+    assert len(client.instances[0].paths) == 2
+    assert len(sleeps) == 1
 
     message = str(excinfo.value)
     assert "502" in message

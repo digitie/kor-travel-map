@@ -162,11 +162,21 @@ class RetryBudget:
     """
 
     limit: int = DEFAULT_UPSTREAM_RUN_RETRY_BUDGET
+    max_seconds: float | None = None
+    """재시도에 쓴 시간(실패한 시도의 소요 + backoff 대기)의 상한. ``None``이면 횟수만 본다.
+
+    횟수 상한만으로는 벽시계가 묶이지 않는다 — lib 안의 재시도(krheritage tenacity 5회 ×
+    timeout 30초)가 실패 한 번을 수 분으로 만들고, 그런 실패가 "한 번 실패 뒤 성공"으로 되풀이되면
+    횟수 32가 그대로 시간이 된다(적대 리뷰 2026-11-24). 이 상한을 넘으면 그 뒤의 일시 오류는
+    즉시 전파된다 — step 재시도가 이어받는다."""
     used: int = field(default=0, init=False)
+    spent_seconds: float = field(default=0.0, init=False)
 
     def __post_init__(self) -> None:
         if self.limit < 0:
             raise ValueError(f"retry budget limit must be >= 0: {self.limit}")
+        if self.max_seconds is not None and self.max_seconds < 0:
+            raise ValueError(f"retry budget max_seconds must be >= 0: {self.max_seconds}")
 
     @classmethod
     def proportional(
@@ -198,23 +208,15 @@ class RetryBudget:
     def try_consume(self) -> bool:
         if self.used >= self.limit:
             return False
+        if self.max_seconds is not None and self.spent_seconds >= self.max_seconds:
+            return False
         self.used += 1
         return True
 
-    def widen_to(self, limit: int) -> RetryBudget:
-        """예산 상한을 ``limit``까지 넓힌다 — 좁히지는 않고 :data:`MAX_UPSTREAM_RUN_RETRY_BUDGET`을
-        넘지 않는다.
+    def charge(self, seconds: float) -> None:
+        """재시도에 쓴 시간을 더한다(실패한 시도의 소요, backoff 대기)."""
 
-        run 경계(:func:`sharing_run_retry_budget`)는 무엇을 부를지 모른 채 기본 예산을 연다.
-        그 안의 fetcher가 호출 수를 알게 되면 비례 예산까지 넓힌다. 새 예산을 따로 만들지 않는
-        이유는 큐 run 하나가 scope 여러 개를 돌 때 scope 수만큼 예산이 곱해지기 때문이다 — 넓혀도
-        run 전체의 재시도는 여전히 hard cap 하나로 묶인다.
-        """
-
-        if limit < 0:
-            raise ValueError(f"retry budget limit must be >= 0: {limit}")
-        self.limit = max(self.limit, min(limit, MAX_UPSTREAM_RUN_RETRY_BUDGET))
-        return self
+        self.spent_seconds += max(0.0, seconds)
 
 
 _RUN_RETRY_BUDGET: Final[ContextVar[RetryBudget | None]] = ContextVar(
@@ -322,8 +324,8 @@ def _should_retry(
     if budget is not None and not budget.try_consume():
         _notify(
             on_retry,
-            f"upstream retry budget exhausted ({budget.limit}) — "
-            f"{safe_label}: {type(exc).__name__} 즉시 전파",
+            f"upstream retry budget exhausted ({budget.used}/{budget.limit}, "
+            f"{budget.spent_seconds:.0f}s) — {safe_label}: {type(exc).__name__} 즉시 전파",
         )
         return False
     _notify(
@@ -332,6 +334,11 @@ def _should_retry(
         f"({type(exc).__name__}) — 재시도",
     )
     return True
+
+
+def _charge(budget: RetryBudget | None, seconds: float) -> None:
+    if budget is not None:
+        budget.charge(seconds)
 
 
 def _notify(on_retry: Callable[[str], None] | None, message: str) -> None:
@@ -370,9 +377,11 @@ def retry_upstream(
         raise ValueError(f"attempts must be >= 1: {attempts} ({label})")
     do_sleep = time.sleep if sleep is None else sleep
     for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
             return call()
         except Exception as exc:
+            _charge(budget, time.monotonic() - started)
             if not _should_retry(
                 exc,
                 attempt=attempt,
@@ -385,16 +394,16 @@ def retry_upstream(
                 max_retry_after=max_retry_after,
             ):
                 raise
-            do_sleep(
-                _retry_delay(
-                    exc,
-                    attempt,
-                    base_delay=base_delay,
-                    max_delay=max_delay,
-                    jitter=jitter,
-                    retry_after=retry_after,
-                )
+            delay = _retry_delay(
+                exc,
+                attempt,
+                base_delay=base_delay,
+                max_delay=max_delay,
+                jitter=jitter,
+                retry_after=retry_after,
             )
+            _charge(budget, delay)
+            do_sleep(delay)
     raise AssertionError(f"unreachable: {label}")  # pragma: no cover
 
 
@@ -428,9 +437,11 @@ async def retry_upstream_awaitable(
         raise ValueError(f"attempts must be >= 1: {attempts} ({label})")
     do_sleep = asyncio.sleep if sleep is None else sleep
     for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
             return await call()
         except Exception as exc:
+            _charge(budget, time.monotonic() - started)
             if not _should_retry(
                 exc,
                 attempt=attempt,
@@ -443,16 +454,16 @@ async def retry_upstream_awaitable(
                 max_retry_after=max_retry_after,
             ):
                 raise
-            await do_sleep(
-                _retry_delay(
-                    exc,
-                    attempt,
-                    base_delay=base_delay,
-                    max_delay=max_delay,
-                    jitter=jitter,
-                    retry_after=retry_after,
-                )
+            delay = _retry_delay(
+                exc,
+                attempt,
+                base_delay=base_delay,
+                max_delay=max_delay,
+                jitter=jitter,
+                retry_after=retry_after,
             )
+            _charge(budget, delay)
+            await do_sleep(delay)
     raise AssertionError(f"unreachable: {label}")  # pragma: no cover
 
 
@@ -479,9 +490,11 @@ async def retry_upstream_async(
         raise ValueError(f"attempts must be >= 1: {attempts} ({label})")
     do_sleep = asyncio.sleep if sleep is None else sleep
     for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
             return call()
         except Exception as exc:
+            _charge(budget, time.monotonic() - started)
             if not _should_retry(
                 exc,
                 attempt=attempt,
@@ -494,14 +507,14 @@ async def retry_upstream_async(
                 max_retry_after=max_retry_after,
             ):
                 raise
-            await do_sleep(
-                _retry_delay(
-                    exc,
-                    attempt,
-                    base_delay=base_delay,
-                    max_delay=max_delay,
-                    jitter=jitter,
-                    retry_after=retry_after,
-                )
+            delay = _retry_delay(
+                exc,
+                attempt,
+                base_delay=base_delay,
+                max_delay=max_delay,
+                jitter=jitter,
+                retry_after=retry_after,
             )
+            _charge(budget, delay)
+            await do_sleep(delay)
     raise AssertionError(f"unreachable: {label}")  # pragma: no cover

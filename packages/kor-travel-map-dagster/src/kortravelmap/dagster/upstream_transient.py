@@ -40,6 +40,7 @@ from .upstream_retry import NONRETRYABLE_FAILURE_KINDS
 
 __all__ = [
     "TRANSIENT_EXCEPTION_TYPES",
+    "TRANSIENT_RESULT_CODES",
     "TRANSIENT_FAILURE_KINDS",
     "TRANSIENT_HTTP_STATUSES",
     "is_transient_upstream_failure",
@@ -66,6 +67,21 @@ TRANSIENT_EXCEPTION_TYPES: Final[frozenset[tuple[str, str]]] = frozenset(
         ("mois", "MoisServerError"),
         ("mcst", "McstNetworkError"),
     }
+)
+
+#: 분류 속성 없는 lib이 결과 코드로 알려 주는 **일시** 실패 — ``top-level 모듈 → (속성, 코드들)``.
+#:
+#: - datagokr ``FILE_METADATA_CHANGED`` — 공개 파일을 받는 도중 포털의 파일 메타데이터가 바뀌었다
+#:   (``services/standard_file.py``). 파일을 처음부터 다시 받으면 지나간다 — 재시도 단위가 파일
+#:   하나인 :func:`~.provider_fetchers._read_datagokr_standard_file`이 바로 그것을 한다.
+TRANSIENT_RESULT_CODES: Final[dict[str, tuple[str, frozenset[str]]]] = {
+    "datagokr": ("code", frozenset({"FILE_METADATA_CHANGED"})),
+}
+
+#: ``httpx.TransportError``의 하위 중 **결정적**인 것 — 몇 번을 다시 보내도 같다.
+_DETERMINISTIC_TRANSPORT_ERRORS: Final[tuple[type[Exception], ...]] = (
+    httpx.UnsupportedProtocol,
+    httpx.LocalProtocolError,
 )
 
 _HTTP_STATUS_ATTRIBUTES: Final[tuple[str, ...]] = ("status_code", "http_status")
@@ -97,6 +113,15 @@ def _declared_transient(exc: BaseException) -> bool:
     return False
 
 
+def _transient_result_code(exc: BaseException) -> bool:
+    declared = TRANSIENT_RESULT_CODES.get(type(exc).__module__.split(".", 1)[0])
+    if declared is None:
+        return False
+    attribute, codes = declared
+    code = getattr(exc, attribute, None)
+    return code is not None and str(code).strip() in codes
+
+
 def _classify(exc: BaseException) -> bool | None:
     """이 예외 하나만 보고 내린 판정. 판단할 신호가 없으면 ``None``(원인을 본다)."""
 
@@ -112,7 +137,11 @@ def _classify(exc: BaseException) -> bool | None:
         return False
     if retryable is True or failure_kind in TRANSIENT_FAILURE_KINDS:
         return True
+    if isinstance(exc, _DETERMINISTIC_TRANSPORT_ERRORS):
+        return False
     if isinstance(exc, httpx.TransportError | TimeoutError | ConnectionError):
+        return True
+    if _transient_result_code(exc):
         return True
     if _declared_transient(exc):
         return True

@@ -308,25 +308,112 @@ async def test_retry_after_longer_than_the_run_can_wait_is_not_retried(
     assert budget.used == 0  # 예산을 쓰지 않는다
 
 
-def test_budget_widens_but_never_shrinks_or_exceeds_the_cap() -> None:
-    budget = RetryBudget(limit=8)
-    assert budget.widen_to(4).limit == 8
-    assert budget.widen_to(20).limit == 20
-    assert budget.widen_to(10_000).limit == MAX_UPSTREAM_RUN_RETRY_BUDGET
-    with pytest.raises(ValueError, match="must be >= 0"):
-        budget.widen_to(-1)
+def test_fetcher_budget_follows_settings_and_leaves_the_run_budget_alone() -> None:
+    """settings로 재시도를 끌 수 있어야 하고(0), 같은 run의 transport·weather 예산을
+    넓히지 않는다."""
 
-
-def test_fetchers_share_the_run_budget_instead_of_multiplying_it() -> None:
-    settings = _settings()
+    off = _settings(
+        provider_upstream_retry_budget_percent=0, provider_upstream_retry_budget_minimum=0
+    )
     with sharing_run_retry_budget() as shared:
-        first = provider_call_retry_budget(settings, expected_calls=5_000)
-        second = provider_call_retry_budget(settings, expected_calls=14)
-    assert first is shared
-    assert second is shared
-    assert shared.limit == MAX_UPSTREAM_RUN_RETRY_BUDGET
-    # 경계 밖이면 비례 예산을 새로 만든다.
-    assert provider_call_retry_budget(settings, expected_calls=14) is not shared
+        disabled = provider_call_retry_budget(off, expected_calls=5_000)
+        large = provider_call_retry_budget(_settings(), expected_calls=5_000)
+    assert disabled.limit == 0
+    assert large.limit == MAX_UPSTREAM_RUN_RETRY_BUDGET
+    assert large is not shared
+    assert shared.limit == RetryBudget().limit  # run 공유 예산은 그대로다
+
+
+async def test_retry_time_allowance_stops_retries_once_spent(sleeps: list[float]) -> None:
+    """횟수가 남아도 재시도에 쓴 시간(실패한 시도 + 대기)이 상한을 넘으면 즉시 전파한다."""
+
+    budget = RetryBudget(limit=8, max_seconds=10.0)
+    first = _Flaky([httpx.ConnectError("a")])
+    await retry_upstream_awaitable(
+        first, label="t", is_retryable=is_transient_upstream_failure, base_delay=15.0, budget=budget
+    )
+    assert budget.used == 1
+    assert budget.spent_seconds >= 15.0
+    error = httpx.ConnectError("b")
+    second = _Flaky([error])
+    with pytest.raises(httpx.ConnectError) as raised:
+        await retry_upstream_awaitable(
+            second, label="t", is_retryable=is_transient_upstream_failure, budget=budget
+        )
+    assert raised.value is error
+    assert second.calls == 1
+    assert sleeps == [15.0]
+
+
+def test_provider_budgets_carry_the_time_allowance() -> None:
+    budget = provider_call_retry_budget(_settings(), expected_calls=10)
+    assert budget.max_seconds == provider_fetchers.PROVIDER_FETCH_RETRY_MAX_SECONDS
+
+
+def test_mois_sync_lock_is_kept_fresh_between_slugs(tmp_path: Any) -> None:
+    import os
+
+    from kortravelmap.dagster import mois_source_sync
+
+    db_path = str(tmp_path / "m.sqlite")
+    mois_source_sync._touch_sync_lock(db_path)  # 락이 없으면 아무것도 하지 않는다
+    lock = mois_source_sync._sync_lock_path(db_path)
+    assert not lock.exists()
+    lock.write_text("")
+    os.utime(lock, (0, 0))
+    mois_source_sync._touch_sync_lock(db_path)
+    assert lock.stat().st_mtime > 1_000_000
+
+
+def test_deterministic_httpx_transport_errors_are_not_retried() -> None:
+    assert is_transient_upstream_failure(httpx.UnsupportedProtocol("ftp://x")) is False
+    assert is_transient_upstream_failure(httpx.LocalProtocolError("bad header")) is False
+
+
+def test_datagokr_file_metadata_change_is_retried_as_a_whole_file() -> None:
+    changed = _DatagokrApiError("FILE_METADATA_CHANGED: x", code="FILE_METADATA_CHANGED")
+    incomplete = _DatagokrApiError("FILE_PAGE_INCOMPLETE: x", code="FILE_PAGE_INCOMPLETE")
+    assert is_transient_upstream_failure(changed) is True
+    assert is_transient_upstream_failure(incomplete) is False
+
+
+async def test_paginated_retries_are_counted_in_the_request_numerator(
+    monkeypatch: pytest.MonkeyPatch, sleeps: list[float]
+) -> None:
+    """페이지네이터는 페이지당 한 번 센다 — 재시도한 요청은 호출 지점이 더 센다."""
+
+    from kortravelmap.dagster.upstream_requests import (
+        counting_upstream_requests,
+        observed_upstream_requests,
+    )
+
+    calls: list[int] = []
+
+    async def _endpoint(*, page_no: int, num_of_rows: int) -> _ForestPage:
+        calls.append(page_no)
+        if len(calls) == 1:
+            raise httpx.ConnectError("x")
+        return _ForestPage(["a", "b"], 2)
+
+    class _Client:
+        def __init__(self, **_kwargs: Any) -> None:
+            self.travel = SimpleNamespace(standard_recreation_forests=_endpoint)
+
+        async def aclose(self) -> None:
+            return None
+
+    module = ModuleType("krforest")
+    module.__dict__["ForestClient"] = _Client
+    module.__dict__["ForestNoDataError"] = type("ForestNoDataError", (Exception,), {})
+    monkeypatch.setitem(sys.modules, "krforest", module)
+
+    with counting_upstream_requests():
+        records = await _collect(fetch_krforest_recreation_forests(_settings()))
+        observed = observed_upstream_requests()
+
+    assert records == ["a", "b"]
+    assert calls == [1, 1]
+    assert observed == 2  # 페이지 1(페이지네이터) + 재시도 1(호출 지점)
 
 
 # ---------------------------------------------------------------- fetcher 적용처

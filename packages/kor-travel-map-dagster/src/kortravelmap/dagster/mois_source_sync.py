@@ -251,10 +251,6 @@ def sync_mois_source_db(
             for slug in slugs:
 
                 async def _sync_slug(slug: str = slug) -> Any:
-                    # slug마다 provider가 LOCALDATA 파일을 적어도 1건 내려받는다.
-                    # 그 안에서 몇 건이 더 나가는지는 provider 내부라 보이지 않으므로
-                    # 하한으로 1을 센다 - 이름이 `_min`인 이유. 재시도도 시도마다 센다.
-                    note_upstream_request()
                     session = AsyncSession(async_engine)
                     try:
                         return await mois.sync_localdata_source_db(
@@ -269,11 +265,20 @@ def sync_mois_source_db(
                         await session.close()
                         _checkpoint_sqlite_wal(engine)
 
+                # slug마다 provider가 LOCALDATA 파일을 적어도 1건 내려받는다.
+                # 그 안에서 몇 건이 더 나가는지는 provider 내부라 보이지 않으므로
+                # 하한으로 1을 센다 - 이름이 `_min`인 이유. 첫 시도는 여기서, 재시도는
+                # `count_retries`가 센다.
+                note_upstream_request()
                 results.append(
                     await provider_call_with_retry(
-                        _sync_slug, label=f"mois LOCALDATA {slug}", budget=budget
+                        _sync_slug,
+                        label=f"mois LOCALDATA {slug}",
+                        budget=budget,
+                        count_retries=True,
                     )
                 )
+                _touch_sync_lock(db_path)
         finally:
             await client.aclose()
             await async_engine.dispose()
@@ -434,6 +439,20 @@ def _acquire_sync_lock(lock: pathlib.Path) -> int | None:
         except (OSError, FileExistsError):
             return None
         return None
+
+
+def _touch_sync_lock(db_path: str) -> None:
+    """업종 하나를 마칠 때마다 락의 mtime을 새로 한다 — 살아 있는 sync가 회수되지 않게.
+
+    회수 기준(:data:`_SYNC_LOCK_STALE_SECONDS`, 1시간)은 mtime을 본다. 전국 sync는 약 24분이지만
+    업종 단위 재시도(감사 §4 #15)가 꼬리를 늘리면 1시간을 넘길 수 있고, 그때 다른 worker가 락을
+    회수해 같은 SQLite에 둘이 쓰게 된다(적대 리뷰 2026-11-24). 락이 없으면(op 밖 호출) 아무것도
+    하지 않는다.
+    """
+    lock = _sync_lock_path(db_path)
+    with contextlib.suppress(OSError):
+        if lock.exists():
+            os.utime(lock)
 
 
 def _release_sync_lock(fd: int, lock: pathlib.Path) -> None:

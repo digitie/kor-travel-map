@@ -145,18 +145,17 @@ def provider_call_retry_budget(
     *,
     expected_calls: int,
 ) -> upstream_retry.RetryBudget:
-    """이 fetcher가 쓸 run 재시도 예산.
+    """이 fetcher(= dataset 하나의 순회)가 쓸 호출 단위 재시도 예산.
 
-    run 경계(asset step·큐 run)가 연 공유 예산이 있으면 그것을 호출 수에 맞춰 넓혀 쓴다 —
-    큐 run 하나가 scope 여러 개를 돌 때 예산이 scope 수만큼 곱해지지 않게 하기 위해서다.
-    경계 밖(단독 호출·시험)이면 비례 예산을 새로 만든다.
+    settings의 비율·하한(``provider_upstream_retry_budget_*``)으로 만든 비례 예산이고, 상한은
+    :data:`~.upstream_retry.MAX_UPSTREAM_RUN_RETRY_BUDGET`이다. **run 경계가 연 공유 예산은 쓰지
+    않는다**(적대 리뷰 2026-11-24): 공유 예산은 기본 8로 열려 있어 넓히면 같은 run의 transport·
+    weather 호출까지 상한이 함께 올라가고, 넓히지 않고 나눠 쓰면 운영자가 settings로 재시도를
+    끄는(0) 스위치가 먹지 않는다. KHOA가 처음부터 쓰던 방식(fetcher마다 비례 예산)이다 — 큐 run
+    하나가 dataset 여러 개를 돌면 dataset마다 하나씩이고, 그 수는 요청의 membership 수로 묶인다.
     """
 
-    proportional = _provider_retry_budget(settings, expected_calls=expected_calls)
-    shared = upstream_retry.active_run_retry_budget()
-    if shared is None:
-        return proportional
-    return shared.widen_to(proportional.limit)
+    return _provider_retry_budget(settings, expected_calls=expected_calls)
 
 
 def provider_call_with_retry(
@@ -164,6 +163,7 @@ def provider_call_with_retry(
     *,
     label: str,
     budget: upstream_retry.RetryBudget,
+    count_retries: bool = False,
 ) -> Awaitable[_T]:
     """provider public client 호출 **하나**를 호출 단위 재시도 경계 안에서 await한다.
 
@@ -175,10 +175,23 @@ def provider_call_with_retry(
     안의 재시도가 수 초 안에 끝나므로 이 층은 수십 초 뒤의 독립 시행이다.
 
     ``label``은 로그에 남는다. **인증키를 넣지 마라** — 서울 열린데이터는 키가 URL 경로에 있다.
+
+    ``count_retries=True``는 첫 시도를 다른 곳(페이지네이터 ``aiter_paginated_items``)이 이미 센
+    호출 지점용이다 — 재시도마다 ``note_upstream_request``를 하나씩 더한다. 콜러블이 시도마다 스스로
+    세는 호출 지점은 ``False``로 둔다(이중 계수 방지).
     """
 
+    attempts = 0
+
+    async def _counted() -> _T:
+        nonlocal attempts
+        attempts += 1
+        if attempts > 1:
+            note_upstream_request()
+        return await call()
+
     return upstream_retry.retry_upstream_awaitable(
-        call,
+        _counted if count_retries else call,
         label=label,
         is_retryable=is_transient_upstream_failure,
         base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
@@ -235,13 +248,17 @@ async def fetch_kor_travel_concierge_youtube_features(
 
             async def _get_page(params: dict[str, str | int] = params) -> Any:
                 # 페이지 하나 = 같은 cursor로 다시 불러도 같은 응답(cursor는 opaque·불변).
-                note_upstream_request()
                 response = await client.get(path, params=params)
                 response.raise_for_status()
                 return response.json()
 
+            # 첫 시도는 여기서, 재시도는 `count_retries`가 센다.
+            note_upstream_request()
             payload = await provider_call_with_retry(
-                _get_page, label="kor-travel-concierge feature export page", budget=budget
+                _get_page,
+                label="kor-travel-concierge feature export page",
+                budget=budget,
+                count_retries=True,
             )
             if not isinstance(payload, dict):
                 raise RuntimeError(
@@ -846,14 +863,14 @@ async def fetch_krheritage_events(
     try:
         for year, month in months:
 
-            async def _by_month(year: int = year, month: int = month) -> Any:
-                # `by_month`는 달마다 정확히 HTTP 1건이다(provider 소스 확인). 재시도도
-                # 요청이므로 시도마다 센다.
-                note_upstream_request()
-                return await client.event.by_month(year=year, month=month)
-
+            # `by_month`는 달마다 정확히 HTTP 1건이다(provider 소스 확인). 첫 시도는 여기서,
+            # 재시도는 `count_retries`가 센다.
+            note_upstream_request()
             for record in await provider_call_with_retry(
-                _by_month, label=f"krheritage event.by_month {year}-{month:02d}", budget=budget
+                partial(client.event.by_month, year=year, month=month),
+                label=f"krheritage event.by_month {year}-{month:02d}",
+                budget=budget,
+                count_retries=True,
             ):
                 yield record
     finally:
@@ -947,6 +964,7 @@ async def _iter_krheritage_details(
             ),
             label=f"krheritage search.list kdcd={kind_code} p{page_no}",
             budget=call_budget,
+            count_retries=True,
         )
         return ProviderPage(items=list(result.items), total_count=result.total)
 
@@ -970,17 +988,15 @@ async def _iter_krheritage_details(
         # detail은 record당 정확히 1 HTTP다(이 파일 위쪽 docstring과
         # `krheritage_max_items_per_run`이 같은 사실에 기대고 있다). 목록
         # 페이지만 세면 실린 수가 실제의 ~1%가 된다 - run 하나가 목록 ~45건,
-        # detail ~4,000건이다. 재시도도 요청이므로 시도마다 센다.
-        async def _details(key: Any = key) -> Any:
-            note_upstream_request()
-            return await client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
-
+        # detail ~4,000건이다. 첫 시도는 여기서, 재시도는 `count_retries`가 센다.
+        note_upstream_request()
         yield await provider_call_with_retry(
-            _details,
+            partial(client.search.details, key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd),
             label=(
                 f"krheritage search.details {key.ccba_kdcd}/{key.ccba_asno}/{key.ccba_ctcd}"
             ),
             budget=call_budget,
+            count_retries=True,
         )
 
 
@@ -1186,6 +1202,7 @@ async def _iter_krforest_records(
             partial(endpoint, page_no=page_no, num_of_rows=num_of_rows),
             label=f"{label} p{page_no}",
             budget=call_budget,
+            count_retries=True,
         )
         return ProviderPage(items=page.items, total_count=page.total_count)
 
@@ -1428,6 +1445,12 @@ async def _iter_datagokr_standard_file(service: Any, *, label: str) -> AsyncIter
         )
 
 
+async def _collect_datagokr_standard_file(service: Any, *, label: str) -> list[Any]:
+    """공개 파일 하나를 끝까지 받아 리스트로 — 시도마다 페이지·header를 센다."""
+
+    return [record async for record in _iter_datagokr_standard_file(service, label=label)]
+
+
 #: 표준데이터 공개 파일 하나를 받는 호출 수(헤더 2 + 페이지). 가장 큰 주차장 18,994행이 1,000행
 #: 페이지로 19장이다 — 예산 비례 계산의 근거일 뿐 상한이 아니다(상한은 provider의 5만 건).
 _DATAGOKR_STANDARD_FILE_EXPECTED_CALLS: Final = 21
@@ -1445,11 +1468,8 @@ async def _read_datagokr_standard_file(
     아니므로 재시도하지 않는다.
     """
 
-    async def _read() -> list[Any]:
-        return [record async for record in _iter_datagokr_standard_file(service, label=label)]
-
     return await provider_call_with_retry(
-        _read,
+        partial(_collect_datagokr_standard_file, service, label=label),
         label=label,
         budget=provider_call_retry_budget(
             settings, expected_calls=_DATAGOKR_STANDARD_FILE_EXPECTED_CALLS
@@ -1539,22 +1559,6 @@ class SeoulOpenDataError(RuntimeError):
         self.status_code = status_code
 
 
-def _is_transient_upstream_error(exc: BaseException) -> bool:
-    """같은 run을 다시 돌리면 지나갈 수 있는 실패인가.
-
-    네트워크 계층(연결·타임아웃·읽기 오류)만 True다. HTTP 상태 오류는 제외한다 —
-    404/410처럼 원천이 사라진 응답이 그쪽으로 오고, 그것은 재시도로 나아지지
-    않는다. 5xx는 나아질 수 있지만 그 구분까지 넣으면 판정이 상류 운영 상태에
-    의존하게 되므로, **네트워크 계층만** 재시도 가능으로 본다.
-    """
-
-    if isinstance(exc, httpx.HTTPStatusError):
-        return False
-    if isinstance(exc, httpx.TransportError):
-        return True
-    return isinstance(exc, TimeoutError | ConnectionError)
-
-
 async def fetch_seoul_open_data_bookstores(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
@@ -1589,16 +1593,20 @@ async def fetch_seoul_open_data_bookstores(
             end = start + _SEOUL_OPEN_DATA_PAGE_SIZE - 1
 
             async def _get_rows(start: int = start, end: int = end) -> httpx.Response:
-                note_upstream_request()
                 response = await client.get(
                     f"/{api_key}/json/{_SEOUL_BOOKSTORE_SERVICE}/{start}/{end}/"
                 )
                 _raise_seoul_status(response)
                 return response
 
-            # label에 경로를 넣지 않는다 — 인증키가 경로에 있다.
+            # label에 경로를 넣지 않는다 — 인증키가 경로에 있다. 첫 시도는 여기서,
+            # 재시도는 `count_retries`가 센다.
+            note_upstream_request()
             response = await provider_call_with_retry(
-                _get_rows, label=f"서울 책방 rows {start}-{end}", budget=budget
+                _get_rows,
+                label=f"서울 책방 rows {start}-{end}",
+                budget=budget,
+                count_retries=True,
             )
             try:
                 payload = response.json()
@@ -1813,12 +1821,9 @@ async def fetch_mcst_culture_records(
             yield McstSlugAttempt(slug=slug)
 
             async def _read_slug(slug: str = slug) -> list[Any]:
-                # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
-                # 나가는지는 이 층에서 볼 수 없어 시도마다 **1로 센다** — 하한이다.
                 # CSV를 다 받은 뒤에 내보낸다 — 중간에 끊긴 다운로드를 다시 받을 때 앞
                 # 행이 두 번 나가지 않게 한다. asset은 어차피 행을 리스트로 모은다
                 # (`_record_list`)라 기억 비용은 같다.
-                note_upstream_request()
                 rows: list[Any] = []
                 async for row in client.iter_csv(slug):
                     rows.append(row)
@@ -1826,9 +1831,16 @@ async def fetch_mcst_culture_records(
                         break
                 return rows
 
+            # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
+            # 나가는지는 이 층에서 볼 수 없어 시도마다 **1로 센다** — 하한이다. 첫 시도는
+            # 여기서, 재시도는 `count_retries`가 센다.
+            note_upstream_request()
             try:
                 rows = await provider_call_with_retry(
-                    _read_slug, label=f"mcst iter_csv {slug}", budget=budget
+                    _read_slug,
+                    label=f"mcst iter_csv {slug}",
+                    budget=budget,
+                    count_retries=True,
                 )
             except Exception as exc:  # noqa: BLE001 — 아래에서 다시 가른다
                 # **한 slug의 상류 변화가 13개를 전멸시키지 않게 한다.**
@@ -1857,10 +1869,9 @@ async def fetch_mcst_culture_records(
                         if getattr(exc, "result_code", None) in _MCST_SAFE_ERROR_CODES
                         else type(exc).__name__
                     ),
-                    retryable=(
-                        _is_transient_upstream_error(exc)
-                        or isinstance(exc, getattr(mcst, "McstNetworkError", ()))
-                    ),
+                    # 호출 단위 재시도와 같은 판정을 쓴다 — 5xx를 다 쓰고 실패한 slug가 여기서
+                    # 결정적(allow_retries=False)으로 바뀌면 두 층이 서로 다른 말을 한다.
+                    retryable=is_transient_upstream_failure(exc),
                 )
                 continue
             for row in rows:
@@ -1869,18 +1880,27 @@ async def fetch_mcst_culture_records(
         await client.aclose()
 
 
+#: provider fetcher 하나(dataset 하나의 순회)가 재시도에 쓸 수 있는 시간 상한 — 실패한 시도의
+#: 소요와 backoff 대기의 합. 15분이면 provider 경계 backoff(15·30초)로 수십 번은 다시 부르고,
+#: lib 안의 재시도가 긴 실패(krheritage 최악 약 165초)도 대여섯 번은 견딘다. 그보다 오래
+#: 흔들리는 상류는 step 재시도(60·120·240초 뒤)와 다음 schedule에 맡긴다(적대 리뷰 2026-11-24).
+PROVIDER_FETCH_RETRY_MAX_SECONDS: Final[float] = 900.0
+
+
 def _provider_retry_budget(
     settings: KorTravelMapSettings,
     *,
     expected_calls: int,
 ) -> upstream_retry.RetryBudget:
-    """settings의 비율·하한으로 run 재시도 예산을 만든다(H45 후속)."""
+    """settings의 비율·하한으로 재시도 예산을 만든다(H45 후속). 시간 상한도 건다."""
 
-    return upstream_retry.RetryBudget.proportional(
+    budget = upstream_retry.RetryBudget.proportional(
         expected_calls,
         percent=settings.provider_upstream_retry_budget_percent,
         minimum=settings.provider_upstream_retry_budget_minimum,
     )
+    budget.max_seconds = PROVIDER_FETCH_RETRY_MAX_SECONDS
+    return budget
 
 
 async def fetch_khoa_beaches(
@@ -1939,6 +1959,7 @@ async def fetch_khoa_beaches(
                     ),
                     label=f"khoa oceans_beach_info {sido} p{page_no}",
                     budget=budget,
+                    count_retries=True,
                 )
 
             async for record in aiter_paginated_items(
@@ -2114,6 +2135,7 @@ async def fetch_visitkorea_festivals(
             ),
             label=f"visitkorea search_festival p{page_no}",
             budget=budget,
+            count_retries=True,
         )
         raw = getattr(page, "raw", None)
         if isinstance(raw, Mapping) and raw.get("totalCount") in (None, ""):
@@ -2229,6 +2251,7 @@ async def fetch_visitkorea_tourist_attractions(
                     ),
                     label=f"visitkorea area_based_list({content_type_id}) p{page_no}",
                     budget=budget,
+                    count_retries=True,
                 )
                 raw = getattr(page, "raw", None)
                 if isinstance(raw, Mapping) and raw.get("totalCount") in (None, ""):
