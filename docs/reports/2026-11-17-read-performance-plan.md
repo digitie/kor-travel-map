@@ -747,6 +747,19 @@ Map 적재는 schedule이 멈춰 있어도 큐에서 돈다. 절차는 Manager T
 | 2 | `T-READ-WEA-02`·`04`, `T-READ-TRN-02`·`04` | weather·transport | 각자의 `-01` | 각 저장소 배포 |
 | 3 | `T-READ-05` → `T-READ-06`, `T-READ-07` | Map | `T-READ-01` 보고서 | Map 회전(spec 불변, migration) |
 
+**Manager 작업 상태(2026-11-23, 정본은 Manager `docs/journal.md` 같은 날·`docs/tasks.md`)** —
+
+| ID | 상태 | 근거·사유 |
+| --- | --- | --- |
+| `T-READ-MGR-01`·`07` | 운영 적용(2026-11-18, Manager `7062254b`) | — |
+| `T-READ-MGR-03` ① | 운영 적용(Manager #628 `d690e82d`) | Map·PinVi API `mem_limit == memswap_limit` 1 GiB. 전 peak 223·254 MB·swap 92·58 MB → 후 swap 0·OOM 0 |
+| `T-READ-MGR-02`(PinVi) | 운영 적용(#628) | Prometheus `pinvi-api` target `up` |
+| `T-READ-MGR-03` ②·`02`(Map) | 보류 | C6c가 운영 `PROMETHEUS_METRICS_ENABLED=false`를 literal로 잠그고 실행 env도 대조 — metrics token을 C6c 보호 비밀로 들이는 계약 변경이 먼저 |
+| `T-READ-MGR-06` ③ | 운영 적용(n150 root `.env`) | WAL 바이트의 75%가 FPI, checkpoint 99.8%가 시간 주기 → `checkpoint_timeout` 15분·`wal_compression` lz4를 한 창에(FPI 건수·크기로 효과를 가를 수 있어). 시간당 checkpoint 11.9 → 4.3회, fsync 100 → 0.1초, WAL 214 → 133 MB(짧은 창, 하루 단위 재측정 남음) |
+| `T-READ-MGR-06` ② | 원인 규명, 변경 없음 | Valkey 과다 fork는 n150 디스크 가득참(11-13·11-15) 동안의 bgsave 재시도. 평시는 `save 900 1`대로 하루 96회 |
+| `T-READ-MGR-04` | 보류 | 읽기 적중 99.4%·평균 0.4~1 ms, 읽기 비용 1위가 Dagster `job_ticks` 정리(19,297초·78.8 GB) — `shared_buffers`로 줄지 않는다 |
+| `T-READ-MGR-05` | 범위 밖 | odroid(Codex 담당) |
+
 같은 단계 안에서 파일이 겹치는 것 —
 
 - `T-READ-02` → `T-READ-03`: 둘 다 `api/db.py`·`api/app.py`·`api/settings.py`. 02가 먼저다.
