@@ -11,7 +11,6 @@
   단위로 일시 오류(5xx·timeout·연결)만 한 번 더 부른다(jitter, `Retry-After` 존중, run 예산 공유). datagokr·krheritage·
   mois의 결과 코드 22를 일일 쿼터로 분류. OpenAPI·migration 없음.
 - 다음: n150 회전(dagster code-server 이미지) 뒤 Dagster 로그의 `upstream retry …` 경고 빈도와 step 재시도 감소 확인.
-||||||| parent of a48646de4 (feat(queue): 큐 요청 일시 실패 재발행·상한과 실패 원인 기록 (감사 §4 #15, alembic 456))
 
 ## 2026-11-23 — R4 전환 계획 제외 옵션(`--exclude <dataset>:<action>`)
 

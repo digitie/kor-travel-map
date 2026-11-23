@@ -7,7 +7,6 @@
 ## 2026-11-24 — provider 호출 단위 재시도(감사 §4 #15)
 
 - Dagster 적재: 국가유산·산림청·TourAPI·서울 책방·표준데이터 공개 파일·concierge export·MCST·MOIS LOCALDATA·KHOA가 일시 오류(HTTP 408·425·429·5xx 일부, timeout, 연결 오류)를 그 호출 하나만 한 번 더 부른다(15초 기준 backoff + jitter, `Retry-After` 120초 초과면 재시도 안 함, run당 재시도 예산 공유). datagokr·krheritage·mois 결과 코드 `22`를 일일 쿼터로 보고 step 재시도를 끈다. API·OpenAPI·DB 변경 없음.
-||||||| parent of a48646de4 (feat(queue): 큐 요청 일시 실패 재발행·상한과 실패 원인 기록 (감사 §4 #15, alembic 456))
 
 ## 2026-11-23 — MCST 전환 계획 제외(`--exclude`, ADR-121 R4)
 

@@ -67,7 +67,6 @@
   미완으로 꺼져 있다). 단건 호출(knps·산림청 SHP)은 step 재시도로 충분해 두었다.
 - 시험: `packages/kor-travel-map-dagster/tests/test_provider_call_retry.py`(분류 표·Retry-After·jitter·예산 공유·
   fetcher 9곳·실물 datagokr/krheritage/mois 예외 계약). OpenAPI·migration 없음.
-||||||| parent of a48646de4 (feat(queue): 큐 요청 일시 실패 재발행·상한과 실패 원인 기록 (감사 §4 #15, alembic 456))
 
 ## 2026-11-23 — R4 전환 계획 제외 옵션: 정밀도 미달 쌍을 계획 파일을 고치지 않고 뺀다
 
