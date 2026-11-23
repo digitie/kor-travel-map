@@ -3,8 +3,7 @@
 
 import { PlayIcon, RefreshCwIcon } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 
 import { opsLiveConnectionLabel, useOpsLiveInvalidation } from "@/api/live";
 import {
@@ -28,6 +27,10 @@ import { ExecutionTimeline, type TimelineFilters } from "./execution-timeline";
 import { PipelineEventsPanel } from "./events-panel";
 import { CommonDagsterPanel } from "@/components/common-dagster-panel";
 import { parseExecutionParam } from "./pipeline-shared";
+import {
+  type UrlUpdates,
+  useOwnedSearchParams,
+} from "./use-owned-search-params";
 import { RequestCreateDialog } from "./request-dialog";
 import { SchedulePanel } from "./schedule-panel";
 
@@ -293,7 +296,7 @@ function OverviewStrip({
  * 막고, 무엇보다 이 규칙 자체가 한 덩어리로 읽혀야 한다.
  */
 function useCanonicalDatasetFilters(
-  searchParams: ReturnType<typeof useSearchParams>,
+  searchParams: URLSearchParams,
   updateUrl: (
     updates: Record<string, string | null>,
     mode?: "push" | "replace",
@@ -352,7 +355,7 @@ function useTimelineFilters({
   urlSyncScope,
 }: {
   hasProviderDatasetFilter: boolean;
-  searchParams: ReturnType<typeof useSearchParams>;
+  searchParams: URLSearchParams;
   urlOperationKey: string;
   urlProviderDatasetIdValue: number | undefined;
   urlSyncScope: string;
@@ -382,22 +385,46 @@ function useTimelineFilters({
   );
 }
 
+/** dataset operation filter 규칙 — `useOwnedSearchParams`의 정규화 단계. */
+function normalizePipelineQuery(
+  previous: URLSearchParams,
+  next: URLSearchParams,
+  updates: UrlUpdates,
+): void {
+  const providerDatasetId = next.get("provider_dataset_id")?.trim() ?? "";
+  const providerDatasetChanged =
+    Object.hasOwn(updates, "provider_dataset_id") &&
+    providerDatasetId !== (previous.get("provider_dataset_id")?.trim() ?? "");
+  const scopeExplicitlyUpdated = Object.hasOwn(updates, "sync_scope");
+  const operationExplicitlyUpdated = Object.hasOwn(updates, "operation_key");
+  // dataset operation filter는 triple만 유효하다. ID 변경 때 scope와
+  // operation을 같이 주지 않았거나 scope 변경 때 operation을 같이 주지
+  // 않으면 이전 member 일부를 절대 재사용하지 않는다.
+  if (!positiveInteger(providerDatasetId)) {
+    next.delete("sync_scope");
+    next.delete("operation_key");
+  } else if (
+    providerDatasetChanged &&
+    (!scopeExplicitlyUpdated || !operationExplicitlyUpdated)
+  ) {
+    next.delete("sync_scope");
+    next.delete("operation_key");
+  } else if (scopeExplicitlyUpdated && !operationExplicitlyUpdated) {
+    next.delete("operation_key");
+  }
+  // provider/dataset 자연키 filter는 T-VN-33에서 제거됐다.
+  next.delete("provider");
+  next.delete("dataset");
+  next.delete("dataset_key");
+}
+
 export function PipelineClient() {
-  const pathname = usePathname();
   const queryClient = useQueryClient();
-  const searchParams = useSearchParams();
-  // 필터 URL 갱신의 기준은 "마지막으로 쓴 query"다. `searchParams`도 `window.location`도
-  // 믿을 수 없다 — Next는 same-route `history.replaceState/pushState`를 transition으로
-  // router 상태에 옮기고, 늦게 commit된 transition은 그 시점의 canonical URL을 브라우저에
-  // 다시 써서 방금 쓴 URL을 잠깐 되돌린다. 빠르게 이어진 입력(상태 → provider dataset ID →
-  // sync scope)이 그 낡은 URL을 기준으로 삼으면 앞 입력이 빠진 URL을 만들고, 아래 규칙이
-  // provider 없는 scope를 지운다(실측: scope가 한 번도 요청에 실리지 않음).
-  const urlStateRef = useRef(searchParams.toString());
-  // 우리가 썼지만 아직 `searchParams`로 commit되지 않은 query들(쓴 순서). 그중 하나가
-  // commit되면 우리 쓰기의 중간 상태이므로 기준을 덮지 않는다. 목록에 없는 새 commit은
-  // 외부 이동(Link·다른 코드의 history 변경)이라 기준을 그것으로 바꾼다.
-  const unackedWritesRef = useRef<string[]>([]);
-  const lastCommittedRef = useRef(searchParams.toString());
+  // router의 `useSearchParams`가 아니라 이 화면이 소유한 query를 읽는다 — 이유는
+  // `useOwnedSearchParams` 주석(transition 지연·늦은 commit의 URL 되돌림).
+  const { searchParams, updateUrl } = useOwnedSearchParams(
+    normalizePipelineQuery,
+  );
   const focusReturnExecutionIdRef = useRef<string | null>(null);
   const focusAfterCloseRef = useRef(false);
   const urlSchedule = searchParams.get("schedule");
@@ -428,94 +455,6 @@ export function PipelineClient() {
   const overview = usePipelineOverview(10);
   const queueOperational =
     queueSensorState(overview.data)?.operational === true;
-
-  const updateUrl = useCallback(
-    (
-      updates: Record<string, string | null>,
-      mode: "push" | "replace" = "push",
-    ) => {
-      const previous = new URLSearchParams(urlStateRef.current);
-      const next = new URLSearchParams(previous);
-      for (const [key, value] of Object.entries(updates)) {
-        if (value === null || value === "") {
-          next.delete(key);
-        } else {
-          next.set(key, value);
-        }
-      }
-      const providerDatasetId = next.get("provider_dataset_id")?.trim() ?? "";
-      const providerDatasetChanged =
-        Object.hasOwn(updates, "provider_dataset_id") &&
-        providerDatasetId !==
-          (previous.get("provider_dataset_id")?.trim() ?? "");
-      const scopeExplicitlyUpdated = Object.hasOwn(updates, "sync_scope");
-      const operationExplicitlyUpdated = Object.hasOwn(
-        updates,
-        "operation_key",
-      );
-      // dataset operation filter는 triple만 유효하다. ID 변경 때 scope와
-      // operation을 같이 주지 않았거나 scope 변경 때 operation을 같이 주지
-      // 않으면 이전 member 일부를 절대 재사용하지 않는다.
-      if (!positiveInteger(providerDatasetId)) {
-        next.delete("sync_scope");
-        next.delete("operation_key");
-      } else if (
-        providerDatasetChanged &&
-        (!scopeExplicitlyUpdated || !operationExplicitlyUpdated)
-      ) {
-        next.delete("sync_scope");
-        next.delete("operation_key");
-      } else if (scopeExplicitlyUpdated && !operationExplicitlyUpdated) {
-        next.delete("operation_key");
-      }
-      // provider/dataset 자연키 filter는 T-VN-33에서 제거됐다.
-      next.delete("provider");
-      next.delete("dataset");
-      next.delete("dataset_key");
-      const query = next.toString();
-      const href = query ? `${pathname}?${query}` : pathname;
-      const currentQuery = previous.toString();
-      const current = currentQuery ? `${pathname}?${currentQuery}` : pathname;
-      if (href === current) {
-        return;
-      }
-      urlStateRef.current = query;
-      unackedWritesRef.current.push(query);
-      window.history[mode === "push" ? "pushState" : "replaceState"](
-        null,
-        "",
-        href,
-      );
-    },
-    [pathname],
-  );
-
-  useEffect(() => {
-    const committed = searchParams.toString();
-    if (committed === lastCommittedRef.current) {
-      return;
-    }
-    lastCommittedRef.current = committed;
-    const writes = unackedWritesRef.current;
-    const index = writes.indexOf(committed);
-    if (index >= 0) {
-      unackedWritesRef.current = writes.slice(index + 1);
-      return;
-    }
-    unackedWritesRef.current = [];
-    urlStateRef.current = committed;
-  }, [searchParams]);
-
-  useEffect(() => {
-    // Back/Forward는 우리 쓰기와 무관한 외부 이동이다 — 대기 중인 쓰기를 버리고 브라우저
-    // URL을 기준으로 삼는다.
-    const onPopState = () => {
-      unackedWritesRef.current = [];
-      urlStateRef.current = new URLSearchParams(window.location.search).toString();
-    };
-    window.addEventListener("popstate", onPopState);
-    return () => window.removeEventListener("popstate", onPopState);
-  }, []);
 
   const {
     hasProviderDatasetFilter,

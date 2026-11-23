@@ -74,20 +74,6 @@ interface TimelineDrafts {
   urlSignature: string;
 }
 
-type TimelineDraftField = "providerDatasetId" | "syncScope" | "operationKey";
-
-/** draft 값이 URL에서 읽은 필터에 이미 반영됐는가(입력이 URL에 쓰는 정규화 그대로). */
-function draftReflectedInUrl(
-  field: TimelineDraftField,
-  value: string,
-  filters: TimelineFilters,
-): boolean {
-  if (field === "providerDatasetId") {
-    return positiveInteger(value) === filters.providerDatasetId;
-  }
-  return value.trim() === (filters[field] ?? "");
-}
-
 function padDatePart(value: number): string {
   return String(value).padStart(2, "0");
 }
@@ -161,20 +147,6 @@ function useExecutionTimelineController({
       urlSignature: urlDraftSignature,
     });
   }
-  // blur는 draft를 내려놓고 URL 값을 다시 보여 준다. 단, URL이 아직 그 draft를
-  // 반영하지 못했으면 내려놓지 않는다 — Next는 same-route `history.replaceState`를
-  // transition으로 `searchParams`에 옮기므로, 입력 직후 다음 필드로 포커스를 옮기면
-  // blur 렌더가 그 transition보다 먼저 온다. 그때 draft를 버리면 낡은 URL 값(빈
-  // provider dataset ID)이 렌더되고, 거기 매달린 sync scope 입력이 비활성으로 바뀌어
-  // 방금 받은 포커스와 입력을 잃는다. URL이 따라오면 위 서명 비교가 draft를 비운다.
-  const releaseDraft = (field: TimelineDraftField) =>
-    setDrafts((current) => {
-      const value = current[field];
-      if (value === null || !draftReflectedInUrl(field, value, initialFilters)) {
-        return current;
-      }
-      return { ...current, [field]: null };
-    });
   function deriveExecutionTimelineControllerState() {
     const providerDatasetId =
       drafts.providerDatasetId ??
@@ -504,7 +476,6 @@ function useExecutionTimelineController({
     providerDatasetId,
     providerDatasetIdFilter,
     operationKey,
-    releaseDraft,
     resetToFirstPage,
     rows,
     selectedExecutionId,
@@ -532,7 +503,6 @@ function ExecutionTimelineFilters({
   operationKey,
   providerDatasetId,
   providerDatasetIdFilter,
-  releaseDraft,
   setDrafts,
   setStoredBaselineTop,
   setStoredCursorStack,
@@ -547,7 +517,6 @@ function ExecutionTimelineFilters({
   | "operationKey"
   | "providerDatasetId"
   | "providerDatasetIdFilter"
-  | "releaseDraft"
   | "setDrafts"
   | "setStoredBaselineTop"
   | "setStoredCursorStack"
@@ -600,7 +569,12 @@ function ExecutionTimelineFilters({
           placeholder="예: 42"
           type="number"
           value={providerDatasetId}
-          onBlur={() => releaseDraft("providerDatasetId")}
+          onBlur={() =>
+            setDrafts((current) => ({
+              ...current,
+              providerDatasetId: null,
+            }))
+          }
           onChange={(event) => {
             const value = event.target.value;
             setDrafts((current) => ({
@@ -638,7 +612,9 @@ function ExecutionTimelineFilters({
           disabled={!providerDatasetIdFilter}
           placeholder="예: target_grids"
           value={syncScope}
-          onBlur={() => releaseDraft("syncScope")}
+          onBlur={() =>
+            setDrafts((current) => ({ ...current, syncScope: null }))
+          }
           onChange={(event) => {
             const value = event.target.value;
             setDrafts((current) => ({ ...current, syncScope: value }));
@@ -665,7 +641,9 @@ function ExecutionTimelineFilters({
           disabled={!providerDatasetIdFilter || !syncScope.trim()}
           placeholder="예: refresh_targeted"
           value={operationKey}
-          onBlur={() => releaseDraft("operationKey")}
+          onBlur={() =>
+            setDrafts((current) => ({ ...current, operationKey: null }))
+          }
           onChange={(event) => {
             const value = event.target.value;
             setDrafts((current) => ({ ...current, operationKey: value }));
@@ -725,7 +703,6 @@ function ExecutionTimelineView({
   providerDatasetId,
   providerDatasetIdFilter,
   operationKey,
-  releaseDraft,
   resetToFirstPage,
   rows,
   selectedExecutionId,
@@ -761,7 +738,6 @@ function ExecutionTimelineView({
         operationKey={operationKey}
         providerDatasetId={providerDatasetId}
         providerDatasetIdFilter={providerDatasetIdFilter}
-        releaseDraft={releaseDraft}
         setDrafts={setDrafts}
         setStoredBaselineTop={setStoredBaselineTop}
         setStoredCursorStack={setStoredCursorStack}
