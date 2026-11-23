@@ -1981,6 +1981,70 @@ test.describe("/ops/pipeline", () => {
       .toBe("running|101|target_grids");
   });
 
+  test("provider dataset ID 입력 직후 scope로 포커스를 옮겨도 URL 반영 전 blur가 scope를 잠그지 않는다", async ({
+    page,
+  }) => {
+    // Next는 same-route `history.replaceState`를 transition으로 `searchParams`에
+    // 옮긴다. 아래는 그 transition이 렌더되기 전(같은 task, microtask만 비움)에
+    // provider 입력 → scope 포커스를 끝낸다. 화면이 router의 `searchParams`를 읽던
+    // 때는 provider blur가 draft를 버리자 낡은 URL의 빈 ID가 렌더됐고, scope가
+    // 비활성으로 바뀌어 포커스를 잃었다(main에서 20/20 실패) — "필터가 executions
+    // 쿼리 파라미터로 전달된다"가 간헐적으로 sync_scope 없이 끝난 원인 하나다.
+    // 지금은 `useOwnedSearchParams`가 쓴 query를 같은 렌더에서 들고 있다.
+    const counters = await installPipelineMocks(page);
+    await page.goto("/ops/pipeline");
+    await expect(
+      page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`),
+    ).toBeVisible();
+
+    const state = await page.evaluate(async () => {
+      const provider = document.querySelector<HTMLInputElement>(
+        'input[aria-label="provider dataset ID 필터"]',
+      );
+      const scope = document.querySelector<HTMLInputElement>(
+        'input[aria-label="sync scope 필터"]',
+      );
+      if (!provider || !scope) throw new Error("필터 입력을 찾지 못했다");
+      const flushMicrotasks = () =>
+        new Promise<void>((resolve) => queueMicrotask(resolve));
+      provider.focus();
+      Object.getOwnPropertyDescriptor(
+        HTMLInputElement.prototype,
+        "value",
+      )?.set?.call(provider, "101");
+      provider.dispatchEvent(new Event("input", { bubbles: true }));
+      await flushMicrotasks();
+      const enabledAfterInput = !scope.disabled;
+      scope.focus();
+      await flushMicrotasks();
+      return {
+        enabledAfterInput,
+        enabledAfterBlur: !scope.disabled,
+        providerValue: provider.value,
+        scopeFocused: document.activeElement === scope,
+      };
+    });
+    expect(state).toEqual({
+      enabledAfterInput: true,
+      enabledAfterBlur: true,
+      providerValue: "101",
+      scopeFocused: true,
+    });
+
+    await page.keyboard.insertText("target_grids");
+    await expect(page.getByLabel("sync scope 필터")).toHaveValue(
+      "target_grids",
+    );
+    await expect
+      .poll(() => {
+        const last = counters.executionQueries.at(-1);
+        return [last?.get("provider_dataset_id"), last?.get("sync_scope")].join(
+          "|",
+        );
+      })
+      .toBe("101|target_grids");
+  });
+
   test("타임라인 provider dataset ID는 scope prerequisite를 강제하고 ID 변경 시 scope를 원자 제거한다", async ({
     page,
   }) => {

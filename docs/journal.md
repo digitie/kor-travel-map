@@ -1,3 +1,25 @@
+## 2026-11-23 — 파이프라인 필터 e2e 간헐 실패: 화면이 router의 늦은 `searchParams`를 읽었다
+
+- 증상: `ops-pipeline.spec.ts` "필터가 executions 쿼리 파라미터로 전달된다"가 가끔 `running|101|`(sync_scope 없음)로 실패.
+  n150 mocked e2e 재현(main `5586635a`, `--repeat-each=20 --retries=0`): workers 2에서 2/20·4/20, workers 4·40회
+  (고친 첫 판)에서도 5/40. 실패 화면은 provider 101, scope 칸은 활성인데 비어 있었다 — 입력이 사라졌다.
+- 원인: 화면이 필터를 router의 `useSearchParams`에서 읽었다. Next 16은 same-route `history.replaceState/pushState`를
+  **transition**으로 router 상태에 옮기므로 ① `searchParams`가 방금 쓴 URL보다 늦고 ② 이어진 쓰기가 따로·늦게 commit되며
+  ③ 늦은 commit의 `HistoryUpdater`가 그 시점 canonical URL을 브라우저에 다시 써 `window.location`도 잠깐 되돌린다.
+  빠른 입력(상태 → ID → scope)에서 두 경로로 scope를 잃었다. (a) provider blur가 draft를 버리면 낡은 URL의 빈 ID가 렌더돼
+  scope 칸이 비활성으로 바뀌어 포커스·입력을 잃었다 — 같은 task에서 입력 → 포커스 이동을 하는 새 시험이 main에서
+  **20/20** 실패(blur 직후 provider `""`·scope disabled). (b) URL 기준 사본(ref)이 늦은 commit에 덮여 provider 없는 URL을
+  만들면 triple 규칙이 scope를 지웠다. stress trace에서 scope가 실린 요청은 0건이었고, provider가 반영된 뒤 status만 있는
+  요청이 다시 나온 run도 있었다(router 상태 자체의 일시 역행).
+- 고침: `useOwnedSearchParams`(새 파일) — 화면이 쓴 query를 같은 렌더의 상태로 들고, router commit은 우리 쓰기(중간·순서
+  뒤바뀜 포함)면 무시하고 우리가 쓴 적 없는 commit만 외부 이동으로 받는다(popstate는 대기 목록을 비운다). 파이프라인
+  화면의 모든 URL 읽기·쓰기가 이것을 쓴다. 중간 시도 둘(location 기준, 쓴 query ref + blur 보존)은 workers 4에서 각각
+  3/20·2/40 실패로 부족해 대체했다. 재시도·sleep은 더하지 않았다.
+- 검증(n150 `~/gate-slot.sh`, io-guard 통과 뒤): 원 시험 + 새 시험 workers 4·`--repeat-each=40 --retries=0` **80/80**(두 차례),
+  ops-pipeline·admin-shell·home-nav 전체 193 passed, static(check-deps·lint·doctor·vitest·type-check·build) PASS. vitest
+  `use-owned-search-params.test.ts`가 늦은·뒤바뀐 commit 무시와 외부 commit 수용을 고정한다. **frontend 코드 변경 — 운영
+  반영은 다음 회전.** OpenAPI·migration 없음.
+
 ## 2026-11-23 — 읽기 성능 원장 정리: T-READ-12 완료·T-READ-06 보류·T-READ-07 스냅샷 정정
 
 - `T-READ-12` 완료: 회전 t1122a(Map `7a44cf94`, api·ui·dagster-code-server 이미지 revision 일치, 배포 코드에

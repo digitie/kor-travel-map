@@ -1,3 +1,9 @@
+## 2026-11-23 — 파이프라인 필터 e2e 간헐 실패 근본 수정(배포 대기)
+
+- 화면이 Next의 transition 지연 `searchParams`를 읽어 빠른 필터 입력의 sync scope를 잃었다. `useOwnedSearchParams`로 화면이
+  쓴 query를 직접 소유한다. n150 stress 80/80(main 2~5회/20~40 실패). frontend 코드 변경.
+- 다음: 통합 회전에서 admin frontend 재빌드·배포.
+
 ## 2026-11-23 — 읽기 성능 원장 정리(T-READ-12 완료·06 보류·07 스냅샷)
 
 - `T-READ-12` 완료(t1122a, Map `7a44cf94`, zoom 7 p50/p95 185/642 → 158/191 ms). `T-READ-06`은 기준 미달 보류·브랜치
