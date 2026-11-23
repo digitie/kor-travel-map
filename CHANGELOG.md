@@ -2,7 +2,7 @@
 
 ## 2026-11-24 — 큐 요청 일시 실패 재발행과 실패 원인(감사 §4 #15, alembic 456)
 
-- 새 열 `ops.feature_update_requests.retry_count`·`next_dispatch_at`(alembic `456_feature_update_retry_schedule`). 큐 요청이 일시 DB 오류(lock timeout·serialization·deadlock·연결 끊김)나 worker run 시작 전 실패로 멈추면 종결하지 않고 60초 × 2^n(jitter, 상한 30분) 뒤 다시 발행한다. 5회를 넘기면 `failed`. run이 도중에 죽은 경우는 재발행하지 않는다.
+- 새 열 `ops.feature_update_requests.retry_count`·`next_dispatch_at`(alembic `456_feature_update_retry`). 큐 요청이 일시 DB 오류(lock timeout·serialization·deadlock·연결 끊김)나 worker run 시작 전 실패로 멈추면 종결하지 않고 60초 × 2^n(jitter, 상한 30분) 뒤 다시 발행한다. 5회를 넘기면 `failed`. run이 도중에 죽은 경우는 재발행하지 않는다.
 - 실패한 큐 요청의 `error_message`가 가장 안쪽 원인을 덧붙이고(`… ← 원인 …`), 모든 종결·재발행이 import job event(`FEATURE_UPDATE_EXECUTION_FAILED`·`FEATURE_UPDATE_RETRY_SCHEDULED`·`FEATURE_UPDATE_RETRIES_EXHAUSTED`·`FEATURE_UPDATE_RUN_FAILED`)에 분류·실패 단계·Dagster run id를 남긴다(SQL 본문·키·비밀번호 제거). operation root의 실패 JSON에 실패 step·오류를 더했다. 관리자 실행 상세가 이 원인을 보여 준다. OpenAPI 변경 없음.
 ## 2026-11-24 — provider 호출 단위 재시도(감사 §4 #15)
 

@@ -1,6 +1,6 @@
 """큐 요청 재발행 일정 — ``ops.feature_update_requests``에 재시도 횟수와 다음 발행 시각을 둔다.
 
-Revision ID: 456_feature_update_retry_schedule
+Revision ID: 456_feature_update_retry
 Revises: 455_feature_cluster_points
 
 왜 필요한가(감사 ``docs/reports/2026-11-23-collection-failure-audit.md`` §1.3 P1·§4 #15).
@@ -39,7 +39,7 @@ from sqlalchemy import text
 
 from alembic import op
 
-revision: str = "456_feature_update_retry_schedule"
+revision: str = "456_feature_update_retry"
 down_revision: str | Sequence[str] | None = "455_feature_cluster_points"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
@@ -124,7 +124,7 @@ ALTER TABLE ops.application_schema_operation_receipts
         '453_features_autovacuum',
         '454_route_cluster_markers',
         '455_feature_cluster_points',
-        '456_feature_update_retry_schedule'
+        '456_feature_update_retry'
     ))
 """
 
@@ -171,5 +171,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     """되돌리지 않는다 — 열은 forward revision으로만 걷는다."""
     raise RuntimeError(
-        "456_feature_update_retry_schedule is forward-only: 열은 forward revision으로만 걷는다."
+        "456_feature_update_retry is forward-only: 열은 forward revision으로만 걷는다."
     )
