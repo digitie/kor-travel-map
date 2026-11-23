@@ -57,8 +57,8 @@ export function FeatureUpdateFailureDetail({
   const value = payload as Record<string, unknown>;
   const failureClass = text(value.failure_class, 40);
   const dbFailure = text(value.db_failure, 40);
-  const stage = text(value.stage);
-  const failedStep = text(value.failed_step);
+  const stage = text(value.stage, 300);
+  const failedStep = text(value.failed_step, 300);
   const runId = text(value.dagster_run_id, 80);
   const retryCount = count(value.retry_count);
   const maxRetries = count(value.max_retries);

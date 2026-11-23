@@ -510,6 +510,9 @@ async def _evaluate_status_event(
             f"run_id={context.dagster_run.run_id}"
         )
         return _EVENT_HANDLED
+    # 실패 원인 추출은 DB 반영과 떼어 둔다 — 여기서 난 오류가 "DB 반영 실패"로 보이거나 반영을
+    # 막으면 안 된다.
+    failure_detail = _status_event_failure_detail(context)
     try:
         # 상태 sensor도 공용 code server의 sensor thread를 나눠 쓴다 — reconcile tick과 같은 서버 쪽
         # 상한을 건다(ADR-112 결정 2). 반영은 다음 이벤트·reconcile이 다시 하므로 짧게 끊어도 된다.
@@ -518,9 +521,7 @@ async def _evaluate_status_event(
             async with asyncio.timeout(
                 _STATUS_EVENT_BUDGET_SECONDS + _CLIENT_TIMEOUT_GRACE_SECONDS
             ):
-                outcome = await _apply_run_record(
-                    record, client, failure_detail=_status_event_failure_detail(context)
-                )
+                outcome = await _apply_run_record(record, client, failure_detail=failure_detail)
     except FeatureOperationObservationError as exc:
         context.log.error("provider feature operation panel-only conflict: %s", exc)
         return _EVENT_HANDLED
@@ -554,9 +555,12 @@ def _status_event_failure_detail(context: RunStatusSensorContext) -> dict[str, s
     추가 storage 읽기가 없다 — 이벤트가 ``first_step_failure_event``를 들고 온다. reconcile·
     completion 경로(이벤트를 놓쳤을 때)는 원인 없이 종전 모양으로 남긴다.
     """
-    if context.dagster_run.status != DagsterRunStatus.FAILURE:
+    try:
+        if context.dagster_run.status != DagsterRunStatus.FAILURE:
+            return None
+        return run_failure_detail(getattr(context, "dagster_event", None)) or None
+    except Exception:  # noqa: BLE001 — 원인 기록은 반영의 부수 경로다
         return None
-    return run_failure_detail(getattr(context, "dagster_event", None)) or None
 
 
 def _utcnow() -> datetime:

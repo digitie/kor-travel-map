@@ -71,6 +71,17 @@ def _error_parts(error: Any) -> dict[str, str]:
     return parts
 
 
+def _user_metadata_text(step_data: Any, key: str) -> str | None:
+    """step 실패의 ``Failure(metadata=...)``에서 문자열 값 하나를 꺼낸다."""
+
+    metadata = getattr(getattr(step_data, "user_failure_data", None), "metadata", None)
+    if not isinstance(metadata, dict):
+        return None
+    value = metadata.get(key)
+    raw = getattr(value, "value", value)
+    return raw if isinstance(raw, str) else None
+
+
 def run_failure_detail(failure_event: Any) -> dict[str, str]:
     """``RUN_FAILURE`` :class:`dagster.DagsterEvent`에서 실패 원인 요약을 만든다. 없으면 빈 dict."""
 
@@ -86,7 +97,13 @@ def run_failure_detail(failure_event: Any) -> dict[str, str]:
             step_key = getattr(step_event, "step_key", None)
             if isinstance(step_key, str) and step_key:
                 detail["failed_step"] = step_key
-            error = getattr(getattr(step_event, "event_specific_data", None), "error", None)
+            step_data = getattr(step_event, "event_specific_data", None)
+            error = getattr(step_data, "error", None)
+            failure_class = _user_metadata_text(step_data, "failure_class")
+            if failure_class in {"transient_db", "execution"}:
+                # 큐 op가 ``Failure(metadata=...)``로 남긴 분류 — 재발행 기록에 실패한 일시 DB
+                # 실패면 failure sensor가 닫지 않고 재발행한다.
+                detail["failure_class"] = failure_class
         if error is None:
             error = getattr(data, "error", None)
         if error is not None:

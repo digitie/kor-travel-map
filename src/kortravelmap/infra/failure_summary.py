@@ -50,11 +50,13 @@ _TRANSIENT_SQLSTATES: Final[dict[str, TransientDbFailureKind]] = {
     "53300": "connection",  # too_many_connections
 }
 
-#: SQLSTATE 없이 오는 driver 연결 오류 — ``(top-level 모듈, 클래스 이름)``.
+#: SQLSTATE 없이 오는 driver 연결 오류 — ``(top-level 모듈, 클래스 이름)``. **정확한 타입만** 본다.
+#: asyncpg ``InterfaceError``의 하위에는 client 쪽 ``DataError``(잘못된 인자)·
+#: ``ClientConfigurationError``·"another operation is in progress"도 있다 — 기반 클래스로 묶으면
+#: 프로그램 오류가 "연결 끊김"으로 다섯 번 재발행된다(적대 리뷰 2026-11-24).
 _CONNECTION_ERROR_TYPES: Final[frozenset[tuple[str, str]]] = frozenset(
     {
         ("asyncpg", "ConnectionDoesNotExistError"),
-        ("asyncpg", "InterfaceError"),
         ("asyncpg", "ConnectionFailureError"),
         ("asyncpg", "TooManyConnectionsError"),
         ("asyncpg", "CannotConnectNowError"),
@@ -68,9 +70,13 @@ _MAX_CHAIN: Final[int] = 6
 _SQLALCHEMY_TAIL = re.compile(r"\n?\s*\[(?:SQL|parameters):.*", re.DOTALL)
 _SQLALCHEMY_BACKGROUND = re.compile(r"\s*\(Background on this error at:[^)]*\)")
 _SECRET_ASSIGNMENT = re.compile(
-    r"(?i)\b((?:service_?key|api_?key|access_?key|secret|token|password|passwd|pwd|"
-    r"authorization|x-api-key)\s*[=:]\s*)(?:\"[^\"]*\"|'[^']*'|[^\s&'\",;)]+)"
+    r"(?i)\b((?:service_?key|api_?key|access_?key|auth_?key|cert_?key|crtfc_key|key|secret|"
+    r"token|password|passwd|pwd|authorization|x-api-key)\s*[=:]\s*)"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s&'\",;)]+)"
 )
+#: URL의 query string은 통째로 걷는다 — provider마다 키 parameter 이름이 다르다(serviceKey·key·
+#: certkey·authKey·crtfc_key …). 이름 목록으로는 언젠가 하나를 놓친다(적대 리뷰 2026-11-24).
+_URL_QUERY = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://[^\s?#'\"<>]+)\?[^\s#'\"<>]*")
 _URL_CREDENTIALS = re.compile(r"(?i)\b([a-z][a-z0-9+.\-]*://)[^/\s:@]+:[^/\s@]+@")
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=\-]+")
 _WHITESPACE = re.compile(r"\s+")
@@ -82,6 +88,7 @@ def redact_failure_text(text: str, *, limit: int = MAX_FAILURE_MESSAGE_CHARS) ->
     cleaned = _SQLALCHEMY_TAIL.sub("", text)
     cleaned = _SQLALCHEMY_BACKGROUND.sub("", cleaned)
     cleaned = _URL_CREDENTIALS.sub(r"\1***@", cleaned)
+    cleaned = _URL_QUERY.sub(r"\1?…", cleaned)
     # bearer 먼저 — ``Authorization: Bearer x``에서 할당 규칙이 ``Bearer``만 가리고 토큰을 남기지
     # 않게 한다.
     cleaned = _BEARER.sub(r"\1***", cleaned)
@@ -130,10 +137,9 @@ def transient_db_failure_kind(exc: BaseException) -> TransientDbFailureKind | No
             return None
         if getattr(node, "connection_invalidated", False) is True:
             return "connection"
-        for klass in type(node).__mro__:
-            module = getattr(klass, "__module__", "").split(".", 1)[0]
-            if (module, klass.__name__) in _CONNECTION_ERROR_TYPES:
-                return "connection"
+        module = type(node).__module__.split(".", 1)[0]
+        if (module, type(node).__name__) in _CONNECTION_ERROR_TYPES:
+            return "connection"
     return None
 
 
@@ -155,12 +161,34 @@ class FailureSummary:
     failure_kind: str | None = None
     """원인 연쇄에서 처음 만난 provider ``failure_kind``(quota·server·network 등)."""
 
+    masked: str | None = None
+    """이 예외가 **다른 예외를 처리하다** 났다면 그 가려진 예외(``__context__``)의 한 줄.
+
+    분류에는 쓰지 않는다(정리 중의 lock timeout이 결정적 실패를 "일시"로 바꾸면 안 된다). 대신
+    잃지 않게 payload에 남긴다 — 실패를 기록하다 lock timeout이 나면 진짜 원인은 여기 있다."""
+
     def describe(self) -> str:
         """``error_message``에 싣는 한 줄. 원인이 있으면 가장 안쪽 원인을 덧붙인다."""
 
         if not self.causes:
             return self.message
         return f"{self.message} ← 원인 {self.causes[-1]}"
+
+    def classification(self) -> dict[str, Any]:
+        """메시지 없이 **분류만** — 타입 이름·분류·DB 실패 종류·provider ``failure_kind``.
+
+        provider attempt event처럼 상류 원문을 싣지 않기로 한 자리(원문에 응답 본문이 섞일 수
+        있다)에 쓴다. 원인 연쇄도 타입 이름만 남긴다.
+        """
+
+        body: dict[str, Any] = {"failure_class": self.failure_class}
+        if self.db_failure is not None:
+            body["db_failure"] = self.db_failure
+        if self.failure_kind is not None:
+            body["failure_kind"] = self.failure_kind
+        if self.causes:
+            body["cause_types"] = [cause.split(": ", 1)[0] for cause in self.causes]
+        return body
 
     def payload(self) -> dict[str, Any]:
         """import job event payload에 싣는 구조."""
@@ -176,6 +204,8 @@ class FailureSummary:
             body["failure_kind"] = self.failure_kind
         if self.causes:
             body["causes"] = list(self.causes)
+        if self.masked is not None:
+            body["masked_failure"] = self.masked
         return body
 
 
@@ -204,6 +234,14 @@ def summarize_failure(exc: BaseException) -> FailureSummary:
             causes[-1] = line
             continue
         causes.append(line)
+    context = exc.__context__
+    masked = (
+        _one_line(context)
+        if context is not None
+        and not exc.__suppress_context__
+        and all(context is not node for node in chain)
+        else None
+    )
     return FailureSummary(
         failure_class="transient_db" if db_failure is not None else "execution",
         db_failure=db_failure,
@@ -211,4 +249,5 @@ def summarize_failure(exc: BaseException) -> FailureSummary:
         message=_one_line(exc),
         causes=tuple(causes),
         failure_kind=failure_kind,
+        masked=masked,
     )

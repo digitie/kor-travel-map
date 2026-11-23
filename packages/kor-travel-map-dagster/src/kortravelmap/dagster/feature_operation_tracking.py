@@ -529,18 +529,20 @@ async def _append_failed_attempt(
     membership: ProviderDatasetOperationMembership,
     error: Exception,
 ) -> None:
-    """member attempt 실패 event — 원인(분류·메시지·연쇄·step·run id)을 비밀값 없이 싣는다.
+    """member attempt 실패 event — 분류·원인 타입·step·run id를 싣는다(감사 §1.2).
 
-    종전에는 ``code``와 예외 타입 이름만 실었다(감사 §1.2). 메시지는
-    :func:`~kortravelmap.infra.failure_summary.summarize_failure`가 SQL 본문·키·DSN 비밀번호를
-    걷는다.
+    종전에는 ``code``와 예외 타입 이름만 실었다. **상류 원문(메시지)은 여전히 싣지 않는다** —
+    응답 본문이 섞일 수 있어 이 event에는 원문을 남기지 않는다는 결정이 있다
+    (``test_canonical_provider_operations``의 raw detail 검사). 분류는
+    :meth:`~kortravelmap.infra.failure_summary.FailureSummary.classification`이 타입 이름으로
+    만든다.
     """
     summary = summarize_failure(error)
     detail: dict[str, Any] = {
         "code": "FEATURE_OPERATION_ASSET_ATTEMPT_FAILED",
         "type": type(error).__name__,
         "dagster_run_id": guard.dagster_run_id,
-        **summary.payload(),
+        **summary.classification(),
     }
     step = _attempt_step(context)
     if step is not None:

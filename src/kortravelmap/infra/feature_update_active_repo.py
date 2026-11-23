@@ -88,6 +88,19 @@ updated AS (
        AND locked.cancellation_id IS NULL
        AND locked.quarantined_at IS NULL
     RETURNING job.job_id, job.dispatch_requested_at
+),
+-- 운영자·PinVi의 "지금 실행"은 일시 실패 backoff(alembic 456 ``next_dispatch_at``)를 건너뛴다.
+-- 값이 있을 때만 건드린다 — 없는 대부분의 요청에서 request 갱신 trigger를 깨우지 않는다.
+cleared_backoff AS (
+    UPDATE ops.feature_update_requests AS request
+       SET next_dispatch_at = NULL
+      FROM locked
+     WHERE request.request_id = locked.request_id
+       AND locked.status = 'queued'
+       AND locked.cancellation_id IS NULL
+       AND locked.quarantined_at IS NULL
+       AND request.next_dispatch_at IS NOT NULL
+    RETURNING request.request_id
 )
 SELECT
   locked.request_id,

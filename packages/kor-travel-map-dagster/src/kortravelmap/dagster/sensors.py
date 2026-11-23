@@ -7,8 +7,11 @@ from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from kortravelcommon.dagster import RecoveryPolicy
 from kortravelmap.infra.failure_summary import FailureSummary, summarize_failure
-from kortravelmap.infra.feature_update_executor import FeatureUpdateTransientFailure
-from kortravelmap.infra.feature_update_repo import FeatureUpdateLockBusy
+from kortravelmap.infra.feature_update_executor import (
+    FeatureUpdateTerminalizationFailed,
+    FeatureUpdateTransientFailure,
+)
+from kortravelmap.infra.feature_update_repo import FEATURE_UPDATE_MAX_RETRIES, FeatureUpdateLockBusy
 
 from dagster import (
     DefaultSensorStatus,
@@ -105,11 +108,26 @@ async def execute_feature_update_request_op(
         return await _reschedule_after_transient_failure(
             context, client, request_id, request_generation, exc.summary, stage=exc.stage
         )
+    except FeatureUpdateTerminalizationFailed as exc:
+        # 결정적 실패를 기록하다 그 기록이 실패했다 — 재발행하지 않고 원 원인으로 새 연결에서
+        # 닫는다.
+        original, original_stage = exc.summary, exc.stage
+        await _with_db_retries(
+            lambda: client.fail_update_request_after_failure(
+                request_id,
+                owner_dagster_run_id=context.run_id,
+                expected_request_generation=request_generation,
+                failure=original,
+                stage=original_stage,
+            )
+        )
+        raise Failure(description=original.describe()) from exc
     except Exception as exc:
         # claim 전(request lock·scope lock 획득, request 조회)에 난 일시 DB 실패도 같은 길로 간다.
+        # 다른 실패를 처리하다 난 것(``__context__``)은 재발행하지 않는다 — 진짜 원인이 가려져 있다.
         # 결정적 실패는 종전처럼 run을 실패시킨다 — failure sensor가 request를 닫는다.
         summary = summarize_failure(exc)
-        if summary.failure_class != "transient_db":
+        if summary.failure_class != "transient_db" or summary.masked is not None:
             raise
         return await _reschedule_after_transient_failure(
             context, client, request_id, request_generation, summary, stage=None
@@ -314,13 +332,7 @@ async def _reschedule_after_transient_failure(
     failure sensor·알림을 부른다. 원인과 다음 발행 시각은 Map DB import job event
     (``FEATURE_UPDATE_RETRY_SCHEDULED``)와 이 op의 output metadata에 남는다.
     """
-    outcome = await client.reschedule_update_request_after_failure(
-        request_id,
-        owner_dagster_run_id=context.run_id,
-        expected_request_generation=request_generation,
-        failure=summary,
-        stage=stage,
-    )
+    max_retries = _max_retries_for_stage(stage)
     failure_metadata: dict[str, str | int | None] = {
         "request_id": request_id,
         "failure_class": summary.failure_class,
@@ -328,21 +340,42 @@ async def _reschedule_after_transient_failure(
         "stage": stage,
         "error": summary.describe(),
     }
-    if outcome is None:
-        raise Failure(
-            description=(
-                "일시 DB 실패 뒤 request 상태가 재발행·종결 대상이 아니었다(이미 종결·취소됐다): "
-                f"{summary.describe()}"
-            ),
-            metadata=failure_metadata,
+    try:
+        outcome = await _with_db_retries(
+            lambda: client.reschedule_update_request_after_failure(
+                request_id,
+                owner_dagster_run_id=context.run_id,
+                expected_request_generation=request_generation,
+                failure=summary,
+                stage=stage,
+                max_retries=max_retries,
+            )
         )
+    except Exception as exc:
+        # 재발행 기록 자체가 실패했다(DB가 아직 흔들린다). run을 실패시키되 metadata에 일시 실패임을
+        # 남긴다 — failure sensor가 그것을 보고 request를 닫지 않고 재발행한다.
+        raise Failure(
+            description=f"일시 DB 실패 뒤 재발행 기록도 실패했다: {summary.describe()}",
+            metadata={**failure_metadata, "reschedule_error": type(exc).__name__},
+        ) from exc
+    if outcome is None:
+        # 그 사이 상태가 바뀌었다(취소·다른 경로의 종결·lock 경합 requeue로 generation 전진).
+        # 실패가 아니다 — 알림을 부르지 않는다.
+        metadata: dict[str, object] = {**failure_metadata, "status": "state_changed"}
+        context.log.warning(
+            "feature update request 일시 실패 뒤 상태가 이미 바뀌어 재발행하지 않았다: "
+            "request_id=%s",
+            request_id,
+        )
+        context.add_output_metadata(metadata)
+        return metadata
     if not outcome.rescheduled:
         raise Failure(
             description=outcome.request.error_message or summary.describe(),
             metadata={**failure_metadata, "retry_count": outcome.request.retry_count},
         )
     next_at = outcome.request.next_dispatch_at
-    metadata: dict[str, object] = {
+    metadata = {
         **failure_metadata,
         "status": "retry_scheduled",
         "retry_count": outcome.request.retry_count,
@@ -357,6 +390,35 @@ async def _reschedule_after_transient_failure(
     )
     context.add_output_metadata(metadata)
     return metadata
+
+
+#: 실행이 provider 갱신을 시작한 뒤의 일시 실패는 재발행할 때마다 provider 호출을 처음부터
+#: 다시 한다(앞서 commit된 scope도). 쿼터가 좁은 상류(data.go.kr·OpiNet)를 위해 그 재발행 수를
+#: 줄인다(적대 리뷰 2026-11-24). claim·scope 해석 단계의 실패는 상류를 부르지 않았다.
+_PROVIDER_STAGE_MAX_RETRIES: Final[int] = 2
+_DB_CALL_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (2.0, 5.0)
+
+
+def _max_retries_for_stage(stage: str | None) -> int:
+    if stage is not None and (stage.startswith("refreshing:") or stage == "finalize"):
+        return min(_PROVIDER_STAGE_MAX_RETRIES, FEATURE_UPDATE_MAX_RETRIES)
+    return FEATURE_UPDATE_MAX_RETRIES
+
+
+async def _with_db_retries(call: Callable[[], Awaitable[_T]]) -> _T:
+    """재발행·종결 기록을 일시 DB 실패에 한해 짧게 몇 번 더 시도한다(2·5초 뒤).
+
+    그 기록도 event clock 경합이나 연결 회복 중에 실패할 수 있다 — 한 번에 포기하면 request가
+    ``running``으로 남고 failure sensor가 원인을 모른 채 닫는다.
+    """
+    for delay in (*_DB_CALL_RETRY_DELAYS_SECONDS, None):
+        try:
+            return await call()
+        except Exception as exc:
+            if delay is None or summarize_failure(exc).failure_class != "transient_db":
+                raise
+            await asyncio.sleep(delay)
+    raise AssertionError("unreachable")  # pragma: no cover
 
 
 def _failure_detail(context: RunFailureSensorContext) -> dict[str, str]:

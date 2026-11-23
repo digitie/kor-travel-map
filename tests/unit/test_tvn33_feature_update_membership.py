@@ -69,6 +69,8 @@ def _row(*, membership: repo.FeatureUpdateRequestDataset | None) -> SimpleNamesp
         finished_at=None,
         generation=1,
         dispatch_requested_at=None,
+        retry_count=0,
+        next_dispatch_at=None,
         feature_update_request_dataset_id=(
             membership.feature_update_request_dataset_id if membership else None
         ),
@@ -436,5 +438,5 @@ def test_terminal_event_member_ids_never_silently_skips(
     monkeypatch.setattr(executor, "get_import_job", _fake_get_import_job)
 
     assert (
-        asyncio.run(executor._terminal_event_member_ids(object(), "job-1")) == expected
+        asyncio.run(executor.update_request_event_member_ids(object(), "job-1")) == expected
     )

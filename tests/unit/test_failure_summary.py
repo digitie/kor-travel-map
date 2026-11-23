@@ -62,6 +62,9 @@ def test_connection_invalidated_and_driver_connection_errors() -> None:
         == "connection"
     )
     assert transient_db_failure_kind(_driver_error("elsewhere", "InterfaceError")) is None
+    # 기반 InterfaceError(하위에 client 쪽 DataError 등)는 연결 끊김이 아니다.
+    assert transient_db_failure_kind(_driver_error("asyncpg.exceptions", "InterfaceError")) is None
+    assert transient_db_failure_kind(_driver_error("asyncpg.exceptions", "DataError")) is None
 
 
 def test_explicit_cause_is_followed_but_implicit_context_is_not() -> None:
@@ -104,8 +107,23 @@ def test_redaction_removes_secrets_and_sql_body() -> None:
     cleaned = redact_failure_text(secrets)
     for leaked in ("ABC123", "hunter2", "tok-1", "eyJhbGciOi", "p w"):
         assert leaked not in cleaned
-    assert "serviceKey=***" in cleaned
+    # URL query string은 통째로 걷는다 — provider마다 키 이름이 다르다.
+    assert "https://apis.data.go.kr/x?…" in cleaned
     assert "postgresql+asyncpg://***@db:5432/map" in cleaned
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "GET http://x/y?key=SECRET1&a=1 failed",  # krex·VWorld
+        "certkey=SECRET1 rejected",  # OpiNet
+        "authKey: SECRET1",  # KMA
+        "crtfc_key=SECRET1",  # 공공데이터 계열
+        "HTTP 503 for url 'https://host/p/SECRETPATH?serviceKey=SECRET1'",
+    ],
+)
+def test_provider_key_parameters_never_survive(text: str) -> None:
+    assert "SECRET1" not in redact_failure_text(text)
 
 
 def test_redaction_truncates_long_messages() -> None:
@@ -147,3 +165,14 @@ def test_summary_of_a_lock_timeout_is_transient_and_has_no_sql() -> None:
     assert summary.db_failure == "lock_timeout"
     assert "INSERT INTO" not in summary.describe()
     assert summary.payload()["db_failure"] == "lock_timeout"
+
+
+def test_a_failure_raised_while_handling_another_keeps_the_masked_cause() -> None:
+    """실패를 기록하다 lock timeout이 나면 분류는 바깥(일시)이지만 진짜 원인을 잃지 않는다."""
+
+    original = RuntimeError("provider exploded")
+    while_saving = _PgError("canceling statement due to lock timeout", "55P03")
+    while_saving.__context__ = original
+    summary = summarize_failure(while_saving)
+    assert summary.failure_class == "transient_db"
+    assert summary.payload()["masked_failure"] == "RuntimeError: provider exploded"

@@ -89,6 +89,7 @@ __all__ = [
     "FeatureUpdateExecutionResult",
     "FeatureUpdateConnectionUnsafe",
     "FeatureUpdateLockReleaseError",
+    "FeatureUpdateTerminalizationFailed",
     "FeatureUpdateTransientFailure",
     "ProviderDatasetRefreshResult",
     "ProviderDatasetRefreshFailure",
@@ -1462,27 +1463,34 @@ async def _execute_feature_update_request_locked(
         error_message = failure.describe()
         if plan is None:
             plan = _unresolved_execution_plan(started)
-        if isinstance(exc, ProviderDatasetRefreshFailure) and exc.record_sync_failure:
-            # runner의 bound transaction은 ``session.begin`` context가 이미
-            # rollback했다. sync failure를 별도 transaction으로 먼저 commit해
-            # 이후 request terminalize 실패에도 provider 실패 신호를 보존한다.
-            await _record_provider_refresh_failure(session, exc)
-        return await _finish_failed_execution(
-            session,
-            started,
-            plan=plan,
-            results=results,
-            error_message=error_message,
-            owner_dagster_run_id=dagster_run_id,
-            event_code=(
-                exc.event_code
-                if isinstance(exc, ProviderDatasetRefreshFailure)
-                else None
-            ),
-            append_cache_target_status_events=not suppresses_relay_finalization(exc),
-            failure=failure,
-            stage=stage,
-        )
+        try:
+            if isinstance(exc, ProviderDatasetRefreshFailure) and exc.record_sync_failure:
+                # runner의 bound transaction은 ``session.begin`` context가 이미
+                # rollback했다. sync failure를 별도 transaction으로 먼저 commit해
+                # 이후 request terminalize 실패에도 provider 실패 신호를 보존한다.
+                await _record_provider_refresh_failure(session, exc)
+            return await _finish_failed_execution(
+                session,
+                started,
+                plan=plan,
+                results=results,
+                error_message=error_message,
+                owner_dagster_run_id=dagster_run_id,
+                event_code=(
+                    exc.event_code
+                    if isinstance(exc, ProviderDatasetRefreshFailure)
+                    else None
+                ),
+                append_cache_target_status_events=not suppresses_relay_finalization(exc),
+                failure=failure,
+                stage=stage,
+            )
+        except _FeatureUpdateExecutionStopped:
+            raise
+        except Exception as terminal_error:
+            # 실패를 기록하다 실패했다(대개 event clock lock timeout). 이 오류를 그대로 올리면
+            # 호출자가 그것을 일시 오류로 읽어 결정적 실패를 재발행한다 — 원 실패를 들고 올린다.
+            raise FeatureUpdateTerminalizationFailed(failure, stage=stage) from terminal_error
 
 
 def suppresses_relay_finalization(exc: BaseException) -> bool:
@@ -1539,12 +1547,27 @@ FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE: Final[str] = "FEATURE_UPDATE_RETRIE
 FEATURE_UPDATE_RUN_FAILED_EVENT_CODE: Final[str] = "FEATURE_UPDATE_RUN_FAILED"
 
 
+class FeatureUpdateTerminalizationFailed(RuntimeError):
+    """결정적 실패를 ``failed``로 기록하다가 그 기록이 실패했다(대개 lock timeout).
+
+    이것을 일시 DB 실패로 읽어 재발행하면 결정적 실패를 상한까지 되풀이하고 진짜 원인을 잃는다
+    (적대 리뷰 2026-11-24). 그래서 **원 실패의 요약**을 들고 올라가고, 호출자(Dagster 큐 op)가 새
+    연결로 그 원인과 함께 종결한다. request는 이 시점에 아직 이 run의 ``running``이다.
+    """
+
+    def __init__(self, failure: FailureSummary, *, stage: str | None) -> None:
+        super().__init__(f"feature update failure could not be recorded: {failure.describe()}")
+        self.summary = failure
+        self.stage = stage
+
+
 @dataclass(frozen=True)
 class FeatureUpdateRetryOutcome:
-    """:func:`retry_or_fail_update_request`의 결과 — 다시 발행했는가, 종결했는가."""
+    """:func:`retry_or_fail_update_request_state`의 결과 — 다시 발행했는가, 종결했는가."""
 
     request: FeatureUpdateRequest
     rescheduled: bool
+    max_retries: int
 
 
 async def _record_update_request_events(
@@ -1570,79 +1593,25 @@ async def _record_update_request_events(
             raise RuntimeError("canonical feature update event insert failed")
 
 
-async def _fail_update_request_outside_execution(
-    session: AsyncSession,
-    request_id: str,
-    *,
-    expected_generation: int,
-    owner_dagster_run_id: str,
-    error_message: str,
-    event_code: str,
-    payload: Mapping[str, Any],
-) -> FeatureUpdateRequest | None:
-    """executor 밖(새 연결)에서 claim 전 ``queued`` 또는 owner의 ``running``을 ``failed``로 닫는다.
-
-    executor의 :func:`_finish_failed_execution`과 같은 순서를 지킨다 — relay stream을 먼저 잡고,
-    request를 닫고, captured member가 있으면 ``failed`` status event를 savepoint 안에서 낸다(restore
-    fence가 움직였으면 그 event만 건너뛴다). 그래야 PinVi가 executor가 죽은 요청의 끝도 본다.
-    """
-    await lock_cache_target_result_streams(session, request_id=request_id)
-    failed = await fail_update_request_after_retries(
-        session,
-        request_id,
-        expected_generation=expected_generation,
-        owner_dagster_run_id=owner_dagster_run_id,
-        error_message=error_message,
-    )
-    if failed is None:
-        return None
-    try:
-        async with session.begin_nested():
-            await append_cache_target_refresh_status_events(
-                session,
-                request_id=failed.request_id,
-                job_id=failed.job_id,
-                status="failed",
-                error_code=event_code,
-            )
-    except CacheTargetRefreshProtocolViolation as violation:
-        if not suppresses_relay_finalization(violation):
-            raise
-        _LOG.warning(
-            "feature update failed status persisted without relay event — restore fence moved: "
-            "request_id=%s reason=%s",
-            failed.request_id,
-            violation.reason,
-        )
-    await _record_update_request_events(
-        session,
-        failed,
-        level="error",
-        code=event_code,
-        message=error_message,
-        payload={"status": "failed", "failure_code": event_code, **payload},
-    )
-    return failed
-
-
-async def retry_or_fail_update_request(
+async def retry_or_fail_update_request_state(
     session: AsyncSession,
     request_id: str,
     *,
     expected_generation: int,
     owner_dagster_run_id: str,
     failure_message: str,
-    payload: Mapping[str, Any],
     include_running: bool = True,
     max_retries: int = FEATURE_UPDATE_MAX_RETRIES,
 ) -> FeatureUpdateRetryOutcome | None:
-    """일시 실패한 request를 backoff 뒤 재발행하고, 상한에 닿았으면 ``failed``로 닫는다.
+    """일시 실패한 request를 backoff 뒤 재발행하고, 상한에 닿았으면 ``failed``로 닫는다 —
+    **상태만**.
 
-    호출자가 연 transaction 안에서 돈다. 둘 다 사건(import job event)을 남긴다 — 재발행은
-    ``warning`` + :data:`FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE`(다음 발행 시각·횟수),
-    종결은 ``error`` + :data:`FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE`. ``payload``에는 비밀값을
-    넣지 않는다(:func:`~kortravelmap.infra.failure_summary.summarize_failure`가 만든 것).
-    상태가 맞지 않으면(이미 terminal·취소 marker·다른 owner·stale generation) ``None``.
+    import job event·relay event는 쓰지 않는다(:func:`record_update_request_retry_events`가 **다음
+    transaction**에서 쓴다). event INSERT는 전역 단일 행 ``import_job_event_clock``을 commit까지
+    쥐는데,
+    그 행이 바로 10-22 lock timeout의 자리다 — 상태 전이를 거기에 묶으면 재발행 자체가 같은 lock에서
+    실패하고, 그러면 request가 ``running``으로 남는다(적대 리뷰 2026-11-24). 상태가 맞지 않으면(이미
+    terminal·취소 marker·다른 owner·stale generation) ``None``.
     """
     rescheduled = await reschedule_update_request_after_failure(
         session,
@@ -1653,65 +1622,129 @@ async def retry_or_fail_update_request(
         max_retries=max_retries,
     )
     if rescheduled is not None:
-        next_at = (
-            rescheduled.next_dispatch_at.isoformat()
-            if rescheduled.next_dispatch_at is not None
-            else None
+        return FeatureUpdateRetryOutcome(
+            request=rescheduled, rescheduled=True, max_retries=max_retries
         )
-        await _record_update_request_events(
-            session,
-            rescheduled,
-            level="warning",
-            code=FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE,
-            message=(
-                f"일시 실패 — {next_at or '즉시'} 이후 다시 발행 "
-                f"({rescheduled.retry_count}/{max_retries}): {failure_message}"
-            ),
-            payload={
-                **payload,
-                "status": "queued",
-                "dagster_run_id": owner_dagster_run_id,
-                "retry_count": rescheduled.retry_count,
-                "max_retries": max_retries,
-                "next_dispatch_at": next_at,
-            },
-        )
-        return FeatureUpdateRetryOutcome(request=rescheduled, rescheduled=True)
-    failed = await _fail_update_request_outside_execution(
+    failed = await fail_update_request_after_retries(
         session,
         request_id,
         expected_generation=expected_generation,
         owner_dagster_run_id=owner_dagster_run_id,
         error_message=f"재발행 {max_retries}회 소진: {failure_message}",
-        event_code=FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE,
-        payload={**payload, "dagster_run_id": owner_dagster_run_id, "max_retries": max_retries},
     )
     if failed is None:
         return None
-    return FeatureUpdateRetryOutcome(request=failed, rescheduled=False)
+    return FeatureUpdateRetryOutcome(request=failed, rescheduled=False, max_retries=max_retries)
 
 
-async def fail_update_request_after_run_failure(
+async def fail_update_request_state(
     session: AsyncSession,
     request_id: str,
     *,
     expected_generation: int,
     owner_dagster_run_id: str,
     error_message: str,
-    payload: Mapping[str, Any],
 ) -> FeatureUpdateRequest | None:
-    """worker run이 executor의 종결 없이 실패했다 — owner의 ``running``을 ``failed``로 닫는다.
+    """executor 밖에서 claim 전 ``queued`` 또는 owner의 ``running``을 ``failed``로 닫는다 —
+    **상태만**.
 
-    run이 도중에 죽은 경우(프로세스 kill·OOM·run 상한·code-server 재시작)다. 원인을 모르므로
-    재발행하지 않는다(결정적 실패를 상한까지 되풀이할 수 있다). 대신 Dagster가 남긴 실패 원인을
-    ``error_message``와 event payload에 싣는다.
+    run이 도중에 죽었거나(failure sensor) executor가 실패를 기록하지 못한 경우다. relay·import job
+    event는 :func:`record_update_request_failure_events`가 다음 transaction에서 쓴다.
     """
-    return await _fail_update_request_outside_execution(
+    return await fail_update_request_after_retries(
         session,
         request_id,
         expected_generation=expected_generation,
         owner_dagster_run_id=owner_dagster_run_id,
         error_message=error_message,
-        event_code=FEATURE_UPDATE_RUN_FAILED_EVENT_CODE,
-        payload={**payload, "dagster_run_id": owner_dagster_run_id},
+    )
+
+
+async def record_update_request_failure_events(
+    session: AsyncSession,
+    request: FeatureUpdateRequest,
+    *,
+    event_code: str,
+    payload: Mapping[str, Any],
+) -> None:
+    """``failed``로 닫힌 request의 relay ``failed`` status와 terminal import job event를 쓴다.
+
+    상태 전이와 **다른** transaction이다(:func:`retry_or_fail_update_request_state` 참고). relay
+    stream을 먼저 잡고 status event를 savepoint 안에서 낸다 — restore fence가 움직였으면 그 event만
+    건너뛴다(executor의 :func:`_finish_failed_execution`과 같은 규칙). 그래야 PinVi가 executor가
+    죽은
+    요청의 끝도 본다.
+    """
+    await lock_cache_target_result_streams(session, request_id=request.request_id)
+    try:
+        async with session.begin_nested():
+            await append_cache_target_refresh_status_events(
+                session,
+                request_id=request.request_id,
+                job_id=request.job_id,
+                status="failed",
+                error_code=event_code,
+            )
+    except CacheTargetRefreshProtocolViolation as violation:
+        if not suppresses_relay_finalization(violation):
+            raise
+        _LOG.warning(
+            "feature update failed status persisted without relay event — restore fence moved: "
+            "request_id=%s reason=%s",
+            request.request_id,
+            violation.reason,
+        )
+    await _record_update_request_events(
+        session,
+        request,
+        level="error",
+        code=event_code,
+        message=request.error_message or event_code,
+        payload={"status": "failed", "failure_code": event_code, **payload},
+    )
+
+
+async def record_update_request_retry_events(
+    session: AsyncSession,
+    outcome: FeatureUpdateRetryOutcome,
+    *,
+    owner_dagster_run_id: str,
+    failure_message: str,
+    payload: Mapping[str, Any],
+) -> None:
+    """:func:`retry_or_fail_update_request_state`의 결과를 import job event(와 종결이면 relay)로
+    남긴다.
+
+    재발행은 ``warning`` + :data:`FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE`(다음 발행 시각·횟수),
+    종결은 ``error`` + :data:`FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE`. ``payload``에는 비밀값을
+    넣지 않는다(:func:`~kortravelmap.infra.failure_summary.summarize_failure`가 만든 것).
+    """
+    request = outcome.request
+    common = {**payload, "dagster_run_id": owner_dagster_run_id, "max_retries": outcome.max_retries}
+    if not outcome.rescheduled:
+        await record_update_request_failure_events(
+            session,
+            request,
+            event_code=FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE,
+            payload=common,
+        )
+        return
+    next_at = (
+        request.next_dispatch_at.isoformat() if request.next_dispatch_at is not None else None
+    )
+    await _record_update_request_events(
+        session,
+        request,
+        level="warning",
+        code=FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE,
+        message=(
+            f"일시 실패 — {next_at or '즉시'} 이후 다시 발행 "
+            f"({request.retry_count}/{outcome.max_retries}): {failure_message}"
+        ),
+        payload={
+            **common,
+            "status": "queued",
+            "retry_count": request.retry_count,
+            "next_dispatch_at": next_at,
+        },
     )
