@@ -31,10 +31,10 @@
 | 1 | deploy | Map 448 포함 SHA로 회전(attach mode `off`) | 회전 규칙대로 |
 | 2 | deploy | **동결**: 모든 feature 적재 operation·queue(`DISABLED_FEATURE_LOAD_SCHEDULES`)와 `consistency_dedup_refresh_daily_schedule` 정지, STARTED run 0 확인. 관리자 쓰기(M05 manual dedup 결정·feature PATCH·병합 큐 적용)도 창 동안 멈춘다. 국가유산 367쌍 큐가 돌고 있지 않음을 확인 | 해제 |
 | 3 | deploy | map DB 백업(pg_dump) — 되돌림 기준점 | — |
-| 4 | R4 | 새 계획 `ktmctl mcst-theme-plan --samples 50 --ids-out … --plan-out plan.json`(읽기 전용) → 목록별 action 수·정밀도 표본·PinVi 참조 수 보고 | 없음(읽기) |
-| 5 | coordinator | 표본 승인, `plan_sha256` 확정 | — |
-| 6 | R4 | 표본 리허설 `ktmctl mcst-theme-transition plan.json --sample-per-action 200`(되감음) → stale·error 0 확인 | 없음(되감음) |
-| 7 | R4 | **실행** `ktmctl mcst-theme-transition plan.json --execute --confirm-plan-sha256 <sha> --batch-size 200` | §3 |
+| 4 | R4 | 새 계획 `ktmctl mcst-theme-plan --samples 50 [--exclude <dataset>:<action> …] --ids-out … --plan-out plan.json`(읽기 전용) → 목록별 action 수·정밀도 표본·제외 행 수·PinVi 참조 수 보고. 제외는 §2.1 | 없음(읽기) |
+| 5 | coordinator | 표본 승인, 제외 목록·`plan_sha256` 확정 | — |
+| 6 | R4 | 표본 리허설 `ktmctl mcst-theme-transition plan.json [--exclude …] --sample-per-action 200`(되감음) → stale·error 0 확인 | 없음(되감음) |
+| 7 | R4 | **실행** `ktmctl mcst-theme-transition plan.json [--exclude …] --execute --confirm-plan-sha256 <sha> --batch-size 200` | §3 |
 | 8 | deploy | `KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE=apply`(Map Dagster code-server·worker env) 회전 | `off`는 롤백 아님 |
 | 9 | deploy | 동결 해제, MCST 적재 1회(`feature_place_mcst_culture_job`) | — |
 | 10 | R4 | 적재 metadata `theme_attach` 상태 수 확인(owner·sticky·redirected·matched·created), 속성 필터 운영 EXPLAIN | — |
@@ -57,6 +57,52 @@ batch 안에서 Feature 하나라도 `error`면 그 batch를 **통째로 되감�
 
 리허설도 사건 sequence 번호를 소비한다(`nextval`은 되감기지 않는다). 사건 번호에 빈 칸이 생기는 것은
 정상이다 — PinVi 커서는 존재하는 사건만 따른다.
+
+### 2.1 정밀도 게이트 미달 쌍 제외(`--exclude`)
+
+표본 판정(5)에서 어떤 목록의 어떤 action이 정밀도 게이트(설계 §5.4, 0.97)를 못 넘으면 그 쌍만 빼고
+나머지를 전환한다. **계획 파일을 손으로 고치지 않는다** — `mcst-theme-plan --exclude <dataset>:<action>`
+(반복 가능)으로 계획을 다시 뽑는다.
+
+- `<dataset>`은 dataset_key(`mcst_barrier_free_places_csv`) 또는 slug(`barrier_free_places_csv`,
+  `_csv` 생략 가능 — `barrier_free_places`). 계획에는 언제나 dataset_key로 기록된다. `<action>`은
+  `attach`·`collapse`·`retire`(전환 action)만. 모르는 dataset·action·같은 쌍의 반복은 종료 코드 2로 거부.
+- 제외된 행은 **기록된 비전환**이다. 계획 JSON의 `excluded_items`에 원래 action·대상·`row_revision` 그대로
+  남고(`items`에서 빠진다), `exclusions`에 쌍이 남는다. 둘 다 `plan_sha256`에 든다 — 승인한 sha가 "무엇을
+  하지 않는지"까지 고정한다. 효과는 `keep`과 같다(Feature·앵커·`feature_id` 불변, 사건 없음, 장부 행 없음,
+  apply 모드 적재에서는 자기 목록의 owner로 남는다). 그래도 `keep`으로 다시 쓰지 않는 것은 판정과 결정을
+  섞지 않기 위해서다 — 보고서 `by_dataset`·`samples`는 판정 그대로(제외 전후 같은 숫자)이고, 제외는
+  보고서 `exclusions`(쌍마다 `feature_count`)와 계획 `excluded_items`로 따로 보인다. 나중에 그 쌍을 다시
+  전환하려면 제외 없이 새 계획을 뽑으면 된다.
+- 제외는 그 **행의 dataset** 기준이다. 다른 목록의 `collapse`가 제외된 목록의 생존자로 접히는 것은 그
+  목록의 판정으로 남는다(생존자는 `keep`이라 제외와 무관하다). 남는 전환이 제외된 Feature를 대상으로
+  하면 계획 생성이 거부한다(계획기 규칙상 생기지 않는다 — collapse 대상은 `keep` 생존자, attach 대상은
+  비MCST master).
+- `--ids-out`과 보고서 `retiring_feature_count`는 제외를 뺀 **실제 퇴역 예정**이다 — PinVi 참조 수는 이
+  목록으로 다시 센다.
+- 실행기(6·7)에는 **같은 `--exclude`를 다시 준다**. 계획에 기록된 제외와 정확히 같지 않으면(빠뜨림·더함
+  포함, 순서와 표기는 무관) 리허설·실행 모두 DB에 닿기 전에 종료 코드 2로 거부한다 — sha만 붙여 넣다가
+  다른 범위의 계획을 실행하는 일을 막는다. 제외 없는 계획은 `--exclude` 없이 돈다. 실행 요약에
+  `exclusions`·`excluded_items`(수)가 찍힌다.
+- 계획 파일 형식에 `exclusions`·`excluded_items`가 더해져 sha 정의가 바뀌었다. 이 기능 이전에 뽑은
+  계획 파일은 실행기가 "옛 형식"으로 거부한다 — 운영 창에서 새로 뽑는다(어차피 창 안에서 다시 뽑는다).
+- 계획은 그대로 읽기 전용이다(`SET TRANSACTION READ ONLY`) — 제외는 읽은 뒤 메모리에서만 적용한다.
+
+2026-11-23 표본 판정(R4 준비 실행, `plan_sha256 3f93a4b7…`)에서 `barrier_free_places` collapse(0.94~0.96,
+같은 복합 건물 주소의 다른 시설이 0 m로 접힘)와 `world_restaurants` collapse(0.81~0.92, 다른 주소의 체인
+지점이 접힘)가 미달했다. 그 판정대로라면:
+
+```
+ktmctl mcst-theme-plan --samples 50 \
+  --exclude barrier_free_places:collapse --exclude world_restaurants:collapse \
+  --ids-out ids.tsv --plan-out plan.json
+ktmctl mcst-theme-transition plan.json \
+  --exclude barrier_free_places:collapse --exclude world_restaurants:collapse \
+  --sample-per-action 200
+ktmctl mcst-theme-transition plan.json \
+  --exclude barrier_free_places:collapse --exclude world_restaurants:collapse \
+  --execute --confirm-plan-sha256 <plan.json의 plan_sha256> --batch-size 200
+```
 
 ## 3. 되돌림
 

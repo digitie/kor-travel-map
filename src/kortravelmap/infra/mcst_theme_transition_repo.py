@@ -19,6 +19,10 @@ batch 하나가 transaction 하나이고 domain command 하나다. 같은 계획
 않는다(``(plan_sha256, batch_size, batch_index)`` UNIQUE, 이미 있으면 건너뜀). Feature 하나가 DB
 오류로 실패하면(``error``) 그 Feature는 savepoint로 되감기고, CLI가 그 batch 전체를 되감고 멈춘다.
 
+**제외**(``exclusions``): 계획기가 ``(dataset_key, action)`` 쌍을 제외하면 그 쌍의 계획 행은
+``items``가 아니라 ``excluded_items``에 남는다 — 실행기는 손대지 않는다(효과는 ``keep``과 같다).
+제외 쌍과 제외된 행은 ``plan_sha256``에 들어가고, 계획 파일을 읽을 때 일관성을 다시 본다.
+
 이 모듈은 commit하지 않는다 — 호출자가 commit(실행) 또는 rollback(리허설)한다.
 """
 
@@ -55,15 +59,19 @@ __all__ = [
     "TRANSITION_ACTOR",
     "TRANSITION_OPERATION",
     "TransitionBatchResult",
+    "TransitionExclusion",
     "TransitionItemOutcome",
     "TransitionPlan",
     "TransitionPlanItem",
     "build_transition_plan",
+    "check_plan_exclusions",
     "execute_transition_batch",
     "load_transition_plan",
 ]
 
 TransitionAction = Literal["retire", "attach", "collapse"]
+TransitionExclusion = tuple[str, str]
+"""``(dataset_key, action)`` — 계획기가 전환하지 않기로 한 쌍(정밀도 게이트 미달 등)."""
 OutcomeStatus = Literal[
     "done",
     "stale_feature",
@@ -95,18 +103,39 @@ class TransitionPlan:
     rule_version: str
     plan_sha256: str
     items: tuple[TransitionPlanItem, ...]
+    exclusions: tuple[TransitionExclusion, ...] = ()
+    """제외한 ``(dataset_key, action)`` 쌍(정렬). 실행기는 이 쌍의 행을 돌리지 않는다."""
+    excluded_items: tuple[TransitionPlanItem, ...] = ()
+    """제외로 빠진 계획 행 — 기록용(전환하지 않는다, 효과는 ``keep``과 같다)."""
 
     def as_json(self) -> dict[str, Any]:
         return {
             "rule_version": self.rule_version,
             "plan_sha256": self.plan_sha256,
+            "exclusions": _exclusions_json(self.exclusions),
             "items": [asdict(item) for item in self.items],
+            "excluded_items": [asdict(item) for item in self.excluded_items],
         }
 
 
-def _plan_sha256(rule_version: str, items: Sequence[TransitionPlanItem]) -> str:
+def _exclusions_json(exclusions: Iterable[TransitionExclusion]) -> list[dict[str, str]]:
+    return [{"dataset_key": dataset_key, "action": action} for dataset_key, action in exclusions]
+
+
+def _plan_sha256(
+    rule_version: str,
+    items: Sequence[TransitionPlanItem],
+    exclusions: Sequence[TransitionExclusion],
+    excluded_items: Sequence[TransitionPlanItem],
+) -> str:
+    # 제외 쌍과 제외된 행도 sha에 든다 — 승인한 sha가 "무엇을 하지 않는지"까지 고정한다.
     canonical = json.dumps(
-        {"rule_version": rule_version, "items": [asdict(item) for item in items]},
+        {
+            "rule_version": rule_version,
+            "exclusions": _exclusions_json(exclusions),
+            "items": [asdict(item) for item in items],
+            "excluded_items": [asdict(item) for item in excluded_items],
+        },
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
@@ -114,15 +143,77 @@ def _plan_sha256(rule_version: str, items: Sequence[TransitionPlanItem]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _plan_order(item: TransitionPlanItem) -> tuple[str, str, str]:
+    return (item.action, item.dataset_key, item.feature_id)
+
+
+def _check_exclusion_pairs(exclusions: Sequence[TransitionExclusion]) -> None:
+    if list(exclusions) != sorted(set(exclusions)):
+        raise ValueError("계획의 exclusions가 정렬·중복 없는 모양이 아니다")
+    for dataset_key, action in exclusions:
+        if action not in _TRANSITION_ACTIONS:
+            raise ValueError(f"제외할 수 없는 action: {dataset_key}:{action}")
+
+
+def _check_plan_shape(
+    items: Sequence[TransitionPlanItem],
+    exclusions: Sequence[TransitionExclusion],
+    excluded_items: Sequence[TransitionPlanItem],
+) -> None:
+    """행·제외가 서로 맞는지 본다 — 손으로 고친 계획·어긋난 계획을 거른다."""
+
+    _check_exclusion_pairs(exclusions)
+    excluded = frozenset(exclusions)
+    for item in (*items, *excluded_items):
+        if item.action not in _TRANSITION_ACTIONS:
+            raise ValueError(f"알 수 없는 전환 action: {item.action!r}")
+        if (item.action == "retire") != (item.target_feature_id is None):
+            raise ValueError(f"retire만 대상이 없다: {item.feature_id}")
+        if item.row_revision < 1:
+            raise ValueError(f"계획에 row_revision이 없다: {item.feature_id}")
+    for item in items:
+        if (item.dataset_key, item.action) in excluded:
+            raise ValueError(
+                f"제외한 쌍의 행이 실행 목록에 있다: {item.dataset_key}:{item.action} "
+                f"{item.feature_id}"
+            )
+    for item in excluded_items:
+        if (item.dataset_key, item.action) not in excluded:
+            raise ValueError(
+                f"제외 목록에 없는 쌍의 행이 제외돼 있다: {item.dataset_key}:{item.action} "
+                f"{item.feature_id}"
+            )
+    feature_ids = [item.feature_id for item in (*items, *excluded_items)]
+    if len(feature_ids) != len(set(feature_ids)):
+        raise ValueError("같은 Feature가 계획에 두 번 있다")
+    # 남는 전환이 제외된 Feature로 병합하면 안 된다 — 계획기 규칙상 생기지 않지만(collapse 대상은
+    # keep 생존자, attach 대상은 비MCST master) 계약으로 막는다.
+    held = frozenset(item.feature_id for item in excluded_items)
+    for item in items:
+        if item.target_feature_id is not None and item.target_feature_id in held:
+            raise ValueError(
+                f"남는 전환이 제외된 Feature를 대상으로 한다: {item.feature_id} → "
+                f"{item.target_feature_id}"
+            )
+
+
 def build_transition_plan(
-    entries: Iterable[Any], *, revisions: Mapping[str, int], rule_version: str
+    entries: Iterable[Any],
+    *,
+    revisions: Mapping[str, int],
+    rule_version: str,
+    exclusions: Iterable[TransitionExclusion] = (),
 ) -> TransitionPlan:
     """계획 행(``PlanEntry``)에서 실행 계획을 만든다. ``keep``·``ambiguous``는 빠진다.
 
+    ``exclusions``의 ``(dataset_key, action)``에 맞는 행은 ``excluded_items``로 간다(전환 안 함).
     순서는 결정적이다(action, dataset, feature_id) — 같은 입력이면 같은 ``plan_sha256``.
     """
 
-    items = sorted(
+    excluded_pairs = tuple(sorted(set(exclusions)))
+    _check_exclusion_pairs(excluded_pairs)
+    excluded = frozenset(excluded_pairs)
+    planned = sorted(
         (
             TransitionPlanItem(
                 feature_id=str(entry.feature_id),
@@ -136,42 +227,71 @@ def build_transition_plan(
             for entry in entries
             if entry.action in _TRANSITION_ACTIONS
         ),
-        key=lambda item: (item.action, item.dataset_key, item.feature_id),
+        key=_plan_order,
     )
+    items = tuple(item for item in planned if (item.dataset_key, item.action) not in excluded)
+    held = tuple(item for item in planned if (item.dataset_key, item.action) in excluded)
+    _check_plan_shape(items, excluded_pairs, held)
     return TransitionPlan(
         rule_version=rule_version,
-        plan_sha256=_plan_sha256(rule_version, items),
-        items=tuple(items),
+        plan_sha256=_plan_sha256(rule_version, items, excluded_pairs, held),
+        items=items,
+        exclusions=excluded_pairs,
+        excluded_items=held,
     )
+
+
+def check_plan_exclusions(plan: TransitionPlan, expected: Iterable[TransitionExclusion]) -> None:
+    """실행자가 말한 제외(``--exclude``)가 계획에 기록된 제외와 **정확히** 같은지 본다.
+
+    제외 없는 계획은 제외 없이, 제외 있는 계획은 같은 제외를 다시 말해야 돈다 — sha만 붙여
+    넣다가 다른 범위의 계획을 실행하는 일을 막는다.
+    """
+
+    stated = tuple(sorted(set(expected)))
+    if stated != plan.exclusions:
+        raise ValueError(
+            "계획의 제외와 --exclude가 다르다: 계획 "
+            f"{[':'.join(pair) for pair in plan.exclusions]} / 인자 "
+            f"{[':'.join(pair) for pair in stated]}"
+        )
 
 
 def load_transition_plan(payload: Mapping[str, Any]) -> TransitionPlan:
     """계획 파일을 읽고 ``plan_sha256``을 다시 계산해 대조한다(손으로 고친 계획을 거른다)."""
 
     rule_version = str(payload["rule_version"])
-    items = tuple(
-        TransitionPlanItem(
-            feature_id=str(raw["feature_id"]),
-            dataset_key=str(raw["dataset_key"]),
-            action=raw["action"],
-            target_feature_id=(
-                None if raw["target_feature_id"] is None else str(raw["target_feature_id"])
-            ),
-            row_revision=int(raw["row_revision"]),
-        )
-        for raw in payload["items"]
+    if "exclusions" not in payload or "excluded_items" not in payload:
+        # 제외 기록이 없는 옛 형식 — sha 정의가 바뀌었으니 계획을 새로 뽑는다.
+        raise ValueError("계획 파일에 exclusions·excluded_items가 없다(옛 형식) — 새로 뽑을 것")
+    items = tuple(_load_item(raw) for raw in payload["items"])
+    excluded_items = tuple(_load_item(raw) for raw in payload["excluded_items"])
+    exclusions = tuple(
+        (str(raw["dataset_key"]), str(raw["action"])) for raw in payload["exclusions"]
     )
-    for item in items:
-        if item.action not in _TRANSITION_ACTIONS:
-            raise ValueError(f"알 수 없는 전환 action: {item.action!r}")
-        if (item.action == "retire") != (item.target_feature_id is None):
-            raise ValueError(f"retire만 대상이 없다: {item.feature_id}")
-        if item.row_revision < 1:
-            raise ValueError(f"계획에 row_revision이 없다: {item.feature_id}")
-    expected = _plan_sha256(rule_version, items)
+    _check_plan_shape(items, exclusions, excluded_items)
+    expected = _plan_sha256(rule_version, items, exclusions, excluded_items)
     if expected != str(payload["plan_sha256"]):
         raise ValueError("계획 파일의 plan_sha256이 내용과 다르다")
-    return TransitionPlan(rule_version=rule_version, plan_sha256=expected, items=items)
+    return TransitionPlan(
+        rule_version=rule_version,
+        plan_sha256=expected,
+        items=items,
+        exclusions=exclusions,
+        excluded_items=excluded_items,
+    )
+
+
+def _load_item(raw: Mapping[str, Any]) -> TransitionPlanItem:
+    return TransitionPlanItem(
+        feature_id=str(raw["feature_id"]),
+        dataset_key=str(raw["dataset_key"]),
+        action=raw["action"],
+        target_feature_id=(
+            None if raw["target_feature_id"] is None else str(raw["target_feature_id"])
+        ),
+        row_revision=int(raw["row_revision"]),
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -478,9 +598,17 @@ async def execute_transition_batch(
     """계획의 한 batch를 현재 transaction에서 실행한다. commit은 호출자 몫이다.
 
     batch의 정체는 ``(plan_sha256, batch_size, batch_index)``다 — 다른 크기로 다시 돌리면 batch는
-    새로 잡히고, 이미 전환된 Feature는 ``already_done``으로 건너뛴다.
+    새로 잡히고, 이미 전환된 Feature는 ``already_done``으로 건너뛴다. 계획이 제외한
+    ``(dataset_key, action)``의 행이 ``items``에 섞여 오면 아무것도 쓰지 않고 거부한다.
     """
 
+    excluded = frozenset(plan.exclusions)
+    for item in items:
+        if (item.dataset_key, item.action) in excluded:
+            raise ValueError(
+                f"계획이 제외한 행은 실행하지 않는다: {item.dataset_key}:{item.action} "
+                f"{item.feature_id}"
+            )
     await lock_feature_curation_write(session)
     if (
         await session.execute(

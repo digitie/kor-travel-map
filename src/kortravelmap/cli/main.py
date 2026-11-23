@@ -337,6 +337,16 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="전환 실행 계획(JSON, plan_sha256 포함)을 쓸 파일 — mcst-theme-transition 입력.",
     )
+    plan_p.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="DATASET:ACTION",
+        help=(
+            "이 dataset의 이 action(attach|collapse|retire)을 전환하지 않는다(반복 가능). "
+            "dataset은 dataset_key 또는 slug(_csv 생략 가능). 계획에 기록되고 plan_sha256에 든다."
+        ),
+    )
     plan_p.set_defaults(func=_cmd_mcst_theme_plan)
 
     transition_p = sub.add_parser(
@@ -363,6 +373,16 @@ def build_parser() -> argparse.ArgumentParser:
         "--confirm-plan-sha256",
         default=None,
         help="--execute일 때 필수. 계획 파일의 plan_sha256과 정확히 같아야 한다.",
+    )
+    transition_p.add_argument(
+        "--exclude",
+        action="append",
+        default=[],
+        metavar="DATASET:ACTION",
+        help=(
+            "계획을 뽑을 때 준 --exclude를 그대로 다시 준다(반복). 계획에 기록된 제외와 "
+            "정확히 같지 않으면 리허설·실행 모두 거부한다(제외 없는 계획은 생략)."
+        ),
     )
     transition_p.set_defaults(func=_cmd_mcst_theme_transition)
 
@@ -796,12 +816,17 @@ async def _cmd_reconcile_abandon(args: argparse.Namespace) -> int:
 async def _cmd_mcst_theme_plan(args: argparse.Namespace) -> int:
     import json
 
-    from kortravelmap.cli.mcst_theme_plan import run_mcst_theme_plan
+    from kortravelmap.cli.mcst_theme_plan import parse_exclusions, run_mcst_theme_plan
 
+    try:
+        exclusions = parse_exclusions(args.exclude)
+    except ValueError as exc:
+        print(f"mcst-theme-plan: {exc}", file=sys.stderr)
+        return _EXIT_INVALID
     engine = make_async_engine(_resolve_dsn(args))
     try:
         report, retiring, transition = await run_mcst_theme_plan(
-            engine, samples=max(0, int(args.samples))
+            engine, samples=max(0, int(args.samples)), exclusions=exclusions
         )
     finally:
         await engine.dispose()
@@ -824,8 +849,11 @@ async def _cmd_mcst_theme_plan(args: argparse.Namespace) -> int:
 async def _cmd_mcst_theme_transition(args: argparse.Namespace) -> int:
     import json
 
-    from kortravelmap.cli.mcst_theme_plan import run_mcst_theme_transition
-    from kortravelmap.infra.mcst_theme_transition_repo import load_transition_plan
+    from kortravelmap.cli.mcst_theme_plan import parse_exclusions, run_mcst_theme_transition
+    from kortravelmap.infra.mcst_theme_transition_repo import (
+        check_plan_exclusions,
+        load_transition_plan,
+    )
 
     try:
         plan = load_transition_plan(
@@ -833,6 +861,12 @@ async def _cmd_mcst_theme_transition(args: argparse.Namespace) -> int:
         )
     except (OSError, ValueError, KeyError) as exc:
         print(f"mcst-theme-transition: 계획 파일을 읽지 못했다 — {exc}", file=sys.stderr)
+        return _EXIT_INVALID
+    try:
+        exclusions = parse_exclusions(args.exclude)
+        check_plan_exclusions(plan, exclusions)
+    except ValueError as exc:
+        print(f"mcst-theme-transition: {exc}", file=sys.stderr)
         return _EXIT_INVALID
     if args.execute and args.confirm_plan_sha256 != plan.plan_sha256:
         print(
@@ -850,6 +884,7 @@ async def _cmd_mcst_theme_transition(args: argparse.Namespace) -> int:
             execute=bool(args.execute),
             max_batches=args.max_batches,
             sample_per_action=args.sample_per_action,
+            exclusions=exclusions,
         )
     finally:
         await engine.dispose()

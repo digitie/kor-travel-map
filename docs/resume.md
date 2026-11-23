@@ -1,3 +1,10 @@
+## 2026-11-23 — R4 전환 계획 제외 옵션(`--exclude <dataset>:<action>`)
+
+- `mcst-theme-plan`·`mcst-theme-transition`에 반복 `--exclude`. 제외 행은 계획 `excluded_items`에 기록(효과 `keep`),
+  `plan_sha256`에 포함, 실행기는 같은 제외를 다시 받아야 돈다. 옛 형식 계획 파일은 거부. OpenAPI·migration·PinVi 재vendor 없음.
+- 다음: 회전에 싣고 R4 창에서 `--exclude barrier_free_places:collapse --exclude world_restaurants:collapse`로 계획을
+  새로 뽑는다(runbook §2.1). 회전 여부는 coordinator 결정.
+
 ## 2026-11-23 — 관리자 프런트 ui 0.2.5 채택(입력·선택 focus 덧대기 제거)
 
 - ui 0.2.5·tokens 0.1.6 vendor, guard `ade7b3eb`. 공통 입력·선택 컨트롤이 FS-7.8 단일 outline이 되어 Badge·dry-run

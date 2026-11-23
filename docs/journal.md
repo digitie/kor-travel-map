@@ -1,3 +1,24 @@
+## 2026-11-23 — R4 전환 계획 제외 옵션: 정밀도 미달 쌍을 계획 파일을 고치지 않고 뺀다
+
+- 배경: R4 준비 계획(읽기 전용, `plan_sha256 3f93a4b7…`)의 표본 판정에서 `barrier_free_places` collapse
+  (0.94~0.96 — 한 복합 건물 주소의 다른 시설이 0 m로 접힘)와 `world_restaurants` collapse(0.81~0.92 — 다른
+  주소의 체인 지점이 접힘)가 게이트 0.97을 못 넘었다. 계획기·실행기 어느 쪽에도 쌍을 빼는 길이 없었고
+  `plan.json`을 손으로 고치는 것은 설계 위반이다.
+- `mcst-theme-plan --exclude <dataset>:<action>`(반복). dataset은 dataset_key 또는 slug(`_csv` 생략 가능)로
+  받아 dataset_key로 기록한다. 제외된 행은 `keep`으로 다시 쓰지 않고 계획의 `excluded_items`에 원래 action·
+  대상·`row_revision` 그대로 남긴다(효과는 `keep`과 같다) — 판정(보고서 `by_dataset`·표본)과 운영 결정
+  (`exclusions`)을 섞지 않아 표본 감사가 제외 전후로 같은 숫자를 본다. `exclusions`·`excluded_items`가
+  `plan_sha256`에 들어 승인한 sha가 "하지 않을 것"까지 고정한다(아무 행도 빼지 않는 제외도 sha를 바꾼다).
+- 실행기: `--exclude`를 다시 받아 계획의 제외와 정확히 같을 때만 돈다(리허설 포함, DB 접근 전 종료 코드 2).
+  `load_transition_plan`은 제외 쌍의 행이 `items`에 있거나, 제외에 없는 쌍이 `excluded_items`에 있거나,
+  남는 전환이 제외된 Feature를 대상으로 하거나, 같은 Feature가 두 번 있으면 거부한다.
+  `execute_transition_batch`도 제외 쌍의 행을 받으면 잠금·쓰기 전에 거부한다(라이브러리 직접 호출 방어).
+- sha 정의가 바뀌어 이전 형식 계획 파일은 "옛 형식"으로 거부한다 — 운영 창에서 어차피 새로 뽑는다. 계획은
+  여전히 `SET TRANSACTION READ ONLY` 하나이고 제외는 읽은 뒤 메모리에서만 적용한다.
+- 시험: unit `tests/unit/test_mcst_theme_plan_exclude.py`(파싱·계획 내용·sha·변조 거부·실행기가 `items`만
+  넘김·불일치 거부), integration `test_excluded_pair_is_left_untouched`(실 PostGIS: 제외 행 active·revision
+  불변·사건·장부 0, 같은 batch의 attach는 전환). OpenAPI·migration·PinVi 재vendor 없음.
+
 ## 2026-11-23 — 관리자 프런트 ui 0.2.5(입력·선택 컨트롤 focus 정본화)와 Map 덧대기 제거
 
 - `@kor-travel/ui` 0.2.4→0.2.5·tokens 0.1.5→0.1.6(common #81 `fe141143`, main CI artifact 14782962353
