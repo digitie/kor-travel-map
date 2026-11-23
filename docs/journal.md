@@ -1,3 +1,32 @@
+## 2026-11-24 — 상태 적재 job: 상류 미준비는 건너뜀·나이로 판정, weather export 읽기 줄 세우기 (감사 §4 #9)
+
+- 근거: 감사 보고서 §1.3 P1·P2·§3 + n150 Dagster(읽기 전용) 재측정. Map 실패 run 389건 중 상한 초과 124건(`weather_state_current`
+  97 — 79건이 W5 :41과 겹친 :40 회차). 재시도 원인 `TransportExportNotCurrent` 220·`_WeatherUnavailable` 119·
+  `DagsterExecutionInterruptedError` 100(전부 weather 상태 job — retry policy가 있으면 run 상한 취소도 재시도로 넘어간다)·
+  ReadTimeout 39·ConnectError 22. 부모 단독 측정: current 전량 23페이지 p50 20.5초/페이지·합 460초 + 경합 503 7회 = 706초,
+  Map grouping 0.4초. weather 조사: 페이지마다 전체 scope 상태·승인 선택 재검증(SQL 82문장), 23페이지는 weather
+  `MAX_PAGE_SCOPES=128`, "경합" 503은 statement_timeout 5초 초과, :41 W5 동시 읽기가 current 페이지 간격을 2~3배로.
+- 새 모듈 `kortravelmap.dagster.upstream_signal`(ADR-114 "2026-11-24 개정"): 상류 미준비(provider 예외 `retryable=True`·무응답
+  전송 오류·HTTP 429/5xx)는 `skipped=upstream_not_ready`(세대 유지, step 재시도 없음), weather 200+stale은 교체, 교체 거부·
+  transport 0건은 `skipped=refused`. 모든 결과에 `upstream_state`·서비스 세대·`served_age_seconds`·`stale_alert`를 싣고 run tag
+  둘을 언제나 쓴다. **run 결과는 서비스 세대 나이가 데이터셋 `max_age`(REST stale 기준)를 넘었는지로 정한다** — 넘으면 재시도 없는
+  실패. 상태 op에서 `RetryPolicy`를 뺐다(Valkey 연결 실패만 op가 `RetryRequested`).
+- weather: Valkey 공용 자리 `weather.export_read`(동시성 1, `ValkeyStateStore.shared_lease`)로 원천 읽기를 줄 세우고, 발화를
+  벌렸다(W5 :41→:05, 단기 :30→:50, 중기 :40→:50). 503 페이지 재시도는 같은 cursor로 7회·대기 합 180초(±20%), 다음
+  페이지를 상한 안에 못 끝내면 스스로 멈춘다(`weather_export_too_slow`). `weather_state_current` 상한 480→600초는 weather 수정
+  전 임시책(뒤에 되돌림). page size·ETag는 손대지 않았다(weather 쪽 수정 뒤 별도).
+- P2: tag 없던 Map job 7개에 `dagster/max_runtime`(cache_target_snapshot_gc 3600, managed_file_scan 3600,
+  manual_provider_dedup_detection 3600, consistency_dedup_refresh 10800, full_load_batch_consistency_gate 10800,
+  mois_localdata_source_sync 21600, offline_upload_load 21600 — 앞 둘은 표본 부족으로 전역과 같게 명시). 지수 backoff RetryPolicy
+  둘(feature 적재·maintenance)에 `Jitter.PLUS_MINUS`(±delay). "lock busy가 SUCCESS로 끝나고 15초 뒤 새 run"은 큐 requeue에
+  not-before가 필요해 큐 재시도 작업과 겹치므로 이 PR에서 뺐다.
+- 적대 리뷰 2인(Dagster 의미·운영 안전) 반영: 미준비도 나이 기준으로 빨갛게(설정 오류가 영영 초록이 되지 않게), httpx 분류 축소
+  (scheme 없는 주소는 실패), 계약 위반이 재시도 가능한 원인보다 우선, tag 항상 기록, 기준 = 읽기 `max_age`, 고정 간격 단발 재시도엔
+  jitter 제외, GC 상한 3600.
+- 시험: `test_upstream_signal.py`(새), `test_transport_state_jobs.py`·`test_weather_state_jobs.py`·`test_weather_forecast_delta_jobs.py`·
+  `test_definitions.py`(모든 job run 상한, 비-feature schedule 다음 tick 전 회수), integration `test_valkey_{transport,weather}_state.py`
+  (거부·나이, 공용 자리 동시성·갱신·대기). OpenAPI·migration 없음. 관리자 화면 변화 없음(e2e 대상 아님).
+
 ## 2026-11-24 — 큐 요청 재발행 후속: 상한·종결 후처리·실패 run 표시(#1544 리뷰, PR #1551)
 
 - 배경: #1544(큐 요청 일시 실패 재발행, alembic 456)를 머지 뒤 두 관점으로 리뷰했다. 지적마다 최신 main(#1546 event
@@ -57,6 +86,7 @@
 - 반영하지 않은 것: migration 456 lock 실패는 코드 결함이 아니라 회전 절차라 `resume.md` 다음 단계에 순서를 적었다.
   COMMIT 응답 유실 뒤 후처리를 다시 내는 reconciler는 만들지 않았다(위).
 
+
 ## 2026-11-24 — live topic revision을 commit 직전에 올림·10-22 큐 상황 전체 재현(alembic 458)
 
 - 재현(`tests/integration/test_queue_concurrency_1022.py`, 모듈 전용 DB): 긴 큐 적재(KNPS 탐방로 실제 asset — runner 맨
@@ -77,6 +107,7 @@
   completeness 검사(쓰기 행 수만큼) 내내 topic 행을 쥐던 것(리뷰 실측 3초 검사). 시험 추가: deferred 순서(재넣기 제거 변이에서
   빨강), 실제 `get_dataset_projection_revision` receipt 인과, transaction당 topic +1·표식 누수 0. 표식 표 권한은 SELECT·INSERT·DELETE.
 - 남은 것: 큰 첫 적재의 쓰기 단계가 fence 900초 상한을 넘을 수 있다(ADR-113 재검토 조건, 별도).
+
 
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영(수집 실패 감사 §4 #10·#11)
 
@@ -107,6 +138,7 @@
   location, 6개 RUNNING 포함 스냅샷·복원). n150 읽기 전용 `status`·`freeze --dry-run`·스냅샷 없는 `unfreeze` 거부
   확인(instigator 61·RUNNING 59, 6개 모두 RUNNING, run-status sensor 8개의 tick 조회), 상대 경로 거부. 실제 freeze/unfreeze는
   돌리지 않았다. 적대 리뷰 2인(상태 기계·운영/보안) 지적을 반영했다.
+
 ## 2026-11-24 — import job event clock을 slot으로 나눔(감사 §1.2·#1544 남은 구조 문제, alembic 457)
 
 - 근거(n150 Map DB 읽기 전용 조회): 10-22 큐 요청 12건 중 8건이 `LockNotAvailableError` + `INSERT INTO
@@ -129,6 +161,7 @@
 - 남은 것: `ops.ops_live_topic_revisions`(provider_sync·dataset_projection·dagster_schedules)도 같은 singleton 꼴이지만
   432 snapshot 잠금 순서와 ADR-065 causal receipt에 묶여 있어 이번에 바꾸지 않았다. 큐 경로에서는 cache target 요청의
   `poi_cache_targets` 갱신이 그 행을 잡는다.
+
 
 ## 2026-11-24 — 큐 요청 일시 실패 재발행·상한과 실패 원인 기록(감사 §4 #15·§1.3 P1, alembic 456)
 
@@ -199,6 +232,7 @@
   미완으로 꺼져 있다). 단건 호출(knps·산림청 SHP)은 step 재시도로 충분해 두었다.
 - 시험: `packages/kor-travel-map-dagster/tests/test_provider_call_retry.py`(분류 표·Retry-After·jitter·예산 공유·
   fetcher 9곳·실물 datagokr/krheritage/mois 예외 계약). OpenAPI·migration 없음.
+
 
 ## 2026-11-23 — R4 전환 계획 제외 옵션: 정밀도 미달 쌍을 계획 파일을 고치지 않고 뺀다
 

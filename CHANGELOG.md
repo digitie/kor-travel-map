@@ -22,6 +22,18 @@
 
 - `ops.import_job_event_clock`(전역 단일 행)을 `ops.import_job_event_clock_slots`로 바꿨다(alembic `457_event_clock_slots`). event를 쓴 긴 적재 transaction이 commit까지 그 행을 쥐어 다른 큐 요청·job의 event 기록이 lock timeout으로 실패하던 문제(10-22 큐 요청 8건)를 없앤다. `/v1/ops/live`의 `event_clock_revision` 값·의미는 같다(slot 합, 옛 값 이관). OpenAPI 변경 없음.
 
+## 2026-11-24 — 상태 적재 job의 상류 신호와 weather export 줄 세우기(ADR-114 개정)
+
+- transport·weather Valkey 상태 job은 상류 503·stale·무응답·HTTP 429/5xx면 이번 tick을 건너뛴다(op metadata
+  `skipped=upstream_not_ready`, 세대 유지, step 재시도 없음). 교체 거부·0건은 `skipped=refused`. 모든 결과가 `upstream_state`·
+  `served_age_seconds`·`stale_alert`를 싣고 run tag `kor_travel_map.upstream_state`·`kor_travel_map.upstream_stale_alert`를 단다.
+  서비스 세대가 데이터셋 stale 기준(`max_age`)을 넘으면 run은 재시도 없이 실패한다.
+- weather 상태 job 일곱은 원천 읽기를 Valkey 공용 자리 `weather.export_read`로 한 번에 하나만 하고, 발화 시각이 바뀌었다(단기
+  :30→:50, 중기 :40→:50, 하루 요약 :41→:05). 다음 페이지를 run 상한 안에 끝낼 수 없으면 그 tick을 건너뛴다.
+  `weather_state_current` run 상한 480→600초(weather export 수정 전 임시).
+- 상태 op의 Dagster `RetryPolicy` 제거(Valkey 연결 실패만 op가 재시도 요청), tag 없던 Map job 7개에 `dagster/max_runtime`,
+  지수 backoff `RetryPolicy`에 jitter.
+
 ## 2026-11-24 — 큐 요청 일시 실패 재발행과 실패 원인(감사 §4 #15, alembic 456)
 
 - 새 열 `ops.feature_update_requests.retry_count`·`next_dispatch_at`(alembic `456_feature_update_retry`). 큐 요청이 일시 DB 오류(lock timeout·serialization·deadlock·연결 끊김)나 worker run 시작 전 실패로 멈추면 종결하지 않고 60초 × 2^n(jitter, 상한 30분) 뒤 다시 발행한다. 5회를 넘기면 `failed`. run이 도중에 죽은 경우는 재발행하지 않는다.
@@ -29,6 +41,7 @@
 ## 2026-11-24 — provider 호출 단위 재시도(감사 §4 #15)
 
 - Dagster 적재: 국가유산·산림청·TourAPI·서울 책방·표준데이터 공개 파일·concierge export·MCST·MOIS LOCALDATA·KHOA가 일시 오류(HTTP 408·425·429·5xx 일부, timeout, 연결 오류)를 그 호출 하나만 한 번 더 부른다(15초 기준 backoff + jitter, `Retry-After` 120초 초과면 재시도 안 함, run당 재시도 예산 공유). datagokr·krheritage·mois 결과 코드 `22`를 일일 쿼터로 보고 step 재시도를 끈다. API·OpenAPI·DB 변경 없음.
+
 
 ## 2026-11-23 — MCST 전환 계획 제외(`--exclude`, ADR-121 R4)
 

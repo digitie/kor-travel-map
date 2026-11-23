@@ -33,6 +33,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     DefaultScheduleStatus,
     OpExecutionContext,
     RetryPolicy,
@@ -192,7 +193,8 @@ async def scan_managed_files_op(context: OpExecutionContext) -> dict[str, object
 
 @job(
     name="managed_file_scan",
-    tags=FILE_REGISTRY_SCAN_JOB_TAGS,
+    # 6시간마다. 실측 성공 p99 148초·최대 164초 → 1시간.
+    tags={**FILE_REGISTRY_SCAN_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "3600"},
     description=(
         "파일 registry reconciliation scan — 등록/orphan/missing 판정 + "
         "offline-uploads DB backfill."

@@ -201,6 +201,10 @@ class _Store:
     async def load_lock(self, _dataset: str, *, ttl_seconds: int) -> AsyncIterator[bool]:
         yield True
 
+    @asynccontextmanager
+    async def shared_lease(self, *_args: Any, **_kwargs: Any) -> AsyncIterator[bool]:
+        yield True
+
     async def touch_checked(self, *_args: Any) -> bool:
         return True
 

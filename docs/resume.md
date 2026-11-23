@@ -1,3 +1,11 @@
+## 2026-11-24 — 상태 적재 job 상류 신호 통일·weather export 줄 세우기(감사 §4 #9, 배포 대기)
+
+- transport·weather 상태 job: 상류 미준비·거부는 건너뜀(세대 유지, step 재시도 없음), run 결과는 서비스 세대 나이가 `max_age`를
+  넘었는지로. 상태 op `RetryPolicy` 제거. weather 원천 읽기는 Valkey 공용 자리로 한 번에 하나, 발화 시각 분리(W5 :05·단기 :50·
+  중기 :50). current 상한 600초(weather 수정 전 임시, 뒤에 480으로). Map job 7개 run 상한, jitter. OpenAPI·migration 없음.
+- 다음: n150 Map dagster 회전 뒤 확인(PR 본문 "회전 뒤 확인"). 남은 것: weather export 페이지 처리 수정(weather 쪽) 뒤 current
+  상한 480 복귀·page size 검토, 큐 lock busy 15초 재발행(큐 재시도 작업), schedule override가 이 job들의 cron을 덮는지 확인.
+
 ## 2026-11-24 — 큐 요청 재발행 후속(#1544 리뷰, PR #1551)
 
 - failure sensor의 claim 뒤 재발행도 provider 단계 상한 2회(누적 `retry_count` 기준, 종결 메시지에 상한·누적 함께),
@@ -22,6 +30,7 @@
   cache target `poi_cache_targets` 갱신은 alembic 458(#1548) 전까지 live topic 행을 기다릴 수 있다 — 후처리 시도
   마감(ADR-112 규칙으로 `lock_timeout` 4초)이 그 대기를 끊는다.
 
+
 ## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)·10-22 큐 상황 재현
 
 - 긴 큐 적재가 topic 원본(주소 finding·override finding·sync state)을 써도 `ops_live_topic_revisions` 행을 commit 직전까지만
@@ -37,6 +46,7 @@
 - 다음: n150 호스트에 설치(`~/dagster-freeze.py`), 호스트 회전 스크립트의 `freeze.py stop|start`를
   `dagster-freeze.py freeze|unfreeze --snapshot`으로 교체하거나 R4 8단계 회전에서 freeze를 뺀다(부모, R4 runbook §2.2). 주유소 place schedule은 transport 유가 수정 배포 뒤
   첫 run 결과 확인.
+
 
 ## 2026-11-24 — import job event clock slot화(alembic 457)
 
@@ -59,6 +69,7 @@
   단위로 일시 오류(5xx·timeout·연결)만 한 번 더 부른다(jitter, `Retry-After` 존중, run 예산 공유). datagokr·krheritage·
   mois의 결과 코드 22를 일일 쿼터로 분류. OpenAPI·migration 없음.
 - 다음: n150 회전(dagster code-server 이미지) 뒤 Dagster 로그의 `upstream retry …` 경고 빈도와 step 재시도 감소 확인.
+
 
 ## 2026-11-23 — R4 전환 계획 제외 옵션(`--exclude <dataset>:<action>`)
 

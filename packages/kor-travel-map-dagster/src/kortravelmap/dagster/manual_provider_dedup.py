@@ -32,6 +32,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     DefaultScheduleStatus,
     JobDefinition,
     OpExecutionContext,
@@ -133,7 +134,8 @@ async def detect_manual_provider_dedup_candidates_op(
 
 @job(
     name="manual_provider_dedup_detection",
-    tags=MANUAL_PROVIDER_DEDUP_JOB_TAGS,
+    # 매일. 실측 성공 최대 56초 → 1시간.
+    tags={**MANUAL_PROVIDER_DEDUP_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "3600"},
     description=(
         "manual/provider dedup 후보 탐지. 자동 병합하지 않고 후보로만 올린다. "
         "admin이 판정한 쌍은 migration 305의 재심 차단이 막고, 억눌린 수는 "

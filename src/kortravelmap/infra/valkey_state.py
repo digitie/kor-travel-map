@@ -29,11 +29,13 @@ Valkey 오류는 :class:`StateStoreUnavailable`(연결·timeout — 재시도 �
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import functools
 import inspect
 import json
 import logging
 import math
+import random
 import secrets
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Mapping, Sequence
@@ -484,6 +486,15 @@ _RELEASE_LOCK_SCRIPT: Final[str] = """
 if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) end
 return 0
 """
+
+# KEYS[1]=자리 키. ARGV[1]=token ARGV[2]=ms. 내 token일 때만 만료를 늘린다.
+_RENEW_LEASE_SCRIPT: Final[str] = """
+if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('PEXPIRE', KEYS[1], ARGV[2]) end
+return 0
+"""
+
+_lease_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+"""공용 읽기 자리 대기(테스트가 바꾼다)."""
 
 
 # -- client --------------------------------------------------------------------
@@ -965,6 +976,66 @@ class ValkeyStateStore:
                     await self._retrying("잠금 해제", _release, _RetryBudget())
                 except StateStoreError:
                     _LOGGER.warning("%s 적재 잠금을 풀지 못했다 — TTL로 풀린다.", dataset)
+
+    @asynccontextmanager
+    async def shared_lease(
+        self,
+        name: str,
+        *,
+        ttl_seconds: float,
+        wait_seconds: float,
+        poll_seconds: float = 3.0,
+    ) -> AsyncIterator[bool]:
+        """여러 적재가 나눠 쓰는 자리 하나(동시성 1). ``wait_seconds`` 안에 못 잡으면 ``False``.
+
+        데이터셋 잠금(:meth:`load_lock`)과 달리 **기다린다** — 같은 원천을 읽는 서로 다른
+        데이터셋의 적재를 줄 세우는 용도다(weather export 읽기 경합, 2026-11-24). 잡은 동안
+        ``ttl_seconds/3``마다 만료를 늘리므로 TTL은 짧게 둔다 — 프로세스가 죽으면 그만큼 뒤에
+        풀린다. 갱신이 실패하면(자리를 잃었다) 경고만 남긴다. 읽기는 멱등이라 겹쳐도 데이터가
+        틀어지지 않고, 경합이 다시 생길 뿐이다.
+        """
+        key = state_key(name, "lease")
+        token = secrets.token_hex(16)
+        ttl_ms = max(1_000, int(ttl_seconds * 1_000))
+        give_up = time.monotonic() + max(0.0, wait_seconds)
+        while True:
+            async with _unavailable_on_error("공용 자리"):
+                acquired = bool(await self._client.set(key, token, nx=True, px=ttl_ms))
+            remaining = give_up - time.monotonic()
+            if acquired or remaining <= 0:
+                break
+            await _lease_sleep(min(remaining, poll_seconds * random.uniform(0.5, 1.5)))  # noqa: S311
+        if not acquired:
+            yield False
+            return
+
+        async def _renew() -> None:
+            while True:
+                await asyncio.sleep(ttl_seconds / 3)
+                kept: object = None
+                try:
+                    async with _unavailable_on_error("공용 자리 갱신"):
+                        kept = await _resolve(
+                            self._client.eval(_RENEW_LEASE_SCRIPT, 1, key, token, ttl_ms)
+                        )
+                except StateStoreError:
+                    pass  # 일시 장애 — 다음 갱신이 다시 본다
+                if kept == 0:
+                    _LOGGER.warning("공용 자리 %s를 잃었다(만료) — 읽기는 계속한다.", name)
+                    return
+
+        renewer = asyncio.create_task(_renew())
+        try:
+            yield True
+        finally:
+            renewer.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await renewer
+            try:
+                async with _unavailable_on_error("공용 자리 해제"):
+                    await _resolve(self._client.eval(_RELEASE_LOCK_SCRIPT, 1, key, token))
+            except StateStoreError:
+                _LOGGER.warning("공용 자리 %s를 풀지 못했다 — TTL로 풀린다.", name)
 
     async def swap(
         self,

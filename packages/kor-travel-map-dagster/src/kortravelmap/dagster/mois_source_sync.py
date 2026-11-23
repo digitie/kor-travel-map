@@ -45,6 +45,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     Array,
     DefaultScheduleStatus,
     Field,
@@ -646,7 +647,9 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
 
 @job(
     name="mois_localdata_source_sync",
-    tags=MOIS_SOURCE_SYNC_JOB_TAGS,
+    # 매주. 14일 표본이 성공 1건(8,978초, 6월 1,447초에서 늘었다)뿐이라 전역 상한과 같은 6시간을
+    # 명시한다 — 표본이 쌓이면 줄인다.
+    tags={**MOIS_SOURCE_SYNC_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "21600"},
     description=(
         "LOCALDATA 인허가 파일을 받아 MOIS 소스 SQLite DB(Phase A)를 갱신한다. "
         "Phase B feature-load fetcher가 이 DB를 읽는다."

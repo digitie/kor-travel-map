@@ -950,6 +950,7 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
 ) -> None:
     from dagster import Failure
     from kortravelmap.dagster.transport_state import TRANSPORT_STATE_SPECS, load_transport_state
+    from kortravelmap.dagster.upstream_signal import raise_if_stale
 
     spec = next(s for s in TRANSPORT_STATE_SPECS if s.dataset is DATASET_HIGHWAY_INCIDENTS)
     collected_at = datetime.now(UTC) - timedelta(minutes=4)
@@ -972,16 +973,51 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
     )
     assert metadata["count"] == 30
     assert metadata["source_collected_at"] == collected_at.isoformat()
+    assert metadata["upstream_state"] == "ok"
+    assert metadata["stale_alert"] is False
     meta = await store.current_meta(DATASET_HIGHWAY_INCIDENTS.name)
     assert meta.run_id == "run-1"
+    # 서비스 세대가 신선하면(4분) 거부는 건너뜀 + 경고다 — 세대를 지키고 run은 성공한다
+    # (2026-11-24 개정, upstream_signal).
+    refused = await load_transport_state(
+        fake_spec,
+        settings=KorTravelMapSettings.model_construct(),
+        run_id="run-2",
+        allow_shrink=False,
+        store=store,
+    )
+    assert refused["skipped"] == "refused"
+    assert refused["failure_kind"] == "state_swap_refused"
+    assert refused["served_generation"] == meta.generation
+    assert refused["baseline"] == 30
+    assert (await store.current_meta(DATASET_HIGHWAY_INCIDENTS.name)).count == 30
+
+    # 거부가 이어져 서비스 세대가 stale 기준(30분)을 넘었으면 사람이 판단할 차례다 — FAILURE.
+    old_collection = datetime.now(UTC) - spec.dataset.max_age - timedelta(minutes=5)
+
+    async def _old(_settings: Any, on_collected_at: Callable[[datetime], None]) -> list[Any]:
+        on_collected_at(old_collection)
+        return [to_state_item(highway_incident_state(_incident(i))) for i in range(30)]
+
+    await load_transport_state(
+        replace(spec, collect=_old),
+        settings=KorTravelMapSettings.model_construct(),
+        run_id="run-3",
+        allow_shrink=False,
+        store=store,
+    )
+    payload.append([])
+    stale = await load_transport_state(
+        fake_spec,
+        settings=KorTravelMapSettings.model_construct(),
+        run_id="run-4",
+        allow_shrink=False,
+        store=store,
+    )
+    assert stale["skipped"] == "refused"
+    assert stale["stale_alert"] is True
     with pytest.raises(Failure) as excinfo:
-        await load_transport_state(
-            fake_spec,
-            settings=KorTravelMapSettings.model_construct(),
-            run_id="run-2",
-            allow_shrink=False,
-            store=store,
-        )
+        raise_if_stale(stale)  # op가 run을 실패시킨다
     assert excinfo.value.allow_retries is False
     assert str(excinfo.value.metadata["failure_kind"].value) == "state_swap_refused"
     assert (await store.current_meta(DATASET_HIGHWAY_INCIDENTS.name)).count == 30

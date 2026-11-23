@@ -10,9 +10,14 @@
 - geo를 부르지 않는다. 행정 코드는 transport export가 실어 줄 때까지 비어 있다(결정 6).
 - schedule은 **기본 STOPPED**다. Valkey가 배포된 뒤 Dagster UI(Schedules)나 ``dagster schedule
   start <이름>``으로 켠다. 첫 교체 전에는 REST가 503 ``TRANSPORT_STATE_NOT_LOADED``다.
-- 실패 분류: transport 실패는 기존 규약(``raise_terminal_if_transport_unrecoverable``)을 따르고,
-  교체 거부 (``state_swap_refused``)·동시 교체(``state_swap_conflict``)·Valkey OOM·미설정은 step
-  재시도를 끈다 (다음 tick이 다시 본다). Valkey 연결 실패는 재시도한다.
+- 실패 분류(2026-11-24 개정, ``upstream_signal``이 정본): transport 503·``collection``
+  stale/실패·무응답 같은 **상류 미준비**는 step 재시도 없이 이번 tick을 건너뛰고(run 성공, 세대
+  유지) 서비스 세대의 원천 나이를 남긴다. 0건 export·교체 거부(``state_swap_refused``)도 세대를
+  지키고 건너뛴다. 어느 결과든 서비스 세대가 데이터셋 stale 기준(``max_age``)을 넘으면 run은
+  재시도 없이 실패한다. 그 밖의 transport
+  실패는 기존 규약(``raise_terminal_if_transport_unrecoverable``)을 따르고, 동시
+  교체(``state_swap_conflict``)·Valkey OOM·미설정은 step 재시도를 끈다. Valkey 연결 실패만 step을
+  다시 돈다(op가 직접 요청 — ``RetryPolicy``를 쓰지 않는다).
 - 다른 적재가 같은 데이터셋을 잡고 있으면(잠금) 이번 run은 아무것도 하지 않고 성공으로 끝난다.
 """
 
@@ -24,11 +29,14 @@ from datetime import UTC, datetime
 from typing import Any, Final
 
 from kortravelmap.infra.valkey_state import (
+    GenerationMeta,
+    StateNotLoaded,
     StateStoreError,
     StateSwapRefused,
     ValkeyStateStore,
     make_valkey_client,
 )
+from kortravelmap.providers.kor_travel_transport import TransportExportEmpty
 from kortravelmap.providers.kor_travel_transport_state import (
     DATASET_AIRPORTS,
     DATASET_FUEL_STATIONS,
@@ -47,13 +55,11 @@ from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import (
     MAX_RUNTIME_SECONDS_TAG,
-    Backoff,
     DefaultScheduleStatus,
     Failure,
     Field,
     JobDefinition,
     OpExecutionContext,
-    RetryPolicy,
     ScheduleDefinition,
     job,
     op,
@@ -75,11 +81,21 @@ from .upstream_requests import (
     observed_upstream_requests,
 )
 from .upstream_retry import sharing_run_retry_budget
+from .upstream_signal import (
+    UPSTREAM_NOT_READY,
+    UPSTREAM_OK,
+    raise_if_stale,
+    refused,
+    report_upstream_signal,
+    retry_state_store_outage,
+    run_deadline,
+    upstream_not_ready_kind,
+    upstream_signal,
+)
 
 __all__ = [
     "TRANSPORT_STATE_JOBS",
     "TRANSPORT_STATE_JOB_TAGS",
-    "TRANSPORT_STATE_RETRY_POLICY",
     "TRANSPORT_STATE_SCHEDULES",
     "TRANSPORT_STATE_SPECS",
     "TransportStateJobSpec",
@@ -87,13 +103,6 @@ __all__ = [
     "load_transport_state",
     "lock_ttl_seconds",
 ]
-
-TRANSPORT_STATE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
-    max_retries=2,
-    delay=30,
-    backoff=Backoff.EXPONENTIAL,
-)
-"""Valkey 연결 실패·transport 503 같은 기다리면 풀리는 실패만 다시 돈다."""
 
 TRANSPORT_STATE_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.job_scope": "state",
@@ -253,6 +262,14 @@ def _terminal(exc: StateStoreError) -> Failure:
     )
 
 
+async def _served_meta(store: ValkeyStateStore, dataset: str) -> GenerationMeta | None:
+    """지금 서비스하는 세대 meta. 없거나(첫 적재 전) 읽지 못하면 ``None``."""
+    try:
+        return await store.current_meta(dataset)
+    except (StateNotLoaded, StateStoreError):
+        return None
+
+
 async def load_transport_state(
     spec: TransportStateJobSpec,
     *,
@@ -263,7 +280,9 @@ async def load_transport_state(
 ) -> dict[str, Any]:
     """한 데이터셋을 받아 Valkey 세대를 교체한다. 반환값은 op metadata다.
 
-    ``store``를 넘기지 않으면 settings로 client를 만들고 끝나면 닫는다.
+    ``store``를 넘기지 않으면 settings로 client를 만들고 끝나면 닫는다. 상류 미준비면 교체 없이
+    ``skipped=upstream_not_ready``로, 0건·비정상 집합이면 ``skipped=refused``로 끝난다. run을
+    실패시킬지는 op가 서비스 세대 나이로 정한다(``upstream_signal.raise_if_stale``).
     """
     owned = store is None
     try:
@@ -283,9 +302,39 @@ async def load_transport_state(
                     items, source_collected_at = await collect_transport_state_items(
                         spec, settings
                     )
+                except TransportExportEmpty as exc:
+                    # 0건 export는 교체 거부와 같은 데이터 보호다 — 같은 규칙으로 끝낸다.
+                    return refused(
+                        dataset=spec.dataset.name,
+                        failure_kind=exc.failure_kind,
+                        description=str(exc),
+                        served=await _served_meta(active, spec.dataset.name),
+                        alert_after=spec.dataset.max_age,
+                        now=datetime.now(UTC),
+                        details={"baseline": -1, "new_count": 0},
+                    )
                 except Exception as exc:
-                    raise_terminal_if_transport_unrecoverable(exc)
-                    raise
+                    kind = upstream_not_ready_kind(exc)
+                    if kind is None:
+                        raise_terminal_if_transport_unrecoverable(exc)
+                        raise
+                    not_ready: dict[str, Any] = {
+                        "dataset": spec.dataset.name,
+                        "skipped": "upstream_not_ready",
+                        "failure_kind": kind,
+                        "reason": str(exc)[:500],
+                        **upstream_signal(
+                            UPSTREAM_NOT_READY,
+                            served=await _served_meta(active, spec.dataset.name),
+                            alert_after=spec.dataset.max_age,
+                            now=datetime.now(UTC),
+                            reason=kind,
+                        ),
+                    }
+                    observed = observed_upstream_requests()
+                    if observed is not None:
+                        not_ready[UPSTREAM_REQUESTS_METADATA_KEY] = observed
+                    return not_ready
                 upstream = observed_upstream_requests()
             result = await active.swap(
                 spec.dataset.name,
@@ -315,23 +364,29 @@ async def load_transport_state(
             ),
             "guard_override": result.meta.guard_override,
             "retired_other_version_keys": retired,
+            **upstream_signal(
+                UPSTREAM_OK,
+                served=result.meta,
+                alert_after=spec.dataset.max_age,
+                now=datetime.now(UTC),
+            ),
         }
         if upstream is not None:
             metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
         return metadata
     except StateSwapRefused as exc:
-        raise Failure(
+        return refused(
+            dataset=spec.dataset.name,
+            failure_kind=exc.failure_kind,
             description=str(exc),
-            metadata={
-                "failure_kind": exc.failure_kind,
-                "dataset": spec.dataset.name,
+            served=await _served_meta(active, spec.dataset.name),
+            alert_after=spec.dataset.max_age,
+            now=datetime.now(UTC),
+            details={
                 "baseline": exc.baseline if exc.baseline is not None else -1,
                 "new_count": exc.new_count,
-                "step_retries_suppressed": "true",
-                "override": "run config ops.<op>.config.allow_shrink: true",
             },
-            allow_retries=False,
-        ) from exc
+        )
     except StateStoreError as exc:
         if exc.retryable:
             raise
@@ -355,22 +410,35 @@ _OP_CONFIG: Final[dict[str, Field]] = {
 }
 
 
+_RUN_TAIL_SECONDS: Final[int] = 60
+"""Valkey 재시도 대기가 run 상한에 닿지 않게 남겨 두는 꼬리."""
+
+
 def _build_job(spec: TransportStateJobSpec) -> JobDefinition:
+    # retry_policy를 달지 않는다 — Dagster는 retry policy가 있는 step이 run 상한 초과 취소로
+    # 끝나도 재시도를 요청한다. Valkey 연결 실패만 op가 직접 재시도를 요청한다(upstream_signal).
     @op(
         name=f"{spec.job_name}_op",
         config_schema=_OP_CONFIG,
-        retry_policy=TRANSPORT_STATE_RETRY_POLICY,
         description=spec.description,
     )
     async def _load_op(context: OpExecutionContext) -> dict[str, Any]:
-        metadata = await load_transport_state(
-            spec,
-            settings=KorTravelMapSettings(),
-            run_id=context.run_id,
-            allow_shrink=bool(context.op_config.get("allow_shrink", False)),
-        )
-        if metadata.get("skipped"):
+        deadline = run_deadline(context, spec.max_runtime_seconds, _RUN_TAIL_SECONDS)
+        try:
+            metadata = await load_transport_state(
+                spec,
+                settings=KorTravelMapSettings(),
+                run_id=context.run_id,
+                allow_shrink=bool(context.op_config.get("allow_shrink", False)),
+            )
+        except StateStoreError as exc:
+            if exc.retryable:
+                retry_state_store_outage(context, exc, deadline=deadline)
+            raise
+        if metadata.get("skipped") == "locked":
             context.log.info("%s: 다른 적재가 잠금을 쥐고 있어 건너뛴다.", spec.dataset.name)
+        report_upstream_signal(context, metadata)
+        raise_if_stale(metadata)
         context.add_output_metadata(metadata)
         return metadata
 

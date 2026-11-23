@@ -15,6 +15,7 @@ from kortravelmap.infra.dedup_refresh_repo import (
 )
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     Array,
     Backoff,
     Bool,
@@ -22,6 +23,7 @@ from dagster import (
     Failure,
     Field,
     Int,
+    Jitter,
     OpExecutionContext,
     Permissive,
     RetryPolicy,
@@ -78,6 +80,7 @@ MAINTENANCE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     max_retries=3,
     delay=60,
     backoff=Backoff.EXPONENTIAL,
+    jitter=Jitter.PLUS_MINUS,  # Dagster PLUS_MINUS = ±delay(60초), 2026-11-23 감사 P2
 )
 """consistency/dedup maintenance op 공통 retry policy."""
 
@@ -903,7 +906,8 @@ async def drain_expired_cache_target_snapshots_op(
 
 @job(
     name="consistency_dedup_refresh",
-    tags=CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
+    # 매일. 2026-11-23 실측 성공 p95 3,234초·최대 3,389초 → 3시간(다음 발화 한참 전).
+    tags={**CONSISTENCY_DEDUP_REFRESH_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "10800"},
     description=(
         "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고 검색 인지도를 "
         "다시 계산하며, 보존 기간이 지난 notice와 resolved integrity finding을 정리한다."
@@ -920,7 +924,9 @@ def consistency_dedup_refresh_job() -> None:
 
 @job(
     name="cache_target_snapshot_gc",
-    tags=CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS,
+    # 매시. 실측 성공 p99 98초·최대 172초지만 backlog가 쌓이면 op가 스스로 3,300초(max_seconds)까지
+    # 돈다 → 발화 간격과 같은 1시간.
+    tags={**CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "3600"},
     description=(
         "만료·미참조 cache-target snapshot item/header를 system round-robin batch로 "
         "정리하고 정확한 잔여 backlog와 referenced 보존 추세 alert를 기록한다."

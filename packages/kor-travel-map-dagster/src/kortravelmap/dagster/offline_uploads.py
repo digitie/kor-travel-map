@@ -11,7 +11,7 @@ from kortravelmap.geocoding import (
 )
 from kortravelmap.settings import KorTravelMapSettings
 
-from dagster import Failure, OpExecutionContext, job, op
+from dagster import MAX_RUNTIME_SECONDS_TAG, Failure, OpExecutionContext, job, op
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -91,7 +91,9 @@ async def load_offline_upload_op(context: OpExecutionContext) -> dict[str, objec
 
 @job(
     name="offline_upload_load",
-    tags=OFFLINE_UPLOAD_LOAD_JOB_TAGS,
+    # 운영자 수동 실행(14일 실행 0, 실측 없음). 업로드는 100 MB까지이고 행마다 geo를 부르므로 전역
+    # 상한과 같은 6시간을 명시한다.
+    tags={**OFFLINE_UPLOAD_LOAD_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "21600"},
     description="ops.offline_uploads 원본 파일을 읽어 FeatureBundle로 적재한다.",
 )
 def offline_upload_load_job() -> None:

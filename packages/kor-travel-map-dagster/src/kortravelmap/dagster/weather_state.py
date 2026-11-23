@@ -13,12 +13,21 @@ D3·D4와 "2단계" W3·W4가 정본이다.
   (``KOR_TRAVEL_WEATHER_SERVICE_EXPORTS_ENABLED``) Map code-server에 weather 주소·토큰이
   들어간 뒤 켠다. 첫 교체 전에는 REST가 503이다.
 - 503은 먼저 **그 페이지만** 같은 cursor로 유한 재시도한다(``Retry-After``를 따르고, 대기와 가장 긴
-  요청이 run 상한 안에 들 때만, 한 순회 대기 합 60초·run 재시도 예산 안에서). weather의
-  ``EXPORT_TEMPORARILY_UNAVAILABLE``(읽기 경합)과, 그 구분이 없던 이전 weather의
-  ``EXPORT_NOT_READY``가 대상이다.
-- 실패 분류: 503(``weather_not_ready``) 페이지 재시도 소진·410 재시도 소진·Valkey 연결 실패는 step
-  재시도 대상이고, 401·404·계약 위반·JSON 아님·교체 거부·동시 교체·Valkey OOM·미설정은 step
-  재시도를 끈다.
+  요청이 run 상한 안에 들 때만, 한 순회 대기 합 180초·run 재시도 예산 안에서, 간격은 ±20% 흔든다).
+  weather의 ``EXPORT_TEMPORARILY_UNAVAILABLE``(읽기 경합)과, 그 구분이 없던 이전 weather의
+  ``EXPORT_NOT_READY``가 대상이다. 처음부터 다시 읽는 step 재시도는 하지 않는다 — 2026-11-23 감사
+  때 current는 23페이지를 다 받은 뒤 경합 503이 나면 step 재시도가 1페이지부터 다시 읽다 run 상한
+  480초에 걸렸다(상한 초과 97건).
+- 실패 분류(2026-11-24 개정, ``upstream_signal``이 정본): 503·410 재시도 소진·HTTP 재시도를 다 쓴
+  5xx·무응답·읽기 자리를 못 잡음·run 상한 안에 순회를 끝낼 수 없음 같은 **상류 미준비**는 step
+  재시도 없이 이번 tick을 건너뛴다(세대 유지). 200 + ``stale``은 그대로 교체한다. 교체 거부도 세대를
+  지키고 건너뛴다. 어느 결과든 서비스 세대의 원천 나이가 데이터셋 stale 기준(``max_age``)을 넘으면
+  run은 재시도 없이 실패한다. 401·404·계약 위반·JSON 아님·동시 교체·Valkey OOM·미설정은 step 재시도
+  없이 실패한다. Valkey 연결 실패만 step을 다시 돈다(op가 직접 요청 — ``RetryPolicy``를 쓰지
+  않는다).
+- **원천 읽기는 weather 전체에서 한 번에 하나다**(Valkey 공용 자리 :data:`WEATHER_EXPORT_LEASE`).
+  일곱 데이터셋이 같은 odroid export를 읽어 겹치면 읽기 경합 503이 났다 — 발화 시각도 벌렸다
+  (``WEATHER_STATE_SPECS`` 위 주석).
 - 다른 적재가 같은 데이터셋을 잡고 있으면(잠금) 이번 run은 아무것도 하지 않고 성공으로 끝난다.
 - **예보(W3)는 증분이다(ADR-122).** 지금 세대 meta의 cursor(직전 ``next_since``)로 ``since``를
   보내 바뀐 묶음만 받고, 지금 세대에 병합한 새 세대를 같은 CAS 교체로 올린다(그 세대가 아직
@@ -32,12 +41,11 @@ D3·D4와 "2단계" W3·W4가 정본이다.
 import asyncio
 import contextlib
 import logging
-import math
 import re
 import time
 from collections.abc import Awaitable, Callable, Iterator, Mapping
 from contextvars import ContextVar
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from typing import Any, Final, TypeVar
@@ -100,13 +108,11 @@ from pydantic import BaseModel, ValidationError
 
 from dagster import (
     MAX_RUNTIME_SECONDS_TAG,
-    Backoff,
     DefaultScheduleStatus,
     Failure,
     Field,
     JobDefinition,
     OpExecutionContext,
-    RetryPolicy,
     ScheduleDefinition,
     job,
     op,
@@ -122,11 +128,23 @@ from .upstream_requests import (
     observed_upstream_requests,
 )
 from .upstream_retry import sharing_run_retry_budget
+from .upstream_signal import (
+    UPSTREAM_NOT_READY,
+    UPSTREAM_OK,
+    UPSTREAM_STALE,
+    jittered,
+    raise_if_stale,
+    refused,
+    report_upstream_signal,
+    retry_state_store_outage,
+    run_deadline,
+    upstream_not_ready_kind,
+    upstream_signal,
+)
 
 __all__ = [
     "WEATHER_STATE_JOBS",
     "WEATHER_STATE_JOB_TAGS",
-    "WEATHER_STATE_RETRY_POLICY",
     "WEATHER_STATE_SCHEDULES",
     "WEATHER_STATE_SPECS",
     "ForecastSyncPlan",
@@ -145,13 +163,6 @@ __all__ = [
 ]
 
 _LOGGER = logging.getLogger(__name__)
-
-WEATHER_STATE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
-    max_retries=2,
-    delay=30,
-    backoff=Backoff.EXPONENTIAL,
-)
-"""Valkey 연결 실패·weather 503 같은 기다리면 풀리는 실패만 다시 돈다."""
 
 WEATHER_STATE_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.job_scope": "state",
@@ -205,19 +216,24 @@ _WEATHER_MAX_PAGES: Final[int] = 2_000
 _WEATHER_RETRY_BASE_DELAY_SECONDS: float = upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS
 """HTTP 층 재시도 간격 기준(테스트가 0으로 바꾼다)."""
 
-_WEATHER_PAGE_ATTEMPTS: Final[int] = 4
-"""503 한 페이지의 시도 상한(첫 요청 포함). 실패한 페이지만 같은 cursor로 다시 묻는다."""
+_WEATHER_PAGE_ATTEMPTS: Final[int] = 7
+"""503 한 페이지의 시도 상한(첫 요청 포함). 실패한 페이지만 같은 cursor로 다시 묻는다.
+
+종전 4회(대기 5·10·20초)로는 weather 읽기 경합이 35초를 넘으면 페이지를 포기했고, 그 뒤 step
+재시도가 1페이지부터 다시 읽었다. cursor는 snapshot이 살아 있는 동안 유효하므로 같은 페이지를 더
+기다리는 편이 싸다 — 상한은 시도 수가 아니라 :class:`_PageClock`(대기 합·run deadline)이 정한다."""
 
 _WEATHER_PAGE_RETRY_BASE_DELAY_SECONDS: Final[float] = 5.0
-"""503 페이지 재시도 간격 기준(5·10·20초). ``Retry-After``가 더 길면 그것을 따른다."""
+"""503 페이지 재시도 간격 기준(5·10·20·40·60초, ±20%). ``Retry-After``가 더 길면 그것을 따른다."""
 
 _WEATHER_PAGE_RETRY_MAX_DELAY_SECONDS: Final[float] = 60.0
-"""한 번 기다리는 상한. ``Retry-After``가 이보다 길면 이 페이지를 다시 묻지 않고 실패한다(그 뒤는
-step 재시도 몫이다 — ``RetryPolicy`` 30초가 ``Retry-After``보다 이를 수 있다)."""
+"""한 번 기다리는 상한. ``Retry-After``가 이보다 길면 이 페이지를 다시 묻지 않고 이번 tick을
+건너뛴다(상류 미준비 — ``upstream_signal``)."""
 
-_WEATHER_WALK_RETRY_SLEEP_SECONDS: Final[float] = 60.0
+_WEATHER_WALK_RETRY_SLEEP_SECONDS: Final[float] = 180.0
 """한 순회(``_read_all_pages``)의 503 페이지 재시도 대기 합 상한. 페이지마다 따로 맞는 재시도가
-쌓여 run 상한을 넘기지 않게 한다 — 남은 페이지 수는 미리 알 수 없다."""
+쌓여 run 상한을 넘기지 않게 한다 — 남은 페이지 수는 미리 알 수 없다. run deadline 검사가 따로
+있으므로 이 값은 경합이 수 분 이어지는 날의 상한이다."""
 
 _WEATHER_RUN_TAIL_SECONDS: Final[int] = 60
 """페이지를 다 받은 뒤 Valkey 교체·정리에 남겨 두는 시간. run 상한에서 뺀다."""
@@ -240,6 +256,9 @@ _WEATHER_DEADLINE: Final[ContextVar[float | None]] = ContextVar(
 
 _page_retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
 """503 페이지 재시도 대기(테스트가 기록용으로 바꾼다)."""
+
+_jitter: Callable[[float], float] = jittered
+"""재시도 간격 흔들기(테스트가 항등 함수로 바꾼다)."""
 
 
 @contextlib.contextmanager
@@ -372,9 +391,11 @@ async def _weather_get(
         except Exception as exc:
             if attempt >= attempts or not _weather_retryable(exc) or not budget.try_consume():
                 raise
-            delay = min(
-                _WEATHER_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
-                upstream_retry.DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
+            delay = _jitter(
+                min(
+                    _WEATHER_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
+                    upstream_retry.DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
+                )
             )
             _LOGGER.warning(
                 "kor-travel-weather %s 재시도 %d/%d (%s)", path, attempt, attempts,
@@ -419,9 +440,11 @@ async def _weather_get_page(
             response = await _weather_get(client, path, params, budget=budget, headers=headers)
         except _WeatherUnavailable as exc:
             clock.slowest = max(clock.slowest, time.monotonic() - started)
-            delay = max(
-                _WEATHER_PAGE_RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1), exc.retry_after or 0.0
+            backoff = min(
+                _jitter(_WEATHER_PAGE_RETRY_BASE_DELAY_SECONDS * 2 ** (attempt - 1)),
+                _WEATHER_PAGE_RETRY_MAX_DELAY_SECONDS,
             )
+            delay = max(backoff, exc.retry_after or 0.0)
             if (
                 attempt >= _WEATHER_PAGE_ATTEMPTS
                 or exc.code not in _PAGE_RETRY_CODES
@@ -524,6 +547,12 @@ async def _read_all_pages(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+class _WeatherWalkOutOfTime(WeatherExportNotReady):
+    """남은 run 시간 안에 다음 페이지를 끝낼 수 없다 — 상한에 죽기 전에 이번 tick을 건너뛴다."""
+
+    failure_kind = "weather_export_too_slow"
+
+
 class _MidWalkCursorRejected(WeatherExportFailure):
     """둘째 페이지 이후의 422 — :func:`_read_all_pages`가 한 번 재시작한다."""
 
@@ -557,6 +586,16 @@ async def _walk_pages(
         if cursor is not None:
             query["cursor"] = cursor
         first = page_number == 1
+        if (
+            clock.deadline is not None
+            and not first
+            and time.monotonic() + clock.slowest > clock.deadline
+        ):
+            # run monitor가 죽이면 실패(빨강)로 남고 받은 페이지도 버려진다 — 그 전에 스스로 멈춘다.
+            raise _WeatherWalkOutOfTime(
+                f"{path}: 페이지 {page_number - 1}까지 받았으나 남은 run 시간 안에 다음 페이지"
+                f"(가장 느린 요청 {clock.slowest:.0f}초)를 끝낼 수 없다."
+            )
         headers = {"If-None-Match": if_none_match} if first and if_none_match else None
         try:
             response = await _weather_get_page(
@@ -794,6 +833,9 @@ class WeatherStateJobSpec:
     description: str
     delta: DeltaFetcher | None = None
     """있으면 ``since`` 증분을 지금 세대에 병합할 수 있다(W3 예보, ADR-122). ``collect``는 전량."""
+    read_budget_seconds: int = 300
+    """원천을 끝까지 읽는 데 남겨 둘 시간. weather export 읽기 자리(:data:`WEATHER_EXPORT_LEASE`)를
+    기다리는 것은 run 상한 − 꼬리 − 이 값까지다 — 못 잡으면 이번 tick을 건너뛴다."""
 
 
 def _spec(
@@ -803,6 +845,8 @@ def _spec(
     max_runtime_seconds: int,
     collect: Collector,
     description: str,
+    *,
+    read_budget_seconds: int,
 ) -> WeatherStateJobSpec:
     return WeatherStateJobSpec(
         dataset=dataset,
@@ -813,50 +857,80 @@ def _spec(
         collect=collect,
         description=description,
         delta=_forecast_delta_fetcher(dataset) if dataset.style is not None else None,
+        read_budget_seconds=read_budget_seconds,
     )
 
 
+# 발화 시각(2026-11-24, 수집 실패 감사 §4 #9): 일곱 데이터셋이 같은 odroid weather export를 읽는다.
+# 겹치면 weather가 읽기 경합 503(``EXPORT_TEMPORARILY_UNAVAILABLE``)을 내고 둘 다 느려진다 — 14일
+# current 상한 초과 97건 중 79건이 W5(매시 :41, p50 418초·p95 1,176초)와 겹친 :40 회차였고, 11-23
+# 21:40에는 current·mid·W5가 함께 돌다 셋 다 경합 503으로 끝났다. 그래서 (1) 시각을 벌리고 (2) 읽기
+# 자체를 weather 전체에서 한 번에 하나로 줄 세운다(:data:`WEATHER_EXPORT_LEASE`). 한 시간의 자리:
+# W5 :05(보통 :12, 늦어도 :25 전에 끝난다) → current :25·:40(weather 공개 :20·:35 뒤) → 초단기 :48 →
+# 단기 :50(02·05…23시)·중기 :50(06·07·18·19시 — 둘은 같은 시에 돌지 않는다) → 외부 :55(3시간마다).
+# current가 도는 :25~:31·:40~:46에는 아무것도 발화하지 않는다(W5 :41·단기 :30·중기 :40을 옮겼다 —
+# weather 로그로 :41 W5 동시 읽기가 current 페이지 간격을 p50 3~6초에서 9~11초로 늘린 것을 확인).
+# 줄을 서도 못 끝낼 만큼 밀리면 그 tick은 건너뛴다.
 WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
     _spec(
         DATASET_LOCATIONS, "locations", "37 4 * * *", 900, _collect_locations,
         "weather 위치 roster(W1) → Valkey 세대 교체(매일).",
+        read_budget_seconds=300,
     ),
+    # current는 W2 전량(운영 약 2만 7천 행, 23페이지 — weather ``MAX_PAGE_SCOPES=128``이 정한다)을
+    # 매번 받는다. 느린 원인은 weather가 페이지마다 전체 scope 상태·승인 선택을 다시 검증하는
+    # 것이고(페이지당 SQL 82문장, 2026-11-24 조사), 그 "읽기 경합" 503의 실체는 weather
+    # statement_timeout(5초) 초과다. 운영 :25 단독 회차 p50 193초·p95 359초.
+    # **600초는 weather 수정 전까지의 임시 상한이다**(480초에서). weather가 페이지 처리를 고치면
+    # 480초로 되돌린다. 그보다 길어지는 tick은 상한에 죽지 않고 스스로 건너뛴다(순회 deadline 검사).
     _spec(
-        DATASET_CURRENT, "current", "25,40 * * * *", 480, _collect_current,
+        DATASET_CURRENT, "current", "25,40 * * * *", 600, _collect_current,
         "weather 최신 관측·실황(W2) → Valkey 세대 교체(매시 :25·:40 — weather 공개 :20·:35 뒤).",
+        read_budget_seconds=300,
     ),
     _spec(
         DATASET_FORECAST_ULTRA_SHORT, "forecast_ultra_short", "48 * * * *", 1_800,
         _forecast_collector(DATASET_FORECAST_ULTRA_SHORT),
         "weather 초단기예보(W3 ultra_short) → Valkey 세대 교체(매시 :48).",
+        read_budget_seconds=600,
     ),
     # 단기·외부 상한은 증분이 아니라 **전량 재동기화**(첫 적재·하루 한 번·증분 거절 뒤)에 맞춘다.
     # odroid eMMC cold 전량은 단기 약 1,174초·외부 약 674초인데, 1,500·1,200초 상한에서 run이
     # 1,514·1,201초에 ReadTimeout으로 죽었다(2026-11-10). 증분 거절 뒤 같은 run의 전량까지 들게
     # 늘리되, lock TTL(상한 + 660초)은 3시간 발화 간격 안이다(ADR-122).
     _spec(
-        DATASET_FORECAST_SHORT, "forecast_short", "30 2-23/3 * * *", 3_600,
+        DATASET_FORECAST_SHORT, "forecast_short", "50 2-23/3 * * *", 3_600,
         _forecast_collector(DATASET_FORECAST_SHORT),
-        "weather 단기예보(W3 short) → Valkey 세대 교체(하루 8회, 발표 02·05…23시 뒤 :30).",
+        "weather 단기예보(W3 short) → Valkey 세대 교체(하루 8회, 발표 02·05…23시 뒤 :50).",
+        read_budget_seconds=1_500,
     ),
     _spec(
-        DATASET_FORECAST_MID, "forecast_mid", "40 6,7,18,19 * * *", 900,
+        DATASET_FORECAST_MID, "forecast_mid", "50 6,7,18,19 * * *", 900,
         _forecast_collector(DATASET_FORECAST_MID),
-        "weather 중기예보(W3 mid) → Valkey 세대 교체(발표 06·18시 뒤, 한 시간 뒤 한 번 더).",
+        "weather 중기예보(W3 mid) → Valkey 세대 교체(발표 06·18시 뒤 :50, 한 시간 뒤 한 번 더).",
+        read_budget_seconds=400,
     ),
     _spec(
         DATASET_FORECAST_EXTERNAL, "forecast_external", "55 */3 * * *", 2_400,
         _forecast_collector(DATASET_FORECAST_EXTERNAL),
         "weather 외부 provider 예보(W3 external) → Valkey 세대 교체(3시간마다).",
+        read_budget_seconds=900,
     ),
     # W5는 14일 × 세 구간 × 위치(운영 약 6만 1천 건, 2,000건 페이지 약 31개)다. 포화된 odroid에서
     # 페이지당 약 27초라(2026-11-02 실측) 한 번 전량에 14분, 재시도까지 900초 상한을 넘겼다.
     # 매시 발화 간격(3,600초) 안에 lock TTL(상한 + 660초)이 들어가는 2,700초로 둔다.
     _spec(
-        DATASET_DAILY_SUMMARIES, "daily_summaries", "41 * * * *", 2_700, _collect_daily_summaries,
-        "weather 하루 세 구간 요약(W5) → Valkey 세대 교체(매시).",
+        DATASET_DAILY_SUMMARIES, "daily_summaries", "5 * * * *", 2_700, _collect_daily_summaries,
+        "weather 하루 세 구간 요약(W5) → Valkey 세대 교체(매시 :05).",
+        read_budget_seconds=1_400,
     ),
 )
+
+WEATHER_EXPORT_LEASE: Final[str] = "weather.export_read"
+"""weather export 읽기 자리(Valkey, 동시성 1). 일곱 weather 상태 job이 원천을 읽는 동안만 쥔다."""
+
+_WEATHER_EXPORT_LEASE_TTL_SECONDS: Final[float] = 120.0
+"""자리 TTL — 쥔 동안 40초마다 늘린다. 프로세스가 죽으면 늦어도 이만큼 뒤에 풀린다."""
 
 
 _CANCEL_GRACE_SECONDS: Final[int] = 600
@@ -1144,10 +1218,50 @@ async def _swap_forecast_delta(
         "membership_verified": _verified_text(ready.membership_verified),
         "member_count": len(merge.members),
         "clock_epoch": ready.clock_epoch or "",
+        **_signal_for_source(spec, ready.fetch.source_status, result.meta),
     }
     if upstream is not None:
         metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
     return metadata
+
+
+def _signal_for_source(
+    spec: WeatherStateJobSpec, source_status: str | None, served: GenerationMeta | None
+) -> dict[str, Any]:
+    """weather가 알린 집합 상태(``ok``·``stale``)를 상류 신호로."""
+    state = UPSTREAM_STALE if source_status == "stale" else UPSTREAM_OK
+    return upstream_signal(
+        state, served=served, alert_after=spec.dataset.max_age, now=datetime.now(UTC)
+    )
+
+
+def _not_ready(
+    spec: WeatherStateJobSpec,
+    exc: BaseException,
+    kind: str,
+    served: GenerationMeta | None,
+) -> dict[str, Any]:
+    """상류 미준비로 이번 tick을 건너뛴 metadata(세대·cursor는 그대로)."""
+    _LOGGER.warning(
+        "weather %s 상류 미준비(%s) — 이번 tick을 건너뛴다: %s", spec.dataset.name, kind, exc
+    )
+    skipped: dict[str, Any] = {
+        "dataset": spec.dataset.name,
+        "skipped": "upstream_not_ready",
+        "failure_kind": kind,
+        "reason": str(exc)[:500],
+        **upstream_signal(
+            UPSTREAM_NOT_READY,
+            served=served,
+            alert_after=spec.dataset.max_age,
+            now=datetime.now(UTC),
+            reason=kind,
+        ),
+    }
+    observed = observed_upstream_requests()
+    if observed is not None:
+        skipped[UPSTREAM_REQUESTS_METADATA_KEY] = observed
+    return skipped
 
 
 def _verified_text(value: bool | None) -> str:
@@ -1176,6 +1290,7 @@ async def load_weather_state(
         active = store if store is not None else ValkeyStateStore(make_valkey_client(settings))
     except StateStoreError as exc:
         raise _terminal(exc) from exc
+    current: GenerationMeta | None = None
     try:
         async with active.load_lock(
             spec.dataset.name, ttl_seconds=weather_lock_ttl_seconds(spec)
@@ -1202,54 +1317,87 @@ async def load_weather_state(
                 if current is not None and not allow_shrink and spec.delta is None
                 else None
             )
-            with (
-                counting_upstream_requests(),
-                sharing_run_retry_budget(),
-                _paging_deadline(deadline),
-            ):
-                ready: _DeltaReady | None = None
-                if plan is not None and plan.since is not None and current is not None:
+            lease_wait = (
+                0.0
+                if deadline is None
+                else max(0.0, deadline - time.monotonic() - spec.read_budget_seconds)
+            )
+            async with active.shared_lease(
+                WEATHER_EXPORT_LEASE,
+                ttl_seconds=_WEATHER_EXPORT_LEASE_TTL_SECONDS,
+                wait_seconds=lease_wait,
+            ) as leased:
+                if not leased:
+                    return _not_ready(
+                        spec,
+                        WeatherExportNotReady(
+                            f"다른 weather 상태 적재가 export를 읽고 있어 {lease_wait:.0f}초 안에 "
+                            "읽기 자리를 잡지 못했다."
+                        ),
+                        "weather_export_busy",
+                        current,
+                    )
+                with (
+                    counting_upstream_requests(),
+                    sharing_run_retry_budget(),
+                    _paging_deadline(deadline),
+                ):
+                    ready: _DeltaReady | None = None
+                    if plan is not None and plan.since is not None and current is not None:
+                        try:
+                            ready = await _prepare_forecast_delta(
+                                spec, active, current, plan.since, settings
+                            )
+                        except _DeltaUnavailable as exc:
+                            _LOGGER.warning(
+                                "weather %s 증분이 503이다 — 세대·cursor를 그대로 둔다: %s",
+                                spec.dataset.name, exc,
+                            )
+                            unavailable: dict[str, Any] = {
+                                "dataset": spec.dataset.name,
+                                "unchanged": "delta_unavailable",
+                                "sync_mode": "delta",
+                                "generation": current.generation,
+                                "since": plan.since.isoformat(),
+                                **upstream_signal(
+                                    UPSTREAM_NOT_READY,
+                                    served=current,
+                                    alert_after=spec.dataset.max_age,
+                                    now=datetime.now(UTC),
+                                    reason="weather_delta_unavailable",
+                                ),
+                            }
+                            observed = observed_upstream_requests()
+                            if observed is not None:
+                                unavailable[UPSTREAM_REQUESTS_METADATA_KEY] = observed
+                            return unavailable
+                        except _FullResyncNeeded as exc:
+                            resync_reason = exc.reason
+                            _LOGGER.warning(
+                                "weather %s 증분을 버리고 전량으로 다시 받는다(%s): %s",
+                                spec.dataset.name, exc.reason, exc,
+                            )
+                        except Exception as exc:
+                            _raise_terminal_if_weather_unrecoverable(exc)
+                            kind = upstream_not_ready_kind(exc)
+                            if kind is None:
+                                raise
+                            return _not_ready(spec, exc, kind, current)
+                    if ready is not None:
+                        upstream = observed_upstream_requests()
+                        assert current is not None
+                        return await _swap_forecast_delta(
+                            spec, active, current, ready, run_id=run_id, upstream=upstream
+                        )
                     try:
-                        ready = await _prepare_forecast_delta(
-                            spec, active, current, plan.since, settings
-                        )
-                    except _DeltaUnavailable as exc:
-                        _LOGGER.warning(
-                            "weather %s 증분이 503이다 — 세대·cursor를 그대로 둔다: %s",
-                            spec.dataset.name, exc,
-                        )
-                        unavailable: dict[str, Any] = {
-                            "dataset": spec.dataset.name,
-                            "unchanged": "delta_unavailable",
-                            "sync_mode": "delta",
-                            "generation": current.generation,
-                            "since": plan.since.isoformat(),
-                        }
-                        observed = observed_upstream_requests()
-                        if observed is not None:
-                            unavailable[UPSTREAM_REQUESTS_METADATA_KEY] = observed
-                        return unavailable
-                    except _FullResyncNeeded as exc:
-                        resync_reason = exc.reason
-                        _LOGGER.warning(
-                            "weather %s 증분을 버리고 전량으로 다시 받는다(%s): %s",
-                            spec.dataset.name, exc.reason, exc,
-                        )
+                        collected = await spec.collect(settings, etag)
                     except Exception as exc:
                         _raise_terminal_if_weather_unrecoverable(exc)
-                        raise
-                if ready is not None:
+                        kind = upstream_not_ready_kind(exc)
+                        if kind is None:
+                            raise
+                        return _not_ready(spec, exc, kind, current)
                     upstream = observed_upstream_requests()
-                    assert current is not None
-                    return await _swap_forecast_delta(
-                        spec, active, current, ready, run_id=run_id, upstream=upstream
-                    )
-                try:
-                    collected = await spec.collect(settings, etag)
-                except Exception as exc:
-                    _raise_terminal_if_weather_unrecoverable(exc)
-                    raise
-                upstream = observed_upstream_requests()
             if collected.fetch.not_modified:
                 assert current is not None
                 touched = await active.touch_checked(
@@ -1260,6 +1408,11 @@ async def load_weather_state(
                     "unchanged": "not_modified",
                     "generation": current.generation,
                     "checked": touched,
+                    **_signal_for_source(
+                        spec,
+                        current.source_status,
+                        replace(current, checked_at=datetime.now(UTC)) if touched else current,
+                    ),
                 }
                 if upstream is not None:
                     unchanged[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
@@ -1334,6 +1487,7 @@ async def load_weather_state(
             "source_status": collected.fetch.source_status,
             "guard_override": result.meta.guard_override,
             "retired_other_version_keys": retired,
+            **_signal_for_source(spec, collected.fetch.source_status, result.meta),
         }
         if forecast:
             metadata["sync_mode"] = "full"
@@ -1355,18 +1509,18 @@ async def load_weather_state(
             metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
         return metadata
     except StateSwapRefused as exc:
-        raise Failure(
+        return refused(
+            dataset=spec.dataset.name,
+            failure_kind=exc.failure_kind,
             description=str(exc),
-            metadata={
-                "failure_kind": exc.failure_kind,
-                "dataset": spec.dataset.name,
+            served=current,
+            alert_after=spec.dataset.max_age,
+            now=datetime.now(UTC),
+            details={
                 "baseline": exc.baseline if exc.baseline is not None else -1,
                 "new_count": exc.new_count,
-                "step_retries_suppressed": "true",
-                "override": "run config ops.<op>.config.allow_shrink: true",
             },
-            allow_retries=False,
-        ) from exc
+        )
     except StateStoreError as exc:
         if exc.retryable:
             raise
@@ -1401,48 +1555,41 @@ _OP_CONFIG: Final[dict[str, Field]] = {
 def _run_deadline(context: OpExecutionContext, spec: WeatherStateJobSpec) -> float:
     """run 상한(``dagster/max_runtime``)에서 꼬리를 뺀 monotonic 시각.
 
-    run monitor는 step이 아니라 **run** 시작부터 센다 — step 재시도가 이미 쓴 시간도 뺀다
-    (``mois_chunked_load._run_clock_start``와 같은 규칙). 상한은 run의 실제 tag(없으면 spec)다.
-    run 시작을 모르면(조회 실패 포함) 지금부터 센다.
+    ``upstream_signal.run_deadline``에 맡긴다. run monitor는 step이 아니라 **run** 시작부터
+    센다 — step 재시도가 이미 쓴 시간도 뺀다. 상한은 run의 실제 tag(없으면 spec)다. run 시작을
+    모르면 지금부터 센다.
     """
-    now = time.time()
-    cap = spec.max_runtime_seconds
-    with contextlib.suppress(AttributeError, TypeError, ValueError):
-        cap = int(context.run.tags.get(MAX_RUNTIME_SECONDS_TAG, cap))
-    try:
-        record = context.instance.get_run_record_by_id(context.run_id)
-    except Exception:  # noqa: BLE001 — 시작 시각을 모르면 지금부터 센다(적재를 막지 않는다)
-        record = None
-    start_time = getattr(record, "start_time", None)
-    elapsed = 0.0
-    if (
-        isinstance(start_time, int | float)
-        and not isinstance(start_time, bool)
-        and math.isfinite(start_time)
-        and 0 < start_time <= now
-    ):
-        elapsed = now - float(start_time)
-    return time.monotonic() + cap - _WEATHER_RUN_TAIL_SECONDS - elapsed
+    return run_deadline(context, spec.max_runtime_seconds, _WEATHER_RUN_TAIL_SECONDS)
 
 
 def _build_job(spec: WeatherStateJobSpec) -> JobDefinition:
+    # retry_policy를 달지 않는다 — Dagster는 retry policy가 있는 step이 run 상한 초과 취소로
+    # 끝나도 재시도를 요청한다(2026-11-23 감사: 14일 100회). Valkey 연결 실패만 op가 직접
+    # 재시도를 요청한다(upstream_signal.retry_state_store_outage).
     @op(
         name=f"{spec.job_name}_op",
         config_schema=_OP_CONFIG,
-        retry_policy=WEATHER_STATE_RETRY_POLICY,
         description=spec.description,
     )
     async def _load_op(context: OpExecutionContext) -> dict[str, Any]:
-        metadata = await load_weather_state(
-            spec,
-            settings=KorTravelMapSettings(),
-            run_id=context.run_id,
-            allow_shrink=bool(context.op_config.get("allow_shrink", False)),
-            deadline=_run_deadline(context, spec),
-            full_resync=bool(context.op_config.get("full_resync", False)),
-        )
-        if metadata.get("skipped"):
+        deadline = _run_deadline(context, spec)
+        try:
+            metadata = await load_weather_state(
+                spec,
+                settings=KorTravelMapSettings(),
+                run_id=context.run_id,
+                allow_shrink=bool(context.op_config.get("allow_shrink", False)),
+                deadline=deadline,
+                full_resync=bool(context.op_config.get("full_resync", False)),
+            )
+        except StateStoreError as exc:
+            if exc.retryable:
+                retry_state_store_outage(context, exc, deadline=deadline)
+            raise
+        if metadata.get("skipped") == "locked":
             context.log.info("%s: 다른 적재가 잠금을 쥐고 있어 건너뛴다.", spec.dataset.name)
+        report_upstream_signal(context, metadata)
+        raise_if_stale(metadata)
         context.add_output_metadata(metadata)
         return metadata
 
