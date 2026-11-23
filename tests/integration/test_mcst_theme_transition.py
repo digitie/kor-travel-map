@@ -306,6 +306,58 @@ async def test_merge_into_retired_master_is_refused(migrated_session: AsyncSessi
     assert await _state(session, loser) == ("active", "published")
 
 
+async def test_excluded_pair_is_left_untouched(migrated_session: AsyncSession) -> None:
+    """``--exclude barrier_free_places:collapse`` — 그 쌍의 Feature는 그대로, 나머지는 전환."""
+
+    session = migrated_session
+    await feature_repo.load_bundles(
+        session, [_master_bundle("제외테스트박물관", _offset(11000), "tr-master-excl")]
+    )
+    master = await _master_id(session, "tr-master-excl")
+    attach = await _mcst_feature(session, "barrier_free_places_csv", "제외테스트박물관", 11005)
+    survivor = await _mcst_feature(session, "independent_bookstores_csv", "제외테스트책방", 11400)
+    held = await _mcst_feature(session, "barrier_free_places_csv", "제외테스트책방", 11402)
+    entries = [
+        PlanEntry(attach, "mcst_barrier_free_places_csv", "attach", master, {}),
+        PlanEntry(held, "mcst_barrier_free_places_csv", "collapse", survivor, {}),
+    ]
+    revisions = {entry.feature_id: await _revision(session, entry.feature_id) for entry in entries}
+    held_revision = revisions[held]
+    plan = build_transition_plan(
+        entries,
+        revisions=revisions,
+        rule_version="theme-attach-v1",
+        exclusions=(("mcst_barrier_free_places_csv", "collapse"),),
+    )
+    assert load_transition_plan(plan.as_json()) == plan
+    assert [item.feature_id for item in plan.excluded_items] == [held]
+
+    result = await _run(session, plan)
+
+    assert result.counts() == {"attach:done": 1}
+    assert await _state(session, attach) == ("retired", "suppressed")
+    assert await _state(session, held) == ("active", "published")
+    assert await _revision(session, held) == held_revision
+    assert await _events_for(session, held) == []
+    ledger = (
+        await session.execute(
+            text(
+                "SELECT count(*) FROM ops.mcst_theme_transition_items "
+                "WHERE feature_id = CAST(:id AS uuid)"
+            ),
+            {"id": held},
+        )
+    ).scalar_one()
+    assert ledger == 0
+    # 제외 행을 억지로 넘기면 아무것도 쓰지 않고 거부한다.
+    with pytest.raises(ValueError, match="제외한 행"):
+        async with session.begin_nested(), as_api_runtime(session):
+            await execute_transition_batch(
+                session, plan=plan, batch_size=1, batch_index=0, items=plan.excluded_items
+            )
+    assert await _state(session, held) == ("active", "published")
+
+
 async def test_plan_file_tampering_is_rejected() -> None:
     plan = build_transition_plan(
         [PlanEntry("00000000-0000-7000-8000-000000000001", "d", "retire", None, {})],

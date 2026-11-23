@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-11-23 — MCST 전환 계획 제외(`--exclude`, ADR-121 R4)
+
+- `ktmctl mcst-theme-plan --exclude <dataset>:<action>`(반복, action은 `attach`·`collapse`·`retire`): 그 쌍을 전환하지 않는다. 제외된 행은 계획 JSON의 `excluded_items`에 원래 action 그대로, 쌍은 `exclusions`에 기록되고 둘 다 `plan_sha256`에 든다. `--ids-out`·`retiring_feature_count`는 제외를 뺀 수다. 계획은 그대로 읽기 전용.
+- `ktmctl mcst-theme-transition --exclude …`: 계획에 기록된 제외와 정확히 같아야 리허설·실행이 돈다(다르면 종료 코드 2, DB 접근 전). 계획 파일 형식이 바뀌어 이전에 뽑은 계획은 "옛 형식"으로 거부된다 — 새로 뽑는다. OpenAPI·migration 변경 없음.
+
 ## 2026-11-19 — 저배율 집계 좁은 표(T-READ-10 후속, alembic 455)
 
 - 새 표 `feature.feature_cluster_points`(Feature당 한 행, DB trigger가 같은 transaction에서 맞춘다)와 trigger 셋(`features`, `feature_route_geometries`, `feature_areas`). in-bounds 집계(zoom ≤ 13)는 이 표를 병렬로 읽는다. 런타임 권한은 SELECT만. 응답·OpenAPI 변경 없음(결과는 종전 SQL과 같다 — 통합 시험). migration은 backfill 동안 세 표의 쓰기를 막는다.

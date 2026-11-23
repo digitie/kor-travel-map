@@ -420,6 +420,11 @@ dataset → entity → link로 Feature 집합을 한 번 만든다) — 행마�
   `feature.record_mcst_theme_transition_event(uuid)`(M05 procedure owner 소유)는 manual 경로와 같은 잠금
   (`feature-curation-m05`)·sequence·payload·hash를 쓰고 `case_id`·`resolution_id`에 batch·item id를 싣는다.
   PinVi 소비자는 두 값을 불투명 UUID로만 쓰므로 계약·OpenAPI는 그대로다(재vendor 불필요).
+- **제외**(2026-11-23): `mcst-theme-plan --exclude <dataset>:<action>`(반복)은 정밀도 게이트(§5.4)를 못
+  넘은 쌍을 전환에서 뺀다. 그 쌍의 행은 계획의 `excluded_items`에 원래 action 그대로 기록되고(효과는
+  `keep`), 제외 쌍 `exclusions`와 함께 `plan_sha256`에 든다. 실행기는 같은 `--exclude`를 다시 받아 계획과
+  정확히 같을 때만 돌고, 제외 행을 batch로 넘기면 쓰기 전에 거부한다. 판정 숫자(`by_dataset`·표본)는
+  제외와 무관하다. 자세히는 runbook §2.1.
 - 운영 순서·되돌림은 [`docs/runbooks/mcst-theme-transition-r4.md`](../runbooks/mcst-theme-transition-r4.md).
 
 ### 8.3 PinVi 참조
