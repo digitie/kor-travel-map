@@ -1,3 +1,35 @@
+## 2026-11-24 — 다건 호출 provider 호출 단위 재시도·쿼터 결과 코드 분류(감사 §4 #15·§1.3 P0/P1)
+
+- 배경: `upstream_retry.py`의 설명과 달리 적용처는 KHOA 하나뿐이었다. 국가유산(행사 14달·본체 상세 ~4,000건)·
+  산림청 페이지·TourAPI 축제/관광지 페이지·서울 책방·표준데이터 공개 파일·concierge export·MCST slug·MOIS LOCALDATA
+  업종은 5xx·timeout 한 번에 asset(또는 op) 전체가 실패했고 step 재시도가 처음부터 다시 돌았다
+  (`docs/reports/2026-11-23-collection-failure-audit.md` §1.3 P0).
+- 새 판정 `dagster/upstream_transient.py`: HTTP 상태가 있으면 408·425·429·500·502·503·504만 일시 오류(2xx·3xx
+  상태는 무시 — visitkorea·krforest가 결과 코드 오류에 200을 싣는다), 없으면 lib 분류(`retryable`,
+  `failure_kind` network·server·timeout), 그다음 전송 계층 예외, 분류 속성 없는 lib의 일시 오류 타입 선언
+  (datagokr `TransportError`·mois `MoisServerError`·mcst `McstNetworkError`), 마지막으로 명시적 `__cause__`.
+  쿼터 소진은 언제나 거절. `Retry-After`(header 초·HTTP-date, `retry_after` 속성)를 읽는다.
+- `upstream_retry`: `jitter`(equal jitter, 기본 꺼짐 — 상태 job 시험 결정성 유지), `retry_after`(대기 하한, 120초를
+  넘으면 예산을 쓰지 않고 원 예외). 예산은 fetcher(dataset)마다 settings 비례 예산(`provider_upstream_retry_budget_*`,
+  hard cap 32)이다 — run 공유 예산을 넓히던 첫 판은 적대 리뷰가 "settings 0으로 끄는 스위치가 먹지 않고 같은 run의
+  transport·weather 상한까지 올린다"로 잡아 KHOA가 쓰던 방식으로 되돌렸다.
+- 호출 지점 정책 `provider_fetchers.provider_call_with_retry`(ADR-006 — client를 감싸지 않고 public 메서드 하나를
+  넘긴다): 시도 2회, 15초 기준 backoff + jitter. 적용: 국가유산 행사 달·목록 페이지·상세, 산림청 페이지(휴양림·
+  산사태), TourAPI 축제·관광지 페이지, 서울 책방 페이지(키가 경로라 label에 넣지 않음, `SeoulOpenDataError.
+  status_code` 추가), 표준데이터 공개 파일(재시도 단위 = 파일 하나, 행 중복 없음), concierge export 페이지,
+  MCST slug(CSV를 다 받은 뒤 내보낸다 — 재시도 때 앞 행 중복 없음), MOIS LOCALDATA 업종(업종마다 한 번 commit,
+  실패 시도는 session close가 버리고 upsert는 멱등), KHOA(같은 helper로 수렴). 시도마다 `note_upstream_request`
+  (페이지네이터가 첫 시도를 세는 자리는 `count_retries=True`로 재시도만 더 센다). MCST slug 실패의 `retryable`도 같은
+  판정을 쓴다. 결정적인 httpx 전송 오류(`UnsupportedProtocol`·`LocalProtocolError`)는 재시도하지 않고, datagokr
+  `FILE_METADATA_CHANGED`(받는 중 파일이 바뀜)는 파일 단위로 다시 받는다.
+- 쿼터(§1.3 P1): datagokr·krheritage `ApiErrorResponse.code`, mois `MoisError.result_code`가 `22` 또는
+  메시지 `LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS`면 일일 쿼터(`quota_exhaustion.RESULT_CODE_QUOTA_ATTRIBUTES`,
+  모듈 한정). 핀 SHA 소스로 신호가 이미 예외에 있음을 확인해 provider 수정은 필요 없었다.
+- 남김: datagokr fileData(odcloud) `iter_pages`는 provider 안 순회라 호출 단위로 못 끊는다(해당 dataset은 활용신청
+  미완으로 꺼져 있다). 단건 호출(knps·산림청 SHP)은 step 재시도로 충분해 두었다.
+- 시험: `packages/kor-travel-map-dagster/tests/test_provider_call_retry.py`(분류 표·Retry-After·jitter·예산 공유·
+  fetcher 9곳·실물 datagokr/krheritage/mois 예외 계약). OpenAPI·migration 없음.
+
 ## 2026-11-23 — R4 전환 계획 제외 옵션: 정밀도 미달 쌍을 계획 파일을 고치지 않고 뺀다
 
 - 배경: R4 준비 계획(읽기 전용, `plan_sha256 3f93a4b7…`)의 표본 판정에서 `barrier_free_places` collapse

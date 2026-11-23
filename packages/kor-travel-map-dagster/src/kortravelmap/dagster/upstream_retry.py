@@ -62,17 +62,31 @@ try 밖에서 ``_force_mark_as_failed``를 호출하므로, 소켓에 붙어 있
   fail-close 유지.
 - 부분 실행 금지 불변식은 그대로다: attempts 소진 시 **원 예외를 원형
   그대로** 재던져 기존 실패 분류 경로를 탄다.
-- backoff는 지수(2^n)·상한 capped·결정적(sleep은 호출 시점 late-binding —
+- backoff는 지수(2^n)·상한 capped다(sleep은 호출 시점 late-binding —
   ``time.sleep``/``asyncio.sleep`` module-global 조회라 테스트에서 module
   단위 대체 가능). 동기 :func:`retry_upstream`의 backoff는 이벤트 루프
   위에서 소비되는 sync generator 안이라면 루프를 블록한다 — 예산·attempts
   2가 그 상한을 묶는다(비동기 경계는 :func:`retry_upstream_async`).
+- ``jitter=True``면 대기를 ``[delay/2, delay]`` 구간에서 고른다(equal jitter). 같은
+  상류를 여러 worker가 동시에 두드릴 때 재시도가 같은 순간에 몰리지 않게 한다.
+  기본값은 결정적(``False``)이다 — 상태 job의 시험이 정확한 대기를 잰다.
+- ``retry_after``를 주면 예외가 실어 온 ``Retry-After``(초)를 존중한다 — 대기는
+  backoff와 그 값 중 큰 쪽이고, 그 값이 ``max_retry_after``를 넘으면 **재시도하지 않고
+  원 예외를 그대로 올린다**(몇 분 뒤에 오라는 상류를 이 run 안에서 기다리지 않는다).
+
+**호출 단위 재시도의 적용처(2026-11-24, 감사 §4 #15).** 이 모듈은 처음에 KHOA 한 곳에만
+걸려 있었고, 나머지 다건 호출 fetcher(국가유산·산림청·TourAPI·서울 열린데이터·표준데이터
+공개 파일·concierge export·MCST·MOIS LOCALDATA)는 5xx 한 번에 asset 전체를 처음부터 다시
+돌았다. 지금은 그 fetcher들이 ``provider_fetchers.provider_call_with_retry``(호출 지점 정책 — 분류는
+:mod:`.upstream_transient`)로 페이지·지역·slug마다 이 경계를 지난다. ADR-006은 그대로다 —
+provider client를 감싸는 adapter가 아니라 public client 호출 하나를 재시도로 두르는 것이다.
 """
 
 from __future__ import annotations
 
 import asyncio
 import contextlib
+import random
 import time
 from collections.abc import Awaitable, Callable, Iterator
 from contextvars import ContextVar
@@ -80,6 +94,7 @@ from dataclasses import dataclass, field
 from typing import Final, TypeVar
 
 __all__ = [
+    "DEFAULT_MAX_RETRY_AFTER_SECONDS",
     "DEFAULT_UPSTREAM_ATTEMPTS",
     "DEFAULT_UPSTREAM_BASE_DELAY_SECONDS",
     "DEFAULT_UPSTREAM_MAX_DELAY_SECONDS",
@@ -117,6 +132,12 @@ PROVIDER_BOUNDARY_BASE_DELAY_SECONDS: Final[float] = 15.0
 NONRETRYABLE_FAILURE_KINDS: Final[frozenset[str]] = frozenset({"quota", "rate_limit"})
 """``retryable=True``여도 재시도하지 않는 failure_kind — 일일 쿼터 보호."""
 
+DEFAULT_MAX_RETRY_AFTER_SECONDS: Final[float] = 120.0
+"""상류가 ``Retry-After``로 이보다 오래 기다리라고 하면 이 run 안에서 기다리지 않는다.
+
+provider 경계 backoff 상한(:data:`DEFAULT_UPSTREAM_MAX_DELAY_SECONDS`·15초 기준 지수)보다
+넉넉하되, 몇 분짜리 대기를 페이지마다 쌓아 run 상한에 먼저 닿지 않게 둔 값이다."""
+
 
 def default_upstream_retryable(exc: BaseException) -> bool:
     """kma 계열 규약 — ``retryable=True``이면서 쿼터성 분류가 아닐 때만 재시도.
@@ -141,11 +162,21 @@ class RetryBudget:
     """
 
     limit: int = DEFAULT_UPSTREAM_RUN_RETRY_BUDGET
+    max_seconds: float | None = None
+    """재시도에 쓴 시간(실패한 시도의 소요 + backoff 대기)의 상한. ``None``이면 횟수만 본다.
+
+    횟수 상한만으로는 벽시계가 묶이지 않는다 — lib 안의 재시도(krheritage tenacity 5회 ×
+    timeout 30초)가 실패 한 번을 수 분으로 만들고, 그런 실패가 "한 번 실패 뒤 성공"으로 되풀이되면
+    횟수 32가 그대로 시간이 된다(적대 리뷰 2026-11-24). 이 상한을 넘으면 그 뒤의 일시 오류는
+    즉시 전파된다 — step 재시도가 이어받는다."""
     used: int = field(default=0, init=False)
+    spent_seconds: float = field(default=0.0, init=False)
 
     def __post_init__(self) -> None:
         if self.limit < 0:
             raise ValueError(f"retry budget limit must be >= 0: {self.limit}")
+        if self.max_seconds is not None and self.max_seconds < 0:
+            raise ValueError(f"retry budget max_seconds must be >= 0: {self.max_seconds}")
 
     @classmethod
     def proportional(
@@ -177,8 +208,15 @@ class RetryBudget:
     def try_consume(self) -> bool:
         if self.used >= self.limit:
             return False
+        if self.max_seconds is not None and self.spent_seconds >= self.max_seconds:
+            return False
         self.used += 1
         return True
+
+    def charge(self, seconds: float) -> None:
+        """재시도에 쓴 시간을 더한다(실패한 시도의 소요, backoff 대기)."""
+
+        self.spent_seconds += max(0.0, seconds)
 
 
 _RUN_RETRY_BUDGET: Final[ContextVar[RetryBudget | None]] = ContextVar(
@@ -224,6 +262,38 @@ def _backoff_delay(attempt: int, *, base_delay: float, max_delay: float) -> floa
     return min(max_delay, base_delay * (2.0 ** (attempt - 1)))
 
 
+def _retry_delay(
+    exc: Exception,
+    attempt: int,
+    *,
+    base_delay: float,
+    max_delay: float,
+    jitter: bool,
+    retry_after: Callable[[BaseException], float | None] | None,
+) -> float:
+    """이번 재시도 앞의 대기. jitter는 backoff 몫에만 걸고 ``Retry-After``는 하한으로 둔다."""
+
+    delay = _backoff_delay(attempt, base_delay=base_delay, max_delay=max_delay)
+    if jitter:
+        # `random.uniform`은 호출 시점 조회다 — 시험이 module 단위로 바꿔 끼운다.
+        delay = random.uniform(delay / 2.0, delay)
+    hinted = _retry_after_hint(exc, retry_after)
+    return delay if hinted is None else max(delay, hinted)
+
+
+def _retry_after_hint(
+    exc: BaseException, retry_after: Callable[[BaseException], float | None] | None
+) -> float | None:
+    if retry_after is None:
+        return None
+    # 진단 부수 경로 — 힌트 해석이 실패해도 원 예외의 분류를 바꾸지 않는다.
+    with contextlib.suppress(Exception):
+        value = retry_after(exc)
+        if value is not None and value >= 0:
+            return float(value)
+    return None
+
+
 def _should_retry(
     exc: Exception,
     *,
@@ -233,17 +303,29 @@ def _should_retry(
     budget: RetryBudget | None,
     label: str,
     on_retry: Callable[[str], None] | None,
+    retry_after: Callable[[BaseException], float | None] | None = None,
+    max_retry_after: float = DEFAULT_MAX_RETRY_AFTER_SECONDS,
 ) -> bool:
     """재시도 여부 판정 + 텔레메트리. 분류 통과 후에만 예산을 소모한다."""
 
     safe_label = label.replace("\r", r"\r").replace("\n", r"\n")
     if attempt >= attempts or not is_retryable(exc):
         return False
+    hinted = _retry_after_hint(exc, retry_after)
+    if hinted is not None and hinted > max_retry_after:
+        # 상류가 이 run이 기다릴 수 있는 것보다 길게 기다리라고 했다 — 예산을 쓰지 않고
+        # 원 예외로 끝낸다. 다음 주기(또는 step 재시도)가 다시 온다.
+        _notify(
+            on_retry,
+            f"upstream retry {safe_label}: Retry-After {hinted:.0f}s > "
+            f"{max_retry_after:.0f}s — {type(exc).__name__} 즉시 전파",
+        )
+        return False
     if budget is not None and not budget.try_consume():
         _notify(
             on_retry,
-            f"upstream retry budget exhausted ({budget.limit}) — "
-            f"{safe_label}: {type(exc).__name__} 즉시 전파",
+            f"upstream retry budget exhausted ({budget.used}/{budget.limit}, "
+            f"{budget.spent_seconds:.0f}s) — {safe_label}: {type(exc).__name__} 즉시 전파",
         )
         return False
     _notify(
@@ -252,6 +334,11 @@ def _should_retry(
         f"({type(exc).__name__}) — 재시도",
     )
     return True
+
+
+def _charge(budget: RetryBudget | None, seconds: float) -> None:
+    if budget is not None:
+        budget.charge(seconds)
 
 
 def _notify(on_retry: Callable[[str], None] | None, message: str) -> None:
@@ -275,6 +362,9 @@ def retry_upstream(
     max_delay: float = DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
     budget: RetryBudget | None = None,
     on_retry: Callable[[str], None] | None = None,
+    jitter: bool = False,
+    retry_after: Callable[[BaseException], float | None] | None = None,
+    max_retry_after: float = DEFAULT_MAX_RETRY_AFTER_SECONDS,
     sleep: Callable[[float], None] | None = None,
 ) -> T:
     """동기 upstream 단건 호출을 유한 재시도한다. ``label``은 진단용.
@@ -287,9 +377,11 @@ def retry_upstream(
         raise ValueError(f"attempts must be >= 1: {attempts} ({label})")
     do_sleep = time.sleep if sleep is None else sleep
     for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
             return call()
         except Exception as exc:
+            _charge(budget, time.monotonic() - started)
             if not _should_retry(
                 exc,
                 attempt=attempt,
@@ -298,11 +390,20 @@ def retry_upstream(
                 budget=budget,
                 label=label,
                 on_retry=on_retry,
+                retry_after=retry_after,
+                max_retry_after=max_retry_after,
             ):
                 raise
-            do_sleep(
-                _backoff_delay(attempt, base_delay=base_delay, max_delay=max_delay)
+            delay = _retry_delay(
+                exc,
+                attempt,
+                base_delay=base_delay,
+                max_delay=max_delay,
+                jitter=jitter,
+                retry_after=retry_after,
             )
+            _charge(budget, delay)
+            do_sleep(delay)
     raise AssertionError(f"unreachable: {label}")  # pragma: no cover
 
 
@@ -316,6 +417,9 @@ async def retry_upstream_awaitable(
     max_delay: float = DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
     budget: RetryBudget | None = None,
     on_retry: Callable[[str], None] | None = None,
+    jitter: bool = False,
+    retry_after: Callable[[BaseException], float | None] | None = None,
+    max_retry_after: float = DEFAULT_MAX_RETRY_AFTER_SECONDS,
     sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> T:
     """**async client 호출**을 재시도 경계 안에서 await한다.
@@ -333,9 +437,11 @@ async def retry_upstream_awaitable(
         raise ValueError(f"attempts must be >= 1: {attempts} ({label})")
     do_sleep = asyncio.sleep if sleep is None else sleep
     for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
             return await call()
         except Exception as exc:
+            _charge(budget, time.monotonic() - started)
             if not _should_retry(
                 exc,
                 attempt=attempt,
@@ -344,11 +450,20 @@ async def retry_upstream_awaitable(
                 budget=budget,
                 label=label,
                 on_retry=on_retry,
+                retry_after=retry_after,
+                max_retry_after=max_retry_after,
             ):
                 raise
-            await do_sleep(
-                _backoff_delay(attempt, base_delay=base_delay, max_delay=max_delay)
+            delay = _retry_delay(
+                exc,
+                attempt,
+                base_delay=base_delay,
+                max_delay=max_delay,
+                jitter=jitter,
+                retry_after=retry_after,
             )
+            _charge(budget, delay)
+            await do_sleep(delay)
     raise AssertionError(f"unreachable: {label}")  # pragma: no cover
 
 
@@ -362,6 +477,9 @@ async def retry_upstream_async(
     max_delay: float = DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
     budget: RetryBudget | None = None,
     on_retry: Callable[[str], None] | None = None,
+    jitter: bool = False,
+    retry_after: Callable[[BaseException], float | None] | None = None,
+    max_retry_after: float = DEFAULT_MAX_RETRY_AFTER_SECONDS,
     sleep: Callable[[float], Awaitable[None]] | None = None,
 ) -> T:
     """async 문맥용 — 호출 자체는 호출측 규약대로(동기 client도 그대로) 실행하고
@@ -372,9 +490,11 @@ async def retry_upstream_async(
         raise ValueError(f"attempts must be >= 1: {attempts} ({label})")
     do_sleep = asyncio.sleep if sleep is None else sleep
     for attempt in range(1, attempts + 1):
+        started = time.monotonic()
         try:
             return call()
         except Exception as exc:
+            _charge(budget, time.monotonic() - started)
             if not _should_retry(
                 exc,
                 attempt=attempt,
@@ -383,9 +503,18 @@ async def retry_upstream_async(
                 budget=budget,
                 label=label,
                 on_retry=on_retry,
+                retry_after=retry_after,
+                max_retry_after=max_retry_after,
             ):
                 raise
-            await do_sleep(
-                _backoff_delay(attempt, base_delay=base_delay, max_delay=max_delay)
+            delay = _retry_delay(
+                exc,
+                attempt,
+                base_delay=base_delay,
+                max_delay=max_delay,
+                jitter=jitter,
+                retry_after=retry_after,
             )
+            _charge(budget, delay)
+            await do_sleep(delay)
     raise AssertionError(f"unreachable: {label}")  # pragma: no cover

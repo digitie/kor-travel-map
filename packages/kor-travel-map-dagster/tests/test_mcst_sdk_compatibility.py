@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import io
 import zipfile
+from types import SimpleNamespace
 from typing import Any
 
 import httpx
@@ -11,6 +12,7 @@ import pytest
 from kortravelmap.providers.mcst import McstSlugAttempt, McstSlugFailure
 from kortravelmap.settings import KorTravelMapSettings
 
+from kortravelmap.dagster import upstream_retry
 from kortravelmap.dagster.provider_fetchers import fetch_mcst_culture_records
 
 
@@ -80,6 +82,11 @@ async def test_default_factory_uses_native_approval_transport(
             sessions.append(self)
 
     monkeypatch.setattr(_http.httpx, "AsyncClient", NativeFixtureClient)
+
+    async def _instant_sleep(_delay: float) -> None:
+        return None
+
+    monkeypatch.setattr(upstream_retry, "asyncio", SimpleNamespace(sleep=_instant_sleep))
     records = [
         row
         async for row in fetch_mcst_culture_records(
@@ -91,7 +98,8 @@ async def test_default_factory_uses_native_approval_transport(
     if scenario != "approved":
         reason, retryable, count = {
             "captcha": ("CAPTCHA_REQUIRED", False, 3),
-            "network": ("McstNetworkError", True, 2),
+            # 연결 오류는 slug 하나만 한 번 더 받는다(감사 §4 #15) — 2 요청 × 2 시도.
+            "network": ("McstNetworkError", True, 4),
             "metadata": ("FILE_METADATA_INVALID", False, 2),
             "ambiguous": ("AMBIGUOUS_CSV", False, 4),
             "invalid_content": ("CSV_INVALID_CONTENT", False, 4),

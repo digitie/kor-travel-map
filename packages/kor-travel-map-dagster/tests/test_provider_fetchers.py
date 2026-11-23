@@ -1296,7 +1296,9 @@ async def test_khoa_beaches_retries_transient_page_without_record_loss(
     assert len(records) == 2
     client = _FakeKhoaClient.instances[0]
     assert client.calls == ["부산광역시", "부산광역시"]
-    assert delays == [15.0]
+    # provider 경계 간격 15초에 equal jitter — [7.5, 15] 구간(감사 §4 #15).
+    assert len(delays) == 1
+    assert 7.5 <= delays[0] <= 15.0
     assert client.closed is True
 
 

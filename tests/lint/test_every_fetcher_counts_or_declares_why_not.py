@@ -204,6 +204,13 @@ def _module_trees() -> dict[str, ast.Module]:
     }
 
 
+#: 첫 인자로 받은 callable을 **부르는** 호출 — ``partial(f, ...)``의 ``f``는 나중에 불린다.
+#: 호출 단위 재시도(감사 §4 #15)가 ``provider_call_with_retry(partial(helper, ...))``로 계수
+#: 헬퍼를 넘기므로, 그 ``helper``를 부른 것으로 센다. 모듈 수준 이름(``ast.Name``)만 받는다 —
+#: attribute(``client.x``)는 receiver를 모르니 넣지 않는다.
+_CALLABLE_FORWARDERS: frozenset[str] = frozenset({"partial"})
+
+
 def _called_names(node: ast.AST) -> set[str]:
     """이 함수 본문이 부르는 이름. 중첩 함수의 호출은 세지 않는다.
 
@@ -221,6 +228,10 @@ def _called_names(node: ast.AST) -> set[str]:
             func = child.func
             if isinstance(func, ast.Name):
                 names.add(func.id)
+                if func.id in _CALLABLE_FORWARDERS and child.args:
+                    forwarded = child.args[0]
+                    if isinstance(forwarded, ast.Name):
+                        names.add(forwarded.id)
             elif isinstance(func, ast.Attribute):
                 names.add(func.attr)
         stack.extend(ast.iter_child_nodes(child))
