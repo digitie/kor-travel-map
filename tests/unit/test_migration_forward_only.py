@@ -52,6 +52,7 @@ FORWARD_ONLY_REVISIONS = (
     "453_features_autovacuum",
     "454_route_cluster_markers",
     "455_feature_cluster_points",
+    "456_feature_update_retry_schedule",
 )
 
 

@@ -15,9 +15,12 @@ from dagster import (
     resource,
 )
 from kortravelmap.client import IntegrityFindingSyncResult
+from kortravelmap.infra.failure_summary import FailureSummary, summarize_failure
 from kortravelmap.infra.feature_update_executor import (
     FeatureUpdateExecutionPlan,
     FeatureUpdateExecutionResult,
+    FeatureUpdateRetryOutcome,
+    FeatureUpdateTransientFailure,
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
 )
@@ -56,6 +59,8 @@ class _Client:
     fail_raises: Exception | None = None
     execute_raises: Exception | None = None
     advance_generation_on_failure: bool = False
+    rescheduled: list[dict[str, Any]] = field(default_factory=list)
+    reschedule_outcome: FeatureUpdateRetryOutcome | None = None
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         return self.request
@@ -113,6 +118,7 @@ class _Client:
         owner_dagster_run_id: str,
         expected_request_generation: int,
         error_message: str | None = None,
+        failure_payload: dict[str, Any] | None = None,
     ) -> FeatureUpdateRequest | None:
         if self.fail_raises is not None:
             raise self.fail_raises
@@ -122,6 +128,7 @@ class _Client:
                 "owner_dagster_run_id": owner_dagster_run_id,
                 "expected_request_generation": expected_request_generation,
                 "error_message": error_message,
+                "failure_payload": failure_payload,
             }
         )
         if self.advance_generation_on_failure and self.request is not None:
@@ -130,6 +137,26 @@ class _Client:
                 generation=expected_request_generation + 1,
             )
         return self.request
+
+    async def reschedule_update_request_after_failure(
+        self,
+        request_id: str,
+        *,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
+        failure: FailureSummary,
+        stage: str | None = None,
+    ) -> FeatureUpdateRetryOutcome | None:
+        self.rescheduled.append(
+            {
+                "request_id": request_id,
+                "owner_dagster_run_id": owner_dagster_run_id,
+                "expected_request_generation": expected_request_generation,
+                "failure": failure,
+                "stage": stage,
+            }
+        )
+        return self.reschedule_outcome
 
     async def record_address_validation_findings(
         self, findings: object, **kwargs: object
@@ -458,17 +485,22 @@ def test_failure_sensor_marks_request_failed() -> None:
         result = feature_update_request_failure_sensor(context)
 
     assert isinstance(result, SkipReason)
-    assert client.failed == [
-        {
-            "request_id": request.request_id,
-            "owner_dagster_run_id": failed_run.run_id,
-            "expected_request_generation": 1,
-            "error_message": (
-                "Dagster feature update worker failed: "
-                f"run_id={failed_run.run_id} request_id={request.request_id}"
-            ),
-        }
-    ]
+    [failed] = client.failed
+    assert failed["request_id"] == request.request_id
+    assert failed["owner_dagster_run_id"] == failed_run.run_id
+    assert failed["expected_request_generation"] == 1
+    # 실패 원인(실패 step·오류 타입·메시지)이 request 오류 메시지와 event payload에 실린다 —
+    # 종전에는 run_id와 request_id뿐이었다(감사 §1.2).
+    assert failed["error_message"] == (
+        "Dagster feature update worker failed: "
+        f"run_id={failed_run.run_id} request_id={request.request_id} — "
+        "step execute_feature_update_request: Failure: provider down"
+    )
+    payload = failed["failure_payload"]
+    assert payload["source"] == "dagster_run_failure"
+    assert payload["failed_step"] == "execute_feature_update_request"
+    assert payload["error_type"] == "Failure"
+    assert payload["error"] == "provider down"
 
 
 def test_failure_sensor_requires_database_client_resource() -> None:
@@ -589,7 +621,8 @@ def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
             "job_name": "feature_update_request_worker",
             "message": (
                 "Dagster feature update worker failed: "
-                f"run_id={failed_run.run_id} request_id={request.request_id}"
+                f"run_id={failed_run.run_id} request_id={request.request_id} — "
+                "step execute_feature_update_request: Failure: provider down"
             ),
         }
     ]
@@ -624,3 +657,109 @@ def test_worker_job_shares_one_retry_budget_across_the_request_scopes() -> None:
     assert result.success
     [budget] = seen
     assert isinstance(budget, upstream_retry.RetryBudget)
+
+
+class _LockTimeout(Exception):
+    """asyncpg ``LockNotAvailableError``의 모양 — SQLSTATE만 본다."""
+
+    sqlstate = "55P03"
+
+
+def _transient_outcome(
+    request: FeatureUpdateRequest, *, rescheduled: bool
+) -> FeatureUpdateRetryOutcome:
+    return FeatureUpdateRetryOutcome(
+        request=replace(
+            request,
+            generation=request.generation + 1 if rescheduled else request.generation,
+            status="queued" if rescheduled else "failed",
+            retry_count=1 if rescheduled else 5,
+            next_dispatch_at=_NOW if rescheduled else None,
+            error_message=None if rescheduled else "재발행 5회 소진: lock timeout",
+        ),
+        rescheduled=rescheduled,
+    )
+
+
+def _run_worker(client: _Client) -> Any:
+    request = client.request
+    assert request is not None
+    return feature_update_request_worker_job.execute_in_process(
+        run_config={
+            "ops": {
+                "execute_feature_update_request": {
+                    "config": {"request_id": request.request_id, "request_generation": 1}
+                }
+            }
+        },
+        resources={"kor_travel_map_client": client, "feature_update_runner": object()},
+        raise_on_error=False,
+    )
+
+
+def test_worker_reschedules_a_transient_db_failure_instead_of_failing() -> None:
+    """executor가 종결하지 않고 넘긴 일시 DB 실패 → 새 연결로 backoff 재발행, run은 성공."""
+
+    request = _request()
+    summary = summarize_failure(_LockTimeout("canceling statement due to lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage="refreshing:1:dataset_wide"),
+        reschedule_outcome=_transient_outcome(request, rescheduled=True),
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    [call] = client.rescheduled
+    assert call["request_id"] == request.request_id
+    assert call["expected_request_generation"] == 1
+    assert call["owner_dagster_run_id"] == result.run_id
+    assert call["stage"] == "refreshing:1:dataset_wide"
+    assert call["failure"].db_failure == "lock_timeout"
+    metadata = result.output_for_node("execute_feature_update_request")
+    assert metadata["status"] == "retry_scheduled"
+    assert metadata["retry_count"] == 1
+    assert metadata["db_failure"] == "lock_timeout"
+
+
+def test_worker_reschedules_a_transient_db_failure_raised_before_claim() -> None:
+    """claim 전(lock 획득·조회)에 난 일시 DB 실패도 같은 길로 간다."""
+
+    request = _request()
+    client = _Client(
+        request=request,
+        execute_raises=_LockTimeout("canceling statement due to lock timeout"),
+        reschedule_outcome=_transient_outcome(request, rescheduled=True),
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    [call] = client.rescheduled
+    assert call["stage"] is None
+
+
+def test_worker_fails_the_run_when_retries_are_exhausted() -> None:
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage=None),
+        reschedule_outcome=_transient_outcome(request, rescheduled=False),
+    )
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert len(client.rescheduled) == 1
+
+
+def test_worker_does_not_reschedule_a_deterministic_failure() -> None:
+    request = _request()
+    client = _Client(request=request, execute_raises=ValueError("bad scope"))
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert client.rescheduled == []

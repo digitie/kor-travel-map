@@ -2615,6 +2615,102 @@ test.describe("/ops/pipeline", () => {
     ).toBeVisible();
   });
 
+  test("큐 요청 실패 원인·재발행 일정을 상세 이벤트에 표시(감사 §4 #15)", async ({
+    page,
+  }) => {
+    const failureMessage =
+      "재발행 5회 소진: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) " +
+      "<class 'asyncpg.exceptions.LockNotAvailableError'>: canceling statement due to lock timeout";
+    await installPipelineMocks(page, {
+      detailFactory: () => {
+        const detail = makeDetail();
+        const baseEvent = detail.data.events?.[0];
+        if (!baseEvent || !detail.data.update_request) {
+          throw new Error("makeDetail fixture changed");
+        }
+        return {
+          ...detail,
+          data: {
+            ...detail.data,
+            execution: {
+              ...detail.data.execution,
+              status: "failed",
+              error_message: failureMessage,
+            },
+            update_request: {
+              ...detail.data.update_request,
+              status: "failed",
+              error_message: failureMessage,
+            },
+            events: [
+              {
+                ...baseEvent,
+                event_id: "66666666-6666-4666-8666-666666666661",
+                stage: null,
+                level: "warning",
+                code: "FEATURE_UPDATE_RETRY_SCHEDULED",
+                message:
+                  "일시 실패 — 2026-07-14T10:03:00+00:00 이후 다시 발행 (1/5): lock timeout",
+                payload: {
+                  status: "queued",
+                  failure_class: "transient_db",
+                  db_failure: "lock_timeout",
+                  stage: "refreshing:101:target_grids",
+                  dagster_run_id: "run-lock-1",
+                  retry_count: 1,
+                  max_retries: 5,
+                  next_dispatch_at: "2026-07-14T10:03:00.000Z",
+                },
+                occurred_at: "2026-07-14T10:02:00.000Z",
+              },
+              {
+                ...baseEvent,
+                event_id: "66666666-6666-4666-8666-666666666662",
+                stage: null,
+                level: "error",
+                code: "FEATURE_UPDATE_RETRIES_EXHAUSTED",
+                message: failureMessage,
+                payload: {
+                  status: "failed",
+                  failure_code: "FEATURE_UPDATE_RETRIES_EXHAUSTED",
+                  failure_class: "transient_db",
+                  db_failure: "lock_timeout",
+                  dagster_run_id: "run-lock-6",
+                  max_retries: 5,
+                  // 승인되지 않은 필드는 화면에 펼치지 않는다.
+                  raw_sql: "INSERT INTO ops.import_job_events",
+                },
+                occurred_at: "2026-07-14T10:40:00.000Z",
+              },
+            ],
+          },
+        };
+      },
+    });
+    await page.goto("/ops/pipeline");
+
+    await page.getByTestId(`pipeline-execution-row-${REQUEST_ID}`).click();
+
+    const panel = page.getByTestId("pipeline-execution-detail");
+    await expect(panel).toBeVisible();
+    // 실패 원인 Alert — 종전 "provider refresh asset execution failed" 한 줄 대신 분류와 원인.
+    await expect(
+      panel.getByRole("alert").filter({ hasText: "실패 원인" }),
+    ).toContainText("LockNotAvailableError");
+    const details = panel.getByLabel("요청 실패 원인");
+    await expect(details).toHaveCount(2);
+    const scheduled = details.nth(0);
+    await expect(scheduled).toContainText("일시 DB 오류(lock 대기 초과)");
+    await expect(scheduled).toContainText("refreshing:101:target_grids");
+    await expect(scheduled).toContainText("1/5");
+    await expect(scheduled).toContainText("run-lock-1");
+    await expect(scheduled.getByText("다음 발행")).toBeVisible();
+    const exhausted = details.nth(1);
+    await expect(exhausted).toContainText("run-lock-6");
+    await expect(exhausted).not.toContainText("INSERT INTO");
+    await expect(panel.getByText("FEATURE_UPDATE_RETRIES_EXHAUSTED")).toBeVisible();
+  });
+
   test("A→B 상세 전환은 cursor·취소 사유·mutation 오류 상태를 격리", async ({
     page,
   }) => {

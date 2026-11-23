@@ -34,6 +34,7 @@ from kortravelmap.core.feature_operation import (
     ProviderDatasetOperationMembership,
     TriggerKind,
 )
+from kortravelmap.infra.failure_summary import summarize_failure
 
 from dagster import InitResourceContext, resource
 
@@ -512,21 +513,44 @@ def _single_membership_for_asset(
     return guard.memberships[0]
 
 
+def _attempt_step(context: Any) -> str | None:
+    """실패한 step(asset key) — 다중 asset 문맥 등에서 못 구하면 ``None``."""
+    try:
+        asset_key = getattr(context, "asset_key", None)
+    except Exception:  # noqa: BLE001 — 진단 부수 경로
+        return None
+    to_string = getattr(asset_key, "to_user_string", None)
+    return str(to_string()) if callable(to_string) else None
+
+
 async def _append_failed_attempt(
     context: Any,
     guard: FeatureOperationExecutionGuard,
     membership: ProviderDatasetOperationMembership,
     error: Exception,
 ) -> None:
+    """member attempt 실패 event — 원인(분류·메시지·연쇄·step·run id)을 비밀값 없이 싣는다.
+
+    종전에는 ``code``와 예외 타입 이름만 실었다(감사 §1.2). 메시지는
+    :func:`~kortravelmap.infra.failure_summary.summarize_failure`가 SQL 본문·키·DSN 비밀번호를
+    걷는다.
+    """
+    summary = summarize_failure(error)
+    detail: dict[str, Any] = {
+        "code": "FEATURE_OPERATION_ASSET_ATTEMPT_FAILED",
+        "type": type(error).__name__,
+        "dagster_run_id": guard.dagster_run_id,
+        **summary.payload(),
+    }
+    step = _attempt_step(context)
+    if step is not None:
+        detail["step"] = step
     await guard.client.append_dagster_feature_attempt_event(
         dagster_run_id=guard.dagster_run_id,
         membership=membership,
         attempt_number=int(context.retry_number) + 1,
         outcome="failed",
-        error={
-            "code": "FEATURE_OPERATION_ASSET_ATTEMPT_FAILED",
-            "type": type(error).__name__,
-        },
+        error=detail,
     )
 
 

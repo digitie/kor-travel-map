@@ -6,6 +6,8 @@ from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 from kortravelcommon.dagster import RecoveryPolicy
+from kortravelmap.infra.failure_summary import FailureSummary, summarize_failure
+from kortravelmap.infra.feature_update_executor import FeatureUpdateTransientFailure
 from kortravelmap.infra.feature_update_repo import FeatureUpdateLockBusy
 
 from dagster import (
@@ -23,6 +25,7 @@ from dagster import (
     sensor,
 )
 
+from .run_failure_detail import failure_detail_text, run_failure_detail
 from .upstream_retry import sharing_run_retry_budget
 
 if TYPE_CHECKING:
@@ -97,6 +100,20 @@ async def execute_feature_update_request_op(
         }
         context.add_output_metadata(metadata)
         return metadata
+    except FeatureUpdateTransientFailure as exc:
+        # executor가 종결하지 않고 넘긴 일시 DB 실패(lock timeout·serialization·deadlock·연결).
+        return await _reschedule_after_transient_failure(
+            context, client, request_id, request_generation, exc.summary, stage=exc.stage
+        )
+    except Exception as exc:
+        # claim 전(request lock·scope lock 획득, request 조회)에 난 일시 DB 실패도 같은 길로 간다.
+        # 결정적 실패는 종전처럼 run을 실패시킨다 — failure sensor가 request를 닫는다.
+        summary = summarize_failure(exc)
+        if summary.failure_class != "transient_db":
+            raise
+        return await _reschedule_after_transient_failure(
+            context, client, request_id, request_generation, summary, stage=None
+        )
     if result is None:
         raise Failure(description=f"feature update request 없음: {request_id!r}")
 
@@ -158,7 +175,8 @@ def feature_update_request_failure_sensor(
     """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다."""
     request_id = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_ID_TAG)
     request_generation = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_GENERATION_TAG)
-    message = _failure_message(context)
+    detail = _failure_detail(context)
+    message = _failure_message(context, detail)
     _run_async(
         _handle_failure_side_effects(
             context,
@@ -166,6 +184,7 @@ def feature_update_request_failure_sensor(
             request_id,
             request_generation,
             message,
+            detail,
         )
     )
     context.log.error(message)
@@ -280,11 +299,88 @@ def _execution_metadata(
     }
 
 
-def _failure_message(context: RunFailureSensorContext) -> str:
+async def _reschedule_after_transient_failure(
+    context: OpExecutionContext,
+    client: "AsyncKorTravelMapClient",
+    request_id: str,
+    request_generation: int,
+    summary: FailureSummary,
+    *,
+    stage: str | None,
+) -> dict[str, object]:
+    """일시 DB 실패를 backoff 재발행으로 바꾼다. 상한을 넘었으면 종결하고 run을 실패시킨다.
+
+    재발행에 성공하면 run은 **성공**으로 끝난다 — 할 일을 미뤘을 뿐 실패가 아니고, 실패 run은
+    failure sensor·알림을 부른다. 원인과 다음 발행 시각은 Map DB import job event
+    (``FEATURE_UPDATE_RETRY_SCHEDULED``)와 이 op의 output metadata에 남는다.
+    """
+    outcome = await client.reschedule_update_request_after_failure(
+        request_id,
+        owner_dagster_run_id=context.run_id,
+        expected_request_generation=request_generation,
+        failure=summary,
+        stage=stage,
+    )
+    failure_metadata: dict[str, str | int | None] = {
+        "request_id": request_id,
+        "failure_class": summary.failure_class,
+        "db_failure": summary.db_failure,
+        "stage": stage,
+        "error": summary.describe(),
+    }
+    if outcome is None:
+        raise Failure(
+            description=(
+                "일시 DB 실패 뒤 request 상태가 재발행·종결 대상이 아니었다(이미 종결·취소됐다): "
+                f"{summary.describe()}"
+            ),
+            metadata=failure_metadata,
+        )
+    if not outcome.rescheduled:
+        raise Failure(
+            description=outcome.request.error_message or summary.describe(),
+            metadata={**failure_metadata, "retry_count": outcome.request.retry_count},
+        )
+    next_at = outcome.request.next_dispatch_at
+    metadata: dict[str, object] = {
+        **failure_metadata,
+        "status": "retry_scheduled",
+        "retry_count": outcome.request.retry_count,
+        "next_dispatch_at": next_at.isoformat() if next_at is not None else None,
+    }
+    context.log.warning(
+        "feature update request 일시 실패 — 재발행 예약: request_id=%s retry=%s next=%s error=%s",
+        request_id,
+        outcome.request.retry_count,
+        metadata["next_dispatch_at"],
+        summary.describe(),
+    )
+    context.add_output_metadata(metadata)
+    return metadata
+
+
+def _failure_detail(context: RunFailureSensorContext) -> dict[str, str]:
+    return run_failure_detail(getattr(context, "failure_event", None))
+
+
+def _failure_message(
+    context: RunFailureSensorContext, detail: dict[str, str] | None = None
+) -> str:
+    """Dagster가 남긴 실패 원인(실패 step·오류 타입·메시지)을 담은 한 줄.
+
+    종전에는 ``run_id``와 ``request_id``만 실었다 — 큐 요청의 ``error_message``가 원인 없이 그 한
+    줄로
+    남았다(감사 §1.2). 원인은 ``RUN_FAILURE`` 이벤트의 ``first_step_failure_event``에서 storage를
+    다시
+    읽지 않고 꺼낸다(:mod:`.run_failure_detail`).
+    """
     run = context.dagster_run
     request_id = run.tags.get(FEATURE_UPDATE_REQUEST_ID_TAG)
     suffix = f" request_id={request_id}" if request_id else ""
-    return f"Dagster feature update worker failed: run_id={run.run_id}{suffix}"
+    detail = _failure_detail(context) if detail is None else detail
+    head = f"Dagster feature update worker failed: run_id={run.run_id}{suffix}"
+    body = failure_detail_text(detail)
+    return f"{head} — {body}" if body else head
 
 
 async def _handle_failure_side_effects(
@@ -293,6 +389,7 @@ async def _handle_failure_side_effects(
     request_id: str | None,
     request_generation: str | None,
     message: str,
+    detail: dict[str, str] | None = None,
 ) -> None:
     if request_id:
         client = cast("AsyncKorTravelMapClient", kor_travel_map_client)
@@ -309,6 +406,7 @@ async def _handle_failure_side_effects(
                 owner_dagster_run_id=context.dagster_run.run_id,
                 expected_request_generation=expected_generation,
                 error_message=message,
+                failure_payload={"source": "dagster_run_failure", **(detail or {})},
             )
         except Exception as exc:
             context.log.error(

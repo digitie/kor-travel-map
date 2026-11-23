@@ -1,9 +1,17 @@
+## 2026-11-24 — 큐 요청 일시 실패 재발행·상한·실패 원인 기록(감사 §4 #15, alembic 456)
+
+- 일시 DB 실패(lock timeout·serialization·deadlock·연결)와 시작 전 실패는 backoff(60초 × 2^n, jitter) 재발행, 5회 뒤 `failed`.
+  모든 종결이 분류·원인·실패 단계·Dagster run id를 import job event에 남기고, 관리자 실행 상세가 그것을 보여 준다.
+  operation root `dagster_run_terminal`에 실패 step·오류를 더했다. migration 456(열 둘), OpenAPI 변경 없음.
+- 다음: n150 회전(api·dagster-code-server·ui 이미지, `alembic upgrade head` 456) 뒤 실패한 큐 요청의 이벤트·`error_message`와
+  `retry_count`를 확인. `import_job_event_clock` 단일 행 경합은 별도 과제로 남는다.
 ## 2026-11-24 — 다건 호출 provider 호출 단위 재시도·쿼터 결과 코드 분류(감사 §4 #15)
 
 - 국가유산·산림청·TourAPI·서울 책방·표준 공개 파일·concierge·MCST·MOIS LOCALDATA·KHOA가 페이지·달·상세·slug·업종
   단위로 일시 오류(5xx·timeout·연결)만 한 번 더 부른다(jitter, `Retry-After` 존중, run 예산 공유). datagokr·krheritage·
   mois의 결과 코드 22를 일일 쿼터로 분류. OpenAPI·migration 없음.
 - 다음: n150 회전(dagster code-server 이미지) 뒤 Dagster 로그의 `upstream retry …` 경고 빈도와 step 재시도 감소 확인.
+||||||| parent of a48646de4 (feat(queue): 큐 요청 일시 실패 재발행·상한과 실패 원인 기록 (감사 §4 #15, alembic 456))
 
 ## 2026-11-23 — R4 전환 계획 제외 옵션(`--exclude <dataset>:<action>`)
 

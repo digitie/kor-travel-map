@@ -74,7 +74,6 @@ from kortravelmap.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
-from kortravelmap.infra import feature_update_repo as fur_repo
 from kortravelmap.infra import geo_release_repo
 from kortravelmap.infra.advisory_lock import (
     advisory_lock,
@@ -141,6 +140,7 @@ from kortravelmap.infra.enrichment_review_repo import (
 from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
 )
+from kortravelmap.infra.failure_summary import FailureSummary
 from kortravelmap.infra.feature_geocode_reuse import (
     read_reusable_geo_columns as repo_read_reusable_geo_columns,
 )
@@ -238,7 +238,10 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.feature_update_executor import (
     FeatureUpdateExecutionResult,
+    FeatureUpdateRetryOutcome,
     ProviderDatasetRefreshRunner,
+    fail_update_request_after_run_failure,
+    retry_or_fail_update_request,
 )
 from kortravelmap.infra.feature_update_executor import (
     execute_feature_update_request as repo_execute_feature_update_request,
@@ -253,9 +256,6 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.feature_update_repo import (
     enqueue_feature_update_request as repo_enqueue_feature_update_request,
-)
-from kortravelmap.infra.feature_update_repo import (
-    finish_update_request as repo_finish_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
     get_update_request as repo_get_update_request,
@@ -2124,28 +2124,76 @@ class AsyncKorTravelMapClient:
         owner_dagster_run_id: str,
         expected_request_generation: int,
         error_message: str | None = None,
+        failure_payload: Mapping[str, Any] | None = None,
     ) -> FeatureUpdateRequest | None:
-        """Dagster failure를 pre-start retry 또는 started owner 실패로 반영한다.
+        """Dagster worker run 실패를 request에 반영한다(failure sensor 경로).
 
-        request가 sensor가 본 queued generation 그대로면 generation을 +1해
-        다음 run key를 연다. 이미 start한 동일 run이면 기존 run id CAS로 request와
-        import job을 ``failed``로 닫는다.
+        - **claim 전**(sensor가 본 queued generation 그대로 — launch 실패): 일시 실패로 보고 backoff
+          뒤 재발행한다(:data:`~kortravelmap.infra.feature_update_repo.FEATURE_UPDATE_MAX_RETRIES`
+          상한). 상한을 넘으면 ``failed``로 닫는다. 종전에는 generation만 +1해 15초 뒤 곧바로 새
+          run을 냈고 상한이 없었다(감사 §1.3 P1).
+        - **claim 후**(이 run이 owner인 ``running`` — run이 도중에 죽었다): 원인을 모르므로
+        재발행하지
+          않고 ``failed``로 닫는다. PinVi relay에도 ``failed``를 낸다.
+
+        어느 쪽이든 Dagster가 남긴 실패 원인(``error_message``·``failure_payload``)을 import job
+        event에
+        남긴다. 상태가 맞지 않으면(executor가 이미 종결·재발행했다 등) ``None``.
         """
+        message = error_message or "Dagster feature update worker run failed"
+        payload = dict(failure_payload or {})
         async with self._session_factory() as session, session.begin():
-            retry = await fur_repo.advance_update_request_generation_after_pre_start_failure(
+            current = await repo_get_update_request(session, request_id)
+            if current is None or current.generation != expected_request_generation:
+                return None
+            if current.status == "queued" and current.dagster_run_id is None:
+                outcome = await retry_or_fail_update_request(
+                    session,
+                    request_id,
+                    expected_generation=expected_request_generation,
+                    owner_dagster_run_id=owner_dagster_run_id,
+                    failure_message=message,
+                    payload={**payload, "failure_class": "dispatch", "stage": "before_claim"},
+                    include_running=False,
+                )
+                return outcome.request if outcome is not None else None
+            return await fail_update_request_after_run_failure(
                 session,
                 request_id,
                 expected_generation=expected_request_generation,
-            )
-            if retry is not None:
-                return retry
-            return await repo_finish_update_request(
-                session,
-                request_id,
-                status="failed",
                 owner_dagster_run_id=owner_dagster_run_id,
+                error_message=message,
+                payload=payload,
+            )
+
+    async def reschedule_update_request_after_failure(
+        self,
+        request_id: str,
+        *,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
+        failure: FailureSummary,
+        stage: str | None = None,
+    ) -> FeatureUpdateRetryOutcome | None:
+        """일시 DB 실패로 멈춘 실행을 backoff 뒤 재발행하거나, 상한을 넘었으면 종결한다.
+
+        Dagster 큐 op가 executor의
+        :class:`~kortravelmap.infra.feature_update_executor.FeatureUpdateTransientFailure`(또는
+        claim
+        전 일시 DB 실패)를 받았을 때 **새 연결로** 부른다 — 실패한 연결은 끊겼거나 lock을 기다리던
+        것이다. claim 전 ``queued``와 이 run의 ``running``을 모두 받는다.
+        """
+        payload: dict[str, Any] = dict(failure.payload())
+        if stage is not None:
+            payload["stage"] = stage
+        async with self._session_factory() as session, session.begin():
+            return await retry_or_fail_update_request(
+                session,
+                request_id,
                 expected_generation=expected_request_generation,
-                error_message=error_message,
+                owner_dagster_run_id=owner_dagster_run_id,
+                failure_message=failure.describe(),
+                payload=payload,
             )
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:

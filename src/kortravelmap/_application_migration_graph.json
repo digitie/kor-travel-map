@@ -315,6 +315,12 @@
         "454_route_cluster_markers"
       ],
       "revision": "455_feature_cluster_points"
+    },
+    {
+      "down_revision": [
+        "455_feature_cluster_points"
+      ],
+      "revision": "456_feature_update_retry_schedule"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

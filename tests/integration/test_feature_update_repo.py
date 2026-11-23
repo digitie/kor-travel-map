@@ -24,7 +24,6 @@ from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 
     FeatureUpdateRequest,
     FeatureUpdateRequestDataset,
     FeatureUpdateRequestPreview,
-    advance_update_request_generation_after_pre_start_failure,
     enqueue_feature_update_request,
     feature_update_scope_advisory_key,
     finish_update_request,
@@ -36,6 +35,7 @@ from kortravelmap.infra.feature_update_repo import (  # noqa: PLC2701 - EXPLAIN 
     peek_update_requests,
     preview_feature_update_request,
     requeue_update_request_after_lock_contention,
+    reschedule_update_request_after_failure,
     set_update_request_matched_scope,
     start_update_request,
 )
@@ -588,10 +588,12 @@ async def test_pre_start_failure_advances_only_matching_queued_generation(
     assert isinstance(request, FeatureUpdateRequest)
     assert request.job_id is not None
 
-    advanced = await advance_update_request_generation_after_pre_start_failure(
+    advanced = await reschedule_update_request_after_failure(
         migrated_session,
         request.request_id,
         expected_generation=request.generation,
+        owner_dagster_run_id="run-launch-failed",
+        include_running=False,
     )
 
     assert advanced is not None
@@ -599,10 +601,12 @@ async def test_pre_start_failure_advances_only_matching_queued_generation(
     assert advanced.dagster_run_id is None
     assert advanced.generation == request.generation + 1
     job_before_stale = await _job_row(migrated_session, request.job_id)
-    stale = await advance_update_request_generation_after_pre_start_failure(
+    stale = await reschedule_update_request_after_failure(
         migrated_session,
         request.request_id,
         expected_generation=request.generation,
+        owner_dagster_run_id="run-launch-failed",
+        include_running=False,
     )
     stored = await get_update_request(migrated_session, request.request_id)
 
@@ -678,10 +682,12 @@ async def test_pre_start_failure_generation_does_not_mutate_other_states(
         (terminal, terminal_request.generation),
         (marked, marked_request.generation),
     ):
-        changed = await advance_update_request_generation_after_pre_start_failure(
+        changed = await reschedule_update_request_after_failure(
             migrated_session,
             before.request_id,
             expected_generation=generation,
+            owner_dagster_run_id="run-not-the-owner",
+            include_running=False,
         )
         after = await get_update_request(migrated_session, before.request_id)
         assert changed is None

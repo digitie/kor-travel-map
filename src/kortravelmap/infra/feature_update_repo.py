@@ -62,7 +62,11 @@ __all__ = [
     "preview_feature_update_request",
     "peek_update_requests",
     "peek_next_update_request",
-    "advance_update_request_generation_after_pre_start_failure",
+    "FEATURE_UPDATE_MAX_RETRIES",
+    "FEATURE_UPDATE_RETRY_BASE_DELAY_SECONDS",
+    "FEATURE_UPDATE_RETRY_MAX_DELAY_SECONDS",
+    "fail_update_request_after_retries",
+    "reschedule_update_request_after_failure",
     "touch_queued_update_request_for_lock_retry",
     "feature_update_scope_advisory_key",
     "start_update_request",
@@ -81,6 +85,16 @@ __all__ = [
 
 FEATURE_UPDATE_JOB_KIND: Final[str] = FEATURE_UPDATE_REQUEST_JOB_KIND
 FEATURE_UPDATE_LOCK_RETRY_AFTER_SECONDS: Final[int] = 15
+
+#: 일시 실패(시작 전 run 실패·일시 DB 오류)로 다시 발행하는 횟수의 상한(감사 §1.3 P1). 넘으면
+#: request를 ``failed``로 닫는다 — 원인이 지속되는데 15초마다 run을 만들던 것을 끊는다.
+FEATURE_UPDATE_MAX_RETRIES: Final[int] = 5
+#: 재발행 대기의 지수 backoff — ``min(상한, 기준 × 2^재시도 횟수)``에 ``[0.5, 1.0)`` jitter를
+#: 곱한다.
+#: 60초·2·4·8·16분(jitter 전) — 다섯 번을 다 쓰면 약 31분이다. lock 경합(긴 적재 transaction이
+#: event clock 행을 쥔 채 수 분)과 launch 실패(code-server fd 고갈) 모두 분 단위로 풀린다.
+FEATURE_UPDATE_RETRY_BASE_DELAY_SECONDS: Final[float] = 60.0
+FEATURE_UPDATE_RETRY_MAX_DELAY_SECONDS: Final[float] = 1800.0
 _RUN_MODES: Final[frozenset[str]] = frozenset({"queued", "now"})
 _FEATURE_UPDATE_POLICY_MODE: Final[str] = "refresh_existing"
 _FEATURE_UPDATE_POLICY_BOOLEAN_KEYS: Final[tuple[str, ...]] = (
@@ -109,6 +123,7 @@ _REQUEST_RETURN_COLUMNS: Final[str] = (
     "job.cancellation_requested_by, job.cancellation_reason, request.operator, "
     "request.reason, job.error_message, request.created_at, job.started_at, "
     "job.finished_at, request.generation, job.dispatch_requested_at, "
+    "request.retry_count, request.next_dispatch_at, "
     "member.feature_update_request_dataset_id, member.provider_dataset_id, "
     "member.sync_scope, member.operation_key, dataset.provider, dataset.dataset_key"
 )
@@ -181,6 +196,10 @@ class FeatureUpdateRequest:
     cancellation_requested_by: str | None = None
     cancellation_reason: str | None = None
     dispatch_requested_at: datetime | None = None
+    retry_count: int = 0
+    """일시 실패로 다시 발행한 횟수(456). :data:`FEATURE_UPDATE_MAX_RETRIES`를 넘으면 종결한다."""
+    next_dispatch_at: datetime | None = None
+    """이 시각 전에는 큐 sensor가 집지 않는다(456). ``None``이면 즉시."""
 
 
 @dataclass(frozen=True)
@@ -337,6 +356,8 @@ def _rows_to_request(rows: Sequence[Any]) -> FeatureUpdateRequest:
         finished_at=row.finished_at,
         generation=int(row.generation),
         dispatch_requested_at=row.dispatch_requested_at,
+        retry_count=int(row.retry_count),
+        next_dispatch_at=row.next_dispatch_at,
     )
 
 
@@ -721,6 +742,7 @@ WITH candidates AS (
       AND job.status = 'queued'
       AND job.dagster_run_id IS NULL
       AND job.cancellation_id IS NULL
+      AND (request.next_dispatch_at IS NULL OR request.next_dispatch_at <= now())
     ORDER BY (job.dispatch_requested_at IS NOT NULL) DESC,
              request.priority DESC,
              job.dispatch_requested_at NULLS LAST,
@@ -940,7 +962,94 @@ JOIN ops.import_jobs AS job ON job.job_id = request.job_id
 ORDER BY member.provider_dataset_id, member.sync_scope
 """
 
-_ADVANCE_PRE_START_FAILURE_GENERATION_SQL: Final[str] = _TOUCH_QUEUED_REQUEST_FOR_LOCK_RETRY_SQL
+#: 재발행 가능한 상태 — claim 전(``queued`` + run 없음)이거나 이 run이 claim한 ``running``.
+_RETRYABLE_STATE_PREDICATE: Final[str] = """
+      AND request.generation = CAST(:expected_generation AS bigint)
+      AND job.kind = 'feature_update_request'
+      AND job.cancellation_id IS NULL
+      AND (
+        (job.status = 'queued' AND job.dagster_run_id IS NULL)
+        OR (
+          CAST(:include_running AS boolean)
+          AND job.status = 'running'
+          AND job.dagster_run_id = CAST(:owner_dagster_run_id AS text)
+        )
+      )
+"""
+
+#: 상한 안이면 queued로 되돌리고 generation·재시도 횟수를 +1, 다음 발행 시각을 backoff로 민다.
+_RESCHEDULE_REQUEST_SQL: Final[str] = f"""
+WITH locked AS (
+    SELECT request.request_id, request.job_id
+    FROM ops.feature_update_requests AS request
+    JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+    WHERE request.request_id = CAST(:request_id AS uuid)
+      AND request.retry_count < CAST(:max_retries AS integer)
+{_RETRYABLE_STATE_PREDICATE}
+    FOR UPDATE OF request, job
+),
+updated_job AS (
+    UPDATE ops.import_jobs AS job
+    SET status = 'queued',
+        progress = 0,
+        current_stage = NULL,
+        dagster_run_id = NULL,
+        error_message = NULL,
+        started_at = NULL,
+        heartbeat_at = NULL,
+        finished_at = NULL
+    FROM locked
+    WHERE job.job_id = locked.job_id
+    RETURNING job.*
+),
+request AS (
+    UPDATE ops.feature_update_requests AS mutable_request
+    SET generation = mutable_request.generation + 1,
+        retry_count = mutable_request.retry_count + 1,
+        next_dispatch_at = now() + make_interval(
+            secs => LEAST(
+                CAST(:max_delay_seconds AS double precision),
+                CAST(:base_delay_seconds AS double precision)
+                    * power(2.0, mutable_request.retry_count)
+            ) * (0.5 + random() * 0.5)
+        )
+    FROM updated_job AS job
+    WHERE mutable_request.job_id = job.job_id
+    RETURNING mutable_request.*
+)
+SELECT {_REQUEST_RETURN_COLUMNS}
+FROM request
+JOIN updated_job AS job ON job.job_id = request.job_id
+{_REQUEST_MEMBERSHIP_JOINS}
+ORDER BY member.provider_dataset_id, member.sync_scope
+"""
+
+#: 재발행할 수 없을 때(상한 도달) 같은 두 상태에서 request를 ``failed``로 닫는다.
+_FAIL_REQUEST_AFTER_RETRIES_SQL: Final[str] = f"""
+WITH locked AS (
+    SELECT request.request_id, request.job_id
+    FROM ops.feature_update_requests AS request
+    JOIN ops.import_jobs AS job ON job.job_id = request.job_id
+    WHERE request.request_id = CAST(:request_id AS uuid)
+{_RETRYABLE_STATE_PREDICATE}
+    FOR UPDATE OF request, job
+),
+job AS (
+    UPDATE ops.import_jobs AS mutable_job
+    SET status = 'failed',
+        finished_at = now(),
+        heartbeat_at = now(),
+        error_message = CAST(:error_message AS text)
+    FROM locked
+    WHERE mutable_job.job_id = locked.job_id
+    RETURNING mutable_job.*
+)
+SELECT {_REQUEST_RETURN_COLUMNS}
+FROM ops.feature_update_requests AS request
+JOIN job ON job.job_id = request.job_id
+{_REQUEST_MEMBERSHIP_JOINS}
+ORDER BY member.provider_dataset_id, member.sync_scope
+"""
 
 _LIST_REQUESTS_SQL: Final[str] = f"""
 WITH candidate_request_ids AS (
@@ -1643,26 +1752,80 @@ async def touch_queued_update_request_for_lock_retry(
     return _rows_to_request(rows) if rows else None
 
 
-async def advance_update_request_generation_after_pre_start_failure(
+async def reschedule_update_request_after_failure(
     session: AsyncSession,
     request_id: str,
     *,
     expected_generation: int,
+    owner_dagster_run_id: str,
+    include_running: bool = True,
+    max_retries: int = FEATURE_UPDATE_MAX_RETRIES,
+    base_delay_seconds: float = FEATURE_UPDATE_RETRY_BASE_DELAY_SECONDS,
+    max_delay_seconds: float = FEATURE_UPDATE_RETRY_MAX_DELAY_SECONDS,
 ) -> FeatureUpdateRequest | None:
-    """CAS start 전 실패한 queued generation의 sensor run key를 전진시킨다.
+    """일시 실패한 request를 backoff 뒤에 다시 발행하게 둔다. 할 수 없으면 ``None``.
 
-    ``queued + dagster_run_id IS NULL``인 동일 정수 generation만
-    갱신한다. running owner, 더 최신 generation, cancellation marker, terminal
-    request는 모두 0행 no-op이다.
+    대상은 같은 generation의 claim 전(``queued`` + run 없음, launch 실패) 또는
+    ``owner_dagster_run_id``가
+    claim한 ``running``(일시 DB 오류)이다. generation +1로 새 Dagster run key를 열고, 재시도 횟수를
+    +1, ``next_dispatch_at``을 지수 backoff + jitter만큼 민다 — 그 전에는 큐 sensor가 집지 않는다.
+
+    재시도 횟수가 ``max_retries``에 닿았거나, 상태가 맞지 않거나(취소 marker·terminal·다른 owner·
+    stale generation) 하면 0행 no-op이다. ``include_running=False``면 claim 전 상태만 본다 — run이
+    도중에 죽은 경우(실패 원인을 모른다)는 재발행하지 않고 종결해야 하기 때문이다. 상한 도달은
+    호출자가
+    :func:`fail_update_request_after_retries`로 종결한다.
     """
     if expected_generation <= 0:
         raise ValueError("expected_generation must be positive")
+    if max_retries < 0:
+        raise ValueError("max_retries must be >= 0")
+    if base_delay_seconds < 0 or max_delay_seconds < base_delay_seconds:
+        raise ValueError("retry delays must satisfy 0 <= base <= max")
+    _validate_dagster_owner(owner_dagster_run_id, field_name="owner_dagster_run_id")
     rows = (
         await session.execute(
-            text(_ADVANCE_PRE_START_FAILURE_GENERATION_SQL),
+            text(_RESCHEDULE_REQUEST_SQL),
             {
                 "request_id": request_id,
                 "expected_generation": expected_generation,
+                "owner_dagster_run_id": owner_dagster_run_id,
+                "include_running": include_running,
+                "max_retries": max_retries,
+                "base_delay_seconds": base_delay_seconds,
+                "max_delay_seconds": max_delay_seconds,
+            },
+        )
+    ).all()
+    return _rows_to_request(rows) if rows else None
+
+
+async def fail_update_request_after_retries(
+    session: AsyncSession,
+    request_id: str,
+    *,
+    expected_generation: int,
+    owner_dagster_run_id: str,
+    error_message: str,
+) -> FeatureUpdateRequest | None:
+    """재발행할 수 없는 request를 ``failed``로 닫는다(claim 전 ``queued``도 포함).
+
+    :func:`finish_update_request`는 ``running`` + owner만 닫는다 — launch 실패로 한 번도 claim되지
+    않은 request는 그 CAS에 걸리지 않아 종전에는 영원히 ``queued``로 재발행됐다. 같은 상태 술어
+    (:func:`reschedule_update_request_after_failure`)에서 종결한다.
+    """
+    if expected_generation <= 0:
+        raise ValueError("expected_generation must be positive")
+    _validate_dagster_owner(owner_dagster_run_id, field_name="owner_dagster_run_id")
+    rows = (
+        await session.execute(
+            text(_FAIL_REQUEST_AFTER_RETRIES_SQL),
+            {
+                "request_id": request_id,
+                "expected_generation": expected_generation,
+                "owner_dagster_run_id": owner_dagster_run_id,
+                "include_running": True,
+                "error_message": error_message,
             },
         )
     ).all()

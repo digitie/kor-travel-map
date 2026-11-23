@@ -49,6 +49,7 @@ from .feature_operation_tracking import (
     declared_execution_scopes,
     resolve_run_execution_manifest,
 )
+from .run_failure_detail import run_failure_detail
 from .run_scope import MapRunScopeMismatch, map_runs_filter, require_map_code_location
 
 if TYPE_CHECKING:
@@ -517,7 +518,9 @@ async def _evaluate_status_event(
             async with asyncio.timeout(
                 _STATUS_EVENT_BUDGET_SECONDS + _CLIENT_TIMEOUT_GRACE_SECONDS
             ):
-                outcome = await _apply_run_record(record, client)
+                outcome = await _apply_run_record(
+                    record, client, failure_detail=_status_event_failure_detail(context)
+                )
     except FeatureOperationObservationError as exc:
         context.log.error("provider feature operation panel-only conflict: %s", exc)
         return _EVENT_HANDLED
@@ -543,6 +546,17 @@ async def _evaluate_status_event(
         f"run_id={record.dagster_run.run_id} outcome={outcome}"
     )
     return _EVENT_HANDLED
+
+
+def _status_event_failure_detail(context: RunStatusSensorContext) -> dict[str, str] | None:
+    """FAILURE 상태 이벤트면 그 ``RUN_FAILURE`` 이벤트에서 실패 원인을 꺼낸다.
+
+    추가 storage 읽기가 없다 — 이벤트가 ``first_step_failure_event``를 들고 온다. reconcile·
+    completion 경로(이벤트를 놓쳤을 때)는 원인 없이 종전 모양으로 남긴다.
+    """
+    if context.dagster_run.status != DagsterRunStatus.FAILURE:
+        return None
+    return run_failure_detail(getattr(context, "dagster_event", None)) or None
 
 
 def _utcnow() -> datetime:
@@ -1328,6 +1342,7 @@ async def _apply_run_record(
     *,
     completion: bool = False,
     seen: _RootSeen | None = None,
+    failure_detail: Mapping[str, str] | None = None,
 ) -> str:
     """run record 하나를 DB에 반영하고 outcome을 돌려준다.
 
@@ -1418,6 +1433,7 @@ async def _apply_run_record(
         started_at=started_at,
         finished_at=finished_at,
         seen=seen,
+        failure_detail=failure_detail,
     )
 
 
@@ -1510,6 +1526,7 @@ async def _apply_terminal_record(
     started_at: datetime | None,
     finished_at: datetime,
     seen: _RootSeen,
+    failure_detail: Mapping[str, str] | None = None,
 ) -> str:
     run = record.dagster_run
     ensure_conflict: FeatureOperationInvariantConflict | None = None
@@ -1537,7 +1554,7 @@ async def _apply_terminal_record(
             engine_created_at=created_at,
             engine_started_at=started_at,
             engine_finished_at=finished_at,
-            error=_terminal_error(run),
+            error=_terminal_error(run, failure_detail),
         )
     except FeatureOperationInvariantConflict as exc:
         if ensure_conflict is not None:
@@ -1614,14 +1631,28 @@ def _map_run_count(instance: _DagsterInstance) -> int:
     return int(instance.get_runs_count(filters=map_runs_filter()))
 
 
-def _terminal_error(run: _DagsterRun) -> dict[str, str] | None:
+def _terminal_error(
+    run: _DagsterRun, failure_detail: Mapping[str, str] | None = None
+) -> dict[str, str] | None:
+    """operation root의 ``error_message``(JSON)로 남는 terminal 오류.
+
+    종전에는 ``kind``·``run_id``·``status``뿐이었다(감사 §1.2 — "원인이 Map DB에 남지 않는다").
+    FAILURE 상태 이벤트로 반영할 때는 실패 step·오류 타입·메시지(비밀값 제거)·가장 안쪽 원인·
+    Dagster failure reason을 더한다(:mod:`.run_failure_detail`).
+    """
     if run.status == DagsterRunStatus.SUCCESS:
         return None
-    return {
+    error = {
         "kind": "dagster_run_terminal",
         "run_id": run.run_id,
         "status": run.status.value,
     }
+    if failure_detail and run.status == DagsterRunStatus.FAILURE:
+        for key in ("failure_reason", "failed_step", "error_type", "error", "cause"):
+            value = failure_detail.get(key)
+            if value:
+                error[key] = value
+    return error
 
 
 def _parse_datetime(value: object) -> datetime:
