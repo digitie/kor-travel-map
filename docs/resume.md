@@ -1,3 +1,9 @@
+## 2026-11-23 — 관리자 프런트 ui 0.2.5 채택(입력·선택 focus 덧대기 제거)
+
+- ui 0.2.5·tokens 0.1.6 vendor, guard `ade7b3eb`. 공통 입력·선택 컨트롤이 FS-7.8 단일 outline이 되어 Badge·dry-run
+  체크박스의 중복 덧대기를 지웠다. OpenAPI·마이그레이션 변경 없음.
+- 다음: PinVi 0.2.5 채택과 한 pair 회전으로 배포, 입력·선택 Tab 포커스·체크박스 44px 실화면 확인.
+
 ## 2026-11-23 — 파이프라인 필터 e2e 간헐 실패 근본 수정(배포 대기)
 
 - 화면이 Next의 transition 지연 `searchParams`를 읽어 빠른 필터 입력의 sync scope를 잃었다. `useOwnedSearchParams`로 화면이

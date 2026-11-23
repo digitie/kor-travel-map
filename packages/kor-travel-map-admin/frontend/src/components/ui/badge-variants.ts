@@ -13,9 +13,12 @@ import { cva, type VariantProps } from "class-variance-authority";
  * 전환 속성은 열거한다(`transition-[color,background-color,border-color]`). tailwind v4의
  * `transition-colors`는 `outline-color`를 포함해서 링크 배지(`<a>`)의 포커스 링이 100ms 동안
  * 페이드인 되는데, design.md §Focus는 "링은 전환 대상이 아니라 즉시"로 못박고 있다.
+ *
+ * 포커스 링은 덧대지 않는다 — 공통 0.2.5 Badge recipe가 FS-7.8 단일 outline 2px·offset 2px
+ * (`--kt-focus`)를 직접 낸다(예전 Map 덧대기 `focus-visible:outline-*`는 지웠다).
  */
 export const badgeVariants = cva(
-  "group/badge inline-flex h-6 w-fit shrink-0 items-center justify-center gap-1 rounded-control border border-transparent px-2 text-2xs leading-none font-medium whitespace-nowrap tabular-nums transition-[color,background-color,border-color] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3!",
+  "group/badge inline-flex h-6 w-fit shrink-0 items-center justify-center gap-1 rounded-control border border-transparent px-2 text-2xs leading-none font-medium whitespace-nowrap tabular-nums transition-[color,background-color,border-color] has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 aria-invalid:border-destructive [&>svg]:pointer-events-none [&>svg]:size-3!",
   {
     variants: {
       variant: {

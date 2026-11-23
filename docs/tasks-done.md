@@ -6,6 +6,10 @@
   2026-11-22 02:49Z 조용한 창 probe(warm-up 90, 30회)에서 zoom 7 sido 집계 server p50/p95가 185/642 → 158/191 ms.
   acceptance §T-READ-12, journal 2026-11-23.
 
+## 2026-11-23 — 관리자 프런트 ui 0.2.5 채택
+
+- [x] T-UI-FIELD-FOCUS — **공통 입력·선택 컨트롤 focus(ui 0.2.5)와 Map 중복 덧대기 제거.** 근거는 journal 2026-11-23.
+
 ## 2026-11-21 — 관리자 프런트 ui 0.2.4 채택
 
 - [x] T-UI-TABS-FOCUS — **공통 TabsTrigger focus(ui 0.2.4)와 Map override 제거.** 근거는 journal 2026-11-21.
