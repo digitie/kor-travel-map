@@ -36,7 +36,8 @@ airkorea·datagokr·krairport·krex·opinet·krheritage·mois·vworld는 붙이�
 그래서 속성 하나에만 걸면 그 provider들에서 **한 번도 발화하지 않는다**(종전에는
 가장 좁은 분모인 에어코리아 500/일이 그 예였다 — 2026-10-01 ADR-105로 Map은 에어코리아를
 부르지 않는다, ``docs/etl/upstream-quota.md``). 그 구멍을
-:data:`QUOTA_EXCEPTION_TYPES`가 메운다.
+:data:`QUOTA_EXCEPTION_TYPES`(예외 타입)와 :data:`RESULT_CODE_QUOTA_ATTRIBUTES`(datagokr·
+krheritage·mois의 결과 코드 ``22``, 2026-11-24)가 메운다.
 
 **이 기제가 실재한다는 근거.** Dagster 1.13.18 ``_core/execution/plan/utils.py``의
 ``op_execution_error_boundary``가 그 자리다::
@@ -105,12 +106,14 @@ _HTTP_STATUS_ATTRIBUTES: Final[tuple[str, ...]] = ("status_code", "http_status")
 #:
 #: - ``krheritage.RateLimitError`` — upstream 신호가 아니다. docstring이
 #:   "local rate limiting cannot schedule a request"이고 lib 안에서 raise되는 자리가
-#:   없다. krheritage는 쿼터 소진을 **알려 주지 않는다** — acceptance가 든
-#:   "4 × ~3,950 = 15,800요청"은 이 기제로 닫히지 않는다.
+#:   없다. krheritage의 쿼터 신호는 예외 타입이 아니라 ``ApiErrorResponse.code == "22"``다
+#:   (:data:`RESULT_CODE_QUOTA_ATTRIBUTES`). keyless khs.go.kr 경로(본체 detail)는 그 봉투를
+#:   주지 않으므로 "4 × ~3,950 = 15,800요청"은 여전히 이 기제로 닫히지 않는다.
 #: - ``krairport.KrairportRateLimitError`` — 429와 resultCode를 같은 타입으로 던지며
 #:   **어느 쪽인지 알려 주는 속성이 없다**(``_http.py:208``/``:225``). 가를 수단이
 #:   없어 넣지 않는다.
-#: - ``datagokr`` · ``mois`` · ``krmois`` — 쿼터 전용 예외 자체가 없다.
+#: - ``datagokr`` · ``mois`` · ``krmois`` — 쿼터 전용 예외 자체가 없다(datagokr·mois는 결과
+#:   코드로 잡는다 — :data:`RESULT_CODE_QUOTA_ATTRIBUTES`).
 #:
 #: 2026-10-01 — ``("airkorea", "AirKoreaRateLimitError")``를 뺐다(ADR-105: Map은 에어코리아를
 #: 부르지 않는다). 2026-10-02 — ``("krex", "KrexQuotaExceededError")``·
@@ -118,6 +121,36 @@ _HTTP_STATUS_ATTRIBUTES: Final[tuple[str, ...]] = ("status_code", "http_status")
 #: export에서 받고 상류 쿼터는 transport가 진다). 남은 선언이 없어 집합이 비었다 —
 #: ``failure_kind`` 경로는 그대로 산다. 새 쿼터 예외는 여기 ``(모듈, 클래스)``로 더한다.
 QUOTA_EXCEPTION_TYPES: Final[frozenset[tuple[str, str]]] = frozenset()
+
+#: data.go.kr 공통 오류 코드 중 **일일 한도 초과**
+#: (``LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR``). 같은 코드를 krforest
+#: (``_http.py``의 ``code == "22"``)·kma(``resultCode 22``)가 이미 쿼터로 읽는다.
+DATA_GO_KR_QUOTA_RESULT_CODES: Final[frozenset[str]] = frozenset({"22"})
+
+#: 같은 오류의 메시지 토큰. 게이트웨이가 ``cmmMsgHeader.returnAuthMsg``에 이 문자열을 싣는다.
+_DATA_GO_KR_QUOTA_MESSAGE_TOKEN: Final[str] = "LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS"
+
+#: ``failure_kind``를 붙이지 않는 lib이 결과 코드를 싣는 속성 — ``top-level 모듈 → 속성 이름``.
+#:
+#: 2026-11-24(감사 §1.3 P1) provider 소스로 확인한 사실(핀 SHA 기준):
+#:
+#: - ``datagokr`` — ``ApiErrorResponse.code``. ``services/openapi.py``·``standard.py``의
+#:   ``_raise_for_error``가 header ``resultCode``/``returnReasonCode``를 그대로 싣는다.
+#:   HTTP 오류는 ``TransportError.status_code``(429는 아래에서 따로 거른다).
+#: - ``krheritage`` — ``ApiErrorResponse.code``. ``services/_payload.py``가
+#:   ``cmmMsgHeader.returnReasonCode``(없으면 ``returnAuthMsg``)를 싣는다. 종전 주석의
+#:   "krheritage는 쿼터 소진을 알려 주지 않는다"는 ``RateLimitError``만 본 판단이었다 —
+#:   data.go.kr 게이트웨이 경로(행사 ``by_month``)는 이 봉투로 22를 준다.
+#: - ``mois`` — ``MoisError.result_code``. ``parser.py``의 ``_raise_for_result``가 22를
+#:   ``MoisRequestError``로 던진다(인증 20·21·30~33, 서버 04·99와 구분된다).
+#:
+#: 셋 다 provider를 고치지 않고 판정할 수 있다 — 신호(코드·메시지)는 이미 예외에 있고, 빠져
+#: 있던 것은 Map 쪽 분류였다. 모듈을 한정하는 이유는 ``code``가 흔한 속성 이름이라서다.
+RESULT_CODE_QUOTA_ATTRIBUTES: Final[dict[str, str]] = {
+    "datagokr": "code",
+    "krheritage": "code",
+    "mois": "result_code",
+}
 
 
 def _http_status(exc: BaseException) -> int | None:
@@ -140,6 +173,19 @@ def _declares_quota_identity(exc: BaseException) -> bool:
     return False
 
 
+def _declares_quota_result_code(exc: BaseException) -> bool:
+    """``failure_kind`` 없는 lib(datagokr·krheritage·mois)의 결과 코드가 일일 한도 초과인가."""
+
+    module = type(exc).__module__.split(".", 1)[0]
+    attribute = RESULT_CODE_QUOTA_ATTRIBUTES.get(module)
+    if attribute is None:
+        return False
+    code = getattr(exc, attribute, None)
+    if code is not None and str(code).strip() in DATA_GO_KR_QUOTA_RESULT_CODES:
+        return True
+    return _DATA_GO_KR_QUOTA_MESSAGE_TOKEN in str(exc).upper()
+
+
 def _is_daily_quota_exhaustion(exc: BaseException) -> bool:
     """이 예외가 **다음 창까지 회복되지 않는** 한도 초과인가.
 
@@ -151,7 +197,7 @@ def _is_daily_quota_exhaustion(exc: BaseException) -> bool:
         return False
     if getattr(exc, "failure_kind", None) in NONRETRYABLE_FAILURE_KINDS:
         return True
-    return _declares_quota_identity(exc)
+    return _declares_quota_identity(exc) or _declares_quota_result_code(exc)
 
 
 def quota_exhaustion_cause(exc: BaseException) -> BaseException | None:

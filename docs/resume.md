@@ -1,3 +1,10 @@
+## 2026-11-24 — 다건 호출 provider 호출 단위 재시도·쿼터 결과 코드 분류(감사 §4 #15)
+
+- 국가유산·산림청·TourAPI·서울 책방·표준 공개 파일·concierge·MCST·MOIS LOCALDATA·KHOA가 페이지·달·상세·slug·업종
+  단위로 일시 오류(5xx·timeout·연결)만 한 번 더 부른다(jitter, `Retry-After` 존중, run 예산 공유). datagokr·krheritage·
+  mois의 결과 코드 22를 일일 쿼터로 분류. OpenAPI·migration 없음.
+- 다음: n150 회전(dagster code-server 이미지) 뒤 Dagster 로그의 `upstream retry …` 경고 빈도와 step 재시도 감소 확인.
+
 ## 2026-11-23 — R4 전환 계획 제외 옵션(`--exclude <dataset>:<action>`)
 
 - `mcst-theme-plan`·`mcst-theme-transition`에 반복 `--exclude`. 제외 행은 계획 `excluded_items`에 기록(효과 `keep`),

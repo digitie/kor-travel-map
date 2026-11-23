@@ -59,7 +59,11 @@ from dagster import (
 
 from .file_registry_hooks import record_mois_source_download
 from .maintenance import MAINTENANCE_RETRY_POLICY
-from .provider_fetchers import ProviderCredentialMissing
+from .provider_fetchers import (
+    ProviderCredentialMissing,
+    provider_call_retry_budget,
+    provider_call_with_retry,
+)
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 from .upstream_requests import (
@@ -238,16 +242,22 @@ def sync_mois_source_db(
         async_engine = create_async_engine(
             f"sqlite+aiosqlite:///{db_path}", connect_args={"timeout": 30}
         )
+        # 업종 하나가 재시도 단위다(감사 §4 #15). 42개 업종 중 하나의 5xx·연결 끊김이 op 전체를
+        # 실패시키고 `MAINTENANCE_RETRY_POLICY`가 1번 업종부터 다시 받게 하던 것을, 그 업종만
+        # 다시 받는 것으로 줄인다. provider는 업종마다 배치 upsert 뒤 한 번 commit하므로 실패한
+        # 시도의 미커밋 행은 session close가 버리고, 다시 받은 upsert는 멱등이다.
+        budget = provider_call_retry_budget(settings, expected_calls=len(slugs))
         try:
             for slug in slugs:
-                # slug마다 provider가 LOCALDATA 파일을 적어도 1건 내려받는다.
-                # 그 안에서 몇 건이 더 나가는지는 provider 내부라 보이지 않으므로
-                # 하한으로 1을 센다 - 이름이 `_min`인 이유.
-                note_upstream_request()
-                session = AsyncSession(async_engine)
-                try:
-                    results.append(
-                        await mois.sync_localdata_source_db(
+
+                async def _sync_slug(slug: str = slug) -> Any:
+                    # slug마다 provider가 LOCALDATA 파일을 적어도 1건 내려받는다.
+                    # 그 안에서 몇 건이 더 나가는지는 provider 내부라 보이지 않으므로
+                    # 하한으로 1을 센다 - 이름이 `_min`인 이유. 재시도도 시도마다 센다.
+                    note_upstream_request()
+                    session = AsyncSession(async_engine)
+                    try:
+                        return await mois.sync_localdata_source_db(
                             session,
                             client,
                             service_slugs=(slug,),
@@ -255,10 +265,15 @@ def sync_mois_source_db(
                             batch_size=batch_size,
                             commit=True,
                         )
+                    finally:
+                        await session.close()
+                        _checkpoint_sqlite_wal(engine)
+
+                results.append(
+                    await provider_call_with_retry(
+                        _sync_slug, label=f"mois LOCALDATA {slug}", budget=budget
                     )
-                finally:
-                    await session.close()
-                    _checkpoint_sqlite_wal(engine)
+                )
         finally:
             await client.aclose()
             await async_engine.dispose()

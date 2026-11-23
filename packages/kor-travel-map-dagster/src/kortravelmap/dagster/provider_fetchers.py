@@ -31,7 +31,7 @@ from collections.abc import (
 )
 from datetime import UTC, date, datetime, timedelta, timezone
 from functools import partial
-from typing import TYPE_CHECKING, Any, Final, cast
+from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
 import httpx
 from kortravelmap.providers.kor_travel_transport import (
@@ -82,6 +82,7 @@ from .provider_pagination import (
 )
 from .quota_exhaustion import quota_exhaustion_cause
 from .upstream_requests import note_upstream_request
+from .upstream_transient import is_transient_upstream_failure, upstream_retry_after_seconds
 
 if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
@@ -94,6 +95,8 @@ logger의 WARNING 이상을 Dagster event stream으로 결선한다."""
 __all__ = [
     "ProviderCredentialMissing",
     "SeoulOpenDataError",
+    "provider_call_retry_budget",
+    "provider_call_with_retry",
     "fetch_datagokr_file_data_records",
     "fetch_khoa_beaches",
     "fetch_seoul_open_data_bookstores",
@@ -134,6 +137,58 @@ class ProviderCredentialMissing(RuntimeError):
     """provider live fetch에 필요한 credential이 설정되지 않았을 때."""
 
 
+_T = TypeVar("_T")
+
+
+def provider_call_retry_budget(
+    settings: KorTravelMapSettings,
+    *,
+    expected_calls: int,
+) -> upstream_retry.RetryBudget:
+    """이 fetcher가 쓸 run 재시도 예산.
+
+    run 경계(asset step·큐 run)가 연 공유 예산이 있으면 그것을 호출 수에 맞춰 넓혀 쓴다 —
+    큐 run 하나가 scope 여러 개를 돌 때 예산이 scope 수만큼 곱해지지 않게 하기 위해서다.
+    경계 밖(단독 호출·시험)이면 비례 예산을 새로 만든다.
+    """
+
+    proportional = _provider_retry_budget(settings, expected_calls=expected_calls)
+    shared = upstream_retry.active_run_retry_budget()
+    if shared is None:
+        return proportional
+    return shared.widen_to(proportional.limit)
+
+
+def provider_call_with_retry(
+    call: Callable[[], Awaitable[_T]],
+    *,
+    label: str,
+    budget: upstream_retry.RetryBudget,
+) -> Awaitable[_T]:
+    """provider public client 호출 **하나**를 호출 단위 재시도 경계 안에서 await한다.
+
+    호출 지점 정책이지 adapter가 아니다(ADR-006) — client를 감싸지 않고, 이미 부르던
+    public 메서드 하나를 그대로 넘긴다. 규약은 :mod:`.upstream_retry`(시도 2회·run 예산)와
+    :mod:`.upstream_transient`(5xx·timeout·연결 오류만, 쿼터는 거절, 429는 ``Retry-After``
+    존중)다. backoff는 provider 경계 간격
+    (:data:`~.upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS`)에 jitter를 건다 — lib
+    안의 재시도가 수 초 안에 끝나므로 이 층은 수십 초 뒤의 독립 시행이다.
+
+    ``label``은 로그에 남는다. **인증키를 넣지 마라** — 서울 열린데이터는 키가 URL 경로에 있다.
+    """
+
+    return upstream_retry.retry_upstream_awaitable(
+        call,
+        label=label,
+        is_retryable=is_transient_upstream_failure,
+        base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
+        budget=budget,
+        on_retry=_LOGGER.warning,
+        jitter=True,
+        retry_after=upstream_retry_after_seconds,
+    )
+
+
 async def fetch_kor_travel_concierge_youtube_features(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
@@ -164,6 +219,8 @@ async def fetch_kor_travel_concierge_youtube_features(
     path = f"/api/v1/features/{endpoint}"
     cursor = settings.kor_travel_concierge_feature_cursor
     headers = {"X-API-Key": secret.get_secret_value()}
+    # export 크기를 미리 모른다 — 하한 예산(8)으로 시작한다. 공유 예산이 이미 더 크면 그대로 쓴다.
+    budget = provider_call_retry_budget(settings, expected_calls=0)
     async with httpx.AsyncClient(
         base_url=base_url.rstrip("/"),
         timeout=settings.kor_travel_concierge_timeout_seconds,
@@ -175,10 +232,17 @@ async def fetch_kor_travel_concierge_youtube_features(
             }
             if cursor:
                 params["cursor"] = cursor
-            note_upstream_request()
-            response = await client.get(path, params=params)
-            response.raise_for_status()
-            payload = response.json()
+
+            async def _get_page(params: dict[str, str | int] = params) -> Any:
+                # 페이지 하나 = 같은 cursor로 다시 불러도 같은 응답(cursor는 opaque·불변).
+                note_upstream_request()
+                response = await client.get(path, params=params)
+                response.raise_for_status()
+                return response.json()
+
+            payload = await provider_call_with_retry(
+                _get_page, label="kor-travel-concierge feature export page", budget=budget
+            )
             if not isinstance(payload, dict):
                 raise RuntimeError(
                     "kor-travel-concierge feature export 응답은 JSON object여야 한다."
@@ -777,11 +841,20 @@ async def fetch_krheritage_events(
     krheritage = cast(Any, importlib.import_module("krheritage"))
 
     client = krheritage.HeritageClient(api_key=api_key)
+    months = tuple(_krheritage_event_months(date.today()))
+    budget = provider_call_retry_budget(settings, expected_calls=len(months))
     try:
-        for year, month in _krheritage_event_months(date.today()):
-            # `by_month`는 달마다 정확히 HTTP 1건이다(provider 소스 확인).
-            note_upstream_request()
-            for record in await client.event.by_month(year=year, month=month):
+        for year, month in months:
+
+            async def _by_month(year: int = year, month: int = month) -> Any:
+                # `by_month`는 달마다 정확히 HTTP 1건이다(provider 소스 확인). 재시도도
+                # 요청이므로 시도마다 센다.
+                note_upstream_request()
+                return await client.event.by_month(year=year, month=month)
+
+            for record in await provider_call_with_retry(
+                _by_month, label=f"krheritage event.by_month {year}-{month:02d}", budget=budget
+            ):
                 yield record
     finally:
         await client.aclose()
@@ -815,10 +888,14 @@ async def fetch_krheritage_items(
     ]
     max_items = settings.krheritage_max_items_per_run
     client = krheritage.HeritageClient()
+    # detail이 record당 1건이라 호출 수는 상한(`max_items`)이 지배한다 — 목록 페이지는 그 1%다.
+    budget = provider_call_retry_budget(settings, expected_calls=max_items)
     seen = 0
     try:
         for kind_code in kind_codes:
-            async for record in _iter_krheritage_details(client, kind_code=kind_code):
+            async for record in _iter_krheritage_details(
+                client, kind_code=kind_code, budget=budget
+            ):
                 yield record
                 seen += 1
                 if seen >= max_items:
@@ -830,7 +907,12 @@ async def fetch_krheritage_items(
 _KRHERITAGE_PAGE_SIZE: Final[int] = 100
 
 
-async def _iter_krheritage_details(client: Any, *, kind_code: str) -> AsyncIterator[Any]:
+async def _iter_krheritage_details(
+    client: Any,
+    *,
+    kind_code: str,
+    budget: upstream_retry.RetryBudget | None = None,
+) -> AsyncIterator[Any]:
     """국가유산 종목코드 하나의 상세(detail) record를 전부 yield한다.
 
     provider의 ``search.iter_all_details()``를 쓰지 않는다. 그 안의
@@ -847,11 +929,24 @@ async def _iter_krheritage_details(client: Any, *, kind_code: str) -> AsyncItera
 
     상세 조회 규율은 provider의 것을 그대로 따른다 — 복합키 3요소가 모두 있어야
     ``details()``를 부를 수 있고, 결측 row는 조용히 버리지 않고 경고를 남긴다.
+
+    목록 페이지와 상세 하나하나가 호출 단위 재시도 경계(:func:`provider_call_with_retry`)를 지난다 —
+    상세 4,000건 중 하나의 5xx가 종목 전체를 처음부터 다시 돌게 하지 않는다. ``budget``을
+    주지 않으면(시험) 하한 예산을 쓴다.
     """
 
+    call_budget = budget if budget is not None else upstream_retry.RetryBudget()
+
     async def _page(page_no: int) -> ProviderPage:
-        result = await client.search.list(
-            page_size=_KRHERITAGE_PAGE_SIZE, page=page_no, ccba_kdcd=kind_code
+        result = await provider_call_with_retry(
+            partial(
+                client.search.list,
+                page_size=_KRHERITAGE_PAGE_SIZE,
+                page=page_no,
+                ccba_kdcd=kind_code,
+            ),
+            label=f"krheritage search.list kdcd={kind_code} p{page_no}",
+            budget=call_budget,
         )
         return ProviderPage(items=list(result.items), total_count=result.total)
 
@@ -875,9 +970,18 @@ async def _iter_krheritage_details(client: Any, *, kind_code: str) -> AsyncItera
         # detail은 record당 정확히 1 HTTP다(이 파일 위쪽 docstring과
         # `krheritage_max_items_per_run`이 같은 사실에 기대고 있다). 목록
         # 페이지만 세면 실린 수가 실제의 ~1%가 된다 - run 하나가 목록 ~45건,
-        # detail ~4,000건이다.
-        note_upstream_request()
-        yield await client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
+        # detail ~4,000건이다. 재시도도 요청이므로 시도마다 센다.
+        async def _details(key: Any = key) -> Any:
+            note_upstream_request()
+            return await client.search.details(key.ccba_kdcd, key.ccba_asno, key.ccba_ctcd)
+
+        yield await provider_call_with_retry(
+            _details,
+            label=(
+                f"krheritage search.details {key.ccba_kdcd}/{key.ccba_asno}/{key.ccba_ctcd}"
+            ),
+            budget=call_budget,
+        )
 
 
 
@@ -1066,13 +1170,23 @@ async def _iter_krforest_records(
     *,
     label: str,
     num_of_rows: int = 1000,
+    budget: upstream_retry.RetryBudget | None = None,
 ) -> AsyncIterator[Any]:
-    """krforest 페이지 API를 **상한이 있는** 저장소 공통 규칙으로 순회한다."""
+    """krforest 페이지 API를 **상한이 있는** 저장소 공통 규칙으로 순회한다.
+
+    페이지마다 호출 단위 재시도 경계를 지난다 — ``ForestNoDataError``(``failure_kind="no_data"``)
+    는 일시 오류가 아니므로 재시도 없이 그대로 페이지 끝 판정으로 간다.
+    """
 
     krforest = cast(Any, importlib.import_module("krforest"))
+    call_budget = budget if budget is not None else upstream_retry.RetryBudget()
 
     async def _page(page_no: int) -> ProviderPage:
-        page = await endpoint(page_no=page_no, num_of_rows=num_of_rows)
+        page = await provider_call_with_retry(
+            partial(endpoint, page_no=page_no, num_of_rows=num_of_rows),
+            label=f"{label} p{page_no}",
+            budget=call_budget,
+        )
         return ProviderPage(items=page.items, total_count=page.total_count)
 
     async for record in aiter_paginated_items(
@@ -1119,6 +1233,7 @@ async def fetch_krforest_recreation_forests(
         async for record in _iter_krforest_records(
             client.travel.standard_recreation_forests,
             label="krforest travel.standard_recreation_forests",
+            budget=provider_call_retry_budget(settings, expected_calls=_KRFOREST_MAX_PAGES),
         ):
             yield record
     finally:
@@ -1227,6 +1342,7 @@ async def fetch_krforest_landslide_forecast_issues(
         async for record in _iter_krforest_records(
             client.safety.landslide_forecast_issues,
             label="krforest safety.landslide_forecast_issues",
+            budget=provider_call_retry_budget(settings, expected_calls=_KRFOREST_MAX_PAGES),
         ):
             yield record
     finally:
@@ -1244,16 +1360,13 @@ async def fetch_standard_museums(
     그것을 키로 쓰지 않으므로 자연키는 Open API 때와 같은 ``이름::도로명``이다(2026-11-10 실측
     1,070행, 파일 키 전부가 prod에 있다).
     """
-    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
+    # 키가 필요 없다 — settings는 재시도 예산(비율·하한)에만 쓴다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient()
     try:
-        records = [
-            record
-            async for record in _iter_datagokr_standard_file(
-                client.museum_art, label="datagokr museum_art file"
-            )
-        ]
+        records = await _read_datagokr_standard_file(
+            settings, client.museum_art, label="datagokr museum_art file"
+        )
     finally:
         await client.aclose()
     for record in _in_canonical_order(records):
@@ -1270,16 +1383,13 @@ async def fetch_standard_tourist_attractions(
     자연키는 Open API 때와 같은 ``이름::도로명``이다(실측 897행, 파일 키 전부가 prod에 있다 —
     파일이 싣는 ``INSTT_CODE``는 기관 코드라 키로 쓰지 않는다).
     """
-    del settings
+    # 키가 필요 없다 — settings는 재시도 예산(비율·하한)에만 쓴다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient()
     try:
-        records = [
-            record
-            async for record in _iter_datagokr_standard_file(
-                client.tourist_attraction, label="datagokr tourist_attraction file"
-            )
-        ]
+        records = await _read_datagokr_standard_file(
+            settings, client.tourist_attraction, label="datagokr tourist_attraction file"
+        )
     finally:
         await client.aclose()
     for record in _in_canonical_order(records):
@@ -1318,6 +1428,35 @@ async def _iter_datagokr_standard_file(service: Any, *, label: str) -> AsyncIter
         )
 
 
+#: 표준데이터 공개 파일 하나를 받는 호출 수(헤더 2 + 페이지). 가장 큰 주차장 18,994행이 1,000행
+#: 페이지로 19장이다 — 예산 비례 계산의 근거일 뿐 상한이 아니다(상한은 provider의 5만 건).
+_DATAGOKR_STANDARD_FILE_EXPECTED_CALLS: Final = 21
+
+
+async def _read_datagokr_standard_file(
+    settings: KorTravelMapSettings, service: Any, *, label: str
+) -> list[Any]:
+    """공개 파일 snapshot 하나를 **통째로** 받는다 — 일시 오류면 파일 단위로 다시 받는다.
+
+    provider ``iter_file_pages``는 페이지를 provider 안에서 돌고 앞뒤 메타데이터가 같은지까지
+    본다. 그 순회를 중간부터 이어 받을 수단이 없으므로 재시도 단위는 파일 하나다(수십 호출).
+    한 페이지의 5xx가 asset step 전체를 60초 뒤 처음부터 다시 돌게 하던 것을, 이 파일만 다시
+    받는 것으로 줄인다. 선언 건수 불일치(:class:`StandardFileSnapshotIncomplete`)는 일시 오류가
+    아니므로 재시도하지 않는다.
+    """
+
+    async def _read() -> list[Any]:
+        return [record async for record in _iter_datagokr_standard_file(service, label=label)]
+
+    return await provider_call_with_retry(
+        _read,
+        label=label,
+        budget=provider_call_retry_budget(
+            settings, expected_calls=_DATAGOKR_STANDARD_FILE_EXPECTED_CALLS
+        ),
+    )
+
+
 async def fetch_standard_special_streets(
     settings: KorTravelMapSettings,
 ) -> AsyncIterator[Any]:
@@ -1326,16 +1465,17 @@ async def fetch_standard_special_streets(
     Open API(``tn_pubr_public_area_spcliz_stret_api``)는 운영 키가 활용신청되지 않아 403이었고
     prod 0행이었다. 포털 공개 파일은 키를 받지 않는다(2026-11-09 실측 274행).
     """
-    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
+    # 키가 필요 없다 — settings는 재시도 예산(비율·하한)에만 쓴다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard_file(
-            client.special_street, label="datagokr special_street file"
-        ):
-            yield record
+        records = await _read_datagokr_standard_file(
+            settings, client.special_street, label="datagokr special_street file"
+        )
     finally:
         await client.aclose()
+    for record in records:
+        yield record
 
 
 async def fetch_standard_traditional_markets(
@@ -1346,16 +1486,17 @@ async def fetch_standard_traditional_markets(
     Open API는 운영 키가 활용신청되지 않아 403이다. 포털 공개 파일은 키를 받지 않는다
     (2026-11-09 실측 1,393행).
     """
-    del settings
+    # 키가 필요 없다 — settings는 재시도 예산(비율·하한)에만 쓴다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient()
     try:
-        async for record in _iter_datagokr_standard_file(
-            client.traditional_market, label="datagokr traditional_market file"
-        ):
-            yield record
+        records = await _read_datagokr_standard_file(
+            settings, client.traditional_market, label="datagokr traditional_market file"
+        )
     finally:
         await client.aclose()
+    for record in records:
+        yield record
 
 
 #: 서울 열린데이터광장 OpenAPI base. **https가 없다** — 8088 포트는 TLS를 받지
@@ -1389,7 +1530,13 @@ class SeoulOpenDataError(RuntimeError):
     이 포털은 **오류도 HTTP 200으로 준다.** 게다가 ``json``을 요청해도 인증 실패는
     XML(``<RESULT><CODE>INFO-100</CODE>``)로 온다(2026-09-19 실측). 상태 코드나
     파싱 성공으로 판정하면 조용히 0건이 되므로 본문의 ``RESULT.CODE``를 본다.
+
+    HTTP 오류면 ``status_code``를 싣는다 — 호출 단위 재시도가 5xx만 다시 부르도록.
     """
+
+    def __init__(self, message: str, *, status_code: int | None = None) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _is_transient_upstream_error(exc: BaseException) -> bool:
@@ -1429,6 +1576,7 @@ async def fetch_seoul_open_data_bookstores(
 
     start = 1
     pages = 0
+    budget = provider_call_retry_budget(settings, expected_calls=_SEOUL_OPEN_DATA_MAX_PAGES)
     async with httpx.AsyncClient(
         base_url=_SEOUL_OPEN_DATA_BASE_URL, timeout=60.0
     ) as client:
@@ -1439,11 +1587,19 @@ async def fetch_seoul_open_data_bookstores(
                     f"(수신 {start - 1}건, 선언 {_SEOUL_BOOKSTORE_DECLARED_ROWS})"
                 )
             end = start + _SEOUL_OPEN_DATA_PAGE_SIZE - 1
-            note_upstream_request()
-            response = await client.get(
-                f"/{api_key}/json/{_SEOUL_BOOKSTORE_SERVICE}/{start}/{end}/"
+
+            async def _get_rows(start: int = start, end: int = end) -> httpx.Response:
+                note_upstream_request()
+                response = await client.get(
+                    f"/{api_key}/json/{_SEOUL_BOOKSTORE_SERVICE}/{start}/{end}/"
+                )
+                _raise_seoul_status(response)
+                return response
+
+            # label에 경로를 넣지 않는다 — 인증키가 경로에 있다.
+            response = await provider_call_with_retry(
+                _get_rows, label=f"서울 책방 rows {start}-{end}", budget=budget
             )
-            _raise_seoul_status(response)
             try:
                 payload = response.json()
             except ValueError as exc:
@@ -1510,7 +1666,8 @@ def _raise_seoul_status(response: httpx.Response) -> None:
         return
     raise SeoulOpenDataError(
         f"서울 열린데이터광장이 HTTP {response.status_code}를 줬다 "
-        "(URL은 싣지 않는다 — 인증키가 경로에 있다)."
+        "(URL은 싣지 않는다 — 인증키가 경로에 있다).",
+        status_code=response.status_code,
     )
 
 
@@ -1647,22 +1804,32 @@ async def fetch_mcst_culture_records(
     mcst = cast(Any, importlib.import_module("mcst"))
     client = mcst.FileDataClient()
     max_items = settings.mcst_max_items_per_dataset
+    budget = provider_call_retry_budget(settings, expected_calls=len(selected_slugs))
     try:
         for slug in selected_slugs:
-            # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
-            # 나가는지는 이 층에서 볼 수 없어 **1로 센다** — 하한이다.
             # **시도했다**는 사실을 먼저 알린다 — asset이 이 집합만 적재한다.
             # worker 경로는 slug 하나로 좁혀 부르므로, 이것이 없으면 나머지
             # 12개가 시도한 적도 없이 빈 적재와 sync-success를 받는다.
             yield McstSlugAttempt(slug=slug)
-            note_upstream_request()
-            seen = 0
-            try:
+
+            async def _read_slug(slug: str = slug) -> list[Any]:
+                # slug 하나 = 카탈로그 스크레이핑 + CSV 다운로드. lib 안에서 몇 건이
+                # 나가는지는 이 층에서 볼 수 없어 시도마다 **1로 센다** — 하한이다.
+                # CSV를 다 받은 뒤에 내보낸다 — 중간에 끊긴 다운로드를 다시 받을 때 앞
+                # 행이 두 번 나가지 않게 한다. asset은 어차피 행을 리스트로 모은다
+                # (`_record_list`)라 기억 비용은 같다.
+                note_upstream_request()
+                rows: list[Any] = []
                 async for row in client.iter_csv(slug):
-                    seen += 1
-                    yield (slug, row)
-                    if seen >= max_items:
+                    rows.append(row)
+                    if len(rows) >= max_items:
                         break
+                return rows
+
+            try:
+                rows = await provider_call_with_retry(
+                    _read_slug, label=f"mcst iter_csv {slug}", budget=budget
+                )
             except Exception as exc:  # noqa: BLE001 — 아래에서 다시 가른다
                 # **한 slug의 상류 변화가 13개를 전멸시키지 않게 한다.**
                 # 이 stream을 리스트로 걷는 쪽(`_record_list`)은 예외를 그대로
@@ -1695,6 +1862,9 @@ async def fetch_mcst_culture_records(
                         or isinstance(exc, getattr(mcst, "McstNetworkError", ()))
                     ),
                 )
+                continue
+            for row in rows:
+                yield (slug, row)
     finally:
         await client.aclose()
 
@@ -1749,16 +1919,17 @@ async def fetch_khoa_beaches(
         retries=upstream_retry.PROVIDER_CLIENT_INNER_RETRIES,
     )
     sido_names = tuple(khoa.OCEANS_BEACH_INFO_DEFAULT_SIDO_NAMES)
-    budget = _provider_retry_budget(settings, expected_calls=len(sido_names))
+    budget = provider_call_retry_budget(settings, expected_calls=len(sido_names))
     num_of_rows = 100
     try:
         for sido in sido_names:
 
             def _page(page_no: int, sido: str = sido) -> Awaitable[ProviderPage]:
-                # `retry_upstream_awaitable`이 이 콜러블을 **await**한다. 동기
-                # 판(`retry_upstream_async`)에 넘기면 코루틴 객체가 그대로
+                # `retry_upstream_awaitable`(`provider_call_with_retry`)이 이 콜러블을
+                # **await**한다.
+                # 동기 판(`retry_upstream_async`)에 넘기면 코루틴 객체가 그대로
                 # 반환돼 재시도가 예외를 한 번도 보지 못한다.
-                return upstream_retry.retry_upstream_awaitable(
+                return provider_call_with_retry(
                     partial(
                         _khoa_beach_page,
                         client,
@@ -1767,9 +1938,7 @@ async def fetch_khoa_beaches(
                         num_of_rows=num_of_rows,
                     ),
                     label=f"khoa oceans_beach_info {sido} p{page_no}",
-                    base_delay=upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS,
                     budget=budget,
-                    on_retry=_LOGGER.warning,
                 )
 
             async for record in aiter_paginated_items(
@@ -1842,16 +2011,13 @@ async def fetch_standard_parking_lots(
     모델이고 자연키 ``prkplce_no``도 같은 값이라 feature identity가 바뀌지 않는다(prod
     17,986 entity 중 17,875가 파일에 있다).
     """
-    del settings  # 키가 필요 없다 — 시그니처는 다른 fetcher와 같게 둔다.
+    # 키가 필요 없다 — settings는 재시도 예산(비율·하한)에만 쓴다.
     datagokr = cast(Any, importlib.import_module("datagokr"))
     client = datagokr.DataGoKrClient()
     try:
-        records = [
-            record
-            async for record in _iter_datagokr_standard_file(
-                client.parking, label="datagokr parking file"
-            )
-        ]
+        records = await _read_datagokr_standard_file(
+            settings, client.parking, label="datagokr parking file"
+        )
     finally:
         await client.aclose()
     for record in _one_row_per_parking_number(records):
@@ -1935,13 +2101,19 @@ async def fetch_visitkorea_festivals(
     start = festival_window_start(datetime.now(kst).date())
     declared: list[int] = []
     seen: set[str] = set()
+    budget = provider_call_retry_budget(settings, expected_calls=_VISITKOREA_FESTIVAL_MAX_PAGES)
 
     async def _page(page_no: int) -> ProviderPage:
-        page = await client.search_festival(
-            start,
-            arrange="C",
-            page_no=page_no,
-            num_of_rows=_VISITKOREA_FESTIVAL_PAGE_SIZE,
+        page = await provider_call_with_retry(
+            partial(
+                client.search_festival,
+                start,
+                arrange="C",
+                page_no=page_no,
+                num_of_rows=_VISITKOREA_FESTIVAL_PAGE_SIZE,
+            ),
+            label=f"visitkorea search_festival p{page_no}",
+            budget=budget,
         )
         raw = getattr(page, "raw", None)
         if isinstance(raw, Mapping) and raw.get("totalCount") in (None, ""):
@@ -2035,6 +2207,10 @@ async def fetch_visitkorea_tourist_attractions(
     api_key = _visitkorea_service_key(settings, "tourist attractions")
     visitkorea = cast(Any, importlib.import_module("visitkorea"))
     client = visitkorea.KrTourApiClient(service_key=api_key)
+    budget = provider_call_retry_budget(
+        settings,
+        expected_calls=_VISITKOREA_ATTRACTION_MAX_PAGES * len(TOURAPI_PLACE_CONTENT_TYPE_IDS),
+    )
     try:
         for content_type_id in TOURAPI_PLACE_CONTENT_TYPE_IDS:
             declared: list[int] = []
@@ -2043,11 +2219,16 @@ async def fetch_visitkorea_tourist_attractions(
             async def _page(
                 page_no: int, content_type_id: str = content_type_id, declared: list[int] = declared
             ) -> ProviderPage:
-                page = await client.area_based_list(
-                    content_type_id=content_type_id,
-                    arrange="D",
-                    page_no=page_no,
-                    num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
+                page = await provider_call_with_retry(
+                    partial(
+                        client.area_based_list,
+                        content_type_id=content_type_id,
+                        arrange="D",
+                        page_no=page_no,
+                        num_of_rows=_VISITKOREA_ATTRACTION_PAGE_SIZE,
+                    ),
+                    label=f"visitkorea area_based_list({content_type_id}) p{page_no}",
+                    budget=budget,
                 )
                 raw = getattr(page, "raw", None)
                 if isinstance(raw, Mapping) and raw.get("totalCount") in (None, ""):
