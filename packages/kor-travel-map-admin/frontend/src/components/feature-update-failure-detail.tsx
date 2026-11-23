@@ -39,8 +39,46 @@ function count(value: unknown): number | null {
     : null;
 }
 
-export function isFeatureUpdateFailureEvent(code: string | null | undefined): boolean {
+function isFeatureUpdateFailureEvent(code: string | null | undefined): boolean {
   return typeof code === "string" && CODES.has(code);
+}
+
+type FailureItem = { label: string; value: string; mono?: boolean };
+
+function classItem(value: Record<string, unknown>): FailureItem | null {
+  const failureClass = text(value.failure_class, 40);
+  if (!failureClass) return null;
+  const classLabel = FAILURE_CLASS_LABELS[failureClass] ?? failureClass;
+  const dbFailure = text(value.db_failure, 40);
+  const dbLabel = dbFailure ? (DB_FAILURE_LABELS[dbFailure] ?? dbFailure) : null;
+  return { label: "분류", value: dbLabel ? `${classLabel}(${dbLabel})` : classLabel };
+}
+
+function retryItem(value: Record<string, unknown>): FailureItem | null {
+  const retryCount = count(value.retry_count);
+  const maxRetries = count(value.max_retries);
+  if (retryCount === null || maxRetries === null) return null;
+  return { label: "재발행", value: `${retryCount}/${maxRetries}` };
+}
+
+function monoItem(label: string, raw: string | null): FailureItem | null {
+  return raw ? { label, value: raw, mono: true } : null;
+}
+
+/** 승인된 필드만 순서대로 — 값이 없는 항목은 뺀다. */
+function failureItems(payload: unknown): FailureItem[] {
+  if (!payload || typeof payload !== "object" || Array.isArray(payload)) return [];
+  const value = payload as Record<string, unknown>;
+  const nextDispatchAt = text(value.next_dispatch_at, 60);
+  const items = [
+    classItem(value),
+    monoItem("실패 단계", text(value.stage, 300)),
+    monoItem("실패 step", text(value.failed_step, 300)),
+    retryItem(value),
+    nextDispatchAt ? { label: "다음 발행", value: formatDateTime(nextDispatchAt) } : null,
+    monoItem("Dagster run", text(value.dagster_run_id, 80)),
+  ];
+  return items.filter((item): item is FailureItem => item !== null);
 }
 
 export function FeatureUpdateFailureDetail({
@@ -50,39 +88,7 @@ export function FeatureUpdateFailureDetail({
   code: string | null | undefined;
   payload: unknown;
 }) {
-  if (!isFeatureUpdateFailureEvent(code)) return null;
-  if (!payload || typeof payload !== "object" || Array.isArray(payload)) {
-    return null;
-  }
-  const value = payload as Record<string, unknown>;
-  const failureClass = text(value.failure_class, 40);
-  const dbFailure = text(value.db_failure, 40);
-  const stage = text(value.stage, 300);
-  const failedStep = text(value.failed_step, 300);
-  const runId = text(value.dagster_run_id, 80);
-  const retryCount = count(value.retry_count);
-  const maxRetries = count(value.max_retries);
-  const nextDispatchAt = text(value.next_dispatch_at, 60);
-  const classLabel = failureClass
-    ? (FAILURE_CLASS_LABELS[failureClass] ?? failureClass)
-    : null;
-  const dbLabel = dbFailure ? (DB_FAILURE_LABELS[dbFailure] ?? dbFailure) : null;
-  const items: Array<{ label: string; value: string; mono?: boolean }> = [];
-  if (classLabel) {
-    items.push({
-      label: "분류",
-      value: dbLabel ? `${classLabel}(${dbLabel})` : classLabel,
-    });
-  }
-  if (stage) items.push({ label: "실패 단계", value: stage, mono: true });
-  if (failedStep) items.push({ label: "실패 step", value: failedStep, mono: true });
-  if (retryCount !== null && maxRetries !== null) {
-    items.push({ label: "재발행", value: `${retryCount}/${maxRetries}` });
-  }
-  if (nextDispatchAt) {
-    items.push({ label: "다음 발행", value: formatDateTime(nextDispatchAt) });
-  }
-  if (runId) items.push({ label: "Dagster run", value: runId, mono: true });
+  const items = isFeatureUpdateFailureEvent(code) ? failureItems(payload) : [];
   if (items.length === 0) return null;
   return (
     <dl
