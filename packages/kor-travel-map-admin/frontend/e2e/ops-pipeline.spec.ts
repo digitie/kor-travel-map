@@ -1986,10 +1986,11 @@ test.describe("/ops/pipeline", () => {
   }) => {
     // Next는 same-route `history.replaceState`를 transition으로 `searchParams`에
     // 옮긴다. 아래는 그 transition이 렌더되기 전(같은 task, microtask만 비움)에
-    // provider 입력 → scope 포커스를 끝낸다. 예전에는 provider blur가 draft를 버려
-    // 낡은 URL의 빈 ID가 렌더됐고, scope가 비활성으로 바뀌어 포커스를 잃었다 —
-    // "필터가 executions 쿼리 파라미터로 전달된다"가 간헐적으로 sync_scope 없이
-    // 끝난 원인이다.
+    // provider 입력 → scope 포커스를 끝낸다. 화면이 router의 `searchParams`를 읽던
+    // 때는 provider blur가 draft를 버리자 낡은 URL의 빈 ID가 렌더됐고, scope가
+    // 비활성으로 바뀌어 포커스를 잃었다(main에서 20/20 실패) — "필터가 executions
+    // 쿼리 파라미터로 전달된다"가 간헐적으로 sync_scope 없이 끝난 원인 하나다.
+    // 지금은 `useOwnedSearchParams`가 쓴 query를 같은 렌더에서 들고 있다.
     const counters = await installPipelineMocks(page);
     await page.goto("/ops/pipeline");
     await expect(
