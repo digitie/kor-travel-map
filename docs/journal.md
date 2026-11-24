@@ -1,3 +1,32 @@
+## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영(수집 실패 감사 §4 #10·#11)
+
+- #10: n150 `~/freeze.py`는 산사태 schedule과 update-request 큐 sensor 둘만 멈춰, PG에 쓰는 나머지 Map
+  instigator 약 42개(MOIS·consistency·GC·file scan·feature 적재 schedule)가 운영 창 안에서 그대로 돌았다.
+  `scripts/n150/dagster-freeze.py`(표준 라이브러리, host `python3`)로 저장소 정본을 만들었다. `freeze`는 Map
+  location의 모든 schedule·sensor 상태·코드 기본값·저장 여부(`canReset`)를 스냅샷(절대 경로, 0600, fsync 뒤 rename)한
+  뒤 launcher(schedule·non-run-status sensor)를 멈추고 Map run(repository tag로 좁힘) 0을 기다린다. 그다음
+  run-status sensor마다 run 0 뒤 SKIPPED tick(처리할 사건 없음)을 서로 다른 두 시각에 보는지 보고 run을 다시 센다 —
+  `feature_operation_success_sensor`는 completion job run을 **낸다**(적대 리뷰 H1). 그 뒤 run-status sensor를 멈추고,
+  그 사이 run이 생기면 되살린 채 1로 끝난다. launcher 정지 실패·대기 초과도 run-status sensor를 켜 둔 채 1.
+  기존 스냅샷은 `--resume`(24시간 안)일 때만 이어 쓰고, 스냅샷이 RUNNING으로 적지 않은 것이 지금 RUNNING이거나,
+  새 스냅샷인데 RUNNING launcher가 0이면(이미 얼어 있음 — 다른 경로로 재실행) 거부한다(3, 리뷰 H2). `unfreeze`는
+  스냅샷의 RUNNING만 되살리되(run-status sensor 먼저) 저장 상태가 없던 기본 RUNNING은 `reset`으로(저장된 행이
+  코드 기본값을 덮지 않게, 리뷰 M2), STOPPED(MOIS continuation 등)는 그대로, 스냅샷 없거나 비었거나 count가 다르면
+  거부, `missing`은 `--accept-missing`으로만 마치고, 성공하면 스냅샷을 `.restored-<UTC>`로 옮긴다. 주소·인증은
+  env에서 읽고 출력하지 않는다(잘못된 URL도 원문 없이 2, Basic Auth는 https·loopback에만, redirect 안 따라감).
+  PinVi·concierge location은 읽지도 바꾸지도 않는다. mutation 인자·반환형은 n150 Dagster 1.13.24 introspection으로
+  확인했다(`stopSensor(jobOriginId, jobSelectorId)`). 같은 introspection으로 보면 `writer_drain_service.py`의
+  `stopSensor(id, sensorOriginId, sensorSelectorId)`·`... on SensorState`는 이 버전 스키마와 맞지 않는다(범위 밖, 기록만).
+- #11: 미기동 6개(TourAPI 관광지 daily·표준 지역특화거리·전통시장·국가유산 item·concierge YouTube·transport
+  주유소)는 `DISABLED_FEATURE_LOAD_SCHEDULES`에 넣을 문서화된 보류 사유가 없었다(관광지·시장·특화거리는
+  T-TOURAPI-LOAD·T-MARKET-LOAD의 "켜기"만 남은 상태, 국가유산 item·YouTube는 기록 없음, 주유소 place는 ADR-114의
+  "열린 결정"이지 중지 결정이 아님). 소유자 결정으로 부모가 2026-11-24 prod에서 6개를 켰다. 코드 기본 상태는
+  저장소 관례대로 STOPPED 그대로 두고 `schedules.py` 주석·`test_prod_enabled_schedules_are_built_but_start_stopped`로
+  기록했다. cron은 바꾸지 않았다(prod가 지금 그 값으로 돈다).
+- 시험: `tests/unit/test_n150_dagster_freeze.py` 38건(가짜 webserver에 n150 Map location 실제 구성 61개 + PinVi
+  location, 6개 RUNNING 포함 스냅샷·복원). n150 읽기 전용 `status`·`freeze --dry-run`·스냅샷 없는 `unfreeze` 거부
+  확인(instigator 61·RUNNING 59, 6개 모두 RUNNING, run-status sensor 8개의 tick 조회), 상대 경로 거부. 실제 freeze/unfreeze는
+  돌리지 않았다. 적대 리뷰 2인(상태 기계·운영/보안) 지적을 반영했다.
 ## 2026-11-24 — import job event clock을 slot으로 나눔(감사 §1.2·#1544 남은 구조 문제, alembic 457)
 
 - 근거(n150 Map DB 읽기 전용 조회): 10-22 큐 요청 12건 중 8건이 `LockNotAvailableError` + `INSERT INTO

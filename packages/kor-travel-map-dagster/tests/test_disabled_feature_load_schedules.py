@@ -16,6 +16,8 @@ schedule 자체가 만들어지지 않게 한다 — 켤 대상이 없으면 켤
 
 from __future__ import annotations
 
+from dagster import DefaultScheduleStatus
+
 from kortravelmap.dagster.definitions import defs
 from kortravelmap.dagster.schedules import (
     DISABLED_FEATURE_LOAD_SCHEDULES,
@@ -66,3 +68,30 @@ def test_disabled_providers_keep_their_jobs() -> None:
         + ", ".join(missing)
         + " — 일회성 재적재 수단이 없으면 끈 것을 되돌릴 방법도 없다."
     )
+
+
+#: 2026-11-24 소유자 결정으로 prod에서 켠, 그때까지 한 번도 켜지 않았던 schedule(감사 §4 #11).
+PROD_ENABLED_2026_11_24 = frozenset(
+    {
+        "feature_place_visitkorea_tourist_attractions_daily_schedule",
+        "feature_place_standard_special_streets_monthly_schedule",
+        "feature_place_standard_traditional_markets_monthly_schedule",
+        "feature_place_krheritage_items_monthly_schedule",
+        "feature_place_kor_travel_concierge_youtube_monthly_schedule",
+        "feature_place_transport_fuel_stations_weekly_schedule",
+    }
+)
+
+
+def test_prod_enabled_schedules_are_built_but_start_stopped() -> None:
+    """켠 결정은 instigator 상태에 있고, 코드는 그 schedule을 만들되 기본 STOPPED로 둔다.
+
+    목록에 넣으면 schedule이 사라져 prod의 RUNNING 행이 unloadable instigator로 남고,
+    기본 RUNNING으로 바꾸면 새 환경(격리 live·standalone)에 배포만으로 돈다.
+    """
+    by_name = {schedule.name: schedule for schedule in defs.schedules}
+    assert not (PROD_ENABLED_2026_11_24 & DISABLED_FEATURE_LOAD_SCHEDULES)
+    missing = sorted(PROD_ENABLED_2026_11_24 - set(by_name))
+    assert not missing, "prod에서 켠 schedule이 정의에 없다: " + ", ".join(missing)
+    for name in sorted(PROD_ENABLED_2026_11_24):
+        assert by_name[name].default_status == DefaultScheduleStatus.STOPPED, name

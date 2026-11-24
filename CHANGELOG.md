@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-24 — n150 Dagster 전체 freeze 도구(수집 실패 감사 §4 #10·#11)
+
+- `scripts/n150/dagster-freeze.py status|freeze|unfreeze --snapshot <절대 경로> [--resume] [--dry-run] [--accept-missing]`: Map code location의 RUNNING schedule·sensor 전체를 스냅샷 뒤 멈추고 Map run 0까지 기다린다(run-status sensor는 run이 빠지고 tick이 따라잡은 뒤 마지막에), 스냅샷의 RUNNING만 되돌린다. 옛 `~/freeze.py`(두 instigator만 정지)를 대신한다. R4 runbook 2·9단계가 이것을 쓴다.
+- 미기동 schedule 6개(TourAPI 관광지·표준 지역특화거리·전통시장·국가유산 item·concierge YouTube·transport 주유소)를 prod에서 켰다(소유자 결정). 코드 기본 상태는 STOPPED 그대로다.
 ## 2026-11-24 — import job event clock slot화(alembic 457)
 
 - `ops.import_job_event_clock`(전역 단일 행)을 `ops.import_job_event_clock_slots`로 바꿨다(alembic `457_event_clock_slots`). event를 쓴 긴 적재 transaction이 commit까지 그 행을 쥐어 다른 큐 요청·job의 event 기록이 lock timeout으로 실패하던 문제(10-22 큐 요청 8건)를 없앤다. `/v1/ops/live`의 `event_clock_revision` 값·의미는 같다(slot 합, 옛 값 이관). OpenAPI 변경 없음.
