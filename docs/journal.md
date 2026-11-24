@@ -11,7 +11,13 @@
   않는다(fetcher docstring·ADR-106).
 - ADR-106: 주유소 export stale 24시간 → 27.5시간(8시간 tick 두 번 연속 실패까지 200), Map 경고 임계 18시간과의 관계(export가
   200을 내는 18~27.5시간 구간에도 Map은 원천 나이로 빨간 run). 상태 job 실패 metadata 정본 참조를 `upstream_signal`로 정정.
-- 시험: `test_upstream_signal.py`(inconsistent는 retryable과 상관없이 미준비), API
+- transport 세션이 남긴 항목: 바뀌지 않은 집합 건너뛰기(`skipped=unchanged`)에서 `touch_checked`로 확인 시각을 세대 meta에
+  남긴다(metadata `checked`; 판정 나이는 원천 시각 기준이라 그대로). 모르는 값 규칙 통일 — 원천 응답·서비스 세대에서 읽는
+  값은 key를 언제나 싣고 모르면 `""`·`-1`(`transport_problem_code`·`transport_retry_after_seconds`·
+  `transport_retry_after_cap_seconds` 포함), 재지 않은 계측(`transport_http_*`·`transport_server_*`·`upstream_requests_min`)만
+  key를 뺀다. dagster README에 상태 job metadata 키 표. run tag 두 개(`skipped=unchanged` 포함)는 #1542에 이미 들어갔다.
+- 시험: `test_upstream_signal.py`(inconsistent는 retryable과 상관없이 미준비), `test_transport_state_jobs.py`(unchanged
+  `touch_checked`, 모르는 값 ""·-1), API
   `test_service_transport_router.py`(T4 `EXPORT_QUERY_TIMEOUT`). OpenAPI·migration 없음.
 
 ## 2026-11-24 — 관리자 프런트 ui 0.2.6(VirtualTable 선택 칸 44px) 채택과 dedup 선택 칸 e2e

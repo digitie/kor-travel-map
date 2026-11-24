@@ -154,6 +154,28 @@ transport는 token **그리고 접속 peer 주소**(`SERVICE_EXPORT_ALLOWED_CLIE
 | `transport_export_disabled`·`transport_export_too_large` | 503 `code`가 `EXPORT_DISABLED`(transport 설정으로 꺼짐)·`EXPORT_TOO_LARGE`(export 상한 초과) | **끈다** — 설정·데이터가 바뀌기 전에는 같다 |
 | `transport_source_inconsistent` | 503 `code`가 `EXPORT_SOURCE_INCONSISTENT`(transport 근거끼리 불일치) | HTTP 층에서는 다시 묻지 않는다. Valkey 상태 job은 **다음 tick**(producer 권장 — 나이 기준 혼합), feature 적재는 **재시도 대상**(60·180·420초 — 마지막 시도가 `Retry-After` 300초 뒤라 대개 그 run에서 풀린다. 주·월 job에게 "다음 tick"은 한 주라 의도적으로 다르다) |
 | `transport_request_rejected` | 400·422 — Map 질의(`limit`·`cursor`)를 transport가 거절 | 끈다 |
+
+#### transport 상태 job metadata 키
+
+| key | 뜻 | 모를 때 |
+|-----|----|---------|
+| `upstream_state` | `ok`·`stale`·`not_ready`·`refused` | — |
+| `upstream_reason`·`failure_kind` | 미준비·거부의 분류(`transport_source_not_current`·`upstream_unreachable:ReadTimeout` 등) | `""` |
+| `outcome` | 미준비 세부: `upstream_source_not_current`·`upstream_busy_exhausted`·`upstream_busy_over_cap`·`upstream_not_ready` | — |
+| `skipped` | `upstream_not_ready`·`refused`·`unchanged`·`locked` | key 없음(교체한 run) |
+| `transport_problem_code`·`transport_retry_after_seconds`·`transport_retry_after_cap_seconds` | 503 problem `code`·`Retry-After`(힌트)·HTTP 층 한 번 대기 상한 | `""`·`-1` |
+| `served_generation`·`served_source_collected_at`·`served_age_seconds`·`served_age_basis` | 서비스 세대·원천 수집 시각·판정 나이(초)·나이 기준(`source`·`loaded`) | `""`·`-1` |
+| `stale_alert_after_seconds`·`stale_alert` | 경고 임계(초)·넘었는가(넘으면 run 실패) | — |
+| `checked` | `skipped=unchanged`에서 확인 시각(`checked_at`)을 세대 meta에 적었는가 | — |
+| `transport_http_requests`·`transport_http_ms_total`·`transport_http_ms_max`·`transport_http_first_ms` | 이 run이 transport에 보낸 요청 수·걸린 시간 합·최대·첫 요청(ms) | key 없음 |
+| `transport_http_statuses`·`transport_http_retries`·`transport_http_retry_sleep_seconds` | 상태별 응답 수(`200=3,503=1`)·HTTP 층 재시도 수·대기 합(초) | key 없음 |
+| `transport_server_timed`·`transport_server_app_ms_total`·`transport_server_app_ms_max`·`transport_server_sql_ms_total` | transport `Server-Timing`(app·sql)을 실은 응답 수와 그 합·최대(ms) | key 없음 |
+| `upstream_requests_min` | 요청 수의 하한 | key 없음 |
+
+**모르는 값 규칙**: 원천 응답·서비스 세대에서 읽는 값은 key를 언제나 싣고 모르면 문자열 `""`·수 `-1`이다. 재지 않은
+계측(`transport_http_*`·`transport_server_*`·`upstream_requests_min`)만 key를 싣지 않는다 — "세지 않았다"를 0으로 읽지
+않게(`upstream_requests` 모듈 docstring). run tag `kor_travel_map.upstream_state`·`kor_travel_map.upstream_stale_alert`는
+`skipped=unchanged`를 포함해 상류를 본 모든 run에 쓴다(`locked`만 빼고).
 | `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | 끈다 |
 | `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | 끈다 |
 | `transport_malformed_upstream` | 본문이 JSON이 아니다 | 끈다 |

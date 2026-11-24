@@ -40,7 +40,7 @@
 # 실제 타입으로 검사하므로 문자열 주석이면 정의 시점에 거부한다(maintenance.py와 같다).
 import logging
 from collections.abc import Awaitable, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Protocol
 
@@ -397,7 +397,10 @@ def _hold_metadata(exc: BaseException) -> dict[str, Any]:
     while current is not None and id(current) not in seen:
         seen.add(id(current))
         if isinstance(current, TransportSourceNotCurrent):
-            return {"outcome": "upstream_source_not_current"}
+            return {
+                "outcome": "upstream_source_not_current",
+                "transport_retry_after_cap_seconds": -1.0,
+            }
         if isinstance(current, TransportExportBusy):
             metadata: dict[str, Any] = {
                 "outcome": (
@@ -406,11 +409,12 @@ def _hold_metadata(exc: BaseException) -> dict[str, Any]:
                     else "upstream_busy_exhausted"
                 )
             }
-            if current.retry_after_cap is not None:
-                metadata["transport_retry_after_cap_seconds"] = float(current.retry_after_cap)
+            metadata["transport_retry_after_cap_seconds"] = (
+                float(current.retry_after_cap) if current.retry_after_cap is not None else -1.0
+            )
             return metadata
         current = current.__cause__
-    return {"outcome": "upstream_not_ready"}
+    return {"outcome": "upstream_not_ready", "transport_retry_after_cap_seconds": -1.0}
 
 
 def _iso_or_blank(value: datetime | None) -> str:
@@ -418,7 +422,12 @@ def _iso_or_blank(value: datetime | None) -> str:
 
 
 def _problem_metadata(exc: BaseException) -> dict[str, Any]:
-    """transport 503 problem ``code``·``Retry-After``(있으면). 원인 사슬(``__cause__``)을 따른다."""
+    """transport 503 problem ``code``·``Retry-After``. 원인 사슬(``__cause__``)을 따른다.
+
+    모르는 값 규칙(상태 job metadata 공통, README): 원천 응답에서 읽는 값은 key를 언제나 싣고 모르면
+    문자열 ``""``·수 ``-1``이다(code 없는 503·무응답). 재지 않은 계측(``transport_http_*``·
+    ``upstream_requests_min``)만 key를 싣지 않는다 — "세지 않았다"를 0으로 읽지 않게.
+    """
     seen: set[int] = set()
     current: BaseException | None = exc
     while current is not None and id(current) not in seen:
@@ -433,7 +442,7 @@ def _problem_metadata(exc: BaseException) -> dict[str, Any]:
                 ),
             }
         current = current.__cause__
-    return {}
+    return {"transport_problem_code": "", "transport_retry_after_seconds": -1.0}
 
 
 def _request_metadata() -> dict[str, Any]:
@@ -496,6 +505,12 @@ async def load_transport_state(
                     )
                 except TransportExportUnchanged:
                     assert served is not None  # unchanged_since가 있었다
+                    # 원천이 그대로임을 확인한 시각을 세대 meta에 남긴다(weather 304와 같은
+                    # checked_at). 판정 나이는 원천 수집 시각 기준이라 그대로다 — 기록일 뿐이다.
+                    checked_at = datetime.now(UTC)
+                    checked = await active.touch_checked(
+                        spec.dataset.name, served.generation, checked_at
+                    )
                     return {
                         "dataset": spec.dataset.name,
                         "skipped": "unchanged",
@@ -506,10 +521,11 @@ async def load_transport_state(
                             (datetime.now(UTC) - served.loaded_at).total_seconds()
                         ),
                         "full_walk_interval_seconds": int(FULL_WALK_INTERVAL.total_seconds()),
+                        "checked": checked,
                         **_request_metadata(),
                         **upstream_signal(
                             UPSTREAM_OK,
-                            served=served,
+                            served=replace(served, checked_at=checked_at) if checked else served,
                             alert_after=alert_after,
                             now=datetime.now(UTC),
                             reason="unchanged",
