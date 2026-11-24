@@ -828,8 +828,11 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   종전 :30)·중기 :50(06·07·18·19시, 종전 :40) → 외부 :55(3시간마다, 그대로). current가 도는 :25~:31·:40~:46에는 다른 weather
   상태 job이 발화하지 않는다(`test_weather_schedules_do_not_fire_on_the_same_minutes_as_current`).
 - 503 페이지 재시도는 같은 cursor로 7회·5·10·20·40·60초(±20%, `Retry-After`보다 짧지 않게)·한 순회 대기 합 180초다. 처음부터
-  다시 읽는 step 재시도는 없다. 그리고 다음 페이지가 run 상한 안에 끝날 수 없으면(가장 느린 요청 기준) 스스로 멈추고 그 tick을
-  건너뛴다(`weather_export_too_slow`) — run monitor에 죽어 빨간 run이 되는 대신.
+  다시 읽는 step 재시도는 없다. 그리고 다음 페이지가 run 상한 안에 끝날 수 없으면(가장 느린 요청 기준, 410·순회 도중 422로
+  다시 시작하는 첫 페이지 포함) 스스로 멈추고 그 tick을 건너뛴다(`weather_export_too_slow`) — run monitor에 죽어 빨간 run이 되는
+  대신. 이미 시작한 요청도 run deadline(상한 − 꼬리 60초)에서 끊는다(`asyncio.timeout`). httpx read timeout은 읽기 한 번의
+  간격이라 요청 길이를 묶지 못하고 운영 값(300초, ADR-122)은 current 상한의 절반이다. HTTP 층 재시도(전송 오류·429·5xx,
+  15초 기준)도 대기 뒤 deadline을 넘으면 하지 않는다(PR #1542 리뷰).
 - `weather_state_current` 상한 480 → 600초는 **weather export 수정 전까지의 임시책**이다(수정 뒤 480초로 되돌린다). current에는
   증분이 없다: W2에는 `since`가 없고(W3 예보만, ADR-122), 첫 페이지 ETag(If-None-Match)는 보내지만 304는 3일에 1건이라
   손대지 않았다. page size도 바꾸지 않았다(weather 페이지 상한 상향 뒤 별도). 원천 처리 시간은 weather 쪽에서 고친다 — 그 전까지

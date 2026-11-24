@@ -20,7 +20,8 @@
   (`skipped=unchanged`, 6시간마다 전량). transport 요청 계측 metadata `transport_http_*`·`transport_server_*`. 새 env
   `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_REFERENCE_PAGE_SIZE`(철도역·항구 snapshot, 기본 2000·상한 5000).
 - weather 상태 job 일곱은 원천 읽기를 Valkey 공용 자리 `weather.export_read`로 한 번에 하나만 하고, 발화 시각이 바뀌었다(단기
-  :30→:50, 중기 :40→:50, 하루 요약 :41→:05). 다음 페이지를 run 상한 안에 끝낼 수 없으면 그 tick을 건너뛴다.
+  :30→:50, 중기 :40→:50, 하루 요약 :41→:05). 다음 페이지를 run 상한 안에 끝낼 수 없으면 그 tick을 건너뛰고, 진행 중 요청·HTTP
+  재시도도 run deadline에서 끊는다.
   `weather_state_current` run 상한 480→600초(weather export 수정 전 임시).
 - 상태 op의 Dagster `RetryPolicy` 제거(Valkey 연결 실패만 op가 재시도 요청), tag 없던 Map job 7개에 `dagster/max_runtime`,
   지수 backoff `RetryPolicy`에 jitter. transport #265 반영: 돌발 guard의 "기준 미만이면 0건 허용" 제거, 절대 하한 1건.

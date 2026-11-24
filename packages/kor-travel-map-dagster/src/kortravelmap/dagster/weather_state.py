@@ -358,21 +358,58 @@ def _raise_weather_status(response: httpx.Response, path: str) -> None:
         raise WeatherExportFailure(f"kor-travel-weather {path}가 {status}다.")
 
 
+class _WeatherWalkOutOfTime(WeatherExportNotReady):
+    """남은 run 시간 안에 요청·순회를 끝낼 수 없다 — 상한에 죽기 전에 이번 tick을 건너뛴다."""
+
+    failure_kind = "weather_export_too_slow"
+
+
 async def _weather_request_once(
     client: httpx.AsyncClient,
     path: str,
     params: Mapping[str, Any],
     headers: Mapping[str, str] | None = None,
 ) -> httpx.Response:
-    """HTTP 요청 정확히 1건 — 시도마다 여기서 센다(재시도도 요청이다)."""
-    note_upstream_request()
-    response = await client.get(path, params=dict(params), headers=dict(headers or {}))
+    """HTTP 요청 정확히 1건 — 시도마다 여기서 센다(재시도도 요청이다).
+
+    run deadline(:data:`_WEATHER_DEADLINE`)이 있으면 요청 전체를 그 시각 안으로 묶는다. httpx read
+    timeout은 읽기 한 번의 간격이라 요청 길이를 묶지 못하고, 운영 값(300초)은 current 상한(600초)의
+    절반이다 — deadline 직전에 시작한 요청이 run monitor에 죽지 않게 deadline에서 끊고 이번 tick을
+    건너뛴다(:class:`_WeatherWalkOutOfTime`). deadline이 이미 지났으면 요청을 시작하지 않는다.
+    """
+    deadline = _WEATHER_DEADLINE.get()
+    if deadline is None:
+        note_upstream_request()
+        response = await client.get(path, params=dict(params), headers=dict(headers or {}))
+    else:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise _WeatherWalkOutOfTime(f"{path}: run deadline이 지나 요청을 시작하지 않는다.")
+        note_upstream_request()
+        bound = asyncio.timeout(remaining)
+        try:
+            async with bound:
+                response = await client.get(
+                    path, params=dict(params), headers=dict(headers or {})
+                )
+        except TimeoutError as exc:
+            if not bound.expired():
+                raise
+            raise _WeatherWalkOutOfTime(
+                f"{path}: 요청이 run deadline까지 끝나지 않아 끊었다({remaining:.0f}초)."
+            ) from exc
     _raise_weather_status(response, path)
     return response
 
 
 def _weather_retryable(exc: BaseException) -> bool:
     return isinstance(exc, httpx.TransportError | _WeatherTransientStatus)
+
+
+def _fits_before_deadline(delay: float) -> bool:
+    """``delay``초 기다린 뒤에도 run deadline 전에 요청을 시작할 수 있는가(deadline이 없으면 참)."""
+    deadline = _WEATHER_DEADLINE.get()
+    return deadline is None or time.monotonic() + delay < deadline
 
 
 async def _weather_get(
@@ -383,13 +420,17 @@ async def _weather_get(
     budget: upstream_retry.RetryBudget,
     headers: Mapping[str, str] | None = None,
 ) -> httpx.Response:
-    """요청 1건(전송 오류·429·5xx는 유한 재시도, 503 제외). 규약은 transport fetcher와 같다."""
+    """요청 1건(전송 오류·429·5xx는 유한 재시도, 503 제외). 규약은 transport fetcher와 같다.
+
+    재시도는 대기 뒤에도 run deadline 전일 때만 한다 — 그 요청도 deadline에서 끊긴다
+    (:func:`_weather_request_once`).
+    """
     attempts = upstream_retry.DEFAULT_UPSTREAM_ATTEMPTS
     for attempt in range(1, attempts + 1):
         try:
             return await _weather_request_once(client, path, params, headers)
         except Exception as exc:
-            if attempt >= attempts or not _weather_retryable(exc) or not budget.try_consume():
+            if attempt >= attempts or not _weather_retryable(exc):
                 raise
             delay = _jitter(
                 min(
@@ -397,6 +438,8 @@ async def _weather_get(
                     upstream_retry.DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
                 )
             )
+            if not _fits_before_deadline(delay) or not budget.try_consume():
+                raise
             _LOGGER.warning(
                 "kor-travel-weather %s 재시도 %d/%d (%s)", path, attempt, attempts,
                 type(exc).__name__,
@@ -410,8 +453,8 @@ class _PageClock:
     """한 순회의 503 페이지 재시도 시계.
 
     ``slowest``는 이 순회에서 가장 오래 걸린 요청이다. 재시도는 대기 + 그만큼의 요청이
-    ``deadline``(run 상한 - 꼬리) 안에 들어갈 때만 시작한다 — 시작한 요청의 길이는 이미
-    ``kor_travel_weather_timeout_seconds``가 묶는다.
+    ``deadline``(run 상한 - 꼬리) 안에 들어갈 때만 시작한다. 시작한 요청은 길어져도 deadline에서
+    끊긴다(:func:`_weather_request_once`) — read timeout은 요청 길이를 묶지 못한다.
     """
 
     deadline: float | None
@@ -547,12 +590,6 @@ async def _read_all_pages(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
-class _WeatherWalkOutOfTime(WeatherExportNotReady):
-    """남은 run 시간 안에 다음 페이지를 끝낼 수 없다 — 상한에 죽기 전에 이번 tick을 건너뛴다."""
-
-    failure_kind = "weather_export_too_slow"
-
-
 class _MidWalkCursorRejected(WeatherExportFailure):
     """둘째 페이지 이후의 422 — :func:`_read_all_pages`가 한 번 재시작한다."""
 
@@ -586,11 +623,9 @@ async def _walk_pages(
         if cursor is not None:
             query["cursor"] = cursor
         first = page_number == 1
-        if (
-            clock.deadline is not None
-            and not first
-            and time.monotonic() + clock.slowest > clock.deadline
-        ):
+        # 첫 페이지도 본다 — 410·순회 도중 422로 다시 시작할 때는 앞 순회가 잰 가장 느린
+        # 요청이 있다.
+        if clock.deadline is not None and time.monotonic() + clock.slowest > clock.deadline:
             # run monitor가 죽이면 실패(빨강)로 남고 받은 페이지도 버려진다 — 그 전에 스스로 멈춘다.
             raise _WeatherWalkOutOfTime(
                 f"{path}: 페이지 {page_number - 1}까지 받았으나 남은 run 시간 안에 다음 페이지"

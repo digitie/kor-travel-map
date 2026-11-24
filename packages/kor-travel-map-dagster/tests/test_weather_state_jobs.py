@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -577,7 +578,7 @@ async def test_load_hands_its_run_deadline_to_page_retries(
         run_id=None,
         allow_shrink=False,
         store=cast(ValkeyStateStore, _FakeStore()),
-        deadline=time.monotonic(),
+        deadline=time.monotonic() + 3.0,  # Retry-After 5초를 기다릴 시간이 없다
     )
     assert len(seen) == 1
     assert page_sleeps == []
@@ -585,6 +586,64 @@ async def test_load_hands_its_run_deadline_to_page_retries(
     assert metadata["skipped"] == "upstream_not_ready"
     assert metadata["failure_kind"] == "weather_not_ready"
     assert metadata["upstream_requests_min"] == 1
+
+
+async def test_a_request_past_the_run_deadline_is_not_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _install(monkeypatch, lambda _request: httpx.Response(200))
+    metadata = await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id=None,
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, _FakeStore()),
+        deadline=time.monotonic() - 1.0,
+    )
+    assert seen == []
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["failure_kind"] == "weather_export_too_slow"
+
+
+async def test_a_request_still_running_at_the_run_deadline_is_cut(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # httpx read timeout은 읽기 한 번의 간격이라 요청 길이를 묶지 못한다(운영 300초 — current 상한
+    # 600초의 절반). deadline 직전에 시작한 요청이 run monitor에 죽기(FAILURE) 전에 끊고 건너뛴다.
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(30)
+        return httpx.Response(200)
+
+    seen = _install(monkeypatch, hang)
+    started = time.monotonic()
+    metadata = await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id=None,
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, _FakeStore()),
+        deadline=time.monotonic() + 0.3,
+    )
+    assert time.monotonic() - started < 5
+    assert len(seen) == 1
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["failure_kind"] == "weather_export_too_slow"
+
+
+async def test_a_transport_retry_is_not_started_past_the_run_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # HTTP 층 재시도(전송 오류·5xx)도 대기 뒤 deadline을 넘으면 하지 않는다 — 종전에는 예산 횟수만
+    # 보고 15초 뒤 한 번 더 물어 꼬리 60초를 넘길 수 있었다.
+    monkeypatch.setattr(weather_state, "_WEATHER_RETRY_BASE_DELAY_SECONDS", 15.0)
+
+    def timeout(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("느림", request=request)
+
+    seen = _install(monkeypatch, timeout)
+    with weather_state._paging_deadline(time.monotonic() + 5.0), pytest.raises(httpx.ReadTimeout):
+        await fetch_weather_current(_settings())
+    assert len(seen) == 1
 
 
 def test_run_deadline_counts_from_the_run_start_and_keeps_a_tail() -> None:
@@ -990,6 +1049,34 @@ async def test_a_walk_that_cannot_finish_before_the_ceiling_stops_itself(
         await fetch_weather_locations(_settings())
     assert excinfo.value.failure_kind == "weather_export_too_slow"
     assert len(seen) == 3  # 30·60·90초 — 넷째(120초)는 deadline 100초를 넘는다
+
+
+async def test_a_restart_after_410_checks_its_first_page_against_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 410으로 처음부터 다시 받을 때 첫 페이지도 앞 순회가 잰 가장 느린 요청으로 deadline을 본다.
+    now = [0.0]
+    monkeypatch.setattr(
+        weather_state, "time", SimpleNamespace(monotonic=lambda: now[0], time=time.time)
+    )
+    calls: list[str | None] = []
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        now[0] += 40.0
+        cursor = request.url.params.get("cursor")
+        calls.append(cursor)
+        if cursor == "c2":
+            return httpx.Response(410, json={})
+        return httpx.Response(
+            200,
+            json={"items": [_location("a")], "meta": _meta(1, has_more=True, next_cursor="c2")},
+        )
+
+    _install(monkeypatch, slow)
+    with weather_state._paging_deadline(100.0), pytest.raises(WeatherExportNotReady) as excinfo:
+        await fetch_weather_locations(_settings())
+    assert excinfo.value.failure_kind == "weather_export_too_slow"
+    assert calls == [None, "c2"]  # 80초 + 가장 느린 40초 > 100초 — 다시 시작하지 않는다
 
 
 def _ok_spec(source_status: str = "ok", index: int = 0) -> WeatherStateJobSpec:
