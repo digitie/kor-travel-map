@@ -314,6 +314,18 @@ async def test_krex_empty_response_does_not_replace_active_incidents(
     assert all(first.encode() in k or b":current" in k or b"recent" in k for k in keys)
 
 
+async def test_an_empty_incident_set_is_refused_even_below_the_baseline(
+    store: ValkeyStateStore,
+) -> None:
+    # transport #265부터 0건 활성 집합은 503이다 — 그래도 200 + 0건이 오면 기준(20건) 미만이어도
+    # 거부한다.
+    guard = DATASET_HIGHWAY_INCIDENTS.guard
+    first = await _swap(store, "t.small", _items(5), guard=guard)
+    with pytest.raises(StateSwapRefused):
+        await _swap(store, "t.small", [], guard=guard)
+    assert (await store.current_meta("t.small")).generation == first
+
+
 async def test_gradual_decline_is_refused_against_the_recent_maximum(
     store: ValkeyStateStore,
 ) -> None:
@@ -335,8 +347,8 @@ async def test_operator_override_publishes_an_empty_generation(store: ValkeyStat
     # 0건 세대: meta만 있고 읽기는 빈 결과다.
     assert await store.page_ids("t.override", generation, after=None, limit=5) == ([], False)
     # 한 번의 override로 충분하다 — 다음 정상 교체가 옛 최대(40)에 다시 막히지 않는다.
-    await _swap(store, "t.override", [], guard=guard)
-    assert await store.recent_counts("t.override") == [0, 0]
+    await _swap(store, "t.override", _items(3), guard=guard)
+    assert await store.recent_counts("t.override") == [3, 0]
     assert await store.nearby(
         "t.override", generation, lon=127.0, lat=37.5, radius_m=1000, count=5
     ) == []

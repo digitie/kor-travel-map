@@ -762,7 +762,9 @@ async def fetch_transport_highway_incidents(
     transport는 수집이 실패했거나 30분 넘게 성공하지 못했으면 503을 낸다. 그때 이 fetcher가
     실패해야 notice reconcile이 오래된 집합으로 사건을 닫지 않는다 — 503을 빈 집합으로
     바꾸면 활성 사건 전체가 해소로 오판된다. Map도 ``collection`` 플래그와 ``collected_at``
-    나이(30분)를 다시 잰다(:func:`require_fresh_incident_set`). 빈 목록은 그 검사를 통과한
+    나이(30분)를 다시 잰다(:func:`require_fresh_incident_set`). transport #265(ADR-013
+    2026-11-24 개정)부터 0건 활성 집합도 503이다 — 그래도 200 + 빈 목록이 오면 Valkey 상태
+    적재는 거부(절대 하한 1건)로 막는다. 빈 목록은 그 검사를 통과한
     뒤에만 "지금 돌발 없음"이라는 사실이다.
     """
     base_url, headers = _transport_connection(settings)

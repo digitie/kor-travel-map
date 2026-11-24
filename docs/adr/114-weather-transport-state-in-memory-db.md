@@ -132,7 +132,7 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 | `transport.fuel_stations` | fuel-stations | 주유소 1곳 + 유종별 최신가 | 좌표 있는 것 | 10,000곳 · 90% · 100곳 |
 | `transport.rest_areas` | rest-areas | 휴게소 1곳 | 좌표 있는 것 | 100곳 · 90% · 20곳 |
 | `transport.rest_area_fuel_prices` | rest-area-fuel-prices | 휴게소 주유소 1곳의 최신가 | 없음(휴게소에 붙여 읽는다) | 80곳 · 80% · 20곳 |
-| `transport.highway_incidents` | highway-incidents/active | 활성 돌발 1건 | 좌표 있는 것 | 없음 · 25% · 20건(기준 미만이면 0건 허용) |
+| `transport.highway_incidents` | highway-incidents/active | 활성 돌발 1건 | 좌표 있는 것 | 1건 · 25% · 20건(2026-11-24 — 종전 "기준 미만이면 0건 허용"; transport #265부터 0건은 503) |
 | `transport.airports` | airports | 공항 1곳 | 좌표 있는 것 | 10곳 · 80% · 5곳 |
 
 - `feature_id`는 PG 변환과 **같은 입력**으로 `make_feature_id`를 부르되 `bjd_code=None`(`f_global_…`)으로 고정한다.
@@ -204,7 +204,9 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 - 기준 = `recent_counts`(최근 교체 6번) 중 **최대값**. 기준이 비율 적용 기준 이상이고 새 집합이
   `ceil(기준 × 비율)` 미만이거나 0건이면 거부한다. 직전 하나와만 비교하면 106 → 27 → 7 → 0처럼 여러 번에
   나눠 줄어드는 것을 막지 못한다.
-- 돌발만 0건이 정상일 수 있다: 기준이 20건 미만이면 0건도 받는다.
+- 돌발만 0건이 정상일 수 있다: 기준이 20건 미만이면 0건도 받는다. **(2026-11-24 폐지 — transport #265·ADR-013 개정으로 전국
+  활성 돌발 0건은 상류 이상이고 export는 503을 낸다. Map은 503을 상류 미준비로 건너뛰고, 그래도 오는 200 + 0건은 절대 하한
+  1건으로 거부한다.)**
 - 거부는 run 실패(`failure_kind=state_swap_refused`, step 재시도 없음)다. 다음 schedule tick이 다시 본다. 거부가
   이어지면 옛 세대가 남고 나이가 늘어 읽기 응답의 `stale`이 드러낸다(D5) — Dagster run 실패가 경보 자리다.
   **(2026-11-24 개정이 대체: 거부는 세대를 지키고 건너뛰며, 서비스 세대가 stale 기준(`max_age`)을 넘었을 때만 run 실패 — 아래 "2026-11-24 개정" 절.)**

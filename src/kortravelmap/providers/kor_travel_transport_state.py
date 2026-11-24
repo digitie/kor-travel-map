@@ -143,7 +143,10 @@ DATASET_REST_AREA_FUEL_PRICES: Final[TransportStateDataset] = TransportStateData
 )
 DATASET_HIGHWAY_INCIDENTS: Final[TransportStateDataset] = TransportStateDataset(
     name="transport.highway_incidents",
-    guard=ShrinkGuard(min_ratio=0.25, baseline_min=20, allow_empty_below_baseline=True),
+    # transport #265(ADR-013 2026-11-24 개정): 전국 활성 돌발 0건은 상류 이상이라 transport가
+    # 성공으로 게시하지 않고 export가 503을 낸다 — Map에서는 상류 미준비로 건너뛴다. 그래도 200 +
+    # 0건이 오면(옛 transport·계약 위반) 기준과 상관없이 거부하는 방어선으로 절대 하한 1건을 둔다.
+    guard=ShrinkGuard(min_ratio=0.25, baseline_min=20, min_count=1),
     max_age=INCIDENT_SET_MAX_AGE,
 )
 DATASET_AIRPORTS: Final[TransportStateDataset] = TransportStateDataset(

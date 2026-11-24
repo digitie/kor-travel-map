@@ -23,6 +23,9 @@
 - 적대 리뷰 2인(Dagster 의미·운영 안전) 반영: 미준비도 나이 기준으로 빨갛게(설정 오류가 영영 초록이 되지 않게), httpx 분류 축소
   (scheme 없는 주소는 실패), 계약 위반이 재시도 가능한 원인보다 우선, tag 항상 기록, 기준 = 읽기 `max_age`, 고정 간격 단발 재시도엔
   jitter 제외, GC 상한 3600.
+- transport #265(`30aed17`, ADR-013 2026-11-24 개정) 반영: 전국 활성 돌발 0건은 transport가 성공으로 게시하지 않고 export가
+  503 — Map은 상류 미준비로 건너뛴다. `transport.highway_incidents` guard의 "기준 미만이면 0건 허용"을 없애고 절대 하한 1건을
+  방어선으로 남겼다(옛 transport·계약 위반의 200 + 0건은 거부 → 나이 규칙).
 - 시험: `test_upstream_signal.py`(새), `test_transport_state_jobs.py`·`test_weather_state_jobs.py`·`test_weather_forecast_delta_jobs.py`·
   `test_definitions.py`(모든 job run 상한, 비-feature schedule 다음 tick 전 회수), integration `test_valkey_{transport,weather}_state.py`
   (거부·나이, 공용 자리 동시성·갱신·대기). OpenAPI·migration 없음. 관리자 화면 변화 없음(e2e 대상 아님).
