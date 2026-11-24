@@ -22,6 +22,8 @@ UNMAPPED_APP_TABLES = frozenset(
         ("ops", "application_schema_operation_receipts"),
         ("ops", "ops_live_ticket_claims"),
         ("ops", "ops_live_topic_revisions"),
+        # 458: topic 증가 표식. commit 직전 trigger만 읽고 지운다 — ORM entity가 아니다.
+        ("ops", "ops_live_topic_pending"),
         # 0103이 legacy whole-row freeze replay의 fail-closed preflight 결과를
         # 남기는 감사 전용 표다 — 애플리케이션 코드가 읽지 않으므로 ORM에
         # 매핑하지 않는다. 구조 계약은 0103 통합 테스트가 가진다.
