@@ -7,6 +7,7 @@ from kortravelmap.infra.batch_dag import BatchDagRunResult
 from kortravelmap.infra.consistency import DEDUP_PENDING_WARN_THRESHOLD
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     Array,
     Bool,
     Failure,
@@ -133,7 +134,9 @@ async def run_full_load_batch_consistency_gate_op(
 
 @job(
     name="full_load_batch_consistency_gate",
-    tags=FULL_LOAD_BATCH_CONSISTENCY_GATE_JOB_TAGS,
+    # 운영자 수동 실행(14일 실행 0). consistency 검사 + MV 갱신이라 consistency_dedup_refresh와
+    # 같은 3시간.
+    tags={**FULL_LOAD_BATCH_CONSISTENCY_GATE_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "10800"},
     description=(
         "기존 source load import job들을 batch root 아래 묶고 consistency gate와 "
         "mv_refresh 단계를 실행한다."

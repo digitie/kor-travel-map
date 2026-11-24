@@ -760,3 +760,87 @@ def test_an_unrecoverable_transport_error_seen_only_as_context_does_not_stop_ret
 
     with pytest.raises(RuntimeError, match="정리 중"):
         asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_keeps_retries_for_a_short_busy_503(tracked: bool) -> None:
+    """HTTP 층 재시도를 다 쓴 경합 503(``Retry-After`` 상한 안)은 종전 503처럼 step 재시도다."""
+    from kortravelmap.providers.kor_travel_transport import TransportExportBusy
+
+    cause = TransportExportBusy("503", code="EXPORT_BUSY", retry_after=10.0, retry_after_cap=60.0)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(TransportExportBusy) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value is cause
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize("code", ["EXPORT_DISABLED", "EXPORT_TOO_LARGE"])
+def test_the_asset_boundary_stops_retries_for_a_disabled_or_too_large_export(
+    tracked: bool, code: str
+) -> None:
+    from kortravelmap.providers.kor_travel_transport import (
+        TransportExportDisabled,
+        TransportExportTooLarge,
+    )
+
+    cls = TransportExportDisabled if code == "EXPORT_DISABLED" else TransportExportTooLarge
+    cause = cls("503", code=code, retry_after=3600.0)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(Failure) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value.allow_retries is False
+    metadata = {key: value.value for key, value in caught.value.metadata.items()}
+    assert metadata["transport_problem_code"] == code
+    assert metadata["failure_kind"] == cause.failure_kind
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_keeps_retries_for_an_inconsistent_source(tracked: bool) -> None:
+    from kortravelmap.providers.kor_travel_transport import TransportSourceInconsistent
+
+    cause = TransportSourceInconsistent(
+        "503", code="EXPORT_SOURCE_INCONSISTENT", retry_after=300.0
+    )
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(TransportSourceInconsistent) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value is cause
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize(
+    "code",
+    [
+        "EXPORT_SOURCE_NOT_CURRENT",
+        "EXPORT_NO_HISTORY",
+        "EXPORT_INCIDENTS_NOT_CURRENT",
+        "EXPORT_EMPTY_SET",
+    ],
+)
+def test_the_asset_boundary_keeps_step_retries_for_a_coded_not_current_503(
+    tracked: bool, code: str
+) -> None:
+    """주·월 1회 feature 적재는 운 나쁜 tick 하나로 한 주를 잃지 않는다.
+
+    step 재시도(60·180·420초)를
+    쓴다(적대 리뷰 2026-11-24). 상태 job의 나이 기준 혼합과 다르다."""
+    from kortravelmap.providers.kor_travel_transport import TransportSourceNotCurrent
+
+    cause = TransportSourceNotCurrent("503", code=code, retry_after=1800.0)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(TransportSourceNotCurrent) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value is cause

@@ -356,16 +356,16 @@ async def test_load_then_nearest_bundle_joins_every_dataset(
 async def test_shrunken_location_roster_is_not_swapped(
     store: ValkeyStateStore, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    from dagster import Failure
-
     full = [_location(f"l{i}", 127.0 + i * 0.01, 37.5) for i in range(6)]
     _serve(monkeypatch, {"/v1/service/exports/locations": _pages(full)})
     first = await _load(store, DATASET_LOCATIONS)
     assert first["count"] == 6
     _serve(monkeypatch, {"/v1/service/exports/locations": _pages(full[:2])})
-    with pytest.raises(Failure) as excinfo:
-        await _load(store, DATASET_LOCATIONS)
-    assert str(excinfo.value.metadata["failure_kind"].value) == "state_swap_refused"
+    # 서비스 세대가 경고 나이 안이면 거부는 건너뜀 + 경고다(2026-11-24 개정, upstream_signal).
+    refused = await _load(store, DATASET_LOCATIONS)
+    assert refused["skipped"] == "refused"
+    assert refused["failure_kind"] == "state_swap_refused"
+    assert refused["new_count"] == 2
     assert (await store.current_meta(DATASET_LOCATIONS.name)).count == 6
     # 운영자 override 한 번이면 받아들이고 기록한다.
     shrunk = await _load(store, DATASET_LOCATIONS, allow_shrink=True)
@@ -795,3 +795,39 @@ async def test_generation_members_round_trip_and_retire_with_their_generation(
     assert 0 < int(await store.client.ttl(old_members)) <= 60
     after = await store.current_meta("t.members")
     assert (after.member_count, after.membership_verified) == (0, None)
+
+async def test_weather_export_lease_admits_one_reader_renews_and_queues(
+    store: ValkeyStateStore,
+) -> None:
+    """weather 상태 job들의 export 읽기 자리(동시성 1, 2026-11-24 — 읽기 경합 503 제거)."""
+    import asyncio
+
+    from kortravelmap.dagster.weather_state import WEATHER_EXPORT_LEASE
+
+    async with store.shared_lease(WEATHER_EXPORT_LEASE, ttl_seconds=1.5, wait_seconds=0) as first:
+        assert first
+        async with store.shared_lease(
+            WEATHER_EXPORT_LEASE, ttl_seconds=1.5, wait_seconds=0
+        ) as second:
+            assert not second  # 다른 적재가 읽는 중
+        await asyncio.sleep(2.5)  # TTL보다 오래 쥐어도 갱신이 자리를 지킨다
+        async with store.shared_lease(
+            WEATHER_EXPORT_LEASE, ttl_seconds=1.5, wait_seconds=0
+        ) as third:
+            assert not third
+
+    released = asyncio.Event()
+
+    async def _holder() -> None:
+        async with store.shared_lease(WEATHER_EXPORT_LEASE, ttl_seconds=5, wait_seconds=0) as held:
+            assert held
+            released.set()
+            await asyncio.sleep(0.5)
+
+    task = asyncio.create_task(_holder())
+    await released.wait()
+    async with store.shared_lease(
+        WEATHER_EXPORT_LEASE, ttl_seconds=5, wait_seconds=5, poll_seconds=0.1
+    ) as queued:
+        assert queued  # 앞 적재가 끝나면 줄 선 적재가 잡는다
+    await task

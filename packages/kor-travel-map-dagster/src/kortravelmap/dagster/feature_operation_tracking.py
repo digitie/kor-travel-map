@@ -43,6 +43,7 @@ from .quota_exhaustion import (
     raise_terminal_if_transport_unrecoverable,
 )
 from .stall_watchdog import stall_watchdog
+from .transport_http_metrics import observing_transport_http, transport_http_metadata
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     counting_upstream_requests,
@@ -566,18 +567,27 @@ def _log_spend_on_failure(context: Any) -> None:
 
     한 번도 세지 않았으면 아무것도 남기지 않는다. "세지 않았다"를 "0번 썼다"로
     보이게 하는 것이 이 저장소가 이미 한 번 낸 사고다.
+
+    transport export를 불렀으면 요청 계측(``transport_http_*``·``transport_server_*``)도 한 줄로
+    남긴다 — 503 code·timeout으로 끝난 run에서 "어디서 느렸나"를 답할 자리가 이것뿐이다.
     """
 
-    observed = observed_upstream_requests()
-    if observed is None:
-        return
     log = getattr(context, "log", None)
     warning = getattr(log, "warning", None)
-    if callable(warning):
+    if not callable(warning):
+        return
+    observed = observed_upstream_requests()
+    if observed is not None:
         warning(
             "실패로 끝났지만 upstream 요청은 나갔다 (%s=%d)",
             UPSTREAM_REQUESTS_METADATA_KEY,
             observed,
+        )
+    transport = transport_http_metadata()
+    if transport:
+        warning(
+            "실패로 끝난 run의 transport 요청 계측: %s",
+            " ".join(f"{key}={value}" for key, value in transport.items()),
         )
 
 
@@ -607,7 +617,7 @@ async def run_tracked_feature_asset(
     # I/O 없이 멈춘 step은 task 스택을 남긴다(2026-10-23 MCST 3.5시간 무이벤트,
     # :mod:`~.stall_watchdog`).
     async with stall_watchdog(getattr(context, "log", None)):
-        with counting_upstream_requests(), sharing_run_retry_budget():
+        with counting_upstream_requests(), sharing_run_retry_budget(), observing_transport_http():
             guard = await ensure_authoritative_feature_operation_guard(
                 context,
                 boundary="public_wrapper",

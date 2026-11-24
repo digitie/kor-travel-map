@@ -49,8 +49,12 @@ def test_ratio_boundary_is_the_ceiling() -> None:
 
 def test_small_baseline_skips_the_ratio_and_allows_empty_only_when_declared() -> None:
     assert evaluate_shrink_guard([19], 1, INCIDENTS) is None
-    assert evaluate_shrink_guard([19], 0, INCIDENTS) is None
+    # transport #265(ADR-013 2026-11-24 개정)부터 돌발 0건은 503이다 — 200 + 0건은 기준과 상관없이
+    # 거부한다(절대 하한 1건).
+    assert evaluate_shrink_guard([19], 0, INCIDENTS) is not None
     assert evaluate_shrink_guard([20], 0, INCIDENTS) is not None
+    declared = ShrinkGuard(min_ratio=0.5, baseline_min=20, allow_empty_below_baseline=True)
+    assert evaluate_shrink_guard([19], 0, declared) is None
     no_empty = ShrinkGuard(min_ratio=0.5, baseline_min=20)
     assert evaluate_shrink_guard([3], 0, no_empty) is not None
 
@@ -58,7 +62,8 @@ def test_small_baseline_skips_the_ratio_and_allows_empty_only_when_declared() ->
 def test_first_load_obeys_the_absolute_floor() -> None:
     assert evaluate_shrink_guard([], 9_999, FUEL) is not None
     assert evaluate_shrink_guard([], 10_000, FUEL) is None
-    assert evaluate_shrink_guard([], 0, INCIDENTS) is None
+    assert evaluate_shrink_guard([], 0, INCIDENTS) is not None
+    assert evaluate_shrink_guard([], 1, INCIDENTS) is None
 
 
 def test_absolute_floor_applies_even_when_ratio_would_pass() -> None:

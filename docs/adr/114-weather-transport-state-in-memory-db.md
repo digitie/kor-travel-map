@@ -2,7 +2,7 @@
 
 - 상태: proposed (소유자 결정 2026-10-23 — 방향 확정. 2026-10-23 1단계(transport) 구현 PR — 아래 "구현 설계 —
   1단계". 2026-10-24 2단계(weather) 구현 PR — 아래 "구현 설계 — 2단계". 2026-10-24 결정 7 퇴역 1단계(PG 유가·돌발) PR —
-  아래 "결정 7 이행 — PG transport 퇴역". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
+  아래 "결정 7 이행 — PG transport 퇴역". 2026-11-24 상류 미준비·stale·거부 run 결과 통일 — 아래 "2026-11-24 개정". 이행 단계마다 이 문서를 갱신하고 마지막 단계가 배포되면 accepted로 올린다)
 - 날짜: 2026-10-23
 - 결정자: 소유자(방향), Claude(문서)
 - 관계: **ADR-105를 부분 대체**(weather가 Map에 다시 들어온다 — 단 DB 스키마가 아니라 메모리 DB로), ADR-110(odroid
@@ -132,7 +132,7 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 | `transport.fuel_stations` | fuel-stations | 주유소 1곳 + 유종별 최신가 | 좌표 있는 것 | 10,000곳 · 90% · 100곳 |
 | `transport.rest_areas` | rest-areas | 휴게소 1곳 | 좌표 있는 것 | 100곳 · 90% · 20곳 |
 | `transport.rest_area_fuel_prices` | rest-area-fuel-prices | 휴게소 주유소 1곳의 최신가 | 없음(휴게소에 붙여 읽는다) | 80곳 · 80% · 20곳 |
-| `transport.highway_incidents` | highway-incidents/active | 활성 돌발 1건 | 좌표 있는 것 | 없음 · 25% · 20건(기준 미만이면 0건 허용) |
+| `transport.highway_incidents` | highway-incidents/active | 활성 돌발 1건 | 좌표 있는 것 | 1건 · 25% · 20건(2026-11-24 — 종전 "기준 미만이면 0건 허용"; transport #265부터 0건은 503) |
 | `transport.airports` | airports | 공항 1곳 | 좌표 있는 것 | 10곳 · 80% · 5곳 |
 
 - `feature_id`는 PG 변환과 **같은 입력**으로 `make_feature_id`를 부르되 `bjd_code=None`(`f_global_…`)으로 고정한다.
@@ -184,7 +184,10 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 1. `lock`을 `SET NX EX`(그 job의 run 상한 + 취소 유예 600초 + 60초)로 잡는다. 이미 있으면 다른 적재가 도는 것이라 이번 run은 받지 않고 끝낸다(실패
    아님). 끝나면 자기 토큰일 때만 지운다.
 2. 원천을 끝까지 받는다(기존 fetcher 그대로 — 수집 이력 없음·실패·stale·계약 위반·0건 페이지 export는 여기서
-   실패하고 Valkey에는 아무것도 쓰지 않는다).
+   멈추고 Valkey에는 아무것도 쓰지 않는다. run 결과는 "2026-11-24 개정" 절의 나이 기준 혼합 — transport 503 `code`
+   포함, ADR-106 개정 절). 주유소·휴게소 유가는 첫 페이지의 `collection.last_success_at`이 `current` 세대의
+   `source_collected_at`과 같고 그 세대 적재가 6시간 안이면 나머지 페이지와 3~5를 건너뛴다(`skipped=unchanged`,
+   6시간마다 전량).
 3. `current`와 그 세대 `meta`, `recent_counts`를 읽는다. `current`가 있는데 `meta`가 없으면 저장소가 깨진 것이라
    실패한다(첫 적재로 취급하지 않는다). 교체 거부 검사(D4). 거부면 쓰지 않고 실패한다.
 4. 새 세대 키를 pipeline으로 나눠 쓴다. **쓰는 동안 새 키마다 build TTL(기본 2시간)을 건다** — 적재가 도중에
@@ -204,9 +207,12 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 - 기준 = `recent_counts`(최근 교체 6번) 중 **최대값**. 기준이 비율 적용 기준 이상이고 새 집합이
   `ceil(기준 × 비율)` 미만이거나 0건이면 거부한다. 직전 하나와만 비교하면 106 → 27 → 7 → 0처럼 여러 번에
   나눠 줄어드는 것을 막지 못한다.
-- 돌발만 0건이 정상일 수 있다: 기준이 20건 미만이면 0건도 받는다.
+- 돌발만 0건이 정상일 수 있다: 기준이 20건 미만이면 0건도 받는다. **(2026-11-24 폐지 — transport #265·ADR-013 개정으로 전국
+  활성 돌발 0건은 상류 이상이고 export는 503을 낸다. Map은 503을 상류 미준비로 건너뛰고, 그래도 오는 200 + 0건은 절대 하한
+  1건으로 거부한다.)**
 - 거부는 run 실패(`failure_kind=state_swap_refused`, step 재시도 없음)다. 다음 schedule tick이 다시 본다. 거부가
   이어지면 옛 세대가 남고 나이가 늘어 읽기 응답의 `stale`이 드러낸다(D5) — Dagster run 실패가 경보 자리다.
+  **(2026-11-24 개정이 대체: 거부는 세대를 지키고 건너뛰며, 서비스 세대가 경고 임계(`max_age`보다 낮다)를 넘었을 때만 run 실패 — 아래 "2026-11-24 개정" 절.)**
 - 진짜로 줄었으면 운영자가 run config `allow_shrink: true`로 한 번 통과시킨다(`meta.guard_override=1`로 남는다).
 
 ### D5. 신선도
@@ -386,10 +392,10 @@ OpenAPI·weather 저장소의 실제 HTTP 예시(`docs/examples/map-service/`)�
 | `weather.locations` | W1 | 위치 + 주소(시도·시군구·법정동) | 좌표 있는 것 | 1,000곳 · 90% · 100 | 8일(`loaded_at` 기준) | 매일 04:37 |
 | `weather.current` | W2 | 그 위치의 최신 관측 값 목록 | 없음 | 500곳 · 80% · 50 | 3시간 | 매시 :25·:40 |
 | `weather.forecast_ultra_short` | W3 `ultra_short` | 그 위치의 provider별 예보 묶음 | 없음 | 500곳 · 80% · 50 | 3시간 | 매시 :48 |
-| `weather.forecast_short` | W3 `short` | 〃 | 없음 | 250곳 · 65% · 100(2026-11-02 실측으로 1,000곳·90%에서 내림) | 12시간 | 하루 8회 02·05·…·23시 :30 |
-| `weather.forecast_mid` | W3 `mid` | 〃 | 없음 | 14곳 · 80% · 10(2026-11-02 실측 중기 target 21곳으로 300곳에서 내림) | 36시간 | 06·07·18·19시 :40 |
+| `weather.forecast_short` | W3 `short` | 〃 | 없음 | 250곳 · 65% · 100(2026-11-02 실측으로 1,000곳·90%에서 내림) | 12시간 | 하루 8회 02·05·…·23시 :50(2026-11-24 :30에서) |
+| `weather.forecast_mid` | W3 `mid` | 〃 | 없음 | 14곳 · 80% · 10(2026-11-02 실측 중기 target 21곳으로 300곳에서 내림) | 36시간 | 06·07·18·19시 :50(2026-11-24 :40에서) |
 | `weather.forecast_external` | W3 `external` | 〃 | 없음 | 없음 · 80% · 50(기준 미만이면 0곳 허용) | 12시간 | 3시간마다 :55 |
-| `weather.daily_summaries` | W5 `days=N` | 그 위치의 (날짜, 구간) 요약 목록 | 없음 | 1,000곳 · 90% · 100 | 6시간 | 매시 :41 |
+| `weather.daily_summaries` | W5 `days=N` | 그 위치의 (날짜, 구간) 요약 목록 | 없음 | 1,000곳 · 90% · 100 | 6시간 | 매시 :05(2026-11-24 :41에서) |
 
 - **항목 단위는 위치**다(D2 "묶음 단위"). 한 위치의 관측·예보·요약은 각 데이터셋에서 필드 하나(`HGET` 하나)다. provider가
   여럿이면 값 안에 묶음 배열로 든다(외부 예보). 그래서 데이터셋 일곱 개가 **같은 `feature_id`**를 키로 쓴다.
@@ -744,6 +750,96 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
    저장소)은 무관하다. 갱신 정책은 ③에서 dataset과 함께 정리한다.
 8. API 표면 변화 없음(OpenAPI 재생성 없음, PinVi 재vendor 불필요). PinVi 일반 지도에서 transport 유가·돌발 중복 마커가 사라진다
    (교통 레이어는 그대로).
+
+## 2026-11-24 개정 — 상류 미준비·stale·거부의 run 결과를 하나로, weather export 읽기는 한 번에 하나 (수집 실패 감사 §4 #9)
+
+근거: `docs/reports/2026-11-23-collection-failure-audit.md` §1.3·§3과 n150 Dagster 재측정(2026-11-23~24, 읽기 전용).
+
+- 같은 "상류가 오래됐다"가 weather는 초록(200 + `source_status=stale`이면 교체·SUCCESS), transport는 빨강(503·`collection`
+  stale이면 step을 30·60초 뒤 두 번 더 돌린 뒤 FAILURE)이었다. Map 실패의 57%(216건)가 이 상류 신호였고, 재시도가 붙은 run
+  344건 중 성공은 54건(16%)이었다.
+- 상태 op의 `RetryPolicy` 때문에 run 상한으로 취소된 step에도 Dagster가 재시도를 요청했다(14일 100회, 전부 weather 상태
+  job — Dagster는 retry policy가 있으면 interrupt도 재시도로 넘긴다).
+- `weather_state_current` 상한 초과 97건 중 79건이 W5(`daily_summaries`, 매시 :41, p50 418초·p95 1,176초)와 겹친 :40
+  회차였다(:25 단독 216 run 실패 13·p95 359초, :40 334 run 실패 86·p95 447초). 11-23 21:40에는 current·mid·W5가 함께 돌다 셋
+  다 읽기 경합 503(`EXPORT_TEMPORARILY_UNAVAILABLE`)으로 끝났다. Map 동시 읽기가 없을 때도 current 전량 한 번이 23페이지(페이지
+  p50 20.5초, 합 460초)에 경합 503 재시도 7회로 706초였고 Map 처리(grouping)는 0.4초였다. weather 쪽 조사: 서버가 cursor
+  페이지마다 전체 2,925 scope 상태·namespace·roster·승인 선택을 다시 검증하고(페이지당 SQL 82문장), 페이지 수는 weather 상수
+  `MAX_PAGE_SCOPES=128`이 정한다(늘 23페이지). "읽기 경합" 503의 실체는 statement_timeout(5초) 초과였다(limiter 대기 0.013초).
+  :41 W5가 함께 읽으면 current 페이지 간격이 p50 3~6초에서 9~11초로 늘었다(weather 로그).
+
+### 규칙(정본 코드 `packages/kor-travel-map-dagster/src/kortravelmap/dagster/upstream_signal.py`)
+
+| 상류 상태 | 판정 | Valkey 세대 |
+|---|---|---|
+| 미준비 — 503(transport problem `code` `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET`, 경합 `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`(HTTP 층 대기 뒤·대기 상한 초과 포함), `EXPORT_SOURCE_INCONSISTENT`, code 없음 — ADR-106 개정 절), `collection` stale·실패·이력 없음, 돌발 집합 30분 초과, 410 반복, HTTP 층 재시도를 다 쓴 5xx·429, 무응답(timeout·연결·DNS), weather export 읽기 자리를 못 잡음, run 상한 안에 순회를 끝낼 수 없음 | `skipped=upstream_not_ready`, step 재시도 없음 | 그대로 |
+| 바뀌지 않음 — 주유소·휴게소 유가 첫 페이지 `last_success_at`이 서비스 세대와 같다(6시간마다 전량) | `skipped=unchanged` | 그대로 |
+| 값은 왔으나 stale — weather 200 + `source_status=stale` | 교체 | 새 세대 |
+| 비정상 집합 — 교체 거부(D4), transport 0건 export | `skipped=refused` | 그대로 |
+| Map 쪽 Valkey 연결 실패 | op가 `RetryRequested`로 30·60초(±20%) 뒤 두 번(대기가 run 상한 −60초 안일 때만) | 그대로 |
+| 401·404·계약 위반·JSON 아님·OOM·미설정·scheme 없는 주소·transport `EXPORT_DISABLED`·`EXPORT_TOO_LARGE` | 실패, 재시도 없음(종전과 같다) | 그대로 |
+
+- **run 결과는 서비스 세대의 나이가 정한다.** 어느 결과든 op metadata에 `upstream_state`(`ok`·`stale`·`not_ready`·
+  `refused`)·`upstream_reason`·서비스 세대(`served_generation`·`served_source_collected_at`)·**원천 나이**
+  `served_age_seconds`(`source_collected_at`, 없으면 적재·304 재확인 시각, 세대가 없으면 −1)·기준
+  `stale_alert_after_seconds`·`stale_alert`를 싣고, run tag `kor_travel_map.upstream_state`·
+  `kor_travel_map.upstream_stale_alert`(true/false)를 **언제나** 쓴다. **소유자 결정(2026-11-24 "나이 기준 혼합")**: 기준은
+  경고 임계(transport는 settings `transport_state_<데이터셋>_alert_after_seconds` — env로 조정, `max_age − 1초`로 묶는다;
+  weather는 job spec `stale_alert_after`)이고 읽기 쪽 계약 `max_age`(D5·W4 — REST `freshness.stale`, 그대로 둔다)보다 낮다 —
+  소비자가 `stale`을 받기 전에 운영자가 빨간 run을 먼저 본다(transport). weather는 빨강을 Map 적재 기준으로 재므로 읽기
+  쪽 `stale`(원천 시각 기준)과 순서가 같지 않다 — 아래 "나이의 기준". 임계 안이면 run은 성공(초록, 건너뜀·세대 유지·신호 tag)이고,
+  넘으면(세대가 아예 없으면 포함) **재시도 없는 실패**다(`raise_if_stale`). Map에는 상류 장애 경보가 따로 없으므로 빨간 run이
+  유일한 신호다. 한두 tick의 상류 이상(14일 transport 503 80건·거부 64건은 대부분 다음 tick에 풀렸다)은 초록으로 남고,
+  몇 시간짜리 장애·설정 오류(주소·DNS)·거부가 이어진 상태는 빨갛게 된다. 거부가 이어지면 원천이 정말 줄었는지 사람이 판단해
+  `allow_shrink`를 준다(D4 대체).
+- 상태 op에는 `RetryPolicy`가 없다 — run 상한으로 죽은 step에 재시도를 요청하는 경로가 없어진다.
+
+| 데이터셋 | 원천 주기 | 경고 임계(기본) | 읽기 `max_age` |
+|---|---|---|---|
+| `transport.fuel_stations` | OpiNet 수집 8시간(소요 1~2시간) | 18시간(두 주기 + 소요) | 48시간 |
+| `transport.rest_area_fuel_prices` | 4시간 | 9시간(두 주기 + 소요) | 48시간 |
+| `transport.highway_incidents` | 5분(transport는 30분이면 503) | 20분 | 30분 |
+| `transport.rest_areas`·`transport.airports` | 매일 | 2일 | 8일 |
+| `weather.locations` | 매일 | 2일(Map 적재 기준) | 8일 |
+| `weather.current` | weather 공개 :20·:35, Map 매시 2회 | 2시간(Map 적재 기준) | 3시간 |
+| `weather.forecast_ultra_short` | 매시 | 2시간(Map 적재 기준) | 3시간 |
+| `weather.forecast_short` | 3시간 발표 | 8시간(Map 적재 기준) | 12시간 |
+| `weather.forecast_mid` | 06·18시 발표(Map 06·07·18·19시 :50) | 20시간(Map 적재 기준 — 두 회차를 놓치면 다음 06:50에) | 36시간 |
+| `weather.forecast_external` | 3시간 | 8시간(Map 적재 기준) | 12시간 |
+| `weather.daily_summaries` | 매시 | 4시간(Map 적재 기준) | 6시간 |
+
+- **나이의 기준**: transport는 원천 수집 시각(`source_collected_at` = transport `last_success_at`, 공항은 적재 시각).
+  weather는 **Map 적재·304 재확인 시각**(`served_age_basis=loaded`)이다 — weather `source_collected_at`은 그 데이터셋이
+  아니라 함께 묶인 모든 원천 head 중 가장 늦은 것(하루 두 번 도는 지역 관측망·3시간 외부 provider 포함)이라 늘 몇 시간
+  묵어 있다. 그것으로 판정하면 current·W5가 매 tick 빨강이 된다(적대 리뷰 2026-11-24). 그래서 weather 빨강은 "Map이
+  이 데이터셋을 기준 시간 동안 새로 받지 못했다"이고, 원천 자체가 오래됨은 `upstream_state=stale` tag·WARNING과
+  `served_source_collected_at`으로 본다. weather가 데이터셋별 원천 나이를 내면 그 값으로 바꾼다.
+- weather 읽기 자리를 잡은 뒤에도 `read_budget_seconds`(current 420초·W5 1,200초 등)까지만 읽는다 — 느린 날 긴 순회가
+  자리를 run 상한까지 쥐어 current를 굶기지 않게. 넘으면 그 tick을 건너뛴다.
+- 경고 임계의 정본: transport는 settings `transport_state_<데이터셋>_alert_after_seconds`(env로 조정, `max_age − 1초`로
+  묶는다), weather는 job spec `stale_alert_after`.
+
+### weather export 읽기 — 줄 세우기와 발화 시각
+
+- 일곱 weather 상태 job은 원천을 읽는 동안 Valkey 공용 자리 `weather.export_read`(동시성 1, TTL 120초·40초마다 갱신)를 쥔다.
+  자리는 run 상한 − 60초 − 데이터셋 읽기 예산(`read_budget_seconds`: current 300초, W5 1,400초, …)까지 기다리고, 못 잡으면
+  `weather_export_busy`로 그 tick을 건너뛴다. 읽기는 멱등이라 자리를 잃어도(갱신 실패) 데이터는 틀어지지 않는다.
+- 발화 시각을 벌렸다: W5 :05(종전 :41) → current :25·:40(weather 공개 :20·:35 뒤, 그대로) → 초단기 :48 → 단기 :50(02·05…23시,
+  종전 :30)·중기 :50(06·07·18·19시, 종전 :40) → 외부 :55(3시간마다, 그대로). current가 도는 :25~:31·:40~:46에는 다른 weather
+  상태 job이 발화하지 않는다(`test_weather_schedules_do_not_fire_on_the_same_minutes_as_current`).
+- 503 페이지 재시도는 같은 cursor로 7회·5·10·20·40·60초(±20%, `Retry-After`보다 짧지 않게)·한 순회 대기 합 180초다. 처음부터
+  다시 읽는 step 재시도는 없다. 그리고 다음 페이지가 run 상한 안에 끝날 수 없으면(가장 느린 요청 기준, 410·순회 도중 422로
+  다시 시작하는 첫 페이지 포함) 스스로 멈추고 그 tick을 건너뛴다(`weather_export_too_slow`) — run monitor에 죽어 빨간 run이 되는
+  대신. 이미 시작한 요청도 run deadline(상한 − 꼬리 60초)에서 끊는다(`asyncio.timeout`). httpx read timeout은 읽기 한 번의
+  간격이라 요청 길이를 묶지 못하고 운영 값(300초, ADR-122)은 current 상한의 절반이다. HTTP 층 재시도(전송 오류·429·5xx,
+  15초 기준)도 대기 뒤 deadline을 넘으면 하지 않는다(PR #1542 리뷰).
+- `weather_state_current` 상한 480 → 600초는 **weather export 수정 전까지의 임시책**이다(수정 뒤 480초로 되돌린다). current에는
+  증분이 없다: W2에는 `since`가 없고(W3 예보만, ADR-122), 첫 페이지 ETag(If-None-Match)는 보내지만 304는 3일에 1건이라
+  손대지 않았다. page size도 바꾸지 않았다(weather 페이지 상한 상향 뒤 별도). 원천 처리 시간은 weather 쪽에서 고친다 — 그 전까지
+  느린 tick은 건너뛰고 나이가 3시간을 넘으면 빨갛게 드러난다.
+- feature 적재 asset(PG)의 transport 503 분류(`TransportExportNotCurrent` `retryable=True` → `FEATURE_LOAD_RETRY_POLICY`)는
+  바꾸지 않았다 — 주·월 주기라 다음 tick이 멀고 실패가 보이는 편이 낫다. 그 policy에는 jitter(Dagster `PLUS_MINUS` = ±delay)만
+  더했다.
 
 ## 열린 결정
 

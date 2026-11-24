@@ -693,3 +693,43 @@ def test_cache_target_snapshot_gc_hourly_schedule_registered() -> None:
     assert schedule.job_name == "cache_target_snapshot_gc"
     assert schedule.tags["kor_travel_map.job_scope"] == "maintenance"
     assert schedule.tags["kor_travel_map.job_kind"] == "cache_target_snapshot_gc"
+
+
+def test_every_map_job_has_its_own_run_ceiling() -> None:
+    """모든 Map job은 자기 run 상한(``dagster/max_runtime``)을 갖는다.
+
+    2026-11-23 수집 실패 감사(P2): Map job 다섯(+수동 둘)이 tag 없이 전역 상한(6시간)에 기댔다 —
+    매시 도는 GC가 멈춰도 6시간 동안 회수되지 않는다. 상한은 실측 분포와 발화 주기에 맞춰 각자
+    정하고, 전역 상한보다 길 수 없다.
+    """
+    global_timeout = _global_run_timeout_seconds()
+    missing: list[str] = []
+    for job in defs.get_repository_def().get_all_jobs():
+        if job.name.startswith("__ASSET_JOB"):
+            continue  # Dagster가 만드는 암묵 asset job — 실행 경로가 아니다
+        value = job.tags.get(MAX_RUNTIME_SECONDS_TAG)
+        if value is None:
+            missing.append(job.name)
+            continue
+        assert 0 < int(value) <= global_timeout, job.name
+    assert not missing, "run 상한 tag가 없는 Map job: " + ", ".join(sorted(missing))
+
+
+def test_non_feature_schedules_are_reclaimed_before_their_next_tick() -> None:
+    """feature 적재가 아닌 schedule은 다음 발화 전에 run 상한이 회수한다(주기 비례 상한).
+
+    feature 적재 schedule은 합치기(coalesce)·자체 상한 규칙이 따로 있다(위 검사).
+    """
+    feature_jobs = {spec.job_name for spec in FEATURE_LOAD_SCHEDULE_SPECS}
+    repo = defs.get_repository_def()
+    late: list[str] = []
+    for schedule in repo.schedule_defs:
+        if schedule.job_name in feature_jobs:
+            continue
+        cron = schedule.cron_schedule
+        assert isinstance(cron, str), schedule.name
+        cap = int(repo.get_job(schedule.job_name).tags[MAX_RUNTIME_SECONDS_TAG])
+        interval = _minimum_firing_interval_seconds(cron)
+        if cap > interval:
+            late.append(f"{schedule.name}(상한 {cap}s > 간격 {interval:.0f}s)")
+    assert not late, "다음 tick보다 늦게 회수되는 schedule: " + " · ".join(late)

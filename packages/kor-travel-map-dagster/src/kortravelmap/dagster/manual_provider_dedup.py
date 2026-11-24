@@ -32,6 +32,7 @@ from kortravelmap.settings import KorTravelMapSettings
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     DefaultScheduleStatus,
     JobDefinition,
     OpExecutionContext,
@@ -134,10 +135,12 @@ async def detect_manual_provider_dedup_candidates_op(
 
 @job(
     name="manual_provider_dedup_detection",
+    # 매일. 실측 성공 최대 56초 → 1시간.
     # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
     # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
     tags={
         **MANUAL_PROVIDER_DEDUP_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "3600",
         **run_priority_tags("manual_provider_dedup_detection"),
     },
     description=(

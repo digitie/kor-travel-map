@@ -137,7 +137,8 @@ credential이 없거나 아직 guard로 남은 resource는 운영 실행 전에
 |-----|--------|----|
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_BASE_URL` | 없음(필수) | scheme+host[:port]만. 운영(host network)은 `http://127.0.0.1:14001`, repo compose는 `http://host.docker.internal:14001` |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_SERVICE_TOKEN` | 없음(필수) | header `X-Kor-Travel-Transport-Service-Token`. transport `TRANSPORT_SERVICE_EXPORT_TOKEN`과 같은 값(32자 이상) |
-| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_PAGE_SIZE` | `500` | cursor 페이지 크기(1~1000, transport `MAX_PAGE_SIZE`) |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_PAGE_SIZE` | `500` | 현재 집합 export(주유소·휴게소·휴게소 유가) cursor 페이지 크기(1~1000, transport `MAX_PAGE_SIZE`) |
+| `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_REFERENCE_PAGE_SIZE` | `2000` | 기준정보 snapshot export(철도역·항구) 페이지 크기(1~5000, transport 상한) |
 | `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_TIMEOUT_SECONDS` | `30.0` | 요청 하나의 httpx timeout(0.2~120) |
 
 빈 문자열은 미설정과 같다(compose `${X:-}`) — 요청 전에 `ProviderCredentialMissing`으로 실패한다.
@@ -147,7 +148,12 @@ transport는 token **그리고 접속 peer 주소**(`SERVICE_EXPORT_ALLOWED_CLIE
 | failure_kind | 원인 | step 재시도 |
 |--------------|------|-------------|
 | `transport_hidden` | 404 — token·peer 주소·export 없는 버전 | **끈다**(`retryable=False` → `Failure(allow_retries=False)`) |
-| `transport_not_current` | 503 또는 200 본문 `collection`이 이력 없음·실패·stale, 돌발 `collected_at` 30분 초과 | **재시도 대상**(`retryable=True`, HTTP 층에서는 바로 다시 부르지 않는다) |
+| `transport_not_current` | code가 없거나 모르는 code의 503, 200 본문 `collection`이 이력 없음·실패·stale, 돌발 `collected_at` 30분 초과 | **재시도 대상**(`retryable=True`, HTTP 층에서는 바로 다시 부르지 않는다) |
+| `transport_source_not_current`·`transport_no_history`·`transport_incidents_not_current`·`transport_empty_set` | 503 `code`가 `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET` | HTTP 층은 다시 부르지 않는다. feature 적재: **재시도 대상**(60·180·420초). Valkey 상태 job: 나이 기준 혼합 — 서비스 세대 원천 나이가 경고 기준 안이면 초록 건너뜀, 넘으면 재시도 없는 실패(ADR-106 2026-11-24 개정). `Retry-After`는 힌트라 대기에 쓰지 않는다 |
+| `transport_busy`·`transport_prepare_timeout`·`transport_transient_db` | 503 `code`가 `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | HTTP 층에서 첫 요청 포함 4번(다시 묻기 3번, 대기 `max(5·10·20초 ±20%, Retry-After)`) 묻고, 다 쓰면 feature 적재는 **재시도 대상**, 상태 job은 나이 기준 혼합. `Retry-After`가 한 번 대기 상한 60초를 **넘으면** 기다리지 않는다(`retry_after_exceeds_cap`, 상태 job `outcome=upstream_busy_over_cap`) — transport `EXPORT_PREPARE_TIMEOUT` 기본값이 지금 60초라 그 값이 오르면 준비 시간 초과는 이 경로로 간다 |
+| `transport_export_disabled`·`transport_export_too_large` | 503 `code`가 `EXPORT_DISABLED`(transport 설정으로 꺼짐)·`EXPORT_TOO_LARGE`(export 상한 초과) | **끈다** — 설정·데이터가 바뀌기 전에는 같다 |
+| `transport_source_inconsistent` | 503 `code`가 `EXPORT_SOURCE_INCONSISTENT`(transport 근거끼리 불일치) | HTTP 층에서는 다시 묻지 않고 **재시도 대상**(transport의 다음 수집·준비가 고친다) |
+| `transport_request_rejected` | 400·422 — Map 질의(`limit`·`cursor`)를 transport가 거절 | 끈다 |
 | `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | 끈다 |
 | `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | 끈다 |
 | `transport_malformed_upstream` | 본문이 JSON이 아니다 | 끈다 |
@@ -158,7 +164,10 @@ step 재시도를 끄는 자리는 asset 경계 `run_tracked_feature_asset`의
 끝나고 다시 큐에 넣지 않는다. 다음 schedule이나 새 request가 다시 돈다(2026-10-04 결정: 503 재큐잉은 하지
 않는다).
 
-전송 오류와 502/504만 HTTP 층에서 다시 부른다(경계당 2회). 그 재시도는 **run 하나에 예산 하나**다 —
+전송 오류와 408·429·500·502·504는 HTTP 층에서 같은 요청으로 다시 부른다(경계당 2회, 429는 `Retry-After`를
+따르고 60초를 넘으면 다시 부르지 않는다). 다시 보내는 것은 언제나 **같은 요청(같은 cursor)**이다 — step
+재시도는 첫 페이지부터다(transport ADR-013 결정 3, ADR-106 2026-11-24 개정). 그 재시도는 **run 하나에 예산
+하나**다 —
 asset step과 큐 run(`execute_feature_update_request`, scope 여러 개)이 `upstream_retry.sharing_run_retry_budget`을
 열고 그 안의 transport fetcher가 모두 나눠 쓴다.
 

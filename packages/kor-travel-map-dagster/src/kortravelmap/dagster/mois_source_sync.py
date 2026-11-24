@@ -45,6 +45,7 @@ from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     Array,
     DefaultScheduleStatus,
     Field,
@@ -648,10 +649,13 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
 
 @job(
     name="mois_localdata_source_sync",
+    # 매주. 14일 표본이 성공 1건(8,978초, 6월 1,447초에서 늘었다)뿐이라 전역 상한과 같은 6시간을
+    # 명시한다 — 표본이 쌓이면 줄인다.
     # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
     # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
     tags={
         **MOIS_SOURCE_SYNC_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "21600",
         **run_priority_tags("mois_localdata_source_sync"),
     },
     description=(

@@ -15,6 +15,7 @@ from kortravelmap.infra.dedup_refresh_repo import (
 )
 
 from dagster import (
+    MAX_RUNTIME_SECONDS_TAG,
     Array,
     Backoff,
     Bool,
@@ -22,6 +23,7 @@ from dagster import (
     Failure,
     Field,
     Int,
+    Jitter,
     OpExecutionContext,
     Permissive,
     RetryPolicy,
@@ -79,6 +81,7 @@ MAINTENANCE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     max_retries=3,
     delay=60,
     backoff=Backoff.EXPONENTIAL,
+    jitter=Jitter.PLUS_MINUS,  # Dagster PLUS_MINUS = ±delay(60초), 2026-11-23 감사 P2
 )
 """consistency/dedup maintenance op 공통 retry policy."""
 
@@ -710,7 +713,7 @@ async def drain_expired_cache_target_snapshots_op(
         config.get("max_batches"), name="max_batches", default=2_000, minimum=1
     )
     max_seconds = _bounded_int_config(
-        config.get("max_seconds"), name="max_seconds", default=3_300, minimum=1
+        config.get("max_seconds"), name="max_seconds", default=2_700, minimum=1
     )
     item_limit = _bounded_int_config(
         config.get("item_limit"),
@@ -904,10 +907,12 @@ async def drain_expired_cache_target_snapshots_op(
 
 @job(
     name="consistency_dedup_refresh",
+    # 매일. 2026-11-23 실측 성공 p95 3,234초·최대 3,389초 → 3시간(다음 발화 한참 전).
     # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
     # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
     tags={
         **CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "10800",
         **run_priority_tags("consistency_dedup_refresh"),
     },
     description=(
@@ -926,10 +931,13 @@ def consistency_dedup_refresh_job() -> None:
 
 @job(
     name="cache_target_snapshot_gc",
+    # 매시. 실측 성공 p99 98초·최대 172초. backlog가 쌓이면 op가 스스로 max_seconds(기본 2,700초,
+    # 종전 3,300초)까지 비우고 관측 질의를 더 한다 → 발화 간격과 같은 1시간 안에 여유를 남긴다.
     # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
     # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
     tags={
         **CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "3600",
         **run_priority_tags("cache_target_snapshot_gc"),
     },
     description=(

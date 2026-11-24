@@ -630,7 +630,18 @@ class KorTravelMapSettings(BaseSettings):
         ge=1,
         le=1000,
         description=(
-            "kor-travel-transport export page size. 상한 1000은 transport ``MAX_PAGE_SIZE``와 같다."
+            "kor-travel-transport 현재 집합 export(주유소·휴게소·휴게소 유가) page size. "
+            "상한 1000은 transport ``MAX_PAGE_SIZE``와 같다."
+        ),
+    )
+    kor_travel_transport_reference_page_size: int = Field(
+        default=2000,
+        ge=1,
+        le=5000,
+        description=(
+            "kor-travel-transport 기준정보 snapshot export(철도역·항구, T3) page size. "
+            "transport 기본 1000·상한 5000. snapshot 첫 페이지 구성 비용은 limit과 무관하므로 "
+            "키우면 페이지 수만 준다(철도역 약 1.5천 행이면 1페이지, 감사 MC-10)."
         ),
     )
     kor_travel_transport_timeout_seconds: float = Field(
@@ -702,6 +713,63 @@ class KorTravelMapSettings(BaseSettings):
             "가격 추이 프록시의 transport read 상한(초). 사용자 요청 경로라 적재 fetcher(30초)보다 "
             "짧다. 연결 수립은 ``kor_travel_transport_connect_timeout_seconds``를 따른다. "
             "env ``KOR_TRAVEL_MAP_TRANSPORT_PRICE_HISTORY_TIMEOUT_SECONDS``."
+        ),
+    )
+
+    # ── transport 상태 job 상류 경고 기준(ADR-106 2026-11-24 개정 "나이 기준 혼합") ──
+    # transport가 503 code로 "근거 수집이 현재가 아니다"라고 하거나 경합 503이 HTTP 층 재시도로
+    # 풀리지 않으면, 상태 job은 **서비스 세대의 원천 나이**를 이 기준과 견준다: 안이면
+    # 초록(건너뜀), 넘으면
+    # 빨강(재시도 없는 실패). 각 기준은 그 데이터셋의 읽기 stale 기준(``max_age``)보다 작아야 한다 —
+    # 데이터가 stale로 보이기 전에 빨간 신호가 먼저 난다(상한 ``lt``가 그 ``max_age``다).
+    transport_state_fuel_stations_alert_after_seconds: int = Field(
+        default=18 * 3600,
+        ge=60,
+        lt=48 * 3600,
+        description=(
+            "주유소 상태 job 상류 경고 기준(초). 기본 18시간 = transport 유가 수집 주기(8시간) 두 "
+            "번 + 수집 소요(1~2시간) — 한 주기를 놓친 것은 초록으로 넘긴다. 상한은 읽기 stale 기준 "
+            "48시간. "
+            "env ``KOR_TRAVEL_MAP_TRANSPORT_STATE_FUEL_STATIONS_ALERT_AFTER_SECONDS``."
+        ),
+    )
+    transport_state_rest_area_fuel_prices_alert_after_seconds: int = Field(
+        default=9 * 3600,
+        ge=60,
+        lt=48 * 3600,
+        description=(
+            "휴게소 유가 상태 job 상류 경고 기준(초). 기본 9시간 = transport 휴게소 유가 수집 "
+            "주기(4시간) 두 번 + 수집 소요. 상한은 읽기 stale 기준 48시간. "
+            "env ``KOR_TRAVEL_MAP_TRANSPORT_STATE_REST_AREA_FUEL_PRICES_ALERT_AFTER_SECONDS``."
+        ),
+    )
+    transport_state_highway_incidents_alert_after_seconds: int = Field(
+        default=20 * 60,
+        ge=60,
+        lt=30 * 60,
+        description=(
+            "고속도로 돌발 상태 job 상류 경고 기준(초). 기본 20분 — 5분 수집 한두 번의 실패는 "
+            "초록으로 넘긴다. 상한은 읽기 stale 기준 30분. "
+            "env ``KOR_TRAVEL_MAP_TRANSPORT_STATE_HIGHWAY_INCIDENTS_ALERT_AFTER_SECONDS``."
+        ),
+    )
+    transport_state_rest_areas_alert_after_seconds: int = Field(
+        default=2 * 86400,
+        ge=60,
+        lt=8 * 86400,
+        description=(
+            "휴게소 상태 job 상류 경고 기준(초). 기본 2일(매일 적재 두 번). 상한은 읽기 stale "
+            "기준 8일. env ``KOR_TRAVEL_MAP_TRANSPORT_STATE_REST_AREAS_ALERT_AFTER_SECONDS``."
+        ),
+    )
+    transport_state_airports_alert_after_seconds: int = Field(
+        default=2 * 86400,
+        ge=60,
+        lt=8 * 86400,
+        description=(
+            "공항 상태 job 상류 경고 기준(초). 기본 2일(매일 적재 두 번). 공항 세대에는 원천 수집 "
+            "시각이 없어 적재·재확인 시각으로 잰다. 상한은 읽기 stale 기준 8일. "
+            "env ``KOR_TRAVEL_MAP_TRANSPORT_STATE_AIRPORTS_ALERT_AFTER_SECONDS``."
         ),
     )
 

@@ -6,6 +6,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
@@ -21,6 +22,7 @@ from kortravelmap.infra.valkey_state import (
     GenerationMeta,
     StateItem,
     StateStoreUnavailable,
+    StateSwapRefused,
     SwapResult,
     ValkeyStateStore,
 )
@@ -43,7 +45,9 @@ from kortravelmap.dagster.upstream_requests import (
     counting_upstream_requests,
     observed_upstream_requests,
 )
+from kortravelmap.dagster.upstream_signal import raise_if_stale
 from kortravelmap.dagster.weather_state import (
+    WEATHER_EXPORT_LEASE,
     WEATHER_STATE_SPECS,
     WeatherExportNotConfigured,
     WeatherStateJobSpec,
@@ -73,6 +77,7 @@ def _settings(**overrides: Any) -> KorTravelMapSettings:
 def page_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """HTTP 층 재시도 간격을 0으로, 503 페이지 재시도 대기는 기록만 한다(기록을 돌려준다)."""
     monkeypatch.setattr(weather_state, "_WEATHER_RETRY_BASE_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(weather_state, "_jitter", lambda delay: delay)  # 간격 흔들기 끄기
     slept: list[float] = []
 
     async def _record(delay: float) -> None:
@@ -139,6 +144,56 @@ def test_every_dataset_has_a_stopped_schedule_and_no_operation_key() -> None:
         assert "kor_travel_map.operation_key" not in job.tags
         assert job.tags["kor_travel_map.job_kind"] == "weather_state"
         assert int(job.tags["dagster/max_runtime"]) == spec.max_runtime_seconds
+        # retry policy가 있으면 Dagster가 run 상한 초과 취소에도 재시도를 요청한다(14일 100회).
+        (node,) = job.nodes
+        assert node.definition.retry_policy is None, spec.job_name
+
+
+def test_current_ceiling_is_a_temporary_600_and_leaves_room_to_read() -> None:
+    # 600초는 weather export 수정 전까지의 임시 상한(480초에서)이다 — 그 뒤 되돌린다. 더 긴 tick은
+    # 순회 deadline이 건너뛴다. 읽기 자리를 기다릴 여유(상한 − 꼬리 − 읽기 예산)는 남아 있어야 한다.
+    from kortravelmap.providers.kor_travel_weather_state import DATASET_CURRENT
+
+    spec = next(spec for spec in WEATHER_STATE_SPECS if spec.dataset is DATASET_CURRENT)
+    assert spec.cron_schedule == "25,40 * * * *"
+    assert spec.max_runtime_seconds == 600
+    for each in WEATHER_STATE_SPECS:
+        assert 0 < each.read_budget_seconds < each.max_runtime_seconds - 60, each.job_name
+
+
+def test_weather_alert_thresholds_sit_below_the_read_side_max_age() -> None:
+    # 소유자 결정(2026-11-24 "나이 기준 혼합"): run 결과는 경고 임계로, 읽기 계약 max_age는 그대로.
+    expected = {
+        "weather.locations": timedelta(days=2),
+        "weather.current": timedelta(hours=2),
+        "weather.forecast_ultra_short": timedelta(hours=2),
+        "weather.forecast_short": timedelta(hours=8),
+        "weather.forecast_mid": timedelta(hours=20),
+        "weather.forecast_external": timedelta(hours=8),
+        "weather.daily_summaries": timedelta(hours=4),
+    }
+    assert {spec.dataset.name: spec.stale_alert_after for spec in WEATHER_STATE_SPECS} == expected
+    for spec in WEATHER_STATE_SPECS:
+        assert spec.stale_alert_after < spec.dataset.max_age, spec.job_name
+
+
+def _fire_minutes(cron: str) -> set[int]:
+    minute = cron.split()[0]
+    return {int(value) for value in minute.split(",")}
+
+
+def test_weather_schedules_do_not_fire_on_the_same_minutes_as_current() -> None:
+    # 2026-11-23: current 상한 초과 97건 중 79건이 W5(:41)와 겹친 :40 회차였고, 11-23 21:40에는
+    # current·mid·W5가 함께 돌다 셋 다 읽기 경합 503으로 끝났다. current(:25·:40)가 도는 동안
+    # (p95 약 6분) 다른 weather 상태 job이 발화하지 않는다.
+    by_name = {spec.dataset.name: spec for spec in WEATHER_STATE_SPECS}
+    current = _fire_minutes(by_name["weather.current"].cron_schedule)
+    busy = {(start + offset) % 60 for start in current for offset in range(7)}
+    for spec in WEATHER_STATE_SPECS:
+        if spec.dataset.name == "weather.current":
+            continue
+        clash = _fire_minutes(spec.cron_schedule) & busy
+        assert not clash, (spec.job_name, sorted(clash))
 
 
 def test_lock_ttl_follows_the_run_ceiling() -> None:
@@ -152,7 +207,7 @@ def test_daily_summaries_lock_expires_before_its_next_hourly_tick() -> None:
     from kortravelmap.providers.kor_travel_weather_state import DATASET_DAILY_SUMMARIES
 
     spec = next(spec for spec in WEATHER_STATE_SPECS if spec.dataset is DATASET_DAILY_SUMMARIES)
-    assert spec.cron_schedule == "41 * * * *"
+    assert spec.cron_schedule == "5 * * * *"
     assert weather_lock_ttl_seconds(spec) < 3_600
 
 
@@ -408,7 +463,7 @@ async def test_a_page_retry_starts_only_if_wait_plus_the_slowest_request_fits(
     assert page_sleeps == ([7.0] if retried else [])
 
 
-async def test_page_503_retries_are_bounded_and_stay_step_retryable(
+async def test_page_503_retries_are_bounded_and_stay_retryable(
     monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
 ) -> None:
     seen = _install(
@@ -417,23 +472,51 @@ async def test_page_503_retries_are_bounded_and_stay_step_retryable(
     )
     with pytest.raises(WeatherExportNotReady) as excinfo:
         await fetch_weather_current(_settings())
-    assert excinfo.value.retryable is True  # 소진하면 step 재시도에 맡긴다
-    assert len(seen) == 4
-    assert page_sleeps == [5.0, 10.0, 20.0]
+    # 소진하면 상류 미준비다 — 적재 op는 이번 tick을 건너뛴다(처음부터 다시 읽지 않는다).
+    assert excinfo.value.retryable is True
+    # 5·10·20·40·60초. 다음 60초는 한 순회 대기 합 180초를 넘는다.
+    assert page_sleeps == [5.0, 10.0, 20.0, 40.0, 60.0]
+    assert len(seen) == 6
 
 
 async def test_page_retries_share_one_sleep_cap_per_walk(
     monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
 ) -> None:
-    # 페이지마다 따로 맞는 재시도가 쌓여 run 상한을 넘지 않게 한 순회의 대기 합을 60초로 묶는다.
+    # 페이지마다 따로 맞는 재시도가 쌓여 run 상한을 넘지 않게 한 순회의 대기 합을 180초로 묶는다.
     seen = _install(
         monkeypatch,
         lambda _request: httpx.Response(503, json=_BUSY, headers={"retry-after": "25"}),
     )
     with pytest.raises(WeatherExportNotReady):
         await fetch_weather_current(_settings())
-    assert page_sleeps == [25.0, 25.0]
-    assert len(seen) == 3
+    assert page_sleeps == [25.0, 25.0, 25.0, 40.0, 60.0]
+    assert len(seen) == 6
+
+
+async def test_contention_lasting_minutes_resumes_the_same_page(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
+) -> None:
+    # 2026-11-23 운영: 23페이지 순회 도중 경합 503이 35초(종전 대기 합)를 넘게 이어지면 step
+    # 재시도가 1페이지부터 다시 읽다 run 상한에 걸렸다. 이제 같은 cursor를 더 기다린다.
+    calls: list[str | None] = []
+    busy = [httpx.Response(503, json=_BUSY, headers={"retry-after": "5"}) for _ in range(5)]
+    _install(monkeypatch, _second_page_fails(calls, busy))
+    fetch = await fetch_weather_locations(_settings())
+    assert calls == [None] + ["c2"] * 6  # 첫 페이지를 다시 읽지 않는다
+    assert [row.location_id for row in fetch.rows] == ["a", "b"]
+    assert page_sleeps == [5.0, 10.0, 20.0, 40.0, 60.0]
+
+
+async def test_page_retry_waits_are_jittered_but_never_shorter_than_retry_after(
+    monkeypatch: pytest.MonkeyPatch, page_sleeps: list[float]
+) -> None:
+    monkeypatch.setattr(weather_state, "_jitter", lambda delay: delay * 0.8)
+    calls: list[str | None] = []
+    busy = [httpx.Response(503, json=_BUSY, headers={"retry-after": "7"}) for _ in range(3)]
+    _install(monkeypatch, _second_page_fails(calls, busy))
+    await fetch_weather_locations(_settings())
+    # 5·10·20초를 0.8배로 흔들되 Retry-After 7초보다 짧게 기다리지 않는다.
+    assert page_sleeps == [7.0, 8.0, 16.0]
 
 
 async def test_page_retries_spend_the_run_retry_budget(
@@ -489,17 +572,78 @@ async def test_load_hands_its_run_deadline_to_page_retries(
         monkeypatch,
         lambda _request: httpx.Response(503, json=_BUSY, headers={"retry-after": "5"}),
     )
-    with pytest.raises(WeatherExportNotReady):
-        await load_weather_state(
-            WEATHER_STATE_SPECS[0],
-            settings=_settings(),
-            run_id=None,
-            allow_shrink=False,
-            store=cast(ValkeyStateStore, _FakeStore()),
-            deadline=time.monotonic(),
-        )
+    metadata = await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id=None,
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, _FakeStore()),
+        deadline=time.monotonic() + 3.0,  # Retry-After 5초를 기다릴 시간이 없다
+    )
     assert len(seen) == 1
     assert page_sleeps == []
+    # 남은 시간이 없으면 이번 tick을 건너뛴다(step 재시도로 처음부터 다시 읽지 않는다).
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["failure_kind"] == "weather_not_ready"
+    assert metadata["upstream_requests_min"] == 1
+
+
+async def test_a_request_past_the_run_deadline_is_not_started(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    seen = _install(monkeypatch, lambda _request: httpx.Response(200))
+    metadata = await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id=None,
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, _FakeStore()),
+        deadline=time.monotonic() - 1.0,
+    )
+    assert seen == []
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["failure_kind"] == "weather_export_too_slow"
+
+
+async def test_a_request_still_running_at_the_run_deadline_is_cut(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # httpx read timeout은 읽기 한 번의 간격이라 요청 길이를 묶지 못한다(운영 300초 — current 상한
+    # 600초의 절반). deadline 직전에 시작한 요청이 run monitor에 죽기(FAILURE) 전에 끊고 건너뛴다.
+    async def hang(_request: httpx.Request) -> httpx.Response:
+        await asyncio.sleep(30)
+        return httpx.Response(200)
+
+    seen = _install(monkeypatch, hang)
+    started = time.monotonic()
+    metadata = await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id=None,
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, _FakeStore()),
+        deadline=time.monotonic() + 0.3,
+    )
+    assert time.monotonic() - started < 5
+    assert len(seen) == 1
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["failure_kind"] == "weather_export_too_slow"
+
+
+async def test_a_transport_retry_is_not_started_past_the_run_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # HTTP 층 재시도(전송 오류·5xx)도 대기 뒤 deadline을 넘으면 하지 않는다 — 종전에는 예산 횟수만
+    # 보고 15초 뒤 한 번 더 물어 꼬리 60초를 넘길 수 있었다.
+    monkeypatch.setattr(weather_state, "_WEATHER_RETRY_BASE_DELAY_SECONDS", 15.0)
+
+    def timeout(request: httpx.Request) -> httpx.Response:
+        raise httpx.ReadTimeout("느림", request=request)
+
+    seen = _install(monkeypatch, timeout)
+    with weather_state._paging_deadline(time.monotonic() + 5.0), pytest.raises(httpx.ReadTimeout):
+        await fetch_weather_current(_settings())
+    assert len(seen) == 1
 
 
 def test_run_deadline_counts_from_the_run_start_and_keeps_a_tail() -> None:
@@ -666,10 +810,13 @@ class _FakeStore:
         locked: bool = False,
         swap_error: Exception | None = None,
         current: GenerationMeta | None = None,
+        lease_busy: bool = False,
     ) -> None:
         self.locked = locked
         self.swap_error = swap_error
         self.current = current
+        self.lease_busy = lease_busy
+        self.lease_waits: list[float] = []
         self.swapped: list[dict[str, Any]] = []
         self.touched: list[tuple[str, str]] = []
 
@@ -688,6 +835,15 @@ class _FakeStore:
     async def load_lock(self, _dataset: str, *, ttl_seconds: int) -> AsyncIterator[bool]:
         assert ttl_seconds > 660
         yield not self.locked
+
+    @asynccontextmanager
+    async def shared_lease(
+        self, name: str, *, ttl_seconds: float, wait_seconds: float
+    ) -> AsyncIterator[bool]:
+        assert name == WEATHER_EXPORT_LEASE
+        assert ttl_seconds > 0
+        self.lease_waits.append(wait_seconds)
+        yield not self.lease_busy
 
     async def swap(self, dataset: str, items: list[StateItem], **kwargs: Any) -> SwapResult:
         if self.swap_error is not None:
@@ -792,12 +948,183 @@ async def test_unrecoverable_weather_failures_turn_off_step_retries(error: Excep
     assert store.swapped == []
 
 
+def _served(age: timedelta, **overrides: Any) -> GenerationMeta:
+    collected = datetime.now(UTC) - age
+    values: dict[str, Any] = {
+        "dataset": "weather.locations",
+        "generation": "g-served",
+        "count": 1_400,
+        "geo_count": 1_400,
+        "lookup_count": 1_400,
+        "duplicates": 0,
+        "source_collected_at": collected,
+        "loaded_at": collected,
+        "run_id": "run-old",
+        "guard_override": False,
+        "source_status": "ok",
+    }
+    values.update(overrides)
+    return GenerationMeta(**values)
+
+
 @pytest.mark.parametrize(
-    "error", [WeatherExportNotReady("503"), WeatherExportSnapshotExpired("410")]
+    ("error", "kind"),
+    [
+        (WeatherExportNotReady("503"), "weather_not_ready"),
+        (WeatherExportSnapshotExpired("410"), "weather_snapshot_expired"),
+        (httpx.ReadTimeout("느림"), "upstream_unreachable:ReadTimeout"),
+        (httpx.ConnectError("끊김"), "upstream_unreachable:ConnectError"),
+    ],
 )
-async def test_waitable_weather_failures_stay_retryable(error: Exception) -> None:
-    with pytest.raises(type(error)):
-        await _load(_failing_spec(error), _FakeStore())
+async def test_waitable_weather_failures_skip_the_tick(error: Exception, kind: str) -> None:
+    # 상류 미준비는 step 재시도 없이 이번 tick을 건너뛰고 세대를 지킨다(transport와 같은 규칙).
+    store = _FakeStore(current=_served(timedelta(hours=1)))
+    metadata = await _load(_failing_spec(error), store)
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["upstream_state"] == "not_ready"
+    assert metadata["failure_kind"] == kind
+    assert metadata["served_generation"] == "g-served"
+    assert 3_500 < metadata["served_age_seconds"] < 3_700
+    assert metadata["stale_alert"] is False
+    assert store.swapped == []
+
+
+async def test_not_ready_past_the_stale_age_fails_the_run() -> None:
+    spec = _failing_spec(WeatherExportNotReady("503"))
+    store = _FakeStore(current=_served(spec.stale_alert_after + timedelta(hours=1)))
+    metadata = await _load(spec, store)
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["stale_alert"] is True
+    with pytest.raises(Failure) as excinfo:
+        raise_if_stale(metadata)
+    assert excinfo.value.allow_retries is False
+
+
+async def test_a_busy_export_skips_the_tick_without_reading(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 다른 weather 상태 적재가 export를 읽는 동안 읽지 않는다 — 기다려도 못 잡으면 건너뛴다.
+    seen = _install(monkeypatch, lambda _request: httpx.Response(200))
+    store = _FakeStore(current=_served(timedelta(minutes=30)), lease_busy=True)
+    metadata = await load_weather_state(
+        WEATHER_STATE_SPECS[0],
+        settings=_settings(),
+        run_id=None,
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, store),
+        deadline=time.monotonic() + 800,
+    )
+    assert seen == []
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["failure_kind"] == "weather_export_busy"
+    # 기다림 = 남은 run 시간 − 읽기 예산(locations 600초)
+    (waited,) = store.lease_waits
+    assert 180 < waited <= 200
+
+
+async def test_a_walk_that_cannot_finish_before_the_ceiling_stops_itself(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 상한에 죽으면 빨간 run이 되고 받은 페이지도 버려진다 — 다음 페이지를 끝낼 수 없으면 먼저
+    # 멈춘다.
+    now = [0.0]
+    monkeypatch.setattr(
+        weather_state, "time", SimpleNamespace(monotonic=lambda: now[0], time=time.time)
+    )
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        now[0] += 30.0
+        cursor = request.url.params.get("cursor")
+        page = int(cursor) if cursor else 0
+        return httpx.Response(
+            200,
+            json={
+                "items": [_location(f"l{page}")],
+                "meta": _meta(1, has_more=True, next_cursor=str(page + 1)),
+            },
+        )
+
+    seen = _install(monkeypatch, slow)
+    with weather_state._paging_deadline(100.0), pytest.raises(WeatherExportNotReady) as excinfo:
+        await fetch_weather_locations(_settings())
+    assert excinfo.value.failure_kind == "weather_export_too_slow"
+    assert len(seen) == 3  # 30·60·90초 — 넷째(120초)는 deadline 100초를 넘는다
+
+
+async def test_a_restart_after_410_checks_its_first_page_against_the_deadline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 410으로 처음부터 다시 받을 때 첫 페이지도 앞 순회가 잰 가장 느린 요청으로 deadline을 본다.
+    now = [0.0]
+    monkeypatch.setattr(
+        weather_state, "time", SimpleNamespace(monotonic=lambda: now[0], time=time.time)
+    )
+    calls: list[str | None] = []
+
+    def slow(request: httpx.Request) -> httpx.Response:
+        now[0] += 40.0
+        cursor = request.url.params.get("cursor")
+        calls.append(cursor)
+        if cursor == "c2":
+            return httpx.Response(410, json={})
+        return httpx.Response(
+            200,
+            json={"items": [_location("a")], "meta": _meta(1, has_more=True, next_cursor="c2")},
+        )
+
+    _install(monkeypatch, slow)
+    with weather_state._paging_deadline(100.0), pytest.raises(WeatherExportNotReady) as excinfo:
+        await fetch_weather_locations(_settings())
+    assert excinfo.value.failure_kind == "weather_export_too_slow"
+    assert calls == [None, "c2"]  # 80초 + 가장 느린 40초 > 100초 — 다시 시작하지 않는다
+
+
+def _ok_spec(source_status: str = "ok", index: int = 0) -> WeatherStateJobSpec:
+    async def _ok(_settings: Any, _etag: str | None) -> Any:
+        fetch = weather_state.WeatherFetch(
+            [], datetime.now(UTC) - timedelta(minutes=10), source_status, 1, None
+        )
+        return weather_state.WeatherCollected(items=[], row_duplicates=0, fetch=fetch)
+
+    return replace(WEATHER_STATE_SPECS[index], collect=_ok)
+
+
+async def test_stale_source_is_swapped_and_reported_like_transport() -> None:
+    # 200 + stale은 값이 왔으므로 교체한다. 상태는 metadata로 남는다(초록이지만 보인다).
+    store = _FakeStore()
+    metadata = await _load(_ok_spec("stale", index=1), store)  # current는 집합 상태를 알린다
+    assert len(store.swapped) == 1
+    assert metadata["upstream_state"] == "stale"
+    assert metadata["served_generation"] == "20261024T000000Z-00000000"
+    # weather 빨강은 Map 적재 기준이다 — 방금 교체했으니 0에 가깝다. 원천 시각은 따로 남는다.
+    assert metadata["served_age_basis"] == "loaded"
+    assert 0 <= metadata["served_age_seconds"] < 60
+    assert metadata["served_source_collected_at"]
+    assert metadata["stale_alert"] is False
+    fresh = await _load(_ok_spec("ok"), _FakeStore())
+    assert fresh["upstream_state"] == "ok"
+
+
+async def test_weather_refusal_follows_the_served_generation_age() -> None:
+    refused = StateSwapRefused("roster가 줄었다", baseline=6, new_count=2)
+    fresh = await _load(
+        _ok_spec(), _FakeStore(swap_error=refused, current=_served(timedelta(hours=2)))
+    )
+    assert fresh["skipped"] == "refused"
+    assert fresh["failure_kind"] == "state_swap_refused"
+    assert fresh["stale_alert"] is False
+    stale = await _load(
+        _ok_spec(),
+        _FakeStore(
+            swap_error=refused,
+            current=_served(WEATHER_STATE_SPECS[0].stale_alert_after + timedelta(hours=1)),
+        ),
+    )
+    assert stale["skipped"] == "refused"
+    with pytest.raises(Failure) as excinfo:
+        raise_if_stale(stale)
+    assert excinfo.value.allow_retries is False
+    assert str(excinfo.value.metadata["failure_kind"].value) == "state_swap_refused"
 
 
 async def test_valkey_outage_stays_retryable_and_lock_skips() -> None:
@@ -849,6 +1176,10 @@ async def test_not_modified_touches_the_current_generation_without_swapping(
         store=cast(ValkeyStateStore, store),
     )
     assert metadata["unchanged"] == "not_modified"
+    # W1 위치 roster는 집합 상태를 알리지 않는다(weather가 늘 stale을 싣는다) — ok로 보고
+    # 나이만 잰다.
+    assert metadata["upstream_state"] == "ok"
+    assert metadata["served_generation"] == "g-1"
     assert store.swapped == []
     assert store.touched == [("weather.locations", "g-1")]
     assert seen[0].headers["if-none-match"] == 'W/"v1"'
