@@ -38,6 +38,62 @@
   `test_definitions.py`(모든 job run 상한, 비-feature schedule 다음 tick 전 회수), integration `test_valkey_{transport,weather}_state.py`
   (거부·나이, 공용 자리 동시성·갱신·대기). OpenAPI·migration 없음. 관리자 화면 변화 없음(e2e 대상 아님).
 
+## 2026-11-24 — Map Dagster freeze 도구 리뷰 후속 2차(#1552 리뷰)
+
+- 근거 확인: 최신 `origin/main`(1dde1da37)과 열린 #1542·#1548·#1549·#1550·#1551은 `scripts/n150/dagster-freeze.py`를
+  건드리지 않는다. 지적 8건 모두 코드로 사실을 확인했다(1·8은 같은 결함).
+- rollback 안내(P3 둘): `cmd_freeze`가 webserver 조회를 스냅샷 파일 검사보다 먼저 해, 이미 있는 남의 파일(창 스냅샷)로
+  부른 호출이 webserver HTTP 500에 2로 끝나며 그 파일의 unfreeze를 권했다(정상이면 3). 파일 검사(있음·`--resume` 없음
+  거부, `--resume`인데 없음 거부, 나이 검사)를 webserver 앞으로 옮기고, `main`도 "호출 전에 없던 파일이거나
+  `--resume`"일 때만 `rollback:`을 찍는다. 수정 전 스크립트에 새 시험을 돌려 2(`gave up … HTTP 500`)로 재현했다.
+- 상태 run과 회전(P3 둘): `DefaultRunLauncher`의 run worker는 code-server의 자식이라 회전이 돌던 상태 run을 끊고, 끊긴
+  run의 Valkey 적재 잠금(`set(nx, ex=ttl)`)은 TTL(상한 + 660초)까지 남는다. #1541 판은 상태 run도 비운 뒤 회전했으니
+  회귀다. `freeze --include-state`(상태 schedule도 멈추고 그 run도 기다린다 = #1541 판 동작)를 더해 호스트 회전과 공용
+  PG 재생성에 쓰게 했다. 창 안 회전도 회전 전용 파일 + `--include-state`면 상태 schedule만 멈추고 되살려 창과 겹치지
+  않는다(시험). 기본 freeze의 마지막 `after:` 줄에 `state_runs=N(기다리지 않음)`을 따로 찍는다.
+- 회전 끝 unfreeze(P2): 회전 직후 webserver는 location을 다시 싣기 전까지 `repositoryOrError`에
+  `RepositoryNotFoundError`(HTTP 200)를 낸다(dagster_graphql `fetch_repository`, `has_code_location` 거짓). 전송 층은 5xx만
+  다시 시도해 unfreeze가 곧바로 2로 끝나고 Map이 얼어 있는 채 남았다. `LocationNotLoaded`로 갈라 unfreeze가
+  `--location-wait`(기본 300초)까지 기다리고, 1·2로 끝나 읽히는 스냅샷이 남으면 `retry:` 줄을 찍는다. README에 unfreeze
+  종료 코드 규칙(2 다시 돌림·1 확인 뒤 `--accept-missing`·3 나이, 0이 아니면 알린다)을 더했다.
+- 문구(P3 둘): "상태 job은 Map PG를 읽지도 쓰지도 않는다"는 틀렸다 — run 프로세스(gRPC 서버가 `spawn`으로 띄운다)가
+  정의를 import할 때 `cron_for_schedule`이 `ops.dagster_schedule_overrides`를 읽고, compose가 그것을 필수로 둔다.
+  "쓰지 않는다 + import 읽기 하나"로 도구·README·runbook·시험 docstring을 고쳤다. 패키지 시험은 schedule tag와 상태
+  모듈 소스(`pg_dsn`·`AsyncKorTravelMapClient` 없음)까지 보고, docstring은 무엇을 보고 무엇을 못 보는지 적는다.
+- 가짜 webserver(P3): tick 조회가 질의에 있는 필드만 싣는다. 질의에서 `skipReason`을 지운 돌연변이가 이제
+  `test_a_skipped_tick_with_a_reason…`에서 죽는다(전에는 살아남았다).
+- 시험: `tests/unit/test_n150_dagster_freeze.py` 55건(+9), `test_freeze_skips_state_jobs.py` 3건 — WSL venv(dagster
+  1.13.24). n150 접속·실제 freeze는 하지 않았다.
+
+## 2026-11-24 — Map Dagster freeze 도구 리뷰 후속(#1541)
+
+- 따라잡기 판정(P2): Dagster 1.13 run-status sensor 감싸개(`run_status_sensor_definition.py`)는 사건 하나에 사용자
+  함수가 값을 돌려주면 그것을 내고 tick을 끝낸다. `feature_update_request_failure_sensor`는 실패 사건마다
+  `SkipReason(message)`를 돌려주므로 그 tick은 SKIPPED(사유 있음)이고 사건 하나를 처리했다. 처리할 사건이 없던 tick은
+  감싸개가 아무것도 내지 않아 daemon이 사유 없이 SKIPPED로 남긴다(`_daemon/sensor.py`). 도구는 tick의 `skipReason`을
+  함께 읽고 사유 없는 SKIPPED만 센다. feature_operation_* sensor는 `SkipReason`을 내지 않는다(reaction → SUCCESS).
+  가짜 webserver 시험으로 먼저 재현했다(사유 있는 SKIPPED 두 번에 FREEZE_OK).
+- Valkey 상태 schedule(P2·P3): `weather_state`·`transport_state` 모듈의 job은 `kor_travel_map_client`를 요구하지 않고
+  operation tag가 없어(run-status sensor가 panel-only로 지나간다) Map PG에 쓰지 않는다(HTTP export·Valkey만, 정의
+  import의 schedule override 읽기는 있다 — 2차 정정).
+  freeze가 이 12개를 멈추면 창 동안, 그리고 Dagster가 놓친 tick을 따라잡지 않아 하루 한 번 도는 3개(locations·
+  rest_areas·airports)는 unfreeze 뒤 최대 약 24시간 낡았다. 보충 실행(unfreeze가 launchRun) 대신 대상에서 뺐다 — 창 안
+  낡음도 없애고 mutation을 늘리지 않는다. 접두어(`STATE_JOB_PREFIXES`)로 schedule을 launcher·이어 하기 거부·FREEZE_OK
+  판정에서 빼고, run 대기에서 그 job run을 세지 않는다. 스냅샷은 전부 적어 이전 판 스냅샷도 그대로 되살린다.
+  `packages/kor-travel-map-dagster/tests/test_freeze_skips_state_jobs.py`가 접두어 = 상태 job·schedule, 그 job의 PG 경로
+  없음을 정의로 대조한다(루트 시험은 경고를 오류로 바꿔 Definitions 로드의 BetaWarning을 억제해야 해서 패키지 시험에 둠).
+  열린 #1542(상태 job 상류 신호)도 PG 경로를 더하지 않는다(diff 확인).
+- 창 안 회전 안내(P2): 안내대로 회전 전용 파일로 새 도구를 부르면 FREEZE_OK 상태에서 freeze가 "이미 얼어 있다"(3),
+  unfreeze가 스냅샷 없음(2)으로 늘 실패했다. 회전 스크립트는 저장소에 없고(호스트 전용), 창 안에서는 창 freeze가 이미
+  덮으므로 중첩 freeze가 필요 없다. 그 거부는 얼어 있는 상태를 스냅샷하는 사고를 막는 의도된 안전 장치라 도구가 아니라
+  안내를 고쳤다 — "회전의 freeze·unfreeze 단계를 뺀다". 거부 메시지도 그렇게 알린다.
+- P3: 자동 회전 스크립트의 종료 코드 규칙(0 회전·3 아무것도 안 바뀜·1/2 스냅샷 있으면 unfreeze로 접기)을 README에
+  적고, freeze가 1·2로 끝나면 `rollback:` 두 줄을 찍는다. `--resume`은 스냅샷 RUNNING인 launcher가 다시 켜진 것을
+  거부하지 않으므로(prod에서는 Map schedule 대부분이 스냅샷 RUNNING) runbook의 "거부(3)로 알린다"를 고치고 `note:`로
+  이름을 남긴다.
+- 시험: `tests/unit/test_n150_dagster_freeze.py` 46건(+8), `test_freeze_skips_state_jobs.py` 2건 — 로컬 WSL venv(dagster
+  1.13.24). n150 접속·실제 freeze는 하지 않았다.
+
 ## 2026-11-24 — 큐 요청 재발행 후속: 상한·종결 후처리·실패 run 표시(#1544 리뷰, PR #1551)
 
 - 배경: #1544(큐 요청 일시 실패 재발행, alembic 456)를 머지 뒤 두 관점으로 리뷰했다. 지적마다 최신 main(#1546 event
