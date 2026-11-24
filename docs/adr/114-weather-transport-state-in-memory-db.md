@@ -433,6 +433,12 @@ D3 그대로(잠금 → 원천 끝까지 → 거부 검사 → build TTL로 쓰�
   같은 snapshot을 **TTL 15분 동안만** 재사용한다 — 그 뒤에는 내용이 같아도 새 `snapshot_id`가 되어 ETag가 바뀐다. 그래서
   304는 직전 확인과 15분 안에 같은 집합을 다시 볼 때만 난다(관측 :25→:40처럼). 그보다 긴 주기에서는 거의 매번 전량을
   받는다 — 운영 비용은 schedule 주기(위 W1)로 줄인다. `allow_shrink` run은 ETag를 보내지 않는다(강제 재적재).
+  **(2026-11-24 weather 내용 ETag — kor-travel-weather #299, weather 호출 검토 A2):** weather가 W1·W2·W5 ETag에서 `snapshot_id`를
+  뺐다. ETag는 고정 manifest digest(승인 head vector·artifact ref·위치)·페이지(limit·시작 위치)·상태(`source_status`·
+  `source_collected_at`, W5는 본문까지)의 digest라, handle TTL이 지나 새 snapshot이 발급돼도 내용이 같으면 304다(W1·W2
+  첫 페이지는 본문을 읽기 전에 비교). 304는 새 `snapshot_id`·cursor를 주지 않는다. Map 계약(첫 페이지에만 `If-None-Match`,
+  304면 `checked_at`만, 예보는 보내지 않음)은 그대로이며 `packages/kor-travel-map-dagster/tests/
+  test_weather_content_etag_contract.py`가 고정한다. 그 weather 배포 뒤에는 위 "TTL 15분 동안만"이 맞지 않는다.
 - 페이지 내내 `snapshot_id`가 같아야 한다(다르면 계약 위반). **410**(snapshot 만료)이나 **둘째 페이지 이후의 422**(순회
   도중 weather가 재배포돼 provider 선택·cursor 서명이 바뀐 경우)면 첫 페이지부터 **한 번** 다시 받는다 — 두 번째도
   410이면 재시도 가능한 실패, 두 번째도 422면 재시도 없는 계약 위반이다. 첫 페이지 422는 질의 계약 위반(재시도 없음).
