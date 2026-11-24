@@ -2,9 +2,11 @@
 
 ## 2026-11-24 — n150 Dagster freeze 도구 리뷰 후속(#1541)
 
-- `scripts/n150/dagster-freeze.py freeze`가 Valkey 상태 적재 schedule(`weather_state_*`·`transport_state_*`, Map PG 미사용)을 멈추지 않고 그 run도 기다리지 않는다 — 운영 창 동안과 창 뒤 다음 cron까지 날씨·교통 상태가 낡지 않는다. 이전 판이 멈춘 스냅샷은 `unfreeze`가 그대로 되살린다.
+- `scripts/n150/dagster-freeze.py freeze`가 기본으로 Valkey 상태 적재 schedule(`weather_state_*`·`transport_state_*`, Map PG에 쓰지 않음)을 멈추지 않고 그 run도 기다리지 않는다 — 운영 창 동안과 창 뒤 다음 cron까지 날씨·교통 상태가 낡지 않는다. 마지막 `after:` 줄이 기다리지 않은 `state_runs`를 따로 적는다. 이전 판이 멈춘 스냅샷은 `unfreeze`가 그대로 되살린다.
+- `freeze --include-state`: 상태 schedule도 멈추고 그 run도 기다린다. code-server를 다시 띄우는 회전(돌던 상태 run을 끊어 Valkey 적재 잠금이 TTL까지 남는다)과 공용 PG 재생성 창에 쓴다. 운영 창 안의 회전도 회전 전용 파일 + `--include-state`면 상태 schedule만 멈추고 되살린다.
+- `unfreeze`가 회전 직후 location 재로드(`RepositoryNotFoundError`)를 `--location-wait`초(기본 300)까지 기다리고, 1·2로 끝나 스냅샷이 남으면 `retry:` 줄로 Map이 아직 얼어 있다고 알린다.
 - run-status sensor 따라잡기 판정이 사유 있는 SKIPPED tick(실패 사건 하나를 처리한 `feature_update_request_failure_sensor` tick)을 "처리할 사건 없음"으로 읽지 않는다.
-- `freeze --resume`이 다시 멈추는 launcher 이름을 `note:`로 남기고, 1·2로 끝난 freeze는 `rollback:` 줄로 되돌리는 길을 찍는다. R4 runbook·`scripts/n150/README.md`의 창 안 회전 안내를 "회전의 freeze·unfreeze 단계를 뺀다"로 바로잡았다.
+- `freeze --resume`이 다시 멈추는 launcher 이름을 `note:`로 남긴다. 1·2로 끝난 freeze는 이번 호출이 스냅샷을 썼거나 `--resume`으로 이어 받았을 때만 `rollback:` 줄을 찍고, 이미 있는 파일은 webserver에 묻기 전에 거부(3)한다. `scripts/n150/README.md`에 회전 스크립트의 freeze·unfreeze 종료 코드 규칙을 적었다.
 
 ## 2026-11-24 — n150 Dagster 전체 freeze 도구(수집 실패 감사 §4 #10·#11)
 

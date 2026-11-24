@@ -35,7 +35,7 @@
 | 5 | coordinator | 표본 승인, 제외 목록·`plan_sha256` 확정 | — |
 | 6 | R4 | 표본 리허설 `ktmctl mcst-theme-transition plan.json [--exclude …] --sample-per-action 200`(되감음) → stale·error 0 확인 | 없음(되감음) |
 | 7 | R4 | **실행** `ktmctl mcst-theme-transition plan.json [--exclude …] --execute --confirm-plan-sha256 <sha> --batch-size 200` | §3 |
-| 8 | deploy | `KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE=apply`(Map Dagster code-server·worker env) 회전 | `off`는 롤백 아님 |
+| 8 | deploy | `KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE=apply`(Map Dagster code-server·worker env) 회전 — 회전의 freeze·unfreeze는 회전 전용 파일 + `--include-state`(§2.2 "창 전에 끝낼 것"). 창 동안 도는 Valkey 상태 run을 회전이 끊지 않게 한다 | `off`는 롤백 아님 |
 | 9 | deploy | 동결 해제 `dagster-freeze.py unfreeze --snapshot <창 스냅샷>`(스냅샷에서 RUNNING이던 것만 켠다 — MOIS continuation sensor 등 STOPPED는 그대로), `UNFREEZE_OK` 확인. MCST 적재 1회(`feature_place_mcst_culture_job`) | — |
 | 10 | R4 | 적재 metadata `theme_attach` 상태 수 확인(owner·sticky·redirected·matched·created), 속성 필터 운영 EXPLAIN | — |
 | 11 | admin | 촬영지 rule `c09e1efd…`의 `place_kind`를 비우는 `PATCH /v1/admin/curated-source-rules/{rule_id}`(If-Match) | 다시 PATCH |
@@ -113,12 +113,20 @@ consistency·GC·file scan·나머지 feature 적재 schedule 등 PG writer 약 
 
 **창 전에 끝낼 것**
 
-- 8단계 회전에서 호스트 회전 스크립트의 freeze·unfreeze 단계(옛 `~/freeze.py stop|start`든 새 도구든)를 **뺀다** —
-  창 freeze가 이미 덮는다. 옛 `start`는 창 한가운데서 큐 sensor·산사태 schedule을 켜는데 run-status sensor는 꺼져
-  있어, 큐가 낸 run의 operation 상태가 DB에 남지 않는다. 새 도구를 회전 전용 파일로 불러도 되지 않는다 — 얼어 있는
-  location은 새 스냅샷을 거부하고(3, 아무것도 바꾸지 않는다. 얼어 있는 상태를 스냅샷하면 그 파일의 unfreeze가
-  아무것도 되살리지 못하므로 의도된 거부다), 그 파일의 unfreeze는 스냅샷 없음(2)으로 끝난다. 창 스냅샷 파일을
-  회전에 넘기면 회전 끝의 unfreeze가 창 도중에 전부 되살리고 창 스냅샷을 `.restored-*`로 옮긴다 — 넘기지 않는다.
+- 8단계 회전의 호스트 회전 스크립트가 옛 `~/freeze.py stop|start`를 부르면 그 단계를 **뺀다** — 옛 `start`는 창
+  한가운데서 큐 sensor·산사태 schedule을 켜는데 run-status sensor는 꺼져 있어, 큐가 낸 run의 operation 상태가 DB에
+  남지 않는다. 새 도구는 `scripts/n150/README.md` §Dagster freeze의 회전 규칙대로 **회전 전용 파일 + `--include-state`**로
+  부른다. 창 freeze가 멈추지 않은 Valkey 상태 schedule만 멈추고 그 run을 기다린 뒤 회전하고, 회전 끝 unfreeze는 상태
+  schedule만 되살린다(창은 얼어 있는 채 남는다). 회전은 code-server를 다시 띄워 돌던 상태 run을 끊는다 — 끊긴 run의
+  Valkey 적재 잠금은 TTL(run 상한 + 660초)까지 남아 그동안 상태가 낡는다. `--include-state` 없이 부르면 얼어 있는
+  location은 새 스냅샷을 거부(3, 아무것도 바꾸지 않는다 — 얼어 있는 상태를 스냅샷하면 그 파일의 unfreeze가 아무것도
+  되살리지 못하므로 의도된 거부다)하고 스크립트는 회전하지 않는다. `--include-state`로도 3이면 창 freeze가 상태
+  schedule까지 멈춘 것이다(#1541 판 도구) — 끊길 상태 run이 없으니 회전의 freeze·unfreeze 단계를 빼고 회전한다. 창
+  스냅샷 파일을 회전에 넘기면 회전 끝의 unfreeze가 창 도중에 전부 되살리고 창 스냅샷을 `.restored-*`로 옮긴다 —
+  넘기지 않는다.
+- 회전 끝 unfreeze가 0이 아니면(회전 직후 location 미로드 2, 이름이 사라진 `missing` 1) 상태 schedule이 멈춘 채
+  남는다 — 같은 README의 unfreeze 종료 코드 규칙대로 다시 돌리거나 확인 뒤 `--accept-missing`. 9단계 창 unfreeze도
+  스냅샷대로 되살리지만 그 전까지는 낡는다.
 - 8단계 회전에서는 D1·D2(chain16의 prod 쓰기 live lane)를 돌리지 않는다.
 - `status`로 MOIS run(최대 6시간)과 창 안에 tick이 걸리는 schedule(MOIS 월간 2일, `mois_localdata_source_sync`
   월요일 04:00 KST)을 본다. MOIS run이 돌고 있으면 끝나기를 기다리거나 `--wait-timeout 21600`을 쓴다.
@@ -147,12 +155,16 @@ python3 ~/dagster-freeze.py unfreeze --snapshot "$HOME/r4-freeze.json"        # 
   `FREEZE_OK` 뒤 RUNNING은 Valkey 상태 schedule뿐이어야 한다. `--resume`은 스냅샷이 RUNNING으로 적지 **않은** 것이
   켜졌을 때만 거부(3)하고, 스냅샷이 RUNNING으로 적은 것(prod에서는 Map schedule 대부분)이 다시 켜졌으면 거부하지
   않고 `note:` 줄에 이름을 남기며 다시 멈춘다.
-- **Valkey 상태 schedule은 멈추지 않는다**: `weather_state_*`·`transport_state_*`(ADR-114)는 Map PG를 읽지도 쓰지도
-  않는다(`kor_travel_map_client` 없음, operation tag 없음 — Dagster 패키지 시험 `test_freeze_skips_state_jobs.py`가
-  정의로 대조한다). 멈추면 창 동안, 그리고 Dagster가 놓친 tick을 따라잡지 않아 unfreeze 뒤에도 다음 cron까지(하루 한
-  번 도는 `weather_state_locations`·`transport_state_rest_areas`·`transport_state_airports`는 최대 약 24시간) PinVi가
-  보는 날씨·교통 상태가 낡는다. 그래서 freeze는 그 schedule을 그대로 두고 그 run도 기다리지 않는다(옛 도구도 멈추지
-  않았다). #1541 판 도구로 이미 멈춘 창이면 unfreeze가 스냅샷대로 되살린다.
+- **Valkey 상태 schedule은 멈추지 않는다**: `weather_state_*`·`transport_state_*`(ADR-114)는 Map PG에 쓰지 않는다
+  (`kor_travel_map_client` 없음, job·schedule에 operation tag 없음, 상태 모듈에 settings DSN 사용 없음 — Dagster 패키지
+  시험 `test_freeze_skips_state_jobs.py`가 정의와 소스로 대조한다). 읽기는 하나 있다 — Map run은 모두 run 프로세스가
+  정의를 import할 때 `ops.dagster_schedule_overrides`를 읽는다(운영은 필수). 이 창에서는 PG가 떠 있으므로 해가
+  없다. 멈추면 창 동안, 그리고 Dagster가 놓친 tick을 따라잡지 않아 unfreeze 뒤에도 다음 cron까지(하루 한 번 도는
+  `weather_state_locations`·`transport_state_rest_areas`·`transport_state_airports`는 최대 약 24시간) PinVi가 보는
+  날씨·교통 상태가 낡는다. 그래서 2단계 freeze는 그 schedule을 그대로 두고 그 run도 기다리지 않는다(옛 도구도 멈추지
+  않았다) — `FREEZE_OK`는 "Map PG writer 정지"이고 마지막 `after:` 줄의 `state_runs=N(기다리지 않음)`이 그때 돌던 상태
+  run 수다. 그 run을 끊는 8단계 회전은 위 "창 전에 끝낼 것"대로 `--include-state`로 덮는다. #1541 판 도구로 이미
+  멈춘 창이면 unfreeze가 스냅샷대로 되살린다.
 - unfreeze는 스냅샷이 RUNNING으로 적은 것만 되살린다. 8단계 회전이 이름을 지운 instigator는 `missing`으로 알리고
   1로 끝난다 — 확인한 뒤 `--accept-missing`으로 마친다. 창 안에 놓친 cron tick은 Dagster가 따라잡지 않는다 —
   월간·주간 schedule의 tick이 창 안에 있었으면 그 job을 한 번 수동 실행할지 본다.
