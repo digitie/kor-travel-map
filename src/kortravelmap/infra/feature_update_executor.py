@@ -1626,12 +1626,20 @@ async def retry_or_fail_update_request_state(
         return FeatureUpdateRetryOutcome(
             request=rescheduled, rescheduled=True, max_retries=max_retries
         )
+    # 상한은 누적 ``retry_count``(launch 실패 재발행 포함)에 건다 — 단계마다 따로 세지 않는다.
+    # 그래서 provider 단계 상한(2회)으로 닫힐 때 누적이 상한보다 클 수 있다. 메시지가 상한 값만
+    # 적으면 실제 재발행 수와 어긋나므로 둘 다 적는다(#1551 리뷰).
+    current = await get_update_request(session, request_id)
+    if current is None:
+        return None
     failed = await fail_update_request_after_retries(
         session,
         request_id,
         expected_generation=expected_generation,
         owner_dagster_run_id=owner_dagster_run_id,
-        error_message=f"재발행 {max_retries}회 소진: {failure_message}",
+        error_message=(
+            f"재발행 상한 {max_retries}회 소진(누적 {current.retry_count}회): {failure_message}"
+        ),
     )
     if failed is None:
         return None

@@ -701,7 +701,7 @@ def _transient_outcome(
             status="queued" if rescheduled else "failed",
             retry_count=1 if rescheduled else 5,
             next_dispatch_at=_NOW if rescheduled else None,
-            error_message=None if rescheduled else "재발행 5회 소진: lock timeout",
+            error_message=None if rescheduled else "재발행 상한 5회 소진(누적 5회): lock timeout",
         ),
         rescheduled=rescheduled,
         max_retries=5,

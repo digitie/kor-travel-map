@@ -414,6 +414,12 @@ async def _reschedule_after_transient_failure(
 #: 실행이 provider 갱신을 시작한 뒤의 일시 실패는 재발행할 때마다 provider 호출을 처음부터
 #: 다시 한다(앞서 commit된 scope도). 쿼터가 좁은 상류(data.go.kr·OpiNet)를 위해 그 재발행 수를
 #: 줄인다(적대 리뷰 2026-11-24). claim·scope 해석 단계의 실패는 상류를 부르지 않았다.
+#:
+#: 상한은 request의 **누적** ``retry_count``에 건다 — launch 실패·claim 전 일시 실패의 재발행도
+#: 함께 센다(#1551 결정). 그래서 앞서 재발행이 2회 쌓인 request는 provider 단계의 첫 일시 실패에서
+#: 재발행 없이 닫힌다. 단계마다 따로 세려면 열이 하나 더 필요하고(migration), 이미 재발행을
+#: 거듭한 요청을 provider 단계에서 더 미루지 않는 편이 상류 쿼터에도 안전하다. 종결 메시지는 상한과
+#: 누적을 함께 적는다(``재발행 상한 2회 소진(누적 4회): …``).
 _PROVIDER_STAGE_MAX_RETRIES: Final[int] = 2
 _DB_CALL_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (2.0, 5.0)
 

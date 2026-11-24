@@ -401,7 +401,9 @@ async def test_failure_sensor_path_backs_off_pre_start_failures_up_to_the_cap(
     assert final is not None
     assert final.status == "failed"
     assert final.error_message is not None
-    assert final.error_message.startswith(f"재발행 {FEATURE_UPDATE_MAX_RETRIES}회 소진")
+    assert final.error_message.startswith(
+        f"재발행 상한 {FEATURE_UPDATE_MAX_RETRIES}회 소진(누적 {FEATURE_UPDATE_MAX_RETRIES}회)"
+    )
     codes = [event["code"] for event in await _events(migrated_engine, request.job_id)]
     assert codes.count(FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE) == FEATURE_UPDATE_MAX_RETRIES
     assert codes.count(FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE) == 1
@@ -463,7 +465,7 @@ async def test_failure_sensor_path_reschedules_a_claimed_transient_failure_up_to
     assert final.status == "failed"
     assert final.retry_count == 2
     assert final.error_message is not None
-    assert final.error_message.startswith("재발행 2회 소진")
+    assert final.error_message.startswith("재발행 상한 2회 소진(누적 2회)")
 
     events = await _events(migrated_engine, request.job_id)
     scheduled = [e for e in events if e["code"] == FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE]
@@ -474,6 +476,48 @@ async def test_failure_sensor_path_reschedules_a_claimed_transient_failure_up_to
     assert len(exhausted) == 1
     assert exhausted[0]["payload"]["dagster_run_id"] == "run-final"
     assert exhausted[0]["payload"]["max_retries"] == 2
+
+
+async def test_provider_stage_cap_counts_launch_failure_retries_too(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """provider 단계 상한(2회)은 누적 ``retry_count``에 건다(#1551 결정).
+
+    launch 실패 재발행도 센다. launch 실패로 3회 재발행된 요청은 provider 단계 첫 일시 실패에서
+    재발행 없이 닫힌다. 종결 메시지는 상한과 실제 누적을 함께 적는다 — 종전에는 ``재발행 2회
+    소진``이라 적어 실제 재발행 수(3회)와 어긋났다.
+    """
+    request = await _enqueue(migrated_engine, "provider-cap-cumulative")
+    client = AsyncKorTravelMapClient(migrated_engine)
+    generation = request.generation
+    for attempt in (1, 2, 3):
+        retried = await client.fail_update_request(
+            request.request_id,
+            owner_dagster_run_id=f"run-launch-{attempt}",
+            expected_request_generation=generation,
+            error_message="Dagster feature update worker failed — launch failed",
+            failure_payload={"source": "dagster_run_failure"},
+        )
+        assert retried is not None
+        assert retried.status == "queued"
+        generation = retried.generation
+
+    await _claim(migrated_engine, request.request_id, generation=generation, run_id="run-provider")
+    outcome = await client.reschedule_update_request_after_failure(
+        request.request_id,
+        owner_dagster_run_id="run-provider",
+        expected_request_generation=generation,
+        failure=summarize_failure(_LockTimeout("lock timeout")),
+        stage="refreshing:1:dataset_wide",
+        max_retries=2,
+    )
+
+    assert outcome is not None
+    assert outcome.rescheduled is False
+    assert outcome.request.status == "failed"
+    assert outcome.request.retry_count == 3
+    assert outcome.request.error_message is not None
+    assert outcome.request.error_message.startswith("재발행 상한 2회 소진(누적 3회): ")
 
 
 async def _enqueue_cache_target_request(engine: AsyncEngine, prefix: str) -> FeatureUpdateRequest:
