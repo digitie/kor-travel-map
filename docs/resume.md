@@ -1,3 +1,13 @@
+## 2026-11-24 — 큐 요청 재발행 후속(#1544 리뷰, PR #1551)
+
+- failure sensor의 claim 뒤 재발행도 provider 단계 상한 2회, executor 밖 종결(재발행 소진·TerminalizationFailed·
+  RUN_FAILED)의 relay `failed`를 import job event와 분리하고 cache target `last_failed_at`을 찍음, 후처리 시간 상한
+  (문장 5초·전체 20초), executor가 이미 `failed`로 닫은 generation의 run을 성공으로 끝내지 않음. OpenAPI·migration 없음.
+- 다음: 회전에 싣는다. 456 적용은 provider 갱신 단계(running)의 큐 요청이 있으면 그 phase transaction의 `FOR UPDATE`
+  때문에 1초 lock timeout(55P03)으로 실패한다(데이터 변화 없음) — 회전 직전 `SELECT count(*) FROM ops.import_jobs WHERE
+  kind = 'feature_update_request' AND status = 'running'`이 0인지 본다. cache target `poi_cache_targets` 갱신은 alembic
+  458(#1548) 전까지 live topic 행을 기다릴 수 있다 — 후처리 상한이 그 대기를 5초로 끊는다.
+
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영
 
 - `scripts/n150/dagster-freeze.py` `status|freeze [--resume]|unfreeze --snapshot <절대 경로>`(Map location 전체, run 0·run-status

@@ -1,3 +1,33 @@
+## 2026-11-24 — 큐 요청 재발행 후속: 상한·종결 후처리·실패 run 표시(#1544 리뷰, PR #1551)
+
+- 배경: #1544(큐 요청 일시 실패 재발행, alembic 456)를 머지 뒤 두 관점으로 리뷰했다. 지적마다 최신 main(#1546 event
+  clock slot 포함)에서 코드로 다시 확인했다.
+- 실패 run이 SUCCESS로 보이던 것: executor가 결정적 실패를 `failed`로 닫은 뒤 scope/request lock 정리 중 연결이
+  끊기면 op는 일시 DB 실패를 받고 재발행을 시도한다. 상태가 이미 종결돼 재발행은 0행이고, op는 `state_changed`로 성공을
+  돌려 Dagster run이 SUCCESS, failure sensor 알림이 없었다. 이제 재발행이 0행이면 request를 다시 읽어 이 generation이
+  `failed`면 그 오류로 run을 실패시킨다(metadata에 `failure_class`를 싣지 않아 sensor는 닫힌 request를 건드리지 않고
+  알림만 보낸다). generation 전진·queued·done이면 종전처럼 성공.
+- failure sensor의 재발행 상한: op가 재발행을 기록하지 못하고 죽으면 sensor가 대신 재발행하는데 실패 단계를 몰라 기본
+  5회를 썼다(op는 provider 갱신 단계에서 2회). `run_failure_detail`이 op Failure metadata의 `stage`도 꺼내고, sensor가
+  op와 같은 `_max_retries_for_stage`로 고른 상한을 `fail_update_request(max_retries=…)`에 넘긴다.
+- 종결 후처리: executor 밖 종결(재발행 소진·TerminalizationFailed·RUN_FAILED)의 후처리를 relay `failed` →
+  cache target `last_failed_at` → import job event 세 단계로 나눴다. 단계마다 자기 transaction이라 import job event
+  쪽 실패(trigger 거부 등)가 relay를 되감지 않는다. `last_failed_at`은 executor 종결과 같이 활성 target(삭제·갱신 끔·
+  refresh 끔 제외)에만 찍는다 — 계획이 없으므로 scope key로 고른다(`mark_poi_cache_target_keys_refresh_failed`).
+  `poi_cache_targets` 갱신은 alembic 458 전에는 `dataset_projection` live topic 행을 기다릴 수 있어 상태 전이 transaction에
+  넣지 않았다.
+- 시간 상한: #1546 뒤 event clock은 `SKIP LOCKED` slot이라 리뷰가 짚은 "event clock 30초 × 2" 대기는 더 없다. 다만
+  relay stream lock helper가 그 transaction의 `lock_timeout`을 0(무제한)으로 되돌려 relay 뒤 문장의 대기는 묶여 있지
+  않았고, 이번에 더한 target 갱신은 live topic 행을 기다릴 수 있다. 그래서 후처리는 transaction-local
+  `statement_timeout` 5초, 전체 20초로 묶었다 — 상태 전이(`lock_timeout` 30초)와 합쳐 Dagster sensor 평가 60초 안.
+- 시험: dagster 단위(`failed` generation이면 run 실패·다른 generation이면 성공, sensor 상한 2회·launch 실패 5회,
+  stage 추출). 통합(PostGIS) — claim 뒤 transient_db 2회 재발행 뒤 "재발행 2회 소진", 세 종결 경로의 `last_failed_at`
+  (활성만), import job event 실패에도 relay 단계·target 시각이 남음, target 행을 다른 transaction이 쥔 동안 후처리가
+  상한 안에서 끝남(상한을 빼는 변이에서 30초 대기 빨강 확인). 기존 `test_client_orchestration`·`test_feature_update_repo`·
+  `test_feature_update_executor` 70건 통과.
+- 반영하지 않은 것: migration 456 lock 실패는 코드 결함이 아니라 회전 절차라 `resume.md` 다음 단계에 점검 문장을
+  적었다(provider 갱신 단계 큐 요청이 있으면 55P03, 데이터 변화 없음).
+
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영(수집 실패 감사 §4 #10·#11)
 
 - #10: n150 `~/freeze.py`는 산사태 schedule과 update-request 큐 sensor 둘만 멈춰, PG에 쓰는 나머지 Map

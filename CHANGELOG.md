@@ -1,5 +1,13 @@
 # CHANGELOG
 
+## 2026-11-24 — 큐 요청 재발행 후속(#1544 리뷰)
+
+- failure sensor가 claim 뒤 일시 DB 실패를 대신 재발행할 때도 실패 단계로 상한을 고른다 — provider 갱신 단계는 2회(종전 기본 5회, 쿼터가 좁은 상류를 첫 scope부터 다시 부르던 것).
+- 재발행 소진·`FeatureUpdateTerminalizationFailed`·run 실패(`FEATURE_UPDATE_RUN_FAILED`)로 닫은 cache target 요청도 활성 target의 `last_failed_at`을 찍는다.
+- executor 밖 종결의 PinVi relay `failed`를 import job event와 다른 transaction에 쓴다 — event 기록이 실패해도 relay가 되감기지 않는다. 상태 전이 뒤 후처리는 단계마다 자기 transaction이고 문장 5초·전체 20초 상한이다(failure sensor 평가 60초 안).
+- 큐 worker run: executor가 이미 `failed`로 닫은 generation은 정리 중 연결 오류가 나도 run을 실패로 끝낸다(종전에는 SUCCESS로 보이고 실패 알림이 없었다).
+- OpenAPI·migration 변경 없음.
+
 ## 2026-11-24 — n150 Dagster 전체 freeze 도구(수집 실패 감사 §4 #10·#11)
 
 - `scripts/n150/dagster-freeze.py status|freeze|unfreeze --snapshot <절대 경로> [--resume] [--dry-run] [--accept-missing]`: Map code location의 RUNNING schedule·sensor 전체를 스냅샷 뒤 멈추고 Map run 0까지 기다린다(run-status sensor는 run이 빠지고 tick이 따라잡은 뒤 마지막에), 스냅샷의 RUNNING만 되돌린다. 옛 `~/freeze.py`(두 instigator만 정지)를 대신한다. R4 runbook 2·9단계가 이것을 쓴다.
