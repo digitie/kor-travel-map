@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from collections.abc import AsyncIterator
 from datetime import timedelta
@@ -16,11 +17,14 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import kortravelmap.client as client_mod
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.infra.failure_summary import summarize_failure
 from kortravelmap.infra.feature_update_executor import (
     FEATURE_UPDATE_EXECUTION_FAILED_EVENT_CODE,
     FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE,
     FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE,
+    FEATURE_UPDATE_RUN_FAILED_EVENT_CODE,
     FeatureUpdateTransientFailure,
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
@@ -36,6 +40,7 @@ from kortravelmap.infra.feature_update_repo import (
     start_update_request,
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
+from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
 from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
@@ -47,7 +52,9 @@ _TRUNCATE_SQL = """
 TRUNCATE
     ops.feature_update_requests,
     ops.import_job_events,
-    ops.import_jobs
+    ops.import_jobs,
+    ops.poi_cache_target_feature_links,
+    ops.poi_cache_targets
 RESTART IDENTITY CASCADE
 """
 
@@ -399,6 +406,7 @@ async def test_failure_sensor_path_backs_off_pre_start_failures_up_to_the_cap(
     assert codes.count(FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE) == FEATURE_UPDATE_MAX_RETRIES
     assert codes.count(FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE) == 1
 
+
 async def _claim(engine: AsyncEngine, request_id: str, *, generation: int, run_id: str) -> None:
     async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
         started = await start_update_request(
@@ -467,3 +475,186 @@ async def test_failure_sensor_path_reschedules_a_claimed_transient_failure_up_to
     assert exhausted[0]["payload"]["dagster_run_id"] == "run-final"
     assert exhausted[0]["payload"]["max_retries"] == 2
 
+
+async def _enqueue_cache_target_request(engine: AsyncEngine, prefix: str) -> FeatureUpdateRequest:
+    """활성 target 하나와 갱신을 끈 target 하나를 가리키는 cache target key 요청."""
+    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
+        membership = await _membership(session, f"{prefix}-dataset")
+        for key, enabled in ((f"{prefix}-active", True), (f"{prefix}-disabled", False)):
+            await upsert_poi_cache_target(
+                session,
+                external_system="external-app",
+                target_key=key,
+                lon=126.9780,
+                lat=37.5665,
+                radius_km=1.0,
+                update_enabled=enabled,
+            )
+        request = await enqueue_feature_update_request(
+            session,
+            scope={
+                "type": "cache_target_keys",
+                "external_system": "external-app",
+                "target_keys": [f"{prefix}-active", f"{prefix}-disabled"],
+            },
+            dataset_memberships=[membership],
+        )
+    assert isinstance(request, FeatureUpdateRequest)
+    return request
+
+
+async def _target_failed_at(engine: AsyncEngine, prefix: str) -> dict[str, Any]:
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT target_key, last_failed_at FROM ops.poi_cache_targets "
+                    "WHERE target_key LIKE :prefix ORDER BY target_key"
+                ),
+                {"prefix": f"{prefix}-%"},
+            )
+        ).all()
+    return {str(row.target_key): row.last_failed_at for row in rows}
+
+
+@pytest.mark.parametrize("closure", ["retries_exhausted", "terminalization_failed", "run_failed"])
+async def test_closures_outside_the_executor_stamp_the_cache_targets_failed_at(
+    migrated_engine: AsyncEngine,
+    closure: str,
+) -> None:
+    """재발행 소진·``FeatureUpdateTerminalizationFailed``·RUN_FAILED 종결도 target 실패 시각을
+    찍는다 — executor 종결처럼 활성 target만(#1544 리뷰)."""
+    prefix = f"stamp-{closure.replace('_', '-')}"
+    request = await _enqueue_cache_target_request(migrated_engine, prefix)
+    client = AsyncKorTravelMapClient(migrated_engine)
+    await _claim(migrated_engine, request.request_id, generation=request.generation, run_id="run-1")
+
+    if closure == "retries_exhausted":
+        outcome = await client.reschedule_update_request_after_failure(
+            request.request_id,
+            owner_dagster_run_id="run-1",
+            expected_request_generation=request.generation,
+            failure=summarize_failure(_LockTimeout("lock timeout")),
+            max_retries=0,
+        )
+        assert outcome is not None
+        assert outcome.rescheduled is False
+        closed = outcome.request
+    elif closure == "terminalization_failed":
+        failed = await client.fail_update_request_after_failure(
+            request.request_id,
+            owner_dagster_run_id="run-1",
+            expected_request_generation=request.generation,
+            failure=summarize_failure(RuntimeError("provider exploded")),
+            stage="refreshing:1:dataset_wide",
+        )
+        assert failed is not None
+        closed = failed
+    else:
+        failed = await client.fail_update_request(
+            request.request_id,
+            owner_dagster_run_id="run-1",
+            expected_request_generation=request.generation,
+            error_message="Dagster feature update worker failed — run killed",
+            failure_payload={"source": "dagster_run_failure"},
+        )
+        assert failed is not None
+        closed = failed
+    assert closed.status == "failed"
+
+    stamps = await _target_failed_at(migrated_engine, prefix)
+    assert stamps[f"{prefix}-active"] is not None
+    assert stamps[f"{prefix}-disabled"] is None
+
+
+async def test_failure_followups_survive_an_import_job_event_failure(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """relay ``failed``·target 실패 시각은 import job event와 다른 transaction이다.
+
+    종전에는 relay ``failed``가 import job event INSERT와 한 transaction이라, event 쪽이 실패하면
+    상태만 ``failed``로 commit되고 relay는 영구 유실됐다(#1544 리뷰).
+    """
+    prefix = "followup-split"
+    request = await _enqueue_cache_target_request(migrated_engine, prefix)
+    client = AsyncKorTravelMapClient(migrated_engine)
+    await _claim(migrated_engine, request.request_id, generation=request.generation, run_id="run-1")
+    relay_calls: list[str] = []
+    original_relay = client_mod.record_update_request_relay_failed
+
+    async def relay(
+        session: AsyncSession, failed: FeatureUpdateRequest, *, event_code: str
+    ) -> None:
+        relay_calls.append(event_code)
+        await original_relay(session, failed, event_code=event_code)
+
+    async def broken_event(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("import job event insert rejected")
+
+    monkeypatch.setattr(client_mod, "record_update_request_relay_failed", relay)
+    monkeypatch.setattr(client_mod, "record_update_request_failure_events", broken_event)
+    monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS", 0.0)
+
+    failed = await client.fail_update_request(
+        request.request_id,
+        owner_dagster_run_id="run-1",
+        expected_request_generation=request.generation,
+        error_message="Dagster feature update worker failed — run killed",
+        failure_payload={"source": "dagster_run_failure"},
+    )
+
+    assert failed is not None
+    assert failed.status == "failed"
+    assert relay_calls == [FEATURE_UPDATE_RUN_FAILED_EVENT_CODE]
+    stamps = await _target_failed_at(migrated_engine, prefix)
+    assert stamps[f"{prefix}-active"] is not None
+    codes = [event["code"] for event in await _events(migrated_engine, request.job_id)]
+    assert FEATURE_UPDATE_RUN_FAILED_EVENT_CODE not in codes
+
+
+async def test_failure_followups_are_bounded_while_a_lock_is_held(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """상태 전이 뒤 후처리는 lock을 끝없이 기다리지 않는다 — failure sensor 평가 상한 안.
+
+    target 행을 다른 transaction이 쥔 동안 RUN_FAILED 종결을 반영한다. target 실패 시각 단계는
+    문장 상한에서 포기하고, 다음 단계(import job event)는 그대로 쓴다. 상한이 없으면 이 호출은
+    lock이 풀릴 때까지 기다린다(#1544 리뷰).
+    """
+    prefix = "followup-bounded"
+    request = await _enqueue_cache_target_request(migrated_engine, prefix)
+    client = AsyncKorTravelMapClient(migrated_engine)
+    await _claim(migrated_engine, request.request_id, generation=request.generation, run_id="run-1")
+    monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_STATEMENT_TIMEOUT_SECONDS", 0.3)
+    monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS", 0.0)
+
+    async with AsyncSession(migrated_engine) as holder, holder.begin():
+        await holder.execute(
+            text(
+                "SELECT target_id FROM ops.poi_cache_targets "
+                "WHERE target_key = :key FOR UPDATE"
+            ),
+            {"key": f"{prefix}-active"},
+        )
+        loop = asyncio.get_running_loop()
+        started_at = loop.time()
+        failed = await asyncio.wait_for(
+            client.fail_update_request(
+                request.request_id,
+                owner_dagster_run_id="run-1",
+                expected_request_generation=request.generation,
+                error_message="Dagster feature update worker failed — run killed",
+                failure_payload={"source": "dagster_run_failure"},
+            ),
+            timeout=30,
+        )
+        elapsed = loop.time() - started_at
+
+    assert failed is not None
+    assert failed.status == "failed"
+    assert elapsed < 10
+    assert (await _target_failed_at(migrated_engine, prefix))[f"{prefix}-active"] is None
+    codes = [event["code"] for event in await _events(migrated_engine, request.job_id)]
+    assert codes.count(FEATURE_UPDATE_RUN_FAILED_EVENT_CODE) == 1

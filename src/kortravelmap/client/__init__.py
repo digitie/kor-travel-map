@@ -44,7 +44,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
 from types import TracebackType
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Any, Final, Literal
 
 from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
@@ -239,12 +239,15 @@ from kortravelmap.infra.feature_repo import (
 )
 from kortravelmap.infra.feature_update_executor import (
     FEATURE_UPDATE_EXECUTION_FAILED_EVENT_CODE,
+    FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE,
     FEATURE_UPDATE_RUN_FAILED_EVENT_CODE,
     FeatureUpdateExecutionResult,
     FeatureUpdateRetryOutcome,
     ProviderDatasetRefreshRunner,
     fail_update_request_state,
+    mark_update_request_cache_targets_failed,
     record_update_request_failure_events,
+    record_update_request_relay_failed,
     record_update_request_retry_events,
     retry_or_fail_update_request_state,
 )
@@ -396,6 +399,15 @@ if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
 
 _LOG = logging.getLogger(__name__)
+
+#: 큐 요청 상태 전이 뒤 후처리(relay ``failed``·target 실패 시각·import job event) 전체의 상한(초).
+#: failure sensor는 평가 안에서 상태 전이(``lock_timeout`` 30초)와 이것을 함께 한다 — 합이 Dagster
+#: sensor 평가 상한(기본 60초) 안이어야 한다(#1544 리뷰).
+_FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS: Final[float] = 20.0
+#: 후처리 문장 하나의 상한(초, transaction-local ``statement_timeout``).
+_FEATURE_UPDATE_FOLLOWUP_STATEMENT_TIMEOUT_SECONDS: Final[float] = 5.0
+#: 후처리 단계가 실패했을 때 한 번 더 시도하기 전의 대기(초).
+_FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS: Final[float] = 1.0
 
 __all__ = [
     "AsyncKorTravelMapClient",
@@ -2146,10 +2158,11 @@ class AsyncKorTravelMapClient:
           갱신 단계면 2회, #1544 리뷰). 그 밖(run이 도중에 죽음)은 원인을 모르므로 재발행하지 않고
           ``failed``로 닫고 PinVi relay에도 ``failed``를 낸다.
 
-        상태 전이와 event 기록은 **다른 transaction**이다 — event 기록의 일시
-        실패(lock·연결)가 상태 전이를 막지 않게 한다(전역 event clock 단일 행 경합은
-        alembic 457이 없앴다). event 기록이 실패하면 상태는 이미 맞고 경고만 남긴다.
-        상태가 맞지 않으면(executor가 이미 종결·재발행했다, 취소됐다 등) ``None``.
+        상태 전이와 후처리(relay ``failed``·target 실패 시각·import job event)는 **다른
+        transaction**이다 — 후처리의 일시 실패(lock·연결)가 상태 전이를 막지 않게 한다(전역 event
+        clock 단일 행 경합은 alembic 457이 없앴다). 후처리는 단계마다 자기 transaction이고 전체가
+        시간 상한 안에서 끝난다(:meth:`_record_after_state_transition`). 실패하면 상태는 이미 맞고
+        경고만 남긴다. 상태가 맞지 않으면(executor가 이미 종결·재발행했다, 취소됐다 등) ``None``.
         """
         message = error_message or "Dagster feature update worker run failed"
         payload = dict(failure_payload or {})
@@ -2191,28 +2204,20 @@ class AsyncKorTravelMapClient:
                         error_message=message,
                     )
             if outcome is not None:
-                await self._record_update_request_events_best_effort(
+                await self._record_retry_outcome(
                     session,
-                    lambda: record_update_request_retry_events(
-                        session,
-                        outcome,
-                        owner_dagster_run_id=owner_dagster_run_id,
-                        failure_message=message,
-                        payload=retry_payload,
-                    ),
-                    request_id=request_id,
+                    outcome,
+                    owner_dagster_run_id=owner_dagster_run_id,
+                    failure_message=message,
+                    payload=retry_payload,
                 )
                 return outcome.request
             if failed is not None:
-                await self._record_update_request_events_best_effort(
+                await self._record_failed_request(
                     session,
-                    lambda: record_update_request_failure_events(
-                        session,
-                        failed,
-                        event_code=FEATURE_UPDATE_RUN_FAILED_EVENT_CODE,
-                        payload={**payload, "dagster_run_id": owner_dagster_run_id},
-                    ),
-                    request_id=request_id,
+                    failed,
+                    event_code=FEATURE_UPDATE_RUN_FAILED_EVENT_CODE,
+                    payload={**payload, "dagster_run_id": owner_dagster_run_id},
                 )
             return failed
 
@@ -2251,16 +2256,12 @@ class AsyncKorTravelMapClient:
                     max_retries=max_retries,
                 )
             if outcome is not None:
-                await self._record_update_request_events_best_effort(
+                await self._record_retry_outcome(
                     session,
-                    lambda: record_update_request_retry_events(
-                        session,
-                        outcome,
-                        owner_dagster_run_id=owner_dagster_run_id,
-                        failure_message=message,
-                        payload=payload,
-                    ),
-                    request_id=request_id,
+                    outcome,
+                    owner_dagster_run_id=owner_dagster_run_id,
+                    failure_message=message,
+                    payload=payload,
                 )
             return outcome
 
@@ -2288,42 +2289,157 @@ class AsyncKorTravelMapClient:
                     error_message=failure.describe(),
                 )
             if failed is not None:
-                await self._record_update_request_events_best_effort(
+                await self._record_failed_request(
                     session,
-                    lambda: record_update_request_failure_events(
-                        session,
-                        failed,
-                        event_code=FEATURE_UPDATE_EXECUTION_FAILED_EVENT_CODE,
-                        payload={**payload, "dagster_run_id": owner_dagster_run_id},
-                    ),
-                    request_id=request_id,
+                    failed,
+                    event_code=FEATURE_UPDATE_EXECUTION_FAILED_EVENT_CODE,
+                    payload={**payload, "dagster_run_id": owner_dagster_run_id},
                 )
             return failed
 
-    @staticmethod
-    async def _record_update_request_events_best_effort(
+    @classmethod
+    async def _record_retry_outcome(
+        cls,
         session: AsyncSession,
-        record: Callable[[], Awaitable[None]],
+        outcome: FeatureUpdateRetryOutcome,
+        *,
+        owner_dagster_run_id: str,
+        failure_message: str,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """재발행·상한 소진의 후처리. 소진(``failed``)이면 relay·target 실패 시각도 쓴다."""
+        steps: list[tuple[str, Callable[[], Awaitable[object]]]] = []
+        if not outcome.rescheduled:
+            steps.extend(
+                cls._failed_request_side_effects(
+                    session,
+                    outcome.request,
+                    event_code=FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE,
+                )
+            )
+        steps.append(
+            (
+                "import_job_event",
+                lambda: record_update_request_retry_events(
+                    session,
+                    outcome,
+                    owner_dagster_run_id=owner_dagster_run_id,
+                    failure_message=failure_message,
+                    payload=payload,
+                ),
+            )
+        )
+        await cls._record_after_state_transition(
+            session, steps, request_id=outcome.request.request_id
+        )
+
+    @classmethod
+    async def _record_failed_request(
+        cls,
+        session: AsyncSession,
+        failed: FeatureUpdateRequest,
+        *,
+        event_code: str,
+        payload: Mapping[str, Any],
+    ) -> None:
+        """executor 밖에서 ``failed``로 닫은 request의 후처리 — relay·target 실패 시각·event."""
+        await cls._record_after_state_transition(
+            session,
+            [
+                *cls._failed_request_side_effects(session, failed, event_code=event_code),
+                (
+                    "import_job_event",
+                    lambda: record_update_request_failure_events(
+                        session, failed, event_code=event_code, payload=payload
+                    ),
+                ),
+            ],
+            request_id=failed.request_id,
+        )
+
+    @staticmethod
+    def _failed_request_side_effects(
+        session: AsyncSession,
+        failed: FeatureUpdateRequest,
+        *,
+        event_code: str,
+    ) -> list[tuple[str, Callable[[], Awaitable[object]]]]:
+        """``failed``의 바깥 사실 둘 — PinVi relay ``failed``와 cache target ``last_failed_at``.
+
+        relay를 먼저 쓴다(PinVi가 요청의 끝을 보는 유일한 길이다). 각자 다른 transaction이다 —
+        target 갱신은 live topic 행을 기다릴 수 있고(alembic 458 전), import job event는 trigger가
+        거부할 수 있다. 어느 쪽 실패도 relay를 되감지 않게 한다(#1544 리뷰).
+        """
+        return [
+            (
+                "relay_failed",
+                lambda: record_update_request_relay_failed(
+                    session, failed, event_code=event_code
+                ),
+            ),
+            (
+                "cache_target_failed_at",
+                lambda: mark_update_request_cache_targets_failed(session, failed),
+            ),
+        ]
+
+    @staticmethod
+    async def _record_after_state_transition(
+        session: AsyncSession,
+        steps: Sequence[tuple[str, Callable[[], Awaitable[object]]]],
         *,
         request_id: str,
     ) -> None:
-        """상태 전이 뒤의 event 기록 — 실패해도 상태는 이미 맞다. 한 번 더 시도하고 경고만
-        남긴다."""
-        for attempt in (1, 2):
-            try:
-                async with session.begin():
-                    await record()
-                return
-            except Exception as exc:
-                if attempt == 2:
+        """상태 전이 뒤의 후처리 — 단계마다 자기 transaction, 실패해도 상태는 이미 맞다.
+
+        단계마다 한 번 더 시도하고 경고만 남긴다. failure sensor는 이것을 평가 안에서 하므로 전체를
+        :data:`_FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS` 안에 끝낸다 — 상태 전이(``lock_timeout``
+        30초)와 합쳐 Dagster sensor 평가 상한(60초) 안이어야 한다(#1544 리뷰). 문장 하나의 대기는
+        ``statement_timeout``으로 묶는다. ``lock_timeout``으로는 못 묶는다 — relay stream lock
+        helper(:func:`~kortravelmap.infra.cache_target_stream_repo.lock_stream_row_or_conflict`)가
+        그 transaction의 ``lock_timeout``을 0(무제한)으로 되돌린다.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS
+        for step, record in steps:
+            for attempt in (1, 2):
+                remaining = deadline - loop.time()
+                if remaining <= 0:
                     _LOG.warning(
-                        "feature update event 기록 실패(상태 전이는 commit됨): request_id=%s "
-                        "error_type=%s",
+                        "feature update 후처리 시간 상한 소진(상태 전이는 commit됨): "
+                        "request_id=%s step=%s",
                         request_id,
-                        type(exc).__name__,
+                        step,
                     )
-                    return
-                await asyncio.sleep(1.0)
+                    break
+                timeout_ms = max(
+                    1,
+                    int(min(_FEATURE_UPDATE_FOLLOWUP_STATEMENT_TIMEOUT_SECONDS, remaining) * 1000),
+                )
+                try:
+                    async with session.begin():
+                        await session.execute(
+                            text("SELECT set_config('statement_timeout', :timeout, true)"),
+                            {"timeout": f"{timeout_ms}ms"},
+                        )
+                        await record()
+                    break
+                except Exception as exc:
+                    if attempt == 2:
+                        _LOG.warning(
+                            "feature update 후처리 실패(상태 전이는 commit됨): request_id=%s "
+                            "step=%s error_type=%s",
+                            request_id,
+                            step,
+                            type(exc).__name__,
+                        )
+                        break
+                    await asyncio.sleep(
+                        min(
+                            _FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS,
+                            max(0.0, deadline - loop.time()),
+                        )
+                    )
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         """Dagster sensor가 다음 queued request를 상태 변경 없이 확인한다."""
