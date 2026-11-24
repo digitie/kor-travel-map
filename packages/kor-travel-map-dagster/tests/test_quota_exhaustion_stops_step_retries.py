@@ -811,3 +811,43 @@ def test_the_asset_boundary_keeps_retries_for_a_short_busy_503(tracked: bool) ->
     with pytest.raises(TransportExportBusy) as caught:
         asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
     assert caught.value is cause
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize("code", ["EXPORT_DISABLED", "EXPORT_TOO_LARGE"])
+def test_the_asset_boundary_stops_retries_for_a_disabled_or_too_large_export(
+    tracked: bool, code: str
+) -> None:
+    from kortravelmap.providers.kor_travel_transport import (
+        TransportExportDisabled,
+        TransportExportTooLarge,
+    )
+
+    cls = TransportExportDisabled if code == "EXPORT_DISABLED" else TransportExportTooLarge
+    cause = cls("503", code=code, retry_after=3600.0)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(Failure) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value.allow_retries is False
+    metadata = {key: value.value for key, value in caught.value.metadata.items()}
+    assert metadata["transport_problem_code"] == code
+    assert metadata["failure_kind"] == cause.failure_kind
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_keeps_retries_for_an_inconsistent_source(tracked: bool) -> None:
+    from kortravelmap.providers.kor_travel_transport import TransportSourceInconsistent
+
+    cause = TransportSourceInconsistent(
+        "503", code="EXPORT_SOURCE_INCONSISTENT", retry_after=300.0
+    )
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(TransportSourceInconsistent) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value is cause

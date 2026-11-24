@@ -6,7 +6,9 @@
   `EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET`은 HTTP·step 재시도 없이 run을 **실패**로 끝낸다(상태 job metadata
   `outcome=skipped_upstream_not_current`, `transport_problem_code`·`transport_retry_after_seconds`·`last_success_at`; Valkey
   세대 유지). `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`는 같은 요청을 `Retry-After`대로(한 번 60초 상한, run
-  예산 공유) 4회까지 다시 묻는다. code가 없거나 모르는 503은 종전과 같다.
+  예산 공유) 4회까지 다시 묻는다(`Retry-After`가 60초를 넘으면 기다리지 않고 재시도 없이 실패).
+  `EXPORT_DISABLED`·`EXPORT_TOO_LARGE`는 재시도 없이 실패, `EXPORT_SOURCE_INCONSISTENT`는 step 재시도. code가 없거나
+  모르는 503은 종전과 같다. 분류는 code로만 하고 `Retry-After`는 힌트로 metadata에 싣는다.
 - HTTP 층 재시도에 408·429(`Retry-After`)·500을 더했다. 400·422는 재시도 없는 `transport_request_rejected`.
 - Valkey 상태 job 주유소·휴게소 유가: 첫 페이지 `last_success_at`이 서비스 세대와 같으면 나머지 페이지와 교체를
   건너뛴다(`skipped=unchanged`, 6시간마다 전량).

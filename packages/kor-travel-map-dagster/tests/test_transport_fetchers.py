@@ -11,12 +11,20 @@ import httpx
 import pytest
 from kortravelmap.providers.kor_travel_transport import (
     SERVICE_TOKEN_HEADER,
+    TRANSPORT_BUSY_CODES,
+    TRANSPORT_PROBLEM_CODES,
+    TRANSPORT_RETRY_LATER_CODES,
+    TRANSPORT_SOURCE_NOT_CURRENT_CODES,
+    TRANSPORT_TERMINAL_CODES,
     TransportExportBusy,
     TransportExportContractError,
+    TransportExportDisabled,
     TransportExportEmpty,
     TransportExportHidden,
     TransportExportMalformed,
     TransportExportNotCurrent,
+    TransportExportTooLarge,
+    TransportSourceInconsistent,
     TransportSourceNotCurrent,
 )
 from kortravelmap.settings import KorTravelMapSettings
@@ -632,7 +640,10 @@ async def test_a_coded_not_current_503_is_not_retried_and_not_retryable(
     kind: str,
     fetch: Any,
 ) -> None:
-    """몇 시간짜리(돌발은 5분) 503 — HTTP 층도 step도 다시 부르지 않는다(run은 실패로 끝난다)."""
+    """다음 정기 수집 전에는 풀리지 않는 503 — HTTP 층도 step도 다시 부르지 않는다(run은 실패).
+
+    ``Retry-After``는 힌트로 실릴 뿐 대기에 쓰이지 않는다 — 값과 무관하게 같은 분류다.
+    """
     seen = _install(monkeypatch, lambda request: _problem(503, code, retry_after=retry_after))
     with pytest.raises(TransportSourceNotCurrent) as raised:
         _ = [item async for item in fetch(_settings())]
@@ -907,3 +918,116 @@ def test_server_timing_parsing_keeps_only_durations() -> None:
         "app": 9.0,
         "db": 4.0,
     }
+
+
+# ---------------------------------------------- 나머지 producer code·대기 상한(2026-11-24 리뷰)
+
+
+def test_every_producer_code_is_classified_exactly_once() -> None:
+    """transport ``ProblemCode`` 10종(PR #277) — 넷으로 나뉘고 겹치지 않는다."""
+    producer = {
+        "EXPORT_SOURCE_NOT_CURRENT",
+        "EXPORT_NO_HISTORY",
+        "EXPORT_INCIDENTS_NOT_CURRENT",
+        "EXPORT_EMPTY_SET",
+        "EXPORT_BUSY",
+        "EXPORT_PREPARE_TIMEOUT",
+        "EXPORT_DISABLED",
+        "EXPORT_SOURCE_INCONSISTENT",
+        "EXPORT_TOO_LARGE",
+        "TRANSIENT_DB",
+    }
+    groups = [
+        TRANSPORT_SOURCE_NOT_CURRENT_CODES,
+        TRANSPORT_BUSY_CODES,
+        TRANSPORT_TERMINAL_CODES,
+        TRANSPORT_RETRY_LATER_CODES,
+    ]
+    assert set(TRANSPORT_PROBLEM_CODES) == producer
+    assert sum(len(group) for group in groups) == len(producer)
+
+
+@pytest.mark.parametrize(
+    ("code", "expected", "kind"),
+    [
+        ("EXPORT_DISABLED", TransportExportDisabled, "transport_export_disabled"),
+        ("EXPORT_TOO_LARGE", TransportExportTooLarge, "transport_export_too_large"),
+    ],
+)
+async def test_a_disabled_or_too_large_export_is_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_sleeps: list[float],
+    code: str,
+    expected: type[Exception],
+    kind: str,
+) -> None:
+    """설정·데이터가 바뀌기 전에는 결정적으로 같다 — HTTP 층도 step도 다시 부르지 않는다."""
+    seen = _install(monkeypatch, lambda request: _problem(503, code, retry_after="3600"))
+    with pytest.raises(expected) as raised:
+        _ = [item async for item in fetch_transport_rail_stations(_settings())]
+    assert raised.value.retryable is False  # type: ignore[attr-defined]
+    assert raised.value.failure_kind == kind  # type: ignore[attr-defined]
+    assert raised.value.code == code  # type: ignore[attr-defined]
+    assert raised.value.retry_after == 3600.0  # type: ignore[attr-defined]
+    assert len(seen) == 1
+    assert retry_sleeps == []
+
+
+async def test_an_inconsistent_source_is_left_to_step_retries(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    """transport의 다음 수집·준비가 고친다 — HTTP 층에서는 같은 근거를 다시 묻지 않는다."""
+    seen = _install(
+        monkeypatch,
+        lambda request: _problem(503, "EXPORT_SOURCE_INCONSISTENT", retry_after="300"),
+    )
+    with pytest.raises(TransportSourceInconsistent) as raised:
+        _ = [item async for item in fetch_transport_fuel_stations(_settings())]
+    assert raised.value.retryable is True
+    assert raised.value.failure_kind == "transport_source_inconsistent"
+    assert raised.value.retry_after == 300.0
+    assert len(seen) == 1
+    assert retry_sleeps == []
+
+
+async def test_a_prepare_timeout_at_the_wait_cap_is_still_waited(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    """transport 기본 ``EXPORT_PREPARE_TIMEOUT`` Retry-After(60초)는 상한과 같다.
+
+    같으면 기다린다.
+    """
+    body = _golden("airports.json")
+    responses = iter(
+        [
+            _problem(503, "EXPORT_PREPARE_TIMEOUT", retry_after="60"),
+            httpx.Response(200, json=body),
+        ]
+    )
+    seen = _install(monkeypatch, lambda request: next(responses))
+    airports = [item async for item in fetch_transport_airports(_settings())]
+    assert airports
+    assert len(seen) == 2
+    assert retry_sleeps == [60.0]
+
+
+async def test_a_prepare_timeout_above_the_wait_cap_becomes_terminal(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_sleeps: list[float],
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """transport가 그 값을 60초 위로 올리면 기다리지 않고 재시도 없는 실패다.
+
+    조용히 바뀌지 않게 예외 문장과 경고 log에 남긴다.
+    """
+    seen = _install(
+        monkeypatch, lambda request: _problem(503, "EXPORT_PREPARE_TIMEOUT", retry_after="61")
+    )
+    with caplog.at_level("WARNING"), pytest.raises(TransportExportBusy) as raised:
+        _ = [item async for item in fetch_transport_airports(_settings())]
+    assert raised.value.retryable is False
+    assert raised.value.retry_after_exceeds_cap is True
+    assert "대기 상한" in str(raised.value)
+    assert any("대기 상한" in record.getMessage() for record in caplog.records)
+    assert len(seen) == 1
+    assert retry_sleeps == []

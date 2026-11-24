@@ -18,8 +18,10 @@
   ``EXPORT_EMPTY_SET``)과 ``Retry-After``가 HTTP 층 상한보다 긴 경합 503은 step 재시도 없이 **run을
   실패로** 끝낸다(``outcome=skipped_upstream_not_current``, code·``Retry-After``·서비스 세대의 원천
   수집 시각을 metadata에). 세대는 그대로다. Map에는 상류 장애 경보가 따로 없어 빨간 run이 유일한
-  신호이므로 초록으로 건너뛰지 않는다. 몇 초짜리 경합(``EXPORT_BUSY`` 등)은 fetcher가 같은 요청을
-  다시 보낸다. code가 없거나 모르는 code의 503은 종전대로 step 재시도다.
+  신호이므로 초록으로 건너뛰지 않는다. 경합(``EXPORT_BUSY`` 등)은 fetcher가 같은 요청을 다시
+  보낸다. ``EXPORT_DISABLED``·``EXPORT_TOO_LARGE``는 기존 규약
+  (``raise_terminal_if_transport_unrecoverable``)으로 재시도 없이 실패하고,
+  ``EXPORT_SOURCE_INCONSISTENT``와 code가 없거나 모르는 code의 503은 step 재시도다.
 - **바뀌지 않은 집합은 다시 받지 않는다**(주유소·휴게소 유가, 감사 MC-04): 첫 페이지의
   ``collection.last_success_at``이 서비스 세대의 원천 수집 시각과 같고 그 세대를 적재한 지
   :data:`FULL_WALK_INTERVAL`이 안 됐으면 나머지 페이지와 교체를 건너뛴다(``skipped=unchanged``,

@@ -21,8 +21,10 @@ from kortravelmap.infra.valkey_state import (
 )
 from kortravelmap.providers.kor_travel_transport import (
     TransportExportBusy,
+    TransportExportDisabled,
     TransportExportEmpty,
     TransportExportNotCurrent,
+    TransportSourceInconsistent,
     TransportSourceNotCurrent,
 )
 from kortravelmap.settings import KorTravelMapSettings
@@ -377,3 +379,27 @@ async def test_a_short_busy_503_and_an_uncoded_503_keep_step_retries() -> None:
     with pytest.raises(TransportExportNotCurrent) as excinfo:
         await _load(_FakeStore(), _raise_unknown)
     assert excinfo.value is unknown
+
+
+async def test_a_disabled_export_fails_without_retries_through_the_existing_terminal_path() -> None:
+    async def _disabled(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise TransportExportDisabled("503", code="EXPORT_DISABLED", retry_after=3600.0)
+
+    with pytest.raises(Failure) as excinfo:
+        await _load(_FakeStore(), _disabled)
+    assert excinfo.value.allow_retries is False
+    metadata = {key: value.value for key, value in excinfo.value.metadata.items()}
+    assert metadata["failure_kind"] == "transport_export_disabled"
+    assert metadata["transport_problem_code"] == "EXPORT_DISABLED"
+    assert "outcome" not in metadata  # 상류 수집 지연이 아니라 설정 문제다
+
+
+async def test_an_inconsistent_source_keeps_step_retries() -> None:
+    cause = TransportSourceInconsistent("503", code="EXPORT_SOURCE_INCONSISTENT")
+
+    async def _inconsistent(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise cause
+
+    with pytest.raises(TransportSourceInconsistent) as excinfo:
+        await _load(_FakeStore(), _inconsistent)
+    assert excinfo.value is cause

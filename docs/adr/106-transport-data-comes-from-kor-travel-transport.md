@@ -117,18 +117,31 @@ OpiNet/KREX 키 제거)를 **같은 rotation**에서 → C7. Manager만 먼저 �
 ### 개정 2026-11-24 — transport 503 code·HTTP 층 재시도·바뀌지 않은 집합 건너뛰기·요청 계측
 
 근거: transport가 본 Map 호출 감사(2026-11-24 — MC-01·MC-03·MC-04·MC-10·G1-F7·G2-07·G3-03)와 Map 수집 실패
-감사(`docs/reports/2026-11-23-collection-failure-audit.md` §1.3·§3). 같은 503이 몇 시간짜리 stale과 몇 초짜리
-snapshot 경합을 함께 뜻해서, Map은 둘 다 30·90초(상태 job)·60·180·420초(feature 적재) 뒤 step 재시도로
+감사(`docs/reports/2026-11-23-collection-failure-audit.md` §1.3·§3). 같은 503이 다음 정기 수집까지 풀리지
+않는 stale과 곧 풀리는 snapshot 경합을 함께 뜻해서, Map은 둘 다 30·90초(상태 job)·60·180·420초(feature 적재) 뒤 step 재시도로
 처음 페이지부터 다시 읽었다(Dagster 지수 backoff는 `((2**n) - 1) × delay`다). transport는 503 problem+json에
 가산 member `code`(UPPER_SNAKE)와 header `Retry-After`(초)를 싣는다. **`code`가 없으면 지금과 같은 뜻이다.**
 
-1. **503 code 분류**(`providers.kor_travel_transport`, fetcher `_transport_unavailable`).
+1. **503 code 분류**(`providers.kor_travel_transport`, fetcher `_transport_unavailable`). **분류는 code로만
+   한다.** `Retry-After`는 transport가 dataset·상태마다 계산하는 **힌트**다(예: 주유소 stale은 진행 중인 회복
+   수집의 예정 종료 시각으로, 이력 없음은 source 주기로 — 값과 범위는 transport가 조정할 수 있다). Map은 그 값의
+   범위를 가정하지 않고 실패 metadata `transport_retry_after_seconds`에 그대로 싣는다. 대기에 쓰는 것은 경합 code뿐이다.
 
    | code | Map 예외(`failure_kind`) | HTTP 층 | step 재시도 | run |
    |------|--------------------------|---------|-------------|-----|
-   | `EXPORT_SOURCE_NOT_CURRENT`(Retry-After 60~28800)·`EXPORT_NO_HISTORY`(3600)·`EXPORT_INCIDENTS_NOT_CURRENT`(300)·`EXPORT_EMPTY_SET`(300) | `TransportSourceNotCurrent`(code별 `transport_source_not_current` 등), `retryable=False` | 다시 묻지 않는다 | 없다 | **실패** |
-   | `EXPORT_BUSY`(10)·`EXPORT_PREPARE_TIMEOUT`(60)·`TRANSIENT_DB`(15) | `TransportExportBusy`(`transport_busy` 등) | 같은 요청을 4회까지, 대기 `max(5·10·20초, Retry-After)`·한 번 60초 상한, run 재시도 예산 공유 | 다 쓰면 있다(종전 503과 같다). `Retry-After` > 60초면 없다 | 다 쓰면 실패 |
+   | `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET` | `TransportSourceNotCurrent`(code별 `transport_source_not_current` 등), `retryable=False` | 다시 묻지 않는다 | 없다(다음 schedule tick) | **실패** |
+   | `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | `TransportExportBusy`(`transport_busy` 등) | 같은 요청을 4회까지, 대기 `max(5·10·20초, Retry-After)`, run 재시도 예산 공유 | 다 쓰면 있다(종전 503과 같다) | 다 쓰면 실패 |
+   | 위 경합 code인데 `Retry-After` > 60초(HTTP 층 한 번 대기 상한 `_TRANSPORT_RETRY_AFTER_CAP_SECONDS`) | `TransportExportBusy`, `retryable=False`(`retry_after_exceeds_cap`) | 기다리지 않는다(경고 log) | 없다 | **실패** |
+   | `EXPORT_DISABLED`·`EXPORT_TOO_LARGE` | `TransportExportDisabled`(`transport_export_disabled`)·`TransportExportTooLarge`(`transport_export_too_large`), `retryable=False` | 다시 묻지 않는다 | 없다 — 설정·데이터가 바뀌기 전에는 결정적으로 같다 | **실패** |
+   | `EXPORT_SOURCE_INCONSISTENT` | `TransportSourceInconsistent`(`transport_source_inconsistent`), `retryable=True` | 다시 묻지 않는다 | 있다 — transport의 다음 수집·준비가 고친다 | 다 쓰면 실패 |
    | 없음·모르는 code(공통 표준이 모든 5xx에 붙일 `SERVICE_UNAVAILABLE` 등)·모양이 틀린 code | `TransportExportNotCurrent`(`transport_not_current`), `retryable=True` | 다시 묻지 않는다 | 있다 | 종전 |
+
+   - **상한 규칙은 값으로 정해지는 유일한 분기다.** transport `EXPORT_PREPARE_TIMEOUT`의 기본 `Retry-After`는 지금
+     상한과 같은 60초라 기다린다(같으면 기다린다). transport가 그 값을 60초 위로 올리면 준비 시간 초과 503은 기다림
+     없이 재시도 없는 실패로 바뀐다 — 그 값을 바꾸는 transport 변경은 Map 상한을 같이 올려야 한다.
+   - `EXPORT_DISABLED`는 code 없는 옛 transport에서는 종전 503(step 재시도 뒤 실패)이었다. code가 붙으면 재시도
+     없이 바로 실패한다. `EXPORT_SOURCE_INCONSISTENT`를 terminal로 두지 않는 이유: 몇 시간짜리 stale과 달리
+     transport 쪽 일시 불일치이고 다음 준비가 고친다 — 헛걸음이 생겨도 step 재시도 몇 번으로 run 하나 안에서 끝난다.
 
    - **run을 초록으로 건너뛰지 않는다.** Map에는 상류 장애 경보가 따로 없다 — 11월 주유소 export 503 16.6시간
      동안 빨간 run이 유일한 신호였다. 이 개정은 같은 503을 다시 묻는 낭비만 끈다. 상태 job은 실패 metadata에

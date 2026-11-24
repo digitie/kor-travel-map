@@ -149,8 +149,10 @@ transport는 token **그리고 접속 peer 주소**(`SERVICE_EXPORT_ALLOWED_CLIE
 |--------------|------|-------------|
 | `transport_hidden` | 404 — token·peer 주소·export 없는 버전 | **끈다**(`retryable=False` → `Failure(allow_retries=False)`) |
 | `transport_not_current` | code가 없거나 모르는 code의 503, 200 본문 `collection`이 이력 없음·실패·stale, 돌발 `collected_at` 30분 초과 | **재시도 대상**(`retryable=True`, HTTP 층에서는 바로 다시 부르지 않는다) |
-| `transport_source_not_current`·`transport_no_history`·`transport_incidents_not_current`·`transport_empty_set` | 503 `code`가 `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET`(`Retry-After` 5분~8시간) | **끈다** — HTTP 층도 다시 부르지 않고 run은 실패로 끝난다(metadata `transport_problem_code`·`transport_retry_after_seconds`) |
-| `transport_busy`·`transport_prepare_timeout`·`transport_transient_db` | 503 `code`가 `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | HTTP 층에서 같은 요청을 4회까지(대기 `max(5·10·20초, Retry-After)`, 한 번 60초 상한) 다시 묻고, 다 쓰면 **재시도 대상**. `Retry-After`가 60초를 넘으면 끈다 |
+| `transport_source_not_current`·`transport_no_history`·`transport_incidents_not_current`·`transport_empty_set` | 503 `code`가 `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET` | **끈다** — HTTP 층도 다시 부르지 않고 run은 실패로 끝난다(metadata `transport_problem_code`·`transport_retry_after_seconds` — `Retry-After`는 transport가 계산하는 힌트라 대기에 쓰지 않는다) |
+| `transport_busy`·`transport_prepare_timeout`·`transport_transient_db` | 503 `code`가 `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | HTTP 층에서 같은 요청을 4회까지(대기 `max(5·10·20초, Retry-After)`) 다시 묻고, 다 쓰면 **재시도 대상**. `Retry-After`가 한 번 대기 상한 60초를 **넘으면** 기다리지 않고 끈다 — transport `EXPORT_PREPARE_TIMEOUT` 기본값이 지금 60초라 그 값이 오르면 준비 시간 초과는 재시도 없는 실패가 된다 |
+| `transport_export_disabled`·`transport_export_too_large` | 503 `code`가 `EXPORT_DISABLED`(transport 설정으로 꺼짐)·`EXPORT_TOO_LARGE`(export 상한 초과) | **끈다** — 설정·데이터가 바뀌기 전에는 같다 |
+| `transport_source_inconsistent` | 503 `code`가 `EXPORT_SOURCE_INCONSISTENT`(transport 근거끼리 불일치) | HTTP 층에서는 다시 묻지 않고 **재시도 대상**(transport의 다음 수집·준비가 고친다) |
 | `transport_request_rejected` | 400·422 — Map 질의(`limit`·`cursor`)를 transport가 거절 | 끈다 |
 | `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | 끈다 |
 | `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | 끈다 |

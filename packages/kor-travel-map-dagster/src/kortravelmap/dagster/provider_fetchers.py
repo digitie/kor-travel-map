@@ -46,15 +46,20 @@ from kortravelmap.providers.kor_travel_transport import (
     EXPORT_PATH_REST_AREAS,
     SERVICE_TOKEN_HEADER,
     TRANSPORT_BUSY_CODES,
+    TRANSPORT_CODE_DISABLED,
+    TRANSPORT_CODE_SOURCE_INCONSISTENT,
+    TRANSPORT_CODE_TOO_LARGE,
     TRANSPORT_SOURCE_NOT_CURRENT_CODES,
     TransportAirport,
     TransportExportBusy,
     TransportExportContractError,
+    TransportExportDisabled,
     TransportExportEmpty,
     TransportExportFailure,
     TransportExportHidden,
     TransportExportMalformed,
     TransportExportNotCurrent,
+    TransportExportTooLarge,
     TransportFerryPort,
     TransportFuelStation,
     TransportHighwayIncident,
@@ -62,6 +67,7 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportRestArea,
     TransportRestAreaFuelPrice,
     TransportSnapshotExpired,
+    TransportSourceInconsistent,
     TransportSourceNotCurrent,
     parse_active_incident_set,
     parse_airports,
@@ -363,9 +369,15 @@ _TRANSPORT_BUSY_BASE_DELAY_SECONDS: float = 5.0
 """503 경합 재시도 간격 기준(5·10·20초). ``Retry-After``가 더 길면 그것을 따른다."""
 
 _TRANSPORT_RETRY_AFTER_CAP_SECONDS: Final[float] = 60.0
-"""HTTP 층에서 한 번 기다리는 상한. ``Retry-After``가 이보다 길면 다시 묻지 않고 실패를
-올린다 — 503 경합 code면 재시도 없는 실패(:class:`TransportExportBusy` ``retryable=False``),
-429 등 code 없는 일시 상태면 종전대로 step 재시도에 맡긴다."""
+"""HTTP 층에서 한 번 기다리는 상한(같으면 기다린다). ``Retry-After``가 이보다 길면 다시 묻지
+않고 실패를 올린다 — 503 경합 code면 **재시도 없는 실패**(:class:`TransportExportBusy`
+``retryable=False``, ``retry_after_exceeds_cap``), 429 등 code 없는 일시 상태면 종전대로 step
+재시도에 맡긴다.
+
+주의: transport ``EXPORT_PREPARE_TIMEOUT``의 기본 ``Retry-After``는 지금 이 상한과 같은 60초다.
+transport가 그 값을 60초 위로 올리면 준비 시간 초과 503은 기다림 없이 재시도 없는 실패로 바뀐다
+(실패 metadata ``transport_retry_after_seconds``와 경고 log로 드러난다). 그때는 이 상한을 같이
+올린다."""
 
 _PROBLEM_CODE: Final[re.Pattern[str]] = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
 _PROBLEM_DETAIL_CHARS: Final[int] = 300
@@ -523,12 +535,19 @@ def _transport_problem(response: httpx.Response) -> tuple[str | None, str]:
 def _transport_unavailable(response: httpx.Response, path: str) -> TransportExportFailure:
     """503을 problem ``code``로 가른다(transport 2026-11-24 계약, 감사 MC-01).
 
+    분류는 code로만 한다. ``Retry-After``는 transport가 dataset·상태마다 계산하는 힌트라 범위를
+    가정하지 않고 실패에 그대로 싣는다(대기에 쓰는 것은 경합 code뿐이다).
+
     - ``EXPORT_SOURCE_NOT_CURRENT``·``EXPORT_NO_HISTORY``·``EXPORT_INCIDENTS_NOT_CURRENT``·
-      ``EXPORT_EMPTY_SET`` → :class:`TransportSourceNotCurrent`(``Retry-After`` 5분~8시간 —
-      HTTP 층도 step도 다시 부르지 않고 run은 실패로 끝난다).
+      ``EXPORT_EMPTY_SET`` → :class:`TransportSourceNotCurrent`(HTTP 층도 step도 다시 부르지 않고
+      run은 실패로 끝난다).
     - ``EXPORT_BUSY``·``EXPORT_PREPARE_TIMEOUT``·``TRANSIENT_DB`` → :class:`TransportExportBusy`
-      (같은 요청을 ``Retry-After``대로 다시 보낸다 — :func:`_transport_get`. ``Retry-After``가 한 번
-      대기 상한보다 길면 다시 보내지 않고 재시도 없는 실패다).
+      (같은 요청을 ``Retry-After``대로 다시 보낸다 — :func:`_transport_get`. ``Retry-After``가
+      :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않고 재시도 없는 실패다).
+    - ``EXPORT_DISABLED``·``EXPORT_TOO_LARGE`` → :class:`TransportExportDisabled`·
+      :class:`TransportExportTooLarge`(설정·데이터가 바뀌기 전에는 같다 — 재시도 없는 실패).
+    - ``EXPORT_SOURCE_INCONSISTENT`` → :class:`TransportSourceInconsistent`(HTTP 층에서는 다시
+      묻지 않고 step 재시도 — transport의 다음 수집·준비가 고친다).
     - code 없음·모르는 code(``SERVICE_UNAVAILABLE`` 등 앞으로 붙을 공통 code 포함) → 종전대로
       :class:`TransportExportNotCurrent`(retryable, step 재시도).
     """
@@ -543,17 +562,56 @@ def _transport_unavailable(response: httpx.Response, path: str) -> TransportExpo
             retry_after=retry_after,
         )
     if code in TRANSPORT_BUSY_CODES:
+        over_cap = retry_after is not None and retry_after > _TRANSPORT_RETRY_AFTER_CAP_SECONDS
+        if over_cap:
+            _LOGGER.warning(
+                "kor-travel-transport %s 503 code=%s Retry-After %.0f초가 HTTP 층 대기 상한 "
+                "%.0f초를 넘는다 — 기다리지 않고 재시도 없이 실패한다",
+                path,
+                code,
+                retry_after,
+                _TRANSPORT_RETRY_AFTER_CAP_SECONDS,
+            )
+        cap_note = (
+            f" Retry-After가 HTTP 층 대기 상한 {_TRANSPORT_RETRY_AFTER_CAP_SECONDS:.0f}초를 넘어 "
+            "기다리지 않고 재시도 없이 실패한다."
+            if over_cap
+            else ""
+        )
         return TransportExportBusy(
             f"kor-travel-transport {path}가 503이다 — 일시 경합·준비 시간 초과·DB 일시 "
-            f"오류다{tail}",
+            f"오류다{tail}{cap_note}",
             code=code,
             retry_after=retry_after,
             retry_after_cap=_TRANSPORT_RETRY_AFTER_CAP_SECONDS,
         )
+    if code == TRANSPORT_CODE_DISABLED:
+        return TransportExportDisabled(
+            f"kor-travel-transport {path}가 503이다 — transport가 이 export를 설정으로 껐다"
+            f"(``TRANSPORT_MAP_CURRENT_ENABLED``){tail} transport 설정을 바꾸기 전에는 같으므로 "
+            "재시도하지 않는다.",
+            code=code,
+            retry_after=retry_after,
+        )
+    if code == TRANSPORT_CODE_TOO_LARGE:
+        return TransportExportTooLarge(
+            f"kor-travel-transport {path}가 503이다 — 집합이 transport export 상한을 넘었다{tail} "
+            "데이터나 상한이 바뀌기 전에는 같으므로 재시도하지 않는다.",
+            code=code,
+            retry_after=retry_after,
+        )
+    if code == TRANSPORT_CODE_SOURCE_INCONSISTENT:
+        return TransportSourceInconsistent(
+            f"kor-travel-transport {path}가 503이다 — transport 근거끼리 맞지 않는다{tail} "
+            "transport의 다음 수집·준비가 고친다 — step 재시도에 맡긴다. 이번 run은 아무것도 "
+            "적재·삭제·종료하지 않는다.",
+            code=code,
+            retry_after=retry_after,
+        )
     return TransportExportNotCurrent(
         f"kor-travel-transport {path}가 503이다 — 근거 수집의 이력이 없거나 실패했거나 "
-        "stale이다(transport ADR-013). 기준정보 export(철도역·항구)는 transport가 그 export를 "
-        "켜지 않았을 때도 503이다(``TRANSPORT_MAP_CURRENT_ENABLED``)"
+        "stale이다(transport ADR-013). code가 없는 옛 transport에서는 기준정보 "
+        "export(철도역·항구)가 꺼졌을 때도 이 503이다(``TRANSPORT_MAP_CURRENT_ENABLED``)"
         f"{tail} 이번 run은 아무것도 적재·삭제·종료하지 않는다.",
         code=code,
         retry_after=retry_after,
