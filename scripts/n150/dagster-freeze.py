@@ -3,35 +3,52 @@
 
 usage:
   dagster-freeze.py status   [--snapshot ABS_FILE]
-  dagster-freeze.py freeze   --snapshot ABS_FILE [--resume] [--dry-run]
+  dagster-freeze.py freeze   --snapshot ABS_FILE [--resume] [--dry-run] [--include-state]
                              [--wait-timeout S] [--settle S] [--poll S] [--max-age-hours H]
   dagster-freeze.py unfreeze --snapshot ABS_FILE [--dry-run] [--accept-missing] [--max-age-hours H]
+                             [--location-wait S]
 
 옛 ``~/freeze.py``는 산사태 schedule과 update-request 큐 sensor 둘만 멈췄다. PG에 쓰는 나머지
 Map instigator(MOIS·consistency·GC·file scan·feature 적재 schedule 등 약 42개)는 그대로 돌았다
 (수집 실패 감사 2026-11-23 §1.4, §4 #10). 이 도구는 **Map code location 하나의** schedule·sensor
-전체를 대상으로 한다. 다른 location(PinVi·concierge)은 읽지도 바꾸지도 않는다.
+전체를 대상으로 한다. 다른 location(PinVi·concierge)은 읽지도 바꾸지도 않는다. 기본 예외는 Map PG에
+쓰지 않는 Valkey 상태 적재 schedule(``weather_state_*``·``transport_state_*``, ADR-114)이다 —
+멈추지 않고 그 run도 기다리지 않는다(``STATE_JOB_PREFIXES``). 멈추면 창 동안과 창 뒤 다음 cron까지
+PinVi가 보는 날씨·교통 상태가 낡는다. 그래서 ``FREEZE_OK``는 "Map location 정지"가 아니라 "Map PG
+writer 정지"다 — 상태 run은 계속 뜨고 돈다(``after:`` 줄의 ``state_runs``).
+
+``--include-state``는 그 schedule도 멈추고 그 run도 기다린다. code-server를 다시 띄우는 회전과 공용
+PG 재생성 창에 쓴다 — 회전은 돌던 상태 run을 끊는다(``DefaultRunLauncher``의 run worker는
+code-server의 자식이다). 끊긴 run의 Valkey 적재 잠금은 TTL(run 상한 + 660초)까지 남아 그동안 뒤
+run이 "잠금 — 건너뜀"으로 끝난다. 상태 run도 run 프로세스가 정의를 import할 때 Map PG
+(``ops.dagster_schedule_overrides``)를 읽으므로 PG가 없으면 시작하지 못한다.
 
 freeze
   0. 스냅샷 경로는 절대 경로만 받는다(다른 cwd에서 다시 돌려 엉뚱한 새 스냅샷을 쓰지 않게).
      파일이 이미 있으면 ``--resume``일 때만 이어 쓴다(``--max-age-hours`` 안, 스냅샷이 RUNNING으로
-     적지 않은 instigator가 지금 RUNNING이면 거부). 새로 쓸 때 RUNNING launcher가 하나도 없으면
-     "이미 얼어 있다"로 보고 거부한다 — 그 상태를 스냅샷하면 unfreeze가 아무것도 되살리지 못한다.
+     적지 않은 instigator가 지금 RUNNING이면 거부). 이 파일 검사는 webserver에 묻기 전에 한다 —
+     ``--resume`` 없이 이미 있는 파일을 주면 webserver 상태와 상관없이 3이다. 새로 쓸 때 RUNNING
+     launcher가 하나도 없으면 "이미 얼어 있다"로 보고 거부한다 — 그 상태를 스냅샷하면 unfreeze가
+     아무것도 되살리지 못한다.
   1. 모든 schedule·sensor의 상태·코드 기본값·저장 상태 여부를 스냅샷 파일에 남긴다
      (0600, 임시 파일 → fsync → rename).
-  2. launcher(schedule 전부와 RUN_STATUS가 아닌 sensor)를 멈춘다. 하나라도 실패하면 run-status
-     sensor는 켜 둔 채 1로 끝난다(계속 도는 launcher가 낸 run을 관찰할 sensor가 남아야 한다).
-  3. Map run 중 끝나지 않은 것(QUEUED·NOT_STARTED·STARTING·STARTED·MANAGED·CANCELING)이 0이 될
-     때까지 기다린다(진행 표시, ``--wait-timeout``).
+  2. launcher(schedule 전부와 RUN_STATUS가 아닌 sensor, ``--include-state``가 없으면 Valkey 상태
+     schedule 제외)를 멈춘다. 하나라도 실패하면 run-status sensor는 켜 둔 채 1로 끝난다(계속 도는
+     launcher가 낸 run을 관찰할 sensor가 남아야 한다).
+  3. Map run 중 끝나지 않은 것(QUEUED·NOT_STARTED·STARTING·STARTED·MANAGED·CANCELING,
+     ``--include-state``가 없으면 Valkey 상태 적재 run 제외)이 0이 될 때까지 기다린다(진행 표시,
+     ``--wait-timeout``).
   4. run-status sensor가 마지막 terminal 사건을 DB에 반영했는지 본다 — ``--settle``초 뒤, 켜진
-     run-status sensor마다 run이 0이 된 뒤 SKIPPED(처리할 사건 없음) tick을 서로 다른 두 시각에
-     볼 때까지.
+     run-status sensor마다 run이 0이 된 뒤 사유 없는 SKIPPED(처리할 사건 없음) tick을 서로 다른 두
+     시각에 볼 때까지. 사유 있는 SKIPPED는 사건 하나를 처리한 tick이다(failure sensor).
      그다음 run을 다시 센다: run-status sensor 하나(``feature_operation_success_sensor``)는
      completion job run을 **낸다**. 새 run이 있으면 3으로 돌아간다.
   5. run-status sensor를 멈추고 run을 다시 센다. 그 사이 run이 생겼으면 방금 멈춘 run-status
      sensor를 되살리고 1로 끝난다.
-  6. 전부 STOPPED이고 run 0이면 ``FREEZE_OK``(0). 대기 초과·실패는 ``FREEZE_INCOMPLETE``(1)이고,
-     ``--resume``으로 같은 명령을 다시 돌리면 이어 한다.
+  6. (기본은 Valkey 상태 schedule 말고) 전부 STOPPED이고 기다리는 run이 0이면 ``FREEZE_OK``(0).
+     대기 초과·실패는 ``FREEZE_INCOMPLETE``(1)이고, ``--resume``으로 같은 명령을 다시 돌리면 이어
+     한다. 1·2로 끝났고 이번 호출이 스냅샷을 썼거나 ``--resume``으로 이어 받았으면 ``rollback:``
+     줄로 되돌리는 길을 적는다.
 
 unfreeze
   스냅샷이 RUNNING으로 적은 instigator만 되살린다(run-status sensor → 나머지 sensor → schedule).
@@ -40,7 +57,11 @@ unfreeze
   (예: MOIS continuation sensor)은 그대로 둔다. 스냅샷 없이는 거부한다. 지금 정의에 없는 이름은
   ``missing``으로 알리고 1로 끝난다(``--accept-missing``이면 알리고 진행). 성공하면 스냅샷을
   ``<FILE>.restored-<UTC>``로 옮긴다. ``--max-age-hours``(기본 48)보다 오래된 스냅샷은 거부한다.
-  창 안에 놓친 cron tick은 Dagster가 따라잡지 않는다.
+  창 안에 놓친 cron tick은 Dagster가 따라잡지 않는다. Valkey 상태 schedule은 기본 freeze가 멈추지
+  않으므로 대개 할 일이 없다 — ``--include-state``나 이 예외 이전 판이 멈춘 스냅샷이면(스냅샷
+  RUNNING·지금 STOPPED) 다른 것과 같이 되살린다. 회전 직후에는 location이 다시 로드되기 전이라
+  webserver가 ``RepositoryNotFoundError``를 낸다 — 그동안 ``--location-wait``초(기본 300)까지
+  기다린다. 1·2로 끝나고 스냅샷이 남으면 location이 (일부) 얼어 있다는 ``retry:`` 줄을 적는다.
 
 스냅샷은 재부팅에 살아남는 곳(운영 계정 홈)에 둔다 — ``/tmp``에 두었다가 사라지면 부분 freeze 뒤의
 새 스냅샷이 이미 멈춘 것을 STOPPED로 적어 영구히 꺼 둘 수 있다.
@@ -92,12 +113,30 @@ DEFAULT_REPOSITORY = "__repository__"
 REPOSITORY_RUN_TAG_KEY = ".dagster/repository"
 NONTERMINAL_RUN_STATUSES = ("QUEUED", "NOT_STARTED", "STARTING", "STARTED", "MANAGED", "CANCELING")
 RETRY_DELAYS = (2, 5, 10, 20, 30, 45, 60)
+LOCATION_POLL_SECONDS = 10.0
 RUN_LIST_LIMIT = 200
 
 EXIT_OK = 0
 EXIT_INCOMPLETE = 1
 EXIT_ERROR = 2
 EXIT_REFUSED = 3
+
+#: Valkey 상태 적재(ADR-114 ``weather_state``·``transport_state`` 모듈)의 job·schedule 이름 접두어.
+#: 이 job은 Map PG에 쓰지 않는다(``kor_travel_map_client``를 요구하지 않고 operation tag가 없어
+#: run-status sensor도 PG에 반영하지 않는다). 읽기는 하나 있다 — Map run은 모두 run 프로세스가
+#: 정의를 import할 때 ``ops.dagster_schedule_overrides``를 읽고, 운영 compose는 그것을 필수로 둬
+#: PG에 닿지 못하면 run이 시작하지 못한다. 기본 freeze는 이 schedule을 멈추지 않고 run 대기에서 이
+#: run을 세지 않는다 — 멈추면 창 동안 PinVi가 보는 날씨·교통 상태가 낡고, 하루 한 번 도는 것은
+#: unfreeze 뒤에도 다음 cron까지(최대 약 24시간) 낡는다(Dagster는 놓친 tick을 따라잡지 않는다).
+#: 접두어와 정의의 대조는
+#: ``packages/kor-travel-map-dagster/tests/test_freeze_skips_state_jobs.py``가 한다.
+STATE_JOB_PREFIXES = ("weather_state_", "transport_state_")
+
+
+def is_state_job(name: object) -> bool:
+    """Valkey 상태 적재 job 또는 그 schedule의 이름인가."""
+
+    return isinstance(name, str) and name.startswith(STATE_JOB_PREFIXES)
 
 
 class Gql(Protocol):
@@ -106,6 +145,10 @@ class Gql(Protocol):
 
 class FreezeError(RuntimeError):
     """사람이 읽을 secret-free 오류."""
+
+
+class LocationNotLoaded(FreezeError):
+    """webserver에 Map location이 (아직) 로드돼 있지 않다(회전 직후 ``RepositoryNotFoundError``)."""
 
 
 # --------------------------------------------------------------------------- GraphQL
@@ -209,7 +252,10 @@ query KtmFreezeSensorTicks($s: RepositorySelector!, $after: Float) {
   repositoryOrError(repositorySelector: $s) {
     __typename
     ... on Repository {
-      sensors { name sensorState { ticks(limit: 1, afterTimestamp: $after) { status timestamp } } }
+      sensors {
+        name
+        sensorState { ticks(limit: 1, afterTimestamp: $after) { status timestamp skipReason } }
+      }
     }
     ... on RepositoryNotFoundError { message }
     ... on PythonError { message }
@@ -317,6 +363,12 @@ class Instigator:
 
         return self.kind == "sensor" and self.sensor_type == "RUN_STATUS"
 
+    @property
+    def is_state(self) -> bool:
+        """Valkey 상태 적재 schedule — freeze 대상이 아니다(``STATE_JOB_PREFIXES``)."""
+
+        return self.kind == "schedule" and is_state_job(self.name)
+
 
 @dataclass(frozen=True)
 class Target:
@@ -337,7 +389,11 @@ def _repository(data: dict[str, Any]) -> dict[str, Any]:
     repo = data.get("repositoryOrError") or {}
     if repo.get("__typename") != "Repository":
         detail = str(repo.get("message"))[:200]
-        raise FreezeError(f"code location을 읽지 못했다: {repo.get('__typename')} {detail}")
+        message = f"code location을 읽지 못했다: {repo.get('__typename')} {detail}"
+        # Dagster는 location이 로드 오류이거나 다시 로드되는 중이면 RepositoryNotFoundError를 낸다.
+        if repo.get("__typename") == "RepositoryNotFoundError":
+            raise LocationNotLoaded(message)
+        raise FreezeError(message)
     return dict(repo)
 
 
@@ -415,6 +471,18 @@ def active_runs(gql: Gql, target: Target) -> list[dict[str, str]]:
     if runs.get("__typename") != "Runs":
         raise FreezeError(f"run 목록을 읽지 못했다: {runs.get('__typename')}")
     return list(runs.get("results") or [])
+
+
+def awaited_runs(runs: Iterable[dict[str, str]], *, keep_state: bool) -> list[dict[str, str]]:
+    """freeze가 기다리는 run — ``keep_state``면 Valkey 상태 적재 run을 뺀다."""
+
+    return [run for run in runs if not (keep_state and is_state_job(run.get("jobName")))]
+
+
+def writer_runs(gql: Gql, target: Target, *, keep_state: bool = True) -> list[dict[str, str]]:
+    """끝나지 않은 Map run 중 freeze가 기다리는 것."""
+
+    return awaited_runs(active_runs(gql, target), keep_state=keep_state)
 
 
 def _ok(data: dict[str, Any], field: str, ok_type: str) -> None:
@@ -549,7 +617,11 @@ def _absolute(path: Path) -> Path:
 
 def _summary(items: dict[str, Instigator]) -> str:
     running = sum(1 for item in items.values() if item.status == "RUNNING")
-    return f"instigators={len(items)} running={running} stopped={len(items) - running}"
+    state = sum(1 for item in items.values() if item.is_state and item.status == "RUNNING")
+    return (
+        f"instigators={len(items)} running={running} stopped={len(items) - running} "
+        f"(running 중 Valkey 상태 schedule={state} — --include-state 없이는 freeze 대상 아님)"
+    )
 
 
 def _runs_line(runs: Sequence[dict[str, str]]) -> str:
@@ -569,6 +641,7 @@ def cmd_status(gql: Gql, target: Target, snapshot: Path | None) -> int:
     print(f"location={target.location} {_summary(items)}")
     for item in sorted(items.values(), key=lambda value: value.key):
         extra = f" [{item.sensor_type}]" if item.sensor_type else ""
+        extra += " [Valkey 상태 — freeze 대상 아님]" if item.is_state else ""
         print(f"  {item.status:<8} {item.key}{extra}")
     print(_runs_line(active_runs(gql, target)))
     if snapshot is not None and _absolute(snapshot).exists():
@@ -602,9 +675,19 @@ def _stop_all(gql: Gql, items: Iterable[Instigator]) -> list[str]:
     return failed
 
 
-def _running(items: dict[str, Instigator], *, observers: bool) -> list[Instigator]:
+def _running(
+    items: dict[str, Instigator], *, observers: bool, keep_state: bool = True
+) -> list[Instigator]:
+    """freeze가 멈출 RUNNING instigator — ``keep_state``면 Valkey 상태 schedule은 빠진다."""
+
     return sorted(
-        (i for i in items.values() if i.status == "RUNNING" and i.is_observer == observers),
+        (
+            i
+            for i in items.values()
+            if i.status == "RUNNING"
+            and i.is_observer == observers
+            and not (keep_state and i.is_state)
+        ),
         key=lambda i: i.key,
     )
 
@@ -617,13 +700,13 @@ class _Clocks:
 
 
 def _wait_runs_zero(
-    gql: Gql, target: Target, deadline: float, poll: float, clocks: _Clocks
+    gql: Gql, target: Target, deadline: float, poll: float, clocks: _Clocks, keep_state: bool
 ) -> list[dict[str, str]]:
-    runs = active_runs(gql, target)
+    runs = writer_runs(gql, target, keep_state=keep_state)
     while runs and clocks.monotonic() < deadline:
         print(f"  {_runs_line(runs)} — {int(deadline - clocks.monotonic())}s left")
         clocks.sleep(poll)
-        runs = active_runs(gql, target)
+        runs = writer_runs(gql, target, keep_state=keep_state)
     return runs
 
 
@@ -638,10 +721,14 @@ def _observers_caught_up(
 ) -> list[str]:
     """따라잡지 못한 run-status sensor 목록.
 
-    따라잡음 = run 0 뒤 최신 tick이 SKIPPED이고, 그런 SKIPPED tick을 서로 다른 두 시각에 봤다.
+    따라잡음 = run 0 뒤 최신 tick이 **사유 없는** SKIPPED이고, 그런 tick을 서로 다른 두 시각에
+    봤다. 사유를 본다: Dagster run-status sensor 감싸개는 사건 하나에 사용자 함수가 값을 돌려주면
+    그것을 내고 tick을 끝낸다. ``feature_update_request_failure_sensor``는 실패 사건마다
+    ``SkipReason``을 돌려주므로 그 tick은 SKIPPED지만 사건 하나를 처리했고, 실패가 몰렸으면 뒤에
+    사건이 남아 있다. 처리할 사건이 없던 tick은 감싸개가 아무것도 내지 않아 사유가 없다.
     한 번으로는 부족하다: run-status sensor는 tick마다 공용 event log의 사건을 몇 건씩만 읽어,
-    다른 location의 사건만 읽은 tick도 SKIPPED가 될 수 있다. 도구 호스트와 Dagster 서버의
-    시계 차이도 두 번째 tick이 흡수한다.
+    다른 location의 사건만 읽은 tick도 사유 없는 SKIPPED가 될 수 있다. 도구 호스트와 Dagster
+    서버의 시계 차이도 두 번째 tick이 흡수한다.
     """
 
     seen: dict[str, set[float]] = {item.name: set() for item in observers}
@@ -649,7 +736,7 @@ def _observers_caught_up(
         ticks = latest_sensor_ticks(gql, target, drained_at)
         for item in observers:
             tick = ticks.get(item.name) or {}
-            if tick.get("status") == "SKIPPED":
+            if tick.get("status") == "SKIPPED" and not tick.get("skipReason"):
                 seen[item.name].add(float(tick.get("timestamp") or 0.0))
             else:
                 seen[item.name].clear()
@@ -671,16 +758,19 @@ def cmd_freeze(
     settle: float,
     poll: float,
     max_age_hours: float = 24.0,
+    include_state: bool = False,
     clock: Callable[[], float] = time.monotonic,
     wall: Callable[[], float] = time.time,
     sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
     clocks = _Clocks(monotonic=clock, wall=wall, sleep=sleep)
+    keep_state = not include_state
     _absolute(snapshot)
-    items = list_instigators(gql, target)
-    print(f"before: {_summary(items)}")
 
+    # 파일 검사를 webserver에 묻기 전에 한다 — 이미 있는 남의 파일(창 스냅샷)은 webserver가 오류를
+    # 내도 3으로 끝나야 2의 rollback 안내가 그 파일을 가리키지 않는다.
+    recorded: Snapshot | None = None
     if snapshot.exists():
         if not resume:
             print(f"REFUSE: 스냅샷이 이미 있다: {snapshot}")
@@ -693,10 +783,20 @@ def cmd_freeze(
             print("지난 창의 스냅샷이면 unfreeze 결과를 먼저 확인하라.")
             print("이어 쓰면 그 뒤에 바뀐 instigator 상태를 잃는다.")
             return EXIT_REFUSED
+    elif resume:
+        print(f"REFUSE: 이어 할 스냅샷이 없다: {snapshot}")
+        return EXIT_REFUSED
+
+    items = list_instigators(gql, target)
+    print(f"before: {_summary(items)}")
+
+    if recorded is not None:
         stray = sorted(
             key
             for key, item in items.items()
-            if item.status == "RUNNING" and recorded.status(key) != "RUNNING"
+            if item.status == "RUNNING"
+            and recorded.status(key) != "RUNNING"
+            and not (keep_state and item.is_state)
         )
         if stray:
             print("REFUSE: 스냅샷이 RUNNING으로 적지 않은 instigator가 지금 RUNNING이다:")
@@ -705,25 +805,42 @@ def cmd_freeze(
             print("그것을 멈추면 unfreeze가 되살리지 못한다. 누가 켰는지 확인하라.")
             return EXIT_REFUSED
         print(f"snapshot resumed: {snapshot} (taken_at={recorded.taken_at.isoformat()})")
+        again = _running(items, observers=False, keep_state=keep_state)
+        if again:
+            # 스냅샷이 RUNNING으로 적은 것은 거부하지 않고 다시 멈춘다. 앞선 시도가 멈추지 못한 것과
+            # 창 안에서 누가 다시 켠 것은 여기서 갈리지 않으므로 이름을 남긴다.
+            print(
+                f"  note: 스냅샷이 RUNNING으로 적은 launcher {len(again)}개가 지금 RUNNING이다 — "
+                "앞선 시도가 멈추지 못했거나 창 안에서 다시 켜졌다. 다시 멈춘다:"
+            )
+            for item in again:
+                print(f"    {item.key}")
         orphaned = [
             item
             for key, item in sorted(items.items())
             if item.is_observer and item.status != "RUNNING" and recorded.status(key) == "RUNNING"
         ]
-        if orphaned and not dry_run and active_runs(gql, target):
+        if orphaned and not dry_run and writer_runs(gql, target, keep_state=keep_state):
             # 앞선 시도가 run-status sensor를 멈춘 뒤 run이 생겼다 — 관찰부터 되살린다.
             for item in orphaned:
                 restore(gql, target, item, recorded.entries[item.key])
                 print(f"  restored {item.key} (run이 있는데 run-status sensor가 꺼져 있었다)")
             items = list_instigators(gql, target)
     else:
-        if resume:
-            print(f"REFUSE: 이어 할 스냅샷이 없다: {snapshot}")
-            return EXIT_REFUSED
-        if not _running(items, observers=False):
+        if not _running(items, observers=False, keep_state=keep_state):
             print("REFUSE: RUNNING launcher가 하나도 없다 — 이미 얼어 있는 것으로 보인다.")
             print("이 상태를 스냅샷하면 unfreeze가 아무것도 되살리지 못한다.")
-            print("기존 스냅샷 경로를 확인하라.")
+            print("기존 스냅샷 경로를 확인하라. 아무것도 바꾸지 않았다.")
+            if keep_state:
+                print(
+                    "운영 창 안의 회전이면 회전 전용 파일에 --include-state를 붙여라 — Valkey 상태 "
+                    "schedule만 멈추고 그 run을 기다린다(창 freeze가 나머지를 덮는다)."
+                )
+            else:
+                print(
+                    "운영 창 안의 회전이면 창 freeze가 상태 schedule까지 멈췄다 — 끊길 상태 run이 "
+                    "없으니 회전의 freeze·unfreeze 단계를 빼라."
+                )
             return EXIT_REFUSED
         if dry_run:
             print(f"would write snapshot: {snapshot}")
@@ -731,13 +848,19 @@ def cmd_freeze(
             write_snapshot(snapshot, snapshot_document(target, items, now()))
             print(f"snapshot written: {snapshot}")
 
-    launchers = _running(items, observers=False)
+    launchers = _running(items, observers=False, keep_state=keep_state)
+    kept = sum(1 for item in items.values() if item.is_state and item.status == "RUNNING")
     print(f"phase 1: stop {len(launchers)} launcher(s) (schedules + non-run-status sensors)")
+    if keep_state:
+        print(
+            f"  keep {kept} Valkey state schedule(s) running — Map PG에 쓰지 않고 그 run은 "
+            "기다리지 않는다(code-server 회전 전이면 --include-state)"
+        )
     if dry_run:
         for item in launchers:
             print(f"  would stop {item.key}")
         observers = _running(items, observers=True)
-        print(_runs_line(active_runs(gql, target)))
+        print(_runs_line(writer_runs(gql, target, keep_state=keep_state)))
         print(f"phase 3 would stop {len(observers)} run-status sensor(s) after runs drain")
         for item in observers:
             print(f"  would stop {item.key}")
@@ -753,7 +876,7 @@ def cmd_freeze(
     deadline = clocks.monotonic() + wait_timeout
     while True:
         print("phase 2: wait for Map runs to finish")
-        runs = _wait_runs_zero(gql, target, deadline, poll, clocks)
+        runs = _wait_runs_zero(gql, target, deadline, poll, clocks, keep_state)
         if runs:
             print(f"  timeout: {_runs_line(runs)}")
             print("run-status sensor는 켜 둔다(끝나는 run을 DB에 반영).")
@@ -761,7 +884,7 @@ def cmd_freeze(
             print(f"FREEZE_INCOMPLETE active_runs={len(runs)}")
             return EXIT_INCOMPLETE
         drained_at = clocks.wall()
-        print("  active_runs=0")
+        print("  active_runs=0" + (" (Valkey 상태 적재 run 제외)" if keep_state else ""))
         observers = _running(list_instigators(gql, target), observers=True)
         if not observers:
             break
@@ -773,7 +896,7 @@ def cmd_freeze(
         if lagging:
             print(f"FREEZE_INCOMPLETE run-status sensors not caught up: {lagging}")
             return EXIT_INCOMPLETE
-        runs = active_runs(gql, target)
+        runs = writer_runs(gql, target, keep_state=keep_state)
         if not runs:
             break
         # feature_operation_success_sensor가 completion job run을 냈다 — 다시 기다린다.
@@ -781,7 +904,8 @@ def cmd_freeze(
 
     print(f"phase 4: stop {len(observers)} run-status sensor(s)")
     failed = _stop_all(gql, observers)
-    runs = active_runs(gql, target)
+    current = active_runs(gql, target)
+    runs = awaited_runs(current, keep_state=keep_state)
     if runs:
         # 멈추기 직전에 낸 run — 관찰할 sensor를 되살린다.
         print(f"  run appeared while stopping run-status sensors: {_runs_line(runs)}")
@@ -794,13 +918,45 @@ def cmd_freeze(
         return EXIT_INCOMPLETE
 
     after = list_instigators(gql, target)
-    still = sorted(key for key, item in after.items() if item.status == "RUNNING")
-    print(f"after: {_summary(after)} {_runs_line(runs)}")
+    still = sorted(
+        key
+        for key, item in after.items()
+        if item.status == "RUNNING" and not (keep_state and item.is_state)
+    )
+    # FREEZE_OK는 Map PG writer 정지다 — 기다리지 않은 상태 run은 따로 적는다(계속 뜬다).
+    state_runs = f" state_runs={len(current) - len(runs)}(기다리지 않음)" if keep_state else ""
+    print(f"after: {_summary(after)} {_runs_line(runs)}{state_runs}")
     if failed or still:
         print(f"FREEZE_INCOMPLETE failed={failed} still_running={still}")
         return EXIT_INCOMPLETE
     print("FREEZE_OK")
     return EXIT_OK
+
+
+def _instigators_once_loaded(
+    gql: Gql,
+    target: Target,
+    wait: float,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+) -> dict[str, Instigator]:
+    """location이 다시 로드될 때까지 ``wait``초 기다린 뒤 instigator를 읽는다.
+
+    회전이 code-server를 다시 띄우면 webserver가 location을 다시 싣기 전까지
+    ``repositoryOrError``가 HTTP 200의 ``RepositoryNotFoundError``다 — 전송 층의 5xx 재시도에
+    걸리지 않아 곧바로 2로 끝나고 Map location이 얼어 있는 채 남았다.
+    """
+
+    deadline = clock() + wait
+    while True:
+        try:
+            return list_instigators(gql, target)
+        except LocationNotLoaded as exc:
+            left = deadline - clock()
+            if left <= 0:
+                raise
+            print(f"  waiting for code location to load ({exc}) — {int(left)}s left")
+            sleep(min(LOCATION_POLL_SECONDS, left))
 
 
 def cmd_unfreeze(
@@ -811,6 +967,9 @@ def cmd_unfreeze(
     dry_run: bool,
     accept_missing: bool = False,
     max_age_hours: float = 48.0,
+    location_wait: float = 300.0,
+    clock: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
     now: Callable[[], datetime] = lambda: datetime.now(UTC),
 ) -> int:
     recorded = read_snapshot(_absolute(snapshot), target)
@@ -820,7 +979,7 @@ def cmd_unfreeze(
         print("그 뒤에 일부러 끈 instigator를 다시 켤 수 있다.")
         print("확인했으면 --max-age-hours를 늘려라.")
         return EXIT_REFUSED
-    items = list_instigators(gql, target)
+    items = _instigators_once_loaded(gql, target, location_wait, clock, sleep)
     want_running = sorted(
         key for key, entry in recorded.entries.items() if entry["status"] == "RUNNING"
     )
@@ -894,11 +1053,22 @@ def build_parser() -> argparse.ArgumentParser:
     freeze.add_argument("--settle", type=float, default=90.0)
     freeze.add_argument("--poll", type=float, default=30.0)
     freeze.add_argument("--max-age-hours", type=float, default=24.0)
+    freeze.add_argument(
+        "--include-state",
+        action="store_true",
+        help="Valkey 상태 schedule도 멈추고 그 run도 기다린다(code-server 회전·공용 PG 재생성)",
+    )
     unfreeze = sub.add_parser("unfreeze", help="스냅샷의 RUNNING만 복원")
     unfreeze.add_argument("--snapshot", type=Path, required=True)
     unfreeze.add_argument("--dry-run", action="store_true")
     unfreeze.add_argument("--accept-missing", action="store_true")
     unfreeze.add_argument("--max-age-hours", type=float, default=48.0)
+    unfreeze.add_argument(
+        "--location-wait",
+        type=float,
+        default=300.0,
+        help="회전 직후 location이 다시 로드될 때까지 기다리는 초",
+    )
     return parser
 
 
@@ -910,6 +1080,8 @@ def main(argv: Sequence[str] | None = None, gql: Gql | None = None) -> int:
         location=os.environ.get("KTM_DAGSTER_FREEZE_LOCATION", DEFAULT_LOCATION),
         repository=os.environ.get("KTM_DAGSTER_FREEZE_REPOSITORY", DEFAULT_REPOSITORY),
     )
+    snapshot: Path | None = args.snapshot
+    existed = bool(snapshot and snapshot.is_absolute() and snapshot.exists())
     try:
         if gql is None:
             gql = http_transport(
@@ -918,8 +1090,18 @@ def main(argv: Sequence[str] | None = None, gql: Gql | None = None) -> int:
             )
         if args.command == "status":
             return cmd_status(gql, target, args.snapshot)
-        if args.command == "freeze":
-            return cmd_freeze(
+        if args.command == "unfreeze":
+            code = cmd_unfreeze(
+                gql,
+                target,
+                args.snapshot,
+                dry_run=args.dry_run,
+                accept_missing=args.accept_missing,
+                max_age_hours=args.max_age_hours,
+                location_wait=args.location_wait,
+            )
+        else:
+            code = cmd_freeze(
                 gql,
                 target,
                 args.snapshot,
@@ -929,18 +1111,55 @@ def main(argv: Sequence[str] | None = None, gql: Gql | None = None) -> int:
                 settle=args.settle,
                 poll=args.poll,
                 max_age_hours=args.max_age_hours,
+                include_state=args.include_state,
             )
-        return cmd_unfreeze(
-            gql,
-            target,
-            args.snapshot,
-            dry_run=args.dry_run,
-            accept_missing=args.accept_missing,
-            max_age_hours=args.max_age_hours,
-        )
     except FreezeError as exc:
         print(f"ERROR {exc}")
-        return EXIT_ERROR
+        code = EXIT_ERROR
+    if args.command == "freeze":
+        # 호출 전에 있던 파일은 --resume으로 이어 받았을 때만 이번 호출의 것이다.
+        _rollback_hint(args.snapshot, code, dry_run=args.dry_run, owned=args.resume or not existed)
+    elif args.command == "unfreeze":
+        _retry_hint(args.snapshot, target, code, dry_run=args.dry_run)
+    return code
+
+
+def _rollback_hint(snapshot: Path, code: int, *, dry_run: bool, owned: bool) -> None:
+    """freeze가 일부를 멈춘 채 끝났을 수 있으면(1·2) 되돌리는 길을 적는다.
+
+    이번 호출이 스냅샷을 썼거나 ``--resume``으로 이어 받았을 때만 적는다(``owned``). 호출 전에 있던
+    남의 파일(창 스냅샷)을 가리키면 그 unfreeze가 창을 접는다. 거부(3)는 아무것도 바꾸지 않았으므로
+    적지 않는다. 자동 회전 스크립트도 같은 규칙을 따른다(scripts/n150/README.md §Dagster freeze).
+    """
+
+    if dry_run or not owned or code not in (EXIT_INCOMPLETE, EXIT_ERROR):
+        return
+    if not snapshot.is_absolute() or not snapshot.exists():
+        return
+    print(f"rollback: 접으려면 unfreeze --snapshot {snapshot} (부분 freeze도 스냅샷대로 되살린다)")
+    print(f"rollback: 이어 하려면 원인을 본 뒤 freeze --snapshot {snapshot} --resume")
+
+
+def _retry_hint(snapshot: Path, target: Target, code: int, *, dry_run: bool) -> None:
+    """unfreeze가 1·2로 끝나 읽히는 스냅샷이 남았으면 Map location이 (일부) 얼어 있다고 적는다.
+
+    회전 직후가 가장 흔하다 — location이 다시 로드되지 않았거나(2) 회전이 instigator 이름을
+    지웠다(1, ``missing``). 스냅샷이 남아 있는 동안 다음 freeze는 그 파일로 거부(3)한다.
+    """
+
+    if dry_run or code not in (EXIT_INCOMPLETE, EXIT_ERROR):
+        return
+    if not snapshot.is_absolute():
+        return
+    try:
+        read_snapshot(snapshot, target)
+    except FreezeError:
+        return  # 없거나 깨진 파일 — 되살릴 기준이 아니다.
+    print(f"retry: Map location이 아직 (일부) 얼어 있다 — 스냅샷 {snapshot}이 남았다.")
+    print(
+        "retry: 2면 location 로드를 기다렸다 같은 unfreeze를 다시 돌리고(--location-wait), "
+        "1이면 missing·mismatch를 확인한 뒤 다시 돌리거나 --accept-missing으로 마친다."
+    )
 
 
 if __name__ == "__main__":

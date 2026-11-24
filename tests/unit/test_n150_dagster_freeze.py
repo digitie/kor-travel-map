@@ -115,6 +115,24 @@ _SENSORS = (
 
 _RUN_STATUS_SENSORS = {name for name, kind, _ in _SENSORS if kind == "RUN_STATUS"}
 
+#: Valkey 상태 적재 schedule(ADR-114) — Map PG를 읽지도 쓰지도 않아 freeze가 멈추지 않는다.
+_STATE_SCHEDULES = frozenset(
+    {
+        "transport_state_airports_schedule",
+        "transport_state_fuel_stations_schedule",
+        "transport_state_highway_incidents_schedule",
+        "transport_state_rest_area_fuel_prices_schedule",
+        "transport_state_rest_areas_schedule",
+        "weather_state_current_schedule",
+        "weather_state_daily_summaries_schedule",
+        "weather_state_forecast_external_schedule",
+        "weather_state_forecast_mid_schedule",
+        "weather_state_forecast_short_schedule",
+        "weather_state_forecast_ultra_short_schedule",
+        "weather_state_locations_schedule",
+    }
+)
+
 
 #: 코드 기본값이 RUNNING인 것(n150에서는 모두 저장 상태가 있다 — canReset true).
 _DEFAULT_RUNNING = {
@@ -141,8 +159,13 @@ class _FakeDagster:
         #: run 목록 조회 때마다 하나씩 꺼내 Map run 목록을 바꾼다(끝나 가는·새로 뜨는 run).
         self.run_script: list[list[dict[str, str]]] = []
         #: sensor tick 조회마다 하나씩 꺼내는 {sensor 이름: 최신 tick status}. 없으면 SKIPPED.
-        self.tick_script: list[dict[str, str | None]] = []
+        #: ``(status, skipReason)``이면 사유를 단 tick, ``None``이면 tick 없음.
+        self.tick_script: list[dict[str, str | tuple[str, str] | None]] = []
         self.fail_stop: set[str] = set()
+        #: 남은 instigator 조회 수만큼 location이 아직 로드되지 않았다(회전 직후).
+        self.not_loaded = 0
+        #: 켜면 모든 호출이 전송 층 실패(재시도를 다 쓴 HTTP 500)다.
+        self.down = False
 
     def _add(
         self, location: str, kind: str, name: str, status: str, sensor_type: str | None = None
@@ -169,10 +192,21 @@ class _FakeDagster:
         raise AssertionError(f"unknown instigator {origin}")
 
     def __call__(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        if self.down:
+            raise freeze.FreezeError("gave up after 8 attempts: HTTP 500")
         if "KtmFreezeInstigators" in query:
+            if self.not_loaded:
+                self.not_loaded -= 1
+                self.calls.append("not-loaded")
+                return {
+                    "repositoryOrError": {
+                        "__typename": "RepositoryNotFoundError",
+                        "message": f"Could not find a repository __repository__ in {_MAP}",
+                    }
+                }
             return self._instigators(variables)
         if "KtmFreezeSensorTicks" in query:
-            return self._ticks(variables)
+            return self._ticks(query, variables)
         if "KtmFreezeRuns" in query:
             return self._runs(variables)
         if "KtmFreezeStop" in query:
@@ -205,17 +239,21 @@ class _FakeDagster:
             }
         }
 
-    def _ticks(self, variables: dict[str, Any]) -> dict[str, Any]:
+    def _ticks(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         self.calls.append("ticks")
         statuses = self.tick_script.pop(0) if self.tick_script else {}
         after = float(variables["after"])
+        # 실제 GraphQL처럼 질의가 고른 필드만 싣는다 — 질의에서 skipReason을 빼면 사유가 사라진다.
+        selected = {"status", "timestamp", "skipReason"} & set(query.split())
         sensors = []
         for kind, name, _ in self.entries(variables["s"]["repositoryLocationName"]):
             if kind != "sensor":
                 continue
-            status = statuses.get(name, "SKIPPED")
+            value = statuses.get(name, "SKIPPED")
+            status, reason = value if isinstance(value, tuple) else (value, None)
             stamp = after + len(self.calls)  # 조회마다 새 tick
-            ticks = [] if status is None else [{"status": status, "timestamp": stamp}]
+            tick = {"status": status, "timestamp": stamp, "skipReason": reason}
+            ticks = [] if status is None else [{k: tick[k] for k in selected}]
             sensors.append({"name": name, "sensorState": {"ticks": ticks}})
         return {"repositoryOrError": {"__typename": "Repository", "sensors": sensors}}
 
@@ -327,6 +365,13 @@ def _stops(fake: _FakeDagster) -> list[str]:
     return [call.removeprefix("stop:") for call in fake.calls if call.startswith("stop:")]
 
 
+def _assert_frozen(fake: _FakeDagster) -> None:
+    """Valkey 상태 schedule만 RUNNING이고 나머지 Map instigator는 전부 STOPPED다."""
+
+    running = {name for (_, name), status in _map_statuses(fake).items() if status == "RUNNING"}
+    assert running == _STATE_SCHEDULES
+
+
 def _run(job: str = "feature_place_mois_licenses_job") -> dict[str, str]:
     return {"runId": "r1", "status": "STARTED", "jobName": job}
 
@@ -342,7 +387,7 @@ def test_freeze_stops_every_map_instigator_and_unfreeze_restores_the_exact_snaps
     snapshot = tmp_path / "freeze.json"
 
     assert _freeze(fake, snapshot) == 0
-    assert set(_map_statuses(fake).values()) == {"STOPPED"}
+    _assert_frozen(fake)
     # 다른 location은 그대로다.
     assert fake.status("schedule", "pinvi_weather_retention_horizon_schedule", _PINVI) == "RUNNING"
     assert fake.status("sensor", "pinvi_queue_sensor", _PINVI) == "RUNNING"
@@ -378,6 +423,78 @@ def test_newly_enabled_schedules_are_frozen_and_restored(tmp_path: Path, name: s
     assert fake.status("schedule", name) == "RUNNING"
 
 
+def test_valkey_state_schedules_keep_running_and_their_runs_are_not_awaited(
+    tmp_path: Path,
+) -> None:
+    """``weather_state_*``·``transport_state_*``는 Map PG에 닿지 않는다 — 멈추면 상태만 낡는다.
+
+    멈춘 채 두면 창 동안 낡고, Dagster가 놓친 tick을 따라잡지 않아 하루 한 번 도는 것은 unfreeze
+    뒤 다음 cron까지 낡는다. 그 run이 창 안에서 계속 떠도 freeze는 그것을 기다리지 않는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    fake.runs = [_run("weather_state_current"), _run("transport_state_highway_incidents")]
+    clock = _Clock()
+    snapshot = tmp_path / "freeze.json"
+
+    assert _freeze(fake, snapshot, clock) == 0
+    _assert_frozen(fake)
+    assert not set(_stops(fake)) & _STATE_SCHEDULES
+    # 상태 적재 run을 기다리지 않는다 — settle과 두 번째 tick만.
+    assert clock.sleeps == [90.0, 30.0]
+
+    fake.calls.clear()
+    assert _unfreeze(fake, snapshot) == 0
+    assert _map_statuses(fake) == before
+    assert not {call.split(":", 1)[1] for call in fake.calls} & _STATE_SCHEDULES
+
+
+def test_state_schedules_stopped_by_an_earlier_freeze_are_restored(tmp_path: Path) -> None:
+    """이 예외 이전 판의 freeze(상태 schedule을 RUNNING으로 적고 멈췄다)도 이어 하고 되살린다."""
+
+    fake = _FakeDagster()
+    fake.runs = [_run()]
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot, wait_timeout=0.0) == 1
+    for name in _STATE_SCHEDULES:
+        fake.state[(_MAP, "schedule", name)]["status"] = "STOPPED"
+
+    fake.runs = []
+    assert _freeze(fake, snapshot, resume=True) == 0
+    assert _unfreeze(fake, snapshot) == 0
+    assert {name for name in _STATE_SCHEDULES if fake.status("schedule", name) == "RUNNING"} == (
+        _STATE_SCHEDULES
+    )
+
+
+def test_resume_does_not_refuse_a_state_schedule_turned_on_in_the_window(tmp_path: Path) -> None:
+    """상태 schedule은 freeze 대상이 아니다 — 창 안에서 켜져도 이어 하기를 막지 않는다."""
+
+    fake = _FakeDagster()
+    locations = fake.state[(_MAP, "schedule", "weather_state_locations_schedule")]
+    locations["status"] = "STOPPED"
+    fake.runs = [_run()]
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot, wait_timeout=0.0) == 1
+    locations["status"] = "RUNNING"
+
+    fake.runs = []
+    assert _freeze(fake, snapshot, resume=True) == 0
+    assert locations["status"] == "RUNNING"
+
+
+def test_state_prefixes_match_the_fixture_state_schedules() -> None:
+    """가짜 webserver의 n150 구성에서 도구가 건너뛰는 것은 상태 schedule 12개뿐이다.
+
+    이름 규칙이 code location 정의와 맞는지(그리고 그 job이 Map PG에 닿지 않는지)는
+    ``packages/kor-travel-map-dagster/tests/test_freeze_skips_state_jobs.py``가 본다.
+    """
+
+    names = {*_RUNNING_SCHEDULES, *(name for name, _, _ in _SENSORS)}
+    assert {name for name in names if freeze.is_state_job(name)} == _STATE_SCHEDULES
+
+
 def test_run_status_sensors_stop_last_after_runs_drain_and_ticks_settle(tmp_path: Path) -> None:
     fake = _FakeDagster()
     fake.run_script = [[_run()], [_run()], []]
@@ -409,7 +526,7 @@ def test_a_run_launched_by_the_success_sensor_during_settle_is_awaited(tmp_path:
     assert _freeze(fake, tmp_path / "freeze.json", clock) == 0
     # settle·두 번째 SKIPPED tick → completion run 대기 → settle·두 번째 SKIPPED tick.
     assert clock.sleeps == [90.0, 30.0, 30.0, 90.0, 30.0]
-    assert set(_map_statuses(fake).values()) == {"STOPPED"}
+    _assert_frozen(fake)
 
 
 def test_lagging_run_status_sensor_keeps_observers_running(tmp_path: Path) -> None:
@@ -433,7 +550,7 @@ def test_launcher_stop_failure_keeps_run_status_sensors_running(tmp_path: Path) 
 
     fake.fail_stop = set()
     assert _freeze(fake, snapshot, resume=True) == 0
-    assert set(_map_statuses(fake).values()) == {"STOPPED"}
+    _assert_frozen(fake)
 
 
 def test_run_appearing_while_observers_stop_restores_them(tmp_path: Path) -> None:
@@ -488,6 +605,255 @@ def test_resume_refuses_a_stale_snapshot(tmp_path: Path) -> None:
     fake.calls.clear()
     assert _freeze(fake, snapshot, now=_NOW + timedelta(hours=25), resume=True) == 3
     assert not _stops(fake)
+
+
+def test_resume_names_recorded_running_launchers_it_stops_again(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """스냅샷이 RUNNING으로 적은 것이 창 안에서 다시 켜지면 거부 없이 다시 멈추고 이름을 남긴다."""
+
+    fake = _FakeDagster()
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot) == 0
+    mcst = fake.state[(_MAP, "schedule", "feature_place_mcst_culture_monthly_schedule")]
+    mcst["status"] = "RUNNING"
+    capsys.readouterr()
+
+    assert _freeze(fake, snapshot, resume=True) == 0
+    out = capsys.readouterr().out
+    assert "launcher 1개가 지금 RUNNING" in out
+    assert "    schedule:feature_place_mcst_culture_monthly_schedule" in out
+    assert mcst["status"] == "STOPPED"
+
+
+def test_failed_freeze_prints_how_to_roll_back_and_unfreeze_does(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """1로 끝난 freeze를 접는 길 — 같은 스냅샷의 unfreeze가 부분 freeze를 되돌린다."""
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    fake.fail_stop = {"managed_file_scan_six_hourly_schedule"}
+    snapshot = tmp_path / "freeze.json"
+
+    assert freeze.main(["freeze", "--snapshot", str(snapshot)], gql=fake) == 1
+    out = capsys.readouterr().out
+    assert f"rollback: 접으려면 unfreeze --snapshot {snapshot}" in out
+
+    assert freeze.main(["unfreeze", "--snapshot", str(snapshot)], gql=fake) == 0
+    assert _map_statuses(fake) == before
+
+
+def test_refused_freeze_changes_nothing_and_offers_no_rollback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """창 안의 회전이 새 파일로 freeze하면 거부(3)된다 — 아무것도 안 바꿨으니 되돌릴 것도 없다."""
+
+    fake = _FakeDagster()
+    assert _freeze(fake, tmp_path / "window.json") == 0
+    frozen = _map_statuses(fake)
+    capsys.readouterr()
+    fake.calls.clear()
+
+    rotation = tmp_path / "rotation.json"
+    assert freeze.main(["freeze", "--snapshot", str(rotation)], gql=fake) == 3
+    out = capsys.readouterr().out
+    assert "회전 전용 파일에 --include-state를 붙여라" in out
+    assert "rollback" not in out
+    assert not rotation.exists()
+    assert not fake.calls
+    assert _map_statuses(fake) == frozen
+
+
+def test_existing_snapshot_is_refused_before_asking_the_webserver(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """이미 있는 파일(창 스냅샷)로 ``--resume`` 없이 부르면 webserver가 실패해도 3이다.
+
+    파일 검사가 webserver 조회 뒤에 있으면 HTTP 500이 2가 되고, 2의 rollback 안내가 아무것도
+    바꾸지 않은 호출에 남의 파일을 unfreeze하라고 적었다(#1552 리뷰).
+    """
+
+    fake = _FakeDagster()
+    window = tmp_path / "window.json"
+    assert _freeze(fake, window) == 0
+    capsys.readouterr()
+    fake.down = True  # 어떤 GraphQL 호출이든 실패한다 — 3이면 webserver에 묻지 않았다.
+
+    assert freeze.main(["freeze", "--snapshot", str(window)], gql=fake) == 3
+    out = capsys.readouterr().out
+    assert "REFUSE: 스냅샷이 이미 있다" in out
+    assert "rollback" not in out
+    assert window.exists()
+
+
+def test_resumed_snapshot_gets_the_rollback_hint_when_the_webserver_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--resume``으로 이어 받은 파일은 이번 호출의 것이다 — 2로 끝나도 되돌리는 길을 적는다."""
+
+    fake = _FakeDagster()
+    fake.runs = [_run()]
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot, wait_timeout=0.0) == 1
+    capsys.readouterr()
+    fake.down = True
+
+    assert freeze.main(["freeze", "--snapshot", str(snapshot), "--resume"], gql=fake) == 2
+    out = capsys.readouterr().out
+    assert f"rollback: 접으려면 unfreeze --snapshot {snapshot}" in out
+
+
+def test_include_state_stops_state_schedules_and_awaits_their_runs(tmp_path: Path) -> None:
+    """code-server 회전은 돌던 상태 run을 끊는다 — ``--include-state``는 그것도 멈추고 기다린다.
+
+    run worker는 code-server의 자식이라 회전이 함께 죽인다. 끊긴 run의 Valkey 적재 잠금은 TTL(run
+    상한 + 660초)까지 남아 그동안 뒤 run이 "잠금 — 건너뜀"으로 끝나고 상태가 낡는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    forecast = _run("weather_state_forecast_short")
+    fake.run_script = [[forecast], [forecast], []]
+    clock = _Clock()
+    snapshot = tmp_path / "rotation.json"
+
+    assert _freeze(fake, snapshot, clock, include_state=True) == 0
+    assert "RUNNING" not in _map_statuses(fake).values()
+    assert set(_stops(fake)) >= _STATE_SCHEDULES
+    # 상태 run 대기 poll 둘, settle, 두 번째 SKIPPED tick.
+    assert clock.sleeps == [30.0, 30.0, 90.0, 30.0]
+
+    assert _unfreeze(fake, snapshot) == 0
+    assert _map_statuses(fake) == before
+
+
+def test_rotation_inside_a_window_with_include_state_touches_only_state_schedules(
+    tmp_path: Path,
+) -> None:
+    """창 안의 회전은 회전 전용 파일 + ``--include-state`` — 창이 남긴 상태 schedule만 멈춘다.
+
+    회전 스냅샷에는 상태 schedule만 RUNNING으로 적히므로 회전 끝 unfreeze는 그것만 되살리고 창은
+    얼어 있는 채 남는다. 창 스냅샷 파일은 건드리지 않는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    window = tmp_path / "window.json"
+    assert _freeze(fake, window) == 0
+    window_text = window.read_text(encoding="utf-8")
+    fake.calls.clear()
+
+    rotation = tmp_path / "rotation.json"
+    assert _freeze(fake, rotation, include_state=True) == 0
+    assert set(_stops(fake)) == _STATE_SCHEDULES
+    assert "RUNNING" not in _map_statuses(fake).values()
+
+    fake.calls.clear()
+    assert _unfreeze(fake, rotation) == 0
+    assert {call.split(":", 1)[1] for call in fake.calls} == _STATE_SCHEDULES
+    _assert_frozen(fake)
+    assert window.read_text(encoding="utf-8") == window_text
+
+    assert _unfreeze(fake, window) == 0
+    assert _map_statuses(fake) == before
+
+
+def test_include_state_on_a_fully_frozen_location_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """창 freeze가 상태 schedule까지 멈췄으면(#1541 판) 회전 freeze도 거부된다 — 끊길 run이 없다."""
+
+    fake = _FakeDagster()
+    assert _freeze(fake, tmp_path / "window.json", include_state=True) == 0
+    capsys.readouterr()
+    fake.calls.clear()
+
+    rotation = tmp_path / "rotation.json"
+    assert _freeze(fake, rotation, include_state=True) == 3
+    assert "회전의 freeze·unfreeze 단계를 빼라" in capsys.readouterr().out
+    assert not rotation.exists()
+    assert not fake.calls
+
+
+def test_freeze_ok_reports_state_runs_it_did_not_wait_for(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``FREEZE_OK``는 Map PG writer 정지다 — 돌고 있는 상태 run 수를 따로 적는다."""
+
+    fake = _FakeDagster()
+    fake.runs = [_run("weather_state_current"), _run("transport_state_highway_incidents")]
+    assert _freeze(fake, tmp_path / "freeze.json") == 0
+    out = capsys.readouterr().out
+    assert "active_runs=0 state_runs=2(기다리지 않음)" in out
+
+
+def test_unfreeze_waits_for_the_location_to_load_after_a_rotation(tmp_path: Path) -> None:
+    """회전 직후 webserver는 location을 다시 싣기 전까지 ``RepositoryNotFoundError``를 낸다.
+
+    전송 층은 5xx·연결 오류만 다시 시도하므로 기다리지 않으면 unfreeze가 곧바로 2로 끝나고 Map
+    location이 얼어 있는 채 남는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    snapshot = tmp_path / "rotation.json"
+    assert _freeze(fake, snapshot) == 0
+    fake.not_loaded = 3
+    clock = _Clock()
+
+    assert _unfreeze(fake, snapshot, clock=clock.monotonic, sleep=clock.sleep) == 0
+    assert clock.sleeps == [10.0, 10.0, 10.0]
+    assert _map_statuses(fake) == before
+
+
+def test_unfreeze_that_cannot_reach_the_location_says_map_is_still_frozen(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = _FakeDagster()
+    snapshot = tmp_path / "rotation.json"
+    assert _freeze(fake, snapshot) == 0
+    frozen = _map_statuses(fake)
+    fake.not_loaded = 1
+    capsys.readouterr()
+
+    argv = ["unfreeze", "--snapshot", str(snapshot), "--location-wait", "0"]
+    assert freeze.main(argv, gql=fake) == 2
+    out = capsys.readouterr().out
+    assert "RepositoryNotFoundError" in out
+    assert "retry: Map location이 아직 (일부) 얼어 있다" in out
+    assert snapshot.exists()
+    assert _map_statuses(fake) == frozen
+
+    assert freeze.main(argv, gql=fake) == 0
+    assert not snapshot.exists()
+
+
+def test_unfreeze_missing_after_a_rotation_says_map_is_still_frozen(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """회전이 이름을 지우면 1이고 스냅샷이 남는다 — 그동안 다음 freeze는 그 파일로 거부(3)한다."""
+
+    fake = _FakeDagster()
+    snapshot = tmp_path / "rotation.json"
+    assert _freeze(fake, snapshot) == 0
+    del fake.state[(_MAP, "schedule", "feature_place_khoa_beaches_monthly_schedule")]
+    capsys.readouterr()
+
+    assert freeze.main(["unfreeze", "--snapshot", str(snapshot)], gql=fake) == 1
+    out = capsys.readouterr().out
+    assert "retry: Map location이 아직 (일부) 얼어 있다" in out
+    assert "--accept-missing" in out
+    assert freeze.main(["freeze", "--snapshot", str(snapshot)], gql=fake) == 3
+
+
+def test_unfreeze_of_a_broken_snapshot_gives_no_retry_hint(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    snapshot = tmp_path / "freeze.json"
+    snapshot.write_text("{}", encoding="utf-8")
+    assert freeze.main(["unfreeze", "--snapshot", str(snapshot)], gql=_FakeDagster()) == 2
+    assert "retry" not in capsys.readouterr().out
 
 
 def test_resume_without_a_snapshot_is_refused(tmp_path: Path) -> None:
@@ -729,6 +1095,27 @@ def test_one_skipped_tick_is_not_enough(tmp_path: Path) -> None:
     assert _freeze(fake, tmp_path / "freeze.json", clock) == 0
     assert fake.calls.count("ticks") == 2
     assert clock.sleeps == [90.0, 30.0]
+
+
+def test_a_skipped_tick_with_a_reason_handled_an_event_and_is_not_caught_up(
+    tmp_path: Path,
+) -> None:
+    """``feature_update_request_failure_sensor``는 실패 사건 하나를 처리할 때마다 SkipReason을 낸다.
+
+    Dagster run-status sensor 감싸개는 사용자 함수가 돌려준 값을 내고 그 tick을 끝낸다 — tick은
+    SKIPPED지만 사건 하나를 처리했고, 실패가 몰리면 뒤에 사건이 남아 있다. 처리할 사건이 없던
+    tick만 사유가 없다(감싸개가 아무것도 내지 않는다).
+    """
+
+    fake = _FakeDagster()
+    handled = ("SKIPPED", "Dagster feature update worker failed: run_id=r9 request_id=q9")
+    fake.tick_script = [{"feature_update_request_failure_sensor": handled}] * 3
+    clock = _Clock()
+
+    assert _freeze(fake, tmp_path / "freeze.json", clock) == 0
+    # 사유 있는 SKIPPED 세 번은 따라잡음이 아니다 — 그 뒤 사유 없는 tick을 서로 다른 두 시각에 본다.
+    assert fake.calls.count("ticks") == 5
+    assert clock.sleeps == [90.0, 30.0, 30.0, 30.0, 30.0]
 
 
 def test_resume_restores_run_status_sensors_left_off_while_runs_exist(tmp_path: Path) -> None:

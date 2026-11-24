@@ -1,3 +1,13 @@
+## 2026-11-24 — Map Dagster freeze 도구 리뷰 후속(#1541)
+
+- freeze가 기본으로 Valkey 상태 schedule(`weather_state_*`·`transport_state_*`)을 멈추지 않고 그 run을 기다리지 않는다
+  (`after:` 줄 `state_runs`). code-server 회전·공용 PG 재생성은 `--include-state`(상태 run까지 비운다). 따라잡기는 사유 없는
+  SKIPPED tick만 센다. `--resume` `note:`, 이번 호출의 스냅샷일 때만 `rollback:`. unfreeze는 location 재로드를
+  `--location-wait`까지 기다리고 실패하면 `retry:`. 창 안 회전은 회전 전용 파일 + `--include-state`(runbook §2.2·README).
+- 다음: n150 `~/dagster-freeze.py`를 이 판으로 다시 설치하고 호스트 회전 스크립트를 README 규칙(freeze `--include-state`,
+  freeze·unfreeze 종료 코드, 0이 아니면 알림)으로 고친다(부모·호스트 전용). 이미 #1541 판으로 얼린 창이면 이 판의
+  `unfreeze`가 상태 schedule까지 되살린다.
+
 ## 2026-11-24 — 큐 요청 재발행 후속(#1544 리뷰, PR #1551)
 
 - failure sensor의 claim 뒤 재발행도 provider 단계 상한 2회(누적 `retry_count` 기준, 종결 메시지에 상한·누적 함께),
