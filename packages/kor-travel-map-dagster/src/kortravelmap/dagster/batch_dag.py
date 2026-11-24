@@ -18,6 +18,8 @@ from dagster import (
     op,
 )
 
+from .run_priority import run_priority_tags
+
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
 
@@ -33,6 +35,7 @@ __all__ = [
 FULL_LOAD_BATCH_CONSISTENCY_GATE_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.job_scope": "maintenance",
     "kor_travel_map.job_kind": "full_load_batch_consistency_gate",
+    **run_priority_tags("full_load_batch_consistency_gate"),
 }
 
 _BATCH_GATE_CONFIG_SCHEMA: Final[dict[str, object]] = {

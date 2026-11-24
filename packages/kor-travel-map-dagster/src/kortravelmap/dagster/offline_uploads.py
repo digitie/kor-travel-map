@@ -13,6 +13,8 @@ from kortravelmap.settings import KorTravelMapSettings
 
 from dagster import Failure, OpExecutionContext, job, op
 
+from .run_priority import run_priority_tags
+
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
     from kortravelmap.offline_upload import OfflineUploadObjectStore
@@ -27,6 +29,7 @@ __all__ = [
 OFFLINE_UPLOAD_LOAD_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.job_scope": "maintenance",
     "kor_travel_map.job_kind": "offline_upload_load",
+    **run_priority_tags("offline_upload_load"),
 }
 """offline upload load Dagster job 공통 tag."""
 

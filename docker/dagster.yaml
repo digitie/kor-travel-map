@@ -102,6 +102,7 @@ concurrency:
     # job에 6이 남는다. 교환은 명시적이다 — 요청 5건 이상이 동시에 들어오면 4건만
     # 실행되고 나머지는 QUEUED로 남는다(버려지지 않는다). 장기 정지의 비용이
     # "최신성 job 굶주림"에서 "관리자 요청 대기열"로 옮겨가는 것이 의도다.
+    # 이 값(10 중 4)은 standalone 스택 기준이다. 공용 plane은 kor-travel-docker-manager ADR-65로 location 4·worker 2.
     tag_concurrency_limits:
       - key: "kor_travel_map.feature_update_request_id"
         limit: 4

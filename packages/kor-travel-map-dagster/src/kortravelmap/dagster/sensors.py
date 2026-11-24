@@ -31,6 +31,7 @@ from dagster import (
 )
 
 from .run_failure_detail import failure_detail_text, run_failure_detail
+from .run_priority import run_priority_tags
 from .upstream_retry import sharing_run_retry_budget
 
 if TYPE_CHECKING:
@@ -159,9 +160,12 @@ async def execute_feature_update_request_op(
 
 @job(
     name="feature_update_request_worker",
-    tags=RecoveryPolicy(max_runtime_seconds=21_600).tags(
-        project="map", job_name="feature_update_request_worker"
-    ),
+    tags={
+        **RecoveryPolicy(max_runtime_seconds=21_600).tags(
+            project="map", job_name="feature_update_request_worker"
+        ),
+        **run_priority_tags("feature_update_request_worker"),
+    },
 )
 def feature_update_request_worker_job() -> None:
     """Dagster run 1개가 feature update request 1건을 실행한다."""

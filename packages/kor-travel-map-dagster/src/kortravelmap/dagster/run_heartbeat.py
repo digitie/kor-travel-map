@@ -64,6 +64,10 @@ RUN_HEARTBEAT_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.job_scope": "maintenance",
     "kor_travel_map.job_kind": "run_heartbeat",
     MAX_RUNTIME_SECONDS_TAG: str(_RUN_HEARTBEAT_MAX_RUNTIME_SECONDS),
+    # 공용 큐 우선순위(배치 0). 이 모듈은 상대 import를 하지 않으므로(탐침 import
+    # 허용 목록) ``run_priority_tags`` 대신 값을 적는다 — ``tests/test_run_priority.py``가
+    # 표와 대조한다.
+    "dagster/priority": "0",
 }
 """탐침 job tag. ``kor_travel_map.operation_key``를 일부러 달지 않는다(모듈 docstring)."""
 
