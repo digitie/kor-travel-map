@@ -488,6 +488,9 @@ async def _handle_failure_side_effects(
                 expected_request_generation=expected_generation,
                 error_message=message,
                 failure_payload={"source": "dagster_run_failure", **(detail or {})},
+                # op가 재발행을 기록하지 못하고 죽었을 때도 op와 같은 상한을 쓴다 — provider 갱신
+                # 단계면 2회다. 기본 5회를 쓰면 쿼터가 좁은 상류를 세 번 더 처음부터 부른다.
+                max_retries=_max_retries_for_stage((detail or {}).get("stage")),
             )
         except Exception as exc:
             context.log.error(

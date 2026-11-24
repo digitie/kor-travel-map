@@ -398,3 +398,72 @@ async def test_failure_sensor_path_backs_off_pre_start_failures_up_to_the_cap(
     codes = [event["code"] for event in await _events(migrated_engine, request.job_id)]
     assert codes.count(FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE) == FEATURE_UPDATE_MAX_RETRIES
     assert codes.count(FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE) == 1
+
+async def _claim(engine: AsyncEngine, request_id: str, *, generation: int, run_id: str) -> None:
+    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
+        started = await start_update_request(
+            session, request_id, dagster_run_id=run_id, expected_generation=generation
+        )
+    assert started is not None
+    assert started.status == "running"
+
+
+async def test_failure_sensor_path_reschedules_a_claimed_transient_failure_up_to_its_cap(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """claim 뒤 일시 DB 실패 — op가 재발행을 기록하지 못하고 죽은 run — 는 failure sensor가
+    재발행한다. 상한은 sensor가 실패 단계로 고른 값(provider 갱신 단계 2회)이다(#1544 리뷰).
+
+    종전에는 이 분기가 기본 상한 5회를 써서 쿼터가 좁은 상류를 세 번 더 처음부터 불렀다.
+    """
+    request = await _enqueue(migrated_engine, "sensor-claimed-transient")
+    client = AsyncKorTravelMapClient(migrated_engine)
+    payload = {
+        "source": "dagster_run_failure",
+        "failure_class": "transient_db",
+        "stage": "refreshing:1:dataset_wide",
+    }
+    generation = request.generation
+    for attempt in (1, 2):
+        run_id = f"run-claimed-{attempt}"
+        await _claim(migrated_engine, request.request_id, generation=generation, run_id=run_id)
+        retried = await client.fail_update_request(
+            request.request_id,
+            owner_dagster_run_id=run_id,
+            expected_request_generation=generation,
+            error_message="Dagster feature update worker failed — Failure: 재발행 기록 실패",
+            failure_payload=payload,
+            max_retries=2,
+        )
+        assert retried is not None
+        assert retried.status == "queued"
+        assert retried.dagster_run_id is None
+        assert retried.retry_count == attempt
+        assert retried.next_dispatch_at is not None
+        generation = retried.generation
+
+    await _claim(migrated_engine, request.request_id, generation=generation, run_id="run-final")
+    final = await client.fail_update_request(
+        request.request_id,
+        owner_dagster_run_id="run-final",
+        expected_request_generation=generation,
+        error_message="Dagster feature update worker failed — Failure: 재발행 기록 실패",
+        failure_payload=payload,
+        max_retries=2,
+    )
+    assert final is not None
+    assert final.status == "failed"
+    assert final.retry_count == 2
+    assert final.error_message is not None
+    assert final.error_message.startswith("재발행 2회 소진")
+
+    events = await _events(migrated_engine, request.job_id)
+    scheduled = [e for e in events if e["code"] == FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE]
+    exhausted = [e for e in events if e["code"] == FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE]
+    assert [event["payload"]["retry_count"] for event in scheduled] == [1, 2]
+    assert {event["payload"]["max_retries"] for event in scheduled} == {2}
+    assert {event["payload"]["stage"] for event in scheduled} == {"refreshing:1:dataset_wide"}
+    assert len(exhausted) == 1
+    assert exhausted[0]["payload"]["dagster_run_id"] == "run-final"
+    assert exhausted[0]["payload"]["max_retries"] == 2
+

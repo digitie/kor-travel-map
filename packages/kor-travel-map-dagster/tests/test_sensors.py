@@ -127,6 +127,7 @@ class _Client:
         expected_request_generation: int,
         error_message: str | None = None,
         failure_payload: dict[str, Any] | None = None,
+        max_retries: int = 5,
     ) -> FeatureUpdateRequest | None:
         if self.fail_raises is not None:
             raise self.fail_raises
@@ -137,6 +138,7 @@ class _Client:
                 "expected_request_generation": expected_request_generation,
                 "error_message": error_message,
                 "failure_payload": failure_payload,
+                "max_retries": max_retries,
             }
         )
         if self.advance_generation_on_failure and self.request is not None:
@@ -837,6 +839,106 @@ def test_worker_marks_its_failure_transient_when_the_reschedule_write_keeps_fail
     assert len(client.rescheduled) == 3
     detail = run_failure_detail(result.get_run_failure_event())
     assert detail["failure_class"] == "transient_db"
+    assert detail["stage"] == "claim"
+
+
+def test_failure_sensor_reschedules_with_the_provider_stage_cap(monkeypatch: Any) -> None:
+    """op가 재발행을 기록하지 못하고 죽으면 failure sensor가 재발행한다 — 상한도 op와 같다.
+
+    provider 갱신 단계의 일시 실패는 재발행마다 상류를 처음부터 다시 부르므로 2회다. failure
+    sensor가 기본 5회를 쓰면 쿼터가 좁은 상류(data.go.kr·OpiNet)를 세 번 더 부른다(#1544 리뷰).
+    """
+    from kortravelmap.dagster import sensors as sensors_mod
+
+    monkeypatch.setattr(sensors_mod, "_DB_CALL_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    sensor_client = _Client(request=request)
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = feature_update_request_worker_job.execute_in_process(
+            run_config={
+                "ops": {
+                    "execute_feature_update_request": {
+                        "config": {"request_id": request.request_id, "request_generation": 1}
+                    }
+                }
+            },
+            tags={
+                FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
+                FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
+            },
+            resources={
+                "kor_travel_map_client": _Client(
+                    request=request,
+                    execute_raises=FeatureUpdateTransientFailure(
+                        summary, stage="refreshing:1:dataset_wide"
+                    ),
+                    reschedule_raises=[_LockTimeout("a"), _LockTimeout("b"), _LockTimeout("c")],
+                ),
+                "feature_update_runner": object(),
+            },
+            instance=instance,
+            raise_on_error=False,
+        )
+        assert not failed_run.success
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={"kor_travel_map_client": sensor_client},
+        )
+
+        feature_update_request_failure_sensor(context)
+
+    [failed] = sensor_client.failed
+    assert failed["max_retries"] == 2
+    assert failed["failure_payload"]["failure_class"] == "transient_db"
+    assert failed["failure_payload"]["stage"] == "refreshing:1:dataset_wide"
+
+
+def test_failure_sensor_keeps_the_default_cap_without_a_provider_stage() -> None:
+    """launch 실패(step 없음)는 단계가 없다 — 기본 상한."""
+    request = _request()
+    client = _Client(request=request)
+
+    @resource
+    def broken_feature_update_runner() -> object:
+        raise RuntimeError("resource initialization failed")
+
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = feature_update_request_worker_job.execute_in_process(
+            run_config={
+                "ops": {
+                    "execute_feature_update_request": {
+                        "config": {"request_id": request.request_id, "request_generation": 1}
+                    }
+                }
+            },
+            tags={
+                FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
+                FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
+            },
+            resources={
+                "kor_travel_map_client": _Client(request=request),
+                "feature_update_runner": broken_feature_update_runner,
+            },
+            instance=instance,
+            raise_on_error=False,
+        )
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={"kor_travel_map_client": client},
+        )
+
+        feature_update_request_failure_sensor(context)
+
+    [failed] = client.failed
+    assert failed["max_retries"] == 5
+    assert "stage" not in failed["failure_payload"]
 
 
 def test_worker_closes_with_the_original_cause_when_recording_a_failure_failed() -> None:

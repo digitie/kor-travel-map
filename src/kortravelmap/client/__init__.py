@@ -2131,18 +2131,20 @@ class AsyncKorTravelMapClient:
         expected_request_generation: int,
         error_message: str | None = None,
         failure_payload: Mapping[str, Any] | None = None,
+        max_retries: int = FEATURE_UPDATE_MAX_RETRIES,
     ) -> FeatureUpdateRequest | None:
         """Dagster worker run 실패를 request에 반영한다(failure sensor 경로).
 
         - **claim 전**(sensor가 본 queued generation 그대로 — launch 실패): 일시 실패로 보고 backoff
-          뒤 재발행한다(:data:`~kortravelmap.infra.feature_update_repo.FEATURE_UPDATE_MAX_RETRIES`
-          상한). 상한을 넘으면 ``failed``로 닫는다. 종전에는 generation만 +1해 15초 뒤 곧바로 새
-          run을 냈고 상한이 없었다(감사 §1.3 P1).
+          뒤 재발행한다(``max_retries`` 상한, 기본
+          :data:`~kortravelmap.infra.feature_update_repo.FEATURE_UPDATE_MAX_RETRIES`). 상한을 넘으면
+          ``failed``로 닫는다. 종전에는 generation만 +1해 15초 뒤 곧바로 새 run을 냈고 상한이
+          없었다(감사 §1.3 P1).
         - **claim 후**(이 run이 owner인 ``running``): op가 일시 DB 실패의 재발행을 기록하지 못하고
-          죽었다면(``failure_payload["failure_class"] == "transient_db"``) 재발행한다. 그 밖(run이
-          도중에
-          죽음)은 원인을 모르므로 재발행하지 않고 ``failed``로 닫고 PinVi relay에도 ``failed``를
-          낸다.
+          죽었다면(``failure_payload["failure_class"] == "transient_db"``) 재발행한다. 상한은
+          ``max_retries``다 — failure sensor가 op와 같은 규칙으로 실패 단계에서 고른다(provider
+          갱신 단계면 2회, #1544 리뷰). 그 밖(run이 도중에 죽음)은 원인을 모르므로 재발행하지 않고
+          ``failed``로 닫고 PinVi relay에도 ``failed``를 낸다.
 
         상태 전이와 event 기록은 **다른 transaction**이다 — event 기록의 일시
         실패(lock·연결)가 상태 전이를 막지 않게 한다(전역 event clock 단일 행 경합은
@@ -2175,6 +2177,7 @@ class AsyncKorTravelMapClient:
                         owner_dagster_run_id=owner_dagster_run_id,
                         failure_message=message,
                         include_running=not pre_start,
+                        max_retries=max_retries,
                     )
                     failed = None
                 else:
