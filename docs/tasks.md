@@ -179,11 +179,11 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
 - [ ] T-TOURAPI-LOAD — **TourAPI 관광지·문화시설·레포츠 운영 적재·schedule 켜기(#1459)**
 
-  코드는 migration 441과 함께 들어간다. 배포 뒤 첫 적재(12·14·28)·#1459 검색 확인·daily schedule 활성이 남았다. 해제 조건은 acceptance.
+  코드는 migration 441과 함께 들어간다. 첫 적재(11-10 수동)·daily schedule 활성(2026-11-24)은 됐다. #1459 검색 확인이 남았다. 해제 조건은 acceptance.
 
 - [ ] T-MARKET-LOAD — **전통시장·특화거리 표준데이터 운영 적재·schedule 켜기(#1459)**
 
-  원천은 포털 공개 파일(서비스키 불필요)로 바뀌었다. 배포 뒤 두 dataset 첫 적재·검색 확인, schedule 활성이 남았다. 해제 조건은 acceptance.
+  원천은 포털 공개 파일(서비스키 불필요)로 바뀌었다. 두 dataset 첫 적재(11-10 수동)·schedule 활성(2026-11-24)은 됐다. 검색 확인이 남았다. 해제 조건은 acceptance.
 
 - [ ] T-MOIS-LODGING-FIRST — **MOIS 숙박을 먼저 적재하고 통칭으로 찾는다**
 

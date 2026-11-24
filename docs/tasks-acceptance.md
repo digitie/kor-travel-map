@@ -2580,7 +2580,7 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 
 ## T-TOURAPI-LOAD
 
-441 배포 뒤: 첫 적재(≈19,030) · 산막이옛길·태권도원·세종도서관 등 검색 · schedule.
+441 배포 뒤: 첫 적재(≈19,030) · 산막이옛길·태권도원·세종도서관 등 검색 · schedule(2026-11-24 켬).
 
 ## T-MARKET-LOAD
 
@@ -2591,7 +2591,7 @@ kor-travel-common 저장소의 공통화 재조사 계획(2026-11-17, `docs/plan
 - [ ] `POST /v1/ops/pipeline/requests`(preview 먼저)로 첫 적재가 성공하고 feature 수가 원천 totalCount와 맞는다(건너뛴 행은 사유와 함께).
 - [ ] #1459 목록의 시장(망원·통인·남대문·신포·강릉/속초 중앙·강화 풍물 등)이 PinVi `/search`에서 시장 feature로 3위 안에 나온다(없는 것은 원천 부재 여부와 함께 #1459에 기록).
 - [ ] `standard_special_streets`도 첫 적재가 성공하고 feature 수가 274(원천)와 맞는다.
-- [ ] `feature_place_standard_traditional_markets_monthly_schedule`·`feature_place_standard_special_streets_monthly_schedule`을 켠다.
+- [x] `feature_place_standard_traditional_markets_monthly_schedule`·`feature_place_standard_special_streets_monthly_schedule`을 켠다(2026-11-24 소유자 결정, 수집 실패 감사 §4 #11).
 
 ## T-READ-01
 
