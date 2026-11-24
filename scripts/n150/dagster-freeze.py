@@ -756,6 +756,16 @@ def cmd_freeze(
             print("그것을 멈추면 unfreeze가 되살리지 못한다. 누가 켰는지 확인하라.")
             return EXIT_REFUSED
         print(f"snapshot resumed: {snapshot} (taken_at={recorded.taken_at.isoformat()})")
+        again = _running(items, observers=False)
+        if again:
+            # 스냅샷이 RUNNING으로 적은 것은 거부하지 않고 다시 멈춘다. 앞선 시도가 멈추지 못한 것과
+            # 창 안에서 누가 다시 켠 것은 여기서 갈리지 않으므로 이름을 남긴다.
+            print(
+                f"  note: 스냅샷이 RUNNING으로 적은 launcher {len(again)}개가 지금 RUNNING이다 — "
+                "앞선 시도가 멈추지 못했거나 창 안에서 다시 켜졌다. 다시 멈춘다:"
+            )
+            for item in again:
+                print(f"    {item.key}")
         orphaned = [
             item
             for key, item in sorted(items.items())
@@ -774,7 +784,8 @@ def cmd_freeze(
         if not _running(items, observers=False):
             print("REFUSE: RUNNING launcher가 하나도 없다 — 이미 얼어 있는 것으로 보인다.")
             print("이 상태를 스냅샷하면 unfreeze가 아무것도 되살리지 못한다.")
-            print("기존 스냅샷 경로를 확인하라.")
+            print("기존 스냅샷 경로를 확인하라. 아무것도 바꾸지 않았다.")
+            print("운영 창 안의 회전이면 회전의 freeze·unfreeze 단계를 빼라 — 창 freeze가 덮는다.")
             return EXIT_REFUSED
         if dry_run:
             print(f"would write snapshot: {snapshot}")
@@ -973,29 +984,47 @@ def main(argv: Sequence[str] | None = None, gql: Gql | None = None) -> int:
             )
         if args.command == "status":
             return cmd_status(gql, target, args.snapshot)
-        if args.command == "freeze":
-            return cmd_freeze(
+        if args.command == "unfreeze":
+            return cmd_unfreeze(
                 gql,
                 target,
                 args.snapshot,
                 dry_run=args.dry_run,
-                resume=args.resume,
-                wait_timeout=args.wait_timeout,
-                settle=args.settle,
-                poll=args.poll,
+                accept_missing=args.accept_missing,
                 max_age_hours=args.max_age_hours,
             )
-        return cmd_unfreeze(
+        code = cmd_freeze(
             gql,
             target,
             args.snapshot,
             dry_run=args.dry_run,
-            accept_missing=args.accept_missing,
+            resume=args.resume,
+            wait_timeout=args.wait_timeout,
+            settle=args.settle,
+            poll=args.poll,
             max_age_hours=args.max_age_hours,
         )
     except FreezeError as exc:
         print(f"ERROR {exc}")
-        return EXIT_ERROR
+        code = EXIT_ERROR
+    if args.command == "freeze":
+        _rollback_hint(args.snapshot, code, dry_run=args.dry_run)
+    return code
+
+
+def _rollback_hint(snapshot: Path, code: int, *, dry_run: bool) -> None:
+    """freeze가 일부를 멈춘 채 끝났을 수 있으면(1·2, 스냅샷 있음) 되돌리는 길을 적는다.
+
+    거부(3)는 아무것도 바꾸지 않았다 — 그때 unfreeze를 부르면 남의 스냅샷(창)을 되살릴 수 있어
+    적지 않는다. 자동 회전 스크립트도 같은 규칙을 따른다(scripts/n150/README.md §Dagster freeze).
+    """
+
+    if dry_run or code not in (EXIT_INCOMPLETE, EXIT_ERROR):
+        return
+    if not snapshot.is_absolute() or not snapshot.exists():
+        return
+    print(f"rollback: 접으려면 unfreeze --snapshot {snapshot} (부분 freeze도 스냅샷대로 되살린다)")
+    print(f"rollback: 이어 하려면 원인을 본 뒤 freeze --snapshot {snapshot} --resume")
 
 
 if __name__ == "__main__":

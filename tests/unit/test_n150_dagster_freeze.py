@@ -593,6 +593,64 @@ def test_resume_refuses_a_stale_snapshot(tmp_path: Path) -> None:
     assert not _stops(fake)
 
 
+def test_resume_names_recorded_running_launchers_it_stops_again(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """스냅샷이 RUNNING으로 적은 것이 창 안에서 다시 켜지면 거부 없이 다시 멈추고 이름을 남긴다."""
+
+    fake = _FakeDagster()
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot) == 0
+    mcst = fake.state[(_MAP, "schedule", "feature_place_mcst_culture_monthly_schedule")]
+    mcst["status"] = "RUNNING"
+    capsys.readouterr()
+
+    assert _freeze(fake, snapshot, resume=True) == 0
+    out = capsys.readouterr().out
+    assert "launcher 1개가 지금 RUNNING" in out
+    assert "    schedule:feature_place_mcst_culture_monthly_schedule" in out
+    assert mcst["status"] == "STOPPED"
+
+
+def test_failed_freeze_prints_how_to_roll_back_and_unfreeze_does(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """1로 끝난 freeze를 접는 길 — 같은 스냅샷의 unfreeze가 부분 freeze를 되돌린다."""
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    fake.fail_stop = {"managed_file_scan_six_hourly_schedule"}
+    snapshot = tmp_path / "freeze.json"
+
+    assert freeze.main(["freeze", "--snapshot", str(snapshot)], gql=fake) == 1
+    out = capsys.readouterr().out
+    assert f"rollback: 접으려면 unfreeze --snapshot {snapshot}" in out
+
+    assert freeze.main(["unfreeze", "--snapshot", str(snapshot)], gql=fake) == 0
+    assert _map_statuses(fake) == before
+
+
+def test_refused_freeze_changes_nothing_and_offers_no_rollback(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """창 안의 회전이 새 파일로 freeze하면 거부(3)된다 — 아무것도 안 바꿨으니 되돌릴 것도 없다."""
+
+    fake = _FakeDagster()
+    assert _freeze(fake, tmp_path / "window.json") == 0
+    frozen = _map_statuses(fake)
+    capsys.readouterr()
+    fake.calls.clear()
+
+    rotation = tmp_path / "rotation.json"
+    assert freeze.main(["freeze", "--snapshot", str(rotation)], gql=fake) == 3
+    out = capsys.readouterr().out
+    assert "회전의 freeze·unfreeze 단계를 빼라" in out
+    assert "rollback" not in out
+    assert not rotation.exists()
+    assert not fake.calls
+    assert _map_statuses(fake) == frozen
+
+
 def test_resume_without_a_snapshot_is_refused(tmp_path: Path) -> None:
     fake = _FakeDagster()
     assert _freeze(fake, tmp_path / "freeze.json", resume=True) == 3
