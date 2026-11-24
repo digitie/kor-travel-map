@@ -760,3 +760,54 @@ def test_an_unrecoverable_transport_error_seen_only_as_context_does_not_stop_ret
 
     with pytest.raises(RuntimeError, match="정리 중"):
         asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+@pytest.mark.parametrize(
+    ("code", "retry_after"),
+    [
+        ("EXPORT_SOURCE_NOT_CURRENT", 1800.0),
+        ("EXPORT_NO_HISTORY", 3600.0),
+        ("EXPORT_INCIDENTS_NOT_CURRENT", 300.0),
+        ("EXPORT_EMPTY_SET", 300.0),
+    ],
+)
+def test_the_asset_boundary_fails_a_coded_not_current_503_without_retries(
+    tracked: bool, code: str, retry_after: float
+) -> None:
+    """transport가 code로 "이 run 안에서는 풀리지 않는다"고 알린 503.
+
+    60·180·420초 뒤의 step 재시도는 같은 503을 받을 뿐이다. run은 **실패**로 끝나고(초록으로
+    숨기지 않는다) code·Retry-After가 남는다.
+    """
+    from kortravelmap.providers.kor_travel_transport import TransportSourceNotCurrent
+
+    cause = TransportSourceNotCurrent("503", code=code, retry_after=retry_after)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(Failure) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value.allow_retries is False
+    assert caught.value.__cause__ is cause
+    metadata = {key: value.value for key, value in caught.value.metadata.items()}
+    assert metadata["transport_problem_code"] == code
+    assert metadata["transport_retry_after_seconds"] == retry_after
+    assert metadata["failure_kind"] == cause.failure_kind
+    assert cause.failure_kind != "transport_not_current"  # code별로 갈린다
+
+
+@pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
+def test_the_asset_boundary_keeps_retries_for_a_short_busy_503(tracked: bool) -> None:
+    """HTTP 층 재시도를 다 쓴 경합 503(``Retry-After`` 상한 안)은 종전 503처럼 step 재시도다."""
+    from kortravelmap.providers.kor_travel_transport import TransportExportBusy
+
+    cause = TransportExportBusy("503", code="EXPORT_BUSY", retry_after=10.0, retry_after_cap=60.0)
+
+    async def _raise(_context: Any) -> None:
+        raise cause
+
+    with pytest.raises(TransportExportBusy) as caught:
+        asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
+    assert caught.value is cause

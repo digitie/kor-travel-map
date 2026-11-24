@@ -271,17 +271,25 @@ def raise_terminal_if_transport_unrecoverable(exc: BaseException) -> None:
         if isinstance(current, TransportExportFailure | TransportExportContractError):
             if current.retryable:
                 return
+            metadata: dict[str, str | float] = {
+                "failure_kind": current.failure_kind,
+                "provider_error": type(current).__name__,
+                "step_retries_suppressed": "true",
+            }
+            # 503 problem ``code``·``Retry-After``(transport 2026-11-24 계약). 없으면 싣지 않는다.
+            code = getattr(current, "code", None)
+            if isinstance(code, str):
+                metadata["transport_problem_code"] = code
+            retry_after = getattr(current, "retry_after", None)
+            if isinstance(retry_after, int | float) and not isinstance(retry_after, bool):
+                metadata["transport_retry_after_seconds"] = float(retry_after)
             raise Failure(
                 description=(
                     f"kor-travel-transport 실패({current.failure_kind}) — 기다려도 풀리지 "
                     "않으므로 step 재시도를 끈다. "
                     f"원 예외: {type(current).__name__}: {current}"
                 ),
-                metadata={
-                    "failure_kind": current.failure_kind,
-                    "provider_error": type(current).__name__,
-                    "step_retries_suppressed": "true",
-                },
+                metadata=metadata,
                 allow_retries=False,
             ) from current
         # ``__cause__``(명시적 ``raise ... from``)만 따른다. ``__context__``는 처리 중에 난

@@ -1,5 +1,19 @@
 # CHANGELOG
 
+## 2026-11-24 — transport export 503 code·HTTP 층 재시도·바뀌지 않은 주유소 집합 건너뛰기(ADR-106 개정)
+
+- transport 503의 problem `code`를 읽는다. `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·
+  `EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET`은 HTTP·step 재시도 없이 run을 **실패**로 끝낸다(상태 job metadata
+  `outcome=skipped_upstream_not_current`, `transport_problem_code`·`transport_retry_after_seconds`·`last_success_at`; Valkey
+  세대 유지). `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`는 같은 요청을 `Retry-After`대로(한 번 60초 상한, run
+  예산 공유) 4회까지 다시 묻는다. code가 없거나 모르는 503은 종전과 같다.
+- HTTP 층 재시도에 408·429(`Retry-After`)·500을 더했다. 400·422는 재시도 없는 `transport_request_rejected`.
+- Valkey 상태 job 주유소·휴게소 유가: 첫 페이지 `last_success_at`이 서비스 세대와 같으면 나머지 페이지와 교체를
+  건너뛴다(`skipped=unchanged`, 6시간마다 전량).
+- 새 env `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_REFERENCE_PAGE_SIZE`(철도역·항구 snapshot, 기본 2000·상한 5000).
+- transport 요청 계측 metadata `transport_http_*`·`transport_server_*`(Server-Timing app·sql)를 상태 op와 feature 적재
+  asset에 싣는다.
+
 ## 2026-11-24 — import job event clock slot화(alembic 457)
 
 - `ops.import_job_event_clock`(전역 단일 행)을 `ops.import_job_event_clock_slots`로 바꿨다(alembic `457_event_clock_slots`). event를 쓴 긴 적재 transaction이 commit까지 그 행을 쥐어 다른 큐 요청·job의 event 기록이 lock timeout으로 실패하던 문제(10-22 큐 요청 8건)를 없앤다. `/v1/ops/live`의 `event_clock_revision` 값·의미는 같다(slot 합, 옛 값 이관). OpenAPI 변경 없음.

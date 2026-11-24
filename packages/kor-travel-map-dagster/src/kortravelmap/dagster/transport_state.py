@@ -13,6 +13,20 @@
 - 실패 분류: transport 실패는 기존 규약(``raise_terminal_if_transport_unrecoverable``)을 따르고,
   교체 거부 (``state_swap_refused``)·동시 교체(``state_swap_conflict``)·Valkey OOM·미설정은 step
   재시도를 끈다 (다음 tick이 다시 본다). Valkey 연결 실패는 재시도한다.
+- **transport 503 code**(2026-11-24 계약, 감사 MC-01): 근거 수집이 현재가 아니라고 code로 알린 503
+  (``EXPORT_SOURCE_NOT_CURRENT``·``EXPORT_NO_HISTORY``·``EXPORT_INCIDENTS_NOT_CURRENT``·
+  ``EXPORT_EMPTY_SET``)과 ``Retry-After``가 HTTP 층 상한보다 긴 경합 503은 step 재시도 없이 **run을
+  실패로** 끝낸다(``outcome=skipped_upstream_not_current``, code·``Retry-After``·서비스 세대의 원천
+  수집 시각을 metadata에). 세대는 그대로다. Map에는 상류 장애 경보가 따로 없어 빨간 run이 유일한
+  신호이므로 초록으로 건너뛰지 않는다. 몇 초짜리 경합(``EXPORT_BUSY`` 등)은 fetcher가 같은 요청을
+  다시 보낸다. code가 없거나 모르는 code의 503은 종전대로 step 재시도다.
+- **바뀌지 않은 집합은 다시 받지 않는다**(주유소·휴게소 유가, 감사 MC-04): 첫 페이지의
+  ``collection.last_success_at``이 서비스 세대의 원천 수집 시각과 같고 그 세대를 적재한 지
+  :data:`FULL_WALK_INTERVAL`이 안 됐으면 나머지 페이지와 교체를 건너뛴다(``skipped=unchanged``,
+  run 성공). 주기마다 한 번은 전량을 받는다 — ``admin`` 주소처럼 ``last_success_at`` 없이 바뀌는
+  필드가 있다.
+- 요청마다 걸린 시간과 transport ``Server-Timing``(app·sql)을 ``transport_http_*``·
+  ``transport_server_*`` metadata로 남긴다(:mod:`.transport_http_metrics`).
 - 다른 적재가 같은 데이터셋을 잡고 있으면(잠금) 이번 run은 아무것도 하지 않고 성공으로 끝난다.
 """
 
@@ -20,14 +34,21 @@
 # 실제 타입으로 검사하므로 문자열 주석이면 정의 시점에 거부한다(maintenance.py와 같다).
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
-from typing import Any, Final
+from datetime import UTC, datetime, timedelta
+from typing import Any, Final, Protocol
 
 from kortravelmap.infra.valkey_state import (
+    GenerationMeta,
+    StateNotLoaded,
     StateStoreError,
     StateSwapRefused,
     ValkeyStateStore,
     make_valkey_client,
+)
+from kortravelmap.providers.kor_travel_transport import (
+    TransportExportBusy,
+    TransportExportFailure,
+    TransportSourceNotCurrent,
 )
 from kortravelmap.providers.kor_travel_transport_state import (
     DATASET_AIRPORTS,
@@ -60,6 +81,7 @@ from dagster import (
 )
 
 from .provider_fetchers import (
+    TransportExportUnchanged,
     fetch_transport_airports,
     fetch_transport_fuel_stations,
     fetch_transport_highway_incidents,
@@ -69,6 +91,7 @@ from .provider_fetchers import (
 from .quota_exhaustion import raise_terminal_if_transport_unrecoverable
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
+from .transport_http_metrics import observing_transport_http, transport_http_metadata
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     counting_upstream_requests,
@@ -77,6 +100,7 @@ from .upstream_requests import (
 from .upstream_retry import sharing_run_retry_budget
 
 __all__ = [
+    "FULL_WALK_INTERVAL",
     "TRANSPORT_STATE_JOBS",
     "TRANSPORT_STATE_JOB_TAGS",
     "TRANSPORT_STATE_RETRY_POLICY",
@@ -93,7 +117,11 @@ TRANSPORT_STATE_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     delay=30,
     backoff=Backoff.EXPONENTIAL,
 )
-"""Valkey 연결 실패·transport 503 같은 기다리면 풀리는 실패만 다시 돈다."""
+"""Valkey 연결 실패·code 없는 transport 503 같은 기다리면 풀리는 실패만 다시 돈다.
+
+Dagster 지수 backoff는 ``((2**n) - 1) × delay``라 실패 뒤 30초, 그다음 90초에 다시 돈다.
+transport가 code로 "이 run 안에서는 풀리지 않는다"고 알린 503은 이 정책을 타지 않는다
+(``allow_retries=False``)."""
 
 TRANSPORT_STATE_JOB_TAGS: Final[dict[str, str]] = {
     "kor_travel_map.job_scope": "state",
@@ -102,23 +130,49 @@ TRANSPORT_STATE_JOB_TAGS: Final[dict[str, str]] = {
 }
 """상태 적재 job 공통 tag. feature operation이 아니므로 ``operation_key``를 달지 않는다."""
 
-Collector = Callable[[KorTravelMapSettings, Callable[[datetime], None]], Awaitable[list[Any]]]
+class Collector(Protocol):
+    """원천을 끝까지 받아 상태 항목을 만든다. ``unchanged_since``는 바뀌지 않은 집합 건너뛰기 기준
+    (지원하는 데이터셋만 쓰고, 첫 페이지가 같으면 :class:`TransportExportUnchanged`)."""
+
+    def __call__(
+        self,
+        settings: KorTravelMapSettings,
+        on_collected_at: Callable[[datetime], None],
+        /,
+        *,
+        unchanged_since: datetime | None = None,
+    ) -> Awaitable[list[Any]]: ...
+
+
+FULL_WALK_INTERVAL: Final[timedelta] = timedelta(hours=6)
+"""바뀌지 않은 집합 건너뛰기를 해도 이 간격마다 한 번은 전량을 받는다(서비스 세대 적재 시각
+기준). T1 ``admin`` 주소는 주소 job으로 바뀌어 ``last_success_at``만으로는 보이지 않는다(감사
+MC-04 정정)."""
 
 
 async def _collect_fuel_stations(
-    settings: KorTravelMapSettings, on_collected_at: Callable[[datetime], None]
+    settings: KorTravelMapSettings,
+    on_collected_at: Callable[[datetime], None],
+    /,
+    *,
+    unchanged_since: datetime | None = None,
 ) -> list[Any]:
     return [
         to_state_item(fuel_station_state(station))
         async for station in fetch_transport_fuel_stations(
-            settings, on_collected_at=on_collected_at
+            settings, on_collected_at=on_collected_at, unchanged_since=unchanged_since
         )
     ]
 
 
 async def _collect_rest_areas(
-    settings: KorTravelMapSettings, on_collected_at: Callable[[datetime], None]
+    settings: KorTravelMapSettings,
+    on_collected_at: Callable[[datetime], None],
+    /,
+    *,
+    unchanged_since: datetime | None = None,
 ) -> list[Any]:
+    del unchanged_since  # 매일 한 번이라 건너뛰지 않는다
     return [
         to_state_item(rest_area_state(area))
         async for area in fetch_transport_rest_areas(settings, on_collected_at=on_collected_at)
@@ -126,11 +180,15 @@ async def _collect_rest_areas(
 
 
 async def _collect_rest_area_fuel_prices(
-    settings: KorTravelMapSettings, on_collected_at: Callable[[datetime], None]
+    settings: KorTravelMapSettings,
+    on_collected_at: Callable[[datetime], None],
+    /,
+    *,
+    unchanged_since: datetime | None = None,
 ) -> list[Any]:
     items = []
     async for record in fetch_transport_rest_area_fuel_prices(
-        settings, on_collected_at=on_collected_at
+        settings, on_collected_at=on_collected_at, unchanged_since=unchanged_since
     ):
         value = rest_area_fuel_price_state(record)
         items.append(
@@ -140,8 +198,13 @@ async def _collect_rest_area_fuel_prices(
 
 
 async def _collect_highway_incidents(
-    settings: KorTravelMapSettings, on_collected_at: Callable[[datetime], None]
+    settings: KorTravelMapSettings,
+    on_collected_at: Callable[[datetime], None],
+    /,
+    *,
+    unchanged_since: datetime | None = None,
 ) -> list[Any]:
+    del unchanged_since  # 페이지 없는 단건이라 건너뛸 것이 없다
     return [
         to_state_item(highway_incident_state(incident))
         async for incident in fetch_transport_highway_incidents(
@@ -151,10 +214,14 @@ async def _collect_highway_incidents(
 
 
 async def _collect_airports(
-    settings: KorTravelMapSettings, on_collected_at: Callable[[datetime], None]
+    settings: KorTravelMapSettings,
+    on_collected_at: Callable[[datetime], None],
+    /,
+    *,
+    unchanged_since: datetime | None = None,
 ) -> list[Any]:
     # 공항 export에는 수집 상태(collection)가 없다 — 원천 수집 시각을 알릴 것이 없다.
-    del on_collected_at
+    del on_collected_at, unchanged_since
     return [
         to_state_item(airport_state(airport))
         async for airport in fetch_transport_airports(settings)
@@ -172,6 +239,8 @@ class TransportStateJobSpec:
     max_runtime_seconds: int
     collect: Collector
     description: str
+    skip_unchanged: bool = False
+    """첫 페이지 ``last_success_at``이 서비스 세대와 같으면 건너뛴다(:data:`FULL_WALK_INTERVAL`)."""
 
 
 TRANSPORT_STATE_SPECS: Final[tuple[TransportStateJobSpec, ...]] = (
@@ -182,7 +251,8 @@ TRANSPORT_STATE_SPECS: Final[tuple[TransportStateJobSpec, ...]] = (
         cron_schedule="17 * * * *",
         max_runtime_seconds=1_800,
         collect=_collect_fuel_stations,
-        description="주유소 + 유종별 최신가 → Valkey 세대 교체(매시).",
+        description="주유소 + 유종별 최신가 → Valkey 세대 교체(매시, 바뀌지 않았으면 건너뜀).",
+        skip_unchanged=True,
     ),
     TransportStateJobSpec(
         dataset=DATASET_REST_AREAS,
@@ -200,7 +270,8 @@ TRANSPORT_STATE_SPECS: Final[tuple[TransportStateJobSpec, ...]] = (
         cron_schedule="27 * * * *",
         max_runtime_seconds=900,
         collect=_collect_rest_area_fuel_prices,
-        description="휴게소 주유소 최신 유가 → Valkey 세대 교체(매시).",
+        description="휴게소 주유소 최신 유가 → Valkey 세대 교체(매시, 바뀌지 않았으면 건너뜀).",
+        skip_unchanged=True,
     ),
     TransportStateJobSpec(
         dataset=DATASET_HIGHWAY_INCIDENTS,
@@ -224,11 +295,20 @@ TRANSPORT_STATE_SPECS: Final[tuple[TransportStateJobSpec, ...]] = (
 
 
 async def collect_transport_state_items(
-    spec: TransportStateJobSpec, settings: KorTravelMapSettings
+    spec: TransportStateJobSpec,
+    settings: KorTravelMapSettings,
+    *,
+    unchanged_since: datetime | None = None,
 ) -> tuple[list[Any], datetime | None]:
-    """원천을 끝까지 받아 상태 항목과 원천 수집 시각(페이지 중 가장 이른 값)을 돌려준다."""
+    """원천을 끝까지 받아 상태 항목과 원천 수집 시각(페이지 중 가장 이른 값)을 돌려준다.
+
+    ``unchanged_since``가 첫 페이지와 같으면 :class:`TransportExportUnchanged`가 그대로 올라간다.
+    """
     collected: list[datetime] = []
-    items = await spec.collect(settings, collected.append)
+    if unchanged_since is None:
+        items = await spec.collect(settings, collected.append)
+    else:
+        items = await spec.collect(settings, collected.append, unchanged_since=unchanged_since)
     return items, (min(collected) if collected else None)
 
 
@@ -253,6 +333,53 @@ def _terminal(exc: StateStoreError) -> Failure:
     )
 
 
+async def _served_meta(store: ValkeyStateStore, dataset: str) -> GenerationMeta | None:
+    """지금 서비스하는 세대 meta. 없거나(첫 적재 전) 읽지 못하면 ``None``(판단을 막지 않는다)."""
+    try:
+        return await store.current_meta(dataset)
+    except (StateNotLoaded, StateStoreError):
+        return None
+
+
+def _unchanged_since(meta: GenerationMeta | None, *, now: datetime) -> datetime | None:
+    """건너뛰기 기준 — 서비스 세대의 원천 수집 시각. 세대가 없거나 전량 주기가 됐으면 ``None``."""
+    if meta is None or meta.source_collected_at is None:
+        return None
+    if now - meta.loaded_at >= FULL_WALK_INTERVAL:
+        return None
+    return meta.source_collected_at
+
+
+def _iso_or_blank(value: datetime | None) -> str:
+    return value.isoformat() if value is not None else ""
+
+
+def _upstream_stop(exc: BaseException) -> TransportExportFailure | None:
+    """transport가 503 code로 "이 run 안에서는 풀리지 않는다"고 알린 실패. 아니면 ``None``.
+
+    :class:`TransportSourceNotCurrent`(code 4종)와 ``Retry-After``가 HTTP 층 상한보다 긴 경합
+    (:class:`TransportExportBusy` ``retryable=False``)이다. ``__cause__``만 따른다.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TransportSourceNotCurrent | TransportExportBusy):
+            return None if current.retryable else current
+        current = current.__cause__
+    return None
+
+
+def _request_metadata() -> dict[str, Any]:
+    """이 적재가 transport에 보낸 요청 수(하한)와 요청 계측. 재지 않았으면 key를 싣지 않는다."""
+    metadata: dict[str, Any] = {}
+    upstream = observed_upstream_requests()
+    if upstream is not None:
+        metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
+    metadata.update(transport_http_metadata())
+    return metadata
+
+
 async def load_transport_state(
     spec: TransportStateJobSpec,
     *,
@@ -263,7 +390,9 @@ async def load_transport_state(
 ) -> dict[str, Any]:
     """한 데이터셋을 받아 Valkey 세대를 교체한다. 반환값은 op metadata다.
 
-    ``store``를 넘기지 않으면 settings로 client를 만들고 끝나면 닫는다.
+    ``store``를 넘기지 않으면 settings로 client를 만들고 끝나면 닫는다. 바뀌지 않은 집합이면 교체
+    없이 ``skipped=unchanged``로 끝난다. transport가 503 code로 근거 수집이 현재가 아니라고 알리면
+    재시도 없는 :class:`dagster.Failure`(``outcome=skipped_upstream_not_current``)다.
     """
     owned = store is None
     try:
@@ -278,15 +407,40 @@ async def load_transport_state(
         ) as acquired:
             if not acquired:
                 return {"dataset": spec.dataset.name, "skipped": "locked"}
-            with counting_upstream_requests(), sharing_run_retry_budget():
+            served = await _served_meta(active, spec.dataset.name) if spec.skip_unchanged else None
+            unchanged_since = _unchanged_since(served, now=datetime.now(UTC))
+            with (
+                counting_upstream_requests(),
+                sharing_run_retry_budget(),
+                observing_transport_http(),
+            ):
                 try:
                     items, source_collected_at = await collect_transport_state_items(
-                        spec, settings
+                        spec, settings, unchanged_since=unchanged_since
                     )
+                except TransportExportUnchanged:
+                    assert served is not None  # unchanged_since가 있었다
+                    return {
+                        "dataset": spec.dataset.name,
+                        "skipped": "unchanged",
+                        "generation": served.generation,
+                        "source_collected_at": _iso_or_blank(served.source_collected_at),
+                        "generation_loaded_at": served.loaded_at.isoformat(),
+                        "generation_age_seconds": int(
+                            (datetime.now(UTC) - served.loaded_at).total_seconds()
+                        ),
+                        "full_walk_interval_seconds": int(FULL_WALK_INTERVAL.total_seconds()),
+                        **_request_metadata(),
+                    }
                 except Exception as exc:
+                    stop = _upstream_stop(exc)
+                    if stop is not None:
+                        raise await _upstream_not_current_failure(
+                            spec, active, stop, served=served
+                        ) from exc
                     raise_terminal_if_transport_unrecoverable(exc)
                     raise
-                upstream = observed_upstream_requests()
+                requests = _request_metadata()
             result = await active.swap(
                 spec.dataset.name,
                 items,
@@ -308,16 +462,11 @@ async def load_transport_state(
             "geo_count": result.meta.geo_count,
             "duplicates": result.meta.duplicates,
             "baseline": result.baseline if result.baseline is not None else -1,
-            "source_collected_at": (
-                result.meta.source_collected_at.isoformat()
-                if result.meta.source_collected_at is not None
-                else ""
-            ),
+            "source_collected_at": _iso_or_blank(result.meta.source_collected_at),
             "guard_override": result.meta.guard_override,
             "retired_other_version_keys": retired,
+            **requests,
         }
-        if upstream is not None:
-            metadata[UPSTREAM_REQUESTS_METADATA_KEY] = upstream
         return metadata
     except StateSwapRefused as exc:
         raise Failure(
@@ -339,6 +488,56 @@ async def load_transport_state(
     finally:
         if owned:
             await active.client.aclose()
+
+
+async def _upstream_not_current_failure(
+    spec: TransportStateJobSpec,
+    store: ValkeyStateStore,
+    stop: TransportExportFailure,
+    *,
+    served: GenerationMeta | None,
+) -> Failure:
+    """transport가 code로 근거 수집이 현재가 아니라고 알렸다 — 재시도 없이 run을 실패시킨다.
+
+    세대는 건드리지 않았다(REST는 직전 세대를 ``age_seconds``·``stale``과 함께 계속 낸다). 초록으로
+    건너뛰지 않는 이유: Map에는 상류 장애 경보가 따로 없어 빨간 run이 유일한 신호다.
+    """
+    if served is None:
+        served = await _served_meta(store, spec.dataset.name)
+    now = datetime.now(UTC)
+    retry_after = stop.retry_after
+    metadata: dict[str, Any] = {
+        "dataset": spec.dataset.name,
+        "outcome": "skipped_upstream_not_current",
+        "failure_kind": stop.failure_kind,
+        "transport_problem_code": stop.code or "",
+        "transport_retry_after_seconds": float(retry_after) if retry_after is not None else -1.0,
+        "served_generation": served.generation if served is not None else "",
+        "last_success_at": _iso_or_blank(served.source_collected_at if served else None),
+        "served_age_seconds": (
+            int((now - served.source_collected_at).total_seconds())
+            if served is not None and served.source_collected_at is not None
+            else -1
+        ),
+        "step_retries_suppressed": "true",
+        **_request_metadata(),
+    }
+    collected = metadata["last_success_at"] or "모름"
+    served_text = (
+        f"서비스 세대 {served.generation}(원천 수집 {collected})를 그대로 둔다"
+        if served is not None
+        else "서비스할 세대가 아직 없다(첫 적재 전 — REST는 503)"
+    )
+    wait = f"{retry_after:.0f}초" if retry_after is not None else "알리지 않음"
+    return Failure(
+        description=(
+            f"{spec.dataset.name}: transport가 503 code={stop.code}(Retry-After {wait})로 근거 "
+            f"수집이 이 run 안에서는 현재가 되지 않는다고 알렸다 — step 재시도 없이 실패한다. "
+            f"{served_text}. transport 수집 상태를 본다."
+        ),
+        metadata=metadata,
+        allow_retries=False,
+    )
 
 
 _OP_CONFIG: Final[dict[str, Field]] = {
@@ -369,8 +568,15 @@ def _build_job(spec: TransportStateJobSpec) -> JobDefinition:
             run_id=context.run_id,
             allow_shrink=bool(context.op_config.get("allow_shrink", False)),
         )
-        if metadata.get("skipped"):
+        if metadata.get("skipped") == "locked":
             context.log.info("%s: 다른 적재가 잠금을 쥐고 있어 건너뛴다.", spec.dataset.name)
+        elif metadata.get("skipped") == "unchanged":
+            context.log.info(
+                "%s: 근거 수집(%s)이 서비스 세대와 같아 교체하지 않는다(전량은 %s초마다).",
+                spec.dataset.name,
+                metadata.get("source_collected_at"),
+                metadata.get("full_walk_interval_seconds"),
+            )
         context.add_output_metadata(metadata)
         return metadata
 

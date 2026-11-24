@@ -27,6 +27,7 @@ from kortravelmap.dagster.validation import (
     validate_feature_bundles_address,
 )
 
+from .transport_http_metrics import transport_http_metadata
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     observed_upstream_requests,
@@ -1062,6 +1063,9 @@ def _add_output_metadata(
     observed = observed_upstream_requests()
     if observed is not None and UPSTREAM_REQUESTS_METADATA_KEY not in merged:
         merged[UPSTREAM_REQUESTS_METADATA_KEY] = observed
+    # transport export 요청 계측(감사 G2-07) — transport를 부르지 않은 asset은 key가 없다.
+    for key, value in transport_http_metadata().items():
+        merged.setdefault(key, value)
     try:
         context.add_output_metadata(merged)
     except Exception as exc:

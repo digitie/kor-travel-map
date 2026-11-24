@@ -184,7 +184,10 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 1. `lock`을 `SET NX EX`(그 job의 run 상한 + 취소 유예 600초 + 60초)로 잡는다. 이미 있으면 다른 적재가 도는 것이라 이번 run은 받지 않고 끝낸다(실패
    아님). 끝나면 자기 토큰일 때만 지운다.
 2. 원천을 끝까지 받는다(기존 fetcher 그대로 — 수집 이력 없음·실패·stale·계약 위반·0건 페이지 export는 여기서
-   실패하고 Valkey에는 아무것도 쓰지 않는다).
+   실패하고 Valkey에는 아무것도 쓰지 않는다). transport가 503 `code`로 "이 run 안에서는 풀리지 않는다"고 알리면
+   step 재시도 없이 run이 실패한다(2026-11-24, ADR-106 개정 절). 주유소·휴게소 유가는 첫 페이지의
+   `collection.last_success_at`이 `current` 세대의 `source_collected_at`과 같고 그 세대 적재가 6시간 안이면
+   나머지 페이지와 3~5를 건너뛴다(`skipped=unchanged`, 6시간마다 전량).
 3. `current`와 그 세대 `meta`, `recent_counts`를 읽는다. `current`가 있는데 `meta`가 없으면 저장소가 깨진 것이라
    실패한다(첫 적재로 취급하지 않는다). 교체 거부 검사(D4). 거부면 쓰지 않고 실패한다.
 4. 새 세대 키를 pipeline으로 나눠 쓴다. **쓰는 동안 새 키마다 build TTL(기본 2시간)을 건다** — 적재가 도중에

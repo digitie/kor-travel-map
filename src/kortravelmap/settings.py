@@ -630,7 +630,18 @@ class KorTravelMapSettings(BaseSettings):
         ge=1,
         le=1000,
         description=(
-            "kor-travel-transport export page size. 상한 1000은 transport ``MAX_PAGE_SIZE``와 같다."
+            "kor-travel-transport 현재 집합 export(주유소·휴게소·휴게소 유가) page size. "
+            "상한 1000은 transport ``MAX_PAGE_SIZE``와 같다."
+        ),
+    )
+    kor_travel_transport_reference_page_size: int = Field(
+        default=2000,
+        ge=1,
+        le=5000,
+        description=(
+            "kor-travel-transport 기준정보 snapshot export(철도역·항구, T3) page size. "
+            "transport 기본 1000·상한 5000. snapshot 첫 페이지 구성 비용은 limit과 무관하므로 "
+            "키우면 페이지 수만 준다(철도역 약 1.5천 행이면 1페이지, 감사 MC-10)."
         ),
     )
     kor_travel_transport_timeout_seconds: float = Field(

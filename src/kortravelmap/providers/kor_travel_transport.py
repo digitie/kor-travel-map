@@ -22,6 +22,11 @@ Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 �
   확인하며(:func:`require_current_collection`), 돌발 집합은 ``collected_at`` 나이까지 잰다
   (:func:`require_fresh_incident_set`). 어긋나면 :class:`TransportExportNotCurrent`로 실패한다 —
   낡거나 빈 집합을 받아들이면 완전 snapshot reconcile이 멀쩡한 feature를 지우거나 사건을 닫는다.
+- **503은 problem ``code``로 가른다**(transport 2026-11-24 계약, :data:`TRANSPORT_PROBLEM_CODES`).
+  stale·이력 없음·돌발 집합이 지금이 아님·돌발 0건은 :class:`TransportSourceNotCurrent`(재시도 없이
+  run 실패), 몇 초짜리 경합·준비 초과·DB 일시 오류는 :class:`TransportExportBusy`(fetcher가 같은
+  요청을 ``Retry-After``대로 다시 묻는다), code가 없거나 모르는 code는 종전대로
+  :class:`TransportExportNotCurrent`다.
 """
 
 from __future__ import annotations
@@ -54,9 +59,20 @@ __all__ = [
     "PriceHistorySourceStatus",
     "ReferenceSourceStatus",
     "SERVICE_TOKEN_HEADER",
+    "TRANSPORT_BUSY_CODES",
+    "TRANSPORT_CODE_BUSY",
+    "TRANSPORT_CODE_EMPTY_SET",
+    "TRANSPORT_CODE_INCIDENTS_NOT_CURRENT",
+    "TRANSPORT_CODE_NO_HISTORY",
+    "TRANSPORT_CODE_PREPARE_TIMEOUT",
+    "TRANSPORT_CODE_SOURCE_NOT_CURRENT",
+    "TRANSPORT_CODE_TRANSIENT_DB",
+    "TRANSPORT_PROBLEM_CODES",
+    "TRANSPORT_SOURCE_NOT_CURRENT_CODES",
     "TransportAirport",
     "TransportCollection",
     "TransportCoordinate",
+    "TransportExportBusy",
     "TransportExportContractError",
     "TransportExportEmpty",
     "TransportExportFailure",
@@ -77,6 +93,7 @@ __all__ = [
     "TransportRestArea",
     "TransportRestAreaFuelPrice",
     "TransportSnapshotExpired",
+    "TransportSourceNotCurrent",
     "parse_active_incident_set",
     "parse_airport",
     "parse_airports",
@@ -159,6 +176,58 @@ class TransportExportContractError(ValueError):
     """같은 run의 step 재시도로 풀리지 않는다 — Map이나 transport 코드를 고쳐야 한다."""
 
 
+TRANSPORT_CODE_SOURCE_NOT_CURRENT: Final[str] = "EXPORT_SOURCE_NOT_CURRENT"
+"""참조 데이터(주유소·휴게소·휴게소 유가) 근거 수집의 마지막 성공이 stale 기준을 넘었다.
+몇 시간 단위."""
+TRANSPORT_CODE_NO_HISTORY: Final[str] = "EXPORT_NO_HISTORY"
+"""근거 수집이 한 번도 성공하지 않았다(수집이 꺼진 dataset 포함)."""
+TRANSPORT_CODE_INCIDENTS_NOT_CURRENT: Final[str] = "EXPORT_INCIDENTS_NOT_CURRENT"
+"""돌발 활성 집합이 "지금"이 아니다(마지막 시도 실패·30분 초과). transport #265 뒤로 0건 집합도 수집
+실패로 기록되므로 대개 이 code로 온다."""
+TRANSPORT_CODE_EMPTY_SET: Final[str] = "EXPORT_EMPTY_SET"
+"""돌발 활성 집합이 비었다(transport INCIDENT-EMPTY-SET 정책)."""
+TRANSPORT_CODE_BUSY: Final[str] = "EXPORT_BUSY"
+"""snapshot 준비 경합(55P03·반복 40001·SnapshotRace). 몇 초 단위."""
+TRANSPORT_CODE_PREPARE_TIMEOUT: Final[str] = "EXPORT_PREPARE_TIMEOUT"
+"""요청 경로의 본문 구성 예산·statement timeout(57014) 초과."""
+TRANSPORT_CODE_TRANSIENT_DB: Final[str] = "TRANSIENT_DB"
+"""pool checkout timeout·DB 연결 실패·PG 기동 중(57P03)·연결 수 초과(53300)."""
+
+TRANSPORT_SOURCE_NOT_CURRENT_CODES: Final[frozenset[str]] = frozenset(
+    {
+        TRANSPORT_CODE_SOURCE_NOT_CURRENT,
+        TRANSPORT_CODE_NO_HISTORY,
+        TRANSPORT_CODE_INCIDENTS_NOT_CURRENT,
+        TRANSPORT_CODE_EMPTY_SET,
+    }
+)
+"""이 run 안에서는 풀리지 않는 503 — HTTP 층도 step도 다시 부르지 않는다
+(:class:`TransportSourceNotCurrent`)."""
+
+TRANSPORT_BUSY_CODES: Final[frozenset[str]] = frozenset(
+    {TRANSPORT_CODE_BUSY, TRANSPORT_CODE_PREPARE_TIMEOUT, TRANSPORT_CODE_TRANSIENT_DB}
+)
+"""몇 초면 풀리는 503 — 같은 요청을 ``Retry-After``대로 다시 보낸다
+(:class:`TransportExportBusy`)."""
+
+TRANSPORT_PROBLEM_CODES: Final[frozenset[str]] = (
+    TRANSPORT_SOURCE_NOT_CURRENT_CODES | TRANSPORT_BUSY_CODES
+)
+"""Map이 아는 transport 503 problem ``code`` 전부. 여기 없는 code(앞으로 공통 표준이 모든 5xx에
+붙일 ``SERVICE_UNAVAILABLE`` 등)와 code가 없는 503은 종전 동작
+(:class:`TransportExportNotCurrent`)이다."""
+
+_CODE_FAILURE_KINDS: Final[dict[str, str]] = {
+    TRANSPORT_CODE_SOURCE_NOT_CURRENT: "transport_source_not_current",
+    TRANSPORT_CODE_NO_HISTORY: "transport_no_history",
+    TRANSPORT_CODE_INCIDENTS_NOT_CURRENT: "transport_incidents_not_current",
+    TRANSPORT_CODE_EMPTY_SET: "transport_empty_set",
+    TRANSPORT_CODE_BUSY: "transport_busy",
+    TRANSPORT_CODE_PREPARE_TIMEOUT: "transport_prepare_timeout",
+    TRANSPORT_CODE_TRANSIENT_DB: "transport_transient_db",
+}
+
+
 class TransportExportFailure(RuntimeError):
     """transport export를 적재 근거로 쓸 수 없다. ``failure_kind``로 원인을 가른다.
 
@@ -166,21 +235,83 @@ class TransportExportFailure(RuntimeError):
     provider lib 예외와 같은 규약이다: 기다리면 풀리는 실패만 ``True``다. Dagster asset 경계는
     ``False``인 것의 step 재시도를 끈다
     (``quota_exhaustion.raise_terminal_if_transport_unrecoverable``).
+
+    오류 응답이면 problem ``code``(UPPER_SNAKE, 없으면 ``None``)와 ``Retry-After``(초, 없으면
+    ``None``)를 함께 든다 — 실패 metadata에 그대로 실린다.
     """
 
     failure_kind: str = "transport_unavailable"
     retryable: bool = False
+
+    def __init__(
+        self, message: str = "", *, code: str | None = None, retry_after: float | None = None
+    ) -> None:
+        super().__init__(message)
+        self.code = code
+        self.retry_after = retry_after
 
 
 class TransportExportNotCurrent(TransportExportFailure):
     """근거 수집의 이력이 없거나, 실패했거나, stale이다(503이거나 ``collection`` 플래그).
 
     transport의 다음 수집이 성공하면 풀린다 — **retryable step 실패**다. HTTP 층에서 곧바로 다시
-    부르지는 않고(15초 안에 바뀌지 않는다), Dagster ``RetryPolicy``가 step을 다시 돈다.
+    부르지는 않고(15초 안에 바뀌지 않는다), Dagster ``RetryPolicy``가 step을 다시 돈다. code가
+    없거나 Map이 모르는 code의 503도 이것이다(종전 동작).
     """
 
     failure_kind = "transport_not_current"
     retryable = True
+
+
+class TransportSourceNotCurrent(TransportExportNotCurrent):
+    """transport가 503 ``code``로 "이 run 안에서는 풀리지 않는다"고 알렸다.
+
+    code는 :data:`TRANSPORT_SOURCE_NOT_CURRENT_CODES`다. ``Retry-After``가 30분~8시간(돌발은
+    5분)이라 30초·90초 뒤의 step 재시도는 같은 503을 다시 받을 뿐이다 — **retryable이 아니다**.
+    run은 실패로 끝난다(재시도 없음): Map 쪽에는 이것 말고 상류 장애를 알리는 경보가 없다(2026-11
+    주유소 503 16.6시간 동안 빨간 run이 유일한 신호였다). 세대·feature는 그대로다.
+    ``failure_kind``는 code별이다.
+    """
+
+    retryable = False
+
+    def __init__(
+        self, message: str = "", *, code: str | None = None, retry_after: float | None = None
+    ) -> None:
+        super().__init__(message, code=code, retry_after=retry_after)
+        if code in _CODE_FAILURE_KINDS:
+            self.failure_kind = _CODE_FAILURE_KINDS[code]
+
+
+class TransportExportBusy(TransportExportFailure):
+    """몇 초면 풀리는 503(:data:`TRANSPORT_BUSY_CODES`) — fetcher가 같은 요청을 다시 보낸다.
+
+    HTTP 층 재시도를 다 쓰면 종전 503처럼 **retryable step 실패**다(처음 페이지부터 다시
+    읽는다 — 페이지마다 따로 판정한 응답이라 이어 읽지 않는다, transport ADR-013 결정 3). 단
+    ``Retry-After``가 HTTP 층 한 번 대기 상한(``retry_after_cap``)보다 길면 step 재시도 창(상태
+    job 30·90초)으로도 기다릴 수 없으므로 retryable이 아니다 — run은 재시도 없이 실패한다.
+    """
+
+    failure_kind = "transport_busy"
+    retryable = True
+
+    def __init__(
+        self,
+        message: str = "",
+        *,
+        code: str | None = None,
+        retry_after: float | None = None,
+        retry_after_cap: float | None = None,
+    ) -> None:
+        super().__init__(message, code=code, retry_after=retry_after)
+        if code in _CODE_FAILURE_KINDS:
+            self.failure_kind = _CODE_FAILURE_KINDS[code]
+        if (
+            retry_after is not None
+            and retry_after_cap is not None
+            and retry_after > retry_after_cap
+        ):
+            self.retryable = False
 
 
 class TransportSnapshotExpired(TransportExportNotCurrent):

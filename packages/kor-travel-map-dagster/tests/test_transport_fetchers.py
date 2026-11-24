@@ -11,11 +11,13 @@ import httpx
 import pytest
 from kortravelmap.providers.kor_travel_transport import (
     SERVICE_TOKEN_HEADER,
+    TransportExportBusy,
     TransportExportContractError,
     TransportExportEmpty,
     TransportExportHidden,
     TransportExportMalformed,
     TransportExportNotCurrent,
+    TransportSourceNotCurrent,
 )
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import SecretStr
@@ -24,6 +26,8 @@ import kortravelmap.dagster.provider_fetchers as provider_fetchers
 from kortravelmap.dagster import upstream_retry
 from kortravelmap.dagster.provider_fetchers import (
     ProviderCredentialMissing,
+    TransportExportUnchanged,
+    _TransportTransientStatus,
     fetch_transport_airports,
     fetch_transport_ferry_ports,
     fetch_transport_fuel_stations,
@@ -31,6 +35,11 @@ from kortravelmap.dagster.provider_fetchers import (
     fetch_transport_rail_stations,
     fetch_transport_rest_area_fuel_prices,
     fetch_transport_rest_areas,
+)
+from kortravelmap.dagster.transport_http_metrics import (
+    observing_transport_http,
+    parse_server_timing,
+    transport_http_metadata,
 )
 from kortravelmap.dagster.upstream_requests import (
     counting_upstream_requests,
@@ -52,14 +61,24 @@ def _settings(**overrides: Any) -> KorTravelMapSettings:
         "kor_travel_transport_base_url": "http://127.0.0.1:14001",
         "kor_travel_transport_service_token": SecretStr(TOKEN),
         "kor_travel_transport_page_size": 1,
+        "kor_travel_transport_reference_page_size": 1,
     }
     values.update(overrides)
     return KorTravelMapSettings(**values)
 
 
 @pytest.fixture(autouse=True)
-def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch) -> None:
+def retry_sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """HTTP 층 재시도 대기를 기록만 한다. backoff 기준은 0 — 남는 대기는 ``Retry-After``뿐이다."""
+    slept: list[float] = []
+
+    async def _record(seconds: float) -> None:
+        slept.append(seconds)
+
     monkeypatch.setattr(provider_fetchers, "_TRANSPORT_RETRY_BASE_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(provider_fetchers, "_TRANSPORT_BUSY_BASE_DELAY_SECONDS", 0.0)
+    monkeypatch.setattr(provider_fetchers, "_transport_retry_sleep", _record)
+    return slept
 
 
 def _golden_incident_now(monkeypatch: pytest.MonkeyPatch, *, after: timedelta) -> None:
@@ -560,3 +579,331 @@ async def test_a_stale_reference_snapshot_is_loaded_as_the_last_complete_set(
     _install(monkeypatch, lambda request: httpx.Response(200, json=stale))
     ports = [item async for item in fetch_transport_ferry_ports(_settings())]
     assert len(ports) == len(body["items"])
+
+
+# ---------------------------------------------- 503 problem code·HTTP 층 재시도(2026-11-24 계약)
+
+
+def _problem(status: int, code: str | None, *, retry_after: str | None = None) -> httpx.Response:
+    body: dict[str, Any] = {
+        "type": "about:blank",
+        "title": "Service Unavailable",
+        "status": status,
+        "detail": "근거 수집이 현재가 아니다",
+        "instance": "/v1/service/exports/x",
+    }
+    if code is not None:
+        body["code"] = code
+    headers = {"Retry-After": retry_after} if retry_after is not None else {}
+    return httpx.Response(
+        status, json=body, headers={"content-type": "application/problem+json", **headers}
+    )
+
+
+@pytest.mark.parametrize(
+    ("code", "retry_after", "kind", "fetch"),
+    [
+        (
+            "EXPORT_SOURCE_NOT_CURRENT",
+            "1800",
+            "transport_source_not_current",
+            fetch_transport_fuel_stations,
+        ),
+        (
+            "EXPORT_NO_HISTORY",
+            "3600",
+            "transport_no_history",
+            fetch_transport_rest_area_fuel_prices,
+        ),
+        (
+            "EXPORT_INCIDENTS_NOT_CURRENT",
+            "300",
+            "transport_incidents_not_current",
+            fetch_transport_highway_incidents,
+        ),
+        ("EXPORT_EMPTY_SET", "300", "transport_empty_set", fetch_transport_highway_incidents),
+    ],
+)
+async def test_a_coded_not_current_503_is_not_retried_and_not_retryable(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_sleeps: list[float],
+    code: str,
+    retry_after: str,
+    kind: str,
+    fetch: Any,
+) -> None:
+    """몇 시간짜리(돌발은 5분) 503 — HTTP 층도 step도 다시 부르지 않는다(run은 실패로 끝난다)."""
+    seen = _install(monkeypatch, lambda request: _problem(503, code, retry_after=retry_after))
+    with pytest.raises(TransportSourceNotCurrent) as raised:
+        _ = [item async for item in fetch(_settings())]
+    assert raised.value.retryable is False
+    assert raised.value.code == code
+    assert raised.value.retry_after == float(retry_after)
+    assert raised.value.failure_kind == kind
+    assert len(seen) == 1
+    assert retry_sleeps == []
+
+
+async def test_a_busy_503_retries_the_same_page_honouring_retry_after(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    body = _golden("fuel-stations.json")
+    first, second = body["items"]
+    pages = {
+        None: {**body, "items": [first], "has_more": True, "next_cursor": "7"},
+        "7": {**body, "items": [second], "has_more": False, "next_cursor": None},
+    }
+    busy_once = iter([_problem(503, "EXPORT_BUSY", retry_after="10")])
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        if cursor == "7":
+            busy = next(busy_once, None)
+            if busy is not None:
+                return busy
+        return httpx.Response(200, json=pages[cursor])
+
+    seen = _install(monkeypatch, handler)
+    with counting_upstream_requests(), observing_transport_http() as metrics:
+        stations = [station async for station in fetch_transport_fuel_stations(_settings())]
+        counted = observed_upstream_requests()
+    assert [station.uni_id for station in stations] == [first["natural_key"], second["natural_key"]]
+    # 같은 cursor만 다시 묻는다 — 첫 페이지부터 다시 읽지 않는다.
+    assert [request.url.params.get("cursor") for request in seen] == [None, "7", "7"]
+    assert retry_sleeps == [10.0]
+    assert counted == 3
+    assert metrics.retries == 1
+    assert metrics.statuses == {"200": 2, "503": 1}
+
+
+async def test_a_busy_503_gives_up_after_the_attempt_cap_and_stays_retryable(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    seen = _install(monkeypatch, lambda request: _problem(503, "TRANSIENT_DB", retry_after="15"))
+    with pytest.raises(TransportExportBusy) as raised:
+        _ = [item async for item in fetch_transport_airports(_settings())]
+    assert raised.value.retryable is True  # step 재시도(첫 페이지부터)는 남는다
+    assert raised.value.failure_kind == "transport_transient_db"
+    assert len(seen) == 4
+    assert retry_sleeps == [15.0, 15.0, 15.0]
+
+
+async def test_a_busy_503_with_a_long_retry_after_is_not_waited_and_not_retryable(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    seen = _install(
+        monkeypatch, lambda request: _problem(503, "EXPORT_PREPARE_TIMEOUT", retry_after="120")
+    )
+    with pytest.raises(TransportExportBusy) as raised:
+        _ = [item async for item in fetch_transport_rail_stations(_settings())]
+    assert raised.value.retryable is False
+    assert raised.value.failure_kind == "transport_prepare_timeout"
+    assert len(seen) == 1
+    assert retry_sleeps == []
+
+
+async def test_busy_retries_spend_the_shared_run_retry_budget(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    seen = _install(monkeypatch, lambda request: _problem(503, "EXPORT_BUSY", retry_after="10"))
+    with (
+        upstream_retry.sharing_run_retry_budget(upstream_retry.RetryBudget(limit=1)) as budget,
+        pytest.raises(TransportExportBusy),
+    ):
+        _ = [item async for item in fetch_transport_airports(_settings())]
+    assert len(seen) == 2
+    assert budget.used == 1
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        _problem(503, "SERVICE_UNAVAILABLE", retry_after="30"),  # 앞으로 붙을 공통 code
+        _problem(503, "export_busy"),  # UPPER_SNAKE가 아니다
+        _problem(503, None),
+        httpx.Response(503, text="<html>bad gateway</html>"),
+    ],
+    ids=["unknown-code", "malformed-code", "no-code", "not-json"],
+)
+async def test_an_unknown_or_missing_code_keeps_the_old_503_behaviour(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float], response: httpx.Response
+) -> None:
+    seen = _install(monkeypatch, lambda request: response)
+    with pytest.raises(TransportExportNotCurrent) as raised:
+        _ = [item async for item in fetch_transport_fuel_stations(_settings())]
+    assert type(raised.value) is TransportExportNotCurrent
+    assert raised.value.retryable is True
+    assert raised.value.failure_kind == "transport_not_current"
+    assert len(seen) == 1
+    assert retry_sleeps == []
+
+
+@pytest.mark.parametrize(
+    ("status", "retry_after", "expected_sleep"),
+    [(500, None, 0.0), (408, None, 0.0), (429, "7", 7.0)],
+)
+async def test_500_408_429_are_retried_at_the_http_layer(
+    monkeypatch: pytest.MonkeyPatch,
+    retry_sleeps: list[float],
+    status: int,
+    retry_after: str | None,
+    expected_sleep: float,
+) -> None:
+    body = _golden("airports.json")
+    responses = iter(
+        [_problem(status, None, retry_after=retry_after), httpx.Response(200, json=body)]
+    )
+    seen = _install(monkeypatch, lambda request: next(responses))
+    airports = [item async for item in fetch_transport_airports(_settings())]
+    assert airports
+    assert len(seen) == 2
+    assert retry_sleeps == [expected_sleep]
+
+
+async def test_a_429_with_a_long_retry_after_is_left_to_step_retries(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    seen = _install(monkeypatch, lambda request: _problem(429, None, retry_after="300"))
+    with pytest.raises(_TransportTransientStatus) as raised:
+        _ = [item async for item in fetch_transport_airports(_settings())]
+    assert raised.value.retryable is True
+    assert raised.value.retry_after == 300.0
+    assert len(seen) == 1
+    assert retry_sleeps == []
+
+
+@pytest.mark.parametrize("status", [400, 422])
+async def test_a_rejected_request_is_a_contract_error_and_not_retried(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float], status: int
+) -> None:
+    seen = _install(monkeypatch, lambda request: _problem(status, "INVALID_CURSOR"))
+    with pytest.raises(TransportExportContractError) as raised:
+        _ = [item async for item in fetch_transport_fuel_stations(_settings())]
+    assert raised.value.retryable is False
+    assert raised.value.failure_kind == "transport_request_rejected"
+    assert len(seen) == 1
+
+
+# ---------------------------------------------- 바뀌지 않은 집합 건너뛰기(감사 MC-04)
+
+
+def _two_fuel_pages(second_success_at: str | None = None) -> dict[str | None, Any]:
+    body = _golden("fuel-stations.json")
+    first, second = body["items"]
+    second_collection = dict(body["collection"])
+    if second_success_at is not None:
+        second_collection["last_success_at"] = second_success_at
+    return {
+        None: {**body, "items": [first], "has_more": True, "next_cursor": "7"},
+        "7": {
+            **body,
+            "items": [second],
+            "has_more": False,
+            "next_cursor": None,
+            "collection": second_collection,
+        },
+    }
+
+
+_GOLDEN_FUEL_SUCCESS = datetime.fromisoformat("2026-10-02T07:34:44+00:00")
+
+
+async def test_an_unchanged_first_page_stops_the_walk(monkeypatch: pytest.MonkeyPatch) -> None:
+    pages = _two_fuel_pages()
+    seen = _install(
+        monkeypatch,
+        lambda request: httpx.Response(200, json=pages[request.url.params.get("cursor")]),
+    )
+    with pytest.raises(TransportExportUnchanged) as raised:
+        _ = [
+            item
+            async for item in fetch_transport_fuel_stations(
+                _settings(), unchanged_since=_GOLDEN_FUEL_SUCCESS
+            )
+        ]
+    assert raised.value.last_success_at == _GOLDEN_FUEL_SUCCESS
+    assert len(seen) == 1
+
+
+async def test_a_changed_first_page_walks_to_the_end(monkeypatch: pytest.MonkeyPatch) -> None:
+    """판단은 첫 페이지 하나로만 한다 — 뒤 페이지가 기준과 같아도 멈추지 않는다."""
+    pages = _two_fuel_pages(second_success_at="2026-10-01T23:00:00Z")
+    pages[None] = {
+        **pages[None],
+        "collection": {**pages[None]["collection"], "last_success_at": "2026-10-02T15:34:44Z"},
+    }
+    seen = _install(
+        monkeypatch,
+        lambda request: httpx.Response(200, json=pages[request.url.params.get("cursor")]),
+    )
+    stations = [
+        item
+        async for item in fetch_transport_fuel_stations(
+            _settings(), unchanged_since=datetime.fromisoformat("2026-10-01T23:00:00+00:00")
+        )
+    ]
+    assert len(stations) == 2
+    assert len(seen) == 2
+
+
+# ---------------------------------------------- 요청 계측(감사 G2-07)
+
+
+async def test_requests_are_timed_with_the_transport_server_timing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = _two_fuel_pages()
+    timings = {
+        None: 'app;dur=12.4, sql;dur=3.25, sql_count;desc="4", cpu;dur=1.0',
+        "7": 'app;dur=20.6, sql;dur=1.5, page_builds;desc="0"',
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        cursor = request.url.params.get("cursor")
+        return httpx.Response(200, json=pages[cursor], headers={"Server-Timing": timings[cursor]})
+
+    _install(monkeypatch, handler)
+    with observing_transport_http():
+        _ = [item async for item in fetch_transport_fuel_stations(_settings())]
+        metadata = transport_http_metadata()
+    assert metadata["transport_http_requests"] == 2
+    assert metadata["transport_http_statuses"] == "200=2"
+    assert metadata["transport_server_timed"] == 2
+    assert metadata["transport_server_app_ms_total"] == 33
+    assert metadata["transport_server_app_ms_max"] == 21
+    assert metadata["transport_server_sql_ms_total"] == 5
+    assert metadata["transport_http_retries"] == 0
+    assert int(metadata["transport_http_ms_total"]) >= int(metadata["transport_http_first_ms"])
+
+
+async def test_requests_are_not_reported_outside_a_measuring_boundary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    pages = _two_fuel_pages()
+    _install(
+        monkeypatch,
+        lambda request: httpx.Response(200, json=pages[request.url.params.get("cursor")]),
+    )
+    _ = [item async for item in fetch_transport_fuel_stations(_settings())]
+    assert transport_http_metadata() == {}
+
+
+async def test_reference_exports_use_their_own_page_size(monkeypatch: pytest.MonkeyPatch) -> None:
+    body = _golden("rail-stations.json")
+    seen = _install(monkeypatch, lambda request: httpx.Response(200, json=body))
+    settings = _settings(kor_travel_transport_reference_page_size=len(body["items"]))
+    _ = [item async for item in fetch_transport_rail_stations(settings)]
+    assert seen[0].url.params["limit"] == str(len(body["items"]))
+
+
+def test_server_timing_parsing_keeps_only_durations() -> None:
+    assert parse_server_timing(None) == {}
+    assert parse_server_timing('app;dur=1.5, sql;dur="2", sql_count;desc="3"') == {
+        "app": 1.5,
+        "sql": 2.0,
+    }
+    # 읽을 수 없는 값·음수·무한대는 건너뛰고, 같은 이름이 거듭되면 처음 것.
+    assert parse_server_timing("app;dur=x, sql;dur=-1, cpu;dur=inf, app;dur=9, db;dur=4") == {
+        "app": 9.0,
+        "db": 4.0,
+    }
