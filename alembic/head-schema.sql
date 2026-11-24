@@ -11781,6 +11781,12 @@ CREATE FUNCTION ops.bump_import_job_event_clock() RETURNS trigger
                SET revision = slot.revision + 1,
                    updated_at = clock_timestamp()
              WHERE slot.slot_id = v_slot;
+            IF NOT FOUND THEN
+              -- lock을 잡은 slot은 지워지지도 slot_id가 바뀌지도 않는다(guard). 그래도 0행이면
+              -- 증가가 조용히 빠져 변경 감지가 깨지므로 statement를 실패시킨다.
+              RAISE EXCEPTION 'import job event clock slot % vanished', v_slot
+                USING ERRCODE = 'internal_error';
+            END IF;
           END IF;
           PERFORM set_config('ktm.import_job_event_clock_slot', v_slot::text, true);
           RETURN NULL;

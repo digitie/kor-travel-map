@@ -1414,7 +1414,7 @@ singleton과 사실상 같다(나빠지지 않는다). 지금 저장소에 RR·S
 
 배포: 457은 옛 표를 `ACCESS EXCLUSIVE`(lock_timeout 1초)로 잡는다. event를 쓴 진행 중 transaction이
 있으면 실패하므로(데이터 변화 없음) 회전 전에 `SELECT count(*) FROM pg_locks WHERE relation =
-'ops.import_job_event_clock'::regclass`가 0인지 본다. runtime 권한은 migration이 직접 준다(ACL 조정
+'ops.import_job_event_clock'::regclass AND mode = 'RowExclusiveLock'`가 0인지 본다. runtime 권한은 migration이 직접 준다(ACL 조정
 전 창에서도 event 기록이 된다).
 
 ### 9.1.2 `ops.offline_uploads` (ADR-045 D-14 / T-208g)

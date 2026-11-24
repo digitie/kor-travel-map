@@ -55,7 +55,8 @@ job을 합해야 한다.
 표를 기다리던 event 문장은 사라진 표를 보고(42P01) 실패할 수 있고, 그러면 그 statement를 낸
 transaction 전체가 실패한다(그 창은 migration 자체의 수 ms다. 큐 요청은 #1544 재발행이 받고, 정기
 Dagster run은 다음 주기에 다시 돈다). 배포 전에 ``SELECT count(*) FROM pg_locks WHERE relation =
-'ops.import_job_event_clock'::regclass``가 0인지(event를 쓴 진행 중 transaction 없음) 본다.
+'ops.import_job_event_clock'::regclass AND mode = 'RowExclusiveLock'``가 0인지(event를 쓴 진행 중
+transaction 없음) 본다.
 
 권한. runtime(``ktm_feature_runtime``)에는 이 migration이 ``_ORDINARY_OPS``와 같은 권한을 직접
 준다 — 이 commit부터 event trigger가 새 표를 쓰므로, 별도 process인 ``runtime_privileges`` 조정을
@@ -149,6 +150,12 @@ CREATE OR REPLACE FUNCTION ops.bump_import_job_event_clock() RETURNS trigger
                SET revision = slot.revision + 1,
                    updated_at = clock_timestamp()
              WHERE slot.slot_id = v_slot;
+            IF NOT FOUND THEN
+              -- lock을 잡은 slot은 지워지지도 slot_id가 바뀌지도 않는다(guard). 그래도 0행이면
+              -- 증가가 조용히 빠져 변경 감지가 깨지므로 statement를 실패시킨다.
+              RAISE EXCEPTION 'import job event clock slot % vanished', v_slot
+                USING ERRCODE = 'internal_error';
+            END IF;
           END IF;
           PERFORM set_config('ktm.import_job_event_clock_slot', v_slot::text, true);
           RETURN NULL;
