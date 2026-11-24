@@ -115,6 +115,24 @@ _SENSORS = (
 
 _RUN_STATUS_SENSORS = {name for name, kind, _ in _SENSORS if kind == "RUN_STATUS"}
 
+#: Valkey 상태 적재 schedule(ADR-114) — Map PG를 읽지도 쓰지도 않아 freeze가 멈추지 않는다.
+_STATE_SCHEDULES = frozenset(
+    {
+        "transport_state_airports_schedule",
+        "transport_state_fuel_stations_schedule",
+        "transport_state_highway_incidents_schedule",
+        "transport_state_rest_area_fuel_prices_schedule",
+        "transport_state_rest_areas_schedule",
+        "weather_state_current_schedule",
+        "weather_state_daily_summaries_schedule",
+        "weather_state_forecast_external_schedule",
+        "weather_state_forecast_mid_schedule",
+        "weather_state_forecast_short_schedule",
+        "weather_state_forecast_ultra_short_schedule",
+        "weather_state_locations_schedule",
+    }
+)
+
 
 #: 코드 기본값이 RUNNING인 것(n150에서는 모두 저장 상태가 있다 — canReset true).
 _DEFAULT_RUNNING = {
@@ -333,6 +351,13 @@ def _stops(fake: _FakeDagster) -> list[str]:
     return [call.removeprefix("stop:") for call in fake.calls if call.startswith("stop:")]
 
 
+def _assert_frozen(fake: _FakeDagster) -> None:
+    """Valkey 상태 schedule만 RUNNING이고 나머지 Map instigator는 전부 STOPPED다."""
+
+    running = {name for (_, name), status in _map_statuses(fake).items() if status == "RUNNING"}
+    assert running == _STATE_SCHEDULES
+
+
 def _run(job: str = "feature_place_mois_licenses_job") -> dict[str, str]:
     return {"runId": "r1", "status": "STARTED", "jobName": job}
 
@@ -348,7 +373,7 @@ def test_freeze_stops_every_map_instigator_and_unfreeze_restores_the_exact_snaps
     snapshot = tmp_path / "freeze.json"
 
     assert _freeze(fake, snapshot) == 0
-    assert set(_map_statuses(fake).values()) == {"STOPPED"}
+    _assert_frozen(fake)
     # 다른 location은 그대로다.
     assert fake.status("schedule", "pinvi_weather_retention_horizon_schedule", _PINVI) == "RUNNING"
     assert fake.status("sensor", "pinvi_queue_sensor", _PINVI) == "RUNNING"
@@ -384,6 +409,78 @@ def test_newly_enabled_schedules_are_frozen_and_restored(tmp_path: Path, name: s
     assert fake.status("schedule", name) == "RUNNING"
 
 
+def test_valkey_state_schedules_keep_running_and_their_runs_are_not_awaited(
+    tmp_path: Path,
+) -> None:
+    """``weather_state_*``·``transport_state_*``는 Map PG에 닿지 않는다 — 멈추면 상태만 낡는다.
+
+    멈춘 채 두면 창 동안 낡고, Dagster가 놓친 tick을 따라잡지 않아 하루 한 번 도는 것은 unfreeze
+    뒤 다음 cron까지 낡는다. 그 run이 창 안에서 계속 떠도 freeze는 그것을 기다리지 않는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    fake.runs = [_run("weather_state_current"), _run("transport_state_highway_incidents")]
+    clock = _Clock()
+    snapshot = tmp_path / "freeze.json"
+
+    assert _freeze(fake, snapshot, clock) == 0
+    _assert_frozen(fake)
+    assert not set(_stops(fake)) & _STATE_SCHEDULES
+    # 상태 적재 run을 기다리지 않는다 — settle과 두 번째 tick만.
+    assert clock.sleeps == [90.0, 30.0]
+
+    fake.calls.clear()
+    assert _unfreeze(fake, snapshot) == 0
+    assert _map_statuses(fake) == before
+    assert not {call.split(":", 1)[1] for call in fake.calls} & _STATE_SCHEDULES
+
+
+def test_state_schedules_stopped_by_an_earlier_freeze_are_restored(tmp_path: Path) -> None:
+    """이 예외 이전 판의 freeze(상태 schedule을 RUNNING으로 적고 멈췄다)도 이어 하고 되살린다."""
+
+    fake = _FakeDagster()
+    fake.runs = [_run()]
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot, wait_timeout=0.0) == 1
+    for name in _STATE_SCHEDULES:
+        fake.state[(_MAP, "schedule", name)]["status"] = "STOPPED"
+
+    fake.runs = []
+    assert _freeze(fake, snapshot, resume=True) == 0
+    assert _unfreeze(fake, snapshot) == 0
+    assert {name for name in _STATE_SCHEDULES if fake.status("schedule", name) == "RUNNING"} == (
+        _STATE_SCHEDULES
+    )
+
+
+def test_resume_does_not_refuse_a_state_schedule_turned_on_in_the_window(tmp_path: Path) -> None:
+    """상태 schedule은 freeze 대상이 아니다 — 창 안에서 켜져도 이어 하기를 막지 않는다."""
+
+    fake = _FakeDagster()
+    locations = fake.state[(_MAP, "schedule", "weather_state_locations_schedule")]
+    locations["status"] = "STOPPED"
+    fake.runs = [_run()]
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot, wait_timeout=0.0) == 1
+    locations["status"] = "RUNNING"
+
+    fake.runs = []
+    assert _freeze(fake, snapshot, resume=True) == 0
+    assert locations["status"] == "RUNNING"
+
+
+def test_state_prefixes_match_the_fixture_state_schedules() -> None:
+    """가짜 webserver의 n150 구성에서 도구가 건너뛰는 것은 상태 schedule 12개뿐이다.
+
+    이름 규칙이 code location 정의와 맞는지(그리고 그 job이 Map PG에 닿지 않는지)는
+    ``packages/kor-travel-map-dagster/tests/test_freeze_skips_state_jobs.py``가 본다.
+    """
+
+    names = {*_RUNNING_SCHEDULES, *(name for name, _, _ in _SENSORS)}
+    assert {name for name in names if freeze.is_state_job(name)} == _STATE_SCHEDULES
+
+
 def test_run_status_sensors_stop_last_after_runs_drain_and_ticks_settle(tmp_path: Path) -> None:
     fake = _FakeDagster()
     fake.run_script = [[_run()], [_run()], []]
@@ -415,7 +512,7 @@ def test_a_run_launched_by_the_success_sensor_during_settle_is_awaited(tmp_path:
     assert _freeze(fake, tmp_path / "freeze.json", clock) == 0
     # settle·두 번째 SKIPPED tick → completion run 대기 → settle·두 번째 SKIPPED tick.
     assert clock.sleeps == [90.0, 30.0, 30.0, 90.0, 30.0]
-    assert set(_map_statuses(fake).values()) == {"STOPPED"}
+    _assert_frozen(fake)
 
 
 def test_lagging_run_status_sensor_keeps_observers_running(tmp_path: Path) -> None:
@@ -439,7 +536,7 @@ def test_launcher_stop_failure_keeps_run_status_sensors_running(tmp_path: Path) 
 
     fake.fail_stop = set()
     assert _freeze(fake, snapshot, resume=True) == 0
-    assert set(_map_statuses(fake).values()) == {"STOPPED"}
+    _assert_frozen(fake)
 
 
 def test_run_appearing_while_observers_stop_restores_them(tmp_path: Path) -> None:
