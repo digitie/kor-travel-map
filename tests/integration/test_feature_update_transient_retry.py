@@ -10,8 +10,9 @@ from __future__ import annotations
 import asyncio
 import json
 from collections.abc import AsyncIterator
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
@@ -19,6 +20,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 import kortravelmap.client as client_mod
 from kortravelmap.client import AsyncKorTravelMapClient
+from kortravelmap.core.cache_target_stream import make_active_cache_target_source
+from kortravelmap.infra.cache_target_event_repo import (
+    capture_cache_target_refresh_members_by_keys,
+)
+from kortravelmap.infra.cache_target_stream_repo import apply_cache_target_source
 from kortravelmap.infra.failure_summary import summarize_failure
 from kortravelmap.infra.feature_update_executor import (
     FEATURE_UPDATE_EXECUTION_FAILED_EVENT_CODE,
@@ -611,6 +617,84 @@ async def test_closures_outside_the_executor_stamp_the_cache_targets_failed_at(
     assert stamps[f"{prefix}-disabled"] is None
 
 
+_RELAY_TARGET_KEY = "relay-target"
+
+
+async def _enqueue_relay_member_request(engine: AsyncEngine, system: str) -> FeatureUpdateRequest:
+    """relay member를 캡처한 cache target key 요청 — 실행 claim처럼 source tuple을 고정한다.
+
+    ``enqueue_feature_update_request``만으로는 member가 없어 relay ``failed`` 단계가 아무것도 쓰지
+    않고 끝난다(stream·member가 없으면 곧바로 돌아온다) — 그런 요청으로는 relay 단언이 빈 성공이다
+    (#1551 리뷰). stream·source head를 만들고 member를 캡처한다.
+    """
+    async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
+        membership = await _membership(session, f"{system}-dataset")
+        applied = await apply_cache_target_source(
+            session,
+            consumer_id=f"{system}-consumer",
+            source_event_id=str(uuid4()),
+            idempotency_key=str(uuid4()),
+            external_system=system,
+            target_key=_RELAY_TARGET_KEY,
+            restore_epoch=1,
+            source_generation=1,
+            source=make_active_cache_target_source(
+                lon="126.978", lat="37.5665", radius_km="1", update_enabled=True
+            ),
+            occurred_at=datetime(2026, 11, 24, 1, tzinfo=UTC),
+            create_only=True,
+        )
+        assert applied.target is not None
+        request = await enqueue_feature_update_request(
+            session,
+            scope={
+                "type": "cache_target_keys",
+                "external_system": system,
+                "target_keys": [_RELAY_TARGET_KEY],
+            },
+            dataset_memberships=[membership],
+        )
+        members = await capture_cache_target_refresh_members_by_keys(
+            session,
+            request_id=request.request_id,
+            external_system=system,
+            target_keys=[_RELAY_TARGET_KEY],
+        )
+        assert [member.target_key for member in members] == [_RELAY_TARGET_KEY]
+    return request
+
+
+async def _relay_statuses(engine: AsyncEngine, request_id: str) -> list[tuple[str, str | None]]:
+    """이 요청의 PinVi relay status event(outbox) — ``(status, error_code)`` 순서대로."""
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT payload ->> 'status' AS status, payload ->> 'error_code' AS error_code "
+                    "FROM ops.poi_cache_target_outbox_events "
+                    "WHERE refresh_request_id = CAST(:request_id AS uuid) "
+                    "  AND event_type = 'refresh_request.status_changed' "
+                    "ORDER BY relay_order"
+                ),
+                {"request_id": request_id},
+            )
+        ).all()
+    return [(str(row.status), row.error_code) for row in rows]
+
+
+async def _relay_target_failed_at(engine: AsyncEngine, system: str) -> Any:
+    async with AsyncSession(engine) as session:
+        return (
+            await session.execute(
+                text(
+                    "SELECT last_failed_at FROM ops.poi_cache_targets "
+                    "WHERE external_system = :system AND target_key = :key"
+                ),
+                {"system": system, "key": _RELAY_TARGET_KEY},
+            )
+        ).scalar_one()
+
+
 async def test_failure_followups_survive_an_import_job_event_failure(
     migrated_engine: AsyncEngine,
     monkeypatch: pytest.MonkeyPatch,
@@ -618,25 +702,18 @@ async def test_failure_followups_survive_an_import_job_event_failure(
     """relay ``failed``·target 실패 시각은 import job event와 다른 transaction이다.
 
     종전에는 relay ``failed``가 import job event INSERT와 한 transaction이라, event 쪽이 실패하면
-    상태만 ``failed``로 commit되고 relay는 영구 유실됐다(#1544 리뷰).
+    상태만 ``failed``로 commit되고 relay는 영구 유실됐다(#1544 리뷰). member를 캡처한 요청으로
+    outbox에 ``failed`` 행이 실제로 commit됐는지 본다 — member가 없으면 relay 단계가 아무것도
+    쓰지 않아 이 단언이 빈 성공이 된다(#1551 리뷰).
     """
-    prefix = "followup-split"
-    request = await _enqueue_cache_target_request(migrated_engine, prefix)
+    system = "retry-relay-split"
+    request = await _enqueue_relay_member_request(migrated_engine, system)
     client = AsyncKorTravelMapClient(migrated_engine)
     await _claim(migrated_engine, request.request_id, generation=request.generation, run_id="run-1")
-    relay_calls: list[str] = []
-    original_relay = client_mod.record_update_request_relay_failed
-
-    async def relay(
-        session: AsyncSession, failed: FeatureUpdateRequest, *, event_code: str
-    ) -> None:
-        relay_calls.append(event_code)
-        await original_relay(session, failed, event_code=event_code)
 
     async def broken_event(*_args: Any, **_kwargs: Any) -> None:
         raise RuntimeError("import job event insert rejected")
 
-    monkeypatch.setattr(client_mod, "record_update_request_relay_failed", relay)
     monkeypatch.setattr(client_mod, "record_update_request_failure_events", broken_event)
     monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS", 0.0)
 
@@ -650,9 +727,10 @@ async def test_failure_followups_survive_an_import_job_event_failure(
 
     assert failed is not None
     assert failed.status == "failed"
-    assert relay_calls == [FEATURE_UPDATE_RUN_FAILED_EVENT_CODE]
-    stamps = await _target_failed_at(migrated_engine, prefix)
-    assert stamps[f"{prefix}-active"] is not None
+    assert await _relay_statuses(migrated_engine, request.request_id) == [
+        ("failed", FEATURE_UPDATE_RUN_FAILED_EVENT_CODE)
+    ]
+    assert await _relay_target_failed_at(migrated_engine, system) is not None
     codes = [event["code"] for event in await _events(migrated_engine, request.job_id)]
     assert FEATURE_UPDATE_RUN_FAILED_EVENT_CODE not in codes
 
