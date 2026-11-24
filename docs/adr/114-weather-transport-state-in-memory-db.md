@@ -786,7 +786,8 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   `kor_travel_map.upstream_stale_alert`(true/false)를 **언제나** 쓴다. **소유자 결정(2026-11-24 "나이 기준 혼합")**: 기준은
   경고 임계(transport는 settings `transport_state_<데이터셋>_alert_after_seconds` — env로 조정, `max_age − 1초`로 묶는다;
   weather는 job spec `stale_alert_after`)이고 읽기 쪽 계약 `max_age`(D5·W4 — REST `freshness.stale`, 그대로 둔다)보다 낮다 —
-  소비자가 `stale`을 받기 전에 운영자가 빨간 run을 먼저 본다. 임계 안이면 run은 성공(초록, 건너뜀·세대 유지·신호 tag)이고,
+  소비자가 `stale`을 받기 전에 운영자가 빨간 run을 먼저 본다(transport). weather는 빨강을 Map 적재 기준으로 재므로 읽기
+  쪽 `stale`(원천 시각 기준)과 순서가 같지 않다 — 아래 "나이의 기준". 임계 안이면 run은 성공(초록, 건너뜀·세대 유지·신호 tag)이고,
   넘으면(세대가 아예 없으면 포함) **재시도 없는 실패**다(`raise_if_stale`). Map에는 상류 장애 경보가 따로 없으므로 빨간 run이
   유일한 신호다. 한두 tick의 상류 이상(14일 transport 503 80건·거부 64건은 대부분 다음 tick에 풀렸다)은 초록으로 남고,
   몇 시간짜리 장애·설정 오류(주소·DNS)·거부가 이어진 상태는 빨갛게 된다. 거부가 이어지면 원천이 정말 줄었는지 사람이 판단해

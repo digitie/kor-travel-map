@@ -915,7 +915,7 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
         DATASET_FORECAST_SHORT, "forecast_short", "50 2-23/3 * * *", 3_600,
         _forecast_collector(DATASET_FORECAST_SHORT),
         "weather 단기예보(W3 short) → Valkey 세대 교체(하루 8회, 발표 02·05…23시 뒤 :50).",
-        read_budget_seconds=1_500,
+        read_budget_seconds=1_800,
         stale_alert_after=timedelta(hours=8),  # 3시간 적재 두 번 놓침 + 여유
     ),
     _spec(
@@ -938,7 +938,7 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
     _spec(
         DATASET_DAILY_SUMMARIES, "daily_summaries", "5 * * * *", 2_700, _collect_daily_summaries,
         "weather 하루 세 구간 요약(W5) → Valkey 세대 교체(매시 :05).",
-        read_budget_seconds=1_200,
+        read_budget_seconds=1_500,
         stale_alert_after=timedelta(hours=4),  # 매시 적재 네 번 놓침
     ),
 )

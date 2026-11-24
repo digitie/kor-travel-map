@@ -562,11 +562,13 @@ def _transport_unavailable(response: httpx.Response, path: str) -> TransportExpo
     가정하지 않고 실패에 그대로 싣는다(대기에 쓰는 것은 경합 code뿐이다).
 
     - ``EXPORT_SOURCE_NOT_CURRENT``·``EXPORT_NO_HISTORY``·``EXPORT_INCIDENTS_NOT_CURRENT``·
-      ``EXPORT_EMPTY_SET`` → :class:`TransportSourceNotCurrent`(HTTP 층도 step도 다시 부르지 않고
-      run은 실패로 끝난다).
+      ``EXPORT_EMPTY_SET`` → :class:`TransportSourceNotCurrent`(HTTP 층에서는 다시 부르지 않는다.
+      step 재시도 여부는 job 경계가 정한다 — feature 적재는 step 재시도, Valkey 상태 job은 나이
+      기준 혼합).
     - ``EXPORT_BUSY``·``EXPORT_PREPARE_TIMEOUT``·``TRANSIENT_DB`` → :class:`TransportExportBusy`
       (같은 요청을 ``Retry-After``대로 다시 보낸다 — :func:`_transport_get`. ``Retry-After``가
-      :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않고 재시도 없는 실패다).
+      :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않는다 — 그 뒤는 위와 같이
+      job 경계가 정한다).
     - ``EXPORT_DISABLED``·``EXPORT_TOO_LARGE`` → :class:`TransportExportDisabled`·
       :class:`TransportExportTooLarge`(설정·데이터가 바뀌기 전에는 같다 — 재시도 없는 실패).
     - ``EXPORT_SOURCE_INCONSISTENT`` → :class:`TransportSourceInconsistent`(HTTP 층에서는 다시

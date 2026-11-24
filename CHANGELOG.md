@@ -11,7 +11,8 @@
   주유소 18시간·휴게소 유가 9시간·돌발 20분·휴게소·공항 2일; weather는 Map 적재 시각 기준·2시간~2일; 읽기 `max_age`보다
   낮다) 안이면 초록, 넘으면 step 재시도 없이 실패한다. 주유소·휴게소 유가는 HTTP 층 재시도 시간이 run 상한 × 0.25 안이고
   op config `force_full_walk`로 건너뛰기를 끌 수 있다.
-- feature 적재 asset의 transport 503 code: `EXPORT_SOURCE_NOT_CURRENT` 등 4종은 HTTP·step 재시도 없이 실패,
+- feature 적재 asset의 transport 503 code: `EXPORT_SOURCE_NOT_CURRENT` 등 4종은 HTTP 층에서 다시 묻지 않고 step 재시도
+  (60·180·420초) 뒤 실패,
   `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`는 같은 요청을 `Retry-After`대로(한 번 60초 상한, run 예산 공유) 4회까지
   다시 묻는다. `EXPORT_DISABLED`·`EXPORT_TOO_LARGE`는 재시도 없이 실패, `EXPORT_SOURCE_INCONSISTENT`는 step 재시도. HTTP 층
   재시도에 408·429(`Retry-After`)·500을 더했고 400·422는 재시도 없는 `transport_request_rejected`.

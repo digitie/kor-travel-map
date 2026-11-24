@@ -462,6 +462,7 @@ async def load_transport_state(
     (``upstream_signal.raise_if_stale``).
     """
     owned = store is None
+    served: GenerationMeta | None = None
     try:
         active = store if store is not None else ValkeyStateStore(make_valkey_client(settings))
     except StateStoreError as exc:
@@ -591,7 +592,7 @@ async def load_transport_state(
             dataset=spec.dataset.name,
             failure_kind=exc.failure_kind,
             description=str(exc),
-            served=await _served_meta(active, spec.dataset.name),
+            served=served,  # 잠금 안에서 읽은 값 — 예외 처리 안에서 Valkey를 다시 읽지 않는다
             alert_after=timedelta(seconds=alert_after_seconds(spec, settings)),
             now=datetime.now(UTC),
             details={
