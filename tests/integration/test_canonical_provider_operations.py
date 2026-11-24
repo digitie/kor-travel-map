@@ -411,6 +411,25 @@ def _event_payload(value: object) -> dict[str, object]:
     return value
 
 
+#: attempt event ``error``의 분류 필드(감사 2026-11-23 §4 #15). 원문 메시지는 싣지 않는다.
+_ATTEMPT_CLASSIFICATION_KEYS = frozenset(
+    {"dagster_run_id", "failure_class", "db_failure", "failure_kind", "cause_types", "step"}
+)
+
+
+def _attempt_payload(value: object) -> dict[str, object]:
+    """attempt event payload — ``error``의 분류 필드를 확인하고 걷어 낸 뒤 비교용으로 돌려준다."""
+    payload = dict(_event_payload(value))
+    error = payload.get("error")
+    assert isinstance(error, dict)
+    extra = set(error) - {"code", "type"}
+    assert extra <= _ATTEMPT_CLASSIFICATION_KEYS, extra
+    assert error.get("failure_class") in {"execution", "transient_db"}
+    assert isinstance(error.get("dagster_run_id"), str)
+    payload["error"] = {key: error[key] for key in ("code", "type") if key in error}
+    return payload
+
+
 async def _delete_committed_feature_tree(
     engine: AsyncEngine,
     *,
@@ -788,7 +807,7 @@ async def test_real_db_single_retry_and_shared_wrapper_are_idempotent(
                 )
             ).all()
         assert [_triple(row) for row in attempts] == [_membership_triple(membership)]
-        assert [_event_payload(row.payload) for row in attempts] == [
+        assert [_attempt_payload(row.payload) for row in attempts] == [
             {
                 "attempt_number": 1,
                 "outcome": "failed",
@@ -910,7 +929,7 @@ async def test_real_db_mcst_same_run_retry_preserves_pair_and_attempts(
             _membership_triple(failed_membership),
             _membership_triple(failed_membership),
         ]
-        assert [_event_payload(row.payload) for row in stored_attempts] == [
+        assert [_attempt_payload(row.payload) for row in stored_attempts] == [
             {
                 "attempt_number": 1,
                 "outcome": "failed",
@@ -1218,8 +1237,8 @@ async def test_b2_mcst_partial_attempt_is_preserved_by_b3_failure_record(
             == failed_after.import_job_dataset_id
         )
         assert attempt_after.payload_type == attempt_before.payload_type == "jsonb"
-        assert _event_payload(attempt_after.payload) == expected_attempt
-        assert _event_payload(attempt_before.payload) == expected_attempt
+        assert _attempt_payload(attempt_after.payload) == expected_attempt
+        assert _attempt_payload(attempt_before.payload) == expected_attempt
         assert attempt_after.occurred_at == attempt_before.occurred_at
         assert raw_error not in json.dumps(
             _event_payload(attempt_after.payload), ensure_ascii=False

@@ -15,9 +15,13 @@ from dagster import (
     resource,
 )
 from kortravelmap.client import IntegrityFindingSyncResult
+from kortravelmap.infra.failure_summary import FailureSummary, summarize_failure
 from kortravelmap.infra.feature_update_executor import (
     FeatureUpdateExecutionPlan,
     FeatureUpdateExecutionResult,
+    FeatureUpdateRetryOutcome,
+    FeatureUpdateTerminalizationFailed,
+    FeatureUpdateTransientFailure,
     ProviderDatasetRefreshResult,
     ProviderDatasetRefreshScope,
 )
@@ -56,6 +60,10 @@ class _Client:
     fail_raises: Exception | None = None
     execute_raises: Exception | None = None
     advance_generation_on_failure: bool = False
+    rescheduled: list[dict[str, Any]] = field(default_factory=list)
+    reschedule_outcome: FeatureUpdateRetryOutcome | None = None
+    reschedule_raises: list[Exception] = field(default_factory=list)
+    terminalized: list[dict[str, Any]] = field(default_factory=list)
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         return self.request
@@ -113,6 +121,7 @@ class _Client:
         owner_dagster_run_id: str,
         expected_request_generation: int,
         error_message: str | None = None,
+        failure_payload: dict[str, Any] | None = None,
     ) -> FeatureUpdateRequest | None:
         if self.fail_raises is not None:
             raise self.fail_raises
@@ -122,6 +131,7 @@ class _Client:
                 "owner_dagster_run_id": owner_dagster_run_id,
                 "expected_request_generation": expected_request_generation,
                 "error_message": error_message,
+                "failure_payload": failure_payload,
             }
         )
         if self.advance_generation_on_failure and self.request is not None:
@@ -129,6 +139,42 @@ class _Client:
                 self.request,
                 generation=expected_request_generation + 1,
             )
+        return self.request
+
+    async def reschedule_update_request_after_failure(
+        self,
+        request_id: str,
+        *,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
+        failure: FailureSummary,
+        stage: str | None = None,
+        max_retries: int = 5,
+    ) -> FeatureUpdateRetryOutcome | None:
+        self.rescheduled.append(
+            {
+                "request_id": request_id,
+                "owner_dagster_run_id": owner_dagster_run_id,
+                "expected_request_generation": expected_request_generation,
+                "failure": failure,
+                "stage": stage,
+                "max_retries": max_retries,
+            }
+        )
+        if self.reschedule_raises:
+            raise self.reschedule_raises.pop(0)
+        return self.reschedule_outcome
+
+    async def fail_update_request_after_failure(
+        self,
+        request_id: str,
+        *,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
+        failure: FailureSummary,
+        stage: str | None = None,
+    ) -> FeatureUpdateRequest | None:
+        self.terminalized.append({"request_id": request_id, "failure": failure, "stage": stage})
         return self.request
 
     async def record_address_validation_findings(
@@ -458,17 +504,22 @@ def test_failure_sensor_marks_request_failed() -> None:
         result = feature_update_request_failure_sensor(context)
 
     assert isinstance(result, SkipReason)
-    assert client.failed == [
-        {
-            "request_id": request.request_id,
-            "owner_dagster_run_id": failed_run.run_id,
-            "expected_request_generation": 1,
-            "error_message": (
-                "Dagster feature update worker failed: "
-                f"run_id={failed_run.run_id} request_id={request.request_id}"
-            ),
-        }
-    ]
+    [failed] = client.failed
+    assert failed["request_id"] == request.request_id
+    assert failed["owner_dagster_run_id"] == failed_run.run_id
+    assert failed["expected_request_generation"] == 1
+    # 실패 원인(실패 step·오류 타입·메시지)이 request 오류 메시지와 event payload에 실린다 —
+    # 종전에는 run_id와 request_id뿐이었다(감사 §1.2).
+    assert failed["error_message"] == (
+        "Dagster feature update worker failed: "
+        f"run_id={failed_run.run_id} request_id={request.request_id} — "
+        "step execute_feature_update_request: Failure: provider down"
+    )
+    payload = failed["failure_payload"]
+    assert payload["source"] == "dagster_run_failure"
+    assert payload["failed_step"] == "execute_feature_update_request"
+    assert payload["error_type"] == "Failure"
+    assert payload["error"] == "provider down"
 
 
 def test_failure_sensor_requires_database_client_resource() -> None:
@@ -589,7 +640,8 @@ def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
             "job_name": "feature_update_request_worker",
             "message": (
                 "Dagster feature update worker failed: "
-                f"run_id={failed_run.run_id} request_id={request.request_id}"
+                f"run_id={failed_run.run_id} request_id={request.request_id} — "
+                "step execute_feature_update_request: Failure: provider down"
             ),
         }
     ]
@@ -624,3 +676,205 @@ def test_worker_job_shares_one_retry_budget_across_the_request_scopes() -> None:
     assert result.success
     [budget] = seen
     assert isinstance(budget, upstream_retry.RetryBudget)
+
+
+class _LockTimeout(Exception):
+    """asyncpg ``LockNotAvailableError``의 모양 — SQLSTATE만 본다."""
+
+    sqlstate = "55P03"
+
+
+def _transient_outcome(
+    request: FeatureUpdateRequest, *, rescheduled: bool
+) -> FeatureUpdateRetryOutcome:
+    return FeatureUpdateRetryOutcome(
+        request=replace(
+            request,
+            generation=request.generation + 1 if rescheduled else request.generation,
+            status="queued" if rescheduled else "failed",
+            retry_count=1 if rescheduled else 5,
+            next_dispatch_at=_NOW if rescheduled else None,
+            error_message=None if rescheduled else "재발행 5회 소진: lock timeout",
+        ),
+        rescheduled=rescheduled,
+        max_retries=5,
+    )
+
+
+def _run_worker(client: _Client) -> Any:
+    request = client.request
+    assert request is not None
+    return feature_update_request_worker_job.execute_in_process(
+        run_config={
+            "ops": {
+                "execute_feature_update_request": {
+                    "config": {"request_id": request.request_id, "request_generation": 1}
+                }
+            }
+        },
+        resources={"kor_travel_map_client": client, "feature_update_runner": object()},
+        raise_on_error=False,
+    )
+
+
+def test_worker_reschedules_a_transient_db_failure_instead_of_failing() -> None:
+    """executor가 종결하지 않고 넘긴 일시 DB 실패 → 새 연결로 backoff 재발행, run은 성공."""
+
+    request = _request()
+    summary = summarize_failure(_LockTimeout("canceling statement due to lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage="refreshing:1:dataset_wide"),
+        reschedule_outcome=_transient_outcome(request, rescheduled=True),
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    [call] = client.rescheduled
+    assert call["request_id"] == request.request_id
+    assert call["expected_request_generation"] == 1
+    assert call["owner_dagster_run_id"] == result.run_id
+    assert call["stage"] == "refreshing:1:dataset_wide"
+    assert call["failure"].db_failure == "lock_timeout"
+    # provider 갱신을 시작한 뒤의 재발행은 상류를 처음부터 다시 부르므로 2회로 줄인다.
+    assert call["max_retries"] == 2
+    metadata = result.output_for_node("execute_feature_update_request")
+    assert metadata["status"] == "retry_scheduled"
+    assert metadata["retry_count"] == 1
+    assert metadata["db_failure"] == "lock_timeout"
+
+
+def test_worker_reschedules_a_transient_db_failure_raised_before_claim() -> None:
+    """claim 전(lock 획득·조회)에 난 일시 DB 실패도 같은 길로 간다."""
+
+    request = _request()
+    client = _Client(
+        request=request,
+        execute_raises=_LockTimeout("canceling statement due to lock timeout"),
+        reschedule_outcome=_transient_outcome(request, rescheduled=True),
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    [call] = client.rescheduled
+    assert call["stage"] is None
+    assert call["max_retries"] == 5
+
+
+def test_worker_fails_the_run_when_retries_are_exhausted() -> None:
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage=None),
+        reschedule_outcome=_transient_outcome(request, rescheduled=False),
+    )
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert len(client.rescheduled) == 1
+
+
+def test_worker_does_not_reschedule_a_deterministic_failure() -> None:
+    request = _request()
+    client = _Client(request=request, execute_raises=ValueError("bad scope"))
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert client.rescheduled == []
+
+
+def test_worker_retries_the_reschedule_write_on_transient_db_errors(
+    monkeypatch: Any,
+) -> None:
+    """재발행 기록도 event clock 경합으로 실패할 수 있다 — 짧게 다시 시도한다."""
+    from kortravelmap.dagster import sensors as sensors_mod
+
+    monkeypatch.setattr(sensors_mod, "_DB_CALL_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage="claim"),
+        reschedule_outcome=_transient_outcome(request, rescheduled=True),
+        reschedule_raises=[_LockTimeout("lock timeout again")],
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    assert len(client.rescheduled) == 2
+
+
+def test_worker_marks_its_failure_transient_when_the_reschedule_write_keeps_failing(
+    monkeypatch: Any,
+) -> None:
+    """기록이 끝내 실패하면 run을 실패시키되, failure sensor가 닫지 않고 재발행하게 표시한다."""
+    from kortravelmap.dagster import sensors as sensors_mod
+    from kortravelmap.dagster.run_failure_detail import run_failure_detail
+
+    monkeypatch.setattr(sensors_mod, "_DB_CALL_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage="claim"),
+        reschedule_raises=[_LockTimeout("a"), _LockTimeout("b"), _LockTimeout("c")],
+    )
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert len(client.rescheduled) == 3
+    detail = run_failure_detail(result.get_run_failure_event())
+    assert detail["failure_class"] == "transient_db"
+
+
+def test_worker_closes_with_the_original_cause_when_recording_a_failure_failed() -> None:
+    request = _request()
+    original = summarize_failure(RuntimeError("provider exploded"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTerminalizationFailed(original, stage="refreshing:1:x"),
+    )
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert client.rescheduled == []
+    [closed] = client.terminalized
+    assert closed["failure"].describe() == "RuntimeError: provider exploded"
+    assert closed["stage"] == "refreshing:1:x"
+
+
+def test_worker_does_not_reschedule_a_failure_raised_while_handling_another() -> None:
+    request = _request()
+    masked = _LockTimeout("lock timeout during cleanup")
+    masked.__context__ = ValueError("the real failure")
+    client = _Client(request=request, execute_raises=masked)
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert client.rescheduled == []
+
+
+def test_worker_treats_a_state_change_during_reschedule_as_success() -> None:
+    """그 사이 취소·종결·generation 전진이면 재발행할 것이 없다 — 알림을 부르지 않는다."""
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage=None),
+        reschedule_outcome=None,
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    metadata = result.output_for_node("execute_feature_update_request")
+    assert metadata["status"] == "state_changed"

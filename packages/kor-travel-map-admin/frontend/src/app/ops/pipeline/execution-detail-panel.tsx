@@ -18,6 +18,7 @@ import { DetailList } from "@/components/detail-list";
 import { EmptyState } from "@/components/empty-state";
 import { EntityLink } from "@/components/entity-link";
 import { JsonViewer } from "@/components/json-viewer";
+import { FeatureUpdateFailureDetail } from "@/components/feature-update-failure-detail";
 import { McstAttemptError } from "@/components/mcst-attempt-error";
 import { LevelBadge, StatusBadge } from "@/components/status-badge";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
@@ -629,6 +630,10 @@ function ExecutionClaimResolution({
                   ) : null}
                 </div>
                 <p className="mt-1 break-all">{event.message}</p>
+                <FeatureUpdateFailureDetail
+                  code={event.code}
+                  payload={event.payload}
+                />
                 {event.code === "feature_operation.attempt" ? (
                   <McstAttemptError
                     error={event.payload.error}

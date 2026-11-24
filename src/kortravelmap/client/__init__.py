@@ -37,8 +37,9 @@ ADR 참조
 
 from __future__ import annotations
 
+import asyncio
 import logging
-from collections.abc import Mapping, Sequence
+from collections.abc import Awaitable, Callable, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
@@ -74,7 +75,6 @@ from kortravelmap.enrichment import (
     apply_place_phone_enrichment,
     find_place_phone_candidates,
 )
-from kortravelmap.infra import feature_update_repo as fur_repo
 from kortravelmap.infra import geo_release_repo
 from kortravelmap.infra.advisory_lock import (
     advisory_lock,
@@ -141,6 +141,7 @@ from kortravelmap.infra.enrichment_review_repo import (
 from kortravelmap.infra.enrichment_review_repo import (
     pending_enrichment_reviews as repo_pending_enrichment_reviews,
 )
+from kortravelmap.infra.failure_summary import FailureSummary
 from kortravelmap.infra.feature_geocode_reuse import (
     read_reusable_geo_columns as repo_read_reusable_geo_columns,
 )
@@ -237,8 +238,15 @@ from kortravelmap.infra.feature_repo import (
     search_features as repo_search_features,
 )
 from kortravelmap.infra.feature_update_executor import (
+    FEATURE_UPDATE_EXECUTION_FAILED_EVENT_CODE,
+    FEATURE_UPDATE_RUN_FAILED_EVENT_CODE,
     FeatureUpdateExecutionResult,
+    FeatureUpdateRetryOutcome,
     ProviderDatasetRefreshRunner,
+    fail_update_request_state,
+    record_update_request_failure_events,
+    record_update_request_retry_events,
+    retry_or_fail_update_request_state,
 )
 from kortravelmap.infra.feature_update_executor import (
     execute_feature_update_request as repo_execute_feature_update_request,
@@ -247,15 +255,13 @@ from kortravelmap.infra.feature_update_executor import (
     execute_next_feature_update_request as repo_execute_next_feature_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
+    FEATURE_UPDATE_MAX_RETRIES,
     FeatureUpdateRequest,
     FeatureUpdateRequestPage,
     FeatureUpdateRequestPreview,
 )
 from kortravelmap.infra.feature_update_repo import (
     enqueue_feature_update_request as repo_enqueue_feature_update_request,
-)
-from kortravelmap.infra.feature_update_repo import (
-    finish_update_request as repo_finish_update_request,
 )
 from kortravelmap.infra.feature_update_repo import (
     get_update_request as repo_get_update_request,
@@ -2124,29 +2130,197 @@ class AsyncKorTravelMapClient:
         owner_dagster_run_id: str,
         expected_request_generation: int,
         error_message: str | None = None,
+        failure_payload: Mapping[str, Any] | None = None,
     ) -> FeatureUpdateRequest | None:
-        """Dagster failure를 pre-start retry 또는 started owner 실패로 반영한다.
+        """Dagster worker run 실패를 request에 반영한다(failure sensor 경로).
 
-        request가 sensor가 본 queued generation 그대로면 generation을 +1해
-        다음 run key를 연다. 이미 start한 동일 run이면 기존 run id CAS로 request와
-        import job을 ``failed``로 닫는다.
+        - **claim 전**(sensor가 본 queued generation 그대로 — launch 실패): 일시 실패로 보고 backoff
+          뒤 재발행한다(:data:`~kortravelmap.infra.feature_update_repo.FEATURE_UPDATE_MAX_RETRIES`
+          상한). 상한을 넘으면 ``failed``로 닫는다. 종전에는 generation만 +1해 15초 뒤 곧바로 새
+          run을 냈고 상한이 없었다(감사 §1.3 P1).
+        - **claim 후**(이 run이 owner인 ``running``): op가 일시 DB 실패의 재발행을 기록하지 못하고
+          죽었다면(``failure_payload["failure_class"] == "transient_db"``) 재발행한다. 그 밖(run이
+          도중에
+          죽음)은 원인을 모르므로 재발행하지 않고 ``failed``로 닫고 PinVi relay에도 ``failed``를
+          낸다.
+
+        상태 전이와 event 기록은 **다른 transaction**이다 — event INSERT가 잡는 전역 event clock
+        행의
+        경합이 상태 전이를 막지 않게 한다. event 기록이 실패하면 상태는 이미 맞고 경고만 남긴다.
+        상태가 맞지 않으면(executor가 이미 종결·재발행했다, 취소됐다 등) ``None``.
         """
-        async with self._session_factory() as session, session.begin():
-            retry = await fur_repo.advance_update_request_generation_after_pre_start_failure(
-                session,
-                request_id,
-                expected_generation=expected_request_generation,
-            )
-            if retry is not None:
-                return retry
-            return await repo_finish_update_request(
-                session,
-                request_id,
-                status="failed",
-                owner_dagster_run_id=owner_dagster_run_id,
-                expected_generation=expected_request_generation,
-                error_message=error_message,
-            )
+        message = error_message or "Dagster feature update worker run failed"
+        payload = dict(failure_payload or {})
+        async with self._session_factory() as session:
+            async with session.begin():
+                current = await repo_get_update_request(session, request_id)
+                if (
+                    current is None
+                    or current.generation != expected_request_generation
+                    or current.status not in {"queued", "running"}
+                    or current.cancellation_id is not None
+                ):
+                    return None
+                pre_start = current.status == "queued" and current.dagster_run_id is None
+                if pre_start or payload.get("failure_class") == "transient_db":
+                    retry_payload = (
+                        {**payload, "failure_class": "dispatch", "stage": "before_claim"}
+                        if pre_start
+                        else payload
+                    )
+                    outcome = await retry_or_fail_update_request_state(
+                        session,
+                        request_id,
+                        expected_generation=expected_request_generation,
+                        owner_dagster_run_id=owner_dagster_run_id,
+                        failure_message=message,
+                        include_running=not pre_start,
+                    )
+                    failed = None
+                else:
+                    outcome = None
+                    retry_payload = payload
+                    failed = await fail_update_request_state(
+                        session,
+                        request_id,
+                        expected_generation=expected_request_generation,
+                        owner_dagster_run_id=owner_dagster_run_id,
+                        error_message=message,
+                    )
+            if outcome is not None:
+                await self._record_update_request_events_best_effort(
+                    session,
+                    lambda: record_update_request_retry_events(
+                        session,
+                        outcome,
+                        owner_dagster_run_id=owner_dagster_run_id,
+                        failure_message=message,
+                        payload=retry_payload,
+                    ),
+                    request_id=request_id,
+                )
+                return outcome.request
+            if failed is not None:
+                await self._record_update_request_events_best_effort(
+                    session,
+                    lambda: record_update_request_failure_events(
+                        session,
+                        failed,
+                        event_code=FEATURE_UPDATE_RUN_FAILED_EVENT_CODE,
+                        payload={**payload, "dagster_run_id": owner_dagster_run_id},
+                    ),
+                    request_id=request_id,
+                )
+            return failed
+
+    async def reschedule_update_request_after_failure(
+        self,
+        request_id: str,
+        *,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
+        failure: FailureSummary,
+        stage: str | None = None,
+        max_retries: int = FEATURE_UPDATE_MAX_RETRIES,
+    ) -> FeatureUpdateRetryOutcome | None:
+        """일시 DB 실패로 멈춘 실행을 backoff 뒤 재발행하거나, 상한을 넘었으면 종결한다.
+
+        Dagster 큐 op가 executor의
+        :class:`~kortravelmap.infra.feature_update_executor.FeatureUpdateTransientFailure`(또는
+        claim
+        전 일시 DB 실패)를 받았을 때 **새 연결로** 부른다 — 실패한 연결은 끊겼거나 lock을 기다리던
+        것이다. claim 전 ``queued``와 이 run의 ``running``을 모두 받는다. 상태 전이를 먼저
+        commit하고
+        event는 다음 transaction에 남긴다(:meth:`fail_update_request`와 같은 이유).
+        """
+        payload: dict[str, Any] = dict(failure.payload())
+        if stage is not None:
+            payload["stage"] = stage
+        message = failure.describe()
+        async with self._session_factory() as session:
+            async with session.begin():
+                outcome = await retry_or_fail_update_request_state(
+                    session,
+                    request_id,
+                    expected_generation=expected_request_generation,
+                    owner_dagster_run_id=owner_dagster_run_id,
+                    failure_message=message,
+                    max_retries=max_retries,
+                )
+            if outcome is not None:
+                await self._record_update_request_events_best_effort(
+                    session,
+                    lambda: record_update_request_retry_events(
+                        session,
+                        outcome,
+                        owner_dagster_run_id=owner_dagster_run_id,
+                        failure_message=message,
+                        payload=payload,
+                    ),
+                    request_id=request_id,
+                )
+            return outcome
+
+    async def fail_update_request_after_failure(
+        self,
+        request_id: str,
+        *,
+        owner_dagster_run_id: str,
+        expected_request_generation: int,
+        failure: FailureSummary,
+        stage: str | None = None,
+    ) -> FeatureUpdateRequest | None:
+        """executor가 결정적 실패를 기록하지 못했을 때(``FeatureUpdateTerminalizationFailed``) 새
+        연결로 그 원인과 함께 ``failed``로 닫는다. 재발행하지 않는다 — 결정적 실패다."""
+        payload: dict[str, Any] = dict(failure.payload())
+        if stage is not None:
+            payload["stage"] = stage
+        async with self._session_factory() as session:
+            async with session.begin():
+                failed = await fail_update_request_state(
+                    session,
+                    request_id,
+                    expected_generation=expected_request_generation,
+                    owner_dagster_run_id=owner_dagster_run_id,
+                    error_message=failure.describe(),
+                )
+            if failed is not None:
+                await self._record_update_request_events_best_effort(
+                    session,
+                    lambda: record_update_request_failure_events(
+                        session,
+                        failed,
+                        event_code=FEATURE_UPDATE_EXECUTION_FAILED_EVENT_CODE,
+                        payload={**payload, "dagster_run_id": owner_dagster_run_id},
+                    ),
+                    request_id=request_id,
+                )
+            return failed
+
+    @staticmethod
+    async def _record_update_request_events_best_effort(
+        session: AsyncSession,
+        record: Callable[[], Awaitable[None]],
+        *,
+        request_id: str,
+    ) -> None:
+        """상태 전이 뒤의 event 기록 — 실패해도 상태는 이미 맞다. 한 번 더 시도하고 경고만
+        남긴다."""
+        for attempt in (1, 2):
+            try:
+                async with session.begin():
+                    await record()
+                return
+            except Exception as exc:
+                if attempt == 2:
+                    _LOG.warning(
+                        "feature update event 기록 실패(상태 전이는 commit됨): request_id=%s "
+                        "error_type=%s",
+                        request_id,
+                        type(exc).__name__,
+                    )
+                    return
+                await asyncio.sleep(1.0)
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         """Dagster sensor가 다음 queued request를 상태 변경 없이 확인한다."""

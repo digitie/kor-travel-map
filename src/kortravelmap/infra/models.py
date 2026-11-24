@@ -5407,6 +5407,10 @@ class FeatureUpdateRequestRow(Base):
             name=conv("ck_feature_update_requests_generation_positive"),
         ),
         CheckConstraint(
+            "retry_count >= 0",
+            name=conv("ck_feature_update_requests_retry_count_nonnegative"),
+        ),
+        CheckConstraint(
             "jsonb_typeof(matched_scope) = 'object'",
             name=conv("ck_feature_update_requests_matched_scope_object"),
         ),
@@ -5479,6 +5483,14 @@ class FeatureUpdateRequestRow(Base):
         nullable=False,
         server_default=text("1"),
     )
+    #: 재발행 횟수(456). 상한을 넘으면 request를 ``failed``로 닫는다.
+    retry_count: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        server_default=text("0"),
+    )
+    #: 이 시각 전에는 큐 sensor가 집지 않는다(456). ``NULL``이면 즉시.
+    next_dispatch_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class FeatureUpdateRequestDatasetRow(Base):

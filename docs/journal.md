@@ -1,3 +1,41 @@
+## 2026-11-24 — 큐 요청 일시 실패 재발행·상한과 실패 원인 기록(감사 §4 #15·§1.3 P1, alembic 456)
+
+- 배경(`docs/reports/2026-11-23-collection-failure-audit.md`): ① 큐 요청은 일시 DB 오류에도 한 번에 `failed`로
+  닫혔다(10-22 한꺼번에 넣은 13건이 `import_job_events` INSERT lock timeout으로 실패 — 전역 단일 행
+  `import_job_event_clock`을 긴 적재 transaction이 commit까지 쥔다). ② worker run이 claim 전에 실패하면(launch 실패 —
+  n150 fd 고갈) failure sensor가 generation만 +1해 15초 뒤 곧바로 새 run을 냈고 상한·backoff가 없었다. ③ 실패 원인이
+  Map DB에 남지 않았다 — request는 `ProviderDatasetRefreshFailure: provider refresh asset execution failed` 한 줄(원인은
+  `__cause__`에만), operation root는 `{"kind":"dagster_run_terminal","status":"FAILURE"}` 한 줄.
+- alembic 456: `ops.feature_update_requests.retry_count`(≥0)·`next_dispatch_at`. 큐 peek은 `next_dispatch_at <= now()`인
+  것만 집는다. 재발행 SQL은 claim 전 `queued`(+run 없음) 또는 그 run의 `running`을 같은 문장에서 queued·generation+1·
+  retry_count+1·`next_dispatch_at = now() + min(30분, 60초 × 2^n) × [0.5, 1.0)`로 돌린다. 상한(`FEATURE_UPDATE_MAX_RETRIES`=5,
+  약 31분)을 넘으면 같은 상태 술어에서 `failed`로 닫는다(claim 전 `queued`도 — 종전 `finish_update_request`는 running만
+  닫아 launch 실패 request가 영원히 재발행됐다). `advance_update_request_generation_after_pre_start_failure`는 지웠다.
+- executor: 실패를 `infra/failure_summary.py`로 요약한다 — SQLSTATE(55P03·40001·40P01·08xxx·57P0x·53300)·
+  `connection_invalidated`·asyncpg 연결 예외로 **일시 DB 실패**를 가르고(명시적 `__cause__`·`orig`만 따른다,
+  `__context__`는 정리 중의 다른 실패일 수 있어 따르지 않는다), 메시지는 SQL 본문·bind parameter·serviceKey·token·DSN
+  비밀번호·Bearer를 걷고 300자로 자른다. 일시 DB 실패면 request를 **종결하지 않고** `FeatureUpdateTransientFailure`(분류·
+  실패 단계)를 올린다 — 실패한 phase는 이미 되감겼고, 같은 연결로 terminal 쓰기를 하면 끊긴 연결에선 그것도 실패하고
+  lock 경합이면 같은 lock을 다시 기다린다. 결정적 실패는 종전대로 닫되 `error_message`가 가장 안쪽 원인을 덧붙이고
+  (`… ← 원인 Type: msg`, 머리는 종전 `Type: msg` 그대로), **모든** 실패가 terminal import job event
+  (`FEATURE_UPDATE_EXECUTION_FAILED` 또는 provider의 좁은 code)에 분류·원인 연쇄·실패 단계·Dagster run id를 남긴다.
+- Dagster 큐 op: `FeatureUpdateTransientFailure`와 claim 전 일시 DB 실패를 **새 연결로** `reschedule_update_request_after_failure`
+  에 넘긴다 — 재발행이면 run SUCCESS + output metadata(`retry_scheduled`·다음 발행 시각), 상한이면 `failed`로 닫고 run
+  FAILURE. failure sensor: `RUN_FAILURE` 이벤트의 `first_step_failure_event`에서 실패 step·오류 타입·메시지·가장 안쪽 원인을
+  storage를 다시 읽지 않고 꺼내(`dagster/run_failure_detail.py`) 메시지와 payload에 싣는다. claim 전 실패는 backoff 재발행
+  (상한), claim 뒤 실패(run이 도중에 죽음)는 재발행하지 않고 `FEATURE_UPDATE_RUN_FAILED`로 닫으며 PinVi relay에도
+  `failed`를 낸다(종전에는 relay event가 없었다). 재발행 뒤의 PinVi "running" 재통지는 같은 payload라 replay로 접힌다.
+- operation root(`dagster_run_terminal`): FAILURE 상태 sensor 반영 때 `failure_reason`·`failed_step`·`error_type`·`error`·
+  `cause`를 더한다(reconcile·completion 경로는 이벤트가 없어 종전 모양). member attempt event(`feature_operation.attempt`)의
+  `error`에도 분류·메시지·원인·step·run id를 싣는다(종전 code·type뿐).
+- 관리자 화면: 실행 상세 이벤트 목록이 위 code 넷의 payload에서 승인된 필드만(분류·DB 실패 종류·실패 단계·실패 step·
+  재발행 n/5·다음 발행·Dagster run) 보여 준다(`components/feature-update-failure-detail.tsx`). API·OpenAPI 변경 없음.
+- 남은 구조 문제(이번에 고치지 않음): `import_job_event_clock` 단일 행을 긴 적재 transaction이 쥐는 것 — 재발행은 경합을
+  분 단위로 기다려 줄 뿐 원인을 없애지 않는다.
+- 시험: unit `tests/unit/test_failure_summary.py`, Dagster `test_run_failure_detail.py`·`test_sensors.py`(재발행·상한·결정적·
+  원인 메시지), integration `test_feature_update_transient_retry.py`(backoff·peek 숨김·상한·owner·executor 미종결·terminal
+  event·sensor 경로 상한), `test_feature_update_repo.py` 재발행 API로 이관, mocked e2e `ops-pipeline.spec.ts`
+  "큐 요청 실패 원인·재발행 일정". head-schema.sql·migration graph·forward-only 목록 갱신.
 ## 2026-11-24 — 다건 호출 provider 호출 단위 재시도·쿼터 결과 코드 분류(감사 §4 #15·§1.3 P0/P1)
 
 - 배경: `upstream_retry.py`의 설명과 달리 적용처는 KHOA 하나뿐이었다. 국가유산(행사 14달·본체 상세 ~4,000건)·
