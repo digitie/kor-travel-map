@@ -92,7 +92,8 @@ FEATURE_UPDATE_MAX_RETRIES: Final[int] = 5
 #: 재발행 대기의 지수 backoff — ``min(상한, 기준 × 2^재시도 횟수)``에 ``[0.5, 1.0)`` jitter를
 #: 곱한다.
 #: 60초·2·4·8·16분(jitter 전) — 다섯 번을 다 쓰면 약 31분이다. lock 경합(긴 적재 transaction이
-#: event clock 행을 쥔 채 수 분)과 launch 실패(code-server fd 고갈) 모두 분 단위로 풀린다.
+#: 쥔 행 — 10-22의 event clock 단일 행은 alembic 457이 없앴다)과 launch 실패(code-server fd
+#: 고갈) 모두 분 단위로 풀린다.
 FEATURE_UPDATE_RETRY_BASE_DELAY_SECONDS: Final[float] = 60.0
 FEATURE_UPDATE_RETRY_MAX_DELAY_SECONDS: Final[float] = 1800.0
 _RUN_MODES: Final[frozenset[str]] = frozenset({"queued", "now"})

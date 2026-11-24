@@ -119,6 +119,29 @@ async def _event(session: AsyncSession, job_id: str, message: str) -> None:
     assert event is not None
 
 
+async def _begin_bounded(session: AsyncSession) -> None:
+    """transaction을 열고 lock 대기 상한을 건다 — slot이 다시 직렬화되면 10분 hang이 아니라
+    2초 뒤 55P03으로 빨갛게 끝난다."""
+
+    await session.begin()
+    await session.execute(
+        text("SELECT set_config('lock_timeout', :value, true)"),
+        {"value": _WAITER_LOCK_TIMEOUT},
+    )
+
+
+async def _slots_incremented_by_this_transaction(session: AsyncSession) -> list[int]:
+    """이 transaction이 올린 slot(새 판의 xmin이 자기 xid인 행)."""
+
+    rows = await session.execute(
+        text(
+            "SELECT slot_id FROM ops.import_job_event_clock_slots "
+            "WHERE xmin = pg_current_xact_id()::xid ORDER BY slot_id"
+        )
+    )
+    return [int(value) for value in rows.scalars().all()]
+
+
 async def test_long_event_transaction_does_not_block_other_job_event(
     runtime_engine: AsyncEngine,
     migrated_engine: AsyncEngine,
@@ -216,15 +239,17 @@ async def test_sequential_transactions_reuse_slots_and_concurrency_bounds_new_sl
     # 순차 transaction은 slot을 늘리지 않는다.
     baseline_slots = await _slot_count(migrated_engine)
     for index in range(5):
-        async with AsyncSession(runtime_engine) as session, session.begin():
+        async with AsyncSession(runtime_engine) as session:
+            await _begin_bounded(session)
             await _event(session, jobs[0], f"sequential {index}")
+            await session.commit()
     assert await _slot_count(migrated_engine) == baseline_slots
 
     # 동시에 열린 transaction 수만큼까지만 늘어난다(기존 slot을 먼저 쓴다).
     sessions = [AsyncSession(runtime_engine) for _ in range(3)]
     try:
         for session, job_id in zip(sessions, jobs, strict=True):
-            await session.begin()
+            await _begin_bounded(session)
             await _event(session, job_id, "concurrent first")
             # 같은 transaction의 두 번째 statement는 자기가 쥔 slot을 다시 쓸 수 있다.
             await _event(session, job_id, "concurrent second")
@@ -238,9 +263,49 @@ async def test_sequential_transactions_reuse_slots_and_concurrency_bounds_new_sl
     slots = await _slot_count(migrated_engine)
     assert slots <= max(baseline_slots, 3)
     # 다시 순차로 돌면 늘지 않는다.
-    async with AsyncSession(runtime_engine) as session, session.begin():
+    async with AsyncSession(runtime_engine) as session:
+        await _begin_bounded(session)
         await _event(session, jobs[1], "after concurrency")
+        await session.commit()
     assert await _slot_count(migrated_engine) == slots
+
+
+async def test_transaction_keeps_one_slot_when_a_lower_slot_frees_up(
+    runtime_engine: AsyncEngine,
+    migrated_engine: AsyncEngine,
+) -> None:
+    """긴 transaction은 더 낮은 slot이 풀려도 처음 고른 slot 하나만 쓴다.
+
+    그러지 않으면 긴 transaction이 slot을 여럿 쥐고, 그만큼 다른 transaction이 새 slot을 만들어
+    slot 수가 동시 transaction 수를 넘는다(적대 리뷰 실측: 동시 3개에 slot 5개).
+    """
+
+    job_a = await _root_job(migrated_engine)
+    job_b = await _root_job(migrated_engine)
+    async with AsyncSession(runtime_engine) as first, AsyncSession(runtime_engine) as second:
+        await _begin_bounded(first)
+        await _event(first, job_a, "first")
+        await _begin_bounded(second)
+        await _event(second, job_b, "second")
+        [slot_first] = await _slots_incremented_by_this_transaction(first)
+        [slot_second] = await _slots_incremented_by_this_transaction(second)
+        assert slot_first != slot_second
+        # 낮은 slot을 쥔 쪽이 commit해 그 slot을 풀고, 높은 slot을 쥔 쪽이 event를 더 쓴다.
+        low, high = (first, second) if slot_first < slot_second else (second, first)
+        high_slot = max(slot_first, slot_second)
+        high_job = job_b if high is second else job_a
+        await low.commit()
+        await _event(high, high_job, "after the lower slot freed")
+        await _event(high, high_job, "and again")
+        assert await _slots_incremented_by_this_transaction(high) == [high_slot]
+        await high.commit()
+
+
+def _sqlstate(error: BaseException) -> str | None:
+    orig = getattr(error, "orig", None)
+    return getattr(orig, "sqlstate", None) or getattr(
+        getattr(orig, "__cause__", None), "sqlstate", None
+    )
 
 
 @pytest.mark.parametrize(
@@ -249,7 +314,6 @@ async def test_sequential_transactions_reuse_slots_and_concurrency_bounds_new_sl
         "UPDATE ops.import_job_event_clock_slots SET revision = revision + 1",
         "UPDATE ops.import_job_event_clock_slots SET revision = revision + 5",
         "DELETE FROM ops.import_job_event_clock_slots",
-        "TRUNCATE ops.import_job_event_clock_slots",
         "INSERT INTO ops.import_job_event_clock_slots (revision) VALUES (1)",
     ],
 )
@@ -258,7 +322,7 @@ async def test_slots_reject_writes_outside_the_event_trigger(
     migrated_engine: AsyncEngine,
     statement: str,
 ) -> None:
-    """runtime이 표 권한을 가져도 event trigger 밖의 쓰기는 guard가 거부한다."""
+    """runtime은 표 권한(``_ORDINARY_OPS``)을 가지므로 거부는 권한이 아니라 guard(23514)다."""
 
     from sqlalchemy.exc import DBAPIError
 
@@ -271,11 +335,23 @@ async def test_slots_reject_writes_outside_the_event_trigger(
         with pytest.raises(DBAPIError) as raised:
             await session.execute(text(statement))
         await session.rollback()
-    sqlstate = getattr(raised.value.orig, "sqlstate", None) or getattr(
-        getattr(raised.value.orig, "__cause__", None), "sqlstate", None
-    )
-    # TRUNCATE는 표 소유권이 없어 권한 오류(42501)일 수 있다 — 어느 쪽이든 거부다.
-    assert sqlstate in {"23514", "42501"}, sqlstate
+    assert _sqlstate(raised.value) == "23514"
+
+
+async def test_slots_reject_truncate_even_by_the_schema_owner(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """runtime에는 TRUNCATE 권한이 없다 — guard는 표 소유자로 확인한다."""
+
+    from sqlalchemy.exc import DBAPIError
+
+    async with migrated_engine.connect() as connection:
+        transaction = await connection.begin()
+        await connection.execute(text("SET LOCAL ROLE ktm_feature_schema_owner"))
+        with pytest.raises(DBAPIError) as raised:
+            await connection.execute(text("TRUNCATE ops.import_job_event_clock_slots"))
+        await transaction.rollback()
+    assert _sqlstate(raised.value) == "23514"
 
 
 async def test_curation_command_owner_can_open_a_new_slot(
@@ -402,6 +478,22 @@ async def test_migration_carries_singleton_revision_and_refuses_in_flight_writer
         )
         assert old_revision == start + 3
 
+        # 운영처럼 runtime이 456의 event 경로 권한을 가진 상태를 만든다(이 fixture는 ACL 조정을
+        # 돌리지 않는다). 456에서 runtime event 기록이 되는지 먼저 본다 — 457 뒤 검사의 대조군.
+        await connection.execute(
+            "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ops.import_jobs, "
+            "ops.import_job_events, ops.import_job_event_clock TO ktm_feature_runtime"
+        )
+        await connection.execute(
+            "GRANT SELECT ON ALL TABLES IN SCHEMA provider_sync TO ktm_feature_runtime"
+        )
+        baseline_transaction = in_flight.transaction()
+        await baseline_transaction.start()
+        await in_flight.execute("SET LOCAL ROLE ktm_feature_runtime")
+        await _insert_event(in_flight, job_id, "runtime at 456")
+        await baseline_transaction.commit()
+        old_revision += 1
+
         # event transaction이 진행 중이면(옛 singleton 행을 쥔 채) migration은 기다리지 않고
         # 실패한다.
         transaction = in_flight.transaction()
@@ -436,6 +528,19 @@ async def test_migration_carries_singleton_revision_and_refuses_in_flight_writer
                 "SELECT SUM(revision) FROM ops.import_job_event_clock_slots"
             )
         ) == carried + 1
+
+        # runtime ACL 조정(별도 process) 전에도 runtime의 event 기록이 된다 — 457이 새 표 권한을
+        # 직접 준다. 조정 전 창에서 42501이면 회전 중 모든 event 기록이 실패한다(적대 리뷰).
+        runtime_transaction = in_flight.transaction()
+        await runtime_transaction.start()
+        await in_flight.execute("SET LOCAL ROLE ktm_feature_runtime")
+        await _insert_event(in_flight, job_id, "runtime before reconciliation")
+        await runtime_transaction.commit()
+        assert int(
+            await connection.fetchval(
+                "SELECT SUM(revision) FROM ops.import_job_event_clock_slots"
+            )
+        ) == carried + 2
     finally:
         await in_flight.close()
         await connection.close()

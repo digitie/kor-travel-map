@@ -13,6 +13,10 @@
 - 시험: integration `test_import_job_event_clock_slots.py` — 긴 event transaction 중 다른 job event가 `lock_timeout` 2초
   아래서 기다리지 않음(main 456에서는 55P03), late commit·rollback·UPDATE statement 감지, slot 수 상한, guard,
   `ktm_curation_command_owner`의 새 slot, 456→457 이관(진행 중 writer면 lock timeout으로 거부).
+- 적대 리뷰 2인 반영: ① migration이 `ktm_feature_runtime`에 새 표 권한을 직접 준다(별도 process인 ACL 조정 전
+  창에서 runtime event 기록이 42501로 전부 실패하던 것 — 실측). ② transaction이 처음 고른 slot을 transaction-local
+  설정에 기억해 다시 쓴다(긴 transaction이 더 낮은 slot을 계속 쥐어 동시 3개에 slot 5개가 되던 것). ③ guard 시험은
+  23514만 받고 TRUNCATE는 소유자로, slot 시험에 `lock_timeout`(회귀 시 10분 hang 대신 2초 실패).
 - 남은 것: `ops.ops_live_topic_revisions`(provider_sync·dataset_projection·dagster_schedules)도 같은 singleton 꼴이지만
   432 snapshot 잠금 순서와 ADR-065 causal receipt에 묶여 있어 이번에 바꾸지 않았다. 큐 경로에서는 cache target 요청의
   `poi_cache_targets` 갱신이 그 행을 잡는다.

@@ -408,7 +408,7 @@ def _max_retries_for_stage(stage: str | None) -> int:
 async def _with_db_retries(call: Callable[[], Awaitable[_T]]) -> _T:
     """재발행·종결 기록을 일시 DB 실패에 한해 짧게 몇 번 더 시도한다(2·5초 뒤).
 
-    그 기록도 event clock 경합이나 연결 회복 중에 실패할 수 있다 — 한 번에 포기하면 request가
+    그 기록도 lock 경합이나 연결 회복 중에 실패할 수 있다 — 한 번에 포기하면 request가
     ``running``으로 남고 failure sensor가 원인을 모른 채 닫는다.
     """
     for delay in (*_DB_CALL_RETRY_DELAYS_SECONDS, None):

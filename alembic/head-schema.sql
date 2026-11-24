@@ -11748,29 +11748,44 @@ ALTER FUNCTION ops.assign_cache_target_outbox_relay_order() OWNER TO ktm_feature
 
 CREATE FUNCTION ops.bump_import_job_event_clock() RETURNS trigger
     LANGUAGE plpgsql
-    AS $$
+    AS $_$
+        DECLARE
+          v_remembered text := current_setting('ktm.import_job_event_clock_slot', true);
+          v_slot integer;
         BEGIN
-          -- 다른 transaction이 잡지 않은 가장 작은 slot에 1을 더한다. SKIP LOCKED라
-          -- 긴 적재 transaction이 slot 하나를 commit까지 쥐어도 기다리지 않는다.
-          UPDATE ops.import_job_event_clock_slots AS slot
-             SET revision = slot.revision + 1,
-                 updated_at = clock_timestamp()
-           WHERE slot.slot_id = (
-                 SELECT free.slot_id
-                   FROM ops.import_job_event_clock_slots AS free
-                  ORDER BY free.slot_id
-                  LIMIT 1
-                    FOR UPDATE SKIP LOCKED
-                 );
-          IF NOT FOUND THEN
-            -- 모든 slot이 다른 transaction에 잡혀 있다. identity라 새 slot은 누구와도
-            -- 충돌하지 않는다 — slot 수는 동시 event transaction 수의 최대로 묶인다.
-            INSERT INTO ops.import_job_event_clock_slots (revision, updated_at)
-            VALUES (1, clock_timestamp());
+          IF v_remembered ~ '^[0-9]{1,9}$' THEN
+            -- 이 transaction이 이미 쥔 slot이면 자기 lock이라 건너뛰지 않고 다시 잡힌다. 남이
+            -- 쥔 slot(설정을 손으로 바꾼 경우)이면 SKIP LOCKED가 건너뛰어 아래로 간다.
+            SELECT mine.slot_id INTO v_slot
+              FROM ops.import_job_event_clock_slots AS mine
+             WHERE mine.slot_id = v_remembered::integer
+               FOR UPDATE SKIP LOCKED;
           END IF;
+          IF v_slot IS NULL THEN
+            -- 다른 transaction이 잡지 않은 가장 작은 slot. SKIP LOCKED라 긴 적재 transaction이
+            -- slot 하나를 commit까지 쥐어도 기다리지 않는다.
+            SELECT free.slot_id INTO v_slot
+              FROM ops.import_job_event_clock_slots AS free
+             ORDER BY free.slot_id
+             LIMIT 1
+               FOR UPDATE SKIP LOCKED;
+          END IF;
+          IF v_slot IS NULL THEN
+            -- 모든 slot이 다른 transaction에 잡혀 있다. identity라 새 slot은 누구와도
+            -- 충돌하지 않는다.
+            INSERT INTO ops.import_job_event_clock_slots (revision, updated_at)
+            VALUES (1, clock_timestamp())
+            RETURNING slot_id INTO v_slot;
+          ELSE
+            UPDATE ops.import_job_event_clock_slots AS slot
+               SET revision = slot.revision + 1,
+                   updated_at = clock_timestamp()
+             WHERE slot.slot_id = v_slot;
+          END IF;
+          PERFORM set_config('ktm.import_job_event_clock_slot', v_slot::text, true);
           RETURN NULL;
         END;
-        $$;
+        $_$;
 
 
 ALTER FUNCTION ops.bump_import_job_event_clock() OWNER TO ktm_feature_schema_owner;
@@ -28520,6 +28535,7 @@ GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_datasets TO ktm_curation_comm
 --
 
 GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_event_clock_slots TO ktm_curation_command_owner;
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE ops.import_job_event_clock_slots TO ktm_feature_runtime;
 
 
 --

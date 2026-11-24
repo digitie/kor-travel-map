@@ -1389,9 +1389,13 @@ trigger(`trg_import_job_events_clock` → `ops.bump_import_job_event_clock()`)�
 refresh transaction을 연 앞 요청 하나와 겹쳤다(감사 `docs/reports/2026-11-23-collection-failure-audit.md`
 §1.2). 457은 trigger가 **다른 transaction이 잡지 않은 가장 작은 slot**을 `FOR UPDATE SKIP LOCKED`로
 골라 올리고, 모든 slot이 잡혀 있으면 identity로 새 slot을 만든다. event 기록은 어느 slot에서도
-기다리지 않는다. slot 수는 동시에 event를 쓴 transaction 수의 최대로 묶인다(순차 transaction은 slot
-1을 다시 쓴다). 같은 transaction의 다음 statement는 자기가 쥔 slot을 다시 고를 수 있다(자기 lock은
-건너뛰지 않는다).
+기다리지 않는다. transaction은 처음 고른 slot을 transaction-local 설정
+`ktm.import_job_event_clock_slot`에 기억해 다음 statement에서 그 slot만 다시 쓴다(자기 lock이라
+`SKIP LOCKED`가 건너뛰지 않는다. 설정이 남이 쥔 slot을 가리키면 건너뛰고 새로 고른다). 그래서
+transaction 하나가 slot 하나만 쥐고, slot 수는 동시에 event를 쓴 transaction 수의 최대로 묶인다
+(순차 transaction은 slot 1을 다시 쓴다). savepoint를 rollback하면 그 안에서 잡은 row lock과 설정이
+함께 되돌아간다. 이 기억이 없으면 긴 transaction이 더 낮은 slot이 풀릴 때마다 그것도 쥐어 slot이
+늘었다(적대 리뷰 실측: 동시 3개에 slot 5개).
 
 | 후보 | 버린 이유 |
 |---|---|
@@ -1405,8 +1409,13 @@ guard(`trg_import_job_event_clock_slots_mutation_guard`·`…_truncate_guard`): 
 (`pg_trigger_depth() >= 2`)에서만 INSERT(revision 1)·UPDATE(정확히 +1, `slot_id` 불변)할 수 있고
 DELETE·TRUNCATE는 거부한다. event 표 TRUNCATE는 허용하되 같은 AFTER STATEMENT trigger가 1을 올린다.
 REPEATABLE READ·SERIALIZABLE writer가 자기 snapshot 뒤에 다른 transaction이 올린 slot을 고르면 종전
-singleton과 같이 직렬화 실패(40001)가 날 수 있다 — singleton에서는 snapshot 뒤 아무 event commit이나
-그 원인이었고, slot에서는 고른 slot 하나만 해당하므로 더 드물다.
+singleton과 같이 직렬화 실패(40001)가 난다. 순차 부하에서는 거의 늘 slot 1이 골라지므로 빈도는
+singleton과 사실상 같다(나빠지지 않는다). 지금 저장소에 RR·SERIALIZABLE event writer는 없다.
+
+배포: 457은 옛 표를 `ACCESS EXCLUSIVE`(lock_timeout 1초)로 잡는다. event를 쓴 진행 중 transaction이
+있으면 실패하므로(데이터 변화 없음) 회전 전에 `SELECT count(*) FROM pg_locks WHERE relation =
+'ops.import_job_event_clock'::regclass`가 0인지 본다. runtime 권한은 migration이 직접 준다(ACL 조정
+전 창에서도 event 기록이 된다).
 
 ### 9.1.2 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
 

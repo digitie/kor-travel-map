@@ -32,8 +32,10 @@ ops.import_job_events``로 끝났다. 8건 모두 04:55~05:04Z에 claim하자마
   transaction이 하나라도 commit하면 합이 반드시 바뀐다. late commit도 그 commit 시점에 합을
   바꾼다. rollback은 slot 증가도 함께 되감는다.
 - 옛 singleton 값은 slot 1의 시작 revision으로 옮긴다 — ``event_clock_revision`` 값이 끊기지 않는다.
-- slot 수는 "동시에 event를 쓴 transaction 수의 최대"를 넘지 않는다(모두 잡혀 있을 때만 하나
-  늘린다). slot은 지우지 않는다(지우면 합이 줄어 변경 감지가 깨진다).
+- transaction은 처음 고른 slot을 transaction-local 설정(``ktm.import_job_event_clock_slot``)에
+  기억해 다음 statement에서 그 slot을 다시 쓴다. transaction 하나가 slot 하나만 쥐므로 slot 수는
+  "동시에 event를 쓴 transaction 수의 최대"를 넘지 않는다(모두 잡혀 있을 때만 하나 늘린다). slot은
+  지우지 않는다(지우면 합이 줄어 변경 감지가 깨진다).
 - guard: slot 행은 event AFTER STATEMENT trigger 안에서만(``pg_trigger_depth() >= 2``)
   INSERT(revision 1)· UPDATE(정확히 +1, slot_id 불변)할 수 있고 DELETE·TRUNCATE는 거부한다(0052
   singleton guard와 같은 강도).
@@ -50,11 +52,15 @@ job을 합해야 한다.
 중인 event transaction(그 행을 쥔 것)이 없을 때만 옮긴다 — 값 이관이 정확해지는 조건이다. 긴
 적재가 event를 쓴 채 돌고 있으면 ``lock_timeout`` 1초로 실패한다(데이터 변화 없음). 그때는 적재가
 끝난 뒤 다시 올린다. 표는 한 행이라 나머지 문장은 즉시 끝난다. 이 migration이 commit하는 순간 옛
-표를 기다리던 event 문장은 사라진 표를 보고 한 번 실패할 수 있다(그 창은 migration 자체의 수
-ms이고, 큐 요청은 #1544 재발행이 받는다).
+표를 기다리던 event 문장은 사라진 표를 보고(42P01) 실패할 수 있고, 그러면 그 statement를 낸
+transaction 전체가 실패한다(그 창은 migration 자체의 수 ms다. 큐 요청은 #1544 재발행이 받고, 정기
+Dagster run은 다음 주기에 다시 돈다). 배포 전에 ``SELECT count(*) FROM pg_locks WHERE relation =
+'ops.import_job_event_clock'::regclass``가 0인지(event를 쓴 진행 중 transaction 없음) 본다.
 
-권한. runtime(``ktm_feature_runtime``)은 ``runtime_privileges``가 새 표 이름으로 조정한다(배포
-entrypoint가 migration 직후 실행). provider attempt event procedure의 소유자
+권한. runtime(``ktm_feature_runtime``)에는 이 migration이 ``_ORDINARY_OPS``와 같은 권한을 직접
+준다 — 이 commit부터 event trigger가 새 표를 쓰므로, 별도 process인 ``runtime_privileges`` 조정을
+기다리면 그 사이 runtime의 모든 event 기록이 42501로 실패한다(적대 리뷰). 조정기는 이어서 같은
+권한을 다시 준다(인벤토리도 새 이름). provider attempt event procedure의 소유자
 ``ktm_curation_command_owner``는 0211이 옛 표에 준 ``SELECT, INSERT, UPDATE``를 새 표에 그대로
 준다. identity 열의 sequence는 INSERT 권한만으로 쓴다(PostgreSQL은 identity의 nextval에 sequence
 권한을 따로 묻지 않는다).
@@ -103,29 +109,48 @@ SELECT COALESCE(MAX(clock.revision), 0), clock_timestamp()
   FROM ops.import_job_event_clock AS clock
 """
 
+#: event statement trigger 본문. transaction이 처음 고른 slot을 transaction-local 설정
+#: ``ktm.import_job_event_clock_slot``에 기억해, 같은 transaction의 다음 statement는 그 slot을 다시
+#: 쓴다 — transaction 하나가 slot 하나만 쥐므로 slot 수가 동시 event transaction 수의 최대로
+#: 묶인다. savepoint를 rollback하면 그 안에서 잡은 row lock과 이 설정이 함께 되돌아간다.
 _BUMP_FUNCTION_SQL: Final[str] = """
 CREATE OR REPLACE FUNCTION ops.bump_import_job_event_clock() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
+        DECLARE
+          v_remembered text := current_setting('ktm.import_job_event_clock_slot', true);
+          v_slot integer;
         BEGIN
-          -- 다른 transaction이 잡지 않은 가장 작은 slot에 1을 더한다. SKIP LOCKED라
-          -- 긴 적재 transaction이 slot 하나를 commit까지 쥐어도 기다리지 않는다.
-          UPDATE ops.import_job_event_clock_slots AS slot
-             SET revision = slot.revision + 1,
-                 updated_at = clock_timestamp()
-           WHERE slot.slot_id = (
-                 SELECT free.slot_id
-                   FROM ops.import_job_event_clock_slots AS free
-                  ORDER BY free.slot_id
-                  LIMIT 1
-                    FOR UPDATE SKIP LOCKED
-                 );
-          IF NOT FOUND THEN
-            -- 모든 slot이 다른 transaction에 잡혀 있다. identity라 새 slot은 누구와도
-            -- 충돌하지 않는다 — slot 수는 동시 event transaction 수의 최대로 묶인다.
-            INSERT INTO ops.import_job_event_clock_slots (revision, updated_at)
-            VALUES (1, clock_timestamp());
+          IF v_remembered ~ '^[0-9]{1,9}$' THEN
+            -- 이 transaction이 이미 쥔 slot이면 자기 lock이라 건너뛰지 않고 다시 잡힌다. 남이
+            -- 쥔 slot(설정을 손으로 바꾼 경우)이면 SKIP LOCKED가 건너뛰어 아래로 간다.
+            SELECT mine.slot_id INTO v_slot
+              FROM ops.import_job_event_clock_slots AS mine
+             WHERE mine.slot_id = v_remembered::integer
+               FOR UPDATE SKIP LOCKED;
           END IF;
+          IF v_slot IS NULL THEN
+            -- 다른 transaction이 잡지 않은 가장 작은 slot. SKIP LOCKED라 긴 적재 transaction이
+            -- slot 하나를 commit까지 쥐어도 기다리지 않는다.
+            SELECT free.slot_id INTO v_slot
+              FROM ops.import_job_event_clock_slots AS free
+             ORDER BY free.slot_id
+             LIMIT 1
+               FOR UPDATE SKIP LOCKED;
+          END IF;
+          IF v_slot IS NULL THEN
+            -- 모든 slot이 다른 transaction에 잡혀 있다. identity라 새 slot은 누구와도
+            -- 충돌하지 않는다.
+            INSERT INTO ops.import_job_event_clock_slots (revision, updated_at)
+            VALUES (1, clock_timestamp())
+            RETURNING slot_id INTO v_slot;
+          ELSE
+            UPDATE ops.import_job_event_clock_slots AS slot
+               SET revision = slot.revision + 1,
+                   updated_at = clock_timestamp()
+             WHERE slot.slot_id = v_slot;
+          END IF;
+          PERFORM set_config('ktm.import_job_event_clock_slot', v_slot::text, true);
           RETURN NULL;
         END;
         $$
@@ -257,6 +282,11 @@ _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     "FOR EACH STATEMENT EXECUTE FUNCTION ops.guard_import_job_event_clock_slot_mutation()",
     "GRANT SELECT, INSERT, UPDATE ON TABLE ops.import_job_event_clock_slots "
     "TO ktm_curation_command_owner",
+    # runtime ACL 조정기(별도 process)를 기다리지 않는다 — 이 commit부터 event trigger가 새 표를
+    # 쓰므로, 여기서 주지 않으면 조정 전까지 runtime의 모든 event 기록이 42501로 실패한다.
+    # `_ORDINARY_OPS`와 같은 권한이라 조정기의 REVOKE ALL → GRANT와 충돌하지 않는다.
+    "GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE ops.import_job_event_clock_slots "
+    "TO ktm_feature_runtime",
     # 옛 singleton과 그 guard. DROP TABLE이 표의 trigger를 함께 지운다.
     "DROP TABLE ops.import_job_event_clock",
     "DROP FUNCTION ops.guard_import_job_event_clock_mutation()",
