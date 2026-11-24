@@ -10,6 +10,7 @@ ADR-102 결정 6에 따라 n150 `/root`에만 있던 재핀 사이클 스크립�
 | `repin.sh` | 핀 원장 대조, executor 이미지 라벨 확인, `/root/.d2-live.env`의 비밀 아닌 두 키 갱신, Dagster service 키를 Manager 토폴로지에서 유도, D2 fixture DSN 유도, D2 fixture Alembic head 키를 API 이미지에서 유도 |
 | `run-d2.sh` | D2 러너를 D1과 같은 체크아웃(`/home/digitie/ktm-c7-$MAP`)에서 실행 (chain16의 systemd unit) |
 | `adjudicate.sh` | rebuild가 가로지른 v4 BLOCKED lane을 잔여물 0 실측 뒤 `clear-blocked`로 정리 (chain16 lane 정리 단계) |
+| `dagster-freeze.py` | Map Dagster location의 RUNNING schedule·sensor 전체를 스냅샷 뒤 멈추고 run 0까지 기다린다(`freeze`), 스냅샷대로 되돌린다(`unfreeze`), `status`. 옛 `~/freeze.py`·`~/freeze1122d.py`를 대신한다 — 아래 §Dagster freeze |
 
 ## DB에 닿는 법 — instance를 적지 않는다
 
@@ -156,3 +157,37 @@ D1·D2는 핀된 SHA의 평범한 `git archive` 체크아웃에서 돌고, 그 �
 `adjudicate.sh`는 D1·D2와 같은 체크아웃의 상태 helper로 **v4** BLOCKED만 정리한다. 옛 v3
 BLOCKED가 남아 있으면 이유와 함께 멈춘다 — runbook `admin-feature-live-acceptance.md` §6대로
 그것을 만든 커밋의 도구로 정리한다. chain16은 판정 뒤에도 BLOCKED가 남으면 D2 전에 멈춘다.
+
+## Dagster freeze
+
+`dagster-freeze.py`는 운영 창(회전·R4·공용 PG 재생성) 동안 Map의 자동 writer를 멈추는 도구다. 표준
+라이브러리만 쓰고 host `python3`로 돈다. 대상은 **Map code location 하나**(`kortravelmap.dagster.definitions`)이고
+PinVi·concierge location은 읽지도 바꾸지도 않는다. run 조회도 Map repository tag로 좁힌다.
+
+| 명령 | 하는 일 |
+| --- | --- |
+| `status [--snapshot F]` | 읽기 전용 — instigator 상태, 끝나지 않은 Map run, 스냅샷과의 차이 |
+| `freeze --snapshot F [--resume] [--dry-run]` | 스냅샷(0600, fsync 뒤 rename) → launcher(schedule·non-run-status sensor) 정지 → Map run 0 대기 → run-status sensor가 따라잡았는지(SKIPPED tick을 서로 다른 두 시각에) 확인하고 run 재확인 → run-status sensor 정지 → `FREEZE_OK` |
+| `unfreeze --snapshot F [--dry-run] [--accept-missing]` | 스냅샷이 RUNNING으로 적은 것만 되살린다(run-status sensor 먼저; 저장 상태가 없던 기본 RUNNING은 `reset`, 나머지는 `start`). STOPPED였던 것(MOIS continuation 등)은 그대로. 스냅샷 없음·48시간(`--max-age-hours`)보다 오래됨은 거부 → `UNFREEZE_OK`, 스냅샷은 `F.restored-<UTC>`로 옮긴다 |
+
+- `F`는 절대 경로만 받고, 재부팅에 살아남는 곳(운영 계정 홈)에 둔다 — `/tmp`에서 사라지면 부분 freeze 뒤의 새 스냅샷이
+  이미 멈춘 것을 STOPPED로 적어 영구히 꺼 둘 수 있다. 파일이 이미 있으면 `--resume`일 때만(24시간 안, `--max-age-hours`) 이어 한다.
+  스냅샷이 RUNNING으로 적지 않은 instigator가 지금 RUNNING이면 거부한다(그것을 멈추면 되살리지 못한다).
+  새로 쓸 때 RUNNING launcher가 하나도 없으면 "이미 얼어 있다"로 거부한다.
+- run-status sensor는 맨 마지막에 멈춘다. 먼저 멈추면 끝난 run의 operation 상태가 DB에 반영되지 않는다.
+  `feature_operation_success_sensor`는 completion job run을 **내므로** 그 run도 기다린다. launcher 정지 실패·대기
+  초과(`--wait-timeout`, 기본 3600초)·따라잡지 못한 sensor는 run-status sensor를 켜 둔 채 1로 끝난다.
+- 종료 코드: 0 성공·dry-run, 1 불완전(실패·대기 초과·`missing`), 2 입력·연결 오류, 3 스냅샷 안전 검사 거부.
+- 환경 변수: `KTM_DAGSTER_FREEZE_GRAPHQL_URL`(기본 n150 공용 webserver loopback),
+  `KTM_DAGSTER_FREEZE_BASIC_AUTH_FILE`(공개 gateway를 쓸 때만, `user:password` 한 줄 — https 또는 loopback 주소일
+  때만 보내고 redirect는 따라가지 않는다), `KTM_DAGSTER_FREEZE_LOCATION`·`KTM_DAGSTER_FREEZE_REPOSITORY`.
+  주소·인증은 출력하지 않는다.
+- 도구는 run을 끊지 않는다(cache-target writer drain은 grace 뒤 `SAFE_TERMINATE`하는 다른 도구다 —
+  `docs/architecture/cache-target-writer-drain.md`). 관리자 화면의 "지금 실행"·offline upload·schedule 켜기와 이미
+  요청된 backfill은 막지 못한다.
+- 설치: 옛 `~/freeze.py`처럼 운영 계정 홈에 둔다(webserver가 loopback이라 root가 필요 없다).
+  `install -m 0755 scripts/n150/dagster-freeze.py ~/dagster-freeze.py`. 옛 `~/freeze.py stop|start`를 부르는
+  호스트 회전 스크립트는 `dagster-freeze.py freeze|unfreeze --snapshot <회전 전용 절대 경로>`로 바꾼다 — 옛 도구는
+  두 instigator만 멈춘다. 운영 창(R4 등) 안의 회전은 창 스냅샷과 다른 파일을 쓰거나 freeze를 건너뛴다.
+- `tests/unit/test_n150_dagster_freeze.py`가 가짜 GraphQL webserver(n150 Map location의 실제 구성 61개 + PinVi
+  location) 위에서 효과를 고정한다.

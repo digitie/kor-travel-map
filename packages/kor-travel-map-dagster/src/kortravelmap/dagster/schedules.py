@@ -658,6 +658,14 @@ def _coalescing_execution_fn(
 #: 파일**(15017322, 서비스키 불필요 — provider ``special_street.iter_file_pages``)로
 #: 옮기고 274행을 실측했다. 서울 책방과 같이 되살린 근거는 원천 교체다. schedule은
 #: 여전히 STOPPED로 생기고 첫 적재 확인 뒤 켠다.
+#:
+#: 2026-11-24 — 한 번도 켜지 않았던 schedule 6개를 prod에서 켰다(소유자 결정, 수집 실패 감사
+#: 2026-11-23 §4 #11): TourAPI 관광지(daily), 표준 지역특화거리·전통시장, 국가유산 item,
+#: concierge YouTube, transport 주유소. 이 목록에 넣을 보류 사유가 없었다 — 앞의 넷은
+#: 11-10 수동 적재가 성공했고 켜기만 남은 작업(T-TOURAPI-LOAD·T-MARKET-LOAD)이었다.
+#: **코드 기본 상태는 그대로 STOPPED다.** feature 적재 schedule은 전부 ``default_status=STOPPED``로
+#: 생기고 운영자가 Dagster에서 켠 상태(instigator 행)가 정본이다 — 새 schedule이 배포만으로 돌지
+#: 않게 하는 장치이고, 켠 상태는 배포를 넘어 살아남는다.
 DISABLED_FEATURE_LOAD_SCHEDULES: Final[frozenset[str]] = frozenset(
     {
         "feature_place_datagokr_ansan_world_restaurants_monthly_schedule",
@@ -674,9 +682,9 @@ DISABLED_FEATURE_LOAD_OPERATION_KEYS: Final[frozenset[str]] = frozenset(
 """자동 적재를 끈 provider의 **operation key**.
 
 ``DISABLED_FEATURE_LOAD_SCHEDULES``는 이름이 말하듯 **시계만** 끈다. 그런데 이
-저장소의 prod는 cron이 아니라 **feature update queue**로 돈다 — schedule은 전부
-``default_status=STOPPED``이고 켜진 적이 없는 반면
-``feature_update_request_queue_sensor``는 기본 RUNNING이다. 그 큐 runner
+저장소의 feature 적재 schedule은 전부 ``default_status=STOPPED``로 생기는 반면
+``feature_update_request_queue_sensor``는 기본 RUNNING이다(2026-09-14 당시 prod는 cron이
+아니라 이 queue로 돌았다. 2026-11 현재는 운영자가 켠 schedule 49개도 함께 돈다). 그 큐 runner
 (:class:`~.feature_update_runner.FeatureUpdateAssetRunner`)에는 여기 있는
 operation의 spec이 그대로 있고, 실행 전 정책 게이트는 ``provider_refresh_policies``
 row가 없으면 ``allow_targeted``로 **fail-open**한다(baseline seed에 row가 0건이다).

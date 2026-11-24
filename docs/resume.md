@@ -1,3 +1,12 @@
+## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영
+
+- `scripts/n150/dagster-freeze.py` `status|freeze [--resume]|unfreeze --snapshot <절대 경로>`(Map location 전체, run 0·run-status
+  tick 대기, 스냅샷대로 복원).
+  R4 runbook 2·9단계가 이것을 쓴다. 미기동 6개 schedule은 소유자 결정으로 prod에서 켬(코드 기본 STOPPED 유지).
+- 다음: n150 호스트에 설치(`~/dagster-freeze.py`), 호스트 회전 스크립트의 `freeze.py stop|start`를
+  `dagster-freeze.py freeze|unfreeze --snapshot`으로 교체하거나 R4 8단계 회전에서 freeze를 뺀다(부모, R4 runbook §2.2). 주유소 place schedule은 transport 유가 수정 배포 뒤
+  첫 run 결과 확인.
+
 ## 2026-11-24 — import job event clock slot화(alembic 457)
 
 - 긴 적재 transaction이 event를 쓴 채 머물러도 다른 요청·job의 event 기록이 기다리지 않는다(`SKIP LOCKED` slot,
