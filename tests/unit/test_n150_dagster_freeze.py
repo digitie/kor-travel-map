@@ -162,6 +162,10 @@ class _FakeDagster:
         #: ``(status, skipReason)``이면 사유를 단 tick, ``None``이면 tick 없음.
         self.tick_script: list[dict[str, str | tuple[str, str] | None]] = []
         self.fail_stop: set[str] = set()
+        #: 남은 instigator 조회 수만큼 location이 아직 로드되지 않았다(회전 직후).
+        self.not_loaded = 0
+        #: 켜면 모든 호출이 전송 층 실패(재시도를 다 쓴 HTTP 500)다.
+        self.down = False
 
     def _add(
         self, location: str, kind: str, name: str, status: str, sensor_type: str | None = None
@@ -188,10 +192,21 @@ class _FakeDagster:
         raise AssertionError(f"unknown instigator {origin}")
 
     def __call__(self, *, query: str, variables: dict[str, Any]) -> dict[str, Any]:
+        if self.down:
+            raise freeze.FreezeError("gave up after 8 attempts: HTTP 500")
         if "KtmFreezeInstigators" in query:
+            if self.not_loaded:
+                self.not_loaded -= 1
+                self.calls.append("not-loaded")
+                return {
+                    "repositoryOrError": {
+                        "__typename": "RepositoryNotFoundError",
+                        "message": f"Could not find a repository __repository__ in {_MAP}",
+                    }
+                }
             return self._instigators(variables)
         if "KtmFreezeSensorTicks" in query:
-            return self._ticks(variables)
+            return self._ticks(query, variables)
         if "KtmFreezeRuns" in query:
             return self._runs(variables)
         if "KtmFreezeStop" in query:
@@ -224,10 +239,12 @@ class _FakeDagster:
             }
         }
 
-    def _ticks(self, variables: dict[str, Any]) -> dict[str, Any]:
+    def _ticks(self, query: str, variables: dict[str, Any]) -> dict[str, Any]:
         self.calls.append("ticks")
         statuses = self.tick_script.pop(0) if self.tick_script else {}
         after = float(variables["after"])
+        # 실제 GraphQL처럼 질의가 고른 필드만 싣는다 — 질의에서 skipReason을 빼면 사유가 사라진다.
+        selected = {"status", "timestamp", "skipReason"} & set(query.split())
         sensors = []
         for kind, name, _ in self.entries(variables["s"]["repositoryLocationName"]):
             if kind != "sensor":
@@ -235,11 +252,8 @@ class _FakeDagster:
             value = statuses.get(name, "SKIPPED")
             status, reason = value if isinstance(value, tuple) else (value, None)
             stamp = after + len(self.calls)  # 조회마다 새 tick
-            ticks = (
-                []
-                if status is None
-                else [{"status": status, "timestamp": stamp, "skipReason": reason}]
-            )
+            tick = {"status": status, "timestamp": stamp, "skipReason": reason}
+            ticks = [] if status is None else [{k: tick[k] for k in selected}]
             sensors.append({"name": name, "sensorState": {"ticks": ticks}})
         return {"repositoryOrError": {"__typename": "Repository", "sensors": sensors}}
 
@@ -644,11 +658,202 @@ def test_refused_freeze_changes_nothing_and_offers_no_rollback(
     rotation = tmp_path / "rotation.json"
     assert freeze.main(["freeze", "--snapshot", str(rotation)], gql=fake) == 3
     out = capsys.readouterr().out
-    assert "회전의 freeze·unfreeze 단계를 빼라" in out
+    assert "회전 전용 파일에 --include-state를 붙여라" in out
     assert "rollback" not in out
     assert not rotation.exists()
     assert not fake.calls
     assert _map_statuses(fake) == frozen
+
+
+def test_existing_snapshot_is_refused_before_asking_the_webserver(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """이미 있는 파일(창 스냅샷)로 ``--resume`` 없이 부르면 webserver가 실패해도 3이다.
+
+    파일 검사가 webserver 조회 뒤에 있으면 HTTP 500이 2가 되고, 2의 rollback 안내가 아무것도
+    바꾸지 않은 호출에 남의 파일을 unfreeze하라고 적었다(#1552 리뷰).
+    """
+
+    fake = _FakeDagster()
+    window = tmp_path / "window.json"
+    assert _freeze(fake, window) == 0
+    capsys.readouterr()
+    fake.down = True  # 어떤 GraphQL 호출이든 실패한다 — 3이면 webserver에 묻지 않았다.
+
+    assert freeze.main(["freeze", "--snapshot", str(window)], gql=fake) == 3
+    out = capsys.readouterr().out
+    assert "REFUSE: 스냅샷이 이미 있다" in out
+    assert "rollback" not in out
+    assert window.exists()
+
+
+def test_resumed_snapshot_gets_the_rollback_hint_when_the_webserver_fails(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``--resume``으로 이어 받은 파일은 이번 호출의 것이다 — 2로 끝나도 되돌리는 길을 적는다."""
+
+    fake = _FakeDagster()
+    fake.runs = [_run()]
+    snapshot = tmp_path / "freeze.json"
+    assert _freeze(fake, snapshot, wait_timeout=0.0) == 1
+    capsys.readouterr()
+    fake.down = True
+
+    assert freeze.main(["freeze", "--snapshot", str(snapshot), "--resume"], gql=fake) == 2
+    out = capsys.readouterr().out
+    assert f"rollback: 접으려면 unfreeze --snapshot {snapshot}" in out
+
+
+def test_include_state_stops_state_schedules_and_awaits_their_runs(tmp_path: Path) -> None:
+    """code-server 회전은 돌던 상태 run을 끊는다 — ``--include-state``는 그것도 멈추고 기다린다.
+
+    run worker는 code-server의 자식이라 회전이 함께 죽인다. 끊긴 run의 Valkey 적재 잠금은 TTL(run
+    상한 + 660초)까지 남아 그동안 뒤 run이 "잠금 — 건너뜀"으로 끝나고 상태가 낡는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    forecast = _run("weather_state_forecast_short")
+    fake.run_script = [[forecast], [forecast], []]
+    clock = _Clock()
+    snapshot = tmp_path / "rotation.json"
+
+    assert _freeze(fake, snapshot, clock, include_state=True) == 0
+    assert "RUNNING" not in _map_statuses(fake).values()
+    assert set(_stops(fake)) >= _STATE_SCHEDULES
+    # 상태 run 대기 poll 둘, settle, 두 번째 SKIPPED tick.
+    assert clock.sleeps == [30.0, 30.0, 90.0, 30.0]
+
+    assert _unfreeze(fake, snapshot) == 0
+    assert _map_statuses(fake) == before
+
+
+def test_rotation_inside_a_window_with_include_state_touches_only_state_schedules(
+    tmp_path: Path,
+) -> None:
+    """창 안의 회전은 회전 전용 파일 + ``--include-state`` — 창이 남긴 상태 schedule만 멈춘다.
+
+    회전 스냅샷에는 상태 schedule만 RUNNING으로 적히므로 회전 끝 unfreeze는 그것만 되살리고 창은
+    얼어 있는 채 남는다. 창 스냅샷 파일은 건드리지 않는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    window = tmp_path / "window.json"
+    assert _freeze(fake, window) == 0
+    window_text = window.read_text(encoding="utf-8")
+    fake.calls.clear()
+
+    rotation = tmp_path / "rotation.json"
+    assert _freeze(fake, rotation, include_state=True) == 0
+    assert set(_stops(fake)) == _STATE_SCHEDULES
+    assert "RUNNING" not in _map_statuses(fake).values()
+
+    fake.calls.clear()
+    assert _unfreeze(fake, rotation) == 0
+    assert {call.split(":", 1)[1] for call in fake.calls} == _STATE_SCHEDULES
+    _assert_frozen(fake)
+    assert window.read_text(encoding="utf-8") == window_text
+
+    assert _unfreeze(fake, window) == 0
+    assert _map_statuses(fake) == before
+
+
+def test_include_state_on_a_fully_frozen_location_is_refused(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """창 freeze가 상태 schedule까지 멈췄으면(#1541 판) 회전 freeze도 거부된다 — 끊길 run이 없다."""
+
+    fake = _FakeDagster()
+    assert _freeze(fake, tmp_path / "window.json", include_state=True) == 0
+    capsys.readouterr()
+    fake.calls.clear()
+
+    rotation = tmp_path / "rotation.json"
+    assert _freeze(fake, rotation, include_state=True) == 3
+    assert "회전의 freeze·unfreeze 단계를 빼라" in capsys.readouterr().out
+    assert not rotation.exists()
+    assert not fake.calls
+
+
+def test_freeze_ok_reports_state_runs_it_did_not_wait_for(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``FREEZE_OK``는 Map PG writer 정지다 — 돌고 있는 상태 run 수를 따로 적는다."""
+
+    fake = _FakeDagster()
+    fake.runs = [_run("weather_state_current"), _run("transport_state_highway_incidents")]
+    assert _freeze(fake, tmp_path / "freeze.json") == 0
+    out = capsys.readouterr().out
+    assert "active_runs=0 state_runs=2(기다리지 않음)" in out
+
+
+def test_unfreeze_waits_for_the_location_to_load_after_a_rotation(tmp_path: Path) -> None:
+    """회전 직후 webserver는 location을 다시 싣기 전까지 ``RepositoryNotFoundError``를 낸다.
+
+    전송 층은 5xx·연결 오류만 다시 시도하므로 기다리지 않으면 unfreeze가 곧바로 2로 끝나고 Map
+    location이 얼어 있는 채 남는다.
+    """
+
+    fake = _FakeDagster()
+    before = _map_statuses(fake)
+    snapshot = tmp_path / "rotation.json"
+    assert _freeze(fake, snapshot) == 0
+    fake.not_loaded = 3
+    clock = _Clock()
+
+    assert _unfreeze(fake, snapshot, clock=clock.monotonic, sleep=clock.sleep) == 0
+    assert clock.sleeps == [10.0, 10.0, 10.0]
+    assert _map_statuses(fake) == before
+
+
+def test_unfreeze_that_cannot_reach_the_location_says_map_is_still_frozen(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    fake = _FakeDagster()
+    snapshot = tmp_path / "rotation.json"
+    assert _freeze(fake, snapshot) == 0
+    frozen = _map_statuses(fake)
+    fake.not_loaded = 1
+    capsys.readouterr()
+
+    argv = ["unfreeze", "--snapshot", str(snapshot), "--location-wait", "0"]
+    assert freeze.main(argv, gql=fake) == 2
+    out = capsys.readouterr().out
+    assert "RepositoryNotFoundError" in out
+    assert "retry: Map location이 아직 (일부) 얼어 있다" in out
+    assert snapshot.exists()
+    assert _map_statuses(fake) == frozen
+
+    assert freeze.main(argv, gql=fake) == 0
+    assert not snapshot.exists()
+
+
+def test_unfreeze_missing_after_a_rotation_says_map_is_still_frozen(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """회전이 이름을 지우면 1이고 스냅샷이 남는다 — 그동안 다음 freeze는 그 파일로 거부(3)한다."""
+
+    fake = _FakeDagster()
+    snapshot = tmp_path / "rotation.json"
+    assert _freeze(fake, snapshot) == 0
+    del fake.state[(_MAP, "schedule", "feature_place_khoa_beaches_monthly_schedule")]
+    capsys.readouterr()
+
+    assert freeze.main(["unfreeze", "--snapshot", str(snapshot)], gql=fake) == 1
+    out = capsys.readouterr().out
+    assert "retry: Map location이 아직 (일부) 얼어 있다" in out
+    assert "--accept-missing" in out
+    assert freeze.main(["freeze", "--snapshot", str(snapshot)], gql=fake) == 3
+
+
+def test_unfreeze_of_a_broken_snapshot_gives_no_retry_hint(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    snapshot = tmp_path / "freeze.json"
+    snapshot.write_text("{}", encoding="utf-8")
+    assert freeze.main(["unfreeze", "--snapshot", str(snapshot)], gql=_FakeDagster()) == 2
+    assert "retry" not in capsys.readouterr().out
 
 
 def test_resume_without_a_snapshot_is_refused(tmp_path: Path) -> None:
