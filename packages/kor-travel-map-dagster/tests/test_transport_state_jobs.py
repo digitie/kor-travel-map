@@ -33,8 +33,10 @@ from kortravelmap.dagster.definitions import defs
 from kortravelmap.dagster.provider_fetchers import TransportExportUnchanged
 from kortravelmap.dagster.transport_state import (
     FULL_WALK_INTERVAL,
+    RETRY_TIME_SHARE,
     TRANSPORT_STATE_SPECS,
     TransportStateJobSpec,
+    alert_after_seconds,
     load_transport_state,
     lock_ttl_seconds,
 )
@@ -67,6 +69,7 @@ class _FakeStore:
         self.served = served
         self.swapped: list[tuple[str, int, bool]] = []
         self.retired: list[str] = []
+        self.last_swap_kwargs: dict[str, Any] = {}
 
     async def current_meta(self, dataset: str) -> GenerationMeta:
         if self.served is None:
@@ -85,6 +88,7 @@ class _FakeStore:
         if self.swap_error is not None:
             raise self.swap_error
         self.swapped.append((dataset, len(items), kwargs["allow_shrink"]))
+        self.last_swap_kwargs = kwargs
         meta = GenerationMeta(
             dataset=dataset,
             generation="20261023T000000Z-00000000",
@@ -280,105 +284,7 @@ async def test_a_full_walk_is_forced_when_skipping_is_not_safe(
     assert "skipped" not in metadata
 
 
-async def test_datasets_without_skipping_never_read_the_served_meta() -> None:
-    class _NoMeta(_FakeStore):
-        async def current_meta(self, dataset: str) -> GenerationMeta:
-            raise AssertionError("건너뛰기를 하지 않는 데이터셋은 meta를 미리 읽지 않는다")
-
-        @asynccontextmanager
-        async def load_lock(self, _dataset: str, *, ttl_seconds: int) -> AsyncIterator[bool]:
-            del ttl_seconds
-            yield True
-
-    spec = replace(TRANSPORT_STATE_SPECS[1], collect=_collect_two)
-    assert spec.skip_unchanged is False
-    metadata = await load_transport_state(
-        spec,
-        settings=KorTravelMapSettings.model_construct(),
-        run_id="run-x",
-        allow_shrink=False,
-        store=cast(ValkeyStateStore, _NoMeta()),
-    )
-    assert metadata["count"] == 2
-
-
 # ------------------------------------------------- transport 503 code(2026-11-24 계약, 감사 MC-01)
-
-
-@pytest.mark.parametrize(
-    ("code", "retry_after"),
-    [
-        ("EXPORT_SOURCE_NOT_CURRENT", 1800.0),
-        ("EXPORT_NO_HISTORY", 3600.0),
-        ("EXPORT_INCIDENTS_NOT_CURRENT", 300.0),
-        ("EXPORT_EMPTY_SET", 300.0),
-    ],
-)
-async def test_a_coded_not_current_503_fails_the_run_without_retries(
-    code: str, retry_after: float
-) -> None:
-    """초록으로 건너뛰지 않는다 — Map에는 상류 장애 경보가 없어 빨간 run이 유일한 신호다."""
-
-    async def _not_current(*_args: Any, **_kwargs: Any) -> list[Any]:
-        raise TransportSourceNotCurrent("503", code=code, retry_after=retry_after)
-
-    store = _FakeStore(served=_served(loaded_ago=timedelta(hours=1)))
-    with pytest.raises(Failure) as excinfo:
-        await _load(store, _not_current)
-    assert excinfo.value.allow_retries is False
-    assert store.swapped == []
-    metadata = {key: value.value for key, value in excinfo.value.metadata.items()}
-    assert metadata["outcome"] == "skipped_upstream_not_current"
-    assert metadata["transport_problem_code"] == code
-    assert metadata["transport_retry_after_seconds"] == retry_after
-    assert metadata["served_generation"] == "20261124T000500Z-aaaaaaaa"
-    assert metadata["last_success_at"] == _COLLECTED.isoformat()
-    assert int(str(metadata["served_age_seconds"])) > 0
-    assert code in (excinfo.value.description or "")
-
-
-async def test_a_coded_not_current_503_before_the_first_load_still_fails() -> None:
-    async def _not_current(*_args: Any, **_kwargs: Any) -> list[Any]:
-        raise TransportSourceNotCurrent("503", code="EXPORT_NO_HISTORY", retry_after=3600.0)
-
-    with pytest.raises(Failure) as excinfo:
-        await _load(_FakeStore(served=None), _not_current)
-    metadata = {key: value.value for key, value in excinfo.value.metadata.items()}
-    assert metadata["served_generation"] == ""
-    assert metadata["last_success_at"] == ""
-    assert metadata["served_age_seconds"] == -1
-
-
-async def test_a_busy_503_beyond_the_wait_cap_fails_without_retries() -> None:
-    async def _busy(*_args: Any, **_kwargs: Any) -> list[Any]:
-        raise TransportExportBusy(
-            "503", code="EXPORT_BUSY", retry_after=600.0, retry_after_cap=60.0
-        )
-
-    with pytest.raises(Failure) as excinfo:
-        await _load(_FakeStore(), _busy)
-    assert excinfo.value.allow_retries is False
-    metadata = {key: value.value for key, value in excinfo.value.metadata.items()}
-    assert metadata["transport_problem_code"] == "EXPORT_BUSY"
-    assert metadata["failure_kind"] == "transport_busy"
-
-
-async def test_a_short_busy_503_and_an_uncoded_503_keep_step_retries() -> None:
-    """HTTP 층 재시도를 다 쓴 경합과 code 없는(또는 모르는 code) 503은 종전대로 step 재시도다."""
-    busy = TransportExportBusy("503", code="TRANSIENT_DB", retry_after=15.0, retry_after_cap=60.0)
-    unknown = TransportExportNotCurrent("503", code="SERVICE_UNAVAILABLE")
-
-    async def _raise_busy(*_args: Any, **_kwargs: Any) -> list[Any]:
-        raise busy
-
-    async def _raise_unknown(*_args: Any, **_kwargs: Any) -> list[Any]:
-        raise unknown
-
-    with pytest.raises(TransportExportBusy):
-        await _load(_FakeStore(), _raise_busy)
-    with pytest.raises(TransportExportNotCurrent) as excinfo:
-        await _load(_FakeStore(), _raise_unknown)
-    assert excinfo.value is unknown
 
 
 async def test_a_disabled_export_fails_without_retries_through_the_existing_terminal_path() -> None:
@@ -403,3 +309,190 @@ async def test_an_inconsistent_source_keeps_step_retries() -> None:
     with pytest.raises(TransportSourceInconsistent) as excinfo:
         await _load(_FakeStore(), _inconsistent)
     assert excinfo.value is cause
+
+
+# ------------------------------------------- 나이 기준 혼합(소유자 결정 2026-11-24)
+
+
+def _served_at(
+    *, source_age: timedelta, loaded_ago: timedelta = timedelta(hours=1)
+) -> GenerationMeta:
+    now = datetime.now(UTC)
+    return GenerationMeta(
+        dataset=TRANSPORT_STATE_SPECS[0].dataset.name,
+        generation="20261124T000500Z-bbbbbbbb",
+        count=12_000,
+        geo_count=12_000,
+        lookup_count=0,
+        duplicates=0,
+        source_collected_at=now - source_age,
+        loaded_at=now - loaded_ago,
+        run_id="run-old",
+        guard_override=False,
+    )
+
+
+_HOLD_FAILURES = [
+    TransportSourceNotCurrent("503", code="EXPORT_SOURCE_NOT_CURRENT", retry_after=1800.0),
+    TransportExportBusy("503", code="EXPORT_BUSY", retry_after=10.0, retry_after_cap=60.0),
+    TransportExportBusy(
+        "503", code="EXPORT_PREPARE_TIMEOUT", retry_after=120.0, retry_after_cap=60.0
+    ),
+]
+_HOLD_IDS = ["source-not-current", "busy-exhausted", "busy-over-cap"]
+_HOLD_OUTCOMES = {
+    "source-not-current": "upstream_source_not_current",
+    "busy-exhausted": "upstream_busy_exhausted",
+    "busy-over-cap": "upstream_busy_over_cap",
+}
+
+
+def _raising(exc: Exception) -> Callable[..., Any]:
+    async def _collect(*_args: Any, **_kwargs: Any) -> list[Any]:
+        raise exc
+
+    return _collect
+
+
+@pytest.mark.parametrize("exc", _HOLD_FAILURES, ids=_HOLD_IDS)
+async def test_a_fresh_served_generation_keeps_the_run_green(
+    exc: Exception, request: pytest.FixtureRequest
+) -> None:
+    """주유소 경고 기준 16시간 — 서비스 세대 원천이 1시간이면 건너뛰고 초록.
+
+    세대 유지, 재시도 없음.
+    """
+    store = _FakeStore(served=_served_at(source_age=timedelta(hours=1)))
+    metadata = await _load(store, _raising(exc))
+    assert store.swapped == []
+    assert metadata["skipped"] == "upstream_not_ready"
+    assert metadata["upstream_state"] == "not_ready"
+    assert metadata["outcome"] == _HOLD_OUTCOMES[request.node.callspec.id]
+    assert metadata["stale_alert"] is False
+    assert metadata["stale_alert_after_seconds"] == 16 * 3600
+    assert 3500 <= metadata["served_age_seconds"] <= 3700
+    assert metadata["served_generation"] == "20261124T000500Z-bbbbbbbb"
+    assert "served_source_collected_at" in metadata
+    assert metadata["transport_problem_code"] == exc.code  # type: ignore[attr-defined]
+    assert "source not current" not in str(metadata).lower() or "busy" not in metadata["outcome"]
+
+
+@pytest.mark.parametrize("exc", _HOLD_FAILURES, ids=_HOLD_IDS)
+async def test_an_old_served_generation_turns_the_run_red_without_retries(
+    exc: Exception, request: pytest.FixtureRequest
+) -> None:
+    store = _FakeStore(served=_served_at(source_age=timedelta(hours=17)))
+    with pytest.raises(Failure) as excinfo:
+        await _load(store, _raising(exc))
+    assert excinfo.value.allow_retries is False
+    metadata = {key: value.value for key, value in excinfo.value.metadata.items()}
+    assert metadata["outcome"] == _HOLD_OUTCOMES[request.node.callspec.id]
+    assert metadata["stale_alert"] is True
+    assert "skipped" not in metadata
+    assert int(str(metadata["served_age_seconds"])) > 16 * 3600
+    assert store.swapped == []
+
+
+async def test_no_served_generation_is_red_and_unknown_values_are_absent() -> None:
+    exc = TransportSourceNotCurrent("503", code="EXPORT_NO_HISTORY", retry_after=None)
+    with pytest.raises(Failure) as excinfo:
+        await _load(_FakeStore(served=None), _raising(exc))
+    metadata = {key: value.value for key, value in excinfo.value.metadata.items()}
+    assert metadata["stale_alert"] is True
+    for absent in (
+        "served_generation",
+        "served_source_collected_at",
+        "served_age_seconds",
+        "transport_retry_after_seconds",
+    ):
+        assert absent not in metadata
+
+
+async def test_the_over_cap_busy_explains_the_cap_in_metadata() -> None:
+    store = _FakeStore(served=_served_at(source_age=timedelta(hours=1)))
+    metadata = await _load(store, _raising(_HOLD_FAILURES[2]))
+    assert metadata["transport_retry_after_cap_seconds"] == 60.0
+    assert "대기 상한" in metadata["transport_retry_after_cap_note"]
+    assert metadata["transport_retry_after_seconds"] == 120.0
+
+
+async def test_an_uncoded_503_and_an_inconsistent_source_keep_todays_step_retries() -> None:
+    unknown = TransportExportNotCurrent("503", code="SERVICE_UNAVAILABLE")
+    with pytest.raises(TransportExportNotCurrent) as excinfo:
+        await _load(_FakeStore(served=_served_at(source_age=timedelta(hours=1))), _raising(unknown))
+    assert excinfo.value is unknown
+
+
+def test_alert_thresholds_stay_below_the_read_stale_limit() -> None:
+    settings = KorTravelMapSettings.model_construct()
+    for spec in TRANSPORT_STATE_SPECS:
+        assert spec.alert_after_setting
+        assert alert_after_seconds(spec, settings) < spec.dataset.max_age.total_seconds()
+        field = KorTravelMapSettings.model_fields[spec.alert_after_setting]
+        upper = next(m.lt for m in field.metadata if hasattr(m, "lt") and m.lt is not None)
+        assert upper == spec.dataset.max_age.total_seconds(), spec.alert_after_setting
+
+
+# ------------------------------------------- 전량 주기·force_full_walk·재시도 시간(적대 리뷰)
+
+
+async def test_the_full_walk_interval_counts_from_the_walk_start() -> None:
+    """교체 시각이 아니라 순회 시작 시각(``full_synced_at``)을 남긴다.
+
+    매시 tick에서 6시간마다 전량.
+    """
+    store = _FakeStore(served=None)
+    await _load(store)
+    # _FakeStore.swap은 kwargs를 그대로 받는다 — full_synced_at이 loaded_at보다 늦지 않다.
+    assert store.last_swap_kwargs["full_synced_at"] <= store.last_swap_kwargs["loaded_at"]
+
+
+async def test_a_future_full_walk_basis_forces_a_full_walk() -> None:
+    """시계가 뒤로 가 기준이 미래면 믿지 않는다."""
+    served = _served(loaded_ago=timedelta(hours=1))
+    future = replace(served, full_synced_at=datetime.now(UTC) + timedelta(hours=2))
+    store = _FakeStore(served=future)
+    collect = _RecordingCollect(_COLLECTED)
+    await _load(store, collect)
+    assert collect.calls == [None]
+
+
+async def test_a_recent_walk_start_keeps_skipping_even_when_the_swap_was_late() -> None:
+    served = _served(loaded_ago=timedelta(hours=5, minutes=50))
+    started = replace(served, full_synced_at=datetime.now(UTC) - timedelta(hours=5, minutes=55))
+    collect = _RecordingCollect(_COLLECTED)
+    metadata = await _load(_FakeStore(served=started), collect)
+    assert metadata["skipped"] == "unchanged"
+    late = replace(served, full_synced_at=datetime.now(UTC) - timedelta(hours=6, minutes=1))
+    collect = _RecordingCollect(_COLLECTED)
+    await _load(_FakeStore(served=late), collect)
+    assert collect.calls == [None]
+
+
+async def test_force_full_walk_disables_the_unchanged_skip() -> None:
+    store = _FakeStore(served=_served(loaded_ago=timedelta(hours=1)))
+    collect = _RecordingCollect(_COLLECTED)
+    await load_transport_state(
+        _spec(collect),
+        settings=KorTravelMapSettings.model_construct(),
+        run_id="run-x",
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, store),
+        force_full_walk=True,
+    )
+    assert collect.calls == [None]
+    assert len(store.swapped) == 1
+
+
+async def test_retry_time_is_bounded_by_the_run_limit() -> None:
+    seen: list[float | None] = []
+
+    async def _collect(*_args: Any, **_kwargs: Any) -> list[Any]:
+        from kortravelmap.dagster import upstream_retry
+
+        budget = upstream_retry.active_run_retry_budget()
+        seen.append(budget.max_seconds if budget is not None else None)
+        return [object()]
+
+    await _load(_FakeStore(), _collect)
+    assert seen == [TRANSPORT_STATE_SPECS[0].max_runtime_seconds * RETRY_TIME_SHARE]

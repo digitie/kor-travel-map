@@ -184,8 +184,9 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 1. `lock`을 `SET NX EX`(그 job의 run 상한 + 취소 유예 600초 + 60초)로 잡는다. 이미 있으면 다른 적재가 도는 것이라 이번 run은 받지 않고 끝낸다(실패
    아님). 끝나면 자기 토큰일 때만 지운다.
 2. 원천을 끝까지 받는다(기존 fetcher 그대로 — 수집 이력 없음·실패·stale·계약 위반·0건 페이지 export는 여기서
-   실패하고 Valkey에는 아무것도 쓰지 않는다). transport가 503 `code`로 "이 run 안에서는 풀리지 않는다"고 알리면
-   step 재시도 없이 run이 실패한다(2026-11-24, ADR-106 개정 절). 주유소·휴게소 유가는 첫 페이지의
+   실패하고 Valkey에는 아무것도 쓰지 않는다). transport가 503 `code`로 근거 수집이 현재가 아니라고 알리거나 경합
+   503이 HTTP 층에서 풀리지 않으면 나이 기준 혼합이다 — 서비스 세대 원천 나이가 경고 기준 안이면 초록 건너뜀,
+   넘으면 재시도 없는 실패(2026-11-24, ADR-106 개정 절). 주유소·휴게소 유가는 첫 페이지의
    `collection.last_success_at`이 `current` 세대의 `source_collected_at`과 같고 그 세대 적재가 6시간 안이면
    나머지 페이지와 3~5를 건너뛴다(`skipped=unchanged`, 6시간마다 전량).
 3. `current`와 그 세대 `meta`, `recent_counts`를 읽는다. `current`가 있는데 `meta`가 없으면 저장소가 깨진 것이라
@@ -220,6 +221,8 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 - 응답마다 `freshness{dataset, generation, source_collected_at, loaded_at, age_seconds, max_age_seconds, stale,
   item_count}`를 싣는다. `age`는 `source_collected_at`(없으면 `loaded_at`) 기준이다. 상한: 주유소·휴게소 유가
   48시간, 돌발 30분(`INCIDENT_SET_MAX_AGE`와 같다), 휴게소·공항 8일.
+- 바뀌지 않은 집합 건너뛰기(ADR-106 2026-11-24 개정)는 교체하지 않으므로 `loaded_at`이 늦게는 6시간까지 그대로다.
+  `age_seconds`·`stale`은 `source_collected_at` 기준이라 영향이 없다.
 - 응답은 stale이어도 값을 준다(판단은 소비자). 다만 돌발은 소비자가 `stale=true`면 표시하지 않는 것을 권한다.
 
 ### D6. 읽기 — Map REST(service 표면)

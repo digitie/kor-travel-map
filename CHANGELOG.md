@@ -2,19 +2,21 @@
 
 ## 2026-11-24 — transport export 503 code·HTTP 층 재시도·바뀌지 않은 주유소 집합 건너뛰기(ADR-106 개정)
 
-- transport 503의 problem `code`를 읽는다. `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·
-  `EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET`은 HTTP·step 재시도 없이 run을 **실패**로 끝낸다(상태 job metadata
-  `outcome=skipped_upstream_not_current`, `transport_problem_code`·`transport_retry_after_seconds`·`last_success_at`; Valkey
-  세대 유지). `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`는 같은 요청을 `Retry-After`대로(한 번 60초 상한, run
-  예산 공유) 4회까지 다시 묻는다(`Retry-After`가 60초를 넘으면 기다리지 않고 재시도 없이 실패).
-  `EXPORT_DISABLED`·`EXPORT_TOO_LARGE`는 재시도 없이 실패, `EXPORT_SOURCE_INCONSISTENT`는 step 재시도. code가 없거나
-  모르는 503은 종전과 같다. 분류는 code로만 하고 `Retry-After`는 힌트로 metadata에 싣는다.
+- transport 503의 problem `code`를 읽는다(분류는 code로만, `Retry-After`는 힌트로 metadata에). Valkey 상태 job은
+  근거 수집 미현재 code 503(`EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·
+  `EXPORT_EMPTY_SET`)과 HTTP 층에서 풀리지 않은 경합 503에 **나이 기준 혼합**(소유자 결정)을 쓴다: 서비스 세대 원천
+  나이가 데이터셋별 경고 기준(주유소 16시간·휴게소 유가 8시간·돌발 20분·휴게소/공항 2일, env
+  `KOR_TRAVEL_MAP_TRANSPORT_STATE_<DATASET>_ALERT_AFTER_SECONDS`) 안이면 초록 건너뜀(`skipped=upstream_not_ready`), 넘으면
+  재시도 없는 실패. feature 적재 asset은 step 재시도를 그대로 쓴다. `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·
+  `TRANSIENT_DB`는 같은 요청을 첫 요청 포함 4번(다시 묻기 3번, 5·10·20초 ±20% 또는 `Retry-After`, 한 번 60초 상한, run
+  예산 공유) 묻는다. `EXPORT_DISABLED`·`EXPORT_TOO_LARGE`는 재시도 없이 실패, `EXPORT_SOURCE_INCONSISTENT`는 step 재시도.
+  code가 없거나 모르는 503은 종전과 같다.
 - HTTP 층 재시도에 408·429(`Retry-After`)·500을 더했다. 400·422는 재시도 없는 `transport_request_rejected`.
 - Valkey 상태 job 주유소·휴게소 유가: 첫 페이지 `last_success_at`이 서비스 세대와 같으면 나머지 페이지와 교체를
-  건너뛴다(`skipped=unchanged`, 6시간마다 전량).
+  건너뛴다(`skipped=unchanged`, 마지막 전량 순회 시작부터 6시간마다 전량, op config `force_full_walk`).
 - 새 env `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_REFERENCE_PAGE_SIZE`(철도역·항구 snapshot, 기본 2000·상한 5000).
-- transport 요청 계측 metadata `transport_http_*`·`transport_server_*`(Server-Timing app·sql)를 상태 op와 feature 적재
-  asset에 싣는다.
+- transport 요청 계측 metadata `transport_http_*`·`transport_server_*`(Server-Timing app·sql)를 상태 op 성공·건너뜀·혼합
+  결과와 feature 적재 asset 성공·terminal 실패 metadata에 싣고, 그 밖의 실패는 경고 log 한 줄로 남긴다.
 
 ## 2026-11-24 — n150 Dagster 전체 freeze 도구(수집 실패 감사 §4 #10·#11)
 

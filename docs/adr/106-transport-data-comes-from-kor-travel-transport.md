@@ -55,9 +55,9 @@
    network에서 `http://127.0.0.1:14001`로 부른다. 404는 설정 누락(`ProviderCredentialMissing`, 요청 전)과
    가른다 — `TransportExportHidden`(`failure_kind=transport_hidden`: token·접속 주소·버전 중 하나).
 6. **신선도 계약 — 두 겹, 모든 dataset.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면 503을
-   낸다(transport ADR-013: 주유소 24시간, 휴게소 3일, 휴게소 유가 12시간, 돌발 30분). Map은 그것만 믿지 않는다:
+   낸다(transport ADR-013: 주유소 24시간 — transport #277 뒤 export 유예 27.5시간 —, 휴게소 3일, 휴게소 유가 12시간, 돌발 30분). Map은 그것만 믿지 않는다:
    - 매 페이지 `collection`(`last_success_at`·`failed`·`stale`)을 엄격히 읽고 하나라도 어긋나면
-     `TransportExportNotCurrent`(`transport_not_current`)로 실패한다. 503도 같은 예외다.
+     `TransportExportNotCurrent`(`transport_not_current`)로 실패한다. code 없는 503도 같은 예외다(code 503은 아래 2026-11-24 개정 절).
    - 완전 snapshot export(주유소·휴게소·휴게소 유가)가 끝까지 0건이면 `TransportExportEmpty`
      (`transport_empty`)로 실패한다 — 0건을 전량 삭제로 읽지 않는다. 휴게소 수집이 꺼진 transport
      (`REST_AREA_COLLECTION_ENABLED=false`)는 이력이 없어 503이므로 삭제로 번지지 않는다.
@@ -69,7 +69,7 @@
      넓혔다)하고, 페이지 수 상한과 이미 본 cursor
      집합으로 cursor 순환을 잡는다. 재시도 예산은 **run 하나에 하나**다(2026-10-04 정정 — 처음 구현은
      fetcher 호출마다 새 예산이었다): asset step과 큐 run이 `upstream_retry.sharing_run_retry_budget`을 연다.
-   - 분류(2026-10-04): 503·`collection` 어긋남은 `retryable=True`인 step 실패다(HTTP 층에서는 바로 다시
+   - 분류(2026-10-04, code 503은 2026-11-24 개정 절이 대체): code 없는 503·`collection` 어긋남은 `retryable=True`인 step 실패다(HTTP 층에서는 바로 다시
      부르지 않고 `RetryPolicy`가 step을 다시 돈다). 공항 0건은 `transport_empty`, JSON이 아닌 본문은
      `transport_malformed_upstream`이다. 나머지(`transport_hidden`·`transport_empty`·`transport_contract`·
      `transport_malformed_upstream`)는 `retryable=False`이고 asset 경계가 `Failure(allow_retries=False)`로 바꿔
@@ -129,37 +129,51 @@ OpiNet/KREX 키 제거)를 **같은 rotation**에서 → C7. Manager만 먼저 �
 
    | code | Map 예외(`failure_kind`) | HTTP 층 | step 재시도 | run |
    |------|--------------------------|---------|-------------|-----|
-   | `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET` | `TransportSourceNotCurrent`(code별 `transport_source_not_current` 등), `retryable=False` | 다시 묻지 않는다 | 없다(다음 schedule tick) | **실패** |
-   | `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | `TransportExportBusy`(`transport_busy` 등) | 같은 요청을 4회까지, 대기 `max(5·10·20초, Retry-After)`, run 재시도 예산 공유 | 다 쓰면 있다(종전 503과 같다) | 다 쓰면 실패 |
-   | 위 경합 code인데 `Retry-After` > 60초(HTTP 층 한 번 대기 상한 `_TRANSPORT_RETRY_AFTER_CAP_SECONDS`) | `TransportExportBusy`, `retryable=False`(`retry_after_exceeds_cap`) | 기다리지 않는다(경고 log) | 없다 | **실패** |
+   | `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET` | `TransportSourceNotCurrent`(code별 `transport_source_not_current` 등), 예외는 `retryable=True` | 다시 묻지 않는다 | feature 적재: 있다 / 상태 job: 없다(나이 기준 혼합) | 아래 혼합 |
+   | `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | `TransportExportBusy`(`transport_busy` 등) | 첫 요청 포함 4번(다시 묻기 3번), 대기 `max(5·10·20초 ±20%, Retry-After)`, run 재시도 예산 공유 | 다 쓰면 feature 적재: 있다 / 상태 job: 없다(혼합) | 아래 혼합 |
+   | 위 경합 code인데 `Retry-After` > 60초(HTTP 층 한 번 대기 상한 `_TRANSPORT_RETRY_AFTER_CAP_SECONDS`) | `TransportExportBusy`, `retry_after_exceeds_cap=True`, `retryable=True` | 기다리지 않는다(경고 log) | 위와 같다 — 상태 job은 `outcome=upstream_busy_over_cap` | 아래 혼합 |
    | `EXPORT_DISABLED`·`EXPORT_TOO_LARGE` | `TransportExportDisabled`(`transport_export_disabled`)·`TransportExportTooLarge`(`transport_export_too_large`), `retryable=False` | 다시 묻지 않는다 | 없다 — 설정·데이터가 바뀌기 전에는 결정적으로 같다 | **실패** |
    | `EXPORT_SOURCE_INCONSISTENT` | `TransportSourceInconsistent`(`transport_source_inconsistent`), `retryable=True` | 다시 묻지 않는다 | 있다 — transport의 다음 수집·준비가 고친다 | 다 쓰면 실패 |
-   | 없음·모르는 code(공통 표준이 모든 5xx에 붙일 `SERVICE_UNAVAILABLE` 등)·모양이 틀린 code | `TransportExportNotCurrent`(`transport_not_current`), `retryable=True` | 다시 묻지 않는다 | 있다 | 종전 |
+   | 없음·모르는 code(공통 표준이 모든 5xx에 붙일 `SERVICE_UNAVAILABLE` 등, T4 전용 `EXPORT_QUERY_TIMEOUT`)·모양이 틀린 code | `TransportExportNotCurrent`(`transport_not_current`), `retryable=True` | 다시 묻지 않는다 | 있다 | 종전 |
 
-   - **상한 규칙은 값으로 정해지는 유일한 분기다.** transport `EXPORT_PREPARE_TIMEOUT`의 기본 `Retry-After`는 지금
+   - **나이 기준 혼합(소유자 결정 2026-11-24, Valkey 상태 job)**: 근거 수집 미현재 code 503과, HTTP 층에서 풀리지
+     않은 경합 503(재시도 소진·대기 상한 초과)이면 **서비스 세대의 원천 나이**(`served_source_collected_at` →
+     지금, 원천 시각이 없는 공항은 적재·재확인 시각)를 데이터셋별 경고 기준과 견준다. 기준 안이면 **초록**
+     (`skipped=upstream_not_ready`, 세대 유지, step 재시도 없음), 넘었거나 서비스 세대가 없으면 **빨강**(재시도 없는
+     `Failure`). 둘 다 metadata에 `outcome`(`upstream_source_not_current`·`upstream_busy_exhausted`·
+     `upstream_busy_over_cap`)·`upstream_state=not_ready`·`transport_problem_code`·`transport_retry_after_seconds`(없으면
+     key 없음)·`served_generation`·`served_source_collected_at`·`served_age_seconds`·`stale_alert_after_seconds`·
+     `stale_alert`(=빨강)과 요청 계측을 싣는다(이름은 #1542 `upstream_signal`과 같다). 기준(settings, 각각 읽기 stale
+     기준 `max_age`보다 작다 — 데이터가 stale로 보이기 전에 빨강이 먼저 난다): 주유소 16시간(유가 수집 주기 두 번),
+     휴게소 유가 8시간, 고속도로 돌발 20분(5분 수집 한두 번의 실패는 초록), 휴게소·공항 2일. env
+     `KOR_TRAVEL_MAP_TRANSPORT_STATE_<DATASET>_ALERT_AFTER_SECONDS`. 운영 근거로 조정한다.
+   - **feature 적재 asset(주·월 1회 PG)은 혼합을 쓰지 않는다** — 운 나쁜 tick 하나가 한 주를 잃지 않게 step 재시도
+     (60·180·420초)를 쓰고, 다 쓰면 실패한다(운영자는 transport 수집이 회복된 뒤 다시 실행한다).
+   - **대기 상한 규칙은 값으로 정해지는 유일한 분기다.** transport `EXPORT_PREPARE_TIMEOUT`의 기본 `Retry-After`는 지금
      상한과 같은 60초라 기다린다(같으면 기다린다). transport가 그 값을 60초 위로 올리면 준비 시간 초과 503은 기다림
-     없이 재시도 없는 실패로 바뀐다 — 그 값을 바꾸는 transport 변경은 Map 상한을 같이 올려야 한다.
+     없이 `upstream_busy_over_cap`(상태 job)·step 재시도(feature 적재)로 간다 — 그 값을 바꾸는 transport 변경은 Map
+     상한을 같이 올려야 한다.
+   - 상태 job의 HTTP 층 재시도 시간(실패한 시도 + 대기)은 run 상한 × 0.25 안이다(`RETRY_TIME_SHARE` — 돌발 480초 →
+     120초) — 그 상한을 넘길 대기는 하지 않는다.
    - `EXPORT_DISABLED`는 code 없는 옛 transport에서는 종전 503(step 재시도 뒤 실패)이었다. code가 붙으면 재시도
-     없이 바로 실패한다. `EXPORT_SOURCE_INCONSISTENT`를 terminal로 두지 않는 이유: 몇 시간짜리 stale과 달리
-     transport 쪽 일시 불일치이고 다음 준비가 고친다 — 헛걸음이 생겨도 step 재시도 몇 번으로 run 하나 안에서 끝난다.
-
-   - **run을 초록으로 건너뛰지 않는다.** Map에는 상류 장애 경보가 따로 없다 — 11월 주유소 export 503 16.6시간
-     동안 빨간 run이 유일한 신호였다. 이 개정은 같은 503을 다시 묻는 낭비만 끈다. 상태 job은 실패 metadata에
-     `outcome=skipped_upstream_not_current`·`transport_problem_code`·`transport_retry_after_seconds`·
-     `served_generation`·`last_success_at`(서비스 세대의 원천 수집 시각)·`served_age_seconds`를 싣고 세대는
-     그대로 둔다. 초록 건너뛰기는 서비스 세대 나이 경보(데이터셋 `max_age`)가 함께 생길 때만 쓴다.
-   - 실패 metadata 정본: 상태 job은 `transport_state._upstream_not_current_failure`, feature 적재 asset은
+     없이 바로 실패한다. `EXPORT_SOURCE_INCONSISTENT`를 terminal로 두지 않는 이유: 다음 정기 수집을 기다리는 stale과
+     달리 transport 쪽 일시 불일치이고 다음 준비가 고친다.
+   - 실패 metadata 정본: 상태 job은 `transport_state._upstream_hold_outcome`, feature 적재 asset은
      `quota_exhaustion.raise_terminal_if_transport_unrecoverable`(`transport_problem_code`·
-     `transport_retry_after_seconds`를 더했다).
-2. **HTTP 층 재시도 범위**(MC-03). 전송 오류·408·429·500·502·504를 같은 요청으로 2회까지(15초 기준 지수, 429는
+     `transport_retry_after_seconds`·요청 계측). 그 밖의 실패는 요청 계측을 경고 log 한 줄로 남긴다.
+2. **HTTP 층 재시도 범위**(MC-03). 전송 오류·408·429·500·502·504를 같은 요청으로 첫 요청 포함 2번까지(15초 기준 지수, 429는
    `Retry-After`를 하한으로, 60초를 넘으면 다시 묻지 않고 step 재시도에 맡긴다). 400·422는
-   `transport_request_rejected`(`retryable=False`). 다시 보내는 것은 언제나 **같은 요청(같은 cursor)**이다 — 순회를
+   `transport_request_rejected`(`retryable=False`). **500은 #277 전 transport 호환용**이다(그때는 일시 DB 오류가
+   500이었다) — #277이 n150에 배포되고 한 회전 동안 실패 metadata에 500이 없으면 뺀다. 다시 보내는 것은 언제나 **같은 요청(같은 cursor)**이다 — 순회를
    이어 가는 step 재시도는 두지 않는다. 다시 받은 페이지도 transport가 그 요청 시점에 따로 판정한 200이어야 하고,
    그 사이 근거 수집이 현재가 아니게 됐으면 code 503으로 run 전체가 실패한다(transport ADR-013 결정 3).
 3. **바뀌지 않은 집합은 다시 받지 않는다**(MC-04·G1-F7(a)·G3-03, Valkey 상태 job 주유소·휴게소 유가만).
    첫 페이지의 `collection.last_success_at`이 서비스 세대의 `source_collected_at`과 같고 그 세대를 적재한 지
    6시간이 안 됐으면 나머지 페이지와 교체를 건너뛴다(`skipped=unchanged`, run 성공). 판단은 첫 페이지 하나로만
-   한다. 6시간마다 한 번은 전량을 받는다 — T1 `admin` 주소는 주소 job으로 `last_success_at` 없이 바뀐다.
+   한다. 6시간마다 한 번은 전량을 받는다 — T1 `admin` 주소는 주소 job으로 `last_success_at` 없이 바뀐다. 주기는
+   마지막 전량 순회의 **시작** 시각(`full_synced_at`)부터 잰다(교체 시각이면 매시 tick에서 7시간마다가 된다). 그
+   시각이 미래면(시계 역행) 전량을 받는다. Map 변환을 고친 뒤에는 run config `force_full_walk: true`로 한 번
+   전량을 받는다(상태 키 schema 버전을 올리는 변경은 세대가 없어져 저절로 전량이다).
    PG feature 적재(주 1회)는 대상이 아니다.
 4. **page size**(MC-10). 현재 집합 export(`KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_PAGE_SIZE`)는 이미 transport
    상한 1000까지 받는다 — 기본 500은 운영 실측 전이라 그대로 둔다. 기준정보 snapshot(철도역·항구)은 별도
