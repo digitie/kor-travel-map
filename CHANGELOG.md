@@ -10,6 +10,10 @@
 - 큐 worker run: executor가 이미 `failed`로 닫은 generation은 정리 중 연결 오류가 나도 run을 실패로 끝낸다(종전에는 SUCCESS로 보이고 실패 알림이 없었다).
 - OpenAPI·migration 변경 없음.
 
+## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)
+
+- `ops.ops_live_topic_revisions`(provider_sync·dataset_projection·dagster_schedules)를 원본 write 시점이 아니라 그 transaction의 commit 직전에 올린다(alembic `458_live_topic_commit_bump`, 새 표 `ops.ops_live_topic_pending`). 긴 적재가 주소 finding·sync state를 쓴 뒤 commit까지 topic 행을 쥐어 PinVi POI target PUT/DELETE(503)·다른 큐 요청이 막히던 것을 없앤다. 값은 topic을 바꾼 commit당 1씩 오른다. POI target receipt(`meta.dataset_projection_revision`) 의미와 OpenAPI는 그대로다.
+
 ## 2026-11-24 — n150 Dagster 전체 freeze 도구(수집 실패 감사 §4 #10·#11)
 
 - `scripts/n150/dagster-freeze.py status|freeze|unfreeze --snapshot <절대 경로> [--resume] [--dry-run] [--accept-missing]`: Map code location의 RUNNING schedule·sensor 전체를 스냅샷 뒤 멈추고 Map run 0까지 기다린다(run-status sensor는 run이 빠지고 tick이 따라잡은 뒤 마지막에), 스냅샷의 RUNNING만 되돌린다. 옛 `~/freeze.py`(두 instigator만 정지)를 대신한다. R4 runbook 2·9단계가 이것을 쓴다.

@@ -68,3 +68,11 @@ DELETE의 `FOR UPDATE`와 직렬화되며, delete가 먼저 끝난 inactive pare
   `data.live_revision >= mutation receipt`를 단언한다. snapshot과 top-level fingerprint revision은
   비교하지 않는다. DELETE는 update PUT 응답의 최신 `entity_tag`를 그대로 보내며 fresh GET으로
   대체하지 않는다.
+
+## 개정 (2026-11-24, alembic 458)
+
+topic 증가가 statement 시점에서 commit 직전으로 옮겨졌다(`docs/architecture/data-model.md` §9.13). 원본 statement
+trigger는 표식만 남기므로, PUT/DELETE는 receipt를 읽기 전에 `SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply
+IMMEDIATE`로 자기 표식을 먼저 적용하고 읽은 뒤 `DEFERRED`로 되돌린다(`get_dataset_projection_revision`). 적용한
+topic 행을 그 transaction이 commit까지 쥐므로 "`live_revision >= receipt`이면 그 mutation이 commit돼 보인다"는
+결정은 그대로다. 값은 statement당이 아니라 topic을 바꾼 commit당 1씩 오른다 — receipt 비교는 크기 비교라 영향이 없다.

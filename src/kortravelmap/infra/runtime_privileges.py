@@ -278,6 +278,8 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "offline_upload_command_executions": _ORDINARY_OPS,
     "offline_uploads": _ORDINARY_OPS,
     "ops_live_ticket_claims": _ORDINARY_OPS,
+    # 458: topic 증가 표식. 원본 statement trigger가 쓰고 commit 직전 trigger가 지운다.
+    "ops_live_topic_pending": ("SELECT", "INSERT", "DELETE"),
     "ops_live_topic_revisions": _ORDINARY_OPS,
     "pipeline_cancellation_members": _ORDINARY_OPS,
     "pipeline_cancellation_runs": _ORDINARY_OPS,

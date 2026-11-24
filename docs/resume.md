@@ -22,6 +22,13 @@
   cache target `poi_cache_targets` 갱신은 alembic 458(#1548) 전까지 live topic 행을 기다릴 수 있다 — 후처리 시도
   마감(ADR-112 규칙으로 `lock_timeout` 4초)이 그 대기를 끊는다.
 
+## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)·10-22 큐 상황 재현
+
+- 긴 큐 적재가 topic 원본(주소 finding·override finding·sync state)을 써도 `ops_live_topic_revisions` 행을 commit 직전까지만
+  쥔다. PinVi POI target PUT/DELETE·다른 요청 resolve가 막히지 않는다. 10-22 재현 12/12 done. OpenAPI 변경 없음.
+- 다음: n150 회전(api 이미지 `alembic upgrade head` 457·458, R4 뒤) 뒤 `SELECT count(*) FROM ops.ops_live_topic_pending`이
+  정확히 0인지(미commit 표식은 다른 연결에 보이지 않는다 — 0보다 크면 누수), 관리자 live 화면 갱신과 POI target PUT의 `dataset_projection_revision`이 도는지 확인.
+
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영
 
 - `scripts/n150/dagster-freeze.py` `status|freeze [--resume]|unfreeze --snapshot <절대 경로>`(Map location 전체, run 0·run-status

@@ -11680,6 +11680,58 @@ $$;
 ALTER PROCEDURE ops.append_provider_feature_attempt_event_command(IN p_dagster_run_id text, IN p_provider_dataset_id bigint, IN p_sync_scope text, IN p_operation_key text, IN p_attempt_number integer, IN p_outcome text, IN p_error jsonb, OUT o_event_id uuid, OUT o_job_id uuid, OUT o_import_job_dataset_id uuid, OUT o_stage text, OUT o_level text, OUT o_code text, OUT o_message text, OUT o_payload jsonb, OUT o_occurred_at timestamp with time zone) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: apply_ops_live_topic_pending(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION ops.apply_ops_live_topic_pending() RETURNS trigger
+    LANGUAGE plpgsql
+    AS $$
+        DECLARE
+          v_txid bigint := pg_current_xact_id()::text::bigint;
+          v_topic text;
+        BEGIN
+          IF NOT NEW.ready THEN
+            -- 한 번만 줄 맨 뒤로 보낸다. deferred 발화는 사건 순서라, 표식이 쓰기 중간에
+            -- 생겼으면 그 뒤에 쌓인 다른 deferred 검사(쓰기 행 수만큼)가 표식 적용 **뒤에**
+            -- 돌며 topic 행을 그만큼 더 쥐게 한다. 다시 넣은 표식의 사건은 그 검사들 뒤에 온다.
+            DELETE FROM ops.ops_live_topic_pending AS pending
+             WHERE pending.txid = NEW.txid
+               AND pending.topic = NEW.topic
+               AND NOT pending.ready;
+            IF FOUND THEN
+              INSERT INTO ops.ops_live_topic_pending (txid, topic, ready)
+              VALUES (NEW.txid, NEW.topic, true)
+              ON CONFLICT (txid, topic) DO NOTHING;
+            END IF;
+            RETURN NULL;
+          END IF;
+          -- 이 transaction의 표식을 topic 이름 순서로 한꺼번에 적용한다. 순서가 고정이라
+          -- commit 단계의 증가끼리 교착하지 않는다. 첫 적용이 전부 처리하고 지우므로 같은
+          -- transaction의 나머지 발화는 할 일이 없다.
+          FOR v_topic IN
+            SELECT pending.topic
+              FROM ops.ops_live_topic_pending AS pending
+             WHERE pending.txid = v_txid
+             ORDER BY pending.topic COLLATE "C"
+          LOOP
+            INSERT INTO ops.ops_live_topic_revisions AS live_revision (
+              topic, revision, updated_at
+            )
+            VALUES (v_topic, 1, clock_timestamp())
+            ON CONFLICT (topic) DO UPDATE
+            SET revision = live_revision.revision + 1,
+                updated_at = clock_timestamp();
+          END LOOP;
+          DELETE FROM ops.ops_live_topic_pending AS pending
+           WHERE pending.txid = v_txid;
+          RETURN NULL;
+        END;
+        $$;
+
+
+ALTER FUNCTION ops.apply_ops_live_topic_pending() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: assert_feature_update_job_pair(uuid); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
@@ -11807,15 +11859,11 @@ CREATE FUNCTION ops.bump_ops_live_topic_revision() RETURNS trigger
           IF TG_NARGS <> 1 OR btrim(TG_ARGV[0]) = '' THEN
             RAISE EXCEPTION 'ops live revision trigger requires one topic argument';
           END IF;
-          INSERT INTO ops.ops_live_topic_revisions AS live_revision (
-            topic,
-            revision,
-            updated_at
-          )
-          VALUES (TG_ARGV[0], 1, clock_timestamp())
-          ON CONFLICT (topic) DO UPDATE
-          SET revision = live_revision.revision + 1,
-              updated_at = clock_timestamp();
+          -- topic 행은 commit 직전에 올린다(trg_ops_live_topic_pending_apply). 여기서 행을
+          -- 올리면 이 transaction이 끝날 때까지 그 topic의 다른 writer가 모두 기다린다.
+          INSERT INTO ops.ops_live_topic_pending (txid, topic)
+          VALUES (pg_current_xact_id()::text::bigint, TG_ARGV[0])
+          ON CONFLICT (txid, topic) DO NOTHING;
           RETURN NULL;
         END;
         $$;
@@ -17068,7 +17116,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text, '455_feature_cluster_points'::text, '456_feature_update_retry'::text, '457_event_clock_slots'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text, '455_feature_cluster_points'::text, '456_feature_update_retry'::text, '457_event_clock_slots'::text, '458_live_topic_commit_bump'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -18651,6 +18699,20 @@ CREATE TABLE ops.ops_live_ticket_claims (
 
 
 ALTER TABLE ops.ops_live_ticket_claims OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: ops_live_topic_pending; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE ops.ops_live_topic_pending (
+    txid bigint NOT NULL,
+    topic text NOT NULL,
+    ready boolean DEFAULT false NOT NULL,
+    CONSTRAINT ck_ops_live_topic_pending_topic CHECK (((btrim(topic) <> ''::text) AND (char_length(topic) <= 100)))
+);
+
+
+ALTER TABLE ops.ops_live_topic_pending OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: ops_live_topic_revisions; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -20587,6 +20649,14 @@ ALTER TABLE ONLY ops.offline_uploads
 
 ALTER TABLE ONLY ops.ops_live_ticket_claims
     ADD CONSTRAINT pk_ops_live_ticket_claims PRIMARY KEY (nonce_hash);
+
+
+--
+-- Name: ops_live_topic_pending pk_ops_live_topic_pending; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY ops.ops_live_topic_pending
+    ADD CONSTRAINT pk_ops_live_topic_pending PRIMARY KEY (txid, topic);
 
 
 --
@@ -23810,6 +23880,13 @@ CREATE TRIGGER trg_offline_upload_command_executions_no_delete BEFORE DELETE OR 
 --
 
 CREATE TRIGGER trg_offline_uploads_active_dataset_write BEFORE INSERT OR DELETE OR UPDATE ON ops.offline_uploads FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_offline_upload_membership();
+
+
+--
+-- Name: ops_live_topic_pending trg_ops_live_topic_pending_apply; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+CREATE CONSTRAINT TRIGGER trg_ops_live_topic_pending_apply AFTER INSERT ON ops.ops_live_topic_pending DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION ops.apply_ops_live_topic_pending();
 
 
 --
@@ -28605,6 +28682,13 @@ GRANT SELECT ON TABLE ops.mcst_theme_transition_batches TO ktm_manual_provider_d
 --
 
 GRANT SELECT ON TABLE ops.mcst_theme_transition_items TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: TABLE ops_live_topic_pending; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT,INSERT,DELETE ON TABLE ops.ops_live_topic_pending TO ktm_feature_runtime;
 
 
 --
