@@ -266,7 +266,8 @@ _OPS_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "feature_update_request_idempotency": _ORDINARY_OPS,
     "feature_update_requests": _ORDINARY_OPS,
     "import_job_datasets": _ORDINARY_OPS,
-    "import_job_event_clock": _ORDINARY_OPS,
+    # 457: event clock slot. guard trigger가 event trigger 밖의 쓰기·DELETE를 막는다.
+    "import_job_event_clock_slots": _ORDINARY_OPS,
     "import_job_events": _ORDINARY_OPS,
     "import_jobs": _ORDINARY_OPS,
     "integrity_finding_observations": _ORDINARY_OPS,

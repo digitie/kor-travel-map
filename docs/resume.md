@@ -1,10 +1,18 @@
+## 2026-11-24 — import job event clock slot화(alembic 457)
+
+- 긴 적재 transaction이 event를 쓴 채 머물러도 다른 요청·job의 event 기록이 기다리지 않는다(`SKIP LOCKED` slot,
+  reader는 slot 합). 10-22 큐 요청 lock timeout의 원인 제거. OpenAPI 변경 없음, migration 457(표 교체·값 이관).
+- 다음: n150 회전(api 이미지가 `alembic upgrade head` 457) 때 event를 쓴 채 도는 긴 적재가 없을 때 올린다(있으면 1초
+  lock timeout으로 실패 — 데이터 변화 없음, 적재 뒤 재시도). 회전 뒤 `SELECT count(*), sum(revision) FROM
+  ops.import_job_event_clock_slots`가 1행 이상·합이 옛 revision(425) 이상인지, 관리자 실행 화면 live 갱신이 도는지 확인.
+  회전 직전 `SELECT count(*) FROM pg_locks WHERE relation = 'ops.import_job_event_clock'::regclass AND mode = 'RowExclusiveLock'`가 0이어야 한다.
 ## 2026-11-24 — 큐 요청 일시 실패 재발행·상한·실패 원인 기록(감사 §4 #15, alembic 456)
 
 - 일시 DB 실패(lock timeout·serialization·deadlock·연결)와 시작 전 실패는 backoff(60초 × 2^n, jitter) 재발행, 5회 뒤 `failed`.
   모든 종결이 분류·원인·실패 단계·Dagster run id를 import job event에 남기고, 관리자 실행 상세가 그것을 보여 준다.
   operation root `dagster_run_terminal`에 실패 step·오류를 더했다. migration 456(열 둘), OpenAPI 변경 없음.
 - 다음: n150 회전(api·dagster-code-server·ui 이미지, `alembic upgrade head` 456) 뒤 실패한 큐 요청의 이벤트·`error_message`와
-  `retry_count`를 확인. `import_job_event_clock` 단일 행 경합은 별도 과제로 남는다.
+  `retry_count`를 확인. `import_job_event_clock` 단일 행 경합은 alembic 457(event clock slot)이 없앤다.
 ## 2026-11-24 — 다건 호출 provider 호출 단위 재시도·쿼터 결과 코드 분류(감사 §4 #15)
 
 - 국가유산·산림청·TourAPI·서울 책방·표준 공개 파일·concierge·MCST·MOIS LOCALDATA·KHOA가 페이지·달·상세·slug·업종

@@ -149,7 +149,7 @@ __all__ = [
     "ImportJobDatasetRow",
     "C6cCancelProbeFixtureRow",
     "ImportJobEventRow",
-    "ImportJobEventClockRow",
+    "ImportJobEventClockSlotRow",
     "OfflineUploadRow",
     "FeatureOverrideFieldPathRow",
     "FeatureBaseFieldValueRow",
@@ -5216,27 +5216,31 @@ class ImportJobEventRow(Base):
 
 
 # =============================================================================
-# ops.import_job_event_clock  (0052 live revision projection)
+# ops.import_job_event_clock_slots  (457 live revision projection, 0052 singleton 대체)
 # =============================================================================
 
 
-class ImportJobEventClockRow(Base):
-    """Event DML commit을 누락 없이 감지하는 singleton revision projection."""
+class ImportJobEventClockSlotRow(Base):
+    """Event DML commit을 누락 없이 감지하는 revision slot. 읽는 값은 ``SUM(revision)``이다.
 
-    __tablename__ = "import_job_event_clock"
+    event AFTER STATEMENT trigger가 다른 transaction이 잡지 않은 slot에 statement당 1을 더한다
+    (``FOR UPDATE SKIP LOCKED``) — 긴 transaction이 slot 하나를 쥐어도 다른 event 기록은 기다리지
+    않는다. 직접 쓰기·DELETE·TRUNCATE는 guard trigger가 거부한다(alembic 457).
+    """
+
+    __tablename__ = "import_job_event_clock_slots"
     __table_args__ = (
-        CheckConstraint("clock_id", name=conv("ck_import_job_event_clock_singleton")),
         CheckConstraint(
             "revision >= 0",
-            name=conv("ck_import_job_event_clock_revision_nonnegative"),
+            name=conv("ck_import_job_event_clock_slots_revision_nonnegative"),
         ),
         {"schema": "ops"},
     )
 
-    clock_id: Mapped[bool] = mapped_column(
-        Boolean,
+    slot_id: Mapped[int] = mapped_column(
+        Integer,
+        Identity(always=True),
         primary_key=True,
-        server_default=text("true"),
     )
     revision: Mapped[int] = mapped_column(
         BigInteger,

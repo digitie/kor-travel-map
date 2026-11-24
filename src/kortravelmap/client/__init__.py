@@ -2144,9 +2144,9 @@ class AsyncKorTravelMapClient:
           죽음)은 원인을 모르므로 재발행하지 않고 ``failed``로 닫고 PinVi relay에도 ``failed``를
           낸다.
 
-        상태 전이와 event 기록은 **다른 transaction**이다 — event INSERT가 잡는 전역 event clock
-        행의
-        경합이 상태 전이를 막지 않게 한다. event 기록이 실패하면 상태는 이미 맞고 경고만 남긴다.
+        상태 전이와 event 기록은 **다른 transaction**이다 — event 기록의 일시
+        실패(lock·연결)가 상태 전이를 막지 않게 한다(전역 event clock 단일 행 경합은
+        alembic 457이 없앴다). event 기록이 실패하면 상태는 이미 맞고 경고만 남긴다.
         상태가 맞지 않으면(executor가 이미 종결·재발행했다, 취소됐다 등) ``None``.
         """
         message = error_message or "Dagster feature update worker run failed"

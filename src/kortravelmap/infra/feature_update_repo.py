@@ -92,7 +92,8 @@ FEATURE_UPDATE_MAX_RETRIES: Final[int] = 5
 #: 재발행 대기의 지수 backoff — ``min(상한, 기준 × 2^재시도 횟수)``에 ``[0.5, 1.0)`` jitter를
 #: 곱한다.
 #: 60초·2·4·8·16분(jitter 전) — 다섯 번을 다 쓰면 약 31분이다. lock 경합(긴 적재 transaction이
-#: event clock 행을 쥔 채 수 분)과 launch 실패(code-server fd 고갈) 모두 분 단위로 풀린다.
+#: 쥔 행 — 10-22의 event clock 단일 행은 alembic 457이 없앴다)과 launch 실패(code-server fd
+#: 고갈) 모두 분 단위로 풀린다.
 FEATURE_UPDATE_RETRY_BASE_DELAY_SECONDS: Final[float] = 60.0
 FEATURE_UPDATE_RETRY_MAX_DELAY_SECONDS: Final[float] = 1800.0
 _RUN_MODES: Final[frozenset[str]] = frozenset({"queued", "now"})
@@ -583,7 +584,9 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
 #: 1. ``ops.import_job_datasets`` INSERT의 FK가 scope 행에 ``FOR KEY SHARE``를
 #:    건다 — 공유 lock이라 두 transaction이 동시에 보유한다.
 #: 2. ``ops.import_job_events`` INSERT의 statement trigger가 전역 singleton
-#:    ``ops.import_job_event_clock`` 행을 commit까지 배타 점유한다.
+#:    ``ops.import_job_event_clock`` 행을 commit까지 배타 점유했다(alembic 457 전 —
+#:    지금은 ``import_job_event_clock_slots``의 잡히지 않은 slot을 ``SKIP LOCKED``로
+#:    고르므로 이 단계에서 기다리지 않는다. scope lock을 먼저 잡는 순서는 그대로 둔다).
 #: 3. request membership INSERT의 overlap trigger
 #:    (``assert_feature_update_request_member_available``)가 같은 scope 행을
 #:    ``FOR UPDATE``로 **승격**한다 — 상대의 KEY SHARE 때문에 대기한다.

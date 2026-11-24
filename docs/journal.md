@@ -1,3 +1,26 @@
+## 2026-11-24 — import job event clock을 slot으로 나눔(감사 §1.2·#1544 남은 구조 문제, alembic 457)
+
+- 근거(n150 Map DB 읽기 전용 조회): 10-22 큐 요청 12건 중 8건이 `LockNotAvailableError` + `INSERT INTO
+  ops.import_job_events`로 끝났다. 8건 모두 04:55~05:04Z claim 직후 약 30초(Dagster 엔진 `lock_timeout`)에 실패했고,
+  04:47:51~06:04:08Z 76분 동안 refresh transaction을 연 앞 요청(04:47:52Z `job.heartbeat` event를 쓰고 같은 transaction에서
+  적재)과 정확히 겹친다. 전역 singleton `ops.import_job_event_clock`의 row lock이 commit까지 남은 탓이다. 공용 PG에
+  `pg_stat_statements`는 없고(`log_lock_waits=on`), 컨테이너 로그는 11-23 재시작 이후뿐이라 그 창의 lock wait 로그는 없다.
+- 457: `ops.import_job_event_clock_slots`(identity slot). event statement trigger가 다른 transaction이 잡지 않은 가장 작은
+  slot을 `FOR UPDATE SKIP LOCKED`로 골라 +1, 모두 잡혀 있으면 새 slot. reader(`/v1/ops/live` `event_clock_revision`)는
+  `SUM(revision)` — 의미·값이 종전과 같다(commit된 event statement 수, 옛 값은 slot 1로 이관). guard는 trigger 밖
+  INSERT/UPDATE/DELETE/TRUNCATE 거부. migration은 옛 표를 ACCESS EXCLUSIVE로 잡아(1초) 진행 중인 event transaction이
+  없을 때만 값을 옮긴다. 후보 비교(sequence·별도 transaction·지연 잡기·job별 행)는 `data-model.md` §9.1.1 event clock.
+- 시험: integration `test_import_job_event_clock_slots.py` — 긴 event transaction 중 다른 job event가 `lock_timeout` 2초
+  아래서 기다리지 않음(main 456에서는 55P03), late commit·rollback·UPDATE statement 감지, slot 수 상한, guard,
+  `ktm_curation_command_owner`의 새 slot, 456→457 이관(진행 중 writer면 lock timeout으로 거부).
+- 적대 리뷰 2인 반영: ① migration이 `ktm_feature_runtime`에 새 표 권한을 직접 준다(별도 process인 ACL 조정 전
+  창에서 runtime event 기록이 42501로 전부 실패하던 것 — 실측). ② transaction이 처음 고른 slot을 transaction-local
+  설정에 기억해 다시 쓴다(긴 transaction이 더 낮은 slot을 계속 쥐어 동시 3개에 slot 5개가 되던 것). ③ guard 시험은
+  23514만 받고 TRUNCATE는 소유자로, slot 시험에 `lock_timeout`(회귀 시 10분 hang 대신 2초 실패).
+- 남은 것: `ops.ops_live_topic_revisions`(provider_sync·dataset_projection·dagster_schedules)도 같은 singleton 꼴이지만
+  432 snapshot 잠금 순서와 ADR-065 causal receipt에 묶여 있어 이번에 바꾸지 않았다. 큐 경로에서는 cache target 요청의
+  `poi_cache_targets` 갱신이 그 행을 잡는다.
+
 ## 2026-11-24 — 큐 요청 일시 실패 재발행·상한과 실패 원인 기록(감사 §4 #15·§1.3 P1, alembic 456)
 
 - 배경(`docs/reports/2026-11-23-collection-failure-audit.md`): ① 큐 요청은 일시 DB 오류에도 한 번에 `failed`로
