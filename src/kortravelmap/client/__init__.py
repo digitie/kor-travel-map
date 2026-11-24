@@ -341,7 +341,11 @@ from kortravelmap.infra.theme_attach_repo import (
     ThemeAttachSpec,
     load_theme_attach_bundles,
 )
-from kortravelmap.infra.transaction_limits import apply_transaction_limits
+from kortravelmap.infra.transaction_limits import (
+    apply_transaction_limits,
+    remaining_seconds,
+    transaction_deadline,
+)
 from kortravelmap.infra.venue_candidates_repo import (
     find_venue_candidates as repo_find_venue_candidates,
 )
@@ -400,12 +404,16 @@ if TYPE_CHECKING:
 
 _LOG = logging.getLogger(__name__)
 
-#: 큐 요청 상태 전이 뒤 후처리(relay ``failed``·target 실패 시각·import job event) 전체의 상한(초).
-#: failure sensor는 평가 안에서 상태 전이(``lock_timeout`` 30초)와 이것을 함께 한다 — 합이 Dagster
-#: sensor 평가 상한(기본 60초) 안이어야 한다(#1544 리뷰).
+#: 큐 요청 상태 전이 뒤 후처리(relay ``failed``·target 실패 시각·import job event) 전체의 마감(초).
+#: 호출자가 더 이른 마감을 걸었으면 그쪽을 지킨다 — failure sensor는 상태 전이와 후처리를 함께
+#: ADR-112 run-status 예산(20초) 안에 묶는다(:func:`~kortravelmap.infra.transaction_limits.
+#: transaction_deadline`, #1551 리뷰).
 _FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS: Final[float] = 20.0
-#: 후처리 문장 하나의 상한(초, transaction-local ``statement_timeout``).
-_FEATURE_UPDATE_FOLLOWUP_STATEMENT_TIMEOUT_SECONDS: Final[float] = 5.0
+#: 후처리 시도 하나의 마감(초). 시도마다 이 마감에서 ADR-112 규칙으로 서버 쪽 상한을 건다(8초면
+#: ``statement_timeout`` 5초·``lock_timeout`` 4초) — 앞 단계가 막혀도 뒤 단계에 몫이 남는다.
+_FEATURE_UPDATE_FOLLOWUP_ATTEMPT_SECONDS: Final[float] = 8.0
+#: 남은 시간이 이보다 적으면 새 시도를 시작하지 않는다(서버 쪽 ``statement_timeout``의 바닥값).
+_FEATURE_UPDATE_FOLLOWUP_MIN_ATTEMPT_SECONDS: Final[float] = 1.0
 #: 후처리 단계가 실패했을 때 한 번 더 시도하기 전의 대기(초).
 _FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS: Final[float] = 1.0
 
@@ -2163,11 +2171,17 @@ class AsyncKorTravelMapClient:
         clock 단일 행 경합은 alembic 457이 없앴다). 후처리는 단계마다 자기 transaction이고 전체가
         시간 상한 안에서 끝난다(:meth:`_record_after_state_transition`). 실패하면 상태는 이미 맞고
         경고만 남긴다. 상태가 맞지 않으면(executor가 이미 종결·재발행했다, 취소됐다 등) ``None``.
+
+        호출자가 :func:`~kortravelmap.infra.transaction_limits.transaction_deadline`으로 마감을
+        걸면(failure sensor, ADR-112) 상태 전이 transaction에도 그 마감에서 유도한 서버 쪽 상한
+        (``lock_timeout`` 5초 이하·``statement_timeout`` 남은 시간 − 3초)을 건다. 마감이 없으면
+        엔진 기본값 그대로다.
         """
         message = error_message or "Dagster feature update worker run failed"
         payload = dict(failure_payload or {})
         async with self._session_factory() as session:
             async with session.begin():
+                await apply_transaction_limits(session)
                 current = await repo_get_update_request(session, request_id)
                 if (
                     current is None
@@ -2247,6 +2261,7 @@ class AsyncKorTravelMapClient:
         message = failure.describe()
         async with self._session_factory() as session:
             async with session.begin():
+                await apply_transaction_limits(session)
                 outcome = await retry_or_fail_update_request_state(
                     session,
                     request_id,
@@ -2281,6 +2296,7 @@ class AsyncKorTravelMapClient:
             payload["stage"] = stage
         async with self._session_factory() as session:
             async with session.begin():
+                await apply_transaction_limits(session)
                 failed = await fail_update_request_state(
                     session,
                     request_id,
@@ -2392,54 +2408,53 @@ class AsyncKorTravelMapClient:
     ) -> None:
         """상태 전이 뒤의 후처리 — 단계마다 자기 transaction, 실패해도 상태는 이미 맞다.
 
-        단계마다 한 번 더 시도하고 경고만 남긴다. failure sensor는 이것을 평가 안에서 하므로 전체를
-        :data:`_FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS` 안에 끝낸다 — 상태 전이(``lock_timeout``
-        30초)와 합쳐 Dagster sensor 평가 상한(60초) 안이어야 한다(#1544 리뷰). 문장 하나의 대기는
-        ``statement_timeout``으로 묶는다. ``lock_timeout``으로는 못 묶는다 — relay stream lock
-        helper(:func:`~kortravelmap.infra.cache_target_stream_repo.lock_stream_row_or_conflict`)가
-        그 transaction의 ``lock_timeout``을 0(무제한)으로 되돌린다.
+        단계마다 한 번 더 시도하고 경고만 남긴다. 전체는
+        :data:`_FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS` 마감 안에서 끝난다 — 호출자가 더 이른
+        마감을 걸었으면(failure sensor, ADR-112 run-status 20초) 그쪽이다. 시도마다 저장소 공용
+        규칙(:func:`~kortravelmap.infra.transaction_limits.apply_transaction_limits`)으로 서버 쪽
+        상한을 건다.
+
+        서버 쪽 상한만으로는 전체 마감을 지키지 못한다. ``statement_timeout``은 문장마다 새로
+        걸리고, relay stream lock helper(:func:`~kortravelmap.infra.cache_target_stream_repo.
+        lock_stream_row_or_conflict`)는 그 transaction의 ``lock_timeout``을 0(무제한)으로 되돌린다.
+        그래서 relay 단계처럼 문장이 여럿인 시도는 문장마다 기다려 마감을 넘길 수 있다. 시도
+        하나를 그 시도의 마감에서 ``asyncio.timeout``으로 끊는다(#1551 리뷰).
         """
-        loop = asyncio.get_running_loop()
-        deadline = loop.time() + _FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS
-        for step, record in steps:
-            for attempt in (1, 2):
-                remaining = deadline - loop.time()
-                if remaining <= 0:
-                    _LOG.warning(
-                        "feature update 후처리 시간 상한 소진(상태 전이는 commit됨): "
-                        "request_id=%s step=%s",
-                        request_id,
-                        step,
-                    )
-                    break
-                timeout_ms = max(
-                    1,
-                    int(min(_FEATURE_UPDATE_FOLLOWUP_STATEMENT_TIMEOUT_SECONDS, remaining) * 1000),
-                )
-                try:
-                    async with session.begin():
-                        await session.execute(
-                            text("SELECT set_config('statement_timeout', :timeout, true)"),
-                            {"timeout": f"{timeout_ms}ms"},
-                        )
-                        await record()
-                    break
-                except Exception as exc:
-                    if attempt == 2:
+        with transaction_deadline(monotonic() + _FEATURE_UPDATE_FOLLOWUP_BUDGET_SECONDS):
+            for step, record in steps:
+                for attempt in (1, 2):
+                    remaining = remaining_seconds() or 0.0
+                    if remaining < _FEATURE_UPDATE_FOLLOWUP_MIN_ATTEMPT_SECONDS:
                         _LOG.warning(
-                            "feature update 후처리 실패(상태 전이는 commit됨): request_id=%s "
-                            "step=%s error_type=%s",
+                            "feature update 후처리 시간 상한 소진(상태 전이는 commit됨): "
+                            "request_id=%s step=%s",
                             request_id,
                             step,
-                            type(exc).__name__,
                         )
                         break
-                    await asyncio.sleep(
-                        min(
-                            _FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS,
-                            max(0.0, deadline - loop.time()),
+                    attempt_seconds = min(remaining, _FEATURE_UPDATE_FOLLOWUP_ATTEMPT_SECONDS)
+                    try:
+                        with transaction_deadline(monotonic() + attempt_seconds):
+                            async with asyncio.timeout(attempt_seconds), session.begin():
+                                await apply_transaction_limits(session)
+                                await record()
+                        break
+                    except Exception as exc:
+                        if attempt == 2:
+                            _LOG.warning(
+                                "feature update 후처리 실패(상태 전이는 commit됨): request_id=%s "
+                                "step=%s error_type=%s",
+                                request_id,
+                                step,
+                                type(exc).__name__,
+                            )
+                            break
+                        await asyncio.sleep(
+                            min(
+                                _FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS,
+                                max(0.0, remaining_seconds() or 0.0),
+                            )
                         )
-                    )
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         """Dagster sensor가 다음 queued request를 상태 변경 없이 확인한다."""

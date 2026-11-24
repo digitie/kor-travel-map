@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 from typing import TYPE_CHECKING, Any
@@ -16,6 +17,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import kortravelmap.client as client_mod
@@ -47,6 +49,7 @@ from kortravelmap.infra.feature_update_repo import (
 )
 from kortravelmap.infra.jobs_repo import ImportJobDatasetTarget
 from kortravelmap.infra.poi_cache_target_repo import upsert_poi_cache_target
+from kortravelmap.infra.transaction_limits import transaction_deadline
 from tests.integration._db_cleanup import truncate_committed_test_rows
 
 if TYPE_CHECKING:
@@ -735,21 +738,135 @@ async def test_failure_followups_survive_an_import_job_event_failure(
     assert FEATURE_UPDATE_RUN_FAILED_EVENT_CODE not in codes
 
 
+@pytest.mark.parametrize(
+    ("cutoff", "attempt_seconds", "min_attempt_seconds"),
+    [
+        # 서버 쪽: 시도 마감 2초 → statement_timeout 바닥값 1초가 head 대기를 끊는다.
+        ("server", 2.0, 1.0),
+        # client 쪽: 시도 마감(0.8초)이 statement_timeout(1초)보다 먼저 온다 — asyncio.timeout이
+        # 끊고, 같은 session으로 다음 단계가 이어져야 한다.
+        ("client", 0.8, 0.5),
+    ],
+)
+async def test_relay_followup_is_bounded_after_the_stream_helper_clears_lock_timeout(
+    migrated_engine: AsyncEngine,
+    monkeypatch: pytest.MonkeyPatch,
+    cutoff: str,
+    attempt_seconds: float,
+    min_attempt_seconds: float,
+) -> None:
+    """relay 단계의 source head 대기는 ``lock_timeout``으로 묶이지 않는다 — 시도 마감이 끊는다.
+
+    relay stream lock helper(``lock_stream_row_or_conflict``)는 stream lock을 잡은 뒤 그
+    transaction의 ``lock_timeout``을 0(무제한)으로 되돌린다. 그 뒤의 head ``FOR UPDATE``는 다른
+    transaction이 head를 쥐고 있으면 끝없이 기다린다. 시도마다 건 ``statement_timeout``과
+    ``asyncio.timeout``이 그 대기를 끊고, 다음 단계(target 실패 시각·import job event)는 그대로
+    쓴다(#1551 리뷰).
+    """
+    system = f"retry-relay-head-{cutoff}"
+    request = await _enqueue_relay_member_request(migrated_engine, system)
+    client = AsyncKorTravelMapClient(migrated_engine)
+    await _claim(migrated_engine, request.request_id, generation=request.generation, run_id="run-1")
+    monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_ATTEMPT_SECONDS", attempt_seconds)
+    monkeypatch.setattr(
+        client_mod, "_FEATURE_UPDATE_FOLLOWUP_MIN_ATTEMPT_SECONDS", min_attempt_seconds
+    )
+    monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS", 0.0)
+
+    async with AsyncSession(migrated_engine) as holder, holder.begin():
+        await holder.execute(
+            text(
+                "SELECT target_id FROM ops.poi_cache_target_source_heads "
+                "WHERE external_system = :system AND target_key = :key FOR UPDATE"
+            ),
+            {"system": system, "key": _RELAY_TARGET_KEY},
+        )
+        started_at = time.monotonic()
+        failed = await asyncio.wait_for(
+            client.fail_update_request(
+                request.request_id,
+                owner_dagster_run_id="run-1",
+                expected_request_generation=request.generation,
+                error_message="Dagster feature update worker failed — run killed",
+                failure_payload={"source": "dagster_run_failure"},
+            ),
+            timeout=30,
+        )
+        elapsed = time.monotonic() - started_at
+
+    assert failed is not None
+    assert failed.status == "failed"
+    # relay 두 시도(각 attempt_seconds 이하) + 나머지 두 단계.
+    assert elapsed < 2 * attempt_seconds + 3
+    # head를 쥔 동안 relay는 쓰지 못했다 — 상태 전이는 이미 commit돼 있다.
+    assert await _relay_statuses(migrated_engine, request.request_id) == []
+    assert await _relay_target_failed_at(migrated_engine, system) is not None
+    codes = [event["code"] for event in await _events(migrated_engine, request.job_id)]
+    assert codes.count(FEATURE_UPDATE_RUN_FAILED_EVENT_CODE) == 1
+
+
+async def test_failure_sensor_deadline_bounds_the_state_transition_lock_wait(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """failure sensor가 건 마감(ADR-112)은 상태 전이 transaction에도 서버 쪽 상한을 건다.
+
+    종전에는 상태 전이가 엔진 기본 ``lock_timeout``으로 돌아, request·job 행을 다른 transaction이
+    쥐면 행마다 30초(Dagster 엔진)씩 기다렸다(#1551 리뷰). 마감 6초면 ``lock_timeout``은
+    min(5초, 6 − 4초) = 2초다.
+    """
+    request = await _enqueue(migrated_engine, "sensor-deadline-transition")
+    client = AsyncKorTravelMapClient(migrated_engine)
+    await _claim(migrated_engine, request.request_id, generation=request.generation, run_id="run-1")
+
+    async with AsyncSession(migrated_engine) as holder, holder.begin():
+        await holder.execute(
+            text(
+                "SELECT request_id FROM ops.feature_update_requests "
+                "WHERE request_id = CAST(:request_id AS uuid) FOR UPDATE"
+            ),
+            {"request_id": request.request_id},
+        )
+        started_at = time.monotonic()
+        with (
+            transaction_deadline(time.monotonic() + 6.0),
+            pytest.raises(DBAPIError) as raised,
+        ):
+            await asyncio.wait_for(
+                client.fail_update_request(
+                    request.request_id,
+                    owner_dagster_run_id="run-1",
+                    expected_request_generation=request.generation,
+                    error_message="Dagster feature update worker failed — run killed",
+                    failure_payload={"source": "dagster_run_failure"},
+                ),
+                timeout=30,
+            )
+        elapsed = time.monotonic() - started_at
+
+    assert getattr(raised.value.orig, "sqlstate", None) == "55P03"
+    assert elapsed < 5
+    async with AsyncSession(migrated_engine) as session:
+        stored = await get_update_request(session, request.request_id)
+    assert stored is not None
+    assert stored.status == "running"
+
+
 async def test_failure_followups_are_bounded_while_a_lock_is_held(
     migrated_engine: AsyncEngine,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """상태 전이 뒤 후처리는 lock을 끝없이 기다리지 않는다 — failure sensor 평가 상한 안.
+    """상태 전이 뒤 후처리는 lock을 끝없이 기다리지 않는다 — 시도마다 마감에서 유도한 상한.
 
     target 행을 다른 transaction이 쥔 동안 RUN_FAILED 종결을 반영한다. target 실패 시각 단계는
-    문장 상한에서 포기하고, 다음 단계(import job event)는 그대로 쓴다. 상한이 없으면 이 호출은
+    ``lock_timeout``(시도 마감 1.5초 → 바닥값 0.5초)에서 포기하고, 다음 단계(import job event)는
+    그대로 쓴다. 상한이 없으면 이 호출은
     lock이 풀릴 때까지 기다린다(#1544 리뷰).
     """
     prefix = "followup-bounded"
     request = await _enqueue_cache_target_request(migrated_engine, prefix)
     client = AsyncKorTravelMapClient(migrated_engine)
     await _claim(migrated_engine, request.request_id, generation=request.generation, run_id="run-1")
-    monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_STATEMENT_TIMEOUT_SECONDS", 0.3)
+    monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_ATTEMPT_SECONDS", 1.5)
     monkeypatch.setattr(client_mod, "_FEATURE_UPDATE_FOLLOWUP_RETRY_DELAY_SECONDS", 0.0)
 
     async with AsyncSession(migrated_engine) as holder, holder.begin():

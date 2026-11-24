@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
@@ -652,6 +654,140 @@ def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
             ),
         }
     ]
+
+
+def _failed_worker_run(instance: DagsterInstance, request: FeatureUpdateRequest) -> Any:
+    """executor가 ``failed``를 돌려준 worker run 하나(failure sensor의 입력)."""
+    failed_run = feature_update_request_worker_job.execute_in_process(
+        run_config={
+            "ops": {
+                "execute_feature_update_request": {
+                    "config": {"request_id": request.request_id, "request_generation": 1}
+                }
+            }
+        },
+        tags={
+            FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
+            FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
+        },
+        resources={
+            "kor_travel_map_client": _Client(
+                request=request,
+                result=_execution_result(request, state="failed", error_message="provider down"),
+            ),
+            "feature_update_runner": object(),
+        },
+        instance=instance,
+        raise_on_error=False,
+    )
+    assert not failed_run.success
+    return failed_run
+
+
+def test_failure_sensor_reflects_the_failure_under_the_run_status_budget() -> None:
+    """상태 전이와 후처리 전부가 ADR-112 run-status 예산(20초) 마감 안에서 돈다(#1551 리뷰).
+
+    마감이 걸려 있어야 client가 transaction마다 서버 쪽 상한(``lock_timeout`` 5초 이하)을 건다.
+    없으면 상태 전이가 Dagster 엔진 기본값(``lock_timeout`` 30초, 행 두 개면 그 두 배)으로 돈다.
+    """
+    from kortravelmap.infra import transaction_limits
+
+    seen: list[float | None] = []
+
+    @dataclass
+    class _DeadlineClient(_Client):
+        async def fail_update_request(
+            self, request_id: str, **kwargs: Any
+        ) -> FeatureUpdateRequest | None:
+            seen.append(transaction_limits.remaining_seconds())
+            return await super().fail_update_request(request_id, **kwargs)
+
+    request = _request()
+    client = _DeadlineClient(request=request)
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = _failed_worker_run(instance, request)
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={"kor_travel_map_client": client},
+        )
+
+        feature_update_request_failure_sensor(context)
+
+    [remaining] = seen
+    assert remaining is not None
+    assert 0 < remaining <= 20
+    assert len(client.failed) == 1
+
+
+def test_failure_sensor_cuts_a_hanging_db_reflection_and_still_notifies(monkeypatch: Any) -> None:
+    """DB 반영이 마감을 넘기면 끊고 알림은 보낸다 — 공용 sensor thread를 붙들지 않는다."""
+    from kortravelmap.dagster import sensors as sensors_mod
+
+    monkeypatch.setattr(sensors_mod, "_FAILURE_SENSOR_DB_BUDGET_SECONDS", 0.2)
+    monkeypatch.setattr(sensors_mod, "_CLIENT_TIMEOUT_GRACE_SECONDS", 0.1)
+
+    @dataclass
+    class _HangingClient(_Client):
+        async def fail_update_request(
+            self, request_id: str, **kwargs: Any
+        ) -> FeatureUpdateRequest | None:
+            await asyncio.sleep(30)
+            return None
+
+    notifications: list[dict[str, str | None]] = []
+    request = _request()
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = _failed_worker_run(instance, request)
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={
+                "kor_travel_map_client": _HangingClient(request=request),
+                "feature_update_failure_notifier": lambda payload: notifications.append(
+                    dict(payload)
+                ),
+            },
+        )
+        started = time.monotonic()
+
+        result = feature_update_request_failure_sensor(context)
+
+    assert time.monotonic() - started < 5
+    assert isinstance(result, SkipReason)
+    assert [item["request_id"] for item in notifications] == [request.request_id]
+
+
+def test_failure_sensor_reflects_one_failed_run_per_evaluation() -> None:
+    """평가 한 번은 실패 run 하나만 반영한다 — 그래서 DB 반영 마감이 평가 한 번의 상한이다.
+
+    Dagster run-status sensor는 평가 한 번에 실패 run을 최대 5건
+    (``DAGSTER_RUN_STATUS_SENSOR_PROCESS_LIMIT``) 처리할 수 있다. 다만 sensor 함수가 ``None``이
+    아닌 값을 돌려주면 그 run에서 tick을 끝낸다. 이 sensor는 언제나 ``SkipReason``을 돌려준다
+    (#1551 리뷰). ``None``을 돌려주게 바뀌면 한 평가가 run 여러 건의 마감을 이어 쓰고 여기서
+    빨강이다.
+    """
+    request = _request()
+    client = _Client(request=request)
+    resources = {"kor_travel_map_client": client}
+    with DagsterInstance.ephemeral() as instance:
+        first = build_sensor_context(instance=instance, resources=resources)
+        # 첫 평가는 cursor만 잡는다.
+        feature_update_request_failure_sensor.evaluate_tick(first)
+        assert client.failed == []
+        for _ in range(2):
+            _failed_worker_run(instance, request)
+
+        cursor = first.cursor
+        for expected in (1, 2, 2):
+            context = build_sensor_context(instance=instance, cursor=cursor, resources=resources)
+            feature_update_request_failure_sensor.evaluate_tick(context)
+            assert len(client.failed) == expected
+            cursor = context.cursor
 
 
 def test_worker_job_shares_one_retry_budget_across_the_request_scopes() -> None:

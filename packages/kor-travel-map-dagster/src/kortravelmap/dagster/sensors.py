@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
@@ -12,6 +13,7 @@ from kortravelmap.infra.feature_update_executor import (
     FeatureUpdateTransientFailure,
 )
 from kortravelmap.infra.feature_update_repo import FEATURE_UPDATE_MAX_RETRIES, FeatureUpdateLockBusy
+from kortravelmap.infra.transaction_limits import transaction_deadline
 
 from dagster import (
     DefaultSensorStatus,
@@ -45,6 +47,17 @@ FEATURE_UPDATE_SENSOR_INTERVAL_SECONDS: Final[int] = 15
 
 FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS: Final[int] = 10
 """sensor tick 1회에 요청할 feature update worker run 상한."""
+
+_FAILURE_SENSOR_DB_BUDGET_SECONDS: Final[float] = 20.0
+"""failure sensor가 실패 run 하나를 Map DB에 반영하는 마감(초) — 상태 전이와 후처리 전부.
+
+ADR-112의 run-status sensor 예산(20초)과 같다. 공용 code server의 sensor thread
+(``num_workers: 4``)를 모든 tenant가 나눠 쓰므로 오래 붙들지 않는다. 이 마감에서 transaction마다
+서버 쪽 상한(``lock_timeout`` 5초 이하·``statement_timeout`` 남은 시간 − 3초)이 걸린다(#1551
+리뷰)."""
+
+_CLIENT_TIMEOUT_GRACE_SECONDS: Final[float] = 3.0
+"""client 쪽 ``asyncio.timeout`` = 마감 + 3초. 서버 쪽 상한 뒤를 받치는 보조 장치다(ADR-112)."""
 
 FEATURE_UPDATE_REQUEST_GENERATION_TAG: Final[str] = (
     "kor_travel_map.feature_update_request_generation"
@@ -190,7 +203,13 @@ def feature_update_request_failure_sensor(
     context: RunFailureSensorContext,
     kor_travel_map_client: ResourceParam[object],
 ) -> SkipReason:
-    """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다."""
+    """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다.
+
+    **언제나 ``SkipReason``을 돌려준다.** Dagster run-status sensor는 반환값이 ``None``이 아니면
+    그 run에서 tick을 끝낸다 — 평가 한 번이 실패 run 하나만 반영한다. 그래서 DB 반영 마감
+    (:data:`_FAILURE_SENSOR_DB_BUDGET_SECONDS`)이 평가 한 번의 DB 시간 상한이다. 남은 실패 run은
+    다음 tick이 cursor 다음부터 집는다.
+    """
     request_id = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_ID_TAG)
     request_generation = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_GENERATION_TAG)
     detail = _failure_detail(context)
@@ -488,20 +507,28 @@ async def _handle_failure_side_effects(
             )
             if expected_generation is None:
                 raise ValueError("feature update failure run에 request generation tag가 없음")
-            await client.fail_update_request(
-                request_id,
-                owner_dagster_run_id=context.dagster_run.run_id,
-                expected_request_generation=expected_generation,
-                error_message=message,
-                failure_payload={"source": "dagster_run_failure", **(detail or {})},
-                # op가 재발행을 기록하지 못하고 죽었을 때도 op와 같은 상한을 쓴다 — provider 갱신
-                # 단계면 2회다. 기본 5회를 쓰면 쿼터가 좁은 상류를 세 번 더 처음부터 부른다.
-                max_retries=_max_retries_for_stage((detail or {}).get("stage")),
-            )
+            # 상태 전이와 후처리 전부를 ADR-112 run-status 예산 안에 묶는다. 마감이 없으면 상태
+            # 전이가 Dagster 엔진 기본값(``lock_timeout`` 30초 — 행 두 개면 그 두 배)으로 돈다.
+            with transaction_deadline(time.monotonic() + _FAILURE_SENSOR_DB_BUDGET_SECONDS):
+                async with asyncio.timeout(
+                    _FAILURE_SENSOR_DB_BUDGET_SECONDS + _CLIENT_TIMEOUT_GRACE_SECONDS
+                ):
+                    await client.fail_update_request(
+                        request_id,
+                        owner_dagster_run_id=context.dagster_run.run_id,
+                        expected_request_generation=expected_generation,
+                        error_message=message,
+                        failure_payload={"source": "dagster_run_failure", **(detail or {})},
+                        # op가 재발행을 기록하지 못하고 죽었을 때도 op와 같은 상한을 쓴다 — provider
+                        # 갱신 단계면 2회다. 기본 5회를 쓰면 쿼터가 좁은 상류를 세 번 더 처음부터
+                        # 부른다.
+                        max_retries=_max_retries_for_stage((detail or {}).get("stage")),
+                    )
         except Exception as exc:
             context.log.error(
-                "feature update request 실패 상태 반영 실패: request_id=%s error=%s",
+                "feature update request 실패 상태 반영 실패: request_id=%s error_type=%s error=%s",
                 request_id,
+                type(exc).__name__,
                 exc,
             )
     await _notify_failure(context, request_id=request_id, message=message)
