@@ -1,3 +1,11 @@
+## 2026-11-24 — Map Dagster freeze 도구 리뷰 후속(#1541)
+
+- freeze가 Valkey 상태 schedule(`weather_state_*`·`transport_state_*`)을 멈추지 않고 그 run을 기다리지 않는다. 따라잡기는
+  사유 없는 SKIPPED tick만 센다(failure sensor의 처리 tick 제외). `--resume` `note:`, 실패 시 `rollback:` 안내. 창 안 회전은
+  회전의 freeze·unfreeze 단계를 뺀다(runbook §2.2·README).
+- 다음: n150 `~/dagster-freeze.py`를 이 판으로 다시 설치(부모). 이미 #1541 판으로 얼린 창이면 이 판의 `unfreeze`가 상태
+  schedule까지 되살린다.
+
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영
 
 - `scripts/n150/dagster-freeze.py` `status|freeze [--resume]|unfreeze --snapshot <절대 경로>`(Map location 전체, run 0·run-status

@@ -162,21 +162,30 @@ BLOCKED가 남아 있으면 이유와 함께 멈춘다 — runbook `admin-featur
 
 `dagster-freeze.py`는 운영 창(회전·R4·공용 PG 재생성) 동안 Map의 자동 writer를 멈추는 도구다. 표준
 라이브러리만 쓰고 host `python3`로 돈다. 대상은 **Map code location 하나**(`kortravelmap.dagster.definitions`)이고
-PinVi·concierge location은 읽지도 바꾸지도 않는다. run 조회도 Map repository tag로 좁힌다.
+PinVi·concierge location은 읽지도 바꾸지도 않는다. run 조회도 Map repository tag로 좁힌다. Map PG를 읽지도 쓰지도
+않는 Valkey 상태 적재 schedule(`weather_state_*`·`transport_state_*`, ADR-114)은 멈추지 않고 그 run도 기다리지
+않는다 — 멈추면 창 동안과 창 뒤 다음 cron까지(하루 한 번 도는 것은 최대 약 24시간) PinVi가 보는 날씨·교통 상태가
+낡는다(Dagster는 놓친 tick을 따라잡지 않는다). 접두어가 그 job만 가리키고 그 job이 Map PG에 닿지 않는다는 것은
+`packages/kor-travel-map-dagster/tests/test_freeze_skips_state_jobs.py`가 정의로 대조한다.
 
 | 명령 | 하는 일 |
 | --- | --- |
-| `status [--snapshot F]` | 읽기 전용 — instigator 상태, 끝나지 않은 Map run, 스냅샷과의 차이 |
-| `freeze --snapshot F [--resume] [--dry-run]` | 스냅샷(0600, fsync 뒤 rename) → launcher(schedule·non-run-status sensor) 정지 → Map run 0 대기 → run-status sensor가 따라잡았는지(SKIPPED tick을 서로 다른 두 시각에) 확인하고 run 재확인 → run-status sensor 정지 → `FREEZE_OK` |
+| `status [--snapshot F]` | 읽기 전용 — instigator 상태(Valkey 상태 schedule 표시), 끝나지 않은 Map run, 스냅샷과의 차이 |
+| `freeze --snapshot F [--resume] [--dry-run]` | 스냅샷(0600, fsync 뒤 rename) → launcher(Valkey 상태 schedule을 뺀 schedule·non-run-status sensor) 정지 → Map run 0(상태 적재 run 제외) 대기 → run-status sensor가 따라잡았는지(사유 없는 SKIPPED tick을 서로 다른 두 시각에) 확인하고 run 재확인 → run-status sensor 정지 → `FREEZE_OK` |
 | `unfreeze --snapshot F [--dry-run] [--accept-missing]` | 스냅샷이 RUNNING으로 적은 것만 되살린다(run-status sensor 먼저; 저장 상태가 없던 기본 RUNNING은 `reset`, 나머지는 `start`). STOPPED였던 것(MOIS continuation 등)은 그대로. 스냅샷 없음·48시간(`--max-age-hours`)보다 오래됨은 거부 → `UNFREEZE_OK`, 스냅샷은 `F.restored-<UTC>`로 옮긴다 |
 
 - `F`는 절대 경로만 받고, 재부팅에 살아남는 곳(운영 계정 홈)에 둔다 — `/tmp`에서 사라지면 부분 freeze 뒤의 새 스냅샷이
   이미 멈춘 것을 STOPPED로 적어 영구히 꺼 둘 수 있다. 파일이 이미 있으면 `--resume`일 때만(24시간 안, `--max-age-hours`) 이어 한다.
-  스냅샷이 RUNNING으로 적지 않은 instigator가 지금 RUNNING이면 거부한다(그것을 멈추면 되살리지 못한다).
+  스냅샷이 RUNNING으로 적지 않은 instigator가 지금 RUNNING이면 거부한다(그것을 멈추면 되살리지 못한다). 스냅샷이
+  RUNNING으로 적은 것이 다시 켜졌으면 거부하지 않고 `note:` 줄에 이름을 남기며 다시 멈춘다 — 창 안에서 누가 켰는지는
+  `status`로 본다(`FREEZE_OK` 뒤 RUNNING은 Valkey 상태 schedule뿐이어야 한다).
   새로 쓸 때 RUNNING launcher가 하나도 없으면 "이미 얼어 있다"로 거부한다.
 - run-status sensor는 맨 마지막에 멈춘다. 먼저 멈추면 끝난 run의 operation 상태가 DB에 반영되지 않는다.
-  `feature_operation_success_sensor`는 completion job run을 **내므로** 그 run도 기다린다. launcher 정지 실패·대기
-  초과(`--wait-timeout`, 기본 3600초)·따라잡지 못한 sensor는 run-status sensor를 켜 둔 채 1로 끝난다.
+  `feature_operation_success_sensor`는 completion job run을 **내므로** 그 run도 기다린다. 따라잡음은 **사유 없는**
+  SKIPPED tick이다 — `feature_update_request_failure_sensor`는 실패 사건 하나를 처리할 때마다 `SkipReason`을 돌려주어
+  그 tick도 SKIPPED지만 사유가 있다(Dagster run-status sensor는 사건에 값을 돌려주면 그것을 내고 tick을 끝낸다).
+  launcher 정지 실패·대기 초과(`--wait-timeout`, 기본 3600초)·따라잡지 못한 sensor는 run-status sensor를 켜 둔 채
+  1로 끝난다.
 - 종료 코드: 0 성공·dry-run, 1 불완전(실패·대기 초과·`missing`), 2 입력·연결 오류, 3 스냅샷 안전 검사 거부.
 - 환경 변수: `KTM_DAGSTER_FREEZE_GRAPHQL_URL`(기본 n150 공용 webserver loopback),
   `KTM_DAGSTER_FREEZE_BASIC_AUTH_FILE`(공개 gateway를 쓸 때만, `user:password` 한 줄 — https 또는 loopback 주소일
@@ -188,6 +197,17 @@ PinVi·concierge location은 읽지도 바꾸지도 않는다. run 조회도 Map
 - 설치: 옛 `~/freeze.py`처럼 운영 계정 홈에 둔다(webserver가 loopback이라 root가 필요 없다).
   `install -m 0755 scripts/n150/dagster-freeze.py ~/dagster-freeze.py`. 옛 `~/freeze.py stop|start`를 부르는
   호스트 회전 스크립트는 `dagster-freeze.py freeze|unfreeze --snapshot <회전 전용 절대 경로>`로 바꾼다 — 옛 도구는
-  두 instigator만 멈춘다. 운영 창(R4 등) 안의 회전은 창 스냅샷과 다른 파일을 쓰거나 freeze를 건너뛴다.
+  두 instigator만 멈춘다. 새 freeze는 실패하면 launcher를 멈춘 채(run-status sensor는 켠 채) 끝나도록(이어 하기
+  전제) 설계돼 있으므로 스크립트는 종료 코드로 갈라야 한다.
+  - `0`: 회전하고, 끝에 같은 파일로 `unfreeze`한다.
+  - `3`(거부): 아무것도 바꾸지 않았다(스냅샷 파일이 이미 있거나 location이 이미 얼어 있다). 회전하지 않고 멈추며
+    `unfreeze`를 부르지 않는다 — 남의 스냅샷(운영 창)을 되살릴 수 있다.
+  - `1`·`2`: 회전하지 않고 멈춘다. 회전 전용 파일이 생겼으면 일부를 멈춘 채다 — `unfreeze --snapshot <같은 파일>`로
+    되돌리거나(부분 freeze도 스냅샷대로 되살린다) 원인을 본 뒤 `freeze --resume`. 도구가 `rollback:` 두 줄로 같은 것을
+    찍는다. 파일이 없으면 아무것도 바꾸지 않았다.
+- 운영 창(R4 등) **안의** 회전은 회전 스크립트의 freeze·unfreeze 단계를 뺀다 — 창 freeze가 이미 덮는다. 회전 전용
+  파일로 불러도 되지 않는다: 얼어 있는 location은 새 스냅샷을 거부(3)하고 그 파일의 `unfreeze`는 스냅샷 없음(2)이다.
+  이 거부는 의도다 — 얼어 있는 상태를 스냅샷하면 그 파일의 `unfreeze`가 아무것도 되살리지 못한다. 창 스냅샷 파일을
+  회전에 넘기면 회전 끝의 `unfreeze`가 창 도중에 전부 되살린다.
 - `tests/unit/test_n150_dagster_freeze.py`가 가짜 GraphQL webserver(n150 Map location의 실제 구성 61개 + PinVi
   location) 위에서 효과를 고정한다.

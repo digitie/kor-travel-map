@@ -1,3 +1,31 @@
+## 2026-11-24 — Map Dagster freeze 도구 리뷰 후속(#1541)
+
+- 따라잡기 판정(P2): Dagster 1.13 run-status sensor 감싸개(`run_status_sensor_definition.py`)는 사건 하나에 사용자
+  함수가 값을 돌려주면 그것을 내고 tick을 끝낸다. `feature_update_request_failure_sensor`는 실패 사건마다
+  `SkipReason(message)`를 돌려주므로 그 tick은 SKIPPED(사유 있음)이고 사건 하나를 처리했다. 처리할 사건이 없던 tick은
+  감싸개가 아무것도 내지 않아 daemon이 사유 없이 SKIPPED로 남긴다(`_daemon/sensor.py`). 도구는 tick의 `skipReason`을
+  함께 읽고 사유 없는 SKIPPED만 센다. feature_operation_* sensor는 `SkipReason`을 내지 않는다(reaction → SUCCESS).
+  가짜 webserver 시험으로 먼저 재현했다(사유 있는 SKIPPED 두 번에 FREEZE_OK).
+- Valkey 상태 schedule(P2·P3): `weather_state`·`transport_state` 모듈의 job은 `kor_travel_map_client`를 요구하지 않고
+  operation tag가 없어(run-status sensor가 panel-only로 지나간다) Map PG를 읽지도 쓰지도 않는다(HTTP export·Valkey만).
+  freeze가 이 12개를 멈추면 창 동안, 그리고 Dagster가 놓친 tick을 따라잡지 않아 하루 한 번 도는 3개(locations·
+  rest_areas·airports)는 unfreeze 뒤 최대 약 24시간 낡았다. 보충 실행(unfreeze가 launchRun) 대신 대상에서 뺐다 — 창 안
+  낡음도 없애고 mutation을 늘리지 않는다. 접두어(`STATE_JOB_PREFIXES`)로 schedule을 launcher·이어 하기 거부·FREEZE_OK
+  판정에서 빼고, run 대기에서 그 job run을 세지 않는다. 스냅샷은 전부 적어 이전 판 스냅샷도 그대로 되살린다.
+  `packages/kor-travel-map-dagster/tests/test_freeze_skips_state_jobs.py`가 접두어 = 상태 job·schedule, 그 job의 PG 경로
+  없음을 정의로 대조한다(루트 시험은 경고를 오류로 바꿔 Definitions 로드의 BetaWarning을 억제해야 해서 패키지 시험에 둠).
+  열린 #1542(상태 job 상류 신호)도 PG 경로를 더하지 않는다(diff 확인).
+- 창 안 회전 안내(P2): 안내대로 회전 전용 파일로 새 도구를 부르면 FREEZE_OK 상태에서 freeze가 "이미 얼어 있다"(3),
+  unfreeze가 스냅샷 없음(2)으로 늘 실패했다. 회전 스크립트는 저장소에 없고(호스트 전용), 창 안에서는 창 freeze가 이미
+  덮으므로 중첩 freeze가 필요 없다. 그 거부는 얼어 있는 상태를 스냅샷하는 사고를 막는 의도된 안전 장치라 도구가 아니라
+  안내를 고쳤다 — "회전의 freeze·unfreeze 단계를 뺀다". 거부 메시지도 그렇게 알린다.
+- P3: 자동 회전 스크립트의 종료 코드 규칙(0 회전·3 아무것도 안 바뀜·1/2 스냅샷 있으면 unfreeze로 접기)을 README에
+  적고, freeze가 1·2로 끝나면 `rollback:` 두 줄을 찍는다. `--resume`은 스냅샷 RUNNING인 launcher가 다시 켜진 것을
+  거부하지 않으므로(prod에서는 Map schedule 대부분이 스냅샷 RUNNING) runbook의 "거부(3)로 알린다"를 고치고 `note:`로
+  이름을 남긴다.
+- 시험: `tests/unit/test_n150_dagster_freeze.py` 46건(+8), `test_freeze_skips_state_jobs.py` 2건 — 로컬 WSL venv(dagster
+  1.13.24). n150 접속·실제 freeze는 하지 않았다.
+
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영(수집 실패 감사 §4 #10·#11)
 
 - #10: n150 `~/freeze.py`는 산사태 schedule과 update-request 큐 sensor 둘만 멈춰, PG에 쓰는 나머지 Map
