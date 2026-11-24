@@ -2619,7 +2619,7 @@ test.describe("/ops/pipeline", () => {
     page,
   }) => {
     const failureMessage =
-      "재발행 5회 소진: DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) " +
+      "재발행 상한 2회 소진(누적 2회): DBAPIError: (sqlalchemy.dialects.postgresql.asyncpg.Error) " +
       "<class 'asyncpg.exceptions.LockNotAvailableError'>: canceling statement due to lock timeout";
     await installPipelineMocks(page, {
       detailFactory: () => {
@@ -2650,7 +2650,7 @@ test.describe("/ops/pipeline", () => {
                 level: "warning",
                 code: "FEATURE_UPDATE_RETRY_SCHEDULED",
                 message:
-                  "일시 실패 — 2026-07-14T10:03:00+00:00 이후 다시 발행 (1/5): lock timeout",
+                  "일시 실패 — 2026-07-14T10:03:00+00:00 이후 다시 발행 (1/2): lock timeout",
                 payload: {
                   status: "queued",
                   failure_class: "transient_db",
@@ -2658,7 +2658,8 @@ test.describe("/ops/pipeline", () => {
                   stage: "refreshing:101:target_grids",
                   dagster_run_id: "run-lock-1",
                   retry_count: 1,
-                  max_retries: 5,
+                  // provider 갱신 단계(refreshing:*)의 재발행 상한은 2회다(#1551 리뷰).
+                  max_retries: 2,
                   next_dispatch_at: "2026-07-14T10:03:00.000Z",
                 },
                 occurred_at: "2026-07-14T10:02:00.000Z",
@@ -2675,8 +2676,8 @@ test.describe("/ops/pipeline", () => {
                   failure_code: "FEATURE_UPDATE_RETRIES_EXHAUSTED",
                   failure_class: "transient_db",
                   db_failure: "lock_timeout",
-                  dagster_run_id: "run-lock-6",
-                  max_retries: 5,
+                  dagster_run_id: "run-lock-3",
+                  max_retries: 2,
                   // 승인되지 않은 필드는 화면에 펼치지 않는다.
                   raw_sql: "INSERT INTO ops.import_job_events",
                 },
@@ -2702,11 +2703,11 @@ test.describe("/ops/pipeline", () => {
     const scheduled = details.nth(0);
     await expect(scheduled).toContainText("일시 DB 오류(lock 대기 초과)");
     await expect(scheduled).toContainText("refreshing:101:target_grids");
-    await expect(scheduled).toContainText("1/5");
+    await expect(scheduled).toContainText("1/2");
     await expect(scheduled).toContainText("run-lock-1");
     await expect(scheduled.getByText("다음 발행")).toBeVisible();
     const exhausted = details.nth(1);
-    await expect(exhausted).toContainText("run-lock-6");
+    await expect(exhausted).toContainText("run-lock-3");
     await expect(exhausted).not.toContainText("INSERT INTO");
     await expect(panel.getByText("FEATURE_UPDATE_RETRIES_EXHAUSTED")).toBeVisible();
   });

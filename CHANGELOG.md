@@ -8,6 +8,16 @@
 - run-status sensor 따라잡기 판정이 사유 있는 SKIPPED tick(실패 사건 하나를 처리한 `feature_update_request_failure_sensor` tick)을 "처리할 사건 없음"으로 읽지 않는다.
 - `freeze --resume`이 다시 멈추는 launcher 이름을 `note:`로 남긴다. 1·2로 끝난 freeze는 이번 호출이 스냅샷을 썼거나 `--resume`으로 이어 받았을 때만 `rollback:` 줄을 찍고, 이미 있는 파일은 webserver에 묻기 전에 거부(3)한다. `scripts/n150/README.md`에 회전 스크립트의 freeze·unfreeze 종료 코드 규칙을 적었다.
 
+## 2026-11-24 — 큐 요청 재발행 후속(#1544 리뷰)
+
+- failure sensor가 claim 뒤 일시 DB 실패를 대신 재발행할 때도 실패 단계로 상한을 고른다 — provider 갱신 단계는 2회(종전 기본 5회, 쿼터가 좁은 상류를 첫 scope부터 다시 부르던 것).
+- 재발행 소진·`FeatureUpdateTerminalizationFailed`·run 실패(`FEATURE_UPDATE_RUN_FAILED`)로 닫은 cache target 요청도 활성 target의 `last_failed_at`을 찍는다.
+- 재발행 상한은 누적 `retry_count`(launch 실패 재발행 포함)에 건다 — provider 단계 상한 2회도 같다. 종결 메시지는 `재발행 상한 2회 소진(누적 3회): …`처럼 상한과 실제 재발행 수를 함께 적는다(종전 `재발행 2회 소진`은 실제 누적과 어긋날 수 있었다).
+- executor 밖 종결의 PinVi relay `failed`를 import job event와 다른 transaction에 쓴다 — event 기록이 실패해도 relay가 되감기지 않는다. 상태 전이 뒤 후처리는 단계마다 자기 transaction이고 전체 20초 마감 안에서 끝난다(시도마다 ADR-112 서버 쪽 상한, 시도 마감에서 끊는다).
+- failure sensor는 실패 run 하나의 DB 반영(상태 전이와 후처리 전부)을 ADR-112 run-status 예산 20초 마감 안에서 한다 — transaction마다 `lock_timeout` 5초 이하·`statement_timeout` 남은 시간 − 3초(종전 상태 전이는 Dagster 엔진 기본값 `lock_timeout` 30초로 돌았다). 평가 한 번은 실패 run 하나만 반영한다(`SkipReason`으로 tick을 끝낸다).
+- 큐 worker run: executor가 이미 `failed`로 닫은 generation은 정리 중 연결 오류가 나도 run을 실패로 끝낸다(종전에는 SUCCESS로 보이고 실패 알림이 없었다).
+- OpenAPI·migration 변경 없음.
+
 ## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)
 
 - `ops.ops_live_topic_revisions`(provider_sync·dataset_projection·dagster_schedules)를 원본 write 시점이 아니라 그 transaction의 commit 직전에 올린다(alembic `458_live_topic_commit_bump`, 새 표 `ops.ops_live_topic_pending`). 긴 적재가 주소 finding·sync state를 쓴 뒤 commit까지 topic 행을 쥐어 PinVi POI target PUT/DELETE(503)·다른 큐 요청이 막히던 것을 없앤다. 값은 topic을 바꾼 commit당 1씩 오른다. POI target receipt(`meta.dataset_projection_revision`) 의미와 OpenAPI는 그대로다.

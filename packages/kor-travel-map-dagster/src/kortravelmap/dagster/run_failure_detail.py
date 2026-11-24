@@ -104,6 +104,11 @@ def run_failure_detail(failure_event: Any) -> dict[str, str]:
                 # 큐 op가 ``Failure(metadata=...)``로 남긴 분류 — 재발행 기록에 실패한 일시 DB
                 # 실패면 failure sensor가 닫지 않고 재발행한다.
                 detail["failure_class"] = failure_class
+            stage = _user_metadata_text(step_data, "stage")
+            if stage:
+                # 실패한 실행 단계 — failure sensor가 재발행 상한을 고른다(provider 갱신 단계는
+                # 상류를 처음부터 다시 부르므로 2회, #1544 리뷰).
+                detail["stage"] = redact_failure_text(stage)
         if error is None:
             error = getattr(data, "error", None)
         if error is not None:
