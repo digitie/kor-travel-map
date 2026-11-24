@@ -1,3 +1,27 @@
+## 2026-11-24 — 큐 요청 재발행 후속(#1544 리뷰, PR #1551)
+
+- failure sensor의 claim 뒤 재발행도 provider 단계 상한 2회(누적 `retry_count` 기준, 종결 메시지에 상한·누적 함께),
+  executor 밖 종결(재발행 소진·TerminalizationFailed·RUN_FAILED)의 relay `failed`를 import job event와 분리하고 cache
+  target `last_failed_at`을 찍음, failure sensor의 DB 반영 전부(상태 전이 포함)를 ADR-112 run-status 20초 마감 안에,
+  executor가 이미 `failed`로 닫은 generation의 run을 성공으로 끝내지 않음. OpenAPI·migration 없음.
+- 다음: 회전에 싣는다. 456은 `ops.feature_update_requests`에 ACCESS EXCLUSIVE를 `lock_timeout` 1초로 잡는다. provider
+  갱신 단계의 큐 요청은 phase transaction 내내 그 표의 행을 `FOR UPDATE`로 쥐므로(긴 갱신은 수십 분), 그런 요청이
+  돌면 456이 55P03으로 실패한다. 순서:
+  1. `python3 ~/dagster-freeze.py freeze --snapshot <회전 전용 절대 경로>` — 큐 sensor를 멈추고 Map run 0까지
+     기다린다. 점검한 뒤 sensor(15초 주기)가 새 요청을 claim해 끼어드는 틈을 닫는다. 운영 창(R4 등) 안의 회전이면
+     창 스냅샷과 다른 파일을 쓴다(R4 runbook §2.2). 호스트 회전 스크립트가 아직 옛 `freeze.py stop`만 부르면 이미
+     돌던 큐 run이 끝났는지는 2로만 안다.
+  2. `SELECT count(*) FROM pg_locks WHERE relation = 'ops.feature_update_requests'::regclass`가 0인지 본다. `running`
+     import job 수는 지표로 쓰지 않는다 — run이 죽었는데 failure sensor가 닫지 못한 행은 lock 없이도 `running`이다.
+  3. 회전. 55P03이 나면 새 API 컨테이너가 기동하지 못한다 — entrypoint가 `alembic upgrade head`를 2초 간격 30회
+     다시 한 뒤 exit 1로 끝나고(재시작 정책이 있으면 같은 시도를 되풀이한다), runtime은 head가 정확히 맞아야
+     뜬다. 데이터는 바뀌지 않는다(migration 전체가 한 transaction이다). lock을 쥔 요청이 끝나거나 취소되면
+     API 컨테이너를 다시 올리고, 기다릴 수 없으면 옛 이미지로 되돌린다(DB head는 회전 전 그대로다).
+  4. `python3 ~/dagster-freeze.py unfreeze --snapshot <1과 같은 파일>`.
+
+  cache target `poi_cache_targets` 갱신은 alembic 458(#1548) 전까지 live topic 행을 기다릴 수 있다 — 후처리 시도
+  마감(ADR-112 규칙으로 `lock_timeout` 4초)이 그 대기를 끊는다.
+
 ## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)·10-22 큐 상황 재현
 
 - 긴 큐 적재가 topic 원본(주소 finding·override finding·sync state)을 써도 `ops_live_topic_revisions` 행을 commit 직전까지만

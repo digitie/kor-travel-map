@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import asyncio
+import time
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime
 from typing import Any
@@ -64,9 +66,14 @@ class _Client:
     reschedule_outcome: FeatureUpdateRetryOutcome | None = None
     reschedule_raises: list[Exception] = field(default_factory=list)
     terminalized: list[dict[str, Any]] = field(default_factory=list)
+    current: FeatureUpdateRequest | None = None
+    """``get_update_request``가 돌려줄 저장 상태. ``None``이면 ``request``."""
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         return self.request
+
+    async def get_update_request(self, request_id: str) -> FeatureUpdateRequest | None:
+        return self.current if self.current is not None else self.request
 
     async def peek_update_requests(self, *, limit: int = 10) -> tuple[FeatureUpdateRequest, ...]:
         self.peek_limits.append(limit)
@@ -122,6 +129,7 @@ class _Client:
         expected_request_generation: int,
         error_message: str | None = None,
         failure_payload: dict[str, Any] | None = None,
+        max_retries: int = 5,
     ) -> FeatureUpdateRequest | None:
         if self.fail_raises is not None:
             raise self.fail_raises
@@ -132,6 +140,7 @@ class _Client:
                 "expected_request_generation": expected_request_generation,
                 "error_message": error_message,
                 "failure_payload": failure_payload,
+                "max_retries": max_retries,
             }
         )
         if self.advance_generation_on_failure and self.request is not None:
@@ -647,6 +656,140 @@ def test_failure_sensor_notifies_even_when_fail_update_request_fails() -> None:
     ]
 
 
+def _failed_worker_run(instance: DagsterInstance, request: FeatureUpdateRequest) -> Any:
+    """executor가 ``failed``를 돌려준 worker run 하나(failure sensor의 입력)."""
+    failed_run = feature_update_request_worker_job.execute_in_process(
+        run_config={
+            "ops": {
+                "execute_feature_update_request": {
+                    "config": {"request_id": request.request_id, "request_generation": 1}
+                }
+            }
+        },
+        tags={
+            FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
+            FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
+        },
+        resources={
+            "kor_travel_map_client": _Client(
+                request=request,
+                result=_execution_result(request, state="failed", error_message="provider down"),
+            ),
+            "feature_update_runner": object(),
+        },
+        instance=instance,
+        raise_on_error=False,
+    )
+    assert not failed_run.success
+    return failed_run
+
+
+def test_failure_sensor_reflects_the_failure_under_the_run_status_budget() -> None:
+    """상태 전이와 후처리 전부가 ADR-112 run-status 예산(20초) 마감 안에서 돈다(#1551 리뷰).
+
+    마감이 걸려 있어야 client가 transaction마다 서버 쪽 상한(``lock_timeout`` 5초 이하)을 건다.
+    없으면 상태 전이가 Dagster 엔진 기본값(``lock_timeout`` 30초, 행 두 개면 그 두 배)으로 돈다.
+    """
+    from kortravelmap.infra import transaction_limits
+
+    seen: list[float | None] = []
+
+    @dataclass
+    class _DeadlineClient(_Client):
+        async def fail_update_request(
+            self, request_id: str, **kwargs: Any
+        ) -> FeatureUpdateRequest | None:
+            seen.append(transaction_limits.remaining_seconds())
+            return await super().fail_update_request(request_id, **kwargs)
+
+    request = _request()
+    client = _DeadlineClient(request=request)
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = _failed_worker_run(instance, request)
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={"kor_travel_map_client": client},
+        )
+
+        feature_update_request_failure_sensor(context)
+
+    [remaining] = seen
+    assert remaining is not None
+    assert 0 < remaining <= 20
+    assert len(client.failed) == 1
+
+
+def test_failure_sensor_cuts_a_hanging_db_reflection_and_still_notifies(monkeypatch: Any) -> None:
+    """DB 반영이 마감을 넘기면 끊고 알림은 보낸다 — 공용 sensor thread를 붙들지 않는다."""
+    from kortravelmap.dagster import sensors as sensors_mod
+
+    monkeypatch.setattr(sensors_mod, "_FAILURE_SENSOR_DB_BUDGET_SECONDS", 0.2)
+    monkeypatch.setattr(sensors_mod, "_CLIENT_TIMEOUT_GRACE_SECONDS", 0.1)
+
+    @dataclass
+    class _HangingClient(_Client):
+        async def fail_update_request(
+            self, request_id: str, **kwargs: Any
+        ) -> FeatureUpdateRequest | None:
+            await asyncio.sleep(30)
+            return None
+
+    notifications: list[dict[str, str | None]] = []
+    request = _request()
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = _failed_worker_run(instance, request)
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={
+                "kor_travel_map_client": _HangingClient(request=request),
+                "feature_update_failure_notifier": lambda payload: notifications.append(
+                    dict(payload)
+                ),
+            },
+        )
+        started = time.monotonic()
+
+        result = feature_update_request_failure_sensor(context)
+
+    assert time.monotonic() - started < 5
+    assert isinstance(result, SkipReason)
+    assert [item["request_id"] for item in notifications] == [request.request_id]
+
+
+def test_failure_sensor_reflects_one_failed_run_per_evaluation() -> None:
+    """평가 한 번은 실패 run 하나만 반영한다 — 그래서 DB 반영 마감이 평가 한 번의 상한이다.
+
+    Dagster run-status sensor는 평가 한 번에 실패 run을 최대 5건
+    (``DAGSTER_RUN_STATUS_SENSOR_PROCESS_LIMIT``) 처리할 수 있다. 다만 sensor 함수가 ``None``이
+    아닌 값을 돌려주면 그 run에서 tick을 끝낸다. 이 sensor는 언제나 ``SkipReason``을 돌려준다
+    (#1551 리뷰). ``None``을 돌려주게 바뀌면 한 평가가 run 여러 건의 마감을 이어 쓰고 여기서
+    빨강이다.
+    """
+    request = _request()
+    client = _Client(request=request)
+    resources = {"kor_travel_map_client": client}
+    with DagsterInstance.ephemeral() as instance:
+        first = build_sensor_context(instance=instance, resources=resources)
+        # 첫 평가는 cursor만 잡는다.
+        feature_update_request_failure_sensor.evaluate_tick(first)
+        assert client.failed == []
+        for _ in range(2):
+            _failed_worker_run(instance, request)
+
+        cursor = first.cursor
+        for expected in (1, 2, 2):
+            context = build_sensor_context(instance=instance, cursor=cursor, resources=resources)
+            feature_update_request_failure_sensor.evaluate_tick(context)
+            assert len(client.failed) == expected
+            cursor = context.cursor
+
+
 def test_worker_job_shares_one_retry_budget_across_the_request_scopes() -> None:
     """큐 run 하나는 scope 여러 개를 돈다 — 그 전부가 run 예산 하나를 나눠 쓴다."""
     from kortravelmap.dagster import upstream_retry
@@ -694,7 +837,7 @@ def _transient_outcome(
             status="queued" if rescheduled else "failed",
             retry_count=1 if rescheduled else 5,
             next_dispatch_at=_NOW if rescheduled else None,
-            error_message=None if rescheduled else "재발행 5회 소진: lock timeout",
+            error_message=None if rescheduled else "재발행 상한 5회 소진(누적 5회): lock timeout",
         ),
         rescheduled=rescheduled,
         max_retries=5,
@@ -832,6 +975,106 @@ def test_worker_marks_its_failure_transient_when_the_reschedule_write_keeps_fail
     assert len(client.rescheduled) == 3
     detail = run_failure_detail(result.get_run_failure_event())
     assert detail["failure_class"] == "transient_db"
+    assert detail["stage"] == "claim"
+
+
+def test_failure_sensor_reschedules_with_the_provider_stage_cap(monkeypatch: Any) -> None:
+    """op가 재발행을 기록하지 못하고 죽으면 failure sensor가 재발행한다 — 상한도 op와 같다.
+
+    provider 갱신 단계의 일시 실패는 재발행마다 상류를 처음부터 다시 부르므로 2회다. failure
+    sensor가 기본 5회를 쓰면 쿼터가 좁은 상류(data.go.kr·OpiNet)를 세 번 더 부른다(#1544 리뷰).
+    """
+    from kortravelmap.dagster import sensors as sensors_mod
+
+    monkeypatch.setattr(sensors_mod, "_DB_CALL_RETRY_DELAYS_SECONDS", (0.0, 0.0))
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    sensor_client = _Client(request=request)
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = feature_update_request_worker_job.execute_in_process(
+            run_config={
+                "ops": {
+                    "execute_feature_update_request": {
+                        "config": {"request_id": request.request_id, "request_generation": 1}
+                    }
+                }
+            },
+            tags={
+                FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
+                FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
+            },
+            resources={
+                "kor_travel_map_client": _Client(
+                    request=request,
+                    execute_raises=FeatureUpdateTransientFailure(
+                        summary, stage="refreshing:1:dataset_wide"
+                    ),
+                    reschedule_raises=[_LockTimeout("a"), _LockTimeout("b"), _LockTimeout("c")],
+                ),
+                "feature_update_runner": object(),
+            },
+            instance=instance,
+            raise_on_error=False,
+        )
+        assert not failed_run.success
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={"kor_travel_map_client": sensor_client},
+        )
+
+        feature_update_request_failure_sensor(context)
+
+    [failed] = sensor_client.failed
+    assert failed["max_retries"] == 2
+    assert failed["failure_payload"]["failure_class"] == "transient_db"
+    assert failed["failure_payload"]["stage"] == "refreshing:1:dataset_wide"
+
+
+def test_failure_sensor_keeps_the_default_cap_without_a_provider_stage() -> None:
+    """launch 실패(step 없음)는 단계가 없다 — 기본 상한."""
+    request = _request()
+    client = _Client(request=request)
+
+    @resource
+    def broken_feature_update_runner() -> object:
+        raise RuntimeError("resource initialization failed")
+
+    with DagsterInstance.ephemeral() as instance:
+        failed_run = feature_update_request_worker_job.execute_in_process(
+            run_config={
+                "ops": {
+                    "execute_feature_update_request": {
+                        "config": {"request_id": request.request_id, "request_generation": 1}
+                    }
+                }
+            },
+            tags={
+                FEATURE_UPDATE_REQUEST_ID_TAG: request.request_id,
+                FEATURE_UPDATE_REQUEST_GENERATION_TAG: "1",
+            },
+            resources={
+                "kor_travel_map_client": _Client(request=request),
+                "feature_update_runner": broken_feature_update_runner,
+            },
+            instance=instance,
+            raise_on_error=False,
+        )
+        context = build_run_status_sensor_context(
+            sensor_name="feature_update_request_failure_sensor",
+            dagster_instance=instance,
+            dagster_run=failed_run.dagster_run,
+            dagster_event=failed_run.get_run_failure_event(),
+            resources={"kor_travel_map_client": client},
+        )
+
+        feature_update_request_failure_sensor(context)
+
+    [failed] = client.failed
+    assert failed["max_retries"] == 5
+    assert "stage" not in failed["failure_payload"]
 
 
 def test_worker_closes_with_the_original_cause_when_recording_a_failure_failed() -> None:
@@ -878,3 +1121,57 @@ def test_worker_treats_a_state_change_during_reschedule_as_success() -> None:
     assert result.success
     metadata = result.output_for_node("execute_feature_update_request")
     assert metadata["status"] == "state_changed"
+
+
+def test_worker_fails_the_run_when_its_generation_already_ended_failed() -> None:
+    """executor가 ``failed``로 닫은 뒤 lock 정리 중 연결이 끊기면 op는 일시 DB 실패를 받는다.
+
+    재발행은 상태가 맞지 않아 아무것도 하지 않는다. 그때 run을 성공으로 끝내면 실패한 요청의
+    run이 SUCCESS로 보이고 failure sensor 알림이 사라진다(#1544 리뷰).
+    """
+    from kortravelmap.dagster.run_failure_detail import run_failure_detail
+
+    request = _request()
+
+    class _ConnectionDoesNotExistError(Exception):
+        """asyncpg ``ConnectionDoesNotExistError``의 모양 — 모듈·클래스 이름만 본다."""
+
+    _ConnectionDoesNotExistError.__module__ = "asyncpg.exceptions"
+    _ConnectionDoesNotExistError.__name__ = "ConnectionDoesNotExistError"
+    client = _Client(
+        request=request,
+        execute_raises=_ConnectionDoesNotExistError("connection was closed in the middle"),
+        reschedule_outcome=None,
+        current=replace(
+            request,
+            status="failed",
+            dagster_run_id="run-before",
+            error_message="RuntimeError: provider exploded",
+        ),
+    )
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert len(client.rescheduled) == 1
+    detail = run_failure_detail(result.get_run_failure_event())
+    assert detail["error"] == "RuntimeError: provider exploded"
+    # failure sensor가 재발행 분기로 가지 않게 일시 실패 분류를 싣지 않는다.
+    assert "failure_class" not in detail
+
+
+def test_worker_keeps_state_changed_success_when_another_generation_failed() -> None:
+    """generation이 이미 전진했다면(다른 run의 일) 이 run의 실패가 아니다."""
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage=None),
+        reschedule_outcome=None,
+        current=replace(request, generation=2, status="failed", error_message="other run"),
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    assert result.output_for_node("execute_feature_update_request")["status"] == "state_changed"

@@ -41,6 +41,7 @@ __all__ = [
     "get_dataset_projection_revision",
     "list_poi_cache_target_feature_links",
     "list_poi_cache_targets",
+    "mark_poi_cache_target_keys_refresh_failed",
     "mark_poi_cache_targets_refresh_failed",
     "mark_poi_cache_targets_refresh_requested",
     "mark_poi_cache_targets_refreshed",
@@ -545,6 +546,21 @@ WHERE target_id::text = ANY(CAST(:target_ids AS text[]))
 RETURNING 1
 """
 
+#: 실행 계획 없이 request scope의 key로 실패 시각을 찍는다. 대상은 scope 해석기
+#: (``scope_repo``의 cache target key 해석)가 활성으로 보는 target과 같다 — 삭제·갱신 끔·
+#: ``refresh_policy = 'disabled'``는 제외한다.
+_MARK_TARGET_KEYS_FAILED_SQL: Final[str] = """
+UPDATE ops.poi_cache_targets
+SET last_failed_at = now(),
+    updated_at = now()
+WHERE external_system = CAST(:external_system AS text)
+  AND target_key = ANY(CAST(:target_keys AS text[]))
+  AND deleted_at IS NULL
+  AND update_enabled
+  AND refresh_policy <> 'disabled'
+RETURNING 1
+"""
+
 
 async def upsert_poi_cache_target(
     session: AsyncSession,
@@ -1018,5 +1034,25 @@ async def mark_poi_cache_targets_refresh_failed(
     result = await session.execute(
         text(_MARK_TARGETS_FAILED_SQL),
         {"target_ids": target_ids},
+    )
+    return len(result.scalars().all())
+
+
+async def mark_poi_cache_target_keys_refresh_failed(
+    session: AsyncSession,
+    *,
+    external_system: str,
+    target_keys: list[str],
+) -> int:
+    """cache target key 요청이 executor 밖에서 실패로 닫혔을 때 활성 target의 실패 시각을 찍는다.
+
+    executor 종결은 실행 계획의 target id로 :func:`mark_poi_cache_targets_refresh_failed`를 부른다.
+    재발행 소진·run 실패처럼 계획이 없는 종결은 request scope의 key로 같은 target을 고른다.
+    """
+    if not target_keys:
+        return 0
+    result = await session.execute(
+        text(_MARK_TARGET_KEYS_FAILED_SQL),
+        {"external_system": external_system, "target_keys": target_keys},
     )
     return len(result.scalars().all())

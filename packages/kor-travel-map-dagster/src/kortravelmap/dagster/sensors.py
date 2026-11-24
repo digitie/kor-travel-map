@@ -2,6 +2,7 @@
 
 import asyncio
 import inspect
+import time
 from collections.abc import Awaitable, Callable, Mapping
 from typing import TYPE_CHECKING, Any, Final, TypeVar, cast
 
@@ -12,6 +13,7 @@ from kortravelmap.infra.feature_update_executor import (
     FeatureUpdateTransientFailure,
 )
 from kortravelmap.infra.feature_update_repo import FEATURE_UPDATE_MAX_RETRIES, FeatureUpdateLockBusy
+from kortravelmap.infra.transaction_limits import transaction_deadline
 
 from dagster import (
     DefaultSensorStatus,
@@ -45,6 +47,17 @@ FEATURE_UPDATE_SENSOR_INTERVAL_SECONDS: Final[int] = 15
 
 FEATURE_UPDATE_SENSOR_MAX_RUN_REQUESTS: Final[int] = 10
 """sensor tick 1회에 요청할 feature update worker run 상한."""
+
+_FAILURE_SENSOR_DB_BUDGET_SECONDS: Final[float] = 20.0
+"""failure sensor가 실패 run 하나를 Map DB에 반영하는 마감(초) — 상태 전이와 후처리 전부.
+
+ADR-112의 run-status sensor 예산(20초)과 같다. 공용 code server의 sensor thread
+(``num_workers: 4``)를 모든 tenant가 나눠 쓰므로 오래 붙들지 않는다. 이 마감에서 transaction마다
+서버 쪽 상한(``lock_timeout`` 5초 이하·``statement_timeout`` 남은 시간 − 3초)이 걸린다(#1551
+리뷰)."""
+
+_CLIENT_TIMEOUT_GRACE_SECONDS: Final[float] = 3.0
+"""client 쪽 ``asyncio.timeout`` = 마감 + 3초. 서버 쪽 상한 뒤를 받치는 보조 장치다(ADR-112)."""
 
 FEATURE_UPDATE_REQUEST_GENERATION_TAG: Final[str] = (
     "kor_travel_map.feature_update_request_generation"
@@ -190,7 +203,13 @@ def feature_update_request_failure_sensor(
     context: RunFailureSensorContext,
     kor_travel_map_client: ResourceParam[object],
 ) -> SkipReason:
-    """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다."""
+    """worker run 실패를 request/import job 상태와 운영 알림 sink에 반영한다.
+
+    **언제나 ``SkipReason``을 돌려준다.** Dagster run-status sensor는 반환값이 ``None``이 아니면
+    그 run에서 tick을 끝낸다 — 평가 한 번이 실패 run 하나만 반영한다. 그래서 DB 반영 마감
+    (:data:`_FAILURE_SENSOR_DB_BUDGET_SECONDS`)이 평가 한 번의 DB 시간 상한이다. 남은 실패 run은
+    다음 tick이 cursor 다음부터 집는다.
+    """
     request_id = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_ID_TAG)
     request_generation = context.dagster_run.tags.get(FEATURE_UPDATE_REQUEST_GENERATION_TAG)
     detail = _failure_detail(context)
@@ -360,7 +379,35 @@ async def _reschedule_after_transient_failure(
         ) from exc
     if outcome is None:
         # 그 사이 상태가 바뀌었다(취소·다른 경로의 종결·lock 경합 requeue로 generation 전진).
-        # 실패가 아니다 — 알림을 부르지 않는다.
+        # 단 이 generation이 ``failed``로 끝나 있으면 run도 실패해야 한다 — executor가 결정적
+        # 실패를 이미 ``failed``로 닫은 뒤 lock 정리 중 연결이 끊겨 여기 온 경우다. 성공으로
+        # 끝내면 실패한 요청의 run이 SUCCESS로 보이고 failure sensor 알림이 사라진다(#1544 리뷰).
+        # metadata에 ``failure_class``를 싣지 않는다 — failure sensor는 이미 닫힌 request에
+        # 아무것도 하지 않고 알림만 보낸다.
+        #
+        # 앞선 시도가 상한 소진(``failed``)을 commit하고 그 COMMIT 응답만 잃은 경우도 여기 온다.
+        # 이때 맞춰지는 것은 **run 상태뿐**이다 — relay ``failed``·target ``last_failed_at``·소진
+        # event는 상태 전이 뒤 후처리가 돌기 전에 예외가 나서 아무도 쓰지 않고, failure sensor도
+        # 닫힌 request를 건드리지 않는다. ``FeatureUpdateTerminalizationFailed`` 종결의 COMMIT
+        # 응답을 잃은 경우도 같다. 여기서 후처리를 그냥 다시 내지 않는 까닭: executor 자신이
+        # 종결한 경우(위, relay를 같은 transaction에 이미 썼다)에 다시 내면 ``error_code``가 다른
+        # ``failed`` relay가 하나 더 생긴다. relay 종결 여부를 보고 빠진 후처리만 다시 내는
+        # reconciler는 아직 없다(드문 경로 — COMMIT 순간의 연결 단절, #1551 남은 위험).
+        current = await _with_db_retries(lambda: client.get_update_request(request_id))
+        if (
+            current is not None
+            and current.generation == request_generation
+            and current.status == "failed"
+        ):
+            raise Failure(
+                description=current.error_message or summary.describe(),
+                metadata={
+                    "request_id": request_id,
+                    "status": "failed",
+                    "stage": stage,
+                    "transient_error_after_terminal": summary.describe(),
+                },
+            )
         metadata: dict[str, object] = {**failure_metadata, "status": "state_changed"}
         context.log.warning(
             "feature update request 일시 실패 뒤 상태가 이미 바뀌어 재발행하지 않았다: "
@@ -395,6 +442,12 @@ async def _reschedule_after_transient_failure(
 #: 실행이 provider 갱신을 시작한 뒤의 일시 실패는 재발행할 때마다 provider 호출을 처음부터
 #: 다시 한다(앞서 commit된 scope도). 쿼터가 좁은 상류(data.go.kr·OpiNet)를 위해 그 재발행 수를
 #: 줄인다(적대 리뷰 2026-11-24). claim·scope 해석 단계의 실패는 상류를 부르지 않았다.
+#:
+#: 상한은 request의 **누적** ``retry_count``에 건다 — launch 실패·claim 전 일시 실패의 재발행도
+#: 함께 센다(#1551 결정). 그래서 앞서 재발행이 2회 쌓인 request는 provider 단계의 첫 일시 실패에서
+#: 재발행 없이 닫힌다. 단계마다 따로 세려면 열이 하나 더 필요하고(migration), 이미 재발행을
+#: 거듭한 요청을 provider 단계에서 더 미루지 않는 편이 상류 쿼터에도 안전하다. 종결 메시지는 상한과
+#: 누적을 함께 적는다(``재발행 상한 2회 소진(누적 4회): …``).
 _PROVIDER_STAGE_MAX_RETRIES: Final[int] = 2
 _DB_CALL_RETRY_DELAYS_SECONDS: Final[tuple[float, ...]] = (2.0, 5.0)
 
@@ -463,17 +516,28 @@ async def _handle_failure_side_effects(
             )
             if expected_generation is None:
                 raise ValueError("feature update failure run에 request generation tag가 없음")
-            await client.fail_update_request(
-                request_id,
-                owner_dagster_run_id=context.dagster_run.run_id,
-                expected_request_generation=expected_generation,
-                error_message=message,
-                failure_payload={"source": "dagster_run_failure", **(detail or {})},
-            )
+            # 상태 전이와 후처리 전부를 ADR-112 run-status 예산 안에 묶는다. 마감이 없으면 상태
+            # 전이가 Dagster 엔진 기본값(``lock_timeout`` 30초 — 행 두 개면 그 두 배)으로 돈다.
+            with transaction_deadline(time.monotonic() + _FAILURE_SENSOR_DB_BUDGET_SECONDS):
+                async with asyncio.timeout(
+                    _FAILURE_SENSOR_DB_BUDGET_SECONDS + _CLIENT_TIMEOUT_GRACE_SECONDS
+                ):
+                    await client.fail_update_request(
+                        request_id,
+                        owner_dagster_run_id=context.dagster_run.run_id,
+                        expected_request_generation=expected_generation,
+                        error_message=message,
+                        failure_payload={"source": "dagster_run_failure", **(detail or {})},
+                        # op가 재발행을 기록하지 못하고 죽었을 때도 op와 같은 상한을 쓴다 — provider
+                        # 갱신 단계면 2회다. 기본 5회를 쓰면 쿼터가 좁은 상류를 세 번 더 처음부터
+                        # 부른다.
+                        max_retries=_max_retries_for_stage((detail or {}).get("stage")),
+                    )
         except Exception as exc:
             context.log.error(
-                "feature update request 실패 상태 반영 실패: request_id=%s error=%s",
+                "feature update request 실패 상태 반영 실패: request_id=%s error_type=%s error=%s",
                 request_id,
+                type(exc).__name__,
                 exc,
             )
     await _notify_failure(context, request_id=request_id, message=message)

@@ -58,6 +58,7 @@ from kortravelmap.infra.feature_update_repo import (
 from kortravelmap.infra.jobs_repo import get_import_job, record_import_job_event
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTargetFeatureLinkCandidate,
+    mark_poi_cache_target_keys_refresh_failed,
     mark_poi_cache_targets_refresh_failed,
     mark_poi_cache_targets_refresh_requested,
     mark_poi_cache_targets_refreshed,
@@ -1625,12 +1626,20 @@ async def retry_or_fail_update_request_state(
         return FeatureUpdateRetryOutcome(
             request=rescheduled, rescheduled=True, max_retries=max_retries
         )
+    # 상한은 누적 ``retry_count``(launch 실패 재발행 포함)에 건다 — 단계마다 따로 세지 않는다.
+    # 그래서 provider 단계 상한(2회)으로 닫힐 때 누적이 상한보다 클 수 있다. 메시지가 상한 값만
+    # 적으면 실제 재발행 수와 어긋나므로 둘 다 적는다(#1551 리뷰).
+    current = await get_update_request(session, request_id)
+    if current is None:
+        return None
     failed = await fail_update_request_after_retries(
         session,
         request_id,
         expected_generation=expected_generation,
         owner_dagster_run_id=owner_dagster_run_id,
-        error_message=f"재발행 {max_retries}회 소진: {failure_message}",
+        error_message=(
+            f"재발행 상한 {max_retries}회 소진(누적 {current.retry_count}회): {failure_message}"
+        ),
     )
     if failed is None:
         return None
@@ -1660,20 +1669,21 @@ async def fail_update_request_state(
     )
 
 
-async def record_update_request_failure_events(
+async def record_update_request_relay_failed(
     session: AsyncSession,
     request: FeatureUpdateRequest,
     *,
     event_code: str,
-    payload: Mapping[str, Any],
 ) -> None:
-    """``failed``로 닫힌 request의 relay ``failed`` status와 terminal import job event를 쓴다.
+    """``failed``로 닫힌 request의 PinVi relay ``failed`` status를 쓴다 — 그래야 PinVi가 executor가
+    죽은 요청의 끝도 본다.
 
-    상태 전이와 **다른** transaction이다(:func:`retry_or_fail_update_request_state` 참고). relay
-    stream을 먼저 잡고 status event를 savepoint 안에서 낸다 — restore fence가 움직였으면 그 event만
-    건너뛴다(executor의 :func:`_finish_failed_execution`과 같은 규칙). 그래야 PinVi가 executor가
-    죽은
-    요청의 끝도 본다.
+    상태 전이와 **다른** transaction이고(:func:`retry_or_fail_update_request_state` 참고), import
+    job event(:func:`record_update_request_failure_events`)와도 다른 transaction이다. 한
+    transaction에 묶으면 import job event 쪽 실패(lock 경합·trigger 거부)가 relay ``failed``까지
+    되감아, 상태만 ``failed``로 남고 relay는 영구 유실된다(#1544 리뷰). relay stream을 먼저 잡고
+    status event를 savepoint 안에서 낸다 — restore fence가 움직였으면 그 event만 건너뛴다(executor의
+    :func:`_finish_failed_execution`과 같은 규칙).
     """
     await lock_cache_target_result_streams(session, request_id=request.request_id)
     try:
@@ -1694,6 +1704,42 @@ async def record_update_request_failure_events(
             request.request_id,
             violation.reason,
         )
+
+
+async def mark_update_request_cache_targets_failed(
+    session: AsyncSession,
+    request: FeatureUpdateRequest,
+) -> int:
+    """executor 밖에서 ``failed``로 닫힌 cache target 요청의 target에 ``last_failed_at``을 찍는다.
+
+    executor 종결(:func:`_finish_failed_execution`)은 실행 계획의 활성 target에 찍는다. 재발행
+    소진·``FeatureUpdateTerminalizationFailed``·RUN_FAILED 종결도 같은 사실을 남긴다 — 종전에는 일시
+    DB 실패도 executor 종결로 닫혀 찍혔다(#1544 리뷰). 실행 계획이 없으므로 request scope의 key에서
+    해석기와 같은 규칙(삭제·갱신 끔·refresh 끔 제외)으로 활성 target을 고른다. cache target scope가
+    아니면 아무것도 하지 않는다.
+    """
+    if request.scope_type != "cache_target_keys":
+        return 0
+    return await mark_poi_cache_target_keys_refresh_failed(
+        session,
+        external_system=str(request.scope["external_system"]),
+        target_keys=[str(key) for key in request.scope["target_keys"]],
+    )
+
+
+async def record_update_request_failure_events(
+    session: AsyncSession,
+    request: FeatureUpdateRequest,
+    *,
+    event_code: str,
+    payload: Mapping[str, Any],
+) -> None:
+    """``failed``로 닫힌 request의 terminal import job event를 쓴다.
+
+    상태 전이와 다른 transaction이다. relay ``failed``(:func:`record_update_request_relay_failed`)와
+    target 실패 시각(:func:`mark_update_request_cache_targets_failed`)도 각자 다른 transaction에서
+    쓴다 — 하나의 실패가 다른 기록을 되감지 않게 한다.
+    """
     await _record_update_request_events(
         session,
         request,
@@ -1712,12 +1758,14 @@ async def record_update_request_retry_events(
     failure_message: str,
     payload: Mapping[str, Any],
 ) -> None:
-    """:func:`retry_or_fail_update_request_state`의 결과를 import job event(와 종결이면 relay)로
-    남긴다.
+    """:func:`retry_or_fail_update_request_state`의 결과를 import job event로 남긴다.
 
     재발행은 ``warning`` + :data:`FEATURE_UPDATE_RETRY_SCHEDULED_EVENT_CODE`(다음 발행 시각·횟수),
-    종결은 ``error`` + :data:`FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE`. ``payload``에는 비밀값을
-    넣지 않는다(:func:`~kortravelmap.infra.failure_summary.summarize_failure`가 만든 것).
+    종결은 ``error`` + :data:`FEATURE_UPDATE_RETRIES_EXHAUSTED_EVENT_CODE`. 종결의 relay
+    ``failed``와 target 실패 시각은 호출자가 다른 transaction에서 쓴다
+    (:func:`record_update_request_relay_failed`·:func:`mark_update_request_cache_targets_failed`).
+    ``payload``에는 비밀값을 넣지 않는다
+    (:func:`~kortravelmap.infra.failure_summary.summarize_failure`가 만든 것).
     """
     request = outcome.request
     common = {**payload, "dagster_run_id": owner_dagster_run_id, "max_retries": outcome.max_retries}
