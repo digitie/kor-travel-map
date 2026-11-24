@@ -26,6 +26,13 @@
 - transport #265(`30aed17`, ADR-013 2026-11-24 개정) 반영: 전국 활성 돌발 0건은 transport가 성공으로 게시하지 않고 export가
   503 — Map은 상류 미준비로 건너뛴다. `transport.highway_incidents` guard의 "기준 미만이면 0건 허용"을 없애고 절대 하한 1건을
   방어선으로 남겼다(옛 transport·계약 위반의 200 + 0건은 거부 → 나이 규칙).
+- **소유자 결정(2026-11-24) "나이 기준 혼합"과 #1549 합침**: run 결과 기준을 읽기 `max_age`에서 job spec 경고 임계
+  `stale_alert_after`(주유소 16시간·휴게소 유가 8시간·돌발 20분·휴게소·공항 2일, weather 2시간~2일 — 표는 ADR-114 개정 절)로
+  바꿨다. transport 세션 PR #1549(transport export 503 code 분류·HTTP 층 재시도·바뀌지 않은 주유소 집합 건너뛰기·요청 계측)를 이
+  PR로 가져와 같은 자리(`transport_state.py` fetch 실패 처리)를 하나의 의미로 맞췄다 — `TransportSourceNotCurrent` 4종·
+  `TransportExportBusy`(대기 상한 초과 포함)·`EXPORT_SOURCE_INCONSISTENT`·code 없는 503은 상태 job에서 상류 미준비(건너뜀)로,
+  `EXPORT_DISABLED`·`EXPORT_TOO_LARGE`는 재시도 없는 실패로. 그 PR의 `outcome=skipped_upstream_not_current` 실패 경로는 걷었다.
+  feature 적재 asset 쪽 분류는 #1549 그대로다.
 - 시험: `test_upstream_signal.py`(새), `test_transport_state_jobs.py`·`test_weather_state_jobs.py`·`test_weather_forecast_delta_jobs.py`·
   `test_definitions.py`(모든 job run 상한, 비-feature schedule 다음 tick 전 회수), integration `test_valkey_{transport,weather}_state.py`
   (거부·나이, 공용 자리 동시성·갱신·대기). OpenAPI·migration 없음. 관리자 화면 변화 없음(e2e 대상 아님).

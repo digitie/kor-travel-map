@@ -160,6 +160,22 @@ def test_current_ceiling_is_a_temporary_600_and_leaves_room_to_read() -> None:
         assert 0 < each.read_budget_seconds < each.max_runtime_seconds - 60, each.job_name
 
 
+def test_weather_alert_thresholds_sit_below_the_read_side_max_age() -> None:
+    # 소유자 결정(2026-11-24 "나이 기준 혼합"): run 결과는 경고 임계로, 읽기 계약 max_age는 그대로.
+    expected = {
+        "weather.locations": timedelta(days=2),
+        "weather.current": timedelta(hours=2),
+        "weather.forecast_ultra_short": timedelta(hours=2),
+        "weather.forecast_short": timedelta(hours=8),
+        "weather.forecast_mid": timedelta(hours=26),
+        "weather.forecast_external": timedelta(hours=8),
+        "weather.daily_summaries": timedelta(hours=4),
+    }
+    assert {spec.dataset.name: spec.stale_alert_after for spec in WEATHER_STATE_SPECS} == expected
+    for spec in WEATHER_STATE_SPECS:
+        assert spec.stale_alert_after < spec.dataset.max_age, spec.job_name
+
+
 def _fire_minutes(cron: str) -> set[int]:
     minute = cron.split()[0]
     return {int(value) for value in minute.split(",")}
@@ -916,7 +932,7 @@ async def test_waitable_weather_failures_skip_the_tick(error: Exception, kind: s
 
 async def test_not_ready_past_the_stale_age_fails_the_run() -> None:
     spec = _failing_spec(WeatherExportNotReady("503"))
-    store = _FakeStore(current=_served(spec.dataset.max_age + timedelta(hours=1)))
+    store = _FakeStore(current=_served(spec.stale_alert_after + timedelta(hours=1)))
     metadata = await _load(spec, store)
     assert metadata["skipped"] == "upstream_not_ready"
     assert metadata["stale_alert"] is True
@@ -1011,7 +1027,7 @@ async def test_weather_refusal_follows_the_served_generation_age() -> None:
         _ok_spec(),
         _FakeStore(
             swap_error=refused,
-            current=_served(WEATHER_STATE_SPECS[0].dataset.max_age + timedelta(hours=1)),
+            current=_served(WEATHER_STATE_SPECS[0].stale_alert_after + timedelta(hours=1)),
         ),
     )
     assert stale["skipped"] == "refused"

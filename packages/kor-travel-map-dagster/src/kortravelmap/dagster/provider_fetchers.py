@@ -19,6 +19,8 @@ import importlib
 import json
 import logging
 import pathlib
+import re
+import time
 import zlib
 from collections.abc import (
     AsyncIterator,
@@ -43,13 +45,21 @@ from kortravelmap.providers.kor_travel_transport import (
     EXPORT_PATH_REST_AREA_FUEL_PRICES,
     EXPORT_PATH_REST_AREAS,
     SERVICE_TOKEN_HEADER,
+    TRANSPORT_BUSY_CODES,
+    TRANSPORT_CODE_DISABLED,
+    TRANSPORT_CODE_SOURCE_INCONSISTENT,
+    TRANSPORT_CODE_TOO_LARGE,
+    TRANSPORT_SOURCE_NOT_CURRENT_CODES,
     TransportAirport,
+    TransportExportBusy,
     TransportExportContractError,
+    TransportExportDisabled,
     TransportExportEmpty,
     TransportExportFailure,
     TransportExportHidden,
     TransportExportMalformed,
     TransportExportNotCurrent,
+    TransportExportTooLarge,
     TransportFerryPort,
     TransportFuelStation,
     TransportHighwayIncident,
@@ -57,6 +67,8 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportRestArea,
     TransportRestAreaFuelPrice,
     TransportSnapshotExpired,
+    TransportSourceInconsistent,
+    TransportSourceNotCurrent,
     parse_active_incident_set,
     parse_airports,
     parse_export_page,
@@ -81,8 +93,13 @@ from .provider_pagination import (
     aiter_paginated_items,
 )
 from .quota_exhaustion import quota_exhaustion_cause
+from .transport_http_metrics import note_transport_response, note_transport_retry
 from .upstream_requests import note_upstream_request
-from .upstream_transient import is_transient_upstream_failure, upstream_retry_after_seconds
+from .upstream_transient import (
+    is_transient_upstream_failure,
+    parse_retry_after,
+    upstream_retry_after_seconds,
+)
 
 if TYPE_CHECKING:
     from kortravelmap.settings import KorTravelMapSettings
@@ -118,6 +135,7 @@ __all__ = [
     "StandardFileSnapshotIncomplete",
     "fetch_standard_tourist_attractions",
     "fetch_kor_travel_concierge_youtube_features",
+    "TransportExportUnchanged",
     "fetch_transport_airports",
     "fetch_transport_ferry_ports",
     "fetch_transport_fuel_stations",
@@ -329,18 +347,47 @@ _TRANSPORT_MAX_PAGES: Final[int] = 1000
 """페이지 루프 상한. 최대 page size 1000이면 100만 행 — 주유소 약 1.2만·휴게소 수백의 수십 배다.
 넘으면 cursor가 순환하거나 계약이 깨진 것이다(같은 cursor 반복은 별도로 즉시 잡는다)."""
 
-_TRANSPORT_TRANSIENT_STATUSES: Final[frozenset[int]] = frozenset({502, 504})
-"""HTTP 층에서 곧바로 다시 부를 상태 — 같은 호스트의 transport 재기동·게이트웨이 순간 장애.
-503은 여기서 다시 부르지 않는다: transport가 "근거 수집이 현재가 아니다"라고 판정한 것이고 15초
-안에 바뀌지 않는다. 대신 :class:`TransportExportNotCurrent`는 ``retryable=True``라 step 재시도
-(``FEATURE_LOAD_RETRY_POLICY``, 60초부터 지수)의 대상이다 — terminal로 끄지 않는다."""
+_TRANSPORT_TRANSIENT_STATUSES: Final[frozenset[int]] = frozenset({408, 429, 500, 502, 504})
+"""HTTP 층에서 곧바로 다시 부를 상태 — transport 재기동·게이트웨이 순간 장애·DB 일시
+오류(500)·throttle(429, ``Retry-After``를 따른다). 503은 code로 가른다
+(:func:`_transport_unavailable`): 몇 초짜리 경합(``TRANSPORT_BUSY_CODES``)만 같은 요청을 다시
+보내고, 근거 수집이 현재가 아닌 것은 다시 부르지 않는다 — 15초 안에 바뀌지 않는다. code가 없는
+503은 종전대로 :class:`TransportExportNotCurrent`(``retryable=True``, step 재시도 대상)다."""
+
+_TRANSPORT_CONTRACT_STATUSES: Final[frozenset[int]] = frozenset({400, 422})
+"""몇 번을 다시 불러도 같은 요청 오류 — 질의·cursor 계약 위반
+(:class:`_TransportRequestRejected`)."""
 
 _TRANSPORT_RETRY_BASE_DELAY_SECONDS: float = upstream_retry.PROVIDER_BOUNDARY_BASE_DELAY_SECONDS
 """재시도 간격 기준(테스트가 0으로 바꾼다). 다른 내부·provider 경계와 같은 값이다."""
 
+_TRANSPORT_BUSY_ATTEMPTS: Final[int] = 4
+"""503 경합(``TransportExportBusy``) 한 요청의 시도 상한(첫 요청 포함) — 같은 cursor로
+다시 묻는다."""
+
+_TRANSPORT_BUSY_BASE_DELAY_SECONDS: float = 5.0
+"""503 경합 재시도 간격 기준(5·10·20초). ``Retry-After``가 더 길면 그것을 따른다."""
+
+_TRANSPORT_RETRY_AFTER_CAP_SECONDS: Final[float] = 60.0
+"""HTTP 층에서 한 번 기다리는 상한(같으면 기다린다). ``Retry-After``가 이보다 길면 다시 묻지
+않고 실패를 올린다 — 503 경합 code면 **재시도 없는 실패**(:class:`TransportExportBusy`
+``retryable=False``, ``retry_after_exceeds_cap``), 429 등 code 없는 일시 상태면 종전대로 step
+재시도에 맡긴다.
+
+주의: transport ``EXPORT_PREPARE_TIMEOUT``의 기본 ``Retry-After``는 지금 이 상한과 같은 60초다.
+transport가 그 값을 60초 위로 올리면 준비 시간 초과 503은 기다림 없이 재시도 없는 실패로 바뀐다
+(실패 metadata ``transport_retry_after_seconds``와 경고 log로 드러난다). 그때는 이 상한을 같이
+올린다."""
+
+_PROBLEM_CODE: Final[re.Pattern[str]] = re.compile(r"[A-Z][A-Z0-9_]{0,63}")
+_PROBLEM_DETAIL_CHARS: Final[int] = 300
+
+_transport_retry_sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
+"""HTTP 층 재시도 대기(테스트가 기록용으로 바꾼다)."""
+
 
 class _TransportTransientStatus(TransportExportFailure):
-    """재시도 대상 상태(502/504). 시도를 다 쓰면 그대로 전파된다.
+    """재시도 대상 상태(408·429·500·502·504). 시도를 다 쓰면 그대로 전파된다.
 
     ``retryable=True``다 — HTTP 층 시도를 다 써도 step 재시도는 남아야 한다. 부모의 ``False``를
     물려받으면 asset 경계가 짧은 transport 재기동을 terminal로 만들어 하루치 유가를 놓친다.
@@ -350,9 +397,48 @@ class _TransportTransientStatus(TransportExportFailure):
     retryable = True
 
 
+class _TransportRequestRejected(TransportExportContractError):
+    """400·422 — Map이 보낸 질의(``limit``·``cursor``)를 transport가 거절했다. 다시 불러도 같다."""
+
+    failure_kind = "transport_request_rejected"
+
+
 def _transport_retryable(exc: BaseException) -> bool:
-    """연결·timeout 같은 전송 오류와 502/504만 재시도한다. 404·503·계약 위반은 즉시 전파."""
+    """연결·timeout 같은 전송 오류와 일시 상태만 재시도한다. 404·계약 위반은 즉시 전파.
+
+    503 경합(:class:`TransportExportBusy`)은 :func:`_transport_retry_delay`가 따로 다룬다.
+    """
     return isinstance(exc, httpx.TransportError | _TransportTransientStatus)
+
+
+def _transport_retry_delay(exc: BaseException, attempt: int) -> float | None:
+    """``attempt``번째 시도가 ``exc``로 끝났을 때 같은 요청을 다시 보내기 전 대기(초).
+
+    다시 보내지 않으면 ``None``. 대기는 backoff와 ``Retry-After`` 중 긴 쪽이고, ``Retry-After``가
+    :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않는다.
+    """
+    if isinstance(exc, TransportExportBusy):
+        if attempt >= _TRANSPORT_BUSY_ATTEMPTS:
+            return None
+        backoff = min(
+            _TRANSPORT_BUSY_BASE_DELAY_SECONDS * (2.0 ** (attempt - 1)),
+            _TRANSPORT_RETRY_AFTER_CAP_SECONDS,
+        )
+    elif _transport_retryable(exc):
+        if attempt >= upstream_retry.DEFAULT_UPSTREAM_ATTEMPTS:
+            return None
+        backoff = min(
+            _TRANSPORT_RETRY_BASE_DELAY_SECONDS * (2.0 ** (attempt - 1)),
+            upstream_retry.DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
+        )
+    else:
+        return None
+    hinted = getattr(exc, "retry_after", None)
+    if not isinstance(hinted, int | float) or isinstance(hinted, bool):
+        return backoff
+    if hinted > _TRANSPORT_RETRY_AFTER_CAP_SECONDS:
+        return None
+    return max(backoff, float(hinted))
 
 
 def _transport_run_budget() -> upstream_retry.RetryBudget:
@@ -401,12 +487,7 @@ def _raise_transport_status(response: httpx.Response, path: str) -> None:
             "버전이다."
         )
     if status == 503:
-        raise TransportExportNotCurrent(
-            f"kor-travel-transport {path}가 503이다 — 근거 수집의 이력이 없거나 실패했거나 "
-            "stale이다(transport ADR-013). 기준정보 export(철도역·항구)는 transport가 그 export를 "
-            "켜지 않았을 때도 503이다(``TRANSPORT_MAP_CURRENT_ENABLED``). 이번 run은 아무것도 "
-            "적재·삭제·종료하지 않는다."
-        )
+        raise _transport_unavailable(response, path)
     if status == 410:
         # 기준정보 snapshot(15분 TTL)이 페이지를 다 읽기 전에 만료됐다 — 첫 페이지부터 다시
         # 읽어야 한다. 기준정보 fetcher가 한 번 다시 읽고, 그래도 만료면 step 재시도로 넘긴다.
@@ -414,9 +495,128 @@ def _raise_transport_status(response: httpx.Response, path: str) -> None:
             f"kor-travel-transport {path}가 410이다 — snapshot이 만료됐다. 이번 run은 아무것도 "
             "적재·삭제하지 않는다."
         )
+    if status in _TRANSPORT_CONTRACT_STATUSES:
+        code, detail = _transport_problem(response)
+        raise _TransportRequestRejected(
+            f"kor-travel-transport {path}가 {status}다(code={code}) — 질의·cursor 계약 위반이라 "
+            f"다시 불러도 같다. detail: {detail or '-'}"
+        )
     if status in _TRANSPORT_TRANSIENT_STATUSES:
-        raise _TransportTransientStatus(f"kor-travel-transport {path}가 {status}다.")
+        code, detail = _transport_problem(response)
+        raise _TransportTransientStatus(
+            f"kor-travel-transport {path}가 {status}다(code={code}). detail: {detail or '-'}",
+            code=code,
+            retry_after=parse_retry_after(response.headers.get("retry-after")),
+        )
     response.raise_for_status()
+
+
+def _transport_problem(response: httpx.Response) -> tuple[str | None, str]:
+    """오류 응답 problem+json의 ``code``와 ``detail`` 앞부분. 읽을 수 없으면 ``(None, "")``.
+
+    ``code``가 있으나 모양(UPPER_SNAKE)이 틀리면 ``None``으로 본다 — 모르는 code와 같게 종전
+    동작이다.
+    아직 읽지 않은 stream 본문(``_bounded_transport_response``)도 ``(None, "")``다.
+    """
+    try:
+        body = response.json()
+    except (ValueError, RecursionError, httpx.ResponseNotRead):
+        return None, ""
+    if not isinstance(body, dict):
+        return None, ""
+    code = body.get("code")
+    detail = body.get("detail")
+    return (
+        code if isinstance(code, str) and _PROBLEM_CODE.fullmatch(code) else None,
+        detail[:_PROBLEM_DETAIL_CHARS] if isinstance(detail, str) else "",
+    )
+
+
+def _transport_unavailable(response: httpx.Response, path: str) -> TransportExportFailure:
+    """503을 problem ``code``로 가른다(transport 2026-11-24 계약, 감사 MC-01).
+
+    분류는 code로만 한다. ``Retry-After``는 transport가 dataset·상태마다 계산하는 힌트라 범위를
+    가정하지 않고 실패에 그대로 싣는다(대기에 쓰는 것은 경합 code뿐이다).
+
+    - ``EXPORT_SOURCE_NOT_CURRENT``·``EXPORT_NO_HISTORY``·``EXPORT_INCIDENTS_NOT_CURRENT``·
+      ``EXPORT_EMPTY_SET`` → :class:`TransportSourceNotCurrent`(HTTP 층도 step도 다시 부르지 않는다.
+      feature 적재 asset은 run이 실패로 끝나고, Valkey 상태 job은 나이 기준 혼합 —
+      ``upstream_signal``).
+    - ``EXPORT_BUSY``·``EXPORT_PREPARE_TIMEOUT``·``TRANSIENT_DB`` → :class:`TransportExportBusy`
+      (같은 요청을 ``Retry-After``대로 다시 보낸다 — :func:`_transport_get`. ``Retry-After``가
+      :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않고 재시도 없는 실패다).
+    - ``EXPORT_DISABLED``·``EXPORT_TOO_LARGE`` → :class:`TransportExportDisabled`·
+      :class:`TransportExportTooLarge`(설정·데이터가 바뀌기 전에는 같다 — 재시도 없는 실패).
+    - ``EXPORT_SOURCE_INCONSISTENT`` → :class:`TransportSourceInconsistent`(HTTP 층에서는 다시
+      묻지 않고 step 재시도 — transport의 다음 수집·준비가 고친다).
+    - code 없음·모르는 code(``SERVICE_UNAVAILABLE`` 등 앞으로 붙을 공통 code 포함) → 종전대로
+      :class:`TransportExportNotCurrent`(retryable, step 재시도).
+    """
+    code, detail = _transport_problem(response)
+    retry_after = parse_retry_after(response.headers.get("retry-after"))
+    tail = f"(code={code}, Retry-After={retry_after}). detail: {detail or '-'}"
+    if code in TRANSPORT_SOURCE_NOT_CURRENT_CODES:
+        return TransportSourceNotCurrent(
+            f"kor-travel-transport {path}가 503이다 — 근거 수집이 현재가 아니다{tail} 이번 run은 "
+            "아무것도 적재·삭제·종료하지 않는다.",
+            code=code,
+            retry_after=retry_after,
+        )
+    if code in TRANSPORT_BUSY_CODES:
+        over_cap = retry_after is not None and retry_after > _TRANSPORT_RETRY_AFTER_CAP_SECONDS
+        if over_cap:
+            _LOGGER.warning(
+                "kor-travel-transport %s 503 code=%s Retry-After %.0f초가 HTTP 층 대기 상한 "
+                "%.0f초를 넘는다 — 기다리지 않고 재시도 없이 실패한다",
+                path,
+                code,
+                retry_after,
+                _TRANSPORT_RETRY_AFTER_CAP_SECONDS,
+            )
+        cap_note = (
+            f" Retry-After가 HTTP 층 대기 상한 {_TRANSPORT_RETRY_AFTER_CAP_SECONDS:.0f}초를 넘어 "
+            "기다리지 않고 재시도 없이 실패한다."
+            if over_cap
+            else ""
+        )
+        return TransportExportBusy(
+            f"kor-travel-transport {path}가 503이다 — 일시 경합·준비 시간 초과·DB 일시 "
+            f"오류다{tail}{cap_note}",
+            code=code,
+            retry_after=retry_after,
+            retry_after_cap=_TRANSPORT_RETRY_AFTER_CAP_SECONDS,
+        )
+    if code == TRANSPORT_CODE_DISABLED:
+        return TransportExportDisabled(
+            f"kor-travel-transport {path}가 503이다 — transport가 이 export를 설정으로 껐다"
+            f"(``TRANSPORT_MAP_CURRENT_ENABLED``){tail} transport 설정을 바꾸기 전에는 같으므로 "
+            "재시도하지 않는다.",
+            code=code,
+            retry_after=retry_after,
+        )
+    if code == TRANSPORT_CODE_TOO_LARGE:
+        return TransportExportTooLarge(
+            f"kor-travel-transport {path}가 503이다 — 집합이 transport export 상한을 넘었다{tail} "
+            "데이터나 상한이 바뀌기 전에는 같으므로 재시도하지 않는다.",
+            code=code,
+            retry_after=retry_after,
+        )
+    if code == TRANSPORT_CODE_SOURCE_INCONSISTENT:
+        return TransportSourceInconsistent(
+            f"kor-travel-transport {path}가 503이다 — transport 근거끼리 맞지 않는다{tail} "
+            "transport의 다음 수집·준비가 고친다 — step 재시도에 맡긴다. 이번 run은 아무것도 "
+            "적재·삭제·종료하지 않는다.",
+            code=code,
+            retry_after=retry_after,
+        )
+    return TransportExportNotCurrent(
+        f"kor-travel-transport {path}가 503이다 — 근거 수집의 이력이 없거나 실패했거나 "
+        "stale이다(transport ADR-013). code가 없는 옛 transport에서는 기준정보 "
+        "export(철도역·항구)가 꺼졌을 때도 이 503이다(``TRANSPORT_MAP_CURRENT_ENABLED``)"
+        f"{tail} 이번 run은 아무것도 적재·삭제·종료하지 않는다.",
+        code=code,
+        retry_after=retry_after,
+    )
 
 
 async def _bounded_transport_response(
@@ -479,11 +679,32 @@ async def _transport_request_once(
     *,
     response_byte_limit: int | None = None,
 ) -> httpx.Response:
-    """HTTP 요청 정확히 1건 — 시도마다 여기서 센다(재시도도 요청이다)."""
+    """HTTP 요청 정확히 1건 — 시도마다 여기서 센다(재시도도 요청이다).
+
+    걸린 시간과 transport ``Server-Timing``도 여기서 기록한다(:mod:`.transport_http_metrics`).
+    """
     note_upstream_request()
+    started = time.monotonic()
     if response_byte_limit is not None:
-        return await _bounded_transport_response(client, path, params, response_byte_limit)
-    response = await client.get(path, params=dict(params))
+        try:
+            bounded = await _bounded_transport_response(client, path, params, response_byte_limit)
+        except httpx.TransportError as exc:
+            note_transport_response(type(exc).__name__, time.monotonic() - started, None)
+            raise
+        note_transport_response(
+            str(bounded.status_code),
+            time.monotonic() - started,
+            bounded.headers.get("server-timing"),
+        )
+        return bounded
+    try:
+        response = await client.get(path, params=dict(params))
+    except httpx.TransportError as exc:
+        note_transport_response(type(exc).__name__, time.monotonic() - started, None)
+        raise
+    note_transport_response(
+        str(response.status_code), time.monotonic() - started, response.headers.get("server-timing")
+    )
     _raise_transport_status(response, path)
     return response
 
@@ -496,15 +717,26 @@ async def _transport_get(
     budget: upstream_retry.RetryBudget,
     response_byte_limit: int | None = None,
 ) -> httpx.Response:
-    """요청 1건(전송 오류·502/504는 유한 재시도). 상태 해석까지 끝낸 응답만 돌려준다.
+    """요청 1건(일시 실패는 같은 요청으로 유한 재시도). 상태 해석까지 끝낸 응답만 돌려준다.
 
-    재시도 규약은 ``upstream_retry``와 같다(시도 상한 ``DEFAULT_UPSTREAM_ATTEMPTS``, run 예산
-    공유, 지수 backoff). 그 헬퍼에 콜러블을 넘기지 않고 여기서 도는 이유는 계수 게이트
+    - 전송 오류·408·429·500·502·504: 시도 상한 ``DEFAULT_UPSTREAM_ATTEMPTS``, 지수 backoff.
+    - 503 경합(:class:`TransportExportBusy`): 시도 상한 :data:`_TRANSPORT_BUSY_ATTEMPTS`, 5·10·20초.
+    - 대기는 backoff와 ``Retry-After`` 중 긴 쪽, ``Retry-After``가
+      :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않는다
+      (:func:`_transport_retry_delay`). 재시도마다 run 예산을 하나 쓴다(``upstream_retry``와 같다).
+
+    **같은 요청(같은 cursor)만 다시 보낸다** — 순회를 이어 가는 재시도가 아니다. 다시 받은 페이지도
+    transport가 그 요청 시점에 따로 판정한 200이어야 하고, 그 사이 근거 수집이 현재가 아니게 됐으면
+    :class:`TransportSourceNotCurrent`로 run 전체가 실패한다(transport ADR-013 결정 3). step
+    재시도는 언제나 첫 페이지부터다.
+
+    그 헬퍼에 콜러블을 넘기지 않고 여기서 도는 이유는 계수 게이트
     (``tests/lint/test_every_fetcher_counts_or_declares_why_not.py``)가 호출만 따라가기 때문이다 —
     시도마다 :func:`_transport_request_once`를 직접 불러야 재시도 요청까지 센다고 보인다.
     """
-    attempts = upstream_retry.DEFAULT_UPSTREAM_ATTEMPTS
-    for attempt in range(1, attempts + 1):
+    attempt = 0
+    while True:
+        attempt += 1
         try:
             if response_byte_limit is not None:
                 return await _transport_request_once(
@@ -512,21 +744,34 @@ async def _transport_get(
                 )
             return await _transport_request_once(client, path, params)
         except Exception as exc:
-            if attempt >= attempts or not _transport_retryable(exc) or not budget.try_consume():
+            delay = _transport_retry_delay(exc, attempt)
+            if delay is None or not budget.try_consume():
                 raise
-            delay = min(
-                _TRANSPORT_RETRY_BASE_DELAY_SECONDS * (2 ** (attempt - 1)),
-                upstream_retry.DEFAULT_UPSTREAM_MAX_DELAY_SECONDS,
-            )
+            budget.charge(delay)
+            note_transport_retry(delay)
             _LOGGER.warning(
-                "kor-travel-transport %s 재시도 %d/%d (%s)",
+                "kor-travel-transport %s 재시도 %d (%s, code=%s) — %.0f초 뒤 같은 요청",
                 path,
                 attempt,
-                attempts,
                 type(exc).__name__,
+                getattr(exc, "code", None),
+                delay,
             )
-            await asyncio.sleep(delay)
-    raise AssertionError(f"unreachable: kor-travel-transport {path}")  # pragma: no cover
+            await _transport_retry_sleep(delay)
+
+
+class TransportExportUnchanged(Exception):  # noqa: N818 — 실패가 아니라 "그만 읽는다"는 신호다
+    """첫 페이지의 ``collection.last_success_at``이 호출자가 이미 가진 수집 시각과 같다(감사 MC-04).
+
+    실패가 아니다 — 순회를 멈추라는 신호다. item은 하나도 내지 않았다. 호출자(상태 job)는 교체 없이
+    끝낸다.
+    """
+
+    def __init__(self, path: str, last_success_at: datetime) -> None:
+        super().__init__(
+            f"{path}: 근거 수집 last_success_at={last_success_at.isoformat()}가 그대로다."
+        )
+        self.last_success_at = last_success_at
 
 
 async def _iter_transport_export(
@@ -534,6 +779,7 @@ async def _iter_transport_export(
     path: str,
     parse: Callable[[Mapping[str, Any]], Any],
     on_collected_at: Callable[[datetime], None] | None = None,
+    unchanged_since: datetime | None = None,
 ) -> AsyncIterator[Any]:
     """cursor 페이지를 끝까지 읽어 파싱한 item을 낸다.
 
@@ -541,6 +787,10 @@ async def _iter_transport_export(
     :class:`TransportExportEmpty`로 실패한다 — 이 export들은 완전 snapshot reconcile의 근거라서
     빈·낡은 집합을 받아들이면 멀쩡한 feature가 지워진다. 소비자(``_record_list``)는 전부 모은 뒤에
     적재하므로 뒤 페이지의 실패도 적재 전에 run을 멈춘다.
+
+    ``unchanged_since``를 주면 **첫 페이지**의 ``collection.last_success_at``이 그 값과 같을 때
+    item을 내기 전에 :class:`TransportExportUnchanged`로 멈춘다 — 집합은 수집이 성공할 때만
+    바뀐다(감사 MC-04). 판단은 첫 페이지 하나로만 한다.
     """
     base_url, headers = _transport_connection(settings)
     budget = _transport_run_budget()
@@ -559,6 +809,12 @@ async def _iter_transport_export(
             response = await _transport_get(client, path, params, budget=budget)
             page = parse_export_page(_transport_json(response, path), where=path)
             require_current_collection(page.collection, where=path)
+            if (
+                cursor is None
+                and unchanged_since is not None
+                and page.collection.last_success_at == unchanged_since
+            ):
+                raise TransportExportUnchanged(path, unchanged_since)
             if on_collected_at is not None and page.collection.last_success_at is not None:
                 # 페이지마다 원천 수집 시각을 알린다 — Valkey 상태의 신선도(ADR-114 D5).
                 on_collected_at(page.collection.last_success_at)
@@ -605,7 +861,7 @@ async def _read_transport_reference_snapshot(
     stale_warned = False
     for _page_number in range(_TRANSPORT_MAX_PAGES):
         # transport는 cursor에 limit을 결박한다 — 모든 페이지에 같은 limit을 보낸다.
-        params: dict[str, Any] = {"limit": settings.kor_travel_transport_page_size}
+        params: dict[str, Any] = {"limit": settings.kor_travel_transport_reference_page_size}
         if cursor is not None:
             params["cursor"] = cursor
         response = await _transport_get(client, path, params, budget=budget)
@@ -714,13 +970,16 @@ async def fetch_transport_fuel_stations(
     settings: KorTravelMapSettings,
     *,
     on_collected_at: Callable[[datetime], None] | None = None,
+    unchanged_since: datetime | None = None,
 ) -> AsyncIterator[TransportFuelStation]:
     """오피넷 주유소 + 유종별 최신 가격(transport 전국 수집본).
 
     ``on_collected_at``은 페이지마다 그 페이지 근거 수집의 ``last_success_at``을 받는다(ADR-114 D5).
+    ``unchanged_since``는 :func:`_iter_transport_export`를 본다(첫 페이지에서
+    :class:`TransportExportUnchanged`).
     """
     async for station in _iter_transport_export(
-        settings, EXPORT_PATH_FUEL_STATIONS, parse_fuel_station, on_collected_at
+        settings, EXPORT_PATH_FUEL_STATIONS, parse_fuel_station, on_collected_at, unchanged_since
     ):
         yield station
 
@@ -741,13 +1000,18 @@ async def fetch_transport_rest_area_fuel_prices(
     settings: KorTravelMapSettings,
     *,
     on_collected_at: Callable[[datetime], None] | None = None,
+    unchanged_since: datetime | None = None,
 ) -> AsyncIterator[TransportRestAreaFuelPrice]:
-    """휴게소 주유소 현재 유가."""
+    """휴게소 주유소 현재 유가.
+
+    ``unchanged_since``는 :func:`fetch_transport_fuel_stations`와 같다.
+    """
     async for price in _iter_transport_export(
         settings,
         EXPORT_PATH_REST_AREA_FUEL_PRICES,
         parse_rest_area_fuel_price,
         on_collected_at,
+        unchanged_since,
     ):
         yield price
 

@@ -8,23 +8,24 @@ SUCCESS), transport에서는 빨강(503·stale이면 step을 30·60초 뒤 두 �
 step에도 Dagster가 재시도를 요청했다(14일 100회, 전부 weather 상태 job — Dagster는 interrupt를
 retry policy에 넘긴다).
 
-이제 규칙은 하나다(ADR-114 "2026-11-24 개정" 절이 정본). 기준은 **지금 서비스하는 세대의 원천
-나이**(``source_collected_at``, 없으면 적재·304 재확인 시각)와 그 데이터셋의 읽기 stale 기준
-(``dataset.max_age`` — REST 응답의 ``freshness.stale``과 같은 값)이다.
+이제 규칙은 하나다(ADR-114 "2026-11-24 개정" 절이 정본, 소유자 결정 "나이 기준 혼합"). 기준은
+**지금 서비스하는 세대의 원천 나이**(``source_collected_at``, 없으면 적재·304 재확인 시각)와 job
+spec의 경고 임계 ``stale_alert_after``다. 임계는 읽기 쪽 계약 ``dataset.max_age``(REST
+``freshness.stale``)보다 낮다 — 소비자가 stale을 받기 전에 운영자가 빨간 run을 먼저 본다.
 
-- **상류 미준비**(503·``collection`` stale/실패 플래그·무응답·HTTP 층 재시도를 다 쓴 5xx·429·
-  snapshot 만료 반복·weather export 읽기 자리를 못 잡음·run 상한 안에 순회를 끝낼 수 없음)는 이번
-  tick을 건너뛴다(step 재시도 없음, 세대 유지).
+- **상류 미준비**(503 — transport code 503 전부 포함 — ·``collection`` stale/실패 플래그·무응답·HTTP
+  층 재시도를 다 쓴 5xx·429·snapshot 만료 반복·weather export 읽기 자리를 못 잡음·run 상한 안에
+  순회를 끝낼 수 없음)는 이번 tick을 건너뛴다(step 재시도 없음, 세대 유지).
 - **상류 stale이지만 값이 왔다**(weather 200 + ``stale``)는 그대로 교체한다 — 지금 세대보다 나쁘지
   않다.
 - **비정상 집합 거부**(0건·급감, ADR-114 D4)와 transport 0건 export는 데이터 보호라 계속 거부한다.
 - 어느 경우든 결과 metadata에 상류 상태와 서비스 세대 나이를 싣고, run tag
   :data:`UPSTREAM_STATE_TAG`·:data:`STALE_ALERT_TAG`를 언제나 쓴다(재실행이 낡은 tag를 물려받지
   않게).
-- **run 결과는 나이가 정한다**: 서비스 세대가 stale 기준 안이면 성공이다 — 한두 tick의 상류 이상은
-  빨갛게 만들지 않는다(종전 transport 503 80건·거부 64건은 대부분 다음 tick에 풀렸다). 기준을 넘으면
-  (세대가 아예 없으면 포함) **실패, 재시도 없음**이다(:func:`raise_if_stale`) — 소비자가 이미
-  ``stale``을 받는 상태이고 경보가 따로 없으므로 빨간 run이 유일한 신호다. 다음 tick이 다시 본다.
+- **run 결과는 나이가 정한다**: 서비스 세대가 경고 임계 안이면 성공이다 — 한두 tick의 상류 이상은
+  빨갛게 만들지 않는다(종전 transport 503 80건·거부 64건은 대부분 다음 tick에 풀렸다). 임계를 넘으면
+  (세대가 아예 없으면 포함) **실패, 재시도 없음**이다(:func:`raise_if_stale`) — Map에는 상류 장애
+  경보가 따로 없으므로 빨간 run이 유일한 신호다. 다음 tick이 다시 본다.
   설정 오류(주소·DNS)도 이 길로 늦어도 기준 나이 안에 빨갛게 된다.
 - Map 쪽 저장소(Valkey) 연결 실패만 step 재시도한다 — ``RetryPolicy`` 대신 op가
   :class:`dagster.RetryRequested`를 직접 올린다(:func:`retry_state_store_outage`). 그래야 run
@@ -41,6 +42,10 @@ from typing import Any, Final, NoReturn
 
 import httpx
 from kortravelmap.infra.valkey_state import GenerationMeta, StateStoreError
+from kortravelmap.providers.kor_travel_transport import (
+    TransportExportBusy,
+    TransportSourceNotCurrent,
+)
 
 from dagster import MAX_RUNTIME_SECONDS_TAG, Failure, OpExecutionContext, RetryRequested
 
@@ -113,6 +118,11 @@ def upstream_not_ready_kind(exc: BaseException) -> str | None:
         seen.add(id(current))
         if isinstance(current, StateStoreError):
             return None
+        if isinstance(current, TransportSourceNotCurrent | TransportExportBusy):
+            # transport가 503 code로 "근거 수집이 현재가 아니다"(4종)·"경합"(대기 상한 초과
+            # 포함)이라고 알렸다. step 재시도로는 풀리지 않으므로 ``retryable``과 상관없이 미준비다
+            # (transport #277·ADR-106 개정, 소유자 결정 2026-11-24 "나이 기준 혼합").
+            return current.failure_kind
         retryable = getattr(current, "retryable", None)
         if isinstance(retryable, bool):
             if not retryable:

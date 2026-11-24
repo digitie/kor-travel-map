@@ -184,7 +184,10 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
 1. `lock`을 `SET NX EX`(그 job의 run 상한 + 취소 유예 600초 + 60초)로 잡는다. 이미 있으면 다른 적재가 도는 것이라 이번 run은 받지 않고 끝낸다(실패
    아님). 끝나면 자기 토큰일 때만 지운다.
 2. 원천을 끝까지 받는다(기존 fetcher 그대로 — 수집 이력 없음·실패·stale·계약 위반·0건 페이지 export는 여기서
-   실패하고 Valkey에는 아무것도 쓰지 않는다).
+   멈추고 Valkey에는 아무것도 쓰지 않는다. run 결과는 "2026-11-24 개정" 절의 나이 기준 혼합 — transport 503 `code`
+   포함, ADR-106 개정 절). 주유소·휴게소 유가는 첫 페이지의 `collection.last_success_at`이 `current` 세대의
+   `source_collected_at`과 같고 그 세대 적재가 6시간 안이면 나머지 페이지와 3~5를 건너뛴다(`skipped=unchanged`,
+   6시간마다 전량).
 3. `current`와 그 세대 `meta`, `recent_counts`를 읽는다. `current`가 있는데 `meta`가 없으면 저장소가 깨진 것이라
    실패한다(첫 적재로 취급하지 않는다). 교체 거부 검사(D4). 거부면 쓰지 않고 실패한다.
 4. 새 세대 키를 pipeline으로 나눠 쓴다. **쓰는 동안 새 키마다 build TTL(기본 2시간)을 건다** — 적재가 도중에
@@ -769,23 +772,39 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
 
 | 상류 상태 | 판정 | Valkey 세대 |
 |---|---|---|
-| 미준비 — 503, `collection` stale·실패·이력 없음, 돌발 집합 30분 초과, 410 반복, HTTP 층 재시도를 다 쓴 5xx·429, 무응답(timeout·연결·DNS), weather export 읽기 자리를 못 잡음, run 상한 안에 순회를 끝낼 수 없음 | `skipped=upstream_not_ready`, step 재시도 없음 | 그대로 |
+| 미준비 — 503(transport problem `code` `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET`, 경합 `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`(HTTP 층 대기 뒤·대기 상한 초과 포함), `EXPORT_SOURCE_INCONSISTENT`, code 없음 — ADR-106 개정 절), `collection` stale·실패·이력 없음, 돌발 집합 30분 초과, 410 반복, HTTP 층 재시도를 다 쓴 5xx·429, 무응답(timeout·연결·DNS), weather export 읽기 자리를 못 잡음, run 상한 안에 순회를 끝낼 수 없음 | `skipped=upstream_not_ready`, step 재시도 없음 | 그대로 |
+| 바뀌지 않음 — 주유소·휴게소 유가 첫 페이지 `last_success_at`이 서비스 세대와 같다(6시간마다 전량) | `skipped=unchanged` | 그대로 |
 | 값은 왔으나 stale — weather 200 + `source_status=stale` | 교체 | 새 세대 |
 | 비정상 집합 — 교체 거부(D4), transport 0건 export | `skipped=refused` | 그대로 |
 | Map 쪽 Valkey 연결 실패 | op가 `RetryRequested`로 30·60초(±20%) 뒤 두 번(대기가 run 상한 −60초 안일 때만) | 그대로 |
-| 401·404·계약 위반·JSON 아님·OOM·미설정·scheme 없는 주소 | 실패, 재시도 없음(종전과 같다) | 그대로 |
+| 401·404·계약 위반·JSON 아님·OOM·미설정·scheme 없는 주소·transport `EXPORT_DISABLED`·`EXPORT_TOO_LARGE` | 실패, 재시도 없음(종전과 같다) | 그대로 |
 
 - **run 결과는 서비스 세대의 나이가 정한다.** 어느 결과든 op metadata에 `upstream_state`(`ok`·`stale`·`not_ready`·
   `refused`)·`upstream_reason`·서비스 세대(`served_generation`·`served_source_collected_at`)·**원천 나이**
   `served_age_seconds`(`source_collected_at`, 없으면 적재·304 재확인 시각, 세대가 없으면 −1)·기준
   `stale_alert_after_seconds`·`stale_alert`를 싣고, run tag `kor_travel_map.upstream_state`·
-  `kor_travel_map.upstream_stale_alert`(true/false)를 **언제나** 쓴다. 기준은 데이터셋의 읽기 stale 기준 `max_age`(D5·W4 —
-  REST `freshness.stale`과 같은 값: 돌발 30분, weather current·초단기 3시간, …)다. 기준 안이면 run은 성공(초록)이고, 넘으면(세대가
-  아예 없으면 포함) **재시도 없는 실패**다(`raise_if_stale`). 소비자가 이미 `stale`을 받는 상태인데 경보가 따로 없으므로 빨간
-  run이 유일한 신호다. 한두 tick의 상류 이상(14일 transport 503 80건·거부 64건은 대부분 다음 tick에 풀렸다)은 초록으로 남고,
+  `kor_travel_map.upstream_stale_alert`(true/false)를 **언제나** 쓴다. **소유자 결정(2026-11-24 "나이 기준 혼합")**: 기준은
+  job spec의 경고 임계 `stale_alert_after`이고 읽기 쪽 계약 `max_age`(D5·W4 — REST `freshness.stale`, 그대로 둔다)보다 낮다 —
+  소비자가 `stale`을 받기 전에 운영자가 빨간 run을 먼저 본다. 임계 안이면 run은 성공(초록, 건너뜀·세대 유지·신호 tag)이고,
+  넘으면(세대가 아예 없으면 포함) **재시도 없는 실패**다(`raise_if_stale`). Map에는 상류 장애 경보가 따로 없으므로 빨간 run이
+  유일한 신호다. 한두 tick의 상류 이상(14일 transport 503 80건·거부 64건은 대부분 다음 tick에 풀렸다)은 초록으로 남고,
   몇 시간짜리 장애·설정 오류(주소·DNS)·거부가 이어진 상태는 빨갛게 된다. 거부가 이어지면 원천이 정말 줄었는지 사람이 판단해
   `allow_shrink`를 준다(D4 대체).
 - 상태 op에는 `RetryPolicy`가 없다 — run 상한으로 죽은 step에 재시도를 요청하는 경로가 없어진다.
+
+| 데이터셋 | 원천 주기 | 경고 임계 `stale_alert_after` | 읽기 `max_age` |
+|---|---|---|---|
+| `transport.fuel_stations` | OpiNet 수집 8시간 | 16시간(두 주기) | 48시간 |
+| `transport.rest_area_fuel_prices` | 4시간 | 8시간(두 주기) | 48시간 |
+| `transport.highway_incidents` | 5분(transport는 30분이면 503) | 20분 | 30분 |
+| `transport.rest_areas`·`transport.airports` | 매일 | 2일 | 8일 |
+| `weather.locations` | 매일 | 2일 | 8일 |
+| `weather.current` | weather 공개 :20·:35, Map 매시 2회 | 2시간 | 3시간 |
+| `weather.forecast_ultra_short` | 매시 | 2시간 | 3시간 |
+| `weather.forecast_short` | 3시간 발표 | 8시간 | 12시간 |
+| `weather.forecast_mid` | 06·18시 발표 | 26시간(한 회차 놓침 + 여유) | 36시간 |
+| `weather.forecast_external` | 3시간 | 8시간 | 12시간 |
+| `weather.daily_summaries` | 매시 | 4시간 | 6시간 |
 
 ### weather export 읽기 — 줄 세우기와 발화 시각
 

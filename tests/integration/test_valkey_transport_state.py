@@ -12,7 +12,7 @@ import json
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import replace
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 
@@ -1004,8 +1004,8 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
     assert refused["baseline"] == 30
     assert (await store.current_meta(DATASET_HIGHWAY_INCIDENTS.name)).count == 30
 
-    # 거부가 이어져 서비스 세대가 stale 기준(30분)을 넘었으면 사람이 판단할 차례다 — FAILURE.
-    old_collection = datetime.now(UTC) - spec.dataset.max_age - timedelta(minutes=5)
+    # 거부가 이어져 서비스 세대가 경고 임계(20분)를 넘었으면 사람이 판단할 차례다 — FAILURE.
+    old_collection = datetime.now(UTC) - spec.stale_alert_after - timedelta(minutes=5)
 
     async def _old(_settings: Any, on_collected_at: Callable[[datetime], None]) -> list[Any]:
         on_collected_at(old_collection)
@@ -1033,6 +1033,57 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
     assert excinfo.value.allow_retries is False
     assert str(excinfo.value.metadata["failure_kind"].value) == "state_swap_refused"
     assert (await store.current_meta(DATASET_HIGHWAY_INCIDENTS.name)).count == 30
+
+
+async def test_dagster_loader_skips_an_unchanged_fuel_collection(
+    store: ValkeyStateStore,
+) -> None:
+    """실 Valkey meta 왕복 뒤에도 첫 페이지 ``last_success_at``과 같은 순간이면 건너뛴다.
+
+    감사 MC-04. transport는 ``...Z``·마이크로초로 내고 Valkey meta는 UTC ``isoformat``으로
+    적는다 — 표기가 달라도 같은 순간이면 같아야 한다. 건너뛰면 세대·적재 시각은 그대로다.
+    """
+    from kortravelmap.dagster.provider_fetchers import TransportExportUnchanged
+    from kortravelmap.dagster.transport_state import TRANSPORT_STATE_SPECS, load_transport_state
+
+    spec = next(s for s in TRANSPORT_STATE_SPECS if s.dataset is DATASET_FUEL_STATIONS)
+    collected_at = datetime.fromisoformat("2026-11-24T00:00:05.123456Z")
+    seeded = await store.swap(
+        DATASET_FUEL_STATIONS.name,
+        _items(3),
+        guard=LENIENT,
+        source_collected_at=collected_at,
+        loaded_at=datetime.now(UTC) - timedelta(hours=1),
+    )
+    seen: list[datetime | None] = []
+
+    async def _collect(
+        _settings: Any,
+        on_collected_at: Callable[[datetime], None],
+        /,
+        *,
+        unchanged_since: datetime | None = None,
+    ) -> list[Any]:
+        seen.append(unchanged_since)
+        # transport 첫 페이지 표기(+09:00 등)가 달라도 같은 순간이다.
+        first_page = collected_at.astimezone(timezone(timedelta(hours=9)))
+        if unchanged_since is not None and unchanged_since == first_page:
+            raise TransportExportUnchanged("/v1/service/exports/fuel-stations", first_page)
+        raise AssertionError("같은 순간인데 건너뛰지 않았다")
+
+    metadata = await load_transport_state(
+        replace(spec, collect=_collect),
+        settings=KorTravelMapSettings.model_construct(),
+        run_id="run-skip",
+        allow_shrink=False,
+        store=store,
+    )
+    assert seen == [collected_at]
+    assert metadata["skipped"] == "unchanged"
+    assert metadata["generation"] == seeded.meta.generation
+    current = await store.current_meta(DATASET_FUEL_STATIONS.name)
+    assert current.generation == seeded.meta.generation
+    assert current.loaded_at == seeded.meta.loaded_at
 
 
 async def test_rest_cursor_whose_generation_vanishes_mid_read_is_409(

@@ -1,7 +1,8 @@
 ## 2026-11-24 — 상태 적재 job 상류 신호 통일·weather export 줄 세우기(감사 §4 #9, 배포 대기)
 
-- transport·weather 상태 job: 상류 미준비·거부는 건너뜀(세대 유지, step 재시도 없음), run 결과는 서비스 세대 나이가 `max_age`를
-  넘었는지로. 상태 op `RetryPolicy` 제거. weather 원천 읽기는 Valkey 공용 자리로 한 번에 하나, 발화 시각 분리(W5 :05·단기 :50·
+- transport·weather 상태 job: 상류 미준비·거부는 건너뜀(세대 유지, step 재시도 없음), run 결과는 서비스 세대 나이가 경고 임계
+  `stale_alert_after`(소유자 결정 "나이 기준 혼합", 읽기 `max_age`보다 낮다)를 넘었는지로. transport #1549(503 code·HTTP 재시도·
+  주유소 건너뛰기) 합침. 상태 op `RetryPolicy` 제거. weather 원천 읽기는 Valkey 공용 자리로 한 번에 하나, 발화 시각 분리(W5 :05·단기 :50·
   중기 :50). current 상한 600초(weather 수정 전 임시, 뒤에 480으로). Map job 7개 run 상한, jitter. OpenAPI·migration 없음.
 - 다음: n150 Map dagster 회전 뒤 확인(PR 본문 "회전 뒤 확인"). 남은 것: weather export 페이지 처리 수정(weather 쪽) 뒤 current
   상한 480 복귀·page size 검토, 큐 lock busy 15초 재발행(큐 재시도 작업), schedule override가 이 job들의 cron을 덮는지 확인.

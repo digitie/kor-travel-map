@@ -44,6 +44,7 @@ __all__ = [
     "TRANSIENT_FAILURE_KINDS",
     "TRANSIENT_HTTP_STATUSES",
     "is_transient_upstream_failure",
+    "parse_retry_after",
     "upstream_retry_after_seconds",
 ]
 
@@ -171,7 +172,12 @@ def is_transient_upstream_failure(exc: BaseException) -> bool:
     return False
 
 
-def _parse_retry_after(value: object) -> float | None:
+def parse_retry_after(value: object) -> float | None:
+    """``Retry-After`` 값(초 수 또는 HTTP-date, 수 그대로도 받는다)을 초로.
+
+    읽을 수 없으면 ``None``.
+    """
+
     if isinstance(value, bool):
         return None
     if isinstance(value, int | float):
@@ -208,11 +214,11 @@ def upstream_retry_after_seconds(exc: BaseException) -> float | None:
             return None
         seen.add(id(current))
         if isinstance(current, httpx.HTTPStatusError):
-            parsed = _parse_retry_after(current.response.headers.get("Retry-After"))
+            parsed = parse_retry_after(current.response.headers.get("Retry-After"))
             if parsed is not None:
                 return parsed
         for name in _RETRY_AFTER_ATTRIBUTES:
-            parsed = _parse_retry_after(getattr(current, name, None))
+            parsed = parse_retry_after(getattr(current, name, None))
             if parsed is not None:
                 return parsed
         current = current.__cause__

@@ -43,6 +43,7 @@ from .quota_exhaustion import (
     raise_terminal_if_transport_unrecoverable,
 )
 from .stall_watchdog import stall_watchdog
+from .transport_http_metrics import observing_transport_http
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     counting_upstream_requests,
@@ -607,7 +608,7 @@ async def run_tracked_feature_asset(
     # I/O 없이 멈춘 step은 task 스택을 남긴다(2026-10-23 MCST 3.5시간 무이벤트,
     # :mod:`~.stall_watchdog`).
     async with stall_watchdog(getattr(context, "log", None)):
-        with counting_upstream_requests(), sharing_run_retry_budget():
+        with counting_upstream_requests(), sharing_run_retry_budget(), observing_transport_http():
             guard = await ensure_authoritative_feature_operation_guard(
                 context,
                 boundary="public_wrapper",

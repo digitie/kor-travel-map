@@ -1,5 +1,27 @@
 # CHANGELOG
 
+## 2026-11-24 — 상태 적재 job의 상류 신호(나이 기준 혼합)·transport export 503 code·weather export 줄 세우기(ADR-114·ADR-106 개정)
+
+- transport·weather Valkey 상태 job은 상류 503(transport problem `code` 전부 — `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·
+  `EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET`·경합·code 없음)·stale·무응답·HTTP 429/5xx면 이번 tick을 건너뛴다(op
+  metadata `skipped=upstream_not_ready`, `transport_problem_code`·`transport_retry_after_seconds`, 세대 유지, step 재시도
+  없음). 교체 거부·0건은 `skipped=refused`. 모든 결과가 `upstream_state`·`served_age_seconds`·`stale_alert`를 싣고 run tag
+  `kor_travel_map.upstream_state`·`kor_travel_map.upstream_stale_alert`를 단다. **소유자 결정 "나이 기준 혼합"**: 서비스
+  세대의 원천 나이가 데이터셋 경고 임계(`stale_alert_after` — 주유소 16시간·휴게소 유가 8시간·돌발 20분·휴게소·공항 2일,
+  weather 2시간~2일; 읽기 `max_age`보다 낮다) 안이면 초록, 넘으면 step 재시도 없이 실패한다.
+- feature 적재 asset의 transport 503 code: `EXPORT_SOURCE_NOT_CURRENT` 등 4종은 HTTP·step 재시도 없이 실패,
+  `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`는 같은 요청을 `Retry-After`대로(한 번 60초 상한, run 예산 공유) 4회까지
+  다시 묻는다. `EXPORT_DISABLED`·`EXPORT_TOO_LARGE`는 재시도 없이 실패, `EXPORT_SOURCE_INCONSISTENT`는 step 재시도. HTTP 층
+  재시도에 408·429(`Retry-After`)·500을 더했고 400·422는 재시도 없는 `transport_request_rejected`.
+- Valkey 상태 job 주유소·휴게소 유가: 첫 페이지 `last_success_at`이 서비스 세대와 같으면 나머지 페이지와 교체를 건너뛴다
+  (`skipped=unchanged`, 6시간마다 전량). transport 요청 계측 metadata `transport_http_*`·`transport_server_*`. 새 env
+  `KOR_TRAVEL_MAP_KOR_TRAVEL_TRANSPORT_REFERENCE_PAGE_SIZE`(철도역·항구 snapshot, 기본 2000·상한 5000).
+- weather 상태 job 일곱은 원천 읽기를 Valkey 공용 자리 `weather.export_read`로 한 번에 하나만 하고, 발화 시각이 바뀌었다(단기
+  :30→:50, 중기 :40→:50, 하루 요약 :41→:05). 다음 페이지를 run 상한 안에 끝낼 수 없으면 그 tick을 건너뛴다.
+  `weather_state_current` run 상한 480→600초(weather export 수정 전 임시).
+- 상태 op의 Dagster `RetryPolicy` 제거(Valkey 연결 실패만 op가 재시도 요청), tag 없던 Map job 7개에 `dagster/max_runtime`,
+  지수 backoff `RetryPolicy`에 jitter. transport #265 반영: 돌발 guard의 "기준 미만이면 0건 허용" 제거, 절대 하한 1건.
+
 ## 2026-11-24 — 큐 요청 재발행 후속(#1544 리뷰)
 
 - failure sensor가 claim 뒤 일시 DB 실패를 대신 재발행할 때도 실패 단계로 상한을 고른다 — provider 갱신 단계는 2회(종전 기본 5회, 쿼터가 좁은 상류를 첫 scope부터 다시 부르던 것).
@@ -9,6 +31,7 @@
 - failure sensor는 실패 run 하나의 DB 반영(상태 전이와 후처리 전부)을 ADR-112 run-status 예산 20초 마감 안에서 한다 — transaction마다 `lock_timeout` 5초 이하·`statement_timeout` 남은 시간 − 3초(종전 상태 전이는 Dagster 엔진 기본값 `lock_timeout` 30초로 돌았다). 평가 한 번은 실패 run 하나만 반영한다(`SkipReason`으로 tick을 끝낸다).
 - 큐 worker run: executor가 이미 `failed`로 닫은 generation은 정리 중 연결 오류가 나도 run을 실패로 끝낸다(종전에는 SUCCESS로 보이고 실패 알림이 없었다).
 - OpenAPI·migration 변경 없음.
+
 
 ## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)
 
@@ -21,18 +44,6 @@
 ## 2026-11-24 — import job event clock slot화(alembic 457)
 
 - `ops.import_job_event_clock`(전역 단일 행)을 `ops.import_job_event_clock_slots`로 바꿨다(alembic `457_event_clock_slots`). event를 쓴 긴 적재 transaction이 commit까지 그 행을 쥐어 다른 큐 요청·job의 event 기록이 lock timeout으로 실패하던 문제(10-22 큐 요청 8건)를 없앤다. `/v1/ops/live`의 `event_clock_revision` 값·의미는 같다(slot 합, 옛 값 이관). OpenAPI 변경 없음.
-
-## 2026-11-24 — 상태 적재 job의 상류 신호와 weather export 줄 세우기(ADR-114 개정)
-
-- transport·weather Valkey 상태 job은 상류 503·stale·무응답·HTTP 429/5xx면 이번 tick을 건너뛴다(op metadata
-  `skipped=upstream_not_ready`, 세대 유지, step 재시도 없음). 교체 거부·0건은 `skipped=refused`. 모든 결과가 `upstream_state`·
-  `served_age_seconds`·`stale_alert`를 싣고 run tag `kor_travel_map.upstream_state`·`kor_travel_map.upstream_stale_alert`를 단다.
-  서비스 세대가 데이터셋 stale 기준(`max_age`)을 넘으면 run은 재시도 없이 실패한다.
-- weather 상태 job 일곱은 원천 읽기를 Valkey 공용 자리 `weather.export_read`로 한 번에 하나만 하고, 발화 시각이 바뀌었다(단기
-  :30→:50, 중기 :40→:50, 하루 요약 :41→:05). 다음 페이지를 run 상한 안에 끝낼 수 없으면 그 tick을 건너뛴다.
-  `weather_state_current` run 상한 480→600초(weather export 수정 전 임시).
-- 상태 op의 Dagster `RetryPolicy` 제거(Valkey 연결 실패만 op가 재시도 요청), tag 없던 Map job 7개에 `dagster/max_runtime`,
-  지수 backoff `RetryPolicy`에 jitter.
 
 ## 2026-11-24 — 큐 요청 일시 실패 재발행과 실패 원인(감사 §4 #15, alembic 456)
 
