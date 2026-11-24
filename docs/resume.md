@@ -1,3 +1,9 @@
+## 2026-11-24 — 관리자 프런트 ui 0.2.6 채택(VirtualTable 선택 칸 44px)
+
+- ui 0.2.6·tokens 0.1.7 vendor(#1547 `f5fdeba`), guard `309b881`. md 미만 행 선택 칸 폭이 44px로 체크박스 터치 영역과
+  일치(dedup-reviews), 데스크톱 불변. 390px·1440px 칸 기하 e2e를 `dedup-reviews-actions.spec.ts`에 고정. OpenAPI·마이그레이션 없음.
+- 다음: 다음 Map 회전에서 admin frontend 재빌드·배포 뒤 prod 390px dedup-reviews 선택 칸 실화면 확인.
+
 ## 2026-11-24 — 상태 적재 job 상류 신호 통일·weather export 줄 세우기(감사 §4 #9, 배포 대기)
 
 - transport·weather 상태 job: 상류 미준비·거부는 건너뜀(세대 유지, step 재시도 없음), run 결과는 서비스 세대 나이가 경고 임계

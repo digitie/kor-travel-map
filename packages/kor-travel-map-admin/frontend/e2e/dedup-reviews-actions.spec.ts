@@ -946,4 +946,68 @@ test.describe("admin/dedup-reviews actions", () => {
     // invalidation refetch 후 setRowSelection({}) → toolbar 사라짐.
     await expect(page.getByText(/개 선택됨/)).toHaveCount(0);
   });
+
+  // @kor-travel/ui 0.2.6(common #83): VirtualTable 선택 칸이 md(768px) 미만에서 44×44가 되어
+  // 체크박스 터치 영역(max-md:after:-inset-[15px])과 칸이 일치한다. 데스크톱 폭은 24px 그대로.
+  for (const width of [390, 1440]) {
+    test(`row select cell touch target @${width}px`, async ({ page }) => {
+      await page.setViewportSize({ width, height: 900 });
+      await mockDedupReviews(page, {
+        byStatus: { pending: [makeDedupReview()] },
+      });
+
+      await page.goto("/admin/features/dedup-reviews");
+      const box = page.getByRole("checkbox", { name: "행 선택" }).first();
+      await expect(box).toBeVisible();
+      // elementFromPoint는 viewport 밖이면 null — 측정 전에 화면 안으로 들인다.
+      await box.scrollIntoViewIfNeeded();
+
+      const m = await box.evaluate((el) => {
+        const cell = el.closest("td,[role=cell],[role=gridcell]");
+        if (!(cell instanceof HTMLElement)) {
+          throw new Error("row select checkbox has no enclosing cell");
+        }
+        const cr = cell.getBoundingClientRect();
+        const br = el.getBoundingClientRect();
+        const cx = br.left + br.width / 2;
+        const cy = br.top + br.height / 2;
+        const hit = (x: number, y: number) => {
+          const t = document.elementFromPoint(x, y);
+          return !!t && (t === el || el.contains(t));
+        };
+        return {
+          cellH: cr.height,
+          cellW: cr.width,
+          cx,
+          cy,
+          hitDown21: hit(cx, cy + 21),
+          hitLeft21: hit(cx - 21, cy),
+          hitRight21: hit(cx + 21, cy),
+          hitUp21: hit(cx, cy - 21),
+          outsideRight: hit(cr.right + 1, cy),
+        };
+      });
+
+      if (width < 768) {
+        expect(Math.round(m.cellW)).toBe(44);
+        expect(Math.round(m.cellH)).toBeGreaterThanOrEqual(44);
+        // 중심에서 상하좌우 21px(44px 칸의 가장자리 안쪽)이 모두 체크박스에 닿는다.
+        expect(m.hitLeft21).toBe(true);
+        expect(m.hitRight21).toBe(true);
+        expect(m.hitUp21).toBe(true);
+        expect(m.hitDown21).toBe(true);
+        // 터치 영역이 옆 칸으로 새지 않는다(첫 열이라 왼쪽은 표 컨테이너가 자른다).
+        expect(m.outsideRight).toBe(false);
+
+        // 가장자리를 실제로 눌러도 행 상세가 아니라 선택이 된다.
+        await page.mouse.click(m.cx - 21, m.cy);
+        await expect(page.getByText("1개 선택됨")).toBeVisible();
+        await expect(
+          page.getByRole("dialog", { name: "중복 상세 비교" }),
+        ).toHaveCount(0);
+      } else {
+        expect(Math.round(m.cellW)).toBe(24);
+      }
+    });
+  }
 });

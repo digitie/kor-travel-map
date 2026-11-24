@@ -1,3 +1,20 @@
+## 2026-11-24 — 관리자 프런트 ui 0.2.6(VirtualTable 선택 칸 44px) 채택과 dedup 선택 칸 e2e
+
+- #1547(`f5fdeba`): `@kor-travel/ui` 0.2.5→0.2.6·tokens 0.1.6→0.1.7(common #83 `05d7f91`, main docs run 45141922011
+  artifact 14803131043; 세 tgz `sha256sum -c` OK, SRI가 catalog #84 `309b881`과 같음)을 vendor하고 guard·`common-ref`를 `309b881`로 올렸다.
+  toast 0.1.6은 Map이 쓰지 않아 받지 않았다. lock은 두 tgz의 version·resolved·integrity와 ui peer(tokens 0.1.7)만 바뀌었다.
+  다른 PR이 진행 중이라 그 PR은 vendor·package·guard만 바꿨고, 이 절과 아래 e2e는 뒤따라 넣었다.
+- 0.2.6에서 Map 화면에 닿는 것: VirtualTable 선택 칸이 md 미만에서 폭 44px·최소 높이 44px(`h-11`)가 되어 체크박스 터치
+  영역(0.2.5의 `max-md:after:-inset-[15px]`)과 칸 폭이 일치한다. Map `DataTable`은 공통 `VirtualTable` 재수출이라
+  `/admin/features/dedup-reviews` 행 선택 칸이 그대로 바뀐다(데스크톱 24px 불변). Dialog 제목 `pr-7`은 닫기 버튼을 그릴
+  때만인데 Map `DialogContent` wrapper는 `showCloseButton=false`라 변화 없음, AccordionContent `overflow-clip`은 Map이
+  Accordion을 쓰지 않아 무관.
+- 시험: `dedup-reviews-actions.spec.ts`에 `row select cell touch target @390px/@1440px`를 더했다. 390px은 칸 폭 44px·높이
+  44px 이상, 체크박스 중심에서 상하좌우 21px 지점의 `elementFromPoint`가 모두 체크박스, 칸 오른쪽 밖 1px(옆 칸)은 아님, 왼쪽
+  21px 지점을 실제로 누르면 행 상세 대화상자가 아니라 "1개 선택됨". 1440px은 칸 폭 24px. #1547 때 n150 사본에서만 돌린
+  일회성 probe를 바탕으로, 옆 칸 누수 판정과 실제 클릭을 더해 정식 시험으로 만들었다. n150 `~/gate-slot.sh` mocked 실행 결과는 PR 댓글.
+- OpenAPI·마이그레이션 변경 없음. 배포하지 않았다(부모 통합 회전).
+
 ## 2026-11-24 — 상태 적재 job: 상류 미준비는 건너뜀·나이로 판정, weather export 읽기 줄 세우기 (감사 §4 #9)
 
 - 근거: 감사 보고서 §1.3 P1·P2·§3 + n150 Dagster(읽기 전용) 재측정. Map 실패 run 389건 중 상한 초과 124건(`weather_state_current`
