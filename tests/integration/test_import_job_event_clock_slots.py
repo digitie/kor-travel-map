@@ -26,6 +26,7 @@ commit까지 쥐었다.
 from __future__ import annotations
 
 import asyncio
+import os
 import time
 from collections.abc import AsyncIterator
 from pathlib import Path
@@ -40,15 +41,21 @@ from kortravelmap.api.routers.ops_live import (
     _IMPORT_JOBS_LIVE_SQL,
 )
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 
 from alembic import command
 from kortravelmap.infra.db import make_async_engine, normalize_async_dsn
-from kortravelmap.infra.jobs_repo import enqueue_unpaired_import_job, record_import_job_event
+from kortravelmap.infra.jobs_repo import (
+    finish_import_job,
+    record_import_job_event,
+    start_unpaired_import_job,
+)
 from tests.integration._application_300_bootstrap import (
     _TEST_RUNTIME_PASSWORD,
     alembic_schema_owner_role,
     bootstrapped_application_300_migrator_dsn,
+    upgrade_head_with_application_300_bootstrap,
 )
 
 pytestmark = pytest.mark.integration
@@ -63,28 +70,83 @@ _WAITER_LOCK_TIMEOUT: Final = "2s"
 _NO_WAIT_SECONDS: Final = 1.0
 
 
+@pytest.fixture(scope="module")
+async def head_db(pg_container: object) -> AsyncIterator[tuple[AsyncEngine, AsyncEngine]]:
+    """이 모듈 전용 DB를 배포 경로로 head까지 올린다. (superuser engine, runtime engine).
+
+    이 파일의 시험은 slot 동작을 보려고 job·event를 **commit**한다. session 공용
+    DB(``migrated_engine``)에 남기면 그 DB의 전체 job을 세는 다른 시험(``test_jobs_repo``의
+    큐 claim, ``test_mois_loader``의 job 목록)이 깨진다(CI 실측). 그래서 DB를 따로 만들고
+    끝나면 지운다. runtime 권한은 배포 entrypoint와 같이 ``reconcile_runtime_privileges``로
+    준다.
+    """
+
+    from kortravelmap.infra.runtime_privileges import reconcile_runtime_privileges
+
+    raw_dsn = pg_container.get_connection_url()  # type: ignore[attr-defined]
+    database = f"event_clock_head_{uuid4().hex}"
+    await _admin_execute(raw_dsn, f'CREATE DATABASE "{database}"')
+    superuser_dsn = normalize_async_dsn(_with_database(raw_dsn, database))
+    config = Config(str(_ROOT / "alembic.ini"))
+    config.set_main_option("script_location", str(_ROOT / "alembic"))
+    superuser_engine: AsyncEngine | None = None
+    runtime: AsyncEngine | None = None
+    try:
+        await upgrade_head_with_application_300_bootstrap(config, superuser_dsn)
+        migrator_dsn = str(config.get_main_option("sqlalchemy.url"))
+        previous = os.environ.get("KOR_TRAVEL_MAP_PG_DSN")
+        os.environ["KOR_TRAVEL_MAP_PG_DSN"] = migrator_dsn
+        try:
+            await reconcile_runtime_privileges()
+        finally:
+            if previous is None:
+                os.environ.pop("KOR_TRAVEL_MAP_PG_DSN", None)
+            else:
+                os.environ["KOR_TRAVEL_MAP_PG_DSN"] = previous
+        superuser_engine = make_async_engine(superuser_dsn, pool_size=4)
+        runtime = make_async_engine(
+            make_url(superuser_dsn)
+            .set(username="ktm_feature_service", password=_TEST_RUNTIME_PASSWORD)
+            .render_as_string(hide_password=False),
+            pool_size=4,
+        )
+        yield superuser_engine, runtime
+    finally:
+        if runtime is not None:
+            await runtime.dispose()
+        if superuser_engine is not None:
+            await superuser_engine.dispose()
+        await _admin_execute(raw_dsn, f'DROP DATABASE "{database}" WITH (FORCE)')
+
+
 @pytest.fixture
-async def runtime_engine(migrated_engine: AsyncEngine) -> AsyncIterator[AsyncEngine]:
+def migrated_engine(head_db: tuple[AsyncEngine, AsyncEngine]) -> AsyncEngine:
+    """이 모듈에서는 공용 ``migrated_engine`` 대신 전용 DB의 superuser engine을 쓴다."""
+
+    return head_db[0]
+
+
+@pytest.fixture
+def runtime_engine(head_db: tuple[AsyncEngine, AsyncEngine]) -> AsyncEngine:
     """실제 runtime LOGIN(``ktm_feature_service``)으로 동시 연결 여럿을 연다."""
 
-    dsn = migrated_engine.url.set(
-        username="ktm_feature_service",
-        password=_TEST_RUNTIME_PASSWORD,
-    ).render_as_string(hide_password=False)
-    engine = make_async_engine(dsn, pool_size=4)
-    try:
-        yield engine
-    finally:
-        await engine.dispose()
+    return head_db[1]
 
 
 async def _root_job(engine: AsyncEngine) -> str:
+    """event를 붙일 root job — 큐가 집지 않게 **이미 끝난**(``done``) 상태로 commit한다.
+
+    끝난 job에도 event는 기록된다(진행 중 적재의 heartbeat와 같은 INSERT 경로).
+    """
+
     async with AsyncSession(engine, expire_on_commit=False) as session, session.begin():
-        job = await enqueue_unpaired_import_job(
+        job = await start_unpaired_import_job(
             session,
             kind="provider_load",
             payload={"test": "event-clock-slots", "nonce": uuid4().hex},
         )
+        finished = await finish_import_job(session, job.job_id, status="done")
+        assert finished is not None
     return job.job_id
 
 
