@@ -990,10 +990,10 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
 async def test_dagster_loader_skips_an_unchanged_fuel_collection(
     store: ValkeyStateStore,
 ) -> None:
-    """실 Valkey meta 왕복 뒤에도 첫 페이지 ``last_success_at``과 같은 순간이면 건너뛴다(감사 MC-04).
+    """실 Valkey meta 왕복 뒤에도 첫 페이지 ``last_success_at``과 같은 순간이면 건너뛴다.
 
-    transport는 ``...Z``·마이크로초로 내고 Valkey meta는 UTC ``isoformat``으로 적는다 — 표기가 달라도
-    같은 순간이면 같아야 한다. 건너뛰면 세대·적재 시각은 그대로다.
+    감사 MC-04. transport는 ``...Z``·마이크로초로 내고 Valkey meta는 UTC ``isoformat``으로
+    적는다 — 표기가 달라도 같은 순간이면 같아야 한다. 건너뛰면 세대·적재 시각은 그대로다.
     """
     from kortravelmap.dagster.provider_fetchers import TransportExportUnchanged
     from kortravelmap.dagster.transport_state import TRANSPORT_STATE_SPECS, load_transport_state
