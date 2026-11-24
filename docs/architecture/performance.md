@@ -871,10 +871,12 @@ PostGIS/testcontainers baseline으로 고정했다. 로컬 live DB 확인 결과
   격리한 기존 event는 보존하되 marker를 비정규화하므로, 조회 시 parent job을 join하거나 최신
   격리 event를 건너뛰지 않고 visible page만 bounded scan한다. `/ops/live`의 전역 revision은
   최신 event 1건, job event revision은 최근 5건만 읽으며 매 polling마다 exact 전체 건수를
-  다시 세지 않는다. late commit과 최근 page 밖 UPDATE/DELETE는 singleton
-  `ops.import_job_event_clock.revision`의 transactional 증가로 감지한다. AFTER STATEMENT에서 DML
-  statement당 한 번만 global clock을 갱신해 bulk row별 WAL/dead tuple과 교차 row deadlock을
-  피하며, timestamp는 진단에만 쓴다.
+  다시 세지 않는다. late commit과 최근 page 밖 UPDATE/DELETE는
+  `ops.import_job_event_clock_slots`의 transactional 증가 합(`SUM(revision)`)으로 감지한다. AFTER
+  STATEMENT에서 DML statement당 한 번만 slot 하나를 갱신해 bulk row별 WAL/dead tuple을 피하고,
+  slot은 다른 transaction이 잡지 않은 것을 `FOR UPDATE SKIP LOCKED`로 고르므로 긴 transaction이
+  다른 event 기록을 기다리게 하지 않는다(457 — 0052 singleton은 그 행을 commit까지 쥐어 10-22 큐
+  요청 lock timeout을 냈다). timestamp는 진단에만 쓴다.
 - `ops.feature_consistency_reports`
   - `idx_reports_started(started_at DESC, report_id DESC)`
   - `idx_reports_severity_started(severity_max, started_at DESC, report_id DESC)`

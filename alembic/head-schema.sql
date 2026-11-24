@@ -11750,14 +11750,24 @@ CREATE FUNCTION ops.bump_import_job_event_clock() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
         BEGIN
-          INSERT INTO ops.import_job_event_clock AS clock (
-            clock_id, revision, updated_at
-          ) VALUES (
-            TRUE, 1, clock_timestamp()
-          )
-          ON CONFLICT (clock_id) DO UPDATE
-             SET revision = clock.revision + 1,
-                 updated_at = clock_timestamp();
+          -- 다른 transaction이 잡지 않은 가장 작은 slot에 1을 더한다. SKIP LOCKED라
+          -- 긴 적재 transaction이 slot 하나를 commit까지 쥐어도 기다리지 않는다.
+          UPDATE ops.import_job_event_clock_slots AS slot
+             SET revision = slot.revision + 1,
+                 updated_at = clock_timestamp()
+           WHERE slot.slot_id = (
+                 SELECT free.slot_id
+                   FROM ops.import_job_event_clock_slots AS free
+                  ORDER BY free.slot_id
+                  LIMIT 1
+                    FOR UPDATE SKIP LOCKED
+                 );
+          IF NOT FOUND THEN
+            -- 모든 slot이 다른 transaction에 잡혀 있다. identity라 새 slot은 누구와도
+            -- 충돌하지 않는다 — slot 수는 동시 event transaction 수의 최대로 묶인다.
+            INSERT INTO ops.import_job_event_clock_slots (revision, updated_at)
+            VALUES (1, clock_timestamp());
+          END IF;
           RETURN NULL;
         END;
         $$;
@@ -12361,23 +12371,34 @@ CREATE FUNCTION ops.guard_feature_update_request_mutation() RETURNS trigger
 ALTER FUNCTION ops.guard_feature_update_request_mutation() OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: guard_import_job_event_clock_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: guard_import_job_event_clock_slot_mutation(); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE FUNCTION ops.guard_import_job_event_clock_mutation() RETURNS trigger
+CREATE FUNCTION ops.guard_import_job_event_clock_slot_mutation() RETURNS trigger
     LANGUAGE plpgsql
     AS $$
         BEGIN
           IF TG_OP IN ('DELETE', 'TRUNCATE') THEN
-            RAISE EXCEPTION 'import job event clock singleton cannot be %', TG_OP
+            RAISE EXCEPTION 'import job event clock slot cannot be %', TG_OP
               USING ERRCODE = 'check_violation';
           END IF;
-          IF pg_trigger_depth() < 2
-             OR NEW.clock_id IS DISTINCT FROM OLD.clock_id
+          IF pg_trigger_depth() < 2 THEN
+            RAISE EXCEPTION 'import job event clock slot is event-trigger-owned: %', TG_OP
+              USING ERRCODE = 'check_violation';
+          END IF;
+          IF TG_OP = 'INSERT' THEN
+            IF NEW.revision IS DISTINCT FROM 1 THEN
+              RAISE EXCEPTION
+                'import job event clock slot must start at revision 1, not %', NEW.revision
+                USING ERRCODE = 'check_violation';
+            END IF;
+            RETURN NEW;
+          END IF;
+          IF NEW.slot_id IS DISTINCT FROM OLD.slot_id
              OR NEW.revision IS DISTINCT FROM OLD.revision + 1 THEN
             RAISE EXCEPTION
-              'import job event clock is event-trigger-owned: revision % -> %',
-              OLD.revision, NEW.revision
+              'import job event clock slot is event-trigger-owned: slot % revision % -> %',
+              OLD.slot_id, OLD.revision, NEW.revision
               USING ERRCODE = 'check_violation';
           END IF;
           RETURN NEW;
@@ -12385,7 +12406,7 @@ CREATE FUNCTION ops.guard_import_job_event_clock_mutation() RETURNS trigger
         $$;
 
 
-ALTER FUNCTION ops.guard_import_job_event_clock_mutation() OWNER TO ktm_feature_schema_owner;
+ALTER FUNCTION ops.guard_import_job_event_clock_slot_mutation() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: is_valid_feature_update_filter_array(text[], integer); Type: FUNCTION; Schema: ops; Owner: ktm_feature_schema_owner
@@ -17026,7 +17047,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text, '455_feature_cluster_points'::text, '456_feature_update_retry'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text, '455_feature_cluster_points'::text, '456_feature_update_retry'::text, '457_event_clock_slots'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -18054,19 +18075,32 @@ CREATE TABLE ops.import_job_datasets (
 ALTER TABLE ops.import_job_datasets OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: import_job_event_clock; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: import_job_event_clock_slots; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE TABLE ops.import_job_event_clock (
-    clock_id boolean DEFAULT true NOT NULL,
+CREATE TABLE ops.import_job_event_clock_slots (
+    slot_id integer NOT NULL,
     revision bigint DEFAULT 0 NOT NULL,
     updated_at timestamp with time zone DEFAULT clock_timestamp() NOT NULL,
-    CONSTRAINT ck_import_job_event_clock_revision_nonnegative CHECK ((revision >= 0)),
-    CONSTRAINT ck_import_job_event_clock_singleton CHECK (clock_id)
+    CONSTRAINT ck_import_job_event_clock_slots_revision_nonnegative CHECK ((revision >= 0))
 );
 
 
-ALTER TABLE ops.import_job_event_clock OWNER TO ktm_feature_schema_owner;
+ALTER TABLE ops.import_job_event_clock_slots OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: import_job_event_clock_slots_slot_id_seq; Type: SEQUENCE; Schema: ops; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ops.import_job_event_clock_slots ALTER COLUMN slot_id ADD GENERATED ALWAYS AS IDENTITY (
+    SEQUENCE NAME ops.import_job_event_clock_slots_slot_id_seq
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1
+);
+
 
 --
 -- Name: import_job_events; Type: TABLE; Schema: ops; Owner: ktm_feature_schema_owner
@@ -20423,11 +20457,11 @@ ALTER TABLE ONLY ops.import_job_datasets
 
 
 --
--- Name: import_job_event_clock pk_import_job_event_clock; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: import_job_event_clock_slots pk_import_job_event_clock_slots; Type: CONSTRAINT; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-ALTER TABLE ONLY ops.import_job_event_clock
-    ADD CONSTRAINT pk_import_job_event_clock PRIMARY KEY (clock_id);
+ALTER TABLE ONLY ops.import_job_event_clock_slots
+    ADD CONSTRAINT pk_import_job_event_clock_slots PRIMARY KEY (slot_id);
 
 
 --
@@ -23590,17 +23624,17 @@ CREATE CONSTRAINT TRIGGER trg_import_job_datasets_membership_complete AFTER INSE
 
 
 --
--- Name: import_job_event_clock trg_import_job_event_clock_mutation_guard; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: import_job_event_clock_slots trg_import_job_event_clock_slots_mutation_guard; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE TRIGGER trg_import_job_event_clock_mutation_guard BEFORE DELETE OR UPDATE ON ops.import_job_event_clock FOR EACH ROW EXECUTE FUNCTION ops.guard_import_job_event_clock_mutation();
+CREATE TRIGGER trg_import_job_event_clock_slots_mutation_guard BEFORE INSERT OR DELETE OR UPDATE ON ops.import_job_event_clock_slots FOR EACH ROW EXECUTE FUNCTION ops.guard_import_job_event_clock_slot_mutation();
 
 
 --
--- Name: import_job_event_clock trg_import_job_event_clock_truncate_guard; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: import_job_event_clock_slots trg_import_job_event_clock_slots_truncate_guard; Type: TRIGGER; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-CREATE TRIGGER trg_import_job_event_clock_truncate_guard BEFORE TRUNCATE ON ops.import_job_event_clock FOR EACH STATEMENT EXECUTE FUNCTION ops.guard_import_job_event_clock_mutation();
+CREATE TRIGGER trg_import_job_event_clock_slots_truncate_guard BEFORE TRUNCATE ON ops.import_job_event_clock_slots FOR EACH STATEMENT EXECUTE FUNCTION ops.guard_import_job_event_clock_slot_mutation();
 
 
 --
@@ -28482,10 +28516,10 @@ GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_datasets TO ktm_curation_comm
 
 
 --
--- Name: TABLE import_job_event_clock; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
+-- Name: TABLE import_job_event_clock_slots; Type: ACL; Schema: ops; Owner: ktm_feature_schema_owner
 --
 
-GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_event_clock TO ktm_curation_command_owner;
+GRANT SELECT,INSERT,UPDATE ON TABLE ops.import_job_event_clock_slots TO ktm_curation_command_owner;
 
 
 --

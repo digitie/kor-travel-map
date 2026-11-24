@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-24 — import job event clock slot화(alembic 457)
+
+- `ops.import_job_event_clock`(전역 단일 행)을 `ops.import_job_event_clock_slots`로 바꿨다(alembic `457_event_clock_slots`). event를 쓴 긴 적재 transaction이 commit까지 그 행을 쥐어 다른 큐 요청·job의 event 기록이 lock timeout으로 실패하던 문제(10-22 큐 요청 8건)를 없앤다. `/v1/ops/live`의 `event_clock_revision` 값·의미는 같다(slot 합, 옛 값 이관). OpenAPI 변경 없음.
+
 ## 2026-11-24 — 큐 요청 일시 실패 재발행과 실패 원인(감사 §4 #15, alembic 456)
 
 - 새 열 `ops.feature_update_requests.retry_count`·`next_dispatch_at`(alembic `456_feature_update_retry`). 큐 요청이 일시 DB 오류(lock timeout·serialization·deadlock·연결 끊김)나 worker run 시작 전 실패로 멈추면 종결하지 않고 60초 × 2^n(jitter, 상한 30분) 뒤 다시 발행한다. 5회를 넘기면 `failed`. run이 도중에 죽은 경우는 재발행하지 않는다.

@@ -1488,7 +1488,7 @@ async def _execute_feature_update_request_locked(
         except _FeatureUpdateExecutionStopped:
             raise
         except Exception as terminal_error:
-            # 실패를 기록하다 실패했다(대개 event clock lock timeout). 이 오류를 그대로 올리면
+            # 실패를 기록하다 실패했다(일시 DB 오류 등). 이 오류를 그대로 올리면
             # 호출자가 그것을 일시 오류로 읽어 결정적 실패를 재발행한다 — 원 실패를 들고 올린다.
             raise FeatureUpdateTerminalizationFailed(failure, stage=stage) from terminal_error
 
@@ -1607,11 +1607,11 @@ async def retry_or_fail_update_request_state(
     **상태만**.
 
     import job event·relay event는 쓰지 않는다(:func:`record_update_request_retry_events`가 **다음
-    transaction**에서 쓴다). event INSERT는 전역 단일 행 ``import_job_event_clock``을 commit까지
-    쥐는데,
-    그 행이 바로 10-22 lock timeout의 자리다 — 상태 전이를 거기에 묶으면 재발행 자체가 같은 lock에서
-    실패하고, 그러면 request가 ``running``으로 남는다(적대 리뷰 2026-11-24). 상태가 맞지 않으면(이미
-    terminal·취소 marker·다른 owner·stale generation) ``None``.
+    transaction**에서 쓴다). 상태 전이를 event 기록에 묶으면 event 쪽 일시 실패(lock·연결)가
+    재발행 자체를 막고, 그러면 request가 ``running``으로 남는다(적대 리뷰 2026-11-24). 10-22 lock
+    timeout의 자리였던 전역 단일 행 event clock은 alembic 457이 slot으로 나눠 더는 기다리지
+    않지만, 상태 전이를 먼저 commit하는 순서는 그대로 둔다. 상태가 맞지 않으면(이미 terminal·취소
+    marker·다른 owner·stale generation) ``None``.
     """
     rescheduled = await reschedule_update_request_after_failure(
         session,

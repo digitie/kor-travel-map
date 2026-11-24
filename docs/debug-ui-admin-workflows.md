@@ -939,8 +939,9 @@ CREATE INDEX idx_import_job_events_provider_dataset_scope_time
     AND sync_scope IS NOT NULL
     AND quarantined_at IS NULL;
 
-CREATE TABLE ops.import_job_event_clock (
-  clock_id BOOLEAN PRIMARY KEY DEFAULT true CHECK (clock_id),
+-- 457: 0052 singleton을 slot 행 집합으로 대체. reader는 SUM(revision).
+CREATE TABLE ops.import_job_event_clock_slots (
+  slot_id INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   revision BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
@@ -949,10 +950,11 @@ CREATE TABLE ops.import_job_event_clock (
 0052 migration은 격리 component의 기존 event에 parent와 같은 `quarantined_at`을 backfill한다.
 이 marker는 migration 전용 불변값이며 REST와 `/ops/live`는 parent를 join하지 않고 event의
 `quarantined_at IS NULL`을 직접 적용한다. `/ops/live` revision은 전역 최신 1건 또는 job별 최근
-5건과 singleton `event_clock_revision`으로 계산하고 exact 전체 건수를 polling마다 다시 세지
-않는다. event DML의 AFTER STATEMENT에서 revision을 한 번 증가시켜 late commit도 누락하지 않으며
-`updated_at`은 진단용이고 변경 판정 정본은 `revision`이다. Clock은 event AFTER trigger 안의
-`revision+1` 외 직접 UPDATE/DELETE/TRUNCATE를 거부한다. Event TRUNCATE도 AFTER STATEMENT
+5건과 `event_clock_revision`(slot 합)으로 계산하고 exact 전체 건수를 polling마다 다시 세지
+않는다. event DML의 AFTER STATEMENT에서 다른 transaction이 잡지 않은 slot 하나를 한 번 증가시켜
+late commit도 누락하지 않으며(긴 transaction이 다른 event 기록을 기다리게 하지 않는다, 457)
+`updated_at`은 진단용이고 변경 판정 정본은 합이다. Slot은 event AFTER trigger 안의 증가 외 직접
+INSERT/UPDATE/DELETE/TRUNCATE를 거부한다. Event TRUNCATE도 AFTER STATEMENT
 clock 증가를 거치므로 bulk cleanup이 invalidation을 우회하지 않는다.
 
 0057은 canonical update event에 owner의 typed `provider`/`dataset_key`/`sync_scope`를 고정한다.

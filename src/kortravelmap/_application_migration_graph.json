@@ -321,6 +321,12 @@
         "455_feature_cluster_points"
       ],
       "revision": "456_feature_update_retry"
+    },
+    {
+      "down_revision": [
+        "456_feature_update_retry"
+      ],
+      "revision": "457_event_clock_slots"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

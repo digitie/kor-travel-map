@@ -241,9 +241,9 @@ active_jobs AS (
   ) j
 ),
 event_clock AS (
-  SELECT COALESCE(MAX(revision), 0)::bigint AS event_clock_revision
-  FROM ops.import_job_event_clock
-  WHERE clock_id
+  -- 457: slot 합. commit된 event DML statement마다 정확히 1 늘고 줄지 않는다.
+  SELECT COALESCE(SUM(revision), 0)::bigint AS event_clock_revision
+  FROM ops.import_job_event_clock_slots
 ),
 event_stats AS (
   SELECT
@@ -290,9 +290,9 @@ CROSS JOIN job_stats
 
 _IMPORT_JOB_EVENTS_LIVE_SQL: Final[str] = """
 WITH event_clock AS (
-  SELECT COALESCE(MAX(revision), 0)::bigint AS event_clock_revision
-  FROM ops.import_job_event_clock
-  WHERE clock_id
+  -- 457: slot 합. commit된 event DML statement마다 정확히 1 늘고 줄지 않는다.
+  SELECT COALESCE(SUM(revision), 0)::bigint AS event_clock_revision
+  FROM ops.import_job_event_clock_slots
 ),
 recent AS (
   SELECT

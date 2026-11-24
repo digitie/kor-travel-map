@@ -408,8 +408,8 @@ notice 조회는 미래 경고를 보존하기 위해 기존 `valid_end_time` �
 | `import_jobs` | `ck_import_jobs_quarantine_shape` | 두 격리 컬럼이 모두 NULL이거나 시각과 고정 사유 `unlinked_feature_update_component`가 함께 존재 (0052) |
 | `import_jobs` | `trg_import_jobs_quarantine_immutable` | runtime 격리 표식 생성·변경, 격리 행 UPDATE/DELETE와 격리 parent 아래 child attach 금지 (0052) |
 | `import_job_events` | `quarantined_at` + `trg_import_job_events_quarantine_immutable` | 0052 migration이 parent 격리 시각을 backfill하며 runtime marker INSERT/UPDATE, 격리 job의 기존 event UPDATE/DELETE와 신규 event append를 금지 |
-| `import_job_event_clock` | singleton PK/CHECK + nonnegative revision CHECK | event DML AFTER STATEMENT trigger 내부의 statement당 revision+1만 허용하는 bounded live projection; 직접 UPDATE/DELETE/TRUNCATE 금지 (0052) |
-| `import_job_events` | `trg_import_job_events_clock` | INSERT/UPDATE/DELETE/TRUNCATE statement마다 event clock revision을 한 번 증가 (0052) |
+| `import_job_event_clock_slots` | identity PK + nonnegative revision CHECK + guard trigger | event DML AFTER STATEMENT trigger 내부의 statement당 slot 하나 revision+1(또는 새 slot revision 1)만 허용하는 live projection, reader는 `SUM(revision)`; 직접 INSERT/UPDATE/DELETE/TRUNCATE 금지 (457 — 0052 singleton `import_job_event_clock` 대체) |
+| `import_job_events` | `trg_import_job_events_clock` | INSERT/UPDATE/DELETE/TRUNCATE statement마다 다른 transaction이 잡지 않은 event clock slot을 `SKIP LOCKED`로 골라 한 번 증가 (0052, 457) |
 | `pipeline_cancellation_members` | `trg_pipeline_cancellation_members_reject_quarantine` | 격리 job을 신규/변경 cancellation member로 연결하지 못하게 차단 (0052) |
 | `feature_update_requests` | `ck_feature_update_requests_scope_shape` | immutable `ops.is_valid_feature_update_scope`로 6종 scope의 exact key/type/길이/범위·`scope.type=scope_type`을 OpenAPI와 동일하게 강제하며 cache-target `external_system`은 112자 이하 (0052+0053) |
 | `feature_update_requests` | `ck_feature_update_requests_providers_shape` | 1차원 unique `TEXT[]`, 최대 32개, 각 항목 trimmed non-empty string 128자 이하를 강제 (0052) |

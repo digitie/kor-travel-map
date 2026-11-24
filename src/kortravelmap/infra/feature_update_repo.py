@@ -583,7 +583,9 @@ def _decode_cursor(cursor: str | None) -> tuple[datetime | None, str | None]:
 #: 1. ``ops.import_job_datasets`` INSERT의 FK가 scope 행에 ``FOR KEY SHARE``를
 #:    건다 — 공유 lock이라 두 transaction이 동시에 보유한다.
 #: 2. ``ops.import_job_events`` INSERT의 statement trigger가 전역 singleton
-#:    ``ops.import_job_event_clock`` 행을 commit까지 배타 점유한다.
+#:    ``ops.import_job_event_clock`` 행을 commit까지 배타 점유했다(alembic 457 전 —
+#:    지금은 ``import_job_event_clock_slots``의 잡히지 않은 slot을 ``SKIP LOCKED``로
+#:    고르므로 이 단계에서 기다리지 않는다. scope lock을 먼저 잡는 순서는 그대로 둔다).
 #: 3. request membership INSERT의 overlap trigger
 #:    (``assert_feature_update_request_member_available``)가 같은 scope 행을
 #:    ``FOR UPDATE``로 **승격**한다 — 상대의 KEY SHARE 때문에 대기한다.

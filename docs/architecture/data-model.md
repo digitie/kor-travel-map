@@ -1337,9 +1337,10 @@ CREATE INDEX idx_import_job_events_provider_dataset_scope_time
   WHERE provider IS NOT NULL AND dataset_key IS NOT NULL
     AND sync_scope IS NOT NULL AND quarantined_at IS NULL;
 
-CREATE TABLE ops.import_job_event_clock (
-  clock_id  BOOLEAN PRIMARY KEY DEFAULT true CHECK (clock_id),
-  revision  BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
+-- 457: 0052 singleton ops.import_job_event_clock을 대체한다.
+CREATE TABLE ops.import_job_event_clock_slots (
+  slot_id    INTEGER GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  revision   BIGINT NOT NULL DEFAULT 0 CHECK (revision >= 0),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT clock_timestamp()
 );
 ```
@@ -1368,14 +1369,44 @@ INSERT는 trigger와 constraint를 함께 통과한다.
 앞뒤 공백이 없는지 검사한다. 위 축약 DDL의 길이 조건만 만족하는 공백 이름도 실제 constraint는
 거부한다.
 
-`ops.import_job_event_clock`은 event INSERT/UPDATE/DELETE 성공 statement의 AFTER trigger가
-singleton `revision`을 한 번 올리는 live invalidation projection이다. 같은 row update가 동시 event
-transaction을 commit 전에 직렬화하므로 transaction 시작 시각이 오래된 late commit도 놓치지
-않고, rollback이면 event와 revision 증가가 함께 취소된다. `updated_at=clock_timestamp()`은 진단
-정보일 뿐 변경 판정의 정본은 `revision`이다. Row마다 clock을 갱신하지 않고 event row lock을 모두
-얻은 statement 끝에서 한 번만 갱신해 bulk WAL/dead tuple과 교차 row deadlock을 피한다. Clock UPDATE는 event
-AFTER trigger 안의 정확한 `revision+1`만 허용하며 DELETE/TRUNCATE를 금지한다. Event table
-TRUNCATE는 허용하되 같은 AFTER STATEMENT trigger가 revision을 한 번 증가시킨다.
+#### event clock (`ops.import_job_event_clock_slots`, alembic 457)
+
+`/v1/ops/live`의 `event_clock_revision`은 **지금 snapshot에 보이는, commit된 event DML statement
+수**다(+0052 이전 기준값). event INSERT/UPDATE/DELETE/TRUNCATE statement마다 AFTER STATEMENT
+trigger(`trg_import_job_events_clock` → `ops.bump_import_job_event_clock()`)가 slot 하나의
+`revision`을 정확히 1 올리고, reader는 `SUM(revision)`을 읽는다. 이 값이 지키는 성질:
+
+- **late commit 감지**: 증가는 event와 같은 transaction에 있어 commit 시점에 보인다. 먼저 시작해
+  나중에 commit한 transaction도 그 commit에서 합을 바꾼다. rollback이면 event와 증가가 함께 취소된다.
+- **최근 page 밖 변경 감지**: 최신 1건·최근 5건만 읽는 reader가 놓치는 오래된 event의 UPDATE/DELETE도
+  statement 단위로 센다. `updated_at`은 진단용이고 변경 판정 정본은 합이다.
+- **단조**: slot은 지우지 않고 revision은 +1만 허용한다(guard). 그래서 두 snapshot 사이에 event
+  transaction이 하나라도 commit하면 합이 반드시 바뀐다.
+
+**왜 slot인가(457).** 0052는 singleton 한 행을 올렸다. 그 row lock은 commit까지 남으므로 event를 한 줄
+쓴 transaction이 길어지면 다른 **모든** event 기록이 그 행을 기다렸다. 2026-10-22 큐 요청 8건이
+`INSERT INTO ops.import_job_events`의 lock timeout(Dagster 엔진 30초)으로 실패했고, 모두 76분 동안
+refresh transaction을 연 앞 요청 하나와 겹쳤다(감사 `docs/reports/2026-11-23-collection-failure-audit.md`
+§1.2). 457은 trigger가 **다른 transaction이 잡지 않은 가장 작은 slot**을 `FOR UPDATE SKIP LOCKED`로
+골라 올리고, 모든 slot이 잡혀 있으면 identity로 새 slot을 만든다. event 기록은 어느 slot에서도
+기다리지 않는다. slot 수는 동시에 event를 쓴 transaction 수의 최대로 묶인다(순차 transaction은 slot
+1을 다시 쓴다). 같은 transaction의 다음 statement는 자기가 쥔 slot을 다시 고를 수 있다(자기 lock은
+건너뛰지 않는다).
+
+| 후보 | 버린 이유 |
+|---|---|
+| sequence/identity 값(`last_value`·`max(event_id)`)을 revision으로 | `nextval`은 commit 전에 보이고 rollback으로 되감기지 않는다. late commit은 commit 순서가 아니라 발급 순서라 최댓값을 바꾸지 않는다 — 감지가 빠진다. |
+| event 기록을 적재 transaction 밖(짧은 별도 transaction)으로 | rollback된 적재의 event가 남아 event와 상태가 어긋난다. event를 쓰는 곳(repo·procedure·trigger) 전부를 고쳐야 하고, 하나라도 긴 transaction 안에서 쓰면 경합이 돌아온다. |
+| 행을 잡는 시점을 commit 직전으로 미룸(deferred trigger) | 경합 창은 줄지만 직렬화는 남고(긴 commit·대량 statement), 모든 event writer가 같은 규율을 지켜야 한다. |
+| job별 clock 행 | job topic은 충분하지만 전역 topic(`import_jobs`)이 매 polling마다 모든 job의 clock을 합해야 한다. 같은 job을 쓰는 두 transaction은 여전히 직렬화된다. |
+| **slot + SKIP LOCKED + SUM (채택)** | reader 의미·값이 singleton과 같다(옛 값은 slot 1로 이관). writer는 기다리지 않는다. 변경은 trigger 함수와 reader SQL 두 곳뿐이다. |
+
+guard(`trg_import_job_event_clock_slots_mutation_guard`·`…_truncate_guard`): slot은 event trigger 안
+(`pg_trigger_depth() >= 2`)에서만 INSERT(revision 1)·UPDATE(정확히 +1, `slot_id` 불변)할 수 있고
+DELETE·TRUNCATE는 거부한다. event 표 TRUNCATE는 허용하되 같은 AFTER STATEMENT trigger가 1을 올린다.
+REPEATABLE READ·SERIALIZABLE writer가 자기 snapshot 뒤에 다른 transaction이 올린 slot을 고르면 종전
+singleton과 같이 직렬화 실패(40001)가 날 수 있다 — singleton에서는 snapshot 뒤 아무 event commit이나
+그 원인이었고, slot에서는 고른 slot 하나만 해당하므로 더 드물다.
 
 ### 9.1.2 `ops.offline_uploads` (ADR-045 D-14 / T-208g)
 
