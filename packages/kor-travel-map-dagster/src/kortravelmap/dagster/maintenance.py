@@ -712,7 +712,7 @@ async def drain_expired_cache_target_snapshots_op(
         config.get("max_batches"), name="max_batches", default=2_000, minimum=1
     )
     max_seconds = _bounded_int_config(
-        config.get("max_seconds"), name="max_seconds", default=3_300, minimum=1
+        config.get("max_seconds"), name="max_seconds", default=2_700, minimum=1
     )
     item_limit = _bounded_int_config(
         config.get("item_limit"),
@@ -924,8 +924,8 @@ def consistency_dedup_refresh_job() -> None:
 
 @job(
     name="cache_target_snapshot_gc",
-    # 매시. 실측 성공 p99 98초·최대 172초지만 backlog가 쌓이면 op가 스스로 3,300초(max_seconds)까지
-    # 돈다 → 발화 간격과 같은 1시간.
+    # 매시. 실측 성공 p99 98초·최대 172초. backlog가 쌓이면 op가 스스로 max_seconds(기본 2,700초,
+    # 종전 3,300초)까지 비우고 관측 질의를 더 한다 → 발화 간격과 같은 1시간 안에 여유를 남긴다.
     tags={**CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "3600"},
     description=(
         "만료·미참조 cache-target snapshot item/header를 system round-robin batch로 "

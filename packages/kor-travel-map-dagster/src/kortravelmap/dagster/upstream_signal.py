@@ -51,6 +51,8 @@ from dagster import MAX_RUNTIME_SECONDS_TAG, Failure, OpExecutionContext, RetryR
 
 __all__ = [
     "STALE_ALERT_TAG",
+    "AGE_BASIS_LOADED",
+    "AGE_BASIS_SOURCE",
     "STATE_STORE_MAX_RETRIES",
     "STATE_STORE_RETRY_DELAY_SECONDS",
     "UPSTREAM_NOT_READY",
@@ -138,7 +140,18 @@ def upstream_not_ready_kind(exc: BaseException) -> str | None:
     return None
 
 
-def served_age_seconds(meta: GenerationMeta | None, *, now: datetime) -> float | None:
+AGE_BASIS_SOURCE: Final[str] = "source"
+"""원천 수집 시각 기준(없으면 적재·재확인 시각) — transport처럼 원천 시각이 그 데이터셋 주기를
+따를 때."""
+AGE_BASIS_LOADED: Final[str] = "loaded"
+"""Map 적재·304 재확인 시각 기준 — weather처럼 원천 시각이 다른 데이터셋의 가장 늦은 원천(하루 두 번
+도는 지역 관측망 등)에 끌려가 그 데이터셋 주기를 말하지 않을 때. "Map이 이 데이터셋을 얼마나 오래
+새로 받지 못했나"를 잰다."""
+
+
+def served_age_seconds(
+    meta: GenerationMeta | None, *, now: datetime, basis: str = AGE_BASIS_SOURCE
+) -> float | None:
     """서비스 세대의 원천 나이(초). 원천 수집 시각이 없으면 적재 시각으로 잰다.
 
     원천 수집 시각이 없는 세대(공항·weather 위치 roster)는 원천이 304로 "그대로다"라고 다시 확인한
@@ -146,10 +159,9 @@ def served_age_seconds(meta: GenerationMeta | None, *, now: datetime) -> float |
     """
     if meta is None:
         return None
-    basis = meta.source_collected_at
-    if basis is None:
-        basis = max(meta.loaded_at, meta.checked_at or meta.loaded_at)
-    return max(0.0, (now - basis).total_seconds())
+    loaded = max(meta.loaded_at, meta.checked_at or meta.loaded_at)
+    point = loaded if basis == AGE_BASIS_LOADED else (meta.source_collected_at or loaded)
+    return max(0.0, (now - point).total_seconds())
 
 
 def upstream_signal(
@@ -159,9 +171,10 @@ def upstream_signal(
     alert_after: timedelta,
     now: datetime,
     reason: str = "",
+    basis: str = AGE_BASIS_SOURCE,
 ) -> dict[str, Any]:
     """op metadata에 싣는 상류 신호. 세대가 없으면(첫 적재 전) 나이를 모르므로 경고다."""
-    age = served_age_seconds(served, now=now)
+    age = served_age_seconds(served, now=now, basis=basis)
     alert = age is None or age > alert_after.total_seconds()
     collected = served.source_collected_at if served is not None else None
     return {
@@ -170,6 +183,7 @@ def upstream_signal(
         "served_generation": served.generation if served is not None else "",
         "served_source_collected_at": collected.isoformat() if collected is not None else "",
         "served_age_seconds": int(age) if age is not None else -1,
+        "served_age_basis": basis,
         "stale_alert_after_seconds": int(alert_after.total_seconds()),
         "stale_alert": alert,
     }
@@ -211,6 +225,7 @@ def refused(
     alert_after: timedelta,
     now: datetime,
     details: dict[str, Any],
+    basis: str = AGE_BASIS_SOURCE,
 ) -> dict[str, Any]:
     """비정상 집합 거부 metadata(세대 유지). run 결과는 :func:`raise_if_stale`이 나이로 정한다."""
     return {
@@ -221,7 +236,12 @@ def refused(
         "override": "run config ops.<op>.config.allow_shrink: true",
         **details,
         **upstream_signal(
-            UPSTREAM_REFUSED, served=served, alert_after=alert_after, now=now, reason=failure_kind
+            UPSTREAM_REFUSED,
+            served=served,
+            alert_after=alert_after,
+            now=now,
+            reason=failure_kind,
+            basis=basis,
         ),
     }
 
@@ -267,7 +287,8 @@ def run_deadline(context: OpExecutionContext, default_cap_seconds: int, tail_sec
     """
     now = time.time()
     cap = default_cap_seconds
-    with contextlib.suppress(AttributeError, TypeError, ValueError):
+    # run 문맥이 없거나(직접 호출) tag가 틀리면 spec 상한을 쓴다.
+    with contextlib.suppress(Exception):
         cap = int(context.run.tags.get(MAX_RUNTIME_SECONDS_TAG, cap))
     try:
         record = context.instance.get_run_record_by_id(context.run_id)

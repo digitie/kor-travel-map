@@ -29,7 +29,6 @@ Valkey 오류는 :class:`StateStoreUnavailable`(연결·timeout — 재시도 �
 from __future__ import annotations
 
 import asyncio
-import contextlib
 import functools
 import inspect
 import json
@@ -1029,8 +1028,11 @@ class ValkeyStateStore:
             yield True
         finally:
             renewer.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await renewer
+            # 갱신 task를 기다리되 그 결과(취소·예외)가 바깥 흐름을 바꾸지 않게 한다 — 바깥 task가
+            # 취소 중이어도 해제는 한다(실패하면 TTL로 풀린다).
+            await asyncio.wait({renewer})
+            if not renewer.cancelled() and renewer.exception() is not None:
+                _LOGGER.warning("공용 자리 %s 갱신이 멈췄다: %r", name, renewer.exception())
             try:
                 async with _unavailable_on_error("공용 자리 해제"):
                     await _resolve(self._client.eval(_RELEASE_LOCK_SCRIPT, 1, key, token))

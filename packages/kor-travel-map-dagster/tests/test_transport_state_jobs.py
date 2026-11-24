@@ -38,8 +38,10 @@ from kortravelmap.dagster.definitions import defs
 from kortravelmap.dagster.provider_fetchers import TransportExportUnchanged
 from kortravelmap.dagster.transport_state import (
     FULL_WALK_INTERVAL,
+    RETRY_TIME_SHARE,
     TRANSPORT_STATE_SPECS,
     TransportStateJobSpec,
+    alert_after_seconds,
     load_transport_state,
     lock_ttl_seconds,
 )
@@ -111,6 +113,7 @@ class _FakeStore:
         if self.swap_error is not None:
             raise self.swap_error
         self.swapped.append((dataset, len(items), kwargs["allow_shrink"]))
+        self.last_swap_kwargs = kwargs
         meta = GenerationMeta(
             dataset=dataset,
             generation="20261023T000000Z-00000000",
@@ -128,6 +131,13 @@ class _FakeStore:
     async def retire_other_versions(self, dataset: str) -> int:
         self.retired.append(dataset)
         return 0
+
+
+_SETTINGS = KorTravelMapSettings.model_construct()
+
+
+def _alert(spec: TransportStateJobSpec) -> timedelta:
+    return timedelta(seconds=alert_after_seconds(spec, _SETTINGS))
 
 
 def _spec(collect: Callable[..., Any]) -> TransportStateJobSpec:
@@ -212,7 +222,7 @@ async def test_refusal_past_the_stale_age_fails_the_run_and_names_the_override()
     spec = TRANSPORT_STATE_SPECS[0]
     store = _FakeStore(
         swap_error=StateSwapRefused("거부", baseline=106, new_count=0),
-        current=_served(spec.stale_alert_after + timedelta(minutes=1)),
+        current=_served(_alert(spec) + timedelta(minutes=1)),
     )
     metadata = await _load(store)
     assert metadata["skipped"] == "refused"
@@ -292,7 +302,7 @@ async def test_upstream_not_ready_skips_the_tick_without_a_step_retry(
 async def test_not_ready_past_the_stale_age_fails_without_a_retry() -> None:
     # 몇 시간 이어진 상류 장애·설정 오류(주소·DNS)는 결국 빨갛게 된다 — 경보가 따로 없다.
     spec = TRANSPORT_STATE_SPECS[0]
-    store = _FakeStore(current=_served(spec.stale_alert_after + timedelta(minutes=5)))
+    store = _FakeStore(current=_served(_alert(spec) + timedelta(minutes=5)))
     metadata = await _load(store, _raising(httpx.ConnectError("DNS")))
     assert metadata["skipped"] == "upstream_not_ready"
     with pytest.raises(Failure) as excinfo:
@@ -334,17 +344,23 @@ async def test_unrecoverable_transport_failure_stays_terminal() -> None:
 
 
 def test_alert_thresholds_sit_below_the_read_side_max_age() -> None:
-    # 소유자 결정(2026-11-24 "나이 기준 혼합"): 경고 임계는 데이터셋별, 읽기 쪽 max_age보다 낮다.
+    # 소유자 결정(2026-11-24 "나이 기준 혼합"): 경고 임계는 데이터셋별(settings, env로 조정), 읽기
+    # 쪽 max_age보다 낮다 — settings 상한(lt)이 그 max_age이고 코드도 max_age − 1초로 묶는다.
     expected = {
-        "transport.fuel_stations": timedelta(hours=16),
-        "transport.rest_area_fuel_prices": timedelta(hours=8),
-        "transport.highway_incidents": timedelta(minutes=20),
-        "transport.rest_areas": timedelta(days=2),
-        "transport.airports": timedelta(days=2),
+        "transport.fuel_stations": 18 * 3600,
+        "transport.rest_area_fuel_prices": 9 * 3600,
+        "transport.highway_incidents": 20 * 60,
+        "transport.rest_areas": 2 * 86400,
+        "transport.airports": 2 * 86400,
     }
-    assert {spec.dataset.name: spec.stale_alert_after for spec in TRANSPORT_STATE_SPECS} == expected
+    assert {
+        spec.dataset.name: alert_after_seconds(spec, _SETTINGS) for spec in TRANSPORT_STATE_SPECS
+    } == expected
     for spec in TRANSPORT_STATE_SPECS:
-        assert spec.stale_alert_after < spec.dataset.max_age, spec.job_name
+        assert alert_after_seconds(spec, _SETTINGS) < spec.dataset.max_age.total_seconds()
+        field = KorTravelMapSettings.model_fields[spec.alert_after_setting]
+        upper = next(m.lt for m in field.metadata if getattr(m, "lt", None) is not None)
+        assert upper == spec.dataset.max_age.total_seconds(), spec.alert_after_setting
 
 
 # ------------------------------------------------- 바뀌지 않은 집합 건너뛰기(감사 MC-04, #1549)
@@ -415,7 +431,7 @@ async def test_an_unchanged_collection_skips_the_walk_and_the_swap() -> None:
 
 
 async def test_an_unchanged_but_old_collection_is_still_judged_by_its_age() -> None:
-    old = datetime.now(UTC) - timedelta(hours=17)
+    old = datetime.now(UTC) - timedelta(hours=19)
     store = _FakeStore(current=_served_at(loaded_ago=timedelta(hours=1), collected=old))
     metadata = await _load(store, _RecordingCollect(old))
     assert metadata["skipped"] == "unchanged"
@@ -517,8 +533,8 @@ async def test_a_coded_not_current_503_skips_within_the_alert_age(
 
 async def test_a_coded_not_current_503_past_the_alert_age_fails_without_retries() -> None:
     error = TransportSourceNotCurrent("503", code="EXPORT_SOURCE_NOT_CURRENT", retry_after=1800.0)
-    old = datetime.now(UTC) - timedelta(hours=17)  # 주유소 경고 임계 16시간
-    store = _FakeStore(current=_served_at(loaded_ago=timedelta(hours=17), collected=old))
+    old = datetime.now(UTC) - timedelta(hours=19)  # 주유소 경고 임계 18시간
+    store = _FakeStore(current=_served_at(loaded_ago=timedelta(hours=19), collected=old))
     metadata = await _load(store, _raising_problem(error))
     with pytest.raises(Failure) as excinfo:
         raise_if_stale(metadata)
@@ -566,3 +582,144 @@ async def test_a_disabled_export_fails_without_retries_through_the_existing_term
     assert metadata["failure_kind"] == "transport_export_disabled"
     assert metadata["transport_problem_code"] == "EXPORT_DISABLED"
     assert "upstream_state" not in metadata  # 상류 수집 지연이 아니라 설정 문제다
+
+
+@pytest.mark.parametrize(
+    ("error", "outcome"),
+    [
+        (
+            TransportSourceNotCurrent("503", code="EXPORT_NO_HISTORY", retry_after=60.0),
+            "upstream_source_not_current",
+        ),
+        (
+            TransportExportBusy("503", code="EXPORT_BUSY", retry_after=600.0, retry_after_cap=60.0),
+            "upstream_busy_over_cap",
+        ),
+        (
+            TransportExportBusy("503", code="EXPORT_BUSY", retry_after=10.0, retry_after_cap=60.0),
+            "upstream_busy_exhausted",
+        ),
+        (TransportExportNotCurrent("503"), "upstream_not_ready"),
+    ],
+)
+async def test_the_skip_names_its_outcome_and_the_wait_cap(error: Exception, outcome: str) -> None:
+    store = _FakeStore(current=_served_at(loaded_ago=timedelta(minutes=30)))
+    metadata = await _load(store, _raising_problem(error))
+    assert metadata["outcome"] == outcome
+    if isinstance(error, TransportExportBusy):
+        assert metadata["transport_retry_after_cap_seconds"] == 60.0
+
+
+# ------------------------------------------- 전량 주기·force_full_walk·재시도 시간(#1549 적대 리뷰)
+
+
+async def test_the_full_walk_interval_counts_from_the_walk_start() -> None:
+    """교체 시각이 아니라 순회 시작 시각(``full_synced_at``)을 남긴다.
+
+    매시 tick에서 6시간마다 전량이다.
+    """
+    store = _FakeStore()
+    await _load(store)
+    assert store.last_swap_kwargs["full_synced_at"] <= store.last_swap_kwargs["loaded_at"]
+
+
+async def test_a_future_full_walk_basis_forces_a_full_walk() -> None:
+    served = _served_at(loaded_ago=timedelta(hours=1))
+    future = replace(served, full_synced_at=datetime.now(UTC) + timedelta(hours=2))
+    collect = _RecordingCollect(_COLLECTED)
+    await _load(_FakeStore(current=future), collect)
+    assert collect.calls == [None]
+
+
+async def test_a_recent_walk_start_keeps_skipping_even_when_the_swap_was_late() -> None:
+    served = _served_at(loaded_ago=timedelta(hours=5, minutes=50))
+    started = replace(served, full_synced_at=datetime.now(UTC) - timedelta(hours=5, minutes=55))
+    metadata = await _load(_FakeStore(current=started), _RecordingCollect(_COLLECTED))
+    assert metadata["skipped"] == "unchanged"
+    late = replace(served, full_synced_at=datetime.now(UTC) - timedelta(hours=6, minutes=1))
+    collect = _RecordingCollect(_COLLECTED)
+    await _load(_FakeStore(current=late), collect)
+    assert collect.calls == [None]
+
+
+async def test_force_full_walk_disables_the_unchanged_skip() -> None:
+    store = _FakeStore(current=_served_at(loaded_ago=timedelta(hours=1)))
+    collect = _RecordingCollect(_COLLECTED)
+    await load_transport_state(
+        _spec(collect),
+        settings=_SETTINGS,
+        run_id="run-x",
+        allow_shrink=False,
+        store=cast(ValkeyStateStore, store),
+        force_full_walk=True,
+    )
+    assert collect.calls == [None]
+    assert len(store.swapped) == 1
+
+
+async def test_retry_time_is_bounded_by_the_run_limit() -> None:
+    seen: list[float | None] = []
+
+    async def _collect(*_args: Any, **_kwargs: Any) -> list[Any]:
+        from kortravelmap.dagster import upstream_retry
+
+        budget = upstream_retry.active_run_retry_budget()
+        seen.append(budget.max_seconds if budget is not None else None)
+        return [object()]
+
+    await _load(_FakeStore(), _collect)
+    assert seen == [TRANSPORT_STATE_SPECS[0].max_runtime_seconds * RETRY_TIME_SHARE]
+
+
+# ------------------------------------------- op 경계(신호 → 나이 판정 → Valkey 재시도)
+
+
+def _op(job_name: str) -> Any:
+    (node,) = defs.resolve_job_def(job_name).nodes
+    return node.definition
+
+
+async def test_the_op_turns_an_old_skip_red_and_keeps_a_fresh_skip_green(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dagster import build_op_context
+
+    import kortravelmap.dagster.transport_state as transport_state
+
+    spec = TRANSPORT_STATE_SPECS[0]
+    results: list[dict[str, Any]] = []
+
+    async def _fake_load(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        return results.pop(0)
+
+    monkeypatch.setattr(transport_state, "load_transport_state", _fake_load)
+    monkeypatch.setattr(transport_state, "KorTravelMapSettings", lambda: _SETTINGS)
+    base = {
+        "dataset": spec.dataset.name,
+        "skipped": "upstream_not_ready",
+        "upstream_state": "not_ready",
+    }
+    results.append({**base, "stale_alert": False})
+    green = await _op(spec.job_name)(build_op_context())
+    assert green["skipped"] == "upstream_not_ready"
+    results.append({**base, "stale_alert": True, "served_age_seconds": 99_999})
+    with pytest.raises(Failure) as excinfo:
+        await _op(spec.job_name)(build_op_context())
+    assert excinfo.value.allow_retries is False
+
+
+async def test_the_op_requests_a_step_retry_only_for_a_valkey_outage(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from dagster import RetryRequested, build_op_context
+
+    import kortravelmap.dagster.transport_state as transport_state
+
+    async def _outage(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
+        raise StateStoreUnavailable("연결 실패")
+
+    monkeypatch.setattr(transport_state, "load_transport_state", _outage)
+    monkeypatch.setattr(transport_state, "KorTravelMapSettings", lambda: _SETTINGS)
+    with pytest.raises(RetryRequested) as excinfo:
+        await _op(TRANSPORT_STATE_SPECS[0].job_name)(build_op_context())
+    assert excinfo.value.max_retries == 2

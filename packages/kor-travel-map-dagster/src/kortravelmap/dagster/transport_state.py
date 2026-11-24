@@ -17,9 +17,10 @@
   ``collection`` stale/실패·무응답·HTTP 재시도를 다 쓴 5xx·429 같은 **상류 미준비**는 step 재시도
   없이 이번 tick을 건너뛰고 세대를 지킨다(``skipped=upstream_not_ready``, code·``Retry-After``를
   metadata에). 0건 export·교체 거부(``state_swap_refused``)도 세대를 지키고 건너뛴다. **run 결과는
-  서비스 세대의 원천 나이가 정한다**: 데이터셋 경고 임계(spec ``stale_alert_after`` — 읽기 쪽
-  ``max_age``보다 낮다) 안이면 초록, 넘으면 step 재시도 없는 실패다(빨간 run이 Map의 유일한 상류
-  경보다). ``EXPORT_DISABLED``·``EXPORT_TOO_LARGE``·404·계약 위반은 기존 규약
+  서비스 세대의 원천 나이가 정한다**: 데이터셋 경고 임계(settings
+  ``transport_state_<데이터셋>_alert_after_seconds`` — 읽기 쪽 ``max_age``보다 낮게 묶는다) 안이면
+  초록, 넘으면 step 재시도 없는 실패다(빨간 run이 Map의 유일한 상류 경보다).
+  ``EXPORT_DISABLED``·``EXPORT_TOO_LARGE``·404·계약 위반은 기존 규약
   (``raise_terminal_if_transport_unrecoverable``)으로 재시도 없이 실패하고, 동시
   교체(``state_swap_conflict``)·Valkey OOM·미설정도 재시도하지 않는다. Valkey 연결 실패만 step을
   다시 돈다(op가 직접 요청 — ``RetryPolicy``를 쓰지 않는다: Dagster는 retry policy가 있으면 run 상한
@@ -37,6 +38,7 @@
 
 # ``from __future__ import annotations``를 쓰지 않는다 — Dagster가 op의 ``context`` 주석을
 # 실제 타입으로 검사하므로 문자열 주석이면 정의 시점에 거부한다(maintenance.py와 같다).
+import logging
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -50,7 +52,11 @@ from kortravelmap.infra.valkey_state import (
     ValkeyStateStore,
     make_valkey_client,
 )
-from kortravelmap.providers.kor_travel_transport import TransportExportEmpty
+from kortravelmap.providers.kor_travel_transport import (
+    TransportExportBusy,
+    TransportExportEmpty,
+    TransportSourceNotCurrent,
+)
 from kortravelmap.providers.kor_travel_transport_state import (
     DATASET_AIRPORTS,
     DATASET_FUEL_STATIONS,
@@ -96,7 +102,7 @@ from .upstream_requests import (
     counting_upstream_requests,
     observed_upstream_requests,
 )
-from .upstream_retry import sharing_run_retry_budget
+from .upstream_retry import RetryBudget, sharing_run_retry_budget
 from .upstream_signal import (
     UPSTREAM_NOT_READY,
     UPSTREAM_OK,
@@ -109,8 +115,12 @@ from .upstream_signal import (
     upstream_signal,
 )
 
+_LOGGER = logging.getLogger(__name__)
+
 __all__ = [
     "FULL_WALK_INTERVAL",
+    "RETRY_TIME_SHARE",
+    "alert_after_seconds",
     "TRANSPORT_STATE_JOBS",
     "TRANSPORT_STATE_JOB_TAGS",
     "TRANSPORT_STATE_SCHEDULES",
@@ -237,10 +247,10 @@ class TransportStateJobSpec:
     max_runtime_seconds: int
     collect: Collector
     description: str
-    stale_alert_after: timedelta = timedelta(days=2)
-    """서비스 세대의 원천 나이가 이를 넘으면 run을 실패시킨다(``upstream_signal.raise_if_stale``).
-    읽기 쪽 ``dataset.max_age``(REST ``stale``)보다 낮게 둔다 — 소비자가 stale을 받기 전에 운영자가
-    먼저 본다(소유자 결정 2026-11-24)."""
+    alert_after_setting: str = ""
+    """상류 경고 임계(초)를 담은 settings 필드 이름(:func:`alert_after_seconds`). 서비스 세대의 원천
+    나이가 이를 넘으면 run을 실패시킨다(``upstream_signal.raise_if_stale``, 소유자 결정 2026-11-24
+    "나이 기준 혼합"). 읽기 쪽 ``dataset.max_age``(REST ``stale``)보다 낮게 묶는다."""
     skip_unchanged: bool = False
     """첫 페이지 ``last_success_at``이 서비스 세대와 같으면 건너뛴다(:data:`FULL_WALK_INTERVAL`)."""
 
@@ -249,54 +259,54 @@ TRANSPORT_STATE_SPECS: Final[tuple[TransportStateJobSpec, ...]] = (
     TransportStateJobSpec(
         dataset=DATASET_FUEL_STATIONS,
         job_name="transport_state_fuel_stations",
+        alert_after_setting="transport_state_fuel_stations_alert_after_seconds",
         schedule_name="transport_state_fuel_stations_schedule",
         cron_schedule="17 * * * *",
         max_runtime_seconds=1_800,
         collect=_collect_fuel_stations,
         description="주유소 + 유종별 최신가 → Valkey 세대 교체(매시, 바뀌지 않았으면 건너뜀).",
-        stale_alert_after=timedelta(hours=16),  # transport OpiNet 수집 8시간 × 2
         skip_unchanged=True,
     ),
     TransportStateJobSpec(
         dataset=DATASET_REST_AREAS,
         job_name="transport_state_rest_areas",
+        alert_after_setting="transport_state_rest_areas_alert_after_seconds",
         schedule_name="transport_state_rest_areas_schedule",
         cron_schedule="47 4 * * *",
         max_runtime_seconds=900,
         collect=_collect_rest_areas,
         description="고속도로 휴게소 → Valkey 세대 교체(매일).",
-        stale_alert_after=timedelta(days=2),  # 매일 수집 × 2
     ),
     TransportStateJobSpec(
         dataset=DATASET_REST_AREA_FUEL_PRICES,
         job_name="transport_state_rest_area_fuel_prices",
+        alert_after_setting="transport_state_rest_area_fuel_prices_alert_after_seconds",
         schedule_name="transport_state_rest_area_fuel_prices_schedule",
         cron_schedule="27 * * * *",
         max_runtime_seconds=900,
         collect=_collect_rest_area_fuel_prices,
         description="휴게소 주유소 최신 유가 → Valkey 세대 교체(매시, 바뀌지 않았으면 건너뜀).",
-        stale_alert_after=timedelta(hours=8),  # transport 수집 4시간 × 2
         skip_unchanged=True,
     ),
     TransportStateJobSpec(
         dataset=DATASET_HIGHWAY_INCIDENTS,
         job_name="transport_state_highway_incidents",
+        alert_after_setting="transport_state_highway_incidents_alert_after_seconds",
         schedule_name="transport_state_highway_incidents_schedule",
         cron_schedule="3-59/10 * * * *",
         max_runtime_seconds=480,
         collect=_collect_highway_incidents,
         description="고속도로 활성 돌발 → Valkey 세대 교체(10분마다).",
-        stale_alert_after=timedelta(minutes=20),  # 5분 수집 × 4, 읽기 stale 30분 아래
     ),
     TransportStateJobSpec(
         dataset=DATASET_AIRPORTS,
         job_name="transport_state_airports",
+        alert_after_setting="transport_state_airports_alert_after_seconds",
         schedule_name="transport_state_airports_schedule",
         cron_schedule="53 4 * * *",
         max_runtime_seconds=600,
         collect=_collect_airports,
         description="국내 운영 공항 → Valkey 세대 교체(매일).",
-        stale_alert_after=timedelta(days=2),  # 원천 수집 시각이 없어 적재 시각으로 잰다
     ),
 )
 
@@ -344,17 +354,62 @@ async def _served_meta(store: ValkeyStateStore, dataset: str) -> GenerationMeta 
     """지금 서비스하는 세대 meta. 없거나(첫 적재 전) 읽지 못하면 ``None``(판단을 막지 않는다)."""
     try:
         return await store.current_meta(dataset)
-    except (StateNotLoaded, StateStoreError):
+    except StateNotLoaded:
         return None
 
 
 def _unchanged_since(meta: GenerationMeta | None, *, now: datetime) -> datetime | None:
-    """건너뛰기 기준 — 서비스 세대의 원천 수집 시각. 세대가 없거나 전량 주기가 됐으면 ``None``."""
+    """건너뛰기 기준 — 서비스 세대의 원천 수집 시각. 세대가 없거나 전량 주기가 됐으면 ``None``.
+
+    주기의 기준은 그 세대가 이어 온 마지막 전량 순회의 **시작** 시각(``full_synced_at``, 없으면
+    옛 세대라 ``loaded_at``)이다 — 끝(교체) 시각을 쓰면 순회 시간만큼 늦어져 매시 tick에서 전량이
+    7시간마다가 된다(#1549 적대 리뷰). 기준이 지금보다 미래면(시계 역행) 믿지 않고 전량을 받는다.
+    """
     if meta is None or meta.source_collected_at is None:
         return None
-    if now - meta.loaded_at >= FULL_WALK_INTERVAL:
+    basis = meta.full_synced_at or meta.loaded_at
+    if basis > now or now - basis >= FULL_WALK_INTERVAL:
         return None
     return meta.source_collected_at
+
+
+RETRY_TIME_SHARE: Final[float] = 0.25
+"""상태 job 하나가 HTTP 층 재시도(실패한 시도 + 대기)에 쓸 수 있는 시간 = run 상한 × 이 비율.
+대기가 run 상한을 밀어내지 않게 한다(돌발 480초 → 120초, 휴게소 유가 900초 → 225초)."""
+
+
+def alert_after_seconds(spec: TransportStateJobSpec, settings: KorTravelMapSettings) -> int:
+    """데이터셋의 상류 경고 임계(초). 읽기 stale 기준(``max_age``)보다 작게 묶는다."""
+    configured = int(getattr(settings, spec.alert_after_setting))
+    return min(configured, int(spec.dataset.max_age.total_seconds()) - 1)
+
+
+def _hold_metadata(exc: BaseException) -> dict[str, Any]:
+    """transport 503 code가 알린 미준비의 ``outcome``과 대기 상한(있으면). ``__cause__``만 따른다.
+
+    ``upstream_source_not_current``(근거 수집 미현재 code 4종)·``upstream_busy_exhausted``(HTTP 층
+    재시도를 다 쓴 경합)·``upstream_busy_over_cap``(``Retry-After``가 대기 상한을 넘어 기다리지
+    않은 경합). 그 밖의 미준비(code 없는 503·무응답 등)는 ``outcome=upstream_not_ready``다.
+    """
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, TransportSourceNotCurrent):
+            return {"outcome": "upstream_source_not_current"}
+        if isinstance(current, TransportExportBusy):
+            metadata: dict[str, Any] = {
+                "outcome": (
+                    "upstream_busy_over_cap"
+                    if current.retry_after_exceeds_cap
+                    else "upstream_busy_exhausted"
+                )
+            }
+            if current.retry_after_cap is not None:
+                metadata["transport_retry_after_cap_seconds"] = float(current.retry_after_cap)
+            return metadata
+        current = current.__cause__
+    return {"outcome": "upstream_not_ready"}
 
 
 def _iso_or_blank(value: datetime | None) -> str:
@@ -397,6 +452,7 @@ async def load_transport_state(
     run_id: str | None,
     allow_shrink: bool,
     store: ValkeyStateStore | None = None,
+    force_full_walk: bool = False,
 ) -> dict[str, Any]:
     """한 데이터셋을 받아 Valkey 세대를 교체한다. 반환값은 op metadata다.
 
@@ -419,12 +475,17 @@ async def load_transport_state(
             if not acquired:
                 return {"dataset": spec.dataset.name, "skipped": "locked"}
             served = await _served_meta(active, spec.dataset.name)
+            alert_after = timedelta(seconds=alert_after_seconds(spec, settings))
+            walk_started = datetime.now(UTC)
             unchanged_since = (
-                _unchanged_since(served, now=datetime.now(UTC)) if spec.skip_unchanged else None
+                _unchanged_since(served, now=walk_started)
+                if spec.skip_unchanged and not force_full_walk
+                else None
             )
+            budget = RetryBudget(max_seconds=spec.max_runtime_seconds * RETRY_TIME_SHARE)
             with (
                 counting_upstream_requests(),
-                sharing_run_retry_budget(),
+                sharing_run_retry_budget(budget),
                 observing_transport_http(),
             ):
                 try:
@@ -447,7 +508,7 @@ async def load_transport_state(
                         **upstream_signal(
                             UPSTREAM_OK,
                             served=served,
-                            alert_after=spec.stale_alert_after,
+                            alert_after=alert_after,
                             now=datetime.now(UTC),
                             reason="unchanged",
                         ),
@@ -459,13 +520,19 @@ async def load_transport_state(
                         failure_kind=exc.failure_kind,
                         description=str(exc),
                         served=served,
-                        alert_after=spec.stale_alert_after,
+                        alert_after=alert_after,
                         now=datetime.now(UTC),
                         details={"baseline": -1, "new_count": 0, **_request_metadata()},
                     )
                 except Exception as exc:
                     kind = upstream_not_ready_kind(exc)
                     if kind is None:
+                        _LOGGER.warning(
+                            "%s 실패 — transport 요청 계측: %s",
+                            spec.dataset.name,
+                            " ".join(f"{k}={v}" for k, v in transport_http_metadata().items())
+                            or "-",
+                        )
                         raise_terminal_if_transport_unrecoverable(exc)
                         raise
                     return {
@@ -473,12 +540,13 @@ async def load_transport_state(
                         "skipped": "upstream_not_ready",
                         "failure_kind": kind,
                         "reason": str(exc)[:500],
+                        **_hold_metadata(exc),
                         **_problem_metadata(exc),
                         **_request_metadata(),
                         **upstream_signal(
                             UPSTREAM_NOT_READY,
                             served=served,
-                            alert_after=spec.stale_alert_after,
+                            alert_after=alert_after,
                             now=datetime.now(UTC),
                             reason=kind,
                         ),
@@ -492,6 +560,7 @@ async def load_transport_state(
                 loaded_at=datetime.now(UTC),
                 run_id=run_id,
                 allow_shrink=allow_shrink,
+                full_synced_at=walk_started,
             )
             try:
                 retired = await active.retire_other_versions(spec.dataset.name)
@@ -512,7 +581,7 @@ async def load_transport_state(
             **upstream_signal(
                 UPSTREAM_OK,
                 served=result.meta,
-                alert_after=spec.stale_alert_after,
+                alert_after=alert_after,
                 now=datetime.now(UTC),
             ),
         }
@@ -523,7 +592,7 @@ async def load_transport_state(
             failure_kind=exc.failure_kind,
             description=str(exc),
             served=await _served_meta(active, spec.dataset.name),
-            alert_after=spec.stale_alert_after,
+            alert_after=timedelta(seconds=alert_after_seconds(spec, settings)),
             now=datetime.now(UTC),
             details={
                 "baseline": exc.baseline if exc.baseline is not None else -1,
@@ -540,6 +609,15 @@ async def load_transport_state(
 
 
 _OP_CONFIG: Final[dict[str, Field]] = {
+    "force_full_walk": Field(
+        bool,
+        default_value=False,
+        is_required=False,
+        description=(
+            "true면 바뀌지 않은 집합 건너뛰기를 이번 한 번 끄고 전량을 받는다 — Map 변환을 고친 "
+            "뒤 다시 돌릴 때 쓴다(그렇지 않으면 다음 전량 주기까지 skipped=unchanged)."
+        ),
+    ),
     "allow_shrink": Field(
         bool,
         default_value=False,
@@ -573,6 +651,7 @@ def _build_job(spec: TransportStateJobSpec) -> JobDefinition:
                 settings=KorTravelMapSettings(),
                 run_id=context.run_id,
                 allow_shrink=bool(context.op_config.get("allow_shrink", False)),
+                force_full_walk=bool(context.op_config.get("force_full_walk", False)),
             )
         except StateStoreError as exc:
             if exc.retryable:

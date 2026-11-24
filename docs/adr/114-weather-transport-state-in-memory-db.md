@@ -212,7 +212,7 @@ airports}`)만 쓰고, 기존 PG transport 적재는 그대로 둔다(결정 7).
   1건으로 거부한다.)**
 - 거부는 run 실패(`failure_kind=state_swap_refused`, step 재시도 없음)다. 다음 schedule tick이 다시 본다. 거부가
   이어지면 옛 세대가 남고 나이가 늘어 읽기 응답의 `stale`이 드러낸다(D5) — Dagster run 실패가 경보 자리다.
-  **(2026-11-24 개정이 대체: 거부는 세대를 지키고 건너뛰며, 서비스 세대가 stale 기준(`max_age`)을 넘었을 때만 run 실패 — 아래 "2026-11-24 개정" 절.)**
+  **(2026-11-24 개정이 대체: 거부는 세대를 지키고 건너뛰며, 서비스 세대가 경고 임계(`max_age`보다 낮다)를 넘었을 때만 run 실패 — 아래 "2026-11-24 개정" 절.)**
 - 진짜로 줄었으면 운영자가 run config `allow_shrink: true`로 한 번 통과시킨다(`meta.guard_override=1`로 남는다).
 
 ### D5. 신선도
@@ -784,7 +784,8 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   `served_age_seconds`(`source_collected_at`, 없으면 적재·304 재확인 시각, 세대가 없으면 −1)·기준
   `stale_alert_after_seconds`·`stale_alert`를 싣고, run tag `kor_travel_map.upstream_state`·
   `kor_travel_map.upstream_stale_alert`(true/false)를 **언제나** 쓴다. **소유자 결정(2026-11-24 "나이 기준 혼합")**: 기준은
-  job spec의 경고 임계 `stale_alert_after`이고 읽기 쪽 계약 `max_age`(D5·W4 — REST `freshness.stale`, 그대로 둔다)보다 낮다 —
+  경고 임계(transport는 settings `transport_state_<데이터셋>_alert_after_seconds` — env로 조정, `max_age − 1초`로 묶는다;
+  weather는 job spec `stale_alert_after`)이고 읽기 쪽 계약 `max_age`(D5·W4 — REST `freshness.stale`, 그대로 둔다)보다 낮다 —
   소비자가 `stale`을 받기 전에 운영자가 빨간 run을 먼저 본다. 임계 안이면 run은 성공(초록, 건너뜀·세대 유지·신호 tag)이고,
   넘으면(세대가 아예 없으면 포함) **재시도 없는 실패**다(`raise_if_stale`). Map에는 상류 장애 경보가 따로 없으므로 빨간 run이
   유일한 신호다. 한두 tick의 상류 이상(14일 transport 503 80건·거부 64건은 대부분 다음 tick에 풀렸다)은 초록으로 남고,
@@ -792,19 +793,30 @@ weather operation·client 쓰기·KMA provider import·API 이름)를 계속 지
   `allow_shrink`를 준다(D4 대체).
 - 상태 op에는 `RetryPolicy`가 없다 — run 상한으로 죽은 step에 재시도를 요청하는 경로가 없어진다.
 
-| 데이터셋 | 원천 주기 | 경고 임계 `stale_alert_after` | 읽기 `max_age` |
+| 데이터셋 | 원천 주기 | 경고 임계(기본) | 읽기 `max_age` |
 |---|---|---|---|
-| `transport.fuel_stations` | OpiNet 수집 8시간 | 16시간(두 주기) | 48시간 |
-| `transport.rest_area_fuel_prices` | 4시간 | 8시간(두 주기) | 48시간 |
+| `transport.fuel_stations` | OpiNet 수집 8시간(소요 1~2시간) | 18시간(두 주기 + 소요) | 48시간 |
+| `transport.rest_area_fuel_prices` | 4시간 | 9시간(두 주기 + 소요) | 48시간 |
 | `transport.highway_incidents` | 5분(transport는 30분이면 503) | 20분 | 30분 |
 | `transport.rest_areas`·`transport.airports` | 매일 | 2일 | 8일 |
-| `weather.locations` | 매일 | 2일 | 8일 |
-| `weather.current` | weather 공개 :20·:35, Map 매시 2회 | 2시간 | 3시간 |
-| `weather.forecast_ultra_short` | 매시 | 2시간 | 3시간 |
-| `weather.forecast_short` | 3시간 발표 | 8시간 | 12시간 |
-| `weather.forecast_mid` | 06·18시 발표 | 26시간(한 회차 놓침 + 여유) | 36시간 |
-| `weather.forecast_external` | 3시간 | 8시간 | 12시간 |
-| `weather.daily_summaries` | 매시 | 4시간 | 6시간 |
+| `weather.locations` | 매일 | 2일(Map 적재 기준) | 8일 |
+| `weather.current` | weather 공개 :20·:35, Map 매시 2회 | 2시간(Map 적재 기준) | 3시간 |
+| `weather.forecast_ultra_short` | 매시 | 2시간(Map 적재 기준) | 3시간 |
+| `weather.forecast_short` | 3시간 발표 | 8시간(Map 적재 기준) | 12시간 |
+| `weather.forecast_mid` | 06·18시 발표(Map 06·07·18·19시 :50) | 20시간(Map 적재 기준 — 두 회차를 놓치면 다음 06:50에) | 36시간 |
+| `weather.forecast_external` | 3시간 | 8시간(Map 적재 기준) | 12시간 |
+| `weather.daily_summaries` | 매시 | 4시간(Map 적재 기준) | 6시간 |
+
+- **나이의 기준**: transport는 원천 수집 시각(`source_collected_at` = transport `last_success_at`, 공항은 적재 시각).
+  weather는 **Map 적재·304 재확인 시각**(`served_age_basis=loaded`)이다 — weather `source_collected_at`은 그 데이터셋이
+  아니라 함께 묶인 모든 원천 head 중 가장 늦은 것(하루 두 번 도는 지역 관측망·3시간 외부 provider 포함)이라 늘 몇 시간
+  묵어 있다. 그것으로 판정하면 current·W5가 매 tick 빨강이 된다(적대 리뷰 2026-11-24). 그래서 weather 빨강은 "Map이
+  이 데이터셋을 기준 시간 동안 새로 받지 못했다"이고, 원천 자체가 오래됨은 `upstream_state=stale` tag·WARNING과
+  `served_source_collected_at`으로 본다. weather가 데이터셋별 원천 나이를 내면 그 값으로 바꾼다.
+- weather 읽기 자리를 잡은 뒤에도 `read_budget_seconds`(current 420초·W5 1,200초 등)까지만 읽는다 — 느린 날 긴 순회가
+  자리를 run 상한까지 쥐어 current를 굶기지 않게. 넘으면 그 tick을 건너뛴다.
+- 경고 임계의 정본: transport는 settings `transport_state_<데이터셋>_alert_after_seconds`(env로 조정, `max_age − 1초`로
+  묶는다), weather는 job spec `stale_alert_after`.
 
 ### weather export 읽기 — 줄 세우기와 발화 시각
 

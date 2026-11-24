@@ -7,8 +7,10 @@
   metadata `skipped=upstream_not_ready`, `transport_problem_code`·`transport_retry_after_seconds`, 세대 유지, step 재시도
   없음). 교체 거부·0건은 `skipped=refused`. 모든 결과가 `upstream_state`·`served_age_seconds`·`stale_alert`를 싣고 run tag
   `kor_travel_map.upstream_state`·`kor_travel_map.upstream_stale_alert`를 단다. **소유자 결정 "나이 기준 혼합"**: 서비스
-  세대의 원천 나이가 데이터셋 경고 임계(`stale_alert_after` — 주유소 16시간·휴게소 유가 8시간·돌발 20분·휴게소·공항 2일,
-  weather 2시간~2일; 읽기 `max_age`보다 낮다) 안이면 초록, 넘으면 step 재시도 없이 실패한다.
+  세대의 나이가 데이터셋 경고 임계(transport는 원천 수집 시각 기준·settings `transport_state_<데이터셋>_alert_after_seconds` —
+  주유소 18시간·휴게소 유가 9시간·돌발 20분·휴게소·공항 2일; weather는 Map 적재 시각 기준·2시간~2일; 읽기 `max_age`보다
+  낮다) 안이면 초록, 넘으면 step 재시도 없이 실패한다. 주유소·휴게소 유가는 HTTP 층 재시도 시간이 run 상한 × 0.25 안이고
+  op config `force_full_walk`로 건너뛰기를 끌 수 있다.
 - feature 적재 asset의 transport 503 code: `EXPORT_SOURCE_NOT_CURRENT` 등 4종은 HTTP·step 재시도 없이 실패,
   `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB`는 같은 요청을 `Retry-After`대로(한 번 60초 상한, run 예산 공유) 4회까지
   다시 묻는다. `EXPORT_DISABLED`·`EXPORT_TOO_LARGE`는 재시도 없이 실패, `EXPORT_SOURCE_INCONSISTENT`는 step 재시도. HTTP 층

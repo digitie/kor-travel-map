@@ -78,6 +78,7 @@ from kortravelmap.providers.kor_travel_transport import (
 
 from dagster import Failure
 
+from .transport_http_metrics import transport_http_metadata
 from .upstream_requests import (
     UPSTREAM_REQUESTS_METADATA_KEY,
     observed_upstream_requests,
@@ -261,7 +262,12 @@ def raise_terminal_if_transport_unrecoverable(exc: BaseException) -> None:
     ``FEATURE_LOAD_RETRY_POLICY``는 쿼터 말고는 모든 예외를 다시 돈다. 그런데 404(token·peer 주소·
     버전), 0건, 계약 위반, JSON이 아닌 본문은 60초 뒤에도 같다 — 같은 export를 세 번 더 부를 뿐이다.
     ``retryable=False``인 transport 예외만 :class:`dagster.Failure` ``allow_retries=False``로
-    바꾼다. 503(``transport_not_current``, ``retryable=True``)과 그 밖의 예외는 그대로 둔다.
+    바꾼다. retryable인 transport 예외(code 없는 503, 근거 수집이 현재가 아니라는 code 503,
+    경합 503, 근거 불일치)와 그 밖의 예외는 그대로 둔다 — feature 적재는 step
+    재시도(60·180·420초)를 쓴다.
+
+    Failure metadata에는 이 경계에서 잰 transport 요청 계측(``transport_http_*``·
+    ``transport_server_*``)도 싣는다 — 실패한 step은 output metadata를 남기지 않는다.
     """
 
     seen: set[int] = set()
@@ -283,6 +289,8 @@ def raise_terminal_if_transport_unrecoverable(exc: BaseException) -> None:
             retry_after = getattr(current, "retry_after", None)
             if isinstance(retry_after, int | float) and not isinstance(retry_after, bool):
                 metadata["transport_retry_after_seconds"] = float(retry_after)
+            for key, value in transport_http_metadata().items():
+                metadata.setdefault(key, value)
             raise Failure(
                 description=(
                     f"kor-travel-transport 실패({current.failure_kind}) — 기다려도 풀리지 "

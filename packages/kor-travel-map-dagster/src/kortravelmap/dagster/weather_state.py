@@ -57,7 +57,6 @@ from kortravelmap.infra.valkey_state import (
     StateItem,
     StateNotLoaded,
     StateStoreError,
-    StateStoreUnavailable,
     StateSwapRefused,
     ValkeyStateStore,
     make_valkey_client,
@@ -129,6 +128,7 @@ from .upstream_requests import (
 )
 from .upstream_retry import sharing_run_retry_budget
 from .upstream_signal import (
+    AGE_BASIS_LOADED,
     UPSTREAM_NOT_READY,
     UPSTREAM_OK,
     UPSTREAM_STALE,
@@ -834,11 +834,16 @@ class WeatherStateJobSpec:
     delta: DeltaFetcher | None = None
     """있으면 ``since`` 증분을 지금 세대에 병합할 수 있다(W3 예보, ADR-122). ``collect``는 전량."""
     stale_alert_after: timedelta = timedelta(hours=2)
-    """서비스 세대의 원천 나이가 이를 넘으면 run을 실패시킨다(``upstream_signal.raise_if_stale``).
-    읽기 쪽 ``dataset.max_age``(REST ``stale``)보다 낮게 둔다(소유자 결정 2026-11-24)."""
+    """서비스 세대를 Map이 새로 받지 못한 시간(적재·304 재확인 시각 기준 — ``AGE_BASIS_LOADED``)이
+    이를 넘으면 run을 실패시킨다(``upstream_signal.raise_if_stale``, 소유자 결정 2026-11-24 "나이
+    기준 혼합"). 원천 수집 시각을 쓰지 않는 이유: weather ``source_collected_at``은 그 데이터셋이
+    아니라 함께 묶인 모든 원천 중 가장 늦은 것(하루 두 번 도는 지역 관측망 등)이라 늘 몇 시간
+    묵어 있어, 그것으로 판정하면 매 tick 빨강이 된다(적대 리뷰 2026-11-24). 원천 나이는 metadata
+    ``served_source_collected_at``으로 남긴다."""
     read_budget_seconds: int = 300
-    """원천을 끝까지 읽는 데 남겨 둘 시간. weather export 읽기 자리(:data:`WEATHER_EXPORT_LEASE`)를
-    기다리는 것은 run 상한 − 꼬리 − 이 값까지다 — 못 잡으면 이번 tick을 건너뛴다."""
+    """원천을 끝까지 읽는 데 쓸 시간. weather export 읽기 자리(:data:`WEATHER_EXPORT_LEASE`)를
+    기다리는 것은 run 상한 − 꼬리 − 이 값까지고, 자리를 잡은 뒤에도 이 시간까지만 읽는다(넘으면 그
+    tick을 건너뛴다) — 긴 순회가 자리를 run 상한까지 쥐지 않게."""
 
 
 def _spec(
@@ -880,8 +885,8 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
     _spec(
         DATASET_LOCATIONS, "locations", "37 4 * * *", 900, _collect_locations,
         "weather 위치 roster(W1) → Valkey 세대 교체(매일).",
-        read_budget_seconds=300,
-        stale_alert_after=timedelta(days=2),  # 매일 × 2 (읽기 max_age 8일)
+        read_budget_seconds=600,
+        stale_alert_after=timedelta(days=2),  # 매일 적재 두 번 놓침
     ),
     # current는 W2 전량(운영 약 2만 7천 행, 23페이지 — weather ``MAX_PAGE_SCOPES=128``이 정한다)을
     # 매번 받는다. 느린 원인은 weather가 페이지마다 전체 scope 상태·승인 선택을 다시 검증하는
@@ -892,15 +897,15 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
     _spec(
         DATASET_CURRENT, "current", "25,40 * * * *", 600, _collect_current,
         "weather 최신 관측·실황(W2) → Valkey 세대 교체(매시 :25·:40 — weather 공개 :20·:35 뒤).",
-        read_budget_seconds=300,
-        stale_alert_after=timedelta(hours=2),  # 매시 2회 × 4 (읽기 max_age 3시간)
+        read_budget_seconds=420,
+        stale_alert_after=timedelta(hours=2),  # 매시 2회 적재를 네 번 놓침
     ),
     _spec(
         DATASET_FORECAST_ULTRA_SHORT, "forecast_ultra_short", "48 * * * *", 1_800,
         _forecast_collector(DATASET_FORECAST_ULTRA_SHORT),
         "weather 초단기예보(W3 ultra_short) → Valkey 세대 교체(매시 :48).",
-        read_budget_seconds=600,
-        stale_alert_after=timedelta(hours=2),  # 매시 × 2 (읽기 max_age 3시간)
+        read_budget_seconds=900,
+        stale_alert_after=timedelta(hours=2),  # 매시 적재 두 번 놓침
     ),
     # 단기·외부 상한은 증분이 아니라 **전량 재동기화**(첫 적재·하루 한 번·증분 거절 뒤)에 맞춘다.
     # odroid eMMC cold 전량은 단기 약 1,174초·외부 약 674초인데, 1,500·1,200초 상한에서 run이
@@ -911,21 +916,21 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
         _forecast_collector(DATASET_FORECAST_SHORT),
         "weather 단기예보(W3 short) → Valkey 세대 교체(하루 8회, 발표 02·05…23시 뒤 :50).",
         read_budget_seconds=1_500,
-        stale_alert_after=timedelta(hours=8),  # 3시간 발표 × 2 + 여유 (읽기 max_age 12시간)
+        stale_alert_after=timedelta(hours=8),  # 3시간 적재 두 번 놓침 + 여유
     ),
     _spec(
         DATASET_FORECAST_MID, "forecast_mid", "50 6,7,18,19 * * *", 900,
         _forecast_collector(DATASET_FORECAST_MID),
         "weather 중기예보(W3 mid) → Valkey 세대 교체(발표 06·18시 뒤 :50, 한 시간 뒤 한 번 더).",
-        read_budget_seconds=400,
-        stale_alert_after=timedelta(hours=26),  # 하루 2회 발표, 한 회차 놓침 + 여유 (max_age 36h)
+        read_budget_seconds=600,
+        stale_alert_after=timedelta(hours=20),  # 06·18시 회차 둘을 놓치면 다음 06:50에 빨강
     ),
     _spec(
         DATASET_FORECAST_EXTERNAL, "forecast_external", "55 */3 * * *", 2_400,
         _forecast_collector(DATASET_FORECAST_EXTERNAL),
         "weather 외부 provider 예보(W3 external) → Valkey 세대 교체(3시간마다).",
-        read_budget_seconds=900,
-        stale_alert_after=timedelta(hours=8),  # 3시간 × 2 + 여유 (읽기 max_age 12시간)
+        read_budget_seconds=1_200,
+        stale_alert_after=timedelta(hours=8),  # 3시간 적재 두 번 놓침 + 여유
     ),
     # W5는 14일 × 세 구간 × 위치(운영 약 6만 1천 건, 2,000건 페이지 약 31개)다. 포화된 odroid에서
     # 페이지당 약 27초라(2026-11-02 실측) 한 번 전량에 14분, 재시도까지 900초 상한을 넘겼다.
@@ -933,8 +938,8 @@ WEATHER_STATE_SPECS: Final[tuple[WeatherStateJobSpec, ...]] = (
     _spec(
         DATASET_DAILY_SUMMARIES, "daily_summaries", "5 * * * *", 2_700, _collect_daily_summaries,
         "weather 하루 세 구간 요약(W5) → Valkey 세대 교체(매시 :05).",
-        read_budget_seconds=1_400,
-        stale_alert_after=timedelta(hours=4),  # 매시 × 4 (읽기 max_age 6시간)
+        read_budget_seconds=1_200,
+        stale_alert_after=timedelta(hours=4),  # 매시 적재 네 번 놓침
     ),
 )
 
@@ -991,12 +996,14 @@ def _raise_terminal_if_weather_unrecoverable(exc: BaseException) -> None:
 
 
 async def _current_meta_or_none(store: ValkeyStateStore, dataset: str) -> GenerationMeta | None:
-    """지금 세대 meta(원천 ETag용). 없으면 ``None`` — 깨진 저장소는 교체 단계가 실패시킨다."""
+    """지금 세대 meta(원천 ETag·나이용). 없으면 ``None``.
+
+    Valkey에 닿지 못하면 그대로 올린다 — 나이를 모른 채 판정하지 않고 op의 Valkey 재시도로 넘긴다
+    (교체도 어차피 못 한다).
+    """
     try:
         return await store.current_meta(dataset)
     except StateNotLoaded:
-        return None
-    except StateStoreUnavailable:
         return None
 
 
@@ -1240,10 +1247,19 @@ async def _swap_forecast_delta(
 def _signal_for_source(
     spec: WeatherStateJobSpec, source_status: str | None, served: GenerationMeta | None
 ) -> dict[str, Any]:
-    """weather가 알린 집합 상태(``ok``·``stale``)를 상류 신호로."""
-    state = UPSTREAM_STALE if source_status == "stale" else UPSTREAM_OK
+    """weather가 알린 집합 상태(``ok``·``stale``)를 상류 신호로.
+
+    집합 상태를 알리지 않는 데이터셋(W1 위치 roster — weather가 늘 ``stale``을 싣는다)은 ``ok``로
+    본다. 나이는 그때도 적재·재확인 시각으로 잰다.
+    """
+    reported = source_status if spec.dataset.reports_source_status else None
+    state = UPSTREAM_STALE if reported == "stale" else UPSTREAM_OK
     return upstream_signal(
-        state, served=served, alert_after=spec.stale_alert_after, now=datetime.now(UTC)
+        state,
+        served=served,
+        alert_after=spec.stale_alert_after,
+        now=datetime.now(UTC),
+        basis=AGE_BASIS_LOADED,
     )
 
 
@@ -1266,6 +1282,7 @@ def _not_ready(
             UPSTREAM_NOT_READY,
             served=served,
             alert_after=spec.stale_alert_after,
+            basis=AGE_BASIS_LOADED,
             now=datetime.now(UTC),
             reason=kind,
         ),
@@ -1349,10 +1366,15 @@ async def load_weather_state(
                         "weather_export_busy",
                         current,
                     )
+                # 자리를 쥔 동안은 읽기 예산까지만 읽는다 — 느린 날 긴 순회가 자리를 run 상한까지
+                # 쥐어 짧은 주기 데이터셋(current)을 굶기지 않게(적대 리뷰 2026-11-24).
+                read_deadline = time.monotonic() + spec.read_budget_seconds
+                if deadline is not None:
+                    read_deadline = min(read_deadline, deadline)
                 with (
                     counting_upstream_requests(),
                     sharing_run_retry_budget(),
-                    _paging_deadline(deadline),
+                    _paging_deadline(read_deadline),
                 ):
                     ready: _DeltaReady | None = None
                     if plan is not None and plan.since is not None and current is not None:
@@ -1375,6 +1397,7 @@ async def load_weather_state(
                                     UPSTREAM_NOT_READY,
                                     served=current,
                                     alert_after=spec.stale_alert_after,
+                                    basis=AGE_BASIS_LOADED,
                                     now=datetime.now(UTC),
                                     reason="weather_delta_unavailable",
                                 ),
@@ -1527,6 +1550,7 @@ async def load_weather_state(
             description=str(exc),
             served=current,
             alert_after=spec.stale_alert_after,
+            basis=AGE_BASIS_LOADED,
             now=datetime.now(UTC),
             details={
                 "baseline": exc.baseline if exc.baseline is not None else -1,

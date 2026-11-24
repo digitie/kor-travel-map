@@ -961,7 +961,11 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
     store: ValkeyStateStore,
 ) -> None:
     from dagster import Failure
-    from kortravelmap.dagster.transport_state import TRANSPORT_STATE_SPECS, load_transport_state
+    from kortravelmap.dagster.transport_state import (
+        TRANSPORT_STATE_SPECS,
+        alert_after_seconds,
+        load_transport_state,
+    )
     from kortravelmap.dagster.upstream_signal import raise_if_stale
 
     spec = next(s for s in TRANSPORT_STATE_SPECS if s.dataset is DATASET_HIGHWAY_INCIDENTS)
@@ -1005,7 +1009,10 @@ async def test_dagster_loader_swaps_and_refuses_the_empty_incident_set(
     assert (await store.current_meta(DATASET_HIGHWAY_INCIDENTS.name)).count == 30
 
     # 거부가 이어져 서비스 세대가 경고 임계(20분)를 넘었으면 사람이 판단할 차례다 — FAILURE.
-    old_collection = datetime.now(UTC) - spec.stale_alert_after - timedelta(minutes=5)
+    alert_after = timedelta(
+        seconds=alert_after_seconds(spec, KorTravelMapSettings.model_construct())
+    )
+    old_collection = datetime.now(UTC) - alert_after - timedelta(minutes=5)
 
     async def _old(_settings: Any, on_collected_at: Callable[[datetime], None]) -> list[Any]:
         on_collected_at(old_collection)

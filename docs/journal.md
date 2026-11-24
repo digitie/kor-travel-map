@@ -27,7 +27,8 @@
   503 — Map은 상류 미준비로 건너뛴다. `transport.highway_incidents` guard의 "기준 미만이면 0건 허용"을 없애고 절대 하한 1건을
   방어선으로 남겼다(옛 transport·계약 위반의 200 + 0건은 거부 → 나이 규칙).
 - **소유자 결정(2026-11-24) "나이 기준 혼합"과 #1549 합침**: run 결과 기준을 읽기 `max_age`에서 job spec 경고 임계
-  `stale_alert_after`(주유소 16시간·휴게소 유가 8시간·돌발 20분·휴게소·공항 2일, weather 2시간~2일 — 표는 ADR-114 개정 절)로
+  (transport settings — 주유소 18시간·휴게소 유가 9시간·돌발 20분·휴게소·공항 2일, 원천 수집 시각 기준; weather spec 2시간~2일,
+  Map 적재 시각 기준 — weather `source_collected_at`이 지역 관측망 등 가장 늦은 원천에 끌려가서다. 표는 ADR-114 개정 절)로
   바꿨다. transport 세션 PR #1549(transport export 503 code 분류·HTTP 층 재시도·바뀌지 않은 주유소 집합 건너뛰기·요청 계측)를 이
   PR로 가져와 같은 자리(`transport_state.py` fetch 실패 처리)를 하나의 의미로 맞췄다 — `TransportSourceNotCurrent` 4종·
   `TransportExportBusy`(대기 상한 초과 포함)·`EXPORT_SOURCE_INCONSISTENT`·code 없는 503은 상태 job에서 상류 미준비(건너뜀)로,

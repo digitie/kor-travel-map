@@ -144,6 +144,15 @@ def test_served_age_prefers_the_source_collection_and_falls_back_to_the_load() -
     assert served_age_seconds(future, now=NOW) == 0  # 시계가 어긋나도 음수 나이는 없다
 
 
+def test_loaded_basis_ignores_an_old_source_time() -> None:
+    # weather: 원천 시각은 가장 늦은 원천에 끌려가므로 Map 적재·재확인 시각으로 잰다.
+    meta = _meta(NOW - timedelta(hours=20), NOW - timedelta(minutes=10))
+    assert served_age_seconds(meta, now=NOW) == 20 * 3600
+    assert served_age_seconds(meta, now=NOW, basis="loaded") == 600
+    rechecked = replace(meta, checked_at=NOW - timedelta(minutes=2))
+    assert served_age_seconds(rechecked, now=NOW, basis="loaded") == 120
+
+
 def test_signal_alerts_past_the_age_or_without_a_served_generation() -> None:
     fresh = _meta(NOW - timedelta(minutes=40), NOW)
     ok = signal("not_ready", served=fresh, alert_after=timedelta(hours=1), now=NOW, reason="r")
@@ -153,6 +162,7 @@ def test_signal_alerts_past_the_age_or_without_a_served_generation() -> None:
         "served_generation": "g-1",
         "served_source_collected_at": (NOW - timedelta(minutes=40)).isoformat(),
         "served_age_seconds": 2_400,
+        "served_age_basis": "source",
         "stale_alert_after_seconds": 3_600,
         "stale_alert": False,
     }

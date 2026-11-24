@@ -194,7 +194,7 @@ FEATURE_LOAD_RETRY_POLICY: Final[RetryPolicy] = RetryPolicy(
     delay=60,
     backoff=Backoff.EXPONENTIAL,
     # 같은 순간 실패한 asset들이 같은 순간 다시 묻지 않게 간격을 흔든다(2026-11-23 감사 P2).
-    # Dagster PLUS_MINUS는 ±delay(60초)다 — 재시도 간격이 0~120·60~180·180~300초가 된다.
+    # Dagster PLUS_MINUS는 ±delay(60초)다 — 지수 간격 60·180·420초가 0~120·120~240·360~480초가 된다.
     jitter=Jitter.PLUS_MINUS,
 )
 """provider Feature load asset 공통 retry policy."""

@@ -167,7 +167,7 @@ def test_weather_alert_thresholds_sit_below_the_read_side_max_age() -> None:
         "weather.current": timedelta(hours=2),
         "weather.forecast_ultra_short": timedelta(hours=2),
         "weather.forecast_short": timedelta(hours=8),
-        "weather.forecast_mid": timedelta(hours=26),
+        "weather.forecast_mid": timedelta(hours=20),
         "weather.forecast_external": timedelta(hours=8),
         "weather.daily_summaries": timedelta(hours=4),
     }
@@ -958,9 +958,9 @@ async def test_a_busy_export_skips_the_tick_without_reading(
     assert seen == []
     assert metadata["skipped"] == "upstream_not_ready"
     assert metadata["failure_kind"] == "weather_export_busy"
-    # 기다림 = 남은 run 시간 − 읽기 예산(locations 300초)
+    # 기다림 = 남은 run 시간 − 읽기 예산(locations 600초)
     (waited,) = store.lease_waits
-    assert 480 < waited <= 500
+    assert 180 < waited <= 200
 
 
 async def test_a_walk_that_cannot_finish_before_the_ceiling_stops_itself(
@@ -992,24 +992,27 @@ async def test_a_walk_that_cannot_finish_before_the_ceiling_stops_itself(
     assert len(seen) == 3  # 30·60·90초 — 넷째(120초)는 deadline 100초를 넘는다
 
 
-def _ok_spec(source_status: str = "ok") -> WeatherStateJobSpec:
+def _ok_spec(source_status: str = "ok", index: int = 0) -> WeatherStateJobSpec:
     async def _ok(_settings: Any, _etag: str | None) -> Any:
         fetch = weather_state.WeatherFetch(
             [], datetime.now(UTC) - timedelta(minutes=10), source_status, 1, None
         )
         return weather_state.WeatherCollected(items=[], row_duplicates=0, fetch=fetch)
 
-    return replace(WEATHER_STATE_SPECS[0], collect=_ok)
+    return replace(WEATHER_STATE_SPECS[index], collect=_ok)
 
 
 async def test_stale_source_is_swapped_and_reported_like_transport() -> None:
     # 200 + stale은 값이 왔으므로 교체한다. 상태는 metadata로 남는다(초록이지만 보인다).
     store = _FakeStore()
-    metadata = await _load(_ok_spec("stale"), store)
+    metadata = await _load(_ok_spec("stale", index=1), store)  # current는 집합 상태를 알린다
     assert len(store.swapped) == 1
     assert metadata["upstream_state"] == "stale"
     assert metadata["served_generation"] == "20261024T000000Z-00000000"
-    assert 500 < metadata["served_age_seconds"] < 700
+    # weather 빨강은 Map 적재 기준이다 — 방금 교체했으니 0에 가깝다. 원천 시각은 따로 남는다.
+    assert metadata["served_age_basis"] == "loaded"
+    assert 0 <= metadata["served_age_seconds"] < 60
+    assert metadata["served_source_collected_at"]
     assert metadata["stale_alert"] is False
     fresh = await _load(_ok_spec("ok"), _FakeStore())
     assert fresh["upstream_state"] == "ok"
@@ -1086,7 +1089,9 @@ async def test_not_modified_touches_the_current_generation_without_swapping(
         store=cast(ValkeyStateStore, store),
     )
     assert metadata["unchanged"] == "not_modified"
-    assert metadata["upstream_state"] == "stale"  # 지금 세대가 stale로 적재됐다
+    # W1 위치 roster는 집합 상태를 알리지 않는다(weather가 늘 stale을 싣는다) — ok로 보고
+    # 나이만 잰다.
+    assert metadata["upstream_state"] == "ok"
     assert metadata["served_generation"] == "g-1"
     assert store.swapped == []
     assert store.touched == [("weather.locations", "g-1")]
