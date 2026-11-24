@@ -184,6 +184,32 @@ asset step과 큐 run(`execute_feature_update_request`, scope 여러 개)이 `up
 | `feature_route_krforest_dulle_trails_monthly_schedule` | `feature_route_krforest_dulle_trails_job` | `15 2 1 * *` |
 | `feature_notice_krforest_landslide_forecast_issues_six_daily_schedule` | `feature_notice_krforest_landslide_forecast_issues_job` | `20 1,5,9,13,17,21 * * *` |
 
+## Run 큐 우선순위 (`dagster/priority`)
+
+n150 공용 Dagster instance(Map·PinVi·concierge)의 run 큐는 instance 전체에서 `dagster/priority`
+(정수 문자열, 클수록 먼저 dequeue, 없으면 0, 같은 값은 FIFO)로 줄을 선다. 값은 테넌트 공통 규칙이다
+(정본: kor-travel-docker-manager `docs/dagster-tenant-fairness.md`, 소유자 결정 2026-11-24). 분류는 자료의
+성격 + 주기다 — 기준정보·시간표·목록·POI 같은 기준 자료는 주기와 무관하게 0이다.
+
+| 값 | 뜻 | Map job |
+|---|---|---|
+| 10 | 현황(관측·상태)을 1시간 미만 주기로 갱신하는 정기 수집·상태 적재 | `transport_state_highway_incidents`(10분), `weather_state_current`(매시 :25·:40) |
+| 5 | 시간 단위로 바뀌는 값(가격·예보 등)을 하루 미만 주기로 갱신하는 정기 수집(1시간 미만이어도 현황이 아니면 5) | `transport_state_fuel_stations`·`transport_state_rest_area_fuel_prices`(매시), `weather_state_forecast_ultra_short`·`weather_state_daily_summaries`(매시), `weather_state_forecast_short`·`weather_state_forecast_external`(3시간), `weather_state_forecast_mid`(하루 4회), `feature_notice_krforest_landslide_forecast_issues_job`(하루 6회) |
+| 0 | 하루 이상 주기·backfill·전체 재적재·정리·유지보수·검증·큐·수동 | 나머지 전부(매일·매주·매월 feature 적재, 매일 상태 적재, 매시 GC·6시간 file scan 같은 정리, 큐 worker, offline upload, 탐침) |
+
+- 표는 `kortravelmap.dagster.run_priority.JOB_RUN_PRIORITIES` 하나다. 값은 **job 정의 tag에만** 달려
+  schedule·sensor·launchpad·관리자 "지금 실행"(GraphQL `launchRun`)·재실행 run에 모두 실린다.
+  schedule·sensor `RunRequest`와 schedule tag는 이 key를 싣지 않는다(같은 key를 덮지 않는다 — 시험이 막는다).
+  표에 없는 job은 code location 로드에서 실패한다.
+- 정기 job을 사람이 띄워도(launchpad·"지금 실행"·재실행) job 값을 그대로 받는다. 규칙의 "수동 일괄 실행 = 0"은
+  수동으로만 도는 일괄 job(offline upload·batch gate 등)이다. geo 릴리스 재지오코딩 sensor가 띄우는 산사태
+  notice run도 job 값(5)을 받는다. UI에서 asset을 직접 materialize하는 암묵 `__ASSET_JOB` run은 tag가 없어 0이다.
+- 우선순위는 대기 중인 run끼리의 dequeue 순서만 바꾼다. 이미 도는 run을 밀어내지 않고, pool·tag 상한에 막힌 run은
+  그대로 기다린다.
+- 분류는 schedule의 **코드 기본 cron**으로 한다. cron override는 값을 바꾸지 않는다 — 주기를 바꾸면 표도 바꾼다.
+  `tests/test_run_priority.py`가 표 ↔ 정의된 job ↔ 코드 cron 주기를 대조한다.
+- 음수·10 초과는 두지 않는다(다른 테넌트를 굶기지 않는다).
+
 ## Curation candidate 갱신
 
 T-VN-40부터 독립 `curated_features_refresh` asset/job/schedule은 없다. provider full-snapshot의

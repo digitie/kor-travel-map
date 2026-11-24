@@ -41,6 +41,7 @@ from dagster import (
     op,
 )
 
+from .run_priority import run_priority_tags
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
@@ -133,7 +134,12 @@ async def detect_manual_provider_dedup_candidates_op(
 
 @job(
     name="manual_provider_dedup_detection",
-    tags=MANUAL_PROVIDER_DEDUP_JOB_TAGS,
+    # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
+    # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
+    tags={
+        **MANUAL_PROVIDER_DEDUP_JOB_TAGS,
+        **run_priority_tags("manual_provider_dedup_detection"),
+    },
     description=(
         "manual/provider dedup 후보 탐지. 자동 병합하지 않고 후보로만 올린다. "
         "admin이 판정한 쌍은 migration 305의 재심 차단이 막고, 억눌린 수는 "

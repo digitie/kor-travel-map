@@ -26,6 +26,7 @@ from kortravelmap.infra.transaction_limits import connection_check_interval
 from dagster import DagsterRunStatus, Failure, OpExecutionContext, job, op
 
 from .assets import MAP_POOL_PREFIX
+from .run_priority import run_priority_tags
 
 if TYPE_CHECKING:
     from kortravelmap.client import AsyncKorTravelMapClient
@@ -160,6 +161,7 @@ async def _sweep(
         ),
         "kor_travel_map.job_scope": "maintenance",
         "kor_travel_map.job_kind": "feature_operation_completion",
+        **run_priority_tags(FEATURE_OPERATION_COMPLETION_JOB_NAME),
     },
 )
 def feature_operation_completion_job() -> None:

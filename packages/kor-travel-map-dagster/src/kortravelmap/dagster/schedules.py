@@ -61,6 +61,7 @@ from .feature_operation_tracking import (
     encode_execution_scopes,
 )
 from .mcst_features import feature_place_mcst_culture
+from .run_priority import run_priority_tags
 from .run_scope import map_owned_runs_filter
 from .schedule_overrides import cron_for_schedule
 
@@ -548,6 +549,7 @@ def _feature_load_definition_tags(spec: FeatureLoadScheduleSpec) -> dict[str, st
     )
     tags["kor_travel_map.operation_key"] = spec.job_name
     tags.update(_execution_scope_tags(spec))
+    tags.update(run_priority_tags(spec.job_name))
     if spec.max_runtime_seconds is not None:
         tags[MAX_RUNTIME_SECONDS_TAG] = str(spec.max_runtime_seconds)
     return tags
