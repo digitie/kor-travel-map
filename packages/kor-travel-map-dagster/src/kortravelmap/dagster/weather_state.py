@@ -118,6 +118,7 @@ from dagster import (
 )
 
 from . import upstream_retry
+from .run_priority import run_priority_tags
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 from .upstream_requests import (
@@ -1667,6 +1668,7 @@ def _build_job(spec: WeatherStateJobSpec) -> JobDefinition:
     tags = {
         **WEATHER_STATE_JOB_TAGS,
         MAX_RUNTIME_SECONDS_TAG: str(spec.max_runtime_seconds),
+        **run_priority_tags(spec.job_name),
     }
 
     @job(name=spec.job_name, tags=tags, description=spec.description)

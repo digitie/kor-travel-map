@@ -38,6 +38,34 @@
   `test_definitions.py`(모든 job run 상한, 비-feature schedule 다음 tick 전 회수), integration `test_valkey_{transport,weather}_state.py`
   (거부·나이, 공용 자리 동시성·갱신·대기). OpenAPI·migration 없음. 관리자 화면 변화 없음(e2e 대상 아님).
 
+## 2026-11-24 — 공용 run 큐 우선순위 `dagster/priority`(수집 실패 감사 §2.6 #9·§4 #13)
+
+- 배경: 감사 §2.6 #9 — 공용 Dagster 큐에 `dagster/priority`가 없어 10분 고속도로 돌발·30분 weather 현재 상태가
+  매월 적재·GC와 같은 FIFO 줄에 섰다. 소유자 결정(2026-11-24)으로 두 plane 공통 규칙이 생겼다(정본: Manager
+  `docs/dagster-tenant-fairness.md`): 10 = 1시간 미만 정기 수집·상태 적재, 5 = 1시간 이상·하루 미만 정기 수집,
+  0 = 하루 이상·정리·유지보수·검증·수동. 참고 구현은 transport `JOB_PRIORITIES`.
+- 구현: `kortravelmap.dagster.run_priority.JOB_RUN_PRIORITIES` 한 표(job 51개 전부 명시)와 `run_priority_tags()`.
+  각 모듈의 job 정의 tag(또는 job 공통 tag 상수)에 펼쳐 넣었다 — Dagster가 schedule·sensor `RunRequest`·GraphQL
+  `launchRun` tag를 job 정의 tag 위에 덮어 run tag를 만들므로 모든 실행 경로에 실린다. 표에 없는 job은 code
+  location 로드에서 `KeyError`. 탐침(`map_run_heartbeat`)은 상대 import 금지(탐침 lint) 때문에 값을 직접 적는다.
+  schedule tag로도 쓰이는 공통 상수(maintenance·file scan·dedup·MOIS 원천)에는 넣지 않고 job 정의에서만 펼친다 —
+  공용 규칙이 "RunRequest가 같은 key를 덮어쓰지 않게"다.
+- 분류(코드 cron 기준): 10 — `transport_state_highway_incidents`(10분)·`weather_state_current`(:25·:40). 5 —
+  transport 유가 둘(매시), weather 초단기·일 요약(매시)·단기·외부(3시간)·중기(하루 4회), 산사태 notice(하루 6회).
+  0 — 매일 이상 feature 적재 28개·MOIS 원천 동기화, 매일 상태 적재(휴게소·공항·weather 위치), 매시 GC·6시간 file scan(정리),
+  큐 worker·offline upload·batch gate·dedup·completion·탐침. 큐 worker(PinVi cache target·관리자 갱신)는 규칙 표에
+  없는 대화형 요청이라 0으로 두고 소유자 결정을 기다린다.
+- 시험 `packages/kor-travel-map-dagster/tests/test_run_priority.py`: 정의된 job 집합 = 표, 모든 job 정의 tag =
+  표 값 ∈ {0,5,10}, 수집 job의 표 값 = 코드 cron 평균 간격에서 따로 유도한 규칙 값, 비수집 job = 0, 모든 schedule
+  tick(coalescing 포함)·큐·MOIS 이어 달리기 요청을 daemon의 run tag 합성(`{**job.run_tags, **request.tags}`,
+  Dagster 1.13.24 소스 확인)에 넣은 값 확인, 모든 schedule·sensor 요청(큐·MOIS 이어 달리기 실제 판정 함수·completion)에
+  key가 없는지, key를 손으로 적는 모듈이 표·탐침 둘뿐인지(정적). 표·job tag·요청 tag·cron을 일부러 틀린 변이 9종이 모두 빨강(리뷰어 재실행).
+- 적대 리뷰 2인(분류·실행 경로 / 시험·tag 상호작용·문서): rebase 충돌 표식이 문서 3곳에 남은 것, geo 릴리스 sensor의
+  `RunRequest` 덮어쓰기가 Manager 정본 §3("RunRequest가 같은 key를 덮어쓰지 않게")과 어긋남(덮어쓰기 제거 — 산사태
+  재지오코딩 run 1건은 5), schedule tag 상수에 key가 실림, MOIS 원천 동기화가 수집 분류 대조에서 빠짐(cron 상수로 뽑아
+  넣음), MOIS·completion 요청 시험이 실제 생성 경로를 안 거침, 수동 실행 의미 문서화, CHANGELOG 효과 과장을 고쳤다.
+  completion sweep(산사태 root도 완결)과 탐침을 0으로 둔 판단은 표에 주석으로 남겼다.
+
 ## 2026-11-24 — Map Dagster freeze 도구 리뷰 후속 2차(#1552 리뷰)
 
 - 근거 확인: 최신 `origin/main`(1dde1da37)과 열린 #1542·#1548·#1549·#1550·#1551은 `scripts/n150/dagster-freeze.py`를

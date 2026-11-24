@@ -42,6 +42,7 @@ from dagster import (
     op,
 )
 
+from .run_priority import run_priority_tags
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
@@ -194,7 +195,13 @@ async def scan_managed_files_op(context: OpExecutionContext) -> dict[str, object
 @job(
     name="managed_file_scan",
     # 6시간마다. 실측 성공 p99 148초·최대 164초 → 1시간.
-    tags={**FILE_REGISTRY_SCAN_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "3600"},
+    # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
+    # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
+    tags={
+        **FILE_REGISTRY_SCAN_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "3600",
+        **run_priority_tags("managed_file_scan"),
+    },
     description=(
         "파일 registry reconciliation scan — 등록/orphan/missing 판정 + "
         "offline-uploads DB backfill."

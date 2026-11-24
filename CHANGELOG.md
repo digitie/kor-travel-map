@@ -26,6 +26,10 @@
 - 상태 op의 Dagster `RetryPolicy` 제거(Valkey 연결 실패만 op가 재시도 요청), tag 없던 Map job 7개에 `dagster/max_runtime`,
   지수 backoff `RetryPolicy`에 jitter. transport #265 반영: 돌발 guard의 "기준 미만이면 0건 허용" 제거, 절대 하한 1건.
 
+## 2026-11-24 — 공용 run 큐 우선순위 `dagster/priority`(수집 실패 감사 §2.6 #9·§4 #13)
+
+- Map Dagster의 모든 job이 `dagster/priority` tag를 단다(공용 규칙 — kor-travel-docker-manager `docs/dagster-tenant-fairness.md`). 10: `transport_state_highway_incidents`·`weather_state_current`. 5: 매시·3시간·하루 4회 상태 적재(transport 유가 둘, weather 초단기·일 요약·단기·외부·중기)와 산사태 notice(하루 6회). 0: 나머지(매일 이상 feature 적재, 매일 상태 적재, 정리·검증·큐·수동·탐침). 값은 job 정의 tag에만 달려 schedule·sensor·launchpad·관리자 "지금 실행"·재실행 run이 물려받는다. 공용 큐에 대기 run이 쌓였을 때 슬롯이 나면 실시간 run이 먼저 나간다(도는 run을 밀어내지는 않는다). API·OpenAPI·DB 변경 없음.
+
 ## 2026-11-24 — n150 Dagster freeze 도구 리뷰 후속(#1541)
 
 - `scripts/n150/dagster-freeze.py freeze`가 기본으로 Valkey 상태 적재 schedule(`weather_state_*`·`transport_state_*`, Map PG에 쓰지 않음)을 멈추지 않고 그 run도 기다리지 않는다 — 운영 창 동안과 창 뒤 다음 cron까지 날씨·교통 상태가 낡지 않는다. 마지막 `after:` 줄이 기다리지 않은 `state_runs`를 따로 적는다. 이전 판이 멈춘 스냅샷은 `unfreeze`가 그대로 되살린다.

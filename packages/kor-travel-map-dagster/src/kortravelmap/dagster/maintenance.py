@@ -32,6 +32,7 @@ from dagster import (
     op,
 )
 
+from .run_priority import run_priority_tags
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 
@@ -907,7 +908,13 @@ async def drain_expired_cache_target_snapshots_op(
 @job(
     name="consistency_dedup_refresh",
     # 매일. 2026-11-23 실측 성공 p95 3,234초·최대 3,389초 → 3시간(다음 발화 한참 전).
-    tags={**CONSISTENCY_DEDUP_REFRESH_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "10800"},
+    # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
+    # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
+    tags={
+        **CONSISTENCY_DEDUP_REFRESH_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "10800",
+        **run_priority_tags("consistency_dedup_refresh"),
+    },
     description=(
         "DB 기준 dedup 후보 큐를 갱신한 뒤 F1~F4 consistency report를 저장하고 검색 인지도를 "
         "다시 계산하며, 보존 기간이 지난 notice와 resolved integrity finding을 정리한다."
@@ -926,7 +933,13 @@ def consistency_dedup_refresh_job() -> None:
     name="cache_target_snapshot_gc",
     # 매시. 실측 성공 p99 98초·최대 172초. backlog가 쌓이면 op가 스스로 max_seconds(기본 2,700초,
     # 종전 3,300초)까지 비우고 관측 질의를 더 한다 → 발화 간격과 같은 1시간 안에 여유를 남긴다.
-    tags={**CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "3600"},
+    # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
+    # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
+    tags={
+        **CACHE_TARGET_SNAPSHOT_GC_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "3600",
+        **run_priority_tags("cache_target_snapshot_gc"),
+    },
     description=(
         "만료·미참조 cache-target snapshot item/header를 system round-robin batch로 "
         "정리하고 정확한 잔여 backlog와 referenced 보존 추세 alert를 기록한다."

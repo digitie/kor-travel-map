@@ -65,6 +65,7 @@ from .provider_fetchers import (
     provider_call_retry_budget,
     provider_call_with_retry,
 )
+from .run_priority import run_priority_tags
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 from .upstream_requests import (
@@ -75,6 +76,7 @@ from .upstream_requests import (
 )
 
 __all__ = [
+    "MOIS_SOURCE_SYNC_CRON",
     "MOIS_SOURCE_SYNC_JOBS",
     "MOIS_SOURCE_SYNC_JOB_TAGS",
     "MOIS_SOURCE_SYNC_SCHEDULES",
@@ -649,7 +651,13 @@ def mois_localdata_source_sync_op(context: OpExecutionContext) -> dict[str, obje
     name="mois_localdata_source_sync",
     # 매주. 14일 표본이 성공 1건(8,978초, 6월 1,447초에서 늘었다)뿐이라 전역 상한과 같은 6시간을
     # 명시한다 — 표본이 쌓이면 줄인다.
-    tags={**MOIS_SOURCE_SYNC_JOB_TAGS, MAX_RUNTIME_SECONDS_TAG: "21600"},
+    # schedule tag는 상수만 싣는다 — 우선순위는 job 정의 tag에만(RunRequest가 같은
+    # key를 덮지 않게, Manager docs/dagster-tenant-fairness.md §3).
+    tags={
+        **MOIS_SOURCE_SYNC_JOB_TAGS,
+        MAX_RUNTIME_SECONDS_TAG: "21600",
+        **run_priority_tags("mois_localdata_source_sync"),
+    },
     description=(
         "LOCALDATA 인허가 파일을 받아 MOIS 소스 SQLite DB(Phase A)를 갱신한다. "
         "Phase B feature-load fetcher가 이 DB를 읽는다."
@@ -660,13 +668,16 @@ def mois_localdata_source_sync_job() -> None:
     mois_localdata_source_sync_op()
 
 
+MOIS_SOURCE_SYNC_CRON: Final[str] = "0 4 * * 1"
+"""원천 파일 DB 갱신 코드 기본 cron(주 1회). 큐 우선순위 분류(``run_priority``)도 이 값을 본다."""
+
 MOIS_SOURCE_SYNC_SCHEDULES: Final = [
     ScheduleDefinition(
         name="mois_localdata_source_sync_weekly_schedule",
         job=mois_localdata_source_sync_job,
         cron_schedule=cron_for_schedule(
             "mois_localdata_source_sync_weekly_schedule",
-            "0 4 * * 1",
+            MOIS_SOURCE_SYNC_CRON,
         ),
         execution_timezone=KST_TIMEZONE,
         default_status=DefaultScheduleStatus.STOPPED,

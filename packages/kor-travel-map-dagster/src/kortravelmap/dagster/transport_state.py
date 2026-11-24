@@ -94,6 +94,7 @@ from .provider_fetchers import (
     fetch_transport_rest_areas,
 )
 from .quota_exhaustion import raise_terminal_if_transport_unrecoverable
+from .run_priority import run_priority_tags
 from .schedule_overrides import cron_for_schedule
 from .schedules import KST_TIMEZONE
 from .transport_http_metrics import observing_transport_http, transport_http_metadata
@@ -675,6 +676,7 @@ def _build_job(spec: TransportStateJobSpec) -> JobDefinition:
     tags = {
         **TRANSPORT_STATE_JOB_TAGS,
         MAX_RUNTIME_SECONDS_TAG: str(spec.max_runtime_seconds),
+        **run_priority_tags(spec.job_name),
     }
 
     @job(name=spec.job_name, tags=tags, description=spec.description)

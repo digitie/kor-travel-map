@@ -7,6 +7,13 @@
 - 다음: n150 Map dagster 회전 뒤 확인(PR 본문 "회전 뒤 확인"). 남은 것: weather export 페이지 처리 수정(weather 쪽) 뒤 current
   상한 480 복귀·page size 검토, 큐 lock busy 15초 재발행(큐 재시도 작업), schedule override가 이 job들의 cron을 덮는지 확인.
 
+## 2026-11-24 — 공용 run 큐 우선순위 `dagster/priority`(감사 §2.6 #9·§4 #13)
+
+- Map job 전부가 `dagster/priority`를 단다(표 `run_priority.JOB_RUN_PRIORITIES`, 공용 규칙 10/5/0). 실시간 둘(고속도로
+  돌발·weather 현재)이 10, 매시~하루 미만 상태 적재와 산사태 notice가 5, 나머지 0. API·OpenAPI·DB 변경 없음.
+- 다음: n150 회전(dagster code-server 이미지) 뒤 새 run의 run tag에 `dagster/priority`가 있는지(예:
+  `transport_state_highway_incidents` run = `10`) 확인. 큐 worker(대화형 요청)의 값은 소유자 결정 대기(지금 0).
+
 ## 2026-11-24 — Map Dagster freeze 도구 리뷰 후속(#1541)
 
 - freeze가 기본으로 Valkey 상태 schedule(`weather_state_*`·`transport_state_*`)을 멈추지 않고 그 run을 기다리지 않는다
