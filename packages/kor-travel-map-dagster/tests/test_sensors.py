@@ -64,9 +64,14 @@ class _Client:
     reschedule_outcome: FeatureUpdateRetryOutcome | None = None
     reschedule_raises: list[Exception] = field(default_factory=list)
     terminalized: list[dict[str, Any]] = field(default_factory=list)
+    current: FeatureUpdateRequest | None = None
+    """``get_update_request``가 돌려줄 저장 상태. ``None``이면 ``request``."""
 
     async def peek_next_update_request(self) -> FeatureUpdateRequest | None:
         return self.request
+
+    async def get_update_request(self, request_id: str) -> FeatureUpdateRequest | None:
+        return self.current if self.current is not None else self.request
 
     async def peek_update_requests(self, *, limit: int = 10) -> tuple[FeatureUpdateRequest, ...]:
         self.peek_limits.append(limit)
@@ -878,3 +883,57 @@ def test_worker_treats_a_state_change_during_reschedule_as_success() -> None:
     assert result.success
     metadata = result.output_for_node("execute_feature_update_request")
     assert metadata["status"] == "state_changed"
+
+
+def test_worker_fails_the_run_when_its_generation_already_ended_failed() -> None:
+    """executor가 ``failed``로 닫은 뒤 lock 정리 중 연결이 끊기면 op는 일시 DB 실패를 받는다.
+
+    재발행은 상태가 맞지 않아 아무것도 하지 않는다. 그때 run을 성공으로 끝내면 실패한 요청의
+    run이 SUCCESS로 보이고 failure sensor 알림이 사라진다(#1544 리뷰).
+    """
+    from kortravelmap.dagster.run_failure_detail import run_failure_detail
+
+    request = _request()
+
+    class _ConnectionDoesNotExistError(Exception):
+        """asyncpg ``ConnectionDoesNotExistError``의 모양 — 모듈·클래스 이름만 본다."""
+
+    _ConnectionDoesNotExistError.__module__ = "asyncpg.exceptions"
+    _ConnectionDoesNotExistError.__name__ = "ConnectionDoesNotExistError"
+    client = _Client(
+        request=request,
+        execute_raises=_ConnectionDoesNotExistError("connection was closed in the middle"),
+        reschedule_outcome=None,
+        current=replace(
+            request,
+            status="failed",
+            dagster_run_id="run-before",
+            error_message="RuntimeError: provider exploded",
+        ),
+    )
+
+    result = _run_worker(client)
+
+    assert not result.success
+    assert len(client.rescheduled) == 1
+    detail = run_failure_detail(result.get_run_failure_event())
+    assert detail["error"] == "RuntimeError: provider exploded"
+    # failure sensor가 재발행 분기로 가지 않게 일시 실패 분류를 싣지 않는다.
+    assert "failure_class" not in detail
+
+
+def test_worker_keeps_state_changed_success_when_another_generation_failed() -> None:
+    """generation이 이미 전진했다면(다른 run의 일) 이 run의 실패가 아니다."""
+    request = _request()
+    summary = summarize_failure(_LockTimeout("lock timeout"))
+    client = _Client(
+        request=request,
+        execute_raises=FeatureUpdateTransientFailure(summary, stage=None),
+        reschedule_outcome=None,
+        current=replace(request, generation=2, status="failed", error_message="other run"),
+    )
+
+    result = _run_worker(client)
+
+    assert result.success
+    assert result.output_for_node("execute_feature_update_request")["status"] == "state_changed"

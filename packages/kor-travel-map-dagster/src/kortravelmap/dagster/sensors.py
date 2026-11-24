@@ -360,7 +360,26 @@ async def _reschedule_after_transient_failure(
         ) from exc
     if outcome is None:
         # 그 사이 상태가 바뀌었다(취소·다른 경로의 종결·lock 경합 requeue로 generation 전진).
-        # 실패가 아니다 — 알림을 부르지 않는다.
+        # 단 이 generation이 ``failed``로 끝나 있으면 run도 실패해야 한다 — executor가 결정적
+        # 실패를 이미 ``failed``로 닫은 뒤 lock 정리 중 연결이 끊겨 여기 온 경우다(재발행 기록이
+        # commit된 뒤 응답만 잃은 상한 소진도 같다). 성공으로 끝내면 실패한 요청의 run이 SUCCESS로
+        # 보이고 failure sensor 알림이 사라진다(#1544 리뷰). metadata에 ``failure_class``를 싣지
+        # 않는다 — failure sensor는 이미 닫힌 request에 아무것도 하지 않고 알림만 보낸다.
+        current = await _with_db_retries(lambda: client.get_update_request(request_id))
+        if (
+            current is not None
+            and current.generation == request_generation
+            and current.status == "failed"
+        ):
+            raise Failure(
+                description=current.error_message or summary.describe(),
+                metadata={
+                    "request_id": request_id,
+                    "status": "failed",
+                    "stage": stage,
+                    "transient_error_after_terminal": summary.describe(),
+                },
+            )
         metadata: dict[str, object] = {**failure_metadata, "status": "state_changed"}
         context.log.warning(
             "feature update request 일시 실패 뒤 상태가 이미 바뀌어 재발행하지 않았다: "
