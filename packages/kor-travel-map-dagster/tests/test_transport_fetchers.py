@@ -985,17 +985,17 @@ async def test_a_disabled_or_too_large_export_is_terminal(
     assert retry_sleeps == []
 
 
-async def test_an_inconsistent_source_is_left_to_the_next_tick(
+async def test_an_inconsistent_source_is_left_to_step_retries(
     monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
 ) -> None:
-    """transport의 다음 수집·준비가 고친다 — HTTP 층도 step도 같은 근거를 다시 묻지 않는다."""
+    """transport의 다음 수집·준비가 고친다 — HTTP 층에서는 같은 근거를 다시 묻지 않는다."""
     seen = _install(
         monkeypatch,
         lambda request: _problem(503, "EXPORT_SOURCE_INCONSISTENT", retry_after="300"),
     )
     with pytest.raises(TransportSourceInconsistent) as raised:
         _ = [item async for item in fetch_transport_fuel_stations(_settings())]
-    assert raised.value.retryable is False
+    assert raised.value.retryable is True
     assert raised.value.failure_kind == "transport_source_inconsistent"
     assert raised.value.retry_after == 300.0
     assert len(seen) == 1

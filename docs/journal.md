@@ -1,16 +1,17 @@
-## 2026-11-24 — transport export 계약 정렬(#1542 후속): `EXPORT_SOURCE_INCONSISTENT`는 다음 tick, 주유소 27.5시간
+## 2026-11-24 — transport export 계약 정렬(#1542 후속): `EXPORT_SOURCE_INCONSISTENT` 상태 job 다음 tick, 주유소 27.5시간
 
 - 근거: transport `docs/map-service-exports-handoff.md`(transport #277 `67eac73`, ADR-013).
-- `EXPORT_SOURCE_INCONSISTENT`(`TransportSourceInconsistent`)를 `retryable=False`로 — producer 권장 처리("다음 tick, 반복되면
-  경보")대로 feature 적재는 step 재시도 없이 실패하고, Valkey 상태 job은 종전처럼 상류 미준비로 건너뛴다(`upstream_signal`이
-  이 class를 명시적으로 미준비로 본다).
+- `EXPORT_SOURCE_INCONSISTENT`: producer 권장("다음 tick, 반복되면 경보")을 Valkey 상태 job에 적용한다 — `upstream_signal`이
+  이 class를 명시적으로 미준비로 본다(건너뜀 + 나이 판정). 처음엔 예외를 `retryable=False`로 바꿔 feature 적재도 다음
+  tick으로 했으나 적대 리뷰(Medium)를 받아 되돌렸다: 주·월 feature 적재에게 다음 tick은 한 주이고, step 재시도의 마지막
+  시도(420초)가 `Retry-After` 300초 뒤라 대개 그 run에서 풀린다 — `EXPORT_SOURCE_NOT_CURRENT`와 같은 규칙(job 경계가 정한다).
 - `EXPORT_QUERY_TIMEOUT`(11번째 code, T4 전용): Map API T4 프록시가 `upstream_unavailable`로 내리는 것을 시험으로 고정.
   Dagster fetcher(T1~T3)는 받지 않는다(오면 모르는 code).
 - `Retry-After`는 힌트: 현재 값(SOURCE_NOT_CURRENT 60~3600초·NO_HISTORY 300/3600초)을 예로만 적고 Map은 범위를 가정하지
   않는다(fetcher docstring·ADR-106).
 - ADR-106: 주유소 export stale 24시간 → 27.5시간(8시간 tick 두 번 연속 실패까지 200), Map 경고 임계 18시간과의 관계(export가
   200을 내는 18~27.5시간 구간에도 Map은 원천 나이로 빨간 run). 상태 job 실패 metadata 정본 참조를 `upstream_signal`로 정정.
-- 시험: `test_transport_fetchers.py`·`test_quota_exhaustion_stops_step_retries.py`(inconsistent 다음 tick), API
+- 시험: `test_upstream_signal.py`(inconsistent는 retryable과 상관없이 미준비), API
   `test_service_transport_router.py`(T4 `EXPORT_QUERY_TIMEOUT`). OpenAPI·migration 없음.
 
 ## 2026-11-24 — 관리자 프런트 ui 0.2.6(VirtualTable 선택 칸 44px) 채택과 dedup 선택 칸 e2e

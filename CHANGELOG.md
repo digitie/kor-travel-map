@@ -2,8 +2,8 @@
 
 ## 2026-11-24 — transport export 계약 정렬(#1542 후속)
 
-- `EXPORT_SOURCE_INCONSISTENT` 503은 같은 run 안에서 다시 묻지 않는다(producer 권장 "다음 tick") — feature 적재는 재시도 없이
-  실패, Valkey 상태 job은 상류 미준비로 건너뜀. T4 `EXPORT_QUERY_TIMEOUT`은 API 프록시에서 `upstream_unavailable`.
+- `EXPORT_SOURCE_INCONSISTENT` 503: Valkey 상태 job은 producer 권장대로 다음 tick(상류 미준비로 건너뜀·나이 판정), feature
+  적재는 step 재시도(주·월 job에게 다음 tick은 한 주). T4 `EXPORT_QUERY_TIMEOUT`은 API 프록시에서 `upstream_unavailable`.
   ADR-106 주유소 export stale 기준을 27.5시간으로 정정.
 
 ## 2026-11-24 — 상태 적재 job의 상류 신호(나이 기준 혼합)·transport export 503 code·weather export 줄 세우기(ADR-114·ADR-106 개정)
