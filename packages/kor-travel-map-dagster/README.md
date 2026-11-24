@@ -152,18 +152,21 @@ transport는 token **그리고 접속 peer 주소**(`SERVICE_EXPORT_ALLOWED_CLIE
 | `transport_source_not_current`·`transport_no_history`·`transport_incidents_not_current`·`transport_empty_set` | 503 `code`가 `EXPORT_SOURCE_NOT_CURRENT`·`EXPORT_NO_HISTORY`·`EXPORT_INCIDENTS_NOT_CURRENT`·`EXPORT_EMPTY_SET` | HTTP 층은 다시 부르지 않는다. feature 적재: **재시도 대상**(60·180·420초). Valkey 상태 job: 나이 기준 혼합 — 서비스 세대 원천 나이가 경고 기준 안이면 초록 건너뜀, 넘으면 재시도 없는 실패(ADR-106 2026-11-24 개정). `Retry-After`는 힌트라 대기에 쓰지 않는다 |
 | `transport_busy`·`transport_prepare_timeout`·`transport_transient_db` | 503 `code`가 `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | HTTP 층에서 첫 요청 포함 4번(다시 묻기 3번, 대기 `max(5·10·20초 ±20%, Retry-After)`) 묻고, 다 쓰면 feature 적재는 **재시도 대상**, 상태 job은 나이 기준 혼합. `Retry-After`가 한 번 대기 상한 60초를 **넘으면** 기다리지 않는다(`retry_after_exceeds_cap`, 상태 job `outcome=upstream_busy_over_cap`) — transport `EXPORT_PREPARE_TIMEOUT` 기본값이 지금 60초라 그 값이 오르면 준비 시간 초과는 이 경로로 간다 |
 | `transport_export_disabled`·`transport_export_too_large` | 503 `code`가 `EXPORT_DISABLED`(transport 설정으로 꺼짐)·`EXPORT_TOO_LARGE`(export 상한 초과) | **끈다** — 설정·데이터가 바뀌기 전에는 같다 |
-| `transport_source_inconsistent` | 503 `code`가 `EXPORT_SOURCE_INCONSISTENT`(transport 근거끼리 불일치) | HTTP 층에서는 다시 묻지 않는다. Valkey 상태 job은 **다음 tick**(producer 권장 — 나이 기준 혼합), feature 적재는 **재시도 대상**(60·180·420초 — 마지막 시도가 `Retry-After` 300초 뒤라 대개 그 run에서 풀린다. 주·월 job에게 "다음 tick"은 한 주라 의도적으로 다르다) |
+| `transport_source_inconsistent` | 503 `code`가 `EXPORT_SOURCE_INCONSISTENT`(transport 근거끼리 불일치) | HTTP 층에서는 다시 묻지 않는다. Valkey 상태 job은 **다음 tick**(producer 권장 — 나이 기준 혼합), feature 적재는 **재시도 대상**(60·180·420초 — producer는 같은 run 안의 재시도로는 대개 풀리지 않는다고 보지만, 주·월 job에게 "다음 tick"은 한 주라 마지막 시도가 `Retry-After` 300초 뒤에 오는 run 안 기회를 의도적으로 둔다) |
 | `transport_request_rejected` | 400·422 — Map 질의(`limit`·`cursor`)를 transport가 거절 | 끈다 |
+| `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | 끈다 |
+| `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | 끈다 |
+| `transport_malformed_upstream` | 본문이 JSON이 아니다 | 끈다 |
 
 #### transport 상태 job metadata 키
 
 | key | 뜻 | 모를 때 |
 |-----|----|---------|
 | `upstream_state` | `ok`·`stale`·`not_ready`·`refused` | — |
-| `upstream_reason`·`failure_kind` | 미준비·거부의 분류(`transport_source_not_current`·`upstream_unreachable:ReadTimeout` 등) | `""` |
-| `outcome` | 미준비 세부: `upstream_source_not_current`·`upstream_busy_exhausted`·`upstream_busy_over_cap`·`upstream_not_ready` | — |
+| `upstream_reason`·`failure_kind` | 미준비·거부의 분류(`transport_source_not_current`·`upstream_unreachable:ReadTimeout` 등). `failure_kind`는 건너뜀·거부 결과에만 | `upstream_reason`은 `""` |
+| `outcome` | (`skipped=upstream_not_ready`에만) 미준비 세부: `upstream_source_not_current`·`upstream_busy_exhausted`·`upstream_busy_over_cap`·`upstream_not_ready` | — |
 | `skipped` | `upstream_not_ready`·`refused`·`unchanged`·`locked` | key 없음(교체한 run) |
-| `transport_problem_code`·`transport_retry_after_seconds`·`transport_retry_after_cap_seconds` | 503 problem `code`·`Retry-After`(힌트)·HTTP 층 한 번 대기 상한 | `""`·`-1` |
+| `transport_problem_code`·`transport_retry_after_seconds`·`transport_retry_after_cap_seconds` | (`skipped=upstream_not_ready`에만) 503 problem `code`·`Retry-After`(힌트)·HTTP 층 한 번 대기 상한 | `""`·`-1` |
 | `served_generation`·`served_source_collected_at`·`served_age_seconds`·`served_age_basis` | 서비스 세대·원천 수집 시각·판정 나이(초)·나이 기준(`source`·`loaded`) | `""`·`-1` |
 | `stale_alert_after_seconds`·`stale_alert` | 경고 임계(초)·넘었는가(넘으면 run 실패) | — |
 | `checked` | `skipped=unchanged`에서 확인 시각(`checked_at`)을 세대 meta에 적었는가 | — |
@@ -172,13 +175,13 @@ transport는 token **그리고 접속 peer 주소**(`SERVICE_EXPORT_ALLOWED_CLIE
 | `transport_server_timed`·`transport_server_app_ms_total`·`transport_server_app_ms_max`·`transport_server_sql_ms_total` | transport `Server-Timing`(app·sql)을 실은 응답 수와 그 합·최대(ms) | key 없음 |
 | `upstream_requests_min` | 요청 수의 하한 | key 없음 |
 
-**모르는 값 규칙**: 원천 응답·서비스 세대에서 읽는 값은 key를 언제나 싣고 모르면 문자열 `""`·수 `-1`이다. 재지 않은
-계측(`transport_http_*`·`transport_server_*`·`upstream_requests_min`)만 key를 싣지 않는다 — "세지 않았다"를 0으로 읽지
-않게(`upstream_requests` 모듈 docstring). run tag `kor_travel_map.upstream_state`·`kor_travel_map.upstream_stale_alert`는
-`skipped=unchanged`를 포함해 상류를 본 모든 run에 쓴다(`locked`만 빼고).
-| `transport_empty` | 완전 snapshot export(주유소·휴게소·휴게소 유가·공항)가 0건 | 끈다 |
-| `transport_contract` | 필수 필드·타입·페이지·cursor 계약 위반 | 끈다 |
-| `transport_malformed_upstream` | 본문이 JSON이 아니다 | 끈다 |
+**모르는 값 규칙**: 서비스 세대·나이 key(`served_*`·`stale_alert*`·`upstream_state`)는 상류를 본 모든 결과에 싣는다.
+transport 503 key(`transport_problem_code`·`transport_retry_after_seconds`·`transport_retry_after_cap_seconds`)와 `outcome`은
+`skipped=upstream_not_ready` 결과에만 싣고 거기서는 언제나 싣는다(모르면 문자열 `""`·수 `-1`). `failure_kind`는 건너뜀·거부
+결과에만 있다. 재지 않은 계측(`transport_http_*`·`transport_server_*`·`upstream_requests_min`)은 key를 싣지 않는다 — "세지
+않았다"를 0으로 읽지 않게(`upstream_requests` 모듈 docstring). run tag `kor_travel_map.upstream_state`·
+`kor_travel_map.upstream_stale_alert`는 결과 metadata가 나온 run(교체·건너뜀·거부, `skipped=unchanged` 포함)에 쓴다 —
+`locked`와, 그 전에 실패로 끝난 run(404·계약 위반·`EXPORT_DISABLED`·`EXPORT_TOO_LARGE`·JSON 아님)에는 없다.
 
 step 재시도를 끄는 자리는 asset 경계 `run_tracked_feature_asset`의
 `quota_exhaustion.raise_terminal_if_transport_unrecoverable`이다(쿼터 소진과 같은 방식). **큐 경로

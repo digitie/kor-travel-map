@@ -507,10 +507,19 @@ async def load_transport_state(
                     assert served is not None  # unchanged_since가 있었다
                     # 원천이 그대로임을 확인한 시각을 세대 meta에 남긴다(weather 304와 같은
                     # checked_at). 판정 나이는 원천 수집 시각 기준이라 그대로다 — 기록일 뿐이다.
+                    # 기록이라 실패가 run 색을 정하지 않게 한다(retire_other_versions와 같다).
                     checked_at = datetime.now(UTC)
-                    checked = await active.touch_checked(
-                        spec.dataset.name, served.generation, checked_at
-                    )
+                    try:
+                        checked = await active.touch_checked(
+                            spec.dataset.name, served.generation, checked_at
+                        )
+                    except StateStoreError as exc:
+                        _LOGGER.warning(
+                            "%s 확인 시각을 적지 못했다(%s) — 판정은 원천 나이로 그대로 한다.",
+                            spec.dataset.name,
+                            type(exc).__name__,
+                        )
+                        checked = False
                     return {
                         "dataset": spec.dataset.name,
                         "skipped": "unchanged",

@@ -747,3 +747,17 @@ async def test_unknown_problem_values_are_blank_or_minus_one() -> None:
     assert coded["transport_problem_code"] == "EXPORT_NO_HISTORY"
     assert coded["transport_retry_after_seconds"] == -1.0
     assert coded["transport_retry_after_cap_seconds"] == -1.0
+
+
+async def test_a_failed_recheck_write_does_not_decide_the_run() -> None:
+    from kortravelmap.infra.valkey_state import StateStoreOutOfMemory
+
+    class _NoTouch(_FakeStore):
+        async def touch_checked(self, *_args: Any) -> bool:
+            raise StateStoreOutOfMemory("OOM")
+
+    store = _NoTouch(current=_served_at(loaded_ago=timedelta(hours=1)))
+    metadata = await _load(store, _RecordingCollect(_COLLECTED))
+    assert metadata["skipped"] == "unchanged"
+    assert metadata["checked"] is False
+    assert metadata["stale_alert"] is False

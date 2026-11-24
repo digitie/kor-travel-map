@@ -416,8 +416,9 @@ class TransportSourceInconsistent(_CodedTransportFailure):
     - Valkey 상태 job(transport tick 주기와 비슷한 매시·10분)은 producer 권장 그대로 다음 tick이다 —
       상류 미준비로 건너뛰고 서비스 세대 나이로 판정한다(``dagster.upstream_signal``).
     - feature 적재 asset(주·월 1회)에게 "다음 tick"은 한 주다. step 재시도(60·180·420초)의 마지막
-      시도가 ``Retry-After`` 300초 뒤라 대개 그 run 안에서 풀린다 — producer 권장과 의도적으로
-      다르다(``EXPORT_SOURCE_NOT_CURRENT``와 같은 규칙, 2026-11-24 #1549 적대 리뷰).
+      시도가 ``Retry-After`` 300초 뒤에 오는 run 안 기회를 의도적으로 둔다(producer는 같은 run 안의
+      재시도로는 대개 풀리지 않는다고 본다 — ``EXPORT_SOURCE_NOT_CURRENT``와 같은 규칙, 2026-11-24
+      #1549 적대 리뷰).
     """
 
     failure_kind = "transport_source_inconsistent"

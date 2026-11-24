@@ -164,7 +164,8 @@ OpiNet/KREX 키 제거)를 **같은 rotation**에서 → C7. Manager만 먼저 �
    - `EXPORT_DISABLED`는 code 없는 옛 transport에서는 종전 503(step 재시도 뒤 실패)이었다. code가 붙으면 재시도
      없이 바로 실패한다. `EXPORT_SOURCE_INCONSISTENT`의 transport 권장 처리는 "다음 tick, 반복되면 경보"다. Valkey
      상태 job(매시·10분 tick)은 그대로 따른다(상류 미준비 → 나이 기준 혼합). feature 적재 asset(주·월 1회)에게 "다음
-     tick"은 한 주라 step 재시도(60·180·420초)를 둔다 — 마지막 시도가 `Retry-After` 300초 뒤라 대개 그 run에서 풀린다.
+     tick"은 한 주라 step 재시도(60·180·420초)를 둔다 — producer는 같은 run 안의 재시도로는 대개 풀리지 않는다고 보지만,
+     마지막 시도가 `Retry-After` 300초 뒤에 오는 run 안 기회를 의도적으로 둔다.
      `EXPORT_SOURCE_NOT_CURRENT`와 같은 규칙이다(step 재시도 여부는 job 경계가 정한다).
    - `EXPORT_QUERY_TIMEOUT`(11번째 code)은 T4 가격 이력 전용이다. Dagster fetcher(T1~T3)는 받지 않으며(오면 모르는
      code와 같다), Map API T4 프록시는 일시 장애 `upstream_unavailable`로 내린다.

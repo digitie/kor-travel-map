@@ -4,7 +4,9 @@
 - `EXPORT_SOURCE_INCONSISTENT`: producer 권장("다음 tick, 반복되면 경보")을 Valkey 상태 job에 적용한다 — `upstream_signal`이
   이 class를 명시적으로 미준비로 본다(건너뜀 + 나이 판정). 처음엔 예외를 `retryable=False`로 바꿔 feature 적재도 다음
   tick으로 했으나 적대 리뷰(Medium)를 받아 되돌렸다: 주·월 feature 적재에게 다음 tick은 한 주이고, step 재시도의 마지막
-  시도(420초)가 `Retry-After` 300초 뒤라 대개 그 run에서 풀린다 — `EXPORT_SOURCE_NOT_CURRENT`와 같은 규칙(job 경계가 정한다).
+  시도(420초)가 `Retry-After` 300초 뒤에 오는 run 안 기회를 둔다(producer는 대개 풀리지 않는다고 본다) —
+  `EXPORT_SOURCE_NOT_CURRENT`와 같은 규칙(job 경계가 정한다). 남은 항목 리뷰에서 README 표 위치·모르는 값 규칙 범위·run tag
+  문장·이 문구를 고쳤고, `touch_checked` 실패는 run 색을 정하지 않게(best-effort) 했다.
 - `EXPORT_QUERY_TIMEOUT`(11번째 code, T4 전용): Map API T4 프록시가 `upstream_unavailable`로 내리는 것을 시험으로 고정.
   Dagster fetcher(T1~T3)는 받지 않는다(오면 모르는 code).
 - `Retry-After`는 힌트: 현재 값(SOURCE_NOT_CURRENT 60~3600초·NO_HISTORY 300/3600초)을 예로만 적고 Map은 범위를 가정하지
