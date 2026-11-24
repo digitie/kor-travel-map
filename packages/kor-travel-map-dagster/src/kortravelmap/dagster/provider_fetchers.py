@@ -19,6 +19,7 @@ import importlib
 import json
 import logging
 import pathlib
+import random
 import re
 import time
 import zlib
@@ -348,11 +349,17 @@ _TRANSPORT_MAX_PAGES: Final[int] = 1000
 넘으면 cursor가 순환하거나 계약이 깨진 것이다(같은 cursor 반복은 별도로 즉시 잡는다)."""
 
 _TRANSPORT_TRANSIENT_STATUSES: Final[frozenset[int]] = frozenset({408, 429, 500, 502, 504})
-"""HTTP 층에서 곧바로 다시 부를 상태 — transport 재기동·게이트웨이 순간 장애·DB 일시
-오류(500)·throttle(429, ``Retry-After``를 따른다). 503은 code로 가른다
-(:func:`_transport_unavailable`): 몇 초짜리 경합(``TRANSPORT_BUSY_CODES``)만 같은 요청을 다시
-보내고, 근거 수집이 현재가 아닌 것은 다시 부르지 않는다 — 15초 안에 바뀌지 않는다. code가 없는
-503은 종전대로 :class:`TransportExportNotCurrent`(``retryable=True``, step 재시도 대상)다."""
+"""HTTP 층에서 곧바로 다시 부를 상태 — transport 재기동·게이트웨이 순간 장애·throttle(429,
+``Retry-After``를 따른다). 503은 code로 가른다(:func:`_transport_unavailable`): 경합
+(``TRANSPORT_BUSY_CODES``)만 같은 요청을 다시 보내고, 근거 수집이 현재가 아닌 것은 다시 부르지
+않는다. code가 없는 503은 종전대로 :class:`TransportExportNotCurrent`(``retryable=True``)다.
+
+**500은 호환용이다.** transport PR #277 전에는 export 경로의 일시 DB 오류(pool timeout·57014 등)가
+500이었다 — 그래서 다시 묻는다. #277 뒤 export 경로의 일시 오류는 503 ``TRANSIENT_DB``·
+``EXPORT_PREPARE_TIMEOUT``이고 500은 일시 오류가 아니다. **제거 시점**: #277이 n150 transport에
+배포되고 한 회전 동안 Map 실패 metadata에 500이 없으면 500을 이 집합에서 뺀다(다시 묻지 않고
+step 재시도에
+맡긴다)."""
 
 _TRANSPORT_CONTRACT_STATUSES: Final[frozenset[int]] = frozenset({400, 422})
 """몇 번을 다시 불러도 같은 요청 오류 — 질의·cursor 계약 위반
@@ -366,7 +373,22 @@ _TRANSPORT_BUSY_ATTEMPTS: Final[int] = 4
 다시 묻는다."""
 
 _TRANSPORT_BUSY_BASE_DELAY_SECONDS: float = 5.0
-"""503 경합 재시도 간격 기준(5·10·20초). ``Retry-After``가 더 길면 그것을 따른다."""
+"""503 경합 재시도 간격 기준(5·10·20초, 각 ±20%). ``Retry-After``가 더 길면 그것을 따른다."""
+
+_TRANSPORT_BUSY_JITTER_RATIO: Final[float] = 0.2
+"""경합 backoff를 ±20% 흔든다 — 같은 순간 경합한 run들이 같은 순간 다시 묻지 않게.
+``Retry-After``(transport가 정한 하한)는 흔들지 않는다."""
+
+
+def _jitter(seconds: float) -> float:
+    """``seconds``를 ±:data:`_TRANSPORT_BUSY_JITTER_RATIO` 안에서 흔든다(테스트가 바꾼다)."""
+    if seconds <= 0:
+        return 0.0
+    ratio = _TRANSPORT_BUSY_JITTER_RATIO
+    return seconds * random.uniform(1.0 - ratio, 1.0 + ratio)  # noqa: S311 — 보안 난수 아님
+
+
+_transport_busy_jitter: Callable[[float], float] = _jitter
 
 _TRANSPORT_RETRY_AFTER_CAP_SECONDS: Final[float] = 60.0
 """HTTP 층에서 한 번 기다리는 상한(같으면 기다린다). ``Retry-After``가 이보다 길면 다시 묻지
@@ -415,13 +437,14 @@ def _transport_retry_delay(exc: BaseException, attempt: int) -> float | None:
     """``attempt``번째 시도가 ``exc``로 끝났을 때 같은 요청을 다시 보내기 전 대기(초).
 
     다시 보내지 않으면 ``None``. 대기는 backoff와 ``Retry-After`` 중 긴 쪽이고, ``Retry-After``가
-    :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않는다.
+    :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않는다. 경합 backoff는 ±20%
+    흔든다(:data:`_TRANSPORT_BUSY_JITTER_RATIO`).
     """
     if isinstance(exc, TransportExportBusy):
         if attempt >= _TRANSPORT_BUSY_ATTEMPTS:
             return None
         backoff = min(
-            _TRANSPORT_BUSY_BASE_DELAY_SECONDS * (2.0 ** (attempt - 1)),
+            _transport_busy_jitter(_TRANSPORT_BUSY_BASE_DELAY_SECONDS * (2.0 ** (attempt - 1))),
             _TRANSPORT_RETRY_AFTER_CAP_SECONDS,
         )
     elif _transport_retryable(exc):
@@ -557,7 +580,7 @@ def _transport_unavailable(response: httpx.Response, path: str) -> TransportExpo
     if code in TRANSPORT_SOURCE_NOT_CURRENT_CODES:
         return TransportSourceNotCurrent(
             f"kor-travel-transport {path}가 503이다 — 근거 수집이 현재가 아니다{tail} 이번 run은 "
-            "아무것도 적재·삭제·종료하지 않는다.",
+            "아무것도 적재·삭제·종료하지 않는다. transport 수집이 회복된 뒤 다시 실행한다.",
             code=code,
             retry_after=retry_after,
         )
@@ -566,7 +589,7 @@ def _transport_unavailable(response: httpx.Response, path: str) -> TransportExpo
         if over_cap:
             _LOGGER.warning(
                 "kor-travel-transport %s 503 code=%s Retry-After %.0f초가 HTTP 층 대기 상한 "
-                "%.0f초를 넘는다 — 기다리지 않고 재시도 없이 실패한다",
+                "%.0f초를 넘는다 — 기다리지 않는다(경합 상한 초과, 근거 수집 문제가 아니다)",
                 path,
                 code,
                 retry_after,
@@ -574,7 +597,7 @@ def _transport_unavailable(response: httpx.Response, path: str) -> TransportExpo
             )
         cap_note = (
             f" Retry-After가 HTTP 층 대기 상한 {_TRANSPORT_RETRY_AFTER_CAP_SECONDS:.0f}초를 넘어 "
-            "기다리지 않고 재시도 없이 실패한다."
+            "기다리지 않았다(경합 상한 초과)."
             if over_cap
             else ""
         )
@@ -722,7 +745,9 @@ async def _transport_get(
     - 503 경합(:class:`TransportExportBusy`): 시도 상한 :data:`_TRANSPORT_BUSY_ATTEMPTS`, 5·10·20초.
     - 대기는 backoff와 ``Retry-After`` 중 긴 쪽, ``Retry-After``가
       :data:`_TRANSPORT_RETRY_AFTER_CAP_SECONDS`를 넘으면 다시 보내지 않는다
-      (:func:`_transport_retry_delay`). 재시도마다 run 예산을 하나 쓴다(``upstream_retry``와 같다).
+      (:func:`_transport_retry_delay`). 재시도마다 run 예산을 하나 쓰고, 실패한 시도의 소요와 대기를
+      예산 시간에 더한다(``upstream_retry``와 같다). 예산에 시간 상한(``max_seconds``)이 있으면
+      **그 상한을 넘길 대기는 하지 않는다** — 상태 job은 그 상한을 run 상한에서 정한다.
 
     **같은 요청(같은 cursor)만 다시 보낸다** — 순회를 이어 가는 재시도가 아니다. 다시 받은 페이지도
     transport가 그 요청 시점에 따로 판정한 200이어야 하고, 그 사이 근거 수집이 현재가 아니게 됐으면
@@ -736,6 +761,7 @@ async def _transport_get(
     attempt = 0
     while True:
         attempt += 1
+        started = time.monotonic()
         try:
             if response_byte_limit is not None:
                 return await _transport_request_once(
@@ -744,9 +770,26 @@ async def _transport_get(
             return await _transport_request_once(client, path, params)
         except Exception as exc:
             delay = _transport_retry_delay(exc, attempt)
-            if delay is None or not budget.try_consume():
+            if delay is None:
                 raise
-            budget.charge(delay)
+            spent = max(0.0, time.monotonic() - started) + delay
+            if (
+                budget.max_seconds is not None
+                and budget.spent_seconds + spent > budget.max_seconds
+            ):
+                _LOGGER.warning(
+                    "kor-travel-transport %s 재시도하지 않는다 — %.0f초 대기가 run 재시도 "
+                    "시간 상한 "
+                    "%.0f초(이미 %.0f초)를 넘긴다",
+                    path,
+                    delay,
+                    budget.max_seconds,
+                    budget.spent_seconds,
+                )
+                raise
+            if not budget.try_consume():
+                raise
+            budget.charge(spent)
             note_transport_retry(delay)
             _LOGGER.warning(
                 "kor-travel-transport %s 재시도 %d (%s, code=%s) — %.0f초 뒤 같은 요청",

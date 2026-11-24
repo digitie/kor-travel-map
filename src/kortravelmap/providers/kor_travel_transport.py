@@ -23,12 +23,15 @@ Map은 OpiNet 주유소·유가, 한국도로공사(KREX) 휴게소·휴게소 �
   (:func:`require_fresh_incident_set`). 어긋나면 :class:`TransportExportNotCurrent`로 실패한다 —
   낡거나 빈 집합을 받아들이면 완전 snapshot reconcile이 멀쩡한 feature를 지우거나 사건을 닫는다.
 - **503은 problem ``code``로 가른다**(transport 2026-11-24 계약, :data:`TRANSPORT_PROBLEM_CODES`).
-  stale·이력 없음·돌발 집합이 지금이 아님·돌발 0건은 :class:`TransportSourceNotCurrent`(재시도 없이
-  run 실패), 경합·준비 초과·DB 일시 오류는 :class:`TransportExportBusy`(fetcher가 같은 요청을
-  ``Retry-After``대로 다시 묻는다), export 꺼짐·크기 상한 초과는 :class:`TransportExportDisabled`·
+  stale·이력 없음·돌발 집합이 지금이 아님·돌발 0건은 :class:`TransportSourceNotCurrent`, 경합·준비
+  초과·DB 일시 오류는 :class:`TransportExportBusy`(fetcher가 같은 요청을 ``Retry-After``대로 다시
+  묻는다), export 꺼짐·크기 상한 초과는 :class:`TransportExportDisabled`·
   :class:`TransportExportTooLarge`(재시도 없이 run 실패), 근거 불일치는
   :class:`TransportSourceInconsistent`(step 재시도), code가 없거나 모르는 code는 종전대로
-  :class:`TransportExportNotCurrent`다. **분류는 code로만 한다** — ``Retry-After``는 transport가
+  :class:`TransportExportNotCurrent`다. **step 재시도 여부는 job 경계가 정한다** — 앞의 둘은 예외
+  수준에서 retryable이고, feature 적재 asset은 step 재시도를 쓰며, Valkey 상태 job은 서비스 세대의
+  원천 나이로 초록·빨강을 정한다(``dagster.transport_state``, ADR-106 2026-11-24 개정).
+  **분류는 code로만 한다** — ``Retry-After``는 transport가
   dataset·상태마다 계산하는 힌트라 값의 범위에 기대지 않는다(실패 metadata에 그대로 싣는다).
   예외는 하나: 경합 code의 ``Retry-After``가 HTTP 층 한 번 대기 상한을 넘으면 기다리지 않는다
   (:class:`TransportExportBusy`).
@@ -71,6 +74,7 @@ __all__ = [
     "TRANSPORT_CODE_INCIDENTS_NOT_CURRENT",
     "TRANSPORT_CODE_NO_HISTORY",
     "TRANSPORT_CODE_PREPARE_TIMEOUT",
+    "TRANSPORT_CODE_QUERY_TIMEOUT",
     "TRANSPORT_CODE_SOURCE_INCONSISTENT",
     "TRANSPORT_CODE_SOURCE_NOT_CURRENT",
     "TRANSPORT_CODE_TOO_LARGE",
@@ -78,6 +82,7 @@ __all__ = [
     "TRANSPORT_PROBLEM_CODES",
     "TRANSPORT_RETRY_LATER_CODES",
     "TRANSPORT_SOURCE_NOT_CURRENT_CODES",
+    "TRANSPORT_T4_ONLY_CODES",
     "TRANSPORT_TERMINAL_CODES",
     "TransportAirport",
     "TransportCollection",
@@ -213,6 +218,10 @@ TRANSPORT_CODE_SOURCE_INCONSISTENT: Final[str] = "EXPORT_SOURCE_INCONSISTENT"
 수집·준비가 고친다."""
 TRANSPORT_CODE_TOO_LARGE: Final[str] = "EXPORT_TOO_LARGE"
 """고정 집합이 export 행 수·바이트 상한을 넘었다. 데이터·상한이 바뀌기 전에는 결정적으로 같다."""
+TRANSPORT_CODE_QUERY_TIMEOUT: Final[str] = "EXPORT_QUERY_TIMEOUT"
+"""T4 가격 이력 조회의 문장 상한(57014). **T4 전용** — Dagster fetcher(T1~T3)는 받지 않는다. Map의
+T4 프록시(``kortravelmap.api``)가 다룬다. fetcher에 오면 모르는 code와 같다(retryable, step
+재시도)."""
 
 TRANSPORT_SOURCE_NOT_CURRENT_CODES: Final[frozenset[str]] = frozenset(
     {
@@ -240,15 +249,18 @@ TRANSPORT_RETRY_LATER_CODES: Final[frozenset[str]] = frozenset({TRANSPORT_CODE_S
 """transport의 다음 수집·준비가 고치는 503 — HTTP 층에서는 다시 묻지 않고 step 재시도에 맡긴다
 (:class:`TransportSourceInconsistent`)."""
 
+TRANSPORT_T4_ONLY_CODES: Final[frozenset[str]] = frozenset({TRANSPORT_CODE_QUERY_TIMEOUT})
+"""T4(가격 이력)에서만 나오는 code — T1~T3 fetcher 분류에서 뺀다(일시 오류로 본다)."""
+
 TRANSPORT_PROBLEM_CODES: Final[frozenset[str]] = (
     TRANSPORT_SOURCE_NOT_CURRENT_CODES
     | TRANSPORT_BUSY_CODES
     | TRANSPORT_TERMINAL_CODES
     | TRANSPORT_RETRY_LATER_CODES
 )
-"""Map이 아는 transport 503 problem ``code`` 전부. 여기 없는 code(앞으로 공통 표준이 모든 5xx에
-붙일 ``SERVICE_UNAVAILABLE`` 등)와 code가 없는 503은 종전 동작
-(:class:`TransportExportNotCurrent`)이다."""
+"""T1~T3 fetcher가 code별로 가르는 transport 503 problem ``code``. 여기 없는 code(T4 전용
+:data:`TRANSPORT_T4_ONLY_CODES`, 앞으로 공통 표준이 모든 5xx에 붙일 ``SERVICE_UNAVAILABLE`` 등)와
+code가 없는 503은 종전 동작(:class:`TransportExportNotCurrent`)이다."""
 
 _CODE_FAILURE_KINDS: Final[dict[str, str]] = {
     TRANSPORT_CODE_SOURCE_NOT_CURRENT: "transport_source_not_current",
@@ -300,18 +312,19 @@ class TransportExportNotCurrent(TransportExportFailure):
 
 
 class TransportSourceNotCurrent(TransportExportNotCurrent):
-    """transport가 503 ``code``로 "이 run 안에서는 풀리지 않는다"고 알렸다.
+    """transport가 503 ``code``로 "다음 정기 수집 전에는 풀리지 않는다"고 알렸다.
 
-    code는 :data:`TRANSPORT_SOURCE_NOT_CURRENT_CODES`다. transport가 "다음 정기 수집이 성공하기
-    전에는 풀리지 않는다"고 분류한 것이라 몇십 초 뒤의 step 재시도는 같은 503을 다시 받을 뿐이다 —
-    **retryable이 아니다**. 판단은 code로만 하고 ``Retry-After``(transport가 dataset·상태마다
-    계산하는 힌트)는 metadata에 싣기만 한다 — 다음 시도는 다음 schedule tick이다. run은 실패로
-    끝난다(재시도 없음): Map 쪽에는 이것 말고 상류 장애를 알리는 경보가 없다(2026-11 주유소 503
-    16.6시간 동안 빨간 run이 유일한 신호였다). 세대·feature는 그대로다. ``failure_kind``는
+    code는 :data:`TRANSPORT_SOURCE_NOT_CURRENT_CODES`다. 판단은 code로만 하고 ``Retry-After``
+    (transport가 dataset·상태마다 계산하는 힌트)는 metadata에 싣기만 한다. ``failure_kind``는
     code별이다.
-    """
 
-    retryable = False
+    예외 자체는 **retryable**이다 — step 재시도를 할지는 job 경계가 정한다(적대 리뷰 2026-11-24):
+
+    - feature 적재 asset(주·월 1회 PG 적재)은 step 재시도(60·180·420초)를 쓴다. 운 나쁜 tick 하나가
+      한 주를 잃게 하지 않는다. 다 쓰면 실패하고, 운영자는 transport 수집이 회복된 뒤 다시 실행한다.
+    - Valkey 상태 job은 step 재시도를 하지 않고 서비스 세대의 원천 나이로 초록(건너뜀)·빨강(실패)을
+      정한다(``dagster.transport_state``, 소유자 결정 "나이 기준 혼합").
+    """
 
     def __init__(
         self, message: str = "", *, code: str | None = None, retry_after: float | None = None
@@ -324,16 +337,18 @@ class TransportSourceNotCurrent(TransportExportNotCurrent):
 class TransportExportBusy(TransportExportFailure):
     """곧 풀리는 503(:data:`TRANSPORT_BUSY_CODES`) — fetcher가 같은 요청을 다시 보낸다.
 
-    HTTP 층 재시도를 다 쓰면 종전 503처럼 **retryable step 실패**다(처음 페이지부터 다시
-    읽는다 — 페이지마다 따로 판정한 응답이라 이어 읽지 않는다, transport ADR-013 결정 3).
+    HTTP 층 재시도를 다 쓰면 **retryable** 실패로 올라간다(처음 페이지부터 다시 읽는다 — 페이지마다
+    따로 판정한 응답이라 이어 읽지 않는다, transport ADR-013 결정 3). step 재시도 여부는 job 경계가
+    정한다(:class:`TransportSourceNotCurrent`와 같다 — feature 적재는 step 재시도, 상태 job은 나이
+    기준 혼합).
 
-    **상한 규칙(code와 무관하게 값으로 정해지는 유일한 분기)**: ``Retry-After``가 HTTP 층 한 번
-    대기 상한(``retry_after_cap``, fetcher의 ``_TRANSPORT_RETRY_AFTER_CAP_SECONDS`` = 60초)을
-    **넘으면** 기다리지도 다시 묻지도 않고 retryable이 아닌 실패다(``retry_after_exceeds_cap``) —
-    step 재시도 창(상태 job 30·90초)으로도 기다릴 수 없다. 같으면 기다린다. transport의
+    **대기 상한 규칙(값으로 정해지는 유일한 분기)**: ``Retry-After``가 HTTP 층 한 번 대기 상한
+    (``retry_after_cap``, fetcher의 ``_TRANSPORT_RETRY_AFTER_CAP_SECONDS`` = 60초)을 **넘으면**
+    기다리지도 다시 묻지도 않는다(``retry_after_exceeds_cap=True``). 같으면 기다린다. 이때도 예외는
+    retryable이다 — "근거 수집이 현재가 아니다"가 아니라 "경합인데 상한 안에 기다릴 수 없었다"이고,
+    상태 job은 이것을 따로 ``upstream_busy_over_cap``으로 남긴다. transport의
     ``EXPORT_PREPARE_TIMEOUT`` 기본값은 지금 이 상한과 같은 60초라서, transport가 그 값을 60초
-    위로 올리면 준비 시간 초과 503은 **조용히 재시도 없는 실패로 바뀐다** — 그때는 이 상한을 같이
-    올린다.
+    위로 올리면 준비 시간 초과 503은 기다림 없이 이 경로로 간다 — 그때는 상한을 같이 올린다.
     """
 
     failure_kind = "transport_busy"
@@ -350,13 +365,12 @@ class TransportExportBusy(TransportExportFailure):
         super().__init__(message, code=code, retry_after=retry_after)
         if code in _CODE_FAILURE_KINDS:
             self.failure_kind = _CODE_FAILURE_KINDS[code]
+        self.retry_after_cap = retry_after_cap
         self.retry_after_exceeds_cap = (
             retry_after is not None
             and retry_after_cap is not None
             and retry_after > retry_after_cap
         )
-        if self.retry_after_exceeds_cap:
-            self.retryable = False
 
 
 class _CodedTransportFailure(TransportExportFailure):

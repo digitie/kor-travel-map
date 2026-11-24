@@ -15,6 +15,7 @@ from kortravelmap.providers.kor_travel_transport import (
     TRANSPORT_PROBLEM_CODES,
     TRANSPORT_RETRY_LATER_CODES,
     TRANSPORT_SOURCE_NOT_CURRENT_CODES,
+    TRANSPORT_T4_ONLY_CODES,
     TRANSPORT_TERMINAL_CODES,
     TransportExportBusy,
     TransportExportContractError,
@@ -647,7 +648,9 @@ async def test_a_coded_not_current_503_is_not_retried_and_not_retryable(
     seen = _install(monkeypatch, lambda request: _problem(503, code, retry_after=retry_after))
     with pytest.raises(TransportSourceNotCurrent) as raised:
         _ = [item async for item in fetch(_settings())]
-    assert raised.value.retryable is False
+    # 예외는 retryable — step 재시도 여부는 job 경계가 정한다
+    # (feature 적재는 재시도, 상태 job은 나이 기준 혼합).
+    assert raised.value.retryable is True
     assert raised.value.code == code
     assert raised.value.retry_after == float(retry_after)
     assert raised.value.failure_kind == kind
@@ -707,7 +710,8 @@ async def test_a_busy_503_with_a_long_retry_after_is_not_waited_and_not_retryabl
     )
     with pytest.raises(TransportExportBusy) as raised:
         _ = [item async for item in fetch_transport_rail_stations(_settings())]
-    assert raised.value.retryable is False
+    assert raised.value.retryable is True
+    assert raised.value.retry_after_exceeds_cap is True
     assert raised.value.failure_kind == "transport_prepare_timeout"
     assert len(seen) == 1
     assert retry_sleeps == []
@@ -924,7 +928,15 @@ def test_server_timing_parsing_keeps_only_durations() -> None:
 
 
 def test_every_producer_code_is_classified_exactly_once() -> None:
-    """transport ``ProblemCode`` 10종(PR #277) — 넷으로 나뉘고 겹치지 않는다."""
+    """transport ``ProblemCode`` 11종(PR #277 ``backend/app/core/problems.py``).
+
+    T1~T3 열 개는 넷으로 나뉘고 겹치지 않는다. ``EXPORT_QUERY_TIMEOUT``은 T4(가격 이력) 전용이라
+    fetcher 분류에서 뺀다
+    (fetcher에 오면 모르는 code — retryable 일시 오류). transport ``docs/openapi.json``은 code를
+    enum으로 내지 않아 거기서 유도하지 못한다 — transport가 code를 더하면 이 목록을 함께 고친다."""
+    t4_only = {"EXPORT_QUERY_TIMEOUT"}
+    assert t4_only == set(TRANSPORT_T4_ONLY_CODES)
+    assert not t4_only & set(TRANSPORT_PROBLEM_CODES)
     producer = {
         "EXPORT_SOURCE_NOT_CURRENT",
         "EXPORT_NO_HISTORY",
@@ -1025,9 +1037,39 @@ async def test_a_prepare_timeout_above_the_wait_cap_becomes_terminal(
     )
     with caplog.at_level("WARNING"), pytest.raises(TransportExportBusy) as raised:
         _ = [item async for item in fetch_transport_airports(_settings())]
-    assert raised.value.retryable is False
+    assert raised.value.retryable is True  # 기다리지 않을 뿐 — step 재시도 여부는 job 경계
     assert raised.value.retry_after_exceeds_cap is True
     assert "대기 상한" in str(raised.value)
     assert any("대기 상한" in record.getMessage() for record in caplog.records)
     assert len(seen) == 1
     assert retry_sleeps == []
+
+
+async def test_busy_waits_are_jittered_but_never_below_retry_after(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """경합 backoff(5·10·20초)는 ±20% 흔들리고, ``Retry-After``는 하한으로 그대로다."""
+    monkeypatch.setattr(provider_fetchers, "_TRANSPORT_BUSY_BASE_DELAY_SECONDS", 5.0)
+    monkeypatch.setattr(provider_fetchers, "_transport_busy_jitter", provider_fetchers._jitter)
+    busy = TransportExportBusy("503", code="EXPORT_BUSY", retry_after=None, retry_after_cap=60.0)
+    for attempt, base in ((1, 5.0), (2, 10.0), (3, 20.0)):
+        for _ in range(50):
+            delay = provider_fetchers._transport_retry_delay(busy, attempt)
+            assert delay is not None
+            assert base * 0.8 <= delay <= base * 1.2
+    hinted = TransportExportBusy("503", code="EXPORT_BUSY", retry_after=30.0, retry_after_cap=60.0)
+    assert provider_fetchers._transport_retry_delay(hinted, 1) == 30.0
+
+
+async def test_a_wait_that_would_overrun_the_run_retry_time_is_not_taken(
+    monkeypatch: pytest.MonkeyPatch, retry_sleeps: list[float]
+) -> None:
+    """예산의 시간 상한을 넘길 대기는 하지 않는다 — 상태 job이 run 상한을 넘기지 않게."""
+    seen = _install(monkeypatch, lambda request: _problem(503, "EXPORT_BUSY", retry_after="40"))
+    with (
+        upstream_retry.sharing_run_retry_budget(upstream_retry.RetryBudget(max_seconds=60.0)),
+        pytest.raises(TransportExportBusy),
+    ):
+        _ = [item async for item in fetch_transport_airports(_settings())]
+    assert retry_sleeps == [40.0]  # 두 번째 40초는 상한 60초를 넘긴다
+    assert len(seen) == 2
