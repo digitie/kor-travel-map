@@ -18,6 +18,10 @@
 - transport 요청 계측 metadata `transport_http_*`·`transport_server_*`(Server-Timing app·sql)를 상태 op 성공·건너뜀·혼합
   결과와 feature 적재 asset 성공·terminal 실패 metadata에 싣고, 그 밖의 실패는 경고 log 한 줄로 남긴다.
 
+## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)
+
+- `ops.ops_live_topic_revisions`(provider_sync·dataset_projection·dagster_schedules)를 원본 write 시점이 아니라 그 transaction의 commit 직전에 올린다(alembic `458_live_topic_commit_bump`, 새 표 `ops.ops_live_topic_pending`). 긴 적재가 주소 finding·sync state를 쓴 뒤 commit까지 topic 행을 쥐어 PinVi POI target PUT/DELETE(503)·다른 큐 요청이 막히던 것을 없앤다. 값은 topic을 바꾼 commit당 1씩 오른다. POI target receipt(`meta.dataset_projection_revision`) 의미와 OpenAPI는 그대로다.
+
 ## 2026-11-24 — n150 Dagster 전체 freeze 도구(수집 실패 감사 §4 #10·#11)
 
 - `scripts/n150/dagster-freeze.py status|freeze|unfreeze --snapshot <절대 경로> [--resume] [--dry-run] [--accept-missing]`: Map code location의 RUNNING schedule·sensor 전체를 스냅샷 뒤 멈추고 Map run 0까지 기다린다(run-status sensor는 run이 빠지고 tick이 따라잡은 뒤 마지막에), 스냅샷의 RUNNING만 되돌린다. 옛 `~/freeze.py`(두 instigator만 정지)를 대신한다. R4 runbook 2·9단계가 이것을 쓴다.
@@ -108,7 +112,6 @@
   Alert data-variant와 Radix data-state 검사, canonical transport/Dagster 조회 fixture를 보완했다.
 - unit427/427·lint/type/Doctor0/guard 재통과. exact 후속 checkpoint 결과를 별도로 기록한다.
 
-
 ## 2026-11-11 — common 후보6와 키 없는 지도 public mapStyle 복구
 
 - common `a14301c` / upstream `9a7a348`의 동일 tgz·원장을 설치했다. core는 1.0.1로
@@ -118,7 +121,6 @@
 - 자동완성 기존 2건과 형태 회귀 6건을 포함한 unit427/427, lint/type/build33routes/Doctor0/
   AST·원장 guard/npm tree/NextSharp 통과. n150 exact checkpoint와 최종 freeze/review/CI는 후속 gate다.
 - [후보6 검증 기록](docs/reports/common-unification-20261111.md), [산출물 출처](docs/third-party-common.md).
-
 
 ## 2026-11-11 — 관리자 common Radix/VirtualTable·지도 public API 통합 후보
 
@@ -251,7 +253,6 @@
 
 - 기존 actor·명령 키의 결과를 확인하고 부재인 시도를 영구 중단하는 관리자 API를 추가한다(Pinvi #668). 늦은 옛 요청이 실행되지 않으며 처리 중인 명령은 보존한다.
 - PATCH 지문이 생략 필드와 명시 NULL을 구분한다. 과거v1의 모호한 기록은 자동으로 확정하거나 다시 실행하지 않는다.
-
 
 ## 2026-11-04 — #1444 묶음 리뷰 보완
 

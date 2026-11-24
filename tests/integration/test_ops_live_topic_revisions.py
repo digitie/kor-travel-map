@@ -124,6 +124,13 @@ VALUES (
 
 
 async def _revision(session: AsyncSession, topic: str) -> int:
+    """이 transaction의 증가까지 포함한 값(458: 원본 trigger는 표식만 남기고 commit 직전에 올린다).
+
+    receipt 작성자(``get_dataset_projection_revision``)와 같이 표식을 먼저 적용하고 읽는다.
+    """
+    await session.execute(
+        text("SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply IMMEDIATE")
+    )
     value = await session.scalar(
         text(
             "SELECT revision FROM ops.ops_live_topic_revisions "
@@ -131,30 +138,11 @@ async def _revision(session: AsyncSession, topic: str) -> int:
         ),
         {"topic": topic},
     )
+    await session.execute(
+        text("SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply DEFERRED")
+    )
     assert value is not None
     return int(value)
-
-
-async def _wait_for_backend_lock(
-    engine: AsyncEngine,
-    backend_pid: int,
-) -> str:
-    async with AsyncSession(engine) as observer:
-        async with asyncio.timeout(5):
-            while True:
-                row = (
-                    await observer.execute(
-                        text(
-                            "SELECT wait_event_type, wait_event "
-                            "FROM pg_stat_activity WHERE pid = :backend_pid"
-                        ),
-                        {"backend_pid": backend_pid},
-                    )
-                ).one()
-                if row.wait_event_type == "Lock":
-                    assert row.wait_event is not None
-                    return str(row.wait_event)
-                await asyncio.sleep(0.01)
 
 
 async def test_ops_live_topic_revision_rolls_back_with_source_write(
@@ -345,7 +333,7 @@ async def test_each_ops_live_source_bumps_its_topic_once(
     assert await _revision(migrated_session, "dagster_schedules") == schedule_revision
 
 
-async def test_provider_revision_serializes_late_commit_writers(
+async def test_provider_revision_counts_late_commit_writers_without_blocking(
     migrated_engine: AsyncEngine,
 ) -> None:
     suffix = uuid4().hex
@@ -388,15 +376,14 @@ async def test_provider_revision_serializes_late_commit_writers(
                     )
                     await second.commit()
 
+                # 458: 같은 topic의 다른 writer는 이 transaction이 열려 있는 동안 기다리지
+                # 않는다 — topic 행은 commit 직전에만 잡힌다.
                 second_task = asyncio.create_task(_second_writer())
-                wait_event = await _wait_for_backend_lock(
-                    migrated_engine,
-                    int(second_pid),
-                )
-                assert wait_event in {"transactionid", "tuple"}
-                assert not second_task.done()
+                await asyncio.wait_for(asyncio.shield(second_task), timeout=5)
+                async with AsyncSession(migrated_engine) as observer:
+                    assert await _revision(observer, "provider_sync") == baseline + 1
+                # 먼저 시작해 나중에 commit해도 그 commit에서 값이 오른다(late commit 감지).
                 await first.commit()
-                await asyncio.wait_for(second_task, timeout=5)
             finally:
                 if second_task is not None:
                     if not second_task.done():
@@ -412,7 +399,7 @@ async def test_provider_revision_serializes_late_commit_writers(
             await cleanup.commit()
 
 
-async def test_dataset_projection_revision_serializes_late_commit_writers(
+async def test_dataset_projection_revision_counts_late_commit_writers_without_blocking(
     migrated_engine: AsyncEngine,
 ) -> None:
     suffix = uuid4().hex
@@ -450,15 +437,14 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
                     )
                     await second.commit()
 
+                # 458: 같은 topic의 다른 writer는 이 transaction이 열려 있는 동안 기다리지
+                # 않는다 — topic 행은 commit 직전에만 잡힌다.
                 second_task = asyncio.create_task(_second_writer())
-                wait_event = await _wait_for_backend_lock(
-                    migrated_engine,
-                    int(second_pid),
-                )
-                assert wait_event in {"transactionid", "tuple"}
-                assert not second_task.done()
+                await asyncio.wait_for(asyncio.shield(second_task), timeout=5)
+                async with AsyncSession(migrated_engine) as observer:
+                    assert await _revision(observer, "dataset_projection") == baseline + 1
+                # 먼저 시작해 나중에 commit해도 그 commit에서 값이 오른다(late commit 감지).
                 await first.commit()
-                await asyncio.wait_for(second_task, timeout=5)
             finally:
                 if second_task is not None:
                     if not second_task.done():
@@ -490,7 +476,7 @@ async def test_dataset_projection_revision_serializes_late_commit_writers(
             await cleanup.commit()
 
 
-async def test_schedule_revision_lock_wait_preserves_two_increments(
+async def test_schedule_revision_counts_late_commit_writers_without_blocking(
     migrated_engine: AsyncEngine,
 ) -> None:
     suffix = uuid4().hex
@@ -530,15 +516,14 @@ async def test_schedule_revision_lock_wait_preserves_two_increments(
                     )
                     await second.commit()
 
+                # 458: 같은 topic의 다른 writer는 이 transaction이 열려 있는 동안 기다리지
+                # 않는다 — topic 행은 commit 직전에만 잡힌다.
                 second_task = asyncio.create_task(_second_writer())
-                wait_event = await _wait_for_backend_lock(
-                    migrated_engine,
-                    int(second_pid),
-                )
-                assert wait_event in {"transactionid", "tuple"}
-                assert not second_task.done()
+                await asyncio.wait_for(asyncio.shield(second_task), timeout=5)
+                async with AsyncSession(migrated_engine) as observer:
+                    assert await _revision(observer, "dagster_schedules") == baseline + 1
+                # 먼저 시작해 나중에 commit해도 그 commit에서 값이 오른다(late commit 감지).
                 await first.commit()
-                await asyncio.wait_for(second_task, timeout=5)
             finally:
                 if second_task is not None:
                     if not second_task.done():
@@ -650,3 +635,167 @@ async def test_ops_live_revision_trigger_mapping_and_pg_snapshots(
     async with AsyncSession(migrated_engine) as session:
         repeated = await collect_live_topic_snapshots(session, {"dagster_runs"})
     assert repeated["dagster_runs"].data["run_ids"] == run_ids
+
+
+async def _committed_revision(engine: AsyncEngine, topic: str) -> int:
+    """다른 연결에 보이는(commit된) 값 — 표식을 적용하지 않는다."""
+
+    async with AsyncSession(engine) as observer:
+        value = await observer.scalar(
+            text("SELECT revision FROM ops.ops_live_topic_revisions WHERE topic = :topic"),
+            {"topic": topic},
+        )
+    assert value is not None
+    return int(value)
+
+
+async def _pending_rows(engine: AsyncEngine) -> int:
+    async with AsyncSession(engine) as observer:
+        value = await observer.scalar(text("SELECT count(*) FROM ops.ops_live_topic_pending"))
+    return int(value or 0)
+
+
+async def test_one_transaction_bumps_each_topic_once_at_commit_and_leaves_no_marker(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """458: 같은 transaction이 같은 topic 원본을 몇 번 써도 commit당 +1이고 표식은 남지 않는다."""
+
+    baseline = await _committed_revision(migrated_engine, "provider_sync")
+    async with AsyncSession(migrated_engine) as writer, writer.begin():
+        for _ in range(3):
+            await writer.execute(
+                text(
+                    "UPDATE provider_sync.provider_sync_state "
+                    "SET updated_at = updated_at WHERE false"
+                )
+            )
+        # commit 전에는 다른 연결에 아무 변화도 보이지 않는다.
+        assert await _committed_revision(migrated_engine, "provider_sync") == baseline
+    assert await _committed_revision(migrated_engine, "provider_sync") == baseline + 1
+    assert await _pending_rows(migrated_engine) == 0
+
+
+async def test_receipt_includes_own_bump_and_later_writers_commit_after_it(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """ADR-065: 실제 ``get_dataset_projection_revision``의 receipt 인과(458 뒤).
+
+    receipt는 자기 mutation의 증가를 포함하고, 그 값 이상은 receipt 작성자가 commit하기 전에는
+    다른 연결에 보이지 않는다 — 뒤 writer의 commit은 그 행을 기다린다.
+    """
+
+    from kortravelmap.infra.poi_cache_target_repo import (
+        get_dataset_projection_revision,
+        upsert_poi_cache_target,
+    )
+
+    suffix = uuid4().hex[:8]
+    baseline = await _committed_revision(migrated_engine, "dataset_projection")
+    later_task: asyncio.Task[None] | None = None
+    try:
+        async with (
+            AsyncSession(migrated_engine) as first,
+            AsyncSession(migrated_engine) as second,
+        ):
+            await first.begin()
+            await upsert_poi_cache_target(
+                first,
+                external_system="live-projection",
+                target_key=f"receipt-a-{suffix}",
+                lon=126.978,
+                lat=37.5665,
+                radius_km=1.0,
+            )
+            receipt = await get_dataset_projection_revision(first)
+            assert receipt == baseline + 1
+
+            async def _later() -> None:
+                await second.begin()
+                await upsert_poi_cache_target(
+                    second,
+                    external_system="live-projection",
+                    target_key=f"receipt-b-{suffix}",
+                    lon=126.978,
+                    lat=37.5665,
+                    radius_km=1.0,
+                )
+                await second.commit()
+
+            later_task = asyncio.create_task(_later())
+            await asyncio.sleep(1.0)
+            assert not later_task.done()
+            assert await _committed_revision(migrated_engine, "dataset_projection") < receipt
+            await first.commit()
+            await asyncio.wait_for(later_task, timeout=10)
+        assert (
+            await _committed_revision(migrated_engine, "dataset_projection") == baseline + 2
+        )
+        assert await _pending_rows(migrated_engine) == 0
+    finally:
+        if later_task is not None and not later_task.done():
+            later_task.cancel()
+            await asyncio.gather(later_task, return_exceptions=True)
+        async with AsyncSession(migrated_engine) as cleanup, cleanup.begin():
+            await cleanup.execute(
+                text(
+                    "DELETE FROM ops.poi_cache_targets WHERE external_system = 'live-projection' "
+                    "AND target_key IN (:first_key, :second_key)"
+                ),
+                {"first_key": f"receipt-a-{suffix}", "second_key": f"receipt-b-{suffix}"},
+            )
+
+
+async def test_topic_row_is_taken_after_other_deferred_checks_at_commit(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """표식이 먼저 생기고 그 뒤에 무거운 deferred 검사가 쌓여도, commit 동안 그 검사가 도는 사이
+    topic 행은 잡혀 있지 않다(표식이 한 번 줄 맨 뒤로 간다). #1548 재리뷰 실측: 다시 넣지 않으면
+    3초짜리 deferred 검사 내내 행이 잡혔다 — 큰 적재의 completeness 검사가 그 자리다."""
+
+    baseline = await _committed_revision(migrated_engine, "provider_sync")
+    # temp 객체는 연결에 묶인다 — 같은 물리 연결 하나로 만들고 쓴다.
+    async with migrated_engine.connect() as writer, AsyncSession(migrated_engine) as prober:
+        setup = await writer.begin()
+        await writer.execute(text("CREATE TEMP TABLE slow_deferred_probe (id int)"))
+        await writer.execute(
+            text(
+                "CREATE FUNCTION pg_temp.slow_deferred_probe_check() RETURNS trigger "
+                "LANGUAGE plpgsql AS $$ BEGIN PERFORM pg_sleep(2); RETURN NULL; END $$"
+            )
+        )
+        await writer.execute(
+            text(
+                "CREATE CONSTRAINT TRIGGER slow_deferred_probe_check "
+                "AFTER INSERT ON slow_deferred_probe DEFERRABLE INITIALLY DEFERRED "
+                "FOR EACH ROW EXECUTE FUNCTION pg_temp.slow_deferred_probe_check()"
+            )
+        )
+        await setup.commit()
+
+        work = await writer.begin()
+        # 표식 먼저(topic 원본 쓰기), 무거운 deferred 사건은 그 뒤.
+        await writer.execute(
+            text("UPDATE provider_sync.provider_sync_state SET updated_at = updated_at WHERE false")
+        )
+        await writer.execute(text("INSERT INTO slow_deferred_probe VALUES (1)"))
+        started = asyncio.get_running_loop().time()
+        commit_task = asyncio.create_task(work.commit())
+        await asyncio.sleep(0.7)
+        assert not commit_task.done()
+        await prober.begin()
+        locked_free = (
+            await prober.execute(
+                text(
+                    "SELECT topic FROM ops.ops_live_topic_revisions "
+                    "WHERE topic = 'provider_sync' FOR UPDATE SKIP LOCKED"
+                )
+            )
+        ).first()
+        await prober.rollback()
+        await asyncio.wait_for(commit_task, timeout=30)
+        elapsed = asyncio.get_running_loop().time() - started
+    assert elapsed >= 1.5, elapsed
+    # 느린 deferred 검사가 도는 동안 topic 행은 비어 있었다.
+    assert locked_free is not None
+    assert await _committed_revision(migrated_engine, "provider_sync") == baseline + 1
+    assert await _pending_rows(migrated_engine) == 0

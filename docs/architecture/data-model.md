@@ -2877,9 +2877,27 @@ CREATE TABLE ops.ops_live_topic_revisions (
 );
 ```
 
-statement trigger는 원본 write와 같은 transaction에서 `revision = revision + 1` upsert를
-수행한다. 따라서 원본 rollback은 revision도 되돌리고, 같은 topic의 동시 writer는 PK row lock을
-기다린 뒤 각각 한 번씩 증가한다. `provider_sync.provider_sync_state`와
+원본 statement trigger(`ops.bump_ops_live_topic_revision(topic)`)는 topic 행을 건드리지 않고
+`ops.ops_live_topic_pending(txid, topic)`에 transaction·topic당 표식 하나를 `ON CONFLICT DO NOTHING`으로
+남긴다. 표식 표의 `DEFERRABLE INITIALLY DEFERRED` constraint trigger(`trg_ops_live_topic_pending_apply`)가
+commit 직전에 그 transaction의 표식을 topic 이름 순서로 적용(`revision + 1`)하고 지운다(alembic 458).
+따라서 원본 rollback은 revision도 되돌리고(표식과 deferred 발화가 함께 사라진다), 값은 "topic을 바꾼 commit
+하나당 1"씩 오르며, 같은 topic의 writer끼리는 commit 직전에만 잠깐 직렬화된다. 458 전까지(0052~)는
+statement마다 행을 올려 그 transaction이 끝날 때까지 쥐었다.
+
+```sql
+CREATE TABLE ops.ops_live_topic_pending (
+  txid  BIGINT NOT NULL,   -- pg_current_xact_id()::text::bigint
+  topic TEXT NOT NULL CHECK (btrim(topic) <> '' AND char_length(topic) <= 100),
+  ready BOOLEAN NOT NULL DEFAULT false,  -- 첫 deferred 발화가 한 번 줄 맨 뒤로 다시 넣은 표식
+  PRIMARY KEY (txid, topic)
+);
+```
+
+ADR-065 receipt(POI target PUT/DELETE의 `meta.dataset_projection_revision`)는
+`SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply IMMEDIATE`로 표식을 먼저 적용한 뒤 읽고 `DEFERRED`로
+되돌린다(`poi_cache_target_repo.get_dataset_projection_revision`). 적용한 topic 행을 그 짧은 API transaction이
+commit까지 쥐므로, receipt 이상의 값은 그 mutation의 commit 뒤에만 보인다 — 종전 statement 증가와 같은 인과다. `provider_sync.provider_sync_state`와
 `ops.provider_refresh_policies`의 INSERT/UPDATE/DELETE/TRUNCATE는 `provider_sync`,
 `ops.data_integrity_violations`와 `ops.poi_cache_targets`의 같은 네 event는
 `dataset_projection`,
@@ -2887,6 +2905,66 @@ statement trigger는 원본 write와 같은 transaction에서 `revision = revisi
 `ops.dagster_schedule_audit_events`·`ops.dagster_schedule_claim_resolutions` INSERT는
 `dagster_schedules`를 올린다. live snapshot은 원본 projection과 해당 clock을 한 SQL snapshot으로
 읽으며 frame data는 여전히 REST query invalidation signal일 뿐 화면 상태 정본이 아니다.
+
+#### 경합 검토와 commit 직전 증가(2026-11-24, alembic 458)
+
+**무엇이 잡고 있었나.** 큐 적재는 executor transaction 하나에 runner 전체(받기·변환·쓰기·꼬리)를 묶는다. 그 안에서
+topic 원본을 한 번이라도 쓰면 종전 trigger가 topic 행을 commit까지 쥐었다.
+
+- 쓰기 중간: `load_bundle`이 bundle마다 부르는 `record_override_geo_stale`이 `data_integrity_violations`에
+  INSERT한다(geo 릴리스 뒤 override가 있는 Feature를 다시 해석할 때) → `dataset_projection`이 남은 쓰기 내내
+  잡힌다(큰 적재는 수십 분).
+- 꼬리: 주소 검증 finding(`dataset_projection`) → sync state(`provider_sync`) → stale close(`dataset_projection`)
+  → executor checkpoint → commit. finding이 한 건이라도 있으면 그 사이 잡힌다.
+
+그동안 PinVi POI target PUT/DELETE(API `lock_timeout` 5초 → 503), 다른 큐 요청의 resolve 단계(Dagster 30초 →
+재발행), 관리자 issue 쓰기가 막혔다. 재현(`tests/integration/test_queue_concurrency_1022.py`, #1548 적대 리뷰
+실측): finding 1건인 적재를 꼬리에서 멈추면 `topics_held = ['dataset_projection']`이고 resolve 문장이 lock
+timeout. 첫 재현은 finding 0건·geo token 없는 fixture라 이것을 놓쳤다.
+
+**후보.**
+
+| 후보 | ADR-065 receipt 인과 | 판단 |
+|---|---|---|
+| slot 행 집합 + `SUM`(event clock 457의 방식) | 깨진다 — 다른 slot의 commit이 내 commit 전에 합을 receipt 이상으로 올릴 수 있다 | event clock에는 맞지만(receipt 계약이 없다) 여기에는 못 쓴다 |
+| receipt를 `(slot, revision)` 벡터로 | 지킨다 | REST `meta.dataset_projection_revision`·live frame `live_revision`(정수) 계약과 C7 live e2e를 바꿔야 한다 |
+| topic 원본 쓰기를 꼬리로 모음(override finding 등) | 지킨다 | 꼬리 구간(finding → sync → close → checkpoint → commit의 deferred 검사)은 여전히 잡힌다. 새 writer마다 같은 규율을 지켜야 한다 |
+| **commit 직전 증가**(표식 + deferred constraint trigger, receipt 작성자는 먼저 적용) | 지킨다 | 표식은 transaction·topic당 한 행(`ON CONFLICT DO NOTHING`)이라 원본 행 수와 무관하다. 행은 deferred 단계부터 commit까지만 잡힌다 — **채택** |
+
+**deferred 순서.** deferred 발화는 사건 순서다. 표식이 쓰기 중간(override finding)에 처음 생기면 그 뒤 쓰기의
+deferred 검사(`source_records`·`source_entity_heads` completeness, route deferred FK 등 — 쓰기 행 수만큼)가 표식
+뒤에 줄 선다. 그대로 적용하면 그 검사 내내 topic 행을 쥔다(#1548 재리뷰 실측: 표식 뒤 3초짜리 검사 동안 잡혔다).
+그래서 표식의 첫 발화는 적용하지 않고 표식을 `ready = true`로 **한 번 줄 맨 뒤로 다시 넣는다** — PostgreSQL은
+deferred 사건이 더 없을 때까지 돌므로 다시 넣은 사건은 그 검사들 뒤에 발화하고, 그때 topic 행을 잡는다
+(`test_topic_row_is_taken_after_other_deferred_checks_at_commit`). receipt 작성자의 `SET CONSTRAINTS … IMMEDIATE`
+경로에서는 다시 넣은 사건이 그 자리에서 곧바로 발화해 적용된다.
+
+**남는 것.**
+
+- topic 행은 deferred 단계의 끝에서 commit까지 잡힌다. commit 중에 다른 deferred 검사가 새로 쌓는 사건은 그
+  뒤에 올 수 있다(드물다).
+- receipt 작성자는 표식을 먼저 적용하고 짧은 API transaction 끝까지 쥔다(종전과 같다). 그동안 같은 topic의 다른
+  writer는 **commit 시점에** 기다린다 — 실패 위치가 statement에서 COMMIT으로 옮겨졌다(executor의 phase 종료
+  예외, API 55P03 처리기가 받는다).
+- commit 단계의 증가는 topic 이름 순서라 서로 교착하지 않는다. receipt 작성자가 표식을 적용한 뒤 다른 topic
+  원본을 또 쓰면 그 topic은 commit에서 오르므로 순서가 어긋날 수 있다 — 지금 그런 writer는 없다(POI target은
+  `dataset_projection`만 쓴다). 생기면 PostgreSQL이 40P01로 끊는다.
+- REPEATABLE READ·SERIALIZABLE writer는 commit 때 topic 행 `ON CONFLICT DO UPDATE`가 직렬화 실패(40001)를 낼
+  수 있고, 그 창이 commit까지 늘었다. 지금 topic 원본을 쓰는 RR·SERIALIZABLE writer는 없다(SERIALIZABLE 도메인
+  명령은 curation 계열이고 재시도 루프가 있다).
+- 옛 API 코드(표식 선적용 없음)가 458 스키마 위에서 receipt를 읽으면 자기 증가가 빠진다. 지금 배포는 migration
+  뒤 API 컨테이너를 다시 만들어 겹치지 않는다 — 무중단 다중 replica를 하게 되면 순서를 지켜야 한다.
+
+**10-22 상황 전체.** 긴 적재(KNPS 탐방로 실제 asset, runner 맨 앞에서 topic 원본 셋을 쓰고 역지오코딩에서 멈춤)
+동안 큐 요청 12건(KNPS 9·국가유산 2·축제 cache target 1)을 Dagster LOGIN·`lock_timeout`(3초로 줄임)으로 실행했다.
+456(event clock singleton)에서는 12건 모두 `INSERT INTO ops.import_job_events`의 `LockNotAvailableError`(prod 10-22
+서명), 457·458 뒤에는 12건 모두 `done`, 긴 transaction을 기다린 backend 0이다. 남는 대기는 다른 요청끼리의
+`feature-curation-write` fence(쓰기 단계 직렬화, ADR-111·113 설계, 900초 대기 상한)뿐이다. 다만 이 시험의 쓰기 단계는
+작다 — 큰 첫 적재(산림청 등산로 5.7만 segment 등, ADR-113 환산 쓰기 약 30분)가 쓰기 단계에 있으면 다른 적재는 fence를
+900초 기다린 뒤 55P03 → 재발행이다. 그것은 ADR-113의 재검토 조건(쓰기 300초)에 속한 별도 과제다.
+
+432 snapshot 후처리의 topic 잠금(`_lock_snapshot_postprocess_topic_revisions`)은 435가 SH 경로와 함께 퇴역시켜
+지금 이 행을 미리 잡는 루틴은 없다.
 
 ## 10. 보관 정책 (ADR-017) → purge 작업
 
