@@ -4,7 +4,9 @@
 
 - failure sensor가 claim 뒤 일시 DB 실패를 대신 재발행할 때도 실패 단계로 상한을 고른다 — provider 갱신 단계는 2회(종전 기본 5회, 쿼터가 좁은 상류를 첫 scope부터 다시 부르던 것).
 - 재발행 소진·`FeatureUpdateTerminalizationFailed`·run 실패(`FEATURE_UPDATE_RUN_FAILED`)로 닫은 cache target 요청도 활성 target의 `last_failed_at`을 찍는다.
-- executor 밖 종결의 PinVi relay `failed`를 import job event와 다른 transaction에 쓴다 — event 기록이 실패해도 relay가 되감기지 않는다. 상태 전이 뒤 후처리는 단계마다 자기 transaction이고 문장 5초·전체 20초 상한이다(failure sensor 평가 60초 안).
+- 재발행 상한은 누적 `retry_count`(launch 실패 재발행 포함)에 건다 — provider 단계 상한 2회도 같다. 종결 메시지는 `재발행 상한 2회 소진(누적 3회): …`처럼 상한과 실제 재발행 수를 함께 적는다(종전 `재발행 2회 소진`은 실제 누적과 어긋날 수 있었다).
+- executor 밖 종결의 PinVi relay `failed`를 import job event와 다른 transaction에 쓴다 — event 기록이 실패해도 relay가 되감기지 않는다. 상태 전이 뒤 후처리는 단계마다 자기 transaction이고 전체 20초 마감 안에서 끝난다(시도마다 ADR-112 서버 쪽 상한, 시도 마감에서 끊는다).
+- failure sensor는 실패 run 하나의 DB 반영(상태 전이와 후처리 전부)을 ADR-112 run-status 예산 20초 마감 안에서 한다 — transaction마다 `lock_timeout` 5초 이하·`statement_timeout` 남은 시간 − 3초(종전 상태 전이는 Dagster 엔진 기본값 `lock_timeout` 30초로 돌았다). 평가 한 번은 실패 run 하나만 반영한다(`SkipReason`으로 tick을 끝낸다).
 - 큐 worker run: executor가 이미 `failed`로 닫은 generation은 정리 중 연결 오류가 나도 run을 실패로 끝낸다(종전에는 SUCCESS로 보이고 실패 알림이 없었다).
 - OpenAPI·migration 변경 없음.
 

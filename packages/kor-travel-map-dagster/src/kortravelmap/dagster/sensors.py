@@ -380,10 +380,19 @@ async def _reschedule_after_transient_failure(
     if outcome is None:
         # 그 사이 상태가 바뀌었다(취소·다른 경로의 종결·lock 경합 requeue로 generation 전진).
         # 단 이 generation이 ``failed``로 끝나 있으면 run도 실패해야 한다 — executor가 결정적
-        # 실패를 이미 ``failed``로 닫은 뒤 lock 정리 중 연결이 끊겨 여기 온 경우다(재발행 기록이
-        # commit된 뒤 응답만 잃은 상한 소진도 같다). 성공으로 끝내면 실패한 요청의 run이 SUCCESS로
-        # 보이고 failure sensor 알림이 사라진다(#1544 리뷰). metadata에 ``failure_class``를 싣지
-        # 않는다 — failure sensor는 이미 닫힌 request에 아무것도 하지 않고 알림만 보낸다.
+        # 실패를 이미 ``failed``로 닫은 뒤 lock 정리 중 연결이 끊겨 여기 온 경우다. 성공으로
+        # 끝내면 실패한 요청의 run이 SUCCESS로 보이고 failure sensor 알림이 사라진다(#1544 리뷰).
+        # metadata에 ``failure_class``를 싣지 않는다 — failure sensor는 이미 닫힌 request에
+        # 아무것도 하지 않고 알림만 보낸다.
+        #
+        # 앞선 시도가 상한 소진(``failed``)을 commit하고 그 COMMIT 응답만 잃은 경우도 여기 온다.
+        # 이때 맞춰지는 것은 **run 상태뿐**이다 — relay ``failed``·target ``last_failed_at``·소진
+        # event는 상태 전이 뒤 후처리가 돌기 전에 예외가 나서 아무도 쓰지 않고, failure sensor도
+        # 닫힌 request를 건드리지 않는다. ``FeatureUpdateTerminalizationFailed`` 종결의 COMMIT
+        # 응답을 잃은 경우도 같다. 여기서 후처리를 그냥 다시 내지 않는 까닭: executor 자신이
+        # 종결한 경우(위, relay를 같은 transaction에 이미 썼다)에 다시 내면 ``error_code``가 다른
+        # ``failed`` relay가 하나 더 생긴다. relay 종결 여부를 보고 빠진 후처리만 다시 내는
+        # reconciler는 아직 없다(드문 경로 — COMMIT 순간의 연결 단절, #1551 남은 위험).
         current = await _with_db_retries(lambda: client.get_update_request(request_id))
         if (
             current is not None

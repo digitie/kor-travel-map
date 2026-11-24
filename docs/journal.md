@@ -18,15 +18,44 @@
   넣지 않았다.
 - 시간 상한: #1546 뒤 event clock은 `SKIP LOCKED` slot이라 리뷰가 짚은 "event clock 30초 × 2" 대기는 더 없다. 다만
   relay stream lock helper가 그 transaction의 `lock_timeout`을 0(무제한)으로 되돌려 relay 뒤 문장의 대기는 묶여 있지
-  않았고, 이번에 더한 target 갱신은 live topic 행을 기다릴 수 있다. 그래서 후처리는 transaction-local
-  `statement_timeout` 5초, 전체 20초로 묶었다 — 상태 전이(`lock_timeout` 30초)와 합쳐 Dagster sensor 평가 60초 안.
+  않았고, 이번에 더한 target 갱신은 live topic 행을 기다릴 수 있다. 최종 형태는 아래 2차 리뷰 항목이다 — 저장소 공용
+  `transaction_deadline`·`apply_transaction_limits`(ADR-112)로 묶는다.
+- 2차 리뷰(같은 PR, 이 세션의 두 관점 리뷰). 지적 9건 중 아래를 고쳤다.
+  - failure sensor 마감: 첫 판은 후처리에만 별도 상수(문장 5초·전체 20초)를 걸었고, 상태 전이는 Dagster 엔진 기본값
+    (`lock_timeout` 30초, 재발행 SQL은 `FOR UPDATE OF request, job`으로 행 둘)으로 돌았다. ADR-112는 run-status sensor
+    반영을 20초 예산·transaction마다 `lock_timeout` min(5초, 남은 − 4초)로 정했다. 이제 sensor가
+    `transaction_deadline(+20초)`과 `asyncio.timeout(+23초)`으로 `fail_update_request` 전체를 감싸고, client는 상태 전이
+    transaction마다 `apply_transaction_limits`를 부른다(마감이 없는 op 경로는 그대로).
+  - 후처리 상한: 전체 마감은 `transaction_deadline`(호출자 마감이 더 이르면 그쪽), 시도마다 8초 마감에서 ADR-112 규칙
+    (문장 5초·lock 4초)을 건다. 문장마다 `statement_timeout`이 새로 걸려 relay처럼 문장이 여럿인 시도는 마감을 넘길 수
+    있었다 — 시도를 그 마감에서 `asyncio.timeout`으로 끊는다.
+  - 누적 상한: `retry_count`는 launch 실패 재발행도 센다. provider 단계 상한(2회)을 단계별로 따로 셀지 정했다 — 누적에
+    건다(따로 세면 열·migration이 필요하고, 이미 재발행을 거듭한 요청을 provider 단계에서 더 미루지 않는 편이 상류
+    쿼터에 안전하다). 대신 종결 메시지가 상한만 적어 실제 누적과 어긋났다(`재발행 2회 소진`인데 누적 4회) —
+    `재발행 상한 N회 소진(누적 M회): …`로 바꿨다. mocked e2e(`ops-pipeline.spec.ts`)의 provider 단계 + `max_retries: 5`
+    조합도 나올 수 없는 값이라 2회로 맞췄다.
+  - relay 시험이 빈 성공이었다: 시험 요청에 relay member가 없어 relay 단계가 아무것도 쓰지 않았다. member를 캡처한
+    요청(stream·source head·`capture_cache_target_refresh_members_by_keys`)으로 outbox `failed` 행을 단언한다.
+  - 456 회전 안내: 점검(`running` 수) 뒤 sensor가 새 요청을 claim하는 틈, 고아 `running` 행, 실패 시 API 미기동이
+    빠져 있었다 — freeze → `pg_locks` 확인 → 회전(실패 시 재기동·원복) → unfreeze 순서로 다시 적었다.
+  - 주석 정정: 상한 소진·TerminalizationFailed 종결의 COMMIT 응답만 잃은 경우 op가 맞추는 것은 run 상태뿐이고 relay
+    `failed`·`last_failed_at`·종결 event는 쓰이지 않는다. 다시 내는 것은 relay 종결 여부를 보는 reconciler 몫이다(남은
+    위험). executor 자신이 종결한 경우와 구분하지 않고 다시 내면 `error_code`가 다른 `failed` relay가 하나 더 생긴다.
+  - 사실이 아니어서 고치지 않은 것: "failure sensor 평가 한 번이 실패 run 최대 5건을 처리해 5 × 50초"는 이 sensor에
+    해당하지 않는다. Dagster run-status sensor는 sensor 함수가 `None`이 아닌 값을 돌려주면 그 run에서 tick을 끝내고
+    (`run_status_sensor_definition.py`의 `if sensor_return is not None: … return`), 이 sensor는 언제나 `SkipReason`을
+    돌려준다. 평가 한 번은 run 하나다 — 그 불변식을 시험으로 고정했다. 다만 "60초 안" 문구는 위 마감으로 바꿨다.
 - 시험: dagster 단위(`failed` generation이면 run 실패·다른 generation이면 성공, sensor 상한 2회·launch 실패 5회,
-  stage 추출). 통합(PostGIS) — claim 뒤 transient_db 2회 재발행 뒤 "재발행 2회 소진", 세 종결 경로의 `last_failed_at`
-  (활성만), import job event 실패에도 relay 단계·target 시각이 남음, target 행을 다른 transaction이 쥔 동안 후처리가
-  상한 안에서 끝남(상한을 빼는 변이에서 30초 대기 빨강 확인). 기존 `test_client_orchestration`·`test_feature_update_repo`·
-  `test_feature_update_executor` 70건 통과.
-- 반영하지 않은 것: migration 456 lock 실패는 코드 결함이 아니라 회전 절차라 `resume.md` 다음 단계에 점검 문장을
-  적었다(provider 갱신 단계 큐 요청이 있으면 55P03, 데이터 변화 없음).
+  stage 추출, sensor가 20초 이하 마감을 건 채 반영, 걸린 반영을 끊고 알림은 보냄, 평가 한 번에 run 하나 —
+  `SkipReason` 대신 `None`을 돌려주는 변이에서 빨강 확인). 통합(PostGIS) — claim 뒤 transient_db 2회 재발행 뒤 "재발행
+  상한 2회 소진(누적 2회)", launch 실패 3회 뒤 provider 단계 첫 실패에서 "재발행 상한 2회 소진(누적 3회)", 세 종결
+  경로의 `last_failed_at`(활성만), member를 캡처한 요청에서 import job event가 실패해도 outbox `failed` 행이 남음(relay
+  단계를 빼는 변이에서 빨강), source head를 쥔 동안 relay 시도가 서버 쪽(`statement_timeout`)·client 쪽
+  (`asyncio.timeout`) 마감에서 끊기고 다음 단계는 같은 session으로 이어짐, 마감을 건 상태 전이가 request 행 lock을
+  2초에 55P03으로 포기함, target 행을 쥔 동안 후처리가 상한 안에서 끝남(상한·마감을 빼는 변이에서 각각 빨강 확인).
+  기존 `test_client_orchestration`·`test_feature_update_repo`·`test_feature_update_executor` 70건 통과.
+- 반영하지 않은 것: migration 456 lock 실패는 코드 결함이 아니라 회전 절차라 `resume.md` 다음 단계에 순서를 적었다.
+  COMMIT 응답 유실 뒤 후처리를 다시 내는 reconciler는 만들지 않았다(위).
 
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영(수집 실패 감사 §4 #10·#11)
 
