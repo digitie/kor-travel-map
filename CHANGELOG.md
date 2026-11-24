@@ -8,6 +8,10 @@
 - run-status sensor 따라잡기 판정이 사유 있는 SKIPPED tick(실패 사건 하나를 처리한 `feature_update_request_failure_sensor` tick)을 "처리할 사건 없음"으로 읽지 않는다.
 - `freeze --resume`이 다시 멈추는 launcher 이름을 `note:`로 남긴다. 1·2로 끝난 freeze는 이번 호출이 스냅샷을 썼거나 `--resume`으로 이어 받았을 때만 `rollback:` 줄을 찍고, 이미 있는 파일은 webserver에 묻기 전에 거부(3)한다. `scripts/n150/README.md`에 회전 스크립트의 freeze·unfreeze 종료 코드 규칙을 적었다.
 
+## 2026-11-24 — live topic revision commit 직전 증가(alembic 458)
+
+- `ops.ops_live_topic_revisions`(provider_sync·dataset_projection·dagster_schedules)를 원본 write 시점이 아니라 그 transaction의 commit 직전에 올린다(alembic `458_live_topic_commit_bump`, 새 표 `ops.ops_live_topic_pending`). 긴 적재가 주소 finding·sync state를 쓴 뒤 commit까지 topic 행을 쥐어 PinVi POI target PUT/DELETE(503)·다른 큐 요청이 막히던 것을 없앤다. 값은 topic을 바꾼 commit당 1씩 오른다. POI target receipt(`meta.dataset_projection_revision`) 의미와 OpenAPI는 그대로다.
+
 ## 2026-11-24 — n150 Dagster 전체 freeze 도구(수집 실패 감사 §4 #10·#11)
 
 - `scripts/n150/dagster-freeze.py status|freeze|unfreeze --snapshot <절대 경로> [--resume] [--dry-run] [--accept-missing]`: Map code location의 RUNNING schedule·sensor 전체를 스냅샷 뒤 멈추고 Map run 0까지 기다린다(run-status sensor는 run이 빠지고 tick이 따라잡은 뒤 마지막에), 스냅샷의 RUNNING만 되돌린다. 옛 `~/freeze.py`(두 instigator만 정지)를 대신한다. R4 runbook 2·9단계가 이것을 쓴다.

@@ -327,6 +327,12 @@
         "456_feature_update_retry"
       ],
       "revision": "457_event_clock_slots"
+    },
+    {
+      "down_revision": [
+        "457_event_clock_slots"
+      ],
+      "revision": "458_live_topic_commit_bump"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

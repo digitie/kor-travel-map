@@ -363,11 +363,11 @@ Alembic 0058의 `ops.poi_cache_targets.lock_version`은 인덱스에 넣지 않�
 natural key partial unique index로 row를 찾고 `FOR UPDATE` 한 뒤 heap의 UUID+version을 비교한다.
 version을 인덱싱하면 모든 target UPDATE가 불필요한 index churn을 만들고 HOT update 기회를 줄인다.
 
-target UPDATE는 row-level version trigger와 `dataset_projection` topic row lock을 함께 사용하므로 같은
-topic writer가 많은 경우 직렬화 비용이 생긴다. 이는 stale mutation 방지와 causal live receipt를 위한
-의도된 비용이다. 특히 0055의 statement trigger는 `ops.data_integrity_violations` write도 같은
-`dataset_projection` revision row에 결박하므로, 그 테이블을 쓰는 장기 ETL transaction이 열려 있는 동안
-admin POI mutation latency는 해당 writer의 commit까지 직렬화되어 지연될 수 있다. link snapshot sync는 모든 active parent UUID를 정렬해 `FOR KEY SHARE`로 먼저
+target UPDATE는 row-level version trigger와 `dataset_projection` topic row lock(receipt를 읽을 때 표식을
+먼저 적용하며 잡는다)을 함께 사용하므로 같은 topic의 POI writer끼리는 직렬화된다. 이는 stale mutation 방지와
+causal live receipt를 위한 의도된 비용이다. 458 전에는 statement trigger가 `ops.data_integrity_violations`
+write도 같은 행에 결박해 장기 ETL transaction의 commit까지 admin POI mutation이 지연됐다. 458 뒤로는 원본
+쓰기가 표식만 남기고 행은 commit 직전(다른 deferred 검사 뒤)에만 잡힌다(data-model §9.13). link snapshot sync는 모든 active parent UUID를 정렬해 `FOR KEY SHARE`로 먼저
 잠그고, 그 뒤 link를 `(target_id, feature_id)` 순서로 비활성화/upsert한다. 각 parent lock은 target
 DELETE의 `FOR UPDATE`와 직렬화되지만 일반 active parent read는 막지 않는다. multi-target sync와
 delete 모두 parent target → feature link 순서를 지켜 교착을 피한다.

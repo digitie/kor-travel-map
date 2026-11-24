@@ -54,6 +54,27 @@
 - 시험: `tests/unit/test_n150_dagster_freeze.py` 46건(+8), `test_freeze_skips_state_jobs.py` 2건 — 로컬 WSL venv(dagster
   1.13.24). n150 접속·실제 freeze는 하지 않았다.
 
+## 2026-11-24 — live topic revision을 commit 직전에 올림·10-22 큐 상황 전체 재현(alembic 458)
+
+- 재현(`tests/integration/test_queue_concurrency_1022.py`, 모듈 전용 DB): 긴 큐 적재(KNPS 탐방로 실제 asset — runner 맨
+  앞에서 topic 원본 셋을 쓰고 역지오코딩에서 transaction을 연 채 멈춤) 동안 큐 요청 12건(KNPS point 5·geometry 4,
+  국가유산 item·행사, 축제 cache target)을 실제 asset·Dagster LOGIN·`lock_timeout` 3초로 실행기 경로에 태운다.
+  456: 12건 모두 `INSERT INTO ops.import_job_events` `LockNotAvailableError`(prod 10-22 서명). 457·458 뒤: 12건 모두
+  `done`, 긴 transaction을 기다린 backend 0. 남는 대기는 다른 요청끼리의 `feature-curation-write` fence(설계).
+- 첫 판은 "live topic 행은 경합 없음"으로 결론냈다가 적대 리뷰가 뒤집었다: 쓰기 중간 `record_override_geo_stale`
+  (`data_integrity_violations` INSERT)과 꼬리의 주소 finding이 `dataset_projection` 행을 commit까지 쥔다. finding 1건 적재를
+  꼬리에서 멈추면 cache target resolve 문장이 lock timeout(리뷰 실측). fixture가 finding 0건·geo token 없음이라 놓쳤다.
+- 458: 원본 statement trigger는 `ops.ops_live_topic_pending(txid, topic)` 표식만 남기고(`ON CONFLICT DO NOTHING`, 행 수
+  무관), `DEFERRABLE INITIALLY DEFERRED` constraint trigger가 commit 직전에 topic 이름 순서로 `revision + 1`을 적용한다.
+  ADR-065 receipt는 `SET CONSTRAINTS … IMMEDIATE`로 표식을 먼저 적용하고 읽는다(인과 그대로). slot+SUM은 receipt 인과를
+  깨므로 쓰지 않았다 — 후보 비교·남는 것은 `data-model.md` §9.13. 값은 statement당이 아니라 topic을 바꾼 commit당 1.
+- 시험: 위 재현 2건(변환 단계 hold·주소 finding 있는 쓰기 끝 hold), `test_ops_live_topic_revisions`의 late commit 3건을
+  "기다리지 않고 commit마다 1"로 고침, unit receipt 순서, 구조 계약(`test_alembic_upgrade`). head-schema 재생성.
+- 재리뷰 반영: 표식의 첫 deferred 발화가 표식을 한 번 줄 맨 뒤로 다시 넣는다(`ready`) — 쓰기 중간에 생긴 표식이 뒤따르는
+  completeness 검사(쓰기 행 수만큼) 내내 topic 행을 쥐던 것(리뷰 실측 3초 검사). 시험 추가: deferred 순서(재넣기 제거 변이에서
+  빨강), 실제 `get_dataset_projection_revision` receipt 인과, transaction당 topic +1·표식 누수 0. 표식 표 권한은 SELECT·INSERT·DELETE.
+- 남은 것: 큰 첫 적재의 쓰기 단계가 fence 900초 상한을 넘을 수 있다(ADR-113 재검토 조건, 별도).
+
 ## 2026-11-24 — Map Dagster 전체 freeze 도구·미기동 schedule 6개 활성 반영(수집 실패 감사 §4 #10·#11)
 
 - #10: n150 `~/freeze.py`는 산사태 schedule과 update-request 큐 sensor 둘만 멈춰, PG에 쓰는 나머지 Map

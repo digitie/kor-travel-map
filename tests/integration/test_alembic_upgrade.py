@@ -130,6 +130,12 @@ _UNMAPPED_TABLE_COLUMNS: dict[
         ("revision", "bigint", True),
         ("updated_at", "timestamp with time zone", True),
     },
+    # 458: topic 증가 표식(transaction·topic당 한 행, commit 직전 적용 뒤 지운다).
+    ("ops", "ops_live_topic_pending"): {
+        ("txid", "bigint", True),
+        ("topic", "text", True),
+        ("ready", "boolean", True),
+    },
     # 0103 legacy freeze replay의 fail-closed preflight 결과. 애플리케이션이 읽지
     # 않는 일회성 감사 기록이라 ORM에 매핑하지 않고, 구조는 여기서 고정한다.
     ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
@@ -337,6 +343,10 @@ _UNMAPPED_TABLE_CONSTRAINTS: dict[tuple[str, str], set[tuple[str, str]]] = {
         ("ck_ops_live_topic_revisions_topic", "c"),
         ("ck_ops_live_topic_revisions_revision", "c"),
     },
+    ("ops", "ops_live_topic_pending"): {
+        ("pk_ops_live_topic_pending", "p"),
+        ("ck_ops_live_topic_pending_topic", "c"),
+    },
     ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
         ("tvn36_legacy_freeze_preflight_manifest_pkey", "p"),
     },
@@ -515,6 +525,7 @@ _UNMAPPED_TABLE_INDEXES: dict[tuple[str, str], set[str]] = {
         "ix_ops_live_ticket_claims_expires_at",
     },
     ("ops", "ops_live_topic_revisions"): {"pk_ops_live_topic_revisions"},
+    ("ops", "ops_live_topic_pending"): {"pk_ops_live_topic_pending"},
     ("ops", "tvn36_legacy_freeze_preflight_manifest"): {
         "tvn36_legacy_freeze_preflight_manifest_pkey",
     },
@@ -1412,6 +1423,8 @@ async def test_alembic_security_table_checks_reject_invalid_rows(
         "VALUES (decode('00', 'hex'), 'test', now())",
         "INSERT INTO ops.ops_live_topic_revisions (topic, revision) "
         "VALUES ('review-contract', -1)",
+        "INSERT INTO ops.ops_live_topic_pending (txid, topic) "
+        "VALUES (pg_current_xact_id()::text::bigint, ' ')",
     )
     async with pg_engine_with_migrations.connect() as conn:
         for statement in invalid_inserts:
