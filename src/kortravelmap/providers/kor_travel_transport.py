@@ -406,16 +406,17 @@ class TransportExportTooLarge(_CodedTransportFailure):
 
 
 class TransportSourceInconsistent(_CodedTransportFailure):
-    """transport 근거끼리 맞지 않는다(``EXPORT_SOURCE_INCONSISTENT``) — **나중에 다시**.
+    """transport 근거끼리 맞지 않는다(``EXPORT_SOURCE_INCONSISTENT``) — **다음 tick**.
 
-    transport의 다음 수집·준비가 고친다. HTTP 층에서는 다시 묻지 않고(같은 근거를 다시 읽을 뿐이다)
-    **retryable step 실패**로 둔다 — 종전 code 없는 503과 같은 경로다. step 재시도를 다 써도
-    그대로면 run은 실패하고 다음 schedule tick이 다시 본다. 다음 정기 수집을 기다리는 stale과 달리
-    transport 쪽 일시 불일치라 step 재시도 몇 번이 헛걸음이 되어도 run 하나 안에서 끝난다.
+    transport의 다음 수집·준비가 고친다(transport ``docs/map-service-exports-handoff.md`` 권장
+    처리 "다음 tick, 반복되면 경보"). 같은 run 안에서 다시 물어도 같은 근거를 읽을 뿐이라 HTTP 층도
+    step도 다시 부르지 않는다 — ``retryable=False``다. feature 적재 asset은 재시도 없이
+    실패하고(다음 schedule tick이 다시 본다, 반복되면 빨간 run이 경보), Valkey 상태 job은 상류
+    미준비로 건너뛰고 서비스 세대 나이로 판정한다(``dagster.upstream_signal``).
     """
 
     failure_kind = "transport_source_inconsistent"
-    retryable = True
+    retryable = False
 
 
 class TransportSnapshotExpired(TransportExportNotCurrent):

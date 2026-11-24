@@ -802,7 +802,8 @@ def test_the_asset_boundary_stops_retries_for_a_disabled_or_too_large_export(
 
 
 @pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])
-def test_the_asset_boundary_keeps_retries_for_an_inconsistent_source(tracked: bool) -> None:
+def test_the_asset_boundary_leaves_an_inconsistent_source_to_the_next_tick(tracked: bool) -> None:
+    """transport 권장 처리("다음 tick") — 같은 run의 재시도는 같은 근거를 다시 읽을 뿐이다."""
     from kortravelmap.providers.kor_travel_transport import TransportSourceInconsistent
 
     cause = TransportSourceInconsistent(
@@ -812,9 +813,12 @@ def test_the_asset_boundary_keeps_retries_for_an_inconsistent_source(tracked: bo
     async def _raise(_context: Any) -> None:
         raise cause
 
-    with pytest.raises(TransportSourceInconsistent) as caught:
+    with pytest.raises(Failure) as caught:
         asyncio.run(run_tracked_feature_asset(_context(tracked=tracked), _raise))
-    assert caught.value is cause
+    assert caught.value.allow_retries is False
+    metadata = {key: value.value for key, value in caught.value.metadata.items()}
+    assert metadata["failure_kind"] == "transport_source_inconsistent"
+    assert metadata["transport_problem_code"] == "EXPORT_SOURCE_INCONSISTENT"
 
 
 @pytest.mark.parametrize("tracked", [True, False], ids=["guarded", "untracked"])

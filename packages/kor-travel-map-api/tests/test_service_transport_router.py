@@ -372,6 +372,15 @@ _NO_COLLECTION = {
         (httpx.Response(422, json={"status": 422}), "request_rejected"),
         (httpx.Response(503, json=_NO_COLLECTION), "upstream_no_collection"),
         (httpx.Response(503, json={"status": 503}), "upstream_unavailable"),
+        # T4 전용 11번째 code(transport #277) — meta 없는 일시 장애다(transport 권장 처리).
+        (
+            httpx.Response(
+                503,
+                json={"status": 503, "code": "EXPORT_QUERY_TIMEOUT"},
+                headers={"retry-after": "5"},
+            ),
+            "upstream_unavailable",
+        ),
         (httpx.Response(503, text="maintenance"), "upstream_unavailable"),
         (httpx.Response(502, text="bad gateway"), "upstream_unavailable"),
         (httpx.Response(304), "upstream_rejected"),

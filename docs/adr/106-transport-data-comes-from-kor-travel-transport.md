@@ -55,7 +55,10 @@
    network에서 `http://127.0.0.1:14001`로 부른다. 404는 설정 누락(`ProviderCredentialMissing`, 요청 전)과
    가른다 — `TransportExportHidden`(`failure_kind=transport_hidden`: token·접속 주소·버전 중 하나).
 6. **신선도 계약 — 두 겹, 모든 dataset.** transport는 근거 수집의 이력이 없거나 실패했거나 stale이면 503을
-   낸다(transport ADR-013: 주유소 24시간 — transport #277 뒤 export 유예 27.5시간 —, 휴게소 3일, 휴게소 유가 12시간, 돌발 30분). Map은 그것만 믿지 않는다:
+   낸다(transport ADR-013: 주유소 **27.5시간**(transport #277 — 8시간 tick에서 연속 두 번 실패까지 200 +
+   `collection.last_attempt_failed=true`, 세 번째 연속 실패부터 503), 휴게소 3일, 휴게소 유가 12시간, 돌발 30분). Map
+   상태 job의 주유소 경고 임계 18시간은 이보다 짧다 — export가 아직 200을 내는 동안(원천 나이 18~27.5시간)에도 Map은
+   빨간 run으로 먼저 알린다(값은 그대로 교체된다 — 판정은 원천 나이). Map은 그것만 믿지 않는다:
    - 매 페이지 `collection`(`last_success_at`·`failed`·`stale`)을 엄격히 읽고 하나라도 어긋나면
      `TransportExportNotCurrent`(`transport_not_current`)로 실패한다. code 없는 503도 같은 예외다(code 503은 아래 2026-11-24 개정 절).
    - 완전 snapshot export(주유소·휴게소·휴게소 유가)가 끝까지 0건이면 `TransportExportEmpty`
@@ -133,7 +136,7 @@ OpiNet/KREX 키 제거)를 **같은 rotation**에서 → C7. Manager만 먼저 �
    | `EXPORT_BUSY`·`EXPORT_PREPARE_TIMEOUT`·`TRANSIENT_DB` | `TransportExportBusy`(`transport_busy` 등) | 첫 요청 포함 4번(다시 묻기 3번), 대기 `max(5·10·20초 ±20%, Retry-After)`, run 재시도 예산 공유 | 다 쓰면 feature 적재: 있다 / 상태 job: 없다(혼합) | 아래 혼합 |
    | 위 경합 code인데 `Retry-After` > 60초(HTTP 층 한 번 대기 상한 `_TRANSPORT_RETRY_AFTER_CAP_SECONDS`) | `TransportExportBusy`, `retry_after_exceeds_cap=True`, `retryable=True` | 기다리지 않는다(경고 log) | 위와 같다 — 상태 job은 `outcome=upstream_busy_over_cap` | 아래 혼합 |
    | `EXPORT_DISABLED`·`EXPORT_TOO_LARGE` | `TransportExportDisabled`(`transport_export_disabled`)·`TransportExportTooLarge`(`transport_export_too_large`), `retryable=False` | 다시 묻지 않는다 | 없다 — 설정·데이터가 바뀌기 전에는 결정적으로 같다 | **실패** |
-   | `EXPORT_SOURCE_INCONSISTENT` | `TransportSourceInconsistent`(`transport_source_inconsistent`), `retryable=True` | 다시 묻지 않는다 | 있다 — transport의 다음 수집·준비가 고친다 | 다 쓰면 실패 |
+   | `EXPORT_SOURCE_INCONSISTENT` | `TransportSourceInconsistent`(`transport_source_inconsistent`), `retryable=False` | 다시 묻지 않는다 | 없다 — **다음 tick**(transport 권장 처리, 2026-11-24 정렬) | feature 적재: 실패 / 상태 job: 아래 혼합 |
    | 없음·모르는 code(공통 표준이 모든 5xx에 붙일 `SERVICE_UNAVAILABLE` 등, T4 전용 `EXPORT_QUERY_TIMEOUT`)·모양이 틀린 code | `TransportExportNotCurrent`(`transport_not_current`), `retryable=True` | 다시 묻지 않는다 | 있다 | 종전 |
 
    - **나이 기준 혼합(소유자 결정 2026-11-24, Valkey 상태 job)**: 근거 수집 미현재 code 503과, HTTP 층에서 풀리지
@@ -159,9 +162,16 @@ OpiNet/KREX 키 제거)를 **같은 rotation**에서 → C7. Manager만 먼저 �
    - 상태 job의 HTTP 층 재시도 시간(실패한 시도 + 대기)은 run 상한 × 0.25 안이다(`RETRY_TIME_SHARE` — 돌발 480초 →
      120초) — 그 상한을 넘길 대기는 하지 않는다.
    - `EXPORT_DISABLED`는 code 없는 옛 transport에서는 종전 503(step 재시도 뒤 실패)이었다. code가 붙으면 재시도
-     없이 바로 실패한다. `EXPORT_SOURCE_INCONSISTENT`를 terminal로 두지 않는 이유: 다음 정기 수집을 기다리는 stale과
-     달리 transport 쪽 일시 불일치이고 다음 준비가 고친다.
-   - 실패 metadata 정본: 상태 job은 `transport_state._upstream_hold_outcome`, feature 적재 asset은
+     없이 바로 실패한다. `EXPORT_SOURCE_INCONSISTENT`는 transport 권장 처리("다음 tick, 반복되면 경보")를 따라 같은
+     run 안에서 다시 묻지 않는다(2026-11-24 정렬 — 같은 run의 재시도는 같은 근거를 다시 읽을 뿐이다).
+   - `EXPORT_QUERY_TIMEOUT`(11번째 code)은 T4 가격 이력 전용이다. Dagster fetcher(T1~T3)는 받지 않으며(오면 모르는
+     code와 같다), Map API T4 프록시는 일시 장애 `upstream_unavailable`로 내린다.
+   - `Retry-After` 힌트의 현재 값(transport `docs/map-service-exports-handoff.md`): `EXPORT_SOURCE_NOT_CURRENT`는 수집
+     상태로 계산해 60~3600초(진행 중 수집은 시작 + 예상 수행 시간, 예정이 없거나 지났으면 1800초),
+     `EXPORT_NO_HISTORY`는 5분 주기 집합 300초·그 밖 3600초, 경합 10~60초. **Map은 이 범위를 가정하지 않는다** —
+     transport가 바꿀 수 있는 힌트다. 대기에 쓰는 것은 경합 code뿐이다.
+   - 실패 metadata 정본: 상태 job은 `transport_state.load_transport_state`(건너뜀 metadata·`outcome`)와
+     `upstream_signal.raise_if_stale`, feature 적재 asset은
      `quota_exhaustion.raise_terminal_if_transport_unrecoverable`(`transport_problem_code`·
      `transport_retry_after_seconds`·요청 계측). 그 밖의 실패는 요청 계측을 경고 log 한 줄로 남긴다.
 2. **HTTP 층 재시도 범위**(MC-03). 전송 오류·408·429·500·502·504를 같은 요청으로 첫 요청 포함 2번까지(15초 기준 지수, 429는
