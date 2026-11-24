@@ -1108,7 +1108,8 @@ PinVi는 기존 import-job cancel route로 한 번만 호출한다. Manager 성�
   topic은 JSON 문자열 배열이므로 comma가 든 run ID도 그대로 보존한다.
   Dagster id는 ASCII로 제한하지 않고 C0 control만 거절한다. WebSocket이라
   `provider_sync`/`dataset_projection`/`dagster_schedules` 변경 감지는 source transaction과
-  함께 증가하는 `ops.ops_live_topic_revisions` statement-trigger clock을 snapshot에 포함해
+  함께 commit되는 `ops.ops_live_topic_revisions` clock(원본 statement trigger가 표식을 남기고 commit
+  직전에 올린다, alembic 458)을 snapshot에 포함해
   timestamp/MAX tail 동률과 늦은 commit을 놓치지 않는다. `dataset_projection`은
   `ops.data_integrity_violations`와 `ops.poi_cache_targets` 변경을 포괄한다.
   생성 `openapi.json` `paths`에는 **포함되지 않으며**

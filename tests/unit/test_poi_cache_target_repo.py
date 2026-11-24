@@ -363,13 +363,21 @@ async def test_delete_poi_cache_target_recheck_maps_concurrent_recreate_to_412()
 
 
 @pytest.mark.unit
-async def test_get_dataset_projection_revision_requires_canonical_topic_row() -> None:
-    session = _Session(_Result([], scalar=42))
+async def test_get_dataset_projection_revision_applies_pending_bump_before_reading() -> None:
+    """receipt는 이 transaction의 증가를 포함해야 한다(ADR-065) — 458 뒤 증가는 commit 직전이므로
+    읽기 전에 표식을 먼저 적용하고, 읽은 뒤 deferred로 되돌린다."""
+    session = _Session(_Result([]), _Result([], scalar=42), _Result([]))
 
     revision = await get_dataset_projection_revision(cast(Any, session))
 
     assert revision == 42
-    assert session.params == [{}]
+    assert session.statements[0] == (
+        "SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply IMMEDIATE"
+    )
+    assert "FROM ops.ops_live_topic_revisions" in session.statements[1]
+    assert session.statements[2] == (
+        "SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply DEFERRED"
+    )
 
 
 @pytest.mark.unit

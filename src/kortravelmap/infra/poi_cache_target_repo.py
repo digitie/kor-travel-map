@@ -808,11 +808,28 @@ async def delete_poi_cache_target(
     return PoiCacheTargetDeleteResult(status="deleted", target=target)
 
 
+#: 이 transaction의 topic 증가 표식을 지금 적용한다(alembic 458). 원본 trigger는 표식만 남기고 topic
+#: 행은 commit 직전에 올리므로, receipt를 읽기 전에 먼저 올려야 receipt가 자기 증가를 포함한다.
+_APPLY_LIVE_TOPIC_PENDING_NOW_SQL: Final[str] = (
+    "SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply IMMEDIATE"
+)
+_DEFER_LIVE_TOPIC_PENDING_SQL: Final[str] = (
+    "SET CONSTRAINTS ops.trg_ops_live_topic_pending_apply DEFERRED"
+)
+
+
 async def get_dataset_projection_revision(session: AsyncSession) -> int:
-    """현재 transaction에서 관측되는 ``dataset_projection`` live revision."""
+    """이 transaction의 mutation을 포함한 ``dataset_projection`` live revision(ADR-065 receipt).
+
+    표식을 먼저 적용해 topic 행을 올리고 그 행을 commit까지 쥔다 — 그래서 receipt 이상의 값은 이
+    transaction이 commit된 뒤에만 보인다(종전 statement 증가와 같은 인과). 읽은 뒤에는 deferred로
+    되돌려, 이 transaction의 뒤따르는 원본 쓰기는 다시 commit 직전에 올린다.
+    """
+    await session.execute(text(_APPLY_LIVE_TOPIC_PENDING_NOW_SQL))
     revision = (
         await session.execute(text(_GET_DATASET_PROJECTION_REVISION_SQL))
     ).scalar_one()
+    await session.execute(text(_DEFER_LIVE_TOPIC_PENDING_SQL))
     return int(revision)
 
 

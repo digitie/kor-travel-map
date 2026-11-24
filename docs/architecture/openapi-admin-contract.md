@@ -1184,10 +1184,12 @@ prefix topic의 DB resource `{job_id}`·`{request_id}`·`{upload_id}`는 canonic
 topic은 JSON 문자열 배열에서만 전달하므로 comma가 든 run ID도 분할하지 않는다.
 `provider_sync`, `dataset_projection`, `dagster_schedules`는 source transaction과 같은
 transaction에서 증가하는 `ops.ops_live_topic_revisions` clock을 snapshot에 포함한다.
-provider state/policy, data integrity issue/POI cache target, schedule override는 statement 단위
-INSERT/UPDATE/DELETE/TRUNCATE, C5 schedule audit/claim resolution은 INSERT마다 clock을 올린다.
-rollback은 clock도 함께 되돌리고, 동시 writer는 topic PK row lock으로 직렬화되어 늦은 commit도
-유실되지 않는다. `dagster_schedules` snapshot은 clock과 함께 C5
+provider state/policy, data integrity issue/POI cache target, schedule override의
+INSERT/UPDATE/DELETE/TRUNCATE와 C5 schedule audit/claim resolution INSERT는 transaction의 표식을 남기고,
+clock은 그 transaction의 commit 직전에 topic마다 한 번 오른다(alembic 458). rollback은 clock도 함께
+되돌리고, 늦은 commit도 그 commit에서 clock을 올려 유실되지 않는다. 같은 topic의 writer끼리는 commit
+직전에만 잠깐 직렬화된다. POI target PUT/DELETE의 `dataset_projection_revision` receipt는 표식을 먼저
+적용한 뒤 읽으므로 receipt 이상의 값은 그 mutation의 commit 뒤에만 보인다(ADR-065). `dagster_schedules` snapshot은 clock과 함께 C5
 schedule audit `event_id`, claim resolution `resolution_id` tail도 한 SQL에서 읽는다. C7A는 C5
 migration이 먼저 적용된 strict schema를 전제하므로 `to_regclass` degrade를 두지
 않는다. 배포 순서는 C5 후 C7A다.
