@@ -24,8 +24,8 @@ freeze
   3. Map run 중 끝나지 않은 것(QUEUED·NOT_STARTED·STARTING·STARTED·MANAGED·CANCELING)이 0이 될
      때까지 기다린다(진행 표시, ``--wait-timeout``).
   4. run-status sensor가 마지막 terminal 사건을 DB에 반영했는지 본다 — ``--settle``초 뒤, 켜진
-     run-status sensor마다 run이 0이 된 뒤 SKIPPED(처리할 사건 없음) tick을 서로 다른 두 시각에
-     볼 때까지.
+     run-status sensor마다 run이 0이 된 뒤 사유 없는 SKIPPED(처리할 사건 없음) tick을 서로 다른 두
+     시각에 볼 때까지. 사유 있는 SKIPPED는 사건 하나를 처리한 tick이다(failure sensor).
      그다음 run을 다시 센다: run-status sensor 하나(``feature_operation_success_sensor``)는
      completion job run을 **낸다**. 새 run이 있으면 3으로 돌아간다.
   5. run-status sensor를 멈추고 run을 다시 센다. 그 사이 run이 생겼으면 방금 멈춘 run-status
@@ -209,7 +209,10 @@ query KtmFreezeSensorTicks($s: RepositorySelector!, $after: Float) {
   repositoryOrError(repositorySelector: $s) {
     __typename
     ... on Repository {
-      sensors { name sensorState { ticks(limit: 1, afterTimestamp: $after) { status timestamp } } }
+      sensors {
+        name
+        sensorState { ticks(limit: 1, afterTimestamp: $after) { status timestamp skipReason } }
+      }
     }
     ... on RepositoryNotFoundError { message }
     ... on PythonError { message }
@@ -638,10 +641,14 @@ def _observers_caught_up(
 ) -> list[str]:
     """따라잡지 못한 run-status sensor 목록.
 
-    따라잡음 = run 0 뒤 최신 tick이 SKIPPED이고, 그런 SKIPPED tick을 서로 다른 두 시각에 봤다.
+    따라잡음 = run 0 뒤 최신 tick이 **사유 없는** SKIPPED이고, 그런 tick을 서로 다른 두 시각에
+    봤다. 사유를 본다: Dagster run-status sensor 감싸개는 사건 하나에 사용자 함수가 값을 돌려주면
+    그것을 내고 tick을 끝낸다. ``feature_update_request_failure_sensor``는 실패 사건마다
+    ``SkipReason``을 돌려주므로 그 tick은 SKIPPED지만 사건 하나를 처리했고, 실패가 몰렸으면 뒤에
+    사건이 남아 있다. 처리할 사건이 없던 tick은 감싸개가 아무것도 내지 않아 사유가 없다.
     한 번으로는 부족하다: run-status sensor는 tick마다 공용 event log의 사건을 몇 건씩만 읽어,
-    다른 location의 사건만 읽은 tick도 SKIPPED가 될 수 있다. 도구 호스트와 Dagster 서버의
-    시계 차이도 두 번째 tick이 흡수한다.
+    다른 location의 사건만 읽은 tick도 사유 없는 SKIPPED가 될 수 있다. 도구 호스트와 Dagster
+    서버의 시계 차이도 두 번째 tick이 흡수한다.
     """
 
     seen: dict[str, set[float]] = {item.name: set() for item in observers}
@@ -649,7 +656,7 @@ def _observers_caught_up(
         ticks = latest_sensor_ticks(gql, target, drained_at)
         for item in observers:
             tick = ticks.get(item.name) or {}
-            if tick.get("status") == "SKIPPED":
+            if tick.get("status") == "SKIPPED" and not tick.get("skipReason"):
                 seen[item.name].add(float(tick.get("timestamp") or 0.0))
             else:
                 seen[item.name].clear()

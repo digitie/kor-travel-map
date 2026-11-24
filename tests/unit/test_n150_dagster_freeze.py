@@ -141,7 +141,8 @@ class _FakeDagster:
         #: run 목록 조회 때마다 하나씩 꺼내 Map run 목록을 바꾼다(끝나 가는·새로 뜨는 run).
         self.run_script: list[list[dict[str, str]]] = []
         #: sensor tick 조회마다 하나씩 꺼내는 {sensor 이름: 최신 tick status}. 없으면 SKIPPED.
-        self.tick_script: list[dict[str, str | None]] = []
+        #: ``(status, skipReason)``이면 사유를 단 tick, ``None``이면 tick 없음.
+        self.tick_script: list[dict[str, str | tuple[str, str] | None]] = []
         self.fail_stop: set[str] = set()
 
     def _add(
@@ -213,9 +214,14 @@ class _FakeDagster:
         for kind, name, _ in self.entries(variables["s"]["repositoryLocationName"]):
             if kind != "sensor":
                 continue
-            status = statuses.get(name, "SKIPPED")
+            value = statuses.get(name, "SKIPPED")
+            status, reason = value if isinstance(value, tuple) else (value, None)
             stamp = after + len(self.calls)  # 조회마다 새 tick
-            ticks = [] if status is None else [{"status": status, "timestamp": stamp}]
+            ticks = (
+                []
+                if status is None
+                else [{"status": status, "timestamp": stamp, "skipReason": reason}]
+            )
             sensors.append({"name": name, "sensorState": {"ticks": ticks}})
         return {"repositoryOrError": {"__typename": "Repository", "sensors": sensors}}
 
@@ -729,6 +735,27 @@ def test_one_skipped_tick_is_not_enough(tmp_path: Path) -> None:
     assert _freeze(fake, tmp_path / "freeze.json", clock) == 0
     assert fake.calls.count("ticks") == 2
     assert clock.sleeps == [90.0, 30.0]
+
+
+def test_a_skipped_tick_with_a_reason_handled_an_event_and_is_not_caught_up(
+    tmp_path: Path,
+) -> None:
+    """``feature_update_request_failure_sensor``는 실패 사건 하나를 처리할 때마다 SkipReason을 낸다.
+
+    Dagster run-status sensor 감싸개는 사용자 함수가 돌려준 값을 내고 그 tick을 끝낸다 — tick은
+    SKIPPED지만 사건 하나를 처리했고, 실패가 몰리면 뒤에 사건이 남아 있다. 처리할 사건이 없던
+    tick만 사유가 없다(감싸개가 아무것도 내지 않는다).
+    """
+
+    fake = _FakeDagster()
+    handled = ("SKIPPED", "Dagster feature update worker failed: run_id=r9 request_id=q9")
+    fake.tick_script = [{"feature_update_request_failure_sensor": handled}] * 3
+    clock = _Clock()
+
+    assert _freeze(fake, tmp_path / "freeze.json", clock) == 0
+    # 사유 있는 SKIPPED 세 번은 따라잡음이 아니다 — 그 뒤 사유 없는 tick을 서로 다른 두 시각에 본다.
+    assert fake.calls.count("ticks") == 5
+    assert clock.sleeps == [90.0, 30.0, 30.0, 30.0, 30.0]
 
 
 def test_resume_restores_run_status_sensors_left_off_while_runs_exist(tmp_path: Path) -> None:
