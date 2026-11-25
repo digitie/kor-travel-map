@@ -204,13 +204,11 @@ test.describe("live/backups (read-only)", () => {
   test("backups empty-state or list container (PRESENCE=0)", async ({ page }) => {
     await page.goto("/admin/backups");
     await expectHeading(page, HEADINGS.backups);
-    const empty = page.getByText("백업이 없습니다.");
-    const emptyVisible = await empty.isVisible({ timeout: 15000 }).catch(() => false);
-    if (emptyVisible) {
-      await expect(empty).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByText("백업 목록")).toBeVisible({ timeout: 15000 });
-    }
+    // `isVisible`은 기다리지 않는다(timeout 옵션 무시) — 데이터 도착 전 분기가 갈려 flaky했다.
+    // 둘 중 하나가 보일 때까지 기다린다.
+    await expect(
+      page.getByText("백업이 없습니다.").or(page.getByText("백업 목록")).first(),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("backups 백업 목록 card container visible", async ({ page }) => {
@@ -222,13 +220,13 @@ test.describe("live/backups (read-only)", () => {
   test("backups command-enabled badge visible", async ({ page }) => {
     await page.goto("/admin/backups");
     await expectHeading(page, HEADINGS.backups);
-    const planOnly = page.getByText("plan only");
-    const planVisible = await planOnly.isVisible({ timeout: 15000 }).catch(() => false);
-    if (planVisible) {
-      await expect(planOnly).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByText("execute enabled")).toBeVisible({ timeout: 15000 });
-    }
+    // badge는 목록 응답(`command_enabled`)이 온 뒤에만 그려진다 — `isVisible`(대기 없음)로
+    // 분기하면 응답 전에 "execute enabled" 쪽으로 갈려 실패했다(2026-11-25 운영 재실행).
+    await expect(
+      page.getByText("plan only", { exact: true }).or(
+        page.getByText("execute enabled", { exact: true }),
+      ),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("backups 실행 옵션 card heading visible", async ({ page }) => {
@@ -240,13 +238,12 @@ test.describe("live/backups (read-only)", () => {
   test("backups detail placeholder or detail card present", async ({ page }) => {
     await page.goto("/admin/backups");
     await expectHeading(page, HEADINGS.backups);
-    const none = page.getByRole("heading", { name: "선택 없음" });
-    const noneVisible = await none.isVisible({ timeout: 15000 }).catch(() => false);
-    if (noneVisible) {
-      await expect(none).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByRole("heading", { name: "실행 옵션" })).toBeVisible({ timeout: 15000 });
-    }
+    await expect(
+      page
+        .getByRole("heading", { name: "선택 없음" })
+        .or(page.getByRole("heading", { name: "실행 옵션" }))
+        .first(),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("backups deep-link ?job_kind=consistency_check loads heading", async ({ page }) => {
@@ -332,13 +329,9 @@ test.describe("live/poi-cache-targets (read-only)", () => {
   test("poi empty placeholder or targets container (PRESENCE=0)", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expectHeading(page, HEADINGS.poi);
-    const empty = page.getByText("데이터가 없습니다.");
-    const emptyVisible = await empty.first().isVisible({ timeout: 15000 }).catch(() => false);
-    if (emptyVisible) {
-      await expect(empty.first()).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByText("Nearby features")).toBeVisible({ timeout: 15000 });
-    }
+    await expect(
+      page.getByText("데이터가 없습니다.").or(page.getByText("Nearby features")).first(),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("poi page 1 indicator visible", async ({ page }) => {

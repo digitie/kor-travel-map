@@ -128,22 +128,69 @@ type ListCapture = {
  * query params + the parsed live response body. This is the input→param→data half of the
  * round-trip; the UI half is asserted by the caller against the returned body.
  */
+// 한 목록 요청을 기다리는 상한. 테스트 상한(FLOW_TIMEOUT)보다 짧아야 아래 진단 메시지가
+// 테스트 타임아웃의 일반 메시지 대신 보인다.
+const CAPTURE_TIMEOUT = 120_000;
+
 async function captureList(
   page: Page,
   action: () => Promise<unknown>,
   predicate: (params: URLSearchParams) => boolean,
 ): Promise<ListCapture> {
-  const responsePromise = page.waitForResponse(
-    (response) =>
-      response.status() === 200 &&
-      isApiResponse(response, "GET", ADMIN_FEATURES_PATH) &&
-      predicate(new URL(response.url()).searchParams),
-    { timeout: FLOW_TIMEOUT },
-  );
-  await action();
-  const response = await responsePromise;
-  const body = (await response.json()) as AdminFeaturesListResponse;
-  return { params: new URL(response.url()).searchParams, body };
+  const matches = (url: string, method: string): boolean => {
+    if (method !== "GET") return false;
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.startsWith("/api/proxy/")
+      ? parsed.pathname.slice("/api/proxy".length)
+      : parsed.pathname;
+    return (
+      decodeURIComponent(pathname) === ADMIN_FEATURES_PATH &&
+      predicate(parsed.searchParams)
+    );
+  };
+  // 재시도(react-query)가 성공하면 통과하도록 200을 기다리되, 그 사이 같은 요청의 실패
+  // (네트워크 오류·비 200)를 모아 타임아웃 메시지에 싣는다 — 2026-11-25 운영 재실행에서
+  // sort=issue_count 목록이 "Failed to fetch"로 끊겼는데 5분 뒤 일반 타임아웃만 남았다.
+  const failures: string[] = [];
+  const onFailed = (request: import("@playwright/test").Request) => {
+    if (matches(request.url(), request.method())) {
+      failures.push(`requestfailed ${request.failure()?.errorText ?? "?"}`);
+    }
+  };
+  const onResponse = (response: Response) => {
+    if (
+      response.status() !== 200 &&
+      matches(response.url(), response.request().method())
+    ) {
+      failures.push(`HTTP ${response.status()}`);
+    }
+  };
+  page.on("requestfailed", onFailed);
+  page.on("response", onResponse);
+  try {
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.status() === 200 &&
+        isApiResponse(response, "GET", ADMIN_FEATURES_PATH) &&
+        predicate(new URL(response.url()).searchParams),
+      { timeout: CAPTURE_TIMEOUT },
+    );
+    await action();
+    const response = await responsePromise.catch((error: unknown) => {
+      throw new Error(
+        `GET ${ADMIN_FEATURES_PATH} 200 응답을 ${CAPTURE_TIMEOUT}ms 안에 받지 못함` +
+          (failures.length > 0
+            ? ` — 같은 요청 실패: ${failures.join(", ")}`
+            : " — 실패한 요청도 없음(요청이 나가지 않았거나 응답 대기)") +
+          ` (${String(error)})`,
+      );
+    });
+    const body = (await response.json()) as AdminFeaturesListResponse;
+    return { params: new URL(response.url()).searchParams, body };
+  } finally {
+    page.off("requestfailed", onFailed);
+    page.off("response", onResponse);
+  }
 }
 
 async function expectListReady(page: Page): Promise<void> {
