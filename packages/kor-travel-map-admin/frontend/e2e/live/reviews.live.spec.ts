@@ -4,7 +4,7 @@ import type { AdminNavHref } from "../../src/lib/admin-nav";
 import {
   adminNavLabel,
   adminNavLink,
-  adminPageHeading,
+  expectAdminPageLoaded,
   pagerButton,
   pagerNavs,
 } from "./_admin-nav";
@@ -73,7 +73,7 @@ async function expectPageLoaded(
   page: import("@playwright/test").Page,
   cfg: ReviewPage,
 ) {
-  await expect(adminPageHeading(page, cfg.route)).toBeVisible({ timeout: T });
+  await expectAdminPageLoaded(page, cfg.route, T);
 }
 
 async function expectEmptyOrTable(
@@ -302,6 +302,7 @@ test.describe("reviews live — enrichment pager controls", () => {
     // 정확히 같아야 한다(빈 큐면 비활성, 한 페이지를 넘으면 활성).
     const listResponse = page.waitForResponse(
       (response) =>
+        response.status() === 200 &&
         response.request().method() === "GET" &&
         new URL(response.url()).pathname.replace(/^\/api\/proxy/, "") ===
           "/v1/admin/features/enrichment-reviews",
@@ -377,6 +378,7 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
     // (DataTable onRowClick)으로 연다(GET만 유발, 결정 버튼은 누르지 않는다).
     const listResponse = page.waitForResponse(
       (response) =>
+        response.status() === 200 &&
         response.request().method() === "GET" &&
         new URL(response.url()).pathname.replace(/^\/api\/proxy/, "") ===
           "/v1/admin/features/enrichment-reviews",
@@ -387,15 +389,24 @@ test.describe("reviews live — enrichment search/filter/page-size dimensions", 
     await expect(page.getByRole("button", { name: "지도" })).toHaveCount(0);
     const list = await listResponse;
     expect(list.status()).toBe(200);
-    const listBody = (await list.json()) as { data?: { items?: unknown[] } };
-    const hasRows = (listBody.data?.items?.length ?? 0) > 0;
-    if (hasRows) {
-      const firstCell = page.locator("tbody tr").first().getByRole("cell").first();
+    const listBody = (await list.json()) as {
+      data?: { items?: Array<{ review_id: string }> };
+    };
+    const firstItem = listBody.data?.items?.[0];
+    if (firstItem) {
+      // 로딩 중에는 skeleton 행이 먼저 그려진다 — 응답 첫 행(review id 앞 12자, `shortId`)이
+      // 실제로 그려진 행의 첫 칸을 누른다(결정 버튼은 마지막 칸, stopPropagation).
+      const firstRow = page
+        .getByRole("row")
+        .filter({ hasText: firstItem.review_id.slice(0, 12) })
+        .first();
+      const firstCell = firstRow.getByRole("cell").first();
       await expect(firstCell).toBeVisible({ timeout: T });
       const detailResponse = page.waitForResponse(
         (response) =>
           response.request().method() === "GET" &&
           response.url().includes("/api/proxy/v1/admin/features/enrichment-reviews/"),
+        { timeout: T },
       );
       await firstCell.click();
       await expect((await detailResponse).ok()).toBe(true);

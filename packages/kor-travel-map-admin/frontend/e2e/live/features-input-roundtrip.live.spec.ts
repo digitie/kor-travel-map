@@ -7,6 +7,7 @@ import {
 } from "@playwright/test";
 
 import * as F from "./_fixtures";
+import type { AdminFeatureSort } from "../../src/api/features";
 import type { components } from "../../src/api/types";
 
 // LIVE (non-mock) e2e for /admin/features — USER-INPUT → API query param → data → UI
@@ -229,6 +230,18 @@ async function expectTableReflectsBody(
 // <option> value를 읽어 쓴다. admin-features-client.tsx SORT_OPTIONS가 바뀌어도(2026-11:
 // `status` 옵션 제거) 스펙이 사라진 옵션을 고르다 60초 타임아웃으로 죽지 않게 한다.
 type SortColumn = string;
+
+// OpenAPI 정렬 enum 전체. `Record<AdminFeatureSort, true>`라 API enum이 바뀌면 typecheck가
+// 실패하고(계획된 변경 — 이 표를 함께 고친다), 화면 select가 옵션 하나를 조용히 빠뜨리면
+// 아래 집합 비교가 실패한다(잡아야 할 회귀).
+const ALL_ADMIN_FEATURE_SORTS: Record<AdminFeatureSort, true> = {
+  name: true,
+  updated_at: true,
+  created_at: true,
+  kind: true,
+  provider: true,
+  issue_count: true,
+};
 
 /** 화면이 실제로 제공하는 정렬 컬럼(option value) 목록. */
 async function readSortColumns(page: Page): Promise<SortColumn[]> {
@@ -552,12 +565,11 @@ test.describe("admin/features live — input → query param → data → UI rou
     expect(initial.params.get("order")).toBe("asc");
     captured.set("name|asc", initial.body);
 
-    // 화면이 제공하는 정렬 컬럼을 그대로 쓴다. 아래 flip 단언이 기대는 세 컬럼은
-    // 반드시 있어야 한다(없으면 정렬 UI 자체의 회귀다).
+    // 화면이 제공하는 정렬 컬럼을 그대로 쓰되, 그 집합은 API 정렬 enum과 같아야 한다.
     const sortColumns = await readSortColumns(page);
-    for (const required of ["name", "updated_at", "created_at"]) {
-      expect(sortColumns).toContain(required);
-    }
+    expect([...sortColumns].sort()).toEqual(
+      Object.keys(ALL_ADMIN_FEATURE_SORTS).sort(),
+    );
 
     // snake 전이: 각 단계는 sort(select) 또는 order(button) 중 하나만 바꿔 항상 새 요청을 유발한다.
     // 이로써 (컬럼 수) × {asc,desc} 조합을 빠짐없이 캡처한다.

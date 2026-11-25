@@ -399,11 +399,27 @@ test.describe("/ops/consistency 읽기 드릴다운 라운드트립 (live)", () 
       return;
     }
 
+    // 필터가 실제로 행을 거르는지 보려면, 열린 집합에 **다른** dataset 행도 있는 dataset을
+    // 고른다(모든 행이 한 dataset이면 "모든 행이 그 dataset"은 필터 없이도 참이다).
+    const datasetIds = openBody.data.items
+      .map((item) => item.provider_dataset_id)
+      .filter((id): id is number => typeof id === "number" && id > 0);
+    const distinctDatasets = new Set(datasetIds);
     const withDataset = openBody.data.items.find(
       (item) =>
         typeof item.provider_dataset_id === "number" &&
-        item.provider_dataset_id > 0,
+        item.provider_dataset_id > 0 &&
+        (distinctDatasets.size < 2 ||
+          openBody.data.items.some(
+            (other) => other.provider_dataset_id !== item.provider_dataset_id,
+          )),
     );
+    if (distinctDatasets.size < 2) {
+      test.info().annotations.push({
+        type: "note",
+        description: "열린 issue가 한 dataset뿐이라 필터의 거름 효과는 422 검사로만 본다",
+      });
+    }
     test.skip(
       withDataset === undefined,
       "open issues에 provider_dataset_id가 채워진 행이 없어 dataset 드릴다운을 검증할 수 없음(prod 데이터 의존)",
@@ -430,7 +446,15 @@ test.describe("/ops/consistency 읽기 드릴다운 라운드트립 (live)", () 
       }
     }
 
-    // 범위 밖 값은 계약상 422(Query gt=0) — 필터가 조용히 무시되는 회귀를 잡는다.
+    // 없는 dataset id는 빈 결과여야 한다 — 필터가 조용히 무시되면 열린 issue가 그대로 온다.
+    const missingRead = await browserFetch<OpsIntegrityIssuesListResponse>(
+      page,
+      `${ISSUES_PATH}?status=open&provider_dataset_id=2147483647&page_size=1`,
+    );
+    expect(missingRead.status).toBe(200);
+    expect(missingRead.body?.data.items ?? []).toHaveLength(0);
+
+    // 범위 밖 값은 계약상 422(Query gt=0) — 검증이 살아 있는지 본다.
     const invalidRead = await browserFetch<OpsIntegrityIssuesListResponse>(
       page,
       `${ISSUES_PATH}?status=open&provider_dataset_id=0&page_size=1`,

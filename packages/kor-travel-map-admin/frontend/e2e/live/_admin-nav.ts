@@ -1,4 +1,4 @@
-import type { Locator, Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 import { ADMIN_NAV_GROUPS, type AdminNavHref } from "../../src/lib/admin-nav";
 
@@ -28,9 +28,27 @@ export function adminNavLabel(href: AdminNavHref): string {
 /**
  * 화면 h1. 상단 바 h1은 "영역 - 페이지"(예: "수집 파이프라인 - 오프라인 업로드")라
  * 접근성 이름의 부분 일치로 찾는다(Playwright 기본 비-exact).
+ *
+ * 주의: 레이아웃의 상단 바(`AdminShellFrame`)는 pathname만으로 이 h1을 그린다 — 페이지가
+ * 오류 경계로 떨어져도 h1은 남는다. "화면이 떴다"를 보려면 `expectAdminPageLoaded`를 쓴다.
  */
 export function adminPageHeading(page: Page, href: AdminNavHref): Locator {
   return page.getByRole("heading", { level: 1, name: adminNavLabel(href) });
+}
+
+/**
+ * 화면이 실제로 마운트됐는지: h1 + 페이지 자신의 `AdminShell`만 그리는 본문 영역
+ * (`[data-slot="admin-shell-content"]`). 오류 경계(`app/error.tsx`)는 이 영역을 그리지 않는다.
+ */
+export async function expectAdminPageLoaded(
+  page: Page,
+  href: AdminNavHref,
+  timeout = 15000,
+): Promise<void> {
+  await expect(adminPageHeading(page, href)).toBeVisible({ timeout });
+  await expect(page.locator('[data-slot="admin-shell-content"]').first()).toBeVisible({
+    timeout,
+  });
 }
 
 /** 좌측 "주요 메뉴" 내비게이션의 해당 화면 링크(접근성 이름 정확 일치). */

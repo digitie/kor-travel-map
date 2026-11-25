@@ -695,10 +695,12 @@ test.describe("/features live — map render verification", () => {
     // 타임아웃). 그래서 DOM 순서상 첫 마커가 아니라 **중심점이 가려지지 않은** 클러스터를
     // 골라 실제 포인터로 클릭한다. 모두 가려졌으면 같은 핸들러(bindSelection)를 타는
     // 키보드 활성화(Enter)로 대신한다 — role=button 마커의 정식 활성화 경로다.
-    const clickableKey = await page
+    // 서버 클러스터(`data-cluster-key`)와 클라이언트 클러스터(`data-cluster-id`)가 모두 있을 수
+    // 있어 속성 대신 DOM 순서 index로 고른다.
+    const clickableIndex = await page
       .locator(CLUSTER_SELECTOR)
       .evaluateAll((elements) => {
-        for (const element of elements) {
+        for (const [index, element] of elements.entries()) {
           const rect = element.getBoundingClientRect();
           if (rect.width === 0 || rect.height === 0) continue;
           const hit = document.elementFromPoint(
@@ -706,16 +708,19 @@ test.describe("/features live — map render verification", () => {
             rect.top + rect.height / 2,
           );
           if (hit === element || (hit !== null && element.contains(hit))) {
-            return (element as HTMLElement).dataset.clusterKey ?? null;
+            return index;
           }
         }
-        return null;
+        return -1;
       });
-    if (clickableKey !== null) {
-      await page
-        .locator(`${CLUSTER_SELECTOR}[data-cluster-key="${clickableKey}"]`)
-        .click();
+    if (clickableIndex >= 0) {
+      await page.locator(CLUSTER_SELECTOR).nth(clickableIndex).click();
     } else {
+      test.info().annotations.push({
+        type: "warning",
+        description:
+          "모든 클러스터 중심점이 다른 마커에 가려짐 — 포인터 클릭 불가(겹침 UX 문제), Enter로 대신 활성화",
+      });
       const cluster = page.locator(CLUSTER_SELECTOR).first();
       await cluster.focus();
       await cluster.press("Enter");

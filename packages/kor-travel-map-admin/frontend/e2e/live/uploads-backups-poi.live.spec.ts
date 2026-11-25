@@ -1,7 +1,7 @@
 import { test, expect, type Response } from "@playwright/test";
 
 import type { AdminNavHref } from "../../src/lib/admin-nav";
-import { adminNavLink, adminPageHeading, pagerButton } from "./_admin-nav";
+import { adminNavLink, expectAdminPageLoaded, pagerButton } from "./_admin-nav";
 import * as F from "./_fixtures";
 
 /**
@@ -32,7 +32,7 @@ async function expectHeading(
   page: import("@playwright/test").Page,
   href: AdminNavHref,
 ): Promise<void> {
-  await expect(adminPageHeading(page, href)).toBeVisible({ timeout: 15000 });
+  await expectAdminPageLoaded(page, href);
 }
 
 /** offline upload 목록 GET(`/v1/admin/offline-uploads`, BFF proxy 경유) 응답인지. */
@@ -361,6 +361,7 @@ test.describe("live/poi-cache-targets (read-only)", () => {
     // 정확히 같아야 한다(빈 목록이면 비활성).
     const listResponse = page.waitForResponse(
       (response) =>
+        response.status() === 200 &&
         response.request().method() === "GET" &&
         new URL(response.url()).pathname.replace(/^\/api\/proxy/, "") ===
           "/v1/admin/poi-cache-targets",

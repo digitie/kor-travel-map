@@ -216,7 +216,8 @@ test.describe("features-detail LIVE — 헤더 내비 링크(read-only nav)", ()
       .locator('[data-slot="map-shell-actions"]')
       .getByRole("link", { name: "지도", exact: true })
       .click();
-    await expect(page).toHaveURL(/\/features(?:$|[/?])/, TIMEOUT);
+    // 시작 URL(`/features/<id>`)과 구분되게 지도 경로 자체(`/features` + 끝 또는 `?`)만 받는다.
+    await expect(page).toHaveURL(/\/features(?:\?|$)/, TIMEOUT);
   });
 });
 
