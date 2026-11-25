@@ -1,3 +1,27 @@
+## 2026-11-24 — transport export 계약 정렬(#1542 후속): `EXPORT_SOURCE_INCONSISTENT` 상태 job 다음 tick, 주유소 27.5시간
+
+- 근거: transport `docs/map-service-exports-handoff.md`(transport #277 `67eac73`, ADR-013).
+- `EXPORT_SOURCE_INCONSISTENT`: producer 권장("다음 tick, 반복되면 경보")을 Valkey 상태 job에 적용한다 — `upstream_signal`이
+  이 class를 명시적으로 미준비로 본다(건너뜀 + 나이 판정). 처음엔 예외를 `retryable=False`로 바꿔 feature 적재도 다음
+  tick으로 했으나 적대 리뷰(Medium)를 받아 되돌렸다: 주·월 feature 적재에게 다음 tick은 한 주이고, step 재시도의 마지막
+  시도(420초)가 `Retry-After` 300초 뒤에 오는 run 안 기회를 둔다(producer는 대개 풀리지 않는다고 본다) —
+  `EXPORT_SOURCE_NOT_CURRENT`와 같은 규칙(job 경계가 정한다). 남은 항목 리뷰에서 README 표 위치·모르는 값 규칙 범위·run tag
+  문장·이 문구를 고쳤고, `touch_checked` 실패는 run 색을 정하지 않게(best-effort) 했다.
+- `EXPORT_QUERY_TIMEOUT`(11번째 code, T4 전용): Map API T4 프록시가 `upstream_unavailable`로 내리는 것을 시험으로 고정.
+  Dagster fetcher(T1~T3)는 받지 않는다(오면 모르는 code).
+- `Retry-After`는 힌트: 현재 값(SOURCE_NOT_CURRENT 60~3600초·NO_HISTORY 300/3600초)을 예로만 적고 Map은 범위를 가정하지
+  않는다(fetcher docstring·ADR-106).
+- ADR-106: 주유소 export stale 24시간 → 27.5시간(8시간 tick 두 번 연속 실패까지 200), Map 경고 임계 18시간과의 관계(export가
+  200을 내는 18~27.5시간 구간에도 Map은 원천 나이로 빨간 run). 상태 job 실패 metadata 정본 참조를 `upstream_signal`로 정정.
+- transport 세션이 남긴 항목: 바뀌지 않은 집합 건너뛰기(`skipped=unchanged`)에서 `touch_checked`로 확인 시각을 세대 meta에
+  남긴다(metadata `checked`; 판정 나이는 원천 시각 기준이라 그대로). 모르는 값 규칙 통일 — 원천 응답·서비스 세대에서 읽는
+  값은 key를 언제나 싣고 모르면 `""`·`-1`(`transport_problem_code`·`transport_retry_after_seconds`·
+  `transport_retry_after_cap_seconds` 포함), 재지 않은 계측(`transport_http_*`·`transport_server_*`·`upstream_requests_min`)만
+  key를 뺀다. dagster README에 상태 job metadata 키 표. run tag 두 개(`skipped=unchanged` 포함)는 #1542에 이미 들어갔다.
+- 시험: `test_upstream_signal.py`(inconsistent는 retryable과 상관없이 미준비), `test_transport_state_jobs.py`(unchanged
+  `touch_checked`, 모르는 값 ""·-1), API
+  `test_service_transport_router.py`(T4 `EXPORT_QUERY_TIMEOUT`). OpenAPI·migration 없음.
+
 ## 2026-11-24 — 관리자 프런트 ui 0.2.6(VirtualTable 선택 칸 44px) 채택과 dedup 선택 칸 e2e
 
 - #1547(`f5fdeba`): `@kor-travel/ui` 0.2.5→0.2.6·tokens 0.1.6→0.1.7(common #83 `05d7f91`, main docs run 45141922011
@@ -14,6 +38,7 @@
   21px 지점을 실제로 누르면 행 상세 대화상자가 아니라 "1개 선택됨". 1440px은 칸 폭 24px. #1547 때 n150 사본에서만 돌린
   일회성 probe를 바탕으로, 옆 칸 누수 판정과 실제 클릭을 더해 정식 시험으로 만들었다. n150 `~/gate-slot.sh` mocked 실행 결과는 PR 댓글.
 - OpenAPI·마이그레이션 변경 없음. 배포하지 않았다(부모 통합 회전).
+
 
 ## 2026-11-24 — 상태 적재 job: 상류 미준비는 건너뜀·나이로 판정, weather export 읽기 줄 세우기 (감사 §4 #9)
 

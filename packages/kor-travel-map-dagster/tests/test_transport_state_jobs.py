@@ -95,6 +95,11 @@ class _FakeStore:
         self.current = current
         self.swapped: list[tuple[str, int, bool]] = []
         self.retired: list[str] = []
+        self.touched: list[tuple[str, str]] = []
+
+    async def touch_checked(self, dataset: str, generation: str, checked_at: datetime) -> bool:
+        self.touched.append((dataset, generation))
+        return True
 
     async def current_meta(self, dataset: str) -> GenerationMeta:
         if self.current is None:
@@ -425,6 +430,9 @@ async def test_an_unchanged_collection_skips_the_walk_and_the_swap() -> None:
     assert metadata["source_collected_at"] == _COLLECTED.isoformat()
     assert metadata["full_walk_interval_seconds"] == 6 * 3600
     assert 3500 <= metadata["generation_age_seconds"] <= 3700
+    # 바뀌지 않았음을 확인한 시각을 세대 meta에 남긴다(weather 304와 같은 checked_at).
+    assert store.touched == [(TRANSPORT_STATE_SPECS[0].dataset.name, "20261124T000500Z-aaaaaaaa")]
+    assert metadata["checked"] is True
     # 바뀌지 않았어도 서비스 세대 나이는 잰다 — 원천이 오래 그대로면 결국 빨갛게 된다.
     assert metadata["upstream_state"] == "ok"
     assert metadata["stale_alert"] is False
@@ -723,3 +731,33 @@ async def test_the_op_requests_a_step_retry_only_for_a_valkey_outage(
     with pytest.raises(RetryRequested) as excinfo:
         await _op(TRANSPORT_STATE_SPECS[0].job_name)(build_op_context())
     assert excinfo.value.max_retries == 2
+
+
+async def test_unknown_problem_values_are_blank_or_minus_one() -> None:
+    # 모르는 값 규칙: 원천 응답에서 읽는 값은 key를 싣고 모르면 ""·-1(README 표).
+    store = _FakeStore(current=_served_at(loaded_ago=timedelta(minutes=30)))
+    metadata = await _load(store, _raising_problem(httpx.ReadTimeout("느림")))
+    assert metadata["transport_problem_code"] == ""
+    assert metadata["transport_retry_after_seconds"] == -1.0
+    assert metadata["transport_retry_after_cap_seconds"] == -1.0
+    coded = await _load(
+        _FakeStore(current=_served_at(loaded_ago=timedelta(minutes=30))),
+        _raising_problem(TransportSourceNotCurrent("503", code="EXPORT_NO_HISTORY")),
+    )
+    assert coded["transport_problem_code"] == "EXPORT_NO_HISTORY"
+    assert coded["transport_retry_after_seconds"] == -1.0
+    assert coded["transport_retry_after_cap_seconds"] == -1.0
+
+
+async def test_a_failed_recheck_write_does_not_decide_the_run() -> None:
+    from kortravelmap.infra.valkey_state import StateStoreOutOfMemory
+
+    class _NoTouch(_FakeStore):
+        async def touch_checked(self, *_args: Any) -> bool:
+            raise StateStoreOutOfMemory("OOM")
+
+    store = _NoTouch(current=_served_at(loaded_ago=timedelta(hours=1)))
+    metadata = await _load(store, _RecordingCollect(_COLLECTED))
+    assert metadata["skipped"] == "unchanged"
+    assert metadata["checked"] is False
+    assert metadata["stale_alert"] is False

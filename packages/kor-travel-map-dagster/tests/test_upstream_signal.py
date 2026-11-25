@@ -18,6 +18,7 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportExportHidden,
     TransportExportNotCurrent,
     TransportSnapshotExpired,
+    TransportSourceInconsistent,
 )
 from kortravelmap.providers.kor_travel_weather import (
     WeatherExportMissing,
@@ -62,6 +63,10 @@ def _meta(collected: datetime | None, loaded: datetime) -> GenerationMeta:
     [
         (TransportExportNotCurrent("503"), "transport_not_current"),
         (TransportSnapshotExpired("410"), "transport_snapshot_expired"),
+        (
+            TransportSourceInconsistent("503", code="EXPORT_SOURCE_INCONSISTENT"),
+            "transport_source_inconsistent",
+        ),
         (WeatherExportNotReady("503"), "weather_not_ready"),
         (httpx.ConnectTimeout("connect"), "upstream_unreachable:ConnectTimeout"),
         (httpx.RemoteProtocolError("끊김"), "upstream_unreachable:RemoteProtocolError"),

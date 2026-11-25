@@ -44,6 +44,7 @@ import httpx
 from kortravelmap.infra.valkey_state import GenerationMeta, StateStoreError
 from kortravelmap.providers.kor_travel_transport import (
     TransportExportBusy,
+    TransportSourceInconsistent,
     TransportSourceNotCurrent,
 )
 
@@ -120,9 +121,11 @@ def upstream_not_ready_kind(exc: BaseException) -> str | None:
         seen.add(id(current))
         if isinstance(current, StateStoreError):
             return None
-        if isinstance(current, TransportSourceNotCurrent | TransportExportBusy):
+        if isinstance(
+            current, TransportSourceNotCurrent | TransportExportBusy | TransportSourceInconsistent
+        ):
             # transport가 503 code로 "근거 수집이 현재가 아니다"(4종)·"경합"(대기 상한 초과
-            # 포함)이라고 알렸다. step 재시도로는 풀리지 않으므로 ``retryable``과 상관없이 미준비다
+            # 포함)·"근거 불일치"(다음 tick)라고 알렸다. ``retryable``과 상관없이 미준비다
             # (transport #277·ADR-106 개정, 소유자 결정 2026-11-24 "나이 기준 혼합").
             return current.failure_kind
         retryable = getattr(current, "retryable", None)

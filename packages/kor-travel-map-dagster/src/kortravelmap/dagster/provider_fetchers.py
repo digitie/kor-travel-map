@@ -572,9 +572,17 @@ def _transport_unavailable(response: httpx.Response, path: str) -> TransportExpo
     - ``EXPORT_DISABLED``·``EXPORT_TOO_LARGE`` → :class:`TransportExportDisabled`·
       :class:`TransportExportTooLarge`(설정·데이터가 바뀌기 전에는 같다 — 재시도 없는 실패).
     - ``EXPORT_SOURCE_INCONSISTENT`` → :class:`TransportSourceInconsistent`(HTTP 층에서는 다시
-      묻지 않고 step 재시도 — transport의 다음 수집·준비가 고친다).
+      묻지 않는다. 상태 job은 다음 tick(producer 권장), feature 적재는 step 재시도 — job 경계가
+      정한다).
+    - ``EXPORT_QUERY_TIMEOUT``(T4 가격 이력 전용, 11번째 code)은 이 fetcher(T1~T3)에 오지 않는다 —
+      오면 모르는 code와 같다. Map API T4 프록시는 일시 장애(``upstream_unavailable``)로 내린다.
     - code 없음·모르는 code(``SERVICE_UNAVAILABLE`` 등 앞으로 붙을 공통 code 포함) → 종전대로
       :class:`TransportExportNotCurrent`(retryable, step 재시도).
+
+    ``Retry-After``는 transport가 계산하는 힌트다(예: ``EXPORT_SOURCE_NOT_CURRENT``는 수집 상태로
+    계산한 60~3600초, ``EXPORT_NO_HISTORY``는 5분 주기 집합 300초·그 밖 3600초 — transport가 바꿀 수
+    있다). Map은 그 범위를 가정하지 않는다: 대기에 쓰는 것은 경합 code뿐이고 나머지는 metadata에
+    싣기만 한다.
     """
     code, detail = _transport_problem(response)
     retry_after = parse_retry_after(response.headers.get("retry-after"))
