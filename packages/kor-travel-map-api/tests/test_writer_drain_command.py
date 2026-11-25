@@ -450,3 +450,52 @@ async def test_stop_sensor_requires_the_returned_state_to_be_stopped(
             start=False,
         )
     assert str(excinfo.value) == "DAGSTER_MUTATION_FAILED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"__typename": "SensorState", "status": "RUNNING"},
+        {"__typename": "SensorNotFoundError", "message": "missing"},
+        {"__typename": "Sensor", "sensorState": {"status": "STOPPED"}},
+    ],
+)
+async def test_start_sensor_rejects_anything_but_a_running_sensor(
+    monkeypatch: pytest.MonkeyPatch, response: dict[str, object]
+) -> None:
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {"data": {"startSensor": response}}
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._mutate_instigation(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+            instigation=_instigation("sensor"),
+            start=True,
+        )
+    assert str(excinfo.value) == "DAGSTER_MUTATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_stop_sensor_without_instigation_state_is_a_protocol_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 스키마상 instigationState는 nullable이다(1.13 구현은 늘 채우지만).
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {
+            "data": {
+                "stopSensor": {"__typename": "StopSensorMutationResult", "instigationState": None}
+            }
+        }
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._mutate_instigation(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+            instigation=_instigation("sensor"),
+            start=False,
+        )
+    assert str(excinfo.value) == "DAGSTER_PROTOCOL"
