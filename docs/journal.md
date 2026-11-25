@@ -18,8 +18,13 @@
 - `features-map`: maplibre-gl 6.17.0 npm tarball은 `dist/maplibre-gl-shared.mjs`를 원래 0바이트로 싣고 worker는 단일
   번들이다(tarball 실측). worker는 비어 있지 않아야 하고, shared는 worker가 참조할 때만 비어 있지 않아야 한다. 클러스터
   클릭은 겹친 클러스터가 포인터를 가로채 타임아웃 — 중심점이 가려지지 않은 클러스터를 고르고, 모두 가려지면 Enter로 활성화.
-- 시험: live 스펙만 바뀌었다(앱 코드·OpenAPI·migration 없음). Map live e2e는 CI가 없어 n150 `~/gate-slot.sh` 읽기 전용
-  재실행 결과를 PR 댓글로 남긴다.
+- 적대 리뷰 2인 반영: 화면 h1은 레이아웃이 pathname으로 그려 오류 경계에서도 남으므로 `expectAdminPageLoaded`가 페이지
+  자신의 `admin-shell-content`까지 본다. 정렬 옵션 집합은 OpenAPI `AdminFeatureSort` 전체와 같아야 한다. feature 표본은
+  kind별 순차 조회·빈 kind 자리는 다른 kind로 채운다. `isVisible` 분기 race는 `.or()` 대기로, 없는 dataset id는 빈 결과.
+- 시험: live 스펙만 바뀌었다(앱 코드·OpenAPI·migration 없음). n150 `~/gate-slot.sh` 읽기 전용 재실행(PR 댓글): 최종
+  커밋에서 바뀐 6개 스펙 전부 통과(5·13·114·118·171·259), 첫 커밋 run에서 나머지 7개 스펙도 통과. 첫 run의
+  `sort=issue_count` "Failed to fetch"는 n150 PSI io 60~75% 중 admin 목록 정렬 18~39초였던 부하성 지연이다(부하 낮은
+  run 2는 통과) — 목록 캡처가 이제 같은 요청의 실패를 메시지에 싣는다.
 
 ## 2026-11-25 — writer-drain sensor GraphQL을 Dagster 1.13 스키마에 맞춤
 
