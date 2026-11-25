@@ -1,3 +1,20 @@
+## 2026-11-25 — writer-drain sensor GraphQL을 Dagster 1.13 스키마에 맞춤
+
+- 근거: n150 webserver(Dagster 1.13.24) introspection(읽기 전용) — `stopSensor(id, jobOriginId, jobSelectorId)` →
+  `StopSensorMutationResultOrError`(성공 `StopSensorMutationResult.instigationState`), `startSensor` → `SensorOrError`
+  (성공 `Sensor.sensorState`). `SensorState` 타입·`sensorOriginId`/`sensorSelectorId` 인자는 없다. 그래서
+  `writer_drain_service.py`의 stop/start sensor 문서는 webserver의 검증 단계에서 거부돼(errors → `DAGSTER_PROTOCOL`)
+  drain이 sensor를 멈추지도 되살리지도 못했다(2026-11-24 freeze 작업 때 기록만 해 둔 것). schedule·run 문서는 맞았다
+  (`stopRunningSchedule(id, scheduleOriginId, scheduleSelectorId)`·`ScheduleStateResult`; InstigationState.id는
+  `<origin>::<selector>` CompoundID — n150 61개 instigator로 확인).
+- 고침: sensor 두 문서와 성공 판정(타입·상태 key)을 (kind, start)별 표 하나로. #1541 `dagster-freeze.py`가 n150에서 성공한
+  모양과 같다.
+- 시험: `test_writer_drain_graphql_schema.py` — writer-drain의 GraphQL 문서 8개 전부를 설치된 `dagster-graphql`(CI는
+  `constraints-dagster.txt`로 n150과 같은 1.13.24) 스키마로 `graphql.validate`, 성공 `__typename`이 결과 union 멤버이고
+  상태 key가 `InstigationState`인지. 고치기 전 코드에서 sensor 두 문서가 실패함을 확인. `test_writer_drain_command.py`에
+  네 mutation의 1.13 응답 모양·변수, 옛 `SensorState`·오류 응답 거부, STOPPED가 아니면 실패.
+- 다음: API 이미지 회전에 싣는다(writer-drain은 Manager가 부르는 one-shot API image command). 운영 mutation은 실행하지 않았다.
+
 ## 2026-11-24 — transport export 계약 정렬(#1542 후속): `EXPORT_SOURCE_INCONSISTENT` 상태 job 다음 tick, 주유소 27.5시간
 
 - 근거: transport `docs/map-service-exports-handoff.md`(transport #277 `67eac73`, ADR-013).

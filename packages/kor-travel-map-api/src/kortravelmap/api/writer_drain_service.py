@@ -158,11 +158,17 @@ mutation KorTravelMapWriterDrainStopSchedule(
 }
 """
 
+# Dagster 1.13 스키마(n150 webserver introspection, 2026-11-25): ``startSensor``는
+# ``SensorOrError``(성공 ``Sensor``)를, ``stopSensor(id, jobOriginId, jobSelectorId)``는
+# ``StopSensorMutationResultOrError``(성공 ``StopSensorMutationResult``)를 낸다.
+# ``SensorState`` 타입·``sensorOriginId`` 인자는 없다 — 예전 문서는 검증 단계에서
+# 거부돼 sensor를 하나도 멈추지 못했다. 문서는 ``test_writer_drain_graphql_schema``가
+# 설치된 dagster-graphql 스키마로 검증한다.
 _START_SENSOR_MUTATION: Final = """
 mutation KorTravelMapWriterDrainStartSensor($selector: SensorSelector!) {
   startSensor(sensorSelector: $selector) {
     __typename
-    ... on SensorState { status }
+    ... on Sensor { sensorState { status } }
     ... on SensorNotFoundError { message }
     ... on UnauthorizedError { message }
     ... on PythonError { message }
@@ -174,15 +180,39 @@ _STOP_SENSOR_MUTATION: Final = """
 mutation KorTravelMapWriterDrainStopSensor(
   $id: String!, $originId: String!, $selectorId: String!
 ) {
-  stopSensor(id: $id, sensorOriginId: $originId, sensorSelectorId: $selectorId) {
+  stopSensor(id: $id, jobOriginId: $originId, jobSelectorId: $selectorId) {
     __typename
-    ... on SensorState { status }
-    ... on SensorNotFoundError { message }
+    ... on StopSensorMutationResult { instigationState { status } }
     ... on UnauthorizedError { message }
     ... on PythonError { message }
   }
 }
 """
+
+# (kind, start) → (mutation 문서, 응답 field, 성공 __typename, 상태 객체 key).
+_INSTIGATION_MUTATIONS: Final[
+    dict[tuple[Literal["schedule", "sensor"], bool], tuple[str, str, str, str]]
+] = {
+    ("schedule", True): (
+        _START_SCHEDULE_MUTATION,
+        "startSchedule",
+        "ScheduleStateResult",
+        "scheduleState",
+    ),
+    ("schedule", False): (
+        _STOP_SCHEDULE_MUTATION,
+        "stopRunningSchedule",
+        "ScheduleStateResult",
+        "scheduleState",
+    ),
+    ("sensor", True): (_START_SENSOR_MUTATION, "startSensor", "Sensor", "sensorState"),
+    ("sensor", False): (
+        _STOP_SENSOR_MUTATION,
+        "stopSensor",
+        "StopSensorMutationResult",
+        "instigationState",
+    ),
+}
 
 
 class WriterDrainCommandError(RuntimeError):
@@ -489,34 +519,16 @@ async def _mutate_instigation(
     instigation: WriterDrainInstigation,
     start: bool,
 ) -> None:
-    if instigation.kind == "schedule":
-        query = _START_SCHEDULE_MUTATION if start else _STOP_SCHEDULE_MUTATION
-        key = "startSchedule" if start else "stopRunningSchedule"
-        variables: dict[str, object] = (
-            {"selector": _selector(instigation)}
-            if start
-            else {
-                "id": instigation.state_id,
-                "originId": instigation.origin_id,
-                "selectorId": instigation.selector_id,
-            }
-        )
-        success_types = {"ScheduleStateResult"}
-        state_key = "scheduleState"
-    else:
-        query = _START_SENSOR_MUTATION if start else _STOP_SENSOR_MUTATION
-        key = "startSensor" if start else "stopSensor"
-        variables = (
-            {"selector": _selector(instigation)}
-            if start
-            else {
-                "id": instigation.state_id,
-                "originId": instigation.origin_id,
-                "selectorId": instigation.selector_id,
-            }
-        )
-        success_types = {"SensorState"}
-        state_key = "sensorState"
+    query, key, success_type, state_key = _INSTIGATION_MUTATIONS[(instigation.kind, start)]
+    variables: dict[str, object] = (
+        {"selector": _selector(instigation)}
+        if start
+        else {
+            "id": instigation.state_id,
+            "originId": instigation.origin_id,
+            "selectorId": instigation.selector_id,
+        }
+    )
     data = await _post(
         http_client=http_client,
         dagster=dagster,
@@ -524,9 +536,9 @@ async def _mutate_instigation(
         variables=variables,
     )
     result = data.get(key)
-    if not isinstance(result, dict) or result.get("__typename") not in success_types:
+    if not isinstance(result, dict) or result.get("__typename") != success_type:
         raise WriterDrainCommandError("DAGSTER_MUTATION_FAILED")
-    state = result.get(state_key) if state_key in result else result
+    state = result.get(state_key)
     if not isinstance(state, dict):
         raise WriterDrainCommandError("DAGSTER_PROTOCOL")
     expected = "RUNNING" if start else "STOPPED"
