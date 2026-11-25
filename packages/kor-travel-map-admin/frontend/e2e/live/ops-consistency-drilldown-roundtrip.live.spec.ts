@@ -14,7 +14,7 @@ import type { components } from "../../src/api/types";
 //   (2) 집계 카드(Open issues / Latest severity / Reports count)가
 //       상세 endpoint(/consistency/issues, /consistency/reports, /metrics)
 //       응답과 정합(집계→상세 드릴다운).
-// 추가로 router가 지원하지만 UI에 노출되지 않는 provider 드릴다운 파라미터를
+// 추가로 router가 지원하지만 UI에 노출되지 않는 provider_dataset_id 드릴다운 파라미터를
 // API 레벨에서 검증한다(UI 반영 주장 없음 — 컨트롤이 없으므로).
 //
 // 셀렉터/파라미터는 모두 소스에서 직접 확인했다(요약의 인용 라인 참조).
@@ -376,14 +376,18 @@ test.describe("/ops/consistency 읽기 드릴다운 라운드트립 (live)", () 
     }
   });
 
-  test("provider 드릴다운 파라미터가 issues endpoint에서 동작한다(API 레벨 — UI 미노출 필터)", async ({
+  test("provider_dataset_id 드릴다운 파라미터가 issues endpoint에서 동작한다(API 레벨 — UI 미노출 필터)", async ({
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
     await gotoConsistency(page);
 
-    // open 집합에서 provider가 채워진 행을 찾는다(status=open 컨텍스트로 고정 —
-    // router는 status 파라미터 부재 시 'open'을 default로 적용한다).
+    // #966(T-VN-33) 이후 router(ops.py list_integrity_issues)의 provider 축 필터는
+    // `provider_dataset_id`(int)뿐이다. 옛 `provider=` 파라미터는 더 받지 않아
+    // FastAPI가 조용히 무시한다 — 그래서 옛 단언은 필터 없는 전체 open 목록을
+    // 보고 다른 provider 행에서 실패했다(2026-11-25 운영 e2e).
+    // open 집합에서 provider_dataset_id가 채워진 행을 찾는다(status=open 컨텍스트로
+    // 고정 — router는 status 파라미터 부재 시 'open'을 default로 적용한다).
     const openRead = await browserFetch<OpsIntegrityIssuesListResponse>(
       page,
       `${ISSUES_PATH}?status=open&page_size=${ISSUES_PAGE_SIZE}`,
@@ -395,35 +399,42 @@ test.describe("/ops/consistency 읽기 드릴다운 라운드트립 (live)", () 
       return;
     }
 
-    const withProvider = openBody.data.items.find(
-      (item) => typeof item.provider === "string" && item.provider.length > 0,
+    const withDataset = openBody.data.items.find(
+      (item) =>
+        typeof item.provider_dataset_id === "number" &&
+        item.provider_dataset_id > 0,
     );
     test.skip(
-      withProvider === undefined,
-      "open issues에 provider가 채워진 행이 없어 provider 드릴다운을 검증할 수 없음(prod 데이터 의존)",
+      withDataset === undefined,
+      "open issues에 provider_dataset_id가 채워진 행이 없어 dataset 드릴다운을 검증할 수 없음(prod 데이터 의존)",
     );
-    if (!withProvider || !withProvider.provider) {
+    if (!withDataset || typeof withDataset.provider_dataset_id !== "number") {
       return;
     }
-    const provider = withProvider.provider;
+    const datasetId = withDataset.provider_dataset_id;
 
-    // 같은 status=open 컨텍스트에서 provider로 드릴다운 → 해당 provider 행만,
-    // 그리고 시드 issue가 반드시 포함되므로 최소 1건.
-    const providerRead = await browserFetch<OpsIntegrityIssuesListResponse>(
+    // 같은 status=open 컨텍스트에서 provider_dataset_id로 드릴다운 → 해당 dataset
+    // 행만, 그리고 시드 issue가 반드시 포함되므로 최소 1건.
+    const datasetRead = await browserFetch<OpsIntegrityIssuesListResponse>(
       page,
-      `${ISSUES_PATH}?status=open&provider=${encodeURIComponent(
-        provider,
-      )}&page_size=${ISSUES_PAGE_SIZE}`,
+      `${ISSUES_PATH}?status=open&provider_dataset_id=${datasetId}&page_size=${ISSUES_PAGE_SIZE}`,
     );
-    expect(providerRead.status).toBe(200);
-    const providerBody = providerRead.body;
-    expect(providerBody).not.toBeNull();
-    if (providerBody) {
-      expect(providerBody.data.items.length).toBeGreaterThan(0);
-      for (const item of providerBody.data.items) {
-        expect(item.provider).toBe(provider);
+    expect(datasetRead.status).toBe(200);
+    const datasetBody = datasetRead.body;
+    expect(datasetBody).not.toBeNull();
+    if (datasetBody) {
+      expect(datasetBody.data.items.length).toBeGreaterThan(0);
+      for (const item of datasetBody.data.items) {
+        expect(item.provider_dataset_id).toBe(datasetId);
         expect(item.status).toBe("open");
       }
     }
+
+    // 범위 밖 값은 계약상 422(Query gt=0) — 필터가 조용히 무시되는 회귀를 잡는다.
+    const invalidRead = await browserFetch<OpsIntegrityIssuesListResponse>(
+      page,
+      `${ISSUES_PATH}?status=open&provider_dataset_id=0&page_size=1`,
+    );
+    expect(invalidRead.status).toBe(422);
   });
 });

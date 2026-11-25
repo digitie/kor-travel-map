@@ -1,3 +1,26 @@
+## 2026-11-25 — Map 읽기 전용 live 스펙 drift 정비(운영 최종 e2e 후속)
+
+- 근거: 2026-11-25 n150 운영 최종 e2e(읽기 전용 live 스펙, chain16 D1 방식 — root env에서 D1 6개 키만, 쓰기 스펙 제외,
+  workers=1). 코드 회귀는 없고 실패는 전부 테스트 drift였다.
+- `features-detail` 31건 404: `_fixtures.ts` `FEATURE_IDS`가 재생성 전 스냅샷. 새 `e2e/live/_live-feature-sample.ts`가 실행
+  시점에 `GET /v1/admin/features`(kind별 active·published·valid, 이름순 25건, round-robin)로 표본을 뽑고, 스펙은 slot
+  번호(`sample #07`)로 돈다(실제 id는 annotation). 재생성과 무관하다. 상세 상단 바의 옛 `Admin` 링크 → `Feature 목록`
+  (상단 바 동작 영역으로 scope — 사이드바에도 같은 이름이 있다).
+- 화면 이름 drift(`uploads-backups-poi` 34건·`reviews` 29건): 새 `e2e/live/_admin-nav.ts`가 h1·사이드바 링크를 nav
+  정본(`src/lib/admin-nav.ts`)에서 읽는다(`Offline uploads`→`오프라인 업로드`, `POI cache targets`→`POI 캐시 대상`,
+  nav `Issues`→`이슈`). issues 필터는 `이슈 검색`·`이슈 심각도 필터`. 리뷰 큐 pager는 keyset CursorPager(첫 페이지·
+  다음 페이지만, `마지막 페이지` 없음)라 pager nav 두 벌·버튼 접미 일치로 보고, `다음` 활성은 첫 목록 응답의
+  `next_cursor`와 같은지로 본다(데이터 무관). 보강 상세는 `detail` 버튼이 아니라 행 클릭으로 열린다. offline-uploads
+  필터는 `provider dataset ID filter`(정수) 한 칸 — 입력이 목록 GET `provider_dataset_id`로 나가는지 본다.
+- `features-input-roundtrip`: 정렬 `status` 옵션이 사라져 60초 타임아웃 — 정렬 컬럼을 select의 option에서 런타임에 읽는다.
+- `ops-consistency-drilldown-roundtrip`: `provider=`는 #966 이후 router가 받지 않아 조용히 무시됐다 —
+  `provider_dataset_id` 드릴다운으로 바꾸고 `provider_dataset_id=0`이 422인지도 본다.
+- `features-map`: maplibre-gl 6.17.0 npm tarball은 `dist/maplibre-gl-shared.mjs`를 원래 0바이트로 싣고 worker는 단일
+  번들이다(tarball 실측). worker는 비어 있지 않아야 하고, shared는 worker가 참조할 때만 비어 있지 않아야 한다. 클러스터
+  클릭은 겹친 클러스터가 포인터를 가로채 타임아웃 — 중심점이 가려지지 않은 클러스터를 고르고, 모두 가려지면 Enter로 활성화.
+- 시험: live 스펙만 바뀌었다(앱 코드·OpenAPI·migration 없음). Map live e2e는 CI가 없어 n150 `~/gate-slot.sh` 읽기 전용
+  재실행 결과를 PR 댓글로 남긴다.
+
 ## 2026-11-25 — writer-drain sensor GraphQL을 Dagster 1.13 스키마에 맞춤
 
 - 근거: n150 webserver(Dagster 1.13.24) introspection(읽기 전용) — `stopSensor(id, jobOriginId, jobSelectorId)` →
@@ -25,6 +48,7 @@
   그 밖에 검증 실패(HTTP 400)가 `DAGSTER_UNAVAILABLE`로 분류되는 것도 후속 후보.
 - 다음: API 이미지 회전에 싣는다(writer-drain은 one-shot API image command — Manager 코드에는 아직 호출부가 없다). 운영
   mutation은 실행하지 않았다.
+||||||| parent of 75dcae75b (test(admin-e2e): 읽기 전용 live 스펙 drift 정비 — 런타임 feature 표본·nav 정본 화면 이름)
 
 ## 2026-11-24 — transport export 계약 정렬(#1542 후속): `EXPORT_SOURCE_INCONSISTENT` 상태 job 다음 tick, 주유소 27.5시간
 

@@ -138,25 +138,45 @@ test.describe("/features live — page load + core controls", () => {
     await page.goto(ROUTE);
     await expectFeaturesPageReady(page);
 
-    for (const path of [
-      "/maplibre/maplibre-gl-worker.mjs",
-      "/maplibre/maplibre-gl-shared.mjs",
-    ]) {
-      const asset = await page.evaluate(async (assetPath) => {
-        const response = await fetch(assetPath, { cache: "no-store" });
-        const body = await response.arrayBuffer();
+    const WORKER = "/maplibre/maplibre-gl-worker.mjs";
+    const SHARED = "/maplibre/maplibre-gl-shared.mjs";
+    const fetchAsset = (assetPath: string) =>
+      page.evaluate(async (path) => {
+        const response = await fetch(path, { cache: "no-store" });
+        const text = await response.text();
         return {
           status: response.status,
           contentType: response.headers.get("content-type") ?? "",
-          byteLength: body.byteLength,
+          byteLength: new TextEncoder().encode(text).byteLength,
+          importsShared: text.includes("maplibre-gl-shared"),
         };
-      }, path);
+      }, assetPath);
 
+    const worker = await fetchAsset(WORKER);
+    const shared = await fetchAsset(SHARED);
+
+    // 두 파일 모두 같은 디렉터리에서 JS로 서빙돼야 한다(copy-maplibre-worker.mjs 계약).
+    for (const [path, asset] of [
+      [WORKER, worker],
+      [SHARED, shared],
+    ] as const) {
       expect(asset.status, `${path} HTTP status`).toBe(200);
       expect(asset.contentType, `${path} content type`).toMatch(
         /javascript|ecmascript/i,
       );
-      expect(asset.byteLength, `${path} must not be empty`).toBeGreaterThan(0);
+    }
+    // worker는 항상 실체가 있어야 한다 — 비면 GeoJSON source가 tile을 못 만든다.
+    expect(worker.byteLength, `${WORKER} must not be empty`).toBeGreaterThan(0);
+    // shared는 버전에 따라 다르다: maplibre-gl 6.9는 worker가 shared를 상대 import
+    // 했지만, 6.17.0은 worker를 단일 번들로 싣고 `dist/maplibre-gl-shared.mjs`를
+    // **원래 0바이트**로 배포한다(npm tarball 실측 2026-11-25). 그래서 "비어 있지
+    // 않음"은 worker가 shared를 실제로 참조할 때만 요구한다 — 참조하는데 비었으면
+    // 2026-09-18 n150 증상(zoom 14+ 마커 0개)이 재발하는 것이므로 그때는 실패한다.
+    if (worker.importsShared) {
+      expect(
+        shared.byteLength,
+        `${WORKER} imports ${SHARED}, so it must not be empty`,
+      ).toBeGreaterThan(0);
     }
   });
 
@@ -663,13 +683,43 @@ test.describe("/features live — map render verification", () => {
 
     // 클러스터가 나타날 때까지 대기(점만 보이는 고배율 초기 뷰면 클러스터가 없을 수 있어
     // 명시적으로 클러스터 마커를 기다린다).
-    const cluster = page.locator(CLUSTER_SELECTOR).first();
-    await expect(cluster).toBeVisible({ timeout: 30000 });
+    await expect(page.locator(CLUSTER_SELECTOR).first()).toBeVisible({
+      timeout: 30000,
+    });
 
     const zoomBefore = await readZoom(page);
     expect(zoomBefore, "초기 zoom(z 텍스트)을 읽을 수 있어야 함").not.toBeNull();
 
-    await cluster.click();
+    // 저zoom 행정구역 클러스터는 서로 겹칠 수 있다(2026-11-25 운영: 서울 138k 마커를
+    // 인접 41k 마커가 덮어 `.first().click()`이 "intercepts pointer events"로 30초
+    // 타임아웃). 그래서 DOM 순서상 첫 마커가 아니라 **중심점이 가려지지 않은** 클러스터를
+    // 골라 실제 포인터로 클릭한다. 모두 가려졌으면 같은 핸들러(bindSelection)를 타는
+    // 키보드 활성화(Enter)로 대신한다 — role=button 마커의 정식 활성화 경로다.
+    const clickableKey = await page
+      .locator(CLUSTER_SELECTOR)
+      .evaluateAll((elements) => {
+        for (const element of elements) {
+          const rect = element.getBoundingClientRect();
+          if (rect.width === 0 || rect.height === 0) continue;
+          const hit = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
+          if (hit === element || (hit !== null && element.contains(hit))) {
+            return (element as HTMLElement).dataset.clusterKey ?? null;
+          }
+        }
+        return null;
+      });
+    if (clickableKey !== null) {
+      await page
+        .locator(`${CLUSTER_SELECTOR}[data-cluster-key="${clickableKey}"]`)
+        .click();
+    } else {
+      const cluster = page.locator(CLUSTER_SELECTOR).first();
+      await cluster.focus();
+      await cluster.press("Enter");
+    }
 
     // getClusterExpansionZoom → easeTo → onMoveEnd → Zustand viewport 갱신 → DOM z 상승.
     // easeTo 애니메이션 + moveend 디바운스 여유로 넉넉한 timeout.

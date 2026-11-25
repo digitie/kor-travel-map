@@ -1,6 +1,9 @@
 import { test, expect } from "@playwright/test";
 
-import * as F from "./_fixtures";
+import {
+  LIVE_FEATURE_SAMPLE_MAX,
+  liveFeatureIdForSlot,
+} from "./_live-feature-sample";
 
 /**
  * LIVE (비-mock) e2e — `/features/[featureId]` 상세 (area key=features-detail).
@@ -23,6 +26,11 @@ import * as F from "./_fixtures";
  * 실데이터라 feature 이름·행 텍스트·카운트는 변동이 크므로 단언하지 않는다.
  * 안정 landmark(testid/상수 헤딩/섹션 타이틀/URL)만 robust하게 본다.
  *
+ * 대상 id: 고정 fixture(`_fixtures.ts` FEATURE_IDS)는 prod 재생성마다 전멸해 31건이
+ * 404로 실패했다(2026-11-25 운영 e2e). 이제 실행 시점에 admin 목록 API에서 kind별
+ * 공개·유효·활성 feature를 표집해(`_live-feature-sample.ts`) slot 번호로 쓴다 — 테스트
+ * 제목은 slot(`sample #07`)이고 실제 id는 annotation(`feature_id`)으로 남는다.
+ *
  * NOTE: Playwright는 Windows 호스트에서만 실행된다(라이브 검증은 Windows 런 필요).
  */
 
@@ -30,16 +38,18 @@ import * as F from "./_fixtures";
 // (대상 몇 건 15s 초과) 여유 타임아웃을 준다.
 const TIMEOUT = { timeout: 30000 } as const;
 
-// 상한 — fixture가 비거나 과다해도 안전하게.
-const FEATURE_IDS = F.FEATURE_IDS.slice(0, 150);
-const DEEPLINK_IDS = F.FEATURE_IDS.slice(0, 24);
-const VIEWPORT_IDS = F.FEATURE_IDS.slice(0, 6);
+// slot 수 — 표본 상한(kind 수 × kind당 25) 안에서. 표본이 slot보다 적으면 그 slot은 skip.
+const DETAIL_SLOTS = Math.min(100, LIVE_FEATURE_SAMPLE_MAX);
+const DEEPLINK_SLOTS = Math.min(24, DETAIL_SLOTS);
+const VIEWPORT_SLOTS = Math.min(6, DETAIL_SLOTS);
 
-// fixture가 비어도 최소 시나리오가 돌도록 하는 폴백 id(존재하지 않아도
-// 상수 헤딩 "Feature 상세"은 항상 렌더된다).
-const FALLBACK_ID = "f_1156010100_p_e2eabc1234567890";
+function slots(count: number): number[] {
+  return Array.from({ length: count }, (_, index) => index);
+}
 
-const SAMPLE_ID = FEATURE_IDS[0] ?? FALLBACK_ID;
+function slotName(slot: number): string {
+  return `sample #${String(slot).padStart(2, "0")}`;
+}
 
 // AdminShell이 항상 렌더하는 상수 헤딩(detail GET 성공/실패와 무관).
 const SHELL_HEADING = "Feature 상세";
@@ -60,9 +70,10 @@ const VIEWPORTS: [string, number, number][] = [
 ];
 
 test.describe("features-detail LIVE — id별 상세 로드", () => {
-  // FEATURE_IDS(150) 각각 1개씩: 상세 페이지 로드 + 핵심 landmark visible.
-  for (const featureId of FEATURE_IDS) {
-    test(`detail loads — ${featureId}`, async ({ page }) => {
+  // 운영 표본 slot 각각 1개씩: 상세 페이지 로드 + 핵심 landmark visible.
+  for (const slot of slots(DETAIL_SLOTS)) {
+    test(`detail loads — ${slotName(slot)}`, async ({ page }) => {
+      const featureId = await liveFeatureIdForSlot(page, slot);
       await page.goto(`/features/${featureId}`);
 
       // 상수 헤딩은 detail GET 성공/실패와 무관하게 항상 보인다.
@@ -84,8 +95,9 @@ test.describe("features-detail LIVE — id별 상세 로드", () => {
 
 test.describe("features-detail LIVE — 섹션/헤딩 깊이(샘플 id)", () => {
   // 첫 24개 id에서 핵심 섹션 타이틀이 detail-view scope 안에 모두 보이는지.
-  for (const featureId of DEEPLINK_IDS) {
-    test(`sections visible — ${featureId}`, async ({ page }) => {
+  for (const slot of slots(DEEPLINK_SLOTS)) {
+    test(`sections visible — ${slotName(slot)}`, async ({ page }) => {
+      const featureId = await liveFeatureIdForSlot(page, slot);
       await page.goto(`/features/${featureId}`);
 
       const detailView = page.getByTestId("feature-detail-view");
@@ -100,8 +112,9 @@ test.describe("features-detail LIVE — 섹션/헤딩 깊이(샘플 id)", () => 
   }
 
   // 헤더 dl 라벨(coord/sigungu/updated/provider)이 보이는지.
-  for (const featureId of DEEPLINK_IDS) {
-    test(`header dl labels — ${featureId}`, async ({ page }) => {
+  for (const slot of slots(DEEPLINK_SLOTS)) {
+    test(`header dl labels — ${slotName(slot)}`, async ({ page }) => {
+      const featureId = await liveFeatureIdForSlot(page, slot);
       await page.goto(`/features/${featureId}`);
 
       const detailView = page.getByTestId("feature-detail-view");
@@ -116,8 +129,9 @@ test.describe("features-detail LIVE — 섹션/헤딩 깊이(샘플 id)", () => 
   }
 
   // Raw <details> disclosure summary(detail/raw_refs/urls/address) 가시성.
-  for (const featureId of DEEPLINK_IDS) {
-    test(`raw disclosures — ${featureId}`, async ({ page }) => {
+  for (const slot of slots(DEEPLINK_SLOTS)) {
+    test(`raw disclosures — ${slotName(slot)}`, async ({ page }) => {
+      const featureId = await liveFeatureIdForSlot(page, slot);
       await page.goto(`/features/${featureId}`);
 
       const detailView = page.getByTestId("feature-detail-view");
@@ -132,8 +146,9 @@ test.describe("features-detail LIVE — 섹션/헤딩 깊이(샘플 id)", () => 
   }
 
   // 우측 aside 패널들(Nearby/Raw 섹션 타이틀) 가시성.
-  for (const featureId of DEEPLINK_IDS) {
-    test(`aside panels — ${featureId}`, async ({ page }) => {
+  for (const slot of slots(DEEPLINK_SLOTS)) {
+    test(`aside panels — ${slotName(slot)}`, async ({ page }) => {
+      const featureId = await liveFeatureIdForSlot(page, slot);
       await page.goto(`/features/${featureId}`);
 
       await expect(page.getByTestId("feature-detail-view")).toBeVisible(
@@ -151,8 +166,9 @@ test.describe("features-detail LIVE — 섹션/헤딩 깊이(샘플 id)", () => 
 
 test.describe("features-detail LIVE — Raw disclosure 토글(read-only)", () => {
   // 닫힌 raw_refs/urls/address summary 클릭(GET만 유발하는 네이티브 <details> 토글).
-  for (const featureId of DEEPLINK_IDS.slice(0, 12)) {
-    test(`raw_refs toggle — ${featureId}`, async ({ page }) => {
+  for (const slot of slots(Math.min(12, DEEPLINK_SLOTS))) {
+    test(`raw_refs toggle — ${slotName(slot)}`, async ({ page }) => {
+      const featureId = await liveFeatureIdForSlot(page, slot);
       await page.goto(`/features/${featureId}`);
 
       const detailView = page.getByTestId("feature-detail-view");
@@ -172,12 +188,18 @@ test.describe("features-detail LIVE — Raw disclosure 토글(read-only)", () =>
 });
 
 test.describe("features-detail LIVE — 헤더 내비 링크(read-only nav)", () => {
-  // 상세 → 'Admin' 링크 클릭 시 /admin/features로 이동(GET 내비).
-  test(`nav to admin features — ${SAMPLE_ID}`, async ({ page }) => {
-    await page.goto(`/features/${SAMPLE_ID}`);
+  // 상세 → 상단 바 동작 'Feature 목록' 링크 클릭 시 /admin/features로 이동(GET 내비).
+  // (옛 'Admin' 링크는 상단 바 동작 재편으로 'Feature 목록'이 됐다. 사이드바에도 같은
+  // 이름의 nav 링크가 있으므로 상단 바 동작 영역으로 scope한다.)
+  test(`nav to admin features — ${slotName(0)}`, async ({ page }) => {
+    const sampleId = await liveFeatureIdForSlot(page, 0);
+    await page.goto(`/features/${sampleId}`);
     await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
 
-    await page.getByRole("link", { name: "Admin", exact: true }).click();
+    await page
+      .locator('[data-slot="map-shell-actions"]')
+      .getByRole("link", { name: "Feature 목록", exact: true })
+      .click();
     await expect(page).toHaveURL(/\/admin\/features(?:$|[/?])/, TIMEOUT);
   });
 
@@ -185,19 +207,24 @@ test.describe("features-detail LIVE — 헤더 내비 링크(read-only nav)", ()
   // 이동 대상 라우트 자체가 없으므로 해당 내비 테스트도 삭제한다.
 
   // 상세 → '지도' 링크 클릭 시 /features 지도로 이동(GET 내비).
-  test(`nav to features map — ${SAMPLE_ID}`, async ({ page }) => {
-    await page.goto(`/features/${SAMPLE_ID}`);
+  test(`nav to features map — ${slotName(0)}`, async ({ page }) => {
+    const sampleId = await liveFeatureIdForSlot(page, 0);
+    await page.goto(`/features/${sampleId}`);
     await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
 
-    await page.getByRole("link", { name: "지도", exact: true }).click();
+    await page
+      .locator('[data-slot="map-shell-actions"]')
+      .getByRole("link", { name: "지도", exact: true })
+      .click();
     await expect(page).toHaveURL(/\/features(?:$|[/?])/, TIMEOUT);
   });
 });
 
 test.describe("features-detail LIVE — 딥링크 URL", () => {
   // 첫 24개 id에서 URL이 정확히 그 id로 끝나는지(딥링크 검증).
-  for (const featureId of DEEPLINK_IDS) {
-    test(`deeplink url — ${featureId}`, async ({ page }) => {
+  for (const slot of slots(DEEPLINK_SLOTS)) {
+    test(`deeplink url — ${slotName(slot)}`, async ({ page }) => {
+      const featureId = await liveFeatureIdForSlot(page, slot);
       await page.goto(`/features/${featureId}`);
 
       await expect(page).toHaveURL(
@@ -213,9 +240,10 @@ test.describe("features-detail LIVE — 딥링크 URL", () => {
 
 test.describe("features-detail LIVE — 반응형 viewport", () => {
   // viewport(1280/768/390) × 샘플 id 6개 교차 — 각 폭에서 상세 로드.
-  for (const featureId of VIEWPORT_IDS) {
+  for (const slot of slots(VIEWPORT_SLOTS)) {
     for (const [vpName, width, height] of VIEWPORTS) {
-      test(`viewport ${vpName} — ${featureId}`, async ({ page }) => {
+      test(`viewport ${vpName} — ${slotName(slot)}`, async ({ page }) => {
+        const featureId = await liveFeatureIdForSlot(page, slot);
         await page.setViewportSize({ width, height });
         await page.goto(`/features/${featureId}`);
 
@@ -230,32 +258,36 @@ test.describe("features-detail LIVE — 반응형 viewport", () => {
   }
 });
 
-test.describe("features-detail LIVE — 고정 시나리오(fixture-독립)", () => {
-  // fixture가 비어도 항상 도는 고정 시나리오 — 페이지 로드 + 컨트롤 + 반응형.
-  test(`page load — ${SAMPLE_ID}`, async ({ page }) => {
-    await page.goto(`/features/${SAMPLE_ID}`);
+test.describe("features-detail LIVE — 고정 시나리오(표본 slot 0)", () => {
+  // 표본 첫 slot 고정 시나리오 — 페이지 로드 + 컨트롤 + 반응형.
+  test(`page load — ${slotName(0)}`, async ({ page }) => {
+    const sampleId = await liveFeatureIdForSlot(page, 0);
+    await page.goto(`/features/${sampleId}`);
     await expect(
       page.getByRole("heading", { name: SHELL_HEADING, level: 1 }),
     ).toBeVisible(TIMEOUT);
   });
 
-  test(`detail container present — ${SAMPLE_ID}`, async ({ page }) => {
-    await page.goto(`/features/${SAMPLE_ID}`);
+  test(`detail container present — ${slotName(0)}`, async ({ page }) => {
+    const sampleId = await liveFeatureIdForSlot(page, 0);
+    await page.goto(`/features/${sampleId}`);
     await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
   });
 
   // ADR-105: weather 패널은 사라졌다. 상세가 다 렌더된 **뒤에** 부재를 본다 —
   // 렌더 전 0건으로 공허하게 통과하지 않도록 detail-view 가시성을 먼저 기다린다.
-  test(`weather panel absent — ${SAMPLE_ID}`, async ({ page }) => {
-    await page.goto(`/features/${SAMPLE_ID}`);
+  test(`weather panel absent — ${slotName(0)}`, async ({ page }) => {
+    const sampleId = await liveFeatureIdForSlot(page, 0);
+    await page.goto(`/features/${sampleId}`);
     await expect(page.getByTestId("feature-detail-view")).toBeVisible(TIMEOUT);
     await expect(page.getByTestId("feature-weather-panel")).toHaveCount(0);
   });
 
   for (const [vpName, width, height] of VIEWPORTS) {
-    test(`fixed viewport ${vpName} — ${SAMPLE_ID}`, async ({ page }) => {
+    test(`fixed viewport ${vpName} — ${slotName(0)}`, async ({ page }) => {
+      const sampleId = await liveFeatureIdForSlot(page, 0);
       await page.setViewportSize({ width, height });
-      await page.goto(`/features/${SAMPLE_ID}`);
+      await page.goto(`/features/${sampleId}`);
       await expect(
         page.getByRole("heading", { name: SHELL_HEADING, level: 1 }),
       ).toBeVisible(TIMEOUT);

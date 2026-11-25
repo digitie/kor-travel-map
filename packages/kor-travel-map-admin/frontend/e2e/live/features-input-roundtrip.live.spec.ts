@@ -178,15 +178,22 @@ async function expectTableReflectsBody(
   await expect(firstDataRow(page)).toContainText(firstName, T);
 }
 
-// admin-features-client.tsx SORT_OPTIONS와 동일한 7종 (NativeSelect aria-label="feature sort").
-type SortColumn =
-  | "name"
-  | "updated_at"
-  | "created_at"
-  | "kind"
-  | "status"
-  | "provider"
-  | "issue_count";
+// 정렬 컬럼 집합은 하드코딩하지 않는다 — 런타임에 NativeSelect(aria-label="feature sort")의
+// <option> value를 읽어 쓴다. admin-features-client.tsx SORT_OPTIONS가 바뀌어도(2026-11:
+// `status` 옵션 제거) 스펙이 사라진 옵션을 고르다 60초 타임아웃으로 죽지 않게 한다.
+type SortColumn = string;
+
+/** 화면이 실제로 제공하는 정렬 컬럼(option value) 목록. */
+async function readSortColumns(page: Page): Promise<SortColumn[]> {
+  return page
+    .getByLabel("feature sort")
+    .locator("option")
+    .evaluateAll((options) =>
+      options
+        .map((option) => (option as HTMLOptionElement).value)
+        .filter((value) => value.length > 0),
+    );
+}
 
 /**
  * 시간 컬럼(updated_at/created_at)은 ISO 문자열이라 사전순=시간순이다. DB collation에
@@ -477,7 +484,7 @@ test.describe("admin/features live — input → query param → data → UI rou
       .toBe(true);
   });
 
-  test("sort 7개 컬럼 × asc·desc가 sort·order 파라미터로 나가고 응답/UI 정렬이 반영된다", async ({
+  test("sort 전 컬럼 × asc·desc가 sort·order 파라미터로 나가고 응답/UI 정렬이 반영된다", async ({
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
@@ -498,28 +505,27 @@ test.describe("admin/features live — input → query param → data → UI rou
     expect(initial.params.get("order")).toBe("asc");
     captured.set("name|asc", initial.body);
 
+    // 화면이 제공하는 정렬 컬럼을 그대로 쓴다. 아래 flip 단언이 기대는 세 컬럼은
+    // 반드시 있어야 한다(없으면 정렬 UI 자체의 회귀다).
+    const sortColumns = await readSortColumns(page);
+    for (const required of ["name", "updated_at", "created_at"]) {
+      expect(sortColumns).toContain(required);
+    }
+
     // snake 전이: 각 단계는 sort(select) 또는 order(button) 중 하나만 바꿔 항상 새 요청을 유발한다.
-    // 이로써 7컬럼 × {asc,desc} 14개 (sort,order) 조합을 빠짐없이 캡처한다.
+    // 이로써 (컬럼 수) × {asc,desc} 조합을 빠짐없이 캡처한다.
     type SortStep = {
       sort: SortColumn;
       order: "asc" | "desc";
       control: "sort" | "order";
     };
-    const steps: SortStep[] = [
-      { control: "order", order: "desc", sort: "name" },
-      { control: "sort", order: "desc", sort: "updated_at" },
-      { control: "order", order: "asc", sort: "updated_at" },
-      { control: "sort", order: "asc", sort: "created_at" },
-      { control: "order", order: "desc", sort: "created_at" },
-      { control: "sort", order: "desc", sort: "kind" },
-      { control: "order", order: "asc", sort: "kind" },
-      { control: "sort", order: "asc", sort: "status" },
-      { control: "order", order: "desc", sort: "status" },
-      { control: "sort", order: "desc", sort: "provider" },
-      { control: "order", order: "asc", sort: "provider" },
-      { control: "sort", order: "asc", sort: "issue_count" },
-      { control: "order", order: "desc", sort: "issue_count" },
-    ];
+    const steps: SortStep[] = [{ control: "order", order: "desc", sort: "name" }];
+    let currentOrder: "asc" | "desc" = "desc";
+    for (const column of sortColumns.filter((value) => value !== "name")) {
+      steps.push({ control: "sort", order: currentOrder, sort: column });
+      currentOrder = currentOrder === "asc" ? "desc" : "asc";
+      steps.push({ control: "order", order: currentOrder, sort: column });
+    }
 
     for (const step of steps) {
       const action =
@@ -548,7 +554,7 @@ test.describe("admin/features live — input → query param → data → UI rou
     }
 
     // 값이 고르게 분포한 컬럼(name·updated_at·created_at)은 asc/desc 첫 행이 실제로 뒤집힌다
-    // (order 파라미터가 결과 집합을 진짜로 바꾼다는 증거). kind/status/provider/issue_count는
+    // (order 파라미터가 결과 집합을 진짜로 바꾼다는 증거). kind/provider/issue_count는
     // prod 스냅샷에서 동률(전부 place/active/null/0)이라 첫 행 차이를 단정하지 않는다.
     for (const col of ["name", "updated_at", "created_at"] as const) {
       const ascFirst = captured.get(`${col}|asc`)?.data.items[0]?.feature_id;
