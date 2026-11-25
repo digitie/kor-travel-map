@@ -1,3 +1,31 @@
+## 2026-11-25 — writer-drain sensor GraphQL을 Dagster 1.13 스키마에 맞춤
+
+- 근거: n150 webserver(Dagster 1.13.24) introspection(읽기 전용) — `stopSensor(id, jobOriginId, jobSelectorId)` →
+  `StopSensorMutationResultOrError`(성공 `StopSensorMutationResult.instigationState`), `startSensor` → `SensorOrError`
+  (성공 `Sensor.sensorState`). `SensorState` 타입·`sensorOriginId`/`sensorSelectorId` 인자는 없다. 그래서
+  `writer_drain_service.py`의 stop/start sensor 문서는 webserver의 검증 단계에서 거부돼(1.13 webserver는 HTTP 400 →
+  `post_graphql`의 `raise_for_status` → `DAGSTER_UNAVAILABLE`로 보인다) drain이 sensor를 멈추지도 되살리지도 못했다
+  (2026-11-24 freeze 작업 때 기록만 해 둔 것). schedule·run 문서는 맞았다(`stopRunningSchedule(id, scheduleOriginId,
+  scheduleSelectorId)`·`ScheduleStateResult`; InstigationState.id는 `<origin>::<selector>` CompoundID이고 1.13 구현은 `id`를
+  우선 쓴다 — n150 Map location 61개 instigator 전부 이 모양).
+- 고침: sensor 두 문서와 성공 판정(타입·상태 key)을 (kind, start)별 표 하나로. 문서 모양은 #1541 `dagster-freeze.py`가
+  n150에서 성공한 것과 같다.
+- 시험: `test_writer_drain_graphql_schema.py` — 모듈 소스의 GraphQL operation 문자열 전부(AST로 수집, 인라인 포함)가
+  목록 8개와 같고 설치된 `dagster-graphql` 스키마로 `graphql.validate` 통과, 설치 버전 = `constraints-dagster.txt` 핀
+  (n150과 같은 1.13.24), 성공 `__typename`이 결과 union 멤버·상태 key가 `InstigationState`, 문서 selection이 판정 표와
+  같은지(alias 없음·성공 fragment 안 `<state key> { status }`). `importorskip`을 쓰지 않아 dagster-graphql이 빠지면 실패한다.
+  고치기 전 코드에서 sensor 두 문서가 실패함을 확인. `test_writer_drain_command.py`에 네 mutation의 1.13 응답 모양·변수,
+  옛 `SensorState`·오류·STOPPED/RUNNING 불일치·null `instigationState` 거부.
+- 적대 리뷰 2인(프로토콜 정확성·시험 가드) 조건부 승인. 프로토콜 리뷰가 임시 Dagster instance에서 이 문서들을 실제
+  실행해 확인했다(기본 RUNNING sensor stop, 이미 RUNNING start 멱등, 엉터리 originId여도 `id` 우선).
+- **남은 결함(이 PR 밖, 소유자 결정 필요)**: restore가 `was_running` 항목을 무조건 `startSensor`/`startSchedule`로 되살린다.
+  저장 상태가 없던 코드 기본 RUNNING(`DECLARED_IN_CODE`)은 pause 때 STOPPED 행이 생기고 restore 뒤 저장된 RUNNING 행이 남아,
+  나중에 코드 기본값을 STOPPED로 바꿔도 계속 돈다(freeze 도구는 이 경우 `reset*`을 쓴다). 고치려면 조회·스냅샷·digest에
+  `defaultStatus`·`canReset`을 넣어야 해 migration과 receipt 계약(`ktm-cache-target-writer-drain/v1`) 변경이 따른다.
+  그 밖에 검증 실패(HTTP 400)가 `DAGSTER_UNAVAILABLE`로 분류되는 것도 후속 후보.
+- 다음: API 이미지 회전에 싣는다(writer-drain은 one-shot API image command — Manager 코드에는 아직 호출부가 없다). 운영
+  mutation은 실행하지 않았다.
+
 ## 2026-11-24 — transport export 계약 정렬(#1542 후속): `EXPORT_SOURCE_INCONSISTENT` 상태 job 다음 tick, 주유소 27.5시간
 
 - 근거: transport `docs/map-service-exports-handoff.md`(transport #277 `67eac73`, ADR-013).

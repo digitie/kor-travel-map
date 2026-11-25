@@ -1,3 +1,10 @@
+## 2026-11-25 — writer-drain sensor GraphQL을 Dagster 1.13 스키마에 맞춤
+
+- `stopSensor(jobOriginId, jobSelectorId)`·`StopSensorMutationResult`/`Sensor`로 고침(옛 문서는 1.13 webserver가 거부).
+  writer-drain GraphQL 문서 전부를 설치된 dagster-graphql(핀 버전 단언) 스키마로 검증·판정 표와 selection 결박. OpenAPI·migration 없음.
+- 다음: 다음 API 이미지 회전에 싣는다. 열린 결정: restore가 코드 기본 RUNNING instigator를 `start*`로 되살려 저장 RUNNING 행을
+  남기는 결함(`reset*` 분기에는 스냅샷 `defaultStatus`·`canReset` + migration + receipt 계약 변경 필요 — journal 2026-11-25).
+
 ## 2026-11-24 — 관리자 프런트 ui 0.2.6 채택(VirtualTable 선택 칸 44px)
 
 - ui 0.2.6·tokens 0.1.7 vendor(#1547 `f5fdeba`), guard `309b881`. md 미만 행 선택 칸 폭이 44px로 체크박스 터치 영역과

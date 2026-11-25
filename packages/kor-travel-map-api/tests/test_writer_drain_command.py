@@ -9,7 +9,7 @@ from types import SimpleNamespace
 from uuid import UUID
 
 import pytest
-from kortravelmap.infra.writer_drain_repo import WriterDrainLease
+from kortravelmap.infra.writer_drain_repo import WriterDrainInstigation, WriterDrainLease
 
 from kortravelmap.api import writer_drain_command as command
 from kortravelmap.api import writer_drain_service as service
@@ -311,5 +311,191 @@ async def test_writer_drain_fails_loudly_when_the_code_location_is_missing(
         await service._list_nonterminal_runs(  # noqa: SLF001 - private command unit.
             http_client=None,  # type: ignore[arg-type]
             dagster=_DAGSTER,
+        )
+    assert str(excinfo.value) == "DAGSTER_PROTOCOL"
+
+
+def _instigation(kind: str) -> WriterDrainInstigation:
+    # Dagster 1.13의 InstigationState.id는 ``<origin id>::<selector id>``(CompoundID)다.
+    return WriterDrainInstigation(
+        lease_id=UUID("00000000-0000-0000-0000-000000000001"),
+        kind=kind,  # type: ignore[arg-type]
+        selector_id=f"{kind}-selector",
+        state_id=f"{kind}-origin::{kind}-selector",
+        origin_id=f"{kind}-origin",
+        instigation_name=f"{kind}-name",
+        repository_name="__repository__",
+        repository_location_name="kortravelmap.dagster.definitions",
+        was_running=True,
+        pause_result="pending",
+        paused_at=None,
+        restore_result="not_requested",
+        restored_at=None,
+    )
+
+
+# Dagster 1.13 webserver가 실제로 내는 성공 응답 모양(n150 introspection, 2026-11-25).
+_MUTATION_RESPONSES: dict[tuple[str, bool], tuple[str, dict[str, object]]] = {
+    ("schedule", False): (
+        "stopRunningSchedule",
+        {"__typename": "ScheduleStateResult", "scheduleState": {"status": "STOPPED"}},
+    ),
+    ("schedule", True): (
+        "startSchedule",
+        {"__typename": "ScheduleStateResult", "scheduleState": {"status": "RUNNING"}},
+    ),
+    ("sensor", False): (
+        "stopSensor",
+        {"__typename": "StopSensorMutationResult", "instigationState": {"status": "STOPPED"}},
+    ),
+    ("sensor", True): (
+        "startSensor",
+        {"__typename": "Sensor", "sensorState": {"status": "RUNNING"}},
+    ),
+}
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(("kind", "start"), list(_MUTATION_RESPONSES))
+async def test_instigation_mutation_accepts_the_dagster_1_13_success_shape(
+    monkeypatch: pytest.MonkeyPatch, kind: str, start: bool
+) -> None:
+    field, response = _MUTATION_RESPONSES[(kind, start)]
+    seen: list[dict[str, object]] = []
+
+    async def _graphql(**kwargs: object) -> dict[str, object]:
+        seen.append(kwargs)
+        return {"data": {field: response}}
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    await service._mutate_instigation(  # noqa: SLF001 - private command unit.
+        http_client=None,  # type: ignore[arg-type]
+        dagster=_DAGSTER,
+        instigation=_instigation(kind),
+        start=start,
+    )
+
+    assert len(seen) == 1
+    query = str(seen[0]["query"])
+    assert f"{field}(" in query
+    if start:
+        name_key = "scheduleName" if kind == "schedule" else "sensorName"
+        assert seen[0]["variables"] == {
+            "selector": {
+                "repositoryName": "__repository__",
+                "repositoryLocationName": "kortravelmap.dagster.definitions",
+                name_key: f"{kind}-name",
+            }
+        }
+    else:
+        assert seen[0]["variables"] == {
+            "id": f"{kind}-origin::{kind}-selector",
+            "originId": f"{kind}-origin",
+            "selectorId": f"{kind}-selector",
+        }
+    if kind == "sensor" and not start:
+        # 1.13 stopSensor 인자는 jobOriginId·jobSelectorId다.
+        assert "jobOriginId: $originId" in query
+        assert "jobSelectorId: $selectorId" in query
+        assert "sensorOriginId" not in query
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        # 옛 문서가 기대하던 모양 — 1.13에는 SensorState 타입이 없다.
+        {"__typename": "SensorState", "status": "STOPPED"},
+        {"__typename": "PythonError", "message": "boom"},
+        {"__typename": "UnauthorizedError", "message": "no"},
+    ],
+)
+async def test_stop_sensor_rejects_anything_but_stop_sensor_mutation_result(
+    monkeypatch: pytest.MonkeyPatch, response: dict[str, object]
+) -> None:
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {"data": {"stopSensor": response}}
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._mutate_instigation(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+            instigation=_instigation("sensor"),
+            start=False,
+        )
+    assert str(excinfo.value) == "DAGSTER_MUTATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_stop_sensor_requires_the_returned_state_to_be_stopped(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {
+            "data": {
+                "stopSensor": {
+                    "__typename": "StopSensorMutationResult",
+                    "instigationState": {"status": "RUNNING"},
+                }
+            }
+        }
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._mutate_instigation(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+            instigation=_instigation("sensor"),
+            start=False,
+        )
+    assert str(excinfo.value) == "DAGSTER_MUTATION_FAILED"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        {"__typename": "SensorState", "status": "RUNNING"},
+        {"__typename": "SensorNotFoundError", "message": "missing"},
+        {"__typename": "Sensor", "sensorState": {"status": "STOPPED"}},
+    ],
+)
+async def test_start_sensor_rejects_anything_but_a_running_sensor(
+    monkeypatch: pytest.MonkeyPatch, response: dict[str, object]
+) -> None:
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {"data": {"startSensor": response}}
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._mutate_instigation(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+            instigation=_instigation("sensor"),
+            start=True,
+        )
+    assert str(excinfo.value) == "DAGSTER_MUTATION_FAILED"
+
+
+@pytest.mark.asyncio
+async def test_stop_sensor_without_instigation_state_is_a_protocol_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # 스키마상 instigationState는 nullable이다(1.13 구현은 늘 채우지만).
+    async def _graphql(**_kwargs: object) -> dict[str, object]:
+        return {
+            "data": {
+                "stopSensor": {"__typename": "StopSensorMutationResult", "instigationState": None}
+            }
+        }
+
+    monkeypatch.setattr(service.dagster_graphql, "post_graphql", _graphql)
+    with pytest.raises(service.WriterDrainCommandError) as excinfo:
+        await service._mutate_instigation(  # noqa: SLF001 - private command unit.
+            http_client=None,  # type: ignore[arg-type]
+            dagster=_DAGSTER,
+            instigation=_instigation("sensor"),
+            start=False,
         )
     assert str(excinfo.value) == "DAGSTER_PROTOCOL"
