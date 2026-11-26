@@ -1,4 +1,7 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Response } from "@playwright/test";
+
+import type { AdminNavHref } from "../../src/lib/admin-nav";
+import { adminNavLink, expectAdminPageLoaded, pagerButton } from "./_admin-nav";
 import * as F from "./_fixtures";
 
 /**
@@ -12,23 +15,37 @@ import * as F from "./_fixtures";
  * mutation(업로드/백업실행/restore/swap/생성/삭제/검증/적재) 클릭·폼 제출은 전혀 없다.
  * click은 [내비 링크]에만 사용한다. 검색/필터 input 타이핑과 status 필터 select는
  * GET-only 조회라 허용된다. pagination 버튼은 PRESENCE=0이라 disabled → 클릭하지 않고
- * disabled 상태만 단언한다. selector/heading 텍스트는 참조 spec에서 검증된 것만 재사용.
+ * disabled 상태만 단언한다.
+ *
+ * 화면 이름(h1·사이드바 링크)은 하드코딩하지 않고 nav 정본(`src/lib/admin-nav.ts`)에서
+ * 읽는다(`_admin-nav.ts`). 2026-11-25 운영 e2e에서 h1 `Offline uploads`(현재
+ * `오프라인 업로드`)·`POI cache targets`(현재 `POI 캐시 대상`) drift로 34건이 실패했다.
  */
 
 const HEADINGS = {
-  uploads: "Offline uploads",
-  backups: "백업",
-  poi: "POI cache targets",
-} as const;
+  uploads: "/admin/offline-uploads",
+  backups: "/admin/backups",
+  poi: "/admin/poi-cache-targets",
+} as const satisfies Record<string, AdminNavHref>;
 
 async function expectHeading(
   page: import("@playwright/test").Page,
-  name: string,
+  href: AdminNavHref,
 ): Promise<void> {
-  await expect(
-    page.getByRole("heading", { level: 1, name }),
-  ).toBeVisible({ timeout: 15000 });
+  await expectAdminPageLoaded(page, href);
 }
+
+/** offline upload 목록 GET(`/v1/admin/offline-uploads`, BFF proxy 경유) 응답인지. */
+function isOfflineUploadListResponse(response: Response): boolean {
+  if (response.request().method() !== "GET") return false;
+  const { pathname } = new URL(response.url());
+  return pathname.replace(/^\/api\/proxy/, "") === "/v1/admin/offline-uploads";
+}
+
+// 2026-11 offline-uploads 필터는 provider 문자열·dataset key 두 칸에서 정수
+// `provider_dataset_id` 한 칸(`provider dataset ID filter`, type=number)으로 바뀌었다
+// (#966 계열). 존재 여부와 무관하게 양의 정수는 유효한 GET 필터다.
+const PROVIDER_DATASET_ID_SAMPLES = [1, 2, 7, 42, 101, 401, 999, 123456] as const;
 
 test.describe("live/offline-uploads (read-only)", () => {
 
@@ -52,11 +69,12 @@ test.describe("live/offline-uploads (read-only)", () => {
     await expect(page.getByLabel("offline upload status")).toBeVisible({ timeout: 15000 });
   });
 
-  test("uploads provider + dataset filter inputs present", async ({ page }) => {
+  test("uploads provider dataset ID filter input present", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expectHeading(page, HEADINGS.uploads);
-    await expect(page.getByLabel("provider filter")).toBeVisible({ timeout: 15000 });
-    await expect(page.getByLabel("dataset filter")).toBeVisible({ timeout: 15000 });
+    await expect(
+      page.getByLabel("provider dataset ID filter", { exact: true }),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("uploads detail placeholder visible when nothing selected", async ({ page }) => {
@@ -130,245 +148,28 @@ test.describe("live/offline-uploads (read-only)", () => {
     await expectHeading(page, HEADINGS.uploads);
   });
 
-  test("uploads provider filter typing term[0]=공원", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[0];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[1]=공항", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[1];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[2]=도서관", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[2];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[3]=마트", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[3];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[4]=문화재", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[4];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[5]=미술관", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[5];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[6]=박물관", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[6];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[7]=서점", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[7];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[8]=수목원", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[8];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[9]=주유소", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[9];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[10]=주차장", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[10];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[11]=축제", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[11];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[12]=카페", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[12];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[13]=해수욕장", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[13];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[14]=휴게소", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[14];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads provider filter typing term[15]=휴양림", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const term = F.SEARCH_TERMS[15];
-    await page.getByLabel("provider filter").fill(term);
-    await expect(page.getByLabel("provider filter")).toHaveValue(term, { timeout: 15000 });
-    await expectHeading(page, HEADINGS.uploads);
-  });
-
-  test("uploads dataset filter typing code[0]=01000000", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[0];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[1]=01010000", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[1];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[2]=01010100", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[2];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[3]=01010200", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[3];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[4]=01010300", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[4];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[5]=01010400", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[5];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[6]=01020000", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[6];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[7]=01020100", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[7];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[8]=01020200", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[8];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[9]=01020300", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[9];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[10]=01020400", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[10];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
-
-  test("uploads dataset filter typing code[11]=01030000", async ({ page }) => {
-    await page.goto("/admin/offline-uploads");
-    await expectHeading(page, HEADINGS.uploads);
-    const code = F.CATEGORY_CODES[11];
-    await page.getByLabel("dataset filter").fill(code);
-    await expect(page.getByLabel("dataset filter")).toHaveValue(code, { timeout: 15000 });
-  });
+  for (const datasetId of PROVIDER_DATASET_ID_SAMPLES) {
+    test(`uploads provider dataset ID filter ${datasetId} → GET provider_dataset_id`, async ({
+      page,
+    }) => {
+      await page.goto("/admin/offline-uploads");
+      await expectHeading(page, HEADINGS.uploads);
+      const input = page.getByLabel("provider dataset ID filter", { exact: true });
+      await expect(input).toBeVisible({ timeout: 15000 });
+      // 입력 → 목록 GET에 provider_dataset_id가 실린다(읽기 전용 필터 라운드트립).
+      const listResponse = page.waitForResponse(
+        (response) =>
+          isOfflineUploadListResponse(response) &&
+          new URL(response.url()).searchParams.get("provider_dataset_id") ===
+            String(datasetId),
+        { timeout: 15000 },
+      );
+      await input.fill(String(datasetId));
+      expect((await listResponse).status()).toBe(200);
+      await expect(input).toHaveValue(String(datasetId), { timeout: 15000 });
+      await expectHeading(page, HEADINGS.uploads);
+    });
+  }
 
   test("uploads renders at desktop 1280x800", async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 });
@@ -403,13 +204,11 @@ test.describe("live/backups (read-only)", () => {
   test("backups empty-state or list container (PRESENCE=0)", async ({ page }) => {
     await page.goto("/admin/backups");
     await expectHeading(page, HEADINGS.backups);
-    const empty = page.getByText("백업이 없습니다.");
-    const emptyVisible = await empty.isVisible({ timeout: 15000 }).catch(() => false);
-    if (emptyVisible) {
-      await expect(empty).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByText("백업 목록")).toBeVisible({ timeout: 15000 });
-    }
+    // `isVisible`은 기다리지 않는다(timeout 옵션 무시) — 데이터 도착 전 분기가 갈려 flaky했다.
+    // 둘 중 하나가 보일 때까지 기다린다.
+    await expect(
+      page.getByText("백업이 없습니다.").or(page.getByText("백업 목록")).first(),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("backups 백업 목록 card container visible", async ({ page }) => {
@@ -421,13 +220,13 @@ test.describe("live/backups (read-only)", () => {
   test("backups command-enabled badge visible", async ({ page }) => {
     await page.goto("/admin/backups");
     await expectHeading(page, HEADINGS.backups);
-    const planOnly = page.getByText("plan only");
-    const planVisible = await planOnly.isVisible({ timeout: 15000 }).catch(() => false);
-    if (planVisible) {
-      await expect(planOnly).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByText("execute enabled")).toBeVisible({ timeout: 15000 });
-    }
+    // badge는 목록 응답(`command_enabled`)이 온 뒤에만 그려진다 — `isVisible`(대기 없음)로
+    // 분기하면 응답 전에 "execute enabled" 쪽으로 갈려 실패했다(2026-11-25 운영 재실행).
+    await expect(
+      page.getByText("plan only", { exact: true }).or(
+        page.getByText("execute enabled", { exact: true }),
+      ),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("backups 실행 옵션 card heading visible", async ({ page }) => {
@@ -439,13 +238,12 @@ test.describe("live/backups (read-only)", () => {
   test("backups detail placeholder or detail card present", async ({ page }) => {
     await page.goto("/admin/backups");
     await expectHeading(page, HEADINGS.backups);
-    const none = page.getByRole("heading", { name: "선택 없음" });
-    const noneVisible = await none.isVisible({ timeout: 15000 }).catch(() => false);
-    if (noneVisible) {
-      await expect(none).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByRole("heading", { name: "실행 옵션" })).toBeVisible({ timeout: 15000 });
-    }
+    await expect(
+      page
+        .getByRole("heading", { name: "선택 없음" })
+        .or(page.getByRole("heading", { name: "실행 옵션" }))
+        .first(),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("backups deep-link ?job_kind=consistency_check loads heading", async ({ page }) => {
@@ -531,13 +329,9 @@ test.describe("live/poi-cache-targets (read-only)", () => {
   test("poi empty placeholder or targets container (PRESENCE=0)", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expectHeading(page, HEADINGS.poi);
-    const empty = page.getByText("데이터가 없습니다.");
-    const emptyVisible = await empty.first().isVisible({ timeout: 15000 }).catch(() => false);
-    if (emptyVisible) {
-      await expect(empty.first()).toBeVisible({ timeout: 15000 });
-    } else {
-      await expect(page.getByText("Nearby features")).toBeVisible({ timeout: 15000 });
-    }
+    await expect(
+      page.getByText("데이터가 없습니다.").or(page.getByText("Nearby features")).first(),
+    ).toBeVisible({ timeout: 15000 });
   });
 
   test("poi page 1 indicator visible", async ({ page }) => {
@@ -547,21 +341,45 @@ test.describe("live/poi-cache-targets (read-only)", () => {
   });
 
   // 손으로 만들던 targets pager가 공용 CursorPager(+`previous`)로 바뀌면서 버튼 접근성
-  // 이름이 다른 목록과 같아졌다(보이는 라벨은 그대로 `이전`/`다음`).
-  test("poi pagination 이전 button disabled (PRESENCE=0)", async ({ page }) => {
+  // 이름이 다른 목록과 같아졌다(보이는 라벨은 그대로 `이전`/`다음`). 첫 로드는 cursor
+  // 스택이 비어 있어 데이터 유무와 무관하게 `이전`·`첫 페이지`가 비활성이다.
+  test("poi pagination 이전 button disabled on first page", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expectHeading(page, HEADINGS.poi);
-    await expect(
-      page.getByRole("button", { name: "이전 페이지", exact: true }),
-    ).toBeDisabled({ timeout: 15000 });
+    await expect(pagerButton(page, "이전 페이지").first()).toBeDisabled({
+      timeout: 15000,
+    });
+    await expect(pagerButton(page, "첫 페이지").first()).toBeDisabled({
+      timeout: 15000,
+    });
   });
 
-  test("poi pagination 다음 button disabled (PRESENCE=0)", async ({ page }) => {
+  test("poi pagination 다음 enabled iff the targets response has next_cursor", async ({
+    page,
+  }) => {
+    // 실데이터 행 수에 기대지 않는다: `다음`의 활성 여부는 첫 목록 응답의 next_cursor와
+    // 정확히 같아야 한다(빈 목록이면 비활성).
+    const listResponse = page.waitForResponse(
+      (response) =>
+        response.status() === 200 &&
+        response.request().method() === "GET" &&
+        new URL(response.url()).pathname.replace(/^\/api\/proxy/, "") ===
+          "/v1/admin/poi-cache-targets",
+      { timeout: 15000 },
+    );
     await page.goto("/admin/poi-cache-targets");
     await expectHeading(page, HEADINGS.poi);
-    await expect(
-      page.getByRole("button", { name: "다음 페이지", exact: true }),
-    ).toBeDisabled({ timeout: 15000 });
+    const response = await listResponse;
+    expect(response.status()).toBe(200);
+    const body = (await response.json()) as {
+      meta?: { page?: { next_cursor?: string | null } | null };
+    };
+    const next = pagerButton(page, "다음 페이지").first();
+    if (body.meta?.page?.next_cursor) {
+      await expect(next).toBeEnabled({ timeout: 15000 });
+    } else {
+      await expect(next).toBeDisabled({ timeout: 15000 });
+    }
   });
 
   test("poi Nearby features card present", async ({ page }) => {
@@ -799,49 +617,49 @@ test.describe("live/uploads-backups-poi nav (read-only)", () => {
   test("nav /admin/backups click Offline uploads to /admin/offline-uploads", async ({ page }) => {
     await page.goto("/admin/backups");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "오프라인 업로드", exact: true }).first().click();
+    await adminNavLink(page, HEADINGS.uploads).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/offline-uploads(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("nav /admin/offline-uploads click Backups to /admin/backups", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "백업", exact: true }).first().click();
+    await adminNavLink(page, HEADINGS.backups).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/backups(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
   test("nav /admin/backups click POI targets to /admin/poi-cache-targets", async ({ page }) => {
     await page.goto("/admin/backups");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "POI 캐시 대상", exact: true }).first().click();
+    await adminNavLink(page, HEADINGS.poi).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/poi-cache-targets(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
   test("nav /admin/poi-cache-targets click Offline uploads to /admin/offline-uploads", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "오프라인 업로드", exact: true }).first().click();
+    await adminNavLink(page, HEADINGS.uploads).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/offline-uploads(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("nav /admin/offline-uploads click POI targets to /admin/poi-cache-targets", async ({ page }) => {
     await page.goto("/admin/offline-uploads");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "POI 캐시 대상", exact: true }).first().click();
+    await adminNavLink(page, HEADINGS.poi).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/poi-cache-targets(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
   test("nav /admin/poi-cache-targets click Backups to /admin/backups", async ({ page }) => {
     await page.goto("/admin/poi-cache-targets");
     await expect(page.getByRole("heading", { level: 1 }).first()).toBeVisible({ timeout: 15000 });
-    await page.getByRole("link", { name: "백업", exact: true }).first().click();
+    await adminNavLink(page, HEADINGS.backups).first().click();
     await expect(page).toHaveURL(new RegExp("\\/admin\\/backups(\\?|$|\\/)"), { timeout: 15000 });
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
 });
@@ -850,92 +668,92 @@ test.describe("live/uploads-backups-poi kind deep-links (read-only)", () => {
 
   test("uploads deep-link ?kind=place loads heading", async ({ page }) => {
     await page.goto(`/admin/offline-uploads?kind=${F.KINDS[0]}`);
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("uploads deep-link ?kind=event loads heading", async ({ page }) => {
     await page.goto(`/admin/offline-uploads?kind=${F.KINDS[1]}`);
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("uploads deep-link ?kind=notice loads heading", async ({ page }) => {
     await page.goto(`/admin/offline-uploads?kind=${F.KINDS[2]}`);
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("uploads deep-link ?kind=price loads heading", async ({ page }) => {
     await page.goto(`/admin/offline-uploads?kind=${F.KINDS[3]}`);
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("uploads deep-link ?kind=route loads heading", async ({ page }) => {
     await page.goto(`/admin/offline-uploads?kind=${F.KINDS[5]}`);
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("uploads deep-link ?kind=area loads heading", async ({ page }) => {
     await page.goto(`/admin/offline-uploads?kind=${F.KINDS[6]}`);
-    await expectHeading(page, "Offline uploads");
+    await expectHeading(page, HEADINGS.uploads);
   });
 
   test("backups deep-link ?kind=place loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[0]}`);
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
   test("backups deep-link ?kind=event loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[1]}`);
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
   test("backups deep-link ?kind=notice loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[2]}`);
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
   test("backups deep-link ?kind=price loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[3]}`);
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
   test("backups deep-link ?kind=route loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[5]}`);
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
   test("backups deep-link ?kind=area loads heading", async ({ page }) => {
     await page.goto(`/admin/backups?kind=${F.KINDS[6]}`);
-    await expectHeading(page, "백업");
+    await expectHeading(page, HEADINGS.backups);
   });
 
   test("poi deep-link ?kind=place loads heading", async ({ page }) => {
     await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[0]}`);
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
   test("poi deep-link ?kind=event loads heading", async ({ page }) => {
     await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[1]}`);
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
   test("poi deep-link ?kind=notice loads heading", async ({ page }) => {
     await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[2]}`);
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
   test("poi deep-link ?kind=price loads heading", async ({ page }) => {
     await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[3]}`);
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
   test("poi deep-link ?kind=route loads heading", async ({ page }) => {
     await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[5]}`);
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
   test("poi deep-link ?kind=area loads heading", async ({ page }) => {
     await page.goto(`/admin/poi-cache-targets?kind=${F.KINDS[6]}`);
-    await expectHeading(page, "POI cache targets");
+    await expectHeading(page, HEADINGS.poi);
   });
 
 });

@@ -7,6 +7,7 @@ import {
 } from "@playwright/test";
 
 import * as F from "./_fixtures";
+import type { AdminFeatureSort } from "../../src/api/features";
 import type { components } from "../../src/api/types";
 
 // LIVE (non-mock) e2e for /admin/features — USER-INPUT → API query param → data → UI
@@ -128,22 +129,69 @@ type ListCapture = {
  * query params + the parsed live response body. This is the input→param→data half of the
  * round-trip; the UI half is asserted by the caller against the returned body.
  */
+// 한 목록 요청을 기다리는 상한. 테스트 상한(FLOW_TIMEOUT)보다 짧아야 아래 진단 메시지가
+// 테스트 타임아웃의 일반 메시지 대신 보인다.
+const CAPTURE_TIMEOUT = 120_000;
+
 async function captureList(
   page: Page,
   action: () => Promise<unknown>,
   predicate: (params: URLSearchParams) => boolean,
 ): Promise<ListCapture> {
-  const responsePromise = page.waitForResponse(
-    (response) =>
-      response.status() === 200 &&
-      isApiResponse(response, "GET", ADMIN_FEATURES_PATH) &&
-      predicate(new URL(response.url()).searchParams),
-    { timeout: FLOW_TIMEOUT },
-  );
-  await action();
-  const response = await responsePromise;
-  const body = (await response.json()) as AdminFeaturesListResponse;
-  return { params: new URL(response.url()).searchParams, body };
+  const matches = (url: string, method: string): boolean => {
+    if (method !== "GET") return false;
+    const parsed = new URL(url);
+    const pathname = parsed.pathname.startsWith("/api/proxy/")
+      ? parsed.pathname.slice("/api/proxy".length)
+      : parsed.pathname;
+    return (
+      decodeURIComponent(pathname) === ADMIN_FEATURES_PATH &&
+      predicate(parsed.searchParams)
+    );
+  };
+  // 재시도(react-query)가 성공하면 통과하도록 200을 기다리되, 그 사이 같은 요청의 실패
+  // (네트워크 오류·비 200)를 모아 타임아웃 메시지에 싣는다 — 2026-11-25 운영 재실행에서
+  // sort=issue_count 목록이 "Failed to fetch"로 끊겼는데 5분 뒤 일반 타임아웃만 남았다.
+  const failures: string[] = [];
+  const onFailed = (request: import("@playwright/test").Request) => {
+    if (matches(request.url(), request.method())) {
+      failures.push(`requestfailed ${request.failure()?.errorText ?? "?"}`);
+    }
+  };
+  const onResponse = (response: Response) => {
+    if (
+      response.status() !== 200 &&
+      matches(response.url(), response.request().method())
+    ) {
+      failures.push(`HTTP ${response.status()}`);
+    }
+  };
+  page.on("requestfailed", onFailed);
+  page.on("response", onResponse);
+  try {
+    const responsePromise = page.waitForResponse(
+      (response) =>
+        response.status() === 200 &&
+        isApiResponse(response, "GET", ADMIN_FEATURES_PATH) &&
+        predicate(new URL(response.url()).searchParams),
+      { timeout: CAPTURE_TIMEOUT },
+    );
+    await action();
+    const response = await responsePromise.catch((error: unknown) => {
+      throw new Error(
+        `GET ${ADMIN_FEATURES_PATH} 200 응답을 ${CAPTURE_TIMEOUT}ms 안에 받지 못함` +
+          (failures.length > 0
+            ? ` — 같은 요청 실패: ${failures.join(", ")}`
+            : " — 실패한 요청도 없음(요청이 나가지 않았거나 응답 대기)") +
+          ` (${String(error)})`,
+      );
+    });
+    const body = (await response.json()) as AdminFeaturesListResponse;
+    return { params: new URL(response.url()).searchParams, body };
+  } finally {
+    page.off("requestfailed", onFailed);
+    page.off("response", onResponse);
+  }
 }
 
 async function expectListReady(page: Page): Promise<void> {
@@ -178,15 +226,34 @@ async function expectTableReflectsBody(
   await expect(firstDataRow(page)).toContainText(firstName, T);
 }
 
-// admin-features-client.tsx SORT_OPTIONS와 동일한 7종 (NativeSelect aria-label="feature sort").
-type SortColumn =
-  | "name"
-  | "updated_at"
-  | "created_at"
-  | "kind"
-  | "status"
-  | "provider"
-  | "issue_count";
+// 정렬 컬럼 집합은 하드코딩하지 않는다 — 런타임에 NativeSelect(aria-label="feature sort")의
+// <option> value를 읽어 쓴다. admin-features-client.tsx SORT_OPTIONS가 바뀌어도(2026-11:
+// `status` 옵션 제거) 스펙이 사라진 옵션을 고르다 60초 타임아웃으로 죽지 않게 한다.
+type SortColumn = string;
+
+// OpenAPI 정렬 enum 전체. `Record<AdminFeatureSort, true>`라 API enum이 바뀌면 typecheck가
+// 실패하고(계획된 변경 — 이 표를 함께 고친다), 화면 select가 옵션 하나를 조용히 빠뜨리면
+// 아래 집합 비교가 실패한다(잡아야 할 회귀).
+const ALL_ADMIN_FEATURE_SORTS: Record<AdminFeatureSort, true> = {
+  name: true,
+  updated_at: true,
+  created_at: true,
+  kind: true,
+  provider: true,
+  issue_count: true,
+};
+
+/** 화면이 실제로 제공하는 정렬 컬럼(option value) 목록. */
+async function readSortColumns(page: Page): Promise<SortColumn[]> {
+  return page
+    .getByLabel("feature sort")
+    .locator("option")
+    .evaluateAll((options) =>
+      options
+        .map((option) => (option as HTMLOptionElement).value)
+        .filter((value) => value.length > 0),
+    );
+}
 
 /**
  * 시간 컬럼(updated_at/created_at)은 ISO 문자열이라 사전순=시간순이다. DB collation에
@@ -477,7 +544,7 @@ test.describe("admin/features live — input → query param → data → UI rou
       .toBe(true);
   });
 
-  test("sort 7개 컬럼 × asc·desc가 sort·order 파라미터로 나가고 응답/UI 정렬이 반영된다", async ({
+  test("sort 전 컬럼 × asc·desc가 sort·order 파라미터로 나가고 응답/UI 정렬이 반영된다", async ({
     page,
   }) => {
     test.setTimeout(FLOW_TIMEOUT);
@@ -498,28 +565,26 @@ test.describe("admin/features live — input → query param → data → UI rou
     expect(initial.params.get("order")).toBe("asc");
     captured.set("name|asc", initial.body);
 
+    // 화면이 제공하는 정렬 컬럼을 그대로 쓰되, 그 집합은 API 정렬 enum과 같아야 한다.
+    const sortColumns = await readSortColumns(page);
+    expect([...sortColumns].sort()).toEqual(
+      Object.keys(ALL_ADMIN_FEATURE_SORTS).sort(),
+    );
+
     // snake 전이: 각 단계는 sort(select) 또는 order(button) 중 하나만 바꿔 항상 새 요청을 유발한다.
-    // 이로써 7컬럼 × {asc,desc} 14개 (sort,order) 조합을 빠짐없이 캡처한다.
+    // 이로써 (컬럼 수) × {asc,desc} 조합을 빠짐없이 캡처한다.
     type SortStep = {
       sort: SortColumn;
       order: "asc" | "desc";
       control: "sort" | "order";
     };
-    const steps: SortStep[] = [
-      { control: "order", order: "desc", sort: "name" },
-      { control: "sort", order: "desc", sort: "updated_at" },
-      { control: "order", order: "asc", sort: "updated_at" },
-      { control: "sort", order: "asc", sort: "created_at" },
-      { control: "order", order: "desc", sort: "created_at" },
-      { control: "sort", order: "desc", sort: "kind" },
-      { control: "order", order: "asc", sort: "kind" },
-      { control: "sort", order: "asc", sort: "status" },
-      { control: "order", order: "desc", sort: "status" },
-      { control: "sort", order: "desc", sort: "provider" },
-      { control: "order", order: "asc", sort: "provider" },
-      { control: "sort", order: "asc", sort: "issue_count" },
-      { control: "order", order: "desc", sort: "issue_count" },
-    ];
+    const steps: SortStep[] = [{ control: "order", order: "desc", sort: "name" }];
+    let currentOrder: "asc" | "desc" = "desc";
+    for (const column of sortColumns.filter((value) => value !== "name")) {
+      steps.push({ control: "sort", order: currentOrder, sort: column });
+      currentOrder = currentOrder === "asc" ? "desc" : "asc";
+      steps.push({ control: "order", order: currentOrder, sort: column });
+    }
 
     for (const step of steps) {
       const action =
@@ -548,7 +613,7 @@ test.describe("admin/features live — input → query param → data → UI rou
     }
 
     // 값이 고르게 분포한 컬럼(name·updated_at·created_at)은 asc/desc 첫 행이 실제로 뒤집힌다
-    // (order 파라미터가 결과 집합을 진짜로 바꾼다는 증거). kind/status/provider/issue_count는
+    // (order 파라미터가 결과 집합을 진짜로 바꾼다는 증거). kind/provider/issue_count는
     // prod 스냅샷에서 동률(전부 place/active/null/0)이라 첫 행 차이를 단정하지 않는다.
     for (const col of ["name", "updated_at", "created_at"] as const) {
       const ascFirst = captured.get(`${col}|asc`)?.data.items[0]?.feature_id;
