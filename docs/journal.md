@@ -53,7 +53,6 @@
   그 밖에 검증 실패(HTTP 400)가 `DAGSTER_UNAVAILABLE`로 분류되는 것도 후속 후보.
 - 다음: API 이미지 회전에 싣는다(writer-drain은 one-shot API image command — Manager 코드에는 아직 호출부가 없다). 운영
   mutation은 실행하지 않았다.
-||||||| parent of 75dcae75b (test(admin-e2e): 읽기 전용 live 스펙 drift 정비 — 런타임 feature 표본·nav 정본 화면 이름)
 
 ## 2026-11-24 — transport export 계약 정렬(#1542 후속): `EXPORT_SOURCE_INCONSISTENT` 상태 job 다음 tick, 주유소 27.5시간
 

@@ -11,7 +11,6 @@
   writer-drain GraphQL 문서 전부를 설치된 dagster-graphql(핀 버전 단언) 스키마로 검증·판정 표와 selection 결박. OpenAPI·migration 없음.
 - 다음: 다음 API 이미지 회전에 싣는다. 열린 결정: restore가 코드 기본 RUNNING instigator를 `start*`로 되살려 저장 RUNNING 행을
   남기는 결함(`reset*` 분기에는 스냅샷 `defaultStatus`·`canReset` + migration + receipt 계약 변경 필요 — journal 2026-11-25).
-||||||| parent of 75dcae75b (test(admin-e2e): 읽기 전용 live 스펙 drift 정비 — 런타임 feature 표본·nav 정본 화면 이름)
 
 ## 2026-11-24 — 관리자 프런트 ui 0.2.6 채택(VirtualTable 선택 칸 44px)
 
