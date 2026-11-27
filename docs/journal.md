@@ -26,7 +26,7 @@
 - 재적재 순서(배포 뒤 소유자): `knps_protected_areas` 먼저(admin "지금 실행" 또는 provider_dataset 큐 요청) → 확인 게이트
   (active national_park 23·invalid 0·drop 목록에 국립공원 없음) → `knps_park_boundaries`는 **provider_dataset 큐 요청**으로
   (schedule이 없어졌고 tag 없는 launchpad run은 commit 뒤 membership 기록에서 red가 된다). OpenAPI·migration 없음.
-- 재적재 순서(배포 뒤 소유자): `knps_protected_areas` 먼저 → `knps_park_boundaries`(빈 snapshot, 버퍼 21건 은퇴). OpenAPI·migration 없음.
+
 ## 2026-11-27 — 휴게소 먹거리(한국도로공사 메뉴) — 휴게소·고속도로 주유소 상세 (ADR-127)
 
 - 소유자 승인 계획(조사 보고서 2순위, LLM 없음): transport가 KREX 0615(휴게소 코드·상하행)·0502(메뉴)를 하루 한 번 수집해
