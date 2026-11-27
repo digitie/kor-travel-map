@@ -54,6 +54,16 @@ async def _no_route_summaries(_session: Any, _feature_ids: Any) -> dict[str, Any
     return {}
 
 
+def _event_etag(revision: int) -> str:
+    from kortravelmap.api.routers import features as features_mod
+
+    return f'"{revision}-{features_mod._event_projection_digest(None)}"'
+
+
+#: event 행 ETag — 축제 visitor_info 읽기 투영 판 digest가 섞인다(ADR-126).
+_EVENT_ETAG_7 = _event_etag(7)
+
+
 def _expected_uuid(feature_id: str) -> str:
     """mock resolver가 돌려줄 결정적 uuid — **테스트 편의 규약**이지 계약이 아니다.
 
@@ -743,7 +753,8 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
         assert "payload" not in body["data"]["detail"]
         assert body["data"]["updated_at"] == "2026-05-29T00:00:00+09:00"
         assert body["data"]["row_revision"] == 7
-        assert r.headers["ETag"] == '"7"'
+        # event는 축제 visitor_info 읽기 투영 판을 ETag digest에 섞는다(ADR-126).
+        assert r.headers["ETag"] == _EVENT_ETAG_7
         assert body["data"]["curations"] == []
         # T-VN-05: raw observation lineage는 공개 detail에서 제거됐다.
         assert "observations" not in body["data"]
@@ -758,11 +769,11 @@ def test_get_feature_detail_maps_row(client: TestClient, monkeypatch: pytest.Mon
             "/v1/features/f1",
             headers={
                 "Origin": "http://localhost:12705",
-                "If-None-Match": '"7"',
+                "If-None-Match": _EVENT_ETAG_7,
             },
         )
         assert cached.status_code == 304
-        assert cached.headers["ETag"] == '"7"'
+        assert cached.headers["ETag"] == _EVENT_ETAG_7
         assert cached.headers["Access-Control-Allow-Origin"] == (
             "http://localhost:12705"
         )
