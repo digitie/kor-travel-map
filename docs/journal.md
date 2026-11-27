@@ -8,13 +8,17 @@
 - 수정(`admin_feature_repo._admin_features_sql`): 키 단계(`base`: 필터+`sort_key`) → `page`(keyset·LIMIT) → 꾸밈 단계(LATERAL은
   페이지 행에만). 키 단계에는 쓰는 것만: `issue_count` 정렬·`has_issue`면 건수 LATERAL, `provider_dataset_id`면 대표 원천
   LATERAL, `provider` 정렬이면 대표 원천을 `DISTINCT ON` 집합 선택(같은 FROM·순서 조각 — 마지막 키가 PK라 같은 행). 목록 문장
-  동안만 `plan_cache_mode=force_custom_plan`(T-READ-12 방식) — 같은 연결 6번째부터 generic plan이 `provider`를 10~13 s로 되돌렸다.
+  동안만 `plan_cache_mode=force_custom_plan`·`jit=off`(T-READ-12 방식) — 같은 연결 6번째부터 generic plan이 `provider`를
+  10~13 s로 되돌렸고, `kind` 0.6 s 중 0.5 s가 JIT 컴파일이었다.
 - 함께 고친 결함: cursor가 응답의 원문 이름을 싣고 keyset은 `lower(name)`과 비교했다(en_US `'gs25' < 'GS25'`) — prod 실측 같은
   이름 4건이 asc 1건, desc는 같은 행 무한 반복. 이제 cursor는 SQL `sort_key` 값.
-- 실측(prod 읽기 전용, 같은 연결 8회): `kind` 0.6 s·`issue_count` 1.0 s·`provider` 2.8 s, `issue_count`+`has_issue`+`kinds` 29.3→2.7 s.
-  옛/새 결과 15 조합 3쪽까지 값 동일. 잔여: `provider_dataset_id`가 드문 dataset이면 `name` 정렬도 ~3 s(종전과 같음).
+- 실측(prod 읽기 전용, 같은 연결 8회): `kind` 0.13 s·`issue_count` 0.55 s·`provider` 2.1 s, `issue_count`+`has_issue`+`kinds`
+  29.3→2.7 s. 옛/새 결과 prod 15 조합 3쪽까지 값 동일, 적대 리뷰의 차등 시험 4,320 조합 일치. 잔여(후속 후보): `provider` 정렬은
+  hash 노드 ~127 MB를 쓴다 — 대표 원천을 쓰기 경로에서 유지하면 인덱스 keyset이 된다. 드문 `provider_dataset_id` + 이름 정렬 ~3 s,
+  `has_issue`의 EXISTS화·`issue_count`의 GROUP BY join화도 후보(종전보다 느린 조합은 없음).
 - 시험: `tests/integration/test_admin_feature_list_sort.py`(정렬×방향 page 1·2·3 합=전체, 정렬 순서, 대표 원천 일치, 꾸밈
-  LATERAL이 페이지 행만), unit SQL 모양·cursor·plan mode. `test_candidate_arms_use_admin_trigram_indexes`는 앞 시험의 rollback
+  LATERAL이 페이지 행만), unit SQL 모양·cursor·plan mode. `test_t212d`의 이름 정렬 gate는 최상위가 아니라 `page`의
+  `Limit` 아래에 `Sort`가 없는지 본다. `test_candidate_arms_use_admin_trigram_indexes`는 앞 시험의 rollback
   행으로 autoanalyze가 돈 뒤 다른 B-tree 훑기를 골라 깨졌다 — plain index scan도 끄고 본다. journal 2026-10-14~24 70절을
   `archive/journal-2026-10k.md`로 분리(바이트 단위 재구성 검산, 링크만 재기준화). OpenAPI·migration 없음.
 

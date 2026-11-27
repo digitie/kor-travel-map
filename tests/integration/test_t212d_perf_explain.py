@@ -1134,13 +1134,16 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
     _assert_no_seq_scan_on(admin_features_by_name, "features")
     # 인덱스 이름만으로는 "정렬을 인덱스가 대신한다"가 증명되지 않는다(bitmap으로
     # 모아 놓고 다시 Sort해도 이름은 나온다). partial predicate 함의가 실제로
-    # 증명됐는지는 최상위 ``Limit`` 바로 아래에 ``Sort``가 없는 것으로 갈린다 —
-    # 3축을 비웠을 때 나타나던 노드가 정확히 그 ``Sort``다. issue 집계 LATERAL
-    # 안쪽 ``Sort``는 정렬축과 무관하므로 최상위 두 노드만 본다.
-    assert admin_features_by_name["Node Type"] == "Limit", admin_features_by_name
-    assert (
-        admin_features_by_name["Plans"][0]["Node Type"] != "Sort"
-    ), admin_features_by_name["Plans"][0]
+    # 증명됐는지는 페이지를 자르는 ``Limit`` 바로 아래에 ``Sort``가 없는 것으로 갈린다 —
+    # 3축을 비웠을 때 나타나던 노드가 정확히 그 ``Sort``다. 목록 SQL은 키 단계 → ``page``
+    # (keyset·LIMIT) → 꾸밈 단계라, 그 ``Limit``은 최상위가 아니라 keyset 인덱스를 품은
+    # ``page`` 서브트리의 첫 ``Limit``이다(최상위는 꾸밈 LATERAL의 Nested Loop). 꾸밈 단계의
+    # 대표 원천·이슈 LATERAL 안쪽 ``Limit``·``Sort``는 정렬축과 무관하다.
+    page_limit = _page_limit_over_index(
+        admin_features_by_name, "idx_features_admin_lower_name_keyset"
+    )
+    assert page_limit is not None, admin_features_by_name
+    assert page_limit["Plans"][0]["Node Type"] != "Sort", page_limit
 
     # admin **지도**(bbox)와 이름 검색은 상태 무필터일 때 여전히 Seq Scan이다.
     # 0098은 정렬축만 닫았다 — bbox/trgm 축은 실측 두 번이 다 실패했다(전체 인덱스는
@@ -1148,6 +1151,23 @@ async def test_t212d_planner_selects_representative_indexes_without_seqscan_hint
     # 사용 불가). 근거 없는 인덱스를 남기는 대신 공백을 사실로 둔다. 닫으려면 공개
     # partial을 전체로 되돌려 공유하거나 admin 목록에 상태 필터를 필수화해야 하고,
     # 둘 다 표면 결정이라 별도 태스크다(alembic 0098 설계 주석 참조).
+
+
+def _page_limit_over_index(plan: dict[str, Any], index_name: str) -> dict[str, Any] | None:
+    """``index_name`` 스캔을 품은 가장 바깥 ``Limit`` 노드(없으면 ``None``)."""
+
+    def uses(node: dict[str, Any]) -> bool:
+        return node.get("Index Name") == index_name or any(
+            uses(child) for child in node.get("Plans", [])
+        )
+
+    if plan.get("Node Type") == "Limit" and uses(plan):
+        return plan
+    for child in plan.get("Plans", []):
+        found = _page_limit_over_index(child, index_name)
+        if found is not None:
+            return found
+    return None
 
 
 async def test_t212d_ops_and_review_lists_use_expected_indexes(

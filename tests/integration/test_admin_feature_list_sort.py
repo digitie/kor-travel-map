@@ -39,8 +39,9 @@ if TYPE_CHECKING:
 
 pytestmark = pytest.mark.integration
 
-#: 이 파일이 심는 행만 고르는 창 — 다른 seed와 섞이지 않게 updated_at을 미래 한 점에 둔다.
+#: 이 파일이 심는 행만 고르는 창 — 다른 seed와 섞이지 않게 updated_at을 미래 한 시간 안에 둔다.
 _WINDOW = datetime(2031, 1, 1, 0, 0, tzinfo=UTC)
+_WINDOW_END = _WINDOW + timedelta(hours=1)
 _OBSERVED = datetime(2031, 1, 1, 0, 0, tzinfo=UTC)
 
 _SORTS = ("name", "updated_at", "created_at", "kind", "provider", "issue_count")
@@ -78,6 +79,58 @@ async def _two_datasets(session: AsyncSession) -> tuple[int, int]:
     return int(rows[0]), int(rows[1])
 
 
+async def _add_link(
+    session: AsyncSession,
+    feature_id: str,
+    key: str,
+    provider_dataset_id: int,
+    *,
+    observed: datetime,
+    role: str,
+) -> None:
+    """entity·record·head·link 한 벌(head가 그 record를 가리킨다)."""
+
+    session.add(
+        SourceEntityRow(
+            source_entity_key=f"se-{key}",
+            provider_dataset_id=provider_dataset_id,
+            source_entity_type="license_place",
+            source_entity_id=key,
+            first_seen_at=_OBSERVED,
+            last_seen_at=_OBSERVED,
+        )
+    )
+    await session.flush()
+    session.add(
+        SourceRecordRow(
+            source_record_key=key,
+            source_entity_key=f"se-{key}",
+            raw_payload_hash=md5(key.encode("utf-8")).hexdigest(),
+            raw_data={"id": key},
+            fetched_at=_OBSERVED,
+            imported_at=_OBSERVED,
+        )
+    )
+    await session.flush()
+    session.add(
+        SourceEntityHeadRow(
+            source_entity_key=f"se-{key}", current_source_record_key=key, observed_at=observed
+        )
+    )
+    await session.flush()
+    session.add(
+        SourceLinkRow(
+            feature_id=feature_id,
+            source_entity_key=f"se-{key}",
+            source_role=role,
+            match_method="natural_key",
+            confidence=100,
+            created_at=_OBSERVED,
+        )
+    )
+    await session.flush()
+
+
 async def _seed(session: AsyncSession) -> dict[str, str]:
     datasets = await _two_datasets(session)
     ids: dict[str, str] = {}
@@ -98,54 +151,23 @@ async def _seed(session: AsyncSession) -> dict[str, str]:
                 publication_state="published",
                 quality_state="valid",
                 created_at=_WINDOW + timedelta(minutes=created_minute),
-                updated_at=_WINDOW,
+                # 세 값으로 돌려 updated_at 정렬이 동률 처리만 보지 않게 한다.
+                updated_at=_WINDOW + timedelta(minutes=created_minute % 3),
             )
         )
         await session.flush()
         await seed_feature_subtype(session, feature_id=feature_id, kind="place")
         for index, (slot, observed_minute) in enumerate(sources):
-            key = f"admin-list-sort-{label}-{index}"
-            session.add(
-                SourceEntityRow(
-                    source_entity_key=f"se-{key}",
-                    provider_dataset_id=datasets[slot],
-                    source_entity_type="license_place",
-                    source_entity_id=key,
-                    first_seen_at=_OBSERVED,
-                    last_seen_at=_OBSERVED,
-                )
+            await _add_link(
+                session, feature_id, f"admin-list-sort-{label}-{index}", datasets[slot],
+                observed=_OBSERVED + timedelta(minutes=observed_minute), role="primary",
             )
-            await session.flush()
-            session.add(
-                SourceRecordRow(
-                    source_record_key=key,
-                    source_entity_key=f"se-{key}",
-                    raw_payload_hash=md5(key.encode("utf-8")).hexdigest(),
-                    raw_data={"id": key},
-                    fetched_at=_OBSERVED,
-                    imported_at=_OBSERVED,
-                )
+        if label == "ga":
+            # 대표 원천이 아닌 연결 — 더 나중에 관측돼도 primary가 아니므로 고르지 않는다.
+            await _add_link(
+                session, feature_id, f"admin-list-sort-{label}-enrichment", datasets[1],
+                observed=_OBSERVED + timedelta(hours=2), role="enrichment",
             )
-            await session.flush()
-            session.add(
-                SourceEntityHeadRow(
-                    source_entity_key=f"se-{key}",
-                    current_source_record_key=key,
-                    observed_at=_OBSERVED + timedelta(minutes=observed_minute),
-                )
-            )
-            await session.flush()
-            session.add(
-                SourceLinkRow(
-                    feature_id=feature_id,
-                    source_entity_key=f"se-{key}",
-                    source_role="primary",
-                    match_method="natural_key",
-                    confidence=100,
-                    created_at=_OBSERVED,
-                )
-            )
-            await session.flush()
         for issue_index in range(issues):
             await session.execute(
                 text(
@@ -176,7 +198,7 @@ async def _walk(
             page_size=page_size,
             cursor=cursor,
             updated_from=_WINDOW,
-            updated_to=_WINDOW,
+            updated_to=_WINDOW_END,
             **filters,
         )
         items.extend(page.items)
@@ -257,11 +279,13 @@ async def test_admin_feature_provider_sort_key_matches_the_displayed_primary_sou
     }
 
     # 대표 원천이 둘이면 나중에 관측된 쪽이다 — 키 단계(집합 선택)와 응답(LATERAL)이 같다.
+    # ``ga``의 더 나중 연결은 enrichment라 대표가 아니다.
     assert by_id[ids["two-primary"]].primary_provider == providers[second]
     assert by_id[ids["no-source"]].primary_provider is None
     assert by_id[ids["ga"]].primary_provider == providers[first]
 
-    # 같은 대표 원천 필터는 키 단계의 LATERAL로 거른다 — 집합 선택과 같은 행을 고른다.
+    # 같은 대표 원천 필터 — provider 정렬이면 키 단계의 집합 선택(``pick``)으로, 이름 정렬이면
+    # 키 단계의 LATERAL로 거른다. 두 모양이 같은 행을 고른다.
     filtered = await _walk(
         migrated_session, sort="provider", order="asc", page_size=2, provider_dataset_id=second
     )
@@ -305,7 +329,7 @@ async def _analyzed_main_plan(
             order="desc",
             page_size=page_size,
             updated_from=_WINDOW,
-            updated_to=_WINDOW,
+            updated_to=_WINDOW_END,
         )
     finally:
         event.remove(bind, "before_cursor_execute", record)
@@ -333,16 +357,26 @@ async def test_admin_feature_display_values_are_read_for_page_rows_only(
     plan = await _analyzed_main_plan(migrated_session, sort=sort, page_size=page_size)
 
     nodes = _plan_nodes(plan)
-    # 원천 계보 조회는 꾸밈 단계의 LATERAL뿐이고, 그 LATERAL은 페이지 행 수(limit + 1)만큼만
-    # 시작한다 — 행마다 source_links를 한 번 찌른다(그 안쪽 표는 link 수만큼 돈다).
+    # 원천 계보 조회는 꾸밈 단계의 대표 원천 LATERAL(``LIMIT 1``) 하나뿐이고, 그 LATERAL은 페이지
+    # 행 수(limit + 1)만큼만 시작한다. 안쪽 조인 순서(어느 표에서 출발하는지)는 통계에 따라
+    # 바뀌므로 표 노드가 아니라 원천 계보를 품은 ``Limit`` 서브트리의 시작 횟수를 본다.
     # (``provider`` 정렬은 키 단계가 원천을 집합으로 고르므로 여기서 재지 않는다 — 작은 seed에서는
     # planner가 그 집합 선택을 index 조회로 풀어 loops가 행 수가 된다. 정합성은 위 시험이 본다.)
-    link_loops = [
+    lineage_limits = [
         int(node["Actual Loops"])
         for node in nodes
-        if node.get("Relation Name") == "source_links"
+        if node.get("Node Type") == "Limit"
+        and node is not plan
+        and any(
+            inner.get("Relation Name") == "source_links" for inner in _plan_nodes(node)
+        )
+        and not any(
+            inner is not node and inner.get("Node Type") == "Limit"
+            and any(x.get("Relation Name") == "source_links" for x in _plan_nodes(inner))
+            for inner in _plan_nodes(node)
+        )
     ]
-    assert link_loops == [page_size + 1], (sort, link_loops, plan)
+    assert lineage_limits == [page_size + 1], (sort, lineage_limits, plan)
     # 이슈 본문 집계(jsonb_agg)도 페이지 행에만 — 키 단계의 건수 LATERAL은 issue_count 정렬일
     # 때만 feature마다 돈다.
     issue_loops = [

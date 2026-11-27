@@ -1,10 +1,12 @@
 ## 2026-11-27 — 관리자 feature 목록 정렬 지연 수정(키 단계 → 페이지 → 꾸밈 단계)
 
 - `sort=kind|provider|issue_count`가 43만 행마다 표시용 LATERAL을 돌아 유휴 12.7~18.6 s(부하 중 39 s)였다. 표시 값을 페이지 행에만
-  붙이고 `provider` 키는 집합 선택, 목록 문장은 custom plan 강제 → prod 읽기 전용 0.6·2.8·1.0 s. name cursor 대소문자 결함도 고침.
+  붙이고 `provider` 키는 집합 선택, 목록 문장은 custom plan 강제·JIT 끔 → prod 읽기 전용 0.13·2.1·0.55 s. name cursor 대소문자
+  결함도 고침.
   OpenAPI·migration 없음.
 - 다음: 다음 API 이미지 회전에 싣는다. 회전 뒤 n150 API 로그의 `slow_request route=/v1/admin/features`가 사라졌는지,
-  관리자 화면에서 종류·원천·이슈 정렬이 몇 초 안에 뜨는지 확인. 잔여: 드문 `provider_dataset_id` 필터 + 이름 정렬 ~3 s.
+  관리자 화면에서 종류·원천·이슈 정렬이 몇 초 안에 뜨는지 확인. 후속 후보: 대표 원천을 쓰기 경로에서 유지(provider 정렬 hash
+  ~127 MB 제거), 드문 `provider_dataset_id` 필터 + 이름 정렬 ~3 s.
 
 ## 2026-11-25 — 읽기 전용 live 스펙 drift 정비
 

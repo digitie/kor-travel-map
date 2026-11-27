@@ -67,11 +67,11 @@ async def test_candidate_arms_use_admin_trigram_indexes(
     seed가 작아 기본 planner는 Seq Scan을 고를 수 있으므로 seqscan을 끄고 **인덱스가
     후보인지**를 본다 — 술어 식과 인덱스 식이 어긋나면 seqscan을 꺼도 Seq Scan이 남는다.
 
-    plain index scan도 끈다. 앞 시험들이 원천 계보 표에 행을 넣었다 rollback하면 autoanalyze가
-    그 표를 거의 빈 표로 기록하고, planner는 trigram bitmap 대신 다른 B-tree 전체 훑기(예:
-    ``source_links``에서 출발하는 nested loop)로 seqscan을 피한다 — 그러면 갈래의 인덱스가
-    후보인지를 못 본다. bitmap scan은 인덱스 조건이 있어야 하므로 이렇게 끄면 남는 길은 술어와
-    맞는 trigram 인덱스뿐이고, 식이 어긋나면 여전히 Seq Scan이 남는다.
+    plain index scan도 끈다. 앞 시험들이 원천 계보 표에 행을 넣었다 rollback하면 dead tuple을
+    치운 autovacuum이 그 표의 ``reltuples``를 -1(미측정)에서 0으로 바꾸고(시점은 naptime에 따라
+    비결정적), planner는 trigram bitmap 대신 다른 B-tree 전체 훑기로 seqscan을 피한다 — 그러면
+    갈래의 인덱스가 후보인지를 못 본다. bitmap scan은 인덱스 조건이 있어야 하므로 이렇게 끄면
+    남는 길은 술어와 맞는 trigram 인덱스뿐이고, 식이 어긋나면 여전히 Seq Scan이 남는다.
     """
     await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
     await migrated_session.execute(text("SET LOCAL enable_indexscan = off"))

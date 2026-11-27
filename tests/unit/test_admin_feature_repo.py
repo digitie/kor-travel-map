@@ -49,6 +49,9 @@ class _Result:
             return None
         return type("Row", (), self._rows[0])()
 
+    def one(self) -> Any:
+        return type("Row", (), self._rows[0])()
+
     def scalar_one(self) -> Any:
         return next(iter(self._rows[0].values()))
 
@@ -809,7 +812,8 @@ async def test_list_admin_features_without_query_has_no_text_clause() -> None:
 def _list_results(rows: list[dict[str, Any]]) -> list[_Result]:
     """``list_admin_features``의 본 질의 결과 — 앞뒤로 plan_cache_mode 설정 문장이 돈다."""
 
-    return [_Result([{"prior_plan_cache_mode": "auto"}]), _Result(rows), _Result()]
+    prior = _Result([{"prior_plan_cache_mode": "auto", "prior_jit": "on"}])
+    return [prior, _Result(rows), _Result()]
 
 
 def _list_calls(session: _Session) -> tuple[dict[str, Any], ...]:
@@ -925,7 +929,7 @@ def test_admin_features_cursor_normalizes_datetime_and_count_keys() -> None:
 
 @pytest.mark.asyncio
 async def test_list_admin_features_forces_custom_plan_and_restores_it() -> None:
-    """generic plan으로 바뀌지 않게 본 질의 동안만 custom plan을 강제하고 되돌린다."""
+    """본 질의 동안만 custom plan 강제·JIT 끄기를 하고 직전 값으로 되돌린다."""
 
     session = _Session(_list_results([_feature_row("feature-1")]))
 
@@ -934,8 +938,10 @@ async def test_list_admin_features_forces_custom_plan_and_restores_it() -> None:
     on, main, off = session.calls
     assert "set_config('plan_cache_mode', 'force_custom_plan', true)" in on["statement"]
     assert "page AS (" in main["statement"]
+    assert "set_config('jit', 'off', true)" in on["statement"]
     assert "CAST(:prior_plan_cache_mode AS text), true" in off["statement"]
-    assert off["params"] == {"prior_plan_cache_mode": "auto"}
+    assert "CAST(:prior_jit AS text), true" in off["statement"]
+    assert off["params"] == {"prior_plan_cache_mode": "auto", "prior_jit": "on"}
 
 
 def test_feature_id_exact_query_detects_full_feature_ids() -> None:

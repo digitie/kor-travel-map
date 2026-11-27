@@ -1486,20 +1486,26 @@ _ADMIN_FEATURES_HAS_ISSUE_CLAUSE: Final = """
       )"""
 
 
-# 목록 문장 동안만 ``plan_cache_mode=force_custom_plan``(T-READ-12와 같은 이유·같은 방식).
+# 목록 문장 동안만 ``plan_cache_mode=force_custom_plan``·``jit=off``(T-READ-12와 같은 방식).
 # asyncpg는 이 문장을 연결마다 prepared statement로 재사용하고, ``auto``면 6번째 실행부터
 # generic plan(파라미터 값을 모르는 계획)을 고려한다. 필터가 전부 ``CAST(:x) IS NULL OR …``라
 # generic plan은 행 수를 못 읽는다 — ``provider`` 정렬은 같은 연결 6번째 실행부터 집합 선택 대신
 # 행마다 조회하는 계획으로 바뀌어 2.8 s → 10.3~13.1 s가 됐다(prod 읽기 전용 실측 2026-11-27).
-# 매 실행 다시 계획하는 비용은 수 ms다. ``set_config(..., true)``라 transaction 안에서만 살고,
-# 목록이 끝나면 직전 값으로 되돌린다(같은 transaction의 다음 문장에 새지 않게). 목록이 실패하면
-# 되돌리지 않는다 — 그 transaction은 abort됐고 rollback이 설정도 되돌린다.
+# 매 실행 다시 계획하는 비용은 수 ms다. 같은 문장에서 ``jit``도 끈다 — 키 단계의 비용 추정이
+# JIT 문턱(``jit_optimize_above_cost``)을 넘어 ``kind`` 정렬 0.6 s 중 약 0.5 s가 LLVM
+# 컴파일이었다(실행은 ms 단위 top-N이라 컴파일로 되찾을 것이 없다). ``set_config(..., true)``라
+# transaction 안에서만 살고, 목록이 끝나면 직전 값으로 되돌린다(같은 transaction의 다음 문장에
+# 새지 않게). 목록이 실패하면 되돌리지 않는다 — 그 transaction은 abort됐고 rollback이 설정도
+# 되돌린다.
 _ADMIN_FEATURES_CUSTOM_PLAN_ON_SQL: Final[str] = (
     "SELECT current_setting('plan_cache_mode') AS prior_plan_cache_mode, "
-    "set_config('plan_cache_mode', 'force_custom_plan', true)"
+    "current_setting('jit') AS prior_jit, "
+    "set_config('plan_cache_mode', 'force_custom_plan', true), "
+    "set_config('jit', 'off', true)"
 )
 _ADMIN_FEATURES_CUSTOM_PLAN_OFF_SQL: Final[str] = (
-    "SELECT set_config('plan_cache_mode', CAST(:prior_plan_cache_mode AS text), true)"
+    "SELECT set_config('plan_cache_mode', CAST(:prior_plan_cache_mode AS text), true), "
+    "set_config('jit', CAST(:prior_jit AS text), true)"
 )
 
 
@@ -2357,9 +2363,7 @@ async def list_admin_features(
         if len(probed) < probe_limit and len(candidate_ids) <= _ADMIN_FEATURES_Q_CANDIDATE_CAP:
             q_path = "candidates"
             params["q_candidate_ids"] = candidate_ids
-    prior_plan_cache_mode = (
-        await session.execute(text(_ADMIN_FEATURES_CUSTOM_PLAN_ON_SQL), {})
-    ).scalar_one()
+    prior = (await session.execute(text(_ADMIN_FEATURES_CUSTOM_PLAN_ON_SQL), {})).one()
     rows = (
         await session.execute(
             text(
@@ -2379,7 +2383,7 @@ async def list_admin_features(
     ).mappings().all()
     await session.execute(
         text(_ADMIN_FEATURES_CUSTOM_PLAN_OFF_SQL),
-        {"prior_plan_cache_mode": prior_plan_cache_mode},
+        {"prior_plan_cache_mode": prior.prior_plan_cache_mode, "prior_jit": prior.prior_jit},
     )
     items = tuple(_admin_feature_row(row) for row in rows[:effective_limit])
     next_cursor = (
