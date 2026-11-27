@@ -1,16 +1,11 @@
-## 2026-11-27 — 공개 containing-areas API
-
-- `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas` 추가(GiST, 작은 면 먼저, `area_kind` 필터),
-  상세 `area_kind`·`route_type`. OpenAPI·타입 재생성.
-- 다음: 국립공원 경계 재적재(앞 항목) **뒤에** PinVi 상세 패널이 이 API를 쓴다 — 재적재 전엔 버퍼 면이 답이 된다.
-
 ## 2026-11-27 — 국립공원 경계 재원천화(3 km 버퍼 → 한국보호지역 국립공원 행)·면 수리
 
 - 15017313은 공원경계 3 km 버퍼였다. 국립공원 23곳을 한국보호지역 `National Park` 22행 + 승격 팔공산에서 싣고(공식 면적
   ±5.2%, 경주 9 part), 해상 국립공원은 면 위 후보점으로 역지오, 면은 `make_valid`. knps-api 핀 `59fb5b0`(PR#22). OpenAPI·migration 없음.
 - 다음(소유자 배포): Dagster code server 이미지 회전 → `knps_protected_areas` 적재(admin "지금 실행" 또는 provider_dataset 큐
   요청) → 확인(active `national_park` 23·면적비 0.9~1.1·invalid 0) → `knps_park_boundaries`를 provider_dataset 큐 요청으로
-  (버퍼 21건 은퇴). 그 뒤 containing-areas API·PinVi 표시(플래그)를 연다.
+  (버퍼 21건 은퇴). 그 뒤 PinVi 표시(플래그)를 연다.
+- 공개 `GET /v1/features/{id}/containing-areas`·`/containing-areas?lon&lat`(GiST, 작은 면 먼저)·상세 `area_kind`/`route_type`.
 
 ## 2026-11-27 — 휴게소 먹거리(ADR-127, 배포 대기)
 
