@@ -44,7 +44,7 @@ def _filter_sql() -> dict[str, str]:
         sql[f"_CLUSTER_BBOX_POINT_ONLY_SQL_BY_UNIT[{unit}]"] = statement
     for unit, statement in admin_feature_repo._ADMIN_CLUSTER_BBOX_SQL_BY_UNIT.items():
         sql[f"_ADMIN_CLUSTER_BBOX_SQL_BY_UNIT[{unit}]"] = statement
-    for sort in sorted(admin_feature_repo._ADMIN_FEATURE_SORT_COLUMNS):
+    for sort in sorted(admin_feature_repo._ADMIN_FEATURE_SORT_KEYS):
         for order in ("asc", "desc"):
             sql[f"_admin_features_sql({sort},{order})"] = admin_feature_repo._admin_features_sql(
                 sort=sort, order=order

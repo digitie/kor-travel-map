@@ -49,6 +49,9 @@ class _Result:
             return None
         return type("Row", (), self._rows[0])()
 
+    def one(self) -> Any:
+        return type("Row", (), self._rows[0])()
+
     def scalar_one(self) -> Any:
         return next(iter(self._rows[0].values()))
 
@@ -97,6 +100,8 @@ def _feature_row(feature_id: str = "feature-1") -> dict[str, Any]:
         ),
         "created_at": _NOW,
         "updated_at": _NOW,
+        # 목록 SQL이 마지막 행의 정렬 키를 그대로 내보낸다 — cursor는 이 값으로 만든다.
+        "sort_key": 1,
     }
 
 
@@ -135,17 +140,16 @@ def _dedup_row(review_id: str = _REVIEW_KEY_1) -> dict[str, Any]:
 
 
 def test_admin_feature_cursor_round_trip_all_sorts() -> None:
-    item = repo._admin_feature_row(_feature_row())
-
-    for sort, order in (
-        ("name", "asc"),
-        ("kind", "asc"),
-        ("provider", "asc"),
-        ("updated_at", "desc"),
-        ("created_at", "asc"),
-        ("issue_count", "desc"),
+    for sort, order, sort_key in (
+        ("name", "asc", "광화문"),
+        ("kind", "asc", "place"),
+        ("provider", "asc", ""),
+        ("updated_at", "desc", _NOW),
+        ("created_at", "asc", _NOW),
+        ("issue_count", "desc", 1),
     ):
-        cursor = repo._encode_cursor(item, sort=sort, order=order)
+        row = {**_feature_row(), "sort_key": sort_key}
+        cursor = repo._encode_cursor(row, sort=sort, order=order)
         params = repo._cursor_params(cursor, sort=sort, order=order)
         assert params["cursor_feature_id"] == "feature-1"
 
@@ -711,7 +715,7 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
             # 후보 SQL: 같은 feature가 두 갈래에서 나와도 한 번만 넘긴다.
             _Result([{"feature_id": "feature-2"}, {"feature_id": "feature-1"},
                      {"feature_id": "feature-1"}]),
-            _Result([_feature_row("feature-1"), _feature_row("feature-2")]),
+            *_list_results([_feature_row("feature-1"), _feature_row("feature-2")]),
         ]
     )
 
@@ -727,7 +731,7 @@ async def test_list_admin_features_builds_params_and_next_cursor() -> None:
 
     assert len(page.items) == 1
     assert page.next_cursor is not None
-    probe, main = session.calls
+    probe, main = _list_calls(session)
     assert probe["params"] == {"q_like": "%광화문%", "q_candidate_limit": 8001}
     # 기본 범위(all)의 후보는 원천 식별자 갈래까지 보고, 원천 JSON 본문은 보지 않는다(#1475).
     assert "qse.source_entity_id ILIKE" in probe["statement"]
@@ -753,7 +757,7 @@ async def test_list_admin_features_falls_back_to_scan_over_candidate_cap(
     session = _Session(
         [
             _Result([{"feature_id": "feature-1"}, {"feature_id": "feature-2"}]),
-            _Result([_feature_row("feature-1")]),
+            *_list_results([_feature_row("feature-1")]),
         ]
     )
 
@@ -763,7 +767,7 @@ async def test_list_admin_features_falls_back_to_scan_over_candidate_cap(
         search_scope="feature",
     )
 
-    probe, main = session.calls
+    probe, main = _list_calls(session)
     assert probe["params"]["q_candidate_limit"] == 5
     # feature 범위 후보는 원천 갈래를 보지 않는다.
     assert "provider_sync" not in probe["statement"]
@@ -782,13 +786,13 @@ async def test_list_admin_features_truncated_probe_is_not_a_candidate_set(
     session = _Session(
         [
             _Result([{"feature_id": "feature-1"}] * 5),
-            _Result([_feature_row("feature-1")]),
+            *_list_results([_feature_row("feature-1")]),
         ]
     )
 
     await repo.list_admin_features(session, q="광화문")  # type: ignore[arg-type]
 
-    probe, main = session.calls
+    probe, main = _list_calls(session)
     assert probe["params"]["q_candidate_limit"] == 5
     assert "q_candidate_ids" not in main["params"]
     assert "MATERIALIZED" not in main["statement"]
@@ -796,13 +800,148 @@ async def test_list_admin_features_truncated_probe_is_not_a_candidate_set(
 
 @pytest.mark.asyncio
 async def test_list_admin_features_without_query_has_no_text_clause() -> None:
-    session = _Session([_Result([_feature_row("feature-1")])])
+    session = _Session(_list_results([_feature_row("feature-1")]))
 
     await repo.list_admin_features(session)  # type: ignore[arg-type]
 
-    (call,) = session.calls
+    (call,) = _list_calls(session)
     assert call["params"]["q_like"] is None
     assert ":q_like" not in call["statement"]
+
+
+def _list_results(rows: list[dict[str, Any]]) -> list[_Result]:
+    """``list_admin_features``의 본 질의 결과 — 앞뒤로 plan_cache_mode 설정 문장이 돈다."""
+
+    prior = _Result([{"prior_plan_cache_mode": "auto", "prior_jit": "on"}])
+    return [prior, _Result(rows), _Result()]
+
+
+def _list_calls(session: _Session) -> tuple[dict[str, Any], ...]:
+    """plan_cache_mode 설정 문장을 뺀 호출 — 후보 probe와 본 질의만."""
+
+    return tuple(call for call in session.calls if "plan_cache_mode" not in call["statement"])
+
+
+def _key_phase(statement: str) -> str:
+    """목록 SQL의 키 단계(``page`` 앞까지) — 전체 feature에 도는 부분이다."""
+
+    head, sep, _ = statement.partition("\npage AS (")
+    assert sep, statement
+    return head
+
+
+def _decoration_phase(statement: str) -> str:
+    _, sep, tail = statement.partition("LIMIT :limit_plus_one\n)")
+    assert sep, statement
+    return tail
+
+
+@pytest.mark.parametrize("sort", ["name", "updated_at", "created_at", "kind"])
+def test_admin_features_key_phase_has_no_display_laterals(sort: str) -> None:
+    """정렬 키가 feature 열이면 키 단계에 원천·이슈 LATERAL이 없다.
+
+    종전에는 표시용 LATERAL이 키 단계 안에 있어서 ``kind`` 정렬이 전체 feature(prod 43만 행)
+    마다 원천 계보 다섯 표와 이슈 집계를 돈 뒤에 top-N을 골랐다(유휴 n150 18.6 s).
+    """
+    statement = repo._admin_features_sql(sort=sort, order="desc")
+
+    key = _key_phase(statement)
+    assert "LEFT JOIN LATERAL" not in key
+    assert "provider_sync.source_entity_heads AS head" not in key
+    assert "data_integrity_violations" not in key
+    decoration = _decoration_phase(statement)
+    # 표시 값은 페이지 행에만 붙는다.
+    assert "provider_sync.source_links AS sl" in decoration
+    assert "jsonb_agg(" in decoration
+    assert "ORDER BY page.sort_key DESC, page.feature_id DESC" in decoration
+
+
+def test_admin_features_issue_sort_counts_without_aggregating_issue_bodies() -> None:
+    statement = repo._admin_features_sql(sort="issue_count", order="desc")
+
+    key = _key_phase(statement)
+    assert "count(*)::integer AS issue_count" in key
+    assert "jsonb_agg(" not in key
+    assert "provider_sync.source_entity_heads AS head" not in key
+    assert "base.issue_count > 0" in statement
+
+
+def test_admin_features_provider_sort_picks_sources_as_one_set() -> None:
+    """``provider`` 정렬은 대표 원천을 행마다가 아니라 집합으로 한 번에 고른다."""
+
+    statement = repo._admin_features_sql(sort="provider", order="asc")
+
+    key = _key_phase(statement)
+    assert "filtered AS MATERIALIZED (" in key
+    assert "SELECT DISTINCT ON (sl.feature_id)" in key
+    assert "LEFT JOIN LATERAL" not in key
+    # 집합 선택과 꾸밈 단계의 LATERAL은 같은 순서 조각으로 같은 행을 고른다.
+    order = repo._ADMIN_FEATURES_PRIMARY_SOURCE_ORDER
+    assert f"ORDER BY sl.feature_id, {order}" in key
+    assert f"ORDER BY {order}\n        LIMIT 1" in _decoration_phase(statement)
+    assert ":provider_dataset_id" not in statement
+
+
+@pytest.mark.parametrize("sort", ["name", "provider"])
+def test_admin_features_provider_filter_reads_the_primary_source_in_key_phase(sort: str) -> None:
+    statement = repo._admin_features_sql(sort=sort, order="asc", provider_filter=True)
+
+    assert "ps.provider_dataset_id = CAST(:provider_dataset_id AS bigint)" in _key_phase(statement)
+
+
+def test_admin_features_has_issue_filter_counts_in_key_phase() -> None:
+    statement = repo._admin_features_sql(sort="name", order="asc", issue_filter=True)
+
+    key = _key_phase(statement)
+    assert "count(*)::integer AS issue_count" in key
+    assert "provider_sync.source_entity_heads AS head" not in key
+    assert "CAST(:has_issue AS boolean)" in statement
+
+
+def test_admin_features_cursor_carries_the_sql_sort_key() -> None:
+    """cursor 값은 keyset이 비교하는 ``lower(name)`` 값이다 — 응답의 원문 이름이 아니다.
+
+    원문을 실으면 en_US 정렬에서 ``'gs25' < 'GS25'``라 같은 이름의 행이 asc에서는 빠지고
+    desc에서는 같은 행이 끝없이 되돌아왔다(prod 실측: 같은 이름 4건 → asc 1건, desc 같은 행 반복).
+    """
+    row = {"feature_id": "0198d9f1-7a31-7e52-8ea8-cb2548d3a891", "sort_key": "gs25 강남점"}
+
+    cursor = repo._encode_cursor(row, sort="name", order="asc")
+
+    params = repo._cursor_params(cursor, sort="name", order="asc")
+    assert params["cursor_text"] == "gs25 강남점"
+    assert params["cursor_feature_id"] == row["feature_id"]
+
+
+def test_admin_features_cursor_normalizes_datetime_and_count_keys() -> None:
+    feature_id = "0198d9f1-7a31-7e52-8ea8-cb2548d3a891"
+
+    dt_cursor = repo._encode_cursor(
+        {"feature_id": feature_id, "sort_key": _NOW}, sort="updated_at", order="desc"
+    )
+    count_cursor = repo._encode_cursor(
+        {"feature_id": feature_id, "sort_key": 3}, sort="issue_count", order="desc"
+    )
+
+    assert repo._cursor_params(dt_cursor, sort="updated_at", order="desc")["cursor_dt"] == _NOW
+    assert repo._cursor_params(count_cursor, sort="issue_count", order="desc")["cursor_int"] == 3
+
+
+@pytest.mark.asyncio
+async def test_list_admin_features_forces_custom_plan_and_restores_it() -> None:
+    """본 질의 동안만 custom plan 강제·JIT 끄기를 하고 직전 값으로 되돌린다."""
+
+    session = _Session(_list_results([_feature_row("feature-1")]))
+
+    await repo.list_admin_features(session, sort="provider")  # type: ignore[arg-type]
+
+    on, main, off = session.calls
+    assert "set_config('plan_cache_mode', 'force_custom_plan', true)" in on["statement"]
+    assert "page AS (" in main["statement"]
+    assert "set_config('jit', 'off', true)" in on["statement"]
+    assert "CAST(:prior_plan_cache_mode AS text), true" in off["statement"]
+    assert "CAST(:prior_jit AS text), true" in off["statement"]
+    assert off["params"] == {"prior_plan_cache_mode": "auto", "prior_jit": "on"}
 
 
 def test_feature_id_exact_query_detects_full_feature_ids() -> None:
@@ -825,7 +964,7 @@ def test_feature_id_exact_query_detects_full_feature_ids() -> None:
 @pytest.mark.asyncio
 async def test_list_admin_features_full_id_uses_pk_fast_path() -> None:
     feature_id = "f_1168010100_p_a1b2c3d4e5f6a7b8"
-    session = _Session([_Result([_feature_row(feature_id)])])
+    session = _Session(_list_results([_feature_row(feature_id)]))
 
     await repo.list_admin_features(
         session,  # type: ignore[arg-type]
@@ -835,7 +974,7 @@ async def test_list_admin_features_full_id_uses_pk_fast_path() -> None:
         order="desc",
     )
 
-    call = session.calls[0]
+    (call,) = _list_calls(session)
     # 등가 파라미터만 바인딩, ILIKE substring은 비활성.
     assert call["params"]["q_exact"] == feature_id
     assert call["params"]["q_like"] is None
