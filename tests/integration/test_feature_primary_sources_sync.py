@@ -543,3 +543,62 @@ async def test_concurrent_link_writes_on_one_feature_serialize(
         assert drift == 0
     finally:
         await _cleanup(migrated_engine, seed)
+
+
+async def test_repeatable_read_writer_cannot_overwrite_with_a_stale_snapshot(
+    migrated_engine: AsyncEngine,
+) -> None:
+    """REPEATABLE READ writer가 옛 snapshot으로 계산해 사본을 덮지 못한다(적대 리뷰 재현).
+
+    A(READ COMMITTED)가 대표가 아닌 primary를 더하고 commit한다 — 대표는 그대로지만 refresh가
+    사본 행에 새 버전을 쓴다. 그 전에 snapshot을 잡은 B(REPEATABLE READ)가 대표 연결을 지우면,
+    자기 snapshot에는 A의 연결이 없어 틀린 대표를 고른다. refresh가 행을 잠그기만 했다면(lock-only
+    xmax) B는 40001 없이
+    그 값을 썼다. 이제 B는 직렬화 실패로 끝나고 사본은 규칙과 같다.
+    """
+    from sqlalchemy.exc import DBAPIError
+
+    seed = await _commit_seed(migrated_engine, f"rr-{uuid4().hex[:8]}")
+    feature_id = seed["feature_id"]
+    try:
+        async with migrated_engine.connect() as conn_a, migrated_engine.connect() as conn_b:
+            conn_b = await conn_b.execution_options(isolation_level="REPEATABLE READ")
+            await conn_b.begin()
+            await conn_b.execute(text("SELECT 1 FROM feature.features LIMIT 1"))
+            await conn_a.begin()
+            await conn_a.execute(
+                text(
+                    """
+                    INSERT INTO provider_sync.source_links (
+                        feature_id, source_entity_key, source_role, match_method, confidence,
+                        created_at
+                    ) VALUES (CAST(:f AS uuid), :key, 'primary', 'natural_key', 100, :at)
+                    """
+                ),
+                {"f": feature_id, "key": seed["newest"], "at": _T0 + timedelta(minutes=5)},
+            )
+            await conn_a.commit()
+            with pytest.raises(DBAPIError) as raised:
+                await conn_b.execute(
+                    text(
+                        "DELETE FROM provider_sync.source_links "
+                        "WHERE feature_id = CAST(:f AS uuid) AND source_entity_key = :key"
+                    ),
+                    {"f": feature_id, "key": seed["old_rep"]},
+                )
+            assert getattr(raised.value.orig, "sqlstate", None) == "40001"
+            await conn_b.rollback()
+
+        async with migrated_engine.connect() as check:
+            drift = (
+                await check.execute(
+                    text(
+                        f"SELECT count(*) FROM ({PRIMARY_SOURCE_DRIFT_SQL}) AS d "
+                        "WHERE d.id = CAST(:f AS uuid)"
+                    ),
+                    {"f": feature_id},
+                )
+            ).scalar_one()
+        assert drift == 0
+    finally:
+        await _cleanup(migrated_engine, seed)

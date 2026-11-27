@@ -40,6 +40,12 @@ trigger를 걸어야 한다.
    규칙이 기대는 값은 `source_links`의 (feature, entity, role, created_at)과 불변 식별
    (`source_entities.provider_dataset_id`는 `trg_source_entities_identity_and_seen_at`,
    `provider_datasets.provider`는 `trg_provider_dataset_identity_immutable`이 갱신을 거부한다)뿐이다.
+   - 병합(`merge_repo._MOVE_LINKS_SQL`)은 연결을 옮기며 `created_at`을 그대로 둔다. loser의 연결이 더
+     오래됐으면 병합 직후 master의 대표가 loser 쪽 원천이 된다 — "이 Feature에 먼저 붙은"이 아니라
+     "그 원천이 Map에 먼저 들어온" 순서다. 의도한 결과다(먼저 들어온 원천이 더 오래 검증됐다).
+   - 불변 식별을 지키는 두 trigger는 origin 전용(`ENABLE` 기본)이다 — `session_replication_role =
+     replica`로 `provider_datasets.provider`를 바꾸면 사본 `provider`와 정본이 갈린다. 그 갱신은
+     식별 변경이라 운영 경로에 없고, 생기면 F10이 잡는다(사본 trigger만 `ENABLE ALWAYS`).
    - 바뀌는 것: 817건 중 730건의 대표 provider(대부분 TourAPI → 박물관 표준데이터·국가유산·MOIS 등
      먼저 붙은 원천). primary가 하나인 44.1만 건(99.8%)은 그대로다.
 2. **쓰기 시점 유지는 DB trigger로 한다(코드 경로마다 고치지 않는다).** `source_links` 쓰기는
@@ -58,8 +64,11 @@ trigger를 걸어야 한다.
      ④ **새 문장(새 snapshot)**에서 규칙을 다시 계산해 다른 값만 갱신. ②가 ④ 앞이라 같은 Feature의
      서로 다른 연결을 두 transaction이 함께 바꿔도 뒤에 온 쪽이 앞의 commit을 기다렸다가 그것을 보고
      계산한다(READ COMMITTED에서 여러 행에서 유도한 값의 write skew를 막는다 — 시험
-     `test_concurrent_link_writes_on_one_feature_serialize`). REPEATABLE READ 이상의 writer는 ②에서
-     직렬화 실패(40001)로 끝난다 — 어긋난 값을 남기지 않는다.
+     `test_concurrent_link_writes_on_one_feature_serialize`). ④는 값이 같아도 **언제나 새 행 버전을
+     쓴다** — 잠그기만 하고 commit하면 lock-only xmax만 남아, 그 전에 snapshot을 잡은 REPEATABLE
+     READ·SERIALIZABLE writer가 40001 없이 옛 snapshot으로 계산해 덮었다(적대 리뷰 재현). 새 버전이
+     있으면 그 writer는 ②에서 40001로 끝난다(시험
+     `test_repeatable_read_writer_cannot_overwrite_with_a_stale_snapshot`).
    - 잠금 순서: 사본 행은 **잎(leaf) 잠금**이다. trigger가 원본 쓰기 문장의 끝(그 문장이 잡을
      잠금을 다 잡은 뒤)에서 잡아 commit까지 쥔다. 사본 행을 잡는 것은 이 trigger들뿐이고 한 문장
      안에서는 `feature_id` 순서라 trigger끼리 한 문장으로는 교착하지 않는다. 사본 행 대기는 같은
@@ -87,16 +96,18 @@ trigger를 걸어야 한다.
 5. **읽기는 사본만 본다(규칙을 다시 계산하는 곳이 없다).** 관리자 목록(키 단계 정렬·필터, 꾸밈
    단계 표시), nearby(page 행 표시·`providers` 필터), dedup 검토 목록 둘(`psa`·`psb`). 공용 조각은
    `kortravelmap.infra.primary_source`. 관리자 상세의 원천 목록 순서(primary 먼저·관측순)는 "대표"가
-   아니라 전체 원천의 나열이라 그대로 둔다. 지도 bbox의 `providers` 필터는 "primary 중 하나라도"라는
+   아니라 전체 원천의 나열이라 그대로 둔다. 공개 축제·해수욕장 view의 `source_raw_data`(대표 원천의
+   현재 원문)도 사본의 `source_entity_key`를 따라간다 — 종전에는 같은 "먼저 붙은 primary"를 동률
+   깨기만 다르게(`imported_at`) 따로 계산했다. 지도 bbox의 `providers` 필터는 "primary 중 하나라도"라는
    다른 뜻이라 그대로 둔다.
 6. **정합성 검사 F10**(ERROR, `infra.consistency`): 사본과 규칙 view를 전수 대조한다 — 사본 행이
    없는 Feature, 고아 사본 행, 값이 다른 행. trigger가 같은 transaction에서 맞추므로 정상이면 언제나
    0이다(F3과 같은 파생 상태 신뢰 관측). prod 규모 합성 자료에서 3.2 s.
 7. **migration 459는 한 transaction이고, 쓰기를 막는 창을 따라잡기 한 번으로 줄인다.**
    ① 표·view·함수·색인(뜨거운 표 잠금 없음) → ② trigger 없이 5만 행 조각 backfill(`features`·
-   `source_links`는 읽기만 — 적재 계속) → ③ trigger 생성(`SHARE ROW EXCLUSIVE`, `lock_timeout` 5 s —
+   `source_links`는 읽기만 — 적재 계속) → ③ 두 표를 writer 순서(`features` → `source_links`)로 `SHARE ROW EXCLUSIVE` 잠금 후 trigger 생성(`lock_timeout` 5 s —
    진행 중 적재가 있으면 통째로 되돌아가고 다시 돌린다) → ④ 같은 조각으로 따라잡기(②동안 생긴 새
-   Feature·지운 Feature·바뀐 연결). 쓰기 대기는 ③~commit뿐이고 읽기는 막지 않는다. 조각은 문장
+   Feature·지운 Feature·바뀐 연결, 조각마다 규칙 계산 한 번). 쓰기 대기는 ③~commit뿐이고 읽기는 막지 않는다. 조각은 문장
    하나의 메모리·시간을 묶는다(prod 규칙 전체를 한 번에 계산하면 정렬이 worker마다 83 MB를 디스크로
    흘렸고, 5만 행 조각은 3 MB quicksort다). 이 저장소 migration은 한 transaction이라(447 설명 — 중간
    commit은 재시도 불가한 반쪽 상태) autocommit 조각 commit은 쓰지 않는다.
@@ -134,16 +145,18 @@ testcontainer, work_mem 64 MB, jit off, 같은 질의를 옛 코드와 새 코�
 bloat를 포함한다).
 같은 상자에서 통합 시험이 함께 돌아 절대값은 흔들린다 — 옛/새 비율이 판단 근거다.
 
-쓰기 비용(같은 자료):
+쓰기 비용. 운영 적재는 연결 하나에 한 문장(`feature_repo.upsert_source_link`, `INSERT … ON CONFLICT DO
+UPDATE` — INSERT·UPDATE 문장 trigger 둘 다 발화)이다. 그 모양으로 3,000행씩 잰 값(로컬 PG18, 같은 상자에서
+trigger만 끄고 켬):
 
-| 쓰기 | trigger 없이 | trigger와 | 비고 |
-|---|---|---|---|
-| primary 연결 44.2만 행 INSERT(한 문장) | 101 s | 89 s | 사본 44.2만 행 갱신 포함 — 차이가 잡음 안 |
-| 같은 값 UPDATE 21.6만 행(적재 upsert 모양) | 47.5 s | 26.7 s | 규칙 열이 안 바뀌면 사본을 안 건드린다 |
-| `created_at` 바뀐 UPDATE 5만 행 | 6.3 s | 11.2 s | 바뀐 primary 연결 하나당 약 0.1 ms |
+| 쓰기(한 행 한 문장) | trigger 없이 | trigger와 |
+|---|---|---|
+| 새 primary 연결 | 2.97 ms/행 | 4.03 ms/행(**+1.1 ms**) |
+| 같은 값 upsert(재적재) | 3.34 ms/행 | 3.05 ms/행(차이 잡음 안) |
 
-(시험이 함께 돈 상자라 앞의 두 줄은 잡음이 차이보다 크다 — 비용은 "규칙이 실제로 바뀐 Feature 수"에
-비례하고, 같은 값 적재에는 transition table 비교만 남는다.)
+새 primary 연결 비용은 refresh 두 문장(행 잠금·재계산 갱신)이다 — 적대 리뷰가 첫 구현에서 잰 +2.5 ms/행
+(문장 넷)을 보통 경로 두 문장으로 줄였다. MOIS 20만 건 첫 적재면 약 +3.5분, 재적재(같은 값)는 transition
+table 비교뿐이다. 한 문장 bulk(44.2만 행 INSERT)는 trigger 유무 차이가 잡음 안이었다.
 
 ## 남은 일
 
@@ -157,17 +170,31 @@ bloat를 포함한다).
 
 ## 배포
 
-migration 459를 싣는 API 이미지 회전(entrypoint가 `alembic upgrade head`). OpenAPI 변경 없음.
+운영 migration은 Manager의 Map migration one-shot이 돈다(production API entrypoint는 migration을 돌리지
+않는다 — `docker/api-entrypoint.sh`). OpenAPI 변경 없음.
 
-- 시간 추정(prod): backfill 조각 9개 — prod에서 조각 하나의 규칙 계산 0.29 s(읽기 전용 실측), 삽입
-  포함 합 5~8 s(쓰기 막지 않음). 따라잡기 3~5 s — prod 조각 규칙 계산 0.29 s × 9에 사본 비교를 더한 추정(합성 자료·부하 상자에서는
-  17 s였다. 이 동안 `features`·`source_links` 쓰기만
-  대기). 전체 10~20 s.
-- 잠금: ③부터 commit까지 `features`·`source_links`에 `SHARE ROW EXCLUSIVE` — 읽기(공개·관리자
-  조회)는 막지 않고 쓰기(적재·병합·관리자 편집)만 기다린다. 적재 큐·Dagster run이 도는 중이면
-  ③이 5 s 안에 잠금을 못 얻고 migration 전체가 되돌아간다 — 적재를 멈춘(또는 빈) 창에서 회전한다.
-- 확인: 회전 직후 관리자 정합성 검사(F10 0건), `GET /v1/admin/features?sort=provider` 첫 페이지·깊은
-  페이지·`provider_dataset_id`(드문 dataset) + 이름 정렬이 100 ms 안쪽인지, n150 API 로그의
-  `slow_request route=/v1/admin/features`.
-- 되돌리기: forward-only. 표·trigger를 걷는 것은 forward revision이다(옛 코드는 표를 읽지 않으므로
-  이미지만 되돌려도 동작한다 — trigger는 남아 사본을 계속 맞춘다).
+- 선행 조건: **writer drain** — Map Dagster의 적재 sensor·schedule을 멈추고 진행 중 run·큐 요청이 0인지
+  본다. `pg_stat_progress_vacuum`에 `features`·`source_links`의 anti-wraparound vacuum이 없는지 본다(있으면
+  ③이 5 s 안에 잠금을 못 얻는다).
+- 단계와 시간(추정): ① 표·view·함수·색인 — 즉시. ② backfill 조각 9개 — prod 조각 하나의 규칙 계산 0.29 s
+  (읽기 전용 실측), 삽입 포함 5~10 s, 쓰기를 막지 않는다. 그 뒤 ANALYZE·receipt CHECK. ③ `LOCK TABLE
+  features, source_links IN SHARE ROW EXCLUSIVE`(writer와 같은 순서, `lock_timeout` 5 s) → trigger 생성. ④
+  따라잡기 — 조각마다 규칙 계산 한 번(빈 행 삽입·UPDATE·삭제). 0.29 s × 9 + 비교로 **3~6 s**(합성 자료를
+  통합 시험과 같은 상자에서 돌린 첫 구현은 17 s였다 — 그때는 규칙을 조각마다 두 번 계산했다). 전체 15~25 s.
+- 잠금: ③부터 commit까지 `features`·`source_links`에 `SHARE ROW EXCLUSIVE` — 읽기(공개·관리자 조회)는 막지
+  않고 쓰기(적재·병합·관리자 편집)만 기다린다. 관리자 단건 편집(`lock_timeout` 5 s 루틴)은 이 창에 걸리면
+  503 `LOCK_TIMEOUT`으로 끝날 수 있다(재시도 가능).
+- 실패: ③이 5 s 안에 잠금을 못 얻거나 문장 상한(300 s)을 넘으면 migration 전체가 되돌아간다(한 transaction —
+  반쪽 상태 없음). drain을 확인하고 다시 돌린다. 다시 돌리면 backfill부터 다시 한다.
+- 확인: F10 0건, `GET /v1/admin/features?sort=provider` 첫 페이지·깊은 cursor·`provider_dataset_id`(드문
+  dataset) + 이름 정렬이 100 ms 안쪽, API 로그 `slow_request route=/v1/admin/features`, 첫 적재 뒤 40P01 없음.
+- 되돌리기: forward-only. 표·trigger를 걷는 것은 forward revision이다(옛 코드는 표를 읽지 않으므로 이미지만
+  되돌려도 동작한다 — trigger는 남아 사본을 계속 맞춘다).
+
+## 남은 일(리뷰 기록)
+
+- 사본 표는 `fillfactor = 90`이다 — 새 Feature는 빈 행으로 들어온 뒤 연결 trigger가 갱신하고, refresh는 값이
+  같아도 새 버전을 쓴다(RR 안전). autovacuum은 기본값이다. 적재 뒤 `n_dead_tup`을 보고 필요하면 455처럼
+  표 단위 설정을 더한다.
+- `sort=provider`와 선택적 필터(`kind=area` 등)의 계획 시험은 작은 seed라 두지 않았다 — 회전 뒤 실측한다.
+- F10은 규칙 view 전체를 계산한다(합성 3.2 s). 정합성 job 주기 안이다.

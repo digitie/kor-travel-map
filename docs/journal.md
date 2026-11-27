@@ -14,10 +14,15 @@
   dedup 검토 둘. 공용 조각 `infra/primary_source.py`. 정합성 검사 F10(ERROR) 추가. OpenAPI 바이트 변화 없음.
 - migration 459(한 transaction): 표·view·함수·색인 → trigger 없이 5만 행 조각 backfill(쓰기 안 막음) → trigger(`SHARE ROW
   EXCLUSIVE`, `lock_timeout` 5 s) → 같은 조각으로 따라잡기 → ANALYZE. prod 조각 하나의 규칙 계산 0.29 s(전체를 한 번에 하면
-  worker마다 정렬 83 MB 디스크). 쓰기 대기 창 추정 3~5 s.
+  worker마다 정렬 83 MB 디스크). 쓰기 대기 창 추정 3~6 s. 배포는 Manager one-shot, writer drain 선행.
+- 적대 리뷰 2인: ① RR·SERIALIZABLE writer가 lock-only xmax를 지나 옛 snapshot으로 덮는 구멍(재현) → refresh가
+  언제나 새 행 버전을 쓴다(+회귀 시험). ② 행 단위 upsert 비용 +2.5 ms/행 → refresh 보통 경로 두 문장으로 +1.1 ms/행.
+  ③ 따라잡기가 규칙을 두 번 계산 → 한 번. ④ trigger 생성 잠금 순서가 writer와 반대(교착) → `LOCK TABLE features,
+  source_links` 먼저. ⑤ 공개 view `source_raw_data`의 셋째 규칙 사본 → 유지 표로. ANALYZE·receipt는 창 밖으로,
+  fillfactor 90.
 - 합성 prod 규모(44.2만, 실제 dataset 분포, 로컬 PG18, 통합 시험과 같은 상자): provider asc 7.6 s → 3.9 ms, desc 2.5 ms, 22만
   번째 cursor 5.6 s → 3.0 ms, 드문 dataset + 이름 28.8 s → 2.1 ms, provider + MOIS 3.6 s → 298 ms, name·kind 회귀 없음. F10
-  3.2 s·0건. 쓰기: 같은 값 upsert는 사본을 안 건드림, 규칙이 바뀐 primary 연결 하나당 약 0.1 ms.
+  3.2 s·0건. 쓰기(운영 모양 — 연결 하나에 한 문장 upsert): 새 primary +1.1 ms/행, 같은 값 재적재 차이 없음.
 - 시험: `tests/integration/test_feature_primary_sources_sync.py`(쓰기 종류별 사본=규칙, data-modifying CTE, replica 역할·런타임
   login, view 술어 push-down, 따라잡기 SQL 복구, 두 transaction 경쟁 2순서), `test_admin_feature_list_sort.py` 규칙·계획 갱신,
   unit SQL 모양·F10 순서. head 오라클·migration graph·runtime 권한 표 갱신.

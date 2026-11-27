@@ -103,6 +103,7 @@ CREATE TABLE feature.feature_primary_sources (
         AND (provider_dataset_id IS NULL) = (provider IS NULL)
     )
 )
+WITH (fillfactor = 90)
 """
 
 #: 정렬·필터 색인. 식은 ``admin_feature_repo``의 정렬 키·필터 술어와 글자 그대로 같아야 한다.
@@ -114,54 +115,72 @@ _INDEX_SQL: Final[tuple[str, ...]] = (
 )
 
 #: 주어진 Feature들의 행을 규칙에 맞춘다 — 모든 trigger가 이 하나를 부른다.
-#: ① 살아 있는 Feature의 행을 보장한다(잠금 자리). ② 그 행들을 ``feature_id`` 순서로 잠근다.
-#: ③ 사라진 Feature의 행을 지운다. ④ **새 문장(새 snapshot)**에서 규칙을 다시 계산해 다른 값만
-#: 고친다. ②가 ④ 앞에 있어서, 같은 Feature의 연결을 함께 바꾼 다른 transaction이 있으면 그
-#: commit을 기다린 뒤에 계산한다. 규칙 view는 ``feature_id = ANY(...)``를 안으로 내려 받는다
-#: (조인 조건으로 두면 view 전체를 계산한다 — 그래서 바깥 조인이 아니라 부분 질의에 술어를 둔다).
+#:
+#: ① 행들을 ``feature_id`` 순서로 잠근다. ② 잠근 행이 모자라면(행이 아직 없는 새 Feature — 같은
+#: 문장의 data-modifying CTE·backfill 전 창 — 또는 이미 지운 Feature) 산 Feature의 행을 만들고 죽은
+#: 것의 행을 지운 뒤 다시 잠근다. 보통 경로(행이 다 있다)는 ①과 ③ 두 문장이다 — 적재는 연결 하나에
+#: 한 문장이라 문장 수가 곧 비용이다(적대 리뷰 실측). ③ **새 문장(새 snapshot)**에서 규칙을 다시
+#: 계산해 쓴다. ①이 ③ 앞이라 같은 Feature의 연결을 함께 바꾼 다른 transaction이 있으면 그 commit을
+#: 기다린 뒤 그것을 보고 계산한다. ③은 값이 같아도 **언제나 새 행 버전을 쓴다** — 잠그기만 하고
+#: commit하면 xmax가 lock-only로 남아, 그 전에 snapshot을 잡은 REPEATABLE READ·SERIALIZABLE writer가
+#: 40001 없이 옛 snapshot으로 계산해 덮는다(적대 리뷰 재현). 새 버전이 있으면 그 writer는 ①에서
+#: 40001로 끝난다. refresh는 primary 연결이 실제로 바뀐 Feature에만 돈다. 규칙 view는
+#: ``feature_id = ANY(...)``를 안으로 내려 받는다(조인 조건으로 두면 view 전체를 계산한다 — 그래서
+#: 부분 질의에 술어를 둔다).
 _REFRESH_FUNCTION_SQL: Final[str] = """
 CREATE FUNCTION feature.refresh_feature_primary_sources(p_feature_ids uuid[]) RETURNS void
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
+DECLARE
+    v_ids uuid[];
+    v_locked bigint;
 BEGIN
-    IF p_feature_ids IS NULL OR cardinality(p_feature_ids) = 0 THEN
+    v_ids := ARRAY(
+        SELECT DISTINCT id FROM unnest(p_feature_ids) AS t(id) WHERE id IS NOT NULL ORDER BY id
+    );
+    IF cardinality(v_ids) = 0 THEN
         RETURN;
     END IF;
-    INSERT INTO feature.feature_primary_sources AS ps (feature_id)
-    SELECT f.feature_id
-      FROM feature.features AS f
-     WHERE f.feature_id = ANY(p_feature_ids)
-     ORDER BY f.feature_id
-    ON CONFLICT (feature_id) DO NOTHING;
     PERFORM 1
        FROM feature.feature_primary_sources AS ps
-      WHERE ps.feature_id = ANY(p_feature_ids)
+      WHERE ps.feature_id = ANY(v_ids)
       ORDER BY ps.feature_id
         FOR UPDATE;
-    DELETE FROM feature.feature_primary_sources AS ps
-     WHERE ps.feature_id = ANY(p_feature_ids)
-       AND NOT EXISTS (
-           SELECT 1 FROM feature.features AS f WHERE f.feature_id = ps.feature_id
-       );
+    GET DIAGNOSTICS v_locked = ROW_COUNT;
+    IF v_locked < cardinality(v_ids) THEN
+        INSERT INTO feature.feature_primary_sources AS ps (feature_id)
+        SELECT f.feature_id
+          FROM feature.features AS f
+         WHERE f.feature_id = ANY(v_ids)
+         ORDER BY f.feature_id
+        ON CONFLICT (feature_id) DO NOTHING;
+        DELETE FROM feature.feature_primary_sources AS ps
+         WHERE ps.feature_id = ANY(v_ids)
+           AND NOT EXISTS (
+               SELECT 1 FROM feature.features AS f WHERE f.feature_id = ps.feature_id
+           );
+        PERFORM 1
+           FROM feature.feature_primary_sources AS ps
+          WHERE ps.feature_id = ANY(v_ids)
+          ORDER BY ps.feature_id
+            FOR UPDATE;
+    END IF;
     UPDATE feature.feature_primary_sources AS ps
        SET source_entity_key = picked.source_entity_key,
            provider_dataset_id = picked.provider_dataset_id,
            provider = picked.provider
       FROM (
           SELECT ids.feature_id, rule.source_entity_key, rule.provider_dataset_id, rule.provider
-            FROM (SELECT DISTINCT unnest(p_feature_ids) AS feature_id) AS ids
+            FROM unnest(v_ids) AS ids(feature_id)
             LEFT JOIN (
                 SELECT r.feature_id, r.source_entity_key, r.provider_dataset_id, r.provider
                   FROM feature.feature_primary_source_rule AS r
-                 WHERE r.feature_id = ANY(p_feature_ids)
+                 WHERE r.feature_id = ANY(v_ids)
             ) AS rule
               ON rule.feature_id = ids.feature_id
       ) AS picked
-     WHERE ps.feature_id = picked.feature_id
-       AND (ps.source_entity_key, ps.provider_dataset_id, ps.provider)
-           IS DISTINCT FROM
-           (picked.source_entity_key, picked.provider_dataset_id, picked.provider);
+     WHERE ps.feature_id = picked.feature_id;
 END;
 $$
 """
@@ -263,8 +282,11 @@ _REVOKE_FUNCTION_SQL: Final[tuple[str, ...]] = (
     "REVOKE ALL ON FUNCTION feature.truncate_feature_primary_sources() FROM PUBLIC",
 )
 
-#: transition table을 쓰는 trigger는 사건 하나에 하나씩 만든다.
+#: transition table을 쓰는 trigger는 사건 하나에 하나씩 만든다. 첫 문장이 두 표를 writer와 같은
+#: 순서(``features`` → ``source_links``)로 한 번에 잠근다 — trigger를 하나씩 만들며 반대 순서로
+#: 잡으면 Feature를 넣고 연결을 넣으려는 writer와 교착한다(적대 리뷰).
 _TRIGGER_SQL: Final[tuple[str, ...]] = (
+    "LOCK TABLE feature.features, provider_sync.source_links IN SHARE ROW EXCLUSIVE MODE",
     "CREATE TRIGGER trg_source_links_primary_source_insert "
     "AFTER INSERT ON provider_sync.source_links "
     "REFERENCING NEW TABLE AS new_links FOR EACH STATEMENT "
@@ -353,10 +375,23 @@ def _backfill_statements(lower: bool, upper: bool) -> tuple[str, ...]:
 
 
 def _catch_up_sql(lower: bool, upper: bool) -> tuple[str, ...]:
-    """trigger 잠금 아래에서 backfill 뒤 생긴 차이를 고친다(넣기·고치기·지우기)."""
+    """trigger 잠금 아래에서 backfill 뒤 생긴 차이를 고친다(넣기·고치기·지우기).
+
+    빠진 행은 빈 행으로 넣고 값은 이어지는 UPDATE가 채운다 — 조각마다 규칙 계산은 그 UPDATE 한
+    번뿐이다(backfill 문장을 다시 쓰면 이미 있는 행에도 규칙을 계산해 잠금 창이 두 배가 된다).
+    """
 
     return (
-        _backfill_sql(lower, upper),
+        f"""
+INSERT INTO feature.feature_primary_sources (feature_id)
+SELECT f.feature_id
+  FROM feature.features AS f
+ WHERE {_slice_predicate("f.feature_id", lower, upper)}
+   AND NOT EXISTS (
+       SELECT 1 FROM feature.feature_primary_sources AS cur
+        WHERE cur.feature_id = f.feature_id
+   )
+""",
         f"""
 UPDATE feature.feature_primary_sources AS ps
    SET source_entity_key = picked.source_entity_key,
@@ -478,14 +513,16 @@ _SETUP_STATEMENTS: Final[tuple[str, ...]] = (
     _TRUNCATE_SYNC_FUNCTION_SQL,
     *_REVOKE_FUNCTION_SQL,
 )
-_TRIGGER_STATEMENTS: Final[tuple[str, ...]] = (*_TRIGGER_SQL, *_ENABLE_ALWAYS_SQL)
-_FINISH_STATEMENTS: Final[tuple[str, ...]] = (
+#: backfill 뒤·trigger 앞 — 쓰기 대기 창 밖에서 통계와 receipt CHECK를 마친다.
+_PRE_TRIGGER_STATEMENTS: Final[tuple[str, ...]] = (
     "ANALYZE feature.feature_primary_sources",
     _RECEIPT_HEAD_CHECK_SQL,
-    "SET ROLE " + _SCHEMA_OWNER,
 )
+_TRIGGER_STATEMENTS: Final[tuple[str, ...]] = (*_TRIGGER_SQL, *_ENABLE_ALWAYS_SQL)
+_FINISH_STATEMENTS: Final[tuple[str, ...]] = ("SET ROLE " + _SCHEMA_OWNER,)
 _UPGRADE_STATEMENTS: Final[tuple[str, ...]] = (
     *_SETUP_STATEMENTS,
+    *_PRE_TRIGGER_STATEMENTS,
     *_TRIGGER_STATEMENTS,
     *_FINISH_STATEMENTS,
 )
@@ -535,6 +572,8 @@ def upgrade() -> None:
         bind.execute(text(statement))
     # 2. trigger 없이 채운다 — 적재는 계속된다.
     run_slices(_backfill_statements)
+    for statement in _PRE_TRIGGER_STATEMENTS:
+        bind.execute(text(statement))
     # 3. trigger — 이때부터 commit까지 두 표의 쓰기가 기다린다.
     cap("lock_timeout", _TRIGGER_LOCK_TIMEOUT_MS)
     for statement in _TRIGGER_STATEMENTS:

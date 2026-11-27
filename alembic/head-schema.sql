@@ -8857,44 +8857,55 @@ CREATE FUNCTION feature.refresh_feature_primary_sources(p_feature_ids uuid[]) RE
     LANGUAGE plpgsql SECURITY DEFINER
     SET search_path TO 'pg_catalog'
     AS $$
+DECLARE
+    v_ids uuid[];
+    v_locked bigint;
 BEGIN
-    IF p_feature_ids IS NULL OR cardinality(p_feature_ids) = 0 THEN
+    v_ids := ARRAY(
+        SELECT DISTINCT id FROM unnest(p_feature_ids) AS t(id) WHERE id IS NOT NULL ORDER BY id
+    );
+    IF cardinality(v_ids) = 0 THEN
         RETURN;
     END IF;
-    INSERT INTO feature.feature_primary_sources AS ps (feature_id)
-    SELECT f.feature_id
-      FROM feature.features AS f
-     WHERE f.feature_id = ANY(p_feature_ids)
-     ORDER BY f.feature_id
-    ON CONFLICT (feature_id) DO NOTHING;
     PERFORM 1
        FROM feature.feature_primary_sources AS ps
-      WHERE ps.feature_id = ANY(p_feature_ids)
+      WHERE ps.feature_id = ANY(v_ids)
       ORDER BY ps.feature_id
         FOR UPDATE;
-    DELETE FROM feature.feature_primary_sources AS ps
-     WHERE ps.feature_id = ANY(p_feature_ids)
-       AND NOT EXISTS (
-           SELECT 1 FROM feature.features AS f WHERE f.feature_id = ps.feature_id
-       );
+    GET DIAGNOSTICS v_locked = ROW_COUNT;
+    IF v_locked < cardinality(v_ids) THEN
+        INSERT INTO feature.feature_primary_sources AS ps (feature_id)
+        SELECT f.feature_id
+          FROM feature.features AS f
+         WHERE f.feature_id = ANY(v_ids)
+         ORDER BY f.feature_id
+        ON CONFLICT (feature_id) DO NOTHING;
+        DELETE FROM feature.feature_primary_sources AS ps
+         WHERE ps.feature_id = ANY(v_ids)
+           AND NOT EXISTS (
+               SELECT 1 FROM feature.features AS f WHERE f.feature_id = ps.feature_id
+           );
+        PERFORM 1
+           FROM feature.feature_primary_sources AS ps
+          WHERE ps.feature_id = ANY(v_ids)
+          ORDER BY ps.feature_id
+            FOR UPDATE;
+    END IF;
     UPDATE feature.feature_primary_sources AS ps
        SET source_entity_key = picked.source_entity_key,
            provider_dataset_id = picked.provider_dataset_id,
            provider = picked.provider
       FROM (
           SELECT ids.feature_id, rule.source_entity_key, rule.provider_dataset_id, rule.provider
-            FROM (SELECT DISTINCT unnest(p_feature_ids) AS feature_id) AS ids
+            FROM unnest(v_ids) AS ids(feature_id)
             LEFT JOIN (
                 SELECT r.feature_id, r.source_entity_key, r.provider_dataset_id, r.provider
                   FROM feature.feature_primary_source_rule AS r
-                 WHERE r.feature_id = ANY(p_feature_ids)
+                 WHERE r.feature_id = ANY(v_ids)
             ) AS rule
               ON rule.feature_id = ids.feature_id
       ) AS picked
-     WHERE ps.feature_id = picked.feature_id
-       AND (ps.source_entity_key, ps.provider_dataset_id, ps.provider)
-           IS DISTINCT FROM
-           (picked.source_entity_key, picked.provider_dataset_id, picked.provider);
+     WHERE ps.feature_id = picked.feature_id;
 END;
 $$;
 
@@ -16731,7 +16742,8 @@ CREATE TABLE feature.feature_primary_sources (
     provider_dataset_id bigint,
     provider text,
     CONSTRAINT ck_feature_primary_sources_shape CHECK ((((source_entity_key IS NULL) = (provider_dataset_id IS NULL)) AND ((provider_dataset_id IS NULL) = (provider IS NULL))))
-);
+)
+WITH (fillfactor='90');
 
 
 ALTER TABLE feature.feature_primary_sources OWNER TO ktm_feature_schema_owner;

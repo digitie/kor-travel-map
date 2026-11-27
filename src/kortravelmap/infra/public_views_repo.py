@@ -149,21 +149,19 @@ LEFT JOIN LATERAL (
 ) AS sp ON true
 """
 
+#: 대표 원천(ADR-125)의 현재 원문. 대표는 유지된 ``feature.feature_primary_sources``가
+#: 정하고(가장 먼저 붙은 primary 연결), 여기서는 그 entity의 head가 가리키는 record만
+#: 읽는다 — 규칙을 다시 쓰지 않는다.
 _PRIMARY_SOURCE_LATERAL_SQL: Final[str] = """
+LEFT JOIN feature.feature_primary_sources AS ps_row
+  ON ps_row.feature_id = f.feature_id
 LEFT JOIN LATERAL (
     SELECT sr.raw_data AS source_raw_data
-    FROM provider_sync.source_links AS sl
-    JOIN provider_sync.source_entities AS se
-      ON se.source_entity_key = sl.source_entity_key
-    JOIN provider_sync.source_entity_heads AS head
-      ON head.source_entity_key = se.source_entity_key
+    FROM provider_sync.source_entity_heads AS head
     JOIN provider_sync.source_records AS sr
       ON sr.source_entity_key = head.source_entity_key
      AND sr.source_record_key = head.current_source_record_key
-    WHERE sl.feature_id = f.feature_id
-      AND sl.source_role = 'primary'
-    ORDER BY sl.created_at ASC, sr.imported_at ASC, sr.source_record_key ASC
-    LIMIT 1
+    WHERE head.source_entity_key = ps_row.source_entity_key
 ) AS ps ON true
 """
 
