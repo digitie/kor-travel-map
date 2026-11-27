@@ -1,5 +1,10 @@
 # CHANGELOG
 
+## 2026-11-27 — 공개 containing-areas API
+
+- `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas?lon&lat`: 점을 덮는 공개 area(국립공원·
+  보호지역 등) — `contained-features`의 역방향. 공개 상세에 `area_kind`·`route_type` 사본 필드(additive).
+
 ## 2026-11-27 — 국립공원 경계 재원천화·보호지역 면 수리
 
 - 국립공원 area의 원천을 `knps_park_boundaries`(15017313, 실제로는 공원경계 3 km 버퍼)에서 `knps_protected_areas`의 국립공원

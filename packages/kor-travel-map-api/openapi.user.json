@@ -542,6 +542,164 @@
         "title": "ClusterSummary",
         "type": "object"
       },
+      "ContainingAreaSummary": {
+        "additionalProperties": false,
+        "description": "점(또는 feature 대표점)을 덮는 공개 area 1건.",
+        "properties": {
+          "area_kind": {
+            "description": "area 종류(`AreaKind`). `national_park`(국립공원)·`protected_area`(보호지역)·`hazard_zone`(위험지역 — 소비자는 경고 표시) 등. **열린 집합** — 모르는 값은 일반 area로 다룬다.",
+            "title": "Area Kind",
+            "type": "string"
+          },
+          "area_square_meters": {
+            "description": "측지 면적(m²).",
+            "minimum": 0.0,
+            "title": "Area Square Meters",
+            "type": "number"
+          },
+          "boundary_source": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Boundary Source"
+          },
+          "category": {
+            "title": "Category",
+            "type": "string"
+          },
+          "feature_id": {
+            "description": "area feature 참조 (UUID 정본 문자열).",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "feature_uuid": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Feature Uuid"
+          },
+          "marker_color": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Color"
+          },
+          "marker_icon": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Marker Icon"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "category",
+          "area_kind",
+          "area_square_meters"
+        ],
+        "title": "ContainingAreaSummary",
+        "type": "object"
+      },
+      "ContainingAreasData": {
+        "additionalProperties": false,
+        "description": "``GET /features/containing-areas``·``/features/{feature_id}/containing-areas`` data.",
+        "properties": {
+          "feature_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "feature 기준 조회일 때 그 feature(UUID 정본). 점 조회면 null.",
+            "title": "Feature Id"
+          },
+          "items": {
+            "description": "점을 덮는 area — 작은 면(가장 구체적인 구역) 먼저. 경계 위 점도 포함.",
+            "items": {
+              "$ref": "#/components/schemas/ContainingAreaSummary"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "lat": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "조회한 점의 위도(WGS84). lon과 함께 null.",
+            "title": "Lat"
+          },
+          "lon": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "조회한 점의 경도(WGS84). feature 기준 조회에서 대표 좌표가 없으면 null(items는 빈 목록).",
+            "title": "Lon"
+          }
+        },
+        "required": [
+          "lon",
+          "lat",
+          "items"
+        ],
+        "title": "ContainingAreasData",
+        "type": "object"
+      },
+      "ContainingAreasResponse": {
+        "additionalProperties": false,
+        "description": "점을 덮는 공개 area 목록 응답 (``contained-features``의 역방향).",
+        "properties": {
+          "data": {
+            "$ref": "#/components/schemas/ContainingAreasData"
+          },
+          "meta": {
+            "$ref": "#/components/schemas/Meta"
+          }
+        },
+        "required": [
+          "data",
+          "meta"
+        ],
+        "title": "ContainingAreasResponse",
+        "type": "object"
+      },
       "CurationCollectionData": {
         "additionalProperties": false,
         "properties": {
@@ -802,6 +960,18 @@
             "title": "Address",
             "type": "object"
           },
+          "area_kind": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=area일 때 `detail.area_kind`의 사본 — 값은 `AreaKind`(national_park·protected_area·hazard_zone…). 다른 kind는 null.",
+            "title": "Area Kind"
+          },
           "area_square_meters": {
             "anyOf": [
               {
@@ -918,6 +1088,18 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "route_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=route일 때 `detail.route_type`의 사본(hiking_trail…). 다른 kind는 null.",
+            "title": "Route Type"
           },
           "row_revision": {
             "description": "server-owned feature revision. 공개 장소 속성이 없으면 ETag과 같은 값이다(있으면 ETag에 속성 digest가 붙는다).",
@@ -4100,6 +4282,133 @@
         ]
       }
     },
+    "/v1/features/containing-areas": {
+      "get": {
+        "operationId": "list_areas_containing_point_v1_features_containing_areas_get",
+        "parameters": [
+          {
+            "description": "경도(WGS84).",
+            "in": "query",
+            "name": "lon",
+            "required": true,
+            "schema": {
+              "description": "경도(WGS84).",
+              "maximum": 132.0,
+              "minimum": 124.0,
+              "title": "Lon",
+              "type": "number"
+            }
+          },
+          {
+            "description": "위도(WGS84).",
+            "in": "query",
+            "name": "lat",
+            "required": true,
+            "schema": {
+              "description": "위도(WGS84).",
+              "maximum": 39.5,
+              "minimum": 33.0,
+              "title": "Lat",
+              "type": "number"
+            }
+          },
+          {
+            "description": "area 종류 반복 필터(`area_kind`). 미지정 시 전체.",
+            "in": "query",
+            "name": "area_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "area",
+                      "national_park",
+                      "provincial_park",
+                      "recreation_forest",
+                      "tourism_district",
+                      "beach",
+                      "campsite",
+                      "heritage_area",
+                      "natural_heritage_area",
+                      "buried_heritage_area",
+                      "hazard_zone",
+                      "protected_area",
+                      "other"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "area 종류 반복 필터(`area_kind`). 미지정 시 전체.",
+              "title": "Area Kind"
+            }
+          },
+          {
+            "description": "최대 건수.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "최대 건수.",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainingAreasResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "좌표·area_kind·page_size 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "좌표를 덮는 공개 area 목록 (국립공원·보호지역 등)",
+        "tags": [
+          "features"
+        ]
+      }
+    },
     "/v1/features/in-bounds": {
       "get": {
         "operationId": "list_public_features_in_bounds_v1_features_in_bounds_get",
@@ -5217,6 +5526,127 @@
           }
         ],
         "summary": "area feature 안에 포함된 point feature 목록",
+        "tags": [
+          "features"
+        ]
+      }
+    },
+    "/v1/features/{feature_id}/containing-areas": {
+      "get": {
+        "description": "feature의 대표점(``coord``) **한 점**을 덮는 area. area feature 자신은 뺀다.\n\n점 feature(place·event…)용이다. route·area의 대표점은 기하 무게중심(국립공원은 면 위 anchor)이라\n선·면 전체의 포함 관계가 아니다 — 공원을 두르는 둘레길의 무게중심은 공원 안에 떨어질 수 있다.\n대표 좌표가 없는 feature는 200 + 빈 ``items``(``lon``/``lat`` null)다 — 입력 오류가 아니다.",
+        "operationId": "get_feature_containing_areas_v1_features__feature_id__containing_areas_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "feature_id",
+            "required": true,
+            "schema": {
+              "title": "Feature Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "area 종류 반복 필터(`area_kind`). 미지정 시 전체.",
+            "in": "query",
+            "name": "area_kind",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "enum": [
+                      "area",
+                      "national_park",
+                      "provincial_park",
+                      "recreation_forest",
+                      "tourism_district",
+                      "beach",
+                      "campsite",
+                      "heritage_area",
+                      "natural_heritage_area",
+                      "buried_heritage_area",
+                      "hazard_zone",
+                      "protected_area",
+                      "other"
+                    ],
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "area 종류 반복 필터(`area_kind`). 미지정 시 전체.",
+              "title": "Area Kind"
+            }
+          },
+          {
+            "description": "최대 건수.",
+            "in": "query",
+            "name": "page_size",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "description": "최대 건수.",
+              "maximum": 50,
+              "minimum": 1,
+              "title": "Page Size",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ContainingAreasResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "공개 feature 없음"
+          },
+          "422": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "area_kind·page_size 오류"
+          },
+          "default": {
+            "content": {
+              "application/problem+json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProblemDetail"
+                }
+              }
+            },
+            "description": "RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5)."
+          }
+        },
+        "security": [
+          {
+            "PublicApiKey": []
+          },
+          {
+            "ServiceToken": []
+          }
+        ],
+        "summary": "feature 대표점을 덮는 공개 area 목록 (이 장소는 어느 국립공원·보호지역 안인가)",
         "tags": [
           "features"
         ]

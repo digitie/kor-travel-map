@@ -365,8 +365,25 @@ GET /v1/features/nearby                 # 반경, page_size+cursor, distance_m
 GET /v1/features/nearby/by-target       # 등록 POI cache target 주변
 GET  /v1/features/{feature_id}          # 단건 상세
 GET  /v1/features/{feature_id}/observations/{source_entity_key}/history
+GET  /v1/features/{feature_id}/contained-features   # area 안의 점 feature
+GET  /v1/features/{feature_id}/containing-areas     # 이 feature를 덮는 area (역방향)
+GET  /v1/features/containing-areas?lon=&lat=        # 좌표를 덮는 area
 POST /v1/features/batch                 # trip_card 5-state batch, cap≤200 (ServiceToken)
 ```
+- **containing-areas**(2026-11-27): 점(또는 feature 대표점 `coord`)을 **덮는**(`ST_Covers`, 경계 위
+  포함) 공개 area를 작은 면 먼저 돌려준다. query `area_kind`(반복, `AreaKind` 값 — `national_park`·
+  `protected_area`·`hazard_zone`…), `page_size`(1~50, 기본 20). item은 `feature_id`·`name`·`category`·
+  `area_kind`(열린 집합 — 모르는 값은 일반 area)·`boundary_source`·`area_square_meters`·marker. feature 기준 조회는
+  그 feature가 area면 자신을 빼고, 대표 좌표가 없으면 200 + 빈 `items`(`lon`/`lat` null). 좌표 조회는 lon 124~132·
+  lat 33~39.5 밖이면 422. **대표점 한 점 기준이다** — 점 feature(place·event)용이며, route·area의 대표점은 기하
+  무게중심(국립공원은 면 위 anchor)이라 선·면 전체의 포함 관계가 아니다. cursor가 없다(중첩은 실측 한 자릿수,
+  상한 50). "○○국립공원 안" 표시는 `area_kind=national_park&area_kind=protected_area(&area_kind=hazard_zone)`를
+  명시한다(작은 면 먼저라 필터 없이 부르면 해수욕장·야영장 면이 앞에 섞인다). 공간 술어는
+  `feature.feature_areas`의 부분 GiST(`idx_feature_areas_geom_gist`, `public_ready`)를 타고 4326 그대로다
+  (ADR-012, `tests/integration/test_areas_containing_point.py`의 EXPLAIN 시험). 소비자는 `hazard_zone`만
+  경고 표시로 다룬다. 공개 상세(`GET /v1/features/{feature_id}`)는 `area_kind`·`route_type`(detail 값의
+  사본, 해당 kind가 아니면 null)을 함께 싣는다. 상세 ETag는 `row_revision` 기반이라 배포 직후 304 재검증 소비자는 새
+  필드 없는 본문을 들고 있을 수 있다 — 없으면 `detail.area_kind`를 읽는다.
 - 단건과 batch의 각 Feature 상세는 `curations[]`와 `observations[]`를 함께 반환한다.
   `observations[]`는 Feature에 연결된 provider entity별 **현재 immutable payload 전부**이며,
   여러 `source_role='primary'` 관측도 버리지 않는다. payload의 과거 version은

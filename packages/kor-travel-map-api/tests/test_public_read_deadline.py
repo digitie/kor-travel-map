@@ -36,6 +36,8 @@ EXPECTED: dict[tuple[str, str], Callable[..., Any]] = {
     ("GET", "/v1/features/nearby/by-target"): _SNAPSHOT,
     ("GET", "/v1/features/{feature_id}"): _SNAPSHOT,
     ("GET", "/v1/features/{feature_id}/contained-features"): _SNAPSHOT,
+    ("GET", "/v1/features/containing-areas"): _PUBLIC,
+    ("GET", "/v1/features/{feature_id}/containing-areas"): _SNAPSHOT,
     ("GET", "/v1/features/{feature_id}/price"): _SNAPSHOT,
     ("GET", "/v1/features/{feature_id}/price/snapshot"): _SNAPSHOT,
     ("POST", "/v1/features/batch"): _SNAPSHOT,

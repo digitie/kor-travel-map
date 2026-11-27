@@ -1,3 +1,14 @@
+## 2026-11-27 — 공개 containing-areas API(이 장소는 어느 국립공원·보호지역 안인가)
+
+- `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas?lon&lat` — `contained-features`의
+  역방향. `feature.feature_areas` 부분 GiST(`public_ready`) + `&&` + `ST_Covers`(4326, `ST_Transform` 없음), 작은 면 먼저,
+  `area_kind` 반복 필터, `page_size` 1~50, area 자신 제외, 공개 membership은 `public_features` 조인. 공개 상세에 `area_kind`·
+  `route_type` 사본 필드.
+- OpenAPI user·full 재생성(service 불변), admin·user-client 타입 재생성, openapi-diff baseline·consumer-rollout pending receipt 갱신.
+- 시험: 통합(중첩 정렬·종류 필터·자기 제외·경계 점·바깥 점·은퇴 면 제외·EXPLAIN GiST 사용/변환 없음), 라우터(대표점 전달·
+  좌표 없음 422·범위/종류/상한 422·상세 typed 필드). 데이터 정확성은 앞 PR(국립공원 경계 재원천화)의 재적재가 전제다 —
+  재적재 전 prod에선 버퍼 면(공식의 2~4.8배)을 그대로 답한다.
+
 ## 2026-11-27 — 국립공원 경계 재원천화(3 km 버퍼 → 한국보호지역 국립공원 행)·면 수리
 
 - 근거: prod 읽기 전용 감사 — `national_park` 21건이 공식 면적의 2~4.8배(북한산 240.9 km² vs 76.9, 경주 659.6 vs 136.6·한

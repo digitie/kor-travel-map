@@ -82,8 +82,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # user 불변). service added 2건.
     # 2026-11-27 ADR-127 — service·admin baseline 재고정(휴게소·주유소 상세 nullable 먹거리 필드,
     # admin `/v1/ops/rest-area-food/review` 1건, user 불변).
+    # 2026-11-27 — 공개 containing-areas 2 operation·상세 area_kind/route_type(user·admin 재고정).
     "openapi-diff-v1.json": (
-        "ba9df0a8a3258d60b183b5245e8e1d0b3df818bb0bcefdd33b19a07bb8cefb6f"
+        "dcce446055c6945ecdbd7d8dfe7d8e2cabae912e42d91182acde4b7fa31062a1"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -102,8 +103,9 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-11-18 T-READ-04 — pending receipt의 service·full-admin sha 재핀(near-batch).
     # T-VN-40·T-VN-41 둘 다 — 41의 map_service도 현재 service spec이어야 한다.
     # 2026-11-27 ADR-127 — pending receipt의 service·full-admin sha 재핀(먹거리 필드·검토 API).
+    # 2026-11-27 — containing-areas로 user·full 지문 갱신(pending 유지).
     "consumer-rollout-v1.json": (
-        "62c5a08da766cd84191a5405b5a921b53ec29e20d3c52c8680a07115d958f94f"
+        "3916b6bf14667bd12badfbb24c161b1bfb3081ef360e1b01c6956f2831e36a56"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

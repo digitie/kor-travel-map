@@ -198,6 +198,8 @@ __all__ = [
     "set_feature_phones",
     "features_in_bbox",
     "features_contained_in_area",
+    "areas_containing_point",
+    "CONTAINING_AREAS_MAX_LIMIT",
     "encode_bbox_cursor",
     "SEARCH_WHITESPACE_CODEPOINTS",
     "search_alias_key",
@@ -7278,6 +7280,85 @@ async def features_contained_in_area(
                 {
                     "feature_id": feature_id,
                     "kinds": _normalized_filter(kinds),
+                    "limit": limit,
+                },
+            )
+        )
+        .mappings()
+        .all()
+    )
+    return [dict(row) for row in rows]
+
+
+CONTAINING_AREAS_MAX_LIMIT: Final[int] = 50
+"""한 점을 덮는 공개 area 조회의 상한. 실측 최대 중첩은 한 자릿수다(국립공원 ⊃ 명승·천연기념물)."""
+
+#: 점을 **덮는**(경계 포함, ``ST_Covers``) 공개 area. 공간 술어는 subtype 표
+#: ``feature.feature_areas``의 부분 GiST(``idx_feature_areas_geom_gist``, ``WHERE public_ready``)를
+#: 타도록 ``public_ready``·``&&``를 명시한다 — 조립 projection의 ``geom``은 인덱스가 없는 산출
+#: 컬럼이다(:func:`bbox_hit_predicate_sql` docstring). 입력 점은 4326 그대로이고 술어에
+#: ``ST_Transform``이 없다(ADR-012). ``public_features`` 조인이 3축 공개 membership의 최종 fence다.
+#: 정렬은 작은 면 먼저(가장 구체적인 구역) — 측지 면적은 이미 걸러진 몇 행에서만 계산한다. 저장
+#: ``area_square_meters``(provider 공시 면적일 수 있다)와 섞지 않아 정렬 기준이 한 가지다.
+_AREAS_CONTAINING_POINT_SQL: Final[str] = """
+WITH probe AS (
+    SELECT x_extension.ST_SetSRID(
+        x_extension.ST_MakePoint(
+            CAST(:lon AS double precision), CAST(:lat AS double precision)
+        ),
+        4326
+    ) AS pt
+)
+SELECT
+    f.feature_id,
+    CAST(f.feature_uuid AS text) AS feature_uuid,
+    f.name,
+    f.category,
+    a.area_kind,
+    a.boundary_source,
+    f.marker_icon,
+    f.marker_color,
+    x_extension.ST_Area(CAST(a.geom AS x_extension.geography)) AS area_square_meters
+FROM probe
+JOIN feature.feature_areas AS a
+  ON a.public_ready
+ AND a.geom OPERATOR(x_extension.&&) probe.pt
+ AND x_extension.ST_Covers(a.geom, probe.pt)
+JOIN feature.public_features AS f
+  ON f.feature_id = a.feature_id
+WHERE (CAST(:area_kinds AS text[]) IS NULL OR a.area_kind = ANY(CAST(:area_kinds AS text[])))
+  AND (CAST(:exclude_feature_id AS uuid) IS NULL
+       OR a.feature_id <> CAST(:exclude_feature_id AS uuid))
+ORDER BY area_square_meters ASC, f.feature_id ASC
+LIMIT :limit
+"""
+
+
+async def areas_containing_point(
+    session: AsyncSession,
+    *,
+    lon: float,
+    lat: float,
+    area_kinds: Sequence[str] | None = None,
+    exclude_feature_id: str | None = None,
+    limit: int = 20,
+) -> list[dict[str, Any]]:
+    """WGS84 점을 덮는 공개 area 목록 — ``contained-features``의 역방향.
+
+    ``ST_Covers``라 경계 위의 점도 "안"이다. ``exclude_feature_id``는 area 자신의 대표점으로
+    물을 때 자기 자신을 뺀다. ``limit``은 1..:data:`CONTAINING_AREAS_MAX_LIMIT`.
+    """
+    if not 1 <= limit <= CONTAINING_AREAS_MAX_LIMIT:
+        raise ValueError(f"limit must be 1..{CONTAINING_AREAS_MAX_LIMIT}")
+    rows = (
+        (
+            await session.execute(
+                text(_AREAS_CONTAINING_POINT_SQL),
+                {
+                    "lon": lon,
+                    "lat": lat,
+                    "area_kinds": _normalized_filter(area_kinds),
+                    "exclude_feature_id": exclude_feature_id,
                     "limit": limit,
                 },
             )

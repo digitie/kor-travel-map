@@ -136,6 +136,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/features/containing-areas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 좌표를 덮는 공개 area 목록 (국립공원·보호지역 등) */
+        get: operations["list_areas_containing_point_v1_features_containing_areas_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/features/in-bounds": {
         parameters: {
             query?: never;
@@ -233,6 +250,30 @@ export interface paths {
         };
         /** area feature 안에 포함된 point feature 목록 */
         get: operations["get_area_contained_features_v1_features__feature_id__contained_features_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/features/{feature_id}/containing-areas": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * feature 대표점을 덮는 공개 area 목록 (이 장소는 어느 국립공원·보호지역 안인가)
+         * @description feature의 대표점(``coord``) **한 점**을 덮는 area. area feature 자신은 뺀다.
+         *
+         *     점 feature(place·event…)용이다. route·area의 대표점은 기하 무게중심(국립공원은 면 위 anchor)이라
+         *     선·면 전체의 포함 관계가 아니다 — 공원을 두르는 둘레길의 무게중심은 공원 안에 떨어질 수 있다.
+         *     대표 좌표가 없는 feature는 200 + 빈 ``items``(``lon``/``lat`` null)다 — 입력 오류가 아니다.
+         */
+        get: operations["get_feature_containing_areas_v1_features__feature_id__containing_areas_get"];
         put?: never;
         post?: never;
         delete?: never;
@@ -648,6 +689,73 @@ export interface components {
             /** Lon */
             lon: number;
         };
+        /**
+         * ContainingAreaSummary
+         * @description 점(또는 feature 대표점)을 덮는 공개 area 1건.
+         */
+        ContainingAreaSummary: {
+            /**
+             * Area Kind
+             * @description area 종류(`AreaKind`). `national_park`(국립공원)·`protected_area`(보호지역)·`hazard_zone`(위험지역 — 소비자는 경고 표시) 등. **열린 집합** — 모르는 값은 일반 area로 다룬다.
+             */
+            area_kind: string;
+            /**
+             * Area Square Meters
+             * @description 측지 면적(m²).
+             */
+            area_square_meters: number;
+            /** Boundary Source */
+            boundary_source?: string | null;
+            /** Category */
+            category: string;
+            /**
+             * Feature Id
+             * @description area feature 참조 (UUID 정본 문자열).
+             */
+            feature_id: string;
+            /** Feature Uuid */
+            feature_uuid?: string | null;
+            /** Marker Color */
+            marker_color?: string | null;
+            /** Marker Icon */
+            marker_icon?: string | null;
+            /** Name */
+            name: string;
+        };
+        /**
+         * ContainingAreasData
+         * @description ``GET /features/containing-areas``·``/features/{feature_id}/containing-areas`` data.
+         */
+        ContainingAreasData: {
+            /**
+             * Feature Id
+             * @description feature 기준 조회일 때 그 feature(UUID 정본). 점 조회면 null.
+             */
+            feature_id?: string | null;
+            /**
+             * Items
+             * @description 점을 덮는 area — 작은 면(가장 구체적인 구역) 먼저. 경계 위 점도 포함.
+             */
+            items: components["schemas"]["ContainingAreaSummary"][];
+            /**
+             * Lat
+             * @description 조회한 점의 위도(WGS84). lon과 함께 null.
+             */
+            lat: number | null;
+            /**
+             * Lon
+             * @description 조회한 점의 경도(WGS84). feature 기준 조회에서 대표 좌표가 없으면 null(items는 빈 목록).
+             */
+            lon: number | null;
+        };
+        /**
+         * ContainingAreasResponse
+         * @description 점을 덮는 공개 area 목록 응답 (``contained-features``의 역방향).
+         */
+        ContainingAreasResponse: {
+            data: components["schemas"]["ContainingAreasData"];
+            meta: components["schemas"]["Meta"];
+        };
         /** CurationCollectionData */
         CurationCollectionData: {
             collection: components["schemas"]["PublicCurationCollectionView"];
@@ -741,6 +849,11 @@ export interface components {
                 [key: string]: unknown;
             };
             /**
+             * Area Kind
+             * @description kind=area일 때 `detail.area_kind`의 사본 — 값은 `AreaKind`(national_park·protected_area·hazard_zone…). 다른 kind는 null.
+             */
+            area_kind?: string | null;
+            /**
              * Area Square Meters
              * @description kind=area이고 geometry가 있으면 면적(m²).
              */
@@ -785,6 +898,11 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
+            /**
+             * Route Type
+             * @description kind=route일 때 `detail.route_type`의 사본(hiking_trail…). 다른 kind는 null.
+             */
+            route_type?: string | null;
             /**
              * Row Revision
              * @description server-owned feature revision. 공개 장소 속성이 없으면 ETag과 같은 값이다(있으면 ETag에 속성 digest가 붙는다).
@@ -2051,6 +2169,53 @@ export interface operations {
             };
         };
     };
+    list_areas_containing_point_v1_features_containing_areas_get: {
+        parameters: {
+            query: {
+                /** @description 경도(WGS84). */
+                lon: number;
+                /** @description 위도(WGS84). */
+                lat: number;
+                /** @description area 종류 반복 필터(`area_kind`). 미지정 시 전체. */
+                area_kind?: ("area" | "national_park" | "provincial_park" | "recreation_forest" | "tourism_district" | "beach" | "campsite" | "heritage_area" | "natural_heritage_area" | "buried_heritage_area" | "hazard_zone" | "protected_area" | "other")[] | null;
+                /** @description 최대 건수. */
+                page_size?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContainingAreasResponse"];
+                };
+            };
+            /** @description 좌표·area_kind·page_size 오류 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
     list_public_features_in_bounds_v1_features_in_bounds_get: {
         parameters: {
             query: {
@@ -2384,6 +2549,60 @@ export interface operations {
                 };
             };
             /** @description area feature가 아님 */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    get_feature_containing_areas_v1_features__feature_id__containing_areas_get: {
+        parameters: {
+            query?: {
+                /** @description area 종류 반복 필터(`area_kind`). 미지정 시 전체. */
+                area_kind?: ("area" | "national_park" | "provincial_park" | "recreation_forest" | "tourism_district" | "beach" | "campsite" | "heritage_area" | "natural_heritage_area" | "buried_heritage_area" | "hazard_zone" | "protected_area" | "other")[] | null;
+                /** @description 최대 건수. */
+                page_size?: number;
+            };
+            header?: never;
+            path: {
+                feature_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ContainingAreasResponse"];
+                };
+            };
+            /** @description 공개 feature 없음 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description area_kind·page_size 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;

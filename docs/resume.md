@@ -4,7 +4,8 @@
   ±5.2%, 경주 9 part), 해상 국립공원은 면 위 후보점으로 역지오, 면은 `make_valid`. knps-api 핀 `59fb5b0`(PR#22). OpenAPI·migration 없음.
 - 다음(소유자 배포): Dagster code server 이미지 회전 → `knps_protected_areas` 적재(admin "지금 실행" 또는 provider_dataset 큐
   요청) → 확인(active `national_park` 23·면적비 0.9~1.1·invalid 0) → `knps_park_boundaries`를 provider_dataset 큐 요청으로
-  (버퍼 21건 은퇴). 그 뒤 containing-areas API·PinVi 표시(플래그)를 연다.
+  (버퍼 21건 은퇴). 그 뒤 PinVi 표시(플래그)를 연다.
+- 공개 `GET /v1/features/{id}/containing-areas`·`/containing-areas?lon&lat`(GiST, 작은 면 먼저)·상세 `area_kind`/`route_type`.
 
 ## 2026-11-27 — 휴게소 먹거리(ADR-127, 배포 대기)
 

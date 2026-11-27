@@ -840,6 +840,70 @@ def test_get_feature_accepts_uuid_ref_via_boundary_resolution(
 
 
 @pytest.mark.unit
+@pytest.mark.parametrize(
+    ("kind", "detail", "area_kind", "route_type"),
+    [
+        ("area", {"area_kind": "national_park", "payload": {"x": 1}}, "national_park", None),
+        ("route", {"route_type": "hiking_trail"}, None, "hiking_trail"),
+        ("place", {"area_kind": "national_park"}, None, None),
+    ],
+)
+def test_get_feature_detail_exposes_typed_area_kind_and_route_type(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    detail: dict[str, Any],
+    area_kind: str | None,
+    route_type: str | None,
+) -> None:
+    from kortravelmap.api.routers import features as features_mod
+
+    row = {
+        "feature_id": "f1",
+        "feature_uuid": _expected_uuid("f1"),
+        "kind": kind,
+        "name": "북한산 국립공원",
+        "category": "01020101",
+        "lon": 126.97,
+        "lat": 37.66,
+        "address": {},
+        "detail": detail,
+        "urls": {},
+        "legal_dong_code": None,
+        "sido_code": None,
+        "sigungu_code": None,
+        "marker_icon": None,
+        "marker_color": None,
+        "row_revision": 1,
+        "updated_at": "2026-11-27T00:00:00+09:00",
+        "deleted_at": None,
+    }
+
+    async def _get_row(_session: Any, _feature_id: str) -> dict[str, Any]:
+        return row
+
+    async def _curations(_session: Any, **_kw: Any) -> dict[str, tuple[Any, ...]]:
+        return {}
+
+    _patch_resolved_identity(monkeypatch, feature_id="f1")
+    _patch_feature_attributes(monkeypatch)
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
+    monkeypatch.setattr(
+        features_mod.curation_repo, "list_curation_items_by_feature_ids", _curations
+    )
+    _override_sessions(client)
+    try:
+        r = client.get("/v1/features/f1")
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["area_kind"] == area_kind
+        assert data["route_type"] == route_type
+        assert "payload" not in data["detail"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
 def test_get_feature_ref_format_error_maps_to_422(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -1059,6 +1123,164 @@ def test_get_area_contained_features_rejects_non_area(
         r = client.get("/v1/features/place1/contained-features")
         assert r.status_code == 422
         assert "area feature" in r.json()["detail"]
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+_CONTAINING_ROWS = [
+    {
+        "feature_id": "prot1",
+        "feature_uuid": _expected_uuid("prot1"),
+        "name": "북한산 우이령 명승",
+        "category": "01070300",
+        "area_kind": "protected_area",
+        "boundary_source": "knps",
+        "area_square_meters": 1.5e6,
+        "marker_icon": "park",
+        "marker_color": "P-06",
+    },
+    {
+        "feature_id": "park1",
+        "feature_uuid": _expected_uuid("park1"),
+        "name": "북한산 국립공원",
+        "category": "01020101",
+        "area_kind": "national_park",
+        "boundary_source": "knps",
+        "area_square_meters": 7.9e7,
+        "marker_icon": "park",
+        "marker_color": "P-06",
+    },
+]
+
+
+def _override_sessions(client: TestClient) -> None:
+    from kortravelmap.api.db import get_read_snapshot_session, get_session
+
+    async def _fake_session() -> AsyncIterator[Any]:
+        yield object()
+
+    client.app.dependency_overrides[get_session] = _fake_session
+    client.app.dependency_overrides[get_read_snapshot_session] = _fake_session
+
+
+@pytest.mark.unit
+def test_feature_containing_areas_uses_feature_coord_and_excludes_self(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as features_mod
+
+    place_row = {
+        "feature_id": "place1",
+        "kind": "place",
+        "name": "도선사",
+        "category": "01070100",
+        "lon": 126.99,
+        "lat": 37.68,
+        "deleted_at": None,
+    }
+
+    async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
+        return place_row
+
+    async def _containing(_session: Any, **kw: Any) -> list[dict[str, Any]]:
+        assert kw["lon"] == 126.99
+        assert kw["lat"] == 37.68
+        assert kw["exclude_feature_id"] == _expected_uuid("place1")
+        assert kw["area_kinds"] == ["national_park", "protected_area"]
+        assert kw["limit"] == 5
+        return _CONTAINING_ROWS
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "areas_containing_point", _containing)
+    _override_sessions(client)
+    try:
+        r = client.get(
+            "/v1/features/place1/containing-areas",
+            params=[
+                ("area_kind", "national_park"),
+                ("area_kind", "protected_area"),
+                ("page_size", "5"),
+            ],
+        )
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["feature_id"] == _expected_uuid("place1")
+        assert (data["lon"], data["lat"]) == (126.99, 37.68)
+        assert [item["area_kind"] for item in data["items"]] == [
+            "protected_area",
+            "national_park",
+        ]
+        assert data["items"][1]["name"] == "북한산 국립공원"
+        assert data["items"][1]["feature_id"] == _expected_uuid("park1")
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_feature_containing_areas_returns_empty_for_feature_without_coord(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as features_mod
+
+    async def _get_row(_session: Any, _fid: str) -> dict[str, Any]:
+        return {"feature_id": "n1", "kind": "place", "lon": None, "lat": None}
+
+    async def _containing(_session: Any, **_kw: Any) -> list[dict[str, Any]]:
+        raise AssertionError("좌표 없는 feature로 공간 질의를 하면 안 된다")
+
+    monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
+    monkeypatch.setattr(features_mod.feature_repo, "areas_containing_point", _containing)
+    _override_sessions(client)
+    try:
+        r = client.get("/v1/features/n1/containing-areas")
+        # 좌표 없는 feature는 입력 오류가 아니다 — "덮는 구역 없음"(lon/lat null).
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["items"] == []
+        assert data["lon"] is None
+        assert data["lat"] is None
+    finally:
+        client.app.dependency_overrides.clear()
+
+
+@pytest.mark.unit
+def test_point_containing_areas_validates_inputs_and_maps_rows(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from kortravelmap.api.routers import features as features_mod
+
+    seen: dict[str, Any] = {}
+
+    async def _containing(_session: Any, **kw: Any) -> list[dict[str, Any]]:
+        seen.update(kw)
+        return _CONTAINING_ROWS[1:]
+
+    monkeypatch.setattr(features_mod.feature_repo, "areas_containing_point", _containing)
+    _override_sessions(client)
+    try:
+        r = client.get("/v1/features/containing-areas", params={"lon": 126.99, "lat": 37.68})
+        assert r.status_code == 200, r.text
+        assert seen == {
+            "lon": 126.99,
+            "lat": 37.68,
+            "area_kinds": None,
+            "limit": 20,
+        }
+        data = r.json()["data"]
+        assert data["feature_id"] is None
+        assert data["items"][0]["area_kind"] == "national_park"
+        # 한국 범위 밖 좌표·모르는 area_kind·상한 초과는 422.
+        assert client.get(
+            "/v1/features/containing-areas", params={"lon": 0, "lat": 0}
+        ).status_code == 422
+        assert client.get(
+            "/v1/features/containing-areas",
+            params={"lon": 126.99, "lat": 37.68, "area_kind": "volcano"},
+        ).status_code == 422
+        assert client.get(
+            "/v1/features/containing-areas",
+            params={"lon": 126.99, "lat": 37.68, "page_size": 51},
+        ).status_code == 422
     finally:
         client.app.dependency_overrides.clear()
 
