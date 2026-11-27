@@ -90,6 +90,8 @@ type _PathsStable = _Assert<
     | "/v1/features/nearby"
     | "/v1/features/{feature_id}"
     | "/v1/features/{feature_id}/contained-features"
+    | "/v1/features/containing-areas"
+    | "/v1/features/{feature_id}/containing-areas"
     | "/v1/public/beaches"
     | "/v1/public/beaches/map-markers"
     | "/v1/public/beaches/{feature_id}"

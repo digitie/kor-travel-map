@@ -1,3 +1,9 @@
+## 2026-11-27 — 공개 containing-areas API
+
+- `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas` 추가(GiST, 작은 면 먼저, `area_kind` 필터),
+  상세 `area_kind`·`route_type`. OpenAPI·타입 재생성.
+- 다음: 국립공원 경계 재적재(앞 항목) **뒤에** PinVi 상세 패널이 이 API를 쓴다 — 재적재 전엔 버퍼 면이 답이 된다.
+
 ## 2026-11-27 — 국립공원 경계 재원천화(3 km 버퍼 → 한국보호지역 국립공원 행)·면 수리
 
 - 15017313은 공원경계 3 km 버퍼였다. 국립공원 23곳을 한국보호지역 `National Park` 22행 + 승격 팔공산에서 싣고(공식 면적

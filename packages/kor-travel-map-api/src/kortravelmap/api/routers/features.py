@@ -41,6 +41,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorVersionUnsupportedError,
 )
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+from kortravelmap.dto.area import AreaKind
 from kortravelmap.infra import (
     curation_repo,
     feature_identity,
@@ -49,6 +50,7 @@ from kortravelmap.infra import (
     place_attribute_repo,
     price_repo,
 )
+from kortravelmap.infra.feature_repo import CONTAINING_AREAS_MAX_LIMIT
 from kortravelmap.infra.poi_cache_target_repo import (
     PoiCacheTarget,
     get_poi_cache_target_by_key,
@@ -315,6 +317,17 @@ class FeatureDetailResponse(_PublicDisplayName):
     area_square_meters: float | None = Field(
         default=None,
         description="kind=area이고 geometry가 있으면 면적(m²).",
+    )
+    area_kind: str | None = Field(
+        default=None,
+        description=(
+            "kind=area일 때 `detail.area_kind`의 사본 — 값은 `AreaKind`(national_park·"
+            "protected_area·hazard_zone…). 다른 kind는 null."
+        ),
+    )
+    route_type: str | None = Field(
+        default=None,
+        description="kind=route일 때 `detail.route_type`의 사본(hiking_trail…). 다른 kind는 null.",
     )
     address: dict[str, Any]
     detail: dict[str, Any]
@@ -698,6 +711,52 @@ class AreaContainedFeaturesResponse(BaseModel):
     meta: Meta
 
 
+class ContainingAreaSummary(_PublicDisplayName):
+    """점(또는 feature 대표점)을 덮는 공개 area 1건."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    feature_id: str = Field(description="area feature 참조 (UUID 정본 문자열).")
+    feature_uuid: str | None = None
+    name: str
+    category: str
+    area_kind: str = Field(
+        description=(
+            "area 종류(`AreaKind`). `national_park`(국립공원)·`protected_area`(보호지역)·"
+            "`hazard_zone`(위험지역 — 소비자는 경고 표시) 등."
+        ),
+    )
+    boundary_source: str | None = None
+    area_square_meters: float = Field(ge=0, description="측지 면적(m²).")
+    marker_icon: str | None = None
+    marker_color: str | None = None
+
+
+class ContainingAreasData(BaseModel):
+    """``GET /features/containing-areas``·``/features/{feature_id}/containing-areas`` data."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon: float = Field(description="조회한 점의 경도(WGS84).")
+    lat: float = Field(description="조회한 점의 위도(WGS84).")
+    feature_id: str | None = Field(
+        default=None,
+        description="feature 기준 조회일 때 그 feature(UUID 정본). 점 조회면 null.",
+    )
+    items: list[ContainingAreaSummary] = Field(
+        description="점을 덮는 area — 작은 면(가장 구체적인 구역) 먼저. 경계 위 점도 포함.",
+    )
+
+
+class ContainingAreasResponse(BaseModel):
+    """점을 덮는 공개 area 목록 응답 (``contained-features``의 역방향)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    data: ContainingAreasData
+    meta: Meta
+
+
 class NearbyTargetSummary(BaseModel):
     """주변 조회 기준 public target summary."""
 
@@ -829,6 +888,8 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         lon=row["lon"],
         lat=row["lat"],
         area_square_meters=row.get("area_square_meters"),
+        area_kind=(row["detail"] or {}).get("area_kind") if row["kind"] == "area" else None,
+        route_type=(row["detail"] or {}).get("route_type") if row["kind"] == "route" else None,
         address=row["address"],
         detail=_public_detail(row["detail"]),
         urls=row["urls"],
@@ -1366,6 +1427,43 @@ async def list_features_nearby(
     )
 
 
+_AreaKindQuery = Annotated[
+    list[AreaKind] | None,
+    Query(description="area 종류 반복 필터(`area_kind`). 미지정 시 전체."),
+]
+_ContainingLimitQuery = Annotated[
+    int, Query(ge=1, le=CONTAINING_AREAS_MAX_LIMIT, description="최대 건수.")
+]
+
+
+def _containing_area_items(rows: Sequence[dict[str, Any]]) -> list[ContainingAreaSummary]:
+    return [ContainingAreaSummary(**uuid_substituted_row(row)) for row in rows]
+
+
+@router.get(
+    "/containing-areas",
+    response_model=ContainingAreasResponse,
+    summary="좌표를 덮는 공개 area 목록 (국립공원·보호지역 등)",
+    responses={422: {"description": "좌표·area_kind·page_size 오류"}},
+)
+async def list_areas_containing_point(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_public_read_session)],
+    lon: Annotated[float, Query(ge=124.0, le=132.0, description="경도(WGS84).")],
+    lat: Annotated[float, Query(ge=33.0, le=39.5, description="위도(WGS84).")],
+    area_kind: _AreaKindQuery = None,
+    page_size: _ContainingLimitQuery = 20,
+) -> ContainingAreasResponse:
+    started_at = perf_counter()
+    rows = await feature_repo.areas_containing_point(
+        session, lon=lon, lat=lat, area_kinds=area_kind, limit=page_size
+    )
+    return ContainingAreasResponse(
+        data=ContainingAreasData(lon=lon, lat=lat, items=_containing_area_items(rows)),
+        meta=make_meta(request, started_at=started_at, page_size=page_size),
+    )
+
+
 @router.get(
     "/nearby/by-target",
     response_model=FeaturesNearbyByTargetResponse,
@@ -1656,6 +1754,52 @@ async def get_area_contained_features(
             area_feature_id=identity.feature_uuid,
             area_square_meters=area_row.get("area_square_meters"),
             items=[FeatureSummary(**uuid_substituted_row(row)) for row in rows],
+        ),
+        meta=make_meta(request, started_at=started_at, page_size=page_size),
+    )
+
+
+@router.get(
+    "/{feature_id}/containing-areas",
+    response_model=ContainingAreasResponse,
+    summary="feature 대표점을 덮는 공개 area 목록 (이 장소는 어느 국립공원·보호지역 안인가)",
+    responses={
+        404: {"description": "공개 feature 없음"},
+        422: {"description": "대표 좌표 없는 feature, area_kind·page_size 오류"},
+    },
+)
+async def get_feature_containing_areas(
+    request: Request,
+    session: Annotated[AsyncSession, Depends(get_public_read_snapshot_session)],
+    feature_id: str,
+    area_kind: _AreaKindQuery = None,
+    page_size: _ContainingLimitQuery = 20,
+) -> ContainingAreasResponse:
+    """feature의 대표점(``coord`` — 선·면은 그 대표점)을 덮는 area. area feature 자신은 뺀다."""
+    started_at = perf_counter()
+    identity = await resolve_feature_ref_or_error(session, feature_id)
+    canonical_id = identity.feature_id
+    row = await _public_feature_row_or_404(session, canonical_id, display_ref=feature_id)
+    lon, lat = row.get("lon"), row.get("lat")
+    if lon is None or lat is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"대표 좌표가 없는 feature입니다: {feature_id!r}",
+        )
+    rows = await feature_repo.areas_containing_point(
+        session,
+        lon=float(lon),
+        lat=float(lat),
+        area_kinds=area_kind,
+        exclude_feature_id=canonical_id,
+        limit=page_size,
+    )
+    return ContainingAreasResponse(
+        data=ContainingAreasData(
+            lon=float(lon),
+            lat=float(lat),
+            feature_id=identity.feature_uuid,
+            items=_containing_area_items(rows),
         ),
         meta=make_meta(request, started_at=started_at, page_size=page_size),
     )
