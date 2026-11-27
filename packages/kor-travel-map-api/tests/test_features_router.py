@@ -50,6 +50,10 @@ def dbless_client(client: TestClient) -> TestClient:
         client.app.dependency_overrides.clear()
 
 
+async def _no_route_summaries(_session: Any, _feature_ids: Any) -> dict[str, Any]:
+    return {}
+
+
 def _expected_uuid(feature_id: str) -> str:
     """mock resolver가 돌려줄 결정적 uuid — **테스트 편의 규약**이지 계약이 아니다.
 
@@ -465,6 +469,10 @@ def test_list_features_include_geometry_maps_route_area_rows(
         return rows
 
     monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
+    # route 요약(ADR-128)은 별도 시험이 본다 — 여기서는 가짜 session에 닿지 않게 비운다.
+    monkeypatch.setattr(
+        features_mod.route_summary_repo, "list_public_route_summaries", _no_route_summaries
+    )
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -580,6 +588,10 @@ def test_list_public_features_in_bounds_include_geometry(
         return rows
 
     monkeypatch.setattr(features_mod.feature_repo, "features_in_bbox", _bbox)
+    # route 요약(ADR-128)은 별도 시험이 본다 — 여기서는 가짜 session에 닿지 않게 비운다.
+    monkeypatch.setattr(
+        features_mod.route_summary_repo, "list_public_route_summaries", _no_route_summaries
+    )
 
     async def _fake_session() -> AsyncIterator[Any]:
         yield object()
@@ -888,6 +900,9 @@ def test_get_feature_detail_exposes_typed_area_kind_and_route_type(
     _patch_resolved_identity(monkeypatch, feature_id="f1")
     _patch_feature_attributes(monkeypatch)
     monkeypatch.setattr(features_mod.feature_repo, "get_public_feature_row", _get_row)
+    monkeypatch.setattr(
+        features_mod.route_summary_repo, "list_public_route_summaries", _no_route_summaries
+    )
     monkeypatch.setattr(
         features_mod.curation_repo, "list_curation_items_by_feature_ids", _curations
     )
@@ -1425,6 +1440,8 @@ def test_features_batch_returns_exhaustive_typed_items(
                 "address": {"road": "서울"},
                 "marker_icon": "star",
                 "marker_color": "P-11",
+                # event라 route 요약이 없다(ADR-128 — kind=route만 채운다).
+                "route": None,
             },
         }
         assert items[1] == {

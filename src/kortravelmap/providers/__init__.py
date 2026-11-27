@@ -36,6 +36,7 @@ gateway 신규 생성 금지 (ADR-006).
 
 - ``feature_operation_registry`` — DB operation key → Dagster handler 결박 registry (T-VN-33)
 - ``knps_name_translations`` — ``knps``가 쓰는 이름 대역표
+- ``_route_course`` — ``krforest``·``knps``가 함께 쓰는 등산 코스 bundle 조립(ADR-128)
 - ``_source_models`` — 위 변환 모듈들의 ``Protocol``이 어느 provider 실모델과 결박되는지
   선언하는 표. ``tests/lint/test_provider_protocol_conformance.py``가 이 선언과
   ``_provider_surface.json``(핀된 SHA의 provider 표면)을 대조한다.
@@ -79,6 +80,7 @@ from kortravelmap.providers.knps import (
     KnpsPointRecord,
     knps_geometry_records_to_bundles,
     knps_point_records_to_bundles,
+    knps_trail_courses_to_bundles,
     resolve_cultural_resource_category,
 )
 from kortravelmap.providers.knps import (
@@ -137,6 +139,7 @@ from kortravelmap.providers.krforest import (
     arboretums_to_bundles,
     dulle_trails_to_bundles,
     forest_trails_to_bundles,
+    mountain_trail_courses_to_bundles,
     mountain_trails_to_bundles,
     recreation_forests_to_bundles,
 )
@@ -342,6 +345,7 @@ __all__ = [
     "recreation_forests_to_bundles",
     "arboretums_to_bundles",
     "forest_trails_to_bundles",
+    "mountain_trail_courses_to_bundles",
     "mountain_trails_to_bundles",
     "dulle_trails_to_bundles",
     "DATASET_KEY_RECREATION_FORESTS",
@@ -411,6 +415,7 @@ __all__ = [
     "KnpsGeometryRecord",
     "knps_point_records_to_bundles",
     "knps_geometry_records_to_bundles",
+    "knps_trail_courses_to_bundles",
     "resolve_cultural_resource_category",
     "KNPS_PLACE_DATASETS",
     "KNPS_GEOMETRY_DATASETS",

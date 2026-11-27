@@ -29,7 +29,10 @@ ADR 참조
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+import math
+from collections import defaultdict
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
@@ -57,6 +60,11 @@ from kortravelmap.core.ids import (
     make_source_record_key,
 )
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.route_course import (
+    CourseSegmentGeometry,
+    assemble_course,
+    connected_segment_groups,
+)
 from kortravelmap.dto import (
     Address,
     AdminClaimKind,
@@ -78,6 +86,11 @@ from kortravelmap.geocoding import (
     cached_address_resolver,
     cached_reverse_geocoder,
 )
+from kortravelmap.providers._route_course import (
+    CourseAggregate,
+    build_course_bundle,
+    sorted_unique_texts,
+)
 
 __all__ = [
     "ForestSpatialItem",
@@ -86,6 +99,7 @@ __all__ = [
     "arboretums_to_bundles",
     "dulle_trails_to_bundles",
     "forest_trails_to_bundles",
+    "mountain_trail_courses_to_bundles",
     "mountain_trails_to_bundles",
     "recreation_forests_to_bundles",
     # 상수
@@ -93,6 +107,8 @@ __all__ = [
     "DATASET_KEY_ARBORETUMS",
     "DATASET_KEY_DULLE_TRAILS",
     "DATASET_KEY_MOUNTAIN_TRAILS",
+    "MOUNTAIN_TRAIL_COURSE_ENTITY_TYPE",
+    "MOUNTAIN_TRAIL_SEGMENT_ENTITY_TYPE",
     "DATASET_KEY_RECREATION_FORESTS",
     "FOREST_ROUTE_CATEGORY",
     "FOREST_ROUTE_MARKER_COLOR",
@@ -114,7 +130,10 @@ DATASET_KEY_DULLE_TRAILS: Final[str] = "krforest_dulle_trails"
 
 _RECREATION_FOREST_ENTITY_TYPE: Final[str] = "recreation_forest"
 _ARBORETUM_ENTITY_TYPE: Final[str] = "arboretum"
-_MOUNTAIN_TRAIL_ENTITY_TYPE: Final[str] = "mountain_trail_segment"
+MOUNTAIN_TRAIL_SEGMENT_ENTITY_TYPE: Final[str] = "mountain_trail_segment"
+MOUNTAIN_TRAIL_COURSE_ENTITY_TYPE: Final[str] = "mountain_trail_course"
+"""구간을 이어 만든 등산 코스의 source entity type (ADR-128)."""
+_MOUNTAIN_TRAIL_ENTITY_TYPE: Final[str] = MOUNTAIN_TRAIL_SEGMENT_ENTITY_TYPE
 _DULLE_TRAIL_ENTITY_TYPE: Final[str] = "dulle_trail_segment"
 
 RECREATION_FOREST_CATEGORY: Final[str] = PlaceCategoryCode.LODGING_RECREATION_FOREST.value
@@ -532,6 +551,13 @@ async def _forest_route_to_bundle(
         source_type=f"{KRFOREST_PROVIDER_NAME}:{dataset_key}",
         source_natural_key=source_id,
     )
+    # 산림청 등산로 DBF의 거리·상하행 시간·난이도(``PMNTN_*``)는 원천에 있는데도 예전
+    # 변환이 버렸다(ADR-128). 구간 route에도 같은 정규 열로 싣는다.
+    fields = (
+        _mountain_trail_source_fields(raw_data)
+        if dataset_key == DATASET_KEY_MOUNTAIN_TRAILS
+        else None
+    )
     feature = Feature(
         feature_id=feature_id,
         provider_natural_key=source_id,
@@ -548,6 +574,17 @@ async def _forest_route_to_bundle(
             route_type=route_type,
             geometry_source="krforest",
             geometry_status="provided",
+            total_distance_meters=(
+                Decimal(str(round(fields.distance_m, 1)))
+                if fields is not None and fields.distance_m
+                else None
+            ),
+            expected_duration_minutes=(
+                fields.ascent_minutes
+                if fields is not None and fields.ascent_minutes
+                else None
+            ),
+            difficulty=fields.difficulty if fields is not None else None,
             payload={
                 "dataset_key": dataset_key,
                 "source_file": item.source_file,
@@ -555,6 +592,16 @@ async def _forest_route_to_bundle(
                 "source_id": source_id,
                 "geometry_type": geometry_type,
                 "availability_status_source": "not_available",
+                **(
+                    {"descent_minutes": fields.descent_minutes}
+                    if fields is not None and fields.descent_minutes is not None
+                    else {}
+                ),
+                **(
+                    {"duration_basis": "source"}
+                    if fields is not None and fields.ascent_minutes
+                    else {}
+                ),
             },
         ),
     )
@@ -653,6 +700,297 @@ async def dulle_trails_to_bundles(
         fetched_at=fetched_at,
         reverse_geocoder=reverse_geocoder,
     )
+
+
+# -- 등산 코스 (ADR-128) -------------------------------------------------
+
+_FOREST_DIFFICULTY: Final[dict[str, str]] = {
+    "쉬움": "easy",
+    "중간": "moderate",
+    "어려움": "hard",
+}
+"""산림청 ``PMNTN_DFFL`` → ``RouteDetail.difficulty``. 원천 실측 값은 이 셋뿐이다
+(2026-11 prod 57,047구간: 쉬움 56,107 / 중간 844 / 어려움 21 / 빈 값 75)."""
+
+_DIFFICULTY_RANK: Final[dict[str, int]] = {"easy": 0, "moderate": 1, "hard": 2}
+
+
+def _raw_number(raw: Mapping[str, Any], key: str) -> float | None:
+    """DBF 수치 필드를 float로 읽는다. 문자열("57020.0")·빈 값·음수는 걸러낸다."""
+    value = raw.get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(str(value).strip())
+    except ValueError:
+        return None
+    if not math.isfinite(number) or number < 0:
+        return None
+    return number
+
+
+def _raw_minutes(raw: Mapping[str, Any], key: str) -> int | None:
+    number = _raw_number(raw, key)
+    return None if number is None else round(number)
+
+
+def _raw_label(raw: Mapping[str, Any], key: str) -> str | None:
+    value = raw.get(key)
+    return None if value is None else normalize_korean_text(str(value))
+
+
+@dataclass(frozen=True, slots=True)
+class _MountainTrailSourceFields:
+    """산림청 등산로 DBF 한 행에서 읽은 원천 속성(``PMNTN_*``)."""
+
+    distance_m: float | None
+    """``PMNTN_LT``(km) × 1000. geometry 길이와 중앙 비율 1.000으로 일치한다(실측)."""
+    ascent_minutes: int | None
+    """``PMNTN_UPPL`` — 상행 소요시간(분). 중앙 17.8분/km."""
+    descent_minutes: int | None
+    """``PMNTN_GODN`` — 하행 소요시간(분)."""
+    difficulty: str | None
+
+
+def _mountain_trail_source_fields(raw: Mapping[str, Any]) -> _MountainTrailSourceFields:
+    length_km = _raw_number(raw, "PMNTN_LT")
+    label = _raw_label(raw, "PMNTN_DFFL")
+    return _MountainTrailSourceFields(
+        distance_m=None if length_km is None else length_km * 1000.0,
+        ascent_minutes=_raw_minutes(raw, "PMNTN_UPPL"),
+        descent_minutes=_raw_minutes(raw, "PMNTN_GODN"),
+        difficulty=_FOREST_DIFFICULTY.get(label) if label is not None else None,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class _MountainTrailSegment:
+    source_id: str
+    serial: int
+    mountain_code: str
+    mountain_name: str
+    segment_name: str | None
+    wkt: str
+    bbox_center: tuple[float, float]
+    fields: _MountainTrailSourceFields
+    raw: dict[str, Any]
+
+
+def _mountain_trail_segments(items: Iterable[ForestTrailItem]) -> list[_MountainTrailSegment]:
+    """산림청 등산로 item을 코스 조립 입력으로 푼다. 산 코드·geometry 없는 행은 버린다."""
+    segments: list[_MountainTrailSegment] = []
+    seen: set[str] = set()
+    for item in items:
+        raw = dict(item.raw) if isinstance(item.raw, Mapping) else {}
+        mountain_code = _raw_label(raw, "MNTN_CODE")
+        mountain_name = _raw_label(raw, "MNTN_NM")
+        name = normalize_korean_text(item.name)
+        if mountain_code is None or (mountain_name is None and name is None):
+            continue
+        geometry_result = _forest_route_geometry(item)
+        if geometry_result is None:
+            continue
+        canonical_wkt, _centroid, _geometry_type = geometry_result
+        source_id = _forest_route_source_id(
+            item, name=name or mountain_name or mountain_code, canonical_wkt=canonical_wkt
+        )
+        if source_id in seen:
+            continue
+        seen.add(source_id)
+        serial_value = _raw_number(raw, "PMNTN_SN")
+        min_x, min_y, max_x, max_y = shape_geometry(dict(item.geometry or {})).bounds
+        segments.append(
+            _MountainTrailSegment(
+                source_id=source_id,
+                serial=int(serial_value) if serial_value is not None else 0,
+                mountain_code=mountain_code,
+                mountain_name=mountain_name or name or mountain_code,
+                segment_name=_raw_label(raw, "PMNTN_NM"),
+                wkt=canonical_wkt,
+                bbox_center=((min_x + max_x) / 2, (min_y + max_y) / 2),
+                fields=_mountain_trail_source_fields(raw),
+                raw={"source_id": source_id, **raw},
+            )
+        )
+    return segments
+
+
+def _hardest(difficulties: Sequence[str | None]) -> str | None:
+    known = [value for value in difficulties if value is not None]
+    if not known:
+        return None
+    return max(known, key=lambda value: _DIFFICULTY_RANK[value])
+
+
+def _group_by_mountain(
+    segments: Sequence[_MountainTrailSegment],
+) -> dict[str, list[_MountainTrailSegment]]:
+    grouped: dict[str, list[_MountainTrailSegment]] = defaultdict(list)
+    for segment in segments:
+        grouped[segment.mountain_code].append(segment)
+    return grouped
+
+
+def _most_common_name(names: Sequence[str]) -> str:
+    """산 코드 하나의 표기가 갈릴 때 최빈 표기(같으면 사전순 앞) — 행 순서와 무관하다."""
+    counts: dict[str, int] = {}
+    for name in names:
+        counts[name] = counts.get(name, 0) + 1
+    return min(counts, key=lambda name: (-counts[name], name))
+
+
+def _mountain_course_aggregate(
+    *,
+    natural_key: str,
+    name: str,
+    mountain_name: str,
+    members: Sequence[_MountainTrailSegment],
+    excluded: frozenset[str],
+    start_rule: str,
+) -> CourseAggregate:
+    included = [segment for segment in members if segment.source_id not in excluded]
+    distances = [segment.fields.distance_m for segment in included]
+    ascents = [segment.fields.ascent_minutes for segment in included]
+    descents = [segment.fields.descent_minutes for segment in included]
+    breakdown: dict[str, float] = {"easy": 0.0, "moderate": 0.0, "hard": 0.0, "unknown": 0.0}
+    for segment in included:
+        breakdown[segment.fields.difficulty or "unknown"] += segment.fields.distance_m or 0.0
+    known_distances = [value for value in distances if value is not None]
+    first = members[0]
+    return CourseAggregate(
+        natural_key=natural_key,
+        name=name,
+        segment_source_ids=tuple(segment.source_id for segment in members),
+        segment_raws=tuple(segment.raw for segment in members),
+        source_distance_m=sum(known_distances) if known_distances else None,
+        # 상행 시간이 코스 소요시간이다 — 원천은 구간마다 오르막 방향 시간을 적는다.
+        # 하나라도 비면 합이 틀리므로 거리 기반 추정으로 내려간다.
+        source_duration_minutes=(
+            sum(value for value in ascents if value is not None)
+            if included and all(value is not None for value in ascents)
+            else None
+        ),
+        difficulty=_hardest([segment.fields.difficulty for segment in included]),
+        payload={
+            "mountain_code": first.mountain_code,
+            "mountain_name": mountain_name,
+            "segment_name": first.segment_name,
+            "start_rule": start_rule,
+            "duration_method": "sum_of_ascent_minutes",
+            "descent_minutes": (
+                sum(value for value in descents if value is not None)
+                if included and all(value is not None for value in descents)
+                else None
+            ),
+            "difficulty_basis": "hardest_segment",
+            "difficulty_breakdown_m": {key: round(value, 1) for key, value in breakdown.items()},
+            "surfaces": sorted_unique_texts(
+                [_raw_label(segment.raw, "PMNTN_MTRQ") for segment in included]
+            ),
+            "risks": sorted_unique_texts(
+                [_raw_label(segment.raw, "PMNTN_RISK") for segment in included]
+            ),
+            "main_points": sorted_unique_texts(
+                [_raw_label(segment.raw, "PMNTN_MAIN") for segment in included]
+            ),
+            "data_reference_date": max(
+                (value for segment in members if (value := _raw_label(segment.raw, "DATA_STDR_"))),
+                default=None,
+            ),
+        },
+    )
+
+
+async def mountain_trail_courses_to_bundles(
+    items: Iterable[ForestTrailItem],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> list[FeatureBundle]:
+    """산림청 등산로(``PBD0000041``) 구간을 등산 코스 route로 묶는다(ADR-128).
+
+    코스 = 같은 산(``MNTN_CODE``)·같은 노선명(``PMNTN_NM``, 없으면 이름 없는 묶음)의 구간 중
+    약 10 m 안에서 서로 닿는 연결 성분. 출발점은 산 전체 구간망의 중심(정상부 대용점)에서
+    가장 먼 말단이다(들머리 추정 — 원천에 시종점·고도가 없다). 거리·상행시간·난이도는
+    원천 ``PMNTN_LT``/``PMNTN_UPPL``/``PMNTN_DFFL``을 합산·집계한다.
+    """
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    )
+    segments = _mountain_trail_segments(items)
+    groups: dict[tuple[str, str | None], list[_MountainTrailSegment]] = defaultdict(list)
+    mountain_points: dict[str, list[tuple[float, float]]] = defaultdict(list)
+    # 입력 행 순서와 무관하게 같은 결과가 나오도록 원천 순번 순으로 다룬다.
+    for segment in sorted(segments, key=lambda item: (item.serial, item.source_id)):
+        groups[(segment.mountain_code, segment.segment_name)].append(segment)
+        mountain_points[segment.mountain_code].append(segment.bbox_center)
+    mountain_names = {
+        code: _most_common_name([segment.mountain_name for segment in members])
+        for code, members in _group_by_mountain(segments).items()
+    }
+    bundles: list[FeatureBundle] = []
+    seen_keys: set[str] = set()
+    for group_key in sorted(groups, key=lambda key: (key[0], key[1] or "")):
+        mountain_code, segment_name = group_key
+        members = groups[group_key]
+        points = mountain_points[mountain_code]
+        centroid = (
+            math.fsum(point[0] for point in points) / len(points),
+            math.fsum(point[1] for point in points) / len(points),
+        )
+        by_id = {segment.source_id: segment for segment in members}
+        components = connected_segment_groups(
+            [
+                CourseSegmentGeometry(
+                    segment_id=segment.source_id,
+                    order_key=(segment.serial, segment.source_id),
+                    wkt=segment.wkt,
+                    source_length_m=segment.fields.distance_m,
+                )
+                for segment in members
+            ]
+        )
+        mountain_name = mountain_names[mountain_code]
+        base_name = (
+            f"{mountain_name} {segment_name}"
+            if segment_name is not None and segment_name != mountain_name
+            else f"{mountain_name} 등산로"
+        )
+        for ordinal, component in enumerate(components, start=1):
+            course = assemble_course(component, start_far_from=centroid)
+            if course is None:
+                continue
+            component_members = [by_id[geometry.segment_id] for geometry in component]
+            natural_key = (
+                f"course::{mountain_code}::{segment_name or '-'}::{component_members[0].serial}"
+            )
+            if natural_key in seen_keys:
+                natural_key = f"{natural_key}::{component_members[0].source_id}"
+            seen_keys.add(natural_key)
+            aggregate = _mountain_course_aggregate(
+                natural_key=natural_key,
+                name=base_name if len(components) == 1 else f"{base_name} {ordinal}",
+                mountain_name=mountain_name,
+                members=component_members,
+                excluded=frozenset(course.excluded_segment_ids),
+                start_rule="far_from_mountain_network_centroid",
+            )
+            bundles.append(
+                await build_course_bundle(
+                    provider=KRFOREST_PROVIDER_NAME,
+                    dataset_key=DATASET_KEY_MOUNTAIN_TRAILS,
+                    source_entity_type=MOUNTAIN_TRAIL_COURSE_ENTITY_TYPE,
+                    category=FOREST_ROUTE_CATEGORY,
+                    marker_icon=_maki_for(FOREST_ROUTE_CATEGORY),
+                    marker_color=FOREST_ROUTE_MARKER_COLOR,
+                    geometry_source="krforest",
+                    course=course,
+                    aggregate=aggregate,
+                    fetched_at=fetched_at,
+                    reverse_geocoder=geocoder,
+                )
+            )
+    return bundles
 
 
 # -- 단일 변환 ------------------------------------------------------------

@@ -16,6 +16,7 @@ __all__ = [
     # 표준 route_type 상수
     "ROUTE_TYPE_ROUTE",
     "ROUTE_TYPE_HIKING_TRAIL",
+    "ROUTE_TYPE_HIKING_COURSE",
     "ROUTE_TYPE_ACCESSIBLE_WALK",
     "ROUTE_TYPE_TREKKING",
     "ROUTE_TYPE_FOREST_TRAIL",
@@ -35,6 +36,8 @@ __all__ = [
 
 ROUTE_TYPE_ROUTE: Final[str] = "route"
 ROUTE_TYPE_HIKING_TRAIL: Final[str] = "hiking_trail"
+ROUTE_TYPE_HIKING_COURSE: Final[str] = "hiking_course"
+"""원천 구간(``hiking_trail``)을 이어 만든 등산 코스 (ADR-128)."""
 ROUTE_TYPE_ACCESSIBLE_WALK: Final[str] = "accessible_walk"
 ROUTE_TYPE_TREKKING: Final[str] = "trekking"
 ROUTE_TYPE_FOREST_TRAIL: Final[str] = "forest_trail"
@@ -47,6 +50,7 @@ ROUTE_TYPE_DRIVE_COURSE: Final[str] = "drive_course"
 ROUTE_TYPES: Final[tuple[str, ...]] = (
     ROUTE_TYPE_ROUTE,
     ROUTE_TYPE_HIKING_TRAIL,
+    ROUTE_TYPE_HIKING_COURSE,
     ROUTE_TYPE_ACCESSIBLE_WALK,
     ROUTE_TYPE_TREKKING,
     ROUTE_TYPE_FOREST_TRAIL,

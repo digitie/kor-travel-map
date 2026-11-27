@@ -48,10 +48,13 @@ from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASETS,
     KNPS_PLACE_DATASETS,
     KNPS_SOURCE_ENTITY_TYPE,
+    KNPS_TRAIL_COURSE_ENTITY_TYPE,
+    KNPS_TRAIL_SEGMENT_ENTITY_TYPE,
     knps_geometry_records_to_bundles,
     knps_geometry_snapshot_retires_absent,
     knps_national_park_anchors,
     knps_point_records_to_bundles,
+    knps_trail_courses_to_bundles,
 )
 from kortravelmap.providers.knps import (
     PROVIDER_NAME as KNPS_PROVIDER_NAME,
@@ -92,9 +95,11 @@ from kortravelmap.providers.krforest import (
 )
 from kortravelmap.providers.krforest import (
     KRFOREST_PROVIDER_NAME,
+    MOUNTAIN_TRAIL_COURSE_ENTITY_TYPE,
+    MOUNTAIN_TRAIL_SEGMENT_ENTITY_TYPE,
     arboretums_to_bundles,
     dulle_trails_to_bundles,
-    mountain_trails_to_bundles,
+    mountain_trail_courses_to_bundles,
     recreation_forests_to_bundles,
 )
 from kortravelmap.providers.krforest_safety import (
@@ -745,6 +750,44 @@ async def run_feature_geometry_knps_records(
     else:
         records = await _record_list(context, "knps_geometry_records")
     fetched_at = await _fetched_at(context)
+    if dataset_key == "knps_trails":
+        # 탐방로는 구간이 아니라 원천 탐방 코스 단위로 싣는다(ADR-128).
+        course_bundles = await _transform_reusing_geo(
+            context,
+            knps_trail_courses_to_bundles,
+            records,
+            fetched_at=fetched_at,
+            reverse_geocoder=_reverse_geocoder(context),
+        )
+        covered = _covered_course_segments(
+            context,
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            course_bundles=course_bundles,
+            source_segment_count=len(records),
+        )
+        course_result = await _load(
+            context,
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            bundles=course_bundles,
+            authoritative_snapshot_complete=True,
+            source_entity_type=KNPS_TRAIL_COURSE_ENTITY_TYPE,
+            retire_absent_from_snapshot=True,
+            record_sync_state=False,
+            geo_applied=GeoApplied(reverse=True, geocode=False),
+            address_failure_mode=spec.address_failure_mode,
+        )
+        return await _retire_covered_segments_and_record_sync(
+            context,
+            provider=KNPS_PROVIDER_NAME,
+            dataset_key=dataset_key,
+            segment_entity_type=KNPS_TRAIL_SEGMENT_ENTITY_TYPE,
+            covered=covered,
+            source_segment_count=len(records),
+            course_count=len(course_bundles),
+            result=course_result,
+        )
     reverse_geocoder = _reverse_geocoder(context)
     # 후보점 사전 조회 — 변환이 아니다(아래 helper docstring). 키워드 이름이 다른 것은 의도다.
     anchors = await _resolve_knps_national_park_anchors(
@@ -874,26 +917,145 @@ async def feature_place_krforest_arboretums(
 async def run_feature_route_krforest_mountain_trails(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
-    """산림청 등산로 SHP route를 적재한다(C05A)."""
+    """산림청 등산로 SHP를 등산 코스 route로 적재한다(C05A → ADR-128).
+
+    원천 행은 코스가 아니라 구간(중앙값 233 m)이다. 구간을 코스로 묶어 적재하고, 예전에
+    구간 그대로 실었던 Feature는 코스가 대신하므로 은퇴시킨다(원문은 코스 계보에 남는다).
+    """
     records = await _record_list(context, "krforest_mountain_trails")
     fetched_at = await _fetched_at(context)
     bundles = await _transform_reusing_geo(
         context,
-        mountain_trails_to_bundles,
+        mountain_trail_courses_to_bundles,
         records,
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
-    return await _load(
+    covered = _covered_course_segments(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=KRFOREST_MOUNTAIN_TRAILS_DATASET_KEY,
+        course_bundles=bundles,
+        source_segment_count=len(records),
+    )
+    result = await _load(
         context,
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_MOUNTAIN_TRAILS_DATASET_KEY,
         bundles=bundles,
         authoritative_snapshot_complete=True,
-        source_entity_type="mountain_trail_segment",
+        source_entity_type=MOUNTAIN_TRAIL_COURSE_ENTITY_TYPE,
         retire_absent_from_snapshot=True,
+        record_sync_state=False,
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
+    return await _retire_covered_segments_and_record_sync(
+        context,
+        provider=KRFOREST_PROVIDER_NAME,
+        dataset_key=KRFOREST_MOUNTAIN_TRAILS_DATASET_KEY,
+        segment_entity_type=MOUNTAIN_TRAIL_SEGMENT_ENTITY_TYPE,
+        covered=covered,
+        source_segment_count=len(records),
+        course_count=len(bundles),
+        result=result,
+    )
+
+
+COURSE_SEGMENT_COVERAGE_MIN: Final[float] = 0.5
+"""코스가 덮은 원천 구간 비율의 하한. 이보다 낮으면 원천 모양이 바뀐 것으로 보고 멈춘다."""
+
+
+def _course_segment_ids(bundles: Sequence[Any]) -> set[str]:
+    """코스 bundle들이 계보로 가진 원천 구간 id(``payload.segment_source_ids``)의 합집합."""
+    covered: set[str] = set()
+    for bundle in bundles:
+        detail = getattr(bundle.feature, "detail", None)
+        payload = getattr(detail, "payload", None)
+        if isinstance(payload, dict):
+            covered.update(str(value) for value in payload.get("segment_source_ids", ()))
+    return covered
+
+
+def _covered_course_segments(
+    context: AssetExecutionContext,
+    *,
+    provider: str,
+    dataset_key: str,
+    course_bundles: Sequence[Any],
+    source_segment_count: int,
+) -> set[str]:
+    """코스가 덮은 원천 구간 id. 덮은 비율이 하한 미만이면 적재 전에 멈춘다(ADR-128).
+
+    은퇴 대상은 **이 집합만**이다 — 코스가 만들어지지 않은 구간(산 코드·코스명 없음, geometry
+    결함 구간뿐인 묶음)은 손대지 않아 원천 일부가 바뀌어도 지도에서 길이 통째로 사라지지 않는다.
+    """
+    covered = _course_segment_ids(course_bundles)
+    if source_segment_count and len(covered) < COURSE_SEGMENT_COVERAGE_MIN * source_segment_count:
+        raise Failure(
+            description=(
+                f"{provider}/{dataset_key}: 코스가 원천 구간 {source_segment_count}건 중 "
+                f"{len(covered)}건만 덮었다 — 원천 모양이 바뀌었는지 확인할 것(적재하지 않음)."
+            )
+        )
+    context.log.info(
+        "%s/%s: 코스 %d건이 원천 구간 %d건 중 %d건을 덮는다",
+        provider,
+        dataset_key,
+        len(course_bundles),
+        source_segment_count,
+        len(covered),
+    )
+    return covered
+
+
+async def _retire_covered_segments_and_record_sync(
+    context: AssetExecutionContext,
+    *,
+    provider: str,
+    dataset_key: str,
+    segment_entity_type: str,
+    covered: set[str],
+    source_segment_count: int,
+    course_count: int,
+    result: DagsterFeatureLoadResult,
+) -> DagsterFeatureLoadResult:
+    """코스가 대신하는 구간 route를 은퇴시키고, 그 뒤에야 sync 성공을 기록한다(ADR-128).
+
+    은퇴는 provider lifecycle의 정규 경로(``retired_source_entity_ids`` — ``provider_tombstone``
+    전이 기록)라 다시 돌려도 같다. 코스 적재와 은퇴는 두 transaction이므로 sync 성공 기록을
+    은퇴 뒤로 미룬다 — 은퇴가 실패하면 run도 sync 상태도 실패고 다음 run이 같은 일을 다시 한다.
+    """
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
+    retired = 0
+    if covered:
+        _load_result, retired = await client.load_authoritative_feature_snapshot(
+            [],
+            provider=provider,
+            dataset_key=dataset_key,
+            source_entity_type=segment_entity_type,
+            retired_source_entity_ids=covered,
+        )
+    context.log.info(
+        "%s/%s: 코스 %d건 적재 뒤 구간 route %d건 은퇴",
+        provider,
+        dataset_key,
+        course_count,
+        retired,
+    )
+    await _record_feature_sync_success(
+        context,
+        client,
+        provider=provider,
+        dataset_key=dataset_key,
+        cursor_extra={
+            **_feature_result_cursor_extra(result),
+            "course_segments_covered": len(covered),
+            "course_segments_source": source_segment_count,
+            "segment_routes_retired": retired,
+        },
+        observation_receipt=result.observation_receipt,
+    )
+    return result
 
 
 @asset(

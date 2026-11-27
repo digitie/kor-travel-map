@@ -58,6 +58,7 @@ import unicodedata
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Any, Final, Literal, cast
 
 from pydantic import ValidationError
@@ -3477,6 +3478,22 @@ _PATCH_JSON_COLUMNS: Final[frozenset[str]] = frozenset(
 )
 
 
+def _field_value_json_default(value: object) -> object:
+    """field ledger 값 직렬화 — ``Decimal``은 JSON **number**로 낸다.
+
+    ``ops.feature_override_field_paths``의 ``numeric`` field(``route.total_distance_meters``·
+    ``area.area_square_meters``)는 ``jsonb_typeof = 'number'``를 요구한다. 기본 ``default=str``은
+    ``Decimal``을 문자열로 내 ``base JSON value does not match registry type``으로 적재가 죽는다
+    (ADR-128에서 route 거리를 처음 채우며 드러났다). 정수면 ``int``, 아니면 ``float`` — 저장
+    값은 이미 소수 한두 자리로 반올림돼 있어 float 왕복이 같은 10진 표기를 낸다.
+    """
+    if isinstance(value, Decimal):
+        if not value.is_finite():
+            raise ValueError(f"field 값이 유한한 수가 아니다: {value!r}")
+        return int(value) if value == value.to_integral_value() else float(value)
+    return str(value)
+
+
 def _provider_field_patch_payload(
     feature: Feature,
     *,
@@ -3552,7 +3569,7 @@ def _provider_field_patch_payload(
         assert feature.geom is not None
         geometry_wkt[f"{feature.kind.value}.geom"] = feature.geom
     return (
-        json.dumps(values, ensure_ascii=False, default=str),
+        json.dumps(values, ensure_ascii=False, default=_field_value_json_default),
         json.dumps(geometry_wkt, ensure_ascii=False),
     )
 

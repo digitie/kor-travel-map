@@ -5992,6 +5992,17 @@
           "name": {
             "title": "Name",
             "type": "string"
+          },
+          "route": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128). 일정 항목 표시용 — row_revision이 바뀌면 함께 바뀐다."
           }
         },
         "required": [
@@ -7873,6 +7884,152 @@
           "automatic"
         ],
         "title": "RestAreaStationPairState",
+        "type": "object"
+      },
+      "RouteEndpointOut": {
+        "additionalProperties": false,
+        "description": "route 출발·도착 지점(ADR-128).",
+        "properties": {
+          "lat": {
+            "description": "위도 (WGS84).",
+            "title": "Lat",
+            "type": "number"
+          },
+          "lon": {
+            "description": "경도 (WGS84).",
+            "title": "Lon",
+            "type": "number"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "원천이 준 지점 이름(예: KNPS 코스명 `A ~ B`의 A). 없으면 null.",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "lon",
+          "lat"
+        ],
+        "title": "RouteEndpointOut",
+        "type": "object"
+      },
+      "RouteSummaryOut": {
+        "additionalProperties": false,
+        "description": "``kind=route`` 공개 요약(ADR-128). route가 아니면 응답에 ``route=null``.",
+        "properties": {
+          "difficulty": {
+            "anyOf": [
+              {
+                "enum": [
+                  "easy",
+                  "moderate",
+                  "hard"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "원천 등급을 옮긴 값. 원천에 등급이 없거나 척도가 불명이면 null.",
+            "title": "Difficulty"
+          },
+          "duration_basis": {
+            "anyOf": [
+              {
+                "enum": [
+                  "source",
+                  "estimated"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "`source`=원천 소요시간 합(산림청 상행시간·KNPS 가는시간), `estimated`=원천에 없어 거리로 추정(18분/km). 화면에는 추정임을 표시할 것.",
+            "title": "Duration Basis"
+          },
+          "duration_minutes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "예상 소요시간(분). 출처는 `duration_basis`. `shape=network`이면 모든 갈래를 한 번씩 걷는 합이다.",
+            "title": "Duration Minutes"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteEndpointOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "도착점(본선의 끝). `loop`이면 출발점과 같다. 방향 미정 route는 null."
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "route 길이(m). 등산 코스는 그린 선 전체의 WGS84 측지 길이(`shape=network`이면 갈래 포함).",
+            "title": "Length M"
+          },
+          "route_type": {
+            "description": "`hiking_course`(원천 구간을 이은 등산 코스) · `hiking_trail` · `trekking` 등.",
+            "title": "Route Type",
+            "type": "string"
+          },
+          "shape": {
+            "anyOf": [
+              {
+                "enum": [
+                  "path",
+                  "loop",
+                  "network"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "등산 코스 모양. `path`=한 줄, `loop`=원점 회귀, `network`=샛길·끊김이 남은 망(geometry 첫 선이 출발→도착 본선).",
+            "title": "Shape"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/RouteEndpointOut"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "출발점. 등산 코스는 feature `lon`/`lat`과 같다 — 일정에 넣을 때 이 좌표를 쓴다. 진행 방향이 정의되지 않은 route는 null."
+          }
+        },
+        "required": [
+          "route_type"
+        ],
+        "title": "RouteSummaryOut",
         "type": "object"
       },
       "StateAddress": {

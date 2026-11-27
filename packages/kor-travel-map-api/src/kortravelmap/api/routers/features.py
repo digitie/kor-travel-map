@@ -29,7 +29,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal, assert_never
+from typing import Annotated, Any, Literal, TypeVar, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.category import public_feature_display_name
@@ -49,6 +49,7 @@ from kortravelmap.infra import (
     observation_repo,
     place_attribute_repo,
     price_repo,
+    route_summary_repo,
 )
 from kortravelmap.infra.feature_repo import CONTAINING_AREAS_MAX_LIMIT
 from kortravelmap.infra.poi_cache_target_repo import (
@@ -191,6 +192,73 @@ class PricePointOut(BaseModel):
     known_at: datetime
 
 
+class RouteEndpointOut(BaseModel):
+    """route 출발·도착 지점(ADR-128)."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    lon: float = Field(description="경도 (WGS84).")
+    lat: float = Field(description="위도 (WGS84).")
+    name: str | None = Field(
+        default=None, description="원천이 준 지점 이름(예: KNPS 코스명 `A ~ B`의 A). 없으면 null."
+    )
+
+
+class RouteSummaryOut(BaseModel):
+    """``kind=route`` 공개 요약(ADR-128). route가 아니면 응답에 ``route=null``."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    route_type: str = Field(
+        description=(
+            "`hiking_course`(원천 구간을 이은 등산 코스) · `hiking_trail` · `trekking` 등."
+        )
+    )
+    length_m: float | None = Field(
+        default=None,
+        description=(
+            "route 길이(m). 등산 코스는 그린 선 전체의 WGS84 측지 길이"
+            "(`shape=network`이면 갈래 포함)."
+        ),
+    )
+    duration_minutes: int | None = Field(
+        default=None,
+        description=(
+            "예상 소요시간(분). 출처는 `duration_basis`. `shape=network`이면 모든 갈래를 "
+            "한 번씩 걷는 합이다."
+        ),
+    )
+    duration_basis: Literal["source", "estimated"] | None = Field(
+        default=None,
+        description=(
+            "`source`=원천 소요시간 합(산림청 상행시간·KNPS 가는시간), "
+            "`estimated`=원천에 없어 거리로 추정(18분/km). 화면에는 추정임을 표시할 것."
+        ),
+    )
+    difficulty: Literal["easy", "moderate", "hard"] | None = Field(
+        default=None,
+        description="원천 등급을 옮긴 값. 원천에 등급이 없거나 척도가 불명이면 null.",
+    )
+    shape: Literal["path", "loop", "network"] | None = Field(
+        default=None,
+        description=(
+            "등산 코스 모양. `path`=한 줄, `loop`=원점 회귀, `network`=샛길·끊김이 남은 망"
+            "(geometry 첫 선이 출발→도착 본선)."
+        ),
+    )
+    start: RouteEndpointOut | None = Field(
+        default=None,
+        description=(
+            "출발점. 등산 코스는 feature `lon`/`lat`과 같다 — 일정에 넣을 때 이 좌표를 쓴다. "
+            "진행 방향이 정의되지 않은 route는 null."
+        ),
+    )
+    end: RouteEndpointOut | None = Field(
+        default=None,
+        description="도착점(본선의 끝). `loop`이면 출발점과 같다. 방향 미정 route는 null.",
+    )
+
+
 class FeatureSummary(_PublicDisplayName):
     """지도/목록용 경량 feature 표현 (bbox 조회 결과 1건)."""
 
@@ -234,6 +302,10 @@ class FeatureSummary(_PublicDisplayName):
             "공개 장소 속성 코드(ADR-121, 코드 오름차순). source link에서 유도한다. "
             "라벨은 `GET /v1/place-attributes` catalog를 쓴다."
         ),
+    )
+    route: RouteSummaryOut | None = Field(
+        default=None,
+        description="kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128).",
     )
 
 
@@ -352,6 +424,10 @@ class FeatureDetailResponse(_PublicDisplayName):
     attributes: list[FeatureAttributeView] = Field(
         default_factory=list,
         description="이 Feature의 공개 장소 속성(ADR-121, catalog sort_order 순).",
+    )
+    route: RouteSummaryOut | None = Field(
+        default=None,
+        description="kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128).",
     )
     # T-VN-05: raw observation lineage는 공개 detail에서 제거하고 operator 표면
     # (``GET /features/{id}/sources``·observation history)으로 이동했다.
@@ -571,6 +647,13 @@ class FeatureTripCard(_PublicDisplayName):
     address: dict[str, Any]
     marker_icon: str | None
     marker_color: str | None
+    route: RouteSummaryOut | None = Field(
+        default=None,
+        description=(
+            "kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128). 일정 항목 표시용 — "
+            "row_revision이 바뀌면 함께 바뀐다."
+        ),
+    )
 
 
 _FeatureUuidField = Field(
@@ -797,6 +880,10 @@ class NearbyFeatureSummary(_PublicDisplayName):
             "라벨은 `GET /v1/place-attributes` catalog를 쓴다."
         ),
     )
+    route: RouteSummaryOut | None = Field(
+        default=None,
+        description="kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128).",
+    )
 
 
 class FeaturesNearbyByTargetData(BaseModel):
@@ -880,6 +967,62 @@ def _public_detail(detail: dict[str, Any]) -> dict[str, Any]:
     ETL이 쓰는 값은 그대로 두고 **읽기 projection에서만** 제거한다.
     """
     return {key: value for key, value in detail.items() if key not in _PUBLIC_DETAIL_STRIPPED_KEYS}
+
+
+def _route_out(summary: route_summary_repo.PublicRouteSummary) -> RouteSummaryOut:
+    basis = summary.duration_basis
+    shape = summary.shape
+    difficulty = summary.difficulty
+    return RouteSummaryOut(
+        route_type=summary.route_type,
+        length_m=summary.length_m,
+        duration_minutes=summary.duration_minutes,
+        duration_basis=basis if basis in ("source", "estimated") else None,
+        difficulty=difficulty if difficulty in ("easy", "moderate", "hard") else None,
+        shape=shape if shape in ("path", "loop", "network") else None,
+        start=(
+            RouteEndpointOut(lon=summary.start[0], lat=summary.start[1], name=summary.start_name)
+            if summary.start is not None
+            else None
+        ),
+        end=(
+            RouteEndpointOut(lon=summary.end[0], lat=summary.end[1], name=summary.end_name)
+            if summary.end is not None
+            else None
+        ),
+    )
+
+
+_RouteCarrier = TypeVar(
+    "_RouteCarrier", FeatureSummary, NearbyFeatureSummary, FeatureDetailResponse
+)
+
+
+async def _attach_route_summaries(
+    session: AsyncSession, items: list[_RouteCarrier]
+) -> list[_RouteCarrier]:
+    """``kind=route`` 항목에 공개 route 요약을 붙인다 — 페이지당 조회 1회(ADR-128)."""
+    route_ids = [item.feature_id for item in items if item.kind == "route"]
+    if not route_ids:
+        return items
+    summaries = await route_summary_repo.list_public_route_summaries(session, route_ids)
+    return [
+        item.model_copy(update={"route": _route_out(summaries[item.feature_id])})
+        if item.feature_id in summaries
+        else item
+        for item in items
+    ]
+
+
+def _with_trip_card_route(
+    item: FeatureBatchItem, summary: route_summary_repo.PublicRouteSummary | None
+) -> FeatureBatchItem:
+    """found item의 trip_card에 route 요약을 싣는다(ADR-128). 다른 상태는 그대로."""
+    if summary is None or not isinstance(item, FeatureBatchFoundItem):
+        return item
+    return item.model_copy(
+        update={"trip_card": item.trip_card.model_copy(update={"route": _route_out(summary)})}
+    )
 
 
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
@@ -1143,6 +1286,7 @@ async def list_features_in_bbox(
         else None
     )
     items = [FeatureSummary(**uuid_substituted_row(row)) for row in page_rows]
+    items = await _attach_route_summaries(session, items)
     return FeaturesInBboxResponse(
         data=FeaturesInBboxData(items=items),
         meta=make_meta(
@@ -1260,6 +1404,7 @@ async def list_public_features_in_bounds(
     )
     truncated = len(rows) > max_items
     items = [FeatureSummary(**uuid_substituted_row(row)) for row in rows[:max_items]]
+    items = await _attach_route_summaries(session, items)
     return FeaturesInBoundsResponse(
         data=PublicFeatureListData(
             mode="items",
@@ -1344,6 +1489,7 @@ async def search_public_features(
         )
         for item in page.items
     ]
+    items = await _attach_route_summaries(session, items)
     return FeatureSearchResponse(
         data=FeatureSearchData(
             items=items,
@@ -1419,6 +1565,7 @@ async def list_features_nearby(
         )
         for item in page.items
     ]
+    items = await _attach_route_summaries(session, items)
     return FeaturesNearbyResponse(
         data=FeaturesNearbyData(
             origin=NearbyOriginSummary(lon=lon, lat=lat, radius_m=radius_m),
@@ -1550,6 +1697,7 @@ async def list_features_nearby_by_target(
         )
         for item in page.items
     ]
+    items = await _attach_route_summaries(session, items)
     return FeaturesNearbyByTargetResponse(
         data=FeaturesNearbyByTargetData(
             target=_nearby_target(target),
@@ -1638,6 +1786,7 @@ async def get_feature(
             ],
         }
     )
+    (detail,) = await _attach_route_summaries(session, [detail])
     response.headers["ETag"] = etag
     return FeatureDetailEnvelopeResponse(
         data=detail,
@@ -1759,7 +1908,9 @@ async def get_area_contained_features(
         data=AreaContainedFeaturesData(
             area_feature_id=identity.feature_uuid,
             area_square_meters=area_row.get("area_square_meters"),
-            items=[FeatureSummary(**uuid_substituted_row(row)) for row in rows],
+            items=await _attach_route_summaries(
+                session, [FeatureSummary(**uuid_substituted_row(row)) for row in rows]
+            ),
         ),
         meta=make_meta(request, started_at=started_at, page_size=page_size),
     )
@@ -1958,6 +2109,18 @@ async def get_features_batch(
                 for item in body.items
             ),
         )
+        # 두 번째 문장도 공개 읽기 마감 안에 둔다(T-READ-03 — 남은 시간으로 다시 건다).
+        await apply_public_read_budget(session)
+        route_summaries = await route_summary_repo.list_public_route_summaries(
+            session,
+            [
+                str(row.feature_uuid or row.feature_id)
+                for row in rows
+                if row.state == "found"
+                and row.trip_card is not None
+                and row.trip_card.get("kind") == "route"
+            ],
+        )
     except SQLAlchemyError as exc:
         # 공개 읽기 마감(T-READ-03)의 문장 취소(57014)는 앱의 ``READ_TIMEOUT``으로 보낸다 —
         # PinVi는 그 code를 다시 보내지 않는다. 다른 저장소 오류는 종전대로 503이다.
@@ -1974,7 +2137,10 @@ async def get_features_batch(
     return FeatureBatchResponse(
         data=FeatureBatchData(
             items=[
-                _batch_item_from_row(row, echo_feature_id=ref)
+                _with_trip_card_route(
+                    _batch_item_from_row(row, echo_feature_id=ref),
+                    route_summaries.get(str(row.feature_uuid or row.feature_id)),
+                )
                 for row, ref in zip(rows, refs, strict=True)
             ]
         ),

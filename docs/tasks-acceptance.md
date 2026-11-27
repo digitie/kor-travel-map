@@ -2825,3 +2825,19 @@ trigger 유지 사본 `feature.feature_primary_sources`, 목록·nearby·dedup �
 - [ ] 운영 회전 뒤 F10 0건, 관리자 `sort=provider` 첫 페이지·깊은 cursor·드문 dataset + 이름 정렬이 각각 100 ms 미만임을
   언제·어느 배포 generation에서 쟀는지 journal에 적었다.
 
+## T-HIKE-COURSE
+
+ADR-128 운영 반영:
+
+- [ ] 이미지 회전 뒤 산림청 등산로·KNPS 탐방로(`knps_trails`) job 성공.
+- [ ] prod 읽기 전용: 활성 `hiking_course` 산림청 약 14,252·KNPS 약 186, 덮인 구간 route 활성 0.
+- [ ] 코스 거리·소요시간 채움 100%, 산림청 난이도 99% 이상.
+- [ ] 공개 검색 "노고단고개"의 `route.start` 경도 127.53 부근, PinVi 일정 추가 POI 좌표 = `route.start`.
+
+## T-HIKE-SOURCES
+
+- [ ] 데이터셋별 필드·겹침 실측으로 적재 여부를 소유자와 정했고 정한 것은 머지됐다.
+
+## T-KNPS-TRAIL-GEOM
+
+- [ ] 결함 8구간 원인(원천/파서) 판정, 파서면 핀 갱신·재적재로 8코스 생성.
