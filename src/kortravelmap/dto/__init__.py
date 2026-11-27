@@ -89,6 +89,19 @@ from .route import (
 )
 from .source import SourceLink, SourceRecord
 from .urls import FeatureUrls, RawDataRef
+from .visitor_info import (
+    VISITOR_INFO_KEY,
+    AccessibilityGroup,
+    AccessibilityNote,
+    ContentLicense,
+    FeeAudience,
+    PetPolicy,
+    PlaceFee,
+    PlaceImage,
+    PlaceVisitorInfo,
+    VisitorInfoSource,
+    kogl_license,
+)
 from .weather import WeatherValue
 
 __all__ = [
@@ -110,6 +123,18 @@ __all__ = [
     "FeatureOpeningHours",
     # detail kinds
     "PlaceDetail",
+    # place 방문 안내 (ADR-126)
+    "VISITOR_INFO_KEY",
+    "AccessibilityGroup",
+    "AccessibilityNote",
+    "ContentLicense",
+    "FeeAudience",
+    "PetPolicy",
+    "PlaceFee",
+    "PlaceImage",
+    "PlaceVisitorInfo",
+    "VisitorInfoSource",
+    "kogl_license",
     "EventDetail",
     "NoticeDetail",
     "RouteDetail",

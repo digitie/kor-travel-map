@@ -5,9 +5,10 @@ from __future__ import annotations
 from datetime import date
 from typing import Any
 
-from pydantic import AnyUrl, BaseModel, ConfigDict, Field
+from pydantic import AnyUrl, BaseModel, ConfigDict, Field, field_validator
 
 from .opening_hours import FeatureOpeningHours
+from .visitor_info import VISITOR_INFO_KEY, PlaceVisitorInfo
 
 __all__ = ["PlaceDetail"]
 
@@ -30,7 +31,10 @@ class PlaceDetail(BaseModel):
     business_hours: FeatureOpeningHours | None = None
     facility_info: dict[str, Any] = Field(
         default_factory=dict,
-        description="provider별 부가 정보 (예: 해수욕장 ``beachWid``/``beachLen``).",
+        description=(
+            "provider별 부가 정보 (예: 해수욕장 ``beachWid``/``beachLen``). "
+            "``visitor_info`` 키는 typed ``PlaceVisitorInfo``다(ADR-126)."
+        ),
     )
     license_date: date | None = Field(
         default=None,
@@ -41,3 +45,24 @@ class PlaceDetail(BaseModel):
         description="사업자등록번호 (MOIS provider).",
     )
     payload: dict[str, Any] = Field(default_factory=dict)
+
+    @field_validator("facility_info", mode="after")
+    @classmethod
+    def _typed_visitor_info(cls, value: dict[str, Any]) -> dict[str, Any]:
+        """``facility_info["visitor_info"]``를 :class:`PlaceVisitorInfo`로 검증·정규화한다.
+
+        모델이든 dict든 받아 같은 JSON 모양으로 둔다 — 저장값과 읽은 값의 표현이 갈라지지 않게.
+        빈 안내(출처뿐)·``None``은 키째 뺀다. 맞지 않는 모양은 ``ValidationError``다(ADR-018).
+        """
+        if VISITOR_INFO_KEY not in value:
+            return value
+        raw = value[VISITOR_INFO_KEY]
+        rest = {key: item for key, item in value.items() if key != VISITOR_INFO_KEY}
+        if raw is None:
+            return rest  # 명시 None = 방문 안내 없음
+        info = (
+            raw if isinstance(raw, PlaceVisitorInfo) else PlaceVisitorInfo.model_validate(raw)
+        )
+        if info.is_empty():
+            return rest
+        return rest | {VISITOR_INFO_KEY: info.model_dump(mode="json", exclude_defaults=True)}

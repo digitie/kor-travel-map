@@ -297,6 +297,11 @@ class _RecreationForest:
     latitude: float | None
     longitude: float | None
     institution_code: str | None
+    capacity: str | None = None
+    entrance_fee: str | None = None
+    accommodation_available: str | None = None
+    main_facilities: str | None = None
+    reference_date: str | None = None
     raw: Any = None
 
 
@@ -539,6 +544,19 @@ class _Museum:
     oper_phone_number: str | None
     homepage_url: str | None
     instt_code: str | None
+    fclty_info: str | None = None
+    weekday_oper_open_hhmm: str | None = None
+    weekday_oper_colse_hhmm: str | None = None
+    holiday_oper_open_hhmm: str | None = None
+    holiday_close_open_hhmm: str | None = None
+    rstde_info: str | None = None
+    adult_chrge: int | None = None
+    yngbgs_chrge: int | None = None
+    child_chrge: int | None = None
+    etc_chrge_info: str | None = None
+    fclty_intrcn: str | None = None
+    trnsport_info: str | None = None
+    reference_date: date | None = None
     raw: Any = None
 
 

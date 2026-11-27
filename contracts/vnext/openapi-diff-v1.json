@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "179c53b317ad05b5ae5d3b9bbd2de8b4e5f5d255c2a47707ec501f8f8b3bbc48"
+      "sha256": "0df2b2380850028f8d5dab64568328cd260686134f9e69942316dd82eefaa56c"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "03a424d82e664a212375faa13d26cdc5e7f9fc752be4a7b9d3e8b4428a1bd0d4"
+      "sha256": "98d2148e3a2e749a7d8a7589e48c21961ae2f0bf6f06aa771774d8458831bdb3"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -246,6 +246,11 @@
       "date": "2026-11-27",
       "task": "ADR-128 등산 코스",
       "change": "baseline sha256 재고정(user·service·admin). `RouteSummaryOut`·`RouteEndpointOut` 스키마를 추가하고 공개 `FeatureSummary`·`NearbyFeatureSummary`·`FeatureDetailResponse`와 service batch `FeatureTripCard`에 선택 필드 `route`(kind=route 요약 — 거리·소요시간·출처·난이도·모양·출발/도착)를 더했다. 기존 경로·필드·query 불변(additive). PinVi user·service 재vendor 대상이다."
+    },
+    {
+      "date": "2026-11-27",
+      "task": "ADR-126 place 방문 안내",
+      "change": "baseline sha256 재고정(user·admin, service 불변). 공개 `GET /v1/features/{feature_id}` 응답에 선택 필드 `visitor_info`(`PlaceVisitorInfo` — 이용시간·휴무·주차·요금·소개·이미지별 공공누리 라이선스·무장애·반려동물)와 스키마 6개(`PlaceVisitorInfo`·`PlaceImage`·`ContentLicense`·`PlaceFee`·`AccessibilityNote`·`PetPolicy`)를 더했다. 같은 값은 `detail.facility_info`에 다시 싣지 않는다. PinVi user 재vendor 대상이다."
     }
   ],
   "surfaces": {
@@ -257,7 +262,7 @@
         "enum_changes": 8,
         "status_changes": 1,
         "error_changes": 0,
-        "schema_changes": 11,
+        "schema_changes": 12,
         "deferred": 2
       },
       "added": [
@@ -477,6 +482,11 @@
           "operation": "GET /v1/features/{feature_id}",
           "detail": "FeatureDetailResponse.route(RouteSummaryOut | null)",
           "basis": "ADR-128: additive"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "FeatureDetailResponse.visitor_info(PlaceVisitorInfo | null) — 방문 안내 typed, detail.facility_info.visitor_info는 공개 응답에서 뺌",
+          "basis": "ADR-126: 원천 방문 안내 typed 노출 — additive 필드, 기존 필드 의미 불변(facility_info에 visitor_info 키는 이번에 처음 생김)"
         }
       ],
       "deferred": [
@@ -708,7 +718,7 @@
         "enum_changes": 4,
         "status_changes": 6,
         "error_changes": 7,
-        "schema_changes": 23,
+        "schema_changes": 24,
         "deferred": 2
       },
       "added": [
@@ -1130,6 +1140,11 @@
           "operation": "POST /v1/features/batch",
           "detail": "FeatureTripCard.route(RouteSummaryOut | null) — 일정 항목 표시용 kind=route 요약",
           "basis": "ADR-128: additive — PinVi trip card decoder는 추가 키를 허용한다"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "FeatureDetailResponse.visitor_info(PlaceVisitorInfo | null) — 방문 안내 typed, detail.facility_info.visitor_info는 공개 응답에서 뺌",
+          "basis": "ADR-126: 원천 방문 안내 typed 노출 — additive 필드, 기존 필드 의미 불변(facility_info에 visitor_info 키는 이번에 처음 생김)"
         }
       ],
       "deferred": [

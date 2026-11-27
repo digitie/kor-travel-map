@@ -3503,6 +3503,23 @@ export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
         /**
+         * AccessibilityNote
+         * @description 무장애 안내 1항목(TourAPI ``detailWithTour2`` 한 필드).
+         */
+        AccessibilityNote: {
+            /** Facility */
+            facility: string;
+            /**
+             * Group
+             * @enum {string}
+             */
+            group: "physical" | "visual" | "hearing" | "infant_family";
+            /** Label */
+            label: string;
+            /** Text */
+            text: string;
+        };
+        /**
          * AdminAuthEventCreateRequest
          * @description Next.js login/logout API가 남기는 감사 이벤트.
          */
@@ -7190,6 +7207,40 @@ export interface components {
             meta: components["schemas"]["Meta"];
         };
         /**
+         * ContentLicense
+         * @description 한 이미지의 이용 조건 — 공공누리 유형이 확인된 것만 있다(없으면 이미지를 담지 않는다).
+         *
+         *     텍스트 안내는 원천 데이터의 이용허락을 따르므로 license 없이
+         *     ``PlaceVisitorInfo.attribution``만 남긴다.
+         */
+        ContentLicense: {
+            /**
+             * Attribution
+             * @description 출처 표시 문구(원천 기관명).
+             */
+            attribution: string;
+            /**
+             * Commercial Allowed
+             * @description 상업적 이용 허용 여부. 공공누리 2·4유형은 False.
+             */
+            commercial_allowed: boolean;
+            /**
+             * Derivatives Allowed
+             * @description 변경(크롭·필터·리사이즈 재생성) 허용 여부. 공공누리 3·4유형은 False.
+             */
+            derivatives_allowed: boolean;
+            /**
+             * Kogl Type
+             * @description 공공누리 유형 0~4.
+             */
+            kogl_type: number;
+            /**
+             * Label
+             * @description 사람이 읽는 이용 조건.
+             */
+            label?: string | null;
+        };
+        /**
          * CoordinateBody
          * @description WGS84 좌표. 모든 외부 인터페이스는 lon/lat 순서를 사용한다.
          */
@@ -9536,6 +9587,8 @@ export interface components {
             urls: {
                 [key: string]: unknown;
             };
+            /** @description place 방문 안내(ADR-126) — 이용시간·휴무·주차·요금·소개·이미지(공공누리 유형별)·무장애·반려동물. 원천 문장 그대로다. 이미지의 ``license.derivatives_allowed``가 false면(공공누리 3·4유형) 크롭·필터·재인코딩 없이 원본 비율로 표시한다. ``detail.facility_info``에는 다시 싣지 않는다(이 필드가 정본). */
+            visitor_info?: components["schemas"]["PlaceVisitorInfo"] | null;
         };
         /**
          * FeatureIdsScope
@@ -12479,6 +12532,32 @@ export interface components {
             rest_area: components["schemas"]["RestAreaFoodState"];
         };
         /**
+         * PetPolicy
+         * @description 반려동물 동반 안내(TourAPI ``detailPetTour2``).
+         */
+        PetPolicy: {
+            /**
+             * Allowed Pets
+             * @description 동반 가능 동물.
+             */
+            allowed_pets?: string | null;
+            /**
+             * Companion Type
+             * @description 동반 구분.
+             */
+            companion_type?: string | null;
+            /**
+             * Notes
+             * @description 기타 동반 정보.
+             */
+            notes?: string | null;
+            /**
+             * Requirements
+             * @description 동반 시 필요 사항.
+             */
+            requirements?: string | null;
+        };
+        /**
          * PipelineCancellationDetailRecord
          * @description POST 결과와 GET detail이 공유하는 reload 가능한 cancellation 표현.
          */
@@ -13377,6 +13456,143 @@ export interface components {
         PlaceAttributesResponse: {
             data: components["schemas"]["PlaceAttributesData"];
             meta: components["schemas"]["Meta"];
+        };
+        /**
+         * PlaceFee
+         * @description 구조화된 요금 1건(원천이 숫자로 줄 때만 — 박물관 표준데이터).
+         */
+        PlaceFee: {
+            /** Amount Krw */
+            amount_krw: number;
+            /**
+             * Audience
+             * @enum {string}
+             */
+            audience: "adult" | "youth" | "child";
+        };
+        /**
+         * PlaceImage
+         * @description 원본 참조 이미지 1장(가공 없음).
+         */
+        PlaceImage: {
+            /**
+             * Caption
+             * @description 원천 이미지 이름(없으면 null — 화면이 장소명으로 대체한다).
+             */
+            caption?: string | null;
+            license: components["schemas"]["ContentLicense"];
+            /**
+             * Thumbnail Url
+             * @description 원천이 준 작은 이미지 URL. Map이 만든 썸네일이 아니다.
+             */
+            thumbnail_url?: string | null;
+            /**
+             * Url
+             * @description 원본 이미지 URL(원천이 준 그대로).
+             */
+            url: string;
+        };
+        /**
+         * PlaceVisitorInfo
+         * @description place 방문 안내 — 원천 문장 그대로의 typed 묶음.
+         *
+         *     소비자 규칙: 모르는 ``source``·``group``·``audience`` 값과 모르는 필드는 무시한다(원천이 늘면
+         *     값이 더해진다). 목록 필드는 비어 있으면 생략될 수 있다. 배지는 원문을 해석하지 말고
+         *     ``accessibility``가 비어 있지 않음 / ``pet_policy``가 있음으로 판단한다.
+         */
+        PlaceVisitorInfo: {
+            /** Accessibility */
+            accessibility?: components["schemas"]["AccessibilityNote"][];
+            /**
+             * Accommodation Available
+             * @description 숙박 가능 여부.
+             */
+            accommodation_available?: boolean | null;
+            /**
+             * Attribution
+             * @description 출처 표시 문구(원천 기관명).
+             */
+            attribution: string;
+            /**
+             * Capacity
+             * @description 수용 인원 원문.
+             */
+            capacity?: string | null;
+            /**
+             * Description
+             * @description 원천 소개문(국가유산 설명문·박물관 소개 등).
+             */
+            description?: string | null;
+            /**
+             * Discount
+             * @description 할인 안내 원문.
+             */
+            discount?: string | null;
+            /**
+             * Facilities
+             * @description 주요·편의 시설 원문.
+             */
+            facilities?: string | null;
+            /**
+             * Fee Text
+             * @description 이용 요금 원문.
+             */
+            fee_text?: string | null;
+            /** Fees */
+            fees?: components["schemas"]["PlaceFee"][];
+            /** Images */
+            images?: components["schemas"]["PlaceImage"][];
+            /**
+             * Inquiry
+             * @description 문의·안내 원문.
+             */
+            inquiry?: string | null;
+            /**
+             * Parking
+             * @description 주차 안내 원문.
+             */
+            parking?: string | null;
+            /**
+             * Parking Fee
+             * @description 주차 요금 원문.
+             */
+            parking_fee?: string | null;
+            /**
+             * Pet Note
+             * @description 반려동물 동반 여부 원문(소개정보 한 줄, 해석하지 않는다).
+             */
+            pet_note?: string | null;
+            pet_policy?: components["schemas"]["PetPolicy"] | null;
+            /**
+             * Reference Date
+             * @description 원천 기준일(있을 때).
+             */
+            reference_date?: string | null;
+            /**
+             * Reservation
+             * @description 예약 안내 원문.
+             */
+            reservation?: string | null;
+            /**
+             * Rest Days
+             * @description 휴무·휴관일 원문.
+             */
+            rest_days?: string | null;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "tourapi" | "krheritage" | "datagokr_museum" | "krforest_recreation_forest";
+            /**
+             * Transport
+             * @description 교통 안내 원문.
+             */
+            transport?: string | null;
+            /**
+             * Usage Hours
+             * @description 이용·관람 시간 원문.
+             */
+            usage_hours?: string | null;
         };
         /**
          * PoiCacheTargetListData

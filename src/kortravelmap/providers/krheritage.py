@@ -64,7 +64,9 @@ from kortravelmap.core.venue_match import (
     sigungu_root,
     split_venue_names,
 )
+from kortravelmap.core.visitor_text import DESCRIPTION_MAX
 from kortravelmap.dto import (
+    VISITOR_INFO_KEY,
     Address,
     AreaDetail,
     Coordinate,
@@ -75,6 +77,7 @@ from kortravelmap.dto import (
     FeatureKind,
     FeatureQualityState,
     PlaceDetail,
+    PlaceVisitorInfo,
     SourceLink,
     SourceRecord,
     SourceRole,
@@ -253,6 +256,11 @@ class KrHeritageItem(Protocol):
     @property
     def image_url(self) -> str | None:
         """대표 이미지 URL (``imageUrl``). 있으면 ``file_sources``로 변환."""
+        ...
+
+    @property
+    def content(self) -> str | None:
+        """설명문 (``content`` — provider가 HTML을 걷은 본문). place 방문 안내의 소개문(ADR-126)."""
         ...
 
 
@@ -552,6 +560,36 @@ def _image_file_sources(
     ]
 
 
+HERITAGE_ATTRIBUTION: Final[str] = "국가유산청, www.khs.go.kr"
+"""국가유산청 저작권정책의 출처 표시 예시 그대로."""
+
+
+def _heritage_description(content: object) -> str | None:
+    """provider가 이미 정리한 설명문(``clean_html_text`` — 태그 제거 후 entity 해제)을 그대로 쓴다.
+
+    다시 태그 정리를 거치면 ``<삼국유사>`` 같은 본문 꺾쇠가 지워진다. 앞뒤 공백만 걷고 상한에서
+    자른다.
+    """
+    if not isinstance(content, str):
+        return None
+    text = content.strip()
+    return text[:DESCRIPTION_MAX] or None
+
+
+def _heritage_visitor_info(item: KrHeritageItem) -> PlaceVisitorInfo:
+    """설명문 → 방문 안내(원문 그대로).
+
+    국가유산 이미지는 담지 않는다 — 이미지 API의 ``imageNuri`` 값(``B/F``·``D/F`` 등)이 어떤
+    공공누리 유형인지 국가유산청 문서로 확인하지 못했다(ADR-126, fail-closed). 관람시간·관람료는
+    이 API에 없다.
+    """
+    return PlaceVisitorInfo(
+        source="krheritage",
+        attribution=HERITAGE_ATTRIBUTION,
+        description=_heritage_description(getattr(item, "content", None)),
+    )
+
+
 async def _heritage_item_to_bundle(
     item: KrHeritageItem,
     *,
@@ -596,6 +634,9 @@ async def _heritage_item_to_bundle(
         "manager": item.owner,
         "image_url": item.image_url,
     }
+    content = getattr(item, "content", None)
+    if content is not None:  # 없으면 키를 두지 않는다(옛 payload hash 유지)
+        raw_data["content"] = content
     if raw_boundary_wkt is not None:
         raw_data["geom_wkt"] = raw_boundary_wkt
 
@@ -662,6 +703,7 @@ async def _heritage_item_to_bundle(
         detail = PlaceDetail(
             feature_id=feature_id,
             place_kind=_place_kind(item),
+            facility_info={VISITOR_INFO_KEY: _heritage_visitor_info(item)},
             payload={**detail_payload, "manager": normalize_korean_text(item.owner)},
         )
 

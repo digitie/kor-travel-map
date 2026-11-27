@@ -1,10 +1,12 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-129.** (ADR-126은 동시 PR #1564·#1565가 쓴다.)
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-129.**
 
 - [ADR-128 — 등산로는 원천 구간이 아니라 구간을 이은 "등산 코스"를 Feature로 싣는다](128-hiking-courses-from-trail-segments.md) — proposed, 2026-11-27 (migration 없음; 구간 은퇴; 공개 `route` 요약; KNPS geometry 결함 가드).
 
 - [ADR-127 — 휴게소 먹거리는 transport가 모은 한국도로공사 데이터를 Valkey 상태로 내고, 휴게소 연결·주유소 짝은 Map 규칙이 정한다](127-rest-area-food-from-transport.md) — accepted, 2026-11-27 (소유자 승인; LLM 없음; 휴게소 215/215 연결, 주유소 짝 자동 204/242(일대일); migration 없음). ADR-125·126은 동시 PR(#1563·#1564)이 쓴다.
+
+- [ADR-126 — place 방문 안내는 typed `PlaceVisitorInfo` 하나로 모으고, TourAPI 상세는 오퍼레이션별 예산으로 점진 백필한다](126-place-visitor-info.md) — proposed, 2026-11-27 (ADR-018 확장; migration 없음; 국가유산 이미지는 `imageNuri` 미확인으로 fail-closed).
 
 - [ADR-125 — Feature 대표 원천은 "가장 먼저 붙은 primary 연결"이고, 쓰기와 같은 transaction에서 유지되는 표에서 읽는다](125-persisted-feature-primary-source.md) — proposed, 2026-11-27 (소유자 승인 설계 변경; alembic 459, 정합성 검사 F10; performance.md §9.3.3 검토 기록 대체).
 
