@@ -1,5 +1,14 @@
 # CHANGELOG
 
+## 2026-11-27 — TourAPI 상세 op 점진 백필(ADR-126 2/2)
+
+- TourAPI 관광지 run이 `detailIntro2`·`detailImage2`·`detailPetTour2`·무장애 `detailWithTour2`를 op별 하루 예산
+  (`KOR_TRAVEL_MAP_VISITKOREA_DETAIL_*_DAILY_BUDGET`, 기본 900)으로 점진 백필해 `visitor_info`(이용시간·휴무·주차·요금·
+  이미지·반려동물·무장애)를 채운다. 무장애·반려동물은 그 서비스 목록에 든 관광지만 묻는다. migration 없음.
+- `detailCommon2` run 예산 관광지 600→850·축제 300→50. 하루 상한·run 예산·op 예산 전부 env
+  (`KOR_TRAVEL_MAP_VISITKOREA_DETAIL_*`, 빈 값 = 코드 기본값)이고 KST 날짜별 장부(Dagster instance KV)로 run을 넘어 지킨다.
+- 공개 상세 `visitor_info`에 TourAPI 관광지 소개문·대표 이미지와 축제 소개문·대표 이미지가 함께 실린다.
+
 ## 2026-11-27 — place 방문 안내 `visitor_info`(ADR-126)
 
 - 공개 `GET /v1/features/{id}`에 typed `visitor_info`(이용시간·휴무·주차·요금·소개·이미지·무장애·반려동물, 원문 그대로)를

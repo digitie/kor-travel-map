@@ -1,3 +1,13 @@
+## 2026-11-27 — place 방문 안내(ADR-126) PR 2/2: TourAPI 상세 op 점진 백필
+
+- 관광지 run이 소개·이미지·반려동물·무장애를 op별 하루 예산(기본 900, env로 상향)으로 받아 `raw_data`에 잇는다. 우선순위
+  큐레이션+인지도 → 낡음 → 관광타입. migration 없음.
+- `detailCommon2` 예산 관광지 850·축제 50·하루 900, op 넷 하루 900 — 전부 env(빈 값=기본)로 덮고 KST 날짜 장부로 run을 넘어 지킨다.
+  무장애·반려동물은 서비스 목록 contentid만(각 서비스 `KorWithService2`·`KorPetTourService2` 활용신청 필요 — 없으면 그 op은
+  매 run 경고 후 0건). 큐 runner 경로는 장부가 없어 상세를 받지 않는다. 축제 소개·이미지도 `visitor_info`.
+- 다음: 배포 뒤 관광지 run 로그의 op별 "요청·수신·예산 밖"으로 채움 속도 실측(개발계정 op당 ≈21일), 무장애·반려동물 서비스
+  활용신청 여부 확인(없으면 그 op은 첫 호출에서 멈춘다 — 로그 "중단(auth)"), 운영계정 증설 뒤 env 상향.
+
 ## 2026-11-27 — place 방문 안내(ADR-126) PR 1/2: typed 모델·국가유산 설명문·박물관·휴양림 필드·공개 API
 
 - `PlaceVisitorInfo`(typed)를 `facility_info.visitor_info`에 두고 공개 상세에 `visitor_info`로 낸다. 국가유산은 설명문만

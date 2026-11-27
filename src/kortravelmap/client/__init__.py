@@ -310,6 +310,9 @@ from kortravelmap.infra.source_replay_repo import (
 from kortravelmap.infra.source_replay_repo import (
     read_current_source_records as repo_read_current_source_records,
 )
+from kortravelmap.infra.source_replay_repo import (
+    read_detail_priority_scores as repo_read_detail_priority_scores,
+)
 from kortravelmap.infra.status_repo import StatusCounts, gather_status_counts
 from kortravelmap.infra.sync_state_repo import (
     SyncState,
@@ -1367,6 +1370,22 @@ class AsyncKorTravelMapClient:
             if len(page) < batch_size:
                 return records, expected
             after = page[-1].source_entity_key
+
+    async def read_detail_priority_scores(
+        self, *, provider: str, dataset_key: str
+    ) -> dict[str, int]:
+        """dataset entity별 상세 백필 우선 점수(검색 인지도 + 큐레이션 포함, ADR-126, 읽기 전용).
+
+        ``source_entity_id`` → 점수이고 0점 entity는 없다. 상세 op 계획
+        (``plan_tourapi_detail_ops``)이 이 점수가 높은 장소의 상세를 먼저 받는다.
+        """
+        async with self._session_factory() as session, session.begin():
+            provider_dataset_id = await resolve_active_provider_dataset_id(
+                session, provider=normalize_provider_name(provider), dataset_key=dataset_key
+            )
+            return await repo_read_detail_priority_scores(
+                session, provider_dataset_id=provider_dataset_id
+            )
 
     async def find_venue_candidates(self, name: str) -> list[VenueCandidate]:
         """장소 이름 조각으로 좌표가 있는 공개 장소 Feature 후보를 읽는다(#1468 D, 읽기 전용).

@@ -1079,8 +1079,12 @@ async def _recreation_forest_to_bundle(
         "latitude": str(item.latitude) if item.latitude is not None else None,
         "longitude": str(item.longitude) if item.longitude is not None else None,
         "institution_code": item.institution_code,
-        **{name: getattr(item, name) for name in _FOREST_VISITOR_FIELDS},
     }
+    # 값 없는 방문 안내 키는 raw에 두지 않는다 — 이 기능 전 원본과 payload hash가 같게(ADR-126).
+    for field_name in _FOREST_VISITOR_FIELDS:
+        value = getattr(item, field_name, None)
+        if value is not None:
+            raw_data[field_name] = value
     facility_info: dict[str, Any] = {
         "forest_type": normalize_korean_text(item.forest_type),
         "homepage_url": item.homepage_url,
