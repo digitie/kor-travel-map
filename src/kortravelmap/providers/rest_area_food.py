@@ -24,6 +24,7 @@ Map 휴게소(transport ``rest-areas``, data.go.kr 표준데이터)와 맞추고
 
 from __future__ import annotations
 
+import math
 import re
 import statistics
 from collections import defaultdict
@@ -46,11 +47,14 @@ __all__ = [
     "STATION_PAIR_RADIUS_M",
     "MenuSummary",
     "RestAreaLink",
+    "RestAreaPoint",
     "StationPair",
     "StationPairCandidate",
+    "StationPoint",
     "link_rest_areas",
     "name_key",
     "pair_station",
+    "pair_stations",
     "summarize_menus",
     "with_rest_area_links",
 ]
@@ -121,8 +125,7 @@ def link_rest_areas(
     """``(natural_key, 원천 이름)`` 목록을 KREX 휴게소 코드에 잇는다.
 
     주유소(``facility_class=gas_station``) 행은 후보가 아니다. 분류를 모르는 행(0502에만 있는
-    코드)은
-    후보다 — 메뉴가 있으니 휴게소다.
+    코드)은 후보다 — 메뉴가 있으니 휴게소다.
     """
     index: dict[tuple[str, str | None], list[TransportRestAreaFood]] = defaultdict(list)
     for food in foods:
@@ -138,12 +141,13 @@ def link_rest_areas(
             first[natural_key] = RestAreaLink(natural_key, name, 1.0, "name_exact", candidates[0])
         elif len(classified) == 1 and menu_only:
             # 0615 코드 하나 + 0502에만 있는 옛 코드(2026-11-27 함양 000551 ↔ 000161). 코드·방향은
-            # 0615,
-            # 메뉴는 합친다.
+            # 0615, 메뉴는 합치되 같은 (이름, 가격)은 한 번만 둔다.
             merged = replace(
                 classified[0],
-                menus=classified[0].menus
-                + tuple(menu for food in menu_only for menu in food.menus),
+                menus=_dedupe_menus(
+                    classified[0].menus
+                    + tuple(menu for food in menu_only for menu in food.menus)
+                ),
             )
             first[natural_key] = RestAreaLink(
                 natural_key, name, 0.95, "name_merged", merged,
@@ -167,6 +171,19 @@ def link_rest_areas(
                 link = first[key]
                 first[key] = RestAreaLink(key, link.name, 0.0, "shared_code", None, (code,))
     return first
+
+
+def _dedupe_menus(
+    menus: tuple[TransportRestAreaFoodMenu, ...],
+) -> tuple[TransportRestAreaFoodMenu, ...]:
+    seen: set[tuple[str, int | None]] = set()
+    out: list[TransportRestAreaFoodMenu] = []
+    for menu in menus:
+        key = (_clean(menu.name), menu.price)
+        if key not in seen:
+            seen.add(key)
+            out.append(menu)
+    return tuple(out)
 
 
 def with_rest_area_links(
@@ -250,21 +267,24 @@ def summarize_menus(menus: Sequence[TransportRestAreaFoodMenu]) -> MenuSummary:
     """메뉴 목록 → 대표·추천 메뉴, 가격대(최저·중앙·최고), 계절 메뉴. 같은 입력이면 같은 출력이다.
 
     - 가격대는 0보다 큰 가격만 쓴다. 중앙값은 짝수 개면 낮은 쪽(실제 메뉴 가격 중 하나)이다.
+    - 0원 행은 대표·계절 목록에 넣지 않는다(``menu_count``에는 센다).
     - 대표·추천: 대표 → 프리미엄 → 추천 순, 같은 무리 안에서는 가격·이름 순, 최대
       :data:`FEATURED_MENU_LIMIT`.
     - 계절: 여름·겨울 메뉴(사계절 제외), 여름 → 겨울, 가격·이름 순, 최대
       :data:`SEASONAL_MENU_LIMIT`.
     """
     prices = sorted(menu.price for menu in menus if menu.price is not None and menu.price > 0)
+    # 0원 행("자율식당" 같은 매장 안내)은 메뉴가 아니다 — 대표·계절 목록에서 뺀다.
+    listed = [menu for menu in menus if menu.price != 0]
     featured = sorted(
-        (menu for menu in menus if menu.is_best or menu.is_premium or menu.is_recommended),
+        (menu for menu in listed if menu.is_best or menu.is_premium or menu.is_recommended),
         key=lambda menu: (
             0 if menu.is_best else 1 if menu.is_premium else 2,
             *_price_order(menu),
         ),
     )
     seasonal = sorted(
-        (menu for menu in menus if menu.season in ("summer", "winter")),
+        (menu for menu in listed if menu.season in ("summer", "winter")),
         key=lambda menu: (0 if menu.season == "summer" else 1, *_price_order(menu)),
     )
     updated = [menu.menu_updated_on for menu in menus if menu.menu_updated_on is not None]
@@ -308,6 +328,8 @@ class StationPair:
 _UPDOWN: Final[Mapping[str, Literal["up", "down"]]] = {
     "상": "up", "상행": "up", "하": "down", "하행": "down",
 }
+_REVIEW: Final[float] = 0.6
+"""검토 목록으로 보내는 신뢰도(자동 하한 미만)."""
 
 
 def _station_tokens(station_name: str) -> tuple[str, set[str], set[tuple[str, str]]]:
@@ -325,8 +347,10 @@ def _station_tokens(station_name: str) -> tuple[str, set[str], set[tuple[str, st
 def _station_mentions(text: str, pairs: set[tuple[str, str]], base: str) -> bool:
     """주유소 이름이 휴게소 이름을 담는가.
 
-    "밀양(함양)" ↔ "밀양영남루", "고삼하이파크고삼(세종)" ↔ "고삼호수".
+    "밀양(함양)" ↔ "밀양영남루", "고삼하이파크고삼(세종)" ↔ "고삼호수". 빈 이름은 담지 않는다.
     """
+    if len(base) < 2:
+        return False
     if base in text:
         return True
     for station_base, _ in pairs:
@@ -337,37 +361,62 @@ def _station_mentions(text: str, pairs: set[tuple[str, str]], base: str) -> bool
     return any(_base_related(stem[start:], base) for start in range(max(len(stem) - 1, 0)))
 
 
-def _score(station_name: str, candidate: StationPairCandidate, crowded: bool) -> tuple[float, str]:
+def _direction_named(text: str, tokens: set[str], base: str, dest: str) -> bool:
+    """주유소 이름이 이 행선지를 가리키는가.
+
+    괄호·"…방향" 토큰, 또는 휴게소 이름 바로 뒤("홍천서울주유소")만 본다(부분 문자열 아님).
+    """
+    if dest in tokens:
+        return True
+    at = text.find(base)
+    return at >= 0 and text[at + len(base):].startswith(dest)
+
+
+def _score(
+    station_name: str, candidate: StationPairCandidate, others: Sequence[StationPairCandidate]
+) -> tuple[float, str]:
     text, tokens, pairs = _station_tokens(station_name)
     base, dest = name_key(candidate.rest_area_name)
     if not _station_mentions(text, pairs, base):
-        return (0.5 if not crowded and candidate.distance_m <= 150 else 0.3), "distance_only"
+        return 0.3, "distance_only"
     if "양방향" in tokens or dest is None:
         return 0.9, "name_bidirectional"
-    if dest in tokens or dest in text.replace(base, "", 1):
+    if _direction_named(text, tokens, base, dest):
         return 0.95, "name_direction"
     updown = {_UPDOWN[token] for token in tokens if token in _UPDOWN}
     if candidate.direction_code is not None and updown == {candidate.direction_code}:
-        return 0.9, "name_updown"
-    return 0.6, "name_only"
+        # 오피넷 (상)/(하)는 노선마다 기준이 KREX 상하행과 다를 수 있다(2026-11-27 중부내륙선). 같은
+        # 휴게소 이름의 다른 방향 후보보다 이 후보가 가까울 때만 자동으로 본다.
+        rivals = [
+            other for other in others
+            if other is not candidate and name_key(other.rest_area_name)[0] == base
+        ]
+        if all(candidate.distance_m < other.distance_m for other in rivals):
+            return 0.85, "name_updown_nearest"
+        return _REVIEW, "name_updown_far"
+    if tokens:
+        # 이름에 행선지·상하행 표기가 있는데 이 후보와 맞지 않는다.
+        return _REVIEW, "name_conflict"
+    return _REVIEW, "name_only"
 
 
 def pair_station(
     station_name: str, candidates: Sequence[StationPairCandidate]
 ) -> StationPair | None:
-    """주유소 하나를 400 m 안 휴게소 후보 중 하나와 짝짓는다. 후보가 없으면 None.
+    """주유소 하나를 400 m 안 휴게소 후보 중 하나와 짝짓는다(한 주유소만 본 판정). 후보가 없으면
+    None.
 
     이름 근거가 거리보다 앞선다(같은 휴게소 상하행 주유소의 좌표가 서로 바뀌어 있는 원천 사례가
     있다).
-    이름이 휴게소만 가리키고 방향을 못 가리면(``name_only``) 그 휴게소 이름의 후보가 하나일 때만
-    0.85다.
+    이름이 휴게소만 가리키고 방향 표기가 없으면(``name_only``) 그 휴게소 이름의 후보가 하나일 때만
+    0.85(``name_single``)다. 같은 휴게소에 더 강한 짝이 있으면 약한 짝을 내리는 일대일 판정은
+    :func:`pair_stations`가 한다.
     """
     if not candidates:
         return None
-    crowded = len(candidates) > 1
     scored = sorted(
         (
-            (*_score(station_name, candidate, crowded), candidate)
+            (*_score(station_name, candidate, candidates), candidate)
             for candidate in candidates
         ),
         key=lambda row: (-row[0], row[2].distance_m, row[2].key),
@@ -382,5 +431,74 @@ def pair_station(
     ]
     if tied and confidence >= STATION_PAIR_AUTO_CONFIDENCE and method != "name_bidirectional":
         # 같은 근거로 둘이 맞으면 고르지 않는다.
-        confidence, method = 0.6, f"{method}_tie"
+        confidence, method = _REVIEW, f"{method}_tie"
     return StationPair(best.key, confidence, method, best.distance_m)
+
+
+@dataclass(frozen=True, slots=True)
+class StationPoint:
+    key: str
+    name: str
+    lon: float
+    lat: float
+
+
+@dataclass(frozen=True, slots=True)
+class RestAreaPoint:
+    key: str
+    name: str
+    direction_code: Literal["up", "down"] | None
+    lon: float
+    lat: float
+
+
+def _distance_m(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
+    rad = math.pi / 180.0
+    a = (
+        math.sin((lat2 - lat1) * rad / 2) ** 2
+        + math.cos(lat1 * rad) * math.cos(lat2 * rad) * math.sin((lon2 - lon1) * rad / 2) ** 2
+    )
+    return 2 * 6_372_797.560856 * math.asin(math.sqrt(a))
+
+
+def pair_stations(
+    stations: Iterable[StationPoint],
+    rest_areas: Sequence[RestAreaPoint],
+    *,
+    radius_m: float = STATION_PAIR_RADIUS_M,
+) -> dict[str, StationPair]:
+    """주유소 전부를 한 번에 짝짓고 일대일로 다듬는다(:func:`pair_station` + 아래).
+
+    한 휴게소에 자동 짝이 여럿이면 가장 강한 근거만 남기고 더 약한 근거의 짝은 검토로 내린다
+    (``…_weaker``) — 휴게소 주유소는 방향마다 보통 하나라, 이름에 휴게소 지명이 든 근처 일반 주유소
+    ("경산I.C주유소")가 약한 근거로 같은 휴게소에 붙는 오짝을 막는다. 같은 근거끼리(주유소·충전소
+    따로
+    등록)는 둘 다 둔다. 반경 밖 주유소는 결과에 없다.
+    """
+    # 위도 0.01°(약 1.1 km) 격자로 후보를 좁힌다.
+    grid: dict[tuple[int, int], list[RestAreaPoint]] = defaultdict(list)
+    for area in rest_areas:
+        grid[(int(area.lat * 100), int(area.lon * 100))].append(area)
+    pairs: dict[str, StationPair] = {}
+    for station in stations:
+        cell = (int(station.lat * 100), int(station.lon * 100))
+        candidates = []
+        for dlat in (-1, 0, 1):
+            for dlon in (-1, 0, 1):
+                for area in grid.get((cell[0] + dlat, cell[1] + dlon), ()):
+                    distance = _distance_m(station.lon, station.lat, area.lon, area.lat)
+                    if distance <= radius_m:
+                        candidates.append(StationPairCandidate(
+                            area.key, area.name, area.direction_code, distance
+                        ))
+        pair = pair_station(station.name, candidates)
+        if pair is not None:
+            pairs[station.key] = pair
+    best: dict[str, float] = defaultdict(float)
+    for pair in pairs.values():
+        if pair.automatic:
+            best[pair.key] = max(best[pair.key], pair.confidence)
+    for key, pair in list(pairs.items()):
+        if pair.automatic and pair.confidence < best[pair.key]:
+            pairs[key] = StationPair(pair.key, _REVIEW, f"{pair.method}_weaker", pair.distance_m)
+    return pairs

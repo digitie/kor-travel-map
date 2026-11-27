@@ -1090,6 +1090,9 @@ async def test_linked_rest_areas_carry_the_krex_code_and_the_state_job_summarize
             **_golden("rest-areas.json"), "has_more": False, "next_cursor": None,
         },
         "/v1/service/exports/rest-area-food": {**food, "has_more": False, "next_cursor": None},
+        "/v1/service/exports/fuel-stations": {
+            **_golden("fuel-stations.json"), "has_more": False, "next_cursor": None,
+        },
     }
     _install(monkeypatch, lambda request: httpx.Response(200, json=responses[request.url.path]))
     [area] = [item async for item in fetch_transport_rest_areas_linked(_settings())]

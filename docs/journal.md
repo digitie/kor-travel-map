@@ -7,8 +7,9 @@
   - 메뉴를 결정적으로 요약해(대표·프리미엄·추천, 가격 최저·중앙·최고, 여름·겨울 메뉴, 기준일) 새 Valkey 데이터셋
     `transport.rest_area_food`에 싣고(`transport_state_rest_area_food`, 매일 05:07, 코드 기본 STOPPED),
     `/v1/service/transport/rest-areas/{id}`(`food`)·`/fuel-stations/{id}`(`rest_area_food`)가 준다.
-  - 오피넷 주유소 ↔ 휴게소 짝은 읽을 때 400 m GEO + 이름 규칙으로 정한다. **운영 242곳 중 자동 216곳(89.3%)**, 검토 26곳은
-    `GET /v1/ops/rest-area-food/review`(operator)에만.
+  - 오피넷 주유소 ↔ 휴게소 짝은 적재 job이 주유소 export까지 받아 전체를 한 번에 정하고 일대일로 다듬는다(lookup 키).
+    **운영 242곳 중 자동 204곳(84.3%)**, 검토 38곳은 `GET /v1/ops/rest-area-food/review`(operator)에만. 적대 리뷰가 찾은 1차
+    규칙의 오짝 6건((상)/(하) 기준 차이 2, 휴게소 지명이 든 근처 일반 주유소 4)은 모두 검토로 내려갔다.
   - PG 휴게소 place는 `facility_info.ex_link`(코드·노선·상하행·근거)와 비어 있던 `highway_name`·`direction`을 채운다.
     PG 적재는 먹거리 export가 없으면 실패한다(출렁임 방지).
 - `RestAreaState` 모양은 그대로(키 스키마 버전 유지). OpenAPI(admin·service) 갱신, migration 없음.

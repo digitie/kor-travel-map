@@ -28,6 +28,7 @@ __all__ = [
     "RestAreaFuelPriceState",
     "RestAreaMenuItemState",
     "RestAreaState",
+    "RestAreaStationPairState",
     "StateAddress",
     "StateCoordinate",
 ]
@@ -134,6 +135,17 @@ class RestAreaMenuItemState(_StateModel):
     season: Literal["all_year", "summer", "winter"] | None = None
 
 
+class RestAreaStationPairState(_StateModel):
+    """이 휴게소와 짝지은(또는 검토로 남긴) 오피넷 주유소 하나(ADR-127)."""
+
+    feature_id: str = Field(description="주유소 상태(FuelStationState)의 feature_id.")
+    name: str
+    distance_m: float = Field(ge=0.0)
+    confidence: float = Field(ge=0.0, le=1.0)
+    method: str
+    automatic: bool = Field(description="true면 주유소 상세에 이 휴게소 먹거리가 보인다.")
+
+
 class RestAreaFoodState(_StateModel):
     """휴게소 하나의 먹거리 요약과 한국도로공사 표준 코드 연결(ADR-127).
 
@@ -175,6 +187,12 @@ class RestAreaFoodState(_StateModel):
         description="transport가 한국도로공사에서 이 메뉴를 받은 시각(화면의 기준일)."
     )
     attribution: Literal["한국도로공사"] = "한국도로공사"
+    stations: list[RestAreaStationPairState] = Field(
+        default_factory=list,
+        description=(
+            "400 m 안에서 이 휴게소를 고른 오피넷 주유소(자동·검토 모두). 일대일로 다듬은 결과다."
+        ),
+    )
 
 
 class RestAreaFuelPriceState(_StateModel):

@@ -66,11 +66,6 @@ from kortravelmap.providers.kor_travel_transport_state import (
     TransportStateDataset,
 )
 from kortravelmap.providers.opinet import OPINET_PRODUCT_KEY_MAP, OPINET_PRODUCT_NAME_KO
-from kortravelmap.providers.rest_area_food import (
-    STATION_PAIR_RADIUS_M,
-    StationPairCandidate,
-    pair_station,
-)
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
@@ -213,7 +208,9 @@ class PairedRestAreaFood(BaseModel):
     model_config = ConfigDict(extra="forbid")
     confidence: float = Field(ge=0.0, le=1.0)
     method: str = Field(
-        description="짝 근거(name_direction·name_bidirectional·name_updown·name_single)."
+        description=(
+            "짝 근거(name_direction·name_bidirectional·name_updown_nearest·name_single)."
+        )
     )
     distance_m: float
     rest_area: RestAreaFoodState
@@ -837,54 +834,45 @@ def _parse_food(value: bytes | str | None, feature_id: str) -> RestAreaFoodState
 async def _paired_rest_area_food(
     store: ValkeyStateStore, station: FuelStationOut
 ) -> tuple[PairedRestAreaFood | None, TransportFreshness | None]:
-    """주유소 400 m 안 휴게소 가운데 같은 방향 하나를 골라 먹거리를 붙인다(ADR-127).
+    """주유소와 자동으로 짝지은 휴게소의 먹거리(ADR-127).
 
-    짝 규칙은 ``providers.rest_area_food.pair_station``. 자동 하한 미만이면 null — 그 짝은 관리자
-    검토
-    목록(``/v1/admin/ops/rest-area-food-review``)에만 나온다.
+    짝은 적재 job이 전체 주유소·휴게소를 한 번에 보고 일대일로 정해 둔다(``pair_stations``).
+    여기서는
+    먹거리 세대의 lookup(주유소 feature_id → 휴게소 feature_id)으로 찾기만 한다. 자동 하한 미만 짝은
+    lookup에 없다 — 관리자 검토 목록(``/v1/ops/rest-area-food/review``)에만 나온다.
     """
-    if station.coord is None:
-        return None, None
     dataset = DATASET_REST_AREA_FOOD
     try:
         meta = await store.current_meta(dataset.name)
-        hits = await store.nearby(
-            dataset.name,
-            meta.generation,
-            lon=station.coord.lon,
-            lat=station.coord.lat,
-            radius_m=STATION_PAIR_RADIUS_M,
-            count=8,
+        [rest_area_id] = await store.lookup(dataset.name, meta.generation, [station.feature_id])
+        raw = (
+            await store.get_values(dataset.name, meta.generation, [rest_area_id])
+            if rest_area_id is not None
+            else [None]
         )
-        raw = await store.get_values(dataset.name, meta.generation, [key for key, _ in hits])
     except StateNotLoaded:
         return None, None
     except StateStoreError:
         _LOGGER.warning("휴게소 먹거리 데이터셋을 읽지 못해 주유소 먹거리 없이 응답한다.")
         return None, None
     freshness = _freshness(dataset, meta)
-    foods: dict[str, RestAreaFoodState] = {}
-    candidates: list[StationPairCandidate] = []
-    for (key, distance), value in zip(hits, raw, strict=True):
-        food = _parse_food(value, key)
-        if food is None:
-            continue
-        foods[key] = food
-        candidates.append(StationPairCandidate(
-            key=key,
-            rest_area_name=food.rest_area_name,
-            direction_code=food.direction_code,
-            distance_m=distance,
-        ))
-    pair = pair_station(station.name, candidates)
-    if pair is None or not pair.automatic:
+    food = _parse_food(raw[0], rest_area_id or station.feature_id)
+    pair = next(
+        (
+            entry
+            for entry in (food.stations if food is not None else [])
+            if entry.feature_id == station.feature_id and entry.automatic
+        ),
+        None,
+    )
+    if food is None or pair is None:
         return None, freshness
     return (
         PairedRestAreaFood(
             confidence=pair.confidence,
             method=pair.method,
-            distance_m=round(pair.distance_m, 1),
-            rest_area=foods[pair.key],
+            distance_m=pair.distance_m,
+            rest_area=food,
         ),
         freshness,
     )

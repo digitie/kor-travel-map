@@ -2,15 +2,14 @@
 
 휴게소 ↔ 한국도로공사 표준 코드 연결과 고속도로 주유소 ↔ 휴게소 짝은 규칙으로 자동 판정한다
 (``providers.rest_area_food``). 자동으로 쓰지 않는 것만 여기서 본다 — 고치는 길은 규칙(코드)이고,
-사람이
-값을 덮어쓰는 저장소는 두지 않는다(소유자 결정 2026-11-27: "decide simply").
+사람이 값을 덮어쓰는 저장소는 두지 않는다(소유자 결정 2026-11-27: "decide simply").
 
 - ``unlinked_rest_areas``: 휴게소 상태(``transport.rest_areas``)에 있는데 먹거리 상태
-  (``transport.rest_area_food``)에 없는 휴게소. 이름이 한국도로공사 표기와 다르거나 같은 이름이 둘
-  이상이다.
-- ``station_pairs``: 휴게소 400 m 안 주유소마다 고른 짝과 신뢰도. ``automatic=false``가 검토
-  대상이다
-  (PinVi에는 보이지 않는다). ``include_automatic=true``면 자동 짝도 함께 준다.
+  (``transport.rest_area_food``)에 없는 휴게소. 이름이 한국도로공사 표기와 다르거나 같은 이름이
+  둘 이상이다.
+- ``station_pairs``: 적재 job이 정해 둔 주유소 짝(``RestAreaFoodState.stations``, 일대일로 다듬은
+  결과 — 주유소 상세와 같은 판정). ``automatic=false``가 검토 대상이다(PinVi에는 보이지 않는다).
+  ``include_automatic=true``면 자동 짝도 함께 준다.
 
 값은 Valkey 지금 세대만 읽는다(PG를 읽지 않는다).
 """
@@ -21,19 +20,13 @@ from time import perf_counter
 from typing import Annotated, TypeVar
 
 from fastapi import APIRouter, Depends, Query, Request
-from kortravelmap.dto.transport_state import FuelStationState, RestAreaFoodState, RestAreaState
+from kortravelmap.dto.transport_state import RestAreaFoodState, RestAreaState
 from kortravelmap.infra.valkey_state import StateNotLoaded, StateStoreError, ValkeyStateStore
 from kortravelmap.providers.kor_travel_transport_state import (
-    DATASET_FUEL_STATIONS,
     DATASET_REST_AREA_FOOD,
     DATASET_REST_AREAS,
 )
-from kortravelmap.providers.rest_area_food import (
-    STATION_PAIR_AUTO_CONFIDENCE,
-    STATION_PAIR_RADIUS_M,
-    StationPairCandidate,
-    pair_station,
-)
+from kortravelmap.providers.rest_area_food import STATION_PAIR_AUTO_CONFIDENCE
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from kortravelmap.api.response import Meta, make_meta
@@ -99,59 +92,24 @@ async def rest_area_food_review(
     try:
         areas = await _all(store, DATASET_REST_AREAS.name, RestAreaState)
         foods = await _all(store, DATASET_REST_AREA_FOOD.name, RestAreaFoodState)
-        stations_meta = await store.current_meta(DATASET_FUEL_STATIONS.name)
-        located = [food for food in foods.values() if food.coord is not None]
-        # 휴게소 약 215곳 × GEOSEARCH 한 번. 관리자 화면 한 번의 읽기라 묶지 않는다.
-        hits_by_area = [
-            await store.nearby(
-                DATASET_FUEL_STATIONS.name,
-                stations_meta.generation,
-                lon=coord.lon,
-                lat=coord.lat,
-                radius_m=STATION_PAIR_RADIUS_M,
-                count=20,
-            )
-            for food in located
-            if (coord := food.coord) is not None
-        ]
-        candidates: dict[str, list[StationPairCandidate]] = {}
-        for food, hits in zip(located, hits_by_area, strict=True):
-            for station_id, distance in hits:
-                candidates.setdefault(station_id, []).append(StationPairCandidate(
-                    key=food.feature_id,
-                    rest_area_name=food.rest_area_name,
-                    direction_code=food.direction_code,
-                    distance_m=distance,
-                ))
-        station_ids = sorted(candidates)
-        raw_stations = await store.get_values(
-            DATASET_FUEL_STATIONS.name, stations_meta.generation, station_ids
-        )
     except StateNotLoaded as exc:
         raise state_unavailable(str(exc)) from exc
     except StateStoreError as exc:
         raise state_unavailable(str(exc)) from exc
-    pairs: list[StationPairReview] = []
-    for station_id, raw in zip(station_ids, raw_stations, strict=True):
-        if raw is None:
-            continue
-        try:
-            station = FuelStationState.model_validate_json(raw)
-        except ValidationError:
-            continue
-        pair = pair_station(station.name, candidates[station_id])
-        if pair is None:
-            continue
-        pairs.append(StationPairReview(
-            station_feature_id=station_id,
+    pairs = [
+        StationPairReview(
+            station_feature_id=station.feature_id,
             station_name=station.name,
-            rest_area_feature_id=pair.key,
-            rest_area_name=foods[pair.key].rest_area_name,
-            distance_m=round(pair.distance_m, 1),
-            confidence=pair.confidence,
-            method=pair.method,
-            automatic=pair.automatic,
-        ))
+            rest_area_feature_id=food.feature_id,
+            rest_area_name=food.rest_area_name,
+            distance_m=station.distance_m,
+            confidence=station.confidence,
+            method=station.method,
+            automatic=station.automatic,
+        )
+        for food in foods.values()
+        for station in food.stations
+    ]
     automatic = sum(1 for pair in pairs if pair.automatic)
     shown = pairs if include_automatic else [pair for pair in pairs if not pair.automatic]
     shown.sort(key=lambda pair: (pair.automatic, pair.confidence, pair.station_name))

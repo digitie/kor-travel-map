@@ -26,6 +26,7 @@ gateway 신규 생성 금지 (ADR-006).
 | ``mcst`` | python-mcst-api | 문체부 파일데이터 CSV |
 | ``mois`` | python-mois-api | 인허가 LOCALDATA lifecycle |
 | ``opinet`` | kor-travel-transport | 주유소·유가 |
+| ``rest_area_food`` | kor-travel-transport | 휴게소 KREX 코드 연결·메뉴 요약·주유소 짝(ADR-127) |
 | ``standard_data`` | data.go.kr 표준데이터 | 표준데이터 5종 |
 | ``transport_reference_places`` | kor-travel-transport | 철도역·여객선 항구 place(ADR-120) |
 | ``visitkorea`` | python-visitkorea-api | TourAPI 축제·행사 event(유일한 축제 원천) |

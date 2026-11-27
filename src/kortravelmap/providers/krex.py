@@ -483,6 +483,9 @@ async def _rest_area_item_to_bundle(
     }
     if ex_link is not None:
         raw_data["ex_link"] = ex_link
+    if direction_label != item.direction:
+        # 원천 이름에서 유도한 방향 표시도 hash에 넣는다 — 규칙이 바뀌면 다시 쓰인다.
+        raw_data["direction_label"] = direction_label
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,

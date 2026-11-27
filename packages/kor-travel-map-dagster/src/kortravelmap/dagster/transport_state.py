@@ -68,6 +68,7 @@ from kortravelmap.providers.kor_travel_transport_state import (
     airport_state,
     fuel_station_state,
     highway_incident_state,
+    rest_area_food_state_item,
     rest_area_food_states,
     rest_area_fuel_price_state,
     rest_area_state,
@@ -224,6 +225,10 @@ async def _collect_rest_area_food(
     """
     del unchanged_since  # 매일 한 번이라 건너뛰지 않는다
     areas = [area async for area in fetch_transport_rest_areas(settings)]
+    # 주유소 짝은 전체를 한 번에 일대일로 다듬어야 해서 주유소 export도 받는다(하루 한 번).
+    stations = [
+        fuel_station_state(station) async for station in fetch_transport_fuel_stations(settings)
+    ]
     collected: list[datetime] = []
 
     def _seen(value: datetime) -> None:
@@ -234,8 +239,8 @@ async def _collect_rest_area_food(
     if not collected:
         raise TransportExportEmpty("rest-area-food: collection.last_success_at이 없다.")
     return [
-        to_state_item(state)
-        for state in rest_area_food_states(areas, foods, collected_at=min(collected))
+        rest_area_food_state_item(state)
+        for state in rest_area_food_states(areas, foods, stations, collected_at=min(collected))
     ]
 
 

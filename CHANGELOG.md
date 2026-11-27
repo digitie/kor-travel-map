@@ -6,7 +6,7 @@
   `transport.rest_area_food`(job `transport_state_rest_area_food`, 매일 05:07 KST, 기본 STOPPED, 설정
   `KOR_TRAVEL_MAP_TRANSPORT_STATE_REST_AREA_FOOD_ALERT_AFTER_SECONDS` 기본 2일).
 - `/v1/service/transport/rest-areas/{feature_id}`에 `food`·`food_freshness`, `/v1/service/transport/fuel-stations/{feature_id}`에
-  `rest_area_food`(신뢰도 0.8 이상 짝만)·`food_freshness`. 관리자 `GET /v1/ops/rest-area-food/review`(operator).
+  `rest_area_food`(적재 job이 일대일로 정한 신뢰도 0.8 이상 짝만)·`food_freshness`. 관리자 `GET /v1/ops/rest-area-food/review`(operator).
 - PG 휴게소 place `facility_info`: `ex_link`(표준 코드·노선·상하행·근거), `highway_name`·`direction` 채움. PG 휴게소 적재가
   먹거리 export를 함께 받는다(없으면 실패).
 

@@ -768,7 +768,7 @@ class KorTravelMapSettings(BaseSettings):
         lt=8 * 86400,
         description=(
             "휴게소 먹거리 상태 job 상류 경고 기준(초, ADR-127). "
-            "기본 2일(transport 매일 수집 두 번). "
+            "기본 2일(transport 하루 한 번 수집의 두 주기). "
             "상한은 읽기 stale 기준 8일. "
             "env ``KOR_TRAVEL_MAP_TRANSPORT_STATE_REST_AREA_FOOD_ALERT_AFTER_SECONDS``."
         ),

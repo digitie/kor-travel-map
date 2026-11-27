@@ -12347,7 +12347,7 @@ export interface components {
             distance_m: number;
             /**
              * Method
-             * @description 짝 근거(name_direction·name_bidirectional·name_updown·name_single).
+             * @description 짝 근거(name_direction·name_bidirectional·name_updown_nearest·name_single).
              */
             method: string;
             rest_area: components["schemas"]["RestAreaFoodState"];
@@ -14459,6 +14459,11 @@ export interface components {
              */
             source_collected_at: string;
             /**
+             * Stations
+             * @description 400 m 안에서 이 휴게소를 고른 오피넷 주유소(자동·검토 모두). 일대일로 다듬은 결과다.
+             */
+            stations?: components["schemas"]["RestAreaStationPairState"][];
+            /**
              * Std Rest Code
              * @description 한국도로공사 휴게소 표준 코드 6자리(0615 svarCd = 0502 stdRestCd).
              */
@@ -14593,6 +14598,30 @@ export interface components {
             phone?: string | null;
             /** Route Name */
             route_name?: string | null;
+        };
+        /**
+         * RestAreaStationPairState
+         * @description 이 휴게소와 짝지은(또는 검토로 남긴) 오피넷 주유소 하나(ADR-127).
+         */
+        RestAreaStationPairState: {
+            /**
+             * Automatic
+             * @description true면 주유소 상세에 이 휴게소 먹거리가 보인다.
+             */
+            automatic: boolean;
+            /** Confidence */
+            confidence: number;
+            /** Distance M */
+            distance_m: number;
+            /**
+             * Feature Id
+             * @description 주유소 상태(FuelStationState)의 feature_id.
+             */
+            feature_id: string;
+            /** Method */
+            method: string;
+            /** Name */
+            name: string;
         };
         /**
          * ReviewFeatureDetailRecord

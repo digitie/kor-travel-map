@@ -37,6 +37,7 @@ from kortravelmap.dto.transport_state import (
     RestAreaFuelPriceState,
     RestAreaMenuItemState,
     RestAreaState,
+    RestAreaStationPairState,
     StateAddress,
     StateCoordinate,
 )
@@ -80,7 +81,14 @@ from kortravelmap.providers.opinet import (
     OPINET_STATION_MARKER_COLOR,
     OPINET_STATION_MARKER_ICON,
 )
-from kortravelmap.providers.rest_area_food import MenuItem, link_rest_areas, summarize_menus
+from kortravelmap.providers.rest_area_food import (
+    MenuItem,
+    RestAreaPoint,
+    StationPoint,
+    link_rest_areas,
+    pair_stations,
+    summarize_menus,
+)
 
 if TYPE_CHECKING:
     # 이 frozen dataclass들은 krex Protocol의 shape이다. Protocol이 settable 속성·Decimal 좌표를
@@ -106,6 +114,7 @@ __all__ = [
     "airport_state",
     "fuel_station_state",
     "highway_incident_state",
+    "rest_area_food_state_item",
     "rest_area_food_states",
     "rest_area_fuel_price_state",
     "rest_area_state",
@@ -292,13 +301,16 @@ def _menu_item(item: MenuItem) -> RestAreaMenuItemState:
 def rest_area_food_states(
     areas: Sequence[TransportRestArea],
     foods: Sequence[TransportRestAreaFood],
+    stations: Sequence[FuelStationState] = (),
     *,
     collected_at: datetime,
 ) -> list[RestAreaFoodState]:
-    """휴게소마다 KREX 코드를 잇고 메뉴를 요약한다(ADR-127). 연결하지 못한 휴게소는 빠진다.
+    """휴게소마다 KREX 코드를 잇고 메뉴를 요약하고 400 m 안 주유소를 짝짓는다(ADR-127).
 
-    연결하지 못한 휴게소·주유소 짝 검토는 관리자 API(``/v1/admin/ops/rest-area-food-review``)가
-    본다.
+    연결하지 못한 휴게소는 빠진다. 연결 실패·검토 짝은 관리자
+    API(``/v1/ops/rest-area-food/review``)가
+    본다. 메뉴가 없는 휴게소도 빠진다. 주유소 짝은 전체를 한 번에 보고 일대일로
+    다듬는다(``pair_stations``).
     """
     states = {area.natural_key: rest_area_state(area) for area in areas}
     links = link_rest_areas(((area.natural_key, area.name) for area in areas), foods)
@@ -308,6 +320,10 @@ def rest_area_food_states(
             continue
         area = states[key]
         summary = summarize_menus(link.food.menus)
+        if summary.menu_count == 0:
+            # 메뉴 없는 휴게소는 내지 않는다 — 0502만 비어 와도 데이터셋 건수가 줄어 교체 거부
+            # (ShrinkGuard)가 막는다. 연결만 된 휴게소를 세면 메뉴 전멸이 guard를 통과한다.
+            continue
         out.append(RestAreaFoodState(
             feature_id=area.feature_id,
             rest_area_name=area.name,
@@ -329,7 +345,46 @@ def rest_area_food_states(
             menu_updated_on=summary.menu_updated_on,
             source_collected_at=collected_at,
         ))
-    return out
+    pairs = pair_stations(
+        (
+            StationPoint(station.feature_id, station.name, station.coord.lon, station.coord.lat)
+            for station in stations
+            if station.coord is not None
+        ),
+        [
+            RestAreaPoint(
+                food.feature_id, food.rest_area_name, food.direction_code,
+                food.coord.lon, food.coord.lat,
+            )
+            for food in out
+            if food.coord is not None
+        ],
+    )
+    names = {station.feature_id: station.name for station in stations}
+    by_area: dict[str, list[RestAreaStationPairState]] = {}
+    for station_id, pair in sorted(pairs.items()):
+        by_area.setdefault(pair.key, []).append(RestAreaStationPairState(
+            feature_id=station_id,
+            name=names[station_id],
+            distance_m=round(pair.distance_m, 1),
+            confidence=pair.confidence,
+            method=pair.method,
+            automatic=pair.automatic,
+        ))
+    return [
+        food.model_copy(update={"stations": by_area.get(food.feature_id, [])}) for food in out
+    ]
+
+
+def rest_area_food_state_item(state: RestAreaFoodState) -> StateItem:
+    """먹거리 상태 → Valkey 항목.
+
+    자동 짝 주유소의 feature_id를 lookup 키로 단다(주유소 상세가 쓴다).
+    """
+    return to_state_item(
+        state,
+        lookup_keys=tuple(station.feature_id for station in state.stations if station.automatic),
+    )
 
 
 def rest_area_fuel_price_state(record: TransportRestAreaFuelPrice) -> RestAreaFuelPriceState:

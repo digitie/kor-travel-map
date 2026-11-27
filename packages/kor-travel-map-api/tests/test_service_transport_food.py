@@ -18,6 +18,7 @@ from kortravelmap.dto.transport_state import (
     RestAreaFoodState,
     RestAreaMenuItemState,
     RestAreaState,
+    RestAreaStationPairState,
     StateAddress,
     StateCoordinate,
 )
@@ -46,7 +47,12 @@ def _rest(feature_id: str, name: str) -> RestAreaState:
     )
 
 
-def _food(feature_id: str, name: str, direction: Any) -> RestAreaFoodState:
+def _food(
+    feature_id: str,
+    name: str,
+    direction: Any,
+    stations: list[RestAreaStationPairState] | None = None,
+) -> RestAreaFoodState:
     return RestAreaFoodState(
         feature_id=feature_id, rest_area_name=name, natural_key=f"{feature_id}::::",
         coord=StateCoordinate(lon=128.2, lat=36.4), std_rest_code="000101", ex_name=name,
@@ -56,6 +62,14 @@ def _food(feature_id: str, name: str, direction: Any) -> RestAreaFoodState:
             RestAreaMenuItemState(name="소떡소떡", price=4500, tags=["best"], season="all_year")
         ],
         seasonal=[], menu_updated_on=date(2026, 1, 9), source_collected_at=_NOW,
+        stations=stations or [],
+    )
+
+
+def _pair(feature_id: str, name: str, distance: float, confidence: float, method: str) -> Any:
+    return RestAreaStationPairState(
+        feature_id=feature_id, name=name, distance_m=distance, confidence=confidence,
+        method=method, automatic=confidence >= 0.8,
     )
 
 
@@ -74,7 +88,14 @@ _VALUES: dict[str, dict[str, str]] = {
         _REST_FAR: _rest(_REST_FAR, "없는휴게소(서울방향)").model_dump_json(),
     },
     "transport.rest_area_food": {
-        _REST_DOWN: _food(_REST_DOWN, "사천휴게소(부산방향)", "down").model_dump_json(),
+        _REST_DOWN: _food(
+            _REST_DOWN, "사천휴게소(부산방향)", "down",
+            [
+                _pair(_STATION_DOWN, "YM21유통 사천(하)주유소/충전소", 14.0, 0.85,
+                      "name_updown_nearest"),
+                _pair(_STATION_LOCAL, "상서현대셀프", 190.0, 0.3, "distance_only"),
+            ],
+        ).model_dump_json(),
         _REST_UP: _food(_REST_UP, "사천휴게소(순천방향)", "up").model_dump_json(),
     },
     "transport.fuel_stations": {
@@ -82,10 +103,7 @@ _VALUES: dict[str, dict[str, str]] = {
         _STATION_LOCAL: _station(_STATION_LOCAL, "상서현대셀프").model_dump_json(),
     },
 }
-_NEAR = {
-    "transport.rest_area_food": [(_REST_DOWN, 14.0), (_REST_UP, 268.0)],
-    "transport.fuel_stations": [(_STATION_DOWN, 14.0), (_STATION_LOCAL, 190.0)],
-}
+_LOOKUP = {"transport.rest_area_food": {_STATION_DOWN: _REST_DOWN}}
 
 
 class _FakeStore:
@@ -104,10 +122,7 @@ class _FakeStore:
         return [_VALUES.get(dataset, {}).get(key) for key in ids]
 
     async def lookup(self, dataset: str, generation: str, keys: list[str]) -> list[str | None]:
-        return [None for _ in keys]
-
-    async def nearby(self, dataset: str, generation: str, **_: Any) -> list[tuple[str, float]]:
-        return list(_NEAR.get(dataset, []))
+        return [_LOOKUP.get(dataset, {}).get(key) for key in keys]
 
     async def generation_items(self, dataset: str, generation: str) -> dict[str, bytes]:
         return {key: value.encode() for key, value in _VALUES.get(dataset, {}).items()}
@@ -150,7 +165,7 @@ def test_fuel_station_detail_pairs_the_same_direction_rest_area(client: TestClie
     data = client.get(f"/v1/service/transport/fuel-stations/{_STATION_DOWN}").json()["data"]
     paired = data["rest_area_food"]
     assert paired["rest_area"]["feature_id"] == _REST_DOWN
-    assert paired["method"] == "name_updown"
+    assert paired["method"] == "name_updown_nearest"
     assert paired["confidence"] >= 0.8
     assert paired["distance_m"] == 14.0
 

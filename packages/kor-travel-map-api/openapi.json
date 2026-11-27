@@ -23542,7 +23542,7 @@
             "type": "number"
           },
           "method": {
-            "description": "짝 근거(name_direction·name_bidirectional·name_updown·name_single).",
+            "description": "짝 근거(name_direction·name_bidirectional·name_updown_nearest·name_single).",
             "title": "Method",
             "type": "string"
           },
@@ -29157,6 +29157,14 @@
             "title": "Source Collected At",
             "type": "string"
           },
+          "stations": {
+            "description": "400 m 안에서 이 휴게소를 고른 오피넷 주유소(자동·검토 모두). 일대일로 다듬은 결과다.",
+            "items": {
+              "$ref": "#/components/schemas/RestAreaStationPairState"
+            },
+            "title": "Stations",
+            "type": "array"
+          },
           "std_rest_code": {
             "description": "한국도로공사 휴게소 표준 코드 6자리(0615 svarCd = 0502 stdRestCd).",
             "title": "Std Rest Code",
@@ -29591,6 +29599,51 @@
           "address"
         ],
         "title": "RestAreaOut",
+        "type": "object"
+      },
+      "RestAreaStationPairState": {
+        "additionalProperties": false,
+        "description": "이 휴게소와 짝지은(또는 검토로 남긴) 오피넷 주유소 하나(ADR-127).",
+        "properties": {
+          "automatic": {
+            "description": "true면 주유소 상세에 이 휴게소 먹거리가 보인다.",
+            "title": "Automatic",
+            "type": "boolean"
+          },
+          "confidence": {
+            "maximum": 1.0,
+            "minimum": 0.0,
+            "title": "Confidence",
+            "type": "number"
+          },
+          "distance_m": {
+            "minimum": 0.0,
+            "title": "Distance M",
+            "type": "number"
+          },
+          "feature_id": {
+            "description": "주유소 상태(FuelStationState)의 feature_id.",
+            "title": "Feature Id",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "feature_id",
+          "name",
+          "distance_m",
+          "confidence",
+          "method",
+          "automatic"
+        ],
+        "title": "RestAreaStationPairState",
         "type": "object"
       },
       "ReviewFeatureDetailRecord": {

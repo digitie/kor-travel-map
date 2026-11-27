@@ -12,6 +12,7 @@ from typing import Any
 
 import pytest
 
+from kortravelmap.dto.transport_state import FuelStationState, StateAddress, StateCoordinate
 from kortravelmap.providers import kor_travel_transport as transport
 from kortravelmap.providers.kor_travel_transport import (
     TransportRestArea,
@@ -19,16 +20,20 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportRestAreaFoodMenu,
 )
 from kortravelmap.providers.kor_travel_transport_state import (
+    rest_area_food_state_item,
     rest_area_food_states,
     rest_area_state,
 )
 from kortravelmap.providers.krex import rest_areas_to_bundles
 from kortravelmap.providers.rest_area_food import (
     STATION_PAIR_AUTO_CONFIDENCE,
+    RestAreaPoint,
     StationPairCandidate,
+    StationPoint,
     link_rest_areas,
     name_key,
     pair_station,
+    pair_stations,
     summarize_menus,
     with_rest_area_links,
 )
@@ -158,7 +163,7 @@ def test_a_menu_only_code_is_merged_into_the_single_classified_code() -> None:
         _food("000551", "함양(대전)휴게소"),
         _food(
             "000161", "함양(대전)휴게소", cls=None, direction=None,
-            menus=(_menu("1", "국밥", 9000),),
+            menus=(_menu("1", "국밥", 9000), _menu("2", "국밥", 9000)),
         ),
     ]
     link = link_rest_areas([("h", "함양(대전)")], foods)["h"]
@@ -204,6 +209,10 @@ def test_summarize_menus_is_deterministic() -> None:
     summary = summarize_menus(menus)
     assert summary == summarize_menus(tuple(reversed(menus)))
     assert summary.menu_count == 8
+    # 0원 행은 대표에 넣지 않는다.
+    zero = summarize_menus((_menu("9", "자율식당", 0, best=True), _menu("1", "우동", 7000)))
+    assert zero.featured == ()
+    assert zero.menu_count == 2
     assert (summary.price_min, summary.price_median, summary.price_max) == (4500, 7000, 13000)
     assert [item.name for item in summary.featured] == ["소떡소떡", "돈까스", "한우국밥"]
     assert summary.featured[1].tags == ("best", "recommended")
@@ -250,7 +259,7 @@ def _candidate(key: str, name: str, distance: float, direction: Any = None) -> S
             "h",
             "name_direction",
         ),
-        # (상)/(하)는 휴게소의 한국도로공사 상하행으로 맞춘다.
+        # (상)/(하)는 한국도로공사 상하행과 같고 그 후보가 더 가까울 때만 자동이다.
         (
             "YM21유통 사천(하)주유소/충전소",
             [
@@ -258,7 +267,17 @@ def _candidate(key: str, name: str, distance: float, direction: Any = None) -> S
                 _candidate("up", "사천휴게소(순천방향)", 268, "up"),
             ],
             "down",
-            "name_updown",
+            "name_updown_nearest",
+        ),
+        # 이름 바로 뒤의 행선지("홍천서울").
+        (
+            "키다리식품(주)홍천서울주유소/충전소",
+            [
+                _candidate("s", "홍천휴게소(서울방향)", 100),
+                _candidate("y", "홍천휴게소(양양방향)", 255),
+            ],
+            "s",
+            "name_direction",
         ),
         # 양방향 휴게소.
         (
@@ -291,6 +310,27 @@ def test_pair_station_automatic_cases(
                 _candidate("c", "괴산휴게소(창원방향)", 132),
                 _candidate("y", "괴산휴게소(양평방향)", 218),
             ],
+            "name_conflict",
+        ),
+        # 2026-11-27 중부내륙선: 오피넷 (하)가 KREX 상행 쪽 — (상)/(하) 기준이 노선마다 다르다.
+        # 이름이 가리키는 방향 후보가 더 멀면 자동으로 보지 않는다.
+        (
+            "(주)서원문경(하)주유소/충전소",
+            [
+                _candidate("c", "문경휴게소(창원방향)", 61, "up"),
+                _candidate("y", "문경휴게소(양평방향)", 196, "down"),
+            ],
+            "name_conflict",
+        ),
+        # 이름의 행선지가 하나뿐인 후보와 어긋난다.
+        ("오창(통영)주유소", [_candidate("o", "오창휴게소(남이방향)", 86)], "name_conflict"),
+        # 행선지가 회사명 속에 든 것은 행선지가 아니다(부분 문자열 금지).
+        (
+            "부산에너지 서부산주유소",
+            [
+                _candidate("a", "서부산휴게소(순천방향)", 60),
+                _candidate("b", "서부산휴게소(부산방향)", 70),
+            ],
             "name_only",
         ),
     ],
@@ -304,12 +344,45 @@ def test_pair_station_review_cases(
     assert not pair.automatic
 
 
-def test_pair_station_single_named_candidate_and_empty() -> None:
-    pair = pair_station("오창(통영)주유소", [_candidate("o", "오창휴게소(남이방향)", 86)])
+def test_pair_station_single_named_candidate_empty_and_blank_name() -> None:
+    pair = pair_station("경산I.C주유소", [_candidate("o", "경산휴게소(서울방향)", 289)])
     assert pair is not None
     assert pair.method == "name_single"
-    assert pair.automatic
+    assert pair.automatic  # 혼자 보면 자동 — 일대일 다듬기(pair_stations)가 내린다.
     assert pair_station("아무주유소", []) is None
+    # 휴게소 이름이 비면 이름 근거가 없다(빈 문자열은 어디에나 들어 있다).
+    blank = pair_station("아무주유소(양방향)", [_candidate("z", "휴게소", 50)])
+    assert blank is not None
+    assert blank.method == "distance_only"
+
+
+def test_pair_stations_keeps_only_the_strongest_pair_per_rest_area() -> None:
+    """2026-11-27 운영 오짝: 휴게소 지명이 든 근처 일반 주유소가 약한 근거로 붙었다."""
+    areas = [
+        RestAreaPoint("gs-up", "경산휴게소(서울방향)", "up", 128.7400, 35.8200),
+        RestAreaPoint("gs-down", "경산휴게소(부산방향)", "down", 128.7440, 35.8200),
+    ]
+    stations = [
+        StationPoint("s1", "(주)나이스디앤에스 경산(서울방향)주유소/충전", 128.7402, 35.8210),
+        StationPoint("s2", "경산I.C주유소", 128.7380, 35.8225),
+        StationPoint("s3", "아무주유소", 128.9, 35.9),
+    ]
+    pairs = pair_stations(stations, areas)
+    assert set(pairs) == {"s1", "s2"}
+    assert (pairs["s1"].key, pairs["s1"].automatic) == ("gs-up", True)
+    assert pairs["s2"].key == "gs-up"
+    assert pairs["s2"].method == "name_single_weaker"
+    assert not pairs["s2"].automatic
+
+
+def test_pair_stations_keeps_two_same_evidence_stations_on_a_bidirectional_rest_area() -> None:
+    areas = [RestAreaPoint("an", "안산휴게소", None, 126.8, 37.3)]
+    stations = [
+        StationPoint("k", "안산주유소(강릉방향)", 126.8010, 37.3005),
+        StationPoint("i", "안산주유소(인천방향)", 126.7990, 37.2995),
+    ]
+    pairs = pair_stations(stations, areas)
+    assert {key: pair.automatic for key, pair in pairs.items()} == {"k": True, "i": True}
 
 
 def test_rest_area_food_states_link_and_summarize() -> None:
@@ -326,6 +399,31 @@ def test_rest_area_food_states_link_and_summarize() -> None:
     assert state.featured[0].tags == ["best"]
     assert state.source_collected_at == collected
     assert state.attribution == "한국도로공사"
+    assert state.stations == []
+
+
+def test_rest_area_food_state_item_looks_up_only_automatic_stations() -> None:
+    collected = datetime(2026, 11, 27, 18, 50, tzinfo=UTC)
+    area = _area("서울만남(부산)")
+    foods = [_food("000001", "서울만남(부산)휴게소", menus=(_menu("1", "우동", 7000),))]
+    near = [
+        FuelStationState(
+            feature_id=key, category="06010101", marker_icon="fuel", marker_color="P-08",
+            name=name, natural_key=key, coord=StateCoordinate(lon=lon, lat=37.0),
+            address=StateAddress(), prices=[], source_last_seen_at=collected,
+        )
+        for key, name, lon in (
+            ("auto", "서울만남(부산)주유소", 127.0005),
+            ("review", "근처셀프주유소", 127.001),
+            ("far", "서울만남(부산)주유소", 127.2),
+        )
+    ]
+    [state] = rest_area_food_states([area], foods, near, collected_at=collected)
+    assert [(s.feature_id, s.automatic) for s in state.stations] == [
+        ("auto", True), ("review", False),
+    ]
+    item = rest_area_food_state_item(state)
+    assert item.lookup_keys == ("auto",)
 
 
 async def test_pg_rest_area_feature_carries_the_link_and_fills_route_direction() -> None:
