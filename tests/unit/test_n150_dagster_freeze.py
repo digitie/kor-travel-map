@@ -321,6 +321,24 @@ _NOW = datetime(2026, 11, 25, 1, 30, tzinfo=UTC)
 _TARGET = freeze.Target(_MAP, "__repository__")
 
 
+class _FrozenDatetime(datetime):
+    """``freeze.main``이 기본으로 쓰는 벽시계(``datetime.now``)를 ``_NOW``에 묶는다."""
+
+    @classmethod
+    def now(cls, tz: Any = None) -> datetime:  # type: ignore[override]
+        return _NOW if tz is None else _NOW.astimezone(tz)
+
+
+@pytest.fixture(autouse=True)
+def _wall_clock_at_now(monkeypatch: pytest.MonkeyPatch) -> None:
+    """스냅샷은 ``_NOW``에 찍히는데 ``freeze.main``은 실제 시계로 나이를 잰다.
+
+    그러면 ``--max-age-hours``(48 h)가 지난 날부터 ``main``을 거치는 시험이 나이 거부(3)로
+    바뀌어 실패했다(2026-11-27, `_NOW` 뒤 48 h). 시험 안의 시간은 하나여야 한다.
+    """
+    monkeypatch.setattr(freeze, "datetime", _FrozenDatetime)
+
+
 def _freeze(
     fake: _FakeDagster,
     path: Path,
