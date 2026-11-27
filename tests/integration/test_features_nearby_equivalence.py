@@ -67,7 +67,8 @@ _ORACLE_LATERAL = """
           ON sr.source_record_key = head.current_source_record_key
         WHERE sl.feature_id = f.feature_id
           AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
+        -- ADR-125: 대표 원천 규칙만 "가장 먼저 붙은 primary 연결"로 바꿔 둔다(나머지는 원문).
+        ORDER BY sl.created_at, sl.source_entity_key COLLATE "C"
         LIMIT 1
     ) AS ps ON TRUE
     WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
@@ -300,7 +301,8 @@ WHERE g % 9 = 0
 """
 
 # primary link: g % 4 = 0이면 없음. 나머지는 g % 3 = 1이면 B, 아니면 A. g % 7 = 0이면 **다른**
-# dataset의 primary link를 하나 더 붙이고 관측 시각을 늦춰 선택이 그쪽으로 넘어가게 한다.
+# dataset의 primary link를 하나 더 붙이고 관측은 늦추되 연결은 하루 먼저 붙여, 대표 선택이 그쪽으로
+# 넘어가게 한다(ADR-125 — 먼저 붙은 연결이 대표, 관측 시각은 보지 않는다).
 # 계보 표들은 BEFORE 트리거가 앞 표를 조회하므로 한 문장의 CTE로 묶지 않고 차례로 넣는다.
 _SEED_LINKS_SELECT = """
     SELECT g, 1 AS seq,
@@ -345,10 +347,10 @@ FROM ({_SEED_LINKS_SELECT}) AS links
 """,
     f"""
 INSERT INTO provider_sync.source_links (
-    feature_id, source_entity_key, source_role, match_method, confidence
+    feature_id, source_entity_key, source_role, match_method, confidence, created_at
 )
 SELECT CAST(md5('tread09:' || g) AS uuid), 'tread09:e:' || g || ':' || seq,
-       'primary', 'natural_key', 100
+       'primary', 'natural_key', 100, CAST(:base AS timestamptz) - (seq - 1) * interval '1 day'
 FROM ({_SEED_LINKS_SELECT}) AS links
 """,
 )

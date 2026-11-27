@@ -8850,6 +8850,69 @@ $$;
 ALTER PROCEDURE feature.refresh_curated_source_observation(IN p_provider_dataset_id bigint, IN p_import_job_id uuid, OUT o_source_id uuid, OUT o_source_revision bigint, OUT o_observation_revision bigint, OUT o_row_count integer) OWNER TO ktm_curation_command_owner;
 
 --
+-- Name: refresh_feature_primary_sources(uuid[]); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.refresh_feature_primary_sources(p_feature_ids uuid[]) RETURNS void
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_ids uuid[];
+    v_locked bigint;
+BEGIN
+    v_ids := ARRAY(
+        SELECT DISTINCT id FROM unnest(p_feature_ids) AS t(id) WHERE id IS NOT NULL ORDER BY id
+    );
+    IF cardinality(v_ids) = 0 THEN
+        RETURN;
+    END IF;
+    PERFORM 1
+       FROM feature.feature_primary_sources AS ps
+      WHERE ps.feature_id = ANY(v_ids)
+      ORDER BY ps.feature_id
+        FOR UPDATE;
+    GET DIAGNOSTICS v_locked = ROW_COUNT;
+    IF v_locked < cardinality(v_ids) THEN
+        INSERT INTO feature.feature_primary_sources AS ps (feature_id)
+        SELECT f.feature_id
+          FROM feature.features AS f
+         WHERE f.feature_id = ANY(v_ids)
+         ORDER BY f.feature_id
+        ON CONFLICT (feature_id) DO NOTHING;
+        DELETE FROM feature.feature_primary_sources AS ps
+         WHERE ps.feature_id = ANY(v_ids)
+           AND NOT EXISTS (
+               SELECT 1 FROM feature.features AS f WHERE f.feature_id = ps.feature_id
+           );
+        PERFORM 1
+           FROM feature.feature_primary_sources AS ps
+          WHERE ps.feature_id = ANY(v_ids)
+          ORDER BY ps.feature_id
+            FOR UPDATE;
+    END IF;
+    UPDATE feature.feature_primary_sources AS ps
+       SET source_entity_key = picked.source_entity_key,
+           provider_dataset_id = picked.provider_dataset_id,
+           provider = picked.provider
+      FROM (
+          SELECT ids.feature_id, rule.source_entity_key, rule.provider_dataset_id, rule.provider
+            FROM unnest(v_ids) AS ids(feature_id)
+            LEFT JOIN (
+                SELECT r.feature_id, r.source_entity_key, r.provider_dataset_id, r.provider
+                  FROM feature.feature_primary_source_rule AS r
+                 WHERE r.feature_id = ANY(v_ids)
+            ) AS rule
+              ON rule.feature_id = ids.feature_id
+      ) AS picked
+     WHERE ps.feature_id = picked.feature_id;
+END;
+$$;
+
+
+ALTER FUNCTION feature.refresh_feature_primary_sources(p_feature_ids uuid[]) OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: register_provider_field_shadow_policy(bigint, bigint, text, jsonb); Type: PROCEDURE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -10956,6 +11019,76 @@ $$;
 ALTER FUNCTION feature.sync_feature_cluster_point_geometry() OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: sync_feature_primary_source_core(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.sync_feature_primary_source_core() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF TG_OP = 'DELETE' THEN
+        DELETE FROM feature.feature_primary_sources WHERE feature_id = OLD.feature_id;
+    ELSE
+        INSERT INTO feature.feature_primary_sources (feature_id)
+        VALUES (NEW.feature_id)
+        ON CONFLICT (feature_id) DO NOTHING;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.sync_feature_primary_source_core() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: sync_feature_primary_source_links(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.sync_feature_primary_source_links() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+DECLARE
+    v_feature_ids uuid[];
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        SELECT array_agg(DISTINCT n.feature_id ORDER BY n.feature_id) INTO v_feature_ids
+          FROM new_links AS n
+         WHERE n.source_role = 'primary';
+    ELSIF TG_OP = 'DELETE' THEN
+        SELECT array_agg(DISTINCT o.feature_id ORDER BY o.feature_id) INTO v_feature_ids
+          FROM old_links AS o
+         WHERE o.source_role = 'primary';
+    ELSE
+        SELECT array_agg(DISTINCT changed.feature_id ORDER BY changed.feature_id)
+          INTO v_feature_ids
+          FROM (
+              (SELECT o.feature_id, o.source_entity_key, o.source_role, o.created_at
+                 FROM old_links AS o
+               EXCEPT ALL
+               SELECT n.feature_id, n.source_entity_key, n.source_role, n.created_at
+                 FROM new_links AS n)
+              UNION ALL
+              (SELECT n.feature_id, n.source_entity_key, n.source_role, n.created_at
+                 FROM new_links AS n
+               EXCEPT ALL
+               SELECT o.feature_id, o.source_entity_key, o.source_role, o.created_at
+                 FROM old_links AS o)
+          ) AS changed
+         WHERE changed.source_role = 'primary';
+    END IF;
+    IF v_feature_ids IS NOT NULL THEN
+        PERFORM feature.refresh_feature_primary_sources(v_feature_ids);
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.sync_feature_primary_source_links() OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: sync_subtype_public_ready(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
 --
 
@@ -11255,6 +11388,31 @@ $$;
 
 
 ALTER FUNCTION feature.truncate_feature_cluster_point_parts() OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: truncate_feature_primary_sources(); Type: FUNCTION; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE FUNCTION feature.truncate_feature_primary_sources() RETURNS trigger
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO 'pg_catalog'
+    AS $$
+BEGIN
+    IF TG_TABLE_NAME = 'features' THEN
+        TRUNCATE feature.feature_primary_sources;
+    ELSE
+        UPDATE feature.feature_primary_sources
+           SET source_entity_key = NULL,
+               provider_dataset_id = NULL,
+               provider = NULL
+         WHERE source_entity_key IS NOT NULL;
+    END IF;
+    RETURN NULL;
+END;
+$$;
+
+
+ALTER FUNCTION feature.truncate_feature_primary_sources() OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: upsert_provider_geocode_stamps_ex(uuid[], text[], text, text); Type: FUNCTION; Schema: feature; Owner: ktm_feature_state_procedure_owner
@@ -16498,6 +16656,99 @@ CREATE TABLE feature.feature_price_values (
 ALTER TABLE feature.feature_price_values OWNER TO ktm_feature_schema_owner;
 
 --
+-- Name: provider_datasets; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE provider_sync.provider_datasets (
+    provider_dataset_id bigint NOT NULL,
+    provider text NOT NULL,
+    dataset_key text NOT NULL,
+    display_name text NOT NULL,
+    source_kind text NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    capabilities jsonb DEFAULT '{"produces": [], "extensions": {}, "schema_version": 1}'::jsonb NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT ck_provider_datasets_capabilities CHECK (provider_sync.is_valid_provider_dataset_capabilities(capabilities)),
+    CONSTRAINT ck_provider_datasets_dataset_key_canonical CHECK (((dataset_key <> ''::text) AND (dataset_key = btrim(dataset_key)) AND (dataset_key = NORMALIZE(dataset_key, NFC)) AND (length(dataset_key) <= 112))),
+    CONSTRAINT ck_provider_datasets_display_name_canonical CHECK (((display_name <> ''::text) AND (display_name = btrim(display_name)) AND (display_name = NORMALIZE(display_name, NFC)) AND (length(display_name) <= 256))),
+    CONSTRAINT ck_provider_datasets_provider_canonical CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (provider = NORMALIZE(provider, NFC)) AND (length(provider) <= 112))),
+    CONSTRAINT ck_provider_datasets_source_kind CHECK ((source_kind = ANY (ARRAY['openapi'::text, 'filedata'::text, 'manual'::text, 'system'::text, 'standard'::text, 'internal'::text])))
+);
+
+
+ALTER TABLE provider_sync.provider_datasets OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: source_entities; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE provider_sync.source_entities (
+    source_entity_key text NOT NULL,
+    source_entity_type text NOT NULL,
+    source_entity_id text NOT NULL,
+    first_seen_at timestamp with time zone NOT NULL,
+    last_seen_at timestamp with time zone NOT NULL,
+    provider_dataset_id bigint NOT NULL,
+    CONSTRAINT ck_source_entities_seen_order CHECK ((first_seen_at <= last_seen_at))
+);
+
+
+ALTER TABLE provider_sync.source_entities OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: source_links; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE provider_sync.source_links (
+    feature_id uuid NOT NULL,
+    source_role character varying DEFAULT 'enrichment'::character varying NOT NULL,
+    match_method character varying NOT NULL,
+    confidence integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    source_entity_key text NOT NULL,
+    CONSTRAINT ck_source_links_ck_source_links_confidence CHECK (((confidence >= 0) AND (confidence <= 100))),
+    CONSTRAINT ck_source_links_ck_source_links_role CHECK (((source_role)::text = ANY (ARRAY[('primary'::character varying)::text, ('base_address'::character varying)::text, ('base_coordinate'::character varying)::text, ('enrichment'::character varying)::text, ('correction'::character varying)::text, ('duplicate_candidate'::character varying)::text, ('media'::character varying)::text, ('weather_context'::character varying)::text])))
+);
+
+
+ALTER TABLE provider_sync.source_links OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_primary_source_rule; Type: VIEW; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE VIEW feature.feature_primary_source_rule AS
+ SELECT DISTINCT ON (sl.feature_id) sl.feature_id,
+    sl.source_entity_key,
+    se.provider_dataset_id,
+    pd.provider
+   FROM ((provider_sync.source_links sl
+     JOIN provider_sync.source_entities se ON ((se.source_entity_key = sl.source_entity_key)))
+     JOIN provider_sync.provider_datasets pd ON ((pd.provider_dataset_id = se.provider_dataset_id)))
+  WHERE ((sl.source_role)::text = 'primary'::text)
+  ORDER BY sl.feature_id, sl.created_at, (sl.source_entity_key COLLATE "C");
+
+
+ALTER VIEW feature.feature_primary_source_rule OWNER TO ktm_feature_schema_owner;
+
+--
+-- Name: feature_primary_sources; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TABLE feature.feature_primary_sources (
+    feature_id uuid NOT NULL,
+    source_entity_key text,
+    provider_dataset_id bigint,
+    provider text,
+    CONSTRAINT ck_feature_primary_sources_shape CHECK ((((source_entity_key IS NULL) = (provider_dataset_id IS NULL)) AND ((provider_dataset_id IS NULL) = (provider IS NULL))))
+)
+WITH (fillfactor='90');
+
+
+ALTER TABLE feature.feature_primary_sources OWNER TO ktm_feature_schema_owner;
+
+--
 -- Name: feature_route_geometries; Type: TABLE; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -17116,7 +17367,7 @@ CREATE TABLE ops.application_schema_operation_receipts (
     CONSTRAINT ck_application_schema_operation_receipts_database_owner CHECK ((database_owner = 'ktm_feature_schema_owner'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_fence CHECK ((writer_fence_receipt_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_generation CHECK ((journal_generation > 0)),
-    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text, '455_feature_cluster_points'::text, '456_feature_update_retry'::text, '457_event_clock_slots'::text, '458_live_topic_commit_bump'::text]))),
+    CONSTRAINT ck_application_schema_operation_receipts_head CHECK ((destination_head = ANY (ARRAY['300'::text, '301_m03_import_children'::text, '302_m03_child_issuance'::text, '303_m05_payload_hash_domain'::text, '304_m05_detector_manuals'::text, '305_m05_relitigation_fence'::text, '306_m02_manual_feature_purge'::text, '307_m02_truncate_fence'::text, '308_t39_provider_identities'::text, '309_t39_feature_id_rekey'::text, '310_seoul_source_move'::text, '311_seal_member_digest'::text, '312_route_geometry_sidecar'::text, '313_single_service_role'::text, '400'::text, '401_retire_map_kma_refresh'::text, '402_remove_map_weather_data'::text, '403_drop_kma_notice_lineage'::text, '404_transport_provider_identity'::text, '405_mois_freshness_sla'::text, '406_feature_write_gate'::text, '407_feature_geocode_stamps'::text, '408_kor_travel_geo_releases'::text, '409_geo_release_item_reasons'::text, '410_provider_field_shadow'::text, '411_scoped_feature_write_kernel'::text, '412_provider_scalar_projection'::text, '413_legacy_sql_protocol_entry'::text, '414_manual_dedup_protocol'::text, '415_state_lifecycle_protocol'::text, '416_field_override_protocol'::text, '417_protocol_ex_reentry'::text, '418_creation_protocol'::text, '419_retire_pg_transport_values'::text, '420_exclusive_provider_refresh'::text, '421_stamp_writer_boundary'::text, '422_heritage_evidence_reader'::text, '423_exclusive_context_select'::text, '424_tracking_protocol_prefix'::text, '425_provider_base_update_first'::text, '426_provider_patch_protocol'::text, '427_transport_airport_reader'::text, '428_bounded_curation_capture'::text, '429_strict_sh_data_guards'::text, '430_provider_snapshot_recovery'::text, '431_transport_rest_reader'::text, '432_rest_snapshot_atomic'::text, '433_snapshot_ready_plan_reset'::text, '434_protocol_entry_narrowing'::text, '435_retire_sh_snapshot_path'::text, '436_feature_search_aliases'::text, '437_feature_command_fingerprints'::text, '438_transport_reference_places'::text, '439_traditional_market_dataset'::text, '441_tourapi_attraction_dataset'::text, '442_mois_brand_search_aliases'::text, '444_trip_search_aliases'::text, '446_mcst_place_attributes'::text, '447_admin_search_trgm_indexes'::text, '448_mcst_theme_transition'::text, '449_tourapi_festivals_primary'::text, '450_incheon_airport_search_alias'::text, '451_feature_search_prominence'::text, '452_lotte_hotel_search_alias'::text, '453_features_autovacuum'::text, '454_route_cluster_markers'::text, '455_feature_cluster_points'::text, '456_feature_update_retry'::text, '457_event_clock_slots'::text, '458_live_topic_commit_bump'::text, '459_feature_primary_sources'::text]))),
     CONSTRAINT ck_application_schema_operation_receipts_journal CHECK ((journal_sha256 ~ '^[0-9a-f]{64}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_commit CHECK ((map_candidate_commit ~ '^[0-9a-f]{40}$'::text)),
     CONSTRAINT ck_application_schema_operation_receipts_map_image CHECK ((map_candidate_image_id ~ '^sha256:[0-9a-f]{64}$'::text)),
@@ -19446,30 +19697,6 @@ CREATE TABLE provider_sync.provider_dataset_operations (
 ALTER TABLE provider_sync.provider_dataset_operations OWNER TO ktm_feature_schema_owner;
 
 --
--- Name: provider_datasets; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE provider_sync.provider_datasets (
-    provider_dataset_id bigint NOT NULL,
-    provider text NOT NULL,
-    dataset_key text NOT NULL,
-    display_name text NOT NULL,
-    source_kind text NOT NULL,
-    is_active boolean DEFAULT true NOT NULL,
-    capabilities jsonb DEFAULT '{"produces": [], "extensions": {}, "schema_version": 1}'::jsonb NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT ck_provider_datasets_capabilities CHECK (provider_sync.is_valid_provider_dataset_capabilities(capabilities)),
-    CONSTRAINT ck_provider_datasets_dataset_key_canonical CHECK (((dataset_key <> ''::text) AND (dataset_key = btrim(dataset_key)) AND (dataset_key = NORMALIZE(dataset_key, NFC)) AND (length(dataset_key) <= 112))),
-    CONSTRAINT ck_provider_datasets_display_name_canonical CHECK (((display_name <> ''::text) AND (display_name = btrim(display_name)) AND (display_name = NORMALIZE(display_name, NFC)) AND (length(display_name) <= 256))),
-    CONSTRAINT ck_provider_datasets_provider_canonical CHECK (((provider <> ''::text) AND (provider = btrim(provider)) AND (provider = NORMALIZE(provider, NFC)) AND (length(provider) <= 112))),
-    CONSTRAINT ck_provider_datasets_source_kind CHECK ((source_kind = ANY (ARRAY['openapi'::text, 'filedata'::text, 'manual'::text, 'system'::text, 'standard'::text, 'internal'::text])))
-);
-
-
-ALTER TABLE provider_sync.provider_datasets OWNER TO ktm_feature_schema_owner;
-
---
 -- Name: provider_datasets_provider_dataset_id_seq; Type: SEQUENCE; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
@@ -19522,41 +19749,6 @@ CREATE TABLE provider_sync.provider_sync_state (
 
 
 ALTER TABLE provider_sync.provider_sync_state OWNER TO ktm_feature_schema_owner;
-
---
--- Name: source_entities; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE provider_sync.source_entities (
-    source_entity_key text NOT NULL,
-    source_entity_type text NOT NULL,
-    source_entity_id text NOT NULL,
-    first_seen_at timestamp with time zone NOT NULL,
-    last_seen_at timestamp with time zone NOT NULL,
-    provider_dataset_id bigint NOT NULL,
-    CONSTRAINT ck_source_entities_seen_order CHECK ((first_seen_at <= last_seen_at))
-);
-
-
-ALTER TABLE provider_sync.source_entities OWNER TO ktm_feature_schema_owner;
-
---
--- Name: source_links; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-CREATE TABLE provider_sync.source_links (
-    feature_id uuid NOT NULL,
-    source_role character varying DEFAULT 'enrichment'::character varying NOT NULL,
-    match_method character varying NOT NULL,
-    confidence integer NOT NULL,
-    created_at timestamp with time zone DEFAULT now() NOT NULL,
-    source_entity_key text NOT NULL,
-    CONSTRAINT ck_source_links_ck_source_links_confidence CHECK (((confidence >= 0) AND (confidence <= 100))),
-    CONSTRAINT ck_source_links_ck_source_links_role CHECK (((source_role)::text = ANY (ARRAY[('primary'::character varying)::text, ('base_address'::character varying)::text, ('base_coordinate'::character varying)::text, ('enrichment'::character varying)::text, ('correction'::character varying)::text, ('duplicate_candidate'::character varying)::text, ('media'::character varying)::text, ('weather_context'::character varying)::text])))
-);
-
-
-ALTER TABLE provider_sync.source_links OWNER TO ktm_feature_schema_owner;
 
 --
 -- Name: source_records; Type: TABLE; Schema: provider_sync; Owner: ktm_feature_schema_owner
@@ -19825,6 +20017,14 @@ ALTER TABLE ONLY feature.feature_notices
 
 ALTER TABLE ONLY feature.feature_places
     ADD CONSTRAINT pk_feature_places PRIMARY KEY (feature_id);
+
+
+--
+-- Name: feature_primary_sources pk_feature_primary_sources; Type: CONSTRAINT; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+ALTER TABLE ONLY feature.feature_primary_sources
+    ADD CONSTRAINT pk_feature_primary_sources PRIMARY KEY (feature_id);
 
 
 --
@@ -21600,6 +21800,20 @@ CREATE INDEX idx_feature_places_opening_hours ON feature.feature_places USING bt
 
 
 --
+-- Name: idx_feature_primary_sources_dataset; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_primary_sources_dataset ON feature.feature_primary_sources USING btree (provider_dataset_id, feature_id);
+
+
+--
+-- Name: idx_feature_primary_sources_provider_keyset; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE INDEX idx_feature_primary_sources_provider_keyset ON feature.feature_primary_sources USING btree (COALESCE(provider, ''::text), feature_id);
+
+
+--
 -- Name: idx_feature_route_geometries_geom_gist; Type: INDEX; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -23070,6 +23284,24 @@ ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_cluster_point
 
 
 --
+-- Name: features trg_features_zz_primary_source; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_features_zz_primary_source AFTER INSERT OR DELETE ON feature.features FOR EACH ROW EXECUTE FUNCTION feature.sync_feature_primary_source_core();
+
+ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_primary_source;
+
+
+--
+-- Name: features trg_features_zz_primary_source_truncate; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_features_zz_primary_source_truncate AFTER TRUNCATE ON feature.features FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_primary_sources();
+
+ALTER TABLE feature.features ENABLE ALWAYS TRIGGER trg_features_zz_primary_source_truncate;
+
+
+--
 -- Name: manual_feature_identity_claims trg_manual_feature_identity_claims_append_only; Type: TRIGGER; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -24190,6 +24422,42 @@ CREATE TRIGGER trg_source_entity_heads_freshness BEFORE UPDATE ON provider_sync.
 --
 
 CREATE TRIGGER trg_source_links_active_dataset_write BEFORE INSERT OR DELETE OR UPDATE ON provider_sync.source_links FOR EACH ROW EXECUTE FUNCTION provider_sync.reject_inactive_source_entity_dataset();
+
+
+--
+-- Name: source_links trg_source_links_primary_source_delete; Type: TRIGGER; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_source_links_primary_source_delete AFTER DELETE ON provider_sync.source_links REFERENCING OLD TABLE AS old_links FOR EACH STATEMENT EXECUTE FUNCTION feature.sync_feature_primary_source_links();
+
+ALTER TABLE provider_sync.source_links ENABLE ALWAYS TRIGGER trg_source_links_primary_source_delete;
+
+
+--
+-- Name: source_links trg_source_links_primary_source_insert; Type: TRIGGER; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_source_links_primary_source_insert AFTER INSERT ON provider_sync.source_links REFERENCING NEW TABLE AS new_links FOR EACH STATEMENT EXECUTE FUNCTION feature.sync_feature_primary_source_links();
+
+ALTER TABLE provider_sync.source_links ENABLE ALWAYS TRIGGER trg_source_links_primary_source_insert;
+
+
+--
+-- Name: source_links trg_source_links_primary_source_truncate; Type: TRIGGER; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_source_links_primary_source_truncate AFTER TRUNCATE ON provider_sync.source_links FOR EACH STATEMENT EXECUTE FUNCTION feature.truncate_feature_primary_sources();
+
+ALTER TABLE provider_sync.source_links ENABLE ALWAYS TRIGGER trg_source_links_primary_source_truncate;
+
+
+--
+-- Name: source_links trg_source_links_primary_source_update; Type: TRIGGER; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+CREATE TRIGGER trg_source_links_primary_source_update AFTER UPDATE ON provider_sync.source_links REFERENCING OLD TABLE AS old_links NEW TABLE AS new_links FOR EACH STATEMENT EXECUTE FUNCTION feature.sync_feature_primary_source_links();
+
+ALTER TABLE provider_sync.source_links ENABLE ALWAYS TRIGGER trg_source_links_primary_source_update;
 
 
 --
@@ -26601,6 +26869,13 @@ REVOKE ALL ON PROCEDURE feature.refresh_curated_source_observation(IN p_provider
 
 
 --
+-- Name: FUNCTION refresh_feature_primary_sources(p_feature_ids uuid[]); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.refresh_feature_primary_sources(p_feature_ids uuid[]) FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE register_provider_field_shadow_policy(IN p_policy_revision bigint, IN p_provider_dataset_id bigint, IN p_normalizer_revision text, IN p_fields jsonb); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -26760,6 +27035,20 @@ REVOKE ALL ON FUNCTION feature.sync_feature_cluster_point_geometry() FROM PUBLIC
 
 
 --
+-- Name: FUNCTION sync_feature_primary_source_core(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.sync_feature_primary_source_core() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION sync_feature_primary_source_links(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.sync_feature_primary_source_links() FROM PUBLIC;
+
+
+--
 -- Name: PROCEDURE touch_curation_import_collection_command(IN p_collection_id uuid, IN p_command_id bigint, IN p_principal text, OUT o_collection_revision bigint); Type: ACL; Schema: feature; Owner: ktm_curation_command_owner
 --
 
@@ -26789,6 +27078,13 @@ GRANT ALL ON PROCEDURE feature.transition_feature_state(IN p_feature_id uuid, IN
 --
 
 REVOKE ALL ON FUNCTION feature.truncate_feature_cluster_point_parts() FROM PUBLIC;
+
+
+--
+-- Name: FUNCTION truncate_feature_primary_sources(); Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
+--
+
+REVOKE ALL ON FUNCTION feature.truncate_feature_primary_sources() FROM PUBLIC;
 
 
 --
@@ -27809,6 +28105,62 @@ GRANT UPDATE(payload) ON TABLE feature.feature_places TO ktm_feature_state_proce
 
 
 --
+-- Name: TABLE provider_datasets; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN provider_datasets.provider_dataset_id; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
+GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE source_entities; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE provider_sync.source_entities TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.source_entities TO ktm_curation_command_owner;
+GRANT SELECT,UPDATE ON TABLE provider_sync.source_entities TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: COLUMN source_entities.source_entity_key; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entities TO ktm_feature_state_procedure_owner;
+GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entities TO ktm_curation_command_owner;
+
+
+--
+-- Name: TABLE source_links; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT SELECT ON TABLE provider_sync.source_links TO ktm_feature_state_procedure_owner;
+GRANT SELECT ON TABLE provider_sync.source_links TO ktm_curation_command_owner;
+GRANT SELECT,UPDATE ON TABLE provider_sync.source_links TO ktm_manual_provider_dedup_procedure_owner;
+
+
+--
+-- Name: COLUMN source_links.feature_id; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(feature_id) ON TABLE provider_sync.source_links TO ktm_curation_command_owner;
+
+
+--
+-- Name: COLUMN source_links.source_entity_key; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
+--
+
+GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_links TO ktm_feature_state_procedure_owner;
+
+
+--
 -- Name: TABLE feature_route_geometries; Type: ACL; Schema: feature; Owner: ktm_feature_schema_owner
 --
 
@@ -28741,22 +29093,6 @@ GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_dataset_operat
 
 
 --
--- Name: TABLE provider_datasets; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
-GRANT SELECT ON TABLE provider_sync.provider_datasets TO ktm_curation_command_owner;
-
-
---
--- Name: COLUMN provider_datasets.provider_dataset_id; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_feature_state_procedure_owner;
-GRANT UPDATE(provider_dataset_id) ON TABLE provider_sync.provider_datasets TO ktm_curation_command_owner;
-
-
---
 -- Name: TABLE provider_feature_identities; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
 --
 
@@ -28764,46 +29100,6 @@ GRANT SELECT,INSERT ON TABLE provider_sync.provider_feature_identities TO ktm_fe
 GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_curation_command_owner;
 GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_manual_provider_dedup_procedure_owner;
 GRANT SELECT ON TABLE provider_sync.provider_feature_identities TO ktm_feature_runtime;
-
-
---
--- Name: TABLE source_entities; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-GRANT SELECT ON TABLE provider_sync.source_entities TO ktm_feature_state_procedure_owner;
-GRANT SELECT ON TABLE provider_sync.source_entities TO ktm_curation_command_owner;
-GRANT SELECT,UPDATE ON TABLE provider_sync.source_entities TO ktm_manual_provider_dedup_procedure_owner;
-
-
---
--- Name: COLUMN source_entities.source_entity_key; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entities TO ktm_feature_state_procedure_owner;
-GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_entities TO ktm_curation_command_owner;
-
-
---
--- Name: TABLE source_links; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-GRANT SELECT ON TABLE provider_sync.source_links TO ktm_feature_state_procedure_owner;
-GRANT SELECT ON TABLE provider_sync.source_links TO ktm_curation_command_owner;
-GRANT SELECT,UPDATE ON TABLE provider_sync.source_links TO ktm_manual_provider_dedup_procedure_owner;
-
-
---
--- Name: COLUMN source_links.feature_id; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-GRANT UPDATE(feature_id) ON TABLE provider_sync.source_links TO ktm_curation_command_owner;
-
-
---
--- Name: COLUMN source_links.source_entity_key; Type: ACL; Schema: provider_sync; Owner: ktm_feature_schema_owner
---
-
-GRANT UPDATE(source_entity_key) ON TABLE provider_sync.source_links TO ktm_feature_state_procedure_owner;
 
 
 --

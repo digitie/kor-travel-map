@@ -55,6 +55,7 @@ FORWARD_ONLY_REVISIONS = (
     "456_feature_update_retry",
     "457_event_clock_slots",
     "458_live_topic_commit_bump",
+    "459_feature_primary_sources",
 )
 
 

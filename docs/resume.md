@@ -1,3 +1,11 @@
+## 2026-11-27 — 대표 원천 쓰기 시점 유지(ADR-125, alembic 459, T-READ-13)
+
+- 관리자 `sort=provider`·dataset 필터·nearby·dedup 검토가 trigger로 유지되는 `feature.feature_primary_sources`를 읽는다. 규칙은
+  "가장 먼저 붙은 primary 연결"(종전 관측 시각 규칙은 817건의 대표가 적재마다 바뀌었다). 합성 prod 규모: provider 정렬 7.6 s →
+  4 ms, 드문 dataset + 이름 28.8 s → 2 ms. F10 정합성 검사. OpenAPI 변경 없음.
+- 다음: 다음 회전에 싣는다 — Manager one-shot migration, **writer drain 뒤**(migration이 `features`·`source_links` 쓰기를
+  3~6 s 막는다, 5 s 안에 잠금을 못 잡으면 통째로 되돌아간다). 회전 뒤 F10 0건, 관리자 provider 정렬·드문 dataset + 이름 정렬 실측을 journal에.
+
 ## 2026-11-27 — 관리자 feature 목록 정렬 지연 수정(키 단계 → 페이지 → 꾸밈 단계)
 
 - `sort=kind|provider|issue_count`가 43만 행마다 표시용 LATERAL을 돌아 유휴 12.7~18.6 s(부하 중 39 s)였다. 표시 값을 페이지 행에만

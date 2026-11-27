@@ -76,6 +76,8 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "feature_search_prominence": ("SELECT", "INSERT", "UPDATE", "DELETE"),
     # 455(T-READ-10): 저배율 집계 전용 좁은 표. DB trigger만 쓰고 공개 집계는 읽는다.
     "feature_cluster_points": ("SELECT",),
+    # 459(ADR-125): Feature 대표 원천. DB trigger만 쓰고 관리자 목록·nearby가 읽는다.
+    "feature_primary_sources": ("SELECT",),
     # 446(ADR-121): 장소 속성 catalog는 migration이 심고 공개 API는 읽기만 한다.
     "place_attributes": ("SELECT",),
     "dataset_place_attributes": ("SELECT",),
@@ -94,6 +96,8 @@ _FEATURE_TABLE_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
 # reconciliation until its intended consumer is reviewed.
 _FEATURE_VIEW_PRIVILEGES: Mapping[str, tuple[str, ...]] = {
     "public_features": ("SELECT",),
+    # 459(ADR-125): 대표 원천 규칙의 유일한 정의. 정합성 검사(F10)가 저장값과 대조한다.
+    "feature_primary_source_rule": ("SELECT",),
 }
 
 # Route/area geometry is the sole cross-relation public index case.  Keep the

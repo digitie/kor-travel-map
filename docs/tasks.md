@@ -31,7 +31,7 @@ acceptance 본문을 중복하고 있었고, 그 중복본 안에 **낡은 식�
 [읽기 성능 계획](reports/2026-11-17-read-performance-plan.md) §8(단계 순), 해제 조건은 acceptance의 같은 ID 절이다.
 `T-READ-01`(기준선 [보고서](reports/2026-11-19-read-baseline.md))·`02`·`05`(채택 안 함)는 2026-11-19 `tasks-done.md`로
 옮겼다. 기준선으로 `T-READ-06`을 채택했으나 구현이 40% 기준에 못 미쳐 보류했다(브랜치 보존). 새 발견 `T-READ-09`·`10`은
-운영 반영 대기, `T-READ-07`은 둘째 스냅샷(2026-12-03 무렵)을 기다린다. `T-READ-12`는 2026-11-23 `tasks-done.md`로 옮겼다.
+운영 반영 대기(`T-READ-13`도), `T-READ-07`은 둘째 스냅샷(2026-12-03 무렵)을 기다린다. `T-READ-12`는 2026-11-23 `tasks-done.md`로 옮겼다.
 
 **reconcile sensor 재시도(ADR-111 후속)** — `T-RECONCILE-RETRY`는 ADR-112(accepted) 결정 0-1(#1345)과 1~7 구현으로
 2026-10-21 `tasks-done.md`로 이관했다.
@@ -235,3 +235,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   기준선 p50 1,231 ms([기준선](reports/2026-11-19-read-baseline.md) §6.2). 454(route 대표점 생성 컬럼·HashAggregate)에
   이어 455(좁은 집계 표·동기 trigger·병렬 집계)로 n150 합성 1,297 → 255 ms. 운영 회전 뒤 harness로 해제(acceptance).
+
+- [ ] T-READ-13 — **관리자 대표 원천을 쓰기 시점에 유지(ADR-125, alembic 459)** — 구현 PR, 운영 회전 대기
+
+  `sort=provider` 2.7 s·드문 dataset + 이름 정렬 19~44 s(prod 읽기 전용)를 trigger가 유지하는 `feature_primary_sources`의
+  색인 keyset·필터로 바꾸고, 대표 규칙을 "가장 먼저 붙은 primary 연결"로 고정했다. 해제 조건은 acceptance.

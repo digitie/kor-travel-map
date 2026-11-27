@@ -1,6 +1,8 @@
 # ADR — Architecture Decision Records
 
-`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-125.**
+`kor-travel-map`의 누적 ADR. 파일당 1개(`NNN-<slug>.md`)로 둔다. **다음 후보 = ADR-126.**
+
+- [ADR-125 — Feature 대표 원천은 "가장 먼저 붙은 primary 연결"이고, 쓰기와 같은 transaction에서 유지되는 표에서 읽는다](125-persisted-feature-primary-source.md) — proposed, 2026-11-27 (소유자 승인 설계 변경; alembic 459, 정합성 검사 F10; performance.md §9.3.3 검토 기록 대체).
 
 - [ADR-124 — 프론트 workspace는 정확한 Node 26.13.1(최신 LTS)과 npm 12.0.1로 고정한다](124-exact-node-26-pin.md) — accepted, 2026-11-17 (소유자 결정; Common T-416; guard 호출 갱신은 Common T-029 뒤 T-417).
 
@@ -158,6 +160,7 @@
 | ADR-117 | SH 스냅샷·스칼라 정책 경로(411~433) 퇴역, P는 배타 전용 (proposed; alembic 435) | [117-retire-sh-snapshot-scalar-policy-path.md](117-retire-sh-snapshot-scalar-policy-path.md) |
 | ADR-118 | DB 기준 PostgreSQL 18 + PostGIS 3.6, CI는 공용 instance digest 한 lane (proposed; ADR-007 DB major·ADR-103 CI lane 대체) | [118-postgres-18-ci-target.md](118-postgres-18-ci-target.md) |
 | ADR-122 | weather 예보 `since` 증분을 지금 Valkey 세대에 병합, 하루 한 번 전량 (proposed; ADR-114 W3 전량 대체) | [122-weather-forecast-incremental-ingest.md](122-weather-forecast-incremental-ingest.md) |
+| ADR-125 | Feature 대표 원천 = 가장 먼저 붙은 primary 연결, trigger가 유지하는 `feature_primary_sources`에서 읽는다 (proposed; alembic 459) | [125-persisted-feature-primary-source.md](125-persisted-feature-primary-source.md) |
 
 ## 새 ADR 작성 규약
 

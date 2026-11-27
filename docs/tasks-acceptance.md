@@ -2809,3 +2809,19 @@ HashAggregate, 147–191 ms)에서 generic plan(`idx_feature_cluster_points_coor
   코드에 `force_custom_plan` 확인). 조용한 창(공용 Dagster instigator 69개 정지, run 0)에서 probe `--warmup-per-case 90`·
   30회: zoom 7 sido 집계 server p50/p95 **185/642 → 158/191 ms**(이전 tread1121c). warm-up 90건이 pool 15 연결마다 6번째
   실행을 넘긴 뒤라 p95가 custom plan 범위에 머문 것이 연결 나이와 무관하다는 근거다. journal 2026-11-23 절.
+
+## T-READ-13
+
+2026-11-27 #1561 후속(소유자 승인 설계 변경, ADR-125). prod 읽기 전용 기준: 관리자 `sort=provider` 첫 페이지 2.7 s(hash
+127 MB), `sort=name` + 드문 `provider_dataset_id` 19~44 s. 구현(PR, alembic `459_feature_primary_sources`): 규칙 view +
+trigger 유지 사본 `feature.feature_primary_sources`, 목록·nearby·dedup 검토가 사본을 읽고, F10이 대조한다.
+
+- [x] 모든 쓰기 종류(연결 추가·역할·created_at 변경·삭제·Feature 사이 이동·같은 값 upsert·head 관측·Feature 생성·삭제·
+  data-modifying CTE·replica 역할·런타임 login)에서 commit 전 같은 transaction의 사본이 규칙 view와 같다(F10 SQL,
+  `tests/integration/test_feature_primary_sources_sync.py`).
+- [x] 같은 Feature의 다른 primary 연결을 두 transaction이 함께 바꿔도 끝 사본이 규칙과 같다(같은 파일, 두 순서).
+- [x] 관리자 목록 정렬×방향 page 합=전체·정렬 순서·표시=정렬 키, 목록이 원천 계보 표를 읽지 않는다
+  (`tests/integration/test_admin_feature_list_sort.py`). OpenAPI 세 파일이 바뀌지 않았다.
+- [ ] 운영 회전 뒤 F10 0건, 관리자 `sort=provider` 첫 페이지·깊은 cursor·드문 dataset + 이름 정렬이 각각 100 ms 미만임을
+  언제·어느 배포 generation에서 쟀는지 journal에 적었다.
+

@@ -333,6 +333,12 @@
         "457_event_clock_slots"
       ],
       "revision": "458_live_topic_commit_bump"
+    },
+    {
+      "down_revision": [
+        "458_live_topic_commit_bump"
+      ],
+      "revision": "459_feature_primary_sources"
     }
   ],
   "schema": "kor-travel-map.application-migration-graph.v1"

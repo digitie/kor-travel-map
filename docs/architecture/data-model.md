@@ -812,6 +812,24 @@ link는 payload version이 아니라 provider entity에 붙는다. 따라서 같
 각 link의 `source_entities.current_source_record_key`를 따라 현재 관측 전부를 반환하고,
 과거 payload는 entity별 이력 API에서만 조회한다.
 
+### 3.1 대표 원천 `feature.feature_primary_sources` (ADR-125, alembic 459)
+
+primary가 여럿일 수 있으므로 목록·정렬·필터가 쓸 **대표 원천** 하나를 규칙으로 고른다 —
+`source_role='primary'` 연결 중 **가장 먼저 붙은 것**(`source_links.created_at`, 동률이면
+`source_entity_key COLLATE "C"`). 관측 시각(`source_entity_heads.observed_at`)은 보지 않는다 —
+적재마다 움직여 대표가 적재 주기에 따라 바뀐다(ADR-125 배경).
+
+- 규칙의 유일한 정의: view `feature.feature_primary_source_rule`.
+- 사본: `feature.feature_primary_sources(feature_id PK, source_entity_key, provider_dataset_id,
+  provider)` — Feature 하나에 한 행(원천이 없으면 세 열 NULL). `provider`는 불변 식별
+  `provider_datasets.provider`의 사본(정렬 색인용). 색인 `(COALESCE(provider, ''), feature_id)`·
+  `(provider_dataset_id, feature_id)`. FK 없음(455와 같은 이유).
+- 유지: `source_links` 문장 trigger(INSERT·UPDATE·DELETE·TRUNCATE, transition table)와
+  `features` 행 trigger(INSERT·DELETE·TRUNCATE)가 같은 transaction에서 맞춘다(`ENABLE ALWAYS`,
+  `SECURITY DEFINER`). 애플리케이션은 쓰지 않는다(런타임 권한 SELECT).
+- 읽는 곳: 관리자 목록(`sort=provider`·`provider_dataset_id`·표시), 공개 nearby
+  (`primary_provider`·`providers`), dedup 검토 목록. 정합성 검사 F10이 사본과 view를 대조한다.
+
 ## 4. `provider_sync.provider_sync_state`
 
 실제 구현(alembic 0002 / `infra/models.py` `ProviderSyncStateRow`):

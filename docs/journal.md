@@ -1,3 +1,32 @@
+## 2026-11-27 — 대표 원천을 쓰기 시점에 유지(ADR-125, alembic 459, T-READ-13)
+
+- 근거(prod 읽기 전용, jit off, #1561 코드를 리터럴로 렌더링): `sort=provider` 첫 페이지 2.7 s(냉 6.5 s, hash 127 MB·정렬
+  50 MB), `+provider_dataset_id`(MOIS) 2.0~2.4 s, `sort=name` + 드문 dataset(knps_shelters 22건) **19~44 s**(`lower(name)`
+  색인을 걸으며 행마다 대표 원천 LATERAL), 흔한 dataset 9 ms. primary가 둘 이상인 Feature 817건(전부 서로 다른 provider)의
+  대표가 "가장 최근 관측" 규칙이라 적재 주기에 따라 바뀌었다(729건이 가장 자주 적재되는 TourAPI).
+- 결정(ADR-125): 대표 = 가장 먼저 붙은 primary 연결(`created_at`, `source_entity_key COLLATE "C"`). 규칙 view
+  `feature.feature_primary_source_rule` 하나, 사본 `feature.feature_primary_sources`(Feature당 한 행)를 `source_links` 문장
+  trigger 셋(transition table, 규칙 열이 바뀐 primary만)·`features` 행 trigger·TRUNCATE trigger가 같은 transaction에서
+  맞춘다(`ENABLE ALWAYS`·`SECURITY DEFINER`). 재계산은 사본 행을 `feature_id` 순으로 잠근 뒤 새 문장에서 계산 — 같은 Feature를
+  두 transaction이 바꿔도 write skew 없음. 열이 아니라 표인 이유: `row_revision` ETag·`features` 행 잠금·HOT. prod에서
+  730건의 대표 provider가 바뀐다(primary 하나인 99.8%는 그대로).
+- 읽기: 관리자 목록(키 단계는 사본 색인 keyset·dataset 색인, 꾸밈은 정본 `provider_datasets`), nearby(page 표시·`providers`),
+  dedup 검토 둘. 공용 조각 `infra/primary_source.py`. 정합성 검사 F10(ERROR) 추가. OpenAPI 바이트 변화 없음.
+- migration 459(한 transaction): 표·view·함수·색인 → trigger 없이 5만 행 조각 backfill(쓰기 안 막음) → trigger(`SHARE ROW
+  EXCLUSIVE`, `lock_timeout` 5 s) → 같은 조각으로 따라잡기 → ANALYZE. prod 조각 하나의 규칙 계산 0.29 s(전체를 한 번에 하면
+  worker마다 정렬 83 MB 디스크). 쓰기 대기 창 추정 3~6 s. 배포는 Manager one-shot, writer drain 선행.
+- 적대 리뷰 2인: ① RR·SERIALIZABLE writer가 lock-only xmax를 지나 옛 snapshot으로 덮는 구멍(재현) → refresh가
+  언제나 새 행 버전을 쓴다(+회귀 시험). ② 행 단위 upsert 비용 +2.5 ms/행 → refresh 보통 경로 두 문장으로 +1.1 ms/행.
+  ③ 따라잡기가 규칙을 두 번 계산 → 한 번. ④ trigger 생성 잠금 순서가 writer와 반대(교착) → `LOCK TABLE features,
+  source_links` 먼저. ⑤ 공개 view `source_raw_data`의 셋째 규칙 사본 → 유지 표로. ANALYZE·receipt는 창 밖으로,
+  fillfactor 90.
+- 합성 prod 규모(44.2만, 실제 dataset 분포, 로컬 PG18, 통합 시험과 같은 상자): provider asc 7.6 s → 3.9 ms, desc 2.5 ms, 22만
+  번째 cursor 5.6 s → 3.0 ms, 드문 dataset + 이름 28.8 s → 2.1 ms, provider + MOIS 3.6 s → 298 ms, name·kind 회귀 없음. F10
+  3.2 s·0건. 쓰기(운영 모양 — 연결 하나에 한 문장 upsert): 새 primary +1.1 ms/행, 같은 값 재적재 차이 없음.
+- 시험: `tests/integration/test_feature_primary_sources_sync.py`(쓰기 종류별 사본=규칙, data-modifying CTE, replica 역할·런타임
+  login, view 술어 push-down, 따라잡기 SQL 복구, 두 transaction 경쟁 2순서), `test_admin_feature_list_sort.py` 규칙·계획 갱신,
+  unit SQL 모양·F10 순서. head 오라클·migration graph·runtime 권한 표 갱신.
+
 ## 2026-11-27 — 관리자 feature 목록 정렬 지연(kind·provider·issue_count 12~39 s)
 
 - 근거: 2026-11-25 live e2e에서 `GET /v1/admin/features?sort=issue_count`가 "Failed to fetch". API `slow_request`는

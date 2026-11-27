@@ -860,7 +860,7 @@ def test_nearby_feature_sql_guards_required_lon_lat_contract() -> None:
 
 
 def test_nearby_sql_joins_primary_source_after_page_limit() -> None:
-    """T-READ-09: primary source LATERAL은 잘린 page 행에만 붙고, 거리순 page는 KNN이다.
+    """T-READ-09: 대표 원천은 잘린 page 행에만 붙고(ADR-125 뒤 유지된 표), 거리순 page는 KNN이다.
 
     종전 SQL은 반경 안 전 행(100 km에서 20만 행)에 LATERAL을 돌고 나서 잘라 5초가 걸렸다.
     """
@@ -872,13 +872,14 @@ def test_nearby_sql_joins_primary_source_after_page_limit() -> None:
         for sort, sql in by_sort.items():
             page_limit = sql.index("LIMIT :limit_plus_one")
             assert sql.count("LIMIT :limit_plus_one") == 1, (label, sort)
-            # notice 감산 fragment에도 LATERAL이 있다 — primary source LATERAL(``ps``)만 본다.
-            assert sql.count(") AS ps ON TRUE") == 1, (label, sort)
-            assert sql.index(") AS ps ON TRUE") > page_limit, (label, sort)
-            # provider 필터는 응답 열과 같은 선택 규칙(최근 관측 primary)이어야 한다.
-            assert sql.count(
-                "ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key"
-            ) == 2, (label, sort)
+            # 대표 원천(ADR-125)은 유지된 표에서 page 행에만 붙는다 — 원천 계보를 다시 읽지 않는다.
+            display = "LEFT JOIN feature.feature_primary_sources AS ps_row"
+            assert sql.count(display) == 1, (label, sort)
+            assert sql.index(display) > page_limit, (label, sort)
+            assert "ORDER BY head.observed_at DESC, sr.imported_at DESC" not in sql, (label, sort)
+            # provider 필터는 응답 열과 같은 사본의 ``provider``를 본다.
+            assert "fps.provider = ANY(CAST(:providers AS text[]))" in sql, (label, sort)
+            assert sql.index("fps.provider = ANY") < page_limit, (label, sort)
         distance_sql = by_sort["distance"]
         assert "f.coord_5179 OPERATOR(x_extension.<->) o.pt_5179 AS distance_m" in distance_sql
         # KNN은 정렬 키가 ``<->`` 하나일 때만 — 동률 tiebreak는 바깥 page 정렬이 한다.
