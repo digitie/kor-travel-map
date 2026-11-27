@@ -20,6 +20,9 @@
   국립공원 후보점 순회를 변환 밖 `knps_national_park_anchors`로(변환 안에서 돌면 ADR-116 재사용 pass 0이 행 좌표 밖을 물어
   dataset 재사용이 꺼졌다), 싣는 area dataset의 bundle 0건은 은퇴 전 실패, drop 행은 snapshot 부재 은퇴에서 제외
   (`retained_source_entity_ids` — etl 공통, drop→은퇴→재활성 flap 방지). 통합 시험: 버퍼 적재→보호지역→버퍼 빈 snapshot 은퇴→0건 거부.
+  drop 행 제외는 의도적으로 etl 공통이다 — TourAPI 관광지·축제 등 drop+retire dataset도 이제 drop 행을 은퇴시키지 않는다(계속
+  drop되는 행은 옛 버전이 active로 남는다 — 그 수는 각 asset의 미해석 상한이 묶는다). 잔여: 0건 가드만 있고 직전 active 대비
+  감소율 하한은 없다(1건만 남는 붕괴는 못 막음), 국립공원 후보점 사전 조회는 재사용 없이 run마다 23곳을 live로 묻는다(소량).
 - 재적재 순서(배포 뒤 소유자): `knps_protected_areas` 먼저(admin "지금 실행" 또는 provider_dataset 큐 요청) → 확인 게이트
   (active national_park 23·invalid 0·drop 목록에 국립공원 없음) → `knps_park_boundaries`는 **provider_dataset 큐 요청**으로
   (schedule이 없어졌고 tag 없는 launchpad run은 commit 뒤 membership 기록에서 red가 된다). OpenAPI·migration 없음.
