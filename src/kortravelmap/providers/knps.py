@@ -42,7 +42,9 @@ from kortravelmap.core.geometry import (
     AREA_GEOMETRY_TYPES,
     ROUTE_GEOMETRY_TYPES,
     GeometryError,
+    area_anchor_points,
     normalize_geometry,
+    parse_wkt,
 )
 from kortravelmap.core.ids import (
     make_feature_id,
@@ -79,6 +81,11 @@ __all__ = [
     "KNPS_GEOMETRY_DATASET_KEYS",
     "KNPS_LOADABLE_GEOMETRY_DATASET_KEYS",
     "KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES",
+    "KNPS_NATIONAL_PARK_DESIGNATIONS",
+    "KNPS_NATIONAL_PARK_PROMOTIONS",
+    "KNPS_SOURCE_ENTITY_TYPE",
+    "knps_geometry_snapshot_retires_absent",
+    "knps_national_park_anchors",
     "AddressFailureMode",
     "knps_point_records_to_bundles",
     "knps_geometry_records_to_bundles",
@@ -206,6 +213,8 @@ KNPS_PLACE_DATASETS: Final[dict[str, KnpsPlaceDatasetSpec]] = {
 KNPS_POINT_DATASET_KEYS: Final[frozenset[str]] = frozenset(KNPS_PLACE_DATASETS)
 
 _SOURCE_ENTITY_TYPE: Final[str] = "knps_facility"
+KNPS_SOURCE_ENTITY_TYPE: Final[str] = _SOURCE_ENTITY_TYPE
+"""KNPS bundle의 ``source_entity_type`` — snapshot 부재 은퇴의 축."""
 
 
 def resolve_cultural_resource_category(raw: dict[str, Any]) -> tuple[str, str]:
@@ -585,6 +594,13 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         category=_NATIONAL_PARK_CATEGORY,  # upstream §4 — 경계도 관광 category 보유
         marker_icon=_PARK_MAKI,
         marker_color="P-06",
+        unloaded_reason=(
+            "원천(15017313 `공원경계버퍼/BSI_NPK_BBNDR`)은 공원경계가 아니라 **3 km 버퍼**다 — "
+            "원본 메타데이터 처리 이력이 `Buffer … \"3 Kilometers\" FULL ROUND`이고 면적이 공식의 "
+            "2~4.8배다(북한산 240.7 km² vs 76.9, 경주 659.4 vs 136.6, 2026-11-27 실측). 국립공원 "
+            "경계는 `knps_protected_areas`의 국립공원 행에서 싣는다. 이 dataset을 돌리면 예전에 "
+            "실은 버퍼 면을 snapshot 부재로 은퇴시킨다."
+        ),
     ),
     "knps_hazard_zones": KnpsGeometryDatasetSpec(
         "knps_hazard_zones",
@@ -605,7 +621,9 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         feature_kind=FeatureKind.AREA,
         detail_kind="protected_area",
         allowed_geom_types=AREA_GEOMETRY_TYPES,
-        # category는 행마다 지정 종류(DESIG_ENG)에서 정한다 —
+        # area_kind·category는 행마다 지정 종류(DESIG_ENG)에서 정한다 — 국립공원 행은
+        # ``national_park``/01020101(:data:`KNPS_NATIONAL_PARK_DESIGNATIONS`·
+        # :data:`KNPS_NATIONAL_PARK_PROMOTIONS`), 나머지는
         # :data:`KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES`. 표에 없는 지정은 싣지 않는다.
         category=None,
         marker_icon=_PARK_MAKI,
@@ -614,6 +632,18 @@ KNPS_GEOMETRY_DATASETS: Final[dict[str, KnpsGeometryDatasetSpec]] = {
         address_failure_mode="drop",
     ),
 }
+
+def knps_geometry_snapshot_retires_absent(spec: KnpsGeometryDatasetSpec) -> bool:
+    """이 dataset의 적재가 snapshot에 없는 기존 feature를 은퇴시키는가.
+
+    area dataset은 파일 전체가 한 snapshot이다 — 원천에서 빠진 면(또는 knps-api가 source_id를
+    행 hash에서 WDPA id로 바꿔 옛 id가 된 면)이 공개 표면에 남으면 "이 장소는 어느 면 안인가"가
+    틀린 답을 준다. 싣지 않기로 한 dataset(``unloaded_reason``)은 빈 snapshot이라 예전에 실은
+    feature를 전부 내린다(공원경계 3 km 버퍼 21건). route(탐방로)는 이 PR의 범위 밖이라 종전대로
+    은퇴시키지 않는다.
+    """
+    return spec.feature_kind is FeatureKind.AREA or spec.unloaded_reason is not None
+
 
 KNPS_LOADABLE_GEOMETRY_DATASET_KEYS: Final[frozenset[str]] = frozenset(
     key for key, spec in KNPS_GEOMETRY_DATASETS.items() if spec.unloaded_reason is None
@@ -649,8 +679,49 @@ KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES: Final[dict[str, tuple[str, str]]] = 
 """보호지역 원천 지정 종류(``DESIG_ENG``, 소문자·공백 정규화) → (육상, 연안·해상) category.
 
 여행과 관련된 지정만 둔다(#1450 소유자 결정 Option A). 원천 ``MARINE``이 ``0``이면 육상, 그
-밖이면 연안·해상 칸을 쓴다. 표에 없는 지정 — 국립공원(``knps_park_boundaries`` 21건과 중복)·
-야생생물·상수원·특정도서·산림유전자원·해양보호구역·도시자연공원구역 등 — 은 싣지 않는다."""
+밖이면 연안·해상 칸을 쓴다. 국립공원은 이 표가 아니라 :data:`KNPS_NATIONAL_PARK_DESIGNATIONS`로
+``national_park`` area가 된다. 표에 없는 지정 — 야생생물·상수원·특정도서·산림유전자원·
+해양보호구역·도시자연공원구역 등 — 은 싣지 않는다."""
+
+KNPS_NATIONAL_PARK_DESIGNATIONS: Final[frozenset[str]] = frozenset({"national park"})
+"""국립공원 경계의 정본 — 한국보호지역(WDPA 형식) ``DESIG_ENG``가 이 값인 행.
+
+``knps_park_boundaries``(15017313)는 공원경계 3 km 버퍼라 싣지 않는다(그 spec의
+``unloaded_reason``). 한국보호지역 2016 스냅샷의 국립공원 22행은 공식 면적 ±4% 안이다
+(북한산 79.4 km² vs 76.9, 지리산 479.2 vs 483.0, 경주 139.2 vs 136.6·9 part — 2026-11-27 실측)."""
+
+KNPS_NATIONAL_PARK_PROMOTIONS: Final[dict[str, str]] = {
+    # 팔공산 — 2023-12-31 국립공원 승격(23번째). 2016 스냅샷엔 도립공원(Provincial Park)으로 실려
+    # 있고 그 경계가 국립공원 경계와 거의 같다(124.9 km² vs 공식 125.232).
+    "555571373": "2023-12-31",
+}
+"""스냅샷 이후 국립공원으로 승격한 보호지역: ``WDPA_PID``(knps source_id) → 승격일.
+
+원천 지정 종류가 무엇이든 ``national_park`` area로 싣는다. 원천이 새 스냅샷으로 바뀌어 그 행이
+``National Park``로 오면 이 표 없이도 같은 결과다 — 표는 그때 지운다."""
+
+
+def _wdpa_ids(record: KnpsGeometryRecord) -> set[str]:
+    """행의 WDPA id 후보 — knps source_id와 raw ``WDPA_PID``/``WDPAID``(DBF ``.0`` 제거)."""
+    ids = {record.source_id}
+    for key in ("WDPA_PID", "WDPAID"):
+        value = record.raw.get(key)
+        if value is None:
+            continue
+        text = str(value).strip()
+        head, dot, tail = text.partition(".")
+        ids.add(head if dot and head.isdigit() and set(tail) <= {"0"} else text)
+    return ids
+
+
+def _is_national_park_row(record: KnpsGeometryRecord) -> bool:
+    """한국보호지역 행이 국립공원(또는 승격 대상)인가."""
+    if not _wdpa_ids(record).isdisjoint(KNPS_NATIONAL_PARK_PROMOTIONS):
+        return True
+    designation = record.raw.get("DESIG_ENG")
+    if not isinstance(designation, str):
+        return False
+    return " ".join(designation.split()).casefold() in KNPS_NATIONAL_PARK_DESIGNATIONS
 
 
 def _protected_area_category(raw: Mapping[str, Any]) -> str | None:
@@ -820,11 +891,22 @@ def _is_unmatched_trail_course(record: KnpsGeometryRecord) -> bool:
     return False
 
 
+def _national_park_name(name: str | None) -> str | None:
+    """공원명(``지리산``)을 표시명(``지리산 국립공원``)으로. 이미 붙어 있으면 그대로."""
+    if name is None:
+        return None
+    return name if "국립공원" in name else f"{name} 국립공원"
+
+
 def _geometry_record_name(
     record: KnpsGeometryRecord, spec: KnpsGeometryDatasetSpec
 ) -> str | None:
     """KNPS geometry 이름을 provider normalized field 또는 raw column에서 결정한다."""
     raw = record.raw
+    if spec.dataset_key == "knps_protected_areas" and _is_national_park_row(record):
+        return _national_park_name(
+            _raw_hangul_text(raw, "ORIG_NAME") or normalize_korean_text(record.name)
+        )
     if spec.dataset_key == "knps_protected_areas":
         korean_name = _raw_hangul_text(
             raw,
@@ -846,19 +928,22 @@ def _geometry_record_name(
         return normalized_name
 
     if spec.dataset_key == "knps_park_boundaries":
-        park_name = _raw_text(raw, "NPK_NM", "국립공원명", "PARK_NM", "name", "NAME")
-        if park_name is None:
-            return None
-        return park_name if "국립공원" in park_name else f"{park_name} 국립공원"
+        return _national_park_name(
+            _raw_text(raw, "NPK_NM", "국립공원명", "PARK_NM", "name", "NAME")
+        )
     if spec.dataset_key == "knps_protected_areas":
         return _raw_text(raw, "NAME", "ORIG_NAME", "DESIG_ENG", "DESIG")
     return None
 
 
 def _geometry_detail(
-    spec: KnpsGeometryDatasetSpec, feature_id: str, raw: dict[str, Any]
+    spec: KnpsGeometryDatasetSpec,
+    feature_id: str,
+    raw: dict[str, Any],
+    *,
+    area_kind: str | None = None,
 ) -> RouteDetail | AreaDetail:
-    """spec.feature_kind에 맞는 detail 생성 (route/area)."""
+    """spec.feature_kind에 맞는 detail 생성 (route/area). ``area_kind``는 행별 override."""
     if spec.feature_kind is FeatureKind.ROUTE:
         return RouteDetail(
             feature_id=feature_id,
@@ -869,10 +954,53 @@ def _geometry_detail(
         )
     return AreaDetail(
         feature_id=feature_id,
-        area_kind=spec.detail_kind,  # Literal 값 검증은 AreaDetail validator
+        # Literal 값 검증은 AreaDetail validator
+        area_kind=area_kind or spec.detail_kind,
         boundary_source="knps",
         payload={"knps_dataset": spec.dataset_key},
     )
+
+
+async def knps_national_park_anchors(
+    records: Iterable[KnpsGeometryRecord],
+    *,
+    dataset_key: str,
+    reverse_geocoder: ReverseGeocoder,
+) -> dict[str, Coordinate]:
+    """국립공원 행의 대표점 — centroid가 빈 답이면 면 위 후보점에서 첫 법정동을 준 점.
+
+    해상·연안 국립공원(한려해상·태안해안·다도해해상)은 centroid가 바다라 역지오가 법정동을 못
+    준다(2026-11-27 prod 실측). 그 셋이 drop되면 "국립공원 23곳"이 성립하지 않는다.
+    후보는 :func:`area_anchor_points`가 정하고 첫째가 centroid다(내륙 20곳은 centroid 1회).
+
+    **변환 밖에서 미리 푼다.** 변환 안에서 후보를 돌면 ADR-116 저장값 재사용의 pass 0(빈 답 대역)이
+    모든 후보를 묻게 되고, 행 좌표 밖의 요청이라 재사용 안전망이 dataset 전체의 재사용을 끈다
+    (적대 리뷰 F2). 여기서 정한 점을 :func:`knps_geometry_records_to_bundles`에
+    ``national_park_anchors``로 넘기면 변환은 행마다 그 점 하나만 묻는다(= 행 좌표).
+    보호지역 일반 행에는 쓰지 않는다 — 해상 보호구역 134건에 후보를 다 물으면 run 빈 답
+    가드(ADR-109 결정 4)를 넘는다. 법정동을 준 후보가 없으면 그 행은 표에 없다(centroid로 묻고,
+    빈 답이면 drop).
+    """
+    if dataset_key != "knps_protected_areas":
+        return {}
+    spec = KNPS_GEOMETRY_DATASETS[dataset_key]
+    geocoder = cached_reverse_geocoder(reverse_geocoder)
+    anchors: dict[str, Coordinate] = {}
+    for record in records:
+        if not _is_national_park_row(record):
+            continue
+        try:
+            canonical_wkt, _centroid = normalize_geometry(
+                record.geom_wkt, allowed_types=spec.allowed_geom_types
+            )
+        except GeometryError:
+            continue
+        for anchor in area_anchor_points(parse_wkt(canonical_wkt)):
+            address = await geocoder(anchor)
+            if address is not None and address.bjd_code is not None:
+                anchors[record.source_id] = anchor
+                break
+    return anchors
 
 
 async def _geometry_record_to_bundle(
@@ -881,8 +1009,12 @@ async def _geometry_record_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
+    anchor: Coordinate | None = None,
 ) -> FeatureBundle | None:
     """KNPS geometry record 1건 → route/area ``FeatureBundle``.
+
+    ``anchor``는 국립공원 행의 대표점(:func:`knps_national_park_anchors`) — 있으면 centroid 대신
+    그 점을 대표 좌표로 쓰고 그 점을 역지오코딩한다(주소와 좌표가 같은 점에서 나온다).
 
     route는 이름 없는 record를 건너뛰고, area dataset은 raw 속성에서 이름을
     복구한다. geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환(호출자가 skip/집계).
@@ -891,7 +1023,11 @@ async def _geometry_record_to_bundle(
         return None
     if spec.dataset_key == "knps_trails" and _is_unmatched_trail_course(record):
         return None
-    if spec.dataset_key == "knps_protected_areas":
+    row_area_kind: str | None = None
+    if spec.dataset_key == "knps_protected_areas" and _is_national_park_row(record):
+        row_area_kind = "national_park"
+        row_category: str | None = _NATIONAL_PARK_CATEGORY
+    elif spec.dataset_key == "knps_protected_areas":
         row_category = _protected_area_category(record.raw)
         if row_category is None:
             return None
@@ -921,6 +1057,8 @@ async def _geometry_record_to_bundle(
 
     # route/area도 법정동코드가 없다. centroid를 역지오코딩해 feature_id 계산 전에
     # bjd_code/주소를 채운다 (ADR-009).
+    if row_area_kind == "national_park" and anchor is not None:
+        centroid = anchor
     address: Address | None = None
     if reverse_geocoder is not None:
         address = await reverse_geocoder(centroid)
@@ -938,13 +1076,13 @@ async def _geometry_record_to_bundle(
         provider_natural_key=record.source_id,
         kind=spec.feature_kind,
         name=normalized_name,
-        coord=centroid,  # 선/면 대표 좌표 = centroid (ADR-012, 지도 마커용)
+        coord=centroid,  # 선/면 대표 좌표 = centroid 또는 국립공원 anchor (ADR-012, 지도 마커용)
         address=address or Address(),
         geom=canonical_wkt,
         category=category,
         marker_icon=spec.marker_icon,
         marker_color=spec.marker_color,
-        detail=_geometry_detail(spec, feature_id, raw_data),
+        detail=_geometry_detail(spec, feature_id, raw_data, area_kind=row_area_kind),
     )
     source_record = SourceRecord(
         provider=normalize_provider_name(PROVIDER_NAME),
@@ -974,6 +1112,7 @@ async def knps_geometry_records_to_bundles(
     dataset_key: str,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    national_park_anchors: Mapping[str, Coordinate] | None = None,
 ) -> list[FeatureBundle]:
     """KNPS route/area dataset의 파싱된 행들(WKT geometry) → ``list[FeatureBundle]``.
 
@@ -993,6 +1132,8 @@ async def knps_geometry_records_to_bundles(
     reverse_geocoder
         좌표 → ``Address`` async 역지오코더. 주입하면 centroid를 역지오코딩해
         bjd_code를 채워 feature_id가 'global' bucket을 벗어난다 (ADR-009).
+    national_park_anchors
+        ``source_id`` → 국립공원 대표점(:func:`knps_national_park_anchors`가 미리 푼 값).
 
     Raises
     ------
@@ -1016,7 +1157,11 @@ async def knps_geometry_records_to_bundles(
     bundles: list[FeatureBundle] = []
     for record in records:
         bundle = await _geometry_record_to_bundle(
-            record, spec, fetched_at=fetched_at, reverse_geocoder=geocoder
+            record,
+            spec,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            anchor=(national_park_anchors or {}).get(record.source_id),
         )
         if bundle is not None:
             bundles.append(bundle)

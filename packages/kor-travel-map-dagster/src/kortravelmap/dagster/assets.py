@@ -47,7 +47,10 @@ from kortravelmap.providers.khoa import (
 from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASETS,
     KNPS_PLACE_DATASETS,
+    KNPS_SOURCE_ENTITY_TYPE,
     knps_geometry_records_to_bundles,
+    knps_geometry_snapshot_retires_absent,
+    knps_national_park_anchors,
     knps_point_records_to_bundles,
 )
 from kortravelmap.providers.knps import (
@@ -704,6 +707,26 @@ async def feature_place_knps_points(
     return await run_tracked_feature_asset(context, run_feature_place_knps_points)
 
 
+async def _resolve_knps_national_park_anchors(
+    records: Sequence[Any],
+    *,
+    dataset_key: str,
+    live: ReverseGeocoder | None,
+) -> dict[str, Any]:
+    """국립공원 대표점(해상 공원은 면 위 후보점)을 변환 **밖**에서 푼다.
+
+    변환 안에서 후보를 돌면 ADR-116 재사용 pass 0이 행 좌표 밖을 물어 dataset 전체의 재사용이
+    꺼진다. 여기서 고른 점을 변환에 넘기면 변환은 행마다 그 점 하나(= 행 좌표)만 재사용 경로로
+    묻는다. 이 사전 조회는 변환이 아니라 국립공원 행(23)의 후보점 탐색이라 재사용 helper를 거치지
+    않는다(``tests/lint/test_reverse_geocoding_assets_reuse_stored_geo.py`` 허용 목록).
+    """
+    if live is None:
+        return {}
+    return await knps_national_park_anchors(
+        records, dataset_key=dataset_key, reverse_geocoder=live
+    )
+
+
 async def run_feature_geometry_knps_records(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -722,20 +745,40 @@ async def run_feature_geometry_knps_records(
     else:
         records = await _record_list(context, "knps_geometry_records")
     fetched_at = await _fetched_at(context)
+    reverse_geocoder = _reverse_geocoder(context)
+    # 후보점 사전 조회 — 변환이 아니다(아래 helper docstring). 키워드 이름이 다른 것은 의도다.
+    anchors = await _resolve_knps_national_park_anchors(
+        records, dataset_key=dataset_key, live=reverse_geocoder
+    )
     bundles = await _transform_reusing_geo(
         context,
         knps_geometry_records_to_bundles,
         records,
         dataset_key=dataset_key,
         fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
+        reverse_geocoder=reverse_geocoder,
+        national_park_anchors=anchors,
     )
+    retires_absent = knps_geometry_snapshot_retires_absent(spec)
+    if retires_absent and spec.unloaded_reason is None and not bundles:
+        # 싣는 area dataset의 빈 snapshot은 "원천이 비었다"가 아니라 "변환이 무너졌다"일 수 있다
+        # (헤더 변경·이름 디코딩 회귀·SHP 0건). 은퇴 전에 멈춘다 — 빈 snapshot 은퇴는
+        # unloaded dataset(버퍼 은퇴)에만 허용한다(적대 리뷰 F3).
+        raise Failure(
+            description=(
+                f"KNPS {dataset_key}: 원천 {len(records)}행에서 bundle 0건 — 빈 snapshot으로 "
+                "기존 면을 은퇴시키지 않는다. 원천 헤더·디코딩·변환을 확인할 것."
+            ),
+            metadata={"source_records": len(records)},
+        )
     return await _load(
         context,
         provider=KNPS_PROVIDER_NAME,
         dataset_key=dataset_key,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        source_entity_type=KNPS_SOURCE_ENTITY_TYPE if retires_absent else None,
+        retire_absent_from_snapshot=retires_absent,
         geo_applied=GeoApplied(reverse=True, geocode=False),
         address_failure_mode=spec.address_failure_mode,
     )
@@ -1269,8 +1312,8 @@ VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 VISITKOREA_FESTIVAL_DETAIL_BUDGET: Final = 300
 
 #: 축제의 법정동 미해석 허용 상한 — 축제는 900건 안팎이고 원천 좌표가 모두 육지 행사장이라
-#: 관광지(30)보다 좁게 둔다. 버린 행은 은퇴하므로 geo 장애가 한 run에 축제 수십 건을
-#: 지우지 않게 한다.
+#: 관광지(30)보다 좁게 둔다. 버린 행은 은퇴하지 않지만(snapshot 부재 은퇴에서 빠진다) 갱신도 못
+#: 받으므로, geo 장애가 한 run에 축제 수십 건을 낡은 채로 두지 않게 한다.
 VISITKOREA_FESTIVAL_UNRESOLVED_FLOOR: Final = 5
 
 #: 역지오코딩이 법정동을 못 낸 행의 허용 상한 — ``max(이 수, 전체의 1%)``. 해상 등대·무인도처럼
@@ -1702,7 +1745,8 @@ async def run_feature_event_visitkorea_festivals(
         record_sync_state=not replay,
         geo_applied=GeoApplied(reverse=True, geocode=False),
         # 역지오코딩이 법정동을 못 내는 행 하나가 run 전체를 되감지 않게 그 행만 버린다(관광지와
-        # 같은 선택). 버린 행은 은퇴하므로 그 수는 위 `_ensure_geo_resolved_enough`가 묶는다.
+        # 같은 선택). 버린 행은 은퇴하지 않고 이번 갱신만 빠진다 — 그 수는 위
+        # `_ensure_geo_resolved_enough`가 묶는다.
         address_failure_mode="drop",
     )
 

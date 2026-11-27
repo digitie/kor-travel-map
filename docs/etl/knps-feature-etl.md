@@ -18,7 +18,7 @@ provider 등록) + Amendment 2026-05-25 (keyless + file-only)** 기준.
 
 | 항목 | 값 |
 |------|----|
-| provider | `python-knps-api` (`digitie/python-knps-api`, commit `a472a379c10c5b963faea4ca83ac56d98d9e2fc4`) |
+| provider | `python-knps-api` (`digitie/python-knps-api`, commit `59fb5b0a1d21ecff182b203ad60fb9372e771729`) |
 | import | `from knps import KnpsClient, FileDataset, FileArtifact, ...` (아래 §5) |
 | Python | `>=3.11` |
 | 인증 | **없음 (keyless)** — knps-api PR#4. data.go.kr 직접 다운로드 URL 사용. `KNPS_SERVICE_KEY` / `DATA_GO_KR_SERVICE_KEY` 사용 안 함 (ADR-028 amendment) |
@@ -39,7 +39,7 @@ knps-api `knps.catalog.FILE_DATASETS` 14건 (`from knps import file_datasets`
 
 | dataset_key | data.go.kr ID | format | geometry | feature.kind | category / area_kind |
 |-------------|---------------|--------|----------|--------------|----------------------|
-| `knps_park_boundaries` | `15017313` | SHP (ZIP) | MultiPolygon | `area` | `area_kind='national_park'` |
+| `knps_park_boundaries` | `15017313` | SHP (ZIP) | MultiPolygon | — | **싣지 않음** — 공원경계 **3 km 버퍼**(원본 메타 `Buffer "3 Kilometers"`). 돌리면 예전 버퍼 면을 은퇴시킨다(2026-11-27) |
 | `knps_trails` | `15003467` | CSV | LineString | `route` | `route_type='hiking_trail'` |
 | `knps_visitor_centers` | `15003445` | CSV | Point | `place` | `01060101` `TOURISM_INFORMATION_CENTER_PUBLIC`, `place_kind='visitor_center'` |
 | `knps_hazard_zones` | `15003441` | CSV | Polygon | `area` | `area_kind='hazard_zone'` (ADR-027). `payload.hazard_type`/`risk_grade`/`domain='forest'` |
@@ -49,7 +49,7 @@ knps-api `knps.catalog.FILE_DATASETS` 14건 (`from knps import file_datasets`
 | `knps_campgrounds` | `15003469` | CSV | Point | `place` | `03060100` `LODGING_CAMPGROUND_AUTO`, `place_kind='campground'` |
 | `knps_shelters` | `2982556` | CSV | Point | `place` | **`03080100` `LODGING_MOUNTAIN_SHELTER_KNPS`** (ADR-027), `place_kind='mountain_shelter'`, maki `shelter` |
 | `knps_linear_facilities` | `15091972` | CSV | LineString | `route` | `route_type='facility_road'` (탐방로 외 시설 도로) |
-| `knps_protected_areas` | `15127921` | CSV | Polygon | `area` | `area_kind='protected_area'` (특별보호구역). `payload.protection_type` 보존 |
+| `knps_protected_areas` | `15127921` | SHP(ZIP, UTF-8 `.cpg`) | Polygon | `area` | `DESIG_ENG='National Park'` 22행 + 승격 팔공산(`KNPS_NATIONAL_PARK_PROMOTIONS`) → `area_kind='national_park'`/`01020101`(국립공원 경계 정본). 나머지 여행 관련 지정 → `area_kind='protected_area'`. source_id = `WDPA_PID` |
 
 ### 2.2 비공간/통계/메타 (3건)
 

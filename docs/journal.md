@@ -1,3 +1,32 @@
+## 2026-11-27 — 국립공원 경계 재원천화(3 km 버퍼 → 한국보호지역 국립공원 행)·면 수리
+
+- 근거: prod 읽기 전용 감사 — `national_park` 21건이 공식 면적의 2~4.8배(북한산 240.9 km² vs 76.9, 경주 659.6 vs 136.6·한
+  덩어리, 지리산 978.3 vs 483.0), 23곳 중 한려해상·태안해안 없음, `protected_area` 401건 중 14건 `Ring Self-intersection`.
+- 원인(원천): 15017313 ZIP 레이어가 `공원경계버퍼/BSI_NPK_BBNDR`이고 `.shp.xml` 처리 이력이 `Buffer … "3 Kilometers" FULL
+  ROUND`다. 파싱(투영·ring·hole)은 정확했다 — 원본 면적이 저장 면적과 같다. 누락 2곳은 centroid가 바다라 역지오가 법정동을
+  못 줘 strict 검증에서 빠졌다(prod geo 실측).
+- 수정: knps-api PR#22(핀 `59fb5b0`) — 한국보호지역 SHP `.cpg` UTF-8, source_id `WDPA_PID`, 이름 `ORIG_NAME`, 공원경계가 버퍼임을
+  카탈로그에 명시. Map — `knps_park_boundaries`에 `unloaded_reason`(돌리면 빈 snapshot으로 버퍼 면 은퇴), 국립공원은
+  `knps_protected_areas`의 `DESIG_ENG='National Park'` 22행 + 2023-12-31 승격 팔공산(2016 스냅샷의 도립공원 행,
+  `KNPS_NATIONAL_PARK_PROMOTIONS`)을 `national_park`/`01020101`로 싣는다. 국립공원 행만 역지오 후보점(centroid →
+  representative_point → part별 → 바깥 ring 꼭짓점, `core.geometry.area_anchor_points`)을 차례로 묻고 첫 법정동 점을 대표점으로
+  쓴다(일반 보호지역은 centroid 1회 — 해상 보호구역이 빈 답 가드를 넘지 않게). 면은 `normalize_geometry`에서 `make_valid` 후
+  면 조각만 남긴다(`repair_area_geometry`, valid 입력은 그대로). KNPS area dataset 적재는 snapshot 부재 은퇴를 켠다.
+- 검증: 실제 포털 파일 두 개 → 일회용 PostGIS(alembic head) 재적재 — 국립공원 23곳 공식 면적 대비 0.948~1.036(오대산 최소·한려해상
+  최대), 경주 9 part, 버퍼 23건 retired, active 면 invalid 0, 팔공산은 보호지역에서 빠짐. prod geo로 해상 3곳 후보점 실측(태안 첫
+  ring 꼭짓점, 다도해 ring 꼭짓점, 한려해상 representative_point). 보호지역 source_id가 행 hash → WDPA id로 바뀌므로 재적재 시
+  옛 보호지역 feature는 snapshot 부재로 은퇴하고 새 id로 다시 선다(설계 우선 — 서비스 전).
+- 적대 리뷰 2인 반영: `make_valid(method="structure")`(기본 linework는 겹친 곳을 구멍으로 만든다 — shapely 하한 2.1),
+  국립공원 후보점 순회를 변환 밖 `knps_national_park_anchors`로(변환 안에서 돌면 ADR-116 재사용 pass 0이 행 좌표 밖을 물어
+  dataset 재사용이 꺼졌다), 싣는 area dataset의 bundle 0건은 은퇴 전 실패, drop 행은 snapshot 부재 은퇴에서 제외
+  (`retained_source_entity_ids` — etl 공통, drop→은퇴→재활성 flap 방지). 통합 시험: 버퍼 적재→보호지역→버퍼 빈 snapshot 은퇴→0건 거부.
+  drop 행 제외는 의도적으로 etl 공통이다 — TourAPI 관광지·축제 등 drop+retire dataset도 이제 drop 행을 은퇴시키지 않는다(계속
+  drop되는 행은 옛 버전이 active로 남는다 — 그 수는 각 asset의 미해석 상한이 묶는다). 잔여: 0건 가드만 있고 직전 active 대비
+  감소율 하한은 없다(1건만 남는 붕괴는 못 막음), 국립공원 후보점 사전 조회는 재사용 없이 run마다 23곳을 live로 묻는다(소량).
+- 재적재 순서(배포 뒤 소유자): `knps_protected_areas` 먼저(admin "지금 실행" 또는 provider_dataset 큐 요청) → 확인 게이트
+  (active national_park 23·invalid 0·drop 목록에 국립공원 없음) → `knps_park_boundaries`는 **provider_dataset 큐 요청**으로
+  (schedule이 없어졌고 tag 없는 launchpad run은 commit 뒤 membership 기록에서 red가 된다). OpenAPI·migration 없음.
+
 ## 2026-11-27 — 휴게소 먹거리(한국도로공사 메뉴) — 휴게소·고속도로 주유소 상세 (ADR-127)
 
 - 소유자 승인 계획(조사 보고서 2순위, LLM 없음): transport가 KREX 0615(휴게소 코드·상하행)·0502(메뉴)를 하루 한 번 수집해

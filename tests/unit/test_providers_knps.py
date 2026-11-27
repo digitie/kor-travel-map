@@ -23,17 +23,20 @@ from typing import Any
 import pytest
 
 from kortravelmap.category import is_known_category_code
-from kortravelmap.dto import FeatureBundle, FeatureKind, SourceRole
+from kortravelmap.dto import Address, Coordinate, FeatureBundle, FeatureKind, SourceRole
 from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASET_KEYS,
     KNPS_GEOMETRY_DATASETS,
     KNPS_LOADABLE_GEOMETRY_DATASET_KEYS,
+    KNPS_NATIONAL_PARK_PROMOTIONS,
     KNPS_PLACE_DATASETS,
     KNPS_POINT_DATASET_KEYS,
     KNPS_PROTECTED_AREA_DESIGNATION_CATEGORIES,
     PROVIDER_NAME,
     KnpsGeometryColumnMap,
     KnpsPointColumnMap,
+    knps_geometry_snapshot_retires_absent,
+    knps_national_park_anchors,
     resolve_cultural_resource_category,
 )
 from kortravelmap.providers.knps import (
@@ -305,28 +308,221 @@ def test_linear_facility_is_left_unloaded() -> None:
     assert "knps_linear_facilities" not in KNPS_LOADABLE_GEOMETRY_DATASET_KEYS
 
 
-def test_park_boundary_area_mapping() -> None:
-    b = _geo_one("knps_park_boundaries", _POLY, name="북한산국립공원")[0]
-    assert b.feature.kind is FeatureKind.AREA
-    # 국립공원 경계는 실제 관광 category 보유 (upstream §4, sentinel 아님)
-    assert b.feature.category == "01020101"
-    assert b.feature.marker_icon == "park"
-    assert b.feature.detail.area_kind == "national_park"
-    assert b.feature.detail.boundary_source == "knps"
-    assert b.feature.geom is not None
-    assert b.feature.geom.startswith("POLYGON")
+def test_park_boundary_buffer_dataset_is_left_unloaded_and_retires_old_rows() -> None:
+    """15017313은 공원경계 3 km 버퍼다(원본 메타 `Buffer "3 Kilometers"`, 북한산 240.7 km² vs 76.9).
+
+    싣지 않고, 돌리면 빈 snapshot으로 예전에 실은 버퍼 면을 은퇴시킨다.
+    """
+    spec = KNPS_GEOMETRY_DATASETS["knps_park_boundaries"]
+    assert spec.unloaded_reason is not None
+    assert "3 km 버퍼" in spec.unloaded_reason
+    assert _geo_one("knps_park_boundaries", _POLY, name="북한산국립공원") == []
+    assert "knps_park_boundaries" not in KNPS_LOADABLE_GEOMETRY_DATASET_KEYS
+    assert knps_geometry_snapshot_retires_absent(spec)
 
 
-def test_park_boundary_area_name_falls_back_to_raw_park_name() -> None:
-    b = _geo_one(
-        "knps_park_boundaries",
+def test_area_datasets_retire_absent_but_trails_do_not() -> None:
+    assert knps_geometry_snapshot_retires_absent(KNPS_GEOMETRY_DATASETS["knps_protected_areas"])
+    assert not knps_geometry_snapshot_retires_absent(KNPS_GEOMETRY_DATASETS["knps_trails"])
+
+
+def _national_park(**over: Any) -> list[FeatureBundle]:
+    raw = {
+        "WDPAID": "10932.0",
+        "WDPA_PID": "10932.0",
+        "NAME": "Bukhansan",
+        "ORIG_NAME": "북한산",
+        "DESIG_ENG": "National Park",
+        "MARINE": "0",
+    }
+    raw.update(over.pop("raw", {}))
+    return _geo_one(
+        "knps_protected_areas",
         _POLY,
-        name=None,
-        raw={"NPK_NM": "가야산", "NO": "PARK-1"},
-    )[0]
+        source_id=over.pop("source_id", "10932"),
+        name=over.pop("name", "북한산"),
+        raw=raw,
+    )
+
+
+def test_national_park_row_of_protected_areas_becomes_national_park_area() -> None:
+    """국립공원 경계의 정본은 한국보호지역의 `National Park` 행이다(버퍼가 아닌 실제 경계)."""
+    b = _national_park()[0]
     assert b.feature.kind is FeatureKind.AREA
-    assert b.feature.name == "가야산 국립공원"
-    assert b.source_record.raw_data["NPK_NM"] == "가야산"
+    assert b.feature.detail.area_kind == "national_park"
+    assert b.feature.category == "01020101"
+    assert b.feature.name == "북한산 국립공원"
+    assert b.feature.marker_icon == "park"
+    assert b.feature.detail.payload == {"knps_dataset": "knps_protected_areas"}
+    assert b.source_record.dataset_key == "knps_protected_areas"
+    assert b.feature.provider_natural_key == "10932"
+
+
+def test_promoted_provincial_park_row_becomes_national_park() -> None:
+    """팔공산은 2023-12-31 승격 — 2016 스냅샷엔 `Provincial Park` 행이다."""
+    assert KNPS_NATIONAL_PARK_PROMOTIONS == {"555571373": "2023-12-31"}
+    b = _national_park(
+        source_id="555571373",
+        name="팔공산",
+        raw={
+            "WDPAID": "555571373.0",
+            "WDPA_PID": "555571373.0",
+            "ORIG_NAME": "팔공산",
+            "DESIG_ENG": "Provincial Park",
+        },
+    )[0]
+    assert b.feature.detail.area_kind == "national_park"
+    assert b.feature.category == "01020101"
+    assert b.feature.name == "팔공산 국립공원"
+
+
+def test_promotion_also_matches_raw_wdpa_id_under_legacy_row_hash_source_id() -> None:
+    """knps-api가 source_id를 행 hash로 주던 시절의 record도 raw WDPA id로 승격을 알아본다."""
+    b = _national_park(
+        source_id="row:0123456789abcdef",
+        raw={"WDPA_PID": "555571373.0", "ORIG_NAME": "팔공산", "DESIG_ENG": "Provincial Park"},
+    )[0]
+    assert b.feature.detail.area_kind == "national_park"
+
+
+def test_other_provincial_park_stays_protected_area() -> None:
+    b = _protected("Provincial Park", WDPA_PID="555571374.0")[0]
+    assert b.feature.detail.area_kind == "protected_area"
+    assert b.feature.category == "01020102"
+
+
+def _national_park_record(source_id: str, name: str) -> _GRec:
+    return _GRec(
+        source_id=source_id,
+        name=name,
+        geom_wkt=_POLY,
+        raw={"WDPA_PID": f"{source_id}.0", "ORIG_NAME": name, "DESIG_ENG": "National Park"},
+    )
+
+
+def test_national_park_anchor_is_first_candidate_with_a_bjd_code() -> None:
+    """해상 국립공원은 centroid가 바다라 빈 답이다 — 면 위 후보점에서 첫 법정동을 고른다.
+
+    후보 순회는 변환 **밖**(:func:`knps_national_park_anchors`)이다. 변환은 고른 점 하나만 묻고
+    그 점을 대표 좌표로 쓴다(주소·좌표 일치, ADR-116 재사용 pass 0이 행 좌표 밖을 묻지 않는다).
+    """
+    seen: list[Coordinate] = []
+
+    async def walking(coord: Coordinate) -> Address | None:
+        seen.append(coord)
+        if len(seen) < 3:  # centroid·전체 representative_point는 바다
+            return None
+        return Address(bjd_code="4482533000", sigungu_code="44825", sido_code="44")
+
+    records = [
+        _national_park_record("4735", "태안해안"),
+        _GRec("1", "가상 보호지역", _POLY, {"WDPAID": "1", "DESIG_ENG": "Provincial Park"}),
+    ]
+    anchors = asyncio.run(
+        knps_national_park_anchors(
+            records, dataset_key="knps_protected_areas", reverse_geocoder=walking
+        )
+    )
+    assert anchors == {"4735": seen[2]}
+    assert len(seen) == 3  # 보호지역 일반 행은 후보를 돌지 않는다
+
+    calls: list[Coordinate] = []
+
+    async def transform_geocoder(coord: Coordinate) -> Address | None:
+        calls.append(coord)
+        return Address(bjd_code="4482533000", sigungu_code="44825", sido_code="44")
+
+    feature = asyncio.run(
+        _geometry_async(
+            records[:1],
+            dataset_key="knps_protected_areas",
+            fetched_at=_FETCHED,
+            reverse_geocoder=transform_geocoder,
+            national_park_anchors=anchors,
+        )
+    )[0].feature
+    assert calls == [seen[2]]
+    assert feature.coord == seen[2]
+    assert feature.address.bjd_code == "4482533000"
+
+
+def test_anchors_are_only_for_protected_areas_and_skip_unanswered_parks() -> None:
+    async def never(_coord: Coordinate) -> Address | None:
+        return None
+
+    records = [_national_park_record("4736", "다도해해상")]
+    assert asyncio.run(
+        knps_national_park_anchors(records, dataset_key="knps_trails", reverse_geocoder=never)
+    ) == {}
+    assert asyncio.run(
+        knps_national_park_anchors(
+            records, dataset_key="knps_protected_areas", reverse_geocoder=never
+        )
+    ) == {}
+
+
+def test_national_park_without_anchor_keeps_centroid_and_one_call() -> None:
+    calls: list[Coordinate] = []
+
+    async def reverse(coord: Coordinate) -> Address | None:
+        calls.append(coord)
+        return Address(bjd_code="1130510400", sigungu_code="11305", sido_code="11")
+
+    feature = asyncio.run(
+        _geometry_async(
+            [_national_park_record("10932", "북한산")],
+            dataset_key="knps_protected_areas",
+            fetched_at=_FETCHED,
+            reverse_geocoder=reverse,
+        )
+    )[0].feature
+    assert len(calls) == 1
+    assert feature.coord is not None
+    assert float(feature.coord.lon) == pytest.approx(126.95)
+    assert float(feature.coord.lat) == pytest.approx(37.65)
+
+
+def test_protected_area_does_not_walk_anchor_candidates() -> None:
+    """일반 보호지역은 centroid 한 번만 묻는다 — 해상 보호구역 134건이 빈 답 가드를 넘지 않게."""
+    calls: list[Coordinate] = []
+
+    async def reverse(coord: Coordinate) -> Address | None:
+        calls.append(coord)
+        return None
+
+    rec = _GRec(
+        source_id="1",
+        name="가상 보호지역",
+        geom_wkt=_POLY,
+        raw={"WDPAID": "1", "DESIG_ENG": "Provincial Park", "MARINE": "0"},
+    )
+    asyncio.run(
+        _geometry_async(
+            [rec],
+            dataset_key="knps_protected_areas",
+            fetched_at=_FETCHED,
+            reverse_geocoder=reverse,
+        )
+    )
+    assert len(calls) == 1
+
+
+def test_self_intersecting_protected_area_is_repaired_before_storage() -> None:
+    """prod 한국보호지역 14건이 `Ring Self-intersection`이었다 — 저장 전에 valid로 고친다."""
+    from shapely import wkt as shapely_wkt
+
+    bowtie = "POLYGON((126.9 37.6, 127.0 37.7, 127.0 37.6, 126.9 37.7, 126.9 37.6))"
+    repaired = _geo_one(
+        "knps_protected_areas",
+        bowtie,
+        name="가상 보호지역",
+        raw={"WDPAID": "1", "DESIG_ENG": "Provincial Park", "MARINE": "0"},
+    )[0]
+    assert repaired.feature.geom is not None
+    geom = shapely_wkt.loads(repaired.feature.geom)
+    assert geom.is_valid
+    assert geom.geom_type == "MultiPolygon"
+    assert geom.area == pytest.approx(0.005)
 
 
 def test_protected_area_translates_raw_english_name() -> None:
@@ -418,14 +614,9 @@ def test_geometry_raw_payload_is_verbatim_not_normalized() -> None:
     assert trail.feature.name == "북한산 둘레길"  # normalized
     assert trail.source_record.raw_data == {"NO": "G-001"}
     # (b) 이름을 raw column에서 복구해도 원 mapping을 그대로 둔다.
-    park = _geo_one(
-        "knps_park_boundaries",
-        _POLY,
-        name="   ",
-        raw={"NPK_NM": "북한산", "NO": "PARK-9"},
-    )[0]
+    park = _national_park(name="   ")[0]
     assert park.feature.name == "북한산 국립공원"  # 합성된 normalized
-    assert park.source_record.raw_data["NPK_NM"] == "북한산"
+    assert park.source_record.raw_data["ORIG_NAME"] == "북한산"
 
 
 def test_hazard_zones_are_left_unloaded() -> None:
@@ -478,7 +669,6 @@ def test_protected_area_keeps_travel_designations_with_real_category(
 @pytest.mark.parametrize(
     "desig_eng",
     [
-        "National Park",  # 국립공원 경계 21건(knps_park_boundaries)과 중복
         "Wildlife Protection Area",
         "Water Source Protection Area",
         "Special Island",
@@ -512,8 +702,10 @@ def test_invalid_wkt_is_skipped() -> None:
 def test_wrong_geometry_type_is_skipped() -> None:
     # trails(route)에 polygon → 허용 type 위반 → skip.
     assert _geo_one("knps_trails", _POLY) == []
-    # park_boundaries(area)에 linestring → skip.
-    assert _geo_one("knps_park_boundaries", _LINE) == []
+    # protected_areas(area)에 linestring → skip.
+    assert _geo_one(
+        "knps_protected_areas", _LINE, raw={"WDPAID": "1", "DESIG_ENG": "Provincial Park"}
+    ) == []
 
 
 def test_out_of_korea_geometry_is_skipped() -> None:
@@ -732,15 +924,24 @@ def test_csv_preview_geometry_wkt_column() -> None:
 
 def test_csv_preview_geometry_column_map_override() -> None:
     cm = KnpsGeometryColumnMap(source_id=("ID",), name=("NM",), geom_wkt=("SHAPE",))
-    prev = _preview(
-        {
-            "ID": "p1",
-            "NM": "북한산",
-            "SHAPE": "POLYGON((126.9 37.6,127 37.6,127 37.7,126.9 37.7,126.9 37.6))",
-        }
+    row: dict[str, str | None] = {
+        "ID": "p1",
+        "NM": "북한산",
+        "SHAPE": "POLYGON((126.9 37.6,127 37.6,127 37.7,126.9 37.7,126.9 37.6))",
+    }
+    prev = _preview(row)
+    # 공원경계(3 km 버퍼)는 싣지 않는다 — column_map이 맞아도 빈 결과다.
+    assert (
+        knps_csv_preview_to_geometry_bundles(
+            prev, dataset_key="knps_park_boundaries", fetched_at=_FETCHED, column_map=cm
+        )
+        == []
     )
     b = knps_csv_preview_to_geometry_bundles(
-        prev, dataset_key="knps_park_boundaries", fetched_at=_FETCHED, column_map=cm
+        _preview({**row, "DESIG_ENG": "National Park"}),
+        dataset_key="knps_protected_areas",
+        fetched_at=_FETCHED,
+        column_map=cm,
     )[0]
     assert b.feature.kind is FeatureKind.AREA
     assert b.feature.category == "01020101"

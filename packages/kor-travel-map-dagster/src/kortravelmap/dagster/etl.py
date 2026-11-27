@@ -387,6 +387,8 @@ async def load_feature_bundles_for_dagster(
         )
 
     dropped_feature_count = 0
+    # drop은 "원천에 없다"가 아니라 "이번엔 싣지 못했다"다 — snapshot 부재 은퇴에서 뺀다.
+    dropped_source_entity_ids: frozenset[str] = frozenset()
     dropped_feature_ids: tuple[str, ...] = ()
     dropped_feature_id_set: frozenset[str] = frozenset()
     dropped_feature_ids_truncated = False
@@ -405,6 +407,9 @@ async def load_feature_bundles_for_dagster(
             if bundle.feature.feature_id not in error_feature_ids
         ]
         dropped_feature_count = len(dropped)
+        dropped_source_entity_ids = frozenset(
+            bundle.source_record.source_entity_id for bundle in dropped
+        )
         dropped_feature_id_set = frozenset(
             bundle.feature.feature_id for bundle in dropped
         )
@@ -462,6 +467,7 @@ async def load_feature_bundles_for_dagster(
                 dataset_key=dataset_key,
                 source_entity_type=source_entity_type,
                 retire_absent_from_snapshot=True,
+                retained_source_entity_ids=dropped_source_entity_ids,
                 geo=geo_load,
             )
         else:
