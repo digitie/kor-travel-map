@@ -1297,8 +1297,8 @@ VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
 VISITKOREA_FESTIVAL_DETAIL_BUDGET: Final = 300
 
 #: 축제의 법정동 미해석 허용 상한 — 축제는 900건 안팎이고 원천 좌표가 모두 육지 행사장이라
-#: 관광지(30)보다 좁게 둔다. 버린 행은 은퇴하므로 geo 장애가 한 run에 축제 수십 건을
-#: 지우지 않게 한다.
+#: 관광지(30)보다 좁게 둔다. 버린 행은 은퇴하지 않지만(snapshot 부재 은퇴에서 빠진다) 갱신도 못
+#: 받으므로, geo 장애가 한 run에 축제 수십 건을 낡은 채로 두지 않게 한다.
 VISITKOREA_FESTIVAL_UNRESOLVED_FLOOR: Final = 5
 
 #: 역지오코딩이 법정동을 못 낸 행의 허용 상한 — ``max(이 수, 전체의 1%)``. 해상 등대·무인도처럼
@@ -1730,7 +1730,8 @@ async def run_feature_event_visitkorea_festivals(
         record_sync_state=not replay,
         geo_applied=GeoApplied(reverse=True, geocode=False),
         # 역지오코딩이 법정동을 못 내는 행 하나가 run 전체를 되감지 않게 그 행만 버린다(관광지와
-        # 같은 선택). 버린 행은 은퇴하므로 그 수는 위 `_ensure_geo_resolved_enough`가 묶는다.
+        # 같은 선택). 버린 행은 은퇴하지 않고 이번 갱신만 빠진다 — 그 수는 위
+        # `_ensure_geo_resolved_enough`가 묶는다.
         address_failure_mode="drop",
     )
 
