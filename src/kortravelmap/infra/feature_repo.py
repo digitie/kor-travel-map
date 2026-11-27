@@ -7298,7 +7298,8 @@ CONTAINING_AREAS_MAX_LIMIT: Final[int] = 50
 #: 타도록 ``public_ready``·``&&``를 명시한다 — 조립 projection의 ``geom``은 인덱스가 없는 산출
 #: 컬럼이다(:func:`bbox_hit_predicate_sql` docstring). 입력 점은 4326 그대로이고 술어에
 #: ``ST_Transform``이 없다(ADR-012). ``public_features`` 조인이 3축 공개 membership의 최종 fence다.
-#: 정렬은 작은 면 먼저(가장 구체적인 구역) — 면적은 이미 걸러진 몇 행에서만 계산한다.
+#: 정렬은 작은 면 먼저(가장 구체적인 구역) — 적재 때 저장한 ``area_square_meters``를 쓰고, 없는
+#: 행만 이미 걸러진 몇 행에서 측지 면적을 계산한다.
 _AREAS_CONTAINING_POINT_SQL: Final[str] = """
 WITH probe AS (
     SELECT x_extension.ST_SetSRID(
@@ -7317,7 +7318,12 @@ SELECT
     a.boundary_source,
     f.marker_icon,
     f.marker_color,
-    x_extension.ST_Area(CAST(a.geom AS x_extension.geography)) AS area_square_meters
+    CAST(
+        COALESCE(
+            a.area_square_meters,
+            x_extension.ST_Area(CAST(a.geom AS x_extension.geography))
+        ) AS double precision
+    ) AS area_square_meters
 FROM probe
 JOIN feature.feature_areas AS a
   ON a.public_ready

@@ -1217,7 +1217,7 @@ def test_feature_containing_areas_uses_feature_coord_and_excludes_self(
 
 
 @pytest.mark.unit
-def test_feature_containing_areas_rejects_feature_without_coord(
+def test_feature_containing_areas_returns_empty_for_feature_without_coord(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from kortravelmap.api.routers import features as features_mod
@@ -1233,8 +1233,12 @@ def test_feature_containing_areas_rejects_feature_without_coord(
     _override_sessions(client)
     try:
         r = client.get("/v1/features/n1/containing-areas")
-        assert r.status_code == 422
-        assert "대표 좌표" in r.json()["detail"]
+        # 좌표 없는 feature는 입력 오류가 아니다 — "덮는 구역 없음"(lon/lat null).
+        assert r.status_code == 200, r.text
+        data = r.json()["data"]
+        assert data["items"] == []
+        assert data["lon"] is None
+        assert data["lat"] is None
     finally:
         client.app.dependency_overrides.clear()
 

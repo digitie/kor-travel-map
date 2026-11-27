@@ -1700,7 +1700,11 @@ export interface paths {
         };
         /**
          * feature 대표점을 덮는 공개 area 목록 (이 장소는 어느 국립공원·보호지역 안인가)
-         * @description feature의 대표점(``coord`` — 선·면은 그 대표점)을 덮는 area. area feature 자신은 뺀다.
+         * @description feature의 대표점(``coord``) **한 점**을 덮는 area. area feature 자신은 뺀다.
+         *
+         *     점 feature(place·event…)용이다. route·area의 대표점은 기하 무게중심(국립공원은 면 위 anchor)이라
+         *     선·면 전체의 포함 관계가 아니다 — 공원을 두르는 둘레길의 무게중심은 공원 안에 떨어질 수 있다.
+         *     대표 좌표가 없는 feature는 200 + 빈 ``items``(``lon``/``lat`` null)다 — 입력 오류가 아니다.
          */
         get: operations["get_feature_containing_areas_v1_features__feature_id__containing_areas_get"];
         put?: never;
@@ -7125,7 +7129,7 @@ export interface components {
         ContainingAreaSummary: {
             /**
              * Area Kind
-             * @description area 종류(`AreaKind`). `national_park`(국립공원)·`protected_area`(보호지역)·`hazard_zone`(위험지역 — 소비자는 경고 표시) 등.
+             * @description area 종류(`AreaKind`). `national_park`(국립공원)·`protected_area`(보호지역)·`hazard_zone`(위험지역 — 소비자는 경고 표시) 등. **열린 집합** — 모르는 값은 일반 area로 다룬다.
              */
             area_kind: string;
             /**
@@ -7168,14 +7172,14 @@ export interface components {
             items: components["schemas"]["ContainingAreaSummary"][];
             /**
              * Lat
-             * @description 조회한 점의 위도(WGS84).
+             * @description 조회한 점의 위도(WGS84). lon과 함께 null.
              */
-            lat: number;
+            lat: number | null;
             /**
              * Lon
-             * @description 조회한 점의 경도(WGS84).
+             * @description 조회한 점의 경도(WGS84). feature 기준 조회에서 대표 좌표가 없으면 null(items는 빈 목록).
              */
-            lon: number;
+            lon: number | null;
         };
         /**
          * ContainingAreasResponse
@@ -21976,7 +21980,7 @@ export interface operations {
                     "application/problem+json": components["schemas"]["ProblemDetail"];
                 };
             };
-            /** @description 대표 좌표 없는 feature, area_kind·page_size 오류 */
+            /** @description area_kind·page_size 오류 */
             422: {
                 headers: {
                     [name: string]: unknown;

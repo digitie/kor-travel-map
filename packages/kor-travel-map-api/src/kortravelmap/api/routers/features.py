@@ -723,7 +723,8 @@ class ContainingAreaSummary(_PublicDisplayName):
     area_kind: str = Field(
         description=(
             "area 종류(`AreaKind`). `national_park`(국립공원)·`protected_area`(보호지역)·"
-            "`hazard_zone`(위험지역 — 소비자는 경고 표시) 등."
+            "`hazard_zone`(위험지역 — 소비자는 경고 표시) 등. **열린 집합** — 모르는 값은 일반 "
+            "area로 다룬다."
         ),
     )
     boundary_source: str | None = None
@@ -737,8 +738,13 @@ class ContainingAreasData(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    lon: float = Field(description="조회한 점의 경도(WGS84).")
-    lat: float = Field(description="조회한 점의 위도(WGS84).")
+    lon: float | None = Field(
+        description=(
+            "조회한 점의 경도(WGS84). feature 기준 조회에서 대표 좌표가 없으면 null"
+            "(items는 빈 목록)."
+        ),
+    )
+    lat: float | None = Field(description="조회한 점의 위도(WGS84). lon과 함께 null.")
     feature_id: str | None = Field(
         default=None,
         description="feature 기준 조회일 때 그 feature(UUID 정본). 점 조회면 null.",
@@ -1765,7 +1771,7 @@ async def get_area_contained_features(
     summary="feature 대표점을 덮는 공개 area 목록 (이 장소는 어느 국립공원·보호지역 안인가)",
     responses={
         404: {"description": "공개 feature 없음"},
-        422: {"description": "대표 좌표 없는 feature, area_kind·page_size 오류"},
+        422: {"description": "area_kind·page_size 오류"},
     },
 )
 async def get_feature_containing_areas(
@@ -1775,16 +1781,23 @@ async def get_feature_containing_areas(
     area_kind: _AreaKindQuery = None,
     page_size: _ContainingLimitQuery = 20,
 ) -> ContainingAreasResponse:
-    """feature의 대표점(``coord`` — 선·면은 그 대표점)을 덮는 area. area feature 자신은 뺀다."""
+    """feature의 대표점(``coord``) **한 점**을 덮는 area. area feature 자신은 뺀다.
+
+    점 feature(place·event…)용이다. route·area의 대표점은 기하 무게중심(국립공원은 면 위 anchor)이라
+    선·면 전체의 포함 관계가 아니다 — 공원을 두르는 둘레길의 무게중심은 공원 안에 떨어질 수 있다.
+    대표 좌표가 없는 feature는 200 + 빈 ``items``(``lon``/``lat`` null)다 — 입력 오류가 아니다.
+    """
     started_at = perf_counter()
     identity = await resolve_feature_ref_or_error(session, feature_id)
     canonical_id = identity.feature_id
     row = await _public_feature_row_or_404(session, canonical_id, display_ref=feature_id)
     lon, lat = row.get("lon"), row.get("lat")
     if lon is None or lat is None:
-        raise HTTPException(
-            status_code=422,
-            detail=f"대표 좌표가 없는 feature입니다: {feature_id!r}",
+        return ContainingAreasResponse(
+            data=ContainingAreasData(
+                lon=None, lat=None, feature_id=identity.feature_uuid, items=[]
+            ),
+            meta=make_meta(request, started_at=started_at, page_size=page_size),
         )
     rows = await feature_repo.areas_containing_point(
         session,
