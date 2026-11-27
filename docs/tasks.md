@@ -254,3 +254,8 @@ T-MAP-02는 설계 §13의 MGR → (TRN/WEA/GEO) → MAP 사슬과 달리 코드
 
   원천 거리 0.4~12 km 구간이 공원 전체를 훑는 단일 선(9~383 km)이다. 원천 CSV 결함인지 `python-knps-api` 파싱 결함인지
   가린다. ADR-128 가드가 코스 선에서 빼고 있다.
+
+- [ ] T-WRITER-DRAIN-RESTORE — **writer-drain restore가 멈춘 sensor를 원래 상태로 되돌리지 않고 다시 start한다**
+
+  `writer_drain_service.py` `_restore_instigations`는 pause 전 RUNNING 항목을 `startSensor`/`startSchedule`로 켤 뿐 이전
+  상태(코드 기본 RUNNING이면 `reset*`)·cursor를 복원하지 않는다. 소유자 결정(2026-11-27)으로 백로그에만 둔다. 해제 조건은 acceptance.

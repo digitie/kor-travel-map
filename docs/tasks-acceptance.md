@@ -49,6 +49,8 @@
 > | `T-CI-DOCKERFILE-BUILD` (완료) | [archive/tasks-acceptance-t-ci-dockerfile-build.md](archive/tasks-acceptance-t-ci-dockerfile-build.md) | 약 5 KB |
 > | `T-VN-M05-RELITIGATION` (완료) | [archive/tasks-acceptance-t-vn-m05-relitigation.md](archive/tasks-acceptance-t-vn-m05-relitigation.md) | 약 5 KB |
 > | `T-VN-M05-ONESHOT-CONSUME` (완료) | [archive/tasks-acceptance-t-vn-m05-oneshot-consume.md](archive/tasks-acceptance-t-vn-m05-oneshot-consume.md) | 약 4 KB |
+> | `T-VN-39-D2-FIXTURE` (완료) | [archive/tasks-acceptance-39-d2-fixture.md](archive/tasks-acceptance-39-d2-fixture.md) | 약 4 KB |
+> | `T-GR-00` (완료) | [archive/tasks-acceptance-gr-00.md](archive/tasks-acceptance-gr-00.md) | 약 3 KB |
 
 ## T-CWRITE-01 — 현재 writer·trigger·성능 기준선
 
@@ -1632,60 +1634,7 @@ clone lane(`run-admin-feature-clone-live-acceptance.sh`)이며, 그 lane은
 
 ## T-VN-39-D2-FIXTURE
 
-```markdown
-- [x] T-VN-39-D2-FIXTURE — **D2 fixture의 소유 핸들을 재키 뒤 앵커로 옮긴다** (2026-09-11 완료)
-```
-
-**무엇이 참이면 닫히는가.**
-
-1. `scripts/admin_feature_live_fixture.py`의 provider fixture가 자기 Feature를
-   **정본 uuid**로 들고 다닌다 — `CAST(:feature_ids AS uuid[])` 바인드 10곳에
-   legacy 주소가 들어가지 않는다.
-2. D2 lane이 seed → 감사 → cleanup을 완주하고 `RESULT.json`이 남는다.
-3. 잔여물 0이 실측으로 확인된다(`/root/adjudicate.sh`의 네 counter).
-
-**무엇이 깨졌나 — 2026-09-11 실측.**
-
-D2 direct seed가 이렇게 죽는다:
-
-    asyncpg.exceptions.DataError: invalid input for query argument $1:
-    ['f_global_w_47c05e70793daee8', ...] (invalid UUID: length must be
-    between 32..36 characters, got 27)
-
-    SELECT (SELECT count(*) FROM feature.features
-            WHERE feature_id = ANY(CAST($1 AS uuid[]))) AS features, ...
-
-**질의는 uuid 축으로 옮겼는데 값의 출처는 안 옮겼다.** 이것이 T-VN-39가 고치려던
-바로 그 부류이고, 하네스 자신이 그 부류로 남아 있었다.
-
-**왜 alias로 우회할 수 없나.** 이 seed는 core 프로시저를 직접 부른다. ADR-098 결정
-6과 309(`trg_features_legacy_alias` 영구 제거)에 따라 **alias가 생기지 않고 그것이
-정상이다** — 하네스 주석이 스스로 그렇게 적고 있다. 그래서
-`make_feature_id(...)`가 만든 `f_global_*` 주소는 재키 뒤 **DB 키가 전혀 아니다.**
-
-**왜 재계산도 안 되나.** `candidate_feature_uuid()`는 비파생 랜덤 UUIDv7이다
-(0083). run_id에서 유도할 수 없다. 이 파일은 같은 문제를 API-owned 경로에서 이미
-한 번 풀었고, 그 답이 "재계산이 아니라 **재현**"이었다 — 소유권 키로 **조회**한다.
-
-**그래서 해는 T-VN-39가 만든 앵커다.** provider 경로의 Feature identity는
-`provider_sync.provider_feature_identities`의
-`(provider_dataset_id, feature_kind, natural_key)` claim이 소유한다(ADR-098). 이
-fixture의 natural key는 `{run_id}:{kind}`이고 dataset은 `_ensure_dataset`가 run별로
-만든다. 즉 소유 uuid는 그 claim 한 번의 조회로 **재현**된다 — seed 전에는 행이
-없으므로 빈 집합이 되어 "이미 존재하는가" 사전 검사도 그대로 성립한다.
-
-**범위.** `_feature_ids(run_id)`의 소비자 전부(바인드 10곳)와 seed payload의
-`feature_id` 슬롯. payload는 admin 경로처럼 후보 uuid를 실어야 한다.
-
-**주의 — prod에 쓴다.** 이 lane은 prod feature DB에 seed하고 지운다. 고친 뒤
-첫 실행은 잔여물 counter 넷을 전후로 재고 증거를 남긴다.
-
-**2026-09-11 — 자매 lane에도 같은 부류가 남아 있다(이 절의 것이 아니다).**
-적대 리뷰가 `scripts/admin_feature_clone_live_state.py`에서 둘을 더 짚었다:
-`_API_OWNED_AUDIT_FOREIGN_KEY_REFERENCES = 8`(같은 alias 한 행을 더 센다)과,
-evidence 키 집합을 `feature_ids` 없이 **정확히** 요구하는 검사(그 키는 #1176부터
-나오고 있다). clone lane은 D2와 다른 소비자이므로 여기서 고치지 않는다 — 그 lane을
-다시 돌릴 때 함께 본다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-39-d2-fixture.md](archive/tasks-acceptance-39-d2-fixture.md)로 옮겼다(2026-11-28, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-VN-39-ECHO
 
@@ -2153,32 +2102,7 @@ cron은 그 값을 명시하지만, **root로 실행한 `ktdctl db-backup list`�
 
 ## T-GR-00
 
-2026-10-13 geo 릴리스 재지오코딩 설계(ADR-109, 당시 proposed)에서 열었다. 접두사 `T-GR-`는 임시다(ADR-109
-열린 결정 7; 소유자가 다른 접두사를 고르면 `T-GR-00`~`08`을 일괄 재번호하되 journal·acceptance 참조도 함께).
-PR 묶음: PR-0 = 이 doc-only PR(T-GR-00·ADR-109·문서) → PR-1(T-GR-01+02+03, 407) → PR-2(T-GR-04+05+08,
-408+API+센서+replay) → [PinVi 재vendor] → PR-3(T-GR-06) → PR-4(T-GR-07, doc-only). 리모트 브랜치에 자주 푸시,
-PR은 머지 직전.
-
-- 분리 실행(2026-10-13, 이 브랜치): `scripts/archive_task_ledger_section.py --apply`로 닫힌 절 7개
-  (`T-VN-41F1D-D1`·`T-VN-41F1D-E`·`T-VN-M01`·`T-VN-M04`·`T-VN-39`·`T-VN-DAGSTER-STORAGE`·
-  `T-VN-QUOTA-ARITHMETIC`, 파일 순서로 가장 오래된 movable 절부터)를 `docs/archive/tasks-acceptance-*.md`로
-  옮겼다 — 216,950 → 166,931 bytes, 매 이동마다 도구의 다중집합 검산 통과. 거절된 절(`T-VN-41F1D-D2`·
-  `T-VN-D2-API-AUDIT`·`T-VN-H34`: 상대 링크, `T-VN-M03`: 349 B라 stub 비용이 더 큼)은 두었다.
-- 해제 조건: 이 PR에서 `tests/unit/test_docs_archive_links.py`(아카이브 링크·225,280 B 상한)와
-  `tests/lint/test_task_ledger_conventions.py`·`scripts/check_task_ledger_deletions.py`가 초록이고 머지된다.
-  T-GR 절 9개를 더한 이 PR 최종 크기는 §T-GR-00 아래 "실측" 줄(ADR-109 설계 수용 기준 ≤ 200,000 B).
-  `[x]` 전환·`tasks-done.md` 이관은 머지가 조건이라 이 PR 안에서 할 수 없다 — T-GR-00-LEDGER의 doc-only PR에 함께 싣는다.
-- 잔여 바이트 실측(2026-10-13, 이 브랜치): `tasks-acceptance.md`는 2차 리뷰 반영 뒤 §T-GR-00 아래 "최종 실측" 줄;
-  `journal.md`·`tasks-done.md`의 분리는 독립 task **T-GR-00-LEDGER**(이 PR 범위 아님)다.
-- 최종 실측(2차 리뷰 반영 뒤): 커밋 직전 `stat`으로 잰 값을 journal 2026-10-13 항목에 적는다 — 이 절은
-  append-only가 아니므로 PR-1에서 수치를 갱신해도 된다.
-- 열린 결정(ADR-109)이 미결이면 각 절은 ADR의 권장안을 기준으로 한다. 결정별 영향 조문: 3 → T-GR-05
-  `default_status`; 4 → T-GR-08 적용 범위; 5·9 → T-GR-04 `complete_plan`(sweep·링크 재동기화 범위)과 T-GR-05 완료
-  전이; 6 → T-GR-05 timeout 재시도 옵션(T-GR-01에서 뺐다 — T-GR-01은 결정 비의존); 7 → 전 절 ID 재번호; 10 →
-  T-GR-03 override finding; 11 → T-GR-05 기동 방식; 12 → T-GR-03 concierge 해시; 13 → 이 묶음 밖 백로그.
-- T-GR-07 범위 메모: 설계 §11 T-GR-07의 문서 항목 중 ADR-109·README·integration-map·`address-geocoding.md`·etl
-  3문서·ADR-108 각주·원장은 PR-0(이 PR)가 선반영했고, T-GR-07에는 구현 뒤 남는 것(accepted 전환·runbook·CHANGELOG·
-  "계획" 표식 제거)만 둔다.
+닫힌 절이다. 해제 조건 원문은 [archive/tasks-acceptance-gr-00.md](archive/tasks-acceptance-gr-00.md)로 옮겼다(2026-11-28, 규약 §8 — 원장이 220 KiB 상한에 닿았다).
 
 ## T-MAP-01
 
@@ -2841,3 +2765,17 @@ ADR-128 운영 반영:
 ## T-KNPS-TRAIL-GEOM
 
 - [ ] 결함 8구간 원인(원천/파서) 판정, 파서면 핀 갱신·재적재로 8코스 생성.
+
+## T-WRITER-DRAIN-RESTORE
+
+소유자 결정 2026-11-27: 백로그에만 두고 지금은 고치지 않는다(관련 PR #1558, journal 2026-11-25·11-27).
+`packages/kor-travel-map-api/src/kortravelmap/api/writer_drain_service.py` `_restore_instigations`는 pause 때
+RUNNING이던(`was_running`) instigator를 `startSensor`/`startSchedule`로 켠다. 저장 상태 없이 코드 기본 RUNNING
+(`DECLARED_IN_CODE`)이던 것은 restore 뒤 저장된 RUNNING 행이 남아 코드 기본값 변경을 따르지 않고, sensor cursor
+복원도 보장하지 않는다(freeze 도구 `scripts/n150/dagster-freeze.py`는 이 경우 `reset*`을 쓴다).
+
+- [ ] 조회·스냅샷·digest에 instigator별 `defaultStatus`·`canReset`(sensor는 cursor)을 넣고, restore가 저장 상태가
+  없던 항목은 `resetSensor`/`resetSchedule`, 그 밖은 `start*`로 되돌린다(migration·receipt 계약
+  `ktm-cache-target-writer-drain/v1` 개정 포함).
+- [ ] restore 뒤 instigator마다 상태·저장 행 유무·sensor cursor가 pause 전과 같음을 시험이 보인다(코드 기본
+  RUNNING·명시 RUNNING 두 경우).
