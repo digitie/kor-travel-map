@@ -127,8 +127,13 @@ def _admin_feature_sort_arguments(module: Any, _builder: Any) -> list[dict[str, 
     문장을 만든다.
     """
     return [
-        {"sort": sort, "order": order, "search_scope": scope, "q_path": path}
-        for sort in sorted(module._ADMIN_FEATURE_SORT_COLUMNS)
+        {
+            "sort": sort,
+            "order": order,
+            "search_scope": scope,
+            "q_path": path,
+        }
+        for sort in sorted(module._ADMIN_FEATURE_SORT_KEYS)
         for order in ("asc", "desc")
         for scope in get_args(module.AdminFeatureSearchScope)
         for path in get_args(module.AdminFeatureQueryPath)
@@ -348,7 +353,9 @@ def _builder_results(builder: Any, key: str, module: Any) -> list[tuple[str, str
         if factory is None:
             return []
         supplied = list(factory(module, builder))
-    if len(switches) > 3:  # 조합 폭발 방지 — 이 저장소에는 없다.
+    # 조합 폭발 방지. 가장 많은 것은 ``_admin_features_sql``의 넷(exact_id·exact_uuid와 키 단계
+    # LATERAL을 고르는 provider_filter·issue_filter)이다 — 16조합 × 정렬·범위·경로.
+    if len(switches) > 4:
         return []
     results: list[tuple[str, str]] = []
     for base in supplied:
