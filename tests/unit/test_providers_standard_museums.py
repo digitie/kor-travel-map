@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Iterable
-from dataclasses import dataclass, field
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, field, replace
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import pytest
@@ -45,6 +45,19 @@ class _Museum:
     oper_phone_number: str | None
     homepage_url: str | None
     instt_code: str | None
+    fclty_info: str | None = None
+    weekday_oper_open_hhmm: str | None = None
+    weekday_oper_colse_hhmm: str | None = None
+    holiday_oper_open_hhmm: str | None = None
+    holiday_close_open_hhmm: str | None = None
+    rstde_info: str | None = None
+    adult_chrge: int | None = None
+    yngbgs_chrge: int | None = None
+    child_chrge: int | None = None
+    etc_chrge_info: str | None = None
+    fclty_intrcn: str | None = None
+    trnsport_info: str | None = None
+    reference_date: date | None = None
     raw: Any = field(default_factory=dict)
 
 
@@ -158,3 +171,90 @@ def test_reverse_geocoder_fills_bjd_code() -> None:
     bundle = museums_to_bundles([_MUSEUM], fetched_at=_now(), reverse_geocoder=_rg)[0]
     assert bundle.feature.address.bjd_code == "1117010200"
     assert bundle.feature.feature_id.startswith("f_1117010200_p_")
+
+
+@pytest.mark.unit
+def test_museum_visitor_info_keeps_hours_fees_and_intro() -> None:
+    """관람시간·휴관·요금·소개·교통을 버리지 않는다(ADR-126)."""
+    item = replace(
+        _MUSEUM,
+        weekday_oper_open_hhmm="10:00",
+        weekday_oper_colse_hhmm="1800",
+        holiday_oper_open_hhmm="10:00",
+        holiday_close_open_hhmm="25:00",  # 형식 밖 → 공휴일 줄은 만들지 않는다
+        rstde_info="1월 1일, 설날·추석 당일",
+        adult_chrge=2000,
+        yngbgs_chrge=1000,
+        child_chrge=0,
+        etc_chrge_info="특별전 별도",
+        fclty_intrcn="<p>한국 최대의 박물관</p>",
+        trnsport_info="4호선 이촌역",
+        fclty_info="-",  # 자리표시는 버린다
+        reference_date=date(2026, 3, 1),
+    )
+    bundle = museums_to_bundles([item], fetched_at=_now())[0]
+    info = bundle.feature.detail.facility_info["visitor_info"]  # type: ignore[union-attr]
+    assert info == {
+        "source": "datagokr_museum",
+        "attribution": "공공데이터포털 전국박물관미술관정보표준데이터",
+        "reference_date": "2026-03-01",
+        "description": "한국 최대의 박물관",
+        "usage_hours": "평일 10:00~18:00",
+        "rest_days": "1월 1일, 설날·추석 당일",
+        "fee_text": "특별전 별도",
+        "fees": [
+            {"audience": "adult", "amount_krw": 2000},
+            {"audience": "youth", "amount_krw": 1000},
+            {"audience": "child", "amount_krw": 0},
+        ],
+        "transport": "4호선 이촌역",
+    }
+    raw = bundle.source_record.raw_data
+    assert raw["reference_date"] == "2026-03-01"
+    assert raw["fclty_intrcn"] == "<p>한국 최대의 박물관</p>"
+
+
+@pytest.mark.unit
+def test_museum_without_visitor_fields_has_no_visitor_info_and_old_raw_shape() -> None:
+    bundle = museums_to_bundles([_MUSEUM], fetched_at=_now())[0]
+    assert "visitor_info" not in bundle.feature.detail.facility_info  # type: ignore[union-attr]
+    # 값 없는 새 키는 raw에 없다 — 이 기능 전에 저장된 원본을 replay해도 같은 hash다.
+    assert set(bundle.source_record.raw_data) == {
+        "fclty_nm",
+        "fclty_type",
+        "rdnmadr",
+        "lnmadr",
+        "latitude",
+        "longitude",
+        "oper_phone_number",
+        "homepage_url",
+        "instt_code",
+    }
+
+
+def _visitor_info(item: _Museum) -> Any:
+    detail = museums_to_bundles([item], fetched_at=_now())[0].feature.detail
+    return detail.facility_info["visitor_info"]  # type: ignore[union-attr]
+
+
+@pytest.mark.unit
+def test_museum_zero_fees_with_fee_text_are_not_shown_as_free() -> None:
+    item = replace(
+        _MUSEUM, adult_chrge=0, yngbgs_chrge=0, child_chrge=0, etc_chrge_info="성인 3,000원"
+    )
+    info = _visitor_info(item)
+    assert "fees" not in info
+    assert info["fee_text"] == "성인 3,000원"
+
+
+@pytest.mark.unit
+def test_museum_placeholder_hours_are_dropped() -> None:
+    item = replace(
+        _MUSEUM,
+        weekday_oper_open_hhmm="00:00",
+        weekday_oper_colse_hhmm="00:00",
+        holiday_oper_open_hhmm="09:00",
+        holiday_close_open_hhmm="24:00",
+    )
+    info = _visitor_info(item)
+    assert info["usage_hours"] == "공휴일 09:00~24:00"

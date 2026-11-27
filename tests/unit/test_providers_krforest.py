@@ -65,6 +65,11 @@ class _Forest:
     latitude: float | None
     longitude: float | None
     institution_code: str | None
+    capacity: str | None = None
+    entrance_fee: str | None = None
+    accommodation_available: str | None = None
+    main_facilities: str | None = None
+    reference_date: str | None = None
     raw: Any = field(default_factory=dict)
 
 
@@ -569,3 +574,35 @@ def test_arming_does_not_add_findings_for_records_without_claim() -> None:
     assert not [code for code in codes if code.startswith("admin_code_stale_")]
     assert bundle.admin_evidence is not None
     assert bundle.admin_evidence.grade == "obs_only"
+
+
+@pytest.mark.unit
+def test_recreation_forest_visitor_info_keeps_fee_and_facilities() -> None:
+    """입장료·주요시설·수용인원·숙박을 버리지 않는다(ADR-126)."""
+    item = replace(
+        _FOREST_1,
+        entrance_fee="어른 1,000원<br>청소년 600원",
+        main_facilities="숲속의집, 산책로",
+        capacity="2000",
+        accommodation_available="Y",
+        reference_date="2026-05-31",
+    )
+    bundle = recreation_forests_to_bundles([item], fetched_at=_now())[0]
+    info = bundle.feature.detail.facility_info["visitor_info"]  # type: ignore[union-attr]
+    assert info == {
+        "source": "krforest_recreation_forest",
+        "attribution": "공공데이터포털 전국휴양림표준데이터",
+        "reference_date": "2026-05-31",
+        "fee_text": "어른 1,000원\n청소년 600원",
+        "facilities": "숲속의집, 산책로",
+        "capacity": "2000",
+        "accommodation_available": True,
+    }
+    # replay가 되살릴 수 있게 원천 필드 이름 그대로 raw_data에 남는다.
+    assert bundle.source_record.raw_data["entrance_fee"] == "어른 1,000원<br>청소년 600원"
+
+
+@pytest.mark.unit
+def test_recreation_forest_without_visitor_fields_has_no_visitor_info() -> None:
+    bundle = recreation_forests_to_bundles([_FOREST_1], fetched_at=_now())[0]
+    assert "visitor_info" not in bundle.feature.detail.facility_info  # type: ignore[union-attr]

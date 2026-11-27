@@ -40,6 +40,7 @@ bjd_code에 의존하므로(ADR-009) 변환 함수는 **async**이고 feature_id
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from datetime import date, datetime
 from decimal import Decimal
@@ -63,13 +64,17 @@ from kortravelmap.core.ids import (
     make_source_record_key,
 )
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.visitor_text import DESCRIPTION_MAX, clean_text
 from kortravelmap.dto import (
+    VISITOR_INFO_KEY,
     Address,
     Coordinate,
     Feature,
     FeatureBundle,
     FeatureKind,
     PlaceDetail,
+    PlaceFee,
+    PlaceVisitorInfo,
     SourceLink,
     SourceRecord,
     SourceRole,
@@ -197,8 +202,119 @@ class PublicMuseumArtItem(Protocol):
     instt_code: str | None
     """제공기관코드 — 안정 식별자(``source_entity_id``). 없으면 name::road 파생."""
 
+    # -- 방문 안내(ADR-126 — ``facility_info.visitor_info``) --
+    fclty_info: str | None
+    """시설 정보(편의시설 등) 원문."""
+    weekday_oper_open_hhmm: str | None
+    weekday_oper_colse_hhmm: str | None
+    """평일 운영 종료 시각(원천 철자 ``colse`` 그대로)."""
+    holiday_oper_open_hhmm: str | None
+    holiday_close_open_hhmm: str | None
+    """공휴일 운영 종료 시각(원천 이름 그대로)."""
+    rstde_info: str | None
+    """휴관 정보 원문."""
+    adult_chrge: int | None
+    yngbgs_chrge: int | None
+    child_chrge: int | None
+    etc_chrge_info: str | None
+    fclty_intrcn: str | None
+    """시설 소개 원문."""
+    trnsport_info: str | None
+    """교통 안내 원문."""
+    reference_date: date | None
+
     raw: Any
     """provider 원천 dict."""
+
+
+#: ADR-126 때 raw에 더한 키 — 값이 없으면 raw에서 뺀다(옛 원본 replay hash 유지).
+_MUSEUM_VISITOR_RAW_KEYS: Final[tuple[str, ...]] = (
+    "fclty_info",
+    "weekday_oper_open_hhmm",
+    "weekday_oper_colse_hhmm",
+    "holiday_oper_open_hhmm",
+    "holiday_close_open_hhmm",
+    "rstde_info",
+    "adult_chrge",
+    "yngbgs_chrge",
+    "child_chrge",
+    "etc_chrge_info",
+    "fclty_intrcn",
+    "trnsport_info",
+    "reference_date",
+)
+_MUSEUM_ATTRIBUTION: Final[str] = "공공데이터포털 전국박물관미술관정보표준데이터"
+_HHMM_RE: Final = re.compile(r"^([01]?\d|2[0-3]):?([0-5]\d)$|^(24):?(00)$")
+
+
+def _hhmm(value: str | None) -> str | None:
+    """``0900``/``09:00``/``9:00`` → ``09:00``(형식이 다르면 ``None`` — 지어내지 않는다)."""
+    match = _HHMM_RE.match((value or "").strip())
+    if match is None:
+        return None
+    hour, minute = (match.group(1), match.group(2)) if match.group(1) else ("24", "00")
+    return f"{int(hour):02d}:{minute}"
+
+
+def _hours_range(label: str, start: str | None, end: str | None) -> str | None:
+    opened, closed = _hhmm(start), _hhmm(end)
+    if opened is None or closed is None or opened == closed:
+        return None  # "00:00~00:00" 같은 자리표시는 시각이 아니다
+    return f"{label} {opened}~{closed}"
+
+
+def _museum_visitor_info(
+    *,
+    reference_date: date | None,
+    intro: str | None,
+    weekday_open: str | None,
+    weekday_close: str | None,
+    holiday_open: str | None,
+    holiday_close: str | None,
+    rest_days: str | None,
+    adult_fee: int | None,
+    youth_fee: int | None,
+    child_fee: int | None,
+    fee_text: str | None,
+    transport: str | None,
+    facilities: str | None,
+) -> PlaceVisitorInfo:
+    """박물관 표준데이터 1행의 방문 안내(원문 그대로, 시각만 ``HH:MM``로 맞춘다).
+
+    평일·공휴일 시각은 요일 구간이 아니라 원천의 두 묶음이라 ``business_hours``(요일별 구간)로
+    바꾸지 않는다 — "공휴일"은 요일이 아니다. 화면에는 원문 한 줄로 보인다. 요금 0은 무료다
+    (값 없음은 ``None``이라 담지 않는다). 인자는 record 속성으로만 받는다 — replay lint가 변환기의
+    record 사용을 속성 접근으로만 본다.
+    """
+    hours = [
+        text
+        for text in (
+            _hours_range("평일", weekday_open, weekday_close),
+            _hours_range("공휴일", holiday_open, holiday_close),
+        )
+        if text is not None
+    ]
+    fees = [
+        PlaceFee(audience=audience, amount_krw=amount)
+        for audience, amount in (("adult", adult_fee), ("youth", youth_fee), ("child", child_fee))
+        if isinstance(amount, int) and 0 <= amount <= 10_000_000
+    ]
+    if fees and all(fee.amount_krw == 0 for fee in fees) and clean_text(fee_text):
+        # 금액 칸이 전부 0인데 요금 원문이 따로 있으면 0은 "무료"가 아니라 "숫자 칸 미기재"일 수
+        # 있다(표준데이터에 흔하다) — 숫자는 버리고 원문만 보인다.
+        fees = []
+    return PlaceVisitorInfo(
+        source="datagokr_museum",
+        attribution=_MUSEUM_ATTRIBUTION,
+        reference_date=reference_date,
+        description=clean_text(intro, limit=DESCRIPTION_MAX),
+        usage_hours=" · ".join(hours) or None,
+        rest_days=clean_text(rest_days),
+        fee_text=clean_text(fee_text),
+        fees=fees,
+        transport=clean_text(transport),
+        facilities=clean_text(facilities),
+    )
 
 
 def _resolve_museum_category(fclty_type: str | None) -> str:
@@ -264,7 +380,28 @@ async def _museum_to_bundle(
         "oper_phone_number": item.oper_phone_number,
         "homepage_url": item.homepage_url,
         "instt_code": item.instt_code,
+        # 방문 안내(ADR-126) — 모델 필드 이름 그대로(replay가 되살린다).
+        "fclty_info": item.fclty_info,
+        "weekday_oper_open_hhmm": item.weekday_oper_open_hhmm,
+        "weekday_oper_colse_hhmm": item.weekday_oper_colse_hhmm,
+        "holiday_oper_open_hhmm": item.holiday_oper_open_hhmm,
+        "holiday_close_open_hhmm": item.holiday_close_open_hhmm,
+        "rstde_info": item.rstde_info,
+        "adult_chrge": item.adult_chrge,
+        "yngbgs_chrge": item.yngbgs_chrge,
+        "child_chrge": item.child_chrge,
+        "etc_chrge_info": item.etc_chrge_info,
+        "fclty_intrcn": item.fclty_intrcn,
+        "trnsport_info": item.trnsport_info,
+        "reference_date": (
+            item.reference_date.isoformat() if item.reference_date is not None else None
+        ),
     }
+    # 값 없는 방문 안내 키는 raw에 두지 않는다 — 이 키가 생기기 전 저장된 원본을 replay해도 같은
+    # payload hash가 나와야 한다(``ReplayPayloadDrift`` 방지, ADR-126).
+    for key in _MUSEUM_VISITOR_RAW_KEYS:
+        if raw_data[key] is None:
+            del raw_data[key]
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=_PROVIDER_NAME,
@@ -300,6 +437,21 @@ async def _museum_to_bundle(
                 for k, v in {
                     "fclty_type": normalize_korean_text(item.fclty_type),
                     "homepage_url": item.homepage_url,
+                    VISITOR_INFO_KEY: _museum_visitor_info(
+                        reference_date=item.reference_date,
+                        intro=item.fclty_intrcn,
+                        weekday_open=item.weekday_oper_open_hhmm,
+                        weekday_close=item.weekday_oper_colse_hhmm,
+                        holiday_open=item.holiday_oper_open_hhmm,
+                        holiday_close=item.holiday_close_open_hhmm,
+                        rest_days=item.rstde_info,
+                        adult_fee=item.adult_chrge,
+                        youth_fee=item.yngbgs_chrge,
+                        child_fee=item.child_chrge,
+                        fee_text=item.etc_chrge_info,
+                        transport=item.trnsport_info,
+                        facilities=item.fclty_info,
+                    ),
                 }.items()
                 if v is not None
             },

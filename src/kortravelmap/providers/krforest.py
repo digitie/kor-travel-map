@@ -33,7 +33,7 @@ import math
 from collections import defaultdict
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final, Protocol, runtime_checkable
 
@@ -65,7 +65,9 @@ from kortravelmap.core.route_course import (
     assemble_course,
     connected_segment_groups,
 )
+from kortravelmap.core.visitor_text import clean_text
 from kortravelmap.dto import (
+    VISITOR_INFO_KEY,
     Address,
     AdminClaimKind,
     AdminEvidence,
@@ -74,6 +76,7 @@ from kortravelmap.dto import (
     FeatureBundle,
     FeatureKind,
     PlaceDetail,
+    PlaceVisitorInfo,
     RouteDetail,
     SourceLink,
     SourceRecord,
@@ -200,6 +203,18 @@ class RecreationForestItem(Protocol):
 
     institution_code: str | None
     """제공기관코드 — 안정 식별자(``source_entity_id``). 없으면 name::sido 파생."""
+
+    # -- 방문 안내(ADR-126 — ``facility_info.visitor_info``) --
+    capacity: str | None
+    """수용 인원 원문."""
+    entrance_fee: str | None
+    """입장료 원문."""
+    accommodation_available: str | None
+    """숙박 가능 여부 원문(``Y``/``N``)."""
+    main_facilities: str | None
+    """주요 시설 원문."""
+    reference_date: str | None
+    """데이터 기준일 원문(``YYYY-MM-DD``)."""
 
     raw: Any
     """provider 원천 dict (``SourceRecord.raw_data``의 ``provider_raw``로 보존)."""
@@ -996,6 +1011,47 @@ async def mountain_trail_courses_to_bundles(
 # -- 단일 변환 ------------------------------------------------------------
 
 
+#: 휴양림 표준데이터의 방문 안내 필드 — ``raw_data``에도 이 이름 그대로 남는다(replay가
+#: ``StandardRecreationForest``로 되살린다).
+_FOREST_VISITOR_FIELDS: Final[tuple[str, ...]] = (
+    "capacity",
+    "entrance_fee",
+    "accommodation_available",
+    "main_facilities",
+    "reference_date",
+)
+_FOREST_ATTRIBUTION: Final[str] = "공공데이터포털 전국휴양림표준데이터"
+
+
+def _yes_no(value: str | None) -> bool | None:
+    text = (value or "").strip().upper()
+    if text in {"Y", "YES", "가능", "O"}:
+        return True
+    if text in {"N", "NO", "불가", "불가능", "X"}:
+        return False
+    return None
+
+
+def _iso_date(value: str | None) -> date | None:
+    try:
+        return date.fromisoformat((value or "").strip()[:10])
+    except ValueError:
+        return None
+
+
+def _forest_visitor_info(item: RecreationForestItem) -> PlaceVisitorInfo:
+    """휴양림 표준데이터 1행 → 방문 안내(원문 그대로)."""
+    return PlaceVisitorInfo(
+        source="krforest_recreation_forest",
+        attribution=_FOREST_ATTRIBUTION,
+        reference_date=_iso_date(item.reference_date),
+        fee_text=clean_text(item.entrance_fee),
+        facilities=clean_text(item.main_facilities),
+        capacity=clean_text(item.capacity),
+        accommodation_available=_yes_no(item.accommodation_available),
+    )
+
+
 async def _recreation_forest_to_bundle(
     item: RecreationForestItem,
     *,
@@ -1023,10 +1079,12 @@ async def _recreation_forest_to_bundle(
         "latitude": str(item.latitude) if item.latitude is not None else None,
         "longitude": str(item.longitude) if item.longitude is not None else None,
         "institution_code": item.institution_code,
+        **{name: getattr(item, name) for name in _FOREST_VISITOR_FIELDS},
     }
     facility_info: dict[str, Any] = {
         "forest_type": normalize_korean_text(item.forest_type),
         "homepage_url": item.homepage_url,
+        VISITOR_INFO_KEY: _forest_visitor_info(item),
     }
     return _build_place_bundle(
         name=name,

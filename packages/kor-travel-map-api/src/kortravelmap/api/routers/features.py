@@ -26,6 +26,7 @@ ADR 참조
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Sequence
 from datetime import datetime
 from time import perf_counter
@@ -41,6 +42,7 @@ from kortravelmap.core.exceptions import (
     FeatureSearchCursorVersionUnsupportedError,
 )
 from kortravelmap.core.sync_scope import MAX_EXTERNAL_SYSTEM_NAME_LENGTH
+from kortravelmap.dto import VISITOR_INFO_KEY, PlaceVisitorInfo
 from kortravelmap.dto.area import AreaKind
 from kortravelmap.infra import (
     curation_repo,
@@ -62,6 +64,7 @@ from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    ValidationError,
     WithJsonSchema,
     model_validator,
 )
@@ -109,6 +112,8 @@ __all__ = [
 # projection에서만** 벗겨낸다. raw observation lineage(raw_data/raw_payload_hash/
 # source_record_key)는 operator 표면으로 이동한다.
 _PUBLIC_DETAIL_STRIPPED_KEYS: frozenset[str] = frozenset({"payload"})
+
+_LOGGER = logging.getLogger(__name__)
 
 
 router = APIRouter(prefix="/features", tags=["features"])
@@ -403,6 +408,15 @@ class FeatureDetailResponse(_PublicDisplayName):
     )
     address: dict[str, Any]
     detail: dict[str, Any]
+    visitor_info: PlaceVisitorInfo | None = Field(
+        default=None,
+        description=(
+            "place 방문 안내(ADR-126) — 이용시간·휴무·주차·요금·소개·이미지(공공누리 유형별)·"
+            "무장애·반려동물. 원천 문장 그대로다. 이미지의 ``license.derivatives_allowed``가 "
+            "false면(공공누리 3·4유형) 크롭·필터·재인코딩 없이 원본 비율로 표시한다. "
+            "``detail.facility_info``에는 다시 싣지 않는다(이 필드가 정본)."
+        ),
+    )
     urls: dict[str, Any]
     legal_dong_code: str | None = None
     sido_code: str | None = None
@@ -1025,9 +1039,34 @@ def _with_trip_card_route(
     )
 
 
+def _split_visitor_info(
+    kind: str, detail: dict[str, Any]
+) -> tuple[dict[str, Any], PlaceVisitorInfo | None]:
+    """place detail에서 방문 안내를 떼어 typed로 돌려준다(ADR-126, 공개 정본은 typed 필드 하나).
+
+    저장값은 ``PlaceDetail`` 검증을 거쳐 들어왔으므로 맞지 않는 모양은 없어야 한다. 그래도 맞지
+    않으면 공개 응답을 500으로 깨지 않고 방문 안내만 비우고 경고를 남긴다(쓰기 경로가 정본이다).
+    """
+    facility = detail.get("facility_info")
+    if kind != "place" or not isinstance(facility, dict) or VISITOR_INFO_KEY not in facility:
+        return detail, None
+    rest = {key: value for key, value in facility.items() if key != VISITOR_INFO_KEY}
+    try:
+        info = PlaceVisitorInfo.model_validate(facility[VISITOR_INFO_KEY])
+    except ValidationError as exc:
+        _LOGGER.warning(
+            "공개 상세 visitor_info가 모델에 맞지 않아 비운다: feature_id=%s errors=%d",
+            detail.get("feature_id"),
+            exc.error_count(),
+        )
+        info = None
+    return {**detail, "facility_info": rest}, info
+
+
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본. 내부 키는 호출부가 치환
     # 전 row의 legacy 값을 쓴다.
+    detail, visitor_info = _split_visitor_info(row["kind"], _public_detail(row["detail"]))
     return FeatureDetailResponse(
         feature_id=response_feature_id(row),
         feature_uuid=row.get("feature_uuid"),
@@ -1040,7 +1079,8 @@ def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
         area_kind=(row["detail"] or {}).get("area_kind") if row["kind"] == "area" else None,
         route_type=(row["detail"] or {}).get("route_type") if row["kind"] == "route" else None,
         address=row["address"],
-        detail=_public_detail(row["detail"]),
+        detail=detail,
+        visitor_info=visitor_info,
         urls=row["urls"],
         legal_dong_code=row["legal_dong_code"],
         sido_code=row["sido_code"],

@@ -85,7 +85,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-11-27 — 공개 containing-areas 2 operation·상세 area_kind/route_type(user·admin 재고정).
     # 2026-11-27 ADR-128 — route 요약 additive(user·service·admin baseline 재고정).
     "openapi-diff-v1.json": (
-        "f679c55f33b64c75b2ebfbacd5ee7305748dbb5a9ce6aa1207c8183eed5ba704"
+        "b634595ef1586df5b4ba54ec9c19f220cbd64d423b595c9c854a6de3657242bc"
     ),
     # 2026-08-27 T-VN-M02/M05 — pending receipt가 새 full-admin artifact와
     # PinVi의 provenance UUID 결박 선행 조건을 함께 서술한다.
@@ -106,7 +106,7 @@ ARTIFACT_SHA256: Final[dict[str, str]] = {
     # 2026-11-27 ADR-127 — pending receipt의 service·full-admin sha 재핀(먹거리 필드·검토 API).
     # 2026-11-27 — containing-areas로 user·full 지문 갱신(pending 유지).
     "consumer-rollout-v1.json": (
-        "9e42b56286c27de28a3ecc2e536e447a314af1f52bccbfb039bb4b71d1c655df"
+        "f4ed1b694771dbdb3d407c59e616df879be808d2dd3b8f828fd39d394d03c842"
     ),
     "tvn40-live-acceptance-v1.json": (
         "b1e8ffdf05fe0b07b274f521305f1f8b4af0daed16d44c4a0b847ddf81402d0e"

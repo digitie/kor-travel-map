@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-11-27 — place 방문 안내 `visitor_info`(ADR-126)
+
+- 공개 `GET /v1/features/{id}`에 typed `visitor_info`(이용시간·휴무·주차·요금·소개·이미지·무장애·반려동물, 원문 그대로)를
+  더했다. 이미지마다 공공누리 유형·`derivatives_allowed`(3·4유형 false → 크롭·필터 금지)·출처. 같은 값은
+  `detail.facility_info`에서 뺐다.
+- 국가유산 설명문, 박물관 관람시간·휴관·관람료·소개·교통, 휴양림 입장료·주요시설·수용인원·숙박을 싣는다. migration 없음.
+
 ## 2026-11-27 — 등산로 구간을 등산 코스로 묶는다(ADR-128)
 
 - 산림청 등산로(`krforest_mountain_trails`)·KNPS 탐방로(`knps_trails`)를 구간이 아니라 코스 route(`route_type='hiking_course'`)로
@@ -13,6 +20,7 @@
   등산 코스는 새 feature id라 해당 없음이지만 기존 route에 같은 패턴이 생길 때를 위해 적는다.
 - 수정: field ledger가 `Decimal`을 JSON 문자열로 써 numeric field(`route.total_distance_meters`·`area.area_square_meters`)를
   non-null로 쓰는 적재가 `base JSON value does not match registry type`으로 죽던 잠복 결함.
+
 ## 2026-11-27 — 공개 containing-areas API
 
 - `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas?lon&lat`: 점을 덮는 공개 area(국립공원·

@@ -1,3 +1,25 @@
+## 2026-11-27 — place 방문 안내 typed 모델 + 국가유산 설명문·박물관·휴양림 필드 + 공개 API typed (ADR-126, PR 1/2)
+
+- 근거: 상세 콘텐츠 소스 조사(2026-11-27, 소유자 "권장안 대로" — 3·4·5순위). PinVi 상세에 이용시간·휴무·주차·요금·
+  이미지·무장애·반려동물이 없었다. 국가유산 `SearchKindOpenapiDt` `content`는 Map이 이미 건마다 부르면서 버렸고, 박물관·
+  휴양림 표준데이터의 관람시간·요금·소개·입장료·주요시설도 변환기가 버렸다.
+- 설계: `dto.PlaceVisitorInfo`(typed, `extra="forbid"`)를 `facility_info["visitor_info"]`에 두고 `PlaceDetail` validator가
+  검증·정규화한다 — DB 컬럼·protocol 함수·migration 불변. 원문 그대로(태그·공백만 정리). 이미지는 이미지마다
+  `ContentLicense`(공공누리 0~4, 3·4는 `derivatives_allowed=false`), 유형 모르는 이미지는 담지 않는다.
+- 국가유산: 설명문만 담는다(출처 "국가유산청, www.khs.go.kr"). 이미지 API `imageNuri`(`B/F`·`D/F`, 2026-11-27 실호출)의
+  공공누리 대응을 국가유산청 문서로 확인하지 못해 이미지는 담지 않는다(fail-closed) — provider에도 typed `images()`가 없다.
+- 박물관: 평일·공휴일 관람시간(`HH:MM` 한 줄 원문 — 요일 구간 `business_hours`로 바꾸지 않는다)·휴관·관람료(성인·청소년·
+  어린이 숫자)·소개·교통·시설. 휴양림: 입장료·주요시설·수용인원·숙박 여부. 원천 필드는 `raw_data`에 이름 그대로(replay).
+- 공개 API: `GET /v1/features/{id}`에 `visitor_info: PlaceVisitorInfo | null`, 같은 값은 `detail.facility_info`에서 뺀다.
+  OpenAPI 재생성 + admin frontend·user-client types 재생성. TourAPI 상세 op 백필은 PR 2/2.
+- 시험: `tests/unit/test_place_visitor_info.py`(DTO·국가유산), 박물관·휴양림 변환, API `test_feature_visitor_info.py`.
+- 적대 리뷰 2인(데이터·라이선스 / API 계약) 1차 반영: 박물관 raw의 새 키는 값이 있을 때만(옛 원본 replay hash 유지 —
+  아니면 다음 월간 fetch까지 `ReplayPayloadDrift`), "없음"은 자리표시로 지우지 않음(연중무휴·주차 없음), 국가유산 설명문은
+  provider 정리본 그대로(재정리하면 `<삼국유사>` 꺾쇠 소실), 금액 칸 전부 0 + 요금 원문이면 숫자 버림, `00:00~00:00`·`24:xx`
+  시각 거름, `ContentLicense.kogl_type` 필수(이미지 전용), `pet_allowed`→`pet_note`, `parking_fee` 분리, 관리자 ETL fixture
+  dataclass에 새 필드, user-client alias export, openapi-diff baseline·T-VN-40 pending receipt 지문 재고정(pending 유지),
+  공통 정리 함수는 `core/visitor_text.py`로.
+
 ## 2026-11-27 — 등산로 구간을 코스로 묶는다(ADR-128)
 
 - 근거(prod 읽기 전용): route 57,690건 = 산림청 등산로 57,047 + KNPS 617 + 둘레길 26, 거리·소요시간·난이도·시종점 이름 0%.
@@ -16,6 +38,7 @@
 - 실측(prod 원천 전량 → provider 함수): 산림청 14,252코스(p50 1.0 km, ≥1 km 50%), KNPS 186코스(p50 3.3 km). migration 없음,
   OpenAPI(user·admin) 추가만.
 - 다음: `T-HIKE-COURSE`(운영 재적재), PinVi 일정 추가 PR.
+
 ## 2026-11-27 — 공개 containing-areas API(이 장소는 어느 국립공원·보호지역 안인가)
 
 - `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas?lon&lat` — `contained-features`의

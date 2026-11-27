@@ -41,6 +41,13 @@ export type CategorySummary = Schemas["CategorySummary"];
 export type PlaceAttributesResponse = Schemas["PlaceAttributesResponse"];
 export type PlaceAttributeSummary = Schemas["PlaceAttributeSummary"];
 export type FeatureAttributeView = Schemas["FeatureAttributeView"];
+// ADR-126 place 방문 안내(이용시간·휴무·주차·요금·이미지·무장애·반려동물).
+export type PlaceVisitorInfo = Schemas["PlaceVisitorInfo"];
+export type PlaceImage = Schemas["PlaceImage"];
+export type ContentLicense = Schemas["ContentLicense"];
+export type PlaceFee = Schemas["PlaceFee"];
+export type AccessibilityNote = Schemas["AccessibilityNote"];
+export type PetPolicy = Schemas["PetPolicy"];
 export type ProviderLastSyncResponse = Schemas["ProviderLastSyncResponse"];
 export type ProvidersFreshnessResponse = Schemas["ProvidersFreshnessResponse"];
 export type BeachPublicView = Schemas["BeachPublicView"];
