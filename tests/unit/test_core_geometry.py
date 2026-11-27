@@ -156,9 +156,10 @@ def test_area_anchor_points_start_with_centroid_then_surface_then_ring() -> None
     assert anchors[0] == geometry_centroid(geom)
     assert len(anchors) == len(set(anchors))
     lons = [float(anchor.lon) for anchor in anchors]
-    # 큰 part(126.0~126.2) 꼭짓점이 작은 part(127.0~) 꼭짓점보다 먼저 나온다.
-    first_small = next(i for i, lon in enumerate(lons) if lon >= 127.0)
-    assert any(lon in (126.0, 126.2) for lon in lons[:first_small])
+    # 큰 part(126.0~126.2)의 ring 꼭짓점이 작은 part(127.0~127.05)의 ring 꼭짓점보다 먼저다.
+    big_vertex = next(i for i, lon in enumerate(lons) if lon in (126.0, 126.2))
+    small_vertex = next(i for i, lon in enumerate(lons) if lon in (127.0, 127.05))
+    assert big_vertex < small_vertex
     # centroid 다음 후보들은 모두 면 위(경계 포함)다.
     surface = geom.buffer(1e-9)
     assert all(
@@ -169,3 +170,29 @@ def test_area_anchor_points_start_with_centroid_then_surface_then_ring() -> None
 def test_area_anchor_points_rejects_bad_limits() -> None:
     with pytest.raises(ValueError, match="1 이상"):
         area_anchor_points(parse_wkt(_POLY), max_parts=0)
+
+
+@pytest.mark.parametrize(
+    ("wkt", "expected_area"),
+    [
+        # 겹치는 part 2개 — 겹친 0.01이 구멍이 되면 안 된다(합집합 0.07).
+        (
+            "MULTIPOLYGON(((127.0 37.0, 127.2 37.0, 127.2 37.2, 127.0 37.2, 127.0 37.0)),"
+            "((127.1 37.1, 127.3 37.1, 127.3 37.3, 127.1 37.3, 127.1 37.1)))",
+            0.07,
+        ),
+        # shell과 변을 공유하는 hole — hole은 남는다.
+        (
+            "POLYGON((127.0 37.0, 127.2 37.0, 127.2 37.2, 127.0 37.2, 127.0 37.0),"
+            "(127.0 37.0, 127.1 37.0, 127.1 37.1, 127.0 37.1, 127.0 37.0))",
+            0.03,
+        ),
+    ],
+)
+def test_repair_area_geometry_keeps_overlaps_covered(wkt: str, expected_area: float) -> None:
+    """``structure`` 수리 — even-odd(linework)처럼 두 번 덮인 곳을 구멍으로 만들지 않는다."""
+    geom = parse_wkt(wkt)
+    assert not geom.is_valid
+    fixed = repair_area_geometry(geom)
+    assert fixed.is_valid
+    assert fixed.area == pytest.approx(expected_area)

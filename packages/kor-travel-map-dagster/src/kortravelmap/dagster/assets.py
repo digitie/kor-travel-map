@@ -50,6 +50,7 @@ from kortravelmap.providers.knps import (
     KNPS_SOURCE_ENTITY_TYPE,
     knps_geometry_records_to_bundles,
     knps_geometry_snapshot_retires_absent,
+    knps_national_park_anchors,
     knps_point_records_to_bundles,
 )
 from kortravelmap.providers.knps import (
@@ -724,15 +725,37 @@ async def run_feature_geometry_knps_records(
     else:
         records = await _record_list(context, "knps_geometry_records")
     fetched_at = await _fetched_at(context)
+    reverse_geocoder = _reverse_geocoder(context)
+    # 국립공원 대표점(해상 공원은 면 위 후보점)은 변환 **밖**에서 푼다 — 변환 안에서 후보를 돌면
+    # ADR-116 재사용 pass 0이 행 좌표 밖을 물어 dataset 전체의 재사용이 꺼진다.
+    anchors = (
+        await knps_national_park_anchors(
+            records, dataset_key=dataset_key, reverse_geocoder=reverse_geocoder
+        )
+        if reverse_geocoder is not None
+        else {}
+    )
     bundles = await _transform_reusing_geo(
         context,
         knps_geometry_records_to_bundles,
         records,
         dataset_key=dataset_key,
         fetched_at=fetched_at,
-        reverse_geocoder=_reverse_geocoder(context),
+        reverse_geocoder=reverse_geocoder,
+        national_park_anchors=anchors,
     )
     retires_absent = knps_geometry_snapshot_retires_absent(spec)
+    if retires_absent and spec.unloaded_reason is None and not bundles:
+        # 싣는 area dataset의 빈 snapshot은 "원천이 비었다"가 아니라 "변환이 무너졌다"일 수 있다
+        # (헤더 변경·이름 디코딩 회귀·SHP 0건). 은퇴 전에 멈춘다 — 빈 snapshot 은퇴는
+        # unloaded dataset(버퍼 은퇴)에만 허용한다(적대 리뷰 F3).
+        raise Failure(
+            description=(
+                f"KNPS {dataset_key}: 원천 {len(records)}행에서 bundle 0건 — 빈 snapshot으로 "
+                "기존 면을 은퇴시키지 않는다. 원천 헤더·디코딩·변환을 확인할 것."
+            ),
+            metadata={"source_records": len(records)},
+        )
     return await _load(
         context,
         provider=KNPS_PROVIDER_NAME,

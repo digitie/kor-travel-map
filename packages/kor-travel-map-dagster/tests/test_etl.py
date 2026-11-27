@@ -260,10 +260,43 @@ async def test_authoritative_snapshot_can_retire_absent_source_entities(
             "dataset_key": "krforest_mountain_trails",
             "source_entity_type": "mountain_trail_segment",
             "retire_absent_from_snapshot": True,
+            "retained_source_entity_ids": frozenset(),
             # geo를 배선하지 않은 호출(geo_applied 없음)은 geo 입력이 없다(ADR-109 T-GR-03).
             "geo": None,
         }
     ]
+
+
+async def test_drop_mode_rows_are_retained_not_retired_by_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """주소 검증으로 버린 행은 "원천에 없다"가 아니다 — snapshot 부재 은퇴에서 뺀다.
+
+    drop과 retire를 함께 쓰는 dataset(KNPS area)에서 geo 부분장애가 기존 feature를 내렸다가 다음
+    run에 되살리는 flap을 막는다(국립공원 경계 재원천화 적대 리뷰).
+    """
+    bundles = [_bundle(f"area-{index}") for index in range(3)]
+    context = _Context(run_id="drop-retire")
+    client = _SnapshotClient()
+    monkeypatch.setattr(
+        "kortravelmap.dagster.etl.validate_feature_bundles_address",
+        lambda items: _error_summary(items, error_feature_id="area-1"),
+    )
+
+    await load_feature_bundles_for_dagster(
+        context=context,  # type: ignore[arg-type]
+        client=client,  # type: ignore[arg-type]
+        bundles=bundles,  # type: ignore[arg-type]
+        provider="python-knps-api",
+        dataset_key="knps_protected_areas",
+        strict_address="drop",
+        authoritative_snapshot_complete=True,
+        source_entity_type="knps_facility",
+        retire_absent_from_snapshot=True,
+    )
+
+    assert len(client.snapshot_calls) == 1
+    assert client.snapshot_calls[0]["retained_source_entity_ids"] == frozenset({"area-1"})
 
 
 async def test_streaming_feature_batches_keep_one_atomic_loader_call(

@@ -30,7 +30,7 @@ dependencies = [
   "geoalchemy2>=0.15",
   "asyncpg>=0.29",
   "psycopg[binary,pool]>=3.2",
-  "shapely>=2.0",
+  "shapely>=2.1",  # make_valid(method="structure") — core.geometry.repair_area_geometry
   "pyproj>=3.6",  # ADR-012 좌표 변환 / ADR-030 narrow cache singleton
   "alembic>=1.19.1,<1.20",  # ADR-007 schema migration — named CHECK by-name 비교와 column-bound fix를 사용하며 exact catalog/식 gate로 drift를 막는다(T-VN-H45).
   "jellyfish>=1.0",  # ADR-016 Record Linkage (jaro_winkler_similarity)

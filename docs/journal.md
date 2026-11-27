@@ -16,6 +16,13 @@
   최대), 경주 9 part, 버퍼 23건 retired, active 면 invalid 0, 팔공산은 보호지역에서 빠짐. prod geo로 해상 3곳 후보점 실측(태안 첫
   ring 꼭짓점, 다도해 ring 꼭짓점, 한려해상 representative_point). 보호지역 source_id가 행 hash → WDPA id로 바뀌므로 재적재 시
   옛 보호지역 feature는 snapshot 부재로 은퇴하고 새 id로 다시 선다(설계 우선 — 서비스 전).
+- 적대 리뷰 2인 반영: `make_valid(method="structure")`(기본 linework는 겹친 곳을 구멍으로 만든다 — shapely 하한 2.1),
+  국립공원 후보점 순회를 변환 밖 `knps_national_park_anchors`로(변환 안에서 돌면 ADR-116 재사용 pass 0이 행 좌표 밖을 물어
+  dataset 재사용이 꺼졌다), 싣는 area dataset의 bundle 0건은 은퇴 전 실패, drop 행은 snapshot 부재 은퇴에서 제외
+  (`retained_source_entity_ids` — etl 공통, drop→은퇴→재활성 flap 방지). 통합 시험: 버퍼 적재→보호지역→버퍼 빈 snapshot 은퇴→0건 거부.
+- 재적재 순서(배포 뒤 소유자): `knps_protected_areas` 먼저(admin "지금 실행" 또는 provider_dataset 큐 요청) → 확인 게이트
+  (active national_park 23·invalid 0·drop 목록에 국립공원 없음) → `knps_park_boundaries`는 **provider_dataset 큐 요청**으로
+  (schedule이 없어졌고 tag 없는 launchpad run은 commit 뒤 membership 기록에서 red가 된다). OpenAPI·migration 없음.
 - 재적재 순서(배포 뒤 소유자): `knps_protected_areas` 먼저 → `knps_park_boundaries`(빈 snapshot, 버퍼 21건 은퇴). OpenAPI·migration 없음.
 ## 2026-11-27 — 휴게소 먹거리(한국도로공사 메뉴) — 휴게소·고속도로 주유소 상세 (ADR-127)
 

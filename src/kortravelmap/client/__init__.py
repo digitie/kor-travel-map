@@ -39,7 +39,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Awaitable, Callable, Mapping, Sequence
+from collections.abc import Awaitable, Callable, Collection, Mapping, Sequence
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from time import monotonic
@@ -1570,9 +1570,15 @@ class AsyncKorTravelMapClient:
         retired_source_entity_ids: set[str] | None = None,
         retire_geometryless_areas: bool = False,
         retire_absent_from_snapshot: bool = False,
+        retained_source_entity_ids: Collection[str] = (),
         geo: GeoLoadContext | None = None,
     ) -> tuple[FeatureLoadResult, int]:
-        """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다."""
+        """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다.
+
+        ``retained_source_entity_ids``는 snapshot에 있었지만 이번에 싣지 못한(주소 검증 drop)
+        entity다 — ``retire_absent_from_snapshot``에서 부재로 보지 않는다(drop → 은퇴 → 다음 run
+        재활성 flap을 막는다).
+        """
 
         if (
             (retired_source_entity_ids is not None and retire_geometryless_areas)
@@ -1601,7 +1607,8 @@ class AsyncKorTravelMapClient:
                     snapshot_source_entity_ids={
                         bundle.source_record.source_entity_id
                         for bundle in materialized
-                    },
+                    }
+                    | set(retained_source_entity_ids),
                 )
             elif retire_geometryless_areas:
                 retired = await retire_geometryless_area_features_by_source(

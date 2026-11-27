@@ -36,6 +36,7 @@ from kortravelmap.providers.knps import (
     KnpsGeometryColumnMap,
     KnpsPointColumnMap,
     knps_geometry_snapshot_retires_absent,
+    knps_national_park_anchors,
     resolve_cultural_resource_category,
 )
 from kortravelmap.providers.knps import (
@@ -399,34 +400,68 @@ def _national_park_record(source_id: str, name: str) -> _GRec:
     )
 
 
-def test_national_park_geocodes_first_anchor_with_a_bjd_code() -> None:
-    """해상 국립공원은 centroid가 바다라 빈 답이다 — 면 위 후보점에서 첫 법정동을 쓴다.
+def test_national_park_anchor_is_first_candidate_with_a_bjd_code() -> None:
+    """해상 국립공원은 centroid가 바다라 빈 답이다 — 면 위 후보점에서 첫 법정동을 고른다.
 
-    대표점(coord)은 그 주소가 나온 점이다(주소·좌표 일치).
+    후보 순회는 변환 **밖**(:func:`knps_national_park_anchors`)이다. 변환은 고른 점 하나만 묻고
+    그 점을 대표 좌표로 쓴다(주소·좌표 일치, ADR-116 재사용 pass 0이 행 좌표 밖을 묻지 않는다).
     """
     seen: list[Coordinate] = []
 
-    async def reverse(coord: Coordinate) -> Address | None:
+    async def walking(coord: Coordinate) -> Address | None:
         seen.append(coord)
         if len(seen) < 3:  # centroid·전체 representative_point는 바다
             return None
         return Address(bjd_code="4482533000", sigungu_code="44825", sido_code="44")
 
-    bundles = asyncio.run(
-        _geometry_async(
-            [_national_park_record("4735", "태안해안")],
-            dataset_key="knps_protected_areas",
-            fetched_at=_FETCHED,
-            reverse_geocoder=reverse,
+    records = [
+        _national_park_record("4735", "태안해안"),
+        _GRec("1", "가상 보호지역", _POLY, {"WDPAID": "1", "DESIG_ENG": "Provincial Park"}),
+    ]
+    anchors = asyncio.run(
+        knps_national_park_anchors(
+            records, dataset_key="knps_protected_areas", reverse_geocoder=walking
         )
     )
-    feature = bundles[0].feature
-    assert feature.address.bjd_code == "4482533000"
+    assert anchors == {"4735": seen[2]}
+    assert len(seen) == 3  # 보호지역 일반 행은 후보를 돌지 않는다
+
+    calls: list[Coordinate] = []
+
+    async def transform_geocoder(coord: Coordinate) -> Address | None:
+        calls.append(coord)
+        return Address(bjd_code="4482533000", sigungu_code="44825", sido_code="44")
+
+    feature = asyncio.run(
+        _geometry_async(
+            records[:1],
+            dataset_key="knps_protected_areas",
+            fetched_at=_FETCHED,
+            reverse_geocoder=transform_geocoder,
+            national_park_anchors=anchors,
+        )
+    )[0].feature
+    assert calls == [seen[2]]
     assert feature.coord == seen[2]
-    assert len(seen) == 3
+    assert feature.address.bjd_code == "4482533000"
 
 
-def test_national_park_centroid_answer_keeps_centroid_and_one_call() -> None:
+def test_anchors_are_only_for_protected_areas_and_skip_unanswered_parks() -> None:
+    async def never(_coord: Coordinate) -> Address | None:
+        return None
+
+    records = [_national_park_record("4736", "다도해해상")]
+    assert asyncio.run(
+        knps_national_park_anchors(records, dataset_key="knps_trails", reverse_geocoder=never)
+    ) == {}
+    assert asyncio.run(
+        knps_national_park_anchors(
+            records, dataset_key="knps_protected_areas", reverse_geocoder=never
+        )
+    ) == {}
+
+
+def test_national_park_without_anchor_keeps_centroid_and_one_call() -> None:
     calls: list[Coordinate] = []
 
     async def reverse(coord: Coordinate) -> Address | None:

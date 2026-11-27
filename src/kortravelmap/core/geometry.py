@@ -108,8 +108,8 @@ def repair_area_geometry(geom: BaseGeometry) -> BaseGeometry:
     invalid 면은 ``ST_Covers``/``ST_Intersects`` 결과가 정의되지 않아(GEOS가 틀린 답이나
     TopologyException을 낸다) "이 장소는 어느 면 안인가" 질의를 깨뜨리므로 저장 전에 고친다.
 
-    ``make_valid``는 자기교차 부분에서 선·점 조각을 함께 낼 수 있다 — 면 계약을 지키려고
-    Polygon 조각만 모은다. valid 입력은 그대로 돌려준다(정규화가 기존 행을 흔들지 않는다).
+    ``make_valid``는 선·점 조각을 함께 낼 수 있다 — 면 계약을 지키려고 Polygon 조각만 모은다.
+    valid 입력은 그대로 돌려준다(정규화가 기존 행을 흔들지 않는다).
 
     Raises
     ------
@@ -120,7 +120,10 @@ def repair_area_geometry(geom: BaseGeometry) -> BaseGeometry:
         raise GeometryError(f"면 geometry가 아님: {geom.geom_type!r}")
     if geom.is_valid:
         return geom
-    fixed = _make_valid(geom)
+    # ``structure``: 바깥 ring의 합집합에서 안쪽 ring을 뺀다. 기본 ``linework``는 even-odd라
+    # 되접힌 ring·겹친 part의 **두 번 덮인 곳을 구멍으로** 만든다 — 그 안의 장소가 "면 밖"이 된다
+    # (적대 리뷰 F1, shapely 2.1+/GEOS 3.10+).
+    fixed = _make_valid(geom, method="structure", keep_collapsed=False)
     polygons: list[Polygon] = []
     pending: list[BaseGeometry] = [fixed]
     while pending:

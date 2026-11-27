@@ -85,6 +85,7 @@ __all__ = [
     "KNPS_NATIONAL_PARK_PROMOTIONS",
     "KNPS_SOURCE_ENTITY_TYPE",
     "knps_geometry_snapshot_retires_absent",
+    "knps_national_park_anchors",
     "AddressFailureMode",
     "knps_point_records_to_bundles",
     "knps_geometry_records_to_bundles",
@@ -960,28 +961,46 @@ def _geometry_detail(
     )
 
 
-async def _geocode_area_anchor(
-    canonical_wkt: str,
-    centroid: Coordinate,
+async def knps_national_park_anchors(
+    records: Iterable[KnpsGeometryRecord],
+    *,
+    dataset_key: str,
     reverse_geocoder: ReverseGeocoder,
-) -> tuple[Coordinate, Address | None]:
-    """국립공원 면의 대표점·주소 — centroid가 빈 답이면 면 위의 후보점을 차례로 묻는다.
+) -> dict[str, Coordinate]:
+    """국립공원 행의 대표점 — centroid가 빈 답이면 면 위 후보점에서 첫 법정동을 준 점.
 
     해상·연안 국립공원(한려해상·태안해안·다도해해상)은 centroid가 바다라 역지오가 법정동을 못
-    준다(2026-11-27 prod 실측). 그 셋이 drop되면 "국립공원 23곳"이 성립하지 않는다. 첫 법정동을
-    준 후보를 대표점(``coord``)으로 쓴다 — 주소와 좌표가 같은 점에서 나와야 주소 검증이 맞는다.
-    후보는 :func:`area_anchor_points`가 정하고 첫째가 centroid라, centroid가 답하는 공원(20곳)은
-    종전과 같은 점·같은 호출 1회다. 보호지역 일반 행에는 쓰지 않는다 — 해상 보호구역 134건에
-    후보를 다 물으면 run 빈 답 가드(ADR-109 결정 4)를 넘는다.
+    준다(2026-11-27 prod 실측). 그 셋이 drop되면 "국립공원 23곳"이 성립하지 않는다.
+    후보는 :func:`area_anchor_points`가 정하고 첫째가 centroid다(내륙 20곳은 centroid 1회).
+
+    **변환 밖에서 미리 푼다.** 변환 안에서 후보를 돌면 ADR-116 저장값 재사용의 pass 0(빈 답 대역)이
+    모든 후보를 묻게 되고, 행 좌표 밖의 요청이라 재사용 안전망이 dataset 전체의 재사용을 끈다
+    (적대 리뷰 F2). 여기서 정한 점을 :func:`knps_geometry_records_to_bundles`에
+    ``national_park_anchors``로 넘기면 변환은 행마다 그 점 하나만 묻는다(= 행 좌표).
+    보호지역 일반 행에는 쓰지 않는다 — 해상 보호구역 134건에 후보를 다 물으면 run 빈 답
+    가드(ADR-109 결정 4)를 넘는다. 법정동을 준 후보가 없으면 그 행은 표에 없다(centroid로 묻고,
+    빈 답이면 drop).
     """
-    first_address: Address | None = None
-    for anchor in area_anchor_points(parse_wkt(canonical_wkt)):
-        address = await reverse_geocoder(anchor)
-        if address is not None and address.bjd_code is not None:
-            return anchor, address
-        if first_address is None and anchor == centroid:
-            first_address = address
-    return centroid, first_address
+    if dataset_key != "knps_protected_areas":
+        return {}
+    spec = KNPS_GEOMETRY_DATASETS[dataset_key]
+    geocoder = cached_reverse_geocoder(reverse_geocoder)
+    anchors: dict[str, Coordinate] = {}
+    for record in records:
+        if not _is_national_park_row(record):
+            continue
+        try:
+            canonical_wkt, _centroid = normalize_geometry(
+                record.geom_wkt, allowed_types=spec.allowed_geom_types
+            )
+        except GeometryError:
+            continue
+        for anchor in area_anchor_points(parse_wkt(canonical_wkt)):
+            address = await geocoder(anchor)
+            if address is not None and address.bjd_code is not None:
+                anchors[record.source_id] = anchor
+                break
+    return anchors
 
 
 async def _geometry_record_to_bundle(
@@ -990,8 +1009,12 @@ async def _geometry_record_to_bundle(
     *,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
+    anchor: Coordinate | None = None,
 ) -> FeatureBundle | None:
     """KNPS geometry record 1건 → route/area ``FeatureBundle``.
+
+    ``anchor``는 국립공원 행의 대표점(:func:`knps_national_park_anchors`) — 있으면 centroid 대신
+    그 점을 대표 좌표로 쓰고 그 점을 역지오코딩한다(주소와 좌표가 같은 점에서 나온다).
 
     route는 이름 없는 record를 건너뛰고, area dataset은 raw 속성에서 이름을
     복구한다. geometry 파싱 실패/경계 밖 centroid는 ``None`` 반환(호출자가 skip/집계).
@@ -1034,12 +1057,10 @@ async def _geometry_record_to_bundle(
 
     # route/area도 법정동코드가 없다. centroid를 역지오코딩해 feature_id 계산 전에
     # bjd_code/주소를 채운다 (ADR-009).
+    if row_area_kind == "national_park" and anchor is not None:
+        centroid = anchor
     address: Address | None = None
-    if reverse_geocoder is not None and row_area_kind == "national_park":
-        centroid, address = await _geocode_area_anchor(
-            canonical_wkt, centroid, reverse_geocoder
-        )
-    elif reverse_geocoder is not None:
+    if reverse_geocoder is not None:
         address = await reverse_geocoder(centroid)
     bjd_code = address.bjd_code if address is not None else None
 
@@ -1055,7 +1076,7 @@ async def _geometry_record_to_bundle(
         provider_natural_key=record.source_id,
         kind=spec.feature_kind,
         name=normalized_name,
-        coord=centroid,  # 선/면 대표 좌표 = centroid (ADR-012, 지도 마커용)
+        coord=centroid,  # 선/면 대표 좌표 = centroid 또는 국립공원 anchor (ADR-012, 지도 마커용)
         address=address or Address(),
         geom=canonical_wkt,
         category=category,
@@ -1091,6 +1112,7 @@ async def knps_geometry_records_to_bundles(
     dataset_key: str,
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
+    national_park_anchors: Mapping[str, Coordinate] | None = None,
 ) -> list[FeatureBundle]:
     """KNPS route/area dataset의 파싱된 행들(WKT geometry) → ``list[FeatureBundle]``.
 
@@ -1110,6 +1132,8 @@ async def knps_geometry_records_to_bundles(
     reverse_geocoder
         좌표 → ``Address`` async 역지오코더. 주입하면 centroid를 역지오코딩해
         bjd_code를 채워 feature_id가 'global' bucket을 벗어난다 (ADR-009).
+    national_park_anchors
+        ``source_id`` → 국립공원 대표점(:func:`knps_national_park_anchors`가 미리 푼 값).
 
     Raises
     ------
@@ -1133,7 +1157,11 @@ async def knps_geometry_records_to_bundles(
     bundles: list[FeatureBundle] = []
     for record in records:
         bundle = await _geometry_record_to_bundle(
-            record, spec, fetched_at=fetched_at, reverse_geocoder=geocoder
+            record,
+            spec,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            anchor=(national_park_anchors or {}).get(record.source_id),
         )
         if bundle is not None:
             bundles.append(bundle)

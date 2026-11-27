@@ -9,7 +9,7 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from dagster import AssetExecutionContext, build_asset_context
+from dagster import AssetExecutionContext, Failure, build_asset_context
 from kortravelmap.dagster import assets as dagster_assets
 from kortravelmap.dagster.assets import (
     run_feature_event_krheritage_events,
@@ -487,6 +487,128 @@ async def test_rail_stations_keep_their_anchor_and_retire_what_transport_drops(
     assert await _active_rail_station_names(migrated_engine) == [
         ("서울교통공사::1호선::133::서울역", "서울역"),
     ]
+
+
+async def _active_knps_areas(engine: Any) -> list[tuple[str, str, str]]:
+    async with AsyncSession(engine) as session:
+        rows = (
+            await session.execute(
+                text(
+                    "SELECT pd.dataset_key, a.area_kind, f.name "
+                    "FROM feature.features AS f "
+                    "JOIN feature.feature_areas AS a USING (feature_id) "
+                    "JOIN provider_sync.source_links AS sl ON sl.feature_id = f.feature_id "
+                    " AND sl.source_role = 'primary' "
+                    "JOIN provider_sync.source_entities AS se "
+                    "  ON se.source_entity_key = sl.source_entity_key "
+                    "JOIN provider_sync.provider_datasets AS pd "
+                    "  ON pd.provider_dataset_id = se.provider_dataset_id "
+                    "WHERE f.lifecycle_state = 'active' AND pd.provider = 'python-knps-api' "
+                    "ORDER BY 1, 2, 3"
+                )
+            )
+        ).all()
+    return [(str(row[0]), str(row[1]), str(row[2])) for row in rows]
+
+
+_PARK_POLY = "POLYGON((126.95 37.62, 127.02 37.62, 127.02 37.70, 126.95 37.70, 126.95 37.62))"
+
+
+async def test_knps_area_snapshot_retires_buffer_and_refuses_empty_snapshot(
+    map_client: AsyncKorTravelMapClient,
+    migrated_engine: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """국립공원 경계 재원천화(2026-11-27): 보호지역 snapshot → 공원경계(버퍼) 빈 snapshot 순서.
+
+    - 보호지역 dataset의 `National Park` 행이 national_park area로 선다.
+    - 공원경계(3 km 버퍼)를 돌리면 예전 버퍼 면이 snapshot 부재로 은퇴한다.
+    - 싣는 area dataset이 bundle 0건이면 은퇴 전에 실패한다(빈 snapshot 붕괴 방지).
+    """
+    from kortravelmap.providers import knps as knps_mod
+
+    # 1) 옛 상태: 버퍼 면이 실려 있다(unloaded 이전 spec으로 적재).
+    buffer_spec = knps_mod.KNPS_GEOMETRY_DATASETS["knps_park_boundaries"]
+    legacy = knps_mod.KnpsGeometryDatasetSpec(
+        "knps_park_boundaries",
+        feature_kind=buffer_spec.feature_kind,
+        detail_kind=buffer_spec.detail_kind,
+        allowed_geom_types=buffer_spec.allowed_geom_types,
+        category=buffer_spec.category,
+        marker_icon=buffer_spec.marker_icon,
+        marker_color=buffer_spec.marker_color,
+    )
+    monkeypatch.setitem(knps_mod.KNPS_GEOMETRY_DATASETS, "knps_park_boundaries", legacy)
+    await _run_asset(
+        run_feature_geometry_knps_records,
+        map_client,
+        knps_geometry_records=[
+            _KnpsGeometry(
+                source_id="L999M001S009",
+                name="북한산",
+                geom_wkt=_PARK_POLY,
+                raw={"NPK_CD": "L999M001S009", "NPK_NM": "북한산"},
+            )
+        ],
+        knps_geometry_dataset_key="knps_park_boundaries",
+    )
+    monkeypatch.setitem(knps_mod.KNPS_GEOMETRY_DATASETS, "knps_park_boundaries", buffer_spec)
+
+    # 2) 보호지역 snapshot — 국립공원 행 + 도립공원 행.
+    await _run_asset(
+        run_feature_geometry_knps_records,
+        map_client,
+        knps_geometry_records=[
+            _KnpsGeometry(
+                source_id="10932",
+                name="북한산",
+                geom_wkt=_PARK_POLY,
+                raw={"WDPA_PID": "10932.0", "ORIG_NAME": "북한산", "DESIG_ENG": "National Park"},
+            ),
+            _KnpsGeometry(
+                source_id="555571000",
+                name="가상 도립공원",
+                geom_wkt=_PARK_POLY,
+                raw={"WDPA_PID": "555571000.0", "ORIG_NAME": "가상 도립공원",
+                     "DESIG_ENG": "Provincial Park", "MARINE": "0"},
+            ),
+        ],
+        knps_geometry_dataset_key="knps_protected_areas",
+    )
+    assert await _active_knps_areas(migrated_engine) == [
+        ("knps_park_boundaries", "national_park", "북한산"),
+        ("knps_protected_areas", "national_park", "북한산 국립공원"),
+        ("knps_protected_areas", "protected_area", "가상 도립공원"),
+    ]
+
+    # 3) 공원경계(버퍼)를 돌리면 원천을 받지 않고 빈 snapshot으로 버퍼 면을 은퇴시킨다.
+    await _run_asset(
+        run_feature_geometry_knps_records,
+        map_client,
+        knps_geometry_records=[],
+        knps_geometry_dataset_key="knps_park_boundaries",
+    )
+    assert await _active_knps_areas(migrated_engine) == [
+        ("knps_protected_areas", "national_park", "북한산 국립공원"),
+        ("knps_protected_areas", "protected_area", "가상 도립공원"),
+    ]
+
+    # 4) 싣는 area dataset이 bundle 0건(헤더 변경 등) — 은퇴하지 않고 실패한다.
+    with pytest.raises(Failure, match="bundle 0건"):
+        await _run_asset(
+            run_feature_geometry_knps_records,
+            map_client,
+            knps_geometry_records=[
+                _KnpsGeometry(
+                    source_id="10932",
+                    name="북한산",
+                    geom_wkt=_PARK_POLY,
+                    raw={"WDPA_PID": "10932.0", "ORIG_NAME": "북한산", "DESIG": "국립공원"},
+                )
+            ],
+            knps_geometry_dataset_key="knps_protected_areas",
+        )
+    assert len(await _active_knps_areas(migrated_engine)) == 2
 
 
 async def _run_asset(
