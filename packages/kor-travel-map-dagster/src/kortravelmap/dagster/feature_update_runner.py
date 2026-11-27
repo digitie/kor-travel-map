@@ -94,7 +94,7 @@ from .provider_fetchers import (
     fetch_transport_ferry_ports,
     fetch_transport_fuel_stations,
     fetch_transport_rail_stations,
-    fetch_transport_rest_areas,
+    fetch_transport_rest_areas_linked,
     fetch_visitkorea_festivals,
     fetch_visitkorea_tourist_attractions,
 )
@@ -748,7 +748,7 @@ _OPERATION_RUNNER_SPEC_ROWS: Final[tuple[FeatureUpdateRunnerSpec, ...]] = (
     *_operation_specs(
         "feature_place_transport_rest_areas_job",
         run=run_feature_place_transport_rest_areas,
-        resources=_records("transport_rest_areas", fetch_transport_rest_areas),
+        resources=_records("transport_rest_areas", fetch_transport_rest_areas_linked),
         asset_key="feature_place_transport_rest_areas",
     ),
     *_operation_specs(

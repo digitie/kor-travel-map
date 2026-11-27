@@ -43,6 +43,7 @@ from kortravelmap.dto.transport_state import (
     FuelPriceState,
     FuelStationState,
     HighwayIncidentState,
+    RestAreaFoodState,
     RestAreaFuelPriceState,
     RestAreaState,
 )
@@ -58,6 +59,7 @@ from kortravelmap.providers.kor_travel_transport_state import (
     DATASET_AIRPORTS,
     DATASET_FUEL_STATIONS,
     DATASET_HIGHWAY_INCIDENTS,
+    DATASET_REST_AREA_FOOD,
     DATASET_REST_AREA_FUEL_PRICES,
     DATASET_REST_AREAS,
     TRANSPORT_STATE_DATASETS,
@@ -200,10 +202,35 @@ class AirportListResponse(BaseModel):
     meta: Meta
 
 
+class PairedRestAreaFood(BaseModel):
+    """주유소와 짝지은 휴게소의 먹거리(ADR-127). 신뢰도가 자동 하한 이상일 때만 실린다."""
+
+    model_config = ConfigDict(extra="forbid")
+    confidence: float = Field(ge=0.0, le=1.0)
+    method: str = Field(
+        description=(
+            "짝 근거(name_direction·name_bidirectional·name_updown_nearest·name_single)."
+        )
+    )
+    distance_m: float
+    rest_area: RestAreaFoodState
+
+
 class FuelStationDetailData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     item: FuelStationOut
     freshness: TransportFreshness
+    rest_area_food: PairedRestAreaFood | None = Field(
+        default=None,
+        description=(
+            "400 m 안 같은 방향 휴게소의 한국도로공사 메뉴 요약(ADR-127). "
+            "고속도로 주유소가 아니거나 "
+            "짝이 확실하지 않거나 먹거리 데이터셋을 읽지 못하면 null."
+        ),
+    )
+    food_freshness: TransportFreshness | None = Field(
+        default=None, description="휴게소 먹거리 데이터셋의 신선도. 아직 적재 전이면 null."
+    )
 
 
 class RestAreaDetailData(BaseModel):
@@ -211,6 +238,16 @@ class RestAreaDetailData(BaseModel):
     item: RestAreaOut
     freshness: TransportFreshness
     fuel_price_freshness: TransportFreshness | None
+    food: RestAreaFoodState | None = Field(
+        default=None,
+        description=(
+            "한국도로공사 메뉴 요약과 표준 코드 연결(ADR-127). 연결하지 못했거나 먹거리 데이터셋을 "
+            "읽지 못하면 null."
+        ),
+    )
+    food_freshness: TransportFreshness | None = Field(
+        default=None, description="휴게소 먹거리 데이터셋의 신선도. 아직 적재 전이면 null."
+    )
 
 
 class HighwayIncidentDetailData(BaseModel):
@@ -765,6 +802,86 @@ async def _attach_rest_area_prices(
     return attached, _freshness(dataset, meta)
 
 
+async def _rest_area_food(
+    store: ValkeyStateStore, feature_id: str
+) -> tuple[RestAreaFoodState | None, TransportFreshness | None]:
+    """휴게소 하나의 먹거리(ADR-127).
+
+    데이터셋이 없거나 읽지 못하면 휴게소 응답은 그대로 둔다(D6).
+    """
+    dataset = DATASET_REST_AREA_FOOD
+    try:
+        meta = await store.current_meta(dataset.name)
+        raw = await store.get_values(dataset.name, meta.generation, [feature_id])
+    except StateNotLoaded:
+        return None, None
+    except StateStoreError:
+        _LOGGER.warning("휴게소 먹거리 데이터셋을 읽지 못해 먹거리 없이 응답한다.")
+        return None, None
+    return _parse_food(raw[0], feature_id), _freshness(dataset, meta)
+
+
+def _parse_food(value: bytes | str | None, feature_id: str) -> RestAreaFoodState | None:
+    """먹거리 값. 서비스 응답에는 자동 짝 주유소만 남긴다 — 검토 짝은 관리자 목록에만(ADR-127)."""
+    if value is None:
+        return None
+    try:
+        food = RestAreaFoodState.model_validate_json(value)
+    except ValidationError:
+        _LOGGER.warning("휴게소 먹거리 값 모양이 다르다: %s", feature_id)
+        return None
+    return food.model_copy(
+        update={"stations": [station for station in food.stations if station.automatic]}
+    )
+
+
+async def _paired_rest_area_food(
+    store: ValkeyStateStore, station: FuelStationOut
+) -> tuple[PairedRestAreaFood | None, TransportFreshness | None]:
+    """주유소와 자동으로 짝지은 휴게소의 먹거리(ADR-127).
+
+    짝은 적재 job이 전체 주유소·휴게소를 한 번에 보고 일대일로 정해 둔다(``pair_stations``).
+    여기서는
+    먹거리 세대의 lookup(주유소 feature_id → 휴게소 feature_id)으로 찾기만 한다. 자동 하한 미만 짝은
+    lookup에 없다 — 관리자 검토 목록(``/v1/ops/rest-area-food/review``)에만 나온다.
+    """
+    dataset = DATASET_REST_AREA_FOOD
+    try:
+        meta = await store.current_meta(dataset.name)
+        [rest_area_id] = await store.lookup(dataset.name, meta.generation, [station.feature_id])
+        raw = (
+            await store.get_values(dataset.name, meta.generation, [rest_area_id])
+            if rest_area_id is not None
+            else [None]
+        )
+    except StateNotLoaded:
+        return None, None
+    except StateStoreError:
+        _LOGGER.warning("휴게소 먹거리 데이터셋을 읽지 못해 주유소 먹거리 없이 응답한다.")
+        return None, None
+    freshness = _freshness(dataset, meta)
+    food = _parse_food(raw[0], rest_area_id or station.feature_id)
+    pair = next(
+        (
+            entry
+            for entry in (food.stations if food is not None else [])
+            if entry.feature_id == station.feature_id and entry.automatic
+        ),
+        None,
+    )
+    if food is None or pair is None:
+        return None, freshness
+    return (
+        PairedRestAreaFood(
+            confidence=pair.confidence,
+            method=pair.method,
+            distance_m=pair.distance_m,
+            rest_area=food,
+        ),
+        freshness,
+    )
+
+
 FeatureIdPath = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_\-]+$")]
 
 
@@ -826,8 +943,14 @@ async def get_fuel_station(
 ) -> FuelStationDetailResponse:
     started_at = perf_counter()
     item, meta = await _detail(store, DATASET_FUEL_STATIONS, FuelStationOut, feature_id)
+    food, food_freshness = await _paired_rest_area_food(store, item)
     return FuelStationDetailResponse(
-        data=FuelStationDetailData(item=item, freshness=_freshness(DATASET_FUEL_STATIONS, meta)),
+        data=FuelStationDetailData(
+            item=item,
+            freshness=_freshness(DATASET_FUEL_STATIONS, meta),
+            rest_area_food=food,
+            food_freshness=food_freshness,
+        ),
         meta=make_meta(request, started_at=started_at),
     )
 
@@ -985,11 +1108,14 @@ async def get_rest_area(
     started_at = perf_counter()
     item, meta = await _detail(store, DATASET_REST_AREAS, RestAreaOut, feature_id)
     items, price_freshness = await _attach_rest_area_prices(store, [item])
+    food, food_freshness = await _rest_area_food(store, item.feature_id)
     return RestAreaDetailResponse(
         data=RestAreaDetailData(
             item=items[0],
             freshness=_freshness(DATASET_REST_AREAS, meta),
             fuel_price_freshness=price_freshness,
+            food=food,
+            food_freshness=food_freshness,
         ),
         meta=make_meta(request, started_at=started_at),
     )

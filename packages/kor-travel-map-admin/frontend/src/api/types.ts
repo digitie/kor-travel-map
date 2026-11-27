@@ -2479,6 +2479,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/ops/rest-area-food/review": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** 휴게소 먹거리 연결·주유소 짝 검토 목록 (ADR-127) */
+        get: operations["rest_area_food_review_v1_ops_rest_area_food_review_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/ops/system-logs": {
         parameters: {
             query?: never;
@@ -10416,8 +10433,12 @@ export interface components {
         };
         /** FuelStationDetailData */
         FuelStationDetailData: {
+            /** @description 휴게소 먹거리 데이터셋의 신선도. 아직 적재 전이면 null. */
+            food_freshness?: components["schemas"]["TransportFreshness"] | null;
             freshness: components["schemas"]["TransportFreshness"];
             item: components["schemas"]["FuelStationOut"];
+            /** @description 400 m 안 같은 방향 휴게소의 한국도로공사 메뉴 요약(ADR-127). 고속도로 주유소가 아니거나 짝이 확실하지 않거나 먹거리 데이터셋을 읽지 못하면 null. */
+            rest_area_food?: components["schemas"]["PairedRestAreaFood"] | null;
         };
         /** FuelStationDetailResponse */
         FuelStationDetailResponse: {
@@ -12314,6 +12335,22 @@ export interface components {
             page_size: number;
             /** Total */
             total?: number | null;
+        };
+        /**
+         * PairedRestAreaFood
+         * @description 주유소와 짝지은 휴게소의 먹거리(ADR-127). 신뢰도가 자동 하한 이상일 때만 실린다.
+         */
+        PairedRestAreaFood: {
+            /** Confidence */
+            confidence: number;
+            /** Distance M */
+            distance_m: number;
+            /**
+             * Method
+             * @description 짝 근거(name_direction·name_bidirectional·name_updown_nearest·name_single).
+             */
+            method: string;
+            rest_area: components["schemas"]["RestAreaFoodState"];
         };
         /**
          * PipelineCancellationDetailRecord
@@ -14301,6 +14338,10 @@ export interface components {
         };
         /** RestAreaDetailData */
         RestAreaDetailData: {
+            /** @description 한국도로공사 메뉴 요약과 표준 코드 연결(ADR-127). 연결하지 못했거나 먹거리 데이터셋을 읽지 못하면 null. */
+            food?: components["schemas"]["RestAreaFoodState"] | null;
+            /** @description 휴게소 먹거리 데이터셋의 신선도. 아직 적재 전이면 null. */
+            food_freshness?: components["schemas"]["TransportFreshness"] | null;
             freshness: components["schemas"]["TransportFreshness"];
             fuel_price_freshness: components["schemas"]["TransportFreshness"] | null;
             item: components["schemas"]["RestAreaOut"];
@@ -14309,6 +14350,124 @@ export interface components {
         RestAreaDetailResponse: {
             data: components["schemas"]["RestAreaDetailData"];
             meta: components["schemas"]["Meta"];
+        };
+        /** RestAreaFoodReviewData */
+        RestAreaFoodReviewData: {
+            /**
+             * Auto Confidence
+             * @description 자동 하한. 이 미만은 PinVi에 보이지 않는다.
+             */
+            auto_confidence: number;
+            /** Automatic Count */
+            automatic_count: number;
+            /** Linked Count */
+            linked_count: number;
+            /** Rest Area Count */
+            rest_area_count: number;
+            /**
+             * Station Count
+             * @description 휴게소 400 m 안 주유소 수(짝 후보가 있는 주유소).
+             */
+            station_count: number;
+            /** Station Pairs */
+            station_pairs: components["schemas"]["StationPairReview"][];
+            /** Unlinked Rest Areas */
+            unlinked_rest_areas: components["schemas"]["UnlinkedRestArea"][];
+        };
+        /** RestAreaFoodReviewResponse */
+        RestAreaFoodReviewResponse: {
+            data: components["schemas"]["RestAreaFoodReviewData"];
+            meta: components["schemas"]["Meta"];
+        };
+        /**
+         * RestAreaFoodState
+         * @description 휴게소 하나의 먹거리 요약과 한국도로공사 표준 코드 연결(ADR-127).
+         *
+         *     ``feature_id``는 같은 휴게소의 :class:`RestAreaState` ``feature_id``다(데이터셋
+         *     ``transport.rest_area_food``). 값은 transport ``rest-area-food`` export에서 결정적으로 계산한다
+         *     — LLM을 쓰지
+         *     않는다.
+         */
+        RestAreaFoodState: {
+            /**
+             * Attribution
+             * @default 한국도로공사
+             * @constant
+             */
+            attribution: "한국도로공사";
+            coord: components["schemas"]["StateCoordinate"] | null;
+            /**
+             * Direction Code
+             * @description 상행·하행(0615 gudClssCd).
+             */
+            direction_code?: ("up" | "down") | null;
+            /**
+             * Ex Name
+             * @description 한국도로공사 원천 이름. 예: 서울만남(부산)휴게소.
+             */
+            ex_name: string;
+            /** Feature Id */
+            feature_id: string;
+            /**
+             * Featured
+             * @description 대표 → 프리미엄 → 추천 순, 같은 무리는 가격 순. 최대 12.
+             */
+            featured: components["schemas"]["RestAreaMenuItemState"][];
+            /** Link Confidence */
+            link_confidence: number;
+            /**
+             * Link Method
+             * @enum {string}
+             */
+            link_method: "name_exact" | "name_merged";
+            /** Menu Count */
+            menu_count: number;
+            /**
+             * Menu Updated On
+             * @description 원천 메뉴 수정일(lastDtime) 가운데 가장 늦은 날.
+             */
+            menu_updated_on?: string | null;
+            /** Natural Key */
+            natural_key: string;
+            /** Price Max */
+            price_max?: number | null;
+            /**
+             * Price Median
+             * @description 0보다 큰 가격의 중앙값(짝수 개면 낮은 쪽).
+             */
+            price_median?: number | null;
+            /** Price Min */
+            price_min?: number | null;
+            /**
+             * Rest Area Name
+             * @description 휴게소 표시 이름(RestAreaState.name과 같다).
+             */
+            rest_area_name: string;
+            /** Route Code */
+            route_code?: string | null;
+            /** Route Name */
+            route_name?: string | null;
+            /**
+             * Seasonal
+             * @description 여름·겨울 메뉴. 최대 10.
+             */
+            seasonal: components["schemas"]["RestAreaMenuItemState"][];
+            /**
+             * Source Collected At
+             * Format: date-time
+             * @description transport가 한국도로공사에서 이 메뉴를 받은 시각(화면의 기준일).
+             */
+            source_collected_at: string;
+            /**
+             * Stations
+             * @description 400 m 안에서 이 휴게소를 고른 오피넷 주유소(일대일로 다듬은 결과). Valkey 값에는 자동·검토가 모두 있고, 서비스 응답에는 자동(automatic=true)만 싣는다.
+             */
+            stations?: components["schemas"]["RestAreaStationPairState"][];
+            /**
+             * Std Rest Code
+             * @description 한국도로공사 휴게소 표준 코드 6자리(0615 svarCd = 0502 stdRestCd).
+             */
+            std_rest_code: string;
         };
         /**
          * RestAreaFuelPriceState
@@ -14375,6 +14534,26 @@ export interface components {
             data: components["schemas"]["RestAreaListData"];
             meta: components["schemas"]["Meta"];
         };
+        /**
+         * RestAreaMenuItemState
+         * @description 휴게소 메뉴 하나(한국도로공사 0502).
+         */
+        RestAreaMenuItemState: {
+            /** Name */
+            name: string;
+            /**
+             * Price
+             * @description 원. 원천에 없으면 null.
+             */
+            price: number | null;
+            /** Season */
+            season?: ("all_year" | "summer" | "winter") | null;
+            /**
+             * Tags
+             * @description 대표(bestfoodyn)·프리미엄·추천 표시.
+             */
+            tags: ("best" | "premium" | "recommended")[];
+        };
         /** RestAreaOut */
         RestAreaOut: {
             address: components["schemas"]["StateAddress"];
@@ -14419,6 +14598,30 @@ export interface components {
             phone?: string | null;
             /** Route Name */
             route_name?: string | null;
+        };
+        /**
+         * RestAreaStationPairState
+         * @description 이 휴게소와 짝지은(또는 검토로 남긴) 오피넷 주유소 하나(ADR-127).
+         */
+        RestAreaStationPairState: {
+            /**
+             * Automatic
+             * @description true면 주유소 상세에 이 휴게소 먹거리가 보인다.
+             */
+            automatic: boolean;
+            /** Confidence */
+            confidence: number;
+            /** Distance M */
+            distance_m: number;
+            /**
+             * Feature Id
+             * @description 주유소 상태(FuelStationState)의 feature_id.
+             */
+            feature_id: string;
+            /** Method */
+            method: string;
+            /** Name */
+            name: string;
         };
         /**
          * ReviewFeatureDetailRecord
@@ -14565,6 +14768,25 @@ export interface components {
             lat: number;
             /** Lon */
             lon: number;
+        };
+        /** StationPairReview */
+        StationPairReview: {
+            /** Automatic */
+            automatic: boolean;
+            /** Confidence */
+            confidence: number;
+            /** Distance M */
+            distance_m: number;
+            /** Method */
+            method: string;
+            /** Rest Area Feature Id */
+            rest_area_feature_id: string;
+            /** Rest Area Name */
+            rest_area_name: string;
+            /** Station Feature Id */
+            station_feature_id: string;
+            /** Station Name */
+            station_name: string;
         };
         /** SummaryBucket */
         SummaryBucket: {
@@ -14823,6 +15045,15 @@ export interface components {
         TransportStatusResponse: {
             data: components["schemas"]["TransportStatusData"];
             meta: components["schemas"]["Meta"];
+        };
+        /** UnlinkedRestArea */
+        UnlinkedRestArea: {
+            /** Feature Id */
+            feature_id: string;
+            /** Name */
+            name: string;
+            /** Natural Key */
+            natural_key: string;
         };
         /** VersionData */
         VersionData: {
@@ -24355,6 +24586,50 @@ export interface operations {
             };
             /** @description 저장소 또는 Dagster transport 장애 */
             503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+            /** @description RFC7807 `application/problem+json` 에러 본문. 모든 4xx/5xx는 중앙 예외 핸들러가 동일 형식(`code`/`request_id` 확장 멤버 포함)으로 반환한다 (docs/architecture/rest-api.md §1.5). */
+            default: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["ProblemDetail"];
+                };
+            };
+        };
+    };
+    rest_area_food_review_v1_ops_rest_area_food_review_get: {
+        parameters: {
+            query?: {
+                /** @description 자동으로 쓰는 짝도 함께 준다. */
+                include_automatic?: boolean;
+            };
+            header?: {
+                /** @description service principal을 사용할 때 GET은 `ops:read`, exact import-job cancel POST는 `ops:cancel`이 필수다. 권한은 scope 문자열이 아니라 각각의 secret과 method/exact path 결박으로 판정한다. trusted admin frontend BFF 인증에는 이 헤더가 필요하지 않다. */
+                "X-Kor-Travel-Map-Ops-Scope"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RestAreaFoodReviewResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
                 headers: {
                     [name: string]: unknown;
                 };

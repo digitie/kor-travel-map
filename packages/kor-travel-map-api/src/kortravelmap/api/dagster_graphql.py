@@ -67,6 +67,7 @@ _DEFAULT_SCHEDULE_CRONS: dict[str, str] = {
     "transport_state_rest_area_fuel_prices_schedule": "27 * * * *",
     "transport_state_highway_incidents_schedule": "3-59/10 * * * *",
     "transport_state_airports_schedule": "53 4 * * *",
+    "transport_state_rest_area_food_schedule": "7 5 * * *",
     # ADR-114 2단계 — Valkey weather 상태 적재(dagster `WEATHER_STATE_SPECS`와 같은 값).
     "weather_state_locations_schedule": "37 4 * * *",
     "weather_state_current_schedule": "25,40 * * * *",

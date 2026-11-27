@@ -10,6 +10,10 @@
 >
 > **2026-11-09 ADR-120** — 휴게소 place 이름은 표시 이름(`krex.rest_area_display_name`: "강릉(인천)" → "강릉휴게소(인천방향)")으로 저장하고 원천 이름은 raw·자연키에 남는다. 휴게소·공항 place는 ADR-114 결정 7 ②의 퇴역 대상에서 빠졌다. 철도역·여객선 항구도 같은 transport 기준정보 경로다(`providers.transport_reference_places`, dataset `transport_rail_stations`·`transport_ferry_ports`).
 
+> **2026-11-27 ADR-127** — 휴게소 place 적재는 transport `rest-area-food`(KREX 0615 코드·0502 메뉴)도 받아 한국도로공사 표준
+> 코드를 이름으로 잇고 `facility_info.ex_link`·`highway_name`·`direction`을 채운다(자연키 그대로). 메뉴 요약은 PG가 아니라
+> Valkey `transport.rest_area_food`다.
+
 본 문서는 한국도로공사(`python-krex-api`) 휴게소 데이터 — 위치, 시설, 유가,
 기상 — 를 적재하는 ETL이다.
 

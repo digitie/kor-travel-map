@@ -85,7 +85,7 @@ from .provider_fetchers import (
     fetch_transport_ferry_ports,
     fetch_transport_fuel_stations,
     fetch_transport_rail_stations,
-    fetch_transport_rest_areas,
+    fetch_transport_rest_areas_linked,
     fetch_visitkorea_festivals,
     fetch_visitkorea_tourist_attractions,
 )
@@ -638,7 +638,7 @@ _TRANSPORT_REST_AREAS_SPEC: ProviderRecordResourceSpec = next(
 PROVIDER_RECORD_RESOURCE_DEFINITIONS["transport_rest_areas"] = (
     build_provider_record_live_resource(
         _TRANSPORT_REST_AREAS_SPEC,
-        fetch_transport_rest_areas,
+        fetch_transport_rest_areas_linked,
     )
 )
 

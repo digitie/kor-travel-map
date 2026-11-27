@@ -1,3 +1,19 @@
+## 2026-11-27 — 휴게소 먹거리(한국도로공사 메뉴) — 휴게소·고속도로 주유소 상세 (ADR-127)
+
+- 소유자 승인 계획(조사 보고서 2순위, LLM 없음): transport가 KREX 0615(휴게소 코드·상하행)·0502(메뉴)를 하루 한 번 수집해
+  `rest-area-food` export로 낸다(transport 2026-11-27, python-krex-api #21). Map은 그것을 받아
+  - 휴게소 ↔ KREX 표준 코드를 정규화 이름으로 잇는다(`providers.rest_area_food`). **운영 215곳 모두 연결**(정확 213 + 0615·0502
+    코드가 갈린 함양 상하행 2곳 합침), 메뉴가 붙는 곳 213곳. 좌표는 쓰지 않는다(0124 좌표가 290 km 어긋난 행).
+  - 메뉴를 결정적으로 요약해(대표·프리미엄·추천, 가격 최저·중앙·최고, 여름·겨울 메뉴, 기준일) 새 Valkey 데이터셋
+    `transport.rest_area_food`에 싣고(`transport_state_rest_area_food`, 매일 05:07, 코드 기본 STOPPED),
+    `/v1/service/transport/rest-areas/{id}`(`food`)·`/fuel-stations/{id}`(`rest_area_food`)가 준다.
+  - 오피넷 주유소 ↔ 휴게소 짝은 적재 job이 주유소 export까지 받아 전체를 한 번에 정하고 일대일로 다듬는다(lookup 키).
+    **운영 242곳 중 자동 204곳(84.3%)**, 검토 38곳은 `GET /v1/ops/rest-area-food/review`(operator)에만. 적대 리뷰가 찾은 1차
+    규칙의 오짝 6건((상)/(하) 기준 차이 2, 휴게소 지명이 든 근처 일반 주유소 4)은 모두 검토로 내려갔다.
+  - PG 휴게소 place는 `facility_info.ex_link`(코드·노선·상하행·근거)와 비어 있던 `highway_name`·`direction`을 채운다.
+    PG 적재는 먹거리 export가 없으면 실패한다(출렁임 방지).
+- `RestAreaState` 모양은 그대로(키 스키마 버전 유지). OpenAPI(admin·service) 갱신, migration 없음.
+
 ## 2026-11-27 — 대표 원천을 쓰기 시점에 유지(ADR-125, alembic 459, T-READ-13)
 
 - 근거(prod 읽기 전용, jit off, #1561 코드를 리터럴로 렌더링): `sort=provider` 첫 페이지 2.7 s(냉 6.5 s, hash 127 MB·정렬

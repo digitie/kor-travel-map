@@ -69,6 +69,7 @@ JOB_RUN_PRIORITIES: Final[Mapping[str, int]] = MappingProxyType({
     "transport_state_rest_area_fuel_prices": HOURLY_PRIORITY,  # 매시
     "transport_state_rest_areas": BATCH_PRIORITY,  # 매일
     "transport_state_airports": BATCH_PRIORITY,  # 매일
+    "transport_state_rest_area_food": BATCH_PRIORITY,  # 매일
     "weather_state_current": REALTIME_PRIORITY,  # 매시 :25·:40
     "weather_state_forecast_ultra_short": HOURLY_PRIORITY,  # 매시
     "weather_state_daily_summaries": HOURLY_PRIORITY,  # 매시

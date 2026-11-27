@@ -98,8 +98,10 @@ _EXPECTED_FETCHERS: frozenset[str] = frozenset(
         "fetch_transport_airports",
         "fetch_transport_ferry_ports",
         "fetch_transport_rail_stations",
+        "fetch_transport_rest_area_food",
         "fetch_transport_rest_area_fuel_prices",
         "fetch_transport_rest_areas",
+        "fetch_transport_rest_areas_linked",
         "fetch_transport_highway_incidents",
         "fetch_krforest_arboretums",
         "fetch_krforest_dulle_trails",
@@ -194,7 +196,9 @@ _ENTRYPOINT_PREFIXES: tuple[str, ...] = (
 #: `aiter_paginated_items`가, 상세(`fetch_visitkorea_attraction_details`)는 호출마다 센다.
 #: 2026-11-10 34 → 33: 표준데이터 축제(`fetch_datagokr_cultural_festivals`)가 퇴역했다(449). TourAPI
 #: 축제 fetcher는 이름만 바뀌었다(`fetch_visitkorea_festivals`, 여전히 센다).
-_EXPECTED_FULLY_COUNTED: int = 33
+#: 2026-11-27 33 → 35: 휴게소 먹거리(ADR-127) — `fetch_transport_rest_area_food`와 그것을 휴게소에
+#: 잇는 `fetch_transport_rest_areas_linked`. 둘 다 `_iter_transport_export`가 센다.
+_EXPECTED_FULLY_COUNTED: int = 35
 
 
 def _module_trees() -> dict[str, ast.Module]:

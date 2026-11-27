@@ -340,6 +340,7 @@ ROUTE_POLICIES: dict[str, RoutePolicy] = {
     "/v1/ops/datasets/{provider_dataset_id:int}": RoutePolicy.OPERATOR,
     "/v1/ops/datasets/{provider_dataset_id:int}/preview": RoutePolicy.OPERATOR,
     "/v1/ops/datasets/refresh-policy": RoutePolicy.OPERATOR,
+    "/v1/ops/rest-area-food/review": RoutePolicy.OPERATOR,
     # -- operator — geo 릴리스 재지오코딩 계획(ADR-109 결정 8, T-GR-04).
     "/v1/ops/geo-releases": RoutePolicy.OPERATOR,
     "/v1/ops/geo-releases/detect": RoutePolicy.OPERATOR,

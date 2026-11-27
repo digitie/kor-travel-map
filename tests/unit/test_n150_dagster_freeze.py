@@ -86,6 +86,7 @@ _RUNNING_SCHEDULES = (
     "transport_state_airports_schedule",
     "transport_state_fuel_stations_schedule",
     "transport_state_highway_incidents_schedule",
+    "transport_state_rest_area_food_schedule",
     "transport_state_rest_area_fuel_prices_schedule",
     "transport_state_rest_areas_schedule",
     "weather_state_current_schedule",
@@ -121,6 +122,7 @@ _STATE_SCHEDULES = frozenset(
         "transport_state_airports_schedule",
         "transport_state_fuel_stations_schedule",
         "transport_state_highway_incidents_schedule",
+        "transport_state_rest_area_food_schedule",
         "transport_state_rest_area_fuel_prices_schedule",
         "transport_state_rest_areas_schedule",
         "weather_state_current_schedule",
@@ -413,7 +415,7 @@ def test_freeze_stops_every_map_instigator_and_unfreeze_restores_the_exact_snaps
     document = json.loads(snapshot.read_text(encoding="utf-8"))
     assert document["format"] == "ktm-dagster-freeze/v1"
     assert document["location"] == _MAP
-    assert document["count"] == len(_RUNNING_SCHEDULES) + len(_SENSORS) == 61
+    assert document["count"] == len(_RUNNING_SCHEDULES) + len(_SENSORS) == 62
     recorded = {(e["kind"], e["name"]): e["status"] for e in document["instigators"]}
     assert recorded == before
 

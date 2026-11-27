@@ -1,3 +1,12 @@
+## 2026-11-27 — 휴게소 먹거리(ADR-127, 배포 대기)
+
+- transport `rest-area-food` export를 받아 휴게소 KREX 코드 연결(215/215)·메뉴 요약을 Valkey `transport.rest_area_food`에,
+  주유소 짝(242곳 중 자동 204, 일대일)을 주유소 상세에. PG 휴게소 `facility_info.ex_link`·노선·방향 채움. OpenAPI 갱신, migration 없음.
+- 다음: transport 배포(odroid, Codex)·먹거리 수집 1회 → Map 회전 → `transport_state_rest_area_food_schedule` RUNNING·1회 실행,
+  `feature_place_transport_rest_areas` 1회 실행 → PinVi 재vendor·배포. 확인: 휴게소 상세 `food`, 고속도로 주유소 상세
+  `rest_area_food`, `/v1/ops/rest-area-food/review` 검토 38곳 안팎. 주의: 먹거리 export가 멈추면 주간 휴게소 place
+  적재도 실패한다(ADR-127 결정 4). 후속: 관리자 화면 검토 표, 연결 실패 사유를 검토 목록에.
+
 ## 2026-11-27 — 대표 원천 쓰기 시점 유지(ADR-125, alembic 459, T-READ-13)
 
 - 관리자 `sort=provider`·dataset 필터·nearby·dedup 검토가 trigger로 유지되는 `feature.feature_primary_sources`를 읽는다. 규칙은
