@@ -1073,3 +1073,74 @@ async def test_a_wait_that_would_overrun_the_run_retry_time_is_not_taken(
         _ = [item async for item in fetch_transport_airports(_settings())]
     assert retry_sleeps == [40.0]  # 두 번째 40초는 상한 60초를 넘긴다
     assert len(seen) == 2
+
+
+async def test_linked_rest_areas_carry_the_krex_code_and_the_state_job_summarizes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """ADR-127: 휴게소 + 먹거리 export → PG용 ``ex_*`` 연결, Valkey용 메뉴 요약."""
+    from kortravelmap.dto.transport_state import RestAreaFoodState
+
+    from kortravelmap.dagster.provider_fetchers import fetch_transport_rest_areas_linked
+    from kortravelmap.dagster.transport_state import TRANSPORT_STATE_SPECS
+
+    food = _golden("rest-area-food.json")
+    responses = {
+        "/v1/service/exports/rest-areas": {
+            **_golden("rest-areas.json"), "has_more": False, "next_cursor": None,
+        },
+        "/v1/service/exports/rest-area-food": {**food, "has_more": False, "next_cursor": None},
+    }
+    _install(monkeypatch, lambda request: httpx.Response(200, json=responses[request.url.path]))
+    [area] = [item async for item in fetch_transport_rest_areas_linked(_settings())]
+    assert area.ex_std_rest_code == "000341"
+    assert (area.ex_route_name, area.ex_direction_code) == ("서해안선", "up")
+
+    spec = next(spec for spec in TRANSPORT_STATE_SPECS if spec.job_name.endswith("rest_area_food"))
+    collected: list[datetime] = []
+    [item] = await spec.collect(_settings(), collected.append)
+    state = RestAreaFoodState.model_validate_json(item.value)
+    assert state.std_rest_code == "000341"
+    assert state.menu_count == 4
+    assert state.featured[0].tags == ["best"]
+    assert state.source_collected_at == datetime.fromisoformat(
+        food["collection"]["last_success_at"].replace("Z", "+00:00")
+    )
+    assert collected == [state.source_collected_at]
+
+
+async def test_linked_rest_areas_fail_when_the_food_export_is_not_current(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.dagster.provider_fetchers import fetch_transport_rest_areas_linked
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path.endswith("rest-area-food"):
+            return httpx.Response(404)
+        return httpx.Response(200, json={**_golden("rest-areas.json"), "has_more": False})
+
+    _install(monkeypatch, handler)
+    with pytest.raises(TransportExportHidden):
+        _ = [item async for item in fetch_transport_rest_areas_linked(_settings())]
+
+
+async def test_rest_area_food_pages_must_share_one_collection(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from kortravelmap.dagster.provider_fetchers import fetch_transport_rest_area_food
+
+    food = _golden("rest-area-food.json")
+    first = {**food, "items": food["items"][:1], "has_more": True, "next_cursor": "1"}
+    later = {
+        **food,
+        "items": food["items"][1:],
+        "collection": {**food["collection"], "last_success_at": "2026-11-28T18:50:00Z"},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=later if request.url.params.get("cursor") else first)
+
+    _install(monkeypatch, handler)
+    with pytest.raises(TransportExportNotCurrent, match="세대"):
+        _ = [item async for item in fetch_transport_rest_area_food(_settings())]
+

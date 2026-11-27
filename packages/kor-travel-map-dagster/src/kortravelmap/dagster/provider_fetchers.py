@@ -43,6 +43,7 @@ from kortravelmap.providers.kor_travel_transport import (
     EXPORT_PATH_FUEL_STATIONS,
     EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE,
     EXPORT_PATH_RAIL_STATIONS,
+    EXPORT_PATH_REST_AREA_FOOD,
     EXPORT_PATH_REST_AREA_FUEL_PRICES,
     EXPORT_PATH_REST_AREAS,
     SERVICE_TOKEN_HEADER,
@@ -66,6 +67,7 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportHighwayIncident,
     TransportRailStation,
     TransportRestArea,
+    TransportRestAreaFood,
     TransportRestAreaFuelPrice,
     TransportSnapshotExpired,
     TransportSourceInconsistent,
@@ -78,10 +80,12 @@ from kortravelmap.providers.kor_travel_transport import (
     parse_rail_station,
     parse_reference_page,
     parse_rest_area,
+    parse_rest_area_food,
     parse_rest_area_fuel_price,
     require_current_collection,
     require_fresh_incident_set,
 )
+from kortravelmap.providers.rest_area_food import with_rest_area_links
 from kortravelmap.providers.visitkorea import festival_window_start
 from kortravelmap.providers.visitkorea_attractions import TOURAPI_PLACE_CONTENT_TYPE_IDS
 from sqlalchemy import create_engine
@@ -142,8 +146,10 @@ __all__ = [
     "fetch_transport_fuel_stations",
     "fetch_transport_highway_incidents",
     "fetch_transport_rail_stations",
+    "fetch_transport_rest_area_food",
     "fetch_transport_rest_area_fuel_prices",
     "fetch_transport_rest_areas",
+    "fetch_transport_rest_areas_linked",
     "fetch_visitkorea_festivals",
     "fetch_visitkorea_attraction_details",
     "fetch_visitkorea_tourist_attractions",
@@ -1045,6 +1051,60 @@ async def fetch_transport_rest_areas(
     async for area in _iter_transport_export(
         settings, EXPORT_PATH_REST_AREAS, parse_rest_area, on_collected_at
     ):
+        yield area
+
+
+async def fetch_transport_rest_area_food(
+    settings: KorTravelMapSettings,
+    *,
+    on_collected_at: Callable[[datetime], None] | None = None,
+) -> AsyncIterator[TransportRestAreaFood]:
+    """휴게소·주유소 표준 코드(KREX 0615)와 휴게소별 메뉴(KREX 0502) — ADR-127.
+
+    이 export의 현재 집합은 "마지막 성공 수집이 본 행 그대로"다(transport ADR-013 개정 2026-11-27).
+    페이지
+    사이에 수집이 바뀌면 앞 페이지와 뒤 페이지가 다른 세대가 되므로, 모든 페이지의
+    ``last_success_at``이
+    같은지 확인하고 다르면 :class:`TransportExportNotCurrent`로 멈춘다(다음 tick이 다시 받는다).
+    """
+    seen: set[datetime] = set()
+
+    def _seen(value: datetime) -> None:
+        seen.add(value)
+        if on_collected_at is not None:
+            on_collected_at(value)
+
+    items = [
+        food
+        async for food in _iter_transport_export(
+            settings, EXPORT_PATH_REST_AREA_FOOD, parse_rest_area_food, _seen
+        )
+    ]
+    if len(seen) > 1:
+        raise TransportExportNotCurrent(
+            "rest-area-food: 페이지 사이에 transport 수집 세대가 바뀌었다 — "
+            "다음 실행에서 다시 받는다."
+        )
+    for food in items:
+        yield food
+
+
+async def fetch_transport_rest_areas_linked(
+    settings: KorTravelMapSettings,
+    *,
+    on_collected_at: Callable[[datetime], None] | None = None,
+) -> AsyncIterator[TransportRestArea]:
+    """휴게소 기준정보에 한국도로공사 표준 코드·노선·상하행을 이어 낸다(ADR-127, PG place 적재용).
+
+    두 export를 끝까지 받은 뒤에만 낸다. 먹거리 export가 503·404면 run이 실패한다 — 연결 없이 적재해
+    facility_info의 코드가 사라졌다 돌아오는 출렁임을 만들지 않는다(실패한 run은 아무것도 바꾸지
+    않는다).
+    """
+    areas = [
+        area async for area in fetch_transport_rest_areas(settings, on_collected_at=on_collected_at)
+    ]
+    foods = [food async for food in fetch_transport_rest_area_food(settings)]
+    for area in with_rest_area_links(areas, foods):
         yield area
 
 

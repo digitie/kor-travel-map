@@ -120,6 +120,7 @@ from kortravelmap.api.routers import (
     ops_live_router,
     ops_logs_router,
     ops_pipeline_router,
+    ops_rest_area_food_router,
     ops_router,
     place_attributes_router,
     poi_cache_targets_router,
@@ -1483,6 +1484,12 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     if ops_routes_enabled:
         application.include_router(
             ops_datasets_router,
+            prefix="/v1",
+            dependencies=[Depends(require_ops_operator)],
+        )
+        # ADR-127 — 휴게소 먹거리 연결·주유소 짝 검토(Valkey read only).
+        application.include_router(
+            ops_rest_area_food_router,
             prefix="/v1",
             dependencies=[Depends(require_ops_operator)],
         )

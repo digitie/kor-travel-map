@@ -41,7 +41,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any, Final, Literal
 
@@ -107,6 +107,8 @@ __all__ = [
     "TransportReferenceMeta",
     "TransportReferencePage",
     "TransportRestArea",
+    "TransportRestAreaFood",
+    "TransportRestAreaFoodMenu",
     "TransportRestAreaFuelPrice",
     "TransportExportTooLarge",
     "TransportSnapshotExpired",
@@ -123,6 +125,7 @@ __all__ = [
     "parse_rail_station",
     "parse_reference_page",
     "parse_rest_area",
+    "parse_rest_area_food",
     "parse_rest_area_fuel_price",
     "require_current_collection",
     "require_fresh_incident_set",
@@ -154,6 +157,10 @@ SERVICE_TOKEN_HEADER: Final[str] = "X-Kor-Travel-Transport-Service-Token"
 EXPORT_PATH_FUEL_STATIONS: Final[str] = "/v1/service/exports/fuel-stations"
 EXPORT_PATH_REST_AREAS: Final[str] = "/v1/service/exports/rest-areas"
 EXPORT_PATH_REST_AREA_FUEL_PRICES: Final[str] = "/v1/service/exports/rest-area-fuel-prices"
+EXPORT_PATH_REST_AREA_FOOD: Final[str] = "/v1/service/exports/rest-area-food"
+"""휴게소·주유소 표준 코드(KREX 0615)와 휴게소별 메뉴(KREX 0502).
+
+T1 페이지 계약(transport 2026-11-27)."""
 EXPORT_PATH_HIGHWAY_INCIDENTS_ACTIVE: Final[str] = "/v1/service/exports/highway-incidents/active"
 EXPORT_PATH_AIRPORTS: Final[str] = "/v1/service/exports/airports"
 EXPORT_PATH_RAIL_STATIONS: Final[str] = "/v1/service/exports/rail-stations"
@@ -521,6 +528,42 @@ class TransportRestArea:
     has_lpg_station: bool | None
     has_ev_charger: bool | None
     raw: Mapping[str, Any]
+    ex_std_rest_code: str | None = None
+    """한국도로공사 휴게소 표준 코드(ADR-127).
+
+    ``rest-area-food`` export와 이름으로 이은 뒤에만 채운다."""
+    ex_route_code: str | None = None
+    ex_route_name: str | None = None
+    ex_direction_code: Literal["up", "down"] | None = None
+    ex_link_method: str | None = None
+    ex_link_confidence: float | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class TransportRestAreaFoodMenu:
+    """휴게소 메뉴 1건(KREX 0502)."""
+
+    seq: str
+    name: str
+    price: int | None
+    is_best: bool | None
+    is_premium: bool | None
+    is_recommended: bool | None
+    season: Literal["all_year", "summer", "winter"] | None
+    menu_updated_on: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class TransportRestAreaFood:
+    """휴게소·주유소 표준 코드 1건과 그 메뉴(transport ``rest-area-food`` item)."""
+
+    std_rest_code: str
+    name: str
+    facility_class: Literal["rest_area", "gas_station"] | None
+    direction: Literal["up", "down"] | None
+    route_code: str | None
+    route_name: str | None
+    menus: tuple[TransportRestAreaFoodMenu, ...]
 
 
 @dataclass(frozen=True, slots=True)
@@ -839,6 +882,62 @@ def parse_rest_area(item: Mapping[str, Any]) -> TransportRestArea:
         has_lpg_station=_bool(item, "has_lpg_station", where),
         has_ev_charger=_bool(item, "has_ev_charger", where),
         raw=_raw(item, where),
+    )
+
+
+_FOOD_SEASONS: Final[frozenset[str]] = frozenset({"all_year", "summer", "winter"})
+_FOOD_CLASSES: Final[frozenset[str]] = frozenset({"rest_area", "gas_station"})
+_FOOD_DIRECTIONS: Final[frozenset[str]] = frozenset({"up", "down"})
+
+
+def _choice(
+    item: Mapping[str, Any], key: str, where: str, allowed: frozenset[str]
+) -> Any:
+    value = _text(item, key, where)
+    if value is not None and value not in allowed:
+        raise TransportExportContractError(
+            f"{where}.{key}: {sorted(allowed)} 중 하나 또는 null이어야 한다."
+        )
+    return value
+
+
+def _iso_date(item: Mapping[str, Any], key: str, where: str) -> date | None:
+    value = _text(item, key, where)
+    if value is None:
+        return None
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise TransportExportContractError(f"{where}.{key}: YYYY-MM-DD가 아니다.") from exc
+
+
+def parse_rest_area_food(item: Mapping[str, Any]) -> TransportRestAreaFood:
+    where = "rest-area-food.item"
+    menus_value = item.get("menus")
+    if not isinstance(menus_value, list):
+        raise TransportExportContractError(f"{where}.menus: 배열이어야 한다.")
+    menus: list[TransportRestAreaFoodMenu] = []
+    for raw_menu in menus_value:
+        menu = _mapping(raw_menu, f"{where}.menus[]")
+        mwhere = f"{where}.menus[]"
+        menus.append(TransportRestAreaFoodMenu(
+            seq=_required_text(menu, "seq", mwhere).strip(),
+            name=_required_text(menu, "name", mwhere).strip(),
+            price=_integer(menu, "price", mwhere),
+            is_best=_bool(menu, "is_best", mwhere),
+            is_premium=_bool(menu, "is_premium", mwhere),
+            is_recommended=_bool(menu, "is_recommended", mwhere),
+            season=_choice(menu, "season", mwhere, _FOOD_SEASONS),
+            menu_updated_on=_iso_date(menu, "menu_updated_on", mwhere),
+        ))
+    return TransportRestAreaFood(
+        std_rest_code=_required_text(item, "std_rest_code", where).strip(),
+        name=_required_text(item, "name", where).strip(),
+        facility_class=_choice(item, "facility_class", where, _FOOD_CLASSES),
+        direction=_choice(item, "direction", where, _FOOD_DIRECTIONS),
+        route_code=_text(item, "route_code", where),
+        route_name=_text(item, "route_name", where),
+        menus=tuple(menus),
     )
 
 

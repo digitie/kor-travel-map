@@ -1,0 +1,89 @@
+{
+  "generated_at": "2026-11-27T19:00:00Z",
+  "collection": {
+    "source": "krex_rest_area_food",
+    "last_success_at": "2026-11-27T18:50:00Z",
+    "failed": false,
+    "stale": false,
+    "last_attempt_failed": false
+  },
+  "items": [
+    {
+      "std_rest_code": "000341",
+      "source": "krex_rest_area_food",
+      "name": "행담도휴게소",
+      "facility_class": "rest_area",
+      "direction": "up",
+      "route_code": "0150",
+      "route_name": "서해안선",
+      "service_area_code": "A00106",
+      "address": "충남 당진군 신평면 매산리 513",
+      "phone_number": "0413580700",
+      "first_seen_at": "2026-11-27T18:50:00Z",
+      "last_seen_at": "2026-11-27T18:50:00Z",
+      "menus": [
+        {
+          "seq": "12092",
+          "name": "<삼선미> 한우소머리국밥",
+          "price": 13000,
+          "is_best": false,
+          "is_premium": false,
+          "is_recommended": false,
+          "season": "all_year",
+          "app_listed": true,
+          "menu_updated_on": "2026-01-09"
+        },
+        {
+          "seq": "12093",
+          "name": "<삼선미> 만두곰탕",
+          "price": 10000,
+          "is_best": false,
+          "is_premium": false,
+          "is_recommended": false,
+          "season": "all_year",
+          "app_listed": true,
+          "menu_updated_on": "2026-01-09"
+        },
+        {
+          "seq": "12094",
+          "name": "<삼선미> 사골설렁탕",
+          "price": 10000,
+          "is_best": false,
+          "is_premium": false,
+          "is_recommended": false,
+          "season": "all_year",
+          "app_listed": true,
+          "menu_updated_on": "2026-01-09"
+        },
+        {
+          "seq": "22546",
+          "name": "<푸드오클락> 당진우렁강된장비빔밥",
+          "price": 14000,
+          "is_best": true,
+          "is_premium": false,
+          "is_recommended": false,
+          "season": "all_year",
+          "app_listed": true,
+          "menu_updated_on": "2026-03-19"
+        }
+      ]
+    },
+    {
+      "std_rest_code": "000368",
+      "source": "krex_rest_area_food",
+      "name": "행담도(서울)주유소",
+      "facility_class": "gas_station",
+      "direction": "up",
+      "route_code": "0150",
+      "route_name": "서해안선",
+      "service_area_code": "B00176",
+      "address": "충남 당진군 신평면 매산리 503-2",
+      "phone_number": "0413578141",
+      "first_seen_at": "2026-11-27T18:50:00Z",
+      "last_seen_at": "2026-11-27T18:50:00Z",
+      "menus": []
+    }
+  ],
+  "next_cursor": null,
+  "has_more": false
+}

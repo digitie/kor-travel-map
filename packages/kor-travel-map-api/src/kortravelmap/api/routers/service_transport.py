@@ -43,6 +43,7 @@ from kortravelmap.dto.transport_state import (
     FuelPriceState,
     FuelStationState,
     HighwayIncidentState,
+    RestAreaFoodState,
     RestAreaFuelPriceState,
     RestAreaState,
 )
@@ -58,12 +59,18 @@ from kortravelmap.providers.kor_travel_transport_state import (
     DATASET_AIRPORTS,
     DATASET_FUEL_STATIONS,
     DATASET_HIGHWAY_INCIDENTS,
+    DATASET_REST_AREA_FOOD,
     DATASET_REST_AREA_FUEL_PRICES,
     DATASET_REST_AREAS,
     TRANSPORT_STATE_DATASETS,
     TransportStateDataset,
 )
 from kortravelmap.providers.opinet import OPINET_PRODUCT_KEY_MAP, OPINET_PRODUCT_NAME_KO
+from kortravelmap.providers.rest_area_food import (
+    STATION_PAIR_RADIUS_M,
+    StationPairCandidate,
+    pair_station,
+)
 from kortravelmap.settings import KorTravelMapSettings
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, ValidationError
 
@@ -200,10 +207,33 @@ class AirportListResponse(BaseModel):
     meta: Meta
 
 
+class PairedRestAreaFood(BaseModel):
+    """주유소와 짝지은 휴게소의 먹거리(ADR-127). 신뢰도가 자동 하한 이상일 때만 실린다."""
+
+    model_config = ConfigDict(extra="forbid")
+    confidence: float = Field(ge=0.0, le=1.0)
+    method: str = Field(
+        description="짝 근거(name_direction·name_bidirectional·name_updown·name_single)."
+    )
+    distance_m: float
+    rest_area: RestAreaFoodState
+
+
 class FuelStationDetailData(BaseModel):
     model_config = ConfigDict(extra="forbid")
     item: FuelStationOut
     freshness: TransportFreshness
+    rest_area_food: PairedRestAreaFood | None = Field(
+        default=None,
+        description=(
+            "400 m 안 같은 방향 휴게소의 한국도로공사 메뉴 요약(ADR-127). "
+            "고속도로 주유소가 아니거나 "
+            "짝이 확실하지 않거나 먹거리 데이터셋을 읽지 못하면 null."
+        ),
+    )
+    food_freshness: TransportFreshness | None = Field(
+        default=None, description="휴게소 먹거리 데이터셋의 신선도. 아직 적재 전이면 null."
+    )
 
 
 class RestAreaDetailData(BaseModel):
@@ -211,6 +241,16 @@ class RestAreaDetailData(BaseModel):
     item: RestAreaOut
     freshness: TransportFreshness
     fuel_price_freshness: TransportFreshness | None
+    food: RestAreaFoodState | None = Field(
+        default=None,
+        description=(
+            "한국도로공사 메뉴 요약과 표준 코드 연결(ADR-127). 연결하지 못했거나 먹거리 데이터셋을 "
+            "읽지 못하면 null."
+        ),
+    )
+    food_freshness: TransportFreshness | None = Field(
+        default=None, description="휴게소 먹거리 데이터셋의 신선도. 아직 적재 전이면 null."
+    )
 
 
 class HighwayIncidentDetailData(BaseModel):
@@ -765,6 +805,91 @@ async def _attach_rest_area_prices(
     return attached, _freshness(dataset, meta)
 
 
+async def _rest_area_food(
+    store: ValkeyStateStore, feature_id: str
+) -> tuple[RestAreaFoodState | None, TransportFreshness | None]:
+    """휴게소 하나의 먹거리(ADR-127).
+
+    데이터셋이 없거나 읽지 못하면 휴게소 응답은 그대로 둔다(D6).
+    """
+    dataset = DATASET_REST_AREA_FOOD
+    try:
+        meta = await store.current_meta(dataset.name)
+        raw = await store.get_values(dataset.name, meta.generation, [feature_id])
+    except StateNotLoaded:
+        return None, None
+    except StateStoreError:
+        _LOGGER.warning("휴게소 먹거리 데이터셋을 읽지 못해 먹거리 없이 응답한다.")
+        return None, None
+    return _parse_food(raw[0], feature_id), _freshness(dataset, meta)
+
+
+def _parse_food(value: bytes | str | None, feature_id: str) -> RestAreaFoodState | None:
+    if value is None:
+        return None
+    try:
+        return RestAreaFoodState.model_validate_json(value)
+    except ValidationError:
+        _LOGGER.warning("휴게소 먹거리 값 모양이 다르다: %s", feature_id)
+        return None
+
+
+async def _paired_rest_area_food(
+    store: ValkeyStateStore, station: FuelStationOut
+) -> tuple[PairedRestAreaFood | None, TransportFreshness | None]:
+    """주유소 400 m 안 휴게소 가운데 같은 방향 하나를 골라 먹거리를 붙인다(ADR-127).
+
+    짝 규칙은 ``providers.rest_area_food.pair_station``. 자동 하한 미만이면 null — 그 짝은 관리자
+    검토
+    목록(``/v1/admin/ops/rest-area-food-review``)에만 나온다.
+    """
+    if station.coord is None:
+        return None, None
+    dataset = DATASET_REST_AREA_FOOD
+    try:
+        meta = await store.current_meta(dataset.name)
+        hits = await store.nearby(
+            dataset.name,
+            meta.generation,
+            lon=station.coord.lon,
+            lat=station.coord.lat,
+            radius_m=STATION_PAIR_RADIUS_M,
+            count=8,
+        )
+        raw = await store.get_values(dataset.name, meta.generation, [key for key, _ in hits])
+    except StateNotLoaded:
+        return None, None
+    except StateStoreError:
+        _LOGGER.warning("휴게소 먹거리 데이터셋을 읽지 못해 주유소 먹거리 없이 응답한다.")
+        return None, None
+    freshness = _freshness(dataset, meta)
+    foods: dict[str, RestAreaFoodState] = {}
+    candidates: list[StationPairCandidate] = []
+    for (key, distance), value in zip(hits, raw, strict=True):
+        food = _parse_food(value, key)
+        if food is None:
+            continue
+        foods[key] = food
+        candidates.append(StationPairCandidate(
+            key=key,
+            rest_area_name=food.rest_area_name,
+            direction_code=food.direction_code,
+            distance_m=distance,
+        ))
+    pair = pair_station(station.name, candidates)
+    if pair is None or not pair.automatic:
+        return None, freshness
+    return (
+        PairedRestAreaFood(
+            confidence=pair.confidence,
+            method=pair.method,
+            distance_m=round(pair.distance_m, 1),
+            rest_area=foods[pair.key],
+        ),
+        freshness,
+    )
+
+
 FeatureIdPath = Annotated[str, Path(min_length=1, max_length=128, pattern=r"^[A-Za-z0-9_\-]+$")]
 
 
@@ -826,8 +951,14 @@ async def get_fuel_station(
 ) -> FuelStationDetailResponse:
     started_at = perf_counter()
     item, meta = await _detail(store, DATASET_FUEL_STATIONS, FuelStationOut, feature_id)
+    food, food_freshness = await _paired_rest_area_food(store, item)
     return FuelStationDetailResponse(
-        data=FuelStationDetailData(item=item, freshness=_freshness(DATASET_FUEL_STATIONS, meta)),
+        data=FuelStationDetailData(
+            item=item,
+            freshness=_freshness(DATASET_FUEL_STATIONS, meta),
+            rest_area_food=food,
+            food_freshness=food_freshness,
+        ),
         meta=make_meta(request, started_at=started_at),
     )
 
@@ -985,11 +1116,14 @@ async def get_rest_area(
     started_at = perf_counter()
     item, meta = await _detail(store, DATASET_REST_AREAS, RestAreaOut, feature_id)
     items, price_freshness = await _attach_rest_area_prices(store, [item])
+    food, food_freshness = await _rest_area_food(store, item.feature_id)
     return RestAreaDetailResponse(
         data=RestAreaDetailData(
             item=items[0],
             freshness=_freshness(DATASET_REST_AREAS, meta),
             fuel_price_freshness=price_freshness,
+            food=food,
+            food_freshness=food_freshness,
         ),
         meta=make_meta(request, started_at=started_at),
     )

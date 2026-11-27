@@ -353,6 +353,17 @@ def rest_area_display_name(name: str) -> str:
     return f"{base}{REST_AREA_DISPLAY_LABEL}({direction})"
 
 
+def _rest_area_destination(name: str) -> tuple[str, str | None]:
+    """원천 이름 "강릉(인천)" → ("강릉", "인천"). 괄호가 없으면 행선지 None."""
+    match = _REST_AREA_DIRECTION_NAME.match(name.strip())
+    if match is None:
+        return name.strip(), None
+    destination = match.group("direction").strip()
+    if destination.endswith(_REST_AREA_DIRECTION_LABEL):
+        destination = destination[: -len(_REST_AREA_DIRECTION_LABEL)]
+    return match.group("base").strip(), destination or None
+
+
 def _rest_area_natural_key(item: KrexRestAreaItem) -> str:
     """krtour 측 파생 자연키 — ``name``+``route_name``+``direction``.
 
@@ -438,6 +449,26 @@ async def _rest_area_item_to_bundle(
         )
     name_normalized = normalize_korean_text(item.name) or item.name
     display_name = rest_area_display_name(name_normalized)
+    # ADR-127: transport ``rest-area-food``와 이름으로 이은 한국도로공사 표준 코드·노선·상하행. 원천
+    # (data.go.kr)이 노선·방향을 비워 주므로 facility_info의 두 키를 여기서 채운다(자연키는 그대로).
+    ex_code: str | None = getattr(item, "ex_std_rest_code", None)
+    ex_route_name: str | None = getattr(item, "ex_route_name", None)
+    _, destination = _rest_area_destination(item.name)
+    direction_label = item.direction or (
+        f"{destination}{_REST_AREA_DIRECTION_LABEL}" if destination else None
+    )
+    ex_link: dict[str, Any] | None = (
+        {
+            "std_rest_code": ex_code,
+            "route_code": getattr(item, "ex_route_code", None),
+            "route_name": ex_route_name,
+            "direction_code": getattr(item, "ex_direction_code", None),
+            "method": getattr(item, "ex_link_method", None),
+            "confidence": getattr(item, "ex_link_confidence", None),
+        }
+        if ex_code
+        else None
+    )
     raw_data: dict[str, Any] = {
         "natural_key": natural_key,
         "name": item.name,
@@ -450,6 +481,8 @@ async def _rest_area_item_to_bundle(
         "lat": str(lat) if lat is not None else None,
         "phone_number": item.phone_number,
     }
+    if ex_link is not None:
+        raw_data["ex_link"] = ex_link
     payload_hash = make_payload_hash(raw_data)
     source_record_key = make_source_record_key(
         provider=KOR_TRAVEL_TRANSPORT_PROVIDER_NAME,
@@ -488,9 +521,10 @@ async def _rest_area_item_to_bundle(
             phones=phones,
             facility_info={
                 # 출력 키 "highway_name"은 PlaceDetail 계약 유지 — 값은 provider
-                # ``RestArea.route_name``에서 읽는다(입력 reconciliation, ADR-044).
-                "direction": item.direction,
-                "highway_name": item.route_name,
+                # ``RestArea.route_name``에서 읽고, 비어 있으면 한국도로공사 노선명(ADR-127).
+                "direction": direction_label,
+                "highway_name": item.route_name or ex_route_name,
+                **({"ex_link": ex_link} if ex_link is not None else {}),
             },
         ),
     )

@@ -14,6 +14,7 @@ Map Dagster의 ``transport_state_*`` job이 이 모델의 JSON을 Valkey 세대 
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field
@@ -23,7 +24,9 @@ __all__ = [
     "FuelPriceState",
     "FuelStationState",
     "HighwayIncidentState",
+    "RestAreaFoodState",
     "RestAreaFuelPriceState",
+    "RestAreaMenuItemState",
     "RestAreaState",
     "StateAddress",
     "StateCoordinate",
@@ -118,6 +121,60 @@ class RestAreaState(_StateModel):
     has_gas_station: bool | None = None
     has_lpg_station: bool | None = None
     has_ev_charger: bool | None = None
+
+
+class RestAreaMenuItemState(_StateModel):
+    """휴게소 메뉴 하나(한국도로공사 0502)."""
+
+    name: str
+    price: int | None = Field(description="원. 원천에 없으면 null.")
+    tags: list[Literal["best", "premium", "recommended"]] = Field(
+        description="대표(bestfoodyn)·프리미엄·추천 표시."
+    )
+    season: Literal["all_year", "summer", "winter"] | None = None
+
+
+class RestAreaFoodState(_StateModel):
+    """휴게소 하나의 먹거리 요약과 한국도로공사 표준 코드 연결(ADR-127).
+
+    ``feature_id``는 같은 휴게소의 :class:`RestAreaState` ``feature_id``다(데이터셋
+    ``transport.rest_area_food``). 값은 transport ``rest-area-food`` export에서 결정적으로 계산한다
+    — LLM을 쓰지
+    않는다.
+    """
+
+    feature_id: str
+    rest_area_name: str = Field(description="휴게소 표시 이름(RestAreaState.name과 같다).")
+    natural_key: str
+    coord: StateCoordinate | None
+    std_rest_code: str = Field(
+        description="한국도로공사 휴게소 표준 코드 6자리(0615 svarCd = 0502 stdRestCd)."
+    )
+    ex_name: str = Field(description="한국도로공사 원천 이름. 예: 서울만남(부산)휴게소.")
+    route_code: str | None = None
+    route_name: str | None = None
+    direction_code: Literal["up", "down"] | None = Field(
+        default=None, description="상행·하행(0615 gudClssCd)."
+    )
+    link_method: Literal["name_exact", "name_merged"]
+    link_confidence: float = Field(ge=0.0, le=1.0)
+    menu_count: int = Field(ge=0)
+    price_min: int | None = None
+    price_median: int | None = Field(
+        default=None, description="0보다 큰 가격의 중앙값(짝수 개면 낮은 쪽)."
+    )
+    price_max: int | None = None
+    featured: list[RestAreaMenuItemState] = Field(
+        description="대표 → 프리미엄 → 추천 순, 같은 무리는 가격 순. 최대 12."
+    )
+    seasonal: list[RestAreaMenuItemState] = Field(description="여름·겨울 메뉴. 최대 10.")
+    menu_updated_on: date | None = Field(
+        default=None, description="원천 메뉴 수정일(lastDtime) 가운데 가장 늦은 날."
+    )
+    source_collected_at: AwareDatetime = Field(
+        description="transport가 한국도로공사에서 이 메뉴를 받은 시각(화면의 기준일)."
+    )
+    attribution: Literal["한국도로공사"] = "한국도로공사"
 
 
 class RestAreaFuelPriceState(_StateModel):

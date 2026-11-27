@@ -49,8 +49,8 @@ from kortravelmap.dagster.upstream_signal import raise_if_stale
 
 
 def test_every_dataset_has_a_stopped_schedule_and_no_operation_key() -> None:
-    assert len(TRANSPORT_STATE_SPECS) == 5
-    assert len({spec.dataset.name for spec in TRANSPORT_STATE_SPECS}) == 5
+    assert len(TRANSPORT_STATE_SPECS) == 6
+    assert len({spec.dataset.name for spec in TRANSPORT_STATE_SPECS}) == 6
     for spec in TRANSPORT_STATE_SPECS:
         job = defs.resolve_job_def(spec.job_name)
         schedule = defs.resolve_schedule_def(spec.schedule_name)
@@ -356,6 +356,7 @@ def test_alert_thresholds_sit_below_the_read_side_max_age() -> None:
         "transport.rest_area_fuel_prices": 9 * 3600,
         "transport.highway_incidents": 20 * 60,
         "transport.rest_areas": 2 * 86400,
+        "transport.rest_area_food": 2 * 86400,
         "transport.airports": 2 * 86400,
     }
     assert {

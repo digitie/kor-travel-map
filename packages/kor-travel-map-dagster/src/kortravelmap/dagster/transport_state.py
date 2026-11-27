@@ -61,12 +61,14 @@ from kortravelmap.providers.kor_travel_transport_state import (
     DATASET_AIRPORTS,
     DATASET_FUEL_STATIONS,
     DATASET_HIGHWAY_INCIDENTS,
+    DATASET_REST_AREA_FOOD,
     DATASET_REST_AREA_FUEL_PRICES,
     DATASET_REST_AREAS,
     TransportStateDataset,
     airport_state,
     fuel_station_state,
     highway_incident_state,
+    rest_area_food_states,
     rest_area_fuel_price_state,
     rest_area_state,
     to_state_item,
@@ -90,6 +92,7 @@ from .provider_fetchers import (
     fetch_transport_airports,
     fetch_transport_fuel_stations,
     fetch_transport_highway_incidents,
+    fetch_transport_rest_area_food,
     fetch_transport_rest_area_fuel_prices,
     fetch_transport_rest_areas,
 )
@@ -206,6 +209,36 @@ async def _collect_rest_area_fuel_prices(
     return items
 
 
+async def _collect_rest_area_food(
+    settings: KorTravelMapSettings,
+    on_collected_at: Callable[[datetime], None],
+    /,
+    *,
+    unchanged_since: datetime | None = None,
+) -> list[Any]:
+    """휴게소 기준정보 + 먹거리 export → 휴게소마다 KREX 코드 연결·메뉴 요약(ADR-127).
+
+    세대의 원천 수집 시각은 먹거리 export의 것이다(휴게소 기준정보 세대는
+    ``transport_state_rest_areas``가
+    따로 잰다).
+    """
+    del unchanged_since  # 매일 한 번이라 건너뛰지 않는다
+    areas = [area async for area in fetch_transport_rest_areas(settings)]
+    collected: list[datetime] = []
+
+    def _seen(value: datetime) -> None:
+        collected.append(value)
+        on_collected_at(value)
+
+    foods = [food async for food in fetch_transport_rest_area_food(settings, on_collected_at=_seen)]
+    if not collected:
+        raise TransportExportEmpty("rest-area-food: collection.last_success_at이 없다.")
+    return [
+        to_state_item(state)
+        for state in rest_area_food_states(areas, foods, collected_at=min(collected))
+    ]
+
+
 async def _collect_highway_incidents(
     settings: KorTravelMapSettings,
     on_collected_at: Callable[[datetime], None],
@@ -288,6 +321,20 @@ TRANSPORT_STATE_SPECS: Final[tuple[TransportStateJobSpec, ...]] = (
         collect=_collect_rest_area_fuel_prices,
         description="휴게소 주유소 최신 유가 → Valkey 세대 교체(매시, 바뀌지 않았으면 건너뜀).",
         skip_unchanged=True,
+    ),
+    TransportStateJobSpec(
+        dataset=DATASET_REST_AREA_FOOD,
+        job_name="transport_state_rest_area_food",
+        alert_after_setting="transport_state_rest_area_food_alert_after_seconds",
+        schedule_name="transport_state_rest_area_food_schedule",
+        # transport 휴게소 먹거리 수집(03:50 KST)과 휴게소 상태(04:47) 뒤.
+        cron_schedule="7 5 * * *",
+        max_runtime_seconds=900,
+        collect=_collect_rest_area_food,
+        description=(
+            "휴게소 먹거리(한국도로공사 메뉴 요약·표준 코드 연결) → Valkey 세대 교체"
+            "(매일, ADR-127)."
+        ),
     ),
     TransportStateJobSpec(
         dataset=DATASET_HIGHWAY_INCIDENTS,

@@ -16,9 +16,9 @@ transport export에 VWorld 행정 블록(ADR-114 결정 6)이 실려도 id가 �
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING, Final, cast
 
@@ -33,7 +33,9 @@ from kortravelmap.dto.transport_state import (
     FuelPriceState,
     FuelStationState,
     HighwayIncidentState,
+    RestAreaFoodState,
     RestAreaFuelPriceState,
+    RestAreaMenuItemState,
     RestAreaState,
     StateAddress,
     StateCoordinate,
@@ -52,6 +54,7 @@ from kortravelmap.providers.kor_travel_transport import (
     TransportFuelStation,
     TransportHighwayIncident,
     TransportRestArea,
+    TransportRestAreaFood,
     TransportRestAreaFuelPrice,
 )
 from kortravelmap.providers.krairport import AIRPORT_CATEGORY, AIRPORT_MARKER_COLOR
@@ -77,6 +80,7 @@ from kortravelmap.providers.opinet import (
     OPINET_STATION_MARKER_COLOR,
     OPINET_STATION_MARKER_ICON,
 )
+from kortravelmap.providers.rest_area_food import MenuItem, link_rest_areas, summarize_menus
 
 if TYPE_CHECKING:
     # 이 frozen dataclass들은 krex Protocol의 shape이다. Protocol이 settable 속성·Decimal 좌표를
@@ -93,6 +97,7 @@ __all__ = [
     "DATASET_FUEL_STATIONS",
     "DATASET_HIGHWAY_INCIDENTS",
     "DATASET_REST_AREAS",
+    "DATASET_REST_AREA_FOOD",
     "DATASET_REST_AREA_FUEL_PRICES",
     "KOREA_LAT_RANGE",
     "KOREA_LON_RANGE",
@@ -101,6 +106,7 @@ __all__ = [
     "airport_state",
     "fuel_station_state",
     "highway_incident_state",
+    "rest_area_food_states",
     "rest_area_fuel_price_state",
     "rest_area_state",
     "state_coordinate",
@@ -141,6 +147,12 @@ DATASET_REST_AREA_FUEL_PRICES: Final[TransportStateDataset] = TransportStateData
     guard=ShrinkGuard(min_ratio=0.8, baseline_min=20, min_count=80),
     max_age=timedelta(hours=48),
 )
+DATASET_REST_AREA_FOOD: Final[TransportStateDataset] = TransportStateDataset(
+    name="transport.rest_area_food",
+    # 2026-11-27 운영 215곳 중 213곳에 메뉴가 붙는다(ADR-127).
+    guard=ShrinkGuard(min_ratio=0.9, baseline_min=20, min_count=100),
+    max_age=timedelta(days=8),
+)
 DATASET_HIGHWAY_INCIDENTS: Final[TransportStateDataset] = TransportStateDataset(
     name="transport.highway_incidents",
     # transport #265(ADR-013 2026-11-24 개정): 전국 활성 돌발 0건은 상류 이상이라 transport가
@@ -159,6 +171,7 @@ TRANSPORT_STATE_DATASETS: Final[tuple[TransportStateDataset, ...]] = (
     DATASET_FUEL_STATIONS,
     DATASET_REST_AREAS,
     DATASET_REST_AREA_FUEL_PRICES,
+    DATASET_REST_AREA_FOOD,
     DATASET_HIGHWAY_INCIDENTS,
     DATASET_AIRPORTS,
 )
@@ -268,6 +281,55 @@ def rest_area_state(area: TransportRestArea) -> RestAreaState:
         has_lpg_station=area.has_lpg_station,
         has_ev_charger=area.has_ev_charger,
     )
+
+
+def _menu_item(item: MenuItem) -> RestAreaMenuItemState:
+    return RestAreaMenuItemState(
+        name=item.name, price=item.price, tags=list(item.tags), season=item.season
+    )
+
+
+def rest_area_food_states(
+    areas: Sequence[TransportRestArea],
+    foods: Sequence[TransportRestAreaFood],
+    *,
+    collected_at: datetime,
+) -> list[RestAreaFoodState]:
+    """휴게소마다 KREX 코드를 잇고 메뉴를 요약한다(ADR-127). 연결하지 못한 휴게소는 빠진다.
+
+    연결하지 못한 휴게소·주유소 짝 검토는 관리자 API(``/v1/admin/ops/rest-area-food-review``)가
+    본다.
+    """
+    states = {area.natural_key: rest_area_state(area) for area in areas}
+    links = link_rest_areas(((area.natural_key, area.name) for area in areas), foods)
+    out: list[RestAreaFoodState] = []
+    for key, link in sorted(links.items()):
+        if not link.linked or link.food is None or link.method not in ("name_exact", "name_merged"):
+            continue
+        area = states[key]
+        summary = summarize_menus(link.food.menus)
+        out.append(RestAreaFoodState(
+            feature_id=area.feature_id,
+            rest_area_name=area.name,
+            natural_key=key,
+            coord=area.coord,
+            std_rest_code=link.food.std_rest_code,
+            ex_name=link.food.name,
+            route_code=link.food.route_code,
+            route_name=link.food.route_name,
+            direction_code=link.food.direction,
+            link_method=link.method,
+            link_confidence=link.confidence,
+            menu_count=summary.menu_count,
+            price_min=summary.price_min,
+            price_median=summary.price_median,
+            price_max=summary.price_max,
+            featured=[_menu_item(item) for item in summary.featured],
+            seasonal=[_menu_item(item) for item in summary.seasonal],
+            menu_updated_on=summary.menu_updated_on,
+            source_collected_at=collected_at,
+        ))
+    return out
 
 
 def rest_area_fuel_price_state(record: TransportRestAreaFuelPrice) -> RestAreaFuelPriceState:
