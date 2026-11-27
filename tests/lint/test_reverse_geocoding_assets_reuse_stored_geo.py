@@ -33,6 +33,9 @@ _ALLOWED: Final[dict[str, str]] = {
     ),
     "load_mois_license_records_chunked": "ADR-108 MOIS 재개형 chunk 적재(자기 선조회)",
     "load_offline_upload_op": "사람이 올린 일회성 파일 — 이전 적재가 없다",
+    "_resolve_knps_national_park_anchors": (
+        "변환이 아니라 국립공원 행(23)의 대표점 후보 탐색 — 고른 점은 변환이 재사용 경로로 묻는다"
+    ),
 }
 
 

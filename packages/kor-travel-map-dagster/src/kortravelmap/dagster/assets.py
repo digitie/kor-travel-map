@@ -707,6 +707,26 @@ async def feature_place_knps_points(
     return await run_tracked_feature_asset(context, run_feature_place_knps_points)
 
 
+async def _resolve_knps_national_park_anchors(
+    records: Sequence[Any],
+    *,
+    dataset_key: str,
+    reverse_geocoder: ReverseGeocoder | None,
+) -> dict[str, Any]:
+    """국립공원 대표점(해상 공원은 면 위 후보점)을 변환 **밖**에서 푼다.
+
+    변환 안에서 후보를 돌면 ADR-116 재사용 pass 0이 행 좌표 밖을 물어 dataset 전체의 재사용이
+    꺼진다. 여기서 고른 점을 변환에 넘기면 변환은 행마다 그 점 하나(= 행 좌표)만 재사용 경로로
+    묻는다. 이 사전 조회는 변환이 아니라 국립공원 행(23)의 후보점 탐색이라 재사용 helper를 거치지
+    않는다(``tests/lint/test_reverse_geocoding_assets_reuse_stored_geo.py`` 허용 목록).
+    """
+    if reverse_geocoder is None:
+        return {}
+    return await knps_national_park_anchors(
+        records, dataset_key=dataset_key, reverse_geocoder=reverse_geocoder
+    )
+
+
 async def run_feature_geometry_knps_records(
     context: AssetExecutionContext,
 ) -> DagsterFeatureLoadResult:
@@ -726,14 +746,8 @@ async def run_feature_geometry_knps_records(
         records = await _record_list(context, "knps_geometry_records")
     fetched_at = await _fetched_at(context)
     reverse_geocoder = _reverse_geocoder(context)
-    # 국립공원 대표점(해상 공원은 면 위 후보점)은 변환 **밖**에서 푼다 — 변환 안에서 후보를 돌면
-    # ADR-116 재사용 pass 0이 행 좌표 밖을 물어 dataset 전체의 재사용이 꺼진다.
-    anchors = (
-        await knps_national_park_anchors(
-            records, dataset_key=dataset_key, reverse_geocoder=reverse_geocoder
-        )
-        if reverse_geocoder is not None
-        else {}
+    anchors = await _resolve_knps_national_park_anchors(
+        records, dataset_key=dataset_key, reverse_geocoder=reverse_geocoder
     )
     bundles = await _transform_reusing_geo(
         context,
