@@ -613,13 +613,16 @@ class DedupReviewDetail:
     feature_b: ReviewFeatureDetail
 
 
-_ADMIN_FEATURE_SORT_COLUMNS: Final[dict[str, str]] = {
-    "name": "sort_name",
-    "updated_at": "updated_at",
-    "created_at": "created_at",
-    "kind": "kind",
-    "provider": "sort_provider",
-    "issue_count": "issue_count",
+#: 정렬 키 식 — ``base``(키 단계)가 ``sort_key``로 내보내고, keyset·ORDER BY·cursor가 모두 이
+#: 한 값을 본다. ``provider``·``issue_count``는 키 단계에 해당 LATERAL이 있어야 계산된다
+#: (``_admin_features_sql``이 정렬에 따라 붙인다).
+_ADMIN_FEATURE_SORT_KEYS: Final[dict[str, str]] = {
+    "name": "lower(f.name)",
+    "updated_at": "f.updated_at",
+    "created_at": "f.created_at",
+    "kind": "f.kind",
+    "provider": "COALESCE(ps.provider, '')",
+    "issue_count": "COALESCE(issue.issue_count, 0)::integer",
 }
 _TEXT_SORTS: Final[set[str]] = {"name", "kind", "provider"}
 _DATETIME_SORTS: Final[set[str]] = {"updated_at", "created_at"}
@@ -1063,27 +1066,28 @@ def _cursor_payload(cursor: str | None, *, sort: str, order: str) -> dict[str, A
     return payload
 
 
-def _encode_cursor(item: AdminFeatureRow, *, sort: str, order: str) -> str:
-    sort_value: Any
-    if sort == "name":
-        sort_value = item.name
-    elif sort == "updated_at":
-        sort_value = item.updated_at.isoformat()
-    elif sort == "created_at":
-        sort_value = item.created_at.isoformat()
-    elif sort == "kind":
-        sort_value = item.kind
-    elif sort == "provider":
-        sort_value = item.primary_provider or ""
+def _encode_cursor(row: Mapping[Any, Any], *, sort: str, order: str) -> str:
+    """마지막 행의 SQL 정렬 키(``sort_key``)로 다음 페이지 cursor를 만든다.
+
+    cursor 값은 keyset이 비교하는 바로 그 식의 값이어야 한다. 종전에는 응답 필드에서
+    다시 만들었는데, ``name``은 원문(``item.name``)을 실었고 keyset은 ``lower(name)``과
+    비교했다 — 대소문자가 섞인 이름(prod 2.3만 건)이 페이지 경계에 오면 같은 이름의 행이
+    asc에서는 빠지고 desc에서는 겹쳤다(en_US 정렬에서 ``'gs25' < 'GS25'``).
+    """
+    sort_value: Any = row["sort_key"]
+    if sort in _DATETIME_SORTS:
+        sort_value = sort_value.isoformat()
     elif sort == "issue_count":
-        sort_value = item.issue_count
+        sort_value = int(sort_value)
+    elif sort in _TEXT_SORTS:
+        sort_value = str(sort_value)
     else:  # pragma: no cover - sort whitelist가 선행한다.
         raise ValueError("unsupported admin features sort")
     raw = json.dumps(
         {
             "sort": sort,
             "order": order,
-            "feature_id": item.feature_id,
+            "feature_id": str(row["feature_id"]),
             "value": sort_value,
         },
         separators=(",", ":"),
@@ -1123,7 +1127,7 @@ def _cursor_params(cursor: str | None, *, sort: str, order: str) -> dict[str, An
 
 
 def _keyset_condition(*, sort: str, order: str) -> str:
-    column = _ADMIN_FEATURE_SORT_COLUMNS[sort]
+    column = "sort_key"
     op = ">" if order == "asc" else "<"
     if sort in _TEXT_SORTS:
         return (
@@ -1395,57 +1399,13 @@ def _admin_feature_candidates_sql(search_scope: AdminFeatureSearchScope) -> str:
     return f"SELECT cand.feature_id\nFROM ({union}\n) AS cand\nLIMIT :q_candidate_limit\n"
 
 
-def _admin_features_sql(
-    *, sort: str, order: str, exact_id: bool = False, exact_uuid: bool = False,
-    search_scope: AdminFeatureSearchScope = "all", q_path: AdminFeatureQueryPath = "none",
-) -> str:
-    column = _ADMIN_FEATURE_SORT_COLUMNS[sort]
-    order_sql = "ASC" if order == "asc" else "DESC"
-    if exact_id:
-        q_clause = _ADMIN_FEATURES_Q_EXACT_CLAUSE
-    elif exact_uuid:
-        q_clause = _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE
-    elif q_path == "candidates":
-        q_clause = _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE
-    elif q_path == "none":
-        q_clause = ""
-    elif search_scope == "feature":
-        q_clause = _ADMIN_FEATURES_Q_FEATURE_SCAN_CLAUSE
-    else:
-        q_clause = _ADMIN_FEATURES_Q_SCAN_CLAUSE
-    # 후보 경로는 id 배열에서 시작해야 한다 — 위 #1475 설명의 LIMIT 함정.
-    materialized = "MATERIALIZED " if q_clause == _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE else ""
-    return f"""
-WITH base AS {materialized}(
-    SELECT
-        f.feature_id,
-        CAST(f.feature_id AS text) AS feature_uuid,
-        f.kind,
-        f.name,
-        lower(f.name) AS sort_name,
-        f.category,
-        f.lifecycle_state,
-        f.publication_state,
-        f.quality_state,
-        x_extension.ST_X(f.coord) AS lon,
-        x_extension.ST_Y(f.coord) AS lat,
-        COALESCE(
-            NULLIF(f.address ->> 'road', ''),
-            NULLIF(f.address ->> 'legal', ''),
-            NULLIF(f.address ->> 'admin', ''),
-            ''
-        ) AS address_label,
-        ps.provider AS primary_provider,
-        ps.dataset_key AS primary_dataset_key,
-        COALESCE(ps.provider, '') AS sort_provider,
-        COALESCE(issue.issue_count, 0)::integer AS issue_count,
-        COALESCE(issue.issues, '[]'::jsonb) AS issues,
-        f.created_at,
-        f.updated_at
-    FROM feature.features AS f
-    LEFT JOIN LATERAL (
-        SELECT pd.provider_dataset_id, pd.provider, pd.dataset_key
-        FROM provider_sync.source_links AS sl
+# 대표 원천 — feature의 primary link 중 head가 가장 최근에 관측된 것의 provider·dataset.
+# 같은 선택을 두 모양으로 쓴다: 행 하나에 붙는 LATERAL(꾸밈 단계·``provider_dataset_id``
+# 필터)과 집합 전체를 한 번에 고르는 ``DISTINCT ON``(``provider`` 정렬의 키 단계). 두 모양은
+# 아래 FROM·순서 조각을 함께 써서 같은 행을 고른다 — 순서의 마지막 키 ``source_record_key``가
+# ``pk_source_records``라 동률이 없다. 그래야 정렬 키와 응답의 ``primary_provider``가 어긋나지
+# 않는다.
+_ADMIN_FEATURES_PRIMARY_SOURCE_FROM: Final = """FROM provider_sync.source_links AS sl
         JOIN provider_sync.source_entities AS se
           ON se.source_entity_key = sl.source_entity_key
         JOIN provider_sync.provider_datasets AS pd
@@ -1454,12 +1414,48 @@ WITH base AS {materialized}(
           ON head.source_entity_key = se.source_entity_key
         JOIN provider_sync.source_records AS sr
           ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = head.current_source_record_key
+         AND sr.source_record_key = head.current_source_record_key"""
+_ADMIN_FEATURES_PRIMARY_SOURCE_ORDER: Final = (
+    "head.observed_at DESC, sr.imported_at DESC, sr.source_record_key"
+)
+_ADMIN_FEATURES_PRIMARY_SOURCE_JOIN: Final = f"""
+    LEFT JOIN LATERAL (
+        SELECT pd.provider_dataset_id, pd.provider, pd.dataset_key
+        {_ADMIN_FEATURES_PRIMARY_SOURCE_FROM}
         WHERE sl.feature_id = f.feature_id
           AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
+        ORDER BY {_ADMIN_FEATURES_PRIMARY_SOURCE_ORDER}
         LIMIT 1
-    ) AS ps ON TRUE
+    ) AS ps ON TRUE"""
+#: ``provider`` 정렬의 키 단계 — 필터를 통과한 feature 전부의 대표 원천을 한 번에 고른다.
+#: LATERAL로 고르면 행마다 다섯 표를 한 번씩 찔러(prod 43만 행 × 5) 유휴 n150에서도 10.5 s가
+#: 걸렸고, 집합으로 고르면 hash join 한 번이라 2.2 s다(필터가 좁으면 planner가 다시 index
+#: 조회로 돌아간다 — ``kind=area`` 422행 0.16 s).
+_ADMIN_FEATURES_PRIMARY_SOURCE_PICK: Final = f"""
+pick AS (
+    SELECT DISTINCT ON (sl.feature_id) sl.feature_id, pd.provider_dataset_id, pd.provider
+    {_ADMIN_FEATURES_PRIMARY_SOURCE_FROM}
+        JOIN filtered
+          ON filtered.feature_id = sl.feature_id
+    WHERE sl.source_role = 'primary'
+    ORDER BY sl.feature_id, {_ADMIN_FEATURES_PRIMARY_SOURCE_ORDER}
+),"""
+
+# 열린 무결성 이슈 — 키 단계의 건수(``issue_count`` 정렬·``has_issue`` 필터)와 꾸밈 단계의
+# 건수·목록이 같은 술어를 본다.
+_ADMIN_FEATURES_OPEN_ISSUE_PREDICATE: Final = """v.feature_id = f.feature_id
+          AND v.status = 'open'
+          AND (
+            CAST(:issue_types AS text[]) IS NULL
+            OR v.violation_type = ANY(CAST(:issue_types AS text[]))
+          )"""
+_ADMIN_FEATURES_ISSUE_COUNT_JOIN: Final = f"""
+    LEFT JOIN LATERAL (
+        SELECT count(*)::integer AS issue_count
+        FROM ops.data_integrity_violations AS v
+        WHERE {_ADMIN_FEATURES_OPEN_ISSUE_PREDICATE}
+    ) AS issue ON TRUE"""
+_ADMIN_FEATURES_ISSUE_DETAIL_JOIN: Final = f"""
     LEFT JOIN LATERAL (
         SELECT
             count(*)::integer AS issue_count,
@@ -1474,14 +1470,43 @@ WITH base AS {materialized}(
                 ORDER BY v.detected_at DESC
             ) AS issues
         FROM ops.data_integrity_violations AS v
-        WHERE v.feature_id = f.feature_id
-          AND v.status = 'open'
-          AND (
-            CAST(:issue_types AS text[]) IS NULL
-            OR v.violation_type = ANY(CAST(:issue_types AS text[]))
-          )
-    ) AS issue ON TRUE
-    WHERE (CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
+        WHERE {_ADMIN_FEATURES_OPEN_ISSUE_PREDICATE}
+    ) AS issue ON TRUE"""
+
+_ADMIN_FEATURES_PROVIDER_CLAUSE: Final = """
+      AND (
+        CAST(:provider_dataset_id AS bigint) IS NULL
+        OR ps.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
+      )"""
+_ADMIN_FEATURES_HAS_ISSUE_CLAUSE: Final = """
+      AND (
+        CAST(:has_issue AS boolean) IS NULL
+        OR (CAST(:has_issue AS boolean) AND base.issue_count > 0)
+        OR (NOT CAST(:has_issue AS boolean) AND base.issue_count = 0)
+      )"""
+
+
+# 목록 문장 동안만 ``plan_cache_mode=force_custom_plan``(T-READ-12와 같은 이유·같은 방식).
+# asyncpg는 이 문장을 연결마다 prepared statement로 재사용하고, ``auto``면 6번째 실행부터
+# generic plan(파라미터 값을 모르는 계획)을 고려한다. 필터가 전부 ``CAST(:x) IS NULL OR …``라
+# generic plan은 행 수를 못 읽는다 — ``provider`` 정렬은 같은 연결 6번째 실행부터 집합 선택 대신
+# 행마다 조회하는 계획으로 바뀌어 2.8 s → 10.3~13.1 s가 됐다(prod 읽기 전용 실측 2026-11-27).
+# 매 실행 다시 계획하는 비용은 수 ms다. ``set_config(..., true)``라 transaction 안에서만 살고,
+# 목록이 끝나면 직전 값으로 되돌린다(같은 transaction의 다음 문장에 새지 않게). 목록이 실패하면
+# 되돌리지 않는다 — 그 transaction은 abort됐고 rollback이 설정도 되돌린다.
+_ADMIN_FEATURES_CUSTOM_PLAN_ON_SQL: Final[str] = (
+    "SELECT current_setting('plan_cache_mode') AS prior_plan_cache_mode, "
+    "set_config('plan_cache_mode', 'force_custom_plan', true)"
+)
+_ADMIN_FEATURES_CUSTOM_PLAN_OFF_SQL: Final[str] = (
+    "SELECT set_config('plan_cache_mode', CAST(:prior_plan_cache_mode AS text), true)"
+)
+
+
+def _admin_feature_filters_sql(q_clause: str) -> str:
+    """``feature.features AS f`` 한 행에만 기대는 목록 필터(원천·이슈 필터는 따로)."""
+
+    return f"""(CAST(:kinds AS text[]) IS NULL OR f.kind = ANY(CAST(:kinds AS text[])))
       AND (
         -- T-VN-35(0086): valid_end_time은 free-form jsonb가 아니라
         -- ``feature_notices.valid_end_time timestamptz``다. 오염 문자열이
@@ -1514,10 +1539,6 @@ WITH base AS {materialized}(
         OR f.quality_state = ANY(CAST(:quality_states AS text[]))
       )
       AND (
-        CAST(:provider_dataset_id AS bigint) IS NULL
-        OR ps.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
-      )
-      AND (
         CAST(:has_coord AS boolean) IS NULL
         OR (CAST(:has_coord AS boolean) AND f.coord IS NOT NULL)
         OR (NOT CAST(:has_coord AS boolean) AND f.coord IS NULL)
@@ -1531,18 +1552,112 @@ WITH base AS {materialized}(
         OR f.updated_at <= CAST(:updated_to AS timestamptz)
       )
       AND {place_attribute_filter_sql("f")}
-      {q_clause}
+      {q_clause}"""
+
+
+def _admin_features_sql(
+    *, sort: str, order: str, exact_id: bool = False, exact_uuid: bool = False,
+    search_scope: AdminFeatureSearchScope = "all", q_path: AdminFeatureQueryPath = "none",
+    provider_filter: bool = False, issue_filter: bool = False,
+) -> str:
+    """키 단계(``base``) → 페이지(``page``) → 꾸밈 단계의 세 단으로 목록 SQL을 만든다.
+
+    ``base``는 필터와 정렬 키(``sort_key``)만 계산하고, ``page``가 keyset·``LIMIT``으로 한
+    페이지를 자른 **뒤에** 대표 원천·이슈 목록 같은 표시용 LATERAL을 그 행들에만 붙인다.
+    종전에는 표시용 LATERAL(원천 계보 다섯 표 + 이슈 jsonb 집계)이 ``base`` 안에 있어서, 정렬
+    키가 인덱스를 못 타는 ``kind``·``provider``·``issue_count`` 정렬은 전체 feature(prod 43만
+    행)마다 두 LATERAL을 다 돌린 뒤에야 top-N을 골랐다 — 유휴 n150에서 12.7~18.6 s, I/O 부하
+    중 39 s였다. 키 단계에는 정렬·필터가 실제로 쓰는 것만 붙는다: ``issue_count`` 정렬이나
+    ``has_issue`` 필터면 이슈 건수, ``provider_dataset_id`` 필터면 대표 원천 LATERAL,
+    ``provider`` 정렬이면 대표 원천 집합 선택(``_ADMIN_FEATURES_PRIMARY_SOURCE_PICK``).
+    """
+    order_sql = "ASC" if order == "asc" else "DESC"
+    if exact_id:
+        q_clause = _ADMIN_FEATURES_Q_EXACT_CLAUSE
+    elif exact_uuid:
+        q_clause = _ADMIN_FEATURES_Q_EXACT_UUID_CLAUSE
+    elif q_path == "candidates":
+        q_clause = _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE
+    elif q_path == "none":
+        q_clause = ""
+    elif search_scope == "feature":
+        q_clause = _ADMIN_FEATURES_Q_FEATURE_SCAN_CLAUSE
+    else:
+        q_clause = _ADMIN_FEATURES_Q_SCAN_CLAUSE
+    # 후보 경로는 id 배열에서 시작해야 한다 — 위 #1475 설명의 LIMIT 함정.
+    materialized = "MATERIALIZED " if q_clause == _ADMIN_FEATURES_Q_CANDIDATES_CLAUSE else ""
+    filters = _admin_feature_filters_sql(q_clause)
+    key_issue = sort == "issue_count" or issue_filter
+    issue_join = _ADMIN_FEATURES_ISSUE_COUNT_JOIN if key_issue else ""
+    issue_column = (
+        ",\n        COALESCE(issue.issue_count, 0)::integer AS issue_count" if key_issue else ""
+    )
+    has_issue_clause = _ADMIN_FEATURES_HAS_ISSUE_CLAUSE if key_issue else ""
+    provider_clause = _ADMIN_FEATURES_PROVIDER_CLAUSE if provider_filter else ""
+    decoration_joins = _ADMIN_FEATURES_PRIMARY_SOURCE_JOIN + _ADMIN_FEATURES_ISSUE_DETAIL_JOIN
+    sort_key = _ADMIN_FEATURE_SORT_KEYS[sort]
+    if sort == "provider":
+        # ``filtered``는 두 번 읽히므로(집합 선택의 입력·바깥 행) 어차피 물질화된다.
+        key_ctes = f"""filtered AS MATERIALIZED (
+    SELECT f.feature_id
+    FROM feature.features AS f
+    WHERE {filters}
+),{_ADMIN_FEATURES_PRIMARY_SOURCE_PICK}
+base AS (
+    SELECT
+        f.feature_id,
+        {sort_key} AS sort_key{issue_column}
+    FROM filtered AS f
+    LEFT JOIN pick AS ps
+      ON ps.feature_id = f.feature_id{issue_join}
+    WHERE TRUE{provider_clause}
+)"""
+    else:
+        provider_join = _ADMIN_FEATURES_PRIMARY_SOURCE_JOIN if provider_filter else ""
+        key_ctes = f"""base AS {materialized}(
+    SELECT
+        f.feature_id,
+        {sort_key} AS sort_key{issue_column}
+    FROM feature.features AS f{provider_join}{issue_join}
+    WHERE {filters}{provider_clause}
+)"""
+    return f"""
+WITH {key_ctes},
+page AS (
+    SELECT base.feature_id, base.sort_key
+    FROM base
+    WHERE {_keyset_condition(sort=sort, order=order)}{has_issue_clause}
+    ORDER BY base.sort_key {order_sql}, base.feature_id {order_sql}
+    LIMIT :limit_plus_one
 )
-SELECT *
-FROM base
-WHERE (
-    CAST(:has_issue AS boolean) IS NULL
-    OR (CAST(:has_issue AS boolean) AND issue_count > 0)
-    OR (NOT CAST(:has_issue AS boolean) AND issue_count = 0)
-)
-  AND {_keyset_condition(sort=sort, order=order)}
-ORDER BY {column} {order_sql}, feature_id {order_sql}
-LIMIT :limit_plus_one
+SELECT
+    f.feature_id,
+    CAST(f.feature_id AS text) AS feature_uuid,
+    f.kind,
+    f.name,
+    f.category,
+    f.lifecycle_state,
+    f.publication_state,
+    f.quality_state,
+    x_extension.ST_X(f.coord) AS lon,
+    x_extension.ST_Y(f.coord) AS lat,
+    COALESCE(
+        NULLIF(f.address ->> 'road', ''),
+        NULLIF(f.address ->> 'legal', ''),
+        NULLIF(f.address ->> 'admin', ''),
+        ''
+    ) AS address_label,
+    ps.provider AS primary_provider,
+    ps.dataset_key AS primary_dataset_key,
+    COALESCE(issue.issue_count, 0)::integer AS issue_count,
+    COALESCE(issue.issues, '[]'::jsonb) AS issues,
+    f.created_at,
+    f.updated_at,
+    page.sort_key
+FROM page
+JOIN feature.features AS f
+  ON f.feature_id = page.feature_id{decoration_joins}
+ORDER BY page.sort_key {order_sql}, page.feature_id {order_sql}
 """
 
 
@@ -2242,6 +2357,9 @@ async def list_admin_features(
         if len(probed) < probe_limit and len(candidate_ids) <= _ADMIN_FEATURES_Q_CANDIDATE_CAP:
             q_path = "candidates"
             params["q_candidate_ids"] = candidate_ids
+    prior_plan_cache_mode = (
+        await session.execute(text(_ADMIN_FEATURES_CUSTOM_PLAN_ON_SQL), {})
+    ).scalar_one()
     rows = (
         await session.execute(
             text(
@@ -2252,14 +2370,20 @@ async def list_admin_features(
                     exact_id=q_exact is not None,
                     exact_uuid=q_exact_uuid is not None,
                     q_path=q_path,
+                    provider_filter=provider_dataset_id is not None,
+                    issue_filter=has_issue is not None,
                 )
             ),
             params,
         )
     ).mappings().all()
+    await session.execute(
+        text(_ADMIN_FEATURES_CUSTOM_PLAN_OFF_SQL),
+        {"prior_plan_cache_mode": prior_plan_cache_mode},
+    )
     items = tuple(_admin_feature_row(row) for row in rows[:effective_limit])
     next_cursor = (
-        _encode_cursor(items[-1], sort=sort, order=order)
+        _encode_cursor(rows[effective_limit - 1], sort=sort, order=order)
         if len(rows) > effective_limit and items
         else None
     )

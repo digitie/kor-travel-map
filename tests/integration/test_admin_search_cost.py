@@ -66,8 +66,16 @@ async def test_candidate_arms_use_admin_trigram_indexes(
 
     seed가 작아 기본 planner는 Seq Scan을 고를 수 있으므로 seqscan을 끄고 **인덱스가
     후보인지**를 본다 — 술어 식과 인덱스 식이 어긋나면 seqscan을 꺼도 Seq Scan이 남는다.
+
+    plain index scan도 끈다. 앞 시험들이 원천 계보 표에 행을 넣었다 rollback하면 autoanalyze가
+    그 표를 거의 빈 표로 기록하고, planner는 trigram bitmap 대신 다른 B-tree 전체 훑기(예:
+    ``source_links``에서 출발하는 nested loop)로 seqscan을 피한다 — 그러면 갈래의 인덱스가
+    후보인지를 못 본다. bitmap scan은 인덱스 조건이 있어야 하므로 이렇게 끄면 남는 길은 술어와
+    맞는 trigram 인덱스뿐이고, 식이 어긋나면 여전히 Seq Scan이 남는다.
     """
     await migrated_session.execute(text("SET LOCAL enable_seqscan = off"))
+    await migrated_session.execute(text("SET LOCAL enable_indexscan = off"))
+    await migrated_session.execute(text("SET LOCAL enable_indexonlyscan = off"))
     plan = await _explain(
         migrated_session,
         admin_feature_repo._admin_feature_candidates_sql("all"),
@@ -99,7 +107,8 @@ async def test_unmatched_search_takes_candidate_path_without_source_records(
         await _seed_feature(migrated_session, feature_uuid(f"admin-search-cost-{index}"))
     for scope in ("all", "feature"):
         statements = await _captured_statements(migrated_session, scope)
-        # 후보 SQL + 본 질의. 일치가 없으니 후보 경로다(본 질의가 id 배열로 시작한다).
+        # 후보 SQL + 본 질의(앞뒤의 plan_cache_mode 설정 문장은 빼고 센다). 일치가 없으니 후보
+        # 경로다(본 질의가 id 배열로 시작한다).
         assert len(statements) == 2, statements
         main_sql, main_params = statements[1]
         # driver 문장이라 bind 이름은 없다 — 후보 절의 모양으로 가린다.
@@ -132,7 +141,8 @@ async def _captured_statements(
         context: Any,
         executemany: bool,
     ) -> None:
-        statements.append((statement, parameters))
+        if "plan_cache_mode" not in statement:
+            statements.append((statement, parameters))
 
     bind = session.get_bind()
     event.listen(bind, "before_cursor_execute", record)
@@ -332,7 +342,9 @@ async def test_short_query_skips_candidate_probe(
     statements: list[str] = []
 
     def record(*args: Any) -> None:
-        statements.append(args[2])
+        # 본 질의 앞뒤의 plan_cache_mode 설정 문장은 후보 probe가 아니다.
+        if "plan_cache_mode" not in args[2]:
+            statements.append(args[2])
 
     bind = migrated_session.get_bind()
     event.listen(bind, "before_cursor_execute", record)
