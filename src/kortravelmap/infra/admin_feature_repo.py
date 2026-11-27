@@ -48,6 +48,10 @@ from kortravelmap.infra.merge_repo import (
     apply_feature_merge,
     merge_from_review,
 )
+from kortravelmap.infra.primary_source import (
+    PRIMARY_SOURCE_SORT_KEY_SQL,
+    primary_source_display_join_sql,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -614,14 +618,14 @@ class DedupReviewDetail:
 
 
 #: 정렬 키 식 — ``base``(키 단계)가 ``sort_key``로 내보내고, keyset·ORDER BY·cursor가 모두 이
-#: 한 값을 본다. ``provider``·``issue_count``는 키 단계에 해당 LATERAL이 있어야 계산된다
-#: (``_admin_features_sql``이 정렬에 따라 붙인다).
+#: 한 값을 본다. ``provider``는 키 단계에 대표 원천 표(ADR-125)가, ``issue_count``는 이슈 건수
+#: LATERAL이 있어야 계산된다(``_admin_features_sql``이 정렬에 따라 붙인다).
 _ADMIN_FEATURE_SORT_KEYS: Final[dict[str, str]] = {
     "name": "lower(f.name)",
     "updated_at": "f.updated_at",
     "created_at": "f.created_at",
     "kind": "f.kind",
-    "provider": "COALESCE(ps.provider, '')",
+    "provider": PRIMARY_SOURCE_SORT_KEY_SQL,
     "issue_count": "COALESCE(issue.issue_count, 0)::integer",
 }
 _TEXT_SORTS: Final[set[str]] = {"name", "kind", "provider"}
@@ -1399,47 +1403,15 @@ def _admin_feature_candidates_sql(search_scope: AdminFeatureSearchScope) -> str:
     return f"SELECT cand.feature_id\nFROM ({union}\n) AS cand\nLIMIT :q_candidate_limit\n"
 
 
-# 대표 원천 — feature의 primary link 중 head가 가장 최근에 관측된 것의 provider·dataset.
-# 같은 선택을 두 모양으로 쓴다: 행 하나에 붙는 LATERAL(꾸밈 단계·``provider_dataset_id``
-# 필터)과 집합 전체를 한 번에 고르는 ``DISTINCT ON``(``provider`` 정렬의 키 단계). 두 모양은
-# 아래 FROM·순서 조각을 함께 써서 같은 행을 고른다 — 순서의 마지막 키 ``source_record_key``가
-# ``pk_source_records``라 동률이 없다. 그래야 정렬 키와 응답의 ``primary_provider``가 어긋나지
-# 않는다.
-_ADMIN_FEATURES_PRIMARY_SOURCE_FROM: Final = """FROM provider_sync.source_links AS sl
-        JOIN provider_sync.source_entities AS se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets AS pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = se.source_entity_key
-        JOIN provider_sync.source_records AS sr
-          ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = head.current_source_record_key"""
-_ADMIN_FEATURES_PRIMARY_SOURCE_ORDER: Final = (
-    "head.observed_at DESC, sr.imported_at DESC, sr.source_record_key"
+# 대표 원천(ADR-125) — 쓰기 시점에 유지된 ``feature.feature_primary_sources``를 읽는다(규칙을
+# 다시 계산하지 않는다). 키 단계는 정렬·필터에 쓸 때만 그 표를 붙이고(내부 조인 — Feature마다
+# 한 행이 있다), 꾸밈 단계는 페이지 행에 표시 값(정본 ``provider_datasets``)을 붙인다.
+_ADMIN_FEATURES_PRIMARY_SOURCE_KEY_JOIN: Final = """
+    JOIN feature.feature_primary_sources AS ps
+      ON ps.feature_id = f.feature_id"""
+_ADMIN_FEATURES_PRIMARY_SOURCE_DISPLAY_JOIN: Final = primary_source_display_join_sql(
+    "f", row_alias="ps", dataset_alias="pd"
 )
-_ADMIN_FEATURES_PRIMARY_SOURCE_JOIN: Final = f"""
-    LEFT JOIN LATERAL (
-        SELECT pd.provider_dataset_id, pd.provider, pd.dataset_key
-        {_ADMIN_FEATURES_PRIMARY_SOURCE_FROM}
-        WHERE sl.feature_id = f.feature_id
-          AND sl.source_role = 'primary'
-        ORDER BY {_ADMIN_FEATURES_PRIMARY_SOURCE_ORDER}
-        LIMIT 1
-    ) AS ps ON TRUE"""
-#: ``provider`` 정렬의 키 단계 — 필터를 통과한 feature 전부의 대표 원천을 한 번에 고른다.
-#: LATERAL로 고르면 행마다 다섯 표를 한 번씩 찔러(prod 43만 행 × 5) 유휴 n150에서도 10.5 s가
-#: 걸렸고, 집합으로 고르면 hash join 한 번이라 2.2 s다(필터가 좁으면 planner가 다시 index
-#: 조회로 돌아간다 — ``kind=area`` 422행 0.16 s).
-_ADMIN_FEATURES_PRIMARY_SOURCE_PICK: Final = f"""
-pick AS (
-    SELECT DISTINCT ON (sl.feature_id) sl.feature_id, pd.provider_dataset_id, pd.provider
-    {_ADMIN_FEATURES_PRIMARY_SOURCE_FROM}
-        JOIN filtered
-          ON filtered.feature_id = sl.feature_id
-    WHERE sl.source_role = 'primary'
-    ORDER BY sl.feature_id, {_ADMIN_FEATURES_PRIMARY_SOURCE_ORDER}
-),"""
 
 # 열린 무결성 이슈 — 키 단계의 건수(``issue_count`` 정렬·``has_issue`` 필터)와 꾸밈 단계의
 # 건수·목록이 같은 술어를 본다.
@@ -1474,10 +1446,7 @@ _ADMIN_FEATURES_ISSUE_DETAIL_JOIN: Final = f"""
     ) AS issue ON TRUE"""
 
 _ADMIN_FEATURES_PROVIDER_CLAUSE: Final = """
-      AND (
-        CAST(:provider_dataset_id AS bigint) IS NULL
-        OR ps.provider_dataset_id = CAST(:provider_dataset_id AS bigint)
-      )"""
+      AND ps.provider_dataset_id = CAST(:provider_dataset_id AS bigint)"""
 _ADMIN_FEATURES_HAS_ISSUE_CLAUSE: Final = """
       AND (
         CAST(:has_issue AS boolean) IS NULL
@@ -1574,8 +1543,8 @@ def _admin_features_sql(
     키가 인덱스를 못 타는 ``kind``·``provider``·``issue_count`` 정렬은 전체 feature(prod 43만
     행)마다 두 LATERAL을 다 돌린 뒤에야 top-N을 골랐다 — 유휴 n150에서 12.7~18.6 s, I/O 부하
     중 39 s였다. 키 단계에는 정렬·필터가 실제로 쓰는 것만 붙는다: ``issue_count`` 정렬이나
-    ``has_issue`` 필터면 이슈 건수, ``provider_dataset_id`` 필터면 대표 원천 LATERAL,
-    ``provider`` 정렬이면 대표 원천 집합 선택(``_ADMIN_FEATURES_PRIMARY_SOURCE_PICK``).
+    ``has_issue`` 필터면 이슈 건수, ``provider`` 정렬이나 ``provider_dataset_id`` 필터면 쓰기
+    시점에 유지된 대표 원천 표(ADR-125 — 색인 keyset·색인 필터, 원천 계보를 다시 읽지 않는다).
     """
     order_sql = "ASC" if order == "asc" else "DESC"
     if exact_id:
@@ -1600,31 +1569,20 @@ def _admin_features_sql(
     )
     has_issue_clause = _ADMIN_FEATURES_HAS_ISSUE_CLAUSE if key_issue else ""
     provider_clause = _ADMIN_FEATURES_PROVIDER_CLAUSE if provider_filter else ""
-    decoration_joins = _ADMIN_FEATURES_PRIMARY_SOURCE_JOIN + _ADMIN_FEATURES_ISSUE_DETAIL_JOIN
+    key_source = sort == "provider" or provider_filter
+    source_join = _ADMIN_FEATURES_PRIMARY_SOURCE_KEY_JOIN if key_source else ""
+    decoration_joins = (
+        _ADMIN_FEATURES_PRIMARY_SOURCE_DISPLAY_JOIN + _ADMIN_FEATURES_ISSUE_DETAIL_JOIN
+    )
     sort_key = _ADMIN_FEATURE_SORT_KEYS[sort]
-    if sort == "provider":
-        # ``filtered``는 두 번 읽히므로(집합 선택의 입력·바깥 행) 어차피 물질화된다.
-        key_ctes = f"""filtered AS MATERIALIZED (
-    SELECT f.feature_id
-    FROM feature.features AS f
-    WHERE {filters}
-),{_ADMIN_FEATURES_PRIMARY_SOURCE_PICK}
-base AS (
+    # ``provider`` 정렬은 대표 원천 표의 ``(COALESCE(provider, ''), feature_id)`` 색인을 순서대로
+    # 걷는다 — keyset의 행 비교가 그 색인 열이어야 하므로 id도 그 표의 것을 내보낸다.
+    id_column = "ps.feature_id" if sort == "provider" else "f.feature_id"
+    key_ctes = f"""base AS {materialized}(
     SELECT
-        f.feature_id,
+        {id_column} AS feature_id,
         {sort_key} AS sort_key{issue_column}
-    FROM filtered AS f
-    LEFT JOIN pick AS ps
-      ON ps.feature_id = f.feature_id{issue_join}
-    WHERE TRUE{provider_clause}
-)"""
-    else:
-        provider_join = _ADMIN_FEATURES_PRIMARY_SOURCE_JOIN if provider_filter else ""
-        key_ctes = f"""base AS {materialized}(
-    SELECT
-        f.feature_id,
-        {sort_key} AS sort_key{issue_column}
-    FROM feature.features AS f{provider_join}{issue_join}
+    FROM feature.features AS f{source_join}{issue_join}
     WHERE {filters}{provider_clause}
 )"""
     return f"""
@@ -1653,8 +1611,8 @@ SELECT
         NULLIF(f.address ->> 'admin', ''),
         ''
     ) AS address_label,
-    ps.provider AS primary_provider,
-    ps.dataset_key AS primary_dataset_key,
+    pd.provider AS primary_provider,
+    pd.dataset_key AS primary_dataset_key,
     COALESCE(issue.issue_count, 0)::integer AS issue_count,
     COALESCE(issue.issues, '[]'::jsonb) AS issues,
     f.created_at,
@@ -3552,7 +3510,14 @@ async def admin_feature_card_target_exists(
     )
 
 
-_DEDUP_REVIEW_SQL: Final[str] = """
+# dedup 검토 쌍 양쪽의 대표 원천(ADR-125) — 유지된 표에서 읽는다. ``psa``·``psb``는 정본
+# ``provider_datasets`` 행이라 ``provider``·``dataset_key``를 그대로 낸다.
+_REVIEW_PRIMARY_SOURCE_JOINS: Final[str] = primary_source_display_join_sql(
+    "fa", row_alias="psa_row", dataset_alias="psa"
+) + primary_source_display_join_sql("fb", row_alias="psb_row", dataset_alias="psb")
+
+
+_DEDUP_REVIEW_SQL: Final[str] = f"""
 WITH reviews AS MATERIALIZED (
     SELECT
         q.review_id,
@@ -3610,40 +3575,7 @@ expanded AS (
     FROM reviews AS r
     JOIN feature.features AS fa ON fa.feature_id = r.feature_id_a
     JOIN feature.features AS fb ON fb.feature_id = r.feature_id_b
-    LEFT JOIN LATERAL (
-        SELECT pd.provider, pd.dataset_key
-        FROM provider_sync.source_links AS sl
-        JOIN provider_sync.source_entities AS se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets AS pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = se.source_entity_key
-        JOIN provider_sync.source_records AS sr
-          ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = head.current_source_record_key
-        WHERE sl.feature_id = fa.feature_id
-          AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
-        LIMIT 1
-    ) AS psa ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT pd.provider, pd.dataset_key
-        FROM provider_sync.source_links AS sl
-        JOIN provider_sync.source_entities AS se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets AS pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = se.source_entity_key
-        JOIN provider_sync.source_records AS sr
-          ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = head.current_source_record_key
-        WHERE sl.feature_id = fb.feature_id
-          AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
-        LIMIT 1
-    ) AS psb ON TRUE
+{_REVIEW_PRIMARY_SOURCE_JOINS}
 )
 SELECT *
 FROM expanded
@@ -3688,7 +3620,7 @@ LIMIT :limit_plus_one
 """
 
 
-_DEDUP_REVIEW_COUNT_SQL: Final[str] = """
+_DEDUP_REVIEW_COUNT_SQL: Final[str] = f"""
 WITH reviews AS MATERIALIZED (
     SELECT
         q.review_id,
@@ -3721,40 +3653,7 @@ expanded AS (
     FROM reviews AS r
     JOIN feature.features AS fa ON fa.feature_id = r.feature_id_a
     JOIN feature.features AS fb ON fb.feature_id = r.feature_id_b
-    LEFT JOIN LATERAL (
-        SELECT pd.provider, pd.dataset_key
-        FROM provider_sync.source_links AS sl
-        JOIN provider_sync.source_entities AS se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets AS pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = se.source_entity_key
-        JOIN provider_sync.source_records AS sr
-          ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = head.current_source_record_key
-        WHERE sl.feature_id = fa.feature_id
-          AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
-        LIMIT 1
-    ) AS psa ON TRUE
-    LEFT JOIN LATERAL (
-        SELECT pd.provider, pd.dataset_key
-        FROM provider_sync.source_links AS sl
-        JOIN provider_sync.source_entities AS se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets AS pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = se.source_entity_key
-        JOIN provider_sync.source_records AS sr
-          ON sr.source_entity_key = se.source_entity_key
-         AND sr.source_record_key = head.current_source_record_key
-        WHERE sl.feature_id = fb.feature_id
-          AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
-        LIMIT 1
-    ) AS psb ON TRUE
+{_REVIEW_PRIMARY_SOURCE_JOINS}
 )
 SELECT count(*)::integer AS total_count
 FROM expanded

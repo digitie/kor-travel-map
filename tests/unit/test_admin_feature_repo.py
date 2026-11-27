@@ -850,8 +850,10 @@ def test_admin_features_key_phase_has_no_display_laterals(sort: str) -> None:
     assert "provider_sync.source_entity_heads AS head" not in key
     assert "data_integrity_violations" not in key
     decoration = _decoration_phase(statement)
-    # 표시 값은 페이지 행에만 붙는다.
-    assert "provider_sync.source_links AS sl" in decoration
+    # 표시 값은 페이지 행에만 붙는다 — 대표 원천은 유지된 표에서 읽는다(ADR-125).
+    assert "feature.feature_primary_sources AS ps" not in key
+    assert "LEFT JOIN feature.feature_primary_sources AS ps" in decoration
+    assert "provider_sync.source_entity_heads" not in statement
     assert "jsonb_agg(" in decoration
     assert "ORDER BY page.sort_key DESC, page.feature_id DESC" in decoration
 
@@ -866,19 +868,23 @@ def test_admin_features_issue_sort_counts_without_aggregating_issue_bodies() -> 
     assert "base.issue_count > 0" in statement
 
 
-def test_admin_features_provider_sort_picks_sources_as_one_set() -> None:
-    """``provider`` 정렬은 대표 원천을 행마다가 아니라 집합으로 한 번에 고른다."""
+def test_admin_features_provider_sort_walks_the_persisted_primary_source() -> None:
+    """``provider`` 정렬은 유지된 대표 원천 표를 색인 keyset으로 걷는다(ADR-125).
+
+    #1561까지는 필터를 통과한 feature 전부의 대표 원천을 원천 계보 다섯 표에서 ``DISTINCT ON``
+    집합으로 골랐다(prod 2.1 s·hash 약 127 MB). 키 단계는 이제 원천 계보를 읽지 않고, 정렬 키와
+    keyset의 id가 ``idx_feature_primary_sources_provider_keyset``의 두 열이다.
+    """
 
     statement = repo._admin_features_sql(sort="provider", order="asc")
 
     key = _key_phase(statement)
-    assert "filtered AS MATERIALIZED (" in key
-    assert "SELECT DISTINCT ON (sl.feature_id)" in key
+    assert "JOIN feature.feature_primary_sources AS ps" in key
+    assert "ps.feature_id AS feature_id" in key
+    assert "COALESCE(ps.provider, '') AS sort_key" in key
+    assert "DISTINCT ON" not in statement
     assert "LEFT JOIN LATERAL" not in key
-    # 집합 선택과 꾸밈 단계의 LATERAL은 같은 순서 조각으로 같은 행을 고른다.
-    order = repo._ADMIN_FEATURES_PRIMARY_SOURCE_ORDER
-    assert f"ORDER BY sl.feature_id, {order}" in key
-    assert f"ORDER BY {order}\n        LIMIT 1" in _decoration_phase(statement)
+    assert "provider_sync.source_entity_heads" not in statement
     assert ":provider_dataset_id" not in statement
 
 

@@ -649,9 +649,11 @@ feature만** 세고 마커 위치는 그 부분집합의 `avg(coord)`다. MV 방
 
 #### 9.3.3 2순위 — primary-source LATERAL
 
-> 최종 reader는 `source_links.source_role='primary' → source_entities →
-> source_entity_heads → source_records → provider_datasets`를 사용한다. denormalized
-> primary provider/dataset 유지 열은 새로 만들지 않는다.
+> **ADR-125(2026-11-27, alembic 459)가 아래 권고를 채택했다** — 대표 원천은
+> `feature.feature_primary_sources`(trigger가 쓰기 transaction에서 유지하는 Feature당 한 행)에서
+> 읽고, 규칙은 "가장 먼저 붙은 primary 연결"로 바꿨다(관측 시각 규칙은 적재마다 대표가 바뀌고
+> head 관측 갱신마다 trigger가 필요했다). `features` 열이 아니라 별도 표인 이유는 ADR-125 §3
+> (`row_revision` ETag·HOT·`features` 행 잠금). 아래 문단은 결정 전 검토 기록이다.
 
 `/features/nearby`·`/admin/features`는 feature마다
 `source_links(source_role='primary') → source_entities → source_entity_heads → source_records`를

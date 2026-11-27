@@ -1,12 +1,14 @@
 """``list_admin_features`` 정렬·keyset 정합성 (키 단계 → 페이지 → 꾸밈 단계).
 
 목록 SQL은 키 단계(``base``)에서 필터·정렬 키만 계산하고, 한 페이지를 자른 뒤에 대표
-원천·이슈 같은 표시 값을 붙인다. ``provider`` 정렬의 키 단계는 대표 원천을 집합으로
-(``DISTINCT ON``) 고르고 꾸밈 단계는 행마다 LATERAL로 고른다. 여기서는
+원천·이슈 같은 표시 값을 붙인다. 대표 원천은 쓰기 시점에 유지된 ``feature_primary_sources``
+(ADR-125)에서 읽는다 — 키 단계는 그 사본의 ``provider``로 정렬·필터하고, 꾸밈 단계는 정본
+``provider_datasets``의 값을 보인다. 여기서는
 
 * 모든 정렬·방향에서 한 행씩 넘긴 페이지의 합이 한 번에 읽은 목록과 같고(빠짐·겹침 없음),
 * 정렬 키가 실제로 그 순서이며,
-* 키 단계가 고른 대표 원천과 응답의 ``primary_provider``가 같은 행을 가리킨다는 것을
+* 정렬·필터가 본 대표 원천과 응답의 ``primary_provider``가 같고, 그것이 규칙("가장 먼저 붙은
+  primary 연결" — 관측 시각과 무관)의 결과라는 것을
 
 실 DB에서 고정한다. 대소문자만 다른 같은 이름(``GS25``/``gs25``)을 일부러 넣는다 — 종전
 cursor는 원문 이름을 실어 ``lower(name)`` keyset과 비교해 이런 행을 빠뜨리거나(asc) 같은 행을
@@ -46,16 +48,17 @@ _OBSERVED = datetime(2031, 1, 1, 0, 0, tzinfo=UTC)
 
 _SORTS = ("name", "updated_at", "created_at", "kind", "provider", "issue_count")
 
-#: (label, name, primary sources[(dataset 자리, observed 분)], open issue 수, 생성 분)
-_SEED: tuple[tuple[str, str, tuple[tuple[int, int], ...], int, int], ...] = (
-    ("gs25-a", "GS25 강남점", ((0, 0),), 0, 0),
-    ("gs25-b", "GS25 강남점", ((1, 0),), 2, 1),
-    ("gs25-c", "gs25 강남점", ((0, 0),), 1, 2),
-    ("gs25-d", "Gs25 강남점", ((1, 0),), 0, 3),
-    ("ga", "가람", ((0, 0),), 0, 4),
-    ("na", "나루", ((1, 0),), 1, 5),
-    # 대표 원천이 둘 — 나중에 관측된 쪽(dataset 1)이 대표다.
-    ("two-primary", "다리", ((0, 0), (1, 30)), 0, 6),
+#: (label, name, primary sources[(dataset 자리, observed 분, 연결 분)], open issue 수, 생성 분)
+_SEED: tuple[tuple[str, str, tuple[tuple[int, int, int], ...], int, int], ...] = (
+    ("gs25-a", "GS25 강남점", ((0, 0, 0),), 0, 0),
+    ("gs25-b", "GS25 강남점", ((1, 0, 0),), 2, 1),
+    ("gs25-c", "gs25 강남점", ((0, 0, 0),), 1, 2),
+    ("gs25-d", "Gs25 강남점", ((1, 0, 0),), 0, 3),
+    ("ga", "가람", ((0, 0, 0),), 0, 4),
+    ("na", "나루", ((1, 0, 0),), 1, 5),
+    # 대표 원천이 둘 — 먼저 붙은 쪽(dataset 1)이 대표다. dataset 0이 더 나중에 관측됐어도
+    # 바뀌지 않는다(ADR-125: 관측 시각은 적재마다 움직인다).
+    ("two-primary", "다리", ((0, 30, 10), (1, 0, 0)), 0, 6),
     # 원천 연결이 없는 feature — provider 정렬 키는 ''.
     ("no-source", "마을", (), 0, 7),
 )
@@ -87,6 +90,7 @@ async def _add_link(
     *,
     observed: datetime,
     role: str,
+    linked: datetime = _OBSERVED,
 ) -> None:
     """entity·record·head·link 한 벌(head가 그 record를 가리킨다)."""
 
@@ -125,7 +129,7 @@ async def _add_link(
             source_role=role,
             match_method="natural_key",
             confidence=100,
-            created_at=_OBSERVED,
+            created_at=linked,
         )
     )
     await session.flush()
@@ -157,16 +161,19 @@ async def _seed(session: AsyncSession) -> dict[str, str]:
         )
         await session.flush()
         await seed_feature_subtype(session, feature_id=feature_id, kind="place")
-        for index, (slot, observed_minute) in enumerate(sources):
+        for index, (slot, observed_minute, linked_minute) in enumerate(sources):
             await _add_link(
                 session, feature_id, f"admin-list-sort-{label}-{index}", datasets[slot],
                 observed=_OBSERVED + timedelta(minutes=observed_minute), role="primary",
+                linked=_OBSERVED + timedelta(minutes=linked_minute),
             )
         if label == "ga":
-            # 대표 원천이 아닌 연결 — 더 나중에 관측돼도 primary가 아니므로 고르지 않는다.
+            # 대표 원천이 아닌 연결 — 더 먼저 붙고 더 나중에 관측돼도 primary가 아니므로
+            # 고르지 않는다.
             await _add_link(
                 session, feature_id, f"admin-list-sort-{label}-enrichment", datasets[1],
                 observed=_OBSERVED + timedelta(hours=2), role="enrichment",
+                linked=_OBSERVED - timedelta(hours=1),
             )
         for issue_index in range(issues):
             await session.execute(
@@ -278,14 +285,13 @@ async def test_admin_feature_provider_sort_key_matches_the_displayed_primary_sou
         for item in await _walk(migrated_session, sort="provider", order="asc", page_size=2)
     }
 
-    # 대표 원천이 둘이면 나중에 관측된 쪽이다 — 키 단계(집합 선택)와 응답(LATERAL)이 같다.
-    # ``ga``의 더 나중 연결은 enrichment라 대표가 아니다.
+    # 대표 원천이 둘이면 먼저 붙은 쪽이다 — 정렬이 본 사본과 응답(정본 dataset)이 같다.
+    # ``ga``의 더 먼저 붙은 연결은 enrichment라 대표가 아니다.
     assert by_id[ids["two-primary"]].primary_provider == providers[second]
     assert by_id[ids["no-source"]].primary_provider is None
     assert by_id[ids["ga"]].primary_provider == providers[first]
 
-    # 같은 대표 원천 필터 — provider 정렬이면 키 단계의 집합 선택(``pick``)으로, 이름 정렬이면
-    # 키 단계의 LATERAL로 거른다. 두 모양이 같은 행을 고른다.
+    # 같은 대표 원천 필터 — provider 정렬(사본 색인 keyset)과 이름 정렬이 같은 행을 고른다.
     filtered = await _walk(
         migrated_session, sort="provider", order="asc", page_size=2, provider_dataset_id=second
     )
@@ -348,7 +354,8 @@ async def test_admin_feature_display_values_are_read_for_page_rows_only(
 ) -> None:
     """표시용 원천·이슈 조회는 한 페이지 행에만 돈다(키 단계는 정렬에 필요한 것만).
 
-    종전 계획은 정렬 키가 인덱스를 못 타면 필터를 통과한 feature마다 대표 원천 LATERAL
+    대표 원천은 유지된 표의 행 하나다(ADR-125). 종전 계획은 정렬 키가 인덱스를 못 타면 필터를
+    통과한 feature마다 대표 원천 LATERAL
     (원천 계보 다섯 표)과 이슈 jsonb 집계를 돌린 뒤에 top-N을 골랐다 — prod 43만 행에서
     유휴 12.7~18.6 s, I/O 부하 중 39 s.
     """
@@ -357,26 +364,11 @@ async def test_admin_feature_display_values_are_read_for_page_rows_only(
     plan = await _analyzed_main_plan(migrated_session, sort=sort, page_size=page_size)
 
     nodes = _plan_nodes(plan)
-    # 원천 계보 조회는 꾸밈 단계의 대표 원천 LATERAL(``LIMIT 1``) 하나뿐이고, 그 LATERAL은 페이지
-    # 행 수(limit + 1)만큼만 시작한다. 안쪽 조인 순서(어느 표에서 출발하는지)는 통계에 따라
-    # 바뀌므로 표 노드가 아니라 원천 계보를 품은 ``Limit`` 서브트리의 시작 횟수를 본다.
-    # (``provider`` 정렬은 키 단계가 원천을 집합으로 고르므로 여기서 재지 않는다 — 작은 seed에서는
-    # planner가 그 집합 선택을 index 조회로 풀어 loops가 행 수가 된다. 정합성은 위 시험이 본다.)
-    lineage_limits = [
-        int(node["Actual Loops"])
-        for node in nodes
-        if node.get("Node Type") == "Limit"
-        and node is not plan
-        and any(
-            inner.get("Relation Name") == "source_links" for inner in _plan_nodes(node)
-        )
-        and not any(
-            inner is not node and inner.get("Node Type") == "Limit"
-            and any(x.get("Relation Name") == "source_links" for x in _plan_nodes(inner))
-            for inner in _plan_nodes(node)
-        )
-    ]
-    assert lineage_limits == [page_size + 1], (sort, lineage_limits, plan)
+    # 원천 계보 다섯 표는 목록이 아예 읽지 않는다 — 대표 원천은 쓰기 시점에 유지된 표에서 온다
+    # (ADR-125). 그 표는 꾸밈 단계에만 붙는다(키 단계에 없다는 것은 SQL 모양 단위 시험이 본다).
+    lineage = {"source_links", "source_entities", "source_entity_heads", "source_records"}
+    assert not [n for n in nodes if n.get("Relation Name") in lineage], plan
+    assert any(n.get("Relation Name") == "feature_primary_sources" for n in nodes), plan
     # 이슈 본문 집계(jsonb_agg)도 페이지 행에만 — 키 단계의 건수 LATERAL은 issue_count 정렬일
     # 때만 feature마다 돈다.
     issue_loops = [

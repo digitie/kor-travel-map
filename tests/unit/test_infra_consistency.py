@@ -81,12 +81,12 @@ def test_static_cases_declares_f1_f2_f2g_f3_f6_all_error() -> None:
     ADR-099 2단계가 `F2G`를 더했다 — geometry가 subtype 행 바깥으로 나가면서
     "geometry 없는 route"를 즉시 거절하던 `geom NOT NULL`이 COMMIT 시점 DEFERRABLE
     FK로 바뀌었고, 복구·복제 세션이 그 창을 지날 수 있기 때문이다(F2와 같은 성격의
-    보상 관측). 순서는 아래 `run_consistency_checks` 대역이 결과를 **순서대로**
-    돌려주므로 계약이다.
+    보상 관측). ADR-125가 `F10`(대표 원천 사본 drift)을 더했다. 순서는 아래
+    `run_consistency_checks` 대역이 결과를 **순서대로** 돌려주므로 계약이다.
     """
 
     codes = [c.code for c in CONSISTENCY_CASES]
-    assert codes == ["F1", "F2", "F2G", "F3", "F6"]
+    assert codes == ["F1", "F2", "F2G", "F3", "F6", "F10"]
     assert all(c.severity == "ERROR" for c in CONSISTENCY_CASES)
 
 
@@ -464,6 +464,7 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
             _FakeResult(scalar=0),  # F2G count (route geometry 행 결측)
             _FakeResult(scalar=0),  # F3 count
             _FakeResult(scalar=0),  # F6 count
+            _FakeResult(scalar=0),  # F10 count (대표 원천 사본 drift)
             _FakeResult(scalar=2),  # F4 pending count
             _FakeResult(rows=["rk-pending-1", "rk-pending-2"]),  # F4 samples
             _FakeResult(scalar=1),  # F5 stale count
@@ -504,14 +505,15 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
     assert report.batch_id == "batch-unit"
     assert report.severity_max == "ERROR"
     assert report.summary["total_violations"] == 4
-    # ADR-099 2단계가 F2G를 더해 정적 케이스가 넷에서 다섯이 됐다.
-    assert report.summary["cases_evaluated"] == 10
+    # ADR-099 2단계가 F2G를, ADR-125가 F10을 더해 정적 케이스가 여섯이다.
+    assert report.summary["cases_evaluated"] == 11
     assert report.summary["by_code"] == {
         "F1": 0,
         "F2": 1,
         "F2G": 0,
         "F3": 0,
         "F6": 0,
+        "F10": 0,
         "F4": 1,
         "F5": 1,
         "F7": 1,
@@ -533,8 +535,8 @@ async def test_run_consistency_checks_evaluates_dynamic_cases_and_persists() -> 
     by_code = {case["code"]: case for case in report.cases_json()}
     assert by_code["F4"]["metadata"]["pending_count"] == 2
     assert by_code["F7"]["sample_ids"][0].startswith("rk-regressed:f7-a:f7-b:95.00->")
-    # F2G가 count 한 번을 더 쓴다(0건이라 sample 조회는 없다).
-    assert len(session.calls) == 13
+    # F2G·F10이 count 한 번씩을 더 쓴다(0건이라 sample 조회는 없다).
+    assert len(session.calls) == 14
     assert session.calls[-1][1]["batch_id"] == "batch-unit"
     assert session.calls[-1][1]["severity_max"] == "ERROR"
 

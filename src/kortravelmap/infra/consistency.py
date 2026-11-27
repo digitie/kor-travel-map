@@ -46,7 +46,12 @@ F1~F4 + Phase 2 케이스를 raw SQL(ADR-004)로 검사하고 결과를
   모양(보유 개수·보유 시간 폭)은 ``metadata``에만 둔다. 개수를 판정에 넣었다면 그날
   "artifact 3건, 정상"이라고 답했을 것이다.
 
-F1/F2/F3/F6은 ``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5/F7/F8/F9는
+- **F10** 대표 원천 drift — 쓰기 시점에 유지한 ``feature.feature_primary_sources``가 규칙 view
+  ``feature.feature_primary_source_rule``과 어긋난 Feature(행 없음·고아 행·값 다름, ADR-125).
+  severity=ERROR. trigger가 같은 transaction에서 맞추므로 정상이면 언제나 0이다 — F3과 같은
+  파생 상태 신뢰 관측이다.
+
+F1/F2/F3/F6/F10은 ``CONSISTENCY_CASES``(행별 정적 SQL)로, F4/F5/F7/F8/F9는
 ``run_consistency_checks``의 임계/정책/재계산/객체 스냅샷/백업 산출물 분기로
 추가된다.
 
@@ -72,6 +77,7 @@ from kortravelmap.infra.feature_subtype import (
     EXTERNAL_GEOMETRY_KINDS,
     EXTERNAL_GEOMETRY_UNION_SQL,
 )
+from kortravelmap.infra.primary_source import PRIMARY_SOURCE_DRIFT_SQL
 from kortravelmap.settings import BACKUP_LAST_SUCCESS_WARN_HOURS_DEFAULT
 
 if TYPE_CHECKING:
@@ -160,7 +166,7 @@ class CaseSpec:
     sql: str
 
 
-# F1/F2/F3/F6. 각 SQL은 위반 식별자를 ``AS id``로 반환.
+# F1/F2/F3/F6/F10. 각 SQL은 위반 식별자를 ``AS id``로 반환.
 CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
     CaseSpec(
         code="F1",
@@ -301,6 +307,14 @@ CONSISTENCY_CASES: Final[tuple[CaseSpec, ...]] = (
             "  AND (period->'open'->>'day')::int = (period->'close'->>'day')::int "
             "  AND (period->'open'->>'time') > (period->'close'->>'time')"
         ),
+    ),
+    CaseSpec(
+        code="F10",
+        severity="ERROR",
+        description=(
+            "대표 원천 drift (feature_primary_sources ≠ feature_primary_source_rule, ADR-125)"
+        ),
+        sql=PRIMARY_SOURCE_DRIFT_SQL,
     ),
 )
 

@@ -131,6 +131,7 @@ from kortravelmap.infra.lock_wait import (
     FEATURE_CURATION_WRITE_WAIT_INFO_KEY as FEATURE_CURATION_WRITE_WAIT_INFO_KEY,
 )
 from kortravelmap.infra.lock_wait import execute_with_lock_wait, pop_armed_lock_wait
+from kortravelmap.infra.primary_source import primary_source_display_join_sql
 from kortravelmap.infra.provider_field_candidates import (
     capture_provider_field_candidates,
     provider_field_shadow_enabled,
@@ -2942,33 +2943,11 @@ WITH origin AS (
 )"""
 
 
-def _nearby_primary_source_subquery(
-    feature_alias: str, *, columns: str = "pd.provider, pd.dataset_key"
-) -> str:
-    """Feature 하나의 primary source(provider·dataset) 1행 — nearby 응답·provider 필터 공용.
-
-    바깥 ``{feature_alias}``에 상관된 **조각**이라 홀로 Parse되지 않는다 — head parse
-    오라클은 이것을 품은 ``_nearby_sql`` 문장으로 검사한다(그래서 ``*_sql`` 이름이 아니다).
-    같은 Feature에 primary link가 여럿이면 가장 최근 관측(head)·적재 record를 고른다.
-    응답 열과 provider 필터가 **같은 규칙**을 써야 필터가 응답과 어긋나지 않는다.
-    """
-    if not feature_alias.isidentifier():
-        raise ValueError("feature alias must be a SQL identifier")
-    return f"""
-        SELECT {columns}
-        FROM provider_sync.source_links AS sl
-        JOIN provider_sync.source_entities AS se
-          ON se.source_entity_key = sl.source_entity_key
-        JOIN provider_sync.provider_datasets AS pd
-          ON pd.provider_dataset_id = se.provider_dataset_id
-        JOIN provider_sync.source_entity_heads AS head
-          ON head.source_entity_key = se.source_entity_key
-        JOIN provider_sync.source_records AS sr
-          ON sr.source_record_key = head.current_source_record_key
-        WHERE sl.feature_id = {feature_alias}.feature_id
-          AND sl.source_role = 'primary'
-        ORDER BY head.observed_at DESC, sr.imported_at DESC, sr.source_record_key
-        LIMIT 1"""
+#: nearby 응답의 대표 원천(ADR-125) — 쓰기 시점에 유지된 표에서 page 행에만 붙인다. provider
+#: 필터(``_nearby_sql``)도 같은 표의 ``provider``를 본다 — 응답 열과 필터가 같은 값을 본다.
+_NEARBY_PRIMARY_SOURCE_JOIN: Final[str] = primary_source_display_join_sql(
+    "page", row_alias="ps_row", dataset_alias="ps"
+)
 
 
 #: 반경 거리(m). ``<->``는 ``ST_Distance``와 같은 C 함수(``geometry_distance_centroid`` →
@@ -3063,8 +3042,12 @@ page AS (
       )
       AND (
         CAST(:providers AS text[]) IS NULL
-        OR ({_nearby_primary_source_subquery("f", columns="pd.provider")}
-        ) = ANY(CAST(:providers AS text[]))
+        OR EXISTS (
+          SELECT 1
+          FROM feature.feature_primary_sources AS fps
+          WHERE fps.feature_id = f.feature_id
+            AND fps.provider = ANY(CAST(:providers AS text[]))
+        )
       )
       AND {place_attribute_filter_sql("f")}
 {_PUBLIC_ACTIVE_NOTICE_FILTER_SQL}
@@ -3087,8 +3070,7 @@ SELECT
     page.last_updated_at,
     {place_attribute_codes_sql("page")} AS attribute_codes
 FROM page
-LEFT JOIN LATERAL ({_nearby_primary_source_subquery("page")}
-) AS ps ON TRUE
+{_NEARBY_PRIMARY_SOURCE_JOIN}
 ORDER BY {final_order}
 """
     )

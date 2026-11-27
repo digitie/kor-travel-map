@@ -2051,6 +2051,44 @@ class FeatureClusterPointRow(Base):
     )
 
 
+class FeaturePrimarySourceRow(Base):
+    """``feature.feature_primary_sources`` — Feature의 대표 원천(migration 459, ADR-125).
+
+    Feature 하나에 한 행. 규칙의 정의는 view ``feature.feature_primary_source_rule``(primary
+    연결 중 가장 먼저 붙은 것) 하나이고, 이 표는 그 결과를 DB trigger가 **같은 transaction에서**
+    유지한 사본이다 — 애플리케이션은 쓰지 않는다(런타임 권한은 SELECT뿐). 원천이 없으면 세
+    열이 모두 NULL이다. ``provider``는 ``provider_datasets.provider``(불변 식별)의 사본이고 정렬
+    색인을 위해 둔다. FK는 두지 않는다(455와 같은 이유).
+    """
+
+    __tablename__ = "feature_primary_sources"
+    __table_args__ = (
+        CheckConstraint(
+            "(source_entity_key IS NULL) = (provider_dataset_id IS NULL) "
+            "AND (provider_dataset_id IS NULL) = (provider IS NULL)",
+            name=conv("ck_feature_primary_sources_shape"),
+        ),
+        # 관리자 ``sort=provider`` keyset — 식은 ``admin_feature_repo``의 정렬 키와 같다.
+        Index(
+            "idx_feature_primary_sources_provider_keyset",
+            text("COALESCE(provider, ''::text)"),
+            "feature_id",
+        ),
+        # 관리자 ``provider_dataset_id`` 필터.
+        Index(
+            "idx_feature_primary_sources_dataset",
+            "provider_dataset_id",
+            "feature_id",
+        ),
+        {"schema": "feature"},
+    )
+
+    feature_id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True)
+    source_entity_key: Mapped[str | None] = mapped_column(Text)
+    provider_dataset_id: Mapped[int | None] = mapped_column(BigInteger)
+    provider: Mapped[str | None] = mapped_column(Text)
+
+
 class PlaceAttributeRow(Base):
     """``feature.place_attributes`` — 공개 장소 속성 catalog(ADR-121, migration 446).
 

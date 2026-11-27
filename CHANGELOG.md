@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-11-27 — Feature 대표 원천을 쓰기 시점에 유지(ADR-125, alembic 459)
+
+- 대표 원천 규칙을 "가장 먼저 붙은 primary 연결"로 바꿨다(종전 "가장 최근 관측"은 적재마다 바뀌었다 — prod 817건 중 730건의
+  대표 provider가 바뀐다). 규칙 view `feature.feature_primary_source_rule`, trigger가 유지하는 `feature.feature_primary_sources`.
+- 관리자 `GET /v1/admin/features`의 `sort=provider`·`provider_dataset_id`, nearby `primary_provider`·`providers`, dedup 검토
+  목록이 사본을 읽는다(색인 keyset). 정합성 검사 F10. 응답 모양·OpenAPI 변경 없음.
+
 ## 2026-11-24 — transport export 계약 정렬(#1542 후속)
 
 - `EXPORT_SOURCE_INCONSISTENT` 503: Valkey 상태 job은 producer 권장대로 다음 tick(상류 미준비로 건너뜀·나이 판정), feature
