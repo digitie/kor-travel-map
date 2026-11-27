@@ -13,10 +13,12 @@ from kortravelmap.core.geometry import (
     AREA_GEOMETRY_TYPES,
     ROUTE_GEOMETRY_TYPES,
     GeometryError,
+    area_anchor_points,
     geometry_area_square_meters,
     geometry_centroid,
     normalize_geometry,
     parse_wkt,
+    repair_area_geometry,
 )
 from kortravelmap.dto import Coordinate
 
@@ -108,3 +110,62 @@ def test_geometry_area_zero_for_non_area() -> None:
 def test_geometry_area_zero_for_invalid() -> None:
     assert geometry_area_square_meters("NOT WKT") == Decimal("0")
     assert geometry_area_square_meters("POLYGON EMPTY") == Decimal("0")
+
+
+# -- 면 수리·역지오 후보점 (2026-11-27 국립공원 경계 재적재) --------------------
+
+_BOWTIE = "POLYGON((126.9 37.6, 127.0 37.7, 127.0 37.6, 126.9 37.7, 126.9 37.6))"
+
+
+def test_repair_area_geometry_keeps_valid_input_identical() -> None:
+    geom = parse_wkt(_POLY)
+    assert repair_area_geometry(geom) is geom
+
+
+def test_repair_area_geometry_fixes_self_intersection_to_polygons_only() -> None:
+    geom = parse_wkt(_BOWTIE)
+    assert not geom.is_valid
+    fixed = repair_area_geometry(geom)
+    assert fixed.is_valid
+    assert fixed.geom_type == "MultiPolygon"
+    assert len(fixed.geoms) == 2
+
+
+def test_repair_area_geometry_rejects_non_area() -> None:
+    with pytest.raises(GeometryError):
+        repair_area_geometry(parse_wkt(_LINE))
+
+
+def test_normalize_geometry_repairs_invalid_area() -> None:
+    wkt, _centroid = normalize_geometry(_BOWTIE, allowed_types=AREA_GEOMETRY_TYPES)
+    assert parse_wkt(wkt).is_valid
+
+
+def test_normalize_geometry_leaves_valid_area_wkt_unchanged() -> None:
+    """valid 면의 직렬화는 종전과 같다 — 수리가 기존 행의 payload를 흔들지 않는다."""
+    wkt, _centroid = normalize_geometry(_POLY, allowed_types=AREA_GEOMETRY_TYPES)
+    assert wkt == parse_wkt(_POLY).wkt
+
+
+def test_area_anchor_points_start_with_centroid_then_surface_then_ring() -> None:
+    geom = parse_wkt(
+        "MULTIPOLYGON(((126.0 34.0, 126.2 34.0, 126.2 34.2, 126.0 34.2, 126.0 34.0)),"
+        "((127.0 35.0, 127.05 35.0, 127.05 35.05, 127.0 35.05, 127.0 35.0)))"
+    )
+    anchors = area_anchor_points(geom, max_parts=2, ring_samples=4)
+    assert anchors[0] == geometry_centroid(geom)
+    assert len(anchors) == len(set(anchors))
+    lons = [float(anchor.lon) for anchor in anchors]
+    # 큰 part(126.0~126.2) 꼭짓점이 작은 part(127.0~) 꼭짓점보다 먼저 나온다.
+    first_small = next(i for i, lon in enumerate(lons) if lon >= 127.0)
+    assert any(lon in (126.0, 126.2) for lon in lons[:first_small])
+    # centroid 다음 후보들은 모두 면 위(경계 포함)다.
+    surface = geom.buffer(1e-9)
+    assert all(
+        surface.covers(parse_wkt(f"POINT({anchor.lon} {anchor.lat})")) for anchor in anchors[1:]
+    )
+
+
+def test_area_anchor_points_rejects_bad_limits() -> None:
+    with pytest.raises(ValueError, match="1 이상"):
+        area_anchor_points(parse_wkt(_POLY), max_parts=0)

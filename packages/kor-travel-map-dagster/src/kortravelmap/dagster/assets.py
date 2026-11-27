@@ -47,7 +47,9 @@ from kortravelmap.providers.khoa import (
 from kortravelmap.providers.knps import (
     KNPS_GEOMETRY_DATASETS,
     KNPS_PLACE_DATASETS,
+    KNPS_SOURCE_ENTITY_TYPE,
     knps_geometry_records_to_bundles,
+    knps_geometry_snapshot_retires_absent,
     knps_point_records_to_bundles,
 )
 from kortravelmap.providers.knps import (
@@ -730,12 +732,15 @@ async def run_feature_geometry_knps_records(
         fetched_at=fetched_at,
         reverse_geocoder=_reverse_geocoder(context),
     )
+    retires_absent = knps_geometry_snapshot_retires_absent(spec)
     return await _load(
         context,
         provider=KNPS_PROVIDER_NAME,
         dataset_key=dataset_key,
         bundles=bundles,
         authoritative_snapshot_complete=True,
+        source_entity_type=KNPS_SOURCE_ENTITY_TYPE if retires_absent else None,
+        retire_absent_from_snapshot=retires_absent,
         geo_applied=GeoApplied(reverse=True, geocode=False),
         address_failure_mode=spec.address_failure_mode,
     )

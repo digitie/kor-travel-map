@@ -1,3 +1,10 @@
+## 2026-11-27 — 국립공원 경계 재원천화(3 km 버퍼 → 한국보호지역 국립공원 행)·면 수리
+
+- 15017313은 공원경계 3 km 버퍼였다. 국립공원 23곳을 한국보호지역 `National Park` 22행 + 승격 팔공산에서 싣고(공식 면적
+  ±5.2%, 경주 9 part), 해상 국립공원은 면 위 후보점으로 역지오, 면은 `make_valid`. knps-api 핀 `59fb5b0`(PR#22). OpenAPI·migration 없음.
+- 다음(소유자 배포): Dagster code server 이미지 회전 뒤 `feature_geometry_knps_records_job`을 `knps_protected_areas`로 1회 →
+  `knps_park_boundaries`로 1회(버퍼 21건 은퇴). 확인 SQL: active `national_park` 23·면적비 0.9~1.1, `protected_area` invalid 0.
+  그 뒤 containing-areas API·PinVi 표시를 연다.
 ## 2026-11-27 — 휴게소 먹거리(ADR-127, 배포 대기)
 
 - transport `rest-area-food` export를 받아 휴게소 KREX 코드 연결(215/215)·메뉴 요약을 Valkey `transport.rest_area_food`에,

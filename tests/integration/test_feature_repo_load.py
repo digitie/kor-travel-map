@@ -1393,14 +1393,14 @@ async def test_area_feature_geom_persists(migrated_session: AsyncSession) -> Non
         raw: dict
 
     rec = _GRec(
-        "PB-1",
-        "북한산국립공원",
+        "10932",
+        "북한산",
         "POLYGON((126.9 37.6, 127.0 37.6, 127.0 37.7, 126.9 37.7, 126.9 37.6))",
-        {"PARK": "북한산"},
+        {"WDPA_PID": "10932.0", "ORIG_NAME": "북한산", "DESIG_ENG": "National Park"},
     )
     bundle = (
         await knps_geometry_records_to_bundles(
-            [rec], dataset_key="knps_park_boundaries", fetched_at=_FETCHED
+            [rec], dataset_key="knps_protected_areas", fetched_at=_FETCHED
         )
     )[0]
 

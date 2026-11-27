@@ -128,12 +128,12 @@ system
 | `krheritage_gis_spca` | python-krheritage-api | 사적/명승 boundary |
 | `krheritage_gis_3070426` | python-krheritage-api | 천연기념물 boundary |
 | `krheritage_event_list` | python-krheritage-api | 국가유산 행사 |
-| `knps_park_boundaries` | python-knps-api | 국립공원 경계 (area, MultiPolygon, SHP) |
+| `knps_park_boundaries` | python-knps-api | 공원경계 **3 km 버퍼** — **싣지 않음**(돌리면 예전 버퍼 면 은퇴). 국립공원 경계는 `knps_protected_areas`의 국립공원 행 |
 | `knps_trails` | python-knps-api | 국립공원 탐방로 (route, LineString) |
 | `knps_linear_facilities` | python-knps-api | 국립공원 선형시설 — **싣지 않음**(이름이 일반명뿐, #1450) |
 | `knps_visitor_centers` | python-knps-api | 탐방안내소 (place) |
 | `knps_hazard_zones` | python-knps-api | 위험지역 — **싣지 않음**(원천이 POINT·유효기간 없음, #1450) |
-| `knps_protected_areas` | python-knps-api | 보호지역 중 여행 관련 지정만 (area, `area_kind='protected_area'`, 지정 종류별 category, #1450) |
+| `knps_protected_areas` | python-knps-api | 국립공원 23곳(`National Park` 22 + 2023 승격 팔공산, `area_kind='national_park'`) + 보호지역 중 여행 관련 지정 (area, `area_kind='protected_area'`, 지정 종류별 category, #1450). 면은 저장 전 `make_valid` |
 | `knps_weather_stations` | python-knps-api | 산악 기상관측시설 (weather anchor) |
 | `knps_restrooms` | python-knps-api | 국립공원 화장실 (place) |
 | `knps_cultural_resources` | python-knps-api | 국립공원 문화자원 (place, RESOURCE_TYPE 분기) |
@@ -461,7 +461,7 @@ def test_no_provider_wrapper_classes():
 | python-opinet-api | `@dcfb41a` | (후속 PR) | — | Sprint 2 §2.3 PriceValue |
 | python-krex-api | `@d153f3c` | `KrexTrafficNoticeItem` 재정렬 (#378) | — | Sprint 2 §2.4 multi-kind. incident → `openapi/burstInfo/realTimeSms`(apiId 0611) repoint(krex#8/PR#9) — 좌표 일부 row 보유, 종료 시각 컬럼 없음. 휴게소 유가의 `X`/`-`/`N/A` 가격 sentinel은 결측값으로 파싱. `realTimeSMSList`와 0 이상 `count`가 없는 HTTP 200 본문은 authoritative empty가 아니라 `KrexParseError`(krex#11) |
 | python-visitkorea-api | `@151ef90` | `VisitKoreaFestivalItem`(enrichment) + `VisitKoreaAttractionItem`(#1459) | — | ADR-042: 축제는 enrichment 2차. 관광지(12)는 1차 place(`TourItem`, 신 분류 lclsSystm) |
-| python-knps-api | `@a472a379` | `KnpsPointRecord`/`KnpsGeometryRecord` | PR#25 | keyless file-only, geo extra 필수. PR18 대피소 중첩 SHP Point·ID/geometry 지문·손상 입력 사전 검증. PR19 현재 공식 배포본(평면 SHP 22건·잘린 UTF-8 필드명). PR20 이름 앞 現/舊 표식 제거(원문은 raw). ADR-028 amendment 2026-05-25. `16e3954`: trails vertex 행 → 코스 단위 LINESTRING 조립(provider PR#10) |
+| python-knps-api | `@59fb5b0a` | `KnpsPointRecord`/`KnpsGeometryRecord` | PR#25 | keyless file-only, geo extra 필수. PR22 한국보호지역 SHP `.cpg`(UTF-8)·`WDPA_PID` source_id·`ORIG_NAME` 이름, 공원경계(15017313)는 3 km 버퍼임을 명시. PR18 대피소 중첩 SHP Point·ID/geometry 지문·손상 입력 사전 검증. PR19 현재 공식 배포본(평면 SHP 22건·잘린 UTF-8 필드명). PR20 이름 앞 現/舊 표식 제거(원문은 raw). ADR-028 amendment 2026-05-25. `16e3954`: trails vertex 행 → 코스 단위 LINESTRING 조립(provider PR#10) |
 | python-krheritage-api | `@e1b346f` | `KrHeritageItem`/`KrHeritageItemKey` — `HeritageDetail` 재정렬 (#380), `manager`→`owner` (8cde3af) | — | items+events live fetcher 배선. items는 **keyless**(khs.go.kr — transport는 apis.data.go.kr에만 serviceKey 주입). scope/상한 settings `krheritage_kind_codes`(기본 11,12,13,15,16)/`krheritage_max_items_per_run`(detail 1콜/건). event 자연키는 provider `HeritageEvent.occurrence_key`와 같은 `sn::starts_on::ends_on`(`seqNo`는 프로그램 id — 회차마다 반복), `sn` 빈 값은 `title::starts_on::place` fallback. `e1b346f` **상향(2026-10-22, provider #12 0.1.1)**: event 필드를 live 응답(`seqNo`/`sDate`/`eDate`/`subDesc`/`contact`/`sido`/`gugun` …)에 맞춤 — 그 전 핀은 전부 None을 내 prod 첫 적재가 5306/5306 `missing_address`였다. Map 변환부는 속성 → 원 payload 키 순으로 읽어 핀 전후 같은 값을 낸다. `6076b52`: 목록 응답 `result` 레벨 복합키/좌표 병합(live detail 100% 실패 수정) + 결측 key row skip(provider #5/PR#6, T-212e). `8cde3af` **상향(2026-09-11)**: `HeritageDetail.manager` 삭제 → 부모 `HeritageSummary.owner`(동일 alias `ccbaAdmin`)로 일원화 — Protocol은 이미 `owner`로 재결박돼 있다. 보류 사유였던 `iter_all` 종료 조건 퇴화(`page * size >= total` → `len(items) < page_size`, 결측 key row skip과 겹쳐 조용한 절단)는 `545a016` **상향(2026-09-11, PR#10)**으로 닫혔다 — declared total로 끝내되 **행이 아니라 페이지 수**로 센다(`page >= ceil(total/page_size)`). Map이 위임을 끊어 되찾은 권위(`fetch_krheritage_items`가 `search.list`를 `dagster/provider_pagination`의 `iter_paginated_items`로 소진)는 **그대로 둔다**. GIS 경계(geom) 보강은 후속. media → RustFS |
 | python-krairport-api | `@fe2143b` | (Sprint 3 PR) | — | 공항 운항·날씨 |
 | python-mois-api | `@3cdee09` | (Sprint 4 PR) | — | ADR-024 canonical name 정정. 4단계 lifecycle |

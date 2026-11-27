@@ -1,5 +1,12 @@
 # CHANGELOG
 
+## 2026-11-27 — 국립공원 경계 재원천화·보호지역 면 수리
+
+- 국립공원 area의 원천을 `knps_park_boundaries`(15017313, 실제로는 공원경계 3 km 버퍼)에서 `knps_protected_areas`의 국립공원
+  행(22 + 2023 승격 팔공산)으로 옮겼다. 버퍼 dataset은 싣지 않고, 돌리면 예전 버퍼 면을 은퇴시킨다. KNPS area 적재는 snapshot
+  부재 은퇴를 켠다. 해상 국립공원은 면 위 후보점으로 역지오코딩한다.
+- `core.geometry.normalize_geometry`가 invalid 면을 `make_valid`로 고친다(`repair_area_geometry`), `area_anchor_points` 추가.
+- python-knps-api 핀 `59fb5b0`(PR#22): 한국보호지역 `.cpg` UTF-8·`WDPA_PID` source_id — 보호지역 natural key가 바뀐다.
 ## 2026-11-27 — 휴게소 먹거리(ADR-127)
 
 - transport `GET /v1/service/exports/rest-area-food`(KREX 0615 코드 + 0502 메뉴) 소비. Valkey 데이터셋
