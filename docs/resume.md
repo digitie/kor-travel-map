@@ -1,3 +1,9 @@
+## 2026-11-27 — 소유자 결정 4건(문서만)
+
+- writer-drain restore의 `start*` 결함(2026-11-25 열린 결정)은 고치지 않고 `T-WRITER-DRAIN-RESTORE` 백로그로. 공용 PG role
+  연결 상한 overcommit은 유지·관찰, `EXPORT_SOURCE_INCONSISTENT` 재시도는 현행 유지. main 필수 check에 pytest 3.11~3.13·
+  integration(pg18)·fixture replay가 걸렸다(docs PR 포함). journal·acceptance 다음 경계 분리. 상세는 journal 같은 날.
+
 ## 2026-11-27 — place 방문 안내(ADR-126) PR 2/2: TourAPI 상세 op 점진 백필
 
 - 관광지 run이 소개·이미지·반려동물·무장애를 op별 하루 예산(기본 900, env로 상향)으로 받아 `raw_data`에 잇는다. 우선순위
