@@ -26,11 +26,12 @@ ADR 참조
 
 from __future__ import annotations
 
+import hashlib
 import logging
 from collections.abc import Sequence
 from datetime import datetime
 from time import perf_counter
-from typing import Annotated, Any, Literal, TypeVar, assert_never
+from typing import Annotated, Any, Final, Literal, TypeVar, assert_never
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from kortravelmap.category import public_feature_display_name
@@ -60,6 +61,7 @@ from kortravelmap.infra.poi_cache_target_repo import (
 )
 from kortravelmap.infra.public_read_budget import apply_public_read_budget
 from kortravelmap.infra.sqlstate import sqlstate_of
+from kortravelmap.providers.visitkorea import festival_visitor_info
 from pydantic import (
     BaseModel,
     ConfigDict,
@@ -411,7 +413,8 @@ class FeatureDetailResponse(_PublicDisplayName):
     visitor_info: PlaceVisitorInfo | None = Field(
         default=None,
         description=(
-            "place 방문 안내(ADR-126) — 이용시간·휴무·주차·요금·소개·이미지(공공누리 유형별)·"
+            "방문 안내(ADR-126) — place와 TourAPI 축제(event, 소개·대표 이미지) — "
+            "이용시간·휴무·주차·요금·소개·이미지(공공누리 유형별)·"
             "무장애·반려동물. 원천 문장 그대로다. 이미지의 ``license.derivatives_allowed``가 "
             "false면(공공누리 3·4유형) 크롭·필터·재인코딩 없이 원본 비율로 표시한다. "
             "``detail.facility_info``에는 다시 싣지 않는다(이 필드가 정본)."
@@ -1039,14 +1042,29 @@ def _with_trip_card_route(
     )
 
 
+#: event 읽기 투영(축제 visitor_info) 판. 투영 규칙이 바뀌면 올린다 — ETag가 바뀐다.
+_EVENT_VISITOR_INFO_PROJECTION: Final = "event-visitor-info-v1"
+
+
+def _event_projection_digest(digest: str | None) -> str:
+    """속성 digest(없으면 빈 값)에 event 투영 판을 섞은 16자 hex."""
+    return hashlib.sha256(
+        f"{digest or ''}|{_EVENT_VISITOR_INFO_PROJECTION}".encode()
+    ).hexdigest()[:16]
+
+
 def _split_visitor_info(
-    kind: str, detail: dict[str, Any]
+    kind: str, detail: dict[str, Any], raw_payload: object = None
 ) -> tuple[dict[str, Any], PlaceVisitorInfo | None]:
     """place detail에서 방문 안내를 떼어 typed로 돌려준다(ADR-126, 공개 정본은 typed 필드 하나).
 
     저장값은 ``PlaceDetail`` 검증을 거쳐 들어왔으므로 맞지 않는 모양은 없어야 한다. 그래도 맞지
     않으면 공개 응답을 500으로 깨지 않고 방문 안내만 비우고 경고를 남긴다(쓰기 경로가 정본이다).
+    TourAPI 축제(event)는 공개에서 벗기는 ``payload``의 소개·대표 이미지를 typed로 낸다.
     """
+    if kind == "event":
+        payload = raw_payload if isinstance(raw_payload, dict) else {}
+        return detail, festival_visitor_info(payload)
     facility = detail.get("facility_info")
     if kind != "place" or not isinstance(facility, dict) or VISITOR_INFO_KEY not in facility:
         return detail, None
@@ -1066,7 +1084,9 @@ def _split_visitor_info(
 def _detail_from_row(row: dict[str, Any]) -> FeatureDetailResponse:
     # T-VN-32C PR-2 — 응답 feature_id 값은 UUID 정본. 내부 키는 호출부가 치환
     # 전 row의 legacy 값을 쓴다.
-    detail, visitor_info = _split_visitor_info(row["kind"], _public_detail(row["detail"]))
+    detail, visitor_info = _split_visitor_info(
+        row["kind"], _public_detail(row["detail"]), row["detail"].get("payload")
+    )
     return FeatureDetailResponse(
         feature_id=response_feature_id(row),
         feature_uuid=row.get("feature_uuid"),
@@ -1805,10 +1825,12 @@ async def get_feature(
     attributes = await place_attribute_repo.list_feature_place_attributes(
         session, canonical_id, public_only=True
     )
-    etag = revision_digest_etag(
-        revision,
-        place_attribute_repo.place_attribute_digest(attributes),
-    )
+    digest = place_attribute_repo.place_attribute_digest(attributes)
+    if row["kind"] == "event":
+        # 축제 visitor_info는 저장값이 아니라 읽기 투영이라 row_revision 없이 생겼다 — 투영 판을
+        # ETag에 섞어 배포 전 캐시(304)가 새 본문을 가리지 않게 한다(ADR-126).
+        digest = _event_projection_digest(digest)
+    etag = revision_digest_etag(revision, digest)
     if expected == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
     curations = await curation_repo.list_curation_items_by_feature_ids(

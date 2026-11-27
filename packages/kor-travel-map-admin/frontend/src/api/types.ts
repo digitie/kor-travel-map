@@ -9587,7 +9587,7 @@ export interface components {
             urls: {
                 [key: string]: unknown;
             };
-            /** @description place 방문 안내(ADR-126) — 이용시간·휴무·주차·요금·소개·이미지(공공누리 유형별)·무장애·반려동물. 원천 문장 그대로다. 이미지의 ``license.derivatives_allowed``가 false면(공공누리 3·4유형) 크롭·필터·재인코딩 없이 원본 비율로 표시한다. ``detail.facility_info``에는 다시 싣지 않는다(이 필드가 정본). */
+            /** @description 방문 안내(ADR-126) — place와 TourAPI 축제(event, 소개·대표 이미지) — 이용시간·휴무·주차·요금·소개·이미지(공공누리 유형별)·무장애·반려동물. 원천 문장 그대로다. 이미지의 ``license.derivatives_allowed``가 false면(공공누리 3·4유형) 크롭·필터·재인코딩 없이 원본 비율로 표시한다. ``detail.facility_info``에는 다시 싣지 않는다(이 필드가 정본). */
             visitor_info?: components["schemas"]["PlaceVisitorInfo"] | null;
         };
         /**

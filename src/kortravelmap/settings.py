@@ -413,6 +413,101 @@ class KorTravelMapSettings(BaseSettings):
             "env ``KOR_TRAVEL_MAP_MCST_THEME_ATTACH_MODE``."
         ),
     )
+    visitkorea_detail_common_daily_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "TourAPI ``detailCommon2``(소개문·홈페이지) **하루** 호출 상한 — 관광지·축제 run이 "
+            "함께 쓰고 "
+            "KST 날짜별 장부로 묶인다. 기본 900(개발계정 1,000 − 수동 조회 100). 운영계정 증설 뒤 "
+            "env로 올린다. "
+            "env ``KOR_TRAVEL_MAP_VISITKOREA_DETAIL_COMMON_DAILY_BUDGET`` — 비우면(빈 문자열 포함) "
+            "코드 기본값."
+        ),
+    )
+    visitkorea_detail_common_attraction_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "관광지 run 한 번의 ``detailCommon2`` 예산(기본 850). 하루 상한의 남은 몫으로 더 "
+            "줄어든다. "
+            "env ``KOR_TRAVEL_MAP_VISITKOREA_DETAIL_COMMON_ATTRACTION_BUDGET`` — 비우면(빈 문자열 "
+            "포함) 코드 기본값."
+        ),
+    )
+    visitkorea_detail_common_festival_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "축제 run 한 번의 ``detailCommon2`` 예산(기본 50 — 창 안 축제의 새·수정 건은 하루 "
+            "4~6건). "
+            "env ``KOR_TRAVEL_MAP_VISITKOREA_DETAIL_COMMON_FESTIVAL_BUDGET`` — 비우면(빈 문자열 "
+            "포함) 코드 기본값."
+        ),
+    )
+    visitkorea_detail_intro_daily_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "TourAPI ``detailIntro2``(이용시간·휴무·주차·요금) 하루 호출 상한(ADR-126, 기본 900). "
+            "env ``KOR_TRAVEL_MAP_VISITKOREA_DETAIL_INTRO_DAILY_BUDGET`` — 비우면(빈 문자열 포함) "
+            "코드 기본값."
+        ),
+    )
+    visitkorea_detail_image_daily_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "TourAPI ``detailImage2``(추가 이미지·공공누리 유형) 하루 호출 상한(ADR-126, 기본 "
+            "900). "
+            "env ``KOR_TRAVEL_MAP_VISITKOREA_DETAIL_IMAGE_DAILY_BUDGET`` — 비우면(빈 문자열 포함) "
+            "코드 기본값."
+        ),
+    )
+    visitkorea_detail_pet_daily_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "TourAPI ``KorPetTourService2/detailPetTour2``(반려동물) 하루 호출 상한(ADR-126, 기본 "
+            "900). "
+            "env ``KOR_TRAVEL_MAP_VISITKOREA_DETAIL_PET_DAILY_BUDGET`` — 비우면(빈 문자열 포함) "
+            "코드 기본값."
+        ),
+    )
+    visitkorea_detail_accessibility_daily_budget: int | None = Field(
+        default=None,
+        ge=0,
+        le=1_000_000,
+        description=(
+            "TourAPI 무장애 ``KorWithService2/detailWithTour2`` 하루 호출 상한(ADR-126, 기본 900). "
+            "env ``KOR_TRAVEL_MAP_VISITKOREA_DETAIL_ACCESSIBILITY_DAILY_BUDGET`` — 비우면(빈 "
+            "문자열 포함) 코드 기본값."
+        ),
+    )
+
+    @field_validator(
+        "visitkorea_detail_common_daily_budget",
+        "visitkorea_detail_common_attraction_budget",
+        "visitkorea_detail_common_festival_budget",
+        "visitkorea_detail_intro_daily_budget",
+        "visitkorea_detail_image_daily_budget",
+        "visitkorea_detail_pet_daily_budget",
+        "visitkorea_detail_accessibility_daily_budget",
+        mode="before",
+    )
+    @classmethod
+    def _blank_budget_is_default(cls, value: object) -> object:
+        """compose가 ``${VAR:-}``로 빈 값을 넘겨도 코드 기본값을 쓴다(빈 문자열 = 미설정)."""
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
     krheritage_kind_codes: str = Field(
         default="11,12,13,15,16",
         description=(

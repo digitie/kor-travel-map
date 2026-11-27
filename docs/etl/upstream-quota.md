@@ -93,7 +93,8 @@ data.go.kr 마이페이지 → 활용신청 현황 → 각 신청의 **상세기
 | `traditional_market` 공개 파일 | 쿼터 없음(키 없음) | **1,393**(2026-11-09) | 3 | 9 | — |
 | visitkorea 축제 `searchFestival2` (유일한 축제 원천) | 1,000 | **879**(2026-11-10, 1,000행 페이지) | 1 | 10 | 1% |
 | visitkorea 관광지·문화시설·레포츠 `areaBasedList2` | 1,000 | 운영 키 **12,560·2,753·3,717**(1,000행 페이지) | 20(재시도 3 → 80) | 120×4 | 48% |
-| visitkorea `detailCommon2` (관광지 + 축제가 **나눠 쓴다**) | 1,000 | 항목당 1호출 | 관광지 ≤600 + 축제 ≤300(run 예산, step 재시도는 0) | 900 | 90% |
+| visitkorea `detailCommon2` (관광지 + 축제가 **나눠 쓴다**) | 1,000 | 항목당 1호출 | 관광지 ≤850 + 축제 ≤50(run 예산, env로 변경), 하루 ≤900(KST 날짜 장부), step 재시도는 0 | 900 | 90% |
+| visitkorea `detailIntro2`·`detailImage2`·`KorPetTourService2/detailPetTour2`·`KorWithService2/detailWithTour2` (관광지만, ADR-126) | 각 1,000 | 항목당 op마다 1호출 | op마다 설정값(기본 900, `KOR_TRAVEL_MAP_VISITKOREA_DETAIL_*_DAILY_BUDGET`, KST 날짜 장부, step 재시도·replay는 0). 무장애·반려동물은 서비스 목록(`with`·`pet` `areaBasedList2`, run당 수 쪽)에 든 것만 | 각 900 | 각 90% |
 | 산불위험예보 (2026-10-01 제거, ADR-105) | 1,000 | — | 0 | 0 | 0% |
 | 산악기상(2026-10-01 제거)·산사태 | 10,000 | — | 10 | 60 | 0.6% (산사태만) |
 | khoa 해수욕장 | 10,000 | — | ~70 | (아래) | — |

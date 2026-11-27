@@ -5,11 +5,11 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "0df2b2380850028f8d5dab64568328cd260686134f9e69942316dd82eefaa56c"
+      "sha256": "324e1e749bd78d4d23dd19719172e09a83734d1b81fa78fefabc87eeecd75897"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "98d2148e3a2e749a7d8a7589e48c21961ae2f0bf6f06aa771774d8458831bdb3"
+      "sha256": "bcc05c775483b1da60a5275cf93fba317658f0209469c1b54330d1b92b49b63a"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
@@ -250,7 +250,7 @@
     {
       "date": "2026-11-27",
       "task": "ADR-126 place 방문 안내",
-      "change": "baseline sha256 재고정(user·admin, service 불변). 공개 `GET /v1/features/{feature_id}` 응답에 선택 필드 `visitor_info`(`PlaceVisitorInfo` — 이용시간·휴무·주차·요금·소개·이미지별 공공누리 라이선스·무장애·반려동물)와 스키마 6개(`PlaceVisitorInfo`·`PlaceImage`·`ContentLicense`·`PlaceFee`·`AccessibilityNote`·`PetPolicy`)를 더했다. 같은 값은 `detail.facility_info`에 다시 싣지 않는다. PinVi user 재vendor 대상이다."
+      "change": "baseline sha256 재고정(user·admin, service 불변). 공개 `GET /v1/features/{feature_id}` 응답에 선택 필드 `visitor_info`(`PlaceVisitorInfo` — 이용시간·휴무·주차·요금·소개·이미지별 공공누리 라이선스·무장애·반려동물)와 스키마 6개(`PlaceVisitorInfo`·`PlaceImage`·`ContentLicense`·`PlaceFee`·`AccessibilityNote`·`PetPolicy`)를 더했다. 같은 값은 `detail.facility_info`에 다시 싣지 않는다. TourAPI 축제(event)도 저장값을 바꾸지 않고 payload의 소개·대표 이미지를 같은 필드로 투영하고, event ETag에 투영 판 digest를 섞는다(2/2). PinVi user 재vendor 대상이다."
     }
   ],
   "surfaces": {
@@ -485,7 +485,7 @@
         },
         {
           "operation": "GET /v1/features/{feature_id}",
-          "detail": "FeatureDetailResponse.visitor_info(PlaceVisitorInfo | null) — 방문 안내 typed, detail.facility_info.visitor_info는 공개 응답에서 뺌",
+          "detail": "FeatureDetailResponse.visitor_info(PlaceVisitorInfo | null) — 방문 안내 typed, detail.facility_info.visitor_info는 공개 응답에서 뺌; TourAPI 축제(event)는 payload 소개·대표 이미지 투영 + ETag 투영 판 digest",
           "basis": "ADR-126: 원천 방문 안내 typed 노출 — additive 필드, 기존 필드 의미 불변(facility_info에 visitor_info 키는 이번에 처음 생김)"
         }
       ],
@@ -1143,7 +1143,7 @@
         },
         {
           "operation": "GET /v1/features/{feature_id}",
-          "detail": "FeatureDetailResponse.visitor_info(PlaceVisitorInfo | null) — 방문 안내 typed, detail.facility_info.visitor_info는 공개 응답에서 뺌",
+          "detail": "FeatureDetailResponse.visitor_info(PlaceVisitorInfo | null) — 방문 안내 typed, detail.facility_info.visitor_info는 공개 응답에서 뺌; TourAPI 축제(event)는 payload 소개·대표 이미지 투영 + ETag 투영 판 digest",
           "basis": "ADR-126: 원천 방문 안내 typed 노출 — additive 필드, 기존 필드 의미 불변(facility_info에 visitor_info 키는 이번에 처음 생김)"
         }
       ],

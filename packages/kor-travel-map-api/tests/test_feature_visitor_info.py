@@ -60,3 +60,20 @@ def test_openapi_exposes_typed_visitor_info() -> None:
     schema = features.FeatureDetailResponse.model_json_schema()
     prop = schema["properties"]["visitor_info"]
     assert any(option.get("$ref", "").endswith("PlaceVisitorInfo") for option in prop["anyOf"])
+
+
+def test_tourapi_festival_payload_becomes_typed_visitor_info() -> None:
+    payload = {
+        "content": "  축제 소개\n<첫 회> 둘째 줄  ",
+        "image_url": "http://tong.visitkorea.or.kr/f.jpg",
+        "attribution": "한국관광공사",
+        "license": "공공누리 제3유형(출처표시·변경금지)",
+    }
+    detail = {"event_kind": "festival"}
+    rest, info = features._split_visitor_info("event", detail, payload)
+    assert rest == detail
+    assert info is not None
+    assert info.description == "축제 소개\n<첫 회> 둘째 줄"  # 정리본 그대로(꺾쇠 보존)
+    assert info.images[0].license.kogl_type == 3
+    # 다른 원천 event payload는 보지 않는다.
+    assert features._split_visitor_info("event", detail, {"content": "x"})[1] is None

@@ -27,6 +27,8 @@ if TYPE_CHECKING:
 __all__ = [
     "CurrentSourceRecord",
     "count_active_source_entities",
+    "DETAIL_PRIORITY_CURATED_BONUS",
+    "read_detail_priority_scores",
     "read_current_source_records",
 ]
 
@@ -158,3 +160,51 @@ async def count_active_source_entities(
             )
         ).scalar_one()
     )
+
+
+#: 큐레이션 포함은 검색 인지도(0~9)보다 언제나 앞선다.
+DETAIL_PRIORITY_CURATED_BONUS: Final = 10
+
+_DETAIL_PRIORITY_SQL: Final = text(
+    """
+    SELECT
+        entity.source_entity_id,
+        COALESCE(max(prominence.prominence), 0)
+        + CASE WHEN bool_or(item.curation_item_id IS NOT NULL) THEN :curated_bonus ELSE 0 END
+            AS score
+    FROM provider_sync.source_entities AS entity
+    JOIN provider_sync.source_links AS link
+      ON link.source_entity_key = entity.source_entity_key
+     AND link.source_role = 'primary'
+    LEFT JOIN feature.feature_search_prominence AS prominence
+      ON prominence.feature_id = link.feature_id
+    LEFT JOIN feature.curation_items AS item
+      ON item.feature_id = link.feature_id
+     AND item.status = 'included'
+     AND item.source_present
+     AND item.archived_at IS NULL
+    WHERE entity.provider_dataset_id = :provider_dataset_id
+    GROUP BY entity.source_entity_id
+    HAVING COALESCE(max(prominence.prominence), 0) > 0
+        OR bool_or(item.curation_item_id IS NOT NULL)
+    """
+)
+
+
+async def read_detail_priority_scores(
+    session: AsyncSession, *, provider_dataset_id: int
+) -> dict[str, int]:
+    """dataset entity별 상세 백필 우선 점수(``source_entity_id`` → 점수, 0점은 생략).
+
+    점수 = 검색 인지도(``feature_search_prominence``, 0~9) + 큐레이션 포함 보너스
+    (:data:`DETAIL_PRIORITY_CURATED_BONUS`). 큐레이션에 든 장소는 여행 화면에 실제로 오르고,
+    인지도는 여러 원천이 따로 싣는 "알려진 곳" 신호다(ADR-126). 읽기 전용이다.
+    """
+    rows = await session.execute(
+        _DETAIL_PRIORITY_SQL,
+        {
+            "provider_dataset_id": provider_dataset_id,
+            "curated_bonus": DETAIL_PRIORITY_CURATED_BONUS,
+        },
+    )
+    return {str(row[0]): int(row[1]) for row in rows}

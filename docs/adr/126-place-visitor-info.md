@@ -23,7 +23,7 @@
 
 1. **typed 모델 하나.** `kortravelmap.dto.PlaceVisitorInfo`(`extra="forbid"`)가 원천 무관 방문 안내다 —
    `description`·`usage_hours`·`rest_days`·`parking`·`fee_text`·`fees[]`·`discount`·`reservation`·`inquiry`·
-   `transport`·`facilities`·`capacity`·`accommodation_available`·`pet_allowed`·`images[]`·`accessibility[]`·
+   `transport`·`facilities`·`capacity`·`accommodation_available`·`pet_note`·`parking_fee`·`images[]`·`accessibility[]`·
    `pet_policy`, 그리고 `source`·`attribution`·`reference_date`. 소비자는 모르는 enum 값·필드를 무시한다
    (원천이 늘면 값이 더해진다). 배지는 원문을 해석하지 않고 `accessibility`가 비지 않음·`pet_policy` 있음으로
    판단한다. "없음"은 자리표시로 지우지 않는다(휴무 "없음"·주차 "없음"은 뜻이 있다).
@@ -55,6 +55,17 @@
    - 낡은 op 값(목록 수정 시각이 바뀜)은 다시 받을 때까지 그대로 보인다. 목록 수정 시각은 아무 필드 편집에도 바뀌므로
      받기 전에 지우면 맞는 안내까지 사라진다. 그 op은 우선 다시 받는다.
    - 한 op이 한도·인증 실패로 멈춰도 다른 op은 계속한다. replay와 step 재시도는 받지 않는다(저장값만 이어 쓴다).
+   - **하루 상한은 KST 날짜별 장부로 지킨다**(Dagster instance KV `kor_travel_map/tourapi_detail_calls/<op>/<날짜>`). 호출 전에
+     예약하므로 재실행·수동 launch·적재 실패 run도 센다. 장부가 없는 실행(큐 runner의 직접 context)은 상세를 받지 않는다
+     (fail-closed — 상세는 schedule run이 채운다). `detailCommon2`(관광지 850·축제 50, 하루 900)도 같은 장부다.
+     하루 상한·run 예산은 전부 env(빈 값 = 코드 기본값)라 운영계정 증설은 설정 변경뿐이다.
+   - 무장애·반려동물은 그 서비스 `areaBasedList2`(별도 오퍼레이션, 제목순) 목록에 든 contentid만 묻고 상세도 같은 서비스
+     (`KorWithService2/detailWithTour2`·`KorPetTourService2/detailPetTour2`)에서 받는다 — 각 서비스 활용신청이 따로 필요하다. contentid가 국문 서비스와
+     같다는 전제는 배포 뒤 표본으로 확인한다. 목록 실패면 그 op만 이번 run 쉰다.
+   - TourAPI 관광지 `overview`·대표 이미지(`firstimage`, 목록 공공누리 유형)도 `description`·`images[0]`에 싣는다(정본 하나).
+     `facility_info.overview`·`image_url` 평면 키는 기존 소비자가 옮길 때까지 남는다. 축제는 저장을 바꾸지 않고 공개 읽기에서
+     `payload`의 소개·대표 이미지를 `visitor_info`로 투영한다 — 저장값이 아니라 ETag에 투영 판을 섞는다. 서비스 목록에서
+     빠진 관광지의 옛 무장애·반려동물 값은 남는다(후속: 빠지면 숨김).
 7. **공개 API는 typed 필드 하나.** `GET /v1/features/{id}` 응답에 `visitor_info: PlaceVisitorInfo | null`을 더하고,
    같은 값을 `detail.facility_info`에서는 뺀다(정본 하나). 저장값이 모델에 맞지 않으면 500 대신 `null`이다.
 

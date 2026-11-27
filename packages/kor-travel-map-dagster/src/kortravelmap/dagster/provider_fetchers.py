@@ -87,7 +87,15 @@ from kortravelmap.providers.kor_travel_transport import (
 )
 from kortravelmap.providers.rest_area_food import with_rest_area_links
 from kortravelmap.providers.visitkorea import festival_window_start
-from kortravelmap.providers.visitkorea_attractions import TOURAPI_PLACE_CONTENT_TYPE_IDS
+from kortravelmap.providers.visitkorea_attractions import (
+    TOURAPI_ACCESSIBILITY_FIELDS,
+    TOURAPI_INTRO_RAW_KEYS,
+    TOURAPI_MAX_IMAGES,
+    TOURAPI_PET_FIELDS,
+    TOURAPI_PLACE_CONTENT_TYPE_IDS,
+    TourApiDetailOp,
+    TourApiDetailRequest,
+)
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
@@ -152,6 +160,8 @@ __all__ = [
     "fetch_transport_rest_areas_linked",
     "fetch_visitkorea_festivals",
     "fetch_visitkorea_attraction_details",
+    "fetch_visitkorea_detail_ops",
+    "fetch_visitkorea_service_members",
     "fetch_visitkorea_tourist_attractions",
     "VisitKoreaAttractionSnapshotIncomplete",
     "VisitKoreaFestivalSnapshotIncomplete",
@@ -2729,3 +2739,181 @@ async def fetch_visitkorea_attraction_details(
     finally:
         await client.aclose()
     return details
+
+
+#: 상세 op → 로그 이름(원천 오퍼레이션).
+_VISITKOREA_DETAIL_OP_LABEL: Final[dict[str, str]] = {
+    "intro": "detailIntro2",
+    "images": "detailImage2",
+    "pet": "detailPetTour2",
+    "accessibility": "KorWithService2/detailWithTour2",
+}
+
+
+def _raw_text_fields(raw: Any, keys: Iterable[str]) -> dict[str, str]:
+    """원천 행에서 ``keys``의 비지 않은 문자열만 남긴다(저장 크기·변경 감지를 좁힌다)."""
+    if not isinstance(raw, Mapping):
+        return {}
+    kept: dict[str, str] = {}
+    for key in sorted(keys):
+        value = raw.get(key)
+        if value is not None and str(value).strip():
+            kept[key] = str(value).strip()
+    return kept
+
+
+async def _visitkorea_detail_op_call(
+    op: TourApiDetailOp, request: TourApiDetailRequest, client: Any, hub: Any
+) -> Any:
+    """상세 op 한 건 → 저장할 ``data``(dict 또는 list). 원천에 없으면 빈 값."""
+    content_id = request.content_id
+    if op == "intro":
+        page = await client.detail_intro(content_id, request.content_type_id)
+        rows = [item.raw for item in page.items]
+        return _raw_text_fields(rows[0], TOURAPI_INTRO_RAW_KEYS) if rows else {}
+    if op == "images":
+        page = await client.detail_images(content_id, num_of_rows=TOURAPI_MAX_IMAGES)
+        return [
+            _raw_text_fields(
+                item.raw, ("originimgurl", "smallimageurl", "imgname", "cpyrhtDivCd", "serialnum")
+            )
+            for item in page.items
+        ]
+    if op == "pet":
+        # 목록(KorPetTourService2 areaBasedList2)과 같은 서비스에서 받는다 — 활용신청·쿼터·
+        # contentid가 한 서비스로 맞는다(ADR-126).
+        page = await hub.call("pet", "detailPetTour2", {"contentId": content_id})
+        rows = list(page.items)
+        return _raw_text_fields(rows[0], TOURAPI_PET_FIELDS) if rows else {}
+    if op == "accessibility":
+        page = await hub.call("with", "detailWithTour2", {"contentId": content_id})
+        rows = list(page.items)
+        return _raw_text_fields(rows[0], TOURAPI_ACCESSIBILITY_FIELDS) if rows else {}
+    raise ValueError(f"알 수 없는 TourAPI 상세 op: {op!r}")
+
+
+async def fetch_visitkorea_detail_ops(
+    settings: KorTravelMapSettings,
+    requests: Mapping[TourApiDetailOp, Sequence[TourApiDetailRequest]],
+) -> dict[TourApiDetailOp, dict[str, Any]]:
+    """op별 상세(소개·이미지·반려동물·무장애)를 받는다 → ``{op: {contentid: data}}``(ADR-126).
+
+    asset이 op마다 예산 안에서 고른 요청만 넘긴다
+    (``kortravelmap.providers.visitkorea_attractions.plan_tourapi_detail_ops``). 원천에 없다는
+    답(빈 목록·``failure_kind="no_data"``)은 빈 값으로 돌려준다 — 받은 것으로 저장돼 다음 run이
+    다시 묻지 않는다. data.go.kr 한도는 **오퍼레이션마다** 걸리므로 한 op이 한도·인증 실패로
+    멈춰도 다른 op은 계속한다. 그 밖의 실패는 항목만 건너뛰고, 연속
+    :data:`_VISITKOREA_DETAIL_MAX_CONSECUTIVE_FAILURES`번이면 그 op을 멈춘다.
+    """
+    if not any(requests.values()):
+        return {}
+    api_key = _visitkorea_service_key(settings, "detail ops")
+    visitkorea = cast(Any, importlib.import_module("visitkorea"))
+    client = visitkorea.KrTourApiClient(service_key=api_key)
+    hub = visitkorea.TourApiHubClient(service_key=api_key)
+    results: dict[TourApiDetailOp, dict[str, Any]] = {}
+    try:
+        for op, op_requests in requests.items():
+            label = _VISITKOREA_DETAIL_OP_LABEL.get(op, op)
+            received: dict[str, Any] = {}
+            failures = 0
+            for request in op_requests:
+                note_upstream_request()
+                try:
+                    data = await _visitkorea_detail_op_call(op, request, client, hub)
+                except Exception as exc:  # noqa: BLE001 — provider 예외 계층을 import하지 않는다
+                    kind = getattr(exc, "failure_kind", None)
+                    if kind == "no_data":
+                        received[request.content_id] = [] if op == "images" else {}
+                        failures = 0
+                        continue
+                    if kind in _VISITKOREA_DETAIL_STOP_KINDS or quota_exhaustion_cause(exc):
+                        _LOGGER.warning(
+                            "TourAPI %s 중단(%s) — 받은 %d건까지만 쓴다", label, kind, len(received)
+                        )
+                        break
+                    failures += 1
+                    if failures == 1:
+                        # provider 시그니처 변화 같은 결함이 "매일 0건"으로 숨지 않게
+                        # 첫 실패를 남긴다.
+                        _LOGGER.warning(
+                            "TourAPI %s 실패(%s, contentid=%s): %r",
+                            label,
+                            kind,
+                            request.content_id,
+                            exc,
+                        )
+                    if failures >= _VISITKOREA_DETAIL_MAX_CONSECUTIVE_FAILURES:
+                        _LOGGER.warning(
+                            "TourAPI %s 연속 %d회 실패 — 받은 %d건까지만 쓴다",
+                            label,
+                            failures,
+                            len(received),
+                        )
+                        break
+                    continue
+                failures = 0
+                received[request.content_id] = data
+            results[op] = received
+    finally:
+        await client.aclose()
+        await hub.aclose()
+    return results
+
+
+#: 서비스 목록 페이지 크기와 상한(1,000행 × 60 = 6만 — 무장애·반려동물 목록은 수천 건이다).
+_VISITKOREA_MEMBER_PAGE_SIZE: Final = 1000
+_VISITKOREA_MEMBER_MAX_PAGES: Final = 60
+
+
+async def fetch_visitkorea_service_members(
+    settings: KorTravelMapSettings, service: str
+) -> frozenset[str] | None:
+    """TourAPI 형제 서비스(무장애 ``with``·반려동물 ``pet``)의 ``areaBasedList2`` contentid 집합.
+
+    상세(``detailWithTour2``·``detailPetTour2``)는 그 서비스에 실린 관광지에만 값이 있다 — 먼저
+    목록으로 거른다(ADR-126). 목록은 그 서비스의 별도 오퍼레이션이라 상세 한도를 쓰지 않는다.
+    contentid는 국문 서비스(KorService2)와 같은 관리번호로 본다(같은 관광공사 DB — 배포 뒤 표본으로
+    확인한다). 실패(활용신청 없음·한도·장애)·불완전(선언 건수보다 적음)이면 ``None`` — 호출자는 그
+    op을 이번 run에 받지 않는다.
+    """
+    try:
+        api_key = _visitkorea_service_key(settings, f"{service} members")
+    except ProviderCredentialMissing:
+        return None
+    visitkorea = cast(Any, importlib.import_module("visitkorea"))
+    hub = visitkorea.TourApiHubClient(service_key=api_key)
+    members: set[str] = set()
+    total = 0
+    try:
+        for page_no in range(1, _VISITKOREA_MEMBER_MAX_PAGES + 1):
+            note_upstream_request()
+            page = await hub.call(
+                service,
+                "areaBasedList2",
+                {"arrange": "A"},  # 제목순 — 수정순(C)은 순회 중 수정으로 행이 밀린다
+                page_no=page_no,
+                num_of_rows=_VISITKOREA_MEMBER_PAGE_SIZE,
+            )
+            rows = list(page.items)
+            for row in rows:
+                content_id = str((row or {}).get("contentid") or "").strip()
+                if content_id:
+                    members.add(content_id)
+            total = int(getattr(page, "total_count", 0) or 0)
+            if len(rows) < _VISITKOREA_MEMBER_PAGE_SIZE or len(members) >= total:
+                break
+        else:
+            _LOGGER.warning("TourAPI %s 목록이 %d쪽을 넘는다 — 불완전", service, page_no)
+            return None
+    except Exception as exc:  # noqa: BLE001 — provider 예외 계층을 import하지 않는다
+        _LOGGER.warning("TourAPI %s 목록 실패: %r", service, exc)
+        return None
+    finally:
+        await hub.aclose()
+    if total and len(members) < total:
+        _LOGGER.warning(
+            "TourAPI %s 목록 선언 %d건 중 고유 %d건 — 불완전", service, total, len(members)
+        )
+        return None
+    return frozenset(members)

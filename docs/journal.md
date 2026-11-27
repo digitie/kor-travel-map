@@ -1,3 +1,34 @@
+## 2026-11-27 — TourAPI 상세 op 점진 백필: 소개·이미지·반려동물·무장애 (ADR-126, PR 2/2)
+
+- 원천: TourAPI `detailIntro2`(유형마다 접미사가 다른 이용시간·휴무·주차·주차요금·요금·할인·예약·문의·반려동물 한 줄),
+  `detailImage2`(추가 이미지 + `cpyrhtDivCd`), `detailPetTour2`, 무장애 `KorWithService2/detailWithTour2`. 전부
+  `python-visitkorea-api` 핀 `151ef90`에 있다(ADR-006 — wrapper 없음, hub `call("with", "detailWithTour2")`).
+- op마다 하루 예산이 설정값이다(기본 900, env `KOR_TRAVEL_MAP_VISITKOREA_DETAIL_{INTRO,IMAGE,PET,ACCESSIBILITY}_DAILY_BUDGET`).
+  받은 값은 `raw_data["tourapi_detail_ops"][op] = {modified_time, data}`(원천 키 중 쓰는 것만)로 남아 다음 run·replay가
+  잇는다. 상세 없는 행의 raw_data는 이 기능 전과 같다(payload hash 불변).
+- 우선순위: 새 읽기 `read_detail_priority_scores`(큐레이션 포함 +10, 검색 인지도 0~9) → 낡은 것 → 관광타입 12→14→28 →
+  contentid. prod 읽기 전용(2026-11-27): TourAPI 18,894건 모두 인지도 ≥1, 큐레이션 포함 0건, 질의 1.5 s(Dagster 역할로
+  읽기 가능). PinVi 여행 일정의 장소별 신호는 Map에 없다. 점수를 못 읽으면 경고 후 계속.
+- 낡은 op 값은 다시 받을 때까지 보인다(그 op은 우선 다시 받는다). 한 op의 한도·인증 정지가 다른 op을 막지 않는다.
+  replay·step 재시도는 받지 않는다. 기존 `detailCommon2`(overview) 경로는 건드리지 않았다(다른 에이전트가 채움률 11%
+  원인 조사 중).
+- 적대 리뷰 반영·조정(2026-11-27): 하루 상한을 **KST 날짜별 장부**(Dagster instance KV, 호출 전 예약 — 큐 runner·재실행·
+  실패 run도 센다)로 지킨다. 무장애·반려동물은 그 서비스 `areaBasedList2` 목록에 든 contentid만 묻는다(목록 실패면 그 op만
+  이번 run 쉼). current 원본은 한 번만 읽고 못 읽으면 멈춘다(fail-closed). op 첫 실패를 로그. TourAPI `overview`·대표 이미지도
+  `visitor_info.description`·`images[0]`에 싣는다(평면 키는 기존 소비자용으로 유지) — 다음 run에 관광지 feature 대부분이
+  한 번 갱신된다. `주차요금`은 `parking_fee`로 분리.
+- overview 채움 조사(별건, PinVi #809) 요청 반영: `detailCommon2` run 예산 관광지 600→**850**·축제 300→**50**(축제는 새·수정
+  하루 4~6건), 하루 상한 900 — 셋 다 env로 덮을 수 있다(`KOR_TRAVEL_MAP_VISITKOREA_DETAIL_COMMON_{DAILY,ATTRACTION,FESTIVAL}_BUDGET`,
+  빈 값 = 코드 기본값). `detailCommon2`도 같은 날짜 장부를 쓴다. env는 Manager compose code-server에 배선(Manager PR).
+- 축제: 공개 상세가 벗기는 `payload`의 소개·대표 이미지를 `visitor_info`로 typed 투영(읽기만, 저장 불변). 투영은
+  `row_revision`을 바꾸지 않으므로 event ETag에 투영 판(`event-visitor-info-v1`)을 섞는다(배포 전 304 캐시 방지).
+- 적대 리뷰 2차: 큐 runner의 직접 context(instance 없음)는 장부가 없어 상세를 받지 않는다(fail-closed). 반려동물 상세도
+  목록과 같은 `KorPetTourService2`에서 받는다(활용신청·쿼터·contentid 일치). 서비스 목록은 제목순(`arrange=A`). 축제 소개는
+  정리본 그대로(재정리 시 꺾쇠 소실). 휴양림 raw 새 키도 값이 있을 때만. 공개 `visitor_info` 설명에 축제 포함 → OpenAPI·
+  types·계약 지문 재고정.
+- 시험: unit `test_tourapi_detail_ops.py`(plan·merge·변환), dagster `test_visitkorea_detail_ops.py`(op별 필드·한도 독립·
+  우선순위·replay/재시도 0·설정 예산), integration `test_place_visitor_info.py`(jsonb 왕복·current 원본 읽기·점수).
+
 ## 2026-11-27 — place 방문 안내 typed 모델 + 국가유산 설명문·박물관·휴양림 필드 + 공개 API typed (ADR-126, PR 1/2)
 
 - 근거: 상세 콘텐츠 소스 조사(2026-11-27, 소유자 "권장안 대로" — 3·4·5순위). PinVi 상세에 이용시간·휴무·주차·요금·

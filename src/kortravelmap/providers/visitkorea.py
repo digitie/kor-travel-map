@@ -34,7 +34,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from datetime import date, datetime
 from typing import Any, Final, Protocol, runtime_checkable
 
@@ -50,6 +50,7 @@ from kortravelmap.core.address import (
 from kortravelmap.core.events import has_required_event_details
 from kortravelmap.core.ids import make_feature_id, make_payload_hash, make_source_record_key
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.visitor_text import DESCRIPTION_MAX, http_url
 from kortravelmap.dto import (
     Address,
     EventDetail,
@@ -58,9 +59,12 @@ from kortravelmap.dto import (
     FeatureKind,
     FeatureQualityState,
     FeatureUrls,
+    PlaceImage,
+    PlaceVisitorInfo,
     SourceLink,
     SourceRecord,
     SourceRole,
+    kogl_license,
 )
 from kortravelmap.geocoding import (
     AddressResolver,
@@ -81,6 +85,7 @@ from kortravelmap.providers.visitkorea_attractions import (
 
 __all__ = [
     "VisitKoreaFestivalItem",
+    "festival_visitor_info",
     "festival_window_start",
     "tourapi_festivals_to_bundles",
     "VISITKOREA_PROVIDER_NAME",
@@ -120,6 +125,48 @@ _KOGL_LICENSE: Final[dict[str, str]] = {
     "Type1": "공공누리 제1유형(출처표시)",
     "Type3": "공공누리 제3유형(출처표시·변경금지)",
 }
+
+
+_KOGL_TYPE_BY_LABEL: Final[dict[str, int]] = {
+    label: int(code.removeprefix("Type")) for code, label in _KOGL_LICENSE.items()
+}
+
+
+def _payload_text(value: object) -> str | None:
+    """payload ``content``는 이미 정리된 본문(``_plain_text``)이다 — 다시 정리하면 entity로 와 있던
+    ``<…>`` 본문이 지워진다. 앞뒤 공백만 걷고 상한에서 자른다."""
+    if not isinstance(value, str):
+        return None
+    return value.strip()[:DESCRIPTION_MAX] or None
+
+
+def festival_visitor_info(payload: Mapping[str, Any]) -> PlaceVisitorInfo | None:
+    """TourAPI 축제 ``EventDetail.payload`` → 공개 방문 안내(소개문·대표 이미지, ADR-126).
+
+    축제 소개·이미지는 ``payload``에 있고 공개 상세는 ``payload``를 벗긴다 — 그 값을 typed로 낸다
+    (저장 모양은 바꾸지 않는다, 읽기 투영뿐). TourAPI 축제 payload(출처 "한국관광공사")만 본다.
+    이미지는 공공누리 유형을 아는 것만(fail-closed).
+    """
+    if payload.get("attribution") != _ATTRIBUTION:
+        return None
+    images: list[PlaceImage] = []
+    url = http_url(payload.get("image_url"))
+    kogl = _KOGL_TYPE_BY_LABEL.get(str(payload.get("license") or ""))
+    if url is not None and kogl is not None:
+        images.append(
+            PlaceImage(
+                url=url,
+                thumbnail_url=http_url(payload.get("thumbnail_url")),
+                license=kogl_license(kogl, attribution=_ATTRIBUTION),
+            )
+        )
+    info = PlaceVisitorInfo(
+        source="tourapi",
+        attribution=_ATTRIBUTION,
+        description=_payload_text(payload.get("content")),
+        images=images,
+    )
+    return None if info.is_empty() else info
 
 
 # -- 입력 Protocol --------------------------------------------------------

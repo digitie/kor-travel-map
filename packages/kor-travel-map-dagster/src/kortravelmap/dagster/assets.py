@@ -161,7 +161,11 @@ from kortravelmap.providers.visitkorea import (
 )
 from kortravelmap.providers.visitkorea_attractions import (
     DATASET_KEY_VISITKOREA_ATTRACTIONS,
+    TOURAPI_DETAIL_OPS,
+    TourApiDetailOp,
+    merge_tourapi_detail_ops,
     plan_attraction_details,
+    plan_tourapi_detail_ops,
     tourapi_attractions_to_bundles,
 )
 from kortravelmap.settings import KorTravelMapSettings
@@ -184,7 +188,11 @@ from .feature_operation_tracking import (
 )
 from .geo_reuse import transform_reusing_stored_geo
 from .mois_chunked_load import MoisLoadPlan, load_mois_license_records_chunked
-from .provider_fetchers import fetch_visitkorea_attraction_details
+from .provider_fetchers import (
+    fetch_visitkorea_attraction_details,
+    fetch_visitkorea_detail_ops,
+    fetch_visitkorea_service_members,
+)
 from .source_replay import (
     apply_replay_provenance,
     ensure_replay_complete,
@@ -1458,20 +1466,29 @@ async def feature_place_standard_traditional_markets(
     )
 
 
-#: TourAPI ``detailCommon2``의 하루 예산 — data.go.kr 한도는 **오퍼레이션마다** 걸리고 이
-#: 오퍼레이션의 일일 한도는 1,000이다(``docs/etl/upstream-quota.md``). 관광지(매일)와 축제(매일)
-#: 두 dataset이 같은 오퍼레이션을 쓰므로 두 run 예산의 합이 이 값 아래여야 한다(테스트가 고정한다).
-#: 100은 수동 실행·재현 조회 몫으로 남긴다.
+#: TourAPI ``detailCommon2``의 하루 상한 기본값 — data.go.kr 한도는 **오퍼레이션마다** 걸리고 이
+#: 오퍼레이션의 일일 한도는 개발계정 1,000이다(``docs/etl/upstream-quota.md``). 관광지(매일)와
+#: 축제(매일) 두 dataset이 같은 오퍼레이션을 쓰므로 두 run 예산의 합이 이 값 아래여야 한다(테스트가
+#: 고정한다).
+#: 100은 수동 실행·재현 조회 몫으로 남긴다. 운영 값은 settings
+#: ``visitkorea_detail_common_daily_budget``(env)이 덮는다 — 운영계정 증설 뒤 설정만 바꾼다.
 VISITKOREA_DETAIL_DAILY_BUDGET: Final = 900
 
-#: 관광지 run 예산. 첫 적재는 상세 없이 전량이 들어가고, 상세는 run마다 이만큼씩 채워진다
-#: (12·14·28 19,030건 ≈ 32 run). **step 재시도는 상세를 받지 않는다** — 받은 상세는 적재가
-#: 커밋돼야 남으므로, 재시도마다 받으면 한 run이 한도를 넘긴다.
-VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 600
+#: 관광지 run 예산 기본값(2026-11-27 600 → 850). 첫 적재는 상세 없이 전량이 들어가고, 상세는 run마다
+#: 이만큼씩 채워진다(12·14·28 18,894건 ≈ 22 run). **step 재시도는 상세를 받지 않는다** — 받은 상세는
+#: 적재가 커밋돼야 남으므로, 재시도마다 받으면 한 run이 한도를 넘긴다. env
+#: ``visitkorea_detail_common_attraction_budget``이 덮는다.
+VISITKOREA_ATTRACTION_DETAIL_BUDGET: Final = 850
 
-#: 축제 run 예산(2026-11-10 TourAPI 축제 1차 전환). 창 안의 축제는 900건 안팎이라(실측 879) 첫
-#: 사흘이면 상세가 다 차고, 그 뒤로는 수정된 행만 다시 받는다.
-VISITKOREA_FESTIVAL_DETAIL_BUDGET: Final = 300
+#: 축제 run 예산 기본값(2026-11-27 300 → 50). 창 안 축제(실측 879)의 상세는 이미 찼고 하루 새·수정
+#: 건은 4~6건이라 50이면 넉넉하다. env ``visitkorea_detail_common_festival_budget``이 덮는다.
+VISITKOREA_FESTIVAL_DETAIL_BUDGET: Final = 50
+
+#: 상세 op(ADR-126) 하루 상한 기본값 — op마다 개발계정 1,000 − 수동 조회 100.
+TOURAPI_DETAIL_OP_DEFAULT_DAILY_BUDGET: Final = 900
+
+#: Dagster instance KV 장부 key 머리 — ``<머리>/<op>/<KST 날짜>`` → 그날 쓴(예약한) 호출 수.
+_DETAIL_LEDGER_PREFIX: Final = "kor_travel_map/tourapi_detail_calls"
 
 #: 축제의 법정동 미해석 허용 상한 — 축제는 900건 안팎이고 원천 좌표가 모두 육지 행사장이라
 #: 관광지(30)보다 좁게 둔다. 버린 행은 은퇴하지 않지만(snapshot 부재 은퇴에서 빠진다) 갱신도 못
@@ -1482,6 +1499,81 @@ VISITKOREA_FESTIVAL_UNRESOLVED_FLOOR: Final = 5
 #: 늘 비는 행만 버리고(주소 검증 ``drop``), 그보다 많으면 geo 장애로 보고 은퇴 적재 전에 멈춘다.
 #: drop된 행은 snapshot에서 빠져 **은퇴**하기 때문이다.
 VISITKOREA_ATTRACTION_UNRESOLVED_FLOOR: Final = 30
+
+
+def _setting_or(value: int | None, default: int) -> int:
+    return default if value is None else value
+
+
+def _detail_common_run_budget(settings: KorTravelMapSettings, dataset_key: str) -> int:
+    """``detailCommon2`` run 예산 — 설정값(env)이 있으면 그것, 없으면 모듈 기본값."""
+    if dataset_key == DATASET_KEY_VISITKOREA_FESTIVALS:
+        return _setting_or(
+            settings.visitkorea_detail_common_festival_budget, VISITKOREA_FESTIVAL_DETAIL_BUDGET
+        )
+    return _setting_or(
+        settings.visitkorea_detail_common_attraction_budget, VISITKOREA_ATTRACTION_DETAIL_BUDGET
+    )
+
+
+class _DetailCallLedger:
+    """TourAPI 상세 오퍼레이션의 KST 날짜별 호출 장부(Dagster instance KV, ADR-126).
+
+    run 예산만으로는 하루 한도를 지킬 수 없다 — 큐 runner·실패 재실행·수동 launch가 같은 날 다시
+    돌고, 받은 상세는 적재가 커밋돼야 남아서 실패한 run의 호출도 한도를 쓴다. 그래서 호출 **전에**
+    그날 장부에 예약한다(실패해도 센다 — 보수적). 동시에 두 run이 돌면 예약이 겹칠 수 있다
+    (관광지 job은 하루 한 번 schedule이라 드물다) — 그때도 원천 한도 응답(``rate_limit``)에서
+    그 op만 멈춘다.
+    """
+
+    def __init__(self, storage: Any, day: str) -> None:
+        self._storage = storage
+        self._day = day
+
+    @classmethod
+    def of(cls, context: AssetExecutionContext) -> "_DetailCallLedger | None":
+        storage = getattr(getattr(context, "instance", None), "run_storage", None)
+        get = getattr(storage, "kvs_get", None)
+        put = getattr(storage, "kvs_set", None)
+        if not (callable(get) and callable(put)):
+            return None
+        return cls(storage, datetime.now(_KST).date().isoformat())
+
+    def _key(self, op: str) -> str:
+        return f"{_DETAIL_LEDGER_PREFIX}/{op}/{self._day}"
+
+    def used(self, op: str) -> int:
+        raw = self._storage.kvs_get({self._key(op)}).get(self._key(op))
+        try:
+            return max(int(raw), 0) if raw is not None else 0
+        except (TypeError, ValueError):
+            return 0
+
+    def remaining(self, op: str, daily: int, run_budget: int) -> int:
+        return max(min(run_budget, daily - self.used(op)), 0)
+
+    def reserve(self, op: str, count: int) -> None:
+        self._storage.kvs_set({self._key(op): str(self.used(op) + count)})
+
+
+async def _read_stored_raw(
+    context: AssetExecutionContext, dataset_key: str
+) -> dict[str, Mapping[str, Any]]:
+    """dataset current 원본(``raw_data``) — 상세 이어 쓰기의 근거. 못 읽으면 멈춘다(fail-closed).
+
+    빈 저장값으로 계속하면 저장 상세가 전부 빠진 bundle이 적재돼 소개·방문 안내가 지워진다.
+    """
+    client = _resource_object(context, "kor_travel_map_client", default=None)
+    read = getattr(client, "read_current_source_records", None)
+    if not callable(read):
+        raise Failure(
+            description=(
+                f"{dataset_key}: current 원본을 읽을 수 없다(client에 read_current_source_records "
+                "없음) — 저장 상세를 잃지 않도록 적재를 멈춘다."
+            )
+        )
+    current, _expected = await read(provider=VISITKOREA_PROVIDER_NAME, dataset_key=dataset_key)
+    return {record.source_entity_id: record.raw_data for record in current}
 
 
 def _retry_number(context: AssetExecutionContext) -> int:
@@ -1498,6 +1590,7 @@ async def _attach_attraction_details(
     dataset_key: str = DATASET_KEY_VISITKOREA_ATTRACTIONS,
     budget: int | None = None,
     label: str = "TourAPI 관광지",
+    stored: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[Any]:
     """저장 상세를 이어 쓰고, 예산 안에서 새·수정 항목의 상세를 받아 record에 얹는다.
 
@@ -1508,19 +1601,28 @@ async def _attach_attraction_details(
     다음 run이 다시 고른다. record는 provider ``TourItem``(frozen pydantic)이라 ``model_copy``로
     얹는다.
     """
-    stored: dict[str, Mapping[str, Any]] = {}
-    client = _resource_object(context, "kor_travel_map_client", default=None)
-    read = getattr(client, "read_current_source_records", None)
-    if callable(read):
-        current, _expected = await read(
-            provider=VISITKOREA_PROVIDER_NAME, dataset_key=dataset_key
-        )
-        stored = {record.source_entity_id: record.raw_data for record in current}
+    if stored is None:
+        stored = await _read_stored_raw(context, dataset_key)
+    settings = KorTravelMapSettings()
     # 기본값은 호출 시점의 모듈 값이다(def 시점에 묶으면 예산을 바꾼 테스트·운영 보정이 안 닿는다).
     if budget is None:
-        budget = VISITKOREA_ATTRACTION_DETAIL_BUDGET
+        budget = _detail_common_run_budget(settings, dataset_key)
     budget = budget if _retry_number(context) == 0 else 0
+    ledger = _DetailCallLedger.of(context)
+    daily = _setting_or(
+        settings.visitkorea_detail_common_daily_budget, VISITKOREA_DETAIL_DAILY_BUDGET
+    )
+    if ledger is None:
+        # 장부가 없는 실행(큐 runner의 직접 context 등)은 하루 한도를 지킬 수 없다 — 받지 않는다
+        # (fail-closed). 상세는 schedule run이 장부 안에서 채운다.
+        if budget > 0:
+            context.log.warning(f"{label} 상세: 호출 장부(instance KV)가 없어 받지 않는다.")
+        budget = 0
+    else:
+        budget = ledger.remaining("common", daily, budget)
     plan = plan_attraction_details(records, stored, budget=budget)
+    if ledger is not None and plan.fetch:
+        ledger.reserve("common", len(plan.fetch))
     fetched: Mapping[str, tuple[str, str]] = (
         await fetch_visitkorea_attraction_details(KorTravelMapSettings(), plan.fetch)
         if plan.fetch
@@ -1541,6 +1643,118 @@ async def _attach_attraction_details(
                 record.model_copy(update={"overview": pair[0], "homepage": pair[1]})
             )
     return attached
+
+
+def tourapi_detail_op_budgets(settings: KorTravelMapSettings) -> dict[TourApiDetailOp, int]:
+    """op별 하루 상한(설정값, 없으면 :data:`TOURAPI_DETAIL_OP_DEFAULT_DAILY_BUDGET`, ADR-126).
+
+    네 op은 축제 적재가 쓰지 않으므로(축제는 ``detailCommon2``뿐) 관광지 run이 전부 쓴다. 실제 run
+    예산은 그날 장부의 남은 몫으로 더 줄어든다(:class:`_DetailCallLedger`).
+    """
+    default = TOURAPI_DETAIL_OP_DEFAULT_DAILY_BUDGET
+    return {
+        "intro": _setting_or(settings.visitkorea_detail_intro_daily_budget, default),
+        "images": _setting_or(settings.visitkorea_detail_image_daily_budget, default),
+        "pet": _setting_or(settings.visitkorea_detail_pet_daily_budget, default),
+        "accessibility": _setting_or(
+            settings.visitkorea_detail_accessibility_daily_budget, default
+        ),
+    }
+
+
+#: 무장애·반려동물은 그 서비스에 실린 관광지만 묻는다 — 1만 9천 건을 다 물으면 대부분 빈 답이다.
+_MEMBER_SERVICE_BY_OP: Final[dict[TourApiDetailOp, str]] = {
+    "accessibility": "with",
+    "pet": "pet",
+}
+
+
+async def _tourapi_detail_ops(
+    context: AssetExecutionContext,
+    records: Sequence[Any],
+    *,
+    replay: bool,
+    stored: Mapping[str, Mapping[str, Any]] | None = None,
+) -> dict[str, dict[str, Any]]:
+    """관광지 상세 op 묶음(contentid → op 묶음) — 저장값을 잇고 예산 안에서 새로 받는다.
+
+    - replay와 step 재시도는 받지 않는다(예산 0) — 저장값만 이어 쓴다.
+    - 하루 상한은 KST 날짜별 장부로 run을 넘어 지킨다(:class:`_DetailCallLedger`). 장부가 없으면
+      (instance KV 없음 — 큐 runner의 직접 context) 받지 않는다(fail-closed).
+    - 무장애·반려동물은 그 서비스 목록에 있는 contentid만 묻는다. 목록을 못 받으면 그 op은
+      이번 run에 받지 않는다(서비스 활용신청이 없으면 목록부터 실패한다).
+    - 우선순위 점수는 client가 읽는다(큐레이션 포함 + 검색 인지도). 못 읽으면 우선순위 없이
+      관광타입·contentid 순이다.
+    """
+    if stored is None:
+        stored = await _read_stored_raw(context, DATASET_KEY_VISITKOREA_ATTRACTIONS)
+    client = _resource_object(context, "kor_travel_map_client", default=None)
+    settings = KorTravelMapSettings()
+    daily = tourapi_detail_op_budgets(settings)
+    budgets: dict[TourApiDetailOp, int] = dict(daily)
+    if replay or _retry_number(context) != 0:
+        budgets = dict.fromkeys(TOURAPI_DETAIL_OPS, 0)
+    ledger = _DetailCallLedger.of(context) if any(budgets.values()) else None
+    if ledger is not None:
+        budgets = {op: ledger.remaining(op, daily[op], budgets[op]) for op in TOURAPI_DETAIL_OPS}
+    elif any(budgets.values()):
+        # 큐 runner의 직접 context 등 — 하루 한도를 지킬 수 없으니 받지 않는다(fail-closed).
+        context.log.warning("TourAPI 상세 장부(instance KV)가 없어 상세 op을 받지 않는다.")
+        budgets = dict.fromkeys(TOURAPI_DETAIL_OPS, 0)
+    members: dict[TourApiDetailOp, frozenset[str]] = {}
+    for op, service in _MEMBER_SERVICE_BY_OP.items():
+        if budgets[op] <= 0:
+            continue
+        listed = await fetch_visitkorea_service_members(settings, service)
+        if listed is None:
+            context.log.warning(
+                f"TourAPI {service} 목록을 못 받았다 — 이번 run은 {op}를 받지 않는다."
+            )
+            budgets[op] = 0
+        else:
+            members[op] = listed
+    priority: Mapping[str, int] = {}
+    read_priority = getattr(client, "read_detail_priority_scores", None)
+    if any(budgets.values()) and callable(read_priority):
+        try:
+            priority = await read_priority(
+                provider=VISITKOREA_PROVIDER_NAME,
+                dataset_key=DATASET_KEY_VISITKOREA_ATTRACTIONS,
+            )
+        except Exception as exc:  # noqa: BLE001 — 우선순위는 보조 신호다. 적재를 막지 않는다.
+            context.log.warning(
+                f"TourAPI 상세 우선순위를 못 읽었다 — 우선순위 없이 받는다: {exc!r}"
+            )
+    plan = plan_tourapi_detail_ops(
+        records, stored, budgets=budgets, priority=priority, members=members
+    )
+    if ledger is not None:
+        for op in TOURAPI_DETAIL_OPS:
+            if plan.fetch[op]:
+                ledger.reserve(op, len(plan.fetch[op]))
+    fetched: Mapping[TourApiDetailOp, Mapping[str, Any]] = (
+        await fetch_visitkorea_detail_ops(settings, plan.fetch)
+        if any(plan.fetch.values())
+        else {}
+    )
+    for op in TOURAPI_DETAIL_OPS:
+        member_note = f" · 서비스 목록 {len(members[op])}" if op in members else ""
+        context.log.info(
+            f"TourAPI 상세 {op}: 요청 {len(plan.fetch[op])} · "
+            f"수신 {len(fetched.get(op, {}))} · 예산 밖 {plan.deferred[op]} · "
+            f"예산 {budgets[op]}/{daily[op]}{member_note}"
+        )
+    modified_times = {
+        str(getattr(record, "content_id", "") or "").strip(): _iso_or_none(
+            getattr(record, "modified_time", None)
+        )
+        for record in records
+    }
+    return merge_tourapi_detail_ops(plan, fetched, modified_times)
+
+
+def _iso_or_none(value: Any) -> str | None:
+    return value.isoformat() if value is not None else None
 
 
 def _ensure_geo_resolved_enough(
@@ -1588,8 +1802,11 @@ async def run_feature_place_visitkorea_tourist_attractions(
                 "멈춘다(서비스키 활용신청·원천 상태를 확인할 것)."
             )
         )
+    # current 원본은 한 번만 읽어 overview 상세와 상세 op이 같이 쓴다(1만 9천 행).
+    stored = await _read_stored_raw(context, DATASET_KEY_VISITKOREA_ATTRACTIONS)
     if not replay:
-        records = await _attach_attraction_details(context, records)
+        records = await _attach_attraction_details(context, records, stored=stored)
+    details = await _tourapi_detail_ops(context, records, replay=replay, stored=stored)
     bundles = apply_replay_provenance(
         source,
         await _transform_reusing_geo(
@@ -1598,6 +1815,7 @@ async def run_feature_place_visitkorea_tourist_attractions(
             records,
             fetched_at=fetched_at,
             reverse_geocoder=_reverse_geocoder(context),
+            details=details,
         ),
     )
     ensure_replay_complete(source)
@@ -1878,7 +2096,6 @@ async def run_feature_event_visitkorea_festivals(
             context,
             records,
             dataset_key=DATASET_KEY_VISITKOREA_FESTIVALS,
-            budget=VISITKOREA_FESTIVAL_DETAIL_BUDGET,
             label="TourAPI 축제",
         )
     bundles = apply_replay_provenance(

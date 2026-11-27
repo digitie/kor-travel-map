@@ -45,7 +45,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from html import unescape
-from typing import Any, Final, Protocol, runtime_checkable
+from typing import Any, Final, Literal, Protocol, runtime_checkable
 
 from pydantic import ValidationError
 
@@ -58,17 +58,25 @@ from kortravelmap.core.address import (
 )
 from kortravelmap.core.ids import make_feature_id, make_payload_hash, make_source_record_key
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.visitor_text import DESCRIPTION_MAX, clean_text, http_url
 from kortravelmap.dto import (
+    VISITOR_INFO_KEY,
+    AccessibilityGroup,
+    AccessibilityNote,
     Address,
     Coordinate,
     Feature,
     FeatureBundle,
     FeatureFileSource,
     FeatureKind,
+    PetPolicy,
     PlaceDetail,
+    PlaceImage,
+    PlaceVisitorInfo,
     SourceLink,
     SourceRecord,
     SourceRole,
+    kogl_license,
 )
 from kortravelmap.geocoding import (
     AddressResolver,
@@ -80,6 +88,18 @@ from kortravelmap.geocoding import (
 __all__ = [
     "VisitKoreaAttractionItem",
     "AttractionDetailPlan",
+    "TourApiDetailOp",
+    "TourApiDetailOpsPlan",
+    "TourApiDetailRequest",
+    "merge_tourapi_detail_ops",
+    "plan_tourapi_detail_ops",
+    "tourapi_visitor_info",
+    "TOURAPI_ACCESSIBILITY_FIELDS",
+    "TOURAPI_DETAIL_OPS",
+    "TOURAPI_DETAIL_RAW_KEY",
+    "TOURAPI_INTRO_RAW_KEYS",
+    "TOURAPI_MAX_IMAGES",
+    "TOURAPI_PET_FIELDS",
     "attraction_category",
     "plan_attraction_details",
     "tourapi_attractions_to_bundles",
@@ -396,6 +416,313 @@ def plan_attraction_details(
     )
 
 
+# -- 소개·이미지·반려동물·무장애 상세(ADR-126) --------------------------------
+
+TourApiDetailOp = Literal["intro", "images", "pet", "accessibility"]
+"""상세 오퍼레이션 — ``detailIntro2``·``detailImage2``·``detailPetTour2``·
+``KorWithService2/detailWithTour2``. data.go.kr 한도는 **오퍼레이션마다** 따로 걸린다."""
+
+TOURAPI_DETAIL_OPS: Final[tuple[TourApiDetailOp, ...]] = ("intro", "images", "pet", "accessibility")
+
+TOURAPI_DETAIL_RAW_KEY: Final[str] = "tourapi_detail_ops"
+"""``raw_data`` 안 상세 묶음 키 — ``{op: {"modified_time": iso|None, "data": ...}}``.
+
+``data``가 빈 dict/list면 "받았으나 원천에 없음"이다(다시 묻지 않는다). op 키가 없으면 아직 받지
+않았다. ``modified_time``은 그 op을 받을 때 목록의 수정 시각이다 — 목록 값과 다르면 낡았다."""
+
+#: 소개정보(``detailIntro2``)에서 남기는 원천 키 — 관광타입마다 접미사가 다르다.
+_INTRO_FIELDS: Final[dict[str, tuple[str, ...]]] = {
+    "usage_hours": ("usetime", "usetimeculture", "usetimeleports"),
+    "rest_days": ("restdate", "restdateculture", "restdateleports"),
+    "parking": ("parking", "parkingculture", "parkingleports"),
+    "parking_fee": ("parkingfee", "parkingfeeleports"),
+    "fee_text": ("usefee", "usefeeleports"),
+    "discount": ("discountinfo",),
+    "reservation": ("reservation",),
+    "inquiry": ("infocenter", "infocenterculture", "infocenterleports"),
+    "pet_note": ("chkpet", "chkpetculture", "chkpetleports"),
+}
+TOURAPI_INTRO_RAW_KEYS: Final[frozenset[str]] = frozenset(
+    key for keys in _INTRO_FIELDS.values() for key in keys
+)
+
+#: 무장애(``detailWithTour2``) 원천 키 → (분류, 한글 이름). 순서가 화면 순서다.
+TOURAPI_ACCESSIBILITY_FIELDS: Final[dict[str, tuple[AccessibilityGroup, str]]] = {
+    "parking": ("physical", "주차"),
+    "route": ("physical", "접근로"),
+    "publictransport": ("physical", "대중교통"),
+    "ticketoffice": ("physical", "매표소"),
+    "promotion": ("physical", "홍보물"),
+    "wheelchair": ("physical", "휠체어"),
+    "exit": ("physical", "출입통로"),
+    "elevator": ("physical", "엘리베이터"),
+    "restroom": ("physical", "화장실"),
+    "auditorium": ("physical", "관람석"),
+    "room": ("physical", "객실"),
+    "handicapetc": ("physical", "지체장애 기타"),
+    "braileblock": ("visual", "점자블록"),
+    "helpdog": ("visual", "보조견 동반"),
+    "guidehuman": ("visual", "안내요원"),
+    "audioguide": ("visual", "오디오가이드"),
+    "bigprint": ("visual", "큰활자 홍보물"),
+    "brailepromotion": ("visual", "점자 홍보물"),
+    "guidesystem": ("visual", "유도·안내 설비"),
+    "blindhandicapetc": ("visual", "시각장애 기타"),
+    "signguide": ("hearing", "수어 안내"),
+    "videoguide": ("hearing", "자막 비디오가이드"),
+    "hearingroom": ("hearing", "객실(청각)"),
+    "hearinghandicapetc": ("hearing", "청각장애 기타"),
+    "stroller": ("infant_family", "유모차"),
+    "lactationroom": ("infant_family", "수유실"),
+    "babysparechair": ("infant_family", "유아용 보조의자"),
+    "infantsfamilyetc": ("infant_family", "영유아 가족 기타"),
+}
+
+#: 반려동물(``detailPetTour2``) 원천 키 → :class:`PetPolicy` 필드.
+TOURAPI_PET_FIELDS: Final[dict[str, str]] = {
+    "acmpyTypeCd": "companion_type",
+    "acmpyPsblCpam": "allowed_pets",
+    "acmpyNeedMtr": "requirements",
+    "etcAcmpyInfo": "notes",
+}
+
+TOURAPI_MAX_IMAGES: Final[int] = 20
+"""한 관광지에 남기는 추가 이미지 상한(원천 순서 앞에서부터)."""
+
+_KOGL_TYPE_BY_CODE: Final[dict[str, int]] = {"Type1": 1, "Type2": 2, "Type3": 3, "Type4": 4}
+
+_CONTENT_TYPE_RANK: Final[dict[str, int]] = {"12": 0, "14": 1, "28": 2}
+"""같은 우선 등급 안에서 관광지(12) → 문화시설(14) → 레포츠(28) 순으로 상세를 받는다."""
+
+
+@dataclass(frozen=True, slots=True)
+class TourApiDetailRequest:
+    """상세 한 건 요청 — 소개정보는 관광타입이 있어야 묻는다."""
+
+    content_id: str
+    content_type_id: str
+
+
+@dataclass(frozen=True, slots=True)
+class TourApiDetailOpsPlan:
+    """한 적재의 상세 오퍼레이션 계획.
+
+    ``stored``: contentid → 이어 쓸 op 묶음(낡은 것도 포함 — 낡은 것은 ``fetch``에도 오른다).
+    ``fetch``: op → 이번에 받을 요청(예산 안, 우선순위 순).
+    ``deferred``: op → 예산 밖이라 다음 run으로 미룬 수.
+    """
+
+    stored: Mapping[str, Mapping[str, Any]]
+    fetch: Mapping[TourApiDetailOp, tuple[TourApiDetailRequest, ...]]
+    deferred: Mapping[TourApiDetailOp, int]
+
+
+def _stored_ops(raw: Mapping[str, Any] | None) -> dict[str, Any]:
+    ops = raw.get(TOURAPI_DETAIL_RAW_KEY) if raw is not None else None
+    if not isinstance(ops, Mapping):
+        return {}
+    return {
+        op: entry
+        for op, entry in ops.items()
+        if op in TOURAPI_DETAIL_OPS and isinstance(entry, Mapping) and "data" in entry
+    }
+
+
+def plan_tourapi_detail_ops(
+    items: Iterable[VisitKoreaAttractionItem],
+    stored: Mapping[str, Mapping[str, Any]],
+    *,
+    budgets: Mapping[TourApiDetailOp, int],
+    priority: Mapping[str, int] | None = None,
+    members: Mapping[TourApiDetailOp, frozenset[str]] | None = None,
+) -> TourApiDetailOpsPlan:
+    """op마다 이번 run에 받을 contentid를 예산 안에서 고른다(일일 한도 보호, 점진 백필).
+
+    - 저장 op의 ``modified_time``이 목록과 같으면 다시 받지 않는다.
+    - 나머지는 받을 대상이다. 정렬: ``priority`` 점수(contentid → 점수 — 큐레이션 포함과 검색
+      인지도, ``read_detail_priority_scores``)가 높은 것이 먼저, 같은 점수 안에서 낡은 것(저장값
+      있음)이 없는 것보다 먼저, 관광지(12) → 문화시설(14) → 레포츠(28), 마지막으로 contentid
+      순(결정적).
+    - ``members``에 op이 있으면 그 집합(서비스 목록 — 무장애·반려동물)에 든 contentid만 묻는다.
+      나머지는 묻지 않고 다음 run이 다시 본다(목록에 새로 들면 그때 받는다).
+    - 낡은 op 값은 다시 받을 때까지 **그대로 보인다**(그 op의 ``modified_time``이 옛 값이라 다음
+      run이 계속 다시 고른다). 목록 수정 시각은 아무 필드의 편집에도 바뀌므로, 받기 전에 지우면
+      맞는 안내까지 사라진다.
+    """
+    keep: dict[str, dict[str, Any]] = {}
+    scores = priority or {}
+    member_sets = members or {}
+    candidates: dict[TourApiDetailOp, list[tuple[tuple[int, int, int, str], TourApiDetailRequest]]]
+    candidates = {op: [] for op in TOURAPI_DETAIL_OPS}
+    seen: set[str] = set()
+    for item in items:
+        content_id = (item.content_id or "").strip()
+        if not content_id or content_id in seen or _skipped(item.lcls_systm2, item.lcls_systm3):
+            continue
+        seen.add(content_id)
+        content_type_id = (item.content_type_id or "").strip()
+        ops = _stored_ops(stored.get(content_id))
+        if ops:
+            keep[content_id] = ops
+        current = _iso(item.modified_time)
+        request = TourApiDetailRequest(content_id=content_id, content_type_id=content_type_id)
+        for op in TOURAPI_DETAIL_OPS:
+            entry = ops.get(op)
+            if entry is not None and entry.get("modified_time") == current:
+                continue
+            if op == "intro" and not content_type_id:
+                continue  # detailIntro2는 관광타입이 필수다
+            if op in member_sets and content_id not in member_sets[op]:
+                continue  # 그 서비스에 실리지 않은 관광지 — 물어도 빈 답이다
+            key = (
+                -scores.get(content_id, 0),
+                0 if entry is not None else 1,
+                _CONTENT_TYPE_RANK.get(content_type_id, 9),
+                content_id,
+            )
+            candidates[op].append((key, request))
+    fetch: dict[TourApiDetailOp, tuple[TourApiDetailRequest, ...]] = {}
+    deferred: dict[TourApiDetailOp, int] = {}
+    for op in TOURAPI_DETAIL_OPS:
+        ordered = [request for _key, request in sorted(candidates[op], key=lambda pair: pair[0])]
+        limit = max(budgets.get(op, 0), 0)
+        fetch[op] = tuple(ordered[:limit])
+        deferred[op] = max(len(ordered) - limit, 0)
+    return TourApiDetailOpsPlan(stored=keep, fetch=fetch, deferred=deferred)
+
+
+def merge_tourapi_detail_ops(
+    plan: TourApiDetailOpsPlan,
+    fetched: Mapping[TourApiDetailOp, Mapping[str, Any]],
+    modified_times: Mapping[str, str | None],
+) -> dict[str, dict[str, Any]]:
+    """저장 op 묶음 위에 이번에 받은 op 값을 얹는다 → contentid별 ``raw_data`` 상세 묶음."""
+    merged: dict[str, dict[str, Any]] = {cid: dict(ops) for cid, ops in plan.stored.items()}
+    for op, by_content in fetched.items():
+        for content_id, data in by_content.items():
+            merged.setdefault(content_id, {})[op] = {
+                "modified_time": modified_times.get(content_id),
+                "data": data,
+            }
+    return merged
+
+
+def _first_text(data: Mapping[str, Any], keys: tuple[str, ...]) -> str | None:
+    for key in keys:
+        text = clean_text(data.get(key))
+        if text is not None:
+            return text
+    return None
+
+
+def _tourapi_images(
+    data: object, *, primary: str | None, primary_thumbnail: str | None, license_code: str | None
+) -> list[PlaceImage]:
+    """대표 이미지(목록 ``firstimage``, 목록 공공누리 유형) → 추가 이미지(``detailImage2``) 순.
+
+    유형을 모르는 이미지는 담지 않는다(fail-closed). 같은 URL은 한 번만.
+    """
+    images: list[PlaceImage] = []
+    seen: set[str] = set()
+    primary_url = http_url(primary)
+    primary_kogl = _KOGL_TYPE_BY_CODE.get((license_code or "").strip())
+    if primary_url is not None and primary_kogl is not None:
+        seen.add(primary_url)
+        images.append(
+            PlaceImage(
+                url=primary_url,
+                thumbnail_url=http_url(primary_thumbnail),
+                license=kogl_license(primary_kogl, attribution=_ATTRIBUTION),
+            )
+        )
+    if not isinstance(data, list):
+        return images
+    for row in data:
+        if not isinstance(row, Mapping) or len(images) >= TOURAPI_MAX_IMAGES:
+            continue
+        url = http_url(row.get("originimgurl"))
+        kogl = _KOGL_TYPE_BY_CODE.get(str(row.get("cpyrhtDivCd") or "").strip())
+        if url is None or kogl is None or url in seen:
+            continue  # 이용 조건을 모르는 이미지는 담지 않는다(fail-closed)
+        seen.add(url)
+        images.append(
+            PlaceImage(
+                url=url,
+                thumbnail_url=http_url(row.get("smallimageurl")),
+                caption=clean_text(row.get("imgname")),
+                license=kogl_license(kogl, attribution=_ATTRIBUTION),
+            )
+        )
+    return images
+
+
+def _tourapi_accessibility(data: object) -> list[AccessibilityNote]:
+    if not isinstance(data, Mapping):
+        return []
+    notes: list[AccessibilityNote] = []
+    for key, (group, label) in TOURAPI_ACCESSIBILITY_FIELDS.items():
+        text = clean_text(data.get(key))
+        if text is not None:
+            notes.append(AccessibilityNote(group=group, facility=key, label=label, text=text))
+    return notes
+
+
+def _tourapi_pet(data: object) -> PetPolicy | None:
+    if not isinstance(data, Mapping):
+        return None
+    values = {field: clean_text(data.get(key)) for key, field in TOURAPI_PET_FIELDS.items()}
+    if not any(values.values()):
+        return None
+    return PetPolicy.model_validate(values)
+
+
+def _op_data(ops: Mapping[str, Any], op: str) -> object:
+    entry = ops.get(op)
+    return entry.get("data") if isinstance(entry, Mapping) else None
+
+
+def tourapi_visitor_info(
+    ops: Mapping[str, Any] | None,
+    *,
+    overview: str | None = None,
+    primary_image: str | None = None,
+    primary_thumbnail: str | None = None,
+    license_code: str | None = None,
+) -> PlaceVisitorInfo | None:
+    """목록·``detailCommon2``·상세 op 묶음 → 방문 안내(없으면 ``None``). 태그·공백만 정리한다.
+
+    소개문(``overview``)과 대표 이미지(``firstimage``)도 여기 싣는다 — 소비자가 원천마다 다른 자리
+    (``facility_info.overview``·``image_url``)를 찾지 않게(ADR-126, 정본 하나). 평면 키는 기존
+    소비자를 위해 당분간 함께 남는다.
+    """
+    ops = ops or {}
+    raw_intro = _op_data(ops, "intro")
+    intro: Mapping[str, Any] = raw_intro if isinstance(raw_intro, Mapping) else {}
+    info = PlaceVisitorInfo(
+        source="tourapi",
+        attribution=_ATTRIBUTION,
+        description=clean_text(overview, limit=DESCRIPTION_MAX),
+        usage_hours=_first_text(intro, _INTRO_FIELDS["usage_hours"]),
+        rest_days=_first_text(intro, _INTRO_FIELDS["rest_days"]),
+        parking=_first_text(intro, _INTRO_FIELDS["parking"]),
+        parking_fee=_first_text(intro, _INTRO_FIELDS["parking_fee"]),
+        fee_text=_first_text(intro, _INTRO_FIELDS["fee_text"]),
+        discount=_first_text(intro, _INTRO_FIELDS["discount"]),
+        reservation=_first_text(intro, _INTRO_FIELDS["reservation"]),
+        inquiry=_first_text(intro, _INTRO_FIELDS["inquiry"]),
+        pet_note=_first_text(intro, _INTRO_FIELDS["pet_note"]),
+        images=_tourapi_images(
+            _op_data(ops, "images"),
+            primary=primary_image,
+            primary_thumbnail=primary_thumbnail,
+            license_code=license_code,
+        ),
+        accessibility=_tourapi_accessibility(_op_data(ops, "accessibility")),
+        pet_policy=_tourapi_pet(_op_data(ops, "pet")),
+    )
+    return None if info.is_empty() else info
+
+
 # -- 변환 -----------------------------------------------------------------
 
 _HREF_RE: Final = re.compile(r"""href\s*=\s*["']?(https?://[^"'\s>]+)""", re.IGNORECASE)
@@ -504,6 +831,7 @@ async def _attraction_to_bundle(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None,
     address_resolver: AddressResolver | None,
+    detail_ops: Mapping[str, Any] | None = None,
 ) -> FeatureBundle | None:
     content_id = (item.content_id or "").strip()
     name = normalize_korean_text(item.title)
@@ -535,6 +863,9 @@ async def _attraction_to_bundle(
         "overview": item.overview,
         "homepage": item.homepage,
     }
+    if detail_ops:
+        # 상세 묶음이 없는 행은 키를 두지 않는다 — 그 행의 payload hash가 이 기능 전과 같다.
+        raw_data[TOURAPI_DETAIL_RAW_KEY] = {op: detail_ops[op] for op in sorted(detail_ops)}
     coord = _coordinate(item.map_x, item.map_y)
     road_text, legal_text = _split_address(item.addr1)
     detail_text = normalize_korean_text(item.addr2)
@@ -603,6 +934,13 @@ async def _attraction_to_bundle(
         "attribution": _ATTRIBUTION,
         "license": _KOGL_LICENSE.get(license_code or "", license_code),
         "modified_time": _iso(item.modified_time),
+        VISITOR_INFO_KEY: tourapi_visitor_info(
+            detail_ops,
+            overview=item.overview,
+            primary_image=item.first_image,
+            primary_thumbnail=item.first_image2,
+            license_code=license_code,
+        ),
     }
     feature = Feature(
         feature_id=feature_id,
@@ -661,8 +999,13 @@ async def tourapi_attractions_to_bundles(
     fetched_at: datetime,
     reverse_geocoder: ReverseGeocoder | None = None,
     address_resolver: AddressResolver | None = None,
+    details: Mapping[str, Mapping[str, Any]] | None = None,
 ) -> list[FeatureBundle]:
     """TourAPI 관광지 items → place ``FeatureBundle`` (자연키 contentid).
+
+    ``details``는 contentid → 상세 op 묶음(:data:`TOURAPI_DETAIL_RAW_KEY` 모양)이다. 묶음은
+    ``raw_data``에 그대로 남고(다음 run·replay가 이어 쓴다) 방문 안내로 바뀌어
+    ``facility_info.visitor_info``에 들어간다(ADR-126).
 
     - 좌표는 원천 ``mapx``/``mapy``(WGS84)이고, 역지오코딩으로 법정동 코드를 채운다. 역지오코딩이
       실패하면 주소 해석, 그래도 없으면 TourAPI 법정동 시도·시군구 코드로 시군구까지만 채운다.
@@ -674,8 +1017,13 @@ async def tourapi_attractions_to_bundles(
     chosen: dict[str, FeatureBundle] = {}
     order: list[str] = []
     for item in items:
+        content_id = (item.content_id or "").strip()
         bundle = await _attraction_to_bundle(
-            item, fetched_at=fetched_at, reverse_geocoder=geocoder, address_resolver=resolver
+            item,
+            fetched_at=fetched_at,
+            reverse_geocoder=geocoder,
+            address_resolver=resolver,
+            detail_ops=(details or {}).get(content_id),
         )
         if bundle is None:
             continue

@@ -54,11 +54,25 @@ class _StoredClient:
         return self.stored, len(self.stored)
 
 
-def _context(client: object, *, retry_number: int = 0) -> Any:
+class _Kv:
+    """Dagster ``run_storage`` KV 대역 — 상세 호출 장부(ADR-126)가 있어야 상세를 받는다."""
+
+    def __init__(self) -> None:
+        self.values: dict[str, str] = {}
+
+    def kvs_get(self, keys: set[str]) -> dict[str, str]:
+        return {key: self.values[key] for key in keys if key in self.values}
+
+    def kvs_set(self, pairs: dict[str, str]) -> None:
+        self.values.update(pairs)
+
+
+def _context(client: object, *, retry_number: int = 0, ledger: bool = True) -> Any:
     return SimpleNamespace(
         resources=SimpleNamespace(kor_travel_map_client=client),
-        log=SimpleNamespace(info=lambda *_a, **_k: None),
+        log=SimpleNamespace(info=lambda *_a, **_k: None, warning=lambda *_a, **_k: None),
         retry_number=retry_number,
+        instance=SimpleNamespace(run_storage=_Kv()) if ledger else None,
     )
 
 
