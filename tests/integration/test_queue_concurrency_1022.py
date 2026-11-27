@@ -246,7 +246,17 @@ def _records_for(scope: ProviderDatasetRefreshScope) -> dict[str, object]:
         return {
             "knps_geometry_dataset_key": key,
             "knps_geometry_records": [
-                _KnpsGeometry(source_id=f"Q1022-{key}", name=f"{key} 구역", geom_wkt=wkt, raw={})
+                _KnpsGeometry(
+                    source_id=f"Q1022-{key}",
+                    name=f"{key} 구역",
+                    geom_wkt=wkt,
+                    # 보호지역은 싣는 지정 종류여야 bundle이 나온다(0건이면 은퇴 전 실패).
+                    raw=(
+                        {"DESIG_ENG": "Provincial Park", "MARINE": "0"}
+                        if key == "knps_protected_areas"
+                        else {}
+                    ),
+                )
             ],
         }
     if key == "krheritage_heritage_features":
