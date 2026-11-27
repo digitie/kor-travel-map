@@ -822,13 +822,17 @@ async def _rest_area_food(
 
 
 def _parse_food(value: bytes | str | None, feature_id: str) -> RestAreaFoodState | None:
+    """먹거리 값. 서비스 응답에는 자동 짝 주유소만 남긴다 — 검토 짝은 관리자 목록에만(ADR-127)."""
     if value is None:
         return None
     try:
-        return RestAreaFoodState.model_validate_json(value)
+        food = RestAreaFoodState.model_validate_json(value)
     except ValidationError:
         _LOGGER.warning("휴게소 먹거리 값 모양이 다르다: %s", feature_id)
         return None
+    return food.model_copy(
+        update={"stations": [station for station in food.stations if station.automatic]}
+    )
 
 
 async def _paired_rest_area_food(

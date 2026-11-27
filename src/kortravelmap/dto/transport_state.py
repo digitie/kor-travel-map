@@ -190,7 +190,8 @@ class RestAreaFoodState(_StateModel):
     stations: list[RestAreaStationPairState] = Field(
         default_factory=list,
         description=(
-            "400 m 안에서 이 휴게소를 고른 오피넷 주유소(자동·검토 모두). 일대일로 다듬은 결과다."
+            "400 m 안에서 이 휴게소를 고른 오피넷 주유소(일대일로 다듬은 결과). Valkey 값에는 "
+            "자동·검토가 모두 있고, 서비스 응답에는 자동(automatic=true)만 싣는다."
         ),
     )
 

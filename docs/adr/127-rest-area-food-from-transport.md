@@ -86,6 +86,9 @@ PinVi 휴게소·고속도로 주유소 상세에 음식 정보가 없다. 한�
 - 배포 순서: transport(odroid, migration `0051`, 먹거리 수집 1회 수동 실행) → Map(API·Dagster, 새 schedule
   `transport_state_rest_area_food_schedule` RUNNING으로 켜고 한 번 실행) → PinVi.
 - 먹거리 상태 job은 매일 transport 주유소 export(약 1.2만 행)를 한 번 더 받는다(짝 계산용).
+  주유소 export가 실패하면 먹거리 세대도 교체되지 않는다(직전 세대 유지, 짝은 최대 하루 늦게 따라간다 — 의도).
+- 남은 위험(후속): `name_updown_nearest`는 같은 이름 반대 방향 후보가 반경 안에 없으면 거리 비교 없이 자동이고,
+  `name_single`은 같은 휴게소에 더 강한 짝이 없으면 지명이 든 동네 주유소가 남을 수 있다. 검토 목록에서 본다.
 - 관리자 화면 UI는 아직 없다. 검토 목록은 operator API로 본다(후속: 관리자 화면 표).
 - 데이터 출처 표기: "출처: 한국도로공사 · 기준일 YYYY-MM-DD"(`source_collected_at`의 KST 날짜).
 - data.ex.co.kr의 트래픽 한도·공공누리 유형·`bestfoodyn`/`recommendyn`의 공식 정의는 미확인이다.
