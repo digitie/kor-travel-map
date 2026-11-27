@@ -148,6 +148,8 @@ def test_rest_area_detail_carries_the_food_summary(client: TestClient) -> None:
     }
     assert data["food"]["attribution"] == "한국도로공사"
     assert data["food_freshness"]["dataset"] == "transport.rest_area_food"
+    # 검토 짝(automatic=false)은 서비스 응답에 싣지 않는다.
+    assert [entry["automatic"] for entry in data["food"]["stations"]] == [True]
 
 
 def test_rest_area_without_a_link_or_dataset_keeps_the_detail(client: TestClient) -> None:
