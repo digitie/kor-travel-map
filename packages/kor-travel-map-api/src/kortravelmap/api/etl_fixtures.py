@@ -48,7 +48,7 @@ from kortravelmap.providers.krex import (
 from kortravelmap.providers.krforest import (
     arboretums_to_bundles,
     dulle_trails_to_bundles,
-    mountain_trails_to_bundles,
+    mountain_trail_courses_to_bundles,
     recreation_forests_to_bundles,
 )
 from kortravelmap.providers.krforest_safety import (
@@ -396,7 +396,16 @@ def _krforest_mountain_trails_fixture() -> Sequence[_ForestTrail]:
                 "coordinates": [[126.981, 37.592], [126.989, 37.598]],
             },
             bbox=(126.981, 37.592, 126.989, 37.598),
-            raw={"MNTN_NM": "북악산", "PMNTN_NM": "등산로 1구간"},
+            raw={
+                "MNTN_CODE": "111100101",
+                "MNTN_NM": "북악산",
+                "PMNTN_NM": "부암동구간",
+                "PMNTN_SN": 1,
+                "PMNTN_LT": 0.96,
+                "PMNTN_UPPL": 17,
+                "PMNTN_GODN": 12,
+                "PMNTN_DFFL": "쉬움",
+            },
         ),
         _ForestTrail(
             name="북악산 등산로 2구간",
@@ -409,7 +418,16 @@ def _krforest_mountain_trails_fixture() -> Sequence[_ForestTrail]:
                 "coordinates": [[126.989, 37.598], [126.997, 37.601]],
             },
             bbox=(126.989, 37.598, 126.997, 37.601),
-            raw={"MNTN_NM": "북악산", "PMNTN_NM": "등산로 2구간"},
+            raw={
+                "MNTN_CODE": "111100101",
+                "MNTN_NM": "북악산",
+                "PMNTN_NM": "부암동구간",
+                "PMNTN_SN": 2,
+                "PMNTN_LT": 0.78,
+                "PMNTN_UPPL": 15,
+                "PMNTN_GODN": 10,
+                "PMNTN_DFFL": "중간",
+            },
         ),
         _ForestTrail(
             name="빈 geometry는 제외",
@@ -419,7 +437,7 @@ def _krforest_mountain_trails_fixture() -> Sequence[_ForestTrail]:
             geometry_type="Point",
             geometry={"type": "Point", "coordinates": [126.99, 37.6]},
             bbox=(126.99, 37.6, 126.99, 37.6),
-            raw={"MNTN_NM": "잘못된 행"},
+            raw={"MNTN_CODE": "999900001", "MNTN_NM": "잘못된 행", "PMNTN_SN": 3},
         ),
     ]
 
@@ -459,7 +477,8 @@ def _krforest_dulle_trails_fixture() -> Sequence[_ForestTrail]:
 
 
 async def _convert_krforest_mountain_trails(items: Sequence[Any]) -> list[Any]:
-    bundles = await mountain_trails_to_bundles(items, fetched_at=_now())
+    # 운영 자산과 같은 변환 — 구간이 아니라 등산 코스를 싣는다(ADR-128).
+    bundles = await mountain_trail_courses_to_bundles(items, fetched_at=_now())
     return [b.model_dump(mode="json") for b in bundles]
 
 

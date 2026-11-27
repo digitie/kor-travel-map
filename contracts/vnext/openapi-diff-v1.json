@@ -5,15 +5,15 @@
   "baseline": {
     "admin": {
       "file": "packages/kor-travel-map-api/openapi.json",
-      "sha256": "9b7fe8391fbc2603508d5efa6d7238d40fa2a0cab780cd12d1b3dcb06a30e67f"
+      "sha256": "179c53b317ad05b5ae5d3b9bbd2de8b4e5f5d255c2a47707ec501f8f8b3bbc48"
     },
     "user": {
       "file": "packages/kor-travel-map-api/openapi.user.json",
-      "sha256": "17ac805d0eb48b20379a07f55a0487d371a12fdf4690ba4dd4146e19a484f22f"
+      "sha256": "03a424d82e664a212375faa13d26cdc5e7f9fc752be4a7b9d3e8b4428a1bd0d4"
     },
     "service": {
       "file": "packages/kor-travel-map-api/openapi.service.json",
-      "sha256": "617e33b70f40089136050b599953d489782f21404a7c073830685d8b5cc9f5de"
+      "sha256": "c75e0c54f7052dbe69e5f0bbcbfdf68156551795b04dbc7440ad4ace528cde0c"
     }
   },
   "revisions": [
@@ -241,6 +241,11 @@
       "date": "2026-11-27",
       "task": "국립공원·보호지역 containing-areas",
       "change": "baseline sha256 재고정(user·admin, service 불변). 공개 `GET /v1/features/containing-areas`(lon/lat)·`GET /v1/features/{feature_id}/containing-areas` 2 operation과 `ContainingAreasResponse`·`ContainingAreasData`·`ContainingAreaSummary` 스키마를 추가하고, `FeatureDetailResponse`에 선택 `area_kind`·`route_type`(detail 사본)을 더했다. 기존 경로·필드 불변. PinVi user 재vendor 대상이다."
+    },
+    {
+      "date": "2026-11-27",
+      "task": "ADR-128 등산 코스",
+      "change": "baseline sha256 재고정(user·service·admin). `RouteSummaryOut`·`RouteEndpointOut` 스키마를 추가하고 공개 `FeatureSummary`·`NearbyFeatureSummary`·`FeatureDetailResponse`와 service batch `FeatureTripCard`에 선택 필드 `route`(kind=route 요약 — 거리·소요시간·출처·난이도·모양·출발/도착)를 더했다. 기존 경로·필드·query 불변(additive). PinVi user·service 재vendor 대상이다."
     }
   ],
   "surfaces": {
@@ -252,7 +257,7 @@
         "enum_changes": 8,
         "status_changes": 1,
         "error_changes": 0,
-        "schema_changes": 8,
+        "schema_changes": 11,
         "deferred": 2
       },
       "added": [
@@ -457,6 +462,21 @@
           "operation": "GET /v1/features/{feature_id}",
           "detail": "FeatureDetailResponse.area_kind·route_type(kind=area/route일 때 detail 값의 사본, 그 밖 null)",
           "basis": "국립공원 경계 재원천화(2026-11-27): 소비자가 free-form detail 대신 typed 필드로 area 종류를 읽는다 — additive"
+        },
+        {
+          "operation": "GET /v1/features/in-bounds",
+          "detail": "FeatureSummary.route(RouteSummaryOut | null) — kind=route 요약(ADR-128). bbox·search·area contained 목록도 같은 FeatureSummary",
+          "basis": "ADR-128: 등산 코스 거리·소요시간·출발점 — additive, route 아닌 항목은 null"
+        },
+        {
+          "operation": "GET /v1/features/nearby",
+          "detail": "NearbyFeatureSummary.route(RouteSummaryOut | null)",
+          "basis": "ADR-128: additive"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "FeatureDetailResponse.route(RouteSummaryOut | null)",
+          "basis": "ADR-128: additive"
         }
       ],
       "deferred": [
@@ -482,7 +502,7 @@
         "enum_changes": 1,
         "status_changes": 0,
         "error_changes": 0,
-        "schema_changes": 4,
+        "schema_changes": 5,
         "deferred": 1
       },
       "added": [
@@ -664,6 +684,11 @@
           "operation": "GET /v1/service/transport/fuel-stations/{feature_id}",
           "detail": "응답 data에 nullable food/rest_area_food·food_freshness 추가(기본 null) — 한국도로공사 메뉴 요약",
           "basis": "ADR-127: additive — 기존 필드·caller 불변"
+        },
+        {
+          "operation": "POST /v1/features/batch",
+          "detail": "FeatureTripCard.route(RouteSummaryOut | null) — 일정 항목 표시용 kind=route 요약",
+          "basis": "ADR-128: additive — PinVi trip card decoder는 추가 키를 허용한다"
         }
       ],
       "deferred": [
@@ -683,7 +708,7 @@
         "enum_changes": 4,
         "status_changes": 6,
         "error_changes": 7,
-        "schema_changes": 19,
+        "schema_changes": 23,
         "deferred": 2
       },
       "added": [
@@ -1085,6 +1110,26 @@
           "operation": "GET /v1/service/transport/fuel-stations/{feature_id}",
           "detail": "응답 data에 nullable food/rest_area_food·food_freshness 추가(기본 null)",
           "basis": "ADR-127: additive — 기존 필드·caller 불변"
+        },
+        {
+          "operation": "GET /v1/features/in-bounds",
+          "detail": "FeatureSummary.route(RouteSummaryOut | null) — kind=route 요약(ADR-128). bbox·search·area contained 목록도 같은 FeatureSummary",
+          "basis": "ADR-128: 등산 코스 거리·소요시간·출발점 — additive, route 아닌 항목은 null"
+        },
+        {
+          "operation": "GET /v1/features/nearby",
+          "detail": "NearbyFeatureSummary.route(RouteSummaryOut | null)",
+          "basis": "ADR-128: additive"
+        },
+        {
+          "operation": "GET /v1/features/{feature_id}",
+          "detail": "FeatureDetailResponse.route(RouteSummaryOut | null)",
+          "basis": "ADR-128: additive"
+        },
+        {
+          "operation": "POST /v1/features/batch",
+          "detail": "FeatureTripCard.route(RouteSummaryOut | null) — 일정 항목 표시용 kind=route 요약",
+          "basis": "ADR-128: additive — PinVi trip card decoder는 추가 키를 허용한다"
         }
       ],
       "deferred": [

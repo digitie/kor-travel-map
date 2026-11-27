@@ -30,11 +30,13 @@ ADR 참조
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from decimal import Decimal
 from typing import Any, Final, Literal, Protocol, runtime_checkable
+
+from shapely import wkt as shapely_wkt
 
 from kortravelmap.category import PlaceCategoryCode, get_category, is_known_category_code
 from kortravelmap.core.address import normalize_korean_text
@@ -52,6 +54,12 @@ from kortravelmap.core.ids import (
     make_source_record_key,
 )
 from kortravelmap.core.providers import normalize_provider_name
+from kortravelmap.core.route_course import (
+    CourseSegmentGeometry,
+    assemble_course,
+    geodesic_length_m,
+    geometry_contradicts_source,
+)
 from kortravelmap.dto import (
     Address,
     AreaDetail,
@@ -66,6 +74,7 @@ from kortravelmap.dto import (
     SourceRole,
 )
 from kortravelmap.geocoding import ReverseGeocoder, cached_reverse_geocoder
+from kortravelmap.providers._route_course import CourseAggregate, build_course_bundle
 from kortravelmap.providers.knps_name_translations import (
     KNPS_PROTECTED_AREA_KOREAN_NAMES,
 )
@@ -89,6 +98,9 @@ __all__ = [
     "AddressFailureMode",
     "knps_point_records_to_bundles",
     "knps_geometry_records_to_bundles",
+    "knps_trail_courses_to_bundles",
+    "KNPS_TRAIL_COURSE_ENTITY_TYPE",
+    "KNPS_TRAIL_SEGMENT_ENTITY_TYPE",
     "resolve_cultural_resource_category",
     # knps-api CsvPreview → FeatureBundle 브리지
     "KnpsCsvRow",
@@ -1165,6 +1177,251 @@ async def knps_geometry_records_to_bundles(
         )
         if bundle is not None:
             bundles.append(bundle)
+    return bundles
+
+
+
+# =====================================================================
+# 탐방로 구간 → 등산 코스 (ADR-128)
+# =====================================================================
+
+KNPS_TRAIL_SEGMENT_ENTITY_TYPE: Final[str] = _SOURCE_ENTITY_TYPE
+"""``knps_trails`` 구간 route의 source entity type(다른 KNPS geometry dataset과 같다)."""
+
+KNPS_TRAIL_COURSE_ENTITY_TYPE: Final[str] = "knps_trail_course"
+"""구간을 이어 만든 KNPS 탐방 코스의 source entity type."""
+
+
+def _knps_number(raw: Mapping[str, Any], key: str) -> float | None:
+    value = raw.get(key)
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        number = float(str(value).strip())
+    except ValueError:
+        return None
+    if number != number or number < 0:  # NaN·음수
+        return None
+    return number
+
+
+def _course_terminal_names(
+    course_name: str, details: Sequence[str]
+) -> tuple[str | None, str | None]:
+    """코스명 ``A ~ B``(없으면 유일한 ``상세구간``)에서 출발·도착 이름을 읽는다."""
+    for text in (course_name, *(details if len(details) == 1 else ())):
+        tokens = [token.strip() for token in text.split("~") if token.strip()]
+        if len(tokens) >= 2:
+            return tokens[0], tokens[-1]
+    return None, None
+
+
+@dataclass(frozen=True, slots=True)
+class _KnpsTrailSegment:
+    source_id: str
+    serial: int
+    office: str
+    course_name: str
+    wkt: str
+    start_node: str | None
+    end_node: str | None
+    distance_m: float | None
+    go_minutes: int | None
+    return_minutes: int | None
+    raw: dict[str, Any]
+
+
+def _knps_trail_segments(records: Iterable[KnpsGeometryRecord]) -> list[_KnpsTrailSegment]:
+    spec = KNPS_GEOMETRY_DATASETS["knps_trails"]
+    segments: list[_KnpsTrailSegment] = []
+    seen: set[str] = set()
+    for record in records:
+        if _is_unmatched_trail_course(record) or record.source_id in seen:
+            continue
+        raw = dict(record.raw)
+        course_name = _raw_text(raw, "탐방코스(한글)") or _geometry_record_name(record, spec)
+        if course_name is None:
+            continue
+        try:
+            canonical_wkt, _centroid = normalize_geometry(
+                record.geom_wkt, allowed_types=ROUTE_GEOMETRY_TYPES
+            )
+        except GeometryError:
+            continue
+        seen.add(record.source_id)
+        serial = _knps_number(raw, "일련번호")
+        go_minutes = _knps_number(raw, "가는시간(분)")
+        return_minutes = _knps_number(raw, "오는시간(분)")
+        segments.append(
+            _KnpsTrailSegment(
+                source_id=record.source_id,
+                serial=int(serial) if serial is not None else 0,
+                office=_raw_text(raw, "공원사무소코드") or "-",
+                course_name=course_name,
+                wkt=canonical_wkt,
+                start_node=_raw_text(raw, "시작점_ID"),
+                end_node=_raw_text(raw, "종점_ID"),
+                distance_m=_knps_number(raw, "지리정보시스템 상 거리(m)"),
+                go_minutes=None if go_minutes is None else round(go_minutes),
+                return_minutes=None if return_minutes is None else round(return_minutes),
+                raw={"source_id": record.source_id, **raw},
+            )
+        )
+    return segments
+
+
+def _geometry_contradicts(wkt: str, distance_m: float) -> bool:
+    """원천 거리와 모순되는 결함 geometry 구간(코스 선에서 빠질 구간)인가 — 출발 후보에서 뺀다."""
+    return geometry_contradicts_source(geodesic_length_m(shapely_wkt.loads(wkt)), distance_m)
+
+
+def _knps_start_candidates(
+    members: Sequence[_KnpsTrailSegment],
+) -> list[tuple[float, float]]:
+    """원천 노드 그래프에서 들어오는 구간이 없는 노드(출발 후보)의 좌표, 원천 순서.
+
+    원천 구간은 ``시작점_ID → 종점_ID`` 방향으로 디지타이징돼 있다(실측: 노고단고개~천왕봉
+    35구간 전부 geometry 첫 점 = 시작점). 지선 토막의 끝도 후보가 되지만 코스 조립이
+    지선을 먼저 떼므로 본선 말단과 맞는 후보가 이긴다.
+    """
+    incoming = {segment.end_node for segment in members if segment.end_node is not None}
+    candidates: list[tuple[float, float]] = []
+    for segment in members:
+        if segment.start_node is None or segment.start_node in incoming:
+            continue
+        geom = shapely_wkt.loads(segment.wkt)
+        line = geom.geoms[0] if hasattr(geom, "geoms") else geom
+        candidates.append((line.coords[0][0], line.coords[0][1]))
+    return candidates
+
+
+async def knps_trail_courses_to_bundles(
+    records: Iterable[KnpsGeometryRecord],
+    *,
+    fetched_at: datetime,
+    reverse_geocoder: ReverseGeocoder | None = None,
+) -> list[FeatureBundle]:
+    """KNPS 탐방로(``knps_trails``) 구간을 원천 탐방 코스 단위 route로 묶는다(ADR-128).
+
+    코스 = 같은 공원사무소(``공원사무소코드``)·같은 코스명(``탐방코스(한글)``)의 구간 전부.
+    원천이 정한 코스라 연결 성분으로 쪼개지 않는다 — 끊김·샛길이 남으면 ``network``다.
+    거리는 그린 선의 측지 길이, 소요시간은 ``가는시간(분)`` 합(원천), 출발·도착 이름은
+    코스명 ``A ~ B``에서 읽는다. ``난이도``는 원천 척도가 공개 문서에 없어(값 0~3.47,
+    0이 130/617) 등급으로 옮기지 않고 원값만 ``payload``에 보존한다.
+    """
+    spec = KNPS_GEOMETRY_DATASETS["knps_trails"]
+    geocoder = (
+        cached_reverse_geocoder(reverse_geocoder) if reverse_geocoder is not None else None
+    )
+    groups: dict[tuple[str, str], list[_KnpsTrailSegment]] = {}
+    for segment in _knps_trail_segments(records):
+        groups.setdefault((segment.office, segment.course_name), []).append(segment)
+    bundles: list[FeatureBundle] = []
+    for office, course_name in sorted(groups):
+        members = sorted(
+            groups[(office, course_name)], key=lambda segment: (segment.serial, segment.source_id)
+        )
+        course = assemble_course(
+            [
+                CourseSegmentGeometry(
+                    segment_id=segment.source_id,
+                    order_key=(segment.serial, segment.source_id),
+                    wkt=segment.wkt,
+                    source_length_m=segment.distance_m,
+                )
+                for segment in members
+            ],
+            start_near=_knps_start_candidates(
+                [
+                    segment
+                    for segment in members
+                    if segment.distance_m is None
+                    or not _geometry_contradicts(segment.wkt, segment.distance_m)
+                ]
+            )
+            or None,
+        )
+        if course is None:
+            continue
+        excluded = frozenset(course.excluded_segment_ids)
+        included = [segment for segment in members if segment.source_id not in excluded]
+        details = sorted(
+            {text for segment in members if (text := _raw_text(segment.raw, "상세구간"))}
+        )
+        # 코스명 `A ~ B`의 A·B는 원천 노드 그래프로 정한 출발 말단에서만 믿는다 — 출발을 원천
+        # 근거로 정하지 못했으면(후보와 안 맞음) 이름을 엉뚱한 좌표에 붙이지 않는다.
+        begin_name, end_name = (
+            _course_terminal_names(course_name, details)
+            if course.start_matches_hint
+            else (None, None)
+        )
+        distances = [segment.distance_m for segment in included if segment.distance_m is not None]
+        difficulty_values = [
+            value
+            for segment in included
+            if (value := _knps_number(segment.raw, "난이도")) is not None and value > 0
+        ]
+        aggregate = CourseAggregate(
+            natural_key=f"course::{office}::{course_name}",
+            name=course_name,
+            segment_source_ids=tuple(segment.source_id for segment in members),
+            segment_raws=tuple(segment.raw for segment in members),
+            source_distance_m=sum(distances) if distances else None,
+            source_duration_minutes=(
+                sum(segment.go_minutes for segment in included if segment.go_minutes is not None)
+                if included and all(segment.go_minutes is not None for segment in included)
+                else None
+            ),
+            difficulty=None,
+            begin_name=begin_name,
+            end_name=end_name,
+            payload={
+                "park_office_code": office,
+                "start_rule": "source_node_graph",
+                "start_matches_source_node": course.start_matches_hint,
+                "duration_method": "sum_of_go_minutes",
+                "return_minutes": (
+                    sum(
+                        segment.return_minutes
+                        for segment in included
+                        if segment.return_minutes is not None
+                    )
+                    if included and all(segment.return_minutes is not None for segment in included)
+                    else None
+                ),
+                "source_difficulty_max": max(difficulty_values) if difficulty_values else None,
+                "source_difficulty_scale": "undocumented",
+                "detail_sections": details,
+                "closed_segment_count": sum(
+                    1 for segment in members if _raw_text(segment.raw, "탐방로 통제여부") == "1"
+                ),
+                "control_notes": sorted(
+                    {
+                        text
+                        for segment in members
+                        if (text := _raw_text(segment.raw, "통제구간 설명"))
+                    }
+                ),
+                "course_schedule_codes": sorted(
+                    {text for segment in members if (text := _raw_text(segment.raw, "코스일정"))}
+                ),
+            },
+        )
+        bundles.append(
+            await build_course_bundle(
+                provider=PROVIDER_NAME,
+                dataset_key=spec.dataset_key,
+                source_entity_type=KNPS_TRAIL_COURSE_ENTITY_TYPE,
+                category=spec.category or _TRAIL_CATEGORY,
+                marker_icon=spec.marker_icon,
+                marker_color=spec.marker_color,
+                geometry_source="knps",
+                course=course,
+                aggregate=aggregate,
+                fetched_at=fetched_at,
+                reverse_geocoder=geocoder,
+            )
+        )
     return bundles
 
 

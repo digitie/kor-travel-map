@@ -1,3 +1,21 @@
+## 2026-11-27 — 등산로 구간을 코스로 묶는다(ADR-128)
+
+- 근거(prod 읽기 전용): route 57,690건 = 산림청 등산로 57,047 + KNPS 617 + 둘레길 26, 거리·소요시간·난이도·시종점 이름 0%.
+  한 행은 구간이다(산림청 중앙 233 m). 그런데 원천 raw에는 산림청 `PMNTN_LT`(km, geometry와 비율 1.000)·`PMNTN_UPPL`/`GODN`
+  (분)·`PMNTN_DFFL`(쉬움/중간/어려움)·`MNTN_CODE`·`PMNTN_NM`, KNPS `코스ID`·`탐방코스(한글)`·`시작점_ID`/`종점_ID`·거리·
+  가는/오는시간·난이도(척도 문서 없음)가 있었다 — 변환이 버렸다.
+- 구현: `core.route_course`(10 m snap → union/linemerge → 50 m 미만 지선 제거 → path/loop/network, 본선 우선·정점 순서 =
+  진행 방향), `providers._route_course`(코스 bundle, `coord`=출발점), `mountain_trail_courses_to_bundles`(산·노선명 연결 성분,
+  출발 = 산 구간망 중심에서 가장 먼 말단), `knps_trail_courses_to_bundles`(공원사무소·코스명, 출발 = 노드 그래프 시작),
+  Dagster 두 자산이 코스를 싣고 구간을 은퇴. 공개 목록·상세에 `route` 요약(`length_m`·`duration_minutes`·`duration_basis`·
+  `difficulty`·`shape`·`start`/`end`). 구간 route 변환도 원천 거리·상행·난이도를 싣는다.
+- 함께 고친 결함: field ledger가 `Decimal`을 JSON 문자열로 써 numeric field(`route.total_distance_meters`·
+  `area.area_square_meters`)가 처음 non-null이 되는 순간 `base JSON value does not match registry type`으로 적재가 죽었다.
+- 발견: KNPS 8구간 geometry가 원천 거리의 수십~수백 배(공원 전체를 훑는 단일 선) → 가드로 코스 선에서 뺐다
+  (`T-KNPS-TRAIL-GEOM`). 둘레길 DBF는 원천에서 이중 인코딩·바이트 유실이라 이름 복구 불가.
+- 실측(prod 원천 전량 → provider 함수): 산림청 14,252코스(p50 1.0 km, ≥1 km 50%), KNPS 186코스(p50 3.3 km). migration 없음,
+  OpenAPI(user·admin) 추가만.
+- 다음: `T-HIKE-COURSE`(운영 재적재), PinVi 일정 추가 PR.
 ## 2026-11-27 — 공개 containing-areas API(이 장소는 어느 국립공원·보호지역 안인가)
 
 - `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas?lon&lat` — `contained-features`의

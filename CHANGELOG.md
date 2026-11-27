@@ -1,5 +1,18 @@
 # CHANGELOG
 
+## 2026-11-27 — 등산로 구간을 등산 코스로 묶는다(ADR-128)
+
+- 산림청 등산로(`krforest_mountain_trails`)·KNPS 탐방로(`knps_trails`)를 구간이 아니라 코스 route(`route_type='hiking_course'`)로
+  싣는다. 코스 `coord` = 출발점, geometry 첫 선 = 본선(정점 순서 = 진행 방향). 원천의 거리·소요시간·난이도·출발/도착 이름을
+  처음으로 싣는다(소요시간은 원천 합 `duration_basis='source'`, 없으면 18분/km 추정 `estimated`). 구간 route는 코스가
+  대신하므로 provider lifecycle로 은퇴한다(코스가 계보로 가진 구간만, 덮은 비율 50% 미만이면 run 실패). migration 없음.
+- 공개 API: `FeatureSummary`·`NearbyFeatureSummary`·`FeatureDetailResponse`·batch `FeatureTripCard`에 `route`
+  (`RouteSummaryOut` — `route_type`·`length_m`·`duration_minutes`·`duration_basis`·`difficulty`·`shape`·`start`/`end`).
+  user·service·admin OpenAPI와 admin frontend·user-client 타입 재생성(추가만).
+  소비자 캐시: `kind=route`인데 `route`가 없는 캐시 카드(이 배포 전 카드)는 `known_row_revision` 없이 한 번 다시 받는다 —
+  등산 코스는 새 feature id라 해당 없음이지만 기존 route에 같은 패턴이 생길 때를 위해 적는다.
+- 수정: field ledger가 `Decimal`을 JSON 문자열로 써 numeric field(`route.total_distance_meters`·`area.area_square_meters`)를
+  non-null로 쓰는 적재가 `base JSON value does not match registry type`으로 죽던 잠복 결함.
 ## 2026-11-27 — 공개 containing-areas API
 
 - `GET /v1/features/{feature_id}/containing-areas`·`GET /v1/features/containing-areas?lon&lat`: 점을 덮는 공개 area(국립공원·

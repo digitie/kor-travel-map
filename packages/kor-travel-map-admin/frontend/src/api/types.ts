@@ -9511,6 +9511,8 @@ export interface components {
             marker_icon?: string | null;
             /** Name */
             name: string;
+            /** @description kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128). */
+            route?: components["schemas"]["RouteSummaryOut"] | null;
             /**
              * Route Type
              * @description kind=route일 때 `detail.route_type`의 사본(hiking_trail…). 다른 kind는 null.
@@ -10057,6 +10059,8 @@ export interface components {
              * @description kind=price일 때 provider/domain/product series별 최신 가격 요약.
              */
             price_summary?: components["schemas"]["PricePointOut"][] | null;
+            /** @description kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128). */
+            route?: components["schemas"]["RouteSummaryOut"] | null;
         };
         /**
          * FeatureTripCard
@@ -10083,6 +10087,8 @@ export interface components {
             marker_icon: string | null;
             /** Name */
             name: string;
+            /** @description kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128). 일정 항목 표시용 — row_revision이 바뀌면 함께 바뀐다. */
+            route?: components["schemas"]["RouteSummaryOut"] | null;
         };
         /**
          * FeatureUpdateDatasetMembership
@@ -11323,6 +11329,8 @@ export interface components {
             lon: number;
             /** Name */
             name: string;
+            /** @description kind=route일 때 거리·소요시간·난이도·출발/도착 요약(ADR-128). */
+            route?: components["schemas"]["RouteSummaryOut"] | null;
         };
         /**
          * NearbyOriginSummary
@@ -14841,6 +14849,67 @@ export interface components {
             source_record_key: string;
             /** Source Role */
             source_role?: string | null;
+        };
+        /**
+         * RouteEndpointOut
+         * @description route 출발·도착 지점(ADR-128).
+         */
+        RouteEndpointOut: {
+            /**
+             * Lat
+             * @description 위도 (WGS84).
+             */
+            lat: number;
+            /**
+             * Lon
+             * @description 경도 (WGS84).
+             */
+            lon: number;
+            /**
+             * Name
+             * @description 원천이 준 지점 이름(예: KNPS 코스명 `A ~ B`의 A). 없으면 null.
+             */
+            name?: string | null;
+        };
+        /**
+         * RouteSummaryOut
+         * @description ``kind=route`` 공개 요약(ADR-128). route가 아니면 응답에 ``route=null``.
+         */
+        RouteSummaryOut: {
+            /**
+             * Difficulty
+             * @description 원천 등급을 옮긴 값. 원천에 등급이 없거나 척도가 불명이면 null.
+             */
+            difficulty?: ("easy" | "moderate" | "hard") | null;
+            /**
+             * Duration Basis
+             * @description `source`=원천 소요시간 합(산림청 상행시간·KNPS 가는시간), `estimated`=원천에 없어 거리로 추정(18분/km). 화면에는 추정임을 표시할 것.
+             */
+            duration_basis?: ("source" | "estimated") | null;
+            /**
+             * Duration Minutes
+             * @description 예상 소요시간(분). 출처는 `duration_basis`. `shape=network`이면 모든 갈래를 한 번씩 걷는 합이다.
+             */
+            duration_minutes?: number | null;
+            /** @description 도착점(본선의 끝). `loop`이면 출발점과 같다. 방향 미정 route는 null. */
+            end?: components["schemas"]["RouteEndpointOut"] | null;
+            /**
+             * Length M
+             * @description route 길이(m). 등산 코스는 그린 선 전체의 WGS84 측지 길이(`shape=network`이면 갈래 포함).
+             */
+            length_m?: number | null;
+            /**
+             * Route Type
+             * @description `hiking_course`(원천 구간을 이은 등산 코스) · `hiking_trail` · `trekking` 등.
+             */
+            route_type: string;
+            /**
+             * Shape
+             * @description 등산 코스 모양. `path`=한 줄, `loop`=원점 회귀, `network`=샛길·끊김이 남은 망(geometry 첫 선이 출발→도착 본선).
+             */
+            shape?: ("path" | "loop" | "network") | null;
+            /** @description 출발점. 등산 코스는 feature `lon`/`lat`과 같다 — 일정에 넣을 때 이 좌표를 쓴다. 진행 방향이 정의되지 않은 route는 null. */
+            start?: components["schemas"]["RouteEndpointOut"] | null;
         };
         /**
          * SigunguByRadiusScope
