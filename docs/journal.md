@@ -1,3 +1,10 @@
+## 2026-11-28 — kor-travel-common 최신 채택(py 0.1.0.dev3·ui 0.2.8·tokens 0.1.9)
+
+- Python 핀 f1faf56(dev2) → aefdc86(tag `py-v0.1.0.dev3`, common registry canonical ref와 같은 SHA). 추가분은
+  `kortravelcommon.dagster_ops`(공용 Dagster 실행 상태·제어 계약)뿐이라 Map 코드 변경 없음.
+- admin UI: common #98 catalog(73761c5)의 main pack(e131a1e, artifact SHA256 대조 일치)을 vendor하고 guard·common-ref를
+  73761c5로 올렸다. 0.2.8은 수집 파이프라인 export 추가(additive), toast는 Map이 쓰지 않아 받지 않는다.
+
 ## 2026-11-28 — geo 연결 수립 즉시 거부(ConnectError)도 일시 장애로 다시 보낸다
 
 - prod 등산로 적재(`feature_route_krforest_mountain_trails_job`)가 시도 1(96분, geo 호출 14,637건)·시도 2(3시간 8분,
