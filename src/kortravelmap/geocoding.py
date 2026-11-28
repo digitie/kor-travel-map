@@ -1382,10 +1382,20 @@ class GeoCallStats:
     실제 HTTP 수는 ``calls``다(provider 캐시가 같은 좌표를 묶으므로 행 수와 다르다).
     """
 
+    retries: Counter[str] = field(default_factory=Counter)
+    """``endpoint:원인``별 **다시 보낸 시도** 수(``원인`` = 예외 클래스명[+errno] 또는 상태 코드).
+
+    ``calls``는 논리 요청당 한 번이라 재시도 끝에 성공한 일시 장애는 거기 남지 않는다. 이 계수가
+    없으면 "가끔 끊긴다"의 빈도·원인(거부 errno 111인가, 경로 없음 113인가)을 다시 잃는다.
+    """
+
     def record(self, endpoint: str, *, failed: bool) -> None:
         self.calls[endpoint] += 1
         if failed:
             self.failures[endpoint] += 1
+
+    def record_retry(self, endpoint: str, reason: str) -> None:
+        self.retries[f"{endpoint}:{reason}"] += 1
 
     def record_empty(self, endpoint: str) -> None:
         self.empty[endpoint] += 1
@@ -1414,6 +1424,7 @@ class GeoCallStats:
         metadata["geo_calls_total"] = self.total_calls
         metadata["geo_failures_total"] = sum(self.failures.values())
         metadata["geo_empty_total"] = sum(self.empty.values())
+        metadata["geo_retries_total"] = sum(self.retries.values())
         if self.reuse:
             metadata.update({f"geo_reuse_{name}": self.reuse[name] for name in _REUSE_KEYS})
         return metadata
@@ -1433,7 +1444,12 @@ class GeoCallStats:
             + (f"(실패 {self.failures[name]})" if self.failures[name] else "")
             for name in sorted(self.calls)
         ]
-        return f"geo 경계 호출 {self.total_calls}건 — " + " ".join(parts) + reuse
+        retries = (
+            " · 재시도 " + " ".join(f"{key}={self.retries[key]}" for key in sorted(self.retries))
+            if self.retries
+            else ""
+        )
+        return f"geo 경계 호출 {self.total_calls}건 — " + " ".join(parts) + retries + reuse
 
 
 #: 일시 장애로 보고 다시 보내는 geo 응답 상태 — 게이트웨이/과부하 계열만(``_post`` 참고).
@@ -1442,13 +1458,43 @@ _GEO_TRANSIENT_STATUS: Final[frozenset[int]] = frozenset({502, 503, 504})
 GEO_LOAD_TRANSIENT_ATTEMPTS: Final[int] = 3
 #: n번째 재시도 전 대기(초) = 이 값 × n.
 _GEO_TRANSIENT_BACKOFF_SECONDS: Final[float] = 2.0
+#: 연결 수립 오류(ConnectError) n번째 재시도 전 대기(초) = 이 값 × n — 10 s·20 s, 총 30 s.
+#: geo 컨테이너 재기동(10~30 s) 하나를 넘길 만큼 길다. 거부는 서버 일이 거의 없어 싸다.
+_GEO_CONNECT_BACKOFF_SECONDS: Final[float] = 10.0
 
 
 class _TransientGeoRequestError(GeoRequestError):
     """다시 보내 볼 만한 transport 실패(read timeout·연결 중 끊김·읽기/쓰기 중 연결 오류).
 
-    밖에서는 그냥 ``GeoRequestError``다.
+    밖에서는 그냥 ``GeoRequestError``다. ``reason``은 재시도 계수 키(비밀 없음).
     """
+
+    def __init__(self, message: str, *, reason: str) -> None:
+        super().__init__(message)
+        self.reason = reason
+
+    def backoff_seconds(self) -> float:
+        return _GEO_TRANSIENT_BACKOFF_SECONDS
+
+
+class _TransientGeoConnectError(_TransientGeoRequestError):
+    """연결 수립 오류(httpx ``ConnectError`` — 거부·경로 없음·DNS·TLS). 더 길게 기다린다."""
+
+    def backoff_seconds(self) -> float:
+        return _GEO_CONNECT_BACKOFF_SECONDS
+
+
+def _os_errno(exc: BaseException) -> int | None:
+    """예외 사슬의 첫 ``OSError.errno`` — 원인(111 거부·113 경로 없음)만 남기고 URL·키는 버린다."""
+
+    seen: set[int] = set()
+    current: BaseException | None = exc
+    while current is not None and id(current) not in seen:
+        seen.add(id(current))
+        if isinstance(current, OSError) and current.errno is not None:
+            return current.errno
+        current = current.__cause__ or current.__context__
+    return None
 
 
 class KorTravelGeoRestClient:
@@ -1473,8 +1519,8 @@ class KorTravelGeoRestClient:
     ) -> None:
         """backend-to-backend public API key 인증을 생성 시점에 검증한다.
 
-        ``transient_attempts``는 일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김 —
-        ``_post_once`` 참고)에 보낼 총 시도 수다.
+        ``transient_attempts``는 일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김·
+        연결 수립 오류 — ``_post_once`` 참고)에 보낼 총 시도 수다.
         기본 1(재시도 없음) — API 기동 검증·대화형 admin route가 프록시 상한보다 오래 붙잡히지
         않게, 재시도는 적재(Dagster ``reverse_geocoder`` resource)처럼 오래 도는 쪽만 켠다.
 
@@ -1577,13 +1623,16 @@ class KorTravelGeoRestClient:
         return {"X-KTG-API-Key": self._api_key.get_secret_value().strip()}
 
     async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
-        """일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김)는 ``transient_attempts``까지
-        다시 보낸다.
+        """일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김·연결 수립 오류)는
+        ``transient_attempts``까지 다시 보낸다.
 
         2026-10-23 MCST 재현에서 odroid 과부하로 ``/v2/regions/within-radius``가 504를 한 번
         냈고, 그 한 번이 10만 행 변환 전체를 끝냈다. 같은 좌표를 몇 초 뒤 다시 물으면 대개
-        지나간다. 연결 실패(호스트 다운)는 다시 보내지 않는다 — 그때는 매 시도가 connect
-        상한만큼 기다릴 뿐이다.
+        지나간다. connect 상한을 다 쓴 연결 수립(``ConnectTimeout``)은 다시 보내지 않는다 —
+        매 시도가 그 상한만큼 기다릴 뿐이다. ``ConnectError``(거부·경로 없음·DNS·TLS — 상한
+        안에 실패로 끝난 수립)는 더 긴 backoff(10 s·20 s)로 다시 보낸다: geo 재기동 하나를
+        넘기고, 정말 내려갔거나 설정이 틀렸으면 그만큼 늦게 같은 실패로 끝난다(선조회는 첫 소진
+        실패에서 멈춘다). 다시 보낸 시도는 ``GeoCallStats.retries``에 원인별로 남긴다.
 
         **계수는 논리 요청당 한 번이다**(최종 결과로). 재시도를 시도마다 세면 빈 답 run 가드
         (ADR-109 결정 4)의 분모가 부풀어, 과부하 때 오히려 부분 장애가 비율 상한 아래로 숨는다.
@@ -1595,10 +1644,12 @@ class KorTravelGeoRestClient:
             last = attempt == attempts
             try:
                 response = await self._post_once(path, json=json)
-            except _TransientGeoRequestError:
+            except _TransientGeoRequestError as exc:
                 if last:
                     self._record(path, failed=True)
                     raise
+                reason = exc.reason
+                backoff = exc.backoff_seconds()
             except GeoRequestError:
                 self._record(path, failed=True)
                 raise
@@ -1607,7 +1658,11 @@ class KorTravelGeoRestClient:
                     self._record(path, failed=False)
                     return response
                 await response.aclose()
-            await _asyncio.sleep(_GEO_TRANSIENT_BACKOFF_SECONDS * attempt)
+                reason = str(response.status_code)
+                backoff = _GEO_TRANSIENT_BACKOFF_SECONDS
+            if self._stats is not None:
+                self._stats.record_retry(self._endpoint(path), reason)
+            await _asyncio.sleep(backoff * attempt)
         raise AssertionError("unreachable")  # pragma: no cover
 
     def _record(self, path: str, *, failed: bool) -> None:
@@ -1629,22 +1684,29 @@ class KorTravelGeoRestClient:
                 headers=self._public_api_headers(),
             )
         except _httpx.HTTPError as exc:
-            error_type = (
-                _TransientGeoRequestError
-                # ReadError/WriteError = keep-alive 연결이 요청 중 끊김(2026-10-24 등산로
-                # 선조회가 이것 한 번으로 시도를 잃었다). 연결 수립 실패는 제외.
-                if isinstance(
-                    exc,
-                    (
-                        _httpx.ReadTimeout,
-                        _httpx.RemoteProtocolError,
-                        _httpx.ReadError,
-                        _httpx.WriteError,
-                    ),
-                )
-                else GeoRequestError
-            )
-            sanitized = error_type(f"kor-travel-geo transport 실패: {type(exc).__name__}")
+            # 원인 표기 = 클래스명 + (있으면) errno. URL·키·원본 메시지는 싣지 않는다.
+            errno = _os_errno(exc)
+            reason = type(exc).__name__ + (f"(errno={errno})" if errno is not None else "")
+            message = f"kor-travel-geo transport 실패: {reason}"
+            if isinstance(exc, _httpx.ConnectError):
+                # 2026-11-28 등산로 적재가 geo 호출 1만4천·3만4천 건 중 ConnectError 단 1건으로
+                # 두 시도를 잃었다. httpx ConnectError = connect 상한 안에 실패로 끝난 수립(거부·
+                # 경로 없음·DNS·TLS). 상한을 다 쓴 ConnectTimeout은 별개 클래스라 아래로 간다.
+                sanitized = _TransientGeoConnectError(message, reason=reason)
+            elif isinstance(
+                exc,
+                (
+                    # ReadError/WriteError = keep-alive 연결이 요청 중 끊김(2026-10-24 등산로
+                    # 선조회가 이것 한 번으로 시도를 잃었다).
+                    _httpx.ReadTimeout,
+                    _httpx.RemoteProtocolError,
+                    _httpx.ReadError,
+                    _httpx.WriteError,
+                ),
+            ):
+                sanitized = _TransientGeoRequestError(message, reason=reason)
+            else:
+                sanitized = GeoRequestError(message)
         # 왕복 하나가 끝났다 — 적재 멈춤 감시의 진척 신호(소켓 I/O는 ``rchar``에 안 잡힌다).
         activity.mark()
         # except 블록 **밖**에서 던지므로 키가 든 원본 예외의 ``__context__``가 생기지 않는다.

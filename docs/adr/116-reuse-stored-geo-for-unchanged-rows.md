@@ -173,6 +173,10 @@ asset이 helper를 거치는지는 lint(`tests/lint/test_reverse_geocoding_asset
   `reverse_geocoder` resource의 geo client만 502/503/504·read timeout·연결 중 끊김에 총 3회(2초·4초 뒤)까지 다시 보낸다.
   연결 실패(호스트 다운)·4xx·500은 다시 보내지 않는다. API 기동 검증·admin route·offline upload·현재 데이터셋 조회는
   기본값 1(재시도 없음)이라 종전과 같다. 계수는 논리 요청당 한 번(최종 결과) — 빈 답 run 가드의 분모가 부풀지 않는다.
+  **개정(2026-11-28):** "연결 실패" 중 httpx `ConnectError`(connect 상한 안에 실패로 끝난 수립 — 거부·경로 없음·DNS·TLS)는
+  10초·20초 뒤 다시 보낸다(geo 재기동 하나를 넘기는 30초 창). 상한을 다 쓴 `ConnectTimeout`은 여전히 다시 보내지 않는다.
+  계기: 등산로 적재가 geo 호출 1만4천·3만4천 건 중 ConnectError 1건으로 두 시도(96분·3시간 8분)를 잃었다. 다시 보낸 시도는
+  `GeoCallStats.retries`(`endpoint:원인[errno]`)로 run 로그에 남는다 — 원인 규명용.
 - **멈춤 진단.** 적재 step(`run_tracked_feature_asset`·MCST asset)이 900초 동안 프로세스 I/O(`rchar+wchar`, 관측 자신의
   읽기는 뺀다)가 그대로면 asyncio task 스택을 WARNING으로 한 번 남긴다. run은 건드리지 않는다.
 - **받아들인 위험.** 동시 geo 요청 상한이 run당 1에서 2로 오른다 — 큐 경로는 pool을 claim하지 않아 worker run 수만큼
