@@ -1,3 +1,15 @@
+## 2026-11-28 — geo 연결 수립 즉시 거부(ConnectError)도 일시 장애로 다시 보낸다
+
+- prod 등산로 적재(`feature_route_krforest_mountain_trails_job`)가 시도 1(96분, geo 호출 14,637건)·시도 2(3시간 8분,
+  34,690건)를 각각 `ConnectError` **단 1건**으로 잃었다. 시도 3은 6시간 상한 안에 끝날 수 없어 취소했다. geo readyz는
+  정상(pool 사용률 0)이었다.
+- 기존 적재 재시도(`transient_attempts=3`)는 "연결 실패 = 호스트 다운 → 매 시도가 connect 상한만 기다린다"는 이유로
+  `ConnectError`를 뺐다. 그러나 응답 없는 연결 수립은 httpx에서 `ConnectTimeout`(별개 클래스)이고, `ConnectError`는
+  즉시 거부라 다시 보내는 비용이 backoff(2 s·4 s)뿐이다. 이제 `ConnectError`는 재시도하고 `ConnectTimeout`·`PoolTimeout`은
+  여전히 한 번에 끝낸다. 기본(API·admin, `transient_attempts=1`)은 그대로다.
+- 시험: `test_rest_client_retries_transient_transport_errors_but_not_connect_timeout`(ConnectError 3회·ConnectTimeout/
+  PoolTimeout 1회).
+
 ## 2026-11-27 — 소유자 결정 4건 기록·journal/acceptance 다음 경계 분리
 
 - writer-drain restore(#1558 뒤 남은 결함, 2026-11-25 절): restore가 pause 때 멈춘 sensor를 Dagster 1.13 `startSensor`로

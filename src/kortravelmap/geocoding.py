@@ -1577,13 +1577,14 @@ class KorTravelGeoRestClient:
         return {"X-KTG-API-Key": self._api_key.get_secret_value().strip()}
 
     async def _post(self, path: str, *, json: dict[str, Any]) -> httpx.Response:
-        """일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김)는 ``transient_attempts``까지
-        다시 보낸다.
+        """일시 장애(게이트웨이 5xx·read timeout·요청 중 연결 끊김·즉시 거부된 연결 수립)는
+        ``transient_attempts``까지 다시 보낸다.
 
         2026-10-23 MCST 재현에서 odroid 과부하로 ``/v2/regions/within-radius``가 504를 한 번
         냈고, 그 한 번이 10만 행 변환 전체를 끝냈다. 같은 좌표를 몇 초 뒤 다시 물으면 대개
-        지나간다. 연결 실패(호스트 다운)는 다시 보내지 않는다 — 그때는 매 시도가 connect
-        상한만큼 기다릴 뿐이다.
+        지나간다. 응답 없는 연결 수립(ConnectTimeout — 호스트 다운)은 다시 보내지 않는다 —
+        그때는 매 시도가 connect 상한만큼 기다릴 뿐이다. 즉시 거부(ConnectError)는 다시
+        보낸다: 비용은 backoff뿐이고, 호스트가 정말 내려갔다면 시도 수 안에 끝난다.
 
         **계수는 논리 요청당 한 번이다**(최종 결과로). 재시도를 시도마다 세면 빈 답 run 가드
         (ADR-109 결정 4)의 분모가 부풀어, 과부하 때 오히려 부분 장애가 비율 상한 아래로 숨는다.
@@ -1632,7 +1633,10 @@ class KorTravelGeoRestClient:
             error_type = (
                 _TransientGeoRequestError
                 # ReadError/WriteError = keep-alive 연결이 요청 중 끊김(2026-10-24 등산로
-                # 선조회가 이것 한 번으로 시도를 잃었다). 연결 수립 실패는 제외.
+                # 선조회가 이것 한 번으로 시도를 잃었다). ConnectError = 연결 수립이 **즉시**
+                # 거부됨(2026-11-28 등산로 적재가 1만4천·3만4천 호출 중 단 1건으로 두 번 시도를
+                # 잃었다). 다시 보내는 비용은 backoff뿐이다. 호스트가 꺼져 응답이 없으면
+                # ConnectTimeout(별개 클래스)이고, 매 시도가 connect 상한을 기다리므로 제외한다.
                 if isinstance(
                     exc,
                     (
@@ -1640,6 +1644,7 @@ class KorTravelGeoRestClient:
                         _httpx.RemoteProtocolError,
                         _httpx.ReadError,
                         _httpx.WriteError,
+                        _httpx.ConnectError,
                     ),
                 )
                 else GeoRequestError
