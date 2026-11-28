@@ -33,7 +33,7 @@
    (`retired_source_entity_ids` = 코스 payload `segment_source_ids`의 합, `provider_tombstone` 전이 기록, 재실행해도
    같다). 코스를 만들지 못한 구간(산 코드·코스명 없음, geometry 결함 구간뿐인 묶음)은 손대지 않는다. 코스가 덮은
    구간이 원천의 50% 미만이면 원천 모양이 바뀐 것으로 보고 **아무것도 싣지 않고** run을 실패시킨다. 코스 적재와 구간
-   은퇴는 두 transaction이라 sync 성공 기록은 은퇴까지 끝난 뒤에 남긴다. 구간 원문은 코스 SourceRecord의
+   은퇴는 **한 transaction**이고 curation seal은 은퇴 뒤에 잡는다(2026-11-28 개정 — 아래 "개정" 절). 구간 원문은 코스 SourceRecord의
    `raw_data.segments`에 그대로 남는다 — 코스의 계보이자 구간 단위 속성의 보존처다. 코스 payload의
    `segment_source_ids`가 코스→구간을 잇는다.
    - 왜 구간을 공개로 두지 않는가: 구간은 여행 단위가 아니다(233 m 토막, 이름은 "OO동구간"). 은퇴하는 구간은 모두
@@ -83,7 +83,8 @@
    `knps_trail_course`로 구간(`mountain_trail_segment`·`knps_facility`)과 나눠 snapshot·은퇴 범위를 분리한다.
 8. **적재 경로.** 새 자산을 만들지 않는다. 기존 `feature_route_krforest_mountain_trails`·
    `feature_geometry_knps_records`(dataset `knps_trails`)가 같은 원천 snapshot에서 코스를 만들어 싣고
-   (`retire_absent_from_snapshot`, 코스 type 범위) 이어서 구간을 은퇴시킨다. 같은 원천이면 같은 코스·같은 id·같은
+   (`retire_absent_from_snapshot`, 코스 type 범위) 같은 transaction에서 구간을 은퇴시킨다
+   (`load_authoritative_feature_snapshot(superseded=SupersededSourceEntities(구간 type, 덮은 id))`). 같은 원천이면 같은 코스·같은 id·같은
    payload hash다(결정적·멱등).
 9. **공개 API.** `FeatureSummary`(bbox·in-bounds·search·area contained)·`NearbyFeatureSummary`(nearby·by-target)·
    `FeatureDetailResponse`에 `route: RouteSummaryOut | null`을 더한다 — `route_type`·`length_m`·`duration_minutes`·
@@ -137,3 +138,18 @@
 migration 없음. 이미지 배포 뒤 `feature_route_krforest_mountain_trails_job`과 `feature_geometry_knps_records`
 (dataset `knps_trails`)를 한 번씩 돌린다. 원천 다운로드(mountain.zip)·코스 조립(로컬 실측 57k구간 ≈ 2분)·역지오
 (코스 출발점 약 14.4k건, 저장값 재사용 대상 아님 — 새 entity) · 적재(코스 14.4k insert) · 구간 은퇴(57k 상태 전이).
+
+## 개정 (2026-11-28) — 코스 적재와 구간 은퇴를 한 transaction으로
+
+처음 구현(#1569)은 코스 적재(seal 기대값을 그 transaction 끝에서 잡음)와 구간 은퇴를 **두 transaction**으로 돌리고,
+첫 transaction의 seal 값을 run 결과로 넘겼다. child 완료 seal(`feature.seal_provider_curation_snapshot_receipt`)은
+완료 시점의 입력 집합 해시(lifecycle·publication·row_revision 포함)를 다시 계산하므로, 은퇴가 1건이라도 있으면
+기대값(은퇴 전)과 어긋나 `provider load input changed before child completion`으로 실패했다(prod: krforest 57,033건
+은퇴 run, knps 609건 은퇴 run 모두 첫 시도 실패, 은퇴 0건인 재시도만 통과).
+
+수정: 은퇴를 `load_authoritative_feature_snapshot`의 `superseded` 인자로 옮겨 코스 적재·코스 부재 은퇴·구간 은퇴·seal
+캡처를 한 transaction으로 닫는다. seal 기대값이 최종 상태를 가리키고, 은퇴가 실패하면 코스 적재도 함께 rollback돼
+"코스와 구간이 함께 공개된" 중간 상태가 commit되지 않는다. 은퇴 수는 결과의 `superseded_retired`(sync cursor
+`segment_routes_retired`)다. sync 성공 기록은 다른 적재 asset과 같이 child 완료 seal 전에 남는다 — load commit
+사실의 기록이고, seal 실패가 load commit을 되돌리지 않는다는 기존 계약(`tests/integration/test_heritage_collector_tracking.py`)을
+따른다.

@@ -45,7 +45,7 @@ if TYPE_CHECKING:
 
     from kortravelmap.client import AsyncKorTravelMapClient
     from kortravelmap.dto import FeatureBundle
-    from kortravelmap.infra.feature_repo import FeatureLoadResult
+    from kortravelmap.infra.feature_repo import FeatureLoadResult, SupersededSourceEntities
 
     from dagster import AssetExecutionContext
 
@@ -162,6 +162,8 @@ class DagsterFeatureLoadResult:
         }
         if any(geo_counts.values()):
             metadata.update(geo_counts)
+        if self.load.superseded_retired:
+            metadata["superseded_retired"] = self.load.superseded_retired
         if not self.feature_ids_complete:
             metadata["feature_ids_truncated"] = True
         return metadata
@@ -336,6 +338,7 @@ async def load_feature_bundles_for_dagster(
     authoritative_snapshot_complete: bool = False,
     source_entity_type: str | None = None,
     retire_absent_from_snapshot: bool = False,
+    superseded: SupersededSourceEntities | None = None,
     chunk_size: int = FEATURE_LOAD_CHUNK_SIZE,
     load_all: Callable[
         [Sequence[FeatureBundle], GeoLoadContext | None], Awaitable[FeatureLoadResult]
@@ -362,6 +365,11 @@ async def load_feature_bundles_for_dagster(
     """
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
+    if superseded is not None and not (
+        authoritative_snapshot_complete and retire_absent_from_snapshot and load_all is None
+    ):
+        # 대신하는 단위의 은퇴는 snapshot 적재·seal과 한 transaction이어야만 뜻이 있다(ADR-128).
+        raise ValueError("superseded는 authoritative snapshot 부재 은퇴 적재에서만 쓴다")
 
     mode = _normalize_address_validation_mode(strict_address)
     source_observations = len(bundles)
@@ -469,6 +477,8 @@ async def load_feature_bundles_for_dagster(
                 retire_absent_from_snapshot=True,
                 retained_source_entity_ids=dropped_source_entity_ids,
                 geo=geo_load,
+                # 같은 transaction에서 seal 전에 은퇴시킨다 — 따로 commit하면 seal이 어긋난다.
+                superseded=superseded,
             )
         else:
             load = await client.load_feature_bundles(

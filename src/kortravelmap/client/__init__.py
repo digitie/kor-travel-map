@@ -191,6 +191,7 @@ from kortravelmap.infra.feature_repo import (
     NearbyFeaturePage,
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
+    SupersededSourceEntities,
     arm_feature_curation_write_wait,
     capture_provider_curation_input,
     features_in_bbox,
@@ -1591,12 +1592,20 @@ class AsyncKorTravelMapClient:
         retire_absent_from_snapshot: bool = False,
         retained_source_entity_ids: Collection[str] = (),
         geo: GeoLoadContext | None = None,
+        superseded: SupersededSourceEntities | None = None,
     ) -> tuple[FeatureLoadResult, int]:
         """적재·provider lifecycle·curation seal을 한 causal transaction으로 닫는다.
 
         ``retained_source_entity_ids``는 snapshot에 있었지만 이번에 싣지 못한(주소 검증 drop)
         entity다 — ``retire_absent_from_snapshot``에서 부재로 보지 않는다(drop → 은퇴 → 다음 run
         재활성 flap을 막는다).
+
+        ``superseded``는 이 snapshot이 대신하는 같은 dataset의 다른 원천 단위다(등산 코스가 덮은
+        구간 route, ADR-128). retirement mode와 별개로 **같은 transaction**에서 seal을 잡기 전에
+        retired로 내린다 — 반환 tuple의 은퇴 수가 아니라 결과의 ``superseded_retired``로 센다.
+        따로 commit하면 이 transaction의 seal 기대값이 은퇴 전 상태를 가리켜 child 완료 seal이
+        ``provider load input changed before child completion``으로 어긋나고, 은퇴가 실패하면
+        코스와 구간이 함께 공개되는 중간 상태가 commit된다.
         """
 
         if (
@@ -1605,6 +1614,9 @@ class AsyncKorTravelMapClient:
             or (retire_geometryless_areas and retire_absent_from_snapshot)
         ):
             raise ValueError("retirement mode는 하나만 선택해야 합니다")
+        if superseded is not None and superseded.source_entity_type == source_entity_type:
+            # 같은 단위를 "대신한다"고 내리면 방금 실은 행을 은퇴시킬 수 있다.
+            raise ValueError("superseded source_entity_type은 적재 단위와 달라야 합니다")
         materialized: Sequence[FeatureBundle] = list(bundles)
         async with self._feature_load_transaction() as session:
             result = await load_bundles(session, materialized, geo=geo)
@@ -1636,6 +1648,19 @@ class AsyncKorTravelMapClient:
                     dataset_key=dataset_key,
                     source_entity_type=source_entity_type,
                 )
+            if superseded is not None:
+                result = result.merge(
+                    FeatureLoadResult(
+                        superseded_retired=await retire_features_by_source_entity_ids(
+                            session,
+                            provider=provider,
+                            dataset_key=dataset_key,
+                            source_entity_type=superseded.source_entity_type,
+                            source_entity_ids=set(superseded.source_entity_ids),
+                        )
+                    )
+                )
+            # seal은 이 transaction의 마지막 쓰기 뒤에 잡는다 — 은퇴까지 반영한 최종 상태다.
             result = result.merge(
                 await capture_provider_curation_input(
                     session, provider=provider, dataset_key=dataset_key

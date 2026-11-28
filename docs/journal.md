@@ -1,3 +1,16 @@
+## 2026-11-28 — 등산 코스 적재와 구간 은퇴를 한 transaction으로(완료 seal 불일치 수정)
+
+- 증상: ADR-128(#1569) 뒤 `feature_route_krforest_mountain_trails_job`·`feature_geometry_knps_records`(knps_trails)가 구간
+  은퇴가 있는 첫 run마다 child 완료에서 `provider load input changed before child completion`으로 실패(prod krforest
+  57,033건·knps 609건 은퇴 run, 은퇴 0건인 재시도만 통과).
+- 원인: 코스 적재 transaction 끝에서 잡은 seal 기대값(은퇴 전)을 run 결과로 넘기고, 구간 은퇴는 별도 transaction으로
+  commit했다. 완료 seal은 입력 집합 해시(lifecycle·publication 포함)를 다시 계산하므로 어긋난다.
+- 수정: `load_authoritative_feature_snapshot(superseded=SupersededSourceEntities(...))` — 코스 적재·코스 부재 은퇴·구간 은퇴·
+  seal 캡처가 한 transaction. 은퇴 수는 `FeatureLoadResult.superseded_retired`. 은퇴 실패 시 코스도 rollback돼 중간 상태가
+  없다. ADR-128 개정 절. sync 성공 기록 순서(완료 seal 전)는 다른 적재와 같은 기존 계약이라 그대로 둔다(PR 본문에 근거).
+- 시험: integration(실제 asset→client→tracked finish·seal, 구간 3건 은퇴 → child done·receipt=결과 seal) — 수정 전
+  assets.py로 돌리면 prod와 같은 CheckViolation으로 실패함을 확인. dagster 단위(snapshot 1회·superseded 전달·실패 시 sync 없음).
+
 ## 2026-11-28 — kor-travel-common 최신 채택(py 0.1.0.dev3·ui 0.2.8·tokens 0.1.9)
 
 - Python 핀 f1faf56(dev2) → aefdc86(tag `py-v0.1.0.dev3`, common registry canonical ref와 같은 SHA). 추가분은

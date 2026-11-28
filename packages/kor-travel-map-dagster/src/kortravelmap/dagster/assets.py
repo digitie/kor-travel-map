@@ -31,6 +31,7 @@ from kortravelmap.infra.feature_repo import (
     FeatureLoadResult,
     NoticeFeatureLoadResult,
     NoticeReconcileResult,
+    SupersededSourceEntities,
 )
 from kortravelmap.infra.integrity_violation_repo import (
     IntegrityObservationReceipt as DurableIntegrityObservationReceipt,
@@ -782,15 +783,18 @@ async def run_feature_geometry_knps_records(
             authoritative_snapshot_complete=True,
             source_entity_type=KNPS_TRAIL_COURSE_ENTITY_TYPE,
             retire_absent_from_snapshot=True,
+            superseded=SupersededSourceEntities(
+                source_entity_type=KNPS_TRAIL_SEGMENT_ENTITY_TYPE,
+                source_entity_ids=frozenset(covered),
+            ),
             record_sync_state=False,
             geo_applied=GeoApplied(reverse=True, geocode=False),
             address_failure_mode=spec.address_failure_mode,
         )
-        return await _retire_covered_segments_and_record_sync(
+        return await _record_course_sync(
             context,
             provider=KNPS_PROVIDER_NAME,
             dataset_key=dataset_key,
-            segment_entity_type=KNPS_TRAIL_SEGMENT_ENTITY_TYPE,
             covered=covered,
             source_segment_count=len(records),
             course_count=len(course_bundles),
@@ -954,14 +958,17 @@ async def run_feature_route_krforest_mountain_trails(
         authoritative_snapshot_complete=True,
         source_entity_type=MOUNTAIN_TRAIL_COURSE_ENTITY_TYPE,
         retire_absent_from_snapshot=True,
+        superseded=SupersededSourceEntities(
+            source_entity_type=MOUNTAIN_TRAIL_SEGMENT_ENTITY_TYPE,
+            source_entity_ids=frozenset(covered),
+        ),
         record_sync_state=False,
         geo_applied=GeoApplied(reverse=True, geocode=False),
     )
-    return await _retire_covered_segments_and_record_sync(
+    return await _record_course_sync(
         context,
         provider=KRFOREST_PROVIDER_NAME,
         dataset_key=KRFOREST_MOUNTAIN_TRAILS_DATASET_KEY,
-        segment_entity_type=MOUNTAIN_TRAIL_SEGMENT_ENTITY_TYPE,
         covered=covered,
         source_segment_count=len(records),
         course_count=len(bundles),
@@ -1016,40 +1023,33 @@ def _covered_course_segments(
     return covered
 
 
-async def _retire_covered_segments_and_record_sync(
+async def _record_course_sync(
     context: AssetExecutionContext,
     *,
     provider: str,
     dataset_key: str,
-    segment_entity_type: str,
     covered: set[str],
     source_segment_count: int,
     course_count: int,
     result: DagsterFeatureLoadResult,
 ) -> DagsterFeatureLoadResult:
-    """코스가 대신하는 구간 route를 은퇴시키고, 그 뒤에야 sync 성공을 기록한다(ADR-128).
+    """코스 적재의 sync 성공을 코스 계수와 함께 기록한다(ADR-128).
 
-    은퇴는 provider lifecycle의 정규 경로(``retired_source_entity_ids`` — ``provider_tombstone``
-    전이 기록)라 다시 돌려도 같다. 코스 적재와 은퇴는 두 transaction이므로 sync 성공 기록을
-    은퇴 뒤로 미룬다 — 은퇴가 실패하면 run도 sync 상태도 실패고 다음 run이 같은 일을 다시 한다.
+    코스가 덮은 구간 route의 은퇴는 코스 적재와 **같은 transaction**에서 seal 전에 끝났다
+    (``_load(superseded=...)`` → ``load_authoritative_feature_snapshot``). 예전에는 은퇴를 별도
+    transaction으로 돌려, 적재 transaction이 잡은 seal 기대값(은퇴 전)이 child 완료 seal(은퇴
+    후)과 어긋나 은퇴가 있는 첫 run마다 ``provider load input changed before child
+    completion``으로 실패했다. 이제 결과의 seal 값이 은퇴까지 반영한 최종 상태다.
     """
-    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
-    retired = 0
-    if covered:
-        _load_result, retired = await client.load_authoritative_feature_snapshot(
-            [],
-            provider=provider,
-            dataset_key=dataset_key,
-            source_entity_type=segment_entity_type,
-            retired_source_entity_ids=covered,
-        )
+    retired = result.load.superseded_retired
     context.log.info(
-        "%s/%s: 코스 %d건 적재 뒤 구간 route %d건 은퇴",
+        "%s/%s: 코스 %d건 적재와 같은 transaction에서 구간 route %d건 은퇴",
         provider,
         dataset_key,
         course_count,
         retired,
     )
+    client = cast("AsyncKorTravelMapClient", _resource_object(context, "kor_travel_map_client"))
     await _record_feature_sync_success(
         context,
         client,
@@ -2261,6 +2261,7 @@ async def _load(
     authoritative_snapshot_complete: bool,
     source_entity_type: str | None = None,
     retire_absent_from_snapshot: bool = False,
+    superseded: SupersededSourceEntities | None = None,
     record_sync_state: bool = True,
     load_all: Callable[[Sequence[Any], GeoLoadContext | None], Awaitable[FeatureLoadResult]]
     | None = None,
@@ -2286,6 +2287,7 @@ async def _load(
         authoritative_snapshot_complete=authoritative_snapshot_complete,
         source_entity_type=source_entity_type,
         retire_absent_from_snapshot=retire_absent_from_snapshot,
+        superseded=superseded,
         load_all=load_all,
         empty_reverse_ratio=_dataset_empty_reverse_ratio(address_failure_mode),
         **(await _geo_run_inputs(context, geo_applied)),

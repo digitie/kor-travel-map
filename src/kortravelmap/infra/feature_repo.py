@@ -159,6 +159,7 @@ __all__ = [
     "DEFAULT_PRICE_STALE_HIDE_DAYS",
     "EnrichmentLoadResult",
     "FeatureLoadResult",
+    "SupersededSourceEntities",
     "capture_provider_curation_input",
     "FeatureBatchItemRow",
     "FeatureSearchPage",
@@ -3205,6 +3206,9 @@ class FeatureLoadResult:
     #: provider가 더는 Feature로 내지 않아 같은 transaction에서 retired로 내린 Feature
     #: (``retire_features_withdrawn_by_provider`` — MOIS 승격 제외 업태·가려진 숙박 record).
     withdrawn_retired: int = 0
+    #: 같은 dataset의 다른 원천 단위가 대신해 같은 transaction에서 retired로 내린 Feature
+    #: (:class:`SupersededSourceEntities` — 등산 코스가 덮은 구간 route, ADR-128).
+    superseded_retired: int = 0
 
     def merge(self, other: FeatureLoadResult) -> FeatureLoadResult:
         """두 결과 카운트를 합산 (streaming 배치 적재 누적용)."""
@@ -3234,7 +3238,21 @@ class FeatureLoadResult:
             ),
             geo_partial_kept=self.geo_partial_kept + other.geo_partial_kept,
             withdrawn_retired=self.withdrawn_retired + other.withdrawn_retired,
+            superseded_retired=self.superseded_retired + other.superseded_retired,
         )
+
+
+@dataclass(frozen=True)
+class SupersededSourceEntities:
+    """snapshot 적재가 대신하는, 같은 dataset의 **다른** ``source_entity_type`` 원천 단위.
+
+    등산 코스(ADR-128)는 예전에 구간 그대로 실었던 route를 대신한다. 그 구간 Feature 은퇴는
+    코스 적재와 **같은 transaction**에서 curation seal을 잡기 전에 해야 한다 — 따로 commit하면
+    적재 transaction이 잡은 seal 기대값이 은퇴 전 상태를 가리켜 child 완료 seal이 어긋난다.
+    """
+
+    source_entity_type: str
+    source_entity_ids: frozenset[str]
 
 
 async def capture_provider_curation_input(
