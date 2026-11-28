@@ -4,6 +4,8 @@
  * `adminDocumentTitle`로 상단 바와 같은 "영역 - 페이지" 형식의 문서 제목을 만든다.
  * 그룹 헤더는 비링크이며 href는 존치하는 canonical 화면만 가리킨다.
  */
+import { COLLECTION_PIPELINE_TITLE, collectionPipelineItems } from "@kor-travel/ui/collection-pipeline";
+
 export const ADMIN_NAV_GROUPS = [
   {
     group: null,
@@ -26,16 +28,16 @@ export const ADMIN_NAV_GROUPS = [
     ],
   },
   {
-    group: "수집 파이프라인",
-    section: "수집 파이프라인",
-    items: [
-      { href: "/ops/pipeline", label: "파이프라인" },
-      { href: "/ops/datasets", label: "데이터셋" },
-      { href: "/admin/offline-uploads", label: "오프라인 업로드" },
-      { href: "/admin/poi-cache-targets", label: "POI 캐시 대상" },
-      { href: "/ops/cache-target-streams", label: "캐시 전파 스트림" },
-      { href: "/admin/ops/geo-releases", label: "geo 릴리스" },
-    ],
+    group: COLLECTION_PIPELINE_TITLE,
+    section: COLLECTION_PIPELINE_TITLE,
+    items: collectionPipelineItems({
+      pipeline: "/ops/pipeline",
+      datasets: "/ops/datasets",
+      offlineUploads: "/admin/offline-uploads",
+      poiCacheTargets: "/admin/poi-cache-targets",
+      cacheStreams: "/ops/cache-target-streams",
+      releases: { href: "/admin/ops/geo-releases", label: "geo 릴리스" },
+    }),
   },
   {
     group: "모니터링",

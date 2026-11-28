@@ -1,6 +1,8 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
+import { isPipelineErrorEvent } from "@kor-travel/ui/collection-pipeline";
+import { DagsterLogControls } from "@kor-travel/ui/dagster-workbench";
 import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { useMemo, useState } from "react";
 
@@ -315,6 +317,7 @@ export function PipelineEventsPanel({
 
 /** C3c 정본(#690) — `GET /ops/pipeline/dagster-runs/{run_id}` 소비 상세. */
 export function DagsterRunDetail({ runId }: { runId: string }) {
+  const [errorsOnly, setErrorsOnly] = useState(false);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const after = cursorStack.at(-1) ?? null;
   const detail = usePipelineDagsterRunDetail(runId, {
@@ -322,6 +325,7 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
     after,
   });
   const data = detail.data?.data;
+  const events = (data?.events ?? []).filter(event => !errorsOnly || isPipelineErrorEvent(event));
   return (
     <div
       aria-busy={detail.isLoading || undefined}
@@ -353,8 +357,12 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
               </AlertDescription>
             </Alert>
           ) : null}
+          <DagsterLogControls errorsOnly={errorsOnly} onFilter={setErrorsOnly} />
+          {errorsOnly && !events.length ? (
+            <p className="text-text-secondary">이 페이지에 오류 로그가 없습니다.</p>
+          ) : null}
           <ul className="space-y-1">
-            {withOccurrenceKeys(data.events ?? [], (event) =>
+            {withOccurrenceKeys(events, (event) =>
               JSON.stringify([runId, event]),
             ).map(({ key, value: event }) => (
               <li className="flex flex-wrap items-center gap-2" key={key}>
