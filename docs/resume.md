@@ -1,3 +1,7 @@
+## 2026-11-28 — Common 수집 파이프라인 UI 적용
+
+수집 파이프라인의 여섯 메뉴가 Common의 메뉴 정의를 사용한다. Dagster 실행 상세에서 공용 오류 로그 필터를 사용할 수 있다.
+
 ## 2026-11-27 — 소유자 결정 4건(문서만)
 
 - writer-drain restore의 `start*` 결함(2026-11-25 열린 결정)은 고치지 않고 `T-WRITER-DRAIN-RESTORE` 백로그로. 공용 PG role

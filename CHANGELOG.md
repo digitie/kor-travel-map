@@ -1,5 +1,9 @@
 # CHANGELOG
 
+## 2026-11-28 — Common 수집 파이프라인 UI 적용
+
+수집 파이프라인의 여섯 메뉴가 Common의 메뉴 정의를 사용한다. Dagster 실행 상세에서 공용 오류 로그 필터를 사용할 수 있다.
+
 ## 2026-11-27 — TourAPI 상세 op 점진 백필(ADR-126 2/2)
 
 - TourAPI 관광지 run이 `detailIntro2`·`detailImage2`·`detailPetTour2`·무장애 `detailWithTour2`를 op별 하루 예산
