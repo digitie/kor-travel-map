@@ -9,6 +9,7 @@ import { useMemo, useState } from "react";
 import {
   type ExecutionKind,
   type JobEventLevel,
+  type PipelineDagsterRunDetailResponse,
   type PipelineJobEventRecord,
   usePipelineDagsterRunDetail,
   usePipelineDagsterRuns,
@@ -317,7 +318,6 @@ export function PipelineEventsPanel({
 
 /** C3c 정본(#690) — `GET /ops/pipeline/dagster-runs/{run_id}` 소비 상세. */
 export function DagsterRunDetail({ runId }: { runId: string }) {
-  const [errorsOnly, setErrorsOnly] = useState(false);
   const [cursorStack, setCursorStack] = useState<string[]>([]);
   const after = cursorStack.at(-1) ?? null;
   const detail = usePipelineDagsterRunDetail(runId, {
@@ -325,7 +325,6 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
     after,
   });
   const data = detail.data?.data;
-  const events = (data?.events ?? []).filter(event => !errorsOnly || isPipelineErrorEvent(event));
   return (
     <div
       aria-busy={detail.isLoading || undefined}
@@ -357,22 +356,7 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
               </AlertDescription>
             </Alert>
           ) : null}
-          <DagsterLogControls errorsOnly={errorsOnly} onFilter={setErrorsOnly} />
-          {errorsOnly && !events.length ? (
-            <p className="text-text-secondary">이 페이지에 오류 로그가 없습니다.</p>
-          ) : null}
-          <ul className="space-y-1">
-            {withOccurrenceKeys(events, (event) =>
-              JSON.stringify([runId, event]),
-            ).map(({ key, value: event }) => (
-              <li className="flex flex-wrap items-center gap-2" key={key}>
-                <span className="font-mono text-2xs text-text-secondary">
-                  {event.level ?? event.event_type}
-                </span>
-                <span className="break-all">{event.message ?? NULL_GLYPH}</span>
-              </li>
-            ))}
-          </ul>
+          <DagsterRunEventList key={runId} runId={runId} events={data.events} />
           {data.event_has_more ? (
             /*
               P1-5: 전환 중에는 native `disabled` 대신 `loading` — 방금 누른 버튼이 탭 순서에서
@@ -410,6 +394,34 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function DagsterRunEventList({ runId, events }: {
+  runId: string;
+  events: NonNullable<PipelineDagsterRunDetailResponse["data"]>["events"];
+}) {
+  const [errorsOnly, setErrorsOnly] = useState(false);
+  const visibleEvents = (events ?? []).filter(event => !errorsOnly || isPipelineErrorEvent(event));
+  return (
+    <>
+      <DagsterLogControls errorsOnly={errorsOnly} onFilter={setErrorsOnly} />
+      {errorsOnly && !visibleEvents.length ? (
+        <p className="text-text-secondary">이 페이지에 오류 로그가 없습니다.</p>
+      ) : null}
+      <ul className="space-y-1">
+        {withOccurrenceKeys(visibleEvents, (event) =>
+          JSON.stringify([runId, event]),
+        ).map(({ key, value: event }) => (
+          <li className="flex flex-wrap items-center gap-2" key={key}>
+            <span className="font-mono text-2xs text-text-secondary">
+              {event.level ?? event.event_type}
+            </span>
+            <span className="break-all">{event.message ?? NULL_GLYPH}</span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 
