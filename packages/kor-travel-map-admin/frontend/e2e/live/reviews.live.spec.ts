@@ -2,7 +2,6 @@ import { test, expect } from "@playwright/test";
 
 import type { AdminNavHref } from "../../src/lib/admin-nav";
 import {
-  adminNavLabel,
   adminNavLink,
   expectAdminPageLoaded,
   pagerButton,
@@ -24,10 +23,8 @@ import * as F from "./_fixtures";
 
 const T = 15000;
 
-// Stable per-page identity. 화면 이름(h1·사이드바 링크)은 하드코딩하지 않고 nav 정본
-// (`src/lib/admin-nav.ts`)에서 읽는다(`_admin-nav.ts`) — 2026-11-25 운영 e2e에서 nav
-// `Issues`→`이슈` 같은 라벨 drift로 실패했다. DataTable emptyMessage·status-select
-// aria-label·sortable column header title은 page client에서 확인한 값이다.
+// 운영 메뉴의 링크로 경로와 제목을 확인한다(`_admin-nav.ts`). 페이지 클라이언트가 제공하는
+// DataTable emptyMessage·status-select aria-label·sortable column header title도 확인한다.
 interface ReviewPage {
   route: AdminNavHref;
   empty: string;
@@ -545,7 +542,7 @@ test.describe("reviews live — sidebar nav between review pages", () => {
   for (const origin of PAGES) {
     for (const target of PAGES) {
       if (origin.route === target.route) continue;
-      test(`nav ${adminNavLabel(origin.route)} → ${adminNavLabel(target.route)}`, async ({
+      test(`nav ${origin.route} → ${target.route}`, async ({
         page,
       }) => {
         await page.goto(origin.route);

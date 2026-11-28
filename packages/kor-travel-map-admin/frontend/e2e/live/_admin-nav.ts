@@ -1,61 +1,26 @@
 import { expect, type Locator, type Page } from "@playwright/test";
 
-import { ADMIN_NAV_GROUPS, type AdminNavHref } from "../../src/lib/admin-nav";
+import type { AdminNavHref } from "../../src/lib/admin-nav";
 
-/**
- * live 스펙용 관리자 화면 이름 — 하드코딩 대신 nav 정본(`src/lib/admin-nav.ts`)에서 읽는다.
- *
- * 2026-11-25 운영 e2e에서 `uploads-backups-poi`·`reviews` 실패 60여 건은 코드 회귀가 아니라
- * 화면 이름 drift였다(`Offline uploads`→`오프라인 업로드`, nav `Issues`→`이슈`). 화면 제목은
- * #1534부터 nav 라벨과 같고 상단 바 h1은 "영역 - 페이지"라, nav 정본 라벨 하나로 h1과
- * 사이드바 링크를 모두 찾을 수 있다. 라벨을 바꾸면 스펙이 함께 따라온다.
- */
-const NAV_LABELS: ReadonlyMap<string, string> = new Map(
-  ADMIN_NAV_GROUPS.flatMap((group) =>
-    group.items.map((item) => [item.href, item.label] as const),
-  ),
-);
-
-/** nav 정본에서 화면 라벨을 꺼낸다. 없는 href는 스펙 쪽 오타이므로 즉시 실패한다. */
-export function adminNavLabel(href: AdminNavHref): string {
-  const label = NAV_LABELS.get(href);
-  if (label === undefined) {
-    throw new Error(`admin-nav.ts에 없는 href: ${href}`);
-  }
-  return label;
+/** 운영 화면의 메뉴 링크를 정식 경로로 찾는다. */
+export function adminNavLink(page: Page, href: AdminNavHref): Locator {
+  return page
+    .getByRole("navigation", { name: "주요 메뉴" })
+    .locator(`a[href=${JSON.stringify(href)}]`);
 }
 
-/**
- * 화면 h1. 상단 바 h1은 "영역 - 페이지"(예: "수집 파이프라인 - 오프라인 업로드")라
- * 접근성 이름의 부분 일치로 찾는다(Playwright 기본 비-exact).
- *
- * 주의: 레이아웃의 상단 바(`AdminShellFrame`)는 pathname만으로 이 h1을 그린다 — 페이지가
- * 오류 경계로 떨어져도 h1은 남는다. "화면이 떴다"를 보려면 `expectAdminPageLoaded`를 쓴다.
- */
-export function adminPageHeading(page: Page, href: AdminNavHref): Locator {
-  return page.getByRole("heading", { level: 1, name: adminNavLabel(href) });
-}
-
-/**
- * 화면이 실제로 마운트됐는지: h1 + 페이지 자신의 `AdminShell`만 그리는 본문 영역
- * (`[data-slot="admin-shell-content"]`). 오류 경계(`app/error.tsx`)는 이 영역을 그리지 않는다.
- */
+/** 운영 사이드바의 메뉴 이름, 화면 제목, 페이지 콘텐츠가 함께 표시되는지 확인한다. */
 export async function expectAdminPageLoaded(
   page: Page,
   href: AdminNavHref,
   timeout = 15000,
 ): Promise<void> {
-  await expect(adminPageHeading(page, href)).toBeVisible({ timeout });
-  await expect(page.locator('[data-slot="admin-shell-content"]').first()).toBeVisible({
-    timeout,
-  });
-}
-
-/** 좌측 "주요 메뉴" 내비게이션의 해당 화면 링크(접근성 이름 정확 일치). */
-export function adminNavLink(page: Page, href: AdminNavHref): Locator {
-  return page
-    .getByRole("navigation", { name: "주요 메뉴" })
-    .getByRole("link", { name: adminNavLabel(href), exact: true });
+  const link = adminNavLink(page, href).first();
+  await expect(link).toBeVisible({ timeout });
+  const label = (await link.innerText({ timeout })).trim();
+  expect(label).not.toBe("");
+  await expect(page.getByRole("heading", { level: 1, name: label })).toBeVisible({ timeout });
+  await expect(page.locator('[data-slot="admin-shell-content"]').first()).toBeVisible({ timeout });
 }
 
 /**

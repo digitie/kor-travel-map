@@ -1,12 +1,15 @@
 "use client";
 // Hallmark · genre: editorial-utilitarian · macrostructure: Rail-Workbench (list) · design-system: design.md · designed-as-app
 
+import { isPipelineErrorEvent } from "@kor-travel/ui/collection-pipeline";
+import { DagsterLogControls } from "@kor-travel/ui/dagster-workbench";
 import { type ColumnDef } from "@kor-travel/ui/virtual-table";
 import { useMemo, useState } from "react";
 
 import {
   type ExecutionKind,
   type JobEventLevel,
+  type PipelineDagsterRunDetailResponse,
   type PipelineJobEventRecord,
   usePipelineDagsterRunDetail,
   usePipelineDagsterRuns,
@@ -353,18 +356,7 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
               </AlertDescription>
             </Alert>
           ) : null}
-          <ul className="space-y-1">
-            {withOccurrenceKeys(data.events ?? [], (event) =>
-              JSON.stringify([runId, event]),
-            ).map(({ key, value: event }) => (
-              <li className="flex flex-wrap items-center gap-2" key={key}>
-                <span className="font-mono text-2xs text-text-secondary">
-                  {event.level ?? event.event_type}
-                </span>
-                <span className="break-all">{event.message ?? NULL_GLYPH}</span>
-              </li>
-            ))}
-          </ul>
+          <DagsterRunEventList key={runId} runId={runId} events={data.events} />
           {data.event_has_more ? (
             /*
               P1-5: 전환 중에는 native `disabled` 대신 `loading` — 방금 누른 버튼이 탭 순서에서
@@ -402,6 +394,34 @@ export function DagsterRunDetail({ runId }: { runId: string }) {
         </div>
       ) : null}
     </div>
+  );
+}
+
+function DagsterRunEventList({ runId, events }: {
+  runId: string;
+  events: NonNullable<PipelineDagsterRunDetailResponse["data"]>["events"];
+}) {
+  const [errorsOnly, setErrorsOnly] = useState(false);
+  const visibleEvents = (events ?? []).filter(event => !errorsOnly || isPipelineErrorEvent(event));
+  return (
+    <>
+      <DagsterLogControls errorsOnly={errorsOnly} onFilter={setErrorsOnly} />
+      {errorsOnly && !visibleEvents.length ? (
+        <p className="text-text-secondary">이 페이지에 오류 로그가 없습니다.</p>
+      ) : null}
+      <ul className="space-y-1">
+        {withOccurrenceKeys(visibleEvents, (event) =>
+          JSON.stringify([runId, event]),
+        ).map(({ key, value: event }) => (
+          <li className="flex flex-wrap items-center gap-2" key={key}>
+            <span className="font-mono text-2xs text-text-secondary">
+              {event.level ?? event.event_type}
+            </span>
+            <span className="break-all">{event.message ?? NULL_GLYPH}</span>
+          </li>
+        ))}
+      </ul>
+    </>
   );
 }
 

@@ -17,9 +17,7 @@ import * as F from "./_fixtures";
  * GET-only 조회라 허용된다. pagination 버튼은 PRESENCE=0이라 disabled → 클릭하지 않고
  * disabled 상태만 단언한다.
  *
- * 화면 이름(h1·사이드바 링크)은 하드코딩하지 않고 nav 정본(`src/lib/admin-nav.ts`)에서
- * 읽는다(`_admin-nav.ts`). 2026-11-25 운영 e2e에서 h1 `Offline uploads`(현재
- * `오프라인 업로드`)·`POI cache targets`(현재 `POI 캐시 대상`) drift로 34건이 실패했다.
+ * 화면 제목과 메뉴 링크를 운영 웹의 현재 경로와 링크 이름으로 확인한다(`_admin-nav.ts`).
  */
 
 const HEADINGS = {
