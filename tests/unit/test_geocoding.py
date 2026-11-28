@@ -1809,6 +1809,7 @@ def _no_geo_backoff(monkeypatch: pytest.MonkeyPatch) -> None:
     import kortravelmap.geocoding as geocoding_module
 
     monkeypatch.setattr(geocoding_module, "_GEO_TRANSIENT_BACKOFF_SECONDS", 0.0)
+    monkeypatch.setattr(geocoding_module, "_GEO_CONNECT_BACKOFF_SECONDS", 0.0)
 
 
 _OK_REGIONS: dict[str, Any] = {
@@ -1893,6 +1894,55 @@ def test_rest_client_retries_transient_transport_errors_but_not_connect_timeout(
 
     asyncio.run(_run())
     assert len(calls) == expected_calls
+
+
+def test_rest_client_records_retries_by_cause_and_waits_longer_for_connect_errors(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """재시도 끝에 성공한 장애도 원인(errno 포함)별로 남고, 연결 수립 오류는 더 길게 기다린다."""
+    import kortravelmap.geocoding as geocoding_module
+
+    sleeps: list[float] = []
+
+    async def _fake_sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+
+    monkeypatch.setattr(asyncio, "sleep", _fake_sleep)
+    refused = ConnectionRefusedError(111, "Connection refused")
+    script: list[Exception | int] = [
+        httpx.ConnectError("refused"),
+        504,
+        200,
+    ]
+    calls: list[int] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        step = script[len(calls)]
+        calls.append(1)
+        if isinstance(step, Exception):
+            raise step from refused
+        return httpx.Response(step, json=_OK_REGIONS if step == 200 else {"detail": "x"})
+
+    stats = GeoCallStats()
+
+    async def _run() -> None:
+        async with _mock_client(handler) as http:
+            client = _geo_client(http, transient_attempts=3, stats=stats)
+            await client.regions_within_radius(lon=126.978, lat=37.5665)
+
+    asyncio.run(_run())
+    assert len(calls) == 3
+    assert stats.total_calls == 1
+    assert stats.retries == {
+        "regions_within_radius:ConnectError(errno=111)": 1,
+        "regions_within_radius:504": 1,
+    }
+    assert sleeps == [
+        geocoding_module._GEO_CONNECT_BACKOFF_SECONDS * 1,
+        geocoding_module._GEO_TRANSIENT_BACKOFF_SECONDS * 2,
+    ]
+    assert "재시도 regions_within_radius:504=1" in stats.summary()
+    assert stats.as_metadata()["geo_retries_total"] == 2
 
 
 def test_rest_client_does_not_retry_client_errors() -> None:

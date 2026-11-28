@@ -4,11 +4,16 @@
   34,690건)를 각각 `ConnectError` **단 1건**으로 잃었다. 시도 3은 6시간 상한 안에 끝날 수 없어 취소했다. geo readyz는
   정상(pool 사용률 0)이었다.
 - 기존 적재 재시도(`transient_attempts=3`)는 "연결 실패 = 호스트 다운 → 매 시도가 connect 상한만 기다린다"는 이유로
-  `ConnectError`를 뺐다. 그러나 응답 없는 연결 수립은 httpx에서 `ConnectTimeout`(별개 클래스)이고, `ConnectError`는
-  즉시 거부라 다시 보내는 비용이 backoff(2 s·4 s)뿐이다. 이제 `ConnectError`는 재시도하고 `ConnectTimeout`·`PoolTimeout`은
-  여전히 한 번에 끝낸다. 기본(API·admin, `transient_attempts=1`)은 그대로다.
-- 시험: `test_rest_client_retries_transient_transport_errors_but_not_connect_timeout`(ConnectError 3회·ConnectTimeout/
-  PoolTimeout 1회).
+  `ConnectError`를 뺐다. 그러나 상한을 다 쓴 수립은 httpx에서 `ConnectTimeout`(별개 클래스)이고, `ConnectError`는 상한 안에
+  실패로 끝난 수립(거부·경로 없음·DNS·TLS)이다. 이제 `ConnectError`는 **10 s·20 s** 뒤 다시 보내고(geo 재기동 하나를 넘기는
+  30 s 창 — 2 s·4 s로는 재기동을 못 넘긴다), `ConnectTimeout`·`PoolTimeout`은 여전히 한 번에 끝낸다. 기본(API·admin,
+  `transient_attempts=1`)은 그대로다. ADR-116 재시도 절에 개정 줄을 더했다(소유자 승인 범위 확대 — 보고).
+- 원인이 미규명이다(예외 클래스명만 남았다). 그래서 다시 보낸 시도를 `GeoCallStats.retries`(`endpoint:원인`, 원인 =
+  클래스명+errno 또는 상태 코드)로 세어 run 로그 요약·`geo_retries_total` metadata에 싣고, transport 실패 메시지에도
+  errno를 붙였다(URL·키 없음). 재시도로 성공한 일시 장애가 더는 흔적 없이 사라지지 않는다.
+- 적대 리뷰 2인(재시도 의미·httpx 계층 / 운영 부하·충분성): 결함 없음. 지적(주석 과장·ADR/settings 문구 drift·재시도
+  가시성·6 s 창 부족)을 모두 반영했다.
+- 시험: ConnectError 3회·ConnectTimeout/PoolTimeout 1회, 원인별 재시도 계수·errno·backoff 길이.
 
 ## 2026-11-27 — 소유자 결정 4건 기록·journal/acceptance 다음 경계 분리
 
