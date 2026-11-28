@@ -1877,7 +1877,7 @@ def test_rest_client_gives_up_after_bounded_attempts() -> None:
 def test_rest_client_retries_transient_transport_errors_but_not_connect_timeout(
     raised: Exception, expected_calls: int
 ) -> None:
-    """응답 없는 연결 수립(호스트 다운)은 다시 보내도 connect 상한만 더 기다린다 — 한 번에 끝낸다."""
+    """응답 없는 연결 수립(호스트 다운)은 다시 보내도 connect 상한만 기다린다 — 한 번에 끝낸다."""
     calls: list[int] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
