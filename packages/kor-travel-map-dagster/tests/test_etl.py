@@ -263,6 +263,7 @@ async def test_authoritative_snapshot_can_retire_absent_source_entities(
             "retained_source_entity_ids": frozenset(),
             # geo를 배선하지 않은 호출(geo_applied 없음)은 geo 입력이 없다(ADR-109 T-GR-03).
             "geo": None,
+            "superseded": None,
         }
     ]
 
